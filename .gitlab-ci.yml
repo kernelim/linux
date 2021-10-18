@@ -17,12 +17,7 @@ workflow: !reference [.workflow]
   trigger:
     branch: rhel8
   variables:
-    kernel_type: internal
-    make_target: rpm
     builder_image: quay.io/cki/builder-rhel8.4
-    build_kabi_stablelist: 'true'
-    tree_yaml_name: rhel
-    publish_elsewhere: 'true'
     name: kernel-rhel8
     architectures: 'x86_64 ppc64le aarch64 s390x'
     kpet_tree_family: rhel8
@@ -31,44 +26,61 @@ workflow: !reference [.workflow]
 
 # Realtime specific configuration
 .realtime_check:
-  # best-effort, shouldn't block MRs
-  allow_failure: true
   trigger:
     branch: rhel8-rt
   variables:
-    # adjust configuration above slightly for -rt
+    builder_image: quay.io/cki/builder-rhel8.4
     name: kernel-rt-rhel8
-    package_name: kernel-rt
-    merge_tree: ${CI_MERGE_REQUEST_PROJECT_URL}
     merge_branch: 8.4-rt
-    # realtime is x86-only
-    architectures: 'x86_64'
-    # no testing
-    skip_test: 'true'
-    skip_results: 'true'
+    disttag_override: '.el8_4'
+
+# Full RT pipeline for -rt branch
+.realtime_full:
+  trigger:
+    branch: rhel8
+  variables:
+    builder_image: quay.io/cki/builder-rhel8.4
+    name: kernel-rt-rhel8
+    kpet_tree_family: rhel8-rt
+    disttag_override: '.el8_4'
+    RUN_ONLY_FOR_RT: 'true'
 
 # regular pipelines
 
 merge_request_regular:
-  extends: [.internal, .merge_request, .with_notifications,
+  extends: [.internal, .merge_request, .with_notifications, .rhel_common,
             .trigger]
 
 realtime_check_regular:
-  extends: [.internal, .merge_request,
-            .trigger, .realtime_check]
+  extends: [.internal, .merge_request, .realtime_check_common,
+            .realtime_check]
 
 baseline_regular:
-  extends: [.internal, .baseline, .with_notifications,
+  extends: [.internal, .baseline, .with_notifications, .rhel_common,
             .trigger]
+
+# realtime branch pipelines
+
+merge_request_realtime:
+  extends: [.internal, .merge_request, .with_notifications, .realtime_pipeline_common,
+            .realtime_full]
+
+baseline_realtime:
+  extends: [.internal, .baseline, .with_notifications, .realtime_pipeline_common,
+            .realtime_full]
 
 # private pipelines
 
 merge_request_private:
-  extends: [.scratch, .merge_request,
+  extends: [.scratch, .merge_request, .rhel_common,
             .trigger]
 
 realtime_check_private:
-  extends: [.scratch, .merge_request,
-            .trigger, .realtime_check]
+  extends: [.scratch, .merge_request, .realtime_check_common,
+            .realtime_check]
+
+merge_request_realtime_private:
+  extends: [.scratch, .merge_request, .realtime_pipeline_common,
+            .realtime_full]
 
 # no private baselines as repos are mirrored

@@ -8,9 +8,6 @@
 typedef __s64 time64_t;
 typedef __u64 timeu64_t;
 
-/* CONFIG_64BIT_TIME enables new 64 bit time_t syscalls in the compat path
- * and 32-bit emulation.
- */
 #ifdef CONFIG_64BIT
 #define __kernel_timespec timespec
 #define __kernel_itimerspec itimerspec

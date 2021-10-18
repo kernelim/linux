@@ -368,6 +368,25 @@ xlog_tic_add_region(xlog_ticket_t *tic, uint len, uint type)
 	tic->t_res_num++;
 }
 
+bool
+xfs_log_writable(
+	struct xfs_mount	*mp)
+{
+	/*
+	 * Never write to the log on norecovery mounts, if the block device is
+	 * read-only, or if the filesystem is shutdown. Read-only mounts still
+	 * allow internal writes for log recovery and unmount purposes, so don't
+	 * restrict that case here.
+	 */
+	if (mp->m_flags & XFS_MOUNT_NORECOVERY)
+		return false;
+	if (xfs_readonly_buftarg(mp->m_log->l_targ))
+		return false;
+	if (XFS_FORCED_SHUTDOWN(mp))
+		return false;
+	return true;
+}
+
 /*
  * Replenish the byte reservation required by moving the grant write head.
  */
@@ -953,8 +972,7 @@ out_err:
  * currently architecture converted and "Unmount" is a bit foo.
  * As far as I know, there weren't any dependencies on the old behaviour.
  */
-
-static int
+static void
 xfs_log_unmount_write(xfs_mount_t *mp)
 {
 	struct xlog	 *log = mp->m_log;
@@ -962,20 +980,11 @@ xfs_log_unmount_write(xfs_mount_t *mp)
 #ifdef DEBUG
 	xlog_in_core_t	 *first_iclog;
 #endif
-	int		 error;
 
-	/*
-	 * Don't write out unmount record on norecovery mounts or ro devices.
-	 * Or, if we are doing a forced umount (typically because of IO errors).
-	 */
-	if (mp->m_flags & XFS_MOUNT_NORECOVERY ||
-	    xfs_readonly_buftarg(log->l_targ)) {
-		ASSERT(mp->m_flags & XFS_MOUNT_RDONLY);
-		return 0;
-	}
+	if (!xfs_log_writable(mp))
+		return;
 
-	error = xfs_log_force(mp, XFS_LOG_SYNC);
-	ASSERT(error || !(XLOG_FORCED_SHUTDOWN(log)));
+	xfs_log_force(mp, XFS_LOG_SYNC);
 
 #ifdef DEBUG
 	first_iclog = iclog = log->l_iclog;
@@ -1007,7 +1016,7 @@ xfs_log_unmount_write(xfs_mount_t *mp)
 		iclog = log->l_iclog;
 		atomic_inc(&iclog->ic_refcnt);
 		xlog_state_want_sync(log, iclog);
-		error =  xlog_state_release_iclog(log, iclog);
+		xlog_state_release_iclog(log, iclog);
 		switch (iclog->ic_state) {
 		case XLOG_STATE_ACTIVE:
 		case XLOG_STATE_DIRTY:
@@ -1019,9 +1028,7 @@ xfs_log_unmount_write(xfs_mount_t *mp)
 			break;
 		}
 	}
-
-	return error;
-}	/* xfs_log_unmount_write */
+}
 
 /*
  * Empty the log for unmount/freeze.

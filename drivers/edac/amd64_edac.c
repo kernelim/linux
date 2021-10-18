@@ -20,6 +20,9 @@ static struct amd64_family_type *fam_type;
 /* Per-node stuff */
 static struct ecc_settings **ecc_stngs;
 
+/* Device for the PCI component */
+static struct device *pci_ctl_dev;
+
 /*
  * Valid scrub rates for the K8 hardware memory scrubber. We map the scrubbing
  * bandwidth to a valid bit pattern. The 'set' operation finds the 'matching-
@@ -1133,7 +1136,7 @@ static int k8_early_channel_count(struct amd64_pvt *pvt)
 /* On F10h and later ErrAddr is MC4_ADDR[47:1] */
 static u64 get_error_address(struct amd64_pvt *pvt, struct mce *m)
 {
-	u16 mce_nid = amd_get_nb_id(m->extcpu);
+	u16 mce_nid = topology_die_id(m->extcpu);
 	struct mem_ctl_info *mci;
 	u8 start_bit = 1;
 	u8 end_bit   = 47;
@@ -2663,6 +2666,9 @@ reserve_mc_sibling_devs(struct amd64_pvt *pvt, u16 pci_id1, u16 pci_id2)
 			return -ENODEV;
 		}
 
+		if (!pci_ctl_dev)
+			pci_ctl_dev = &pvt->F0->dev;
+
 		edac_dbg(1, "F0: %s\n", pci_name(pvt->F0));
 		edac_dbg(1, "F3: %s\n", pci_name(pvt->F3));
 		edac_dbg(1, "F6: %s\n", pci_name(pvt->F6));
@@ -2686,6 +2692,9 @@ reserve_mc_sibling_devs(struct amd64_pvt *pvt, u16 pci_id1, u16 pci_id2)
 		amd64_err("F2 not found: device 0x%x (broken BIOS?)\n", pci_id2);
 		return -ENODEV;
 	}
+
+	if (!pci_ctl_dev)
+		pci_ctl_dev = &pvt->F2->dev;
 
 	edac_dbg(1, "F1: %s\n", pci_name(pvt->F1));
 	edac_dbg(1, "F2: %s\n", pci_name(pvt->F2));
@@ -2840,8 +2849,6 @@ skip:
 	edac_dbg(1, "  DIMM type: %s\n", edac_mem_types[pvt->dram_type]);
 
 	determine_ecc_sym_sz(pvt);
-
-	dump_misc_regs(pvt);
 }
 
 /*
@@ -3026,7 +3033,7 @@ static void get_cpus_on_this_dct_cpumask(struct cpumask *mask, u16 nid)
 	int cpu;
 
 	for_each_online_cpu(cpu)
-		if (amd_get_nb_id(cpu) == nid)
+		if (topology_die_id(cpu) == nid)
 			cpumask_set_cpu(cpu, mask);
 }
 
@@ -3180,43 +3187,27 @@ static void restore_ecc_error_reporting(struct ecc_settings *s, u16 nid,
 		amd64_warn("Error restoring NB MCGCTL settings!\n");
 }
 
-/*
- * EDAC requires that the BIOS have ECC enabled before
- * taking over the processing of ECC errors. A command line
- * option allows to force-enable hardware ECC later in
- * enable_ecc_error_reporting().
- */
-static const char *ecc_msg =
-	"ECC disabled in the BIOS or no ECC capability, module will not load.\n"
-	" Either enable ECC checking or force module loading by setting "
-	"'ecc_enable_override'.\n"
-	" (Note that use of the override may cause unknown side effects.)\n";
-
-static bool ecc_enabled(struct pci_dev *F3, u16 nid)
+static bool ecc_enabled(struct amd64_pvt *pvt)
 {
+	u16 nid = pvt->mc_node_id;
 	bool nb_mce_en = false;
 	u8 ecc_en = 0, i;
 	u32 value;
 
 	if (boot_cpu_data.x86 >= 0x17) {
 		u8 umc_en_mask = 0, ecc_en_mask = 0;
+		struct amd64_umc *umc;
 
 		for_each_umc(i) {
-			u32 base = get_umc_base(i);
+			umc = &pvt->umc[i];
 
 			/* Only check enabled UMCs. */
-			if (amd_smn_read(nid, base + UMCCH_SDP_CTRL, &value))
-				continue;
-
-			if (!(value & UMC_SDP_INIT))
+			if (!(umc->sdp_ctrl & UMC_SDP_INIT))
 				continue;
 
 			umc_en_mask |= BIT(i);
 
-			if (amd_smn_read(nid, base + UMCCH_UMC_CAP_HI, &value))
-				continue;
-
-			if (value & UMC_ECC_ENABLED)
+			if (umc->umc_cap_hi & UMC_ECC_ENABLED)
 				ecc_en_mask |= BIT(i);
 		}
 
@@ -3229,7 +3220,7 @@ static bool ecc_enabled(struct pci_dev *F3, u16 nid)
 		/* Assume UMC MCA banks are enabled. */
 		nb_mce_en = true;
 	} else {
-		amd64_read_pci_cfg(F3, NBCFG, &value);
+		amd64_read_pci_cfg(pvt->F3, NBCFG, &value);
 
 		ecc_en = !!(value & NBCFG_ECC_ENABLE);
 
@@ -3242,11 +3233,10 @@ static bool ecc_enabled(struct pci_dev *F3, u16 nid)
 	amd64_info("Node %d: DRAM ECC %s.\n",
 		   nid, (ecc_en ? "enabled" : "disabled"));
 
-	if (!ecc_en || !nb_mce_en) {
-		amd64_info("%s", ecc_msg);
+	if (!ecc_en || !nb_mce_en)
 		return false;
-	}
-	return true;
+	else
+		return true;
 }
 
 static inline void
@@ -3482,6 +3472,19 @@ static int init_one_instance(struct amd64_pvt *pvt)
 	return 0;
 }
 
+static bool instance_has_memory(struct amd64_pvt *pvt)
+{
+	bool cs_enabled = false;
+	int cs = 0, dct = 0;
+
+	for (dct = 0; dct < fam_type->max_mcs; dct++) {
+		for_each_chip_select(cs, dct, pvt)
+			cs_enabled |= csrow_enabled(cs, dct, pvt);
+	}
+
+	return cs_enabled;
+}
+
 static int probe_one_instance(unsigned int nid)
 {
 	struct pci_dev *F3 = node_to_amd_nb(nid)->misc;
@@ -3511,8 +3514,14 @@ static int probe_one_instance(unsigned int nid)
 	if (ret < 0)
 		goto err_enable;
 
-	if (!ecc_enabled(F3, nid)) {
-		ret = 0;
+	ret = 0;
+	if (!instance_has_memory(pvt)) {
+		amd64_info("Node %d: No DIMMs detected.\n", nid);
+		goto err_enable;
+	}
+
+	if (!ecc_enabled(pvt)) {
+		ret = -ENODEV;
 
 		if (!ecc_enable_override)
 			goto err_enable;
@@ -3536,6 +3545,8 @@ static int probe_one_instance(unsigned int nid)
 
 		goto err_enable;
 	}
+
+	dump_misc_regs(pvt);
 
 	return ret;
 
@@ -3583,21 +3594,10 @@ static void remove_one_instance(unsigned int nid)
 
 static void setup_pci_device(void)
 {
-	struct mem_ctl_info *mci;
-	struct amd64_pvt *pvt;
-
 	if (pci_ctl)
 		return;
 
-	mci = edac_mc_find(0);
-	if (!mci)
-		return;
-
-	pvt = mci->pvt_info;
-	if (pvt->umc)
-		pci_ctl = edac_pci_create_generic_ctl(&pvt->F0->dev, EDAC_MOD_STR);
-	else
-		pci_ctl = edac_pci_create_generic_ctl(&pvt->F2->dev, EDAC_MOD_STR);
+	pci_ctl = edac_pci_create_generic_ctl(pci_ctl_dev, EDAC_MOD_STR);
 	if (!pci_ctl) {
 		pr_warn("%s(): Unable to create PCI control\n", __func__);
 		pr_warn("%s(): PCI error report via EDAC not set\n", __func__);
@@ -3678,6 +3678,8 @@ static int __init amd64_edac_init(void)
 	return 0;
 
 err_pci:
+	pci_ctl_dev = NULL;
+
 	msrs_free(msrs);
 	msrs = NULL;
 
@@ -3708,6 +3710,8 @@ static void __exit amd64_edac_exit(void)
 
 	kfree(ecc_stngs);
 	ecc_stngs = NULL;
+
+	pci_ctl_dev = NULL;
 
 	msrs_free(msrs);
 	msrs = NULL;

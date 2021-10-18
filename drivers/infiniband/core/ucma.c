@@ -550,6 +550,7 @@ static void ucma_cleanup_mc_events(struct ucma_multicast *mc)
 {
 	struct ucma_event *uevent, *tmp;
 
+	rdma_lock_handler(mc->ctx->cm_id);
 	list_for_each_entry_safe(uevent, tmp, &mc->ctx->file->event_list, list) {
 		if (uevent->mc != mc)
 			continue;
@@ -557,6 +558,7 @@ static void ucma_cleanup_mc_events(struct ucma_multicast *mc)
 		list_del(&uevent->list);
 		kfree(uevent);
 	}
+	rdma_unlock_handler(mc->ctx->cm_id);
 }
 
 /*
@@ -586,6 +588,7 @@ static int ucma_free_ctx(struct ucma_context *ctx)
 			list_move_tail(&uevent->list, &list);
 	}
 	list_del(&ctx->list);
+	events_reported = ctx->events_reported;
 	mutex_unlock(&ctx->file->mut);
 
 	list_for_each_entry_safe(uevent, tmp, &list, list) {
@@ -595,7 +598,6 @@ static int ucma_free_ctx(struct ucma_context *ctx)
 		kfree(uevent);
 	}
 
-	events_reported = ctx->events_reported;
 	mutex_destroy(&ctx->mutex);
 	kfree(ctx);
 	return events_reported;
@@ -1160,16 +1162,20 @@ static ssize_t ucma_accept(struct ucma_file *file, const char __user *inbuf,
 
 	if (cmd.conn_param.valid) {
 		ucma_copy_conn_param(ctx->cm_id, &conn_param, &cmd.conn_param);
-		mutex_lock(&file->mut);
 		mutex_lock(&ctx->mutex);
+		rdma_lock_handler(ctx->cm_id);
 		ret = __rdma_accept_ece(ctx->cm_id, &conn_param, NULL, &ece);
-		mutex_unlock(&ctx->mutex);
-		if (!ret)
+		if (!ret) {
+			/* The uid must be set atomically with the handler */
 			ctx->uid = cmd.uid;
-		mutex_unlock(&file->mut);
+		}
+		rdma_unlock_handler(ctx->cm_id);
+		mutex_unlock(&ctx->mutex);
 	} else {
 		mutex_lock(&ctx->mutex);
+		rdma_lock_handler(ctx->cm_id);
 		ret = __rdma_accept_ece(ctx->cm_id, NULL, NULL, &ece);
+		rdma_unlock_handler(ctx->cm_id);
 		mutex_unlock(&ctx->mutex);
 	}
 	ucma_put_ctx(ctx);
@@ -1581,7 +1587,7 @@ static ssize_t ucma_leave_multicast(struct ucma_file *file,
 	mc = xa_load(&multicast_table, cmd.id);
 	if (!mc)
 		mc = ERR_PTR(-ENOENT);
-	else if (mc->ctx->file != file)
+	else if (READ_ONCE(mc->ctx->file) != file)
 		mc = ERR_PTR(-EINVAL);
 	else if (!refcount_inc_not_zero(&mc->ctx->ref))
 		mc = ERR_PTR(-ENXIO);
@@ -1614,45 +1620,15 @@ out:
 	return ret;
 }
 
-static void ucma_lock_files(struct ucma_file *file1, struct ucma_file *file2)
-{
-	/* Acquire mutex's based on pointer comparison to prevent deadlock. */
-	if (file1 < file2) {
-		mutex_lock(&file1->mut);
-		mutex_lock_nested(&file2->mut, SINGLE_DEPTH_NESTING);
-	} else {
-		mutex_lock(&file2->mut);
-		mutex_lock_nested(&file1->mut, SINGLE_DEPTH_NESTING);
-	}
-}
-
-static void ucma_unlock_files(struct ucma_file *file1, struct ucma_file *file2)
-{
-	if (file1 < file2) {
-		mutex_unlock(&file2->mut);
-		mutex_unlock(&file1->mut);
-	} else {
-		mutex_unlock(&file1->mut);
-		mutex_unlock(&file2->mut);
-	}
-}
-
-static void ucma_move_events(struct ucma_context *ctx, struct ucma_file *file)
-{
-	struct ucma_event *uevent, *tmp;
-
-	list_for_each_entry_safe(uevent, tmp, &ctx->file->event_list, list)
-		if (uevent->ctx == ctx)
-			list_move_tail(&uevent->list, &file->event_list);
-}
-
 static ssize_t ucma_migrate_id(struct ucma_file *new_file,
 			       const char __user *inbuf,
 			       int in_len, int out_len)
 {
 	struct rdma_ucm_migrate_id cmd;
 	struct rdma_ucm_migrate_resp resp;
+	struct ucma_event *uevent, *tmp;
 	struct ucma_context *ctx;
+	LIST_HEAD(event_list);
 	struct fd f;
 	struct ucma_file *cur_file;
 	int ret = 0;
@@ -1668,40 +1644,53 @@ static ssize_t ucma_migrate_id(struct ucma_file *new_file,
 		ret = -EINVAL;
 		goto file_put;
 	}
+	cur_file = f.file->private_data;
 
 	/* Validate current fd and prevent destruction of id. */
-	ctx = ucma_get_ctx(f.file->private_data, cmd.id);
+	ctx = ucma_get_ctx(cur_file, cmd.id);
 	if (IS_ERR(ctx)) {
 		ret = PTR_ERR(ctx);
 		goto file_put;
 	}
 
-	cur_file = ctx->file;
-	if (cur_file == new_file) {
-		resp.events_reported = ctx->events_reported;
-		goto response;
-	}
-
+	rdma_lock_handler(ctx->cm_id);
 	/*
-	 * Migrate events between fd's, maintaining order, and avoiding new
-	 * events being added before existing events.
+	 * ctx->file can only be changed under the handler & xa_lock. xa_load()
+	 * must be checked again to ensure the ctx hasn't begun destruction
+	 * since the ucma_get_ctx().
 	 */
-	ucma_lock_files(cur_file, new_file);
 	xa_lock(&ctx_table);
-
-	list_move_tail(&ctx->list, &new_file->ctx_list);
-	ucma_move_events(ctx, new_file);
+	if (_ucma_find_context(cmd.id, cur_file) != ctx) {
+		xa_unlock(&ctx_table);
+		ret = -ENOENT;
+		goto err_unlock;
+	}
 	ctx->file = new_file;
-	resp.events_reported = ctx->events_reported;
-
 	xa_unlock(&ctx_table);
-	ucma_unlock_files(cur_file, new_file);
 
-response:
+	mutex_lock(&cur_file->mut);
+	list_del(&ctx->list);
+	/*
+	 * At this point lock_handler() prevents addition of new uevents for
+	 * this ctx.
+	 */
+	list_for_each_entry_safe(uevent, tmp, &cur_file->event_list, list)
+		if (uevent->ctx == ctx)
+			list_move_tail(&uevent->list, &event_list);
+	resp.events_reported = ctx->events_reported;
+	mutex_unlock(&cur_file->mut);
+
+	mutex_lock(&new_file->mut);
+	list_add_tail(&ctx->list, &new_file->ctx_list);
+	list_splice_tail(&event_list, &new_file->event_list);
+	mutex_unlock(&new_file->mut);
+
 	if (copy_to_user(u64_to_user_ptr(cmd.response),
 			 &resp, sizeof(resp)))
 		ret = -EFAULT;
 
+err_unlock:
+	rdma_unlock_handler(ctx->cm_id);
 	ucma_put_ctx(ctx);
 file_put:
 	fdput(f);

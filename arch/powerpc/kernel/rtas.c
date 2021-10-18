@@ -22,6 +22,8 @@
 #include <linux/cpu.h>
 #include <linux/sched.h>
 #include <linux/smp.h>
+#include <linux/nmi.h>
+#include <linux/stop_machine.h>
 #include <linux/completion.h>
 #include <linux/cpumask.h>
 #include <linux/memblock.h>
@@ -841,11 +843,6 @@ int rtas_suspend_cpu(struct rtas_suspend_me_data *data)
 	return __rtas_suspend_cpu(data, 0);
 }
 
-static void rtas_percpu_suspend_me(void *info)
-{
-	__rtas_suspend_cpu((struct rtas_suspend_me_data *)info, 1);
-}
-
 enum rtas_cpu_state {
 	DOWN,
 	UP,
@@ -938,15 +935,215 @@ int rtas_offline_cpus_mask(cpumask_var_t cpus)
 }
 EXPORT_SYMBOL(rtas_offline_cpus_mask);
 
+static void prod_single(unsigned int target_cpu)
+{
+	long hvrc;
+	int hwid;
+
+	hwid = get_hard_smp_processor_id(target_cpu);
+	hvrc = plpar_hcall_norets(H_PROD, hwid);
+	if (hvrc == H_SUCCESS)
+		return;
+	pr_err_ratelimited("H_PROD of CPU %u (hwid %d) error: %ld\n",
+			   target_cpu, hwid, hvrc);
+}
+
+static void prod_others(void)
+{
+	unsigned int cpu;
+
+	for_each_online_cpu(cpu) {
+		if (cpu != smp_processor_id())
+			prod_single(cpu);
+	}
+}
+
+static u16 clamp_slb_size(void)
+{
+	u16 prev = mmu_slb_size;
+
+	slb_set_size(SLB_MIN_SIZE);
+
+	return prev;
+}
+
+/**
+ * call_ibm_suspend_me() - Call ibm,suspend-me to suspend the LPAR.
+ *
+ * @fw_status: RTAS call status will be placed here if not NULL.
+ *
+ * rtas_ibm_suspend_me() should be called only on a CPU which has
+ * received H_CONTINUE from the H_JOIN hcall. All other active CPUs
+ * should be waiting to return from H_JOIN.
+ *
+ * rtas_ibm_suspend_me() may suspend execution of the OS
+ * indefinitely. Callers should take appropriate measures upon return, such as
+ * resetting watchdog facilities.
+ *
+ * Callers may choose to retry this call if @fw_status is
+ * %RTAS_THREADS_ACTIVE.
+ *
+ * Return:
+ * 0          - The partition has resumed from suspend, possibly after
+ *              migration to a different host.
+ * -ECANCELED - The operation was aborted.
+ * -EAGAIN    - There were other CPUs not in H_JOIN at the time of the call.
+ * -EBUSY     - Some other condition prevented the suspend from succeeding.
+ * -EIO       - Hardware/platform error.
+ */
+static int call_ibm_suspend_me(int *fw_status)
+{
+	int fwrc;
+	int ret;
+
+	fwrc = rtas_call(rtas_token("ibm,suspend-me"), 0, 1, NULL);
+
+	switch (fwrc) {
+	case 0:
+		ret = 0;
+		break;
+	case RTAS_SUSPEND_ABORTED:
+		ret = -ECANCELED;
+		break;
+	case RTAS_THREADS_ACTIVE:
+		ret = -EAGAIN;
+		break;
+	case RTAS_NOT_SUSPENDABLE:
+	case RTAS_OUTSTANDING_COPROC:
+		ret = -EBUSY;
+		break;
+	case -1:
+	default:
+		ret = -EIO;
+		break;
+	}
+
+	if (fw_status)
+		*fw_status = fwrc;
+
+	return ret;
+}
+
+static int do_suspend(void)
+{
+	u16 saved_slb_size;
+	int status;
+	int ret;
+
+	pr_info("calling ibm,suspend-me on CPU %i\n", smp_processor_id());
+
+	/*
+	 * The destination processor model may have fewer SLB entries
+	 * than the source. We reduce mmu_slb_size to a safe minimum
+	 * before suspending in order to minimize the possibility of
+	 * programming non-existent entries on the destination. If
+	 * suspend fails, we restore it before returning. On success
+	 * the OF reconfig path will update it from the new device
+	 * tree after resuming on the destination.
+	 */
+	saved_slb_size = clamp_slb_size();
+
+	ret = call_ibm_suspend_me(&status);
+	if (ret != 0) {
+		pr_err("ibm,suspend-me error: %d\n", status);
+		slb_set_size(saved_slb_size);
+	}
+
+	return ret;
+}
+
+/**
+ * struct pseries_suspend_info - State shared between CPUs for join/suspend.
+ * @counter: Threads are to increment this upon resuming from suspend
+ *           or if an error is received from H_JOIN. The thread which performs
+ *           the first increment (i.e. sets it to 1) is responsible for
+ *           waking the other threads.
+ * @done: False if join/suspend is in progress. True if the operation is
+ *        complete (successful or not).
+ */
+struct pseries_suspend_info {
+	atomic_t counter;
+	bool done;
+};
+
+static int do_join(void *arg)
+{
+	struct pseries_suspend_info *info = arg;
+	atomic_t *counter = &info->counter;
+	long hvrc;
+	int ret;
+
+retry:
+	/* Must ensure MSR.EE off for H_JOIN. */
+	hard_irq_disable();
+	hvrc = plpar_hcall_norets(H_JOIN);
+
+	switch (hvrc) {
+	case H_CONTINUE:
+		/*
+		 * All other CPUs are offline or in H_JOIN. This CPU
+		 * attempts the suspend.
+		 */
+		ret = do_suspend();
+		break;
+	case H_SUCCESS:
+		/*
+		 * The suspend is complete and this cpu has received a
+		 * prod, or we've received a stray prod from unrelated
+		 * code (e.g. paravirt spinlocks) and we need to join
+		 * again.
+		 *
+		 * This barrier orders the return from H_JOIN above vs
+		 * the load of info->done. It pairs with the barrier
+		 * in the wakeup/prod path below.
+		 */
+		smp_mb();
+		if (READ_ONCE(info->done) == false) {
+			pr_info_ratelimited("premature return from H_JOIN on CPU %i, retrying",
+					    smp_processor_id());
+			goto retry;
+		}
+		ret = 0;
+		break;
+	case H_BAD_MODE:
+	case H_HARDWARE:
+	default:
+		ret = -EIO;
+		pr_err_ratelimited("H_JOIN error %ld on CPU %i\n",
+				   hvrc, smp_processor_id());
+		break;
+	}
+
+	if (atomic_inc_return(counter) == 1) {
+		pr_info("CPU %u waking all threads\n", smp_processor_id());
+		WRITE_ONCE(info->done, true);
+		/*
+		 * This barrier orders the store to info->done vs subsequent
+		 * H_PRODs to wake the other CPUs. It pairs with the barrier
+		 * in the H_SUCCESS case above.
+		 */
+		smp_mb();
+		prod_others();
+	}
+	/*
+	 * Execution may have been suspended for several seconds, so
+	 * reset the watchdog.
+	 */
+	touch_nmi_watchdog();
+	return ret;
+}
+
 int rtas_ibm_suspend_me(u64 handle)
 {
 	long state;
 	long rc;
 	unsigned long retbuf[PLPAR_HCALL_BUFSIZE];
-	struct rtas_suspend_me_data data;
-	DECLARE_COMPLETION_ONSTACK(done);
 	cpumask_var_t offline_mask;
 	int cpuret;
+	struct pseries_suspend_info info = {
+		.counter = ATOMIC_INIT(0),
+		.done = false,
+	};
 
 	if (!rtas_service_present("ibm,suspend-me"))
 		return -ENOSYS;
@@ -970,12 +1167,6 @@ int rtas_ibm_suspend_me(u64 handle)
 	if (!alloc_cpumask_var(&offline_mask, GFP_KERNEL))
 		return -ENOMEM;
 
-	atomic_set(&data.working, 0);
-	atomic_set(&data.done, 0);
-	atomic_set(&data.error, 0);
-	data.token = rtas_token("ibm,suspend-me");
-	data.complete = &done;
-
 	lock_device_hotplug();
 
 	/* All present CPUs must be online */
@@ -983,32 +1174,26 @@ int rtas_ibm_suspend_me(u64 handle)
 	cpuret = rtas_online_cpus_mask(offline_mask);
 	if (cpuret) {
 		pr_err("%s: Could not bring present CPUs online.\n", __func__);
-		atomic_set(&data.error, cpuret);
+		rc = cpuret;
 		goto out;
 	}
 
-	cpu_hotplug_disable();
+	cpus_read_lock();
 
 	/* Check if we raced with a CPU-Offline Operation */
 	if (!cpumask_equal(cpu_present_mask, cpu_online_mask)) {
 		pr_info("%s: Raced against a concurrent CPU-Offline\n", __func__);
-		atomic_set(&data.error, -EAGAIN);
+		rc = -EAGAIN;
 		goto out_hotplug_enable;
 	}
 
 	/* Call function on all CPUs.  One of us will make the
 	 * rtas call
 	 */
-	if (on_each_cpu(rtas_percpu_suspend_me, &data, 0))
-		atomic_set(&data.error, -EINVAL);
-
-	wait_for_completion(&done);
-
-	if (atomic_read(&data.error) != 0)
-		printk(KERN_ERR "Error doing global join\n");
+	rc = stop_machine_cpuslocked(do_join, &info, cpu_online_mask);
 
 out_hotplug_enable:
-	cpu_hotplug_enable();
+	cpus_read_unlock();
 
 	/* Take down CPUs not online prior to suspend */
 	cpuret = rtas_offline_cpus_mask(offline_mask);
@@ -1019,7 +1204,7 @@ out_hotplug_enable:
 out:
 	unlock_device_hotplug();
 	free_cpumask_var(offline_mask);
-	return atomic_read(&data.error);
+	return rc;
 }
 #else /* CONFIG_PPC_PSERIES */
 int rtas_ibm_suspend_me(u64 handle)
