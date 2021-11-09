@@ -276,6 +276,9 @@ int rdma_listen(struct rdma_cm_id *id, int backlog);
 int __rdma_accept(struct rdma_cm_id *id, struct rdma_conn_param *conn_param,
 		  const char *caller);
 
+void rdma_lock_handler(struct rdma_cm_id *id);
+void rdma_unlock_handler(struct rdma_cm_id *id);
+
 /**
  * rdma_accept - Called to accept a connection request or response.
  * @id: Connection identifier associated with the request.
@@ -290,6 +293,9 @@ int __rdma_accept(struct rdma_cm_id *id, struct rdma_conn_param *conn_param,
  * In the case of error, a reject message is sent to the remote side and the
  * state of the qp associated with the id is modified to error, such that any
  * previously posted receive buffers would be flushed.
+ *
+ * This function is for use by kernel ULPs and must be called from under the
+ * handler callback.
  */
 #define rdma_accept(id, conn_param) \
 	__rdma_accept((id), (conn_param),  KBUILD_MODNAME)

@@ -1486,8 +1486,21 @@ void qedf_process_error_detect(struct qedf_ctx *qedf, struct fcoe_cqe *cqe,
 {
 	int rval;
 
-	if (!cqe)
+	if (io_req == NULL) {
+		QEDF_INFO(NULL, QEDF_LOG_IO, "io_req is NULL.\n");
 		return;
+	}
+
+	if (io_req->fcport == NULL) {
+		QEDF_INFO(NULL, QEDF_LOG_IO, "fcport is NULL.\n");
+		return;
+	}
+
+	if (!cqe) {
+		QEDF_INFO(&qedf->dbg_ctx, QEDF_LOG_IO,
+			"cqe is NULL for io_req %p\n", io_req);
+		return;
+	}
 
 	QEDF_ERR(&(io_req->fcport->qedf->dbg_ctx), "Error detection CQE, "
 		  "xid=0x%x\n", io_req->xid);
@@ -1500,6 +1513,16 @@ void qedf_process_error_detect(struct qedf_ctx *qedf, struct fcoe_cqe *cqe,
 		  le32_to_cpu(cqe->cqe_info.err_info.tx_buf_off),
 		  le32_to_cpu(cqe->cqe_info.err_info.rx_buf_off),
 		  le32_to_cpu(cqe->cqe_info.err_info.rx_id));
+
+	/* When flush is active, let the cmds be flushed out from the cleanup context */
+	if (test_bit(QEDF_RPORT_IN_TARGET_RESET, &io_req->fcport->flags) ||
+		(test_bit(QEDF_RPORT_IN_LUN_RESET, &io_req->fcport->flags) &&
+		 io_req->sc_cmd->device->lun == (u64)io_req->fcport->lun_reset_lun)) {
+		QEDF_ERR(&qedf->dbg_ctx,
+			"Dropping EQE for xid=0x%x as fcport is flushing",
+			io_req->xid);
+		return;
+	}
 
 	if (qedf->stop_io_on_error) {
 		qedf_stop_all_io(qedf);

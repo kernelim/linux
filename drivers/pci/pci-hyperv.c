@@ -458,14 +458,12 @@ enum hv_pcibus_state {
 	hv_pcibus_init = 0,
 	hv_pcibus_probed,
 	hv_pcibus_installed,
-	hv_pcibus_removed,
 	hv_pcibus_maximum
 };
 
 struct hv_pcibus_device {
 	struct pci_sysdata sysdata;
 	enum hv_pcibus_state state;
-	atomic_t remove_lock;
 	struct hv_device *hdev;
 	resource_size_t low_mmio_space;
 	resource_size_t high_mmio_space;
@@ -473,7 +471,6 @@ struct hv_pcibus_device {
 	struct resource *low_mmio_res;
 	struct resource *high_mmio_res;
 	struct completion *survey_event;
-	struct completion remove_event;
 	struct pci_bus *pci_bus;
 	spinlock_t config_lock;	/* Avoid two threads writing index page */
 	spinlock_t device_list_lock;	/* Protect lists below */
@@ -600,9 +597,6 @@ static void put_pcichild(struct hv_pci_dev *hpdev)
 	if (refcount_dec_and_test(&hpdev->refs))
 		kfree(hpdev);
 }
-
-static void get_hvpcibus(struct hv_pcibus_device *hv_pcibus);
-static void put_hvpcibus(struct hv_pcibus_device *hv_pcibus);
 
 /*
  * There is no good way to get notified from vmbus_onoffer_rescind(),
@@ -1724,10 +1718,8 @@ static void pci_devices_present_work(struct work_struct *work)
 	}
 	spin_unlock_irqrestore(&hbus->device_list_lock, flags);
 
-	if (!dr) {
-		put_hvpcibus(hbus);
+	if (!dr)
 		return;
-	}
 
 	/* First, mark all existing children as reported missing. */
 	spin_lock_irqsave(&hbus->device_list_lock, flags);
@@ -1817,7 +1809,6 @@ static void pci_devices_present_work(struct work_struct *work)
 		break;
 	}
 
-	put_hvpcibus(hbus);
 	kfree(dr);
 }
 
@@ -1852,12 +1843,10 @@ static int hv_pci_start_relations_work(struct hv_pcibus_device *hbus,
 	list_add_tail(&dr->list_entry, &hbus->dr_list);
 	spin_unlock_irqrestore(&hbus->device_list_lock, flags);
 
-	if (pending_dr) {
+	if (pending_dr)
 		kfree(dr_wrk);
-	} else {
-		get_hvpcibus(hbus);
+	else
 		queue_work(hbus->wq, &dr_wrk->wrk);
-	}
 
 	return 0;
 }
@@ -2004,8 +1993,6 @@ static void hv_eject_device_work(struct work_struct *work)
 	put_pcichild(hpdev);
 	put_pcichild(hpdev);
 	/* hpdev has been freed. Do not use it any more. */
-
-	put_hvpcibus(hbus);
 }
 
 /**
@@ -2021,7 +2008,6 @@ static void hv_pci_eject_device(struct hv_pci_dev *hpdev)
 	hpdev->state = hv_pcichild_ejecting;
 	get_pcichild(hpdev);
 	INIT_WORK(&hpdev->wrk, hv_eject_device_work);
-	get_hvpcibus(hpdev->hbus);
 	queue_work(hpdev->hbus->wq, &hpdev->wrk);
 }
 
@@ -2601,17 +2587,6 @@ static int hv_send_resources_released(struct hv_device *hdev)
 	return 0;
 }
 
-static void get_hvpcibus(struct hv_pcibus_device *hbus)
-{
-	atomic_inc(&hbus->remove_lock);
-}
-
-static void put_hvpcibus(struct hv_pcibus_device *hbus)
-{
-	if (atomic_dec_and_test(&hbus->remove_lock))
-		complete(&hbus->remove_event);
-}
-
 #define HVPCI_DOM_MAP_SIZE (64 * 1024)
 static DECLARE_BITMAP(hvpci_dom_map, HVPCI_DOM_MAP_SIZE);
 
@@ -2712,14 +2687,12 @@ static int hv_pci_probe(struct hv_device *hdev,
 	hbus->sysdata.domain = dom;
 
 	hbus->hdev = hdev;
-	atomic_inc(&hbus->remove_lock);
 	INIT_LIST_HEAD(&hbus->children);
 	INIT_LIST_HEAD(&hbus->dr_list);
 	INIT_LIST_HEAD(&hbus->resources_for_children);
 	spin_lock_init(&hbus->config_lock);
 	spin_lock_init(&hbus->device_list_lock);
 	spin_lock_init(&hbus->retarget_msi_interrupt_lock);
-	init_completion(&hbus->remove_event);
 	hbus->wq = alloc_ordered_workqueue("hv_pci_%x", 0,
 					   hbus->sysdata.domain);
 	if (!hbus->wq) {
@@ -2835,8 +2808,10 @@ static void hv_pci_bus_exit(struct hv_device *hdev)
 		struct pci_packet teardown_packet;
 		u8 buffer[sizeof(struct pci_message)];
 	} pkt;
-	struct hv_dr_state *dr;
 	struct hv_pci_compl comp_pkt;
+	struct hv_pci_dev *hpdev, *tmp;
+	struct list_head removed;
+	unsigned long flags;
 	int ret;
 
 	/*
@@ -2846,10 +2821,22 @@ static void hv_pci_bus_exit(struct hv_device *hdev)
 	if (hdev->channel->rescind)
 		return;
 
-	/* Delete any children which might still exist. */
-	dr = kzalloc(sizeof(*dr), GFP_KERNEL);
-	if (dr && hv_pci_start_relations_work(hbus, dr))
-		kfree(dr);
+	/* Move all present children to the list on stack */
+	INIT_LIST_HEAD(&removed);
+	spin_lock_irqsave(&hbus->device_list_lock, flags);
+	list_for_each_entry_safe(hpdev, tmp, &hbus->children, list_entry)
+		list_move_tail(&hpdev->list_entry, &removed);
+	spin_unlock_irqrestore(&hbus->device_list_lock, flags);
+
+	/* Remove all children in the list */
+	list_for_each_entry_safe(hpdev, tmp, &removed, list_entry) {
+		list_del(&hpdev->list_entry);
+		if (hpdev->pci_slot)
+			pci_destroy_slot(hpdev->pci_slot);
+		/* For the two refs got in new_pcichild_device() */
+		put_pcichild(hpdev);
+		put_pcichild(hpdev);
+	}
 
 	ret = hv_send_resources_released(hdev);
 	if (ret)
@@ -2883,13 +2870,22 @@ static int hv_pci_remove(struct hv_device *hdev)
 
 	hbus = hv_get_drvdata(hdev);
 	if (hbus->state == hv_pcibus_installed) {
+		tasklet_disable(&hdev->channel->callback_event);
+		tasklet_enable(&hdev->channel->callback_event);
+		destroy_workqueue(hbus->wq);
+		hbus->wq = NULL;
+		/*
+		 * At this point, no work is running or can be scheduled
+		 * on hbus-wq. We can't race with hv_pci_devices_present()
+		 * or hv_pci_eject_device(), it's safe to proceed.
+		 */
+
 		/* Remove the bus from PCI's point of view. */
 		pci_lock_rescan_remove();
 		pci_stop_root_bus(hbus->pci_bus);
 		hv_pci_remove_slots(hbus);
 		pci_remove_root_bus(hbus->pci_bus);
 		pci_unlock_rescan_remove();
-		hbus->state = hv_pcibus_removed;
 	}
 
 	hv_pci_bus_exit(hdev);
@@ -2900,9 +2896,6 @@ static int hv_pci_remove(struct hv_device *hdev)
 	hv_free_config_window(hbus);
 	pci_free_resource_list(&hbus->resources_for_children);
 	hv_pci_free_bridge_windows(hbus);
-	put_hvpcibus(hbus);
-	wait_for_completion(&hbus->remove_event);
-	destroy_workqueue(hbus->wq);
 
 	hv_put_dom_num(hbus->sysdata.domain);
 

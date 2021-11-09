@@ -1020,13 +1020,17 @@ static enum blk_eh_timer_return nvme_timeout(struct request *req, bool reserved)
 	 */
 	switch (dev->ctrl.state) {
 	case NVME_CTRL_CONNECTING:
-	case NVME_CTRL_RESETTING:
+		nvme_change_ctrl_state(&dev->ctrl, NVME_CTRL_DELETING);
+		/* fall through */
+	case NVME_CTRL_DELETING:
 		dev_warn_ratelimited(dev->ctrl.device,
 			 "I/O %d QID %d timeout, disable controller\n",
 			 req->tag, nvmeq->qid);
-		nvme_dev_disable(dev, false);
+		nvme_dev_disable(dev, true);
 		nvme_req(req)->flags |= NVME_REQ_CANCELLED;
 		return BLK_EH_NOT_HANDLED;
+	case NVME_CTRL_RESETTING:
+		return BLK_EH_RESET_TIMER;
 	default:
 		break;
 	}
