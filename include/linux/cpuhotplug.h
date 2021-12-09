@@ -3,6 +3,7 @@
 #define __CPUHOTPLUG_H
 
 #include <linux/types.h>
+#include <linux/rh_kabi.h>
 
 /*
  * CPU-up			CPU-down
@@ -144,8 +145,13 @@ enum cpuhp_state {
 	CPUHP_AP_ONLINE,
 	CPUHP_TEARDOWN_CPU,
 	CPUHP_AP_ONLINE_IDLE,
+	/*
+	 * kABI: Other than a offset shift of 1 in CPUHP_AP_SMPBOOT_THREADS,
+	 * the other CPUHP states are not changed or broken.
+	 */
+	RH_KABI_BROKEN_INSERT_ENUM(CPUHP_AP_SCHED_WAIT_EMPTY)
 	CPUHP_AP_SMPBOOT_THREADS,
-	CPUHP_AP_X86_VDSO_VMA_ONLINE,
+	RH_KABI_BROKEN_REMOVE_ENUM(CPUHP_AP_X86_VDSO_VMA_ONLINE)
 	CPUHP_AP_IRQ_AFFINITY_ONLINE,
 	CPUHP_AP_PERF_ONLINE,
 	CPUHP_AP_PERF_X86_ONLINE,

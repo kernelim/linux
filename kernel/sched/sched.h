@@ -939,6 +939,7 @@ struct rq {
 	struct callback_head	*balance_callback;
 
 	unsigned char		idle_balance;
+	RH_KABI_FILL_HOLE(unsigned char	balance_push)
 
 	/* For active balancing */
 	int			active_balance;
@@ -951,7 +952,8 @@ struct rq {
 
 	struct list_head cfs_tasks;
 
-	RH_KABI_DEPRECATE(u64, rt_avg)
+	RH_KABI_REPLACE(u64	rt_avg,
+			struct rcuwait	hotplug_wait)
 	RH_KABI_DEPRECATE(u64, age_stamp)
 	u64			idle_stamp;
 	u64			avg_idle;
@@ -1170,6 +1172,8 @@ struct rq_flags {
 #endif
 };
 
+extern struct callback_head balance_push_callback;
+
 /*
  * Lockdep annotation that avoids accidental unlocks; it's like a
  * sticky/continuous lockdep_assert_held().
@@ -1187,6 +1191,9 @@ static inline void rq_pin_lock(struct rq *rq, struct rq_flags *rf)
 #ifdef CONFIG_SCHED_DEBUG
 	rq->clock_update_flags &= (RQCF_REQ_SKIP|RQCF_ACT_SKIP);
 	rf->clock_update_flags = 0;
+#ifdef CONFIG_SMP
+	SCHED_WARN_ON(rq->balance_callback && rq->balance_callback != &balance_push_callback);
+#endif
 #endif
 }
 
@@ -1354,7 +1361,7 @@ queue_balance_callback(struct rq *rq,
 {
 	lockdep_assert_held(&rq->lock);
 
-	if (unlikely(head->next))
+	if (unlikely(head->next || rq->balance_callback == &balance_push_callback))
 		return;
 
 	head->func = (void (*)(struct callback_head *))func;

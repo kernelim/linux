@@ -563,9 +563,6 @@ int dm_mq_init_request_queue(struct mapped_device *md, struct dm_table *t)
 		goto out_tag_set;
 	}
 
-	/* RHEL-only: block core calls blk_mq_request_fn if ->make_request_fn NULL */
-	q->make_request_fn = NULL;
-
 	return 0;
 
 out_tag_set:
