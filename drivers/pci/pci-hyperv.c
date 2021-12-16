@@ -934,7 +934,7 @@ static int hv_set_affinity(struct irq_data *data, const struct cpumask *dest,
 			goto exit_unlock;
 		}
 
-		cpumask_and(tmp, cfg->domain, cpu_online_mask);
+		cpumask_and(tmp, cfg->domain, dest);
 		nr_bank = cpumask_to_vpset(&params->int_target.vp_set, tmp);
 		free_cpumask_var(tmp);
 
@@ -950,7 +950,7 @@ static int hv_set_affinity(struct irq_data *data, const struct cpumask *dest,
 		 */
 		var_size = 1 + nr_bank;
 	} else {
-		for_each_cpu_and(cpu, cfg->domain, cpu_online_mask) {
+		for_each_cpu_and(cpu, cfg->domain, dest) {
 			params->int_target.vp_mask |=
 				(1ULL << hv_cpu_number_to_vp_number(cpu));
 		}

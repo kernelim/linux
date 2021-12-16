@@ -48,7 +48,7 @@ void gfs2_pin(struct gfs2_sbd *sdp, struct buffer_head *bh)
 	if (test_set_buffer_pinned(bh))
 		gfs2_assert_withdraw(sdp, 0);
 	if (!buffer_uptodate(bh))
-		gfs2_io_error_bh(sdp, bh);
+		gfs2_io_error_bh_wd(sdp, bh);
 	bd = bh->b_private;
 	/* If this buffer is in the AIL and it has already been written
 	 * to in-place disk block, remove it from the AIL.
@@ -209,9 +209,12 @@ static void gfs2_end_log_write(struct bio *bio, int error)
 	int i;
 
 	if (error) {
-		sdp->sd_log_error = error;
-		fs_err(sdp, "Error %d writing to journal, jid=%u\n", error,
-		       sdp->sd_jdesc->jd_jid);
+		if (!cmpxchg(&sdp->sd_log_error, 0, error))
+			fs_err(sdp, "Error %d writing to journal, jid=%u\n",
+			       error, sdp->sd_jdesc->jd_jid);
+		gfs2_withdraw_delayed(sdp);
+		/* prevent more writes to the journal */
+		clear_bit(SDF_JOURNAL_LIVE, &sdp->sd_flags);
 		wake_up(&sdp->sd_logd_waitq);
 	}
 
@@ -762,9 +765,27 @@ static int buf_lo_scan_elements(struct gfs2_jdesc *jd, unsigned int start,
 
 		if (gfs2_meta_check(sdp, bh_ip))
 			error = -EIO;
-		else
-			mark_buffer_dirty(bh_ip);
+		else {
+			struct gfs2_meta_header *mh =
+				(struct gfs2_meta_header *)bh_ip->b_data;
 
+			if (mh->mh_type == cpu_to_be32(GFS2_METATYPE_RG)) {
+				struct gfs2_rgrpd *rgd;
+
+				rgd = gfs2_blk2rgrpd(sdp, blkno, false);
+				if (rgd && rgd->rd_addr == blkno &&
+				    rgd->rd_bits && rgd->rd_bits->bi_bh) {
+					fs_info(sdp, "Replaying 0x%llx but we "
+						"already have a bh!\n",
+						(unsigned long long)blkno);
+					fs_info(sdp, "busy:%d, pinned:%d\n",
+						buffer_busy(rgd->rd_bits->bi_bh) ? 1 : 0,
+						buffer_pinned(rgd->rd_bits->bi_bh));
+					gfs2_dump_glock(NULL, rgd->rd_gl, true);
+				}
+			}
+			mark_buffer_dirty(bh_ip);
+		}
 		brelse(bh_log);
 		brelse(bh_ip);
 

@@ -53,6 +53,8 @@
  * but never before the maximum hash table size has been reached.
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/buffer_head.h>
@@ -511,7 +513,8 @@ static int gfs2_dirent_gather(const struct gfs2_dirent *dent,
  * For now the most important thing is to check that the various sizes
  * are correct.
  */
-static int gfs2_check_dirent(struct gfs2_dirent *dent, unsigned int offset,
+static int gfs2_check_dirent(struct gfs2_sbd *sdp,
+			     struct gfs2_dirent *dent, unsigned int offset,
 			     unsigned int size, unsigned int len, int first)
 {
 	const char *msg = "gfs2_dirent too small";
@@ -533,12 +536,12 @@ static int gfs2_check_dirent(struct gfs2_dirent *dent, unsigned int offset,
 		goto error;
 	return 0;
 error:
-	printk(KERN_WARNING "gfs2_check_dirent: %s (%s)\n", msg,
-	       first ? "first in block" : "not first in block");
+	fs_warn(sdp, "%s: %s (%s)\n",
+		__func__, msg, first ? "first in block" : "not first in block");
 	return -EIO;
 }
 
-static int gfs2_dirent_offset(const void *buf)
+static int gfs2_dirent_offset(struct gfs2_sbd *sdp, const void *buf)
 {
 	const struct gfs2_meta_header *h = buf;
 	int offset;
@@ -557,8 +560,8 @@ static int gfs2_dirent_offset(const void *buf)
 	}
 	return offset;
 wrong_type:
-	printk(KERN_WARNING "gfs2_scan_dirent: wrong block type %u\n",
-	       be32_to_cpu(h->mh_type));
+	fs_warn(sdp, "%s: wrong block type %u\n", __func__,
+		be32_to_cpu(h->mh_type));
 	return -1;
 }
 
@@ -572,7 +575,7 @@ static struct gfs2_dirent *gfs2_dirent_scan(struct inode *inode, void *buf,
 	unsigned size;
 	int ret = 0;
 
-	ret = gfs2_dirent_offset(buf);
+	ret = gfs2_dirent_offset(GFS2_SB(inode), buf);
 	if (ret < 0)
 		goto consist_inode;
 
@@ -580,7 +583,7 @@ static struct gfs2_dirent *gfs2_dirent_scan(struct inode *inode, void *buf,
 	prev = NULL;
 	dent = buf + offset;
 	size = be16_to_cpu(dent->de_rec_len);
-	if (gfs2_check_dirent(dent, offset, size, len, 1))
+	if (gfs2_check_dirent(GFS2_SB(inode), dent, offset, size, len, 1))
 		goto consist_inode;
 	do {
 		ret = scan(dent, name, opaque);
@@ -592,7 +595,8 @@ static struct gfs2_dirent *gfs2_dirent_scan(struct inode *inode, void *buf,
 		prev = dent;
 		dent = buf + offset;
 		size = be16_to_cpu(dent->de_rec_len);
-		if (gfs2_check_dirent(dent, offset, size, len, 0))
+		if (gfs2_check_dirent(GFS2_SB(inode), dent, offset, size,
+				      len, 0))
 			goto consist_inode;
 	} while(1);
 
@@ -769,7 +773,7 @@ static int get_leaf(struct gfs2_inode *dip, u64 leaf_no,
 
 	error = gfs2_meta_read(dip->i_gl, leaf_no, DIO_WAIT, 0, bhp);
 	if (!error && gfs2_metatype_check(GFS2_SB(&dip->i_inode), *bhp, GFS2_METATYPE_LF)) {
-		/* printk(KERN_INFO "block num=%llu\n", leaf_no); */
+		/* pr_info("block num=%llu\n", leaf_no); */
 		error = -EIO;
 	}
 
@@ -1050,7 +1054,8 @@ static int dir_split_leaf(struct inode *inode, const struct qstr *name)
 	len = 1 << (dip->i_depth - be16_to_cpu(oleaf->lf_depth));
 	half_len = len >> 1;
 	if (!half_len) {
-		printk(KERN_WARNING "i_depth %u lf_depth %u index %u\n", dip->i_depth, be16_to_cpu(oleaf->lf_depth), index);
+		fs_warn(GFS2_SB(inode), "i_depth %u lf_depth %u index %u\n",
+			dip->i_depth, be16_to_cpu(oleaf->lf_depth), index);
 		gfs2_consist_inode(dip);
 		error = -EIO;
 		goto fail_brelse;
@@ -1374,7 +1379,7 @@ static int gfs2_set_cookies(struct gfs2_sbd *sdp, struct buffer_head *bh,
 		if (!sdp->sd_args.ar_loccookie)
 			continue;
 		offset = (char *)(darr[i]) -
-			 (bh->b_data + gfs2_dirent_offset(bh->b_data));
+			(bh->b_data + gfs2_dirent_offset(sdp, bh->b_data));
 		offset /= GFS2_MIN_DIRENT_SIZE;
 		offset += leaf_nr * sdp->sd_max_dents_per_leaf;
 		if (offset >= GFS2_USE_HASH_FLAG ||
@@ -2043,7 +2048,8 @@ static int leaf_dealloc(struct gfs2_inode *dip, u32 index, u32 len,
 
 	error = gfs2_trans_begin(sdp,
 			rg_blocks + (DIV_ROUND_UP(size, sdp->sd_jbsize) + 1) +
-			RES_DINODE + RES_STATFS + RES_QUOTA, l_blocks);
+			RES_DINODE + RES_STATFS + RES_QUOTA, RES_DINODE +
+				 l_blocks);
 	if (error)
 		goto out_rg_gunlock;
 

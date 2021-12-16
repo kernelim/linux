@@ -7,6 +7,8 @@
  * of the GNU General Public License version 2.
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
@@ -97,17 +99,16 @@ static void gfs2_log_release(struct gfs2_sbd *sdp, unsigned int blks)
 	up_read(&sdp->sd_log_flush_lock);
 }
 
-static void gfs2_print_trans(const struct gfs2_trans *tr)
+static void gfs2_print_trans(struct gfs2_sbd *sdp, const struct gfs2_trans *tr)
 {
-	printk(KERN_WARNING "GFS2: Transaction created at: %pSR\n",
-	       (void *)tr->tr_ip);
-	printk(KERN_WARNING "GFS2: blocks=%u revokes=%u reserved=%u touched=%d\n",
-	       tr->tr_blocks, tr->tr_revokes, tr->tr_reserved,
-	       test_bit(TR_TOUCHED, &tr->tr_flags));
-	printk(KERN_WARNING "GFS2: Buf %u/%u Databuf %u/%u Revoke %u/%u\n",
-	       tr->tr_num_buf_new, tr->tr_num_buf_rm,
-	       tr->tr_num_databuf_new, tr->tr_num_databuf_rm,
-	       tr->tr_num_revoke, tr->tr_num_revoke_rm);
+	fs_warn(sdp, "Transaction created at: %pSR\n", (void *)tr->tr_ip);
+	fs_warn(sdp, "blocks=%u revokes=%u reserved=%u touched=%u\n",
+		tr->tr_blocks, tr->tr_revokes, tr->tr_reserved,
+		test_bit(TR_TOUCHED, &tr->tr_flags));
+	fs_warn(sdp, "Buf %u/%u Databuf %u/%u Revoke %u/%u\n",
+		tr->tr_num_buf_new, tr->tr_num_buf_rm,
+		tr->tr_num_databuf_new, tr->tr_num_databuf_rm,
+		tr->tr_num_revoke, tr->tr_num_revoke_rm);
 }
 
 void gfs2_trans_end(struct gfs2_sbd *sdp)
@@ -133,7 +134,7 @@ void gfs2_trans_end(struct gfs2_sbd *sdp)
 
 	if (gfs2_assert_withdraw(sdp, (nbuf <= tr->tr_blocks) &&
 				       (tr->tr_num_revoke <= tr->tr_revokes)))
-		gfs2_print_trans(tr);
+		gfs2_print_trans(sdp, tr);
 
 	gfs2_log_commit(sdp, tr);
 	if (tr->tr_t_gh.gh_gl) {
@@ -250,10 +251,14 @@ void gfs2_trans_add_meta(struct gfs2_glock *gl, struct buffer_head *bh)
 	set_bit(GLF_DIRTY, &bd->bd_gl->gl_flags);
 	mh = (struct gfs2_meta_header *)bd->bd_bh->b_data;
 	if (unlikely(mh->mh_magic != cpu_to_be32(GFS2_MAGIC))) {
-		printk(KERN_ERR
-		       "Attempting to add uninitialised block to journal (inplace block=%lld)\n",
+		fs_err(sdp, "Attempting to add uninitialised block to "
+		       "journal (inplace block=%lld)\n",
 		       (unsigned long long)bd->bd_bh->b_blocknr);
 		BUG();
+	}
+	if (unlikely(gfs2_withdrawn(sdp))) {
+		fs_info(sdp, "GFS2:adding buf while withdrawn! 0x%llx\n",
+			(unsigned long long)bd->bd_bh->b_blocknr);
 	}
 	gfs2_pin(sdp, bd->bd_bh);
 	mh->__pad0 = cpu_to_be64(0);

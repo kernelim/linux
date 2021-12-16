@@ -1760,7 +1760,7 @@ static void do_generic_file_read(struct file *filp, loff_t *ppos,
 		cond_resched();
 find_page:
 		if (fatal_signal_pending(current)) {
-			error = -EINTR;
+			desc->error = -EINTR;
 			goto out;
 		}
 
