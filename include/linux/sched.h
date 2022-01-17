@@ -596,10 +596,15 @@ struct task_struct_rh {
 	struct capture_control          *capture_control;
 #endif
 #ifdef CONFIG_X86_MCE
+	void __user			*mce_vaddr;
+	u64				mce_addr;
 	__u64				mce_ripv : 1,
 					mce_whole_page : 1,
 					__mce_reserved : 62;
+	struct callback_head		mce_kill_me;
+	int				mce_count;
 #endif
+
 	/* pointer back to the main task_struct */
 	struct task_struct		*task_struct;
 	int				trc_reader_nesting;
