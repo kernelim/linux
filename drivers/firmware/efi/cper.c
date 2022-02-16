@@ -116,7 +116,7 @@ static const char * const proc_isa_strs[] = {
 	"X64",
 };
 
-static const char * const proc_error_type_strs[] = {
+const char * const cper_proc_error_type_strs[] = {
 	"cache error",
 	"TLB error",
 	"bus error",
@@ -151,8 +151,8 @@ static void cper_print_proc_generic(const char *pfx,
 	if (proc->validation_bits & CPER_PROC_VALID_ERROR_TYPE) {
 		printk("%s""error_type: 0x%02x\n", pfx, proc->proc_error_type);
 		cper_print_bits(pfx, proc->proc_error_type,
-				proc_error_type_strs,
-				ARRAY_SIZE(proc_error_type_strs));
+				cper_proc_error_type_strs,
+				ARRAY_SIZE(cper_proc_error_type_strs));
 	}
 	if (proc->validation_bits & CPER_PROC_VALID_OPERATION)
 		printk("%s""operation: %d, %s\n", pfx, proc->operation,
@@ -436,6 +436,16 @@ cper_estatus_print_section(const char *pfx, struct acpi_hest_generic_data *gdata
 			cper_print_pcie(newpfx, pcie, gdata);
 		else
 			goto err_section_too_small;
+#if defined(CONFIG_UEFI_CPER_X86)
+	} else if (guid_equal(sec_type, &CPER_SEC_PROC_IA)) {
+		struct cper_sec_proc_ia *ia_err = acpi_hest_get_payload(gdata);
+
+		printk("%ssection_type: IA32/X64 processor error\n", newpfx);
+		if (gdata->error_data_length >= sizeof(*ia_err))
+			cper_print_proc_ia(newpfx, ia_err);
+		else
+			goto err_section_too_small;
+ #endif
 	} else
 		printk("%s""section type: unknown, %pUl\n", newpfx, sec_type);
 

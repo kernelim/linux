@@ -2151,6 +2151,40 @@ size_t security_policydb_len(void)
 }
 
 /**
+ * ocontext_to_sid - Helper to safely get sid for an ocontext
+ * @sidtab: SID table
+ * @c: ocontext structure
+ * @index: index of the context entry (0 or 1)
+ * @out_sid: pointer to the resulting SID value
+ *
+ * For all ocontexts except OCON_ISID the SID fields are populated
+ * on-demand when needed. Since updating the SID value is an SMP-sensitive
+ * operation, this helper must be used to do that safely.
+ */
+static int ocontext_to_sid(struct sidtab *sidtab, struct ocontext *c,
+			   size_t index, u32 *out_sid)
+{
+	int rc;
+	u32 sid;
+
+	/* Ensure the associated sidtab entry is visible to this thread. */
+	sid = smp_load_acquire(&c->sid[index]);
+	if (!sid) {
+		rc = sidtab_context_to_sid(sidtab, &c->context[index], &sid);
+		if (rc)
+			return rc;
+
+		/*
+		 * Ensure the new sidtab entry is visible to other threads
+		 * when they see the SID.
+		 */
+		smp_store_release(&c->sid[index], sid);
+	}
+	*out_sid = sid;
+	return 0;
+}
+
+/**
  * security_port_sid - Obtain the SID for a port.
  * @protocol: protocol number
  * @port: port number
@@ -2173,14 +2207,9 @@ int security_port_sid(u8 protocol, u16 port, u32 *out_sid)
 	}
 
 	if (c) {
-		if (!c->sid[0]) {
-			rc = sidtab_context_to_sid(sidtab,
-						   &c->context[0],
-						   &c->sid[0]);
-			if (rc)
-				goto out;
-		}
-		*out_sid = c->sid[0];
+		rc = ocontext_to_sid(sidtab, c, 0, out_sid);
+		if (rc)
+			goto out;
 	} else {
 		*out_sid = SECINITSID_PORT;
 	}
@@ -2214,14 +2243,9 @@ int security_ib_pkey_sid(u64 subnet_prefix, u16 pkey_num, u32 *out_sid)
 	}
 
 	if (c) {
-		if (!c->sid[0]) {
-			rc = sidtab_context_to_sid(sidtab,
-						   &c->context[0],
-						   &c->sid[0]);
-			if (rc)
-				goto out;
-		}
-		*out_sid = c->sid[0];
+		rc = ocontext_to_sid(sidtab, c, 0, out_sid);
+		if (rc)
+			goto out;
 	} else
 		*out_sid = SECINITSID_UNLABELED;
 
@@ -2255,14 +2279,9 @@ int security_ib_endport_sid(const char *dev_name, u8 port_num, u32 *out_sid)
 	}
 
 	if (c) {
-		if (!c->sid[0]) {
-			rc = sidtab_context_to_sid(sidtab,
-						   &c->context[0],
-						   &c->sid[0]);
-			if (rc)
-				goto out;
-		}
-		*out_sid = c->sid[0];
+		rc = ocontext_to_sid(sidtab, c, 0, out_sid);
+		if (rc)
+			goto out;
 	} else
 		*out_sid = SECINITSID_UNLABELED;
 
@@ -2291,19 +2310,9 @@ int security_netif_sid(char *name, u32 *if_sid)
 	}
 
 	if (c) {
-		if (!c->sid[0] || !c->sid[1]) {
-			rc = sidtab_context_to_sid(sidtab,
-						  &c->context[0],
-						  &c->sid[0]);
-			if (rc)
-				goto out;
-			rc = sidtab_context_to_sid(sidtab,
-						   &c->context[1],
-						   &c->sid[1]);
-			if (rc)
-				goto out;
-		}
-		*if_sid = c->sid[0];
+		rc = ocontext_to_sid(sidtab, c, 0, if_sid);
+		if (rc)
+			goto out;
 	} else
 		*if_sid = SECINITSID_NETIF;
 
@@ -2381,14 +2390,9 @@ int security_node_sid(u16 domain,
 	}
 
 	if (c) {
-		if (!c->sid[0]) {
-			rc = sidtab_context_to_sid(sidtab,
-						   &c->context[0],
-						   &c->sid[0]);
-			if (rc)
-				goto out;
-		}
-		*out_sid = c->sid[0];
+		rc = ocontext_to_sid(sidtab, c, 0, out_sid);
+		if (rc)
+			goto out;
 	} else {
 		*out_sid = SECINITSID_NODE;
 	}
@@ -2565,14 +2569,7 @@ int security_genfs_sid(const char *fstype,
 	if (!c)
 		goto out;
 
-	if (!c->sid[0]) {
-		rc = sidtab_context_to_sid(sidtab, &c->context[0], &c->sid[0]);
-		if (rc)
-			goto out;
-	}
-
-	*sid = c->sid[0];
-	rc = 0;
+	rc = ocontext_to_sid(sidtab, c, 0, sid);
 out:
 	read_unlock(&policy_rwlock);
 	return rc;
@@ -2603,13 +2600,9 @@ int security_fs_use(
 
 	if (c) {
 		*behavior = c->v.behavior;
-		if (!c->sid[0]) {
-			rc = sidtab_context_to_sid(sidtab, &c->context[0],
-						   &c->sid[0]);
-			if (rc)
-				goto out;
-		}
-		*sid = c->sid[0];
+		rc = ocontext_to_sid(sidtab, c, 0, sid);
+		if (rc)
+			goto out;
 	} else {
 		rc = security_genfs_sid(fstype, "/", SECCLASS_DIR, sid);
 		if (rc) {

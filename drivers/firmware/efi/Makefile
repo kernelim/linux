@@ -9,3 +9,4 @@ obj-$(CONFIG_EFI_RUNTIME_MAP)		+= runtime-map.o
 obj-$(CONFIG_UEFI_CPER)			+= cper.o
 obj-$(CONFIG_EFI_RUNTIME_WRAPPERS)	+= runtime-wrappers.o
 obj-$(CONFIG_EFI_DEV_PATH_PARSER)	+= dev-path-parser.o
+obj-$(CONFIG_UEFI_CPER_X86)		+= cper-x86.o

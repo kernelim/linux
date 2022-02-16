@@ -55,6 +55,11 @@ config EFI_RUNTIME_MAP
 config UEFI_CPER
 	def_bool n
 
+config UEFI_CPER_X86
+	bool
+	depends on UEFI_CPER && X86
+	default y
+
 config EFI_RUNTIME_WRAPPERS
 	bool
 
