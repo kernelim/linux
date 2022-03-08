@@ -1183,6 +1183,7 @@ err_free_pkey:
 
 err_free_pkey_group:
 	kfree(p->pkey_group);
+	p->pkey_group = NULL;
 
 err_remove_gid_type:
 	sysfs_remove_group(&p->gid_attr_group->kobj,

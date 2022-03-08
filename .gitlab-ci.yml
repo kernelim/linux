@@ -17,7 +17,7 @@ workflow: !reference [.workflow]
   trigger:
     branch: rhel8
   variables:
-    builder_image: quay.io/cki/builder-rhel8
+    builder_image: quay.io/cki/builder-rhel8.5
     name: kernel-rhel8
     architectures: 'x86_64 ppc64le aarch64 s390x'
     kpet_tree_family: rhel8
@@ -29,8 +29,9 @@ workflow: !reference [.workflow]
   trigger:
     branch: rhel8-rt
   variables:
-    builder_image: quay.io/cki/builder-rhel8
+    builder_image: quay.io/cki/builder-rhel8.5
     name: kernel-rt-rhel8
+    kpet_tree_family: rhel8-rt
     merge_branch: 8.5-rt
     disttag_override: '.el8_5'
 
@@ -39,47 +40,48 @@ workflow: !reference [.workflow]
   trigger:
     branch: rhel8
   variables:
-    builder_image: quay.io/cki/builder-rhel8
+    builder_image: quay.io/cki/builder-rhel8.5
     name: kernel-rt-rhel8
     kpet_tree_family: rhel8-rt
     disttag_override: '.el8_5'
     RUN_ONLY_FOR_RT: 'true'
 
 # regular pipelines
-
-merge_request_regular:
+rhel8_merge_request:
   extends: [.internal, .merge_request, .with_notifications, .rhel_common,
             .trigger]
 
-realtime_check_regular:
+rhel8_realtime_check_merge_request:
   extends: [.internal, .merge_request, .realtime_check_common,
             .realtime_check]
 
-baseline_regular:
+rhel8_baseline:
   extends: [.internal, .baseline, .with_notifications, .rhel_common,
             .trigger]
 
-# realtime branch pipelines
+rhel8_realtime_check_baseline:
+  extends: [.internal, .baseline, .realtime_check_baseline,
+            .realtime_check]
 
-merge_request_realtime:
+# realtime branch pipelines
+rhel8_realtime_merge_request:
   extends: [.internal, .merge_request, .with_notifications, .realtime_pipeline_common,
             .realtime_full]
 
-baseline_realtime:
+rhel8_realtime_baseline:
   extends: [.internal, .baseline, .with_notifications, .realtime_pipeline_common,
             .realtime_full]
 
 # private pipelines
-
-merge_request_private:
+rhel8_merge_request_private:
   extends: [.scratch, .merge_request, .rhel_common,
             .trigger]
 
-realtime_check_private:
+rhel8_realtime_check_merge_request_private:
   extends: [.scratch, .merge_request, .realtime_check_common,
             .realtime_check]
 
-merge_request_realtime_private:
+rhel8_realtime_merge_request_private:
   extends: [.scratch, .merge_request, .realtime_pipeline_common,
             .realtime_full]
 

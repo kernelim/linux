@@ -51,4 +51,11 @@ static inline void hugetlb_free_pgd_range(struct mmu_gather *tlb,
 
 #endif
 
+#ifndef __HAVE_ARCH_GIGANTIC_PAGE_RUNTIME_SUPPORTED
+static inline bool gigantic_page_runtime_supported(void)
+{
+	return IS_ENABLED(CONFIG_ARCH_HAS_GIGANTIC_PAGE);
+}
+#endif /* __HAVE_ARCH_GIGANTIC_PAGE_RUNTIME_SUPPORTED */
+
 #endif /* _ASM_GENERIC_HUGETLB_H */
