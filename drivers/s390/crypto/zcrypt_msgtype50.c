@@ -437,13 +437,14 @@ static void zcrypt_cex2a_receive(struct ap_queue *aq,
 		goto out;	/* ap_msg->rc indicates the error */
 	t80h = reply->message;
 	if (t80h->type == TYPE80_RSP_CODE) {
-		if (aq->ap_dev.device_type == AP_DEVICE_TYPE_CEX2A)
-			length = min_t(int,
-				       CEX2A_MAX_RESPONSE_SIZE, t80h->len);
-		else
-			length = min_t(int,
-				       CEX3A_MAX_RESPONSE_SIZE, t80h->len);
-		memcpy(msg->message, reply->message, length);
+		length = t80h->len;
+		if (length > reply->bufsize || length > msg->bufsize) {
+			msg->rc = -EMSGSIZE;
+		} else {
+			memcpy(msg->message, reply->message, length);
+			msg->length = length;
+		}
+
 	} else
 		memcpy(msg->message, reply->message, sizeof(error_reply));
 out:
@@ -467,12 +468,9 @@ static long zcrypt_cex2a_modexpo(struct zcrypt_queue *zq,
 	int rc;
 
 	ap_init_message(&ap_msg);
-	if (zq->zcard->user_space_type == ZCRYPT_CEX2A)
-		ap_msg.message = kmalloc(MSGTYPE50_CRB2_MAX_MSG_SIZE,
-					 GFP_KERNEL);
-	else
-		ap_msg.message = kmalloc(MSGTYPE50_CRB3_MAX_MSG_SIZE,
-					 GFP_KERNEL);
+	ap_msg.bufsize = (zq->zcard->user_space_type == ZCRYPT_CEX2A) ?
+		MSGTYPE50_CRB2_MAX_MSG_SIZE : MSGTYPE50_CRB3_MAX_MSG_SIZE;
+	ap_msg.message = kmalloc(ap_msg.bufsize, GFP_KERNEL);
 	if (!ap_msg.message)
 		return -ENOMEM;
 	ap_msg.receive = zcrypt_cex2a_receive;
@@ -513,12 +511,9 @@ static long zcrypt_cex2a_modexpo_crt(struct zcrypt_queue *zq,
 	int rc;
 
 	ap_init_message(&ap_msg);
-	if (zq->zcard->user_space_type == ZCRYPT_CEX2A)
-		ap_msg.message = kmalloc(MSGTYPE50_CRB2_MAX_MSG_SIZE,
-					 GFP_KERNEL);
-	else
-		ap_msg.message = kmalloc(MSGTYPE50_CRB3_MAX_MSG_SIZE,
-					 GFP_KERNEL);
+	ap_msg.bufsize = (zq->zcard->user_space_type == ZCRYPT_CEX2A) ?
+		MSGTYPE50_CRB2_MAX_MSG_SIZE : MSGTYPE50_CRB3_MAX_MSG_SIZE;
+	ap_msg.message = kmalloc(ap_msg.bufsize, GFP_KERNEL);
 	if (!ap_msg.message)
 		return -ENOMEM;
 	ap_msg.receive = zcrypt_cex2a_receive;

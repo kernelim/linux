@@ -516,7 +516,7 @@ cifs_negotiate_rsize(struct cifs_tcon *tcon, struct smb_vol *volume_info)
 }
 
 static void
-cifs_qfs_tcon(const unsigned int xid, struct cifs_tcon *tcon)
+cifs_qfs_tcon(const unsigned int xid, struct cifs_tcon *tcon, struct cifs_sb_info *cifs_sb)
 {
 	CIFSSMBQFSDeviceInfo(xid, tcon);
 	CIFSSMBQFSAttributeInfo(xid, tcon);
@@ -888,7 +888,7 @@ cifs_oplock_response(struct cifs_tcon *tcon, struct cifs_fid *fid,
 
 static int
 cifs_queryfs(const unsigned int xid, struct cifs_tcon *tcon,
-	     struct kstatfs *buf)
+	     struct cifs_sb_info *cifs_sb, struct kstatfs *buf)
 {
 	int rc = -EOPNOTSUPP;
 

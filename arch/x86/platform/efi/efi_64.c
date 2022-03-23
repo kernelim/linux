@@ -91,6 +91,7 @@ pgd_t * __init efi_call_phys_prolog(void)
 	int n_pgds, j;
 
 	if (!efi_enabled(EFI_OLD_MEMMAP)) {
+		EFI_SAVE_CPU_TLBSTATE();
 		efi_switch_mm(&efi_mm);
 		return NULL;
 	}
@@ -146,6 +147,7 @@ void __init efi_call_phys_epilog(pgd_t *save_pgd)
 
 	if (!efi_enabled(EFI_OLD_MEMMAP)) {
 		efi_switch_mm(efi_scratch.prev_mm);
+		EFI_RESTORE_CPU_TLBSTATE();
 		return;
 	}
 
@@ -435,18 +437,6 @@ void efi_switch_mm(struct mm_struct *mm)
 	efi_scratch.prev_mm = current->active_mm;
 	current->active_mm = mm;
 	switch_mm(efi_scratch.prev_mm, mm, NULL);
-	/*
-	 * RHEL-7: switch_mm() will prematurely flip cpu_tlbstate
-	 * back to TLBSTATE_OK for this kernel thread, which will
-	 * potentially trigger the assertion at leave_mm(), if the
-	 * work queued to run after the EFI thunk happens to initiate
-	 * a TLB flush (i.e.: if a flush worker is queued after the
-	 * efivars read/write work). We just need to make sure we're
-	 * setting cpu_tlbstate back to TLBSTATE_LAZY after flipping
-	 * back and forth the page tables, as in RHEL-7 kernel threads
-	 * are expected to be in TLBSTATE_LAZY state all the way.
-	 */
-	enter_lazy_tlb(mm, current);
 }
 
 #ifdef CONFIG_EFI_MIXED
@@ -503,6 +493,7 @@ efi_status_t efi_thunk_set_virtual_address_map(
 	efi_sync_low_kernel_mappings();
 	local_irq_save(flags);
 
+	EFI_SAVE_CPU_TLBSTATE();
 	efi_switch_mm(&efi_mm);
 
 	func = (u32)(unsigned long)phys_set_virtual_address_map;
@@ -510,6 +501,7 @@ efi_status_t efi_thunk_set_virtual_address_map(
 			     descriptor_version, virtual_map);
 
 	efi_switch_mm(efi_scratch.prev_mm);
+	EFI_RESTORE_CPU_TLBSTATE();
 	local_irq_restore(flags);
 
 	return status;

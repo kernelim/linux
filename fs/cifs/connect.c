@@ -3991,7 +3991,7 @@ try_mount_again:
 
 	/* do not care if a following call succeed - informational */
 	if (!tcon->pipe && server->ops->qfs_tcon)
-		server->ops->qfs_tcon(xid, tcon);
+		server->ops->qfs_tcon(xid, tcon, cifs_sb);
 
 	cifs_sb->wsize = server->ops->negotiate_wsize(tcon, volume_info);
 	cifs_sb->rsize = server->ops->negotiate_rsize(tcon, volume_info);
@@ -4047,6 +4047,10 @@ remote_path_check:
 				cifs_dbg(VFS, "cannot query dirs between root and final path, "
 					 "enabling CIFS_MOUNT_USE_PREFIX_PATH\n");
 				cifs_sb->mnt_cifs_flags |= CIFS_MOUNT_USE_PREFIX_PATH;
+				if (full_path && full_path[0]) {
+					kfree(cifs_sb->prepath);
+					cifs_sb->prepath = kstrdup(full_path + 1, GFP_KERNEL);
+				}
 				rc = 0;
 			}
 		}

@@ -273,7 +273,7 @@ struct smb_version_operations {
 			     const char *, struct dfs_info3_param **,
 			     unsigned int *, const struct nls_table *, int);
 	/* informational QFS call */
-	void (*qfs_tcon)(const unsigned int, struct cifs_tcon *);
+	void (*qfs_tcon)(const unsigned int, struct cifs_tcon *, struct cifs_sb_info *);
 	/* check if a path is accessible or not */
 	int (*is_path_accessible)(const unsigned int, struct cifs_tcon *,
 				  struct cifs_sb_info *, const char *);
@@ -375,7 +375,7 @@ struct smb_version_operations {
 			       struct cifsInodeInfo *);
 	/* query remote filesystem */
 	int (*queryfs)(const unsigned int, struct cifs_tcon *,
-		       struct kstatfs *);
+		       struct cifs_sb_info *cifs_sb, struct kstatfs *);
 	/* send mandatory brlock to the server */
 	int (*mand_lock)(const unsigned int, struct cifsFileInfo *, __u64,
 			 __u64, __u32, int, int, bool);

@@ -153,7 +153,7 @@ static struct ap_queue_status ap_sm_recv(struct ap_queue *aq)
 	struct ap_message *ap_msg;
 
 	status = ap_dqap(aq->qid, &aq->reply->psmid,
-			 aq->reply->message, aq->reply->length);
+			 aq->reply->message, aq->reply->bufsize);
 	switch (status.response_code) {
 	case AP_RESPONSE_NORMAL:
 		aq->queue_count--;

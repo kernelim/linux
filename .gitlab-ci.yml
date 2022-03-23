@@ -30,6 +30,7 @@ workflow: !reference [.workflow]
     builder_image: quay.io/cki/builder-rhel7
     name: kernel-rt-rhel7
     merge_branch: main-rt
+    kpet_tree_family: rhel7-rt
     srpm_make_target: 'rt-srpm'
 
 # Full RT pipeline for -rt branch
@@ -44,40 +45,41 @@ workflow: !reference [.workflow]
     RUN_ONLY_FOR_RT: 'true'
 
 # regular pipelines
-
-merge_request_regular:
+rhel7_merge_request:
   extends: [.internal, .merge_request, .with_notifications, .rhel_common,
             .trigger]
 
-realtime_check_regular:
+rhel7_realtime_check_merge_request:
   extends: [.internal, .merge_request, .realtime_check_common,
             .realtime_check]
 
-baseline_regular:
+rhel7_baseline:
   extends: [.internal, .baseline, .with_notifications, .rhel_common,
             .trigger]
 
-# realtime branch pipelines
+rhel7_realtime_check_baseline:
+  extends: [.internal, .baseline, .realtime_check_baseline,
+            .realtime_check]
 
-merge_request_realtime:
+# realtime branch pipelines
+rhel7_realtime_merge_request:
   extends: [.internal, .merge_request, .with_notifications, .realtime_pipeline_common,
             .realtime_full]
 
-baseline_realtime:
+rhel7_realtime_baseline:
   extends: [.internal, .baseline, .with_notifications, .realtime_pipeline_common,
             .realtime_full]
 
 # private pipelines
-
-merge_request_private:
+rhel7_merge_request_private:
   extends: [.scratch, .merge_request, .rhel_common,
             .trigger]
 
-realtime_check_private:
+rhel7_realtime_check_merge_request_private:
   extends: [.scratch, .merge_request, .realtime_check_common,
             .realtime_check]
 
-merge_request_realtime_private:
+rhel7_realtime_merge_request_private:
   extends: [.scratch, .merge_request, .realtime_pipeline_common,
             .realtime_full]
 

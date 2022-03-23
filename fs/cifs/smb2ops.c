@@ -322,10 +322,12 @@ SMB3_request_interfaces(const unsigned int xid, struct cifs_tcon *tcon)
 #endif /* STATS2 */
 
 static void
-smb3_qfs_tcon(const unsigned int xid, struct cifs_tcon *tcon)
+smb3_qfs_tcon(const unsigned int xid, struct cifs_tcon *tcon, struct cifs_sb_info *cifs_sb)
 {
 	int rc;
 	__le16 srch_path = 0; /* Null - open root of share */
+	__le16 *path = &srch_path;
+	__le16 *utf16_path = NULL;
 	u8 oplock = SMB2_OPLOCK_LEVEL_NONE;
 	struct cifs_open_parms oparms;
 	struct cifs_fid fid;
@@ -337,7 +339,15 @@ smb3_qfs_tcon(const unsigned int xid, struct cifs_tcon *tcon)
 	oparms.fid = &fid;
 	oparms.reconnect = false;
 
-	rc = SMB2_open(xid, &oparms, &srch_path, &oplock, NULL, NULL);
+	if (cifs_sb && (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_USE_PREFIX_PATH)
+	    && cifs_sb->prepath) {
+		utf16_path = cifs_convert_path_to_utf16(cifs_sb->prepath, cifs_sb);
+		if (!utf16_path)
+			return;
+		path = utf16_path;
+	}
+	rc = SMB2_open(xid, &oparms, path, &oplock, NULL, NULL);
+	kfree(utf16_path);
 	if (rc)
 		return;
 
@@ -356,10 +366,12 @@ smb3_qfs_tcon(const unsigned int xid, struct cifs_tcon *tcon)
 }
 
 static void
-smb2_qfs_tcon(const unsigned int xid, struct cifs_tcon *tcon)
+smb2_qfs_tcon(const unsigned int xid, struct cifs_tcon *tcon, struct cifs_sb_info *cifs_sb)
 {
 	int rc;
 	__le16 srch_path = 0; /* Null - open root of share */
+	__le16 *path = &srch_path;
+	__le16 *utf16_path = NULL;
 	u8 oplock = SMB2_OPLOCK_LEVEL_NONE;
 	struct cifs_open_parms oparms;
 	struct cifs_fid fid;
@@ -371,7 +383,15 @@ smb2_qfs_tcon(const unsigned int xid, struct cifs_tcon *tcon)
 	oparms.fid = &fid;
 	oparms.reconnect = false;
 
-	rc = SMB2_open(xid, &oparms, &srch_path, &oplock, NULL, NULL);
+	if (cifs_sb && (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_USE_PREFIX_PATH)
+	    && cifs_sb->prepath) {
+		utf16_path = cifs_convert_path_to_utf16(cifs_sb->prepath, cifs_sb);
+		if (!utf16_path)
+			return;
+		path = utf16_path;
+	}
+	rc = SMB2_open(xid, &oparms, path, &oplock, NULL, NULL);
+	kfree(utf16_path);
 	if (rc)
 		return;
 
@@ -1296,10 +1316,12 @@ smb2_oplock_response(struct cifs_tcon *tcon, struct cifs_fid *fid,
 
 static int
 smb2_queryfs(const unsigned int xid, struct cifs_tcon *tcon,
-	     struct kstatfs *buf)
+	     struct cifs_sb_info *cifs_sb, struct kstatfs *buf)
 {
 	int rc;
 	__le16 srch_path = 0; /* Null - open root of share */
+	__le16 *path = &srch_path;
+	__le16 *utf16_path = NULL;
 	u8 oplock = SMB2_OPLOCK_LEVEL_NONE;
 	struct cifs_open_parms oparms;
 	struct cifs_fid fid;
@@ -1311,7 +1333,15 @@ smb2_queryfs(const unsigned int xid, struct cifs_tcon *tcon,
 	oparms.fid = &fid;
 	oparms.reconnect = false;
 
-	rc = SMB2_open(xid, &oparms, &srch_path, &oplock, NULL, NULL);
+	if (cifs_sb && (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_USE_PREFIX_PATH)
+	    && cifs_sb->prepath) {
+		utf16_path = cifs_convert_path_to_utf16(cifs_sb->prepath, cifs_sb);
+		if (!utf16_path)
+			return -ENOMEM;
+		path = utf16_path;
+	}
+	rc = SMB2_open(xid, &oparms, path, &oplock, NULL, NULL);
+	kfree(utf16_path);
 	if (rc)
 		return rc;
 	buf->f_type = SMB2_MAGIC_NUMBER;

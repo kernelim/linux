@@ -100,17 +100,17 @@ void zcrypt_queue_force_online(struct zcrypt_queue *zq, int online)
 		ap_flush_queue(zq->queue);
 }
 
-struct zcrypt_queue *zcrypt_queue_alloc(size_t max_response_size)
+struct zcrypt_queue *zcrypt_queue_alloc(size_t reply_buf_size)
 {
 	struct zcrypt_queue *zq;
 
 	zq = kzalloc(sizeof(struct zcrypt_queue), GFP_KERNEL);
 	if (!zq)
 		return NULL;
-	zq->reply.message = kmalloc(max_response_size, GFP_KERNEL);
+	zq->reply.message = kmalloc(reply_buf_size, GFP_KERNEL);
 	if (!zq->reply.message)
 		goto out_free;
-	zq->reply.length = max_response_size;
+	zq->reply.bufsize = reply_buf_size;
 	INIT_LIST_HEAD(&zq->list);
 	kref_init(&zq->refcount);
 	return zq;

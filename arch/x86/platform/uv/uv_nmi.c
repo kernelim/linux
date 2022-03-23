@@ -26,6 +26,7 @@
 #include <linux/kgdb.h>
 #include <linux/module.h>
 #include <linux/nmi.h>
+#include <asm/reboot.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 
@@ -814,35 +815,47 @@ static void uv_nmi_touch_watchdogs(void)
 
 #if defined(CONFIG_KEXEC_CORE)
 static atomic_t uv_nmi_kexec_failed;
-static void uv_nmi_kdump(int cpu, int master, struct pt_regs *regs)
+static void uv_nmi_kdump(int cpu, int main, struct pt_regs *regs)
 {
+	/* Check if kdump kernel loaded for both main and secondary CPUs */
+	if (!kexec_crash_image) {
+		if (main)
+			pr_err("UV: NMI error: kdump kernel not loaded\n");
+		return;
+	}
+
 	/* Call crash to dump system state */
-	if (master) {
+	if (main) {
 		pr_emerg("UV: NMI executing crash_kexec on CPU%d\n", cpu);
 		crash_kexec(regs);
 
-		pr_emerg("UV: crash_kexec unexpectedly returned, ");
+		pr_emerg("UV: crash_kexec unexpectedly returned\n");
 		if (!kexec_crash_image) {
 			pr_cont("crash kernel not loaded\n");
 			atomic_set(&uv_nmi_kexec_failed, 1);
 			uv_nmi_sync_exit(1);
 			return;
 		}
-		pr_cont("kexec busy, stalling cpus while waiting\n");
-	}
+	} else { /* secondary */
 
-	/* If crash exec fails the slaves should return, otherwise stall */
-	while (atomic_read(&uv_nmi_kexec_failed) == 0)
-		mdelay(10);
+		/* If kdump kernel fails, secondaries will exit this loop */
+		while (atomic_read(&uv_nmi_kexec_failed) == 0) {
+
+			/* Once shootdown cpus starts, they do not return */
+			run_crash_ipi_callback(regs);
+
+			mdelay(10);
+		}
+	}
 
 	/* Crash kernel most likely not loaded, return in an orderly fashion */
 	uv_nmi_sync_exit(0);
 }
 
 #else /* !CONFIG_KEXEC_CORE */
-static inline void uv_nmi_kdump(int cpu, int master, struct pt_regs *regs)
+static inline void uv_nmi_kdump(int cpu, int main, struct pt_regs *regs)
 {
-	if (master)
+	if (main)
 		pr_err("UV: NMI kdump: KEXEC not supported in this kernel\n");
 }
 #endif /* !CONFIG_KEXEC_CORE */

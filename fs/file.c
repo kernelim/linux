@@ -718,43 +718,107 @@ void do_close_on_exec(struct files_struct *files)
 	spin_unlock(&files->file_lock);
 }
 
-struct file *fget(unsigned int fd)
+static inline struct file *__fget_files_rcu(struct files_struct *files,
+	unsigned int fd, fmode_t mask, unsigned int refs)
+{
+	for (;;) {
+		struct file *file;
+		struct fdtable *fdt = rcu_dereference_raw(files->fdt);
+		struct file __rcu **fdentry;
+
+		if (unlikely(fd >= fdt->max_fds))
+			return NULL;
+
+		fdentry = fdt->fd + array_index_nospec(fd, fdt->max_fds);
+		file = rcu_dereference_raw(*fdentry);
+		if (unlikely(!file))
+			return NULL;
+
+		if (unlikely(file->f_mode & mask))
+			return NULL;
+
+		/*
+		 * Ok, we have a file pointer. However, because we do
+		 * this all locklessly under RCU, we may be racing with
+		 * that file being closed.
+		 *
+		 * Such a race can take two forms:
+		 *
+		 *  (a) the file ref already went down to zero,
+		 *      and get_file_rcu_many() fails. Just try
+		 *      again:
+		 */
+		if (unlikely(!get_file_rcu_many(file, refs)))
+			continue;
+
+		/*
+		 *  (b) the file table entry has changed under us.
+		 *       Note that we don't need to re-check the 'fdt->fd'
+		 *       pointer having changed, because it always goes
+		 *       hand-in-hand with 'fdt'.
+		 *
+		 * If so, we need to put our refs and try again.
+		 */
+		if (unlikely(rcu_dereference_raw(files->fdt) != fdt) ||
+		    unlikely(rcu_dereference_raw(*fdentry) != file)) {
+			fput_many(file, refs);
+			continue;
+		}
+
+		/*
+		 * Ok, we have a ref to the file, and checked that it
+		 * still exists.
+		 */
+		return file;
+	}
+}
+
+static struct file *__fget_files(struct files_struct *files, unsigned int fd,
+				 fmode_t mask, unsigned int refs)
 {
 	struct file *file;
-	struct files_struct *files = current->files;
 
 	rcu_read_lock();
-	file = fcheck_files(files, fd);
-	if (file) {
-		/* File object ref couldn't be taken */
-		if (file->f_mode & FMODE_PATH || !get_file_rcu(file))
-			file = NULL;
-	}
+	file = __fget_files_rcu(files, fd, mask, refs);
 	rcu_read_unlock();
 
 	return file;
 }
 
+static inline struct file *__fget(unsigned int fd, fmode_t mask,
+				  unsigned int refs)
+{
+	return __fget_files(current->files, fd, mask, refs);
+}
+
+struct file *fget_many(unsigned int fd, unsigned int refs)
+{
+	return __fget(fd, FMODE_PATH, refs);
+}
+
+struct file *fget(unsigned int fd)
+{
+	return __fget(fd, FMODE_PATH, 1);
+}
 EXPORT_SYMBOL(fget);
 
 struct file *fget_raw(unsigned int fd)
 {
-	struct file *file;
-	struct files_struct *files = current->files;
+	return __fget(fd, 0, 1);
+}
+EXPORT_SYMBOL(fget_raw);
 
-	rcu_read_lock();
-	file = fcheck_files(files, fd);
-	if (file) {
-		/* File object ref couldn't be taken */
-		if (!atomic_long_inc_not_zero(&file->f_count))
-			file = NULL;
-	}
-	rcu_read_unlock();
+struct file *fget_task(struct task_struct *task, unsigned int fd)
+{
+	struct file *file = NULL;
+
+	task_lock(task);
+	if (task->files)
+		file = __fget_files(task->files, fd, 0, 1);
+	task_unlock(task);
 
 	return file;
 }
-
-EXPORT_SYMBOL(fget_raw);
 
 /*
  * Lightweight file lookup - no refcnt increment if fd table isn't shared.
@@ -772,57 +836,53 @@ EXPORT_SYMBOL(fget_raw);
  * The fput_needed flag returned by fget_light should be passed to the
  * corresponding fput_light.
  */
-struct file *fget_light(unsigned int fd, int *fput_needed)
+static unsigned long __fget_light(unsigned int fd, fmode_t mask)
 {
-	struct file *file;
 	struct files_struct *files = current->files;
+	struct file *file;
 
-	*fput_needed = 0;
 	if (atomic_read(&files->count) == 1) {
-		file = fcheck_files(files, fd);
-		if (file && (file->f_mode & FMODE_PATH))
-			file = NULL;
+		file = __fcheck_files(files, fd);
+		if (!file || unlikely(file->f_mode & mask))
+			return 0;
+		return (unsigned long)file;
 	} else {
-		rcu_read_lock();
-		file = fcheck_files(files, fd);
-		if (file) {
-			if (!(file->f_mode & FMODE_PATH) &&
-			    atomic_long_inc_not_zero(&file->f_count))
-				*fput_needed = 1;
-			else
-				/* Didn't get the reference, someone's freed */
-				file = NULL;
-		}
-		rcu_read_unlock();
+		file = __fget(fd, mask, 1);
+		if (!file)
+			return 0;
+		return FDPUT_FPUT | (unsigned long)file;
 	}
-
-	return file;
 }
-EXPORT_SYMBOL(fget_light);
-
-struct file *fget_raw_light(unsigned int fd, int *fput_needed)
+unsigned long __fdget(unsigned int fd)
 {
-	struct file *file;
-	struct files_struct *files = current->files;
-
-	*fput_needed = 0;
-	if (atomic_read(&files->count) == 1) {
-		file = fcheck_files(files, fd);
-	} else {
-		rcu_read_lock();
-		file = fcheck_files(files, fd);
-		if (file) {
-			if (atomic_long_inc_not_zero(&file->f_count))
-				*fput_needed = 1;
-			else
-				/* Didn't get the reference, someone's freed */
-				file = NULL;
-		}
-		rcu_read_unlock();
-	}
-
-	return file;
+	return __fget_light(fd, FMODE_PATH);
 }
+EXPORT_SYMBOL(__fdget);
+
+unsigned long __fdget_raw(unsigned int fd)
+{
+	return __fget_light(fd, 0);
+}
+
+unsigned long __fdget_pos(unsigned int fd)
+{
+	unsigned long v = __fdget(fd);
+	struct file *file = (struct file *)(v & ~3);
+
+	if (file && (file->f_mode & FMODE_ATOMIC_POS)) {
+		if (file_count(file) > 1) {
+			v |= FDPUT_POS_UNLOCK;
+			mutex_lock(&file->f_pos_lock);
+		}
+	}
+	return v;
+}
+
+/*
+ * We only lock f_pos if we have threads or if the file might be
+ * shared with another process. In both cases we'll have an elevated
+ * file count (done either by fdget() or by fork()).
+ */
 
 void set_close_on_exec(unsigned int fd, int flag)
 {

@@ -101,6 +101,9 @@ struct vm_area_struct;
 #define __GFP_OTHER_NODE ((__force gfp_t)___GFP_OTHER_NODE) /* On behalf of other node */
 #define __GFP_WRITE	((__force gfp_t)___GFP_WRITE)	/* Allocator intends to dirty page */
 
+#define GFP_ACTION_MODIFIERS_MASK (__GFP_REPEAT | __GFP_NOFAIL | \
+				   __GFP_NORETRY | __GFP_MOVABLE | __GFP_ACCOUNT)
+
 /*
  * This may seem redundant, but it's a way of annotating false positives vs.
  * allocations that simply cannot be supported (e.g. page tables).

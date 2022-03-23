@@ -586,12 +586,33 @@ static int __add_to_page_cache_locked(struct page *page,
 				      pgoff_t offset, gfp_t gfp_mask,
 				      void **shadowp)
 {
+	gfp_t gfp_modifiers_mask;
 	int error;
 
 	VM_BUG_ON(!PageLocked(page));
 	VM_BUG_ON(PageSwapBacked(page));
 
+	/*
+	 * RHEL7 commit 16f6fdc2a3b6 ("[mm] fix deadlock when using dm-thin on
+	 * loopback device") introduces the call to mapping_gfp_constraint()
+	 * to mask off GFP_KERNEL allocations coming down this way and
+	 * potentially leading to dm-thin deadlocks on loopback devices.
+	 *
+	 * The side effect of that fix, though, is that it also drops all the
+	 * action modifiers flags from the given gfp_mask, which can lead to
+	 * other subtle issues, like the failure to handle __GFP_NOFAIL or
+	 * __GFP_ACCOUNT cases down in the cgroup charging path.
+	 *
+	 * We deal with that corner case here, by reintroducing any
+	 * action modifier flag that was previously set before calling
+	 * mem_cgroup_cache_charge().
+	 */
+	gfp_modifiers_mask = gfp_mask & GFP_ACTION_MODIFIERS_MASK;
+
 	gfp_mask = mapping_gfp_constraint(mapping, gfp_mask);
+
+	if (gfp_modifiers_mask)
+		gfp_mask |= gfp_modifiers_mask;
 
 	error = mem_cgroup_cache_charge(page, current->mm,
 					gfp_mask & GFP_RECLAIM_MASK);

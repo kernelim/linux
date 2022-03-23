@@ -2703,6 +2703,19 @@ static int mem_cgroup_do_charge(struct mem_cgroup *memcg, gfp_t gfp_mask,
 		page_counter_uncharge(&memcg->memory, nr_pages);
 		mem_over_limit = mem_cgroup_from_counter(counter, memsw);
 		flags |= MEM_CGROUP_RECLAIM_NOSWAP;
+	} else if (gfp_mask & __GFP_NOFAIL) {
+		/*
+		 * RHEL7: This __GFP_NOFAIL case is loosely based on the "force"
+		 * case, taken from the 4th hunk to try_charge() in upstream
+		 * commit 10d53c748bc9 ("memcg: ratify and consolidate
+		 * over-charge handling").
+		 *
+		 * We need to allow memory usage go over the limit, by force
+		 * charging allocations that carry the __GFP_NOFAIL flag.
+		 */
+		page_counter_charge(&memcg->memory, nr_pages);
+
+		return CHARGE_OK;
 	} else
 		mem_over_limit = mem_cgroup_from_counter(counter, memory);
 	/*

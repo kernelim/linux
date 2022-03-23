@@ -84,6 +84,9 @@ static char *aqm_str;
 module_param_named(aqmask, aqm_str, charp, 0440);
 MODULE_PARM_DESC(aqmask, "AP bus domain mask.");
 
+atomic_t ap_max_msg_size = ATOMIC_INIT(AP_DEFAULT_MAX_MSG_SIZE);
+EXPORT_SYMBOL(ap_max_msg_size);
+
 static struct device *ap_root_device;
 
 DEFINE_SPINLOCK(ap_list_lock);
@@ -336,25 +339,39 @@ EXPORT_SYMBOL(ap_test_config_ctrl_domain);
  * @facilities: Pointer to facility indicator
  */
 static int ap_query_queue(ap_qid_t qid, int *queue_depth, int *device_type,
-			  unsigned int *facilities)
+			  unsigned int *facilities, int *q_ml)
 {
 	struct ap_queue_status status;
-	unsigned long info;
+	union {
+		unsigned long value;
+		struct {
+			unsigned int fac   : 32; /* facility bits */
+			unsigned int at	   :  8; /* ap type */
+			unsigned int _res1 :  8;
+			unsigned int _res2 :  4;
+			unsigned int ml	   :  4; /* apxl ml */
+			unsigned int _res3 :  4;
+			unsigned int qd	   :  4; /* queue depth */
+		} tapq_gr2;
+	} tapq_info;
 	int nd;
+
+	tapq_info.value = 0;
 
 	if (!ap_test_config_card_id(AP_QID_CARD(qid)))
 		return -ENODEV;
 
-	status = ap_test_queue(qid, ap_apft_available(), &info);
+	status = ap_test_queue(qid, ap_apft_available(), &tapq_info.value);
 	switch (status.response_code) {
 	case AP_RESPONSE_NORMAL:
-		*queue_depth = (int)(info & 0xff);
-		*device_type = (int)((info >> 24) & 0xff);
-		*facilities = (unsigned int)(info >> 32);
+		*queue_depth = tapq_info.tapq_gr2.qd;
+		*device_type = tapq_info.tapq_gr2.at;
+		*facilities = tapq_info.tapq_gr2.fac;
+		*q_ml = tapq_info.tapq_gr2.ml;
 		/* Update maximum domain id */
-		nd = (info >> 16) & 0xff;
+		nd = (tapq_info.value >> 16) & 0xff;
 		/* if N bit is available, z13 and newer */
-		if ((info & (1UL << 57)) && nd > 0)
+		if ((tapq_info.value & (1UL << 57)) && nd > 0)
 			ap_max_domain_id = nd;
 		else /* older machine types */
 			ap_max_domain_id = 15;
@@ -1385,7 +1402,7 @@ static void ap_scan_bus(struct work_struct *unused)
 	struct ap_card *ac;
 	struct device *dev;
 	ap_qid_t qid;
-	int comp_type, depth = 0, type = 0;
+	int comp_type, depth = 0, type = 0, ml = 0;
 	unsigned int func = 0;
 	int rc, id, dom, borked, domains, defdomdevs = 0;
 
@@ -1436,7 +1453,7 @@ static void ap_scan_bus(struct work_struct *unused)
 				}
 				continue;
 			}
-			rc = ap_query_queue(qid, &depth, &type, &func);
+			rc = ap_query_queue(qid, &depth, &type, &func, &ml);
 			if (dev) {
 				spin_lock_bh(&aq->lock);
 				if (rc == -ENODEV ||
@@ -1464,13 +1481,19 @@ static void ap_scan_bus(struct work_struct *unused)
 			/* maybe a card device needs to be created first */
 			if (!ac) {
 				ac = ap_card_create(id, depth, type,
-						    comp_type, func);
+						    comp_type, func, ml);
 				if (!ac)
 					continue;
 				ac->ap_dev.device.bus = &ap_bus_type;
 				ac->ap_dev.device.parent = ap_root_device;
 				dev_set_name(&ac->ap_dev.device,
 					     "card%02x", id);
+				/* maybe enlarge ap_max_msg_size to support this card */
+				if (ac->maxmsgsize > atomic_read(&ap_max_msg_size)) {
+					atomic_set(&ap_max_msg_size, ac->maxmsgsize);
+					AP_DBF(DBF_INFO, "%s(%d) ap_max_msg_size update to %d byte\n",
+						    __func__, id, atomic_read(&ap_max_msg_size));
+				}
 				/* Register card with AP bus */
 				rc = device_register(&ac->ap_dev.device);
 				if (rc) {

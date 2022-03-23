@@ -72,11 +72,38 @@ extern u64 asmlinkage efi_call(void *fp, ...);
  * struct efi_scratch - Scratch space used while switching to/from efi_mm
  * @phys_stack: stack used during EFI Mixed Mode
  * @prev_mm:    store/restore stolen mm_struct while switching to/from efi_mm
+ * @cpu_tlbstate: store/restore the previous TLB state (for lazy flushes)
  */
 struct efi_scratch {
 	u64			phys_stack;
 	struct mm_struct	*prev_mm;
+	int			cpu_tlbstate;
 } __packed;
+
+/*
+ * RHEL7: switch_mm() will prematurely flip the cpu_tlbstate back to
+ * TLBSTATE_OK for the kernel thread servicing EFI stubs, which can
+ * potentially trigger the assertion at leave_mm(), if the work queued
+ * to run after the EFI thunk happens to initiate a TLB flush (i.e.:
+ * if a flush worker is queued after the efivarsfs read/write work).
+ *
+ * OTOH, we cannot blindly make the cpu re-enter lazy_tlb state on
+ * every call to efi_switch_mm(), as it might also cause issues for
+ * the thread running under efi_mm when it's mapped and operated on.
+ *
+ * In order to address these two diametral corner cases, we need to
+ * save the CPU current TLBSTATE before calling efi_switch_mm(&efi_mm),
+ * and restore its value after calling efi_switch_mm(efi_scratch.prev_mm);
+ */
+#define EFI_SAVE_CPU_TLBSTATE()						\
+({									\
+	efi_scratch.cpu_tlbstate = this_cpu_read(cpu_tlbstate.state);	\
+})
+
+#define EFI_RESTORE_CPU_TLBSTATE()					\
+({									\
+	this_cpu_write(cpu_tlbstate.state, efi_scratch.cpu_tlbstate);	\
+})
 
 #define arch_efi_call_virt_setup()					\
 ({									\
@@ -85,8 +112,10 @@ struct efi_scratch {
 	preempt_disable();						\
 	ibrs_on = unprotected_firmware_begin();				\
 									\
-	if (!efi_enabled(EFI_OLD_MEMMAP))				\
+	if (!efi_enabled(EFI_OLD_MEMMAP)) {				\
+		EFI_SAVE_CPU_TLBSTATE();				\
 		efi_switch_mm(&efi_mm);					\
+	}								\
 	ibrs_on;							\
 })
 
@@ -95,9 +124,10 @@ struct efi_scratch {
 
 #define arch_efi_call_virt_teardown(ibrs_on)				\
 ({									\
-	if (!efi_enabled(EFI_OLD_MEMMAP))				\
+	if (!efi_enabled(EFI_OLD_MEMMAP)) {				\
 		efi_switch_mm(efi_scratch.prev_mm);			\
-									\
+		EFI_RESTORE_CPU_TLBSTATE();				\
+	}								\
 	unprotected_firmware_end(ibrs_on);				\
 	preempt_enable();						\
 })
