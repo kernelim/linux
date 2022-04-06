@@ -19,6 +19,7 @@ See the following tree branches:
 ## Available tags
 
 The following is a chronological list of distribution kernel tags managed in this repository:
+* CentOS 7.x kernel version **3.10.0-1160.62.1.el7** - [tag](https://github.com/kernelim/linux/releases/tag/linux-3.10.0-1160.62.1.el7.tar.xz), dated 2022-03-23 08:53:18
 * CentOS 8.x kernel version **4.18.0-348.20.1.el8_5** - [tag](https://github.com/kernelim/linux/releases/tag/linux-4.18.0-348.20.1.el8_5.tar.xz), dated 2022-03-08 18:16:45
 * CentOS 7.x kernel version **3.10.0-1160.59.1.el7** - [tag](https://github.com/kernelim/linux/releases/tag/linux-3.10.0-1160.59.1.el7.tar.xz), dated 2022-02-16 13:44:34
 * CentOS 8.x kernel version **4.18.0-348.12.2.el8_5** - [tag](https://github.com/kernelim/linux/releases/tag/linux-4.18.0-348.12.2.el8_5.tar.xz), dated 2022-01-17 13:02:11
