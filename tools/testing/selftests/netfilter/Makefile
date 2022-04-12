@@ -7,6 +7,6 @@ TEST_PROGS := nft_trans_stress.sh nft_nat.sh \
 	conntrack_tcp_unreplied.sh
 
 LDLIBS = -lmnl
-TEST_GEN_FILES =  nf-queue
+TEST_GEN_FILES =  nf-queue connect_close
 
 include ../lib.mk

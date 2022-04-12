@@ -813,7 +813,7 @@ struct nft_expr_ops {
 	int				(*offload)(struct nft_offload_ctx *ctx,
 						   struct nft_flow_rule *flow,
 						   const struct nft_expr *expr);
-	u32				offload_flags;
+	bool				(*offload_action)(const struct nft_expr *expr);
 	const struct nft_expr_type	*type;
 	void				*data;
 };
@@ -894,6 +894,12 @@ static inline struct nft_expr *nft_expr_next(const struct nft_expr *expr)
 static inline struct nft_expr *nft_expr_last(const struct nft_rule *rule)
 {
 	return (struct nft_expr *)&rule->data[rule->dlen];
+}
+
+static inline bool nft_expr_more(const struct nft_rule *rule,
+				 const struct nft_expr *expr)
+{
+	return expr != nft_expr_last(rule) && expr->ops;
 }
 
 static inline struct nft_userdata *nft_userdata(const struct nft_rule *rule)
