@@ -1,0 +1,85 @@
+---
+title: 'Kernel Git Repository Information'
+date: 2021-07-20T19:30:08+10:00
+draft: false
+weight: 2
+summary: Git repository information.
+---
+
+== Kernel Git Repository Information
+
+There are many source-git and dist-git repositories that are used to construct Red Hat kernels.  Some of these repositories are used for testing (CKI), but most of these repositories are used for code that is shipped to customers.   Red Hat kernel git repositories use ‘main’ in place of git’s default ‘master’ branch.
+
+=== source-git repositories
+
+Public git repositories can be used by both Red Hat and non-Red Hat contributors.  Private git repositories are restricted to Red Hat contributors and Partner contributors.
+
+The general model of these repositories is that the main branch tracks the current minor development, and other branches track old minor development (commonly referred to as ‘z-stream’).  Some repositories may also contain Real Time kernel branches that are tagged with “-rt”.
+
+For example, the rhel-8 repository contains branches and the main branch (as of writing this section) is for 8.5 development
+
+  remotes/origin/8.0 +
+  remotes/origin/8.1 +
+  remotes/origin/8.2 +
+  remotes/origin/8.2-rt +
+  remotes/origin/8.3 +
+  remotes/origin/8.3-rt +
+  remotes/origin/8.4 +
+  remotes/origin/8.4-rt +
+  remotes/origin/HEAD -> origin/main +
+  remotes/origin/main +
+  remotes/origin/main-rt
+
+|===
+|Name|Type|Description
+
+|https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9[CentOS-Stream 9 kernel]|public|Public kernel tree for future RHEL9 development
+|https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-8[CentOS-Stream 8 kernel]|public|Public kernel tree for future RHEL8 development
+|https://gitlab.com/cki-project/kernel-ark.git[Fedora/ARK]|public|https://cki-project.gitlab.io/kernel-ark/[https://cki-project.gitlab.io/kernel-ark/]
+|https://gitlab.com/redhat/rhel/src/kernel/rhel-5[RHEL-5]|private|RHEL-5 is a private tree restricted to Red Hat employees only.  The git history of this tree contains Red Hat private information and partner data.  This tree will never be made public.
+|https://gitlab.com/redhat/rhel/src/kernel/rhel-6[RHEL-6]|private|RHEL-6 is a private tree restricted to Red Hat employees only.  The git history of this tree contains Red Hat private information and partner data.  This tree will never be made public.
+|https://gitlab.com/redhat/rhel/src/kernel/rhel-7[RHEL-7]|private|RHEL-7 is a private tree restricted to Red Hat employees only.  The git history of this tree contains Red Hat private information and partner data.  This tree will never be made public.
+|https://gitlab.com/redhat/rhel/src/kernel/rhel-alt-7[RHEL-alt-7]|private|RHEL-alt-7 is a private tree restricted to Red Hat employees only.  The git history of this tree contains Red Hat private information and partner data.  This tree will never be made public.
+|https://gitlab.com/redhat/rhel/src/kernel/rhel-8[RHEL-8]|private|RHEL-8 is a private tree restricted to Red Hat employees only.  The git history of this tree contains Red Hat private information and partner data.  This tree will never be made public.  Various sanitized versions exist through CentOS-Stream or the partner program.
+|https://gitlab.com/redhat/rhel/src/kernel/rhel-9[RHEL-9]|private|Future tree for RHEL-9 development. See CentOS-Stream for tree location for main development. The CentOS-Stream 9 repository should be used for general development.  The RHEL-9 tree only contains z-stream branches.
+|https://gitlab.com/redhat/rhel/kernel/8.y/kernel-test/[kernel-test]|private|Private tree to test webhooks, internal scripts, user process, user’s scripts, etc.
+|https://gitlab.com/redhat/centos-stream/src/kernel/utils/tools[Kernel tools]|public|A collection of useful tools and scripts for working with the RHEL, Fedora, and CentOS kernels.  This repository contains the git-backport tool.
+|https://gitlab.com/redhat/centos-stream/src/kernel/documentation[Kernel documentation]|public|Documentation on RHEL, Fedora, and CentOS kernels.
+|Embargoed|Private, with additional restricted access.   In some cases, these are Red Hat internal only.|Used to resolve CVE and other partner-related embargoed issues.
+|===
+
+=== dist-git repositories
+
+Public git repositories can be used by both Red Hat and non-Red Hat contributors.  Private git repositories are restricted to Red Hat contributors and Partner contributors.
+
+|===
+|Name|Location|Type
+
+|CentOS-Stream|TBD|Public
+|RHEL-8|pkgs.devel.redhat.com TBD|Private (internal)
+|RHEL-9|pkgs.devel.redhat.com TBD|Private (internal)
+|CentOS (public)|TBD|TBD (The public CentOS-Stream tree is mirrored to both the private Red Hat and public CentOS dist-git trees.)
+|CentOS (private)|TBD|TBD (The public CentOS-Stream tree is mirrored to both the private Red Hat and public CentOS dist-git trees.)
+|===
+
+=== CI repositories
+
+The kernel workflow relies heavily on CI automation which is implemented in various repositories under the CKI namespace.
+|===
+|Name|Type|Description
+
+|https://gitlab.com/cki-project[CKI]|public|All CKI code repositories
+|https://gitlab.com/cki-project/pipeline-definition[Main pipeline implementation]|public|Main repository of the CKI pipeline implementation. When in doubt, use this to report issues.
+|https://gitlab.com/redhat/red-hat-ci-tools/kernel[Pipeline runs]|public group, specific projects restricted|Pipeline runs and logs. People don't need to access the projects directly but through merge request links unless setting things up.
+|===
+
+=== DataWarehouse
+
+DataWarehouse is the CKI database and dashboard. It includes build and test information for all non-embargoed CKI runs. Data for public kernels (upstream, CentOS Stream) is publicly readable, access to RHEL kernel data requires sign in with Red Hat SSO.
+
+|===
+|Name|Type|Description
+
+|https://datawarehouse.cki-project.org[DataWarehouse]|Public|CKI database and dashboard.
+|===
+

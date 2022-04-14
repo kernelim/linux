@@ -1,0 +1,32 @@
+---
+title: 'Merge Request Approvals and Blocks'
+date: 2021-07-20T19:30:08+10:00
+draft: false
+weight: 2
+summary: Approving and blocking instructions for reviewers.
+---
+
+= Merge Request Approvals and Blocks
+
+Users with sufficient permissions can Approve and Block Merge Requests.  Reviewers should use GitLab’s Approve interface to link:merge_request_approvals_and_blocks.adoc#approving-a-merge-request[Approve Merge requests].  Reviewers can also approve (aka ACK) or block (aka NACK) merge requests by replying to the cover-letter of an email patch series or the patch sent through the email bridge, by adding a comment via the GitLab UI for the merge request, or by using the link:bichon.adoc[bichon] utilities to add a comment to the MR.
+
+== Approving a Merge Request
+
+Reviewers should use GitLab’s Approve interface to approve Merge Requests as this allows the maintainers, managers, and product owners to use the GitLab WebUI or tools to view the approvals for each merge request.
+
+The WebUI has an “Approve” button that is available to users with sufficient permissions to review Merge Requests.  This action can also be completed in lab by executing
+
+----
+	lab mr approve <mr_id>
+----
+
+or by pressing ‘A’ in bichon in the Merge Request view.
+
+== Alternative: Approving a Merge Request In Email
+
+The reply or comment must be in the format of “Acked-by: Firstname Lastname <user@redhat.com>, where the FirstName, LastName, and user@redhat.com are replaced by the reviewer’s information.
+
+== Alternative: Blocking a Merge Request In Email
+
+The reply or comment must be in the format of “Nacked-by: Firstname Lastname <user@redhat.com>, where the FirstName, LastName, and user@redhat.com are replaced by the reviewer’s information.
+

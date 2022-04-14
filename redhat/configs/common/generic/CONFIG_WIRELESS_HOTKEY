@@ -1,0 +1,21 @@
+# CONFIG_WIRELESS_HOTKEY:
+# 
+# This driver provides supports for the wireless buttons found on some AMD,
+# HP, & Xioami laptops.
+# On such systems the driver should load automatically (via ACPI alias).
+# 
+# To compile this driver as a module, choose M here: the module will
+# be called wireless-hotkey.
+# 
+# Symbol: WIRELESS_HOTKEY [=n]
+# Type  : tristate
+# Defined at drivers/platform/x86/Kconfig:418
+#   Prompt: Wireless hotkey button
+#   Depends on: X86 [=y] && X86_PLATFORM_DEVICES [=y] && ACPI [=y] && INPUT [=y]
+#   Location:
+#     -> Device Drivers
+#       -> X86 Platform Specific Device Drivers (X86_PLATFORM_DEVICES [=y])
+# 
+# 
+# 
+CONFIG_WIRELESS_HOTKEY=m

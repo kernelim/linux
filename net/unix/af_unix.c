@@ -600,20 +600,42 @@ static void unix_release_sock(struct sock *sk, int embrion)
 
 static void init_peercred(struct sock *sk)
 {
-	put_pid(sk->sk_peer_pid);
-	if (sk->sk_peer_cred)
-		put_cred(sk->sk_peer_cred);
+	const struct cred *old_cred;
+	struct pid *old_pid;
+
+	spin_lock(&sk->sk_peer_lock);
+	old_pid = sk->sk_peer_pid;
+	old_cred = sk->sk_peer_cred;
 	sk->sk_peer_pid  = get_pid(task_tgid(current));
 	sk->sk_peer_cred = get_current_cred();
+	spin_unlock(&sk->sk_peer_lock);
+
+	put_pid(old_pid);
+	put_cred(old_cred);
 }
 
 static void copy_peercred(struct sock *sk, struct sock *peersk)
 {
-	put_pid(sk->sk_peer_pid);
-	if (sk->sk_peer_cred)
-		put_cred(sk->sk_peer_cred);
+	const struct cred *old_cred;
+	struct pid *old_pid;
+
+	if (sk < peersk) {
+		spin_lock(&sk->sk_peer_lock);
+		spin_lock_nested(&peersk->sk_peer_lock, SINGLE_DEPTH_NESTING);
+	} else {
+		spin_lock(&peersk->sk_peer_lock);
+		spin_lock_nested(&sk->sk_peer_lock, SINGLE_DEPTH_NESTING);
+	}
+	old_pid = sk->sk_peer_pid;
+	old_cred = sk->sk_peer_cred;
 	sk->sk_peer_pid  = get_pid(peersk->sk_peer_pid);
 	sk->sk_peer_cred = get_cred(peersk->sk_peer_cred);
+
+	spin_unlock(&sk->sk_peer_lock);
+	spin_unlock(&peersk->sk_peer_lock);
+
+	put_pid(old_pid);
+	put_cred(old_cred);
 }
 
 static int unix_listen(struct socket *sock, int backlog)
@@ -785,16 +807,21 @@ static struct proto unix_proto = {
 
 static struct sock *unix_create1(struct net *net, struct socket *sock, int kern)
 {
-	struct sock *sk = NULL;
 	struct unix_sock *u;
+	struct sock *sk;
+	int err;
 
 	atomic_long_inc(&unix_nr_socks);
-	if (atomic_long_read(&unix_nr_socks) > 2 * get_max_files())
-		goto out;
+	if (atomic_long_read(&unix_nr_socks) > 2 * get_max_files()) {
+		err = -ENFILE;
+		goto err;
+	}
 
 	sk = sk_alloc(net, PF_UNIX, GFP_KERNEL, &unix_proto, kern);
-	if (!sk)
-		goto out;
+	if (!sk) {
+		err = -ENOMEM;
+		goto err;
+	}
 
 	sock_init_data(sock, sk);
 
@@ -814,20 +841,23 @@ static struct sock *unix_create1(struct net *net, struct socket *sock, int kern)
 	init_waitqueue_func_entry(&u->peer_wake, unix_dgram_peer_wake_relay);
 	memset(&u->scm_stat, 0, sizeof(struct scm_stat));
 	unix_insert_socket(unix_sockets_unbound(sk), sk);
-out:
-	if (sk == NULL)
-		atomic_long_dec(&unix_nr_socks);
-	else {
-		local_bh_disable();
-		sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
-		local_bh_enable();
-	}
+
+	local_bh_disable();
+	sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
+	local_bh_enable();
+
 	return sk;
+
+err:
+	atomic_long_dec(&unix_nr_socks);
+	return ERR_PTR(err);
 }
 
 static int unix_create(struct net *net, struct socket *sock, int protocol,
 		       int kern)
 {
+	struct sock *sk;
+
 	if (protocol && protocol != PF_UNIX)
 		return -EPROTONOSUPPORT;
 
@@ -854,7 +884,11 @@ static int unix_create(struct net *net, struct socket *sock, int protocol,
 		return -ESOCKTNOSUPPORT;
 	}
 
-	return unix_create1(net, sock, kern) ? 0 : -ENOMEM;
+	sk = unix_create1(net, sock, kern);
+	if (IS_ERR(sk))
+		return PTR_ERR(sk);
+
+	return 0;
 }
 
 static int unix_release(struct socket *sock)
@@ -1261,12 +1295,15 @@ static int unix_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 	   we will have to recheck all again in any case.
 	 */
 
-	err = -ENOMEM;
-
 	/* create new sock for complete connection */
 	newsk = unix_create1(sock_net(sk), NULL, 0);
-	if (newsk == NULL)
+	if (IS_ERR(newsk)) {
+		err = PTR_ERR(newsk);
+		newsk = NULL;
 		goto out;
+	}
+
+	err = -ENOMEM;
 
 	/* Allocate skb for sending to listening sock */
 	skb = sock_wmalloc(newsk, 1, 0, GFP_KERNEL);
@@ -2774,7 +2811,7 @@ static __poll_t unix_dgram_poll(struct file *file, struct socket *sock,
 
 		other = unix_peer(sk);
 		if (other && unix_peer(other) != sk &&
-		    unix_recvq_full(other) &&
+		    unix_recvq_full_lockless(other) &&
 		    unix_dgram_peer_wake_me(sk, other))
 			writable = 0;
 

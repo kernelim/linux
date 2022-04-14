@@ -5,6 +5,8 @@
  * This software has been sponsored by Sophos Astaro <http://www.sophos.com>
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -19,6 +21,7 @@
 #include <linux/netfilter_bridge/ebtables.h>
 #include <linux/netfilter_arp/arp_tables.h>
 #include <net/netfilter/nf_tables.h>
+#include <net/netfilter/nf_log.h>
 
 /* Used for matches where *info is larger than X byte */
 #define NFT_MATCH_LARGE_THRESH	192
@@ -257,8 +260,22 @@ nft_target_init(const struct nft_ctx *ctx, const struct nft_expr *expr,
 	nft_compat_wait_for_destructors();
 
 	ret = xt_check_target(&par, size, proto, inv);
-	if (ret < 0)
+	if (ret < 0) {
+		if (ret == -ENOENT) {
+			const char *modname = NULL;
+
+			if (strcmp(target->name, "LOG") == 0)
+				modname = "nf_log_syslog";
+			else if (strcmp(target->name, "NFLOG") == 0)
+				modname = "nfnetlink_log";
+
+			if (modname &&
+			    nft_request_module(ctx->net, "%s", modname) == -EAGAIN)
+				return -EAGAIN;
+		}
+
 		return ret;
+	}
 
 	/* The standard target cannot be used */
 	if (!target->target)
@@ -881,6 +898,8 @@ static struct nft_expr_type nft_target_type __read_mostly = {
 static int __init nft_compat_module_init(void)
 {
 	int ret;
+
+	mark_driver_deprecated("nft_compat");
 
 	ret = nft_register_expr(&nft_match_type);
 	if (ret < 0)

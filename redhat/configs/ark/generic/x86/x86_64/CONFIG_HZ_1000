@@ -1,0 +1,11 @@
+# HZ=1000 is inherited from Fedora/RHEL7. Also we use this value
+# to avoid TCP issues as explained by David Miller:
+# "When the system is busy, a system with NO_HZ + HZ=1000 processes it's timer
+#  workload more smoothly.
+#
+#  With a lower value of HZ such as 250 or 100, lots of timer events get
+#  "bunched up" due to the lower granularity and thus the timers are
+#  processed in a very bursty fashion.
+#
+#  This hurts TCP with lots of connections on the system."
+CONFIG_HZ_1000=y

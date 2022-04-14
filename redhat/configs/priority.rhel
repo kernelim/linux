@@ -1,0 +1,41 @@
+# Entries must be ordered as base and debug (if the debug variant exists)
+# ie) config-variant-arch
+#     config-variant-arch-debug (if the -debug variant exists)
+
+# Individual entries must be ordered as
+# config-variant=config-1:config-2:config-3 in a descending order through
+# the hierarchy
+
+# -debug variants must include the entirety of the base variant
+# For example,
+#
+# config-foo: generic:generic-foo:generic-foo-bar
+# config-foo-debug: generic:generic-foo:debug:debug-foo
+# is not a valid -debug variant
+
+# kernel.config files are build on the fly based on this config,
+# the first arg is arch and variant, the second is a hierarchy of
+# config options, lowest priority to highest
+ORDER=common ark pending-common custom-overrides
+EMPTY=armv7hl armv7hl-debug armv7hl-lpae armv7hl-lpae-debug i686 i686-debug
+
+# x86_64
+x86_64=generic:generic-x86:generic-x86-x86_64
+x86_64-debug=generic:generic-x86:generic-x86-x86_64:debug:debug-x86-x86_64
+x86_64-kgcov=generic:generic-x86:generic-x86-x86_64:kgcov
+
+# ppc64le
+ppc64le=generic:generic-powerpc
+ppc64le-debug=generic:generic-powerpc:debug:debug-powerpc
+ppc64le-kgcov=generic:generic-powerpc:kgcov
+
+# s390x
+s390x=generic:generic-s390x
+s390x-debug=generic:generic-s390x:debug:debug-s390x
+s390x-zfcpdump=generic:generic-s390x:generic-s390x-zfcpdump
+s390x-kgcov=generic:generic-s390x:kgcov
+
+# aarch64
+aarch64=generic:generic-arm:generic-arm-aarch64
+aarch64-debug=generic:generic-arm:generic-arm-aarch64:debug:debug-arm-aarch64
+aarch64-kgcov=generic:generic-arm:generic-arm-aarch64:kgcov

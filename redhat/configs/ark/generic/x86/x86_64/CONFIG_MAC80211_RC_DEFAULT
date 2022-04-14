@@ -1,0 +1,1 @@
+CONFIG_MAC80211_RC_DEFAULT="minstrel_ht"

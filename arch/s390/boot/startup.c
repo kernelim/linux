@@ -12,9 +12,8 @@
 #include <asm/uv.h>
 #include "compressed/decompressor.h"
 #include "boot.h"
+#include "uv.h"
 
-extern char __boot_data_start[], __boot_data_end[];
-extern char __boot_data_preserved_start[], __boot_data_preserved_end[];
 unsigned long __bootdata_preserved(__kaslr_offset);
 unsigned long __bootdata_preserved(VMALLOC_START);
 unsigned long __bootdata_preserved(VMALLOC_END);
@@ -35,10 +34,6 @@ u64 __bootdata_preserved(alt_stfle_fac_list[16]);
  * over to the decompressed / relocated kernel via the .boot.preserved.data
  * section.
  */
-extern char _sdma[], _edma[];
-extern char _stext_dma[], _etext_dma[];
-extern struct exception_table_entry _start_dma_ex_table[];
-extern struct exception_table_entry _stop_dma_ex_table[];
 unsigned long __bootdata_preserved(__sdma) = __pa(&_sdma);
 unsigned long __bootdata_preserved(__edma) = __pa(&_edma);
 unsigned long __bootdata_preserved(__stext_dma) = __pa(&_stext_dma);
@@ -297,6 +292,7 @@ void startup_kernel(void)
 	sclp_early_read_info();
 	setup_boot_command_line();
 	parse_boot_command_line();
+	sanitize_prot_virt_host();
 	setup_ident_map_size(detect_memory());
 	setup_vmalloc_size();
 	setup_kernel_memory_layout();

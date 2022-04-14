@@ -287,3 +287,10 @@ int kern_sync_rcu(void);
 #else
 #define SYS_NANOSLEEP_KPROBE_NAME "sys_nanosleep"
 #endif
+
+#if defined(__powerpc64__)
+#undef SO_RCVTIMEO_OLD
+#undef SO_SNDTIMEO_OLD
+#define SO_RCVTIMEO_OLD	18
+#define SO_SNDTIMEO_OLD	19
+#endif

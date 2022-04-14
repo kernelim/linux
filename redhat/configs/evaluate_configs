@@ -1,0 +1,981 @@
+#!/usr/bin/bash
+trap '[ -d "$tempdir" ] && rm -rf "$tempdir"' EXIT INT
+
+# TODO: -c takes a comma separated list or file?
+# TODO: allow for user to specify CONFIGS ^^^ ?
+# TODO: move the undo the p setting to map_configs_to_array
+# TODO: Fix ERROR: message so it only shows when the file is being deleted
+
+DEBUG=false
+
+# global definitions
+CONFIG=
+priority_file=
+ORDER=
+cfgvariants=
+toplevels=
+subdirs=
+rows=
+columns=
+configmap=
+cfgs=
+cfgs_base=
+weightorig=
+numorder=
+longheader=
+weightorig=
+weight=
+declare -A toplevel_order
+
+tempdir=$(mktemp -d)
+
+whatcouldgowrong() {
+	echo ""
+	echo "usage: evaluate_configs [-c CONFIG] [-d] [-j] [ -p priority_file] [-f]"
+	echo ""
+	echo "      -c CONFIG          Evalulate specific CONFIGs (file or csl)"
+	echo "      -d                 Enable debug"
+	echo "      -p priority.file   Specify a priority.file (no default)"
+	echo "      -j                 Evaluate common directory"
+	echo "      -f                 Evaluate CONFIGs"
+	echo ""
+	echo "examples)"
+	echo ""
+	echo "To show the status of CONFIG_HEADER_TEST in ARK,"
+	echo "	./evaluate_configs -p priority.rhel -c CONFIG_HEADER_TEST"
+	echo ""
+	echo "To fix all the CONFIGS in Fedora,"
+	echo "  ./evaluate_configs -p priority.fedora -f"
+	echo ""
+	echo "To fix only CONFIG_HEADER_TEST in RHEL,"
+	echo "  ./evaluate_configs -p priority.rhel -c CONFIG_HEADER_TEST -f"
+	echo ""
+	echo "and commit the resulting changes."
+	echo ""
+	echo "To fix the common directory entries,"
+	echo " ./evaluate_configs -j"
+	echo ""
+	exit 1
+}
+
+# Get a list of the config-variants
+get_cfgvariants() { # uses priority_file
+	local configvariant
+	local cfgvariant
+
+	# The priority files have a config-variant, followed by a hierarchy of
+	# directories to examine for that config level.  The directories have
+	# '-' instead of '/'.
+	#
+	# For example,
+	#
+	# ppc64le-debug=generic:generic-powerpc:debug:debug-powerpc
+	#
+
+	while read -r configvariant
+	do
+		# ignore any line with whitespace
+		test -z "$configvariant" && continue
+		# ignore any line beginning with a #
+		[[ "$configvariant" == \#* ]] && continue
+		# ignore any line beginning with ORDER
+		[[ "$configvariant" == ORDER* ]] && continue
+		# ignore any line beginning with EMPTY
+		[[ "$configvariant" == EMPTY* ]] && continue
+
+		# -debug variants must include the base variant
+		# does the priority file contain a debug variant?
+		cfgvariant=$(echo "$configvariant" | cut -d "=" -f 1)
+		if grep -q "$cfgvariant-debug" "$priority_file"; then
+			# if it does, skip this variant and only use -debug
+			continue
+		fi
+
+		# if this variant has a -debug, remove the -debug
+		cfgvariant=$(echo "$cfgvariant" | awk -F "-debug" ' { print $1 } ')
+
+		# output "cfgvariant | configorder"
+		echo "$cfgvariant | $(echo "$configvariant" | cut -d "=" -f 2 | tr : " " )"
+	done < $priority_file
+}
+
+# Find top level dirs for each ORDER. These are normally just debug and config.
+get_toplevel_dirs() { # uses cfgvariants
+	local cfg
+	local cfgvariant
+
+	# anything with a dash(-) in it is a subdir
+	echo "$cfgvariants" | while read -r cfgvariant
+	do
+		cfg=$(echo "$cfgvariant" | cut -d "|" -f 2)
+		for i in $cfg
+		do
+			echo "$i" | grep -v "-"
+		done
+	done | sort -u | tr '\n' ' '
+}
+
+# For each top level count subdirs and find max subdirs for each top level
+get_subdirs() { # uses $cfgvariants and $toplevels
+	local max
+	local LINE
+	local count
+	local toplevel
+
+	for toplevel in $toplevels
+	do
+		max=0
+		count=0
+		OLDIFS=$IFS; IFS=$'\n'; for LINE in $cfgvariants
+		do
+			LINE=$(echo "$LINE" | cut -d "|" -f 2)
+			count=0
+			IFS=$' '; for i in $LINE
+			do
+				echo "$i" | grep -q -v $toplevel && continue
+				count=$(echo "$i" | awk -F "-" '{print NF-1}')
+				[ "$max" -lt "$count" ] && max="$count"
+			done
+		done
+		IFS=$OLDIFS
+		echo "$toplevel subdirs $((max + 1))"
+	done
+}
+
+# Walk through cfgvariants and give each toplevel dir an ordering number.
+# This number is later used to insert EMPTY tags at correct place.
+create_toplevel_order() { # uses toplevel_order
+
+while read -r cfgvariant
+do
+	local i
+	local max
+	local order
+	local topname
+
+	LINE=$(echo "$cfgvariant" | cut -d "|" -f 2)
+
+	for i in $LINE; do
+		topname="${i%%-*}"
+		order=${toplevel_order[$topname]}
+		if [ -z "$order" ]; then
+			max=$(echo "${toplevel_order[@]}" | wc -w)
+			max=$((max + 1))
+			toplevel_order[$topname]=$max
+			$DEBUG && echo "toplevel_order[$topname] = $max"
+		fi
+	done
+done <<< "$cfgvariants"
+}
+
+# For each config-variant, find missing sub-directories and mark them as "EMPTY"
+# This is very helpful for stage 3.
+fix_config_variants() { # uses $toplevels, $subdirs, $cfgvariants, $toplevel_order
+
+for toplevel in $toplevels
+do
+	local subdircnt
+	local linenum
+	local cfgvariant
+	local LINE
+	local count
+	local oldentry
+	local newentry
+	local found
+	local dashcount
+	local new
+	local topname
+	local new_topname
+
+	subdircnt=$(echo "$subdirs" | grep "$toplevel" | awk -F "subdirs" ' { print $2 } ')
+	linenum=0
+	echo "$cfgvariants" | while read -r cfgvariant
+	do
+		linenum=$((linenum + 1))
+		# this seems strange to immediately reset cfgvariant but we
+		# want the value from the file, not the one in memory.  The
+		# value in the file may have been modified by a previous
+		# toplevel.
+		cfgvariant=$(sed "${linenum}q;d" "$tempdir"/cfgvariants)
+
+		LINE=$(echo "$cfgvariant" | cut -d "|" -f 2)
+
+		$DEBUG && echo "LINE=$LINE"
+		# get the actual number of subdirs
+		count=$(for i in $LINE
+		do
+			echo "$i" | grep -q -v "$toplevel" && continue
+			echo "$i" | awk -F "-" '{print NF-1}'
+		done | wc -l)
+
+		[ -z "$count" ] && continue
+		$DEBUG && echo "count=$count"
+
+		# if the number of subdirs is the same, then bail
+		[ "$count" -eq "$subdircnt" ] && continue
+
+		$DEBUG && echo "missing entries LINE=$LINE"
+		oldentry=$(for i in $LINE
+		do
+			echo "$i" | grep -q "$toplevel" && echo "$i" | tr "\n" " "
+		done| xargs)
+		$DEBUG && echo "oldentry=|$oldentry|"
+
+		# Find the missing entry
+		found=$(for i in $oldentry
+		do
+			dashcount=$(echo "$i" | awk -F "-" '{print NF-1}')
+			dashcount=$((dashcount + 1))
+			echo $dashcount
+		done | tr "\n" " ")
+		$DEBUG && echo "found=$found"
+
+		# build the missing entry
+		count=1
+		newentry=$(for i in $(seq 1 "$subdircnt")
+		do
+			if echo "$found" | grep -q "$i"; then
+				echo "$oldentry" | cut -d " " -f "$count"
+				count=$((count + 1))
+			else
+				echo "${toplevel}-EMPTY$((i - 1))"
+			fi
+		done | tr "\n" " " | xargs)
+		$DEBUG && echo "newentry=|$newentry|"
+
+		# insert the missing entry
+		if echo "$LINE" | grep -q "$toplevel"; then
+			new=${cfgvariant//$oldentry/$newentry}
+		else
+			# Find out toplevel name of new EMPTY entries and use
+			# toplevel_order to figure out where to insert those.
+			found=0
+			new_topname="${newentry%%-*}"
+			new="$(echo "$cfgvariant" | cut -d "|" -f 1)|"
+			LINE=$(echo "$cfgvariant" | cut -d "|" -f 2)
+
+			for i in $LINE; do
+				topname="${i%%-*}"
+				if [ $found -eq 1 -o ${toplevel_order[$topname]} -lt ${toplevel_order[$new_topname]} ]; then
+					new="$new $i"
+				else
+					found=1
+					new="$new $newentry $i"
+				fi
+			done
+			if [ $found -eq 0 ]; then
+				new="$new $newentry"
+			fi
+		fi
+
+		$DEBUG && echo "REPLACED:"
+		$DEBUG && echo "orig=$cfgvariant"
+		$DEBUG && echo " new=$new"
+
+		sed -i "${linenum}s/${cfgvariant}/${new}/" "$tempdir"/cfgvariants
+
+		$DEBUG && echo "----------------------------"
+	done
+done
+}
+
+# create a configmap
+get_configmap() { # uses $ORDER and $cfgvariants
+	local configvariant
+	local arch
+	local _configorder
+	local configorder
+	local order
+
+	for order in $ORDER
+	do
+		# jforbes: pending-fedora can be dropped.  It should be empty
+		# most of the time.
+		[ "$order" == "pending-fedora" ] && continue
+
+		echo "$cfgvariants" | while read -r configvariant
+		do
+			arch=$(echo "$configvariant" | cut -d "|" -f 1)
+			_configorder=$(echo "$configvariant" | cut -d "|" -f 2 | tr : " " )
+			configorder=$(for c in $_configorder
+			do
+				echo -n "${order}-${c} "
+			done; echo "")
+
+			echo "${order}-$arch | $configorder"
+		done
+	done
+}
+
+# pretty output
+output_pretty_cfgs() { # uses cfgs and configmap, rows, and columns
+	local x
+	local index
+	local _configmap
+
+	index=0
+	for x in $(seq 1 $rows)
+	do
+		[ "$x" == 1 ] && echo "legend" "$1"
+		_configmap=$(echo "$configmap" | sed "${x}q;d" | cut -d "|" -f 1)
+			echo "$_configmap ${cfgs[@]:$index:$columns}"
+		index=$((index + columns))
+	done | column -t
+}
+
+# helper function to remove a CONFIG file
+delete_file() {
+	local position
+	local configentry
+
+	position=$1
+	configentry=$2
+	# if the entry doesn't exist, decrease weight by 1
+	weight[$position]=$((weight[$position] - 1))
+	if [ "${weight[$position]}" -le 0 ]; then
+		if [ -e "$configentry" ]; then
+			$DEBUG && echo "| Deleting $configentry ${weight[$position]})" || echo "| Deleting $configentry"
+			rm -f "$configentry"
+		fi
+	else
+		$DEBUG && echo "| Not deleted.  Required by other config variants (${weight[$position]})"
+	fi
+}
+
+# find duplicate entries
+fix_broken_arches() { # uses ORDER, crows, columns, and configmap
+	local row
+	local x
+	local y
+	local value
+	local _value
+	local char
+	local position
+	local curr
+
+	# See comment about weight in create_output_header()
+	weight=("${weightorig[@]}")
+
+	# This search is handled differently than
+	# output_pretty_cfgs().  A string is created that
+	# is only for the specific cfg-variant (row * numorder
+	# long).  This string is easier to evaluate.
+	for row in $(seq 0 $((crows - 1)))
+	do
+		# construct the string of values to view
+		value=$(for order in $(seq 0 $((numorder - 1)))
+		do
+			index=$(((order * (crows * columns)) + (row * columns)))
+			echo -n "${cfgs[@]:$index:$columns} "
+		done
+		echo "")
+		$DEBUG && echo "row=$row $value"
+
+		# check to see if there is a config setting conflict
+		_value=$(echo "$value" | tr -d " X-")
+		if echo "$_value" | grep -q "yy\|mm\|nn"; then
+			# go through the value string, ex) y-y-Xm-,
+			# and find the characters that match the
+			# previous character.
+			curr="p"
+			position=0
+			# use value here as each character is
+			# separated by a space
+			for char in $value
+			do
+				index=$(( ((crows * columns) * (position / columns)) + (row * columns) + (position % columns) ))
+				# sed is 1-based so add 1 to x and y
+				y=$(((index / columns) + 1))
+				# configmap contains the cfgvariant and a
+				# pipe (+3), and needs to be 1-based
+				x=$(((index % columns) + 4))
+				$DEBUG && echo "($x,$y) $index"
+
+				configentry="$(echo "$configmap" | sed "${y}q;d" | cut -d " " -f "$x" | tr "-" "/")/$CONFIG"
+				cfgvariant=$(echo "$configmap" | sed "${y}q;d" | cut -d " " -f 1)
+
+				# if this, char, is the same as curr then
+				# there is a conflict and char needs to
+				# be changed.
+				if [ "$char" == "$curr" ]; then
+					echo ""
+					echo "ERROR: (hierarchy) $configentry : superseding value has $curr."
+					echo "|$CONFIG ($cfgvariant)"
+					printf "|$longheader\n|$value" | column -t
+					$DEBUG && echo "position=$position | $(echo "$value" | cut -d " " -f $((position + 1)) ) | weight=${weight[$position]}"
+
+					# See comment about weight in
+					# create_output_header()
+					delete_file "$position" "$configentry"
+					break
+				fi
+				case "$char" in
+				'-')
+					;;
+				'X')
+					# See comment about weight in
+					# create_output_header()
+					delete_file "$position" "$configentry"
+					;;
+				* )
+					curr=$char
+					;;
+				esac
+				position=$((position + 1))
+			done
+		else
+			# still have to examine this string because it may
+			# contain "X", which has to be accounted for in
+			# the weights.
+			echo "$value" | grep -q "X" || continue
+			position=0
+			for char in $value
+			do
+				if [ "$char" == 'X' ]; then
+					index=$(( ((crows * columns) * (position / columns)) + (row * columns) + (position % columns) ))
+					# sed is 1-based so add 1 to x and y
+					y=$(((index / columns) + 1))
+					# configmap contains the cfgvariant and
+					# a pipe (+3), and needs to be 1-based
+					x=$(((index % columns) + 4))
+					$DEBUG && echo "($x,$y) $index"
+
+					configentry="$(echo "$configmap" | sed "${y}q;d" | cut -d " " -f "$x" | tr "-" "/")/$CONFIG"
+					cfgvariant=$(echo "$configmap" | sed "${y}q;d" | cut -d " " -f 1)
+					# See comment about weight in
+					# create_output_header()
+					delete_file "$position" "$configentry"
+				fi
+				position=$((position + 1))
+			done
+		fi
+
+	done
+}
+
+# compare the common, fedora, and ark configs.
+# By default this function uses the priority.common file
+fix_common() { # uses cfgs, CONFIG, and ORDER
+	local index
+	local value
+	local _value
+	local x
+	local y
+	local configentry
+	local _configentry
+	local order
+
+	# the priority.common array is
+	#	common configs
+	#	ark configs
+	#	fedora configs
+	for index in $(seq 0 $(((crows * columns) - 1)))
+	do
+		# this string is the concatenation of the
+		# common, ark, and fedora config values
+		value=$(for order in $(seq 0 $((numorder -1)))
+		do
+			echo -n "${cfgs[$(( (order * crows * columns) + index))]}"
+		done
+		echo "")
+
+		# It doesn't matter what common is set to so
+		# trim it off.
+		_value="${value:1}"
+		if echo "$_value" | grep -q "yy\|mm\|nn"; then
+
+			# set _value to just y|m|n
+			_value="${_value:1}"
+
+			# create a long array to see if the change is valid
+			checkvalue=$(for order in $(seq 0 $((numorder -1)))
+			do
+				step=$(( order * crows * columns))
+				# this seems weird but it rounds off to columns
+				row=$(( (step + index) / columns * columns))
+				echo -n "${cfgs[@]:$row:$columns} "
+			done; echo "")
+
+			$DEBUG && echo "checkvalue=$checkvalue"
+
+			IFS=', ' read -r -a checkvalue <<< "$checkvalue"
+			_index=$((index % columns))
+
+			for order in $(seq 1 $((numorder -1)))
+			do
+				checkvalue[$((( order * columns ) + _index))]='-'
+			done
+			$DEBUG && echo "updated checkvalue=${checkvalue[@]}"
+
+			# set the common entry to _value, so that an analysis
+			# can be run on the other entries
+			checkvalue[$_index]="$_value"
+
+			count=0
+			cfgvalue=${checkvalue[0]}
+			warning=false
+			for i in ${checkvalue[@]}
+			do
+				echo "$i" | grep -q 'm\|n\|y' && cfgvalue=$i
+				if [ $count == $_index ]; then
+					if [ "$cfgvalue" != "$_value" ]; then
+						$DEBUG && echo "$CONFIG override will not work."
+						warning=true
+						break;
+					fi
+					_index=$((_index + columns))
+				fi
+				count=$((count + 1))
+			done
+
+			$warning && break
+
+			echo "$CONFIG found a match where common should be set."
+
+			# sed is 1-based so add 1 to x and y
+			y=$(((index / columns) + 1))
+			# configmap contains the cfgvariant and a
+			# pipe (+3), and needs to be 1-based
+			x=$(((index % columns) + 4))
+			$DEBUG && echo "($x,$y) $index"
+
+			# remove the existing ark and fedora configs
+			configentry="$(echo "$configmap" | sed "${y}q;d" | cut -d " " -f "$x" | tr "-" "/")/$CONFIG"
+			for order in $ORDER
+			do
+				[ "$order" == "common" ] && continue
+				_configentry=${configentry//common/$order}
+				[ -e "$_configentry" ] && rm -f "$_configentry"
+			done
+
+			# create a new common config
+			echo "$_value" in "$configentry"
+			case "$_value" in
+			m)
+				echo "${CONFIG}=m" > "$configentry"
+				;;
+			y)
+				echo "${CONFIG}=y" > "$configentry"
+				;;
+			n)
+				echo "# $CONFIG is not set" > "$configentry"
+				;;
+			esac
+		fi
+	done
+}
+
+# Check that ccolumns is consistent
+debug_cfgvariants() { # uses $cfgvariants and sets crows and ccolumns
+	local LINE
+
+	crows=$(echo "$cfgvariants" | wc -l)
+
+	ccolumns=$(echo "$cfgvariants" | while read -r LINE
+	do
+		LINE=$(echo "$LINE" | cut -d "|" -f 2)
+		echo "$LINE" | wc -w
+	done | sort -u)
+
+	# Error check columns
+	if [ "$(echo "$ccolumns" | wc -l)" != "1" ]; then
+		echo "ERROR in parser.  There were multiple length columns found."
+		echo "$ccolumns"
+		exit 1
+	fi
+}
+
+# Create an output header, a fancy long header for fix_broken_arches, and the
+# weights
+create_output_header() { # uses $ORDER, $configmap, and sets output_header
+			 # and weightorig
+
+	local order
+	local dir
+	local convert
+	local f
+	local configline
+
+	# We know that the configmap now contains correct sized entries for
+	# each arch.  The arch doesn't really matter and we just need the
+	# information to make a header.
+	order=$(echo "$ORDER" | cut -d " " -f 1)
+	configline=$(echo "$configmap" | head -1 | cut -d "|" -f 2 | sed "s/${order}-//g")
+	for dir in $configline
+	do
+		convert=false
+		if echo "$dir" | grep -q "-"; then
+			if echo "$dir" | grep -q "EMPTY0"; then
+				dir=$(echo "$dir" | awk -F "-EMPTY0" ' { print $1 } ')
+				convert=true
+			fi
+		else
+			convert=true
+		fi
+
+		! $convert && continue
+
+		# get the first letter of each word
+		f=$(echo "$dir" | head -c 1)
+		$DEBUG && echo "directory $dir entries will be converted to $f"
+		configline=${configline//$dir/$f}
+	done
+
+	# Go through the configline and convert the directory names into header
+	# names For example,
+	#    generic generic-x86 generic-x86-x86_64 generic-EMPTY3 debug-EMPTY0 debug-EMPTY1 debug-EMPTY2
+	# will be converted to
+	#    g ga1 ga2 ga3 d da1 da2
+	output_header=$(for dir in $configline
+	do
+		# convert dirs with no dashes to the same thing
+		if ! echo "$dir" | grep -q "-"; then
+			echo "$dir"
+			continue
+		fi
+		f=$(echo "$dir" | cut -d "-" -f 1)
+		# convert g-x86 to ga, and g-x86-x86_64 to ga2, etc.
+		if echo "$dir" | grep -q "EMPTY"; then
+			numempty=$(echo "$dir" | awk -F "EMPTY" ' { print $2 } ')
+			if [ "$numempty" -eq 0 ]; then
+				echo "$f"
+			else
+				echo "${f}a${numempty}"
+			fi
+		else
+			numdashes=$(echo "$dir"| grep -o "-" | wc -l)
+			echo "${f}a${numdashes}"
+		fi
+	done | tr "\n" " ")
+
+	# create a weightorig array that contains the weights of change for
+	# each directory.  This is useful for the -f option display
+	for entry in $output_header
+	do
+		if echo "$entry" | grep -q 'a'; then
+			_weightorig+=(1)
+		else
+			_weightorig+=("$crows")
+		fi
+	done
+
+	# It is possible (and valid) to have an subdir arch followed by
+	# a debug entry.  The -f checker would have flagged this and
+	# removed the file.  As a solution there is a weight associated
+	# with each entry's CONFIG file.  A debug or generic entry has
+	# a weight equal the number of columns, and the arch entries all
+	# have a weight of one.  The -f tracker subtracts one for each "hit"
+	# and only removes the file if the weight is 1.
+
+	weightorig=""
+	longheader=""
+	for order in $(seq 1 $numorder)
+	do
+		weightorig="${weightorig[@]} ${_weightorig[@]}"
+		longheader="${longheader}${output_header}"
+	done
+	IFS=', ' read -r -a weightorig <<< "$weightorig"
+}
+
+# initialize the array to '-' (undefined) and 'X' (not present/EMPTY)
+init_cfgs() { #uses cfgs, rows, and columns
+	unset cfgs
+	eval "$(eval echo "cfgs[{1..$((rows * columns))}]='-'\;")"
+	# the -'s can be a problem when being parsed by other commands.  I
+	# tried using +, o, ., X, etc. but none of the output was as clear as
+	# a dash.  Initialize the 0th element to an unused letter.  If still
+	# 'p' it can be changed back later on.
+	cfgs[0]=p
+
+	# set EMPTY configs to X
+	for row in $(seq 0 $((rows - 1)))
+	do
+		index=$((row * columns))
+		num=0
+		for entry in $(echo "$cfgvariants" | sed "$(((row % crows) + 1))q;d" | cut -d "|" -f 2)
+		do
+			echo "$entry" | grep -q EMPTY && cfgs[$((index + num))]='X'
+			num=$((num + 1))
+		done
+	done
+	cfgs_base=("${cfgs[@]}")
+}
+
+# reset the configs to default
+reset_cfgs() {
+	unset cfgs
+	cfgs=("${cfgs_base[@]}")
+}
+
+# map the CONFIG files to the array
+map_configs_to_array() { #uses CONFIG, configmap, cfgs
+
+	local LINE
+	local contents
+	local _LINE
+	local row
+	local cols
+	local col
+
+	for LINE in $(find ./ -name $CONFIG -printf '%P\n' | awk -F "/$CONFIG" ' { print $1 } ')
+	# loop through the CONFIG files
+	do
+		$DEBUG && echo "+-------------------"
+		$DEBUG && echo "found: $LINE"
+
+		contents=$(grep "^# $CONFIG is not set\|^$CONFIG=" "$LINE"/"$CONFIG")
+		case $contents in
+		"# $CONFIG is not set")
+			contents=n
+			;;
+		"${CONFIG}=y")
+			contents=y
+			;;
+		"${CONFIG}=m")
+			contents=m
+			;;
+		*)
+			echo "$LINE/$CONFIG has a strange entry ... skipping"
+			return 1
+			break;;
+		esac
+
+		$DEBUG && echo "contents=$contents"
+
+		_LINE=$(echo "$LINE" | tr "/" "-")
+		$DEBUG && echo "_LINE=$_LINE"
+		# set each cfg to $contents
+		OLDIFS=$IFS; IFS=$'\n'; for rowandcol in $(echo "$configmap" | grep -n " $_LINE ")
+		do
+			row=$(echo "$rowandcol" | cut -d ":" -f 1)
+			# grep is 1 based and we need a 0 based number
+			row=$((row - 1))
+			cols=$(echo "$rowandcol" | cut -d "|" -f 2)
+			$DEBUG && echo "row=$row"
+			$DEBUG && echo "cols=$cols"
+
+			col=$(echo "$cols" | awk -F "$_LINE" ' { print $1 }' | wc -w)
+			$DEBUG && echo "($col, $row) = $contents"
+			# convert the (col,row) to an index in the array
+			$DEBUG && echo "setting element $(($((row * columns)) + col)) = $contents"
+			# set the config
+			cfgs[$(($((row * columns)) + col))]=$contents
+		done
+		IFS=$OLDIFS
+	done
+
+	# undo the 'p' setting of the initial element
+	# (setting to 'p' done in init_cfgs)
+	[ "${cfgs[0]}" == "p" ] && cfgs[0]="-"
+
+	return 0
+}
+
+generate_finalconfiglist() {
+	awk '
+		/is not set/ {
+			split ($0, a, "#");
+			split(a[2], b);
+			print b[1] ;
+		}
+		/=/ {
+			split ($0, a, "=");
+			print a[1];
+		}
+	' *.config | sort -u >> .finalconfiglist
+}
+
+find_dead_configs() {
+	echo > .finalconfiglist
+	echo > .configlist
+
+	grep -q "rhel" flavors && (cd ..; make rh-configs) && generate_finalconfiglist
+	grep -q "fedora" flavors && (cd ..; make fedora-configs) && generate_finalconfiglist
+	sort -o .finalconfiglist -u .finalconfiglist
+
+	find ./ -name CONFIG_* | sed 's!.*/!!' | sort -u > .configlist
+
+	echo "These CONFIGS defined in redhat/configs but not the final .configs have been deleted:"
+	comm .configlist .finalconfiglist -2 -3 | while read FILENAME
+	do
+		echo $FILENAME
+		find ./ -name $FILENAME | xargs rm -f
+	done
+
+	rm -f .configlist .finalconfiglist
+}
+
+#
+#
+# MAIN
+#
+#
+
+# PROCESS ARGUMENTS
+FINDFIXES=false
+FIXCOMMON=false
+configs=
+while getopts "c:dDfhjp:" opt; do
+	case ${opt} in
+	c )
+		configs=$OPTARG
+		;;
+	d )
+		DEBUG=true
+		;;
+	D )
+		find_dead_configs
+		exit 0
+		;;
+	f )
+		# Find fixes per config-variant
+		FINDFIXES=true
+		;;
+	h )
+		whatcouldgowrong
+		;;
+	j )
+		# jforbes mode
+		priority_file=priority.common
+		FIXCOMMON=true
+		;;
+	p )
+		# Get the high level order from the priority file
+		priority_file=$OPTARG
+		;;
+	*)
+		whatcouldgowrong
+		;;
+	esac
+done
+
+$DEBUG && echo "priority_file=$priority_file"
+$DEBUG && echo "configs=$CONFIG"
+$DEBUG && echo "FINDFIXES=$FINDFIXES"
+$DEBUG && echo "FIXCOMMON=$FIXCOMMON"
+
+# Do some simple error checking
+if [ -z "$priority_file" ]; then
+	echo "Specify a priority.* file"
+	whatcouldgowrong
+fi
+
+# if configs is not set then do all CONFIGS
+if [ -z "$configs" ]; then
+	find ./ -name "CONFIG*" -type f -printf "%f\n" | sort -u > "$tempdir"/CONFIGS
+	configs=$tempdir/CONFIGS
+fi
+
+# if configs is still not set, then parse the argument provided
+if [ ! -e "$configs" ]; then
+# assume the user is smart enough to specify CONFIGs
+	for config in ${configs//,/ }
+	do
+		# Allow users to specify configs without CONFIG_
+		if ! echo "$config" | grep -q CONFIG; then
+			config="CONFIG_${config}"
+		fi
+		echo "$config" >> "$tempdir"/CONFIGS
+	done
+	configs=$tempdir/CONFIGS
+else
+	# if the file exists just copy it
+	[ ! -e "$tempdir"/CONFIGS ] && cp "$configs" "$tempdir"/CONFIGS
+fi
+
+ORDER=$(grep "^ORDER" "$priority_file"| cut -d "=" -f 2)
+
+# STEP 1.  Parse the priority file
+
+cfgvariants=$(get_cfgvariants)
+$DEBUG && echo "----------------------------------------"
+$DEBUG && echo "cfgvariants:"
+$DEBUG && echo "$cfgvariants"
+$DEBUG && echo "----------------------------------------"
+toplevels=$(get_toplevel_dirs "$cfgvariants")
+$DEBUG && echo "Top level directories in priority file: $toplevels"
+subdirs=$(get_subdirs)
+$DEBUG && echo "Top-level sub-directories:"
+$DEBUG && echo "$subdirs"
+
+# Create ordering for toplevel dirs
+create_toplevel_order
+
+# Add EMPTY entries for each missing subdirectory level in the config
+# variants
+echo "$cfgvariants" > "$tempdir"/cfgvariants
+fix_config_variants
+$DEBUG && echo ""
+$DEBUG && echo ""
+$DEBUG && echo "Fixed: cfgvariants"
+$DEBUG && cat "$tempdir"/cfgvariants
+
+# Reset cfgvariants to new values with EMPTYs.
+# cfgvariants now contains the config-variant data with EMPTY subdirs.
+cfgvariants=$(cat "$tempdir"/cfgvariants)
+crows=
+ccolumns=
+debug_cfgvariants
+$DEBUG && echo "For the config-variants there are $crows rows and $ccolumns columns."
+
+# STEP 2.  Now that we have fixed the list of config variants, create a config
+# map that contains all entries wrt the ORDER specified in the priority file.
+
+numorder=$(echo "$ORDER" | wc -w)
+# jforbes: pending-fedora can be dropped.  It should be empty
+# most of the time.
+echo "$ORDER" | grep -q "pending-fedora" && numorder=$((numorder -1))
+
+# configmap is the list of config-variants used for displaying and analyzing
+# the CONFIGs.
+configmap=$(get_configmap)
+$DEBUG && echo " "
+$DEBUG && echo "The configmap is:"
+$DEBUG && echo "$configmap"
+$DEBUG && echo " "
+
+# STEP 3.  Create an array and header to hold the configmap data.
+
+rows=$(echo "$configmap" | wc -l)
+columns=$(echo "$configmap" | head -1 | cut -d "|" -f 2 | wc -w)
+$DEBUG && echo "There are $rows rows and $columns columns in the configmap."
+
+create_output_header # sets output_header
+$DEBUG && echo "output_header=|$output_header|"
+$DEBUG && echo "longheader=|$longheader|"
+$DEBUG && echo "output_header has weights ${weightorig[@]}"
+
+# create the cfgs array and initialize it to '-' (not found)
+init_cfgs
+
+if $FINDFIXES; then
+	while read -r CONFIG
+	do
+		reset_cfgs
+		map_configs_to_array || continue
+
+		fix_broken_arches "$output_header"
+	done < "$tempdir"/CONFIGS
+	exit
+fi
+
+if $FIXCOMMON; then
+	while read -r CONFIG
+	do
+		reset_cfgs
+		map_configs_to_array || continue
+		fix_common
+	done < "$tempdir"/CONFIGS
+	exit
+fi
+
+# only display the configs
+	while read -r CONFIG
+	do
+		reset_cfgs
+		map_configs_to_array || continue
+		echo ""
+		echo "$CONFIG"
+		output_pretty_cfgs "$output_header"
+	done < "$tempdir"/CONFIGS
+exit

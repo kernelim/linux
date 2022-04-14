@@ -95,7 +95,10 @@ void test_bpf_verif_scale(void)
 		{ "test_sysctl_loop2.o", BPF_PROG_TYPE_CGROUP_SYSCTL },
 
 		{ "test_xdp_loop.o", BPF_PROG_TYPE_XDP },
+#if 0
+		/* CONFIG_IPV6_SEG6_LWTUNNEL is disabled in RHEL 9 */
 		{ "test_seg6_loop.o", BPF_PROG_TYPE_LWT_SEG6LOCAL },
+#endif
 	};
 	libbpf_print_fn_t old_print_fn = NULL;
 	int err, i;

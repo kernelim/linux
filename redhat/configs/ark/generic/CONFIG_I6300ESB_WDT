@@ -1,0 +1,2 @@
+# this device is required for qemu VMs.  Do not disable it.
+CONFIG_I6300ESB_WDT=m

@@ -1,0 +1,30 @@
+# CONFIG_SND_INTEL_BYT_PREFER_SOF:
+# 
+# The kernel has 2 drivers for the Low Power Engine audio-block on
+# Bay- and Cherry-Trail SoCs. The old SST driver and the new SOF
+# driver. If both drivers are enabled then the kernel will default
+# to using the old SST driver, unless told otherwise through the
+# snd_intel_dspcfg.dsp_driver module-parameter.
+# 
+# Set this option to Y to make the kernel default to the new SOF
+# driver instead.
+# 
+# Symbol: SND_INTEL_BYT_PREFER_SOF [=n]
+# Type  : bool
+# Defined at sound/hda/Kconfig:50
+#   Prompt: Prefer SOF driver over SST on BY/CHT platforms
+#   Depends on: SOUND [=m] && !UML && SND [=m] && SND_SST_ATOM_HIFI2_PLATFORM_ACPI [=m] && SND_SOC_SOF_BAYTRAIL [=m]
+#   Location:
+#     -> Device Drivers
+#       -> Sound card support (SOUND [=m])
+#         -> Advanced Linux Sound Architecture (SND [=m])
+# 
+# 
+#
+
+# Note there were plans to enable this by default for F34+ :
+# https://fedoraproject.org/w/index.php?title=Changes/SofDefaultForIntelLpe
+# But there are still too many issues with the new SOF driver, so keep this disabled:
+# https://mailman.alsa-project.org/pipermail/sound-open-firmware/2021-March/004175.html
+
+# CONFIG_SND_INTEL_BYT_PREFER_SOF is not set

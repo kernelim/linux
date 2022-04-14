@@ -1,0 +1,6309 @@
+---
+subsystems:
+ - subsystem: ARK Kernel Maintainer
+   labels:
+     # This is for the subsystem webhook. This will add Subsystem:net
+      # to all relevant merge requests.
+     name: redhat
+     # Optional additional labels that are required for the
+      # readyForMerge label. This is for the net subsystem's testing
+      # efforts. See
+      # https://gitlab.com/cki-project/kernel-webhooks/-/issues/56
+     readyForMergeDeps:
+     # Optional labels that are automatically added to all relevant merge
+      # requests.
+     newLabels: 
+     # Email Label used on RHKL to distinguish email
+     emailLabel: INTERNAL
+   # S:
+   status: Supported
+   # are acks required from this subsystem when a merge request touches its paths?
+   requiredApproval: true
+   # M:
+   maintainers:
+       # maintainers are added as required approvers for subsystem changes if requiredApproval is
+       # true for this subsystem. maintainers are primary contacts for subsystem issues.
+     - name: Justin Forbes
+       email: jforbes@redhat.com
+       gluser: jmflinuxtx
+       # Only unrestricted maintainers show up in the list of required reviewers. The restricted
+       # element is optional and defaults to false if absent.
+       restricted: false
+     - name: Justin Forbes
+       email: jforbes@fedoraproject.org
+       gluser: jmflinuxtx
+     - name: Patrick Talbert
+       email: ptalbert@redhat.com
+       gluser: ptalbert
+   # R:
+   reviewers:
+       # reviewers are added as required approvers for subsystem changes if requiredApproval is
+       # true for this subsystem.
+     - name: Donald Zickus
+       email: dzickus@redhat.com
+       gluser: dzickusrh
+       # Only unrestricted maintainers show up in the list of required reviewers. The restricted
+       # element is optional and defaults to false if absent.
+       restricted: false
+   paths:
+       # F:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       # N:
+       includeRegexes:
+       # X:
+       excludes:
+          - redhat/configs/
+   # T:
+   scm: git https://gitlab.com/cki-project/kernel-ark.git
+   # L:
+   mailingList: 
+ - subsystem: CentOS Stream 9 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Herton R. Krzesinski
+       email: herton@redhat.com
+       gluser: hertonrk-rh
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+   scm: git https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9.git
+ - subsystem: RHEL 9.1 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Patrick Talbert
+       email: ptalbert@redhat.com
+       gluser: ptalbert
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 9.1 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Fernando Pacheco
+       email: fpacheco@redhat.com
+       gluser: pachecof
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 9.0 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Herton R. Krzesinski
+       email: herton@redhat.com
+       gluser: hertonrk-rh
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 9.0 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Luis Claudio Goncalves
+       email: lgoncalv@redhat.com
+       gluser: lgoncalv
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 8.7 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 8.7 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Chris White
+       email: chwhite@redhat.com
+       gluser: chwhite1
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 8.6 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Augusto Caringi
+       email: acaringi@redhat.com
+       gluser: caringi
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 8.6 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Chris White
+       email: chwhite@redhat.com
+       gluser: chwhite1
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 8.5 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Bruno Meneguele
+       email: bmeneg@redhat.com
+       gluser: bmeneg
+   reviewers:
+     - name: Frantisek Hrbata
+       email: fhrbata@redhat.com
+       gluser: frhr
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 8.5 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Fernando Pacheco
+       email: fpacheco@redhat.com
+       gluser: pachecof
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 8.4 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Lucas Zampieri
+       email: lzampier@redhat.com
+       gluser: lzampier
+   reviewers:
+     - name: Jan Stancek
+       email: jstancek@redhat.com
+       gluser: jstancek
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 8.4 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: John Wyatt
+       email: jwyatt@redhat.com
+       gluser: jwyatt-rh
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 8.3 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Frantisek Hrbata
+       email: fhrbata@redhat.com
+       gluser: frhr
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 8.2 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Julio Faracco
+       email: jfaracco@redhat.com
+       gluser: jfaracco
+   reviewers:
+     - name: Frantisek Hrbata
+       email: fhrbata@redhat.com
+       gluser: frhr
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 8.2 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Luis Claudio Goncalves
+       email: lgoncalv@redhat.com
+       gluser: lgoncalv
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 8.1 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Scott Weaver
+       email: scweaver@redhat.com
+       gluser: scweaver
+   reviewers:
+     - name: Jan Stancek
+       email: jstancek@redhat.com
+       gluser: jstancek
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 8.1 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Juri Lelli
+       email: jlelli@redhat.com
+       gluser: jlelli
+   paths:
+       includes:
+          - makefile
+          - Makefile.rhelver
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 7 ALT Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Augusto Caringi
+       email: acaringi@redhat.com
+       gluser: caringi
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 7.9 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Rado Vrbovsky
+       email: rvrbovsk@redhat.com
+       gluser: rvrbovsk
+   reviewers:
+     - name: Frantisek Hrbata
+       email: fhrbata@redhat.com
+       gluser: frhr
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 7.9 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Scott Wood
+       email: swood@redhat.com
+       gluser: swood3
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 7.8 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Augusto Caringi
+       email: acaringi@redhat.com
+       gluser: caringi
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 7.8 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Luis Claudio Goncalves
+       email: lgoncalv@redhat.com
+       gluser: lgoncalv
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 7.7 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Rado Vrbovsky
+       email: rvrbovsk@redhat.com
+       gluser: rvrbovsk
+   reviewers:
+     - name: Jan Stancek
+       email: jstancek@redhat.com
+       gluser: jstancek
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 7.7 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Luis Claudio Goncalves
+       email: lgoncalv@redhat.com
+       gluser: lgoncalv
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 7.6 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Denys Vlasenko
+       email: dvlasenk@redhat.com
+       gluser: dvlasenk
+   reviewers:
+     - name: Frantisek Hrbata
+       email: fhrbata@redhat.com
+       gluser: frhr
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 7.6 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Luis Claudio Goncalves
+       email: lgoncalv@redhat.com
+       gluser: lgoncalv
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 7.5 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Rado Vrbovsky
+       email: rvrbovsk@redhat.com
+       gluser: rvrbovsk
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 7.4 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Lucas Zampieri
+       email: lzampier@redhat.com
+       gluser: lzampier
+   reviewers:
+     - name: Jan Stancek
+       email: jstancek@redhat.com
+       gluser: jstancek
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 7.4 (MRG) Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Clark Williams
+       email: williams@redhat.com
+       gluser: clrkwllms
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 7.3 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Denys Vlasenko
+       email: dvlasenk@redhat.com
+       gluser: dvlasenk
+   reviewers:
+     - name: Frantisek Hrbata
+       email: fhrbata@redhat.com
+       gluser: frhr
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 7.2 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Rado Vrbovsky
+       email: rvrbovsk@redhat.com
+       gluser: rvrbovsk
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 6.10 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Denys Vlasenko
+       email: dvlasenk@redhat.com
+       gluser: dvlasenk
+   reviewers:
+     - name: Jan Stancek
+       email: jstancek@redhat.com
+       gluser: jstancek
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 6.6 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Herton R. Krzesinski
+       email: herton@redhat.com
+       gluser: hertonrk-rh
+   paths:
+       includes:
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 6.5 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Patrick Talbert
+       email: ptalbert@redhat.com
+       gluser: ptalbert
+   paths:
+       includes:
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 5.11 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Rado Vrbovsky
+       email: rvrbovsk@redhat.com
+       gluser: rvrbovsk
+   paths:
+       includes:
+          - makefile
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: RHEL 5.9 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Rado Vrbovsky
+       email: rvrbovsk@redhat.com
+       gluser: rvrbovsk
+   paths:
+       includes:
+          - redhat/
+       excludes:
+          - redhat/configs/
+ - subsystem: 3ware 9000 Storage Controller Linux Driver (3w-9xxx)
+   labels:
+     name: 3w-9xxx
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Tomas Henzl
+       email: thenzl@redhat.com
+       gluser: thenzl
+   paths:
+       includes:
+          - drivers/scsi/3w-9xxx*
+ - subsystem: 8139CP 10/100 MEGABIT ETHERNET DRIVER (8139cp)
+   labels:
+     name: 8139cp
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+   paths:
+       includes:
+          - drivers/net/ethernet/realtek/8139cp.c
+ - subsystem: 8169 10/100/1000 GIGABIT ETHERNET DRIVER (r8169)
+   labels:
+     name: r8169
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Josef Oskera
+       email: joskera@redhat.com
+       gluser: joskera
+   paths:
+       includes:
+          - drivers/net/ethernet/realtek/r8169.c
+ - subsystem: ACCESSIBILITY SUBSYSTEM
+   labels:
+     name: accessibility
+   status: Provided
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/accessibility/
+ - subsystem: ACPI SUBSYSTEM
+   labels:
+     name: acpi
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Mark Langsdorf
+       email: mlangsdo@redhat.com
+       gluser: mlangsdorf
+     - name: Lenny Szubowicz
+       email: lszubowi@redhat.com
+       gluser: lszubowi
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+   paths:
+       includes:
+          - drivers/acpi/
+          - drivers/pnp/pnpacpi/
+          - include/linux/acpi.h
+          - include/acpi/
+          - arch/x86/kernel/acpi/
+          - arch/arm64/kernel/acpi*
+ - subsystem: AIO
+   labels:
+     name: aio
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jeff Moyer
+       email: jmoyer@redhat.com
+       gluser: jmoyer1
+   paths:
+       includes:
+          - fs/aio.c
+          - include/linux/*aio*.h
+ - subsystem: ALSA SOUND DRIVER
+   labels:
+     name: alsa
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jaroslav Kysela
+       email: jkysela@redhat.com
+       gluser: jkysela
+   paths:
+       includes:
+          - sound/
+          - drivers/soundwire/
+          - drivers/media/pci/saa7134/saa7134-alsa.c
+          - drivers/media/pci/cx23885/cx23885-alsa.c
+          - drivers/media/pci/cx25821/cx25821-alsa.c
+          - drivers/media/pci/cx18/cx18-alsa*
+          - drivers/media/pci/cx88/cx88-alsa*
+          - drivers/media/pci/cobalt/cobalt-alsa*
+          - drivers/media/pci/ivtv/ivtv-alsa*
+          - drivers/media/usb/tm6000/tm6000-alsa.c
+ - subsystem: AMAZON ETHERNET DRIVERS
+   labels:
+     name: ena
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
+   paths:
+       includes:
+          - Documentation/networking/ena.txt
+          - Documentation/networking/device_drivers/ethernet/amazon/ena.rst
+          - drivers/net/ethernet/amazon/
+ - subsystem: AMAZON RDMA EFA DRIVER (efa)
+   labels:
+     name: efa
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+   paths:
+       includes:
+          - drivers/infiniband/hw/efa/
+          - include/uapi/rdma/efa-abi.h
+ - subsystem: AMD IOMMU (AMD-VI)
+   labels:
+     name: amd_iommu
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jerry Snitselaar
+       email: jsnitsel@redhat.com
+       gluser: jsnitsel
+     - name: Myron Stowe
+       email: myron.stowe@redhat.com
+       gluser: mstowe1
+     - name: Alex Williamson
+       email: alex.williamson@redhat.com
+       gluser: alex.williamson
+     - name: Don Dutile
+       email: ddutile@redhat.com
+       gluser: ddutile
+   paths:
+       includes:
+          - drivers/iommu/amd_iommu*.[ch]
+          - include/linux/amd-iommu.h
+ - subsystem: AMD PTDMA DRIVER
+   labels:
+     name: amd_ptdma_driver
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: John W. Linville
+       email: linville@redhat.com
+       gluser: linville-rh
+     - name: Myron Stowe
+       email: mstowe@redhat.com
+       gluser: mstowe1
+   paths:
+       includes:
+          - drivers/dma/ptdma
+ - subsystem: AMD SEV/SEV-ES/SEV-SNP Guest Side
+   labels:
+     name: amd_sevx_guest
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Vitaly Kuznetsov
+       email: vkuznets@redhat.com
+       gluser: vkuznets
+     - name: Wei Huang
+       email: wehuang@redhat.com
+       gluser: wehuang
+       restricted: true
+   paths:
+       includes:
+          - arch/x86/boot/compressed/sev*.c
+          - arch/x86/include/asm/sev*.h
+          - arch/x86/kernel/sev*.[cS]
+ - subsystem: ANDROID DRIVERS
+   labels:
+     name: idreamofelectricsheep
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/android/
+ - subsystem: AQUANTIA ATLANTIC ETHERNET DRIVER
+   labels:
+     name: aquantia
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Igor Russkikh
+       email: irusskik@redhat.com
+       gluser: irusskik
+       restricted: true
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/net/ethernet/aquantia/
+ - subsystem: ARCHITECTURE DIRECTORY FILES
+   labels:
+     name: arch_dir
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+   paths:
+       includes:
+          - arch/Kconfig
+ - subsystem: ARECA (ARC11xx/12xx/16xx/1880) SATA/SAS RAID Host Bus Adapter (arcmsr)
+   labels:
+     name: arcmsr
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Tomas Henzl
+       email: thenzl@redhat.com
+       gluser: thenzl
+   paths:
+       includes:
+          - drivers/scsi/arcmsr/
+ - subsystem: ARM ARCHITECTED TIMER DRIVER
+   labels:
+     name: arm_timer
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+     - name: Mark Langsdorf
+       email: mlangsdo@redhat.com
+       gluser: mlangsdorf
+     - name: Jeremy Linton
+       email: jlinton@redhat.com
+       gluser: jlinton
+       restricted: true
+   paths:
+       includes:
+          - arch/arm64/include/asm/arch_timer.h
+          - drivers/clocksource/arm_arch_timer.c
+ - subsystem: ARM INTERRUPT CONTROLLERS (GIC)
+   labels:
+     name: arm_gic
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+     - name: Jeremy Linton
+       email: jlinton@redhat.com
+       gluser: jlinton
+       restricted: true
+   paths:
+       includes:
+          - drivers/irqchip/irq-gic*
+          - include/linux/irqchip/arm-gic*
+ - subsystem: ARM PMU PROFILING AND DEBUGGING
+   labels:
+     name: arm_pmu
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+     - name: Mark Langsdorf
+       email: mlangsdo@redhat.com
+       gluser: mlangsdorf
+     - name: Jeremy Linton
+       email: jlinton@redhat.com
+       gluser: jlinton
+   paths:
+       includes:
+          - arch/arm*/kernel/perf_*
+          - arch/arm/oprofile/common.c
+          - arch/arm*/kernel/hw_breakpoint.c
+          - arch/arm*/include/asm/hw_breakpoint.h
+          - arch/arm*/include/asm/perf_event.h
+          - drivers/perf/
+          - include/linux/perf/arm_pmu.h
+ - subsystem: ARM PORT
+   labels:
+     name: armport
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+     - name: Mark Langsdorf
+       email: mlangsdo@redhat.com
+       gluser: mlangsdorf
+     - name: Jeremy Linton
+       email: jlinton@redhat.com
+       gluser: jlinton
+       restricted: true
+   paths:
+       includes:
+          - arch/arm/
+ - subsystem: ARM SMMU DRIVERS
+   labels:
+     name: arm_smmu
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jerry Snitselaar
+       email: jsnitsel@redhat.com
+       gluser: jsnitsel
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+     - name: Mark Langsdorf
+       email: mlangsdo@redhat.com
+       gluser: mlangsdorf
+     - name: Jeremy Linton
+       email: jlinton@redhat.com
+       gluser: jlinton
+   paths:
+       includes:
+          - drivers/iommu/arm-smmu.c
+          - drivers/iommu/arm-smmu-v3.c
+          - drivers/iommu/io-pgtable-arm.c
+ - subsystem: ARM64 PORT (AARCH64 ARCHITECTURE)
+   labels:
+     name: arm64
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+     - name: Mark Langsdorf
+       email: mlangsdo@redhat.com
+       gluser: mlangsdorf
+     - name: Jeremy Linton
+       email: jlinton@redhat.com
+       gluser: jlinton
+       restricted: true
+   paths:
+       includes:
+          - arch/arm64/
+
+ - subsystem: ATHEROS ETHERNET DRIVERS
+   labels:
+     name: atheros
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
+   paths:
+       includes:
+          - drivers/net/ethernet/atheros/
+ - subsystem: AUDIT SUBSYSTEM
+   labels:
+     name: audit
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Richard Guy Briggs
+       email: rbriggs@redhat.com
+       gluser: rbriggs
+   reviewers:
+     - name: Ondrej Mosnacek
+       email: omosnace@redhat.com
+       gluser: omos
+   paths:
+       includes:
+          - include/linux/audit.h
+          - include/uapi/linux/audit.h
+          - kernel/audit*
+ - subsystem: AUXILIARY DISPLAY DRIVERS
+   labels:
+     name: auxdisplay
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/auxdisplay/
+ - subsystem: BE2NET ETHERNET DRIVER (be2net)
+   labels:
+     name: be2net
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
+   paths:
+       includes:
+          - drivers/net/ethernet/emulex/benet/
+ - subsystem: BIOS ISSUES
+   labels:
+     name: bios
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Al Stone
+       email: ahs3@redhat.com
+       gluser: ahs3
+     - name: Lenny Szubowicz
+       email: lszubowi@redhat.com
+       gluser: lszubowi
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+ - subsystem: BLOCK LAYER
+   labels:
+     name: block
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ming Lei
+       email: ming.lei@redhat.com
+       gluser: minlei
+     - name: Jeff Moyer
+       email: jmoyer@redhat.com
+       gluser: jmoyer1
+     - name: Vivek Goyal
+       email: vgoyal@redhat.com
+       gluser: vgoyal
+   paths:
+       includes:
+          - block/
+          - drivers/block/
+ - subsystem: BLUETOOTH SUBSYSTEM
+   labels:
+     name: bluetooth
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Gopal Tiwari
+       email: gtiwari@redhat.com
+       gluser: gtiwari1
+   paths:
+       includes:
+          - drivers/bluetooth/
+          - include/net/bluetooth/
+          - net/bluetooth/
+ - subsystem: BONDING DRIVER
+   labels:
+     name: bonding
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jonathan Toppins
+       email: jtoppins@redhat.com
+       gluser: jtoppins_redhat
+   reviewers:
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
+   paths:
+       includes:
+          - drivers/net/bonding/
+          - include/linux/if_bonding.h
+ - subsystem: BPF (Safe dynamic programs and tools)
+   labels:
+     name: bpf
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Yauheni Kaliuta
+       email: ykaliuta@redhat.com
+       gluser: ykaliuta
+   reviewers:
+     - name: Jerome Marchand
+       email: jmarchan@redhat.com
+       gluser: jeromemarchand
+     - name: Jiri Benc
+       email: jbenc@redhat.com
+       gluser: jbencrh
+     - name: Viktor Malik
+       email: vmalik@redhat.com
+       gluser: vmalikrh
+   paths:
+       includes:
+          - arch/*/net/*
+          - Documentation/networking/filter.txt
+          - include/linux/filter.h
+          - include/trace/events/xdp.h
+          - include/uapi/linux/filter.h
+          - net/core/filter.c
+       includeRegexes:
+          - b[pt]f
+       excludes:
+          - net/bpfilter/
+ - subsystem: BROADCOM B44 10/100 ETHERNET DRIVER
+   labels:
+     name: b44
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
+   paths:
+       includes:
+          - drivers/net/ethernet/broadcom/b44.*
+ - subsystem: BROADCOM BNX2 GIGABIT ETHERNET DRIVER (bnx2)
+   labels:
+     name: bnx2
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+   paths:
+       includes:
+          - drivers/net/ethernet/broadcom/bnx2.*
+          - drivers/net/ethernet/broadcom/bnx2_*
+ - subsystem: BROADCOM BNX2X GIGABIT ETHERNET DRIVER (bnx2x)
+   labels:
+     name: bnx2x
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/net/ethernet/broadcom/bnx2x.*
+          - drivers/net/ethernet/broadcom/bnx2x_*
+ - subsystem: BROADCOM BNXT_EN 50 GIGABIT ETHERNET DRIVER
+   labels:
+     name: bnxt_en
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+   paths:
+       includes:
+          - drivers/net/ethernet/broadcom/bnxt/
+          - drivers/net/ethernet/broadcom/Kconfig
+ - subsystem: BROADCOM BNXT_RE RDMA ROCE DRIVER
+   labels:
+     name: bnxt_re
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Selvin Xavier
+       email: sxavier@redhat.com
+       gluser: sxavier_rh
+       restricted: true
+   paths:
+       includes:
+          - drivers/infiniband/hw/bnxt_re/
+          - include/uapi/rdma/bnxt_re-abi.h
+ - subsystem: Broadcom NetXtreme II BCM5706/5708/5709/57710/57711/57712/57800/57810/57840 iSCSI Driver
+   labels:
+     name: bnx2i
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Maurizio Lombardi
+       email: mlombard@redhat.com
+       gluser: mlombard
+   paths:
+       includes:
+          - drivers/scsi/bnx2i/
+ - subsystem: Broadcom NetXtreme II BCM57710 FCoE Driver
+   labels:
+     name: bnx2fc
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Maurizio Lombardi
+       email: mlombard@redhat.com
+       gluser: mlombard
+   reviewers:
+     - name: John Meneghini
+       email: jmeneghi@redhat.com
+       gluser: johnmeneghini
+   paths:
+       includes:
+          - drivers/scsi/bnx2fc/
+ - subsystem: Broadcom NetXtreme II CNIC Driver (cnic)
+   labels:
+     name: cnic
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Maurizio Lombardi
+       email: mlombard@redhat.com
+       gluser: mlombard
+   paths:
+       includes:
+          - drivers/net/ethernet/broadcom/cnic*
+ - subsystem: BROADCOM TG3 GIGABIT ETHERNET DRIVER
+   labels:
+     name: tg3
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+   paths:
+       includes:
+          - drivers/net/ethernet/broadcom/tg3.*
+          - drivers/net/ethernet/broadcom/Kconfig
+ - subsystem: BUS DRIVER
+   labels:
+     name: bus
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Myron Stowe
+       email: mstowe@redhat.com
+       gluser: mstowe1
+   paths:
+       includes:
+          - drivers/bus/
+ - subsystem: CAN BUS
+   labels:
+     name: can
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Peter Robinson
+       email: pbrobinson@redhat.com
+       gluser: pbrobinson
+   paths:
+       includes:
+          - Documentation/networking/can.rst
+          - include/linux/can/
+          - include/uapi/linux/can/
+          - include/uapi/linux/can.h
+          - drivers/net/can/
+          - net/can/
+ - subsystem: CAVIUM LIQUIDIO NETWORK DRIVER
+   labels:
+     name: liquidio
+   status: Supported
+   maintainers:
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
+   paths:
+       includes:
+          - drivers/net/ethernet/cavium/liquidio/
+ - subsystem: CAVIUM THUNDERX NETWORK DRIVER
+   labels:
+     name: thunderx
+   status: Supported
+   maintainers:
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
+   paths:
+       includes:
+          - drivers/net/ethernet/cavium/thunder/
+          - drivers/net/ethernet/cavium/common/
+ - subsystem: CEPH COMMON CODE (LIBCEPH)
+   labels:
+     name: libceph
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ilya Dryomov
+       email: idryomov@redhat.com
+       gluser: idryomov
+     - name: Jeff Layton
+       email: jlayton@redhat.com
+       gluser: jtlayton
+   paths:
+       includes:
+          - net/ceph/
+          - include/linux/ceph/
+          - include/linux/crush/
+ - subsystem: CEPH DISTRIBUTED FILE SYSTEM CLIENT (CEPH)
+   labels:
+     name: ceph
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jeff Layton
+       email: jlayton@redhat.com
+       gluser: jtlayton
+   paths:
+       includes:
+          - Documentation/filesystems/ceph.txt
+          - fs/ceph/
+ - subsystem: CHAR and MISC DRIVERS
+   labels:
+     name: char
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/char/
+          - drivers/misc/
+          - include/linux/miscdevice.h
+ - subsystem: CIFS FILESYSTEM
+   labels:
+     name: cifs
+   status: Supported
+   requiredApproval: false
+   paths:
+       includes:
+          - fs/cifs/
+ - subsystem: CISCO FCOE HBA (fnic)
+   labels:
+     name: fnic
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Chris Leech
+       email: cleech@redhat.com
+       gluser: cleech
+   reviewers:
+     - name: John Meneghini
+       email: jmeneghi@redhat.com
+       gluser: johnmeneghini
+   paths:
+       includes:
+          - drivers/scsi/fnic/
+ - subsystem: CISCO VIC ETHERNET NIC DRIVER
+   labels:
+     name: enic
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Govindarajulu Varadarajan
+       email: gvaradar@redhat.com
+       gluser: unknown
+       restricted: true
+   paths:
+       includes:
+          - drivers/net/ethernet/cisco/enic/
+ - subsystem: COMEDI DRIVERS
+   labels:
+     name: comedi
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/comedi/
+ - subsystem: COMMON CLK FRAMEWORK
+   labels:
+     name: common_clk
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+   paths:
+       includes:
+          - Documentation/devicetree/bindings/clock/
+          - drivers/clk/
+          - include/linux/clk-pr*
+          - include/linux/clk/
+          - include/linux/of_clk.h
+ - subsystem: COMPUTE EXPRESS LINK (CXL)
+   labels:
+     name: cxl
+   status: Supported
+   required-approval: false
+   maintainers:
+     - name: Myron Stowe
+       email: mstowe@redhat.com
+       gluser: mstowe1
+     - name: Aristeu Rozanski
+       email: arozansk@redhat.com
+       gluser: arozansk
+     - name: John Linville
+       email: linville@redhat.com
+       gluser: linville-rh
+   paths:
+       includes:
+          - drivers/cxl/
+          - include/uapi/linux/cxl_mem.h
+          - Documentation/ABI/testing/sysfs-bus-cxl
+          - Documentation/driver-api/cxl/memory-devices.rst
+ - subsystem: CONFIGFS
+   labels:
+     name: configfs
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Bob Peterson
+       email: rpeterso@redhat.com
+       gluser: rpeterso1
+   paths:
+       includes:
+          - fs/configfs/
+          - include/linux/configfs.h
+ - subsystem: Continuous Integration (CKI)
+   labels:
+     name: cki
+     emailLabel: INTERNAL
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Veronika Kabatova
+       email: vkabatov@redhat.com
+       gluser: veruu
+     - name: Michael Hofmann
+       email: mhofmann@redhat.com
+       gluser: mh21
+     - name: Iñaki Malerba
+       email: imalerba@redhat.com
+       gluser: inakimalerba
+   paths:
+       includes:
+          - .gitlab-ci.yml
+          - .gitlab-ci-private.yml
+ - subsystem: CONTROL GROUP (CGROUP)
+   labels:
+     name: cgroup
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Waiman Long
+       email: longman@redhat.com
+       gluser: llong1
+   reviewers:
+     - name: Chris White
+       email: chwhite@redhat.com
+       gluser: chwhite1
+     - name: Clark Williams
+       email: williams@redhat.com
+       gluser: clrkwllms
+     - name: Joel Savitz
+       email: jsavitz@redhat.com
+       gluser: jsavitz
+     - name: Lucas Zampieri
+       email: lzampier@redhat.com
+       gluser: lzampier
+     - name: Luis Claudio Goncalves
+       email: lgoncalv@redhat.com
+       gluser: lgoncalv
+     - name: Phil Auld
+       email: pauld@redhat.com
+       gluser: prauld
+   paths:
+       includes:
+          - Documentation/cgroup*
+          - include/linux/cgroup*
+          - include/linux/cpuset.h
+          - kernel/cgroup/
+          - mm/memcontrol.c
+          - mm/swap_cgroup.c
+ - subsystem: COUNTER SUBSYSTEM
+   labels:
+     name: counter
+   status: Provided
+   requiredApproval: false
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/counter/
+          - include/linux/counter.h
+          - include/linux/counter_enum.h
+ - subsystem: CPU FREQUENCY DRIVERS
+   labels:
+     name: cpufreq
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Mark Langsdorf
+       email: mlangsdo@redhat.com
+       gluser: mlangsdorf
+     - name: Lenny Szubowicz
+       email: lszubowi@redhat.com
+       gluser: lszubowi
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+   paths:
+       includes:
+          - drivers/cpufreq/
+          - arch/x86/kernel/cpu/cpufreq/
+ - subsystem: CPU IDLE DRIVERS
+   labels:
+     name: cpuidle
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Mark Langsdorf
+       email: mlangsdo@redhat.com
+       gluser: mlangsdorf
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+   paths:
+       includes:
+          - drivers/cpuidle/
+ - subsystem: CRYPTO API
+   labels:
+     name: crypto
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Herbert Xu
+       email: herbert.xu@redhat.com
+       gluser: herbert.xu2
+     - name: '"David S. Miller"'
+       email: davem@redhat.com
+       gluser: davem_dokebi
+     - name: Vladis Dronov
+       email: vdronov@redhat.com
+       gluser: NefigTut
+   reviewers:
+     - name: Bruno Meneguele
+       email: bmeneg@redhat.com
+       gluser: bmeneg
+     - name: Ondrej Mosnacek
+       email: omosnace@redhat.com
+       gluser: omos
+     - name: Phil Auld
+       email: pauld@redhat.com
+       gluser: prauld
+   paths:
+       includes:
+          - Documentation/crypto/
+          - Documentation/devicetree/bindings/crypto/
+          - arch/*/crypto/
+          - crypto/
+          - drivers/crypto/
+          - include/crypto/
+          - include/linux/crypto*
+          - lib/crypto/
+ - subsystem: CXGB3 ETHERNET DRIVER (cxgb3)
+   labels:
+     name: cxgb3
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/net/ethernet/chelsio/cxgb3/
+ - subsystem: CXGB4 ETHERNET DRIVER (cxgb4)
+   labels:
+     name: cxgb4
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/net/ethernet/chelsio/cxgb4/
+ - subsystem: CXGB4 IWARP DRIVER (IW_CXGB4)
+   labels:
+     name: iw_cxgb4
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/infiniband/hw/cxgb4/
+          - include/uapi/rdma/cxgb4-abi.h
+ - subsystem: DALLAS 1-WIRE SUPPORT
+   labels:
+     name: w1
+   status: Disabled
+   requiredApproval: false
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/w1/
+ - subsystem: DCA SUBSYSTEM
+   labels:
+     name: dca
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jerry Snitselaar
+       email: jsnitsel@redhat.com
+       gluser: jsnitsel
+   paths:
+       includes:
+          - drivers/dca/
+ - subsystem: DEVICE DIRECT ACCESS
+   labels:
+     name: dax
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jeff Moyer
+       email: jmoyer@redhat.com
+       gluser: jmoyer1
+   paths:
+       includes:
+          - drivers/dax/
+ - subsystem: DEVICE FREQUENCY (DEVFREQ)
+   labels:
+     name: devfreq
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/devfreq/
+ - subsystem: DEVICE MAPPER SUPPORT
+   labels:
+     name: dm
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Mike Snitzer
+       email: snitzer@redhat.com
+       gluser: snitm
+   paths:
+       includes:
+          - Documentation/device-mapper/
+          - drivers/md/dm*
+          - drivers/md/persistent-data/
+          - include/linux/device-mapper.h
+          - include/linux/dm-*.h
+          - include/uapi/linux/dm-*.h
+ - subsystem: DEVLINK
+   labels:
+     name: devlink
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+   reviewers:
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+   paths:
+       includes:
+          - Documentation/networking/devlink/
+          - net/core/devlink.c
+          - include/net/devlink.h
+          - include/uapi/linux/devlink.h
+ - subsystem: DIRECT IO
+   labels:
+     name: direct_io
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jeff Moyer
+       email: jmoyer@redhat.com
+       gluser: jmoyer1
+   paths:
+       includes:
+          - fs/direct-io.c
+ - subsystem: Disk Array driver for HP Smart Array SAS controllers (hpsa)
+   labels:
+     name: hpsa
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Tomas Henzl
+       email: thenzl@redhat.com
+       gluser: thenzl
+   paths:
+       includes:
+          - drivers/scsi/hpsa*
+ - subsystem: DISTRIBUTED LOCK MANAGER (DLM)
+   labels:
+     name: dlm
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Alexander Aring
+       email: aahringo@redhat.com
+       gluser: netcoder
+   reviewers:
+     - name: David Teigland
+       email: teigland@redhat.com
+       gluser: teigland
+     - name: Bob Peterson
+       email: rpeterso@redhat.com
+       gluser: rpeterso1
+   paths:
+       includes:
+          - fs/dlm/
+ - subsystem: DM and MD build and config files
+   labels:
+     name: dm_and_md
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Mike Snitzer
+       email: snitzer@redhat.com
+       gluser: snitm
+     - name: Nigel Croxon
+       email: ncroxon@redhat.com
+       gluser: ncroxon
+   paths:
+       includes:
+          - drivers/md/Kconfig
+          - drivers/md/Makefile
+ - subsystem: DMA BUFFER SHARING FRAMEWORK
+   labels:
+     name: dma_buf
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Lyude Paul
+       email: lyude@redhat.com
+       gluser: Lyude
+   paths:
+       includes:
+          - drivers/dma-buf/
+          - include/linux/dma-buf*
+ - subsystem: DMA DRIVERS
+   labels:
+     name: dma_drivers
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jerry Snitselaar
+       email: jsnitsel@redhat.com
+       gluser: jsnitsel
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+   paths:
+       includes:
+          - drivers/dma/
+ - subsystem: DMA SUPPORT
+   labels:
+     name: dma
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jerry Snitselaar
+       email: jsnitsel@redhat.com
+       gluser: jsnitsel
+     - name: Donald Dutile
+       email: ddutile@redhat.com
+       gluser: ddutile
+   reviewers:
+     - name: Clark Williams
+       email: williams@redhat.com
+       gluser: clrkwllms
+     - name: Joel Savitz
+       email: jsavitz@redhat.com
+       gluser: jsavitz
+     - name: Lucas Zampieri
+       email: lzampier@redhat.com
+       gluser: lzampier
+   paths:
+       includes:
+          - kernel/dma/
+          - include/linux/dma*
+ - subsystem: DRIVER CODE
+   labels:
+     name: base
+   maintainers:
+     - name: Mark Langsdorf
+       email: mlangsdo@redhat.com
+       gluser: mlangsdorf
+   status: Supported
+   paths:
+       includes:
+          - drivers/base/
+ - subsystem: EDAC/HERM
+   labels:
+     name: edac
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Aristeu Rozanski
+       email: arozansk@redhat.com
+       gluser: arozansk
+   reviewers:
+     - name: Herton R. Krzesinski
+       email: herton@redhat.com
+       gluser: hertonrk-rh
+     - name: Rafael Aquini
+       email: aquini@redhat.com
+       gluser: raquini
+   paths:
+       includes:
+          - drivers/edac/
+ - subsystem: EISA
+   labels:
+     name: eisa
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/eisa/
+ - subsystem: EMULEX FC DRIVER
+   labels:
+     name: lpfc
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ewan D. Milne
+       email: emilne@redhat.com
+       gluser: e-milne
+   paths:
+       includes:
+          - drivers/scsi/lpfc/
+ - subsystem: ETHERNET
+   labels:
+     name: ethernet
+   status: Supported
+   requiredApproval: false
+   reviewers:
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
+   paths:
+       includes:
+          - drivers/net/ethernet/
+ - subsystem: ETHERNET BRIDGE
+   labels:
+     name: if_bridge
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+     - name: Hangbin Liu
+       email: haliu@redhat.com
+       gluser: liuhangbin
+   paths:
+       includes:
+          - net/bridge/
+          - include/linux/if_bridge.h
+ - subsystem: ETHERNET PHY LIBRARY
+   labels:
+     name: phylib
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
+   paths:
+       includes:
+          - Documentation/networking/phy.rst
+          - drivers/net/phy/
+          - drivers/of/of_mdio.c
+          - include/linux/*mdio*.h
+          - include/linux/phy.h
+          - include/linux/phy_fixed.h
+          - include/linux/platform_data/mdio-bcm-unimac.h
+          - include/linux/platform_data/mdio-gpio.h
+          - include/trace/events/mdio.h
+          - include/uapi/linux/mdio.h
+          - include/uapi/linux/mii.h
+ - subsystem: EXT4 FILE SYSTEM
+   labels:
+     name: ext4
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Lukas Czerner
+       email: lczerner@redhat.com
+       gluser: lczerner
+   paths:
+       includes:
+          - Documentation/filesystems/ext4/ext4.rst
+          - fs/ext4/
+ - subsystem: EXTERNAL CONNECTOR SUBSYSTEM (EXTCON)
+   labels:
+     name: extcon
+   status: Provided
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/extcon/
+ - subsystem: FCOE (libfc, libfcoe)
+   labels:
+     name: libfc
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: John Meneghini
+       email: jmeneghi@redhat.com
+       gluser: johnmeneghini
+   reviewers:
+     - name: Chris Leech
+       email: cleech@redhat.com
+       gluser: cleech
+   paths:
+       includes:
+          - drivers/scsi/libfc/
+          - drivers/scsi/fcoe/
+          - include/scsi/libfc.h
+          - include/scsi/libfcoe.h
+          - include/scsi/fcoe_*.h
+          - include/scsi/fc_*.h
+          - include/scsi/fc/
+       excludes:
+          - drivers/scsi/fcoe/fcoe.c
+ - subsystem: FEDORA
+   labels:
+     name: fedora
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Justin Forbes
+       email: jforbes@fedoraproject.org
+       gluser: jmflinuxtx
+   paths:
+       includes:
+          - redhat/configs/fedora/
+          - redhat/fedora_files/
+ - subsystem: FILESYSTEM (GENERAL)
+   labels:
+     name: fs
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Brian Foster
+       email: bfoster@redhat.com
+       gluser: bfoster2
+     - name: Carlos Maiolino
+       email: cmaiolino@redhat.com
+       gluser: cmaiolino
+     - name: Eric Sandeen
+       email: esandeen@redhat.com
+       gluser: esandeen-rh
+     - name: Bill O'Donnell
+       email: bodonnel@redhat.com
+       gluser: bodonnel
+     - name: Dave Chinner
+       email: dchinner@redhat.com
+       gluser: dchinner
+   paths:
+       includes:
+          - fs/
+       excludes:
+          - fs/aio.c
+          - fs/ceph/
+          - fs/cifs/
+          - fs/configfs/
+          - fs/cramfs/
+          - fs/dax.c
+          - fs/direct-io.c
+          - fs/dlm/
+          - fs/ext4/
+          - fs/fuse/
+          - fs/gfs2/
+          - fs/jbd2/
+          - fs/lockd/
+          - fs/nfs/
+          - fs/nfsd/
+          - fs/overlayfs/
+          - fs/proc/vmcore.c
+          - fs/pstore/
+          - fs/squashfs/
+          - fs/xfs/
+          - fs/proc/namespaces.c
+ - subsystem: FILESYSTEM DIRECT ACCESS
+   labels:
+     name: fs_dax
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jeff Moyer
+       email: jmoyer@redhat.com
+       gluser: jmoyer1
+     - name: Eric Sandeen
+       email: esandeen@redhat.com
+       gluser: esandeen-rh
+   paths:
+       includes:
+          - fs/dax.c
+          - include/linux/dax.h
+          - include/trace/events/fs_dax.h
+ - subsystem: FIREWIRE SUBSYSTEM
+   labels:
+     name: firewire
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/firewire/
+          - include/linux/firewire*.h
+ - subsystem: FIRMWARE SUBSYSTEM
+   labels:
+     name: firmware
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Lenny Szubowicz
+       email: lszubowi@redhat.com
+       gluser: lszubowi
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+     - name: Mark Langsdorf
+       email: mlangsdo@redhat.com
+       gluser: mlangsdorf
+   paths:
+       includes:
+          - drivers/firmware/
+ - subsystem: FORCEDETH ETHERNET DRIVER (forcedeth)
+   labels:
+     name: forcedeth
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+   paths:
+       includes:
+          - drivers/net/ethernet/nvidia/forcedeth.c
+ - subsystem: FSI SUBSYSTEM
+   labels:
+     name: fsi
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/fsi/
+ - subsystem: FTRACE
+   labels:
+     name: ftrace
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jerome Marchand
+       email: jmarchan@redhat.com
+       gluser: jeromemarchand
+   reviewers:
+     - name: Joe Lawrence
+       email: joe.lawrence@redhat.com
+       gluser: joe.lawrence
+     - name: Josh Poimboeuf
+       email: jpoimboe@redhat.com
+       gluser: jpoimboe
+     - name: Luis Claudio Goncalves
+       email: lgoncalv@redhat.com
+       gluser: lgoncalv
+     - name: Waiman Long
+       email: longman@redhat.com
+       gluser: llong1
+     - name: Yannick Cote
+       email: ycote@redhat.com
+       gluser: ycote1
+   paths:
+       includes:
+          - kernel/trace/
+          - include/linux/ftrace*
+ - subsystem: FUSE FILESYSTEM
+   labels:
+     name: fuse
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Miklos Szeredi
+       email: mszeredi@redhat.com
+       gluser: mszeredi
+   paths:
+       includes:
+          - fs/fuse/
+          - include/uapi/linux/fuse.h
+ - subsystem: Fusion MPT SAS Host driver (mptsas)
+   labels:
+     name: mptsas
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Tomas Henzl
+       email: thenzl@redhat.com
+       gluser: thenzl
+   paths:
+       includes:
+          - drivers/message/fusion/
+ - subsystem: FUTEX SUBSYSTEM
+   labels:
+     name: futex
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Waiman Long
+       email: longman@redhat.com
+       gluser: llong1
+   reviewers:
+     - name: Clark Williams
+       email: williams@redhat.com
+       gluser: clrkwllms
+     - name: Donghai Qiao
+       email: dqiao@redhat.com
+       gluser: dqiao
+     - name: Julia Denham
+       email: jdenham@redhat.com
+       gluser: jdenham
+     - name: Nico Pache
+       email: npache@redhat.com
+       gluser: npache
+     - name: Oleg Nesterov
+       email: onestero@redhat.com
+       gluser: onestero
+   paths:
+       includes:
+          - Documentation/*futex*
+          - include/asm-generic/futex.h
+          - include/linux/futex.h
+          - include/uapi/linux/futex.h
+          - kernel/futex.c
+          - tools/perf/bench/futex*
+          - tools/testing/selftests/futex/
+ - subsystem: GENERIC PHY FRAMEWORK
+   labels:
+     name: phy
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
+   paths:
+       includes:
+          - Documentation/devicetree/bindings/phy/
+          - drivers/phy/
+          - include/linux/phy/
+ - subsystem: GFS2 FILE SYSTEM
+   labels:
+     name: gfs2
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Bob Peterson
+       email: rpeterso@redhat.com
+       gluser: rpeterso1
+     - name: Andreas Gruenbacher
+       email: agruenba@redhat.com
+       gluser: agruenba
+   reviewers:
+     - name: Abhi Das
+       email: adas@redhat.com
+       gluser: adas7
+     - name: Andrew Price
+       email: anprice@redhat.com
+       gluser: andyprice
+     - name: Paul Evans
+       email: pevans@redhat.com
+       gluser: pevans1
+   paths:
+       includes:
+          - Documentation/filesystems/gfs2*.txt
+          - fs/gfs2/
+          - include/uapi/linux/gfs2_ondisk.h
+ - subsystem: GNSS SUBSYSTEM
+   labels:
+     name: gnss
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/gnss/
+ - subsystem: GPIO SUBSYSTEM
+   labels:
+     name: gpio
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Brian Masney
+       email: bmasney@redhat.com
+       gluser: bmasney
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+   paths:
+       includes:
+          - Documentation/ABI/obsolete/sysfs-gpio
+          - Documentation/ABI/testing/gpio-cdev
+          - Documentation/admin-guide/gpio/
+          - Documentation/devicetree/bindings/gpio/
+          - Documentation/driver-api/gpio/
+          - drivers/gpio/
+          - include/asm-generic/gpio.h
+          - include/linux/gpio.h
+          - include/linux/gpio/
+          - include/linux/of_gpio.h
+          - include/uapi/linux/gpio.h
+          - tools/gpio/
+ - subsystem: GREYBUS SUBSYSTEM
+   labels:
+     name: greybus
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/greybus/
+ - subsystem: HARDWARE SPINLOCK CORE
+   labels:
+     name: hwspinlock
+   status: Provided
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/hwspinlock/
+ - subsystem: HARDWARE TRACING FACILITIES
+   labels:
+     name: hwtracing
+   status: Provided
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/hwtracing/
+ - subsystem: HID CORE LAYER
+   labels:
+     name: hid
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Benjamin Tissoires
+       email: benjamin.tissoires@redhat.com
+       gluser: btissoir
+   paths:
+       includes:
+          - drivers/hid/
+          - include/linux/hid*
+          - include/uapi/linux/hid*
+ - subsystem: HSI SUBSYSTEM
+   labels:
+     name: hsi
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/hsi/
+ - subsystem: HWMON SUBSYSTEM
+   labels:
+     name: hwmon
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Dean Nelson
+       email: dnelson@redhat.com
+       gluser: dnlsn
+   paths:
+       includes:
+          - drivers/hwmon/
+ - subsystem: HWPOISON MEMORY FAILURE HANDLING
+   labels:
+     name: hwpoison
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Dean Nelson
+       email: dnelson@redhat.com
+       gluser: dnlsn
+   paths:
+       includes:
+          - mm/memory-failure.c
+          - mm/hwpoison-inject.c
+ - subsystem: Hyper-V CORE AND DRIVERS
+   labels:
+     name: hyperv
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Cathy Avery
+       email: cavery@redhat.com
+       gluser: cavery
+     - name: Mohammed Gamal
+       email: mgamal@redhat.com
+       gluser: mgamal-rh
+     - name: Vitaly Kuznetsov
+       email: vkuznets@redhat.com
+       gluser: vkuznets
+   paths:
+       includes:
+          - Documentation/networking/device_drivers/microsoft/netvsc.txt
+          - arch/arm64/hyperv
+          - arch/arm64/include/asm/hyperv-tlfs.h
+          - arch/arm64/include/asm/mshyperv.h
+          - arch/x86/include/asm/mshyperv.h
+          - arch/x86/include/asm/trace/hyperv.h
+          - arch/x86/include/asm/hyperv-tlfs.h
+          - arch/x86/kernel/cpu/mshyperv.c
+          - arch/x86/hyperv
+          - drivers/clocksource/hyperv_timer.c
+          - drivers/hid/hid-hyperv.c
+          - drivers/hv/
+          - drivers/input/serio/hyperv-keyboard.c
+          - drivers/pci/controller/pci-hyperv.c
+          - drivers/pci/controller/pci-hyperv-intf.c
+          - drivers/net/hyperv/
+          - drivers/net/ethernet/microsoft/
+          - drivers/scsi/storvsc_drv.c
+          - drivers/uio/uio_hv_generic.c
+          - drivers/video/fbdev/hyperv_fb.c
+          - drivers/iommu/hyperv-iommu.c
+          - net/vmw_vsock/hyperv_transport.c
+          - include/clocksource/hyperv_timer.h
+          - include/linux/hyperv.h
+          - include/uapi/linux/hyperv.h
+          - include/asm-generic/mshyperv.h
+          - tools/hv/
+          - Documentation/ABI/stable/sysfs-bus-vmbus
+          - Documentation/ABI/testing/debugfs-hyperv
+ - subsystem: I2C SUBSYSTEM
+   labels:
+     name: i2c
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Gopal Tiwari
+       email: gtiwari@redhat.com
+       gluser: gtiwari1
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+   paths:
+       includes:
+          - Documentation/devicetree/bindings/i2c/
+          - Documentation/i2c/
+          - drivers/i2c/
+          - include/linux/i2c.h
+          - include/linux/i2c-*.h
+          - include/uapi/linux/i2c.h
+          - include/uapi/linux/i2c-*.h
+ - subsystem: I3C SUBSYSTEM
+   labels:
+     name: i3c
+   status: Disabled
+   maintainers:
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+   paths:
+       includes:
+          - drivers/i3c
+ - subsystem: INDUSTRIAL I/O SUBSYSTEM (IIO)
+   labels:
+     name: iio
+   status: Provided
+   requiredApproval: false
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/iio/
+ - subsystem: INDUSTRY PACK SUBSYSTEM (IPACK)
+   labels:
+     name: ipack
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/ipack/
+ - subsystem: INFINIBAND SUBSYSTEM
+   labels:
+     name: ib
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+   paths:
+       includes:
+          - drivers/infiniband/
+          - include/rdma/
+          - include/uapi/rdma/
+          - include/uapi/linux/if_infiniband.h
+          - Documentation/infiniband/
+ - subsystem: INIT
+   labels:
+     name: init
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   reviewers:
+     - name: Aristeu Rozanski
+       email: arozansk@redhat.com
+       gluser: arozansk
+     - name: Artem Savkov
+       email: asavkov@redhat.com
+       gluser: artem.savkov
+     - name: Clark Williams
+       email: williams@redhat.com
+       gluser: clrkwllms
+     - name: Herton R. Krzesinski
+       email: herton@redhat.com
+       gluser: hertonrk-rh
+     - name: Jan Stancek
+       email: jstancek@redhat.com
+       gluser: jstancek
+     - name: Josh Poimboeuf
+       email: jpoimboe@redhat.com
+       gluser: jpoimboe
+   paths:
+       includes:
+          - init/
+ - subsystem: INPUT (KEYBOARD, MOUSE, JOYSTICK, TOUCHSCREEN) DRIVERS
+   labels:
+     name: input
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Tony Camuso
+       email: tcamuso@redhat.com
+       gluser: tcamuso
+     - name: Benjamin Tissoires
+       email: benjamin.tissoires@redhat.com
+       gluser: btissoir
+   paths:
+       includes:
+          - Documentation/devicetree/bindings/input/
+          - Documentation/devicetree/bindings/serio/
+          - Documentation/input/
+          - drivers/input/
+          - include/linux/input.h
+          - include/linux/input/
+          - include/uapi/linux/input-event-codes.h
+          - include/uapi/linux/input.h
+ - subsystem: INTEGRITY SUBSYSTEM
+   labels:
+     name: integrity
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Bruno Meneguele
+       email: bmeneg@redhat.com
+       gluser: bmeneg
+   reviewers:
+     - name: Jerry Snitselaar
+       email: jsnitsel@redhat.com
+       gluser: jsnitsel
+     - name: Richard Guy Briggs
+       email: rbriggs@redhat.com
+       gluser: rbriggs
+     - name: Vladis Dronov
+       email: vdronov@redhat.com
+       gluser: NefigTut
+   paths:
+       includes:
+          - security/integrity/
+ - subsystem: INTEL E1000 ETHERNET DRIVER (e1000)
+   labels:
+     name: e1000
+   status: Provided
+   required-approval: false
+   maintainers:
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+   paths:
+       includes:
+          - drivers/net/ethernet/intel/e1000/
+ - subsystem: INTEL E1000E ETHERNET DRIVER (e1000e)
+   labels:
+     name: e1000e
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+   paths:
+       includes:
+          - drivers/net/ethernet/intel/e1000e/
+ - subsystem: INTEL ETHERNET CONNECTION E800 SERIES (ice)
+   labels:
+     name: ice
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jonathan Toppins
+       email: jtoppins@redhat.com
+       gluser: jtoppins_redhat
+   paths:
+       includes:
+          - drivers/net/ethernet/intel/ice/
+          - include/net/intel/
+ - subsystem: INTEL I40E ETHERNET DRIVERS (i40e)
+   labels:
+     name: i40e
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Stefan Assmann
+       email: sassmann@redhat.com
+       gluser: sassmann_rh
+   paths:
+       includes:
+          - drivers/net/ethernet/intel/i40e/
+ - subsystem: INTEL I40IW IWARP DRIVER (i40iw)
+   labels:
+     name: i40iw
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Stefan Assmann
+       email: sassmann@redhat.com
+       gluser: sassmann_rh
+   paths:
+       includes:
+          - drivers/infiniband/hw/i40iw/
+          - include/uapi/rdma/i40iw-abi.h
+ - subsystem: INTEL IAVF ETHERNET DRIVERS (iavf)
+   labels:
+     name: iavf
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Stefan Assmann
+       email: sassmann@redhat.com
+       gluser: sassmann_rh
+   paths:
+       includes:
+          - drivers/net/ethernet/intel/iavf/
+ - subsystem: INTEL IGB ETHERNET DRIVERS (igb)
+   labels:
+     name: igb
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Corinna Vinschen
+       email: vinschen@redhat.com
+       gluser: vinschen
+   paths:
+       includes:
+          - drivers/net/ethernet/intel/igb/
+ - subsystem: INTEL IGBVF ETHERNET DRIVERS (igbvf)
+   labels:
+     name: igbvf
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Corinna Vinschen
+       email: vinschen@redhat.com
+       gluser: vinschen
+   paths:
+       includes:
+          - drivers/net/ethernet/intel/igbvf/
+ - subsystem: INTEL IGC ETHERNET DRIVERS (igc)
+   labels:
+     name: igc
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Corinna Vinschen
+       email: vinschen@redhat.com
+       gluser: vinschen
+   paths:
+       includes:
+          - drivers/net/ethernet/intel/igc/
+ - subsystem: INTEL IOMMU (VT-d)
+   labels:
+     name: intel_iommu
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jerry Snitselaar
+       email: jsnitsel@redhat.com
+       gluser: jsnitsel
+     - name: Myron Stowe
+       email: myron.stowe@redhat.com
+       gluser: mstowe1
+     - name: Alex Williamson
+       email: alex.williamson@redhat.com
+       gluser: alex.williamson
+     - name: Don Dutile
+       email: ddutile@redhat.com
+       gluser: ddutile
+   paths:
+       includes:
+          - drivers/iommu/intel_iommu.c
+          - include/linux/intel-iommu.h
+ - subsystem: INTEL IXGBE ETHERNET DRIVER (ixgbe)
+   labels:
+     name: ixgbe
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+   paths:
+       includes:
+          - drivers/net/ethernet/intel/ixgbe/
+ - subsystem: INTEL IXGBEVF ETHERNET DRIVER (ixgbevf)
+   labels:
+     name: ixgbevf
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+   paths:
+       includes:
+          - drivers/net/ethernet/intel/ixgbevf/
+ - subsystem: INTEL POWERCLAMP DRIVER
+   labels:
+     name: powerclamp
+   status: Supported
+   requiredApproval: false
+   paths:
+       includes:
+          - drivers/thermal/intel_powerclamp.c
+ - subsystem: INTEL QUADRATURE ENCODER PERIPHERAL DRIVER
+   labels:
+     name: intel_qep
+   status: Maintained
+   requiredApproval: false
+   maintainers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+   paths:
+       includes:
+          - drivers/counter/intel-qep.c
+ - subsystem: INTEL QUICK ASSIST TECHNOLOGY (QAT)
+   labels:
+     name: intel_qat
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Vladis Dronov
+       email: vdronov@redhat.com
+       gluser: NefigTut
+     - name: Tony Camuso
+       email: tcamuso@redhat.com
+       gluser: tcamuso
+   paths:
+       includes:
+          - drivers/crypto/qat/
+ - subsystem: INTEL RAPL DRIVER
+   labels:
+     name: intel_rapl
+   status: Supported
+   requiredApproval: false
+   paths:
+       includes:
+          - drivers/powercap/intel_rapl.c
+ - subsystem: INTERCONNECT API
+   labels:
+     name: interconnect
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/interconnect/
+ - subsystem: INTERPROCESS COMMUNICATION (IPC)
+   labels:
+     name: ipc
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Aristeu Rozanski
+       email: arozansk@redhat.com
+       gluser: arozansk
+     - name: Rafael Aquini
+       email: aquini@redhat.com
+       gluser: raquini
+     - name: Waiman Long
+       email: longman@redhat.com
+       gluser: llong1
+   reviewers:
+     - name: Herton R. Krzesinski
+       email: herton@redhat.com
+       gluser: hertonrk-rh
+     - name: Eugene Syromiatnikov
+       email: esyromia@redhat.com
+       gluser: esyr-rh
+   paths:
+       includes:
+          - include/linux/ipc*.h
+          - include/linux/msg.h
+          - include/linux/sem.h
+          - include/linux/shm.h
+          - ipc/
+ - subsystem: INTERRUPT CONTROLLERS
+   labels:
+     name: irqchip
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+   paths:
+       includes:
+         - drivers/irqchip/
+         - include/linux/irqchip/
+         - include/linux/irqchip.h
+       excludes:
+          - drivers/irqchip/irq-gic*
+          - include/linux/irqchip/arm-gic*
+ - subsystem: IOMMU DRIVERS
+   labels:
+     name: iommu
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jerry Snitselaar
+       email: jsnitsel@redhat.com
+       gluser: jsnitsel
+     - name: Myron Stowe
+       email: myron.stowe@redhat.com
+       gluser: mstowe1
+     - name: Alex Williamson
+       email: alex.williamson@redhat.com
+       gluser: alex.williamson
+     - name: Don Dutile
+       email: ddutile@redhat.com
+       gluser: ddutile
+   paths:
+       includes:
+          - drivers/iommu/
+ - subsystem: IPMI SUBSYSTEM
+   labels:
+     name: ipmi
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Tony Camuso
+       email: tcamuso@redhat.com
+       gluser: tcamuso
+   paths:
+       includes:
+          - drivers/char/ipmi/
+          - include/linux/ipmi-fru.h
+          - include/linux/ipmi.h
+          - include/linux/ipmi_smi.h
+          - include/uapi/linux/ipmi.h
+          - include/uapi/linux/ipmi_bmc.h
+          - include/uapi/linux/ipmi_msgdefs.h
+ - subsystem: IRQ SUBSYSTEM
+   labels:
+     name: irq
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+   paths:
+       includes:
+          - kernel/irq/
+ - subsystem: ISCSI (iscsi_tcp, libiscsi, libiscsi_tcp, scsi_transport_iscsi)
+   labels:
+     name: iscsi
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Chris Leech
+       email: cleech@redhat.com
+       gluser: cleech
+   paths:
+       includes:
+          - drivers/scsi/*iscsi*
+          - include/scsi/*iscsi*
+ - subsystem: ISMT SMBUS DRIVER
+   labels:
+     name: ismt
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Tony Camuso
+       email: tcamuso@redhat.com
+       gluser: tcamuso
+   paths:
+       includes:
+          - drivers/i2c/busses/i2c-ismt.c
+ - subsystem: JOURNALLING LAYER FOR BLOCK DEVICES (JBD2)
+   labels:
+     name: jbd2
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Lukas Czerner
+       email: lczerner@redhat.com
+       gluser: lczerner
+   paths:
+       includes:
+          - fs/jbd2/
+          - include/linux/jbd2.h
+ - subsystem: KASLR
+   labels:
+     name: kaslr
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Baoquan He
+       email: bhe@redhat.com
+       gluser: baoquan_he
+   paths:
+       includes:
+          - arch/x86/boot/compressed/kaslr.c
+          - arch/x86/mm/kaslr.c
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: KERNEL INIT (and related code)
+   labels:
+     name: kernelinit
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - kernel/*.[ch]
+       excludes:
+          - kernel/audit*
+          - kernel/crash_*.c
+          - kernel/futex.c
+          - kernel/kexec*
+          - kernel/rcu/
+ - subsystem: KERNEL VIRTUAL MACHINE (KVM)
+   labels:
+     name: kvm
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Paolo Bonzini
+       email: pbonzini@redhat.com
+       gluser: bonzini
+     - name: Bandan Das
+       email: bsd@redhat.com
+       gluser: bdas1
+     - name: Vitaly Kuznetsov
+       email: vkuznets@redhat.com
+       gluser: vkuznets
+   paths:
+       includes:
+          - Documentation/virt/kvm/
+          - include/trace/events/kvm.h
+          - include/uapi/asm-generic/kvm*
+          - include/uapi/linux/kvm*
+          - include/asm-generic/kvm*
+          - include/linux/kvm*
+          - include/kvm/iodev.h
+          - virt/kvm/
+          - tools/kvm/
+          - tools/testing/selftests/kvm/
+ - subsystem: KERNEL VIRTUAL MACHINE FOR AMD-V (KVM/amd)
+   labels:
+     name: amd_kvm
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Paolo Bonzini
+       email: pbonzini@redhat.com
+       gluser: bonzini
+     - name: Bandan Das
+       email: bsd@redhat.com
+       gluser: bdas1
+     - name: Vitaly Kuznetsov
+       email: vkuznets@redhat.com
+       gluser: vkuznets
+     - name: Wei Huang
+       email: wehuang@redhat.com
+       gluser: wehuang
+       restricted: true
+   paths:
+       includes:
+          - arch/x86/include/asm/svm.h
+          - arch/x86/include/uapi/asm/svm.h
+          - arch/x86/kvm/svm.c
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: KERNEL VIRTUAL MACHINE FOR ARM64 (KVM/arm64)
+   labels:
+     name: arm64_kvm
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Andrew Jones
+       email: drjones@redhat.com
+       gluser: rhdrjones
+     - name: Eric Auger
+       email: eric.auger@redhat.com
+       gluser: eauger1
+     - name: Gavin Shan
+       email: gshan@redhat.com
+       gluser: gwshan
+   paths:
+       includes:
+          - arch/arm64/include/uapi/asm/kvm*
+          - arch/arm64/include/asm/kvm*
+          - arch/arm64/kvm/
+          - virt/kvm/arm/
+          - include/kvm/arm_*
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: KERNEL VIRTUAL MACHINE FOR POWERPC (KVM/powerpc)
+   labels:
+     name: ppc_kvm
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: David Gibson
+       email: dgibson@redhat.com
+       gluser: rhdgibson
+     - name: Laurent Vivier
+       email: lvivier@redhat.com
+       gluser: lvivier
+     - name: Greg Kurz
+       email: gkurz@redhat.com
+       gluser: rhgkurz
+   paths:
+       includes:
+          - arch/powerpc/include/uapi/asm/kvm*
+          - arch/powerpc/include/asm/kvm*
+          - arch/powerpc/kvm/
+          - arch/powerpc/kernel/kvm*
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: KERNEL VIRTUAL MACHINE for s390 (KVM/s390)
+   labels:
+     name: s390_kvm
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Thomas Huth
+       email: thuth@redhat.com
+       gluser: thuth
+     - name: Cornelia Huck
+       email: cohuck@redhat.com
+       gluser: cohuck
+     - name: David Hildenbrand
+       email: david@redhat.com
+       gluser: davidhildenbrand
+   paths:
+       includes:
+          - arch/s390/include/uapi/asm/kvm*
+          - arch/s390/include/asm/gmap.h
+          - arch/s390/include/asm/kvm*
+          - arch/s390/kvm/
+          - arch/s390/mm/gmap.c
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: KERNEL VIRTUAL MACHINE FOR X86 (KVM/x86)
+   labels:
+     name: x86_kvm
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Paolo Bonzini
+       email: pbonzini@redhat.com
+       gluser: bonzini
+     - name: Bandan Das
+       email: bsd@redhat.com
+       gluser: bdas1
+     - name: Vitaly Kuznetsov
+       email: vkuznets@redhat.com
+       gluser: vkuznets
+   paths:
+       includes:
+          - arch/x86/kvm/
+          - arch/x86/include/uapi/asm/kvm*
+          - arch/x86/include/uapi/asm/vmx.h
+          - arch/x86/include/asm/kvm*
+          - arch/x86/include/asm/pvclock-abi.h
+          - arch/x86/include/asm/vmx*.h
+          - arch/x86/kernel/kvm.c
+          - arch/x86/kernel/kvmclock.c
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: KEXEC/KDUMP
+   labels:
+     name: kexec_kdump
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Baoquan He
+       email: bhe@redhat.com
+       gluser: baoquan_he
+   reviewers:
+     - name: Julia Denham
+       email: jdenham@redhat.com
+       gluser: jdenham
+     - name: Lucas Zampieri
+       email: lzampier@redhat.com
+       gluser: lzampier
+     - name: Pingfan Liu
+       email: piliu@redhat.com
+       gluser: piliu
+     - name: Tao Liu
+       email: ltao@redhat.com
+       gluser: liutgnu
+     - name: Lianbo Jiang
+       email: lijiang@redhat.com
+       gluser: lijiang1
+     - name: Philipp Rudo
+       email: prudo@redhat.com
+       gluser: prudo1
+   paths:
+       includes:
+          - Documentation/admin-guide/kdump/
+          - include/linux/crash_core.h
+          - include/linux/crash_dump.h
+          - include/uapi/linux/vmcore.h
+          - include/linux/kexec.h
+          - include/uapi/linux/kexec.h
+          - fs/proc/vmcore.c
+          - kernel/crash_*.c
+          - kernel/kexec*
+          - arch/x86/kernel/machine_kexec_*.c
+          - arch/x86/kernel/crash*.c
+          - arch/x86/kernel/kexec-bzimage64.c
+   mailingList: kdump-bugs@redhat.com
+ - subsystem: LEDS DRIVERS
+   labels:
+     name: leds
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Tony Camuso
+       email: tcamuso@redhat.com
+       gluser: tcamuso
+   paths:
+       includes:
+          - drivers/leds/
+ - subsystem: LIB
+   labels:
+     name: lib
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   reviewers:
+     - name: Aristeu Rozanski
+       email: arozansk@redhat.com
+       gluser: arozansk
+     - name: Christoph von Recklinghausen
+       email: crecklin@redhat.com
+       gluser: crecklin
+     - name: Eugene Syromiatnikov
+       email: esyromia@redhat.com
+       gluser: esyr-rh
+     - name: Herton R. Krzesinski
+       email: herton@redhat.com
+       gluser: hertonrk-rh
+     - name: Nico Pache
+       email: npache@redhat.com
+       gluser: npache
+     - name: Oleg Nesterov
+       email: onestero@redhat.com
+       gluser: onestero
+     - name: Rafael Aquini
+       email: aquini@redhat.com
+       gluser: raquini
+   paths:
+       includes:
+          - lib/
+       excludes:
+          - lib/nlattr.c
+ - subsystem: LIVE PATCHING / KPATCH
+   labels:
+     name: kpatch
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Josh Poimboeuf
+       email: jpoimboe@redhat.com
+       gluser: jpoimboe
+     - name: Joe Lawrence
+       email: joe.lawrence@redhat.com
+       gluser: joe.lawrence
+     - name: Artem Savkov
+       email: asavkov@redhat.com
+       gluser: artem.savkov
+     - name: Yannick Cote
+       email: ycote@redhat.com
+       gluser: ycote1
+   reviewers:
+     - name: Joel Savitz
+       email: jsavitz@redhat.com
+       gluser: jsavitz
+   paths:
+       includes:
+          - Documentation/ABI/testing/sysfs-kernel-livepatch
+          - Documentation/livepatch/
+          - arch/powerpc/include/asm/livepatch.h
+          - arch/x86/include/asm/livepatch.h
+          - arch/x86/kernel/livepatch.c
+          - include/linux/livepatch.h
+          - kernel/livepatch/
+          - lib/livepatch/
+          - samples/livepatch/
+          - tools/objtool/
+          - tools/testing/selftests/livepatch/
+ - subsystem: LOCKING PRIMITIVES
+   labels:
+     name: locking
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Waiman Long
+       email: longman@redhat.com
+       gluser: llong1
+   reviewers:
+     - name: Artem Savkov
+       email: asavkov@redhat.com
+       gluser: artem.savkov
+     - name: Clark Williams
+       email: williams@redhat.com
+       gluser: clrkwllms
+     - name: Donghai Qiao
+       email: dqiao@redhat.com
+       gluser: dqiao
+     - name: Oleg Nesterov
+       email: onestero@redhat.com
+       gluser: onestero
+     - name: Phil Auld
+       email: pauld@redhat.com
+       gluser: prauld
+     - name: Wander Costa
+       email: wander@redhat.com
+       gluser: walac
+   paths:
+       includes:
+          - Documentation/locking/
+          - arch/*/include/asm/mutex*.h
+          - arch/*/include/asm/spinlock*.h
+          - include/asm-generic/qrwlock*
+          - include/asm-generic/qspinlock*
+          - include/linux/lockdep.h
+          - include/linux/mutex*.h
+          - include/linux/rwlock*.h
+          - include/linux/rwsem*.h
+          - include/linux/seqlock.h
+          - include/linux/spinlock*.h
+          - lib/locking*.[ch]
+          - kernel/locking/
+ - subsystem: LSI 3ware SAS/SATA-RAID Linux Drive (3w-sas)
+   labels:
+     name: 3w-sas
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Tomas Henzl
+       email: thenzl@redhat.com
+       gluser: thenzl
+   paths:
+       includes:
+          - drivers/scsi/3w-sas*
+ - subsystem: LSI MegaRAID SAS Driver (megaraid_sas)
+   labels:
+     name: megaraid_sas
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Tomas Henzl
+       email: thenzl@redhat.com
+       gluser: thenzl
+   paths:
+       includes:
+          - drivers/scsi/megaraid/
+ - subsystem: LSI MPT Fusion SAS 2.0 Device Driver (mpt2sas)
+   labels:
+     name: mpt2sas
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Tomas Henzl
+       email: thenzl@redhat.com
+       gluser: thenzl
+   paths:
+       includes:
+          - drivers/scsi/mpt2sas/
+ - subsystem: LSI MPT Fusion SAS 3.0 Device Driver (mpt3sas)
+   labels:
+     name: mpt3sas
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Tomas Henzl
+       email: thenzl@redhat.com
+       gluser: thenzl
+   paths:
+       includes:
+          - drivers/scsi/mpt3sas/
+ - subsystem: MACHINE CHECK ERROR (MCE) SUBSYSTEM
+   labels:
+     name: mce
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - arch/x86/kernel/cpu/mcheck/
+ - subsystem: MACINTOSH SUBSYSTEM
+   labels:
+     name: macintosh
+   status: Disabled
+   requiredApproval: false
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/macintosh/
+ - subsystem: MAILBOX DRIVERS
+   labels:
+     name: mailbox
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Al Stone
+       email: ahs3@redhat.com
+       gluser: ahs3
+   paths:
+       includes:
+          - drivers/mailbox/
+ - subsystem: MEDIA INPUT INFRASTRUCTURE (V4L/DVB)
+   labels:
+     name: media
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
+   paths:
+       includes:
+          - drivers/media/
+          - include/media/
+          - include/uapi/linux/dvb/
+          - include/uapi/linux/videodev2.h
+          - include/uapi/linux/media.h
+          - include/uapi/linux/v4l2-*
+          - include/uapi/linux/ivtv*
+ - subsystem: MELLANOX ETHERNET SWITCH DRIVERS
+   labels:
+     name: mlxsw
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+   paths:
+       includes:
+          - drivers/net/ethernet/mellanox/mlxsw/
+ - subsystem: MEMORY CONTROLLER DRIVERS
+   labels:
+     name: memcontrol
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/memory/
+   mailingList: mm-maint@redhat.com
+ - subsystem: MEMORY HOTPLUG
+   labels:
+     name: mem_hp
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/acpi/acpi_memhotplug.c
+          - include/linux/memory_hotplug.h
+ - subsystem: MEMORY MANAGEMENT
+   labels:
+     name: mm
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Rafael Aquini
+       email: aquini@redhat.com
+       gluser: raquini
+   reviewers:
+     - name: Aristeu Rozanski
+       email: arozansk@redhat.com
+       gluser: arozansk
+     - name: Artem Savkov
+       email: asavkov@redhat.com
+       gluser: artem.savkov
+     - name: Baoquan He
+       email: bhe@redhat.com
+       gluser: baoquan_he
+     - name: Christoph von Recklinghausen
+       email: crecklin@redhat.com
+       gluser: crecklin
+     - name: Don Dutile
+       email: ddutile@redhat.com
+       gluser: ddutile
+     - name: Herton R. Krzesinski
+       email: herton@redhat.com
+       gluser: hertonrk-rh
+     - name: Leah Leshchinsky
+       email: lleshchi@redhat.com
+       gluser: lleshchi
+     - name: Nico Pache
+       email: npache@redhat.com
+       gluser: npache
+     - name: Waiman Long
+       email: longman@redhat.com
+       gluser: llong1
+   paths:
+       includes:
+          - arch/arm64/mm/
+          - arch/powerpc/mm/
+          - arch/s390/mm/
+          - arch/x86/mm/
+          - include/linux/compaction.h
+          - include/linux/gfp.h
+          - include/linux/huge*.h
+          - include/linux/kasan.h
+          - include/linux/khugepaged.h
+          - include/linux/kmemleak.h
+          - include/linux/ksm.h
+          - include/linux/mem*.h
+          - include/linux/migrate.h
+          - include/linux/mm*.h
+          - include/linux/node*.h
+          - include/linux/numa.h
+          - include/linux/oom.h
+          - include/linux/page*.h
+          - include/linux/pfn*.h
+          - include/linux/rmap.h
+          - include/linux/shm*.h
+          - include/linux/shrinker.h
+          - include/linux/slab_def.h
+          - include/linux/slab.h
+          - include/linux/slub_def.h
+          - include/linux/swap*.h
+          - include/linux/vmalloc.h
+          - include/linux/vmpressure.h
+          - include/linux/vmstat.h
+          - mm/
+ - subsystem: MEMORY TECHNOLOGY DEVICE SUPPORT (MTD)
+   labels:
+     name: mtd
+   status: Unassigned
+   requiredApproval: false
+   maintainers:
+   paths:
+       includes:
+          - drivers/mtd/
+ - subsystem: MFD DRIVERS (Multi Function Devices)
+   labels:
+     name: mfd
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Torez Smith
+       email: torez@redhat.com
+       gluser: torez
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+     - name: Tony Camuso
+       email: tcamuso@redhat.com
+       gluser: tcamuso
+   paths:
+       includes:
+          - drivers/mfd/
+ - subsystem: MICRON PCIe SSD DRIVER (mtip32xx)
+   labels:
+     name: mtip32xx
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Gopal Tiwari
+       email: gtiwari@redhat.com
+       gluser: gtiwari1
+   paths:
+       includes:
+          - drivers/block/mtip32xx/mtip32xx.c
+          - drivers/block/mtip32xx/mtip32xx.h
+ - subsystem: MICROSEMI SMART ARRAY SMARTPQI DRIVER (smartpqi)
+   labels:
+     name: smartpqi
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Don Brace
+       email: dbrace@redhat.com
+       gluser: dbrace
+       restricted: true
+     - name: Tomas Henzl
+       email: thenzl@redhat.com
+       gluser: thenzl
+   paths:
+       includes:
+          - drivers/scsi/smartpqi/smartpqi*.[ch]
+          - drivers/scsi/smartpqi/Kconfig
+          - drivers/scsi/smartpqi/Makefile
+          - include/linux/cciss*.h
+          - include/uapi/linux/cciss*.h
+          - Documentation/scsi/smartpqi.txt
+ - subsystem: MLX4 ETHERNET DRIVER (mlx4)
+   labels:
+     name: mlx4
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Alaa Hleihel
+       email: ahleihel@redhat.com
+       gluser: ahleihel
+       restricted: true
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+   paths:
+       includes:
+          - drivers/net/ethernet/mellanox/mlx4/
+ - subsystem: MLX4 IB DRIVER (mlx4_ib)
+   labels:
+     name: mlx4_ib
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Alaa Hleihel
+       email: ahleihel@redhat.com
+       gluser: ahleihel
+       restricted: true
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+   paths:
+       includes:
+          - drivers/infiniband/hw/mlx4/
+          - include/linux/mlx4/
+          - include/uapi/rdma/mlx4-abi.h
+ - subsystem: MLX5 ETHERNET DRIVER (mlx5)
+   labels:
+     name: mlx5
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Alaa Hleihel
+       email: ahleihel@redhat.com
+       gluser: ahleihel
+       restricted: true
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+   paths:
+       includes:
+          - drivers/net/ethernet/mellanox/mlx5/
+ - subsystem: MLX5 IB DRIVER (mlx5_ib)
+   labels:
+     name: mlx5_ib
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Alaa Hleihel
+       email: ahleihel@redhat.com
+       gluser: ahleihel
+       restricted: true
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+   paths:
+       includes:
+          - drivers/infiniband/hw/mlx5/
+          - include/linux/mlx5/
+          - include/uapi/rdma/mlx5-abi.h
+ - subsystem: MMC LAYER
+   labels:
+     name: mmc
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Gopal Tiwari
+       email: gtiwari@redhat.com
+       gluser: gtiwari1
+   paths:
+       includes:
+          - Documentation/mmc/
+          - include/linux/mmc/
+          - drivers/mmc/
+ - subsystem: MOST SUBSYSTEM
+   labels:
+     name: most
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/most/
+ - subsystem: MYRICOM MYRI-10G 10GbE DRIVER (MYRI10GE)
+   labels:
+     name: myri10ge
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
+   paths:
+       includes:
+          - drivers/net/ethernet/myricom/myri10ge/
+ - subsystem: NAMESPACES
+   labels:
+     name: namespaces
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Eric W. Biederman
+       email: ebiederm@redhat.com
+       gluser: ebiederm
+     - name: Alex Gladkov
+       email: agladkov@redhat.com
+       gluser: legionus
+   reviewers:
+     - name: Chris von Recklinghausen
+       email: crecklin@redhat.com
+       gluser: crecklin
+   paths:
+       includes:
+          - Documentation/admin-guide/namespaces/
+          - fs/proc/namespaces.c
+          - include/linux/mnt_namespace.h
+          - include/linux/pid_namespace.h
+          - include/linux/time_namespace.h
+          - include/linux/user_namespace.h
+          - kernel/nsproxy.c
+          - kernel/time/namespace.c
+          - kernel/ucounts.c
+          - kernel/user_namespace.c
+          - tools/testing/selftests/pid_namespace/
+          - tools/testing/selftests/rlimits/
+ - subsystem: NETFILTER
+   labels:
+     name: netfilter
+     readyForMergeDeps:
+       - lnst
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Florian Westphal
+       email: fwestpha@redhat.com
+       gluser: fwestpha
+   paths:
+       includes:
+          - net/netfilter/
+          - net/*/netfilter*
+          - include/linux/netfilter*
+          - include/net/netfilter/
+          - include/uapi/linux/netfilter*
+          - include/net/netns/conntrack.h
+          - include/net/netns/netfilter.h
+          - include/net/netns/nftables.h
+          - include/net/netns/x_tables.h
+ - subsystem: NETWORK LOCK MANAGER (lockd)
+   labels:
+     name: lockd
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Benjamin Coddington
+       email: bcodding@redhat.com
+       gluser: bcodding
+     - name: J. Bruce Fields
+       email: bfields@redhat.com
+       gluser: bfields1
+     - name: Steve Dickson
+       email: steved@redhat.com
+       gluser: steved92
+     - name: Scott Mayhew
+       email: smayhew@redhat.com
+       gluser: smayhew
+   paths:
+       includes:
+          - fs/lockd/
+ - subsystem: NETWORKING [DSA]
+   labels:
+     name: dsa
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+   paths:
+       includes:
+          - Documentation/devicetree/bindings/net/dsa/
+          - Documentation/networking/dsa/
+          - drivers/net/dsa/
+          - include/linux/dsa/
+          - include/linux/platform_data/dsa.h
+          - include/net/dsa.h
+          - net/dsa/
+ - subsystem: NETWORKING [GENERAL]
+   labels:
+     name: net
+     readyForMergeDeps:
+       - lnst
+     emailLabel: net
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Jiri Benc
+       email: jbenc@redhat.com
+       gluser: jbencrh
+     - name: Marcelo Leitner
+       email: mleitner@redhat.com
+       gluser: marcelo.leitner
+   reviewers:
+     - name: Andrea Claudi
+       email: aclaudi@redhat.com
+       gluser: aclaudi
+     - name: Antoine Tenart
+       email: atenart@redhat.com
+       gluser: atenart
+     - name: Balazs Nemeth
+       email: bnemeth@redhat.com
+       gluser: bnemeth
+     - name: Davide Caratti
+       email: dcaratti@redhat.com
+       gluser: dcaratti
+     - name: Eric Garver
+       email: egarver@redhat.com
+       gluser: egarver
+     - name: Flavio Leitner
+       email: fbl@redhat.com
+       gluser: fleitner
+     - name: Florian Westphal
+       email: fwestpha@redhat.com
+       gluser: fwestpha
+     - name: Guillaume Nault
+       email: gnault@redhat.com
+       gluser: gnault
+     - name: Hangbin Liu
+       email: haliu@redhat.com
+       gluser: liuhangbin
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
+     - name: Jiri Benc
+       email: jbenc@redhat.com
+       gluser: jbencrh
+     - name: Lorenzo Bianconi
+       email: lorenzo.bianconi@redhat.com
+       gluser: LorenzoBianconi
+     - name: Marcelo Leitner
+       email: mleitner@redhat.com
+       gluser: marcelo.leitner
+     - name: Paolo Abeni
+       email: pabeni@redhat.com
+       gluser: pabeni
+     - name: Phil Sutter
+       email: psutter@redhat.com
+       gluser: psutter1
+     - name: Sabrina Dubroca
+       email: sdubroca@redhat.com
+       gluser: sdubroca
+     - name: Toke Høiland-Jørgensen
+       email: toke@redhat.com
+       gluser: tohojo
+     - name: Xin Long
+       email: lxin@redhat.com
+       gluser: lxin.redhat
+   paths:
+       includes:
+          - net/
+          - Documentation/networking/
+          - drivers/net/Space.c
+          - drivers/net/bareudp.c
+          - drivers/net/dummy.c
+          - drivers/net/geneve.c
+          - drivers/net/ifb.c
+          - drivers/net/ipvlan/
+          - drivers/net/loopback.c
+          - drivers/net/mac*
+          - drivers/net/netconsole.c
+          - drivers/net/netdevsim/
+          - drivers/net/nlmon.c
+          - drivers/net/ppp/
+          - drivers/net/veth.c
+          - drivers/net/vrf.c
+          - drivers/net/vxlan.c
+          - drivers/net/wireguard/
+          - include/net/
+          - include/linux/eth*
+          - include/linux/filter.h
+          - include/linux/icmp*
+          - include/linux/if*
+          - include/linux/in[.6e]*
+          - include/linux/ip.h
+          - include/linux/ipv6*
+          - include/linux/llc.h
+          - include/linux/mroute*
+          - include/linux/net*
+          - include/linux/*netlink*
+          - include/linux/openvswitch.h
+          - include/linux/ppp_channel.h
+          - include/linux/ppp-comp.h
+          - include/linux/ppp_defs.h
+          - include/linux/sctp.h
+          - include/linux/seg6*
+          - include/linux/skb*
+          - include/linux/sock*
+          - include/linux/tcp.h
+          - include/linux/tfrc.h
+          - include/linux/udp.h
+          - include/uapi/linux/devlink.h
+          - include/uapi/linux/eth*
+          - include/uapi/linux/filter.h
+          - include/uapi/linux/genetlink.h
+          - include/uapi/linux/icmp*
+          - include/uapi/linux/if*
+          - include/uapi/linux/in[.6e]*
+          - include/uapi/linux/ip[._sv6]*
+          - include/uapi/linux/llc.h
+          - include/uapi/linux/lwtunnel.h
+          - include/uapi/linux/mroute*
+          - include/uapi/linux/net*
+          - include/uapi/linux/netlink*
+          - include/uapi/linux/openvswitch.h
+          - include/uapi/linux/pkt_*
+          - include/uapi/linux/ppp-comp.h
+          - include/uapi/linux/ppp_defs.h
+          - include/uapi/linux/ppp-ioctl.h
+          - include/uapi/linux/rtnetlink.h
+          - include/uapi/linux/sctp.h
+          - include/uapi/linux/seg6*
+          - include/uapi/linux/sock*
+          - include/uapi/linux/tc_*/*
+          - include/uapi/linux/tcp*
+          - include/uapi/linux/tls.h
+          - include/uapi/linux/udp.h
+          - include/uapi/linux/xfrm.h
+          - include/uapi/linux/wireguard.h
+          - lib/nlattr.c
+          - tools/testing/selftests/net/
+          - tools/testing/selftests/wireguard/
+       excludes:
+          - Documentation/networking/can.rst
+          - Documentation/networking/device_drivers/
+          - Documentation/networking/mac80211*
+          - Documentation/networking/ieee802154*
+          - Documentation/networking/phonet*
+          - Documentation/networking/rds*
+          - Documentation/networking/regulatory*
+          - Documentation/networking/rxrpc*
+          - include/net/*80211*
+          - include/net/*80215*
+          - include/net/af_vsock.h
+          - include/net/bluetooth/
+          - include/net/intel/
+          - include/net/irda/
+          - include/net/iucv/
+          - include/net/iw*
+          - include/net/regulatory.h
+          - include/net/vsock_addr.h
+          - net/bluetooth/
+          - net/can/
+          - net/ceph/
+          - net/ieee802154/
+          - net/irda/
+          - net/iucv/
+          - net/mac80211/
+          - net/mac802154/
+          - net/ncsi/
+          - net/netlabel/
+          - net/nfc/
+          - net/phonet/
+          - net/qrtr/
+          - net/rds/
+          - net/rfkill/
+          - net/rxrpc/
+          - net/smc/
+          - net/sunrpc/
+          - net/vmw_vsock/
+          - net/wimax/
+          - net/wireless/
+          - net/x25/
+ - subsystem: NETWORKING [LABELED] (NetLabel, Labeled IPsec, SECMARK)
+   labels:
+     name: netlabel
+     readyForMergeDeps:
+       - lnst
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ondrej Mosnacek
+       email: omosnace@redhat.com
+       gluser: omos
+   paths:
+       includes:
+          - Documentation/netlabel/
+          - include/net/calipso.h
+          - include/net/cipso_ipv4.h
+          - include/net/netlabel.h
+          - include/uapi/linux/netfilter/xt_SECMARK.h
+          - include/uapi/linux/netfilter/xt_CONNSECMARK.h
+          - net/netlabel/
+          - net/ipv4/cipso_ipv4.c
+          - net/ipv6/calipso.c
+          - net/netfilter/xt_CONNSECMARK.c
+          - net/netfilter/xt_SECMARK.c
+ - subsystem: NETWORKING [TEAM]
+   labels:
+     name: net_team
+     readyForMergeDeps:
+       - lnst
+     emailLabel: net
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Hangbin Liu
+       email: haliu@redhat.com
+       gluser: liuhangbin
+     - name: Xin Long
+       email: lxin@redhat.com
+       gluser: lxin.redhat
+   paths:
+       includes:
+          - drivers/net/team/
+          - include/linux/if_team.h
+          - include/uapi/linux/if_team.h
+ - subsystem: NETXEN (1/10) GbE SUPPORT
+   labels:
+     name: netxen
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Manish Chopra
+       email: mchopra@redhat.com
+       gluser: mchopra
+       restricted: true
+     - name: Tony Camuso
+       email: tcamuso@redhat.com
+       gluser: tcamuso
+   paths:
+       includes:
+          - drivers/net/ethernet/qlogic/netxen/
+ - subsystem: NFS FILE SYSTEM (nfs)
+   labels:
+     name: nfs
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Benjamin Coddington
+       email: bcodding@redhat.com
+       gluser: bcodding
+     - name: J. Bruce Fields
+       email: bfields@redhat.com
+       gluser: bfields1
+     - name: Steve Dickson
+       email: steved@redhat.com
+       gluser: steved92
+     - name: Scott Mayhew
+       email: smayhew@redhat.com
+       gluser: smayhew
+   paths:
+       includes:
+          - fs/nfs/
+ - subsystem: NFS SERVER (nfsd)
+   labels:
+     name: nfsd
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Benjamin Coddington
+       email: bcodding@redhat.com
+       gluser: bcodding
+     - name: J. Bruce Fields
+       email: bfields@redhat.com
+       gluser: bfields1
+     - name: Steve Dickson
+       email: steved@redhat.com
+       gluser: steved92
+     - name: Scott Mayhew
+       email: smayhew@redhat.com
+       gluser: smayhew
+   paths:
+       includes:
+          - fs/nfsd/
+ - subsystem: NIC DRIVERS AND RDMA
+   labels:
+     name: nic_rdma
+   status: Supported
+   requiredApproval: false
+   reviewers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+     - name: Stefan Assmann
+       email: sassmann@redhat.com
+       gluser: sassmann_rh
+     - name: Corinna Vinschen
+       email: vinschen@redhat.com
+       gluser: vinschen
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
+     - name: Jonathan Toppins
+       email: jtoppins@redhat.com
+       gluser: jtoppins_redhat
+     - name: Josef Oskera
+       email: joskera@redhat.com
+       gluser: joskera
+   paths:
+       includes:
+          # ethernet
+          - drivers/net/ethernet
+          # infiniband
+          - drivers/infiniband/
+          - include/rdma/
+          - include/uapi/rdma/
+          - include/uapi/linux/if_infiniband.h
+          - Documentation/infiniband/
+          - include/linux/mlx4/
+          - include/linux/mlx5/
+          # wireless
+          - Documentation/networking/mac80211*
+          - Documentation/networking/regulatory*
+          - drivers/net/wireless
+          - net/mac80211/
+          - net/wireless/
+          - net/rfkill/
+          - include/linux/*80211*
+          - include/net/*80211*
+          - include/net/iw*
+          - include/net/regulatory.h
+          - include/uapi/linux/nl80211.h
+          - include/uapi/linux/wireless.h
+          # bonding
+          - drivers/net/bonding
+          - include/linux/if_bonding.h
+          # phy
+          - Documentation/networking/phy.rst
+          - drivers/net/phy/
+          - drivers/of/of_mdio.c
+          - include/linux/*mdio*.h
+          - include/linux/phy.h
+          - include/linux/phy_fixed.h
+          - include/linux/platform_data/mdio-bcm-unimac.h
+          - include/linux/platform_data/mdio-gpio.h
+          - include/trace/events/mdio.h
+          - include/uapi/linux/mdio.h
+          - include/uapi/linux/mii.h
+          # ice
+          - include/net/intel/
+          # dsa
+          - Documentation/devicetree/bindings/net/dsa/
+          - Documentation/networking/dsa/
+          - drivers/net/dsa
+          - include/linux/dsa/
+          - include/linux/platform_data/dsa.h
+          - include/net/dsa.h
+          - net/dsa/
+          # ena
+          - Documentation/networking/ena.txt
+          - Documentation/networking/device_drivers/ethernet/amazon/ena.rst
+       excludes:
+          - drivers/net/ethernet/microsoft/
+ - subsystem: NITRO ENCLAVES (NE)
+   labels:
+     name: ne
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Cathy Avery
+       email: cavery@redhat.com
+       gluser: cavery
+     - name: Mohammed Gamal
+       email: mgamal@redhat.com
+       gluser: mgamal-rh
+     - name: Vitaly Kuznetsov
+       email: vkuznets@redhat.com
+       gluser: vkuznets
+   paths:
+       includes:
+          - Documentation/virt/ne_overview.rst
+          - drivers/virt/nitro_enclaves/
+          - include/linux/nitro_enclaves.h
+          - include/uapi/linux/nitro_enclaves.h
+          - samples/nitro_enclaves/
+ - subsystem: NON TRANSPARENT BRIDGE
+   labels:
+     name: ntb
+   status: Provided
+   requiredApproval: false
+   maintainers:
+     - name: Myron Stowe
+       email: mstowe@redhat.com
+       gluser: mstowe1
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+   paths:
+       includes:
+          - drivers/ntb/
+          - tools/testing/selftests/ntb/
+ - subsystem: Non Volatile Memory (nvmem)
+   labels:
+     name: nvmem
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+   paths:
+       includes:
+          - drivers/nvmem/
+          - include/linux/nvmem-consumer.h
+          - include/linux/nvmem-producer.h
+ - subsystem: NON-MASKABLE INTERRUPT (NMI)
+   labels:
+     name: nmi
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+   paths:
+       includes:
+          - arch/*/include/asm/nmi.h
+          - arch/x86/kernel/apic/hw_nmi.c
+          - arch/x86/kernel/nmi.c
+          - arch/x86/kernel/nmi_selftest.c
+          - include/linux/nmi.h
+          - lib/nmi_backtrace.c
+ - subsystem: NVDIMM SUBSYSTEM
+   labels:
+     name: nvdimm
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jeff Moyer
+       email: jmoyer@redhat.com
+       gluser: jmoyer1
+   paths:
+       includes:
+          - drivers/acpi/nfit/
+          - drivers/nvdimm/
+          - include/linux/libnvdimm.h
+          - include/linux/nd.h
+          - include/uapi/linux/ndctl.h
+ - subsystem: NVM EXPRESS DRIVER (nvme)
+   labels:
+     name: nvme
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Gopal Tiwari
+       email: gtiwari@redhat.com
+       gluser: gtiwari1
+   reviewers:
+     - name: John Meneghini
+       email: jmeneghi@redhat.com
+       gluser: johnmeneghini
+     - name: Chris Leech
+       email: cleech@redhat.com
+       gluser: cleech
+     - name: Ewan D. Milne
+       email: emilne@redhat.com
+       gluser: e-milne
+     - name: Maurizio Lombardi
+       email: mlombard@redhat.com
+       gluser: mlombard
+   paths:
+       includes:
+          - drivers/nvme/
+          - include/linux/nvme.h
+          - include/linux/nvme-rdma*.h
+          - include/uapi/linux/nvme_ioctl.h
+ - subsystem: NVM EXPRESS DRIVER FC
+   labels:
+     name: nvme-fc
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ewan D. Milne
+       email: emilne@redhat.com
+       gluser: e-milne
+   reviewers:
+     - name: John Meneghini
+       email: jmeneghi@redhat.com
+       gluser: johnmeneghini
+   paths:
+       includes:
+          - drivers/nvme/host/fc.c
+          - drivers/nvme/target/fc.c
+          - include/linux/nvme-fc*.h
+ - subsystem: NVM EXPRESS DRIVER TCP
+   labels:
+     name: nvme-tcp
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Chris Leech
+       email: cleech@redhat.com
+       gluser: cleech
+   reviewers:
+     - name: John Meneghini
+       email: jmeneghi@redhat.com
+       gluser: johnmeneghini
+   paths:
+       includes:
+          - drivers/nvme/host/tcp.c
+          - drivers/nvme/target/tcp.c
+          - include/linux/nvme-tcp*.h
+ - subsystem: OMNI-PATH ARCHITECTURE (opa)
+   labels:
+     name: opa
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+   paths:
+       includes:
+          - drivers/infiniband/hw/hfi*
+          - include/rdma/opa*
+          - include/uapi/rdma/hfi*
+ - subsystem: OPEN FIRMWARE AND FLATTENED DEVICE TREE
+   labels:
+     name: of
+   status: Provided
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/of/
+ - subsystem: OPENVSWITCH (OVS)
+   labels:
+     name: ovs
+     readyForMergeDeps:
+       - lnst
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Flavio Leitner
+       email: fbl@redhat.com
+       gluser: fleitner
+   reviewers:
+     - name: Eelco Chaudron
+       email: echaudro@redhat.com
+       gluser: echaudron
+   paths:
+       includes:
+          - net/openvswitch/
+          - include/linux/openvswitch.h
+          - include/uapi/linux/openvswitch.h
+ - subsystem: OVERLAY FILESYSTEM
+   labels:
+     name: overlayfs
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Miklos Szeredi
+       email: mszeredi@redhat.com
+       gluser: mszeredi
+   paths:
+       includes:
+          - fs/overlayfs/
+ - subsystem: PARALLEL PORT SUBSYSTEM
+   labels:
+     name: parport
+   status: Provided
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/parport/
+ - subsystem: PCI HOTPLUG
+   labels:
+     name: pcihp
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+     - name: Myron Stowe
+       email: myron.stowe@redhat.com
+       gluser: mstowe1
+   paths:
+       includes:
+          - drivers/pci/hotplug/
+ - subsystem: PCI SUBSYSTEM
+   labels:
+     name: pci
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Myron Stowe
+       email: myron.stowe@redhat.com
+       gluser: mstowe1
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/pci/
+ - subsystem: PCI-E NON-TRANSPARENT BRIDGE
+   labels:
+     name: pcintb
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: John Linville
+       email: linville@redhat.com
+       gluser: linville
+     - name: Myron Stowe
+       email: myron.stowe@redhat.com
+       gluser: mstowe1
+   paths:
+       includes:
+          - drivers/pci/
+          - tools/testing/selftests/ntb
+          - include/linux/ntb.h
+          - include/linux/ntb_transport.h
+          - Documentation/driver-api/ntb.rst
+          - Documentation/PCI/endpoint/
+          - drivers/ntb
+          - drivers/pci/endpoint/
+          - drivers/net/ntb_netdev.c
+ - subsystem: PCMCIA SUBSYSTEM
+   labels:
+     name: pcmcia
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/pcmcia/
+ - subsystem: PCS NETWORK DRIVERS
+   labels:
+     name: pcs
+   status: Unassigned
+   requiredApproval: false
+   maintainers:
+   paths:
+       includes:
+          - drivers/net/pcs/
+ - subsystem: Pensando Ethernet IONIC Driver
+   labels:
+     name: ionic
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jonathan Toppins
+       email: jtoppins@redhat.com
+       gluser: jtoppins_redhat
+   paths:
+       includes:
+          - drivers/net/ethernet/pensando/
+ - subsystem: PERFORMANCE EVENTS SUBSYSTEM
+   labels:
+     name: perf
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Michael Petlan
+       email: mpetlan@redhat.com
+       gluser: mpetlan
+   reviewers:
+     - name: Jerome Marchand
+       email: jmarchan@redhat.com
+       gluser: jeromemarchand
+   paths:
+       includes:
+          - kernel/events/
+          - include/linux/perf_event.h
+          - include/uapi/linux/perf_event.h
+          - arch/*/kernel/perf_event*.c
+          - arch/*/kernel/*/perf_event*.c
+          - arch/*/kernel/*/*/perf_event*.c
+          - arch/*/include/asm/perf_event.h
+          - arch/*/kernel/perf_callchain.c
+          - tools/perf/
+          - tools/lib/
+ - subsystem: PIN CONTROL SUBSYSTEM
+   labels:
+     name: pinctrl
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Brian Masney
+       email: bmasney@redhat.com
+       gluser: bmasney
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+   paths:
+       includes:
+          - drivers/pinctrl/
+          - include/linux/pinctrl/
+ - subsystem: PLATFORM DRIVERS
+   labels:
+     name: platform
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+     - name: Mark Langsdorf
+       email: mlangsdo@redhat.com
+       gluser: mlangsdorf
+   paths:
+       includes:
+          - drivers/platform/Kconfig
+ - subsystem: PLATFORM DRIVERS MELLANOX
+   labels:
+     name: platform_mellanox
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Mark Langsdorf
+       email: mlangsdo@redhat.com
+       gluser: mlangsdorf
+   paths:
+       includes:
+          - drivers/platform/mellanox/
+ - subsystem: PLATFORM DRIVERS X86
+   labels:
+     name: platform_x86
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+   paths:
+       includes:
+          - drivers/platform/x86/
+ - subsystem: PNP SUPPORT
+   labels:
+     name: pnp
+   status: Provided
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/pnp/
+ - subsystem: POWER DRIVERS (Batteries, power supplies, etc.)
+   labels:
+     name: batteries
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Lenny Szubowicz
+       email: lszubowi@redhat.com
+       gluser: lszubowi
+   paths:
+       includes:
+          - drivers/power/
+ - subsystem: POWER STATE COORDINATION INTERFACE (PSCI)
+   labels:
+     name: psci
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+     - name: Mark Langsdorf
+       email: mlangsdo@redhat.com
+       gluser: mlangsdorf
+     - name: Jeremy Linton
+       email: jlinton@redhat.com
+       gluser: jlinton
+   paths:
+       includes:
+          - drivers/firmware/psci*.c
+          - include/linux/psci.h
+          - include/uapi/linux/psci.h
+ - subsystem: POWERPC (64-BIT)
+   labels:
+     name: ppc64
+   status: Supported
+   requiredApproval: false
+   paths:
+       includes:
+          - arch/powerpc/
+ - subsystem: PPS SUPPORT
+   labels:
+     name: pps
+   status: Provided
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/pps/
+ - subsystem: PSTORE PERSISTENT STORAGE
+   labels:
+     name: pstore
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Lenny Szubowicz
+       email: lszubowi@redhat.com
+       gluser: lszubowi
+     - name: Al Stone
+       email: ahs3@redhat.com
+       gluser: ahs3
+   paths:
+       includes:
+          - Documentation/ABI/testing/pstore
+          - fs/pstore/
+ - subsystem: PTP HARDWARE CLOCK SUPPORT
+   labels:
+     name: ptp
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jiri Benc
+       email: jbenc@redhat.com
+       gluser: jbencrh
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - Documentation/ptp/
+          - drivers/ptp/
+          - include/linux/ptp_cl*
+ - subsystem: PTP KVM
+   labels:
+     name: ptp_kvm
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Marcelo Tosatti
+       email: mtosatti@redhat.com
+       gluser: mtosatti
+   paths:
+       includes:
+          - drivers/ptp/ptp_kvm.c
+ - subsystem: PULSE-WIDTH MODULATION SUPPORT (PWM)
+   labels:
+     name: pwm
+   status: Provided
+   requiredApproval: false
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/pwm/
+ - subsystem: QLOGIC QED NETWORK DRIVER
+   labels:
+     name: qed
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Manish Chopra
+       email: mchopra@redhat.com
+       gluser: mchopra
+       restricted: true
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/net/ethernet/qlogic/qed/
+ - subsystem: QLOGIC QEDE ETHERNET NETWORK DRIVER
+   labels:
+     name: qede
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Manish Chopra
+       email: mchopra@redhat.com
+       gluser: mchopra
+       restricted: true
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/net/ethernet/qlogic/qede/
+ - subsystem: QLOGIC QEDR RDMA ETHERNET NETWORK DRIVER
+   labels:
+     name: qedr
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Manish Chopra
+       email: mchopra@redhat.com
+       gluser: mchopra
+       restricted: true
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/infiniband/hw/qedr/
+ - subsystem: QLOGIC QL41xxx FCOE DRIVER
+   labels:
+     name: qedf
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Nilesh Javali
+       email: njavali@redhat.com
+       gluser: njavali
+       restricted: true
+     - name: Arun Easi
+       email: aeasi@redhat.com
+       gluser: unknown
+       restricted: true
+   reviewers:
+     - name: John Meneghini
+       email: jmeneghi@redhat.com
+       gluser: johnmeneghini
+     - name: Chris Leech
+       email: cleech@redhat.com
+       gluser: cleech
+   paths:
+       includes:
+          - drivers/scsi/qedf/
+ - subsystem: QLOGIC QL41xxx ISCSI DRIVER
+   labels:
+     name: qedi
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Nilesh Javali
+       email: njavali@redhat.com
+       gluser: njavali
+       restricted: true
+     - name: Chris Leech
+       email: cleech@redhat.com
+       gluser: cleech
+   paths:
+       includes:
+          - drivers/scsi/qedi/
+ - subsystem: QLOGIC QLA2XXX FC-SCSI DRIVER
+   labels:
+     name: qla2xxx
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Nilesh Javali
+       email: njavali@redhat.com
+       gluser: njavali
+       restricted: true
+     - name: Arun Easi
+       email: aeasi@redhat.com
+       gluser: unknown
+       restricted: true
+     - name: Ewan D. Milne
+       email: emilne@redhat.com
+       gluser: e-milne
+   paths:
+       includes:
+          - drivers/scsi/qla2xxx/
+ - subsystem: QLOGIC QLA3XXX NETWORK DRIVER
+   labels:
+     name: qla3xxx
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Manish Chopra
+       email: mchopra@redhat.com
+       gluser: mchopra
+       restricted: true
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - Documentation/networking/LICENSE.qla3xxx
+          - drivers/net/ethernet/qlogic/qla3xxx.*
+ - subsystem: QLOGIC QLCNIC (1/10)Gb ETHERNET DRIVER
+   labels:
+     name: qlcnic
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Manish Chopra
+       email: mchopra@redhat.com
+       gluser: mchopra
+       restricted: true
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/net/ethernet/qlogic/qlcnic/
+ - subsystem: QLOGIC QLGE 10Gb ETHERNET DRIVER
+   labels:
+     name: qlge
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Manish Chopra
+       email: mchopra@redhat.com
+       gluser: mchopra
+       restricted: true
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/net/ethernet/qlogic/qlge/
+ - subsystem: QUALCOMM IPC ROUTER
+   labels:
+     name: qrtr
+   status: Provided
+   requiredApproval: false
+   maintainers:
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
+   reviewers:
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
+     - name: John Linville
+       email: linville@redhat.com
+       gluser: linville-rh
+   paths:
+       includes:
+          - include/uapi/linux/qrtr.h
+          - include/trace/events/qrtr.h
+          - net/qrtr/
+ - subsystem: RADOS BLOCK DEVICE (RBD)
+   labels:
+     name: rbd
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ilya Dryomov
+       email: idryomov@redhat.com
+       gluser: idryomov
+   paths:
+       includes:
+          - Documentation/ABI/testing/sysfs-bus-rbd
+          - drivers/block/rbd.c
+          - drivers/block/rbd_types.h
+ - subsystem: RAS INFRASTRUCTURE
+   labels:
+     name: ras
+   status: Provided
+   maintainers:
+     - name: Aristeu Rozanski
+       email: arozansk@redhat.com
+       gluser: arozansk
+   paths:
+       includes:
+          - drivers/ras/
+ - subsystem: READ-COPY UPDATE (RCU)
+   labels:
+     name: rcu
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Waiman Long
+       email: longman@redhat.com
+       gluser: llong1
+   reviewers:
+     - name: Artem Savkov
+       email: asavkov@redhat.com
+       gluser: artem.savkov
+     - name: Clark Williams
+       email: williams@redhat.com
+       gluser: clrkwllms
+     - name: Donghai Qiao
+       email: dqiao@redhat.com
+       gluser: dqiao
+     - name: Phil Auld
+       email: pauld@redhat.com
+       gluser: prauld
+     - name: Wander Costa
+       email: wander@redhat.com
+       gluser: walac
+   paths:
+       includes:
+          - Documentation/RCU/
+          - include/linux/rcu*
+          - kernel/rcu/
+ - subsystem: REAL TIME CLOCK (RTC) SUBSYSTEM
+   labels:
+     name: rtc
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Waiman Long
+       email: longman@redhat.com
+       gluser: llong1
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - Documentation/rtc.*
+          - Documentation/admin-guide/rtc.*
+          - drivers/rtc/
+          - include/linux/platform_data/rtc-*
+          - include/linux/rtc.h
+          - include/linux/rtc/
+          - include/uapi/linux/rtc.h
+          - tools/testing/selftests/rtc/
+ - subsystem: REMOTE PROCESSOR (REMOTEPROC) SUBSYSTEM
+   labels:
+     name: remoteproc
+   status: Provided
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/remoteproc/
+ - subsystem: RESET DRIVERS
+   labels:
+     name: reset
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/reset/
+ - subsystem: RFKILL
+   labels:
+     name: rfkill
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: John Linville
+       email: linville@redhat.com
+       gluser: linville-rh
+   paths:
+       includes:
+          - Documentation/rfkill.txt
+          - net/rfkill/
+ - subsystem: ROCKER DRIVER
+   labels:
+     name: rocker
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+   paths:
+       includes:
+          - drivers/net/ethernet/rocker/
+ - subsystem: RPMSG SUBSYSTEM
+   labels:
+     name: rpmsg
+   status: Disabled
+   requiredApproval: false
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/rpmsg/
+ - subsystem: S390 VFIO-CCW DRIVER
+   labels:
+     name: vfio-ccw
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Cornelia Huck
+       email: cohuck@redhat.com
+       gluser: cohuck
+   paths:
+       includes:
+          - drivers/s390/cio/vfio_ccw*
+          - Documentation/s390/vfio-ccw.txt
+          - include/uapi/linux/vfio_ccw.h
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: SCHEDULER
+   labels:
+     name: scheduler
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Phil Auld
+       email: pauld@redhat.com
+       gluser: prauld
+   reviewers:
+     - name: Andrew Halaney
+       email: ahalaney@redhat.com
+       gluser: ahalaney
+     - name: Clark Williams
+       email: williams@redhat.com
+       gluser: clrkwllms
+     - name: Daniel Bristot
+       email: bristot@redhat.com
+       gluser: daolivei
+     - name: Fernando Pacheco
+       email: fpacheco@redhat.com
+       gluser: pachecof
+     - name: Juri Lelli
+       email: jlelli@redhat.com
+       gluser: jlelli
+     - name: Luis Claudio Goncalves
+       email: lgoncalv@redhat.com
+       gluser: lgoncalv
+     - name: Nico Pache
+       email: npache@redhat.com
+       gluser: npache
+     - name: Oleg Nesterov
+       email: onestero@redhat.com
+       gluser: onestero
+   paths:
+       includes:
+          - kernel/sched/
+          - include/linux/sched/
+          - include/linux/sched.h
+          - include/uapi/linux/sched.h
+          - include/linux/wait.h
+ - subsystem: SCSI CORE SUBSYSTEM (NOT INDIVIDUAL DRIVERS)
+   labels:
+     name: scsi_core
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ewan D. Milne
+       email: emilne@redhat.com
+       gluser: e-milne
+   reviewers:
+     - name: Tomas Henzl
+       email: thenzl@redhat.com
+       gluser: thenzl
+     - name: Maurizio Lombardi
+       email: mlombard@redhat.com
+       gluser: mlombard
+     - name: Chris Leech
+       email: cleech@redhat.com
+       gluser: cleech
+   paths:
+       includes:
+          - drivers/scsi/
+          - include/scsi/
+ - subsystem: SCSI TARGET (LIO)
+   labels:
+     name: scsi_target
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Maurizio Lombardi
+       email: mlombard@redhat.com
+       gluser: mlombard
+   paths:
+       includes:
+          - drivers/target/
+          - include/target/
+ - subsystem: SCTP PROTOCOL
+   labels:
+     name: sctp
+     readyForMergeDeps:
+       - lnst
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Marcelo Ricardo Leitner
+       email: mleitner@redhat.com
+       gluser: marcelo.leitner
+     - name: Xin Long
+       email: lxin@redhat.com
+       gluser: lxin.redhat
+   paths:
+       includes:
+          - net/sctp/
+          - include/linux/sctp.h
+          - include/net/sctp/
+          - include/uapi/linux/sctp.h
+ - subsystem: SECURITY SUBSYSTEM
+   labels:
+     name: security
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ondrej Mosnacek
+       email: omosnace@redhat.com
+       gluser: omos
+   reviewers:
+     - name: Christoph von Recklinghausen
+       email: crecklin@redhat.com
+       gluser: crecklin
+     - name: Richard Guy Briggs
+       email: rbriggs@redhat.com
+       gluser: rbriggs
+     - name: Vladis Dronov
+       email: vdronov@redhat.com
+       gluser: NefigTut
+     - name: Wander Costa
+       email: wander@redhat.com
+       gluser: walac
+     - name: Yannick Cote
+       email: ycote@redhat.com
+       gluser: ycote1
+   paths:
+       includes:
+          - include/linux/lsm_*
+          - include/linux/security.h
+          - security/commoncap.c
+          - security/inode.c
+          - security/lsm_audit.c
+          - security/min_addr.c
+          - security/security.c
+          - security/Kconfig
+          - security/Makefile
+ - subsystem: SELINUX SECURITY MODULE
+   labels:
+     name: selinux
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ondrej Mosnacek
+       email: omosnace@redhat.com
+       gluser: omos
+   reviewers:
+     - name: Richard Guy Briggs
+       email: rbriggs@redhat.com
+       gluser: rbriggs
+     - name: Wander Costa
+       email: wander@redhat.com
+       gluser: walac
+   paths:
+       includes:
+          - include/linux/selinux*
+          - security/selinux/
+          - scripts/selinux/
+          - Documentation/admin-guide/LSM/SELinux.rst
+ - subsystem: SERIAL ATA (SATA) SUBSYSTEM
+   labels:
+     name: sata
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Tomas Henzl
+       email: thenzl@redhat.com
+       gluser: thenzl
+   paths:
+       includes:
+          - drivers/ata/
+          - include/linux/ata.h
+          - include/linux/libata.h
+ - subsystem: SERIAL LOW-POWER INTER-CHIP MEDIA BUS (SLIMbus)
+   labels:
+     name: slimbus
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/slimbus/
+ - subsystem: SFC NETWORK DRIVER
+   labels:
+     name: sfc
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
+   reviewers:
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
+   paths:
+       includes:
+          - drivers/net/ethernet/sfc/
+ - subsystem: SGI (HPE HPC) SPECIFIC
+   labels:
+     name: hpe_hpc
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Frank Ramsay
+       email: framsay@redhat.com
+       gluser: framsay1234
+       restricted: true
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+   paths:
+       includes:
+          - drivers/char/uv_mmtimer.c
+          - drivers/misc/sgi-gru/
+          - drivers/misc/sgi-xp/
+          - arch/ia64/include/asm/machvec_uv.h
+          - arch/ia64/include/asm/uv/
+          - arch/ia64/uv/
+          - arch/x86/include/asm/uv/
+          - arch/x86/kernel/apic/x2apic_uv_x.c
+          - arch/x86/platform/uv/
+ - subsystem: SHARED MEMORY COMMUNICATIONS
+   labels:
+     name: smc
+   status: Supported
+   required-approval: false
+   maintainers:
+     - name: Steve Best
+       email: sbest@redhat.com
+       gluser: sfbest
+   paths:
+       includes:
+          - net/smc/
+          - include/uapi/linux/smc.h
+          - include/uapi/linux/smc_diag.h
+ - subsystem: SIOX SUBSYSTEM
+   labels:
+     name: siox
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/siox/
+ - subsystem: SKGE 10/100/1000 GIGABIT ETHERNET DRIVER
+   labels:
+     name: skge
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/net/ethernet/marvell/skge.*
+ - subsystem: SKY2 10/100/1000 GIGABIT ETHERNET DRIVER
+   labels:
+     name: sky2
+   status: Provided
+   requiredApproval: false
+   maintainers:
+     - name: Jeremy Linton
+       email: jlinton@redhat.com
+       gluser: jlinton
+     - name: Mark Langsdorf
+       email: mlangsdo@redhat.com
+       gluser: mlangsdorf
+   paths:
+       includes:
+          - drivers/net/ethernet/marvell/sky2.*
+ - subsystem: SOFT-IWARP DRIVER (siw)
+   labels:
+     name: siw
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+   paths:
+       includes:
+          - drivers/infiniband/sw/siw/
+          - include/uapi/rdma/siw-abi.h
+ - subsystem: SOFT-ROCE DRIVER (rdma_rxe)
+   labels:
+     name: rdma_rxe
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+   paths:
+       includes:
+          - drivers/infiniband/sw/rxe/
+          - include/uapi/rdma/rdma_user_rxe.h
+ - subsystem: SOFTWARE RAID (Multiple Disks, MD) SUPPORT
+   labels:
+     name: md
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Nigel Croxon
+       email: ncroxon@redhat.com
+       gluser: ncroxon
+   paths:
+       includes:
+          - drivers/md/md*
+          - drivers/md/raid*
+          - include/linux/raid/
+          - include/uapi/linux/raid/
+ - subsystem: SONICS SILICON BACKPLANE DRIVER (SSB)
+   labels:
+     name: ssb
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/ssb/
+ - subsystem: SONY MEMORYSTICK SUBSYSTEM
+   labels:
+     name: sonymemstick
+   status: Provided
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/memstick/
+ - subsystem: SOUNDWIRE SUBSYSTEM
+   labels:
+     name: soundwire
+   status: Provided
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/soundwire/
+ - subsystem: SPEAKUP
+   labels:
+     name: speakup
+   status: Supported
+   required-approval: false
+   maintainers:
+     - name: John Linville
+       email: linville@redhat.com
+       gluser: linville-rh
+   paths:
+       includes:
+          - Documentation/ABI/stable/sysfs-driver-speakup
+          - drivers/accessibility/speakup/
+ - subsystem: SPI DRIVERS (Serial Peripheral Interface)
+   labels:
+     name: spi
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Al Stone
+       email: ahs3@redhat.com
+       gluser: ahs3
+   paths:
+       includes:
+          - drivers/spi/
+ - subsystem: SPMI SUBSYSTEM
+   labels:
+     name: spmi
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/spmi/
+ - subsystem: SQUASHFS FILE SYSTEM
+   labels:
+     name: squashfs
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Abhijith Das
+       email: adas@redhat.com
+       gluser: adas7
+   paths:
+       includes:
+          - Documentation/filesystems/squashfs.txt
+          - fs/squashfs/
+ - subsystem: SUN REMOTE PROCEDURE CALL (sunrpc)
+   labels:
+     name: sunrpc
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Benjamin Coddington
+       email: bcodding@redhat.com
+       gluser: bcodding
+     - name: J. Bruce Fields
+       email: bfields@redhat.com
+       gluser: bfields1
+     - name: Steve Dickson
+       email: steved@redhat.com
+       gluser: steved92
+     - name: Scott Mayhew
+       email: smayhew@redhat.com
+       gluser: smayhew
+   paths:
+       includes:
+          - net/sunrpc/
+ - subsystem: SUSPEND/RESUME
+   labels:
+     name: sus_res
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Al Stone
+       email: ahs3@redhat.com
+       gluser: ahs3
+     - name: Lenny Szubowicz
+       email: lszubowi@redhat.com
+       gluser: lszubowi
+   paths:
+ - subsystem: SWITCHDEV
+   labels:
+     name: switchdev
+     readyForMergeDeps:
+       - lnst
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+   paths:
+       includes:
+          - Documentation/networking/switchdev.txt
+          - include/net/switchdev.h
+          - net/switchdev/
+ - subsystem: SYSTEM ON CHIP (SOC)
+   labels:
+     name: soc
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+   paths:
+       includes:
+          - drivers/soc/
+          - include/linux/soc/
+ - subsystem: TC subsystem
+   labels:
+     name: tc
+     readyForMergeDeps:
+       - lnst
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+   paths:
+       includes:
+          - include/net/act_api.h
+          - include/net/pkt_cls.h
+          - include/net/pkt_sched.h
+          - include/net/tc_act/
+          - include/uapi/linux/pkt_cls.h
+          - include/uapi/linux/pkt_sched.h
+          - include/uapi/linux/tc_act/
+          - include/uapi/linux/tc_ematch/
+          - net/sched/
+ - subsystem: TEE SUBSYSTEM
+   labels:
+     name: tee
+   status: Provided
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/tee/
+ - subsystem: THERMAL
+   labels:
+     name: thermal
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+   paths:
+       includes:
+          - drivers/thermal/
+          - include/linux/cpu_cooling.h
+          - include/linux/thermal.h
+ - subsystem: THUNDERBOLT SUBSYSTEM
+   labels:
+     name: thunderbolt
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Torez Smith
+       email: torez@redhat.com
+       gluser: torez
+   reviewers:
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
+   paths:
+       includes:
+          - drivers/net/thunderbolt.c
+          - drivers/thunderbolt/
+          - drivers/platform/x86/intel-wmi-thunderbolt.c
+          - include/linux/thunderbolt.h
+ - subsystem: TIPC PROTOCOL
+   labels:
+     name: tipc
+     readyForMergeDeps:
+       - lnst
+   status: Provided
+   requiredApproval: false
+   maintainers:
+     - name: Jon Maloy
+       email: jmaloy@redhat.com
+       gluser: jmaloy
+     - name: Xin Long
+       email: lxin@redhat.com
+       gluser: lxin.redhat
+   paths:
+       includes:
+          - net/tipc/
+          - include/net/tipc.h
+          - include/uapi/linux/tipc.h
+          - include/uapi/linux/tipc_netlink.h
+          - include/uapi/linux/tipc_config.h
+          - include/uapi/linux/tipc_socket_diag.h
+ - subsystem: TRUSTED PLATFORM MODULE (TPM)
+   labels:
+     name: tpm
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Stepan Horacek
+       email: shoracek@redhat.com
+       gluser: shoracek
+     - name: Jerry Snitselaar
+       email: jsnitsel@redhat.com
+       gluser: jsnitsel
+   paths:
+       includes:
+          - drivers/char/tpm/
+          - include/linux/tpm.h
+ - subsystem: TTY LAYER
+   labels:
+     name: tty
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: John Linville
+       email: linville@redhat.com
+       gluser: linville-rh
+   paths:
+       includes:
+          - drivers/tty/
+          - drivers/tty/serial/serial_core.c
+          - include/linux/serial.h
+          - include/linux/serial_core.h
+          - include/linux/tty.h
+          - include/uapi/linux/serial.h
+          - include/uapi/linux/serial_core.h
+          - include/uapi/linux/tty.h
+ - subsystem: UNISYS S-PAR DRIVERS
+   labels:
+     name: visorbus
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/visorbus/
+ - subsystem: UNIVERSAL EXTENSIBLE FIRMWARE INTERFACE (UEFI/EFI)
+   labels:
+     name: uefi
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Lenny Szubowicz
+       email: lszubowi@redhat.com
+       gluser: lszubowi
+     - name: Al Stone
+       email: ahs3@redhat.com
+       gluser: ahs3
+     - name: Myron Stowe
+       email: myron.stowe@redhat.com
+       gluser: mstowe1
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - arch/x86/kernel/efi*
+          - include/linux/efi.h
+ - subsystem: USB SUBSYSTEM
+   labels:
+     name: usb
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Torez Smith
+       email: torez@redhat.com
+       gluser: torez
+   paths:
+       includes:
+          - drivers/usb/
+ - subsystem: USERSPACE I/O DRIVERS (UIO)
+   labels:
+     name: uio
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Aristeu Rozanski
+       email: arozansk@redhat.com
+       gluser: arozansk
+   reviewers:
+     - name: Brian Masney
+       email: bmasney@redhat.com
+       gluser: bmasney
+   paths:
+       includes:
+          - include/linux/uio_driver.h
+          - include/linux/platform_data/uio_dmem_genirq.h
+          - linux/platform_data/uio_pruss.h
+          - drivers/uio/
+       excludes:
+          - drivers/uio/uio_hv_generic.c
+ - subsystem: USR DIRECTORY
+   labels:
+     name: usr
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - usr/
+ - subsystem: UVC WEBCAM DRIVER
+   labels:
+     name: uvc
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Tony Camuso
+       email: tcamuso@redhat.com
+       gluser: tcamuso
+   paths:
+       includes:
+          - drivers/media/video/uvc/
+ - subsystem: VFIO DRIVER
+   labels:
+     name: vfio
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Alex Williamson
+       email: alex.williamson@redhat.com
+       gluser: alex.williamson
+     - name: Eric Auger
+       email: eric.auger@redhat.com
+       gluser: eauger1
+   paths:
+       includes:
+          - Documentation/vfio.txt
+          - drivers/vfio/
+          - include/linux/vfio.h
+          - include/uapi/linux/vfio.h
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: VFIO MEDIATED DEVICE DRIVERS
+   labels:
+     name: vfio-mdev
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Alex Williamson
+       email: alex.williamson@redhat.com
+       gluser: alex.williamson
+     - name: Eric Auger
+       email: eric.auger@redhat.com
+       gluser: eauger1
+   paths:
+       includes:
+          - Documentation/vfio-mediated-device.txt
+          - drivers/vfio/mdev/
+          - include/linux/mdev.h
+          - samples/vfio-mdev/
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: VIDEO DRIVERS
+   labels:
+     name: video
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: David Airlie
+       email: airlied@redhat.com
+       gluser: airlied
+     - name: Adam Jackson
+       email: ajax@redhat.com
+       gluser: nwnk
+     - name: Lyude Paul
+       email: lyude@redhat.com
+       gluser: Lyude
+   reviewers:
+     - name: Michel Dänzer
+       email: mdaenzer@redhat.com
+       gluser: daenzer
+     - name: Karol Herbst
+       email: kherbst@redhat.com
+       gluser: karolherbst
+     - name: Ben Skeggs
+       email: bskeggs@redhat.com
+       gluser: bskeggs
+   paths:
+       includes:
+          - drivers/gpu/
+          - drivers/video/
+ - subsystem: VIRT LIB
+   labels:
+     name: virt_lib
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Alex Williamson
+       email: alex.williamson@redhat.com
+       gluser: alex.williamson
+     - name: Paolo Bonzini
+       email: pbonzini@redhat.com
+       gluser: bonzini
+   paths:
+       includes:
+          - virt/lib/
+ - subsystem: VIRTIO AND VHOST VSOCK DRIVER
+   labels:
+     name: virtio_vsock
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Stefan Hajnoczi
+       email: stefanha@redhat.com
+       gluser: stefanha
+   paths:
+       includes:
+          - include/linux/virtio_vsock.h
+          - include/net/af_vsock.h
+          - include/net/vsock_addr.h
+          - include/uapi/linux/virtio_vsock.h
+          - include/uapi/linux/vsockmon.h
+          - net/vmw_vsock/
+          - drivers/net/vsockmon.c
+          - drivers/vhost/vsock.c
+          - drivers/vhost/vsock.h
+       excludes:
+          - net/vmw_vsock/hyperv*
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: VIRTIO CONSOLE DRIVER
+   labels:
+     name: virtio_cons
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: '"Michael S. Tsirkin"'
+       email: mst@redhat.com
+       gluser: mstredhat
+     - name: Jason Wang
+       email: jasowang@redhat.com
+       gluser: jasowang
+   paths:
+       includes:
+          - drivers/char/virtio_console.c
+          - include/linux/virtio_console.h
+          - include/uapi/linux/virtio_console.h
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: VIRTIO CORE, NET AND BLOCK DRIVERS
+   labels:
+     name: virtio
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: '"Michael S. Tsirkin"'
+       email: mst@redhat.com
+       gluser: mstredhat
+     - name: Jason Wang
+       email: jasowang@redhat.com
+       gluser: jasowang
+   paths:
+       includes:
+          - Documentation/devicetree/bindings/virtio/
+          - drivers/virtio/
+          - tools/virtio/
+          - drivers/net/virtio_net.c
+          - drivers/vdpa/
+          - drivers/block/virtio_blk.c
+          - include/linux/virtio*.h
+          - include/linux/vdpa.h
+          - include/uapi/linux/virtio_*.h
+          - drivers/crypto/virtio/
+          - mm/balloon_compaction.c
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: VIRTIO CRYPTO DRIVER
+   labels:
+     name: virtio_crypto
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: '"Michael S. Tsirkin"'
+       email: mst@redhat.com
+       gluser: mstredhat
+     - name: Jason Wang
+       email: jasowang@redhat.com
+       gluser: jasowang
+   paths:
+       includes:
+          - drivers/crypto/virtio/
+          - include/uapi/linux/virtio_crypto.h
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: VIRTIO DRIVERS FOR S390
+   labels:
+     name: virtio_s390
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Cornelia Huck
+       email: cohuck@redhat.com
+       gluser: cohuck
+   paths:
+       includes:
+          - drivers/s390/virtio/
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: VIRTIO GPU DRIVER
+   labels:
+     name: virtio_gpu
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Gerd Hoffmann
+       email: kraxel@redhat.com
+       gluser: kraxel
+   paths:
+       includes:
+          - drivers/gpu/drm/virtio/
+          - include/uapi/linux/virtio_gpu.h
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: VIRTIO HOST (VHOST)
+   labels:
+     name: virtio_host
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: '"Michael S. Tsirkin"'
+       email: mst@redhat.com
+       gluser: mstredhat
+     - name: Jason Wang
+       email: jasowang@redhat.com
+       gluser: jasowang
+   paths:
+       includes:
+          - drivers/vhost/
+          - include/uapi/linux/vhost.h
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: VIRTIO INPUT DRIVER
+   labels:
+     name: virtio_input
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Gerd Hoffmann
+       email: kraxel@redhat.com
+       gluser: kraxel
+   paths:
+       includes:
+          - drivers/virtio/virtio_input.c
+          - include/uapi/linux/virtio_input.h
+   mailingList: rhvirt-patches@redhat.com
+   mailingList: rhvirt-patches@redhat.com
+ - subsystem: VME SUBSYSTEM
+   labels:
+     name: vme
+   status: Disabled
+   requiredApproval: false
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/vme/
+ - subsystem: VMWARE PVRDMA DRIVER (vmw_pvrdma)
+   labels:
+     name: vmw_pvrdma
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+   paths:
+       includes:
+          - drivers/infiniband/hw/vmw_pvrdma/
+          - include/uapi/rdma/vmw_pvrdma-abi.h
+ - subsystem: VMWARE VMXNET3 ETHERNET DRIVER (vmxnet3)
+   labels:
+     name: vmxnet3
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Cathy Avery
+       email: cavery@redhat.com
+       gluser: cavery
+   paths:
+       includes:
+          - drivers/net/vmxnet3/
+ - subsystem: VOLTAGE AND CURRENT REGULATOR FRAMEWORK
+   labels:
+     name: regulator
+   status: Disabled
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/regulator/
+ - subsystem: WATCHDOG
+   labels:
+     name: watchdog
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   reviewers:
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+   paths:
+       includes:
+          - Documentation/watchdog/
+          - drivers/watchdog/
+          - drivers/acpi/acpi_watchdog.c
+          - include/linux/watchdog.h
+          - include/uapi/linux/watchdog.h
+ - subsystem: WIRELESS DRIVERS AND STACK
+   labels:
+     name: wireless
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
+   reviewers:
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
+     - name: John Linville
+       email: linville@redhat.com
+       gluser: linville-rh
+   paths:
+       includes:
+          - Documentation/networking/mac80211*
+          - Documentation/networking/regulatory*
+          - drivers/net/wireless/
+          - net/mac80211/
+          - net/wireless/
+          - net/rfkill/
+          - include/linux/*80211*
+          - include/net/*80211*
+          - include/net/iw*
+          - include/net/regulatory.h
+          - include/uapi/linux/nl80211.h
+          - include/uapi/linux/wireless.h
+ - subsystem: WIRELESS [LR-WPAN] (IEEE 802.15.4)
+   labels:
+     name: lr_wpan
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Chris von Recklinghausen
+       email: crecklin@redhat.com
+       gluser: crecklin
+   paths:
+       includes:
+          - Documentation/networking/ieee802154.rst
+          - drivers/net/ieee802154/fakelb.c
+          - include/linux/*802154*
+          - include/net/*802154*
+          - net/ieee802154/
+          - net/mac802154/
+ - subsystem: X86 ARCHITECTURE
+   labels:
+     name: x86
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+     - name: Dean Nelson
+       email: dnelson@redhat.com
+       gluser: dnlsn
+   paths:
+       includes:
+          - arch/x86/
+          - tools/arch/x86/
+          - tools/power/cpupower/
+          - tools/power/x86/
+       excludes:
+          - arch/x86/hyperv/hv_init.c
+          - arch/x86/include/asm/kvm*
+          - arch/x86/include/asm/mshyperv.h
+          - arch/x86/include/asm/pvclock-abi.h
+          - arch/x86/include/asm/svm.h
+          - arch/x86/include/asm/vmx*.h
+          - arch/x86/include/uapi/asm/kvm*
+          - arch/x86/include/uapi/asm/svm.h
+          - arch/x86/include/uapi/asm/vmx.h
+          - arch/x86/kernel/cpu/mshyperv.c
+          - arch/x86/kernel/fpu/
+          - arch/x86/kernel/kvm.c
+          - arch/x86/kernel/kvmclock.c
+          - arch/x86/kvm/
+          - arch/x86/kvm/svm.c
+          - arch/x86/net/
+ - subsystem: X86 FPU SUBSYSTEM
+   labels:
+     name: x86fpu
+   status: Supported
+   requiredApproval: true
+   maintainers:
+     - name: Dean Nelson
+       email: dnelson@redhat.com
+       gluser: dnlsn
+   reviewers:
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - arch/x86/kernel/fpu/
+ - subsystem: XDP (eXpress Data Path)
+   labels:
+     name: xdp
+     readyForMergeDeps:
+       - lnst
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jesper Dangaard Brouer
+       email: brouer@redhat.com
+       gluser: netoptimizer
+     - name: Jiri Benc
+       email: jbenc@redhat.com
+       gluser: jbencrh
+     - name: Toke Høiland-Jørgensen
+       email: toke@redhat.com
+       gluser: tohojo
+   paths:
+       includes:
+          - Documentation/networking/*xdp*
+          - kernel/bpf/devmap.c
+          - kernel/bpf/cpumap.c
+          - include/net/netns/xdp.h
+          - include/net/page_pool.h
+          - include/net/*xdp*
+          - include/net/*xsk*
+          - include/uapi/linux/*xdp*
+          - net/core/page_pool.c
+          - net/core/sock_map.c
+          - net/core/xdp.c
+          - net/xdp/
+          - samples/bpf/*xdp*
+          - tools/testing/selftests/bpf/*xdp*
+          - tools/testing/selftests/bpf/*/*xdp*
+ - subsystem: XEN
+   labels:
+     name: xen
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Vitaly Kuznetsov
+       email: vkuznets@redhat.com
+       gluser: vkuznets
+     - name: Igor Mammedov
+       email: imammedo@redhat.com
+       gluser: imammedo
+     - name: Andrew Jones
+       email: drjones@redhat.com
+       gluser: rhdrjones
+   paths:
+       includes:
+          - drivers/block/xen-blkfront.c
+          - drivers/input/misc/xen-kbdfront.c
+          - drivers/net/xen-netfront.c
+          - drivers/tty/hvc/hvc_xen.c
+          - drivers/watchdog/xen_wdt.c
+          - drivers/xen/
+          - include/trace/events/xen.h
+          - include/uapi/xen/
+          - include/xen/
+          - arch/x86/include/asm/xen/
+          - arch/x86/pci/xen.c
+          - arch/x86/xen/
+ - subsystem: XFS FILESYSTEM
+   labels:
+     name: xfs
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Brian Foster
+       email: bfoster@redhat.com
+       gluser: bfoster2
+     - name: Carlos Maiolino
+       email: cmaiolino@redhat.com
+       gluser: cmaiolino
+     - name: Eric Sandeen
+       email: esandeen@redhat.com
+       gluser: esandeen-rh
+     - name: Bill O'Donnell
+       email: bodonnel@redhat.com
+       gluser: bodonnel
+     - name: Dave Chinner
+       email: dchinner@redhat.com
+       gluser: dchinner
+   paths:
+       includes:
+          - Documentation/filesystems/xfs.txt
+          - fs/xfs/
+ - subsystem: ZBUD COMPRESSED PAGE ALLOCATOR
+   labels:
+     name: zbud
+   status: Supported
+   requiredApproval: false
+   paths:
+       includes:
+          - mm/zbud.c
+          - include/linux/zbud.h
+ - subsystem: ZRAM COMPRESSED RAM BLOCK DEVICE DRVIER
+   labels:
+     name: zram
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jerome Marchand
+       email: jmarchan@redhat.com
+       gluser: jeromemarchand
+   paths:
+       includes:
+          - drivers/block/zram/
+          - Documentation/ABI/testing/sysfs-block-zram
+ - subsystem: ZSWAP COMPRESSED SWAP CACHING
+   labels:
+     name: zswap
+   status: Supported
+   requiredApproval: false
+   paths:
+       includes:
+          - mm/zswap.c

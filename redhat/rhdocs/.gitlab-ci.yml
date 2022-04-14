@@ -1,0 +1,155 @@
+include:
+  - remote: 'https://gitlab.freedesktop.org/freedesktop/ci-templates/-/raw/856dc00a017ae22617d188b4a952bba7d3ec943b/templates/ci-fairy.yml'
+  - remote: 'https://gitlab.freedesktop.org/freedesktop/ci-templates/-/raw/856dc00a017ae22617d188b4a952bba7d3ec943b/templates/alpine.yml'
+
+stages:
+  - container prep
+  - sanity check
+  - build
+  - check
+
+# https://docs.gitlab.com/ee/ci/yaml/README.html#switch-between-branch-pipelines-and-merge-request-pipelines
+# if a MR is opened: run a detached MR pipeline
+# if not, run a regular pipeline
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+
+.common_variables:
+  variables:
+    FDO_UPSTREAM_REPO: centos-stream/rhel/src/kernel/documentation
+    FDO_DISTRIBUTION_TAG: 2021-07-21.3
+    FDO_DISTRIBUTION_PACKAGES: make git hugo asciidoctor
+    # too tired of manually pulling the various go packages
+    FDO_BASE_IMAGE: golang:alpine3.14
+
+prep alpine container:
+  stage: container prep
+  extends:
+    - .fdo.container-build@alpine
+    - .common_variables
+
+#
+# Verify that commit messages are as expected, signed-off, etc.
+#
+check-commit:
+  extends:
+    - .fdo.ci-fairy
+  stage: sanity check
+  script:
+    - ci-fairy check-commits --branch $CI_DEFAULT_BRANCH --signed-off-by --junit-xml=results.xml
+  except:
+    - main@centos-stream/rhel/src/kernel/documentation
+  variables:
+    GIT_DEPTH: 100
+  artifacts:
+    reports:
+      junit: results.xml
+
+build:
+  stage: build
+  extends:
+    - .fdo.distribution-image@alpine
+    - .common_variables
+  script:
+    - cd scripts
+    - make
+  artifacts:
+    paths:
+      - scripts/RHMAINTAINERS_parser
+      - scripts/yaml2CODEOWNERS
+      - scripts/yaml2RHMAINTAINERS
+
+.pages:
+  stage: build
+  extends:
+    - .fdo.distribution-image@alpine
+    - .common_variables
+  variables:
+    PAGES_BASE_URL: $CI_PAGES_URL
+  script:
+    - hugo new site rhdocs
+    - pushd rhdocs
+    - mkdir -p themes/hugo-geekdoc/
+    - wget https://github.com/thegeeklab/hugo-geekdoc/releases/latest/download/hugo-geekdoc.tar.gz
+    - tar xfz hugo-geekdoc.tar.gz -C themes/hugo-geekdoc/
+
+    # cleanup and populate our site
+    - mv ../docs content
+
+    # use our own hugo config file
+    - rm config.toml
+    - echo $CI_PAGES_URL
+    - echo $PAGES_BASE_URL
+    - cp ../hugo_config.yaml config.yaml
+
+    # fix links with the help of the `ref` shortcode
+    - |
+      for i in content/docs/*.adoc ; do sed 's/link:\([^.]*\.adoc\)/link:{{< ref \1 >}}/g' -i $i; done
+
+    # finally run hugo
+    - hugo --config config.yaml --baseURL $PAGES_BASE_URL
+
+    - popd
+
+    - mv rhdocs/public .
+  artifacts:
+    paths:
+    - public
+
+pages CI check:
+  extends:
+  - .pages
+  before_script:
+    - export PROJECT_PATH_WITHOUT_ROOT=${CI_PROJECT_PATH/$CI_PROJECT_ROOT_NAMESPACE/-}
+    - export PAGES_BASE_URL="https://${CI_PROJECT_ROOT_NAMESPACE}.${CI_PAGES_DOMAIN}/${PROJECT_PATH_WITHOUT_ROOT}/-/jobs/${CI_JOB_ID}/artifacts/public/"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: never
+    - when: on_success
+
+check:
+  stage: check
+  needs:
+    - build
+  extends:
+    - .fdo.distribution-image@alpine
+    - .common_variables
+  script:
+    # rebuild the current files
+    - make
+
+    # clean up cache
+    - rm -f .failed
+
+    # check that the committed files matched
+    - git diff --exit-code || touch .failed
+    - |
+      if [[ -e .failed ]]
+      then
+        echo '-----------------------------------------------------------------'
+        echo ''
+        echo ' Looks like the files scripts/CODEOWNERS or scripts/RHMAINTAINERS'
+        echo ' have not been regenerated and checked in this commit.'
+        echo ''
+        echo ' Please run the following command before committing:'
+        echo '        ./scripts/yaml2CODEOWNERS info/owners.yaml > info/CODEOWNERS'
+        echo '        ./scripts/yaml2RHMAINTAINERS info/owners.yaml > info/RHMAINTAINERS'
+        echo ''
+        echo '-----------------------------------------------------------------'
+        exit 1
+      fi
+
+pages:
+  extends:
+  - .pages
+  stage: check
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - when: never

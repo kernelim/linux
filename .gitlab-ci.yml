@@ -1,0 +1,96 @@
+# This CI will only work for project members. CI for public contributors
+# runs via a webhook on the merge requests. There's nothing you have to do if
+# you want your changes tested -- created pipeline will be automatically
+# linked in the merge request and appropriate labels will be added to it.
+# Changes to this file will NOT be reflected in the webhook testing.
+
+include:
+  - project: cki-project/pipeline-definition
+    ref: main
+    file: kernel_templates.yml
+
+workflow: !reference [.workflow]
+
+.9-common:
+  variables:
+    srpm_make_target: dist-srpm
+    native_tools: 'true'
+    architectures: 'x86_64 ppc64le aarch64 s390x'
+    POWER_BUILDER_SUFFIX: '-p9'
+    disttag_override: '.el9_0'
+
+.trigger_rhel9_pipeline:
+  trigger:
+    branch: rhel9
+  variables:
+    name: rhel9
+    builder_image: quay.io/cki/builder-rhel9
+    kpet_tree_family: rhel9
+
+.realtime_check_rhel9:
+  trigger:
+    branch: rhel9-rt
+  variables:
+    name: kernel-rt-rhel9
+    kpet_tree_family: rhel9-rt
+
+.realtime_full_rhel9:
+  variables:
+    name: kernel-rt-rhel9
+    kpet_tree_family: rhel9-rt
+    RUN_ONLY_FOR_RT: 'true'
+
+# RHEL9 CI
+rhel9_merge_request:
+  extends: [.internal, .merge_request, .rhel_common, .with_notifications,
+            .9-common, .trigger_rhel9_pipeline]
+
+rhel9_realtime_check_merge_request:
+  extends: [.internal, .merge_request,
+            .9-common,
+            .realtime_check_common,
+            .trigger_rhel9_pipeline, .realtime_check_rhel9]
+
+rhel9_baseline:
+  extends: [.internal, .baseline, .rhel_common, .with_notifications,
+            .9-common, .trigger_rhel9_pipeline]
+
+rhel9_realtime_check_baseline:
+  extends: [.internal, .baseline,
+            .9-common,
+            .realtime_check_baseline,
+            .trigger_rhel9_pipeline, .realtime_check_rhel9]
+
+rhel9_baseline_coverage_build:
+  extends: [.internal, .baseline, .rhel_common, .only_build_and_publish, .coverage,
+            .9-common, .trigger_rhel9_pipeline]
+
+# RHEL9 realtime branch CI
+rhel9_realtime_merge_request:
+  extends: [.internal, .merge_request,
+            .9-common,
+            .realtime_pipeline_common,
+            .trigger_rhel9_pipeline, .realtime_full_rhel9]
+
+rhel9_realtime_baseline:
+  extends: [.internal, .baseline,
+            .9-common,
+            .realtime_pipeline_common,
+            .trigger_rhel9_pipeline, .realtime_full_rhel9]
+
+# RHEL9 private CI (including RT branches)
+rhel9_merge_request_private:
+  extends: [.scratch, .merge_request, .rhel_common,
+            .9-common, .trigger_rhel9_pipeline]
+
+rhel9_realtime_check_merge_request_private:
+  extends: [.scratch, .merge_request,
+            .9-common,
+            .realtime_check_common,
+            .trigger_rhel9_pipeline, .realtime_check_rhel9]
+
+rhel9_realtime_merge_request_private:
+  extends: [.scratch, .merge_request,
+            .9-common,
+            .realtime_pipeline_common,
+            .trigger_rhel9_pipeline, .realtime_full_rhel9]

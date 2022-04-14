@@ -1,0 +1,24 @@
+# CONFIG_SND_SOC_SOF_JASPERLAKE:
+# 
+# This adds support for Sound Open Firmware for Intel(R) platforms
+# using the JasperLake processors.
+# Say Y if you have such a device.
+# If unsure select "N".
+# 
+# Symbol: SND_SOC_SOF_JASPERLAKE [=m]
+# Type  : tristate
+# Defined at sound/soc/sof/intel/Kconfig:167
+#   Prompt: SOF support for JasperLake
+#   Depends on: SOUND [=m] && !UML && SND [=m] && SND_SOC [=m] && SND_SOC_SOF_TOPLEVEL [=y] && SND_SOC_SOF_INTEL_TOPLEVEL [=y] && SND_SOC_SOF_PCI [=m]
+#   Location:
+#     -> Device Drivers
+#       -> Sound card support (SOUND [=m])
+#         -> Advanced Linux Sound Architecture (SND [=m])
+#           -> ALSA for SoC audio support (SND_SOC [=m])
+#             -> Sound Open Firmware Support (SND_SOC_SOF_TOPLEVEL [=y])
+#               -> SOF support for Intel audio DSPs (SND_SOC_SOF_INTEL_TOPLEVEL [=y])
+# Selects: SND_SOC_SOF_INTEL_ICL [=m]
+# 
+# 
+# 
+CONFIG_SND_SOC_SOF_JASPERLAKE=m

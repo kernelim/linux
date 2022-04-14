@@ -74,7 +74,24 @@ static inline void set_arch_panic_timeout(int timeout, int arch_default_timeout)
 #define TAINT_LIVEPATCH			15
 #define TAINT_AUX			16
 #define TAINT_RANDSTRUCT		17
-#define TAINT_FLAGS_COUNT		18
+/* Start of Red Hat-specific taint flags */
+#define TAINT_18			18
+#define TAINT_19			19
+#define TAINT_20			20
+#define TAINT_21			21
+#define TAINT_22			22
+#define TAINT_23			23
+#define TAINT_24			24
+#define TAINT_25			25
+#define TAINT_26			26
+#define TAINT_SUPPORT_REMOVED		27
+/* Bits 28 - 31 are reserved for Red Hat use only */
+#define TAINT_RESERVED28		28
+#define TAINT_RESERVED29		29
+#define TAINT_RESERVED30		30
+#define TAINT_UNPRIVILEGED_BPF		31
+/* End of Red Hat-specific taint flags */
+#define TAINT_FLAGS_COUNT		32
 #define TAINT_FLAGS_MAX			((1UL << TAINT_FLAGS_COUNT) - 1)
 
 struct taint_flag {

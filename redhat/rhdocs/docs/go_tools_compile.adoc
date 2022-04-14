@@ -1,0 +1,24 @@
+---
+title: 'Compile `lab` and `bichon`'
+date: 2021-07-20T19:30:08+10:00
+draft: false
+weight: 6
+summary: Manual installation instructions for the recommended tools.
+---
+
+=== GitLab ‘lab’ and ‘bichon’ & Go
+
+The recommended tools (bichon and lab) are written in go.  The tools are packaged as RPMs and are available from https://copr.fedorainfracloud.org/[COPR].  Instructions on installing the RPMs from COPR are provided in the link:bichon.adoc[bichon] sections below.
+
+Users wishing to use a bleeding edge version of bichon or lab, must install the widely used go compiler and executable in their environments.
+
+To install ‘go’ in RHEL8 or RHEL9 [Verified Tue Sep 7 2021]:
+----
+	yum -y install /usr/bin/go # can be installed from AppStream repo
+----
+
+To install ‘go’ in Fedora34 [Verified Tue Sep 7 2021]:
+----
+	yum -y install /usr/bin/go
+----
+

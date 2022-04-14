@@ -14,6 +14,11 @@
 
 #include <uapi/linux/random.h>
 
+struct random_extrng {
+	ssize_t (*extrng_read)(void __user *buf, size_t buflen);
+	struct module *owner;
+};
+
 struct random_ready_callback {
 	struct list_head list;
 	void (*func)(struct random_ready_callback *rdy);
@@ -44,6 +49,8 @@ extern bool rng_is_initialized(void);
 extern int add_random_ready_callback(struct random_ready_callback *rdy);
 extern void del_random_ready_callback(struct random_ready_callback *rdy);
 extern int __must_check get_random_bytes_arch(void *buf, int nbytes);
+void random_register_extrng(const struct random_extrng *rng);
+void random_unregister_extrng(void);
 
 #ifndef MODULE
 extern const struct file_operations random_fops, urandom_fops;

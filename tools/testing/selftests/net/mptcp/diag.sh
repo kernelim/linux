@@ -74,6 +74,7 @@ chk_msk_remote_key_nr()
 
 trap cleanup EXIT
 ip netns add $ns
+ip netns exec $ns sysctl -q net.mptcp.enabled=1
 ip -n $ns link set dev lo up
 
 echo "a" | \

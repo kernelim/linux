@@ -40,7 +40,11 @@ int acpi_pci_disabled = 1;	/* skip ACPI PCI scan and IRQ initialization */
 EXPORT_SYMBOL(acpi_pci_disabled);
 
 static bool param_acpi_off __initdata;
+#ifdef CONFIG_RHEL_DIFFERENCES
+static bool param_acpi_on __initdata = true;
+#else
 static bool param_acpi_on __initdata;
+#endif
 static bool param_acpi_force __initdata;
 
 static int __init parse_acpi(char *arg)

@@ -1,0 +1,13 @@
+# Symbol: IOMMU_DEFAULT_DMA_LAZY [=n]
+# Type  : bool
+# Defined at drivers/iommu/Kconfig:108
+#   Prompt: Translated - Lazy
+#   Depends on: <choice>
+#   Location:
+#     -> Device Drivers
+#       -> IOMMU Hardware Support (IOMMU_SUPPORT [=y])
+#         -> IOMMU default domain type (<choice> [=y])
+# 
+# 
+# 
+CONFIG_IOMMU_DEFAULT_DMA_LAZY=y

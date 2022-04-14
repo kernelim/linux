@@ -9855,6 +9855,7 @@ static struct pci_device_id qla4xxx_pci_tbl[] = {
 		.subvendor	= PCI_ANY_ID,
 		.subdevice	= PCI_ANY_ID,
 	},
+#ifndef CONFIG_RHEL_DIFFERENCES
 	{
 		.vendor         = PCI_VENDOR_ID_QLOGIC,
 		.device         = PCI_DEVICE_ID_QLOGIC_ISP8022,
@@ -9873,6 +9874,7 @@ static struct pci_device_id qla4xxx_pci_tbl[] = {
 		.subvendor	= PCI_ANY_ID,
 		.subdevice	= PCI_ANY_ID,
 	},
+#endif
 	{0, 0},
 };
 MODULE_DEVICE_TABLE(pci, qla4xxx_pci_tbl);

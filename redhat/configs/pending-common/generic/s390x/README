@@ -1,0 +1,5 @@
+Place config options in this directory that you want applied to s390x
+kernel variants. These options are overlayed atop the generic/ kernel
+options, but can also be overridden config option files places in the
+debug/ and/or debug/s390x directories, as well as by config option files
+placed in generic/s390x/zfcpdump for the s390x-zfcpdump kernel variant.

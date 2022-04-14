@@ -1,0 +1,2 @@
+# Verify upstream support before re-enabling.
+# CONFIG_X86_PCC_CPUFREQ is not set

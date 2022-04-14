@@ -1,0 +1,41 @@
+# variables that can be overrided by ~/.rhel8git.mk or $(TOPDIR)/.rhel8git.mk
+#
+
+# Command to invoke rhpkg
+ifeq ("$(DISTRO)", "fedora")
+	RHPKG_BIN:=fedpkg
+else ifeq ("$(DISTRO)", "centos")
+	RHPKG_BIN:=centpkg
+else
+	RHPKG_BIN:=rhpkg
+endif
+# Kerberos username for pkgs.devel.redhat.com
+RHDISTGIT_USER:="$(shell whoami)"
+# Local dist-git _clean_ clone. To be used when updating dist-git
+#RHDISTGIT_CACHE:=
+# Temporary directory to clone the dist-git repo to. Change this if you
+# have a faster storage
+RHDISTGIT_TMP:=/tmp
+# Branch it should be switched into
+RHDISTGIT_BRANCH:=${RHPRODUCT}
+
+# load configuration, starting with home directory then local
+ifeq ("$(RHDISTGIT_CACHE)", "")
+ ifneq ("$(wildcard ${HOME}/.rhel9git.mk)", "")
+  include ${HOME}/.rhel9git.mk
+ endif
+ ifneq ("$(wildcard $(TOPDIR)/.rhel9git.mk)", "")
+  include $(TOPDIR)/.rhel9git.mk
+ endif
+endif
+
+ifneq ("$(DISTRO)", "centos")
+	RHDISTGIT:="ssh://$(RHDISTGIT_USER)@pkgs.devel.redhat.com/rpms/$(PACKAGE_NAME)"
+else
+	# CentOS uses a fork + merge request based workflow with dist-git to
+	# handle changes, so you need to provide the gitlab username and we by
+	# default set the default user's fork path. The dist-git target in
+	# redhat/Makefile has a check to see if the variable is not set.
+	GL_FORK_PATH?=$(PACKAGE_NAME).git
+	RHDISTGIT:=git@gitlab.com:$(GL_DISTGIT_USER)/$(GL_FORK_PATH)
+endif

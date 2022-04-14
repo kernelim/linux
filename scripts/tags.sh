@@ -16,6 +16,8 @@ fi
 ignore="$(echo "$RCS_FIND_IGNORE" | sed 's|\\||g' )"
 # tags and cscope files should also ignore MODVERSION *.mod.c files
 ignore="$ignore ( -name *.mod.c ) -prune -o"
+# RHEL tags and cscope should also ignore redhat/rpm
+ignore="$ignore ( -path redhat/rpm ) -prune -o"
 
 # Use make KBUILD_ABS_SRCTREE=1 {tags|cscope}
 # to force full paths for a non-O= build

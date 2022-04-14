@@ -13,6 +13,8 @@ struct kcs_bmc_device_ops {
 	u8 (*io_inputb)(struct kcs_bmc_device *kcs_bmc, u32 reg);
 	void (*io_outputb)(struct kcs_bmc_device *kcs_bmc, u32 reg, u8 b);
 	void (*io_updateb)(struct kcs_bmc_device *kcs_bmc, u32 reg, u8 mask, u8 b);
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 };
 
 irqreturn_t kcs_bmc_handle_event(struct kcs_bmc_device *kcs_bmc);

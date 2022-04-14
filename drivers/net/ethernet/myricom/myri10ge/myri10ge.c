@@ -3739,6 +3739,8 @@ static int myri10ge_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	unsigned hdr_offset, ss_offset;
 	static int board_number;
 
+	pci_hw_unmaintained(ent, pdev);
+
 	netdev = alloc_etherdev_mq(sizeof(*mgp), MYRI10GE_MAX_SLICES);
 	if (netdev == NULL)
 		return -ENOMEM;

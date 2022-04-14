@@ -506,6 +506,12 @@ static inline bool sk_psock_strp_enabled(struct sk_psock *psock)
 	return !!psock->saved_data_ready;
 }
 
+static inline bool sk_is_udp(const struct sock *sk)
+{
+	return sk->sk_type == SOCK_DGRAM &&
+	       sk->sk_protocol == IPPROTO_UDP;
+}
+
 #if IS_ENABLED(CONFIG_NET_SOCK_MSG)
 
 /* We only have one bit so far. */

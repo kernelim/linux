@@ -1,0 +1,401 @@
+---
+title: 'Red Hat KWF: Quick Start Guide'
+date: 2022-02-11T08:40:00-05:00
+draft: false
+weight: 1
+summary: Entry point.
+---
+= Getting started with the RHEL kernel workflow
+// Borrowed from https://github.com/asciidoctor/asciidoctor.org/issues/571
+:caution-caption: pass:[<span style="font-size: 2em">☠</span>]
+:important-caption: pass:[<span style="font-size: 2em">❗</span>]
+:note-caption: pass:[<span style="font-size: 2em">🛈</span>]
+:tip-caption: pass:[<span style="font-size: 2em">💡</span>]
+:warning-caption: pass:[<span style="font-size: 2em">⚠</span>]
+
+== Introduction
+
+This document aims to help you quickly get started with contributing to the Red Hat-based kernel projects including https://gitlab.com/redhat/rhel/src/kernel[RHEL kernels], https://gitlab.com/centos-stream/src/kernel[CentOS Stream kernels], and https://gitlab.com/cki-project/kernel-ark[the Fedora/ARK kernel].
+
+It is expected that readers are familiar with the concepts of git, kernel code hacking, and backporting code changes from upstream trees. *This guide does not cover explanations of such concepts*.
+
+The target audience of this document is a Red Hat Kernel Developer or Partner Engineer. +
+[.small]_Instructions for External Contributors will be provided in a separate document._
+
+|===
+| *Topic* | *Description*
+| <<Preparing to contribute for RHEL kernel>> a|
+* Learn how to create and set up Red Hat Bugzilla and GitLab accounts.
+* Get familiar with the most important Red Hat kernel-related projects.
+* Fork and configure Red Hat kernel projects.
+
+| <<Creating merge requests>> a|
+* Get familiar with the Red Hat kernel engineering guidelines and best practices for commits and merge requests (MRs).
+* Learn how to verify your merge request's data before submitting the merge request.
+* Learn how to create a proper MR of your work.
+
+| <<Performing additional operations on merge requests>> a|
+* Get a list of MRs.
+* Get patches from an MR.
+* Show comments on your MR.
+* Approve your MR.
+* Close your MR.
+* And Others.
+
+| <<Additional resources>> a|
+* GitLab forks.
+* The `lab`, `rhstatus`, and `revumatic` utilities for performing basic contributor and reviewer actions.
+* The RHEL kernel workflow process.
+* And others.
+
+| <<Frequently asked questions>> a|
+* The most common questions related to contributing to Red Hat-based kernel projects.
+
+| <<Appendix>> a|
+* Acronym expansions.
+
+|===
+
+== Preparing to contribute for RHEL kernel
+
+. Working on the RHEL kernel requires an appropriately configured Bugzilla and GitLab account.
+* Create and configure your https://bugzilla.redhat.com/createaccount.cgi[Red Hat Bugzilla account].
+.. Red Hat Developers must be a member of the `redhat` bugzilla group to properly associate their account with GitLab.
+.. Red Hat Partner Engineers must be a member of `redhat_partner_engineer_staff` to properly associate their account with GitLab.
++
+xref:rh_and_gitlab_configuration.adoc#partnerengineer[Required Permissions for Partner Engineers] +
+[.small]_Look for "I'm using https://red.ht/GitLabSSO to login to GitLab and can see centos-stream and other public projects but cannot see the RHEL projects."_
++
+https://redhat.service-now.com/help?id=kb_article_view&sysparm_article=KB0009257[Instructions to Request Access]
+* Create and configure your https://gitlab.com/users/sign_up[GitLab account] per the  xref:rh_and_gitlab_configuration.adoc#accountcreation[Red Hat and GitLab Configuration Guide]
+.. xref:rh_and_gitlab_configuration.adoc#sshconfiguration[Configure your SSH keys] to your GitLab account.
+.. xref:rh_and_gitlab_configuration.adoc#tokens[Create a Personal Access Token (PAT)] as a means or authentication for your GitLab account. This token is required to use any of the recommended public tools for kernel work.
+* Associate your Red Hat and GitLab accounts together: https://red.ht/GitLabSSO +
+This link should be used when starting fresh, or when common issues such as these occur:
+** A contributor is experiencing difficulties such as (but not limited to) restricted access to repositories. +
+** Pipelines not running. +
++
+NOTE: It is recommended to renew the SSO association on a regular basis (monthly or quarterly) as it can expire and cause unintended behavior. +
+_This does not apply to External Contributors.  Instructions will be provide in a separate document._
+
+. Install and configure your utilities for performing contributor and reviewer actions. +
+You can choose from: +
+* Internal Tools:
+** https://gitlab.cee.redhat.com/kernel-review/revumatic[revumatic] - A review tool that provides a text user interface to review GitLab Merge Requests.
+** https://gitlab.com/prarit/rhstatus[rhstatus] - Provides a terminal based report based on the current status of a developer's TODO list and open Merge Requests.
+* External Tools:
+** https://gitlab.com/redhat/centos-stream/src/kernel/documentation/-/blob/main/docs/bichon.adoc[bichon] - A terminal based user interface for reviewing GitLab Merge Requests.
+** https://gitlab.com/redhat/centos-stream/src/kernel/documentation/-/blob/main/docs/lab.adoc[lab] - Interact with repositories on GitLab (creating/editing Merge Requests, forking projects, etc.) via command line.
++
+IMPORTANT: We recommend using the `lab` utility to create forks and subsequent MRs to provide a consistent experience. Proceeding with this document assumes that `lab` is configured.
+
+. Review notable Red Hat projects.
+** https://red.ht/GitLab[Main Red Hat RHEL namespace]
+** https://gitlab.com/redhat/rhel/src/kernel/rhel-8[Private rhel-8 kernel source]
+** https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9[Public centos-stream-9 kernel source (You want to contribute here!)]
+** https://gitlab.com/redhat/rhel/src/kernel/rhel-9[Private rhel-9 z-stream/EUS contribution kernel source]
+. Create a Bugzilla ticket for the bug you want to fix or for the feature you want to add.
+* Select the appropriate release in the product and version fields. +
+_For example, for RHEL 9:_ +
+*Product*: Red Hat Enterprise Linux 9 +
+*Version*: 9.0 +
+*Component*: kernel +
+*Sub Component*: select the suitable one or select “other” if there is no such one.
++
+image::images/qsg-bugzilla_image.png[align="center"]
+. anchor:getreleaseapproval[] Get release approval. _(This does not apply to External Contributors)_
+.. http://pkgs.devel.redhat.com/rules.html[Requirements for release+ can be found here.] +
+_Example: RHEL8.6 search for rhel-8.6.0_ +
+_Example: c9s (for RHEL9 bugzillas)_
+.. GENERAL GUIDANCE on how to obtain +release++ on a BZ: +
+_(This guidance may vary and/or change down the road)_
+... Before ITM 26: +
+`ITR, DTM, ITM, devel_ack+, qa_ack+ = release+`
+... After ITM 26: +
+Same requirements, but also `exception+` or `blocker+` based on schedule.
+. Clone the project you want to contribute to. +
+`git clone _<project_SSH_URL>_`
+* *RHEL9*:
+According to the https://gitlab.com/redhat/rhel/src/kernel/internal-docs/-/blob/main/CentOS-Stream-9_Workflow.adoc#user-content-red-hat-contributors[CentOS-Stream-9 Workflow document], use https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9[CentOS-Stream 9] like a normal RHEL git tree for all development work per the http://red.ht/kernel_workflow_doc[kernel workflow] document. Working after ITM 26 may require additional considerations as specified for <<getreleaseapproval,obtaining release approval>> as well as working on an https://gitlab.com/redhat/rhel/src/kernel/rhel-9[internal RHEL-9 tree] instead.
+* *RHEL8*:
+Use https://gitlab.com/redhat/rhel/src/kernel/rhel-8[rhel8-tree] like a normal RHEL git tree for all development work per the http://red.ht/kernel_workflow_doc[kernel workflow] document. 
+* Embargoed/NDA related content:
+Contact the https://gitlab.com/redhat/centos-stream/src/kernel/documentation/-/blob/main/info/CODEOWNERS[relevant kernel maintainer].
++
+IMPORTANT: For embargoed content or for content with non-disclosure agreements, you need to clone the project's kernel-private tree directly. You cannot create your own fork from it, because your code would end up in a personal fork. This would increase the possibility of it leaking to the public.
+. Change directory to the project you cloned and use the +lab+ utility to fork the project.
+* `lab fork` +
+Note that kernel repositories take a long time to fork.
+. Find the name of the fork.
+* `git remote -v | grep _<GitLab_username>_` +
+Note that GitLab username is used for the remote name.
+. Modify your fork while following the details outlined in xref:commitrules.adoc#commitdescriptioninfo[CommitRules Section 3: Commit-Specific Description Information]
+
+. Push the updated branch to your kernel fork on GitLab.
+* `git push -u _<GitLab_fork_name>_ _<branch_name>_`
+
+== Creating merge requests
+
+. Familiarize yourself with xref:commitrules.adoc[CommitRules] and xref:verifying_a_gitlab_mr.adoc[Verify the MR information] documents.
+
+. When done with your work, create a merge request (MR) on some branch other than the `main` branch. +
+`git checkout -b <branch_name>` +
+`# do your work` +
+`git push -u _<GitLab_username>_ _<branch_name>_` +
+`lab mr create --draft --force-linebreak _[<origin>]_` +
+_Note that the previous command produces a MR URL that contains a MR ID._
++
+We strongly recommend that users of the `lab` utility use the `--draft` option to verify the changes pass the https://gitlab.com/cki-project/kernel-webhooks/[kernel project's webhooks]. +
+To achieve “optimal” formatting of the MR overview text, it is recommended that you use the `--force-linebreak` option with the `lab` utility. +
++
+Here are a couple of examples with the same input template with and without --force-linebreak:
++
+.With --force-linebreak
+image::images/qsg-lab_mr_create-forcelinebreak.png[caption=""]
++
+.Without --force-linebreak
+image::images/qsg-lab_mr_create-noforcelinebreak.png[caption=""]
++
+Some tips:
+
+.. If you choose to use Markdown, some common formatting problems can be found and addressed in <<commonformattingissues,FAQ "I followed the commit rules as detailed, why do I have a red label that is seemingly satisfied?">> and <<badformatting,FAQ "The formatting is bad, how do I fix it?">>.
+.. While editing the MR description, if you decide you don't want to create it just yet, exiting the editor with a non-zero return value (e.g. vim's `:cq`), or saving an empty file for the MR description will cause `lab` to abort the MR creation. +
++
+For a MR to be approved and subsequently merged, it must meet certain requirements. The label panel on the right shows the current status. For example:
++
+image::images/qsg-mr_labels_grouped.png[align="center"]
++
+*Label Color Descriptions* +
++
+|===
+|*Color*|*Description*|*Example*
+
+|Red|Unsatisfied or Failed requirement a|
+image::images/qsg-label_image-red.png[]
+
+|Blue|Satisfied requirement a|
+image::images/qsg-label_image-blue.png[]
+
+|Purple|Irrelevant requirement (will not prevent a merge) a|
+image::images/qsg-label_image-purple.png[]
+
+|Gray|Informational, does not prevent a merge a|
+image::images/qsg-label_image-gray.png[]
+
+|Goldenrod|Follow up on merge request a|
+image::images/qsg-label_image-goldenrod.png[]
+
+|Dark Green|Informational, Does not prevent a merge a|
+image::images/qsg-label_image-darkgreen.png[]
+
+|Light Green|Proceed to next steps a|
+image::images/qsg-label_image-lightgreen.png[]
+
+|===
++
+The full list of possible labels is https://gitlab.com/cki-project/kernel-webhooks/-/blob/main/utils/labels.yaml[available for reference]. +
++
+.. As various automated bot jobs run, different labels will be added or removed based on analysis of the MR or BZ or the results of tests performed: +
++
+image::images/qsg-bot_activity.png[align="center"]
++
+_If you don't like the relative timestamps, they can be turned off (changed to date+time) in your GitLab preferences._
+.. The CKI KWF Bot updates Bugzillas when applicable. +
+Some examples include:
+... When a BZ is detected in an MR, it automatically adds the link to the BZ.
++
+image::images/qsg-bot_bz_link.png[]
+... When a BZ is detected in an MR that contains code changes AND that BZ is in state NEW or ASSIGNED, the bot sets the status of that BZ to POST.
++
+image::images/qsg-bot_bz_status.png[]
+... When the CI pipeline has build products available such as kernel RPMs, the bot records them in the BZ as a private comment. +
++
+NOTE: Since the comments are private, these links are not easily found for external contributors.  See <<getartifactsdirectly,FAQ "How do I get build artifacts without looking at Bugzilla?">>
++
+image::images/qsg-bot_bz_buildinfo.png[]
+... When a BZ has met (Ready for QA or Ready for Merge) requirements, the bot updates the BZ status to MODIFIED from POST.
++
+image::images/qsg-bot_bz_modified.png[]
+... etc.
+.. CKI Gating tests run in a pipeline automatically +
++
+NOTE: If a CKI test fails, then you should refer to the process for https://cki-project.org/docs/user_docs/gitlab-mr-testing/full_picture/#debugging-and-fixing-failures---more-details[debugging and fixing failures in CKI]. +
+_If you encounter a failed test that results in a new purple label “CKI_RT::Failed:merge”, this can be ignored._ +
+
+. Once your MR has passed the initial webhooks checks and is ready for review by others, move it out of `draft` state. +
+`lab mr edit <mrID> --ready` +
++
+Three people need to ACK (or approve) this MR for it to pass. Direct action could be required to get people to provide their acks. +
++
+When MR is approved, it receives the image:images/qsg-label_image-lightgreen.png["readyForMerge"] label.
++
+image::images/qsg-mr_update_ready.png[align="center"]
+All approved MR's, assuming they have the +readyForMerge+ label, will normally be merged into the parent tree at the end of each week.
+
+. xref:create-a-merge-request-for-zstream.adoc[Create MR targeting a specific branch (i.e. z-stream)]
+
+== Performing additional operations on merge requests
+
+* Get a list of MRs.
+** `bichon` +
++
+-or-
+** `git fetch --all` +
+`lab mr list --all`
+
+* Checkout the code from an MR.
+** `git fetch --all` +
+`lab mr list --all` # to find the mrID +
+`lab mr checkout _<mrID>_`
+
+* Get patches from an MR.
+** `git fetch --all` +
+`lab mr checkout _<mrID>_` +
+`git-format-patch -_<number_of_patches>_` +
++
+-or-
+** `git-format-patch origin/main`
+
+* View the code without checkout.
+** `bichon` # select MR from main page +
++
+-or-
+** `lab mr show --patch`
+
+* Show comments on an MR.
+** `bichon` +
++
+-or-
+** `lab mr show <mrID> --comments`
+
+* Comment on an MR.
+** Non-blocking
+*** `bichon` # select description, and add comment +
++
+-or-
+*** `lab mr comment _<mrID>_`
+
+** Blocking (NACK)
+*** `bichon` # select commit, add comment, select 'Enable replies to comment' +
++
+-or-
+*** `lab mr discussion _<mrID>_`
+*** `lab mr reply _<mrID>:<comment_id>_`
+
+* Approve an MR.
+** `bichon` # select MR and 'a' +
++
+-or-
+** `lab mr approve _<mrID>_`
+
+* Unapprove an MR (Rescind-Acked-by).
+** `bichon` # select MR and 'A' +
++
+-or-
+** `lab mr unapprove _<mrID>_`
+
+* Close an MR.
+** `lab mr close _<mrID>_`
+
+* xref:updating_or_fixing_a_mr.adoc[Update or Fix your MR if needed.]
+
+== Additional resources
+
+* https://source.redhat.com/groups/public/kernel[General Kernel Info Page]
+* https://gitlab.com/redhat/centos-stream/src/kernel/documentation/-/blob/main/docs/what_is_a_GitLab_fork.adoc[What is a GitLab Fork?]
+* xref:commitrules.adoc[CommitRules]
+* xref:rh_and_gitlab_configuration.adoc[Red Hat and GitLab Configuration]
+* xref:lab.adoc[Gitlab 'lab' utility and the Red Hat Kernel]
+* https://gitlab.cee.redhat.com/kernel-review/revumatic/[Red Hat Specific 'revumatic' tool]
+* https://gitlab.com/prarit/rhstatus[rhstatus]
+* https://red.ht/kernel_workflow_doc[Main KWF documentation]
+* https://one.redhat.com/rhel-developer-guide[RHEL Developer guide]
+* https://gitlab.com/redhat/rhel/src/kernel/internal-docs/-/blob/main/CentOS-Stream-9_Workflow.adoc#user-content-red-hat-contributors[Which tree should I use for RHEL9?]
+* https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9[CentOS Stream 9 Kernel Tree]
+* https://gitlab.com/redhat/rhel/src/kernel/rhel-8[RHEL-8 Kernel Tree]
+* https://listman.redhat.com/mailman/listinfo/kernel-info[kernel-info mailing list]
+
+
+== Frequently asked questions
+
+. I have a Red Unmet Requirement label image:images/qsg-label_image-red_blank.png["Blank Red Label"], what does this mean and how do I fix it?
+.. Review the listed Dependencies in the MR Summary.
+.. Find each of the MR associated with the Dependencies line(s)
+.. Compare the common commits between this MR and each of the dependent MR commits.
+... If any of the common commits have *different* ID's, the Dependency check will be marked as RED.
+... To resolve, this MR must be rebased upon the tree containing the mismatched commit ID.
+. The link I received to create the MR for my change only refers to my fork and not the upstream kernel tree. Why did this happen and how do I resolve it?
+.. This typically happens if you have inadvertently cloned your fork and the `origin` remote points at your fork rather than the upstream tree.
+.. It is recommended that you clone the upstream tree, not your fork. +
+If that is not an option, then you can specify the remote to use when creating the MR. +
+_(This was previously https://listman.redhat.com/mailman/private/kernel-info/2021-November/msg00051.html[reported on kernel-info].)_
+. I opened a new MR, but there is a image:images/qsg-label_image_cki_missing.png["Red CKI:Missing"] Label.  What is the problem?
+.. First, confirm whether you can see a Pipelines tab on the MR itself.
+... Try to REMOVE the image:images/qsg-label_image_cki_missing.png["Red CKI:Missing"] label.  This will trigger the system to re-run the webhook and will likely return as image:images/qsg-label_image_cki_ok.png["Blue CKI:OK"] if the test ran OK but the webhook hasn't posted the update yet.
+... If the image:images/qsg-label_image_cki_missing.png["Red CKI:Missing"] label returns, go into the Pipelines tab and press the image:images/qsg-run_pipeline.png["Run Pipeline"] button.  That will generate some results that should satisfy the unmet requirement.
+.. If the Pipelines tab is missing:
+... A possible cause is that the source branch (on your fork) is named `main`.  The name `main` is protected and is not able to trigger a pipeline job.  To resolve this, close the current MR, rename the branch on your fork and open a new MR.
+... Another possible cause is that you have insufficient permissions.  Find another associate in your organization that can look to confirm whether they see the missing tab (and image:images/qsg-run_pipeline.png[“Run Pipeline”] button on that tab)
+.... If they can see it, ask them to click the image:images/qsg-run_pipeline.png["Run Pipeline"] button and then refer to <<weirdmr,My MR is behaving weirdly, I'm not sure what to do...>>
+. How do I make the webhook re-evaluate the readiness of a MR?
+.. Remove the label you want re-checked by clicking the 'x' in the Labels area as defined above under step 8.  (i.e. if you have image:images/qsg-label_image_bugzilla_needsreview.png["Red Bugzilla::NeedsReview Label"], remove that label from the MR)
+. anchor:weirdmr[] My MR is behaving weirdly, I'm not sure what to do...
+.. First and foremost, make sure to click the https://red.ht/GitLabSSO[GitLabSSO link] to refresh your permissions.
+.. Reach out to your KWF Representative for assistance.
++
+image::images/qsg-KWF_Representatives_2021Q4.png["KWF Reps"]
+
+.. Send an email to mailto:kernel-info@redhat.com[kernel-info@redhat.com].
+.. If there's a GitLab specific issue, you can open an issue at https://gitlab.com/redhat/rhel/src/kernel/bugreports[Red Hat Kernel bug reports].
+. anchor:commonformattingissues[] I followed the commit rules as detailed, why do I have a red label that is seemingly satisfied? +
+Things to be aware of:
+... Even extra leading whitespace can cause problems, and may not be obvious in some browsers.
+.... https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9/-/merge_requests/141[https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9/-/merge_requests/141] shows an example where fields were indented but not rendered as such.
+... Beware that some formatting is masked by the web interface that can only be seen via the edit interface. (for example, the <>'s around an email address in the DCO sign-off)
+.... https://gitlab.com/redhat/rhel/src/kernel/rhel-8/-/merge_requests/1720[https://gitlab.com/redhat/rhel/src/kernel/rhel-8/-/merge_requests/1720] shows an example of this.
+. anchor:badformatting[] The formatting is bad, how do I fix it?
+.. Descriptions and comments utilize https://docs.gitlab.com/ee/user/markdown.html[GitLab Flavored Markdown] to handle the formatting of the text.
+.. Consecutive lines separated by single newlines, without a blank line in between, will be treated as a paragraph for purposes of display. The MR tools will still see the newlines and will treat such labeled fields (“bugzilla:”, etc) as intended. If you want a cleaner display, insert a blank line between entries.
+.. Indented blocks of text get a box around them, which can cause unintended consequences on the formatting of the display of your description..
+. What does image:images/qsg-label_image_targetedtestingmissing.png["TargetedTestingMissing label"] indicate?
+.. This is currently only an informational alert.  It does not have an impact on the ability of an MR to be merged.
+... https://cki-project.org/docs/user_docs/gitlab-mr-testing/full_picture/#blocking-on-missing-targeted-testing[This is intended to transition to a blocking tag in the future], but there are no timelines attached to this effort currently.
+.. It is currently consumed by QA teams that are working on identifying testing gaps.  The label indicates that the changed code in this commit did not have any specific tests that target the affected area.  Baseline testing (booting, functional, standard regression, etc.) is still performed and validated.
+. How can I determine the status of any related Bugzillas on my MR?
+.. The bugzilla webhook will post a comment to the MR with the current status of each referenced BZ.  Each time the webhook is run, that comment will be edited to reflect the current state.
+. Can I edit my comments?
+.. Minor modifications to an existing MR comment are allowed.
+.. A minor modiviation can be defined mostly as correcting a typo or adjusting the language of a sentence that is otherwise unclear (i.e. perhaps there's a word missing).
+.. *It is important to keep comments as close to their original intent as possible since they are used for auditing purposes.*
+. anchor:getartifactsdirectly[] How do I get build artifacts without looking at Bugzilla? +
+
+WARNING: This can be confusing to follow, so many images are included to aid in direction.
+
+.. Find the pipelines tab image:images/qsg-faq-pipelines.png["Pipelines Tab"] and click it
+.. Find the most recent build and click the pipeline number +
++
+image::images/qsg-faq-pipelines_jobs.png["Pipeline Jobs Links"]
+.. In the Pipeline section toward the bottom of the screen, click the expand arrow for `cki-trusted-contributors`. +
++
+image::images/qsg-faq-pipelines_graph.png["Graph display of pipeline job"]
+.. Find the arch you want (e.g. x86_64) and click the `build <arch>` item under the `Build` column. +
++
+image::images/qsg-faq-pipelines_build.png["Builds Graph"]
+.. On the right side of the page, find the `Browse` button under `Job artifacts` and click it +
++
+image::images/qsg-faq-pipelines_build-artifacts-browse.png["Browse Build Artifacts"]
+.. Locate and open the `artifacts-meta.json` build artifact +
++
+image::images/qsg-faq-pipelines_build-artifacts-list.png["List of Build Artifacts"]
+.. Follow the URL indicated as s3_index_url to find all RPM build artifacts for the build. +
++
+image::images/qsg-faq-pipelines_build-artifact-artifactsmeta.png["artifacts-meta.json"]
+.. All of the build artifacts (including installable RPMs) can be found at that link. +
++
+image::images/qsg-faq-pipelines_build-artifacts-archived_links.png["Links to build artifacts"]
+
+== Appendix
+
+KWF - kernel workflow +
+MR - merge request +
+NACK - no acknowledgement

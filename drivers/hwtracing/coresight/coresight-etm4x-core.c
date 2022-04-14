@@ -9,6 +9,7 @@
 #include <linux/init.h>
 #include <linux/types.h>
 #include <linux/device.h>
+#include <linux/dmi.h>
 #include <linux/io.h>
 #include <linux/err.h>
 #include <linux/fs.h>
@@ -2071,6 +2072,16 @@ static const struct amba_id etm4_ids[] = {
 	{},
 };
 
+static const struct dmi_system_id broken_coresight[] = {
+	{
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "HPE"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Apollo 70"),
+		},
+	},
+	{ }	/* terminating entry */
+};
+
 MODULE_DEVICE_TABLE(amba, etm4_ids);
 
 static struct amba_driver etm4x_amba_driver = {
@@ -2104,6 +2115,11 @@ static int __init etm4x_init(void)
 {
 	int ret;
 
+	if (dmi_check_system(broken_coresight)) {
+		pr_info("ETM4 disabled due to firmware bug\n");
+		return 0;
+	}
+
 	ret = etm4_pm_setup();
 
 	/* etm4_pm_setup() does its own cleanup - exit on error */
@@ -2130,6 +2146,9 @@ clear_pm:
 
 static void __exit etm4x_exit(void)
 {
+	if (dmi_check_system(broken_coresight))
+		return;
+
 	amba_driver_unregister(&etm4x_amba_driver);
 	platform_driver_unregister(&etm4_platform_driver);
 	etm4_pm_clear();

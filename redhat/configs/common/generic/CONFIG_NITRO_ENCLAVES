@@ -1,0 +1,20 @@
+# CONFIG_NITRO_ENCLAVES:
+# 
+# This driver consists of support for enclave lifetime management
+# for Nitro Enclaves (NE).
+# 
+# To compile this driver as a module, choose M here.
+# The module will be called nitro_enclaves.
+# 
+# Symbol: NITRO_ENCLAVES [=n]
+# Type  : tristate
+# Defined at drivers/virt/nitro_enclaves/Kconfig:12
+#   Prompt: Nitro Enclaves Support
+#   Depends on: VIRT_DRIVERS [=y] && X86 [=y] && HOTPLUG_CPU [=y] && PCI [=y] && SMP [=y]
+#   Location:
+#     -> Device Drivers
+#       -> Virtualization drivers (VIRT_DRIVERS [=y])
+# 
+# 
+# 
+CONFIG_NITRO_ENCLAVES=m

@@ -60,6 +60,9 @@ struct bsg_job {
 	struct bio *bidi_bio;
 
 	void *dd_data;		/* Used for driver-specific storage */
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 };
 
 void bsg_job_done(struct bsg_job *job, int result,

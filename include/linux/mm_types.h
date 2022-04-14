@@ -12,11 +12,14 @@
 #include <linux/completion.h>
 #include <linux/cpumask.h>
 #include <linux/uprobes.h>
+#include <linux/rcupdate.h>
 #include <linux/page-flags-layout.h>
 #include <linux/workqueue.h>
 #include <linux/seqlock.h>
 
 #include <asm/mmu.h>
+
+#include <linux/rh_kabi.h>
 
 #ifndef AT_VECTOR_SIZE_ARCH
 #define AT_VECTOR_SIZE_ARCH 0
@@ -144,6 +147,12 @@ struct page {
 			unsigned char compound_order;
 			atomic_t compound_mapcount;
 			unsigned int compound_nr; /* 1 << compound_order */
+			/*
+			 * mapcount_seqcount is serialized by the
+			 * PG_locked bit spinlock from the first tail
+			 * page.
+			 */
+			unsigned int mapcount_seqcount;
 		};
 		struct {	/* Second tail page of compound page */
 			unsigned long _compound_pad_1;	/* compound_head */
@@ -564,6 +573,9 @@ struct mm_struct {
 		bool tlb_flush_batched;
 #endif
 		struct uprobes_state uprobes_state;
+#ifdef CONFIG_PREEMPT_RT
+		struct rcu_head delayed_drop;
+#endif
 #ifdef CONFIG_HUGETLB_PAGE
 		atomic_long_t hugetlb_usage;
 #endif

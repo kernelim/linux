@@ -1,0 +1,20 @@
+# CONFIG_DMA_PERNUMA_CMA:
+# 
+# Enable this option to get pernuma CMA areas so that devices like
+# ARM64 SMMU can get local memory by DMA coherent APIs.
+# 
+# You can set the size of pernuma CMA by specifying "cma_pernuma=size"
+# on the kernel's command line.
+# 
+# Symbol: DMA_PERNUMA_CMA [=n]
+# Type  : bool
+# Defined at kernel/dma/Kconfig:126
+#   Prompt: Enable separate DMA Contiguous Memory Area for each NUMA Node
+#   Depends on: DMA_CMA [=y]
+#   Location:
+#     -> Library routines
+#       -> DMA Contiguous Memory Allocator (DMA_CMA [=y])
+# 
+# 
+# 
+# CONFIG_DMA_PERNUMA_CMA is not set

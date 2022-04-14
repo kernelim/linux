@@ -1,0 +1,12 @@
+# Individual entries must be ordered as
+# config-variant=config-1:config-2:config-3 in a descending order through
+# the hierarchy
+
+# kernel.config files are build on the fly based on this config,
+# the first arg is arch and variant, the second is a hierarchy of
+# config options, lowest priority to highest
+ORDER=common
+EMPTY=
+
+# gcov options
+kgcov=kgcov

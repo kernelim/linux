@@ -68,6 +68,8 @@ struct ipmi_smi_msg {
 	 * (presumably to free it).
 	 */
 	void (*done)(struct ipmi_smi_msg *msg);
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 };
 
 struct ipmi_smi_handlers {
@@ -153,6 +155,11 @@ struct ipmi_smi_handlers {
 	 * block.
 	 */
 	void (*set_maintenance_mode)(void *send_info, bool enable);
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 struct ipmi_device_id {

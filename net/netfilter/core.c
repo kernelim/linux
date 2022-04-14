@@ -335,7 +335,8 @@ static int nf_ingress_check(struct net *net, const struct nf_hook_ops *reg,
 	return 0;
 }
 
-static inline bool nf_ingress_hook(const struct nf_hook_ops *reg, int pf)
+static inline bool __maybe_unused nf_ingress_hook(const struct nf_hook_ops *reg,
+						  int pf)
 {
 	if ((pf == NFPROTO_NETDEV && reg->hooknum == NF_NETDEV_INGRESS) ||
 	    (pf == NFPROTO_INET && reg->hooknum == NF_INET_INGRESS))

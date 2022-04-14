@@ -1,0 +1,17 @@
+# CONFIG_KEXEC_IMAGE_VERIFY_SIG:
+# 
+# Enable Image signature verification support.
+# 
+# Symbol: KEXEC_IMAGE_VERIFY_SIG [=y]
+# Type  : bool
+# Defined at arch/arm64/Kconfig:1095
+#   Prompt: Enable Image signature verification support
+#   Depends on: KEXEC_SIG [=y] && EFI [=y] && SIGNED_PE_FILE_VERIFICATION [=y]
+#   Location:
+#     -> Kernel Features
+#       -> kexec file based system call (KEXEC_FILE [=y])
+#         -> Verify kernel signature during kexec_file_load() syscall (KEXEC_SIG [=y])
+# 
+# 
+# 
+CONFIG_KEXEC_IMAGE_VERIFY_SIG=y

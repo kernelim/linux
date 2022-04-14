@@ -125,14 +125,22 @@ static void __init cma_activate_area(struct cma *cma)
 	spin_lock_init(&cma->mem_head_lock);
 #endif
 
+#ifdef CONFIG_RHEL_DIFFERENCES
+	/* s390x and ppc64 has been using CMA already in RHEL 8 as default. */
+	if (!IS_ENABLED(CONFIG_S390) && !IS_ENABLED(CONFIG_PPC64))
+		mark_tech_preview("CMA", NULL);
+#endif /* CONFIG_RHEL_DIFFERENCES */
+
 	return;
 
 not_in_zone:
 	bitmap_free(cma->bitmap);
 out_error:
 	/* Expose all pages to the buddy, they are useless for CMA. */
-	for (pfn = base_pfn; pfn < base_pfn + cma->count; pfn++)
-		free_reserved_page(pfn_to_page(pfn));
+	if (!cma->reserve_pages_on_error) {
+		for (pfn = base_pfn; pfn < base_pfn + cma->count; pfn++)
+			free_reserved_page(pfn_to_page(pfn));
+	}
 	totalcma_pages -= cma->count;
 	cma->count = 0;
 	pr_err("CMA area %s could not be activated\n", cma->name);
@@ -149,6 +157,11 @@ static int __init cma_init_reserved_areas(void)
 	return 0;
 }
 core_initcall(cma_init_reserved_areas);
+
+void __init cma_reserve_pages_on_error(struct cma *cma)
+{
+	cma->reserve_pages_on_error = true;
+}
 
 /**
  * cma_init_reserved_mem() - create custom contiguous area from reserved memory
@@ -436,6 +449,10 @@ struct page *cma_alloc(struct cma *cma, unsigned long count,
 
 	if (!cma || !cma->count || !cma->bitmap)
 		goto out;
+
+#ifdef CONFIG_RHEL_DIFFERENCES
+	pr_info_once("Initial CMA usage detected\n");
+#endif /* CONFIG_RHEL_DIFFERENCES */
 
 	pr_debug("%s(cma %p, count %lu, align %d)\n", __func__, (void *)cma,
 		 count, align);

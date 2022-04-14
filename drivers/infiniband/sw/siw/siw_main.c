@@ -539,6 +539,8 @@ static __init int siw_init_module(void)
 	int rv;
 	int nr_cpu;
 
+	mark_tech_preview("Software iWARP Driver", THIS_MODULE);
+
 	if (SENDPAGE_THRESH < SIW_MAX_INLINE) {
 		pr_info("siw: sendpage threshold too small: %u\n",
 			(int)SENDPAGE_THRESH);

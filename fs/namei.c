@@ -3020,12 +3020,8 @@ static int handle_truncate(struct user_namespace *mnt_userns, struct file *filp)
 	int error = get_write_access(inode);
 	if (error)
 		return error;
-	/*
-	 * Refuse to truncate files with mandatory locks held on them.
-	 */
-	error = locks_verify_locked(filp);
-	if (!error)
-		error = security_path_truncate(path);
+
+	error = security_path_truncate(path);
 	if (!error) {
 		error = do_truncate(mnt_userns, path->dentry, 0,
 				    ATTR_MTIME|ATTR_CTIME|ATTR_OPEN,
@@ -4024,7 +4020,9 @@ int vfs_unlink(struct user_namespace *mnt_userns, struct inode *dir,
 		return -EPERM;
 
 	inode_lock(target);
-	if (is_local_mountpoint(dentry))
+	if (IS_SWAPFILE(target))
+		error = -EPERM;
+	else if (is_local_mountpoint(dentry))
 		error = -EBUSY;
 	else {
 		error = security_inode_unlink(dir, dentry);
@@ -4525,6 +4523,10 @@ int vfs_rename(struct renamedata *rd)
 		lock_two_nondirectories(source, target);
 	else if (target)
 		inode_lock(target);
+
+	error = -EPERM;
+	if (IS_SWAPFILE(source) || (target && IS_SWAPFILE(target)))
+		goto out;
 
 	error = -EBUSY;
 	if (is_local_mountpoint(old_dentry) || is_local_mountpoint(new_dentry))

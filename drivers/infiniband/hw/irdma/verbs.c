@@ -535,8 +535,7 @@ static int irdma_destroy_qp(struct ib_qp *ibqp, struct ib_udata *udata)
 	irdma_qp_rem_ref(&iwqp->ibqp);
 	wait_for_completion(&iwqp->free_qp);
 	irdma_free_lsmm_rsrc(iwqp);
-	if (!iwdev->reset)
-		irdma_cqp_qp_destroy_cmd(&iwdev->rf->sc_dev, &iwqp->sc_qp);
+	irdma_cqp_qp_destroy_cmd(&iwdev->rf->sc_dev, &iwqp->sc_qp);
 
 	if (!iwqp->user_mode) {
 		if (iwqp->iwscq) {
@@ -2041,7 +2040,7 @@ static int irdma_create_cq(struct ib_cq *ibcq,
 		/* Kmode allocations */
 		int rsize;
 
-		if (entries > rf->max_cqe) {
+		if (entries < 1 || entries > rf->max_cqe) {
 			err_code = -EINVAL;
 			goto cq_free_rsrc;
 		}
@@ -3359,6 +3358,10 @@ static enum ib_wc_status irdma_flush_err_to_ib_wc_status(enum irdma_flush_opcode
 		return IB_WC_LOC_LEN_ERR;
 	case FLUSH_GENERAL_ERR:
 		return IB_WC_WR_FLUSH_ERR;
+	case FLUSH_RETRY_EXC_ERR:
+		return IB_WC_RETRY_EXC_ERR;
+	case FLUSH_MW_BIND_ERR:
+		return IB_WC_MW_BIND_ERR;
 	case FLUSH_FATAL_ERR:
 	default:
 		return IB_WC_FATAL_ERR;
@@ -3402,9 +3405,13 @@ static void irdma_process_cqe(struct ib_wc *entry,
 		}
 
 		if (cq_poll_info->ud_vlan_valid) {
-			entry->vlan_id = cq_poll_info->ud_vlan & VLAN_VID_MASK;
-			entry->wc_flags |= IB_WC_WITH_VLAN;
+			u16 vlan = cq_poll_info->ud_vlan & VLAN_VID_MASK;
+
 			entry->sl = cq_poll_info->ud_vlan >> VLAN_PRIO_SHIFT;
+			if (vlan) {
+				entry->vlan_id = vlan;
+				entry->wc_flags |= IB_WC_WITH_VLAN;
+			}
 		} else {
 			entry->sl = 0;
 		}
@@ -3603,18 +3610,31 @@ static int irdma_req_notify_cq(struct ib_cq *ibcq,
 	struct irdma_cq *iwcq;
 	struct irdma_cq_uk *ukcq;
 	unsigned long flags;
-	enum irdma_cmpl_notify cq_notify = IRDMA_CQ_COMPL_EVENT;
+	enum irdma_cmpl_notify cq_notify;
+	bool promo_event = false;
+	int ret = 0;
 
+	cq_notify = notify_flags == IB_CQ_SOLICITED ?
+		    IRDMA_CQ_COMPL_SOLICITED : IRDMA_CQ_COMPL_EVENT;
 	iwcq = to_iwcq(ibcq);
 	ukcq = &iwcq->sc_cq.cq_uk;
-	if (notify_flags == IB_CQ_SOLICITED)
-		cq_notify = IRDMA_CQ_COMPL_SOLICITED;
 
 	spin_lock_irqsave(&iwcq->lock, flags);
-	irdma_uk_cq_request_notification(ukcq, cq_notify);
+	/* Only promote to arm the CQ for any event if the last arm event was solicited. */
+	if (iwcq->last_notify == IRDMA_CQ_COMPL_SOLICITED && notify_flags != IB_CQ_SOLICITED)
+		promo_event = true;
+
+	if (!iwcq->armed || promo_event) {
+		iwcq->armed = true;
+		iwcq->last_notify = cq_notify;
+		irdma_uk_cq_request_notification(ukcq, cq_notify);
+	}
+
+	if ((notify_flags & IB_CQ_REPORT_MISSED_EVENTS) && !irdma_cq_empty(iwcq))
+		ret = 1;
 	spin_unlock_irqrestore(&iwcq->lock, flags);
 
-	return 0;
+	return ret;
 }
 
 static int irdma_roce_port_immutable(struct ib_device *ibdev, u32 port_num,

@@ -186,7 +186,7 @@ static void disable_nest_pmu_counters(void)
 	int nid, cpu;
 	const struct cpumask *l_cpumask;
 
-	get_online_cpus();
+	cpus_read_lock();
 	for_each_node_with_cpus(nid) {
 		l_cpumask = cpumask_of_node(nid);
 		cpu = cpumask_first_and(l_cpumask, cpu_online_mask);
@@ -195,25 +195,25 @@ static void disable_nest_pmu_counters(void)
 		opal_imc_counters_stop(OPAL_IMC_COUNTERS_NEST,
 				       get_hard_smp_processor_id(cpu));
 	}
-	put_online_cpus();
+	cpus_read_unlock();
 }
 
 static void disable_core_pmu_counters(void)
 {
-	cpumask_t cores_map;
 	int cpu, rc;
 
-	get_online_cpus();
+	cpus_read_lock();
 	/* Disable the IMC Core functions */
-	cores_map = cpu_online_cores_map();
-	for_each_cpu(cpu, &cores_map) {
+	for_each_online_cpu(cpu) {
+		if (cpu_first_thread_sibling(cpu) != cpu)
+			continue;
 		rc = opal_imc_counters_stop(OPAL_IMC_COUNTERS_CORE,
 					    get_hard_smp_processor_id(cpu));
 		if (rc)
 			pr_err("%s: Failed to stop Core (cpu = %d)\n",
 				__FUNCTION__, cpu);
 	}
-	put_online_cpus();
+	cpus_read_unlock();
 }
 
 int get_max_nest_dev(void)

@@ -1,0 +1,1 @@
+CONFIG_DEFAULT_NET_SCH="fq_codel"

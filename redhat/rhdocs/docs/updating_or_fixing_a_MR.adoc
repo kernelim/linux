@@ -1,0 +1,43 @@
+---
+title: 'Updating or Fixing a Merge Request'
+date: 2021-07-20T19:30:08+10:00
+draft: false
+weight: 4
+summary: A merge request can be easily updated for code updates or comment descriptions.
+---
+
+= Updating or Fixing a Merge Request
+
+A merge request can be easily updated for code updates or comment descriptions.  In this case, *there is no need to create a new branch, push a new branch, or create a new merge request*.  All of the work can be done on an existing branch.
+
+If you have the local branch that was used to push code,
+
+----
+	git checkout <local_branch_name>
+----
+
+If you do not have the local branch that was used to push your code on your system you can obtain the latest code by executing,
+
+----
+	lab mr checkout <mrID> # output will indicate local_branch_name
+----
+
+Users should put the MR into Draft status before making any changes,
+
+----
+	lab mr edit <mrID> --draft
+----
+
+At this point the user can use standard git commands (git rebase, git commit, etc.) to modify the local branch.  *Before modifying code users should read link:CommitRules.adoc[CommitRules*].
+
+After the changes are complete users can force push to their fork
+
+----
+	git push -f <fork_name> <local_branch_name>
+----
+
+and then remove the draft status of the MR.  This will alert reviewers that the code is ready for review.
+
+----
+	lab mr edit <mrID> --ready
+----

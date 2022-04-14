@@ -5163,6 +5163,10 @@ mptsas_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	int			error=0;
 	int			r;
 
+#ifdef CONFIG_RHEL_DIFFERENCES
+	mark_driver_unmaintained(MYNAM);
+#endif
+
 	r = mpt_attach(pdev,id);
 	if (r)
 		return r;
@@ -5381,6 +5385,10 @@ static void mptsas_remove(struct pci_dev *pdev)
 }
 
 static struct pci_device_id mptsas_pci_table[] = {
+#ifdef CONFIG_RHEL_DIFFERENCES
+	{ PCI_VENDOR_ID_LSI_LOGIC, MPI_MANUFACTPAGE_DEVID_SAS1068,
+		PCI_VENDOR_ID_VMWARE, PCI_ANY_ID },
+#else
 	{ PCI_VENDOR_ID_LSI_LOGIC, MPI_MANUFACTPAGE_DEVID_SAS1064,
 		PCI_ANY_ID, PCI_ANY_ID },
 	{ PCI_VENDOR_ID_LSI_LOGIC, MPI_MANUFACTPAGE_DEVID_SAS1068,
@@ -5393,6 +5401,7 @@ static struct pci_device_id mptsas_pci_table[] = {
 		PCI_ANY_ID, PCI_ANY_ID },
 	{ PCI_VENDOR_ID_LSI_LOGIC, MPI_MANUFACTPAGE_DEVID_SAS1068_820XELP,
 		PCI_ANY_ID, PCI_ANY_ID },
+#endif
 	{0}	/* Terminating entry */
 };
 MODULE_DEVICE_TABLE(pci, mptsas_pci_table);

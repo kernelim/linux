@@ -1,0 +1,354 @@
+#!/bin/bash
+#
+# editconfig: RHEL Config Editor
+#
+# For help, run ./editconfig -h
+#
+# TODO: Is there a way to verify the output?  Maybe run 'make dist-configs' &
+# 	the process_configs.sh -c tool on the modified CONFIG?  This would
+#	require a modification to process_configs.sh to take a single
+#	CONFIG option but is do-able.
+# TODO: what to do with "c" text/numeric options?
+
+DIR=./
+HEIGHT=20
+WIDTH=40
+BACKTITLE="RHEL Config Editor"
+
+MAINOPTIONS=(1 "View $CONFIG"
+	     2 "Set all arches"
+	     3 "Set all debug"
+	     4 "Set specific arches"
+	     5 "Set Specific debugs"
+	     6 "Set s390x zfcpdump"
+	     7 "Exit and create patch"
+	     8 "Exit")
+
+CONFIGOPTIONS=(m ""
+	       y ""
+	       "is not set" "")
+
+EVALUATECONFIGS=(1 "Help"
+		 2 "Balance CONFIGs"
+		 3 "Check arch CONFIGs"
+		 4 "Check syntax"
+		 5 "Find dead CONFIGs")
+
+ARCHOPTIONS=(aarch64 ""
+	     powerpc64le ""
+	     s390x   ""
+	     x86_64  "")
+
+usage()
+{
+	echo ""
+	echo "editconfig [ -h ] [config_option]"
+	echo "	-h: help"
+	echo ""
+	echo "ex) editconfig CONFIG_PCI"
+	echo "      or"
+	echo "    editconfig PCI"
+	echo ""
+	echo "    editconfig (no options) provides a menu to run"
+	echo "    verification tests on all CONFIG options."
+	echo ""
+	echo "See redhat/docs/editing_CONFIGS.txt for more information"
+}
+
+read_file() # $1 is the full file path
+{
+	filepath=$1
+	if test -e $filepath; then
+		egrep "# CONFIG.*is not set" $filepath >& /dev/null && echo "n" && return
+		egrep "CONFIG.*=" $filepath >& /dev/null
+		if [ $? -eq 0 ]; then
+			egrep "=y" $filepath >& /dev/null && echo "y" && return
+			egrep "=m" $filepath >& /dev/null && echo "m" && return
+			# some files may equal a number or a string
+			egrep "=*" $filepath >& /dev/null && echo "c" && echo $filepath >> $DIR/.strlist && return
+		fi
+	else
+		echo "x" # file does not exist
+		return
+	fi
+	# some files may contain only comments
+	echo "c"
+}
+
+get_arch_files() # $1 is directory, $2 is CONFIG
+{
+	# The second s390x entry is really s390x/zfcpdump
+	for arch in "aarch64" "powerpc64le" "s390x" "x86_64" "s390x"
+	do
+		# Need to special case generic powerpc64 & powerpc64le
+		# because they have an extra "hop" between them at
+		# the arch level
+		[ "$arch" == "powerpc64le" ] && [ -e $DIR/$1/powerpc64/$2 ] && arch=powerpc64
+		val=$(read_file $DIR/$1/$arch/$2)
+		echo -n "$val "
+	done
+	echo ""
+}
+
+check_config_syntax() # $1 is CONFIG
+{
+	cfg=$(find ./ -name $1)
+	./evaluate_configs -s $cfg
+	[ $? -ne 0 ] && exit 1
+}
+
+config_is_valid() # $1 is CONFIG
+{
+	generic=$(read_file $DIR/generic/$1)
+	generic_arch=$(get_arch_files generic $1)
+	debug=$(read_file $DIR/debug/$1)
+	debug_arch=$(get_arch_files debug $1)
+	zfcpdump=$(read_file $DIR/generic/s390x/zfcpdump/$1)
+
+	echo "${generic}${generic_arch}${debug}${debug_arch}${zfcpdump}" | grep -v c >& /dev/null
+	if [ $? -ne 0 ]; then
+		echo "editconfig currently only handles CONFIGs with y/n/m/is not settings."
+		exit 1
+	fi
+
+}
+
+display_config() # $1 is CONFIG
+{
+	generic=$(read_file $DIR/generic/$1)
+	generic_arch=$(get_arch_files generic $1)
+	debug=$(read_file $DIR/debug/$1)
+	debug_arch=$(get_arch_files debug $1)
+	zfcpdump=$(read_file $DIR/generic/s390x/zfcpdump/$1)
+
+	echo ""
+	echo "                       a p s x s"
+	echo "                       a p 3 8 3"
+	echo "                       r c 9 6 9"
+	echo "                       c 6 0 _ 0"
+	echo "                       h 4 x 6 x"
+	echo "                       6 l   4 k"
+	echo "                       4 e     d"
+	echo ""
+	# debug/arch
+	echo "debug/arch             ${debug_arch::-3} $zfcpdump"
+	# debug, the '-' at the end is for s390x/zfcpdump which is a noop
+	echo "debug                  $debug $debug $debug $debug -"
+	# generic/arch
+	echo "generic/arch           ${generic_arch::-1}"
+	# generic
+	echo "generic                $generic $generic $generic $generic $generic"
+	echo ""
+	echo "Legend:"
+	echo "       x undefined/inherited from level below"
+	echo "       y built-in"
+	echo "       m module"
+	echo "       n is not set"
+	echo "       c numeric/text setting (currently unsupported)"
+	echo "       - s390/zfcpdump is not affected at this level"
+
+}
+
+menuconfig() # $@ is title
+{
+	dialog --clear --backtitle "$BACKTITLE" \
+	       --title "$@" --menu "Choose one of the following options:" \
+	       $HEIGHT $WIDTH ${#CONFIGOPTIONS[@]} \
+	       "${CONFIGOPTIONS[@]}" 2>&1 >/dev/tty
+}
+
+menuarch() # $@ is title
+{
+	dialog --clear --backtitle "$BACKTITLE" \
+	       --title "$@" --menu "Choose one of the following options:" \
+	       $HEIGHT $WIDTH ${#ARCHOPTIONS[@]} \
+	       "${ARCHOPTIONS[@]}" 2>&1 >/dev/tty
+}
+
+createfile() # $1 is m/y/is not set, $2 is filename
+{
+	option=$1
+	filename=$2
+	case $option in
+	m|y)
+		echo "$CONFIG=$STATUS" > $filename;;
+	n)
+		echo "# $CONFIG is not set" > $filename;;
+	esac
+}
+
+call_evaluate_configs()
+{
+	STATUS="loop"
+	while [ "$STATUS" == "loop" ]
+	do
+		STATUS=$(dialog --clear --backtitle "$BACKTITLE" \
+			 --title "Evaluate Configs" \
+			 --menu "Choose one of the following options:" \
+			 $HEIGHT $WIDTH ${#EVALUATECONFIGS[@]} \
+			 "${EVALUATECONFIGS[@]}" 2>&1 >/dev/tty)
+		case $STATUS in
+		1) usage_text=$(usage)
+		   dialog --clear --backtitle "$BACKTITLE" \
+			  --title "editconfig help" \
+			  --no-collapse --msgbox "$usage_text" 20 60
+		   STATUS="loop"
+		   ;;
+		2) $DIR/evaluate_configs -b;;
+		3) $DIR/evaluate_configs -c;;
+		4) $DIR/evaluate_configs -s;;
+		5) $DIR/evaluate_configs -f;;
+		esac
+	done
+}
+
+check_dialog()
+{
+	rpm -q dialog >& /dev/null
+	[ $? -ne 0 ] && echo "Run 'yum -y install dialog'." && exit 1
+}
+
+# where am i?
+if [ ! -d "generic" ] || [ ! -d "debug" ]; then
+	echo "This script must be run in the redhat/configs directory."
+	exit 1
+fi
+
+check_dialog
+
+while [[ $# -gt 0 ]]
+do
+	key="$1"
+	case $key in
+	-h) usage
+	    exit 1
+	    ;;
+	*) break;;
+	esac
+	shift
+done
+
+CONFIG=$1
+
+[ -z "$CONFIG" ] && call_evaluate_configs && exit $?
+
+# Allow for "FOO" instead of "CONFIG_FOO"
+echo $CONFIG | grep CONFIG >& /dev/null
+[ $? -ne 0 ] && CONFIG="CONFIG_${CONFIG}"
+
+# Is this a new or old config (useful for messaging below)
+EDIT=$(find $DIR -name $CONFIG | wc -l)
+
+clear
+
+[ $EDIT -eq 1 ] && check_config_syntax $CONFIG
+
+# editconfig currently only supports y/n/m/is not set CONFIG options.
+config_is_valid $CONFIG
+
+STATUS=0
+while [ $STATUS -le 7 ]
+do
+	case $STATUS in
+	0) 	STATUS=$(dialog --clear --backtitle "$BACKTITLE" \
+			 --title "$CONFIG EDITOR" \
+			 --menu "Choose one of the following options:" \
+			 $HEIGHT $WIDTH ${#MAINOPTIONS[@]} \
+			 "${MAINOPTIONS[@]}" 2>&1 >/dev/tty)
+		[ -z "$STATUS" ] && exit
+		;;
+
+	1)	# view current CONFIG settings
+		config_data=$(display_config $CONFIG)
+		dialog --clear --backtitle "$BACKTITLE" \
+		       --title "$CONFIG settings" \
+		       --no-collapse --msgbox "$config_data" \
+		       25 60
+		STATUS=0
+		;;
+
+	2)	# set the config on all arch configs
+		STATUS=$(menuconfig "Set $CONFIG on all arches")
+		[ -z "$STATUS" ] && STATUS=0 && continue
+		filename=$DIR/generic/$CONFIG
+		[ "$STATUS" == "is not set" ] && STATUS=n
+		createfile $STATUS $filename
+		STATUS=0
+		;;
+
+
+	3)	# set the config on all debug configs
+		STATUS=$(menuconfig "Set $CONFIG on all debug")
+		[ -z "$STATUS" ] && STATUS=0 && continue
+		filename=$DIR/debug/$CONFIG
+		[ "$STATUS" == "is not set" ] && STATUS=n
+		createfile $STATUS $filename
+		STATUS=0
+		;;
+
+	4)	# set the config on specific arches
+		STATUS=$(menuarch "Pick one arch .config")
+		[ -z "$STATUS" ] && STATUS=0 && continue
+		arch=$STATUS
+		STATUS=$(menuconfig "Set $CONFIG on $arch.config")
+		[ -z "$STATUS" ] && STATUS=3 && continue
+		filename=$DIR/generic/$arch/$CONFIG
+		[ "$STATUS" == "is not set" ] && STATUS=n
+		createfile $STATUS $filename
+		STATUS=0
+		;;
+
+	5)	# set the config on specific debug
+		STATUS=$(menuarch "Pick one arch-debug.config")
+		[ -z "$STATUS" ] && STATUS=0 && continue
+		arch=$STATUS
+		STATUS=$(menuconfig "Set $CONFIG on ${arch}-debug.config")
+		[ -z "$STATUS" ] && STATUS=3 && continue
+		filename=$DIR/debug/$arch/$CONFIG
+		[ "$STATUS" == "is not set" ] && STATUS=n
+		createfile $STATUS $filename
+		STATUS=0
+		;;
+
+	6)	# set the config on s390 zfcpdump
+		STATUS=$(menuconfig "Set $CONFIG in s390x zfcpdump .config")
+		[ -z "$STATUS" ] && STATUS=0 && continue
+		filename=$DIR/generic/s390x/zfcpdump/$CONFIG
+		[ "$STATUS" == "is not set" ] && STATUS=n
+		createfile $STATUS $filename
+		STATUS=0
+		;;
+
+	7)	# exit and save
+		./evaluate_configs -c $CONFIG
+		./evaluate_configs -b $CONFIG
+		git add -A $DIR/generic/ $DIR/debug/
+		if [ $EDIT -eq 0 ]; then
+			git commit -m "
+redhat/configs: Add $CONFIG
+
+Upstream Status: RHEL only.
+
+Add redhat/configs for new ${CONFIG}.
+
+Autogenerated & verified by editconfig."
+		else
+			git commit -m "
+redhat/configs: Update $CONFIG
+
+Upstream Status: RHEL only.
+
+Update redhat/configs for ${CONFIG}.
+
+Autogenerated & verified by editconfig."
+		fi
+
+		exit
+		;;
+	8)	# exit and don't save
+		git co -f $DIR/generic $DIR/debug
+		exit
+		;;
+
+	esac
+done

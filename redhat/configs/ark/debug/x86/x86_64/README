@@ -1,0 +1,4 @@
+Place config options in this directory that you want applied only to the
+x86_64 kernel-debug variant. These options are overlayed atop the generic/
+configs, all other configs in directories below generic/ and the configs
+in debug/.

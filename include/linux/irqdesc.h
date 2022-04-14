@@ -6,6 +6,8 @@
 #include <linux/kobject.h>
 #include <linux/mutex.h>
 
+#include <linux/rh_kabi.h>
+
 /*
  * Core internal functions to deal with irq descriptors
  */
@@ -102,6 +104,10 @@ struct irq_desc {
 	int			parent_irq;
 	struct module		*owner;
 	const char		*name;
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 } ____cacheline_internodealigned_in_smp;
 
 #ifdef CONFIG_SPARSE_IRQ

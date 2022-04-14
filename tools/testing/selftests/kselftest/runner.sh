@@ -65,6 +65,13 @@ run_one()
 
 	TEST_HDR_MSG="selftests: $DIR: $BASENAME_TEST"
 	echo "# $TEST_HDR_MSG"
+	rharch=$(uname -m)
+	for rhskipped in $kselftest_rhskip; do
+		if [ $rhskipped = $BASENAME_TEST -o $rhskipped = $BASENAME_TEST:$rharch ]; then
+			echo "ok $test_num $TEST_HDR_MSG # skipped in RHEL"
+			return 0
+		fi
+	done
 	if [ ! -x "$TEST" ]; then
 		echo -n "# Warning: file $TEST is "
 		if [ ! -e "$TEST" ]; then

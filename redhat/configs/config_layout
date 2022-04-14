@@ -1,0 +1,31 @@
+# config-variant=config:config:config
+# kernel.config files are build on the fly based on this config,
+# the first arg is arch and variant, the second is a hierarchy of
+# config options, lowest priority to highest
+
+# x86_64
+x86_64=generic:generic-x86:generic-x86-x86_64
+x86_64-debug=generic:generic-x86:generic-x86-x86_64:debug:debug-x86-x86_64
+
+# i686
+i686=generic:generic-x86:generic-x86-i686
+i686-debug=generic:generic-x86:generic-x86-i686:debug:debug-x86
+
+# ppc64le
+ppc64le=generic:generic-powerpc
+ppc64le-debug=generic:generic-powerpc:debug:debug-powerpc
+
+# s390x
+s390x=generic:generic-s390x
+s390x-debug=generic:generic-s390x:debug:debug-s390x
+s390x-zfcpdump=generic:generic-s390x:generic-s390x-zfcpdump
+
+# aarch64
+aarch64=generic:generic-arm-aarch64
+aarch64-debug=generic:generic-arm-aarch64:debug:debug-arm-aarch64
+
+# arm
+armv7hl=generic:generic-arm:generic-arm-armv7:generic-arm-armv7-armv7
+armv7hl-debug=generic:generic-arm:generic-arm-armv7:generic-arm-armv7-armv7:debug:debug-arm
+armv7hl-lpae=generic:generic-arm:generic-arm-armv7:generic-arm-armv7-lpae
+armv7hl-lpae-debug=generic:generic-arm:generic-arm-armv7:generic-arm-armv7-lpae:debug:debug-arm

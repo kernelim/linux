@@ -1843,6 +1843,8 @@ static int bpf_object__init_user_maps(struct bpf_object *obj, bool strict)
 			continue;
 		if (sym.st_shndx != obj->efile.maps_shndx)
 			continue;
+		if (GELF_ST_TYPE(sym.st_info) == STT_SECTION)
+			continue;
 		nr_maps++;
 	}
 	/* Assume equally sized map definitions */
@@ -1867,6 +1869,8 @@ static int bpf_object__init_user_maps(struct bpf_object *obj, bool strict)
 			continue;
 		if (sym.st_shndx != obj->efile.maps_shndx)
 			continue;
+		if (GELF_ST_TYPE(sym.st_info) == STT_SECTION)
+			continue;
 
 		map = bpf_object__add_map(obj);
 		if (IS_ERR(map))
@@ -1879,8 +1883,7 @@ static int bpf_object__init_user_maps(struct bpf_object *obj, bool strict)
 			return -LIBBPF_ERRNO__FORMAT;
 		}
 
-		if (GELF_ST_TYPE(sym.st_info) == STT_SECTION
-		    || GELF_ST_BIND(sym.st_info) == STB_LOCAL) {
+		if (GELF_ST_BIND(sym.st_info) == STB_LOCAL) {
 			pr_warn("map '%s' (legacy): static maps are not supported\n", map_name);
 			return -ENOTSUP;
 		}

@@ -109,6 +109,7 @@ table inet $name {
 	chain output {
 		type filter hook output priority $prio; policy accept;
 		tcp dport 12345 queue num 3
+		tcp sport 23456 queue num 3
 		jump nfq
 	}
 	chain post {
@@ -292,6 +293,23 @@ test_tcp_localhost()
 	wait 2>/dev/null
 }
 
+test_tcp_localhost_connectclose()
+{
+	tmpfile=$(mktemp) || exit 1
+
+	ip netns exec ${nsrouter} ./connect_close -p 23456 -t $timeout &
+
+	ip netns exec ${nsrouter} ./nf-queue -q 3 -t $timeout &
+	local nfqpid=$!
+
+	sleep 1
+	rm -f "$tmpfile"
+
+	wait $rpid
+	[ $? -eq 0 ] && echo "PASS: tcp via loopback with connect/close"
+	wait 2>/dev/null
+}
+
 test_tcp_localhost_requeue()
 {
 ip netns exec ${nsrouter} nft -f /dev/stdin <<EOF
@@ -371,6 +389,7 @@ test_queue 20
 
 test_tcp_forward
 test_tcp_localhost
+test_tcp_localhost_connectclose
 test_tcp_localhost_requeue
 
 exit $ret

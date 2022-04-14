@@ -324,6 +324,9 @@ linked_maps.skel.h-deps := linked_maps1.o linked_maps2.o
 
 LINKED_BPF_SRCS := $(patsubst %.o,%.c,$(foreach skel,$(LINKED_SKELS),$($(skel)-deps)))
 
+RHSKIP_FILTER := awk -F: '!/:/ || /:$(ARCH)/ {print $$1}'
+RHSKIP_FILTER_EVAL := $(subst $$,$$$$,$(RHSKIP_FILTER))
+
 # Set up extra TRUNNER_XXX "temporary" variables in the environment (relies on
 # $eval()) and pass control to DEFINE_TEST_RUNNER_RULES.
 # Parameters:
@@ -333,13 +336,19 @@ define DEFINE_TEST_RUNNER
 
 TRUNNER_OUTPUT := $(OUTPUT)$(if $2,/)$2
 TRUNNER_BINARY := $1$(if $2,-)$2
+TRUNNER_TESTS_RHSKIP := $$(shell $(RHSKIP_FILTER_EVAL)			\
+				 $$(TRUNNER_TESTS_DIR)/rhskip 2>/dev/null)
 TRUNNER_TEST_OBJS := $$(patsubst %.c,$$(TRUNNER_OUTPUT)/%.test.o,	\
-				 $$(notdir $$(wildcard $(TRUNNER_TESTS_DIR)/*.c)))
+				 $$(filter-out $$(TRUNNER_TESTS_RHSKIP),\
+					       $$(notdir $$(wildcard $(TRUNNER_TESTS_DIR)/*.c))))
 TRUNNER_EXTRA_OBJS := $$(patsubst %.c,$$(TRUNNER_OUTPUT)/%.o,		\
 				 $$(filter %.c,$(TRUNNER_EXTRA_SOURCES)))
 TRUNNER_EXTRA_HDRS := $$(filter %.h,$(TRUNNER_EXTRA_SOURCES))
 TRUNNER_TESTS_HDR := $(TRUNNER_TESTS_DIR)/tests.h
-TRUNNER_BPF_SRCS := $$(notdir $$(wildcard $(TRUNNER_BPF_PROGS_DIR)/*.c))
+TRUNNER_BPF_RHSKIP := $$(shell $(RHSKIP_FILTER_EVAL)			\
+			       $$(TRUNNER_BPF_PROGS_DIR)/rhskip 2>/dev/null)
+TRUNNER_BPF_SRCS := $$(filter-out $$(TRUNNER_BPF_RHSKIP),		\
+				  $$(notdir $$(wildcard $(TRUNNER_BPF_PROGS_DIR)/*.c)))
 TRUNNER_BPF_OBJS := $$(patsubst %.c,$$(TRUNNER_OUTPUT)/%.o, $$(TRUNNER_BPF_SRCS))
 TRUNNER_BPF_SKELS := $$(patsubst %.c,$$(TRUNNER_OUTPUT)/%.skel.h,	\
 				 $$(filter-out $(SKEL_BLACKLIST) $(LINKED_BPF_SRCS),\
@@ -374,7 +383,8 @@ $(TRUNNER_BPF_OBJS): $(TRUNNER_OUTPUT)/%.o:				\
 		     $(TRUNNER_BPF_PROGS_DIR)/%.c			\
 		     $(TRUNNER_BPF_PROGS_DIR)/*.h			\
 		     $$(INCLUDE_DIR)/vmlinux.h				\
-		     $(wildcard $(BPFDIR)/bpf_*.h) | $(TRUNNER_OUTPUT)
+		     $(wildcard $(BPFDIR)/bpf_*.h)			\
+		     | $(TRUNNER_OUTPUT) $$(BPFOBJ)
 	$$(call $(TRUNNER_BPF_BUILD_RULE),$$<,$$@,			\
 					  $(TRUNNER_BPF_CFLAGS))
 
@@ -407,11 +417,15 @@ endif
 # ensure we set up tests.h header generation rule just once
 ifeq ($($(TRUNNER_TESTS_DIR)-tests-hdr),)
 $(TRUNNER_TESTS_DIR)-tests-hdr := y
-$(TRUNNER_TESTS_HDR): $(TRUNNER_TESTS_DIR)/*.c
+$(TRUNNER_TESTS_HDR): $(TRUNNER_TESTS_DIR)/*.c				\
+		      $(wildcard $(TRUNNER_TESTS_DIR)/rhskip)
 	$$(call msg,TEST-HDR,$(TRUNNER_BINARY),$$@)
 	$$(shell ( cd $(TRUNNER_TESTS_DIR);				\
 		  echo '/* Generated header, do not edit */';		\
 		  ls *.c 2> /dev/null |					\
+		  ([[ -f rhskip ]] && 					\
+		   grep -v "`$(RHSKIP_FILTER_EVAL) rhskip`" || cat	\
+		  ) |							\
 			sed -e 's@\([^\.]*\)\.c@DEFINE_TEST(\1)@';	\
 		 ) > $$@)
 endif
@@ -494,11 +508,16 @@ $(eval $(call DEFINE_TEST_RUNNER,test_maps))
 # It is much simpler than test_maps/test_progs and sufficiently different from
 # them (e.g., test.h is using completely pattern), that it's worth just
 # explicitly defining all the rules explicitly.
-verifier/tests.h: verifier/*.c
+verifier/tests.h: verifier/*.c \
+		  $(wildcard verifier/rhskip)
 	$(shell ( cd verifier/; \
 		  echo '/* Generated header, do not edit */'; \
 		  echo '#ifdef FILL_ARRAY'; \
-		  ls *.c 2> /dev/null | sed -e 's@\(.*\)@#include \"\1\"@'; \
+		  ls *.c 2> /dev/null | \
+		  ([[ -f rhskip ]] && \
+		   grep -v "`$(RHSKIP_FILTER) rhskip`" || cat \
+		  ) | \
+		  sed -e 's@\(.*\)@#include \"\1\"@'; \
 		  echo '#endif' \
 		) > verifier/tests.h)
 $(OUTPUT)/test_verifier: test_verifier.c verifier/tests.h $(BPFOBJ) | $(OUTPUT)

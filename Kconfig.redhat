@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Red Hat specific options
+#
+
+menu "Red Hat options"
+
+config RHEL_DIFFERENCES
+	bool "Remove support for deprecated features"
+	help
+	  Red Hat may choose to deprecate certain features in its kernels.
+	  Enable this option to remove support for hardware that is no
+	  longer supported.
+
+	  Unless you want a restricted kernel, say N here.
+
+endmenu

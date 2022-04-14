@@ -13,6 +13,8 @@
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_request.h>
 
+#include <linux/rh_kabi.h>
+
 struct Scsi_Host;
 struct scsi_driver;
 
@@ -144,6 +146,16 @@ struct scsi_cmnd {
 
 	unsigned char tag;	/* SCSI-II queued command tag */
 	unsigned int extra_len;	/* length of alignment and padding */
+
+	/* FOR RH USE ONLY
+	 *
+	 * The following padding has been inserted before ABI freeze to
+	 * allow extending the structure while preserving ABI.
+	 */
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 /*

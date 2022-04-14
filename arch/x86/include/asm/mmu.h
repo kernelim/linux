@@ -44,7 +44,7 @@ typedef struct {
 
 	struct mutex lock;
 	void __user *vdso;			/* vdso base address */
-	const struct vdso_image *vdso_image;	/* vdso image in use */
+	RH_KABI_EXCLUDE(const struct vdso_image *vdso_image)	/* vdso image in use */
 
 	atomic_t perf_rdpmc_allowed;	/* nonzero if rdpmc is allowed */
 #ifdef CONFIG_X86_INTEL_MEMORY_PROTECTION_KEYS

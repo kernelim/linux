@@ -235,6 +235,15 @@ struct signal_struct {
 						 * and may have inconsistent
 						 * permissions.
 						 */
+	/*
+	 * RHEL9: signal_struct is always dynamically allocated at process
+	 * creation time and not embedded directly into other structure.
+	 * So it is also safe to extend the size of the structure.
+	 */
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 } __randomize_layout;
 
 /*
@@ -713,6 +722,12 @@ static inline void unlock_task_sighand(struct task_struct *task,
 {
 	spin_unlock_irqrestore(&task->sighand->siglock, *flags);
 }
+
+#ifdef CONFIG_LOCKDEP
+extern void lockdep_assert_task_sighand_held(struct task_struct *task);
+#else
+static inline void lockdep_assert_task_sighand_held(struct task_struct *task) { }
+#endif
 
 static inline unsigned long task_rlimit(const struct task_struct *task,
 		unsigned int limit)

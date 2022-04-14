@@ -1,0 +1,140 @@
+---
+title: 'Red Hat and GitLab Configuration'
+date: 2021-07-20T19:30:08+10:00
+draft: false
+weight: 2
+summary: It is required that Red Hat employees and Red Hat Partner Engineers must associate their Red Hat email account with a GitLab account.
+---
+
+= Red Hat and GitLab Configuration
+
+The Red Hat kernel workflow process uses several GitLab features. Project owners and maintainers must be able to differentiate users based on whether or not they are Red Hat employees.  *It is required that Red Hat employees and Red Hat Partner Engineers must associate their Red Hat email account with a GitLab account*.
+
+== anchor:accountcreation[] GitLab Account Creation
+
+Users can associate their redhat.com email address with an existing GitLab account, create a GitLab account with a custom username, or have a GitLab account created with their default LDAP username.  In all cases
+
+* users must specify their LDAP redhat.com email address as one of the email addresses in their account; *email aliases will only work if the user’s LDAP redhat.com email address is also specified in the user’s account*.
+* a redhat.com LDAP email address or redhat.com email alias must be the https://gitlab.com/-/profile/emails[Primary Email address] on the account.  *The* https://gitlab.com/-/profile/emails[*Primary Email address*] *must match the email address that is used to send and receive GitLab and kernel workflow email.*
+
+*It is strongly recommended that users specify the same email address for the "Email" and "Commit
+Email" settings in the* https://gitlab.com/-/profile[*Gitlab Profile tab*]*.*  Additional configuration steps such as configuring ssh-key, personal access tokens (PATs), and the Red Hat GitLab SAML are discussed in the sections below.
+
+=== Associating with an existing account
+
+Existing GitLab account holders can associate their redhat.com email address to their account at https://gitlab.com/profile/emails[https://gitlab.com/profile/emails].  The redhat.com email address must be changed to the primary address on the account at https://gitlab.com/profile[https://gitlab.com/profile].
+
+Existing users must log out, and re-authenticate through https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/saml/clients/gitlab-groups-redhat[Red Hat GitLab SAML].
+
+=== Creating a new account with a custom username
+
+If you do not have a GitLab account, go to https://gitlab.com/users/sign_in[https://gitlab.com/users/sign_in] and create a new account with your redhat.com email address.
+
+After creating the account, users must log out, and re-authenticate through https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/saml/clients/gitlab-groups-redhat[Red Hat GitLab SAML].
+
+=== Create a new account with your Red Hat username
+
+Users can automatically create a new account with their Red Hat username by logging into the https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/saml/clients/gitlab-groups-redhat[Red Hat GitLab SAML].  The login process will detect that no account is associated with the redhat.com email address and create a new account.  If your Red Hat username is already in use by another GitLab account the creation process will append a number to your username, for example, “prarit3” instead of “prarit”.
+
+After successful authentication through the Red Hat GitLab SAML, users should see the “Red Hat Enterprise Linux” project at https://gitlab.com/redhat[https://gitlab.com/redhat].
+
+=== Email Aliases and GitLab
+
+Contributors must match the GitLab email address with the $GIT_AUTHOR_EMAIL of any submitted commits.  There are no restrictions on email address use by reviewers.
+
+Red Hat contributors can use their email alias as their Commit Email as long as *_both_* their LDAP email and email alias are added to the same GitLab account.  The LDAP email is used to link the GitLab account to LDAP through the SAML verification.  The email alias is used to link the alias to the GitLab account for the kernel-webhooks verification.
+
+== anchor:sshconfiguration[] GitLab SSH Configuration
+
+GitLab is more convenient to use with configured ssh-keys, as users do not have to provide password verification when interacting with GitLab projects.  Users can opt out of configuring an SSH key, however, all of the configuration examples and tooling examples in this and other documents assume users have configured a SSH key.
+
+To generate a new ssh-key pair on the command line, follow the instructions at https://docs.gitlab.com/ee/ssh/index.html#generate-an-ssh-key-pair[https://docs.gitlab.com/ee/ssh/index.html#generate-an-ssh-key-pair].
+
+To add the ssh-key to a gitlab account, follow the instructions at https://docs.gitlab.com/ee/ssh/index.html#add-an-ssh-key-to-your-gitlab-account[https://docs.gitlab.com/ee/ssh/index.html#add-an-ssh-key-to-your-gitlab-account] to add an ssh key to your GitLab account.
+
+To test that the ssh-key is configured properly, follow the instructions at https://docs.gitlab.com/ee/ssh/index.html#verify-that-you-can-connect[https://docs.gitlab.com/ee/ssh/index.html#verify-that-you-can-connect].
+
+== anchor:tokens[] GitLab Personal Access Tokens
+
+GitLab provides another authentication mechanism that allows authentication from scripts and other utilities.  This mechanism is the Personal Access Token (PAT) and is used by the Kernel Team’s recommended GitLab command line interaction utilities, bichon and lab.  A user’s PAT is stored in both utilities and avoids the user from having to authenticate passwords when running the utilities.
+
+PATs can be created by following the instructions at the URL below when tools like lab or bichon prompt for an access token.  +++<u>+++*Both *+++</u>++++++<u>+++*lab*+++</u>++++++<u>+++* and bichon require “API” and the ability to read repository scope tokens, ie) select “api” and “read_repository” on step 5 in the URL instructions.*+++</u>+++
+
+	https://docs.gitlab.com/ee/user/profile/personal_access_tokens.html#creating-a-personal-access-token[https://docs.gitlab.com/ee/user/profile/personal_access_tokens.html#creating-a-personal-access-token].
+
+Tokens created with “API” privilege grant full access to your gitlab account.  This token should be protected as if it were a password.  Both recommended GitLab tools can protect your token: lab provides an option to store the password in a password manager, and bichon encrypts tokens.
+
+== Access to the RHEL kernel repositories
+
+External (ie, non-Red Hat) contributors do not have access to the RHEL kernel repositories.
+
+Red Hat Contributors and Red Hat Partner Contributors will be granted developer and/or reviewer access, or maintainer access based on their redhat.com email address and Red Hat LDAP entry.  This access is granted via Red Hat GitLab SAML login.
+
+If you have not done so, follow these steps to configure Red Hat SSO on your GitLab account.
+
+. Log out of your GitLab account.
+. Click this link to login through SSO
+https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/saml/clients/gitlab-groups-redhat[https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/saml/clients/gitlab-groups-redhat] +
+You should see a small blue banner that displays “Login to a GitLab account to link with your SAML identity” at the top of the page.
+
+. Enter your username and password and login.
+. You will be presented with an option to ‘Allow "Red Hat" to sign you in’ and a green “Authorize” button.  Click the button.
+
+To verify the configuration click the GitLab Avatar in the top right corner and select “Settings”.  From the "Settings" options, select "Account".  Under the “Social Sign-in” section you should see “SAML for Red Hat” and a “Disconnect” button.
+
+== Logging into to GitLab via Red Hat SSO
+
+*Users with redhat.com email addresses must login to GitLab via Red Hat SSO through this link:*
+
+https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/saml/clients/gitlab-groups-redhat[https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/saml/clients/gitlab-groups-redhat]
+
+or through the shortened URL, https://red.ht/GitLabSSO[https://red.ht/GitLabSSO].
+
+== Common Issues
+
+=== I get ‘permission denied’ when clicking on the https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/saml/clients/gitlab-groups-redhat[SAML] link.
+
+Solutions:
+
+* Please wait a few minutes and click on the link again.
+* If your account *used to have access* but suddenly *stopped*, use Step 2 to unassociate and then re-associate the SAML link.
+* Make sure you are connected via the VPN and you have used your LDAP redhat email address in your gitlab account.  +++<u>+++Email aliases will work as long as your LDAP email is also specified on your GitLab account.+++</u>+++
+** Note: confirm that the correct GitLab account is being associated with the SSO before approving the SAML link.
+* Ensure there are no ‘pending approval’ requests outstanding for your account.
+* Make sure you are part of the Linux engineering “linux-eng” rover group.  You can verify your inclusion on https://rover.redhat.com/groups[https://rover.redhat.com/groups] and select “My Groups”.
+
+=== I am a Red Hat Employee or Partner Engineer and am trying to authenticate through the https://red.ht/GitLabSSO[SAML] link, but I get a "SAML authentication failed: Extern uid has already been taken" error.
+	Solution: If your redhat.com LDAP email was not associated with a Gitlab account when you clicked on the SAML link, it is possible that an account was created for just your LDAP email address.  This situation is common for developers who use email addresses.  You can resolve this issue by deleting the newly created LDAP account.
+
+** Login into the newly created LDAP account with the password and https://docs.gitlab.com/ee/user/profile/account/delete_account.html[delete the account].   If you do not have the password, goto https://gitlab.com[https://gitlab.com], login in with the LDAP email address and reset the account’s password.
+** Add the LDAP email address to your original account.
+** Login through the https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/saml/clients/gitlab-groups-redhat[SAML] link.
+
+=== How can I unassociate the Red Hat SAML login with my account?
+
+If you have created an account in error, or linked SAML authentication to the wrong account, you can unlink the authentication by selecting the GitLab Avatar in the top right corner and selecting Settings.  On the “User Settings” page select “Account”.  In the “Social Sign-in” section you will see a “SAML for Red Hat” box with a “Disconnect” button.  Users can click that button to disconnect the SAML authentication from the account.
+
+=== Reporting issues with GitLab Access
+
+Users can email mailto:kernel-info@redhat.com[kernel-info@redhat.com] with any problems they have with GitLab access.  Please provide an explanation of the problem and, if lab is configured on your system, the output of ‘lab project list --member’.
+
+=== I get a “server gave bad signature for RSA key 0” error when connecting to GitLab
+
+Some users have reported this issue when connecting to GitLab with newer versions of the openssh package.  This problem can be avoided by adding
+
+	Host gitlab.com
+		UpdateHostKeys no
+
+to your ssh configuration file (typically ~/.ssh/config).
+
+=== Where can I find the Email, Primary Email, and Commit Email settings in my profile, and how should they be configured?
+
+The Email, Primary Email, and Commit Email settings can be found in your https://gitlab.com/-/profile[profile tab].  You can add email addresses to your account in the https://gitlab.com/-/profile/emails[Email tab] and see which address is set as the Primary Email.  The Primary Email is reflected in the Email entry in your https://gitlab.com/-/profile[profile tab].
+
+To avoid confusion, it is strongly recommended that you use the same email address for all email address settings.
+
+=== anchor:partnerengineer[] I'm using https://red.ht/GitLabSSO[https://red.ht/GitLabSSO] to login to GitLab and can see centos-stream and other public projects but cannot see the RHEL projects.
+
+Red Hat employees must associate their redhat.com email address with their bugzilla account, and must be part of the "Redhat: Red Hat Employee (internal)" group. Red Hat employees can request access to the group https://bugzilla.redhat.com/page.cgi?id=workflows/group_request.html[here].
+
+Red Hat Partner Engineers must associate their redhat.com email address with their bugzilla account, and must be part of the "redhat_partner_engineer_staff" Partner group.  Red Hat Partner engineers can request access to the group https://bugzilla.redhat.com/page.cgi?id=workflows/group_request.html[here].

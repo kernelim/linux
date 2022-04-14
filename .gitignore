@@ -156,6 +156,15 @@ x509.genkey
 # Kdevelop4
 *.kdev4
 
+#
+# Red Hat
+#
+configs/*.config
+localversion
+
+# GitLab CI configuration
+!.gitlab-ci.yml
+
 # Clang's compilation database file
 /compile_commands.json
 

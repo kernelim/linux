@@ -13,6 +13,8 @@
 #include <linux/list.h>
 #include <linux/err.h>
 
+#include <linux/rh_kabi.h>
+
 struct fwnode_operations;
 struct device;
 
@@ -29,11 +31,15 @@ struct device;
 
 struct fwnode_handle {
 	struct fwnode_handle *secondary;
-	const struct fwnode_operations *ops;
+	RH_KABI_EXCLUDE(const struct fwnode_operations *ops)
 	struct device *dev;
 	struct list_head suppliers;
 	struct list_head consumers;
 	u8 flags;
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 struct fwnode_link {

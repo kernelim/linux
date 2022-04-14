@@ -1,0 +1,63 @@
+Red Hat Enterprise Linux Always Ready config option scheme
+------------------------------------------------------
+
+Historically, the RHEL kernel is forked from a Fedora kernel.
+Today, the Always Ready Kernel (ARK) is constantly rebased as new kernel
+releases come out. New configuration options are reviewed and set
+with each release.
+
+The config options are split out into a hierarchical
+tree structure, with one file per config option at each level of the
+hierarchy. The config options are merged and properly layered according to
+the file "priority" in the same directory as this README to generate the
+final kernel-$VERSION-<arch>-<variant>.config files we need for building the
+actual kernels.
+
+The configuration is broken down into several directories:
+
+ark - This contains all configuration options that have been fully
+reviewed by kernel developers and are suitable for inclusion at branch time.
+
+pending-common - This directory contains all configuration options that have
+not yet been fully reviewed for inclusion. Because of the rate at which
+kernel options come out, we can't guarantee everything has been reviewed
+by the time a build needs to happen. In the interest of letting the build
+proceed for other testing, configuration options are staged in the
+pending directory. It is expected that this directory will be empty
+at branch time.
+
+In each directory (ark etc.), we have generic/CONFIG_* and debug/CONFIG_*, then
+generic/<arch>/CONFIG_* and generic/<arch>/<variant>/CONFIG_*, as well as
+debug/<arch>/CONFIG_*. While this may seem overly complex compared with
+past RHEL kernel config setups at first glance, its actually quite
+straight-forward and should be less error-prone. There's no potential
+for configuration options getting out of order or conflicts when changing
+adjacent configuraiton options.
+
+pending-fedora - This directory contains configuration options that have not
+been reviewed by Fedora kernel maintainers. Since the Fedora kernel turns on
+more configuration options than ARK, there are often settings that are not set
+to default in pending-common. These settings are moved to the fedora/
+configuration directory after community review. Options are populated with
+"make FLAVOR=fedora dist-commit-configs".
+
+custom-overrides - This directory contains an empty set of the generic and debug
+arch-specific directory tree. Any config option set here is applied last and
+therefore will override anything set in the ark, fedora, or pending directories.
+This allows users to easily override a config option without altering the
+standard directories. Users can even maintain their own branch with a full set
+of custom configuration options that can be easily be rebased on top of
+os-build without worrying about conflicts.
+
+All the configuration options for each arch and variant can be found
+in the "priority" file.
+
+If you want to make a change that applies to all kernels, debug and
+non-debug alike, add a config option file under ark/generic/. If it should
+only apply to all debug kernels, add it under ark/debug/. Arch-specific
+options go under ark/generic/<arch>/ and so on. Each layer's individual config
+option files are concatenated together with all other options at the same
+level, then stacked atop the lower layers until reaching the highest
+precedence layer for the given config option.
+
+Send any questions, comments or concerns to rhkernel-list@redhat.com.

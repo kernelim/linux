@@ -1,0 +1,12 @@
+Place config options in this directory that you want applied to the
+s390x-zfcpdump kernel variant only. These options are overlayed atop the
+generic/ and generic/s390x/ kernel options.
+
+The s390x-zfcpdump kernel variant is used as separate kernel for the SCSI
+stand-alone dump (also known as zfcp dump) on s390.
+
+A separate kernel is needed for the hardware dump mechanism as there's
+a fixed 32MB limitation (64MB on some new machines) on the size of the
+kernel the hardware is able to load -- hence the need for this minimal
+configuration. This kernel variant only needs to write to FCP-attached
+SCSI disks. Therefore networking support, for instance, is not needed.

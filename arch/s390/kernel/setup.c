@@ -49,6 +49,7 @@
 #include <linux/memory.h>
 #include <linux/compat.h>
 #include <linux/start_kernel.h>
+#include <linux/security.h>
 #include <linux/hugetlb.h>
 
 #include <asm/boot_data.h>
@@ -626,8 +627,9 @@ static void __init reserve_crashkernel(void)
 			return;
 		}
 		low = crash_base ?: low;
-		crash_base = memblock_find_in_range(low, high, crash_size,
-						    KEXEC_CRASH_MEM_ALIGN);
+		crash_base = memblock_phys_alloc_range(crash_size,
+						       KEXEC_CRASH_MEM_ALIGN,
+						       low, high);
 	}
 
 	if (!crash_base) {
@@ -636,8 +638,10 @@ static void __init reserve_crashkernel(void)
 		return;
 	}
 
-	if (register_memory_notifier(&kdump_mem_nb))
+	if (register_memory_notifier(&kdump_mem_nb)) {
+		memblock_free(crash_base, crash_size);
 		return;
+	}
 
 	if (!OLDMEM_BASE && MACHINE_IS_VM)
 		diag10_range(PFN_DOWN(crash_base), PFN_DOWN(crash_size));
@@ -854,17 +858,23 @@ static int __init setup_hwcaps(void)
 			elf_hwcap |= HWCAP_S390_VXRS_EXT2;
 		if (test_facility(152))
 			elf_hwcap |= HWCAP_S390_VXRS_PDE;
+		if (test_facility(192))
+			elf_hwcap |= HWCAP_S390_VXRS_PDE2;
 	}
 	if (test_facility(150))
 		elf_hwcap |= HWCAP_S390_SORT;
 	if (test_facility(151))
 		elf_hwcap |= HWCAP_S390_DFLT;
+	if (test_facility(165))
+		elf_hwcap |= HWCAP_S390_NNPA;
 
 	/*
 	 * Guarded storage support HWCAP_S390_GS is bit 12.
 	 */
 	if (MACHINE_HAS_GS)
 		elf_hwcap |= HWCAP_S390_GS;
+	if (MACHINE_HAS_PCI_MIO)
+		elf_hwcap |= HWCAP_S390_PCI_MIO;
 
 	get_cpu_id(&cpu_id);
 	add_device_randomness(&cpu_id, sizeof(cpu_id));
@@ -1022,6 +1032,9 @@ void __init setup_arch(char **cmdline_p)
 		pr_info("Linux is running as a guest in 64-bit mode\n");
 
 	log_component_list();
+
+	if (ipl_get_secureboot())
+		security_lock_kernel_down("Secure IPL mode", LOCKDOWN_INTEGRITY_MAX);
 
 	/* Have one command line that is parsed and saved in /proc/cmdline */
 	/* boot_command_line has been already set up in early.c */

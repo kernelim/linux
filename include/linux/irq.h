@@ -24,6 +24,8 @@
 #include <asm/ptrace.h>
 #include <asm/irq_regs.h>
 
+#include <linux/rh_kabi.h>
+
 struct seq_file;
 struct module;
 struct msi_msg;
@@ -185,6 +187,10 @@ struct irq_data {
 	struct irq_data		*parent_data;
 #endif
 	void			*chip_data;
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 /*

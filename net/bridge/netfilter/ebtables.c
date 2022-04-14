@@ -2484,6 +2484,8 @@ static int __init ebtables_init(void)
 {
 	int ret;
 
+	mark_driver_deprecated("ebtables");
+
 	ret = xt_register_target(&ebt_standard_target);
 	if (ret < 0)
 		return ret;

@@ -1,0 +1,6 @@
+# This option allows systems with ECC memory to perform Predictive Failure
+# Analysis (PFA) using CE MCE data to determine when an 4K page of memory
+# should be taken out of service and then remapped to another region of
+# memory.  This feature conflicts with many server systems which have their
+# own HW or SW-assisted PFA and should be disabled.
+# CONFIG_RAS_CEC is not set

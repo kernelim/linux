@@ -18,6 +18,7 @@ static int sgx_open(struct inode *inode, struct file *file)
 {
 	struct sgx_encl *encl;
 	int ret;
+	static bool warned = false;
 
 	encl = kzalloc(sizeof(*encl), GFP_KERNEL);
 	if (!encl)
@@ -34,6 +35,11 @@ static int sgx_open(struct inode *inode, struct file *file)
 	if (ret) {
 		kfree(encl);
 		return ret;
+	}
+
+	if (!warned) {
+		mark_tech_preview("Intel Software Guard Extensions (SGX)", NULL);
+		warned = true;
 	}
 
 	file->private_data = encl;

@@ -1,0 +1,134 @@
+evaluate_configs is a tool that can verify the settings of kernel
+CONFIGs in the redhat/configs directory.  The data for evaluate_configs
+is a combination of the redhat/configs files and the priority files.
+
+Introduction to Basic Output
+============================
+
+This command demonstrates how to display information about the
+CONFIG_HEADER_TEST option for RHEL.
+
+[prarit@prarit configs]$ ./evaluate_configs -p priority.rhel -c CONFIG_HEADER_TEST
+CONFIG_HEADER_TEST
+legend                         g  ga1  ga2  d  da1  da2
+common-x86_64                  y  -    -    -  X    -
+common-ppc64le                 y  -    X    -  -    X
+common-s390x                   y  -    X    -  -    X
+common-s390x-zfcpdump          y  -    -    X  X    X
+common-aarch64                 y  -    -    -  X    -
+ark-x86_64                     y  -    -    -  X    -
+ark-ppc64le                    y  -    X    -  -    X
+ark-s390x                      y  -    X    -  -    X
+ark-s390x-zfcpdump             y  -    -    X  X    X
+ark-aarch64                    y  -    -    -  X    -
+pending-common-x86_64          -  -    -    -  X    -
+pending-common-ppc64le         -  -    X    -  -    X
+pending-common-s390x           -  -    X    -  -    X
+pending-common-s390x-zfcpdump  -  -    -    X  X    X
+pending-common-aarch64         -  -    -    -  X    -
+
+The legend row, shows the subdirectory entries.  These can be mapped
+back to the priority.rhel entries, for example, for x86_64
+
+# x86_64
+x86_64=generic:generic-x86:generic-x86-x86_64
+x86_64-debug=generic:generic-x86:generic-x86-x86_64:debug:debug-x86-x86_64
+
+are combined into one entry for x86_64 where
+
+g maps to "generic"
+ga1 maps to "generic-x86"
+ga2 maps to "generic-x86-x86-64"
+d maps to "debug"
+da1 maps to nothing (more on this below)
+da2 maps to debug-x86-x86_64
+
+The left hand column indicates the directory and config-variant.  For
+example, ark-s390x-zfcpdump is the s390x-zfcpdump variant and the
+row beside it shows the config settings in the ark directory.
+
+The data contained in the output can have 5 values:
+
+	y = CONFIG is set to 'y'
+	m = CONFIG is set to 'm'
+	n = CONFIG is set to 'is not set'
+	- = CONFIG file does not exist
+	X = CONFIG file entry is not in priority file
+
+As can be seen above in the CONFIG_HEADER_TEST output, da1 is not present
+in the priority.rhel file and is marked with an 'X'.
+
+Options
+=======
+
+	-c CONFIG
+		Evalulate these specific CONFIGs. This can be a file,
+		or a comma-separated list.  If nothing is specified then
+		all CONFIGs are examined by default.)
+	-d
+		Enable debug
+	-p priority.file
+		Specify a priority.file (no default)
+	-j
+		Evaluate common directory
+	-f
+		Evaluate and fix a priority's CONFIGs
+
+All commands except -j require a -p argument.
+
+Evaluate CONFIGs
+================
+
+The -f option can be used to evaluate all the CONFIGs by executing, for
+example
+
+# evaluate_configs -p priority.rhel -f
+
+or a single CONFIG
+
+# evaluate_configs -p priority.rhel -f -c CONFIG_HEADER_TEST
+
+The Evaluate Output will show a different view than the Basic Output above:
+
+ERROR: (hierarchy) ark/generic/CONFIG_HEADER_TEST : superseding value has y.
+|CONFIG_HEADER_TEST (ark-aarch64)
+|g  ga1  ga2  d  da1  da2  g  ga1  ga2  d  da1  da2  g  ga1  ga2  d  da1  da2
+|y  -    -    -  X    -    y  -    -    -  X    -    -  -    -    -  X    -
+| Deleting ark/generic/CONFIG_HEADER_TEST
+
+This view is the Basic Output's aarch64 data in a single line,  From the
+above output,
+
+common-aarch64                 y  -    -    -  X    -
+ark-aarch64                    y  -    -    -  X    -
+pending-common-aarch64         -  -    -    -  X    -
+
+The Evaluate output makes it easier to visually see a conflict.   One
+can read the line and if there are two y|m|n separated by one or more - or
+X's in a line, then there is the possibility of a conflict.
+
+If the CONFIG setting is found to be incorrect it it automatically removed
+and a message
+
+| Deleting ark/generic/CONFIG_HEADER_TEST
+
+will be output.
+
+Evaluate common Directory
+=========================
+
+This function does a 1-to-1 comparison of CONFIG settings in the
+ark and fedora directories, and checks to see if the CONFIG should be set
+in the common directory.
+
+The output is the same as the Evaluate output.
+
+This functionality uses the priority.common file and can be executed via
+
+evaluate_configs -j
+
+for all CONFIGs, or
+
+evaluate_configs -j -c CONFIG_HEADER_TEST
+
+for a single CONFIG.

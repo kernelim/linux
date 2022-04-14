@@ -1,0 +1,20 @@
+# CONFIG_ETM4X_IMPDEF_FEATURE:
+# 
+# This control provides implementation define control for CoreSight
+# ETM 4.x tracer module that can't reduce commit rate automatically.
+# This avoids overflow between the ETM tracer module and the cpu core.
+# 
+# Symbol: ETM4X_IMPDEF_FEATURE [=n]
+# Type  : bool
+# Defined at drivers/hwtracing/coresight/Kconfig:113
+#   Prompt: Control implementation defined overflow support in ETM 4.x driver
+#   Depends on: CORESIGHT [=m] && CORESIGHT_SOURCE_ETM4X [=m]
+#   Location:
+#     -> Kernel hacking
+#       -> arm64 Debugging
+#         -> CoreSight Tracing Support (CORESIGHT [=m])
+#           -> CoreSight Embedded Trace Macrocell 4.x driver (CORESIGHT_SOURCE_ETM4X [=m])
+# 
+# 
+# 
+# CONFIG_ETM4X_IMPDEF_FEATURE is not set

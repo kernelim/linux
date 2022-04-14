@@ -1,0 +1,2 @@
+Rebase notes for Fedora kernel rebases:
+

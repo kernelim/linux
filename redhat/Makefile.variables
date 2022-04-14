@@ -1,0 +1,40 @@
+
+# Variables below should be changed as needed for building on a different
+# branch, or with a different upstream branch. This should be the only
+# file that needs to be changed now, and is included in redhat/Makefile
+# and redhat/Makefile.common
+
+# This is the source branch that you are building out of typically this is
+# the current branch.
+DIST_BRANCH ?= "main"
+
+# The branch used as upstream. This is what the upstream tarball is it
+# should be tracked in a local branch. This would be "master" for the
+# Linus master branch or linux-5.x.y for a stable branch. It can also be
+# any other upstream you have added as a branch locally.
+UPSTREAM_BRANCH ?= v5.14
+
+# If VERSION_ON_UPSTREAM is set, the versioning of the rpm package is based
+# on a branch tracking upstream. This allows for generating rpms
+# based on untagged releases.
+VERSION_ON_UPSTREAM:=0
+
+# BUMP_RELEASE determines whether the pkgrelease is bumped when you call
+# 'make dist-release'.  It should be set to "yes" if you expect to do
+# multiple updates and builds without bumping the base version, and no
+# when you expect every build to use a different base kernel version.
+BUMP_RELEASE:=yes
+
+# Should DIST tag be present also in source tags and commits? For ARK
+# it should be '0' since rpms may be re-build in multiple buildroots.
+# Downstream releases with single buildroot are expected to use '1'
+# which makes produced rpms match source tags, changelog, etc. including
+# dist tag.
+USE_DIST_IN_SOURCE:=1
+
+# INCLUDE_*_FILES determines whether or not the specific OS flavor files will
+# be included as part of the source RPM.  Downstream projects, such as
+# centos-stream or RHEL, can disable file inclusion by setting these values
+# to '0'.
+INCLUDE_FEDORA_FILES:=0
+INCLUDE_RHEL_FILES:=1

@@ -19,6 +19,7 @@
 #include <linux/kexec.h>
 #include <linux/of_device.h>
 #include <linux/acpi.h>
+#include <linux/kernel.h>
 #include <linux/dma-map-ops.h>
 #include "pci.h"
 #include "pcie/portdrv.h"
@@ -280,6 +281,84 @@ static struct attribute *pci_drv_attrs[] = {
 	NULL,
 };
 ATTRIBUTE_GROUPS(pci_drv);
+
+#ifdef CONFIG_RHEL_DIFFERENCES
+/**
+ * pci_hw_deprecated - Tell if a PCI device is deprecated
+ * @ids: array of PCI device id structures to search in
+ * @dev: the PCI device structure to match against
+ *
+ * Used by a driver to check whether this device is in its list of deprecated
+ * devices.  Returns the matching pci_device_id structure or %NULL if there is
+ * no match.
+ *
+ * Reserved for Internal Red Hat use only.
+ */
+const struct pci_device_id *pci_hw_deprecated(const struct pci_device_id *ids,
+					      struct pci_dev *dev)
+{
+	const struct pci_device_id *ret = pci_match_id(ids, dev);
+
+	if (!ret)
+		return NULL;
+
+	mark_hardware_deprecated(dev_driver_string(&dev->dev), "%04X:%04X @ %s",
+				 dev->device, dev->vendor, pci_name(dev));
+	return ret;
+}
+EXPORT_SYMBOL(pci_hw_deprecated);
+
+/**
+ * pci_hw_unmaintained - Tell if a PCI device is unmaintained
+ * @ids: array of PCI device id structures to search in
+ * @dev: the PCI device structure to match against
+ *
+ * Used by a driver to check whether this device is in its list of unmaintained
+ * devices.  Returns the matching pci_device_id structure or %NULL if there is
+ * no match.
+ *
+ * Reserved for Internal Red Hat use only.
+ */
+const struct pci_device_id *pci_hw_unmaintained(const struct pci_device_id *ids,
+						struct pci_dev *dev)
+{
+	const struct pci_device_id *ret = pci_match_id(ids, dev);
+
+	if (!ret)
+		return NULL;
+
+	mark_hardware_unmaintained(dev_driver_string(&dev->dev), "%04X:%04X @ %s",
+				   dev->device, dev->vendor, pci_name(dev));
+	return ret;
+}
+EXPORT_SYMBOL(pci_hw_unmaintained);
+
+/**
+ * pci_hw_disabled - Tell if a PCI device is disabled
+ * @ids: array of PCI device id structures to search in
+ * @dev: the PCI device structure to match against
+ *
+ * Used by a driver to check whether this device is in its list of disabled
+ * devices.  Returns the matching pci_device_id structure or %NULL if there is
+ * no match.
+ *
+ * Reserved for Internal Red Hat use only.
+ */
+const struct pci_device_id *pci_hw_disabled(const struct pci_device_id *ids,
+					    struct pci_dev *dev)
+{
+	const struct pci_device_id *ret = pci_match_id(ids, dev);
+
+	if (!ret)
+		return NULL;
+
+	mark_hardware_disabled(dev_driver_string(&dev->dev), "%04X:%04X @ %s",
+				   dev->device, dev->vendor, pci_name(dev));
+	return ret;
+}
+EXPORT_SYMBOL(pci_hw_disabled);
+
+#endif
 
 struct drv_dev_and_id {
 	struct pci_driver *drv;

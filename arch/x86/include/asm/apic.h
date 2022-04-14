@@ -13,6 +13,8 @@
 #include <asm/msr.h>
 #include <asm/hardirq.h>
 
+#include <linux/rh_kabi.h>
+
 #define ARCH_APICTIMER_STOPS_ON_C3	1
 
 /*
@@ -270,6 +272,9 @@ static inline int x2apic_enabled(void) { return 0; }
 
 struct irq_data;
 
+struct apic_extended_rh {
+};
+
 /*
  * Copyright 2004 James Cleverdon, IBM.
  *
@@ -345,6 +350,7 @@ struct apic {
 	int (*x86_32_early_logical_apicid)(int cpu);
 #endif
 	char	*name;
+	RH_KABI_AUX_EMBED(apic_extended)
 };
 
 /*

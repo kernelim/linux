@@ -62,6 +62,13 @@ static const struct pci_device_id be_dev_ids[] = {
 };
 MODULE_DEVICE_TABLE(pci, be_dev_ids);
 
+static const struct pci_device_id be_unmaintained_dev_ids[] = {
+#ifdef CONFIG_BE2NET_LANCER
+	{ PCI_DEVICE(EMULEX_VENDOR_ID, OC_DEVICE_ID3)},
+#endif /* CONFIG_BE2NET_LANCER */
+	{ 0 }
+};
+
 /* Workqueue used by all functions for defering cmd calls to the adapter */
 static struct workqueue_struct *be_wq;
 
@@ -5819,6 +5826,8 @@ static int be_probe(struct pci_dev *pdev, const struct pci_device_id *pdev_id)
 	struct be_adapter *adapter;
 	struct net_device *netdev;
 	int status = 0;
+
+	pci_hw_unmaintained(be_unmaintained_dev_ids, pdev);
 
 	status = pci_enable_device(pdev);
 	if (status)

@@ -80,6 +80,7 @@ struct qedi_endpoint {
 	u32 handle;
 	u32 fw_cid;
 	void __iomem *p_doorbell;
+	struct iscsi_db_data db_data;
 
 	/* Send queue management */
 	struct iscsi_wqe *sq;
@@ -154,7 +155,7 @@ struct qedi_conn {
 	spinlock_t list_lock;		/* internal conn lock */
 	u32 active_cmd_count;
 	u32 cmd_cleanup_req;
-	u32 cmd_cleanup_cmpl;
+	atomic_t cmd_cleanup_cmpl;
 
 	u32 iscsi_conn_id;
 	int itt;

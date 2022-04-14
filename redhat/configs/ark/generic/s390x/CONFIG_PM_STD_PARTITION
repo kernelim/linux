@@ -1,0 +1,1 @@
+CONFIG_PM_STD_PARTITION="/dev/jokes"

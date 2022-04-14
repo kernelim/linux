@@ -248,7 +248,6 @@ void panic(const char *fmt, ...)
 	 * Bypass the panic_cpu check and call __crash_kexec directly.
 	 */
 	if (!_crash_kexec_post_notifiers) {
-		printk_safe_flush_on_panic();
 		__crash_kexec(NULL);
 
 		/*
@@ -272,8 +271,6 @@ void panic(const char *fmt, ...)
 	 */
 	atomic_notifier_call_chain(&panic_notifier_list, 0, buf);
 
-	/* Call flush even twice. It tries harder with a single online CPU */
-	printk_safe_flush_on_panic();
 	kmsg_dump(KMSG_DUMP_PANIC);
 
 	/*
@@ -387,6 +384,20 @@ const struct taint_flag taint_flags[TAINT_FLAGS_COUNT] = {
 	[ TAINT_LIVEPATCH ]		= { 'K', ' ', true },
 	[ TAINT_AUX ]			= { 'X', ' ', true },
 	[ TAINT_RANDSTRUCT ]		= { 'T', ' ', true },
+	[ TAINT_18 ]			= { '?', '-', false },
+	[ TAINT_19 ]			= { '?', '-', false },
+	[ TAINT_20 ]			= { '?', '-', false },
+	[ TAINT_21 ]			= { '?', '-', false },
+	[ TAINT_22 ]			= { '?', '-', false },
+	[ TAINT_23 ]			= { '?', '-', false },
+	[ TAINT_24 ]			= { '?', '-', false },
+	[ TAINT_25 ]			= { '?', '-', false },
+	[ TAINT_26 ]			= { '?', '-', false },
+	[ TAINT_SUPPORT_REMOVED ]	= { 'h', ' ', false },
+	[ TAINT_RESERVED28 ]		= { '?', '-', false },
+	[ TAINT_RESERVED29 ]		= { '?', '-', false },
+	[ TAINT_RESERVED30 ]		= { '?', '-', false },
+	[ TAINT_UNPRIVILEGED_BPF ]	= { 'u', ' ', false },
 };
 
 /**
