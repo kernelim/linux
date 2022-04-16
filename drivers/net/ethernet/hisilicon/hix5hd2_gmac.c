@@ -1104,7 +1104,6 @@ static int hix5hd2_dev_probe(struct platform_device *pdev)
 	struct hix5hd2_priv *priv;
 	struct resource *res;
 	struct mii_bus *bus;
-	const char *mac_addr;
 	int ret;
 
 	ndev = alloc_etherdev(sizeof(struct hix5hd2_priv));
@@ -1229,10 +1228,8 @@ static int hix5hd2_dev_probe(struct platform_device *pdev)
 		goto out_phy_node;
 	}
 
-	mac_addr = of_get_mac_address(node);
-	if (mac_addr)
-		ether_addr_copy(ndev->dev_addr, mac_addr);
-	if (!is_valid_ether_addr(ndev->dev_addr)) {
+	ret = of_get_mac_address(node, ndev->dev_addr);
+	if (ret) {
 		eth_hw_addr_random(ndev);
 		netdev_warn(ndev, "using random MAC address %pM\n",
 			    ndev->dev_addr);

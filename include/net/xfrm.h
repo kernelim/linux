@@ -266,6 +266,7 @@ struct xfrm_state {
 	RH_KABI_EXTEND(u32	output_mark_mask)
 	RH_KABI_EXTEND(u32	if_id)
 	RH_KABI_EXTEND(struct sock __rcu	*encap_sk)
+	RH_KABI_EXTEND(struct hlist_node	byseq)
 };
 
 static inline struct net *xs_net(struct xfrm_state *x)

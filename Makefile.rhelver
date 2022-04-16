@@ -1,5 +1,5 @@
 RHEL_MAJOR = 8
-RHEL_MINOR = 5
+RHEL_MINOR = 6
 
 #
 # RHEL_RELEASE
@@ -12,7 +12,29 @@ RHEL_MINOR = 5
 #
 # Use this spot to avoid future merge conflicts.
 # Do not trim this comment.
-RHEL_RELEASE = 348.23.1
+RHEL_RELEASE = 372.9.1
+
+#
+# ZSTREAM
+# -------
+#
+#  This variable controls whether we use zstream numbering or not for the
+#  package release. The zstream release keeps the build number of the last
+#  build done for ystream for the Beta milestone, and increments a second
+#  number for each build. The third number is used for branched builds
+#  (eg.: for builds with security fixes or hot fixes done outside of the
+#  batch release process).
+#
+#  For example, with ZSTREAM unset or set to "no", all builds will contain
+#  a release with only the build number, eg.: kernel-<kernel version>-X.el*,
+#  where X is the build number. With ZSTREAM set to "yes", we will have
+#  builds with kernel-<kernel version>-X.Y.Z.el*, where X is the last
+#  RHEL_RELEASE number before ZSTREAM flag was set to yes, Y will now be the
+#  build number and Z will always be 1 except if you're doing a branched build
+#  (when you give RHDISTGIT_BRANCH on the command line, in which case the Z
+#  number will be incremented instead of the Y).
+#
+ZSTREAM = yes
 
 #
 # Early y+1 numbering

@@ -21,6 +21,7 @@
 #include <linux/ccp.h>
 #include <linux/firmware.h>
 #include <linux/gfp.h>
+#include <linux/cpufeature.h>
 
 #include <asm/smp.h>
 
@@ -41,6 +42,10 @@ MODULE_PARM_DESC(psp_cmd_timeout, " default timeout value, in seconds, for PSP c
 static int psp_probe_timeout = 5;
 module_param(psp_probe_timeout, int, 0644);
 MODULE_PARM_DESC(psp_probe_timeout, " default timeout value, in seconds, during PSP device probe");
+
+MODULE_FIRMWARE("amd/amd_sev_fam17h_model0xh.sbin"); /* 1st gen EPYC */
+MODULE_FIRMWARE("amd/amd_sev_fam17h_model3xh.sbin"); /* 2nd gen EPYC */
+MODULE_FIRMWARE("amd/amd_sev_fam19h_model0xh.sbin"); /* 3rd gen EPYC */
 
 static bool psp_dead;
 static int psp_timeout;
@@ -129,7 +134,7 @@ static int sev_cmd_buffer_len(int cmd)
 	case SEV_CMD_DOWNLOAD_FIRMWARE:		return sizeof(struct sev_data_download_firmware);
 	case SEV_CMD_GET_ID:			return sizeof(struct sev_data_get_id);
 	case SEV_CMD_ATTESTATION_REPORT:	return sizeof(struct sev_data_attestation_report);
-	case SEV_CMD_SEND_CANCEL:			return sizeof(struct sev_data_send_cancel);
+	case SEV_CMD_SEND_CANCEL:		return sizeof(struct sev_data_send_cancel);
 	default:				return 0;
 	}
 
@@ -294,6 +299,9 @@ static int __sev_platform_shutdown_locked(int *error)
 {
 	struct sev_device *sev = psp_master->sev_data;
 	int ret;
+
+	if (sev->state == SEV_STATE_UNINIT)
+		return 0;
 
 	ret = __sev_do_cmd_locked(SEV_CMD_SHUTDOWN, NULL, error);
 	if (ret)
@@ -963,6 +971,11 @@ int sev_dev_init(struct psp_device *psp)
 	struct sev_device *sev;
 	int ret = -ENOMEM;
 
+	if (!boot_cpu_has(X86_FEATURE_SEV)) {
+		dev_info_once(dev, "SEV: memory encryption not enabled by BIOS\n");
+		return 0;
+	}
+
 	sev = devm_kzalloc(dev, sizeof(*sev), GFP_KERNEL);
 	if (!sev)
 		goto e_err;
@@ -1009,12 +1022,28 @@ e_err:
 	return ret;
 }
 
+static void sev_firmware_shutdown(struct sev_device *sev)
+{
+	sev_platform_shutdown(NULL);
+
+	if (sev_es_tmr) {
+		/* The TMR area was encrypted, flush it from the cache */
+		wbinvd_on_all_cpus();
+
+		free_pages((unsigned long)sev_es_tmr,
+			   get_order(SEV_ES_TMR_SIZE));
+		sev_es_tmr = NULL;
+	}
+}
+
 void sev_dev_destroy(struct psp_device *psp)
 {
 	struct sev_device *sev = psp->sev_data;
 
 	if (!sev)
 		return;
+
+	sev_firmware_shutdown(sev);
 
 	if (sev->misc)
 		kref_put(&misc_dev->refcount, sev_exit);
@@ -1045,21 +1074,6 @@ void sev_pci_init(void)
 
 	if (sev_get_api_version())
 		goto err;
-
-	/*
-	 * If platform is not in UNINIT state then firmware upgrade and/or
-	 * platform INIT command will fail. These command require UNINIT state.
-	 *
-	 * In a normal boot we should never run into case where the firmware
-	 * is not in UNINIT state on boot. But in case of kexec boot, a reboot
-	 * may not go through a typical shutdown sequence and may leave the
-	 * firmware in INIT or WORKING state.
-	 */
-
-	if (sev->state != SEV_STATE_UNINIT) {
-		sev_platform_shutdown(NULL);
-		sev->state = SEV_STATE_UNINIT;
-	}
 
 	if (sev_version_greater_or_equal(0, 15) &&
 	    sev_update_firmware(sev->dev) == 0)
@@ -1105,17 +1119,10 @@ err:
 
 void sev_pci_exit(void)
 {
-	if (!psp_master->sev_data)
+	struct sev_device *sev = psp_master->sev_data;
+
+	if (!sev)
 		return;
 
-	sev_platform_shutdown(NULL);
-
-	if (sev_es_tmr) {
-		/* The TMR area was encrypted, flush it from the cache */
-		wbinvd_on_all_cpus();
-
-		free_pages((unsigned long)sev_es_tmr,
-			   get_order(SEV_ES_TMR_SIZE));
-		sev_es_tmr = NULL;
-	}
+	sev_firmware_shutdown(sev);
 }

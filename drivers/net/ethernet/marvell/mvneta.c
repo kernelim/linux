@@ -3826,8 +3826,11 @@ static int mvneta_ethtool_nway_reset(struct net_device *dev)
 }
 
 /* Set interrupt coalescing for ethtools */
-static int mvneta_ethtool_set_coalesce(struct net_device *dev,
-				       struct ethtool_coalesce *c)
+static int
+mvneta_ethtool_set_coalesce(struct net_device *dev,
+			    struct ethtool_coalesce *c,
+			    struct kernel_ethtool_coalesce *kernel_coal,
+			    struct netlink_ext_ack *extack)
 {
 	struct mvneta_port *pp = netdev_priv(dev);
 	int queue;
@@ -3850,8 +3853,11 @@ static int mvneta_ethtool_set_coalesce(struct net_device *dev,
 }
 
 /* get coalescing for ethtools */
-static int mvneta_ethtool_get_coalesce(struct net_device *dev,
-				       struct ethtool_coalesce *c)
+static int
+mvneta_ethtool_get_coalesce(struct net_device *dev,
+			    struct ethtool_coalesce *c,
+			    struct kernel_ethtool_coalesce *kernel_coal,
+			    struct netlink_ext_ack *extack)
 {
 	struct mvneta_port *pp = netdev_priv(dev);
 
@@ -4325,7 +4331,6 @@ static int mvneta_probe(struct platform_device *pdev)
 	struct mvneta_port *pp;
 	struct net_device *dev;
 	struct phylink *phylink;
-	const char *dt_mac_addr;
 	char hw_mac_addr[ETH_ALEN];
 	const char *mac_from;
 	int tx_csum_limit;
@@ -4417,10 +4422,9 @@ static int mvneta_probe(struct platform_device *pdev)
 		goto err_free_ports;
 	}
 
-	dt_mac_addr = of_get_mac_address(dn);
-	if (dt_mac_addr) {
+	err = of_get_mac_address(dn, dev->dev_addr);
+	if (!err) {
 		mac_from = "device tree";
-		memcpy(dev->dev_addr, dt_mac_addr, ETH_ALEN);
 	} else {
 		mvneta_get_mac_addr(pp, hw_mac_addr);
 		if (is_valid_ether_addr(hw_mac_addr)) {

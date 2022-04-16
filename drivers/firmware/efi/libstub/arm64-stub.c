@@ -64,10 +64,11 @@ efi_status_t handle_kernel_image(efi_system_table_t *sys_table_arg,
 						      sizeof(phys_seed),
 						      (u8 *)&phys_seed);
 			if (status == EFI_NOT_FOUND) {
-				pr_efi(sys_table_arg, "EFI_RNG_PROTOCOL unavailable, no randomness supplied\n");
+				pr_efi(sys_table_arg, "EFI_RNG_PROTOCOL unavailable\n");
+				set_nokaslr(1);
 			} else if (status != EFI_SUCCESS) {
 				pr_efi_err(sys_table_arg, "efi_get_random_bytes() failed\n");
-				return status;
+				set_nokaslr(1);
 			}
 		} else {
 			pr_efi(sys_table_arg, "KASLR disabled on kernel command line\n");

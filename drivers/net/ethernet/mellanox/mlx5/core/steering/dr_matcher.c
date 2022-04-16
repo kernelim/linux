@@ -92,15 +92,17 @@ static bool dr_mask_is_tnl_gre_set(struct mlx5dr_match_misc *misc)
 		misc->gre_k_present || misc->gre_s_present);
 }
 
-#define DR_MASK_IS_OUTER_MPLS_OVER_GRE_UDP_SET(_misc2, gre_udp) ( \
-	(_misc2).outer_first_mpls_over_##gre_udp##_label || \
-	(_misc2).outer_first_mpls_over_##gre_udp##_exp || \
-	(_misc2).outer_first_mpls_over_##gre_udp##_s_bos || \
-	(_misc2).outer_first_mpls_over_##gre_udp##_ttl)
+#define DR_MASK_IS_OUTER_MPLS_OVER_GRE_SET(_misc) (\
+	(_misc)->outer_first_mpls_over_gre_label || \
+	(_misc)->outer_first_mpls_over_gre_exp || \
+	(_misc)->outer_first_mpls_over_gre_s_bos || \
+	(_misc)->outer_first_mpls_over_gre_ttl)
 
-#define DR_MASK_IS_TNL_MPLS_SET(_misc2) ( \
-	DR_MASK_IS_OUTER_MPLS_OVER_GRE_UDP_SET((_misc2), gre) || \
-	DR_MASK_IS_OUTER_MPLS_OVER_GRE_UDP_SET((_misc2), udp))
+#define DR_MASK_IS_OUTER_MPLS_OVER_UDP_SET(_misc) (\
+	(_misc)->outer_first_mpls_over_udp_label || \
+	(_misc)->outer_first_mpls_over_udp_exp || \
+	(_misc)->outer_first_mpls_over_udp_s_bos || \
+	(_misc)->outer_first_mpls_over_udp_ttl)
 
 static bool
 dr_mask_is_vxlan_gpe_set(struct mlx5dr_match_misc3 *misc3)
@@ -133,6 +135,11 @@ static bool dr_mask_is_tnl_geneve_set(struct mlx5dr_match_misc *misc)
 	       misc->geneve_opt_len;
 }
 
+static bool dr_mask_is_tnl_geneve_tlv_opt(struct mlx5dr_match_misc3 *misc3)
+{
+	return misc3->geneve_tlv_option_0_data;
+}
+
 static bool
 dr_matcher_supp_tnl_geneve(struct mlx5dr_cmd_caps *caps)
 {
@@ -146,6 +153,109 @@ dr_mask_is_tnl_geneve(struct mlx5dr_match_param *mask,
 {
 	return dr_mask_is_tnl_geneve_set(&mask->misc) &&
 	       dr_matcher_supp_tnl_geneve(&dmn->info.caps);
+}
+
+static bool dr_mask_is_tnl_gtpu_set(struct mlx5dr_match_misc3 *misc3)
+{
+	return misc3->gtpu_msg_flags || misc3->gtpu_msg_type || misc3->gtpu_teid;
+}
+
+static bool dr_matcher_supp_tnl_gtpu(struct mlx5dr_cmd_caps *caps)
+{
+	return caps->flex_protocols & MLX5_FLEX_PARSER_GTPU_ENABLED;
+}
+
+static bool dr_mask_is_tnl_gtpu(struct mlx5dr_match_param *mask,
+				struct mlx5dr_domain *dmn)
+{
+	return dr_mask_is_tnl_gtpu_set(&mask->misc3) &&
+	       dr_matcher_supp_tnl_gtpu(&dmn->info.caps);
+}
+
+static int dr_matcher_supp_tnl_gtpu_dw_0(struct mlx5dr_cmd_caps *caps)
+{
+	return caps->flex_protocols & MLX5_FLEX_PARSER_GTPU_DW_0_ENABLED;
+}
+
+static bool dr_mask_is_tnl_gtpu_dw_0(struct mlx5dr_match_param *mask,
+				     struct mlx5dr_domain *dmn)
+{
+	return mask->misc3.gtpu_dw_0 &&
+	       dr_matcher_supp_tnl_gtpu_dw_0(&dmn->info.caps);
+}
+
+static int dr_matcher_supp_tnl_gtpu_teid(struct mlx5dr_cmd_caps *caps)
+{
+	return caps->flex_protocols & MLX5_FLEX_PARSER_GTPU_TEID_ENABLED;
+}
+
+static bool dr_mask_is_tnl_gtpu_teid(struct mlx5dr_match_param *mask,
+				     struct mlx5dr_domain *dmn)
+{
+	return mask->misc3.gtpu_teid &&
+	       dr_matcher_supp_tnl_gtpu_teid(&dmn->info.caps);
+}
+
+static int dr_matcher_supp_tnl_gtpu_dw_2(struct mlx5dr_cmd_caps *caps)
+{
+	return caps->flex_protocols & MLX5_FLEX_PARSER_GTPU_DW_2_ENABLED;
+}
+
+static bool dr_mask_is_tnl_gtpu_dw_2(struct mlx5dr_match_param *mask,
+				     struct mlx5dr_domain *dmn)
+{
+	return mask->misc3.gtpu_dw_2 &&
+	       dr_matcher_supp_tnl_gtpu_dw_2(&dmn->info.caps);
+}
+
+static int dr_matcher_supp_tnl_gtpu_first_ext(struct mlx5dr_cmd_caps *caps)
+{
+	return caps->flex_protocols & MLX5_FLEX_PARSER_GTPU_FIRST_EXT_DW_0_ENABLED;
+}
+
+static bool dr_mask_is_tnl_gtpu_first_ext(struct mlx5dr_match_param *mask,
+					  struct mlx5dr_domain *dmn)
+{
+	return mask->misc3.gtpu_first_ext_dw_0 &&
+	       dr_matcher_supp_tnl_gtpu_first_ext(&dmn->info.caps);
+}
+
+static bool dr_mask_is_tnl_gtpu_flex_parser_0(struct mlx5dr_match_param *mask,
+					      struct mlx5dr_domain *dmn)
+{
+	struct mlx5dr_cmd_caps *caps = &dmn->info.caps;
+
+	return (dr_is_flex_parser_0_id(caps->flex_parser_id_gtpu_dw_0) &&
+		dr_mask_is_tnl_gtpu_dw_0(mask, dmn)) ||
+	       (dr_is_flex_parser_0_id(caps->flex_parser_id_gtpu_teid) &&
+		dr_mask_is_tnl_gtpu_teid(mask, dmn)) ||
+	       (dr_is_flex_parser_0_id(caps->flex_parser_id_gtpu_dw_2) &&
+		dr_mask_is_tnl_gtpu_dw_2(mask, dmn)) ||
+	       (dr_is_flex_parser_0_id(caps->flex_parser_id_gtpu_first_ext_dw_0) &&
+		dr_mask_is_tnl_gtpu_first_ext(mask, dmn));
+}
+
+static bool dr_mask_is_tnl_gtpu_flex_parser_1(struct mlx5dr_match_param *mask,
+					      struct mlx5dr_domain *dmn)
+{
+	struct mlx5dr_cmd_caps *caps = &dmn->info.caps;
+
+	return (dr_is_flex_parser_1_id(caps->flex_parser_id_gtpu_dw_0) &&
+		dr_mask_is_tnl_gtpu_dw_0(mask, dmn)) ||
+	       (dr_is_flex_parser_1_id(caps->flex_parser_id_gtpu_teid) &&
+		dr_mask_is_tnl_gtpu_teid(mask, dmn)) ||
+	       (dr_is_flex_parser_1_id(caps->flex_parser_id_gtpu_dw_2) &&
+		dr_mask_is_tnl_gtpu_dw_2(mask, dmn)) ||
+	       (dr_is_flex_parser_1_id(caps->flex_parser_id_gtpu_first_ext_dw_0) &&
+		dr_mask_is_tnl_gtpu_first_ext(mask, dmn));
+}
+
+static bool dr_mask_is_tnl_gtpu_any(struct mlx5dr_match_param *mask,
+				    struct mlx5dr_domain *dmn)
+{
+	return dr_mask_is_tnl_gtpu_flex_parser_0(mask, dmn) ||
+	       dr_mask_is_tnl_gtpu_flex_parser_1(mask, dmn) ||
+	       dr_mask_is_tnl_gtpu(mask, dmn);
 }
 
 static int dr_matcher_supp_icmp_v4(struct mlx5dr_cmd_caps *caps)
@@ -199,6 +309,65 @@ static bool dr_mask_is_gvmi_or_qpn_set(struct mlx5dr_match_misc *misc)
 	return (misc->source_sqn || misc->source_port);
 }
 
+static bool dr_mask_is_flex_parser_id_0_3_set(u32 flex_parser_id,
+					      u32 flex_parser_value)
+{
+	if (flex_parser_id)
+		return flex_parser_id <= DR_STE_MAX_FLEX_0_ID;
+
+	/* Using flex_parser 0 means that id is zero, thus value must be set. */
+	return flex_parser_value;
+}
+
+static bool dr_mask_is_flex_parser_0_3_set(struct mlx5dr_match_misc4 *misc4)
+{
+	return (dr_mask_is_flex_parser_id_0_3_set(misc4->prog_sample_field_id_0,
+						  misc4->prog_sample_field_value_0) ||
+		dr_mask_is_flex_parser_id_0_3_set(misc4->prog_sample_field_id_1,
+						  misc4->prog_sample_field_value_1) ||
+		dr_mask_is_flex_parser_id_0_3_set(misc4->prog_sample_field_id_2,
+						  misc4->prog_sample_field_value_2) ||
+		dr_mask_is_flex_parser_id_0_3_set(misc4->prog_sample_field_id_3,
+						  misc4->prog_sample_field_value_3));
+}
+
+static bool dr_mask_is_flex_parser_id_4_7_set(u32 flex_parser_id)
+{
+	return flex_parser_id > DR_STE_MAX_FLEX_0_ID &&
+	       flex_parser_id <= DR_STE_MAX_FLEX_1_ID;
+}
+
+static bool dr_mask_is_flex_parser_4_7_set(struct mlx5dr_match_misc4 *misc4)
+{
+	return (dr_mask_is_flex_parser_id_4_7_set(misc4->prog_sample_field_id_0) ||
+		dr_mask_is_flex_parser_id_4_7_set(misc4->prog_sample_field_id_1) ||
+		dr_mask_is_flex_parser_id_4_7_set(misc4->prog_sample_field_id_2) ||
+		dr_mask_is_flex_parser_id_4_7_set(misc4->prog_sample_field_id_3));
+}
+
+static int dr_matcher_supp_tnl_mpls_over_gre(struct mlx5dr_cmd_caps *caps)
+{
+	return caps->flex_protocols & MLX5_FLEX_PARSER_MPLS_OVER_GRE_ENABLED;
+}
+
+static bool dr_mask_is_tnl_mpls_over_gre(struct mlx5dr_match_param *mask,
+					 struct mlx5dr_domain *dmn)
+{
+	return DR_MASK_IS_OUTER_MPLS_OVER_GRE_SET(&mask->misc2) &&
+	       dr_matcher_supp_tnl_mpls_over_gre(&dmn->info.caps);
+}
+
+static int dr_matcher_supp_tnl_mpls_over_udp(struct mlx5dr_cmd_caps *caps)
+{
+	return caps->flex_protocols & MLX5_FLEX_PARSER_MPLS_OVER_UDP_ENABLED;
+}
+
+static bool dr_mask_is_tnl_mpls_over_udp(struct mlx5dr_match_param *mask,
+					 struct mlx5dr_domain *dmn)
+{
+	return DR_MASK_IS_OUTER_MPLS_OVER_UDP_SET(&mask->misc2) &&
+	       dr_matcher_supp_tnl_mpls_over_udp(&dmn->info.caps);
+}
 int mlx5dr_matcher_select_builders(struct mlx5dr_matcher *matcher,
 				   struct mlx5dr_matcher_rx_tx *nic_matcher,
 				   enum mlx5dr_ipv outer_ipv,
@@ -227,13 +396,14 @@ static int dr_matcher_set_ste_builders(struct mlx5dr_matcher *matcher,
 	struct mlx5dr_domain *dmn = matcher->tbl->dmn;
 	struct mlx5dr_ste_ctx *ste_ctx = dmn->ste_ctx;
 	struct mlx5dr_match_param mask = {};
+	bool allow_empty_match = false;
 	struct mlx5dr_ste_build *sb;
 	bool inner, rx;
 	int idx = 0;
 	int ret, i;
 
 	sb = nic_matcher->ste_builder_arr[outer_ipv][inner_ipv];
-	rx = nic_dmn->ste_type == MLX5DR_STE_TYPE_RX;
+	rx = nic_dmn->type == DR_DOMAIN_NIC_TYPE_RX;
 
 	/* Create a temporary mask to track and clear used mask fields */
 	if (matcher->match_criteria & DR_MATCHER_CRITERIA_OUTER)
@@ -251,10 +421,23 @@ static int dr_matcher_set_ste_builders(struct mlx5dr_matcher *matcher,
 	if (matcher->match_criteria & DR_MATCHER_CRITERIA_MISC3)
 		mask.misc3 = matcher->mask.misc3;
 
+	if (matcher->match_criteria & DR_MATCHER_CRITERIA_MISC4)
+		mask.misc4 = matcher->mask.misc4;
+
 	ret = mlx5dr_ste_build_pre_check(dmn, matcher->match_criteria,
 					 &matcher->mask, NULL);
 	if (ret)
 		return ret;
+
+	/* Optimize RX pipe by reducing source port match, since
+	 * the FDB RX part is connected only to the wire.
+	 */
+	if (dmn->type == MLX5DR_DOMAIN_TYPE_FDB &&
+	    rx && mask.misc.source_port) {
+		mask.misc.source_port = 0;
+		mask.misc.source_eswitch_owner_vhca_id = 0;
+		allow_empty_match = true;
+	}
 
 	/* Outer */
 	if (matcher->match_criteria & (DR_MATCHER_CRITERIA_OUTER |
@@ -321,9 +504,28 @@ static int dr_matcher_set_ste_builders(struct mlx5dr_matcher *matcher,
 		if (dr_mask_is_tnl_vxlan_gpe(&mask, dmn))
 			mlx5dr_ste_build_tnl_vxlan_gpe(ste_ctx, &sb[idx++],
 						       &mask, inner, rx);
-		else if (dr_mask_is_tnl_geneve(&mask, dmn))
+		else if (dr_mask_is_tnl_geneve(&mask, dmn)) {
 			mlx5dr_ste_build_tnl_geneve(ste_ctx, &sb[idx++],
 						    &mask, inner, rx);
+			if (dr_mask_is_tnl_geneve_tlv_opt(&mask.misc3))
+				mlx5dr_ste_build_tnl_geneve_tlv_opt(ste_ctx, &sb[idx++],
+								    &mask, &dmn->info.caps,
+								    inner, rx);
+		} else if (dr_mask_is_tnl_gtpu_any(&mask, dmn)) {
+			if (dr_mask_is_tnl_gtpu_flex_parser_0(&mask, dmn))
+				mlx5dr_ste_build_tnl_gtpu_flex_parser_0(ste_ctx, &sb[idx++],
+									&mask, &dmn->info.caps,
+									inner, rx);
+
+			if (dr_mask_is_tnl_gtpu_flex_parser_1(&mask, dmn))
+				mlx5dr_ste_build_tnl_gtpu_flex_parser_1(ste_ctx, &sb[idx++],
+									&mask, &dmn->info.caps,
+									inner, rx);
+
+			if (dr_mask_is_tnl_gtpu(&mask, dmn))
+				mlx5dr_ste_build_tnl_gtpu(ste_ctx, &sb[idx++],
+							  &mask, inner, rx);
+		}
 
 		if (DR_MASK_IS_ETH_L4_MISC_SET(mask.misc3, outer))
 			mlx5dr_ste_build_eth_l4_misc(ste_ctx, &sb[idx++],
@@ -333,17 +535,20 @@ static int dr_matcher_set_ste_builders(struct mlx5dr_matcher *matcher,
 			mlx5dr_ste_build_mpls(ste_ctx, &sb[idx++],
 					      &mask, inner, rx);
 
-		if (DR_MASK_IS_TNL_MPLS_SET(mask.misc2))
-			mlx5dr_ste_build_tnl_mpls(ste_ctx, &sb[idx++],
-						  &mask, inner, rx);
+		if (dr_mask_is_tnl_mpls_over_gre(&mask, dmn))
+			mlx5dr_ste_build_tnl_mpls_over_gre(ste_ctx, &sb[idx++],
+							   &mask, &dmn->info.caps,
+							   inner, rx);
+		else if (dr_mask_is_tnl_mpls_over_udp(&mask, dmn))
+			mlx5dr_ste_build_tnl_mpls_over_udp(ste_ctx, &sb[idx++],
+							   &mask, &dmn->info.caps,
+							   inner, rx);
 
-		if (dr_mask_is_icmp(&mask, dmn)) {
-			ret = mlx5dr_ste_build_icmp(ste_ctx, &sb[idx++],
-						    &mask, &dmn->info.caps,
-						    inner, rx);
-			if (ret)
-				return ret;
-		}
+		if (dr_mask_is_icmp(&mask, dmn))
+			mlx5dr_ste_build_icmp(ste_ctx, &sb[idx++],
+					      &mask, &dmn->info.caps,
+					      inner, rx);
+
 		if (dr_mask_is_tnl_gre_set(&mask.misc))
 			mlx5dr_ste_build_tnl_gre(ste_ctx, &sb[idx++],
 						 &mask, inner, rx);
@@ -404,12 +609,29 @@ static int dr_matcher_set_ste_builders(struct mlx5dr_matcher *matcher,
 			mlx5dr_ste_build_mpls(ste_ctx, &sb[idx++],
 					      &mask, inner, rx);
 
-		if (DR_MASK_IS_TNL_MPLS_SET(mask.misc2))
-			mlx5dr_ste_build_tnl_mpls(ste_ctx, &sb[idx++],
-						  &mask, inner, rx);
+		if (dr_mask_is_tnl_mpls_over_gre(&mask, dmn))
+			mlx5dr_ste_build_tnl_mpls_over_gre(ste_ctx, &sb[idx++],
+							   &mask, &dmn->info.caps,
+							   inner, rx);
+		else if (dr_mask_is_tnl_mpls_over_udp(&mask, dmn))
+			mlx5dr_ste_build_tnl_mpls_over_udp(ste_ctx, &sb[idx++],
+							   &mask, &dmn->info.caps,
+							   inner, rx);
 	}
+
+	if (matcher->match_criteria & DR_MATCHER_CRITERIA_MISC4) {
+		if (dr_mask_is_flex_parser_0_3_set(&mask.misc4))
+			mlx5dr_ste_build_flex_parser_0(ste_ctx, &sb[idx++],
+						       &mask, false, rx);
+
+		if (dr_mask_is_flex_parser_4_7_set(&mask.misc4))
+			mlx5dr_ste_build_flex_parser_1(ste_ctx, &sb[idx++],
+						       &mask, false, rx);
+	}
+
 	/* Empty matcher, takes all */
-	if (matcher->match_criteria == DR_MATCHER_CRITERIA_EMPTY)
+	if ((!idx && allow_empty_match) ||
+	    matcher->match_criteria == DR_MATCHER_CRITERIA_EMPTY)
 		mlx5dr_ste_build_empty_always_hit(&sb[idx++], rx);
 
 	if (idx == 0) {
@@ -499,7 +721,7 @@ static int dr_matcher_add_to_tbl(struct mlx5dr_matcher *matcher)
 	int ret;
 
 	next_matcher = NULL;
-	list_for_each_entry(tmp_matcher, &tbl->matcher_list, matcher_list) {
+	list_for_each_entry(tmp_matcher, &tbl->matcher_list, list_node) {
 		if (tmp_matcher->prio >= matcher->prio) {
 			next_matcher = tmp_matcher;
 			break;
@@ -509,11 +731,11 @@ static int dr_matcher_add_to_tbl(struct mlx5dr_matcher *matcher)
 
 	prev_matcher = NULL;
 	if (next_matcher && !first)
-		prev_matcher = list_prev_entry(next_matcher, matcher_list);
+		prev_matcher = list_prev_entry(next_matcher, list_node);
 	else if (!first)
 		prev_matcher = list_last_entry(&tbl->matcher_list,
 					       struct mlx5dr_matcher,
-					       matcher_list);
+					       list_node);
 
 	if (dmn->type == MLX5DR_DOMAIN_TYPE_FDB ||
 	    dmn->type == MLX5DR_DOMAIN_TYPE_NIC_RX) {
@@ -534,12 +756,12 @@ static int dr_matcher_add_to_tbl(struct mlx5dr_matcher *matcher)
 	}
 
 	if (prev_matcher)
-		list_add(&matcher->matcher_list, &prev_matcher->matcher_list);
+		list_add(&matcher->list_node, &prev_matcher->list_node);
 	else if (next_matcher)
-		list_add_tail(&matcher->matcher_list,
-			      &next_matcher->matcher_list);
+		list_add_tail(&matcher->list_node,
+			      &next_matcher->list_node);
 	else
-		list_add(&matcher->matcher_list, &tbl->matcher_list);
+		list_add(&matcher->list_node, &tbl->matcher_list);
 
 	return 0;
 }
@@ -650,12 +872,12 @@ uninit_nic_rx:
 	return ret;
 }
 
-static int dr_matcher_init(struct mlx5dr_matcher *matcher,
-			   struct mlx5dr_match_parameters *mask)
+static int dr_matcher_copy_param(struct mlx5dr_matcher *matcher,
+				 struct mlx5dr_match_parameters *mask)
 {
-	struct mlx5dr_table *tbl = matcher->tbl;
-	struct mlx5dr_domain *dmn = tbl->dmn;
-	int ret;
+	struct mlx5dr_domain *dmn = matcher->tbl->dmn;
+	struct mlx5dr_match_parameters consumed_mask;
+	int i, ret = 0;
 
 	if (matcher->match_criteria >= DR_MATCHER_CRITERIA_MAX) {
 		mlx5dr_err(dmn, "Invalid match criteria attribute\n");
@@ -667,9 +889,43 @@ static int dr_matcher_init(struct mlx5dr_matcher *matcher,
 			mlx5dr_err(dmn, "Invalid match size attribute\n");
 			return -EINVAL;
 		}
+
+		consumed_mask.match_buf = kzalloc(mask->match_sz, GFP_KERNEL);
+		if (!consumed_mask.match_buf)
+			return -ENOMEM;
+
+		consumed_mask.match_sz = mask->match_sz;
+		memcpy(consumed_mask.match_buf, mask->match_buf, mask->match_sz);
 		mlx5dr_ste_copy_param(matcher->match_criteria,
-				      &matcher->mask, mask);
+				      &matcher->mask, &consumed_mask, true);
+
+		/* Check that all mask data was consumed */
+		for (i = 0; i < consumed_mask.match_sz; i++) {
+			if (!((u8 *)consumed_mask.match_buf)[i])
+				continue;
+
+			mlx5dr_dbg(dmn,
+				   "Match param mask contains unsupported parameters\n");
+			ret = -EOPNOTSUPP;
+			break;
+		}
+
+		kfree(consumed_mask.match_buf);
 	}
+
+	return ret;
+}
+
+static int dr_matcher_init(struct mlx5dr_matcher *matcher,
+			   struct mlx5dr_match_parameters *mask)
+{
+	struct mlx5dr_table *tbl = matcher->tbl;
+	struct mlx5dr_domain *dmn = tbl->dmn;
+	int ret;
+
+	ret = dr_matcher_copy_param(matcher, mask);
+	if (ret)
+		return ret;
 
 	switch (dmn->type) {
 	case MLX5DR_DOMAIN_TYPE_NIC_RX:
@@ -687,7 +943,7 @@ static int dr_matcher_init(struct mlx5dr_matcher *matcher,
 		break;
 	default:
 		WARN_ON(true);
-		return -EINVAL;
+		ret = -EINVAL;
 	}
 
 	return ret;
@@ -712,7 +968,8 @@ mlx5dr_matcher_create(struct mlx5dr_table *tbl,
 	matcher->prio = priority;
 	matcher->match_criteria = match_criteria_enable;
 	refcount_set(&matcher->refcount, 1);
-	INIT_LIST_HEAD(&matcher->matcher_list);
+	INIT_LIST_HEAD(&matcher->list_node);
+	INIT_LIST_HEAD(&matcher->dbg_rule_list);
 
 	mlx5dr_domain_lock(tbl->dmn);
 
@@ -775,15 +1032,15 @@ static int dr_matcher_remove_from_tbl(struct mlx5dr_matcher *matcher)
 	struct mlx5dr_domain *dmn = tbl->dmn;
 	int ret = 0;
 
-	if (list_is_last(&matcher->matcher_list, &tbl->matcher_list))
+	if (list_is_last(&matcher->list_node, &tbl->matcher_list))
 		next_matcher = NULL;
 	else
-		next_matcher = list_next_entry(matcher, matcher_list);
+		next_matcher = list_next_entry(matcher, list_node);
 
-	if (matcher->matcher_list.prev == &tbl->matcher_list)
+	if (matcher->list_node.prev == &tbl->matcher_list)
 		prev_matcher = NULL;
 	else
-		prev_matcher = list_prev_entry(matcher, matcher_list);
+		prev_matcher = list_prev_entry(matcher, list_node);
 
 	if (dmn->type == MLX5DR_DOMAIN_TYPE_FDB ||
 	    dmn->type == MLX5DR_DOMAIN_TYPE_NIC_RX) {
@@ -803,7 +1060,7 @@ static int dr_matcher_remove_from_tbl(struct mlx5dr_matcher *matcher)
 			return ret;
 	}
 
-	list_del(&matcher->matcher_list);
+	list_del(&matcher->list_node);
 
 	return 0;
 }
@@ -812,7 +1069,7 @@ int mlx5dr_matcher_destroy(struct mlx5dr_matcher *matcher)
 {
 	struct mlx5dr_table *tbl = matcher->tbl;
 
-	if (refcount_read(&matcher->refcount) > 1)
+	if (WARN_ON_ONCE(refcount_read(&matcher->refcount) > 1))
 		return -EBUSY;
 
 	mlx5dr_domain_lock(tbl->dmn);

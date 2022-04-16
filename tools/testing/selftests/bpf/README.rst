@@ -6,6 +6,30 @@ General instructions on running selftests can be found in
 
 __ /Documentation/bpf/bpf_devel_QA.rst#q-how-to-run-bpf-selftests
 
+=========================
+Running Selftests in a VM
+=========================
+
+It's now possible to run the selftests using ``tools/testing/selftests/bpf/vmtest.sh``.
+The script tries to ensure that the tests are run with the same environment as they
+would be run post-submit in the CI used by the Maintainers.
+
+This script downloads a suitable Kconfig and VM userspace image from the system used by
+the CI. It builds the kernel (without overwriting your existing Kconfig), recompiles the
+bpf selftests, runs them (by default ``tools/testing/selftests/bpf/test_progs``) and
+saves the resulting output (by default in ``~/.bpf_selftests``).
+
+For more information on about using the script, run:
+
+.. code-block:: console
+
+  $ tools/testing/selftests/bpf/vmtest.sh -h
+
+.. note:: The script uses pahole and clang based on host environment setting.
+          If you want to change pahole and llvm, you can change `PATH` environment
+          variable in the beginning of script.
+
+.. note:: The script currently only supports x86_64.
 
 Additional information about selftest failures are
 documented here.
@@ -87,6 +111,45 @@ available in 10.0.1. The patch is available in llvm 11.0.0 trunk.
 
 __  https://reviews.llvm.org/D78466
 
+bpf_verif_scale/loop6.o test failure with Clang 12
+==================================================
+
+With Clang 12, the following bpf_verif_scale test failed:
+  * ``bpf_verif_scale/loop6.o``
+
+The verifier output looks like
+
+.. code-block:: c
+
+  R1 type=ctx expected=fp
+  The sequence of 8193 jumps is too complex.
+
+The reason is compiler generating the following code
+
+.. code-block:: c
+
+  ;       for (i = 0; (i < VIRTIO_MAX_SGS) && (i < num); i++) {
+      14:       16 05 40 00 00 00 00 00 if w5 == 0 goto +64 <LBB0_6>
+      15:       bc 51 00 00 00 00 00 00 w1 = w5
+      16:       04 01 00 00 ff ff ff ff w1 += -1
+      17:       67 05 00 00 20 00 00 00 r5 <<= 32
+      18:       77 05 00 00 20 00 00 00 r5 >>= 32
+      19:       a6 01 01 00 05 00 00 00 if w1 < 5 goto +1 <LBB0_4>
+      20:       b7 05 00 00 06 00 00 00 r5 = 6
+  00000000000000a8 <LBB0_4>:
+      21:       b7 02 00 00 00 00 00 00 r2 = 0
+      22:       b7 01 00 00 00 00 00 00 r1 = 0
+  ;       for (i = 0; (i < VIRTIO_MAX_SGS) && (i < num); i++) {
+      23:       7b 1a e0 ff 00 00 00 00 *(u64 *)(r10 - 32) = r1
+      24:       7b 5a c0 ff 00 00 00 00 *(u64 *)(r10 - 64) = r5
+
+Note that insn #15 has w1 = w5 and w1 is refined later but
+r5(w5) is eventually saved on stack at insn #24 for later use.
+This cause later verifier failure. The bug has been `fixed`__ in
+Clang 13.
+
+__  https://reviews.llvm.org/D97479
+
 BPF CO-RE-based tests and Clang version
 =======================================
 
@@ -116,3 +179,26 @@ types, which was introduced in `Clang 13`__. The older Clang versions will
 either crash when compiling these tests, or generate an incorrect BTF.
 
 __  https://reviews.llvm.org/D83289
+
+Kernel function call test and Clang version
+===========================================
+
+Some selftests (e.g. kfunc_call and bpf_tcp_ca) require a LLVM support
+to generate extern function in BTF.  It was introduced in `Clang 13`__.
+
+Without it, the error from compiling bpf selftests looks like:
+
+.. code-block:: console
+
+  libbpf: failed to find BTF for extern 'tcp_slow_start' [25] section: -2
+
+__ https://reviews.llvm.org/D93563
+
+Clang dependencies for static linking tests
+===========================================
+
+linked_vars, linked_maps, and linked_funcs tests depend on `Clang fix`__ to
+generate valid BTF information for weak variables. Please make sure you use
+Clang that contains the fix.
+
+__ https://reviews.llvm.org/D100362

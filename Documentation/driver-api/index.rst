@@ -50,7 +50,7 @@ available subsections can be seen below.
    80211/index
    uio-howto
    firmware/index
-   pinctl
+   pin-control
    pldmfw/index
    gpio/index
    misc_devices

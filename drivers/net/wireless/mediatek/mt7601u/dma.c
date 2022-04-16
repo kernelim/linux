@@ -515,7 +515,7 @@ static int mt7601u_alloc_tx(struct mt7601u_dev *dev)
 
 int mt7601u_dma_init(struct mt7601u_dev *dev)
 {
-	int ret = -ENOMEM;
+	int ret;
 
 	tasklet_init(&dev->tx_tasklet, mt7601u_tx_tasklet, (unsigned long) dev);
 	tasklet_init(&dev->rx_tasklet, mt7601u_rx_tasklet, (unsigned long) dev);

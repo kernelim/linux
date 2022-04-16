@@ -1138,11 +1138,6 @@ static int lme2510_powerup(struct dvb_usb_device *d, int onoff)
 	return ret;
 }
 
-static int lme2510_get_adapter_count(struct dvb_usb_device *d)
-{
-	return 1;
-}
-
 static int lme2510_identify_state(struct dvb_usb_device *d, const char **name)
 {
 	struct lme2510_state *st = d->priv;
@@ -1232,12 +1227,12 @@ static struct dvb_usb_device_properties lme2510_props = {
 	.frontend_attach  = dm04_lme2510_frontend_attach,
 	.tuner_attach = dm04_lme2510_tuner,
 	.get_stream_config = lme2510_get_stream_config,
-	.get_adapter_count = lme2510_get_adapter_count,
 	.streaming_ctrl   = lme2510_streaming_ctrl,
 
 	.get_rc_config = lme2510_get_rc_config,
 
 	.exit = lme2510_exit,
+	.num_adapters = 1,
 	.adapter = {
 		{
 			.caps = DVB_USB_ADAP_HAS_PID_FILTER|
@@ -1248,8 +1243,6 @@ static struct dvb_usb_device_properties lme2510_props = {
 			.stream =
 			DVB_USB_STREAM_BULK(0x86, 10, 4096),
 		},
-		{
-		}
 	},
 };
 

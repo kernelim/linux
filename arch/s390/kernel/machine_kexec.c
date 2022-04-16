@@ -95,7 +95,7 @@ static void __do_machine_kdump(void *image)
 	start_kdump(1);
 
 	/* Die if start_kdump returns */
-	disabled_wait((unsigned long) __builtin_return_address(0));
+	disabled_wait();
 }
 
 /*
@@ -274,7 +274,7 @@ static void __do_machine_kexec(void *data)
 	(*data_mover)(&image->head, image->start);
 
 	/* Die if kexec returns */
-	disabled_wait((unsigned long) __builtin_return_address(0));
+	disabled_wait();
 }
 
 /*

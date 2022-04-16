@@ -477,7 +477,7 @@ int show_interrupts(struct seq_file *p, void *v)
 
 	irq_lock_sparse();
 	desc = irq_to_desc(i);
-	if (!desc)
+	if (!desc || irq_settings_is_hidden(desc))
 		goto outsparse;
 
 	raw_spin_lock_irqsave(&desc->lock, flags);

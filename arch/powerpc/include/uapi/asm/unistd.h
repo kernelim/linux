@@ -400,6 +400,7 @@
 #define __NR_pkey_mprotect	386
 #define __NR_rseq		387
 #define __NR_io_pgetevents	388
+#define __NR_pidfd_send_signal	424
 #define __NR_io_uring_setup	425
 #define __NR_io_uring_enter	426
 #define __NR_io_uring_register	427

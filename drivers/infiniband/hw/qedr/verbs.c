@@ -72,7 +72,7 @@ static inline int qedr_ib_copy_to_udata(struct ib_udata *udata, void *src,
 	return ib_copy_to_udata(udata, src, min_len);
 }
 
-int qedr_query_pkey(struct ib_device *ibdev, u8 port, u16 index, u16 *pkey)
+int qedr_query_pkey(struct ib_device *ibdev, u32 port, u16 index, u16 *pkey)
 {
 	if (index >= QEDR_ROCE_PKEY_TABLE_LEN)
 		return -EINVAL;
@@ -81,7 +81,7 @@ int qedr_query_pkey(struct ib_device *ibdev, u8 port, u16 index, u16 *pkey)
 	return 0;
 }
 
-int qedr_iw_query_gid(struct ib_device *ibdev, u8 port,
+int qedr_iw_query_gid(struct ib_device *ibdev, u32 port,
 		      int index, union ib_gid *sgid)
 {
 	struct qedr_dev *dev = get_qedr_dev(ibdev);
@@ -159,7 +159,7 @@ int qedr_query_device(struct ib_device *ibdev,
 
 	attr->local_ca_ack_delay = qattr->dev_ack_delay;
 	attr->max_fast_reg_page_list_len = qattr->max_mr / 8;
-	attr->max_pkeys = QEDR_ROCE_PKEY_MAX;
+	attr->max_pkeys = qattr->max_pkey;
 	attr->max_ah = qattr->max_ah;
 
 	return 0;
@@ -210,7 +210,8 @@ static inline void get_link_speed_and_width(int speed, u16 *ib_speed,
 	}
 }
 
-int qedr_query_port(struct ib_device *ibdev, u8 port, struct ib_port_attr *attr)
+int qedr_query_port(struct ib_device *ibdev, u32 port,
+		    struct ib_port_attr *attr)
 {
 	struct qedr_dev *dev;
 	struct qed_rdma_port *rdma_port;
@@ -1481,7 +1482,7 @@ static int qedr_init_srq_user_params(struct ib_udata *udata,
 		return PTR_ERR(srq->prod_umem);
 	}
 
-	sg = srq->prod_umem->sg_head.sgl;
+	sg = srq->prod_umem->sgt_append.sgt.sgl;
 	srq->hw_srq.phy_prod_pair_addr = sg_dma_address(sg);
 
 	return 0;
@@ -2758,15 +2759,18 @@ int qedr_query_qp(struct ib_qp *ibqp,
 	int rc = 0;
 
 	memset(&params, 0, sizeof(params));
-
-	rc = dev->ops->rdma_query_qp(dev->rdma_ctx, qp->qed_qp, &params);
-	if (rc)
-		goto err;
-
 	memset(qp_attr, 0, sizeof(*qp_attr));
 	memset(qp_init_attr, 0, sizeof(*qp_init_attr));
 
-	qp_attr->qp_state = qedr_get_ibqp_state(params.state);
+	if (qp->qp_type != IB_QPT_GSI) {
+		rc = dev->ops->rdma_query_qp(dev->rdma_ctx, qp->qed_qp, &params);
+		if (rc)
+			goto err;
+		qp_attr->qp_state = qedr_get_ibqp_state(params.state);
+	} else {
+		qp_attr->qp_state = qedr_get_ibqp_state(QED_ROCE_QP_STATE_RTS);
+	}
+
 	qp_attr->cur_qp_state = qedr_get_ibqp_state(params.state);
 	qp_attr->path_mtu = ib_mtu_int_to_enum(params.mtu);
 	qp_attr->path_mig_state = IB_MIG_MIGRATED;
@@ -2996,7 +3000,11 @@ struct ib_mr *qedr_reg_user_mr(struct ib_pd *ibpd, u64 start, u64 len,
 
 	rc = dev->ops->rdma_alloc_tid(dev->rdma_ctx, &mr->hw_mr.itid);
 	if (rc) {
-		DP_ERR(dev, "roce alloc tid returned an error %d\n", rc);
+		if (rc == -EINVAL)
+			DP_ERR(dev, "Out of MR resources\n");
+		else
+			DP_ERR(dev, "roce alloc tid returned error %d\n", rc);
+
 		goto err1;
 	}
 
@@ -3091,7 +3099,11 @@ static struct qedr_mr *__qedr_alloc_mr(struct ib_pd *ibpd,
 
 	rc = dev->ops->rdma_alloc_tid(dev->rdma_ctx, &mr->hw_mr.itid);
 	if (rc) {
-		DP_ERR(dev, "roce alloc tid returned an error %d\n", rc);
+		if (rc == -EINVAL)
+			DP_ERR(dev, "Out of MR resources\n");
+		else
+			DP_ERR(dev, "roce alloc tid returned error %d\n", rc);
+
 		goto err0;
 	}
 
@@ -3221,7 +3233,11 @@ struct ib_mr *qedr_get_dma_mr(struct ib_pd *ibpd, int acc)
 
 	rc = dev->ops->rdma_alloc_tid(dev->rdma_ctx, &mr->hw_mr.itid);
 	if (rc) {
-		DP_ERR(dev, "roce alloc tid returned an error %d\n", rc);
+		if (rc == -EINVAL)
+			DP_ERR(dev, "Out of MR resources\n");
+		else
+			DP_ERR(dev, "roce alloc tid returned error %d\n", rc);
+
 		goto err1;
 	}
 
@@ -3887,10 +3903,10 @@ int qedr_post_srq_recv(struct ib_srq *ibsrq, const struct ib_recv_wr *wr,
 		 * in first 4 bytes and need to update WQE producer in
 		 * next 4 bytes.
 		 */
-		srq->hw_srq.virt_prod_pair_addr->sge_prod = hw_srq->sge_prod;
+		srq->hw_srq.virt_prod_pair_addr->sge_prod = cpu_to_le32(hw_srq->sge_prod);
 		/* Make sure sge producer is updated first */
 		dma_wmb();
-		srq->hw_srq.virt_prod_pair_addr->wqe_prod = hw_srq->wqe_prod;
+		srq->hw_srq.virt_prod_pair_addr->wqe_prod = cpu_to_le32(hw_srq->wqe_prod);
 
 		wr = wr->next;
 	}
@@ -4484,7 +4500,7 @@ int qedr_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *wc)
 }
 
 int qedr_process_mad(struct ib_device *ibdev, int process_mad_flags,
-		     u8 port_num, const struct ib_wc *in_wc,
+		     u32 port_num, const struct ib_wc *in_wc,
 		     const struct ib_grh *in_grh, const struct ib_mad *in,
 		     struct ib_mad *out_mad, size_t *out_mad_size,
 		     u16 *out_mad_pkey_index)

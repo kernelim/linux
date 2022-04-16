@@ -79,6 +79,9 @@
 #define SVM_EXIT_AVIC_INCOMPLETE_IPI		0x401
 #define SVM_EXIT_AVIC_UNACCELERATED_ACCESS	0x402
 
+/* Exit code reserved for hypervisor/software use */
+#define SVM_EXIT_SW				0xf0000000
+
 #define SVM_EXIT_ERR           -1
 
 #define SVM_EXIT_REASONS \

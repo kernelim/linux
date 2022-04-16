@@ -22,14 +22,21 @@
 #define MT_PLE_BASE			0x8000
 #define MT_PLE(ofs)			(MT_PLE_BASE + (ofs))
 
-#define MT_PLE_FL_Q0_CTRL		MT_PLE(0x1b0)
-#define MT_PLE_FL_Q1_CTRL		MT_PLE(0x1b4)
-#define MT_PLE_FL_Q2_CTRL		MT_PLE(0x1b8)
-#define MT_PLE_FL_Q3_CTRL		MT_PLE(0x1bc)
+#define MT_FL_Q_EMPTY			0x0b0
+#define MT_FL_Q0_CTRL			0x1b0
+#define MT_FL_Q2_CTRL			0x1b8
+#define MT_FL_Q3_CTRL			0x1bc
 
-#define MT_PLE_AC_QEMPTY(ac, n)		MT_PLE(0x300 + 0x10 * (ac) + \
+#define MT_PLE_FREEPG_CNT		MT_PLE(0x100)
+#define MT_PLE_FREEPG_HEAD_TAIL		MT_PLE(0x104)
+#define MT_PLE_PG_HIF_GROUP		MT_PLE(0x110)
+#define MT_PLE_HIF_PG_INFO		MT_PLE(0x114)
+#define MT_PLE_AC_QEMPTY(ac, n)		MT_PLE(0x500 + 0x40 * (ac) + \
 					       ((n) << 2))
 #define MT_PLE_AMSDU_PACK_MSDU_CNT(n)	MT_PLE(0x10e0 + ((n) << 2))
+
+#define MT_PSE_BASE			0xc000
+#define MT_PSE(ofs)			(MT_PSE_BASE + (ofs))
 
 #define MT_MDP_BASE			0xf000
 #define MT_MDP(ofs)			(MT_MDP_BASE + (ofs))
@@ -57,6 +64,7 @@
 #define MT_WF_TMAC(_band, ofs)		(MT_WF_TMAC_BASE(_band) + (ofs))
 
 #define MT_TMAC_TCR0(_band)		MT_WF_TMAC(_band, 0)
+#define MT_TMAC_TCR0_TX_BLINK		GENMASK(7, 6)
 #define MT_TMAC_TCR0_TBTT_STOP_CTRL	BIT(25)
 
 #define MT_TMAC_CDTR(_band)		MT_WF_TMAC(_band, 0x090)
@@ -72,20 +80,18 @@
 #define MT_TMAC_TRCR0_I2T_CHK		GENMASK(24, 16)
 
 #define MT_TMAC_ICR0(_band)		MT_WF_TMAC(_band, 0x0a4)
-#define MT_IFS_EIFS			GENMASK(8, 0)
+#define MT_IFS_EIFS_OFDM			GENMASK(8, 0)
 #define MT_IFS_RIFS			GENMASK(14, 10)
 #define MT_IFS_SIFS			GENMASK(22, 16)
 #define MT_IFS_SLOT			GENMASK(30, 24)
+
+#define MT_TMAC_ICR1(_band)		MT_WF_TMAC(_band, 0x0b4)
+#define MT_IFS_EIFS_CCK			GENMASK(8, 0)
 
 #define MT_TMAC_CTCR0(_band)			MT_WF_TMAC(_band, 0x0f4)
 #define MT_TMAC_CTCR0_INS_DDLMT_REFTIME		GENMASK(5, 0)
 #define MT_TMAC_CTCR0_INS_DDLMT_EN		BIT(17)
 #define MT_TMAC_CTCR0_INS_DDLMT_VHT_SMPDU_EN	BIT(18)
-
-#define MT_TMAC_FP0R0(_band)		MT_WF_TMAC(_band, 0x020)
-#define MT_TMAC_FP0R15(_band)		MT_WF_TMAC(_band, 0x080)
-#define MT_TMAC_FP0R18(_band)		MT_WF_TMAC(_band, 0x270)
-#define MT_TMAC_FP_MASK			GENMASK(7, 0)
 
 #define MT_TMAC_TFCR0(_band)		MT_WF_TMAC(_band, 0x1e0)
 
@@ -103,6 +109,11 @@
 #define MT_ETBF_TX_NDP_BFRP(_band)	MT_WF_ETBF(_band, 0x040)
 #define MT_ETBF_TX_FB_CPL		GENMASK(31, 16)
 #define MT_ETBF_TX_FB_TRI		GENMASK(15, 0)
+
+#define MT_ETBF_RX_FB_CONT(_band)	MT_WF_ETBF(_band, 0x068)
+#define MT_ETBF_RX_FB_BW		GENMASK(7, 6)
+#define MT_ETBF_RX_FB_NC		GENMASK(5, 3)
+#define MT_ETBF_RX_FB_NR		GENMASK(2, 0)
 
 #define MT_ETBF_TX_APP_CNT(_band)	MT_WF_ETBF(_band, 0x0f0)
 #define MT_ETBF_TX_IBF_CNT		GENMASK(31, 16)
@@ -124,27 +135,123 @@
 #define MT_LPON_TCR(_band, n)		MT_WF_LPON(_band, 0x0a8 + (n) * 4)
 #define MT_LPON_TCR_SW_MODE		GENMASK(1, 0)
 #define MT_LPON_TCR_SW_WRITE		BIT(0)
+#define MT_LPON_TCR_SW_ADJUST		BIT(1)
+#define MT_LPON_TCR_SW_READ		GENMASK(1, 0)
 
 /* MIB: band 0(0x24800), band 1(0xa4800) */
+/* These counters are (mostly?) clear-on-read.  So, some should not
+ * be read at all in case firmware is already reading them.  These
+ * are commented with 'DNR' below.  The DNR stats will be read by querying
+ * the firmware API for the appropriate message.  For counters the driver
+ * does read, the driver should accumulate the counters.
+ */
 #define MT_WF_MIB_BASE(_band)		((_band) ? 0xa4800 : 0x24800)
 #define MT_WF_MIB(_band, ofs)		(MT_WF_MIB_BASE(_band) + (ofs))
+
+#define MT_MIB_SDR0(_band)		MT_WF_MIB(_band, 0x010)
+#define MT_MIB_SDR0_BERACON_TX_CNT_MASK	GENMASK(15, 0)
 
 #define MT_MIB_SDR3(_band)		MT_WF_MIB(_band, 0x014)
 #define MT_MIB_SDR3_FCS_ERR_MASK	GENMASK(15, 0)
 
-#define MT_MIB_SDR9(_band)		MT_WF_MIB(_band, 0x02c)
-#define MT_MIB_SDR9_BUSY_MASK		GENMASK(23, 0)
+#define MT_MIB_SDR4(_band)		MT_WF_MIB(_band, 0x018)
+#define MT_MIB_SDR4_RX_FIFO_FULL_MASK	GENMASK(15, 0)
 
-#define MT_MIB_SDR16(_band)		MT_WF_MIB(_band, 0x048)
-#define MT_MIB_SDR16_BUSY_MASK		GENMASK(23, 0)
+/* rx mpdu counter, full 32 bits */
+#define MT_MIB_SDR5(_band)		MT_WF_MIB(_band, 0x01c)
+
+#define MT_MIB_SDR6(_band)		MT_WF_MIB(_band, 0x020)
+#define MT_MIB_SDR6_CHANNEL_IDL_CNT_MASK	GENMASK(15, 0)
+
+#define MT_MIB_SDR7(_band)		MT_WF_MIB(_band, 0x024)
+#define MT_MIB_SDR7_RX_VECTOR_MISMATCH_CNT_MASK	GENMASK(15, 0)
+
+#define MT_MIB_SDR8(_band)		MT_WF_MIB(_band, 0x028)
+#define MT_MIB_SDR8_RX_DELIMITER_FAIL_CNT_MASK	GENMASK(15, 0)
+
+/* aka CCA_NAV_TX_TIME */
+#define MT_MIB_SDR9_DNR(_band)		MT_WF_MIB(_band, 0x02c)
+#define MT_MIB_SDR9_CCA_BUSY_TIME_MASK	GENMASK(23, 0)
+
+#define MT_MIB_SDR10_DNR(_band)		MT_WF_MIB(_band, 0x030)
+#define MT_MIB_SDR10_MRDY_COUNT_MASK	GENMASK(25, 0)
+
+#define MT_MIB_SDR11(_band)		MT_WF_MIB(_band, 0x034)
+#define MT_MIB_SDR11_RX_LEN_MISMATCH_CNT_MASK	GENMASK(15, 0)
+
+/* tx ampdu cnt, full 32 bits */
+#define MT_MIB_SDR12(_band)		MT_WF_MIB(_band, 0x038)
+
+#define MT_MIB_SDR13(_band)		MT_WF_MIB(_band, 0x03c)
+#define MT_MIB_SDR13_TX_STOP_Q_EMPTY_CNT_MASK	GENMASK(15, 0)
+
+/* counts all mpdus in ampdu, regardless of success */
+#define MT_MIB_SDR14(_band)		MT_WF_MIB(_band, 0x040)
+#define MT_MIB_SDR14_TX_MPDU_ATTEMPTS_CNT_MASK	GENMASK(23, 0)
+
+/* counts all successfully tx'd mpdus in ampdu */
+#define MT_MIB_SDR15(_band)		MT_WF_MIB(_band, 0x044)
+#define MT_MIB_SDR15_TX_MPDU_SUCCESS_CNT_MASK	GENMASK(23, 0)
+
+/* in units of 'us' */
+#define MT_MIB_SDR16_DNR(_band)		MT_WF_MIB(_band, 0x048)
+#define MT_MIB_SDR16_PRIMARY_CCA_BUSY_TIME_MASK	GENMASK(23, 0)
+
+#define MT_MIB_SDR17_DNR(_band)		MT_WF_MIB(_band, 0x04c)
+#define MT_MIB_SDR17_SECONDARY_CCA_BUSY_TIME_MASK	GENMASK(23, 0)
+
+#define MT_MIB_SDR18(_band)		MT_WF_MIB(_band, 0x050)
+#define MT_MIB_SDR18_PRIMARY_ENERGY_DETECT_TIME_MASK	GENMASK(23, 0)
+
+/* units are us */
+#define MT_MIB_SDR19_DNR(_band)		MT_WF_MIB(_band, 0x054)
+#define MT_MIB_SDR19_CCK_MDRDY_TIME_MASK	GENMASK(23, 0)
+
+#define MT_MIB_SDR20_DNR(_band)		MT_WF_MIB(_band, 0x058)
+#define MT_MIB_SDR20_OFDM_VHT_MDRDY_TIME_MASK	GENMASK(23, 0)
+
+#define MT_MIB_SDR21_DNR(_band)		MT_WF_MIB(_band, 0x05c)
+#define MT_MIB_SDR20_GREEN_MDRDY_TIME_MASK	GENMASK(23, 0)
+
+/* rx ampdu count, 32-bit */
+#define MT_MIB_SDR22(_band)		MT_WF_MIB(_band, 0x060)
+
+/* rx ampdu bytes count, 32-bit */
+#define MT_MIB_SDR23(_band)		MT_WF_MIB(_band, 0x064)
+
+/* rx ampdu valid subframe count */
+#define MT_MIB_SDR24(_band)		MT_WF_MIB(_band, 0x068)
+#define MT_MIB_SDR24_RX_AMPDU_SF_CNT_MASK	GENMASK(23, 0)
+
+/* rx ampdu valid subframe bytes count, 32bits */
+#define MT_MIB_SDR25(_band)		MT_WF_MIB(_band, 0x06c)
+
+/* remaining windows protected stats */
+#define MT_MIB_SDR27(_band)		MT_WF_MIB(_band, 0x074)
+#define MT_MIB_SDR27_TX_RWP_FAIL_CNT_MASK	GENMASK(15, 0)
+
+#define MT_MIB_SDR28(_band)		MT_WF_MIB(_band, 0x078)
+#define MT_MIB_SDR28_TX_RWP_NEED_CNT_MASK	GENMASK(15, 0)
+
+#define MT_MIB_SDR29(_band)		MT_WF_MIB(_band, 0x07c)
+#define MT_MIB_SDR29_RX_PFDROP_CNT_MASK	GENMASK(7, 0)
+
+#define MT_MIB_SDR30(_band)		MT_WF_MIB(_band, 0x080)
+#define MT_MIB_SDR30_RX_VEC_QUEUE_OVERFLOW_DROP_CNT_MASK	GENMASK(15, 0)
+
+/* rx blockack count, 32 bits */
+#define MT_MIB_SDR31(_band)		MT_WF_MIB(_band, 0x084)
+
+#define MT_MIB_SDR32(_band)		MT_WF_MIB(_band, 0x088)
+#define MT_MIB_SDR32_TX_PKT_EBF_CNT_MASK	GENMASK(15, 0)
+
+#define MT_MIB_SDR33(_band)		MT_WF_MIB(_band, 0x08c)
+#define MT_MIB_SDR33_TX_PKT_IBF_CNT_MASK	GENMASK(15, 0)
 
 #define MT_MIB_SDR34(_band)		MT_WF_MIB(_band, 0x090)
 #define MT_MIB_MU_BF_TX_CNT		GENMASK(15, 0)
 
-#define MT_MIB_SDR36(_band)		MT_WF_MIB(_band, 0x098)
-#define MT_MIB_SDR36_TXTIME_MASK	GENMASK(23, 0)
-#define MT_MIB_SDR37(_band)		MT_WF_MIB(_band, 0x09c)
-#define MT_MIB_SDR37_RXTIME_MASK	GENMASK(23, 0)
+/* 36, 37 both DNR */
 
 #define MT_MIB_DR8(_band)		MT_WF_MIB(_band, 0x0c0)
 #define MT_MIB_DR9(_band)		MT_WF_MIB(_band, 0x0c4)
@@ -157,9 +264,6 @@
 #define MT_MIB_MB_SDR1(_band, n)	MT_WF_MIB(_band, 0x104 + ((n) << 4))
 #define MT_MIB_BA_MISS_COUNT_MASK	GENMASK(15, 0)
 #define MT_MIB_ACK_FAIL_COUNT_MASK	GENMASK(31, 16)
-
-#define MT_MIB_MB_SDR2(_band, n)	MT_WF_MIB(_band, 0x108 + ((n) << 4))
-#define MT_MIB_FRAME_RETRIES_COUNT_MASK	GENMASK(15, 0)
 
 #define MT_TX_AGG_CNT(_band, n)		MT_WF_MIB(_band, 0x0a8 + ((n) << 2))
 #define MT_TX_AGG_CNT2(_band, n)	MT_WF_MIB(_band, 0x164 + ((n) << 2))
@@ -258,13 +362,8 @@
 #define MT_WF_RFCR1_DROP_CFEND		BIT(7)
 #define MT_WF_RFCR1_DROP_CFACK		BIT(8)
 
-#define MT_WF_RMAC_MIB_TIME0(_band)	MT_WF_RMAC(_band, 0x03c4)
-#define MT_WF_RMAC_MIB_RXTIME_CLR	BIT(31)
-#define MT_WF_RMAC_MIB_RXTIME_EN	BIT(30)
-
-#define MT_WF_RMAC_MIB_AIRTIME14(_band)	MT_WF_RMAC(_band, 0x03b8)
-#define MT_MIB_OBSSTIME_MASK		GENMASK(23, 0)
 #define MT_WF_RMAC_MIB_AIRTIME0(_band)	MT_WF_RMAC(_band, 0x0380)
+#define MT_WF_RMAC_MIB_RXTIME_CLR	BIT(31)
 
 /* WFDMA0 */
 #define MT_WFDMA0_BASE			0xd4000
@@ -429,12 +528,38 @@
 #define MT_HIF_REMAP_L2_BASE		GENMASK(31, 12)
 #define MT_HIF_REMAP_BASE_L2		0x00000
 
+#define MT_DIC_CMD_REG_BASE		0x41f000
+#define MT_DIC_CMD_REG(ofs)		(MT_DIC_CMD_REG_BASE + (ofs))
+#define MT_DIC_CMD_REG_CMD		MT_DIC_CMD_REG(0x10)
+
+#define MT_CPU_UTIL_BASE		0x41f030
+#define MT_CPU_UTIL(ofs)		(MT_CPU_UTIL_BASE + (ofs))
+#define MT_CPU_UTIL_BUSY_PCT		MT_CPU_UTIL(0x00)
+#define MT_CPU_UTIL_PEAK_BUSY_PCT	MT_CPU_UTIL(0x04)
+#define MT_CPU_UTIL_IDLE_CNT		MT_CPU_UTIL(0x08)
+#define MT_CPU_UTIL_PEAK_IDLE_CNT	MT_CPU_UTIL(0x0c)
+#define MT_CPU_UTIL_CTRL		MT_CPU_UTIL(0x1c)
+
 #define MT_SWDEF_BASE			0x41f200
 #define MT_SWDEF(ofs)			(MT_SWDEF_BASE + (ofs))
 #define MT_SWDEF_MODE			MT_SWDEF(0x3c)
 #define MT_SWDEF_NORMAL_MODE		0
 #define MT_SWDEF_ICAP_MODE		1
 #define MT_SWDEF_SPECTRUM_MODE		2
+
+#define MT_LED_TOP_BASE			0x18013000
+#define MT_LED_PHYS(_n)			(MT_LED_TOP_BASE + (_n))
+
+#define MT_LED_CTRL(_n)			MT_LED_PHYS(0x00 + ((_n) * 4))
+#define MT_LED_CTRL_KICK		BIT(7)
+#define MT_LED_CTRL_BLINK_MODE		BIT(2)
+#define MT_LED_CTRL_POLARITY		BIT(1)
+
+#define MT_LED_TX_BLINK(_n)		MT_LED_PHYS(0x10 + ((_n) * 4))
+#define MT_LED_TX_BLINK_ON_MASK		GENMASK(7, 0)
+#define MT_LED_TX_BLINK_OFF_MASK        GENMASK(15, 8)
+
+#define MT_LED_EN(_n)			MT_LED_PHYS(0x40 + ((_n) * 4))
 
 #define MT_TOP_BASE			0x18060000
 #define MT_TOP(ofs)			(MT_TOP_BASE + (ofs))
@@ -445,6 +570,10 @@
 
 #define MT_TOP_MISC			MT_TOP(0xf0)
 #define MT_TOP_MISC_FW_STATE		GENMASK(2, 0)
+
+#define MT_LED_GPIO_MUX2                0x70005058 /* GPIO 18 */
+#define MT_LED_GPIO_MUX3                0x7000505C /* GPIO 26 */
+#define MT_LED_GPIO_SEL_MASK            GENMASK(11, 8)
 
 #define MT_HW_BOUND			0x70010020
 #define MT_HW_CHIPID			0x70010200
@@ -472,5 +601,10 @@
 #define MT_WF_PHY_RXTD12(_phy)		MT_WF_PHY(0x8230 + ((_phy) << 16))
 #define MT_WF_PHY_RXTD12_IRPI_SW_CLR_ONLY	BIT(18)
 #define MT_WF_PHY_RXTD12_IRPI_SW_CLR	BIT(29)
+
+#define MT_MCU_WM_CIRQ_BASE			0x89010000
+#define MT_MCU_WM_CIRQ(ofs)			(MT_MCU_WM_CIRQ_BASE + (ofs))
+#define MT_MCU_WM_CIRQ_IRQ_MASK_CLR_ADDR	MT_MCU_WM_CIRQ(0x80)
+#define MT_MCU_WM_CIRQ_IRQ_SOFT_ADDR		MT_MCU_WM_CIRQ(0xc0)
 
 #endif

@@ -83,6 +83,8 @@ struct bcm_device_data {
  *	deassert = Bluetooth device may sleep when sleep criteria are met
  * @shutdown: BT_REG_ON pin,
  *	power up or power down Bluetooth device internal regulators
+ * @reset: BT_RST_N pin,
+ *	active low resets the Bluetooth logic core
  * @set_device_wakeup: callback to toggle BT_WAKE pin
  *	either by accessing @device_wakeup or by calling @btlp
  * @set_shutdown: callback to toggle BT_REG_ON pin
@@ -116,6 +118,7 @@ struct bcm_device {
 	const char		*name;
 	struct gpio_desc	*device_wakeup;
 	struct gpio_desc	*shutdown;
+	struct gpio_desc	*reset;
 	int			(*set_device_wakeup)(struct bcm_device *, bool);
 	int			(*set_shutdown)(struct bcm_device *, bool);
 #ifdef CONFIG_ACPI
@@ -669,6 +672,7 @@ static const struct h4_recv_pkt bcm_recv_pkts[] = {
 	{ H4_RECV_ACL,      .recv = hci_recv_frame },
 	{ H4_RECV_SCO,      .recv = hci_recv_frame },
 	{ H4_RECV_EVENT,    .recv = hci_recv_frame },
+	{ H4_RECV_ISO,      .recv = hci_recv_frame },
 	{ BCM_RECV_LM_DIAG, .recv = hci_recv_diag  },
 	{ BCM_RECV_NULL,    .recv = hci_recv_diag  },
 	{ BCM_RECV_TYPE49,  .recv = hci_recv_diag  },
@@ -999,6 +1003,15 @@ static int bcm_gpio_set_device_wakeup(struct bcm_device *dev, bool awake)
 static int bcm_gpio_set_shutdown(struct bcm_device *dev, bool powered)
 {
 	gpiod_set_value_cansleep(dev->shutdown, powered);
+	if (dev->reset)
+		/*
+		 * The reset line is asserted on powerdown and deasserted
+		 * on poweron so the inverse of powered is used. Notice
+		 * that the GPIO line BT_RST_N needs to be specified as
+		 * active low in the device tree or similar system
+		 * description.
+		 */
+		gpiod_set_value_cansleep(dev->reset, !powered);
 	return 0;
 }
 
@@ -1063,6 +1076,11 @@ static int bcm_get_resources(struct bcm_device *dev)
 						GPIOD_OUT_LOW);
 	if (IS_ERR(dev->shutdown))
 		return PTR_ERR(dev->shutdown);
+
+	dev->reset = devm_gpiod_get_optional(dev->dev, "reset",
+					     GPIOD_OUT_LOW);
+	if (IS_ERR(dev->reset))
+		return PTR_ERR(dev->reset);
 
 	dev->set_device_wakeup = bcm_gpio_set_device_wakeup;
 	dev->set_shutdown = bcm_gpio_set_shutdown;
@@ -1486,6 +1504,8 @@ static void bcm_serdev_remove(struct serdev_device *serdev)
 
 #ifdef CONFIG_OF
 static const struct of_device_id bcm_bluetooth_of_match[] = {
+	{ .compatible = "brcm,bcm4330-bt" },
+	{ .compatible = "brcm,bcm4334-bt" },
 	{ .compatible = "brcm,bcm4345c5" },
 	{ .compatible = "brcm,bcm4330-bt" },
 	{ .compatible = "brcm,bcm43438-bt", .data = &bcm43438_device_data },

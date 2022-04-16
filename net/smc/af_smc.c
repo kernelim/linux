@@ -793,7 +793,7 @@ static int smc_connect_rdma(struct smc_sock *smc,
 			reason_code = SMC_CLC_DECL_NOSRVLINK;
 			goto connect_abort;
 		}
-		smc->conn.lnk = link;
+		smc_switch_link_and_count(&smc->conn, link);
 	}
 
 	/* create send buffer and rmb */
@@ -2211,7 +2211,7 @@ static int smc_setsockopt(struct socket *sock, int level, int optname,
 					   optval, optlen);
 	if (smc->clcsock->sk->sk_err) {
 		sk->sk_err = smc->clcsock->sk->sk_err;
-		sk->sk_error_report(sk);
+		sk_error_report(sk);
 	}
 
 	if (optlen < sizeof(int))

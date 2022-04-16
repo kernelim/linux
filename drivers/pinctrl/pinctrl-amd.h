@@ -1,13 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * GPIO driver for AMD
  *
  * Copyright (c) 2014,2015 Ken Xue <Ken.Xue@amd.com>
  *		Jeff Wu <Jeff.Wu@amd.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
  */
 
 #ifndef _PINCTRL_AMD_H
@@ -54,6 +50,10 @@
 #define ACTIVE_LEVEL_MASK	0x3UL
 #define DRV_STRENGTH_SEL_MASK	0x3UL
 
+#define ACTIVE_LEVEL_HIGH	0x0UL
+#define ACTIVE_LEVEL_LOW	0x1UL
+#define ACTIVE_LEVEL_BOTH	0x2UL
+
 #define DB_TYPE_NO_DEBOUNCE               0x0UL
 #define DB_TYPE_PRESERVE_LOW_GLITCH       0x1UL
 #define DB_TYPE_PRESERVE_HIGH_GLITCH      0x2UL
@@ -98,6 +98,7 @@ struct amd_gpio {
 	struct resource         *res;
 	struct platform_device  *pdev;
 	u32			*saved_regs;
+	int			irq;
 };
 
 /*  KERNCZ configuration*/

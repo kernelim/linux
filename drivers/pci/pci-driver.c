@@ -20,6 +20,7 @@
 #include <linux/of_device.h>
 #include <linux/acpi.h>
 #include <linux/kernel.h>
+#include <linux/dma-map-ops.h>
 #include "pci.h"
 #include "pcie/portdrv.h"
 
@@ -90,7 +91,80 @@ static void pci_free_dynids(struct pci_driver *drv)
 }
 
 /**
- * store_new_id - sysfs frontend to pci_add_dynid()
+ * pci_match_id - See if a PCI device matches a given pci_id table
+ * @ids: array of PCI device ID structures to search in
+ * @dev: the PCI device structure to match against.
+ *
+ * Used by a driver to check whether a PCI device is in its list of
+ * supported devices.  Returns the matching pci_device_id structure or
+ * %NULL if there is no match.
+ *
+ * Deprecated; don't use this as it will not catch any dynamic IDs
+ * that a driver might want to check for.
+ */
+const struct pci_device_id *pci_match_id(const struct pci_device_id *ids,
+					 struct pci_dev *dev)
+{
+	if (ids) {
+		while (ids->vendor || ids->subvendor || ids->class_mask) {
+			if (pci_match_one_device(ids, dev))
+				return ids;
+			ids++;
+		}
+	}
+	return NULL;
+}
+EXPORT_SYMBOL(pci_match_id);
+
+static const struct pci_device_id pci_device_id_any = {
+	.vendor = PCI_ANY_ID,
+	.device = PCI_ANY_ID,
+	.subvendor = PCI_ANY_ID,
+	.subdevice = PCI_ANY_ID,
+};
+
+/**
+ * pci_match_device - See if a device matches a driver's list of IDs
+ * @drv: the PCI driver to match against
+ * @dev: the PCI device structure to match against
+ *
+ * Used by a driver to check whether a PCI device is in its list of
+ * supported devices or in the dynids list, which may have been augmented
+ * via the sysfs "new_id" file.  Returns the matching pci_device_id
+ * structure or %NULL if there is no match.
+ */
+static const struct pci_device_id *pci_match_device(struct pci_driver *drv,
+						    struct pci_dev *dev)
+{
+	struct pci_dynid *dynid;
+	const struct pci_device_id *found_id = NULL;
+
+	/* When driver_override is set, only bind to the matching driver */
+	if (dev->driver_override && strcmp(dev->driver_override, drv->name))
+		return NULL;
+
+	/* Look at the dynamic ids first, before the static ones */
+	spin_lock(&drv->dynids.lock);
+	list_for_each_entry(dynid, &drv->dynids.list, node) {
+		if (pci_match_one_device(&dynid->id, dev)) {
+			found_id = &dynid->id;
+			break;
+		}
+	}
+	spin_unlock(&drv->dynids.lock);
+
+	if (!found_id)
+		found_id = pci_match_id(drv->id_table, dev);
+
+	/* driver_override will always match, send a dummy id */
+	if (!found_id && dev->driver_override)
+		found_id = &pci_device_id_any;
+
+	return found_id;
+}
+
+/**
+ * new_id_store - sysfs frontend to pci_add_dynid()
  * @driver: target device driver
  * @buf: buffer for scanning device ID data
  * @count: input size
@@ -125,7 +199,7 @@ static ssize_t new_id_store(struct device_driver *driver, const char *buf,
 		pdev->subsystem_device = subdevice;
 		pdev->class = class;
 
-		if (pci_match_id(pdrv->id_table, pdev))
+		if (pci_match_device(pdrv, pdev))
 			retval = -EEXIST;
 
 		kfree(pdev);
@@ -158,7 +232,7 @@ static ssize_t new_id_store(struct device_driver *driver, const char *buf,
 static DRIVER_ATTR_WO(new_id);
 
 /**
- * store_remove_id - remove a PCI device ID from this driver
+ * remove_id_store - remove a PCI device ID from this driver
  * @driver: target device driver
  * @buf: buffer for scanning device ID data
  * @count: input size
@@ -208,125 +282,83 @@ static struct attribute *pci_drv_attrs[] = {
 };
 ATTRIBUTE_GROUPS(pci_drv);
 
+#ifdef CONFIG_RHEL_DIFFERENCES
 /**
- * pci_match_id - See if a pci device matches a given pci_id table
- * @ids: array of PCI device id structures to search in
- * @dev: the PCI device structure to match against.
- *
- * Used by a driver to check whether a PCI device present in the
- * system is in its list of supported devices.  Returns the matching
- * pci_device_id structure or %NULL if there is no match.
- *
- * Deprecated, don't use this as it will not catch any dynamic ids
- * that a driver might want to check for.
- */
-const struct pci_device_id *pci_match_id(const struct pci_device_id *ids,
-					 struct pci_dev *dev)
-{
-	if (ids) {
-		while (ids->vendor || ids->subvendor || ids->class_mask) {
-			if (pci_match_one_device(ids, dev))
-				return ids;
-			ids++;
-		}
-	}
-	return NULL;
-}
-EXPORT_SYMBOL(pci_match_id);
-
-static const struct pci_device_id pci_device_id_any = {
-	.vendor = PCI_ANY_ID,
-	.device = PCI_ANY_ID,
-	.subvendor = PCI_ANY_ID,
-	.subdevice = PCI_ANY_ID,
-};
-
-/**
- * pci_match_device - Tell if a PCI device structure has a matching PCI device id structure
- * @drv: the PCI driver to match against
- * @dev: the PCI device structure to match against
- *
- * Used by a driver to check whether a PCI device present in the
- * system is in its list of supported devices.  Returns the matching
- * pci_device_id structure or %NULL if there is no match.
- */
-static const struct pci_device_id *pci_match_device(struct pci_driver *drv,
-						    struct pci_dev *dev)
-{
-	struct pci_dynid *dynid;
-	const struct pci_device_id *found_id = NULL;
-
-	/* When driver_override is set, only bind to the matching driver */
-	if (dev->driver_override && strcmp(dev->driver_override, drv->name))
-		return NULL;
-
-	/* Look at the dynamic ids first, before the static ones */
-	spin_lock(&drv->dynids.lock);
-	list_for_each_entry(dynid, &drv->dynids.list, node) {
-		if (pci_match_one_device(&dynid->id, dev)) {
-			found_id = &dynid->id;
-			break;
-		}
-	}
-	spin_unlock(&drv->dynids.lock);
-
-	if (!found_id)
-		found_id = pci_match_id(drv->id_table, dev);
-
-	/* driver_override will always match, send a dummy id */
-	if (!found_id && dev->driver_override)
-		found_id = &pci_device_id_any;
-
-	return found_id;
-}
-
-/**
- * pci_hw_vendor_status - Tell if a PCI device is supported by the HW vendor
+ * pci_hw_deprecated - Tell if a PCI device is deprecated
  * @ids: array of PCI device id structures to search in
  * @dev: the PCI device structure to match against
  *
- * Used by a driver to check whether this device is in its list of unsupported
+ * Used by a driver to check whether this device is in its list of deprecated
  * devices.  Returns the matching pci_device_id structure or %NULL if there is
  * no match.
  *
  * Reserved for Internal Red Hat use only.
  */
-const struct pci_device_id *pci_hw_vendor_status(
-						const struct pci_device_id *ids,
-						struct pci_dev *dev)
+const struct pci_device_id *pci_hw_deprecated(const struct pci_device_id *ids,
+					      struct pci_dev *dev)
 {
-	char devinfo[64];
 	const struct pci_device_id *ret = pci_match_id(ids, dev);
 
-	if (ret) {
-		snprintf(devinfo, sizeof(devinfo), "%s %s",
-			 dev_driver_string(&dev->dev), dev_name(&dev->dev));
-		mark_hardware_deprecated(devinfo);
-	}
+	if (!ret)
+		return NULL;
 
+	mark_hardware_deprecated(dev_driver_string(&dev->dev), "%04X:%04X @ %s",
+				 dev->device, dev->vendor, pci_name(dev));
 	return ret;
 }
-EXPORT_SYMBOL(pci_hw_vendor_status);
+EXPORT_SYMBOL(pci_hw_deprecated);
 
-/*
- * check_pci_unsupported_hardware() tests if certain pci-id is
- * unsupported and if needed calls mark_hardware_unsupported
+/**
+ * pci_hw_unmaintained - Tell if a PCI device is unmaintained
+ * @ids: array of PCI device id structures to search in
+ * @dev: the PCI device structure to match against
+ *
+ * Used by a driver to check whether this device is in its list of unmaintained
+ * devices.  Returns the matching pci_device_id structure or %NULL if there is
+ * no match.
+ *
+ * Reserved for Internal Red Hat use only.
  */
-void check_unsupported_pci_hardware(const struct pci_device_id *removed_ids,
-                                    struct pci_dev *dev)
+const struct pci_device_id *pci_hw_unmaintained(const struct pci_device_id *ids,
+						struct pci_dev *dev)
 {
-	char devinfo[64];
-	const struct pci_device_id *ret = pci_match_id(removed_ids, dev);
+	const struct pci_device_id *ret = pci_match_id(ids, dev);
 
 	if (!ret)
-		return;
+		return NULL;
 
-	snprintf(devinfo, sizeof(devinfo), "%s %s [%04x:%04x]",
-		dev_driver_string(&dev->dev), dev_name(&dev->dev),
-		dev->vendor, dev->device);
-	mark_hardware_unsupported(devinfo);
+	mark_hardware_unmaintained(dev_driver_string(&dev->dev), "%04X:%04X @ %s",
+				   dev->device, dev->vendor, pci_name(dev));
+	return ret;
 }
-EXPORT_SYMBOL(check_unsupported_pci_hardware);
+EXPORT_SYMBOL(pci_hw_unmaintained);
+
+/**
+ * pci_hw_disabled - Tell if a PCI device is disabled
+ * @ids: array of PCI device id structures to search in
+ * @dev: the PCI device structure to match against
+ *
+ * Used by a driver to check whether this device is in its list of disabled
+ * devices.  Returns the matching pci_device_id structure or %NULL if there is
+ * no match.
+ *
+ * Reserved for Internal Red Hat use only.
+ */
+const struct pci_device_id *pci_hw_disabled(const struct pci_device_id *ids,
+					    struct pci_dev *dev)
+{
+	const struct pci_device_id *ret = pci_match_id(ids, dev);
+
+	if (!ret)
+		return NULL;
+
+	mark_hardware_disabled(dev_driver_string(&dev->dev), "%04X:%04X @ %s",
+				   dev->device, dev->vendor, pci_name(dev));
+	return ret;
+}
+EXPORT_SYMBOL(pci_hw_disabled);
+
+#endif
 
 struct drv_dev_and_id {
 	struct pci_driver *drv;

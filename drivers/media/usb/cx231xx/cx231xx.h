@@ -426,8 +426,6 @@ struct cx231xx_audio {
 	u16 end_point_addr;
 };
 
-struct cx231xx;
-
 struct cx231xx_fh {
 	struct v4l2_fh fh;
 	struct cx231xx *dev;

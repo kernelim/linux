@@ -17,6 +17,7 @@
 #ifdef CONFIG_PPC_PERF_CTRS
 #include <asm/perf_event_server.h>
 #else
+static inline bool is_sier_available(void) { return false; }
 static inline unsigned long get_pmcs_ext_regs(int idx) { return 0; }
 #endif
 

@@ -385,11 +385,10 @@ static void update_link_status(struct net_device *netdev,
 /**
  * \brief PCI probe handler
  * @param pdev PCI device structure
- * @param ent unused
  */
 static int
 liquidio_vf_probe(struct pci_dev *pdev,
-		  const struct pci_device_id *ent __attribute__((unused)))
+		  const struct pci_device_id *ent)
 {
 	struct octeon_device *oct_dev = NULL;
 
@@ -405,8 +404,7 @@ liquidio_vf_probe(struct pci_dev *pdev,
 	dev_info(&pdev->dev, "Initializing device %x:%x.\n",
 		 (u32)pdev->vendor, (u32)pdev->device);
 
-	/* mark hardware as deprecated in RHEL8 */
-	mark_hardware_deprecated(DRV_NAME);
+	pci_hw_deprecated(ent, pdev);
 
 	/* Assign octeon_device for this device to the private data area. */
 	pci_set_drvdata(pdev, oct_dev);

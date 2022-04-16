@@ -3867,7 +3867,6 @@ static int macb_probe(struct platform_device *pdev)
 	struct net_device *dev;
 	struct resource *regs;
 	void __iomem *mem;
-	const char *mac;
 	struct macb *bp;
 	int err, val;
 
@@ -3970,10 +3969,8 @@ static int macb_probe(struct platform_device *pdev)
 						macb_dma_desc_get_size(bp);
 	}
 
-	mac = of_get_mac_address(np);
-	if (mac) {
-		ether_addr_copy(bp->dev->dev_addr, mac);
-	} else {
+	err = of_get_mac_address(np, bp->dev->dev_addr);
+	if (err) {
 		err = of_get_nvmem_mac_address(np, bp->dev->dev_addr);
 		if (err) {
 			if (err == -EPROBE_DEFER)

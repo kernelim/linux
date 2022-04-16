@@ -873,7 +873,6 @@ int arc_emac_probe(struct net_device *ndev, int interface)
 	struct device_node *phy_node;
 	struct phy_device *phydev = NULL;
 	struct arc_emac_priv *priv;
-	const char *mac_addr;
 	unsigned int id, clock_frequency, irq;
 	int err;
 
@@ -958,11 +957,8 @@ int arc_emac_probe(struct net_device *ndev, int interface)
 	}
 
 	/* Get MAC address from device tree */
-	mac_addr = of_get_mac_address(dev->of_node);
-
-	if (mac_addr)
-		memcpy(ndev->dev_addr, mac_addr, ETH_ALEN);
-	else
+	err = of_get_mac_address(dev->of_node, ndev->dev_addr);
+	if (err)
 		eth_hw_addr_random(ndev);
 
 	arc_emac_set_address_internal(ndev);

@@ -14,11 +14,7 @@
 #include <linux/device.h>
 #include <trace/events/writeback.h>
 
-static char noop_bdi_dev_name[BDI_DEV_NAME_LEN];
-struct backing_dev_info noop_backing_dev_info = {
-	.capabilities	= BDI_CAP_NO_ACCT_AND_WRITEBACK,
-	.dev_name	= noop_bdi_dev_name,
-};
+struct backing_dev_info noop_backing_dev_info;
 EXPORT_SYMBOL_GPL(noop_backing_dev_info);
 
 static struct class *bdi_class;
@@ -220,10 +216,9 @@ static ssize_t stable_pages_required_show(struct device *dev,
 					  struct device_attribute *attr,
 					  char *page)
 {
-	struct backing_dev_info *bdi = dev_get_drvdata(dev);
-
-	return snprintf(page, PAGE_SIZE-1, "%d\n",
-			bdi_cap_stable_pages_required(bdi) ? 1 : 0);
+	dev_warn_once(dev,
+		"the stable_pages_required attribute has been removed. Use the stable_writes queue attribute instead.\n");
+	return snprintf(page, PAGE_SIZE-1, "%d\n", 0);
 }
 static DEVICE_ATTR_RO(stable_pages_required);
 
@@ -291,6 +286,11 @@ void wb_wakeup_delayed(struct bdi_writeback *wb)
 	spin_unlock_bh(&wb->work_lock);
 }
 
+static void wb_update_bandwidth_workfn(struct work_struct *work)
+{
+	wb_update_bandwidth((struct bdi_writeback*) work->bdi_wb_backptr);
+}
+
 /*
  * Initial write bandwidth: 100 MB/s
  */
@@ -300,6 +300,7 @@ static int wb_init(struct bdi_writeback *wb, struct backing_dev_info *bdi,
 		   int blkcg_id, gfp_t gfp)
 {
 	int i, err;
+	struct delayed_work *bw_dwork;
 
 	memset(wb, 0, sizeof(*wb));
 
@@ -313,6 +314,7 @@ static int wb_init(struct bdi_writeback *wb, struct backing_dev_info *bdi,
 	INIT_LIST_HEAD(&wb->b_dirty_time);
 	spin_lock_init(&wb->list_lock);
 
+	atomic_set(&wb->writeback_inodes, 0);
 	wb->bw_time_stamp = jiffies;
 	wb->balanced_dirty_ratelimit = INIT_BW;
 	wb->dirty_ratelimit = INIT_BW;
@@ -322,6 +324,16 @@ static int wb_init(struct bdi_writeback *wb, struct backing_dev_info *bdi,
 	spin_lock_init(&wb->work_lock);
 	INIT_LIST_HEAD(&wb->work_list);
 	INIT_DELAYED_WORK(&wb->dwork, wb_workfn);
+
+	bw_dwork = kzalloc(sizeof(*bw_dwork), gfp);
+	if (!bw_dwork) {
+		err = -ENOMEM;
+		goto out_put_bdi;
+	}
+	INIT_DELAYED_WORK(bw_dwork, wb_update_bandwidth_workfn);
+	wb->bw_dwork = bw_dwork;
+	bw_dwork->work.bdi_wb_backptr = wb;
+
 	wb->dirty_sleep = jiffies;
 
 	wb->congested = wb_congested_get_create(bdi, blkcg_id, gfp);
@@ -349,6 +361,8 @@ out_destroy_stat:
 out_put_cong:
 	wb_congested_put(wb->congested);
 out_put_bdi:
+	kfree(bw_dwork);
+	bw_dwork = NULL;
 	if (wb != &bdi->wb)
 		bdi_put(bdi);
 	return err;
@@ -378,6 +392,7 @@ static void wb_shutdown(struct bdi_writeback *wb)
 	mod_delayed_work(bdi_wq, &wb->dwork, 0);
 	flush_delayed_work(&wb->dwork);
 	WARN_ON(!list_empty(&wb->work_list));
+	flush_delayed_work(wb->bw_dwork);
 }
 
 static void wb_exit(struct bdi_writeback *wb)
@@ -393,6 +408,8 @@ static void wb_exit(struct bdi_writeback *wb)
 	wb_congested_put(wb->congested);
 	if (wb != &wb->bdi->wb)
 		bdi_put(wb->bdi);
+	kfree(wb->bw_dwork);
+	wb->bw_dwork = NULL;
 }
 
 #ifdef CONFIG_CGROUP_WRITEBACK
@@ -904,6 +921,7 @@ struct backing_dev_info *bdi_alloc(int node_id)
 		kfree(bdi);
 		return NULL;
 	}
+	bdi->capabilities = BDI_CAP_WRITEBACK | BDI_CAP_WRITEBACK_ACCT;
 	bdi->ra_pages = VM_READAHEAD_PAGES;
 	bdi->io_pages = VM_READAHEAD_PAGES;
 	return bdi;

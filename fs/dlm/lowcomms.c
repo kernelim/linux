@@ -1405,7 +1405,7 @@ static int tcp_listen_for_all(void)
 		return -ENOMEM;
 
 	/* We don't support multi-homed hosts */
-	if (dlm_local_addr[1] != NULL) {
+	if (dlm_local_count > 1) {
 		log_print("TCP protocol can't handle multi-homed hosts, "
 			  "try SCTP");
 		return -EINVAL;

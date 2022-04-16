@@ -1,6 +1,5 @@
 libbpf_version.h
 libbpf.pc
-FEATURE-DUMP.libbpf
 libbpf.so.*
 TAGS
 tags

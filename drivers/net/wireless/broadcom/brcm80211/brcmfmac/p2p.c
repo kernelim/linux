@@ -2037,7 +2037,7 @@ static void brcmf_p2p_get_current_chanspec(struct brcmf_p2p_info *p2p,
 }
 
 /**
- * Change a P2P Role.
+ * brcmf_p2p_ifchange - Change a P2P Role.
  * @cfg: driver private data for cfg80211 interface.
  * @if_type: interface type.
  * Returns 0 if success.
@@ -2125,7 +2125,7 @@ static int brcmf_p2p_disable_p2p_if(struct brcmf_cfg80211_vif *vif)
 	struct brcmf_cfg80211_info *cfg = wdev_to_cfg(&vif->wdev);
 	struct net_device *pri_ndev = cfg_to_ndev(cfg);
 	struct brcmf_if *ifp = netdev_priv(pri_ndev);
-	u8 *addr = vif->wdev.netdev->dev_addr;
+	const u8 *addr = vif->wdev.netdev->dev_addr;
 
 	return brcmf_fil_iovar_data_set(ifp, "p2p_ifdis", addr, ETH_ALEN);
 }
@@ -2135,7 +2135,7 @@ static int brcmf_p2p_release_p2p_if(struct brcmf_cfg80211_vif *vif)
 	struct brcmf_cfg80211_info *cfg = wdev_to_cfg(&vif->wdev);
 	struct net_device *pri_ndev = cfg_to_ndev(cfg);
 	struct brcmf_if *ifp = netdev_priv(pri_ndev);
-	u8 *addr = vif->wdev.netdev->dev_addr;
+	const u8 *addr = vif->wdev.netdev->dev_addr;
 
 	return brcmf_fil_iovar_data_set(ifp, "p2p_ifdel", addr, ETH_ALEN);
 }

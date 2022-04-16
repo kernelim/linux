@@ -486,7 +486,7 @@ static int pxa_ssp_configure_dai_fmt(struct ssp_priv *priv)
 
 	case SND_SOC_DAIFMT_DSP_A:
 		sspsp |= SSPSP_FSRT;
-		/* fall through */
+		fallthrough;
 	case SND_SOC_DAIFMT_DSP_B:
 		sscr0 |= SSCR0_MOD | SSCR0_PSP;
 		sscr1 |= SSCR1_TRAIL | SSCR1_RWOT;
@@ -866,15 +866,12 @@ static struct snd_soc_dai_driver pxa_ssp_dai = {
 static const struct snd_soc_component_driver pxa_ssp_component = {
 	.name		= "pxa-ssp",
 	.pcm_construct	= pxa2xx_soc_pcm_new,
-	.pcm_destruct	= pxa2xx_soc_pcm_free,
 	.open		= pxa2xx_soc_pcm_open,
 	.close		= pxa2xx_soc_pcm_close,
 	.hw_params	= pxa2xx_soc_pcm_hw_params,
-	.hw_free	= pxa2xx_soc_pcm_hw_free,
 	.prepare	= pxa2xx_soc_pcm_prepare,
 	.trigger	= pxa2xx_soc_pcm_trigger,
 	.pointer	= pxa2xx_soc_pcm_pointer,
-	.mmap		= pxa2xx_soc_pcm_mmap,
 	.suspend	= pxa_ssp_suspend,
 	.resume		= pxa_ssp_resume,
 };

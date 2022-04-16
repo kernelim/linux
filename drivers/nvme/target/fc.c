@@ -1033,60 +1033,75 @@ nvmet_fc_free_hostport(struct nvmet_fc_hostport *hostport)
 }
 
 static struct nvmet_fc_hostport *
+nvmet_fc_match_hostport(struct nvmet_fc_tgtport *tgtport, void *hosthandle)
+{
+	struct nvmet_fc_hostport *host;
+
+	lockdep_assert_held(&tgtport->lock);
+
+	list_for_each_entry(host, &tgtport->host_list, host_list) {
+		if (host->hosthandle == hosthandle && !host->invalid) {
+			if (nvmet_fc_hostport_get(host))
+				return (host);
+		}
+	}
+
+	return NULL;
+}
+
+static struct nvmet_fc_hostport *
 nvmet_fc_alloc_hostport(struct nvmet_fc_tgtport *tgtport, void *hosthandle)
 {
-	struct nvmet_fc_hostport *newhost, *host, *match = NULL;
+	struct nvmet_fc_hostport *newhost, *match = NULL;
 	unsigned long flags;
 
 	/* if LLDD not implemented, leave as NULL */
 	if (!hosthandle)
 		return NULL;
 
-	/* take reference for what will be the newly allocated hostport */
+	/*
+	 * take reference for what will be the newly allocated hostport if
+	 * we end up using a new allocation
+	 */
 	if (!nvmet_fc_tgtport_get(tgtport))
 		return ERR_PTR(-EINVAL);
 
-	newhost = kzalloc(sizeof(*newhost), GFP_KERNEL);
-	if (!newhost) {
-		spin_lock_irqsave(&tgtport->lock, flags);
-		list_for_each_entry(host, &tgtport->host_list, host_list) {
-			if (host->hosthandle == hosthandle && !host->invalid) {
-				if (nvmet_fc_hostport_get(host)) {
-					match = host;
-					break;
-				}
-			}
-		}
-		spin_unlock_irqrestore(&tgtport->lock, flags);
-		/* no allocation - release reference */
-		nvmet_fc_tgtport_put(tgtport);
-		return (match) ? match : ERR_PTR(-ENOMEM);
-	}
-
-	newhost->tgtport = tgtport;
-	newhost->hosthandle = hosthandle;
-	INIT_LIST_HEAD(&newhost->host_list);
-	kref_init(&newhost->ref);
-
 	spin_lock_irqsave(&tgtport->lock, flags);
-	list_for_each_entry(host, &tgtport->host_list, host_list) {
-		if (host->hosthandle == hosthandle && !host->invalid) {
-			if (nvmet_fc_hostport_get(host)) {
-				match = host;
-				break;
-			}
-		}
-	}
-	if (match) {
-		kfree(newhost);
-		newhost = NULL;
-		/* releasing allocation - release reference */
-		nvmet_fc_tgtport_put(tgtport);
-	} else
-		list_add_tail(&newhost->host_list, &tgtport->host_list);
+	match = nvmet_fc_match_hostport(tgtport, hosthandle);
 	spin_unlock_irqrestore(&tgtport->lock, flags);
 
-	return (match) ? match : newhost;
+	if (match) {
+		/* no new allocation - release reference */
+		nvmet_fc_tgtport_put(tgtport);
+		return match;
+	}
+
+	newhost = kzalloc(sizeof(*newhost), GFP_KERNEL);
+	if (!newhost) {
+		/* no new allocation - release reference */
+		nvmet_fc_tgtport_put(tgtport);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	spin_lock_irqsave(&tgtport->lock, flags);
+	match = nvmet_fc_match_hostport(tgtport, hosthandle);
+	if (match) {
+		/* new allocation not needed */
+		kfree(newhost);
+		newhost = match;
+		/* no new allocation - release reference */
+		nvmet_fc_tgtport_put(tgtport);
+	} else {
+		newhost->tgtport = tgtport;
+		newhost->hosthandle = hosthandle;
+		INIT_LIST_HEAD(&newhost->host_list);
+		kref_init(&newhost->ref);
+
+		list_add_tail(&newhost->host_list, &tgtport->host_list);
+	}
+	spin_unlock_irqrestore(&tgtport->lock, flags);
+
+	return newhost;
 }
 
 static void
@@ -1259,8 +1274,6 @@ nvmet_fc_find_target_assoc(struct nvmet_fc_tgtport *tgtport,
 	return ret;
 }
 
-bool tech_preview_warning_issued = false;
-
 static void
 nvmet_fc_portentry_bind(struct nvmet_fc_tgtport *tgtport,
 			struct nvmet_fc_port_entry *pe,
@@ -1339,6 +1352,8 @@ nvmet_fc_portentry_rebind_tgt(struct nvmet_fc_tgtport *tgtport)
 	spin_unlock_irqrestore(&nvmet_fc_tgtlock, flags);
 }
 
+static bool driver_warning_issued;
+
 /**
  * nvme_fc_register_targetport - transport entry point called by an
  *                              LLDD to register the existence of a local
@@ -1366,9 +1381,9 @@ nvmet_fc_register_targetport(struct nvmet_fc_port_info *pinfo,
 	unsigned long flags;
 	int ret, idx;
 
-	if (!tech_preview_warning_issued) {
-		mark_driver_unsupported("NVMe over FC Target");
-		tech_preview_warning_issued = true;
+	if (!driver_warning_issued) {
+		mark_driver_unmaintained("NVMe over FC Target");
+		driver_warning_issued = true;
 	}
 
 	if (!template->xmt_ls_rsp || !template->fcp_op ||
@@ -2015,6 +2030,7 @@ nvmet_fc_handle_ls_rqst_work(struct work_struct *work)
  *
  * @target_port: pointer to the (registered) target port the LS was
  *              received on.
+ * @hosthandle: pointer to the host specific data, gets stored in iod.
  * @lsrsp:      pointer to a lsrsp structure to be used to reference
  *              the exchange corresponding to the LS.
  * @lsreqbuf:   pointer to the buffer containing the LS Request
@@ -2514,13 +2530,6 @@ nvmet_fc_handle_fcp_rqst(struct nvmet_fc_tgtport *tgtport,
 	int ret;
 
 	/*
-	 * if there is no nvmet mapping to the targetport there
-	 * shouldn't be requests. just terminate them.
-	 */
-	if (!tgtport->pe)
-		goto transport_error;
-
-	/*
 	 * Fused commands are currently not supported in the linux
 	 * implementation.
 	 *
@@ -2547,7 +2556,8 @@ nvmet_fc_handle_fcp_rqst(struct nvmet_fc_tgtport *tgtport,
 
 	fod->req.cmd = &fod->cmdiubuf.sqe;
 	fod->req.cqe = &fod->rspiubuf.cqe;
-	fod->req.port = tgtport->pe->port;
+	if (tgtport->pe)
+		fod->req.port = tgtport->pe->port;
 
 	/* clear any response payload */
 	memset(&fod->rspiubuf, 0, sizeof(fod->rspiubuf));

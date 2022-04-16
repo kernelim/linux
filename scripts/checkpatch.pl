@@ -5841,14 +5841,18 @@ sub process {
 		        for (my $count = $linenr; $count <= $lc; $count++) {
 				my $specifier;
 				my $extension;
+				my $qualifier;
 				my $bad_specifier = "";
 				my $fmt = get_quoted_string($lines[$count - 1], raw_line($count, 0));
 				$fmt =~ s/%%//g;
 
-				while ($fmt =~ /(\%[\*\d\.]*p(\w))/g) {
+				while ($fmt =~ /(\%[\*\d\.]*p(\w)(\w*))/g) {
 					$specifier = $1;
 					$extension = $2;
+					$qualifier = $3;
 					if ($extension !~ /[SsBKRraEehMmIiUDdgVCbGNOxt]/) {
+					    ($extension eq "f" &&
+					     defined $qualifier && $qualifier !~ /^w/)) {
 						$bad_specifier = $specifier;
 						last;
 					}
@@ -5865,7 +5869,6 @@ sub process {
 					my $ext_type = "Invalid";
 					my $use = "";
 					if ($bad_specifier =~ /p[Ff]/) {
-						$ext_type = "Deprecated";
 						$use = " - use %pS instead";
 						$use =~ s/pS/ps/ if ($bad_specifier =~ /pf/);
 					}

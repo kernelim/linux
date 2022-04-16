@@ -351,6 +351,10 @@ struct nfs4_client {
 
 	/* debugging info directory under nfsd/clients/ : */
 	struct dentry		*cl_nfsd_dentry;
+	/* 'info' file within that directory. Ref is not counted,
+	 * but will remain valid iff cl_nfsd_dentry != NULL
+	 */
+	struct dentry		*cl_nfsd_info_dentry;
 
 	/* for nfs41 callbacks */
 	/* We currently support a single back channel with a single slot */
@@ -492,6 +496,8 @@ struct nfs4_clnt_odstate {
  */
 struct nfs4_file {
 	refcount_t		fi_ref;
+	struct inode *		fi_inode;
+	bool			fi_aliased;
 	spinlock_t		fi_lock;
 	struct hlist_node       fi_hash;	/* hash on fi_fhandle */
 	struct list_head        fi_stateids;
@@ -626,8 +632,7 @@ void nfs4_remove_reclaim_record(struct nfs4_client_reclaim *, struct nfsd_net *)
 extern void nfs4_release_reclaim(struct nfsd_net *);
 extern struct nfs4_client_reclaim *nfsd4_find_reclaim_client(struct xdr_netobj name,
 							struct nfsd_net *nn);
-extern __be32 nfs4_check_open_reclaim(clientid_t *clid,
-		struct nfsd4_compound_state *cstate, struct nfsd_net *nn);
+extern __be32 nfs4_check_open_reclaim(struct nfs4_client *);
 extern void nfsd4_probe_callback(struct nfs4_client *clp);
 extern void nfsd4_probe_callback_sync(struct nfs4_client *clp);
 extern void nfsd4_change_callback(struct nfs4_client *clp, struct nfs4_cb_conn *);
@@ -643,7 +648,6 @@ extern struct nfs4_client_reclaim *nfs4_client_to_reclaim(struct xdr_netobj name
 				struct xdr_netobj princhash, struct nfsd_net *nn);
 extern bool nfs4_has_reclaimed_state(struct xdr_netobj name, struct nfsd_net *nn);
 
-struct nfs4_file *find_file(struct knfsd_fh *fh);
 void put_nfs4_file(struct nfs4_file *fi);
 extern void nfs4_put_copy(struct nfsd4_copy *copy);
 extern struct nfsd4_copy *
@@ -664,32 +668,5 @@ extern void nfsd4_client_record_create(struct nfs4_client *clp);
 extern void nfsd4_client_record_remove(struct nfs4_client *clp);
 extern int nfsd4_client_record_check(struct nfs4_client *clp);
 extern void nfsd4_record_grace_done(struct nfsd_net *nn);
-
-/* nfs fault injection functions */
-#ifdef CONFIG_NFSD_FAULT_INJECTION
-void nfsd_fault_inject_init(void);
-void nfsd_fault_inject_cleanup(void);
-
-u64 nfsd_inject_print_clients(void);
-u64 nfsd_inject_forget_client(struct sockaddr_storage *, size_t);
-u64 nfsd_inject_forget_clients(u64);
-
-u64 nfsd_inject_print_locks(void);
-u64 nfsd_inject_forget_client_locks(struct sockaddr_storage *, size_t);
-u64 nfsd_inject_forget_locks(u64);
-
-u64 nfsd_inject_print_openowners(void);
-u64 nfsd_inject_forget_client_openowners(struct sockaddr_storage *, size_t);
-u64 nfsd_inject_forget_openowners(u64);
-
-u64 nfsd_inject_print_delegations(void);
-u64 nfsd_inject_forget_client_delegations(struct sockaddr_storage *, size_t);
-u64 nfsd_inject_forget_delegations(u64);
-u64 nfsd_inject_recall_client_delegations(struct sockaddr_storage *, size_t);
-u64 nfsd_inject_recall_delegations(u64);
-#else /* CONFIG_NFSD_FAULT_INJECTION */
-static inline void nfsd_fault_inject_init(void) {}
-static inline void nfsd_fault_inject_cleanup(void) {}
-#endif /* CONFIG_NFSD_FAULT_INJECTION */
 
 #endif   /* NFSD4_STATE_H */

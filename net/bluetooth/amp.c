@@ -85,7 +85,7 @@ struct amp_ctrl *amp_ctrl_lookup(struct amp_mgr *mgr, u8 id)
 {
 	struct amp_ctrl *ctrl;
 
-	BT_DBG("mgr %p id %d", mgr, id);
+	BT_DBG("mgr %p id %u", mgr, id);
 
 	mutex_lock(&mgr->amp_ctrls_lock);
 	list_for_each_entry(ctrl, &mgr->amp_ctrls, list) {
@@ -161,7 +161,6 @@ static int hmac_sha256(u8 *key, u8 ksize, char *plaintext, u8 psize, u8 *output)
 	}
 
 	shash->tfm = tfm;
-	shash->flags = CRYPTO_TFM_REQ_MAY_SLEEP;
 
 	ret = crypto_shash_digest(shash, plaintext, psize, output);
 
@@ -187,7 +186,7 @@ int phylink_gen_key(struct hci_conn *conn, u8 *data, u8 *len, u8 *type)
 
 	/* Legacy key */
 	if (conn->key_type < 3) {
-		bt_dev_err(hdev, "legacy key type %d", conn->key_type);
+		bt_dev_err(hdev, "legacy key type %u", conn->key_type);
 		return -EACCES;
 	}
 
@@ -265,7 +264,7 @@ void amp_read_loc_assoc_frag(struct hci_dev *hdev, u8 phy_handle)
 	struct hci_request req;
 	int err;
 
-	BT_DBG("%s handle %d", hdev->name, phy_handle);
+	BT_DBG("%s handle %u", hdev->name, phy_handle);
 
 	cp.phy_handle = phy_handle;
 	cp.max_len = cpu_to_le16(hdev->amp_assoc_size);
@@ -304,6 +303,9 @@ void amp_read_loc_assoc_final_data(struct hci_dev *hdev,
 	struct amp_mgr *mgr = hcon->amp_mgr;
 	struct hci_request req;
 	int err;
+
+	if (!mgr)
+		return;
 
 	if (!mgr)
 		return;

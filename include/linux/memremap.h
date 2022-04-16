@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_MEMREMAP_H_
 #define _LINUX_MEMREMAP_H_
+#include <linux/range.h>
 #include <linux/ioport.h>
 #include <linux/percpu-refcount.h>
 #include <linux/mm_types.h>  /* needed in RHEL8 for dev_pagemap & vm_fault_t */
@@ -54,11 +55,10 @@ struct vmem_altmap {
  * wakeup is used to coordinate physical address space management (ex:
  * fs truncate/hole punch) vs pinned pages (ex: device dma).
  *
- * MEMORY_DEVICE_DEVDAX:
+ * MEMORY_DEVICE_GENERIC:
  * Host memory that has similar access semantics as System RAM i.e. DMA
- * coherent and supports page pinning. In contrast to
- * MEMORY_DEVICE_FS_DAX, this memory is access via a device-dax
- * character device.
+ * coherent and supports page pinning. This is for example used by DAX devices
+ * that expose memory using a character device.
  *
  * MEMORY_DEVICE_PCI_P2PDMA:
  * Device memory residing in a PCI BAR intended for use with Peer-to-Peer
@@ -71,7 +71,7 @@ enum memory_type {
 	MEMORY_DEVICE_FS_DAX,
 	MEMORY_DEVICE_PCI_P2PDMA,
 #ifndef __GENKSYMS__
-	MEMORY_DEVICE_DEVDAX,
+	MEMORY_DEVICE_GENERIC,
 #endif /* __GENKSYMS__ */
 };
 
@@ -111,7 +111,6 @@ struct dev_pagemap_ops {
 /**
  * struct dev_pagemap - metadata for ZONE_DEVICE mappings
  * @altmap: pre-allocated/reserved memory for vmemmap allocations
- * @res: physical address range covered by @ref
  * @ref: reference count that pins the devm_memremap_pages() mapping
  * @internal_ref: internal reference if @ref is not provided by the caller
  * @done: completion for @internal_ref
@@ -121,23 +120,33 @@ struct dev_pagemap_ops {
  * @owner: an opaque pointer identifying the entity that manages this
  *	instance.  Used by various helpers to make sure that no
  *	foreign ZONE_DEVICE memory is accessed.
+ * @nr_range: number of ranges to be mapped
+ * @range: range to be mapped when nr_range == 1
+ * @ranges: array of ranges to be mapped when nr_range > 1
  */
 struct dev_pagemap {
 	RH_KABI_DEPRECATE(dev_page_fault_t, page_fault)
 	RH_KABI_DEPRECATE(dev_page_free_t, page_free)
 	struct vmem_altmap altmap;
 	RH_KABI_DEPRECATE(bool, altmap_valid)
-	struct resource res;
+	RH_KABI_DEPRECATE(struct resource, res)
 	struct percpu_ref *ref;
 	RH_KABI_DEPRECATE(struct device *, dev)
 	RH_KABI_DEPRECATE(void *, data)
 	enum memory_type type;
-	u64 pci_p2pdma_bus_offset;
+	RH_KABI_DEPRECATE(u64, pci_p2pdma_bus_offset)
 	RH_KABI_EXTEND(const struct dev_pagemap_ops *ops)
 	RH_KABI_EXTEND(unsigned int flags)
 	RH_KABI_EXTEND(struct percpu_ref internal_ref)
 	RH_KABI_EXTEND(struct completion done)
 	RH_KABI_EXTEND(void *owner)
+	RH_KABI_EXTEND(int nr_range)
+	RH_KABI_BROKEN_INSERT_BLOCK(
+	union {
+		struct range range;
+		struct range ranges[0];
+	};
+	) /* RH_KABI_BROKEN_INSERT_BLOCK */
 };
 
 static inline struct vmem_altmap *pgmap_altmap(struct dev_pagemap *pgmap)

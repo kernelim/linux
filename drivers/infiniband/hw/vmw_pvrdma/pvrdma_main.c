@@ -68,21 +68,21 @@ static int pvrdma_del_gid(const struct ib_gid_attr *attr, void **context);
 static ssize_t hca_type_show(struct device *device,
 			     struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "VMW_PVRDMA-%s\n", DRV_VERSION);
+	return sysfs_emit(buf, "VMW_PVRDMA-%s\n", DRV_VERSION);
 }
 static DEVICE_ATTR_RO(hca_type);
 
 static ssize_t hw_rev_show(struct device *device,
 			   struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", PVRDMA_REV_ID);
+	return sysfs_emit(buf, "%d\n", PVRDMA_REV_ID);
 }
 static DEVICE_ATTR_RO(hw_rev);
 
 static ssize_t board_id_show(struct device *device,
 			     struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", PVRDMA_BOARD_ID);
+	return sysfs_emit(buf, "%d\n", PVRDMA_BOARD_ID);
 }
 static DEVICE_ATTR_RO(board_id);
 
@@ -121,7 +121,7 @@ static int pvrdma_init_device(struct pvrdma_dev *dev)
 	return 0;
 }
 
-static int pvrdma_port_immutable(struct ib_device *ibdev, u8 port_num,
+static int pvrdma_port_immutable(struct ib_device *ibdev, u32 port_num,
 				 struct ib_port_immutable *immutable)
 {
 	struct pvrdma_dev *dev = to_vdev(ibdev);
@@ -162,6 +162,7 @@ static const struct ib_device_ops pvrdma_dev_ops = {
 	.destroy_ah = pvrdma_destroy_ah,
 	.destroy_cq = pvrdma_destroy_cq,
 	.destroy_qp = pvrdma_destroy_qp,
+	.device_group = &pvrdma_attr_group,
 	.get_dev_fw_str = pvrdma_get_fw_ver_str,
 	.get_dma_mr = pvrdma_get_dma_mr,
 	.get_link_layer = pvrdma_port_link_layer,
@@ -240,7 +241,6 @@ static int pvrdma_register_device(struct pvrdma_dev *dev)
 	if (ret)
 		goto err_srq_free;
 	spin_lock_init(&dev->srq_tbl_lock);
-	rdma_set_device_sysfs_group(&dev->ib_dev, &pvrdma_attr_group);
 
 	ret = ib_register_device(&dev->ib_dev, "vmw_pvrdma%d", &dev->pdev->dev);
 	if (ret)

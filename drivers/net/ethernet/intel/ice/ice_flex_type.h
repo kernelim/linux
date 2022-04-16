@@ -13,6 +13,8 @@ struct ice_fv_word {
 	u8 resvrd;
 } __packed;
 
+#define ICE_MAX_NUM_PROFILES 256
+
 #define ICE_MAX_FV_WORDS 48
 struct ice_fv {
 	struct ice_fv_word ew[ICE_MAX_FV_WORDS];
@@ -109,6 +111,7 @@ struct ice_buf_hdr {
 	(ent_sz))
 
 /* ice package section IDs */
+#define ICE_SID_METADATA		1
 #define ICE_SID_XLT0_SW			10
 #define ICE_SID_XLT_KEY_BUILDER_SW	11
 #define ICE_SID_XLT1_SW			12
@@ -117,6 +120,14 @@ struct ice_buf_hdr {
 #define ICE_SID_PROFID_REDIR_SW		15
 #define ICE_SID_FLD_VEC_SW		16
 #define ICE_SID_CDID_KEY_BUILDER_SW	17
+
+struct ice_meta_sect {
+	struct ice_pkg_ver ver;
+#define ICE_META_SECT_NAME_SIZE	28
+	char name[ICE_META_SECT_NAME_SIZE];
+	__le32 track_id;
+};
+
 #define ICE_SID_CDID_REDIR_SW		18
 
 #define ICE_SID_XLT0_ACL		20
@@ -149,6 +160,7 @@ struct ice_buf_hdr {
 #define ICE_SID_CDID_KEY_BUILDER_RSS	47
 #define ICE_SID_CDID_REDIR_RSS		48
 
+#define ICE_SID_RXPARSER_MARKER_PTYPE	55
 #define ICE_SID_RXPARSER_BOOST_TCAM	56
 #define ICE_SID_TXPARSER_BOOST_TCAM	66
 
@@ -190,6 +202,24 @@ enum ice_sect {
 	ICE_SECT_COUNT
 };
 
+/* Packet Type (PTYPE) values */
+#define ICE_PTYPE_MAC_PAY		1
+#define ICE_PTYPE_IPV4_PAY		23
+#define ICE_PTYPE_IPV4_UDP_PAY		24
+#define ICE_PTYPE_IPV4_TCP_PAY		26
+#define ICE_PTYPE_IPV4_SCTP_PAY		27
+#define ICE_PTYPE_IPV6_PAY		89
+#define ICE_PTYPE_IPV6_UDP_PAY		90
+#define ICE_PTYPE_IPV6_TCP_PAY		92
+#define ICE_PTYPE_IPV6_SCTP_PAY		93
+#define ICE_MAC_IPV4_ESP		160
+#define ICE_MAC_IPV6_ESP		161
+#define ICE_MAC_IPV4_AH			162
+#define ICE_MAC_IPV6_AH			163
+#define ICE_MAC_IPV4_NAT_T_ESP		164
+#define ICE_MAC_IPV6_NAT_T_ESP		165
+#define ICE_MAC_IPV4_GTPU		329
+#define ICE_MAC_IPV6_GTPU		330
 #define ICE_MAC_IPV4_GTPU_IPV4_FRAG	331
 #define ICE_MAC_IPV4_GTPU_IPV4_PAY	332
 #define ICE_MAC_IPV4_GTPU_IPV4_UDP_PAY	333
@@ -210,6 +240,10 @@ enum ice_sect {
 #define ICE_MAC_IPV6_GTPU_IPV6_UDP_PAY	348
 #define ICE_MAC_IPV6_GTPU_IPV6_TCP	349
 #define ICE_MAC_IPV6_GTPU_IPV6_ICMPV6	350
+#define ICE_MAC_IPV4_PFCP_SESSION	352
+#define ICE_MAC_IPV6_PFCP_SESSION	354
+#define ICE_MAC_IPV4_L2TPV3		360
+#define ICE_MAC_IPV6_L2TPV3		361
 
 /* Attributes that can modify PTYPE definitions.
  *
@@ -270,6 +304,12 @@ struct ice_sw_fv_section {
 	struct ice_fv fv[];
 };
 
+struct ice_sw_fv_list_entry {
+	struct list_head list_entry;
+	u32 profile_id;
+	struct ice_fv *fv_ptr;
+};
+
 /* The BOOST TCAM stores the match packet header in reverse order, meaning
  * the fields are reversed; in addition, this means that the normally big endian
  * fields of the packet are now little endian.
@@ -311,6 +351,25 @@ struct ice_boost_tcam_section {
 	struct_size((struct ice_boost_tcam_section *)0, tcam, 1) - \
 	sizeof(struct ice_boost_tcam_entry), \
 	sizeof(struct ice_boost_tcam_entry))
+
+/* package Marker Ptype TCAM entry */
+struct ice_marker_ptype_tcam_entry {
+#define ICE_MARKER_PTYPE_TCAM_ADDR_MAX	1024
+	__le16 addr;
+	__le16 ptype;
+	u8 keys[20];
+};
+
+struct ice_marker_ptype_tcam_section {
+	__le16 count;
+	__le16 reserved;
+	struct ice_marker_ptype_tcam_entry tcam[];
+};
+
+#define ICE_MAX_MARKER_PTYPE_TCAMS_IN_BUF	\
+	ICE_MAX_ENTRIES_IN_BUF(struct_size((struct ice_marker_ptype_tcam_section *)0, tcam, 1) - \
+	sizeof(struct ice_marker_ptype_tcam_entry), \
+	sizeof(struct ice_marker_ptype_tcam_entry))
 
 struct ice_xlt1_section {
 	__le16 count;
@@ -356,6 +415,8 @@ struct ice_pkg_enum {
 enum ice_tunnel_type {
 	TNL_VXLAN = 0,
 	TNL_GENEVE,
+	TNL_GRETAP,
+	__TNL_TYPE_CNT,
 	TNL_LAST = 0xFF,
 	TNL_ALL = 0xFF,
 };
@@ -369,11 +430,8 @@ struct ice_tunnel_entry {
 	enum ice_tunnel_type type;
 	u16 boost_addr;
 	u16 port;
-	u16 ref;
 	struct ice_boost_tcam_entry *boost_entry;
 	u8 valid;
-	u8 in_use;
-	u8 marked;
 };
 
 #define ICE_TUNNEL_MAX_ENTRIES	16
@@ -381,6 +439,7 @@ struct ice_tunnel_entry {
 struct ice_tunnel_table {
 	struct ice_tunnel_entry tbl[ICE_TUNNEL_MAX_ENTRIES];
 	u16 count;
+	u16 valid_count[__TNL_TYPE_CNT];
 };
 
 struct ice_pkg_es {
@@ -489,8 +548,8 @@ struct ice_xlt1 {
 #define ICE_PF_NUM_S	13
 #define ICE_PF_NUM_M	(0x07 << ICE_PF_NUM_S)
 #define ICE_VSIG_VALUE(vsig, pf_id) \
-	(u16)((((u16)(vsig)) & ICE_VSIG_IDX_M) | \
-	      (((u16)(pf_id) << ICE_PF_NUM_S) & ICE_PF_NUM_M))
+	((u16)((((u16)(vsig)) & ICE_VSIG_IDX_M) | \
+	       (((u16)(pf_id) << ICE_PF_NUM_S) & ICE_PF_NUM_M)))
 #define ICE_DEFAULT_VSIG	0
 
 /* XLT2 Table */
@@ -595,4 +654,12 @@ struct ice_chs_chg {
 };
 
 #define ICE_FLOW_PTYPE_MAX		ICE_XLT1_CNT
+
+enum ice_prof_type {
+	ICE_PROF_NON_TUN = 0x1,
+	ICE_PROF_TUN_UDP = 0x2,
+	ICE_PROF_TUN_GRE = 0x4,
+	ICE_PROF_TUN_ALL = 0x6,
+	ICE_PROF_ALL = 0xFF,
+};
 #endif /* _ICE_FLEX_TYPE_H_ */

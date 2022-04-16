@@ -135,6 +135,7 @@ static void mt7615_irq_tasklet(unsigned long data)
 	if (is_mt7663(&dev->mt76)) {
 		mcu_int = mt76_rr(dev, MT_MCU2HOST_INT_STATUS);
 		mcu_int &= MT7663_MCU_CMD_ERROR_MASK;
+		mt76_wr(dev, MT_MCU2HOST_INT_STATUS, mcu_int);
 	} else {
 		mcu_int = mt76_rr(dev, MT_MCU_CMD);
 		mcu_int &= MT_MCU_CMD_ERROR_MASK;
@@ -229,7 +230,7 @@ int mt7615_mmio_probe(struct device *pdev, void __iomem *mem_base,
 			       GFP_KERNEL);
 	if (!bus_ops) {
 		ret = -ENOMEM;
-		goto error;
+		goto err_free_dev;
 	}
 
 	bus_ops->rr = mt7615_rr;
@@ -242,17 +243,20 @@ int mt7615_mmio_probe(struct device *pdev, void __iomem *mem_base,
 	ret = devm_request_irq(mdev->dev, irq, mt7615_irq_handler,
 			       IRQF_SHARED, KBUILD_MODNAME, dev);
 	if (ret)
-		goto error;
+		goto err_free_dev;
 
 	if (is_mt7663(mdev))
 		mt76_wr(dev, MT_PCIE_IRQ_ENABLE, 1);
 
 	ret = mt7615_register_device(dev);
 	if (ret)
-		goto error;
+		goto err_free_irq;
 
 	return 0;
-error:
+
+err_free_irq:
+	devm_free_irq(pdev, irq, dev);
+err_free_dev:
 	mt76_free_device(&dev->mt76);
 
 	return ret;

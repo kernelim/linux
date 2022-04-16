@@ -154,4 +154,6 @@ extern struct device *mdev_parent_dev(struct mdev_device *mdev);
 extern struct device *mdev_dev(struct mdev_device *mdev);
 extern struct mdev_device *mdev_from_dev(struct device *dev);
 
+extern int mdev_type_kobj_to_group_id(struct kobject *kobj);
+
 #endif /* MDEV_H */

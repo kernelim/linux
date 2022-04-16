@@ -349,7 +349,7 @@ void __init setup_arch(char **cmdline_p)
 	smp_build_mpidr_hash();
 
 	/* Init percpu seeds for random tags after cpus are set up. */
-	kasan_init_tags();
+	kasan_init_sw_tags();
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
 	/*
@@ -375,6 +375,15 @@ void __init setup_arch(char **cmdline_p)
 	}
 }
 
+static inline bool cpu_can_disable(unsigned int cpu)
+{
+#ifdef CONFIG_HOTPLUG_CPU
+	if (cpu_ops[cpu] && cpu_ops[cpu]->cpu_can_disable)
+		return cpu_ops[cpu]->cpu_can_disable(cpu);
+#endif
+	return false;
+}
+
 static int __init topology_init(void)
 {
 	int i;
@@ -384,7 +393,7 @@ static int __init topology_init(void)
 
 	for_each_possible_cpu(i) {
 		struct cpu *cpu = &per_cpu(cpu_data.cpu, i);
-		cpu->hotpluggable = 1;
+		cpu->hotpluggable = cpu_can_disable(i);
 		register_cpu(cpu, i);
 	}
 

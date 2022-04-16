@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Counter devices
+#
+
+menuconfig COUNTER
+	tristate "Counter support"
+	help
+	  This enables counter device support through the Generic Counter
+	  interface. You only need to enable this, if you also want to enable
+	  one or more of the counter device drivers below.
+
+if COUNTER
+
+config INTEL_QEP
+	tristate "Intel Quadrature Encoder Peripheral driver"
+	depends on PCI
+	help
+	  Select this option to enable the Intel Quadrature Encoder Peripheral
+	  driver.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called intel-qep.
+
+endif # COUNTER

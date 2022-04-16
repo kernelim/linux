@@ -1,6 +1,5 @@
+// SPDX-License-Identifier: MIT
 /*
- * SPDX-License-Identifier: MIT
- *
  * Copyright © 2014-2018 Intel Corporation
  */
 
@@ -242,7 +241,7 @@ static void gen8_ctx_workarounds_init(struct intel_engine_cs *engine,
 		     PARTIAL_INSTRUCTION_SHOOTDOWN_DISABLE);
 
 	/* Use Force Non-Coherent whenever executing a 3D context. This is a
-	 * workaround for for a possible hang in the unlikely event a TLB
+	 * workaround for a possible hang in the unlikely event a TLB
 	 * invalidation occurs during a PSD flush.
 	 */
 	/* WaForceEnableNonCoherent:bdw,chv */
@@ -608,19 +607,49 @@ static void icl_ctx_workarounds_init(struct intel_engine_cs *engine,
 	wa_masked_en(wal, GEN9_ROW_CHICKEN4, GEN11_DIS_PICK_2ND_EU);
 }
 
+/*
+ * These settings aren't actually workarounds, but general tuning settings that
+ * need to be programmed on several platforms.
+ */
+static void gen12_ctx_gt_tuning_init(struct intel_engine_cs *engine,
+				     struct i915_wa_list *wal)
+{
+	/*
+	 * Although some platforms refer to it as Wa_1604555607, we need to
+	 * program it even on those that don't explicitly list that
+	 * workaround.
+	 *
+	 * Note that the programming of this register is further modified
+	 * according to the FF_MODE2 guidance given by Wa_1608008084:gen12.
+	 * Wa_1608008084 tells us the FF_MODE2 register will return the wrong
+	 * value when read. The default value for this register is zero for all
+	 * fields and there are no bit masks. So instead of doing a RMW we
+	 * should just write TDS timer value. For the same reason read
+	 * verification is ignored.
+	 */
+	wa_add(wal,
+	       FF_MODE2,
+	       FF_MODE2_TDS_TIMER_MASK,
+	       FF_MODE2_TDS_TIMER_128,
+	       0);
+}
+
 static void gen12_ctx_workarounds_init(struct intel_engine_cs *engine,
 				       struct i915_wa_list *wal)
 {
+	gen12_ctx_gt_tuning_init(engine, wal);
+
 	/*
-	 * Wa_1409142259:tgl
-	 * Wa_1409347922:tgl
-	 * Wa_1409252684:tgl
-	 * Wa_1409217633:tgl
-	 * Wa_1409207793:tgl
-	 * Wa_1409178076:tgl
-	 * Wa_1408979724:tgl
-	 * Wa_14010443199:rkl
-	 * Wa_14010698770:rkl
+	 * Wa_1409142259:tgl,dg1,adl-p
+	 * Wa_1409347922:tgl,dg1,adl-p
+	 * Wa_1409252684:tgl,dg1,adl-p
+	 * Wa_1409217633:tgl,dg1,adl-p
+	 * Wa_1409207793:tgl,dg1,adl-p
+	 * Wa_1409178076:tgl,dg1,adl-p
+	 * Wa_1408979724:tgl,dg1,adl-p
+	 * Wa_14010443199:tgl,rkl,dg1,adl-p
+	 * Wa_14010698770:tgl,rkl,dg1,adl-s,adl-p
+	 * Wa_1409342910:tgl,rkl,dg1,adl-s,adl-p
 	 */
 	wa_masked_en(wal, GEN11_COMMON_SLICE_CHICKEN3,
 		     GEN12_DISABLE_CPS_AWARE_COLOR_PIPE);
@@ -629,40 +658,18 @@ static void gen12_ctx_workarounds_init(struct intel_engine_cs *engine,
 	wa_masked_field_set(wal, GEN8_CS_CHICKEN1,
 			    GEN9_PREEMPT_GPGPU_LEVEL_MASK,
 			    GEN9_PREEMPT_GPGPU_THREAD_GROUP_LEVEL);
-}
-
-static void tgl_ctx_workarounds_init(struct intel_engine_cs *engine,
-				     struct i915_wa_list *wal)
-{
-	gen12_ctx_workarounds_init(engine, wal);
 
 	/*
-	 * Wa_1604555607:tgl,rkl
+	 * Wa_16011163337
 	 *
-	 * Note that the implementation of this workaround is further modified
-	 * according to the FF_MODE2 guidance given by Wa_1608008084:gen12.
-	 * FF_MODE2 register will return the wrong value when read. The default
-	 * value for this register is zero for all fields and there are no bit
-	 * masks. So instead of doing a RMW we should just write the GS Timer
-	 * and TDS timer values for Wa_1604555607 and Wa_16011163337.
+	 * Like in gen12_ctx_gt_tuning_init(), read verification is ignored due
+	 * to Wa_1608008084.
 	 */
 	wa_add(wal,
 	       FF_MODE2,
-	       FF_MODE2_GS_TIMER_MASK | FF_MODE2_TDS_TIMER_MASK,
-	       FF_MODE2_GS_TIMER_224  | FF_MODE2_TDS_TIMER_128,
+	       FF_MODE2_GS_TIMER_MASK,
+	       FF_MODE2_GS_TIMER_224,
 	       0);
-
-	/* RH note: Limit this workaround to ADL-S as this came too late in the release cycle to
-	 * justify retesting other gens
-	 */
-	if (IS_ALDERLAKE_S(engine->i915)) {
-		/*
-		 * Wa_14012131227:dg1
-		 * Wa_1508744258:tgl,rkl,dg1,adl-s,adl-p
-		 */
-		wa_masked_en(wal, GEN7_COMMON_SLICE_CHICKEN1,
-			     GEN9_RHWO_OPTIMIZATION_DISABLE);
-	}
 }
 
 static void dg1_ctx_workarounds_init(struct intel_engine_cs *engine,
@@ -677,16 +684,6 @@ static void dg1_ctx_workarounds_init(struct intel_engine_cs *engine,
 	/* Wa_22010493298 */
 	wa_masked_en(wal, HIZ_CHICKEN,
 		     DG1_HZ_READ_SUPPRESSION_OPTIMIZATION_DISABLE);
-
-	/*
-	 * Wa_16011163337
-	 *
-	 * Like in tgl_ctx_workarounds_init(), read verification is ignored due
-	 * to Wa_1608008084.
-	 */
-	wa_add(wal,
-	       FF_MODE2,
-	       FF_MODE2_GS_TIMER_MASK, FF_MODE2_GS_TIMER_224, 0);
 }
 
 static void
@@ -703,12 +700,9 @@ __intel_engine_init_ctx_wa(struct intel_engine_cs *engine,
 
 	if (IS_DG1(i915))
 		dg1_ctx_workarounds_init(engine, wal);
-	else if (IS_ALDERLAKE_S(i915) || IS_ROCKETLAKE(i915) ||
-		 IS_TIGERLAKE(i915))
-		tgl_ctx_workarounds_init(engine, wal);
-	else if (IS_GEN(i915, 12))
+	else if (GRAPHICS_VER(i915) == 12)
 		gen12_ctx_workarounds_init(engine, wal);
-	else if (IS_GEN(i915, 11))
+	else if (GRAPHICS_VER(i915) == 11)
 		icl_ctx_workarounds_init(engine, wal);
 	else if (IS_CANNONLAKE(i915))
 		cnl_ctx_workarounds_init(engine, wal);
@@ -726,14 +720,14 @@ __intel_engine_init_ctx_wa(struct intel_engine_cs *engine,
 		chv_ctx_workarounds_init(engine, wal);
 	else if (IS_BROADWELL(i915))
 		bdw_ctx_workarounds_init(engine, wal);
-	else if (IS_GEN(i915, 7))
+	else if (GRAPHICS_VER(i915) == 7)
 		gen7_ctx_workarounds_init(engine, wal);
-	else if (IS_GEN(i915, 6))
+	else if (GRAPHICS_VER(i915) == 6)
 		gen6_ctx_workarounds_init(engine, wal);
-	else if (INTEL_GEN(i915) < 8)
-		return;
+	else if (GRAPHICS_VER(i915) < 8)
+		;
 	else
-		MISSING_CASE(INTEL_GEN(i915));
+		MISSING_CASE(GRAPHICS_VER(i915));
 
 	wa_init_finish(wal);
 }
@@ -957,7 +951,7 @@ wa_init_mcr(struct drm_i915_private *i915, struct i915_wa_list *wal)
 	unsigned int slice, subslice;
 	u32 l3_en, mcr, mcr_mask;
 
-	GEM_BUG_ON(INTEL_GEN(i915) < 10);
+	GEM_BUG_ON(GRAPHICS_VER(i915) < 10);
 
 	/*
 	 * WaProgramMgsrForL3BankSpecificMmioReads: cnl,icl
@@ -987,7 +981,7 @@ wa_init_mcr(struct drm_i915_private *i915, struct i915_wa_list *wal)
 	 * of every MMIO read.
 	 */
 
-	if (INTEL_GEN(i915) >= 10 && is_power_of_2(sseu->slice_mask)) {
+	if (GRAPHICS_VER(i915) >= 10 && is_power_of_2(sseu->slice_mask)) {
 		u32 l3_fuse =
 			intel_uncore_read(&i915->uncore, GEN10_MIRROR_FUSE3) &
 			GEN10_L3BANK_MASK;
@@ -1009,7 +1003,7 @@ wa_init_mcr(struct drm_i915_private *i915, struct i915_wa_list *wal)
 	}
 	subslice--;
 
-	if (INTEL_GEN(i915) >= 11) {
+	if (GRAPHICS_VER(i915) >= 11) {
 		mcr = GEN11_MCR_SLICE(slice) | GEN11_MCR_SUBSLICE(subslice);
 		mcr_mask = GEN11_MCR_SLICE_MASK | GEN11_MCR_SUBSLICE_MASK;
 	} else {
@@ -1085,11 +1079,16 @@ icl_gt_workarounds_init(struct drm_i915_private *i915, struct i915_wa_list *wal)
 
 	/* Wa_1607087056:icl,ehl,jsl */
 	if (IS_ICELAKE(i915) ||
-		IS_JSL_EHL_REVID(i915, EHL_REVID_A0, EHL_REVID_A0)) {
+	    IS_JSL_EHL_REVID(i915, EHL_REVID_A0, EHL_REVID_A0))
 		wa_write_or(wal,
 			    SLICE_UNIT_LEVEL_CLKGATE,
 			    L3_CLKGATE_DIS | L3_CR2X_CLKGATE_DIS);
-	}
+
+	/*
+	 * This is not a documented workaround, but rather an optimization
+	 * to reduce sampler power.
+	 */
+	wa_write_clr(wal, GEN10_DFR_RATIO_EN_AND_CHICKEN, DFR_DISABLE);
 }
 
 /*
@@ -1121,13 +1120,11 @@ gen12_gt_workarounds_init(struct drm_i915_private *i915,
 {
 	wa_init_mcr(i915, wal);
 
-	/* RH note: this workaround came in quite late, so limit it to ADL-S to avoid potential
-	 * regressions
-	 */
-	if (IS_ALDERLAKE_S(i915)) {
-		/* Wa_14011060649:tgl,rkl,dg1,adls */
-		wa_14011060649(i915, wal);
-	}
+	/* Wa_14011060649:tgl,rkl,dg1,adl-s,adl-p */
+	wa_14011060649(i915, wal);
+
+	/* Wa_14011059788:tgl,rkl,adl-s,dg1,adl-p */
+	wa_write_or(wal, GEN10_DFR_RATIO_EN_AND_CHICKEN, DFR_DISABLE);
 }
 
 static void
@@ -1184,9 +1181,9 @@ gt_init_workarounds(struct drm_i915_private *i915, struct i915_wa_list *wal)
 		dg1_gt_workarounds_init(i915, wal);
 	else if (IS_TIGERLAKE(i915))
 		tgl_gt_workarounds_init(i915, wal);
-	else if (IS_GEN(i915, 12))
+	else if (GRAPHICS_VER(i915) == 12)
 		gen12_gt_workarounds_init(i915, wal);
-	else if (IS_GEN(i915, 11))
+	else if (GRAPHICS_VER(i915) == 11)
 		icl_gt_workarounds_init(i915, wal);
 	else if (IS_CANNONLAKE(i915))
 		cnl_gt_workarounds_init(i915, wal);
@@ -1206,18 +1203,18 @@ gt_init_workarounds(struct drm_i915_private *i915, struct i915_wa_list *wal)
 		vlv_gt_workarounds_init(i915, wal);
 	else if (IS_IVYBRIDGE(i915))
 		ivb_gt_workarounds_init(i915, wal);
-	else if (IS_GEN(i915, 6))
+	else if (GRAPHICS_VER(i915) == 6)
 		snb_gt_workarounds_init(i915, wal);
-	else if (IS_GEN(i915, 5))
+	else if (GRAPHICS_VER(i915) == 5)
 		ilk_gt_workarounds_init(i915, wal);
 	else if (IS_G4X(i915))
 		g4x_gt_workarounds_init(i915, wal);
-	else if (IS_GEN(i915, 4))
+	else if (GRAPHICS_VER(i915) == 4)
 		gen4_gt_workarounds_init(i915, wal);
-	else if (INTEL_GEN(i915) <= 8)
-		return;
+	else if (GRAPHICS_VER(i915) <= 8)
+		;
 	else
-		MISSING_CASE(INTEL_GEN(i915));
+		MISSING_CASE(GRAPHICS_VER(i915));
 }
 
 void intel_gt_init_workarounds(struct drm_i915_private *i915)
@@ -1534,7 +1531,11 @@ static void tgl_whitelist_build(struct intel_engine_cs *engine)
 				  RING_FORCE_TO_NONPRIV_ACCESS_RD |
 				  RING_FORCE_TO_NONPRIV_RANGE_4);
 
-		/* Wa_1808121037:tgl */
+		/*
+		 * Wa_1808121037:tgl
+		 * Wa_14012131227:dg1
+		 * Wa_1508744258:tgl,rkl,dg1,adl-s,adl-p
+		 */
 		whitelist_reg(w, GEN7_COMMON_SLICE_CHICKEN1);
 
 		/* Wa_1806527549:tgl */
@@ -1571,9 +1572,9 @@ void intel_engine_init_whitelist(struct intel_engine_cs *engine)
 
 	if (IS_DG1(i915))
 		dg1_whitelist_build(engine);
-	else if (IS_GEN(i915, 12))
+	else if (GRAPHICS_VER(i915) == 12)
 		tgl_whitelist_build(engine);
-	else if (IS_GEN(i915, 11))
+	else if (GRAPHICS_VER(i915) == 11)
 		icl_whitelist_build(engine);
 	else if (IS_CANNONLAKE(i915))
 		cnl_whitelist_build(engine);
@@ -1589,10 +1590,10 @@ void intel_engine_init_whitelist(struct intel_engine_cs *engine)
 		bxt_whitelist_build(engine);
 	else if (IS_SKYLAKE(i915))
 		skl_whitelist_build(engine);
-	else if (INTEL_GEN(i915) <= 8)
-		return;
+	else if (GRAPHICS_VER(i915) <= 8)
+		;
 	else
-		MISSING_CASE(INTEL_GEN(i915));
+		MISSING_CASE(GRAPHICS_VER(i915));
 
 	wa_init_finish(w);
 }
@@ -1646,38 +1647,40 @@ rcs_engine_wa_init(struct intel_engine_cs *engine, struct i915_wa_list *wal)
 			    GEN7_DISABLE_SAMPLER_PREFETCH);
 	}
 
-	if (IS_ALDERLAKE_S(i915) || IS_DG1(i915) ||
+	if (IS_ALDERLAKE_P(i915) || IS_ALDERLAKE_S(i915) || IS_DG1(i915) ||
 	    IS_ROCKETLAKE(i915) || IS_TIGERLAKE(i915)) {
-		/* Wa_1606931601:tgl,rkl,dg1,adl-s */
+		/* Wa_1606931601:tgl,rkl,dg1,adl-s,adl-p */
 		wa_masked_en(wal, GEN7_ROW_CHICKEN2, GEN12_DISABLE_EARLY_READ);
 
 		/*
 		 * Wa_1407928979:tgl A*
 		 * Wa_18011464164:tgl[B0+],dg1[B0+]
 		 * Wa_22010931296:tgl[B0+],dg1[B0+]
-		 * Wa_14010919138:rkl,dg1,adl-s
+		 * Wa_14010919138:rkl,dg1,adl-s,adl-p
 		 */
 		wa_write_or(wal, GEN7_FF_THREAD_MODE,
 			    GEN12_FF_TESSELATION_DOP_GATE_DISABLE);
 
 		/*
-		 * Wa_1606700617:tgl,dg1
-		 * Wa_22010271021:tgl,rkl,dg1, adl-s
+		 * Wa_1606700617:tgl,dg1,adl-p
+		 * Wa_22010271021:tgl,rkl,dg1,adl-s,adl-p
+		 * Wa_14010826681:tgl,dg1,rkl,adl-p
 		 */
 		wa_masked_en(wal,
 			     GEN9_CS_DEBUG_MODE1,
 			     FF_DOP_CLOCK_GATE_DISABLE);
 	}
 
-	if (IS_ALDERLAKE_S(i915) || IS_DG1_REVID(i915, DG1_REVID_A0, DG1_REVID_A0) ||
+	if (IS_ALDERLAKE_P(i915) || IS_ALDERLAKE_S(i915) ||
+	    IS_DG1_REVID(i915, DG1_REVID_A0, DG1_REVID_A0) ||
 	    IS_ROCKETLAKE(i915) || IS_TIGERLAKE(i915)) {
-		/* Wa_1409804808:tgl,rkl,dg1[a0],adl-s */
+		/* Wa_1409804808:tgl,rkl,dg1[a0],adl-s,adl-p */
 		wa_masked_en(wal, GEN7_ROW_CHICKEN2,
 			     GEN12_PUSH_CONST_DEREF_HOLD_DIS);
 
 		/*
 		 * Wa_1409085225:tgl
-		 * Wa_14010229206:tgl,rkl,dg1[a0],adl-s
+		 * Wa_14010229206:tgl,rkl,dg1[a0],adl-s,adl-p
 		 */
 		wa_masked_en(wal, GEN9_ROW_CHICKEN4, GEN12_DISABLE_TDL_PUSH);
 	}
@@ -1702,14 +1705,14 @@ rcs_engine_wa_init(struct intel_engine_cs *engine, struct i915_wa_list *wal)
 	}
 
 	if (IS_DG1(i915) || IS_ROCKETLAKE(i915) || IS_TIGERLAKE(i915) ||
-	    IS_ALDERLAKE_S(i915)) {
-		/* Wa_1406941453:tgl,rkl,dg1,adl-s */
+	    IS_ALDERLAKE_S(i915) || IS_ALDERLAKE_P(i915)) {
+		/* Wa_1406941453:tgl,rkl,dg1,adl-s,adl-p */
 		wa_masked_en(wal,
 			     GEN10_SAMPLER_MODE,
 			     ENABLE_SMALLPL);
 	}
 
-	if (IS_GEN(i915, 11)) {
+	if (GRAPHICS_VER(i915) == 11) {
 		/* This is not an Wa. Enable for better image quality */
 		wa_masked_en(wal,
 			     _3D_CHICKEN3,
@@ -1801,14 +1804,13 @@ rcs_engine_wa_init(struct intel_engine_cs *engine, struct i915_wa_list *wal)
 			    GEN7_FF_THREAD_MODE,
 			    GEN12_FF_TESSELATION_DOP_GATE_DISABLE);
 
-		/* Wa_22010271021:ehl */
-		if (IS_JSL_EHL(i915))
-			wa_masked_en(wal,
-				     GEN9_CS_DEBUG_MODE1,
-				     FF_DOP_CLOCK_GATE_DISABLE);
+		/* Wa_22010271021 */
+		wa_masked_en(wal,
+			     GEN9_CS_DEBUG_MODE1,
+			     FF_DOP_CLOCK_GATE_DISABLE);
 	}
 
-	if (IS_GEN_RANGE(i915, 9, 12)) {
+	if (IS_GRAPHICS_VER(i915, 9, 12)) {
 		/* FtrPerCtxtPreemptionGranularityControl:skl,bxt,kbl,cfl,cnl,icl,tgl */
 		wa_masked_en(wal,
 			     GEN7_FF_SLICE_CS_CHICKEN1,
@@ -1832,7 +1834,7 @@ rcs_engine_wa_init(struct intel_engine_cs *engine, struct i915_wa_list *wal)
 			     GEN9_POOLED_EU_LOAD_BALANCING_FIX_DISABLE);
 	}
 
-	if (IS_GEN(i915, 9)) {
+	if (GRAPHICS_VER(i915) == 9) {
 		/* WaContextSwitchWithConcurrentTLBInvalidate:skl,bxt,kbl,glk,cfl */
 		wa_masked_en(wal,
 			     GEN9_CSFE_CHICKEN1_RCS,
@@ -1874,9 +1876,6 @@ rcs_engine_wa_init(struct intel_engine_cs *engine, struct i915_wa_list *wal)
 			      CACHE_MODE_0_GEN7,
 			      /* enable HiZ Raw Stall Optimization */
 			      HIZ_RAW_STALL_OPT_DISABLE);
-
-		/* WaDisable4x2SubspanOptimization:hsw */
-		wa_masked_en(wal, CACHE_MODE_1, PIXEL_SUBSPAN_COLLECT_OPT_DISABLE);
 	}
 
 	if (IS_VALLEYVIEW(i915)) {
@@ -1939,7 +1938,7 @@ rcs_engine_wa_init(struct intel_engine_cs *engine, struct i915_wa_list *wal)
 				     GEN7_PSD_SINGLE_PORT_DISPATCH_ENABLE);
 	}
 
-	if (IS_GEN(i915, 7)) {
+	if (GRAPHICS_VER(i915) == 7) {
 		/* WaBCSVCSTlbInvalidationMode:ivb,vlv,hsw */
 		wa_masked_en(wal,
 			     GFX_MODE_GEN7,
@@ -1971,7 +1970,7 @@ rcs_engine_wa_init(struct intel_engine_cs *engine, struct i915_wa_list *wal)
 		       GEN6_WIZ_HASHING_16x4);
 	}
 
-	if (IS_GEN_RANGE(i915, 6, 7))
+	if (IS_GRAPHICS_VER(i915, 6, 7))
 		/*
 		 * We need to disable the AsyncFlip performance optimisations in
 		 * order to use MI_WAIT_FOR_EVENT within the CS. It should
@@ -1983,7 +1982,7 @@ rcs_engine_wa_init(struct intel_engine_cs *engine, struct i915_wa_list *wal)
 			     MI_MODE,
 			     ASYNC_FLIP_PERF_DISABLE);
 
-	if (IS_GEN(i915, 6)) {
+	if (GRAPHICS_VER(i915) == 6) {
 		/*
 		 * Required for the hardware to program scanline values for
 		 * waiting
@@ -2037,14 +2036,14 @@ rcs_engine_wa_init(struct intel_engine_cs *engine, struct i915_wa_list *wal)
 			      CM0_STC_EVICT_DISABLE_LRA_SNB);
 	}
 
-	if (IS_GEN_RANGE(i915, 4, 6))
+	if (IS_GRAPHICS_VER(i915, 4, 6))
 		/* WaTimedSingleVertexDispatch:cl,bw,ctg,elk,ilk,snb */
 		wa_add(wal, MI_MODE,
 		       0, _MASKED_BIT_ENABLE(VS_TIMER_DISPATCH),
 		       /* XXX bit doesn't stick on Broadwater */
 		       IS_I965G(i915) ? 0 : VS_TIMER_DISPATCH);
 
-	if (IS_GEN(i915, 4))
+	if (GRAPHICS_VER(i915) == 4)
 		/*
 		 * Disable CONSTANT_BUFFER before it is loaded from the context
 		 * image. For as it is loaded, it is executed and the stored
@@ -2076,7 +2075,7 @@ xcs_engine_wa_init(struct intel_engine_cs *engine, struct i915_wa_list *wal)
 static void
 engine_init_workarounds(struct intel_engine_cs *engine, struct i915_wa_list *wal)
 {
-	if (I915_SELFTEST_ONLY(INTEL_GEN(engine->i915) < 4))
+	if (I915_SELFTEST_ONLY(GRAPHICS_VER(engine->i915) < 4))
 		return;
 
 	if (engine->class == RENDER_CLASS)
@@ -2089,7 +2088,7 @@ void intel_engine_init_workarounds(struct intel_engine_cs *engine)
 {
 	struct i915_wa_list *wal = &engine->wa_list;
 
-	if (INTEL_GEN(engine->i915) < 4)
+	if (GRAPHICS_VER(engine->i915) < 4)
 		return;
 
 	wa_init_start(wal, "engine", engine->name);
@@ -2130,9 +2129,9 @@ static bool mcr_range(struct drm_i915_private *i915, u32 offset)
 	const struct mcr_range *mcr_ranges;
 	int i;
 
-	if (INTEL_GEN(i915) >= 12)
+	if (GRAPHICS_VER(i915) >= 12)
 		mcr_ranges = mcr_ranges_gen12;
-	else if (INTEL_GEN(i915) >= 8)
+	else if (GRAPHICS_VER(i915) >= 8)
 		mcr_ranges = mcr_ranges_gen8;
 	else
 		return false;
@@ -2161,7 +2160,7 @@ wa_list_srm(struct i915_request *rq,
 	u32 srm, *cs;
 
 	srm = MI_STORE_REGISTER_MEM | MI_SRM_LRM_GLOBAL_GTT;
-	if (INTEL_GEN(i915) >= 8)
+	if (GRAPHICS_VER(i915) >= 8)
 		srm++;
 
 	for (i = 0, wa = wal->list; i < wal->count; i++, wa++) {
@@ -2218,10 +2217,15 @@ retry:
 	if (err)
 		goto err_pm;
 
+	err = i915_vma_pin_ww(vma, &ww, 0, 0,
+			   i915_vma_is_ggtt(vma) ? PIN_GLOBAL : PIN_USER);
+	if (err)
+		goto err_unpin;
+
 	rq = i915_request_create(ce);
 	if (IS_ERR(rq)) {
 		err = PTR_ERR(rq);
-		goto err_unpin;
+		goto err_vma;
 	}
 
 	err = i915_request_await_object(rq, vma->obj, true);
@@ -2262,6 +2266,8 @@ retry:
 
 err_rq:
 	i915_request_put(rq);
+err_vma:
+	i915_vma_unpin(vma);
 err_unpin:
 	intel_context_unpin(ce);
 err_pm:
@@ -2272,7 +2278,6 @@ err_pm:
 	}
 	i915_gem_ww_ctx_fini(&ww);
 	intel_engine_pm_put(ce->engine);
-	i915_vma_unpin(vma);
 	i915_vma_put(vma);
 	return err;
 }

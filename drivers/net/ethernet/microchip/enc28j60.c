@@ -1554,7 +1554,6 @@ static int enc28j60_probe(struct spi_device *spi)
 {
 	struct net_device *dev;
 	struct enc28j60_net *priv;
-	const void *macaddr;
 	int ret = 0;
 
 	if (netif_msg_drv(&debug))
@@ -1587,11 +1586,10 @@ static int enc28j60_probe(struct spi_device *spi)
 		goto error_irq;
 	}
 
-	macaddr = of_get_mac_address(spi->dev.of_node);
-	if (macaddr)
-		ether_addr_copy(dev->dev_addr, macaddr);
-	else
+	ret = of_get_mac_address(spi->dev.of_node, dev->dev_addr);
+	if (ret)
 		eth_hw_addr_random(dev);
+
 	enc28j60_set_hw_macaddr(dev);
 
 	/* Board setup must set the relevant edge trigger type;

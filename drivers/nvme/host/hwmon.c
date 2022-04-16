@@ -263,5 +263,6 @@ void nvme_hwmon_exit(struct nvme_ctrl *ctrl)
 		hwmon_device_unregister(ctrl->hwmon_device);
 		ctrl->hwmon_device = NULL;
 		kfree(data);
+		return PTR_ERR(hwmon);
 	}
 }

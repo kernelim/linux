@@ -602,7 +602,6 @@ static int mac_probe(struct platform_device *_of_dev)
 	struct platform_device	*of_dev;
 	struct resource		 res;
 	struct mac_priv_s	*priv;
-	const u8		*mac_addr;
 	u32			 val;
 	u8			fman_id;
 	int			phy_if;
@@ -720,13 +719,12 @@ static int mac_probe(struct platform_device *_of_dev)
 	priv->cell_index = (u8)val;
 
 	/* Get the MAC address */
-	mac_addr = of_get_mac_address(mac_node);
-	if (!mac_addr) {
+	err = of_get_mac_address(mac_node, mac_dev->addr);
+	if (err) {
 		dev_err(dev, "of_get_mac_address(%pOF) failed\n", mac_node);
 		err = -EINVAL;
 		goto _return_of_get_parent;
 	}
-	memcpy(mac_dev->addr, mac_addr, sizeof(mac_dev->addr));
 
 	/* Get the port handles */
 	nph = of_count_phandle_with_args(mac_node, "fsl,fman-ports", NULL);

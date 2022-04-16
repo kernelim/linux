@@ -107,7 +107,8 @@ struct work_struct {
 #ifdef CONFIG_LOCKDEP
 	struct lockdep_map lockdep_map;
 #endif
-	RH_KABI_RESERVE(1)
+ 	/* RHEL-Only for use by wb_update_bandwidth_workfn */
+	RH_KABI_USE(1, void *bdi_wb_backptr)
 	RH_KABI_RESERVE(2)
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)

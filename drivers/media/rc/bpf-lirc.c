@@ -8,7 +8,7 @@
 #include <linux/bpf_lirc.h>
 #include "rc-core-priv.h"
 
-#include <linux/rh_features.h>
+#include <linux/rh_flags.h>
 
 #define lirc_rcu_dereference(p)						\
 	rcu_dereference_protected(p, lockdep_is_held(&ir_raw_handler_lock))
@@ -253,7 +253,7 @@ int lirc_prog_attach(const union bpf_attr *attr, struct bpf_prog *prog)
 	struct rc_dev *rcdev;
 	int ret;
 
-	rh_mark_used_feature("eBPF/lirc");
+	rh_add_flag("eBPF/lirc");
 
 	if (attr->attach_flags)
 		return -EINVAL;

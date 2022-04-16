@@ -42,8 +42,11 @@ static void wil_ethtoolops_complete(struct net_device *ndev)
 	mutex_unlock(&wil->mutex);
 }
 
-static int wil_ethtoolops_get_coalesce(struct net_device *ndev,
-				       struct ethtool_coalesce *cp)
+static int
+wil_ethtoolops_get_coalesce(struct net_device *ndev,
+			    struct ethtool_coalesce *cp,
+			    struct kernel_ethtool_coalesce *kernel_coal,
+			    struct netlink_ext_ack *extack)
 {
 	struct wil6210_priv *wil = ndev_to_wil(ndev);
 	u32 tx_itr_en, tx_itr_val = 0;
@@ -71,8 +74,11 @@ static int wil_ethtoolops_get_coalesce(struct net_device *ndev,
 	return 0;
 }
 
-static int wil_ethtoolops_set_coalesce(struct net_device *ndev,
-				       struct ethtool_coalesce *cp)
+static int
+wil_ethtoolops_set_coalesce(struct net_device *ndev,
+			    struct ethtool_coalesce *cp,
+			    struct kernel_ethtool_coalesce *kernel_coal,
+			    struct netlink_ext_ack *extack)
 {
 	struct wil6210_priv *wil = ndev_to_wil(ndev);
 	struct wireless_dev *wdev = ndev->ieee80211_ptr;

@@ -14,6 +14,7 @@
 #include <linux/kthread.h>
 #include <linux/scatterlist.h>
 #include <linux/dma-mapping.h>
+#include <linux/backing-dev.h>
 
 #include <linux/mmc/card.h>
 #include <linux/mmc/host.h>
@@ -428,6 +429,9 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card)
 		ret = PTR_ERR(mq->queue);
 		goto free_tag_set;
 	}
+
+	if (mmc_host_is_spi(host) && host->use_spi_crc)
+		blk_queue_flag_set(QUEUE_FLAG_STABLE_WRITES, mq->queue);
 
 	mq->queue->queuedata = mq;
 	blk_queue_rq_timeout(mq->queue, 60 * HZ);

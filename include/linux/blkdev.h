@@ -68,8 +68,6 @@ typedef void (rq_end_io_fn)(struct request *, blk_status_t);
  * request flags */
 typedef __u32 __bitwise req_flags_t;
 
-/* elevator knows about this request */
-#define RQF_SORTED		((__force req_flags_t)(1 << 0))
 /* drive already may have started this one */
 #define RQF_STARTED		((__force req_flags_t)(1 << 1))
 /* may not be passed by ioscheduler */
@@ -164,7 +162,7 @@ struct request {
 	 */
 	union {
 		struct hlist_node hash;	/* merge hash */
-		struct list_head ipi_list;
+		RH_KABI_REPLACE(struct list_head ipi_list, struct llist_node ipi_list)
 	};
 
 	/*
@@ -281,6 +279,12 @@ static inline bool bio_is_passthrough(struct bio *bio)
 	unsigned op = bio_op(bio);
 
 	return blk_op_is_scsi(op) || blk_op_is_private(op);
+}
+
+static inline bool blk_op_is_passthrough(unsigned int op)
+{
+	return (blk_op_is_scsi(op & REQ_OP_MASK) ||
+			blk_op_is_private(op & REQ_OP_MASK));
 }
 
 static inline unsigned short req_get_ioprio(struct request *req)
@@ -485,7 +489,7 @@ struct request_queue {
 #ifdef CONFIG_PM
 	struct device		*dev;
 	RH_KABI_REPLACE(int	rpm_status, enum rpm_status rpm_status)
-	unsigned int		nr_pending;
+	RH_KABI_DEPRECATE(unsigned int,		nr_pending)
 #endif
 
 	/*
@@ -654,7 +658,7 @@ struct request_queue {
 #define QUEUE_FLAG_PCI_P2PDMA  29	/* device supports PCI p2p requests */
 #define QUEUE_FLAG_ZONE_RESETALL 30	/* supports Zone Reset All */
 #define QUEUE_FLAG_NOWAIT      31	/* device supports NOWAIT */
-
+#define QUEUE_FLAG_STABLE_WRITES 32	/* don't modify blks until WB is done */
 #define QUEUE_FLAG_DEFAULT	((1 << QUEUE_FLAG_IO_STAT) |		\
 				 (1 << QUEUE_FLAG_SAME_COMP)	|	\
 				 (1 << QUEUE_FLAG_ADD_RANDOM))
@@ -677,6 +681,8 @@ bool blk_queue_flag_test_and_set(unsigned int flag, struct request_queue *q);
 #define blk_queue_unpriv_sgio(q) \
 	test_bit(QUEUE_FLAG_UNPRIV_SGIO, &(q)->queue_flags)
 #define blk_queue_nonrot(q)	test_bit(QUEUE_FLAG_NONROT, &(q)->queue_flags)
+#define blk_queue_stable_writes(q) \
+	test_bit(QUEUE_FLAG_STABLE_WRITES, &(q)->queue_flags)
 #define blk_queue_io_stat(q)	test_bit(QUEUE_FLAG_IO_STAT, &(q)->queue_flags)
 #define blk_queue_add_random(q)	test_bit(QUEUE_FLAG_ADD_RANDOM, &(q)->queue_flags)
 #define blk_queue_discard(q)	test_bit(QUEUE_FLAG_DISCARD, &(q)->queue_flags)
@@ -707,11 +713,6 @@ bool blk_queue_flag_test_and_set(unsigned int flag, struct request_queue *q);
 
 extern void blk_set_pm_only(struct request_queue *q);
 extern void blk_clear_pm_only(struct request_queue *q);
-
-static inline bool blk_account_rq(struct request *rq)
-{
-	return (rq->rq_flags & RQF_STARTED) && !blk_rq_is_passthrough(rq);
-}
 
 #define list_entry_rq(ptr)	list_entry((ptr), struct request, queuelist)
 
@@ -948,6 +949,8 @@ extern void blk_execute_rq(struct request_queue *, struct gendisk *,
 			  struct request *, int);
 extern void blk_execute_rq_nowait(struct request_queue *, struct gendisk *,
 				  struct request *, int, rq_end_io_fn *);
+blk_status_t blk_execute_rq_rh(struct request_queue *, struct gendisk *,
+			  struct request *, int);
 
 /* Helper to convert REQ_OP_XXX to its string format XXX */
 extern const char *blk_op_str(unsigned int op);
@@ -1282,7 +1285,7 @@ static inline bool blk_needs_flush_plug(struct task_struct *tsk)
 
 extern void blk_io_schedule(void);
 
-int blkdev_issue_flush(struct block_device *, gfp_t);
+int blkdev_issue_flush(struct block_device *bdev);
 extern int blkdev_issue_write_same(struct block_device *bdev, sector_t sector,
 		sector_t nr_sects, gfp_t gfp_mask, struct page *page);
 
@@ -1912,7 +1915,7 @@ static inline bool blk_needs_flush_plug(struct task_struct *tsk)
 	return false;
 }
 
-static inline int blkdev_issue_flush(struct block_device *bdev, gfp_t gfp_mask)
+static inline int blkdev_issue_flush(struct block_device *bdev)
 {
 	return 0;
 }
@@ -1943,16 +1946,8 @@ unsigned long part_start_io_acct(struct gendisk *disk, struct hd_struct **part,
 void part_end_io_acct(struct hd_struct *part, struct bio *bio,
 		      unsigned long start_time);
 
-/**
- * bio_start_io_acct - start I/O accounting for bio based drivers
- * @bio:	bio to start account for
- *
- * Returns the start time that should be passed back to bio_end_io_acct().
- */
-static inline unsigned long bio_start_io_acct(struct bio *bio)
-{
-	return disk_start_io_acct(bio->bi_disk, bio_sectors(bio), bio_op(bio));
-}
+void bio_start_io_acct_time(struct bio *bio, unsigned long start_time);
+unsigned long bio_start_io_acct(struct bio *bio);
 
 /**
  * bio_end_io_acct - end I/O accounting for bio based drivers
@@ -1994,20 +1989,15 @@ void blkdev_put(struct block_device *bdev, fmode_t mode);
 struct block_device *bdget(dev_t);
 struct block_device *bdgrab(struct block_device *bdev);
 void bdput(struct block_device *);
+int truncate_bdev_range(struct block_device *bdev, fmode_t mode, loff_t lstart,
+		loff_t lend);
 
 #ifdef CONFIG_BLOCK
 void invalidate_bdev(struct block_device *bdev);
-int truncate_bdev_range(struct block_device *bdev, fmode_t mode, loff_t lstart,
-			loff_t lend);
 int sync_blockdev(struct block_device *bdev);
 #else
 static inline void invalidate_bdev(struct block_device *bdev)
 {
-}
-static inline int truncate_bdev_range(struct block_device *bdev, fmode_t mode,
-				      loff_t lstart, loff_t lend)
-{
-	return 0;
 }
 static inline int sync_blockdev(struct block_device *bdev)
 {

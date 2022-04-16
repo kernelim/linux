@@ -26,6 +26,7 @@
 #include <linux/wait.h>
 #include <linux/atomic.h>
 #include <linux/workqueue.h>
+#include <linux/uidgid.h>
 #include <linux/rh_kabi.h>
 
 #define UEVENT_HELPER_PATH_LEN		256
@@ -119,6 +120,8 @@ extern struct kobject * __must_check kobject_get_unless_zero(
 extern void kobject_put(struct kobject *kobj);
 
 extern const void *kobject_namespace(struct kobject *kobj);
+extern void kobject_get_ownership(struct kobject *kobj,
+				  kuid_t *uid, kgid_t *gid);
 extern char *kobject_get_path(struct kobject *kobj, gfp_t flag);
 
 /**
@@ -145,7 +148,7 @@ struct kobj_type {
 	const struct kobj_ns_type_operations *(*child_ns_type)(struct kobject *kobj);
 	const void *(*namespace)(struct kobject *kobj);
 	RH_KABI_USE(1, const struct attribute_group **default_groups)
-	RH_KABI_RESERVE(2)
+	RH_KABI_USE(2, void (*get_ownership)(struct kobject *kobj, kuid_t *uid, kgid_t *gid))
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
 };

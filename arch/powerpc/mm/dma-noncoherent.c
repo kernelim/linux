@@ -30,8 +30,8 @@
 #include <linux/types.h>
 #include <linux/highmem.h>
 #include <linux/dma-direct.h>
-#include <linux/dma-noncoherent.h>
 #include <linux/export.h>
+#include <linux/dma-map-ops.h>
 
 #include <asm/tlbflush.h>
 #include <asm/dma.h>

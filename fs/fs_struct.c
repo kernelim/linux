@@ -7,6 +7,8 @@
 #include <linux/fs_struct.h>
 #include "internal.h"
 
+#include <linux/rh_tasklist_lock.h>
+
 /*
  * Replace the fs->{rootmnt,root} with {mnt,dentry}. Put the old values.
  * It can block.

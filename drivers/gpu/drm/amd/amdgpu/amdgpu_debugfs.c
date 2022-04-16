@@ -27,8 +27,6 @@
 #include <linux/pci.h>
 #include <linux/uaccess.h>
 #include <linux/pm_runtime.h>
-#include <linux/poll.h>
-#include <drm/drm_debugfs.h>
 
 #include "amdgpu.h"
 #include "amdgpu_pm.h"
@@ -38,124 +36,7 @@
 #include "amdgpu_securedisplay.h"
 #include "amdgpu_fw_attestation.h"
 
-/**
- * amdgpu_debugfs_add_files - Add simple debugfs entries
- *
- * @adev:  Device to attach debugfs entries to
- * @files:  Array of function callbacks that respond to reads
- * @nfiles: Number of callbacks to register
- *
- */
-int amdgpu_debugfs_add_files(struct amdgpu_device *adev,
-			     const struct drm_info_list *files,
-			     unsigned nfiles)
-{
-	unsigned i;
-
-	for (i = 0; i < adev->debugfs_count; i++) {
-		if (adev->debugfs[i].files == files) {
-			/* Already registered */
-			return 0;
-		}
-	}
-
-	i = adev->debugfs_count + 1;
-	if (i > AMDGPU_DEBUGFS_MAX_COMPONENTS) {
-		DRM_ERROR("Reached maximum number of debugfs components.\n");
-		DRM_ERROR("Report so we increase "
-			  "AMDGPU_DEBUGFS_MAX_COMPONENTS.\n");
-		return -EINVAL;
-	}
-	adev->debugfs[adev->debugfs_count].files = files;
-	adev->debugfs[adev->debugfs_count].num_files = nfiles;
-	adev->debugfs_count = i;
 #if defined(CONFIG_DEBUG_FS)
-	drm_debugfs_create_files(files, nfiles,
-				 adev_to_drm(adev)->primary->debugfs_root,
-				 adev_to_drm(adev)->primary);
-#endif
-	return 0;
-}
-
-int amdgpu_debugfs_wait_dump(struct amdgpu_device *adev)
-{
-#if defined(CONFIG_DEBUG_FS)
-	unsigned long timeout = 600 * HZ;
-	int ret;
-
-	wake_up_interruptible(&adev->autodump.gpu_hang);
-
-	ret = wait_for_completion_interruptible_timeout(&adev->autodump.dumping, timeout);
-	if (ret == 0) {
-		pr_err("autodump: timeout, move on to gpu recovery\n");
-		return -ETIMEDOUT;
-	}
-#endif
-	return 0;
-}
-
-#if defined(CONFIG_DEBUG_FS)
-
-static int amdgpu_debugfs_autodump_open(struct inode *inode, struct file *file)
-{
-	struct amdgpu_device *adev = inode->i_private;
-	int ret;
-
-	file->private_data = adev;
-
-	ret = down_read_killable(&adev->reset_sem);
-	if (ret)
-		return ret;
-
-	if (adev->autodump.dumping.done) {
-		reinit_completion(&adev->autodump.dumping);
-		ret = 0;
-	} else {
-		ret = -EBUSY;
-	}
-
-	up_read(&adev->reset_sem);
-
-	return ret;
-}
-
-static int amdgpu_debugfs_autodump_release(struct inode *inode, struct file *file)
-{
-	struct amdgpu_device *adev = file->private_data;
-
-	complete_all(&adev->autodump.dumping);
-	return 0;
-}
-
-static unsigned int amdgpu_debugfs_autodump_poll(struct file *file, struct poll_table_struct *poll_table)
-{
-	struct amdgpu_device *adev = file->private_data;
-
-	poll_wait(file, &adev->autodump.gpu_hang, poll_table);
-
-	if (amdgpu_in_reset(adev))
-		return POLLIN | POLLRDNORM | POLLWRNORM;
-
-	return 0;
-}
-
-static const struct file_operations autodump_debug_fops = {
-	.owner = THIS_MODULE,
-	.open = amdgpu_debugfs_autodump_open,
-	.poll = amdgpu_debugfs_autodump_poll,
-	.release = amdgpu_debugfs_autodump_release,
-};
-
-static void amdgpu_debugfs_autodump_init(struct amdgpu_device *adev)
-{
-	init_completion(&adev->autodump.dumping);
-	complete_all(&adev->autodump.dumping);
-	init_waitqueue_head(&adev->autodump.gpu_hang);
-
-	debugfs_create_file("amdgpu_autodump", 0600,
-		adev_to_drm(adev)->primary->debugfs_root,
-		adev, &autodump_debug_fops);
-}
 
 /**
  * amdgpu_debugfs_process_reg_op - Handle MMIO register reads/writes
@@ -1030,7 +911,7 @@ err:
 }
 
 /**
- * amdgpu_debugfs_regs_gfxoff_write - Enable/disable GFXOFF
+ * amdgpu_debugfs_gfxoff_write - Enable/disable GFXOFF
  *
  * @f: open file handle
  * @buf: User buffer to write data from
@@ -1081,7 +962,7 @@ static ssize_t amdgpu_debugfs_gfxoff_write(struct file *f, const char __user *bu
 
 
 /**
- * amdgpu_debugfs_regs_gfxoff_status - read gfxoff status
+ * amdgpu_debugfs_gfxoff_read - read gfxoff status
  *
  * @f: open file handle
  * @buf: User buffer to store read data in
@@ -1228,22 +1109,20 @@ int amdgpu_debugfs_regs_init(struct amdgpu_device *adev)
 					  adev, debugfs_regs[i]);
 		if (!i && !IS_ERR_OR_NULL(ent))
 			i_size_write(ent->d_inode, adev->rmmio_size);
-		adev->debugfs_regs[i] = ent;
 	}
 
 	return 0;
 }
 
-static int amdgpu_debugfs_test_ib(struct seq_file *m, void *data)
+static int amdgpu_debugfs_test_ib_show(struct seq_file *m, void *unused)
 {
-	struct drm_info_node *node = (struct drm_info_node *) m->private;
-	struct drm_device *dev = node->minor->dev;
-	struct amdgpu_device *adev = drm_to_adev(dev);
+	struct amdgpu_device *adev = (struct amdgpu_device *)m->private;
+	struct drm_device *dev = adev_to_drm(adev);
 	int r = 0, i;
 
 	r = pm_runtime_get_sync(dev->dev);
 	if (r < 0) {
-		pm_runtime_put_autosuspend(adev_to_drm(adev)->dev);
+		pm_runtime_put_autosuspend(dev->dev);
 		return r;
 	}
 
@@ -1285,30 +1164,19 @@ static int amdgpu_debugfs_test_ib(struct seq_file *m, void *data)
 	return 0;
 }
 
-static int amdgpu_debugfs_get_vbios_dump(struct seq_file *m, void *data)
+static int amdgpu_debugfs_evict_vram(void *data, u64 *val)
 {
-	struct drm_info_node *node = (struct drm_info_node *) m->private;
-	struct drm_device *dev = node->minor->dev;
-	struct amdgpu_device *adev = drm_to_adev(dev);
-
-	seq_write(m, adev->bios, adev->bios_size);
-	return 0;
-}
-
-static int amdgpu_debugfs_evict_vram(struct seq_file *m, void *data)
-{
-	struct drm_info_node *node = (struct drm_info_node *)m->private;
-	struct drm_device *dev = node->minor->dev;
-	struct amdgpu_device *adev = drm_to_adev(dev);
+	struct amdgpu_device *adev = (struct amdgpu_device *)data;
+	struct drm_device *dev = adev_to_drm(adev);
 	int r;
 
 	r = pm_runtime_get_sync(dev->dev);
 	if (r < 0) {
-		pm_runtime_put_autosuspend(adev_to_drm(adev)->dev);
+		pm_runtime_put_autosuspend(dev->dev);
 		return r;
 	}
 
-	seq_printf(m, "(%d)\n", amdgpu_bo_evict_vram(adev));
+	*val = amdgpu_bo_evict_vram(adev);
 
 	pm_runtime_mark_last_busy(dev->dev);
 	pm_runtime_put_autosuspend(dev->dev);
@@ -1316,11 +1184,11 @@ static int amdgpu_debugfs_evict_vram(struct seq_file *m, void *data)
 	return 0;
 }
 
-static int amdgpu_debugfs_evict_gtt(struct seq_file *m, void *data)
+
+static int amdgpu_debugfs_evict_gtt(void *data, u64 *val)
 {
-	struct drm_info_node *node = (struct drm_info_node *)m->private;
-	struct drm_device *dev = node->minor->dev;
-	struct amdgpu_device *adev = drm_to_adev(dev);
+	struct amdgpu_device *adev = (struct amdgpu_device *)data;
+	struct drm_device *dev = adev_to_drm(adev);
 	struct ttm_resource_manager *man;
 	int r;
 
@@ -1331,8 +1199,7 @@ static int amdgpu_debugfs_evict_gtt(struct seq_file *m, void *data)
 	}
 
 	man = ttm_manager_type(&adev->mman.bdev, TTM_PL_TT);
-	r = ttm_resource_manager_evict_all(&adev->mman.bdev, man);
-	seq_printf(m, "(%d)\n", r);
+	*val = ttm_resource_manager_evict_all(&adev->mman.bdev, man);
 
 	pm_runtime_mark_last_busy(dev->dev);
 	pm_runtime_put_autosuspend(dev->dev);
@@ -1340,10 +1207,11 @@ static int amdgpu_debugfs_evict_gtt(struct seq_file *m, void *data)
 	return 0;
 }
 
-static int amdgpu_debugfs_vm_info(struct seq_file *m, void *data)
+
+static int amdgpu_debugfs_vm_info_show(struct seq_file *m, void *unused)
 {
-	struct drm_info_node *node = (struct drm_info_node *)m->private;
-	struct drm_device *dev = node->minor->dev;
+	struct amdgpu_device *adev = (struct amdgpu_device *)m->private;
+	struct drm_device *dev = adev_to_drm(adev);
 	struct drm_file *file;
 	int r;
 
@@ -1357,11 +1225,11 @@ static int amdgpu_debugfs_vm_info(struct seq_file *m, void *data)
 
 		seq_printf(m, "pid:%d\tProcess:%s ----------\n",
 				vm->task_info.pid, vm->task_info.process_name);
-		r = amdgpu_bo_reserve(vm->root.base.bo, true);
+		r = amdgpu_bo_reserve(vm->root.bo, true);
 		if (r)
 			break;
 		amdgpu_debugfs_vm_bo_info(vm, m);
-		amdgpu_bo_unreserve(vm->root.base.bo);
+		amdgpu_bo_unreserve(vm->root.bo);
 	}
 
 	mutex_unlock(&dev->filelist_mutex);
@@ -1369,13 +1237,12 @@ static int amdgpu_debugfs_vm_info(struct seq_file *m, void *data)
 	return r;
 }
 
-static const struct drm_info_list amdgpu_debugfs_list[] = {
-	{"amdgpu_vbios", amdgpu_debugfs_get_vbios_dump},
-	{"amdgpu_test_ib", &amdgpu_debugfs_test_ib},
-	{"amdgpu_evict_vram", &amdgpu_debugfs_evict_vram},
-	{"amdgpu_evict_gtt", &amdgpu_debugfs_evict_gtt},
-	{"amdgpu_vm_info", &amdgpu_debugfs_vm_info},
-};
+DEFINE_SHOW_ATTRIBUTE(amdgpu_debugfs_test_ib);
+DEFINE_SHOW_ATTRIBUTE(amdgpu_debugfs_vm_info);
+DEFINE_DEBUGFS_ATTRIBUTE(amdgpu_evict_vram_fops, amdgpu_debugfs_evict_vram,
+			 NULL, "%lld\n");
+DEFINE_DEBUGFS_ATTRIBUTE(amdgpu_evict_gtt_fops, amdgpu_debugfs_evict_gtt,
+			 NULL, "%lld\n");
 
 static void amdgpu_ib_preempt_fences_swap(struct amdgpu_ring *ring,
 					  struct dma_fence **fences)
@@ -1586,71 +1453,48 @@ static int amdgpu_debugfs_sclk_set(void *data, u64 val)
 	return 0;
 }
 
-DEFINE_SIMPLE_ATTRIBUTE(fops_ib_preempt, NULL,
+DEFINE_DEBUGFS_ATTRIBUTE(fops_ib_preempt, NULL,
 			amdgpu_debugfs_ib_preempt, "%llu\n");
 
-DEFINE_SIMPLE_ATTRIBUTE(fops_sclk_set, NULL,
+DEFINE_DEBUGFS_ATTRIBUTE(fops_sclk_set, NULL,
 			amdgpu_debugfs_sclk_set, "%llu\n");
 
 int amdgpu_debugfs_init(struct amdgpu_device *adev)
 {
+	struct dentry *root = adev_to_drm(adev)->primary->debugfs_root;
+	struct dentry *ent;
 	int r, i;
 
-	adev->debugfs_preempt =
-		debugfs_create_file("amdgpu_preempt_ib", 0600,
-				    adev_to_drm(adev)->primary->debugfs_root, adev,
-				    &fops_ib_preempt);
-	if (!(adev->debugfs_preempt)) {
+	ent = debugfs_create_file("amdgpu_preempt_ib", 0600, root, adev,
+				  &fops_ib_preempt);
+	if (IS_ERR(ent)) {
 		DRM_ERROR("unable to create amdgpu_preempt_ib debugsfs file\n");
-		return -EIO;
+		return PTR_ERR(ent);
 	}
 
-	adev->smu.debugfs_sclk =
-		debugfs_create_file("amdgpu_force_sclk", 0200,
-				    adev_to_drm(adev)->primary->debugfs_root, adev,
-				    &fops_sclk_set);
-	if (!(adev->smu.debugfs_sclk)) {
+	ent = debugfs_create_file("amdgpu_force_sclk", 0200, root, adev,
+				  &fops_sclk_set);
+	if (IS_ERR(ent)) {
 		DRM_ERROR("unable to create amdgpu_set_sclk debugsfs file\n");
-		return -EIO;
+		return PTR_ERR(ent);
 	}
 
 	/* Register debugfs entries for amdgpu_ttm */
-	r = amdgpu_ttm_debugfs_init(adev);
-	if (r) {
-		DRM_ERROR("Failed to init debugfs\n");
-		return r;
-	}
-
-	r = amdgpu_debugfs_pm_init(adev);
-	if (r) {
-		DRM_ERROR("Failed to register debugfs file for dpm!\n");
-		return r;
-	}
-
-	if (amdgpu_debugfs_sa_init(adev)) {
-		dev_err(adev->dev, "failed to register debugfs file for SA\n");
-	}
-
-	if (amdgpu_debugfs_fence_init(adev))
-		dev_err(adev->dev, "fence debugfs file creation failed\n");
-
-	r = amdgpu_debugfs_gem_init(adev);
-	if (r)
-		DRM_ERROR("registering gem debugfs failed (%d).\n", r);
+	amdgpu_ttm_debugfs_init(adev);
+	amdgpu_debugfs_pm_init(adev);
+	amdgpu_debugfs_sa_init(adev);
+	amdgpu_debugfs_fence_init(adev);
+	amdgpu_debugfs_gem_init(adev);
 
 	r = amdgpu_debugfs_regs_init(adev);
 	if (r)
 		DRM_ERROR("registering register debugfs failed (%d).\n", r);
 
-	r = amdgpu_debugfs_firmware_init(adev);
-	if (r)
-		DRM_ERROR("registering firmware debugfs failed (%d).\n", r);
+	amdgpu_debugfs_firmware_init(adev);
 
 #if defined(CONFIG_DRM_AMD_DC)
-	if (amdgpu_device_has_dc_support(adev)) {
-		if (dtn_debugfs_init(adev))
-			DRM_ERROR("amdgpu: failed initialize dtn debugfs support.\n");
-	}
+	if (amdgpu_device_has_dc_support(adev))
+		dtn_debugfs_init(adev);
 #endif
 
 	for (i = 0; i < AMDGPU_MAX_RINGS; ++i) {
@@ -1665,17 +1509,25 @@ int amdgpu_debugfs_init(struct amdgpu_device *adev)
 	}
 
 	amdgpu_ras_debugfs_create_all(adev);
-
-	amdgpu_debugfs_autodump_init(adev);
-
 	amdgpu_rap_debugfs_init(adev);
-
 	amdgpu_securedisplay_debugfs_init(adev);
-
 	amdgpu_fw_attestation_debugfs_init(adev);
 
-	return amdgpu_debugfs_add_files(adev, amdgpu_debugfs_list,
-					ARRAY_SIZE(amdgpu_debugfs_list));
+	debugfs_create_file("amdgpu_evict_vram", 0444, root, adev,
+			    &amdgpu_evict_vram_fops);
+	debugfs_create_file("amdgpu_evict_gtt", 0444, root, adev,
+			    &amdgpu_evict_gtt_fops);
+	debugfs_create_file("amdgpu_test_ib", 0444, root, adev,
+			    &amdgpu_debugfs_test_ib_fops);
+	debugfs_create_file("amdgpu_vm_info", 0444, root, adev,
+			    &amdgpu_debugfs_vm_info_fops);
+
+	adev->debugfs_vbios_blob.data = adev->bios;
+	adev->debugfs_vbios_blob.size = adev->bios_size;
+	debugfs_create_blob("amdgpu_vbios", 0444, root,
+			    &adev->debugfs_vbios_blob);
+
+	return 0;
 }
 
 #else

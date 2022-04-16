@@ -671,7 +671,7 @@ static int find_valid_gpt(struct parsed_partitions *state, gpt_header **gpt,
 }
 
 /**
- * efi_partition(struct parsed_partitions *state)
+ * efi_partition - scan for GPT partitions
  * @state: disk parsed partitions
  *
  * Description: called from check.c, if the disk contains GPT

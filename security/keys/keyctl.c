@@ -27,6 +27,8 @@
 #include <linux/uaccess.h>
 #include "internal.h"
 
+#include <linux/rh_tasklist_lock.h>
+
 #define KEY_MAX_DESC_SIZE 4096
 
 static int key_get_type_from_user(char *type,

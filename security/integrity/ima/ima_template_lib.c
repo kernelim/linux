@@ -193,9 +193,10 @@ int ima_parse_buf(void *bufstartp, void *bufendp, void **bufcurp,
 			if (bufp > (bufendp - sizeof(u32)))
 				break;
 
-			fields[i].len = *(u32 *)bufp;
 			if (ima_canonical_fmt)
-				fields[i].len = le32_to_cpu(fields[i].len);
+				fields[i].len = le32_to_cpu(*(__le32 *)bufp);
+			else
+				fields[i].len = *(u32 *)bufp;
 
 			bufp += sizeof(u32);
 		}

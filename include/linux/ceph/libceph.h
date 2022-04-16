@@ -36,6 +36,7 @@
 #define CEPH_OPT_TCP_NODELAY	  (1<<5) /* TCP_NODELAY on TCP sockets */
 #define CEPH_OPT_NOMSGSIGN	  (1<<6) /* don't sign msgs (msgr1) */
 #define CEPH_OPT_ABORT_ON_FULL	  (1<<7) /* abort w/ ENOSPC when full */
+#define CEPH_OPT_RXBOUNCE         (1<<8) /* double-buffer read data */
 
 #define CEPH_OPT_DEFAULT   (CEPH_OPT_TCP_NODELAY)
 

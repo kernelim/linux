@@ -873,7 +873,9 @@ static int hns3_get_coalesce_per_queue(struct net_device *netdev, u32 queue,
 }
 
 static int hns3_get_coalesce(struct net_device *netdev,
-			     struct ethtool_coalesce *cmd)
+			     struct ethtool_coalesce *cmd,
+			     struct kernel_ethtool_coalesce *kernel_coal,
+			     struct netlink_ext_ack *extack)
 {
 	return hns3_get_coalesce_per_queue(netdev, 0, cmd);
 }
@@ -1002,7 +1004,9 @@ static void hns3_set_coalesce_per_queue(struct net_device *netdev,
 }
 
 static int hns3_set_coalesce(struct net_device *netdev,
-			     struct ethtool_coalesce *cmd)
+			     struct ethtool_coalesce *cmd,
+			     struct kernel_ethtool_coalesce *kernel_coal,
+			     struct netlink_ext_ack *extack)
 {
 	struct hnae3_handle *h = hns3_get_handle(netdev);
 	u16 queue_num = h->kinfo.num_tqps;

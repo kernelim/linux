@@ -17,6 +17,7 @@ config CIFS
 	select CRYPTO_AES
 	select CRYPTO_DES
 	select KEYS
+	select DNS_RESOLVER
 	help
 	  This is the client VFS module for the SMB3 family of NAS protocols,
 	  (including support for the most recent, most secure dialect SMB3.1.1)
@@ -111,7 +112,6 @@ config CIFS_WEAK_PW_HASH
 config CIFS_UPCALL
 	bool "Kerberos/SPNEGO advanced session setup"
 	depends on CIFS
-	select DNS_RESOLVER
 	help
 	  Enables an upcall mechanism for CIFS which accesses userspace helper
 	  utilities to provide SPNEGO packaged (RFC 4178) Kerberos tickets
@@ -178,7 +178,6 @@ config CIFS_DEBUG_DUMP_KEYS
 config CIFS_DFS_UPCALL
 	bool "DFS feature support"
 	depends on CIFS
-	select DNS_RESOLVER
 	help
 	  Distributed File System (DFS) support is used to access shares
 	  transparently in an enterprise name space, even if the share
@@ -188,6 +187,17 @@ config CIFS_DFS_UPCALL
 	  IP addresses) which is needed in order to reconnect to
 	  servers if their addresses change or for implicit mounts of
 	  DFS junction points. If unsure, say Y.
+
+config CIFS_SWN_UPCALL
+	bool "SWN feature support"
+	depends on CIFS
+	help
+	  The Service Witness Protocol (SWN) is used to get notifications
+	  from a highly available server of resource state changes. This
+	  feature enables an upcall mechanism for CIFS which contacts an
+	  userspace daemon to establish the DCE/RPC connection to retrieve
+	  the cluster available interfaces and resource change notifications.
+	  If unsure, say Y.
 
 config CIFS_NFSD_EXPORT
 	bool "Allow nfsd to export CIFS file system"

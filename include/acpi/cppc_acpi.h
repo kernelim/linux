@@ -15,6 +15,7 @@
 #define _CPPC_ACPI_H
 
 #include <linux/acpi.h>
+#include <linux/cpufreq.h>
 #include <linux/types.h>
 
 #include <acpi/pcc.h>
@@ -137,11 +138,43 @@ struct cppc_cpudata {
 	cpumask_var_t shared_cpu_map;
 };
 
+#ifdef CONFIG_ACPI_CPPC_LIB
 extern int cppc_get_desired_perf(int cpunum, u64 *desired_perf);
+extern int cppc_get_nominal_perf(int cpunum, u64 *nominal_perf);
 extern int cppc_get_perf_ctrs(int cpu, struct cppc_perf_fb_ctrs *perf_fb_ctrs);
 extern int cppc_set_perf(int cpu, struct cppc_perf_ctrls *perf_ctrls);
 extern int cppc_get_perf_caps(int cpu, struct cppc_perf_caps *caps);
 extern int acpi_get_psd_map(struct cppc_cpudata **);
 extern unsigned int cppc_get_transition_latency(int cpu);
+#else /* !CONFIG_ACPI_CPPC_LIB */
+static inline int cppc_get_desired_perf(int cpunum, u64 *desired_perf)
+{
+	return -ENOTSUPP;
+}
+static inline int cppc_get_nominal_perf(int cpunum, u64 *nominal_perf)
+{
+	return -ENOTSUPP;
+}
+static inline int cppc_get_perf_ctrs(int cpu, struct cppc_perf_fb_ctrs *perf_fb_ctrs)
+{
+	return -ENOTSUPP;
+}
+static inline int cppc_set_perf(int cpu, struct cppc_perf_ctrls *perf_ctrls)
+{
+	return -ENOTSUPP;
+}
+static inline int cppc_get_perf_caps(int cpu, struct cppc_perf_caps *caps)
+{
+	return -ENOTSUPP;
+}
+static inline bool acpi_cpc_valid(void)
+{
+	return false;
+}
+static inline unsigned int cppc_get_transition_latency(int cpu)
+{
+	return CPUFREQ_ETERNAL;
+}
+#endif /* !CONFIG_ACPI_CPPC_LIB */
 
 #endif /* _CPPC_ACPI_H*/

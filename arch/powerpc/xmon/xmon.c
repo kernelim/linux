@@ -469,6 +469,13 @@ static inline int unrecoverable_excp(struct pt_regs *regs)
 #endif
 }
 
+static void xmon_touch_watchdogs(void)
+{
+	touch_softlockup_watchdog_sync();
+	rcu_cpu_stall_reset();
+	touch_nmi_watchdog();
+}
+
 static int xmon_core(struct pt_regs *regs, int fromipi)
 {
 	int cmd = 0;
@@ -703,7 +710,7 @@ static int xmon_core(struct pt_regs *regs, int fromipi)
 	else
 		insert_cpu_bpts();
 
-	touch_nmi_watchdog();
+	xmon_touch_watchdogs();
 	local_irq_restore(flags);
 
 	return cmd != 'X' && cmd != EOF;
@@ -2672,12 +2679,12 @@ static void dump_all_xives(void)
 {
 	int cpu;
 
-	if (num_possible_cpus() == 0) {
+	if (num_online_cpus() == 0) {
 		printf("No possible cpus, use 'dx #' to dump individual cpus\n");
 		return;
 	}
 
-	for_each_possible_cpu(cpu)
+	for_each_online_cpu(cpu)
 		dump_one_xive(cpu);
 }
 
@@ -2950,7 +2957,7 @@ print_address(unsigned long addr)
 void
 dump_log_buf(void)
 {
-	struct kmsg_dumper dumper = { .active = 1 };
+	struct kmsg_dump_iter iter;
 	unsigned char buf[128];
 	size_t len;
 
@@ -2962,9 +2969,9 @@ dump_log_buf(void)
 	catch_memory_errors = 1;
 	sync();
 
-	kmsg_dump_rewind_nolock(&dumper);
+	kmsg_dump_rewind(&iter);
 	xmon_start_pagination();
-	while (kmsg_dump_get_line_nolock(&dumper, false, buf, sizeof(buf), &len)) {
+	while (kmsg_dump_get_line(&iter, false, buf, sizeof(buf), &len)) {
 		buf[len] = '\0';
 		printf("%s", buf);
 	}
@@ -3138,6 +3145,7 @@ memzcan(void)
 
 static void show_task(struct task_struct *tsk)
 {
+	unsigned int p_state = READ_ONCE(tsk->__state);
 	char state;
 
 	/*
@@ -3145,14 +3153,14 @@ static void show_task(struct task_struct *tsk)
 	 * appropriate for calling from xmon. This could be moved
 	 * to a common, generic, routine used by both.
 	 */
-	state = (tsk->state == 0) ? 'R' :
-		(tsk->state < 0) ? 'U' :
-		(tsk->state & TASK_UNINTERRUPTIBLE) ? 'D' :
-		(tsk->state & TASK_STOPPED) ? 'T' :
-		(tsk->state & TASK_TRACED) ? 'C' :
+	state = (p_state == 0) ? 'R' :
+		(p_state < 0) ? 'U' :
+		(p_state & TASK_UNINTERRUPTIBLE) ? 'D' :
+		(p_state & TASK_STOPPED) ? 'T' :
+		(p_state & TASK_TRACED) ? 'C' :
 		(tsk->exit_state & EXIT_ZOMBIE) ? 'Z' :
 		(tsk->exit_state & EXIT_DEAD) ? 'E' :
-		(tsk->state & TASK_INTERRUPTIBLE) ? 'S' : '?';
+		(p_state & TASK_INTERRUPTIBLE) ? 'S' : '?';
 
 	printf("%px %016lx %6d %6d %c %2d %s\n", tsk,
 		tsk->thread.ksp,

@@ -65,8 +65,7 @@ void dst_init(struct dst_entry *dst, struct dst_ops *ops,
 	      unsigned short flags)
 {
 	dst->dev = dev;
-	if (dev)
-		dev_hold(dev);
+	dev_hold(dev);
 	dst->ops = ops;
 	dst_init_metrics(dst, dst_default_metrics.metrics, true);
 	dst->expires = 0UL;
@@ -130,8 +129,7 @@ struct dst_entry *dst_destroy(struct dst_entry * dst)
 
 	if (dst->ops->destroy)
 		dst->ops->destroy(dst);
-	if (dst->dev)
-		dev_put(dst->dev);
+	dev_put(dst->dev);
 
 	lwtstate_put(dst->lwtstate);
 
@@ -307,6 +305,7 @@ void metadata_dst_free(struct metadata_dst *md_dst)
 #endif
 	kfree(md_dst);
 }
+EXPORT_SYMBOL_GPL(metadata_dst_free);
 
 struct metadata_dst __percpu *
 metadata_dst_alloc_percpu(u8 optslen, enum metadata_type type, gfp_t flags)

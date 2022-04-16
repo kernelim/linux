@@ -7,24 +7,18 @@
 #include <linux/module.h>
 #include "mt76x02.h"
 
-#define CCK_RATE(_idx, _rate) {					\
+#define MT76x02_CCK_RATE(_idx, _rate) {					\
 	.bitrate = _rate,					\
 	.flags = IEEE80211_RATE_SHORT_PREAMBLE,			\
 	.hw_value = (MT_PHY_TYPE_CCK << 8) | (_idx),		\
 	.hw_value_short = (MT_PHY_TYPE_CCK << 8) | (8 + (_idx)),	\
 }
 
-#define OFDM_RATE(_idx, _rate) {				\
-	.bitrate = _rate,					\
-	.hw_value = (MT_PHY_TYPE_OFDM << 8) | (_idx),		\
-	.hw_value_short = (MT_PHY_TYPE_OFDM << 8) | (_idx),	\
-}
-
 struct ieee80211_rate mt76x02_rates[] = {
-	CCK_RATE(0, 10),
-	CCK_RATE(1, 20),
-	CCK_RATE(2, 55),
-	CCK_RATE(3, 110),
+	MT76x02_CCK_RATE(0, 10),
+	MT76x02_CCK_RATE(1, 20),
+	MT76x02_CCK_RATE(2, 55),
+	MT76x02_CCK_RATE(3, 110),
 	OFDM_RATE(0, 60),
 	OFDM_RATE(1, 90),
 	OFDM_RATE(2, 120),
@@ -293,6 +287,8 @@ mt76x02_vif_init(struct mt76x02_dev *dev, struct ieee80211_vif *vif,
 	mvif->idx = idx;
 	mvif->group_wcid.idx = MT_VIF_WCID(idx);
 	mvif->group_wcid.hw_key_idx = -1;
+	mt76_packet_id_init(&mvif->group_wcid);
+
 	mtxq = (struct mt76_txq *)vif->txq->drv_priv;
 	mtxq->wcid = &mvif->group_wcid;
 }
@@ -347,6 +343,7 @@ void mt76x02_remove_interface(struct ieee80211_hw *hw,
 	struct mt76x02_vif *mvif = (struct mt76x02_vif *)vif->drv_priv;
 
 	dev->mt76.vif_mask &= ~BIT(mvif->idx);
+	mt76_packet_id_flush(&dev->mt76, &mvif->group_wcid);
 }
 EXPORT_SYMBOL_GPL(mt76x02_remove_interface);
 

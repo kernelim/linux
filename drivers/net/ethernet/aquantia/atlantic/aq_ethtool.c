@@ -418,7 +418,9 @@ static int aq_ethtool_set_rxnfc(struct net_device *ndev,
 }
 
 static int aq_ethtool_get_coalesce(struct net_device *ndev,
-				   struct ethtool_coalesce *coal)
+				   struct ethtool_coalesce *coal,
+				   struct kernel_ethtool_coalesce *kernel_coal,
+				   struct netlink_ext_ack *extack)
 {
 	struct aq_nic_s *aq_nic = netdev_priv(ndev);
 	struct aq_nic_cfg_s *cfg;
@@ -442,7 +444,9 @@ static int aq_ethtool_get_coalesce(struct net_device *ndev,
 }
 
 static int aq_ethtool_set_coalesce(struct net_device *ndev,
-				   struct ethtool_coalesce *coal)
+				   struct ethtool_coalesce *coal,
+				   struct kernel_ethtool_coalesce *kernel_coal,
+				   struct netlink_ext_ack *extack)
 {
 	struct aq_nic_s *aq_nic = netdev_priv(ndev);
 	struct aq_nic_cfg_s *cfg;

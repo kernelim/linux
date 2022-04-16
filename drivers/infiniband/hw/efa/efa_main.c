@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause
 /*
- * Copyright 2018-2020 Amazon.com, Inc. or its affiliates. All rights reserved.
+ * Copyright 2018-2021 Amazon.com, Inc. or its affiliates. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -209,11 +209,11 @@ static void efa_set_host_info(struct efa_dev *dev)
 	if (!hinf)
 		return;
 
-	strlcpy(hinf->os_dist_str, utsname()->release,
-		min(sizeof(hinf->os_dist_str), sizeof(utsname()->release)));
+	strscpy(hinf->os_dist_str, utsname()->release,
+		sizeof(hinf->os_dist_str));
 	hinf->os_type = EFA_ADMIN_OS_LINUX;
-	strlcpy(hinf->kernel_ver_str, utsname()->version,
-		min(sizeof(hinf->kernel_ver_str), sizeof(utsname()->version)));
+	strscpy(hinf->kernel_ver_str, utsname()->version,
+		sizeof(hinf->kernel_ver_str));
 	hinf->kernel_ver = LINUX_VERSION_CODE;
 	EFA_SET(&hinf->driver_ver, EFA_ADMIN_HOST_INFO_DRIVER_MAJOR, 0);
 	EFA_SET(&hinf->driver_ver, EFA_ADMIN_HOST_INFO_DRIVER_MINOR, 0);
@@ -242,7 +242,8 @@ static const struct ib_device_ops efa_dev_ops = {
 	.driver_id = RDMA_DRIVER_EFA,
 	.uverbs_abi_ver = EFA_UVERBS_ABI_VERSION,
 
-	.alloc_hw_stats = efa_alloc_hw_stats,
+	.alloc_hw_port_stats = efa_alloc_hw_port_stats,
+	.alloc_hw_device_stats = efa_alloc_hw_device_stats,
 	.alloc_pd = efa_alloc_pd,
 	.alloc_ucontext = efa_alloc_ucontext,
 	.create_cq = efa_create_cq,
@@ -356,6 +357,7 @@ static int efa_enable_msix(struct efa_dev *dev)
 	}
 
 	if (irq_num != msix_vecs) {
+		efa_disable_msix(dev);
 		dev_err(&dev->pdev->dev,
 			"Allocated %d MSI-X (out of %d requested)\n",
 			irq_num, msix_vecs);

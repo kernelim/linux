@@ -77,7 +77,19 @@ Pointers printed without a specifier extension (i.e unadorned %p) are
 hashed to prevent leaking information about the kernel memory layout. This
 has the added benefit of providing a unique identifier. On 64-bit machines
 the first 32 bits are zeroed. The kernel will print ``(ptrval)`` until it
-gathers enough entropy. If you *really* want the address see %px below.
+gathers enough entropy.
+
+When possible, use specialised modifiers such as %pS or %pB (described below)
+to avoid the need of providing an unhashed address that has to be interpreted
+post-hoc. If not possible, and the aim of printing the address is to provide
+more information for debugging, use %p and boot the kernel with the
+``no_hash_pointers`` parameter during debugging, which will print all %p
+addresses unmodified. If you *really* always want the unmodified address, see
+%px below.
+
+If (and only if) you are printing addresses as a content of a virtual file in
+e.g. procfs or sysfs (using e.g. seq_printf(), not printk()) read by a
+userspace process, use the %pK modifier described below instead of %p or %px.
 
 Error Pointers
 --------------
@@ -98,8 +110,6 @@ Symbols/Function Pointers
 
 	%pS	versatile_init+0x0/0x110
 	%ps	versatile_init
-	%pF	versatile_init+0x0/0x110
-	%pf	versatile_init
 	%pSR	versatile_init+0x9/0x110
 		(with __builtin_extract_return_addr() translation)
 	%pB	prev_fn_of_versatile_init+0x88/0x88
@@ -108,14 +118,6 @@ Symbols/Function Pointers
 The ``S`` and ``s`` specifiers are used for printing a pointer in symbolic
 format. They result in the symbol name with (S) or without (s)
 offsets. If KALLSYMS are disabled then the symbol address is printed instead.
-
-Note, that the ``F`` and ``f`` specifiers are identical to ``S`` (``s``)
-and thus deprecated. We have ``F`` and ``f`` because on ia64, ppc64 and
-parisc64 function pointers are indirect and, in fact, are function
-descriptors, which require additional dereferencing before we can lookup
-the symbol. As of now, ``S`` and ``s`` perform dereferencing on those
-platforms (when needed), so ``F`` and ``f`` exist for compatibility
-reasons only.
 
 The ``B`` specifier results in the symbol name with offsets and should be
 used when printing stack backtraces. The specifier takes into
@@ -147,6 +149,11 @@ For printing kernel pointers which should be hidden from unprivileged
 users. The behaviour of %pK depends on the kptr_restrict sysctl - see
 Documentation/sysctl/kernel.txt for more details.
 
+This modifier is *only* intended when producing content of a file read by
+userspace from e.g. procfs or sysfs, not for dmesg. Please refer to the
+section about %p above for discussion about how to manage hashing pointers
+in printk().
+
 Unmodified Addresses
 --------------------
 
@@ -160,6 +167,27 @@ kernel memory layout before printing pointers with %px. %px is functionally
 equivalent to %lx (or %lu). %px is preferred because it is more uniquely
 grep'able. If in the future we need to modify the way the kernel handles
 printing pointers we will be better equipped to find the call sites.
+
+Before using %px, consider if using %p is sufficient together with enabling the
+``no_hash_pointers`` kernel parameter during debugging sessions (see the %p
+description above). One valid scenario for %px might be printing information
+immediately before a panic, which prevents any sensitive information to be
+exploited anyway, and with %px there would be no need to reproduce the panic
+with no_hash_pointers.
+
+Pointer Differences
+-------------------
+
+::
+
+	%td	2560
+	%tx	a00
+
+For printing the pointer differences, use the %t modifier for ptrdiff_t.
+
+Example::
+
+	printk("test: difference between pointers: %td\n", ptr2 - ptr1);
 
 Struct Resources
 ----------------
@@ -311,7 +339,7 @@ colon-separators. Leading zeros are always used.
 
 The additional ``c`` specifier can be used with the ``I`` specifier to
 print a compressed IPv6 address as described by
-http://tools.ietf.org/html/rfc5952
+https://tools.ietf.org/html/rfc5952
 
 Passed by reference.
 
@@ -335,7 +363,7 @@ The additional ``p``, ``f``, and ``s`` specifiers are used to specify port
 flowinfo a ``/`` and scope a ``%``, each followed by the actual value.
 
 In case of an IPv6 address the compressed IPv6 address as described by
-http://tools.ietf.org/html/rfc5952 is being used if the additional
+https://tools.ietf.org/html/rfc5952 is being used if the additional
 specifier ``c`` is given. The IPv6 address is surrounded by ``[``, ``]`` in
 case of additional specifiers ``p``, ``f`` or ``s`` as suggested by
 https://tools.ietf.org/html/draft-ietf-6man-text-addr-representation-07
@@ -454,21 +482,52 @@ Examples::
 
 Passed by reference.
 
-Time and date (struct rtc_time)
--------------------------------
+Fwnode handles
+--------------
 
 ::
 
-	%ptR		YYYY-mm-ddTHH:MM:SS
-	%ptRd		YYYY-mm-dd
-	%ptRt		HH:MM:SS
-	%ptR[dt][r]
+	%pfw[fP]
 
-For printing date and time as represented by struct rtc_time structure in
-human readable format.
+For printing information on fwnode handles. The default is to print the full
+node name, including the path. The modifiers are functionally equivalent to
+%pOF above.
 
-By default year will be incremented by 1900 and month by 1. Use %ptRr (raw)
-to suppress this behaviour.
+	- f - full name of the node, including the path
+	- P - the name of the node including an address (if there is one)
+
+Examples (ACPI)::
+
+	%pfwf	\_SB.PCI0.CIO2.port@1.endpoint@0	- Full node name
+	%pfwP	endpoint@0				- Node name
+
+Examples (OF)::
+
+	%pfwf	/ocp@68000000/i2c@48072000/camera@10/port/endpoint - Full name
+	%pfwP	endpoint				- Node name
+
+Time and date
+-------------
+
+::
+
+	%pt[RT]			YYYY-mm-ddTHH:MM:SS
+	%pt[RT]s		YYYY-mm-dd HH:MM:SS
+	%pt[RT]d		YYYY-mm-dd
+	%pt[RT]t		HH:MM:SS
+	%pt[RT][dt][r][s]
+
+For printing date and time as represented by
+	R  struct rtc_time structure
+	T  time64_t type
+in human readable format.
+
+By default year will be incremented by 1900 and month by 1.
+Use %pt[RT]r (raw) to suppress this behaviour.
+
+The %pt[RT]s (space) will override ISO 8601 separator by using ' ' (space)
+instead of 'T' (Capital T) between date and time. It won't have any effect
+when date or time is omitted.
 
 Passed by reference.
 
@@ -504,7 +563,7 @@ Flags bitfields such as page flags, gfp_flags
 
 ::
 
-	%pGp	referenced|uptodate|lru|active|private
+	%pGp	referenced|uptodate|lru|active|private|node=0|zone=2|lastcpupid=0x1fffff
 	%pGg	GFP_USER|GFP_DMA32|GFP_NOWARN
 	%pGv	read|exec|mayread|maywrite|mayexec|denywrite
 

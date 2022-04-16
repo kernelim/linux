@@ -36,7 +36,7 @@
 
 struct stmmac_resources {
 	void __iomem *addr;
-	const char *mac;
+	u8 mac[ETH_ALEN];
 	int wol_irq;
 	int lpi_irq;
 	int irq;
@@ -72,7 +72,7 @@ struct stmmac_tx_queue {
 	unsigned int cur_tx;
 	unsigned int dirty_tx;
 	dma_addr_t dma_tx_phy;
-	u32 tx_tail_addr;
+	dma_addr_t tx_tail_addr;
 	u32 mss;
 };
 

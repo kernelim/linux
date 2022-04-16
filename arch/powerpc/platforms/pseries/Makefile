@@ -32,3 +32,4 @@ obj-$(CONFIG_PPC_SVM)		+= svm.o
 ifdef CONFIG_PPC_PSERIES
 obj-$(CONFIG_SUSPEND)		+= suspend.o
 endif
+obj-$(CONFIG_PPC_VAS)		+= vas.o

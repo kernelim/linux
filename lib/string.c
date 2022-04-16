@@ -400,6 +400,9 @@ EXPORT_SYMBOL(strncmp);
  * strchr - Find the first occurrence of a character in a string
  * @s: The string to be searched
  * @c: The character to search for
+ *
+ * Note that the %NUL-terminator is considered part of the string, and can
+ * be searched for.
  */
 char *strchr(const char *s, int c)
 {
@@ -453,12 +456,18 @@ EXPORT_SYMBOL(strrchr);
  * @s: The string to be searched
  * @count: The number of characters to be searched
  * @c: The character to search for
+ *
+ * Note that the %NUL-terminator is considered part of the string, and can
+ * be searched for.
  */
 char *strnchr(const char *s, size_t count, int c)
 {
-	for (; count-- && *s != '\0'; ++s)
+	while (count--) {
 		if (*s == (char)c)
 			return (char *)s;
+		if (*s++ == '\0')
+			break;
+	}
 	return NULL;
 }
 EXPORT_SYMBOL(strnchr);
@@ -902,36 +911,6 @@ void *memscan(void *addr, int c, size_t size)
 }
 EXPORT_SYMBOL(memscan);
 #endif
-
-/*
- * Merge two NULL-terminated pointer arrays into a newly allocated
- * array, which is also NULL-terminated. Nomenclature is inspired by
- * memset_p() and memcat() found elsewhere in the kernel source tree.
- */
-void **__memcat_p(void **a, void **b)
-{
-	void **p = a, **new;
-	int nr;
-
-	/* count the elements in both arrays */
-	for (nr = 0, p = a; *p; nr++, p++)
-		;
-	for (p = b; *p; nr++, p++)
-		;
-	/* one for the NULL-terminator */
-	nr++;
-
-	new = kmalloc_array(nr, sizeof(void *), GFP_KERNEL);
-	if (!new)
-		return NULL;
-
-	/* nr -> last index; p points to NULL in b[] */
-	for (nr--; nr >= 0; nr--, p = p == b ? &a[nr] : p - 1)
-		new[nr] = *p;
-
-	return new;
-}
-EXPORT_SYMBOL_GPL(__memcat_p);
 
 #ifndef __HAVE_ARCH_STRSTR
 /**

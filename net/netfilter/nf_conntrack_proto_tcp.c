@@ -461,6 +461,32 @@ static void tcp_sack(const struct sk_buff *skb, unsigned int dataoff,
 	}
 }
 
+static void tcp_init_sender(struct ip_ct_tcp_state *sender,
+			    struct ip_ct_tcp_state *receiver,
+			    const struct sk_buff *skb,
+			    unsigned int dataoff,
+			    const struct tcphdr *tcph,
+			    u32 end, u32 win)
+{
+	/* SYN-ACK in reply to a SYN
+	 * or SYN from reply direction in simultaneous open.
+	 */
+	sender->td_end =
+	sender->td_maxend = end;
+	sender->td_maxwin = (win == 0 ? 1 : win);
+
+	tcp_options(skb, dataoff, tcph, sender);
+	/* RFC 1323:
+	 * Both sides must send the Window Scale option
+	 * to enable window scaling in either direction.
+	 */
+	if (!(sender->flags & IP_CT_TCP_FLAG_WINDOW_SCALE &&
+	      receiver->flags & IP_CT_TCP_FLAG_WINDOW_SCALE)) {
+		sender->td_scale = 0;
+		receiver->td_scale = 0;
+	}
+}
+
 static bool tcp_in_window(const struct nf_conn *ct,
 			  struct ip_ct_tcp *state,
 			  enum ip_conntrack_dir dir,
@@ -513,24 +539,9 @@ static bool tcp_in_window(const struct nf_conn *ct,
 		 * Initialize sender data.
 		 */
 		if (tcph->syn) {
-			/*
-			 * SYN-ACK in reply to a SYN
-			 * or SYN from reply direction in simultaneous open.
-			 */
-			sender->td_end =
-			sender->td_maxend = end;
-			sender->td_maxwin = (win == 0 ? 1 : win);
-
-			tcp_options(skb, dataoff, tcph, sender);
-			/*
-			 * RFC 1323:
-			 * Both sides must send the Window Scale option
-			 * to enable window scaling in either direction.
-			 */
-			if (!(sender->flags & IP_CT_TCP_FLAG_WINDOW_SCALE
-			      && receiver->flags & IP_CT_TCP_FLAG_WINDOW_SCALE))
-				sender->td_scale =
-				receiver->td_scale = 0;
+			tcp_init_sender(sender, receiver,
+					skb, dataoff, tcph,
+					end, win);
 			if (!tcph->ack)
 				/* Simultaneous open */
 				return true;
@@ -574,6 +585,18 @@ static bool tcp_in_window(const struct nf_conn *ct,
 		sender->td_maxwin = (win == 0 ? 1 : win);
 
 		tcp_options(skb, dataoff, tcph, sender);
+	} else if (tcph->syn && dir == IP_CT_DIR_REPLY &&
+		   state->state == TCP_CONNTRACK_SYN_SENT) {
+		/* Retransmitted syn-ack, or syn (simultaneous open).
+		 *
+		 * Re-init state for this direction, just like for the first
+		 * syn(-ack) reply, it might differ in seq, ack or tcp options.
+		 */
+		tcp_init_sender(sender, receiver,
+				skb, dataoff, tcph,
+				end, win);
+		if (!tcph->ack)
+			return true;
 	}
 
 	if (!(tcph->ack)) {
@@ -1199,7 +1222,7 @@ static bool tcp_can_early_drop(const struct nf_conn *ct)
 #include <linux/netfilter/nfnetlink_conntrack.h>
 
 static int tcp_to_nlattr(struct sk_buff *skb, struct nlattr *nla,
-			 struct nf_conn *ct)
+			 struct nf_conn *ct, bool destroy)
 {
 	struct nlattr *nest_parms;
 	struct nf_ct_tcp_flags tmp = {};
@@ -1209,8 +1232,13 @@ static int tcp_to_nlattr(struct sk_buff *skb, struct nlattr *nla,
 	if (!nest_parms)
 		goto nla_put_failure;
 
-	if (nla_put_u8(skb, CTA_PROTOINFO_TCP_STATE, ct->proto.tcp.state) ||
-	    nla_put_u8(skb, CTA_PROTOINFO_TCP_WSCALE_ORIGINAL,
+	if (nla_put_u8(skb, CTA_PROTOINFO_TCP_STATE, ct->proto.tcp.state))
+		goto nla_put_failure;
+
+	if (destroy)
+		goto skip_state;
+
+	if (nla_put_u8(skb, CTA_PROTOINFO_TCP_WSCALE_ORIGINAL,
 		       ct->proto.tcp.seen[0].td_scale) ||
 	    nla_put_u8(skb, CTA_PROTOINFO_TCP_WSCALE_REPLY,
 		       ct->proto.tcp.seen[1].td_scale))
@@ -1225,8 +1253,8 @@ static int tcp_to_nlattr(struct sk_buff *skb, struct nlattr *nla,
 	if (nla_put(skb, CTA_PROTOINFO_TCP_FLAGS_REPLY,
 		    sizeof(struct nf_ct_tcp_flags), &tmp))
 		goto nla_put_failure;
+skip_state:
 	spin_unlock_bh(&ct->lock);
-
 	nla_nest_end(skb, nest_parms);
 
 	return 0;

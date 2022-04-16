@@ -22,7 +22,7 @@ to SEV::
 		  [ecx]:
 			Bits[31:0]  Number of encrypted guests supported simultaneously
 
-If support for SEV is present, MSR 0xc001_0010 (MSR_K8_SYSCFG) and MSR 0xc001_0015
+If support for SEV is present, MSR 0xc001_0010 (MSR_AMD64_SYSCFG) and MSR 0xc001_0015
 (MSR_K7_HWCR) can be used to determine if it can be enabled::
 
 	0xc001_0010:
@@ -148,6 +148,9 @@ measurement. Since the guest owner knows the initial contents of the guest at
 boot, the measurement can be verified by comparing it to what the guest owner
 expects.
 
+If len is zero on entry, the measurement blob length is written to len and
+uaddr is unused.
+
 Parameters (in): struct  kvm_sev_launch_measure
 
 Returns: 0 on success, -negative on error
@@ -271,6 +274,9 @@ report containing the SHA-256 digest of the guest memory and VMSA passed through
 commands and signed with the PEK. The digest returned by the command should match the digest
 used by the guest owner with the KVM_SEV_LAUNCH_MEASURE.
 
+If len is zero on entry, the measurement blob length is written to len and
+uaddr is unused.
+
 Parameters (in): struct kvm_sev_attestation
 
 Returns: 0 on success, -negative on error
@@ -298,6 +304,7 @@ Parameters (in): struct kvm_sev_send_start
 Returns: 0 on success, -negative on error
 
 ::
+
         struct kvm_sev_send_start {
                 __u32 policy;                 /* guest policy */
 
@@ -360,7 +367,7 @@ migration can restart with a new target later.
 Returns: 0 on success, -negative on error
 
 15. KVM_SEV_RECEIVE_START
-------------------------
+-------------------------
 
 The KVM_SEV_RECEIVE_START command is used for creating the memory encryption
 context for an incoming SEV guest. To create the encryption context, the user must
@@ -389,7 +396,7 @@ On success, the 'handle' field contains a new handle and on error, a negative va
 For more details, see SEV spec Section 6.12.
 
 16. KVM_SEV_RECEIVE_UPDATE_DATA
-----------------------------
+-------------------------------
 
 The KVM_SEV_RECEIVE_UPDATE_DATA command can be used by the hypervisor to copy
 the incoming buffers into the guest memory region with encryption context
@@ -413,7 +420,7 @@ Returns: 0 on success, -negative on error
         };
 
 17. KVM_SEV_RECEIVE_FINISH
-------------------------
+--------------------------
 
 After completion of the migration flow, the KVM_SEV_RECEIVE_FINISH command can be
 issued by the hypervisor to make the guest ready for execution.

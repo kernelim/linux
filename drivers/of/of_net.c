@@ -39,13 +39,15 @@ int of_get_phy_mode(struct device_node *np)
 }
 EXPORT_SYMBOL_GPL(of_get_phy_mode);
 
-static const void *of_get_mac_addr(struct device_node *np, const char *name)
+static int of_get_mac_addr(struct device_node *np, const char *name, u8 *addr)
 {
 	struct property *pp = of_find_property(np, name, NULL);
 
-	if (pp && pp->length == ETH_ALEN && is_valid_ether_addr(pp->value))
-		return pp->value;
-	return NULL;
+	if (pp && pp->length == ETH_ALEN && is_valid_ether_addr(pp->value)) {
+		memcpy(addr, pp->value, ETH_ALEN);
+		return 0;
+	}
+	return -ENODEV;
 }
 
 /**
@@ -65,20 +67,29 @@ static const void *of_get_mac_addr(struct device_node *np, const char *name)
  * addresses.  Some older U-Boots only initialized 'local-mac-address'.  In
  * this case, the real MAC is in 'local-mac-address', and 'mac-address' exists
  * but is all zeros.
+ *
+ * Return: 0 on success and errno in case of error.
 */
-const void *of_get_mac_address(struct device_node *np)
+int of_get_mac_address(struct device_node *np, u8 *addr)
 {
-	const void *addr;
+	int ret;
 
-	addr = of_get_mac_addr(np, "mac-address");
-	if (addr)
-		return addr;
+	if (!np)
+		return -ENODEV;
 
-	addr = of_get_mac_addr(np, "local-mac-address");
-	if (addr)
-		return addr;
+	ret = of_get_mac_addr(np, "mac-address", addr);
+	if (!ret)
+		return 0;
 
-	return of_get_mac_addr(np, "address");
+	ret = of_get_mac_addr(np, "local-mac-address", addr);
+	if (!ret)
+		return 0;
+
+	ret = of_get_mac_addr(np, "address", addr);
+	if (!ret)
+		return 0;
+
+	return -ENODEV;
 }
 EXPORT_SYMBOL(of_get_mac_address);
 

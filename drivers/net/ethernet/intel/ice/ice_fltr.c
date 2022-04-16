@@ -47,12 +47,113 @@ ice_fltr_add_entry_to_list(struct device *dev, struct ice_fltr_info *info,
 }
 
 /**
+ * ice_fltr_set_vlan_vsi_promisc
+ * @hw: pointer to the hardware structure
+ * @vsi: the VSI being configured
+ * @promisc_mask: mask of promiscuous config bits
+ *
+ * Set VSI with all associated VLANs to given promiscuous mode(s)
+ */
+int
+ice_fltr_set_vlan_vsi_promisc(struct ice_hw *hw, struct ice_vsi *vsi,
+			      u8 promisc_mask)
+{
+	struct ice_pf *pf = hw->back;
+	int result;
+
+	result = ice_set_vlan_vsi_promisc(hw, vsi->idx, promisc_mask, false);
+	if (!result)
+		return result;
+
+	dev_err(ice_pf_to_dev(pf),
+		"Error setting promisc mode on VSI %i (rc=%d)\n", vsi->vsi_num,
+		result);
+
+	return result;
+}
+
+/**
+ * ice_fltr_clear_vlan_vsi_promisc
+ * @hw: pointer to the hardware structure
+ * @vsi: the VSI being configured
+ * @promisc_mask: mask of promiscuous config bits
+ *
+ * Clear VSI with all associated VLANs to given promiscuous mode(s)
+ */
+int
+ice_fltr_clear_vlan_vsi_promisc(struct ice_hw *hw, struct ice_vsi *vsi,
+				u8 promisc_mask)
+{
+	struct ice_pf *pf = hw->back;
+	int result;
+
+	result = ice_set_vlan_vsi_promisc(hw, vsi->idx, promisc_mask, true);
+	if (!result)
+		return result;
+
+	dev_err(ice_pf_to_dev(pf),
+		"Error clearing promisc mode on VSI %i (rc=%d)\n",
+		vsi->vsi_num, result);
+
+	return result;
+}
+
+/**
+ * ice_fltr_clear_vsi_promisc - clear specified promiscuous mode(s)
+ * @hw: pointer to the hardware structure
+ * @vsi_handle: VSI handle to clear mode
+ * @promisc_mask: mask of promiscuous config bits to clear
+ * @vid: VLAN ID to clear VLAN promiscuous
+ */
+int
+ice_fltr_clear_vsi_promisc(struct ice_hw *hw, u16 vsi_handle, u8 promisc_mask,
+			   u16 vid)
+{
+	struct ice_pf *pf = hw->back;
+	int result;
+
+	result = ice_clear_vsi_promisc(hw, vsi_handle, promisc_mask, vid);
+	if (!result)
+		return result;
+
+	dev_err(ice_pf_to_dev(pf),
+		"Error clearing promisc mode on VSI %i for VID %u (rc=%d)\n",
+		ice_get_hw_vsi_num(hw, vsi_handle), vid, result);
+
+	return result;
+}
+
+/**
+ * ice_fltr_set_vsi_promisc - set given VSI to given promiscuous mode(s)
+ * @hw: pointer to the hardware structure
+ * @vsi_handle: VSI handle to configure
+ * @promisc_mask: mask of promiscuous config bits
+ * @vid: VLAN ID to set VLAN promiscuous
+ */
+int
+ice_fltr_set_vsi_promisc(struct ice_hw *hw, u16 vsi_handle, u8 promisc_mask,
+			 u16 vid)
+{
+	struct ice_pf *pf = hw->back;
+	int result;
+
+	result = ice_set_vsi_promisc(hw, vsi_handle, promisc_mask, vid);
+	if (!result)
+		return result;
+
+	dev_err(ice_pf_to_dev(pf),
+		"Error setting promisc mode on VSI %i for VID %u (rc=%d)\n",
+		ice_get_hw_vsi_num(hw, vsi_handle), vid, result);
+
+	return result;
+}
+
+/**
  * ice_fltr_add_mac_list - add list of MAC filters
  * @vsi: pointer to VSI struct
  * @list: list of filters
  */
-enum ice_status
-ice_fltr_add_mac_list(struct ice_vsi *vsi, struct list_head *list)
+int ice_fltr_add_mac_list(struct ice_vsi *vsi, struct list_head *list)
 {
 	return ice_add_mac(&vsi->back->hw, list);
 }
@@ -62,8 +163,7 @@ ice_fltr_add_mac_list(struct ice_vsi *vsi, struct list_head *list)
  * @vsi: pointer to VSI struct
  * @list: list of filters
  */
-enum ice_status
-ice_fltr_remove_mac_list(struct ice_vsi *vsi, struct list_head *list)
+int ice_fltr_remove_mac_list(struct ice_vsi *vsi, struct list_head *list)
 {
 	return ice_remove_mac(&vsi->back->hw, list);
 }
@@ -73,8 +173,7 @@ ice_fltr_remove_mac_list(struct ice_vsi *vsi, struct list_head *list)
  * @vsi: pointer to VSI struct
  * @list: list of filters
  */
-static enum ice_status
-ice_fltr_add_vlan_list(struct ice_vsi *vsi, struct list_head *list)
+static int ice_fltr_add_vlan_list(struct ice_vsi *vsi, struct list_head *list)
 {
 	return ice_add_vlan(&vsi->back->hw, list);
 }
@@ -84,7 +183,7 @@ ice_fltr_add_vlan_list(struct ice_vsi *vsi, struct list_head *list)
  * @vsi: pointer to VSI struct
  * @list: list of filters
  */
-static enum ice_status
+static int
 ice_fltr_remove_vlan_list(struct ice_vsi *vsi, struct list_head *list)
 {
 	return ice_remove_vlan(&vsi->back->hw, list);
@@ -95,8 +194,7 @@ ice_fltr_remove_vlan_list(struct ice_vsi *vsi, struct list_head *list)
  * @vsi: pointer to VSI struct
  * @list: list of filters
  */
-static enum ice_status
-ice_fltr_add_eth_list(struct ice_vsi *vsi, struct list_head *list)
+static int ice_fltr_add_eth_list(struct ice_vsi *vsi, struct list_head *list)
 {
 	return ice_add_eth_mac(&vsi->back->hw, list);
 }
@@ -106,8 +204,7 @@ ice_fltr_add_eth_list(struct ice_vsi *vsi, struct list_head *list)
  * @vsi: pointer to VSI struct
  * @list: list of filters
  */
-static enum ice_status
-ice_fltr_remove_eth_list(struct ice_vsi *vsi, struct list_head *list)
+static int ice_fltr_remove_eth_list(struct ice_vsi *vsi, struct list_head *list)
 {
 	return ice_remove_eth_mac(&vsi->back->hw, list);
 }
@@ -207,18 +304,17 @@ ice_fltr_add_eth_to_list(struct ice_vsi *vsi, struct list_head *list,
  * @action: action to be performed on filter match
  * @mac_action: pointer to add or remove MAC function
  */
-static enum ice_status
+static int
 ice_fltr_prepare_mac(struct ice_vsi *vsi, const u8 *mac,
 		     enum ice_sw_fwd_act_type action,
-		     enum ice_status (*mac_action)(struct ice_vsi *,
-						   struct list_head *))
+		     int (*mac_action)(struct ice_vsi *, struct list_head *))
 {
-	enum ice_status result;
 	LIST_HEAD(tmp_list);
+	int result;
 
 	if (ice_fltr_add_mac_to_list(vsi, &tmp_list, mac, action)) {
 		ice_fltr_free_list(ice_pf_to_dev(vsi->back), &tmp_list);
-		return ICE_ERR_NO_MEMORY;
+		return -ENOMEM;
 	}
 
 	result = mac_action(vsi, &tmp_list);
@@ -233,21 +329,21 @@ ice_fltr_prepare_mac(struct ice_vsi *vsi, const u8 *mac,
  * @action: action to be performed on filter match
  * @mac_action: pointer to add or remove MAC function
  */
-static enum ice_status
+static int
 ice_fltr_prepare_mac_and_broadcast(struct ice_vsi *vsi, const u8 *mac,
 				   enum ice_sw_fwd_act_type action,
-				   enum ice_status(*mac_action)
+				   int(*mac_action)
 				   (struct ice_vsi *, struct list_head *))
 {
 	u8 broadcast[ETH_ALEN];
-	enum ice_status result;
 	LIST_HEAD(tmp_list);
+	int result;
 
 	eth_broadcast_addr(broadcast);
 	if (ice_fltr_add_mac_to_list(vsi, &tmp_list, mac, action) ||
 	    ice_fltr_add_mac_to_list(vsi, &tmp_list, broadcast, action)) {
 		ice_fltr_free_list(ice_pf_to_dev(vsi->back), &tmp_list);
-		return ICE_ERR_NO_MEMORY;
+		return -ENOMEM;
 	}
 
 	result = mac_action(vsi, &tmp_list);
@@ -262,17 +358,16 @@ ice_fltr_prepare_mac_and_broadcast(struct ice_vsi *vsi, const u8 *mac,
  * @action: action to be performed on filter match
  * @vlan_action: pointer to add or remove VLAN function
  */
-static enum ice_status
+static int
 ice_fltr_prepare_vlan(struct ice_vsi *vsi, u16 vlan_id,
 		      enum ice_sw_fwd_act_type action,
-		      enum ice_status (*vlan_action)(struct ice_vsi *,
-						     struct list_head *))
+		      int (*vlan_action)(struct ice_vsi *, struct list_head *))
 {
-	enum ice_status result;
 	LIST_HEAD(tmp_list);
+	int result;
 
 	if (ice_fltr_add_vlan_to_list(vsi, &tmp_list, vlan_id, action))
-		return ICE_ERR_NO_MEMORY;
+		return -ENOMEM;
 
 	result = vlan_action(vsi, &tmp_list);
 	ice_fltr_free_list(ice_pf_to_dev(vsi->back), &tmp_list);
@@ -287,17 +382,16 @@ ice_fltr_prepare_vlan(struct ice_vsi *vsi, u16 vlan_id,
  * @action: action to be performed on filter match
  * @eth_action: pointer to add or remove ethertype function
  */
-static enum ice_status
+static int
 ice_fltr_prepare_eth(struct ice_vsi *vsi, u16 ethertype, u16 flag,
 		     enum ice_sw_fwd_act_type action,
-		     enum ice_status (*eth_action)(struct ice_vsi *,
-						   struct list_head *))
+		     int (*eth_action)(struct ice_vsi *, struct list_head *))
 {
-	enum ice_status result;
 	LIST_HEAD(tmp_list);
+	int result;
 
 	if (ice_fltr_add_eth_to_list(vsi, &tmp_list, ethertype, flag, action))
-		return ICE_ERR_NO_MEMORY;
+		return -ENOMEM;
 
 	result = eth_action(vsi, &tmp_list);
 	ice_fltr_free_list(ice_pf_to_dev(vsi->back), &tmp_list);
@@ -310,8 +404,8 @@ ice_fltr_prepare_eth(struct ice_vsi *vsi, u16 ethertype, u16 flag,
  * @mac: MAC to add
  * @action: action to be performed on filter match
  */
-enum ice_status ice_fltr_add_mac(struct ice_vsi *vsi, const u8 *mac,
-				 enum ice_sw_fwd_act_type action)
+int ice_fltr_add_mac(struct ice_vsi *vsi, const u8 *mac,
+		     enum ice_sw_fwd_act_type action)
 {
 	return ice_fltr_prepare_mac(vsi, mac, action, ice_fltr_add_mac_list);
 }
@@ -322,7 +416,7 @@ enum ice_status ice_fltr_add_mac(struct ice_vsi *vsi, const u8 *mac,
  * @mac: MAC to add
  * @action: action to be performed on filter match
  */
-enum ice_status
+int
 ice_fltr_add_mac_and_broadcast(struct ice_vsi *vsi, const u8 *mac,
 			       enum ice_sw_fwd_act_type action)
 {
@@ -336,8 +430,8 @@ ice_fltr_add_mac_and_broadcast(struct ice_vsi *vsi, const u8 *mac,
  * @mac: filter MAC to remove
  * @action: action to remove
  */
-enum ice_status ice_fltr_remove_mac(struct ice_vsi *vsi, const u8 *mac,
-				    enum ice_sw_fwd_act_type action)
+int ice_fltr_remove_mac(struct ice_vsi *vsi, const u8 *mac,
+			enum ice_sw_fwd_act_type action)
 {
 	return ice_fltr_prepare_mac(vsi, mac, action, ice_fltr_remove_mac_list);
 }
@@ -348,8 +442,8 @@ enum ice_status ice_fltr_remove_mac(struct ice_vsi *vsi, const u8 *mac,
  * @vlan_id: VLAN ID to add
  * @action: action to be performed on filter match
  */
-enum ice_status ice_fltr_add_vlan(struct ice_vsi *vsi, u16 vlan_id,
-				  enum ice_sw_fwd_act_type action)
+int ice_fltr_add_vlan(struct ice_vsi *vsi, u16 vlan_id,
+		      enum ice_sw_fwd_act_type action)
 {
 	return ice_fltr_prepare_vlan(vsi, vlan_id, action,
 				     ice_fltr_add_vlan_list);
@@ -361,8 +455,8 @@ enum ice_status ice_fltr_add_vlan(struct ice_vsi *vsi, u16 vlan_id,
  * @vlan_id: filter VLAN to remove
  * @action: action to remove
  */
-enum ice_status ice_fltr_remove_vlan(struct ice_vsi *vsi, u16 vlan_id,
-				     enum ice_sw_fwd_act_type action)
+int ice_fltr_remove_vlan(struct ice_vsi *vsi, u16 vlan_id,
+			 enum ice_sw_fwd_act_type action)
 {
 	return ice_fltr_prepare_vlan(vsi, vlan_id, action,
 				     ice_fltr_remove_vlan_list);
@@ -375,8 +469,8 @@ enum ice_status ice_fltr_remove_vlan(struct ice_vsi *vsi, u16 vlan_id,
  * @flag: direction of packet to be filtered, Tx or Rx
  * @action: action to be performed on filter match
  */
-enum ice_status ice_fltr_add_eth(struct ice_vsi *vsi, u16 ethertype, u16 flag,
-				 enum ice_sw_fwd_act_type action)
+int ice_fltr_add_eth(struct ice_vsi *vsi, u16 ethertype, u16 flag,
+		     enum ice_sw_fwd_act_type action)
 {
 	return ice_fltr_prepare_eth(vsi, ethertype, flag, action,
 				    ice_fltr_add_eth_list);
@@ -389,8 +483,8 @@ enum ice_status ice_fltr_add_eth(struct ice_vsi *vsi, u16 ethertype, u16 flag,
  * @flag: direction of filter
  * @action: action to remove
  */
-enum ice_status ice_fltr_remove_eth(struct ice_vsi *vsi, u16 ethertype,
-				    u16 flag, enum ice_sw_fwd_act_type action)
+int ice_fltr_remove_eth(struct ice_vsi *vsi, u16 ethertype, u16 flag,
+			enum ice_sw_fwd_act_type action)
 {
 	return ice_fltr_prepare_eth(vsi, ethertype, flag, action,
 				    ice_fltr_remove_eth_list);

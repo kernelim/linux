@@ -190,6 +190,10 @@ void dcn3_init_clocks(struct clk_mgr *clk_mgr_base)
 			&clk_mgr_base->bw_params->clk_table.entries[0].dtbclk_mhz,
 			&num_levels);
 
+	/* SOCCLK */
+	dcn3_init_single_clock(clk_mgr, PPCLK_SOCCLK,
+					&clk_mgr_base->bw_params->clk_table.entries[0].socclk_mhz,
+					&num_levels);
 	// DPREFCLK ???
 
 	/* DISPCLK */
@@ -334,11 +338,11 @@ static void dcn3_update_clocks(struct clk_mgr *clk_mgr_base,
 		if (dpp_clock_lowered) {
 			/* if clock is being lowered, increase DTO before lowering refclk */
 			dcn20_update_clocks_update_dpp_dto(clk_mgr, context, safe_to_lower);
-			dcn20_update_clocks_update_dentist(clk_mgr);
+			dcn20_update_clocks_update_dentist(clk_mgr, context);
 		} else {
 			/* if clock is being raised, increase refclk before lowering DTO */
 			if (update_dppclk || update_dispclk)
-				dcn20_update_clocks_update_dentist(clk_mgr);
+				dcn20_update_clocks_update_dentist(clk_mgr, context);
 			/* There is a check inside dcn20_update_clocks_update_dpp_dto which ensures
 			 * that we do not lower dto when it is not safe to lower. We do not need to
 			 * compare the current and new dppclk before calling this function.*/
@@ -432,6 +436,12 @@ static void dcn3_get_memclk_states_from_smu(struct clk_mgr *clk_mgr_base)
 			clk_mgr->base.ctx->dc, clk_mgr_base->bw_params);
 }
 
+static bool dcn3_is_smu_present(struct clk_mgr *clk_mgr_base)
+{
+	struct clk_mgr_internal *clk_mgr = TO_CLK_MGR_INTERNAL(clk_mgr_base);
+	return clk_mgr->smu_present;
+}
+
 static bool dcn3_are_clock_states_equal(struct dc_clocks *a,
 					struct dc_clocks *b)
 {
@@ -494,6 +504,7 @@ static struct clk_mgr_funcs dcn3_funcs = {
 		.are_clock_states_equal = dcn3_are_clock_states_equal,
 		.enable_pme_wa = dcn3_enable_pme_wa,
 		.notify_link_rate_change = dcn30_notify_link_rate_change,
+		.is_smu_present = dcn3_is_smu_present
 };
 
 static void dcn3_init_clocks_fpga(struct clk_mgr *clk_mgr)

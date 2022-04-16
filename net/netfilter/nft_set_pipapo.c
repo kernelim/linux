@@ -1202,6 +1202,12 @@ static struct nft_pipapo_match *pipapo_clone(struct nft_pipapo_match *old)
 	if (!new->scratch)
 		goto out_scratch;
 
+	for_each_possible_cpu(i)
+		*per_cpu_ptr(new->scratch, i) = NULL;
+
+	if (pipapo_realloc_scratch(new, old->bsize_max))
+		goto out_scratch_realloc;
+
 	rcu_head_init(&new->rcu);
 
 	src = old->f;
@@ -1239,8 +1245,11 @@ out_lt:
 		kvfree(dst->lt);
 		dst--;
 	}
-	free_percpu(new->scratch);
+out_scratch_realloc:
+	for_each_possible_cpu(i)
+		kfree(*per_cpu_ptr(new->scratch, i));
 out_scratch:
+	free_percpu(new->scratch);
 	kfree(new);
 
 	return ERR_PTR(-ENOMEM);

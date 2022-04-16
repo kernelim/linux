@@ -35,7 +35,7 @@ ssize_t hisi_format_sysfs_show(struct device *dev,
 
 	eattr = container_of(attr, struct dev_ext_attribute, attr);
 
-	return sprintf(buf, "%s\n", (char *)eattr->var);
+	return sysfs_emit(buf, "%s\n", (char *)eattr->var);
 }
 
 /*
@@ -48,7 +48,7 @@ ssize_t hisi_event_sysfs_show(struct device *dev,
 
 	eattr = container_of(attr, struct dev_ext_attribute, attr);
 
-	return sprintf(page, "config=0x%lx\n", (unsigned long)eattr->var);
+	return sysfs_emit(page, "config=0x%lx\n", (unsigned long)eattr->var);
 }
 
 /*
@@ -59,7 +59,7 @@ ssize_t hisi_cpumask_sysfs_show(struct device *dev,
 {
 	struct hisi_pmu *hisi_pmu = to_hisi_pmu(dev_get_drvdata(dev));
 
-	return sprintf(buf, "%d\n", hisi_pmu->on_cpu);
+	return sysfs_emit(buf, "%d\n", hisi_pmu->on_cpu);
 }
 
 static bool hisi_validate_event_group(struct perf_event *event)
@@ -141,15 +141,6 @@ int hisi_uncore_pmu_event_init(struct perf_event *event)
 	 */
 	if (is_sampling_event(event) || event->attach_state & PERF_ATTACH_TASK)
 		return -EOPNOTSUPP;
-
-	/* counters do not have these bits */
-	if (event->attr.exclude_user	||
-	    event->attr.exclude_kernel	||
-	    event->attr.exclude_host	||
-	    event->attr.exclude_guest	||
-	    event->attr.exclude_hv	||
-	    event->attr.exclude_idle)
-		return -EINVAL;
 
 	/*
 	 *  The uncore counters not specific to any CPU, so cannot

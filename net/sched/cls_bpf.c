@@ -23,7 +23,7 @@
 #include <net/pkt_cls.h>
 #include <net/sock.h>
 
-#include <linux/rh_features.h>
+#include <linux/rh_flags.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Daniel Borkmann <dborkman@redhat.com>");
@@ -400,7 +400,7 @@ static int cls_bpf_prog_from_efd(struct nlattr **tb, struct cls_bpf_prog *prog,
 		}
 	}
 
-	rh_mark_used_feature("eBPF/cls");
+	rh_add_flag("eBPF/cls");
 
 	prog->bpf_ops = NULL;
 	prog->bpf_name = name;

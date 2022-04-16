@@ -981,7 +981,7 @@ static int temac_of_probe(struct platform_device *op)
 	struct device_node *np;
 	struct temac_local *lp;
 	struct net_device *ndev;
-	const void *addr;
+	u8 addr[ETH_ALEN];
 	__be32 *p;
 	int rc = 0;
 
@@ -1075,8 +1075,8 @@ static int temac_of_probe(struct platform_device *op)
 
 
 	/* Retrieve the MAC address */
-	addr = of_get_mac_address(op->dev.of_node);
-	if (!addr) {
+	rc = of_get_mac_address(op->dev.of_node, addr);
+	if (rc) {
 		dev_err(&op->dev, "could not find MAC address\n");
 		rc = -ENODEV;
 		goto err_iounmap_2;

@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Intel BayTrail PMIC I2C bus semaphore implementaion
+ * Intel BayTrail PMIC I2C bus semaphore implementation
  * Copyright (c) 2014, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 #include <linux/device.h>
 #include <linux/acpi.h>
@@ -19,16 +11,6 @@
 #include <asm/iosf_mbi.h>
 
 #include "i2c-designware-core.h"
-
-static int baytrail_i2c_acquire(struct dw_i2c_dev *dev)
-{
-	return iosf_mbi_block_punit_i2c_access();
-}
-
-static void baytrail_i2c_release(struct dw_i2c_dev *dev)
-{
-	iosf_mbi_unblock_punit_i2c_access();
-}
 
 int i2c_dw_probe_lock_support(struct dw_i2c_dev *dev)
 {
@@ -54,13 +36,9 @@ int i2c_dw_probe_lock_support(struct dw_i2c_dev *dev)
 		return -EPROBE_DEFER;
 
 	dev_info(dev->dev, "I2C bus managed by PUNIT\n");
-	dev->acquire_lock = baytrail_i2c_acquire;
-	dev->release_lock = baytrail_i2c_release;
-	dev->pm_disabled = true;
+	dev->acquire_lock = iosf_mbi_block_punit_i2c_access;
+	dev->release_lock = iosf_mbi_unblock_punit_i2c_access;
+	dev->shared_with_punit = true;
 
 	return 0;
-}
-
-void i2c_dw_remove_lock_support(struct dw_i2c_dev *dev)
-{
 }

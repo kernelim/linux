@@ -393,7 +393,6 @@ repeat:
 	return last_map_addr;
 }
 
-pte_t *kmap_pte;
 
 static inline pte_t *kmap_get_fixmap_pte(unsigned long vaddr)
 {
@@ -402,17 +401,6 @@ static inline pte_t *kmap_get_fixmap_pte(unsigned long vaddr)
 	pud_t *pud = pud_offset(p4d, vaddr);
 	pmd_t *pmd = pmd_offset(pud, vaddr);
 	return pte_offset_kernel(pmd, vaddr);
-}
-
-static void __init kmap_init(void)
-{
-	unsigned long kmap_vstart;
-
-	/*
-	 * Cache the first kmap pte:
-	 */
-	kmap_vstart = __fix_to_virt(FIX_KMAP_BEGIN);
-	kmap_pte = kmap_get_fixmap_pte(kmap_vstart);
 }
 
 #ifdef CONFIG_HIGHMEM
@@ -732,8 +720,6 @@ void __init paging_init(void)
 
 	__flush_tlb_all();
 
-	kmap_init();
-
 	/*
 	 * NOTE: at this point the bootmem allocator is fully available.
 	 */
@@ -757,7 +743,7 @@ static void __init test_wp_bit(void)
 
 	__set_fixmap(FIX_WP_TEST, __pa_symbol(empty_zero_page), PAGE_KERNEL_RO);
 
-	if (probe_kernel_write((char *)fix_to_virt(FIX_WP_TEST), &z, 1)) {
+	if (copy_to_kernel_nofault((char *)fix_to_virt(FIX_WP_TEST), &z, 1)) {
 		clear_fixmap(FIX_WP_TEST);
 		printk(KERN_CONT "Ok.\n");
 		return;

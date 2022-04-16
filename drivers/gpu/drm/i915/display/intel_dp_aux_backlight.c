@@ -35,6 +35,7 @@
  */
 
 #include "intel_display_types.h"
+#include "intel_dp.h"
 #include "intel_dp_aux_backlight.h"
 #include "intel_panel.h"
 
@@ -105,6 +106,8 @@ intel_dp_aux_supports_hdr_backlight(struct intel_connector *connector)
 	struct intel_panel *panel = &connector->panel;
 	int ret;
 	u8 tcon_cap[4];
+
+	intel_dp_wait_source_oui(intel_dp);
 
 	ret = drm_dp_dpcd_read(aux, INTEL_EDP_HDR_TCON_CAP0, tcon_cap, sizeof(tcon_cap));
 	if (ret < 0)
@@ -202,6 +205,8 @@ intel_dp_aux_hdr_enable_backlight(const struct intel_crtc_state *crtc_state,
 	int ret;
 	u8 old_ctrl, ctrl;
 
+	intel_dp_wait_source_oui(intel_dp);
+
 	ret = drm_dp_dpcd_readb(&intel_dp->aux, INTEL_EDP_HDR_GETSET_CTRL_PARAMS, &old_ctrl);
 	if (ret < 0) {
 		drm_err(&i915->drm, "Failed to read current backlight control mode: %d\n", ret);
@@ -291,7 +296,7 @@ static void set_vesa_backlight_enable(struct intel_dp *intel_dp, bool enable)
 	if (drm_dp_dpcd_writeb(&intel_dp->aux, DP_EDP_DISPLAY_CONTROL_REGISTER,
 			       reg_val) != 1) {
 		drm_dbg_kms(&i915->drm, "Failed to %s aux backlight\n",
-			    enable ? "enable" : "disable");
+			    enabledisable(enable));
 	}
 }
 

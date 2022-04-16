@@ -28,6 +28,8 @@
 #include <linux/sched/task.h>
 #include <linux/static_key.h>
 
+#include <linux/rh_tasklist_lock.h>
+
 extern struct tracepoint * const __start___tracepoints_ptrs[];
 extern struct tracepoint * const __stop___tracepoints_ptrs[];
 

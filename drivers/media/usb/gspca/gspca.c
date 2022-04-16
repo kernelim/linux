@@ -1036,15 +1036,15 @@ static int vidioc_enum_fmt_vid_cap(struct file *file, void  *priv,
 	return 0;
 }
 
-static int vidioc_g_fmt_vid_cap(struct file *file, void *priv,
-			    struct v4l2_format *fmt)
+static int vidioc_g_fmt_vid_cap(struct file *file, void *_priv,
+				struct v4l2_format *fmt)
 {
 	struct gspca_dev *gspca_dev = video_drvdata(file);
+	u32 priv = fmt->fmt.pix.priv;
 
 	fmt->fmt.pix = gspca_dev->pixfmt;
-	/* some drivers use priv internally, zero it before giving it back to
-	   the core */
-	fmt->fmt.pix.priv = 0;
+	/* some drivers use priv internally, so keep the original value */
+	fmt->fmt.pix.priv = priv;
 	return 0;
 }
 
@@ -1079,27 +1079,27 @@ static int try_fmt_vid_cap(struct gspca_dev *gspca_dev,
 		fmt->fmt.pix.height = h;
 		gspca_dev->sd_desc->try_fmt(gspca_dev, fmt);
 	}
-	/* some drivers use priv internally, zero it before giving it back to
-	   the core */
-	fmt->fmt.pix.priv = 0;
 	return mode;			/* used when s_fmt */
 }
 
-static int vidioc_try_fmt_vid_cap(struct file *file,
-			      void *priv,
-			      struct v4l2_format *fmt)
+static int vidioc_try_fmt_vid_cap(struct file *file, void *_priv,
+				  struct v4l2_format *fmt)
 {
 	struct gspca_dev *gspca_dev = video_drvdata(file);
+	u32 priv = fmt->fmt.pix.priv;
 
 	if (try_fmt_vid_cap(gspca_dev, fmt) < 0)
 		return -EINVAL;
+	/* some drivers use priv internally, so keep the original value */
+	fmt->fmt.pix.priv = priv;
 	return 0;
 }
 
-static int vidioc_s_fmt_vid_cap(struct file *file, void *priv,
-			    struct v4l2_format *fmt)
+static int vidioc_s_fmt_vid_cap(struct file *file, void *_priv,
+				struct v4l2_format *fmt)
 {
 	struct gspca_dev *gspca_dev = video_drvdata(file);
+	u32 priv = fmt->fmt.pix.priv;
 	int mode;
 
 	if (vb2_is_busy(&gspca_dev->queue))
@@ -1115,6 +1115,8 @@ static int vidioc_s_fmt_vid_cap(struct file *file, void *priv,
 		gspca_dev->pixfmt = fmt->fmt.pix;
 	else
 		gspca_dev->pixfmt = gspca_dev->cam.cam_mode[mode];
+	/* some drivers use priv internally, so keep the original value */
+	fmt->fmt.pix.priv = priv;
 	return 0;
 }
 
@@ -1562,7 +1564,7 @@ int gspca_dev_probe2(struct usb_interface *intf,
 
 	/* init video stuff */
 	ret = video_register_device(&gspca_dev->vdev,
-				  VFL_TYPE_GRABBER,
+				  VFL_TYPE_VIDEO,
 				  -1);
 	if (ret < 0) {
 		pr_err("video_register_device err %d\n", ret);
@@ -1582,6 +1584,9 @@ out:
 		input_unregister_device(gspca_dev->input_dev);
 #endif
 	v4l2_ctrl_handler_free(gspca_dev->vdev.ctrl_handler);
+	v4l2_device_unregister(&gspca_dev->v4l2_dev);
+	if (sd_desc->probe_error)
+		sd_desc->probe_error(gspca_dev);
 	kfree(gspca_dev->usb_buf);
 	kfree(gspca_dev);
 	return ret;

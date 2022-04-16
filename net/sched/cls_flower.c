@@ -21,7 +21,7 @@
 #include <linux/ip.h>
 #include <linux/mpls.h>
 
-#include <linux/rh_features.h>
+#include <linux/rh_flags.h>
 
 #include <net/sch_generic.h>
 #include <net/pkt_cls.h>
@@ -949,7 +949,7 @@ static int fl_set_key_mpls(struct nlattr **tb,
 			return -EBADMSG;
 		}
 
-		rh_mark_used_feature("flower/mpls_multilabel");
+		rh_add_flag("flower/mpls_multilabel");
 
 		return fl_set_key_mpls_opts(tb[TCA_FLOWER_KEY_MPLS_OPTS],
 					    key_val, key_mask, extack);
@@ -2198,18 +2198,24 @@ static void fl_walk(struct tcf_proto *tp, struct tcf_walker *arg,
 
 	arg->count = arg->skip;
 
+	rcu_read_lock();
 	idr_for_each_entry_continue_ul(&head->handle_idr, f, tmp, id) {
 		/* don't return filters that are being deleted */
 		if (!refcount_inc_not_zero(&f->refcnt))
 			continue;
+		rcu_read_unlock();
+
 		if (arg->fn(tp, f, arg) < 0) {
 			__fl_put(f);
 			arg->stop = 1;
+			rcu_read_lock();
 			break;
 		}
 		__fl_put(f);
 		arg->count++;
+		rcu_read_lock();
 	}
+	rcu_read_unlock();
 	arg->cookie = id;
 }
 

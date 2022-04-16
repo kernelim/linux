@@ -21,7 +21,7 @@
 
 static void close_dir(struct perf_data_file *files, int nr)
 {
-	while (--nr >= 1) {
+	while (--nr >= 0) {
 		close(files[nr].fd);
 		zfree(&files[nr].path);
 	}
@@ -241,11 +241,12 @@ static bool is_dir(struct perf_data *data)
 
 static int open_file_read(struct perf_data *data)
 {
+	int flags = data->in_place_update ? O_RDWR : O_RDONLY;
 	struct stat st;
 	int fd;
 	char sbuf[STRERR_BUFSIZE];
 
-	fd = open(data->file.path, O_RDONLY);
+	fd = open(data->file.path, flags);
 	if (fd < 0) {
 		int err = errno;
 

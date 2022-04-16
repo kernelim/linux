@@ -141,6 +141,10 @@ struct bdi_writeback {
 	struct list_head b_dirty_time;	/* time stamps are dirty */
 	spinlock_t list_lock;		/* protects the b_* lists */
 
+	/* number of inodes under writeback */
+	/* 4-byte hole after list_lock*/
+	RH_KABI_FILL_HOLE(atomic_t writeback_inodes)
+
 	struct percpu_counter stat[NR_WB_STAT_ITEMS];
 
 	struct bdi_writeback_congested *congested;
@@ -186,7 +190,8 @@ struct bdi_writeback {
 	};
 #endif
 
-	RH_KABI_RESERVE(1)
+	/* work item used for bandwidth estimate */
+	RH_KABI_USE(1,struct delayed_work *bw_dwork)
 	RH_KABI_RESERVE(2)
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)

@@ -32,6 +32,8 @@
 #include <linux/security.h>
 #include <linux/pid_namespace.h>
 
+#include <linux/rh_tasklist_lock.h>
+
 int set_task_ioprio(struct task_struct *task, int ioprio)
 {
 	int err;
@@ -118,11 +120,17 @@ SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
 				pgrp = task_pgrp(current);
 			else
 				pgrp = find_vpid(who);
+
+			qread_lock(&tasklist_lock);
 			do_each_pid_thread(pgrp, PIDTYPE_PGID, p) {
 				ret = set_task_ioprio(p, ioprio);
-				if (ret)
-					break;
+				if (ret) {
+					read_unlock(&tasklist_lock);
+					goto out;
+				}
 			} while_each_pid_thread(pgrp, PIDTYPE_PGID, p);
+			qread_unlock(&tasklist_lock);
+
 			break;
 		case IOPRIO_WHO_USER:
 			uid = make_kuid(current_user_ns(), who);
@@ -152,6 +160,7 @@ free_uid:
 			ret = -EINVAL;
 	}
 
+out:
 	rcu_read_unlock();
 	return ret;
 }

@@ -586,7 +586,6 @@ static s32 nps_enet_probe(struct platform_device *pdev)
 	struct net_device *ndev;
 	struct nps_enet_priv *priv;
 	s32 err = 0;
-	const char *mac_addr;
 	struct resource *res_regs;
 
 	if (!dev->of_node)
@@ -615,10 +614,8 @@ static s32 nps_enet_probe(struct platform_device *pdev)
 	dev_dbg(dev, "Registers base address is 0x%p\n", priv->regs_base);
 
 	/* set kernel MAC address to dev */
-	mac_addr = of_get_mac_address(dev->of_node);
-	if (mac_addr)
-		ether_addr_copy(ndev->dev_addr, mac_addr);
-	else
+	err = of_get_mac_address(dev->of_node, ndev->dev_addr);
+	if (err)
 		eth_hw_addr_random(ndev);
 
 	/* Get IRQ number */

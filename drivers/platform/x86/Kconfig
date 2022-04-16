@@ -200,6 +200,7 @@ config DELL_WMI_SYSMAN
 	depends on ACPI_WMI
 	depends on DMI
 	select NLS
+	select FW_ATTR_CLASS
 	help
 	  This driver allows changing BIOS settings on many Dell machines from
 	  2018 and newer without the use of any additional software.
@@ -607,6 +608,17 @@ config THINKPAD_ACPI_HOTKEY_POLL
 	  If you are not sure, say Y here.  The driver enables polling only if
 	  it is strictly necessary to do so.
 
+config THINKPAD_LMI
+	tristate "Lenovo WMI-based systems management driver"
+	depends on ACPI_WMI
+	select FW_ATTR_CLASS
+	help
+	  This driver allows changing BIOS settings on Lenovo machines whose
+	  BIOS support the WMI interface.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called think-lmi.
+
 config SENSORS_HDAPS
 	tristate "Thinkpad Hard Drive Active Protection System (hdaps)"
 	depends on INPUT
@@ -625,6 +637,8 @@ config SENSORS_HDAPS
 
 	  Say Y here if you have an applicable laptop and want to experience
 	  the awesome power of hdaps.
+
+source "drivers/platform/x86/intel/Kconfig"
 
 config INTEL_MENLOW
 	tristate "Thermal Management driver for Intel menlow platform"
@@ -1011,6 +1025,10 @@ config INTEL_IPS
 	  functionality.  If in doubt, say Y here; it will only load on
 	  supported platforms.
 
+config FW_ATTR_CLASS
+	tristate
+	default n
+
 config INTEL_IMR
 	bool "Intel Isolated Memory Region support"
 	depends on X86_INTEL_QUARK && IOSF_MBI
@@ -1034,22 +1052,6 @@ config INTEL_IMR
 	  registers during its bootup process.
 
 	  If you are running on a Galileo/Quark say Y here.
-
-config INTEL_PMC_CORE
-	tristate "Intel PMC Core driver"
-	depends on PCI
-	depends on ACPI
-	---help---
-	  The Intel Platform Controller Hub for Intel Core SoCs provides access
-	  to Power Management Controller registers via a PCI interface. This
-	  driver can utilize debugging capabilities and supported features as
-	  exposed by the Power Management Controller.
-
-	  Supported features:
-		- SLP_S0_RESIDENCY counter
-		- PCH IP Power Gating status
-		- LTR Ignore
-		- MPHY/PLL gating status (Sunrisepoint PCH only)
 
 config IBM_RTL
 	tristate "Device driver to enable PRTL support"
@@ -1130,7 +1132,7 @@ config SAMSUNG_Q10
 
 config AMD_PMC
 	tristate "AMD SoC PMC driver"
-	depends on ACPI && PCI
+	depends on ACPI && PCI && RTC_CLASS
 	help
 	  The driver provides support for AMD Power Management Controller
 	  primarily responsible for S2Idle transactions that are driven from

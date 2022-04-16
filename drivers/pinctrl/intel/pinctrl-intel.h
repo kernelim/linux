@@ -1,13 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Core pinctrl/GPIO driver for Intel GPIO controllers
  *
  * Copyright (C) 2015, Intel Corporation
  * Authors: Mathias Nyman <mathias.nyman@linux.intel.com>
  *          Mika Westerberg <mika.westerberg@linux.intel.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef PINCTRL_INTEL_H
@@ -146,6 +143,10 @@ struct intel_community {
 /* Additional features supported by the hardware */
 #define PINCTRL_FEATURE_DEBOUNCE	BIT(0)
 #define PINCTRL_FEATURE_1K_PD		BIT(1)
+#define PINCTRL_FEATURE_GPIO_HW_INFO	BIT(2)
+#define PINCTRL_FEATURE_PWM		BIT(3)
+#define PINCTRL_FEATURE_BLINK		BIT(4)
+#define PINCTRL_FEATURE_EXP		BIT(5)
 
 /**
  * PIN_GROUP - Declare a pin group

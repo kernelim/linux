@@ -7,6 +7,7 @@ TEST_PROGS = bridge_igmp.sh \
 	bridge_vlan_unaware.sh \
 	ethtool.sh \
 	gre_multipath.sh \
+	ip6_forward_instats_vrf.sh \
 	ipip_flat_gre_key.sh \
 	ipip_flat_gre_keys.sh \
 	ipip_flat_gre.sh \

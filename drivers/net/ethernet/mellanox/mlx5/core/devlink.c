@@ -7,6 +7,7 @@
 #include "fw_reset.h"
 #include "fs_core.h"
 #include "eswitch.h"
+#include "esw/qos.h"
 #include "sf/dev/dev.h"
 #include "sf/sf.h"
 
@@ -63,6 +64,11 @@ mlx5_devlink_info_get(struct devlink *devlink, struct devlink_info_req *req,
 	err = devlink_info_version_running_put(req, "fw.version", version_str);
 	if (err)
 		return err;
+	err = devlink_info_version_running_put(req,
+					       DEVLINK_INFO_VERSION_GENERIC_FW,
+					       version_str);
+	if (err)
+		return err;
 
 	/* no pending version, return running (stored) version */
 	if (stored_fw == 0)
@@ -74,8 +80,9 @@ mlx5_devlink_info_get(struct devlink *devlink, struct devlink_info_req *req,
 	err = devlink_info_version_stored_put(req, "fw.version", version_str);
 	if (err)
 		return err;
-
-	return 0;
+	return devlink_info_version_stored_put(req,
+					       DEVLINK_INFO_VERSION_GENERIC_FW,
+					       version_str);
 }
 
 static int mlx5_devlink_reload_fw_activate(struct devlink *devlink, struct netlink_ext_ack *extack)
@@ -129,6 +136,7 @@ static int mlx5_devlink_reload_down(struct devlink *devlink, bool netns_change,
 				    struct netlink_ext_ack *extack)
 {
 	struct mlx5_core_dev *dev = devlink_priv(devlink);
+	struct pci_dev *pdev = dev->pdev;
 	bool sf_dev_allocated;
 
 	sf_dev_allocated = mlx5_sf_dev_allocated(dev);
@@ -137,13 +145,17 @@ static int mlx5_devlink_reload_down(struct devlink *devlink, bool netns_change,
 		 * unregistering devlink instance while holding devlink_mutext.
 		 * Hence, do not support reload.
 		 */
-		NL_SET_ERR_MSG_MOD(extack, "reload is unsupported when SFs are allocated\n");
+		NL_SET_ERR_MSG_MOD(extack, "reload is unsupported when SFs are allocated");
 		return -EOPNOTSUPP;
 	}
 
 	if (mlx5_lag_is_active(dev)) {
-		NL_SET_ERR_MSG_MOD(extack, "reload is unsupported in Lag mode\n");
+		NL_SET_ERR_MSG_MOD(extack, "reload is unsupported in Lag mode");
 		return -EOPNOTSUPP;
+	}
+
+	if (pci_num_vf(pdev)) {
+		NL_SET_ERR_MSG_MOD(extack, "reload while VFs are present is unfavorable");
 	}
 
 	switch (action) {
@@ -286,6 +298,13 @@ static const struct devlink_ops mlx5_devlink_ops = {
 	.eswitch_encap_mode_get = mlx5_devlink_eswitch_encap_mode_get,
 	.port_function_hw_addr_get = mlx5_devlink_port_function_hw_addr_get,
 	.port_function_hw_addr_set = mlx5_devlink_port_function_hw_addr_set,
+	.rate_leaf_tx_share_set = mlx5_esw_devlink_rate_leaf_tx_share_set,
+	.rate_leaf_tx_max_set = mlx5_esw_devlink_rate_leaf_tx_max_set,
+	.rate_node_tx_share_set = mlx5_esw_devlink_rate_node_tx_share_set,
+	.rate_node_tx_max_set = mlx5_esw_devlink_rate_node_tx_max_set,
+	.rate_node_new = mlx5_esw_devlink_rate_node_new,
+	.rate_node_del = mlx5_esw_devlink_rate_node_del,
+	.rate_leaf_parent_set = mlx5_esw_devlink_rate_parent_set,
 #endif
 #ifdef CONFIG_MLX5_SF_MANAGER
 	.port_new = mlx5_devlink_sf_port_new,
@@ -664,6 +683,7 @@ params_reg_err:
 void mlx5_devlink_unregister(struct devlink *devlink)
 {
 	mlx5_devlink_traps_unregister(devlink);
+	devlink_params_unpublish(devlink);
 	devlink_params_unregister(devlink, mlx5_devlink_params,
 				  ARRAY_SIZE(mlx5_devlink_params));
 	devlink_unregister(devlink);

@@ -21,11 +21,11 @@
 #include <linux/acpi.h>
 #include <linux/memblock.h>
 #include <linux/cache.h>
+#include <linux/dma-map-ops.h>
 #include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/genalloc.h>
 #include <linux/dma-direct.h>
-#include <linux/dma-noncoherent.h>
 #include <linux/dma-contiguous.h>
 #include <linux/dma-iommu.h>
 #include <linux/vmalloc.h>
@@ -71,7 +71,7 @@ void arch_setup_dma_ops(struct device *dev, u64 dma_base, u64 size,
 
 	dev->dma_coherent = coherent;
 	if (iommu)
-		iommu_setup_dma_ops(dev, dma_base, size);
+		iommu_setup_dma_ops(dev, dma_base, dma_base + size - 1);
 
 #ifdef CONFIG_XEN
 	if (xen_initial_domain()) {

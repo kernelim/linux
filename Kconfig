@@ -11,6 +11,8 @@ source "scripts/Kconfig.include"
 
 source "arch/$(SRCARCH)/Kconfig"
 
+source "Kconfig.redhat"
+
 config RH_KABI_SIZE_ALIGN_CHECKS
 	bool "Enables more stringent kabi checks in the macros"
 	default y

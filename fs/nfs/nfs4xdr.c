@@ -144,7 +144,16 @@ static int decode_layoutget(struct xdr_stream *xdr, struct rpc_rqst *req,
  * layout types will be returned.
  */
 #define decode_fsinfo_maxsz	(op_decode_hdr_maxsz + \
-				 nfs4_fattr_bitmap_maxsz + 4 + 8 + 5)
+				 nfs4_fattr_bitmap_maxsz + 1 + \
+				 1 /* lease time */ + \
+				 2 /* max filesize */ + \
+				 2 /* max read */ + \
+				 2 /* max write */ + \
+				 nfstime4_maxsz /* time delta */ + \
+				 5 /* fs layout types */ + \
+				 1 /* layout blksize */ + \
+				 1 /* clone blksize */ + \
+				 1 /* xattr support */)
 #define encode_renew_maxsz	(op_encode_hdr_maxsz + 3)
 #define decode_renew_maxsz	(op_decode_hdr_maxsz)
 #define encode_setclientid_maxsz \
@@ -3200,9 +3209,7 @@ out_status:
 	*nfs_retval = nfs4_stat_to_errno(nfserr);
 	return true;
 out_bad_operation:
-	dprintk("nfs: Server returned operation"
-		" %d but we issued a request for %d\n",
-			opnum, expected);
+	trace_nfs4_xdr_bad_operation(xdr, opnum, expected);
 	*nfs_retval = -EREMOTEIO;
 	return false;
 out_overflow:
@@ -3487,8 +3494,11 @@ static int decode_attr_filehandle(struct xdr_stream *xdr, uint32_t *bitmap, stru
 		if (unlikely(!p))
 			return -EIO;
 		len = be32_to_cpup(p);
-		if (len > NFS4_FHSIZE)
-			return -EIO;
+		if (len > NFS4_FHSIZE || len == 0) {
+			trace_nfs4_xdr_bad_filehandle(xdr, OP_READDIR,
+						      NFS4ERR_BADHANDLE);
+			return -EREMOTEIO;
+		}
 		p = xdr_inline_decode(xdr, len);
 		if (unlikely(!p))
 			return -EIO;
@@ -4913,8 +4923,10 @@ static int decode_getfh(struct xdr_stream *xdr, struct nfs_fh *fh)
 	if (unlikely(!p))
 		return -EIO;
 	len = be32_to_cpup(p);
-	if (len > NFS4_FHSIZE)
-		return -EIO;
+	if (len > NFS4_FHSIZE || len == 0) {
+		trace_nfs4_xdr_bad_filehandle(xdr, OP_GETFH, NFS4ERR_BADHANDLE);
+		return -EREMOTEIO;
+	}
 	fh->size = len;
 	p = xdr_inline_decode(xdr, len);
 	if (unlikely(!p))

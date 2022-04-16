@@ -50,19 +50,19 @@ void nvme_mpath_start_freeze(struct nvme_subsystem *subsys)
  * and those that have a single controller and use the controller node
  * directly.
  */
-void nvme_set_disk_name(char *disk_name, struct nvme_ns *ns,
-			struct nvme_ctrl *ctrl, int *flags)
+bool nvme_mpath_set_disk_name(struct nvme_ns *ns, char *disk_name, int *flags)
 {
-	if (!multipath) {
-		sprintf(disk_name, "nvme%dn%d", ctrl->instance, ns->head->instance);
-	} else if (ns->head->disk) {
-		sprintf(disk_name, "nvme%dc%dn%d", ctrl->subsys->instance,
-				ctrl->instance, ns->head->instance);
-		*flags = GENHD_FL_HIDDEN;
-	} else {
-		sprintf(disk_name, "nvme%dn%d", ctrl->subsys->instance,
-				ns->head->instance);
+	if (!multipath)
+		return false;
+	if (!ns->head->disk) {
+		sprintf(disk_name, "nvme%dn%d", ns->ctrl->subsys->instance,
+			ns->head->instance);
+		return true;
 	}
+	sprintf(disk_name, "nvme%dc%dn%d", ns->ctrl->subsys->instance,
+		ns->ctrl->instance, ns->head->instance);
+	*flags = GENHD_FL_HIDDEN;
+	return true;
 }
 
 static inline void __nvme_update_ana(struct nvme_ns *ns)
@@ -332,7 +332,7 @@ static blk_qc_t nvme_ns_head_make_request(struct request_queue *q,
 		trace_block_bio_remap(bio->bi_disk->queue, bio,
 				      disk_devt(ns->head->disk),
 				      bio->bi_iter.bi_sector);
-		ret = direct_make_request(bio);
+		ret = generic_make_request(bio);
 	} else if (nvme_available_path(head)) {
 		dev_warn_ratelimited(dev, "no usable path - requeuing I/O\n");
 
@@ -347,6 +347,87 @@ static blk_qc_t nvme_ns_head_make_request(struct request_queue *q,
 	}
 
 	srcu_read_unlock(&head->srcu, srcu_idx);
+	return ret;
+}
+
+static int nvme_ns_head_open(struct block_device *bdev, fmode_t mode)
+{
+	if (!nvme_tryget_ns_head(bdev->bd_disk->private_data))
+		return -ENXIO;
+	return 0;
+}
+
+static void nvme_ns_head_release(struct gendisk *disk, fmode_t mode)
+{
+	nvme_put_ns_head(disk->private_data);
+}
+
+#ifdef CONFIG_BLK_DEV_ZONED
+static int nvme_ns_head_report_zones(struct gendisk *disk, sector_t sector,
+		unsigned int nr_zones, report_zones_cb cb, void *data)
+{
+	struct nvme_ns_head *head = disk->private_data;
+	struct nvme_ns *ns;
+	int srcu_idx, ret = -EWOULDBLOCK;
+
+	srcu_idx = srcu_read_lock(&head->srcu);
+	ns = nvme_find_path(head);
+	if (ns)
+		ret = nvme_ns_report_zones(ns, sector, nr_zones, cb, data);
+	srcu_read_unlock(&head->srcu, srcu_idx);
+	return ret;
+}
+#else
+#define nvme_ns_head_report_zones	NULL
+#endif /* CONFIG_BLK_DEV_ZONED */
+
+const struct block_device_operations nvme_ns_head_ops = {
+	.owner		= THIS_MODULE,
+	.open		= nvme_ns_head_open,
+	.release	= nvme_ns_head_release,
+	.ioctl		= nvme_ns_head_ioctl,
+	.getgeo		= nvme_getgeo,
+	.report_zones	= nvme_ns_head_report_zones,
+	.pr_ops		= &nvme_pr_ops,
+};
+
+static inline struct nvme_ns_head *cdev_to_ns_head(struct cdev *cdev)
+{
+	return container_of(cdev, struct nvme_ns_head, cdev);
+}
+
+static int nvme_ns_head_chr_open(struct inode *inode, struct file *file)
+{
+	if (!nvme_tryget_ns_head(cdev_to_ns_head(inode->i_cdev)))
+		return -ENXIO;
+	return 0;
+}
+
+static int nvme_ns_head_chr_release(struct inode *inode, struct file *file)
+{
+	nvme_put_ns_head(cdev_to_ns_head(inode->i_cdev));
+	return 0;
+}
+
+static const struct file_operations nvme_ns_head_chr_fops = {
+	.owner		= THIS_MODULE,
+	.open		= nvme_ns_head_chr_open,
+	.release	= nvme_ns_head_chr_release,
+	.unlocked_ioctl	= nvme_ns_head_chr_ioctl,
+	.compat_ioctl	= compat_ptr_ioctl,
+};
+
+static int nvme_add_ns_head_cdev(struct nvme_ns_head *head)
+{
+	int ret;
+
+	head->cdev_device.parent = &head->subsys->dev;
+	ret = dev_set_name(&head->cdev_device, "ng%dn%d",
+			   head->subsys->instance, head->instance);
+	if (ret)
+		return ret;
+	ret = nvme_cdev_add(&head->cdev, &head->cdev_device,
+			    &nvme_ns_head_chr_fops, THIS_MODULE);
 	return ret;
 }
 
@@ -428,9 +509,11 @@ static void nvme_mpath_set_live(struct nvme_ns *ns)
 	if (!head->disk)
 		return;
 
-	if (!test_and_set_bit(NVME_NSHEAD_DISK_LIVE, &head->flags))
+	if (!test_and_set_bit(NVME_NSHEAD_DISK_LIVE, &head->flags)) {
 		device_add_disk(&head->subsys->dev, head->disk,
 				nvme_ns_id_attr_groups);
+		nvme_add_ns_head_cdev(head);
+	}
 
 	mutex_lock(&head->lock);
 	if (nvme_path_is_optimized(ns)) {
@@ -526,14 +609,17 @@ static int nvme_update_ana_state(struct nvme_ctrl *ctrl,
 
 	down_read(&ctrl->namespaces_rwsem);
 	list_for_each_entry(ns, &ctrl->namespaces, list) {
-		unsigned nsid = le32_to_cpu(desc->nsids[n]);
-
+		unsigned nsid;
+again:
+		nsid = le32_to_cpu(desc->nsids[n]);
 		if (ns->head->ns_id < nsid)
 			continue;
 		if (ns->head->ns_id == nsid)
 			nvme_update_ns_ana_state(desc, ns);
 		if (++n == nr_nsids)
 			break;
+		if (ns->head->ns_id > nsid)
+			goto again;
 	}
 	up_read(&ctrl->namespaces_rwsem);
 	return 0;
@@ -618,8 +704,8 @@ static ssize_t nvme_subsys_iopolicy_show(struct device *dev,
 	struct nvme_subsystem *subsys =
 		container_of(dev, struct nvme_subsystem, dev);
 
-	return sprintf(buf, "%s\n",
-			nvme_iopolicy_names[READ_ONCE(subsys->iopolicy)]);
+	return sysfs_emit(buf, "%s\n",
+			  nvme_iopolicy_names[READ_ONCE(subsys->iopolicy)]);
 }
 
 static ssize_t nvme_subsys_iopolicy_store(struct device *dev,
@@ -644,7 +730,7 @@ SUBSYS_ATTR_RW(iopolicy, S_IRUGO | S_IWUSR,
 static ssize_t ana_grpid_show(struct device *dev, struct device_attribute *attr,
 		char *buf)
 {
-	return sprintf(buf, "%d\n", nvme_get_ns_from_dev(dev)->ana_grpid);
+	return sysfs_emit(buf, "%d\n", nvme_get_ns_from_dev(dev)->ana_grpid);
 }
 DEVICE_ATTR_RO(ana_grpid);
 
@@ -653,7 +739,7 @@ static ssize_t ana_state_show(struct device *dev, struct device_attribute *attr,
 {
 	struct nvme_ns *ns = nvme_get_ns_from_dev(dev);
 
-	return sprintf(buf, "%s\n", nvme_ana_state_names[ns->ana_state]);
+	return sysfs_emit(buf, "%s\n", nvme_ana_state_names[ns->ana_state]);
 }
 DEVICE_ATTR_RO(ana_state);
 
@@ -690,29 +776,34 @@ void nvme_mpath_add_disk(struct nvme_ns *ns, struct nvme_id_ns *id)
 			queue_work(nvme_wq, &ns->ctrl->ana_work);
 		}
 	} else {
-		ns->ana_state = NVME_ANA_OPTIMIZED; 
+		ns->ana_state = NVME_ANA_OPTIMIZED;
 		nvme_mpath_set_live(ns);
 	}
 
-	if (bdi_cap_stable_pages_required(ns->queue->backing_dev_info)) {
-		struct gendisk *disk = ns->head->disk;
-
-		if (disk)
-			disk->queue->backing_dev_info->capabilities |=
-					BDI_CAP_STABLE_WRITES;
-	}
 #ifdef CONFIG_BLK_DEV_ZONED
 	if (blk_queue_is_zoned(ns->queue) && ns->head->disk)
 		ns->head->disk->queue->nr_zones = ns->queue->nr_zones;
 #endif
+	if (blk_queue_stable_writes(ns->queue) && ns->head->disk)
+		blk_queue_flag_set(QUEUE_FLAG_STABLE_WRITES,
+				   ns->head->disk->queue);
+}
+
+void nvme_mpath_shutdown_disk(struct nvme_ns_head *head)
+{
+	if (!head->disk)
+		return;
+	kblockd_schedule_work(&head->requeue_work);
+	if (head->disk->flags & GENHD_FL_UP) {
+		nvme_cdev_del(&head->cdev, &head->cdev_device);
+		del_gendisk(head->disk);
+	}
 }
 
 void nvme_mpath_remove_disk(struct nvme_ns_head *head)
 {
 	if (!head->disk)
 		return;
-	if (head->disk->flags & GENHD_FL_UP)
-		del_gendisk(head->disk);
 	blk_set_queue_dying(head->disk->queue);
 	/* make sure all pending bios are cleaned up */
 	kblockd_schedule_work(&head->requeue_work);
@@ -746,6 +837,13 @@ int nvme_mpath_init_identify(struct nvme_ctrl *ctrl, struct nvme_id_ctrl *id)
 	if (!ctrl->subsys ||
 	    !(ctrl->subsys->cmic & NVME_CTRL_CMIC_ANA))
 		return 0;
+
+	if (!ctrl->max_namespaces ||
+	    ctrl->max_namespaces > le32_to_cpu(id->nn)) {
+		dev_err(ctrl->device,
+			"Invalid MNAN value %u\n", ctrl->max_namespaces);
+		return -EINVAL;
+	}
 
 	ctrl->anacap = id->anacap;
 	ctrl->anatt = id->anatt;
@@ -785,4 +883,3 @@ void nvme_mpath_uninit(struct nvme_ctrl *ctrl)
 	kfree(ctrl->ana_log_buf);
 	ctrl->ana_log_buf = NULL;
 }
-

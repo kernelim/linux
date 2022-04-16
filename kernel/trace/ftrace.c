@@ -43,6 +43,8 @@
 #include "trace_output.h"
 #include "trace_stat.h"
 
+#include <linux/rh_tasklist_lock.h>
+
 #define FTRACE_WARN_ON(cond)			\
 	({					\
 		int ___r = cond;		\

@@ -21,11 +21,13 @@ Contents:
    msg_zerocopy
    phy
    sfp-phylink
+   bridge
    tls
    tls-offload
    filter
    mptcp-sysctl
    statistics
+   switchdev
    tipc
    vxlan
 

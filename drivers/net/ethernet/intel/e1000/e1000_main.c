@@ -227,9 +227,6 @@ static int __init e1000_init_module(void)
 
 	pr_info("%s\n", e1000_copyright);
 
-	add_taint(TAINT_SUPPORT_REMOVED, LOCKDEP_STILL_OK);
-	pr_warn("E1000 MODULE IS NOT SUPPORTED\n");
-
 	ret = pci_register_driver(&e1000_driver);
 	if (copybreak != COPYBREAK_DEFAULT) {
 		if (copybreak == 0)
@@ -934,6 +931,8 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	u16 eeprom_apme_mask = E1000_EEPROM_APME;
 	int bars, need_ioport;
 	bool disable_dev = false;
+
+	pci_hw_unmaintained(e1000_pci_tbl, pdev);
 
 	/* do not allocate ioport bars when not needed */
 	need_ioport = e1000_is_need_ioport(pdev);

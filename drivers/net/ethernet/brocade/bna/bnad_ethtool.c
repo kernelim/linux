@@ -316,8 +316,10 @@ bnad_get_wol(struct net_device *netdev, struct ethtool_wolinfo *wolinfo)
 	wolinfo->wolopts = 0;
 }
 
-static int
-bnad_get_coalesce(struct net_device *netdev, struct ethtool_coalesce *coalesce)
+static int bnad_get_coalesce(struct net_device *netdev,
+			     struct ethtool_coalesce *coalesce,
+			     struct kernel_ethtool_coalesce *kernel_coal,
+			     struct netlink_ext_ack *extack)
 {
 	struct bnad *bnad = netdev_priv(netdev);
 	unsigned long flags;
@@ -337,8 +339,10 @@ bnad_get_coalesce(struct net_device *netdev, struct ethtool_coalesce *coalesce)
 	return 0;
 }
 
-static int
-bnad_set_coalesce(struct net_device *netdev, struct ethtool_coalesce *coalesce)
+static int bnad_set_coalesce(struct net_device *netdev,
+			     struct ethtool_coalesce *coalesce,
+			     struct kernel_ethtool_coalesce *kernel_coal,
+			     struct netlink_ext_ack *extack)
 {
 	struct bnad *bnad = netdev_priv(netdev);
 	unsigned long flags;

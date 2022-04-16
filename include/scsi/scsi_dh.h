@@ -1,5 +1,5 @@
 /*
- * Header file for SCSI device handler infrastruture.
+ * Header file for SCSI device handler infrastructure.
  *
  * Modified version of patches posted by Mike Christie <michaelc@cs.wisc.edu>
  *

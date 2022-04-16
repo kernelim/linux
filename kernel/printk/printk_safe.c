@@ -3,6 +3,7 @@
 #include <linux/preempt.h>
 #include <linux/spinlock.h>
 #include <linux/debug_locks.h>
+#include <linux/kdb.h>
 #include <linux/smp.h>
 #include <linux/cpumask.h>
 #include <linux/irq_work.h>
@@ -11,7 +12,7 @@
 #include "internal.h"
 
 /*
- * printk() could not take logbuf_lock in NMI context. Instead,
+ * In NMI and safe mode, printk() avoids taking locks. Instead,
  * it uses an alternative implementation that temporary stores
  * the strings into a per-CPU buffer. The content of the buffer
  * is later flushed into the main ring buffer via IRQ work.
@@ -39,6 +40,8 @@ struct printk_safe_seq_buf {
 
 static DEFINE_PER_CPU(struct printk_safe_seq_buf, safe_print_seq);
 static DEFINE_PER_CPU(int, printk_context);
+
+static DEFINE_RAW_SPINLOCK(safe_read_lock);
 
 #ifdef CONFIG_PRINTK_NMI
 static DEFINE_PER_CPU(struct printk_safe_seq_buf, nmi_print_seq);
@@ -175,8 +178,6 @@ static void report_message_lost(struct printk_safe_seq_buf *s)
  */
 static void __printk_safe_flush(struct irq_work *work)
 {
-	static raw_spinlock_t read_lock =
-		__RAW_SPIN_LOCK_INITIALIZER(read_lock);
 	struct printk_safe_seq_buf *s =
 		container_of(work, struct printk_safe_seq_buf, work);
 	unsigned long flags;
@@ -190,7 +191,7 @@ static void __printk_safe_flush(struct irq_work *work)
 	 * different CPUs. This is especially important when printing
 	 * a backtrace.
 	 */
-	raw_spin_lock_irqsave(&read_lock, flags);
+	raw_spin_lock_irqsave(&safe_read_lock, flags);
 
 	i = 0;
 more:
@@ -227,7 +228,7 @@ more:
 
 out:
 	report_message_lost(s);
-	raw_spin_unlock_irqrestore(&read_lock, flags);
+	raw_spin_unlock_irqrestore(&safe_read_lock, flags);
 }
 
 /**
@@ -262,15 +263,15 @@ void printk_safe_flush(void)
 void printk_safe_flush_on_panic(void)
 {
 	/*
-	 * Make sure that we could access the main ring buffer.
+	 * Make sure that we could access the safe buffers.
 	 * Do not risk a double release when more CPUs are up.
 	 */
-	if (raw_spin_is_locked(&logbuf_lock)) {
+	if (raw_spin_is_locked(&safe_read_lock)) {
 		if (num_online_cpus() > 1)
 			return;
 
 		debug_locks_off();
-		raw_spin_lock_init(&logbuf_lock);
+		raw_spin_lock_init(&safe_read_lock);
 	}
 
 	printk_safe_flush();
@@ -306,9 +307,7 @@ void notrace printk_nmi_exit(void)
  * reordering.
  *
  * It has effect only when called in NMI context. Then printk()
- * will try to store the messages into the main logbuf directly
- * and use the per-CPU buffers only as a fallback when the lock
- * is not available.
+ * will store the messages into the main logbuf directly.
  */
 void printk_nmi_direct_enter(void)
 {
@@ -354,23 +353,30 @@ void __printk_safe_exit(void)
 	this_cpu_dec(printk_context);
 }
 
-__printf(1, 0) int vprintk_func(const char *fmt, va_list args)
+asmlinkage int vprintk(const char *fmt, va_list args)
 {
+#ifdef CONFIG_KGDB_KDB
+	/* Allow to pass printk() to kdb but avoid a recursion. */
+	if (unlikely(kdb_trap_printk && kdb_printf_cpu < 0))
+		return vkdb_printf(KDB_MSGSRC_PRINTK, fmt, args);
+#endif
+
 	/*
-	 * Try to use the main logbuf even in NMI. But avoid calling console
+	 * Use the main logbuf even in NMI. But avoid calling console
 	 * drivers that might have their own locks.
 	 */
-	if ((this_cpu_read(printk_context) & PRINTK_NMI_DIRECT_CONTEXT_MASK) &&
-	    raw_spin_trylock(&logbuf_lock)) {
+	if ((this_cpu_read(printk_context) & PRINTK_NMI_DIRECT_CONTEXT_MASK)) {
+		unsigned long flags;
 		int len;
 
-		len = vprintk_store(0, LOGLEVEL_DEFAULT, NULL, 0, fmt, args);
-		raw_spin_unlock(&logbuf_lock);
+		printk_safe_enter_irqsave(flags);
+		len = vprintk_store(0, LOGLEVEL_DEFAULT, NULL, fmt, args);
+		printk_safe_exit_irqrestore(flags);
 		defer_console_output();
 		return len;
 	}
 
-	/* Use extra buffer in NMI when logbuf_lock is taken or in safe mode. */
+	/* Use extra buffer in NMI. */
 	if (this_cpu_read(printk_context) & PRINTK_NMI_CONTEXT_MASK)
 		return vprintk_nmi(fmt, args);
 
@@ -381,6 +387,7 @@ __printf(1, 0) int vprintk_func(const char *fmt, va_list args)
 	/* No obstacles. */
 	return vprintk_default(fmt, args);
 }
+EXPORT_SYMBOL(vprintk);
 
 void __init printk_safe_init(void)
 {

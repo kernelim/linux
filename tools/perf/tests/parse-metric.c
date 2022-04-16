@@ -99,7 +99,7 @@ static u64 find_value(const char *name, struct value *values)
 		if (!strcmp(name, v->event))
 			return v->val;
 		v++;
-	};
+	}
 	return 0;
 }
 
@@ -187,7 +187,7 @@ static int __compute_metric(const char *name, struct value *vals,
 		*ratio2 = compute_single(&metric_events, evlist, &st, name2);
 
 out:
-	/* ... clenup. */
+	/* ... cleanup. */
 	metricgroup__rblist_exit(&metric_events);
 	runtime_stat__exit(&st);
 	evlist__free_stats(evlist);

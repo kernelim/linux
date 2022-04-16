@@ -50,30 +50,34 @@ struct kmem_cache *fanotify_perm_event_cachep __read_mostly;
 /*
  * Get an fsnotify notification event if one exists and is small
  * enough to fit in "count". Return an error pointer if the count
- * is not large enough.
- *
- * Called with the group->notification_lock held.
+ * is not large enough. When permission event is dequeued, its state is
+ * updated accordingly.
  */
 static struct fsnotify_event *get_one_event(struct fsnotify_group *group,
 					    size_t count)
 {
-	assert_spin_locked(&group->notification_lock);
+	struct fsnotify_event *fsn_event = NULL;
 
 	pr_debug("%s: group=%p count=%zd\n", __func__, group, count);
 
+	spin_lock(&group->notification_lock);
 	if (fsnotify_notify_queue_is_empty(group))
-		return NULL;
+		goto out;
 
-	if (FAN_EVENT_METADATA_LEN > count)
-		return ERR_PTR(-EINVAL);
-
-	/* held the notification_lock the whole time, so this is the
-	 * same event we peeked above */
-	return fsnotify_remove_first_event(group);
+	if (FAN_EVENT_METADATA_LEN > count) {
+		fsn_event = ERR_PTR(-EINVAL);
+		goto out;
+	}
+	fsn_event = fsnotify_remove_first_event(group);
+	if (fanotify_is_perm_event(fsn_event->mask))
+		FANOTIFY_PE(fsn_event)->state = FAN_EVENT_REPORTED;
+out:
+	spin_unlock(&group->notification_lock);
+	return fsn_event;
 }
 
 static int create_fd(struct fsnotify_group *group,
-		     struct fanotify_event_info *event,
+		     struct fanotify_event *event,
 		     struct file **file)
 {
 	int client_fd;
@@ -120,13 +124,13 @@ static int fill_event_metadata(struct fsnotify_group *group,
 			       struct file **file)
 {
 	int ret = 0;
-	struct fanotify_event_info *event;
+	struct fanotify_event *event;
 
 	pr_debug("%s: group=%p metadata=%p event=%p\n", __func__,
 		 group, metadata, fsn_event);
 
 	*file = NULL;
-	event = container_of(fsn_event, struct fanotify_event_info, fse);
+	event = container_of(fsn_event, struct fanotify_event, fse);
 	metadata->event_len = FAN_EVENT_METADATA_LEN;
 	metadata->metadata_len = FAN_EVENT_METADATA_LEN;
 	metadata->vers = FANOTIFY_METADATA_VERSION;
@@ -144,32 +148,32 @@ static int fill_event_metadata(struct fsnotify_group *group,
 	return ret;
 }
 
-static struct fanotify_perm_event_info *dequeue_event(
-				struct fsnotify_group *group, int fd)
+/*
+ * Finish processing of permission event by setting it to ANSWERED state and
+ * drop group->notification_lock.
+ */
+static void finish_permission_event(struct fsnotify_group *group,
+				    struct fanotify_perm_event *event,
+				    unsigned int response)
+				    __releases(&group->notification_lock)
 {
-	struct fanotify_perm_event_info *event, *return_e = NULL;
+	bool destroy = false;
 
-	spin_lock(&group->notification_lock);
-	list_for_each_entry(event, &group->fanotify_data.access_list,
-			    fae.fse.list) {
-		if (event->fd != fd)
-			continue;
-
-		list_del_init(&event->fae.fse.list);
-		return_e = event;
-		break;
-	}
+	assert_spin_locked(&group->notification_lock);
+	event->response = response;
+	if (event->state == FAN_EVENT_CANCELED)
+		destroy = true;
+	else
+		event->state = FAN_EVENT_ANSWERED;
 	spin_unlock(&group->notification_lock);
-
-	pr_debug("%s: found return_re=%p\n", __func__, return_e);
-
-	return return_e;
+	if (destroy)
+		fsnotify_destroy_event(group, &event->fae.fse);
 }
 
 static int process_access_response(struct fsnotify_group *group,
 				   struct fanotify_response *response_struct)
 {
-	struct fanotify_perm_event_info *event;
+	struct fanotify_perm_event *event;
 	int fd = response_struct->fd;
 	int response = response_struct->response;
 
@@ -194,14 +198,20 @@ static int process_access_response(struct fsnotify_group *group,
 	if ((response & FAN_AUDIT) && !FAN_GROUP_FLAG(group, FAN_ENABLE_AUDIT))
 		return -EINVAL;
 
-	event = dequeue_event(group, fd);
-	if (!event)
-		return -ENOENT;
+	spin_lock(&group->notification_lock);
+	list_for_each_entry(event, &group->fanotify_data.access_list,
+			    fae.fse.list) {
+		if (event->fd != fd)
+			continue;
 
-	event->response = response;
-	wake_up(&group->fanotify_data.access_waitq);
+		list_del_init(&event->fae.fse.list);
+		finish_permission_event(group, event, response);
+		wake_up(&group->fanotify_data.access_waitq);
+		return 0;
+	}
+	spin_unlock(&group->notification_lock);
 
-	return 0;
+	return -ENOENT;
 }
 
 static ssize_t copy_event_to_user(struct fsnotify_group *group,
@@ -276,10 +286,7 @@ static ssize_t fanotify_read(struct file *file, char __user *buf,
 
 	add_wait_queue(&group->notification_waitq, &wait);
 	while (1) {
-		spin_lock(&group->notification_lock);
 		kevent = get_one_event(group, count);
-		spin_unlock(&group->notification_lock);
-
 		if (IS_ERR(kevent)) {
 			ret = PTR_ERR(kevent);
 			break;
@@ -320,7 +327,9 @@ static ssize_t fanotify_read(struct file *file, char __user *buf,
 			fsnotify_destroy_event(group, kevent);
 		} else {
 			if (ret <= 0) {
-				FANOTIFY_PE(kevent)->response = FAN_DENY;
+				spin_lock(&group->notification_lock);
+				finish_permission_event(group,
+					FANOTIFY_PE(kevent), FAN_DENY);
 				wake_up(&group->fanotify_data.access_waitq);
 			} else {
 				spin_lock(&group->notification_lock);
@@ -370,7 +379,7 @@ static ssize_t fanotify_write(struct file *file, const char __user *buf, size_t 
 static int fanotify_release(struct inode *ignored, struct file *file)
 {
 	struct fsnotify_group *group = file->private_data;
-	struct fanotify_perm_event_info *event, *next;
+	struct fanotify_perm_event *event;
 	struct fsnotify_event *fsn_event;
 
 	/*
@@ -385,13 +394,12 @@ static int fanotify_release(struct inode *ignored, struct file *file)
 	 * and simulate reply from userspace.
 	 */
 	spin_lock(&group->notification_lock);
-	list_for_each_entry_safe(event, next, &group->fanotify_data.access_list,
-				 fae.fse.list) {
-		pr_debug("%s: found group=%p event=%p\n", __func__, group,
-			 event);
-
+	while (!list_empty(&group->fanotify_data.access_list)) {
+		event = list_first_entry(&group->fanotify_data.access_list,
+				struct fanotify_perm_event, fae.fse.list);
 		list_del_init(&event->fae.fse.list);
-		event->response = FAN_ALLOW;
+		finish_permission_event(group, event, FAN_ALLOW);
+		spin_lock(&group->notification_lock);
 	}
 
 	/*
@@ -404,10 +412,11 @@ static int fanotify_release(struct inode *ignored, struct file *file)
 		if (!(fsn_event->mask & FANOTIFY_PERM_EVENTS)) {
 			spin_unlock(&group->notification_lock);
 			fsnotify_destroy_event(group, fsn_event);
-			spin_lock(&group->notification_lock);
 		} else {
-			FANOTIFY_PE(fsn_event)->response = FAN_ALLOW;
+			finish_permission_event(group, FANOTIFY_PE(fsn_event),
+						FAN_ALLOW);
 		}
+		spin_lock(&group->notification_lock);
 	}
 	spin_unlock(&group->notification_lock);
 
@@ -673,7 +682,7 @@ SYSCALL_DEFINE2(fanotify_init, unsigned int, flags, unsigned int, event_f_flags)
 	struct fsnotify_group *group;
 	int f_flags, fd;
 	struct user_struct *user;
-	struct fanotify_event_info *oevent;
+	struct fanotify_event *oevent;
 
 	pr_debug("%s: flags=%x event_f_flags=%x\n",
 		 __func__, flags, event_f_flags);
@@ -933,10 +942,10 @@ static int __init fanotify_user_setup(void)
 
 	fanotify_mark_cache = KMEM_CACHE(fsnotify_mark,
 					 SLAB_PANIC|SLAB_ACCOUNT);
-	fanotify_event_cachep = KMEM_CACHE(fanotify_event_info, SLAB_PANIC);
+	fanotify_event_cachep = KMEM_CACHE(fanotify_event, SLAB_PANIC);
 	if (IS_ENABLED(CONFIG_FANOTIFY_ACCESS_PERMISSIONS)) {
 		fanotify_perm_event_cachep =
-			KMEM_CACHE(fanotify_perm_event_info, SLAB_PANIC);
+			KMEM_CACHE(fanotify_perm_event, SLAB_PANIC);
 	}
 
 	return 0;

@@ -26,6 +26,8 @@
 #include "transition.h"
 #include "../sched/sched.h"
 
+#include <linux/rh_tasklist_lock.h>
+
 #define MAX_STACK_ENTRIES  100
 #define STACK_ERR_BUF_SIZE 128
 

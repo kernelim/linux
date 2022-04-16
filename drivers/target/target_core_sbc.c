@@ -80,7 +80,7 @@ sbc_emulate_readcapacity(struct se_cmd *cmd)
 		transport_kunmap_data_sg(cmd);
 	}
 
-	target_complete_cmd_with_length(cmd, GOOD, 8);
+	target_complete_cmd_with_length(cmd, SAM_STAT_GOOD, 8);
 	return 0;
 }
 
@@ -143,7 +143,7 @@ sbc_emulate_readcapacity_16(struct se_cmd *cmd)
 		transport_kunmap_data_sg(cmd);
 	}
 
-	target_complete_cmd_with_length(cmd, GOOD, 32);
+	target_complete_cmd_with_length(cmd, SAM_STAT_GOOD, 32);
 	return 0;
 }
 
@@ -215,14 +215,14 @@ sbc_execute_write_same_unmap(struct se_cmd *cmd)
 			return ret;
 	}
 
-	target_complete_cmd(cmd, GOOD);
+	target_complete_cmd(cmd, SAM_STAT_GOOD);
 	return 0;
 }
 
 static sense_reason_t
 sbc_emulate_noop(struct se_cmd *cmd)
 {
-	target_complete_cmd(cmd, GOOD);
+	target_complete_cmd(cmd, SAM_STAT_GOOD);
 	return 0;
 }
 
@@ -461,7 +461,7 @@ compare_and_write_do_cmp(struct scatterlist *read_sgl, unsigned int read_nents,
 	sense_reason_t ret;
 	unsigned int offset;
 	size_t rc;
-	int i;
+	int sg_cnt;
 
 	buf = kzalloc(cmp_len, GFP_KERNEL);
 	if (!buf) {
@@ -480,7 +480,7 @@ compare_and_write_do_cmp(struct scatterlist *read_sgl, unsigned int read_nents,
 	 */
 	offset = 0;
 	ret = TCM_NO_SENSE;
-	for_each_sg(read_sgl, sg, read_nents, i) {
+	for_each_sg(read_sgl, sg, read_nents, sg_cnt) {
 		unsigned int len = min(sg->length, cmp_len);
 		unsigned char *addr = kmap_atomic(sg_page(sg));
 
@@ -1258,7 +1258,7 @@ sbc_execute_unmap(struct se_cmd *cmd)
 err:
 	transport_kunmap_data_sg(cmd);
 	if (!ret)
-		target_complete_cmd(cmd, GOOD);
+		target_complete_cmd(cmd, SAM_STAT_GOOD);
 	return ret;
 }
 

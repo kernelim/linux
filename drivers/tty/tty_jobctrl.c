@@ -12,6 +12,8 @@
 #include <linux/fcntl.h>
 #include <linux/uaccess.h>
 
+#include <linux/rh_tasklist_lock.h>
+
 static int is_ignored(int sig)
 {
 	return (sigismember(&current->blocked, sig) ||

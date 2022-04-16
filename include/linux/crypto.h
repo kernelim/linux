@@ -113,6 +113,11 @@
 #define CRYPTO_ALG_OPTIONAL_KEY		0x00004000
 
 /*
+ * Don't trigger module loading
+ */
+#define CRYPTO_NOLOAD			0x00008000
+
+/*
  * The algorithm may allocate memory during request processing, i.e. during
  * encryption, decryption, or hashing.  Users can request an algorithm with this
  * flag unset if they can't handle memory allocation failures.

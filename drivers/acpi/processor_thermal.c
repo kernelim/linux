@@ -30,8 +30,6 @@
 #include <acpi/processor.h>
 #include <linux/uaccess.h>
 
-#define PREFIX "ACPI: "
-
 #ifdef CONFIG_CPU_FREQ
 
 /* If a passive cooling situation is detected, primarily CPUfreq is used, as it

@@ -494,7 +494,7 @@ struct smb_version_operations {
 			 struct inode *inode,
 			 struct dentry *dentry,
 			 struct cifs_tcon *tcon,
-			 char *full_path,
+			 const char *full_path,
 			 umode_t mode,
 			 dev_t device_number);
 	/* version specific fiemap implementation */
@@ -687,6 +687,10 @@ struct TCP_Server_Info {
 	int nr_targets;
 	bool noblockcnt; /* use non-blocking connect() */
 	bool is_channel; /* if a session channel */
+#ifdef CONFIG_CIFS_SWN_UPCALL
+	bool use_swn_dstaddr;
+	struct sockaddr_storage swn_dstaddr;
+#endif
 };
 
 struct cifs_credits {
@@ -1085,6 +1089,9 @@ struct cifs_tcon {
 	char *dfs_path;
 	int remap:2;
 	struct list_head ulist; /* cache update list */
+#endif
+#ifdef CONFIG_CIFS_SWN_UPCALL
+	bool use_witness:1; /* use witness protocol */
 #endif
 };
 

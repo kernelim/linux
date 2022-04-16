@@ -77,6 +77,7 @@
 #include "sf/vhca_event.h"
 #include "sf/dev/dev.h"
 #include "sf/sf.h"
+#include "mlx5_irq.h"
 
 MODULE_AUTHOR("Eli Cohen <eli@mellanox.com>");
 MODULE_DESCRIPTION("Mellanox 5th generation network adapters (ConnectX series) core driver");
@@ -573,6 +574,10 @@ static int handle_hca_cap(struct mlx5_core_dev *dev, void *set_ctx)
 
 	mlx5_vhca_state_cap_handle(dev, set_hca_cap);
 
+	if (MLX5_CAP_GEN_MAX(dev, num_total_dynamic_vf_msix))
+		MLX5_SET(cmd_hca_cap, set_hca_cap, num_total_dynamic_vf_msix,
+			 MLX5_CAP_GEN_MAX(dev, num_total_dynamic_vf_msix));
+
 	return set_caps(dev, set_ctx, MLX5_SET_HCA_CAP_OP_MOD_GENERAL_DEVICE);
 }
 
@@ -742,35 +747,12 @@ static int mlx5_core_set_issi(struct mlx5_core_dev *dev)
 	return -EOPNOTSUPP;
 }
 
-/* PCI table of mlx5 devices that are tech preview in RHEL */
+/* PCI table of mlx5 devices that are unmaintained in RHEL */
 static const struct pci_device_id mlx5_core_hw_unsupp_pci_table[] = {
 	{ PCI_VDEVICE(MELLANOX, 0x1021) },			/* ConnectX-7 */
 	{ PCI_VDEVICE(MELLANOX, 0xa2dc) },			/* BlueField-3 integrated ConnectX-7 network controller */
 	{ 0, }
 };
-
-static char mlx5_pci_id[32]; /* more than enough space */
-/*
- * Function to check if an mlx5 device is tech-preview.
- * If so, print out message and mark accordingly.
- *
- * most of it stolen from pci_match_device() in drivers/pci/pci-drivers.c
- *
- */
-static void mlx5_check_hw_unsupp_status(struct pci_dev *pdev)
-{
-	const struct pci_device_id *found_id = NULL;
-
-	found_id = pci_match_id(mlx5_core_hw_unsupp_pci_table, pdev);
-
-	if (found_id) {
-		sprintf(mlx5_pci_id, "%s: %04x:%02x:%02x.%01x\n", "pci-device",
-				pci_domain_nr(pdev->bus), pdev->bus->number,
-				PCI_SLOT(pdev->devfn), PCI_FUNC(pdev->devfn));
-		/* mark-hw-unsupported doesn't taint kernel; just prints warning */
-		mark_hardware_unsupported(mlx5_pci_id);
-	}
-}
 
 static int mlx5_pci_init(struct mlx5_core_dev *dev, struct pci_dev *pdev,
 			 const struct pci_device_id *id)
@@ -819,7 +801,7 @@ static int mlx5_pci_init(struct mlx5_core_dev *dev, struct pci_dev *pdev,
 
 	mlx5_pci_vsc_init(dev);
 	dev->caps.embedded_cpu = mlx5_read_embedded_cpu(dev);
-	mlx5_check_hw_unsupp_status(pdev);
+	pci_hw_unmaintained(mlx5_core_hw_unsupp_pci_table, pdev);
 	return 0;
 
 err_clr_master:
@@ -1207,6 +1189,7 @@ static int mlx5_load(struct mlx5_core_dev *dev)
 		goto err_ec;
 	}
 
+	mlx5_lag_add_mdev(dev);
 	err = mlx5_sriov_attach(dev);
 	if (err) {
 		mlx5_core_err(dev, "sriov init failed %d\n", err);
@@ -1218,6 +1201,7 @@ static int mlx5_load(struct mlx5_core_dev *dev)
 	return 0;
 
 err_sriov:
+	mlx5_lag_remove_mdev(dev);
 	mlx5_ec_cleanup(dev);
 err_ec:
 	mlx5_sf_hw_table_destroy(dev);
@@ -1251,6 +1235,7 @@ static void mlx5_unload(struct mlx5_core_dev *dev)
 {
 	mlx5_sf_dev_table_destroy(dev);
 	mlx5_sriov_detach(dev);
+	mlx5_lag_remove_mdev(dev);
 	mlx5_ec_cleanup(dev);
 	mlx5_sf_hw_table_destroy(dev);
 	mlx5_vhca_event_stop(dev);
@@ -1756,12 +1741,13 @@ void mlx5_disable_device(struct mlx5_core_dev *dev)
 
 int mlx5_recover_device(struct mlx5_core_dev *dev)
 {
-	int ret = -EIO;
+	if (!mlx5_core_is_sf(dev)) {
+		mlx5_pci_disable_device(dev);
+		if (mlx5_pci_slot_reset(dev->pdev) != PCI_ERS_RESULT_RECOVERED)
+			return -EIO;
+	}
 
-	mlx5_pci_disable_device(dev);
-	if (mlx5_pci_slot_reset(dev->pdev) == PCI_ERS_RESULT_RECOVERED)
-		ret = mlx5_load_one(dev);
-	return ret;
+	return mlx5_load_one(dev);
 }
 
 static struct pci_driver mlx5_core_driver = {
@@ -1774,6 +1760,8 @@ static struct pci_driver mlx5_core_driver = {
 	.shutdown	= shutdown,
 	.err_handler	= &mlx5_err_handler,
 	.sriov_configure   = mlx5_core_sriov_configure,
+	.sriov_get_vf_total_msix = mlx5_sriov_get_vf_total_msix,
+	.sriov_set_msix_vec_count = mlx5_core_sriov_set_msix_vec_count,
 };
 
 static void mlx5_core_verify_params(void)
@@ -1808,16 +1796,14 @@ static int __init init(void)
 	if (err)
 		goto err_sf;
 
-#ifdef CONFIG_MLX5_CORE_EN
 	err = mlx5e_init();
-	if (err) {
-		pci_unregister_driver(&mlx5_core_driver);
-		goto err_debug;
-	}
-#endif
+	if (err)
+		goto err_en;
 
 	return 0;
 
+err_en:
+	mlx5_sf_driver_unregister();
 err_sf:
 	pci_unregister_driver(&mlx5_core_driver);
 err_debug:
@@ -1827,9 +1813,7 @@ err_debug:
 
 static void __exit cleanup(void)
 {
-#ifdef CONFIG_MLX5_CORE_EN
 	mlx5e_cleanup();
-#endif
 	mlx5_sf_driver_unregister();
 	pci_unregister_driver(&mlx5_core_driver);
 	mlx5_unregister_debugfs();

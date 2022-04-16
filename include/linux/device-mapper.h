@@ -571,11 +571,6 @@ void dm_table_run_md_queue_async(struct dm_table *t);
 struct dm_table *dm_swap_table(struct mapped_device *md,
 			       struct dm_table *t);
 
-/*
- * A wrapper around vmalloc.
- */
-void *dm_vcalloc(unsigned long nmemb, unsigned long elem_size);
-
 /*-----------------------------------------------------------------
  * Macros.
  *---------------------------------------------------------------*/

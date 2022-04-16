@@ -149,6 +149,7 @@
 #define EM28174_BOARD_HAUPPAUGE_WINTV_DUALHD_01595 100
 #define EM2884_BOARD_TERRATEC_H6		  101
 #define EM2882_BOARD_ZOLID_HYBRID_TV_STICK		102
+#define EM28178_BOARD_PCTV_461E_V2                104
 
 /* Limits minimum and default number of buffers */
 #define EM28XX_MIN_BUF 4
@@ -333,7 +334,7 @@ enum em28xx_usb_audio_type {
 };
 
 /**
- * em28xx_amux - describes the type of audio input used by em28xx
+ * enum em28xx_amux - describes the type of audio input used by em28xx
  *
  * @EM28XX_AMUX_UNUSED:
  *	Used only on em28xx dev->map field, in order to mark an entry
@@ -625,8 +626,6 @@ struct em28xx_audio {
 	struct work_struct wq_trigger;	/* trigger to start/stop audio */
 	atomic_t       stream_started;	/* stream should be running if true */
 };
-
-struct em28xx;
 
 enum em28xx_i2c_algo_type {
 	EM28XX_I2C_ALGO_EM28XX = 0,

@@ -414,8 +414,14 @@ static int w5100_spi_probe(struct spi_device *spi)
 {
 	const struct spi_device_id *id = spi_get_device_id(spi);
 	const struct w5100_ops *ops;
+	const void *mac = NULL;
+	u8 tmpmac[ETH_ALEN];
 	int priv_size;
-	const void *mac = of_get_mac_address(spi->dev.of_node);
+	int ret;
+
+	ret = of_get_mac_address(spi->dev.of_node, tmpmac);
+	if (!ret)
+		mac = tmpmac;
 
 	switch (id->driver_data) {
 	case W5100:

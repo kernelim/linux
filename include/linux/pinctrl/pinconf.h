@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Interface the pinconfig portions of the pinctrl subsystem
  *
@@ -6,13 +7,11 @@
  * This interface is used in the core to keep track of pins.
  *
  * Author: Linus Walleij <linus.walleij@linaro.org>
- *
- * License terms: GNU General Public License (GPL) version 2
  */
 #ifndef __LINUX_PINCTRL_PINCONF_H
 #define __LINUX_PINCTRL_PINCONF_H
 
-#include <linux/pinctrl/machine.h>
+#include <linux/types.h>
 
 struct pinctrl_dev;
 struct seq_file;
@@ -26,7 +25,8 @@ struct seq_file;
  *	is not available on this controller this should return -ENOTSUPP
  *	and if it is available but disabled it should return -EINVAL
  * @pin_config_set: configure an individual pin
- * @pin_config_group_get: get configurations for an entire pin group
+ * @pin_config_group_get: get configurations for an entire pin group; should
+ *	return -ENOTSUPP and -EINVAL using the same rules as pin_config_get.
  * @pin_config_group_set: configure all pins in a group
  * @pin_config_dbg_show: optional debugfs display hook that will provide
  *	per-device info for a certain pin in debugfs

@@ -283,6 +283,35 @@ static struct mpi3mr_fwevt *mpi3mr_dequeue_fwevt(
 }
 
 /**
+ * mpi3mr_cancel_work - cancel firmware event
+ * @fwevt: fwevt object which needs to be canceled
+ *
+ * Return: Nothing.
+ */
+static void mpi3mr_cancel_work(struct mpi3mr_fwevt *fwevt)
+{
+	/*
+	 * Wait on the fwevt to complete. If this returns 1, then
+	 * the event was never executed.
+	 *
+	 * If it did execute, we wait for it to finish, and the put will
+	 * happen from mpi3mr_process_fwevt()
+	 */
+	if (cancel_work_sync(&fwevt->work)) {
+		/*
+		 * Put fwevt reference count after
+		 * dequeuing it from worker queue
+		 */
+		mpi3mr_fwevt_put(fwevt);
+		/*
+		 * Put fwevt reference count to neutralize
+		 * kref_init increment
+		 */
+		mpi3mr_fwevt_put(fwevt);
+	}
+}
+
+/**
  * mpi3mr_cleanup_fwevt_list - Cleanup firmware event list
  * @mrioc: Adapter instance reference
  *
@@ -299,28 +328,25 @@ void mpi3mr_cleanup_fwevt_list(struct mpi3mr_ioc *mrioc)
 	    !mrioc->fwevt_worker_thread)
 		return;
 
-	while ((fwevt = mpi3mr_dequeue_fwevt(mrioc)) ||
-	    (fwevt = mrioc->current_event)) {
+	while ((fwevt = mpi3mr_dequeue_fwevt(mrioc)))
+		mpi3mr_cancel_work(fwevt);
+
+	if (mrioc->current_event) {
+		fwevt = mrioc->current_event;
 		/*
-		 * Wait on the fwevt to complete. If this returns 1, then
-		 * the event was never executed, and we need a put for the
-		 * reference the work had on the fwevt.
-		 *
-		 * If it did execute, we wait for it to finish, and the put will
-		 * happen from mpi3mr_process_fwevt()
+		 * Don't call cancel_work_sync() API for the
+		 * fwevt work if the controller reset is
+		 * get called as part of processing the
+		 * same fwevt work (or) when worker thread is
+		 * waiting for device add/remove APIs to complete.
+		 * Otherwise we will see deadlock.
 		 */
-		if (cancel_work_sync(&fwevt->work)) {
-			/*
-			 * Put fwevt reference count after
-			 * dequeuing it from worker queue
-			 */
-			mpi3mr_fwevt_put(fwevt);
-			/*
-			 * Put fwevt reference count to neutralize
-			 * kref_init increment
-			 */
-			mpi3mr_fwevt_put(fwevt);
+		if (current_work() == &fwevt->work || fwevt->pending_at_sml) {
+			fwevt->discard = 1;
+			return;
 		}
+
+		mpi3mr_cancel_work(fwevt);
 	}
 }
 
@@ -415,6 +441,74 @@ static bool mpi3mr_flush_scmd(struct request *rq,
 
 out:
 	return(true);
+}
+
+/**
+ * mpi3mr_count_dev_pending - Count commands pending for a lun
+ * @rq: Block request
+ * @data: SCSI device reference
+ * @reserved: Unused
+ *
+ * This is an iterator function called for each SCSI command in
+ * a host and if the command is pending in the LLD for the
+ * specific device(lun) then device specific pending I/O counter
+ * is updated in the device structure.
+ *
+ * Return: true always.
+ */
+
+static bool mpi3mr_count_dev_pending(struct request *rq,
+	void *data, bool reserved)
+{
+	struct scsi_device *sdev = (struct scsi_device *)data;
+	struct mpi3mr_sdev_priv_data *sdev_priv_data = sdev->hostdata;
+	struct scsi_cmnd *scmd = blk_mq_rq_to_pdu(rq);
+	struct scmd_priv *priv;
+
+	if (scmd) {
+		priv = scsi_cmd_priv(scmd);
+		if (!priv->in_lld_scope)
+			goto out;
+		if (scmd->device == sdev)
+			sdev_priv_data->pend_count++;
+	}
+
+out:
+	return true;
+}
+
+/**
+ * mpi3mr_count_tgt_pending - Count commands pending for target
+ * @rq: Block request
+ * @data: SCSI target reference
+ * @reserved: Unused
+ *
+ * This is an iterator function called for each SCSI command in
+ * a host and if the command is pending in the LLD for the
+ * specific target then target specific pending I/O counter is
+ * updated in the target structure.
+ *
+ * Return: true always.
+ */
+
+static bool mpi3mr_count_tgt_pending(struct request *rq,
+	void *data, bool reserved)
+{
+	struct scsi_target *starget = (struct scsi_target *)data;
+	struct mpi3mr_stgt_priv_data *stgt_priv_data = starget->hostdata;
+	struct scsi_cmnd *scmd = blk_mq_rq_to_pdu(rq);
+	struct scmd_priv *priv;
+
+	if (scmd) {
+		priv = scsi_cmd_priv(scmd);
+		if (!priv->in_lld_scope)
+			goto out;
+		if (scmd->device && (scsi_target(scmd->device) == starget))
+			stgt_priv_data->pend_count++;
+	}
+
+out:
+	return true;
 }
 
 /**
@@ -620,6 +714,24 @@ static struct mpi3mr_tgt_dev  *__mpi3mr_get_tgtdev_from_tgtpriv(
 }
 
 /**
+ * mpi3mr_print_device_event_notice - print notice related to post processing of
+ *					device event after controller reset.
+ *
+ * @mrioc: Adapter instance reference
+ * @device_add: true for device add event and false for device removal event
+ *
+ * Return: None.
+ */
+static void mpi3mr_print_device_event_notice(struct mpi3mr_ioc *mrioc,
+	bool device_add)
+{
+	ioc_notice(mrioc, "Device %s was under process before the reset and\n",
+	    (device_add ? "addition" : "removal"));
+	ioc_notice(mrioc, "completed after reset, verify whether the exposed devices\n");
+	ioc_notice(mrioc, "are matched with attached devices for correctness\n");
+}
+
+/**
  * mpi3mr_remove_tgtdev_from_host - Remove dev from upper layers
  * @mrioc: Adapter instance reference
  * @tgtdev: Target device structure
@@ -643,8 +755,17 @@ static void mpi3mr_remove_tgtdev_from_host(struct mpi3mr_ioc *mrioc,
 	}
 
 	if (tgtdev->starget) {
+		if (mrioc->current_event)
+			mrioc->current_event->pending_at_sml = 1;
 		scsi_remove_target(&tgtdev->starget->dev);
 		tgtdev->host_exposed = 0;
+		if (mrioc->current_event) {
+			mrioc->current_event->pending_at_sml = 0;
+			if (mrioc->current_event->discard) {
+				mpi3mr_print_device_event_notice(mrioc, false);
+				return;
+			}
+		}
 	}
 	ioc_info(mrioc, "%s :Removed handle(0x%04x), wwid(0x%016llx)\n",
 	    __func__, tgtdev->dev_handle, (unsigned long long)tgtdev->wwid);
@@ -678,11 +799,20 @@ static int mpi3mr_report_tgtdev_to_host(struct mpi3mr_ioc *mrioc,
 	}
 	if (!tgtdev->host_exposed && !mrioc->reset_in_progress) {
 		tgtdev->host_exposed = 1;
+		if (mrioc->current_event)
+			mrioc->current_event->pending_at_sml = 1;
 		scsi_scan_target(&mrioc->shost->shost_gendev, 0,
 		    tgtdev->perst_id,
 		    SCAN_WILD_CARD, SCSI_SCAN_INITIAL);
 		if (!tgtdev->starget)
 			tgtdev->host_exposed = 0;
+		if (mrioc->current_event) {
+			mrioc->current_event->pending_at_sml = 0;
+			if (mrioc->current_event->discard) {
+				mpi3mr_print_device_event_notice(mrioc, true);
+				goto out;
+			}
+		}
 	}
 out:
 	if (tgtdev)
@@ -824,6 +954,17 @@ static void mpi3mr_update_tgtdev(struct mpi3mr_ioc *mrioc,
 		scsi_tgt_priv_data->dev_type = tgtdev->dev_type;
 	}
 
+	switch (dev_pg0->access_status) {
+	case MPI3_DEVICE0_ASTATUS_NO_ERRORS:
+	case MPI3_DEVICE0_ASTATUS_PREPARE:
+	case MPI3_DEVICE0_ASTATUS_NEEDS_INITIALIZATION:
+	case MPI3_DEVICE0_ASTATUS_DEVICE_MISSING_DELAY:
+		break;
+	default:
+		tgtdev->is_hidden = 1;
+		break;
+	}
+
 	switch (tgtdev->dev_type) {
 	case MPI3_DEVICE_DEVFORM_SAS_SATA:
 	{
@@ -858,9 +999,11 @@ static void mpi3mr_update_tgtdev(struct mpi3mr_ioc *mrioc,
 			    le32_to_cpu(pcieinf->maximum_data_transfer_size);
 			tgtdev->dev_spec.pcie_inf.pgsz = pcieinf->page_size;
 			tgtdev->dev_spec.pcie_inf.reset_to =
-			    pcieinf->controller_reset_to;
+			    max_t(u8, pcieinf->controller_reset_to,
+			     MPI3MR_INTADMCMD_TIMEOUT);
 			tgtdev->dev_spec.pcie_inf.abort_to =
-			    pcieinf->nv_me_abort_to;
+			    max_t(u8, pcieinf->nvme_abort_to,
+			    MPI3MR_INTADMCMD_TIMEOUT);
 		}
 		if (tgtdev->dev_spec.pcie_inf.mdts > (1024 * 1024))
 			tgtdev->dev_spec.pcie_inf.mdts = (1024 * 1024);
@@ -1099,6 +1242,8 @@ static void mpi3mr_sastopochg_evt_bh(struct mpi3mr_ioc *mrioc,
 	mpi3mr_sastopochg_evt_debug(mrioc, event_data);
 
 	for (i = 0; i < event_data->num_entries; i++) {
+		if (fwevt->discard)
+			return;
 		handle = le16_to_cpu(event_data->phy_entry[i].attached_dev_handle);
 		if (!handle)
 			continue;
@@ -1230,6 +1375,8 @@ static void mpi3mr_pcietopochg_evt_bh(struct mpi3mr_ioc *mrioc,
 	mpi3mr_pcietopochg_evt_debug(mrioc, event_data);
 
 	for (i = 0; i < event_data->num_entries; i++) {
+		if (fwevt->discard)
+			return;
 		handle =
 		    le16_to_cpu(event_data->port_entry[i].attached_dev_handle);
 		if (!handle)
@@ -1268,8 +1415,8 @@ static void mpi3mr_pcietopochg_evt_bh(struct mpi3mr_ioc *mrioc,
 static void mpi3mr_fwevt_bh(struct mpi3mr_ioc *mrioc,
 	struct mpi3mr_fwevt *fwevt)
 {
-	mrioc->current_event = fwevt;
 	mpi3mr_fwevt_del_from_list(mrioc, fwevt);
+	mrioc->current_event = fwevt;
 
 	if (mrioc->stop_drv_processing)
 		goto out;
@@ -1414,6 +1561,9 @@ static void mpi3mr_dev_rmhs_complete_iou(struct mpi3mr_ioc *mrioc,
 	u16 cmd_idx = drv_cmd->host_tag - MPI3MR_HOSTTAG_DEVRMCMD_MIN;
 	struct delayed_dev_rmhs_node *delayed_dev_rmhs = NULL;
 
+	if (drv_cmd->state & MPI3MR_CMD_RESET)
+		goto clear_drv_cmd;
+
 	ioc_info(mrioc,
 	    "%s :dev_rmhs_iouctrl_complete:handle(0x%04x), ioc_status(0x%04x), loginfo(0x%08x)\n",
 	    __func__, drv_cmd->dev_handle, drv_cmd->ioc_status,
@@ -1454,6 +1604,8 @@ static void mpi3mr_dev_rmhs_complete_iou(struct mpi3mr_ioc *mrioc,
 		kfree(delayed_dev_rmhs);
 		return;
 	}
+
+clear_drv_cmd:
 	drv_cmd->state = MPI3MR_CMD_NOTUSED;
 	drv_cmd->callback = NULL;
 	drv_cmd->retry_count = 0;
@@ -1479,6 +1631,9 @@ static void mpi3mr_dev_rmhs_complete_tm(struct mpi3mr_ioc *mrioc,
 	u16 cmd_idx = drv_cmd->host_tag - MPI3MR_HOSTTAG_DEVRMCMD_MIN;
 	struct mpi3_scsi_task_mgmt_reply *tm_reply = NULL;
 	int retval;
+
+	if (drv_cmd->state & MPI3MR_CMD_RESET)
+		goto clear_drv_cmd;
 
 	if (drv_cmd->state & MPI3MR_CMD_REPLY_VALID)
 		tm_reply = (struct mpi3_scsi_task_mgmt_reply *)drv_cmd->reply;
@@ -1508,11 +1663,11 @@ static void mpi3mr_dev_rmhs_complete_tm(struct mpi3mr_ioc *mrioc,
 	if (retval) {
 		pr_err(IOCNAME "Issue DevRmHsTMIOUCTL: Admin post failed\n",
 		    mrioc->name);
-		goto out_failed;
+		goto clear_drv_cmd;
 	}
 
 	return;
-out_failed:
+clear_drv_cmd:
 	drv_cmd->state = MPI3MR_CMD_NOTUSED;
 	drv_cmd->callback = NULL;
 	drv_cmd->dev_handle = MPI3MR_INVALID_DEV_HANDLE;
@@ -2224,6 +2379,8 @@ void mpi3mr_process_op_reply_desc(struct mpi3mr_ioc *mrioc,
 		scmd->result = DID_OK << 16;
 		goto out_success;
 	}
+
+	scsi_set_resid(scmd, scsi_bufflen(scmd) - xfer_count);
 	if (ioc_status == MPI3_IOCSTATUS_SCSI_DATA_UNDERRUN &&
 	    xfer_count == 0 && (scsi_status == MPI3_SCSI_STATUS_BUSY ||
 	    scsi_status == MPI3_SCSI_STATUS_RESERVATION_CONFLICT ||
@@ -2540,49 +2697,63 @@ static int mpi3mr_build_sg_scmd(struct mpi3mr_ioc *mrioc,
 }
 
 /**
- * mpi3mr_print_response_code - print TM response as a string
- * @mrioc: Adapter instance reference
+ * mpi3mr_tm_response_name -  get TM response as a string
  * @resp_code: TM response code
  *
- * Print TM response code as a readable string.
+ * Convert known task management response code as a readable
+ * string.
  *
- * Return: Nothing.
+ * Return: response code string.
  */
-static void mpi3mr_print_response_code(struct mpi3mr_ioc *mrioc, u8 resp_code)
+static const char *mpi3mr_tm_response_name(u8 resp_code)
 {
 	char *desc;
 
 	switch (resp_code) {
-	case MPI3MR_RSP_TM_COMPLETE:
+	case MPI3_SCSITASKMGMT_RSPCODE_TM_COMPLETE:
 		desc = "task management request completed";
 		break;
-	case MPI3MR_RSP_INVALID_FRAME:
+	case MPI3_SCSITASKMGMT_RSPCODE_INVALID_FRAME:
 		desc = "invalid frame";
 		break;
-	case MPI3MR_RSP_TM_NOT_SUPPORTED:
+	case MPI3_SCSITASKMGMT_RSPCODE_TM_FUNCTION_NOT_SUPPORTED:
 		desc = "task management request not supported";
 		break;
-	case MPI3MR_RSP_TM_FAILED:
+	case MPI3_SCSITASKMGMT_RSPCODE_TM_FAILED:
 		desc = "task management request failed";
 		break;
-	case MPI3MR_RSP_TM_SUCCEEDED:
+	case MPI3_SCSITASKMGMT_RSPCODE_TM_SUCCEEDED:
 		desc = "task management request succeeded";
 		break;
-	case MPI3MR_RSP_TM_INVALID_LUN:
-		desc = "invalid lun";
+	case MPI3_SCSITASKMGMT_RSPCODE_TM_INVALID_LUN:
+		desc = "invalid LUN";
 		break;
-	case MPI3MR_RSP_TM_OVERLAPPED_TAG:
+	case MPI3_SCSITASKMGMT_RSPCODE_TM_OVERLAPPED_TAG:
 		desc = "overlapped tag attempted";
 		break;
-	case MPI3MR_RSP_IO_QUEUED_ON_IOC:
+	case MPI3_SCSITASKMGMT_RSPCODE_IO_QUEUED_ON_IOC:
 		desc = "task queued, however not sent to target";
+		break;
+	case MPI3_SCSITASKMGMT_RSPCODE_TM_NVME_DENIED:
+		desc = "task management request denied by NVMe device";
 		break;
 	default:
 		desc = "unknown";
 		break;
 	}
-	ioc_info(mrioc, "%s :response_code(0x%01x): %s\n", __func__,
-	    resp_code, desc);
+
+	return desc;
+}
+
+inline void mpi3mr_poll_pend_io_completions(struct mpi3mr_ioc *mrioc)
+{
+	int i;
+	int num_of_reply_queues =
+	    mrioc->num_op_reply_q + mrioc->op_reply_q_offset;
+
+	for (i = mrioc->op_reply_q_offset; i < num_of_reply_queues; i++)
+		mpi3mr_process_op_reply_q(mrioc,
+		    &mrioc->intr_info[i]);
 }
 
 /**
@@ -2592,9 +2763,10 @@ static void mpi3mr_print_response_code(struct mpi3mr_ioc *mrioc, u8 resp_code)
  * @handle: Device handle
  * @lun: lun ID
  * @htag: Host tag of the TM request
+ * @timeout: TM timeout value
  * @drv_cmd: Internal command tracker
  * @resp_code: Response code place holder
- * @cmd_priv: SCSI command private data
+ * @scmd: SCSI command
  *
  * Issues a Task Management Request to the controller for a
  * specified target, lun and command and wait for its completion
@@ -2606,14 +2778,16 @@ static void mpi3mr_print_response_code(struct mpi3mr_ioc *mrioc, u8 resp_code)
 static int mpi3mr_issue_tm(struct mpi3mr_ioc *mrioc, u8 tm_type,
 	u16 handle, uint lun, u16 htag, ulong timeout,
 	struct mpi3mr_drv_cmd *drv_cmd,
-	u8 *resp_code, struct scmd_priv *cmd_priv)
+	u8 *resp_code, struct scsi_cmnd *scmd)
 {
 	struct mpi3_scsi_task_mgmt_request tm_req;
 	struct mpi3_scsi_task_mgmt_reply *tm_reply = NULL;
 	int retval = 0;
 	struct mpi3mr_tgt_dev *tgtdev = NULL;
 	struct mpi3mr_stgt_priv_data *scsi_tgt_priv_data = NULL;
-	struct op_req_qinfo *op_req_q = NULL;
+	struct scmd_priv *cmd_priv = NULL;
+	struct scsi_device *sdev = NULL;
+	struct mpi3mr_sdev_priv_data *sdev_priv_data = NULL;
 
 	ioc_info(mrioc, "%s :Issue TM: TM type (0x%x) for devhandle 0x%04x\n",
 	     __func__, tm_type, handle);
@@ -2650,16 +2824,21 @@ static int mpi3mr_issue_tm(struct mpi3mr_ioc *mrioc, u8 tm_type,
 	tm_req.function = MPI3_FUNCTION_SCSI_TASK_MGMT;
 
 	tgtdev = mpi3mr_get_tgtdev_by_handle(mrioc, handle);
-	if (tgtdev && tgtdev->starget && tgtdev->starget->hostdata) {
-		scsi_tgt_priv_data = (struct mpi3mr_stgt_priv_data *)
-		    tgtdev->starget->hostdata;
+
+	if (scmd) {
+		sdev = scmd->device;
+		sdev_priv_data = sdev->hostdata;
+		scsi_tgt_priv_data = ((sdev_priv_data) ?
+		    sdev_priv_data->tgt_priv_data : NULL);
+	} else {
+		if (tgtdev && tgtdev->starget && tgtdev->starget->hostdata)
+			scsi_tgt_priv_data = (struct mpi3mr_stgt_priv_data *)
+			    tgtdev->starget->hostdata;
+	}
+
+	if (scsi_tgt_priv_data)
 		atomic_inc(&scsi_tgt_priv_data->block_io);
-	}
-	if (cmd_priv) {
-		op_req_q = &mrioc->req_qinfo[cmd_priv->req_q_idx];
-		tm_req.task_host_tag = cpu_to_le16(cmd_priv->host_tag);
-		tm_req.task_request_queue_id = cpu_to_le16(op_req_q->qid);
-	}
+
 	if (tgtdev && (tgtdev->dev_type == MPI3_DEVICE_DEVFORM_PCIE)) {
 		if (cmd_priv && tgtdev->dev_spec.pcie_inf.abort_to)
 			timeout = tgtdev->dev_spec.pcie_inf.abort_to;
@@ -2676,39 +2855,49 @@ static int mpi3mr_issue_tm(struct mpi3mr_ioc *mrioc, u8 tm_type,
 	wait_for_completion_timeout(&drv_cmd->done, (timeout * HZ));
 
 	if (!(drv_cmd->state & MPI3MR_CMD_COMPLETE)) {
-		ioc_err(mrioc, "%s :Issue TM: command timed out\n", __func__);
 		drv_cmd->is_waiting = 0;
 		retval = -1;
-		mpi3mr_soft_reset_handler(mrioc,
-		    MPI3MR_RESET_FROM_TM_TIMEOUT, 1);
+		if (!(drv_cmd->state & MPI3MR_CMD_RESET)) {
+			dprint_tm(mrioc,
+			    "task management request timed out after %ld seconds\n",
+			    timeout);
+			if (mrioc->logging_level & MPI3_DEBUG_TM)
+				dprint_dump_req(&tm_req, sizeof(tm_req)/4);
+			mpi3mr_soft_reset_handler(mrioc,
+			    MPI3MR_RESET_FROM_TM_TIMEOUT, 1);
+		}
 		goto out_unlock;
 	}
 
-	if (drv_cmd->state & MPI3MR_CMD_REPLY_VALID)
-		tm_reply = (struct mpi3_scsi_task_mgmt_reply *)drv_cmd->reply;
-
-	if (drv_cmd->ioc_status != MPI3_IOCSTATUS_SUCCESS) {
-		ioc_err(mrioc,
-		    "%s :Issue TM: handle(0x%04x) Failed ioc_status(0x%04x) Loginfo(0x%08x)\n",
-		    __func__, handle, drv_cmd->ioc_status,
-		    drv_cmd->ioc_loginfo);
+	if (!(drv_cmd->state & MPI3MR_CMD_REPLY_VALID)) {
+		dprint_tm(mrioc, "invalid task management reply message\n");
 		retval = -1;
 		goto out_unlock;
 	}
 
-	if (!tm_reply) {
-		ioc_err(mrioc, "%s :Issue TM: No TM Reply message\n", __func__);
-		retval = -1;
-		goto out_unlock;
-	}
+	tm_reply = (struct mpi3_scsi_task_mgmt_reply *)drv_cmd->reply;
 
-	*resp_code = le32_to_cpu(tm_reply->response_data) &
-	    MPI3MR_RI_MASK_RESPCODE;
-	switch (*resp_code) {
-	case MPI3MR_RSP_TM_SUCCEEDED:
-	case MPI3MR_RSP_TM_COMPLETE:
+	switch (drv_cmd->ioc_status) {
+	case MPI3_IOCSTATUS_SUCCESS:
+		*resp_code = le32_to_cpu(tm_reply->response_data) &
+			MPI3MR_RI_MASK_RESPCODE;
 		break;
-	case MPI3MR_RSP_IO_QUEUED_ON_IOC:
+	case MPI3_IOCSTATUS_SCSI_IOC_TERMINATED:
+		*resp_code = MPI3_SCSITASKMGMT_RSPCODE_TM_COMPLETE;
+		break;
+	default:
+		dprint_tm(mrioc,
+		    "task management request to handle(0x%04x) is failed with ioc_status(0x%04x) log_info(0x%08x)\n",
+		    handle, drv_cmd->ioc_status, drv_cmd->ioc_loginfo);
+		retval = -1;
+		goto out_unlock;
+	}
+
+	switch (*resp_code) {
+	case MPI3_SCSITASKMGMT_RSPCODE_TM_SUCCEEDED:
+	case MPI3_SCSITASKMGMT_RSPCODE_TM_COMPLETE:
+		break;
+	case MPI3_SCSITASKMGMT_RSPCODE_IO_QUEUED_ON_IOC:
 		if (tm_type != MPI3_SCSITASKMGMT_TASKTYPE_QUERY_TASK)
 			retval = -1;
 		break;
@@ -2717,14 +2906,37 @@ static int mpi3mr_issue_tm(struct mpi3mr_ioc *mrioc, u8 tm_type,
 		break;
 	}
 
-	ioc_info(mrioc,
-	    "%s :Issue TM: Completed TM type (0x%x) handle(0x%04x) ",
-	    __func__, tm_type, handle);
-	ioc_info(mrioc,
-	    "with ioc_status(0x%04x), loginfo(0x%08x), term_count(0x%08x)\n",
-	    drv_cmd->ioc_status, drv_cmd->ioc_loginfo,
-	    le32_to_cpu(tm_reply->termination_count));
-	mpi3mr_print_response_code(mrioc, *resp_code);
+	dprint_tm(mrioc,
+	    "task management request type(%d) completed for handle(0x%04x) with ioc_status(0x%04x), log_info(0x%08x), termination_count(%d), response:%s(0x%x)\n",
+	    tm_type, handle, drv_cmd->ioc_status, drv_cmd->ioc_loginfo,
+	    le32_to_cpu(tm_reply->termination_count),
+	    mpi3mr_tm_response_name(*resp_code), *resp_code);
+
+	if (!retval) {
+		mpi3mr_ioc_disable_intr(mrioc);
+		mpi3mr_poll_pend_io_completions(mrioc);
+		mpi3mr_ioc_enable_intr(mrioc);
+		mpi3mr_poll_pend_io_completions(mrioc);
+	}
+	switch (tm_type) {
+	case MPI3_SCSITASKMGMT_TASKTYPE_TARGET_RESET:
+		if (!scsi_tgt_priv_data)
+			break;
+		scsi_tgt_priv_data->pend_count = 0;
+		blk_mq_tagset_busy_iter(&mrioc->shost->tag_set,
+		    mpi3mr_count_tgt_pending,
+		    (void *)scsi_tgt_priv_data->starget);
+		break;
+	case MPI3_SCSITASKMGMT_TASKTYPE_LOGICAL_UNIT_RESET:
+		if (!sdev_priv_data)
+			break;
+		sdev_priv_data->pend_count = 0;
+		blk_mq_tagset_busy_iter(&mrioc->shost->tag_set,
+		    mpi3mr_count_dev_pending, (void *)sdev);
+		break;
+	default:
+		break;
+	}
 
 out_unlock:
 	drv_cmd->state = MPI3MR_CMD_NOTUSED;
@@ -2733,14 +2945,6 @@ out_unlock:
 		atomic_dec_if_positive(&scsi_tgt_priv_data->block_io);
 	if (tgtdev)
 		mpi3mr_tgtdev_put(tgtdev);
-	if (!retval) {
-		/*
-		 * Flush all IRQ handlers by calling synchronize_irq().
-		 * mpi3mr_ioc_disable_intr() takes care of it.
-		 */
-		mpi3mr_ioc_disable_intr(mrioc);
-		mpi3mr_ioc_enable_intr(mrioc);
-	}
 out:
 	return retval;
 }
@@ -2958,6 +3162,13 @@ static int mpi3mr_eh_target_reset(struct scsi_cmnd *scmd)
 
 	stgt_priv_data = sdev_priv_data->tgt_priv_data;
 	dev_handle = stgt_priv_data->dev_handle;
+	if (stgt_priv_data->dev_removed) {
+		sdev_printk(KERN_INFO, scmd->device,
+		    "%s:target(handle = 0x%04x) is removed, target reset is not issued\n",
+		    mrioc->name, dev_handle);
+		retval = FAILED;
+		goto out;
+	}
 	sdev_printk(KERN_INFO, scmd->device,
 	    "Target Reset is issued to handle(0x%04x)\n",
 	    dev_handle);
@@ -2965,15 +3176,22 @@ static int mpi3mr_eh_target_reset(struct scsi_cmnd *scmd)
 	ret = mpi3mr_issue_tm(mrioc,
 	    MPI3_SCSITASKMGMT_TASKTYPE_TARGET_RESET, dev_handle,
 	    sdev_priv_data->lun_id, MPI3MR_HOSTTAG_BLK_TMS,
-	    MPI3MR_RESETTM_TIMEOUT, &mrioc->host_tm_cmds, &resp_code, NULL);
+	    MPI3MR_RESETTM_TIMEOUT, &mrioc->host_tm_cmds, &resp_code, scmd);
 
 	if (ret)
 		goto out;
 
+	if (stgt_priv_data->pend_count) {
+		sdev_printk(KERN_INFO, scmd->device,
+		    "%s: target has %d pending commands, target reset is failed\n",
+		    mrioc->name, stgt_priv_data->pend_count);
+		goto out;
+	}
+
 	retval = SUCCESS;
 out:
 	sdev_printk(KERN_INFO, scmd->device,
-	    "Target reset is %s for scmd(%p)\n",
+	    "%s: target reset is %s for scmd(%p)\n", mrioc->name,
 	    ((retval == SUCCESS) ? "SUCCESS" : "FAILED"), scmd);
 
 	return retval;
@@ -3012,21 +3230,34 @@ static int mpi3mr_eh_dev_reset(struct scsi_cmnd *scmd)
 
 	stgt_priv_data = sdev_priv_data->tgt_priv_data;
 	dev_handle = stgt_priv_data->dev_handle;
+	if (stgt_priv_data->dev_removed) {
+		sdev_printk(KERN_INFO, scmd->device,
+		    "%s: device(handle = 0x%04x) is removed, device(LUN) reset is not issued\n",
+		    mrioc->name, dev_handle);
+		retval = FAILED;
+		goto out;
+	}
 	sdev_printk(KERN_INFO, scmd->device,
 	    "Device(lun) Reset is issued to handle(0x%04x)\n", dev_handle);
 
 	ret = mpi3mr_issue_tm(mrioc,
 	    MPI3_SCSITASKMGMT_TASKTYPE_LOGICAL_UNIT_RESET, dev_handle,
 	    sdev_priv_data->lun_id, MPI3MR_HOSTTAG_BLK_TMS,
-	    MPI3MR_RESETTM_TIMEOUT, &mrioc->host_tm_cmds, &resp_code, NULL);
+	    MPI3MR_RESETTM_TIMEOUT, &mrioc->host_tm_cmds, &resp_code, scmd);
 
 	if (ret)
 		goto out;
 
+	if (sdev_priv_data->pend_count) {
+		sdev_printk(KERN_INFO, scmd->device,
+		    "%s: device has %d pending commands, device(LUN) reset is failed\n",
+		    mrioc->name, sdev_priv_data->pend_count);
+		goto out;
+	}
 	retval = SUCCESS;
 out:
 	sdev_printk(KERN_INFO, scmd->device,
-	    "Device(lun) reset is %s for scmd(%p)\n",
+	    "%s: device(LUN) reset is %s for scmd(%p)\n", mrioc->name,
 	    ((retval == SUCCESS) ? "SUCCESS" : "FAILED"), scmd);
 
 	return retval;
@@ -3706,8 +3937,6 @@ mpi3mr_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	struct Scsi_Host *shost = NULL;
 	int retval = 0, i;
 
-	mark_tech_preview("MPI3 Storage Controller Device Driver", THIS_MODULE);
-
 	if (osintfc_mrioc_security_status(pdev)) {
 		warn_non_secure_ctlr = 1;
 		return 1; /* For Invalid and Tampered device */
@@ -3762,7 +3991,7 @@ mpi3mr_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	shost->max_lun = -1;
 	shost->unique_id = mrioc->id;
 
-	shost->max_channel = 1;
+	shost->max_channel = 0;
 	shost->max_id = 0xFFFFFFFF;
 
 	if (prot_mask >= 0)
@@ -3793,7 +4022,7 @@ mpi3mr_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	snprintf(mrioc->fwevt_worker_name, sizeof(mrioc->fwevt_worker_name),
 	    "%s%d_fwevt_wrkr", mrioc->driver_name, mrioc->id);
 	mrioc->fwevt_worker_thread = alloc_ordered_workqueue(
-	    mrioc->fwevt_worker_name, WQ_MEM_RECLAIM);
+	    mrioc->fwevt_worker_name, 0);
 	if (!mrioc->fwevt_worker_thread) {
 		ioc_err(mrioc, "failure at %s:%d/%s()!\n",
 		    __FILE__, __LINE__, __func__);
@@ -3802,7 +4031,7 @@ mpi3mr_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	mrioc->is_driver_loading = 1;
-	if (mpi3mr_init_ioc(mrioc, 0)) {
+	if (mpi3mr_init_ioc(mrioc, MPI3MR_IT_INIT)) {
 		ioc_err(mrioc, "failure at %s:%d/%s()!\n",
 		    __FILE__, __LINE__, __func__);
 		retval = -ENODEV;
@@ -3825,7 +4054,7 @@ mpi3mr_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	return retval;
 
 addhost_failed:
-	mpi3mr_cleanup_ioc(mrioc, 0);
+	mpi3mr_cleanup_ioc(mrioc, MPI3MR_COMPLETE_CLEANUP);
 out_iocinit_failed:
 	destroy_workqueue(mrioc->fwevt_worker_thread);
 out_fwevtthread_failed:
@@ -3877,7 +4106,7 @@ static void mpi3mr_remove(struct pci_dev *pdev)
 		mpi3mr_tgtdev_del_from_list(mrioc, tgtdev);
 		mpi3mr_tgtdev_put(tgtdev);
 	}
-	mpi3mr_cleanup_ioc(mrioc, 0);
+	mpi3mr_cleanup_ioc(mrioc, MPI3MR_COMPLETE_CLEANUP);
 
 	spin_lock(&mrioc_list_lock);
 	list_del(&mrioc->list);
@@ -3917,7 +4146,7 @@ static void mpi3mr_shutdown(struct pci_dev *pdev)
 	spin_unlock_irqrestore(&mrioc->fwevt_lock, flags);
 	if (wq)
 		destroy_workqueue(wq);
-	mpi3mr_cleanup_ioc(mrioc, 0);
+	mpi3mr_cleanup_ioc(mrioc, MPI3MR_COMPLETE_CLEANUP);
 }
 
 #ifdef CONFIG_PM
@@ -3947,14 +4176,14 @@ static int mpi3mr_suspend(struct pci_dev *pdev, pm_message_t state)
 	mpi3mr_cleanup_fwevt_list(mrioc);
 	scsi_block_requests(shost);
 	mpi3mr_stop_watchdog(mrioc);
-	mpi3mr_cleanup_ioc(mrioc, 1);
+	mpi3mr_cleanup_ioc(mrioc, MPI3MR_SUSPEND);
 
 	device_state = pci_choose_state(pdev, state);
 	ioc_info(mrioc, "pdev=0x%p, slot=%s, entering operating state [D%d]\n",
 	    pdev, pci_name(pdev), device_state);
 	pci_save_state(pdev);
-	pci_set_power_state(pdev, device_state);
 	mpi3mr_cleanup_resources(mrioc);
+	pci_set_power_state(pdev, device_state);
 
 	return 0;
 }
@@ -3995,7 +4224,8 @@ static int mpi3mr_resume(struct pci_dev *pdev)
 	}
 
 	mrioc->stop_drv_processing = 0;
-	mpi3mr_init_ioc(mrioc, 1);
+	mpi3mr_memset_buffers(mrioc);
+	mpi3mr_init_ioc(mrioc, MPI3MR_IT_RESUME);
 	scsi_unblock_requests(shost);
 	mpi3mr_start_watchdog(mrioc);
 

@@ -389,4 +389,11 @@ void __noreturn usercopy_abort(const char *name, const char *detail,
 			       unsigned long len);
 #endif
 
+/*
+ * RHEL8:
+ * Remapping copy_{from,to}_kernel_nofault to probe_kernel_{read,write}
+ */
+#define copy_from_kernel_nofault(a,b,c)	probe_kernel_read(a,b,c)
+#define copy_to_kernel_nofault(a,b,c)	probe_kernel_write(a,b,c)
+
 #endif		/* __LINUX_UACCESS_H__ */

@@ -162,7 +162,7 @@ config HMEM_REPORTING
 	default n
 	depends on NUMA
 	help
-	  Enable reporting for heterogenous memory access attributes under
+	  Enable reporting for heterogeneous memory access attributes under
 	  their non-uniform memory nodes.
 
 source "drivers/base/test/Kconfig"
@@ -290,5 +290,11 @@ config GENERIC_ARCH_TOPOLOGY
 	  CPU capacity information from DT, usage of such information for
 	  appropriate scaling, sysfs interface for changing capacity values at
 	  runtime.
+
+config GENERIC_ARCH_NUMA
+	bool
+	help
+	  Enable support for generic NUMA implementation. Currently, RISC-V
+	  and ARM64 use it.
 
 endmenu

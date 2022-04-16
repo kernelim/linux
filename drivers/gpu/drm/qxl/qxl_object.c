@@ -142,8 +142,8 @@ int qxl_bo_create(struct qxl_device *qdev, unsigned long size,
 
 	bo->tbo.priority = priority;
 	r = ttm_bo_init_reserved(&qdev->mman.bdev, &bo->tbo, size, type,
-				 &bo->placement, 0, &ctx, size,
-				 NULL, NULL, &qxl_ttm_bo_destroy);
+				 &bo->placement, 0, &ctx, NULL, NULL,
+				 &qxl_ttm_bo_destroy);
 	if (unlikely(r != 0)) {
 		if (r != -ERESTARTSYS)
 			dev_err(qdev->ddev.dev,
@@ -212,14 +212,14 @@ void *qxl_bo_kmap_atomic_page(struct qxl_device *qdev,
 	struct io_mapping *map;
 	struct dma_buf_map bo_map;
 
-	if (bo->tbo.mem.mem_type == TTM_PL_VRAM)
+	if (bo->tbo.resource->mem_type == TTM_PL_VRAM)
 		map = qdev->vram_mapping;
-	else if (bo->tbo.mem.mem_type == TTM_PL_PRIV)
+	else if (bo->tbo.resource->mem_type == TTM_PL_PRIV)
 		map = qdev->surface_mapping;
 	else
 		goto fallback;
 
-	offset = bo->tbo.mem.start << PAGE_SHIFT;
+	offset = bo->tbo.resource->start << PAGE_SHIFT;
 	return io_mapping_map_atomic_wc(map, offset + page_offset);
 fallback:
 	if (bo->kptr) {
@@ -266,8 +266,8 @@ int qxl_bo_vunmap(struct qxl_bo *bo)
 void qxl_bo_kunmap_atomic_page(struct qxl_device *qdev,
 			       struct qxl_bo *bo, void *pmap)
 {
-	if ((bo->tbo.mem.mem_type != TTM_PL_VRAM) &&
-	    (bo->tbo.mem.mem_type != TTM_PL_PRIV))
+	if ((bo->tbo.resource->mem_type != TTM_PL_VRAM) &&
+	    (bo->tbo.resource->mem_type != TTM_PL_PRIV))
 		goto fallback;
 
 	io_mapping_unmap_atomic(pmap);

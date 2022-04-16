@@ -986,6 +986,7 @@ struct mwifiex_adapter {
 	struct timer_list wakeup_timer;
 	struct mwifiex_hs_config_param hs_cfg;
 	u8 hs_activated;
+	u8 hs_activated_manually;
 	u16 hs_activate_wait_q_woken;
 	wait_queue_head_t hs_activate_wait_q;
 	u8 event_body[MAX_EVENT_SIZE];
@@ -1054,6 +1055,8 @@ struct mwifiex_adapter {
 	void *devdump_data;
 	int devdump_len;
 	struct timer_list devdump_timer;
+
+	bool ignore_btcoex_events;
 };
 
 void mwifiex_process_tx_queue(struct mwifiex_adapter *adapter);

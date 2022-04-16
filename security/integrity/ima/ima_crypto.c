@@ -341,7 +341,6 @@ static int ima_calc_file_hash_tfm(struct file *file,
 	SHASH_DESC_ON_STACK(shash, tfm);
 
 	shash->tfm = tfm;
-	shash->flags = 0;
 
 	hash->length = crypto_shash_digestsize(tfm);
 
@@ -366,8 +365,10 @@ static int ima_calc_file_hash_tfm(struct file *file,
 			rc = rbuf_len;
 			break;
 		}
-		if (rbuf_len == 0)
+		if (rbuf_len == 0) {	/* unexpected EOF */
+			rc = -EINVAL;
 			break;
+		}
 		offset += rbuf_len;
 
 		rc = crypto_shash_update(shash, rbuf, rbuf_len);
@@ -415,7 +416,7 @@ int ima_calc_file_hash(struct file *file, struct ima_digest_data *hash)
 	loff_t i_size;
 	int rc;
 	struct file *f = file;
-	bool new_file_instance = false, modified_mode = false;
+	bool new_file_instance = false;
 
 	/*
 	 * For consistency, fail file's opened with the O_DIRECT flag on
@@ -433,18 +434,10 @@ int ima_calc_file_hash(struct file *file, struct ima_digest_data *hash)
 				O_TRUNC | O_CREAT | O_NOCTTY | O_EXCL);
 		flags |= O_RDONLY;
 		f = dentry_open(&file->f_path, flags, file->f_cred);
-		if (IS_ERR(f)) {
-			/*
-			 * Cannot open the file again, lets modify f_mode
-			 * of original and continue
-			 */
-			pr_info_ratelimited("Unable to reopen file for reading.\n");
-			f = file;
-			f->f_mode |= FMODE_READ;
-			modified_mode = true;
-		} else {
-			new_file_instance = true;
-		}
+		if (IS_ERR(f))
+			return PTR_ERR(f);
+
+		new_file_instance = true;
 	}
 
 	i_size = i_size_read(file_inode(f));
@@ -459,8 +452,6 @@ int ima_calc_file_hash(struct file *file, struct ima_digest_data *hash)
 out:
 	if (new_file_instance)
 		fput(f);
-	else if (modified_mode)
-		f->f_mode &= ~FMODE_READ;
 	return rc;
 }
 
@@ -477,7 +468,6 @@ static int ima_calc_field_array_hash_tfm(struct ima_field_data *field_data,
 	int rc, i;
 
 	shash->tfm = tfm;
-	shash->flags = 0;
 
 	hash->length = crypto_shash_digestsize(tfm);
 
@@ -599,7 +589,6 @@ static int calc_buffer_shash_tfm(const void *buf, loff_t size,
 	int rc;
 
 	shash->tfm = tfm;
-	shash->flags = 0;
 
 	hash->length = crypto_shash_digestsize(tfm);
 
@@ -680,7 +669,6 @@ static int ima_calc_boot_aggregate_tfm(char *digest, u16 alg_id,
 	SHASH_DESC_ON_STACK(shash, tfm);
 
 	shash->tfm = tfm;
-	shash->flags = 0;
 
 	pr_devel("calculating the boot-aggregate based on TPM bank: %04x\n",
 		 d.alg_id);
@@ -695,6 +683,8 @@ static int ima_calc_boot_aggregate_tfm(char *digest, u16 alg_id,
 		/* now accumulate with current aggregate */
 		rc = crypto_shash_update(shash, d.digest,
 					 crypto_shash_digestsize(tfm));
+		if (rc != 0)
+			return rc;
 	}
 	/*
 	 * Extend cumulative digest over TPM registers 8-9, which contain

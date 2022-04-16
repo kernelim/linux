@@ -17,33 +17,29 @@ workflow: !reference [.workflow]
   trigger:
     branch: rhel8
   variables:
-    builder_image: quay.io/cki/builder-rhel8.5
+    builder_image: quay.io/cki/builder-rhel8
     name: kernel-rhel8
     architectures: 'x86_64 ppc64le aarch64 s390x'
     kpet_tree_family: rhel8
     native_tools: 'true'
-    disttag_override: '.el8_5'
 
 # Realtime specific configuration
 .realtime_check:
   trigger:
     branch: rhel8-rt
   variables:
-    builder_image: quay.io/cki/builder-rhel8.5
+    builder_image: quay.io/cki/builder-rhel8
     name: kernel-rt-rhel8
     kpet_tree_family: rhel8-rt
-    merge_branch: 8.5-rt
-    disttag_override: '.el8_5'
 
 # Full RT pipeline for -rt branch
 .realtime_full:
   trigger:
     branch: rhel8
   variables:
-    builder_image: quay.io/cki/builder-rhel8.5
+    builder_image: quay.io/cki/builder-rhel8
     name: kernel-rt-rhel8
     kpet_tree_family: rhel8-rt
-    disttag_override: '.el8_5'
     RUN_ONLY_FOR_RT: 'true'
 
 # regular pipelines
@@ -57,6 +53,10 @@ rhel8_realtime_check_merge_request:
 
 rhel8_baseline:
   extends: [.internal, .baseline, .with_notifications, .rhel_common,
+            .trigger]
+
+rhel8_baseline_coverage_build:
+  extends: [.internal, .baseline, .rhel_common, .only_build_and_publish, .coverage,
             .trigger]
 
 rhel8_realtime_check_baseline:

@@ -406,7 +406,7 @@ static void enter_uniprocessor(void)
 	}
 out:
 	if (num_online_cpus() > 1)
-		pr_warning("multiple CPUs still online, may miss events.\n");
+		pr_warn("multiple CPUs still online, may miss events.\n");
 }
 
 static void leave_uniprocessor(void)
@@ -430,8 +430,8 @@ static void leave_uniprocessor(void)
 static void enter_uniprocessor(void)
 {
 	if (num_online_cpus() > 1)
-		pr_warning("multiple CPUs are online, may miss events. "
-			   "Suggest booting with maxcpus=1 kernel argument.\n");
+		pr_warn("multiple CPUs are online, may miss events. "
+			"Suggest booting with maxcpus=1 kernel argument.\n");
 }
 
 static void leave_uniprocessor(void)

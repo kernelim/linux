@@ -298,7 +298,7 @@ DECLARE_EVENT_CLASS(xprtrdma_mr_class,
 
 		__entry->task_id = task->tk_pid;
 		__entry->client_id = task->tk_client->cl_clid;
-		__entry->mr_id  = mr->frwr.fr_mr->res.id;
+		__entry->mr_id  = mr->mr_ibmr->res.id;
 		__entry->nents  = mr->mr_nents;
 		__entry->handle = mr->mr_handle;
 		__entry->length = mr->mr_length;
@@ -339,7 +339,7 @@ DECLARE_EVENT_CLASS(xprtrdma_anonymous_mr_class,
 	),
 
 	TP_fast_assign(
-		__entry->mr_id  = mr->frwr.fr_mr->res.id;
+		__entry->mr_id  = mr->mr_ibmr->res.id;
 		__entry->nents  = mr->mr_nents;
 		__entry->handle = mr->mr_handle;
 		__entry->length = mr->mr_length;
@@ -498,38 +498,6 @@ TRACE_EVENT(xprtrdma_op_set_cto,
 	TP_printk("peer=[%s]:%s r_xprt=%p: connect=%lu reconnect=%lu",
 		__get_str(addr), __get_str(port), __entry->r_xprt,
 		__entry->connect / HZ, __entry->reconnect / HZ
-	)
-);
-
-TRACE_EVENT(xprtrdma_qp_event,
-	TP_PROTO(
-		const struct rpcrdma_ep *ep,
-		const struct ib_event *event
-	),
-
-	TP_ARGS(ep, event),
-
-	TP_STRUCT__entry(
-		__field(unsigned long, event)
-		__string(name, event->device->name)
-		__array(unsigned char, srcaddr, sizeof(struct sockaddr_in6))
-		__array(unsigned char, dstaddr, sizeof(struct sockaddr_in6))
-	),
-
-	TP_fast_assign(
-		const struct rdma_cm_id *id = ep->re_id;
-
-		__entry->event = event->event;
-		__assign_str(name, event->device->name);
-		memcpy(__entry->srcaddr, &id->route.addr.src_addr,
-		       sizeof(struct sockaddr_in6));
-		memcpy(__entry->dstaddr, &id->route.addr.dst_addr,
-		       sizeof(struct sockaddr_in6));
-	),
-
-	TP_printk("%pISpc -> %pISpc device=%s %s (%lu)",
-		__entry->srcaddr, __entry->dstaddr, __get_str(name),
-		rdma_show_ib_event(__entry->event), __entry->event
 	)
 );
 
@@ -859,7 +827,7 @@ TRACE_EVENT(xprtrdma_frwr_alloc,
 	),
 
 	TP_fast_assign(
-		__entry->mr_id = mr->frwr.fr_mr->res.id;
+		__entry->mr_id = mr->mr_ibmr->res.id;
 		__entry->rc = rc;
 	),
 
@@ -887,7 +855,7 @@ TRACE_EVENT(xprtrdma_frwr_dereg,
 	),
 
 	TP_fast_assign(
-		__entry->mr_id  = mr->frwr.fr_mr->res.id;
+		__entry->mr_id  = mr->mr_ibmr->res.id;
 		__entry->nents  = mr->mr_nents;
 		__entry->handle = mr->mr_handle;
 		__entry->length = mr->mr_length;
@@ -920,7 +888,7 @@ TRACE_EVENT(xprtrdma_frwr_sgerr,
 	),
 
 	TP_fast_assign(
-		__entry->mr_id = mr->frwr.fr_mr->res.id;
+		__entry->mr_id = mr->mr_ibmr->res.id;
 		__entry->addr = mr->mr_sg->dma_address;
 		__entry->dir = mr->mr_dir;
 		__entry->nents = sg_nents;
@@ -950,7 +918,7 @@ TRACE_EVENT(xprtrdma_frwr_maperr,
 	),
 
 	TP_fast_assign(
-		__entry->mr_id = mr->frwr.fr_mr->res.id;
+		__entry->mr_id = mr->mr_ibmr->res.id;
 		__entry->addr = mr->mr_sg->dma_address;
 		__entry->dir = mr->mr_dir;
 		__entry->num_mapped = num_mapped;
@@ -964,11 +932,12 @@ TRACE_EVENT(xprtrdma_frwr_maperr,
 	)
 );
 
+DEFINE_MR_EVENT(fastreg);
 DEFINE_MR_EVENT(localinv);
+DEFINE_MR_EVENT(reminv);
 DEFINE_MR_EVENT(map);
 
 DEFINE_ANON_MR_EVENT(unmap);
-DEFINE_ANON_MR_EVENT(recycle);
 
 TRACE_EVENT(xprtrdma_dma_maperr,
 	TP_PROTO(

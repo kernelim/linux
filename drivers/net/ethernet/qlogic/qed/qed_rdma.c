@@ -504,7 +504,8 @@ static void qed_rdma_init_devinfo(struct qed_hwfn *p_hwfn,
 	dev->max_mw = 0;
 	dev->max_mr_mw_fmr_pbl = (PAGE_SIZE / 8) * (PAGE_SIZE / 8);
 	dev->max_mr_mw_fmr_size = dev->max_mr_mw_fmr_pbl * PAGE_SIZE;
-	dev->max_pkey = QED_RDMA_MAX_P_KEY;
+	if (QED_IS_ROCE_PERSONALITY(p_hwfn))
+		dev->max_pkey = QED_RDMA_MAX_P_KEY;
 
 	dev->max_srq = p_hwfn->p_rdma_info->num_srqs;
 	dev->max_srq_wr = QED_RDMA_MAX_SRQ_WQE_ELEM;
@@ -1284,8 +1285,7 @@ qed_rdma_create_qp(void *rdma_cxt,
 
 	if (!rdma_cxt || !in_params || !out_params ||
 	    !p_hwfn->p_rdma_info->active) {
-		DP_ERR(p_hwfn->cdev,
-		       "qed roce create qp failed due to NULL entry (rdma_cxt=%p, in=%p, out=%p, roce_info=?\n",
+		pr_err("qed roce create qp failed due to NULL entry (rdma_cxt=%p, in=%p, out=%p, roce_info=?\n",
 		       rdma_cxt, in_params, out_params);
 		return NULL;
 	}
@@ -1462,14 +1462,14 @@ static int qed_rdma_modify_qp(void *rdma_cxt,
 
 	switch (qp->qp_type) {
 	case QED_RDMA_QP_TYPE_XRC_INI:
-		qp->has_req = 1;
+		qp->has_req = true;
 		break;
 	case QED_RDMA_QP_TYPE_XRC_TGT:
-		qp->has_resp = 1;
+		qp->has_resp = true;
 		break;
 	default:
-		qp->has_req = 1;
-		qp->has_resp = 1;
+		qp->has_req  = true;
+		qp->has_resp = true;
 	}
 
 	if (QED_IS_IWARP_PERSONALITY(p_hwfn)) {

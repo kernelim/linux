@@ -5,6 +5,7 @@
 #include <asm/sclp.h>
 #include <asm/sections.h>
 #include <asm/boot_data.h>
+#include <asm/pgtable.h>
 #include <asm/uv.h>
 #include "boot.h"
 
@@ -13,6 +14,7 @@ struct ipl_parameter_block __bootdata_preserved(ipl_block);
 int __bootdata_preserved(ipl_block_valid);
 unsigned int __bootdata_preserved(zlib_dfltcc_support) = ZLIB_DFLTCC_FULL;
 
+unsigned long __bootdata(vmalloc_size) = VMALLOC_DEFAULT_SIZE;
 unsigned long __bootdata(memory_end);
 int __bootdata(memory_end_set);
 int __bootdata(noexec_disabled);
@@ -179,6 +181,9 @@ static void parse_mem_opt(void)
 			memory_end = memparse(val, NULL);
 			memory_end_set = 1;
 		}
+
+		if (!strcmp(param, "vmalloc"))
+			vmalloc_size = round_up(memparse(val, NULL), PAGE_SIZE);
 
 		if (!strcmp(param, "dfltcc")) {
 			if (!strcmp(val, "off"))

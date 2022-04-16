@@ -82,6 +82,7 @@ struct device_private {
 	struct device *device;
 	RH_KABI_EXTEND(struct device_driver *async_driver)
 	RH_KABI_EXTEND(u8 dead:1)
+	RH_KABI_EXTEND(char *deferred_probe_reason)
 
 };
 #define to_device_private_parent(obj)	\
@@ -125,8 +126,9 @@ extern void device_release_driver_internal(struct device *dev,
 					   struct device *parent);
 
 extern void driver_detach(struct device_driver *drv);
-extern int driver_probe_device(struct device_driver *drv, struct device *dev);
 extern void driver_deferred_probe_del(struct device *dev);
+extern void device_set_deferred_probe_reason(const struct device *dev,
+					     struct va_format *vaf);
 static inline int driver_match_device(struct device_driver *drv,
 				      struct device *dev)
 {

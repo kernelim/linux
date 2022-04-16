@@ -29,24 +29,14 @@
 #ifndef	_LINUX_RBTREE_H
 #define	_LINUX_RBTREE_H
 
+#include <linux/rbtree_types.h>
+
 #include <linux/kernel.h>
 #include <linux/stddef.h>
 #include <linux/rcupdate.h>
 
-struct rb_node {
-	unsigned long  __rb_parent_color;
-	struct rb_node *rb_right;
-	struct rb_node *rb_left;
-} __attribute__((aligned(sizeof(long))));
-    /* The alignment might seem pointless, but allegedly CRIS needs it */
-
-struct rb_root {
-	struct rb_node *rb_node;
-};
-
 #define rb_parent(r)   ((struct rb_node *)((r)->__rb_parent_color & ~3))
 
-#define RB_ROOT	(struct rb_root) { NULL, }
 #define	rb_entry(ptr, type, member) container_of(ptr, type, member)
 
 #define RB_EMPTY_ROOT(root)  (READ_ONCE((root)->rb_node) == NULL)
@@ -124,23 +114,6 @@ static inline void rb_link_node_rcu(struct rb_node *node, struct rb_node *parent
 			typeof(*pos), field); 1; }); \
 	     pos = n)
 
-/*
- * Leftmost-cached rbtrees.
- *
- * We do not cache the rightmost node based on footprint
- * size vs number of potential users that could benefit
- * from O(1) rb_last(). Just not worth it, users that want
- * this feature can always implement the logic explicitly.
- * Furthermore, users that want to cache both pointers may
- * find it a bit asymmetric, but that's ok.
- */
-struct rb_root_cached {
-	struct rb_root rb_root;
-	struct rb_node *rb_leftmost;
-};
-
-#define RB_ROOT_CACHED (struct rb_root_cached) { {NULL, }, NULL }
-
 /* Same as rb_first(), but O(1) */
 #define rb_first_cached(root) (root)->rb_leftmost
 
@@ -153,12 +126,18 @@ static inline void rb_insert_color_cached(struct rb_node *node,
 	rb_insert_color(node, &root->rb_root);
 }
 
-static inline void rb_erase_cached(struct rb_node *node,
-				   struct rb_root_cached *root)
+
+static inline struct rb_node *
+rb_erase_cached(struct rb_node *node, struct rb_root_cached *root)
 {
+	struct rb_node *leftmost = NULL;
+
 	if (root->rb_leftmost == node)
-		root->rb_leftmost = rb_next(node);
+		leftmost = root->rb_leftmost = rb_next(node);
+
 	rb_erase(node, &root->rb_root);
+
+	return leftmost;
 }
 
 static inline void rb_replace_node_cached(struct rb_node *victim,
@@ -191,8 +170,10 @@ static inline void rb_replace_node_cached(struct rb_node *victim,
  * @node: node to insert
  * @tree: leftmost cached tree to insert @node into
  * @less: operator defining the (partial) node order
+ *
+ * Returns @node when it is the new leftmost, or NULL.
  */
-static __always_inline void
+static __always_inline struct rb_node *
 rb_add_cached(struct rb_node *node, struct rb_root_cached *tree,
 	      bool (*less)(struct rb_node *, const struct rb_node *))
 {
@@ -212,6 +193,8 @@ rb_add_cached(struct rb_node *node, struct rb_root_cached *tree,
 
 	rb_link_node(node, parent, link);
 	rb_insert_color_cached(node, tree, leftmost);
+
+	return leftmost ? node : NULL;
 }
 
 /**

@@ -14,7 +14,6 @@
 #include <linux/uprobes.h>
 #include <linux/page-flags-layout.h>
 #include <linux/workqueue.h>
-#include <linux/rh_kabi.h>
 #include <linux/seqlock.h>
 
 #include <asm/mmu.h>
@@ -25,6 +24,12 @@
 #define AT_VECTOR_SIZE_ARCH 0
 #endif
 #define AT_VECTOR_SIZE (2*(AT_VECTOR_SIZE_ARCH + AT_VECTOR_SIZE_BASE + 1))
+
+#ifndef ORIG_AT_VECTOR_SIZE_ARCH
+#define ORIG_AT_VECTOR_SIZE_ARCH AT_VECTOR_SIZE_ARCH
+#endif
+/* RH KABI check requires this to be this "string" rather than just "46". */
+#define ORIG_AT_VECTOR_SIZE (2*(ORIG_AT_VECTOR_SIZE_ARCH + AT_VECTOR_SIZE_BASE + 1))
 
 
 struct address_space;
@@ -376,6 +381,11 @@ struct core_state {
 };
 
 struct kioctx_table;
+
+struct mm_struct_rh {
+		unsigned long saved_auxv[AT_VECTOR_SIZE]; /* for /proc/PID/auxv */
+};
+
 struct mm_struct {
 	struct {
 		struct vm_area_struct *mmap;		/* list of VMAs */
@@ -472,7 +482,7 @@ struct mm_struct {
 		unsigned long start_brk, brk, start_stack;
 		unsigned long arg_start, arg_end, env_start, env_end;
 
-		unsigned long saved_auxv[AT_VECTOR_SIZE]; /* for /proc/PID/auxv */
+		RH_KABI_DEPRECATE(unsigned long, saved_auxv[ORIG_AT_VECTOR_SIZE])
 
 		/*
 		 * Special counters, in some configurations protected by the
@@ -513,7 +523,8 @@ struct mm_struct {
 		/* store ref to file /proc/<pid>/exe symlink points to */
 		struct file __rcu *exe_file;
 #ifdef CONFIG_MMU_NOTIFIER
-		struct mmu_notifier_mm *mmu_notifier_mm;
+		RH_KABI_REPLACE(struct mmu_notifier_mm *mmu_notifier_mm,
+		struct mmu_notifier_subscriptions *notifier_subscriptions)
 #endif
 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) && !USE_SPLIT_PMD_PTLOCKS
 		pgtable_t pmd_huge_pte; /* protected by page_table_lock */
@@ -574,7 +585,7 @@ struct mm_struct {
 	 * for instance during page table copying for fork().
 	 */
 	RH_KABI_USE(3, seqcount_t write_protect_seq)
-	RH_KABI_RESERVE(4)
+	RH_KABI_USE(4, struct mm_struct_rh *mm_rh)
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)
 	RH_KABI_RESERVE(7)

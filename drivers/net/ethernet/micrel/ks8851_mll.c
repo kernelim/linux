@@ -1632,9 +1632,7 @@ static int ks8851_probe(struct platform_device *pdev)
 
 	/* overwriting the default MAC address */
 	if (pdev->dev.of_node) {
-		mac = of_get_mac_address(pdev->dev.of_node);
-		if (mac)
-			memcpy(ks->mac_addr, mac, ETH_ALEN);
+		mac = of_get_mac_address(pdev->dev.of_node, ks->mac_addr);
 	} else {
 		struct ks8851_mll_platform_data *pdata;
 

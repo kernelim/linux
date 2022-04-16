@@ -846,7 +846,6 @@ static struct zfcp_fsf_req *zfcp_fsf_req_create(struct zfcp_qdio *qdio,
 	if (adapter->req_no == 0)
 		adapter->req_no++;
 
-	INIT_LIST_HEAD(&req->list);
 	timer_setup(&req->timer, NULL, 0);
 	init_completion(&req->completion);
 
@@ -2379,8 +2378,7 @@ static void zfcp_fsf_req_trace(struct zfcp_fsf_req *req, struct scsi_cmnd *scsi)
 		}
 	}
 
-	blk_add_driver_data(scsi->request->q, scsi->request, &blktrc,
-			    sizeof(blktrc));
+	blk_add_driver_data(scsi->request, &blktrc, sizeof(blktrc));
 }
 
 /**

@@ -486,11 +486,10 @@ static int ptrace_hbp_set_addr(unsigned int note_type,
 
 static int hw_break_get(struct task_struct *target,
 			const struct user_regset *regset,
-			unsigned int pos, unsigned int count,
-			void *kbuf, void __user *ubuf)
+			struct membuf to)
 {
 	unsigned int note_type = regset->core_note_type;
-	int ret, idx = 0, offset, limit;
+	int ret, idx = 0;
 	u32 info, ctrl;
 	u64 addr;
 
@@ -499,49 +498,21 @@ static int hw_break_get(struct task_struct *target,
 	if (ret)
 		return ret;
 
-	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf, &info, 0,
-				  sizeof(info));
-	if (ret)
-		return ret;
-
-	/* Pad */
-	offset = offsetof(struct user_hwdebug_state, pad);
-	ret = user_regset_copyout_zero(&pos, &count, &kbuf, &ubuf, offset,
-				       offset + PTRACE_HBP_PAD_SZ);
-	if (ret)
-		return ret;
-
+	membuf_write(&to, &info, sizeof(info));
+	membuf_zero(&to, sizeof(u32));
 	/* (address, ctrl) registers */
-	offset = offsetof(struct user_hwdebug_state, dbg_regs);
-	limit = regset->n * regset->size;
-	while (count && offset < limit) {
+	while (to.left) {
 		ret = ptrace_hbp_get_addr(note_type, target, idx, &addr);
 		if (ret)
 			return ret;
-		ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf, &addr,
-					  offset, offset + PTRACE_HBP_ADDR_SZ);
-		if (ret)
-			return ret;
-		offset += PTRACE_HBP_ADDR_SZ;
-
 		ret = ptrace_hbp_get_ctrl(note_type, target, idx, &ctrl);
 		if (ret)
 			return ret;
-		ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf, &ctrl,
-					  offset, offset + PTRACE_HBP_CTRL_SZ);
-		if (ret)
-			return ret;
-		offset += PTRACE_HBP_CTRL_SZ;
-
-		ret = user_regset_copyout_zero(&pos, &count, &kbuf, &ubuf,
-					       offset,
-					       offset + PTRACE_HBP_PAD_SZ);
-		if (ret)
-			return ret;
-		offset += PTRACE_HBP_PAD_SZ;
+		membuf_store(&to, addr);
+		membuf_store(&to, ctrl);
+		membuf_zero(&to, sizeof(u32));
 		idx++;
 	}
-
 	return 0;
 }
 
@@ -601,11 +572,10 @@ static int hw_break_set(struct task_struct *target,
 
 static int gpr_get(struct task_struct *target,
 		   const struct user_regset *regset,
-		   unsigned int pos, unsigned int count,
-		   void *kbuf, void __user *ubuf)
+		   struct membuf to)
 {
 	struct user_pt_regs *uregs = &task_pt_regs(target)->user_regs;
-	return user_regset_copyout(&pos, &count, &kbuf, &ubuf, uregs, 0, -1);
+	return membuf_write(&to, uregs, sizeof(*uregs));
 }
 
 static int gpr_set(struct task_struct *target, const struct user_regset *regset,
@@ -631,8 +601,7 @@ static int gpr_set(struct task_struct *target, const struct user_regset *regset,
  */
 static int __fpr_get(struct task_struct *target,
 		     const struct user_regset *regset,
-		     unsigned int pos, unsigned int count,
-		     void *kbuf, void __user *ubuf, unsigned int start_pos)
+		     struct membuf to)
 {
 	struct user_fpsimd_state *uregs;
 
@@ -640,18 +609,16 @@ static int __fpr_get(struct task_struct *target,
 
 	uregs = &target->thread.uw.fpsimd_state;
 
-	return user_regset_copyout(&pos, &count, &kbuf, &ubuf, uregs,
-				   start_pos, start_pos + sizeof(*uregs));
+	return membuf_write(&to, uregs, sizeof(*uregs));
 }
 
 static int fpr_get(struct task_struct *target, const struct user_regset *regset,
-		   unsigned int pos, unsigned int count,
-		   void *kbuf, void __user *ubuf)
+		   struct membuf to)
 {
 	if (target == current)
 		fpsimd_preserve_current_state();
 
-	return __fpr_get(target, regset, pos, count, kbuf, ubuf, 0);
+	return __fpr_get(target, regset, to);
 }
 
 static int __fpr_set(struct task_struct *target,
@@ -698,15 +665,12 @@ static int fpr_set(struct task_struct *target, const struct user_regset *regset,
 }
 
 static int tls_get(struct task_struct *target, const struct user_regset *regset,
-		   unsigned int pos, unsigned int count,
-		   void *kbuf, void __user *ubuf)
+		   struct membuf to)
 {
-	unsigned long *tls = &target->thread.uw.tp_value;
-
 	if (target == current)
 		tls_preserve_current_state();
 
-	return user_regset_copyout(&pos, &count, &kbuf, &ubuf, tls, 0, -1);
+	return membuf_store(&to, target->thread.uw.tp_value);
 }
 
 static int tls_set(struct task_struct *target, const struct user_regset *regset,
@@ -726,13 +690,9 @@ static int tls_set(struct task_struct *target, const struct user_regset *regset,
 
 static int system_call_get(struct task_struct *target,
 			   const struct user_regset *regset,
-			   unsigned int pos, unsigned int count,
-			   void *kbuf, void __user *ubuf)
+			   struct membuf to)
 {
-	int syscallno = task_pt_regs(target)->syscallno;
-
-	return user_regset_copyout(&pos, &count, &kbuf, &ubuf,
-				   &syscallno, 0, -1);
+	return membuf_store(&to, task_pt_regs(target)->syscallno);
 }
 
 static int system_call_set(struct task_struct *target,
@@ -793,10 +753,8 @@ static unsigned int sve_get_size(struct task_struct *target,
 
 static int sve_get(struct task_struct *target,
 		   const struct user_regset *regset,
-		   unsigned int pos, unsigned int count,
-		   void *kbuf, void __user *ubuf)
+		   struct membuf to)
 {
-	int ret;
 	struct user_sve_header header;
 	unsigned int vq;
 	unsigned long start, end;
@@ -808,10 +766,7 @@ static int sve_get(struct task_struct *target,
 	sve_init_header_from_task(&header, target);
 	vq = sve_vq_from_vl(header.vl);
 
-	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf, &header,
-				  0, sizeof(header));
-	if (ret)
-		return ret;
+	membuf_write(&to, &header, sizeof(header));
 
 	if (target == current)
 		fpsimd_preserve_current_state();
@@ -820,26 +775,18 @@ static int sve_get(struct task_struct *target,
 
 	BUILD_BUG_ON(SVE_PT_FPSIMD_OFFSET != sizeof(header));
 	if ((header.flags & SVE_PT_REGS_MASK) == SVE_PT_REGS_FPSIMD)
-		return __fpr_get(target, regset, pos, count, kbuf, ubuf,
-				 SVE_PT_FPSIMD_OFFSET);
+		return __fpr_get(target, regset, to);
 
 	/* Otherwise: full SVE case */
 
 	BUILD_BUG_ON(SVE_PT_SVE_OFFSET != sizeof(header));
 	start = SVE_PT_SVE_OFFSET;
 	end = SVE_PT_SVE_FFR_OFFSET(vq) + SVE_PT_SVE_FFR_SIZE(vq);
-	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
-				  target->thread.sve_state,
-				  start, end);
-	if (ret)
-		return ret;
+	membuf_write(&to, target->thread.sve_state, end - start);
 
 	start = end;
 	end = SVE_PT_SVE_FPSR_OFFSET(vq);
-	ret = user_regset_copyout_zero(&pos, &count, &kbuf, &ubuf,
-				       start, end);
-	if (ret)
-		return ret;
+	membuf_zero(&to, end - start);
 
 	/*
 	 * Copy fpsr, and fpcr which must follow contiguously in
@@ -847,16 +794,11 @@ static int sve_get(struct task_struct *target,
 	 */
 	start = end;
 	end = SVE_PT_SVE_FPCR_OFFSET(vq) + SVE_PT_SVE_FPCR_SIZE;
-	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
-				  &target->thread.uw.fpsimd_state.fpsr,
-				  start, end);
-	if (ret)
-		return ret;
+	membuf_write(&to, &target->thread.uw.fpsimd_state.fpsr, end - start);
 
 	start = end;
 	end = sve_size_from_header(&header);
-	return user_regset_copyout_zero(&pos, &count, &kbuf, &ubuf,
-					start, end);
+	return membuf_zero(&to, end - start);
 }
 
 static int sve_set(struct task_struct *target,
@@ -960,8 +902,7 @@ out:
 #ifdef CONFIG_ARM64_PTR_AUTH
 static int pac_mask_get(struct task_struct *target,
 			const struct user_regset *regset,
-			unsigned int pos, unsigned int count,
-			void *kbuf, void __user *ubuf)
+			struct membuf to)
 {
 	/*
 	 * The PAC bits can differ across data and instruction pointers
@@ -977,7 +918,7 @@ static int pac_mask_get(struct task_struct *target,
 	if (!system_supports_address_auth())
 		return -EINVAL;
 
-	return user_regset_copyout(&pos, &count, &kbuf, &ubuf, &uregs, 0, -1);
+	return membuf_write(&to, &uregs, sizeof(uregs));
 }
 
 #ifdef CONFIG_CHECKPOINT_RESTORE
@@ -1016,8 +957,7 @@ static void pac_address_keys_from_user(struct ptrauth_keys *keys,
 
 static int pac_address_keys_get(struct task_struct *target,
 				const struct user_regset *regset,
-				unsigned int pos, unsigned int count,
-				void *kbuf, void __user *ubuf)
+				struct membuf to)
 {
 	struct ptrauth_keys *keys = &target->thread.keys_user;
 	struct user_pac_address_keys user_keys;
@@ -1027,8 +967,7 @@ static int pac_address_keys_get(struct task_struct *target,
 
 	pac_address_keys_to_user(&user_keys, keys);
 
-	return user_regset_copyout(&pos, &count, &kbuf, &ubuf,
-				   &user_keys, 0, -1);
+	return membuf_write(&to, &user_keys, sizeof(user_keys));
 }
 
 static int pac_address_keys_set(struct task_struct *target,
@@ -1067,8 +1006,7 @@ static void pac_generic_keys_from_user(struct ptrauth_keys *keys,
 
 static int pac_generic_keys_get(struct task_struct *target,
 				const struct user_regset *regset,
-				unsigned int pos, unsigned int count,
-				void *kbuf, void __user *ubuf)
+				struct membuf to)
 {
 	struct ptrauth_keys *keys = &target->thread.keys_user;
 	struct user_pac_generic_keys user_keys;
@@ -1078,8 +1016,7 @@ static int pac_generic_keys_get(struct task_struct *target,
 
 	pac_generic_keys_to_user(&user_keys, keys);
 
-	return user_regset_copyout(&pos, &count, &kbuf, &ubuf,
-				   &user_keys, 0, -1);
+	return membuf_write(&to, &user_keys, sizeof(user_keys));
 }
 
 static int pac_generic_keys_set(struct task_struct *target,
@@ -1133,7 +1070,7 @@ static const struct user_regset aarch64_regsets[] = {
 		.n = sizeof(struct user_pt_regs) / sizeof(u64),
 		.size = sizeof(u64),
 		.align = sizeof(u64),
-		.get = gpr_get,
+		.regset_get = gpr_get,
 		.set = gpr_set
 	},
 	[REGSET_FPR] = {
@@ -1145,7 +1082,7 @@ static const struct user_regset aarch64_regsets[] = {
 		 */
 		.size = sizeof(u32),
 		.align = sizeof(u32),
-		.get = fpr_get,
+		.regset_get = fpr_get,
 		.set = fpr_set
 	},
 	[REGSET_TLS] = {
@@ -1153,7 +1090,7 @@ static const struct user_regset aarch64_regsets[] = {
 		.n = 1,
 		.size = sizeof(void *),
 		.align = sizeof(void *),
-		.get = tls_get,
+		.regset_get = tls_get,
 		.set = tls_set,
 	},
 #ifdef CONFIG_HAVE_HW_BREAKPOINT
@@ -1162,7 +1099,7 @@ static const struct user_regset aarch64_regsets[] = {
 		.n = sizeof(struct user_hwdebug_state) / sizeof(u32),
 		.size = sizeof(u32),
 		.align = sizeof(u32),
-		.get = hw_break_get,
+		.regset_get = hw_break_get,
 		.set = hw_break_set,
 	},
 	[REGSET_HW_WATCH] = {
@@ -1170,7 +1107,7 @@ static const struct user_regset aarch64_regsets[] = {
 		.n = sizeof(struct user_hwdebug_state) / sizeof(u32),
 		.size = sizeof(u32),
 		.align = sizeof(u32),
-		.get = hw_break_get,
+		.regset_get = hw_break_get,
 		.set = hw_break_set,
 	},
 #endif
@@ -1179,7 +1116,7 @@ static const struct user_regset aarch64_regsets[] = {
 		.n = 1,
 		.size = sizeof(int),
 		.align = sizeof(int),
-		.get = system_call_get,
+		.regset_get = system_call_get,
 		.set = system_call_set,
 	},
 #ifdef CONFIG_ARM64_SVE
@@ -1189,7 +1126,7 @@ static const struct user_regset aarch64_regsets[] = {
 				  SVE_VQ_BYTES),
 		.size = SVE_VQ_BYTES,
 		.align = SVE_VQ_BYTES,
-		.get = sve_get,
+		.regset_get = sve_get,
 		.set = sve_set,
 		.get_size = sve_get_size,
 	},
@@ -1200,7 +1137,7 @@ static const struct user_regset aarch64_regsets[] = {
 		.n = sizeof(struct user_pac_mask) / sizeof(u64),
 		.size = sizeof(u64),
 		.align = sizeof(u64),
-		.get = pac_mask_get,
+		.regset_get = pac_mask_get,
 		/* this cannot be set dynamically */
 	},
 #ifdef CONFIG_CHECKPOINT_RESTORE
@@ -1209,7 +1146,7 @@ static const struct user_regset aarch64_regsets[] = {
 		.n = sizeof(struct user_pac_address_keys) / sizeof(__uint128_t),
 		.size = sizeof(__uint128_t),
 		.align = sizeof(__uint128_t),
-		.get = pac_address_keys_get,
+		.regset_get = pac_address_keys_get,
 		.set = pac_address_keys_set,
 	},
 	[REGSET_PACG_KEYS] = {
@@ -1217,7 +1154,7 @@ static const struct user_regset aarch64_regsets[] = {
 		.n = sizeof(struct user_pac_generic_keys) / sizeof(__uint128_t),
 		.size = sizeof(__uint128_t),
 		.align = sizeof(__uint128_t),
-		.get = pac_generic_keys_get,
+		.regset_get = pac_generic_keys_get,
 		.set = pac_generic_keys_set,
 	},
 #endif
@@ -1235,56 +1172,31 @@ enum compat_regset {
 	REGSET_COMPAT_VFP,
 };
 
+static inline compat_ulong_t compat_get_user_reg(struct task_struct *task, int idx)
+{
+	struct pt_regs *regs = task_pt_regs(task);
+
+	switch (idx) {
+	case 15:
+		return regs->pc;
+	case 16:
+		return pstate_to_compat_psr(regs->pstate);
+	case 17:
+		return regs->orig_x0;
+	default:
+		return regs->regs[idx];
+	}
+}
+
 static int compat_gpr_get(struct task_struct *target,
 			  const struct user_regset *regset,
-			  unsigned int pos, unsigned int count,
-			  void *kbuf, void __user *ubuf)
+			  struct membuf to)
 {
-	int ret = 0;
-	unsigned int i, start, num_regs;
+	int i = 0;
 
-	/* Calculate the number of AArch32 registers contained in count */
-	num_regs = count / regset->size;
-
-	/* Convert pos into an register number */
-	start = pos / regset->size;
-
-	if (start + num_regs > regset->n)
-		return -EIO;
-
-	for (i = 0; i < num_regs; ++i) {
-		unsigned int idx = start + i;
-		compat_ulong_t reg;
-
-		switch (idx) {
-		case 15:
-			reg = task_pt_regs(target)->pc;
-			break;
-		case 16:
-			reg = task_pt_regs(target)->pstate;
-			break;
-		case 17:
-			reg = task_pt_regs(target)->orig_x0;
-			break;
-		default:
-			reg = task_pt_regs(target)->regs[idx];
-		}
-
-		if (kbuf) {
-			memcpy(kbuf, &reg, sizeof(reg));
-			kbuf += sizeof(reg);
-		} else {
-			ret = copy_to_user(ubuf, &reg, sizeof(reg));
-			if (ret) {
-				ret = -EFAULT;
-				break;
-			}
-
-			ubuf += sizeof(reg);
-		}
-	}
-
-	return ret;
+	while (to.left)
+		membuf_store(&to, compat_get_user_reg(target, i++));
+	return 0;
 }
 
 static int compat_gpr_set(struct task_struct *target,
@@ -1350,12 +1262,10 @@ static int compat_gpr_set(struct task_struct *target,
 
 static int compat_vfp_get(struct task_struct *target,
 			  const struct user_regset *regset,
-			  unsigned int pos, unsigned int count,
-			  void *kbuf, void __user *ubuf)
+			  struct membuf to)
 {
 	struct user_fpsimd_state *uregs;
 	compat_ulong_t fpscr;
-	int ret, vregs_end_pos;
 
 	uregs = &target->thread.uw.fpsimd_state;
 
@@ -1366,19 +1276,10 @@ static int compat_vfp_get(struct task_struct *target,
 	 * The VFP registers are packed into the fpsimd_state, so they all sit
 	 * nicely together for us. We just need to create the fpscr separately.
 	 */
-	vregs_end_pos = VFP_STATE_SIZE - sizeof(compat_ulong_t);
-	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf, uregs,
-				  0, vregs_end_pos);
-
-	if (count && !ret) {
-		fpscr = (uregs->fpsr & VFP_FPSCR_STAT_MASK) |
-			(uregs->fpcr & VFP_FPSCR_CTRL_MASK);
-
-		ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf, &fpscr,
-					  vregs_end_pos, VFP_STATE_SIZE);
-	}
-
-	return ret;
+	membuf_write(&to, uregs, VFP_STATE_SIZE - sizeof(compat_ulong_t));
+	fpscr = (uregs->fpsr & VFP_FPSCR_STAT_MASK) |
+		(uregs->fpcr & VFP_FPSCR_CTRL_MASK);
+	return membuf_store(&to, fpscr);
 }
 
 static int compat_vfp_set(struct task_struct *target,
@@ -1410,11 +1311,10 @@ static int compat_vfp_set(struct task_struct *target,
 }
 
 static int compat_tls_get(struct task_struct *target,
-			  const struct user_regset *regset, unsigned int pos,
-			  unsigned int count, void *kbuf, void __user *ubuf)
+			  const struct user_regset *regset,
+			  struct membuf to)
 {
-	compat_ulong_t tls = (compat_ulong_t)target->thread.uw.tp_value;
-	return user_regset_copyout(&pos, &count, &kbuf, &ubuf, &tls, 0, -1);
+	return membuf_store(&to, (compat_ulong_t)target->thread.uw.tp_value);
 }
 
 static int compat_tls_set(struct task_struct *target,
@@ -1439,7 +1339,7 @@ static const struct user_regset aarch32_regsets[] = {
 		.n = COMPAT_ELF_NGREG,
 		.size = sizeof(compat_elf_greg_t),
 		.align = sizeof(compat_elf_greg_t),
-		.get = compat_gpr_get,
+		.regset_get = compat_gpr_get,
 		.set = compat_gpr_set
 	},
 	[REGSET_COMPAT_VFP] = {
@@ -1447,7 +1347,7 @@ static const struct user_regset aarch32_regsets[] = {
 		.n = VFP_STATE_SIZE / sizeof(compat_ulong_t),
 		.size = sizeof(compat_ulong_t),
 		.align = sizeof(compat_ulong_t),
-		.get = compat_vfp_get,
+		.regset_get = compat_vfp_get,
 		.set = compat_vfp_set
 	},
 };
@@ -1463,7 +1363,7 @@ static const struct user_regset aarch32_ptrace_regsets[] = {
 		.n = COMPAT_ELF_NGREG,
 		.size = sizeof(compat_elf_greg_t),
 		.align = sizeof(compat_elf_greg_t),
-		.get = compat_gpr_get,
+		.regset_get = compat_gpr_get,
 		.set = compat_gpr_set
 	},
 	[REGSET_FPR] = {
@@ -1471,7 +1371,7 @@ static const struct user_regset aarch32_ptrace_regsets[] = {
 		.n = VFP_STATE_SIZE / sizeof(compat_ulong_t),
 		.size = sizeof(compat_ulong_t),
 		.align = sizeof(compat_ulong_t),
-		.get = compat_vfp_get,
+		.regset_get = compat_vfp_get,
 		.set = compat_vfp_set
 	},
 	[REGSET_TLS] = {
@@ -1479,7 +1379,7 @@ static const struct user_regset aarch32_ptrace_regsets[] = {
 		.n = 1,
 		.size = sizeof(compat_ulong_t),
 		.align = sizeof(compat_ulong_t),
-		.get = compat_tls_get,
+		.regset_get = compat_tls_get,
 		.set = compat_tls_set,
 	},
 #ifdef CONFIG_HAVE_HW_BREAKPOINT
@@ -1488,7 +1388,7 @@ static const struct user_regset aarch32_ptrace_regsets[] = {
 		.n = sizeof(struct user_hwdebug_state) / sizeof(u32),
 		.size = sizeof(u32),
 		.align = sizeof(u32),
-		.get = hw_break_get,
+		.regset_get = hw_break_get,
 		.set = hw_break_set,
 	},
 	[REGSET_HW_WATCH] = {
@@ -1496,7 +1396,7 @@ static const struct user_regset aarch32_ptrace_regsets[] = {
 		.n = sizeof(struct user_hwdebug_state) / sizeof(u32),
 		.size = sizeof(u32),
 		.align = sizeof(u32),
-		.get = hw_break_get,
+		.regset_get = hw_break_get,
 		.set = hw_break_set,
 	},
 #endif
@@ -1505,7 +1405,7 @@ static const struct user_regset aarch32_ptrace_regsets[] = {
 		.n = 1,
 		.size = sizeof(int),
 		.align = sizeof(int),
-		.get = system_call_get,
+		.regset_get = system_call_get,
 		.set = system_call_set,
 	},
 };
@@ -1857,7 +1757,7 @@ asmlinkage void syscall_trace_exit(struct pt_regs *regs)
  * We also reserve IL for the kernel; SS is handled dynamically.
  */
 #define SPSR_EL1_AARCH64_RES0_BITS \
-	(GENMASK_ULL(63, 32) | GENMASK_ULL(27, 25) | GENMASK_ULL(23, 22) | \
+	(GENMASK_ULL(63, 32) | GENMASK_ULL(27, 26) | GENMASK_ULL(23, 22) | \
 	 GENMASK_ULL(20, 13) | GENMASK_ULL(11, 10) | GENMASK_ULL(5, 5))
 #define SPSR_EL1_AARCH32_RES0_BITS \
 	(GENMASK_ULL(63, 32) | GENMASK_ULL(22, 22) | GENMASK_ULL(20, 20))

@@ -241,9 +241,9 @@ struct intel_dpll_hw_state {
  */
 struct intel_shared_dpll_state {
 	/**
-	 * @crtc_mask: mask of CRTC using this DPLL, active or not
+	 * @pipe_mask: mask of pipes using this DPLL, active or not
 	 */
-	unsigned crtc_mask;
+	u8 pipe_mask;
 
 	/**
 	 * @hw_state: hardware configuration for the DPLL stored in
@@ -256,16 +256,6 @@ struct intel_shared_dpll_state {
  * struct intel_shared_dpll_funcs - platform specific hooks for managing DPLLs
  */
 struct intel_shared_dpll_funcs {
-	/**
-	 * @prepare:
-	 *
-	 * Optional hook to perform operations prior to enabling the PLL.
-	 * Called from intel_prepare_shared_dpll() function unless the PLL
-	 * is already enabled.
-	 */
-	void (*prepare)(struct drm_i915_private *dev_priv,
-			struct intel_shared_dpll *pll);
-
 	/**
 	 * @enable:
 	 *
@@ -351,9 +341,9 @@ struct intel_shared_dpll {
 	struct intel_shared_dpll_state state;
 
 	/**
-	 * @active_mask: mask of active CRTCs (i.e. DPMS on) using this DPLL
+	 * @active_mask: mask of active pipes (i.e. DPMS on) using this DPLL
 	 */
-	unsigned active_mask;
+	u8 active_mask;
 
 	/**
 	 * @on: is the PLL actually active? Disabled during modeset
@@ -405,11 +395,11 @@ int intel_dpll_get_freq(struct drm_i915_private *i915,
 bool intel_dpll_get_hw_state(struct drm_i915_private *i915,
 			     struct intel_shared_dpll *pll,
 			     struct intel_dpll_hw_state *hw_state);
-void intel_prepare_shared_dpll(const struct intel_crtc_state *crtc_state);
 void intel_enable_shared_dpll(const struct intel_crtc_state *crtc_state);
 void intel_disable_shared_dpll(const struct intel_crtc_state *crtc_state);
 void intel_shared_dpll_swap_state(struct intel_atomic_state *state);
 void intel_shared_dpll_init(struct drm_device *dev);
+void intel_dpll_update_ref_clks(struct drm_i915_private *dev_priv);
 void intel_dpll_readout_hw_state(struct drm_i915_private *dev_priv);
 void intel_dpll_sanitize_state(struct drm_i915_private *dev_priv);
 

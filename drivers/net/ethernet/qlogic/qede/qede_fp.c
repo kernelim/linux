@@ -345,7 +345,7 @@ int qede_xdp_transmit(struct net_device *dev, int n_frames,
 	struct qede_tx_queue *xdp_tx;
 	struct xdp_frame *xdpf;
 	dma_addr_t mapping;
-	int i, drops = 0;
+	int i, nxmit = 0;
 	u16 xdp_prod;
 
 	if (unlikely(flags & ~XDP_XMIT_FLAGS_MASK))
@@ -364,18 +364,13 @@ int qede_xdp_transmit(struct net_device *dev, int n_frames,
 
 		mapping = dma_map_single(dmadev, xdpf->data, xdpf->len,
 					 DMA_TO_DEVICE);
-		if (unlikely(dma_mapping_error(dmadev, mapping))) {
-			xdp_return_frame_rx_napi(xdpf);
-			drops++;
-
-			continue;
-		}
+		if (unlikely(dma_mapping_error(dmadev, mapping)))
+			break;
 
 		if (unlikely(qede_xdp_xmit(xdp_tx, mapping, 0, xdpf->len,
-					   NULL, xdpf))) {
-			xdp_return_frame_rx_napi(xdpf);
-			drops++;
-		}
+					   NULL, xdpf)))
+			break;
+		nxmit++;
 	}
 
 	if (flags & XDP_XMIT_FLUSH) {
@@ -387,7 +382,7 @@ int qede_xdp_transmit(struct net_device *dev, int n_frames,
 
 	spin_unlock(&xdp_tx->xdp_tx_lock);
 
-	return n_frames - drops;
+	return nxmit;
 }
 
 int qede_txq_has_work(struct qede_tx_queue *txq)
@@ -1094,13 +1089,7 @@ static bool qede_rx_xdp(struct qede_dev *edev,
 	xdp_prepare_buff(&xdp, page_address(bd->data), *data_offset,
 			 *len, false);
 
-	/* Queues always have a full reset currently, so for the time
-	 * being until there's atomic program replace just mark read
-	 * side for map helpers.
-	 */
-	rcu_read_lock();
 	act = bpf_prog_run_xdp(prog, &xdp);
-	rcu_read_unlock();
 
 	/* Recalculate, as XDP might have changed the headers */
 	*data_offset = xdp.data - xdp.data_hard_start;
@@ -1447,7 +1436,8 @@ int qede_poll(struct napi_struct *napi, int budget)
 	rx_work_done = (likely(fp->type & QEDE_FASTPATH_RX) &&
 			qede_has_rx_work(fp->rxq)) ?
 			qede_rx_int(fp, budget) : 0;
-	if (rx_work_done < budget) {
+	/* Handle case where we are called by netpoll with a budget of 0 */
+	if (rx_work_done < budget || !budget) {
 		if (!qede_poll_is_more_work(fp)) {
 			napi_complete_done(napi, rx_work_done);
 

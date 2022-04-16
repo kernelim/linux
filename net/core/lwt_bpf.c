@@ -20,7 +20,7 @@
 #include <net/ip6_route.h>
 #include <net/ipv6_stubs.h>
 
-#include <linux/rh_features.h>
+#include <linux/rh_flags.h>
 
 struct bpf_lwt_prog {
 	struct bpf_prog *prog;
@@ -365,7 +365,7 @@ static int bpf_parse_prog(struct nlattr *attr, struct bpf_lwt_prog *prog,
 	if (IS_ERR(p))
 		return PTR_ERR(p);
 
-	rh_mark_used_feature("eBPF/lwt");
+	rh_add_flag("eBPF/lwt");
 
 	prog->prog = p;
 

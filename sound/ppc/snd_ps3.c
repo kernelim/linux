@@ -227,14 +227,14 @@ static int snd_ps3_program_dma(struct snd_ps3_card_info *card,
 	switch (filltype) {
 	case SND_PS3_DMA_FILLTYPE_SILENT_FIRSTFILL:
 		silent = 1;
-		/* intentionally fall thru */
+		fallthrough;
 	case SND_PS3_DMA_FILLTYPE_FIRSTFILL:
 		ch0_kick_event = PS3_AUDIO_KICK_EVENT_ALWAYS;
 		break;
 
 	case SND_PS3_DMA_FILLTYPE_SILENT_RUNNING:
 		silent = 1;
-		/* intentionally fall thru */
+		fallthrough;
 	case SND_PS3_DMA_FILLTYPE_RUNNING:
 		ch0_kick_event = PS3_AUDIO_KICK_EVENT_SERIALOUT0_EMPTY;
 		break;
@@ -742,7 +742,6 @@ static const struct snd_kcontrol_new spdif_ctls[] = {
 static const struct snd_pcm_ops snd_ps3_pcm_spdif_ops = {
 	.open = snd_ps3_pcm_open,
 	.close = snd_ps3_pcm_close,
-	.ioctl = snd_pcm_lib_ioctl,
 	.prepare = snd_ps3_pcm_prepare,
 	.trigger = snd_ps3_pcm_trigger,
 	.pointer = snd_ps3_pcm_pointer,
@@ -897,11 +896,6 @@ static int snd_ps3_driver_probe(struct ps3_system_bus_device *dev)
 	u64 lpar_addr, lpar_size;
 	static u64 dummy_mask;
 
-	if (WARN_ON(!firmware_has_feature(FW_FEATURE_PS3_LV1)))
-		return -ENODEV;
-	if (WARN_ON(dev->match_id != PS3_MATCH_ID_SOUND))
-		return -ENODEV;
-
 	the_card.ps3_dev = dev;
 
 	ret = ps3_open_hv_device(dev);
@@ -1054,8 +1048,6 @@ static int snd_ps3_driver_remove(struct ps3_system_bus_device *dev)
 {
 	int ret;
 	pr_info("%s:start id=%d\n", __func__,  dev->match_id);
-	if (dev->match_id != PS3_MATCH_ID_SOUND)
-		return -ENXIO;
 
 	/*
 	 * ctl and preallocate buffer will be freed in

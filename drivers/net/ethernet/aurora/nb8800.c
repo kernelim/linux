@@ -1353,7 +1353,6 @@ static int nb8800_probe(struct platform_device *pdev)
 	struct resource *res;
 	struct net_device *dev;
 	struct mii_bus *bus;
-	const unsigned char *mac;
 	void __iomem *base;
 	int irq;
 	int ret;
@@ -1464,9 +1463,7 @@ static int nb8800_probe(struct platform_device *pdev)
 	dev->flags |= IFF_MULTICAST;
 	dev->irq = irq;
 
-	mac = of_get_mac_address(pdev->dev.of_node);
-	if (mac)
-		ether_addr_copy(dev->dev_addr, mac);
+	of_get_mac_address(pdev->dev.of_node, dev->dev_addr);
 
 	if (!is_valid_ether_addr(dev->dev_addr))
 		eth_hw_addr_random(dev);

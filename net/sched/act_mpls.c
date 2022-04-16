@@ -6,7 +6,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mpls.h>
-#include <linux/rh_features.h>
+#include <linux/rh_flags.h>
 #include <linux/rtnetlink.h>
 #include <linux/skbuff.h>
 #include <linux/tc_act/tc_mpls.h>
@@ -423,7 +423,7 @@ static int __init mpls_init_module(void)
 
 	err = tcf_register_action(&act_mpls_ops, &mpls_net_ops);
 	if (!err)
-		rh_mark_used_feature("act_mpls");
+		rh_add_flag("act_mpls");
 
 	return err;
 }

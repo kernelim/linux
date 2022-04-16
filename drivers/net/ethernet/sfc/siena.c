@@ -269,8 +269,6 @@ static int siena_probe_nic(struct efx_nic *efx)
 	nic_data->efx = efx;
 	efx->nic_data = nic_data;
 
-	mark_hardware_deprecated("SFC9000 family");
-
 	if (efx_farch_fpga_ver(efx) != 0) {
 		netif_err(efx, probe, efx->net_dev,
 			  "Siena FPGA not supported\n");

@@ -733,7 +733,7 @@ static int i2s_hw_params(struct snd_pcm_substream *substream,
 	switch (params_channels(params)) {
 	case 6:
 		val |= MOD_DC2_EN;
-		/* Fall through */
+		fallthrough;
 	case 4:
 		val |= MOD_DC1_EN;
 		break;
@@ -1443,8 +1443,7 @@ static int samsung_i2s_probe(struct platform_device *pdev)
 		}
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->addr = devm_ioremap_resource(&pdev->dev, res);
+	priv->addr = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
 	if (IS_ERR(priv->addr))
 		return PTR_ERR(priv->addr);
 

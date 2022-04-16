@@ -11,6 +11,7 @@
 #include <linux/module.h>
 #include <linux/msi.h>
 #include <linux/pci.h>
+#include <linux/pci-ecam.h>
 #include <linux/srcu.h>
 #include <linux/rculist.h>
 #include <linux/rcupdate.h>
@@ -82,16 +83,17 @@ struct vmd_irq_list {
 	struct list_head	irq_list;
 	struct srcu_struct	srcu;
 	unsigned int		count;
+	unsigned int		index;
 };
 
 struct vmd_dev {
 	struct pci_dev		*dev;
 
 	spinlock_t		cfg_lock;
-	char __iomem		*cfgbar;
+	void __iomem		*cfgbar;
 
 	int msix_count;
-	struct vmd_irq_list	*irqs;
+	struct vmd_irq_list	**irqs;
 
 	struct pci_sysdata	sysdata;
 	struct resource		resources[3];
@@ -103,12 +105,6 @@ struct vmd_dev {
 static inline struct vmd_dev *vmd_from_bus(struct pci_bus *bus)
 {
 	return container_of(bus->sysdata, struct vmd_dev, sysdata);
-}
-
-static inline unsigned int index_from_irqs(struct vmd_dev *vmd,
-					   struct vmd_irq_list *irqs)
-{
-	return irqs - vmd->irqs;
 }
 
 /*
@@ -123,11 +119,10 @@ static void vmd_compose_msi_msg(struct irq_data *data, struct msi_msg *msg)
 {
 	struct vmd_irq *vmdirq = data->chip_data;
 	struct vmd_irq_list *irq = vmdirq->irq;
-	struct vmd_dev *vmd = irq_data_get_irq_handler_data(data);
 
 	msg->address_hi = MSI_ADDR_BASE_HI;
 	msg->address_lo = MSI_ADDR_BASE_LO |
-			  MSI_ADDR_DEST_ID(index_from_irqs(vmd, irq));
+			  MSI_ADDR_DEST_ID(irq->index);
 	msg->data = 0;
 }
 
@@ -197,7 +192,7 @@ static struct vmd_irq_list *vmd_next_irq(struct vmd_dev *vmd, struct msi_desc *d
 	unsigned long flags;
 
 	if (vmd->msix_count == 1)
-		return &vmd->irqs[0];
+		return vmd->irqs[0];
 
 	/*
 	 * White list for fast-interrupt handlers. All others will share the
@@ -207,17 +202,17 @@ static struct vmd_irq_list *vmd_next_irq(struct vmd_dev *vmd, struct msi_desc *d
 	case PCI_CLASS_STORAGE_EXPRESS:
 		break;
 	default:
-		return &vmd->irqs[0];
+		return vmd->irqs[0];
 	}
 
 	raw_spin_lock_irqsave(&list_lock, flags);
 	for (i = 1; i < vmd->msix_count; i++)
-		if (vmd->irqs[i].count < vmd->irqs[best].count)
+		if (vmd->irqs[i]->count < vmd->irqs[best]->count)
 			best = i;
-	vmd->irqs[best].count++;
+	vmd->irqs[best]->count++;
 	raw_spin_unlock_irqrestore(&list_lock, flags);
 
-	return &vmd->irqs[best];
+	return vmd->irqs[best];
 }
 
 static int vmd_msi_init(struct irq_domain *domain, struct msi_domain_info *info,
@@ -227,7 +222,7 @@ static int vmd_msi_init(struct irq_domain *domain, struct msi_domain_info *info,
 	struct msi_desc *desc = arg->desc;
 	struct vmd_dev *vmd = vmd_from_bus(msi_desc_to_pci_dev(desc)->bus);
 	struct vmd_irq *vmdirq = kzalloc(sizeof(*vmdirq), GFP_KERNEL);
-	unsigned int index, vector;
+	unsigned int vector;
 
 	if (!vmdirq)
 		return -ENOMEM;
@@ -235,8 +230,7 @@ static int vmd_msi_init(struct irq_domain *domain, struct msi_domain_info *info,
 	INIT_LIST_HEAD(&vmdirq->node);
 	vmdirq->irq = vmd_next_irq(vmd, desc);
 	vmdirq->virq = virq;
-	index = index_from_irqs(vmd, vmdirq->irq);
-	vector = pci_irq_vector(vmd->dev, index);
+	vector = pci_irq_vector(vmd->dev, vmdirq->irq->index);
 
 	irq_domain_set_info(domain, virq, vector, info->chip, vmdirq,
 			    handle_untracked_irq, vmd, NULL);
@@ -292,18 +286,16 @@ static struct msi_domain_info vmd_msi_domain_info = {
 	.chip		= &vmd_msi_controller,
 };
 
-static char __iomem *vmd_cfg_addr(struct vmd_dev *vmd, struct pci_bus *bus,
+static void __iomem *vmd_cfg_addr(struct vmd_dev *vmd, struct pci_bus *bus,
 				  unsigned int devfn, int reg, int len)
 {
-	char __iomem *addr = vmd->cfgbar +
-			     ((bus->number - vmd->busn_start) << 20) +
-			     (devfn << 12) + reg;
+	unsigned int busnr_ecam = bus->number - vmd->busn_start;
+	u32 offset = PCIE_ECAM_OFFSET(busnr_ecam, devfn, reg);
 
-	if ((addr - vmd->cfgbar) + len >=
-	    resource_size(&vmd->dev->resource[VMD_CFGBAR]))
+	if (offset + len >= resource_size(&vmd->dev->resource[VMD_CFGBAR]))
 		return NULL;
 
-	return addr;
+	return vmd->cfgbar + offset;
 }
 
 /*
@@ -314,7 +306,7 @@ static int vmd_pci_read(struct pci_bus *bus, unsigned int devfn, int reg,
 			int len, u32 *value)
 {
 	struct vmd_dev *vmd = vmd_from_bus(bus);
-	char __iomem *addr = vmd_cfg_addr(vmd, bus, devfn, reg, len);
+	void __iomem *addr = vmd_cfg_addr(vmd, bus, devfn, reg, len);
 	unsigned long flags;
 	int ret = 0;
 
@@ -349,7 +341,7 @@ static int vmd_pci_write(struct pci_bus *bus, unsigned int devfn, int reg,
 			 int len, u32 value)
 {
 	struct vmd_dev *vmd = vmd_from_bus(bus);
-	char __iomem *addr = vmd_cfg_addr(vmd, bus, devfn, reg, len);
+	void __iomem *addr = vmd_cfg_addr(vmd, bus, devfn, reg, len);
 	unsigned long flags;
 	int ret = 0;
 
@@ -636,14 +628,22 @@ static int vmd_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		return -ENOMEM;
 
 	for (i = 0; i < vmd->msix_count; i++) {
-		err = init_srcu_struct(&vmd->irqs[i].srcu);
+		vmd->irqs[i] = devm_kzalloc(&dev->dev, sizeof(**vmd->irqs),
+					    GFP_KERNEL);
+		if (!vmd->irqs[i])
+			return -ENOMEM;
+	}
+
+	for (i = 0; i < vmd->msix_count; i++) {
+		err = init_srcu_struct(&vmd->irqs[i]->srcu);
 		if (err)
 			return err;
 
-		INIT_LIST_HEAD(&vmd->irqs[i].irq_list);
+		INIT_LIST_HEAD(&vmd->irqs[i]->irq_list);
+		vmd->irqs[i]->index = i;
 		err = devm_request_irq(&dev->dev, pci_irq_vector(dev, i),
 				       vmd_irq, IRQF_NO_THREAD,
-				       "vmd", &vmd->irqs[i]);
+				       "vmd", vmd->irqs[i]);
 		if (err)
 			return err;
 	}
@@ -664,7 +664,7 @@ static void vmd_cleanup_srcu(struct vmd_dev *vmd)
 	int i;
 
 	for (i = 0; i < vmd->msix_count; i++)
-		cleanup_srcu_struct(&vmd->irqs[i].srcu);
+		cleanup_srcu_struct(&vmd->irqs[i]->srcu);
 }
 
 static void vmd_remove(struct pci_dev *dev)
@@ -687,7 +687,7 @@ static int vmd_suspend(struct device *dev)
 	int i;
 
 	for (i = 0; i < vmd->msix_count; i++)
-                devm_free_irq(dev, pci_irq_vector(pdev, i), &vmd->irqs[i]);
+                devm_free_irq(dev, pci_irq_vector(pdev, i), vmd->irqs[i]);
 
 	pci_save_state(pdev);
 	return 0;
@@ -702,7 +702,7 @@ static int vmd_resume(struct device *dev)
 	for (i = 0; i < vmd->msix_count; i++) {
 		err = devm_request_irq(dev, pci_irq_vector(pdev, i),
 				       vmd_irq, IRQF_NO_THREAD,
-				       "vmd", &vmd->irqs[i]);
+				       "vmd", vmd->irqs[i]);
 		if (err)
 			return err;
 	}

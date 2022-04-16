@@ -14,9 +14,6 @@
 #include "netns.h"
 #include "vfs.h"
 
-#define NFSDDBG_FACILITY		NFSDDBG_XDR
-
-
 /*
  * Mapping of S_IF* types to NFS file types
  */

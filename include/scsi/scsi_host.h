@@ -21,7 +21,6 @@ struct scsi_device;
 struct scsi_host_cmd_pool;
 struct scsi_target;
 struct Scsi_Host;
-struct scsi_host_cmd_pool;
 struct scsi_transport_template;
 
 
@@ -490,13 +489,22 @@ struct scsi_host_template {
 	 */
 	RH_KABI_USE(2, bool (*eh_should_retry_cmd)(struct scsi_cmnd *scmd))
 
+	/*
+	 * SCSI interface of blk_poll - poll for IO completions.
+	 * Only applicable if SCSI LLD exposes multiple h/w queues.
+	 *
+	 * Return value: Number of completed entries found.
+	 *
+	 * Status: OPTIONAL
+	 */
+	RH_KABI_USE(3, int (* mq_poll)(struct Scsi_Host *shost, unsigned int queue_num))
+
 	/* FOR RH USE ONLY
 	 *
 	 * The following padding has been inserted before ABI freeze to
 	 * allow extending the structure while preserving ABI.
 	 */
 
-	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
 };
 
@@ -713,14 +721,14 @@ struct Scsi_Host {
 	 */
 	struct device *dma_dev;
 
+	RH_KABI_USE(1, unsigned nr_maps)
+	RH_KABI_USE(2, 3, struct list_head eh_abort_list)
+
 	/* FOR RH USE ONLY
 	 *
 	 * The following padding has been inserted before ABI freeze to
 	 * allow extending the structure while preserving ABI.
 	 */
-	RH_KABI_RESERVE(1)
-	RH_KABI_RESERVE(2)
-	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)

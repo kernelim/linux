@@ -350,17 +350,20 @@ static int aarch32_alloc_kuser_vdso_page(void)
 	return 0;
 }
 
+#define COMPAT_SIGPAGE_POISON_WORD	0xe7fddef1
 static int aarch32_alloc_sigpage(void)
 {
 	extern char __aarch32_sigret_code_start[], __aarch32_sigret_code_end[];
 	int sigret_sz = __aarch32_sigret_code_end - __aarch32_sigret_code_start;
-	unsigned long sigpage;
+	__le32 poison = cpu_to_le32(COMPAT_SIGPAGE_POISON_WORD);
+	void *sigpage;
 
-	sigpage = get_zeroed_page(GFP_ATOMIC);
+	sigpage = (void *)__get_free_page(GFP_ATOMIC);
 	if (!sigpage)
 		return -ENOMEM;
 
-	memcpy((void *)sigpage, __aarch32_sigret_code_start, sigret_sz);
+	memset32(sigpage, (__force u32)poison, PAGE_SIZE / sizeof(poison));
+	memcpy(sigpage, __aarch32_sigret_code_start, sigret_sz);
 	aarch32_sig_page = virt_to_page(sigpage);
 	flush_dcache_page(aarch32_sig_page);
 	return 0;

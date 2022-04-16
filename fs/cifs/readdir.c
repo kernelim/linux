@@ -383,8 +383,8 @@ int get_symlink_reparse_path(char *full_path, struct cifs_sb_info *cifs_sb,
  */
 
 static int
-initiate_cifs_search(const unsigned int xid, struct file *file,
-		     char *full_path)
+_initiate_cifs_search(const unsigned int xid, struct file *file,
+		     const char *full_path)
 {
 	__u16 search_flags;
 	int rc = 0;
@@ -462,6 +462,27 @@ ffirst_retry:
 	}
 error_exit:
 	cifs_put_tlink(tlink);
+	return rc;
+}
+
+static int
+initiate_cifs_search(const unsigned int xid, struct file *file,
+		     const char *full_path)
+{
+	int rc, retry_count = 0;
+
+	do {
+		rc = _initiate_cifs_search(xid, file, full_path);
+		/*
+		 * If we don't have enough credits to start reading the
+		 * directory just try again after short wait.
+		 */
+		if (rc != -EDEADLK)
+			break;
+
+		usleep_range(512, 2048);
+	} while (retry_count++ < 5);
+
 	return rc;
 }
 
@@ -704,7 +725,7 @@ static int cifs_save_resume_key(const char *current_entry,
  */
 static int
 find_cifs_entry(const unsigned int xid, struct cifs_tcon *tcon, loff_t pos,
-		struct file *file, char *full_path,
+		struct file *file, const char *full_path,
 		char **current_entry, int *num_to_ret)
 {
 	__u16 search_flags;

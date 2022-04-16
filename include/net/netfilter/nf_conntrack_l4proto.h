@@ -35,7 +35,7 @@ struct nf_conntrack_l4proto {
 
 	/* convert protoinfo to nfnetink attributes */
 	int (*to_nlattr)(struct sk_buff *skb, struct nlattr *nla,
-			 struct nf_conn *ct);
+			 struct nf_conn *ct, bool destroy);
 
 	/* convert nfnetlink attributes to protoinfo */
 	int (*from_nlattr)(struct nlattr *tb[], struct nf_conn *ct);
@@ -45,7 +45,8 @@ struct nf_conntrack_l4proto {
 	/* Calculate tuple nlattr size */
 	unsigned int (*nlattr_tuple_size)(void);
 	int (*nlattr_to_tuple)(struct nlattr *tb[],
-			       struct nf_conntrack_tuple *t);
+			       struct nf_conntrack_tuple *t,
+			       u_int32_t flags);
 	const struct nla_policy *nla_policy;
 
 	struct {
@@ -158,7 +159,8 @@ void nf_ct_l4proto_unregister_one(const struct nf_conntrack_l4proto *proto);
 int nf_ct_port_tuple_to_nlattr(struct sk_buff *skb,
 			       const struct nf_conntrack_tuple *tuple);
 int nf_ct_port_nlattr_to_tuple(struct nlattr *tb[],
-			       struct nf_conntrack_tuple *t);
+			       struct nf_conntrack_tuple *t,
+			       u_int32_t flags);
 unsigned int nf_ct_port_nlattr_tuple_size(void);
 extern const struct nla_policy nf_ct_port_nla_policy[];
 

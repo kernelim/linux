@@ -23,6 +23,7 @@
 #include <asm/mmu.h>
 
 #ifdef CONFIG_PPC_MMU_NOHASH
+#include <asm/trace.h>
 
 /*
  * On 40x and 8xx, we directly inline tlbia and tlbivax
@@ -56,6 +57,7 @@ static inline void _tlbil_va(unsigned long address, unsigned int pid,
 			     unsigned int tsize, unsigned int ind)
 {
 	asm volatile ("tlbie %0; sync" : : "r" (address) : "memory");
+	trace_tlbie(0, 0, address, pid, 0, 0, 0);
 }
 #elif defined(CONFIG_PPC_BOOK3E)
 extern void _tlbil_va(unsigned long address, unsigned int pid,

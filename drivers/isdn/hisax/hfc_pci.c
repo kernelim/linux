@@ -682,9 +682,9 @@ hfcpci_fill_fifo(struct BCState *bcs)
 		count += B_FIFO_SIZE;	/* count now contains available bytes */
 
 	if (cs->debug & L1_DEB_HSCX)
-		debugl1(cs, "hfcpci_fill_fifo %d count(%u/%d),%lx",
+		debugl1(cs, "hfcpci_fill_fifo %d count(%u/%d),%x",
 			bcs->channel, bcs->tx_skb->len,
-			count, current->state);
+			count, get_current_state());
 
 	if (count < bcs->tx_skb->len) {
 		if (cs->debug & L1_DEB_HSCX)

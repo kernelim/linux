@@ -36,7 +36,7 @@ static int mptcp_diag_dump_one(struct netlink_callback *cb,
 	struct sock *sk;
 
 	net = sock_net(in_skb->sk);
-	msk = mptcp_token_get_sock(req->id.idiag_cookie[0]);
+	msk = mptcp_token_get_sock(net, req->id.idiag_cookie[0]);
 	if (!msk)
 		goto out_nosk;
 
@@ -57,10 +57,8 @@ static int mptcp_diag_dump_one(struct netlink_callback *cb,
 		kfree_skb(rep);
 		goto out;
 	}
-	err = netlink_unicast(net->diag_nlsk, rep, NETLINK_CB(in_skb).portid,
-			      MSG_DONTWAIT);
-	if (err > 0)
-		err = 0;
+	err = nlmsg_unicast(net->diag_nlsk, rep, NETLINK_CB(in_skb).portid);
+
 out:
 	sock_put(sk);
 

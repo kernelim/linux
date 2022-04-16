@@ -716,7 +716,7 @@ int hns_roce_init(struct hns_roce_dev *hr_dev)
 	int ret;
 	struct device *dev = hr_dev->dev;
 
-	mark_hardware_unsupported(DRV_NAME);
+	mark_hardware_deprecated(dev_driver_string(&dev->dev), "%s %s", dev_name(&dev->dev));
 
 	if (hr_dev->hw->reset) {
 		ret = hr_dev->hw->reset(hr_dev, true);

@@ -172,10 +172,10 @@ static int kmb_setup_mode_config(struct drm_device *drm)
 	ret = drmm_mode_config_init(drm);
 	if (ret)
 		return ret;
-	drm->mode_config.min_width = KMB_MIN_WIDTH;
-	drm->mode_config.min_height = KMB_MIN_HEIGHT;
-	drm->mode_config.max_width = KMB_MAX_WIDTH;
-	drm->mode_config.max_height = KMB_MAX_HEIGHT;
+	drm->mode_config.min_width = KMB_FB_MIN_WIDTH;
+	drm->mode_config.min_height = KMB_FB_MIN_HEIGHT;
+	drm->mode_config.max_width = KMB_FB_MAX_WIDTH;
+	drm->mode_config.max_height = KMB_FB_MAX_HEIGHT;
 	drm->mode_config.funcs = &kmb_mode_config_funcs;
 
 	ret = kmb_setup_crtc(drm);
@@ -202,6 +202,7 @@ static irqreturn_t handle_lcd_irq(struct drm_device *dev)
 	unsigned long status, val, val1;
 	int plane_id, dma0_state, dma1_state;
 	struct kmb_drm_private *kmb = to_kmb(dev);
+	u32 ctrl = 0;
 
 	status = kmb_read_lcd(kmb, LCD_INT_STATUS);
 
@@ -225,6 +226,19 @@ static irqreturn_t handle_lcd_irq(struct drm_device *dev)
 
 				kmb_clr_bitmask_lcd(kmb, LCD_CONTROL,
 						    kmb->plane_status[plane_id].ctrl);
+
+				ctrl = kmb_read_lcd(kmb, LCD_CONTROL);
+				if (!(ctrl & (LCD_CTRL_VL1_ENABLE |
+				    LCD_CTRL_VL2_ENABLE |
+				    LCD_CTRL_GL1_ENABLE |
+				    LCD_CTRL_GL2_ENABLE))) {
+					/* If no LCD layers are using DMA,
+					 * then disable DMA pipelined AXI read
+					 * transactions.
+					 */
+					kmb_clr_bitmask_lcd(kmb, LCD_CONTROL,
+							    LCD_CTRL_PIPELINE_DMA);
+				}
 
 				kmb->plane_status[plane_id].disable = false;
 			}
@@ -366,7 +380,7 @@ static irqreturn_t handle_lcd_irq(struct drm_device *dev)
 		if (val & LAYER3_DMA_FIFO_UNDERFLOW)
 			drm_dbg(&kmb->drm,
 				"LAYER3:GL1 DMA UNDERFLOW val = 0x%lx", val);
-		if (val & LAYER3_DMA_FIFO_UNDERFLOW)
+		if (val & LAYER3_DMA_FIFO_OVERFLOW)
 			drm_dbg(&kmb->drm,
 				"LAYER3:GL1 DMA OVERFLOW val = 0x%lx", val);
 	}
@@ -410,10 +424,10 @@ static const struct drm_driver kmb_driver = {
 	.fops = &fops,
 	DRM_GEM_CMA_DRIVER_OPS_VMAP,
 	.name = "kmb-drm",
-	.desc = "KEEMBAY DISPLAY DRIVER ",
-	.date = "20201008",
-	.major = 1,
-	.minor = 0,
+	.desc = "KEEMBAY DISPLAY DRIVER",
+	.date = DRIVER_DATE,
+	.major = DRIVER_MAJOR,
+	.minor = DRIVER_MINOR,
 };
 
 static int kmb_remove(struct platform_device *pdev)

@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <linux/mman.h>
 #include "linux/kernel.h"
 
@@ -129,13 +130,16 @@ size_t get_trans_hugepagesz(void)
 {
 	size_t size;
 	FILE *f;
+	int ret;
 
 	TEST_ASSERT(thp_configured(), "THP is not configured in host kernel");
 
 	f = fopen("/sys/kernel/mm/transparent_hugepage/hpage_pmd_size", "r");
 	TEST_ASSERT(f != NULL, "Error in opening transparent_hugepage/hpage_pmd_size");
 
-	fscanf(f, "%ld", &size);
+	ret = fscanf(f, "%ld", &size);
+	ret = fscanf(f, "%ld", &size);
+	TEST_ASSERT(ret < 1, "Error reading transparent_hugepage/hpage_pmd_size");
 	fclose(f);
 
 	return size;
@@ -166,72 +170,79 @@ size_t get_def_hugetlb_pagesz(void)
 	return 0;
 }
 
+#define ANON_FLAGS	(MAP_PRIVATE | MAP_ANONYMOUS)
+#define ANON_HUGE_FLAGS	(ANON_FLAGS | MAP_HUGETLB)
+
 const struct vm_mem_backing_src_alias *vm_mem_backing_src_alias(uint32_t i)
 {
 	static const struct vm_mem_backing_src_alias aliases[] = {
 		[VM_MEM_SRC_ANONYMOUS] = {
 			.name = "anonymous",
-			.flag = 0,
+			.flag = ANON_FLAGS,
 		},
 		[VM_MEM_SRC_ANONYMOUS_THP] = {
 			.name = "anonymous_thp",
-			.flag = 0,
+			.flag = ANON_FLAGS,
 		},
 		[VM_MEM_SRC_ANONYMOUS_HUGETLB] = {
 			.name = "anonymous_hugetlb",
-			.flag = MAP_HUGETLB,
+			.flag = ANON_HUGE_FLAGS,
 		},
 		[VM_MEM_SRC_ANONYMOUS_HUGETLB_16KB] = {
 			.name = "anonymous_hugetlb_16kb",
-			.flag = MAP_HUGETLB | MAP_HUGE_16KB,
+			.flag = ANON_HUGE_FLAGS | MAP_HUGE_16KB,
 		},
 		[VM_MEM_SRC_ANONYMOUS_HUGETLB_64KB] = {
 			.name = "anonymous_hugetlb_64kb",
-			.flag = MAP_HUGETLB | MAP_HUGE_64KB,
+			.flag = ANON_HUGE_FLAGS | MAP_HUGE_64KB,
 		},
 		[VM_MEM_SRC_ANONYMOUS_HUGETLB_512KB] = {
 			.name = "anonymous_hugetlb_512kb",
-			.flag = MAP_HUGETLB | MAP_HUGE_512KB,
+			.flag = ANON_HUGE_FLAGS | MAP_HUGE_512KB,
 		},
 		[VM_MEM_SRC_ANONYMOUS_HUGETLB_1MB] = {
 			.name = "anonymous_hugetlb_1mb",
-			.flag = MAP_HUGETLB | MAP_HUGE_1MB,
+			.flag = ANON_HUGE_FLAGS | MAP_HUGE_1MB,
 		},
 		[VM_MEM_SRC_ANONYMOUS_HUGETLB_2MB] = {
 			.name = "anonymous_hugetlb_2mb",
-			.flag = MAP_HUGETLB | MAP_HUGE_2MB,
+			.flag = ANON_HUGE_FLAGS | MAP_HUGE_2MB,
 		},
 		[VM_MEM_SRC_ANONYMOUS_HUGETLB_8MB] = {
 			.name = "anonymous_hugetlb_8mb",
-			.flag = MAP_HUGETLB | MAP_HUGE_8MB,
+			.flag = ANON_HUGE_FLAGS | MAP_HUGE_8MB,
 		},
 		[VM_MEM_SRC_ANONYMOUS_HUGETLB_16MB] = {
 			.name = "anonymous_hugetlb_16mb",
-			.flag = MAP_HUGETLB | MAP_HUGE_16MB,
+			.flag = ANON_HUGE_FLAGS | MAP_HUGE_16MB,
 		},
 		[VM_MEM_SRC_ANONYMOUS_HUGETLB_32MB] = {
 			.name = "anonymous_hugetlb_32mb",
-			.flag = MAP_HUGETLB | MAP_HUGE_32MB,
+			.flag = ANON_HUGE_FLAGS | MAP_HUGE_32MB,
 		},
 		[VM_MEM_SRC_ANONYMOUS_HUGETLB_256MB] = {
 			.name = "anonymous_hugetlb_256mb",
-			.flag = MAP_HUGETLB | MAP_HUGE_256MB,
+			.flag = ANON_HUGE_FLAGS | MAP_HUGE_256MB,
 		},
 		[VM_MEM_SRC_ANONYMOUS_HUGETLB_512MB] = {
 			.name = "anonymous_hugetlb_512mb",
-			.flag = MAP_HUGETLB | MAP_HUGE_512MB,
+			.flag = ANON_HUGE_FLAGS | MAP_HUGE_512MB,
 		},
 		[VM_MEM_SRC_ANONYMOUS_HUGETLB_1GB] = {
 			.name = "anonymous_hugetlb_1gb",
-			.flag = MAP_HUGETLB | MAP_HUGE_1GB,
+			.flag = ANON_HUGE_FLAGS | MAP_HUGE_1GB,
 		},
 		[VM_MEM_SRC_ANONYMOUS_HUGETLB_2GB] = {
 			.name = "anonymous_hugetlb_2gb",
-			.flag = MAP_HUGETLB | MAP_HUGE_2GB,
+			.flag = ANON_HUGE_FLAGS | MAP_HUGE_2GB,
 		},
 		[VM_MEM_SRC_ANONYMOUS_HUGETLB_16GB] = {
 			.name = "anonymous_hugetlb_16gb",
-			.flag = MAP_HUGETLB | MAP_HUGE_16GB,
+			.flag = ANON_HUGE_FLAGS | MAP_HUGE_16GB,
+		},
+		[VM_MEM_SRC_SHMEM] = {
+			.name = "shmem",
+			.flag = MAP_SHARED,
 		},
 	};
 	_Static_assert(ARRAY_SIZE(aliases) == NUM_SRC_TYPES,
@@ -250,6 +261,7 @@ size_t get_backing_src_pagesz(uint32_t i)
 
 	switch (i) {
 	case VM_MEM_SRC_ANONYMOUS:
+	case VM_MEM_SRC_SHMEM:
 		return getpagesize();
 	case VM_MEM_SRC_ANONYMOUS_THP:
 		return get_trans_hugepagesz();
@@ -260,13 +272,22 @@ size_t get_backing_src_pagesz(uint32_t i)
 	}
 }
 
-void backing_src_help(void)
+static void print_available_backing_src_types(const char *prefix)
 {
 	int i;
 
-	printf("Available backing src types:\n");
+	printf("%sAvailable backing src types:\n", prefix);
+
 	for (i = 0; i < NUM_SRC_TYPES; i++)
-		printf("\t%s\n", vm_mem_backing_src_alias(i)->name);
+		printf("%s    %s\n", prefix, vm_mem_backing_src_alias(i)->name);
+}
+
+void backing_src_help(const char *flag)
+{
+	printf(" %s: specify the type of memory that should be used to\n"
+	       "     back the guest data region. (default: %s)\n",
+	       flag, vm_mem_backing_src_alias(DEFAULT_VM_MEM_SRC)->name);
+	print_available_backing_src_types("     ");
 }
 
 enum vm_mem_backing_src_type parse_backing_src_type(const char *type_name)
@@ -277,7 +298,23 @@ enum vm_mem_backing_src_type parse_backing_src_type(const char *type_name)
 		if (!strcmp(type_name, vm_mem_backing_src_alias(i)->name))
 			return i;
 
-	backing_src_help();
+	print_available_backing_src_types("");
 	TEST_FAIL("Unknown backing src type: %s", type_name);
 	return -1;
+}
+
+long get_run_delay(void)
+{
+	char path[64];
+	long val[2];
+	FILE *fp;
+
+	sprintf(path, "/proc/%ld/schedstat", syscall(SYS_gettid));
+	fp = fopen(path, "r");
+	/* Return MIN_RUN_DELAY_NS upon failure just to be safe */
+	if (fscanf(fp, "%ld %ld ", &val[0], &val[1]) < 2)
+		val[1] = MIN_RUN_DELAY_NS;
+	fclose(fp);
+
+	return val[1];
 }

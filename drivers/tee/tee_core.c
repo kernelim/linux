@@ -1,15 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015-2016, Linaro Limited
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #define pr_fmt(fmt) "%s: " fmt, __func__
@@ -38,15 +29,13 @@ static DEFINE_SPINLOCK(driver_lock);
 static struct class *tee_class;
 static dev_t tee_devt;
 
-static int tee_open(struct inode *inode, struct file *filp)
+static struct tee_context *teedev_open(struct tee_device *teedev)
 {
 	int rc;
-	struct tee_device *teedev;
 	struct tee_context *ctx;
 
-	teedev = container_of(inode->i_cdev, struct tee_device, cdev);
 	if (!tee_device_get(teedev))
-		return -EINVAL;
+		return ERR_PTR(-EINVAL);
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx) {
@@ -56,17 +45,16 @@ static int tee_open(struct inode *inode, struct file *filp)
 
 	kref_init(&ctx->refcount);
 	ctx->teedev = teedev;
-	INIT_LIST_HEAD(&ctx->list_shm);
-	filp->private_data = ctx;
 	rc = teedev->desc->ops->open(ctx);
 	if (rc)
 		goto err;
 
-	return 0;
+	return ctx;
 err:
 	kfree(ctx);
 	tee_device_put(teedev);
-	return rc;
+	return ERR_PTR(rc);
+
 }
 
 void teedev_ctx_get(struct tee_context *ctx)
@@ -98,6 +86,23 @@ static void teedev_close_context(struct tee_context *ctx)
 {
 	tee_device_put(ctx->teedev);
 	teedev_ctx_put(ctx);
+}
+
+static int tee_open(struct inode *inode, struct file *filp)
+{
+	struct tee_context *ctx;
+
+	ctx = teedev_open(container_of(inode->i_cdev, struct tee_device, cdev));
+	if (IS_ERR(ctx))
+		return PTR_ERR(ctx);
+
+	/*
+	 * Default user-space behaviour is to wait for tee-supplicant
+	 * if not present for any requests in this context.
+	 */
+	ctx->supp_nowait = false;
+	filp->private_data = ctx;
+	return 0;
 }
 
 static int tee_release(struct inode *inode, struct file *filp)
@@ -227,25 +232,38 @@ static int params_from_user(struct tee_context *ctx, struct tee_param *params,
 		case TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_OUTPUT:
 		case TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INOUT:
 			/*
-			 * If we fail to get a pointer to a shared memory
-			 * object (and increase the ref count) from an
-			 * identifier we return an error. All pointers that
-			 * has been added in params have an increased ref
-			 * count. It's the callers responibility to do
-			 * tee_shm_put() on all resolved pointers.
+			 * If a NULL pointer is passed to a TA in the TEE,
+			 * the ip.c IOCTL parameters is set to TEE_MEMREF_NULL
+			 * indicating a NULL memory reference.
 			 */
-			shm = tee_shm_get_from_id(ctx, ip.c);
-			if (IS_ERR(shm))
-				return PTR_ERR(shm);
+			if (ip.c != TEE_MEMREF_NULL) {
+				/*
+				 * If we fail to get a pointer to a shared
+				 * memory object (and increase the ref count)
+				 * from an identifier we return an error. All
+				 * pointers that has been added in params have
+				 * an increased ref count. It's the callers
+				 * responibility to do tee_shm_put() on all
+				 * resolved pointers.
+				 */
+				shm = tee_shm_get_from_id(ctx, ip.c);
+				if (IS_ERR(shm))
+					return PTR_ERR(shm);
 
-			/*
-			 * Ensure offset + size does not overflow offset
-			 * and does not overflow the size of the referred
-			 * shared memory object.
-			 */
-			if ((ip.a + ip.b) < ip.a ||
-			    (ip.a + ip.b) > shm->size) {
-				tee_shm_put(shm);
+				/*
+				 * Ensure offset + size does not overflow
+				 * offset and does not overflow the size of
+				 * the referred shared memory object.
+				 */
+				if ((ip.a + ip.b) < ip.a ||
+				    (ip.a + ip.b) > shm->size) {
+					tee_shm_put(shm);
+					return -EINVAL;
+				}
+			} else if (ctx->cap_memref_null) {
+				/* Pass NULL pointer to OP-TEE */
+				shm = NULL;
+			} else {
 				return -EINVAL;
 			}
 
@@ -927,6 +945,105 @@ void *tee_get_drvdata(struct tee_device *teedev)
 	return dev_get_drvdata(&teedev->dev);
 }
 EXPORT_SYMBOL_GPL(tee_get_drvdata);
+
+struct match_dev_data {
+	struct tee_ioctl_version_data *vers;
+	const void *data;
+	int (*match)(struct tee_ioctl_version_data *, const void *);
+};
+
+static int match_dev(struct device *dev, const void *data)
+{
+	const struct match_dev_data *match_data = data;
+	struct tee_device *teedev = container_of(dev, struct tee_device, dev);
+
+	teedev->desc->ops->get_version(teedev, match_data->vers);
+	return match_data->match(match_data->vers, match_data->data);
+}
+
+struct tee_context *
+tee_client_open_context(struct tee_context *start,
+			int (*match)(struct tee_ioctl_version_data *,
+				     const void *),
+			const void *data, struct tee_ioctl_version_data *vers)
+{
+	struct device *dev = NULL;
+	struct device *put_dev = NULL;
+	struct tee_context *ctx = NULL;
+	struct tee_ioctl_version_data v;
+	struct match_dev_data match_data = { vers ? vers : &v, data, match };
+
+	if (start)
+		dev = &start->teedev->dev;
+
+	do {
+		dev = class_find_device(tee_class, dev, &match_data, match_dev);
+		if (!dev) {
+			ctx = ERR_PTR(-ENOENT);
+			break;
+		}
+
+		put_device(put_dev);
+		put_dev = dev;
+
+		ctx = teedev_open(container_of(dev, struct tee_device, dev));
+	} while (IS_ERR(ctx) && PTR_ERR(ctx) != -ENOMEM);
+
+	put_device(put_dev);
+	/*
+	 * Default behaviour for in kernel client is to not wait for
+	 * tee-supplicant if not present for any requests in this context.
+	 * Also this flag could be configured again before call to
+	 * tee_client_open_session() if any in kernel client requires
+	 * different behaviour.
+	 */
+	if (!IS_ERR(ctx))
+		ctx->supp_nowait = true;
+
+	return ctx;
+}
+EXPORT_SYMBOL_GPL(tee_client_open_context);
+
+void tee_client_close_context(struct tee_context *ctx)
+{
+	teedev_close_context(ctx);
+}
+EXPORT_SYMBOL_GPL(tee_client_close_context);
+
+void tee_client_get_version(struct tee_context *ctx,
+			    struct tee_ioctl_version_data *vers)
+{
+	ctx->teedev->desc->ops->get_version(ctx->teedev, vers);
+}
+EXPORT_SYMBOL_GPL(tee_client_get_version);
+
+int tee_client_open_session(struct tee_context *ctx,
+			    struct tee_ioctl_open_session_arg *arg,
+			    struct tee_param *param)
+{
+	if (!ctx->teedev->desc->ops->open_session)
+		return -EINVAL;
+	return ctx->teedev->desc->ops->open_session(ctx, arg, param);
+}
+EXPORT_SYMBOL_GPL(tee_client_open_session);
+
+int tee_client_close_session(struct tee_context *ctx, u32 session)
+{
+	if (!ctx->teedev->desc->ops->close_session)
+		return -EINVAL;
+	return ctx->teedev->desc->ops->close_session(ctx, session);
+}
+EXPORT_SYMBOL_GPL(tee_client_close_session);
+
+int tee_client_invoke_func(struct tee_context *ctx,
+			   struct tee_ioctl_invoke_arg *arg,
+			   struct tee_param *param)
+{
+	if (!ctx->teedev->desc->ops->invoke_func)
+		return -EINVAL;
+	return ctx->teedev->desc->ops->invoke_func(ctx, arg, param);
+}
+EXPORT_SYMBOL_GPL(tee_client_invoke_func);
 
 static int __init tee_init(void)
 {

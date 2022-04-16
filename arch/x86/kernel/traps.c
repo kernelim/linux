@@ -52,7 +52,7 @@
 #include <asm/ftrace.h>
 #include <asm/traps.h>
 #include <asm/desc.h>
-#include <asm/fpu/internal.h>
+#include <asm/fpu/api.h>
 #include <asm/cpu.h>
 #include <asm/cpu_entry_area.h>
 #include <asm/mce.h>
@@ -696,9 +696,8 @@ static __always_inline unsigned long debug_read_clear_dr6(void)
 	 * Keep it simple: clear DR6 immediately.
 	 */
 	get_debugreg(dr6, 6);
-	set_debugreg(0, 6);
-	/* Filter out all the reserved bits which are preset to 1 */
-	dr6 &= ~DR6_RESERVED;
+	set_debugreg(DR6_RESERVED, 6);
+	dr6 ^= DR6_RESERVED; /* Flip to positive polarity */
 
 	return dr6;
 }
@@ -872,9 +871,10 @@ static void math_error(struct pt_regs *regs, int error_code, int trapnr)
 	}
 
 	/*
-	 * Save the info for the exception handler and clear the error.
+	 * Synchronize the FPU register state to the memory register state
+	 * if necessary. This allows the exception handler to inspect it.
 	 */
-	fpu__save(fpu);
+	fpu_sync_fpstate(fpu);
 
 	task->thread.trap_nr	= trapnr;
 	task->thread.error_code = error_code;
@@ -910,12 +910,52 @@ do_spurious_interrupt_bug(struct pt_regs *regs, long error_code)
 	cond_local_irq_enable(regs);
 }
 
+static bool handle_xfd_event(struct pt_regs *regs)
+{
+	struct task_struct *task = current;
+	u64 xfd_err;
+	int err;
+
+	if (!IS_ENABLED(CONFIG_X86_64) || !cpu_feature_enabled(X86_FEATURE_XFD))
+		return false;
+
+	rdmsrl(MSR_IA32_XFD_ERR, xfd_err);
+	if (!xfd_err)
+		return false;
+
+	wrmsrl(MSR_IA32_XFD_ERR, 0);
+
+	/* Die if that happens in kernel space */
+	if (WARN_ON(!user_mode(regs)))
+		return false;
+
+	local_irq_enable();
+
+	err = xfd_enable_feature(xfd_err);
+
+	switch (err) {
+	case -EPERM:
+		force_sig_fault(SIGILL, ILL_ILLOPC,
+				(void __user *)uprobe_get_trap_addr(regs), task);
+		break;
+	case -EFAULT:
+		force_sig(SIGSEGV, task);
+		break;
+	}
+
+	local_irq_disable();
+	return true;
+}
+
 dotraplinkage void
 do_device_not_available(struct pt_regs *regs, long error_code)
 {
 	unsigned long cr0;
 
 	RCU_LOCKDEP_WARN(!rcu_is_watching(), "entry code didn't wake RCU");
+
+	if (handle_xfd_event(regs))
+		return;
 
 #ifdef CONFIG_MATH_EMULATION
 	if (!boot_cpu_has(X86_FEATURE_FPU) && (read_cr0() & X86_CR0_EM)) {

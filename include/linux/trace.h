@@ -31,6 +31,12 @@ struct trace_export {
 int register_ftrace_export(struct trace_export *export);
 int unregister_ftrace_export(struct trace_export *export);
 
+/* For osnoise tracer */
+int osnoise_arch_register(void);
+void osnoise_arch_unregister(void);
+void osnoise_trace_irq_entry(int id);
+void osnoise_trace_irq_exit(int id, const char *desc);
+
 #endif	/* CONFIG_TRACING */
 
 #endif	/* _LINUX_TRACE_H */

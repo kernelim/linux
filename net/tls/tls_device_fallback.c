@@ -273,7 +273,7 @@ static int fill_sg_in(struct scatterlist *sg_in,
 
 		__skb_frag_ref(frag);
 		sg_set_page(sg_in + i, skb_frag_page(frag),
-			    skb_frag_size(frag), frag->page_offset);
+			    skb_frag_size(frag), skb_frag_off(frag));
 
 		remaining -= skb_frag_size(frag);
 
@@ -429,6 +429,13 @@ struct sk_buff *tls_validate_xmit_skb(struct sock *sk,
 	return tls_sw_fallback(sk, skb);
 }
 EXPORT_SYMBOL_GPL(tls_validate_xmit_skb);
+
+struct sk_buff *tls_validate_xmit_skb_sw(struct sock *sk,
+					 struct net_device *dev,
+					 struct sk_buff *skb)
+{
+	return tls_sw_fallback(sk, skb);
+}
 
 struct sk_buff *tls_encrypt_skb(struct sk_buff *skb)
 {

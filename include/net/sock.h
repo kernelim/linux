@@ -295,6 +295,7 @@ struct bpf_local_storage;
   *	@sk_priority: %SO_PRIORITY setting
   *	@sk_type: socket type (%SOCK_STREAM, etc)
   *	@sk_protocol: which protocol this socket belongs in this network family
+  *	@sk_peer_lock: lock protecting @sk_peer_pid and @sk_peer_cred
   *	@sk_peer_pid: &struct pid for this socket's peer
   *	@sk_peer_cred: %SO_PEERCRED setting
   *	@sk_rcvlowat: %SO_RCVLOWAT setting
@@ -516,7 +517,7 @@ struct sock {
 	RH_KABI_USE(2, struct sk_buff                  *sk_tx_skb_cache)
 	RH_KABI_USE_SPLIT(3, u8			sk_prefer_busy_poll,
 			     u16		sk_busy_poll_budget)
-	RH_KABI_RESERVE(4)
+	RH_KABI_USE(4, spinlock_t		sk_peer_lock)
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)
 	RH_KABI_RESERVE(7)
@@ -1112,6 +1113,7 @@ struct inet_hashinfo;
 struct raw_hashinfo;
 struct smc_hashinfo;
 struct module;
+struct sk_psock;
 
 /*
  * caches using SLAB_TYPESAFE_BY_RCU should let .next pointer from nulls nodes
@@ -1245,8 +1247,11 @@ struct proto {
 #endif
 	int			(*diag_destroy)(struct sock *sk, int err);
 
-	RH_KABI_RESERVE(1)
-	RH_KABI_RESERVE(2)
+	RH_KABI_USE(1, bool	(*bpf_bypass_getsockopt)(int level,
+							 int optname))
+	RH_KABI_USE(2, int	(*psock_update_sk_prot)(struct sock *sk,
+							struct sk_psock *psock,
+							bool restore))
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
 	RH_KABI_RESERVE(5)
@@ -1619,7 +1624,37 @@ void release_sock(struct sock *sk);
 				SINGLE_DEPTH_NESTING)
 #define bh_unlock_sock(__sk)	spin_unlock(&((__sk)->sk_lock.slock))
 
-bool lock_sock_fast(struct sock *sk);
+bool __lock_sock_fast(struct sock *sk) __acquires(&sk->sk_lock.slock);
+
+/**
+ * lock_sock_fast - fast version of lock_sock
+ * @sk: socket
+ *
+ * This version should be used for very small section, where process wont block
+ * return false if fast path is taken:
+ *
+ *   sk_lock.slock locked, owned = 0, BH disabled
+ *
+ * return true if slow path is taken:
+ *
+ *   sk_lock.slock unlocked, owned = 1, BH enabled
+ */
+static inline bool lock_sock_fast(struct sock *sk)
+{
+	/* The sk_lock has mutex_lock() semantics here. */
+	mutex_acquire(&sk->sk_lock.dep_map, 0, 0, _RET_IP_);
+
+	return __lock_sock_fast(sk);
+}
+
+/* fast socket lock variant for caller already holding a [different] socket lock */
+static inline bool lock_sock_fast_nested(struct sock *sk)
+{
+	mutex_acquire(&sk->sk_lock.dep_map, SINGLE_DEPTH_NESTING, 0, _RET_IP_);
+
+	return __lock_sock_fast(sk);
+}
+
 /**
  * unlock_sock_fast - complement of lock_sock_fast
  * @sk: socket
@@ -1629,11 +1664,15 @@ bool lock_sock_fast(struct sock *sk);
  * If slow mode is on, we call regular release_sock()
  */
 static inline void unlock_sock_fast(struct sock *sk, bool slow)
+	__releases(&sk->sk_lock.slock)
 {
-	if (slow)
+	if (slow) {
 		release_sock(sk);
-	else
+		__release(&sk->sk_lock.slock);
+	} else {
+		mutex_release(&sk->sk_lock.dep_map, _RET_IP_);
 		spin_unlock_bh(&sk->sk_lock.slock);
+	}
 }
 
 /* Used by processes to "lock" a socket state, so that
@@ -2267,6 +2306,8 @@ static inline int sock_error(struct sock *sk)
 	err = xchg(&sk->sk_err, 0);
 	return -err;
 }
+
+void sk_error_report(struct sock *sk);
 
 static inline unsigned long sock_wspace(struct sock *sk)
 {

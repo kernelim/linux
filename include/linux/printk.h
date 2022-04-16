@@ -7,9 +7,12 @@
 #include <linux/kern_levels.h>
 #include <linux/linkage.h>
 #include <linux/cache.h>
+#include <linux/ratelimit_types.h>
 
 extern const char linux_banner[];
 extern const char linux_proc_banner[];
+
+extern int oops_in_progress;	/* If set, an oops, panic(), BUG() or die() is in progress */
 
 #define PRINTK_MAX_SINGLE_HEADER_LEN 2
 
@@ -158,10 +161,12 @@ static inline void printk_nmi_direct_enter(void) { }
 static inline void printk_nmi_direct_exit(void) { }
 #endif /* PRINTK_NMI */
 
+struct dev_printk_info;
+
 #ifdef CONFIG_PRINTK
-asmlinkage __printf(5, 0)
+asmlinkage __printf(4, 0)
 int vprintk_emit(int facility, int level,
-		 const char *dict, size_t dictlen,
+		 const struct dev_printk_info *dev_info,
 		 const char *fmt, va_list args);
 
 asmlinkage __printf(1, 0)
@@ -277,6 +282,47 @@ static inline void printk_safe_flush_on_panic(void)
 }
 #endif
 
+#ifdef CONFIG_SMP
+extern int __printk_cpu_trylock(void);
+extern void __printk_wait_on_cpu_lock(void);
+extern void __printk_cpu_unlock(void);
+
+/**
+ * printk_cpu_lock_irqsave() - Acquire the printk cpu-reentrant spinning
+ *                             lock and disable interrupts.
+ * @flags: Stack-allocated storage for saving local interrupt state,
+ *         to be passed to printk_cpu_unlock_irqrestore().
+ *
+ * If the lock is owned by another CPU, spin until it becomes available.
+ * Interrupts are restored while spinning.
+ */
+#define printk_cpu_lock_irqsave(flags)		\
+	for (;;) {				\
+		local_irq_save(flags);		\
+		if (__printk_cpu_trylock())	\
+			break;			\
+		local_irq_restore(flags);	\
+		__printk_wait_on_cpu_lock();	\
+	}
+
+/**
+ * printk_cpu_unlock_irqrestore() - Release the printk cpu-reentrant spinning
+ *                                  lock and restore interrupts.
+ * @flags: Caller's saved interrupt state, from printk_cpu_lock_irqsave().
+ */
+#define printk_cpu_unlock_irqrestore(flags)	\
+	do {					\
+		__printk_cpu_unlock();		\
+		local_irq_restore(flags);	\
+	} while (0)				\
+
+#else
+
+#define printk_cpu_lock_irqsave(flags) ((void)flags)
+#define printk_cpu_unlock_irqrestore(flags) ((void)flags)
+
+#endif /* CONFIG_SMP */
+
 extern int kptr_restrict;
 
 #ifndef pr_fmt
@@ -385,8 +431,7 @@ extern int kptr_restrict;
 	printk_once(KERN_NOTICE pr_fmt(fmt), ##__VA_ARGS__)
 #define pr_info_once(fmt, ...)					\
 	printk_once(KERN_INFO pr_fmt(fmt), ##__VA_ARGS__)
-#define pr_cont_once(fmt, ...)					\
-	printk_once(KERN_CONT pr_fmt(fmt), ##__VA_ARGS__)
+/* no pr_cont_once, don't do that... */
 
 #if defined(DEBUG)
 #define pr_devel_once(fmt, ...)					\

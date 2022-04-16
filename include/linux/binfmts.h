@@ -27,24 +27,36 @@ struct linux_binprm {
 	unsigned long p; /* current top of mem */
 	unsigned int
 		/*
-		 * True after the bprm_set_creds hook has been called once
-		 * (multiple calls can be made via prepare_binprm() for
-		 * binfmt_script/misc).
-		 */
-		called_set_creds:1,
-		/*
+		 * DEPRECATED
 		 * True if most recent call to the commoncaps bprm_set_creds
 		 * hook (due to multiple prepare_binprm() calls from the
 		 * binfmt_script/misc handlers) resulted in elevated
 		 * privileges.
+		 * NOTE: in a perfect world we'd use RH_KABI_DEPRECATE on
+		 * called_set_creds but it does not work on bitfields declared
+		 * using the comma separator. The best we can do is rename the
+		 * field.
 		 */
-		cap_elevated:1,
+		RH_KABI_RENAME(called_set_creds, deprecated_called_set_creds):1,
 		/*
-		 * Set by bprm_set_creds hook to indicate a privilege-gaining
-		 * exec has happened. Used to sanitize execution environment
-		 * and to set AT_SECURE auxv for glibc.
+		 * True if most recent call to cap_bprm_set_creds
+		 * resulted in elevated privileges.
+		 */
+		RH_KABI_RENAME(cap_elevated, active_secureexec):1,
+		/*
+		 * Set by bprm_creds_for_exec hook to indicate a
+		 * privilege-gaining exec has happened. Used to set
+		 * AT_SECURE auxv for glibc.
 		 */
 		secureexec:1;
+		/*
+		 * Set when errors can no longer be returned to the
+		 * original userspace.
+		 */
+		RH_KABI_FILL_HOLE(unsigned int called_exec_mmap:1)
+		RH_KABI_FILL_HOLE(unsigned int point_of_no_return:1)
+		/* It is safe to use the creds of a script (see binfmt_misc) */
+		RH_KABI_FILL_HOLE(unsigned int preserve_creds:1)
 #ifdef __alpha__
 	unsigned int taso:1;
 #endif
@@ -116,10 +128,9 @@ static inline void insert_binfmt(struct linux_binfmt *fmt)
 
 extern void unregister_binfmt(struct linux_binfmt *);
 
-extern int prepare_binprm(struct linux_binprm *);
 extern int __must_check remove_arg_zero(struct linux_binprm *);
 extern int search_binary_handler(struct linux_binprm *);
-extern int flush_old_exec(struct linux_binprm * bprm);
+extern int begin_new_exec(struct linux_binprm * bprm);
 extern void setup_new_exec(struct linux_binprm * bprm);
 extern void finalize_exec(struct linux_binprm *bprm);
 extern void would_dump(struct linux_binprm *, struct file *);
@@ -139,8 +150,6 @@ extern int transfer_args_to_stack(struct linux_binprm *bprm,
 extern int bprm_change_interp(const char *interp, struct linux_binprm *bprm);
 extern int copy_strings_kernel(int argc, const char *const *argv,
 			       struct linux_binprm *bprm);
-extern int prepare_bprm_creds(struct linux_binprm *bprm);
-extern void install_exec_creds(struct linux_binprm *bprm);
 extern void set_binfmt(struct linux_binfmt *new);
 extern ssize_t read_code(struct file *, unsigned long, loff_t, size_t);
 

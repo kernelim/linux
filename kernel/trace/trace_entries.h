@@ -369,3 +369,48 @@ FTRACE_ENTRY(hwlat, hwlat_entry,
 
 	FILTER_OTHER
 );
+
+FTRACE_ENTRY(osnoise, osnoise_entry,
+
+	TRACE_OSNOISE,
+
+	F_STRUCT(
+		__field(	u64,			noise		)
+		__field(	u64,			runtime		)
+		__field(	u64,			max_sample	)
+		__field(	unsigned int,		hw_count	)
+		__field(	unsigned int,		nmi_count	)
+		__field(	unsigned int,		irq_count	)
+		__field(	unsigned int,		softirq_count	)
+		__field(	unsigned int,		thread_count	)
+	),
+
+	F_printk("noise:%llu\tmax_sample:%llu\thw:%u\tnmi:%u\tirq:%u\tsoftirq:%u\tthread:%u\n",
+		 __entry->noise,
+		 __entry->max_sample,
+		 __entry->hw_count,
+		 __entry->nmi_count,
+		 __entry->irq_count,
+		 __entry->softirq_count,
+		 __entry->thread_count),
+
+	FILTER_OTHER
+);
+
+FTRACE_ENTRY(timerlat, timerlat_entry,
+
+	TRACE_TIMERLAT,
+
+	F_STRUCT(
+		__field(	unsigned int,		seqnum		)
+		__field(	int,			context		)
+		__field(	u64,			timer_latency	)
+	),
+
+	F_printk("seq:%u\tcontext:%d\ttimer_latency:%llu\n",
+		 __entry->seqnum,
+		 __entry->context,
+		 __entry->timer_latency),
+
+	FILTER_OTHER
+);

@@ -911,8 +911,11 @@ static inline u16 get_cqe_flow_tag(struct mlx5_cqe64 *cqe)
 	return be32_to_cpu(cqe->sop_drop_qpn) & 0xFFF;
 }
 
-#define MLX5_MPWQE_LOG_NUM_STRIDES_BASE	(9)
-#define MLX5_MPWQE_LOG_STRIDE_SZ_BASE	(6)
+#define MLX5_MPWQE_LOG_NUM_STRIDES_EXT_BASE	3
+#define MLX5_MPWQE_LOG_NUM_STRIDES_BASE		9
+#define MLX5_MPWQE_LOG_NUM_STRIDES_MAX		16
+#define MLX5_MPWQE_LOG_STRIDE_SZ_BASE		6
+#define MLX5_MPWQE_LOG_STRIDE_SZ_MAX		13
 
 struct mpwrq_cqe_bc {
 	__be16	filler_consumed_strides;
@@ -1035,7 +1038,7 @@ enum {
 struct mlx5_mkey_seg {
 	/* This is a two bit field occupying bits 31-30.
 	 * bit 31 is always 0,
-	 * bit 30 is zero for regular MRs and 1 (e.g free) for UMRs that do not have tanslation
+	 * bit 30 is zero for regular MRs and 1 (e.g free) for UMRs that do not have translation
 	 */
 	u8		status;
 	u8		pcie_control;
@@ -1142,6 +1145,8 @@ enum mlx5_flex_parser_protos {
 	MLX5_FLEX_PROTO_GENEVE	      = 1 << 3,
 	MLX5_FLEX_PROTO_CW_MPLS_GRE   = 1 << 4,
 	MLX5_FLEX_PROTO_CW_MPLS_UDP   = 1 << 5,
+	MLX5_FLEX_PROTO_ICMP	      = 1 << 8,
+	MLX5_FLEX_PROTO_ICMPV6	      = 1 << 9,
 };
 
 /* MLX5 DEV CAPs */
@@ -1174,6 +1179,7 @@ enum mlx5_cap_type {
 	MLX5_CAP_VDPA_EMULATION = 0x13,
 	MLX5_CAP_DEV_EVENT = 0x14,
 	MLX5_CAP_IPSEC,
+	MLX5_CAP_GENERAL_2 = 0x20,
 	/* NUM OF CAP Types */
 	MLX5_CAP_NUM
 };
@@ -1214,6 +1220,15 @@ enum mlx5_qcam_feature_groups {
 
 #define MLX5_CAP_GEN_MAX(mdev, cap) \
 	MLX5_GET(cmd_hca_cap, mdev->caps.hca_max[MLX5_CAP_GENERAL], cap)
+
+#define MLX5_CAP_GEN_2(mdev, cap) \
+	MLX5_GET(cmd_hca_cap_2, mdev->caps.hca_cur[MLX5_CAP_GENERAL_2], cap)
+
+#define MLX5_CAP_GEN_2_64(mdev, cap) \
+	MLX5_GET64(cmd_hca_cap_2, mdev->caps.hca_cur[MLX5_CAP_GENERAL_2], cap)
+
+#define MLX5_CAP_GEN_2_MAX(mdev, cap) \
+	MLX5_GET(cmd_hca_cap_2, mdev->caps.hca_max[MLX5_CAP_GENERAL_2], cap)
 
 #define MLX5_CAP_ETH(mdev, cap) \
 	MLX5_GET(per_protocol_networking_offload_caps,\

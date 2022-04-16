@@ -19,7 +19,7 @@ union thread_union;
  * _adding_ to the beginning of the run-queue has
  * a separate lock).
  */
-extern rwlock_t tasklist_lock;
+extern qrwlock_t tasklist_lock;
 extern spinlock_t mmlist_lock;
 
 extern union thread_union init_thread_union;

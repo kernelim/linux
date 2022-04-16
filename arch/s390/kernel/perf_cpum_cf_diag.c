@@ -338,7 +338,7 @@ static size_t cf_diag_ctrset_size(enum cpumf_ctr_set ctrset,
 	case CPUMF_CTR_SET_CRYPTO:
 		if (info->csvn >= 1 && info->csvn <= 5)
 			ctrset_size = 16;
-		else if (info->csvn == 6)
+		else if (info->csvn == 6 || info->csvn == 7)
 			ctrset_size = 20;
 		break;
 	case CPUMF_CTR_SET_EXT:
@@ -348,7 +348,7 @@ static size_t cf_diag_ctrset_size(enum cpumf_ctr_set ctrset,
 			ctrset_size = 48;
 		else if (info->csvn >= 3 && info->csvn <= 5)
 			ctrset_size = 128;
-		else if (info->csvn == 6)
+		else if (info->csvn == 6 || info->csvn == 7)
 			ctrset_size = 160;
 		break;
 	case CPUMF_CTR_SET_MT_DIAG:

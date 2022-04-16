@@ -98,7 +98,7 @@ static void facility_mismatch(void)
 	sclp_early_printk("The Linux kernel requires more recent processor hardware\n");
 	print_machine_type();
 	print_missing_facilities();
-	disabled_wait(0x8badcccc);
+	disabled_wait();
 }
 
 void verify_facilities(void)

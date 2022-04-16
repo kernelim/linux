@@ -1818,9 +1818,7 @@ static int __init mtk_init(struct net_device *dev)
 	const char *mac_addr;
 	int err;
 
-	mac_addr = of_get_mac_address(mac->of_node);
-	if (mac_addr)
-		ether_addr_copy(dev->dev_addr, mac_addr);
+	mac_addr = of_get_mac_address(mac->of_node, dev->dev_addr);
 
 	/* If the mac address is invalid, use random mac address  */
 	if (!is_valid_ether_addr(dev->dev_addr)) {

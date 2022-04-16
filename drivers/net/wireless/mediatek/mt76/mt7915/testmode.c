@@ -166,6 +166,22 @@ mt7915_tm_set_slot_time(struct mt7915_phy *phy, u8 slot_time, u8 sifs)
 }
 
 static int
+mt7915_tm_set_tam_arb(struct mt7915_phy *phy, bool enable, bool mu)
+{
+	struct mt7915_dev *dev = phy->dev;
+	u32 op_mode;
+
+	if (!enable)
+		op_mode = TAM_ARB_OP_MODE_NORMAL;
+	else if (mu)
+		op_mode = TAM_ARB_OP_MODE_TEST;
+	else
+		op_mode = TAM_ARB_OP_MODE_FORCE_SU;
+
+	return mt7915_mcu_set_muru_ctrl(dev, MURU_SET_ARB_OP_MODE, op_mode);
+}
+
+static int
 mt7915_tm_set_wmm_qid(struct mt7915_dev *dev, u8 qid, u8 aifs, u8 cw_min,
 		      u16 cw_max, u16 txop)
 {
@@ -345,16 +361,15 @@ mt7915_tm_reg_backup_restore(struct mt7915_phy *phy)
 		return;
 	}
 
-	if (b)
-		return;
+	if (!b) {
+		b = devm_kzalloc(dev->mt76.dev, 4 * n_regs, GFP_KERNEL);
+		if (!b)
+			return;
 
-	b = devm_kzalloc(dev->mt76.dev, 4 * n_regs, GFP_KERNEL);
-	if (!b)
-		return;
-
-	phy->test.reg_backup = b;
-	for (i = 0; i < n_regs; i++)
-		b[i] = mt76_rr(dev, reg_backup_list[i].band[ext_phy]);
+		phy->test.reg_backup = b;
+		for (i = 0; i < n_regs; i++)
+			b[i] = mt76_rr(dev, reg_backup_list[i].band[ext_phy]);
+	}
 
 	mt76_clear(dev, MT_AGG_PCR0(ext_phy, 0), MT_AGG_PCR0_MM_PROT |
 		   MT_AGG_PCR0_GF_PROT | MT_AGG_PCR0_ERP_PROT |
@@ -397,6 +412,10 @@ mt7915_tm_init(struct mt7915_phy *phy, bool en)
 	mt7915_tm_set_trx(phy, TM_MAC_TXRX, !en);
 
 	mt7915_mcu_add_bss_info(phy, phy->monitor_vif, en);
+	mt7915_mcu_add_sta(dev, phy->monitor_vif, NULL, en);
+
+	if (!en)
+		mt7915_tm_set_tam_arb(phy, en, 0);
 }
 
 static void
@@ -438,6 +457,9 @@ mt7915_tm_set_tx_frames(struct mt7915_phy *phy, bool en)
 		}
 	}
 
+	mt7915_tm_set_tam_arb(phy, en,
+			      td->tx_rate_mode == MT76_TM_TX_MODE_HE_MU);
+
 	/* if all three params are set, duty_cycle will be ignored */
 	if (duty_cycle && tx_time && !ipg) {
 		ipg = tx_time * 100 / duty_cycle - tx_time;
@@ -464,10 +486,17 @@ mt7915_tm_set_tx_frames(struct mt7915_phy *phy, bool en)
 static void
 mt7915_tm_set_rx_frames(struct mt7915_phy *phy, bool en)
 {
-	if (en)
+	mt7915_tm_set_trx(phy, TM_MAC_RX_RXV, false);
+
+	if (en) {
+		struct mt7915_dev *dev = phy->dev;
+
 		mt7915_tm_update_channel(phy);
 
-	mt7915_tm_set_trx(phy, TM_MAC_RX_RXV, en);
+		/* read-clear */
+		mt76_rr(dev, MT_MIB_SDR3(phy != &dev->phy));
+		mt7915_tm_set_trx(phy, TM_MAC_RX_RXV, en);
+	}
 }
 
 static int
@@ -690,7 +719,11 @@ static int
 mt7915_tm_dump_stats(struct mt76_phy *mphy, struct sk_buff *msg)
 {
 	struct mt7915_phy *phy = mphy->priv;
+	struct mt7915_dev *dev = phy->dev;
+	bool ext_phy = phy != &dev->phy;
+	enum mt76_rxq_id q;
 	void *rx, *rssi;
+	u16 fcs_err;
 	int i;
 
 	rx = nla_nest_start(msg, MT76_TM_STATS_ATTR_LAST_RX);
@@ -734,6 +767,12 @@ mt7915_tm_dump_stats(struct mt76_phy *mphy, struct sk_buff *msg)
 		return -ENOMEM;
 
 	nla_nest_end(msg, rx);
+
+	fcs_err = mt76_get_field(dev, MT_MIB_SDR3(ext_phy),
+				 MT_MIB_SDR3_FCS_ERR_MASK);
+	q = ext_phy ? MT_RXQ_EXT : MT_RXQ_MAIN;
+	mphy->test.rx_stats.packets[q] += fcs_err;
+	mphy->test.rx_stats.fcs_error[q] += fcs_err;
 
 	return 0;
 }

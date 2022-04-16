@@ -254,7 +254,9 @@ static int mm_fault_error(struct pt_regs *regs, unsigned long addr,
 static bool bad_kernel_fault(bool is_exec, unsigned long error_code,
 			     unsigned long address)
 {
-	if (is_exec && (error_code & (DSISR_NOEXEC_OR_G | DSISR_KEYFAULT))) {
+	/* NX faults set DSISR_PROTFAULT on the 8xx, DSISR_NOEXEC_OR_G on others */
+	if (is_exec && (error_code & (DSISR_NOEXEC_OR_G | DSISR_KEYFAULT |
+				      DSISR_PROTFAULT))) {
 		printk_ratelimited(KERN_CRIT "kernel tried to execute"
 				   " exec-protected page (%lx) -"
 				   "exploit attempt? (uid: %d)\n",
@@ -383,9 +385,22 @@ static inline void cmo_account_page_fault(void)
 static inline void cmo_account_page_fault(void) { }
 #endif /* CONFIG_PPC_SMLPAR */
 
-#ifdef CONFIG_PPC_BOOK3S
-static void sanity_check_fault(bool is_write, unsigned long error_code)
+static void sanity_check_fault(bool is_write, bool is_user,
+			       unsigned long error_code, unsigned long address)
 {
+	/*
+	 * Userspace trying to access kernel address, we get PROTFAULT for that.
+	 */
+	if (is_user && address >= TASK_SIZE) {
+		pr_crit_ratelimited("%s[%d]: User access of kernel address (%lx) - exploit attempt? (uid: %d)\n",
+				   current->comm, current->pid, address,
+				   from_kuid(&init_user_ns, current_uid()));
+		return;
+	}
+
+	if (!IS_ENABLED(CONFIG_PPC_BOOK3S))
+		return;
+
 	/*
 	 * For hash translation mode, we should never get a
 	 * PROTFAULT. Any update to pte to reduce access will result in us
@@ -415,12 +430,11 @@ static void sanity_check_fault(bool is_write, unsigned long error_code)
 	 * For radix, we can get prot fault for autonuma case, because radix
 	 * page table will have them marked noaccess for user.
 	 */
-	if (!radix_enabled() && !is_write)
-		WARN_ON_ONCE(error_code & DSISR_PROTFAULT);
+	if (radix_enabled() || is_write)
+		return;
+
+	WARN_ON_ONCE(error_code & DSISR_PROTFAULT);
 }
-#else
-static void sanity_check_fault(bool is_write, unsigned long error_code) { }
-#endif /* CONFIG_PPC_BOOK3S */
 
 /*
  * Define the correct "is_write" bit in error_code based
@@ -477,7 +491,7 @@ static int __do_page_fault(struct pt_regs *regs, unsigned long address,
 	}
 
 	/* Additional sanity check(s) */
-	sanity_check_fault(is_write, error_code);
+	sanity_check_fault(is_write, is_user, error_code, address);
 
 	/*
 	 * The kernel should never take an execute fault nor should it

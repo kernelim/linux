@@ -100,6 +100,7 @@
 #define PF_SB_ATQT				0x0022FE00
 #define PF_SB_ATQT_ATQT_S			0
 #define PF_SB_ATQT_ATQT_M			ICE_M(0x3FF, 0)
+#define PF_SB_REM_DEV_CTL			0x002300F0
 #define PRTDCB_GENC				0x00083000
 #define PRTDCB_GENC_PFCLDA_S			16
 #define PRTDCB_GENC_PFCLDA_M			ICE_M(0xFFFF, 16)
@@ -163,8 +164,6 @@
 #define VPGEN_VFRSTAT_VFRD_M			BIT(0)
 #define VPGEN_VFRTRIG(_VF)			(0x00090000 + ((_VF) * 4))
 #define VPGEN_VFRTRIG_VFSWR_M			BIT(0)
-#define PFHMC_ERRORDATA				0x00520500
-#define PFHMC_ERRORINFO				0x00520400
 #define GLINT_CTL				0x0016CC54
 #define GLINT_CTL_DIS_AUTOMASK_M		BIT(0)
 #define GLINT_CTL_ITR_GRAN_200_S		16
@@ -183,6 +182,8 @@
 #define GLINT_DYN_CTL_ITR_INDX_M		ICE_M(0x3, 3)
 #define GLINT_DYN_CTL_INTERVAL_S		5
 #define GLINT_DYN_CTL_INTERVAL_M		ICE_M(0xFFF, 5)
+#define GLINT_DYN_CTL_SW_ITR_INDX_ENA_M		BIT(24)
+#define GLINT_DYN_CTL_SW_ITR_INDX_S		25
 #define GLINT_DYN_CTL_SW_ITR_INDX_M		ICE_M(0x3, 25)
 #define GLINT_DYN_CTL_WB_ON_ITR_M		BIT(30)
 #define GLINT_DYN_CTL_INTENA_MSK_M		BIT(31)
@@ -214,6 +215,7 @@
 #define PFINT_OICR_GRST_M			BIT(20)
 #define PFINT_OICR_PCI_EXCEPTION_M		BIT(21)
 #define PFINT_OICR_HMC_ERR_M			BIT(26)
+#define PFINT_OICR_PE_PUSH_M			BIT(27)
 #define PFINT_OICR_PE_CRITERR_M			BIT(28)
 #define PFINT_OICR_VFLR_M			BIT(29)
 #define PFINT_OICR_SWINT_M			BIT(31)
@@ -439,6 +441,10 @@
 #define GLV_UPRCL(_i)				(0x003B2000 + ((_i) * 8))
 #define GLV_UPTCL(_i)				(0x0030A000 + ((_i) * 8))
 #define PRTRPB_RDPC				0x000AC260
+#define GLHH_ART_CTL				0x000A41D4
+#define GLHH_ART_CTL_ACTIVE_M			BIT(0)
+#define GLHH_ART_TIME_H				0x000A41D8
+#define GLHH_ART_TIME_L				0x000A41DC
 #define GLTSYN_AUX_IN_0(_i)			(0x000889D8 + ((_i) * 4))
 #define GLTSYN_AUX_IN_0_INT_ENA_M		BIT(4)
 #define GLTSYN_AUX_OUT_0(_i)			(0x00088998 + ((_i) * 4))
@@ -451,6 +457,8 @@
 #define GLTSYN_ENA_TSYN_ENA_M			BIT(0)
 #define GLTSYN_EVNT_H_0(_i)			(0x00088970 + ((_i) * 4))
 #define GLTSYN_EVNT_L_0(_i)			(0x00088968 + ((_i) * 4))
+#define GLTSYN_HHTIME_H(_i)			(0x00088900 + ((_i) * 4))
+#define GLTSYN_HHTIME_L(_i)			(0x000888F8 + ((_i) * 4))
 #define GLTSYN_INCVAL_H(_i)			(0x00088920 + ((_i) * 4))
 #define GLTSYN_INCVAL_L(_i)			(0x00088918 + ((_i) * 4))
 #define GLTSYN_SHADJ_H(_i)			(0x00088910 + ((_i) * 4))
@@ -467,6 +475,8 @@
 #define GLTSYN_TGT_L_0(_i)			(0x00088928 + ((_i) * 4))
 #define GLTSYN_TIME_H(_i)			(0x000888D8 + ((_i) * 4))
 #define GLTSYN_TIME_L(_i)			(0x000888D0 + ((_i) * 4))
+#define PFHH_SEM				0x000A4200 /* Reset Source: PFR */
+#define PFHH_SEM_BUSY_M				BIT(0)
 #define PFTSYN_SEM				0x00088880
 #define PFTSYN_SEM_BUSY_M			BIT(0)
 #define VSIQF_FD_CNT(_VSI)			(0x00464000 + ((_VSI) * 4))

@@ -879,7 +879,7 @@ static void mlx5_ib_set_rule_source_port(struct mlx5_ib_dev *dev,
 				    misc_parameters_2);
 
 		MLX5_SET(fte_match_set_misc2, misc, metadata_reg_c_0,
-			 mlx5_eswitch_get_vport_metadata_for_match(esw,
+			 mlx5_eswitch_get_vport_metadata_for_match(rep->esw,
 								   rep->vport));
 		misc = MLX5_ADDR_OF(fte_match_param, spec->match_criteria,
 				    misc_parameters_2);
@@ -2285,6 +2285,7 @@ static int mlx5_ib_flow_action_create_packet_reformat_ctx(
 	u8 ft_type, u8 dv_prt,
 	void *in, size_t len)
 {
+	struct mlx5_pkt_reformat_params reformat_params;
 	enum mlx5_flow_namespace_type namespace;
 	u8 prm_prt;
 	int ret;
@@ -2297,9 +2298,13 @@ static int mlx5_ib_flow_action_create_packet_reformat_ctx(
 	if (ret)
 		return ret;
 
+	memset(&reformat_params, 0, sizeof(reformat_params));
+	reformat_params.type = prm_prt;
+	reformat_params.size = len;
+	reformat_params.data = in;
 	maction->flow_action_raw.pkt_reformat =
-		mlx5_packet_reformat_alloc(dev->mdev, prm_prt, len,
-					   in, namespace);
+		mlx5_packet_reformat_alloc(dev->mdev, &reformat_params,
+					   namespace);
 	if (IS_ERR(maction->flow_action_raw.pkt_reformat)) {
 		ret = PTR_ERR(maction->flow_action_raw.pkt_reformat);
 		return ret;

@@ -125,12 +125,33 @@ static void pnv_setup_rfi_flush(void)
 			type = L1D_FLUSH_ORI;
 	}
 
+	/*
+	 * The issues addressed by the entry and uaccess flush don't affect P7
+	 * or P8, so on bare metal disable them explicitly in case firmware does
+	 * not include the features to disable them. POWER9 and newer processors
+	 * should have the appropriate firmware flags.
+	 */
+	if (pvr_version_is(PVR_POWER7) || pvr_version_is(PVR_POWER7p) ||
+	    pvr_version_is(PVR_POWER8E) || pvr_version_is(PVR_POWER8NVL) ||
+	    pvr_version_is(PVR_POWER8)) {
+		security_ftr_clear(SEC_FTR_L1D_FLUSH_ENTRY);
+		security_ftr_clear(SEC_FTR_L1D_FLUSH_UACCESS);
+	}
+
 	enable = security_ftr_enabled(SEC_FTR_FAVOUR_SECURITY) && \
 		 (security_ftr_enabled(SEC_FTR_L1D_FLUSH_PR)   || \
 		  security_ftr_enabled(SEC_FTR_L1D_FLUSH_HV));
 
 	setup_rfi_flush(type, enable);
 	setup_count_cache_flush();
+
+	enable = security_ftr_enabled(SEC_FTR_FAVOUR_SECURITY) &&
+		 security_ftr_enabled(SEC_FTR_L1D_FLUSH_ENTRY);
+	setup_entry_flush(enable);
+
+	enable = security_ftr_enabled(SEC_FTR_FAVOUR_SECURITY) &&
+		 security_ftr_enabled(SEC_FTR_L1D_FLUSH_UACCESS);
+	setup_uaccess_flush(enable);
 }
 
 static void __init pnv_setup_arch(void)

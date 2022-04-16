@@ -42,13 +42,17 @@
 #include "inc/hw/dmcu.h"
 #include "dml/display_mode_lib.h"
 
-#define DC_VER "3.2.122"
+/* forward declaration */
+struct aux_payload;
+
+#define DC_VER "3.2.141"
 
 #define MAX_SURFACES 3
 #define MAX_PLANES 6
 #define MAX_STREAMS 6
 #define MAX_SINKS_PER_LINK 4
 #define MIN_VIEWPORT_SIZE 12
+#define MAX_NUM_EDP 2
 
 /*******************************************************************************
  * Display Core Interfaces
@@ -151,6 +155,8 @@ struct dc_caps {
 	uint32_t max_links;
 	uint32_t max_audios;
 	uint32_t max_slave_planes;
+	uint32_t max_slave_yuv_planes;
+	uint32_t max_slave_rgb_planes;
 	uint32_t max_planes;
 	uint32_t max_downscale_ratio;
 	uint32_t i2c_speed_in_khz;
@@ -177,6 +183,8 @@ struct dc_caps {
 	unsigned int cursor_cache_size;
 	struct dc_plane_cap planes[MAX_PLANES];
 	struct dc_color_caps color;
+	bool vbios_lttpr_aware;
+	bool vbios_lttpr_enable;
 };
 
 struct dc_bug_wa {
@@ -287,20 +295,25 @@ struct dc_config {
 	bool gpu_vm_support;
 	bool disable_disp_pll_sharing;
 	bool fbc_support;
-	bool optimize_edp_link_rate;
 	bool disable_fractional_pwm;
 	bool allow_seamless_boot_optimization;
 	bool power_down_display_on_boot;
 	bool edp_not_connected;
+	bool edp_no_power_sequencing;
 	bool force_enum_edp;
 	bool forced_clocks;
 	bool allow_lttpr_non_transparent_mode;
 	bool multi_mon_pp_mclk_switch;
 	bool disable_dmcu;
 	bool enable_4to1MPC;
+	bool allow_edp_hotplug_detection;
 #if defined(CONFIG_DRM_AMD_DC_DCN)
 	bool clamp_min_dcfclk;
 #endif
+	uint64_t vblank_alignment_dto_params;
+	uint8_t  vblank_alignment_max_frame_time_diff;
+	bool is_asymmetric_memory;
+	bool is_single_rank_dimm;
 };
 
 enum visual_confirm {
@@ -309,6 +322,7 @@ enum visual_confirm {
 	VISUAL_CONFIRM_HDR = 2,
 	VISUAL_CONFIRM_MPCTREE = 4,
 	VISUAL_CONFIRM_PSR = 5,
+	VISUAL_CONFIRM_SWIZZLE = 9,
 };
 
 enum dcc_option {
@@ -341,6 +355,13 @@ enum dcn_pwr_state {
 	DCN_PWR_STATE_LOW_POWER = 3,
 };
 
+#if defined(CONFIG_DRM_AMD_DC_DCN)
+enum dcn_zstate_support_state {
+	DCN_ZSTATE_SUPPORT_UNKNOWN,
+	DCN_ZSTATE_SUPPORT_ALLOW,
+	DCN_ZSTATE_SUPPORT_DISALLOW,
+};
+#endif
 /*
  * For any clocks that may differ per pipe
  * only the max is stored in this structure
@@ -358,6 +379,10 @@ struct dc_clocks {
 	int phyclk_khz;
 	int dramclk_khz;
 	bool p_state_change_support;
+#if defined(CONFIG_DRM_AMD_DC_DCN)
+	enum dcn_zstate_support_state zstate_support;
+	bool dtbclk_en;
+#endif
 	enum dcn_pwr_state pwr_state;
 	/*
 	 * Elements below are not compared for the purposes of
@@ -424,6 +449,7 @@ struct dc_bw_validation_profile {
 
 union mem_low_power_enable_options {
 	struct {
+		bool vga: 1;
 		bool i2c: 1;
 		bool dmcu: 1;
 		bool dscl: 1;
@@ -452,6 +478,7 @@ struct dc_debug_options {
 	enum pipe_split_policy pipe_split_policy;
 	bool force_single_disp_pipe_split;
 	bool voltage_align_fclk;
+	bool disable_min_fclk;
 
 	bool disable_dfs_bypass;
 	bool disable_dpp_power_gate;
@@ -477,6 +504,9 @@ struct dc_debug_options {
 	bool disable_pplib_clock_request;
 	bool disable_clock_gate;
 	bool disable_mem_low_power;
+#if defined(CONFIG_DRM_AMD_DC_DCN)
+	bool pstate_enabled;
+#endif
 	bool disable_dmcu;
 	bool disable_psr;
 	bool force_abm_enable;
@@ -495,6 +525,7 @@ struct dc_debug_options {
 	unsigned int force_odm_combine; //bit vector based on otg inst
 #if defined(CONFIG_DRM_AMD_DC_DCN)
 	unsigned int force_odm_combine_4to1; //bit vector based on otg inst
+	bool disable_z9_mpc;
 #endif
 	unsigned int force_fclk_khz;
 	bool enable_tri_buf;
@@ -528,6 +559,19 @@ struct dc_debug_options {
 	bool disable_dsc;
 	bool enable_dram_clock_change_one_display_vactive;
 	union mem_low_power_enable_options enable_mem_low_power;
+	bool force_vblank_alignment;
+
+	/* Enable dmub aux for legacy ddc */
+	bool enable_dmub_aux_for_legacy_ddc;
+	bool optimize_edp_link_rate; /* eDP ILR */
+	/* force enable edp FEC */
+	bool force_enable_edp_fec;
+	/* FEC/PSR1 sequence enable delay in 100us */
+	uint8_t fec_enable_delay_in100us;
+#if defined(CONFIG_DRM_AMD_DC_DCN)
+	bool disable_z10;
+	bool enable_sw_cntl_psr;
+#endif
 };
 
 struct dc_debug_data {
@@ -552,6 +596,9 @@ struct dc_phy_addr_space_config {
 		uint64_t page_table_start_addr;
 		uint64_t page_table_end_addr;
 		uint64_t page_table_base_addr;
+#if defined(CONFIG_DRM_AMD_DC_DCN)
+		bool base_addr_is_mc_addr;
+#endif
 	} gart_config;
 
 	bool valid;
@@ -581,7 +628,6 @@ struct dc_bounding_box_overrides {
 	int min_dcfclk_mhz;
 };
 
-struct dc_state;
 struct resource_pool;
 struct dce_hwseq;
 struct gpu_info_soc_bounding_box_v1_0;
@@ -628,7 +674,6 @@ struct dc {
 #endif
 
 	/* Require to maintain clocks and bandwidth for UEFI enabled HW */
-	int optimize_seamless_boot_streams;
 
 	/* FBC compressor */
 	struct compressor *fbc_compressor;
@@ -888,6 +933,8 @@ struct dc_plane_state {
 
 	union surface_update_flags update_flags;
 	bool flip_int_enabled;
+	bool skip_manual_trigger;
+
 	/* private to DC core */
 	struct dc_plane_status status;
 	struct dc_context *ctx;
@@ -1049,8 +1096,6 @@ bool dc_resource_is_dsc_encoding_supported(const struct dc *dc);
  *   New streams are enabled with blank stream; no memory read.
  */
 bool dc_commit_state(struct dc *dc, struct dc_state *context);
-
-void dc_power_down_on_boot(struct dc *dc);
 
 struct dc_state *dc_create_state(struct dc *dc);
 struct dc_state *dc_copy_state(struct dc_state *src_ctx);
@@ -1291,9 +1336,25 @@ void dc_hardware_release(struct dc *dc);
 #endif
 
 bool dc_set_psr_allow_active(struct dc *dc, bool enable);
+#if defined(CONFIG_DRM_AMD_DC_DCN)
+void dc_z10_restore(struct dc *dc);
+void dc_z10_save_init(struct dc *dc);
+#endif
+
+bool dc_enable_dmub_notifications(struct dc *dc);
+
+bool dc_process_dmub_aux_transfer_async(struct dc *dc,
+				uint32_t link_index,
+				struct aux_payload *payload);
 
 /*******************************************************************************
  * DSC Interfaces
  ******************************************************************************/
 #include "dc_dsc.h"
+
+/*******************************************************************************
+ * Disable acc mode Interfaces
+ ******************************************************************************/
+void dc_disable_accelerated_mode(struct dc *dc);
+
 #endif /* DC_INTERFACE_H_ */

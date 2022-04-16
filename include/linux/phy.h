@@ -1,3 +1,4 @@
+
 /*
  * Framework and drivers for configuring and reading different PHYs
  * Based on code in sungem_phy.c and (long-removed) gianfar_phy.c
@@ -467,6 +468,7 @@ struct phy_c45_device_ids {
  * state: state of the PHY for management purposes
  * dev_flags: Device-specific flags used by the PHY driver.
  * irq: IRQ number of the PHY's interrupt (-1 if none)
+ * @mac_managed_pm: Set true if MAC driver takes of suspending/resuming PHY
  * phy_timer: The timer for handling the state machine
  * sfp_bus_attached: flag indicating whether the SFP bus has been attached
  * sfp_bus: SFP bus attached to this PHY's fiber port
@@ -512,8 +514,9 @@ struct phy_device {
 	RH_KABI_FILL_HOLE(unsigned interrupts:1)
 	RH_KABI_FILL_HOLE(unsigned suspended_by_mdio_bus:1)
 	RH_KABI_FILL_HOLE(unsigned downshifted_rate:1)
+	RH_KABI_FILL_HOLE(unsigned mac_managed_pm:1)
 
-	/* 18 bits hole remain */
+	/* 17 bits hole remain */
 
 	enum phy_state state;
 

@@ -23,7 +23,7 @@
 #include <linux/tc_act/tc_bpf.h>
 #include <net/tc_act/tc_bpf.h>
 
-#include <linux/rh_features.h>
+#include <linux/rh_flags.h>
 
 #define ACT_BPF_NAME_LEN	256
 
@@ -246,7 +246,7 @@ static int tcf_bpf_init_from_efd(struct nlattr **tb, struct tcf_bpf_cfg *cfg)
 		}
 	}
 
-	rh_mark_used_feature("eBPF/act");
+	rh_add_flag("eBPF/act");
 
 	cfg->bpf_name = name;
 	cfg->filter = fp;

@@ -69,12 +69,14 @@
 
 #include <linux/percpu.h>
 #include <linux/crash_dump.h>
+#include <linux/dma-contiguous.h>
 #include <linux/tboot.h>
 #include <linux/jiffies.h>
 #include <linux/mem_encrypt.h>
 #include <linux/sizes.h>
 
 #include <linux/usb/xhci-dbgp.h>
+#include <linux/swiotlb.h>
 #include <video/edid.h>
 
 #include <asm/mtrr.h>
@@ -823,7 +825,8 @@ static void rh_check_supported(void)
 		pr_crit("Detected processor %s %s\n",
 			boot_cpu_data.x86_vendor_id,
 			boot_cpu_data.x86_model_id);
-		mark_hardware_unsupported("Processor");
+		mark_hardware_unmaintained("x86 processor", "%s %s", boot_cpu_data.x86_vendor_id,
+					  boot_cpu_data.x86_model_id);
 		break;
 	}
 

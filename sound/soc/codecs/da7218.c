@@ -3309,7 +3309,7 @@ MODULE_DEVICE_TABLE(i2c, da7218_i2c_id);
 static struct i2c_driver da7218_i2c_driver = {
 	.driver = {
 		.name = "da7218",
-		.of_match_table = of_match_ptr(da7218_of_match),
+		.of_match_table = da7218_of_match,
 	},
 	.probe		= da7218_i2c_probe,
 	.id_table	= da7218_i2c_id,

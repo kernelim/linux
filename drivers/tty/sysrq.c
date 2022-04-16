@@ -54,6 +54,8 @@
 #include <asm/ptrace.h>
 #include <asm/irq_regs.h>
 
+#include <linux/rh_tasklist_lock.h>
+
 /* Whether we react on sysrq keys or just ignore them */
 static int __read_mostly sysrq_enabled = CONFIG_MAGIC_SYSRQ_DEFAULT_ENABLE;
 static bool __read_mostly sysrq_always_enabled;
@@ -134,17 +136,10 @@ static const struct sysrq_key_op sysrq_unraw_op = {
 
 static void sysrq_handle_crash(int key)
 {
-	char *killer = NULL;
-
-	/* we need to release the RCU read lock here,
-	 * otherwise we get an annoying
-	 * 'BUG: sleeping function called from invalid context'
-	 * complaint from the kernel before the panic.
-	 */
+	/* release the RCU read lock before crashing */
 	rcu_read_unlock();
-	panic_on_oops = 1;	/* force panic */
-	wmb();
-	*killer = 1;
+
+	panic("sysrq triggered crash\n");
 }
 static const struct sysrq_key_op sysrq_crash_op = {
 	.handler	= sysrq_handle_crash,

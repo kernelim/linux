@@ -1038,9 +1038,9 @@ static bool of_is_ancestor_of(struct device_node *test_ancestor,
 }
 
 /**
- * of_link_to_phandle - Add device link to supplier from supplier phandle
- * @dev: consumer device
- * @sup_np: phandle to supplier device tree node
+ * of_link_to_phandle - Add fwnode link to supplier from supplier phandle
+ * @con_np: consumer device tree node
+ * @sup_np: supplier device tree node
  *
  * Given a phandle to a supplier device tree node (@sup_np), this function
  * finds the device that owns the supplier device tree node and creates a
@@ -1050,16 +1050,14 @@ static bool of_is_ancestor_of(struct device_node *test_ancestor,
  * cases, it returns an error.
  *
  * Returns:
- * - 0 if link successfully created to supplier
- * - -EAGAIN if linking to the supplier should be reattempted
+ * - 0 if fwnode link successfully created to supplier
  * - -EINVAL if the supplier link is invalid and should not be created
- * - -ENODEV if there is no device that corresponds to the supplier phandle
+ * - -ENODEV if struct device will never be create for supplier
  */
-static int of_link_to_phandle(struct device *dev, struct device_node *sup_np)
+static int of_link_to_phandle(struct device_node *con_np,
+			      struct device_node *sup_np)
 {
 	struct device *sup_dev;
-	u32 dl_flags = DL_FLAG_AUTOPROBE_CONSUMER;
-	int ret = 0;
 	struct device_node *tmp_np = sup_np;
 
 	of_node_get(sup_np);
@@ -1082,7 +1080,8 @@ static int of_link_to_phandle(struct device *dev, struct device_node *sup_np)
 	}
 
 	if (!sup_np) {
-		dev_dbg(dev, "Not linking to %pOFP - No device\n", tmp_np);
+		pr_debug("Not linking %pOFP to %pOFP - No device\n",
+			 con_np, tmp_np);
 		return -ENODEV;
 	}
 
@@ -1091,19 +1090,30 @@ static int of_link_to_phandle(struct device *dev, struct device_node *sup_np)
 	 * descendant nodes. By definition, a child node can't be a functional
 	 * dependency for the parent node.
 	 */
-	if (of_is_ancestor_of(dev->of_node, sup_np)) {
-		dev_dbg(dev, "Not linking to %pOFP - is descendant\n", sup_np);
+	if (of_is_ancestor_of(con_np, sup_np)) {
+		pr_debug("Not linking %pOFP to %pOFP - is descendant\n",
+			 con_np, sup_np);
 		of_node_put(sup_np);
 		return -EINVAL;
 	}
+
+	/*
+	 * Don't create links to "early devices" that won't have struct devices
+	 * created for them.
+	 */
 	sup_dev = get_dev_from_fwnode(&sup_np->fwnode);
-	of_node_put(sup_np);
-	if (!sup_dev)
-		return -EAGAIN;
-	if (!device_link_add(dev, sup_dev, dl_flags))
-		ret = -EAGAIN;
+	if (!sup_dev && of_node_check_flag(sup_np, OF_POPULATED)) {
+		pr_debug("Not linking %pOFP to %pOFP - No struct device\n",
+			 con_np, sup_np);
+		of_node_put(sup_np);
+		return -ENODEV;
+	}
 	put_device(sup_dev);
-	return ret;
+
+	fwnode_link_add(of_fwnode_handle(con_np), of_fwnode_handle(sup_np));
+	of_node_put(sup_np);
+
+	return 0;
 }
 
 /**
@@ -1303,16 +1313,16 @@ static const struct supplier_bindings of_supplier_bindings[] = {
  * that list phandles to suppliers. If @prop_name isn't one, this function
  * doesn't do anything.
  *
- * If @prop_name is one, this function attempts to create device links from the
- * consumer device @dev to all the devices of the suppliers listed in
- * @prop_name.
+ * If @prop_name is one, this function attempts to create fwnode links from the
+ * consumer device tree node @con_np to all the suppliers device tree nodes
+ * listed in @prop_name.
  *
- * Any failed attempt to create a device link will NOT result in an immediate
+ * Any failed attempt to create a fwnode link will NOT result in an immediate
  * return.  of_link_property() must create links to all the available supplier
- * devices even when attempts to create a link to one or more suppliers fail.
+ * device tree nodes even when attempts to create a link to one or more
+ * suppliers fail.
  */
-static int of_link_property(struct device *dev, struct device_node *con_np,
-			     const char *prop_name)
+static int of_link_property(struct device_node *con_np, const char *prop_name)
 {
 	struct device_node *phandle;
 	const struct supplier_bindings *s = of_supplier_bindings;
@@ -1325,8 +1335,7 @@ static int of_link_property(struct device *dev, struct device_node *con_np,
 		while ((phandle = s->parse_prop(con_np, prop_name, i))) {
 			matched = true;
 			i++;
-			if (of_link_to_phandle(dev, phandle) == -EAGAIN)
-				ret = -EAGAIN;
+			of_link_to_phandle(con_np, phandle);
 			of_node_put(phandle);
 		}
 		s++;
@@ -1334,31 +1343,19 @@ static int of_link_property(struct device *dev, struct device_node *con_np,
 	return ret;
 }
 
-static int of_link_to_suppliers(struct device *dev,
-				  struct device_node *con_np)
-{
-	struct device_node *child;
-	struct property *p;
-	int ret = 0;
-
-	for_each_property_of_node(con_np, p)
-		if (of_link_property(dev, con_np, p->name))
-			ret = -EAGAIN;
-
-	for_each_available_child_of_node(con_np, child)
-		if (of_link_to_suppliers(dev, child))
-			ret = -EAGAIN;
-
-	return ret;
-}
-
-static int of_fwnode_add_links(const struct fwnode_handle *fwnode,
+static int of_fwnode_add_links(struct fwnode_handle *fwnode,
 			       struct device *dev)
 {
-	if (unlikely(!is_of_node(fwnode)))
-		return 0;
+	struct property *p;
+	struct device_node *con_np = to_of_node(fwnode);
 
-	return of_link_to_suppliers(dev, to_of_node(fwnode));
+	if (!con_np)
+		return -EINVAL;
+
+	for_each_property_of_node(con_np, p)
+		of_link_property(con_np, p->name);
+
+	return 0;
 }
 
 const struct fwnode_operations of_fwnode_ops = {

@@ -776,7 +776,7 @@ static int dnet_probe(struct platform_device *pdev)
 	int err;
 	unsigned int irq;
 
-	mark_hardware_unsupported(DRV_NAME);
+	mark_driver_unmaintained(DRV_NAME);
 
 	irq = platform_get_irq(pdev, 0);
 
