@@ -563,6 +563,9 @@ void ib_security_release_port_pkey_list(struct ib_device *device)
 	struct pkey_index_qp_list *pkey, *tmp_pkey;
 	int i;
 
+	if (!device->port_pkey_list)
+		return;
+
 	for (i = rdma_start_port(device); i <= rdma_end_port(device); i++) {
 		list_for_each_entry_safe(pkey,
 					 tmp_pkey,

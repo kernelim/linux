@@ -1230,14 +1230,18 @@ static void call_timer_fn(struct timer_list *timer, void (*fn)(unsigned long),
  * soft or hard system lockup.
  *
  * This function remedies this situation by requeuing all the timers in
- * the cascading timer wheel and adjusting timer_jiffies to the min() of
- * current jiffies and the expiry times of all timers.
+ * the cascading timer wheel and adjusting timer_jiffies to the current
+ * jiffies.
+ *
+ * N.B.  __internal_add_timer() is used to add the timers back which will
+ * not update the total timer count. Timers that have expired will be added
+ * to the slot for the current timer_jiffies.
  */
 static noinline void requeue_timers(struct tvec_base *base)
 {
 	struct timer_list *timer, *tmp;
 	struct list_head list, head, *vecs;
-	unsigned long min_jiffies = jiffies;
+	unsigned long current_jiffies = jiffies;
 	unsigned long count = 0;
 	int i;
 
@@ -1259,21 +1263,18 @@ static noinline void requeue_timers(struct tvec_base *base)
 		 */
 		list_for_each_entry_safe(timer, tmp, &list, entry) {
 			count++;
-			if (time_before(timer->expires, min_jiffies))
-				min_jiffies = timer->expires;
 			list_add_tail(&timer->entry, &head);
 		}
 		if (base->all_timers == count)
 			break;
 	}
-	WARN_ON_ONCE(base->all_timers != count ||
-		     time_before(min_jiffies, base->timer_jiffies));
+	WARN_ON_ONCE(base->all_timers != count);
 
 	/*
 	 * Requeue timers back into timer wheel with timer_jiffies
-	 * set to min_jiffies.
+	 * set to current_jiffies.
 	 */
-	base->timer_jiffies = min_jiffies;
+	base->timer_jiffies = current_jiffies;
 	list_for_each_entry_safe(timer, tmp, &head, entry)
 		__internal_add_timer(base, timer);
 }

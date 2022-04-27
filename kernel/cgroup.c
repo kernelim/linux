@@ -1149,6 +1149,13 @@ static int parse_cgroupfs_options(char *data, struct cgroup_sb_opts *opts)
 			/* Specifying two release agents is forbidden */
 			if (opts->release_agent)
 				return -EINVAL;
+			/*
+			 * Release agent gets called with all capabilities,
+			 * require capabilities to set release agent.
+			 */
+			if (!capable(CAP_SYS_ADMIN))
+				return -EPERM;
+
 			opts->release_agent =
 				kstrndup(token + 14, PATH_MAX - 1, GFP_KERNEL);
 			if (!opts->release_agent)
@@ -2196,6 +2203,14 @@ static int cgroup_release_agent_write(struct cgroup *cgrp, struct cftype *cft,
 	BUILD_BUG_ON(sizeof(cgrp->root->release_agent_path) < PATH_MAX);
 	if (strlen(buffer) >= PATH_MAX)
 		return -EINVAL;
+
+	/*
+	 * Release agent gets called with all capabilities,
+	 * require capabilities to set release agent.
+	 */
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
 	if (!cgroup_lock_live_group(cgrp))
 		return -ENODEV;
 	mutex_lock(&cgroup_root_mutex);
