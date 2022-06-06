@@ -377,6 +377,8 @@ struct iscsi_cmd {
 	u8			unsolicited_data;
 	/* Reject reason code */
 	u8			reject_reason;
+	/* Explicit do not modify maxcmdsn on release */
+	u8			no_maxcmdsn_release;
 	/* CID contained in logout PDU when opcode == ISCSI_INIT_LOGOUT_CMND */
 	u16			logout_cid;
 	/* Command flags */
@@ -643,6 +645,7 @@ struct iscsi_session {
 	u32			exp_cmd_sn;
 	/* session wide counter: maximum allowed command sequence number */
 	atomic_t		max_cmd_sn;
+	u32			last_max_cmd_sn;
 	struct list_head	sess_ooo_cmdsn_list;
 
 	/* LIO specific session ID */
@@ -922,5 +925,12 @@ static inline void iscsit_thread_check_cpumask(
 	 * same CPU.
 	 */
 	set_cpus_allowed_ptr(p, conn->conn_cpumask);
+}
+
+#define iscsit_set_max_cmdsn(hdr, conn) \
+{ \
+	u32 max_cmdsn = (u32) atomic_read(&conn->sess->max_cmd_sn); \
+	hdr->max_cmdsn = cpu_to_be32(max_cmdsn); \
+	conn->sess->last_max_cmd_sn = max_cmdsn; \
 }
 #endif /* ISCSI_TARGET_CORE_H */

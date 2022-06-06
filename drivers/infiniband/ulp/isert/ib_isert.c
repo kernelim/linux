@@ -1469,6 +1469,7 @@ isert_put_cmd(struct isert_cmd *isert_cmd, bool comp_err)
 		break;
 	case ISCSI_OP_REJECT:
 	case ISCSI_OP_NOOP_OUT:
+	case ISCSI_OP_NOOP_IN:
 	case ISCSI_OP_TEXT:
 		hdr = (struct iscsi_text_rsp *)&isert_cmd->tx_desc.iscsi_header;
 		/* If the continue bit is on, keep the command alive */
@@ -1858,7 +1859,14 @@ isert_put_nopin(struct iscsi_cmd *cmd, struct iscsi_conn *conn,
 
 	isert_dbg("conn %p Posting NOPIN Response\n", isert_conn);
 
-	return isert_post_response(isert_conn, isert_cmd);
+	if (nopout_response)
+		return isert_post_response(isert_conn, isert_cmd);
+
+	/* pointer init since didn't go through isert_allocate_cmd */
+	isert_cmd->conn = isert_conn;
+	isert_cmd->iscsi_cmd = cmd;
+
+	return ib_post_send(isert_conn->qp, send_wr, NULL);
 }
 
 static int
@@ -2159,6 +2167,7 @@ isert_immediate_queue(struct iscsi_conn *conn, struct iscsi_cmd *cmd, int state)
 		spin_unlock_bh(&conn->cmd_lock);
 		isert_put_cmd(isert_cmd, true);
 		break;
+	case ISTATE_SEND_NOPIN_NO_RESPONSE:
 	case ISTATE_SEND_NOPIN_WANT_RESPONSE:
 		ret = isert_put_nopin(cmd, conn, false);
 		break;

@@ -68,5 +68,6 @@ extern int tx_data(struct iscsi_conn *, struct kvec *, int, int);
 extern void iscsit_collect_login_stats(struct iscsi_conn *, u8, u8);
 extern struct iscsi_tiqn *iscsit_snmp_get_tiqn(struct iscsi_conn *);
 extern void iscsit_fill_cxn_timeout_err_stats(struct iscsi_session *);
+extern int iscsit_add_nopin(struct iscsi_conn *, int);
 
 #endif /*** ISCSI_TARGET_UTIL_H ***/

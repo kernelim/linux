@@ -312,20 +312,38 @@ struct prev_cputime {
 #endif
 };
 
+/*
+ * RHEL Notes:
+ * Due to dependency of cputime.c code on the exact ordering of
+ * vtime_state enum names, __GENKSYMS__ macro is used directly
+ * here instead of RH_KABI*ENUM* macros.
+ */
+#ifndef __GENKSYMS__
+
 enum vtime_state {
 	/* Task is sleeping or running in a CPU with VTIME inactive: */
 	VTIME_INACTIVE = 0,
-	/* Task runs in userspace in a CPU with VTIME active: */
-	VTIME_USER,
+	/* Task is idle */
+	VTIME_IDLE,
 	/* Task runs in kernelspace in a CPU with VTIME active: */
 	VTIME_SYS,
+	/* Task runs in userspace in a CPU with VTIME active: */
+	VTIME_USER,
+	/* Task runs as guests in a CPU with VTIME active: */
+	VTIME_GUEST,
 };
+
+#else
+enum vtime_state {
+	VTIME_INACTIVE = 0, VTIME_USER, VTIME_SYS,
+};
+#endif
 
 struct vtime {
 	seqcount_t		seqcount;
 	unsigned long long	starttime;
 	enum vtime_state	state;
-	/* cpu is defined in struct task_struct->task_struct_rh->vtime_cpu */
+	RH_KABI_FILL_HOLE(unsigned int cpu)
 	u64			utime;
 	u64			stime;
 	u64			gtime;
@@ -669,7 +687,7 @@ struct task_struct_rh {
 	/* Empty if CONFIG_POSIX_CPUTIMERS=n */
 	struct posix_cputimers posix_cputimers;
 	/* struct vtime->cpu */
-	unsigned int vtime_cpu;
+	RH_KABI_DEPRECATE(unsigned int, vtime_cpu)
 	u64				parent_exec_id;
 	u64				self_exec_id;
 #ifdef CONFIG_COMPACTION

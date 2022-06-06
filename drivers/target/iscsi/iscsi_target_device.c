@@ -21,9 +21,13 @@
 #include <target/target_core_fabric.h>
 
 #include <target/iscsi/iscsi_target_core.h>
+#include <target/iscsi/iscsi_transport.h>
 #include "iscsi_target_device.h"
 #include "iscsi_target_tpg.h"
 #include "iscsi_target_util.h"
+
+#define iscsit_needs_delayed_maxcmdsn_increment(conn) \
+	(conn->conn_transport->transport_type == ISCSI_INFINIBAND)
 
 void iscsit_determine_maxcmdsn(struct iscsi_session *sess)
 {
@@ -50,7 +54,7 @@ void iscsit_determine_maxcmdsn(struct iscsi_session *sess)
 	atomic_add(se_nacl->queue_depth - 1, &sess->max_cmd_sn);
 }
 
-void iscsit_increment_maxcmdsn(struct iscsi_cmd *cmd, struct iscsi_session *sess)
+void __iscsit_increment_maxcmdsn(struct iscsi_cmd *cmd, struct iscsi_session *sess)
 {
 	u32 max_cmd_sn;
 
@@ -62,4 +66,33 @@ void iscsit_increment_maxcmdsn(struct iscsi_cmd *cmd, struct iscsi_session *sess
 	max_cmd_sn = atomic_inc_return(&sess->max_cmd_sn);
 	pr_debug("Updated MaxCmdSN to 0x%08x\n", max_cmd_sn);
 }
+
+void iscsit_increment_maxcmdsn(struct iscsi_cmd *cmd, struct iscsi_session *sess)
+{
+	if (!iscsit_needs_delayed_maxcmdsn_increment(cmd->conn))
+		__iscsit_increment_maxcmdsn(cmd, sess);
+}
 EXPORT_SYMBOL(iscsit_increment_maxcmdsn);
+
+
+
+void iscsit_increment_maxcmdsn_on_release(struct iscsi_cmd *cmd, struct iscsi_session *sess)
+{
+	if (iscsit_needs_delayed_maxcmdsn_increment(cmd->conn) && !cmd->no_maxcmdsn_release) {
+		__iscsit_increment_maxcmdsn(cmd, sess);
+		if ((u32)atomic_read(&sess->max_cmd_sn) -
+		     READ_ONCE(sess->last_max_cmd_sn)
+		     > sess->cmdsn_window / 2) {
+			/*
+			 * Prevent nopin races if one may be needed by using
+			 * a lock and rechecking after grabbing the lock
+			 */
+			spin_lock_bh(&cmd->conn->nopin_timer_lock);
+			if ((u32)atomic_read(&sess->max_cmd_sn) -
+			    READ_ONCE(sess->last_max_cmd_sn)
+			    > sess->cmdsn_window / 2)
+				iscsit_add_nopin(cmd->conn, 0);
+			spin_unlock_bh(&cmd->conn->nopin_timer_lock);
+		}
+	}
+}

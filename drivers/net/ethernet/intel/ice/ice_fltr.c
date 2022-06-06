@@ -62,12 +62,10 @@ ice_fltr_set_vlan_vsi_promisc(struct ice_hw *hw, struct ice_vsi *vsi,
 	int result;
 
 	result = ice_set_vlan_vsi_promisc(hw, vsi->idx, promisc_mask, false);
-	if (!result)
-		return result;
-
-	dev_err(ice_pf_to_dev(pf),
-		"Error setting promisc mode on VSI %i (rc=%d)\n", vsi->vsi_num,
-		result);
+	if (result)
+		dev_err(ice_pf_to_dev(pf),
+			"Error setting promisc mode on VSI %i (rc=%d)\n",
+			vsi->vsi_num, result);
 
 	return result;
 }
@@ -88,12 +86,10 @@ ice_fltr_clear_vlan_vsi_promisc(struct ice_hw *hw, struct ice_vsi *vsi,
 	int result;
 
 	result = ice_set_vlan_vsi_promisc(hw, vsi->idx, promisc_mask, true);
-	if (!result)
-		return result;
-
-	dev_err(ice_pf_to_dev(pf),
-		"Error clearing promisc mode on VSI %i (rc=%d)\n",
-		vsi->vsi_num, result);
+	if (result)
+		dev_err(ice_pf_to_dev(pf),
+			"Error clearing promisc mode on VSI %i (rc=%d)\n",
+			vsi->vsi_num, result);
 
 	return result;
 }
@@ -113,12 +109,10 @@ ice_fltr_clear_vsi_promisc(struct ice_hw *hw, u16 vsi_handle, u8 promisc_mask,
 	int result;
 
 	result = ice_clear_vsi_promisc(hw, vsi_handle, promisc_mask, vid);
-	if (!result)
-		return result;
-
-	dev_err(ice_pf_to_dev(pf),
-		"Error clearing promisc mode on VSI %i for VID %u (rc=%d)\n",
-		ice_get_hw_vsi_num(hw, vsi_handle), vid, result);
+	if (result)
+		dev_err(ice_pf_to_dev(pf),
+			"Error clearing promisc mode on VSI %i for VID %u (rc=%d)\n",
+			ice_get_hw_vsi_num(hw, vsi_handle), vid, result);
 
 	return result;
 }
@@ -138,12 +132,10 @@ ice_fltr_set_vsi_promisc(struct ice_hw *hw, u16 vsi_handle, u8 promisc_mask,
 	int result;
 
 	result = ice_set_vsi_promisc(hw, vsi_handle, promisc_mask, vid);
-	if (!result)
-		return result;
-
-	dev_err(ice_pf_to_dev(pf),
-		"Error setting promisc mode on VSI %i for VID %u (rc=%d)\n",
-		ice_get_hw_vsi_num(hw, vsi_handle), vid, result);
+	if (result)
+		dev_err(ice_pf_to_dev(pf),
+			"Error setting promisc mode on VSI %i for VID %u (rc=%d)\n",
+			ice_get_hw_vsi_num(hw, vsi_handle), vid, result);
 
 	return result;
 }

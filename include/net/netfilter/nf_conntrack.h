@@ -83,7 +83,6 @@ struct nf_conn {
 
 	/* jiffies32 when this ct is considered dead */
 	u32 timeout;
-	u16		local_origin:1;
 
 	possible_net_t ct_net;
 

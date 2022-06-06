@@ -3443,6 +3443,7 @@ static int parse_tc_nic_actions(struct mlx5e_priv *priv,
 	struct pedit_headers_action hdrs[2] = {};
 	const struct flow_action_entry *act;
 	struct mlx5_nic_flow_attr *nic_attr;
+	bool clear_action;
 	u32 action = 0;
 	int err, i;
 
@@ -3535,6 +3536,12 @@ static int parse_tc_nic_actions(struct mlx5e_priv *priv,
 			attr->dest_chain = act->chain_index;
 			break;
 		case FLOW_ACTION_CT:
+			clear_action = act->ct.action & TCA_CT_ACT_CLEAR;
+
+			/* It's redundant to do ct clear more than once. */
+			if (clear_action && attr->ct_clear)
+				break;
+
 			err = mlx5_tc_ct_parse_action(get_ct_priv(priv), attr,
 						      &parse_attr->mod_hdr_acts,
 						      act, extack);
@@ -3542,6 +3549,7 @@ static int parse_tc_nic_actions(struct mlx5e_priv *priv,
 				return err;
 
 			flow_flag_set(flow, CT);
+			attr->ct_clear = clear_action;
 			break;
 		default:
 			NL_SET_ERR_MSG_MOD(extack, "The offload action is not supported");
@@ -3871,6 +3879,7 @@ static int parse_tc_fdb_actions(struct mlx5e_priv *priv,
 	int err, i, if_count = 0;
 	bool ptype_host = false;
 	bool mpls_push = false;
+	bool clear_action;
 
 	if (!flow_action_has_entries(flow_action))
 		return -EINVAL;
@@ -4184,6 +4193,13 @@ static int parse_tc_fdb_actions(struct mlx5e_priv *priv,
 				NL_SET_ERR_MSG_MOD(extack, "Sample action with connection tracking is not supported");
 				return -EOPNOTSUPP;
 			}
+
+			clear_action = act->ct.action & TCA_CT_ACT_CLEAR;
+
+			/* It's redundant to do ct clear more than once. */
+			if (clear_action && attr->ct_clear)
+				break;
+
 			err = mlx5_tc_ct_parse_action(get_ct_priv(priv), attr,
 						      &parse_attr->mod_hdr_acts,
 						      act, extack);
@@ -4192,6 +4208,7 @@ static int parse_tc_fdb_actions(struct mlx5e_priv *priv,
 
 			flow_flag_set(flow, CT);
 			esw_attr->split_count = esw_attr->out_count;
+			attr->ct_clear = clear_action;
 			break;
 		case FLOW_ACTION_SAMPLE:
 			if (flow_flag_test(flow, CT)) {

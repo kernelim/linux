@@ -716,6 +716,8 @@ void iscsit_release_cmd(struct iscsi_cmd *cmd)
 
 	BUG_ON(!sess || !sess->se_sess);
 
+	iscsit_increment_maxcmdsn_on_release(cmd, sess);
+
 	kfree(cmd->buf_ptr);
 	kfree(cmd->pdu_list);
 	kfree(cmd->seq_list);
@@ -875,7 +877,7 @@ void iscsit_inc_conn_usage_count(struct iscsi_conn *conn)
 	spin_unlock_bh(&conn->conn_usage_lock);
 }
 
-static int iscsit_add_nopin(struct iscsi_conn *conn, int want_response)
+int iscsit_add_nopin(struct iscsi_conn *conn, int want_response)
 {
 	u8 state;
 	struct iscsi_cmd *cmd;
@@ -885,6 +887,7 @@ static int iscsit_add_nopin(struct iscsi_conn *conn, int want_response)
 		return -1;
 
 	cmd->iscsi_opcode = ISCSI_OP_NOOP_IN;
+	cmd->no_maxcmdsn_release = 1;
 	state = (want_response) ? ISTATE_SEND_NOPIN_WANT_RESPONSE :
 				ISTATE_SEND_NOPIN_NO_RESPONSE;
 	cmd->init_task_tag = RESERVED_ITT;

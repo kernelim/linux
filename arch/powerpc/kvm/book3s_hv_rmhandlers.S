@@ -57,11 +57,13 @@ END_FTR_SECTION_IFCLR(CPU_FTR_ARCH_300)
 #define STACK_SLOT_PID		(SFS-32)
 #define STACK_SLOT_IAMR		(SFS-40)
 #define STACK_SLOT_CIABR	(SFS-48)
-#define STACK_SLOT_DAWR		(SFS-56)
-#define STACK_SLOT_DAWRX	(SFS-64)
+#define STACK_SLOT_DAWR0	(SFS-56)
+#define STACK_SLOT_DAWRX0	(SFS-64)
 #define STACK_SLOT_HFSCR	(SFS-72)
 #define STACK_SLOT_AMR		(SFS-80)
 #define STACK_SLOT_UAMOR	(SFS-88)
+#define STACK_SLOT_DAWR1	(SFS-96)
+#define STACK_SLOT_DAWRX1	(SFS-104)
 /* the following is used by the P9 short path */
 #define STACK_SLOT_NVGPRS	(SFS-152)	/* 18 gprs */
 
@@ -692,10 +694,16 @@ BEGIN_FTR_SECTION
 	mfspr	r7, SPRN_DAWRX0
 	mfspr	r8, SPRN_IAMR
 	std	r5, STACK_SLOT_CIABR(r1)
-	std	r6, STACK_SLOT_DAWR(r1)
-	std	r7, STACK_SLOT_DAWRX(r1)
+	std	r6, STACK_SLOT_DAWR0(r1)
+	std	r7, STACK_SLOT_DAWRX0(r1)
 	std	r8, STACK_SLOT_IAMR(r1)
 END_FTR_SECTION_IFSET(CPU_FTR_ARCH_207S)
+BEGIN_FTR_SECTION
+	mfspr	r6, SPRN_DAWR1
+	mfspr	r7, SPRN_DAWRX1
+	std	r6, STACK_SLOT_DAWR1(r1)
+	std	r7, STACK_SLOT_DAWRX1(r1)
+END_FTR_SECTION_IFSET(CPU_FTR_ARCH_207S | CPU_FTR_DAWR1)
 
 	mfspr	r5, SPRN_AMR
 	std	r5, STACK_SLOT_AMR(r1)
@@ -782,10 +790,16 @@ END_FTR_SECTION_IFCLR(CPU_FTR_ARCH_207S)
 	lbz	r5, 0(r5)
 	cmpdi	r5, 0
 	beq	1f
-	ld	r5, VCPU_DAWR(r4)
-	ld	r6, VCPU_DAWRX(r4)
+	ld	r5, VCPU_DAWR0(r4)
+	ld	r6, VCPU_DAWRX0(r4)
 	mtspr	SPRN_DAWR0, r5
 	mtspr	SPRN_DAWRX0, r6
+BEGIN_FTR_SECTION
+	ld	r5, VCPU_DAWR1(r4)
+	ld	r6, VCPU_DAWRX1(r4)
+	mtspr	SPRN_DAWR1, r5
+	mtspr	SPRN_DAWRX1, r6
+END_FTR_SECTION_IFSET(CPU_FTR_DAWR1)
 1:
 	ld	r7, VCPU_CIABR(r4)
 	ld	r8, VCPU_TAR(r4)
@@ -1778,8 +1792,8 @@ END_FTR_SECTION(CPU_FTR_TM | CPU_FTR_P9_TM_HV_ASSIST, 0)
 	/* Restore host values of some registers */
 BEGIN_FTR_SECTION
 	ld	r5, STACK_SLOT_CIABR(r1)
-	ld	r6, STACK_SLOT_DAWR(r1)
-	ld	r7, STACK_SLOT_DAWRX(r1)
+	ld	r6, STACK_SLOT_DAWR0(r1)
+	ld	r7, STACK_SLOT_DAWRX0(r1)
 	mtspr	SPRN_CIABR, r5
 	/*
 	 * If the DAWR doesn't work, it's ok to write these here as
@@ -1788,6 +1802,12 @@ BEGIN_FTR_SECTION
 	mtspr	SPRN_DAWR0, r6
 	mtspr	SPRN_DAWRX0, r7
 END_FTR_SECTION_IFSET(CPU_FTR_ARCH_207S)
+BEGIN_FTR_SECTION
+	ld	r6, STACK_SLOT_DAWR1(r1)
+	ld	r7, STACK_SLOT_DAWRX1(r1)
+	mtspr	SPRN_DAWR1, r6
+	mtspr	SPRN_DAWRX1, r7
+END_FTR_SECTION_IFSET(CPU_FTR_ARCH_207S | CPU_FTR_DAWR1)
 BEGIN_FTR_SECTION
 	ld	r5, STACK_SLOT_TID(r1)
 	ld	r6, STACK_SLOT_PSSCR(r1)
@@ -2579,8 +2599,8 @@ END_FTR_SECTION_IFSET(CPU_FTR_ARCH_207S)
 	rlwimi	r5, r4, 5, DAWRX_DR | DAWRX_DW
 	rlwimi	r5, r4, 2, DAWRX_WT
 	clrrdi	r4, r4, 3
-	std	r4, VCPU_DAWR(r3)
-	std	r5, VCPU_DAWRX(r3)
+	std	r4, VCPU_DAWR0(r3)
+	std	r5, VCPU_DAWRX0(r3)
 	/*
 	 * If came in through the real mode hcall handler then it is necessary
 	 * to write the registers since the return path won't. Otherwise it is
@@ -3355,6 +3375,9 @@ END_FTR_SECTION_IFCLR(CPU_FTR_ARCH_300)
 	mtspr	SPRN_IAMR, r0
 	mtspr	SPRN_CIABR, r0
 	mtspr	SPRN_DAWRX0, r0
+BEGIN_FTR_SECTION
+	mtspr	SPRN_DAWRX1, r0
+END_FTR_SECTION_IFSET(CPU_FTR_DAWR1)
 
 	/* Clear hash and radix guest SLB, see guest_exit_short_path comment. */
 	slbmte	r0, r0
