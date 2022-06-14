@@ -2215,6 +2215,14 @@ popd
 # in the source tree. We installed them previously to $RPM_BUILD_ROOT/usr
 # but there's no way to tell the Makefile to take them from there.
 %{make} %{?_smp_mflags} headers_install
+
+# If we re building only tools without kernel, we need to generate config
+# headers and prepare tree for modules building. The modules_prepare target
+# will cover both.
+if [ ! -f include/generated/autoconf.h ]; then
+   %{make} %{?_smp_mflags} modules_prepare
+fi
+
 %{make} %{?_smp_mflags} ARCH=$Arch V=1 M=samples/bpf/
 
 # Prevent bpf selftests to build bpftool repeatedly:

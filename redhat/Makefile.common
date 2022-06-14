@@ -1,7 +1,7 @@
+include Makefile.variables
 TOPDIR:=$(shell $(GIT) rev-parse --show-toplevel)
 REDHAT:=$(TOPDIR)/redhat
 include $(TOPDIR)/Makefile.rhelver
-include $(REDHAT)/Makefile.variables
 
 RPMBUILD := $(shell if [ -x "/usr/bin/rpmbuild" ]; then echo rpmbuild; \
                    else echo rpm; fi)
@@ -103,7 +103,6 @@ KVERSION:=$(RPMKVERSION).$(RPMKPATCHLEVEL).$(RPMKSUBLEVEL)
 RPMVERSION:=$(KVERSION)
 
 BUILD:=$(RHEL_RELEASE)
-PACKAGE_NAME:=kernel
 SPECFILE:=$(PACKAGE_NAME).spec
 RPM:=$(REDHAT)/rpm
 SRPMS:=$(RPM)/SRPMS

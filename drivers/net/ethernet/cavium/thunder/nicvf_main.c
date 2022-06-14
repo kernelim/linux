@@ -2109,6 +2109,8 @@ static int nicvf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	u16    sdevid;
 	struct cavium_ptp *ptp_clock;
 
+	pci_hw_unmaintained(ent, pdev);
+
 	ptp_clock = cavium_ptp_get();
 	if (IS_ERR(ptp_clock)) {
 		if (PTR_ERR(ptp_clock) == -ENODEV)

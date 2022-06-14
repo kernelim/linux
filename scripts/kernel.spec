@@ -121,13 +121,13 @@ Summary:               The Linux kernel
 %define kversion 5.14
 
 %define rpmversion 5.14.0
-%define pkgrelease 70.13.1.el9_0
+%define pkgrelease 70.17.1.el9_0
 
 # This is needed to do merge window version magic
 %define patchlevel 14
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 70.13.1%{?buildid}%{?dist}
+%define specrelease 70.17.1%{?buildid}%{?dist}
 
 %define pkg_release %{specrelease}
 
@@ -677,7 +677,7 @@ BuildRequires:         lld
 # exact git commit you can run
 #
 # xzcat -qq ${TARBALL} | git get-tar-commit-id
-Source0:               linux-5.14.0-70.13.1.el9_0.tar.xz
+Source0:               linux-5.14.0-70.17.1.el9_0.tar.xz
 
 Source1:               Makefile.rhelver
 
@@ -1342,8 +1342,8 @@ ApplyOptionalPatch()
   fi
 }
 
-%setup -q -n kernel-5.14.0-70.13.1.el9_0 -c
-mv linux-5.14.0-70.13.1.el9_0 linux-%{KVERREL}
+%setup -q -n kernel-5.14.0-70.17.1.el9_0 -c
+mv linux-5.14.0-70.17.1.el9_0 linux-%{KVERREL}
 
 cd linux-%{KVERREL}
 cp -a %{SOURCE1} .
@@ -2213,6 +2213,14 @@ popd
 # in the source tree. We installed them previously to $RPM_BUILD_ROOT/usr
 # but there's no way to tell the Makefile to take them from there.
 %{make} %{?_smp_mflags} headers_install
+
+# If we re building only tools without kernel, we need to generate config
+# headers and prepare tree for modules building. The modules_prepare target
+# will cover both.
+if [ ! -f include/generated/autoconf.h ]; then
+   %{make} %{?_smp_mflags} modules_prepare
+fi
+
 %{make} %{?_smp_mflags} ARCH=$Arch V=1 M=samples/bpf/
 
 # Prevent bpf selftests to build bpftool repeatedly:
@@ -2942,9 +2950,48 @@ fi
 #
 #
 %changelog
-* Tue May 17 2022 Release Engineering <releng@rockylinux.org> - 5.14.0-70.13.1
+* Tue Jul 12 2022 Release Engineering <releng@rockylinux.org> - 5.14.0-70.17.1
 - Porting to 9.0, debranding and Rocky branding with new release pkg (Sherif Nagy)
 - Porting to 9.0, debranding and Rocky branding (Louis Abel)
+
+* Tue Jun 14 2022 Herton R. Krzesinski <herton@redhat.com> [5.14.0-70.17.1.el9_0]
+- netfilter: nf_tables: disallow non-stateful expression in sets earlier (Phil Sutter) [2092994 2092995] {CVE-2022-1966}
+- thunderx nic: mark device as unmaintained (Íñigo Huguet) [2092638 2060285]
+- pseries/eeh: Fix the kdump kernel crash during eeh_pseries_init (Steve Best) [2092255 2067770]
+- perf: Fix sys_perf_event_open() race against self (Michael Petlan) [2087963 2087964] {CVE-2022-1729}
+- spec: Fix separate tools build (Jiri Olsa) [2090852 2054579]
+- mm: lru_cache_disable: replace work queue synchronization with synchronize_rcu (Marcelo Tosatti) [2086963 2033500]
+
+* Wed Jun 08 2022 Herton R. Krzesinski <herton@redhat.com> [5.14.0-70.16.1.el9_0]
+- dm integrity: fix memory corruption when tag_size is less than digest size (Benjamin Marzinski) [2082187 2081778]
+
+* Wed Jun 01 2022 Herton R. Krzesinski <herton@redhat.com> [5.14.0-70.15.1.el9_0]
+- CI: Use zstream builder image (Veronika Kabatova)
+- tcp: drop the hash_32() part from the index calculation (Guillaume Nault) [2087128 2064868] {CVE-2022-1012}
+- tcp: increase source port perturb table to 2^16 (Guillaume Nault) [2087128 2064868] {CVE-2022-1012}
+- tcp: dynamically allocate the perturb table used by source ports (Guillaume Nault) [2087128 2064868] {CVE-2022-1012}
+- tcp: add small random increments to the source port (Guillaume Nault) [2087128 2064868] {CVE-2022-1012}
+- tcp: resalt the secret every 10 seconds (Guillaume Nault) [2087128 2064868] {CVE-2022-1012}
+- tcp: use different parts of the port_offset for index and offset (Guillaume Nault) [2087128 2064868] {CVE-2022-1012}
+- secure_seq: use the 64 bits of the siphash for port offset calculation (Guillaume Nault) [2087128 2064868] {CVE-2022-1012}
+- Revert "netfilter: conntrack: tag conntracks picked up in local out hook" (Florian Westphal) [2085480 2061850]
+- Revert "netfilter: nat: force port remap to prevent shadowing well-known ports" (Florian Westphal) [2085480 2061850]
+- redhat/koji/Makefile: Decouple koji Makefile from Makefile.common (Andrea Claudi)
+- redhat: fix make {distg-brew,distg-koji} (Andrea Claudi)
+- esp: limit skb_page_frag_refill use to a single page (Sabrina Dubroca) [2082950 2082951] {CVE-2022-27666}
+- esp: Fix possible buffer overflow in ESP transformation (Sabrina Dubroca) [2082950 2082951] {CVE-2022-27666}
+- sctp: use the correct skb for security_sctp_assoc_request (Ondrej Mosnacek) [2084044 2078856]
+- security: implement sctp_assoc_established hook in selinux (Ondrej Mosnacek) [2084044 2078856]
+- security: add sctp_assoc_established hook (Ondrej Mosnacek) [2084044 2078856]
+- security: call security_sctp_assoc_request in sctp_sf_do_5_1D_ce (Ondrej Mosnacek) [2084044 2078856]
+- security: pass asoc to sctp_assoc_request and sctp_sk_clone (Ondrej Mosnacek) [2084044 2078856]
+
+* Wed May 11 2022 Herton R. Krzesinski <herton@redhat.com> [5.14.0-70.14.1.el9_0]
+- PCI: hv: Propagate coherence from VMbus device to PCI device (Vitaly Kuznetsov) [2074830 2068432]
+- Drivers: hv: vmbus: Propagate VMbus coherence to each VMbus device (Vitaly Kuznetsov) [2074830 2068432]
+- redhat: rpminspect: disable 'patches' check for known empty patch files (Herton R. Krzesinski)
+- redhat/configs: make SHA512_arch algos and CRYPTO_USER built-ins (Vladis Dronov) [2072643 2070624]
+- CI: Drop baseline runs (Veronika Kabatova)
 
 * Thu Apr 14 2022 Herton R. Krzesinski <herton@redhat.com> [5.14.0-70.13.1.el9_0]
 - redhat: disable uncommon media device infrastructure (Jarod Wilson) [2074598]

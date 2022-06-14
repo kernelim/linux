@@ -701,12 +701,12 @@ subsystems:
    status: Supported
    requiredApproval: false
    maintainers:
-     - name: Josef Oskera
-       email: joskera@redhat.com
-       gluser: joskera
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
    paths:
        includes:
-          - drivers/net/ethernet/realtek/r8169.c
+          - drivers/net/ethernet/realtek/r8169*
  - subsystem: ACCESSIBILITY SUBSYSTEM
    labels:
      name: accessibility
@@ -787,9 +787,9 @@ subsystems:
    status: Supported
    requiredApproval: false
    maintainers:
-     - name: Petr Oros
-       email: poros@redhat.com
-       gluser: poros2
+     - name: Josef Oskera
+       email: joskera@redhat.com
+       gluser: joskera
    paths:
        includes:
           - Documentation/networking/ena.txt
@@ -1189,6 +1189,9 @@ subsystems:
      - name: Viktor Malik
        email: vmalik@redhat.com
        gluser: vmalikrh
+     - name: Artem Savkov
+       email: asavkov@redhat.com
+       gluser: artem.savkov
    paths:
        includes:
           - arch/*/net/*
@@ -1839,6 +1842,9 @@ subsystems:
      - name: Bob Peterson
        email: rpeterso@redhat.com
        gluser: rpeterso1
+     - name: Andreas Gruenbacher
+       email: agruenba@redhat.com
+       gluser: agruenba
    paths:
        includes:
           - fs/dlm/
@@ -2290,6 +2296,7 @@ subsystems:
           - include/linux/futex.h
           - include/uapi/linux/futex.h
           - kernel/futex.c
+          - kernel/futex/
           - tools/perf/bench/futex*
           - tools/testing/selftests/futex/
  - subsystem: GENERIC PHY FRAMEWORK
@@ -2696,22 +2703,21 @@ subsystems:
    status: Supported
    requiredApproval: false
    maintainers:
-     - name: Jonathan Toppins
-       email: jtoppins@redhat.com
-       gluser: jtoppins_redhat
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
    paths:
        includes:
           - drivers/net/ethernet/intel/ice/
-          - include/net/intel/
  - subsystem: INTEL I40E ETHERNET DRIVERS (i40e)
    labels:
      name: i40e
    status: Supported
    requiredApproval: false
    maintainers:
-     - name: Stefan Assmann
-       email: sassmann@redhat.com
-       gluser: sassmann_rh
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
    paths:
        includes:
           - drivers/net/ethernet/intel/i40e/
@@ -2734,12 +2740,16 @@ subsystems:
    status: Supported
    requiredApproval: false
    maintainers:
-     - name: Stefan Assmann
-       email: sassmann@redhat.com
-       gluser: sassmann_rh
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
    paths:
        includes:
           - drivers/net/ethernet/intel/iavf/
+          - include/linux/avf/
  - subsystem: INTEL IGB ETHERNET DRIVERS (igb)
    labels:
      name: igb
@@ -3051,10 +3061,12 @@ subsystems:
           - kernel/*.[ch]
        excludes:
           - kernel/audit*
+          - kernel/bpf/
           - kernel/crash_*.c
           - kernel/futex.c
           - kernel/kexec*
           - kernel/rcu/
+          - kernel/trace/
  - subsystem: KERNEL VIRTUAL MACHINE (KVM)
    labels:
      name: kvm
@@ -3463,6 +3475,10 @@ subsystems:
    status: Supported
    requiredApproval: false
    maintainers:
+     - name: Dean Nelson
+       email: dnelson@redhat.com
+       gluser: dnlsn
+   reviewers:
      - name: Jarod Wilson
        email: jarod@redhat.com
        gluser: jwilsonrh
@@ -4000,20 +4016,26 @@ subsystems:
           - Documentation/networking/rds*
           - Documentation/networking/regulatory*
           - Documentation/networking/rxrpc*
+          - include/linux/netfs.h
           - include/net/*80211*
           - include/net/*80215*
           - include/net/af_vsock.h
           - include/net/bluetooth/
+          - include/net/calipso.h
+          - include/net/cipso_ipv4.h
           - include/net/intel/
           - include/net/irda/
           - include/net/iucv/
           - include/net/iw*
+          - include/net/netlabel.h
           - include/net/regulatory.h
           - include/net/vsock_addr.h
           - net/bluetooth/
           - net/can/
           - net/ceph/
           - net/ieee802154/
+          - net/ipv4/cipso_ipv4.c
+          - net/ipv6/calipso.c
           - net/irda/
           - net/iucv/
           - net/mac80211/
@@ -4035,8 +4057,6 @@ subsystems:
  - subsystem: NETWORKING [LABELED] (NetLabel, Labeled IPsec, SECMARK)
    labels:
      name: netlabel
-     readyForMergeDeps:
-       - lnst
    status: Supported
    requiredApproval: false
    maintainers:
@@ -4076,6 +4096,25 @@ subsystems:
           - drivers/net/team/
           - include/linux/if_team.h
           - include/uapi/linux/if_team.h
+ - subsystem: NETWORKING [TUNTAP]
+   labels:
+     name: tuntap
+     readyForMergeDeps:
+       - lnst
+     emailLabel: net
+   status: Supported
+   requiredApproval: false
+   maintainers:
+     - name: Jason Wang
+       email: jasowang@redhat.com
+       gluser: jasowang
+   paths:
+       includes:
+          - drivers/net/tap.c
+          - drivers/net/tun.c
+          - include/linux/if_tap.h
+          - include/linux/if_tun.h
+          - include/uapi/linux/if_tun.h
  - subsystem: NETXEN (1/10) GbE SUPPORT
    labels:
      name: netxen
@@ -4173,10 +4212,13 @@ subsystems:
      - name: Josef Oskera
        email: joskera@redhat.com
        gluser: joskera
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
    paths:
        includes:
           # ethernet
-          - drivers/net/ethernet
+          - drivers/net/ethernet/
           # infiniband
           - drivers/infiniband/
           - include/rdma/
@@ -4188,7 +4230,7 @@ subsystems:
           # wireless
           - Documentation/networking/mac80211*
           - Documentation/networking/regulatory*
-          - drivers/net/wireless
+          - drivers/net/wireless/
           - net/mac80211/
           - net/wireless/
           - net/rfkill/
@@ -4199,7 +4241,7 @@ subsystems:
           - include/uapi/linux/nl80211.h
           - include/uapi/linux/wireless.h
           # bonding
-          - drivers/net/bonding
+          - drivers/net/bonding/
           - include/linux/if_bonding.h
           # phy
           - Documentation/networking/phy.rst
@@ -4218,7 +4260,7 @@ subsystems:
           # dsa
           - Documentation/devicetree/bindings/net/dsa/
           - Documentation/networking/dsa/
-          - drivers/net/dsa
+          - drivers/net/dsa/
           - include/linux/dsa/
           - include/linux/platform_data/dsa.h
           - include/net/dsa.h
@@ -4487,6 +4529,7 @@ subsystems:
    paths:
        includes:
           - drivers/pci/
+          - include/linux/pci*
  - subsystem: PCI-E NON-TRANSPARENT BRIDGE
    labels:
      name: pcintb
@@ -4625,6 +4668,21 @@ subsystems:
    paths:
        includes:
           - drivers/platform/x86/
+ - subsystem: Platform Environment Control Interface (PECI)
+   labels:
+     name: peci
+   status: Disabled
+   requiredApproval: false
+   maintainers:
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/peci
  - subsystem: PNP SUPPORT
    labels:
      name: pnp
@@ -5125,6 +5183,9 @@ subsystems:
      - name: Oleg Nesterov
        email: onestero@redhat.com
        gluser: onestero
+     - name: Valentin Schneider
+       email: vschneid@redhat.com
+       gluser: vschneid
    paths:
        includes:
           - kernel/sched/
@@ -5785,7 +5846,7 @@ subsystems:
        gluser: tcamuso
    paths:
        includes:
-          - drivers/media/video/uvc/
+          - drivers/media/usb/uvc/
  - subsystem: VFIO DRIVER
    labels:
      name: vfio
@@ -5849,6 +5910,12 @@ subsystems:
      - name: Ben Skeggs
        email: bskeggs@redhat.com
        gluser: bskeggs
+     - name: Jocelyn Falempe
+       email: jfalempe@redhat.com
+       gluser: kdj0c
+     - name: Mika Penttilä
+       email: mpenttil@redhat.com
+       gluser: mpenttil
    paths:
        includes:
           - drivers/gpu/
@@ -6094,6 +6161,9 @@ subsystems:
      - name: Íñigo Huguet
        email: ihuguet@redhat.com
        gluser: ihuguet-rh
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
    reviewers:
      - name: Jarod Wilson
        email: jarod@redhat.com
@@ -6147,6 +6217,10 @@ subsystems:
      - name: Dean Nelson
        email: dnelson@redhat.com
        gluser: dnlsn
+   reviewers:
+     - name: Lenny Szubowicz
+       email: lszubowi@redhat.com
+       gluser: lszubowi
    paths:
        includes:
           - arch/x86/
@@ -6188,6 +6262,7 @@ subsystems:
        gluser: prarit
    paths:
        includes:
+          - arch/x86/include/asm/fpu/
           - arch/x86/kernel/fpu/
  - subsystem: XDP (eXpress Data Path)
    labels:

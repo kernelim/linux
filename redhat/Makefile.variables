@@ -38,3 +38,12 @@ USE_DIST_IN_SOURCE:=1
 # to '0'.
 INCLUDE_FEDORA_FILES:=0
 INCLUDE_RHEL_FILES:=1
+
+# This can be used to change the filename of the specfile.  For example, it can
+# be set to "kernel" for kernel.spec or "kernel-rt" for kernel-rt.spec.  This
+# is useful for other projects with different specfile names.
+PACKAGE_NAME ?= kernel
+
+# This is the executable for 'git' commands.  It is used by the redhat/self-test
+# tests to provide testing information on git hashes (see redhat/self-test/egit.sh)
+GIT ?= git

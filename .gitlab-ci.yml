@@ -24,7 +24,7 @@ workflow: !reference [.workflow]
     branch: rhel9
   variables:
     name: rhel9
-    builder_image: quay.io/cki/builder-rhel9
+    builder_image: quay.io/cki/builder-rhel9.0
     kpet_tree_family: rhel9
 
 .realtime_check_rhel9:
@@ -51,16 +51,6 @@ rhel9_realtime_check_merge_request:
             .realtime_check_common,
             .trigger_rhel9_pipeline, .realtime_check_rhel9]
 
-rhel9_baseline:
-  extends: [.internal, .baseline, .rhel_common, .with_notifications,
-            .9-common, .trigger_rhel9_pipeline]
-
-rhel9_realtime_check_baseline:
-  extends: [.internal, .baseline,
-            .9-common,
-            .realtime_check_baseline,
-            .trigger_rhel9_pipeline, .realtime_check_rhel9]
-
 rhel9_baseline_coverage_build:
   extends: [.internal, .baseline, .rhel_common, .only_build_and_publish, .coverage,
             .9-common, .trigger_rhel9_pipeline]
@@ -68,12 +58,6 @@ rhel9_baseline_coverage_build:
 # RHEL9 realtime branch CI
 rhel9_realtime_merge_request:
   extends: [.internal, .merge_request,
-            .9-common,
-            .realtime_pipeline_common,
-            .trigger_rhel9_pipeline, .realtime_full_rhel9]
-
-rhel9_realtime_baseline:
-  extends: [.internal, .baseline,
             .9-common,
             .realtime_pipeline_common,
             .trigger_rhel9_pipeline, .realtime_full_rhel9]

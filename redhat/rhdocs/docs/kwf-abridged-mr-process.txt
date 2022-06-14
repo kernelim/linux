@@ -1,0 +1,138 @@
+
+MR Submission Prerequisites
+
+* For more details on the Kernel Work Flow in general, see...
+  https://red.ht/KWF-Quick-Start
+
+* Establish your gitlab account
+  https://red.ht/gitlab-configuration-guide
+
+* You must have a bugzilla number in order to submit an MR.
+  If the bugzilla does not yet exist, create it.
+  https://red.ht/Preparing-for-MR-sumbission
+
+* To correctly merge your changes when you have dependencies, you must
+  add the following merge-requests line to the [remote "origin"] stanza
+  of the .git/config file in your repo directory.
+      fetch = +refs/merge-requests/*/head:refs/remotes/origin/merge-requests/*
+
+  Here is an example of the [remote "origin"] stanza from a rhel-8 repo
+  directory.
+
+  [remote "origin"]
+      url = git@gitlab.com:redhat/rhel/src/kernel/rhel-8.git
+      fetch = +refs/heads/*:refs/remotes/origin/*
+      fetch = +refs/merge-requests/*/head:refs/remotes/origin/merge-requests/*
+
+* Create a template text file for the description for your MR submission.
+  Every MR description should be formatted as follows. Use three backticks
+  after the Summary Line in order to guarantee proper line fomatting.
+
+  <empty line for summary line>
+  <empty line>
+  ```
+  Bugzilla:
+  Upstream Status:
+  <empty line>
+  <Description Text>
+
+  Signed-off-by: Your Name <your-email@redhat.com>
+
+* Command line MR submissions require the lab utility.
+  If you're using the gitlab Web UI to submit MRs, you can skip these steps.
+
+  * Install the lab app.
+    https://red.ht/lab-utility-config-and-use
+
+  * Create the ~/.config/lab/lab.toml file
+    with the following contents.
+
+    [core]
+       host = "https://gitlab.com"
+       token = "<your token enclosed in double quotes"
+       user = "<your username enlcosed in double quotes"
+
+
+Abridged MR Submission Process
+
+* Set bugzilla flags and milestone dates
+  https://red.ht/bugzilla-and-gitlab-process
+
+  * Get release approval for the bugzilla
+    http://pkgs.devel.redhat.com/rules.html
+
+* git clone the project, if it doesn't already exist
+  Don't forget to add the merge-requests line to the [remote "origin"]
+  stanza in the .git/config file in the cloned directory.
+  See "MR Submission Prerequisites" above.
+
+* Create your fork, if it doesn't already exist
+  You can do this from the project's gitlab Web UI.
+  From the command line with the lab utility, type ...
+  $ lab fork
+
+* If you have already cloned the project, update it.
+  $ git fetch --all
+  $ git checkout main
+  $ git pull
+
+* Checkout a branch to do your work
+  $ git checkout -b <workbranch>
+
+* If your changes are dependent on a specific MR that has not been merged
+  yet, then issue the following command.
+  $ git merge origin/merge_requests/<MR number of depencency>
+
+* Make your edits, bugfixes, backports, etc.
+  Be sure to commit your changes with 'git commit -s' to get your
+  signoff.
+
+* Push your changes with upstream tracking to your fork, fork <-- branch.
+  $ git push --set-upstream <myfork> <workbranch>
+
+* Edit a copy of your MR description template file for your merge request.
+  See MR Submission Prerequisites above.
+  * Enter the summary line.
+  * Add the link to the bugzilla.
+  * Enter the upstream status, e.g. v5.18 or a link to an upstream repo.
+  * Enter links to any brew builds or test results
+  * Write the description.
+
+* Create your merge request.
+  If you're using the gitlab Web UI to create the MR, you can skip these
+  command line steps.
+  $ git checkout <workbranch>
+  $ lab mr create \
+      -f <edited-MR-description>.txt \
+      --force-linebreak \
+      -r <reviewer> -r <reviewer> -r <reviewer> \
+      origin
+
+* Modify your merge request
+  $ git checkout <workbranch>
+    <make your edits, additions, deletions, etc>
+  $ git commit -s <edited files>
+  $ git push -f <myfork> <workbranch>
+
+
+Addendum
+
+While synchronizing your fork to the latest commit in origin is not
+necessary, it is annoying to see dozens of commits having nothing
+to do with your work being pushed to your fork, because it is out
+of sync with the origin.
+
+If you want to update your fork before pushing your changes to it,
+a force push may be required depending on the state of your local
+branch or the remote branch. In which case, you must assure that
+it allows a forced push.
+
+* All your forks are listed at https://gitlab/<username>
+* Select one of your forks to synchronize.
+* When your fork page appears, it looks just like the main repo page.
+* Hover over settings button (gear symbol) at bottom of the left column.
+* Select 'Repository' from the list that appears
+* Click the 'Expand' button to the right of the  'Protected Branches' field
+* Scroll down to the bottom of that entry where it lists protected branches
+  to the row starting with 'main'.
+* Slide the 'Allow to force push' to its 'ON' position.

@@ -19,3 +19,8 @@ emptyrpm:
         - kernel-zfcpdump
         - kernel-zfcpdump-devel-matched
         - kernel-zfcpdump-modules
+
+patches:
+    ignore_list:
+        - linux-kernel-test.patch
+        - patch-5.14.0-redhat.patch

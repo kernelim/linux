@@ -21,11 +21,9 @@ Red Hat uses GitLab to manage the patch workflow, and all changes must be submit
 == Alternative Code Submission Formats
 Contributors may submit changesets in formats other than are detailed in this document.  Contributors using alternative code submission formats must obtain consensus with their reviewers, approvers, and maintainers on acceptance of the alternative format.  When submitting with an alternative format contributors may be asked for future commitments to security and z-stream fixes.
 
-== Machine Readable Tag Formats
+== Tag Format
 
-Machine readable tags are acceptable in Merge Request descriptions or commit comments. Human Readable tags can be converted to Machine Readable format by replacing spaces with hyphens (-), using an upper-case letter at the beginning of the string, and replacing all upper-case letters with lower-case letters in the remaining string.
-
-For example, "Upstream Status:" can be converted to "Upstream-status:".  Both formats are valid and must be recognized by the kernel-webhooks and tools.
+Tags described below are accepted space separated or hyphen separated, with the first word capitalized or all words capitalized. For example, all of "Upstream status:", "Upstream Status:", "Upstream-status:" and "Upstream-Status:" are valid and must be recognized by the kernel-webhooks and custom tools.
 
 == Use of the term "Upstream"
 
@@ -106,10 +104,13 @@ Each commit in a changeset and the MR description must reference at least one Re
 
 Changesets that are lacking a bugzilla number will not be committed and will be immediately flagged by the project’s webhooks.  Every changeset needs to be coordinated with other groups at Red Hat(management, QE, Documentation, etc.) and the coordination is handled through bugzilla flags and state.  If the link:pkgs.devel.redhat.com/rules.html[bugzilla flags] and state are appropriately set on a bugzilla, then and only then, will the associated changeset be considered for inclusion into the project by the maintainers.
 
+The INTERNAL keyword can be substituted for a bugzilla URL.  The INTERNAL keyword indicates a change to code that is considered to have minimal customer impact such as changes to files in the redhat directory (excluding CONFIG* files) or the .gitlab-ci.yaml file.
+
 Good examples for bugzilla URLS in the description:
 
     Bugzilla: https://bugzilla.redhat.com/show_bug.cgi?id=783023
     Bugzilla: https://bugzilla.redhat.com/783023
+    Bugzilla: INTERNAL
 
 ==== 2b. Testing Details (required)
 The MR description must include information about how the changeset was tested.  This information can include links to test results in a bugzilla or a text description of the results.
@@ -119,7 +120,7 @@ If the upstream source tree is not linux.git, the description must include a URL
 
 If the changeset is not in Linus' linux.git tree, please specify the URL of the source tree, a URL to the patch posting on a mailing list, or explain why the changeset is unique to RHEL.
 
-Non-upstream change tracking is useful for Engineering teams monitoring current, future, and update releases, therefore changesets that are not in an upstream tree and are unique to RHEL must have upstream status in the format "RHELX.Y.Z only".  "RHEL only" must be used for changesets that must be applied to future versions of RHEL.  Changes that will only be applied to a specific major release must have status "RHELX only", and changesets in a minor release that are temporary workarounds must be specified in the format "RHELX.Y only". Temporary workaround changesets can also include additional information about future work in parenthesis.  Unique z-stream fixes must be specified with upstream status as "RHELX.Y.Z only".
+Non-upstream change tracking is useful for Engineering teams monitoring current, future, and update releases, therefore changesets that are not in an upstream tree and are unique to RHEL must have upstream status in the format "RHELX.Y.Z only".  "RHEL only" must be used for changesets that must be applied to future versions of RHEL.  Changes that will only be applied to a specific major release must have status "RHELX only", and changesets in a minor release that are temporary workarounds must be specified in the format "RHELX.Y only". Temporary workaround changesets can also include additional information about future work in parenthesis.  Unique z-stream fixes must be specified with upstream status as "RHELX.Y.Z only".  This follows the Tag Format described above, making "RHEL-Only" and similar forms acceptable, too.
 
 Changes that have been sent upstream but have not been included in an upstream repo must have status “Posted” followed by a link to the upstream post, merge request, or pull request.
 
@@ -129,6 +130,7 @@ Good examples of Upstream Status for changesets that are not in Linus’ linux.g
 
     Upstream Status: https://git.kernel.org/pub/scm/linux/kernel/git/next/linux-next.git
     Upstream Status: RHEL only
+    Upstream Status: RHEL Only
     Upstream Status: RHEL8.1 only (to be removed in BZ 123456)
     Upstream Status: Posted https://lore.kernel.org/lkml/87ft4djtyp.fsf@nanos.tec.linutronix.de/
     Upstream-status: RHEL8.6 only

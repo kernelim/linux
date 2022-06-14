@@ -212,7 +212,7 @@ drivers/scsi/3w-9xxx*	thenzl@redhat.com
 drivers/net/ethernet/realtek/8139cp.c	ivecera@redhat.com
 
 ^[8169 10/100/1000 GIGABIT ETHERNET DRIVER (r8169)]
-drivers/net/ethernet/realtek/r8169.c	joskera@redhat.com
+drivers/net/ethernet/realtek/r8169*	jtornosm@redhat.com
 
 ^[ACCESSIBILITY SUBSYSTEM]
 drivers/accessibility/	dledford@redhat.com prarit@redhat.com
@@ -242,9 +242,9 @@ drivers/media/pci/ivtv/ivtv-alsa*	jkysela@redhat.com
 drivers/media/usb/tm6000/tm6000-alsa.c	jkysela@redhat.com
 
 ^[AMAZON ETHERNET DRIVERS]
-Documentation/networking/ena.txt	poros@redhat.com
-Documentation/networking/device_drivers/ethernet/amazon/ena.rst	poros@redhat.com
-drivers/net/ethernet/amazon/	poros@redhat.com
+Documentation/networking/ena.txt	joskera@redhat.com
+Documentation/networking/device_drivers/ethernet/amazon/ena.rst	joskera@redhat.com
+drivers/net/ethernet/amazon/	joskera@redhat.com
 
 ^[AMAZON RDMA EFA DRIVER (efa)]
 drivers/infiniband/hw/efa/	kheib@redhat.com
@@ -611,6 +611,7 @@ include/asm-generic/futex.h	longman@redhat.com
 include/linux/futex.h	longman@redhat.com
 include/uapi/linux/futex.h	longman@redhat.com
 kernel/futex.c	longman@redhat.com
+kernel/futex/	longman@redhat.com
 tools/perf/bench/futex*	longman@redhat.com
 tools/testing/selftests/futex/	longman@redhat.com
 
@@ -729,18 +730,18 @@ drivers/net/ethernet/intel/e1000/	jkc@redhat.com
 drivers/net/ethernet/intel/e1000e/	jkc@redhat.com
 
 ^[INTEL ETHERNET CONNECTION E800 SERIES (ice)]
-drivers/net/ethernet/intel/ice/	jtoppins@redhat.com
-include/net/intel/	jtoppins@redhat.com
+drivers/net/ethernet/intel/ice/	poros@redhat.com
 
 ^[INTEL I40E ETHERNET DRIVERS (i40e)]
-drivers/net/ethernet/intel/i40e/	sassmann@redhat.com
+drivers/net/ethernet/intel/i40e/	ivecera@redhat.com
 
 ^[INTEL I40IW IWARP DRIVER (i40iw)]
 drivers/infiniband/hw/i40iw/	sassmann@redhat.com
 include/uapi/rdma/i40iw-abi.h	sassmann@redhat.com
 
 ^[INTEL IAVF ETHERNET DRIVERS (iavf)]
-drivers/net/ethernet/intel/iavf/	sassmann@redhat.com
+drivers/net/ethernet/intel/iavf/	poros@redhat.com ivecera@redhat.com
+include/linux/avf/	poros@redhat.com ivecera@redhat.com
 
 ^[INTEL IGB ETHERNET DRIVERS (igb)]
 drivers/net/ethernet/intel/igb/	vinschen@redhat.com
@@ -820,10 +821,12 @@ arch/x86/mm/kaslr.c	bhe@redhat.com
 ^[KERNEL INIT (and related code)]
 kernel/*.[ch]	prarit@redhat.com
 ^kernel/audit*	prarit@redhat.com
+^kernel/bpf/	prarit@redhat.com
 ^kernel/crash_*.c	prarit@redhat.com
 ^kernel/futex.c	prarit@redhat.com
 ^kernel/kexec*	prarit@redhat.com
 ^kernel/rcu/	prarit@redhat.com
+^kernel/trace/	prarit@redhat.com
 
 ^[KERNEL VIRTUAL MACHINE (KVM)]
 Documentation/virt/kvm/	pbonzini@redhat.com bsd@redhat.com vkuznets@redhat.com
@@ -940,13 +943,13 @@ arch/x86/kernel/cpu/mcheck/	prarit@redhat.com
 drivers/mailbox/	ahs3@redhat.com
 
 ^[MEDIA INPUT INFRASTRUCTURE (V4L/DVB)]
-drivers/media/	jarod@redhat.com
-include/media/	jarod@redhat.com
-include/uapi/linux/dvb/	jarod@redhat.com
-include/uapi/linux/videodev2.h	jarod@redhat.com
-include/uapi/linux/media.h	jarod@redhat.com
-include/uapi/linux/v4l2-*	jarod@redhat.com
-include/uapi/linux/ivtv*	jarod@redhat.com
+drivers/media/	dnelson@redhat.com
+include/media/	dnelson@redhat.com
+include/uapi/linux/dvb/	dnelson@redhat.com
+include/uapi/linux/videodev2.h	dnelson@redhat.com
+include/uapi/linux/media.h	dnelson@redhat.com
+include/uapi/linux/v4l2-*	dnelson@redhat.com
+include/uapi/linux/ivtv*	dnelson@redhat.com
 
 ^[MELLANOX ETHERNET SWITCH DRIVERS]
 drivers/net/ethernet/mellanox/mlxsw/	ivecera@redhat.com
@@ -1144,20 +1147,26 @@ tools/testing/selftests/wireguard/	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/rds*	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/regulatory*	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/rxrpc*	jbenc@redhat.com mleitner@redhat.com
+^include/linux/netfs.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/*80211*	jbenc@redhat.com mleitner@redhat.com
 ^include/net/*80215*	jbenc@redhat.com mleitner@redhat.com
 ^include/net/af_vsock.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/bluetooth/	jbenc@redhat.com mleitner@redhat.com
+^include/net/calipso.h	jbenc@redhat.com mleitner@redhat.com
+^include/net/cipso_ipv4.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/intel/	jbenc@redhat.com mleitner@redhat.com
 ^include/net/irda/	jbenc@redhat.com mleitner@redhat.com
 ^include/net/iucv/	jbenc@redhat.com mleitner@redhat.com
 ^include/net/iw*	jbenc@redhat.com mleitner@redhat.com
+^include/net/netlabel.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/regulatory.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/vsock_addr.h	jbenc@redhat.com mleitner@redhat.com
 ^net/bluetooth/	jbenc@redhat.com mleitner@redhat.com
 ^net/can/	jbenc@redhat.com mleitner@redhat.com
 ^net/ceph/	jbenc@redhat.com mleitner@redhat.com
 ^net/ieee802154/	jbenc@redhat.com mleitner@redhat.com
+^net/ipv4/cipso_ipv4.c	jbenc@redhat.com mleitner@redhat.com
+^net/ipv6/calipso.c	jbenc@redhat.com mleitner@redhat.com
 ^net/irda/	jbenc@redhat.com mleitner@redhat.com
 ^net/iucv/	jbenc@redhat.com mleitner@redhat.com
 ^net/mac80211/	jbenc@redhat.com mleitner@redhat.com
@@ -1195,6 +1204,13 @@ drivers/net/team/	haliu@redhat.com lxin@redhat.com
 include/linux/if_team.h	haliu@redhat.com lxin@redhat.com
 include/uapi/linux/if_team.h	haliu@redhat.com lxin@redhat.com
 
+^[NETWORKING [TUNTAP]]
+drivers/net/tap.c	jasowang@redhat.com
+drivers/net/tun.c	jasowang@redhat.com
+include/linux/if_tap.h	jasowang@redhat.com
+include/linux/if_tun.h	jasowang@redhat.com
+include/uapi/linux/if_tun.h	jasowang@redhat.com
+
 ^[NETXEN (1/10) GbE SUPPORT]
 drivers/net/ethernet/qlogic/netxen/	mchopra@redhat.com tcamuso@redhat.com
 
@@ -1205,7 +1221,7 @@ fs/nfs/	bcodding@redhat.com bfields@redhat.com steved@redhat.com smayhew@redhat.
 fs/nfsd/	bcodding@redhat.com bfields@redhat.com steved@redhat.com smayhew@redhat.com
 
 ^[NIC DRIVERS AND RDMA]
-drivers/net/ethernet	
+drivers/net/ethernet/	
 drivers/infiniband/	
 include/rdma/	
 include/uapi/rdma/	
@@ -1215,7 +1231,7 @@ include/linux/mlx4/
 include/linux/mlx5/	
 Documentation/networking/mac80211*	
 Documentation/networking/regulatory*	
-drivers/net/wireless	
+drivers/net/wireless/	
 net/mac80211/	
 net/wireless/	
 net/rfkill/	
@@ -1225,7 +1241,7 @@ include/net/iw*
 include/net/regulatory.h	
 include/uapi/linux/nl80211.h	
 include/uapi/linux/wireless.h	
-drivers/net/bonding	
+drivers/net/bonding/	
 include/linux/if_bonding.h	
 Documentation/networking/phy.rst	
 drivers/net/phy/	
@@ -1241,7 +1257,7 @@ include/uapi/linux/mii.h
 include/net/intel/	
 Documentation/devicetree/bindings/net/dsa/	
 Documentation/networking/dsa/	
-drivers/net/dsa	
+drivers/net/dsa/	
 include/linux/dsa/	
 include/linux/platform_data/dsa.h	
 include/net/dsa.h	
@@ -1321,6 +1337,7 @@ drivers/pci/hotplug/	prarit@redhat.com myron.stowe@redhat.com
 
 ^[PCI SUBSYSTEM]
 drivers/pci/	myron.stowe@redhat.com prarit@redhat.com
+include/linux/pci*	myron.stowe@redhat.com prarit@redhat.com
 
 ^[PCI-E NON-TRANSPARENT BRIDGE]
 drivers/pci/	linville@redhat.com myron.stowe@redhat.com
@@ -1642,7 +1659,7 @@ drivers/uio/	arozansk@redhat.com
 usr/	prarit@redhat.com
 
 ^[UVC WEBCAM DRIVER]
-drivers/media/video/uvc/	tcamuso@redhat.com
+drivers/media/usb/uvc/	tcamuso@redhat.com
 
 ^[VFIO DRIVER]
 Documentation/vfio.txt	alex.williamson@redhat.com eric.auger@redhat.com
@@ -1727,18 +1744,18 @@ include/linux/watchdog.h	prarit@redhat.com
 include/uapi/linux/watchdog.h	prarit@redhat.com
 
 [WIRELESS DRIVERS AND STACK]
-Documentation/networking/mac80211*	ihuguet@redhat.com
-Documentation/networking/regulatory*	ihuguet@redhat.com
-drivers/net/wireless/	ihuguet@redhat.com
-net/mac80211/	ihuguet@redhat.com
-net/wireless/	ihuguet@redhat.com
-net/rfkill/	ihuguet@redhat.com
-include/linux/*80211*	ihuguet@redhat.com
-include/net/*80211*	ihuguet@redhat.com
-include/net/iw*	ihuguet@redhat.com
-include/net/regulatory.h	ihuguet@redhat.com
-include/uapi/linux/nl80211.h	ihuguet@redhat.com
-include/uapi/linux/wireless.h	ihuguet@redhat.com
+Documentation/networking/mac80211*	ihuguet@redhat.com jtornosm@redhat.com
+Documentation/networking/regulatory*	ihuguet@redhat.com jtornosm@redhat.com
+drivers/net/wireless/	ihuguet@redhat.com jtornosm@redhat.com
+net/mac80211/	ihuguet@redhat.com jtornosm@redhat.com
+net/wireless/	ihuguet@redhat.com jtornosm@redhat.com
+net/rfkill/	ihuguet@redhat.com jtornosm@redhat.com
+include/linux/*80211*	ihuguet@redhat.com jtornosm@redhat.com
+include/net/*80211*	ihuguet@redhat.com jtornosm@redhat.com
+include/net/iw*	ihuguet@redhat.com jtornosm@redhat.com
+include/net/regulatory.h	ihuguet@redhat.com jtornosm@redhat.com
+include/uapi/linux/nl80211.h	ihuguet@redhat.com jtornosm@redhat.com
+include/uapi/linux/wireless.h	ihuguet@redhat.com jtornosm@redhat.com
 
 ^[WIRELESS [LR-WPAN] (IEEE 802.15.4)]
 Documentation/networking/ieee802154.rst	crecklin@redhat.com
@@ -1771,6 +1788,7 @@ tools/power/x86/	darcari@redhat.com prarit@redhat.com dnelson@redhat.com
 ^arch/x86/net/	darcari@redhat.com prarit@redhat.com dnelson@redhat.com
 
 [X86 FPU SUBSYSTEM]
+arch/x86/include/asm/fpu/	dnelson@redhat.com
 arch/x86/kernel/fpu/	dnelson@redhat.com
 
 ^[XDP (eXpress Data Path)]
