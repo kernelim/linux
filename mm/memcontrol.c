@@ -2714,6 +2714,8 @@ static int mem_cgroup_do_charge(struct mem_cgroup *memcg, gfp_t gfp_mask,
 		 * charging allocations that carry the __GFP_NOFAIL flag.
 		 */
 		page_counter_charge(&memcg->memory, nr_pages);
+		if (do_swap_account)
+			page_counter_charge(&memcg->memsw, nr_pages);
 
 		return CHARGE_OK;
 	} else

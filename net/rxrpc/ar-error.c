@@ -32,6 +32,7 @@ void rxrpc_UDP_error_report(struct sock *sk)
 	struct rxrpc_local *local = sk->sk_user_data;
 	struct rxrpc_peer *peer;
 	struct sk_buff *skb;
+	unsigned long flags;
 	__be32 addr;
 	__be16 port;
 
@@ -111,15 +112,15 @@ void rxrpc_UDP_error_report(struct sock *sk)
 	rxrpc_queue_work(&trans->error_handler);
 
 	/* reset and regenerate socket error */
-	spin_lock_bh(&sk->sk_error_queue.lock);
+	spin_lock_irqsave(&sk->sk_error_queue.lock, flags);
 	sk->sk_err = 0;
 	skb = skb_peek(&sk->sk_error_queue);
 	if (skb) {
 		sk->sk_err = SKB_EXT_ERR(skb)->ee.ee_errno;
-		spin_unlock_bh(&sk->sk_error_queue.lock);
+		spin_unlock_irqrestore(&sk->sk_error_queue.lock, flags);
 		sk->sk_error_report(sk);
 	} else {
-		spin_unlock_bh(&sk->sk_error_queue.lock);
+		spin_unlock_irqrestore(&sk->sk_error_queue.lock, flags);
 	}
 
 	_leave("");

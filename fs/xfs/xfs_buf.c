@@ -607,24 +607,35 @@ _xfs_buf_find(
 		parent = *rbp;
 		bp = rb_entry(parent, struct xfs_buf, b_rbnode);
 
-		if (blkno < bp->b_bn)
+		/*
+		 * RHEL7: Use the buffer length as a secondary index for buffers
+		 * with a matching block number.
+		 *
+		 * Descend the tree looking for a block number match. If found
+		 * and the block length doesn't match, use the length as a
+		 * secondary index to continue searching and/or as an insertion
+		 * point for the new buffer. This code historically hardcoded
+		 * insertion of duplicate bn buffers to the right branch of the
+		 * resident buffer, but this corrupts the rb_tree with certain
+		 * combinations of tree rotations and duplicate buffers. Note
+		 * that this problem is rare in that duplicate buffers are only
+		 * allowed while the existing buffer has been marked stale and
+		 * all references have not yet been dropped. The upstream code
+		 * was replaced with a different mechanism before this problem
+		 * was ever discovered. Since that mechanism is not supportable
+		 * in RHEL7, this is a RHEL7 only behavior.
+		 */
+		if (blkno < bp->b_bn) {
 			rbp = &(*rbp)->rb_left;
-		else if (blkno > bp->b_bn)
+		} else if (blkno > bp->b_bn) {
 			rbp = &(*rbp)->rb_right;
-		else {
-			/*
-			 * found a block number match. If the range doesn't
-			 * match, the only way this is allowed is if the buffer
-			 * in the cache is stale and the transaction that made
-			 * it stale has not yet committed. i.e. we are
-			 * reallocating a busy extent. Skip this buffer and
-			 * continue searching to the right for an exact match.
-			 */
-			if (bp->b_length != numblks) {
-				ASSERT(bp->b_flags & XBF_STALE);
-				rbp = &(*rbp)->rb_right;
-				continue;
-			}
+		} else if (numblks < bp->b_length) {
+			ASSERT(bp->b_flags & XBF_STALE);
+			rbp = &(*rbp)->rb_left;
+		} else if (numblks > bp->b_length) {
+			ASSERT(bp->b_flags & XBF_STALE);
+			rbp = &(*rbp)->rb_right;
+		} else {
 			atomic_inc(&bp->b_hold);
 			goto found;
 		}

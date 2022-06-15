@@ -391,6 +391,7 @@ int ipv6_recv_error(struct sock *sk, struct msghdr *msg, int len, int *addr_len)
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	struct sock_exterr_skb *serr;
 	struct sk_buff *skb, *skb2;
+	unsigned long flags;
 	struct sockaddr_in6 *sin;
 	struct {
 		struct sock_extended_err ee;
@@ -479,14 +480,14 @@ int ipv6_recv_error(struct sock *sk, struct msghdr *msg, int len, int *addr_len)
 	err = copied;
 
 	/* Reset and regenerate socket error */
-	spin_lock_bh(&sk->sk_error_queue.lock);
+	spin_lock_irqsave(&sk->sk_error_queue.lock, flags);
 	sk->sk_err = 0;
 	if ((skb2 = skb_peek(&sk->sk_error_queue)) != NULL) {
 		sk->sk_err = SKB_EXT_ERR(skb2)->ee.ee_errno;
-		spin_unlock_bh(&sk->sk_error_queue.lock);
+		spin_unlock_irqrestore(&sk->sk_error_queue.lock, flags);
 		sk->sk_error_report(sk);
 	} else {
-		spin_unlock_bh(&sk->sk_error_queue.lock);
+		spin_unlock_irqrestore(&sk->sk_error_queue.lock, flags);
 	}
 
 out_free_skb:
