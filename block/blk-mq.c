@@ -1943,28 +1943,17 @@ static int plug_rq_cmp(void *priv, struct list_head *a, struct list_head *b)
 	return blk_rq_pos(rqa) > blk_rq_pos(rqb);
 }
 
-void blk_mq_flush_plug_list(struct blk_plug *plug, bool from_schedule)
+static void __blk_mq_flush_plug_list(struct list_head *list, bool from_schedule)
 {
-	LIST_HEAD(list);
-
-	if (list_empty(&plug->mq_list))
-		return;
-	list_splice_init(&plug->mq_list, &list);
-
-	if (plug->rq_count > 2 && plug->multiple_queues)
-		list_sort(NULL, &list, plug_rq_cmp);
-
-	plug->rq_count = 0;
-
 	do {
 		struct list_head rq_list;
-		struct request *rq, *head_rq = list_entry_rq(list.next);
+		struct request *rq, *head_rq = list_entry_rq(list->next);
 		struct list_head *pos = &head_rq->queuelist; /* skip first */
 		struct blk_mq_hw_ctx *this_hctx = head_rq->mq_hctx;
 		struct blk_mq_ctx *this_ctx = head_rq->mq_ctx;
 		unsigned int depth = 1;
 
-		list_for_each_continue(pos, &list) {
+		list_for_each_continue(pos, list) {
 			rq = list_entry_rq(pos);
 			BUG_ON(!rq->q);
 			if (rq->mq_hctx != this_hctx || rq->mq_ctx != this_ctx)
@@ -1972,11 +1961,26 @@ void blk_mq_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 			depth++;
 		}
 
-		list_cut_before(&rq_list, &list, pos);
+		list_cut_before(&rq_list, list, pos);
 		trace_block_unplug(head_rq->q, depth, !from_schedule);
 		blk_mq_sched_insert_requests(this_hctx, this_ctx, &rq_list,
 						from_schedule);
-	} while(!list_empty(&list));
+	} while(!list_empty(list));
+}
+
+void blk_mq_flush_plug_list(struct blk_plug *plug, bool from_schedule)
+{
+	LIST_HEAD(list);
+
+	while (!list_empty(&plug->mq_list)) {
+		list_splice_init(&plug->mq_list, &list);
+
+		if (plug->rq_count > 2 && plug->multiple_queues)
+			list_sort(NULL, &list, plug_rq_cmp);
+
+		plug->rq_count = 0;
+		__blk_mq_flush_plug_list(&list, from_schedule);
+	}
 }
 
 static void blk_mq_bio_to_request(struct request *rq, struct bio *bio)

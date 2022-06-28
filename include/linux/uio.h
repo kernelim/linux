@@ -27,6 +27,7 @@ struct kvec {
 enum iter_type {
 	/* set if ITER_BVEC doesn't hold a bv_page ref */
 	ITER_BVEC_FLAG_NO_REF = 2,
+	ITER_IOVEC_FLAG_NOFAULT = 128,
 
 	/* iter types */
 	ITER_IOVEC = 4,
@@ -41,6 +42,7 @@ struct iov_iter {
 	 * Bit 0 is the read/write bit, set if we're writing.
 	 * Bit 1 is the BVEC_FLAG_NO_REF bit, set if type is a bvec and
 	 * the caller isn't expecting to drop a page reference when done.
+	 * Bit 7 is the ITER_IOVEC_FLAG_NOFAULT bit.
 	 */
 	RH_KABI_REPLACE(int type, unsigned int type)
 	size_t iov_offset;
@@ -62,7 +64,9 @@ struct iov_iter {
 
 static inline enum iter_type iov_iter_type(const struct iov_iter *i)
 {
-	return i->type & ~(READ | WRITE | ITER_BVEC_FLAG_NO_REF);
+	return i->type & ~(READ | WRITE |
+			   ITER_BVEC_FLAG_NO_REF |
+			   ITER_IOVEC_FLAG_NOFAULT);
 }
 
 static inline bool iter_is_iovec(const struct iov_iter *i)
@@ -138,7 +142,8 @@ size_t iov_iter_copy_from_user_atomic(struct page *page,
 		struct iov_iter *i, unsigned long offset, size_t bytes);
 void iov_iter_advance(struct iov_iter *i, size_t bytes);
 void iov_iter_revert(struct iov_iter *i, size_t bytes);
-int iov_iter_fault_in_readable(struct iov_iter *i, size_t bytes);
+size_t fault_in_iov_iter_readable(const struct iov_iter *i, size_t bytes);
+size_t fault_in_iov_iter_writeable(const struct iov_iter *i, size_t bytes);
 size_t iov_iter_single_seg_count(const struct iov_iter *i);
 size_t copy_page_to_iter(struct page *page, size_t offset, size_t bytes,
 			 struct iov_iter *i);

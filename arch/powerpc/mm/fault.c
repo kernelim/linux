@@ -576,8 +576,8 @@ retry:
 			return bad_area(regs, address);
 
 		mmap_read_unlock(mm);
-		if (fault_in_pages_readable((const char __user *)regs->nip,
-					    sizeof(unsigned int)))
+		if (fault_in_readable((const char __user *)regs->nip,
+				      sizeof(unsigned int)))
 			return bad_area_nosemaphore(regs, address);
 		goto retry;
 	}
