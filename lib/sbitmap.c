@@ -124,7 +124,7 @@ int sbitmap_init_node(struct sbitmap *sb, unsigned int depth, int shift,
 	 * RHEL8: sb->alloc_hint is kept in an additional sb->map array element prior
          * to the actual sb->map due to KABI (it was not possible to add it to struct sbitmap)
 	 */
-	sb->map = kcalloc_node(sb->map_nr + 1, sizeof(*sb->map), flags, node);
+	sb->map = kvzalloc_node((sb->map_nr + 1) * sizeof(*sb->map), flags, node);
 	if (!sb->map) {
 		return -ENOMEM;
 	}

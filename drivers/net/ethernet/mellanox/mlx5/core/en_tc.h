@@ -83,7 +83,6 @@ struct mlx5_flow_attr {
 	u8 ip_version;
 	u8 tun_ip_version;
 	u32 flags;
-	bool ct_clear;
 	union {
 		struct mlx5_esw_flow_attr esw_attr[0];
 		struct mlx5_nic_flow_attr nic_attr[0];

@@ -196,7 +196,7 @@ static inline void sbitmap_free(struct sbitmap *sb)
 	if (alloc_hint_p)
 		free_percpu(*alloc_hint_p);
 	if (map)
-		kfree(--map);
+		kvfree(--map);
 	sb->map = NULL;
 }
 

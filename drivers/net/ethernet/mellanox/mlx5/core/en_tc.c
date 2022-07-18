@@ -3443,7 +3443,7 @@ static int parse_tc_nic_actions(struct mlx5e_priv *priv,
 	struct pedit_headers_action hdrs[2] = {};
 	const struct flow_action_entry *act;
 	struct mlx5_nic_flow_attr *nic_attr;
-	bool clear_action;
+	bool ct = false, ct_clear = false, clear_action;
 	u32 action = 0;
 	int err, i;
 
@@ -3539,8 +3539,13 @@ static int parse_tc_nic_actions(struct mlx5e_priv *priv,
 			clear_action = act->ct.action & TCA_CT_ACT_CLEAR;
 
 			/* It's redundant to do ct clear more than once. */
-			if (clear_action && attr->ct_clear)
+			if (clear_action && ct_clear)
 				break;
+
+			if (clear_action)
+				ct_clear = true;
+			else
+				ct = true;
 
 			err = mlx5_tc_ct_parse_action(get_ct_priv(priv), attr,
 						      &parse_attr->mod_hdr_acts,
@@ -3549,7 +3554,6 @@ static int parse_tc_nic_actions(struct mlx5e_priv *priv,
 				return err;
 
 			flow_flag_set(flow, CT);
-			attr->ct_clear = clear_action;
 			break;
 		default:
 			NL_SET_ERR_MSG_MOD(extack, "The offload action is not supported");
@@ -3584,6 +3588,18 @@ static int parse_tc_nic_actions(struct mlx5e_priv *priv,
 
 	if (attr->action & MLX5_FLOW_CONTEXT_ACTION_MOD_HDR)
 		attr->action |= MLX5_FLOW_CONTEXT_ACTION_FWD_DEST;
+
+	/* If ct action exist, we can ignore previous ct_clear actions */
+	if (!ct && ct_clear) {
+		err = mlx5_tc_ct_set_ct_clear_regs(get_ct_priv(priv),
+						   &parse_attr->mod_hdr_acts);
+		if (err) {
+			NL_SET_ERR_MSG_MOD(extack,
+					   "Failed to set registers for ct clear");
+			return err;
+		}
+		attr->action |= MLX5_FLOW_CONTEXT_ACTION_MOD_HDR;
+	}
 
 	if (!actions_match_supported(priv, flow_action, parse_attr, flow, extack))
 		return -EOPNOTSUPP;
@@ -3865,6 +3881,7 @@ static int parse_tc_fdb_actions(struct mlx5e_priv *priv,
 {
 	struct pedit_headers_action hdrs[2] = {};
 	struct mlx5_eswitch *esw = priv->mdev->priv.eswitch;
+	bool ct = false, ct_clear = false, clear_action;
 	struct mlx5e_tc_flow_parse_attr *parse_attr;
 	struct mlx5e_rep_priv *rpriv = priv->ppriv;
 	struct mlx5e_sample_attr sample_attr = {};
@@ -3879,7 +3896,6 @@ static int parse_tc_fdb_actions(struct mlx5e_priv *priv,
 	int err, i, if_count = 0;
 	bool ptype_host = false;
 	bool mpls_push = false;
-	bool clear_action;
 
 	if (!flow_action_has_entries(flow_action))
 		return -EINVAL;
@@ -4197,8 +4213,13 @@ static int parse_tc_fdb_actions(struct mlx5e_priv *priv,
 			clear_action = act->ct.action & TCA_CT_ACT_CLEAR;
 
 			/* It's redundant to do ct clear more than once. */
-			if (clear_action && attr->ct_clear)
+			if (clear_action && ct_clear)
 				break;
+
+			if (clear_action)
+				ct_clear = true;
+			else
+				ct = true;
 
 			err = mlx5_tc_ct_parse_action(get_ct_priv(priv), attr,
 						      &parse_attr->mod_hdr_acts,
@@ -4208,7 +4229,6 @@ static int parse_tc_fdb_actions(struct mlx5e_priv *priv,
 
 			flow_flag_set(flow, CT);
 			esw_attr->split_count = esw_attr->out_count;
-			attr->ct_clear = clear_action;
 			break;
 		case FLOW_ACTION_SAMPLE:
 			if (flow_flag_test(flow, CT)) {
@@ -4267,6 +4287,18 @@ static int parse_tc_fdb_actions(struct mlx5e_priv *priv,
 			      (action & MLX5_FLOW_CONTEXT_ACTION_VLAN_PUSH)))
 				esw_attr->split_count = 0;
 		}
+	}
+
+	/* If ct action exist, we can ignore previous ct_clear actions */
+	if (!ct && ct_clear) {
+		err = mlx5_tc_ct_set_ct_clear_regs(get_ct_priv(priv),
+						   &parse_attr->mod_hdr_acts);
+		if (err) {
+			NL_SET_ERR_MSG_MOD(extack,
+					"Failed to set registers for ct clear");
+			return err;
+		}
+		action |= MLX5_FLOW_CONTEXT_ACTION_MOD_HDR;
 	}
 
 	attr->action = action;
