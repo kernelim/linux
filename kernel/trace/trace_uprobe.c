@@ -53,6 +53,7 @@ struct trace_uprobe {
 	struct list_head		list;
 	struct trace_uprobe_filter	filter;
 	struct uprobe_consumer		consumer;
+	struct path			path;
 	struct inode			*inode;
 	char				*filename;
 	unsigned long			offset;
@@ -288,7 +289,7 @@ static void free_trace_uprobe(struct trace_uprobe *tu)
 	for (i = 0; i < tu->tp.nr_args; i++)
 		traceprobe_free_probe_arg(&tu->tp.args[i]);
 
-	iput(tu->inode);
+	path_put(&tu->path);
 	kfree(tu->tp.call.class->system);
 	kfree(tu->tp.call.name);
 	kfree(tu->filename);
@@ -361,15 +362,14 @@ end:
 static int create_trace_uprobe(int argc, char **argv)
 {
 	struct trace_uprobe *tu;
-	struct inode *inode;
 	char *arg, *event, *group, *filename;
 	char buf[MAX_EVENT_NAME_LEN];
+	struct inode *inode;
 	struct path path;
 	unsigned long offset;
 	bool is_delete, is_return;
 	int i, ret;
 
-	inode = NULL;
 	ret = 0;
 	is_delete = false;
 	is_return = false;
@@ -438,21 +438,17 @@ static int create_trace_uprobe(int argc, char **argv)
 		return -EINVAL;
 	}
 	arg = strchr(argv[1], ':');
-	if (!arg) {
-		ret = -EINVAL;
-		goto fail_address_parse;
-	}
+	if (!arg)
+		return -EINVAL;
 
 	*arg++ = '\0';
 	filename = argv[1];
 	ret = kern_path(filename, LOOKUP_FOLLOW, &path);
 	if (ret)
-		goto fail_address_parse;
+		return ret;
 
-	inode = igrab(path.dentry->d_inode);
-	path_put(&path);
-
-	if (!inode || !S_ISREG(inode->i_mode)) {
+	inode = d_real_inode(path.dentry);
+	if (!S_ISREG(inode->i_mode)) {
 		ret = -EINVAL;
 		goto fail_address_parse;
 	}
@@ -492,6 +488,7 @@ static int create_trace_uprobe(int argc, char **argv)
 	}
 	tu->offset = offset;
 	tu->inode = inode;
+	tu->path = path;
 	tu->filename = kstrdup(filename, GFP_KERNEL);
 
 	if (!tu->filename) {
@@ -557,8 +554,7 @@ error:
 	return ret;
 
 fail_address_parse:
-	if (inode)
-		iput(inode);
+	path_put(&path);
 
 	pr_info("Failed to parse address or file.\n");
 
@@ -1276,11 +1272,9 @@ create_local_trace_uprobe(char *name, unsigned long offs, bool is_return)
 	if (ret)
 		return ERR_PTR(ret);
 
-	inode = igrab(d_inode(path.dentry));
-	path_put(&path);
-
-	if (!inode || !S_ISREG(inode->i_mode)) {
-		iput(inode);
+	inode = d_real_inode(path.dentry);
+	if (!S_ISREG(inode->i_mode)) {
+		path_put(&path);
 		return ERR_PTR(-EINVAL);
 	}
 
@@ -1295,11 +1289,13 @@ create_local_trace_uprobe(char *name, unsigned long offs, bool is_return)
 	if (IS_ERR(tu)) {
 		pr_info("Failed to allocate trace_uprobe.(%d)\n",
 			(int)PTR_ERR(tu));
+		path_put(&path);
 		return ERR_CAST(tu);
 	}
 
 	tu->offset = offs;
 	tu->inode = inode;
+	tu->path = path;
 	tu->filename = kstrdup(name, GFP_KERNEL);
 	init_trace_event_call(tu, &tu->tp.call);
 

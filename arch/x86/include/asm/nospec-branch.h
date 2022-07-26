@@ -250,6 +250,7 @@ static inline void fill_RSB(void)
 
 extern struct static_key mds_user_clear;
 extern struct static_key mds_idle_clear;
+extern struct static_key mmio_stale_data_clear;
 
 #include <asm/segment.h>
 

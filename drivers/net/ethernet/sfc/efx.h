@@ -26,7 +26,14 @@ void efx_fini_tx_queue(struct efx_tx_queue *tx_queue);
 netdev_tx_t efx_hard_start_xmit(struct sk_buff *skb,
 				struct net_device *net_dev);
 netdev_tx_t efx_enqueue_skb(struct efx_tx_queue *tx_queue, struct sk_buff *skb);
+static inline bool efx_tx_buffer_in_use(struct efx_tx_buffer *buffer)
+{
+	return buffer->len || (buffer->flags & EFX_TX_BUF_OPTION);
+}
+
+void efx_xmit_done_check_empty(struct efx_tx_queue *tx_queue);
 void efx_xmit_done(struct efx_tx_queue *tx_queue, unsigned int index);
+void efx_xmit_done_single(struct efx_tx_queue *tx_queue);
 int efx_setup_tc(struct net_device *net_dev, enum tc_setup_type type,
 		 void *type_data);
 unsigned int efx_tx_max_skb_descs(struct efx_nic *efx);

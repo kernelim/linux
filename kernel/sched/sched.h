@@ -144,6 +144,7 @@ struct rt_bandwidth {
 	ktime_t			rt_period;
 	u64			rt_runtime;
 	struct hrtimer		rt_period_timer;
+	RH_KABI_EXTEND(unsigned int rt_period_active)
 };
 
 void __dl_clear_params(struct task_struct *p);
@@ -234,7 +235,18 @@ struct cfs_bandwidth {
 	s64 hierarchal_quota;
 
 	RH_KABI_DEPRECATE(u64, runtime_expires)
+
+	/*
+	 * RHEL: Splitting a comma-separated declaration of n variables into
+	 * n separate declarations is considered as a kABI break by the
+	 * .symtypes comparison (not by kabi-dwarf obviously). This is why
+	 * this open-codes RH_KABI_DEPRECATE().
+	 */
+#ifdef __GENKSYMS__
 	int idle, timer_active;
+#else
+	int idle, rh_reserved_timer_active_orig;
+#endif
 
 	struct hrtimer period_timer, slack_timer;
 	struct list_head throttled_cfs_rq;
@@ -243,6 +255,7 @@ struct cfs_bandwidth {
 	int nr_periods, nr_throttled;
 	u64 throttled_time;
 	RH_KABI_EXTEND(bool distribute_running)
+	RH_KABI_EXTEND(int period_active)
 #endif
 };
 
@@ -336,7 +349,7 @@ extern void init_cfs_bandwidth(struct cfs_bandwidth *cfs_b);
 extern int sched_group_set_shares(struct task_group *tg, unsigned long shares);
 
 extern void __refill_cfs_bandwidth_runtime(struct cfs_bandwidth *cfs_b);
-extern void __start_cfs_bandwidth(struct cfs_bandwidth *cfs_b, bool force);
+extern void start_cfs_bandwidth(struct cfs_bandwidth *cfs_b);
 extern void unthrottle_cfs_rq(struct cfs_rq *cfs_rq);
 
 extern void free_rt_sched_group(struct task_group *tg);
@@ -1521,8 +1534,6 @@ static inline void sched_rt_avg_update(struct rq *rq, u64 rt_delta)
 static inline void sched_rt_avg_update(struct rq *rq, u64 rt_delta) { }
 static inline void sched_avg_update(struct rq *rq) { }
 #endif
-
-extern void start_bandwidth_timer(struct hrtimer *period_timer, ktime_t period);
 
 /*
  * __task_rq_lock - lock the rq @p resides on.
