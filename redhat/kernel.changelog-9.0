@@ -1,3 +1,61 @@
+* Tue Aug 02 2022 Herton R. Krzesinski <herton@redhat.com> [5.14.0-70.22.1.el9_0]
+- PCI: vmd: Revert 2565e5b69c44 ("PCI: vmd: Do not disable MSI-X remapping if interrupt remapping is enabled by IOMMU.") (Myron Stowe) [2109974 2084146]
+- PCI: vmd: Assign VMD IRQ domain before enumeration (Myron Stowe) [2109974 2084146]
+- rhel config: Set DMAR_UNITS_SUPPORTED (Jerry Snitselaar) [2105326 2094984]
+- iommu/vt-d: Make DMAR_UNITS_SUPPORTED a config setting (Jerry Snitselaar) [2105326 2094984]
+Resolves: rhbz#2109974, rhbz#2105326
+
+* Tue Jul 26 2022 Herton R. Krzesinski <herton@redhat.com> [5.14.0-70.21.1.el9_0]
+- ibmvnic: fix race between xmit and reset (Gustavo Walbon) [2103085 2061556]
+- scsi: core: sysfs: Fix setting device state to SDEV_RUNNING (Chris Leech) [2098251 2095440]
+- scsi: core: sysfs: Fix hang when device state is set via sysfs (Chris Leech) [2098251 2095440]
+Resolves: rhbz#2103085, rhbz#2098251
+
+* Tue Jul 19 2022 Herton R. Krzesinski <herton@redhat.com> [5.14.0-70.20.1.el9_0]
+- block-map: add __GFP_ZERO flag for alloc_page in function bio_copy_kern (Ming Lei) [2106024 2066297] {CVE-2022-0494}
+- ahci: Add a generic 'controller2' RAID id (Tomas Henzl) [2099740 2078880]
+- ahci: remove duplicated PCI device IDs (Tomas Henzl) [2099740 2042790]
+- gfs2: Stop using glock holder auto-demotion for now (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: buffered write prefaulting (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Align read and write chunks to the page cache (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Pull return value test out of should_fault_in_pages (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Clean up use of fault_in_iov_iter_{read,write}able (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Variable rename (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Fix filesystem block deallocation for short writes (Andreas Gruenbacher) [2097306 2082193]
+- iomap: iomap_write_end cleanup (Andreas Gruenbacher) [2097306 2082193]
+- iomap: iomap_write_failed fix (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Don't re-check for write past EOF unnecessarily (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: No short reads or writes upon glock contention (Andreas Gruenbacher) [2097306 2082193]
+- fs/iomap: Fix buffered write page prefaulting (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Make sure not to return short direct writes (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Remove dead code in gfs2_file_read_iter (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Fix gfs2_file_buffered_write endless loop workaround (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Minor retry logic cleanup (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Disable page faults during lockless buffered reads (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Fix should_fault_in_pages() logic (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Initialize gh_error in gfs2_glock_nq (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Make use of list_is_first (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Switch lock order of inode and iopen glock (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: cancel timed-out glock requests (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: Expect -EBUSY after canceling dlm locking requests (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: gfs2_setattr_size error path fix (Andreas Gruenbacher) [2097306 2082193]
+- gfs2: assign rgrp glock before compute_bitstructs (Bob Peterson) [2097306 2082193]
+Resolves: rhbz#2106024, rhbz#2099740, rhbz#2097306
+
+* Wed Jul 13 2022 Herton R. Krzesinski <herton@redhat.com> [5.14.0-70.19.1.el9_0]
+- KVM: x86/mmu: make apf token non-zero to fix bug (Vitaly Kuznetsov) [2100903 2074832]
+- powerpc/64: Move paca allocation later in boot (Desnes A. Nunes do Rosario) [2092248 2055566]
+- powerpc: Set crashkernel offset to mid of RMA region (Desnes A. Nunes do Rosario) [2092248 2055566]
+- powerpc/64s/hash: Make hash faults work in NMI context (Desnes A. Nunes do Rosario) [2092253 2062762]
+Resolves: rhbz#2100903, rhbz#2092248, rhbz#2092253
+
+* Tue Jul 05 2022 Herton R. Krzesinski <herton@redhat.com> [5.14.0-70.18.1.el9_0]
+- NFSv4: Fix free of uninitialized nfs4_label on referral lookup. (Benjamin Coddington) [2101858 2086367]
+- NFSv4 only print the label when its queried (Benjamin Coddington) [2101854 2057327]
+- crypto: fips - make proc files report fips module name and version (Simo Sorce) [2093384 2080499]
+- net: sched: fix use-after-free in tc_new_tfilter() (Ivan Vecera) [2071707 2090410] {CVE-2022-1055}
+Resolves: rhbz#2101858, rhbz#2101854, rhbz#2093384, rhbz#2071707
+
 * Tue Jun 14 2022 Herton R. Krzesinski <herton@redhat.com> [5.14.0-70.17.1.el9_0]
 - netfilter: nf_tables: disallow non-stateful expression in sets earlier (Phil Sutter) [2092994 2092995] {CVE-2022-1966}
 - thunderx nic: mark device as unmaintained (Íñigo Huguet) [2092638 2060285]
