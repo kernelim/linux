@@ -4,11 +4,11 @@ This repository contains automated and non-automated Linux kernel Git trees.
 The master branch is therefore disconnected from such kernel trees, solely to
 provide this README doc.
 
-## CentOS
+## CentOS / Rocky
 
 For each CentOS source release, a git commit and a tag is automatically created
 in the respective branch. This allows browsing and diff'ing the kernel source
-changes between various CentOS kernel versions.
+changes between various CentOS and Rocky kernel versions.
 
 See the following tree branches:
 
