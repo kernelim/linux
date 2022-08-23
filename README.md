@@ -21,10 +21,13 @@ See the following tree branches:
 
 The following is a chronological list of distribution kernel tags managed in this repository:
 * Rocky 9.x kernel version **5.14.0-70.22.1.el9_0** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-70.22.1.el9_0.tar.xz), dated 2022-08-02 16:11:28
+* CentOS 7.x kernel version **3.10.0-1160.76.1.el7** - [tag](https://github.com/kernelim/linux/releases/tag/linux-3.10.0-1160.76.1.el7.tar.xz), dated 2022-07-26 16:05:43
 * Rocky 8.x kernel version **4.18.0-372.19.1.el8_6** - [tag](https://github.com/kernelim/linux/releases/tag/linux-4.18.0-372.19.1.el8_6.tar.xz), dated 2022-07-18 17:05:41
 * Rocky 8.x kernel version **4.18.0-372.16.1.el8_6** - [tag](https://github.com/kernelim/linux/releases/tag/linux-4.18.0-372.16.1.el8_6.tar.xz), dated 2022-06-28 09:05:32
+* CentOS 7.x kernel version **3.10.0-1160.71.1.el7** - [tag](https://github.com/kernelim/linux/releases/tag/linux-3.10.0-1160.71.1.el7.tar.xz), dated 2022-06-15 11:17:59
 * Rocky 9.x kernel version **5.14.0-70.17.1.el9_0** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-70.17.1.el9_0.tar.xz), dated 2022-06-14 17:40:35
 * Rocky 8.x kernel version **4.18.0-372.13.1.el8_6** - [tag](https://github.com/kernelim/linux/releases/tag/linux-4.18.0-372.13.1.el8_6.tar.xz), dated 2022-06-06 21:02:06
+* CentOS 7.x kernel version **3.10.0-1160.66.1.el7** - [tag](https://github.com/kernelim/linux/releases/tag/linux-3.10.0-1160.66.1.el7.tar.xz), dated 2022-04-27 22:46:04
 * Rocky 8.x kernel version **4.18.0-372.9.1.el8** - [tag](https://github.com/kernelim/linux/releases/tag/linux-4.18.0-372.9.1.el8.tar.xz), dated 2022-04-16 03:03:46
 * Rocky 9.x kernel version **5.14.0-70.13.1.el9_0** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-70.13.1.el9_0.tar.xz), dated 2022-04-14 18:51:12
 * Rocky 8.x kernel version **4.18.0-348.23.1.el8_5** - [tag](https://github.com/kernelim/linux/releases/tag/linux-4.18.0-348.23.1.el8_5.tar.xz), dated 2022-04-12 16:30:37
