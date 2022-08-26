@@ -265,6 +265,9 @@ int klp_apply_section_relocs(struct module *pmod, Elf_Shdr *sechdrs,
 	return 0;
 }
 
+/* RHEL-only, to define klp_shadow_Xtor_t for shadow.c */
+#include <linux/rh_kabi_aux.h>
+
 #endif /* CONFIG_LIVEPATCH */
 
 #endif /* _LINUX_LIVEPATCH_H_ */

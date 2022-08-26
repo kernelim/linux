@@ -784,11 +784,6 @@ static void init_intel(struct cpuinfo_x86 *c)
 
 	init_intel_misc_features(c);
 
-	if (tsx_ctrl_state == TSX_CTRL_ENABLE)
-		tsx_enable();
-	if (tsx_ctrl_state == TSX_CTRL_DISABLE)
-		tsx_disable();
-
 	split_lock_init();
 	bus_lock_init();
 }

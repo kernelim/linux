@@ -60,6 +60,14 @@ enum memcg_memory_event {
 	MEMCG_NR_MEMORY_EVENTS,
 };
 
+enum percpu_stats_state {
+	MEMCG_PERCPU_STATS_ACTIVE = 0,
+	MEMCG_PERCPU_STATS_DISABLED,
+	MEMCG_PERCPU_VMSTATS_FLUSHED,
+	MEMCG_PERCPU_STATS_FLUSHED,
+	MEMCG_PERCPU_STATS_FREED
+};
+
 struct mem_cgroup_reclaim_cookie {
 	pg_data_t *pgdat;
 	unsigned int generation;
@@ -165,6 +173,7 @@ struct mem_cgroup_per_node {
 						/* the soft limit is exceeded*/
 	bool			on_tree;
 	RH_KABI_DEPRECATE(bool,	congested)
+	RH_KABI_FILL_HOLE(unsigned short nid)
 
 	struct mem_cgroup	*memcg;		/* Back pointer, we cannot */
 						/* use container_of	   */
@@ -349,6 +358,12 @@ struct mem_cgroup {
 	unsigned long		move_lock_flags;
 
 	MEMCG_PADDING(_pad1_);
+	/*
+	 * Disable percpu stats when offline, flush and free them after one
+	 * grace period.
+	 */
+	struct rcu_work		percpu_stats_rwork;
+	enum percpu_stats_state percpu_stats_disabled;
 
 	/* memory.stat */
 	struct memcg_vmstats	vmstats;
@@ -1018,6 +1033,9 @@ static inline unsigned long lruvec_page_state_local(struct lruvec *lruvec,
 		return node_page_state(lruvec_pgdat(lruvec), idx);
 
 	pn = container_of(lruvec, struct mem_cgroup_per_node, lruvec);
+	if (pn->memcg->percpu_stats_disabled)
+		return 0;
+
 	for_each_possible_cpu(cpu)
 		x += per_cpu(pn->lruvec_stat_local->count[idx], cpu);
 #ifdef CONFIG_SMP

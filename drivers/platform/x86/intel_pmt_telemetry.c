@@ -96,7 +96,7 @@ static int pmt_telem_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, priv);
 
 	for (i = 0; i < pdev->num_resources; i++) {
-		struct intel_pmt_entry *entry = &priv->entry[i];
+		struct intel_pmt_entry *entry = &priv->entry[priv->num_entries];
 
 		ret = intel_pmt_dev_create(entry, &pmt_telem_ns, pdev, i);
 		if (ret < 0)

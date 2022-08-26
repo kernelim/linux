@@ -56,6 +56,7 @@
 #include "audit.h"	/* audit_signal_info() */
 
 #include <linux/rh_tasklist_lock.h>
+#include <linux/rh_kabi_aux.h>
 
 /*
  * SLAB caches for signal bits.
@@ -1840,6 +1841,17 @@ ret:
 	return ret;
 }
 
+static void do_notify_pidfd(struct task_struct *task)
+{
+	struct pid *pid;
+	wait_queue_head_t *wait_pidfd;
+
+	pid = task_pid(task);
+	wait_pidfd = kabi_aux_get(pid, 0);
+	if (wait_pidfd)
+		wake_up_all(wait_pidfd);
+}
+
 /*
  * Let a parent know about the death of a child.
  * For a stopped/continued status change, use do_notify_parent_cldstop instead.
@@ -1862,6 +1874,9 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
 
 	BUG_ON(!tsk->ptrace &&
 	       (tsk->group_leader != tsk || !thread_group_empty(tsk)));
+
+	/* Wake up all pidfd waiters */
+	do_notify_pidfd(tsk);
 
 	if (sig != SIGCHLD) {
 		/*

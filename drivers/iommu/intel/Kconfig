@@ -6,6 +6,13 @@ config DMAR_TABLE
 config DMAR_PERF
 	bool
 
+config DMAR_UNITS_SUPPORTED
+	int "Number of DMA Remapping Units supported"
+	depends on DMAR_TABLE
+	default 1024 if MAXSMP
+	default 128  if X86_64
+	default 64
+
 config INTEL_IOMMU
 	bool "Support for Intel IOMMU using DMA Remapping Devices"
 	depends on PCI_MSI && ACPI && (X86 || IA64_GENERIC)

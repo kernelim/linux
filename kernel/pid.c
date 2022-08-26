@@ -41,6 +41,7 @@
 #include <linux/sched/task.h>
 #include <linux/idr.h>
 #include RH_KABI_HIDE_INCLUDE(<net/sock.h>)
+#include <linux/rh_kabi_aux.h>
 
 struct pid init_struct_pid = {
 	.count 		= ATOMIC_INIT(1),
@@ -109,6 +110,7 @@ void put_pid(struct pid *pid)
 	ns = pid->numbers[pid->level].ns;
 	if ((atomic_read(&pid->count) == 1) ||
 	     atomic_dec_and_test(&pid->count)) {
+		kabi_aux_free(pid, 0, NULL);
 		kmem_cache_free(ns->pid_cachep, pid);
 		put_pid_ns(ns);
 	}
