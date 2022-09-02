@@ -4,7 +4,6 @@
 #ifndef _ICE_XSK_H_
 #define _ICE_XSK_H_
 #include "ice_txrx.h"
-#include "ice.h"
 
 struct ice_vsi;
 

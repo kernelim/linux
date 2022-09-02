@@ -5,6 +5,19 @@
 #include "ice_base.h"
 #include "ice_lib.h"
 #include "ice_dcb_lib.h"
+#include "ice_sriov.h"
+
+static bool ice_alloc_rx_buf_zc(struct ice_rx_ring *rx_ring)
+{
+	rx_ring->xdp_buf = kcalloc(rx_ring->count, sizeof(*rx_ring->xdp_buf), GFP_KERNEL);
+	return !!rx_ring->xdp_buf;
+}
+
+static bool ice_alloc_rx_buf(struct ice_rx_ring *rx_ring)
+{
+	rx_ring->rx_buf = kcalloc(rx_ring->count, sizeof(*rx_ring->rx_buf), GFP_KERNEL);
+	return !!rx_ring->rx_buf;
+}
 
 /**
  * __ice_vsi_get_qs_contig - Assign a contiguous chunk of queues to VSI
@@ -213,11 +226,38 @@ static u16 ice_calc_txq_handle(struct ice_vsi *vsi, struct ice_tx_ring *ring, u8
 {
 	WARN_ONCE(ice_ring_is_xdp(ring) && tc, "XDP ring can't belong to TC other than 0\n");
 
+	if (ring->ch)
+		return ring->q_index - ring->ch->base_q;
+
 	/* Idea here for calculation is that we subtract the number of queue
 	 * count from TC that ring belongs to from it's absolute queue index
 	 * and as a result we get the queue's index within TC.
 	 */
 	return ring->q_index - vsi->tc_cfg.tc_info[tc].qoffset;
+}
+
+/**
+ * ice_eswitch_calc_txq_handle
+ * @ring: pointer to ring which unique index is needed
+ *
+ * To correctly work with many netdevs ring->q_index of Tx rings on switchdev
+ * VSI can repeat. Hardware ring setup requires unique q_index. Calculate it
+ * here by finding index in vsi->tx_rings of this ring.
+ *
+ * Return ICE_INVAL_Q_INDEX when index wasn't found. Should never happen,
+ * because VSI is get from ring->vsi, so it has to be present in this VSI.
+ */
+static u16 ice_eswitch_calc_txq_handle(struct ice_tx_ring *ring)
+{
+	struct ice_vsi *vsi = ring->vsi;
+	int i;
+
+	ice_for_each_txq(vsi, i) {
+		if (vsi->tx_rings[i] == ring)
+			return i;
+	}
+
+	return ICE_INVAL_Q_INDEX;
 }
 
 /**
@@ -276,19 +316,28 @@ ice_setup_tx_ctx(struct ice_tx_ring *ring, struct ice_tlan_ctx *tlan_ctx, u16 pf
 	case ICE_VSI_LB:
 	case ICE_VSI_CTRL:
 	case ICE_VSI_PF:
-		tlan_ctx->vmvf_type = ICE_TLAN_CTX_VMVF_TYPE_PF;
+		if (ring->ch)
+			tlan_ctx->vmvf_type = ICE_TLAN_CTX_VMVF_TYPE_VMQ;
+		else
+			tlan_ctx->vmvf_type = ICE_TLAN_CTX_VMVF_TYPE_PF;
 		break;
 	case ICE_VSI_VF:
 		/* Firmware expects vmvf_num to be absolute VF ID */
-		tlan_ctx->vmvf_num = hw->func_caps.vf_base_id + vsi->vf_id;
+		tlan_ctx->vmvf_num = hw->func_caps.vf_base_id + vsi->vf->vf_id;
 		tlan_ctx->vmvf_type = ICE_TLAN_CTX_VMVF_TYPE_VF;
+		break;
+	case ICE_VSI_SWITCHDEV_CTRL:
+		tlan_ctx->vmvf_type = ICE_TLAN_CTX_VMVF_TYPE_VMQ;
 		break;
 	default:
 		return;
 	}
 
 	/* make sure the context is associated with the right VSI */
-	tlan_ctx->src_vsi = ice_get_hw_vsi_num(hw, vsi->idx);
+	if (ring->ch)
+		tlan_ctx->src_vsi = ring->ch->vsi_num;
+	else
+		tlan_ctx->src_vsi = ice_get_hw_vsi_num(hw, vsi->idx);
 
 	/* Restrict Tx timestamps to the PF VSI */
 	switch (vsi->type) {
@@ -370,8 +419,22 @@ static int ice_setup_rx_ctx(struct ice_rx_ring *ring)
 	 */
 	rlan_ctx.crcstrip = 1;
 
-	/* L2TSEL flag defines the reported L2 Tags in the receive descriptor */
-	rlan_ctx.l2tsel = 1;
+	/* L2TSEL flag defines the reported L2 Tags in the receive descriptor
+	 * and it needs to remain 1 for non-DVM capable configurations to not
+	 * break backward compatibility for VF drivers. Setting this field to 0
+	 * will cause the single/outer VLAN tag to be stripped to the L2TAG2_2ND
+	 * field in the Rx descriptor. Setting it to 1 allows the VLAN tag to
+	 * be stripped in L2TAG1 of the Rx descriptor, which is where VFs will
+	 * check for the tag
+	 */
+	if (ice_is_dvm_ena(hw))
+		if (vsi->type == ICE_VSI_VF &&
+		    ice_vf_is_port_vlan_ena(vsi->vf))
+			rlan_ctx.l2tsel = 1;
+		else
+			rlan_ctx.l2tsel = 0;
+	else
+		rlan_ctx.l2tsel = 1;
 
 	rlan_ctx.dtype = ICE_RX_DTYPE_NO_SPLIT;
 	rlan_ctx.hsplit_0 = ICE_RLAN_RX_HSPLIT_0_NO_SPLIT;
@@ -456,8 +519,11 @@ int ice_vsi_cfg_rxq(struct ice_rx_ring *ring)
 			xdp_rxq_info_reg(&ring->xdp_rxq, ring->netdev,
 					 ring->q_index, ring->q_vector->napi.napi_id);
 
+		kfree(ring->rx_buf);
 		ring->xsk_pool = ice_xsk_pool(ring);
 		if (ring->xsk_pool) {
+			if (!ice_alloc_rx_buf_zc(ring))
+				return -ENOMEM;
 			xdp_rxq_info_unreg_mem_model(&ring->xdp_rxq);
 
 			ring->rx_buf_len =
@@ -472,6 +538,8 @@ int ice_vsi_cfg_rxq(struct ice_rx_ring *ring)
 			dev_info(dev, "Registered XDP mem model MEM_TYPE_XSK_BUFF_POOL on Rx ring %d\n",
 				 ring->q_index);
 		} else {
+			if (!ice_alloc_rx_buf(ring))
+				return -ENOMEM;
 			if (!xdp_rxq_info_is_reg(&ring->xdp_rxq))
 				/* coverity[check_return] */
 				xdp_rxq_info_reg(&ring->xdp_rxq,
@@ -720,9 +788,10 @@ ice_vsi_cfg_txq(struct ice_vsi *vsi, struct ice_tx_ring *ring,
 	u8 buf_len = struct_size(qg_buf, txqs, 1);
 	struct ice_tlan_ctx tlan_ctx = { 0 };
 	struct ice_aqc_add_txqs_perq *txq;
+	struct ice_channel *ch = ring->ch;
 	struct ice_pf *pf = vsi->back;
 	struct ice_hw *hw = &pf->hw;
-	enum ice_status status;
+	int status;
 	u16 pf_q;
 	u8 tc;
 
@@ -749,14 +818,27 @@ ice_vsi_cfg_txq(struct ice_vsi *vsi, struct ice_tx_ring *ring,
 	/* Add unique software queue handle of the Tx queue per
 	 * TC into the VSI Tx ring
 	 */
-	ring->q_handle = ice_calc_txq_handle(vsi, ring, tc);
+	if (vsi->type == ICE_VSI_SWITCHDEV_CTRL) {
+		ring->q_handle = ice_eswitch_calc_txq_handle(ring);
 
-	status = ice_ena_vsi_txq(vsi->port_info, vsi->idx, tc, ring->q_handle,
-				 1, qg_buf, buf_len, NULL);
+		if (ring->q_handle == ICE_INVAL_Q_INDEX)
+			return -ENODEV;
+	} else {
+		ring->q_handle = ice_calc_txq_handle(vsi, ring, tc);
+	}
+
+	if (ch)
+		status = ice_ena_vsi_txq(vsi->port_info, ch->ch_vsi->idx, 0,
+					 ring->q_handle, 1, qg_buf, buf_len,
+					 NULL);
+	else
+		status = ice_ena_vsi_txq(vsi->port_info, vsi->idx, tc,
+					 ring->q_handle, 1, qg_buf, buf_len,
+					 NULL);
 	if (status) {
-		dev_err(ice_pf_to_dev(pf), "Failed to set LAN Tx queue context, error: %s\n",
-			ice_stat_str(status));
-		return -ENODEV;
+		dev_err(ice_pf_to_dev(pf), "Failed to set LAN Tx queue context, error: %d\n",
+			status);
+		return status;
 	}
 
 	/* Add Tx Queue TEID into the VSI Tx ring from the
@@ -879,7 +961,7 @@ ice_vsi_stop_tx_ring(struct ice_vsi *vsi, enum ice_disq_rst_src rst_src,
 	struct ice_pf *pf = vsi->back;
 	struct ice_q_vector *q_vector;
 	struct ice_hw *hw = &pf->hw;
-	enum ice_status status;
+	int status;
 	u32 val;
 
 	/* clear cause_ena bit for disabled queues */
@@ -903,18 +985,18 @@ ice_vsi_stop_tx_ring(struct ice_vsi *vsi, enum ice_disq_rst_src rst_src,
 				 rel_vmvf_num, NULL);
 
 	/* if the disable queue command was exercised during an
-	 * active reset flow, ICE_ERR_RESET_ONGOING is returned.
+	 * active reset flow, -EBUSY is returned.
 	 * This is not an error as the reset operation disables
 	 * queues at the hardware level anyway.
 	 */
-	if (status == ICE_ERR_RESET_ONGOING) {
+	if (status == -EBUSY) {
 		dev_dbg(ice_pf_to_dev(vsi->back), "Reset in progress. LAN Tx queues already disabled\n");
-	} else if (status == ICE_ERR_DOES_NOT_EXIST) {
+	} else if (status == -ENOENT) {
 		dev_dbg(ice_pf_to_dev(vsi->back), "LAN Tx queues do not exist, nothing to disable\n");
 	} else if (status) {
-		dev_dbg(ice_pf_to_dev(vsi->back), "Failed to disable LAN Tx queues, error: %s\n",
-			ice_stat_str(status));
-		return -ENODEV;
+		dev_dbg(ice_pf_to_dev(vsi->back), "Failed to disable LAN Tx queues, error: %d\n",
+			status);
+		return status;
 	}
 
 	return 0;
@@ -933,6 +1015,7 @@ void
 ice_fill_txq_meta(struct ice_vsi *vsi, struct ice_tx_ring *ring,
 		  struct ice_txq_meta *txq_meta)
 {
+	struct ice_channel *ch = ring->ch;
 	u8 tc;
 
 	if (IS_ENABLED(CONFIG_DCB))
@@ -943,6 +1026,11 @@ ice_fill_txq_meta(struct ice_vsi *vsi, struct ice_tx_ring *ring,
 	txq_meta->q_id = ring->reg_idx;
 	txq_meta->q_teid = ring->txq_teid;
 	txq_meta->q_handle = ring->q_handle;
-	txq_meta->vsi_idx = vsi->idx;
-	txq_meta->tc = tc;
+	if (ch) {
+		txq_meta->vsi_idx = ch->ch_vsi->idx;
+		txq_meta->tc = 0;
+	} else {
+		txq_meta->vsi_idx = vsi->idx;
+		txq_meta->tc = tc;
+	}
 }
