@@ -411,6 +411,7 @@
 #define __NR_fsmount		432
 #define __NR_fspick		433
 #define __NR_close_range	436
+#define __NR_openat2		437
 #define __NR_faccessat2		439
 
 #endif /* _UAPI_ASM_POWERPC_UNISTD_H_ */

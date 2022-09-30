@@ -260,8 +260,7 @@ static int cxgb4vf_set_addr_hash(struct port_info *pi)
  *	@tcam_idx: TCAM index of existing filter for old value of MAC address,
  *		   or -1
  *	@addr: the new MAC address value
- *	@persist: whether a new MAC allocation should be persistent
- *	@add_smt: if true also add the address to the HW SMT
+ *	@persistent: whether a new MAC allocation should be persistent
  *
  *	Modifies an MPS filter and sets it to the new MAC address if
  *	@tcam_idx >= 0, or adds the MAC address to a new filter if
@@ -1219,7 +1218,7 @@ static int cxgb4vf_set_mac_addr(struct net_device *dev, void *_addr)
 	if (ret < 0)
 		return ret;
 
-	memcpy(dev->dev_addr, addr->sa_data, dev->addr_len);
+	eth_hw_addr_set(dev, addr->sa_data);
 	return 0;
 }
 
@@ -1592,7 +1591,9 @@ static void cxgb4vf_set_msglevel(struct net_device *dev, u32 msglevel)
  * first Queue Set.
  */
 static void cxgb4vf_get_ringparam(struct net_device *dev,
-				  struct ethtool_ringparam *rp)
+				  struct ethtool_ringparam *rp,
+				  struct kernel_ethtool_ringparam *kernel_rp,
+				  struct netlink_ext_ack *extack)
 {
 	const struct port_info *pi = netdev_priv(dev);
 	const struct sge *s = &pi->adapter->sge;
@@ -1615,7 +1616,9 @@ static void cxgb4vf_get_ringparam(struct net_device *dev,
  * device -- after vetting them of course!
  */
 static int cxgb4vf_set_ringparam(struct net_device *dev,
-				 struct ethtool_ringparam *rp)
+				 struct ethtool_ringparam *rp,
+				 struct kernel_ethtool_ringparam *kernel_rp,
+				 struct netlink_ext_ack *extack)
 {
 	const struct port_info *pi = netdev_priv(dev);
 	struct adapter *adapter = pi->adapter;
@@ -1923,6 +1926,8 @@ static void cxgb4vf_get_wol(struct net_device *dev,
 		   NETIF_F_GRO | NETIF_F_IPV6_CSUM | NETIF_F_HIGHDMA)
 
 static const struct ethtool_ops cxgb4vf_ethtool_ops = {
+	.supported_coalesce_params = ETHTOOL_COALESCE_RX_USECS |
+				     ETHTOOL_COALESCE_RX_MAX_FRAMES,
 	.get_link_ksettings	= cxgb4vf_get_link_ksettings,
 	.get_fecparam		= cxgb4vf_get_fecparam,
 	.get_drvinfo		= cxgb4vf_get_drvinfo,
@@ -2020,33 +2025,14 @@ static void mboxlog_stop(struct seq_file *seq, void *v)
 {
 }
 
-static const struct seq_operations mboxlog_seq_ops = {
+static const struct seq_operations mboxlog_sops = {
 	.start = mboxlog_start,
 	.next  = mboxlog_next,
 	.stop  = mboxlog_stop,
 	.show  = mboxlog_show
 };
 
-static int mboxlog_open(struct inode *inode, struct file *file)
-{
-	int res = seq_open(file, &mboxlog_seq_ops);
-
-	if (!res) {
-		struct seq_file *seq = file->private_data;
-
-		seq->private = inode->i_private;
-	}
-	return res;
-}
-
-static const struct file_operations mboxlog_fops = {
-	.owner   = THIS_MODULE,
-	.open    = mboxlog_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = seq_release,
-};
-
+DEFINE_SEQ_ATTRIBUTE(mboxlog);
 /*
  * Show SGE Queue Set information.  We display QPL Queues Sets per line.
  */
@@ -2174,31 +2160,14 @@ static void *sge_queue_next(struct seq_file *seq, void *v, loff_t *pos)
 	return *pos < entries ? (void *)((uintptr_t)*pos + 1) : NULL;
 }
 
-static const struct seq_operations sge_qinfo_seq_ops = {
+static const struct seq_operations sge_qinfo_sops = {
 	.start = sge_queue_start,
 	.next  = sge_queue_next,
 	.stop  = sge_queue_stop,
 	.show  = sge_qinfo_show
 };
 
-static int sge_qinfo_open(struct inode *inode, struct file *file)
-{
-	int res = seq_open(file, &sge_qinfo_seq_ops);
-
-	if (!res) {
-		struct seq_file *seq = file->private_data;
-		seq->private = inode->i_private;
-	}
-	return res;
-}
-
-static const struct file_operations sge_qinfo_debugfs_fops = {
-	.owner   = THIS_MODULE,
-	.open    = sge_qinfo_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = seq_release,
-};
+DEFINE_SEQ_ATTRIBUTE(sge_qinfo);
 
 /*
  * Show SGE Queue Set statistics.  We display QPL Queues Sets per line.
@@ -2320,31 +2289,14 @@ static void *sge_qstats_next(struct seq_file *seq, void *v, loff_t *pos)
 	return *pos < entries ? (void *)((uintptr_t)*pos + 1) : NULL;
 }
 
-static const struct seq_operations sge_qstats_seq_ops = {
+static const struct seq_operations sge_qstats_sops = {
 	.start = sge_qstats_start,
 	.next  = sge_qstats_next,
 	.stop  = sge_qstats_stop,
 	.show  = sge_qstats_show
 };
 
-static int sge_qstats_open(struct inode *inode, struct file *file)
-{
-	int res = seq_open(file, &sge_qstats_seq_ops);
-
-	if (res == 0) {
-		struct seq_file *seq = file->private_data;
-		seq->private = inode->i_private;
-	}
-	return res;
-}
-
-static const struct file_operations sge_qstats_proc_fops = {
-	.owner   = THIS_MODULE,
-	.open    = sge_qstats_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = seq_release,
-};
+DEFINE_SEQ_ATTRIBUTE(sge_qstats);
 
 /*
  * Show PCI-E SR-IOV Virtual Function Resource Limits.
@@ -2418,31 +2370,14 @@ static void interfaces_stop(struct seq_file *seq, void *v)
 {
 }
 
-static const struct seq_operations interfaces_seq_ops = {
+static const struct seq_operations interfaces_sops = {
 	.start = interfaces_start,
 	.next  = interfaces_next,
 	.stop  = interfaces_stop,
 	.show  = interfaces_show
 };
 
-static int interfaces_open(struct inode *inode, struct file *file)
-{
-	int res = seq_open(file, &interfaces_seq_ops);
-
-	if (res == 0) {
-		struct seq_file *seq = file->private_data;
-		seq->private = inode->i_private;
-	}
-	return res;
-}
-
-static const struct file_operations interfaces_proc_fops = {
-	.owner   = THIS_MODULE,
-	.open    = interfaces_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = seq_release,
-};
+DEFINE_SEQ_ATTRIBUTE(interfaces);
 
 /*
  * /sys/kernel/debugfs/cxgb4vf/ files list.
@@ -2455,10 +2390,10 @@ struct cxgb4vf_debugfs_entry {
 
 static struct cxgb4vf_debugfs_entry debugfs_files[] = {
 	{ "mboxlog",    0444, &mboxlog_fops },
-	{ "sge_qinfo",  0444, &sge_qinfo_debugfs_fops },
-	{ "sge_qstats", 0444, &sge_qstats_proc_fops },
+	{ "sge_qinfo",  0444, &sge_qinfo_fops },
+	{ "sge_qstats", 0444, &sge_qstats_fops },
 	{ "resources",  0444, &resources_fops },
-	{ "interfaces", 0444, &interfaces_proc_fops },
+	{ "interfaces", 0444, &interfaces_fops },
 };
 
 /*
@@ -2482,7 +2417,7 @@ static int setup_debugfs(struct adapter *adapter)
 	for (i = 0; i < ARRAY_SIZE(debugfs_files); i++)
 		debugfs_create_file(debugfs_files[i].name,
 				    debugfs_files[i].mode,
-				    adapter->debugfs_root, (void *)adapter,
+				    adapter->debugfs_root, adapter,
 				    debugfs_files[i].fops);
 
 	return 0;
@@ -2924,7 +2859,7 @@ static const struct net_device_ops cxgb4vf_netdev_ops	= {
  *				address stored on the adapter
  *	@adapter: The adapter
  *
- *	Find the the port mask for the VF based on the index of mac
+ *	Find the port mask for the VF based on the index of mac
  *	address stored in the adapter. If no mac address is stored on
  *	the adapter for the VF, use the port mask received from the
  *	firmware.
@@ -2964,17 +2899,14 @@ static int cxgb4vf_pci_probe(struct pci_dev *pdev,
 	struct net_device *netdev;
 	struct port_info *pi;
 	unsigned int pmask;
-	int pci_using_dac;
 	int err, pidx;
 
 	/*
 	 * Initialize generic PCI device state.
 	 */
 	err = pci_enable_device(pdev);
-	if (err) {
-		dev_err(&pdev->dev, "cannot enable PCI device\n");
-		return err;
-	}
+	if (err)
+		return dev_err_probe(&pdev->dev, err, "cannot enable PCI device\n");
 
 	/*
 	 * Reserve PCI resources for the device.  If we can't get them some
@@ -2987,25 +2919,12 @@ static int cxgb4vf_pci_probe(struct pci_dev *pdev,
 	}
 
 	/*
-	 * Set up our DMA mask: try for 64-bit address masking first and
-	 * fall back to 32-bit if we can't get 64 bits ...
+	 * Set up our DMA mask
 	 */
-	err = pci_set_dma_mask(pdev, DMA_BIT_MASK(64));
-	if (err == 0) {
-		err = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(64));
-		if (err) {
-			dev_err(&pdev->dev, "unable to obtain 64-bit DMA for"
-				" coherent allocations\n");
-			goto err_release_regions;
-		}
-		pci_using_dac = 1;
-	} else {
-		err = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
-		if (err != 0) {
-			dev_err(&pdev->dev, "no usable DMA configuration\n");
-			goto err_release_regions;
-		}
-		pci_using_dac = 0;
+	err = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
+	if (err) {
+		dev_err(&pdev->dev, "no usable DMA configuration\n");
+		goto err_release_regions;
 	}
 
 	/*
@@ -3151,9 +3070,7 @@ static int cxgb4vf_pci_probe(struct pci_dev *pdev,
 		netdev->hw_features = NETIF_F_SG | TSO_FLAGS | NETIF_F_GRO |
 			NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM | NETIF_F_RXCSUM |
 			NETIF_F_HW_VLAN_CTAG_TX | NETIF_F_HW_VLAN_CTAG_RX;
-		netdev->features = netdev->hw_features;
-		if (pci_using_dac)
-			netdev->features |= NETIF_F_HIGHDMA;
+		netdev->features = netdev->hw_features | NETIF_F_HIGHDMA;
 		netdev->vlan_features = netdev->features & VLAN_FEAT;
 
 		netdev->priv_flags |= IFF_UNICAST_FLT;
@@ -3273,6 +3190,7 @@ static int cxgb4vf_pci_probe(struct pci_dev *pdev,
 	}
 	if (adapter->registered_device_map == 0) {
 		dev_err(&pdev->dev, "could not register any net devices\n");
+		err = -EINVAL;
 		goto err_disable_interrupts;
 	}
 

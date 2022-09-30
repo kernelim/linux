@@ -187,8 +187,10 @@ void kfree(const void *);
 void kfree_sensitive(const void *);
 size_t __ksize(const void *);
 size_t ksize(const void *);
+#ifdef CONFIG_PRINTK
 bool kmem_valid_obj(void *object);
 void kmem_dump_obj(void *object);
+#endif
 
 #define kzfree(x)	kfree_sensitive(x)	/* For backward compatibility */
 

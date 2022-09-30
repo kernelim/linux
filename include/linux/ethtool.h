@@ -73,6 +73,22 @@ enum {
 	ETH_RSS_HASH_FUNCS_COUNT
 };
 
+/**
+ * struct kernel_ethtool_ringparam - RX/TX ring configuration
+ * @rx_buf_len: Current length of buffers on the rx ring.
+ */
+struct kernel_ethtool_ringparam {
+	u32	rx_buf_len;
+};
+
+/**
+ * enum ethtool_supported_ring_param - indicator caps for setting ring params
+ * @ETHTOOL_RING_USE_RX_BUF_LEN: capture for setting rx_buf_len
+ */
+enum ethtool_supported_ring_param {
+	ETHTOOL_RING_USE_RX_BUF_LEN = BIT(0),
+};
+
 #define __ETH_RSS_HASH_BIT(bit)	((u32)1 << (bit))
 #define __ETH_RSS_HASH(name)	__ETH_RSS_HASH_BIT(ETH_RSS_HASH_##name##_BIT)
 
@@ -100,7 +116,8 @@ struct ethtool_link_ext_state_info {
 		enum ethtool_link_ext_substate_link_logical_mismatch link_logical_mismatch;
 		enum ethtool_link_ext_substate_bad_signal_integrity bad_signal_integrity;
 		enum ethtool_link_ext_substate_cable_issue cable_issue;
-		u8 __link_ext_substate;
+		enum ethtool_link_ext_substate_module module;
+		u32 __link_ext_substate;
 	};
 };
 
@@ -439,6 +456,7 @@ struct ethtool_ops_extended_rh {
  * @cap_link_lanes_supported: indicates if the driver supports lanes
  *	parameter.
  * @supported_coalesce_params: supported types of interrupt coalescing.
+ * @supported_ring_params: supported ring params.
  * @get_settings: DEPRECATED, use %get_link_ksettings/%set_link_ksettings
  *	API. Get various device settings including Ethernet link
  *	settings. The @cmd parameter is expected to have been cleared
@@ -654,10 +672,18 @@ struct ethtool_ops {
 						struct ethtool_coalesce *,
 						struct kernel_ethtool_coalesce *,
 						struct netlink_ext_ack *))
-	void	(*get_ringparam)(struct net_device *,
-				 struct ethtool_ringparam *);
-	int	(*set_ringparam)(struct net_device *,
-				 struct ethtool_ringparam *);
+	RH_KABI_REPLACE(void	(*get_ringparam)(struct net_device *,
+						 struct ethtool_ringparam *),
+			void	(*get_ringparam)(struct net_device *,
+						 struct ethtool_ringparam *,
+						 struct kernel_ethtool_ringparam *,
+						 struct netlink_ext_ack *))
+	RH_KABI_REPLACE(int	(*set_ringparam)(struct net_device *,
+						 struct ethtool_ringparam *),
+			int	(*set_ringparam)(struct net_device *,
+						 struct ethtool_ringparam *,
+						 struct kernel_ethtool_ringparam *,
+						 struct netlink_ext_ack *))
 	void	(*get_pauseparam)(struct net_device *,
 				  struct ethtool_pauseparam*);
 	int	(*set_pauseparam)(struct net_device *,
@@ -752,7 +778,7 @@ struct ethtool_ops {
 	RH_KABI_USE(13, void	(*get_rmon_stats)(struct net_device *dev,
 				 struct ethtool_rmon_stats *rmon_stats,
 				 const struct ethtool_rmon_hist_range **ranges))
-	RH_KABI_RESERVE(14)
+	RH_KABI_USE(14, u32 supported_ring_params)
 	RH_KABI_RESERVE(15)
 	RH_KABI_RESERVE(16)
 	RH_KABI_RESERVE(17)

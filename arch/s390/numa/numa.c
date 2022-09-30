@@ -154,21 +154,6 @@ static int __init numa_init_early(void)
 }
 early_initcall(numa_init_early);
 
-/*
- * numa_init_late() - Initialization initcall
- *
- * Register NUMA nodes.
- */
-static int __init numa_init_late(void)
-{
-	int nid;
-
-	for_each_online_node(nid)
-		register_one_node(nid);
-	return 0;
-}
-arch_initcall(numa_init_late);
-
 static int __init parse_debug(char *parm)
 {
 	numa_debug_enabled = 1;

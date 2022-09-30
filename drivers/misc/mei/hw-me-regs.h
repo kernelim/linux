@@ -102,6 +102,7 @@
 
 #define MEI_DEV_ID_EBG        0x1BE0  /* Emmitsburg WS */
 
+#define MEI_DEV_ID_ADP_N      0x54E0  /* Alder Lake Point N */
 /*
  * MEI HW Section
  */

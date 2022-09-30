@@ -284,6 +284,7 @@ config TI_SCI_PROTOCOL
 	  provided by the system controller.
 
 source "drivers/firmware/broadcom/Kconfig"
+source "drivers/firmware/cirrus/Kconfig"
 source "drivers/firmware/google/Kconfig"
 source "drivers/firmware/efi/Kconfig"
 source "drivers/firmware/meson/Kconfig"

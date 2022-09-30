@@ -747,7 +747,7 @@ lpfc_bsg_rport_els(struct bsg_job *job)
 		readl(phba->HCregaddr); /* flush */
 	}
 
-	cmdiocbq->context1 = lpfc_nlp_get(ndlp);
+	cmdiocbq->context1 = ndlp;
 	if (!cmdiocbq->context1) {
 		rc = -EIO;
 		goto linkdown_err;

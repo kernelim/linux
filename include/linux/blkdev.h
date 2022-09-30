@@ -1946,7 +1946,8 @@ unsigned long part_start_io_acct(struct gendisk *disk, struct hd_struct **part,
 void part_end_io_acct(struct hd_struct *part, struct bio *bio,
 		      unsigned long start_time);
 
-void bio_start_io_acct_time(struct bio *bio, unsigned long start_time);
+void bio_start_io_acct_time(struct bio *bio, unsigned int sectors,
+			    unsigned long start_time);
 unsigned long bio_start_io_acct(struct bio *bio);
 
 /**

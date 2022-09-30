@@ -418,4 +418,5 @@
 432  common	fsmount			sys_fsmount			sys_fsmount
 433  common	fspick			sys_fspick			sys_fspick
 436  common	close_range		sys_close_range			sys_close_range
+437  common	openat2			sys_openat2			sys_openat2
 439  common	faccessat2		sys_faccessat2			sys_faccessat2

@@ -36,6 +36,11 @@ typedef uint16_t	__u16;
 typedef unsigned char	__u8;
 typedef struct {
 	__u8 b[16];
+} guid_t;
+
+/* backwards compatibility, don't use in new code */
+typedef struct {
+	__u8 b[16];
 } uuid_le;
 
 /* Big exception to the "don't include kernel headers into userspace, which
@@ -93,6 +98,17 @@ static inline void add_uuid(char *str, uuid_le uuid)
 		uuid.b[5], uuid.b[4], uuid.b[7], uuid.b[6],
 		uuid.b[8], uuid.b[9], uuid.b[10], uuid.b[11],
 		uuid.b[12], uuid.b[13], uuid.b[14], uuid.b[15]);
+}
+
+static inline void add_guid(char *str, guid_t guid)
+{
+	int len = strlen(str);
+
+	sprintf(str + len, "%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
+		guid.b[3], guid.b[2], guid.b[1], guid.b[0],
+		guid.b[5], guid.b[4], guid.b[7], guid.b[6],
+		guid.b[8], guid.b[9], guid.b[10], guid.b[11],
+		guid.b[12], guid.b[13], guid.b[14], guid.b[15]);
 }
 
 /**
@@ -1289,6 +1305,18 @@ static int do_mhi_entry(const char *filename, void *symval, char *alias)
 	return 1;
 }
 
+/* Looks like: ishtp:{guid} */
+static int do_ishtp_entry(const char *filename, void *symval, char *alias)
+{
+	DEF_FIELD(symval, ishtp_device_id, guid);
+
+	strcpy(alias, ISHTP_MODULE_PREFIX "{");
+	add_guid(alias, guid);
+	strcat(alias, "}");
+
+	return 1;
+}
+
 static int do_auxiliary_entry(const char *filename, void *symval, char *alias)
 {
 	DEF_FIELD_ADDR(symval, auxiliary_device_id, name);
@@ -1370,6 +1398,7 @@ static const struct devtable devtable[] = {
 	{"typec", SIZE_typec_device_id, do_typec_entry},
 	{"mhi", SIZE_mhi_device_id, do_mhi_entry},
 	{"auxiliary", SIZE_auxiliary_device_id, do_auxiliary_entry},
+	{"ishtp", SIZE_ishtp_device_id, do_ishtp_entry},
 };
 
 /* Create MODULE_ALIAS() statements.

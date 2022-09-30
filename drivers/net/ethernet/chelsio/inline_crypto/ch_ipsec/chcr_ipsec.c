@@ -336,9 +336,6 @@ static bool ch_ipsec_offload_ok(struct sk_buff *skb, struct xfrm_state *x)
 		if (ipv6_ext_hdr(ipv6_hdr(skb)->nexthdr))
 			return false;
 	}
-	/* Inline single pdu */
-	if (skb_shinfo(skb)->gso_size)
-		return false;
 	return true;
 }
 

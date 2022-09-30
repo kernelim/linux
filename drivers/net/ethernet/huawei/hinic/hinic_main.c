@@ -172,7 +172,9 @@ static void hinic_get_drvinfo(struct net_device *netdev,
 }
 
 static void hinic_get_ringparam(struct net_device *netdev,
-				struct ethtool_ringparam *ring)
+				struct ethtool_ringparam *ring,
+				struct kernel_ethtool_ringparam *kernel_ring,
+				struct netlink_ext_ack *extack)
 {
 	ring->rx_max_pending = HINIC_RQ_DEPTH;
 	ring->tx_max_pending = HINIC_SQ_DEPTH;

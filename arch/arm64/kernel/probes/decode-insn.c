@@ -54,7 +54,7 @@ static bool __kprobes aarch64_insn_is_steppable(u32 insn)
 		 * except for the NOP case.
 		 */
 		if (aarch64_insn_is_hint(insn))
-			return aarch64_insn_is_nop(insn);
+			return aarch64_insn_is_steppable_hint(insn);
 
 		return true;
 	}

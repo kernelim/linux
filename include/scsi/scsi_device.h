@@ -205,6 +205,8 @@ struct scsi_device {
 
 	RH_KABI_FILL_HOLE(unsigned set_dbd_for_ms:1) /* Set "DBD" field in mode sense */
 	RH_KABI_FILL_HOLE(unsigned offline_already:1) /* Device offline message logged */
+	RH_KABI_FILL_HOLE(unsigned ignore_media_change:1) /* Ignore MEDIA CHANGE on resume */
+	RH_KABI_FILL_HOLE(unsigned silence_suspend:1)	/* Do not print runtime PM related messages */
 
 	atomic_t disk_events_disable_depth; /* disable depth for disk events */
 
@@ -274,13 +276,15 @@ sdev_prefix_printk(const char *, const struct scsi_device *, const char *,
 __printf(3, 4) void
 scmd_printk(const char *, const struct scsi_cmnd *, const char *, ...);
 
-#define scmd_dbg(scmd, fmt, a...)					   \
-	do {								   \
-		if ((scmd)->request->rq_disk)				   \
-			sdev_dbg((scmd)->device, "[%s] " fmt,		   \
-				 (scmd)->request->rq_disk->disk_name, ##a);\
-		else							   \
-			sdev_dbg((scmd)->device, fmt, ##a);		   \
+#define scmd_dbg(scmd, fmt, a...)					\
+	do {								\
+		struct request *__rq = scsi_cmd_to_rq((scmd));		\
+									\
+		if (__rq->rq_disk)					\
+			sdev_dbg((scmd)->device, "[%s] " fmt,		\
+				 __rq->rq_disk->disk_name, ##a);	\
+		else							\
+			sdev_dbg((scmd)->device, fmt, ##a);		\
 	} while (0)
 
 enum scsi_target_state {

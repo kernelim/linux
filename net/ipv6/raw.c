@@ -651,7 +651,7 @@ static int rawv6_send_hdrinc(struct sock *sk, struct msghdr *msg, int length,
 
 	skb->protocol = htons(ETH_P_IPV6);
 	skb->priority = sk->sk_priority;
-	skb->mark = sk->sk_mark;
+	skb->mark = sockc->mark;
 	skb->tstamp = sockc->transmit_time;
 
 	skb_put(skb, length);
@@ -782,7 +782,6 @@ static int rawv6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	struct dst_entry *dst = NULL;
 	struct raw6_frag_vec rfv;
 	struct flowi6 fl6;
-	struct sockcm_cookie sockc;
 	struct ipcm6_cookie ipc6;
 	int addr_len = msg->msg_namelen;
 	int hdrincl;
@@ -814,10 +813,9 @@ static int rawv6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	fl6.flowi6_mark = sk->sk_mark;
 	fl6.flowi6_uid = sk->sk_uid;
 
-	ipc6.hlimit = -1;
-	ipc6.tclass = -1;
-	ipc6.dontfrag = -1;
-	ipc6.opt = NULL;
+	ipcm6_init(&ipc6);
+	ipc6.sockc.tsflags = sk->sk_tsflags;
+	ipc6.sockc.mark = sk->sk_mark;
 
 	if (sin6) {
 		if (addr_len < SIN6_LEN_RFC2133)
@@ -871,15 +869,13 @@ static int rawv6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	if (fl6.flowi6_oif == 0)
 		fl6.flowi6_oif = sk->sk_bound_dev_if;
 
-	sockc.tsflags = sk->sk_tsflags;
-	sockc.transmit_time = 0;
 	if (msg->msg_controllen) {
 		opt = &opt_space;
 		memset(opt, 0, sizeof(struct ipv6_txoptions));
 		opt->tot_len = sizeof(struct ipv6_txoptions);
 		ipc6.opt = opt;
 
-		err = ip6_datagram_send_ctl(sock_net(sk), sk, msg, &fl6, &ipc6, &sockc);
+		err = ip6_datagram_send_ctl(sock_net(sk), sk, msg, &fl6, &ipc6);
 		if (err < 0) {
 			fl6_sock_release(flowlabel);
 			return err;
@@ -901,6 +897,7 @@ static int rawv6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	opt = ipv6_fixup_options(&opt_space, opt);
 
 	fl6.flowi6_proto = proto;
+	fl6.flowi6_mark = ipc6.sockc.mark;
 
 	if (!hdrincl) {
 		rfv.msg = msg;
@@ -950,13 +947,13 @@ static int rawv6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 back_from_confirm:
 	if (hdrincl)
 		err = rawv6_send_hdrinc(sk, msg, len, &fl6, &dst,
-					msg->msg_flags, &sockc);
+					msg->msg_flags, &ipc6.sockc);
 	else {
 		ipc6.opt = opt;
 		lock_sock(sk);
 		err = ip6_append_data(sk, raw6_getfrag, &rfv,
 			len, 0, &ipc6, &fl6, (struct rt6_info *)dst,
-			msg->msg_flags, &sockc);
+			msg->msg_flags);
 
 		if (err)
 			ip6_flush_pending_frames(sk);

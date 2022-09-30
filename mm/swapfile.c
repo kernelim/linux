@@ -1608,6 +1608,7 @@ static int page_trans_huge_map_swapcount(struct page *page, int *total_mapcount,
 	struct swap_cluster_info *ci = NULL;
 	unsigned char *map = NULL;
 	int mapcount, swapcount = 0;
+	unsigned int seqcount;
 
 	/* hugetlbfs shouldn't call it */
 	VM_BUG_ON_PAGE(PageHuge(page), page);
@@ -1625,7 +1626,6 @@ static int page_trans_huge_map_swapcount(struct page *page, int *total_mapcount,
 
 	page = compound_head(page);
 
-	_total_mapcount = _total_swapcount = map_swapcount = 0;
 	if (PageSwapCache(page)) {
 		swp_entry_t entry;
 
@@ -1638,6 +1638,11 @@ static int page_trans_huge_map_swapcount(struct page *page, int *total_mapcount,
 	}
 	if (map)
 		ci = lock_cluster(si, offset);
+
+again:
+	seqcount = page_mapcount_seq_begin(page);
+
+	_total_mapcount = _total_swapcount = map_swapcount = 0;
 	for (i = 0; i < HPAGE_PMD_NR; i++) {
 		mapcount = atomic_read(&page[i]._mapcount) + 1;
 		_total_mapcount += mapcount;
@@ -1647,12 +1652,17 @@ static int page_trans_huge_map_swapcount(struct page *page, int *total_mapcount,
 		}
 		map_swapcount = max(map_swapcount, mapcount + swapcount);
 	}
-	unlock_cluster(ci);
 	if (PageDoubleMap(page)) {
 		map_swapcount -= 1;
 		_total_mapcount -= HPAGE_PMD_NR;
 	}
 	mapcount = compound_mapcount(page);
+
+	if (page_mapcount_seq_retry(page, seqcount))
+		goto again;
+
+	unlock_cluster(ci);
+
 	map_swapcount += mapcount;
 	_total_mapcount += mapcount;
 	if (total_mapcount)
@@ -1682,6 +1692,38 @@ static int page_trans_huge_map_swapcount(struct page *page, int *total_mapcount,
 	return mapcount + swapcount;
 }
 #endif
+
+/*
+ * Very similar in functionality to reuse_swap_page().
+ *
+ * reuse_swap_page() and can_read_pin_swap_page() both answer if the
+ * page is exclusive or not, but for two different purposes.
+ *
+ * reuse_swap_page() is invoked to know if a page is exclusive so it
+ * can be made writable.
+ *
+ * can_read_pin_swap_page() is invoked to know if the page is
+ * exclusive so a read GUP pin can be taken, but the page isn't going
+ * to be made writable.
+ *
+ * So there is a different retval in the case of PageKsm(). In
+ * addition can_read_pin_swap_page() will not alter the mapping and so
+ * it should not cause any side effects to the page type. It is also a
+ * readonly PIN so there's no concern for stable pages.
+ */
+bool can_read_pin_swap_page(struct page *page)
+{
+	VM_BUG_ON_PAGE(!PageLocked(page), page);
+
+	/*
+	 * If the !PageKsm changed to PageKsm from under us before the
+	 * page lock was taken, always allow GUP pins on PageKsm.
+	 */
+	if (unlikely(PageKsm(page)))
+		return true;
+
+	return page_trans_huge_map_swapcount(page, NULL, NULL) <= 1;
+}
 
 /*
  * We can write to an anon page without COW if there are no other references

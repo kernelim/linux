@@ -180,6 +180,16 @@ int printk(const char *fmt, ...);
  */
 __printf(1, 2) __cold int printk_deferred(const char *fmt, ...);
 
+extern void __printk_safe_enter(void);
+extern void __printk_safe_exit(void);
+/*
+ * The printk_deferred_enter/exit macros are available only as a hack for
+ * some code paths that need to defer all printk console printing. Interrupts
+ * must be disabled for the deferred duration.
+ */
+#define printk_deferred_enter __printk_safe_enter
+#define printk_deferred_exit __printk_safe_exit
+
 /*
  * Please don't use printk_ratelimit(), because it shares ratelimiting state
  * with all other unrelated printk_ratelimit() callsites.  Instead use
@@ -225,6 +235,15 @@ int printk_deferred(const char *s, ...)
 {
 	return 0;
 }
+
+static inline void printk_deferred_enter(void)
+{
+}
+
+static inline void printk_deferred_exit(void)
+{
+}
+
 static inline int printk_ratelimit(void)
 {
 	return 0;

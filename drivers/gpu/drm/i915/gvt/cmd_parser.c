@@ -37,7 +37,9 @@
 #include <linux/slab.h>
 
 #include "i915_drv.h"
+#include "gt/intel_engine_regs.h"
 #include "gt/intel_gpu_commands.h"
+#include "gt/intel_gt_regs.h"
 #include "gt/intel_lrc.h"
 #include "gt/intel_ring.h"
 #include "gt/intel_gt_requests.h"
@@ -1144,7 +1146,7 @@ struct cmd_interrupt_event {
 	int mi_user_interrupt;
 };
 
-static struct cmd_interrupt_event cmd_interrupt_events[] = {
+static const struct cmd_interrupt_event cmd_interrupt_events[] = {
 	[RCS0] = {
 		.pipe_control_notify = RCS_PIPE_CONTROL,
 		.mi_flush_dw = INTEL_GVT_EVENT_RESERVED,
@@ -3115,9 +3117,9 @@ void intel_gvt_update_reg_whitelist(struct intel_vgpu *vgpu)
 			continue;
 
 		vaddr = shmem_pin_map(engine->default_state);
-		if (IS_ERR(vaddr)) {
-			gvt_err("failed to map %s->default state, err:%zd\n",
-				engine->name, PTR_ERR(vaddr));
+		if (!vaddr) {
+			gvt_err("failed to map %s->default state\n",
+				engine->name);
 			return;
 		}
 

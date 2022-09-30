@@ -318,7 +318,7 @@ int bcmgenet_mii_probe(struct net_device *dev)
 	 * Ethernet MAC ISRs
 	 */
 	if (priv->internal_phy)
-		dev->phydev->irq = PHY_IGNORE_INTERRUPT;
+		dev->phydev->irq = PHY_MAC_INTERRUPT;
 
 	return 0;
 }

@@ -52,18 +52,23 @@ static int __init hash_setup(char *str)
 		return 1;
 
 	if (strcmp(template_desc->name, IMA_TEMPLATE_IMA_NAME) == 0) {
-		if (strncmp(str, "sha1", 4) == 0)
+		if (strncmp(str, "sha1", 4) == 0) {
 			ima_hash_algo = HASH_ALGO_SHA1;
-		else if (strncmp(str, "md5", 3) == 0)
+		} else if (strncmp(str, "md5", 3) == 0) {
 			ima_hash_algo = HASH_ALGO_MD5;
-		else
+		} else {
+			pr_err("invalid hash algorithm \"%s\" for template \"%s\"",
+				str, IMA_TEMPLATE_IMA_NAME);
 			return 1;
+		}
 		goto out;
 	}
 
 	i = match_string(hash_algo_name, HASH_ALGO__LAST, str);
-	if (i < 0)
+	if (i < 0) {
+		pr_err("invalid hash algorithm \"%s\"", str);
 		return 1;
+	}
 
 	ima_hash_algo = i;
 out:
@@ -482,19 +487,17 @@ void ima_post_path_mknod(struct dentry *dentry)
 int ima_read_file(struct file *file, enum kernel_read_file_id read_id)
 {
 	/*
-	 * READING_FIRMWARE_PREALLOC_BUFFER
-	 *
 	 * Do devices using pre-allocated memory run the risk of the
 	 * firmware being accessible to the device prior to the completion
 	 * of IMA's signature verification any more than when using two
-	 * buffers?
+	 * buffers? It may be desirable to include the buffer address
+	 * in this API and walk all the dma_map_single() mappings to check.
 	 */
 	return 0;
 }
 
 const int read_idmap[READING_MAX_ID] = {
 	[READING_FIRMWARE] = FIRMWARE_CHECK,
-	[READING_FIRMWARE_PREALLOC_BUFFER] = FIRMWARE_CHECK,
 	[READING_MODULE] = MODULE_CHECK,
 	[READING_KEXEC_IMAGE] = KEXEC_KERNEL_CHECK,
 	[READING_KEXEC_INITRAMFS] = KEXEC_INITRAMFS_CHECK,

@@ -12,20 +12,44 @@
 #include <linux/list.h>
 #include <linux/cpumask.h>
 #include <linux/init.h>
-#include <linux/llist.h>
+#include <linux/smp_types.h>
+
+#include <linux/rh_kabi.h>
 
 typedef void (*smp_call_func_t)(void *info);
 typedef bool (*smp_cond_func_t)(int cpu, void *info);
+
+/*
+ * structure shares (partial) layout with struct irq_work
+ *
+ * RHEL8 Note: The size of struct __call_single_data doesn't change,
+ * but field offsets do. So 3rd kernel modules that use
+ * smp_call_function_single_async() will likely be broken.
+ */
 struct __call_single_data {
-	struct llist_node llist;
+	RH_KABI_BROKEN_INSERT(
+		union {
+			struct __call_single_node node;
+			struct {
+				unsigned int flags;
+				struct llist_node llist;
+			};
+		})
+	RH_KABI_BROKEN_REMOVE(struct llist_node llist)
 	smp_call_func_t func;
 	void *info;
-	unsigned int flags;
+	RH_KABI_BROKEN_REMOVE(unsigned int flags)
 };
 
 /* Use __aligned() to avoid to use 2 cache lines for 1 csd */
 typedef struct __call_single_data call_single_data_t
 	__aligned(sizeof(struct __call_single_data));
+
+/*
+ * Enqueue a llist_node on the call_single_queue; be very careful, read
+ * flush_smp_call_function_queue() in detail.
+ */
+extern void __smp_call_single_queue(int cpu, struct llist_node *node);
 
 /* total number of cpus in this system (may exceed NR_CPUS) */
 extern unsigned int total_cpus;

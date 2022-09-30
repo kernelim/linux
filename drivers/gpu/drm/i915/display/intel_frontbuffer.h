@@ -28,13 +28,12 @@
 #include <linux/kref.h>
 
 #include "gem/i915_gem_object_types.h"
-#include "i915_active.h"
+#include "i915_active_types.h"
 
 struct drm_i915_private;
 
 enum fb_op_origin {
-	ORIGIN_GTT,
-	ORIGIN_CPU,
+	ORIGIN_CPU = 0,
 	ORIGIN_CS,
 	ORIGIN_FLIP,
 	ORIGIN_DIRTYFB,

@@ -531,6 +531,15 @@ enforces that 0 swappiness really prevents from any swapping even if
 there is a swap storage available. This might lead to memcg OOM killer
 if there are no file pages to reclaim.
 
+Please note that systemd creates its slice cgroups (and children) with a
+swappiness value of 60 and most processes run in a system will utilize this
+swappiness value. If you are experiencing unwanted swapping try setting the
+/proc/sys/vm/force_cgroup_v2_swappiness=1 value to deprecate per-cgroups
+swappiness values. When this value is set, all per-cgroup swappiness values
+will match the value in /proc/sys/vm/swappiness. With this setting enabled
+writing to a cgroups memory.swappiness value will have no effect, and
+reading a memory.swappiness value will return the global swappiness value.
+
 5.4 failcnt
 
 A memory cgroup provides memory.failcnt and memory.memsw.failcnt files.

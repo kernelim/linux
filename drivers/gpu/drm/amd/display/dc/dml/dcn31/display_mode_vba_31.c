@@ -64,6 +64,8 @@ typedef struct {
 	double DCFCLKDeepSleep;
 	unsigned int DPPPerPlane;
 	bool ScalerEnabled;
+	double VRatio;
+	double VRatioChroma;
 	enum scan_direction_class SourceScan;
 	unsigned int BlockWidth256BytesY;
 	unsigned int BlockHeight256BytesY;
@@ -942,6 +944,7 @@ static bool CalculatePrefetchSchedule(
 	double dst_y_prefetch_equ;
 	double Tsw_oto;
 	double prefetch_bw_oto;
+	double prefetch_bw_pr;
 	double Tvm_oto;
 	double Tr0_oto;
 	double Tvm_oto_lines;
@@ -971,6 +974,7 @@ static bool CalculatePrefetchSchedule(
 	double min_Lsw;
 	double Tsw_est1 = 0;
 	double Tsw_est3 = 0;
+	double  max_Tsw = 0;
 
 	if (GPUVMEnable == true && HostVMEnable == true) {
 		HostVMDynamicLevelsTrips = HostVMMaxNonCachedPageTableLevels;
@@ -1111,11 +1115,14 @@ static bool CalculatePrefetchSchedule(
 		bytes_pp = myPipe->BytePerPixelY + myPipe->BytePerPixelC / 4;
 	else
 		bytes_pp = myPipe->BytePerPixelY + myPipe->BytePerPixelC;
-
+	/*rev 99*/
+	prefetch_bw_pr = dml_min(1, bytes_pp * myPipe->PixelClock / (double) myPipe->DPPPerPlane);
+    max_Tsw = dml_max(PrefetchSourceLinesY, PrefetchSourceLinesC) * LineTime;
 	prefetch_sw_bytes = PrefetchSourceLinesY * swath_width_luma_ub * myPipe->BytePerPixelY + PrefetchSourceLinesC * swath_width_chroma_ub * myPipe->BytePerPixelC;
 	prefetch_bw_oto = dml_max(bytes_pp * myPipe->PixelClock / myPipe->DPPPerPlane, prefetch_sw_bytes / (dml_max(PrefetchSourceLinesY, PrefetchSourceLinesC) * LineTime));
+    prefetch_bw_oto = dml_max(prefetch_bw_pr, prefetch_sw_bytes / max_Tsw);
 
-	min_Lsw = dml_max(PrefetchSourceLinesY, PrefetchSourceLinesC) / max_vratio_pre;
+	min_Lsw = dml_max(1, dml_max(PrefetchSourceLinesY, PrefetchSourceLinesC) / max_vratio_pre);
 	Lsw_oto = dml_ceil(4 * dml_max(prefetch_sw_bytes / prefetch_bw_oto / LineTime, min_Lsw), 1) / 4;
 	Tsw_oto = Lsw_oto * LineTime;
 
@@ -1389,7 +1396,7 @@ static bool CalculatePrefetchSchedule(
 			dml_print("DML::%s: SwathHeightC = %d\n", __func__, SwathHeightC);
 			dml_print("DML::%s: VInitPreFillC = %f\n", __func__, VInitPreFillC);
 #endif
-			if ((SwathHeightC > 4)) {
+			if ((SwathHeightC > 4) || VInitPreFillC > 3) {
 				if (LinesToRequestPrefetchPixelData > (VInitPreFillC - 3.0) / 2.0) {
 					*VRatioPrefetchC = dml_max(
 							*VRatioPrefetchC,
@@ -2663,6 +2670,8 @@ static void DISPCLKDPPCLKDCFCLKDeepSleepPrefetchParametersWatermarksAndPerforman
 			myPipe.DCFCLKDeepSleep = v->DCFCLKDeepSleep;
 			myPipe.DPPPerPlane = v->DPPPerPlane[k];
 			myPipe.ScalerEnabled = v->ScalerEnabled[k];
+			myPipe.VRatio = v->VRatio[k];
+			myPipe.VRatioChroma = v->VRatioChroma[k];
 			myPipe.SourceScan = v->SourceScan[k];
 			myPipe.BlockWidth256BytesY = v->BlockWidth256BytesY[k];
 			myPipe.BlockHeight256BytesY = v->BlockHeight256BytesY[k];
@@ -2982,10 +2991,9 @@ static void DISPCLKDPPCLKDCFCLKDeepSleepPrefetchParametersWatermarksAndPerforman
 		}
 
 		v->PrefetchAndImmediateFlipSupported =
-				(v->PrefetchModeSupported == true
-						&& ((!v->ImmediateFlipSupport && !v->HostVMEnable
-								&& v->ImmediateFlipRequirement != dm_immediate_flip_required) || v->ImmediateFlipSupported)) ?
-						true : false;
+				(v->PrefetchModeSupported == true && ((!v->ImmediateFlipSupport && !v->HostVMEnable
+				&& v->ImmediateFlipRequirement[0] != dm_immediate_flip_required) ||
+				v->ImmediateFlipSupported)) ? true : false;
 #ifdef __DML_VBA_DEBUG__
 		dml_print("DML::%s: PrefetchModeSupported %d\n", __func__, v->PrefetchModeSupported);
 		dml_print("DML::%s: ImmediateFlipRequirement %d\n", __func__, v->ImmediateFlipRequirement == dm_immediate_flip_required);
@@ -3839,15 +3847,11 @@ static double TruncToValidBPP(
 		MinDSCBPP = 8;
 		MaxDSCBPP = 3 * DSCInputBitPerComponent - 1.0 / 16;
 	} else {
-		if (Output == dm_hdmi) {
-			NonDSCBPP0 = 24;
-			NonDSCBPP1 = 24;
-			NonDSCBPP2 = 24;
-		} else {
-			NonDSCBPP0 = 16;
-			NonDSCBPP1 = 20;
-			NonDSCBPP2 = 24;
-		}
+
+		NonDSCBPP0 = 16;
+		NonDSCBPP1 = 20;
+		NonDSCBPP2 = 24;
+
 		if (Format == dm_n422) {
 			MinDSCBPP = 7;
 			MaxDSCBPP = 2 * DSCInputBitPerComponent - 1.0 / 16.0;
@@ -3916,6 +3920,9 @@ static noinline void CalculatePrefetchSchedulePerPlane(
 	myPipe.DCFCLKDeepSleep = v->ProjectedDCFCLKDeepSleep[i][j];
 	myPipe.DPPPerPlane = v->NoOfDPP[i][j][k];
 	myPipe.ScalerEnabled = v->ScalerEnabled[k];
+	myPipe.VRatio = mode_lib->vba.VRatio[k];
+	myPipe.VRatioChroma = mode_lib->vba.VRatioChroma[k];
+
 	myPipe.SourceScan = v->SourceScan[k];
 	myPipe.BlockWidth256BytesY = v->Read256BlockWidthY[k];
 	myPipe.BlockHeight256BytesY = v->Read256BlockHeightY[k];
@@ -4992,6 +4999,17 @@ void dml31_ModeSupportAndSystemConfigurationFull(struct display_mode_lib *mode_l
 						&v->meta_row_bandwidth[i][j][k],
 						&v->dpte_row_bandwidth[i][j][k]);
 			}
+			/*DCCMetaBufferSizeSupport(i, j) = True
+			For k = 0 To NumberOfActivePlanes - 1
+			If MetaRowBytes(i, j, k) > 24064 Then
+			DCCMetaBufferSizeSupport(i, j) = False
+			End If
+			Next k*/
+			v->DCCMetaBufferSizeSupport[i][j] = true;
+			for (k = 0; k < v->NumberOfActivePlanes; ++k) {
+				if (v->MetaRowBytes[i][j][k] > 24064)
+					v->DCCMetaBufferSizeSupport[i][j] = false;
+			}
 			v->UrgLatency[i] = CalculateUrgentLatency(
 					v->UrgentLatencyPixelDataOnly,
 					v->UrgentLatencyPixelMixedWithVMData,
@@ -5443,7 +5461,8 @@ void dml31_ModeSupportAndSystemConfigurationFull(struct display_mode_lib *mode_l
 				}
 				v->NextPrefetchMode = v->NextPrefetchMode + 1;
 			} while (!((v->PrefetchSupported[i][j] == true && v->DynamicMetadataSupported[i][j] == true && v->VRatioInPrefetchSupported[i][j] == true
-					&& ((v->HostVMEnable == false && v->ImmediateFlipRequirement != dm_immediate_flip_required)
+					&& ((v->HostVMEnable == false &&
+							v->ImmediateFlipRequirement[0] != dm_immediate_flip_required)
 							|| v->ImmediateFlipSupportedForState[i][j] == true))
 					|| (v->NextMaxVStartup == v->MaxMaxVStartup[i][j] && NextPrefetchModeState > MaxPrefetchMode)));
 
@@ -5603,7 +5622,8 @@ void dml31_ModeSupportAndSystemConfigurationFull(struct display_mode_lib *mode_l
 					&& v->PrefetchSupported[i][j] == true && v->DynamicMetadataSupported[i][j] == true
 					&& v->TotalVerticalActiveBandwidthSupport[i][j] == true && v->VRatioInPrefetchSupported[i][j] == true
 					&& v->PTEBufferSizeNotExceeded[i][j] == true && v->NonsupportedDSCInputBPC == false
-					&& ((v->HostVMEnable == false && v->ImmediateFlipRequirement != dm_immediate_flip_required)
+					&& ((v->HostVMEnable == false
+					&& v->ImmediateFlipRequirement[0] != dm_immediate_flip_required)
 							|| v->ImmediateFlipSupportedForState[i][j] == true)
 					&& FMTBufferExceeded == false) {
 				v->ModeSupport[i][j] = true;
@@ -7190,7 +7210,7 @@ static void UseMinimumDCFCLK(
 
 			MinimumTWait = CalculateTWait(MaxPrefetchMode, v->FinalDRAMClockChangeLatency, v->UrgLatency[i], v->SREnterPlusExitTime);
 			NonDPTEBandwidth = v->TotalVActivePixelBandwidth[i][j] + v->TotalVActiveCursorBandwidth[i][j] + v->TotalMetaRowBandwidth[i][j];
-			DPTEBandwidth = (v->HostVMEnable == true || v->ImmediateFlipRequirement == dm_immediate_flip_required) ?
+			DPTEBandwidth = (v->HostVMEnable == true || v->ImmediateFlipRequirement[0] == dm_immediate_flip_required) ?
 					TotalMaxPrefetchFlipDPTERowBandwidth[i][j] : v->TotalDPTERowBandwidth[i][j];
 			DCFCLKRequiredForAverageBandwidth = dml_max3(
 					v->ProjectedDCFCLKDeepSleep[i][j],
@@ -7242,7 +7262,7 @@ static void UseMinimumDCFCLK(
 							/ (PrefetchTime * PixelDCFCLKCyclesRequiredInPrefetch[k] / DCFCLKCyclesRequiredInPrefetch);
 					DCFCLKRequiredForPeakBandwidthPerPlane[k] = NoOfDPPState[k] * PixelDCFCLKCyclesRequiredInPrefetch[k] / PrefetchPixelLinesTime[k]
 							* dml_max(1.0, ExpectedVRatioPrefetch) * dml_max(1.0, ExpectedVRatioPrefetch / 4) * ExpectedPrefetchBWAcceleration;
-					if (v->HostVMEnable == true || v->ImmediateFlipRequirement == dm_immediate_flip_required) {
+					if (v->HostVMEnable == true || v->ImmediateFlipRequirement[0] == dm_immediate_flip_required) {
 						DCFCLKRequiredForPeakBandwidthPerPlane[k] = DCFCLKRequiredForPeakBandwidthPerPlane[k]
 								+ NoOfDPPState[k] * DPTEBandwidth / NormalEfficiency / NormalEfficiency / v->ReturnBusWidth;
 					}

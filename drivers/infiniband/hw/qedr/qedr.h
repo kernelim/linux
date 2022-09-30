@@ -418,6 +418,7 @@ struct qedr_qp {
 	u32 sq_psn;
 	u32 qkey;
 	u32 dest_qp_num;
+	u8 timeout;
 
 	/* Relevant to qps created from kernel space only (ULPs) */
 	u8 prev_wqe_size;
@@ -455,6 +456,7 @@ struct qedr_qp {
 	/* synchronization objects used with iwarp ep */
 	struct kref refcnt;
 	struct completion iwarp_cm_comp;
+	struct completion qp_rel_comp;
 	unsigned long iwarp_cm_flags; /* enum iwarp_cm_flags */
 };
 

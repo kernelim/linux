@@ -270,8 +270,7 @@ nfs_page_set_headlock(struct nfs_page *req)
 void
 nfs_page_clear_headlock(struct nfs_page *req)
 {
-	smp_mb__before_atomic();
-	clear_bit(PG_HEADLOCK, &req->wb_flags);
+	clear_bit_unlock(PG_HEADLOCK, &req->wb_flags);
 	smp_mb__after_atomic();
 	if (!test_bit(PG_CONTENDED1, &req->wb_flags))
 		return;
@@ -524,12 +523,7 @@ nfs_create_subreq(struct nfs_page *req,
  */
 void nfs_unlock_request(struct nfs_page *req)
 {
-	if (!NFS_WBACK_BUSY(req)) {
-		printk(KERN_ERR "NFS: Invalid unlock attempted\n");
-		BUG();
-	}
-	smp_mb__before_atomic();
-	clear_bit(PG_BUSY, &req->wb_flags);
+	clear_bit_unlock(PG_BUSY, &req->wb_flags);
 	smp_mb__after_atomic();
 	if (!test_bit(PG_CONTENDED2, &req->wb_flags))
 		return;
@@ -772,6 +766,9 @@ int nfs_initiate_pgio(struct rpc_clnt *clnt, struct nfs_pgio_header *hdr,
 		.flags = RPC_TASK_ASYNC | flags,
 	};
 
+	if (nfs_server_capable(hdr->inode, NFS_CAP_MOVEABLE))
+		task_setup_data.flags |= RPC_TASK_MOVEABLE;
+
 	hdr->rw_ops->rw_initiate(hdr, &msg, rpc_ops, &task_setup_data, how);
 
 	dprintk("NFS: initiated pgio call "
@@ -869,9 +866,6 @@ static void nfs_pgio_result(struct rpc_task *task, void *calldata)
 	struct nfs_pgio_header *hdr = calldata;
 	struct inode *inode = hdr->inode;
 
-	dprintk("NFS: %s: %5u, (status %d)\n", __func__,
-		task->tk_pid, task->tk_status);
-
 	if (hdr->rw_ops->rw_done(task, hdr, inode) != 0)
 		return;
 	if (task->tk_status < 0)
@@ -953,6 +947,7 @@ static int nfs_generic_pg_pgios(struct nfs_pageio_descriptor *desc)
 {
 	struct nfs_pgio_header *hdr;
 	int ret;
+	unsigned short task_flags = 0;
 
 	hdr = nfs_pgio_header_alloc(desc->pg_rw_ops);
 	if (!hdr) {
@@ -961,14 +956,17 @@ static int nfs_generic_pg_pgios(struct nfs_pageio_descriptor *desc)
 	}
 	nfs_pgheader_init(desc, hdr, nfs_pgio_header_free);
 	ret = nfs_generic_pgio(desc, hdr);
-	if (ret == 0)
+	if (ret == 0) {
+		if (NFS_SERVER(hdr->inode)->nfs_client->cl_minorversion)
+			task_flags = RPC_TASK_MOVEABLE;
 		ret = nfs_initiate_pgio(NFS_CLIENT(hdr->inode),
 					hdr,
 					hdr->cred,
 					NFS_PROTO(hdr->inode),
 					desc->pg_rpc_callops,
 					desc->pg_ioflags,
-					RPC_TASK_CRED_NOREF);
+					RPC_TASK_CRED_NOREF | task_flags);
+	}
 	return ret;
 }
 

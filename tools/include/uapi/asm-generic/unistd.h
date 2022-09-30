@@ -805,8 +805,11 @@ __SYSCALL(__NR_fspick, sys_fspick)
 #define __NR_close_range 436
 __SYSCALL(__NR_close_range, sys_close_range)
 
+#define __NR_openat2 437
+__SYSCALL(__NR_openat2, sys_openat2)
+
 #undef __NR_syscalls
-#define __NR_syscalls 437
+#define __NR_syscalls 438
 
 /*
  * 32 bit systems traditionally used different

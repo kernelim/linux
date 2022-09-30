@@ -425,4 +425,5 @@
 432	i386	fsmount			sys_fsmount			__ia32_sys_fsmount
 433	i386	fspick			sys_fspick			__ia32_sys_fspick
 436	i386	close_range		sys_close_range			__ia32_sys_close_range
+437	i386	openat2			sys_openat2			__ia32_sys_openat2
 439	i386	faccessat2		sys_faccessat2			__ia32_sys_faccessat2

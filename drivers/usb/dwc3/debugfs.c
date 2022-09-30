@@ -485,7 +485,7 @@ static int dwc3_testmode_show(struct seq_file *s, void *unused)
 		seq_puts(s, "test_force_enable\n");
 		break;
 	default:
-		seq_puts(s, "UNKNOWN %d\n", reg);
+		seq_printf(s, "UNKNOWN %d\n", reg);
 	}
 
 	return 0;

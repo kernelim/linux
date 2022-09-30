@@ -80,8 +80,24 @@
 
 #include <trace/events/sched.h>
 
+#define WARN_ONCE_SAFE(condition, format...)	({		\
+	static bool __section(.data.once) __warned;		\
+	int __ret_warn_once = !!(condition);			\
+								\
+	if (unlikely(__ret_warn_once && !__warned)) {		\
+		bool __warn_deferred = irqs_disabled();         \
+		__warned = true;				\
+		if(__warn_deferred)                         	\
+			printk_deferred_enter();		\
+		WARN(1, format);				\
+		if (__warn_deferred)				\
+			printk_deferred_exit();			\
+	}							\
+	unlikely(__ret_warn_once);				\
+})
+
 #ifdef CONFIG_SCHED_DEBUG
-# define SCHED_WARN_ON(x)	WARN_ONCE(x, #x)
+# define SCHED_WARN_ON(x)	WARN_ONCE_SAFE(x, #x)
 #else
 # define SCHED_WARN_ON(x)	({ (void)(x), 0; })
 #endif
@@ -349,9 +365,8 @@ extern void __setparam_dl(struct task_struct *p, const struct sched_attr *attr);
 extern void __getparam_dl(struct task_struct *p, struct sched_attr *attr);
 extern bool __checkparam_dl(const struct sched_attr *attr);
 extern bool dl_param_changed(struct task_struct *p, const struct sched_attr *attr);
-extern int  dl_task_can_attach(struct task_struct *p, const struct cpumask *cs_cpus_allowed);
 extern int  dl_cpuset_cpumask_can_shrink(const struct cpumask *cur, const struct cpumask *trial);
-extern bool dl_cpu_busy(unsigned int cpu);
+extern int  dl_cpu_busy(int cpu, struct task_struct *p);
 
 #ifdef CONFIG_CGROUP_SCHED
 
@@ -892,11 +907,12 @@ struct rq {
 	unsigned int		has_blocked_load;
 #endif /* CONFIG_SMP */
 	unsigned int		nohz_tick_stopped;
-	atomic_t nohz_flags;
+	atomic_t		nohz_flags;
 #endif /* CONFIG_NO_HZ_COMMON */
 
 	RH_KABI_DEPRECATE(struct load_weight, load)
-	unsigned long		nr_load_updates;
+	RH_KABI_REPLACE(unsigned long nr_load_updates,
+			unsigned int  ttwu_pending)
 	u64			nr_switches;
 
 	struct cfs_rq		cfs;
@@ -944,6 +960,7 @@ struct rq {
 	struct callback_head	*balance_callback;
 
 	unsigned char		idle_balance;
+	RH_KABI_FILL_HOLE(unsigned char nohz_idle_balance)
 
 	/* For active balancing */
 	int			active_balance;
@@ -963,7 +980,7 @@ struct rq {
 
 	/* This is used to determine avg_idle's max value */
 	u64			max_idle_balance_cost;
-#endif
+#endif /* CONFIG_SMP */
 
 #ifdef CONFIG_IRQ_TIME_ACCOUNTING
 	u64			prev_irq_time;
@@ -981,7 +998,7 @@ struct rq {
 
 #ifdef CONFIG_SCHED_HRTICK
 #ifdef CONFIG_SMP
-	int			hrtick_csd_pending;
+	RH_KABI_DEPRECATE(int,	hrtick_csd_pending)
 	call_single_data_t	hrtick_csd;
 #endif
 	struct hrtimer		hrtick_timer;
@@ -1006,7 +1023,7 @@ struct rq {
 #endif
 
 #ifdef CONFIG_SMP
-	struct llist_head	wake_list;
+	RH_KABI_DEPRECATE(struct llist_head, wake_list)
 #endif
 
 #ifdef CONFIG_CPU_IDLE
@@ -1040,6 +1057,9 @@ struct rq {
 	RH_KABI_EXTEND(u64 clock_pelt)
 	RH_KABI_EXTEND(unsigned long lost_idle_time)
 	RH_KABI_EXTEND(struct cpu_stop_work push_work)
+#ifdef CONFIG_SMP
+	RH_KABI_EXTEND(call_single_data_t nohz_csd)
+#endif
 };
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
@@ -1431,8 +1451,6 @@ queue_balance_callback(struct rq *rq,
 	rq->balance_callback = head;
 }
 
-extern void sched_ttwu_pending(void);
-
 #define rcu_dereference_check_sched_domain(p) \
 	rcu_dereference_check((p), \
 			      lockdep_is_held(&sched_domains_mutex))
@@ -1573,11 +1591,11 @@ static inline void unregister_sched_domain_sysctl(void)
 }
 #endif
 
-#else
+extern void flush_smp_call_function_queue(void);
 
-static inline void sched_ttwu_pending(void) { }
-
-#endif /* CONFIG_SMP */
+#else /* !CONFIG_SMP: */
+static inline void flush_smp_call_function_queue(void) { }
+#endif
 
 #include "stats.h"
 #include "autogroup.h"

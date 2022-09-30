@@ -442,6 +442,7 @@ struct pv_mmu_ops pv_mmu_ops __ro_after_init = {
 	},
 
 	.set_fixmap = native_set_fixmap,
+	.notify_page_enc_status_changed	= paravirt_nop,
 };
 
 EXPORT_SYMBOL_GPL(pv_time_ops);

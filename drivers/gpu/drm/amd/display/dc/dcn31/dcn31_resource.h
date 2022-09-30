@@ -35,6 +35,21 @@ struct dcn31_resource_pool {
 	struct resource_pool base;
 };
 
+bool dcn31_validate_bandwidth(struct dc *dc,
+		struct dc_state *context,
+		bool fast_validate);
+void dcn31_calculate_wm_and_dlg(
+		struct dc *dc, struct dc_state *context,
+		display_e2e_pipe_params_st *pipes,
+		int pipe_cnt,
+		int vlevel);
+int dcn31_populate_dml_pipes_from_context(
+	struct dc *dc, struct dc_state *context,
+	display_e2e_pipe_params_st *pipes,
+	bool fast_validate);
+void dcn31_update_bw_bounding_box(struct dc *dc, struct clk_bw_params *bw_params);
+void dcn31_update_soc_for_wm_a(struct dc *dc, struct dc_state *context);
+
 struct resource_pool *dcn31_create_resource_pool(
 		const struct dc_init_data *init_data,
 		struct dc *dc);

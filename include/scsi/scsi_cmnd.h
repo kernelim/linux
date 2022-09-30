@@ -12,7 +12,6 @@
 #include <linux/timer.h>
 #include <linux/scatterlist.h>
 #include <scsi/scsi_device.h>
-#include RH_KABI_HIDE_INCLUDE(<scsi/scsi_host.h>)
 #include <scsi/scsi_request.h>
 
 struct Scsi_Host;
@@ -168,6 +167,12 @@ struct scsi_cmnd {
 	RH_KABI_RESERVE(4)
 };
 
+/* Variant of blk_mq_rq_from_pdu() that verifies the type of its argument. */
+static inline struct request *scsi_cmd_to_rq(struct scsi_cmnd *scmd)
+{
+	return blk_mq_rq_from_pdu(scmd);
+}
+
 /*
  * Return the driver private allocation behind the command.
  * Only works if cmd_size is set in the host template.
@@ -180,7 +185,9 @@ static inline void *scsi_cmd_priv(struct scsi_cmnd *cmd)
 /* make sure not to use it with passthrough commands */
 static inline struct scsi_driver *scsi_cmd_to_driver(struct scsi_cmnd *cmd)
 {
-	return *(struct scsi_driver **)cmd->request->rq_disk->private_data;
+	struct request *rq = scsi_cmd_to_rq(cmd);
+
+	return *(struct scsi_driver **)rq->rq_disk->private_data;
 }
 
 extern void scsi_put_command(struct scsi_cmnd *);
@@ -241,6 +248,13 @@ static inline int scsi_sg_copy_to_buffer(struct scsi_cmnd *cmd,
 {
 	return sg_copy_to_buffer(scsi_sglist(cmd), scsi_sg_count(cmd),
 				 buf, buflen);
+}
+
+static inline unsigned int scsi_logical_block_count(struct scsi_cmnd *scmd)
+{
+	unsigned int shift = ilog2(scmd->device->sector_size) - SECTOR_SHIFT;
+
+	return blk_rq_bytes(scsi_cmd_to_rq(scmd)) >> shift;
 }
 
 /*
@@ -307,7 +321,14 @@ static inline unsigned char scsi_get_prot_type(struct scsi_cmnd *scmd)
 
 static inline sector_t scsi_get_lba(struct scsi_cmnd *scmd)
 {
-	return blk_rq_pos(scmd->request);
+	return blk_rq_pos(scsi_cmd_to_rq(scmd));
+}
+
+static inline u32 scsi_prot_ref_tag(struct scsi_cmnd *scmd)
+{
+	struct request *rq = blk_mq_rq_from_pdu(scmd);
+
+	return t10_pi_ref_tag(rq);
 }
 
 static inline unsigned int scsi_prot_interval(struct scsi_cmnd *scmd)
@@ -338,6 +359,11 @@ static inline void set_status_byte(struct scsi_cmnd *cmd, char status)
 	cmd->result = (cmd->result & 0xffffff00) | status;
 }
 
+static inline u8 get_status_byte(struct scsi_cmnd *cmd)
+{
+	return cmd->result & 0xff;
+}
+
 static inline void set_msg_byte(struct scsi_cmnd *cmd, char status)
 {
 	cmd->result = (cmd->result & 0xffff00ff) | (status << 8);
@@ -351,6 +377,38 @@ static inline void set_host_byte(struct scsi_cmnd *cmd, char status)
 static inline void set_driver_byte(struct scsi_cmnd *cmd, char status)
 {
 	cmd->result = (cmd->result & 0x00ffffff) | (status << 24);
+}
+
+static inline u8 get_host_byte(struct scsi_cmnd *cmd)
+{
+	return (cmd->result >> 16) & 0xff;
+}
+
+/**
+ * scsi_msg_to_host_byte() - translate message byte
+ *
+ * Translate the SCSI parallel message byte to a matching
+ * host byte setting. A message of COMMAND_COMPLETE indicates
+ * a successful command execution, any other message indicate
+ * an error. As the messages themselves only have a meaning
+ * for the SCSI parallel protocol this function translates
+ * them into a matching host byte value for SCSI EH.
+ */
+static inline void scsi_msg_to_host_byte(struct scsi_cmnd *cmd, u8 msg)
+{
+	switch (msg) {
+	case COMMAND_COMPLETE:
+		break;
+	case ABORT_TASK_SET:
+		set_host_byte(cmd, DID_ABORT);
+		break;
+	case TARGET_RESET:
+		set_host_byte(cmd, DID_RESET);
+		break;
+	default:
+		set_host_byte(cmd, DID_ERROR);
+		break;
+	}
 }
 
 static inline unsigned scsi_transfer_length(struct scsi_cmnd *scmd)

@@ -16,8 +16,6 @@
 #ifndef __ASM_IRQFLAGS_H
 #define __ASM_IRQFLAGS_H
 
-#ifdef __KERNEL__
-
 #include <asm/alternative.h>
 #include <asm/barrier.h>
 #include <asm/ptrace.h>
@@ -145,5 +143,4 @@ static inline void arch_local_irq_restore(unsigned long flags)
 	pmr_sync();
 }
 
-#endif
-#endif
+#endif /* __ASM_IRQFLAGS_H */

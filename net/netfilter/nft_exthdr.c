@@ -70,7 +70,7 @@ nft_tcp_header_pointer(const struct nft_pktinfo *pkt,
 {
 	struct tcphdr *tcph;
 
-	if (!pkt->tprot_set || pkt->tprot != IPPROTO_TCP)
+	if (!pkt->tprot_set || pkt->tprot != IPPROTO_TCP || pkt->xt.fragoff)
 		return NULL;
 
 	tcph = skb_header_pointer(pkt->skb, pkt->xt.thoff, sizeof(*tcph), buffer);

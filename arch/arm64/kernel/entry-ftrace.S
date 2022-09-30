@@ -152,14 +152,12 @@ ENTRY(ftrace_caller)
 	mcount_get_pc0	x0		//     function's pc
 	mcount_get_lr	x1		//     function's lr
 
-	.global ftrace_call
-ftrace_call:				// tracer(pc, lr);
+GLOBAL(ftrace_call)			// tracer(pc, lr);
 	nop				// This will be replaced with "bl xxx"
 					// where xxx can be any kind of tracer.
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
-	.global ftrace_graph_call
-ftrace_graph_call:			// ftrace_graph_caller();
+GLOBAL(ftrace_graph_call)		// ftrace_graph_caller();
 	nop				// If enabled, this will be replaced
 					// "b ftrace_graph_caller"
 #endif
@@ -201,10 +199,10 @@ ENDPROC(ftrace_stub)
  * and run return_to_handler() later on its exit.
  */
 ENTRY(ftrace_graph_caller)
-	mcount_get_lr_addr	  x0	//     pointer to function's saved lr
-	mcount_get_pc		  x1	//     function's pc
+	mcount_get_pc		  x0	//     function's pc
+	mcount_get_lr_addr	  x1	//     pointer to function's saved lr
 	mcount_get_parent_fp	  x2	//     parent's fp
-	bl	prepare_ftrace_return	// prepare_ftrace_return(&lr, pc, fp)
+	bl	prepare_ftrace_return	// prepare_ftrace_return(pc, &lr, fp)
 
 	mcount_exit
 ENDPROC(ftrace_graph_caller)

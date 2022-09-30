@@ -16,8 +16,6 @@
 #ifndef __ASM_VDSO_H
 #define __ASM_VDSO_H
 
-#ifdef __KERNEL__
-
 /*
  * Default link address for the vDSO.
  * Since we randomise the VDSO mapping, there's little point in trying
@@ -40,7 +38,5 @@
 })
 
 #endif /* !__ASSEMBLY__ */
-
-#endif /* __KERNEL__ */
 
 #endif /* __ASM_VDSO_H */

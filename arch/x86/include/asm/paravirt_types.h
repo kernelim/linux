@@ -204,6 +204,9 @@ struct pv_irq_ops {
 
 struct pv_mmu_ops {
 	unsigned long (*read_cr2)(void);
+
+	void (*notify_page_enc_status_changed)(unsigned long pfn, int npages, bool enc);
+
 	void (*write_cr2)(unsigned long);
 
 	unsigned long (*read_cr3)(void);

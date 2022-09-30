@@ -23,6 +23,7 @@ struct smcd_dev_list smcd_dev_list = {
 };
 
 static bool smc_ism_v2_capable;
+static u8 smc_ism_v2_system_eid[SMC_MAX_EID_LEN];
 
 /* Test if an ISM communication is possible - same CPC */
 int smc_ism_cantalk(u64 peer_gid, unsigned short vlan_id, struct smcd_dev *smcd)
@@ -42,9 +43,12 @@ int smc_ism_write(struct smcd_dev *smcd, const struct smc_ism_position *pos,
 	return rc < 0 ? rc : 0;
 }
 
-void smc_ism_get_system_eid(struct smcd_dev *smcd, u8 **eid)
+void smc_ism_get_system_eid(u8 **eid)
 {
-	smcd->ops->get_system_eid(smcd, eid);
+	if (!smc_ism_v2_capable)
+		*eid = NULL;
+	else
+		*eid = smc_ism_v2_system_eid;
 }
 
 u16 smc_ism_get_chid(struct smcd_dev *smcd)
@@ -429,13 +433,18 @@ EXPORT_SYMBOL_GPL(smcd_alloc_dev);
 
 int smcd_register_dev(struct smcd_dev *smcd)
 {
+	int rc;
+
 	mutex_lock(&smcd_dev_list.mutex);
 	if (list_empty(&smcd_dev_list.list)) {
 		u8 *system_eid = NULL;
 
-		smc_ism_get_system_eid(smcd, &system_eid);
-		if (system_eid[24] != '0' || system_eid[28] != '0')
+		smcd->ops->get_system_eid(smcd, &system_eid);
+		if (system_eid[24] != '0' || system_eid[28] != '0') {
 			smc_ism_v2_capable = true;
+			memcpy(smc_ism_v2_system_eid, system_eid,
+			       SMC_MAX_EID_LEN);
+		}
 	}
 	/* sort list: devices without pnetid before devices with pnetid */
 	if (smcd->pnetid[0])
@@ -448,7 +457,14 @@ int smcd_register_dev(struct smcd_dev *smcd)
 			    dev_name(&smcd->dev), smcd->pnetid,
 			    smcd->pnetid_by_user ? " (user defined)" : "");
 
-	return device_add(&smcd->dev);
+	rc = device_add(&smcd->dev);
+	if (rc) {
+		mutex_lock(&smcd_dev_list.mutex);
+		list_del(&smcd->list);
+		mutex_unlock(&smcd_dev_list.mutex);
+	}
+
+	return rc;
 }
 EXPORT_SYMBOL_GPL(smcd_register_dev);
 
@@ -461,7 +477,6 @@ void smcd_unregister_dev(struct smcd_dev *smcd)
 	mutex_unlock(&smcd_dev_list.mutex);
 	smcd->going_away = 1;
 	smc_smcd_terminate_all(smcd);
-	flush_workqueue(smcd->event_wq);
 	destroy_workqueue(smcd->event_wq);
 
 	device_del(&smcd->dev);
@@ -525,4 +540,5 @@ EXPORT_SYMBOL_GPL(smcd_handle_irq);
 void __init smc_ism_init(void)
 {
 	smc_ism_v2_capable = false;
+	memset(smc_ism_v2_system_eid, 0, SMC_MAX_EID_LEN);
 }

@@ -499,7 +499,7 @@ static bool wait_for_scan(const char *msg, char *p)
 
 	madvise(p, hpage_pmd_size, MADV_NOHUGEPAGE);
 
-	return !timeout;
+	return timeout == -1;
 }
 
 static void alloc_at_fault(void)

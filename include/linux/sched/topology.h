@@ -85,7 +85,7 @@ struct sched_domain {
 	unsigned int busy_factor;	/* less balancing by factor if busy */
 	unsigned int imbalance_pct;	/* No balance until over watermark */
 	unsigned int cache_nice_tries;	/* Leave cache hot tasks for # tries */
-	RH_KABI_DEPRECATE(unsigned int, busy_idx)
+	RH_KABI_REPLACE(unsigned int busy_idx, unsigned int imb_numa_nr)
 	RH_KABI_DEPRECATE(unsigned int, idle_idx)
 	RH_KABI_DEPRECATE(unsigned int, newidle_idx)
 	RH_KABI_DEPRECATE(unsigned int, wake_idx)

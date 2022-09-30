@@ -51,6 +51,12 @@
 			       PCI_STATUS_SIG_TARGET_ABORT | \
 			       PCI_STATUS_PARITY)
 
+/* Number of reset methods used in pci_reset_fn_methods array in pci.c */
+#define PCI_NUM_RESET_METHODS 7
+
+#define PCI_RESET_PROBE		true
+#define PCI_RESET_DO_RESET	false
+
 /*
  * The PCI interface treats multi-function devices as independent
  * devices.  The slot/function address of each device is encoded
@@ -149,6 +155,15 @@ enum pci_interrupt_pin {
 
 /* The number of legacy PCI INTx interrupts */
 #define PCI_NUM_INTX	4
+
+/*
+ * Reading from a device that doesn't respond typically returns ~0.  A
+ * successful read from a device may also return ~0, so you need additional
+ * information to reliably identify errors.
+ */
+#define PCI_ERROR_RESPONSE		(~0ULL)
+#define PCI_SET_ERROR_RESPONSE(val)	(*(val) = ((typeof(*(val))) PCI_ERROR_RESPONSE))
+#define PCI_POSSIBLE_ERROR(val)		((val) == ((typeof(val)) PCI_ERROR_RESPONSE))
 
 /*
  * pci_power_t values must match the bits in the Capabilities PME_Support
@@ -441,7 +456,7 @@ struct pci_dev {
 	unsigned int	state_saved:1;
 	unsigned int	is_physfn:1;
 	unsigned int	is_virtfn:1;
-	unsigned int	reset_fn:1;
+	RH_KABI_DEPRECATE(unsigned int,	reset_fn:1)
 	unsigned int	is_hotplug_bridge:1;
 	unsigned int	shpc_managed:1;		/* SHPC owned by shpchp */
 	unsigned int	is_thunderbolt:1;	/* Thunderbolt controller */
@@ -473,6 +488,7 @@ struct pci_dev {
 	RH_KABI_FILL_HOLE(unsigned int	dpc_rp_extensions:1)
 #endif
         RH_KABI_FILL_HOLE(unsigned int  no_command_memory:1)    /* No PCI_COMMAND_MEMORY */
+	RH_KABI_FILL_HOLE(unsigned int	rom_bar_overlap:1)	/* ROM BAR disable broken */
 	pci_dev_flags_t dev_flags;
 	atomic_t	enable_cnt;	/* pci_enable_device has been called */
 
@@ -536,8 +552,9 @@ struct pci_dev {
 	RH_KABI_USE(8, struct pci_dev  *rcec)	 /* Associated RCEC device */
 #endif
 	RH_KABI_USE(9, 10, 11, 12, 13, struct pci_vpd  vpd)
-	RH_KABI_RESERVE(14)
-	RH_KABI_RESERVE(15)
+	RH_KABI_USE(14, u32  devcap)		/* PCIe Device Capabilities */
+	/* These methods index pci_reset_fn_methods[] */
+	RH_KABI_USE(15, u8  reset_methods[PCI_NUM_RESET_METHODS]) /* In priority order */
 	RH_KABI_AUX_EMBED(pci_dev_extended)
 };
 
@@ -1293,7 +1310,7 @@ u32 pcie_bandwidth_available(struct pci_dev *dev, struct pci_dev **limiting_dev,
 			     enum pci_bus_speed *speed,
 			     enum pcie_link_width *width);
 void pcie_print_link_status(struct pci_dev *dev);
-bool pcie_has_flr(struct pci_dev *dev);
+int pcie_reset_flr(struct pci_dev *dev, bool probe);
 int pcie_flr(struct pci_dev *dev);
 int __pci_reset_function_locked(struct pci_dev *dev);
 int pci_reset_function(struct pci_dev *dev);
@@ -2154,7 +2171,8 @@ void __iomem *pci_ioremap_wc_bar(struct pci_dev *pdev, int bar);
 #ifdef CONFIG_PCI_IOV
 int pci_iov_virtfn_bus(struct pci_dev *dev, int id);
 int pci_iov_virtfn_devfn(struct pci_dev *dev, int id);
-
+int pci_iov_vf_id(struct pci_dev *dev);
+void *pci_iov_get_pf_drvdata(struct pci_dev *dev, struct pci_driver *pf_driver);
 int pci_enable_sriov(struct pci_dev *dev, int nr_virtfn);
 void pci_disable_sriov(struct pci_dev *dev);
 
@@ -2182,6 +2200,18 @@ static inline int pci_iov_virtfn_devfn(struct pci_dev *dev, int id)
 {
 	return -ENOSYS;
 }
+
+static inline int pci_iov_vf_id(struct pci_dev *dev)
+{
+	return -ENOSYS;
+}
+
+static inline void *pci_iov_get_pf_drvdata(struct pci_dev *dev,
+					   struct pci_driver *pf_driver)
+{
+	return ERR_PTR(-EINVAL);
+}
+
 static inline int pci_enable_sriov(struct pci_dev *dev, int nr_virtfn)
 { return -ENODEV; }
 

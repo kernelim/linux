@@ -107,10 +107,10 @@ static int __init haltpoll_init(void)
 	if (boot_option_idle_override != IDLE_NO_OVERRIDE)
 		return -ENODEV;
 
-	cpuidle_poll_state_init(drv);
-
 	if (!kvm_para_available() || !haltpoll_want())
 		return -ENODEV;
+
+	cpuidle_poll_state_init(drv);
 
 	ret = rhel_cpuidle_register_driver_hpoll(drv);
 	if (ret < 0)

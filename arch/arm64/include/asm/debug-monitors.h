@@ -16,8 +16,6 @@
 #ifndef __ASM_DEBUG_MONITORS_H
 #define __ASM_DEBUG_MONITORS_H
 
-#ifdef __KERNEL__
-
 #include <linux/errno.h>
 #include <linux/types.h>
 #include <asm/brk-imm.h>
@@ -94,18 +92,24 @@ struct step_hook {
 	int (*fn)(struct pt_regs *regs, unsigned int esr);
 };
 
-void register_step_hook(struct step_hook *hook);
-void unregister_step_hook(struct step_hook *hook);
+void register_user_step_hook(struct step_hook *hook);
+void unregister_user_step_hook(struct step_hook *hook);
+
+void register_kernel_step_hook(struct step_hook *hook);
+void unregister_kernel_step_hook(struct step_hook *hook);
 
 struct break_hook {
 	struct list_head node;
-	u32 esr_val;
-	u32 esr_mask;
 	int (*fn)(struct pt_regs *regs, unsigned int esr);
+	u16 imm;
+	u16 mask; /* These bits are ignored when comparing with imm */
 };
 
-void register_break_hook(struct break_hook *hook);
-void unregister_break_hook(struct break_hook *hook);
+void register_user_break_hook(struct break_hook *hook);
+void unregister_user_break_hook(struct break_hook *hook);
+
+void register_kernel_break_hook(struct break_hook *hook);
+void unregister_kernel_break_hook(struct break_hook *hook);
 
 u8 debug_monitors_arch(void);
 
@@ -135,6 +139,7 @@ static inline int reinstall_suspended_bps(struct pt_regs *regs)
 
 int aarch32_break_handler(struct pt_regs *regs);
 
+void debug_traps_init(void);
+
 #endif	/* __ASSEMBLY */
-#endif	/* __KERNEL__ */
 #endif	/* __ASM_DEBUG_MONITORS_H */

@@ -21,10 +21,14 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/kernel.h>
+#include <linux/kexec.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/types.h>
 #include <linux/acpi.h>
+#include <uapi/misc/pvpanic.h>
+
+static unsigned int capability = PVPANIC_PANICKED | PVPANIC_CRASH_LOADED;
 
 MODULE_AUTHOR("Hu Tao <hutao@cn.fujitsu.com>");
 MODULE_DESCRIPTION("pvpanic device driver");
@@ -38,8 +42,6 @@ static const struct acpi_device_id pvpanic_device_ids[] = {
 	{ "", 0 },
 };
 MODULE_DEVICE_TABLE(acpi, pvpanic_device_ids);
-
-#define PVPANIC_PANICKED	(1 << 0)
 
 static u16 port;
 
@@ -57,14 +59,20 @@ static struct acpi_driver pvpanic_driver = {
 static void
 pvpanic_send_event(unsigned int event)
 {
-	outb(event, port);
+	if (event & capability)
+		outb(event, port);
 }
 
 static int
 pvpanic_panic_notify(struct notifier_block *nb, unsigned long code,
 		     void *unused)
 {
-	pvpanic_send_event(PVPANIC_PANICKED);
+	unsigned int event = PVPANIC_PANICKED;
+
+	if (kexec_crash_loaded())
+		event = PVPANIC_CRASH_LOADED;
+
+	pvpanic_send_event(event);
 	return NOTIFY_DONE;
 }
 
@@ -107,8 +115,12 @@ static int pvpanic_add(struct acpi_device *device)
 	if (!port)
 		return -ENODEV;
 
-	atomic_notifier_chain_register(&panic_notifier_list,
-				       &pvpanic_panic_nb);
+	/* initlize capability by RDPT */
+	capability &= inb(port);
+
+	if (capability)
+		atomic_notifier_chain_register(&panic_notifier_list,
+					       &pvpanic_panic_nb);
 
 	return 0;
 }
@@ -116,8 +128,10 @@ static int pvpanic_add(struct acpi_device *device)
 static int pvpanic_remove(struct acpi_device *device)
 {
 
-	atomic_notifier_chain_unregister(&panic_notifier_list,
-					 &pvpanic_panic_nb);
+	if (capability)
+		atomic_notifier_chain_unregister(&panic_notifier_list,
+						&pvpanic_panic_nb);
+
 	return 0;
 }
 

@@ -723,6 +723,7 @@ struct task_struct_rh {
 #if IS_ENABLED(CONFIG_KUNIT)
 	struct kunit			*kunit_test;
 #endif
+	struct timer_list		oom_reaper_timer;
 };
 
 struct task_struct {
@@ -754,7 +755,7 @@ struct task_struct {
 	unsigned int			ptrace;
 
 #ifdef CONFIG_SMP
-	struct llist_node		wake_entry;
+	RH_KABI_DEPRECATE(struct llist_node, wake_entry)
 	int				on_cpu;
 #ifdef CONFIG_THREAD_INFO_IN_TASK
 	/* Current CPU: */
@@ -917,6 +918,13 @@ struct task_struct {
 	/* Stalled due to lack of memory */
 	RH_KABI_FILL_HOLE(unsigned	in_memstall:1)
 #endif
+#ifdef CONFIG_PAGE_OWNER
+	/* Used by page_owner=on to detect recursion in page tracking. */
+	RH_KABI_FILL_HOLE(unsigned	in_page_owner:1)
+#endif
+#ifdef CONFIG_IOMMU_SVA
+	RH_KABI_FILL_HOLE(unsigned	pasid_activated:1)
+#endif
 
 	unsigned long			atomic_flags; /* Flags requiring atomic access. */
 
@@ -1034,7 +1042,8 @@ struct task_struct {
 	unsigned long			min_flt;
 	unsigned long			maj_flt;
 
-	RH_KABI_DEPRECATE(struct task_cputime, cputime_expires)
+	RH_KABI_REPLACE_SPLIT(struct task_cputime	cputime_expires,
+			      struct __call_single_node	wake_entry)
 #ifdef CONFIG_FUTEX
 	RH_KABI_REPLACE_SPLIT(struct list_head	cpu_timers[3],
 			      struct mutex	futex_exit_mutex,
@@ -1743,7 +1752,7 @@ current_restore_flags(unsigned long orig_flags, unsigned long flags)
 }
 
 extern int cpuset_cpumask_can_shrink(const struct cpumask *cur, const struct cpumask *trial);
-extern int task_can_attach(struct task_struct *p, const struct cpumask *cs_cpus_allowed);
+extern int task_can_attach(struct task_struct *p, const struct cpumask *cs_effective_cpus);
 #ifdef CONFIG_SMP
 extern void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask);
 extern int set_cpus_allowed_ptr(struct task_struct *p, const struct cpumask *new_mask);
@@ -1871,7 +1880,15 @@ extern char *__get_task_comm(char *to, size_t len, struct task_struct *tsk);
 })
 
 #ifdef CONFIG_SMP
-void scheduler_ipi(void);
+static __always_inline void scheduler_ipi(void)
+{
+	/*
+	 * Fold TIF_NEED_RESCHED into the preempt_count; anybody setting
+	 * TIF_NEED_RESCHED remotely (for the first time) will also send
+	 * this IPI.
+	 */
+	preempt_fold_need_resched();
+}
 extern unsigned long wait_task_inactive(struct task_struct *, unsigned int match_state);
 #else
 static inline void scheduler_ipi(void) { }

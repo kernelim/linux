@@ -64,7 +64,10 @@ static int __init evm_set_fixmode(char *str)
 {
 	if (strncmp(str, "fix", 3) == 0)
 		evm_fixmode = 1;
-	return 0;
+	else
+		pr_err("invalid \"%s\" mode", str);
+
+	return 1;
 }
 __setup("evm=", evm_set_fixmode);
 
@@ -428,6 +431,31 @@ static void evm_reset_status(struct inode *inode)
 }
 
 /**
+ * evm_revalidate_status - report whether EVM status re-validation is necessary
+ * @xattr_name: pointer to the affected extended attribute name
+ *
+ * Report whether callers of evm_verifyxattr() should re-validate the
+ * EVM status.
+ *
+ * Return true if re-validation is necessary, false otherwise.
+ */
+bool evm_revalidate_status(const char *xattr_name)
+{
+	if (!evm_key_loaded())
+		return false;
+
+	/* evm_inode_post_setattr() passes NULL */
+	if (!xattr_name)
+		return true;
+
+	if (!evm_protected_xattr(xattr_name) && !posix_xattr_acl(xattr_name) &&
+	    strcmp(xattr_name, XATTR_NAME_EVM))
+		return false;
+
+	return true;
+}
+
+/**
  * evm_inode_post_setxattr - update 'security.evm' to reflect the changes
  * @dentry: pointer to the affected dentry
  * @xattr_name: pointer to the affected extended attribute name
@@ -443,11 +471,13 @@ static void evm_reset_status(struct inode *inode)
 void evm_inode_post_setxattr(struct dentry *dentry, const char *xattr_name,
 			     const void *xattr_value, size_t xattr_value_len)
 {
-	if (!evm_key_loaded() || (!evm_protected_xattr(xattr_name)
-				  && !posix_xattr_acl(xattr_name)))
+	if (!evm_revalidate_status(xattr_name))
 		return;
 
 	evm_reset_status(dentry->d_inode);
+
+	if (!strcmp(xattr_name, XATTR_NAME_EVM))
+		return;
 
 	evm_update_evmxattr(dentry, xattr_name, xattr_value, xattr_value_len);
 }
@@ -464,10 +494,13 @@ void evm_inode_post_setxattr(struct dentry *dentry, const char *xattr_name,
  */
 void evm_inode_post_removexattr(struct dentry *dentry, const char *xattr_name)
 {
-	if (!evm_key_loaded() || !evm_protected_xattr(xattr_name))
+	if (!evm_revalidate_status(xattr_name))
 		return;
 
 	evm_reset_status(dentry->d_inode);
+
+	if (!strcmp(xattr_name, XATTR_NAME_EVM))
+		return;
 
 	evm_update_evmxattr(dentry, xattr_name, NULL, 0);
 }
@@ -515,15 +548,17 @@ int evm_inode_setattr(struct dentry *dentry, struct iattr *attr)
  */
 void evm_inode_post_setattr(struct dentry *dentry, int ia_valid)
 {
-	if (!evm_key_loaded())
+	if (!evm_revalidate_status(NULL))
 		return;
+
+	evm_reset_status(dentry->d_inode);
 
 	if (ia_valid & (ATTR_MODE | ATTR_UID | ATTR_GID))
 		evm_update_evmxattr(dentry, NULL, NULL, 0);
 }
 
 /*
- * evm_inode_init_security - initializes security.evm
+ * evm_inode_init_security - initializes security.evm HMAC value
  */
 int evm_inode_init_security(struct inode *inode,
 				 const struct xattr *lsm_xattr,
@@ -532,7 +567,8 @@ int evm_inode_init_security(struct inode *inode,
 	struct evm_xattr *xattr_data;
 	int rc;
 
-	if (!evm_key_loaded() || !evm_protected_xattr(lsm_xattr->name))
+	if (!(evm_initialized & EVM_INIT_HMAC) ||
+	    !evm_protected_xattr(lsm_xattr->name))
 		return 0;
 
 	xattr_data = kzalloc(sizeof(*xattr_data), GFP_NOFS);

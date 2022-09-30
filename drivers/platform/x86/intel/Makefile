@@ -4,4 +4,12 @@
 # Intel x86 Platform-Specific Drivers
 #
 obj-$(CONFIG_INTEL_PMC_CORE)		+= pmc/
+obj-$(CONFIG_INTEL_PMT_CLASS)		+= pmt/
+obj-$(CONFIG_INTEL_SPEED_SELECT_INTERFACE) += speed_select_if/
 
+# Intel miscellaneous drivers
+obj-$(CONFIG_INTEL_ISHTP_ECLITE)	+= ishtp_eclite.o
+intel_sdsi-y				:= sdsi.o
+obj-$(CONFIG_INTEL_SDSI)		+= intel_sdsi.o
+intel_vsec-y				:= vsec.o
+obj-$(CONFIG_INTEL_VSEC)		+= intel_vsec.o

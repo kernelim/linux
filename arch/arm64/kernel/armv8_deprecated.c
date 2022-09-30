@@ -177,6 +177,9 @@ static void __init register_insn_emulation(struct insn_emulation_ops *ops)
 	struct insn_emulation *insn;
 
 	insn = kzalloc(sizeof(*insn), GFP_KERNEL);
+	if (!insn)
+		return;
+
 	insn->ops = ops;
 	insn->min = INSN_UNDEF;
 
@@ -236,6 +239,8 @@ static void __init register_insn_emulation_sysctl(void)
 
 	insns_sysctl = kcalloc(nr_insn_emulated + 1, sizeof(*sysctl),
 			       GFP_KERNEL);
+	if (!insns_sysctl)
+		return;
 
 	raw_spin_lock_irqsave(&insn_emulation_lock, flags);
 	list_for_each_entry(insn, &insn_emulation, node) {
@@ -441,8 +446,8 @@ static struct undef_hook swp_hooks[] = {
 	{
 		.instr_mask	= 0x0fb00ff0,
 		.instr_val	= 0x01000090,
-		.pstate_mask	= COMPAT_PSR_MODE_MASK,
-		.pstate_val	= COMPAT_PSR_MODE_USR,
+		.pstate_mask	= PSR_AA32_MODE_MASK,
+		.pstate_val	= PSR_AA32_MODE_USR,
 		.fn		= swp_handler
 	},
 	{ }
@@ -521,15 +526,15 @@ static struct undef_hook cp15_barrier_hooks[] = {
 	{
 		.instr_mask	= 0x0fff0fdf,
 		.instr_val	= 0x0e070f9a,
-		.pstate_mask	= COMPAT_PSR_MODE_MASK,
-		.pstate_val	= COMPAT_PSR_MODE_USR,
+		.pstate_mask	= PSR_AA32_MODE_MASK,
+		.pstate_val	= PSR_AA32_MODE_USR,
 		.fn		= cp15barrier_handler,
 	},
 	{
 		.instr_mask	= 0x0fff0fff,
 		.instr_val	= 0x0e070f95,
-		.pstate_mask	= COMPAT_PSR_MODE_MASK,
-		.pstate_val	= COMPAT_PSR_MODE_USR,
+		.pstate_mask	= PSR_AA32_MODE_MASK,
+		.pstate_val	= PSR_AA32_MODE_USR,
 		.fn		= cp15barrier_handler,
 	},
 	{ }
@@ -562,10 +567,10 @@ static int compat_setend_handler(struct pt_regs *regs, u32 big_endian)
 
 	if (big_endian) {
 		insn = "setend be";
-		regs->pstate |= COMPAT_PSR_E_BIT;
+		regs->pstate |= PSR_AA32_E_BIT;
 	} else {
 		insn = "setend le";
-		regs->pstate &= ~COMPAT_PSR_E_BIT;
+		regs->pstate &= ~PSR_AA32_E_BIT;
 	}
 
 	trace_instruction_emulation(insn, regs->pc);
@@ -593,16 +598,16 @@ static struct undef_hook setend_hooks[] = {
 	{
 		.instr_mask	= 0xfffffdff,
 		.instr_val	= 0xf1010000,
-		.pstate_mask	= COMPAT_PSR_MODE_MASK,
-		.pstate_val	= COMPAT_PSR_MODE_USR,
+		.pstate_mask	= PSR_AA32_MODE_MASK,
+		.pstate_val	= PSR_AA32_MODE_USR,
 		.fn		= a32_setend_handler,
 	},
 	{
 		/* Thumb mode */
 		.instr_mask	= 0x0000fff7,
 		.instr_val	= 0x0000b650,
-		.pstate_mask	= (COMPAT_PSR_T_BIT | COMPAT_PSR_MODE_MASK),
-		.pstate_val	= (COMPAT_PSR_T_BIT | COMPAT_PSR_MODE_USR),
+		.pstate_mask	= (PSR_AA32_T_BIT | PSR_AA32_MODE_MASK),
+		.pstate_val	= (PSR_AA32_T_BIT | PSR_AA32_MODE_USR),
 		.fn		= t16_setend_handler,
 	},
 	{}
@@ -616,7 +621,8 @@ static struct insn_emulation_ops setend_ops = {
 };
 
 /*
- * Invoked as late_initcall, since not needed before init spawned.
+ * Invoked as core_initcall, which guarantees that the instruction
+ * emulation is ready for userspace.
  */
 static int __init armv8_deprecated_init(void)
 {
@@ -627,7 +633,7 @@ static int __init armv8_deprecated_init(void)
 		register_insn_emulation(&cp15_barrier_ops);
 
 	if (IS_ENABLED(CONFIG_SETEND_EMULATION)) {
-		if(system_supports_mixed_endian_el0())
+		if (system_supports_mixed_endian_el0())
 			register_insn_emulation(&setend_ops);
 		else
 			pr_info("setend instruction emulation is not supported on this system\n");

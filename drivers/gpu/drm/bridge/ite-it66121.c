@@ -227,7 +227,7 @@ static const struct regmap_range_cfg it66121_regmap_banks[] = {
 		.selector_mask = 0x1,
 		.selector_shift = 0,
 		.window_start = 0x00,
-		.window_len = 0x130,
+		.window_len = 0x100,
 	},
 };
 
@@ -935,9 +935,6 @@ static int it66121_probe(struct i2c_client *client,
 		dev_dbg(ctx->dev, "Next bridge not found, deferring probe\n");
 		return -EPROBE_DEFER;
 	}
-
-	if (!ctx->next_bridge)
-		return -EPROBE_DEFER;
 
 	i2c_set_clientdata(client, ctx);
 	mutex_init(&ctx->lock);

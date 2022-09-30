@@ -58,7 +58,7 @@ MODULE_AUTHOR
     ("(C) 2001 IBM Corporation by Fritz Elfert (felfert@millenux.com)");
 MODULE_DESCRIPTION ("Linux for S/390 IUCV network driver");
 
-/**
+/*
  * Debug Facility stuff
  */
 #define IUCV_DBF_SETUP_NAME "iucv_setup"
@@ -107,7 +107,7 @@ DECLARE_PER_CPU(char[256], iucv_dbf_txt_buf);
 		debug_sprintf_event(iucv_dbf_trace, level, text ); \
 	} while (0)
 
-/**
+/*
  * some more debug stuff
  */
 #define PRINTK_HEADER " iucv: "       /* for debugging */
@@ -135,7 +135,7 @@ static struct device_driver netiucv_driver = {
 	.pm = &netiucv_pm_ops,
 };
 
-/**
+/*
  * Per connection profiling data
  */
 struct connection_profile {
@@ -150,7 +150,7 @@ struct connection_profile {
 	unsigned long tx_max_pending;
 };
 
-/**
+/*
  * Representation of one iucv connection
  */
 struct iucv_connection {
@@ -171,13 +171,13 @@ struct iucv_connection {
 	char			  userdata[17];
 };
 
-/**
+/*
  * Linked list of all connection structs.
  */
 static LIST_HEAD(iucv_connection_list);
 static DEFINE_RWLOCK(iucv_connection_rwlock);
 
-/**
+/*
  * Representation of event-data for the
  * connection state machine.
  */
@@ -186,7 +186,7 @@ struct iucv_event {
 	void                   *data;
 };
 
-/**
+/*
  * Private part of the network device structure
  */
 struct netiucv_priv {
@@ -198,7 +198,7 @@ struct netiucv_priv {
 	int			 pm_state;
 };
 
-/**
+/*
  * Link level header for a packet.
  */
 struct ll_header {
@@ -213,7 +213,7 @@ struct ll_header {
 #define NETIUCV_QUEUELEN_DEFAULT 50
 #define NETIUCV_TIMEOUT_5SEC     5000
 
-/**
+/*
  * Compatibility macros for busy handling
  * of network devices.
  */
@@ -241,7 +241,7 @@ static u8 iucvMagic_ebcdic[16] = {
 	0xF0, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40
 };
 
-/**
+/*
  * Convert an iucv userId to its printable
  * form (strip whitespace at end).
  *
@@ -280,7 +280,7 @@ static char *netiucv_printuser(struct iucv_connection *conn)
 		return netiucv_printname(conn->userid, 8);
 }
 
-/**
+/*
  * States of the interface statemachine.
  */
 enum dev_states {
@@ -288,7 +288,7 @@ enum dev_states {
 	DEV_STATE_STARTWAIT,
 	DEV_STATE_STOPWAIT,
 	DEV_STATE_RUNNING,
-	/**
+	/*
 	 * MUST be always the last element!!
 	 */
 	NR_DEV_STATES
@@ -301,7 +301,7 @@ static const char *dev_state_names[] = {
 	"Running",
 };
 
-/**
+/*
  * Events of the interface statemachine.
  */
 enum dev_events {
@@ -309,7 +309,7 @@ enum dev_events {
 	DEV_EVENT_STOP,
 	DEV_EVENT_CONUP,
 	DEV_EVENT_CONDOWN,
-	/**
+	/*
 	 * MUST be always the last element!!
 	 */
 	NR_DEV_EVENTS
@@ -322,11 +322,11 @@ static const char *dev_event_names[] = {
 	"Connection down",
 };
 
-/**
+/*
  * Events of the connection statemachine
  */
 enum conn_events {
-	/**
+	/*
 	 * Events, representing callbacks from
 	 * lowlevel iucv layer)
 	 */
@@ -338,23 +338,23 @@ enum conn_events {
 	CONN_EVENT_RX,
 	CONN_EVENT_TXDONE,
 
-	/**
+	/*
 	 * Events, representing errors return codes from
 	 * calls to lowlevel iucv layer
 	 */
 
-	/**
+	/*
 	 * Event, representing timer expiry.
 	 */
 	CONN_EVENT_TIMER,
 
-	/**
+	/*
 	 * Events, representing commands from upper levels.
 	 */
 	CONN_EVENT_START,
 	CONN_EVENT_STOP,
 
-	/**
+	/*
 	 * MUST be always the last element!!
 	 */
 	NR_CONN_EVENTS,
@@ -375,55 +375,55 @@ static const char *conn_event_names[] = {
 	"Stop",
 };
 
-/**
+/*
  * States of the connection statemachine.
  */
 enum conn_states {
-	/**
+	/*
 	 * Connection not assigned to any device,
 	 * initial state, invalid
 	 */
 	CONN_STATE_INVALID,
 
-	/**
+	/*
 	 * Userid assigned but not operating
 	 */
 	CONN_STATE_STOPPED,
 
-	/**
+	/*
 	 * Connection registered,
 	 * no connection request sent yet,
 	 * no connection request received
 	 */
 	CONN_STATE_STARTWAIT,
 
-	/**
+	/*
 	 * Connection registered and connection request sent,
 	 * no acknowledge and no connection request received yet.
 	 */
 	CONN_STATE_SETUPWAIT,
 
-	/**
+	/*
 	 * Connection up and running idle
 	 */
 	CONN_STATE_IDLE,
 
-	/**
+	/*
 	 * Data sent, awaiting CONN_EVENT_TXDONE
 	 */
 	CONN_STATE_TX,
 
-	/**
+	/*
 	 * Error during registration.
 	 */
 	CONN_STATE_REGERR,
 
-	/**
+	/*
 	 * Error during registration.
 	 */
 	CONN_STATE_CONNERR,
 
-	/**
+	/*
 	 * MUST be always the last element!!
 	 */
 	NR_CONN_STATES,
@@ -442,7 +442,7 @@ static const char *conn_state_names[] = {
 };
 
 
-/**
+/*
  * Debug Facility Stuff
  */
 static debug_info_t *iucv_dbf_setup = NULL;
@@ -574,7 +574,7 @@ static void netiucv_callback_connres(struct iucv_path *path, u8 *ipuser)
 	fsm_event(conn->fsm, CONN_EVENT_CONN_RES, conn);
 }
 
-/**
+/*
  * NOP action for statemachines
  */
 static void netiucv_action_nop(fsm_instance *fi, int event, void *arg)
@@ -585,7 +585,7 @@ static void netiucv_action_nop(fsm_instance *fi, int event, void *arg)
  * Actions of the connection statemachine
  */
 
-/**
+/*
  * netiucv_unpack_skb
  * @conn: The connection where this skb has been received.
  * @pskb: The received skb.
@@ -1011,7 +1011,7 @@ static const int CONN_FSM_LEN = sizeof(conn_fsm) / sizeof(fsm_node);
  * Actions for interface - statemachine.
  */
 
-/**
+/*
  * dev_action_start
  * @fi: An instance of an interface statemachine.
  * @event: The event, just happened.
@@ -1030,7 +1030,7 @@ static void dev_action_start(fsm_instance *fi, int event, void *arg)
 	fsm_event(privptr->conn->fsm, CONN_EVENT_START, privptr->conn);
 }
 
-/**
+/*
  * Shutdown connection by sending CONN_EVENT_STOP to it.
  *
  * @param fi    An instance of an interface statemachine.
@@ -1052,7 +1052,7 @@ dev_action_stop(fsm_instance *fi, int event, void *arg)
 	fsm_event(privptr->conn->fsm, CONN_EVENT_STOP, &ev);
 }
 
-/**
+/*
  * Called from connection statemachine
  * when a connection is up and running.
  *
@@ -1085,7 +1085,7 @@ dev_action_connup(fsm_instance *fi, int event, void *arg)
 	}
 }
 
-/**
+/*
  * Called from connection statemachine
  * when a connection has been shutdown.
  *
@@ -1125,7 +1125,7 @@ static const fsm_node dev_fsm[] = {
 
 static const int DEV_FSM_LEN = sizeof(dev_fsm) / sizeof(fsm_node);
 
-/**
+/*
  * Transmit a packet.
  * This is a helper function for netiucv_tx().
  *
@@ -1162,7 +1162,7 @@ static int netiucv_transmit_skb(struct iucv_connection *conn,
 		spin_unlock_irqrestore(&conn->collect_lock, saveflags);
 	} else {
 		struct sk_buff *nskb = skb;
-		/**
+		/*
 		 * Copy the skb to a new allocated skb in lowmem only if the
 		 * data is located above 2G in memory or tailroom is < 2.
 		 */
@@ -1182,7 +1182,7 @@ static int netiucv_transmit_skb(struct iucv_connection *conn,
 			}
 			copied = 1;
 		}
-		/**
+		/*
 		 * skb now is below 2G and has enough room. Add headers.
 		 */
 		header.next = nskb->len + NETIUCV_HDRLEN;
@@ -1212,7 +1212,7 @@ static int netiucv_transmit_skb(struct iucv_connection *conn,
 			if (copied)
 				dev_kfree_skb(nskb);
 			else {
-				/**
+				/*
 				 * Remove our headers. They get added
 				 * again on retransmit.
 				 */
@@ -1235,7 +1235,7 @@ static int netiucv_transmit_skb(struct iucv_connection *conn,
  * Interface API for upper network layers
  */
 
-/**
+/*
  * Open an interface.
  * Called from generic network layer when ifconfig up is run.
  *
@@ -1251,7 +1251,7 @@ static int netiucv_open(struct net_device *dev)
 	return 0;
 }
 
-/**
+/*
  * Close an interface.
  * Called from generic network layer when ifconfig down is run.
  *
@@ -1279,7 +1279,7 @@ static void netiucv_pm_complete(struct device *dev)
 	return;
 }
 
-/**
+/*
  * netiucv_pm_freeze() - Freeze PM callback
  * @dev:	netiucv device
  *
@@ -1303,7 +1303,7 @@ out:
 	return rc;
 }
 
-/**
+/*
  * netiucv_pm_restore_thaw() - Thaw and restore PM callback
  * @dev:	netiucv device
  *
@@ -1333,7 +1333,7 @@ out:
 	return rc;
 }
 
-/**
+/*
  * Start transmission of a packet.
  * Called from generic network device layer.
  *
@@ -1350,7 +1350,7 @@ static int netiucv_tx(struct sk_buff *skb, struct net_device *dev)
 	int rc;
 
 	IUCV_DBF_TEXT(trace, 4, __func__);
-	/**
+	/*
 	 * Some sanity checks ...
 	 */
 	if (skb == NULL) {
@@ -1366,7 +1366,7 @@ static int netiucv_tx(struct sk_buff *skb, struct net_device *dev)
 		return NETDEV_TX_OK;
 	}
 
-	/**
+	/*
 	 * If connection is not running, try to restart it
 	 * and throw away packet.
 	 */
@@ -1388,7 +1388,7 @@ static int netiucv_tx(struct sk_buff *skb, struct net_device *dev)
 	return rc ? NETDEV_TX_BUSY : NETDEV_TX_OK;
 }
 
-/**
+/*
  * netiucv_stats
  * @dev: Pointer to interface struct.
  *
@@ -1829,7 +1829,7 @@ static void netiucv_unregister_device(struct device *dev)
 	device_unregister(dev);
 }
 
-/**
+/*
  * Allocate and initialize a new connection structure.
  * Add it to the list of netiucv connections;
  */
@@ -1886,7 +1886,7 @@ out:
 	return NULL;
 }
 
-/**
+/*
  * Release a connection structure and remove it from the
  * list of netiucv connections.
  */
@@ -1910,7 +1910,7 @@ static void netiucv_remove_connection(struct iucv_connection *conn)
 	kfree_skb(conn->tx_buff);
 }
 
-/**
+/*
  * Release everything of a net device.
  */
 static void netiucv_free_netdevice(struct net_device *dev)
@@ -1932,7 +1932,7 @@ static void netiucv_free_netdevice(struct net_device *dev)
 	}
 }
 
-/**
+/*
  * Initialize a net device. (Called from kernel in alloc_netdev())
  */
 static const struct net_device_ops netiucv_netdev_ops = {
@@ -1957,7 +1957,7 @@ static void netiucv_setup_netdevice(struct net_device *dev)
 	dev->netdev_ops		 = &netiucv_netdev_ops;
 }
 
-/**
+/*
  * Allocate and initialize everything of a net device.
  */
 static struct net_device *netiucv_init_netdevice(char *username, char *userdata)

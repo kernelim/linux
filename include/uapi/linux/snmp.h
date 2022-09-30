@@ -159,6 +159,9 @@ enum
 	UDP_MIB_SNDBUFERRORS,			/* SndbufErrors */
 	UDP_MIB_CSUMERRORS,			/* InCsumErrors */
 	UDP_MIB_IGNOREDMULTI,			/* IgnoredMulti */
+#ifndef __GENKSYMS__
+	UDP_MIB_MEMERRORS,			/* MemErrors */
+#endif
 	__UDP_MIB_MAX
 };
 
@@ -284,7 +287,10 @@ enum
 	LINUX_MIB_TCPDELIVEREDCE,		/* TCPDeliveredCE */
 	LINUX_MIB_TCPACKCOMPRESSED,		/* TCPAckCompressed */
 #ifndef __GENKSYMS__
+	LINUX_MIB_TCPZEROWINDOWDROP,		/* TCPZeroWindowDrop */
+	LINUX_MIB_TCPRCVQDROP,			/* TCPRcvQDrop */
 	LINUX_MIB_TCPWQUEUETOOBIG,		/* TCPWqueueTooBig */
+	LINUX_MIB_TCPTIMEOUTREHASH,		/* TCPTimeoutRehash */
 #endif
 	__LINUX_MIB_MAX
 };

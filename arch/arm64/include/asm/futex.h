@@ -16,8 +16,6 @@
 #ifndef __ASM_FUTEX_H
 #define __ASM_FUTEX_H
 
-#ifdef __KERNEL__
-
 #include <linux/futex.h>
 #include <linux/uaccess.h>
 
@@ -139,5 +137,4 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *_uaddr,
 	return ret;
 }
 
-#endif /* __KERNEL__ */
 #endif /* __ASM_FUTEX_H */

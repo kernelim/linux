@@ -455,6 +455,12 @@ config MESON_GXL_PHY
 	---help---
 	  Currently has a driver for the Amlogic Meson GXL Internal PHY
 
+config MAXLINEAR_GPHY
+	tristate "Maxlinear Ethernet PHYs"
+	help
+	  Support for the Maxlinear GPY115, GPY211, GPY212, GPY215,
+	  GPY241, GPY245 PHYs.
+
 config MICREL_PHY
 	tristate "Micrel PHYs"
 	---help---

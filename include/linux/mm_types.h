@@ -31,6 +31,7 @@
 /* RH KABI check requires this to be this "string" rather than just "46". */
 #define ORIG_AT_VECTOR_SIZE (2*(ORIG_AT_VECTOR_SIZE_ARCH + AT_VECTOR_SIZE_BASE + 1))
 
+#define INIT_PASID	0
 
 struct address_space;
 struct mem_cgroup;
@@ -145,6 +146,12 @@ struct page {
 			unsigned char compound_dtor;
 			unsigned char compound_order;
 			atomic_t compound_mapcount;
+			/*
+			 * mapcount_seqcount is serialized by the
+			 * PG_locked bit spinlock from the first tail
+			 * page.
+			 */
+			RH_KABI_EXTEND(unsigned int mapcount_seqcount)
 		};
 		struct {	/* Second tail page of compound page */
 			unsigned long _compound_pad_1;	/* compound_head */
@@ -565,20 +572,12 @@ struct mm_struct {
 #endif
 	} __randomize_layout;
 
-#if defined(CONFIG_IOMMU_SUPPORT)
+#if defined(CONFIG_IOMMU_SVA)
 	RH_KABI_USE(1, u32 pasid)
 #else
 	RH_KABI_RESERVE(1)
 #endif
-	/**
-	 * @has_pinned: Whether this mm has pinned any pages.  This can
-	 * be either replaced in the future by @pinned_vm when it
-	 * becomes stable, or grow into a counter on its own. We're
-	 * aggresive on this bit now - even if the pinned pages were
-	 * unpinned later on, we'll still keep this bit set for the
-	 * lifecycle of this mm just for simplicity.
-	 */
-	RH_KABI_USE(2, atomic_t has_pinned)
+	RH_KABI_RESERVE(2)
 	/**
 	 * @write_protect_seq: Locked when any thread is write
 	 * protecting pages mapped by this mm to enforce a later COW,

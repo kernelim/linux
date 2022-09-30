@@ -418,7 +418,7 @@ static int start_single_kthread(struct trace_array *tr)
 	int next_cpu;
 
 	cpus_read_lock();
-	if (WARN_ON(kdata->kthread))
+	if (kdata->kthread)
 		goto out_put_cpus;
 
 	kthread = kthread_create(kthread_fn, NULL, "hwlatd");

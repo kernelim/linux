@@ -555,6 +555,7 @@ int mls_compute_sid(struct policydb *p,
 #ifdef CONFIG_NETLABEL
 /**
  * mls_export_netlbl_lvl - Export the MLS sensitivity levels to NetLabel
+ * @p: the policy
  * @context: the security context
  * @secattr: the NetLabel security attributes
  *
@@ -576,6 +577,7 @@ void mls_export_netlbl_lvl(struct policydb *p,
 
 /**
  * mls_import_netlbl_lvl - Import the NetLabel MLS sensitivity levels
+ * @p: the policy
  * @context: the security context
  * @secattr: the NetLabel security attributes
  *
@@ -597,6 +599,7 @@ void mls_import_netlbl_lvl(struct policydb *p,
 
 /**
  * mls_export_netlbl_cat - Export the MLS categories to NetLabel
+ * @p: the policy
  * @context: the security context
  * @secattr: the NetLabel security attributes
  *
@@ -624,6 +627,7 @@ int mls_export_netlbl_cat(struct policydb *p,
 
 /**
  * mls_import_netlbl_cat - Import the MLS categories from NetLabel
+ * @p: the policy
  * @context: the security context
  * @secattr: the NetLabel security attributes
  *

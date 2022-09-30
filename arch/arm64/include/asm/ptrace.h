@@ -105,35 +105,7 @@
 #endif
 
 /* AArch32 CPSR bits, as seen in AArch32 */
-#define COMPAT_PSR_MODE_MASK	0x0000001f
-#define COMPAT_PSR_MODE_USR	0x00000010
-#define COMPAT_PSR_MODE_FIQ	0x00000011
-#define COMPAT_PSR_MODE_IRQ	0x00000012
-#define COMPAT_PSR_MODE_SVC	0x00000013
-#define COMPAT_PSR_MODE_ABT	0x00000017
-#define COMPAT_PSR_MODE_HYP	0x0000001a
-#define COMPAT_PSR_MODE_UND	0x0000001b
-#define COMPAT_PSR_MODE_SYS	0x0000001f
-#define COMPAT_PSR_T_BIT	0x00000020
-#define COMPAT_PSR_F_BIT	0x00000040
-#define COMPAT_PSR_I_BIT	0x00000080
-#define COMPAT_PSR_A_BIT	0x00000100
-#define COMPAT_PSR_E_BIT	0x00000200
 #define COMPAT_PSR_DIT_BIT	0x00200000
-#define COMPAT_PSR_J_BIT	0x01000000
-#define COMPAT_PSR_Q_BIT	0x08000000
-#define COMPAT_PSR_V_BIT	0x10000000
-#define COMPAT_PSR_C_BIT	0x20000000
-#define COMPAT_PSR_Z_BIT	0x40000000
-#define COMPAT_PSR_N_BIT	0x80000000
-#define COMPAT_PSR_IT_MASK	0x0600fc00	/* If-Then execution state mask */
-#define COMPAT_PSR_GE_MASK	0x000f0000
-
-#ifdef CONFIG_CPU_BIG_ENDIAN
-#define COMPAT_PSR_ENDSTATE	COMPAT_PSR_E_BIT
-#else
-#define COMPAT_PSR_ENDSTATE	0
-#endif
 
 /*
  * These are 'magic' values for PTRACE_PEEKUSR that return info about where a
@@ -251,7 +223,7 @@ static inline void forget_syscall(struct pt_regs *regs)
 
 #ifdef CONFIG_COMPAT
 #define compat_thumb_mode(regs) \
-	(((regs)->pstate & COMPAT_PSR_T_BIT))
+	(((regs)->pstate & PSR_AA32_T_BIT))
 #else
 #define compat_thumb_mode(regs) (0)
 #endif
@@ -277,11 +249,12 @@ static inline void forget_syscall(struct pt_regs *regs)
 #define fast_interrupts_enabled(regs) \
 	(!((regs)->pstate & PSR_F_BIT))
 
-#define GET_USP(regs) \
-	(!compat_user_mode(regs) ? (regs)->sp : (regs)->compat_sp)
-
-#define SET_USP(ptregs, value) \
-	(!compat_user_mode(regs) ? ((regs)->sp = value) : ((regs)->compat_sp = value))
+static inline unsigned long user_stack_pointer(struct pt_regs *regs)
+{
+	if (compat_user_mode(regs))
+		return regs->compat_sp;
+	return regs->sp;
+}
 
 extern int regs_query_register_offset(const char *name);
 extern unsigned long regs_get_kernel_stack_nth(struct pt_regs *regs,
@@ -354,17 +327,46 @@ static inline unsigned long regs_return_value(struct pt_regs *regs)
 	return regs->regs[0];
 }
 
+/**
+ * regs_get_kernel_argument() - get Nth function argument in kernel
+ * @regs:	pt_regs of that context
+ * @n:		function argument number (start from 0)
+ *
+ * regs_get_argument() returns @n th argument of the function call.
+ *
+ * Note that this chooses the most likely register mapping. In very rare
+ * cases this may not return correct data, for example, if one of the
+ * function parameters is 16 bytes or bigger. In such cases, we cannot
+ * get access the parameter correctly and the register assignment of
+ * subsequent parameters will be shifted.
+ */
+static inline unsigned long regs_get_kernel_argument(struct pt_regs *regs,
+						     unsigned int n)
+{
+#define NR_REG_ARGUMENTS 8
+	if (n < NR_REG_ARGUMENTS)
+		return pt_regs_read_reg(regs, n);
+	return 0;
+}
+
 /* We must avoid circular header include via sched.h */
 struct task_struct;
 int valid_user_regs(struct user_pt_regs *regs, struct task_struct *task);
 
-#define GET_IP(regs)		((unsigned long)(regs)->pc)
-#define SET_IP(regs, value)	((regs)->pc = ((u64) (value)))
+static inline unsigned long instruction_pointer(struct pt_regs *regs)
+{
+	return regs->pc;
+}
+static inline void instruction_pointer_set(struct pt_regs *regs,
+		unsigned long val)
+{
+	regs->pc = val;
+}
 
-#define GET_FP(ptregs)		((unsigned long)(ptregs)->regs[29])
-#define SET_FP(ptregs, value)	((ptregs)->regs[29] = ((u64) (value)))
-
-#include <asm-generic/ptrace.h>
+static inline unsigned long frame_pointer(struct pt_regs *regs)
+{
+	return regs->regs[29];
+}
 
 #define procedure_link_pointer(regs)	((regs)->regs[30])
 
@@ -374,7 +376,6 @@ static inline void procedure_link_pointer_set(struct pt_regs *regs,
 	procedure_link_pointer(regs) = val;
 }
 
-#undef profile_pc
 extern unsigned long profile_pc(struct pt_regs *regs);
 
 #endif /* __ASSEMBLY__ */

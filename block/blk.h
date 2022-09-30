@@ -454,4 +454,6 @@ static inline void part_nr_sects_write(struct hd_struct *part, sector_t size)
 
 struct request_queue *__blk_alloc_queue(int node_id);
 
+blk_qc_t generic_make_request_no_check(struct bio *bio);
+
 #endif /* BLK_INTERNAL_H */

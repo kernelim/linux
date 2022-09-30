@@ -4150,7 +4150,7 @@ void bnx2x_init_mcast_obj(struct bnx2x *bp,
 /*************************** Credit handling **********************************/
 
 /**
- * atomic_add_ifless - add if the result is less than a given value.
+ * __atomic_add_ifless - add if the result is less than a given value.
  *
  * @v:	pointer of type atomic_t
  * @a:	the amount to add to v...
@@ -4178,7 +4178,7 @@ static inline bool __atomic_add_ifless(atomic_t *v, int a, int u)
 }
 
 /**
- * atomic_dec_ifmoe - dec if the result is more or equal than a given value.
+ * __atomic_dec_ifmoe - dec if the result is more or equal than a given value.
  *
  * @v:	pointer of type atomic_t
  * @a:	the amount to dec from v...

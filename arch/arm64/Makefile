@@ -123,7 +123,7 @@ TEXT_OFFSET := $(shell awk "BEGIN {srand(); printf \"0x%06x\n\", \
 		 int(2 * 1024 * 1024 / (2 ^ $(CONFIG_ARM64_PAGE_SHIFT)) * \
 		 rand()) * (2 ^ $(CONFIG_ARM64_PAGE_SHIFT))}")
 else
-TEXT_OFFSET := 0x00080000
+TEXT_OFFSET := 0x0
 endif
 
 ifeq ($(CONFIG_KASAN_SW_TAGS), y)
@@ -175,6 +175,9 @@ vdso_install:
 	$(Q)$(MAKE) $(build)=arch/arm64/kernel/vdso $@
 	$(if $(CONFIG_COMPAT_VDSO), \
 		$(Q)$(MAKE) $(build)=arch/arm64/kernel/vdso32 $@)
+
+archprepare:
+	$(Q)$(MAKE) $(build)=arch/arm64/tools kapi
 
 # We use MRPROPER_FILES and CLEAN_FILES now
 archclean:

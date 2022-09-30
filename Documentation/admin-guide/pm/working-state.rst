@@ -11,4 +11,5 @@ Working-State Power Management
    intel_idle
    cpufreq
    intel_pstate
+   intel_epb
    intel-speed-select

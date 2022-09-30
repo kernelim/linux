@@ -61,6 +61,7 @@ Currently, these files are in /proc/sys/vm:
 - stat_refresh
 - numa_stat
 - swappiness
+- force_cgroup_v2_swappiness
 - user_reserve_kbytes
 - vfs_cache_pressure
 - watermark_boost_factor
@@ -836,6 +837,21 @@ be 133 (x + 2x = 200, 2x = 133.33).
 
 At 0, the kernel will not initiate swap until the amount of free and
 file-backed pages is less than the high watermark in a z
+
+==============================================================
+
+force_cgroup_v2_swappiness
+
+This control is used to deprecate the per-cgroup swappiness value available
+only in cgroupsV1. Due to a systemd design choice, most of all system and
+user processes are run within a cgroup. Furthermore these cgroup swappiness
+values default to 60. This can lead to undesireable effects where systems
+swappiness value has little effect on the swap behavior of their system. If
+a user does not care about the per-cgroup swappiness feature they can
+configure their system with force_cgroup_v2_swappiness=1 to have more
+consistent swappiness behavior across their whole system.
+
+This is a RHEL-Only feature.
 
 ==============================================================
 

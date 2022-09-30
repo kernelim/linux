@@ -24,8 +24,34 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/context_tracking.h>
 
-DEFINE_STATIC_KEY_FALSE(context_tracking_enabled);
-EXPORT_SYMBOL_GPL(context_tracking_enabled);
+/*
+ * RHEL8
+ * -----
+ * The ARM64 specific code seems to have some mismatch between lockdep
+ * tracking of hardirqs state vs. the actual processor hardirqs state when
+ * nohz_full kernel parameter is used. This can lead to false positive
+ * warnings from lockdep and RCU. Sync up the hardirqs state in
+ * context_tracking_enter() to prevent that.
+ */
+#if defined(CONFIG_TRACE_IRQFLAGS) && defined(CONFIG_ARM64)
+static void trace_hardirqs_sync(void)
+{
+	bool cpu_irqs_off = !!irqs_disabled();
+	bool lockdep_irqs_off = !lockdep_hardirqs_enabled();
+
+	if (unlikely(cpu_irqs_off != lockdep_irqs_off)) {
+		if (cpu_irqs_off)
+			trace_hardirqs_off();
+		else
+			trace_hardirqs_on();
+	}
+}
+#else
+static void trace_hardirqs_sync(void)	{ }
+#endif
+
+DEFINE_STATIC_KEY_FALSE(context_tracking_key);
+EXPORT_SYMBOL_GPL(context_tracking_key);
 
 DEFINE_PER_CPU(struct context_tracking, context_tracking);
 EXPORT_SYMBOL_GPL(context_tracking);
@@ -116,6 +142,7 @@ void context_tracking_enter(enum ctx_state state)
 	if (in_interrupt())
 		return;
 
+	trace_hardirqs_sync();
 	local_irq_save(flags);
 	__context_tracking_enter(state);
 	local_irq_restore(flags);
@@ -191,7 +218,7 @@ void __init context_tracking_cpu_set(int cpu)
 
 	if (!per_cpu(context_tracking.active, cpu)) {
 		per_cpu(context_tracking.active, cpu) = true;
-		static_branch_inc(&context_tracking_enabled);
+		static_branch_inc(&context_tracking_key);
 	}
 
 	if (initialized)

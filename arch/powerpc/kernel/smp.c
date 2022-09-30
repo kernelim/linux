@@ -1432,6 +1432,8 @@ static void remove_cpu_from_masks(int cpu)
 	struct cpumask *(*mask_fn)(int) = cpu_sibling_mask;
 	int i;
 
+	unmap_cpu_from_node(cpu);
+
 	if (shared_caches)
 		mask_fn = cpu_l2_cache_mask;
 
@@ -1516,6 +1518,7 @@ static void add_cpu_to_masks(int cpu)
 	 * This CPU will not be in the online mask yet so we need to manually
 	 * add it to it's own thread sibling mask.
 	 */
+	map_cpu_to_node(cpu, cpu_to_node(cpu));
 	cpumask_set_cpu(cpu, cpu_sibling_mask(cpu));
 	cpumask_set_cpu(cpu, cpu_core_mask(cpu));
 
@@ -1587,6 +1590,9 @@ void start_secondary(void *unused)
 
 	vdso_getcpu_init();
 #endif
+	set_numa_node(numa_cpu_lookup_table[cpu]);
+	set_numa_mem(local_memory_node(numa_cpu_lookup_table[cpu]));
+
 	/* Update topology CPU masks */
 	add_cpu_to_masks(cpu);
 
@@ -1604,9 +1610,6 @@ void start_secondary(void *unused)
 		if (cpumask_weight(mask) > cpumask_weight(sibling_mask(cpu)))
 			shared_caches = true;
 	}
-
-	set_numa_node(numa_cpu_lookup_table[cpu]);
-	set_numa_mem(local_memory_node(numa_cpu_lookup_table[cpu]));
 
 	smp_wmb();
 	notify_cpu_starting(cpu);

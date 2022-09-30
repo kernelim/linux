@@ -139,6 +139,9 @@
 #define ATH8035_PHY_ID 0x004dd072
 #define AT8030_PHY_ID_MASK			0xffffffef
 
+#define AT803X_PAGE_FIBER		0
+#define AT803X_PAGE_COPPER		1
+
 MODULE_DESCRIPTION("Qualcomm Atheros AR803x PHY driver");
 MODULE_AUTHOR("Matus Ujhelyi");
 MODULE_LICENSE("GPL");
@@ -188,6 +191,35 @@ static int at803x_debug_reg_mask(struct phy_device *phydev, u16 reg,
 	val |= set;
 
 	return phy_write(phydev, AT803X_DEBUG_DATA, val);
+}
+
+static int at803x_write_page(struct phy_device *phydev, int page)
+{
+	int mask;
+	int set;
+
+	if (page == AT803X_PAGE_COPPER) {
+		set = AT803X_BT_BX_REG_SEL;
+		mask = 0;
+	} else {
+		set = 0;
+		mask = AT803X_BT_BX_REG_SEL;
+	}
+
+	return __phy_modify(phydev, AT803X_REG_CHIP_CONFIG, mask, set);
+}
+
+static int at803x_read_page(struct phy_device *phydev)
+{
+	int ccr = __phy_read(phydev, AT803X_REG_CHIP_CONFIG);
+
+	if (ccr < 0)
+		return ccr;
+
+	if (ccr & AT803X_BT_BX_REG_SEL)
+		return AT803X_PAGE_COPPER;
+
+	return AT803X_PAGE_FIBER;
 }
 
 static int at803x_enable_rx_delay(struct phy_device *phydev)
@@ -343,7 +375,7 @@ static int at803x_rgmii_reg_get_voltage_sel(struct regulator_dev *rdev)
 	return (val & AT803X_DEBUG_RGMII_1V8) ? 1 : 0;
 }
 
-static struct regulator_ops vddio_regulator_ops = {
+static const struct regulator_ops vddio_regulator_ops = {
 	.list_voltage = regulator_list_voltage_table,
 	.set_voltage_sel = at803x_rgmii_reg_set_voltage_sel,
 	.get_voltage_sel = at803x_rgmii_reg_get_voltage_sel,
@@ -364,7 +396,7 @@ static const struct regulator_desc vddio_desc = {
 	.owner = THIS_MODULE,
 };
 
-static struct regulator_ops vddh_regulator_ops = {
+static const struct regulator_ops vddh_regulator_ops = {
 };
 
 static const struct regulator_desc vddh_desc = {
@@ -399,12 +431,6 @@ static int at8031_register_regulators(struct phy_device *phydev)
 	}
 
 	return 0;
-}
-
-static bool at803x_match_phy_id(struct phy_device *phydev, u32 phy_id)
-{
-	return (phydev->phy_id & phydev->drv->phy_id_mask)
-		== (phy_id & phydev->drv->phy_id_mask);
 }
 
 static int at803x_parse_dt(struct phy_device *phydev)
@@ -452,8 +478,8 @@ static int at803x_parse_dt(struct phy_device *phydev)
 		 *   to the AR8030 so there might be a good chance it works on
 		 *   the AR8030 too.
 		 */
-		if (at803x_match_phy_id(phydev, ATH8030_PHY_ID) ||
-		    at803x_match_phy_id(phydev, ATH8035_PHY_ID)) {
+		if (phydev->drv->phy_id == ATH8030_PHY_ID ||
+		    phydev->drv->phy_id == ATH8035_PHY_ID) {
 			priv->clk_25m_reg &= AT8035_CLK_OUT_MASK;
 			priv->clk_25m_mask &= AT8035_CLK_OUT_MASK;
 		}
@@ -481,7 +507,7 @@ static int at803x_parse_dt(struct phy_device *phydev)
 	/* Only supported on AR8031/AR8033, the AR8030/AR8035 use strapping
 	 * options.
 	 */
-	if (at803x_match_phy_id(phydev, ATH8031_PHY_ID)) {
+	if (phydev->drv->phy_id == ATH8031_PHY_ID) {
 		if (of_property_read_bool(node, "qca,keep-pll-enabled"))
 			priv->flags |= AT803X_KEEP_PLL_ENABLED;
 
@@ -495,10 +521,6 @@ static int at803x_parse_dt(struct phy_device *phydev)
 			phydev_err(phydev, "failed to get VDDIO regulator\n");
 			return PTR_ERR(priv->vddio);
 		}
-
-		ret = regulator_enable(priv->vddio);
-		if (ret < 0)
-			return ret;
 	}
 
 	return 0;
@@ -508,6 +530,7 @@ static int at803x_probe(struct phy_device *phydev)
 {
 	struct device *dev = &phydev->mdio.dev;
 	struct at803x_priv *priv;
+	int ret;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -515,7 +538,17 @@ static int at803x_probe(struct phy_device *phydev)
 
 	phydev->priv = priv;
 
-	return at803x_parse_dt(phydev);
+	ret = at803x_parse_dt(phydev);
+	if (ret)
+		return ret;
+
+	if (priv->vddio) {
+		ret = regulator_enable(priv->vddio);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
 }
 
 static void at803x_remove(struct phy_device *phydev)
@@ -556,6 +589,22 @@ static int at803x_config_init(struct phy_device *phydev)
 {
 	int ret;
 
+	if (phydev->drv->phy_id == ATH8031_PHY_ID) {
+		/* Some bootloaders leave the fiber page selected.
+		 * Switch to the copper page, as otherwise we read
+		 * the PHY capabilities from the fiber side.
+		 */
+		phy_lock_mdio_bus(phydev);
+		ret = at803x_write_page(phydev, AT803X_PAGE_COPPER);
+		phy_unlock_mdio_bus(phydev);
+		if (ret)
+			return ret;
+
+		ret = at8031_pll_config(phydev);
+		if (ret < 0)
+			return ret;
+	}
+
 	/* The RX and TX delay default is:
 	 *   after HW reset: RX delay enabled and TX delay disabled
 	 *   after SW reset: RX delay enabled, while TX delay retains the
@@ -580,12 +629,6 @@ static int at803x_config_init(struct phy_device *phydev)
 	ret = at803x_clk_out_config(phydev);
 	if (ret < 0)
 		return ret;
-
-	if (at803x_match_phy_id(phydev, ATH8031_PHY_ID)) {
-		ret = at8031_pll_config(phydev);
-		if (ret < 0)
-			return ret;
-	}
 
 	/* Ar803x extended next page bit is enabled by default. Cisco
 	 * multigig switches read this bit and attempt to negotiate 10Gbps
@@ -686,36 +729,6 @@ static void at803x_link_change_notify(struct phy_device *phydev)
 
 		phydev_dbg(phydev, "%s(): phy was reset\n", __func__);
 	}
-}
-
-static int at803x_aneg_done(struct phy_device *phydev)
-{
-	int ccr;
-
-	int aneg_done = genphy_aneg_done(phydev);
-	if (aneg_done != BMSR_ANEGCOMPLETE)
-		return aneg_done;
-
-	/*
-	 * in SGMII mode, if copper side autoneg is successful,
-	 * also check SGMII side autoneg result
-	 */
-	ccr = phy_read(phydev, AT803X_REG_CHIP_CONFIG);
-	if ((ccr & AT803X_MODE_CFG_MASK) != AT803X_MODE_CFG_SGMII)
-		return aneg_done;
-
-	/* switch to SGMII/fiber page */
-	phy_write(phydev, AT803X_REG_CHIP_CONFIG, ccr & ~AT803X_BT_BX_REG_SEL);
-
-	/* check if the SGMII link is OK. */
-	if (!(phy_read(phydev, AT803X_PSSR) & AT803X_PSSR_MR_AN_COMPLETE)) {
-		phydev_warn(phydev, "803x_aneg_done: SGMII link is not ok\n");
-		aneg_done = 0;
-	}
-	/* switch back to copper page */
-	phy_write(phydev, AT803X_REG_CHIP_CONFIG, ccr | AT803X_BT_BX_REG_SEL);
-
-	return aneg_done;
 }
 
 static int at803x_read_status(struct phy_device *phydev)
@@ -1127,14 +1140,16 @@ static struct phy_driver at803x_driver[] = {
 	.probe			= at803x_probe,
 	.remove			= at803x_remove,
 	.config_init		= at803x_config_init,
+	.config_aneg		= at803x_config_aneg,
 	.soft_reset		= genphy_soft_reset,
 	.set_wol		= at803x_set_wol,
 	.get_wol		= at803x_get_wol,
 	.suspend		= at803x_suspend,
 	.resume			= at803x_resume,
+	.read_page		= at803x_read_page,
+	.write_page		= at803x_write_page,
 	/* PHY_GBIT_FEATURES */
 	.read_status		= at803x_read_status,
-	.aneg_done		= at803x_aneg_done,
 	.config_intr		= &at803x_config_intr,
 	.handle_interrupt	= at803x_handle_interrupt,
 	.get_tunable		= at803x_get_tunable,

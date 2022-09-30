@@ -173,6 +173,16 @@ struct scan_control {
  * From 0 .. 200.  Higher means more swappy.
  */
 int vm_swappiness = 60;
+
+/*
+ * RHEL-Only: systemd runs everything in cgroups, so the per-cgroup swappiness
+ * creates inconsistant swap behavior across the system... additionally a race
+ * between systemd-sysctl.service and the creation of these cgroups causes all
+ * these cgroups to have a default of 60, despite the sysctl value at boot.
+ *
+ * Adding the force_cgroup_v2_swappiness tuneable turns off per-cgroup swappiness
+ */
+int force_cgroup_v2_swappiness __read_mostly = 0; 
 /*
  * The total number of pages which are beyond the high watermark within all
  * zones.
@@ -647,6 +657,21 @@ void unregister_shrinker(struct shrinker *shrinker)
 	shrinker->nr_deferred = NULL;
 }
 EXPORT_SYMBOL(unregister_shrinker);
+
+/**
+ * synchronize_shrinkers - Wait for all running shrinkers to complete.
+ *
+ * This is equivalent to calling unregister_shrink() and register_shrinker(),
+ * but atomically and with less overhead. This is useful to guarantee that all
+ * shrinker invocations have seen an update, before freeing memory, similar to
+ * rcu.
+ */
+void synchronize_shrinkers(void)
+{
+	down_write(&shrinker_rwsem);
+	up_write(&shrinker_rwsem);
+}
+EXPORT_SYMBOL(synchronize_shrinkers);
 
 #define SHRINK_BATCH 128
 

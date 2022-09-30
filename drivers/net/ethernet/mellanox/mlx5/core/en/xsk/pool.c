@@ -9,15 +9,15 @@
 static int mlx5e_xsk_map_pool(struct mlx5e_priv *priv,
 			      struct xsk_buff_pool *pool)
 {
-	struct device *dev = priv->mdev->device;
+	struct device *dev = mlx5_core_dma_dev(priv->mdev);
 
-	return xsk_pool_dma_map(pool, dev, 0);
+	return xsk_pool_dma_map(pool, dev, DMA_ATTR_SKIP_CPU_SYNC);
 }
 
 static void mlx5e_xsk_unmap_pool(struct mlx5e_priv *priv,
 				 struct xsk_buff_pool *pool)
 {
-	return xsk_pool_dma_unmap(pool, 0);
+	return xsk_pool_dma_unmap(pool, DMA_ATTR_SKIP_CPU_SYNC);
 }
 
 static int mlx5e_xsk_get_pools(struct mlx5e_xsk *xsk)
@@ -117,6 +117,7 @@ static int mlx5e_xsk_enable_locked(struct mlx5e_priv *priv,
 		goto err_remove_pool;
 
 	mlx5e_activate_xsk(c);
+	mlx5e_trigger_napi_icosq(c);
 
 	/* Don't wait for WQEs, because the newer xdpsock sample doesn't provide
 	 * any Fill Ring entries at the setup stage.

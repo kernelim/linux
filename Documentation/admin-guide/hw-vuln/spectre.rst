@@ -422,6 +422,14 @@ The possible values in this file are:
   'RSB filling'   Protection of RSB on context switch enabled
   =============   ===========================================
 
+  - EIBRS Post-barrier Return Stack Buffer (PBRSB) protection status:
+
+  ===========================  =======================================================
+  'PBRSB-eIBRS: SW sequence'   CPU is affected and protection of RSB on VMEXIT enabled
+  'PBRSB-eIBRS: Vulnerable'    CPU is vulnerable
+  'PBRSB-eIBRS: Not affected'  CPU is not affected by PBRSB
+  ===========================  =======================================================
+
 Full mitigation might require a microcode update from the CPU
 vendor. When the necessary microcode is not available, the kernel will
 report vulnerability.
@@ -505,9 +513,8 @@ Spectre variant 2
 
    Restricting indirect branch speculation on a user program will
    also prevent the program from launching a variant 2 attack
-   on x86.  All sand-boxed SECCOMP programs have indirect branch
-   speculation restricted by default.  Administrators can change
-   that behavior via the kernel command line and sysfs control files.
+   on x86.  Administrators can change that behavior via the kernel
+   command line and sysfs control files.
    See :ref:`spectre_mitigation_control_command_line`.
 
    Programs that disable their indirect branch speculation will have
@@ -643,9 +650,8 @@ Mitigation selection guide
    off by disabling their indirect branch speculation when they are run
    (See :ref:`Documentation/userspace-api/spec_ctrl.rst <set_spec_ctrl>`).
    This prevents untrusted programs from polluting the branch target
-   buffer.  All programs running in SECCOMP sandboxes have indirect
-   branch speculation restricted by default. This behavior can be
-   changed via the kernel command line and sysfs control files. See
+   buffer.  This behavior can be changed via the kernel command line
+   and sysfs control files. See
    :ref:`spectre_mitigation_control_command_line`.
 
 3. High security mode

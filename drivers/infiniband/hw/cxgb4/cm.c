@@ -145,7 +145,7 @@ static void connect_reply_upcall(struct c4iw_ep *ep, int status);
 static int sched(struct c4iw_dev *dev, struct sk_buff *skb);
 
 static LIST_HEAD(timeout_list);
-static spinlock_t timeout_lock;
+static DEFINE_SPINLOCK(timeout_lock);
 
 static void deref_cm_id(struct c4iw_ep_common *epc)
 {
@@ -948,7 +948,7 @@ static int send_mpa_req(struct c4iw_ep *ep, struct sk_buff *skb,
 	mpalen = sizeof(*mpa) + ep->plen;
 	if (mpa_rev_to_use == 2)
 		mpalen += sizeof(struct mpa_v2_conn_params);
-	wrlen = roundup(mpalen + sizeof *req, 16);
+	wrlen = roundup(mpalen + sizeof(*req), 16);
 	skb = get_skb(skb, wrlen, GFP_KERNEL);
 	if (!skb) {
 		connect_reply_upcall(ep, -ENOMEM);
@@ -992,8 +992,9 @@ static int send_mpa_req(struct c4iw_ep *ep, struct sk_buff *skb,
 	}
 
 	if (mpa_rev_to_use == 2) {
-		mpa->private_data_size = htons(ntohs(mpa->private_data_size) +
-					       sizeof (struct mpa_v2_conn_params));
+		mpa->private_data_size =
+			htons(ntohs(mpa->private_data_size) +
+			      sizeof(struct mpa_v2_conn_params));
 		pr_debug("initiator ird %u ord %u\n", ep->ird,
 			 ep->ord);
 		mpa_v2_params.ird = htons((u16)ep->ird);
@@ -1052,7 +1053,7 @@ static int send_mpa_reject(struct c4iw_ep *ep, const void *pdata, u8 plen)
 	mpalen = sizeof(*mpa) + plen;
 	if (ep->mpa_attr.version == 2 && ep->mpa_attr.enhanced_rdma_conn)
 		mpalen += sizeof(struct mpa_v2_conn_params);
-	wrlen = roundup(mpalen + sizeof *req, 16);
+	wrlen = roundup(mpalen + sizeof(*req), 16);
 
 	skb = get_skb(NULL, wrlen, GFP_KERNEL);
 	if (!skb) {
@@ -1083,8 +1084,9 @@ static int send_mpa_reject(struct c4iw_ep *ep, const void *pdata, u8 plen)
 
 	if (ep->mpa_attr.version == 2 && ep->mpa_attr.enhanced_rdma_conn) {
 		mpa->flags |= MPA_ENHANCED_RDMA_CONN;
-		mpa->private_data_size = htons(ntohs(mpa->private_data_size) +
-					       sizeof (struct mpa_v2_conn_params));
+		mpa->private_data_size =
+			htons(ntohs(mpa->private_data_size) +
+			      sizeof(struct mpa_v2_conn_params));
 		mpa_v2_params.ird = htons(((u16)ep->ird) |
 					  (peer2peer ? MPA_V2_PEER2PEER_MODEL :
 					   0));
@@ -1131,7 +1133,7 @@ static int send_mpa_reply(struct c4iw_ep *ep, const void *pdata, u8 plen)
 	mpalen = sizeof(*mpa) + plen;
 	if (ep->mpa_attr.version == 2 && ep->mpa_attr.enhanced_rdma_conn)
 		mpalen += sizeof(struct mpa_v2_conn_params);
-	wrlen = roundup(mpalen + sizeof *req, 16);
+	wrlen = roundup(mpalen + sizeof(*req), 16);
 
 	skb = get_skb(NULL, wrlen, GFP_KERNEL);
 	if (!skb) {
@@ -1166,8 +1168,9 @@ static int send_mpa_reply(struct c4iw_ep *ep, const void *pdata, u8 plen)
 
 	if (ep->mpa_attr.version == 2 && ep->mpa_attr.enhanced_rdma_conn) {
 		mpa->flags |= MPA_ENHANCED_RDMA_CONN;
-		mpa->private_data_size = htons(ntohs(mpa->private_data_size) +
-					       sizeof (struct mpa_v2_conn_params));
+		mpa->private_data_size =
+			htons(ntohs(mpa->private_data_size) +
+			      sizeof(struct mpa_v2_conn_params));
 		mpa_v2_params.ird = htons((u16)ep->ird);
 		mpa_v2_params.ord = htons((u16)ep->ord);
 		if (peer2peer && (ep->mpa_attr.p2p_type !=
@@ -4438,7 +4441,6 @@ c4iw_handler_func c4iw_handlers[NUM_CPL_CMDS] = {
 
 int __init c4iw_cm_init(void)
 {
-	spin_lock_init(&timeout_lock);
 	skb_queue_head_init(&rxq);
 
 	workq = alloc_ordered_workqueue("iw_cxgb4", WQ_MEM_RECLAIM);
@@ -4451,6 +4453,5 @@ int __init c4iw_cm_init(void)
 void c4iw_cm_term(void)
 {
 	WARN_ON(!list_empty(&timeout_list));
-	flush_workqueue(workq);
 	destroy_workqueue(workq);
 }

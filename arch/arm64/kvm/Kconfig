@@ -40,6 +40,7 @@ menuconfig KVM
 	select HAVE_KVM_VCPU_RUN_PID_CHANGE
 	select TASKSTATS
 	select TASK_DELAY_ACCT
+	select INTERVAL_TREE
 	---help---
 	  Support hosting virtualized guest machines.
 
@@ -58,7 +59,7 @@ config KVM_ARM_PMU
 	  virtual machines.
 
 config KVM_INDIRECT_VECTORS
-	def_bool HARDEN_BRANCH_PREDICTOR || HARDEN_EL2_VECTORS
+	def_bool HARDEN_EL2_VECTORS
 
 endif # KVM
 

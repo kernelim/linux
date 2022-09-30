@@ -579,19 +579,32 @@ struct address_space *page_mapping_file(struct page *page)
 /* Slow path of page_mapcount() for compound pages */
 int __page_mapcount(struct page *page)
 {
+	unsigned int seqcount;
 	int ret;
+	struct page *head;
 
-	ret = atomic_read(&page->_mapcount) + 1;
 	/*
 	 * For file THP page->_mapcount contains total number of mapping
 	 * of the page: no need to look into compound_mapcount.
 	 */
-	if (!PageAnon(page) && !PageHuge(page))
-		return ret;
-	page = compound_head(page);
-	ret += atomic_read(compound_mapcount_ptr(page)) + 1;
-	if (PageDoubleMap(page))
+	if (PageHuge(page)) {
+		VM_WARN_ON_ONCE_PAGE(atomic_read(&page->_mapcount) >= 0, page);
+		return compound_mapcount(page);
+	}
+	if (!PageAnon(page))
+		return atomic_read(&page->_mapcount) + 1;
+
+	head = compound_head(page);
+again:
+	seqcount = page_mapcount_seq_begin(head);
+
+	ret = atomic_read(&page->_mapcount) + 1;
+	ret += atomic_read(compound_mapcount_ptr(head)) + 1;
+	if (PageDoubleMap(head))
 		ret--;
+
+	if (page_mapcount_seq_retry(head, seqcount))
+		goto again;
 	return ret;
 }
 EXPORT_SYMBOL_GPL(__page_mapcount);
@@ -840,6 +853,7 @@ int memcmp_pages(struct page *page1, struct page *page2)
 	return ret;
 }
 
+#ifdef CONFIG_PRINTK
 /**
  * mem_dump_obj - Print available provenance information
  * @object: object for which to find provenance information.
@@ -870,3 +884,5 @@ void mem_dump_obj(void *object)
 	}
 	pr_cont(" non-slab/vmalloc memory.\n");
 }
+EXPORT_SYMBOL_GPL(mem_dump_obj);
+#endif

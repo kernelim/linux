@@ -146,6 +146,15 @@ There are also equivalents to memcpy. The :c:func:`ins()` and
 :c:func:`outs()` functions copy bytes, words or longs to the given
 port.
 
+Generalizing Access to System and I/O Memory
+============================================
+
+.. kernel-doc:: include/linux/iosys-map.h
+   :doc: overview
+
+.. kernel-doc:: include/linux/iosys-map.h
+   :internal:
+
 Public Functions Provided
 =========================
 

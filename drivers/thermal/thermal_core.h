@@ -12,6 +12,8 @@
 #include <linux/device.h>
 #include <linux/thermal.h>
 
+#include "thermal_netlink.h"
+
 /* Initial state of a cooling device during binding */
 #define THERMAL_NO_TARGET -1UL
 
@@ -140,5 +142,16 @@ of_thermal_get_trip_points(struct thermal_zone_device *tz)
 	return NULL;
 }
 #endif
+
+int for_each_thermal_zone(int (*cb)(struct thermal_zone_device *, void *),
+			  void *);
+
+int for_each_thermal_cooling_device(int (*cb)(struct thermal_cooling_device *,
+					      void *), void *);
+
+int for_each_thermal_governor(int (*cb)(struct thermal_governor *, void *),
+			      void *thermal_governor);
+
+struct thermal_zone_device *thermal_zone_get_by_id(int id);
 
 #endif /* __THERMAL_CORE_H__ */

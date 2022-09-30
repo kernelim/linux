@@ -559,6 +559,11 @@ int of_map_id(struct device_node *np, u32 id,
 	       const char *map_name, const char *map_mask_name,
 	       struct device_node **target, u32 *id_out);
 
+struct kimage;
+void *of_kexec_alloc_and_setup_fdt(const struct kimage *image,
+				   unsigned long initrd_load_addr,
+				   unsigned long initrd_len,
+				   const char *cmdline, size_t extra_fdt_size);
 #else /* CONFIG_OF */
 
 static inline void of_core_init(void)

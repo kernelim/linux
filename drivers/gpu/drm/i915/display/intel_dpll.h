@@ -15,6 +15,7 @@ struct intel_crtc_state;
 enum pipe;
 
 void intel_dpll_init_clock_hook(struct drm_i915_private *dev_priv);
+int intel_dpll_crtc_compute_clock(struct intel_crtc_state *crtc_state);
 int vlv_calc_dpll_params(int refclk, struct dpll *clock);
 int pnv_calc_dpll_params(int refclk, struct dpll *clock);
 int i9xx_calc_dpll_params(int refclk, struct dpll *clock);
@@ -35,5 +36,8 @@ void i9xx_disable_pll(const struct intel_crtc_state *crtc_state);
 bool bxt_find_best_dpll(struct intel_crtc_state *crtc_state,
 			struct dpll *best_clock);
 int chv_calc_dpll_params(int refclk, struct dpll *pll_clock);
+
+void assert_pll_enabled(struct drm_i915_private *i915, enum pipe pipe);
+void assert_pll_disabled(struct drm_i915_private *i915, enum pipe pipe);
 
 #endif

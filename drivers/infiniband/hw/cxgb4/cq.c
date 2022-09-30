@@ -42,7 +42,7 @@ static void destroy_cq(struct c4iw_rdev *rdev, struct t4_cq *cq,
 	struct fw_ri_res *res;
 	int wr_len;
 
-	wr_len = sizeof *res_wr + sizeof *res;
+	wr_len = sizeof(*res_wr) + sizeof(*res);
 	set_wr_txq(skb, CPL_PRIORITY_CONTROL, 0);
 
 	res_wr = __skb_put_zero(skb, wr_len);
@@ -114,7 +114,7 @@ static int create_cq(struct c4iw_rdev *rdev, struct t4_cq *cq,
 	}
 
 	/* build fw_ri_res_wr */
-	wr_len = sizeof *res_wr + sizeof *res;
+	wr_len = sizeof(*res_wr) + sizeof(*res);
 
 	skb = alloc_skb(wr_len, GFP_KERNEL);
 	if (!skb) {
@@ -967,6 +967,12 @@ int c4iw_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *wc)
 	return !err || err == -ENODATA ? npolled : err;
 }
 
+void c4iw_cq_rem_ref(struct c4iw_cq *chp)
+{
+	if (refcount_dec_and_test(&chp->refcnt))
+		complete(&chp->cq_rel_comp);
+}
+
 int c4iw_destroy_cq(struct ib_cq *ib_cq, struct ib_udata *udata)
 {
 	struct c4iw_cq *chp;
@@ -976,8 +982,8 @@ int c4iw_destroy_cq(struct ib_cq *ib_cq, struct ib_udata *udata)
 	chp = to_c4iw_cq(ib_cq);
 
 	xa_erase_irq(&chp->rhp->cqs, chp->cq.cqid);
-	atomic_dec(&chp->refcnt);
-	wait_event(chp->wait, !atomic_read(&chp->refcnt));
+	c4iw_cq_rem_ref(chp);
+	wait_for_completion(&chp->cq_rel_comp);
 
 	ucontext = rdma_udata_to_drv_context(udata, struct c4iw_ucontext,
 					     ibucontext);
@@ -1080,18 +1086,18 @@ int c4iw_create_cq(struct ib_cq *ibcq, const struct ib_cq_init_attr *attr,
 	chp->ibcq.cqe = entries - 2;
 	spin_lock_init(&chp->lock);
 	spin_lock_init(&chp->comp_handler_lock);
-	atomic_set(&chp->refcnt, 1);
-	init_waitqueue_head(&chp->wait);
+	refcount_set(&chp->refcnt, 1);
+	init_completion(&chp->cq_rel_comp);
 	ret = xa_insert_irq(&rhp->cqs, chp->cq.cqid, chp, GFP_KERNEL);
 	if (ret)
 		goto err_destroy_cq;
 
 	if (ucontext) {
 		ret = -ENOMEM;
-		mm = kmalloc(sizeof *mm, GFP_KERNEL);
+		mm = kmalloc(sizeof(*mm), GFP_KERNEL);
 		if (!mm)
 			goto err_remove_handle;
-		mm2 = kmalloc(sizeof *mm2, GFP_KERNEL);
+		mm2 = kmalloc(sizeof(*mm2), GFP_KERNEL);
 		if (!mm2)
 			goto err_free_mm;
 

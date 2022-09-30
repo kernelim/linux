@@ -255,7 +255,7 @@ void __noreturn hyp_panic(struct kvm_cpu_context *host_ctxt)
 {
 	u64 spsr = read_sysreg_el2(SYS_SPSR);
 	u64 elr = read_sysreg_el2(SYS_ELR);
-	u64 par = read_sysreg(par_el1);
+	u64 par = read_sysreg_par();
 	struct kvm_vcpu *vcpu = host_ctxt->__hyp_running_vcpu;
 	unsigned long str_va;
 

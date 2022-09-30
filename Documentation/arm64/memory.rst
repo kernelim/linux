@@ -128,7 +128,7 @@ this logic.
 
 As a single binary will need to support both 48-bit and 52-bit VA
 spaces, the VMEMMAP must be sized large enough for 52-bit VAs and
-also must be sized large enought to accommodate a fixed PAGE_OFFSET.
+also must be sized large enough to accommodate a fixed PAGE_OFFSET.
 
 Most code in the kernel should not need to consider the VA_BITS, for
 code that does need to know the VA size the variables are
@@ -153,11 +153,18 @@ return virtual addresses to userspace from a 48-bit range.
 
 Software can "opt-in" to receiving VAs from a 52-bit space by
 specifying an mmap hint parameter that is larger than 48-bit.
+
 For example:
-    maybe_high_address = mmap(~0UL, size, prot, flags,...);
+
+.. code-block:: c
+
+   maybe_high_address = mmap(~0UL, size, prot, flags,...);
 
 It is also possible to build a debug kernel that returns addresses
 from a 52-bit space by enabling the following kernel config options:
+
+.. code-block:: sh
+
    CONFIG_EXPERT=y && CONFIG_ARM64_FORCE_52BIT=y
 
 Note that this option is only intended for debugging applications

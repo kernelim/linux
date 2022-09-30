@@ -354,6 +354,7 @@
 432	common	fsmount			__x64_sys_fsmount
 433	common	fspick			__x64_sys_fspick
 436	common	close_range		__x64_sys_close_range
+437	common	openat2			__x64_sys_openat2
 439	common	faccessat2		__x64_sys_faccessat2
 
 #

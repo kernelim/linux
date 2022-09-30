@@ -233,5 +233,9 @@ int main(void)
 	DEVID(auxiliary_device_id);
 	DEVID_FIELD(auxiliary_device_id, name);
 
+
+	DEVID(ishtp_device_id);
+	DEVID_FIELD(ishtp_device_id, guid);
+
 	return 0;
 }

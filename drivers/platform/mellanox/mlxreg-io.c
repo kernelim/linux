@@ -18,7 +18,7 @@
 
 /* Attribute parameters. */
 #define MLXREG_IO_ATT_SIZE	10
-#define MLXREG_IO_ATT_NUM	48
+#define MLXREG_IO_ATT_NUM	96
 
 /**
  * struct mlxreg_io_priv_data - driver's private data:
@@ -98,7 +98,7 @@ mlxreg_io_get_reg(void *regmap, struct mlxreg_core_data *data, u32 in_val,
 			if (ret)
 				goto access_error;
 
-			*regval |= rol32(val, regsize * i);
+			*regval |= rol32(val, regsize * i * 8);
 		}
 	}
 

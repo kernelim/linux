@@ -23,10 +23,10 @@
 
 #include <linux/compiler.h>
 #include <linux/const.h>
+#include <linux/sizes.h>
 #include <linux/types.h>
 #include <asm/bug.h>
 #include <asm/page-def.h>
-#include <asm/sizes.h>
 
 /*
  * Size of the PCI I/O space. This must remain a power of two so that
@@ -74,18 +74,21 @@
 #define MODULES_VADDR		(BPF_JIT_REGION_END)
 #define MODULES_VSIZE		(SZ_128M)
 #define VMEMMAP_START		(-VMEMMAP_SIZE - SZ_2M)
+#define VMEMMAP_END		(VMEMMAP_START + VMEMMAP_SIZE)
 #define PCI_IO_END		(VMEMMAP_START - SZ_2M)
 #define PCI_IO_START		(PCI_IO_END - PCI_IO_SIZE)
 #define FIXADDR_TOP		(PCI_IO_START - SZ_2M)
+
 #if VA_BITS > 48
 #define VA_BITS_MIN		(48)
 #else
 #define VA_BITS_MIN		(VA_BITS)
 #endif
+
 #define _PAGE_END(va)		(-(UL(1) << ((va) - 1)))
 
-#define KERNEL_START      _text
-#define KERNEL_END        _end
+#define KERNEL_START		_text
+#define KERNEL_END		_end
 
 /*
  * Generic and tag-based KASAN require 1/8th and 1/16th of the kernel virtual
@@ -139,22 +142,12 @@
 
 /*
  * Alignment of kernel segments (e.g. .text, .data).
- */
-#if defined(CONFIG_DEBUG_ALIGN_RODATA)
-/*
- *  4 KB granule:   1 level 2 entry
- * 16 KB granule: 128 level 3 entries, with contiguous bit
- * 64 KB granule:  32 level 3 entries, with contiguous bit
- */
-#define SEGMENT_ALIGN			SZ_2M
-#else
-/*
+ *
  *  4 KB granule:  16 level 3 entries, with contiguous bit
  * 16 KB granule:   4 level 3 entries, without contiguous bit
  * 64 KB granule:   1 level 3 entry
  */
-#define SEGMENT_ALIGN			SZ_64K
-#endif
+#define SEGMENT_ALIGN		SZ_64K
 
 /*
  * Memory types available.
@@ -288,8 +281,7 @@ static inline const void *__tag_set(const void *addr, u8 tag)
 
 #define __virt_to_phys_nodebug(x) ({					\
 	phys_addr_t __x = (phys_addr_t)(__tag_reset(x));		\
-	__is_lm_address(__x) ? __lm_to_phys(__x) :			\
-			       __kimg_to_phys(__x);			\
+	__is_lm_address(__x) ? __lm_to_phys(__x) : __kimg_to_phys(__x);	\
 })
 
 #define __pa_symbol_nodebug(x)	__kimg_to_phys((phys_addr_t)(x))
@@ -300,7 +292,7 @@ extern phys_addr_t __phys_addr_symbol(unsigned long x);
 #else
 #define __virt_to_phys(x)	__virt_to_phys_nodebug(x)
 #define __phys_addr_symbol(x)	__pa_symbol_nodebug(x)
-#endif
+#endif /* CONFIG_DEBUG_VIRTUAL */
 
 #define __phys_to_virt(x)	((unsigned long)((x) - PHYS_OFFSET) | PAGE_OFFSET)
 #define __phys_to_kimg(x)	((unsigned long)((x) + kimage_voffset))
@@ -336,40 +328,50 @@ static inline void *phys_to_virt(phys_addr_t x)
 #define __pa_nodebug(x)		__virt_to_phys_nodebug((unsigned long)(x))
 #define __va(x)			((void *)__phys_to_virt((phys_addr_t)(x)))
 #define pfn_to_kaddr(pfn)	__va((pfn) << PAGE_SHIFT)
-#define virt_to_pfn(x)      __phys_to_pfn(__virt_to_phys((unsigned long)(x)))
-#define sym_to_pfn(x)	    __phys_to_pfn(__pa_symbol(x))
+#define virt_to_pfn(x)		__phys_to_pfn(__virt_to_phys((unsigned long)(x)))
+#define sym_to_pfn(x)		__phys_to_pfn(__pa_symbol(x))
 
 /*
- *  virt_to_page(k)	convert a _valid_ virtual address to struct page *
- *  virt_addr_valid(k)	indicates whether a virtual address is valid
+ *  virt_to_page(x)	convert a _valid_ virtual address to struct page *
+ *  virt_addr_valid(x)	indicates whether a virtual address is valid
  */
 #define ARCH_PFN_OFFSET		((unsigned long)PHYS_PFN_OFFSET)
 
-#ifndef CONFIG_SPARSEMEM_VMEMMAP
-#define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
+#if !defined(CONFIG_SPARSEMEM_VMEMMAP) || defined(CONFIG_DEBUG_VIRTUAL)
+#define virt_to_page(x)		pfn_to_page(virt_to_pfn(x))
 #else
-#define __virt_to_pgoff(kaddr)	(((u64)(kaddr) - PAGE_OFFSET) / PAGE_SIZE * sizeof(struct page))
-#define __page_to_voff(kaddr)	(((u64)(kaddr) - VMEMMAP_START) * PAGE_SIZE / sizeof(struct page))
-
-#define page_to_virt(page)	({					\
-	unsigned long __addr =						\
-		((__page_to_voff(page)) + PAGE_OFFSET);			\
-	const void *__addr_tag =					\
-		__tag_set((void *)__addr, page_kasan_tag(page));	\
-	((void *)__addr_tag);						\
+#define page_to_virt(x)	({						\
+	__typeof__(x) __page = x;					\
+	u64 __idx = ((u64)__page - VMEMMAP_START) / sizeof(struct page);\
+	u64 __addr = PAGE_OFFSET + (__idx * PAGE_SIZE);			\
+	(void *)__tag_set((const void *)__addr, page_kasan_tag(__page));\
 })
 
-#define virt_to_page(vaddr)	\
-	((struct page *)((__virt_to_pgoff(__tag_reset(vaddr))) + VMEMMAP_START))
-#endif
+#define virt_to_page(x)	({						\
+	u64 __idx = (__tag_reset((u64)x) - PAGE_OFFSET) / PAGE_SIZE;	\
+	u64 __addr = VMEMMAP_START + (__idx * sizeof(struct page));	\
+	(struct page *)__addr;						\
+})
+#endif /* !CONFIG_SPARSEMEM_VMEMMAP || CONFIG_DEBUG_VIRTUAL */
 
 #define virt_addr_valid(addr)	({					\
 	__typeof__(addr) __addr = __tag_reset(addr);			\
 	__is_lm_address(__addr) && pfn_valid(virt_to_pfn(__addr));	\
 })
 
+#endif /* !ASSEMBLY */
+
+/*
+ * Given that the GIC architecture permits ITS implementations that can only be
+ * configured with a LPI table address once, GICv3 systems with many CPUs may
+ * end up reserving a lot of different regions after a kexec for their LPI
+ * tables (one per CPU), as we are forced to reuse the same memory after kexec
+ * (and thus reserve it persistently with EFI beforehand)
+ */
+#if defined(CONFIG_EFI) && defined(CONFIG_ARM_GIC_V3_ITS)
+# define INIT_MEMBLOCK_RESERVED_REGIONS	(INIT_MEMBLOCK_REGIONS + NR_CPUS + 1)
 #endif
 
 #include <asm-generic/memory_model.h>
 
-#endif
+#endif /* __ASM_MEMORY_H */

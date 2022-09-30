@@ -29,7 +29,7 @@ int mlx5e_devlink_port_register(struct mlx5e_priv *priv)
 
 	if (mlx5_core_is_pf(priv->mdev)) {
 		attrs.flavour = DEVLINK_PORT_FLAVOUR_PHYSICAL;
-		attrs.phys.port_number = PCI_FUNC(priv->mdev->pdev->devfn);
+		attrs.phys.port_number = mlx5_get_dev_index(priv->mdev);
 		if (MLX5_ESWITCH_MANAGER(priv->mdev)) {
 			mlx5e_devlink_get_port_parent_id(priv->mdev, &ppid);
 			memcpy(attrs.switch_id.id, ppid.id, ppid.id_len);
@@ -68,8 +68,7 @@ void mlx5e_devlink_port_unregister(struct mlx5e_priv *priv)
 	if (!mlx5_core_is_sf(mdev))
 		return; /* RHEL-only: Disable 'devlink port' support for non-switchdev mode*/
 
-	if (dl_port->registered)
-		devlink_port_unregister(dl_port);
+	devlink_port_unregister(dl_port);
 }
 
 struct devlink_port *mlx5e_get_devlink_port(struct net_device *dev)
@@ -77,7 +76,6 @@ struct devlink_port *mlx5e_get_devlink_port(struct net_device *dev)
 	struct mlx5e_priv *priv = netdev_priv(dev);
 	struct mlx5e_rep_priv *rpriv = priv->ppriv;
 	struct mlx5_core_dev *mdev = priv->mdev;
-	struct devlink_port *port;
 
 	if (!netif_device_present(dev))
 		return NULL;
@@ -88,8 +86,5 @@ struct devlink_port *mlx5e_get_devlink_port(struct net_device *dev)
 	if (!mlx5_core_is_sf(mdev))
 		return NULL; /* RHEL-only: Disable 'devlink port' support for non-switchdev mode*/
 
-	port = mlx5e_devlink_get_dl_port(priv);
-	if (port->registered)
-		return port;
-	return NULL;
+	return mlx5e_devlink_get_dl_port(priv);
 }

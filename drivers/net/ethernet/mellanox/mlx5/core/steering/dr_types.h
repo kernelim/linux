@@ -91,6 +91,7 @@ enum mlx5dr_ste_ctx_action_cap {
 	DR_STE_CTX_ACTION_CAP_TX_POP   = 1 << 0,
 	DR_STE_CTX_ACTION_CAP_RX_PUSH  = 1 << 1,
 	DR_STE_CTX_ACTION_CAP_RX_ENCAP = 1 << 2,
+	DR_STE_CTX_ACTION_CAP_POP_MDFY = 1 << 3,
 };
 
 enum {
@@ -105,7 +106,8 @@ enum mlx5dr_matcher_criteria {
 	DR_MATCHER_CRITERIA_MISC2 = 1 << 3,
 	DR_MATCHER_CRITERIA_MISC3 = 1 << 4,
 	DR_MATCHER_CRITERIA_MISC4 = 1 << 5,
-	DR_MATCHER_CRITERIA_MAX = 1 << 6,
+	DR_MATCHER_CRITERIA_MISC5 = 1 << 6,
+	DR_MATCHER_CRITERIA_MAX = 1 << 7,
 };
 
 enum mlx5dr_action_type {
@@ -145,9 +147,11 @@ struct mlx5dr_matcher_rx_tx;
 struct mlx5dr_ste_ctx;
 
 struct mlx5dr_ste {
-	u8 *hw_ste;
 	/* refcount: indicates the num of rules that using this ste */
 	u32 refcount;
+
+	/* this ste is part of a rule, located in ste's chain */
+	u8 ste_chain_location;
 
 	/* attached to the miss_list head at each htbl entry */
 	struct list_head miss_list_node;
@@ -159,9 +163,6 @@ struct mlx5dr_ste {
 
 	/* The rule this STE belongs to */
 	struct mlx5dr_rule_rx_tx *rule_rx_tx;
-
-	/* this ste is part of a rule, located in ste's chain */
-	u8 ste_chain_location;
 };
 
 struct mlx5dr_ste_htbl_ctrl {
@@ -179,14 +180,7 @@ struct mlx5dr_ste_htbl {
 	u16 byte_mask;
 	u32 refcount;
 	struct mlx5dr_icm_chunk *chunk;
-	struct mlx5dr_ste *ste_arr;
-	u8 *hw_ste_arr;
-
-	struct list_head *miss_list;
-
-	enum mlx5dr_icm_chunk_size chunk_size;
 	struct mlx5dr_ste *pointing_ste;
-
 	struct mlx5dr_ste_htbl_ctrl ctrl;
 };
 
@@ -441,6 +435,11 @@ void mlx5dr_ste_build_tnl_geneve_tlv_opt(struct mlx5dr_ste_ctx *ste_ctx,
 					 struct mlx5dr_match_param *mask,
 					 struct mlx5dr_cmd_caps *caps,
 					 bool inner, bool rx);
+void mlx5dr_ste_build_tnl_geneve_tlv_opt_exist(struct mlx5dr_ste_ctx *ste_ctx,
+					       struct mlx5dr_ste_build *sb,
+					       struct mlx5dr_match_param *mask,
+					       struct mlx5dr_cmd_caps *caps,
+					       bool inner, bool rx);
 void mlx5dr_ste_build_tnl_gtpu(struct mlx5dr_ste_ctx *ste_ctx,
 			       struct mlx5dr_ste_build *sb,
 			       struct mlx5dr_match_param *mask,
@@ -455,6 +454,10 @@ void mlx5dr_ste_build_tnl_gtpu_flex_parser_1(struct mlx5dr_ste_ctx *ste_ctx,
 					     struct mlx5dr_match_param *mask,
 					     struct mlx5dr_cmd_caps *caps,
 					     bool inner, bool rx);
+void mlx5dr_ste_build_tnl_header_0_1(struct mlx5dr_ste_ctx *ste_ctx,
+				     struct mlx5dr_ste_build *sb,
+				     struct mlx5dr_match_param *mask,
+				     bool inner, bool rx);
 void mlx5dr_ste_build_general_purpose(struct mlx5dr_ste_ctx *ste_ctx,
 				      struct mlx5dr_ste_build *sb,
 				      struct mlx5dr_match_param *mask,
@@ -545,7 +548,9 @@ struct mlx5dr_match_spec {
 	 */
 	u32 tcp_dport:16;
 
-	u32 reserved_auto1:24;
+	u32 reserved_auto1:16;
+	u32 ipv4_ihl:4;
+	u32 reserved_auto2:4;
 	u32 ttl_hoplimit:8;
 
 	/* UDP source port.;tcp and udp sport/dport are mutually exclusive */
@@ -661,7 +666,8 @@ struct mlx5dr_match_misc {
 	u32 reserved_auto3:8;
 
 	u32 geneve_vni:24;		/* GENEVE VNI field (outer) */
-	u32 reserved_auto4:7;
+	u32 reserved_auto4:6;
+	u32 geneve_tlv_option_0_exist:1;
 	u32 geneve_oam:1;		/* GENEVE OAM field (outer) */
 
 	u32 reserved_auto5:12;
@@ -762,6 +768,17 @@ struct mlx5dr_match_misc4 {
 	u32 reserved_auto1[8];
 };
 
+struct mlx5dr_match_misc5 {
+	u32 macsec_tag_0;
+	u32 macsec_tag_1;
+	u32 macsec_tag_2;
+	u32 macsec_tag_3;
+	u32 tunnel_header_0;
+	u32 tunnel_header_1;
+	u32 tunnel_header_2;
+	u32 tunnel_header_3;
+};
+
 struct mlx5dr_match_param {
 	struct mlx5dr_match_spec outer;
 	struct mlx5dr_match_misc misc;
@@ -769,11 +786,22 @@ struct mlx5dr_match_param {
 	struct mlx5dr_match_misc2 misc2;
 	struct mlx5dr_match_misc3 misc3;
 	struct mlx5dr_match_misc4 misc4;
+	struct mlx5dr_match_misc5 misc5;
 };
 
 #define DR_MASK_IS_ICMPV4_SET(_misc3) ((_misc3)->icmpv4_type || \
 				       (_misc3)->icmpv4_code || \
 				       (_misc3)->icmpv4_header_data)
+
+#define DR_MASK_IS_SRC_IP_SET(_spec) ((_spec)->src_ip_127_96 || \
+				      (_spec)->src_ip_95_64  || \
+				      (_spec)->src_ip_63_32  || \
+				      (_spec)->src_ip_31_0)
+
+#define DR_MASK_IS_DST_IP_SET(_spec) ((_spec)->dst_ip_127_96 || \
+				      (_spec)->dst_ip_95_64  || \
+				      (_spec)->dst_ip_63_32  || \
+				      (_spec)->dst_ip_31_0)
 
 struct mlx5dr_esw_caps {
 	u64 drop_icm_address_rx;
@@ -825,6 +853,7 @@ struct mlx5dr_cmd_caps {
 	u8 flex_parser_id_gtpu_teid;
 	u8 flex_parser_id_gtpu_dw_2;
 	u8 flex_parser_id_gtpu_first_ext_dw_0;
+	u8 flex_parser_ok_bits_supp;
 	u8 max_ft_level;
 	u16 roce_min_src_udp;
 	u8 sw_format_ver;
@@ -887,6 +916,7 @@ struct mlx5dr_table_rx_tx {
 	struct mlx5dr_ste_htbl *s_anchor;
 	struct mlx5dr_domain_rx_tx *nic_dmn;
 	u64 default_icm_addr;
+	struct list_head nic_matcher_list;
 };
 
 struct mlx5dr_table {
@@ -914,6 +944,9 @@ struct mlx5dr_matcher_rx_tx {
 	u8 num_of_builders_arr[DR_RULE_IPV_MAX][DR_RULE_IPV_MAX];
 	u64 default_icm_addr;
 	struct mlx5dr_table_rx_tx *nic_tbl;
+	u32 prio;
+	struct list_head list_node;
+	u32 rules;
 };
 
 struct mlx5dr_matcher {
@@ -1056,16 +1089,12 @@ int mlx5dr_rule_get_reverse_rule_members(struct mlx5dr_ste **ste_arr,
 struct mlx5dr_icm_chunk {
 	struct mlx5dr_icm_buddy_mem *buddy_mem;
 	struct list_head chunk_list;
-	u32 rkey;
-	u32 num_of_entries;
-	u32 byte_size;
-	u64 icm_addr;
-	u64 mr_addr;
 
 	/* indicates the index of this chunk in the whole memory,
 	 * used for deleting the chunk from the buddy
 	 */
 	unsigned int seg;
+	enum mlx5dr_icm_chunk_size size;
 
 	/* Memory optimisation */
 	struct mlx5dr_ste *ste_arr;
@@ -1095,10 +1124,22 @@ static inline void mlx5dr_domain_unlock(struct mlx5dr_domain *dmn)
 	mlx5dr_domain_nic_unlock(&dmn->info.rx);
 }
 
+int mlx5dr_matcher_add_to_tbl_nic(struct mlx5dr_domain *dmn,
+				  struct mlx5dr_matcher_rx_tx *nic_matcher);
+int mlx5dr_matcher_remove_from_tbl_nic(struct mlx5dr_domain *dmn,
+				       struct mlx5dr_matcher_rx_tx *nic_matcher);
+
 int mlx5dr_matcher_select_builders(struct mlx5dr_matcher *matcher,
 				   struct mlx5dr_matcher_rx_tx *nic_matcher,
 				   enum mlx5dr_ipv outer_ipv,
 				   enum mlx5dr_ipv inner_ipv);
+
+u64 mlx5dr_icm_pool_get_chunk_mr_addr(struct mlx5dr_icm_chunk *chunk);
+u32 mlx5dr_icm_pool_get_chunk_rkey(struct mlx5dr_icm_chunk *chunk);
+u64 mlx5dr_icm_pool_get_chunk_icm_addr(struct mlx5dr_icm_chunk *chunk);
+u32 mlx5dr_icm_pool_get_chunk_num_of_entries(struct mlx5dr_icm_chunk *chunk);
+u32 mlx5dr_icm_pool_get_chunk_byte_size(struct mlx5dr_icm_chunk *chunk);
+u8 *mlx5dr_ste_get_hw_ste(struct mlx5dr_ste *ste);
 
 static inline int
 mlx5dr_icm_pool_dm_type_to_entry_size(enum mlx5dr_icm_type icm_type)
@@ -1132,7 +1173,7 @@ static inline int
 mlx5dr_ste_htbl_increase_threshold(struct mlx5dr_ste_htbl *htbl)
 {
 	int num_of_entries =
-		mlx5dr_icm_pool_chunk_size_to_entries(htbl->chunk_size);
+		mlx5dr_icm_pool_chunk_size_to_entries(htbl->chunk->size);
 
 	/* Threshold is 50%, one is added to table of size 1 */
 	return (num_of_entries + 1) / 2;
@@ -1141,7 +1182,7 @@ mlx5dr_ste_htbl_increase_threshold(struct mlx5dr_ste_htbl *htbl)
 static inline bool
 mlx5dr_ste_htbl_may_grow(struct mlx5dr_ste_htbl *htbl)
 {
-	if (htbl->chunk_size == DR_CHUNK_SIZE_MAX - 1 || !htbl->byte_mask)
+	if (htbl->chunk->size == DR_CHUNK_SIZE_MAX - 1 || !htbl->byte_mask)
 		return false;
 
 	return true;
@@ -1311,7 +1352,7 @@ struct mlx5dr_cq {
 
 struct mlx5dr_mr {
 	struct mlx5_core_dev *mdev;
-	struct mlx5_core_mkey mkey;
+	u32 mkey;
 	dma_addr_t dma_addr;
 	void *addr;
 	size_t size;

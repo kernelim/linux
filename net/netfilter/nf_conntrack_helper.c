@@ -620,6 +620,12 @@ static const struct nf_ct_ext_type helper_extend = {
 	.id	= NF_CT_EXT_HELPER,
 };
 
+void nf_ct_set_auto_assign_helper_warned(struct net *net)
+{
+	net->ct.auto_assign_helper_warned = true;
+}
+EXPORT_SYMBOL_GPL(nf_ct_set_auto_assign_helper_warned);
+
 int nf_conntrack_helper_pernet_init(struct net *net)
 {
 	net->ct.auto_assign_helper_warned = false;

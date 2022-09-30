@@ -528,6 +528,9 @@ static int fib_get_nhs(struct fib_info *fi, struct rtnexthop *rtnh,
 				struct lwtunnel_state *lwtstate;
 				struct nlattr *nla_entype;
 
+				/* RTA_ENCAP_TYPE length checked in
+				 * lwtunnel_valid_encap_type_attr
+				 */
 				nla_entype = nla_find(attrs, attrlen,
 						      RTA_ENCAP_TYPE);
 				if (!nla_entype) {

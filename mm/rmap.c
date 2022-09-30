@@ -1299,7 +1299,28 @@ static void page_remove_anon_compound_rmap(struct page *page)
 
 	__mod_lruvec_page_state(page, NR_ANON_THPS, -thp_nr_pages(page));
 
-	if (TestClearPageDoubleMap(page)) {
+	if (PageDoubleMap(page)) {
+		/*
+		 * To avoid readonly FOLL_LONGTERM pins to lose
+		 * coherency the page_mapcount() isn't allowed to
+		 * jitter from a) 2 b) 1 c) 2 d) 1 if munmap() is
+		 * running in a different process, in parallel with
+		 * GUP on the current process.
+		 *
+		 * Without the page_trans_huge_mapcount_lock such
+		 * jittering could happen and FOLL_LONGTERM could take
+		 * the GUP pin in b) without GUP unsharing with COR,
+		 * and another thread in c) could trigger a spurious
+		 * COW immediately later, causing the readonly long
+		 * term GUP pin to lose coherency.
+		 */
+		page_trans_huge_mapcount_lock(page);
+		/*
+		 * The last hugepmd mapping is gone so there cannot be
+		 * extra pmd splits on this THP.
+		 */
+		if (!TestClearPageDoubleMap(page))
+			BUG();
 		/*
 		 * Subpages can be mapped with PTEs too. Check how many of
 		 * them are still mapped.
@@ -1308,6 +1329,7 @@ static void page_remove_anon_compound_rmap(struct page *page)
 			if (atomic_add_negative(-1, &page[i]._mapcount))
 				nr++;
 		}
+		page_trans_huge_mapcount_unlock(page);
 
 		/*
 		 * Queue the page for deferred split if at least one small

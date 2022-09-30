@@ -72,12 +72,27 @@ struct ipcm_cookie {
 	__be32			addr;
 	int			oif;
 	struct ip_options_rcu	*opt;
-	__u8			tx_flags;
 	__u8			ttl;
 	__s16			tos;
 	char			priority;
 	__u16			gso_size;
 };
+
+static inline void ipcm_init(struct ipcm_cookie *ipcm)
+{
+	*ipcm = (struct ipcm_cookie) { .tos = -1 };
+}
+
+static inline void ipcm_init_sk(struct ipcm_cookie *ipcm,
+				const struct inet_sock *inet)
+{
+	ipcm_init(ipcm);
+
+	ipcm->sockc.mark = inet->sk.sk_mark;
+	ipcm->sockc.tsflags = inet->sk.sk_tsflags;
+	ipcm->oif = inet->sk.sk_bound_dev_if;
+	ipcm->addr = inet->inet_saddr;
+}
 
 #define IPCB(skb) ((struct inet_skb_parm*)((skb)->cb))
 #define PKTINFO_SKB_CB(skb) ((struct in_pktinfo *)((skb)->cb))
@@ -440,19 +455,18 @@ static inline void ip_select_ident_segs(struct net *net, struct sk_buff *skb,
 {
 	struct iphdr *iph = ip_hdr(skb);
 
+	/* We had many attacks based on IPID, use the private
+	 * generator as much as we can.
+	 */
+	if (sk && inet_sk(sk)->inet_daddr) {
+		iph->id = htons(inet_sk(sk)->inet_id);
+		inet_sk(sk)->inet_id += segs;
+		return;
+	}
 	if ((iph->frag_off & htons(IP_DF)) && !skb->ignore_df) {
-		/* This is only to work around buggy Windows95/2000
-		 * VJ compression implementations.  If the ID field
-		 * does not change, they drop every other packet in
-		 * a TCP stream using header compression.
-		 */
-		if (sk && inet_sk(sk)->inet_daddr) {
-			iph->id = htons(inet_sk(sk)->inet_id);
-			inet_sk(sk)->inet_id += segs;
-		} else {
-			iph->id = 0;
-		}
+		iph->id = 0;
 	} else {
+		/* Unfortunately we need the big hammer to get a suitable IPID */
 		__ip_select_ident(net, iph, segs);
 	}
 }

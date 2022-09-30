@@ -55,7 +55,7 @@ static void warn_setuid_and_fcaps_mixed(const char *fname)
 /**
  * cap_capable - Determine whether a task has a particular effective capability
  * @cred: The credentials to use
- * @ns:  The user namespace in which we need the capability
+ * @targ_ns:  The user namespace in which we need the capability
  * @cap: The capability to check for
  * @opts: Bitmask of options defined in include/linux/security.h
  *
@@ -294,7 +294,7 @@ int cap_capset(struct cred *new,
  * affects the security markings on that inode, and if it is, should
  * inode_killpriv() be invoked or the change rejected.
  *
- * Returns 1 if security.capability has a value, meaning inode_killpriv()
+ * Return: 1 if security.capability has a value, meaning inode_killpriv()
  * is required, 0 otherwise, meaning inode_killpriv() is not required.
  */
 int cap_inode_need_killpriv(struct dentry *dentry)
@@ -312,7 +312,7 @@ int cap_inode_need_killpriv(struct dentry *dentry)
  *
  * Erase the privilege-enhancing security markings on an inode.
  *
- * Returns 0 if successful, -ve on error.
+ * Return: 0 if successful, -ve on error.
  */
 int cap_inode_killpriv(struct dentry *dentry)
 {
@@ -396,7 +396,7 @@ int cap_inode_getsecurity(struct inode *inode, const char *name, void **buffer,
 				 &tmpbuf, size, GFP_NOFS);
 	dput(dentry);
 
-	if (ret < 0)
+	if (ret < 0 || !tmpbuf)
 		return ret;
 
 	fs_ns = inode->i_sb->s_user_ns;
@@ -495,7 +495,7 @@ static bool validheader(size_t size, const struct vfs_cap_data *cap)
  * User requested a write of security.capability.  If needed, update the
  * xattr to change from v2 to v3, or to fixup the v3 rootid.
  *
- * If all is ok, we return the new size, on error return < 0.
+ * Return: On success, return the new size; on error, return < 0.
  */
 int cap_convert_nscap(struct dentry *dentry, const void **ivalue, size_t size)
 {
@@ -828,7 +828,9 @@ static inline bool nonroot_raised_pE(struct cred *new, const struct cred *old,
  *
  * Set up the proposed credentials for a new execution context being
  * constructed by execve().  The proposed creds in @bprm->cred is altered,
- * which won't take effect immediately.  Returns 0 if successful, -ve on error.
+ * which won't take effect immediately.
+ *
+ * Return: 0 if successful, -ve on error.
  */
 int cap_bprm_repopulate_creds(struct linux_binprm *bprm)
 {
@@ -1055,7 +1057,9 @@ static inline void cap_emulate_setxuid(struct cred *new, const struct cred *old)
  * @flags: Indications of what has changed
  *
  * Fix up the results of setuid() call before the credential changes are
- * actually applied, returning 0 to grant the changes, -ve to deny them.
+ * actually applied.
+ *
+ * Return: 0 to grant the changes, -ve to deny them.
  */
 int cap_task_fix_setuid(struct cred *new, const struct cred *old, int flags)
 {
@@ -1125,7 +1129,9 @@ static int cap_safe_nice(struct task_struct *p)
  * @p: The task to affect
  *
  * Detemine if the requested scheduler policy change is permitted for the
- * specified task, returning 0 if permission is granted, -ve if denied.
+ * specified task.
+ *
+ * Return: 0 if permission is granted, -ve if denied.
  */
 int cap_task_setscheduler(struct task_struct *p)
 {
@@ -1133,12 +1139,14 @@ int cap_task_setscheduler(struct task_struct *p)
 }
 
 /**
- * cap_task_ioprio - Detemine if I/O priority change is permitted
+ * cap_task_setioprio - Detemine if I/O priority change is permitted
  * @p: The task to affect
  * @ioprio: The I/O priority to set
  *
  * Detemine if the requested I/O priority change is permitted for the specified
- * task, returning 0 if permission is granted, -ve if denied.
+ * task.
+ *
+ * Return: 0 if permission is granted, -ve if denied.
  */
 int cap_task_setioprio(struct task_struct *p, int ioprio)
 {
@@ -1146,12 +1154,14 @@ int cap_task_setioprio(struct task_struct *p, int ioprio)
 }
 
 /**
- * cap_task_ioprio - Detemine if task priority change is permitted
+ * cap_task_setnice - Detemine if task priority change is permitted
  * @p: The task to affect
  * @nice: The nice value to set
  *
  * Detemine if the requested task priority change is permitted for the
- * specified task, returning 0 if permission is granted, -ve if denied.
+ * specified task.
+ *
+ * Return: 0 if permission is granted, -ve if denied.
  */
 int cap_task_setnice(struct task_struct *p, int nice)
 {
@@ -1181,12 +1191,15 @@ static int cap_prctl_drop(unsigned long cap)
 /**
  * cap_task_prctl - Implement process control functions for this security module
  * @option: The process control function requested
- * @arg2, @arg3, @arg4, @arg5: The argument data for this function
+ * @arg2: The argument data for this function
+ * @arg3: The argument data for this function
+ * @arg4: The argument data for this function
+ * @arg5: The argument data for this function
  *
  * Allow process control functions (sys_prctl()) to alter capabilities; may
  * also deny access to other functions not otherwise implemented here.
  *
- * Returns 0 or +ve on success, -ENOSYS if this function is not implemented
+ * Return: 0 or +ve on success, -ENOSYS if this function is not implemented
  * here, other -ve on error.  If -ENOSYS is returned, sys_prctl() and other LSM
  * modules will consider performing the function.
  */
@@ -1321,7 +1334,9 @@ int cap_task_prctl(int option, unsigned long arg2, unsigned long arg3,
  * @pages: The size of the mapping
  *
  * Determine whether the allocation of a new virtual mapping by the current
- * task is permitted, returning 1 if permission is granted, 0 if not.
+ * task is permitted.
+ *
+ * Return: 1 if permission is granted, 0 if not.
  */
 int cap_vm_enough_memory(struct mm_struct *mm, long pages)
 {
@@ -1334,14 +1349,15 @@ int cap_vm_enough_memory(struct mm_struct *mm, long pages)
 	return cap_sys_admin;
 }
 
-/*
+/**
  * cap_mmap_addr - check if able to map given addr
  * @addr: address attempting to be mapped
  *
  * If the process is attempting to map memory below dac_mmap_min_addr they need
  * CAP_SYS_RAWIO.  The other parameters to this function are unused by the
- * capability security module.  Returns 0 if this mapping should be allowed
- * -EPERM if not.
+ * capability security module.
+ *
+ * Return: 0 if this mapping should be allowed or -EPERM if not.
  */
 int cap_mmap_addr(unsigned long addr)
 {

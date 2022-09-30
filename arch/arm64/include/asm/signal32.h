@@ -16,7 +16,6 @@
 #ifndef __ASM_SIGNAL32_H
 #define __ASM_SIGNAL32_H
 
-#ifdef __KERNEL__
 #ifdef CONFIG_COMPAT
 #include <linux/compat.h>
 
@@ -90,5 +89,4 @@ static inline void compat_setup_restart_syscall(struct pt_regs *regs)
 {
 }
 #endif /* CONFIG_COMPAT */
-#endif /* __KERNEL__ */
 #endif /* __ASM_SIGNAL32_H */

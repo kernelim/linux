@@ -407,7 +407,7 @@ struct sock {
 #ifdef CONFIG_XFRM
 	struct xfrm_policy __rcu *sk_policy[2];
 #endif
-	struct dst_entry	*sk_rx_dst;
+	struct dst_entry RH_KABI_ADD_MODIFIER(__rcu) *sk_rx_dst;
 	struct dst_entry __rcu	*sk_dst_cache;
 	atomic_t		sk_omem_alloc;
 	int			sk_sndbuf;
@@ -496,7 +496,16 @@ struct sock {
 #ifdef CONFIG_SECURITY
 	void			*sk_security;
 #endif
-	struct sock_cgroup_data	sk_cgrp_data;
+	/*
+	 * RH_KABI: The old sock_cgroup_data is 8 bytes, while the new one
+	 * is 16 bytes. Since sk_cgrp_data is only to be used internally
+	 * by the cgroup subsystem and should not be used by 3rd party
+	 * kernel modules, we are relocating the new sk_cgrp_data down
+	 * to the RH_KABI_RESERVE area while keeping its old location
+	 * with fixed size hole of 8 bytes.
+	 */
+	RH_KABI_BROKEN_REPLACE( struct sock_cgroup_data	sk_cgrp_data,
+				u64 sk_cgrp_data_hole)
 	struct mem_cgroup	*sk_memcg;
 	void			(*sk_state_change)(struct sock *sk);
 	void			(*sk_data_ready)(struct sock *sk);
@@ -518,8 +527,7 @@ struct sock {
 	RH_KABI_USE_SPLIT(3, u8			sk_prefer_busy_poll,
 			     u16		sk_busy_poll_budget)
 	RH_KABI_USE(4, spinlock_t		sk_peer_lock)
-	RH_KABI_RESERVE(5)
-	RH_KABI_RESERVE(6)
+	RH_KABI_USE(5, 6, struct sock_cgroup_data sk_cgrp_data)
 	RH_KABI_RESERVE(7)
 	RH_KABI_RESERVE(8)
 	RH_KABI_RESERVE(9)
@@ -1759,6 +1767,12 @@ struct sockcm_cookie {
 	u16 tsflags;
 };
 
+static inline void sockcm_init(struct sockcm_cookie *sockc,
+			       const struct sock *sk)
+{
+	*sockc = (struct sockcm_cookie) { .tsflags = sk->sk_tsflags };
+}
+
 int __sock_cmsg_send(struct sock *sk, struct msghdr *msg, struct cmsghdr *cmsg,
 		     struct sockcm_cookie *sockc);
 int sock_cmsg_send(struct sock *sk, struct msghdr *msg,
@@ -1968,10 +1982,13 @@ static inline void sk_set_txhash(struct sock *sk)
 	sk->sk_txhash = net_tx_rndhash();
 }
 
-static inline void sk_rethink_txhash(struct sock *sk)
+static inline bool sk_rethink_txhash(struct sock *sk)
 {
-	if (sk->sk_txhash)
+	if (sk->sk_txhash) {
 		sk_set_txhash(sk);
+		return true;
+	}
+	return false;
 }
 
 static inline struct dst_entry *
@@ -1994,11 +2011,9 @@ sk_dst_get(struct sock *sk)
 	return dst;
 }
 
-static inline void dst_negative_advice(struct sock *sk)
+static inline void __dst_negative_advice(struct sock *sk)
 {
 	struct dst_entry *ndst, *dst = __sk_dst_get(sk);
-
-	sk_rethink_txhash(sk);
 
 	if (dst && dst->ops->negative_advice) {
 		ndst = dst->ops->negative_advice(dst);
@@ -2009,6 +2024,12 @@ static inline void dst_negative_advice(struct sock *sk)
 			sk->sk_dst_pending_confirm = 0;
 		}
 	}
+}
+
+static inline void dst_negative_advice(struct sock *sk)
+{
+	sk_rethink_txhash(sk);
+	__dst_negative_advice(sk);
 }
 
 static inline void

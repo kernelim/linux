@@ -16,7 +16,6 @@
 #include <linux/videodev2.h>
 #include <linux/vmalloc.h>
 #include <linux/wait.h>
-#include <linux/version.h>
 #include <asm/unaligned.h>
 
 #include <media/v4l2-common.h>
@@ -1700,32 +1699,6 @@ static int uvc_scan_chain_forward(struct uvc_video_chain *chain,
 				return -EINVAL;
 			}
 
-			if (UVC_ENTITY_IS_OTERM(entity)) {
-				uvc_dbg(chain->dev, DESCR,
-					"Unsupported connection between output terminals %u and %u\n",
-					entity->id, forward->id);
-				break;
-			}
-
-			list_add_tail(&forward->chain, &chain->entities);
-			if (!found)
-				uvc_dbg_cont(PROBE, " (->");
-
-			uvc_dbg_cont(PROBE, " XU %d", forward->id);
-			found = 1;
-			break;
-
-		case UVC_OTT_VENDOR_SPECIFIC:
-		case UVC_OTT_DISPLAY:
-		case UVC_OTT_MEDIA_TRANSPORT_OUTPUT:
-		case UVC_TT_STREAMING:
-			if (UVC_ENTITY_IS_ITERM(forward)) {
-				uvc_dbg(chain->dev, DESCR,
-					"Unsupported input terminal %u\n",
-					forward->id);
-				return -EINVAL;
-			}
-
 			/*
 			 * Some devices reference an output terminal as the
 			 * source of extension units. This is incorrect, as
@@ -1749,6 +1722,32 @@ static int uvc_scan_chain_forward(struct uvc_video_chain *chain,
 				}
 
 				forward->baSourceID[0] = source->id;
+			}
+
+			list_add_tail(&forward->chain, &chain->entities);
+			if (!found)
+				uvc_dbg_cont(PROBE, " (->");
+
+			uvc_dbg_cont(PROBE, " XU %d", forward->id);
+			found = 1;
+			break;
+
+		case UVC_OTT_VENDOR_SPECIFIC:
+		case UVC_OTT_DISPLAY:
+		case UVC_OTT_MEDIA_TRANSPORT_OUTPUT:
+		case UVC_TT_STREAMING:
+			if (UVC_ENTITY_IS_ITERM(forward)) {
+				uvc_dbg(chain->dev, DESCR,
+					"Unsupported input terminal %u\n",
+					forward->id);
+				return -EINVAL;
+			}
+
+			if (UVC_ENTITY_IS_OTERM(entity)) {
+				uvc_dbg(chain->dev, DESCR,
+					"Unsupported connection between output terminals %u and %u\n",
+					entity->id, forward->id);
+				break;
 			}
 
 			list_add_tail(&forward->chain, &chain->entities);

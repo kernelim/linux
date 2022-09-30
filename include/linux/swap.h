@@ -358,6 +358,7 @@ extern unsigned long mem_cgroup_shrink_node(struct mem_cgroup *mem,
 						unsigned long *nr_scanned);
 extern unsigned long shrink_all_memory(unsigned long nr_pages);
 extern int vm_swappiness;
+extern int force_cgroup_v2_swappiness __read_mostly;
 extern int remove_mapping(struct address_space *mapping, struct page *page);
 extern unsigned long vm_total_pages;
 
@@ -470,6 +471,7 @@ extern int __swp_swapcount(swp_entry_t entry);
 extern int swp_swapcount(swp_entry_t entry);
 extern struct swap_info_struct *page_swap_info(struct page *);
 extern struct swap_info_struct *swp_swap_info(swp_entry_t entry);
+extern bool can_read_pin_swap_page(struct page *);
 extern bool reuse_swap_page(struct page *, int *);
 extern int try_to_free_swap(struct page *);
 struct backing_dev_info;
@@ -612,6 +614,13 @@ static inline int swp_swapcount(swp_entry_t entry)
 	return 0;
 }
 
+static inline bool can_read_pin_swap_page(struct page *page)
+{
+	if (unlikely(PageKsm(page)))
+		return true;
+	return page_trans_huge_mapcount(page, NULL) <= 1;
+}
+
 #define reuse_swap_page(page, total_map_swapcount) \
 	(page_trans_huge_mapcount(page, total_map_swapcount) == 1)
 
@@ -641,6 +650,10 @@ static inline int split_swap_cluster(swp_entry_t entry)
 #ifdef CONFIG_MEMCG
 static inline int mem_cgroup_swappiness(struct mem_cgroup *memcg)
 {
+	/* RHEL-Only deprecate per-cg swappiness for v1 */
+	if (force_cgroup_v2_swappiness)
+		return vm_swappiness;
+
 	/* Cgroup2 doesn't have per-cgroup swappiness */
 	if (cgroup_subsys_on_dfl(memory_cgrp_subsys))
 		return vm_swappiness;

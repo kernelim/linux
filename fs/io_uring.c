@@ -2990,13 +2990,15 @@ static int io_openat_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 static int io_openat(struct io_kiocb *req, bool force_nonblock)
 {
 	struct open_flags op;
+	struct open_how how;
 	struct file *file;
 	int ret;
 
 	if (force_nonblock)
 		return -EAGAIN;
 
-	ret = build_open_flags(req->open.flags, req->open.mode, &op);
+	how = build_open_how(req->open.flags, req->open.mode);
+	ret = build_open_flags(&how, &op);
 	if (ret)
 		goto err;
 
@@ -3252,7 +3254,7 @@ static int io_madvise(struct io_kiocb *req, bool force_nonblock)
 	if (force_nonblock)
 		return -EAGAIN;
 
-	ret = do_madvise(ma->addr, ma->len, ma->advice);
+	ret = do_madvise(current->mm, ma->addr, ma->len, ma->advice);
 	if (ret < 0)
 		req_set_fail_links(req);
 	io_cqring_add_event(req, ret);

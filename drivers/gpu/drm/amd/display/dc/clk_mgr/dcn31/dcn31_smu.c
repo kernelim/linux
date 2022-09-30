@@ -95,9 +95,9 @@ static uint32_t dcn31_smu_wait_for_response(struct clk_mgr_internal *clk_mgr, un
 	return res_val;
 }
 
-int dcn31_smu_send_msg_with_param(
-		struct clk_mgr_internal *clk_mgr,
-		unsigned int msg_id, unsigned int param)
+static int dcn31_smu_send_msg_with_param(struct clk_mgr_internal *clk_mgr,
+					 unsigned int msg_id,
+					 unsigned int param)
 {
 	uint32_t result;
 
@@ -120,7 +120,11 @@ int dcn31_smu_send_msg_with_param(
 	result = dcn31_smu_wait_for_response(clk_mgr, 10, 200000);
 
 	if (result == VBIOSSMC_Result_Failed) {
-		ASSERT(0);
+		if (msg_id == VBIOSSMC_MSG_TransferTableDram2Smu &&
+		    param == TABLE_WATERMARKS)
+			DC_LOG_WARNING("Watermarks table not configured properly by SMU");
+		else
+			ASSERT(0);
 		REG_WRITE(MP1_SMN_C2PMSG_91, VBIOSSMC_Result_OK);
 		return -1;
 	}
@@ -153,7 +157,7 @@ int dcn31_smu_set_dispclk(struct clk_mgr_internal *clk_mgr, int requested_dispcl
 	actual_dispclk_set_mhz = dcn31_smu_send_msg_with_param(
 			clk_mgr,
 			VBIOSSMC_MSG_SetDispclkFreq,
-			(requested_dispclk_khz + 999) / 1000);
+			khz_to_mhz_ceil(requested_dispclk_khz));
 
 	return actual_dispclk_set_mhz * 1000;
 }
@@ -168,7 +172,7 @@ int dcn31_smu_set_dprefclk(struct clk_mgr_internal *clk_mgr)
 	actual_dprefclk_set_mhz = dcn31_smu_send_msg_with_param(
 			clk_mgr,
 			VBIOSSMC_MSG_SetDprefclkFreq,
-			(clk_mgr->base.dprefclk_khz + 999) / 1000);
+			khz_to_mhz_ceil(clk_mgr->base.dprefclk_khz));
 
 	/* TODO: add code for programing DP DTO, currently this is down by command table */
 
@@ -188,7 +192,7 @@ int dcn31_smu_set_hard_min_dcfclk(struct clk_mgr_internal *clk_mgr, int requeste
 	actual_dcfclk_set_mhz = dcn31_smu_send_msg_with_param(
 			clk_mgr,
 			VBIOSSMC_MSG_SetHardMinDcfclkByFreq,
-			(requested_dcfclk_khz + 999) / 1000);
+			khz_to_mhz_ceil(requested_dcfclk_khz));
 
 	return actual_dcfclk_set_mhz * 1000;
 }
@@ -206,7 +210,7 @@ int dcn31_smu_set_min_deep_sleep_dcfclk(struct clk_mgr_internal *clk_mgr, int re
 	actual_min_ds_dcfclk_mhz = dcn31_smu_send_msg_with_param(
 			clk_mgr,
 			VBIOSSMC_MSG_SetMinDeepSleepDcfclk,
-			(requested_min_ds_dcfclk_khz + 999) / 1000);
+			khz_to_mhz_ceil(requested_min_ds_dcfclk_khz));
 
 	return actual_min_ds_dcfclk_mhz * 1000;
 }
@@ -221,7 +225,7 @@ int dcn31_smu_set_dppclk(struct clk_mgr_internal *clk_mgr, int requested_dpp_khz
 	actual_dppclk_set_mhz = dcn31_smu_send_msg_with_param(
 			clk_mgr,
 			VBIOSSMC_MSG_SetDppclkFreq,
-			(requested_dpp_khz + 999) / 1000);
+			khz_to_mhz_ceil(requested_dpp_khz));
 
 	return actual_dppclk_set_mhz * 1000;
 }
@@ -306,23 +310,32 @@ void dcn31_smu_transfer_wm_table_dram_2_smu(struct clk_mgr_internal *clk_mgr)
 			VBIOSSMC_MSG_TransferTableDram2Smu, TABLE_WATERMARKS);
 }
 
-void dcn31_smu_set_Z9_support(struct clk_mgr_internal *clk_mgr, bool support)
+void dcn31_smu_set_zstate_support(struct clk_mgr_internal *clk_mgr, enum dcn_zstate_support_state support)
 {
-	//TODO: Work with smu team to define optimization options.
-	unsigned int msg_id;
+	unsigned int msg_id, param;
 
 	if (!clk_mgr->smu_present)
 		return;
 
-	if (support)
-		msg_id = VBIOSSMC_MSG_AllowZstatesEntry;
+	if (!clk_mgr->base.ctx->dc->debug.enable_z9_disable_interface &&
+			(support == DCN_ZSTATE_SUPPORT_ALLOW_Z10_ONLY))
+		support = DCN_ZSTATE_SUPPORT_DISALLOW;
+
+
+	if (support == DCN_ZSTATE_SUPPORT_ALLOW_Z10_ONLY)
+		param = 1;
 	else
+		param = 0;
+
+	if (support == DCN_ZSTATE_SUPPORT_DISALLOW)
 		msg_id = VBIOSSMC_MSG_DisallowZstatesEntry;
+	else
+		msg_id = VBIOSSMC_MSG_AllowZstatesEntry;
 
 	dcn31_smu_send_msg_with_param(
 		clk_mgr,
 		msg_id,
-		0);
+		param);
 
 }
 

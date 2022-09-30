@@ -21,6 +21,7 @@
 
 #ifndef __ASSEMBLY__
 
+#include <linux/bitfield.h>
 #include <linux/mm_types.h>
 #include <linux/sched.h>
 #include <asm/cputype.h>
@@ -135,6 +136,54 @@ static inline unsigned long get_trans_granule(void)
 	((((pages) >> (5 * (scale) + 1)) & TLBI_RANGE_MASK) - 1)
 
 /*
+ * Level-based TLBI operations.
+ *
+ * When ARMv8.4-TTL exists, TLBI operations take an additional hint for
+ * the level at which the invalidation must take place. If the level is
+ * wrong, no invalidation may take place. In the case where the level
+ * cannot be easily determined, a 0 value for the level parameter will
+ * perform a non-hinted invalidation.
+ *
+ * For Stage-2 invalidation, use the level values provided to that effect
+ * in asm/stage2_pgtable.h.
+ */
+#define TLBI_TTL_MASK		GENMASK_ULL(47, 44)
+#define TLBI_TTL_TG_4K		1
+#define TLBI_TTL_TG_16K		2
+#define TLBI_TTL_TG_64K		3
+
+#define __tlbi_level(op, addr, level) do {				\
+	u64 arg = addr;							\
+									\
+	if (cpus_have_const_cap(ARM64_HAS_ARMv8_4_TTL) &&		\
+	    level) {							\
+		u64 ttl = level & 3;					\
+									\
+		switch (PAGE_SIZE) {					\
+		case SZ_4K:						\
+			ttl |= TLBI_TTL_TG_4K << 2;			\
+			break;						\
+		case SZ_16K:						\
+			ttl |= TLBI_TTL_TG_16K << 2;			\
+			break;						\
+		case SZ_64K:						\
+			ttl |= TLBI_TTL_TG_64K << 2;			\
+			break;						\
+		}							\
+									\
+		arg &= ~TLBI_TTL_MASK;					\
+		arg |= FIELD_PREP(TLBI_TTL_MASK, ttl);			\
+	}								\
+									\
+	__tlbi(op, arg);						\
+} while(0)
+
+#define __tlbi_user_level(op, arg, level) do {				\
+	if (arm64_kernel_unmapped_at_el0())				\
+		__tlbi_level(op, (arg | USER_ASID_FLAG), level);	\
+} while (0)
+
+/*
  *	TLB Invalidation
  *	================
  *
@@ -240,7 +289,7 @@ extern enum tlb_flush_types tlb_flush_check(struct mm_struct *mm,
 
 static inline void flush_tlb_mm(struct mm_struct *mm)
 {
-	unsigned long asid = __TLBI_VADDR(0, ASID(mm));
+	unsigned long asid;
 	enum tlb_flush_types flush;
 
 	flush = tlb_flush_check(mm, get_cpu());
@@ -248,6 +297,7 @@ static inline void flush_tlb_mm(struct mm_struct *mm)
 	case TLB_FLUSH_LOCAL:
 
 		dsb(nshst);
+		asid = __TLBI_VADDR(0, ASID(mm));
 		__tlbi(aside1, asid);
 		__tlbi_user(aside1, asid);
 		dsb(nsh);
@@ -260,6 +310,7 @@ static inline void flush_tlb_mm(struct mm_struct *mm)
 		put_cpu();
 
 		dsb(ishst);
+		asid = __TLBI_VADDR(0, ASID(mm));
 		__tlbi(aside1is, asid);
 		__tlbi_user(aside1is, asid);
 		dsb(ish);
@@ -271,9 +322,10 @@ static inline void flush_tlb_mm(struct mm_struct *mm)
 static inline void flush_tlb_page_nosync(struct vm_area_struct *vma,
 					 unsigned long uaddr)
 {
-	unsigned long addr = __TLBI_VADDR(uaddr, ASID(vma->vm_mm));
+	unsigned long addr;
 
 	dsb(ishst);
+	addr = __TLBI_VADDR(uaddr, ASID(vma->vm_mm));
 	__tlbi(vale1is, addr);
 	__tlbi_user(vale1is, addr);
 }
@@ -282,7 +334,7 @@ static inline void flush_tlb_page(struct vm_area_struct *vma,
 				  unsigned long uaddr)
 {
 	struct mm_struct *mm = vma->vm_mm;
-	unsigned long addr = __TLBI_VADDR(uaddr, ASID(mm));
+	unsigned long addr;
 	enum tlb_flush_types flush;
 
 	flush = tlb_flush_check(mm, get_cpu());
@@ -290,6 +342,7 @@ static inline void flush_tlb_page(struct vm_area_struct *vma,
 	case TLB_FLUSH_LOCAL:
 
 		dsb(nshst);
+		addr = __TLBI_VADDR(uaddr, ASID(mm));
 		__tlbi(vale1, addr);
 		__tlbi_user(vale1, addr);
 		dsb(nsh);
@@ -302,6 +355,7 @@ static inline void flush_tlb_page(struct vm_area_struct *vma,
 		put_cpu();
 
 		dsb(ishst);
+		addr = __TLBI_VADDR(uaddr, ASID(mm));
 		__tlbi(vale1is, addr);
 		__tlbi_user(vale1is, addr);
 		dsb(ish);
@@ -318,14 +372,13 @@ static inline void flush_tlb_page(struct vm_area_struct *vma,
 
 static inline void __flush_tlb_range(struct vm_area_struct *vma,
 				     unsigned long start, unsigned long end,
-				     unsigned long stride, bool last_level)
+				     unsigned long stride, bool last_level,
+				     int tlb_level)
 {
 	struct mm_struct *mm = vma->vm_mm;
 	int num = 0;
 	int scale = 0;
-	unsigned long asid = ASID(mm);
-	unsigned long addr;
-	unsigned long pages;
+	unsigned long asid, addr, pages;
 	enum tlb_flush_types flush;
 
 	start = round_down(start, stride);
@@ -350,17 +403,17 @@ static inline void __flush_tlb_range(struct vm_area_struct *vma,
 	case TLB_FLUSH_LOCAL:
 		stride >>= PAGE_SHIFT;
 
+		dsb(nshst);
+		asid = ASID(mm);
 		start = __TLBI_VADDR(start, asid);
 		end = __TLBI_VADDR(end, asid);
-
-		dsb(nshst);
 		for (addr = start; addr < end; addr += stride) {
 			if (last_level) {
-				__tlbi(vale1, addr);
-				__tlbi_user(vale1, addr);
+				__tlbi_level(vale1, addr, tlb_level);
+				__tlbi_user_level(vale1, addr, tlb_level);
 			} else {
-				__tlbi(vae1, addr);
-				__tlbi_user(vae1, addr);
+				__tlbi_level(vae1, addr, tlb_level);
+				__tlbi_user_level(vae1, addr, tlb_level);
 			}
 		}
 		dsb(nsh);
@@ -373,16 +426,17 @@ static inline void __flush_tlb_range(struct vm_area_struct *vma,
 		put_cpu();
 
 		dsb(ishst);
+		asid = ASID(mm);
 		while (pages > 0) {
 			if (!system_supports_tlb_range() ||
 			    pages % 2 == 1) {
 			        addr = __TLBI_VADDR(start, asid);
 				if (last_level) {
-					__tlbi(vale1is, addr);
-					__tlbi_user(vale1is, addr);
+					__tlbi_level(vale1is, addr, tlb_level);
+					__tlbi_user_level(vale1is, addr, tlb_level);
 				} else {
-					__tlbi(vae1is, addr);
-					__tlbi_user(vae1is, addr);
+					__tlbi_level(vae1is, addr, tlb_level);
+					__tlbi_user_level(vae1is, addr, tlb_level);
 				}
 				start += stride;
 				pages -= stride >> PAGE_SHIFT;
@@ -392,8 +446,8 @@ static inline void __flush_tlb_range(struct vm_area_struct *vma,
 					addr = __TLBI_VADDR_RANGE(start, asid, scale,
 								  num, 0);
 					if (last_level) {
-						 __tlbi(rvale1is, addr);
-						 __tlbi_user(rvale1is, addr);
+						__tlbi(rvale1is, addr);
+						__tlbi_user(rvale1is, addr);
 					} else {
 						__tlbi(rvae1is, addr);
 						__tlbi_user(rvae1is, addr);
@@ -415,8 +469,9 @@ static inline void flush_tlb_range(struct vm_area_struct *vma,
 	/*
 	 * We cannot use leaf-only invalidation here, since we may be invalidating
 	 * table entries as part of collapsing hugepages or moving page tables.
+	 * Set the tlb_level to 0 because we can not get enough information here.
 	 */
-	__flush_tlb_range(vma, start, end, PAGE_SIZE, false);
+	__flush_tlb_range(vma, start, end, PAGE_SIZE, false, 0);
 }
 
 static inline void flush_tlb_kernel_range(unsigned long start, unsigned long end)
@@ -460,6 +515,7 @@ static inline void __flush_tlb_kernel_pgtable(unsigned long kaddr)
 	dsb(ishst);
 	__tlbi(vaae1is, addr);
 	dsb(ish);
+	isb();
 }
 #endif
 

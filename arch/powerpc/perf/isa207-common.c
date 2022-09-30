@@ -112,7 +112,7 @@ static void mmcra_sdar_mode(u64 event, unsigned long *mmcra)
 		*mmcra |= MMCRA_SDAR_MODE_TLB;
 }
 
-static u64 p10_thresh_cmp_val(u64 value)
+static int p10_thresh_cmp_val(u64 value)
 {
 	int exp = 0;
 	u64 result = value;
@@ -143,7 +143,7 @@ static u64 p10_thresh_cmp_val(u64 value)
 		 * exponent is also zero.
 		 */
 		if (!(value & 0xC0) && exp)
-			result = 0;
+			result = -1;
 		else
 			result = (exp << 8) | value;
 	}
@@ -191,7 +191,7 @@ static bool is_thresh_cmp_valid(u64 event)
 	unsigned int cmp, exp;
 
 	if (cpu_has_feature(CPU_FTR_ARCH_31))
-		return p10_thresh_cmp_val(event) != 0;
+		return p10_thresh_cmp_val(event) >= 0;
 
 	/*
 	 * Check the mantissa upper two bits are not zero, unless the
@@ -224,36 +224,82 @@ static inline u64 isa207_find_source(u64 idx, u32 sub_idx)
 		/* Nothing to do */
 		break;
 	case 1:
-		ret = PH(LVL, L1);
+		ret = PH(LVL, L1) | LEVEL(L1) | P(SNOOP, HIT);
 		break;
 	case 2:
-		ret = PH(LVL, L2);
+		ret = PH(LVL, L2) | LEVEL(L2) | P(SNOOP, HIT);
 		break;
 	case 3:
-		ret = PH(LVL, L3);
+		ret = PH(LVL, L3) | LEVEL(L3) | P(SNOOP, HIT);
 		break;
 	case 4:
-		if (sub_idx <= 1)
-			ret = PH(LVL, LOC_RAM);
-		else if (sub_idx > 1 && sub_idx <= 2)
-			ret = PH(LVL, REM_RAM1);
-		else
-			ret = PH(LVL, REM_RAM2);
-		ret |= P(SNOOP, HIT);
+		if (cpu_has_feature(CPU_FTR_ARCH_31)) {
+			ret = P(SNOOP, HIT);
+
+			if (sub_idx == 1)
+				ret |= PH(LVL, LOC_RAM) | LEVEL(RAM);
+			else if (sub_idx == 2 || sub_idx == 3)
+				ret |= P(LVL, HIT) | LEVEL(PMEM);
+			else if (sub_idx == 4)
+				ret |= PH(LVL, REM_RAM1) | REM | LEVEL(RAM) | P(HOPS, 2);
+			else if (sub_idx == 5 || sub_idx == 7)
+				ret |= P(LVL, HIT) | LEVEL(PMEM) | REM;
+			else if (sub_idx == 6)
+				ret |= PH(LVL, REM_RAM2) | REM | LEVEL(RAM) | P(HOPS, 3);
+		} else {
+			if (sub_idx <= 1)
+				ret = PH(LVL, LOC_RAM);
+			else if (sub_idx > 1 && sub_idx <= 2)
+				ret = PH(LVL, REM_RAM1);
+			else
+				ret = PH(LVL, REM_RAM2);
+			ret |= P(SNOOP, HIT);
+		}
 		break;
 	case 5:
-		ret = PH(LVL, REM_CCE1);
-		if ((sub_idx == 0) || (sub_idx == 2) || (sub_idx == 4))
-			ret |= P(SNOOP, HIT);
-		else if ((sub_idx == 1) || (sub_idx == 3) || (sub_idx == 5))
-			ret |= P(SNOOP, HITM);
+		if (cpu_has_feature(CPU_FTR_ARCH_31)) {
+			ret = REM | P(HOPS, 0);
+
+			if (sub_idx == 0 || sub_idx == 4)
+				ret |= PH(LVL, L2) | LEVEL(L2) | P(SNOOP, HIT);
+			else if (sub_idx == 1 || sub_idx == 5)
+				ret |= PH(LVL, L2) | LEVEL(L2) | P(SNOOP, HITM);
+			else if (sub_idx == 2 || sub_idx == 6)
+				ret |= PH(LVL, L3) | LEVEL(L3) | P(SNOOP, HIT);
+			else if (sub_idx == 3 || sub_idx == 7)
+				ret |= PH(LVL, L3) | LEVEL(L3) | P(SNOOP, HITM);
+		} else {
+			if (sub_idx == 0)
+				ret = PH(LVL, L2) | LEVEL(L2) | REM | P(SNOOP, HIT) | P(HOPS, 0);
+			else if (sub_idx == 1)
+				ret = PH(LVL, L2) | LEVEL(L2) | REM | P(SNOOP, HITM) | P(HOPS, 0);
+			else if (sub_idx == 2 || sub_idx == 4)
+				ret = PH(LVL, L3) | LEVEL(L3) | REM | P(SNOOP, HIT) | P(HOPS, 0);
+			else if (sub_idx == 3 || sub_idx == 5)
+				ret = PH(LVL, L3) | LEVEL(L3) | REM | P(SNOOP, HITM) | P(HOPS, 0);
+		}
 		break;
 	case 6:
-		ret = PH(LVL, REM_CCE2);
-		if ((sub_idx == 0) || (sub_idx == 2))
-			ret |= P(SNOOP, HIT);
-		else if ((sub_idx == 1) || (sub_idx == 3))
-			ret |= P(SNOOP, HITM);
+		if (cpu_has_feature(CPU_FTR_ARCH_31)) {
+			if (sub_idx == 0)
+				ret = PH(LVL, REM_CCE1) | LEVEL(ANY_CACHE) | REM |
+					P(SNOOP, HIT) | P(HOPS, 2);
+			else if (sub_idx == 1)
+				ret = PH(LVL, REM_CCE1) | LEVEL(ANY_CACHE) | REM |
+					P(SNOOP, HITM) | P(HOPS, 2);
+			else if (sub_idx == 2)
+				ret = PH(LVL, REM_CCE2) | LEVEL(ANY_CACHE) | REM |
+					P(SNOOP, HIT) | P(HOPS, 3);
+			else if (sub_idx == 3)
+				ret = PH(LVL, REM_CCE2) | LEVEL(ANY_CACHE) | REM |
+					P(SNOOP, HITM) | P(HOPS, 3);
+		} else {
+			ret = PH(LVL, REM_CCE2);
+			if (sub_idx == 0 || sub_idx == 2)
+				ret |= P(SNOOP, HIT);
+			else if (sub_idx == 1 || sub_idx == 3)
+				ret |= P(SNOOP, HITM);
+		}
 		break;
 	case 7:
 		ret = PM(LVL, L1);
@@ -460,7 +506,8 @@ int isa207_get_constraint(u64 event, unsigned long *maskp, unsigned long *valp, 
 			value |= CNST_THRESH_CTL_SEL_VAL(event >> EVENT_THRESH_SHIFT);
 			mask  |= p10_CNST_THRESH_CMP_MASK;
 			value |= p10_CNST_THRESH_CMP_VAL(p10_thresh_cmp_val(event_config1));
-		}
+		} else if (event_is_threshold(event))
+			return -1;
 	} else if (cpu_has_feature(CPU_FTR_ARCH_300))  {
 		if (event_is_threshold(event) && is_thresh_cmp_valid(event)) {
 			mask  |= CNST_THRESH_MASK;

@@ -590,7 +590,7 @@ static inline bool nicvf_xdp_rx(struct nicvf *nic, struct bpf_prog *prog,
 		nicvf_xdp_sq_append_pkt(nic, sq, (u64)xdp.data, dma_addr, len);
 		return true;
 	default:
-		bpf_warn_invalid_xdp_action(action);
+		bpf_warn_invalid_xdp_action(nic->netdev, prog, action);
 		/* fall through */
 	case XDP_ABORTED:
 		trace_xdp_exception(nic->netdev, prog, action);
@@ -1908,10 +1908,6 @@ static int nicvf_config_hwtstamp(struct net_device *netdev, struct ifreq *ifr)
 	if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
 		return -EFAULT;
 
-	/* reserved for future extensions */
-	if (config.flags)
-		return -EINVAL;
-
 	switch (config.tx_type) {
 	case HWTSTAMP_TX_OFF:
 	case HWTSTAMP_TX_ON:
@@ -2098,6 +2094,8 @@ static int nicvf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	int    err, qcount;
 	u16    sdevid;
 	struct cavium_ptp *ptp_clock;
+
+	pci_hw_deprecated(ent, pdev);
 
 	ptp_clock = cavium_ptp_get();
 	if (IS_ERR(ptp_clock)) {

@@ -211,7 +211,11 @@ __xfs_ag_resv_init(
 		ASSERT(0);
 		return -EINVAL;
 	}
-	error = xfs_mod_fdblocks(mp, -(int64_t)hidden_space, true);
+
+	if (XFS_TEST_ERROR(false, mp, XFS_ERRTAG_AG_RESV_FAIL))
+		error = -ENOSPC;
+	else
+		error = xfs_mod_fdblocks(mp, -(int64_t)hidden_space, true);
 	if (error) {
 		trace_xfs_ag_resv_init_error(pag->pag_mount, pag->pag_agno,
 				error, _RET_IP_);
@@ -321,10 +325,22 @@ out:
 		error2 = xfs_alloc_pagf_init(mp, tp, pag->pag_agno, 0);
 		if (error2)
 			return error2;
-		ASSERT(xfs_perag_resv(pag, XFS_AG_RESV_METADATA)->ar_reserved +
-		       xfs_perag_resv(pag, XFS_AG_RESV_RMAPBT)->ar_reserved <=
-		       pag->pagf_freeblks + pag->pagf_flcount);
+
+		/*
+		 * If there isn't enough space in the AG to satisfy the
+		 * reservation, let the caller know that there wasn't enough
+		 * space.  Callers are responsible for deciding what to do
+		 * next, since (in theory) we can stumble along with
+		 * insufficient reservation if data blocks are being freed to
+		 * replenish the AG's free space.
+		 */
+		if (!error &&
+		    xfs_perag_resv(pag, XFS_AG_RESV_METADATA)->ar_reserved +
+		    xfs_perag_resv(pag, XFS_AG_RESV_RMAPBT)->ar_reserved >
+		    pag->pagf_freeblks + pag->pagf_flcount)
+			error = -ENOSPC;
 	}
+
 	return error;
 }
 

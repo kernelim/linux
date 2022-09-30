@@ -626,8 +626,6 @@ static void mpc_rcvd_sweep_resp(struct mpcg_info *mpcginfo)
 		ctcm_clear_busy_do(dev);
 	}
 
-	kfree(mpcginfo);
-
 	return;
 
 }
@@ -1030,7 +1028,7 @@ done:
 	CTCM_PR_DEBUG("exit %s: ch=0x%p id=%s\n", __func__, ch, ch->id);
 }
 
-/**
+/*
  * Unpack a just received skb and hand it over to
  * upper layers.
  * special MPC version of unpack_skb.
@@ -1206,10 +1204,10 @@ static void ctcmpc_unpack_skb(struct channel *ch, struct sk_buff *pskb)
 						CTCM_FUNTAIL, dev->name);
 			priv->stats.rx_dropped++;
 			/* mpcginfo only used for non-data transfers */
-			kfree(mpcginfo);
 			if (do_debug_data)
 				ctcmpc_dump_skb(pskb, -8);
 		}
+		kfree(mpcginfo);
 	}
 done:
 
@@ -1225,7 +1223,7 @@ done:
 			__func__, dev->name, ch, ch->id);
 }
 
-/**
+/*
  * tasklet helper for mpc's skb unpacking.
  *
  * ch		The channel to work on.
@@ -1334,7 +1332,7 @@ struct mpc_group *ctcmpc_init_mpc_group(struct ctcm_priv *priv)
  * CTCM_PROTO_MPC only
  */
 
-/**
+/*
  * NOP action for statemachines
  */
 static void mpc_action_nop(fsm_instance *fi, int event, void *arg)
@@ -1440,7 +1438,7 @@ static void mpc_action_go_inop(fsm_instance *fi, int event, void *arg)
 	}
 }
 
-/**
+/*
  * Handle mpc group  action timeout.
  * MPC Group Station FSM action
  * CTCM_PROTO_MPC only
@@ -1993,7 +1991,6 @@ static void mpc_action_rcvd_xid0(fsm_instance *fsm, int event, void *arg)
 		}
 		break;
 	}
-	kfree(mpcginfo);
 
 	CTCM_PR_DEBUG("ctcmpc:%s() %s xid2:%i xid7:%i xidt_p2:%i \n",
 		__func__, ch->id, grp->outstanding_xid2,
@@ -2054,7 +2051,6 @@ static void mpc_action_rcvd_xid7(fsm_instance *fsm, int event, void *arg)
 		mpc_validate_xid(mpcginfo);
 		break;
 	}
-	kfree(mpcginfo);
 	return;
 }
 

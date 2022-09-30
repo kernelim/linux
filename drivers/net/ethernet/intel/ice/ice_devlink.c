@@ -607,7 +607,7 @@ struct ice_pf *ice_allocate_pf(struct device *dev)
 {
 	struct devlink *devlink;
 
-	devlink = devlink_alloc(&ice_devlink_ops, sizeof(struct ice_pf));
+	devlink = devlink_alloc(&ice_devlink_ops, sizeof(struct ice_pf), dev);
 	if (!devlink)
 		return NULL;
 
@@ -629,9 +629,9 @@ struct ice_pf *ice_allocate_pf(struct device *dev)
 void ice_devlink_register(struct ice_pf *pf)
 {
 	struct devlink *devlink = priv_to_devlink(pf);
-	struct device *dev = ice_pf_to_dev(pf);
-	devlink_register(devlink, dev);
-	devlink_reload_enable(devlink);
+
+	devlink_set_features(devlink, DEVLINK_F_RELOAD);
+	devlink_register(devlink);
 }
 
 /**
@@ -643,7 +643,6 @@ void ice_devlink_register(struct ice_pf *pf)
 void ice_devlink_unregister(struct ice_pf *pf)
 {
 	struct devlink *devlink = priv_to_devlink(pf);
-	devlink_reload_disable(devlink);
 	devlink_unregister(devlink);
 }
 
@@ -668,15 +667,11 @@ int ice_devlink_register_params(struct ice_pf *pf)
 					   DEVLINK_PARAM_GENERIC_ID_ENABLE_ROCE,
 					   value);
 
-	devlink_params_publish(devlink);
-
 	return 0;
 }
 
 void ice_devlink_unregister_params(struct ice_pf *pf)
 {
-	devlink_params_unpublish(priv_to_devlink(pf));
-
 	devlink_params_unregister(priv_to_devlink(pf), ice_devlink_params,
 				  ARRAY_SIZE(ice_devlink_params));
 }
