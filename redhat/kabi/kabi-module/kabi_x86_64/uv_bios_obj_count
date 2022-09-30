@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/x86/platform/uv/bios_uv.c
+0x18b2790f	uv_bios_obj_count	vmlinux	EXPORT_SYMBOL_GPL

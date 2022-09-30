@@ -29,16 +29,6 @@
 #include <asm/asm-uaccess.h>
 #include <asm/unistd.h>
 
-/*
- * Context tracking and irqflag tracing need to instrument transitions between
- * user and kernel mode.
- */
-	.macro user_enter_irqoff
-#if defined(CONFIG_CONTEXT_TRACKING) || defined(CONFIG_TRACE_IRQFLAGS)
-	bl	exit_to_user_mode
-#endif
-	.endm
-
 	.macro	clear_gp_regs
 	.irp	n,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29
 	mov	x\n, xzr
@@ -140,64 +130,66 @@ alternative_cb_end
 	.endm
 
 	/* Check for MTE asynchronous tag check faults */
-	.macro check_mte_async_tcf, tmp, ti_flags
+	.macro check_mte_async_tcf, tmp, ti_flags, thread_sctlr
 #ifdef CONFIG_ARM64_MTE
 	.arch_extension lse
 alternative_if_not ARM64_MTE
 	b	1f
 alternative_else_nop_endif
+	/*
+	 * Asynchronous tag check faults are only possible in ASYNC (2) or
+	 * ASYM (3) modes. In each of these modes bit 1 of SCTLR_EL1.TCF0 is
+	 * set, so skip the check if it is unset.
+	 */
+	tbz	\thread_sctlr, #(SCTLR_EL1_TCF0_SHIFT + 1), 1f
 	mrs_s	\tmp, SYS_TFSRE0_EL1
 	tbz	\tmp, #SYS_TFSR_EL1_TF0_SHIFT, 1f
 	/* Asynchronous TCF occurred for TTBR0 access, set the TI flag */
 	mov	\tmp, #_TIF_MTE_ASYNC_FAULT
 	add	\ti_flags, tsk, #TSK_TI_FLAGS
 	stset	\tmp, [\ti_flags]
-	msr_s	SYS_TFSRE0_EL1, xzr
 1:
 #endif
 	.endm
 
 	/* Clear the MTE asynchronous tag check faults */
-	.macro clear_mte_async_tcf
+	.macro clear_mte_async_tcf thread_sctlr
 #ifdef CONFIG_ARM64_MTE
 alternative_if ARM64_MTE
+	/* See comment in check_mte_async_tcf above. */
+	tbz	\thread_sctlr, #(SCTLR_EL1_TCF0_SHIFT + 1), 1f
 	dsb	ish
 	msr_s	SYS_TFSRE0_EL1, xzr
+1:
 alternative_else_nop_endif
 #endif
 	.endm
 
-	.macro mte_set_gcr, tmp, tmp2
+	.macro mte_set_gcr, mte_ctrl, tmp
 #ifdef CONFIG_ARM64_MTE
-	/*
-	 * Calculate and set the exclude mask preserving
-	 * the RRND (bit[16]) setting.
-	 */
-	mrs_s	\tmp2, SYS_GCR_EL1
-	bfi	\tmp2, \tmp, #0, #16
-	msr_s	SYS_GCR_EL1, \tmp2
+	ubfx	\tmp, \mte_ctrl, #MTE_CTRL_GCR_USER_EXCL_SHIFT, #16
+	orr	\tmp, \tmp, #SYS_GCR_EL1_RRND
+	msr_s	SYS_GCR_EL1, \tmp
 #endif
 	.endm
 
 	.macro mte_set_kernel_gcr, tmp, tmp2
 #ifdef CONFIG_KASAN_HW_TAGS
-alternative_if_not ARM64_MTE
+alternative_cb	kasan_hw_tags_enable
 	b	1f
-alternative_else_nop_endif
-	ldr_l	\tmp, gcr_kernel_excl
-
-	mte_set_gcr \tmp, \tmp2
-	isb
+alternative_cb_end
+	mov	\tmp, KERNEL_GCR_EL1
+	msr_s	SYS_GCR_EL1, \tmp
 1:
 #endif
 	.endm
 
 	.macro mte_set_user_gcr, tsk, tmp, tmp2
-#ifdef CONFIG_ARM64_MTE
-alternative_if_not ARM64_MTE
+#ifdef CONFIG_KASAN_HW_TAGS
+alternative_cb	kasan_hw_tags_enable
 	b	1f
-alternative_else_nop_endif
-	ldr	\tmp, [\tsk, #THREAD_GCR_EL1_USER]
+alternative_cb_end
+	ldr	\tmp, [\tsk, #THREAD_MTE_CTRL]
 
 	mte_set_gcr \tmp, \tmp2
 1:
@@ -238,8 +230,8 @@ alternative_else_nop_endif
 	disable_step_tsk x19, x20
 
 	/* Check for asynchronous tag check faults in user space */
-	check_mte_async_tcf x22, x23
-	apply_ssbd 1, x22, x23
+	ldr	x0, [tsk, THREAD_SCTLR_USER]
+	check_mte_async_tcf x22, x23, x0
 
 #ifdef CONFIG_ARM64_PTR_AUTH
 alternative_if ARM64_HAS_ADDRESS_AUTH
@@ -252,7 +244,6 @@ alternative_if ARM64_HAS_ADDRESS_AUTH
 	 * was disabled on kernel exit then we would have left the kernel IA
 	 * installed so there is no need to install it again.
 	 */
-	ldr	x0, [tsk, THREAD_SCTLR_USER]
 	tbz	x0, SCTLR_ELx_ENIA_SHIFT, 1f
 	__ptrauth_keys_install_kernel_nosync tsk, x20, x22, x23
 	b	2f
@@ -261,11 +252,25 @@ alternative_if ARM64_HAS_ADDRESS_AUTH
 	orr	x0, x0, SCTLR_ELx_ENIA
 	msr	sctlr_el1, x0
 2:
-	isb
 alternative_else_nop_endif
 #endif
 
+	apply_ssbd 1, x22, x23
+
 	mte_set_kernel_gcr x22, x23
+
+	/*
+	 * Any non-self-synchronizing system register updates required for
+	 * kernel entry should be placed before this point.
+	 */
+alternative_if ARM64_MTE
+	isb
+	b	1f
+alternative_else_nop_endif
+alternative_if ARM64_HAS_ADDRESS_AUTH
+	isb
+alternative_else_nop_endif
+1:
 
 	scs_load tsk
 	.else
@@ -302,18 +307,13 @@ alternative_else_nop_endif
 	str	w21, [sp, #S_SYSCALLNO]
 	.endif
 
+#ifdef CONFIG_ARM64_PSEUDO_NMI
 	/* Save pmr */
 alternative_if ARM64_HAS_IRQ_PRIO_MASKING
 	mrs_s	x20, SYS_ICC_PMR_EL1
 	str	x20, [sp, #S_PMR_SAVE]
 	mov	x20, #GIC_PRIO_IRQON | GIC_PRIO_PSR_I_SET
 	msr_s	SYS_ICC_PMR_EL1, x20
-alternative_else_nop_endif
-
-	/* Re-enable tag checking (TCO set on exception entry) */
-#ifdef CONFIG_ARM64_MTE
-alternative_if ARM64_MTE
-	SET_PSTATE_TCO(0)
 alternative_else_nop_endif
 #endif
 
@@ -332,6 +332,7 @@ alternative_else_nop_endif
 	disable_daif
 	.endif
 
+#ifdef CONFIG_ARM64_PSEUDO_NMI
 	/* Restore pmr */
 alternative_if ARM64_HAS_IRQ_PRIO_MASKING
 	ldr	x20, [sp, #S_PMR_SAVE]
@@ -341,6 +342,7 @@ alternative_if ARM64_HAS_IRQ_PRIO_MASKING
 	dsb	sy				// Ensure priority change is seen by redistributor
 .L__skip_pmr_sync\@:
 alternative_else_nop_endif
+#endif
 
 	ldp	x21, x22, [sp, #S_PC]		// load ELR, SPSR
 
@@ -369,6 +371,10 @@ alternative_else_nop_endif
 3:
 	scs_save tsk
 
+	/* Ignore asynchronous tag check faults in the uaccess routines */
+	ldr	x0, [tsk, THREAD_SCTLR_USER]
+	clear_mte_async_tcf x0
+
 #ifdef CONFIG_ARM64_PTR_AUTH
 alternative_if ARM64_HAS_ADDRESS_AUTH
 	/*
@@ -378,7 +384,6 @@ alternative_if ARM64_HAS_ADDRESS_AUTH
 	 *
 	 * No kernel C function calls after this.
 	 */
-	ldr	x0, [tsk, THREAD_SCTLR_USER]
 	tbz	x0, SCTLR_ELx_ENIA_SHIFT, 1f
 	__ptrauth_keys_install_user tsk, x0, x1, x2
 	b	2f
@@ -486,18 +491,6 @@ SYM_CODE_END(__swpan_exit_el0)
 /* GPRs used by entry code */
 tsk	.req	x28		// current thread_info
 
-/*
- * Interrupt handling.
- */
-	.macro	gic_prio_kentry_setup, tmp:req
-#ifdef CONFIG_ARM64_PSEUDO_NMI
-	alternative_if ARM64_HAS_IRQ_PRIO_MASKING
-	mov	\tmp, #(GIC_PRIO_PSR_I_SET | GIC_PRIO_IRQON)
-	msr_s	SYS_ICC_PMR_EL1, \tmp
-	alternative_else_nop_endif
-#endif
-	.endm
-
 	.text
 
 /*
@@ -529,12 +522,13 @@ SYM_CODE_START(vectors)
 SYM_CODE_END(vectors)
 
 #ifdef CONFIG_VMAP_STACK
+SYM_CODE_START_LOCAL(__bad_stack)
 	/*
 	 * We detected an overflow in kernel_ventry, which switched to the
 	 * overflow stack. Stash the exception regs, and head to our overflow
 	 * handler.
 	 */
-__bad_stack:
+
 	/* Restore the original x0 value */
 	mrs	x0, tpidrro_el0
 
@@ -554,6 +548,7 @@ __bad_stack:
 	/* Time to die */
 	bl	handle_bad_stack
 	ASM_BUG()
+SYM_CODE_END(__bad_stack)
 #endif /* CONFIG_VMAP_STACK */
 
 
@@ -597,37 +592,13 @@ SYM_CODE_START_LOCAL(ret_to_kernel)
 	kernel_exit 1
 SYM_CODE_END(ret_to_kernel)
 
-/*
- * "slow" syscall return path.
- */
 SYM_CODE_START_LOCAL(ret_to_user)
-	disable_daif
-	gic_prio_kentry_setup tmp=x3
-#ifdef CONFIG_TRACE_IRQFLAGS
-	bl	trace_hardirqs_off
-#endif
-	ldr	x19, [tsk, #TSK_TI_FLAGS]
-	and	x2, x19, #_TIF_WORK_MASK
-	cbnz	x2, work_pending
-finish_ret_to_user:
-	user_enter_irqoff
-	/* Ignore asynchronous tag check faults in the uaccess routines */
-	clear_mte_async_tcf
+	ldr	x19, [tsk, #TSK_TI_FLAGS]	// re-check for single-step
 	enable_step_tsk x19, x2
 #ifdef CONFIG_GCC_PLUGIN_STACKLEAK
 	bl	stackleak_erase
 #endif
 	kernel_exit 0
-
-/*
- * Ok, we need to do extra processing, enter the slow path.
- */
-work_pending:
-	mov	x0, sp				// 'regs'
-	mov	x1, x19
-	bl	do_notify_resume
-	ldr	x19, [tsk, #TSK_TI_FLAGS]	// re-check for single-step
-	b	finish_ret_to_user
 SYM_CODE_END(ret_to_user)
 
 	.popsection				// .entry.text
@@ -895,6 +866,8 @@ SYM_CODE_START(ret_from_fork)
 	mov	x0, x20
 	blr	x19
 1:	get_current_task tsk
+	mov	x0, sp
+	bl	asm_exit_to_user_mode
 	b	ret_to_user
 SYM_CODE_END(ret_from_fork)
 NOKPROBE(ret_from_fork)
@@ -1090,8 +1063,10 @@ SYM_CODE_START(__sdei_asm_handler)
 	mov	sp, x1
 
 	mov	x1, x0			// address to complete_and_resume
-	/* x0 = (x0 <= 1) ? EVENT_COMPLETE:EVENT_COMPLETE_AND_RESUME */
-	cmp	x0, #1
+	/* x0 = (x0 <= SDEI_EV_FAILED) ?
+	 * EVENT_COMPLETE:EVENT_COMPLETE_AND_RESUME
+	 */
+	cmp	x0, #SDEI_EV_FAILED
 	mov_q	x2, SDEI_1_0_FN_SDEI_EVENT_COMPLETE
 	mov_q	x3, SDEI_1_0_FN_SDEI_EVENT_COMPLETE_AND_RESUME
 	csel	x0, x2, x3, ls

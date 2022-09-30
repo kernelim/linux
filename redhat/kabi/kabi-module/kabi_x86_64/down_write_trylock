@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/locking/rwsem.c
+0xe40c37ea	down_write_trylock	vmlinux	EXPORT_SYMBOL

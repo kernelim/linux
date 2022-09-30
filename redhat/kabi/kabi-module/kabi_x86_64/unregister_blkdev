@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:block/genhd.c
+0xb5a459dc	unregister_blkdev	vmlinux	EXPORT_SYMBOL

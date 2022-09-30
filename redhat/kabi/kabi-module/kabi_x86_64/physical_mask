@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/x86/mm/pgtable.c
+0x1d19f77b	physical_mask	vmlinux	EXPORT_SYMBOL

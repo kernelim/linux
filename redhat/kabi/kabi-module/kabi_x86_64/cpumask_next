@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:lib/cpumask.c
+0xaa44a707	cpumask_next	vmlinux	EXPORT_SYMBOL

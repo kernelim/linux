@@ -70,6 +70,7 @@ enum {
 struct neigh_parms {
 	possible_net_t net;
 	struct net_device *dev;
+	netdevice_tracker dev_tracker;
 	struct list_head list;
 	int	(*neigh_setup)(struct neighbour *);
 	struct neigh_table *tbl;
@@ -157,6 +158,7 @@ struct neighbour {
 	struct list_head	gc_list;
 	struct rcu_head		rcu;
 	struct net_device	*dev;
+	netdevice_tracker	dev_tracker;
 	u8			primary_key[0];
 } __randomize_layout;
 
@@ -172,6 +174,7 @@ struct pneigh_entry {
 	struct pneigh_entry	*next;
 	possible_net_t		net;
 	struct net_device	*dev;
+	netdevice_tracker	dev_tracker;
 	u8			flags;
 	u8			protocol;
 	u8			key[];

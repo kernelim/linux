@@ -43,3 +43,7 @@ test_klp_state2
 test_klp_state3
 torture
 refscale
+rcuscale
+test_vmalloc
+test_hmm
+mtty

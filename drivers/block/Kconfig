@@ -74,7 +74,6 @@ config N64CART
 
 config CDROM
 	tristate
-	select BLK_SCSI_REQUEST
 
 config GDROM
 	tristate "SEGA Dreamcast GD-ROM drive"
@@ -282,8 +281,8 @@ config BLK_DEV_RAM_SIZE
 config CDROM_PKTCDVD
 	tristate "Packet writing on CD/DVD media (DEPRECATED)"
 	depends on !UML
+	depends on SCSI
 	select CDROM
-	select BLK_SCSI_REQUEST
 	help
 	  Note: This driver is deprecated and will be removed from the
 	  kernel in the near future!

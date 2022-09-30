@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:mm/memremap.c
+0x587f22d7	devmap_managed_key	vmlinux	EXPORT_SYMBOL

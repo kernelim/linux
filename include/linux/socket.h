@@ -361,6 +361,7 @@ struct ucred {
 #define SOL_TLS		282
 #define SOL_XDP		283
 #define SOL_MPTCP	284
+#define SOL_SMC		286
 
 /* IPX options */
 #define IPX_TYPE	1

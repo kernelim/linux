@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:lib/checksum.c
+0xe113bbbc	csum_partial	vmlinux	EXPORT_SYMBOL

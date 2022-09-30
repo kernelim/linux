@@ -303,7 +303,7 @@ static int iss_net_rx(struct net_device *dev)
 
 		lp->stats.rx_bytes += skb->len;
 		lp->stats.rx_packets++;
-		netif_rx_ni(skb);
+		netif_rx(skb);
 		return pkt_len;
 	}
 	kfree_skb(skb);
@@ -467,7 +467,7 @@ static int iss_net_set_mac(struct net_device *dev, void *addr)
 	if (!is_valid_ether_addr(hwaddr->sa_data))
 		return -EADDRNOTAVAIL;
 	spin_lock_bh(&lp->lock);
-	memcpy(dev->dev_addr, hwaddr->sa_data, ETH_ALEN);
+	eth_hw_addr_set(dev, hwaddr->sa_data);
 	spin_unlock_bh(&lp->lock);
 	return 0;
 }

@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:mm/vmalloc.c
+0xd6ee688f	vmalloc	vmlinux	EXPORT_SYMBOL

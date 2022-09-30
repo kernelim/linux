@@ -33,6 +33,7 @@
 #include <linux/security.h>
 #include <linux/ctype.h>
 #include <linux/kmemleak.h>
+#include <linux/filter.h>
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -2183,11 +2184,6 @@ static struct ctl_table kern_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= sysctl_max_threads,
-	},
-	{
-		.procname	= "random",
-		.mode		= 0555,
-		.child		= random_table,
 	},
 	{
 		.procname	= "usermodehelper",

@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/x86/kernel/head64.c
+0xdad13544	ptrs_per_p4d	vmlinux	EXPORT_SYMBOL

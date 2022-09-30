@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/cred.c
+0xdafbd89f	override_creds	vmlinux	EXPORT_SYMBOL

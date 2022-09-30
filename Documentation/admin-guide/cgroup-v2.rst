@@ -1298,6 +1298,11 @@ PAGE_SIZE multiple when read back.
 		Amount of memory used to cache filesystem data,
 		including tmpfs and shared memory.
 
+	  kernel (npn)
+		Amount of total kernel memory, including
+		(kernel_stack, pagetables, percpu, vmalloc, slab) in
+		addition to other kernel memory use cases.
+
 	  kernel_stack
 		Amount of memory allocated to kernel stacks.
 
@@ -1310,6 +1315,9 @@ PAGE_SIZE multiple when read back.
 
 	  sock (npn)
 		Amount of memory used in network transmission buffers
+
+	  vmalloc (npn)
+		Amount of memory used for vmap backed memory.
 
 	  shmem
 		Amount of cached filesystem data that is swap-backed,

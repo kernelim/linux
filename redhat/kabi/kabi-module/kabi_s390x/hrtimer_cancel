@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/time/hrtimer.c
+0xeb72b825	hrtimer_cancel	vmlinux	EXPORT_SYMBOL_GPL

@@ -26,38 +26,31 @@ menuconfig BLOCK
 
 if BLOCK
 
-config BLK_RQ_ALLOC_TIME
-	bool
+config BLOCK_LEGACY_AUTOLOAD
+	bool "Legacy autoloading support"
+	default y
+	help
+	  Enable loading modules and creating block device instances based on
+	  accesses through their device special file.  This is a historic Linux
+	  feature and makes no sense in a udev world where device files are
+	  created on demand, but scripts that manually create device nodes and
+	  then call losetup might rely on this behavior.
 
-config BLK_SCSI_REQUEST
+config BLK_RQ_ALLOC_TIME
 	bool
 
 config BLK_CGROUP_RWSTAT
 	bool
 
-config BLK_DEV_BSG
-	bool "Block layer SG support v4"
-	default y
-	select BLK_SCSI_REQUEST
-	help
-	  Saying Y here will enable generic SG (SCSI generic) v4 support
-	  for any block device.
+config BLK_DEV_BSG_COMMON
+	tristate
 
-	  Unlike SG v3 (aka block/scsi_ioctl.c drivers/scsi/sg.c), SG v4
-	  can handle complicated SCSI commands: tagged variable length cdbs
-	  with bidirectional data transfers and generic request/response
-	  protocols (e.g. Task Management Functions and SMP in Serial
-	  Attached SCSI).
-
-	  This option is required by recent UDEV versions to properly
-	  access device serial numbers, etc.
-
-	  If unsure, say Y.
+config BLK_ICQ
+	bool
 
 config BLK_DEV_BSGLIB
 	bool "Block layer SG support v4 helper lib"
-	select BLK_DEV_BSG
-	select BLK_SCSI_REQUEST
+	select BLK_DEV_BSG_COMMON
 	help
 	  Subsystems will normally enable this if needed. Users will not
 	  normally need to manually enable this.
@@ -80,6 +73,7 @@ config BLK_DEV_INTEGRITY_T10
 	tristate
 	depends on BLK_DEV_INTEGRITY
 	select CRC_T10DIF
+	select CRC64_ROCKSOFT
 
 config BLK_DEV_ZONED
 	bool "Zoned block device support"
@@ -233,6 +227,9 @@ config BLK_PM
 
 # do not use in new code
 config BLOCK_HOLDER_DEPRECATED
+	bool
+
+config BLK_MQ_STACKING
 	bool
 
 source "block/Kconfig.iosched"

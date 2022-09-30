@@ -275,8 +275,7 @@ ppp_sync_write(struct tty_struct *tty, struct file *file,
 }
 
 static int
-ppp_synctty_ioctl(struct tty_struct *tty, struct file *file,
-		  unsigned int cmd, unsigned long arg)
+ppp_synctty_ioctl(struct tty_struct *tty, unsigned int cmd, unsigned long arg)
 {
 	struct syncppp *ap = sp_get(tty);
 	int __user *p = (int __user *)arg;
@@ -304,7 +303,7 @@ ppp_synctty_ioctl(struct tty_struct *tty, struct file *file,
 		/* flush our buffers and the serial port's buffer */
 		if (arg == TCIOFLUSH || arg == TCOFLUSH)
 			ppp_sync_flush_output(ap);
-		err = n_tty_ioctl_helper(tty, file, cmd, arg);
+		err = n_tty_ioctl_helper(tty, cmd, arg);
 		break;
 
 	case FIONREAD:
@@ -315,7 +314,7 @@ ppp_synctty_ioctl(struct tty_struct *tty, struct file *file,
 		break;
 
 	default:
-		err = tty_mode_ioctl(tty, file, cmd, arg);
+		err = tty_mode_ioctl(tty, cmd, arg);
 		break;
 	}
 

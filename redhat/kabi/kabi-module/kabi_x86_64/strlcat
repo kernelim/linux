@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:lib/string.c
+0xf9c0b663	strlcat	vmlinux	EXPORT_SYMBOL

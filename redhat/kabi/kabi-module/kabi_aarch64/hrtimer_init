@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/time/hrtimer.c
+0x3f281598	hrtimer_init	vmlinux	EXPORT_SYMBOL_GPL

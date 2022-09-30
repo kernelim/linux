@@ -23,7 +23,7 @@ __license__ = "GPL"
 import getopt
 import os
 import sys
-
+import re
 
 def load_kabi(dirname, kabi, order, arch):
     """Load a reference stablelist content."""
@@ -46,15 +46,30 @@ def load_kabi(dirname, kabi, order, arch):
 
         for arch in archlist:
             for symbol in os.listdir(dirname + "/kabi_" + arch):
-                if symbol.startswith('.'):
-                    # skip hidden files
+                if '.' in symbol:
+                    # skip files
                     continue
                 kabi_file = open(dirname + "/kabi_" + arch + "/" + symbol, "r")
                 line = []
-                # store version metadata
-                line.append(kabi_file.readline())
-                # store content ( no empty line is bad state )
-                line.append(kabi_file.readline().rstrip('\n'))
+                offset = 0
+                lines = 0
+                for l in kabi_file:
+                    l = l.rstrip('\n')
+                    m = re.match(r"^#([^0-9]+):(.*)", l)
+                    if m:
+                        # store index metadata
+                        if m.group(1) == "I":
+                            offset = int(m.group(2))
+                        # skip any other metadata
+                        continue
+                    if l.startswith("#"):
+                        # store version metadata
+                        line.append(l)
+                        continue
+                    if lines == offset:
+                        line.append(l)
+                        break
+                    lines += 1
                 kabi[arch][symbol] = line
                 order[arch].append(symbol)
                 kabi_file.close()
@@ -94,7 +109,7 @@ def show_kabi(kabi, order, release, fmt, show_head):
             if kabi[current_arch][sym][0][0] != "#":
                 print("Invalid metadata format: {}".format(kabi[current_arch][sym][0]))
                 sys.exit(1)
-            minor_range = kabi[current_arch][sym][0][1:-1].split("-", 2)
+            minor_range = kabi[current_arch][sym][0][1:].split("-", 2)
             minor_range[0] = int(minor_range[0])
             if minor_range[1] == "":
                 minor_range[1] = sys.maxsize

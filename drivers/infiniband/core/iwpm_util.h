@@ -33,7 +33,6 @@
 #ifndef _IWPM_UTIL_H
 #define _IWPM_UTIL_H
 
-#include <linux/module.h>
 #include <linux/io.h>
 #include <linux/in.h>
 #include <linux/in6.h>
@@ -90,9 +89,7 @@ struct iwpm_remote_info {
 };
 
 struct iwpm_admin_data {
-	refcount_t refcount;
 	atomic_t nlmsg_seq;
-	int      client_list[RDMA_NL_NUM_CLIENTS];
 	u32      reg_list[RDMA_NL_NUM_CLIENTS];
 };
 
@@ -146,22 +143,6 @@ int iwpm_get_nlmsg_seq(void);
  * @reminfo: The remote info to be added
  */
 void iwpm_add_remote_info(struct iwpm_remote_info *reminfo);
-
-/**
- * iwpm_valid_client - Check if the port mapper client is valid
- * @nl_client: The index of the netlink client
- *
- * Valid clients need to call iwpm_init() before using
- * the port mapper
- */
-int iwpm_valid_client(u8 nl_client);
-
-/**
- * iwpm_set_valid - Set the port mapper client to valid or not
- * @nl_client: The index of the netlink client
- * @valid: 1 if valid or 0 if invalid
- */
-void iwpm_set_valid(u8 nl_client, int valid);
 
 /**
  * iwpm_check_registration - Check if the client registration

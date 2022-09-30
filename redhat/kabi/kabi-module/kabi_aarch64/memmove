@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/arm64/lib/memcpy.S
+0x5a9f1d63	memmove	vmlinux	EXPORT_SYMBOL

@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:block/bdev.c
+0x34c7cdbc	lookup_bdev	vmlinux	EXPORT_SYMBOL

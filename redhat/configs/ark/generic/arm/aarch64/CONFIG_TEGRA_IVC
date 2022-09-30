@@ -1,1 +1,1 @@
-# CONFIG_TEGRA_IVC is not set
+CONFIG_TEGRA_IVC=y

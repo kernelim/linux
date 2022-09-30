@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/workqueue.c
+0x8c03d20c	destroy_workqueue	vmlinux	EXPORT_SYMBOL_GPL

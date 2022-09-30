@@ -1,1 +1,1 @@
-# CONFIG_CRC64 is not set
+CONFIG_CRC64=y

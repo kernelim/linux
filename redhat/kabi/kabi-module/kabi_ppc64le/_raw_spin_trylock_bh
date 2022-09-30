@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/locking/spinlock.c
+0x8518a4a6	_raw_spin_trylock_bh	vmlinux	EXPORT_SYMBOL

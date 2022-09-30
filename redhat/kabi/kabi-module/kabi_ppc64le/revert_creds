@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/cred.c
+0xd0ec78d8	revert_creds	vmlinux	EXPORT_SYMBOL

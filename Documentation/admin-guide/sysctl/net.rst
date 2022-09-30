@@ -365,6 +365,27 @@ new netns has been created.
 
 Default : 0  (for compatibility reasons)
 
+gro_normal_batch
+----------------
+
+Maximum number of the segments to batch up on output of GRO. When a packet
+exits GRO, either as a coalesced superframe or as an original packet which
+GRO has decided not to coalesce, it is placed on a per-NAPI list. This
+list is then passed to the stack when the number of segments reaches the
+gro_normal_batch limit.
+
+high_order_alloc_disable
+------------------------
+
+By default the allocator for page frags tries to use high order pages (order-3
+on x86). While the default behavior gives good results in most cases, some users
+might have hit a contention in page allocations/freeing. This was especially
+true on older kernels (< 5.14) when high-order pages were not stored on per-cpu
+lists. This allows to opt-in for order-0 allocation instead but is now mostly of
+historical importance.
+
+Default: 0
+
 2. /proc/sys/net/unix - Parameters for Unix domain sockets
 ----------------------------------------------------------
 

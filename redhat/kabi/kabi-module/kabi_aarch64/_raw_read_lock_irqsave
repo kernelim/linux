@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/locking/spinlock.c
+0xb1342cdb	_raw_read_lock_irqsave	vmlinux	EXPORT_SYMBOL

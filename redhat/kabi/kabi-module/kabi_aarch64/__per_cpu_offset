@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:drivers/base/arch_numa.c
+0x32047ad5	__per_cpu_offset	vmlinux	EXPORT_SYMBOL

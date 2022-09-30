@@ -60,6 +60,9 @@ switch_to_toplevel()
 
 checkoptions()
 {
+	count=$3
+	variant=$4
+
 	/usr/bin/awk '
 
 		/is not set/ {
@@ -82,14 +85,14 @@ checkoptions()
 					 print "Found "a[1]"="a[2]" after generation, had " a[1]"="configs[a[1]]" in Source tree";
 			}
 		}
-	' "$1" "$2" > .mismatches
+	' "$1" "$2" > .mismatches${count}
 
 	checkoptions_error=false
-	if test -s .mismatches
+	if test -s .mismatches${count}
 	then
 		while read -r LINE
 		do
-			if find ./ -name "$(echo "$LINE" | awk -F "=" ' { print $1 } ' | awk ' { print $2 }')" -print0 | xargs -0 grep ^ | grep -q "process_configs_known_broken"; then
+			if find "${REDHAT}"/configs -name "$(echo "$LINE" | awk -F "=" ' { print $1 } ' | awk ' { print $2 }')" -print0 | xargs -0 grep ^ | grep -q "process_configs_known_broken"; then
 				# This is a known broken config.
 				# See script help warning.
 				checkoptions_error=false
@@ -97,14 +100,13 @@ checkoptions()
 				checkoptions_error=true
 				break
 			fi
-		done < .mismatches
+		done < .mismatches${count}
 
 		! $checkoptions_error && return
 
-		echo "Error: Mismatches found in configuration files"
-		cat .mismatches
-		RETURNCODE=1
-		[ "$CONTINUEONERROR" ] || exit 1
+		sed -i "1s/^/Error: Mismatches found in configuration files for ${arch} ${variant}\n/" .mismatches${count}
+	else
+		rm -f .mismatches${count}
 	fi
 }
 
@@ -218,75 +220,119 @@ function commit_new_configs()
 	git commit -m "[redhat] AUTOMATIC: New configs"
 }
 
+function process_config()
+{
+	local cfg
+	local arch
+	local cfgtmp
+	local cfgorig
+	local count
+	local variant
+
+	cfg=$1
+	count=$2
+
+	arch=$(head -1 "$cfg" | cut -b 3-)
+
+	if [ "$arch" = "EMPTY" ]
+	then
+		# This arch is intentionally left blank
+		return
+	fi
+
+	variant=$(basename "$cfg" | cut -d"-" -f3- | cut -d"." -f1)
+
+	cfgtmp="${cfg}.tmp"
+	cfgorig="${cfg}.orig"
+	cat "$cfg" > "$cfgorig"
+
+	echo "Processing $cfg ... "
+
+	make ${MAKEOPTS} ARCH="$arch" CROSS_COMPILE=$(get_cross_compile $arch) KCONFIG_CONFIG="$cfgorig" listnewconfig >& .listnewconfig${count}
+	grep -E 'CONFIG_' .listnewconfig${count} > .newoptions${count}
+	if test -n "$NEWOPTIONS" && test -s .newoptions${count}
+	then
+		echo "Found unset config items in ${arch} ${variant}, please set them to an appropriate value" >> .errors${count}
+		cat .newoptions${count} >> .errors${count}
+		rm .newoptions${count}
+		RETURNCODE=1
+	fi
+	rm .newoptions${count}
+
+	grep -E 'config.*warning' .listnewconfig${count} > .warnings${count}
+	if test -n "$CHECKWARNINGS" && test -s .warnings${count}
+	then
+		echo "Found misconfigured config items in ${arch} ${variant}, please set them to an appropriate value" >> .errors${count}
+		cat .warnings${count} >> .errors${count}
+		rm .warnings${count}
+	fi
+	rm .warnings${count}
+
+	rm .listnewconfig${count}
+
+	make ${MAKEOPTS} ARCH="$arch" CROSS_COMPILE=$(get_cross_compile $arch) KCONFIG_CONFIG="$cfgorig" olddefconfig > /dev/null || exit 1
+	echo "# $arch" > "$cfgtmp"
+	cat "$cfgorig" >> "$cfgtmp"
+	if test -n "$CHECKOPTIONS"
+	then
+		checkoptions "$cfg" "$cfgtmp" "$count" "$variant"
+	fi
+	# if test run, don't overwrite original
+	if test -n "$TESTRUN"
+	then
+		rm -f "$cfgtmp"
+	else
+		mv "$cfgtmp" "$cfg"
+	fi
+	rm -f "$cfgorig"
+	echo "Processing $cfg complete"
+}
+
 function process_configs()
 {
 	# assume we are in $source_tree/configs, need to get to top level
 	pushd "$(switch_to_toplevel)" &>/dev/null
 
+	# The next line is throwaway code for transition to parallel
+	# processing.  Leaving this line in place is harmless, but it can be
+	# removed the next time anyone updates this function.
+	[ -f .mismatches ] && rm -f .mismatches
+
+	count=0
 	for cfg in "$SCRIPT_DIR/${PACKAGE_NAME}${KVERREL}${SUBARCH}"*.config
 	do
-		arch=$(head -1 "$cfg" | cut -b 3-)
-		cfgtmp="${cfg}.tmp"
-		cfgorig="${cfg}.orig"
-		cat "$cfg" > "$cfgorig"
-
-		if [ "$arch" = "EMPTY" ]
-		then
-			# This arch is intentionally left blank
-			continue
+		if [ "$count" -eq 0 ]; then
+			# do the first one by itself so that tools are built
+			process_config "$cfg" "$count"
 		fi
-		echo -n "Processing $cfg ... "
-
-		make ${MAKEOPTS} ARCH="$arch" CROSS_COMPILE=$(get_cross_compile $arch) KCONFIG_CONFIG="$cfgorig" listnewconfig >& .listnewconfig
-		grep -E 'CONFIG_' .listnewconfig > .newoptions
-		if test -n "$NEWOPTIONS" && test -s .newoptions
-		then
-			echo "Found unset config items, please set them to an appropriate value"
-			cat .newoptions
-			rm .newoptions
-			RETURNCODE=1
-			[ "$CONTINUEONERROR" ] || exit 1
-		fi
-		rm .newoptions
-
-		grep -E 'config.*warning' .listnewconfig > .warnings
-		if test -n "$CHECKWARNINGS" && test -s .warnings
-		then
-			echo "Found misconfigured config items, please set them to an appropriate value"
-			cat .warnings
-			rm .warnings
-			RETURNCODE=1
-			[ "$CONTINUEONERROR" ] || exit 1
-		fi
-		rm .warnings
-
-		rm .listnewconfig
-
-		make ${MAKEOPTS} ARCH="$arch" CROSS_COMPILE=$(get_cross_compile $arch) KCONFIG_CONFIG="$cfgorig" olddefconfig > /dev/null || exit 1
-		echo "# $arch" > "$cfgtmp"
-		cat "$cfgorig" >> "$cfgtmp"
-		if test -n "$CHECKOPTIONS"
-		then
-			checkoptions "$cfg" "$cfgtmp"
-		fi
-		# if test run, don't overwrite original
-		if test -n "$TESTRUN"
-		then
-			rm -f "$cfgtmp"
-		else
-			mv "$cfgtmp" "$cfg"
-		fi
-		rm -f "$cfgorig"
-		echo "done"
+		process_config "$cfg" "$count" &
+		waitpids[${count}]=$!
+		((count++))
+		while [ "$(jobs | grep Running | wc -l)" -ge $RHJOBS ]; do :; done
 	done
+	for pid in ${waitpids[*]}; do
+		wait ${pid}
+	done
+
 	rm "$SCRIPT_DIR"/*.config*.old
+
+	if ls .errors* 1> /dev/null 2>&1; then
+		RETURNCODE=1
+		cat .errors*
+		rm .errors* -f
+	fi
+	if ls .mismatches* 1> /dev/null 2>&1; then
+		RETURNCODE=1
+		cat .mismatches*
+		rm .mismatches* -f
+	fi
+
 	popd > /dev/null
 
-	echo "Processed config files are in $SCRIPT_DIR"
+	[ $RETURNCODE -eq 0 ] && echo "Processed config files are in $SCRIPT_DIR"
 }
 
 CHECKOPTIONS=""
-CONTINUEONERROR=""
 NEWOPTIONS=""
 TESTRUN=""
 CHECKWARNINGS=""
@@ -301,7 +347,6 @@ do
 	case $key in
 		-a)
 			CHECKOPTIONS="x"
-			CONTINUEONERROR="x"
 			NEWOPTIONS="x"
 			CHECKWARNINGS="x"
 			;;
@@ -310,9 +355,6 @@ do
 			;;
 		-h)
 			usage
-			;;
-		-i)
-			CONTINUEONERROR="x"
 			;;
 		-n)
 			NEWOPTIONS="x"
@@ -343,6 +385,7 @@ PACKAGE_NAME="${1:-kernel}" # defines the package name used
 KVERREL="$(test -n "$2" && echo "-$2" || echo "")"
 SUBARCH="$(test -n "$3" && echo "-$3" || echo "")"
 FLAVOR="$(test -n "$4" && echo "-$4" || echo "-common")"
+RHJOBS="$(test -n "$5" && echo "$5" || nproc --all)"
 SCRIPT=$(readlink -f "$0")
 SCRIPT_DIR=$(dirname "$SCRIPT")
 

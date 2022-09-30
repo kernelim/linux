@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/groups.c
+0xe080e8f0	set_current_groups	vmlinux	EXPORT_SYMBOL

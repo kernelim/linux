@@ -157,7 +157,7 @@ static void can_restart(struct net_device *dev)
 	stats->rx_packets++;
 	stats->rx_bytes += cf->len;
 
-	netif_rx_ni(skb);
+	netif_rx(skb);
 
 restart:
 	netdev_dbg(dev, "restarted\n");

@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/x86/kernel/setup.c
+0x22892d67	boot_cpu_data	vmlinux	EXPORT_SYMBOL

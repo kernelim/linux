@@ -7,6 +7,7 @@
 #include <linux/fs.h>
 #include <linux/iomap.h>
 #include <linux/fiemap.h>
+#include <linux/pagemap.h>
 
 struct fiemap_ctx {
 	struct fiemap_extent_info *fi;

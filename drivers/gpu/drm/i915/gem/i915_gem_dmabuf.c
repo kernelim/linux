@@ -9,6 +9,9 @@
 #include <linux/dma-resv.h>
 #include <linux/module.h>
 
+#include <asm/smp.h>
+
+#include "gem/i915_gem_dmabuf.h"
 #include "i915_drv.h"
 #include "i915_gem_object.h"
 #include "i915_scatterlist.h"
@@ -72,7 +75,8 @@ static void i915_gem_unmap_dma_buf(struct dma_buf_attachment *attachment,
 	kfree(sg);
 }
 
-static int i915_gem_dmabuf_vmap(struct dma_buf *dma_buf, struct dma_buf_map *map)
+static int i915_gem_dmabuf_vmap(struct dma_buf *dma_buf,
+				struct iosys_map *map)
 {
 	struct drm_i915_gem_object *obj = dma_buf_to_obj(dma_buf);
 	void *vaddr;
@@ -81,12 +85,13 @@ static int i915_gem_dmabuf_vmap(struct dma_buf *dma_buf, struct dma_buf_map *map
 	if (IS_ERR(vaddr))
 		return PTR_ERR(vaddr);
 
-	dma_buf_map_set_vaddr(map, vaddr);
+	iosys_map_set_vaddr(map, vaddr);
 
 	return 0;
 }
 
-static void i915_gem_dmabuf_vunmap(struct dma_buf *dma_buf, struct dma_buf_map *map)
+static void i915_gem_dmabuf_vunmap(struct dma_buf *dma_buf,
+				   struct iosys_map *map)
 {
 	struct drm_i915_gem_object *obj = dma_buf_to_obj(dma_buf);
 
@@ -167,8 +172,29 @@ static int i915_gem_dmabuf_attach(struct dma_buf *dmabuf,
 				  struct dma_buf_attachment *attach)
 {
 	struct drm_i915_gem_object *obj = dma_buf_to_obj(dmabuf);
+	struct i915_gem_ww_ctx ww;
+	int err;
 
-	return i915_gem_object_pin_pages_unlocked(obj);
+	if (!i915_gem_object_can_migrate(obj, INTEL_REGION_SMEM))
+		return -EOPNOTSUPP;
+
+	for_i915_gem_ww(&ww, err, true) {
+		err = i915_gem_object_lock(obj, &ww);
+		if (err)
+			continue;
+
+		err = i915_gem_object_migrate(obj, &ww, INTEL_REGION_SMEM);
+		if (err)
+			continue;
+
+		err = i915_gem_object_wait_migration(obj, 0);
+		if (err)
+			continue;
+
+		err = i915_gem_object_pin_pages(obj);
+	}
+
+	return err;
 }
 
 static void i915_gem_dmabuf_detach(struct dma_buf *dmabuf,
@@ -214,6 +240,7 @@ struct dma_buf *i915_gem_prime_export(struct drm_gem_object *gem_obj, int flags)
 
 static int i915_gem_object_get_pages_dmabuf(struct drm_i915_gem_object *obj)
 {
+	struct drm_i915_private *i915 = to_i915(obj->base.dev);
 	struct sg_table *pages;
 	unsigned int sg_page_sizes;
 
@@ -224,8 +251,22 @@ static int i915_gem_object_get_pages_dmabuf(struct drm_i915_gem_object *obj)
 	if (IS_ERR(pages))
 		return PTR_ERR(pages);
 
-	sg_page_sizes = i915_sg_dma_sizes(pages->sgl);
+	/*
+	 * DG1 is special here since it still snoops transactions even with
+	 * CACHE_NONE. This is not the case with other HAS_SNOOP platforms. We
+	 * might need to revisit this as we add new discrete platforms.
+	 *
+	 * XXX: Consider doing a vmap flush or something, where possible.
+	 * Currently we just do a heavy handed wbinvd_on_all_cpus() here since
+	 * the underlying sg_table might not even point to struct pages, so we
+	 * can't just call drm_clflush_sg or similar, like we do elsewhere in
+	 * the driver.
+	 */
+	if (i915_gem_object_can_bypass_llc(obj) ||
+	    (!HAS_LLC(i915) && !IS_DG1(i915)))
+		wbinvd_on_all_cpus();
 
+	sg_page_sizes = i915_sg_dma_sizes(pages->sgl);
 	__i915_gem_object_set_pages(obj, pages, sg_page_sizes);
 
 	return 0;
@@ -283,7 +324,8 @@ struct drm_gem_object *i915_gem_prime_import(struct drm_device *dev,
 	}
 
 	drm_gem_private_object_init(dev, &obj->base, dma_buf->size);
-	i915_gem_object_init(obj, &i915_gem_object_dmabuf_ops, &lock_class, 0);
+	i915_gem_object_init(obj, &i915_gem_object_dmabuf_ops, &lock_class,
+			     I915_BO_ALLOC_USER);
 	obj->base.import_attach = attach;
 	obj->base.resv = dma_buf->resv;
 

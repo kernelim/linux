@@ -17,7 +17,7 @@
 #define FTR_DESC_NAME_LEN	20
 #define FTR_DESC_FIELD_LEN	10
 #define FTR_ALIAS_NAME_LEN	30
-#define FTR_ALIAS_OPTION_LEN	80
+#define FTR_ALIAS_OPTION_LEN	116
 
 struct ftr_set_desc {
 	char 				name[FTR_DESC_NAME_LEN];
@@ -54,6 +54,7 @@ static const struct ftr_set_desc pfr1 __initconst = {
 	.override	= &id_aa64pfr1_override,
 	.fields		= {
 	        { "bt", ID_AA64PFR1_BT_SHIFT },
+		{ "mte", ID_AA64PFR1_MTE_SHIFT},
 		{}
 	},
 };
@@ -66,6 +67,16 @@ static const struct ftr_set_desc isar1 __initconst = {
 	        { "gpa", ID_AA64ISAR1_GPA_SHIFT },
 	        { "api", ID_AA64ISAR1_API_SHIFT },
 	        { "apa", ID_AA64ISAR1_APA_SHIFT },
+		{}
+	},
+};
+
+static const struct ftr_set_desc isar2 __initconst = {
+	.name		= "id_aa64isar2",
+	.override	= &id_aa64isar2_override,
+	.fields		= {
+	        { "gpa3", ID_AA64ISAR2_GPA3_SHIFT },
+	        { "apa3", ID_AA64ISAR2_APA3_SHIFT },
 		{}
 	},
 };
@@ -87,6 +98,7 @@ static const struct ftr_set_desc * const regs[] __initconst = {
 	&mmfr1,
 	&pfr1,
 	&isar1,
+	&isar2,
 	&kaslr,
 };
 
@@ -99,7 +111,9 @@ static const struct {
 	{ "arm64.nobti",		"id_aa64pfr1.bt=0" },
 	{ "arm64.nopauth",
 	  "id_aa64isar1.gpi=0 id_aa64isar1.gpa=0 "
-	  "id_aa64isar1.api=0 id_aa64isar1.apa=0"	   },
+	  "id_aa64isar1.api=0 id_aa64isar1.apa=0 "
+	  "id_aa64isar2.gpa3=0 id_aa64isar2.apa3=0"	   },
+	{ "arm64.nomte",		"id_aa64pfr1.mte=0" },
 	{ "nokaslr",			"kaslr.disabled=1" },
 };
 

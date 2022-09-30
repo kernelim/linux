@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:fs/libfs.c
+0x5a5e7ea3	simple_read_from_buffer	vmlinux	EXPORT_SYMBOL

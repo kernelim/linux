@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/arm64/lib/memcmp.S
+0x449ad0a7	memcmp	vmlinux	EXPORT_SYMBOL

@@ -1,1 +1,1 @@
-# CONFIG_SP5100_TCO is not set
+CONFIG_SP5100_TCO=m

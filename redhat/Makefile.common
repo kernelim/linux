@@ -1,6 +1,6 @@
 include Makefile.variables
 TOPDIR:=$(shell $(GIT) rev-parse --show-toplevel)
-REDHAT:=$(TOPDIR)/redhat
+export REDHAT:=$(TOPDIR)/redhat
 include $(TOPDIR)/Makefile.rhelver
 
 RPMBUILD := $(shell if [ -x "/usr/bin/rpmbuild" ]; then echo rpmbuild; \
@@ -22,6 +22,7 @@ ifneq ($(RPMKEXTRAVERSION),)
   PREBUILD:=0$(KEXTRAVERSION).
   UPSTREAM_TARBALL_NAME:=$(RPMKVERSION).$(RPMKPATCHLEVEL)$(RPMKEXTRAVERSION)
 else
+  KEXTRAVERSION:=
   ifeq ($(RPMKSUBLEVEL),0)
     MARKER:=v$(RPMKVERSION).$(RPMKPATCHLEVEL)
     UPSTREAM_TARBALL_NAME:=$(RPMKVERSION).$(RPMKPATCHLEVEL)
@@ -32,7 +33,7 @@ else
   PREBUILD:=
 endif
 
-DIST ?= .el9_0
+DIST ?= .el9_1
 ifneq ($(findstring .fc,$(DIST)),)
   DISTRO ?= fedora
 else

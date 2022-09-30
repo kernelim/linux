@@ -25,11 +25,20 @@
  *
  **************************************************************************/
 
+#include <linux/pci.h>
 #include <linux/sched/signal.h>
 
 #include "vmwgfx_drv.h"
 
 #define VMW_FENCE_WRAP (1 << 24)
+
+static u32 vmw_irqflag_fence_goal(struct vmw_private *vmw)
+{
+	if ((vmw->capabilities2 & SVGA_CAP2_EXTRA_REGS) != 0)
+		return SVGA_IRQFLAG_REG_FENCE_GOAL;
+	else
+		return SVGA_IRQFLAG_FENCE_GOAL;
+}
 
 /**
  * vmw_thread_fn - Deferred (process context) irq handler
@@ -95,7 +104,7 @@ static irqreturn_t vmw_irq_handler(int irq, void *arg)
 		wake_up_all(&dev_priv->fifo_queue);
 
 	if ((masked_status & (SVGA_IRQFLAG_ANY_FENCE |
-			      SVGA_IRQFLAG_FENCE_GOAL)) &&
+			      vmw_irqflag_fence_goal(dev_priv))) &&
 	    !test_and_set_bit(VMW_IRQTHREAD_FENCE, dev_priv->irqthread_pending))
 		ret = IRQ_WAKE_THREAD;
 
@@ -136,8 +145,7 @@ bool vmw_seqno_passed(struct vmw_private *dev_priv,
 	if (likely(dev_priv->last_read_seqno - seqno < VMW_FENCE_WRAP))
 		return true;
 
-	if (!(vmw_fifo_caps(dev_priv) & SVGA_FIFO_CAP_FENCE) &&
-	    vmw_fifo_idle(dev_priv, seqno))
+	if (!vmw_has_fences(dev_priv) && vmw_fifo_idle(dev_priv, seqno))
 		return true;
 
 	/**
@@ -159,6 +167,7 @@ int vmw_fallback_wait(struct vmw_private *dev_priv,
 		      unsigned long timeout)
 {
 	struct vmw_fifo_state *fifo_state = dev_priv->fifo;
+	bool fifo_down = false;
 
 	uint32_t count = 0;
 	uint32_t signal_seq;
@@ -175,12 +184,14 @@ int vmw_fallback_wait(struct vmw_private *dev_priv,
 	 */
 
 	if (fifo_idle) {
-		down_read(&fifo_state->rwsem);
 		if (dev_priv->cman) {
 			ret = vmw_cmdbuf_idle(dev_priv->cman, interruptible,
 					      10*HZ);
 			if (ret)
 				goto out_err;
+		} else if (fifo_state) {
+			down_read(&fifo_state->rwsem);
+			fifo_down = true;
 		}
 	}
 
@@ -217,12 +228,12 @@ int vmw_fallback_wait(struct vmw_private *dev_priv,
 		}
 	}
 	finish_wait(&dev_priv->fence_queue, &__wait);
-	if (ret == 0 && fifo_idle)
+	if (ret == 0 && fifo_idle && fifo_state)
 		vmw_fence_write(dev_priv, signal_seq);
 
 	wake_up_all(&dev_priv->fence_queue);
 out_err:
-	if (fifo_idle)
+	if (fifo_down)
 		up_read(&fifo_state->rwsem);
 
 	return ret;
@@ -265,13 +276,13 @@ void vmw_seqno_waiter_remove(struct vmw_private *dev_priv)
 
 void vmw_goal_waiter_add(struct vmw_private *dev_priv)
 {
-	vmw_generic_waiter_add(dev_priv, SVGA_IRQFLAG_FENCE_GOAL,
+	vmw_generic_waiter_add(dev_priv, vmw_irqflag_fence_goal(dev_priv),
 			       &dev_priv->goal_queue_waiters);
 }
 
 void vmw_goal_waiter_remove(struct vmw_private *dev_priv)
 {
-	vmw_generic_waiter_remove(dev_priv, SVGA_IRQFLAG_FENCE_GOAL,
+	vmw_generic_waiter_remove(dev_priv, vmw_irqflag_fence_goal(dev_priv),
 				  &dev_priv->goal_queue_waiters);
 }
 
@@ -287,12 +298,10 @@ static void vmw_irq_preinstall(struct drm_device *dev)
 void vmw_irq_uninstall(struct drm_device *dev)
 {
 	struct vmw_private *dev_priv = vmw_priv(dev);
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	uint32_t status;
 
 	if (!(dev_priv->capabilities & SVGA_CAP_IRQMASK))
-		return;
-
-	if (!dev->irq_enabled)
 		return;
 
 	vmw_write(dev_priv, SVGA_REG_IRQMASK, 0);
@@ -300,8 +309,7 @@ void vmw_irq_uninstall(struct drm_device *dev)
 	status = vmw_irq_status_read(dev_priv);
 	vmw_irq_status_write(dev_priv, status);
 
-	dev->irq_enabled = false;
-	free_irq(dev->irq, dev);
+	free_irq(pdev->irq, dev);
 }
 
 /**
@@ -313,20 +321,8 @@ void vmw_irq_uninstall(struct drm_device *dev)
  */
 int vmw_irq_install(struct drm_device *dev, int irq)
 {
-	int ret;
-
-	if (dev->irq_enabled)
-		return -EBUSY;
-
 	vmw_irq_preinstall(dev);
 
-	ret = request_threaded_irq(irq, vmw_irq_handler, vmw_thread_fn,
-				   IRQF_SHARED, VMWGFX_DRIVER_NAME, dev);
-	if (ret < 0)
-		return ret;
-
-	dev->irq_enabled = true;
-	dev->irq = irq;
-
-	return ret;
+	return request_threaded_irq(irq, vmw_irq_handler, vmw_thread_fn,
+				    IRQF_SHARED, VMWGFX_DRIVER_NAME, dev);
 }

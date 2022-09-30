@@ -73,6 +73,7 @@ What:		/sys/devices/system/cpu/cpu#/topology/core_id
 		/sys/devices/system/cpu/cpu#/topology/physical_package_id
 		/sys/devices/system/cpu/cpu#/topology/thread_siblings
 		/sys/devices/system/cpu/cpu#/topology/thread_siblings_list
+		/sys/devices/system/cpu/cpu#/topology/ppin
 Date:		December 2008
 Contact:	Linux kernel mailing list <linux-kernel@vger.kernel.org>
 Description:	CPU topology files that describe a logical CPU's relationship
@@ -102,6 +103,11 @@ Description:	CPU topology files that describe a logical CPU's relationship
 
 		thread_siblings_list: human-readable list of cpu#'s hardware
 		threads within the same core as cpu#
+
+		ppin: human-readable Protected Processor Identification
+		Number of the socket the cpu# belongs to. There should be
+		one per physical_package_id. File is readable only to
+		admin.
 
 		See Documentation/admin-guide/cputopology.rst for more information.
 
@@ -494,6 +500,15 @@ Description:	AArch64 CPU registers
 		'identification' directory exposes the CPU ID registers for
 		identifying model and revision of the CPU.
 
+What:		/sys/devices/system/cpu/aarch32_el0
+Date:		May 2021
+Contact:	Linux ARM Kernel Mailing list <linux-arm-kernel@lists.infradead.org>
+Description:	Identifies the subset of CPUs in the system that can execute
+		AArch32 (32-bit ARM) applications. If present, the same format as
+		/sys/devices/system/cpu/{offline,online,possible,present} is used.
+		If absent, then all or none of the CPUs can execute AArch32
+		applications and execve() will behave accordingly.
+
 What:		/sys/devices/system/cpu/cpu#/cpu_capacity
 Date:		December 2016
 Contact:	Linux kernel mailing list <linux-kernel@vger.kernel.org>
@@ -511,6 +526,7 @@ What:		/sys/devices/system/cpu/vulnerabilities
 		/sys/devices/system/cpu/vulnerabilities/srbds
 		/sys/devices/system/cpu/vulnerabilities/tsx_async_abort
 		/sys/devices/system/cpu/vulnerabilities/itlb_multihit
+		/sys/devices/system/cpu/vulnerabilities/mmio_stale_data
 Date:		January 2018
 Contact:	Linux kernel mailing list <linux-kernel@vger.kernel.org>
 Description:	Information about CPU vulnerabilities
@@ -640,3 +656,21 @@ Description:	SPURR ticks for cpuX when it was idle.
 
 		This sysfs interface exposes the number of SPURR ticks
 		for cpuX when it was idle.
+
+What: 		/sys/devices/system/cpu/cpuX/mte_tcf_preferred
+Date:		July 2021
+Contact:	Linux ARM Kernel Mailing list <linux-arm-kernel@lists.infradead.org>
+Description:	Preferred MTE tag checking mode
+
+		When a user program specifies more than one MTE tag checking
+		mode, this sysfs node is used to specify which mode should
+		be preferred when scheduling a task on that CPU. Possible
+		values:
+
+		================  ==============================================
+		"sync"	  	  Prefer synchronous mode
+		"asymm"	  	  Prefer asymmetric mode
+		"async"	  	  Prefer asynchronous mode
+		================  ==============================================
+
+		See also: Documentation/arm64/memory-tagging-extension.rst

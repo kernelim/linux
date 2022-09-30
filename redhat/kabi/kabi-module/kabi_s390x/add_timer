@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/time/timer.c
+0x0c2a113a	add_timer	vmlinux	EXPORT_SYMBOL

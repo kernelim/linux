@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/x86/kernel/apic/x2apic_uv_x.c
+0x12e285ec	is_uv_system	vmlinux	EXPORT_SYMBOL_GPL

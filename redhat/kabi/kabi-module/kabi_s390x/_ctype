@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:lib/ctype.c
+0x11089ac7	_ctype	vmlinux	EXPORT_SYMBOL

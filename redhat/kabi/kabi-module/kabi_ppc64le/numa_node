@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:mm/page_alloc.c
+0x618911fc	numa_node	vmlinux	EXPORT_SYMBOL

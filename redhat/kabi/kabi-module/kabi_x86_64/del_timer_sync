@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/time/timer.c
+0xcd3c7696	del_timer_sync	vmlinux	EXPORT_SYMBOL

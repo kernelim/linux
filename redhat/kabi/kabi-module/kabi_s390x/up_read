@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/locking/rwsem.c
+0x555ccb97	up_read	vmlinux	EXPORT_SYMBOL

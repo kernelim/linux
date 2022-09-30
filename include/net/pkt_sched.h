@@ -11,6 +11,7 @@
 #include <uapi/linux/pkt_sched.h>
 
 #define DEFAULT_TX_QUEUE_LEN	1000
+#define STAB_SIZE_LOG_MAX	30
 
 struct qdisc_walker {
 	int	stop;
@@ -60,12 +61,6 @@ typedef long	psched_tdiff_t;
 static inline psched_time_t psched_get_time(void)
 {
 	return PSCHED_NS2TICKS(ktime_get_ns());
-}
-
-static inline psched_tdiff_t
-psched_tdiff_bounded(psched_time_t tv1, psched_time_t tv2, psched_time_t bound)
-{
-	return min(tv1 - tv2, bound);
 }
 
 struct qdisc_watchdog {

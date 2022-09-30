@@ -43,8 +43,7 @@
  *	some processing on the characters first.  If this function is
  *	not defined, the user will receive an EIO error.
  *
- * int	(*ioctl)(struct tty_struct * tty, struct file * file,
- *		 unsigned int cmd, unsigned long arg);
+ * int	(*ioctl)(struct tty_struct *tty, unsigned int cmd, unsigned long arg);
  *
  *	This function is called when the user requests an ioctl which
  *	is not handled by the tty layer or the low-level tty driver.
@@ -54,8 +53,8 @@
  *	low-level driver can "grab" an ioctl request before the line
  *	discpline has a chance to see it.
  *
- * int	(*compat_ioctl)(struct tty_struct * tty, struct file * file,
- *		        unsigned int cmd, unsigned long arg);
+ * int	(*compat_ioctl)(struct tty_struct *tty, unsigned int cmd,
+ *			unsigned long arg);
  *
  *	Process ioctl calls from 32-bit process on 64-bit system
  *
@@ -188,10 +187,10 @@ struct tty_ldisc_ops {
 			void **cookie, unsigned long offset);
 	ssize_t	(*write)(struct tty_struct *tty, struct file *file,
 			 const unsigned char *buf, size_t nr);
-	int	(*ioctl)(struct tty_struct *tty, struct file *file,
-			 unsigned int cmd, unsigned long arg);
-	int	(*compat_ioctl)(struct tty_struct *tty, struct file *file,
-				unsigned int cmd, unsigned long arg);
+	int	(*ioctl)(struct tty_struct *tty, unsigned int cmd,
+			unsigned long arg);
+	int	(*compat_ioctl)(struct tty_struct *tty, unsigned int cmd,
+			unsigned long arg);
 	void	(*set_termios)(struct tty_struct *tty, struct ktermios *old);
 	__poll_t (*poll)(struct tty_struct *, struct file *,
 			     struct poll_table_struct *);

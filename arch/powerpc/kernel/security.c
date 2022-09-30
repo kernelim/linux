@@ -44,7 +44,7 @@ static void enable_barrier_nospec(bool enable)
 	do_barrier_nospec_fixups(enable);
 }
 
-void setup_barrier_nospec(void)
+void __init setup_barrier_nospec(void)
 {
 	bool enable;
 
@@ -132,7 +132,7 @@ early_param("nospectre_v2", handle_nospectre_v2);
 #endif /* CONFIG_PPC_FSL_BOOK3E || CONFIG_PPC_BOOK3S_64 */
 
 #ifdef CONFIG_PPC_FSL_BOOK3E
-void setup_spectre_v2(void)
+void __init setup_spectre_v2(void)
 {
 	if (no_spectrev2 || cpu_mitigations_off())
 		do_btb_flush_fixups();
@@ -262,6 +262,11 @@ static int __init handle_no_stf_barrier(char *p)
 }
 
 early_param("no_stf_barrier", handle_no_stf_barrier);
+
+enum stf_barrier_type stf_barrier_type_get(void)
+{
+	return stf_enabled_flush_types;
+}
 
 /* This is the generic flag used by other architectures */
 static int __init handle_ssbd(char *p)

@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/sched/core.c
+0x48d88a2c	__SCT__preempt_schedule	vmlinux	EXPORT_SYMBOL

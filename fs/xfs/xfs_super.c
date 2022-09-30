@@ -756,6 +756,7 @@ xfs_fs_sync_fs(
 	int			wait)
 {
 	struct xfs_mount	*mp = XFS_M(sb);
+	int			error;
 
 	/*
 	 * Doing anything during the async pass would be counterproductive.
@@ -763,7 +764,10 @@ xfs_fs_sync_fs(
 	if (!wait)
 		return 0;
 
-	xfs_log_force(mp, XFS_LOG_SYNC);
+	error = xfs_log_force(mp, XFS_LOG_SYNC);
+	if (error)
+		return error;
+
 	if (laptop_mode) {
 		/*
 		 * The disk must be active because we're syncing.
@@ -1569,9 +1573,7 @@ xfs_fs_fill_super(
 	}
 
 	if (mp->m_flags & XFS_MOUNT_DISCARD) {
-		struct request_queue *q = bdev_get_queue(sb->s_bdev);
-
-		if (!blk_queue_discard(q)) {
+		if (!bdev_max_discard_sectors(sb->s_bdev)) {
 			xfs_warn(mp, "mounting with \"discard\" option, but "
 					"the device does not support discard");
 			mp->m_flags &= ~XFS_MOUNT_DISCARD;

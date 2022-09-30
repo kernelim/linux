@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:lib/string.c
+0xebbf1dba	strncasecmp	vmlinux	EXPORT_SYMBOL

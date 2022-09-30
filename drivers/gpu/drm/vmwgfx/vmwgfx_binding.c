@@ -354,6 +354,27 @@ void vmw_binding_add(struct vmw_ctx_binding_state *cbs,
 }
 
 /**
+ * vmw_binding_cb_offset_update: Update the offset of a cb binding
+ *
+ * @cbs: Pointer to the context binding state tracker.
+ * @shader_slot: The shader slot of the binding.
+ * @slot: The slot of the binding.
+ * @offsetInBytes: The new offset of the binding.
+ *
+ * Updates the offset of an existing cb binding in the context binding
+ * state structure @cbs.
+ */
+void vmw_binding_cb_offset_update(struct vmw_ctx_binding_state *cbs,
+				  u32 shader_slot, u32 slot, u32 offsetInBytes)
+{
+	struct vmw_ctx_bindinfo *loc =
+		vmw_binding_loc(cbs, vmw_ctx_binding_cb, shader_slot, slot);
+	struct vmw_ctx_bindinfo_cb *loc_cb =
+		(struct vmw_ctx_bindinfo_cb *)((u8 *) loc);
+	loc_cb->offset = offsetInBytes;
+}
+
+/**
  * vmw_binding_add_uav_index - Add UAV index for tracking.
  * @cbs: Pointer to the context binding state tracker.
  * @slot: UAV type to which bind this index.
@@ -715,7 +736,7 @@ static int vmw_binding_scrub_cb(struct vmw_ctx_bindinfo *bi, bool rebind)
  * without checking which bindings actually need to be emitted
  *
  * @cbs: Pointer to the context's struct vmw_ctx_binding_state
- * @bi: Pointer to where the binding info array is stored in @cbs
+ * @biv: Pointer to where the binding info array is stored in @cbs
  * @max_num: Maximum number of entries in the @bi array.
  *
  * Scans the @bi array for bindings and builds a buffer of view id data.
@@ -725,11 +746,9 @@ static int vmw_binding_scrub_cb(struct vmw_ctx_bindinfo *bi, bool rebind)
  * contains the command data.
  */
 static void vmw_collect_view_ids(struct vmw_ctx_binding_state *cbs,
-				 const struct vmw_ctx_bindinfo *bi,
+				 const struct vmw_ctx_bindinfo_view *biv,
 				 u32 max_num)
 {
-	const struct vmw_ctx_bindinfo_view *biv =
-		container_of(bi, struct vmw_ctx_bindinfo_view, bi);
 	unsigned long i;
 
 	cbs->bind_cmd_count = 0;
@@ -838,7 +857,7 @@ static int vmw_emit_set_sr(struct vmw_ctx_binding_state *cbs,
  */
 static int vmw_emit_set_rt(struct vmw_ctx_binding_state *cbs)
 {
-	const struct vmw_ctx_bindinfo *loc = &cbs->render_targets[0].bi;
+	const struct vmw_ctx_bindinfo_view *loc = &cbs->render_targets[0];
 	struct {
 		SVGA3dCmdHeader header;
 		SVGA3dCmdDXSetRenderTargets body;
@@ -846,7 +865,7 @@ static int vmw_emit_set_rt(struct vmw_ctx_binding_state *cbs)
 	size_t cmd_size, view_id_size;
 	const struct vmw_resource *ctx = vmw_cbs_context(cbs);
 
-	vmw_collect_view_ids(cbs, loc, SVGA3D_MAX_SIMULTANEOUS_RENDER_TARGETS);
+	vmw_collect_view_ids(cbs, loc, SVGA3D_DX_MAX_RENDER_TARGETS);
 	view_id_size = cbs->bind_cmd_count*sizeof(uint32);
 	cmd_size = sizeof(*cmd) + view_id_size;
 	cmd = VMW_CMD_CTX_RESERVE(ctx->dev_priv, cmd_size, ctx->id);
@@ -874,7 +893,7 @@ static int vmw_emit_set_rt(struct vmw_ctx_binding_state *cbs)
  * without checking which bindings actually need to be emitted
  *
  * @cbs: Pointer to the context's struct vmw_ctx_binding_state
- * @bi: Pointer to where the binding info array is stored in @cbs
+ * @biso: Pointer to where the binding info array is stored in @cbs
  * @max_num: Maximum number of entries in the @bi array.
  *
  * Scans the @bi array for bindings and builds a buffer of SVGA3dSoTarget data.
@@ -884,11 +903,9 @@ static int vmw_emit_set_rt(struct vmw_ctx_binding_state *cbs)
  * contains the command data.
  */
 static void vmw_collect_so_targets(struct vmw_ctx_binding_state *cbs,
-				   const struct vmw_ctx_bindinfo *bi,
+				   const struct vmw_ctx_bindinfo_so_target *biso,
 				   u32 max_num)
 {
-	const struct vmw_ctx_bindinfo_so_target *biso =
-		container_of(bi, struct vmw_ctx_bindinfo_so_target, bi);
 	unsigned long i;
 	SVGA3dSoTarget *so_buffer = (SVGA3dSoTarget *) cbs->bind_cmd_buffer;
 
@@ -919,7 +936,7 @@ static void vmw_collect_so_targets(struct vmw_ctx_binding_state *cbs,
  */
 static int vmw_emit_set_so_target(struct vmw_ctx_binding_state *cbs)
 {
-	const struct vmw_ctx_bindinfo *loc = &cbs->so_targets[0].bi;
+	const struct vmw_ctx_bindinfo_so_target *loc = &cbs->so_targets[0];
 	struct {
 		SVGA3dCmdHeader header;
 		SVGA3dCmdDXSetSOTargets body;
@@ -1066,7 +1083,7 @@ static int vmw_emit_set_vb(struct vmw_ctx_binding_state *cbs)
 
 static int vmw_emit_set_uav(struct vmw_ctx_binding_state *cbs)
 {
-	const struct vmw_ctx_bindinfo *loc = &cbs->ua_views[0].views[0].bi;
+	const struct vmw_ctx_bindinfo_view *loc = &cbs->ua_views[0].views[0];
 	struct {
 		SVGA3dCmdHeader header;
 		SVGA3dCmdDXSetUAViews body;
@@ -1074,7 +1091,7 @@ static int vmw_emit_set_uav(struct vmw_ctx_binding_state *cbs)
 	size_t cmd_size, view_id_size;
 	const struct vmw_resource *ctx = vmw_cbs_context(cbs);
 
-	vmw_collect_view_ids(cbs, loc, SVGA3D_MAX_UAVIEWS);
+	vmw_collect_view_ids(cbs, loc, vmw_max_num_uavs(cbs->dev_priv));
 	view_id_size = cbs->bind_cmd_count*sizeof(uint32);
 	cmd_size = sizeof(*cmd) + view_id_size;
 	cmd = VMW_CMD_CTX_RESERVE(ctx->dev_priv, cmd_size, ctx->id);
@@ -1096,7 +1113,7 @@ static int vmw_emit_set_uav(struct vmw_ctx_binding_state *cbs)
 
 static int vmw_emit_set_cs_uav(struct vmw_ctx_binding_state *cbs)
 {
-	const struct vmw_ctx_bindinfo *loc = &cbs->ua_views[1].views[0].bi;
+	const struct vmw_ctx_bindinfo_view *loc = &cbs->ua_views[1].views[0];
 	struct {
 		SVGA3dCmdHeader header;
 		SVGA3dCmdDXSetCSUAViews body;
@@ -1104,7 +1121,7 @@ static int vmw_emit_set_cs_uav(struct vmw_ctx_binding_state *cbs)
 	size_t cmd_size, view_id_size;
 	const struct vmw_resource *ctx = vmw_cbs_context(cbs);
 
-	vmw_collect_view_ids(cbs, loc, SVGA3D_MAX_UAVIEWS);
+	vmw_collect_view_ids(cbs, loc, vmw_max_num_uavs(cbs->dev_priv));
 	view_id_size = cbs->bind_cmd_count*sizeof(uint32);
 	cmd_size = sizeof(*cmd) + view_id_size;
 	cmd = VMW_CMD_CTX_RESERVE(ctx->dev_priv, cmd_size, ctx->id);
@@ -1331,8 +1348,7 @@ static int vmw_binding_scrub_so(struct vmw_ctx_bindinfo *bi, bool rebind)
 }
 
 /**
- * vmw_binding_state_alloc - Allocate a struct vmw_ctx_binding_state with
- * memory accounting.
+ * vmw_binding_state_alloc - Allocate a struct vmw_ctx_binding_state.
  *
  * @dev_priv: Pointer to a device private structure.
  *
@@ -1342,20 +1358,9 @@ struct vmw_ctx_binding_state *
 vmw_binding_state_alloc(struct vmw_private *dev_priv)
 {
 	struct vmw_ctx_binding_state *cbs;
-	struct ttm_operation_ctx ctx = {
-		.interruptible = false,
-		.no_wait_gpu = false
-	};
-	int ret;
-
-	ret = ttm_mem_global_alloc(vmw_mem_glob(dev_priv), sizeof(*cbs),
-				&ctx);
-	if (ret)
-		return ERR_PTR(ret);
 
 	cbs = vzalloc(sizeof(*cbs));
 	if (!cbs) {
-		ttm_mem_global_free(vmw_mem_glob(dev_priv), sizeof(*cbs));
 		return ERR_PTR(-ENOMEM);
 	}
 
@@ -1366,17 +1371,13 @@ vmw_binding_state_alloc(struct vmw_private *dev_priv)
 }
 
 /**
- * vmw_binding_state_free - Free a struct vmw_ctx_binding_state and its
- * memory accounting info.
+ * vmw_binding_state_free - Free a struct vmw_ctx_binding_state.
  *
  * @cbs: Pointer to the struct vmw_ctx_binding_state to be freed.
  */
 void vmw_binding_state_free(struct vmw_ctx_binding_state *cbs)
 {
-	struct vmw_private *dev_priv = cbs->dev_priv;
-
 	vfree(cbs);
-	ttm_mem_global_free(vmw_mem_glob(dev_priv), sizeof(*cbs));
 }
 
 /**
@@ -1444,7 +1445,7 @@ u32 vmw_binding_dirtying(enum vmw_ctx_binding_type binding_type)
 static void vmw_binding_build_asserts(void)
 {
 	BUILD_BUG_ON(SVGA3D_NUM_SHADERTYPE_DX10 != 3);
-	BUILD_BUG_ON(SVGA3D_MAX_SIMULTANEOUS_RENDER_TARGETS > SVGA3D_RT_MAX);
+	BUILD_BUG_ON(SVGA3D_DX_MAX_RENDER_TARGETS > SVGA3D_RT_MAX);
 	BUILD_BUG_ON(sizeof(uint32) != sizeof(u32));
 
 	/*

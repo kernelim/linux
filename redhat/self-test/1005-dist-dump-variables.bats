@@ -5,25 +5,27 @@ function prologue()
     tag=$1
     ofile=$BATS_TMPDIR/$tag.out
     # Have to unset environment variables that may be inherited from supra-make:
-    grep "^[ 	]*[a-zA-Z_][a-zA-Z_0-9]*[ 	]*[:?]*=" \
-         $BATS_TEST_DIRNAME/../Makefile.common | \
-        sed -e 's/[ 	]*\([a-zA-Z_][a-zA-Z_0-9]*\).*/unset \1/' | \
-        sort | uniq > $BATS_TMPDIR/unset-vars.sh
-    source $BATS_TMPDIR/unset-vars.sh
+    make dist-dump-variables | grep "=" | cut -d"=" -f1 | while read VAR; do unset "$VAR"; done
     GIT=$BATS_TEST_DIRNAME/egit.sh HEAD=$tag EGIT_OVERRIDE_DESCRIBE=$tag DIST=.fc33 make dist-dump-variables > $ofile
 }
 
 function checkversion()
 {
-    status=1
-    if grep -x "_TAG=$1" $ofile && \
-            grep -x "RPMKVERSION=$2" $ofile && grep -x "RPMKPATCHLEVEL=$3" $ofile && \
-            grep -x "RPMKSUBLEVEL=$4" $ofile && grep -x "RPMKEXTRAVERSION=$5" $ofile && \
-            grep -x "KEXTRAVERSION=$6" $ofile && \
-            grep -x "SNAPSHOT=$7" $ofile
-    then
-        status=$?
-    fi
+	echo "verifying _TAG=$1"
+	grep -E "^_TAG=$1" $ofile
+	echo "verifying RPMKVERSION=$2"
+	grep -E "^RPMKVERSION=$2" $ofile
+	echo "verifying RPMPATCHLEVEL=$3"
+	grep -E "^RPMKPATCHLEVEL=$3" $ofile
+	echo "verifying RPMSUBLEVEL=$4"
+	grep -E "^RPMKSUBLEVEL=$4" $ofile
+	echo "verifying RPMEXTRAVERSION=$5"
+	grep -E "^RPMKEXTRAVERSION=$5" $ofile
+	echo "verifying KEXTRAVERSION=$6"
+	grep -E "^KEXTRAVERSION=$6" $ofile
+	echo "verifying SNAPSHOT=$6"
+	grep -E "^SNAPSHOT=$7" $ofile
+	status=0
 }
 
 @test "dist-dump-variables v5.8" {

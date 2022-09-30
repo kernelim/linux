@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/powerpc/lib/string.S
+0x9166fada	strncpy	vmlinux	EXPORT_SYMBOL

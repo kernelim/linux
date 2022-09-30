@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:mm/mempool.c
+0x8a99a016	mempool_free_slab	vmlinux	EXPORT_SYMBOL

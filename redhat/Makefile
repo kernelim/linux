@@ -50,6 +50,14 @@ KABIDW := $(REDHAT)/kabi-dwarf
 
 include Makefile.cross
 
+RHJOBS?=$(shell j=$$(echo $(MAKEFLAGS) | grep -Eo "\ -j[0-9]*" | xargs ); \
+	if [ -z "$${j}" ]; then \
+		echo "1"; \
+	else \
+		j=$$(echo "$${j}" | tr -d "\-j"); \
+		[ -z "$${j}" ] && nproc --all || echo $${j}; \
+	fi)
+
 default: dist-help
 
 dist-python-check:
@@ -79,6 +87,101 @@ dist-kabi-dup: dist-python-check
 				$(REDHAT)/kabi/Module.kabi_dup_$$KABIARCH;\
 		fi \
 	done;
+
+dist-assert-tree-clean:
+ifeq ($(FORCE),)
+	@if ! git diff-index --quiet --cached HEAD -- &> /dev/null; then \
+		echo "ERROR: staged changes found. Please clean the git tree."; >&2 \
+		git status; \
+		exit 1; \
+	fi
+	@if ! git diff-files --quiet &> /dev/null; then \
+		echo "ERROR: unstaged changes found. Please clean the git tree." >&2; \
+		git status; \
+		exit 1; \
+	fi
+	@if [ $$(git ls-files --exclude-standard --others | wc -l) -gt 0 ]; then \
+		echo "ERROR: untracked files found. Please clean the git tree." >&2; \
+		git status; \
+		exit 1; \
+	fi
+endif
+
+KABI_SUPPORTED_ARCHS ?= $(patsubst kabi_%,%,$(notdir $(wildcard kabi/kabi-module/*)))
+export KABI_CROSS_COMPILE_PREFIX ?= /usr/bin/
+export KABI_CROSS_COMPILE_SUFFIX ?= -linux-gnu-
+KABI_CROSS_COMPILE = $(patsubst %,$(KABI_CROSS_COMPILE_PREFIX)%$(KABI_CROSS_COMPILE_SUFFIX),$(filter-out $(CURARCH),$(KABI_SUPPORTED_ARCHS)))
+
+ifeq ($(ARCH),$(CURARCH))
+dist-assert-cross-tools: # no dependencies when we're building for native arch
+else
+dist-assert-cross-tools: $(patsubst %,%gcc,$(KABI_CROSS_COMPILE))
+endif
+
+$(KABI_CROSS_COMPILE_PREFIX)%$(KABI_CROSS_COMPILE_SUFFIX)gcc:
+	@echo "ERROR: couldn't find cross compilation toolchain (looking for: $@)" >&2
+	@echo "       override KABI_CROSS_COMPILE_PREFIX to set path (currently $(KABI_CROSS_COMPILE_PREFIX))" >&2
+	@echo "       override KABI_CROSS_COMPILE_SUFFIX to set suffix (currently $(KABI_CROSS_COMPILE_SUFFIX))" >&2
+	@exit 1
+
+
+ifeq ($(ARCH),)
+dist-kabi-index: ARCH=$(CURARCH)
+endif
+dist-kabi-index:
+	: > $(REDHAT)/kabi/kabi-module/kabi_$(ARCH)/.index.json
+	for sym in $$(find $(REDHAT)/kabi/kabi-module/kabi_$(ARCH)/ -type f -not -name "*.*" \
+	                  -exec basename {} \;); do \
+		$(REDHAT)/kabi/symtypes index \
+			$(REDHAT)/kabi/kabi-module/kabi_$(ARCH)/.$$(basename $$sym) \
+			-o $(REDHAT)/kabi/kabi-module/kabi_$(ARCH)/.index.json || : ; \
+	done
+
+ifeq ($(ARCH),)
+dist-kabi-image-%: ARCH=$(CURARCH)
+endif
+dist-kabi-image-%: NODE = $(patsubst dist-kabi-image-%,%,$@)
+dist-kabi-image-%: dist-kabi-index
+	$(REDHAT)/kabi/symtypes image -s $(NODE) -t $(REDHAT)/kabi/kabi-module/kabi_$(ARCH)/.index.json
+
+ifeq ($(ARCH),)
+dist-kabi-preimage-%: ARCH=$(CURARCH)
+endif
+dist-kabi-preimage-%: NODE = $(patsubst dist-kabi-preimage-%,%,$@)
+dist-kabi-preimage-%: dist-kabi-index
+	@node="$(NODE)"; \
+	if [ "${node:1:1}" = "#" ]; then \
+		$(REDHAT)/kabi/symtypes preimage -s '$(NODE)' -t $(REDHAT)/kabi/kabi-module/kabi_$(ARCH)/.index.json; \
+	else \
+		for prefix in {E,e,s,t,u}; do \
+		$(REDHAT)/kabi/symtypes preimage -S -s "$$prefix#$(NODE)" -t $(REDHAT)/kabi/kabi-module/kabi_$(ARCH)/.index.json || :; \
+		done; \
+	fi
+
+dist-symtype-diff: KABI_TOOL = $(REDHAT)/kabi/diff-kabi
+dist-symtype-diff: dist-assert-cross-tools dist-assert-tree-clean dist-configs dist-symtype-shared
+
+dist-kabi-update: KABI_TOOL = $(REDHAT)/kabi/update-kabi
+dist-kabi-update: dist-assert-cross-tools dist-assert-tree-clean dist-configs dist-symtype-shared
+
+dist-symtype-shared:
+	@declare -a _ARGS; \
+	declare -a _ARCHS; \
+	for symbol in $${SYMBOL:-}; do \
+		_ARGS=("$${_ARGS[@]}" -s "$$symbol"); \
+	done; \
+	if [ -n "$${SRC:-}" ]; then \
+		_ARGS=("$${_ARGS[@]}" $$SRC); \
+	fi; \
+	if [ -n "$${ARCH:-}" ]; then \
+		$(KABI_TOOL) -a $(ARCH) $${_ARGS[@]}; \
+	else \
+		cnt=1; \
+		for arch in $(KABI_SUPPORTED_ARCHS); do \
+			$(KABI_TOOL) -a $$arch $${_ARGS[@]} || : ; \
+			let cnt++; \
+		done; \
+	fi
 
 dist-check-kabi: dist-kabi
 	@if [ ! -e $(_OUTPUT)/Module.symvers ]; then \
@@ -121,12 +224,12 @@ dist-kabi-dw-check: dist-kabi
 	@rm -rf $(KABIDW)/base/$(CURARCH).tmp
 
 dist-configs-commit: dist-configs-prep
-	@cd $(REDHAT)/configs; VERSION=$(KVERSION) ./generate_all_configs.sh "$(FLAVOR)" 1; \
-	./process_configs.sh -z $(PACKAGE_NAME) $(KVERSION) "" $(FLAVOR)
+	+@cd $(REDHAT)/configs; VERSION=$(KVERSION) ./generate_all_configs.sh "$(FLAVOR)" 1; \
+	./process_configs.sh -z "$(PACKAGE_NAME)" "$(KVERSION)" "" "$(FLAVOR)" "$(RHJOBS)"
 
 dist-configs: dist-configs-prep
-	@cd $(REDHAT)/configs; VERSION=$(KVERSION) ./generate_all_configs.sh "$(FLAVOR)" 1; \
-	./process_configs.sh $(PROCESS_CONFIGS_OPTS) $(PACKAGE_NAME) $(KVERSION)
+	+@cd $(REDHAT)/configs; VERSION=$(KVERSION) ./generate_all_configs.sh "$(FLAVOR)" 1; \
+	./process_configs.sh $(PROCESS_CONFIGS_OPTS) "$(PACKAGE_NAME)" "$(KVERSION)" "" "" "$(RHJOBS)"
 
 dist-fedora-configs: FLAVOR = fedora
 dist-fedora-configs: dist-configs
@@ -137,19 +240,17 @@ dist-rhel-configs: dist-configs
 rh-configs: dist-rhel-configs
 
 dist-configs-check: dist-configs-prep
-	cd $(REDHAT)/configs; ./process_configs.sh $(PROCESS_CONFIGS_CHECK_OPTS) $(PACKAGE_NAME)
+	+cd $(REDHAT)/configs; ./process_configs.sh $(PROCESS_CONFIGS_CHECK_OPTS) $(PACKAGE_NAME) "" "" "" "$(RHJOBS)"
 
 dist-configs-prep: dist-clean-configs dist-buildreq-check
-	cd $(REDHAT)/configs; ./build_configs.sh "partial" "$(ARCH_MACH)" "snip"
-	cd $(REDHAT)/configs; ./build_configs.sh "$(PACKAGE_NAME)" "$(ARCH_MACH)" "$(FLAVOR)"
+	+cd $(REDHAT)/configs; ./build_configs.sh "partial" "$(ARCH_MACH)" "snip" "$(RHJOBS)"
+	+cd $(REDHAT)/configs; ./build_configs.sh "$(PACKAGE_NAME)" "$(ARCH_MACH)" "$(FLAVOR)" "$(RHJOBS)"
 
 dist-configs-arch: ARCH_MACH = $(MACH)
 dist-configs-arch: dist-configs
 
 dist-clean-configs:
-	cd $(REDHAT)/configs; rm -f kernel-*.config \
-					kernel-*.config.orig \
-					kernel-*.config.tmp
+	@cd $(REDHAT)/configs; rm -f kernel-*.config kernel-*.config.orig kernel-*.config.tmp
 
 dist-clean-sources:
 	@rm -f $(RPM)/SPECS/*
@@ -162,10 +263,7 @@ dist-clean-rpmdirs:
 		rm -rf $$i; \
 	done;
 
-dist-clean-scripts:
-	@rm -f dist-dump-variables.sh
-
-dist-clean: dist-clean-sources dist-clean-configs dist-clean-rpmdirs dist-clean-scripts
+dist-clean: dist-clean-sources dist-clean-configs dist-clean-rpmdirs
 
 dist-stub-key:
 	@echo "Copying pre-generated keys";
@@ -397,13 +495,7 @@ dist-git: dist-srpm $(KABI_TARBALL) $(KABIDW_TARBALL)
 ifeq ("$(RHDISTGIT_BRANCH)", "")
  $(error RHDISTGIT_BRANCH unset)
 endif
-	@if [ "$(DISTRO)" == "centos" ]; then \
-	if [ -z "$(GL_DISTGIT_USER)" ]; then \
-		echo "Error: please provide your gitlab username with GL_DISTGIT_USER"; \
-		exit 1; \
-	fi; \
-	fi
-	$(REDHAT)/scripts/rh-dist-git.sh "$(RHDISTGIT_BRANCH)" "$(RHDISTGIT_CACHE)" "$(RHDISTGIT_TMP)" "$(RHDISTGIT)" "$(TARBALL)" "$(KABI_TARBALL)" "$(KABIDW_TARBALL)" "$(PACKAGE_NAME)" "$(RPMVERSION)-$(PKGRELEASE)" "$(REDHAT)/$(CHANGELOG)" "$(RHEL_MAJOR)" "$(RHPKG_BIN)" "$(SRPMS)/$(PACKAGE_NAME)-$(KVERSION)-$(PKGRELEASE)$(SRPM_DIST).src.rpm"
+	$(REDHAT)/scripts/rh-dist-git.sh "$(RHDISTGIT_BRANCH)" "$(RHDISTGIT_CACHE)" "$(RHDISTGIT_TMP)" "$(TARBALL)" "$(KABI_TARBALL)" "$(KABIDW_TARBALL)" "$(PACKAGE_NAME)" "$(RPMVERSION)-$(PKGRELEASE)" "$(REDHAT)/$(CHANGELOG)" "$(RHEL_MAJOR)" "$(RHPKG_BIN)" "$(SRPMS)/$(PACKAGE_NAME)-$(KVERSION)-$(PKGRELEASE)$(SRPM_DIST).src.rpm"
 
 dist-rtg: dist-release
 	@$(MAKE) dist-release-tag
@@ -418,12 +510,8 @@ dist-get-latest:
 dist-os-version:
 	@echo "OSVERSION: $(RHEL_MAJOR).$(RHEL_MINOR)"
 
-.EXPORT_ALL_VARIABLES:
-.PHONY: dist-dump-variables
 dist-dump-variables:
-	grep -h "^[ 	]*[a-zA-Z_][a-zA-Z_0-9]*[ 	]*[:?]*=" $(REDHAT)/Makefile.common $(REDHAT)/Makefile $(TOPDIR)/Makefile.rhelver | sed -e 's/[ 	]*\([a-zA-Z_][a-zA-Z_0-9]*\).*/echo "\1=$$\1"/' | sort | uniq > dist-dump-variables.sh
-	chmod +x $(REDHAT)/dist-dump-variables.sh
-	@$(REDHAT)/dist-dump-variables.sh
+	@$(foreach V,$(sort $(.VARIABLES)), $(if $(filter-out environment% default automatic, $(origin $V)),$(info $V=$($V) )))
 
 dist-self-test:
 	@if test -x /usr/bin/bats; then \
@@ -532,6 +620,8 @@ dist-full-help:
 	@echo  '  dist-kabi-dw-base   - Generate the base dataset for kABI DWARF-based check.'
 	@echo  '  dist-kabi-dw-check  - Run DWARF-based kABI comparison of current binaries'
 	@echo  '                        with the base dataset.'
+	@echo  '  dist-kabi-update    - Update kabi stablelist checksums.'
+	@echo  '  dist-symtype-diff   - Diff kabi stablelist and current kernel.'
 
 	@echo  ''
 	@echo  'Configuration targets:'

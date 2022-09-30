@@ -8,19 +8,13 @@
  */
 
 /*
- * CMSPAR, some architectures can't have space and mark parity.
- */
-
-#ifndef CMSPAR
-#define CMSPAR			0
-#endif
-
-/*
  * Major and minor numbers.
  */
 
 #define ACM_TTY_MAJOR		166
 #define ACM_TTY_MINORS		256
+
+#define ACM_MINOR_INVALID	ACM_TTY_MINORS
 
 /*
  * Requests.

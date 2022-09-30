@@ -170,7 +170,7 @@ static void free_tty_struct(struct tty_struct *tty)
 {
 	tty_ldisc_deinit(tty);
 	put_device(tty->dev);
-	kfree(tty->write_buf);
+	kvfree(tty->write_buf);
 	tty->magic = 0xDEADDEAD;
 	kfree(tty);
 }
@@ -997,9 +997,6 @@ static inline ssize_t do_tty_write(
 	 * layer has problems with bigger chunks. It will
 	 * claim to be able to handle more characters than
 	 * it actually does.
-	 *
-	 * FIXME: This can probably go away now except that 64K chunks
-	 * are too likely to fail unless switched to vmalloc...
 	 */
 	chunk = 2048;
 	if (test_bit(TTY_NO_WRITE_SPLIT, &tty->flags))
@@ -1014,12 +1011,12 @@ static inline ssize_t do_tty_write(
 		if (chunk < 1024)
 			chunk = 1024;
 
-		buf_chunk = kmalloc(chunk, GFP_KERNEL);
+		buf_chunk = kvmalloc(chunk, GFP_KERNEL | __GFP_RETRY_MAYFAIL);
 		if (!buf_chunk) {
 			ret = -ENOMEM;
 			goto out;
 		}
-		kfree(tty->write_buf);
+		kvfree(tty->write_buf);
 		tty->write_cnt = chunk;
 		tty->write_buf = buf_chunk;
 	}
@@ -2811,7 +2808,7 @@ long tty_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		return hung_up_tty_ioctl(file, cmd, arg);
 	retval = -EINVAL;
 	if (ld->ops->ioctl) {
-		retval = ld->ops->ioctl(tty, file, cmd, arg);
+		retval = ld->ops->ioctl(tty, cmd, arg);
 		if (retval == -ENOIOCTLCMD)
 			retval = -ENOTTY;
 	}
@@ -2990,10 +2987,10 @@ static long tty_compat_ioctl(struct file *file, unsigned int cmd,
 	if (!ld)
 		return hung_up_tty_compat_ioctl(file, cmd, arg);
 	if (ld->ops->compat_ioctl)
-		retval = ld->ops->compat_ioctl(tty, file, cmd, arg);
+		retval = ld->ops->compat_ioctl(tty, cmd, arg);
 	if (retval == -ENOIOCTLCMD && ld->ops->ioctl)
-		retval = ld->ops->ioctl(tty, file,
-				(unsigned long)compat_ptr(cmd), arg);
+		retval = ld->ops->ioctl(tty, (unsigned long)compat_ptr(cmd),
+				arg);
 	tty_ldisc_deref(ld);
 
 	return retval;

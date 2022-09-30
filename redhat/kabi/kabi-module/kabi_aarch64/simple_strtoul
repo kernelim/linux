@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:lib/vsprintf.c
+0x20000329	simple_strtoul	vmlinux	EXPORT_SYMBOL

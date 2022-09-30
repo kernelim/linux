@@ -639,7 +639,7 @@ static void __init reserve_crashkernel(void)
 	}
 
 	if (register_memory_notifier(&kdump_mem_nb)) {
-		memblock_free(crash_base, crash_size);
+		memblock_phys_free(crash_base, crash_size);
 		return;
 	}
 
@@ -739,7 +739,7 @@ static void __init check_initrd(void)
 	if (INITRD_START && INITRD_SIZE &&
 	    !memblock_is_region_memory(INITRD_START, INITRD_SIZE)) {
 		pr_err("The initial RAM disk does not fit into the memory\n");
-		memblock_free(INITRD_START, INITRD_SIZE);
+		memblock_phys_free(INITRD_START, INITRD_SIZE);
 		initrd_start = initrd_end = 0;
 	}
 #endif

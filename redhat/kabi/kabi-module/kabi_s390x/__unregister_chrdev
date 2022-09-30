@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:fs/char_dev.c
+0x6bc3fbc0	__unregister_chrdev	vmlinux	EXPORT_SYMBOL

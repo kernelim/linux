@@ -126,6 +126,7 @@ struct objtool_file *objtool_open_read(const char *_objname)
 	INIT_LIST_HEAD(&file.insn_list);
 	hash_init(file.insn_hash);
 	INIT_LIST_HEAD(&file.retpoline_call_list);
+	INIT_LIST_HEAD(&file.return_thunk_list);
 	INIT_LIST_HEAD(&file.static_call_list);
 	INIT_LIST_HEAD(&file.mcount_loc_list);
 	file.c_file = !vmlinux && find_section_by_name(file.elf, ".comment");
@@ -133,6 +134,32 @@ struct objtool_file *objtool_open_read(const char *_objname)
 	file.hints = false;
 
 	return &file;
+}
+
+void objtool_pv_add(struct objtool_file *f, int idx, struct symbol *func)
+{
+	if (!noinstr)
+		return;
+
+	if (!f->pv_ops) {
+		WARN("paravirt confusion");
+		return;
+	}
+
+	/*
+	 * These functions will be patched into native code,
+	 * see paravirt_patch().
+	 */
+	if (!strcmp(func->name, "_paravirt_nop") ||
+	    !strcmp(func->name, "_paravirt_ident_64"))
+		return;
+
+	/* already added this function */
+	if (!list_empty(&func->pv_target))
+		return;
+
+	list_add(&func->pv_target, &f->pv_ops[idx].targets);
+	f->pv_ops[idx].clean = false;
 }
 
 static void cmd_usage(void)

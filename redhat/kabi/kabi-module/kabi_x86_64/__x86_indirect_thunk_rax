@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/x86/lib/retpoline.S
+0x65487097	__x86_indirect_thunk_rax	vmlinux	EXPORT_SYMBOL

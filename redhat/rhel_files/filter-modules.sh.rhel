@@ -25,6 +25,8 @@ netdrvs="appletalk can dsa hamradio ieee802154 irda ppp slip usb wireless"
 
 ethdrvs="3com adaptec alteon amd aquantia atheros broadcom cadence calxeda chelsio cisco dec dlink emulex icplus marvell neterion nvidia oki-semi packetengines qlogic rdc renesas sfc silan sis smsc stmicro sun tehuti ti wiznet xircom"
 
+cryptdrvs="bcm caam cavium chelsio hisilicon marvell qat"
+
 inputdrvs="gameport tablet touchscreen"
 
 scsidrvs="aacraid aic7xxx aic94xx be2iscsi bfa bnx2i bnx2fc csiostor cxgbi esas2r fcoe fnic hisi_sas isci libsas lpfc megaraid mpt2sas mpt3sas mvsas pm8001 qla2xxx qla4xxx sym53c8xx_2 ufs qedf"
@@ -98,6 +100,12 @@ done
 for eth in ${ethdrvs}
 do
 	filter_dir $1 drivers/net/ethernet/${eth}
+done
+
+# Filter the crypto drivers
+for crypt in ${cryptdrvs}
+do
+	filter_dir $1 drivers/crypto/${crypt}
 done
 
 # SCSI

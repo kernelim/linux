@@ -10,9 +10,9 @@ This document is based on the ARM booting document by Russell King and
 is relevant to all public releases of the AArch64 Linux kernel.
 
 The AArch64 exception model is made up of a number of exception levels
-(EL0 - EL3), with EL0 and EL1 having a secure and a non-secure
-counterpart.  EL2 is the hypervisor level and exists only in non-secure
-mode. EL3 is the highest priority level and exists only in secure mode.
+(EL0 - EL3), with EL0, EL1 and EL2 having a secure and a non-secure
+counterpart.  EL2 is the hypervisor level, EL3 is the highest priority
+level and exists only in secure mode. Both are architecturally optional.
 
 For the purposes of this document, we will use the term `boot loader`
 simply to define all software that executes on the CPU(s) before control
@@ -167,8 +167,8 @@ Before jumping into the kernel, the following conditions must be met:
 
   All forms of interrupts must be masked in PSTATE.DAIF (Debug, SError,
   IRQ and FIQ).
-  The CPU must be in either EL2 (RECOMMENDED in order to have access to
-  the virtualisation extensions) or non-secure EL1.
+  The CPU must be in non-secure state, either in EL2 (RECOMMENDED in order
+  to have access to the virtualisation extensions), or in EL1.
 
 - Caches, MMUs
 
@@ -207,10 +207,17 @@ Before jumping into the kernel, the following conditions must be met:
   software at a higher exception level to prevent execution in an UNKNOWN
   state.
 
-  - SCR_EL3.FIQ must have the same value across all CPUs the kernel is
-    executing on.
-  - The value of SCR_EL3.FIQ must be the same as the one present at boot
-    time whenever the kernel is executing.
+  For all systems:
+  - If EL3 is present:
+
+    - SCR_EL3.FIQ must have the same value across all CPUs the kernel is
+      executing on.
+    - The value of SCR_EL3.FIQ must be the same as the one present at boot
+      time whenever the kernel is executing.
+
+  - If EL3 is present and the kernel is entered at EL2:
+
+    - SCR_EL3.HCE (bit 8) must be initialised to 0b1.
 
   For systems with a GICv3 interrupt controller to be used in v3 mode:
   - If EL3 is present:
@@ -310,6 +317,38 @@ Before jumping into the kernel, the following conditions must be met:
 
     - ZCR_EL2.LEN must be initialised to the same value for all CPUs the
       kernel will execute on.
+
+  For CPUs with the Scalable Matrix Extension (FEAT_SME):
+
+  - If EL3 is present:
+
+    - CPTR_EL3.ESM (bit 12) must be initialised to 0b1.
+
+    - SCR_EL3.EnTP2 (bit 41) must be initialised to 0b1.
+
+    - SMCR_EL3.LEN must be initialised to the same value for all CPUs the
+      kernel will execute on.
+
+ - If the kernel is entered at EL1 and EL2 is present:
+
+    - CPTR_EL2.TSM (bit 12) must be initialised to 0b0.
+
+    - CPTR_EL2.SMEN (bits 25:24) must be initialised to 0b11.
+
+    - SCTLR_EL2.EnTP2 (bit 60) must be initialised to 0b1.
+
+    - SMCR_EL2.LEN must be initialised to the same value for all CPUs the
+      kernel will execute on.
+
+  For CPUs with the Scalable Matrix Extension FA64 feature (FEAT_SME_FA64)
+
+  - If EL3 is present:
+
+    - SMCR_EL3.FA64 (bit 31) must be initialised to 0b1.
+
+ - If the kernel is entered at EL1 and EL2 is present:
+
+    - SMCR_EL2.FA64 (bit 31) must be initialised to 0b1.
 
 The requirements described above for CPU mode, caches, MMUs, architected
 timers, coherency and system registers apply to all CPUs.  All CPUs must

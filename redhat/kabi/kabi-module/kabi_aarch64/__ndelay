@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/arm64/lib/delay.c
+0xdf8c695a	__ndelay	vmlinux	EXPORT_SYMBOL

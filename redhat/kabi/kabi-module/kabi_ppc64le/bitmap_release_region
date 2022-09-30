@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:lib/bitmap.c
+0x574c2e74	bitmap_release_region	vmlinux	EXPORT_SYMBOL

@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/x86/kernel/nmi.c
+0xe64ad8ea	unregister_nmi_handler	vmlinux	EXPORT_SYMBOL_GPL

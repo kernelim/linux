@@ -34,7 +34,7 @@ struct vgic_register_region {
 	};
 };
 
-extern struct kvm_io_device_ops kvm_io_gic_ops;
+extern const struct kvm_io_device_ops kvm_io_gic_ops;
 
 #define VGIC_ACCESS_8bit	1
 #define VGIC_ACCESS_32bit	2
@@ -148,6 +148,9 @@ int vgic_uaccess_write_cenable(struct kvm_vcpu *vcpu,
 
 unsigned long vgic_mmio_read_pending(struct kvm_vcpu *vcpu,
 				     gpa_t addr, unsigned int len);
+
+unsigned long vgic_uaccess_read_pending(struct kvm_vcpu *vcpu,
+					gpa_t addr, unsigned int len);
 
 void vgic_mmio_write_spending(struct kvm_vcpu *vcpu,
 			      gpa_t addr, unsigned int len,

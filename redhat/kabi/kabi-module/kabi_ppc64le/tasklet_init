@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/softirq.c
+0x2364c85a	tasklet_init	vmlinux	EXPORT_SYMBOL

@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:mm/slab_common.c
+0x82c2f005	kmalloc_order_trace	vmlinux	EXPORT_SYMBOL

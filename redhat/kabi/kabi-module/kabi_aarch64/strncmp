@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/arm64/lib/strncmp.S
+0x5a921311	strncmp	vmlinux	EXPORT_SYMBOL

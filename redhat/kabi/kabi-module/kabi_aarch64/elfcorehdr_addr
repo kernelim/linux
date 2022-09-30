@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/crash_dump.c
+0xb26a1add	elfcorehdr_addr	vmlinux	EXPORT_SYMBOL_GPL

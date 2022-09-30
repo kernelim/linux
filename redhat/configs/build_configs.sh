@@ -16,6 +16,8 @@ else
 	echo "$3" > .flavors
 fi
 
+RHJOBS="$(test -n "$4" && echo "$4" || nproc --all)"
+
 LANG=en_US.UTF-8
 
 # to handle this script being a symlink
@@ -53,15 +55,25 @@ function combine_config_layer()
 
 function merge_configs()
 {
+	local archvar
+	local arch
+	local configs
+	local order
+	local flavor
+	local count
+	local name
+	local skip_if_missing
+
 	archvar=$1
 	arch=$(echo "$archvar" | cut -f1 -d"-")
 	configs=$2
 	order=$3
 	flavor=$4
+	count=$5
 
 	name=$OUTPUT_DIR/$PACKAGE_NAME-$archvar-$flavor.config
-	echo -n "Building $name ... "
-	touch config-merging config-merged
+	echo "Building $name ... "
+	touch config-merging.$count config-merged.$count
 
 	# apply based on order
 	skip_if_missing=""
@@ -73,10 +85,10 @@ function merge_configs()
 
 			test -n "$skip_if_missing" && test ! -e "$cfile" && continue
 
-			if ! perl merge.pl "$cfile" config-merging > config-merged; then
+			if ! perl merge.pl "$cfile" config-merging.$count > config-merged.$count; then
 				die "Failed to merge $cfile"
 			fi
-			mv config-merged config-merging
+			mv config-merged.$count config-merging.$count
 		done
 
 		# first configs in $order is baseline, all files should be
@@ -96,9 +108,9 @@ function merge_configs()
 	else
 		echo "# $arch" > "$name"
 	fi
-	sort config-merging >> "$name"
-	rm -f config-merged config-merging
-	echo "done"
+	sort config-merging.$count >> "$name"
+	rm -f config-merged.$count config-merging.$count
+	echo "Building $name complete"
 }
 
 function build_flavor()
@@ -141,9 +153,16 @@ function build_flavor()
 				esac
 			fi
 
-			merge_configs "$arch" "$configs" "$order" "$flavor"
+			merge_configs "$arch" "$configs" "$order" "$flavor" "$count" &
+			waitpids[$count]=$!
+			((count++))
+			while [ "$(jobs | grep Running | wc -l)" -ge $RHJOBS ]; do :; done
 		fi
 	done < "$control_file"
+
+	for pid in ${waitpids[*]}; do
+		wait $pid
+	done
 }
 
 while read -r line

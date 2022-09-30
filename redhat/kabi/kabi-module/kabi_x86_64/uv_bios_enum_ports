@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/x86/platform/uv/bios_uv.c
+0x0bbeaeba	uv_bios_enum_ports	vmlinux	EXPORT_SYMBOL_GPL

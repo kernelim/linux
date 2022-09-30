@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/sched/core.c
+0x01000e51	schedule	vmlinux	EXPORT_SYMBOL

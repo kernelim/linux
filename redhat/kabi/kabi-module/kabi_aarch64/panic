@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/panic.c
+0xf1e046cc	panic	vmlinux	EXPORT_SYMBOL

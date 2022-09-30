@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:lib/find_bit.c
+0xa50a3da7	_find_next_bit	vmlinux	EXPORT_SYMBOL

@@ -1,1 +1,1 @@
-# CONFIG_DAMON is not set
+CONFIG_DAMON=y

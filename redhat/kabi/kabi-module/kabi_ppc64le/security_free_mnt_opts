@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:security/security.c
+0xf2e5bd87	security_free_mnt_opts	vmlinux	EXPORT_SYMBOL

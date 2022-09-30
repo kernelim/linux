@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/smp.c
+0x9b1da8ae	smp_call_function_many	vmlinux	EXPORT_SYMBOL

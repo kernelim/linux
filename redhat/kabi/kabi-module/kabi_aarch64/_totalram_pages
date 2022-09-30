@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:mm/page_alloc.c
+0x944375db	_totalram_pages	vmlinux	EXPORT_SYMBOL

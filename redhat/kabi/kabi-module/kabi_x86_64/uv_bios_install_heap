@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/x86/platform/uv/bios_uv.c
+0xba82f246	uv_bios_install_heap	vmlinux	EXPORT_SYMBOL_GPL

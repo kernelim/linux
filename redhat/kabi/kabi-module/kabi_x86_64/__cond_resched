@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/sched/core.c
+0x0800473f	__cond_resched	vmlinux	EXPORT_SYMBOL

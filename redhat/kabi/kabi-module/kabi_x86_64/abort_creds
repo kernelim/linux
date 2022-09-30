@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/cred.c
+0x639931af	abort_creds	vmlinux	EXPORT_SYMBOL

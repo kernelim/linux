@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:mm/vmstat.c
+0x77808a48	vm_event_states	vmlinux	EXPORT_SYMBOL

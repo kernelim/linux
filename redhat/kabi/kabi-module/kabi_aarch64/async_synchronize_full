@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/async.c
+0xa5efbf4c	async_synchronize_full	vmlinux	EXPORT_SYMBOL_GPL

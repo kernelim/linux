@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/sched/build_utility.c
+0x45b9877f	prepare_to_wait	vmlinux	EXPORT_SYMBOL

@@ -5581,7 +5581,7 @@ static int netdev_set_mac_address(struct net_device *dev, void *addr)
 		memcpy(hw->override_addr, mac->sa_data, ETH_ALEN);
 	}
 
-	memcpy(dev->dev_addr, mac->sa_data, ETH_ALEN);
+	eth_hw_addr_set(dev, mac->sa_data);
 
 	interrupt = hw_block_intr(hw);
 
@@ -6317,11 +6317,15 @@ static int netdev_set_pauseparam(struct net_device *dev,
  * netdev_get_ringparam - get tx/rx ring parameters
  * @dev:	Network device.
  * @ring:	Ethtool RING settings data structure.
+ * @kernel_ring:	Ethtool external RING settings data structure.
+ * @extack:	Netlink handle.
  *
  * This procedure returns the TX/RX ring settings.
  */
 static void netdev_get_ringparam(struct net_device *dev,
-	struct ethtool_ringparam *ring)
+				 struct ethtool_ringparam *ring,
+				 struct kernel_ethtool_ringparam *kernel_ring,
+				 struct netlink_ext_ack *extack)
 {
 	struct dev_priv *priv = netdev_priv(dev);
 	struct dev_info *hw_priv = priv->adapter;
@@ -7005,10 +7009,9 @@ static int pcidev_init(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev->mem_end = dev->mem_start + reg_len - 1;
 		dev->irq = pdev->irq;
 		if (MAIN_PORT == i)
-			memcpy(dev->dev_addr, hw_priv->hw.override_addr,
-			       ETH_ALEN);
+			eth_hw_addr_set(dev, hw_priv->hw.override_addr);
 		else {
-			memcpy(dev->dev_addr, sw->other_addr, ETH_ALEN);
+			eth_hw_addr_set(dev, sw->other_addr);
 			if (ether_addr_equal(sw->other_addr, hw->override_addr))
 				dev->dev_addr[5] += port->first_port;
 		}

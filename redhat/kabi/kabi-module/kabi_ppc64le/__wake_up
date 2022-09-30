@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/sched/build_utility.c
+0x3eeb2322	__wake_up	vmlinux	EXPORT_SYMBOL

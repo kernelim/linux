@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:lib/vsprintf.c
+0x96848186	scnprintf	vmlinux	EXPORT_SYMBOL

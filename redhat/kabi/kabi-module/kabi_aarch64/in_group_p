@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/groups.c
+0x8b8059bd	in_group_p	vmlinux	EXPORT_SYMBOL

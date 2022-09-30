@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:mm/slub.c
+0xeb233a45	__kmalloc	vmlinux	EXPORT_SYMBOL

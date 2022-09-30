@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:lib/kstrtox.c
+0x3854774b	kstrtoll	vmlinux	EXPORT_SYMBOL

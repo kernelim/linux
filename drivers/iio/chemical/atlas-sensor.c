@@ -434,9 +434,6 @@ static int atlas_buffer_predisable(struct iio_dev *indio_dev)
 	return 0;
 }
 
-static const struct iio_trigger_ops atlas_interrupt_trigger_ops = {
-};
-
 static const struct iio_buffer_setup_ops atlas_buffer_setup_ops = {
 	.postenable = atlas_buffer_postenable,
 	.predisable = atlas_buffer_predisable,
@@ -592,11 +589,11 @@ static const struct iio_info atlas_info = {
 };
 
 static const struct i2c_device_id atlas_id[] = {
-	{ "atlas-ph-sm", ATLAS_PH_SM},
-	{ "atlas-ec-sm", ATLAS_EC_SM},
-	{ "atlas-orp-sm", ATLAS_ORP_SM},
-	{ "atlas-do-sm", ATLAS_DO_SM},
-	{ "atlas-rtd-sm", ATLAS_RTD_SM},
+	{ "atlas-ph-sm", ATLAS_PH_SM },
+	{ "atlas-ec-sm", ATLAS_EC_SM },
+	{ "atlas-orp-sm", ATLAS_ORP_SM },
+	{ "atlas-do-sm", ATLAS_DO_SM },
+	{ "atlas-rtd-sm", ATLAS_RTD_SM },
 	{}
 };
 MODULE_DEVICE_TABLE(i2c, atlas_id);
@@ -645,7 +642,6 @@ static int atlas_probe(struct i2c_client *client,
 	data->client = client;
 	data->trig = trig;
 	data->chip = chip;
-	trig->ops = &atlas_interrupt_trigger_ops;
 	iio_trigger_set_drvdata(trig, indio_dev);
 
 	i2c_set_clientdata(client, indio_dev);

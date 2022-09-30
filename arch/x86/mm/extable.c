@@ -8,6 +8,7 @@
 #include <asm/sev.h>
 #include <asm/traps.h>
 #include <asm/kdebug.h>
+#include <asm/sgx.h>
 
 static inline unsigned long
 ex_fixup_addr(const struct exception_table_entry *x)
@@ -26,6 +27,13 @@ static bool ex_handler_fault(const struct exception_table_entry *fixup,
 			     struct pt_regs *regs, int trapnr)
 {
 	regs->ax = trapnr;
+	return ex_handler_default(fixup, regs);
+}
+
+static bool ex_handler_sgx(const struct exception_table_entry *fixup,
+			   struct pt_regs *regs, int trapnr)
+{
+	regs->ax = trapnr | SGX_ENCLS_FAULT_FLAG;
 	return ex_handler_default(fixup, regs);
 }
 
@@ -156,6 +164,8 @@ int fixup_exception(struct pt_regs *regs, int trapnr, unsigned long error_code,
 	case EX_TYPE_WRMSR_IN_MCE:
 		ex_handler_msr_mce(regs, true);
 		break;
+	case EX_TYPE_FAULT_SGX:
+		return ex_handler_sgx(e, regs, trapnr);
 	}
 	BUG();
 }

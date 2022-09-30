@@ -380,9 +380,6 @@ static int hwtstamp_set(struct net_device *netdev, struct ifreq *ifr)
 	if (copy_from_user(&cfg, ifr->ifr_data, sizeof(cfg)))
 		return -EFAULT;
 
-	if (cfg.flags) /* reserved for future extensions */
-		return -EINVAL;
-
 	ch = PORT2CHANNEL(port);
 	regs = (struct ixp46x_ts_regs __iomem *) IXP4XX_TIMESYNC_BASE_VIRT;
 
@@ -1515,7 +1512,7 @@ static int ixp4xx_eth_probe(struct platform_device *pdev)
 
 	port->plat = plat;
 	npe_port_tab[NPE_ID(port->id)] = port;
-	memcpy(ndev->dev_addr, plat->hwaddr, ETH_ALEN);
+	eth_hw_addr_set(ndev, plat->hwaddr);
 
 	platform_set_drvdata(pdev, ndev);
 

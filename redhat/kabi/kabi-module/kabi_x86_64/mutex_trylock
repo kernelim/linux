@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/locking/mutex.c
+0xbb9ed3bf	mutex_trylock	vmlinux	EXPORT_SYMBOL

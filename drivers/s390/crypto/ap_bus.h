@@ -47,6 +47,7 @@ static inline int ap_test_bit(unsigned int *ptr, unsigned int nr)
 #define AP_RESPONSE_BUSY		0x05
 #define AP_RESPONSE_INVALID_ADDRESS	0x06
 #define AP_RESPONSE_OTHERWISE_CHANGED	0x07
+#define AP_RESPONSE_INVALID_GISA	0x08
 #define AP_RESPONSE_Q_FULL		0x10
 #define AP_RESPONSE_NO_PENDING_REPLY	0x10
 #define AP_RESPONSE_INDEX_TOO_BIG	0x11
@@ -69,6 +70,7 @@ static inline int ap_test_bit(unsigned int *ptr, unsigned int nr)
 #define AP_DEVICE_TYPE_CEX5	11
 #define AP_DEVICE_TYPE_CEX6	12
 #define AP_DEVICE_TYPE_CEX7	13
+#define AP_DEVICE_TYPE_CEX8	14
 
 /*
  * Known function facilities
@@ -172,6 +174,7 @@ struct ap_card {
 	int id;				/* AP card number. */
 	unsigned int maxmsgsize;	/* AP msg limit for this card */
 	bool config;			/* configured state */
+	bool chkstop;			/* checkstop state */
 	atomic64_t total_request_count;	/* # requests ever for this AP device.*/
 };
 
@@ -185,6 +188,7 @@ struct ap_queue {
 	void *private;			/* ap driver private pointer. */
 	enum ap_dev_state dev_state;	/* queue device state */
 	bool config;			/* configured state */
+	bool chkstop;			/* checkstop state */
 	ap_qid_t qid;			/* AP queue id. */
 	int interrupt;			/* indicate if interrupts are enabled */
 	int queue_count;		/* # messages currently on AP queue. */
@@ -243,7 +247,9 @@ struct ap_message {
 			struct ap_message *);
 };
 
-#define AP_MSG_FLAG_SPECIAL  1		/* flag msg as 'special' with NQAP */
+#define AP_MSG_FLAG_SPECIAL  0x0001	/* flag msg as 'special' with NQAP */
+#define AP_MSG_FLAG_USAGE    0x0002	/* CCA, EP11: usage (no admin) msg */
+#define AP_MSG_FLAG_ADMIN    0x0004	/* CCA, EP11: admin (=control) msg */
 
 /**
  * ap_init_message() - Initialize ap_message.
@@ -302,6 +308,7 @@ struct ap_perms {
 	unsigned long ioctlm[BITS_TO_LONGS(AP_IOCTLS)];
 	unsigned long apm[BITS_TO_LONGS(AP_DEVICES)];
 	unsigned long aqm[BITS_TO_LONGS(AP_DOMAINS)];
+	unsigned long adm[BITS_TO_LONGS(AP_DOMAINS)];
 };
 extern struct ap_perms ap_perms;
 extern struct mutex ap_perms_mutex;

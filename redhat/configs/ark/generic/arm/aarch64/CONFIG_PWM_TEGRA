@@ -1,1 +1,1 @@
-# CONFIG_PWM_TEGRA is not set
+CONFIG_PWM_TEGRA=y

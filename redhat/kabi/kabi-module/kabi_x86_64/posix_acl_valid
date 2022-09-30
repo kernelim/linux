@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:fs/posix_acl.c
+0xcfa7e913	posix_acl_valid	vmlinux	EXPORT_SYMBOL

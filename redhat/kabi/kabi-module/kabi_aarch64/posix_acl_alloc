@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:fs/posix_acl.c
+0x9b496b21	posix_acl_alloc	vmlinux	EXPORT_SYMBOL

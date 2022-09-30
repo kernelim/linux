@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*  Copyright(c) 2016-20 Intel Corporation. */
 
+#include <cpuid.h>
 #include <elf.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -145,7 +146,8 @@ static bool setup_test_encl(unsigned long heap_size, struct encl *encl,
 
 	if (!encl_load("test_encl.elf", encl, heap_size)) {
 		encl_delete(encl);
-		TH_LOG("Failed to load the test enclave.\n");
+		TH_LOG("Failed to load the test enclave.");
+		return false;
 	}
 
 	if (!encl_measure(encl))
@@ -184,8 +186,6 @@ static bool setup_test_encl(unsigned long heap_size, struct encl *encl,
 	return true;
 
 err:
-	encl_delete(encl);
-
 	for (i = 0; i < encl->nr_segments; i++) {
 		seg = &encl->segment_tbl[i];
 
@@ -204,7 +204,9 @@ err:
 		fclose(maps_file);
 	}
 
-	TH_LOG("Failed to initialize the test enclave.\n");
+	TH_LOG("Failed to initialize the test enclave.");
+
+	encl_delete(encl);
 
 	return false;
 }
@@ -291,9 +293,7 @@ static unsigned long get_total_epc_mem(void)
 	int section = 0;
 
 	while (true) {
-		eax = SGX_CPUID;
-		ecx = section + SGX_CPUID_EPC;
-		__cpuid(&eax, &ebx, &ecx, &edx);
+		__cpuid_count(SGX_CPUID, section + SGX_CPUID_EPC, eax, ebx, ecx, edx);
 
 		type = eax & SGX_CPUID_EPC_MASK;
 		if (type == SGX_CPUID_EPC_INVALID)

@@ -13,7 +13,6 @@ pygmentsUseClasses: true
 markup:
   asciidocext:
     attributes:
-      toc: auto
       idprefix: user-content-
       idseparator: '-'
 

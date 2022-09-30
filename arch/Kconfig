@@ -191,6 +191,14 @@ config HAVE_OPTPROBES
 config HAVE_KPROBES_ON_FTRACE
 	bool
 
+config ARCH_CORRECT_STACKTRACE_ON_KRETPROBE
+	bool
+	help
+	  Since kretprobes modifies return address on the stack, the
+	  stacktrace may see the kretprobe trampoline address instead
+	  of correct one. If the architecture stacktrace code and
+	  unwinder can adjust such entries, select this configuration.
+
 config HAVE_FUNCTION_ERROR_INJECTION
 	bool
 
@@ -1231,6 +1239,9 @@ config RELR
 config ARCH_HAS_MEM_ENCRYPT
 	bool
 
+config ARCH_HAS_CC_PLATFORM
+	bool
+
 config HAVE_SPARSE_SYSCALL_NR
        bool
        help
@@ -1251,12 +1262,41 @@ config HAVE_STATIC_CALL_INLINE
 
 config HAVE_PREEMPT_DYNAMIC
 	bool
+
+config HAVE_PREEMPT_DYNAMIC_CALL
+	bool
 	depends on HAVE_STATIC_CALL
-	depends on GENERIC_ENTRY
+	select HAVE_PREEMPT_DYNAMIC
 	help
-	   Select this if the architecture support boot time preempt setting
-	   on top of static calls. It is strongly advised to support inline
-	   static call to avoid any overhead.
+	   An architecture should select this if it can handle the preemption
+	   model being selected at boot time using static calls.
+
+	   Where an architecture selects HAVE_STATIC_CALL_INLINE, any call to a
+	   preemption function will be patched directly.
+
+	   Where an architecture does not select HAVE_STATIC_CALL_INLINE, any
+	   call to a preemption function will go through a trampoline, and the
+	   trampoline will be patched.
+
+	   It is strongly advised to support inline static call to avoid any
+	   overhead.
+
+config HAVE_PREEMPT_DYNAMIC_KEY
+	bool
+	depends on HAVE_ARCH_JUMP_LABEL && CC_HAS_ASM_GOTO
+	select HAVE_PREEMPT_DYNAMIC
+	help
+	   An architecture should select this if it can handle the preemption
+	   model being selected at boot time using static keys.
+
+	   Each preemption function will be given an early return based on a
+	   static key. This should have slightly lower overhead than non-inline
+	   static calls, as this effectively inlines each trampoline into the
+	   start of its callee. This may avoid redundant work, and may
+	   integrate better with CFI schemes.
+
+	   This will have greater overhead than using inline static calls as
+	   the call to the preemption function cannot be entirely elided.
 
 config ARCH_WANT_LD_ORPHAN_WARN
 	bool
@@ -1282,7 +1322,14 @@ config ARCH_SPLIT_ARG64
 config ARCH_HAS_ELFCORE_COMPAT
 	bool
 
+config ARCH_HAS_PARANOID_L1D_FLUSH
+	bool
+
 config DYNAMIC_SIGFRAME
+	bool
+
+# Select, if arch has a named attribute group bound to NUMA device nodes.
+config HAVE_ARCH_NODE_DEV_GROUP
 	bool
 
 source "kernel/gcov/Kconfig"

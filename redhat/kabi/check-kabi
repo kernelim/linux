@@ -41,7 +41,8 @@ def load_symvers(symvers, filename):
             break
         if in_line == "\n":
             continue
-        checksum, symbol, directory, type = in_line.split()
+        checksum, symbol, directory, type, *ns = in_line.split()
+        ns = ns[0] if ns else None
 
         symvers[symbol] = in_line[0:-1]
 
@@ -57,7 +58,8 @@ def load_kabi(kabi, filename):
             break
         if in_line == "\n":
             continue
-        checksum, symbol, directory, type = in_line.split()
+        checksum, symbol, directory, type, *ns = in_line.split()
+        ns = ns[0] if ns else None
 
         kabi[symbol] = in_line[0:-1]
 
@@ -69,11 +71,14 @@ def check_kabi(symvers, kabi):
     warn = 0
     changed_symbols = []
     moved_symbols = []
+    ns_symbols = []
 
     for symbol in kabi:
-        abi_hash, abi_sym, abi_dir, abi_type = kabi[symbol].split()
+        abi_hash, abi_sym, abi_dir, abi_type, *abi_ns = kabi[symbol].split()
+        abi_ns = abi_ns[0] if abi_ns else None
         if symbol in symvers:
-            sym_hash, sym_sym, sym_dir, sym_type = symvers[symbol].split()
+            sym_hash, sym_sym, sym_dir, sym_type, *sym_ns = symvers[symbol].split()
+            sym_ns = sym_ns[0] if sym_ns else None
             if abi_hash != sym_hash:
                 fail = 1
                 changed_symbols.append(symbol)
@@ -81,6 +86,10 @@ def check_kabi(symvers, kabi):
             if abi_dir != sym_dir:
                 warn = 1
                 moved_symbols.append(symbol)
+
+            if abi_ns != sym_ns:
+                warn = 1
+                ns_symbols.append(symbol)
         else:
             fail = 1
             changed_symbols.append(symbol)
@@ -96,13 +105,21 @@ def check_kabi(symvers, kabi):
 
     if warn:
         print("*** WARNING - ABI SYMBOLS MOVED ***")
-        print("")
-        print("The following symbols moved (typically caused by moving a symbol from being")
-        print("provided by the kernel vmlinux out to a loadable module):")
-        print("")
-        for symbol in moved_symbols:
-            print(symbol)
-        print("")
+        if moved_symbols:
+            print("")
+            print("The following symbols moved (typically caused by moving a symbol from being")
+            print("provided by the kernel vmlinux out to a loadable module):")
+            print("")
+            for symbol in moved_symbols:
+                print(symbol)
+            print("")
+        if ns_symbols:
+            print("")
+            print("The following symbols changed symbol namespaces:")
+            print("")
+            for symbol in ns_symbols:
+                print(symbol)
+            print("")
 
     """Halt the build, if we got errors and/or warnings. In either case,
        double-checkig is required to avoid introducing / concealing

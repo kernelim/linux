@@ -40,11 +40,10 @@ void __init arm64_hugetlb_cma_reserve(void)
 {
 	int order;
 
-#ifdef CONFIG_ARM64_4K_PAGES
-	order = PUD_SHIFT - PAGE_SHIFT;
-#else
-	order = CONT_PMD_SHIFT + PMD_SHIFT - PAGE_SHIFT;
-#endif
+	if (pud_sect_supported())
+		order = PUD_SHIFT - PAGE_SHIFT;
+	else
+		order = CONT_PMD_SHIFT - PAGE_SHIFT;
 	/*
 	 * HugeTLB CMA reservation is required for gigantic
 	 * huge pages which could not be allocated via the
@@ -56,23 +55,33 @@ void __init arm64_hugetlb_cma_reserve(void)
 }
 #endif /* CONFIG_CMA */
 
+static bool __hugetlb_valid_size(unsigned long size)
+{
+	switch (size) {
+#ifndef __PAGETABLE_PMD_FOLDED
+	case PUD_SIZE:
+		return pud_sect_supported();
+#endif
+	case CONT_PMD_SIZE:
+	case PMD_SIZE:
+	case CONT_PTE_SIZE:
+		return true;
+	}
+
+	return false;
+}
+
 #ifdef CONFIG_ARCH_ENABLE_HUGEPAGE_MIGRATION
 bool arch_hugetlb_migration_supported(struct hstate *h)
 {
 	size_t pagesize = huge_page_size(h);
 
-	switch (pagesize) {
-#ifdef CONFIG_ARM64_4K_PAGES
-	case PUD_SIZE:
-#endif
-	case PMD_SIZE:
-	case CONT_PMD_SIZE:
-	case CONT_PTE_SIZE:
-		return true;
-	}
-	pr_warn("%s: unrecognized huge page size 0x%lx\n",
+	if (!__hugetlb_valid_size(pagesize)) {
+		pr_warn("%s: unrecognized huge page size 0x%lx\n",
 			__func__, pagesize);
-	return false;
+		return false;
+	}
+	return true;
 }
 #endif
 
@@ -126,8 +135,11 @@ static inline int num_contig_ptes(unsigned long size, size_t *pgsize)
 	*pgsize = size;
 
 	switch (size) {
-#ifdef CONFIG_ARM64_4K_PAGES
+#ifndef __PAGETABLE_PMD_FOLDED
 	case PUD_SIZE:
+		if (pud_sect_supported())
+			contig_ptes = 1;
+		break;
 #endif
 	case PMD_SIZE:
 		contig_ptes = 1;
@@ -489,9 +501,9 @@ void huge_ptep_clear_flush(struct vm_area_struct *vma,
 
 static int __init hugetlbpage_init(void)
 {
-#ifdef CONFIG_ARM64_4K_PAGES
-	hugetlb_add_hstate(PUD_SHIFT - PAGE_SHIFT);
-#endif
+	if (pud_sect_supported())
+		hugetlb_add_hstate(PUD_SHIFT - PAGE_SHIFT);
+
 	hugetlb_add_hstate(CONT_PMD_SHIFT - PAGE_SHIFT);
 	hugetlb_add_hstate(PMD_SHIFT - PAGE_SHIFT);
 	hugetlb_add_hstate(CONT_PTE_SHIFT - PAGE_SHIFT);
@@ -502,15 +514,5 @@ arch_initcall(hugetlbpage_init);
 
 bool __init arch_hugetlb_valid_size(unsigned long size)
 {
-	switch (size) {
-#ifdef CONFIG_ARM64_4K_PAGES
-	case PUD_SIZE:
-#endif
-	case CONT_PMD_SIZE:
-	case PMD_SIZE:
-	case CONT_PTE_SIZE:
-		return true;
-	}
-
-	return false;
+	return __hugetlb_valid_size(size);
 }

@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:mm/percpu.c
+0x55f2580b	__alloc_percpu	vmlinux	EXPORT_SYMBOL_GPL

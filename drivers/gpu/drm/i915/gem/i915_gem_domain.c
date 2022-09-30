@@ -9,17 +9,40 @@
 
 #include "i915_drv.h"
 #include "i915_gem_clflush.h"
+#include "i915_gem_domain.h"
 #include "i915_gem_gtt.h"
 #include "i915_gem_ioctls.h"
-#include "i915_gem_object.h"
-#include "i915_vma.h"
 #include "i915_gem_lmem.h"
 #include "i915_gem_mman.h"
+#include "i915_gem_object.h"
+#include "i915_vma.h"
 
 static bool gpu_write_needs_clflush(struct drm_i915_gem_object *obj)
 {
+	struct drm_i915_private *i915 = to_i915(obj->base.dev);
+
+	if (IS_DGFX(i915))
+		return false;
+
 	return !(obj->cache_level == I915_CACHE_NONE ||
 		 obj->cache_level == I915_CACHE_WT);
+}
+
+bool i915_gem_cpu_write_needs_clflush(struct drm_i915_gem_object *obj)
+{
+	struct drm_i915_private *i915 = to_i915(obj->base.dev);
+
+	if (obj->cache_dirty)
+		return false;
+
+	if (!(obj->cache_coherent & I915_BO_CACHE_COHERENT_FOR_WRITE))
+		return true;
+
+	if (IS_DGFX(i915))
+		return false;
+
+	/* Currently in use by HW (display engine)? Keep flushed. */
+	return i915_gem_object_is_framebuffer(obj);
 }
 
 static void
@@ -268,6 +291,9 @@ int i915_gem_get_caching_ioctl(struct drm_device *dev, void *data,
 	struct drm_i915_gem_object *obj;
 	int err = 0;
 
+	if (IS_DGFX(to_i915(dev)))
+		return -ENODEV;
+
 	rcu_read_lock();
 	obj = i915_gem_object_lookup_rcu(file, args->handle);
 	if (!obj) {
@@ -302,6 +328,9 @@ int i915_gem_set_caching_ioctl(struct drm_device *dev, void *data,
 	struct drm_i915_gem_object *obj;
 	enum i915_cache_level level;
 	int ret = 0;
+
+	if (IS_DGFX(i915))
+		return -ENODEV;
 
 	switch (args->caching) {
 	case I915_CACHING_NONE:
@@ -375,7 +404,7 @@ i915_gem_object_pin_to_display_plane(struct drm_i915_gem_object *obj,
 	struct i915_vma *vma;
 	int ret;
 
-	/* Frame buffer must be in LMEM (no migration yet) */
+	/* Frame buffer must be in LMEM */
 	if (HAS_LMEM(i915) && !i915_gem_object_is_lmem(obj))
 		return ERR_PTR(-EINVAL);
 
@@ -483,6 +512,9 @@ i915_gem_set_domain_ioctl(struct drm_device *dev, void *data,
 	u32 read_domains = args->read_domains;
 	u32 write_domain = args->write_domain;
 	int err;
+
+	if (IS_DGFX(to_i915(dev)))
+		return -ENODEV;
 
 	/* Only handle setting domains to types used by the CPU. */
 	if ((write_domain | read_domains) & I915_GEM_GPU_DOMAINS)

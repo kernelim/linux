@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/time/hrtimer.c
+0xe18c800e	hrtimer_start_range_ns	vmlinux	EXPORT_SYMBOL_GPL

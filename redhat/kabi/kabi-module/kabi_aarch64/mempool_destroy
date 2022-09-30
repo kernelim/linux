@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:mm/mempool.c
+0x04b0e44d	mempool_destroy	vmlinux	EXPORT_SYMBOL

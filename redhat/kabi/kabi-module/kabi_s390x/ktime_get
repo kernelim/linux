@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/time/timekeeping.c
+0xb43f9365	ktime_get	vmlinux	EXPORT_SYMBOL_GPL

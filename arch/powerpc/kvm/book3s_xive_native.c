@@ -802,7 +802,7 @@ static int kvmppc_xive_reset(struct kvmppc_xive *xive)
 {
 	struct kvm *kvm = xive->kvm;
 	struct kvm_vcpu *vcpu;
-	unsigned int i;
+	unsigned long i;
 
 	pr_devel("%s\n", __func__);
 
@@ -911,7 +911,7 @@ static int kvmppc_xive_native_eq_sync(struct kvmppc_xive *xive)
 {
 	struct kvm *kvm = xive->kvm;
 	struct kvm_vcpu *vcpu;
-	unsigned int i;
+	unsigned long i;
 
 	pr_devel("%s\n", __func__);
 
@@ -1012,7 +1012,7 @@ static void kvmppc_xive_native_release(struct kvm_device *dev)
 	struct kvmppc_xive *xive = dev->private;
 	struct kvm *kvm = xive->kvm;
 	struct kvm_vcpu *vcpu;
-	int i;
+	unsigned long i;
 
 	pr_devel("Releasing xive native device\n");
 
@@ -1204,7 +1204,7 @@ static int xive_native_debug_show(struct seq_file *m, void *private)
 	struct kvmppc_xive *xive = m->private;
 	struct kvm *kvm = xive->kvm;
 	struct kvm_vcpu *vcpu;
-	unsigned int i;
+	unsigned long i;
 
 	if (!kvm)
 		return 0;

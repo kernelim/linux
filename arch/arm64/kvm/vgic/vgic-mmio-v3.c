@@ -315,42 +315,6 @@ static unsigned long vgic_mmio_read_v3_idregs(struct kvm_vcpu *vcpu,
 	return 0;
 }
 
-static unsigned long vgic_v3_uaccess_read_pending(struct kvm_vcpu *vcpu,
-						  gpa_t addr, unsigned int len)
-{
-	u32 intid = VGIC_ADDR_TO_INTID(addr, 1);
-	u32 value = 0;
-	int i;
-
-	/*
-	 * pending state of interrupt is latched in pending_latch variable.
-	 * Userspace will save and restore pending state and line_level
-	 * separately.
-	 * Refer to Documentation/virt/kvm/devices/arm-vgic-v3.rst
-	 * for handling of ISPENDR and ICPENDR.
-	 */
-	for (i = 0; i < len * 8; i++) {
-		struct vgic_irq *irq = vgic_get_irq(vcpu->kvm, vcpu, intid + i);
-		bool state = irq->pending_latch;
-
-		if (irq->hw && vgic_irq_is_sgi(irq->intid)) {
-			int err;
-
-			err = irq_get_irqchip_state(irq->host_irq,
-						    IRQCHIP_STATE_PENDING,
-						    &state);
-			WARN_ON(err);
-		}
-
-		if (state)
-			value |= (1U << i);
-
-		vgic_put_irq(vcpu->kvm, irq);
-	}
-
-	return value;
-}
-
 static int vgic_v3_uaccess_write_pending(struct kvm_vcpu *vcpu,
 					 gpa_t addr, unsigned int len,
 					 unsigned long val)
@@ -572,7 +536,7 @@ static const struct vgic_register_region vgic_v3_dist_registers[] = {
 		VGIC_ACCESS_32bit),
 	REGISTER_DESC_WITH_BITS_PER_IRQ_SHARED(GICD_ISPENDR,
 		vgic_mmio_read_pending, vgic_mmio_write_spending,
-		vgic_v3_uaccess_read_pending, vgic_v3_uaccess_write_pending, 1,
+		vgic_uaccess_read_pending, vgic_v3_uaccess_write_pending, 1,
 		VGIC_ACCESS_32bit),
 	REGISTER_DESC_WITH_BITS_PER_IRQ_SHARED(GICD_ICPENDR,
 		vgic_mmio_read_pending, vgic_mmio_write_cpending,
@@ -647,7 +611,7 @@ static const struct vgic_register_region vgic_v3_rd_registers[] = {
 		VGIC_ACCESS_32bit),
 	REGISTER_DESC_WITH_LENGTH_UACCESS(SZ_64K + GICR_ISPENDR0,
 		vgic_mmio_read_pending, vgic_mmio_write_spending,
-		vgic_v3_uaccess_read_pending, vgic_v3_uaccess_write_pending, 4,
+		vgic_uaccess_read_pending, vgic_v3_uaccess_write_pending, 4,
 		VGIC_ACCESS_32bit),
 	REGISTER_DESC_WITH_LENGTH_UACCESS(SZ_64K + GICR_ICPENDR0,
 		vgic_mmio_read_pending, vgic_mmio_write_cpending,
@@ -754,7 +718,8 @@ static void vgic_unregister_redist_iodev(struct kvm_vcpu *vcpu)
 static int vgic_register_all_redist_iodevs(struct kvm *kvm)
 {
 	struct kvm_vcpu *vcpu;
-	int c, ret = 0;
+	unsigned long c;
+	int ret = 0;
 
 	kvm_for_each_vcpu(c, vcpu, kvm) {
 		ret = vgic_register_redist_iodev(vcpu);
@@ -763,10 +728,12 @@ static int vgic_register_all_redist_iodevs(struct kvm *kvm)
 	}
 
 	if (ret) {
-		/* The current c failed, so we start with the previous one. */
+		/* The current c failed, so iterate over the previous ones. */
+		int i;
+
 		mutex_lock(&kvm->slots_lock);
-		for (c--; c >= 0; c--) {
-			vcpu = kvm_get_vcpu(kvm, c);
+		for (i = 0; i < c; i++) {
+			vcpu = kvm_get_vcpu(kvm, i);
 			vgic_unregister_redist_iodev(vcpu);
 		}
 		mutex_unlock(&kvm->slots_lock);
@@ -836,7 +803,7 @@ static int vgic_v3_alloc_redist_region(struct kvm *kvm, uint32_t index,
 	if (vgic_v3_rdist_overlap(kvm, base, size))
 		return -EINVAL;
 
-	rdreg = kzalloc(sizeof(*rdreg), GFP_KERNEL);
+	rdreg = kzalloc(sizeof(*rdreg), GFP_KERNEL_ACCOUNT);
 	if (!rdreg)
 		return -ENOMEM;
 
@@ -995,10 +962,10 @@ void vgic_v3_dispatch_sgi(struct kvm_vcpu *vcpu, u64 reg, bool allow_group1)
 	struct kvm_vcpu *c_vcpu;
 	u16 target_cpus;
 	u64 mpidr;
-	int sgi, c;
+	int sgi;
 	int vcpu_id = vcpu->vcpu_id;
 	bool broadcast;
-	unsigned long flags;
+	unsigned long c, flags;
 
 	sgi = (reg & ICC_SGI1R_SGI_ID_MASK) >> ICC_SGI1R_SGI_ID_SHIFT;
 	broadcast = reg & BIT_ULL(ICC_SGI1R_IRQ_ROUTING_MODE_BIT);

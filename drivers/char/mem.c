@@ -35,6 +35,10 @@
 # include <linux/efi.h>
 #endif
 
+#ifdef CONFIG_PPC_RTAS
+# include <asm/rtas.h>
+#endif
+
 #define DEVMEM_MINOR	1
 #define DEVPORT_MINOR	4
 
@@ -116,6 +120,13 @@ static ssize_t read_mem(struct file *file, char __user *buf,
 	void *ptr;
 	char *bounce;
 	int err;
+
+#ifdef CONFIG_PPC_RTAS
+	/* rtas: allow /dev/mem to be open()ed for mmap only: see open_mem. */
+	err = security_locked_down(LOCKDOWN_DEV_MEM);
+	if (err)
+		return err;
+#endif
 
 	if (p != *ppos)
 		return 0;
@@ -202,6 +213,14 @@ static ssize_t write_mem(struct file *file, const char __user *buf,
 	ssize_t written, sz;
 	unsigned long copied;
 	void *ptr;
+
+#ifdef CONFIG_PPC_RTAS
+	int rc;
+	/* rtas: allow /dev/mem to be open()ed for mmap only: see open_mem. */
+	rc = security_locked_down(LOCKDOWN_DEV_MEM);
+	if (rc)
+		return rc;
+#endif
 
 	if (p != *ppos)
 		return -EFBIG;
@@ -363,6 +382,20 @@ static int mmap_mem(struct file *file, struct vm_area_struct *vma)
 {
 	size_t size = vma->vm_end - vma->vm_start;
 	phys_addr_t offset = (phys_addr_t)vma->vm_pgoff << PAGE_SHIFT;
+
+#ifdef CONFIG_PPC_RTAS
+	int rc;
+	/* rtas: we want to be careful here.
+	 *
+	 * Check carefully the address and size. If we are getting exactly
+	 * the RTAS user region, pass even in lockdown.
+	 */
+	if (offset != rtas_rmo_buf || size != RTAS_USER_REGION_SIZE) {
+		rc = security_locked_down(LOCKDOWN_DEV_MEM);
+		if (rc)
+			return rc;
+	}
+#endif
 
 	/* Does it even fit in phys_addr_t? */
 	if (offset >> PAGE_SHIFT != vma->vm_pgoff)
@@ -634,11 +667,51 @@ static int open_port(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+#ifdef CONFIG_PPC_RTAS
+/*
+ * The powerpc RTAS interface for communicating with the hypervisor is old.
+ * Currently it requires a userspace process to open /dev/mem and acquire a
+ * writable mmap at a specific address advertised is sysfs.
+ *
+ * This userspace access breaks under lockdown because lockdown blocks open() on
+ * /dev/mem.
+ *
+ * While we write a newer interface:
+ *
+ * - If the kernel is compiled with RTAS support, and an open() of /dev/mem
+ *   would otherwise be blocked by lockdown: permit the open().
+ *
+ * - Block all read()s and write()s on /dev/mem if under lockdown.
+ *
+ * - Permit only an mmap() of /dev/mem for specifically the area used for RTAS
+ *   and with the precise flags used by librtas, the only supported/known user
+ *   of RTAS.
+ */
+static int open_mem(struct inode *inode, struct file *filp)
+{
+	if (!capable(CAP_SYS_RAWIO))
+		return -EPERM;
+
+	if (iminor(inode) != DEVMEM_MINOR)
+		return 0;
+
+	/*
+	 * Use a unified address space to have a single point to manage
+	 * revocations when drivers want to take over a /dev/mem mapped
+	 * range.
+	 */
+	filp->f_mapping = iomem_get_mapping();
+
+	return 0;
+}
+#else
+#define open_mem	open_port
+#endif
+
 #define zero_lseek	null_lseek
 #define full_lseek      null_lseek
 #define write_zero	write_null
 #define write_iter_zero	write_iter_null
-#define open_mem	open_port
 
 static const struct file_operations __maybe_unused mem_fops = {
 	.llseek		= memory_lseek,

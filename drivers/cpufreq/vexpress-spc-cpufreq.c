@@ -455,7 +455,6 @@ static int ve_spc_cpufreq_init(struct cpufreq_policy *policy)
 static int ve_spc_cpufreq_exit(struct cpufreq_policy *policy)
 {
 	struct device *cpu_dev;
-	int cur_cluster = cpu_to_cluster(policy->cpu);
 
 	if (cur_cluster < MAX_CLUSTERS) {
 		cpufreq_cooling_unregister(cdev[cur_cluster]);

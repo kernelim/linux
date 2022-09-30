@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/sched/build_utility.c
+0xc06fa7e0	add_wait_queue_exclusive	vmlinux	EXPORT_SYMBOL

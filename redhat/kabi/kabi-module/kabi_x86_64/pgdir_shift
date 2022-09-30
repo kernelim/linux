@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/x86/kernel/head64.c
+0x72d79d83	pgdir_shift	vmlinux	EXPORT_SYMBOL

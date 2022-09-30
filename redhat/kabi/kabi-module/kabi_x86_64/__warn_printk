@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/panic.c
+0x56470118	__warn_printk	vmlinux	EXPORT_SYMBOL

@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/time/timer.c
+0x78534f62	init_timer_key	vmlinux	EXPORT_SYMBOL

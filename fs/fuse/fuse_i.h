@@ -490,6 +490,7 @@ struct fuse_dev {
 
 struct fuse_fs_context {
 	int fd;
+	struct file *file;
 	unsigned int rootmode;
 	kuid_t user_id;
 	kgid_t group_id;
@@ -764,6 +765,9 @@ struct fuse_conn {
 
 	/* Propagate syncfs() to server */
 	unsigned int sync_fs:1;
+
+	/* Initialize security xattrs when creating a new inode */
+	unsigned int init_security:1;
 
 	/** The number of requests waiting for completion */
 	atomic_t num_waiting;
@@ -1108,6 +1112,9 @@ int fuse_init_fs_context_submount(struct fs_context *fsc);
  * Shut down the connection (possibly sending DESTROY request).
  */
 void fuse_conn_destroy(struct fuse_mount *fm);
+
+/* Drop the connection and free the fuse mount */
+void fuse_mount_destroy(struct fuse_mount *fm);
 
 /**
  * Add connection to control filesystem

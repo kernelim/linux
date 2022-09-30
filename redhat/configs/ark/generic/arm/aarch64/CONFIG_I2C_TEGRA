@@ -1,1 +1,1 @@
-# CONFIG_I2C_TEGRA is not set
+CONFIG_I2C_TEGRA=y

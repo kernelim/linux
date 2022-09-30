@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:arch/x86/kernel/ftrace_64.S
+0xbdfb6dbb	__fentry__	vmlinux	EXPORT_SYMBOL

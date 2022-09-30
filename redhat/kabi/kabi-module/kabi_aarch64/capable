@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/capability.c
+0xc6cbbc89	capable	vmlinux	EXPORT_SYMBOL

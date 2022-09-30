@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:mm/page_alloc.c
+0x6a5cb5ee	__get_free_pages	vmlinux	EXPORT_SYMBOL

@@ -50,7 +50,7 @@ struct arp_pkt {
 #pragma pack()
 
 /* Forward declaration */
-static void alb_send_learning_packets(struct slave *slave, u8 mac_addr[],
+static void alb_send_learning_packets(struct slave *slave, const u8 mac_addr[],
 				      bool strict_match);
 static void rlb_purge_src_ip(struct bonding *bond, struct arp_pkt *arp);
 static void rlb_src_unlink(struct bonding *bond, u32 index);
@@ -353,7 +353,8 @@ static struct slave *rlb_next_rx_slave(struct bonding *bond)
  *
  * Caller must hold RTNL
  */
-static void rlb_teach_disabled_mac_on_primary(struct bonding *bond, u8 addr[])
+static void rlb_teach_disabled_mac_on_primary(struct bonding *bond,
+					      const u8 addr[])
 {
 	struct slave *curr_active = rtnl_dereference(bond->curr_active_slave);
 
@@ -904,7 +905,7 @@ static void rlb_clear_vlan(struct bonding *bond, unsigned short vlan_id)
 
 /*********************** tlb/rlb shared functions *********************/
 
-static void alb_send_lp_vid(struct slave *slave, u8 mac_addr[],
+static void alb_send_lp_vid(struct slave *slave, const u8 mac_addr[],
 			    __be16 vlan_proto, u16 vid)
 {
 	struct learning_pkt pkt;
@@ -940,7 +941,7 @@ static void alb_send_lp_vid(struct slave *slave, u8 mac_addr[],
 struct alb_walk_data {
 	struct bonding *bond;
 	struct slave *slave;
-	u8 *mac_addr;
+	const u8 *mac_addr;
 	bool strict_match;
 };
 
@@ -949,9 +950,9 @@ static int alb_upper_dev_walk(struct net_device *upper,
 {
 	struct alb_walk_data *data = (struct alb_walk_data *)priv->data;
 	bool strict_match = data->strict_match;
+	const u8 *mac_addr = data->mac_addr;
 	struct bonding *bond = data->bond;
 	struct slave *slave = data->slave;
-	u8 *mac_addr = data->mac_addr;
 	struct bond_vlan_tag *tags;
 
 	if (is_vlan_dev(upper) &&
@@ -982,7 +983,7 @@ static int alb_upper_dev_walk(struct net_device *upper,
 	return 0;
 }
 
-static void alb_send_learning_packets(struct slave *slave, u8 mac_addr[],
+static void alb_send_learning_packets(struct slave *slave, const u8 mac_addr[],
 				      bool strict_match)
 {
 	struct bonding *bond = bond_get_bond_by_slave(slave);
@@ -1006,14 +1007,14 @@ static void alb_send_learning_packets(struct slave *slave, u8 mac_addr[],
 	rcu_read_unlock();
 }
 
-static int alb_set_slave_mac_addr(struct slave *slave, u8 addr[],
+static int alb_set_slave_mac_addr(struct slave *slave, const u8 addr[],
 				  unsigned int len)
 {
 	struct net_device *dev = slave->dev;
 	struct sockaddr_storage ss;
 
 	if (BOND_MODE(slave->bond) == BOND_MODE_TLB) {
-		memcpy(dev->dev_addr, addr, len);
+		__dev_addr_set(dev, addr, len);
 		return 0;
 	}
 
@@ -1242,8 +1243,7 @@ static int alb_set_mac_address(struct bonding *bond, void *addr)
 		res = dev_set_mac_address(slave->dev, addr, NULL);
 
 		/* restore net_device's hw address */
-		bond_hw_addr_copy(slave->dev->dev_addr, tmp_addr,
-				  slave->dev->addr_len);
+		dev_addr_set(slave->dev, tmp_addr);
 
 		if (res)
 			goto unwind;
@@ -1263,11 +1263,31 @@ unwind:
 				  rollback_slave->dev->addr_len);
 		dev_set_mac_address(rollback_slave->dev,
 				    (struct sockaddr *)&ss, NULL);
-		bond_hw_addr_copy(rollback_slave->dev->dev_addr, tmp_addr,
-				  rollback_slave->dev->addr_len);
+		dev_addr_set(rollback_slave->dev, tmp_addr);
 	}
 
 	return res;
+}
+
+/* determine if the packet is NA or NS */
+static bool alb_determine_nd(struct sk_buff *skb, struct bonding *bond)
+{
+	struct ipv6hdr *ip6hdr;
+	struct icmp6hdr *hdr;
+
+	if (!pskb_network_may_pull(skb, sizeof(*ip6hdr)))
+		return true;
+
+	ip6hdr = ipv6_hdr(skb);
+	if (ip6hdr->nexthdr != IPPROTO_ICMPV6)
+		return false;
+
+	if (!pskb_network_may_pull(skb, sizeof(*ip6hdr) + sizeof(*hdr)))
+		return true;
+
+	hdr = icmp6_hdr(skb);
+	return hdr->icmp6_type == NDISC_NEIGHBOUR_ADVERTISEMENT ||
+		hdr->icmp6_type == NDISC_NEIGHBOUR_SOLICITATION;
 }
 
 /************************ exported alb functions ************************/
@@ -1281,12 +1301,12 @@ int bond_alb_initialize(struct bonding *bond, int rlb_enabled)
 		return res;
 
 	if (rlb_enabled) {
-		bond->alb_info.rlb_enabled = 1;
 		res = rlb_initialize(bond);
 		if (res) {
 			tlb_deinitialize(bond);
 			return res;
 		}
+		bond->alb_info.rlb_enabled = 1;
 	} else {
 		bond->alb_info.rlb_enabled = 0;
 	}
@@ -1349,8 +1369,11 @@ struct slave *bond_xmit_tlb_slave_get(struct bonding *bond,
 	/* Do not TX balance any multicast or broadcast */
 	if (!is_multicast_ether_addr(eth_data->h_dest)) {
 		switch (skb->protocol) {
-		case htons(ETH_P_IP):
 		case htons(ETH_P_IPV6):
+			if (alb_determine_nd(skb, bond))
+				break;
+			fallthrough;
+		case htons(ETH_P_IP):
 			hash_index = bond_xmit_hash(bond, skb);
 			if (bond->params.tlb_dynamic_lb) {
 				tx_slave = tlb_choose_channel(bond,
@@ -1433,10 +1456,12 @@ struct slave *bond_xmit_alb_slave_get(struct bonding *bond,
 			break;
 		}
 
-		if (!pskb_network_may_pull(skb, sizeof(*ip6hdr))) {
+		if (alb_determine_nd(skb, bond)) {
 			do_tx_balance = false;
 			break;
 		}
+
+		/* The IPv6 header is pulled by alb_determine_nd */
 		/* Additionally, DAD probes should not be tx-balanced as that
 		 * will lead to false positives for duplicate addresses and
 		 * prevent address configuration from working.
@@ -1729,8 +1754,7 @@ void bond_alb_handle_active_change(struct bonding *bond, struct slave *new_slave
 		dev_set_mac_address(new_slave->dev, (struct sockaddr *)&ss,
 				    NULL);
 
-		bond_hw_addr_copy(new_slave->dev->dev_addr, tmp_addr,
-				  new_slave->dev->addr_len);
+		dev_addr_set(new_slave->dev, tmp_addr);
 	}
 
 	/* curr_active_slave must be set before calling alb_swap_mac_addr */
@@ -1763,7 +1787,7 @@ int bond_alb_set_mac_address(struct net_device *bond_dev, void *addr)
 	if (res)
 		return res;
 
-	bond_hw_addr_copy(bond_dev->dev_addr, ss->__data, bond_dev->addr_len);
+	dev_addr_set(bond_dev, ss->__data);
 
 	/* If there is no curr_active_slave there is nothing else to do.
 	 * Otherwise we'll need to pass the new address to it and handle

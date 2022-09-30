@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/rcu/tree.c
+0x6091797f	synchronize_rcu	vmlinux	EXPORT_SYMBOL_GPL

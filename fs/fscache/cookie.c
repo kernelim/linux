@@ -717,8 +717,6 @@ void __fscache_disable_cookie(struct fscache_cookie *cookie,
 
 	trace_fscache_disable(cookie);
 
-	ASSERTCMP(atomic_read(&cookie->n_active), >, 0);
-
 	if (atomic_read(&cookie->n_children) != 0) {
 		pr_err("Cookie '%s' still has children\n",
 		       cookie->def->name);
@@ -732,6 +730,8 @@ void __fscache_disable_cookie(struct fscache_cookie *cookie,
 
 	if (!test_and_clear_bit(FSCACHE_COOKIE_ENABLED, &cookie->flags))
 		goto out_unlock_enable;
+
+	ASSERTCMP(atomic_read(&cookie->n_active), >, 0);
 
 	/* If the cookie is being invalidated, wait for that to complete first
 	 * so that we can reuse the flag.

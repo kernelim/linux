@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/locking/semaphore.c
+0x81b433f2	down	vmlinux	EXPORT_SYMBOL

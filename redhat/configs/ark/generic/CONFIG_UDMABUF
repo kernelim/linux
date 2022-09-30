@@ -1,1 +1,1 @@
-# CONFIG_UDMABUF is not set
+CONFIG_UDMABUF=y

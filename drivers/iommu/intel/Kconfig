@@ -6,6 +6,9 @@ config DMAR_TABLE
 config DMAR_PERF
 	bool
 
+config DMAR_DEBUG
+	bool
+
 config DMAR_UNITS_SUPPORTED
 	int "Number of DMA Remapping Units supported"
 	depends on DMAR_TABLE
@@ -38,6 +41,7 @@ config INTEL_IOMMU_DEBUGFS
 	bool "Export Intel IOMMU internals in Debugfs"
 	depends on IOMMU_DEBUGFS
 	select DMAR_PERF
+	select DMAR_DEBUG
 	help
 	  !!!WARNING!!!
 
@@ -55,7 +59,7 @@ config INTEL_IOMMU_SVM
 	select PCI_PRI
 	select MMU_NOTIFIER
 	select IOASID
-	select IOMMU_SVA_LIB
+	select IOMMU_SVA
 	help
 	  Shared Virtual Memory (SVM) provides a facility for devices
 	  to access DMA resources through process address space by

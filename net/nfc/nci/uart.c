@@ -329,14 +329,13 @@ static void nci_uart_tty_receive(struct tty_struct *tty, const u8 *data,
  * Arguments:
  *
  *    tty        pointer to tty instance data
- *    file       pointer to open file object for device
  *    cmd        IOCTL command code
  *    arg        argument for IOCTL call (cmd dependent)
  *
  * Return Value:    Command dependent
  */
-static int nci_uart_tty_ioctl(struct tty_struct *tty, struct file *file,
-			      unsigned int cmd, unsigned long arg)
+static int nci_uart_tty_ioctl(struct tty_struct *tty, unsigned int cmd,
+			      unsigned long arg)
 {
 	struct nci_uart *nu = (void *)tty->disc_data;
 	int err = 0;
@@ -349,7 +348,7 @@ static int nci_uart_tty_ioctl(struct tty_struct *tty, struct file *file,
 			return -EBUSY;
 		break;
 	default:
-		err = n_tty_ioctl_helper(tty, file, cmd, arg);
+		err = n_tty_ioctl_helper(tty, cmd, arg);
 		break;
 	}
 

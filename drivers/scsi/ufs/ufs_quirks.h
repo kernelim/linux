@@ -19,24 +19,15 @@
 #define UFS_VENDOR_WDC         0x145
 
 /**
- * ufs_dev_fix - ufs device quirk info
+ * ufs_dev_quirk - ufs device quirk info
  * @card: ufs card details
  * @quirk: device quirk
  */
-struct ufs_dev_fix {
+struct ufs_dev_quirk {
 	u16 wmanufacturerid;
-	u8 *model;
+	const u8 *model;
 	unsigned int quirk;
 };
-
-#define END_FIX { }
-
-/* add specific device quirk */
-#define UFS_FIX(_vendor, _model, _quirk) { \
-	.wmanufacturerid = (_vendor),\
-	.model = (_model),		   \
-	.quirk = (_quirk),		   \
-}
 
 /*
  * Some vendor's UFS device sends back to back NACs for the DL data frames
@@ -115,5 +106,11 @@ struct ufs_dev_fix {
  * suspend flow.
  */
 #define UFS_DEVICE_QUIRK_DELAY_AFTER_LPM        (1 << 11)
+
+/*
+ * Some UFS devices require L2P entry should be swapped before being sent to the
+ * UFS device for HPB READ command.
+ */
+#define UFS_DEVICE_QUIRK_SWAP_L2P_ENTRY_FOR_HPB_READ (1 << 12)
 
 #endif /* UFS_QUIRKS_H_ */

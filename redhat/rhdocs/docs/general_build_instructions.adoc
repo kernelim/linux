@@ -1,8 +1,3 @@
----
-title: 'General Build Instructions'
-weight: 2
-summary: Entry point.
----
 = RHEL Kernel Build Instructions
 
 Simple instructions for building RHEL and CentOS-Stream kernels.

@@ -717,13 +717,6 @@ static void init_intel(struct cpuinfo_x86 *c)
 
 	init_intel_misc_features(c);
 
-	if (tsx_ctrl_state == TSX_CTRL_ENABLE)
-		tsx_enable();
-	else if (tsx_ctrl_state == TSX_CTRL_DISABLE)
-		tsx_disable();
-	else if (tsx_ctrl_state == TSX_CTRL_RTM_ALWAYS_ABORT)
-		tsx_clear_cpuid();
-
 	split_lock_init();
 	bus_lock_init();
 
@@ -1237,6 +1230,7 @@ static const struct x86_cpu_id split_lock_cpu_ids[] __initconst = {
 	X86_MATCH_INTEL_FAM6_MODEL(SAPPHIRERAPIDS_X,	1),
 	X86_MATCH_INTEL_FAM6_MODEL(ALDERLAKE,		1),
 	X86_MATCH_INTEL_FAM6_MODEL(ALDERLAKE_L,		1),
+	X86_MATCH_INTEL_FAM6_MODEL(RAPTORLAKE,		1),
 	{}
 };
 

@@ -19,23 +19,27 @@
 #include "hyperv_drm.h"
 
 static int hyperv_blit_to_vram_rect(struct drm_framebuffer *fb,
-				    const struct dma_buf_map *map,
+				    const struct iosys_map *map,
 				    struct drm_rect *rect)
 {
 	struct hyperv_drm_device *hv = to_hv(fb->dev);
+	void __iomem *dst = hv->vram;
 	void *vmap = map->vaddr; /* TODO: Use mapping abstraction properly */
 	int idx;
 
 	if (!drm_dev_enter(&hv->dev, &idx))
 		return -ENODEV;
 
-	drm_fb_memcpy_dstclip(hv->vram, fb->pitches[0], vmap, fb, rect);
+	dst += drm_fb_clip_offset(fb->pitches[0], fb->format, rect);
+	drm_fb_memcpy_toio(dst, fb->pitches[0], vmap, fb, rect);
+
 	drm_dev_exit(idx);
 
 	return 0;
 }
 
-static int hyperv_blit_to_vram_fullscreen(struct drm_framebuffer *fb, const struct dma_buf_map *map)
+static int hyperv_blit_to_vram_fullscreen(struct drm_framebuffer *fb,
+					  const struct iosys_map *map)
 {
 	struct drm_rect fullscreen = {
 		.x1 = 0,
@@ -106,7 +110,7 @@ static void hyperv_pipe_enable(struct drm_simple_display_pipe *pipe,
 				crtc_state->mode.hdisplay,
 				crtc_state->mode.vdisplay,
 				plane_state->fb->pitches[0]);
-	hyperv_blit_to_vram_fullscreen(plane_state->fb, &shadow_plane_state->map[0]);
+	hyperv_blit_to_vram_fullscreen(plane_state->fb, &shadow_plane_state->data[0]);
 }
 
 static int hyperv_pipe_check(struct drm_simple_display_pipe *pipe,
@@ -134,7 +138,7 @@ static void hyperv_pipe_update(struct drm_simple_display_pipe *pipe,
 	struct drm_rect rect;
 
 	if (drm_atomic_helper_damage_merged(old_state, state, &rect)) {
-		hyperv_blit_to_vram_rect(state->fb, &shadow_plane_state->map[0], &rect);
+		hyperv_blit_to_vram_rect(state->fb, &shadow_plane_state->data[0], &rect);
 		hyperv_update_dirt(hv->hdev, &rect);
 	}
 }

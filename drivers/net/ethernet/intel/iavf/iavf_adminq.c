@@ -324,7 +324,6 @@ static enum iavf_status iavf_config_arq_regs(struct iavf_hw *hw)
 static enum iavf_status iavf_init_asq(struct iavf_hw *hw)
 {
 	enum iavf_status ret_code = 0;
-	int i;
 
 	if (hw->aq.asq.count > 0) {
 		/* queue already initialized */
@@ -355,16 +354,11 @@ static enum iavf_status iavf_init_asq(struct iavf_hw *hw)
 	/* initialize base registers */
 	ret_code = iavf_config_asq_regs(hw);
 	if (ret_code)
-		goto init_free_asq_bufs;
+		goto init_adminq_free_rings;
 
 	/* success! */
 	hw->aq.asq.count = hw->aq.num_asq_entries;
 	goto init_adminq_exit;
-
-init_free_asq_bufs:
-	for (i = 0; i < hw->aq.num_asq_entries; i++)
-		iavf_free_dma_mem(hw, &hw->aq.asq.r.asq_bi[i]);
-	iavf_free_virt_mem(hw, &hw->aq.asq.dma_head);
 
 init_adminq_free_rings:
 	iavf_free_adminq_asq(hw);
@@ -389,7 +383,6 @@ init_adminq_exit:
 static enum iavf_status iavf_init_arq(struct iavf_hw *hw)
 {
 	enum iavf_status ret_code = 0;
-	int i;
 
 	if (hw->aq.arq.count > 0) {
 		/* queue already initialized */
@@ -420,16 +413,12 @@ static enum iavf_status iavf_init_arq(struct iavf_hw *hw)
 	/* initialize base registers */
 	ret_code = iavf_config_arq_regs(hw);
 	if (ret_code)
-		goto init_free_arq_bufs;
+		goto init_adminq_free_rings;
 
 	/* success! */
 	hw->aq.arq.count = hw->aq.num_arq_entries;
 	goto init_adminq_exit;
 
-init_free_arq_bufs:
-	for (i = 0; i < hw->aq.num_arq_entries; i++)
-		iavf_free_dma_mem(hw, &hw->aq.arq.r.arq_bi[i]);
-	iavf_free_virt_mem(hw, &hw->aq.arq.dma_head);
 init_adminq_free_rings:
 	iavf_free_adminq_arq(hw);
 

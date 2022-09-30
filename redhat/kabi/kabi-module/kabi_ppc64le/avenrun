@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/sched/build_utility.c
+0xf1e98c74	avenrun	vmlinux	EXPORT_SYMBOL

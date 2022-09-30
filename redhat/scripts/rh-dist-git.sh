@@ -15,16 +15,15 @@
 rhdistgit_branch=$1;
 rhdistgit_cache=$2;
 rhdistgit_tmp=$3;
-rhdistgit_server=$4;
-rhdistgit_tarball=$5;
-rhdistgit_kabi_tarball=$6;
-rhdistgit_kabidw_tarball=$7;
-package_name=$8;
-rpm_version=$9;
-changelog=${10};
-rhel_major=${11};
-rhpkg_bin=${12};
-srpm_name=${13};
+rhdistgit_tarball=$4;
+rhdistgit_kabi_tarball=$5;
+rhdistgit_kabidw_tarball=$6;
+package_name=$7;
+rpm_version=$8;
+changelog=$9;
+rhel_major=${10};
+rhpkg_bin=${11};
+srpm_name=${12};
 
 redhat=$(dirname "$0")/..;
 topdir="$redhat"/..;
@@ -48,7 +47,12 @@ fi
 
 echo "Cloning the repository"
 # clone the dist-git, considering cache
-tmpdir=$("$redhat"/scripts/clone_tree.sh "$rhdistgit_server" "$rhdistgit_cache" "$rhdistgit_tmp" "$package_name" "$rhel_major" "$rhpkg_bin");
+date=$(date +"%Y-%m-%d")
+tmpdir="$(mktemp -d --tmpdir="$rhdistgit_tmp" RHEL"$rhel_major"."$date".XXXXXXXX)"
+cd "$tmpdir" || die "Unable to create temporary directory";
+test -n "$rhdistgit_cache" && reference="-- --reference $rhdistgit_cache"
+echo "Cloning using $rhpkg_bin" >&2;
+eval $rhpkg_bin clone "$package_name" "$reference" >/dev/null || die "Unable to clone using $rhpkg_bin";
 
 echo "Switching the branch"
 # change in the correct branch

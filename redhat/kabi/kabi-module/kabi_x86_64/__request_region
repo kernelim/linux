@@ -1,0 +1,4 @@
+#0-
+#I:0
+#P:kernel/resource.c
+0x85bd1608	__request_region	vmlinux	EXPORT_SYMBOL
