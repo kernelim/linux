@@ -109,7 +109,7 @@ __load_partial:
 	pxor T0, MSG
 
 .Lld_partial_8:
-	ret
+	RET
 ENDPROC(__load_partial)
 
 /*
@@ -167,7 +167,7 @@ __store_partial:
 	mov %r10b, (%r9)
 
 .Lst_partial_1:
-	ret
+	RET
 ENDPROC(__store_partial)
 
 .macro update
@@ -299,7 +299,7 @@ ENTRY(crypto_aegis256_aesni_init)
 	state_store3
 
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_aegis256_aesni_init)
 
 .macro ad_block a i
@@ -353,36 +353,36 @@ ENTRY(crypto_aegis256_aesni_ad)
 .Lad_out_0:
 	state_store0
 	FRAME_END
-	ret
+	RET
 
 .Lad_out_1:
 	state_store1
 	FRAME_END
-	ret
+	RET
 
 .Lad_out_2:
 	state_store2
 	FRAME_END
-	ret
+	RET
 
 .Lad_out_3:
 	state_store3
 	FRAME_END
-	ret
+	RET
 
 .Lad_out_4:
 	state_store4
 	FRAME_END
-	ret
+	RET
 
 .Lad_out_5:
 	state_store5
 	FRAME_END
-	ret
+	RET
 
 .Lad_out:
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_aegis256_aesni_ad)
 
 .macro crypt m s0 s1 s2 s3 s4 s5
@@ -489,36 +489,36 @@ ENTRY(crypto_aegis256_aesni_enc)
 .Lenc_out_0:
 	state_store0
 	FRAME_END
-	ret
+	RET
 
 .Lenc_out_1:
 	state_store1
 	FRAME_END
-	ret
+	RET
 
 .Lenc_out_2:
 	state_store2
 	FRAME_END
-	ret
+	RET
 
 .Lenc_out_3:
 	state_store3
 	FRAME_END
-	ret
+	RET
 
 .Lenc_out_4:
 	state_store4
 	FRAME_END
-	ret
+	RET
 
 .Lenc_out_5:
 	state_store5
 	FRAME_END
-	ret
+	RET
 
 .Lenc_out:
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_aegis256_aesni_enc)
 
 /*
@@ -543,7 +543,7 @@ ENTRY(crypto_aegis256_aesni_enc_tail)
 	state_store0
 
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_aegis256_aesni_enc_tail)
 
 /*
@@ -592,36 +592,36 @@ ENTRY(crypto_aegis256_aesni_dec)
 .Ldec_out_0:
 	state_store0
 	FRAME_END
-	ret
+	RET
 
 .Ldec_out_1:
 	state_store1
 	FRAME_END
-	ret
+	RET
 
 .Ldec_out_2:
 	state_store2
 	FRAME_END
-	ret
+	RET
 
 .Ldec_out_3:
 	state_store3
 	FRAME_END
-	ret
+	RET
 
 .Ldec_out_4:
 	state_store4
 	FRAME_END
-	ret
+	RET
 
 .Ldec_out_5:
 	state_store5
 	FRAME_END
-	ret
+	RET
 
 .Ldec_out:
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_aegis256_aesni_dec)
 
 /*
@@ -656,7 +656,7 @@ ENTRY(crypto_aegis256_aesni_dec_tail)
 	state_store0
 
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_aegis256_aesni_dec_tail)
 
 /*
@@ -699,5 +699,5 @@ ENTRY(crypto_aegis256_aesni_final)
 	movdqu MSG, (%rsi)
 
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_aegis256_aesni_final)

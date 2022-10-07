@@ -534,7 +534,7 @@ ddq_add_8:
 	/* return updated IV */
 	vpshufb	xbyteswap, xcounter, xcounter
 	vmovdqu	xcounter, (p_iv)
-	ret
+	RET
 .endm
 
 /*

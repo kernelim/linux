@@ -40,7 +40,7 @@
 #include <asm/processor-flags.h>
 #include <asm/irq_vectors.h>
 #include <asm/cpufeatures.h>
-#include <asm/alternative-asm.h>
+#include <asm/alternative.h>
 #include <asm/asm.h>
 #include <asm/smap.h>
 #include <asm/frame.h>
@@ -775,7 +775,7 @@ ENTRY(schedule_tail_wrapper)
 	popl	%eax
 
 	FRAME_END
-	ret
+	RET
 ENDPROC(schedule_tail_wrapper)
 /*
  * A newly forked process directly context switches into this address.

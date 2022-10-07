@@ -265,7 +265,7 @@ SYM_FUNC_START(twofish_enc_blk)
 
 	popq	R1
 	movl	$1,%eax
-	ret
+	RET
 SYM_FUNC_END(twofish_enc_blk)
 
 SYM_FUNC_START(twofish_dec_blk)
@@ -317,5 +317,5 @@ SYM_FUNC_START(twofish_dec_blk)
 
 	popq	R1
 	movl	$1,%eax
-	ret
+	RET
 SYM_FUNC_END(twofish_dec_blk)

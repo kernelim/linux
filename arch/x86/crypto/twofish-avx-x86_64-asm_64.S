@@ -287,7 +287,7 @@ SYM_FUNC_START_LOCAL(__twofish_enc_blk8)
 	outunpack_blocks(RC1, RD1, RA1, RB1, RK1, RX0, RY0, RK2);
 	outunpack_blocks(RC2, RD2, RA2, RB2, RK1, RX0, RY0, RK2);
 
-	ret;
+	RET;
 SYM_FUNC_END(__twofish_enc_blk8)
 
 .align 8
@@ -327,7 +327,7 @@ SYM_FUNC_START_LOCAL(__twofish_dec_blk8)
 	outunpack_blocks(RA1, RB1, RC1, RD1, RK1, RX0, RY0, RK2);
 	outunpack_blocks(RA2, RB2, RC2, RD2, RK1, RX0, RY0, RK2);
 
-	ret;
+	RET;
 SYM_FUNC_END(__twofish_dec_blk8)
 
 SYM_FUNC_START(twofish_ecb_enc_8way)
@@ -347,7 +347,7 @@ SYM_FUNC_START(twofish_ecb_enc_8way)
 	store_8way(%r11, RC1, RD1, RA1, RB1, RC2, RD2, RA2, RB2);
 
 	FRAME_END
-	ret;
+	RET;
 SYM_FUNC_END(twofish_ecb_enc_8way)
 
 SYM_FUNC_START(twofish_ecb_dec_8way)
@@ -367,7 +367,7 @@ SYM_FUNC_START(twofish_ecb_dec_8way)
 	store_8way(%r11, RA1, RB1, RC1, RD1, RA2, RB2, RC2, RD2);
 
 	FRAME_END
-	ret;
+	RET;
 SYM_FUNC_END(twofish_ecb_dec_8way)
 
 SYM_FUNC_START(twofish_cbc_dec_8way)
@@ -392,7 +392,7 @@ SYM_FUNC_START(twofish_cbc_dec_8way)
 	popq %r12;
 
 	FRAME_END
-	ret;
+	RET;
 SYM_FUNC_END(twofish_cbc_dec_8way)
 
 SYM_FUNC_START(twofish_ctr_8way)
@@ -419,7 +419,7 @@ SYM_FUNC_START(twofish_ctr_8way)
 	popq %r12;
 
 	FRAME_END
-	ret;
+	RET;
 SYM_FUNC_END(twofish_ctr_8way)
 
 SYM_FUNC_START(twofish_xts_enc_8way)
@@ -443,7 +443,7 @@ SYM_FUNC_START(twofish_xts_enc_8way)
 	store_xts_8way(%r11, RC1, RD1, RA1, RB1, RC2, RD2, RA2, RB2);
 
 	FRAME_END
-	ret;
+	RET;
 SYM_FUNC_END(twofish_xts_enc_8way)
 
 SYM_FUNC_START(twofish_xts_dec_8way)
@@ -467,5 +467,5 @@ SYM_FUNC_START(twofish_xts_dec_8way)
 	store_xts_8way(%r11, RA1, RB1, RC1, RD1, RA2, RB2, RC2, RD2);
 
 	FRAME_END
-	ret;
+	RET;
 SYM_FUNC_END(twofish_xts_dec_8way)

@@ -172,7 +172,7 @@ __morus1280_update:
 		STATE2_LO, STATE2_HI, \
 		STATE3_LO, STATE3_HI, \
 		4, rol1
-	ret
+	RET
 ENDPROC(__morus1280_update)
 
 /*
@@ -220,7 +220,7 @@ __morus1280_update_zero:
 		STATE2_LO, STATE2_HI, \
 		STATE3_LO, STATE3_HI, \
 		4, rol1
-	ret
+	RET
 ENDPROC(__morus1280_update_zero)
 
 /*
@@ -294,7 +294,7 @@ __load_partial:
 	movdqu (%rsi), MSG_LO
 
 .Lld_partial_16:
-	ret
+	RET
 ENDPROC(__load_partial)
 
 /*
@@ -362,7 +362,7 @@ __store_partial:
 	mov %r10b, (%r9)
 
 .Lst_partial_1:
-	ret
+	RET
 ENDPROC(__store_partial)
 
 /*
@@ -425,7 +425,7 @@ ENTRY(crypto_morus1280_sse2_init)
 	movdqu STATE4_HI, (9 * 16)(%rdi)
 
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_morus1280_sse2_init)
 
 /*
@@ -490,7 +490,7 @@ ENTRY(crypto_morus1280_sse2_ad)
 
 .Lad_out:
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_morus1280_sse2_ad)
 
 /*
@@ -594,7 +594,7 @@ ENTRY(crypto_morus1280_sse2_enc)
 
 .Lenc_out:
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_morus1280_sse2_enc)
 
 /*
@@ -652,7 +652,7 @@ ENTRY(crypto_morus1280_sse2_enc_tail)
 	movdqu STATE4_HI, (9 * 16)(%rdi)
 
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_morus1280_sse2_enc_tail)
 
 /*
@@ -752,7 +752,7 @@ ENTRY(crypto_morus1280_sse2_dec)
 
 .Ldec_out:
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_morus1280_sse2_dec)
 
 /*
@@ -824,7 +824,7 @@ ENTRY(crypto_morus1280_sse2_dec_tail)
 	movdqu STATE4_HI, (9 * 16)(%rdi)
 
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_morus1280_sse2_dec_tail)
 
 /*
@@ -892,5 +892,5 @@ ENTRY(crypto_morus1280_sse2_final)
 	movdqu MSG_HI, 16(%rsi)
 
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_morus1280_sse2_final)

@@ -135,7 +135,7 @@ EXPORT_SYMBOL(__fentry__)
 #ifdef CONFIG_DYNAMIC_FTRACE
 
 SYM_FUNC_START(function_hook)
-	retq
+	RET
 SYM_FUNC_END(function_hook)
 
 SYM_FUNC_START(ftrace_caller)
@@ -155,9 +155,6 @@ SYM_INNER_LABEL(ftrace_call, SYM_L_GLOBAL)
 	restore_mcount_regs
 
 	/*
-	 * The copied trampoline must call ftrace_epilogue as it
-	 * still may need to call the function graph tracer.
-	 *
 	 * The code up to this label is copied into trampolines so
 	 * think twice before adding any new code or changing the
 	 * layout here.
@@ -169,9 +166,12 @@ SYM_INNER_LABEL(ftrace_graph_call, SYM_L_GLOBAL)
 	jmp ftrace_stub
 #endif
 
-/* This is weak to keep gas from relaxing the jumps */
+/*
+ * This is weak to keep gas from relaxing the jumps.
+ * It is also used to copy the RET for trampolines.
+ */
 WEAK(ftrace_stub)
-	retq
+	RET
 SYM_FUNC_END(ftrace_caller)
 
 SYM_FUNC_START(ftrace_regs_caller)
@@ -292,7 +292,7 @@ fgraph_trace:
 #endif
 
 SYM_INNER_LABEL(ftrace_stub, SYM_L_GLOBAL)
-	retq
+	RET
 
 trace:
 	/* save_mcount_regs fills in first two parameters */
@@ -323,7 +323,7 @@ SYM_FUNC_START(ftrace_graph_caller)
 
 	restore_mcount_regs
 
-	retq
+	RET
 SYM_FUNC_END(ftrace_graph_caller)
 
 SYM_CODE_START(return_to_handler)

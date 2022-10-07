@@ -209,7 +209,7 @@ SYM_FUNC_START(csum_partial_copy_generic)
 	movq 5*8(%rsp), %r13
 	movq 6*8(%rsp), %r15
 	addq $7*8, %rsp
-	ret
+	RET
 
 	/* Exception handlers. Very simple, zeroing is done in the wrappers */
 .Lbad_source:

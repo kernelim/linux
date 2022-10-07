@@ -358,7 +358,7 @@ Lrounds_16_xx:
 	pop     %r12
 
 	# outer calling routine restores XMM and other GP registers
-	ret
+	RET
 ENDPROC(sha512_x4_avx2)
 
 .section	.rodata.K512_4, "a", @progbits

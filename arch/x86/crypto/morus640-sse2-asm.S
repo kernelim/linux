@@ -78,7 +78,7 @@ __morus640_update:
 	morus640_round STATE3, STATE4, STATE0, STATE1, STATE2, 22, MASK2
 	pxor MSG, STATE4
 	morus640_round STATE4, STATE0, STATE1, STATE2, STATE3, 13, MASK1
-	ret
+	RET
 ENDPROC(__morus640_update)
 
 
@@ -97,7 +97,7 @@ __morus640_update_zero:
 	morus640_round STATE2, STATE3, STATE4, STATE0, STATE1,  7, MASK3
 	morus640_round STATE3, STATE4, STATE0, STATE1, STATE2, 22, MASK2
 	morus640_round STATE4, STATE0, STATE1, STATE2, STATE3, 13, MASK1
-	ret
+	RET
 ENDPROC(__morus640_update_zero)
 
 /*
@@ -163,7 +163,7 @@ __load_partial:
 	pxor T0, MSG
 
 .Lld_partial_8:
-	ret
+	RET
 ENDPROC(__load_partial)
 
 /*
@@ -221,7 +221,7 @@ __store_partial:
 	mov %r10b, (%r9)
 
 .Lst_partial_1:
-	ret
+	RET
 ENDPROC(__store_partial)
 
 /*
@@ -270,7 +270,7 @@ ENTRY(crypto_morus640_sse2_init)
 	movdqu STATE4, (4 * 16)(%rdi)
 
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_morus640_sse2_init)
 
 /*
@@ -323,7 +323,7 @@ ENTRY(crypto_morus640_sse2_ad)
 
 .Lad_out:
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_morus640_sse2_ad)
 
 /*
@@ -397,7 +397,7 @@ ENTRY(crypto_morus640_sse2_enc)
 
 .Lenc_out:
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_morus640_sse2_enc)
 
 /*
@@ -437,7 +437,7 @@ ENTRY(crypto_morus640_sse2_enc_tail)
 	movdqu STATE4, (4 * 16)(%rdi)
 
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_morus640_sse2_enc_tail)
 
 /*
@@ -509,7 +509,7 @@ ENTRY(crypto_morus640_sse2_dec)
 
 .Ldec_out:
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_morus640_sse2_dec)
 
 /*
@@ -559,7 +559,7 @@ ENTRY(crypto_morus640_sse2_dec_tail)
 	movdqu STATE4, (4 * 16)(%rdi)
 
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_morus640_sse2_dec_tail)
 
 /*
@@ -611,5 +611,5 @@ ENTRY(crypto_morus640_sse2_final)
 	movdqu MSG, (%rsi)
 
 	FRAME_END
-	ret
+	RET
 ENDPROC(crypto_morus640_sse2_final)

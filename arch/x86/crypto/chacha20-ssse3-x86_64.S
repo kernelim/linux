@@ -142,7 +142,7 @@ ENTRY(chacha20_block_xor_ssse3)
 	pxor		%xmm7,%xmm3
 	movdqu		%xmm3,0x30(%rsi)
 
-	ret
+	RET
 ENDPROC(chacha20_block_xor_ssse3)
 
 ENTRY(chacha20_4block_xor_ssse3)
@@ -626,5 +626,5 @@ ENTRY(chacha20_4block_xor_ssse3)
 	movdqu		%xmm15,0xf0(%rsi)
 
 	lea		-8(%r10),%rsp
-	ret
+	RET
 ENDPROC(chacha20_4block_xor_ssse3)

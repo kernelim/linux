@@ -36,7 +36,7 @@ SYM_FUNC_START(xen_irq_enable_direct)
 	call check_events
 1:
 	FRAME_END
-	ret
+	RET
 SYM_FUNC_END(xen_irq_enable_direct)
 
 
@@ -46,7 +46,7 @@ SYM_FUNC_END(xen_irq_enable_direct)
  */
 SYM_FUNC_START(xen_irq_disable_direct)
 	movb $1, PER_CPU_VAR(xen_vcpu_info) + XEN_vcpu_info_mask
-	ret
+	RET
 SYM_FUNC_END(xen_irq_disable_direct)
 
 /*
@@ -62,7 +62,7 @@ SYM_FUNC_START(xen_save_fl_direct)
 	testb $0xff, PER_CPU_VAR(xen_vcpu_info) + XEN_vcpu_info_mask
 	setz %ah
 	addb %ah, %ah
-	ret
+	RET
 SYM_FUNC_END(xen_save_fl_direct)
 
 
@@ -93,7 +93,7 @@ SYM_FUNC_START(xen_restore_fl_direct)
 	call check_events
 1:
 	FRAME_END
-	ret
+	RET
 SYM_FUNC_END(xen_restore_fl_direct)
 
 
@@ -133,5 +133,5 @@ SYM_FUNC_START(check_events)
 	pop %rax
 #endif
 	FRAME_END
-	ret
+	RET
 SYM_FUNC_END(check_events)

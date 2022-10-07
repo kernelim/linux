@@ -18,7 +18,7 @@
 #include <asm/bootparam.h>
 #include <asm/suspend.h>
 #include <asm/tlbflush.h>
-#include <asm/spec_ctrl.h>
+#include "../kvm/vmx/vmx.h"
 
 #ifdef CONFIG_XEN
 #include <xen/interface/xen.h>
@@ -72,7 +72,6 @@ void common(void) {
 	OFFSET(PV_IRQ_irq_disable, pv_irq_ops, irq_disable);
 	OFFSET(PV_IRQ_irq_enable, pv_irq_ops, irq_enable);
 	OFFSET(PV_CPU_iret, pv_cpu_ops, iret);
-	OFFSET(PV_CPU_read_cr0, pv_cpu_ops, read_cr0);
 	OFFSET(PV_MMU_read_cr2, pv_mmu_ops, read_cr2);
 #endif
 
@@ -109,8 +108,8 @@ void common(void) {
 	OFFSET(TSS_sp1, tss_struct, x86_tss.sp1);
 	OFFSET(TSS_sp2, tss_struct, x86_tss.sp2);
 
-	/* Kernel IBRS speculation control structure */
-	OFFSET(KERNEL_IBRS_SPEC_CTRL_entry, kernel_ibrs_spec_ctrl, entry);
-	OFFSET(KERNEL_IBRS_SPEC_CTRL_exit, kernel_ibrs_spec_ctrl, exit);
-	OFFSET(KERNEL_IBRS_SPEC_CTRL_hi32, kernel_ibrs_spec_ctrl, hi32);
+	if (IS_ENABLED(CONFIG_KVM_INTEL)) {
+		BLANK();
+		OFFSET(VMX_spec_ctrl, vcpu_vmx, spec_ctrl);
+	}
 }

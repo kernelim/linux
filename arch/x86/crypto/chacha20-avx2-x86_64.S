@@ -444,5 +444,5 @@ ENTRY(chacha20_8block_xor_avx2)
 
 	vzeroupper
 	lea		-8(%r10),%rsp
-	ret
+	RET
 ENDPROC(chacha20_8block_xor_avx2)

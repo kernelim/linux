@@ -103,7 +103,7 @@
 	pop	%rbp
 	pop	%r12
 	pop	%rbx
-	ret
+	RET
 
 	SYM_FUNC_END(\name)
 .endm

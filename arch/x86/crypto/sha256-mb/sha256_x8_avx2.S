@@ -435,7 +435,7 @@ Lrounds_16_xx:
 	pop     %r13
 	pop     %r12
 
-	ret
+	RET
 ENDPROC(sha256_x8_avx2)
 
 .section	.rodata.K256_8, "a", @progbits

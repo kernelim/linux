@@ -89,7 +89,7 @@ SYM_FUNC_START_LOCAL(__clmul_gf128mul_ble)
 	psrlq $1, T2
 	pxor T2, T1
 	pxor T1, DATA
-	ret
+	RET
 SYM_FUNC_END(__clmul_gf128mul_ble)
 
 /* void clmul_ghash_mul(char *dst, const u128 *shash) */
@@ -103,7 +103,7 @@ SYM_FUNC_START(clmul_ghash_mul)
 	PSHUFB_XMM BSWAP DATA
 	movups DATA, (%rdi)
 	FRAME_END
-	ret
+	RET
 SYM_FUNC_END(clmul_ghash_mul)
 
 /*
@@ -132,5 +132,5 @@ SYM_FUNC_START(clmul_ghash_update)
 	movups DATA, (%rdi)
 .Lupdate_just_ret:
 	FRAME_END
-	ret
+	RET
 SYM_FUNC_END(clmul_ghash_update)

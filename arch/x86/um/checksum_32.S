@@ -114,7 +114,7 @@ csum_partial:
 7:	
 	popl %ebx
 	popl %esi
-	ret
+	RET
 
 #else
 
@@ -212,7 +212,7 @@ csum_partial:
 80: 
 	popl %ebx
 	popl %esi
-	ret
+	RET
 				
 #endif
 	EXPORT_SYMBOL(csum_partial)

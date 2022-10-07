@@ -384,5 +384,5 @@ SYM_FUNC_START(poly1305_4block_avx2)
 	pop		%r13
 	pop		%r12
 	pop		%rbx
-	ret
+	RET
 SYM_FUNC_END(poly1305_4block_avx2)

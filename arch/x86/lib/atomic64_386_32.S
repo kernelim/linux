@@ -10,7 +10,7 @@
  */
 
 #include <linux/linkage.h>
-#include <asm/alternative-asm.h>
+#include <asm/alternative.h>
 
 /* if you want SMP support, implement these with real spinlocks */
 .macro LOCK reg
@@ -34,7 +34,7 @@ ENTRY(atomic64_##op##_386); \
 
 #define RET \
 	UNLOCK v; \
-	ret
+	RET
 
 #define RET_ENDP \
 	RET; \

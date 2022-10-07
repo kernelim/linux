@@ -195,7 +195,7 @@ return:
 	pop	%r12
 	pop	%rbx
 	FRAME_END
-	ret
+	RET
 
 return_null:
 	xor     job_rax, job_rax

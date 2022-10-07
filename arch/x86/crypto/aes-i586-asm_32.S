@@ -286,7 +286,7 @@ ENTRY(aes_enc_blk)
 	pop     %ebx
 	mov     %r0,(%ebp)
 	pop     %ebp
-	ret
+	RET
 ENDPROC(aes_enc_blk)
 
 // AES (Rijndael) Decryption Subroutine
@@ -358,5 +358,5 @@ ENTRY(aes_dec_blk)
 	pop     %ebx
 	mov     %r0,(%ebp)
 	pop     %ebp
-	ret
+	RET
 ENDPROC(aes_dec_blk)

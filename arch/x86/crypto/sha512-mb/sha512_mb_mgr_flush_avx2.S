@@ -212,7 +212,7 @@ len_is_0:
 return:
 	pop	%rbx
 	FRAME_END
-        ret
+        RET
 
 return_null:
         xor     job_rax, job_rax
@@ -273,12 +273,12 @@ ENTRY(sha512_mb_mgr_get_comp_job_avx2)
 
 	pop     %rbx
 
-        ret
+        RET
 
 .return_null:
         xor     job_rax, job_rax
 	pop     %rbx
-        ret
+        RET
 ENDPROC(sha512_mb_mgr_get_comp_job_avx2)
 
 .section	.rodata.cst8.one, "aM", @progbits, 8

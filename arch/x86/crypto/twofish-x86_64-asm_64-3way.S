@@ -273,7 +273,7 @@ SYM_FUNC_START(__twofish_enc_blk_3way)
 	popq %rbx;
 	popq %r12;
 	popq %r13;
-	ret;
+	RET;
 
 .L__enc_xor3:
 	outunpack_enc3(xor);
@@ -281,7 +281,7 @@ SYM_FUNC_START(__twofish_enc_blk_3way)
 	popq %rbx;
 	popq %r12;
 	popq %r13;
-	ret;
+	RET;
 SYM_FUNC_END(__twofish_enc_blk_3way)
 
 SYM_FUNC_START(twofish_dec_blk_3way)
@@ -316,5 +316,5 @@ SYM_FUNC_START(twofish_dec_blk_3way)
 	popq %rbx;
 	popq %r12;
 	popq %r13;
-	ret;
+	RET;
 SYM_FUNC_END(twofish_dec_blk_3way)

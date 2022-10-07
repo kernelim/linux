@@ -583,7 +583,7 @@ static void nv_pcie_gen3_enable(struct amdgpu_device *adev)
 
 static void nv_program_aspm(struct amdgpu_device *adev)
 {
-	if (!amdgpu_aspm)
+	if (!amdgpu_device_should_use_aspm(adev))
 		return;
 
 	if (!(adev->flags & AMD_IS_APU) &&
@@ -981,7 +981,8 @@ static int nv_update_umd_stable_pstate(struct amdgpu_device *adev,
 		adev->gfx.funcs->update_perfmon_mgcg(adev, !enter);
 
 	if (!(adev->flags & AMD_IS_APU) &&
-	    (adev->nbio.funcs->enable_aspm))
+	    (adev->nbio.funcs->enable_aspm) &&
+	     amdgpu_device_should_use_aspm(adev))
 		adev->nbio.funcs->enable_aspm(adev, !enter);
 
 	return 0;
