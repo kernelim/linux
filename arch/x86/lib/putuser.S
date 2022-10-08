@@ -33,7 +33,7 @@
 #define ENTER	CFI_STARTPROC ; \
 		GET_THREAD_INFO(%_ASM_BX)
 #define EXIT	ASM_CLAC ;	\
-		ret ;		\
+		RET ;		\
 		CFI_ENDPROC
 
 .text

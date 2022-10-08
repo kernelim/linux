@@ -769,7 +769,7 @@ static __always_inline void __ticket_unlock_kick(struct arch_spinlock *lock,
 	    "call " #func ";"						\
 	    PV_RESTORE_ALL_CALLER_REGS					\
 	    FRAME_END							\
-	    "ret;"							\
+	    ASM_RET							\
 	    ".popsection")
 
 /* Get a reference to a callee-save function */

@@ -422,7 +422,7 @@ __twofish_enc_blk16:
 	outunpack_enc16(RA, RB, RC, RD);
 	write_blocks16(RA, RB, RC, RD);
 
-	ret;
+	RET;
 ENDPROC(__twofish_enc_blk16)
 
 .align 8
@@ -454,7 +454,7 @@ __twofish_dec_blk16:
 	outunpack_dec16(RA, RB, RC, RD);
 	write_blocks16(RA, RB, RC, RD);
 
-	ret;
+	RET;
 ENDPROC(__twofish_dec_blk16)
 
 ENTRY(twofish_ecb_enc_16way)
@@ -476,7 +476,7 @@ ENTRY(twofish_ecb_enc_16way)
 	popq %r12;
 	vzeroupper;
 
-	ret;
+	RET;
 ENDPROC(twofish_ecb_enc_16way)
 
 ENTRY(twofish_ecb_dec_16way)
@@ -498,7 +498,7 @@ ENTRY(twofish_ecb_dec_16way)
 	popq %r12;
 	vzeroupper;
 
-	ret;
+	RET;
 ENDPROC(twofish_ecb_dec_16way)
 
 ENTRY(twofish_cbc_dec_16way)
@@ -521,7 +521,7 @@ ENTRY(twofish_cbc_dec_16way)
 	popq %r12;
 	vzeroupper;
 
-	ret;
+	RET;
 ENDPROC(twofish_cbc_dec_16way)
 
 ENTRY(twofish_ctr_16way)
@@ -546,7 +546,7 @@ ENTRY(twofish_ctr_16way)
 	popq %r12;
 	vzeroupper;
 
-	ret;
+	RET;
 ENDPROC(twofish_ctr_16way)
 
 .align 8
@@ -574,7 +574,7 @@ twofish_xts_crypt_16way:
 	popq %r12;
 	vzeroupper;
 
-	ret;
+	RET;
 ENDPROC(twofish_xts_crypt_16way)
 
 ENTRY(twofish_xts_enc_16way)

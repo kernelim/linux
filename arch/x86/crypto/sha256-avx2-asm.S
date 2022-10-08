@@ -720,7 +720,7 @@ done_hash:
 	popq	%r12
 	popq	%rbp
 	popq	%rbx
-	ret
+	RET
 ENDPROC(sha256_transform_rorx)
 
 .data

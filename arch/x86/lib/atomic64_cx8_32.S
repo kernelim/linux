@@ -35,7 +35,7 @@ ENTRY(atomic64_read_cx8)
 	CFI_STARTPROC
 
 	read64 %ecx
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(atomic64_read_cx8)
 
@@ -48,7 +48,7 @@ ENTRY(atomic64_set_cx8)
 	cmpxchg8b (%esi)
 	jne 1b
 
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(atomic64_set_cx8)
 
@@ -60,7 +60,7 @@ ENTRY(atomic64_xchg_cx8)
 	cmpxchg8b (%esi)
 	jne 1b
 
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(atomic64_xchg_cx8)
 
@@ -93,7 +93,7 @@ ENTRY(atomic64_\func\()_return_cx8)
 	RESTORE esi
 	RESTORE ebx
 	RESTORE ebp
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(atomic64_\func\()_return_cx8)
 .endm
@@ -120,7 +120,7 @@ ENTRY(atomic64_\func\()_return_cx8)
 	movl %ebx, %eax
 	movl %ecx, %edx
 	RESTORE ebx
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(atomic64_\func\()_return_cx8)
 .endm
@@ -147,7 +147,7 @@ ENTRY(atomic64_dec_if_positive_cx8)
 	movl %ebx, %eax
 	movl %ecx, %edx
 	RESTORE ebx
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(atomic64_dec_if_positive_cx8)
 
@@ -181,7 +181,7 @@ ENTRY(atomic64_add_unless_cx8)
 	CFI_ADJUST_CFA_OFFSET -8
 	RESTORE ebx
 	RESTORE ebp
-	ret
+	RET
 4:
 	cmpl %edx, 4(%esp)
 	jne 2b
@@ -210,6 +210,6 @@ ENTRY(atomic64_inc_not_zero_cx8)
 	movl $1, %eax
 3:
 	RESTORE ebx
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(atomic64_inc_not_zero_cx8)

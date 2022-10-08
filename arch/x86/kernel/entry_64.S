@@ -269,7 +269,8 @@ ENDPROC(native_usergs_sysret64)
 	SWITCH_TO_KERNEL_CR3
 	IBRS_ENTRY_CLOBBER /* no indirect jump allowed before IBRS */
 	movq PER_CPU_VAR(kernel_stack), %rsp
-	FILL_RETURN_BUFFER_CLOBBER /* no ret allowed before stuffing the RSB */
+	FILL_RETURN_BUFFER_CLOBBER %rax, X86_FEATURE_RSB_CTXSW /* no ret allowed before stuffing the RSB */
+	UNTRAIN_RET
 	movq %rsi, %rsp
 	jmp 2f
 1:
@@ -329,7 +330,7 @@ ENTRY(save_rest)
 	movq_cfi r15, R15+16
 	movq %r11, 8(%rsp)	/* return address */
 	FIXUP_TOP_OF_STACK %r11, 16
-	ret
+	RET
 	CFI_ENDPROC
 END(save_rest)
 
@@ -367,8 +368,9 @@ ENTRY(save_paranoid)
 2:
 	SAVE_AND_SWITCH_TO_KERNEL_CR3 scratch_reg=%rax save_reg=%r14
 	IBRS_ENTRY_SAVE_AND_CLOBBER save_reg=%r13d /* no indirect jump allowed before IBRS */
-	FILL_RETURN_BUFFER_CLOBBER /* no ret allowed before stuffing the RSB */
-	ret
+	FILL_RETURN_BUFFER_CLOBBER %rax, X86_FEATURE_RSB_CTXSW /* no ret allowed before stuffing the RSB */
+	UNTRAIN_RET
+	RET
 	CFI_ENDPROC
 END(save_paranoid)
 	.popsection
@@ -475,7 +477,8 @@ GLOBAL(system_call_after_swapgs)
 	movq	%rsp,PER_CPU_VAR(old_rsp)
 	movq	PER_CPU_VAR(kernel_stack),%rsp
 	IBRS_ENTRY /* no indirect jump allowed before IBRS */
-	FILL_RETURN_BUFFER /* no ret allowed before stuffing the RSB */
+	FILL_RETURN_BUFFER %rax, X86_FEATURE_RSB_CTXSW /* no ret allowed before stuffing the RSB */
+	UNTRAIN_RET
 	/*
 	 * No need to follow this irqs off/on section - it's straight
 	 * and short:
@@ -715,7 +718,7 @@ ENTRY(stub_\func)
 	call sys_\func
 	UNWIND_END_OF_STACK
 	RESTORE_TOP_OF_STACK %r11, 8
-	ret
+	RET
 	CFI_ENDPROC
 END(stub_\func)
 	.endm
@@ -728,7 +731,7 @@ ENTRY(\label)
 	call \func
 	UNWIND_END_OF_STACK
 	RESTORE_TOP_OF_STACK %r11, 8
-	ret
+	RET
 	CFI_ENDPROC
 END(\label)
 	.endm
@@ -1269,7 +1272,7 @@ gs_change:
 2:	mfence		/* workaround */
 	SWAPGS
 	popfq_cfi
-	ret
+	RET
 	CFI_ENDPROC
 END(native_load_gs_index)
 
@@ -1299,7 +1302,7 @@ ENTRY(call_softirq)
 	CFI_DEF_CFA_REGISTER	rsp
 	CFI_ADJUST_CFA_OFFSET   -8
 	decl PER_CPU_VAR(irq_count)
-	ret
+	RET
 	CFI_ENDPROC
 END(call_softirq)
 
@@ -1541,7 +1544,8 @@ error_swapgs:
 	movq %rsp, %rsi
 	movq PER_CPU_VAR(kernel_stack), %rsp
 	IBRS_ENTRY_CLOBBER /* no indirect jump allowed before IBRS */
-	FILL_RETURN_BUFFER_CLOBBER /* no ret allowed before stuffing the RSB */
+	FILL_RETURN_BUFFER_CLOBBER %rax, X86_FEATURE_RSB_CTXSW /* no ret allowed before stuffing the RSB */
+	UNTRAIN_RET
 	movq %rsi, %rsp
 error_sti:
 	/* Check to see if we're on the trampoline stack. */
@@ -1565,7 +1569,7 @@ error_sti:
 	movq %rax, %rsp
 1:
 	TRACE_IRQS_OFF
-	ret
+	RET
 
 /*
  * There are two places in the kernel that can potentially fault with
@@ -1727,7 +1731,8 @@ ENTRY(nmi)
 	pushq	%r15		/* pt_regs->r15 */
 
 	IBRS_ENTRY_CLOBBER /* no indirect jump allowed before IBRS */
-	FILL_RETURN_BUFFER_CLOBBER /* no ret allowed before stuffing the RSB */
+	FILL_RETURN_BUFFER_CLOBBER %rax, X86_FEATURE_RSB_CTXSW /* no ret allowed before stuffing the RSB */
+	UNTRAIN_RET
 
 	/*
 	 * At this point we no longer need to worry about stack damage

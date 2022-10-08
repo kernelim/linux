@@ -423,8 +423,11 @@ bool spec_ctrl_force_enable_ibrs(void)
 
 bool spec_ctrl_cond_enable_ibrs(bool full_retp)
 {
-	if (cpu_has_spec_ctrl() && (is_skylake_era() || !full_retp) &&
-	    !noibrs_cmdline) {
+	bool retbleed = boot_cpu_has_bug(X86_BUG_RETBLEED) &&
+			boot_cpu_data.x86_vendor == X86_VENDOR_INTEL;
+
+	if (cpu_has_spec_ctrl() &&
+	    (retbleed || is_skylake_era() || !full_retp) && !noibrs_cmdline) {
 		if (boot_cpu_has(X86_FEATURE_IBRS_ENHANCED)) {
 			spec_ctrl_enable_ibrs_enhanced();
 		} else {
@@ -868,6 +871,9 @@ static ssize_t retp_enabled_read(struct file *file, char __user *user_buf,
 	return __enabled_read(file, user_buf, count, ppos, &enabled);
 }
 
+#define RETP_IBRS_OFF_WARN "WARNING: disabling IBRS on a RETBleed affected CPU is not safe."
+#define RETP_IBRS_ON_FAIL "WARNING: failed to set IBRS. CPU vulnerable to RETBleed attacks."
+
 static ssize_t retp_enabled_write(struct file *file,
 				  const char __user *user_buf,
 				  size_t count, loff_t *ppos)
@@ -884,17 +890,47 @@ static ssize_t retp_enabled_write(struct file *file,
 	if (kstrtouint(buf, 0, &enable))
 		return -EINVAL;
 
-	if (enable > 1)
+	if (enable > 2)
 		return -EINVAL;
 
 	mutex_lock(&spec_ctrl_mutex);
 
-	if (enable == retp_enabled())
+	if (!!enable == retp_enabled())
 		goto out_unlock;
 
-	set_spec_ctrl_retp(enable);
-
 	if (enable) {
+		bool force_enable = (enable == 2) ? true : false;
+
+		/*
+		 * RETBleed affected CPUs (Intel) depend on IBRS as
+		 * an effective mitigation mechanism. We'll override
+		 * retp_enabled=1 with spectre_v2=ibrs here.
+		 */
+		if (boot_cpu_has_bug(X86_BUG_RETBLEED) &&
+		    boot_cpu_data.x86_vendor == X86_VENDOR_INTEL) {
+			if (!force_enable) {
+				if (ibrs_mode == IBRS_DISABLED) {
+					pr_warn("%s Switching to spectre_v2=ibrs\n",
+						RETP_IBRS_OFF_WARN);
+
+					if (spec_ctrl_cond_enable_ibrs(true))
+						goto out_get_mitigation;
+					else
+						pr_warn("%s\n", RETP_IBRS_ON_FAIL);
+				}
+
+				goto out_unlock;
+			}
+
+			/*
+			 * retp_enabled=2 case here, which preserves the
+			 * old behavior and disables IBRS.
+			 * on a RETBleed affected CPU we just throw the
+			 * warning and keep on going.
+			 */
+			pr_warn("%s\n", RETP_IBRS_OFF_WARN);
+		}
+
 		/* enforce sane combinations */
 		if (ibp_disabled) {
 			sync_all_cpus_ibp(true);
@@ -907,6 +943,10 @@ static ssize_t retp_enabled_write(struct file *file,
 			set_spec_ctrl_pcp_ibrs_user();
 		}
 	}
+
+	set_spec_ctrl_retp(!!enable);
+
+out_get_mitigation:
 	spec_ctrl_get_mitigation();
 
 out_unlock:

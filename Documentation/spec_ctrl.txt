@@ -79,6 +79,13 @@ retp_enabled 1: Retpolines are enabled in the kernel, which replace all
 		which adds user-to-user and guest-to-guest protection
 		across context switches.
 
+		With the advent of RETBleed, IBRS becomes the defacto
+		speculation control protection mechanism for Intel CPUs
+		affected by it, and retp_enabled=1 will fallback to
+		enabling IBRS instead of Retpolines on those CPUs.
+
+retp_enabled 2: Retpolines are force-enabled on Intel RETBleed affected CPUs.
+
 ibrs_enabled 0: Disabled
 
 ibrs_enabled 1: IBRS enabled in kernel mode.

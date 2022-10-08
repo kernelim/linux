@@ -3317,6 +3317,30 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 
 	retain_initrd	[RAM] Keep initrd memory after extraction
 
+	retbleed=	[X86] Control mitigation of RETBleed (Arbitrary
+			Speculative Code Execution with Return Instructions)
+			vulnerability.
+
+			off          - no mitigation
+			auto         - automatically select a migitation
+			auto,nosmt   - automatically select a mitigation,
+				       disabling SMT if necessary for
+				       the full mitigation (only on Zen1
+				       and older without STIBP).
+			ibpb	     - mitigate short speculation windows on
+				       basic block boundaries too. Safe, highest
+				       perf impact.
+			unret        - force enable untrained return thunks,
+				       only effective on AMD f15h-f17h
+				       based systems.
+			unret,nosmt  - like unret, will disable SMT when STIBP
+			               is not available.
+
+			Selecting 'auto' will choose a mitigation method at run
+			time according to the CPU.
+
+			Not specifying this option is equivalent to retbleed=auto.
+
 	rhash_entries=	[KNL,NET]
 			Set number of hash buckets for route cache
 
@@ -3504,12 +3528,22 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 
 			Specific mitigations can also be selected manually:
 
-			retpoline	  - replace indirect branches
+			retpoline[,force] - replace indirect branches
 			ibrs		  - Intel: Indirect Branch Restricted Speculation (kernel)
 			ibrs_always	  - Intel: Indirect Branch Restricted Speculation (kernel and user space)
 
 			Not specifying this option is equivalent to
 			spectre_v2=auto.
+
+			NOTE: with the advent of RETBleed, IBRS becomes the
+			defacto speculation control protection mechanism for
+			Intel CPUs affected by it. Specifying 'retpoline' as
+			spectre_v2 mitigation will now become equivalent to
+			spectre_v2=auto for such CPUs.
+
+			adding ',force' to spectre_v2=retpoline will make it
+			keep the old behavior, which means the system will
+			remain VULNERABLE to RETBleed.
 
 	spec_store_bypass_disable=
 			[HW] Control Speculative Store Bypass (SSB) Disable mitigation

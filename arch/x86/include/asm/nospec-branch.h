@@ -51,9 +51,11 @@
 	lfence;					\
 	jmp	775b;				\
 774:						\
+	add	$(BITS_PER_LONG/8) * 2, sp;	\
 	dec	reg;				\
 	jnz	771b;				\
-	add	$(BITS_PER_LONG/8) * nr, sp;
+	/* barrier for jnz misprediction */	\
+	lfence;
 
 #ifdef __ASSEMBLY__
 
@@ -61,20 +63,21 @@
   * A simpler FILL_RETURN_BUFFER macro. Don't make people use the CPP
   * monstrosity above, manually.
   */
-.macro FILL_RETURN_BUFFER_CLOBBER reg=%rax
-	661: __FILL_RETURN_BUFFER(\reg, RSB_CLEAR_LOOPS, %_ASM_SP); 662:
+.macro FILL_RETURN_BUFFER_CLOBBER reg:req ftr:req
+	661: jmp .Lskip_rsb_\@; ASM_NOP8; ASM_NOP8; ASM_NOP8; ASM_NOP8; ASM_NOP8; ASM_NOP4; 662:
 	.pushsection .altinstr_replacement, "ax"
-	663: ASM_NOP8; ASM_NOP8; ASM_NOP8; ASM_NOP8; ASM_NOP8; ASM_NOP3; 664:
+	663: __FILL_RETURN_BUFFER(\reg, RSB_CLEAR_LOOPS, %_ASM_SP); 664:
 	.popsection
 	.pushsection .altinstructions, "a"
-	altinstruction_entry 661b, 663b, X86_FEATURE_SMEP, 662b-661b, 664b-663b
+	altinstruction_entry 661b, 663b, \ftr, 662b-661b, 664b-663b
 	.popsection
+.Lskip_rsb_\@:
 .endm
 
-.macro FILL_RETURN_BUFFER
-	push %rax
-	FILL_RETURN_BUFFER_CLOBBER reg=%rax
-	pop %rax
+.macro FILL_RETURN_BUFFER reg:req ftr:req
+	push \reg
+	FILL_RETURN_BUFFER_CLOBBER reg=\reg ftr=\ftr
+	pop \reg
 .endm
 
 /*
@@ -166,7 +169,36 @@
 .Ldone_\@:
 .endm
 
+/*
+ * Mitigate RETBleed for AMD/Hygon Zen uarch. Requires KERNEL CR3 because the
+ * return thunk isn't mapped into the userspace tables (then again, AMD
+ * typically has NO_MELTDOWN).
+ *
+ * While zen_untrain_ret() doesn't clobber anything but requires stack,
+ * entry_ibpb() will clobber AX, CX, DX.
+ *
+ * As such, this must be placed after every *SWITCH_TO_KERNEL_CR3 at a point
+ * where we have a stack but before any RET instruction.
+ */
+.macro UNTRAIN_RET
+#ifdef CONFIG_RETPOLINE
+	661: ASM_NOP5_ATOMIC; 662:
+	.pushsection .altinstr_replacement, "ax"
+	6631: call zen_untrain_ret; 6641:
+	6632: call entry_ibpb; 6642:
+	.popsection
+	.pushsection .altinstructions, "a"
+	altinstruction_entry 661b, 6631b, X86_FEATURE_UNRET, 662b-661b, 6641b-6631b
+	altinstruction_entry 661b, 6632b, X86_FEATURE_ENTRY_IBPB, 662b-661b, 6642b-6632b
+	.popsection
+#endif
+.endm
+
 #else /* __ASSEMBLY__ */
+
+extern void __x86_return_thunk(void);
+extern void zen_untrain_ret(void);
+extern void entry_ibpb(void);
 
 #if defined(CONFIG_X86_64) && defined(RETPOLINE)
 /*
@@ -246,6 +278,20 @@ static inline void fill_RSB(void)
 	asm volatile (__stringify(__FILL_RETURN_BUFFER(%0, RSB_CLEAR_LOOPS, %1))
 		      : "=r" (loops), "+r" (sp)
 		      : : "memory" );
+}
+
+/*
+ * On VMEXIT we must ensure we untrain RET in order to mitigate
+ * RETBleed for AMD/Hygon Zen uarch.
+ */
+static inline void untrain_ret(void)
+{
+	asm volatile (
+		ALTERNATIVE_2(ASM_NOP5_ATOMIC,
+			      "call zen_untrain_ret", X86_FEATURE_UNRET,
+			      "call entry_ibpb", X86_FEATURE_ENTRY_IBPB)
+		: : : "memory"
+	);
 }
 
 extern struct static_key mds_user_clear;

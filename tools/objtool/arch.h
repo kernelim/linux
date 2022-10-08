@@ -41,4 +41,6 @@ int arch_decode_instruction(struct elf *elf, struct section *sec,
 			    unsigned int *len, unsigned char *type,
 			    unsigned long *displacement);
 
+bool arch_is_rethunk(struct symbol *sym);
+
 #endif /* _ARCH_H */

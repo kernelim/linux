@@ -476,11 +476,11 @@ check_x87:
 	movl %cr0,%eax		/* no coprocessor: have to set bits */
 	xorl $4,%eax		/* set EM */
 	movl %eax,%cr0
-	ret
+	RET
 	ALIGN
 1:	movb $1,X86_HARD_MATH
 	.byte 0xDB,0xE4		/* fsetpm for 287, ignored by 387 */
-	ret
+	RET
 
 	
 #include "verify_cpu.S"
@@ -540,7 +540,7 @@ setup_once:
 #endif
 
 	andl $0,setup_once_ref	/* Once is enough, thanks */
-	ret
+	RET
 
 ENTRY(early_idt_handler_array)
 	# 36(%esp) %eflags

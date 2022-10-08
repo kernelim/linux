@@ -13,7 +13,7 @@
 __kernel_vsyscall:
 .LSTART_vsyscall:
 	int $0x80
-	ret
+	RET
 .LEND_vsyscall:
 	.size __kernel_vsyscall,.-.LSTART_vsyscall
 	.previous

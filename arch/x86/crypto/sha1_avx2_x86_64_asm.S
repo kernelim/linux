@@ -676,7 +676,7 @@ _loop3:
 	pop	%rbp
 	pop	%rbx
 
-	ret
+	RET
 
 	ENDPROC(\name)
 .endm

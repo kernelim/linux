@@ -527,7 +527,7 @@ void nfs_prime_dcache(struct dentry *parent, struct nfs_entry *entry)
 		}
 	}
 	if (!entry->fh->size)
-		goto out;
+		return;
 
 	dentry = d_alloc(parent, &filename);
 	if (dentry == NULL)

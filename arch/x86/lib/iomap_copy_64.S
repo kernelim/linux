@@ -25,6 +25,6 @@ ENTRY(__iowrite32_copy)
 	CFI_STARTPROC
 	movl %edx,%ecx
 	rep movsd
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(__iowrite32_copy)

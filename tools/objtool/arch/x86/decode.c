@@ -53,7 +53,7 @@ int arch_decode_instruction(struct elf *elf, struct section *sec,
 	if (x86_64 == -1)
 		return -1;
 
-	insn_init(&insn, (void *)(sec->data + offset), maxlen, x86_64);
+	insn_init(&insn, (void *)(sec->data->d_buf + offset), maxlen, x86_64);
 	insn_get_length(&insn);
 	insn_get_opcode(&insn);
 	insn_get_modrm(&insn);
@@ -169,4 +169,9 @@ int arch_decode_instruction(struct elf *elf, struct section *sec,
 	*immediate = insn.immediate.nbytes ? insn.immediate.value : 0;
 
 	return 0;
+}
+
+bool arch_is_rethunk(struct symbol *sym)
+{
+	return !strcmp(sym->name, "__x86_return_thunk");
 }

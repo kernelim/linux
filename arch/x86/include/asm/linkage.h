@@ -55,6 +55,20 @@
 #define __ALIGN_STR	__stringify(__ALIGN)
 #endif
 
+#if defined(CONFIG_RETPOLINE) && !defined(BUILD_VDSO)
+#define RET	jmp __x86_return_thunk
+#else
+#define RET	ret
+#endif
+
+#else /* __ASSEMBLY__ */
+
+#if defined(CONFIG_RETPOLINE) && !defined(BUILD_VDSO)
+#define ASM_RET	"jmp __x86_return_thunk\n\t"
+#else
+#define ASM_RET	"ret\n\t"
+#endif
+
 #endif /* __ASSEMBLY__ */
 
 #endif /* _ASM_X86_LINKAGE_H */

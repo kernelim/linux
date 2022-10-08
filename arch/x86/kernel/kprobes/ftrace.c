@@ -99,7 +99,7 @@ asmlinkage void override_func(void);
 asm(
 	".type override_func, @function\n"
 	"override_func:\n"
-	"	ret\n"
+	ASM_RET
 	".size override_func, .-override_func\n"
 );
 

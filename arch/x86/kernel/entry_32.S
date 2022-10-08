@@ -1087,7 +1087,7 @@ BUILD_INTERRUPT3(hv_stimer0_callback_vector, HYPERV_STIMER0_VECTOR,
 #ifdef CONFIG_DYNAMIC_FTRACE
 
 ENTRY(mcount)
-	ret
+	RET
 END(mcount)
 
 ENTRY(ftrace_caller)
@@ -1117,7 +1117,7 @@ ftrace_graph_call:
 
 .globl ftrace_stub
 ftrace_stub:
-	ret
+	RET
 END(ftrace_caller)
 
 ENTRY(ftrace_regs_caller)
@@ -1196,7 +1196,7 @@ ENTRY(mcount)
 #endif
 .globl ftrace_stub
 ftrace_stub:
-	ret
+	RET
 
 	/* taken from glibc */
 trace:
@@ -1230,7 +1230,7 @@ ENTRY(ftrace_graph_caller)
 	popl %edx
 	popl %ecx
 	popl %eax
-	ret
+	RET
 END(ftrace_graph_caller)
 
 .globl return_to_handler

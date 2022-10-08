@@ -42,6 +42,14 @@
 # define DISABLE_OSPKE		(1<<(X86_FEATURE_OSPKE & 31))
 #endif /* CONFIG_X86_INTEL_MEMORY_PROTECTION_KEYS */
 
+#ifndef CONFIG_RETPOLINE
+# define DISABLE_RETPOLINE     0
+#else
+# define DISABLE_RETPOLINE ((1 << (X86_FEATURE_RETPOLINE_AMD & 31)) | \
+			    (1 << (X86_FEATURE_RETHUNK & 31)) | \
+			    (1 << (X86_FEATURE_UNRET & 31)))
+#endif
+
 /*
  * Make sure to add features to the correct mask
  */
@@ -56,7 +64,7 @@
 #define DISABLED_MASK8	0
 #define DISABLED_MASK9	(DISABLE_MPX)
 #define DISABLED_MASK10	0
-#define DISABLED_MASK11	0
+#define DISABLED_MASK11	(DISABLE_RETPOLINE)
 #define DISABLED_MASK12	0
 #define DISABLED_MASK13	0
 #define DISABLED_MASK14	0

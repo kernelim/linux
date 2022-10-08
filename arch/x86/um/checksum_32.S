@@ -113,7 +113,7 @@ csum_partial:
 7:	
 	popl %ebx
 	popl %esi
-	ret
+	RET
 
 #else
 
@@ -211,7 +211,7 @@ csum_partial:
 80: 
 	popl %ebx
 	popl %esi
-	ret
+	RET
 				
 #endif
 
@@ -363,7 +363,7 @@ DST(	movb %cl, (%edi)	)
 	popl %esi
 	popl %edi
 	popl %ecx			# equivalent to addl $4,%esp
-	ret	
+	RET
 
 #else
 
@@ -447,7 +447,7 @@ DST(	movb %dl, (%edi)         )
 	popl %esi
 	popl %edi
 	popl %ebx
-	ret
+	RET
 				
 #undef ROUND
 #undef ROUND1		

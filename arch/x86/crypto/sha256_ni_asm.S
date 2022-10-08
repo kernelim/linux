@@ -326,7 +326,7 @@ ENTRY(sha256_ni_transform)
 
 .Ldone_hash:
 
-	ret
+	RET
 ENDPROC(sha256_ni_transform)
 
 .data

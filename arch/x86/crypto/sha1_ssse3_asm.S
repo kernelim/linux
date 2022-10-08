@@ -104,7 +104,7 @@
 	pop	%r12
 	pop	%rbp
 	pop	%rbx
-	ret
+	RET
 
 	ENDPROC(\name)
 .endm

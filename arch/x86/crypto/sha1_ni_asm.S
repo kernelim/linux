@@ -290,7 +290,7 @@ ENTRY(sha1_ni_transform)
 .Ldone_hash:
 	mov		RSPSAVE, %rsp
 
-	ret
+	RET
 ENDPROC(sha1_ni_transform)
 
 .data

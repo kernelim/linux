@@ -367,7 +367,7 @@ _cleanup:
 	# scale the result back to 16 bits
 	shr	$16, %eax
 	mov     %rcx, %rsp
-	ret
+	RET
 
 ########################################################################
 

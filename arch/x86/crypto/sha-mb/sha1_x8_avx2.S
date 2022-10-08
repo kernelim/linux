@@ -457,7 +457,7 @@ lloop:
 	pop	%r13
 	pop	%r12
 
-	ret
+	RET
 ENDPROC(sha1_x8_avx2)
 
 

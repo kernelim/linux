@@ -9569,6 +9569,15 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	/* Eliminate branch target predictions from guest mode */
 	fill_RSB();
 
+	/*
+	 * Mitigate RETBleed for AMD/Hygon Zen uarch. RET should be
+	 * untrained as soon as we exit the VM and are back to the
+	 * kernel. This should be done before re-enabling interrupts
+	 * because interrupt handlers won't sanitize 'ret' if the return is
+	 * from the kernel.
+	 */
+	untrain_ret();
+
 	/* MSR_IA32_DEBUGCTLMSR is zeroed on vmexit. Restore it if needed */
 	if (vmx->host_debugctlmsr)
 		update_debugctlmsr(vmx->host_debugctlmsr);

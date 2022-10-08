@@ -24,7 +24,7 @@ __kernel_vsyscall:
 	movl	%ebp, %ecx
 	popl	%ebp
 .Lpop_ebp:
-	ret
+	RET
 .LEND_vsyscall:
 	.size __kernel_vsyscall,.-.LSTART_vsyscall
 

@@ -21,7 +21,7 @@
 	popl %edx
 	popl %ecx
 	popl %eax
-	ret
+	RET
 	.endm
 
 	thunk_ra trace_hardirqs_on_thunk,trace_hardirqs_on_caller

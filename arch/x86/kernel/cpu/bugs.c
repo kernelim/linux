@@ -32,6 +32,7 @@
 #include "cpu.h"
 
 static void __init spectre_v1_select_mitigation(void);
+static void __init retbleed_select_mitigation(void);
 static void __init spectre_v2_select_mitigation(void);
 static void __init ssb_parse_cmdline(void);
 void ssb_select_mitigation(void);
@@ -87,6 +88,7 @@ void __init check_bugs(void)
 	/* Select the proper CPU mitigations before patching alternatives */
 	spectre_v1_select_mitigation();
 	spectre_v2_select_mitigation();
+	retbleed_select_mitigation();
 	spec_ctrl_cpu_init();
 	ssb_select_mitigation();
 	l1tf_select_mitigation();
@@ -147,6 +149,7 @@ enum spectre_v2_mitigation_cmd {
 	SPECTRE_V2_CMD_FORCE,
 	SPECTRE_V2_CMD_AUTO,
 	SPECTRE_V2_CMD_RETPOLINE,
+	SPECTRE_V2_CMD_RETPOLINE_FORCE,
 	SPECTRE_V2_CMD_RETPOLINE_IBRS_USER,
 	SPECTRE_V2_CMD_IBRS,
 	SPECTRE_V2_CMD_IBRS_ALWAYS,
@@ -649,10 +652,166 @@ static int __init nospectre_v1_cmdline(char *str)
 }
 early_param("nospectre_v1", nospectre_v1_cmdline);
 
+enum spectre_v2_mitigation spectre_v2_enabled = SPECTRE_V2_NONE;
+
+#undef pr_fmt
+#define pr_fmt(fmt)     "RETBleed: " fmt
+
+enum retbleed_mitigation {
+	RETBLEED_MITIGATION_NONE,
+	RETBLEED_MITIGATION_UNRET,
+	RETBLEED_MITIGATION_IBPB,
+	RETBLEED_MITIGATION_IBRS,
+	RETBLEED_MITIGATION_EIBRS,
+};
+
+enum retbleed_mitigation_cmd {
+	RETBLEED_CMD_OFF,
+	RETBLEED_CMD_AUTO,
+	RETBLEED_CMD_UNRET,
+	RETBLEED_CMD_IBPB,
+};
+
+const char * const retbleed_strings[] = {
+	[RETBLEED_MITIGATION_NONE]	= "Vulnerable",
+	[RETBLEED_MITIGATION_UNRET]	= "Mitigation: untrained return thunk",
+	[RETBLEED_MITIGATION_IBPB]	= "Mitigation: IBPB",
+	[RETBLEED_MITIGATION_IBRS]	= "Mitigation: IBRS",
+	[RETBLEED_MITIGATION_EIBRS]	= "Mitigation: Enhanced IBRS",
+};
+
+static enum retbleed_mitigation retbleed_mitigation __read_mostly =
+	RETBLEED_MITIGATION_NONE;
+static enum retbleed_mitigation_cmd retbleed_cmd __read_mostly =
+	RETBLEED_CMD_AUTO;
+
+static int __read_mostly retbleed_nosmt = false;
+
+static int __init retbleed_parse_cmdline(char *str)
+{
+	while (str) {
+		char *next = strchr(str, ',');
+		if (next) {
+			*next = 0;
+			next++;
+		}
+
+		if (!strcmp(str, "off")) {
+			retbleed_cmd = RETBLEED_CMD_OFF;
+		} else if (!strcmp(str, "auto")) {
+			retbleed_cmd = RETBLEED_CMD_AUTO;
+		} else if (!strcmp(str, "unret")) {
+			retbleed_cmd = RETBLEED_CMD_UNRET;
+		} else if (!strcmp(str, "ibpb")) {
+			retbleed_cmd = RETBLEED_CMD_IBPB;
+		} else if (!strcmp(str, "nosmt")) {
+			retbleed_nosmt = true;
+		} else {
+			pr_err("Ignoring unknown retbleed option (%s).", str);
+		}
+
+		str = next;
+	}
+
+	return 0;
+}
+early_param("retbleed", retbleed_parse_cmdline);
+
+#define RETBLEED_UNTRAIN_MSG "WARNING: BTB untrained return thunk mitigation is only effective on AMD!\n"
+#define RETBLEED_COMPILER_MSG "WARNING: kernel not compiled with RETPOLINE or -mfunction-return capable compiler; falling back to IBPB!\n"
+#define RETBLEED_INTEL_MSG "WARNING: Spectre v2 mitigation leaves CPU vulnerable to RETBleed attacks, data leaks possible!\n"
+
+static void __init retbleed_select_mitigation(void)
+{
+	bool mitigate_smt = false;
+
+	if (!boot_cpu_has_bug(X86_BUG_RETBLEED) || cpu_mitigations_off())
+		return;
+
+	switch (retbleed_cmd) {
+	case RETBLEED_CMD_OFF:
+		return;
+
+	case RETBLEED_CMD_UNRET:
+		retbleed_mitigation = RETBLEED_MITIGATION_UNRET;
+		break;
+
+	case RETBLEED_CMD_IBPB:
+		if (boot_cpu_has(X86_FEATURE_IBPB)) {
+			retbleed_mitigation = RETBLEED_MITIGATION_IBPB;
+			break;
+		} else {
+			pr_err("WARNING: CPU does not support IBPB.\n");
+		}
+		/* fallthrough */
+	case RETBLEED_CMD_AUTO:
+	default:
+		if (boot_cpu_data.x86_vendor == X86_VENDOR_AMD) {
+			if (!IS_ENABLED(CONFIG_RETPOLINE) && boot_cpu_has(X86_FEATURE_IBPB)) {
+				pr_err(RETBLEED_COMPILER_MSG);
+				retbleed_mitigation = RETBLEED_MITIGATION_IBPB;
+			} else {
+				retbleed_mitigation = RETBLEED_MITIGATION_UNRET;
+			}
+		}
+
+		/*
+		 * The Intel mitigation (IBRS or eIBRS) was already selected in
+		 * spectre_v2_select_mitigation().  'retbleed_mitigation' will
+		 * be set accordingly below.
+		 */
+
+		break;
+	}
+
+	switch (retbleed_mitigation) {
+	case RETBLEED_MITIGATION_UNRET:
+		setup_force_cpu_cap(X86_FEATURE_RETHUNK);
+		setup_force_cpu_cap(X86_FEATURE_UNRET);
+
+		if (boot_cpu_data.x86_vendor != X86_VENDOR_AMD)
+			pr_err(RETBLEED_UNTRAIN_MSG);
+
+		mitigate_smt = true;
+		break;
+
+	case RETBLEED_MITIGATION_IBPB:
+		setup_force_cpu_cap(X86_FEATURE_ENTRY_IBPB);
+		mitigate_smt = true;
+		break;
+
+	default:
+		break;
+	}
+
+	if (mitigate_smt && (!boot_cpu_has(X86_FEATURE_STIBP) ||
+	     !(x86_spec_ctrl_base & SPEC_CTRL_STIBP)) &&
+	    (retbleed_nosmt || cpu_mitigations_auto_nosmt()))
+		cpu_smt_disable(false);
+
+	/*
+	 * Let IBRS trump all on Intel without affecting the effects of the
+	 * retbleed= cmdline option.
+	 */
+	if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL) {
+		switch (spectre_v2_enabled) {
+		case SPECTRE_V2_IBRS_ALWAYS:
+		case SPECTRE_V2_IBRS:
+			retbleed_mitigation = RETBLEED_MITIGATION_IBRS;
+			break;
+		case SPECTRE_V2_IBRS_ENHANCED:
+			retbleed_mitigation = RETBLEED_MITIGATION_EIBRS;
+			break;
+		default:
+			pr_err(RETBLEED_INTEL_MSG);
+		}
+	}
+
+	pr_info("%s\n", retbleed_strings[retbleed_mitigation]);
+}
+
 #undef pr_fmt
 #define pr_fmt(fmt)     "Spectre V2 : " fmt
-
-enum spectre_v2_mitigation spectre_v2_enabled = SPECTRE_V2_NONE;
 
 static inline bool match_option(const char *arg, int arglen, const char *opt)
 {
@@ -669,6 +828,7 @@ static const struct {
 	{ "off",		SPECTRE_V2_CMD_NONE,		   false },
 	{ "on",			SPECTRE_V2_CMD_FORCE,		   true },
 	{ "retpoline",		SPECTRE_V2_CMD_RETPOLINE,	   false },
+	{ "retpoline,force",	SPECTRE_V2_CMD_RETPOLINE_FORCE,	   false },
 	{ "retpoline,ibrs_user",SPECTRE_V2_CMD_RETPOLINE_IBRS_USER,false },
 	{ "ibrs",		SPECTRE_V2_CMD_IBRS,		   false },
 	{ "ibrs_always",	SPECTRE_V2_CMD_IBRS_ALWAYS,	   false },
@@ -724,6 +884,30 @@ static enum spectre_v2_mitigation_cmd __init spectre_v2_parse_cmdline(void)
 		return SPECTRE_V2_CMD_AUTO;
 	}
 
+	/*
+	 * RETBleed affected CPUs (Intel) depend on IBRS as an effective
+	 * mitigation mechanism. We'll override spectre_v2=retpoline with
+	 * spectre_v2=auto here, unless the old behavior is forced by
+	 * amending ',force' to the spectre_v2 cmdline.
+	 */
+	if (boot_cpu_has_bug(X86_BUG_RETBLEED) &&
+	    boot_cpu_data.x86_vendor == X86_VENDOR_INTEL) {
+		switch (cmd) {
+		case SPECTRE_V2_CMD_RETPOLINE:
+			pr_warn("WARNING: %s selected but CPU is affected by RETBleed. " \
+				"Switching to AUTO select\n",
+				mitigation_options[i].option);
+			return SPECTRE_V2_CMD_AUTO;
+
+		case SPECTRE_V2_CMD_RETPOLINE_FORCE:
+			pr_warn("WARNING: %s selected but CPU is affected by RETBleed. " \
+				"Switching to \"auto\" is advised\n",
+				mitigation_options[i].option);
+		default:
+			break;
+		}
+	}
+
 	if (mitigation_options[i].secure)
 		spec2_print_if_secure(mitigation_options[i].option);
 	else
@@ -763,6 +947,7 @@ void __spectre_v2_select_mitigation(void)
 		}
 		break;
 
+	case SPECTRE_V2_CMD_RETPOLINE_FORCE:
 	case SPECTRE_V2_CMD_RETPOLINE:
 		spec_ctrl_enable_retpoline();
 		return;
@@ -871,11 +1056,55 @@ void arch_smt_update(void)
 	mutex_unlock(&spec_ctrl_mutex);
 }
 
+/* Disable in-kernel use of non-RSB RET predictors */
+static void __init spec_ctrl_disable_kernel_rrsba(void)
+{
+	u64 ia32_cap;
+
+	if (!boot_cpu_has(X86_FEATURE_RRSBA_CTRL))
+		return;
+
+	ia32_cap = x86_read_arch_cap_msr();
+
+	if (ia32_cap & ARCH_CAP_RRSBA) {
+		x86_spec_ctrl_base |= SPEC_CTRL_RRSBA_DIS_S;
+		native_wrmsrl(MSR_IA32_SPEC_CTRL, x86_spec_ctrl_base);
+	}
+}
+
 static void __init spectre_v2_select_mitigation(void)
 {
+	enum spectre_v2_mitigation mode;
+
 	spectre_v2_cmd = spectre_v2_parse_cmdline();
 	__spectre_v2_select_mitigation();
+
+	/*
+	 * Disable alternate RSB predictions in kernel when indirect CALLs and
+	 * JMPs gets protection against BHI and Intramode-BTI, but RET
+	 * prediction from a non-RSB predictor is still a risk.
+	 */
+	barrier();
+	mode = spec_ctrl_get_mitigation();
+	if (mode == SPECTRE_V2_IBRS_ENHANCED ||
+	    mode == SPECTRE_V2_RETPOLINE_IBRS_USER ||
+	    mode == SPECTRE_V2_RETPOLINE)
+		spec_ctrl_disable_kernel_rrsba();
+
 	spectre_v2_print_mitigation();
+
+	/*
+	 * If spectre v2 protection has been enabled, unconditionally fill
+	 * RSB during a context switch; this protects against two independent
+	 * issues:
+	 *
+	 *	- RSB underflow (and switch to BTB) on Skylake+
+	 *	- SpectreRSB variant of spectre v2 on X86_BUG_SPECTRE_V2 CPUs
+	 */
+	if (boot_cpu_has_bug(X86_BUG_SPECTRE_V2) && mode != SPECTRE_V2_NONE) {
+		setup_force_cpu_cap(X86_FEATURE_RSB_CTXSW);
+		pr_info("Filling RSB on context switch\n");
+	}
 }
 
 #undef pr_fmt
@@ -1393,6 +1622,22 @@ static ssize_t srbds_show_state(char *buf)
 	return sprintf(buf, "%s\n", srbds_strings[srbds_mitigation]);
 }
 
+static ssize_t retbleed_show_state(char *buf)
+{
+	if (retbleed_mitigation == RETBLEED_MITIGATION_UNRET) {
+	    if (boot_cpu_data.x86_vendor != X86_VENDOR_AMD)
+		    return sprintf(buf, "Vulnerable: untrained return thunk on non-Zen uarch\n");
+
+	    return sprintf(buf, "%s; SMT %s\n",
+			   retbleed_strings[retbleed_mitigation],
+			   !sched_smt_active() ? "disabled" :
+			   (x86_spec_ctrl_base & SPEC_CTRL_STIBP) ?
+			   "enabled with STIBP protection" : "vulnerable");
+	}
+
+	return sprintf(buf, "%s\n", retbleed_strings[retbleed_mitigation]);
+}
+
 static ssize_t cpu_show_common(struct device *dev, struct device_attribute *attr,
 			char *buf, unsigned int bug)
 {
@@ -1437,6 +1682,9 @@ static ssize_t cpu_show_common(struct device *dev, struct device_attribute *attr
 
 	case X86_BUG_MMIO_STALE_DATA:
 		return mmio_stale_data_show_state(buf);
+
+	case X86_BUG_RETBLEED:
+		return retbleed_show_state(buf);
 
 	default:
 		break;
@@ -1496,5 +1744,10 @@ ssize_t cpu_show_srbds(struct device *dev, struct device_attribute *attr, char *
 ssize_t cpu_show_mmio_stale_data(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	return cpu_show_common(dev, attr, buf, X86_BUG_MMIO_STALE_DATA);
+}
+
+ssize_t cpu_show_retbleed(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return cpu_show_common(dev, attr, buf, X86_BUG_RETBLEED);
 }
 #endif

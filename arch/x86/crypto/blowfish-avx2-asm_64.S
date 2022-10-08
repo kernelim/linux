@@ -221,7 +221,7 @@ __blowfish_enc_blk32:
 
 	write_block(RXl, RXr);
 
-	ret;
+	RET;
 ENDPROC(__blowfish_enc_blk32)
 
 .align 8
@@ -250,7 +250,7 @@ __blowfish_dec_blk32:
 
 	write_block(RXl, RXr);
 
-	ret;
+	RET;
 ENDPROC(__blowfish_dec_blk32)
 
 ENTRY(blowfish_ecb_enc_32way)
@@ -284,7 +284,7 @@ ENTRY(blowfish_ecb_enc_32way)
 
 	vzeroupper;
 
-	ret;
+	RET;
 ENDPROC(blowfish_ecb_enc_32way)
 
 ENTRY(blowfish_ecb_dec_32way)
@@ -318,7 +318,7 @@ ENTRY(blowfish_ecb_dec_32way)
 
 	vzeroupper;
 
-	ret;
+	RET;
 ENDPROC(blowfish_ecb_dec_32way)
 
 ENTRY(blowfish_cbc_dec_32way)
@@ -365,7 +365,7 @@ ENTRY(blowfish_cbc_dec_32way)
 
 	vzeroupper;
 
-	ret;
+	RET;
 ENDPROC(blowfish_cbc_dec_32way)
 
 ENTRY(blowfish_ctr_32way)
@@ -445,5 +445,5 @@ ENTRY(blowfish_ctr_32way)
 
 	vzeroupper;
 
-	ret;
+	RET;
 ENDPROC(blowfish_ctr_32way)

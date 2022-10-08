@@ -9,7 +9,7 @@ copy_page_rep:
 	CFI_STARTPROC
 	movl	$4096/8, %ecx
 	rep	movsq
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(copy_page_rep)
 
@@ -89,7 +89,7 @@ ENTRY(copy_page)
 	CFI_RESTORE r12
 	addq	$2*8, %rsp
 	CFI_ADJUST_CFA_OFFSET -2*8
-	ret
+	RET
 .Lcopy_page_end:
 	CFI_ENDPROC
 ENDPROC(copy_page)

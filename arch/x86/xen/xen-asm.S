@@ -42,7 +42,7 @@ ENTRY(xen_irq_enable_direct)
 1:
 ENDPATCH(xen_irq_enable_direct)
 	FRAME_END
-	ret
+	RET
 	ENDPROC(xen_irq_enable_direct)
 	RELOC(xen_irq_enable_direct, 2b+1)
 
@@ -54,7 +54,7 @@ ENDPATCH(xen_irq_enable_direct)
 ENTRY(xen_irq_disable_direct)
 	movb $1, PER_CPU_VAR(xen_vcpu_info) + XEN_vcpu_info_mask
 ENDPATCH(xen_irq_disable_direct)
-	ret
+	RET
 	ENDPROC(xen_irq_disable_direct)
 	RELOC(xen_irq_disable_direct, 0)
 
@@ -72,7 +72,7 @@ ENTRY(xen_save_fl_direct)
 	setz %ah
 	addb %ah, %ah
 ENDPATCH(xen_save_fl_direct)
-	ret
+	RET
 	ENDPROC(xen_save_fl_direct)
 	RELOC(xen_save_fl_direct, 0)
 
@@ -105,7 +105,7 @@ ENTRY(xen_restore_fl_direct)
 1:
 ENDPATCH(xen_restore_fl_direct)
 	FRAME_END
-	ret
+	RET
 	ENDPROC(xen_restore_fl_direct)
 	RELOC(xen_restore_fl_direct, 2b+1)
 
@@ -146,5 +146,5 @@ ENTRY(check_events)
 	pop %rax
 #endif
 	FRAME_END
-	ret
+	RET
 ENDPROC(check_events)

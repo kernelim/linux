@@ -97,7 +97,7 @@ ENTRY(call_rwsem_down_read_failed)
 	CFI_RESTORE __ASM_REG(dx)
 	restore_common_regs
 	FRAME_END
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(call_rwsem_down_read_failed)
 
@@ -109,7 +109,7 @@ ENTRY(call_rwsem_down_write_failed)
 	call rwsem_down_write_failed
 	restore_common_regs
 	FRAME_END
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(call_rwsem_down_write_failed)
 
@@ -124,7 +124,7 @@ ENTRY(call_rwsem_wake)
 	call rwsem_wake
 	restore_common_regs
 1:	FRAME_END
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(call_rwsem_wake)
 
@@ -140,6 +140,6 @@ ENTRY(call_rwsem_downgrade_wake)
 	CFI_RESTORE __ASM_REG(dx)
 	restore_common_regs
 	FRAME_END
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(call_rwsem_downgrade_wake)

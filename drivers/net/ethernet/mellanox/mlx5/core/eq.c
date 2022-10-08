@@ -1094,6 +1094,33 @@ struct mlx5_eq_comp *mlx5_eqn2comp_eq(struct mlx5_core_dev *dev, int eqn)
 	return ERR_PTR(-ENOENT);
 }
 
+/* This function should only be called after mlx5_cmd_force_teardown_hca */
+void mlx5_core_eq_free_irqs(struct mlx5_core_dev *dev)
+{
+	struct mlx5_eq_table *table = dev->priv.eq_table;
+	int i, max_eqs;
+
+	clear_comp_irqs_affinity_hints(dev);
+
+#ifdef CONFIG_RFS_ACCEL
+	if (table->rmap) {
+		free_irq_cpu_rmap(table->rmap);
+		table->rmap = NULL;
+	}
+#endif
+
+	mutex_lock(&table->lock); /* sync with create/destroy_async_eq */
+	max_eqs = table->num_comp_vectors + MLX5_EQ_VEC_COMP_BASE;
+	for (i = max_eqs - 1; i >= 0; i--) {
+		if (!table->irq_info[i].context)
+			continue;
+		free_irq(pci_irq_vector(dev->pdev, i), table->irq_info[i].context);
+		table->irq_info[i].context = NULL;
+	}
+	mutex_unlock(&table->lock);
+	pci_free_irq_vectors(dev->pdev);
+}
+
 static int alloc_irq_vectors(struct mlx5_core_dev *dev)
 {
 	struct mlx5_priv *priv = &dev->priv;

@@ -111,7 +111,7 @@ bad_from_user:
 	stosb
 bad_to_user:
 	movl %edx,%eax
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(bad_from_user)
 	.previous
@@ -180,7 +180,7 @@ ENTRY(copy_user_generic_unrolled)
 	jnz 21b
 23:	xor %eax,%eax
 	ASM_CLAC
-	ret
+	RET
 
 	.section .fixup,"ax"
 30:	shll $6,%ecx
@@ -251,7 +251,7 @@ ENTRY(copy_user_generic_string)
 	movsb
 4:	xorl %eax,%eax
 	ASM_CLAC
-	ret
+	RET
 
 	.section .fixup,"ax"
 11:	lea (%rdx,%rcx,8),%rcx
@@ -286,7 +286,7 @@ ENTRY(copy_user_enhanced_fast_string)
 	movsb
 2:	xorl %eax,%eax
 	ASM_CLAC
-	ret
+	RET
 
 	.section .fixup,"ax"
 12:	movl %ecx,%edx		/* ecx is zerorest also */

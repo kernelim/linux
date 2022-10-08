@@ -24,7 +24,7 @@
 #ifdef CONFIG_DYNAMIC_FTRACE
 
 ENTRY(function_hook)
-	retq
+	RET
 END(function_hook)
 
 /* skip is set if stack has been adjusted */
@@ -63,7 +63,7 @@ GLOBAL(ftrace_graph_call)
 
 /* This is weak to keep gas from relaxing the jumps */
 WEAK(ftrace_stub)
-	retq
+	RET
 END(ftrace_caller)
 
 ENTRY(ftrace_regs_caller)
@@ -146,7 +146,7 @@ ENTRY(function_hook)
 #endif
 
 GLOBAL(ftrace_stub)
-	retq
+	RET
 
 trace:
 	MCOUNT_SAVE_FRAME
@@ -187,7 +187,7 @@ ENTRY(ftrace_graph_caller)
 
 	MCOUNT_RESTORE_FRAME
 
-	retq
+	RET
 END(ftrace_graph_caller)
 
 GLOBAL(return_to_handler)

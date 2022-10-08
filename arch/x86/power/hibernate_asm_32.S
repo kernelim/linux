@@ -24,7 +24,7 @@ ENTRY(swsusp_arch_suspend)
 	popl saved_context_eflags
 
 	call swsusp_save
-	ret
+	RET
 
 ENTRY(restore_image)
 	movl	mmu_cr4_features, %ecx
@@ -81,4 +81,4 @@ done:
 
 	xorl	%eax, %eax
 
-	ret
+	RET

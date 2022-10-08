@@ -118,7 +118,7 @@ ENTRY(__memset)
 
 .Lende:
 	movq	%r10,%rax
-	ret
+	RET
 
 	CFI_RESTORE_STATE
 .Lbad_alignment:

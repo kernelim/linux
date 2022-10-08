@@ -220,7 +220,7 @@ ENTRY(csum_partial_copy_generic)
 	CFI_RESTORE rbp
 	addq $7*8, %rsp
 	CFI_ADJUST_CFA_OFFSET -7*8
-	ret
+	RET
 	CFI_RESTORE_STATE
 
 	/* Exception handlers. Very simple, zeroing is done in the wrappers */

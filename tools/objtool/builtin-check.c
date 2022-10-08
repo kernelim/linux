@@ -25,6 +25,7 @@
  * For more information, see tools/objtool/Documentation/stack-validation.txt.
  */
 
+#include <fcntl.h>
 #include <string.h>
 #include <stdlib.h>
 #include <subcmd/parse-options.h>
@@ -45,6 +46,7 @@
 struct instruction {
 	struct list_head list;
 	struct hlist_node hash;
+	struct list_head call_node;
 	struct section *sec;
 	unsigned long offset;
 	unsigned int len, state;
@@ -66,6 +68,7 @@ struct objtool_file {
 	struct elf *elf;
 	struct list_head insn_list;
 	DECLARE_HASHTABLE(insn_hash, 16);
+	struct list_head return_thunk_list;
 	struct section *rodata, *whitelist;
 	bool ignore_unreachables, c_file;
 };
@@ -271,6 +274,8 @@ static int decode_instructions(struct objtool_file *file)
 			memset(insn, 0, sizeof(*insn));
 
 			INIT_LIST_HEAD(&insn->alts);
+			INIT_LIST_HEAD(&insn->call_node);
+
 			insn->sec = sec;
 			insn->offset = offset;
 
@@ -310,6 +315,67 @@ static int decode_instructions(struct objtool_file *file)
 	return 0;
 }
 
+static int create_return_sites_sections(struct objtool_file *file)
+{
+	struct instruction *insn;
+	struct section *sec, *rela_sec;
+	struct rela *rela;
+	int idx;
+
+	sec = find_section_by_name(file->elf, ".return_sites");
+	if (sec) {
+		WARN("file already has .return_sites, skipping");
+		return 0;
+	}
+
+	idx = 0;
+	list_for_each_entry(insn, &file->return_thunk_list, call_node)
+		idx++;
+
+	if (!idx)
+		return 0;
+
+	sec = elf_create_section(file->elf, ".return_sites",
+				 sizeof(int), idx);
+	if (!sec) {
+		WARN("elf_create_section: .return_sites");
+		return -1;
+	}
+
+	rela_sec = elf_create_rela_section(file->elf, sec);
+	if (!rela_sec)
+		return -1;
+
+	idx = 0;
+	list_for_each_entry(insn, &file->return_thunk_list, call_node) {
+
+		int *site = (int *)sec->data->d_buf + idx;
+		*site = 0;
+
+		rela = malloc(sizeof(*rela));
+		if (!rela) {
+			perror("malloc");
+			return -1;
+		}
+		memset(rela, 0, sizeof(*rela));
+
+		rela->sym = insn->sec->sym;
+		rela->addend = insn->offset;
+		rela->type = R_X86_64_PC32;
+		rela->offset = idx * sizeof(*site);
+
+		list_add_tail(&rela->list, &rela_sec->rela_list);
+		hash_add(rela_sec->rela_hash, &rela->hash, rela->offset);
+
+		idx++;
+	}
+
+	if (elf_rebuild_rela_section(rela_sec))
+		return -1;
+
+	return 0;
+}
+
 /*
  * Warnings shouldn't be reported for ignored functions.
  */
@@ -331,6 +397,28 @@ static void add_ignores(struct objtool_file *file)
 				insn->visited = true;
 		}
 	}
+}
+
+__weak bool arch_is_rethunk(struct symbol *sym)
+{
+	return false;
+}
+
+static void add_return_call(struct objtool_file *file, struct instruction *insn)
+{
+	/*
+	 * Return thunk tail calls are really just returns in disguise,
+	 * so convert them accordingly.
+	 */
+	insn->type = INSN_RETURN;
+
+	/*
+	 * Do not add instructions that are in .discard.text section
+	 * to avoid the "'.discard.text' referenced in section `.return_sites'
+	 * of arch/x86/built-in.o" linker error
+	 */
+	if (!!strncmp(insn->sec->name, ".discard", 8))
+		list_add_tail(&insn->call_node, &file->return_thunk_list);
 }
 
 /*
@@ -369,6 +457,9 @@ static int add_jump_destinations(struct objtool_file *file)
 			 * disguise, so convert them accordingly.
 			 */
 			insn->type = INSN_JUMP_DYNAMIC;
+			continue;
+		} else if (arch_is_rethunk(rela->sym)) {
+			add_return_call(file, insn);
 			continue;
 		} else {
 			/* sibling call */
@@ -1214,7 +1305,7 @@ int cmd_check(int argc, const char **argv)
 
 	objname = argv[0];
 
-	file.elf = elf_open(objname);
+	file.elf = elf_open(objname, O_RDWR);
 	if (!file.elf) {
 		fprintf(stderr, "error reading elf file %s\n", objname);
 		return 1;
@@ -1222,6 +1313,7 @@ int cmd_check(int argc, const char **argv)
 
 	INIT_LIST_HEAD(&file.insn_list);
 	hash_init(file.insn_hash);
+	INIT_LIST_HEAD(&file.return_thunk_list);
 	file.whitelist = find_section_by_name(file.elf, "__func_stack_frame_non_standard");
 	file.rodata = find_section_by_name(file.elf, ".rodata");
 	file.ignore_unreachables = false;
@@ -1237,10 +1329,19 @@ int cmd_check(int argc, const char **argv)
 		goto out;
 	warnings += ret;
 
+	ret = create_return_sites_sections(&file);
+	if (ret < 0)
+		goto out;
+	warnings += ret;
+
 	ret = validate_uncallable_instructions(&file);
 	if (ret < 0)
 		goto out;
 	warnings += ret;
+
+	ret = elf_write(file.elf);
+	if (ret < 0)
+		goto out;
 
 out:
 	cleanup(&file);

@@ -80,6 +80,6 @@ restore:
 	popq_cfi %rdi
 	CFI_RESTORE rdi
 	popq %rbp
-	ret
+	RET
 	CFI_ENDPROC
 #endif

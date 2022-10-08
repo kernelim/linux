@@ -672,7 +672,7 @@ static void __used __kprobes kretprobe_trampoline_holder(void)
 			RESTORE_REGS_STRING
 			"	popf\n"
 #endif
-			"	ret\n");
+			ASM_RET);
 }
 STACK_FRAME_NON_STANDARD(kretprobe_trampoline_holder);
 STACK_FRAME_NON_STANDARD(kretprobe_trampoline);

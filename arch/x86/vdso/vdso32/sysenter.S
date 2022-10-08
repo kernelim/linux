@@ -52,7 +52,7 @@ VDSO32_SYSENTER_RETURN:	/* Symbol used by sysenter.c via vdso32-syms.h */
 .Lpop_edx:
 	pop %ecx
 .Lpop_ecx:
-	ret
+	RET
 .LEND_vsyscall:
 	.size __kernel_vsyscall,.-.LSTART_vsyscall
 	.previous

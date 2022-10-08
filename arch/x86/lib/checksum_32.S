@@ -135,7 +135,7 @@ ENTRY(csum_partial)
 	CFI_RESTORE ebx
 	popl_cfi %esi
 	CFI_RESTORE esi
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(csum_partial)
 
@@ -259,7 +259,7 @@ ENTRY(csum_partial)
 	CFI_RESTORE ebx
 	popl_cfi %esi
 	CFI_RESTORE esi
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(csum_partial)
 				
@@ -419,7 +419,7 @@ DST(	movb %cl, (%edi)	)
 	popl_cfi %edi
 	CFI_RESTORE edi
 	popl_cfi %ecx			# equivalent to addl $4,%esp
-	ret	
+	RET
 	CFI_ENDPROC
 ENDPROC(csum_partial_copy_generic)
 
@@ -512,7 +512,7 @@ DST(	movb %dl, (%edi)         )
 	CFI_RESTORE edi
 	popl_cfi %ebx
 	CFI_RESTORE ebx
-	ret
+	RET
 	CFI_ENDPROC
 ENDPROC(csum_partial_copy_generic)
 				

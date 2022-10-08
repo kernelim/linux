@@ -789,7 +789,7 @@ ENTRY(salsa20_encrypt_bytes)
 	add	%r11,%rsp
 	mov	%rdi,%rax
 	mov	%rsi,%rdx
-	ret
+	RET
 #   bytesatleast65:
 ._bytesatleast65:
 	#   bytes -= 64
@@ -889,7 +889,7 @@ ENTRY(salsa20_keysetup)
 	add	%r11,%rsp
 	mov	%rdi,%rax
 	mov	%rsi,%rdx
-	ret
+	RET
 ENDPROC(salsa20_keysetup)
 
 # enter salsa20_ivsetup
@@ -914,5 +914,5 @@ ENTRY(salsa20_ivsetup)
 	add	%r11,%rsp
 	mov	%rdi,%rax
 	mov	%rsi,%rdx
-	ret
+	RET
 ENDPROC(salsa20_ivsetup)

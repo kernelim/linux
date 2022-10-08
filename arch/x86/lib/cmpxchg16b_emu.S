@@ -53,12 +53,12 @@ this_cpu_cmpxchg16b_emu:
 
 	popf
 	mov $1, %al
-	ret
+	RET
 
  not_same:
 	popf
 	xor %al,%al
-	ret
+	RET
 
 CFI_ENDPROC
 

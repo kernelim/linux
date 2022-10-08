@@ -32,7 +32,7 @@ check_events:
 	pop %edx
 	pop %ecx
 	pop %eax
-	ret
+	RET
 
 /*
  * We can't use sysexit directly, because we're not running in ring0.

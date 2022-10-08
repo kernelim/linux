@@ -37,7 +37,7 @@ ENTRY(atomic64_##op##_386); \
 
 #define RET \
 	UNLOCK v; \
-	ret
+	RET
 
 #define RET_ENDP \
 	RET; \

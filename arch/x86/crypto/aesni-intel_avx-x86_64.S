@@ -1557,7 +1557,7 @@ ENTRY(aesni_gcm_precomp_avx_gen2)
         pop     %r14
         pop     %r13
         pop     %r12
-        ret
+        RET
 ENDPROC(aesni_gcm_precomp_avx_gen2)
 
 ###############################################################################
@@ -1578,7 +1578,7 @@ ENDPROC(aesni_gcm_precomp_avx_gen2)
 ###############################################################################
 ENTRY(aesni_gcm_enc_avx_gen2)
         GCM_ENC_DEC_AVX     ENC
-	ret
+	RET
 ENDPROC(aesni_gcm_enc_avx_gen2)
 
 ###############################################################################
@@ -1599,7 +1599,7 @@ ENDPROC(aesni_gcm_enc_avx_gen2)
 ###############################################################################
 ENTRY(aesni_gcm_dec_avx_gen2)
         GCM_ENC_DEC_AVX     DEC
-	ret
+	RET
 ENDPROC(aesni_gcm_dec_avx_gen2)
 #endif /* CONFIG_AS_AVX */
 
@@ -2881,7 +2881,7 @@ ENTRY(aesni_gcm_precomp_avx_gen4)
         pop     %r14
         pop     %r13
         pop     %r12
-        ret
+        RET
 ENDPROC(aesni_gcm_precomp_avx_gen4)
 
 
@@ -2903,7 +2903,7 @@ ENDPROC(aesni_gcm_precomp_avx_gen4)
 ###############################################################################
 ENTRY(aesni_gcm_enc_avx_gen4)
         GCM_ENC_DEC_AVX2     ENC
-	ret
+	RET
 ENDPROC(aesni_gcm_enc_avx_gen4)
 
 ###############################################################################
@@ -2924,7 +2924,7 @@ ENDPROC(aesni_gcm_enc_avx_gen4)
 ###############################################################################
 ENTRY(aesni_gcm_dec_avx_gen4)
         GCM_ENC_DEC_AVX2     DEC
-	ret
+	RET
 ENDPROC(aesni_gcm_dec_avx_gen4)
 
 #endif /* CONFIG_AS_AVX2 */

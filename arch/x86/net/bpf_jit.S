@@ -37,7 +37,7 @@ FUNC(sk_load_word_positive_offset)
 	jle	bpf_slow_path_word
 	mov     (SKBDATA,%rsi),%eax
 	bswap   %eax  			/* ntohl() */
-	ret
+	RET
 
 FUNC(sk_load_half)
 	test	%esi,%esi
@@ -50,7 +50,7 @@ FUNC(sk_load_half_positive_offset)
 	jle	bpf_slow_path_half
 	movzwl	(SKBDATA,%rsi),%eax
 	rol	$8,%ax			# ntohs()
-	ret
+	RET
 
 FUNC(sk_load_byte)
 	test	%esi,%esi
@@ -60,7 +60,7 @@ FUNC(sk_load_byte_positive_offset)
 	cmp	%esi,%r9d   /* if (offset >= hlen) goto bpf_slow_path_byte */
 	jle	bpf_slow_path_byte
 	movzbl	(SKBDATA,%rsi),%eax
-	ret
+	RET
 
 /**
  * sk_load_byte_msh - BPF_S_LDX_B_MSH helper
@@ -80,7 +80,7 @@ FUNC(sk_load_byte_msh_positive_offset)
 	movzbl	(SKBDATA,%rsi),%ebx
 	and	$15,%bl
 	shl	$2,%bl
-	ret
+	RET
 
 /* rsi contains offset and can be scratched */
 #define bpf_slow_path_common(LEN)		\
@@ -104,7 +104,7 @@ bpf_slow_path_word:
 	js	bpf_error
 	mov	-12(%rbp),%eax
 	bswap	%eax
-	ret
+	RET
 
 bpf_slow_path_half:
 	bpf_slow_path_common(2)
@@ -112,13 +112,13 @@ bpf_slow_path_half:
 	mov	-12(%rbp),%ax
 	rol	$8,%ax
 	movzwl	%ax,%eax
-	ret
+	RET
 
 bpf_slow_path_byte:
 	bpf_slow_path_common(1)
 	js	bpf_error
 	movzbl	-12(%rbp),%eax
-	ret
+	RET
 
 bpf_slow_path_byte_msh:
 	xchg	%eax,%ebx /* dont lose A , X is about to be scratched */
@@ -128,7 +128,7 @@ bpf_slow_path_byte_msh:
 	and	$15,%al
 	shl	$2,%al
 	xchg	%eax,%ebx
-	ret
+	RET
 
 #define sk_negative_common(SIZE)				\
 	FRAME_BEGIN;						\
@@ -154,7 +154,7 @@ FUNC(sk_load_word_negative_offset)
 	sk_negative_common(4)
 	mov	(%rax), %eax
 	bswap	%eax
-	ret
+	RET
 
 bpf_slow_path_half_neg:
 	cmp	SKF_MAX_NEG_OFF, %esi
@@ -165,7 +165,7 @@ FUNC(sk_load_half_negative_offset)
 	mov	(%rax),%ax
 	rol	$8,%ax
 	movzwl	%ax,%eax
-	ret
+	RET
 
 bpf_slow_path_byte_neg:
 	cmp	SKF_MAX_NEG_OFF, %esi
@@ -174,7 +174,7 @@ bpf_slow_path_byte_neg:
 FUNC(sk_load_byte_negative_offset)
 	sk_negative_common(1)
 	movzbl	(%rax), %eax
-	ret
+	RET
 
 bpf_slow_path_byte_msh_neg:
 	cmp	SKF_MAX_NEG_OFF, %esi
@@ -187,11 +187,11 @@ FUNC(sk_load_byte_msh_negative_offset)
 	and	$15,%al
 	shl	$2,%al
 	xchg	%eax,%ebx
-	ret
+	RET
 
 bpf_error:
 # force a return 0 from jit handler
 	xor		%eax,%eax
 	mov		-8(%rbp),%rbx
 	leaveq
-	ret
+	RET

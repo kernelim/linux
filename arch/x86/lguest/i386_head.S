@@ -91,7 +91,7 @@ ENTRY(lg_irq_enable)
 	 * a register.  In this case, the normal path hasn't needed to save or
 	 * restore any registers at all!
 	 */
-	ret
+	RET
 send_interrupts:
 	/*
 	 * OK, now we need a register: eax is used for the hypercall number,
@@ -109,7 +109,7 @@ send_interrupts:
 	int  $LGUEST_TRAP_ENTRY
 	/* Put eax back the way we found it. */
 	popl %eax
-	ret
+	RET
 
 /*
  * Finally, the "popf" or "restore flags" routine.  The %eax register holds the
@@ -130,7 +130,7 @@ ENTRY(lg_restore_fl)
 	testl lguest_data+LGUEST_DATA_irq_pending, %eax
 	jnz send_interrupts
 	/* Again, the normal path has used no extra registers.  Clever, huh? */
-	ret
+	RET
 /*:*/
 
 /* These demark the EIP range where host should never deliver interrupts. */

@@ -282,7 +282,7 @@ __cast5_enc_blk16:
 	outunpack_blocks(RR3, RL3, RTMP, RX, RKM);
 	outunpack_blocks(RR4, RL4, RTMP, RX, RKM);
 
-	ret;
+	RET;
 ENDPROC(__cast5_enc_blk16)
 
 .align 16
@@ -353,7 +353,7 @@ __cast5_dec_blk16:
 	outunpack_blocks(RR3, RL3, RTMP, RX, RKM);
 	outunpack_blocks(RR4, RL4, RTMP, RX, RKM);
 
-	ret;
+	RET;
 
 .L__skip_dec:
 	vpsrldq $4, RKR, RKR;
@@ -391,7 +391,7 @@ ENTRY(cast5_ecb_enc_16way)
 	vmovdqu RL4, (7*4*4)(%r11);
 
 	FRAME_END
-	ret;
+	RET;
 ENDPROC(cast5_ecb_enc_16way)
 
 ENTRY(cast5_ecb_dec_16way)
@@ -425,7 +425,7 @@ ENTRY(cast5_ecb_dec_16way)
 	vmovdqu RL4, (7*4*4)(%r11);
 
 	FRAME_END
-	ret;
+	RET;
 ENDPROC(cast5_ecb_dec_16way)
 
 ENTRY(cast5_cbc_dec_16way)
@@ -476,7 +476,7 @@ ENTRY(cast5_cbc_dec_16way)
 	popq %r12;
 
 	FRAME_END
-	ret;
+	RET;
 ENDPROC(cast5_cbc_dec_16way)
 
 ENTRY(cast5_ctr_16way)
@@ -551,5 +551,5 @@ ENTRY(cast5_ctr_16way)
 	popq %r12;
 
 	FRAME_END
-	ret;
+	RET;
 ENDPROC(cast5_ctr_16way)
