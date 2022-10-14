@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1
 /*
- *   fs/cifs/fscache.c - CIFS filesystem cache interface
+ *   CIFS filesystem cache interface
  *
  *   Copyright (c) 2010 Novell, Inc.
  *   Author(s): Suresh Jayaraman <sjayaraman@suse.de>
@@ -16,14 +16,7 @@
  * Key layout of CIFS server cache index object
  */
 struct cifs_server_key {
-	struct {
-		uint16_t	family;		/* address family */
-		__be16		port;		/* IP port */
-	} hdr;
-	union {
-		struct in_addr	ipv4_addr;
-		struct in6_addr	ipv6_addr;
-	};
+	__u64 conn_id;
 } __packed;
 
 /*
@@ -31,42 +24,23 @@ struct cifs_server_key {
  */
 void cifs_fscache_get_client_cookie(struct TCP_Server_Info *server)
 {
-	const struct sockaddr *sa = (struct sockaddr *) &server->dstaddr;
-	const struct sockaddr_in *addr = (struct sockaddr_in *) sa;
-	const struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *) sa;
 	struct cifs_server_key key;
-	uint16_t key_len = sizeof(key.hdr);
-
-	memset(&key, 0, sizeof(key));
 
 	/*
-	 * Should not be a problem as sin_family/sin6_family overlays
-	 * sa_family field
+	 * Check if cookie was already initialized so don't reinitialize it.
+	 * In the future, as we integrate with newer fscache features,
+	 * we may want to instead add a check if cookie has changed
 	 */
-	key.hdr.family = sa->sa_family;
-	switch (sa->sa_family) {
-	case AF_INET:
-		key.hdr.port = addr->sin_port;
-		key.ipv4_addr = addr->sin_addr;
-		key_len += sizeof(key.ipv4_addr);
-		break;
-
-	case AF_INET6:
-		key.hdr.port = addr6->sin6_port;
-		key.ipv6_addr = addr6->sin6_addr;
-		key_len += sizeof(key.ipv6_addr);
-		break;
-
-	default:
-		cifs_dbg(VFS, "Unknown network family '%d'\n", sa->sa_family);
-		server->fscache = NULL;
+	if (server->fscache)
 		return;
-	}
+
+	memset(&key, 0, sizeof(key));
+	key.conn_id = server->conn_id;
 
 	server->fscache =
 		fscache_acquire_cookie(cifs_fscache_netfs.primary_index,
 				       &cifs_fscache_server_index_def,
-				       &key, key_len,
+				       &key, sizeof(key),
 				       NULL, 0,
 				       server, 0, true);
 	cifs_dbg(FYI, "%s: (0x%p/0x%p)\n",
@@ -86,6 +60,14 @@ void cifs_fscache_get_super_cookie(struct cifs_tcon *tcon)
 	struct TCP_Server_Info *server = tcon->ses->server;
 	char *sharename;
 	struct cifs_fscache_super_auxdata auxdata;
+
+	/*
+	 * Check if cookie was already initialized so don't reinitialize it.
+	 * In the future, as we integrate with newer fscache features,
+	 * we may want to instead add a check if cookie has changed
+	 */
+	if (tcon->fscache)
+		return;
 
 	sharename = extract_sharename(tcon->treeName);
 	if (IS_ERR(sharename)) {
@@ -176,29 +158,34 @@ void cifs_fscache_release_inode_cookie(struct inode *inode)
 		auxdata.last_change_time_nsec = cifsi->vfs_inode.i_ctime.tv_nsec;
 
 		cifs_dbg(FYI, "%s: (0x%p)\n", __func__, cifsi->fscache);
+		/* fscache_relinquish_cookie does not seem to update auxdata */
+		fscache_update_cookie(cifsi->fscache, &auxdata);
 		fscache_relinquish_cookie(cifsi->fscache, &auxdata, false);
 		cifsi->fscache = NULL;
 	}
 }
 
-static void cifs_fscache_disable_inode_cookie(struct inode *inode)
+void cifs_fscache_update_inode_cookie(struct inode *inode)
 {
+	struct cifs_fscache_inode_auxdata auxdata;
 	struct cifsInodeInfo *cifsi = CIFS_I(inode);
 
 	if (cifsi->fscache) {
+		memset(&auxdata, 0, sizeof(auxdata));
+		auxdata.eof = cifsi->server_eof;
+		auxdata.last_write_time_sec = cifsi->vfs_inode.i_mtime.tv_sec;
+		auxdata.last_change_time_sec = cifsi->vfs_inode.i_ctime.tv_sec;
+		auxdata.last_write_time_nsec = cifsi->vfs_inode.i_mtime.tv_nsec;
+		auxdata.last_change_time_nsec = cifsi->vfs_inode.i_ctime.tv_nsec;
+
 		cifs_dbg(FYI, "%s: (0x%p)\n", __func__, cifsi->fscache);
-		fscache_uncache_all_inode_pages(cifsi->fscache, inode);
-		fscache_relinquish_cookie(cifsi->fscache, NULL, true);
-		cifsi->fscache = NULL;
+		fscache_update_cookie(cifsi->fscache, &auxdata);
 	}
 }
 
 void cifs_fscache_set_inode_cookie(struct inode *inode, struct file *filp)
 {
-	if ((filp->f_flags & O_ACCMODE) != O_RDONLY)
-		cifs_fscache_disable_inode_cookie(inode);
-	else
-		cifs_fscache_enable_inode_cookie(inode);
+	cifs_fscache_enable_inode_cookie(inode);
 }
 
 void cifs_fscache_reset_inode_cookie(struct inode *inode)
@@ -310,6 +297,8 @@ void __cifs_readpage_to_fscache(struct inode *inode, struct page *page)
 	struct cifsInodeInfo *cifsi = CIFS_I(inode);
 	int ret;
 
+	WARN_ON(!cifsi->fscache);
+
 	cifs_dbg(FYI, "%s: (fsc: %p, p: %p, i: %p)\n",
 		 __func__, cifsi->fscache, page, inode);
 	ret = fscache_write_page(cifsi->fscache, page,
@@ -332,5 +321,23 @@ void __cifs_fscache_invalidate_page(struct page *page, struct inode *inode)
 
 	cifs_dbg(FYI, "%s: (0x%p/0x%p)\n", __func__, page, cookie);
 	fscache_wait_on_page_write(cookie, page);
+	fscache_uncache_page(cookie, page);
+}
+
+void __cifs_fscache_wait_on_page_write(struct inode *inode, struct page *page)
+{
+	struct cifsInodeInfo *cifsi = CIFS_I(inode);
+	struct fscache_cookie *cookie = cifsi->fscache;
+
+	cifs_dbg(FYI, "%s: (0x%p/0x%p)\n", __func__, page, cookie);
+	fscache_wait_on_page_write(cookie, page);
+}
+
+void __cifs_fscache_uncache_page(struct inode *inode, struct page *page)
+{
+	struct cifsInodeInfo *cifsi = CIFS_I(inode);
+	struct fscache_cookie *cookie = cifsi->fscache;
+
+	cifs_dbg(FYI, "%s: (0x%p/0x%p)\n", __func__, page, cookie);
 	fscache_uncache_page(cookie, page);
 }
