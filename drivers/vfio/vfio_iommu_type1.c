@@ -471,6 +471,15 @@ static int vaddr_get_pfn(struct mm_struct *mm, unsigned long vaddr,
 				    page, NULL, NULL);
 	if (ret == 1) {
 		*pfn = page_to_pfn(page[0]);
+
+		/*
+		 * The zero page is always resident, we don't need to pin it
+		 * and it falls into our invalid/reserved test so we don't
+		 * unpin in put_pfn().  Unpin all zero pages in the batch here.
+		 */
+		if (unlikely(is_zero_pfn(*pfn)))
+			unpin_user_page(page[0]);
+
 		ret = 0;
 		goto done;
 	}

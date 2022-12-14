@@ -1465,13 +1465,14 @@ err:
  * Wrapper around drbg_generate which can pull arbitrary long strings
  * from the DRBG without hitting the maximum request limitation.
  *
- * Parameters: see drbg_generate
+ * Parameters: see drbg_generate, except @reseed, which triggers reseeding
  * Return codes: see drbg_generate -- if one drbg_generate request fails,
  *		 the entire drbg_generate_long request fails
  */
 static int drbg_generate_long(struct drbg_state *drbg,
 			      unsigned char *buf, unsigned int buflen,
-			      struct drbg_string *addtl)
+			      struct drbg_string *addtl,
+			      bool reseed)
 {
 	unsigned int len = 0;
 	unsigned int slice = 0;
@@ -1481,6 +1482,8 @@ static int drbg_generate_long(struct drbg_state *drbg,
 		slice = ((buflen - len) / drbg_max_request_bytes(drbg));
 		chunk = slice ? drbg_max_request_bytes(drbg) : (buflen - len);
 		mutex_lock(&drbg->drbg_mutex);
+		if (reseed)
+			drbg->seeded = false;
 		err = drbg_generate(drbg, buf + len, chunk, addtl);
 		mutex_unlock(&drbg->drbg_mutex);
 		if (0 > err)
@@ -1950,6 +1953,7 @@ static int drbg_kcapi_random(struct crypto_rng *tfm,
 	struct drbg_state *drbg = crypto_rng_ctx(tfm);
 	struct drbg_string *addtl = NULL;
 	struct drbg_string string;
+	int err;
 
 	if (slen) {
 		/* linked list variable is now local to allow modification */
@@ -1957,7 +1961,15 @@ static int drbg_kcapi_random(struct crypto_rng *tfm,
 		addtl = &string;
 	}
 
-	return drbg_generate_long(drbg, dst, dlen, addtl);
+	err = drbg_generate_long(drbg, dst, dlen, addtl,
+				 (crypto_tfm_get_flags(crypto_rng_tfm(tfm)) &
+				  CRYPTO_TFM_REQ_NEED_RESEED) ==
+				 CRYPTO_TFM_REQ_NEED_RESEED);
+
+	crypto_tfm_clear_flags(crypto_rng_tfm(tfm),
+			       CRYPTO_TFM_REQ_NEED_RESEED);
+
+	return err;
 }
 
 /*

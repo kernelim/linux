@@ -205,8 +205,6 @@ struct pv_irq_ops {
 struct pv_mmu_ops {
 	unsigned long (*read_cr2)(void);
 
-	void (*notify_page_enc_status_changed)(unsigned long pfn, int npages, bool enc);
-
 	void (*write_cr2)(unsigned long);
 
 	unsigned long (*read_cr3)(void);
@@ -306,7 +304,8 @@ struct pv_mmu_ops {
 	void (*set_fixmap)(unsigned /* enum fixed_addresses */ idx,
 			   phys_addr_t phys, pgprot_t flags);
 
-	RH_KABI_RESERVE(1)
+	RH_KABI_USE(1, void (*notify_page_enc_status_changed)(unsigned long pfn,
+							int npages, bool enc))
 	RH_KABI_RESERVE(2)
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)

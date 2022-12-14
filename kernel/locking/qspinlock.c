@@ -593,6 +593,18 @@ EXPORT_SYMBOL(queued_spin_lock_slowpath);
 bool nopvspin __initdata;
 static __init int parse_nopvspin(char *arg)
 {
+#ifdef CONFIG_X86_64
+	/*
+	 * Add build check to make sure that the sizes of the various pv_*_ops
+	 * structures do not change or kABI will be broken.
+	 */
+	BUILD_BUG_ON((sizeof(struct pv_init_ops) != 8)   ||
+		     (sizeof(struct pv_time_ops) != 16)  ||
+		     (sizeof(struct pv_cpu_ops)  != 272) ||
+		     (sizeof(struct pv_irq_ops)  != 64)  ||
+		     (sizeof(struct pv_mmu_ops)  != 384) ||
+		     (sizeof(struct pv_lock_ops) != 48));
+#endif
 	nopvspin = true;
 	return 0;
 }

@@ -307,6 +307,20 @@ static int ice_clear_promisc(struct ice_vsi *vsi, u8 promisc_m)
 }
 
 /**
+ * ice_get_devlink_port - Get devlink port from netdev
+ * @netdev: the netdevice structure
+ */
+static struct devlink_port *ice_get_devlink_port(struct net_device *netdev)
+{
+	struct ice_pf *pf = ice_netdev_to_pf(netdev);
+
+	if (!ice_is_switchdev_running(pf))
+		return NULL;
+
+	return &pf->devlink_port;
+}
+
+/**
  * ice_vsi_sync_fltr - Update the VSI filter list to the HW
  * @vsi: ptr to the VSI
  *
@@ -3072,7 +3086,8 @@ static irqreturn_t ice_misc_intr(int __always_unused irq, void *data)
 
 	if (oicr & PFINT_OICR_TSYN_TX_M) {
 		ena_mask &= ~PFINT_OICR_TSYN_TX_M;
-		ice_ptp_process_ts(pf);
+		if (!hw->reset_ongoing)
+			ret = IRQ_WAKE_THREAD;
 	}
 
 	if (oicr & PFINT_OICR_TSYN_EVNT_M) {
@@ -3107,10 +3122,29 @@ static irqreturn_t ice_misc_intr(int __always_unused irq, void *data)
 			ice_service_task_schedule(pf);
 		}
 	}
-	ret = IRQ_HANDLED;
+	if (!ret)
+		ret = IRQ_HANDLED;
 
 	ice_service_task_schedule(pf);
 	ice_irq_dynamic_ena(hw, NULL, NULL);
+
+	return ret;
+}
+
+/**
+ * ice_misc_intr_thread_fn - misc interrupt thread function
+ * @irq: interrupt number
+ * @data: pointer to a q_vector
+ */
+static irqreturn_t ice_misc_intr_thread_fn(int __always_unused irq, void *data)
+{
+	irqreturn_t ret = IRQ_HANDLED;
+	struct ice_pf *pf = data;
+	bool irq_handled;
+
+	irq_handled = ice_ptp_process_ts(pf);
+	if (!irq_handled)
+		ret = IRQ_WAKE_THREAD;
 
 	return ret;
 }
@@ -3227,10 +3261,12 @@ static int ice_req_irq_msix_misc(struct ice_pf *pf)
 	pf->num_avail_sw_msix -= 1;
 	pf->oicr_idx = (u16)oicr_idx;
 
-	err = devm_request_irq(dev, pf->msix_entries[pf->oicr_idx].vector,
-			       ice_misc_intr, 0, pf->int_name, pf);
+	err = devm_request_threaded_irq(dev,
+					pf->msix_entries[pf->oicr_idx].vector,
+					ice_misc_intr, ice_misc_intr_thread_fn,
+					0, pf->int_name, pf);
 	if (err) {
-		dev_err(dev, "devm_request_irq for %s failed: %d\n",
+		dev_err(dev, "devm_request_threaded_irq for %s failed: %d\n",
 			pf->int_name, err);
 		ice_free_res(pf->irq_tracker, 1, ICE_RES_MISC_VEC_ID);
 		pf->num_avail_sw_msix += 1;
@@ -3346,7 +3382,9 @@ static void ice_set_netdev_features(struct net_device *netdev)
 			      vlano_features | tso_features;
 
 	/* add support for HW_CSUM on packets with MPLS header */
-	netdev->mpls_features =  NETIF_F_HW_CSUM;
+	netdev->mpls_features =  NETIF_F_HW_CSUM |
+				 NETIF_F_TSO     |
+				 NETIF_F_TSO6;
 
 	/* enable features */
 	netdev->features |= netdev->hw_features;
@@ -4612,8 +4650,6 @@ ice_probe(struct pci_dev *pdev, const struct pci_device_id __always_unused *ent)
 
 	/* set up for high or low DMA */
 	err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
-	if (err)
-		err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 	if (err) {
 		dev_err(dev, "DMA configuration failed: 0x%x\n", err);
 		return err;
@@ -5434,6 +5470,7 @@ static const struct pci_device_id ice_pci_tbl[] = {
 	{ PCI_VDEVICE(INTEL, ICE_DEV_ID_E823L_10G_BASE_T), 0 },
 	{ PCI_VDEVICE(INTEL, ICE_DEV_ID_E823L_1GBE), 0 },
 	{ PCI_VDEVICE(INTEL, ICE_DEV_ID_E823L_QSFP), 0 },
+	{ PCI_VDEVICE(INTEL, ICE_DEV_ID_E822_SI_DFLT), 0 },
 	/* required last entry */
 	{ 0, }
 };
@@ -6619,7 +6656,7 @@ static void ice_napi_disable_all(struct ice_vsi *vsi)
  */
 int ice_down(struct ice_vsi *vsi)
 {
-	int i, tx_err, rx_err, link_err = 0, vlan_err = 0;
+	int i, tx_err, rx_err, vlan_err = 0;
 
 	WARN_ON(!test_bit(ICE_VSI_DOWN, vsi->state));
 
@@ -6653,20 +6690,13 @@ int ice_down(struct ice_vsi *vsi)
 
 	ice_napi_disable_all(vsi);
 
-	if (test_bit(ICE_FLAG_LINK_DOWN_ON_CLOSE_ENA, vsi->back->flags)) {
-		link_err = ice_force_phys_link_state(vsi, false);
-		if (link_err)
-			netdev_err(vsi->netdev, "Failed to set physical link down, VSI %d error %d\n",
-				   vsi->vsi_num, link_err);
-	}
-
 	ice_for_each_txq(vsi, i)
 		ice_clean_tx_ring(vsi->tx_rings[i]);
 
 	ice_for_each_rxq(vsi, i)
 		ice_clean_rx_ring(vsi->rx_rings[i]);
 
-	if (tx_err || rx_err || link_err || vlan_err) {
+	if (tx_err || rx_err || vlan_err) {
 		netdev_err(vsi->netdev, "Failed to close VSI 0x%04X on switch 0x%04X\n",
 			   vsi->vsi_num, vsi->vsw->sw_id);
 		return -EIO;
@@ -8860,6 +8890,16 @@ int ice_stop(struct net_device *netdev)
 		return -EBUSY;
 	}
 
+	if (test_bit(ICE_FLAG_LINK_DOWN_ON_CLOSE_ENA, vsi->back->flags)) {
+		int link_err = ice_force_phys_link_state(vsi, false);
+
+		if (link_err) {
+			netdev_err(vsi->netdev, "Failed to set physical link down, VSI %d error %d\n",
+				   vsi->vsi_num, link_err);
+			return -EIO;
+		}
+	}
+
 	ice_vsi_close(vsi);
 
 	return 0;
@@ -8975,4 +9015,5 @@ static const struct net_device_ops ice_netdev_ops = {
 	.ndo_xsk_wakeup = ice_xsk_wakeup,
 	.ndo_udp_tunnel_add = udp_tunnel_nic_add_port,
 	.ndo_udp_tunnel_del = udp_tunnel_nic_del_port,
+	.ndo_get_devlink_port = ice_get_devlink_port,
 };

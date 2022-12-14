@@ -52,3 +52,10 @@ struct pv_lock_ops pv_lock_ops = {
 #endif /* SMP */
 };
 EXPORT_SYMBOL(pv_lock_ops);
+
+/* A dummy function for checking kABI */
+void *__x86_paravirt_patch_template(struct paravirt_patch_template *tmpl)
+{
+	return tmpl->pv_lock_ops.queued_spin_lock_slowpath;
+}
+EXPORT_SYMBOL_GPL(__x86_paravirt_patch_template);

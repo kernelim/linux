@@ -201,6 +201,7 @@ static int tcm_loop_issue_tmr(struct tcm_loop_tpg *tl_tpg,
 	struct tcm_loop_nexus *tl_nexus;
 	struct tcm_loop_cmd *tl_cmd;
 	int ret = TMR_FUNCTION_FAILED, rc;
+	DECLARE_COMPLETION_ONSTACK(compl);
 
 	/*
 	 * Locate the tl_nexus and se_sess pointers
@@ -215,26 +216,23 @@ static int tcm_loop_issue_tmr(struct tcm_loop_tpg *tl_tpg,
 	if (!tl_cmd)
 		return ret;
 
-	init_completion(&tl_cmd->tmr_done);
+	tl_cmd->is_tmr = true;
+	tl_cmd->tmr_done = &compl;
+	tl_cmd->tmr_result = &ret;
 
 	se_cmd = &tl_cmd->tl_se_cmd;
 	se_sess = tl_tpg->tl_nexus->se_sess;
 
 	rc = target_submit_tmr(se_cmd, se_sess, tl_cmd->tl_sense_buf, lun,
-			       NULL, tmr, GFP_KERNEL, task,
-			       TARGET_SCF_ACK_KREF);
-	if (rc < 0)
-		goto release;
-	wait_for_completion(&tl_cmd->tmr_done);
-	ret = se_cmd->se_tmr_req->response;
-	target_put_sess_cmd(se_cmd);
+			       NULL, tmr, GFP_KERNEL, task, 0);
+	if (rc < 0) {
+		kmem_cache_free(tcm_loop_cmd_cache, tl_cmd);
+		return ret;
+	}
 
-out:
+	wait_for_completion(tl_cmd->tmr_done);
+
 	return ret;
-
-release:
-	kmem_cache_free(tcm_loop_cmd_cache, tl_cmd);
-	goto out;
 }
 
 static int tcm_loop_abort_task(struct scsi_cmnd *sc)
@@ -593,13 +591,22 @@ static void tcm_loop_queue_tm_rsp(struct se_cmd *se_cmd)
 	struct tcm_loop_cmd *tl_cmd = container_of(se_cmd,
 				struct tcm_loop_cmd, tl_se_cmd);
 
-	/* Wake up tcm_loop_issue_tmr(). */
-	complete(&tl_cmd->tmr_done);
+	/* Set tmr result and wake up tcm_loop_issue_tmr(). */
+	*tl_cmd->tmr_result = se_cmd->se_tmr_req->response;
+	complete(tl_cmd->tmr_done);
 }
 
 static void tcm_loop_aborted_task(struct se_cmd *se_cmd)
 {
-	return;
+	struct tcm_loop_cmd *tl_cmd = container_of(se_cmd,
+				struct tcm_loop_cmd, tl_se_cmd);
+
+	if (!tl_cmd->is_tmr)
+		return;
+
+	/* Set tmr result and wake up tcm_loop_issue_tmr(). */
+	*tl_cmd->tmr_result = TMR_FUNCTION_REJECTED;
+	complete(tl_cmd->tmr_done);
 }
 
 static char *tcm_loop_dump_proto_id(struct tcm_loop_hba *tl_hba)
