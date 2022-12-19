@@ -3529,6 +3529,7 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			Specific mitigations can also be selected manually:
 
 			retpoline[,force] - replace indirect branches
+			retpoline,amd     - AMD-specific minimal thunk
 			ibrs		  - Intel: Indirect Branch Restricted Speculation (kernel)
 			ibrs_always	  - Intel: Indirect Branch Restricted Speculation (kernel and user space)
 

@@ -204,6 +204,7 @@ void spec_ctrl_enable_ibrs_enhanced(void);
 bool spec_ctrl_force_enable_ibp_disabled(void);
 bool spec_ctrl_cond_enable_ibp_disabled(void);
 void spec_ctrl_enable_retpoline(void);
+void spec_ctrl_enable_retpoline_amd(void);
 bool spec_ctrl_enable_retpoline_ibrs_user(void);
 void spec_ctrl_set_ssbd(bool ssbd_on);
 

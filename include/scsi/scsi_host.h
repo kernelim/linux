@@ -806,8 +806,12 @@ struct Scsi_Host {
 	 * The following padding has been inserted before ABI freeze to
 	 * allow extending the structure while preserve ABI.
 	 */
+#ifndef __GENKSYMS__
+	struct list_head eh_abort_list;
+#else
 	RH_KABI_RESERVE_P(1)
 	RH_KABI_RESERVE_P(2)
+#endif
 	RH_KABI_RESERVE_P(3)
 	RH_KABI_RESERVE_P(4)
 	RH_KABI_RESERVE_P(5)

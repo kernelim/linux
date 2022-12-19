@@ -1826,6 +1826,7 @@ static int scsi_mq_prep_fn(struct request *req)
 	cmd->prot_op = SCSI_PROT_NORMAL;
 
 	INIT_LIST_HEAD(&cmd->list);
+	INIT_LIST_HEAD(&cmd->eh_entry);
 	INIT_DELAYED_WORK(&cmd->abort_work, scmd_eh_abort_handler);
 	cmd->jiffies_at_alloc = jiffies;
 

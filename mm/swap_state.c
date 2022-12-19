@@ -40,7 +40,11 @@ struct backing_dev_info swap_backing_dev_info = {
 
 struct address_space *swapper_spaces[MAX_SWAPFILES];
 static unsigned int nr_swapper_spaces[MAX_SWAPFILES];
+#if defined(CONFIG_PPC64)
+bool swap_vma_readahead = false;
+#else
 bool swap_vma_readahead = true;
+#endif
 
 #define SWAP_RA_WIN_SHIFT	(PAGE_SHIFT / 2)
 #define SWAP_RA_HITS_MASK	((1UL << SWAP_RA_WIN_SHIFT) - 1)
@@ -795,6 +799,11 @@ static ssize_t vma_ra_enabled_store(struct kobject *kobj,
 	else
 		return -EINVAL;
 
+#if defined(CONFIG_PPC64)
+	WARN_ONCE(swap_vma_readahead == true,
+		  "WARNING: Enabling VMA-based swap readahead is not recommended for this platform, "
+		  "please refer to https://access.redhat.com/solutions/5368911 for further details");
+#endif
 	return count;
 }
 static struct kobj_attribute vma_ra_enabled_attr =

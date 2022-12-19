@@ -21,6 +21,7 @@ static DEFINE_MUTEX(spec_ctrl_mutex);
 static bool noibrs_cmdline __read_mostly;
 static bool ibp_disabled __read_mostly;
 static bool unsafe_module __read_mostly;
+static bool retpoline_amd_mode __read_mostly;
 static unsigned int ibrs_mode __read_mostly;
 
 /*
@@ -490,6 +491,13 @@ void spec_ctrl_enable_retpoline(void)
 	set_spec_ctrl_retp(true);
 }
 
+void spec_ctrl_enable_retpoline_amd(void)
+{
+	retpoline_amd_mode = true;
+	setup_force_cpu_cap(X86_FEATURE_RETPOLINE_AMD);
+	set_spec_ctrl_retp(true);
+}
+
 bool spec_ctrl_enable_retpoline_ibrs_user(void)
 {
 	if (!cpu_has_spec_ctrl())
@@ -535,6 +543,8 @@ enum spectre_v2_mitigation spec_ctrl_get_mitigation(void)
 			mode = SPECTRE_V2_RETPOLINE_UNSAFE_MODULE;
 		else if (ibrs_mode == IBRS_ENABLED_USER)
 			mode = SPECTRE_V2_RETPOLINE_IBRS_USER;
+		else if (retpoline_amd_mode)
+			mode = SPECTRE_V2_RETPOLINE_AMD;
 		else
 			mode = SPECTRE_V2_RETPOLINE;
 	}
