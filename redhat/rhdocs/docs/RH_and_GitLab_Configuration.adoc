@@ -103,7 +103,7 @@ Solutions:
 * Ensure there are no ‘pending approval’ requests outstanding for your account.
 * Make sure you are part of the Linux engineering “linux-eng” rover group.  You can verify your inclusion on https://rover.redhat.com/groups[https://rover.redhat.com/groups] and select “My Groups”.
 
-=== I am a Red Hat Employee or Partner Engineer and am trying to authenticate through the https://red.ht/GitLabSSO[SAML] link, but I get a "SAML authentication failed: Extern uid has already been taken" error.
+=== I am a Red Hat Employee or Red Hat Partner Engineer and am trying to authenticate through the https://red.ht/GitLabSSO[SAML] link, but I get a "SAML authentication failed: Extern uid has already been taken" error.
 	Solution: If your redhat.com LDAP email was not associated with a Gitlab account when you clicked on the SAML link, it is possible that an account was created for just your LDAP email address.  This situation is common for developers who use email addresses.  You can resolve this issue by deleting the newly created LDAP account.
 
 ** Login into the newly created LDAP account with the password and https://docs.gitlab.com/ee/user/profile/account/delete_account.html[delete the account].   If you do not have the password, goto https://gitlab.com[https://gitlab.com], login in with the LDAP email address and reset the account’s password.

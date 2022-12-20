@@ -231,8 +231,12 @@ int __on_event(struct bpf_raw_tracepoint_args *ctx)
 #ifdef NO_UNROLL
 #pragma clang loop unroll(disable)
 #else
+#ifdef UNROLL_COUNT
+#pragma clang loop unroll_count(UNROLL_COUNT)
+#else
 #pragma clang loop unroll(full)
 #endif
+#endif /* NO_UNROLL */
 		/* Unwind python stack */
 		for (int i = 0; i < STACK_MAX_LEN; ++i) {
 			if (frame_ptr && get_frame_data(frame_ptr, pidData, &frame, &sym)) {

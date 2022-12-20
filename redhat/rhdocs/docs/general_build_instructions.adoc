@@ -1,3 +1,8 @@
+---
+title: 'General Build Instructions'
+weight: 2
+summary: Entry point.
+---
 = RHEL Kernel Build Instructions
 
 Simple instructions for building RHEL and CentOS-Stream kernels.
@@ -19,6 +24,20 @@ cp redhat/configs/<version-arch>.config .config
 ----
 
 Older RHEL repositories may use rh-* in place of dist-* in make commands.
+
+== Brew build instructions
+
+In general, users can submit an MR and use the CKI build artifacts.  In cases where a brew build is required, a build for all supported architectures can be completed by executing
+
+----
+make dist-brew
+----
+
+Specific architectures can be built by setting the BREW_FLAGS variable.  For example, to build the x86_64 and noarch architectures,
+
+----
+make dist-brew BREW_FLAGS="--arch-override=x86_64,noarch"
+----
 
 == Command Help
 

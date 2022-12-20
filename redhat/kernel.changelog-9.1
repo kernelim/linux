@@ -1,3 +1,90 @@
+* Tue Dec 20 2022 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.12.1.el9_1]
+- x86/fpu: Drop fpregs lock before inheriting FPU permissions (Valentin Schneider) [2154407 2153181]
+- hv_netvsc: Fix race between VF offering and VF association message from host (Mohammed Gamal) [2151605 2149277]
+- PCI: hv: Do not set PCI_COMMAND_MEMORY to reduce VM boot time (Emanuele Giuseppe Esposito) [2150910 2092794]
+Resolves: rhbz#2154407, rhbz#2151605, rhbz#2150910
+
+* Thu Dec 08 2022 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.11.1.el9_1]
+- drm/i915: fix TLB invalidation for Gen12 video and compute engines (Wander Lairson Costa) [2148152 2148153] {CVE-2022-4139}
+- memcg: prohibit unconditional exceeding the limit of dying tasks (Chris von Recklinghausen) [2143976 2120352]
+- mm, oom: do not trigger out_of_memory from the #PF (Waiman Long) [2143976 2139747]
+- mm, oom: pagefault_out_of_memory: don't force global OOM for dying tasks (Chris von Recklinghausen) [2143976 2120352]
+- pipe: Fix missing lock in pipe_resize_ring() (Ian Kent) [2141631 2141632] {CVE-2022-2959}
+- net: usb: ax88179_178a: Fix packet receiving (Jose Ignacio Tornos Martinez) [2142722 2142723] {CVE-2022-2964}
+- net: usb: ax88179_178a: Fix out-of-bounds accesses in RX fixup (Jose Ignacio Tornos Martinez) [2142722 2142723] {CVE-2022-2964}
+- NFSD: Protect against send buffer overflow in NFSv3 READ (Scott Mayhew) [2141769 2141770] {CVE-2022-43945}
+- NFSD: Protect against send buffer overflow in NFSv2 READ (Scott Mayhew) [2141769 2141770] {CVE-2022-43945}
+- NFSD: Protect against send buffer overflow in NFSv3 READDIR (Scott Mayhew) [2141769 2141770] {CVE-2022-43945}
+- NFSD: Protect against send buffer overflow in NFSv2 READDIR (Scott Mayhew) [2141769 2141770] {CVE-2022-43945}
+- SUNRPC: Fix svcxdr_init_encode's buflen calculation (Scott Mayhew) [2141769 2141770] {CVE-2022-43945}
+- SUNRPC: Fix svcxdr_init_decode's end-of-buffer calculation (Scott Mayhew) [2141769 2141770] {CVE-2022-43945}
+Resolves: rhbz#2148152, rhbz#2143976, rhbz#2141631, rhbz#2142722, rhbz#2141769
+
+* Thu Dec 01 2022 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.10.1.el9_1]
+- ice: Fix crash by keep old cfg when update TCs more than queues (Petr Oros) [2132070 2131953]
+- ice: Fix tunnel checksum offload with fragmented traffic (Petr Oros) [2132070 2131953]
+- ice: handle E822 generic device ID in PLDM header (Petr Oros) [2132070 2131953]
+- ice: ethtool: Prohibit improper channel config for DCB (Petr Oros) [2132070 2131953]
+- ice: ethtool: advertise 1000M speeds properly (Petr Oros) [2132070 2131953]
+- ice: Fix switchdev rules book keeping (Petr Oros) [2132070 2131953]
+- ice: fix access-beyond-end in the switch code (Petr Oros) [2132070 2131953]
+- eth: ice: silence the GCC 12 array-bounds warning (Petr Oros) [2132070 2131953]
+- ice: Expose RSS indirection tables for queue groups via ethtool (Petr Oros) [2132070 2131953]
+- Revert "ice: Hide bus-info in ethtool for PRs in switchdev mode" (Petr Oros) [2132070 2131953]
+- ice: remove period on argument description in ice_for_each_vf (Petr Oros) [2132070 2131953]
+- ice: add a function comment for ice_cfg_mac_antispoof (Petr Oros) [2132070 2131953]
+- ice: fix wording in comment for ice_reset_vf (Petr Oros) [2132070 2131953]
+- ice: remove return value comment for ice_reset_all_vfs (Petr Oros) [2132070 2131953]
+- ice: always check VF VSI pointer values (Petr Oros) [2132070 2131953]
+- ice: add newline to dev_dbg in ice_vf_fdir_dump_info (Petr Oros) [2132070 2131953]
+- ice: get switch id on switchdev devices (Petr Oros) [2132070 2131953]
+- ice: return ENOSPC when exceeding ICE_MAX_CHAIN_WORDS (Petr Oros) [2132070 2131953]
+- ice: introduce common helper for retrieving VSI by vsi_num (Petr Oros) [2132070 2131953]
+- ice: use min_t() to make code cleaner in ice_gnss (Petr Oros) [2132070 2131953]
+- ice, xsk: Avoid refilling single Rx descriptors (Petr Oros) [2132070 2131953]
+- ice, xsk: Diversify return values from xsk_wakeup call paths (Petr Oros) [2132070 2131953]
+- ice, xsk: Terminate Rx side of NAPI when XSK Rx queue gets full (Petr Oros) [2132070 2131953]
+- ice, xsk: Decorate ICE_XDP_REDIR with likely() (Petr Oros) [2132070 2131953]
+- ice: Add mpls+tso support (Petr Oros) [2132070 2131953]
+- ice: switch: convert packet template match code to rodata (Petr Oros) [2132070 2131953]
+- ice: switch: use convenience macros to declare dummy pkt templates (Petr Oros) [2132070 2131953]
+- ice: switch: use a struct to pass packet template params (Petr Oros) [2132070 2131953]
+- ice: switch: unobscurify bitops loop in ice_fill_adv_dummy_packet() (Petr Oros) [2132070 2131953]
+- ice: switch: add and use u16[] aliases to ice_adv_lkup_elem::{h, m}_u (Petr Oros) [2132070 2131953]
+- ice: Support GTP-U and GTP-C offload in switchdev (Petr Oros) [2132070 2131953]
+- Documentation/admin-guide: Document nomodeset kernel parameter (Karol Herbst) [2145217 2143841]
+- drm: Move nomodeset kernel parameter to the DRM subsystem (Karol Herbst) [2145217 2143841]
+- selftests/bpf: Limit unroll_count for pyperf600 test (Frantisek Hrbata) [2144902 2139836]
+- nvme-fc: fix the fc_appid_store return value (Ewan D. Milne) [2136914 2113035]
+- ACPI: processor idle: Practically limit "Dummy wait" workaround to old Intel systems (Wei Huang) [2142168 2130652]
+- CI: Drop c9s CI parts (Veronika Kabatova)
+- CI: Use GA builder container (Veronika Kabatova)
+Resolves: rhbz#2132070, rhbz#2145217, rhbz#2144902, rhbz#2136914, rhbz#2142168
+
+* Thu Nov 17 2022 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.9.1.el9_1]
+- CI: Remove deprecated variable (Veronika Kabatova)
+- drm: fix duplicated code in drm_connector_register (Karol Herbst) [2134619 2132575]
+- drm/mgag200: Fix PLL setup for G200_SE_A rev >=4 (Jocelyn Falempe) [2140153 1960467]
+- scsi: mpi3mr: Schedule IRQ kthreads only on non-RT kernels (Tomas Henzl) [2139213 2136223]
+Resolves: rhbz#2134619, rhbz#2140153, rhbz#2139213
+
+* Fri Nov 11 2022 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.8.1.el9_1]
+- redhat: fix the branch we pull from the documentation tree (Herton R. Krzesinski)
+- nvme-tcp: handle number of queue changes (John Meneghini) [2131359 2112025]
+- nvmet: expose max queues to configfs (John Meneghini) [2131359 2112025]
+- nvme-fabrics: parse nvme connect Linux error codes (John Meneghini) [2131359 2112025]
+- vfio/type1: Unpin zero pages (Alex Williamson) [2128514 2121855]
+- ptrace: Check PTRACE_O_SUSPEND_SECCOMP permission on PTRACE_SEIZE (Oleg Nesterov) [2127881 2121271] {CVE-2022-30594}
+Resolves: rhbz#2131359, rhbz#2128514, rhbz#2127881
+
+* Thu Nov 03 2022 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.7.1.el9_1]
+- i2c: ismt: prevent memory corruption in ismt_access() (David Arcari) [2127532 2125582] {CVE-2022-3077}
+- x86/fpu: Prevent FPU state corruption (Oleksandr Natalenko) [2134588 2131667]
+- iavf: Fix reset error handling (Petr Oros) [2127884 2119712]
+- iavf: Fix NULL pointer dereference in iavf_get_link_ksettings (Petr Oros) [2127884 2119712]
+- iavf: Fix missing state logs (Petr Oros) [2127884 2119712]
+Resolves: rhbz#2127532, rhbz#2134588, rhbz#2127884
+
 * Fri Sep 30 2022 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.6.1.el9_1]
 - kabi: add symbol yield to stablelist (Čestmír Kalina) [2120286]
 - kabi: add symbol xa_find_after to stablelist (Čestmír Kalina) [2120286]

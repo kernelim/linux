@@ -553,10 +553,6 @@ int drm_connector_register(struct drm_connector *connector)
 		drm_privacy_screen_register_notifier(connector->privacy_screen,
 					   &connector->privacy_screen_notifier);
 
-	if (connector->privacy_screen)
-		drm_privacy_screen_register_notifier(connector->privacy_screen,
-					   &connector->privacy_screen_notifier);
-
 	mutex_lock(&connector_list_lock);
 	list_add_tail(&connector->global_connector_list_entry, &connector_list);
 	mutex_unlock(&connector_list_lock);

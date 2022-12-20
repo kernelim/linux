@@ -8,5 +8,5 @@ entries="
 
 echo "$entries" | while read -r name url; do
 	[ -z "$name" ] && continue
-	git subtree pull --prefix="$name" "$url"  master
+	git subtree pull --prefix="$name" "$url" main
 done

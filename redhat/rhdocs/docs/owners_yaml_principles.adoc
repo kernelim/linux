@@ -1,0 +1,53 @@
+= Red Hat Kernel Team Policies and owners.yaml
+
+
+https://gitlab.com/redhat/centos-stream/src/kernel/documentation/-/blob/main/info/owners.yaml[owners.yaml] is a collection of data which maps which Red Hat SSTs (Sub System Team) are responsible for kernel technologies (aka subsystems) that Red Hat supports.  The owners.yaml file includes other data such as Kernel technology maintainers and reviewers that is useful for the https://gitlab.com/cki-project/kernel-webhooks/[kernel-webhooks] and other utilities.
+
+Two Red Hat Kernel Team policies are followed in the file:
+
+== *Every Kernel technology must have at least one maintainer.*
+
+* Devel Engineers are responsible for providing updates and debugging technologies.  Maintainers are also responsible for reviewing code changes that impact their Kernel technologies.
+
+== *Every Kernel technology is tracked by SSTs.*
+
+* Red Hat is organized by SSTs and tracks work via SSTs.  Having Kernel technologies aligned with this structure allows for better planning of efforts surrounding the technology.  Engineers may change SSTs, maintainers may change over time, etc., but the technology must remain tracked by SSTs.
+
+=== FAQ
+
+
+*Why is there a requirement that every Kernel technology have an SST tracking it?*
+
+A technology must have at least one SST responsible for product decisions of the technology.  In the case of more than one SST tracking a Kernel technology, SSTs should collaborate with other SSTs to provide feedback on product decisions.
+
+*Why is there a requirement that every Kernel technology have a maintainer?*
+
+Every file (code or CONFIG) is tracked to a Kernel technology and every Kernel technology is tracked by an SST.  As a result, every kernel file will have an SST responsible for tracking product changes in RHEL, and every kernel file will have an maintainer responsible for approving or modifying changes to the kernel code.
+
+*Does the maintainer or QE representative of a Kernel technology have to be in the SST(s) tracking the Kernel technology?*
+
+No.  Devel Engineers maintaining a Kernel technology may be part of or move to another SST, and the Devel Engineer may remain as a maintainer for the Kernel technology.  The same holds true for QE Engineers; they may remain as the QE representative for a Kernel technology while being part of another SST.
+
+SST Leads should communicate with all the SST Kernel technologies’ maintainers and QE representatives.  SST meetings should also include all the SST Kernel technologies’ maintainers and QE representatives.
+
+*Why does an SST and maintainer have to be assigned for disabled CONFIGs?*
+
+An SST and maintainer are required to help make product decisions in case the CONFIG is enabled in RHEL.
+
+*Can more than one SST be assigned to a Kernel technology?*
+
+Yes.  It is recommended that SSTs attempt to split the Kernel technology into different subsystems when this happens, however, it is not a requirement.  It is also recommended that the SSTs coordinate efforts to avoid duplication of work and effort.
+
+*Do I have to update my Rover SST group to indicate developers from other SSTs are helping?*
+
+Rover Groups for SSTs can contain "members" for all individuals who work with that SST. In the case of Development Engineers, most of them are (and should be) focused on a single SST. It only makes sense to list a single Development Engineer in multiple Rover SSTs in very extenuating circumstances.
+
+Unlike Development Engineers, members of QE, Docs, Support are often supporting multiple SSTs. So, it makes sense, for example, to have a single QE individual listed as a member of multiple SSTs in their respective Rover Groups. In these cases, please indicate in that QE member's *Role *in each Rover Group that they participate in, what specific things they test or do for that specific SST.
+
+*How do I find the right QE representative?*
+
+There are multiple ways to find a QE representative.
+
+* Look at the https://rover.redhat.com/groups/search?q=rhel-sst-[Rover groups].
+* Look at the assigned QE person in a bugzilla associated with the technology.
+* Attend *any* SST meeting.  A QE representative will be able to assist you with finding the representative for a technology.

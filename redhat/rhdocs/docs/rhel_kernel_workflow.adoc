@@ -48,7 +48,7 @@ dist-git: A packaging git tree used by distro package maintainers.  A git reposi
 
 == Roles
 
-There are five roles (Red Hat Contributor, Red Hat Partner Contributor, Non-Red Hat Contributor, Red Hat Maintainer, and Red Hat Management) in the Kernel Workflow.  The Kernel Workflow has three levels of public exposure for projects (Public, _Private_, and Secret).  These projects all have source-git repositories, but only Public projects also have a dist-git repository.  Two of these Public projects are the CentOS Stream and RHEL Kernels.
+There are five roles (Red Hat Contributor, Red Hat Partner Contributor, Community or Stream Partner Engineer Contributor, Red Hat Maintainer, and Red Hat Management) in the Kernel Workflow.  The Kernel Workflow has three levels of public exposure for projects (Public, _Private_, and Secret).  These projects all have source-git repositories, but only Public projects also have a dist-git repository.  Two of these Public projects are the CentOS Stream and RHEL Kernels.
 
 Each role will require a different level of code access.  For example, Maintainers will require access to both source-git and dist-git repositories, while Management may only require access to statistical information from the source-git repositories.
 
@@ -66,9 +66,9 @@ Red Hat employees can contribute to the Red Hat kernel GitLab projects as Develo
 
 Red Hat Partners can contribute to Red Hat kernel GitLab projects as Developers, and in some cases, as Reviewers.  See the <<Contributor>> section for more details.
 
-==== Non-Red Hat Contributor
+==== Community Contributor or Stream Partner Engineers Contributor
 
-Non-Red Hat Contributors can contribute to the Red Hat kernel GitLab projects as Guests. They have restricted CI and review capabilities.  See the <<Contributor>> section for more details.
+Community Contributors or Stream Partner Engineer Contributors can contribute to the Red Hat kernel GitLab projects as Guests. They have restricted CI and review capabilities.  See the <<Contributor>> section for more details.
 
 ==== Red Hat Maintainer
 
@@ -213,7 +213,7 @@ All reviews can be completed through the GitLab WebUI.  Red Hat recommends the G
 
 Red Hat Employee Contributors can follow the link:merge_request_approvals_and_blocks.adoc[Merge Request Approval Procedure].  In some cases, Red Hat Partner Contributors may be asked by their manager to also review Merge Requests.
 
-Non-Red Hat Contributors are able to participate in discussions but do not have the ability to approve or block merge requests.
+Community Contributors and Stream Partner Engineer Contributors are able to participate in discussions but do not have the ability to approve or block merge requests.
 
 ==== Finding Merge Requests to review
 
@@ -247,7 +247,7 @@ Instructions for https://bugzilla.redhat.com/docs/en/html/using/filing.html#repo
 
 All Red Hat Kernels are hosted on GitLab so all contributors must set up a GitLab account to contribute to the Red Hat Kernel.  Red Hat Employees are granted Developer and Reviewer status by default, and Maintainer status if necessary.  Red Hat Partner Engineers are granted Developers status by default.
 
-*Red Hat contributors to Red Hat Kernel projects must link:RH_and_GitLab_Configuration.adoc[configure a Red Hat GitLab account] and submit merge requests through that account.  Non-Red Hat contributors to Red Hat Kernel Projects must configure a GitLab account(TBD).*
+*Red Hat contributors to Red Hat Kernel projects must link:RH_and_GitLab_Configuration.adoc[configure a Red Hat GitLab account] and submit merge requests through that account.  Community Contributors or Stream Partner Engineer contributors to Red Hat Kernel Projects must configure a GitLab account(TBD).*
 
 == Tools
 
@@ -304,7 +304,9 @@ One can subscribe to any label in GitLab, and receive any and all notifications 
 
 The CI service implemented by the Continuous Kernel Integration Project (CKI), is responsible for building test kernels and testing kernel changes.
 
-Read the  https://cki-project.org/docs/user_docs/gitlab-mr-testing/[CKI Project’s documentation] for information on the Red Hat Kernel and Continuous Integration. Detailed information targeted for people who are new to the CI workflow can be found in the https://cki-project.org/docs/user_docs/gitlab-mr-testing/full_picture/["full picture"] documentation. This page also contains https://cki-project.org/docs/user_docs/gitlab-mr-testing/full_picture/#debugging-and-fixing-failures---more-details[information on debugging CKI failures].  Contributors are encouraged to check the https://cki-project.org/docs/user_docs/gitlab-mr-testing/faq/[FAQ] for answers to common questions.
+We strongly encourage people new to the workflow to read the https://cki-project.org/docs/user_docs/gitlab-mr-testing/full_picture/[introductory CKI documentation for developers]. This step is not mandatory, but it demystifies the process and teaches people how to take full advantage of CI.
+
+On a daily basis, people should refer to the https://cki-project.org/docs/user_docs/gitlab-mr-testing/faq/[FAQ] containing step by step debugging guides and answers for common questions.
 
 === Continuous Delivery (CD)
 

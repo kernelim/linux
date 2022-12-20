@@ -69,7 +69,7 @@
 %define _binary_payload w3T.xzdio
 %endif
 
-Summary:               The Linux kernel
+Summary: The Linux kernel
 
 # Set debugbuildsenabled to 1 to build separate base and debug kernels
 #  (on supported architectures). The kernel-debug-* subpackages will
@@ -121,13 +121,13 @@ Summary:               The Linux kernel
 %define kversion 5.14
 
 %define rpmversion 5.14.0
-%define pkgrelease 162.6.1.el9_1
+%define pkgrelease 162.12.1.el9_1
 
 # This is needed to do merge window version magic
 %define patchlevel 14
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 162.6.1%{?buildid}%{?dist}
+%define specrelease 162.12.1%{?buildid}%{?dist}
 
 %define pkg_release %{specrelease}
 
@@ -534,94 +534,94 @@ Summary:               The Linux kernel
 %define initrd_prereq  dracut >= 027
 
 
-Name:                  kernel
-License:               GPLv2 and Redistributable, no modification permitted
-URL:                   https://www.kernel.org/
-Version:               %{rpmversion}
-Release:               %{pkg_release}
+Name: kernel
+License: GPLv2 and Redistributable, no modification permitted
+URL: https://www.kernel.org/
+Version: %{rpmversion}
+Release: %{pkg_release}.0.1
 # DO NOT CHANGE THE 'ExclusiveArch' LINE TO TEMPORARILY EXCLUDE AN ARCHITECTURE BUILD.
 # SET %%nobuildarches (ABOVE) INSTEAD
 %if 0%{?fedora}
-ExclusiveArch:         x86_64 s390x %{arm} aarch64 ppc64le
+ExclusiveArch: x86_64 s390x %{arm} aarch64 ppc64le
 %else
-ExclusiveArch:         noarch i386 i686 x86_64 s390x %{arm} aarch64 ppc64le
+ExclusiveArch: noarch i386 i686 x86_64 s390x %{arm} aarch64 ppc64le
 %endif
-ExclusiveOS:           Linux
+ExclusiveOS: Linux
 %ifnarch %{nobuildarches}
-Requires:              kernel-core-uname-r = %{KVERREL}
-Requires:              kernel-modules-uname-r = %{KVERREL}
+Requires: kernel-core-uname-r = %{KVERREL}
+Requires: kernel-modules-uname-r = %{KVERREL}
 %endif
 
 
 #
 # List the packages used during the kernel build
 #
-BuildRequires:         kmod, patch, bash, coreutils, tar, git-core, which
-BuildRequires:         bzip2, xz, findutils, gzip, m4, perl-interpreter, perl-Carp, perl-devel, perl-generators, make, diffutils, gawk
-BuildRequires:         gcc, binutils, redhat-rpm-config, hmaccalc, bison, flex, gcc-c++
-BuildRequires:         net-tools, hostname, bc, elfutils-devel
-BuildRequires:         dwarves
-BuildRequires:         python3-devel
-BuildRequires:         gcc-plugin-devel
+BuildRequires: kmod, patch, bash, coreutils, tar, git-core, which
+BuildRequires: bzip2, xz, findutils, gzip, m4, perl-interpreter, perl-Carp, perl-devel, perl-generators, make, diffutils, gawk
+BuildRequires: gcc, binutils, redhat-rpm-config, hmaccalc, bison, flex, gcc-c++
+BuildRequires: net-tools, hostname, bc, elfutils-devel
+BuildRequires: dwarves
+BuildRequires: python3-devel
+BuildRequires: gcc-plugin-devel
 # glibc-static is required for a consistent build environment (specifically
 # CONFIG_CC_CAN_LINK_STATIC=y).
-BuildRequires:         glibc-static
-BuildRequires:         kernel-rpm-macros >= 185-9
+BuildRequires: glibc-static
+BuildRequires: kernel-rpm-macros >= 185-9
 %ifnarch %{nobuildarches} noarch
-BuildRequires:         bpftool
+BuildRequires: bpftool
 %endif
 %if %{with_headers}
-BuildRequires:         rsync
+BuildRequires: rsync
 %endif
 %if %{with_doc}
-BuildRequires:         xmlto, asciidoc, python3-sphinx, python3-sphinx_rtd_theme
+BuildRequires: xmlto, asciidoc, python3-sphinx, python3-sphinx_rtd_theme
 %endif
 %if %{with_sparse}
-BuildRequires:         sparse
+BuildRequires: sparse
 %endif
 %if %{with_perf}
-BuildRequires:         zlib-devel binutils-devel newt-devel perl(ExtUtils::Embed) bison flex xz-devel
-BuildRequires:         audit-libs-devel
-BuildRequires:         java-devel
-BuildRequires:         libbpf-devel >= 0.6.0-1
-BuildRequires:         libbabeltrace-devel
-BuildRequires:         libtraceevent-devel
+BuildRequires: zlib-devel binutils-devel newt-devel perl(ExtUtils::Embed) bison flex xz-devel
+BuildRequires: audit-libs-devel
+BuildRequires: java-devel
+BuildRequires: libbpf-devel >= 0.6.0-1
+BuildRequires: libbabeltrace-devel
+BuildRequires: libtraceevent-devel
 %ifnarch %{arm} s390x
-BuildRequires:         numactl-devel
+BuildRequires: numactl-devel
 %endif
 %ifarch aarch64
-BuildRequires:         opencsd-devel >= 1.0.0
+BuildRequires: opencsd-devel >= 1.0.0
 %endif
 %endif
 %if %{with_tools}
-BuildRequires:         gettext ncurses-devel
-BuildRequires:         libcap-devel libcap-ng-devel
+BuildRequires: gettext ncurses-devel
+BuildRequires: libcap-devel libcap-ng-devel
 %ifnarch s390x
-BuildRequires:         pciutils-devel
+BuildRequires: pciutils-devel
 %endif
 %ifarch i686 x86_64
-BuildRequires:         libnl3-devel
+BuildRequires: libnl3-devel
 %endif
 %endif
 %if %{with_tools} || %{signmodules} || %{signkernel}
-BuildRequires:         openssl-devel
+BuildRequires: openssl-devel
 %endif
 %if %{with_bpftool}
-BuildRequires:         python3-docutils
-BuildRequires:         zlib-devel binutils-devel
+BuildRequires: python3-docutils
+BuildRequires: zlib-devel binutils-devel
 %endif
 %if %{with_selftests}
-BuildRequires:         clang llvm fuse-devel
+BuildRequires: clang llvm fuse-devel
 %ifnarch %{arm}
-BuildRequires:         numactl-devel
+BuildRequires: numactl-devel
 %endif
-BuildRequires:         libcap-devel libcap-ng-devel rsync libmnl-devel
+BuildRequires: libcap-devel libcap-ng-devel rsync libmnl-devel
 %endif
-BuildConflicts:        rhbuildsys(DiskFree) < 500Mb
+BuildConflicts: rhbuildsys(DiskFree) < 500Mb
 %if %{with_debuginfo}
-BuildRequires:         rpm-build, elfutils
-BuildConflicts:        rpm < 4.13.0.1-19
-BuildConflicts:        dwarves < 1.13
+BuildRequires: rpm-build, elfutils
+BuildConflicts: rpm < 4.13.0.1-19
+BuildConflicts: dwarves < 1.13
 # Most of these should be enabled after more investigation
 %undefine _include_minidebuginfo
 %undefine _find_debuginfo_dwz_opts
@@ -635,41 +635,41 @@ BuildConflicts:        dwarves < 1.13
 %global _no_recompute_build_ids 1
 %endif
 %if %{with_kabidwchk} || %{with_kabidw_base}
-BuildRequires:         kabi-dw
+BuildRequires: kabi-dw
 %endif
 
 %if %{signkernel}%{signmodules}
-BuildRequires:         openssl
+BuildRequires: openssl
 %if %{signkernel}
-BuildRequires:         system-sb-certs
+BuildRequires: system-sb-certs
 %ifarch x86_64 aarch64
-BuildRequires:         nss-tools
-BuildRequires:         pesign >= 0.10-4
+BuildRequires: nss-tools
+BuildRequires: pesign >= 0.10-4
 %endif
 %endif
 %endif
 
 %if %{with_cross}
-BuildRequires:         binutils-%{_build_arch}-linux-gnu, gcc-%{_build_arch}-linux-gnu
+BuildRequires: binutils-%{_build_arch}-linux-gnu, gcc-%{_build_arch}-linux-gnu
 %define cross_opts CROSS_COMPILE=%{_build_arch}-linux-gnu-
 %define __strip %{_build_arch}-linux-gnu-strip
 %endif
 
 # These below are required to build man pages
 %if %{with_perf}
-BuildRequires:         xmlto
+BuildRequires: xmlto
 %endif
 %if %{with_perf} || %{with_tools}
-BuildRequires:         asciidoc
+BuildRequires: asciidoc
 %endif
 
 %if %{with toolchain_clang}
-BuildRequires:         clang
+BuildRequires: clang
 %endif
 
 %if %{with clang_lto}
-BuildRequires:         llvm
-BuildRequires:         lld
+BuildRequires: llvm
+BuildRequires: lld
 %endif
 
 # Because this is the kernel, it's hard to get a single upstream URL
@@ -678,9 +678,9 @@ BuildRequires:         lld
 # exact git commit you can run
 #
 # xzcat -qq ${TARBALL} | git get-tar-commit-id
-Source0:               linux-5.14.0-162.6.1.el9_1.tar.xz
+Source0: linux-5.14.0-162.12.1.el9_1.tar.xz
 
-Source1:               Makefile.rhelver
+Source1: Makefile.rhelver
 
 %if %{signkernel}
 
@@ -708,118 +708,118 @@ Source1:               Makefile.rhelver
 # signkernel
 %endif
 
-Source20:              mod-denylist.sh
-Source21:              mod-sign.sh
-Source22:              parallel_xz.sh
+Source20: mod-denylist.sh
+Source21: mod-sign.sh
+Source22: parallel_xz.sh
 
 %define modsign_cmd %{SOURCE21}
 
 %if 0%{?include_rhel}
-Source23:              x509.genkey
+Source23: x509.genkey
 
-Source24:              kernel-aarch64-rhel.config
-Source25:              kernel-aarch64-debug-rhel.config
-Source26:              mod-extra.list.rhel
+Source24: kernel-aarch64-rhel.config
+Source25: kernel-aarch64-debug-rhel.config
+Source26: mod-extra.list.rhel
 
-Source27:              kernel-ppc64le-rhel.config
-Source28:              kernel-ppc64le-debug-rhel.config
-Source29:              kernel-s390x-rhel.config
-Source30:              kernel-s390x-debug-rhel.config
-Source31:              kernel-s390x-zfcpdump-rhel.config
-Source32:              kernel-x86_64-rhel.config
-Source33:              kernel-x86_64-debug-rhel.config
+Source27: kernel-ppc64le-rhel.config
+Source28: kernel-ppc64le-debug-rhel.config
+Source29: kernel-s390x-rhel.config
+Source30: kernel-s390x-debug-rhel.config
+Source31: kernel-s390x-zfcpdump-rhel.config
+Source32: kernel-x86_64-rhel.config
+Source33: kernel-x86_64-debug-rhel.config
 
-Source34:              filter-x86_64.sh.rhel
-Source35:              filter-armv7hl.sh.rhel
-Source36:              filter-i686.sh.rhel
-Source37:              filter-aarch64.sh.rhel
-Source38:              filter-ppc64le.sh.rhel
-Source39:              filter-s390x.sh.rhel
-Source40:              filter-modules.sh.rhel
+Source34: filter-x86_64.sh.rhel
+Source35: filter-armv7hl.sh.rhel
+Source36: filter-i686.sh.rhel
+Source37: filter-aarch64.sh.rhel
+Source38: filter-ppc64le.sh.rhel
+Source39: filter-s390x.sh.rhel
+Source40: filter-modules.sh.rhel
 
-Source41:              x509.genkey.centos
+Source41: x509.genkey.centos
 %endif
 
 %if 0%{?include_fedora}
-Source50:              x509.genkey.fedora
-Source51:              mod-extra.list.fedora
+Source50: x509.genkey.fedora
+Source51: mod-extra.list.fedora
 
-Source52:              kernel-aarch64-fedora.config
-Source53:              kernel-aarch64-debug-fedora.config
-Source54:              kernel-armv7hl-fedora.config
-Source55:              kernel-armv7hl-debug-fedora.config
-Source56:              kernel-armv7hl-lpae-fedora.config
-Source57:              kernel-armv7hl-lpae-debug-fedora.config
-Source58:              kernel-i686-fedora.config
-Source59:              kernel-i686-debug-fedora.config
-Source60:              kernel-ppc64le-fedora.config
-Source61:              kernel-ppc64le-debug-fedora.config
-Source62:              kernel-s390x-fedora.config
-Source63:              kernel-s390x-debug-fedora.config
-Source64:              kernel-x86_64-fedora.config
-Source65:              kernel-x86_64-debug-fedora.config
+Source52: kernel-aarch64-fedora.config
+Source53: kernel-aarch64-debug-fedora.config
+Source54: kernel-armv7hl-fedora.config
+Source55: kernel-armv7hl-debug-fedora.config
+Source56: kernel-armv7hl-lpae-fedora.config
+Source57: kernel-armv7hl-lpae-debug-fedora.config
+Source58: kernel-i686-fedora.config
+Source59: kernel-i686-debug-fedora.config
+Source60: kernel-ppc64le-fedora.config
+Source61: kernel-ppc64le-debug-fedora.config
+Source62: kernel-s390x-fedora.config
+Source63: kernel-s390x-debug-fedora.config
+Source64: kernel-x86_64-fedora.config
+Source65: kernel-x86_64-debug-fedora.config
 
-Source67:              filter-x86_64.sh.fedora
-Source68:              filter-armv7hl.sh.fedora
-Source69:              filter-i686.sh.fedora
-Source70:              filter-aarch64.sh.fedora
-Source71:              filter-ppc64le.sh.fedora
-Source72:              filter-s390x.sh.fedora
-Source73:              filter-modules.sh.fedora
+Source67: filter-x86_64.sh.fedora
+Source68: filter-armv7hl.sh.fedora
+Source69: filter-i686.sh.fedora
+Source70: filter-aarch64.sh.fedora
+Source71: filter-ppc64le.sh.fedora
+Source72: filter-s390x.sh.fedora
+Source73: filter-modules.sh.fedora
 %endif
 
-Source75:              partial-kgcov-snip.config
-Source80:              generate_all_configs.sh
-Source81:              process_configs.sh
+Source75: partial-kgcov-snip.config
+Source80: generate_all_configs.sh
+Source81: process_configs.sh
 
-Source82:              update_scripts.sh
+Source82: update_scripts.sh
 
-Source84:              mod-internal.list
+Source84: mod-internal.list
 
-Source200:             check-kabi
+Source200: check-kabi
 
-Source201:             Module.kabi_aarch64
-Source202:             Module.kabi_ppc64le
-Source203:             Module.kabi_s390x
-Source204:             Module.kabi_x86_64
+Source201: Module.kabi_aarch64
+Source202: Module.kabi_ppc64le
+Source203: Module.kabi_s390x
+Source204: Module.kabi_x86_64
 
-Source210:             Module.kabi_dup_aarch64
-Source211:             Module.kabi_dup_ppc64le
-Source212:             Module.kabi_dup_s390x
-Source213:             Module.kabi_dup_x86_64
+Source210: Module.kabi_dup_aarch64
+Source211: Module.kabi_dup_ppc64le
+Source212: Module.kabi_dup_s390x
+Source213: Module.kabi_dup_x86_64
 
-Source300:             kernel-abi-stablelists-%{rpmversion}-%{pkgrelease}.tar.bz2
-Source301:             kernel-kabi-dw-%{rpmversion}-%{pkgrelease}.tar.bz2
+Source300: kernel-abi-stablelists-%{rpmversion}-%{pkgrelease}.tar.bz2
+Source301: kernel-kabi-dw-%{rpmversion}-%{pkgrelease}.tar.bz2
 
 # Sources for kernel-tools
-Source2000:            cpupower.service
-Source2001:            cpupower.config
-Source2002:            kvm_stat.logrotate
+Source2000: cpupower.service
+Source2001: cpupower.config
+Source2002: kvm_stat.logrotate
 
 # Some people enjoy building customized kernels from the dist-git in Fedora and
 # use this to override configuration options. One day they may all use the
 # source tree, but in the mean time we carry this to support the legacy workflow
-Source3000:            merge.pl
-Source3001:            kernel-local
+Source3000: merge.pl
+Source3001: kernel-local
 
-Source4000:            README.rst
-Source4001:            rpminspect.yaml
-Source4002:            gating.yaml
+Source4000: README.rst
+Source4001: rpminspect.yaml
+Source4002: gating.yaml
 
 ## Rocky driver and kpatch certs
-Source90000:           rockydup1.x509
-Source90001:           rockykpatch1.x509
+Source90000: rockydup1.x509
+Source90001: rockykpatch1.x509
 
 ## Patches needed for building this package
 
 %if !%{nopatches}
 
-Patch1:                patch-%{rpmversion}-redhat.patch
+Patch1: patch-%{rpmversion}-redhat.patch
 %endif
 
 # empty final patch to facilitate testing of kernel patches
-Patch999999:           linux-kernel-test.patch
-Patch1000000:          debrand-rh-main.patch
+Patch999999: linux-kernel-test.patch
+Patch1000000: debrand-rh-main.patch
 
 # END OF PATCH DEFINITIONS
 
@@ -834,32 +834,32 @@ The kernel meta package
 #
 %define kernel_reqprovconf(o) \
 %if %{-o:0}%{!-o:1}\
-Provides:              kernel = %{rpmversion}-%{pkg_release}\
+Provides: kernel = %{rpmversion}-%{pkg_release}\
 %endif\
-Provides:              kernel-%{_target_cpu} = %{rpmversion}-%{pkg_release}%{?1:+%{1}}\
-Provides:              kernel-drm-nouveau = 16\
-Provides:              kernel-uname-r = %{KVERREL}%{?1:+%{1}}\
+Provides: kernel-%{_target_cpu} = %{rpmversion}-%{pkg_release}%{?1:+%{1}}\
+Provides: kernel-drm-nouveau = 16\
+Provides: kernel-uname-r = %{KVERREL}%{?1:+%{1}}\
 Requires(pre): %{kernel_prereq}\
 Requires(pre): %{initrd_prereq}\
 Requires(pre): ((linux-firmware >= 20150904-56.git6ebf5d57) if linux-firmware)\
-Recommends:            linux-firmware\
+Recommends: linux-firmware\
 Requires(preun): systemd >= 200\
-Conflicts:             xfsprogs < 4.3.0-1\
-Conflicts:             xorg-x11-drv-vmmouse < 13.0.99\
+Conflicts: xfsprogs < 4.3.0-1\
+Conflicts: xorg-x11-drv-vmmouse < 13.0.99\
 %{expand:%%{?kernel%{?1:_%{1}}_conflicts:Conflicts: %%{kernel%{?1:_%{1}}_conflicts}}}\
 %{expand:%%{?kernel%{?1:_%{1}}_obsoletes:Obsoletes: %%{kernel%{?1:_%{1}}_obsoletes}}}\
 %{expand:%%{?kernel%{?1:_%{1}}_provides:Provides: %%{kernel%{?1:_%{1}}_provides}}}\
 # We can't let RPM do the dependencies automatic because it'll then pick up\
 # a correct but undesirable perl dependency from the module headers which\
 # isn't required for the kernel proper to function\
-AutoReq:               no\
-AutoProv:              yes\
+AutoReq: no\
+AutoProv: yes\
 %{nil}
 
 
 %package doc
-Summary:               Various documentation bits found in the kernel source
-Group:                 Documentation
+Summary: Various documentation bits found in the kernel source
+Group: Documentation
 %description doc
 This package contains documentation files from the kernel
 source. Various bits of information about the Linux kernel and the
@@ -870,9 +870,9 @@ options that can be passed to Linux kernel modules at load time.
 
 
 %package headers
-Summary:               Header files for the Linux kernel for use by glibc
-Obsoletes:             glibc-kernheaders < 3.0-46
-Provides:              glibc-kernheaders = 3.0-46
+Summary: Header files for the Linux kernel for use by glibc
+Obsoletes: glibc-kernheaders < 3.0-46
+Provides: glibc-kernheaders = 3.0-46
 %description headers
 Kernel-headers includes the C header files that specify the interface
 between the Linux kernel and userspace libraries and programs.  The
@@ -881,7 +881,7 @@ building most standard programs and are also needed for rebuilding the
 glibc package.
 
 %package cross-headers
-Summary:               Header files for the Linux kernel for use by cross-glibc
+Summary: Header files for the Linux kernel for use by cross-glibc
 %description cross-headers
 Kernel-cross-headers includes the C header files that specify the interface
 between the Linux kernel and userspace libraries and programs.  The
@@ -891,25 +891,25 @@ cross-glibc package.
 
 
 %package debuginfo-common-%{_target_cpu}
-Summary:               Kernel source files used by %{name}-debuginfo packages
-Provides:              installonlypkg(kernel)
+Summary: Kernel source files used by %{name}-debuginfo packages
+Provides: installonlypkg(kernel)
 %description debuginfo-common-%{_target_cpu}
 This package is required by %{name}-debuginfo subpackages.
 It provides the kernel source files common to all builds.
 
 %if %{with_perf}
 %package -n perf
-Summary:               Performance monitoring for the Linux kernel
-Requires:              bzip2
-License:               GPLv2
+Summary: Performance monitoring for the Linux kernel
+Requires: bzip2
+License: GPLv2
 %description -n perf
 This package contains the perf tool, which enables performance monitoring
 of the Linux kernel.
 
 %package -n perf-debuginfo
-Summary:               Debug information for package perf
-Requires:              %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}
-AutoReqProv:           no
+Summary: Debug information for package perf
+Requires: %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}
+AutoReqProv: no
 %description -n perf-debuginfo
 This package provides debug information for the perf package.
 
@@ -920,16 +920,16 @@ This package provides debug information for the perf package.
 %{expand:%%global _find_debuginfo_opts %{?_find_debuginfo_opts} -p '.*%%{_bindir}/perf(\.debug)?|.*%%{_libexecdir}/perf-core/.*|.*%%{_libdir}/libperf-jvmti.so(\.debug)?|XXX' -o perf-debuginfo.list}
 
 %package -n python3-perf
-Summary:               Python bindings for apps which will manipulate perf events
+Summary: Python bindings for apps which will manipulate perf events
 %description -n python3-perf
 The python3-perf package contains a module that permits applications
 written in the Python programming language to use the interface
 to manipulate perf events.
 
 %package -n python3-perf-debuginfo
-Summary:               Debug information for package perf python bindings
-Requires:              %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}
-AutoReqProv:           no
+Summary: Debug information for package perf python bindings
+Requires: %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}
+AutoReqProv: no
 %description -n python3-perf-debuginfo
 This package provides debug information for the perf python bindings.
 
@@ -941,17 +941,17 @@ This package provides debug information for the perf python bindings.
 
 %if %{with_tools}
 %package -n kernel-tools
-Summary:               Assortment of tools for the Linux kernel
-License:               GPLv2
+Summary: Assortment of tools for the Linux kernel
+License: GPLv2
 %ifarch %{cpupowerarchs}
-Provides:              cpupowerutils = 1:009-0.6.p1
-Obsoletes:             cpupowerutils < 1:009-0.6.p1
-Provides:              cpufreq-utils = 1:009-0.6.p1
-Provides:              cpufrequtils = 1:009-0.6.p1
-Obsoletes:             cpufreq-utils < 1:009-0.6.p1
-Obsoletes:             cpufrequtils < 1:009-0.6.p1
-Obsoletes:             cpuspeed < 1:1.5-16
-Requires:              kernel-tools-libs = %{version}-%{release}
+Provides: cpupowerutils = 1:009-0.6.p1
+Obsoletes: cpupowerutils < 1:009-0.6.p1
+Provides: cpufreq-utils = 1:009-0.6.p1
+Provides: cpufrequtils = 1:009-0.6.p1
+Obsoletes: cpufreq-utils < 1:009-0.6.p1
+Obsoletes: cpufrequtils < 1:009-0.6.p1
+Obsoletes: cpuspeed < 1:1.5-16
+Requires: kernel-tools-libs = %{version}-%{release}
 %endif
 %define __requires_exclude ^%{_bindir}/python
 %description -n kernel-tools
@@ -959,30 +959,30 @@ This package contains the tools/ directory from the kernel source
 and the supporting documentation.
 
 %package -n kernel-tools-libs
-Summary:               Libraries for the kernels-tools
-License:               GPLv2
+Summary: Libraries for the kernels-tools
+License: GPLv2
 %description -n kernel-tools-libs
 This package contains the libraries built from the tools/ directory
 from the kernel source.
 
 %package -n kernel-tools-libs-devel
-Summary:               Assortment of tools for the Linux kernel
-License:               GPLv2
-Requires:              kernel-tools = %{version}-%{release}
+Summary: Assortment of tools for the Linux kernel
+License: GPLv2
+Requires: kernel-tools = %{version}-%{release}
 %ifarch %{cpupowerarchs}
-Provides:              cpupowerutils-devel = 1:009-0.6.p1
-Obsoletes:             cpupowerutils-devel < 1:009-0.6.p1
+Provides: cpupowerutils-devel = 1:009-0.6.p1
+Obsoletes: cpupowerutils-devel < 1:009-0.6.p1
 %endif
-Requires:              kernel-tools-libs = %{version}-%{release}
-Provides:              kernel-tools-devel
+Requires: kernel-tools-libs = %{version}-%{release}
+Provides: kernel-tools-devel
 %description -n kernel-tools-libs-devel
 This package contains the development files for the tools/ directory from
 the kernel source.
 
 %package -n kernel-tools-debuginfo
-Summary:               Debug information for package kernel-tools
-Requires:              %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}
-AutoReqProv:           no
+Summary: Debug information for package kernel-tools
+Requires: %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}
+AutoReqProv: no
 %description -n kernel-tools-debuginfo
 This package provides debug information for package kernel-tools.
 
@@ -998,17 +998,17 @@ This package provides debug information for package kernel-tools.
 %if %{with_bpftool}
 
 %package -n bpftool
-Summary:               Inspection and simple manipulation of eBPF programs and maps
-License:               GPLv2
+Summary: Inspection and simple manipulation of eBPF programs and maps
+License: GPLv2
 %description -n bpftool
 This package contains the bpftool, which allows inspection and simple
 manipulation of eBPF programs and maps.
 
 %package -n bpftool-debuginfo
-Summary:               Debug information for package bpftool
-Group:                 Development/Debug
-Requires:              %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}
-AutoReqProv:           no
+Summary: Debug information for package bpftool
+Group: Development/Debug
+Requires: %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}
+AutoReqProv: no
 %description -n bpftool-debuginfo
 This package provides debug information for the bpftool package.
 
@@ -1020,9 +1020,9 @@ This package provides debug information for the bpftool package.
 %if %{with_selftests}
 
 %package selftests-internal
-Summary:               Kernel samples and selftests
-License:               GPLv2
-Requires:              binutils, bpftool, iproute-tc, nmap-ncat, python3, fuse-libs
+Summary: Kernel samples and selftests
+License: GPLv2
+Requires: binutils, bpftool, iproute-tc, nmap-ncat, python3, fuse-libs
 %description selftests-internal
 Kernel sample programs and selftests.
 
@@ -1037,14 +1037,14 @@ Kernel sample programs and selftests.
 
 %if %{with_gcov}
 %package gcov
-Summary:               gcov graph and source files for coverage data collection.
+Summary: gcov graph and source files for coverage data collection.
 %description gcov
 kernel-gcov includes the gcov graph and source files for gcov coverage collection.
 %endif
 
 %package -n kernel-abi-stablelists
-Summary:               The Rocky Linux kernel ABI symbol stablelists
-AutoReqProv:           no
+Summary: The Rocky Linux kernel ABI symbol stablelists
+AutoReqProv: no
 %description -n kernel-abi-stablelists
 The kABI package contains information pertaining to the Rocky
 Linux kernel ABI, including lists of kernel symbols that are needed by
@@ -1052,9 +1052,9 @@ external Linux kernel modules, and a yum plugin to aid enforcement.
 
 %if %{with_kabidw_base}
 %package kernel-kabidw-base-internal
-Summary:               The baseline dataset for kABI verification using DWARF data
-Group:                 System Environment/Kernel
-AutoReqProv:           no
+Summary: The baseline dataset for kABI verification using DWARF data
+Group: System Environment/Kernel
+AutoReqProv: no
 %description kernel-kabidw-base-internal
 The package contains data describing the current ABI of the Rocky
 Linux kernel, suitable for the kabi-dw tool.
@@ -1071,11 +1071,11 @@ Linux kernel, suitable for the kabi-dw tool.
 # care about debugging those so we just filter those out and remove it.
 %define kernel_debuginfo_package() \
 %package %{?1:%{1}-}debuginfo\
-Summary:               Debug information for package %{name}%{?1:-%{1}}\
-Requires:              %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}\
-Provides:              %{name}%{?1:-%{1}}-debuginfo-%{_target_cpu} = %{version}-%{release}\
-Provides:              installonlypkg(kernel)\
-AutoReqProv:           no\
+Summary: Debug information for package %{name}%{?1:-%{1}}\
+Requires: %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}\
+Provides: %{name}%{?1:-%{1}}-debuginfo-%{_target_cpu} = %{version}-%{release}\
+Provides: installonlypkg(kernel)\
+AutoReqProv: no\
 %description %{?1:%{1}-}debuginfo\
 This package provides debug information for package %{name}%{?1:-%{1}}.\
 This is required to use SystemTap with %{name}%{?1:-%{1}}-%{KVERREL}.\
@@ -1088,23 +1088,23 @@ This is required to use SystemTap with %{name}%{?1:-%{1}}-%{KVERREL}.\
 #
 %define kernel_devel_package(m) \
 %package %{?1:%{1}-}devel\
-Summary:               Development package for building kernel modules to match the %{?2:%{2} }kernel\
-Provides:              kernel%{?1:-%{1}}-devel-%{_target_cpu} = %{version}-%{release}\
-Provides:              kernel-devel-%{_target_cpu} = %{version}-%{release}%{?1:+%{1}}\
-Provides:              kernel-devel-uname-r = %{KVERREL}%{?1:+%{1}}\
-Provides:              installonlypkg(kernel)\
-AutoReqProv:           no\
+Summary: Development package for building kernel modules to match the %{?2:%{2} }kernel\
+Provides: kernel%{?1:-%{1}}-devel-%{_target_cpu} = %{version}-%{release}\
+Provides: kernel-devel-%{_target_cpu} = %{version}-%{release}%{?1:+%{1}}\
+Provides: kernel-devel-uname-r = %{KVERREL}%{?1:+%{1}}\
+Provides: installonlypkg(kernel)\
+AutoReqProv: no\
 Requires(pre): findutils\
-Requires:              findutils\
-Requires:              perl-interpreter\
-Requires:              openssl-devel\
-Requires:              elfutils-libelf-devel\
-Requires:              bison\
-Requires:              flex\
-Requires:              make\
-Requires:              gcc\
+Requires: findutils\
+Requires: perl-interpreter\
+Requires: openssl-devel\
+Requires: elfutils-libelf-devel\
+Requires: bison\
+Requires: flex\
+Requires: make\
+Requires: gcc\
 %if %{-m:1}%{!-m:0}\
-Requires:              kernel-devel-uname-r = %{KVERREL}\
+Requires: kernel-devel-uname-r = %{KVERREL}\
 %endif\
 %description %{?1:%{1}-}devel\
 This package provides kernel headers and makefiles sufficient to build modules\
@@ -1118,9 +1118,9 @@ against the %{?2:%{2} }kernel package.\
 #
 %define kernel_devel_matched_package(m) \
 %package %{?1:%{1}-}devel-matched\
-Summary:               Meta package to install matching core and devel packages for a given %{?2:%{2} }kernel\
-Requires:              kernel%{?1:-%{1}}-devel = %{version}-%{release}\
-Requires:              kernel%{?1:-%{1}}-core = %{version}-%{release}\
+Summary: Meta package to install matching core and devel packages for a given %{?2:%{2} }kernel\
+Requires: kernel%{?1:-%{1}}-devel = %{version}-%{release}\
+Requires: kernel%{?1:-%{1}}-core = %{version}-%{release}\
 %description %{?1:%{1}-}devel-matched\
 This meta package is used to install matching core and devel packages for a given %{?2:%{2} }kernel.\
 %{nil}
@@ -1130,9 +1130,9 @@ This meta package is used to install matching core and devel packages for a give
 #
 %define kernel_ipaclones_package() \
 %package %{?1:%{1}-}ipaclones-internal\
-Summary:               *.ipa-clones files generated by -fdump-ipa-clones for kernel%{?1:-%{1}}\
-Group:                 System Environment/Kernel\
-AutoReqProv:           no\
+Summary: *.ipa-clones files generated by -fdump-ipa-clones for kernel%{?1:-%{1}}\
+Group: System Environment/Kernel\
+AutoReqProv: no\
 %description %{?1:%{1}-}ipaclones-internal\
 This package provides *.ipa-clones files.\
 %{nil}
@@ -1143,17 +1143,17 @@ This package provides *.ipa-clones files.\
 #
 %define kernel_modules_internal_package() \
 %package %{?1:%{1}-}modules-internal\
-Summary:               Extra kernel modules to match the %{?2:%{2} }kernel\
-Group:                 System Environment/Kernel\
-Provides:              kernel%{?1:-%{1}}-modules-internal-%{_target_cpu} = %{version}-%{release}\
-Provides:              kernel%{?1:-%{1}}-modules-internal-%{_target_cpu} = %{version}-%{release}%{?1:+%{1}}\
-Provides:              kernel%{?1:-%{1}}-modules-internal = %{version}-%{release}%{?1:+%{1}}\
-Provides:              installonlypkg(kernel-module)\
-Provides:              kernel%{?1:-%{1}}-modules-internal-uname-r = %{KVERREL}%{?1:+%{1}}\
-Requires:              kernel-uname-r = %{KVERREL}%{?1:+%{1}}\
-Requires:              kernel%{?1:-%{1}}-modules-uname-r = %{KVERREL}%{?1:+%{1}}\
-AutoReq:               no\
-AutoProv:              yes\
+Summary: Extra kernel modules to match the %{?2:%{2} }kernel\
+Group: System Environment/Kernel\
+Provides: kernel%{?1:-%{1}}-modules-internal-%{_target_cpu} = %{version}-%{release}\
+Provides: kernel%{?1:-%{1}}-modules-internal-%{_target_cpu} = %{version}-%{release}%{?1:+%{1}}\
+Provides: kernel%{?1:-%{1}}-modules-internal = %{version}-%{release}%{?1:+%{1}}\
+Provides: installonlypkg(kernel-module)\
+Provides: kernel%{?1:-%{1}}-modules-internal-uname-r = %{KVERREL}%{?1:+%{1}}\
+Requires: kernel-uname-r = %{KVERREL}%{?1:+%{1}}\
+Requires: kernel%{?1:-%{1}}-modules-uname-r = %{KVERREL}%{?1:+%{1}}\
+AutoReq: no\
+AutoProv: yes\
 %description %{?1:%{1}-}modules-internal\
 This package provides kernel modules for the %{?2:%{2} }kernel package for Rocky internal usage.\
 %{nil}
@@ -1164,19 +1164,19 @@ This package provides kernel modules for the %{?2:%{2} }kernel package for Rocky
 #
 %define kernel_modules_extra_package(m) \
 %package %{?1:%{1}-}modules-extra\
-Summary:               Extra kernel modules to match the %{?2:%{2} }kernel\
-Provides:              kernel%{?1:-%{1}}-modules-extra-%{_target_cpu} = %{version}-%{release}\
-Provides:              kernel%{?1:-%{1}}-modules-extra-%{_target_cpu} = %{version}-%{release}%{?1:+%{1}}\
-Provides:              kernel%{?1:-%{1}}-modules-extra = %{version}-%{release}%{?1:+%{1}}\
-Provides:              installonlypkg(kernel-module)\
-Provides:              kernel%{?1:-%{1}}-modules-extra-uname-r = %{KVERREL}%{?1:+%{1}}\
-Requires:              kernel-uname-r = %{KVERREL}%{?1:+%{1}}\
-Requires:              kernel%{?1:-%{1}}-modules-uname-r = %{KVERREL}%{?1:+%{1}}\
+Summary: Extra kernel modules to match the %{?2:%{2} }kernel\
+Provides: kernel%{?1:-%{1}}-modules-extra-%{_target_cpu} = %{version}-%{release}\
+Provides: kernel%{?1:-%{1}}-modules-extra-%{_target_cpu} = %{version}-%{release}%{?1:+%{1}}\
+Provides: kernel%{?1:-%{1}}-modules-extra = %{version}-%{release}%{?1:+%{1}}\
+Provides: installonlypkg(kernel-module)\
+Provides: kernel%{?1:-%{1}}-modules-extra-uname-r = %{KVERREL}%{?1:+%{1}}\
+Requires: kernel-uname-r = %{KVERREL}%{?1:+%{1}}\
+Requires: kernel%{?1:-%{1}}-modules-uname-r = %{KVERREL}%{?1:+%{1}}\
 %if %{-m:1}%{!-m:0}\
-Requires:              kernel-modules-extra-uname-r = %{KVERREL}\
+Requires: kernel-modules-extra-uname-r = %{KVERREL}\
 %endif\
-AutoReq:               no\
-AutoProv:              yes\
+AutoReq: no\
+AutoProv: yes\
 %description %{?1:%{1}-}modules-extra\
 This package provides less commonly used kernel modules for the %{?2:%{2} }kernel package.\
 %{nil}
@@ -1187,18 +1187,18 @@ This package provides less commonly used kernel modules for the %{?2:%{2} }kerne
 #
 %define kernel_modules_package(m) \
 %package %{?1:%{1}-}modules\
-Summary:               kernel modules to match the %{?2:%{2}-}core kernel\
-Provides:              kernel%{?1:-%{1}}-modules-%{_target_cpu} = %{version}-%{release}\
-Provides:              kernel-modules-%{_target_cpu} = %{version}-%{release}%{?1:+%{1}}\
-Provides:              kernel-modules = %{version}-%{release}%{?1:+%{1}}\
-Provides:              installonlypkg(kernel-module)\
-Provides:              kernel%{?1:-%{1}}-modules-uname-r = %{KVERREL}%{?1:+%{1}}\
-Requires:              kernel-uname-r = %{KVERREL}%{?1:+%{1}}\
+Summary: kernel modules to match the %{?2:%{2}-}core kernel\
+Provides: kernel%{?1:-%{1}}-modules-%{_target_cpu} = %{version}-%{release}\
+Provides: kernel-modules-%{_target_cpu} = %{version}-%{release}%{?1:+%{1}}\
+Provides: kernel-modules = %{version}-%{release}%{?1:+%{1}}\
+Provides: installonlypkg(kernel-module)\
+Provides: kernel%{?1:-%{1}}-modules-uname-r = %{KVERREL}%{?1:+%{1}}\
+Requires: kernel-uname-r = %{KVERREL}%{?1:+%{1}}\
 %if %{-m:1}%{!-m:0}\
-Requires:              kernel-modules-uname-r = %{KVERREL}\
+Requires: kernel-modules-uname-r = %{KVERREL}\
 %endif\
-AutoReq:               no\
-AutoProv:              yes\
+AutoReq: no\
+AutoProv: yes\
 %description %{?1:%{1}-}modules\
 This package provides commonly used kernel modules for the %{?2:%{2}-}core kernel package.\
 %{nil}
@@ -1209,10 +1209,10 @@ This package provides commonly used kernel modules for the %{?2:%{2}-}core kerne
 #
 %define kernel_meta_package() \
 %package %{1}\
-summary:               kernel meta-package for the %{1} kernel\
-Requires:              kernel-%{1}-core-uname-r = %{KVERREL}+%{1}\
-Requires:              kernel-%{1}-modules-uname-r = %{KVERREL}+%{1}\
-Provides:              installonlypkg(kernel)\
+summary: kernel meta-package for the %{1} kernel\
+Requires: kernel-%{1}-core-uname-r = %{KVERREL}+%{1}\
+Requires: kernel-%{1}-modules-uname-r = %{KVERREL}+%{1}\
+Provides: installonlypkg(kernel)\
 %description %{1}\
 The meta-package for the %{1} kernel\
 %{nil}
@@ -1224,11 +1224,11 @@ The meta-package for the %{1} kernel\
 #
 %define kernel_variant_package(n:mo) \
 %package %{?1:%{1}-}core\
-Summary:               %{variant_summary}\
-Provides:              kernel-%{?1:%{1}-}core-uname-r = %{KVERREL}%{?1:+%{1}}\
-Provides:              installonlypkg(kernel)\
+Summary: %{variant_summary}\
+Provides: kernel-%{?1:%{1}-}core-uname-r = %{KVERREL}%{?1:+%{1}}\
+Provides: installonlypkg(kernel)\
 %if %{-m:1}%{!-m:0}\
-Requires:              kernel-core-uname-r = %{KVERREL}\
+Requires: kernel-core-uname-r = %{KVERREL}\
 %endif\
 %{expand:%%kernel_reqprovconf %{?1:%{1}} %{-o:%{-o}}}\
 %if %{?1:1} %{!?1:0} \
@@ -1348,8 +1348,8 @@ ApplyOptionalPatch()
   fi
 }
 
-%setup -q -n kernel-5.14.0-162.6.1.el9_1 -c
-mv linux-5.14.0-162.6.1.el9_1 linux-%{KVERREL}
+%setup -q -n kernel-5.14.0-162.12.1.el9_1 -c
+mv linux-5.14.0-162.12.1.el9_1 linux-%{KVERREL}
 
 cd linux-%{KVERREL}
 cp -a %{SOURCE1} .
@@ -1359,6 +1359,7 @@ cp -a %{SOURCE1} .
 ApplyOptionalPatch patch-%{rpmversion}-redhat.patch
 %endif
 
+ApplyOptionalPatch debrand-rh-main.patch
 ApplyOptionalPatch linux-kernel-test.patch
 
 # END OF PATCH APPLICATIONS
@@ -1451,7 +1452,7 @@ done
 # Adjust FIPS module name for RHEL
 %if 0%{?rhel}
 for i in *.config; do
-  sed -i 's/CONFIG_CRYPTO_FIPS_NAME=.*/CONFIG_CRYPTO_FIPS_NAME="Red Hat Enterprise Linux %{rhel} - Kernel Cryptographic API"/' $i
+  sed -i 's/CONFIG_CRYPTO_FIPS_NAME=.*/CONFIG_CRYPTO_FIPS_NAME="Rocky Linux %{rhel} - Kernel Cryptographic API"/' $i
 done
 %endif
 
@@ -3015,9 +3016,90 @@ fi
 #
 #
 %changelog
-* Tue Nov 15 2022 Release Engineering <releng@rockylinux.org> - 5.14.0-162.6.1
+* Mon Jan 23 2023 Release Engineering <releng@rockylinux.org> - 5.14.0-162.12.1.0.1
 - Porting to 9.0, debranding and Rocky branding with new release pkg (Sherif Nagy)
 - Porting to 9.0, debranding and Rocky branding (Louis Abel)
+
+* Tue Dec 20 2022 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.12.1.el9_1]
+- x86/fpu: Drop fpregs lock before inheriting FPU permissions (Valentin Schneider) [2154407 2153181]
+- hv_netvsc: Fix race between VF offering and VF association message from host (Mohammed Gamal) [2151605 2149277]
+- PCI: hv: Do not set PCI_COMMAND_MEMORY to reduce VM boot time (Emanuele Giuseppe Esposito) [2150910 2092794]
+
+* Thu Dec 08 2022 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.11.1.el9_1]
+- drm/i915: fix TLB invalidation for Gen12 video and compute engines (Wander Lairson Costa) [2148152 2148153] {CVE-2022-4139}
+- memcg: prohibit unconditional exceeding the limit of dying tasks (Chris von Recklinghausen) [2143976 2120352]
+- mm, oom: do not trigger out_of_memory from the #PF (Waiman Long) [2143976 2139747]
+- mm, oom: pagefault_out_of_memory: don't force global OOM for dying tasks (Chris von Recklinghausen) [2143976 2120352]
+- pipe: Fix missing lock in pipe_resize_ring() (Ian Kent) [2141631 2141632] {CVE-2022-2959}
+- net: usb: ax88179_178a: Fix packet receiving (Jose Ignacio Tornos Martinez) [2142722 2142723] {CVE-2022-2964}
+- net: usb: ax88179_178a: Fix out-of-bounds accesses in RX fixup (Jose Ignacio Tornos Martinez) [2142722 2142723] {CVE-2022-2964}
+- NFSD: Protect against send buffer overflow in NFSv3 READ (Scott Mayhew) [2141769 2141770] {CVE-2022-43945}
+- NFSD: Protect against send buffer overflow in NFSv2 READ (Scott Mayhew) [2141769 2141770] {CVE-2022-43945}
+- NFSD: Protect against send buffer overflow in NFSv3 READDIR (Scott Mayhew) [2141769 2141770] {CVE-2022-43945}
+- NFSD: Protect against send buffer overflow in NFSv2 READDIR (Scott Mayhew) [2141769 2141770] {CVE-2022-43945}
+- SUNRPC: Fix svcxdr_init_encode's buflen calculation (Scott Mayhew) [2141769 2141770] {CVE-2022-43945}
+- SUNRPC: Fix svcxdr_init_decode's end-of-buffer calculation (Scott Mayhew) [2141769 2141770] {CVE-2022-43945}
+
+* Thu Dec 01 2022 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.10.1.el9_1]
+- ice: Fix crash by keep old cfg when update TCs more than queues (Petr Oros) [2132070 2131953]
+- ice: Fix tunnel checksum offload with fragmented traffic (Petr Oros) [2132070 2131953]
+- ice: handle E822 generic device ID in PLDM header (Petr Oros) [2132070 2131953]
+- ice: ethtool: Prohibit improper channel config for DCB (Petr Oros) [2132070 2131953]
+- ice: ethtool: advertise 1000M speeds properly (Petr Oros) [2132070 2131953]
+- ice: Fix switchdev rules book keeping (Petr Oros) [2132070 2131953]
+- ice: fix access-beyond-end in the switch code (Petr Oros) [2132070 2131953]
+- eth: ice: silence the GCC 12 array-bounds warning (Petr Oros) [2132070 2131953]
+- ice: Expose RSS indirection tables for queue groups via ethtool (Petr Oros) [2132070 2131953]
+- Revert "ice: Hide bus-info in ethtool for PRs in switchdev mode" (Petr Oros) [2132070 2131953]
+- ice: remove period on argument description in ice_for_each_vf (Petr Oros) [2132070 2131953]
+- ice: add a function comment for ice_cfg_mac_antispoof (Petr Oros) [2132070 2131953]
+- ice: fix wording in comment for ice_reset_vf (Petr Oros) [2132070 2131953]
+- ice: remove return value comment for ice_reset_all_vfs (Petr Oros) [2132070 2131953]
+- ice: always check VF VSI pointer values (Petr Oros) [2132070 2131953]
+- ice: add newline to dev_dbg in ice_vf_fdir_dump_info (Petr Oros) [2132070 2131953]
+- ice: get switch id on switchdev devices (Petr Oros) [2132070 2131953]
+- ice: return ENOSPC when exceeding ICE_MAX_CHAIN_WORDS (Petr Oros) [2132070 2131953]
+- ice: introduce common helper for retrieving VSI by vsi_num (Petr Oros) [2132070 2131953]
+- ice: use min_t() to make code cleaner in ice_gnss (Petr Oros) [2132070 2131953]
+- ice, xsk: Avoid refilling single Rx descriptors (Petr Oros) [2132070 2131953]
+- ice, xsk: Diversify return values from xsk_wakeup call paths (Petr Oros) [2132070 2131953]
+- ice, xsk: Terminate Rx side of NAPI when XSK Rx queue gets full (Petr Oros) [2132070 2131953]
+- ice, xsk: Decorate ICE_XDP_REDIR with likely() (Petr Oros) [2132070 2131953]
+- ice: Add mpls+tso support (Petr Oros) [2132070 2131953]
+- ice: switch: convert packet template match code to rodata (Petr Oros) [2132070 2131953]
+- ice: switch: use convenience macros to declare dummy pkt templates (Petr Oros) [2132070 2131953]
+- ice: switch: use a struct to pass packet template params (Petr Oros) [2132070 2131953]
+- ice: switch: unobscurify bitops loop in ice_fill_adv_dummy_packet() (Petr Oros) [2132070 2131953]
+- ice: switch: add and use u16[] aliases to ice_adv_lkup_elem::{h, m}_u (Petr Oros) [2132070 2131953]
+- ice: Support GTP-U and GTP-C offload in switchdev (Petr Oros) [2132070 2131953]
+- Documentation/admin-guide: Document nomodeset kernel parameter (Karol Herbst) [2145217 2143841]
+- drm: Move nomodeset kernel parameter to the DRM subsystem (Karol Herbst) [2145217 2143841]
+- selftests/bpf: Limit unroll_count for pyperf600 test (Frantisek Hrbata) [2144902 2139836]
+- nvme-fc: fix the fc_appid_store return value (Ewan D. Milne) [2136914 2113035]
+- ACPI: processor idle: Practically limit "Dummy wait" workaround to old Intel systems (Wei Huang) [2142168 2130652]
+- CI: Drop c9s CI parts (Veronika Kabatova)
+- CI: Use GA builder container (Veronika Kabatova)
+
+* Thu Nov 17 2022 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.9.1.el9_1]
+- CI: Remove deprecated variable (Veronika Kabatova)
+- drm: fix duplicated code in drm_connector_register (Karol Herbst) [2134619 2132575]
+- drm/mgag200: Fix PLL setup for G200_SE_A rev >=4 (Jocelyn Falempe) [2140153 1960467]
+- scsi: mpi3mr: Schedule IRQ kthreads only on non-RT kernels (Tomas Henzl) [2139213 2136223]
+
+* Fri Nov 11 2022 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.8.1.el9_1]
+- redhat: fix the branch we pull from the documentation tree (Herton R. Krzesinski)
+- nvme-tcp: handle number of queue changes (John Meneghini) [2131359 2112025]
+- nvmet: expose max queues to configfs (John Meneghini) [2131359 2112025]
+- nvme-fabrics: parse nvme connect Linux error codes (John Meneghini) [2131359 2112025]
+- vfio/type1: Unpin zero pages (Alex Williamson) [2128514 2121855]
+- ptrace: Check PTRACE_O_SUSPEND_SECCOMP permission on PTRACE_SEIZE (Oleg Nesterov) [2127881 2121271] {CVE-2022-30594}
+
+* Thu Nov 03 2022 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.7.1.el9_1]
+- i2c: ismt: prevent memory corruption in ismt_access() (David Arcari) [2127532 2125582] {CVE-2022-3077}
+- x86/fpu: Prevent FPU state corruption (Oleksandr Natalenko) [2134588 2131667]
+- iavf: Fix reset error handling (Petr Oros) [2127884 2119712]
+- iavf: Fix NULL pointer dereference in iavf_get_link_ksettings (Petr Oros) [2127884 2119712]
+- iavf: Fix missing state logs (Petr Oros) [2127884 2119712]
 
 * Fri Sep 30 2022 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.6.1.el9_1]
 - kabi: add symbol yield to stablelist (Čestmír Kalina) [2120286]

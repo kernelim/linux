@@ -1,32 +1,120 @@
 ---
 title: 'Merge Request Approvals and Blocks'
-date: 2021-07-20T19:30:08+10:00
+date: 2022-07-24T23:34:08+10:00
 draft: false
 weight: 2
 summary: Approving and blocking instructions for reviewers.
 ---
-
 = Merge Request Approvals and Blocks
+// Borrowed from https://github.com/asciidoctor/asciidoctor.org/issues/571
+:caution-caption: pass:[<span style="font-size: 2em">☠</span>]
+:important-caption: pass:[<span style="font-size: 2em">❗</span>]
+:note-caption: pass:[<span style="font-size: 2em">🛈</span>]
+:tip-caption: pass:[<span style="font-size: 2em">💡</span>]
+:warning-caption: pass:[<span style="font-size: 2em">⚠</span>]
+:sectnums:
 
-Users with sufficient permissions can Approve and Block Merge Requests.  Reviewers should use GitLab’s Approve interface to link:merge_request_approvals_and_blocks.adoc#approving-a-merge-request[Approve Merge requests].  Reviewers can also approve (aka ACK) or block (aka NACK) merge requests by replying to the cover-letter of an email patch series or the patch sent through the email bridge, by adding a comment via the GitLab UI for the merge request, or by using the link:bichon.adoc[bichon] utilities to add a comment to the MR.
+Users with sufficient permissions can Approve and Block Merge Requests.  Reviewers should use GitLab's Approve interface to link:merge_request_approvals_and_blocks.adoc#approving-a-merge-request[Approve Merge Requests].  Reviewers can also approve (aka ACK) or block (aka NACK) merge requests by adding a comment via the GitLab UI for the merge request using a `blocking thread` or using the `/block` and `/unblock` keywords, or by using the link:bichon.adoc[bichon] utilities to add a comment to the MR.
 
-== Approving a Merge Request
+{{< toc >}}
 
-Reviewers should use GitLab’s Approve interface to approve Merge Requests as this allows the maintainers, managers, and product owners to use the GitLab WebUI or tools to view the approvals for each merge request.
+== Approving a Merge Request via GitLab Web interface
+:sectnums:
 
-The WebUI has an “Approve” button that is available to users with sufficient permissions to review Merge Requests.  This action can also be completed in lab by executing
+Reviewers can use GitLab's Approve interface to approve Merge Requests as this allows the maintainers, managers, and product owners to use the GitLab WebUI or tools to view the approvals for each merge request.
 
-----
-	lab mr approve <mr_id>
-----
+The WebUI has an “Approve” button that is available to users with sufficient permissions to review Merge Requests.
 
-or by pressing ‘A’ in bichon in the Merge Request view.
+Here are some examples of what that "Approve" button might look like:
 
-== Alternative: Approving a Merge Request In Email
+=== Example being the first to approve
+image::images/approvals-webint-approve_initial.png[align="center"]
 
-The reply or comment must be in the format of “Acked-by: Firstname Lastname <user@redhat.com>, where the FirstName, LastName, and user@redhat.com are replaced by the reviewer’s information.
+In this above image, this is what to expect to see when there aren't any existing approvals on the MR.
 
-== Alternative: Blocking a Merge Request In Email
+=== Example approving in addiiton to others who have already approved
+image::images/approvals-webint-approve_additionally.png[align="center"]
 
-The reply or comment must be in the format of “Nacked-by: Firstname Lastname <user@redhat.com>, where the FirstName, LastName, and user@redhat.com are replaced by the reviewer’s information.
+This image shows an MR that should already be satisfied enough to merge, but the option to approve additionally is also available.
 
+=== Example being ineligible to provide an approval
+image::images/approvals-webint-approve_ineligible.png[align="center"]
+
+This image shows what the approval interface looks like when the necessary privilege is missing to provide an approval.
+
+NOTE: There are various reasons for being ineligible to review a MR including (but not limited to) being the original author for this MR, and also not having developer permissions to the project.
+
+== Approving a Merge Request using the 'lab' or 'bichon' utilities
+:sectnums:
+
+This action can also be completed in lab by executing:
+
+`lab mr approve <mr_id>`
+
+or by pressing `A` in bichon in the Merge Request view.
+
+== Blocking a Merge Request with a Blocking Thread
+:sectnums:
+
+There are currently two different ways to block an open MR.  The first is to open a blocking thread which needs to be resolved prior to the MR being able to get merged.
+
+IMPORTANT: It is critical that the blocking thread is only resolved by the author of the original comment in a that thread.  Otherwise, an issue can get overlooked inadvertently and allow the MR to progress unblocked.
+
+Here are a couple of examples to understand what a blocking thread involved MR looks like:
+
+=== With unresolved blocking threads
+image::images/approvals-unresolved_thread.png[caption=""]
+
+In the above image, this MR will not be able to get merged until that 1 unresolved thread is marked as resolved.
+
+=== With all blocking threads resolved
+image::images/approvals-resolved_thread.png[caption=""]
+
+As displayed in this image, there were some blocking threads opened, but they have all been resolved.  Therefore, this MR will not be blocked from getting merged due to a blocking thread.
+
+=== A freshly opened blocking thread
+image::images/approvals-blocking_thread_opened.png[caption=""]
+
+In the above image, this is what would be expected on a freshly created blocking thread from the comments portion of the MR.
+
+=== Another freshly opened blocking thread (started from within code review)
+image::images/approvals-blocking_thread_opened_alt.png[caption=""]
+
+This image shows that blocking threads can also be started from within the code while doing a review, which allows for providing some additional context.
+
+=== A resolved blocking thread
+image::images/approvals-blocking_thread_resolved.png[caption=""]
+
+The above image shows what a blocking thread looks like once it has been blocked.  Note that the list of comments has been collapsed and there is no "Resolve thread" button available.
+
+== Blocking a Merge Request with the /block keyword
+:sectnums:
+
+The other way to block an open MR is to add a comment with `/block` in its contents (alone on the start of a line).  This is enforced by adding an approval rule (near the Approve button) that must be satisfied before the MR can be merged.
+
+=== Example using /block keyword
+image::images/approvals-blocked_keyword.png[caption=""]
+
+The effect of this /block will have the `CKI KWF Bot` set the image:images/approvals-label_image_acks_blocked.png["Acks::Blocked"] label if there are still unresolved `/block` operations.  This is also reflected on the Ack/Nack summary comment.
+
+=== Example of the Approval Rule showing up on a blocked MR
+image::images/approvals-blocking_approval_rule.png[caption=""]
+
+=== Example of the Approval Rule noted by the Ack/Nack Comment
+image::images/approvals-blocked_acknack.png[caption=""]
+
+
+== Unblocking a Merge Request with the /unblock keyword
+:sectnums:
+
+An important distinction to note between using `/block` and `blocking threads` is that only the originaly person who applied `/block` can apply the corresponding `/unblock`.
+
+=== Example using /unblock keyword
+image::images/approvals-unblocked_keyword.png[caption=""]
+
+Note that in this particular image, the Acks are not satisfied, but the image:images/approvals-label_image_acks_blocked.png["Acks::Blocked"] label has been removed by the `/unblock`.
+
+== Unblocking a Merge Request with the Approve button
+:sectnums:
+
+An MR that has been blocked via the /block functionality can also be unblocked by using the Approve button as detailed in <<Approving a Merge Request via GitLab Web interface>>

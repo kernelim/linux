@@ -16,31 +16,15 @@ workflow: !reference [.workflow]
     srpm_make_target: dist-srpm
     native_tools: 'true'
     architectures: 'x86_64 ppc64le aarch64 s390x'
-    POWER_BUILDER_SUFFIX: '-p9'
     disttag_override: '.el9_1'
-
-.trigger_c9s_pipeline:
-  trigger:
-    branch: c9s
-  variables:
-    name: c9s
-    builder_image: quay.io/cki/builder-stream9
-    kpet_tree_family: c9s
 
 .trigger_rhel9_pipeline:
   trigger:
     branch: rhel9
   variables:
     name: rhel9
-    builder_image: quay.io/cki/builder-rhel9
+    builder_image: quay.io/cki/builder-rhel9.1
     kpet_tree_family: rhel9
-
-.realtime_check_c9s:
-  trigger:
-    branch: c9s-rt
-  variables:
-    name: kernel-rt-c9s
-    kpet_tree_family: c9s-rt
 
 .realtime_check_rhel9:
   trigger:
@@ -49,81 +33,11 @@ workflow: !reference [.workflow]
     name: kernel-rt-rhel9
     kpet_tree_family: rhel9-rt
 
-.trigger_rhel9_build:
-  extends: .trigger_rhel9_pipeline
-  variables:
-    skip_test: 'true'
-    skip_results: 'true'
-
-.realtime_full_c9s:
-  variables:
-    name: kernel-rt-c9s
-    kpet_tree_family: c9s-rt
-    RUN_ONLY_FOR_RT: 'true'
-
-.automotive_full_c9s:
-  variables:
-    name: kernel-automotive-c9s
-    kpet_tree_family: c9s-rt
-    disttag_override: '.el9iv'
-    AWS_UPT_IMAGE_NAME_FILTER: 'auto-osbuild-qemu-cs9-cki-ostree-*'
-    RUN_ONLY_FOR_AUTOMOTIVE: 'true'
-
 .realtime_full_rhel9:
   variables:
     name: kernel-rt-rhel9
     kpet_tree_family: rhel9-rt
     RUN_ONLY_FOR_RT: 'true'
-
-.automotive_check_c9s_overrides:
-  trigger:
-    branch: c9s-automotive
-  variables:
-    RUN_ONLY_FOR_AUTOMOTIVE: 'false'
-
-# c9s CI
-c9s_merge_request:
-  extends: [.trusted, .merge_request, .rhel_common,
-            .9-common, .trigger_c9s_pipeline]
-
-c9s_automotive_check_merge_request:
-  extends: [.trusted, .merge_request,
-            .9-common, .trigger_c9s_pipeline, .automotive_full_c9s, .automotive_check_c9s_overrides,
-            .automotive_check_common]
-
-c9s_realtime_check_merge_request:
-  extends: [.trusted, .merge_request,
-            .9-common,
-            .realtime_check_common,
-            .trigger_c9s_pipeline, .realtime_check_c9s]
-
-c9s_baseline_coverage_build:
-  extends: [.trusted, .baseline, .rhel_common, .only_build_and_publish, .coverage,
-            .9-common, .trigger_c9s_pipeline]
-
-c9s_rhel9_compat_merge_request:
-  extends: [.centos_stream_rhel_internal, .merge_request, .rhel_common, .with_notifications,
-            .9-common, .trigger_rhel9_build]
-
-# c9s realtime branch CI
-c9s_realtime_merge_request:
-  extends: [.trusted, .merge_request,
-            .9-common,
-            .realtime_pipeline_common,
-            .trigger_c9s_pipeline, .realtime_full_c9s]
-
-# c9s automotive branch CI
-c9s_automotive_merge_request:
-  extends: [.trusted, .merge_request,
-            .9-common,
-            .automotive_pipeline_common,
-            .trigger_c9s_pipeline, .automotive_full_c9s]
-
-c9s_automotive_baseline_coverage:
-  extends: [.trusted, .baseline, .9-common,
-            .automotive_pipeline_common,
-            .coverage,
-            .trigger_c9s_pipeline, .automotive_full_c9s]
 
 # RHEL9 CI
 rhel9_merge_request:

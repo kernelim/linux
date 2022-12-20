@@ -5,11 +5,29 @@ Makefile.rhelver	jforbes@redhat.com jforbes@fedoraproject.org ptalbert@redhat.co
 redhat/	jforbes@redhat.com jforbes@fedoraproject.org ptalbert@redhat.com
 ^redhat/configs/	jforbes@redhat.com jforbes@fedoraproject.org ptalbert@redhat.com
 
+[ARK Real Time Kernel Maintainer]
+makefile	williams@redhat.com ahalaney@redhat.com
+Makefile.rhelver	williams@redhat.com ahalaney@redhat.com
+redhat/	williams@redhat.com ahalaney@redhat.com
+^redhat/configs/	williams@redhat.com ahalaney@redhat.com
+
+[Automotive Stream Distribution Kernel Maintainer]
+makefile	jfaracco@redhat.com scweaver@redhat.com
+Makefile.rhelver	jfaracco@redhat.com scweaver@redhat.com
+redhat/	jfaracco@redhat.com scweaver@redhat.com
+^redhat/configs/	jfaracco@redhat.com scweaver@redhat.com
+
 [CentOS Stream 9 Kernel Maintainer]
 makefile	herton@redhat.com
 Makefile.rhelver	herton@redhat.com
 redhat/	herton@redhat.com
 ^redhat/configs/	herton@redhat.com
+
+[CentOS Stream 9 Real Time Kernel Maintainer]
+makefile	lgoncalv@redhat.com
+Makefile.rhelver	lgoncalv@redhat.com
+redhat/	lgoncalv@redhat.com
+^redhat/configs/	lgoncalv@redhat.com
 
 [RHEL 9.1 Kernel Maintainer]
 makefile	ptalbert@redhat.com
@@ -17,23 +35,41 @@ Makefile.rhelver	ptalbert@redhat.com
 redhat/	ptalbert@redhat.com
 ^redhat/configs/	ptalbert@redhat.com
 
+[RHEL/ARK/Centos-Stream General Kernel Reviewers]
+makefile	
+Makefile.rhelver	
+redhat/	
+^redhat/configs/	
+
 [RHEL 9.1 Real Time Kernel Maintainer]
-makefile	fpacheco@redhat.com
-Makefile.rhelver	fpacheco@redhat.com
-redhat/	fpacheco@redhat.com
-^redhat/configs/	fpacheco@redhat.com
-
-[RHEL 9.0 Kernel Maintainer]
-makefile	herton@redhat.com
-Makefile.rhelver	herton@redhat.com
-redhat/	herton@redhat.com
-^redhat/configs/	herton@redhat.com
-
-[RHEL 9.0 Real Time Kernel Maintainer]
 makefile	lgoncalv@redhat.com
 Makefile.rhelver	lgoncalv@redhat.com
 redhat/	lgoncalv@redhat.com
 ^redhat/configs/	lgoncalv@redhat.com
+
+[RHEL 9.0 Kernel Maintainer]
+makefile	jstancek@redhat.com
+Makefile.rhelver	jstancek@redhat.com
+redhat/	jstancek@redhat.com
+^redhat/configs/	jstancek@redhat.com
+
+[RHEL 9.0 Real Time Kernel Maintainer]
+makefile	lgoncalv@redhat.com lleshchi@redhat.com
+Makefile.rhelver	lgoncalv@redhat.com lleshchi@redhat.com
+redhat/	lgoncalv@redhat.com lleshchi@redhat.com
+^redhat/configs/	lgoncalv@redhat.com lleshchi@redhat.com
+
+[RHEL 8.8 Kernel Maintainer]
+makefile	lzampier@redhat.com
+Makefile.rhelver	lzampier@redhat.com
+redhat/	lzampier@redhat.com
+^redhat/configs/	lzampier@redhat.com
+
+[RHEL 8.8 Real Time Kernel Maintainer]
+makefile	jwyatt@redhat.com chwhite@redhat.com
+Makefile.rhelver	jwyatt@redhat.com chwhite@redhat.com
+redhat/	jwyatt@redhat.com chwhite@redhat.com
+^redhat/configs/	jwyatt@redhat.com chwhite@redhat.com
 
 [RHEL 8.7 Kernel Maintainer]
 makefile	jarod@redhat.com
@@ -59,35 +95,17 @@ Makefile.rhelver	chwhite@redhat.com
 redhat/	chwhite@redhat.com
 ^redhat/configs/	chwhite@redhat.com
 
-[RHEL 8.5 Kernel Maintainer]
-makefile	bmeneg@redhat.com
-Makefile.rhelver	bmeneg@redhat.com
-redhat/	bmeneg@redhat.com
-^redhat/configs/	bmeneg@redhat.com
-
-[RHEL 8.5 Real Time Kernel Maintainer]
-makefile	fpacheco@redhat.com
-Makefile.rhelver	fpacheco@redhat.com
-redhat/	fpacheco@redhat.com
-^redhat/configs/	fpacheco@redhat.com
-
 [RHEL 8.4 Kernel Maintainer]
-makefile	lzampier@redhat.com
-Makefile.rhelver	lzampier@redhat.com
-redhat/	lzampier@redhat.com
-^redhat/configs/	lzampier@redhat.com
+makefile	scweaver@redhat.com
+Makefile.rhelver	scweaver@redhat.com
+redhat/	scweaver@redhat.com
+^redhat/configs/	scweaver@redhat.com
 
 [RHEL 8.4 Real Time Kernel Maintainer]
-makefile	jwyatt@redhat.com
-Makefile.rhelver	jwyatt@redhat.com
-redhat/	jwyatt@redhat.com
-^redhat/configs/	jwyatt@redhat.com
-
-[RHEL 8.3 Kernel Maintainer]
-makefile	fhrbata@redhat.com
-Makefile.rhelver	fhrbata@redhat.com
-redhat/	fhrbata@redhat.com
-^redhat/configs/	fhrbata@redhat.com
+makefile	debarbos@redhat.com
+Makefile.rhelver	debarbos@redhat.com
+redhat/	debarbos@redhat.com
+^redhat/configs/	debarbos@redhat.com
 
 [RHEL 8.2 Kernel Maintainer]
 makefile	jfaracco@redhat.com
@@ -96,27 +114,16 @@ redhat/	jfaracco@redhat.com
 ^redhat/configs/	jfaracco@redhat.com
 
 [RHEL 8.2 Real Time Kernel Maintainer]
-makefile	lgoncalv@redhat.com
-Makefile.rhelver	lgoncalv@redhat.com
-redhat/	lgoncalv@redhat.com
-^redhat/configs/	lgoncalv@redhat.com
+makefile	tyberry@redhat.com
+Makefile.rhelver	tyberry@redhat.com
+redhat/	tyberry@redhat.com
+^redhat/configs/	tyberry@redhat.com
 
 [RHEL 8.1 Kernel Maintainer]
 makefile	scweaver@redhat.com
 Makefile.rhelver	scweaver@redhat.com
 redhat/	scweaver@redhat.com
 ^redhat/configs/	scweaver@redhat.com
-
-[RHEL 8.1 Real Time Kernel Maintainer]
-makefile	jlelli@redhat.com
-Makefile.rhelver	jlelli@redhat.com
-redhat/	jlelli@redhat.com
-^redhat/configs/	jlelli@redhat.com
-
-[RHEL 7 ALT Kernel Maintainer]
-makefile	acaringi@redhat.com
-redhat/	acaringi@redhat.com
-^redhat/configs/	acaringi@redhat.com
 
 [RHEL 7.9 Kernel Maintainer]
 makefile	rvrbovsk@redhat.com
@@ -128,25 +135,10 @@ makefile	swood@redhat.com
 redhat/	swood@redhat.com
 ^redhat/configs/	swood@redhat.com
 
-[RHEL 7.8 Kernel Maintainer]
-makefile	acaringi@redhat.com
-redhat/	acaringi@redhat.com
-^redhat/configs/	acaringi@redhat.com
-
-[RHEL 7.8 Real Time Kernel Maintainer]
-makefile	lgoncalv@redhat.com
-redhat/	lgoncalv@redhat.com
-^redhat/configs/	lgoncalv@redhat.com
-
 [RHEL 7.7 Kernel Maintainer]
 makefile	rvrbovsk@redhat.com
 redhat/	rvrbovsk@redhat.com
 ^redhat/configs/	rvrbovsk@redhat.com
-
-[RHEL 7.7 Real Time Kernel Maintainer]
-makefile	lgoncalv@redhat.com
-redhat/	lgoncalv@redhat.com
-^redhat/configs/	lgoncalv@redhat.com
 
 [RHEL 7.6 Kernel Maintainer]
 makefile	dvlasenk@redhat.com
@@ -158,52 +150,20 @@ makefile	lgoncalv@redhat.com
 redhat/	lgoncalv@redhat.com
 ^redhat/configs/	lgoncalv@redhat.com
 
-[RHEL 7.5 Kernel Maintainer]
-makefile	rvrbovsk@redhat.com
-redhat/	rvrbovsk@redhat.com
-^redhat/configs/	rvrbovsk@redhat.com
-
 [RHEL 7.4 Kernel Maintainer]
-makefile	lzampier@redhat.com
-redhat/	lzampier@redhat.com
-^redhat/configs/	lzampier@redhat.com
-
-[RHEL 7.4 (MRG) Real Time Kernel Maintainer]
-makefile	williams@redhat.com
-redhat/	williams@redhat.com
-^redhat/configs/	williams@redhat.com
+makefile	dvlasenk@redhat.com
+redhat/	dvlasenk@redhat.com
+^redhat/configs/	dvlasenk@redhat.com
 
 [RHEL 7.3 Kernel Maintainer]
 makefile	dvlasenk@redhat.com
 redhat/	dvlasenk@redhat.com
 ^redhat/configs/	dvlasenk@redhat.com
 
-[RHEL 7.2 Kernel Maintainer]
-makefile	rvrbovsk@redhat.com
-redhat/	rvrbovsk@redhat.com
-^redhat/configs/	rvrbovsk@redhat.com
-
 [RHEL 6.10 Kernel Maintainer]
 makefile	dvlasenk@redhat.com
 redhat/	dvlasenk@redhat.com
 ^redhat/configs/	dvlasenk@redhat.com
-
-[RHEL 6.6 Kernel Maintainer]
-redhat/	herton@redhat.com
-^redhat/configs/	herton@redhat.com
-
-[RHEL 6.5 Kernel Maintainer]
-redhat/	ptalbert@redhat.com
-^redhat/configs/	ptalbert@redhat.com
-
-[RHEL 5.11 Kernel Maintainer]
-makefile	rvrbovsk@redhat.com
-redhat/	rvrbovsk@redhat.com
-^redhat/configs/	rvrbovsk@redhat.com
-
-[RHEL 5.9 Kernel Maintainer]
-redhat/	rvrbovsk@redhat.com
-^redhat/configs/	rvrbovsk@redhat.com
 
 ^[3ware 9000 Storage Controller Linux Driver (3w-9xxx)]
 drivers/scsi/3w-9xxx*	thenzl@redhat.com
@@ -212,10 +172,10 @@ drivers/scsi/3w-9xxx*	thenzl@redhat.com
 drivers/net/ethernet/realtek/8139cp.c	ivecera@redhat.com
 
 ^[8169 10/100/1000 GIGABIT ETHERNET DRIVER (r8169)]
-drivers/net/ethernet/realtek/r8169.c	joskera@redhat.com
+drivers/net/ethernet/realtek/r8169*	jtornosm@redhat.com
 
 ^[ACCESSIBILITY SUBSYSTEM]
-drivers/accessibility/	dledford@redhat.com prarit@redhat.com
+drivers/accessibility/	torez@redhat.com dledford@redhat.com prarit@redhat.com
 
 ^[ACPI SUBSYSTEM]
 drivers/acpi/	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com
@@ -224,6 +184,10 @@ include/linux/acpi.h	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com d
 include/acpi/	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com
 arch/x86/kernel/acpi/	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com
 arch/arm64/kernel/acpi*	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com
+
+^[AFS]
+fs/afs/	mdionne@redhat.com
+net/rxrpc/	mdionne@redhat.com
 
 ^[AIO]
 fs/aio.c	jmoyer@redhat.com
@@ -242,17 +206,17 @@ drivers/media/pci/ivtv/ivtv-alsa*	jkysela@redhat.com
 drivers/media/usb/tm6000/tm6000-alsa.c	jkysela@redhat.com
 
 ^[AMAZON ETHERNET DRIVERS]
-Documentation/networking/ena.txt	poros@redhat.com
-Documentation/networking/device_drivers/ethernet/amazon/ena.rst	poros@redhat.com
-drivers/net/ethernet/amazon/	poros@redhat.com
+Documentation/networking/ena.txt	joskera@redhat.com
+Documentation/networking/device_drivers/ethernet/amazon/ena.rst	joskera@redhat.com
+drivers/net/ethernet/amazon/	joskera@redhat.com
 
 ^[AMAZON RDMA EFA DRIVER (efa)]
 drivers/infiniband/hw/efa/	kheib@redhat.com
 include/uapi/rdma/efa-abi.h	kheib@redhat.com
 
-^[AMD IOMMU (AMD-VI)]
-drivers/iommu/amd_iommu*.[ch]	jsnitsel@redhat.com myron.stowe@redhat.com alex.williamson@redhat.com ddutile@redhat.com
-include/linux/amd-iommu.h	jsnitsel@redhat.com myron.stowe@redhat.com alex.williamson@redhat.com ddutile@redhat.com
+[AMD IOMMU (AMD-VI)]
+drivers/iommu/amd/	jsnitsel@redhat.com
+include/linux/amd-iommu.h	jsnitsel@redhat.com
 
 ^[AMD PTDMA DRIVER]
 drivers/dma/ptdma	linville@redhat.com mstowe@redhat.com
@@ -288,13 +252,49 @@ arch/arm*/include/asm/perf_event.h	msalter@redhat.com mlangsdo@redhat.com jlinto
 drivers/perf/	msalter@redhat.com mlangsdo@redhat.com jlinton@redhat.com
 include/linux/perf/arm_pmu.h	msalter@redhat.com mlangsdo@redhat.com jlinton@redhat.com
 
-^[ARM SMMU DRIVERS]
-drivers/iommu/arm-smmu.c	jsnitsel@redhat.com msalter@redhat.com mlangsdo@redhat.com jlinton@redhat.com
-drivers/iommu/arm-smmu-v3.c	jsnitsel@redhat.com msalter@redhat.com mlangsdo@redhat.com jlinton@redhat.com
-drivers/iommu/io-pgtable-arm.c	jsnitsel@redhat.com msalter@redhat.com mlangsdo@redhat.com jlinton@redhat.com
+[ARM SMMU DRIVERS]
+drivers/iommu/arm/	jsnitsel@redhat.com
+drivers/iommu/io-pgtable-arm.c	jsnitsel@redhat.com
+
+[ARM/QUALCOMM SUPPORT]
+Documentation/devicetree/bindings/*/qcom*	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+Documentation/devicetree/bindings/soc/qcom/	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+arch/arm/boot/dts/qcom-*.dts	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+arch/arm/boot/dts/qcom-*.dtsi	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+arch/arm/mach-qcom/	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+arch/arm64/boot/dts/qcom/	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/*/*/qcom*	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/*/*/qcom/	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/*/pm8???-*	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/*/qcom*	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/*/qcom/	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/bluetooth/btqcomsmd.c	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/clocksource/timer-qcom.c	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/cpuidle/cpuidle-qcom-spm.c	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/extcon/extcon-qcom*	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/i2c/busses/i2c-qcom-geni.c	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/i2c/busses/i2c-qup.c	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/iommu/msm*	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/mfd/ssbi.c	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/mmc/host/mmci_qcom*	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/mmc/host/sdhci-msm.c	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/pci/controller/dwc/pcie-qcom.c	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/phy/qualcomm/	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/power/*/msm*	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/reset/reset-qcom-*	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/ufs/host/ufs-qcom*	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/spi/spi-geni-qcom.c	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/spi/spi-qcom-qspi.c	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/spi/spi-qup.c	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/tty/serial/msm_serial.c	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+drivers/usb/dwc3/dwc3-qcom.c	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+include/dt-bindings/*/qcom*	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+include/linux/*/qcom*	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
+include/linux/soc/qcom/	athierry@redhat.com ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
 
 ^[ARM64 PORT (AARCH64 ARCHITECTURE)]
 arch/arm64/	msalter@redhat.com mlangsdo@redhat.com jlinton@redhat.com
+^arch/arm64/net/	msalter@redhat.com mlangsdo@redhat.com jlinton@redhat.com
 
 ^[ATHEROS ETHERNET DRIVERS]
 drivers/net/ethernet/atheros/	jarod@redhat.com
@@ -303,6 +303,9 @@ drivers/net/ethernet/atheros/	jarod@redhat.com
 include/linux/audit.h	rbriggs@redhat.com
 include/uapi/linux/audit.h	rbriggs@redhat.com
 kernel/audit*	rbriggs@redhat.com
+
+^[AUTOMOTIVE]
+redhat/configs/automotive/	jfaracco@redhat.com scweaver@redhat.com
 
 ^[BE2NET ETHERNET DRIVER (be2net)]
 drivers/net/ethernet/emulex/benet/	poros@redhat.com
@@ -329,6 +332,11 @@ include/linux/filter.h	ykaliuta@redhat.com
 include/trace/events/xdp.h	ykaliuta@redhat.com
 include/uapi/linux/filter.h	ykaliuta@redhat.com
 net/core/filter.c	ykaliuta@redhat.com
+^Documentation/devicetree/bindings/dma/*nbpfaxi*	ykaliuta@redhat.com
+^drivers/dma/*nbpfaxi*	ykaliuta@redhat.com
+^drivers/media/i2c/sony-btf-mpx.c	ykaliuta@redhat.com
+^drivers/staging/fbtft/	ykaliuta@redhat.com
+^include/dt-bindings/dma/*nbpfaxi*	ykaliuta@redhat.com
 ^net/bpfilter/	ykaliuta@redhat.com
 
 ^[BROADCOM B44 10/100 ETHERNET DRIVER]
@@ -382,13 +390,13 @@ drivers/net/ethernet/cavium/thunder/	ihuguet@redhat.com
 drivers/net/ethernet/cavium/common/	ihuguet@redhat.com
 
 ^[CEPH COMMON CODE (LIBCEPH)]
-net/ceph/	idryomov@redhat.com jlayton@redhat.com
-include/linux/ceph/	idryomov@redhat.com jlayton@redhat.com
-include/linux/crush/	idryomov@redhat.com jlayton@redhat.com
+net/ceph/	idryomov@redhat.com xiubli@redhat.com
+include/linux/ceph/	idryomov@redhat.com xiubli@redhat.com
+include/linux/crush/	idryomov@redhat.com xiubli@redhat.com
 
 ^[CEPH DISTRIBUTED FILE SYSTEM CLIENT (CEPH)]
-Documentation/filesystems/ceph.txt	jlayton@redhat.com
-fs/ceph/	jlayton@redhat.com
+Documentation/filesystems/ceph.txt	xiubli@redhat.com
+fs/ceph/	xiubli@redhat.com
 
 ^[CHAR and MISC DRIVERS]
 drivers/char/	dledford@redhat.com prarit@redhat.com
@@ -412,18 +420,17 @@ include/linux/clk/	msalter@redhat.com
 include/linux/of_clk.h	msalter@redhat.com
 
 ^[COMPUTE EXPRESS LINK (CXL)]
-drivers/cxl/	mstowe@redhat.com arozansk@redhat.com linville@redhat.com
-include/uapi/linux/cxl_mem.h	mstowe@redhat.com arozansk@redhat.com linville@redhat.com
-Documentation/ABI/testing/sysfs-bus-cxl	mstowe@redhat.com arozansk@redhat.com linville@redhat.com
-Documentation/driver-api/cxl/memory-devices.rst	mstowe@redhat.com arozansk@redhat.com linville@redhat.com
+drivers/cxl/	mstowe@redhat.com linville@redhat.com
+include/uapi/linux/cxl_mem.h	mstowe@redhat.com linville@redhat.com
+Documentation/ABI/testing/sysfs-bus-cxl	mstowe@redhat.com linville@redhat.com
+Documentation/driver-api/cxl/memory-devices.rst	mstowe@redhat.com linville@redhat.com
 
 ^[CONFIGFS]
 fs/configfs/	rpeterso@redhat.com
 include/linux/configfs.h	rpeterso@redhat.com
 
 [Continuous Integration (CKI)]
-.gitlab-ci.yml	vkabatov@redhat.com mhofmann@redhat.com imalerba@redhat.com
-.gitlab-ci-private.yml	vkabatov@redhat.com mhofmann@redhat.com imalerba@redhat.com
+.gitlab-ci.yml	vkabatov@redhat.com mhofmann@redhat.com sturivny@redhat.com
 
 ^[CONTROL GROUP (CGROUP)]
 Documentation/cgroup*	longman@redhat.com
@@ -440,7 +447,11 @@ include/linux/counter_enum.h	dledford@redhat.com prarit@redhat.com
 
 [CPU FREQUENCY DRIVERS]
 drivers/cpufreq/	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com
-arch/x86/kernel/cpu/cpufreq/	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com
+^drivers/cpufreq/intel_pstate.c	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com
+^drivers/cpufreq/amd-pstate-trace.h	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com
+^drivers/cpufreq/amd_freq_sensitivity.c	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com
+^drivers/cpufreq/amd-pstate.c	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com
+^drivers/cpufreq/amd-pstate-trace.c	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com
 
 [CPU IDLE DRIVERS]
 drivers/cpuidle/	mlangsdo@redhat.com prarit@redhat.com darcari@redhat.com
@@ -505,9 +516,12 @@ include/linux/dma-buf*	lyude@redhat.com
 ^[DMA DRIVERS]
 drivers/dma/	jsnitsel@redhat.com darcari@redhat.com
 
-^[DMA SUPPORT]
-kernel/dma/	jsnitsel@redhat.com ddutile@redhat.com
-include/linux/dma*	jsnitsel@redhat.com ddutile@redhat.com
+[DMA SUPPORT]
+kernel/dma/	jsnitsel@redhat.com
+include/asm-generic/dma-mapping.h	jsnitsel@redhat.com
+include/linux/dma-mapping.h	jsnitsel@redhat.com
+include/linux/dma-map-ops.h	jsnitsel@redhat.com
+include/linux/dma-direct.h	jsnitsel@redhat.com
 
 ^[DRIVER CODE]
 drivers/base/	mlangsdo@redhat.com
@@ -611,6 +625,7 @@ include/asm-generic/futex.h	longman@redhat.com
 include/linux/futex.h	longman@redhat.com
 include/uapi/linux/futex.h	longman@redhat.com
 kernel/futex.c	longman@redhat.com
+kernel/futex/	longman@redhat.com
 tools/perf/bench/futex*	longman@redhat.com
 tools/testing/selftests/futex/	longman@redhat.com
 
@@ -623,6 +638,10 @@ include/linux/phy/	poros@redhat.com
 Documentation/filesystems/gfs2*.txt	rpeterso@redhat.com agruenba@redhat.com
 fs/gfs2/	rpeterso@redhat.com agruenba@redhat.com
 include/uapi/linux/gfs2_ondisk.h	rpeterso@redhat.com agruenba@redhat.com
+
+^[GNSS SUBSYSTEM]
+drivers/gnss/	mschmidt@redhat.com
+include/linux/gnss.h	mschmidt@redhat.com
 
 ^[GPIO SUBSYSTEM]
 Documentation/ABI/obsolete/sysfs-gpio	bmasney@redhat.com darcari@redhat.com
@@ -637,6 +656,10 @@ include/linux/gpio/	bmasney@redhat.com darcari@redhat.com
 include/linux/of_gpio.h	bmasney@redhat.com darcari@redhat.com
 include/uapi/linux/gpio.h	bmasney@redhat.com darcari@redhat.com
 tools/gpio/	bmasney@redhat.com darcari@redhat.com
+
+[GPU DRIVERS]
+drivers/gpu/	airlied@redhat.com ajax@redhat.com lyude@redhat.com
+drivers/video/	airlied@redhat.com ajax@redhat.com lyude@redhat.com
 
 ^[HARDWARE SPINLOCK CORE]
 drivers/hwspinlock/	dledford@redhat.com prarit@redhat.com
@@ -720,7 +743,7 @@ include/uapi/linux/input-event-codes.h	tcamuso@redhat.com benjamin.tissoires@red
 include/uapi/linux/input.h	tcamuso@redhat.com benjamin.tissoires@redhat.com
 
 ^[INTEGRITY SUBSYSTEM]
-security/integrity/	bmeneg@redhat.com
+security/integrity/	coxu@redhat.com
 
 ^[INTEL E1000 ETHERNET DRIVER (e1000)]
 drivers/net/ethernet/intel/e1000/	jkc@redhat.com
@@ -729,18 +752,18 @@ drivers/net/ethernet/intel/e1000/	jkc@redhat.com
 drivers/net/ethernet/intel/e1000e/	jkc@redhat.com
 
 ^[INTEL ETHERNET CONNECTION E800 SERIES (ice)]
-drivers/net/ethernet/intel/ice/	jtoppins@redhat.com
-include/net/intel/	jtoppins@redhat.com
+drivers/net/ethernet/intel/ice/	poros@redhat.com
 
 ^[INTEL I40E ETHERNET DRIVERS (i40e)]
-drivers/net/ethernet/intel/i40e/	sassmann@redhat.com
+drivers/net/ethernet/intel/i40e/	ivecera@redhat.com
 
 ^[INTEL I40IW IWARP DRIVER (i40iw)]
 drivers/infiniband/hw/i40iw/	sassmann@redhat.com
 include/uapi/rdma/i40iw-abi.h	sassmann@redhat.com
 
 ^[INTEL IAVF ETHERNET DRIVERS (iavf)]
-drivers/net/ethernet/intel/iavf/	sassmann@redhat.com
+drivers/net/ethernet/intel/iavf/	poros@redhat.com ivecera@redhat.com
+include/linux/avf/	poros@redhat.com ivecera@redhat.com
 
 ^[INTEL IGB ETHERNET DRIVERS (igb)]
 drivers/net/ethernet/intel/igb/	vinschen@redhat.com
@@ -751,9 +774,10 @@ drivers/net/ethernet/intel/igbvf/	vinschen@redhat.com
 ^[INTEL IGC ETHERNET DRIVERS (igc)]
 drivers/net/ethernet/intel/igc/	vinschen@redhat.com
 
-^[INTEL IOMMU (VT-d)]
-drivers/iommu/intel_iommu.c	jsnitsel@redhat.com myron.stowe@redhat.com alex.williamson@redhat.com ddutile@redhat.com
-include/linux/intel-iommu.h	jsnitsel@redhat.com myron.stowe@redhat.com alex.williamson@redhat.com ddutile@redhat.com
+[INTEL IOMMU (VT-d)]
+drivers/iommu/intel/	jsnitsel@redhat.com
+include/linux/intel-iommu.h	jsnitsel@redhat.com
+include/linux/intel-svm.h	jsnitsel@redhat.com
 
 ^[INTEL IXGBE ETHERNET DRIVER (ixgbe)]
 drivers/net/ethernet/intel/ixgbe/	jkc@redhat.com
@@ -761,8 +785,8 @@ drivers/net/ethernet/intel/ixgbe/	jkc@redhat.com
 ^[INTEL IXGBEVF ETHERNET DRIVER (ixgbevf)]
 drivers/net/ethernet/intel/ixgbevf/	jkc@redhat.com
 
-^[INTEL POWERCLAMP DRIVER]
-drivers/thermal/intel_powerclamp.c	
+[INTEL POWERCLAMP DRIVER]
+drivers/thermal/intel_powerclamp.c	prarit@redhat.com darcari@redhat.com
 
 ^[INTEL QUADRATURE ENCODER PERIPHERAL DRIVER]
 drivers/counter/intel-qep.c	prarit@redhat.com darcari@redhat.com
@@ -770,8 +794,8 @@ drivers/counter/intel-qep.c	prarit@redhat.com darcari@redhat.com
 ^[INTEL QUICK ASSIST TECHNOLOGY (QAT)]
 drivers/crypto/qat/	vdronov@redhat.com tcamuso@redhat.com
 
-^[INTEL RAPL DRIVER]
-drivers/powercap/intel_rapl.c	
+[INTEL RAPL DRIVER]
+drivers/powercap/intel_rapl.c	prarit@redhat.com darcari@redhat.com
 
 ^[INTERPROCESS COMMUNICATION (IPC)]
 include/linux/ipc*.h	arozansk@redhat.com aquini@redhat.com longman@redhat.com
@@ -787,8 +811,15 @@ include/linux/irqchip.h	msalter@redhat.com
 ^drivers/irqchip/irq-gic*	msalter@redhat.com
 ^include/linux/irqchip/arm-gic*	msalter@redhat.com
 
-^[IOMMU DRIVERS]
-drivers/iommu/	jsnitsel@redhat.com myron.stowe@redhat.com alex.williamson@redhat.com ddutile@redhat.com
+[IOMMU DRIVERS]
+drivers/iommu/	jsnitsel@redhat.com
+include/linux/iommu*h	jsnitsel@redhat.com
+include/linux/ioasid.h	jsnitsel@redhat.com
+include/linux/iova.h	jsnitsel@redhat.com
+include/linux/io-pgtable.h	jsnitsel@redhat.com
+include/linux/dma-iommu.h	jsnitsel@redhat.com
+include/linux/of_iommu.h	jsnitsel@redhat.com
+include/uapi/linux/iommu.h	jsnitsel@redhat.com
 
 ^[IPMI SUBSYSTEM]
 drivers/char/ipmi/	tcamuso@redhat.com
@@ -806,24 +837,23 @@ kernel/irq/	prarit@redhat.com darcari@redhat.com msalter@redhat.com
 drivers/scsi/*iscsi*	cleech@redhat.com
 include/scsi/*iscsi*	cleech@redhat.com
 
-^[ISMT SMBUS DRIVER]
-drivers/i2c/busses/i2c-ismt.c	tcamuso@redhat.com
-
 ^[JOURNALLING LAYER FOR BLOCK DEVICES (JBD2)]
 fs/jbd2/	lczerner@redhat.com
 include/linux/jbd2.h	lczerner@redhat.com
 
 ^[KASLR]
-arch/x86/boot/compressed/kaslr.c	bhe@redhat.com
-arch/x86/mm/kaslr.c	bhe@redhat.com
+arch/x86/boot/compressed/kaslr.c	jdenham@redhat.com
+arch/x86/mm/kaslr.c	jdenham@redhat.com
 
 ^[KERNEL INIT (and related code)]
 kernel/*.[ch]	prarit@redhat.com
 ^kernel/audit*	prarit@redhat.com
+^kernel/bpf/	prarit@redhat.com
 ^kernel/crash_*.c	prarit@redhat.com
 ^kernel/futex.c	prarit@redhat.com
 ^kernel/kexec*	prarit@redhat.com
 ^kernel/rcu/	prarit@redhat.com
+^kernel/trace/	prarit@redhat.com
 
 ^[KERNEL VIRTUAL MACHINE (KVM)]
 Documentation/virt/kvm/	pbonzini@redhat.com bsd@redhat.com vkuznets@redhat.com
@@ -843,11 +873,14 @@ arch/x86/include/uapi/asm/svm.h	pbonzini@redhat.com bsd@redhat.com vkuznets@redh
 arch/x86/kvm/svm.c	pbonzini@redhat.com bsd@redhat.com vkuznets@redhat.com wehuang@redhat.com
 
 ^[KERNEL VIRTUAL MACHINE FOR ARM64 (KVM/arm64)]
-arch/arm64/include/uapi/asm/kvm*	drjones@redhat.com eric.auger@redhat.com gshan@redhat.com
-arch/arm64/include/asm/kvm*	drjones@redhat.com eric.auger@redhat.com gshan@redhat.com
-arch/arm64/kvm/	drjones@redhat.com eric.auger@redhat.com gshan@redhat.com
-virt/kvm/arm/	drjones@redhat.com eric.auger@redhat.com gshan@redhat.com
-include/kvm/arm_*	drjones@redhat.com eric.auger@redhat.com gshan@redhat.com
+arch/arm64/include/uapi/asm/kvm*	eric.auger@redhat.com gshan@redhat.com cohuck@redhat.com
+arch/arm64/include/asm/kvm*	eric.auger@redhat.com gshan@redhat.com cohuck@redhat.com
+arch/arm64/include/asm/el2_setup.h	eric.auger@redhat.com gshan@redhat.com cohuck@redhat.com
+arch/arm64/include/asm/stage2_pgtable.h	eric.auger@redhat.com gshan@redhat.com cohuck@redhat.com
+arch/arm64/include/asm/virt.h	eric.auger@redhat.com gshan@redhat.com cohuck@redhat.com
+arch/arm64/kvm/	eric.auger@redhat.com gshan@redhat.com cohuck@redhat.com
+include/kvm/arm_*	eric.auger@redhat.com gshan@redhat.com cohuck@redhat.com
+Documentation/virt/kvm/arm/	eric.auger@redhat.com gshan@redhat.com cohuck@redhat.com
 
 ^[KERNEL VIRTUAL MACHINE FOR POWERPC (KVM/powerpc)]
 arch/powerpc/include/uapi/asm/kvm*	dgibson@redhat.com lvivier@redhat.com gkurz@redhat.com
@@ -872,7 +905,7 @@ arch/x86/include/asm/vmx*.h	pbonzini@redhat.com bsd@redhat.com vkuznets@redhat.c
 arch/x86/kernel/kvm.c	pbonzini@redhat.com bsd@redhat.com vkuznets@redhat.com
 arch/x86/kernel/kvmclock.c	pbonzini@redhat.com bsd@redhat.com vkuznets@redhat.com
 
-^[KEXEC/KDUMP]
+[KEXEC/KDUMP]
 Documentation/admin-guide/kdump/	bhe@redhat.com
 include/linux/crash_core.h	bhe@redhat.com
 include/linux/crash_dump.h	bhe@redhat.com
@@ -885,13 +918,16 @@ kernel/kexec*	bhe@redhat.com
 arch/x86/kernel/machine_kexec_*.c	bhe@redhat.com
 arch/x86/kernel/crash*.c	bhe@redhat.com
 arch/x86/kernel/kexec-bzimage64.c	bhe@redhat.com
+arch/arm64/kernel/machine_kexec_*.c	bhe@redhat.com
+arch/arm64/kernel/crash*.c	bhe@redhat.com
+arch/arm64/kernel/kexec-image.c	bhe@redhat.com
 
 ^[LEDS DRIVERS]
 drivers/leds/	tcamuso@redhat.com
 
 ^[LIB]
-lib/	prarit@redhat.com
-^lib/nlattr.c	prarit@redhat.com
+lib/	prarit@redhat.com wander@redhat.com
+^lib/nlattr.c	prarit@redhat.com wander@redhat.com
 
 ^[LIVE PATCHING / KPATCH]
 Documentation/ABI/testing/sysfs-kernel-livepatch	jpoimboe@redhat.com joe.lawrence@redhat.com asavkov@redhat.com ycote@redhat.com
@@ -940,13 +976,13 @@ arch/x86/kernel/cpu/mcheck/	prarit@redhat.com
 drivers/mailbox/	ahs3@redhat.com
 
 ^[MEDIA INPUT INFRASTRUCTURE (V4L/DVB)]
-drivers/media/	jarod@redhat.com
-include/media/	jarod@redhat.com
-include/uapi/linux/dvb/	jarod@redhat.com
-include/uapi/linux/videodev2.h	jarod@redhat.com
-include/uapi/linux/media.h	jarod@redhat.com
-include/uapi/linux/v4l2-*	jarod@redhat.com
-include/uapi/linux/ivtv*	jarod@redhat.com
+drivers/media/	dnelson@redhat.com
+include/media/	dnelson@redhat.com
+include/uapi/linux/dvb/	dnelson@redhat.com
+include/uapi/linux/videodev2.h	dnelson@redhat.com
+include/uapi/linux/media.h	dnelson@redhat.com
+include/uapi/linux/v4l2-*	dnelson@redhat.com
+include/uapi/linux/ivtv*	dnelson@redhat.com
 
 ^[MELLANOX ETHERNET SWITCH DRIVERS]
 drivers/net/ethernet/mellanox/mlxsw/	ivecera@redhat.com
@@ -985,10 +1021,12 @@ include/linux/swap*.h	aquini@redhat.com
 include/linux/vmalloc.h	aquini@redhat.com
 include/linux/vmpressure.h	aquini@redhat.com
 include/linux/vmstat.h	aquini@redhat.com
+include/linux/zbud.h	aquini@redhat.com
 mm/	aquini@redhat.com
+^include/linux/memstick.h	aquini@redhat.com
 
 ^[MFD DRIVERS (Multi Function Devices)]
-drivers/mfd/	torez@redhat.com darcari@redhat.com tcamuso@redhat.com
+drivers/mfd/	msalter@redhat.com prarit@redhat.com
 
 ^[MICRON PCIe SSD DRIVER (mtip32xx)]
 drivers/block/mtip32xx/mtip32xx.c	gtiwari@redhat.com
@@ -1003,20 +1041,21 @@ include/uapi/linux/cciss*.h	dbrace@redhat.com thenzl@redhat.com
 Documentation/scsi/smartpqi.txt	dbrace@redhat.com thenzl@redhat.com
 
 ^[MLX4 ETHERNET DRIVER (mlx4)]
-drivers/net/ethernet/mellanox/mlx4/	ahleihel@redhat.com kheib@redhat.com
+drivers/net/ethernet/mellanox/mlx4/	atzin@redhat.com mkabat@redhat.com kheib@redhat.com
 
 ^[MLX4 IB DRIVER (mlx4_ib)]
-drivers/infiniband/hw/mlx4/	ahleihel@redhat.com kheib@redhat.com
-include/linux/mlx4/	ahleihel@redhat.com kheib@redhat.com
-include/uapi/rdma/mlx4-abi.h	ahleihel@redhat.com kheib@redhat.com
+drivers/infiniband/hw/mlx4/	atzin@redhat.com mkabat@redhat.com kheib@redhat.com
+include/linux/mlx4/	atzin@redhat.com mkabat@redhat.com kheib@redhat.com
+include/uapi/rdma/mlx4-abi.h	atzin@redhat.com mkabat@redhat.com kheib@redhat.com
 
 ^[MLX5 ETHERNET DRIVER (mlx5)]
-drivers/net/ethernet/mellanox/mlx5/	ahleihel@redhat.com kheib@redhat.com
+Documentation/networking/device_drivers/ethernet/mellanox/mlx5.rst	atzin@redhat.com mkabat@redhat.com kheib@redhat.com
+drivers/net/ethernet/mellanox/mlx5/	atzin@redhat.com mkabat@redhat.com kheib@redhat.com
 
 ^[MLX5 IB DRIVER (mlx5_ib)]
-drivers/infiniband/hw/mlx5/	ahleihel@redhat.com kheib@redhat.com
-include/linux/mlx5/	ahleihel@redhat.com kheib@redhat.com
-include/uapi/rdma/mlx5-abi.h	ahleihel@redhat.com kheib@redhat.com
+drivers/infiniband/hw/mlx5/	atzin@redhat.com mkabat@redhat.com kheib@redhat.com
+include/linux/mlx5/	atzin@redhat.com mkabat@redhat.com kheib@redhat.com
+include/uapi/rdma/mlx5-abi.h	atzin@redhat.com mkabat@redhat.com kheib@redhat.com
 
 ^[MMC LAYER]
 Documentation/mmc/	gtiwari@redhat.com
@@ -1052,7 +1091,7 @@ include/net/netns/nftables.h	fwestpha@redhat.com
 include/net/netns/x_tables.h	fwestpha@redhat.com
 
 ^[NETWORK LOCK MANAGER (lockd)]
-fs/lockd/	bcodding@redhat.com bfields@redhat.com steved@redhat.com smayhew@redhat.com
+fs/lockd/	bcodding@redhat.com jlayton@redhat.com steved@redhat.com smayhew@redhat.com
 
 ^[NETWORKING [DSA]]
 Documentation/devicetree/bindings/net/dsa/	ivecera@redhat.com
@@ -1065,6 +1104,7 @@ net/dsa/	ivecera@redhat.com
 
 [NETWORKING [GENERAL]]
 net/	jbenc@redhat.com mleitner@redhat.com
+Documentation/admin-guide/sysctl/net.rst	jbenc@redhat.com mleitner@redhat.com
 Documentation/networking/	jbenc@redhat.com mleitner@redhat.com
 drivers/net/Space.c	jbenc@redhat.com mleitner@redhat.com
 drivers/net/bareudp.c	jbenc@redhat.com mleitner@redhat.com
@@ -1144,20 +1184,26 @@ tools/testing/selftests/wireguard/	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/rds*	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/regulatory*	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/rxrpc*	jbenc@redhat.com mleitner@redhat.com
+^include/linux/netfs.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/*80211*	jbenc@redhat.com mleitner@redhat.com
 ^include/net/*80215*	jbenc@redhat.com mleitner@redhat.com
 ^include/net/af_vsock.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/bluetooth/	jbenc@redhat.com mleitner@redhat.com
+^include/net/calipso.h	jbenc@redhat.com mleitner@redhat.com
+^include/net/cipso_ipv4.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/intel/	jbenc@redhat.com mleitner@redhat.com
 ^include/net/irda/	jbenc@redhat.com mleitner@redhat.com
 ^include/net/iucv/	jbenc@redhat.com mleitner@redhat.com
 ^include/net/iw*	jbenc@redhat.com mleitner@redhat.com
+^include/net/netlabel.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/regulatory.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/vsock_addr.h	jbenc@redhat.com mleitner@redhat.com
 ^net/bluetooth/	jbenc@redhat.com mleitner@redhat.com
 ^net/can/	jbenc@redhat.com mleitner@redhat.com
 ^net/ceph/	jbenc@redhat.com mleitner@redhat.com
 ^net/ieee802154/	jbenc@redhat.com mleitner@redhat.com
+^net/ipv4/cipso_ipv4.c	jbenc@redhat.com mleitner@redhat.com
+^net/ipv6/calipso.c	jbenc@redhat.com mleitner@redhat.com
 ^net/irda/	jbenc@redhat.com mleitner@redhat.com
 ^net/iucv/	jbenc@redhat.com mleitner@redhat.com
 ^net/mac80211/	jbenc@redhat.com mleitner@redhat.com
@@ -1195,17 +1241,24 @@ drivers/net/team/	haliu@redhat.com lxin@redhat.com
 include/linux/if_team.h	haliu@redhat.com lxin@redhat.com
 include/uapi/linux/if_team.h	haliu@redhat.com lxin@redhat.com
 
+^[NETWORKING [TUNTAP]]
+drivers/net/tap.c	jasowang@redhat.com
+drivers/net/tun.c	jasowang@redhat.com
+include/linux/if_tap.h	jasowang@redhat.com
+include/linux/if_tun.h	jasowang@redhat.com
+include/uapi/linux/if_tun.h	jasowang@redhat.com
+
 ^[NETXEN (1/10) GbE SUPPORT]
 drivers/net/ethernet/qlogic/netxen/	mchopra@redhat.com tcamuso@redhat.com
 
 ^[NFS FILE SYSTEM (nfs)]
-fs/nfs/	bcodding@redhat.com bfields@redhat.com steved@redhat.com smayhew@redhat.com
+fs/nfs/	bcodding@redhat.com jlayton@redhat.com steved@redhat.com smayhew@redhat.com
 
 ^[NFS SERVER (nfsd)]
-fs/nfsd/	bcodding@redhat.com bfields@redhat.com steved@redhat.com smayhew@redhat.com
+fs/nfsd/	bcodding@redhat.com jlayton@redhat.com steved@redhat.com smayhew@redhat.com
 
 ^[NIC DRIVERS AND RDMA]
-drivers/net/ethernet	
+drivers/net/ethernet/	
 drivers/infiniband/	
 include/rdma/	
 include/uapi/rdma/	
@@ -1215,7 +1268,7 @@ include/linux/mlx4/
 include/linux/mlx5/	
 Documentation/networking/mac80211*	
 Documentation/networking/regulatory*	
-drivers/net/wireless	
+drivers/net/wireless/	
 net/mac80211/	
 net/wireless/	
 net/rfkill/	
@@ -1225,7 +1278,7 @@ include/net/iw*
 include/net/regulatory.h	
 include/uapi/linux/nl80211.h	
 include/uapi/linux/wireless.h	
-drivers/net/bonding	
+drivers/net/bonding/	
 include/linux/if_bonding.h	
 Documentation/networking/phy.rst	
 drivers/net/phy/	
@@ -1241,7 +1294,7 @@ include/uapi/linux/mii.h
 include/net/intel/	
 Documentation/devicetree/bindings/net/dsa/	
 Documentation/networking/dsa/	
-drivers/net/dsa	
+drivers/net/dsa/	
 include/linux/dsa/	
 include/linux/platform_data/dsa.h	
 include/net/dsa.h	
@@ -1321,6 +1374,7 @@ drivers/pci/hotplug/	prarit@redhat.com myron.stowe@redhat.com
 
 ^[PCI SUBSYSTEM]
 drivers/pci/	myron.stowe@redhat.com prarit@redhat.com
+include/linux/pci*	myron.stowe@redhat.com prarit@redhat.com
 
 ^[PCI-E NON-TRANSPARENT BRIDGE]
 drivers/pci/	linville@redhat.com myron.stowe@redhat.com
@@ -1373,7 +1427,8 @@ include/linux/psci.h	msalter@redhat.com mlangsdo@redhat.com jlinton@redhat.com
 include/uapi/linux/psci.h	msalter@redhat.com mlangsdo@redhat.com jlinton@redhat.com
 
 ^[POWERPC (64-BIT)]
-arch/powerpc/	
+arch/powerpc/	sbest@redhat.com
+^arch/powerpc/net/	sbest@redhat.com
 
 ^[PPS SUPPORT]
 drivers/pps/	dledford@redhat.com prarit@redhat.com
@@ -1389,6 +1444,16 @@ include/linux/ptp_cl*	jbenc@redhat.com prarit@redhat.com
 
 ^[PTP KVM]
 drivers/ptp/ptp_kvm.c	mtosatti@redhat.com
+
+^[PTRACE]
+arch/*/*/ptrace*.c	onestero@redhat.com agladkov@redhat.com
+arch/*/include/asm/ptrace*.h	onestero@redhat.com agladkov@redhat.com
+arch/*/ptrace*.c	onestero@redhat.com agladkov@redhat.com
+include/asm-generic/syscall.h	onestero@redhat.com agladkov@redhat.com
+include/linux/ptrace.h	onestero@redhat.com agladkov@redhat.com
+include/linux/regset.h	onestero@redhat.com agladkov@redhat.com
+include/uapi/linux/ptrace.h	onestero@redhat.com agladkov@redhat.com
+kernel/ptrace.c	onestero@redhat.com agladkov@redhat.com
 
 ^[PULSE-WIDTH MODULATION SUPPORT (PWM)]
 drivers/pwm/	dledford@redhat.com prarit@redhat.com
@@ -1451,10 +1516,6 @@ tools/testing/selftests/rtc/	longman@redhat.com prarit@redhat.com
 
 ^[REMOTE PROCESSOR (REMOTEPROC) SUBSYSTEM]
 drivers/remoteproc/	dledford@redhat.com prarit@redhat.com
-
-^[RFKILL]
-Documentation/rfkill.txt	linville@redhat.com
-net/rfkill/	linville@redhat.com
 
 ^[ROCKER DRIVER]
 drivers/net/ethernet/rocker/	ivecera@redhat.com
@@ -1548,13 +1609,10 @@ include/uapi/linux/raid/	ncroxon@redhat.com
 
 ^[SONY MEMORYSTICK SUBSYSTEM]
 drivers/memstick/	dledford@redhat.com prarit@redhat.com
+include/linux/memstick.h	dledford@redhat.com prarit@redhat.com
 
 ^[SOUNDWIRE SUBSYSTEM]
 drivers/soundwire/	dledford@redhat.com prarit@redhat.com
-
-^[SPEAKUP]
-Documentation/ABI/stable/sysfs-driver-speakup	linville@redhat.com
-drivers/accessibility/speakup/	linville@redhat.com
 
 ^[SPI DRIVERS (Serial Peripheral Interface)]
 drivers/spi/	ahs3@redhat.com
@@ -1563,8 +1621,12 @@ drivers/spi/	ahs3@redhat.com
 Documentation/filesystems/squashfs.txt	adas@redhat.com
 fs/squashfs/	adas@redhat.com
 
+^[STMICRO ETHERNET DRIVER]
+drivers/net/ethernet/stmicro/	vinschen@redhat.com
+include/linux/stmmac.h	vinschen@redhat.com
+
 ^[SUN REMOTE PROCEDURE CALL (sunrpc)]
-net/sunrpc/	bcodding@redhat.com bfields@redhat.com steved@redhat.com smayhew@redhat.com
+net/sunrpc/	bcodding@redhat.com jlayton@redhat.com steved@redhat.com smayhew@redhat.com
 
 ^[SUSPEND/RESUME]
 
@@ -1611,8 +1673,11 @@ include/uapi/linux/tipc_config.h	jmaloy@redhat.com lxin@redhat.com
 include/uapi/linux/tipc_socket_diag.h	jmaloy@redhat.com lxin@redhat.com
 
 ^[TRUSTED PLATFORM MODULE (TPM)]
-drivers/char/tpm/	shoracek@redhat.com jsnitsel@redhat.com
-include/linux/tpm.h	shoracek@redhat.com jsnitsel@redhat.com
+drivers/char/tpm/	shoracek@redhat.com
+include/linux/tpm.h	shoracek@redhat.com
+drivers/firmware/efi/tpm.c	shoracek@redhat.com
+drivers/firmware/efi/libstub/tpm.c	shoracek@redhat.com
+tools/testing/selftests/tpm2/	shoracek@redhat.com
 
 ^[TTY LAYER]
 drivers/tty/	linville@redhat.com
@@ -1628,6 +1693,9 @@ include/uapi/linux/tty.h	linville@redhat.com
 arch/x86/kernel/efi*	lszubowi@redhat.com ahs3@redhat.com myron.stowe@redhat.com prarit@redhat.com
 include/linux/efi.h	lszubowi@redhat.com ahs3@redhat.com myron.stowe@redhat.com prarit@redhat.com
 
+^[USB CDC ETHERNET DRIVER]
+drivers/net/usb/cdc_ether.c	jtornosm@redhat.com
+
 ^[USB SUBSYSTEM]
 drivers/usb/	torez@redhat.com
 
@@ -1639,10 +1707,7 @@ drivers/uio/	arozansk@redhat.com
 ^drivers/uio/uio_hv_generic.c	arozansk@redhat.com
 
 ^[USR DIRECTORY]
-usr/	prarit@redhat.com
-
-^[UVC WEBCAM DRIVER]
-drivers/media/video/uvc/	tcamuso@redhat.com
+usr/	prarit@redhat.com wander@redhat.com
 
 ^[VFIO DRIVER]
 Documentation/vfio.txt	alex.williamson@redhat.com eric.auger@redhat.com
@@ -1655,10 +1720,6 @@ Documentation/vfio-mediated-device.txt	alex.williamson@redhat.com eric.auger@red
 drivers/vfio/mdev/	alex.williamson@redhat.com eric.auger@redhat.com
 include/linux/mdev.h	alex.williamson@redhat.com eric.auger@redhat.com
 samples/vfio-mdev/	alex.williamson@redhat.com eric.auger@redhat.com
-
-[VIDEO DRIVERS]
-drivers/gpu/	airlied@redhat.com ajax@redhat.com lyude@redhat.com
-drivers/video/	airlied@redhat.com ajax@redhat.com lyude@redhat.com
 
 ^[VIRT LIB]
 virt/lib/	alex.williamson@redhat.com pbonzini@redhat.com
@@ -1717,7 +1778,7 @@ drivers/infiniband/hw/vmw_pvrdma/	kheib@redhat.com
 include/uapi/rdma/vmw_pvrdma-abi.h	kheib@redhat.com
 
 ^[VMWARE VMXNET3 ETHERNET DRIVER (vmxnet3)]
-drivers/net/vmxnet3/	cavery@redhat.com
+drivers/net/vmxnet3/	kheib@redhat.com
 
 ^[WATCHDOG]
 Documentation/watchdog/	prarit@redhat.com
@@ -1727,18 +1788,18 @@ include/linux/watchdog.h	prarit@redhat.com
 include/uapi/linux/watchdog.h	prarit@redhat.com
 
 [WIRELESS DRIVERS AND STACK]
-Documentation/networking/mac80211*	ihuguet@redhat.com
-Documentation/networking/regulatory*	ihuguet@redhat.com
-drivers/net/wireless/	ihuguet@redhat.com
-net/mac80211/	ihuguet@redhat.com
-net/wireless/	ihuguet@redhat.com
-net/rfkill/	ihuguet@redhat.com
-include/linux/*80211*	ihuguet@redhat.com
-include/net/*80211*	ihuguet@redhat.com
-include/net/iw*	ihuguet@redhat.com
-include/net/regulatory.h	ihuguet@redhat.com
-include/uapi/linux/nl80211.h	ihuguet@redhat.com
-include/uapi/linux/wireless.h	ihuguet@redhat.com
+Documentation/networking/mac80211*	ihuguet@redhat.com jtornosm@redhat.com
+Documentation/networking/regulatory*	ihuguet@redhat.com jtornosm@redhat.com
+drivers/net/wireless/	ihuguet@redhat.com jtornosm@redhat.com
+net/mac80211/	ihuguet@redhat.com jtornosm@redhat.com
+net/wireless/	ihuguet@redhat.com jtornosm@redhat.com
+net/rfkill/	ihuguet@redhat.com jtornosm@redhat.com
+include/linux/*80211*	ihuguet@redhat.com jtornosm@redhat.com
+include/net/*80211*	ihuguet@redhat.com jtornosm@redhat.com
+include/net/iw*	ihuguet@redhat.com jtornosm@redhat.com
+include/net/regulatory.h	ihuguet@redhat.com jtornosm@redhat.com
+include/uapi/linux/nl80211.h	ihuguet@redhat.com jtornosm@redhat.com
+include/uapi/linux/wireless.h	ihuguet@redhat.com jtornosm@redhat.com
 
 ^[WIRELESS [LR-WPAN] (IEEE 802.15.4)]
 Documentation/networking/ieee802154.rst	crecklin@redhat.com
@@ -1762,15 +1823,27 @@ tools/power/x86/	darcari@redhat.com prarit@redhat.com dnelson@redhat.com
 ^arch/x86/include/uapi/asm/kvm*	darcari@redhat.com prarit@redhat.com dnelson@redhat.com
 ^arch/x86/include/uapi/asm/svm.h	darcari@redhat.com prarit@redhat.com dnelson@redhat.com
 ^arch/x86/include/uapi/asm/vmx.h	darcari@redhat.com prarit@redhat.com dnelson@redhat.com
+^arch/x86/kernel/cpu/cpufreq/	darcari@redhat.com prarit@redhat.com dnelson@redhat.com
 ^arch/x86/kernel/cpu/mshyperv.c	darcari@redhat.com prarit@redhat.com dnelson@redhat.com
 ^arch/x86/kernel/fpu/	darcari@redhat.com prarit@redhat.com dnelson@redhat.com
 ^arch/x86/kernel/kvm.c	darcari@redhat.com prarit@redhat.com dnelson@redhat.com
 ^arch/x86/kernel/kvmclock.c	darcari@redhat.com prarit@redhat.com dnelson@redhat.com
 ^arch/x86/kvm/	darcari@redhat.com prarit@redhat.com dnelson@redhat.com
 ^arch/x86/kvm/svm.c	darcari@redhat.com prarit@redhat.com dnelson@redhat.com
+^arch/x86/mm/	darcari@redhat.com prarit@redhat.com dnelson@redhat.com
 ^arch/x86/net/	darcari@redhat.com prarit@redhat.com dnelson@redhat.com
 
+[X86 CPU POWER MANAGEMENT]
+arch/x86/kernel/cpu/cpufreq/	prarit@redhat.com darcari@redhat.com
+drivers/cpufreq/intel_pstate.c	prarit@redhat.com darcari@redhat.com
+drivers/cpufreq/amd-pstate-trace.h	prarit@redhat.com darcari@redhat.com
+drivers/cpufreq/amd_freq_sensitivity.c	prarit@redhat.com darcari@redhat.com
+drivers/cpufreq/amd-pstate.c	prarit@redhat.com darcari@redhat.com
+drivers/cpufreq/amd-pstate-trace.c	prarit@redhat.com darcari@redhat.com
+drivers/idle/intel_idle.c	prarit@redhat.com darcari@redhat.com
+
 [X86 FPU SUBSYSTEM]
+arch/x86/include/asm/fpu/	dnelson@redhat.com
 arch/x86/kernel/fpu/	dnelson@redhat.com
 
 ^[XDP (eXpress Data Path)]
@@ -1808,13 +1881,6 @@ arch/x86/xen/	vkuznets@redhat.com imammedo@redhat.com drjones@redhat.com
 Documentation/filesystems/xfs.txt	bfoster@redhat.com cmaiolino@redhat.com esandeen@redhat.com bodonnel@redhat.com dchinner@redhat.com
 fs/xfs/	bfoster@redhat.com cmaiolino@redhat.com esandeen@redhat.com bodonnel@redhat.com dchinner@redhat.com
 
-^[ZBUD COMPRESSED PAGE ALLOCATOR]
-mm/zbud.c	
-include/linux/zbud.h	
-
 ^[ZRAM COMPRESSED RAM BLOCK DEVICE DRVIER]
 drivers/block/zram/	jmarchan@redhat.com
 Documentation/ABI/testing/sysfs-block-zram	jmarchan@redhat.com
-
-^[ZSWAP COMPRESSED SWAP CACHING]
-mm/zswap.c	

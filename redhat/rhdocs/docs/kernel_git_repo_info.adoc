@@ -12,7 +12,7 @@ There are many source-git and dist-git repositories that are used to construct R
 
 === source-git repositories
 
-Public git repositories can be used by both Red Hat and non-Red Hat contributors.  Private git repositories are restricted to Red Hat contributors and Partner contributors.
+Public git repositories can be used by Red Hat contributors, Community Contributors, and all Partner Engineer contributors.  Private git repositories are restricted to Red Hat contributors and Partner contributors.
 
 The general model of these repositories is that the main branch tracks the current minor development, and other branches track old minor development (commonly referred to as ‘z-stream’).  Some repositories may also contain Real Time kernel branches that are tagged with “-rt”.
 
@@ -50,7 +50,7 @@ For example, the rhel-8 repository contains branches and the main branch (as of 
 
 === dist-git repositories
 
-Public git repositories can be used by both Red Hat and non-Red Hat contributors.  Private git repositories are restricted to Red Hat contributors and Partner contributors.
+Public git repositories can be used by Red Hat contributors, Community Contributors, and all Partner Engineer contributors.  Private git repositories are restricted to Red Hat contributors and Partner contributors.
 
 |===
 |Name|Location|Type

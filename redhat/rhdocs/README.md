@@ -1,3 +1,9 @@
+**Attention**
+
+Are you looking to read the RHEL kernel documentation? Be sure to view
+the rendered version [here](https://redhat.gitlab.io/centos-stream/src/kernel/documentation/) instead of the gitlab markdown version to avoid
+broken links!
+
 All changes to this file and directories included at this level must be made
 to the [Red Hat kernel documentation project](https://gitlab.com/redhat/centos-stream/src/kernel/documentation)
 Please see the 'Making Changes' section below for detailed information on
@@ -82,8 +88,18 @@ except in the case when the removed engineer is no longer with Red Hat.  While r
 do not require the approve of the maintainer, MR authors are encouraged to add the maintainer for
 an approve.
 
+4.  Any MR adding or modifying a devel-sst field requires the approval from
+the subsystem maintainer.
+
+5. Any MR adding a or modifying a qe-sst field requires the approval from a member of
+the QE SST being added.
+
 MR authors, reviewers, and maintainers should discuss disagreements about ownership or role changes
 with their management.
+
+** validSSTNames.go Changes**
+
+These changes include validSSTNames.go changes.  You must ensure the SST names themselves, and the SST name changes in the file are approved by RHEL management.  Changes to this file that have not been verified by management will be removed by reverting commits.
 
 **Project Layout**
 

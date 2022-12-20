@@ -2,5 +2,6 @@ RHMAINTAINERS_parser
 yaml2RHMAINTAINERS
 yaml2CODEOWNERS
 verifySubsystems
+searchowners
 *.patch
 *.swp

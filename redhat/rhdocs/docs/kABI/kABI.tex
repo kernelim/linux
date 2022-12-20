@@ -1,0 +1,2550 @@
+\documentclass[10pt,oneside,english]{book}
+\usepackage{mathptmx}
+\usepackage{helvet}
+\usepackage{courier}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[letterpaper]{geometry}
+\geometry{verbose,tmargin=1in,bmargin=1in,lmargin=1in,rmargin=1in}
+\setcounter{secnumdepth}{1}
+\setcounter{tocdepth}{1}
+\setlength{\parskip}{\medskipamount}
+\setlength{\parindent}{0pt}
+\usepackage{babel}
+\usepackage{fancybox}
+\usepackage{calc}
+\usepackage{url}
+\usepackage[unicode=true,
+ bookmarks=true,bookmarksnumbered=true,bookmarksopen=true,bookmarksopenlevel=2,
+ breaklinks=true,pdfborder={0 0 1},backref=section,colorlinks=false]
+ {hyperref}
+\hypersetup{pdftitle={A Kernel Developer's Guide to kABI},
+ pdfauthor={Kernel: Platform Enablement Team},
+ pdfkeywords={kernel, kABI}}
+
+\newcommand*{\fullref}[1]{\hyperref[{#1}]{\autoref*{#1} \nameref*{#1}}}
+
+\usepackage{listingsutf8}
+\lstdefinestyle{customc}{
+  language=C,
+  basicstyle=\footnotesize\ttfamily,
+  showstringspaces=false,
+}
+\lstset{style=customc}
+
+\makeatletter
+
+\makeatother
+
+\begin{document}
+
+\title{A Kernel Developer's Guide to kABI}
+
+\author{Kernel: Platform Enablement Team Red Hat, Inc.}
+\maketitle
+
+\newlength{\mpwidth}
+\setlength{\mpwidth}{1\columnwidth - 2\fboxsep - 2\fboxrule - \shadowsize}
+
+\section*{Abstract}
+
+There can be a burden associated with maintaining RHEL's kABI (Kernel
+Application Binary Interface) commitment that persists throughout
+the release's entire lifecycle if subsystem maintainers don't pro-actively
+accommodate for upstream back-ports. RHEL kernel developers need to
+be aware of, and fully comprehend, such restrictions, which is the
+focus of this document.
+
+\textbf{Keywords:} kABI, KABI, KMI, Kernel Application Binary Interface,
+Kernel Module Interface.
+
+\tableofcontents{}
+
+\chapter{Overview}
+
+There are Red Hat partners and customers that want a means to deliver
+and receive updated drivers in a manner that allows continued operation
+across subsequent kernel updates. Out-of-band (OOB) driver modules
+are the most common, which includes updates such as what the Driver
+Update Program (DUP) provides. \footnote{Linux man page: \texttt{kmod(8)}.}
+Driver updates enable ``stop gap'' solutions for situations such
+as supporting new hardware, or new, or maturing, functionality, prior
+to such updates becoming available in a future kernel update.
+
+Extending this concept, a subset of ISV's have said they need the
+ability to build, and ship, their own, ``\emph{third party'' }modules,
+independently of Red Hat Enterprise Linux (RHEL). These module types
+tend not to be open-source, but critical to various partners' proprietary
+solutions -- not drivers per say, but more filesystem, or system
+management, oriented -- and will never go into a RHEL release.
+
+These customer driven use cases necessitate the need for some level
+of binary compatibility with respect to the kernel. To meet these
+needs, Red Hat has publicly stated that it will provide ``kernel
+ABI stability'', more commonly referred to as the ``\emph{kernel
+ABI}'' (\emph{kABI}), along minor updates of a RHEL release but not
+across major releases.
+
+Partners cite Red Hat's kABI commitment as a key differentiator, distinguishing
+it from other distributions.
+
+Most of the effort concerning kABI derives from third party modules.
+The specific type of module -- OOB, or third party -- isn't really
+important. What does matter is whether a module is linked with the
+kernel statically or dynamically. Modules are strongly tied to the
+data structures and function prototypes defined in a particular kernel
+version; the interface seen by a module can change significantly from
+one kernel version to the next.
+
+Statically linked modules -- ``\emph{built-in}'' or ``\emph{internal
+modules}'' -- are incorporated as part of the kernel so most, if
+not all, of the concerns related to whether or not the module is compatible
+with the specific kernel version -- ``\emph{Kernel/module variance}''
+-- don't come into play. Dynamically linked modules -- ``\emph{external
+modules}''; sometimes referred to as \emph{out-of-tree} modules --
+are stored within the filesystem as separate ELF object files. In
+order to run an external module on a kernel the '\texttt{insmod(8)}'
+program is executed which compares the globally exported symbols used
+by the module against the kernel's symbol's versions and accepts,
+or rejects, linking the module to the kernel. Thus, for external modules,
+kernel/module variance concerns are paramount.
+
+kABI's role is to proactively disallow changes related to exported
+symbol's ABI from occurring.
+
+Red Hat's partners wanting a commitment that they will not have to
+rewrite, or recompile, their modules identify the external symbols
+used within them and submit a request to Red Hat for protection. Such
+requests then have to be reviewed, and explicitly agreed to, by Red
+Hat's kernel development team before the symbols are considered protected.
+
+Maintaining kABI protected symbols can cause severe restrictions with
+respect to bringing in new content unless additions are made to the
+kernel to specifically accommodate future back-porting efforts to
+a RHEL release.
+
+\chapter{Technical Details: Linux Kernel - Modules}
+
+\section{Module Versioning}
+
+The enabling of \texttt{CONFIG\_MODVERSIONS} in a Linux kernel's configuration
+enforces compatibility of the Kernel Module Interface (KMI), more
+commonly referred to as ``\emph{module versioning}''. \footnote{./Documentation/kbuild/modules.txt}
+\footnote{Option \texttt{CONFIG\_MODVERSIONS} is enabled in all RHEL configurations.}
+This causes all kernel global symbols exported with the \texttt{EXPORT\_SYMBOL()}
+and \texttt{EXPORT\_SYMBOL\_GPL()} macros to be augmented with 8-hex-digit
+checksums computed from the names of all relevant C tokens that define
+the interface. \footnote{./include/linux/export.h: \texttt{EXPORT\_SYMBOL\{\_GPL\}()}}
+
+The checksumming augmentation -- \emph{genksyms} \emph{symbol} \emph{versioning
+information} -- is calculated by expanding the symbol to its full
+definition where all structures, unions, enums, and typedefs are expanded
+down to their basic parts, recursively. This final string is then
+used as input to a CRC algorithm yielding an integer that will change
+when any constituent part(s) of the symbol's included definitions
+change. \footnote{./Makefile, ./scripts/genksyms/{*}: genksyms symbol versioning is
+dynamically enabled during a kernel build via the \texttt{\_\_GENKSYMS\_\_}
+pre-processing directive. When symbol versioning is needed, \texttt{\_\_GENKSYMS\_\_}
+is defined, and the 'genksyms' script is invoked.
+
+./scripts/Makefile.build: \texttt{\$(CPP) -D\_\_GENKSYMS\_\_ \$(c\_flags)
+\$< \$(GENKSYMS) ...}}
+
+Note that it's not just the globally exported symbol's names themselves
+that are versioned. Encompassed is everything associated with the
+symbol's full prototype: ``\emph{all relevant C tokens that essentially
+define the interface}''.
+
+Whenever there is a change to an exported symbol's return type, name,
+any of its argument's type, or to the type of any field of any structure
+contained in, or pointed to, by any of its arguments, including all
+data structures within data structures (recursively), then its checksum
+changes. When a module attempts loading, each symbol's CRC value contained
+in the kernel's symbol table is compared with the corresponding symbol's
+CRC value in the module's object file, and if they are not equal the
+kernel refuses to load the module. Thus, kernel interface changes
+cause the 'insmod' of previously built modules to fail.
+
+Kernel data structures are of particular interest with respect to
+KMI as they contain multiple members, some of which may be other data
+structures themselves, all of which become recursively included as
+part of the symbol's versioning checksum, making the total scope of
+what must be preserved in order for an existing module to continue
+to load and run, potentially quite large.
+
+As a concrete example, consider the exported symbol '\texttt{pci\_bus\_read\_config\_word()}'
+within the kernel's PCI core that accesses PCI device configuration
+space. As an exported symbol, it's available for external modules
+to call. \footnote{./drivers/pci/access.c: \texttt{pci\_bus\_read\_config\_word()}}
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+int pci_bus_read_config_word(struct pci_bus *bus, unsigned int devfn, int pos, type *value)
+
+EXPORT_SYMBOL(pci_bus_read_config_word)
+
+0x1aa4c8bf pci_bus_read_config_word vmlinux EXPORT_SYMBOL
+\end{lstlisting}
+\end{minipage}}
+
+From its function prototype, the '\texttt{int}' return type, its name,
+and all its arguments, must remain preserved, which is somewhat self-evident.
+Much more subtle, however, is its '\texttt{bus}' argument which is
+a pointer to a '\texttt{struct pci\_bus}'. \footnote{\texttt{\label{fn:c1f6}include/linux/pci.h: struct pci\_bus \{ …
+\}}} If, as the result of an upstream patch series incorporation, the
+type of any member of '\texttt{struct pci\_bus}', including members
+of structures within '\texttt{struct pci\_bus}', were to change --
+including adding to, removing from, or changing the name or ordering
+of any of its members -- then the '\texttt{pci\_bus\_read\_config\_word()}'
+symbol's versioning checksum would correspondingly change.
+
+Module versioning does not, nor does the Linux kernel, provide a \emph{stable
+kernel interface} (a.k.a., a \emph{binary kernel interface}). \footnote{\href{https://www.kernel.org/doc/html/v4.12/process/stable-api-nonsense.html}{https://www.kernel.org/doc/html/v4.12/process/stable-api-nonsense.html}}
+The KMI is solely a module to kernel consistency checking mechanism
+for validating external kernel modules with respect to the kernels
+they are attempting to link (attach) to, and run against.
+
+\chapter{Technical Details: RHEL's kABI}
+
+Throughout successive minor version update cycles of a RHEL release,
+partners and customers request bug fixes, and additional features,
+be applied to the kernel. Fulfilling these requests often requires
+the removal of a function, changes to a function's return type or
+parameters, or changes to kernel data structures (adding, removing,
+and renaming members). These types of changes recurrently alter the
+CRC versioning information of globally exported symbols; negating
+the ability to continue running a previously runnable, external, module
+upon updated kernels.
+
+Like Linux's KMI, RHEL's kABI focuses on exported symbols, utilizing
+the same underlying '\texttt{genksyms}' based symbol versioning information
+in its checking mechanisms. So, while they are inter-related (any
+symbol changes affects both kABI and KMI), KMI is concerned with after-the-fact
+module to kernel compatibility checking, whereas RHEL's kABI is concerned
+with before-the-fact preclusion of kernel to module incompatibilities.
+kABI's role is to maintain a stable kernel interface, specifically
+in order that RHEL's partner's external modules continue to operate
+along minor kernel updates. \footnote{\label{fn:c3f1}Within a specific RHEL major release (the X in X.Y;
+i.e., RHEL 7.5), an external module that was compiled against a specific
+minor (Y) version should continue to operate on all subsequent (Y+;
+i.e., RHEL 7.6, ...), but not necessarily previous (-Y; i.e., ...,
+RHEL 7.4), minor versions.}
+
+RHEL's kernel build related processes have been augmented with a set
+of additional rules and scripts to implement kernel ABI stability.
+RHEL's implementation utilizes the kernel's existing \texttt{\_\_GENKSYMS\_\_}
+directive to dynamically enable, and disable, checking. Additionally,
+with respect to partners, there are user-level enforcement checking
+utilities ('\texttt{ksc(1)}'), all of which act in concert to enact
+Red Hat's kABI commitment. \footnote{kABI policy strictly requires a module is compiled with a toolchain
+(kernel headers, '\texttt{gcc}', '\texttt{glibc}', etc.) from a single
+RHEL OS release. Modules compiled with a mix of toolchain components
+are not supported.}
+
+\section{What is Protected}
+
+RHEL's kABI commitment does not cover all exported symbols but rather
+is limited to, and thus only concerned with, the subset of global
+symbols that partners have requested be preserved, and that Red Hat's
+kernel development engineers have reviewed, and explicitly agreed
+to protect. Such symbols become \emph{white-listed }{[}see: \nameref{chap:kABI-Lists}{]},
+which is one of the components used in implementing RHEL's kABI compliance.
+
+Agreeing to partners' external symbol requests has significant consequences.
+More acutely, as a direct result of partners and customers developing
+and compiling their external modules against a release's inception
+(i.e., X.0), kABI's impacts, and restrictions, begin with its origin,
+and persist throughout its entire lifecycle.
+
+While RHEL's kABI is not limited to kernel data structures -- like
+KMI, it focuses on kernel external symbols and their entire prototype's
+makeup -- they are of particular interest with respect to kABI also.
+Data structures have all the same impacts to kABI as they do to KMI:
+ramifications can be very subtle, often outright hidden, yet potentially
+encompass a very large scope.
+
+Continuing with the example, '\texttt{pci\_bus\_read\_config\_word()}'
+is a kernel exported symbol that is white-listed, thus considered
+protected with respect to kABI.
+
+\texttt{\footnotesize{}0x1aa4c8bf pci\_bus\_read\_config\_word vmlinux
+EXPORT\_SYMBOL}\texttt{ }\footnote{RHEL7: ./redhat/kabi/kabi-module/kabi\_\{ppc64,s390x,ppc64le,x86\_64\}/pci\_bus\_read\_config\_word}
+
+The kernel's '\texttt{pci\_dev}' data structure, via its indirect
+correlation from the '\texttt{bus}' argument ('\texttt{struct pci\_dev}'
+contains members of type '\texttt{struct pci\_bus}') of '\texttt{pci\_bus\_read\_config\_word()}',
+also becomes effectively kABI protected. \footnote{./include/linux/pci.h: \texttt{struct pci\_dev \{ … \}}}
+So: ``What does that imply with respect to kABI?''
+
+Consider upstream commit \texttt{31c2b8153c ``PCI: Add support for
+DMA alias quirks''}. As a core aspect of that commit, a new '\texttt{dma\_alias\_devfn}'
+member was added to '\texttt{struct pci\_dev}'.
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\texttt{}
+\begin{lstlisting}
+diff git a/include/linux/pci.h b/include/linux/pci.h
+index 545903df00dc..9d4035c276f4 100644
+--- a/include/linux/pci.h
++++ b/include/linux/pci.h
+@@ -268,6 +270,7 @@ struct pci_dev {
+        u8              rom_base_reg;   /* which config register controls the ROM */
+        u8              pin;            /* which interrupt pin this device uses */
+        u16             pcie_flags_reg; /* cached PCIe Capabilities Register */
++       u8              dma_alias_devfn;/* devfn of DMA alias, if any */
+ 
+        struct pci_driver *driver;      /* which driver has allocated this device */
+        u64             dma_mask;       /* Mask of the bits of bus address this
+\end{lstlisting}
+\end{minipage}}
+
+Prior to commit \texttt{31c2b8153c}, '\texttt{struct pci\_dev}' consumed
+N bytes of memory, and the '\texttt{driver}' member was at some known
+offset from the structure's beginning - assume 0x148. After the commit,
+'\texttt{struct pci\_dev}' now consumes N + 1 bytes of memory, and
+the pre-existing 'driver' member no longer resides at the same 0x148
+byte offset location in memory that backs the structure (all '\texttt{struct
+pci\_dev}' members at, or past, the '\texttt{driver}' member will
+have been shifted to new, larger, offset locations).
+
+Now consider a partner's external module which was compiled against
+RHEL's 7.0 kernel, and relies upon (i.e., utilizes) the kernel's '\texttt{pci\_bus\_read\_config\_word()}'
+external symbol. If upstream commit \texttt{31c2b8153c} were back-ported
+into RHEL in a straightforward manner, say during 7.1's kernel development
+phase, changes to the kernel's version of '\texttt{struct pci\_dev}'
+would affect the module in two ways.
+
+\begin{tabular}[t]{|c|c|c|c|}
+\hline 
+RHEL 7.0 kernel & Offset & RHEL 7.1 kernel & Offset\tabularnewline
+\hline 
+\hline 
+\begin{lstlisting}
+struct pci_dev {
+  ...
+  u16 pcie_flags_reg;
+  struct pci_driver *driver;
+  u64               dma_mask;
+  ...
+  ...
+\end{lstlisting}
+&
+\begin{lstlisting}
+...
+...
+0x146
+0x148
+0x150
+...
+...
+\end{lstlisting}
+&
+\begin{lstlisting}
+struct pci_dev {
+  ...
+  u16 pcie_flags_reg;
+  u8                dma_alias_devfn;
+  struct pci_driver *driver;
+  u64               dma_mask;
+  ...
+\end{lstlisting}
+&
+\begin{lstlisting}
+...
+...
+0x146
+0x148
+0x150
+0x158
+...
+\end{lstlisting}
+\tabularnewline
+\hline 
+\end{tabular}
+
+First, any module's references to the kernel's structure's members
+up to, but not including, the '\texttt{driver}' member would be fine,
+as none of their offsets would have changed. However, unbeknownst
+to the external module, a new '\texttt{dma\_alias\_devfn}' member
+now resides within the kernel where the '\texttt{driver}' member used
+to in the memory backing '\texttt{struct pci\_dev}'. So, in effect,
+all member references by modules of the '\texttt{driver}' member onward
+will dereference memory that no longer corresponds to what the module
+expects. Second, since the structure is effectively larger now, if
+the module accesses memory immediately after an automatic allocation
+of the structure (i.e., a routine's local variable of type '\texttt{struct
+pci\_dev}' within the module's source file) in any manner, those memory
+dereferences also will not correspond to what the module is expecting.
+Both conditions -- member dereferences at, or past, the newly added
+member, and the structure's overall size -- would cause external
+modules to dereference memory now backing other content resulting
+in silent data corruption at best, and much more likely, outright
+failure (i.e., a kernel panic), as a result of the kernel's kABI commitment
+regarding '\texttt{pci\_bus\_read\_config\_word()}' having been broken.
+
+The broken kABI commitment is not limited to the '\texttt{pci\_bus\_read\_config\_word()}'
+symbol. The change to '\texttt{struct pci\_dev}' would correspondingly
+cause all partners external modules that utilized any external symbols
+with correlations to '\texttt{struct pci\_dev}' (in any capacity,
+directly, or indirectly) to no longer successfully link and run against
+such an updated kernel.
+
+So, not only are kABI protected external symbols effectively locked
+down with respect to any changes -- \emph{API permanence} -- all
+data structures correlated with such symbols also become entangled
+and are effectively locked down with respect to any changes, including
+member additions, deletions, and re-naming or re-arrangement - \emph{kernel
+data structure invariance}. In general: kABI protected external symbols,
+and all kernel data structures that are correlated with such symbols,
+are effectively locked down with respect to any changes, starting
+with the symbol becoming protected (which may occur with the release's
+origin), and persists throughout the release's entire lifecycle. \footnote{\label{fn:c3f5}Encumbered structures become locked down upon their
+associated symbols becoming kABI protected, which may start occurring
+as early as the origin release's Beta 6 snapshot, or within any subsequent
+minor kernel update cycle thereafter.}
+
+Due to the restrictive constraints that kABI imposes onto RHEL, Red
+Hat does not automatically guarantee 100\% compliance of symbol protection
+requests received. Some requested symbols are purposely rejected,
+to allow the symbols to change in future minor releases in order to
+minimize the encumbrances of integrating new, or maturing, technologies
+from upstream. In such cases, partners may have to recompile their
+modules for every minor update kernel. \footnote{Conversations with, and surveys of, key partners indicate that most
+recompile their modules on every minor version update as a standard
+practice.}
+
+\section{Kernel Development Impacts}
+
+While not all types of kABI induced ramifications and repercussions
+could ever be covered, reviewing and understanding some key examples
+from past experiences should help developers gather enough knowledge
+with which to tackle future kABI breakages they encounter on their
+own. There are cases of frequently occurring issues that are naturally
+coincident with, and known to be vulnerable to, kABI and kernel development.
+The most common can be roughly categorized into general areas susceptible
+to kABI and include: exported symbols, data structures, header files,
+static inline functions, enumerations, and the \texttt{/proc} (procfs)
+and \texttt{/sys} (sysfs) filesystems.
+
+RHEL kernel developers must be aware of the conditions that may introduce
+kABI failures when developing, and back-porting, patches. This is
+mostly a trial and error process at first but, with time, and experience,
+there are general situations developers become familiar with, having
+learned that such types of changes are particularly susceptible to
+introducing kABI failures.
+
+Within the classes outlined next are references to kABI case studies
+presented in Appendix B ``\nameref{chap:kABI-Case-Studies}`` -
+providing specific examples of methods developed for solving specific
+kABI failure types. It is recommended to read the class' content first
+to gain an overall understanding, and context, and then reference
+the noted, class specific, case studies for further details.
+
+\section{What is Impacted}
+
+\subsection{Exported Symbols}
+
+An exported symbol's return type can be augmented with '\texttt{const}'
+(see: \texttt{RH\_KABI\_CONST()}). Other than that, changing an exported
+symbol's prototype in any way -- its name, return type, and parameters,
+including their ordering -- is disallowed if it's white-listed: API
+permanence.
+
+\subsection{Data Structures}
+
+Kernel data structure changes are by far the most common kABI breakage
+type. \footnote{These types of breakages are also hidden upon a successful compilation.}
+Data structures are not symbols themselves, but become entangled with
+a symbol due to their direct, and indirect, correlations. Direct correlations
+are straightforward; the data structure is used as the symbol's return
+type, or within the implementation by way of a parameter. Indirect
+correlations, where data structures include other data structures,
+are much more concealed. Such entangled data structure sets can become
+potentially large in scope, making them very subtle, and thus extremely
+hard, to associate as the specific cause of a breakage.
+
+In general, developers cannot change kernel data structures correlated
+with white-listed symbols unless some type of kABI-specific extension
+mechanism has been pro-actively put into place. All kernel data structures
+that are correlated with kABI protected symbols, are effectively locked
+down with respect to any changes -- member additions, deletions,
+re-naming, and re-arrangement -- starting with the symbol becoming
+protected, and persisting throughout its entire lifecycle: kernel
+data structure invariance. Otherwise, if data structures were altered
+going forward, an external module built against a prior kernel would
+cease to link successfully due to Red Hat not having maintained its
+kABI commitment. This obviously severely impacts kernel development,
+especially when \emph{foundational} data structures -- structures
+that make up the core of some kernel subsystem's basis -- have become
+encumbered with a white-listed symbol, sometimes to the extent that
+no known recourse is available
+
+Upstream data structure changes typically fall into one of three categories:
+adding new members, deleting existing members, and re-naming or re-arranging
+members. Deletions, and re-arrangements are fairly straightforward:
+don't enact such changes as they are prohibited, and let RHEL's kernel
+source vary from upstream in these specific cases. Additions of new
+members are much more problematic as new features depend upon such.
+Fortunately, some fairly inventive solutions have been developed over
+the years to help with these specific instances.
+
+There is a technique, commonly referred to as an ``extension'',
+that can be used for adding new members, but, such RHEL specific extensions
+to existing kernel structures must be put into place prior to, or
+coincident with, the correlated symbol becoming protected. This assures
+that any external modules will always have been compiled against a
+kernel that already has the extensions, thus relevant symbol version
+checksums will not have changed as far as any external modules are
+concerned.
+
+While kernel data structures may be able to be extended there is implicit
+factor that has to be considered when developing an extension scheme.
+Extending kernel data structures correlated with protected symbols
+is all about enabling new feature content developed upstream, via
+back-ports into RHEL, without breaking RHEL's kABI commitment. kABI
+related extension mechanisms enable this, specifically preparing for
+new members to be added to a structure encumbered with one or more
+protected symbols which can take place within any minor update's development
+cycle. As a result, from the kernel's perspective: protection encumbered
+data structures with extension mechanisms enabled pro-actively may
+change size (growing only) during any minor update cycle. However,
+external modules that were compiled against earlier kernel versions,
+and thus would not know about such structure growth (``kernel/module
+variance''), must continue to link (attach) and run upon newer kernels
+-- RHEL's kABI commitment. As such, the kernel's data structure growth
+has to be enacted in a way that accounts for kernel/module variance.
+
+The implication is that a symbol may become protected, and its encumbered
+data structures thus locked down, with the release's origin (i.e.,
+RHEL X.0). In fact, this is fairly common occurrence for the kernel's
+foundational data structures as they are the most likely to become
+encumbered with symbols becoming protected. Therefore, pro-actively
+implementing extension members for key kernel data structures during
+the release's origin is a prudent action that subsystem maintainers
+should strongly consider. Otherwise, there likely will be no recourse
+available: Adding extensions is a once per release event; living with
+kABI is day to day.
+
+For examples, and details, of extension structures along with one
+other method related to ``holes'', see the kABI Case Studies related
+to kernel data structures:
+\begin{itemize}
+\item \fullref{sec:Case-Study:Pro-actively-Extending}
+\item \fullref{sec:Case-Study:Adding-Members-Centrally}
+\item \fullref{sec:Case-Study:Adding-Members-Non-Centrally}
+\item \fullref{sec:Case-Study:Exploting-Holes}
+\item \fullref{sec:Case-Study:Kernel-Header-Files}
+\end{itemize}
+The extension implementation developed and used within the kernel's
+networking subsystem is considered the canonical model to follow currently
+{[}see: \fullref{sec:Case-Study:Pro-actively-Extending},
+and \nameref{chap:kABI-Case-Studies}{]}.
+
+Kernel data structures not encumbered with any white-listed symbols
+are not protected by any kABI commitments.
+
+\subsection{Header Files}
+
+Including header files may change the parsing of structures - a source,
+or header, file that had an indirect forward reference to a structure
+is changed to now include another header which, via the inclusion,
+replaces the indirect forward reference with the full declaration
+of the structure (i.e., previously opaque symbols become transparent,
+as the pre-processor now knows more about them). These types of occurrences
+can result in a ``\emph{false-positive}'' kABI breakage, and can
+be worked around by the use of the \texttt{\_\_GENKSYMS\_\_} pre-processing
+directive.
+
+kABI Case Studies related to kernel header files:
+\begin{itemize}
+\item \fullref{sec:Case-Study:Kernel-Header-Files}
+\end{itemize}
+
+\subsection{Static Inline Functions}
+
+Developers should be aware that modifying public inline functions
+might cause problems with external driver modules. Care should be
+taken to minimize those changes and when possible use exportable functions
+instead.
+
+\subsection{Enumerations}
+
+There are currently no hard requirements to protect these interfaces;
+however, changes to enumeration ordering can affect external modules.
+RHEL's current kABI checking capabilities may not catch simple enumeration
+related changes that indeed affect modules, leading to \emph{silent
+}kABI\emph{ failures}.
+
+Enumerations can also be inherently problematic in nature as the C
+Standard says un-assigned enumeration lists can have any value assigned
+to each member of the list for any given compilation. Enumeration
+lists that explicitly assign values avoid this issue, and converting
+un-assigned lists to explicitly assigned lists can be used to obviate
+future kABI concerns. Developers should self-police and preserve them
+on a case-by-case basis.
+
+kABI Case Studies related to enumerations:
+\begin{itemize}
+\item \fullref{sec:Case-Study:Enumerations}
+\end{itemize}
+For recurring situations where solutions have been developed over
+the years that solve, or work around, kABI failures, case studies
+have been written and are presented in Appendix B: ``kABI Case Studies:
+Methods of Working Around kABI's Impacts''. Each study outlines the
+case's general type, specifics involved, techniques used, explanations
+as to why the solution works, and any known caveats to be cognizant
+of.
+
+Note however, there are situations in which developers encounter circumstances
+where kABI precludes back-porting content from upstream and there
+is no known recourse.
+
+\section{What is Not Impacted}
+
+\subsection{procfs / sysfs}
+
+There are currently no hard requirements to protect these interfaces;
+however, upstream generally disallows removals or non-compatible changes
+(additions are allowed when justified). Developers will occasionally
+self-police and preserve them on a case-by-case basis.
+
+\subsection{What is \texttt{\_\_GENKSYMS\_\_} and its Abuse}
+
+While \texttt{\_\_GENKSYMS\_\_} is not one of the common cases listed,
+it is a key mechanism that must be used in effecting solutions in
+all cases (i.e., most cases use \texttt{\_\_GENKSYMS\_\_} in some
+capacity). Working around kABI is typically a two-pronged process.
+First, a strategy that does not logically alter a kernel symbol's
+ABI has to be developed (assuming one can be crafted, or even exists).
+With a logical solution implemented, the second part of masking the
+physical (i.e., code) changes from both KMI's, and kABI's, symbol
+versioning based checking mechanisms, must be enacted. This involves
+using the kernel's same build related pre-processing directive --
+\texttt{\_\_GENKSYMS\_\_}.
+
+kABI workarounds must effectively mask the specific changes that would
+break kABI. To do such, RHEL implementations used to use a common
+idiom of surrounding changes via \_\_GENKSYMS\_\_. \footnote{RHEL7: Commit \texttt{4f994b1e3fc} “PCI: Add support for DMA alias
+quirks”} \footnote{\label{fn:s3f9}Note the new member is added to a RHEL specific “extension”
+structure, not '\texttt{struct pci\_dev}' {[}see: Appendix AB.1 ,
+B.3, and B.4{]}.}
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+@@ -379,6 +381,7 @@ struct pci_dev {
+ */
+ struct pci_dev_rh {
+ #ifndef __GENKSYMS__
++        u8 dma_alias_devfn;/* devfn of DMA alias, if any */
+ #endif
+ };
+\end{lstlisting}
+\end{minipage}}
+
+Over time, this idiom was becoming overused, leading to some negative
+outcomes -- from the \emph{commit message} of RHEL7 commit \texttt{023ac646f29}
+``kabi: Remove GENKSYMS usage through the code'':
+
+\begin{lstlisting}[]
+"A conversation started about the usage of GENKSYMS on a 7.0 kernel.
+
+Normally this is not needed because kabi is not frozen until _after_ a .0 release is GA.
+
+However folks were using this wrapper to clearly indicate which chunks of code were being
+reserved for Red Hat purposes.
+
+After thinking about this and discussing it with folks, we realized this is not a good idea.
+Two reasons have stuck out as to why.
+
+First, the idea was that hiding the symbols in the GENKSYSMS wrapper, we hide the true checksum
+of the symbols. We should try to encompass the true checksum for GA. On the flip side,
+removing the macro and doing things properly for 7.1 would entail:
+
+        struct foo {
+                int bar;
+        #ifndef __GENKSYMS__
+                int original;
+        #else
+                int new;
+        #endif
+        }
+
+which leads to ugly and hard to read code. I agreed to create some macros in 7.1 that would
+hide the ugliness, yet make it obvious what is going on.
+
+Second, and this is more a social problem, most folks have come to assume that anything inside
+__GENKSYMS__ is free to be modified/added. But in this particular example, this is _not_ the
+case. So to prevent the confusion, we should avoid this usage for reserving memory.
+
+As a result, I have removed all uses I believe were not correct. There should be no downside as
+this only affects how genksyms pre-processes the symbols and generates checksums. The only
+noticeable change will be new kabi checksums for a bunch of functions.
+
+I did leave in a few usages, namely the PCI ones. I believe this is a correct usage as it
+properly sets the stage for future additions to the reserved struct."
+\end{lstlisting}
+
+As a result of the actions behind the context of RHEL7 commit \texttt{023ac646f29}
+(too many kABI-naive engineers overusing, and abusing, \texttt{\_\_GENKSYMS\_\_};
+anything inside \texttt{\_\_GENKSYSMS\_\_} is not free to be modified/added),
+RHEL specific kABI macros were developed, and incorporated, during
+7.1's minor update development cycle {[}see: Appendix C \ref{sec:include/linux/rh_kabi.h}
+\nameref{sec:include/linux/rh_kabi.h}{]}. \footnote{\label{fn:c3f10}RHEL7: \texttt{include/linux/rh\_kabi.h} (via commit
+\texttt{22f7116921c} “kabi: Add generic kabi macros to use for kabi
+workarounds”).} The kABI macros were introduced for use in kABI related development
+efforts that effectively do the same thing but in a manner identical
+to the kernel's build processing - using macros that expose changes
+when disabled yet mask changes (essentially turning them into a no-op,
+or \texttt{<null>}, clause), when enabled.
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+#ifdef __GENKSYMS__
+...
+#        define RH_KABI_EXTEND(_new)
+...
+#else
+...
+#        define RH_KABI_EXTEND(_new) _new;
+...
+#endif /* __GENKSYMS__ */
+\end{lstlisting}
+\end{minipage}}
+
+As should be evident, blindly using RHEL's '\texttt{RH\_KABI\_EXTEND()}'
+macros in an attempt to workaround kABI is not sufficient -- a common
+mistake made by RHEL kernel developers not fully cognizant of kABI
+-- as the core ABI issues still exist (the ``first'' step mentioned
+above is needed to solve the ``logical'' aspects). In fact, attempting
+to do such just ``hides'' the breakage from the kABI enforcement
+tools' detecting such, a much worse problem.
+
+All of the kABI case studies outlined in ``\nameref{chap:kABI-Case-Studies}''
+utilize common \texttt{\_\_GENKSYMS\_\_} based idioms, either directly,
+or indirectly via RHEL's kABI macros, as one aspect in an overall
+solution.
+
+\section{Verification}
+
+When building a RHEL kernel, either from a Source RPM (SRPM) or via
+'\texttt{rh-brew}', a kABI checking script, '\texttt{check-kabi}',
+is automatically run as part of the build process. \footnote{\texttt{redhat/kabi/check-kabi}}
+The script attempts to check for any kABI breakages introduced by
+changes to the kernel. The checking is constrained to RHEL's white-listed
+symbols only; it does not check the kernel's non white-listed exported
+symbols
+
+kABI protection applies to all supported architectures. Hence building
+via '\texttt{rh-brew}' is the recommended method, as it will run '\texttt{check-kabi}'
+on all architectures. If '\texttt{check-kabi}' is executed manually,
+only one specific architecture is checked. When building via the '\texttt{rpmbuild}'
+process, the SPEC file sets the '\texttt{with\_kabichk}' flag --
+\texttt{redhat/rpm/SPECS/kernel.spec::\%define with\_kabichk} --
+enacting the exact same '\texttt{check-kabi}' based checking.
+
+To manually check if there is going to be a kABI issue, prepare by
+first enacting the patch series' changes, and make the kernel:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}[language=sh]
+$ make rh-configs-prep
+$ cp configs/kernel-2.6.32-x86_64.config .config
+$ make oldconfig
+$ make -j16
+\end{lstlisting}
+\end{minipage}}
+
+With the kernel built, manually run '\texttt{check-kabi}' to check
+for kABI failures:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}[language=sh]
+$ redhat/kabi/check-kabi -h /* help */
+$ redhat/kabi/check-kabi -k redhat/kabi/Module.kabi_x86_64 -s Module.symvers
+\end{lstlisting}
+\end{minipage}}
+
+If there is no output, then the build was successful and there were
+no kABI related failures. Otherwise, '\texttt{check-kabi}' outputs
+a list of broken symbols.
+
+\section{Debugging Breakages}
+
+Removal or change to white-listed symbols is considered a serious
+offense as partners and customers are actively using these symbols.
+Changing a white-listed symbol's checksum would cause their modules
+to fail loading in future minor updates, negating Red Hat's commitment.
+Red Hat has removed white-listed symbols in the past, but only after
+contacting partners and securing knowledge they were not using those
+symbols.
+
+Developers will, on occasion, include a patch that incidentally modifies
+a white-listed symbol. This will lead to the checksum changing and
+is considered ``\emph{breaking kABI}''. In such cases, developers
+are expected to modify their patches to accommodate these symbols
+and patches will be rejected unless they are revised to work around
+such breakages.
+
+\subsection{via 'check-kabi'}
+
+Inevitability, every RHEL kernel developer will encounter the case
+where a patch series is applied and building a kernel now fails due
+to kABI (specifically, \texttt{'check-kabi}' fails). How can one determine
+which part of a patch caused the breakage, especially if the broken
+symbol seems to have nothing to do with the applied patch series?
+
+Novell added some code a while ago that saves the 'genksyms' versioning
+symbol(s) backtrace when compiling {*}.o files. Using this backtrace
+one can hone in and determine where the kABI broke by comparing the
+old backtrace with the new one. \footnote{RHEL6: commit \texttt{409236c741a} Makefile.build: make KBUILD\_SYMTYPES
+work again}
+\begin{itemize}
+\item Make sure you have a clean master branch in git and another branch
+with your changes (it is just easier this way); 
+\item Make sure you have your .config setup; 
+\item Pick a symbol that brew said broke with respect to kABI, call it '\texttt{foo}'. 
+\end{itemize}
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}[language=sh]
+$ git checkout master                    # Need the original kABI cksum
+$ git grep foo | grep EXPORT_SYMBOL      # Find the file that exports foo
+$ make file.symtypes                     # Generate backtrace
+$ cp file.symtypes file.symref           # Save the backtrace
+$ git checkout branch_with_change        # Switch to patched branch
+$ KBUILD_PRESERVE=1 make file.symtypes   # Generate and compare new backtrace
+\end{lstlisting}
+\end{minipage}}
+
+By way of concrete example, assume some changes have broken kABI and
+'\texttt{check-kabi}' indicates that\newline the
+'\texttt{ieee80211\_restart\_hw}' symbol now fails:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}[language=sh]
+$ git grep <target_kABI_failure_symbol_from_check-kabi> | grep EXPORT
+net/mac80211/main.c:EXPORT_SYMBOL(ieee80211_restart_hw);
+\end{lstlisting}
+\end{minipage}}
+
+According to '\texttt{check-kabi}', there looks to be an issue with
+the '\texttt{ieee802111\_restart\_hw}' symbol but in reviewing the
+patch series' content there are no changes to that function's body
+of code.
+
+Continuing with the approach outlined above:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}[language=sh]
+$ make net/mac80211/main.symtypes    # Note: strip the .c from source filename
+\end{lstlisting}
+\end{minipage}}
+
+This should fail and print out the structure that caused the breakage:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}[language=sh,basicstyle=\scriptsize\ttfamily]
+$ KBUILD_PRESERVE=1 make init/version.symtypes
+...
+init/version.c:37: error: init_uts_ns: modversion changed because of changes in struct uts_namespace
+...
+\end{lstlisting}
+\end{minipage}}
+
+So the issue isn't within the '\texttt{ieee80211\_restart\_hw}' symbol's
+function, but rather something indirectly involving '\texttt{struct
+uts\_namespace}'. Reviewing the patch series again, with this new
+information, one now sees that it indeed added a new member to \texttt{include/linux/utsname.h::'struct
+uts\_namespace'} which is the root of the kABI failure:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+-@ -40,6 +40,7 @@ struct new_utsname {
+ struct uts_namespace {
+         struct kref kref;
+         struct new_utsname name;
++        struct dummy;
+};
+extern struct uts_namespace init_uts_ns;
+\end{lstlisting}
+\end{minipage}}
+
+Most kABI breakages usually center on a single change, but sometimes
+more than one change breaks kABI. One can either perform the above
+steps for each symbol that broke kABI or just recompile and see what
+was missed. Recompiling is probably easiest but may not be enough.
+
+\subsection{via 'kabi-dw'}
+
+'\texttt{kabi-dw}' is a new tool which allows checking for kABI changes
+based on changes in DWARF debugging data. In short it loads the type
+information from DWARF, from vmlinux and \emph{all kernel modules},
+and dumps these types into a set of text files starting with a given
+list of exported symbols and descending to all types reachable from
+these symbols.
+
+Consider the following example where we are interested only in '\texttt{pci\_bus\_read\_config\_word()}'
+symbol. First we'd build the kernel tree with debug info enabled (which
+is on by default in RHEL kernels):
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}[language=sh]
+$ make rh-configs
+$ cp redhat/configs/kernel-3.10.0-$(uname -p).config .config
+$ make && make modules
+\end{lstlisting}
+\end{minipage}}
+
+Then we'd generate the list of symbols we're interested in:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}[language=sh]
+$ echo 'pci_bus_read_config_word' > symbols
+\end{lstlisting}
+\end{minipage}}
+
+We build the kabi-dw tool:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}[language=sh]
+$ make rh-kabi-dw
+\end{lstlisting}
+\end{minipage}}
+
+Finally we generate the files for all types reachable from our selected
+symbol:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}[language=sh]
+$ redhat/kabi-dwarf/kabi-dw/kabi-dw generate -s symbols -o output .
+\end{lstlisting}
+\end{minipage}}
+
+In the 'output' directory we can find the text file for function '\texttt{pci\_bus\_read\_config\_word}':
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}[language=sh]
+$ ls -l output/func-pci_bus_read_config_word.txt
+-rw-r-r-. 1 root root 175 Apr 17 16:38 output/func-pci_bus_read_config_word.txt
+\end{lstlisting}
+\end{minipage}}
+
+Because the '\texttt{bus}' argument of '\texttt{pci\_bus\_read\_config\_word()}'
+is of type '\texttt{struct pci\_bus {*}}' there will also be a file
+for '\texttt{struct pci\_bus}':
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}[language=sh]
+$ ls -l output/struct-pci_bus.txt
+-rw-r-r-. 1 root root 1051 Apr 17 16:38 output/struct-pci_bus.txt
+\end{lstlisting}
+\end{minipage}}
+
+Similarly the tool descends to all the reachable types that are defined
+in the DWARF debug data.
+
+It is expected that the list of symbols provided to start the dump
+of data will be the kABI white-list. There is Makefile target which
+simplifies whole process with providing the current whitelist as the
+input and storing the output under \texttt{redhat/kabi-dwarf/base/\$(uname
+-p)}:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}[language=sh]
+$ make rh-kabi-dw-base
+\end{lstlisting}
+\end{minipage}}
+
+'\texttt{kabi-dw}' tool can also be used for comparing two datasets.
+Typical usage would then include generating baseline dataset (aka.
+last offical RHEL build), re-building the kernel with your changes,
+generating new dataset and comparing them with \texttt{kabi-dw}:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}[language=sh]
+$ redhat/kabi-dwarf/kabi-dw/kabi-dw compare output1 output2
+\end{lstlisting}
+\end{minipage}}
+
+This can again be simplified with:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}[language=sh]
+$ make rh-kabi-dw-base
+# ... apply your patch
+$ make && make modules
+$ make rh-kabi-dw-check
+\end{lstlisting}
+\end{minipage}}
+
+\subsection{Where can kabi-dw help?}
+
+In general, the '\texttt{kabi-dw}' approach is similar to the '\texttt{make
+<file>.symtypes}' approach described above. The main added value is:
+\begin{itemize}
+\item '\texttt{kabi-dw}' can ``see'' through all '\texttt{\_\_GENKSYMS\_\_}'
+macros. That is, even if certain parts of the code are already masked
+using '\texttt{\_\_GENKSYMS\_\_}' or some of the '\texttt{RH\_KABI\_{*}()}'
+macros, these changes will still be reported in '\texttt{kabi-dw}'
+output.
+\item '\texttt{kabi-dw}' looks at the whole kernel tree, ie. \texttt{vmlinux}
++ \emph{all modules}, together. This is in sharp contrast with '\texttt{genksyms}'
+which only looks at single C source file at a time. '\texttt{kabi-dw}'
+can help to answer questions like if given structure is embedded inside
+other structure elsewhere in the kernel.
+\end{itemize}
+
+\chapter{Conclusion}
+
+Attempting to describe all the various ways that kABI impacts kernel
+development is impractical. Developers will inevitability run into
+new, unique, situations involving kABI. So while the content presented
+just scratches the surface, hopefully, it will have been enough to
+help developers in solving future kABI breakages that they encounter
+on their own (when possible).
+
+Anyone who has further questions related to kABI should send questions
+to the \emph{core-kernel@redhat.com} mail list.
+
+\section{Exercises}
+\begin{enumerate}
+\item Q: Explain what a Linux kernel ``exported symbol'' is. 
+\item Q: What is KMI? 
+\item Q: What is ``symbol versioning'' and what does it do? 
+\item Q: What is kABI? 
+\item Q: How is kABI different from KMI? 
+\item Q: Does KMI catch all kABI breakages? Why? 
+\item Q: Is it possible to break kABI in a way where KMI's symbol versioning
+doesn't change and '\texttt{insmod}' still loads the module? Or, does
+KMI symbol versioning causing modules to no longer load successfully
+also catch all kABI breakages?  Answer: KMI should catch all breakages also but manual use (overuse)
+of \texttt{\_\_GENKSYMS\_\_} related to kABI can hide changes causing
+the association to no longer hold true. Additionally, \texttt{\_\_GENKSYMS\_\_}
+will not catch enumeration changes unless the enumeration is hardwired
+in an inline function (i.e., enumeration changes can silently break
+kABI). 
+\item Q: Can all kernel data structures be extended? Why not? 
+\item Q: Is using a RHEL kABI macro such as '\texttt{RH\_KABI\_EXTEND()}'
+sufficient to satisfy all requirements when dealing with a kABI breakage?
+Why?\pagebreak{}
+\end{enumerate}
+
+\appendix
+
+\chapter{kABI Lists\label{chap:kABI-Lists}}
+
+kABI tracks global symbols through two types of lists: white, and
+grey. These lists define which symbols are protected and which ones
+are not:
+
+\subsubsection{White}
+
+Exported symbols that Red Hat has committed to not break throughout
+the subsequent lifecycle of a RHEL major release make up the ``white-list''.
+\footnote{'RHEL KABI Whitelist Process and Program', Red Hat, 11 August 2017.
+
+\url{https://docs.google.com/document/d/1cEj4sYYacx16vHj3-41eEWqT-Wzq01VR7ydPcinIHQc/edit}}
+
+Each minor RHEL release has a set of symbols constituting a white-list.
+\footnote{White-listed symbols reside in:
+
+kernel package - \texttt{/boot/symvers.\$(uname -r).gz}
+
+kernel-devel package - \texttt{/usr/src/kernels/\$(uname -r)/Module.symvers}
+
+kernel's source tree - \texttt{redhat/kabi/kabi-module/kabi\_\{ppc64,ppc64le,s390x,x86\_64\}/{*}}} Once a symbol has been added to the kABI white-list for a particular
+release it will not be removed, nor is it allowed to change during
+the major release's remaining lifecycle. New symbols may be added
+to the kABI white-list in minor releases.
+
+\subsubsection{Grey}
+
+Exported symbols that Red Hat's partners have requested for review
+and addition to the while-list but have not yet been explicitly accepted
+nor rejected (e.g., they are in the internal review phase where Red
+Hat's developers discuss whether or not to add them to the white-list).
+
+There is a database server that maintains grey-listed entries for
+each specific RH partner. This server also offers a monitoring service
+that notifies partners if any of the symbols on their respective grey-list
+changes.
+
+Partners can request additions to RHEL's kABI white-list by opening
+a RHEL bugzilla: ``kernel'' component, ``kabi-whitelists'' subcomponent.
+Bugzilla symbol requests are sent to the Red Hat Kernel development
+team's Mail List (RHKML) for internal review. Symbols explicitly accepted
+for protection are added to the kABI white-list at the end of the
+next minor release's development phase. Symbols that were not explicitly
+accepted are automatically added to the grey-list.
+
+\chapter{kABI Case Studies: Methods of Working Around kABI's Impacts \label{chap:kABI-Case-Studies}}
+
+Attempting to describe all the various ways that kABI impacts kernel
+development is not practical. Nevertheless, there are sets of issues
+that are recurrent, falling within somewhat common areas, scenarios,
+or themes (i.e., classes of scenarios that can be roughly categorized).
+For the recurrent issues within these classes, there have been some
+fairly innovative methods developed over the years to work around
+kABI's restrictions. So while not all types of issues could ever be
+covered, going over and understanding some key examples from past
+experiences should help developers gather enough knowledge with which
+to tackle future kABI breakages they run into on their own.
+
+This appendix outlines some of the more interesting, and common, past
+experiences within the various classes via concrete examples. Each
+study outlines the case's general scenario, specifics involved, techniques
+used, explanations as to why the solution works, and any known caveats
+to be cognizant of.
+
+For each of the case studies, the referenced material ('\texttt{git}'
+commits and source files) should be accessed and studied in an effort
+to fully comprehend how, and why, the methods are successful in working
+around kABI while maintaining an external module to continue to operate
+across RHEL's successive minor update cycles despite kernel/module
+variance.
+
+\section{Case Study: Pro-actively Extending Core Kernel Data Structures \label{sec:Case-Study:Pro-actively-Extending}}
+
+Upstream reference: N/A
+
+RHEL7 reference: commit \texttt{c9be03bbc1c} \footnote{\label{fn:a1}{[}RHEL7 RHEL\_only PATCH v3 0/6{]} PCI: Add kABI shadow
+structs for the kernel's PCI subsystem
+
+\texttt{c9be03bbc1c} PCI: Create 'pci\_dev\_rh' KABI shadowing structure
+
+\texttt{9599688156b} PCI: Convert 'pci\_dev' allocations and frees
+
+\texttt{5abdc3d2dac} PCI: Convert specific 'pci\_dev' related constructs
+
+\texttt{829d829c1b7} PCI: Create 'pci\_bus\_rh' KABI shadowing structure
+
+\texttt{8af377d9592} PCI: Convert 'pci\_bus' allocations and frees
+
+\texttt{610b1c95049} PCI: Create 'pci\_driver\_rh' KABI shadowing
+structure}
+
+This case study covers the pre-requisite setup that enables logically
+adding new members to existing kernel data structures that are becoming,
+or expected to become, encumbered with kABI-protected symbols. While
+specific implementations have evolved over the years -- hash based
+associations to shadow structures, directly associated opaque extension
+structures, and pre-reserved additions with directly associated opaque
+extension structures -- its central tenant -- adding a new data
+structure that is directly associated to an existing data structure
+unto which all future member additions will be added so as to not
+effect any symbol versioning aspects of the original data structure
+-- has not.
+
+During RHEL7's initial kernel development phase -- 7.0 -- commit
+\texttt{c9be03bbc1c} ``PCI: Create 'pci\_dev\_rh' KABI shadowing
+structure'' was pro-actively put into place adding a pointer to an
+opaque, RHEL kABI-specific, extension structure onto the end of '\texttt{struct
+pci\_dev}'.\textsuperscript{\ref{fn:a1}} This pre-requisite step
+allowed RHEL7 to maintain kABI with respect to '\texttt{pci\_dev}'
+yet also accommodates logical upstream updates to such -- the addition
+of new members only - via its '\texttt{pci\_dev\_rh}' extension structure.
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff -git a/include/linux/pci.h b/include/linux/pci.h
+index e564932..45f1c16 100644
+--- a/include/linux/pci.h
++++ b/include/linux/pci.h
+@@ -364,6 +364,20 @@ struct pci_dev {
+ #endif
+         phys_addr_t rom; /* Phys addr of ROM if it's not from the BAR */
+         size_t romlen; /* Length of ROM if it's not from the BAR */
++
++        /* Extension to accomodate future upstream changes to this struct
++         * yet maintain RHEL7 kABI.  For Red Hat internal use only!
++         */
++        struct pci_dev_rh  *pci_dev_rh;
++};
++
++/*
++ * RHEL7 specific 'struct pci_dev' shadow structure to help maintain kABI
++ * going forward.  This structure will never be under kABI restrictions.
++ */
++struct pci_dev_rh {
++#ifndef __GENKSYMS__
++#endif
+ };
+
+ static inline struct pci_dev *pci_physfn(struct pci_dev *dev)
+\end{lstlisting}
+\end{minipage}}
+
+The RHEL specific extension member addition to existing kernel structures
+-- in this instance, a pointer to an opaque extension structure --
+must be put into place prior to, or coincident with, the correlated
+symbol becoming protected. This assures that any external modules
+will have always been compiled against a kernel that has the extension's
+member included, prior to the symbol having become protected, and
+thus relevant symbol version checksums will not have changed.
+
+Once a symbol becomes protected, any encumbered data structures are
+effectively locked down from any further changes for the remaining
+life cycle of the release. Otherwise, if data structures were altered
+going forward, an external module built against a prior kernel, would
+cease to link successfully due to Red Hat not having maintained its
+kABI commitment.
+
+The implication is that a symbol may become protected, and its encumbered
+data structures thus locked down, with the release's origin (i.e.,
+RHEL X.0). In fact, this is fairly common occurrence for the kernel's
+foundational data structures as they are the most likely to become
+encumbered with symbols becoming protected. Therefore, pro-actively
+implementing extension members for key kernel data structures during
+the release's initial phase is a prudent action that subsystem maintainers
+should strongly consider.
+
+The subsequent step of allocating the extension structure itself can
+be postponed until such time as needing to effectively add a new member
+to the existing structure occurs {[}see: \ref{sec:Case-Study:Adding-Members-Centrally}
+\nameref{sec:Case-Study:Adding-Members-Centrally} and \ref{sec:Case-Study:Adding-Members-Non-Centrally}
+\nameref{sec:Case-Study:Adding-Members-Non-Centrally}{]}.
+
+\subsection{Caveats}
+
+There are some fairly strict requirements that the existing kernel
+data structure predicted to need members added to at some future time
+must meet {[}see: \fullref{sec:Case-Study:Adding-Members-Centrally}
+and \fullref{sec:Case-Study:Adding-Members-Non-Centrally}{]}.
+
+This method is not allowed after an encumbered data structure's symbol
+has become protected. The extension member must be implemented prior
+to becoming locked down, possibly pro-actively as part of the release's
+origin. This implies that any kernel data structures that will need
+members added to them at some future date should be predicted, and
+extensions enacted, up front whenever possible, via ``experience''.
+
+\section{Case Study: Adding Members to Centrally Allocated Kernel Data Structures
+\label{sec:Case-Study:Adding-Members-Centrally}}
+
+Upstream reference: commit \texttt{338c3149a22}
+
+RHEL7 back-port ref: commit \texttt{8e7c115586d} \footnote{\texttt{8e7c115586d} PCI: Add support for multiple DMA aliases}
+
+The case study involves adding new members to existing kernel data
+structures. Its focus is the specific case where all allocations of
+the existing structure needing augmented are performed by a single,
+centralized, in-kernel-core routine. There are multiple aspects involved
+to making this technique work without breaking kABI. This technique
+requires a pre-requisite setup step {[}see: \nameref{sec:Case-Study:Pro-actively-Extending}{]}
+that itself must be fully comprehended before proceeding.
+
+During RHEL 7.3's development phase, upstream commit \texttt{338c3149a22}
+``PCI: Add support for multiple DMA aliases'' was needed. The new
+feature was dependent upon a new '\texttt{dma\_alias\_mask}' member
+being added to '\texttt{struct pci\_dev}'.
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff -git a/include/linux/pci.h b/include/linux/pci.h
+index 7e7019064437..5581d05f7833 100644
+--- a/include/linux/pci.h
++++ b/include/linux/pci.h
+@@ -273,7 +271,7 @@ struct pci_dev {
+         u8              rom_base_reg;   /* which config register controls the ROM */
+         u8              pin;            /* which interrupt pin this device uses */
+         u16             pcie_flags_reg; /* cached PCIe Capabilities Register */
+-        u8              dma_alias_devfn;/* devfn of DMA alias, if any */
++        unsigned long   *dma_alias_mask;/* mask of enabled devfn aliases */
+
+         struct pci_driver *driver;      /* which driver has allocated this device */
+         u64             dma_mask;       /* Mask of the bits of bus address this
+\end{lstlisting}
+\end{minipage}}
+
+The '\texttt{pci\_dev}' data structure from the kernel's PCI subsystem
+is foundational to its subsystem -- thus is altered by upstream changes
+on a consistent basis.\textsuperscript{\ref{fn:c1f6}} Additionally,
+being such a core data structure, there are numerous kABI-protected
+symbols within PCI's subsystem that reference it, so any changes to
+it would normally break kABI for many symbols. Fortunately, '\texttt{struct
+pci\_dev}' meets very strict requirements that allows new members
+to be logically added to it: it is strictly allocated from the kernel's
+heap via a common function - '\texttt{pci\_alloc\_dev()}'. \footnote{\texttt{drivers/pci/probe.c::pci\_alloc\_dev()} (and \texttt{pci\_release\_dev()})}
+
+If a data structure is strictly allocated from the kernel's heap (i.e.,
+no static definitions of the structure are allowed, nor are automatic
+allocations on the stack) then there is a technique that can be used
+for adding new members to it without breaking kABI. \footnote{Strictly allocated from the kernel's heap implies: the data structure
+was dynamically allocated, and references to it must be indirect (i.e.,
+via a pointer).}
+
+Intuitive, or experienced, developers will eventually ask: ``What
+prevents an external driver module from allocating a '\texttt{struct
+pci\_dev}' within itself, either statically (within the source file's
+scope) or automatically (as an automatic variable within a routine;
+thus resides on the routine's stack)?'' \footnote{The possible effects of such a scenario and how such breaks kABI are
+covered in Appendix C: kABI: Canonical Method for Extending Kernel
+Data Structures.} Nothing, however if one researches, via \texttt{'cscope(1)}' or some
+similar tool, all 'struct pci\_dev' allocations within the kernel
+and it's built-in modules, they will see that all allocations of '\texttt{pci\_dev}'
+utilize '\texttt{pci\_alloc\_dev()}'. This is where kABI enters a
+``grey area'': nothing prevents an external driver module from doing
+such, but, it would be considered ill formed; improper programming
+by a module is not considered a kABI breakage.
+
+With the aforementioned setup step -- the extension mechanism from
+commit \texttt{c9be03bbc1c} -- in place, the subsystem's common allocation
+related functions next need to be augmented to include allocating
+the additional extension structure along side its parent. While it
+makes sense to do this coincident with the addition of the extension
+structure in this particular case -- where allocations are handled
+by a common in-kernel-core function within the subsystem -- it is
+not absolutely necessary to perform this specific step until a specific
+need arises as is covered in a different case study {[}see: \ref{sec:Case-Study:Adding-Members-Non-Centrally}
+\nameref{sec:Case-Study:Adding-Members-Non-Centrally}{]}. This was
+accomplished via RHEL7 commit \texttt{9599688156b} ``PCI: Convert
+'pci\_dev' allocations and frees''.\textsuperscript{\ref{fn:a1}}
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff -git a/drivers/pci/probe.c b/drivers/pci/probe.c
+index 38e403dddf6..24da7642d3c 100644
+--- a/drivers/pci/probe.c
++++ b/drivers/pci/probe.c
+@@ -1170,6 +1170,7 @@ static void pci_release_dev(struct device *dev)
+         pci_release_of_node(pci_dev);
+         pcibios_release_device(pci_dev);
+         pci_bus_put(pci_dev->bus);
++        kfree(pci_dev->pci_dev_rh);
+         kfree(pci_dev);
+ }
+ 
+@@ -1234,6 +1235,12 @@ struct pci_dev *pci_alloc_dev(struct pci_bus *bus)
+         if (!dev)
+                 return NULL;
+
++        dev->pci_dev_rh = kzalloc(sizeof(struct pci_dev_rh), GFP_KERNEL);
++        if (!dev->pci_dev_rh) {
++                kfree(dev);
++                return NULL;
++        }
++
+         INIT_LIST_HEAD(&dev->bus_list);
+         dev->dev.type = &pci_dev_type;
+         dev->bus = pci_bus_get(bus);
+@@ -1308,6 +1315,7 @@ static struct pci_dev *pci_scan_device(struct pci_bus *bus, int devfn)
+ 
+         if (pci_setup_device(dev)) {
+                 pci_bus_put(dev->bus);
++                kfree(dev->pci_dev_rh);
+                 kfree(dev);
+                 return NULL;
+ }
+\end{lstlisting}
+\end{minipage}}
+
+With an opaque, RHEL specific extension structure now in place, and
+fully backed (allocated), future upstream changes to the structure
+which would normally break kABI can now be brought into RHEL by placing
+new members into the corresponding extension structure such as was
+done in this case study's RHEL7 commit - \texttt{8e7c115586d} ``PCI:
+Add support for multiple DMA aliases''.
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+@@ -398,7 +396,7 @@ struct pci_dev {
+  * going forward.  This structure will never be under KABI restrictions.
+  */
+ struct pci_dev_rh {
+-        RH_KABI_EXTEND(u8   dma_alias_devfn) /* devfn of DMA alias, ..
++        RH_KABI_EXTEND(unsigned long *dma_alias_mask) /* mask of ..
+         RH_KABI_EXTEND(char *driver_override) /* Driver name to ..
+ #ifdef CONFIG_PPC64
+         RH_KABI_EXTEND(struct pci_dn *pci_data) /* PCI device node*/
+\end{lstlisting}
+\end{minipage}}
+
+Any existing external module references to members of '\texttt{struct
+pci\_dev}' will remain valid. Yes, there will effectively be new members
+to '\texttt{struct pci\_dev}', placed into the extension structure;
+however, external modules compiled against any earlier RHEL kernel
+will not be aware of such additions and so will never attempt to access
+the member or its backing memory.
+
+With a solution in place that is understood not to logically break
+existing external modules, the change would still end up altering
+all symbols with associations to '\texttt{struct pci\_dev}'. The final
+piece of the overall solution is to use RHEL's '\texttt{RH\_KABI\_EXTEND()}'
+macro to circumvent \texttt{\_\_GENKSYMS\_\_} based checking from
+detecting the change.\textsuperscript{\ref{fn:c3f10}}
+
+\subsection{Caveats}
+
+There are some fairly strict requirements that the existing kernel
+data structure predicted to need members added to at some future time
+must meet.
+
+This method is not allowed after an encumbered data structure's symbol
+has become protected. The extension member must be implemented prior
+to becoming locked down, possibly pro-actively as part of the release's
+origin.
+
+One concerning caveat to this method is bringing in references to
+any new members introduced in this fashion from upstream. As a direct
+result of new members being added to RHEL's specific extension structure,
+references to any such members will have to be adjusted to account
+for the extra level of indirection incurred when back-porting (i.e.,
+upstream references like 'pci\_dev-><member>' have to be converted
+to '\texttt{pci\_dev->pci\_dev\_rh-><member>}').
+
+Only the addition of new members is allowed. Member deletions, and
+even re-arrangements, are prohibited.
+
+\section{Case Study: Adding Members to Non-Centrally Allocated Kernel Data
+Structures \label{sec:Case-Study:Adding-Members-Non-Centrally}}
+
+Upstream reference: commit 2d984ad132a
+
+RHEL7 back-port reference: commit bef916144ab \footnote{RHEL7: commit \texttt{bef916144ab} ``PM: add Red Hat dev\_pm\_info\_rh
+struct''}
+
+This case study is similar to \ref{sec:Case-Study:Adding-Members-Centrally}
+\nameref{sec:Case-Study:Adding-Members-Centrally} in that it is concerned
+with adding new members to an existing kernel data structure, in this
+case '\texttt{struct device}'. \footnote{\texttt{include/linux/device.h::struct device \{ … \}}}What
+differs, however, is that the existing kernel data structure does
+not have a centralized allocation routine with which to collocate
+the extension's allocation, introducing an additional consideration
+that has to be taken into account, making things quite a bit more
+complex, and worth specifically looking at.
+
+The same, pre-requisite, associated extension structure setup is necessary
+and took place during RHEL7's initial kernel development phase, via
+commit \texttt{9f84482488d} ``device: Create 'device\_rh' KABI shadowing
+structure'', which put a pointer to a RHEL specific kABI extension
+structure, '\texttt{struct device\_rh}', onto the end of '\texttt{struct
+device}'. \footnote{RHEL7: {[}PATCH 0/2{]} driver-core: Add KABI shadow structs to kernel's
+driver subsys
+
+\texttt{3ba6b481780} device: Create 'device\_driver\_rh' KABI shadowing
+structure
+
+\texttt{9f84482488d} device: Create 'device\_rh' KABI shadowing structure}
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff -git a/include/linux/device.h b/include/linux/device.h
+index 19f4329b539..f8374e30669 100644
+--- a/include/linux/device.h
++++ b/include/linux/device.h
+@@ -754,6 +754,19 @@ struct device {
+
+         bool                                offline_disabled:1;
+         bool                                offline:1;
++
++        /* Extension to accomodate future upstream changes to this structure
++         * yet maintain RHEL7 KABI.  For Red Hat internal use only!
++         */
++        struct device_rh        *device_rh;
++};
++
++/* RHEL7 specific 'struct device_rh' shadow structure to help maintain KABI
++ * going forward.  This structure will never be under KABI restrictions.
++ */
++struct device_rh {
++#ifndef __GENKSYMS__
++#endif
+ };
+ 
+ static inline struct device *kobj_to_dev(struct kobject *kobj)
+\end{lstlisting}
+\end{minipage}}
+
+The '\texttt{device}' structure, from the kernel's device driver subsystem,
+underlies every device that runs on Linux. The sequence that device
+drivers typically use with respect to getting a device initialized
+-- \emph{device registration} -- is to first obtain an allocated
+'device' structure, typically via inheritance from a device specific
+subsystem, and then, at some later time, call '\texttt{device\_add()}'
+which adds the device entry to the kernel with reference counting.
+As such, '\texttt{struct device}' does not have a centralized function
+for its allocation; allocations are distributed throughout the kernel.
+
+Distributed allocations of '\texttt{device}' structures, typically
+from within each of the kernel's specific device related subsystem's
+themselves, introduces an additional consideration that must be taken
+into account: ``Where is a good place to add the allocation of the
+corresponding kABI extension structure?'' When the need to add a
+member to RHEL's '\texttt{device}' structure finally arose -- during
+the kernel development phase of RHEL 7.2 -- commit \texttt{928a66966c2}
+``device: allocate/free Red Hat only struct device\_rh'' took the
+approach of not collocating RHEL's extension structure allocations
+with their respective '\texttt{device}' structure allocations, but
+instead, to augment the '\texttt{device\_add()}' function to perform
+the extension's allocation.
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff -git a/drivers/base/core.c b/drivers/base/core.c
+index aa6cc6f7f2d..75ed70b3a78 100644
+--- a/drivers/base/core.c
++++ b/drivers/base/core.c
+@@ -1060,6 +1060,10 @@ int device_add(struct device *dev)
+         if (!dev)
+                 goto done;
+
++        /* allocate the Red Hat only struct */
++        dev->device_rh = kzalloc(sizeof(struct device_rh),
++                                 GFP_KERNEL | __GFP_NOFAIL);
++
+         if (!dev->p) {
+                 error = device_private_init(dev);
+                 if (error)
+@@ -1304,6 +1308,8 @@ void device_del(struct device *dev)
+         kobject_uevent(&dev->kobj, KOBJ_REMOVE);
+         cleanup_device_parent(dev);
+         kobject_del(&dev->kobj);
++        /* This free's the allocation done in device_add() */
++        kfree(dev->device_rh);
+         put_device(parent);
+ }
+\end{lstlisting}
+\end{minipage}}
+
+As device registration first obtains an allocated '\texttt{device}'
+structure and then, some separate time later, calls '\texttt{device\_add()}',
+there is a window of time in which 'struct device' exists, and can
+be accessed, prior to device registration's completion via '\texttt{device\_add()}',
+and there are driver, and kernel, paths that access members of '\texttt{struct
+device}' within this window. This is not an issue for upstream, as
+all accesses obviously occur after the allocation. A consequence of
+the approach taken in this case for RHEL, however, is accesses within
+this window that, now by extension, reference '\texttt{struct device\_rh}'.
+Such accesses cause the kernel to panic de-referencing a \texttt{NULL}
+pointer with RHEL as a consequence of '\texttt{struct device\_rh}'
+not yet having been allocated. As such, some code paths need the extension
+structure allocated prior to '\texttt{device\_add()}' being called,
+which subsequently requires extra checking within RHEL's customized
+'\texttt{device\_add()}' routine to see if '\texttt{struct device\_rh}'
+has already been allocated or not. This was covered with commit \texttt{ef52e4a544c}
+``device: add device\_rh\_alloc()''.
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff --git a/drivers/base/core.c b/drivers/base/core.c
+index d142ffcefc2..2b210cf4b0f 100644
+--- a/drivers/base/core.c
++++ b/drivers/base/core.c
+@@ -1039,6 +1039,16 @@ int device_private_init(struct device *dev)
+         return 0;
+ }
+ 
++/** device_rh_alloc - allocate a device_rh
++ * @dev: device to attach device_rh to.
++ */
++void device_rh_alloc(struct device *dev)
++{
++        dev->device_rh = kzalloc(sizeof(struct device_rh),
++                                 GFP_KERNEL | __GFP_NOFAIL);
++}
++EXPORT_SYMBOL_GPL(device_rh_alloc);
++
+ /**
+  * device_add - add device to device hierarchy.
+  * @dev: device.
+@@ -1072,9 +1082,17 @@ int device_add(struct device *dev)
+        if (!dev)
+                goto done;
+
+-        /* allocate the Red Hat only struct */
+-           dev->device_rh = kzalloc(sizeof(struct device_rh),
+-                                    GFP_KERNEL | __GFP_NOFAIL);
++        /* In general, this is where we allocate the Red Hat only struct.
++         * A known exception is the acpi_bus_scan() which requires elements
++         * from the device_rh struct during initialization.  This test will
++         * allow code to allocate & use the device_rh struct prior to calling
++         * device_add().
++         *
++         * Regardless of when allocated, the device_rh will be free'd at the
++         * end of device_del().
++         */
++        if (!dev->device_rh)
++                device_rh_alloc(dev);
+
+         if (!dev->p) {
+                 error = device_private_init(dev);
+\end{lstlisting}
+\end{minipage}}
+
+The default extension related allocation remains within '\texttt{device\_add()}';
+however, extension allocations necessary prior to such now have to
+be enacted throughout the kernel in a somewhat ad hoc, case-by-case,
+manner; usually upon each occurrence of a de-referencing panic (along
+with the additional work of root cause analysis and re-working of
+the path's specific, allocation related, need). \footnote{RHEL7: Since commit \texttt{ef52e4a544c} there have been similar occurrences
+encountered: see commits \texttt{320d729cf76}, \texttt{3f726c5d045},
+\texttt{e03b2d39fce}, \texttt{e25bbd31c16}, \texttt{a3929deae7e},
+\texttt{731dc052b42}. Commit \texttt{b369cf3d0d5} is also related.} \footnote{RHEL7: With hindsight, while collocating '\texttt{struct device\_rh}'
+allocations with '\texttt{struct device}' allocations would have been
+much more invasive, it would have prevented the introduction of the
+RHEL specific window in which references to '\texttt{struct device\_rh}'
+can occur. Perhaps the invasiveness could be handled in the future
+by leaving the allocations to the device drivers themselves: when
+a driver recognizes the need for a new member residing within '\texttt{struct
+device\_rh}', it then performs the allocation of '\texttt{struct device\_rh}'
+where appropriate if it has not yet done so already.}
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff --git a/drivers/ata/libata-transport.c b/drivers/ata/libata-transport.c
+index fd29b722408..6c52db6e941 100644
+--- a/drivers/ata/libata-transport.c
++++ b/drivers/ata/libata-transport.c
+@@ -660,6 +660,7 @@ static int ata_tdev_add(struct ata_device *ata_dev)
+         int error;
+
+         device_initialize(dev);
++        device_rh_alloc(dev);
+         dev->parent = get_device(&link->tdev);
+         dev->release = ata_tdev_release;
+         if (ata_is_host_link(link))
+diff --git a/drivers/base/platform.c b/drivers/base/platform.c
+index 55684f06283..f6a50dbe3bd 100644
+--- a/drivers/base/platform.c
++++ b/drivers/base/platform.c
+@@ -209,6 +209,7 @@ struct platform_device *platform_device_alloc(const char *name, int id)
+                device_initialize(&pa->pdev.dev);
+                pa->pdev.dev.release = platform_device_release;
+                arch_setup_pdev_archdata(&pa->pdev);
++               device_rh_alloc(&pa->pdev.dev);
+        }
+ 
+        return pa ? &pa->pdev : NULL;
+diff --git a/drivers/pci/probe.c b/drivers/pci/probe.c
+index 18c5a9c2b82..6fa2f418ea3 100644
+--- a/drivers/pci/probe.c
++++ b/drivers/pci/probe.c
+@@ -568,6 +568,7 @@ static struct pci_host_bridge *pci_alloc_host_bridge(struct pci_bus *b)
+        bridge = kzalloc(sizeof(*bridge), GFP_KERNEL);
+        if (!bridge)
+                return NULL;
++       device_rh_alloc(&bridge->dev);
+ 
+        INIT_LIST_HEAD(&bridge->windows);
+        bridge->bus = b;
+diff --git a/drivers/pnp/core.c b/drivers/pnp/core.c
+index cb6ce42f8e7..0c8d8f8977f 100644
+--- a/drivers/pnp/core.c
++++ b/drivers/pnp/core.c
+@@ -133,6 +133,7 @@ struct pnp_dev *pnp_alloc_dev(struct pnp_protocol *protocol, int id,
+        dev = kzalloc(sizeof(struct pnp_dev), GFP_KERNEL);
+        if (!dev)
+                return NULL;
++       device_rh_alloc(&dev->dev);
+ 
+        INIT_LIST_HEAD(&dev->resources);
+        INIT_LIST_HEAD(&dev->options);
+\end{lstlisting}
+\end{minipage}}
+
+From here on out the case study is similar to \ref{sec:Case-Study:Adding-Members-Centrally}
+\nameref{sec:Case-Study:Adding-Members-Centrally} with the additional
+caveat that additional latent issues yet uncovered may yet occur and
+need addressed as outlined.
+
+\subsection{Caveats}
+
+This method is not allowed after an encumbered data structure's symbol
+has become protected. The extension member must be implemented prior
+to becoming locked down, possibly pro-actively as part of the release's
+origin.
+
+One caveat to this method concerns bringing in future references to
+any new members introduced in this fashion from upstream. As a direct
+result of new members being added to RHEL's specific extension structure,
+references to any such members will have to be adjusted to account
+for the extra level of indirection incurred when back-porting (i.e.,
+upstream references like '\texttt{dev-><member>}' have to be converted
+to '\texttt{dev->device\_rh-><member>}').
+
+Only the addition of new members is allowed. Member deletions, re-naming,
+and even re-arrangements, are prohibited.
+
+\section{Case Study: Exploiting Holes within Kernel Data Structures \label{sec:Case-Study:Exploting-Holes}}
+
+Upstream reference: commit \texttt{9d26d3a8f1b}
+
+RHEL7 back-port reference: commit \texttt{a040fb72b14} \footnote{RHEL7: commit \texttt{a040fb72b14} ``PCI: Put PCIe ports into D3
+during suspend”}
+
+This case study covers the easiest approach for adding members to
+existing kernel data structures without breaking kABI. As the study's
+title suggests, it involves exploiting existing holes within kernel
+data structures. Kernel developers typically take data structure member
+alignment and padding aspects into consideration during development,
+attempting to both align, and pack, structures as efficiently, and
+tightly, as possible. \footnote{Kernel code, especially development of kernel data structures, is
+typically written to conform to natural alignment constraints, a scheme
+that is sufficiently strict to ensure portability across multiple
+architectures. Natural alignment requires that every \texttt{N} byte
+access must be aligned on a memory address boundary of \texttt{N}
+which can be expressed in terms of the modulus operator: \texttt{(addr
+\% N)} must be zero.} Even so, holes within structures sometimes exist.
+
+If an existing hole can be found within a protected kernel data structure
+that, including all alignment concerns, is equal to or greater than
+the size of a new member needing to be added, the hole can be exploited
+for adding the member while still maintaining kABI.
+
+An upstream patch, targeted for back-porting into RHEL, added a new
+'\texttt{bridge\_d3}' member to '\texttt{struct pci\_dev}'.\textsuperscript{\ref{fn:c1f6}}
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff --git a/include/linux/pci.h b/include/linux/pci.h
+index 8d748345b158..8597b423cb63 100644
+--- a/include/linux/pci.h
++++ b/include/linux/pci.h
+@@ -294,6 +294,7 @@ struct pci_dev {
+      unsigned int    d2_support:1;   /* Low power state D2 is supported */
+      unsigned int    no_d1d2:1;      /* D1 and D2 are forbidden */
+      unsigned int    no_d3cold:1;    /* D3cold is forbidden */
++     unsigned int    bridge_d3:1;    /* Allow D3 for bridge */
+      unsigned int    d3cold_allowed:1;       /* D3cold is allowed by user */
+      unsigned int    mmio_always_on:1;       /* disallow turning off io/mem
+                                                 decoding during bar sizing */
+\end{lstlisting}
+\end{minipage}}
+
+The '\texttt{pci\_dev}' structure is the base data structure of the
+kernel's PCI subsystem, and as such, there are numerous kABI-protected
+symbols with associations to it. A straight back-port would break
+kABI due to its side-effect of changing the version checksums of all
+symbols '\texttt{pci\_dev}' is correlated with.
+
+The new member is a single bit bit-field declaration, and with careful
+inspection of RHEL's '\texttt{struct pci\_dev}' (RHEL 7's structure
+varies from upstream's), there looked to be a ``hole'' between the
+end of the previously existing bit-fields and the '\texttt{d3\_delay}'
+member. Running the '\texttt{pahole(1)}' utility against '\texttt{struct
+pci\_dev}' confirmed that a 14-bit hole existed:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+  /* Bitfield combined with previous fields */
+  unsigned int               pme_support:5;        /*   124:19  4 */
+  ...
+  unsigned int               bridge_d3:1;          /*   124: 7  4 */
+  /* XXX 14 bits hole, try to pack */
+\end{lstlisting}
+\end{minipage}}
+
+RHEL7 Patch 09/23 ``PCI: Put PCIe ports into D3 during suspend''
+used just such an exploitation. During the back-port, the new member
+was inserted within the existing hole. As the hole already existed,
+both the size of the overall structure, and the offsets of all existing
+members within the structure, were not altered as long as the insertion
+was performed at the end of the bit fields. Incidentally, any existing
+external modules would not know about the newly introduced member,
+thus should never attempt to access that part of the structure's memory.
+
+While the solution is understood not to logically effect existing
+external modules, the change would still end up altering all symbols
+with associations to '\texttt{struct pci\_dev}'. The final piece of
+the overall solution is to use RHEL's '\texttt{RH\_KABI\_FILL\_HOLE()}'
+macro to specifically circumvent \texttt{\_\_GENKSYMS\_\_} based checking
+from detecting the change.\textsuperscript{\ref{fn:c3f10}}
+
+\subsection{Caveats}
+
+A benefit of this tactic is that all code references of the new member
+do not have to be modified during the initial, and all future subsequent,
+back-ports.
+
+Holes within existing kernel data structures that can be utilized
+are very rare. One may want to consider saving them for performance-sensitive
+code additions, if another workaround is possible. If there are no
+other methods available and the hole is the last one available, one
+may want to consider not back-porting the code in question, instead
+saving the hole for use with a more critical back-port requiring a
+kABI workaround.
+
+\section{Case Study: Kernel Header Files \label{sec:Case-Study:Kernel-Header-Files}}
+
+Upstream reference: commit \texttt{589fcc23074}
+
+RHEL7 back-port reference: commit \texttt{0c9beb71177} \footnote{\label{fn:b5f13}rhkernel-list: {[}RHEL7.3 PATCH 00/61{]} Re-base
+PCI subsystem with v3.18 content
+
+\texttt{0c9beb71177} {[}RHEL7.3 PATCH 15/16{]} PCI: Move pci\_configure\_slot()
+to drivers/pci/probe.c}
+
+There is an interesting situation concerning forward declarations
+of kernel data structures that yields ``false kABI failures'' from
+the checking tools. The scenario typically involves header files in
+which prior to the patch series' changes, a source file only knows
+about a specific data structure via an incomplete forward declaration
+(i.e., \texttt{struct pci\_dev;}). Then, as a direct result of the
+patch including an additional header file, the source file now knows
+the structure's full declaration (i.e., \texttt{struct pci\_dev \{
+... \};}).
+
+Basically what has occurred with respect to the source file is that
+what was an opaque reference to a structure subsequently becomes non-opaque
+due to the new header file inclusion that adds -- directly, or indirectly
+-- the structure's full declaration.
+
+Including header files may change the parsing of structures, which
+can result in a false-positive kABI failure.
+
+These situations can be particularly hard to track down and isolate
+as the root of the kABI failure.
+
+During RHEL7.3's kernel development phase, commit \texttt{0c9beb71177}
+`` PCI: Move pci\_configure\_slot() to drivers/pci/probe.c'' was
+pro-actively back-ported, moving a function from one source file to
+another.\textsuperscript{\ref{fn:b5f13}} As a necessary result of
+the move, an additional header file was included within the destination's
+source file.
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff --git a/drivers/pci/probe.c b/drivers/pci/probe.c
+index 4c22517..3c01e49 100644
+--- a/drivers/pci/probe.c
++++ b/drivers/pci/probe.c
+@@ -6,6 +6,7 @@
+ #include <linux/delay.h>
+ #include <linux/init.h>
+ #include <linux/pci.h>
++#include <linux/pci_hotplug.h>
+ #include <linux/slab.h>
+ #include <linux/module.h>
+ #include <linux/cpumask.h>
+\end{lstlisting}
+\end{minipage}}
+
+What was particularly interesting about this circumstance was that
+RHEL's build related kABI checking did not flag a kABI failure whereas
+the '\texttt{ksc(1)}' kABI checking tool, which was used by a partner,
+indicated that the following symbol's kABI checksums changed and affects
+(breaks) their modules, leading them to request for the symbols to
+become protected:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+pci_read_config_dword
+pci_read_config_word
+pci_write_config_byte
+pci_read_config_byte
+pci_write_config_word
+pci_write_config_dword
+\end{lstlisting}
+\end{minipage}}
+
+These specific symbols were not kABI white-listed (thus why this situation
+was not caught during the back-port's kernel build related checking);
+however, the \texttt{pci\_read/write\_config{*}} functions are really
+just wrappers around \texttt{pci\_bus\_read/write\_config\_{*}} which
+are kABI white-listed. \footnote{Notice the '\texttt{struct pci\_dev}' in the wrapper functions, whereas
+the protected functions are using '\texttt{dev->bus}' and '\texttt{dev->devfn}'.}
+
+This specific instance's circumstances are unique. As the symbols
+were not white-listed, RHEL kernel developers were very reluctant
+to add them as the partner had requested as this could be a slippery
+slope that leading to RHEL being requested to preserve all the kernel's
+exported symbols.
+
+Regardless of the specific circumstances, once isolated, these types
+of false-failures are generally fairly easy to rectify as they can
+be worked around by the use of the \texttt{\_\_GENKSYMS\_\_} pre-processing
+directive.
+
+For this specific case, it exposed a bug in the '\texttt{ksc(1)}'
+tool, so RHEL's kernel development team acquiesced, enacting the easy
+fix to restore the original checksums, but in a manner explicitly
+not adding the symbols to the white-list, via RHEL7 commit \texttt{0c348a6cd87}.
+\footnote{RHEL7: \texttt{0c348a6cd87} ``PCI: Restore original checksums of
+pci symbols''}
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff --git a/drivers/pci/probe.c b/drivers/pci/probe.c
+index 6fa2f418ea3..cba8d30d4e6 100644
+--- a/drivers/pci/probe.c
++++ b/drivers/pci/probe.c
+@@ -6,7 +6,9 @@
+ #include <linux/delay.h>
+ #include <linux/init.h>
+ #include <linux/pci.h>
++#ifndef __GENKSYMS__
+ #include <linux/pci_hotplug.h>
++#endif
+ #include <linux/slab.h>
+ #include <linux/module.h>
+ #include <linux/cpumask.h>
+\end{lstlisting}
+\end{minipage}}
+
+This same technique can often be used to work around false kABI failures
+with similar -- indirect forward declarations of data structures
+becoming full forward declarations -- scenarios.
+
+\subsection{Caveats}
+
+If a header file has kABI protected structures in it, and is the only
+inclusive path to an \texttt{EXPORT\_SYMBOL\{\_GPL\}()}, the \texttt{\_\_GENKSYMS\_\_}
+masking scenario as outlined will now hide all future kABI check failures
+that should have caught kABI protected structure changes within the
+header. Masking header files in this manner should be carefully done
+and may require splitting the header, or specific content therein,
+in a RHEL-only manner to limit the scope of the \texttt{\_\_GENKSYMS\_\_}
+wrapping.
+
+\section{Case Study: Enumerations \label{sec:Case-Study:Enumerations}}
+
+Upstream reference: commit \texttt{95e300c052f}
+
+RHEL7 back-port reference: commit \texttt{a57906f6a8f} \footnote{rhkernel-list: {[}RHEL7.6 BZ 1541533 45/54 V2{]} ipmi: Make the DMI
+probe into a generic platform probe}
+
+Changes to enumeration ordering can affect external modules. RHEL's
+current kABI checking capabilities may not catch simple enumeration
+related changes that indeed affect modules, leading to silent kABI
+failures.
+
+Note how RHEL7.6 commit \texttt{a57906f6a8f} ``IPMI: Make the DMI
+probe into a generic platform probe'' was able to maintain the values
+of previously existing enumerations to preserve kABI.
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff --git a/include/linux/ipmi.h b/include/linux/ipmi.h
+index c0c3aed..eac5879 100644
+--- a/include/linux/ipmi.h
++++ b/include/linux/ipmi.h
+@@ -281,7 +281,10 @@ int ipmi_validate_addr(struct ipmi_addr *addr, int len);
+  */
+ enum ipmi_addr_src {
+        SI_INVALID = 0, SI_HOTMOD, SI_HARDCODED, SI_SPMI, SI_ACPI, SI_SMBIOS,
+-       SI_PCI, SI_DEVICETREE, RH_KABI_RENAME(SI_DEFAULT, SI_LAST)
++       SI_PCI, SI_DEVICETREE, SI_DEFAULT
++#ifndef __GENKSYMS__
++       , SI_PLATFORM = SI_DEFAULT, SI_LAST
++#endif
+ };
+ const char *ipmi_addr_src_to_str(enum ipmi_addr_src src);
+\end{lstlisting}
+\end{minipage}}
+
+Fortunately, updates of enumerations are fairly easy to adhere to
+kABI's requirements. The most common tactic is to convert un-assigned
+enumeration lists into explicitly assigned lists, and then if adding
+new entries is needed, do so in a manner that does not affect any
+previous entries (i.e., if a new, upstream, enumeration was added
+within an existing list, keep the list ordered as it was and add the
+new entry to the end of the list instead).
+
+\chapter{kABI: Canonical Method for Extending Kernel Data Structures }
+
+kABI's impact on kernel data structures is its most subtle, yet arguably
+also its most severe, aspect that kernel developers must be aware
+of. To circumvent this particularly onerous problem, a number of innovative
+implementations have evolved over the years -- hash based associations
+to shadow structures, directly associated opaque extension structures,
+and pre-reserved additions with directly associated opaque extension
+structures -- to name a few.
+
+So, while there have been many iterative solutions developed over
+the years, the consensus is that the method developed and used within
+the kernel's networking subsystem -- a combination of pre-reserving
+entries with an additional ``extension'' structure -- is considered
+to be the canonical model to follow currently.
+
+One of the key data structures within the kernel's networking subsystem
+is '\texttt{net\_device\_ops}'. \footnote{include/linux/netdevice.h::\texttt{struct net\_device\_ops \{ ... \};}}
+This structure is altered upstream on a consistent basis, and there
+are numerous kABI-protected symbols within networking's subsystem
+that reference it. Normally, any changes to '\texttt{struct net\_device\_ops}'
+would break kABI (and KMI), for all symbols it is correlated with.
+As such, let's analyze, via software archeology, the evolution of
+enabling extensions to it over the lifecycle of RHEL 7's release,
+specifically focusing on the tactics it implemented, including explanations
+as to ``why'' the tactics were necessary. While there is some overlap,
+it would be best to have the background knowledge, and context, from
+the kernel data structure related case studies in Appendix B (\ref{sec:Case-Study:Pro-actively-Extending},
+\ref{sec:Case-Study:Adding-Members-Centrally}, \ref{sec:Case-Study:Adding-Members-Non-Centrally}
+\& \ref{sec:Case-Study:Exploting-Holes}) before continuing on.
+
+As should be evident, kABI does not come into play until the originating
+major release's General Availability (GA) (e.g., 7.0).\textsuperscript{\ref{fn:c3f5}}
+Prior to such, external modules do not yet have a kernel basis against
+which to build against, so all kernel development activities are unencumbered.
+RHEL developers, especially maintainers of core kernel subsystems,
+should take advantage of this possibly once-in-a-release opportunity
+to get their subsystem's header files updated to upstream's 'tip'.
+RHEL 7 commit \texttt{4a59d5e8211} ``{[}net{]} core: Add VF link
+state control'' did just that, pulling in recent updates to '\texttt{struct
+net\_device\_ops}' from upstream (commit \texttt{1d8faf48c74}) prior
+to the release's launch. \footnote{RHEL7 commit \texttt{4a59d5e8211} came in with 'kernel-3.10.0-35.el7'
+whereas RHEL 7.0's release was 'kernel-3.10.0-123.el7'.}
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
+index f7ec329dd33..553d6be0159 100644
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -839,6 +839,7 @@ struct netdev_phys_port_id {
+  * int (*ndo_set_vf_spoofchk)(struct net_device *dev, int vf, bool setting);
+  * int (*ndo_get_vf_config)(struct net_device *dev,
+  *                         int vf, struct ifla_vf_info *ivf);
++ * int (*ndo_set_vf_link_state)(struct net_device *dev, int vf, int link_state);
+  * int (*ndo_set_vf_port)(struct net_device *dev, int vf,
+  *                       struct nlattr *port[]);
+  * int (*ndo_get_vf_port)(struct net_device *dev, int vf, struct sk_buff *skb);
+@@ -1002,6 +1003,8 @@ struct net_device_ops {
+        int                     (*ndo_get_vf_config)(struct net_device *dev,
+                                                     int vf,
+                                                     struct ifla_vf_info *ivf);
++       int                     (*ndo_set_vf_link_state)(struct net_device *dev,
++                                                        int vf, int link_state);
+        int                     (*ndo_set_vf_port)(struct net_device *dev,
+                                                   int vf,
+                                                   struct nlattr *port[]);
+\end{lstlisting}
+\end{minipage}}
+
+Subsequently, as a necessary action prior to the release's launch,
+RHEL7 specific commit \texttt{259662d355d} ``net: Reserve extension
+space for 'struct net\_device\_ops'`` was incorporated. This pro-active
+step was enacted specifically to obviate concerns surrounding kABI
+- in order that additions to '\texttt{struct net\_device\_ops}' could
+occur going forward without affecting any future protected symbols
+with which the structure is correlated.
+
+Upon the occurrence of a symbol with which a structure is correlated
+with becoming protected, which for '\texttt{net\_device\_ops}' is
+an all but forgone conclusion, the structure becomes locked down from
+any future changes if not for actions such as this. As such, it is
+especially important for maintainers of externally facing core kernel
+subsystems such as networking, and PCI, (to name a couple) to take
+similar actions as their foundational data structures are the most
+likely to become encumbered with symbols becoming protected.
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
+index 553d6be0159..6d6007e2df9 100644
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -1078,6 +1078,32 @@ struct net_device_ops {
+                                                      bool new_carrier);
+        int                     (*ndo_get_phys_port_id)(struct net_device *dev,
+                                                        struct netdev_phys_port_id *ppid);
++
++       /* RHEL SPECIFIC
++        *
++        * The following padding has been inserted before ABI freeze to
++        * allow extending the structure while preserve ABI. Feel free
++        * to replace reserved slots with required structure field
++        * additions of your backport.
++        */
++#ifndef __GENKSYMS__
++       void                    (*rh_reserved1)(void);
++       void                    (*rh_reserved2)(void);
++       void                    (*rh_reserved3)(void);
+...
++       void                    (*rh_reserved14)(void);
++       void                    (*rh_reserved15)(void);
++       void                    (*rh_reserved16)(void);
++#endif
+ };
+ 
+ /*
+\end{lstlisting}
+\end{minipage}}
+
+At the last minute, just prior to the release's GA, RHEL 7 specific
+commit \texttt{023ac646f29} ``kabi: Remove GENKSYMS usage through
+the code'' was enacted. \footnote{RHEL7 commit \texttt{023ac646f29} came in with 'kernel-3.10.0-120.el7'
+whereas RHEL 7.0's release was 'kernel-3.10.0-123.el7'.}
+
+\emph{...}
+
+\emph{However folks were using this wrapper to clearly indicate which
+chunks of code were being reserved for Red Hat purposes.}
+
+\emph{After thinking about this and discussing it with folks, we realized
+this is not a good idea.  Two reasons have stuck out as to why.}
+
+\emph{First, the idea was that hiding the symbols in the GENKSYSMS
+wrapper, we hide the true checksum of the symbols.  We should try
+to encompass the true checksum for GA.  On the flip side, removing
+the macro and doing things properly for 7.1 would entail:}
+
+\begin{lstlisting}
+struct foo {
+        int bar;
+#ifndef __GENKSYMS__
+        int original;
+#else
+        int new;
+#endif
+}
+\end{lstlisting}
+
+\emph{which leads to ugly and hard to read code.  I agreed to create
+some macros in 7.1 that would hide the ugliness, yet make it obvious
+what is going on.}
+
+\emph{Second, and this is more a social problem, most folks have come
+to assume that anything inside \_\_GENKSYMS\_\_ is free to be modiifed/added.
+ But in this particular example, this is \_not\_ the case.  So to
+prevent the confusion, we should avoid this usage for reserving memory.}
+
+\emph{As a result, I have removed all uses I believe were not correct.
+ There should be no downside as this only affects how genksyms pre-processes
+the symbols and generates checksums.  The only noticable change will
+be new kabi checksums for a bunch of functions.}
+
+\emph{...}
+
+\begin{lstlisting}
+diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
+index c23d772f8b3..42e58d229b1 100644
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -1105,7 +1105,6 @@ struct net_device_ops {
+         * to replace reserved slots with required structure field
+         * additions of your backport.
+         */
+-#ifndef __GENKSYMS__
+        void                    (*rh_reserved1)(void);
+        void                    (*rh_reserved2)(void);
+        void                    (*rh_reserved3)(void);
+@@ -1122,7 +1121,6 @@ struct net_device_ops {
+        void                    (*rh_reserved14)(void);
+        void                    (*rh_reserved15)(void);
+        void                    (*rh_reserved16)(void);
+-#endif
+ };
+ 
+ /*
+\end{lstlisting}
+
+With these actions (specifically commit \texttt{259662d355d}), RHEL's
+networking subsystem's '\texttt{struct net\_device\_ops}' was equipped
+for taking in future extensions (new members) while not affecting
+(breaking) kABI. These actions are similar in effect to what case
+study \fullref{sec:Case-Study:Pro-actively-Extending}
+-- enacted. Such actions are predictive, based on experience, and
+must be pro-active due to symbols starting to become protected and
+external modules beginning to build against a just released major
+version kernel.
+
+As a result of the actions behind the context of RHEL7 commit \texttt{023ac646f29}
+(too many kABI-naive engineers overusing, and abusing, \texttt{\_\_GENKSYMS\_\_};
+anything inside \texttt{\_\_GENKSYMS\_\_} is not free to be modified/added),
+RHEL specific kABI macros were developed, and incorporated, during
+7.1's minor update development cycle {[}see: Appendix C \ref{sec:include/linux/rh_kabi.h}
+\nameref{sec:include/linux/rh_kabi.h}{]}.\textsuperscript{\ref{fn:c3f5}}
+Subsequently, commit \texttt{2d1a734afb0} ``kernel: Use new KABI
+macros'' converted '\texttt{struct net\_device\_ops}' reserved entries
+over to the new macros, specifically '\texttt{RH\_KABI\_RESERVE\_P()}'.
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+@@ -1105,22 +1107,22 @@ struct net_device_ops {
+ * to replace reserved slots with required structure field
+ * additions of your backport.
+ */
+-        void (*rh_reserved1)(void);
+-        void (*rh_reserved2)(void);
+-        void (*rh_reserved3)(void);
+...
+-        void (*rh_reserved14)(void);
+-        void (*rh_reserved15)(void);
+-        void (*rh_reserved16)(void);
++        RH_KABI_RESERVE_P(1)
++        RH_KABI_RESERVE_P(2)
++        RH_KABI_RESERVE_P(3)
+...
++        RH_KABI_RESERVE_P(14)
++        RH_KABI_RESERVE_P(15)
++        RH_KABI_RESERVE_P(16)
+ };
+
+ /*
+\end{lstlisting}
+\end{minipage}}
+
+With the kABI related reserved extension placeholders in place, along
+with the inevitable upstream changes to '\texttt{struct net\_device\_ops}'
+beginning to take place, exchanges such as commit \texttt{332b89c4cae}
+``{[}net{]} introduce dev\_get\_iflink()'' started occurring, adding
+new functionality via the new members introduced by such exchanges.
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
+index 239157b4ebb..02b67f7e3c4 100644
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -970,6 +970,9 @@ struct netdev_phys_port_id {
+  * Called by vxlan to notify the driver about a UDP port and socket
+  * address family that vxlan is not listening to anymore. The operation
+  * is protected by the vxlan_net->sock_lock.
++ *
++ * int (*ndo_get_iflink)(const struct net_device *dev);
++ * Called to get the iflink value of this device.
+ */
+ struct net_device_ops {
+         int (*ndo_init)(struct net_device *dev);
+@@ -1114,7 +1117,7 @@ struct net_device_ops {
+ * to replace reserved slots with required structure field
+ * additions of your backport.
+ */
+-        RH_KABI_RESERVE_P(1)
++        RH_KABI_USE_P(1, int (*ndo_get_iflink)(const struct net_device *dev))
+         RH_KABI_RESERVE_P(2)
+         RH_KABI_RESERVE_P(3)
+         RH_KABI_RESERVE_P(4)
+\end{lstlisting}
+\end{minipage}}
+
+Normally adding new functionality (members) to the structure would
+affect kABI but the placeholders circumvented such unintended consequences.
+
+The '\texttt{net\_device\_ops}' data structure exhibits a unique aspect
+in that it consists exclusively of function pointers to network device
+operations (NDO's): each, and every one, of its members is going to
+be the same size - 8 Bytes. So later, with a back-port like \texttt{332b89c4cae}
+where '\texttt{RH\_KABI\_RESERVE\_P(1)}' is exchanged for ``\texttt{int
+({*}ndo\_get\_iflink)(...)}'', the conversion is exchanging 8 Bytes
+(i.e., ``\texttt{unsigned long rh\_reserved\#\#n}'') with 8 Bytes,
+and due to the structure's nature, exchanges are always going to be
+similarly sized, thus the structure's overall size remains constant.
+As such it's too easy to miss the subtle, yet important, aspects that
+'\texttt{RH\_KABI\_USE\_P()}' plays in such exchanges.
+
+In the back-port of upstream commit \texttt{125c99bc8b6} ``scsi:
+add new scsi-command flag for tagged commands'' (RHEL7 commit \texttt{1a89161c09a}),
+a similar kABI related exchange scenario was enacted. In this specific
+case however, the exchange's resultant type was an 'int' which is
+4 Bytes. \footnote{The C standard leaves it completely up to the compiler, which also
+means the same compiler can make it depend on options and the target
+architecture. '\texttt{gcc}', with respect to 64-bit Linux on Intel
+architectures, produces 32-bit (4 Bytes) '\texttt{int}' types.}
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff --git a/include/scsi/scsi_cmnd.h b/include/scsi/scsi_cmnd.h
+index 9b1ebe610b5..bc2c64ce04f 100644
+--- a/include/scsi/scsi_cmnd.h
++++ b/include/scsi/scsi_cmnd.h
+@@ -54,6 +54,9 @@ struct scsi_pointer {
+         volatile int phase;
+ };
+
++/* for scmd-flags */
++#define SCMD_TAGGED (1  0)
++
+ struct scsi_cmnd {
+         struct scsi_device *device;
+         struct list_head list; /* scsi_cmnd participates in queue lists */
+@@ -140,7 +143,7 @@ struct scsi_cmnd {
+ * The following padding has been inserted before ABI freeze to
+ * allow extending the structure while preserve ABI.
+ */
+-        RH_KABI_RESERVE_P(1)
++        RH_KABI_USE_P(1, int flags) /* Command flags */
+         RH_KABI_RESERVE_P(2)
+         RH_KABI_RESERVE_P(3)
+         RH_KABI_RESERVE_P(4)
+\end{lstlisting}
+\end{minipage}}
+
+An exchange of 8 Bytes with 4 Bytes would change the overall size
+of '\texttt{struct scsi\_pointer}', resulting in a kABI failure. Perhaps
+natural alignment aspects would make this work (i.e., there will be
+a 4 Byte hole included after '\texttt{flags}' and before '\texttt{RH\_KABI\_RESERVE\_P(2)}')
+but that is likely architecture dependent and should not be relied
+upon. Careful inspection of '\texttt{RH\_KABI\_USE\_P()}' reveals
+that its replacement mechanism includes putting the new member into
+a union with an 'unsigned long' member which takes care of two things.
+It ensures there is proper padding so the resulting size doesn't ``shrink''
+and remains 8 Bytes. It also checks that the result didn't ``grow''
+over 8 Bytes ('\texttt{sizeof(unsigned long)}').
+
+So \texttt{RH\_KABI\_USE\_P()} (and \texttt{RH\_KABI\_USE()}) play
+an important role that developers could easily overlook in such kABI
+related exchange scenarios: they help maintain the structure's overall
+size for all various exchange types so as not to inadvertently break
+kABI. More specifically: From the '\texttt{check-kabi}' standpoint,
+things might be fine, due to \texttt{\_\_GENKSYMS\_\_} wrappers, but
+we'd actually end up with silent kABI breakage -- we'd just be lying
+that kABI wasn't broken, effectively.
+
+During RHEL 7.3's kernel development phase it was recognized that
+'\texttt{struct net\_device\_ops}' was beginning to run low on kABI's
+pre-reserved entries ('\texttt{RH\_KABI\_RESERVE\_P(n)}') put in place
+earlier via commit \texttt{259662d355d}. As a result, commit \texttt{e33a3c136b5}
+``net: introduce net\_device\_ops\_extended'' was developed.
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
+index e599072f4c0..750dc19d214 100644
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -805,6 +805,9 @@ struct tc_to_netdev {
+ };
++struct net_device_ops_extended {
++};
++
+ /*
+  * This structure defines the management hooks for network devices.
+  * The following hooks can be defined; unless noted otherwise, they are
+@@ -1286,9 +1289,25 @@ struct net_device_ops {
+                                                sa_family_t sa_family,
+                                                __be16 port))
+         RH_KABI_RESERVE_P(15)
+-        RH_KABI_RESERVE_P(16)
++        RH_KABI_USE_P(16, size_t ndo_size)
++        /* RHEL: put all new non-performance critical ndo's into
++         * net_device_ops_extended. The reserved slots above can be used
++         * only for performance critical operations.
++         * Drivers may access the extended fields directly from
++         * net_device_ops, if they allocated the net_device_ops structure
++         * themselves (usually statically). The kernel core and drivers
++         * using others' net_device_ops must access the extended fields
++         * using the get_ndo_ext macro.
++         */
++        RH_KABI_EXTEND(struct net_device_ops_extended extended)
+ };
+
++#define get_ndo_ext(ops, field) ({                                        \
++        const struct net_device_ops *__ops = (ops);                        \
++        size_t __off = offsetof(struct net_device_ops, extended.field);        \
++        __ops->ndo_size > __off ? __ops->extended.field : NULL;                \
++        })
++
+ /**
+  * enum net_device_priv_flags - &struct net_device priv_flags
+  *
+\end{lstlisting}
+\end{minipage}}
+
+Commit \texttt{259662d355d} accomplishes a number of inter-related,
+yet very subtle, aspects. Similar to what was accomplished in \ref{sec:Case-Study:Adding-Members-Non-Centrally}'s
+kABI case study, a '\texttt{struct net\_device\_ops\_extended}' extension
+data structure was added onto the end of '\texttt{struct net\_device\_ops()}'
+via '\texttt{RH\_KABI\_EXTEND()}' which effectively masks the extension
+from '\texttt{genksyms}' symbol versioning so as to not break kABI
+as a unintended consequence of changing the structure's overall size.
+What is different in this instance, however, is that the extension
+structure is put into place after the fact (i.e., after the structure
+had been locked down with respect to kABI), and is appended onto the
+end of the originating structure ('\texttt{net\_device\_ops}') as
+opposed to adding a pointer to a kABI specific opaque extension structure.
+In this particular application, that's an important tactic to the
+overall approaches' strategy as it obviates all the allocation considerations,
+and subsequent resultant issues, that \ref{sec:Case-Study:Adding-Members-Non-Centrally}
+suffered.
+
+Prior to this commit, new functionality (NDOs) were enacted via substitutions
+- exchanging a pre-reserved slot with a new NDO function pointer.
+After this commit, similar substitutions introducing new functionality
+could occur as before, or via the '\texttt{struct net\_device\_ops\_extended}'
+extension structure introduced. As noted in the patch's comment, the
+idea was add ``performance critical operations'' via pre-reserved
+slot exchanges, and to add ``non-performance critical ndo's'' via
+the newly inserted '\texttt{net\_device\_ops\_extended}' extension
+structure.
+
+A critical component of this implementation relates to its multi-faceted
+guard mechanism. Extending kernel data structures correlated with
+protected symbols is all about enabling new feature content developed
+upstream -- via back-ports into RHEL -- without breaking RHEL's
+kABI commitment. The kABI related extension mechanisms enable this,
+specifically allowing new members to be added to a structure encumbered
+with one or more protected symbols which can take place within any
+minor update's development cycle. As a result, from the kernel's perspective:
+protection encumbered data structures with extension mechanisms enabled
+pro-actively may change size (growing -- from additions -- only)
+during any minor update cycle.
+
+\begin{table}[h]
+\begin{centering}
+\begin{tabular}{@{}l|lll@{}}
+\textbf{Kernel vn} & \textbf{Num members} & \textbf{Total size} & \textbf{Member offsets}\tabularnewline
+\hline 
+\textbf{7.0 } & 72  & 0x240  & 0x000, 0x008, ..., 0x238\tabularnewline
+\textbf{7.3 } & 79  & 0x278  & 0x000, 0x008, ..., 0x270\tabularnewline
+\textbf{7.5 } & 94  & 0x2F0  & 0x000, 0x008, ..., 0x2E8\tabularnewline
+\end{tabular}
+\par\end{centering}
+\caption{'\texttt{struct net\_device\_ops}' (kernel's perspective)}
+\end{table}
+
+However, external modules that were compiled against earlier kernel
+versions, and thus would not know about such structure growth (``kernel/module
+variance''), must continue to load (attach) and run upon newer kernels
+- RHEL's kABI commitment.\textsuperscript{\ref{fn:c3f1}} This implies
+that the kernel's data structure growth has to be enacted in a way
+that accounts for this type of ``kernel/module variance''. This
+is the concern that the guard mechanism involves.
+
+As outlined in the commit's message: going forward, all NDO additions
+using '\texttt{net\_device\_ops\_extended}' must have their references
+``wrapped in the provided '\texttt{get\_ndo\_ext()}' macro''. Otherwise,
+back-ported core kernel references to such NDO based extensions will
+not even compile successfully. Additionally, again going forward,
+all back-ported driver code needing to reference such NDO based extensions
+must also be modified -- which includes external modules -- otherwise
+they will not compile successfully. So inherent to the implementations
+design, is this ``built-in'' guard mechanism's implicit facet.
+
+The guard mechanism's other facet is explicit and has to do with its
+'ndo\_size' member addition and corresponding '\texttt{get\_ndo\_ext()}'
+macro which act in concert with each other. As covered in the commit's
+message: ``It's intentionally a separate struct because calling anything
+in the extended area is unsafe (because 'net\_device\_ops' is allocated
+by drivers).'' If driver code needs to reference any of the NDO extensions,
+it has to set '\texttt{ndo\_size}' as part of its allocation phase
+tasks as was done in commit \texttt{b62901b5257} ``{[}net{]} move
+ndo\_dfwd\_add/del\_station to net\_device\_ops\_extended''.
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+diff --git a/drivers/net/.../ixgbe/ixgbe_main.c b/drivers/net/.../ixgbe/ixgbe_main.c
+index 5168b849df4..159b5bbadcc 100644
+--- a/drivers/net/ethernet/intel/ixgbe/ixgbe_main.c
++++ b/drivers/net/ethernet/intel/ixgbe/ixgbe_main.c
+@@ -8655,6 +8655,7 @@ ixgbe_features_check(struct sk_buff *skb, struct net_device *dev,
+ }
+ static const struct net_device_ops ixgbe_netdev_ops = {
++        .ndo_size = sizeof(struct net_device_ops),
+         .ndo_open = ixgbe_open,
+         .ndo_stop = ixgbe_close,
+         .ndo_start_xmit = ixgbe_xmit_frame,
+\end{lstlisting}
+\end{minipage}}
+
+Consider the scenario where an external module that is some type of
+networking related driver defines within itself a '\texttt{static
+struct net\_device\_ops <instance\_name>;}' structure. \footnote{The structure could also be an external variable (e.g., defined outside
+of any function); but not automatic (e.g., defined within any function).
+External and static variables are guaranteed to be initialized to
+zero; automatic and register variables have undefined (i.e., garbage)
+initial values.} From the perspective of this driver module, when compiled against
+a RHEL 7.0 kernel, its local version of 'struct net\_device\_ops'
+has 72 members and consumes 0x240 Bytes. Now assume that this module
+has attached to, and is running on a newer kernel and calls a routine
+within the networking subsystem's core, passing in as an argument,
+a pointer to its copy of '\texttt{struct net\_device\_ops}' (i.e.
+\texttt{<instance\_name>}). The kernel's point of view of '\texttt{struct
+net\_device\_ops}' includes all the extensions that have taken place
+throughout all its updates cycles. As such, code within it may attempt
+to access any one of the NDO members added after 7.0's GA.
+
+To make the scenario concrete, assume:
+\begin{itemize}
+\item the driver module was compiled against a 7.0 kernel;
+\item the driver module attaches to, and is running on, a 7.5 kernel;
+\item a routine within the kernel's networking subsystem's core, called
+by the module, accesses the last function pointer added onto the '\texttt{net\_device\_ops\_extended}'
+extension structure -- member 94's NDO -- via a pointer the module
+defined within itself.
+\end{itemize}
+Without the guard mechanism in place, the resulting dereference will
+not obtain what was intended, it would be accessing some completely
+unrelated memory that is somewhere past the module's allocated memory
+backing\linebreak'\texttt{net\_device\_ops}'. At best, chaos will ensue and
+the kernel will panic. At worst, data corruption will silently occur.
+This is where the commit's (\texttt{259662d355d}) guard mechanism
+explicitly comes into play, circumventing this type of unintended
+kernel/module variance induced occurrence.
+
+Now consider the same scenario and concrete example, but, with the
+guard mechanism -- '\texttt{ndo\_size}' and\linebreak'\texttt{get\_ndo\_ext()}'
+-- enacted by commit \texttt{259662d355d} in place. Even though the
+driver module has no knowledge of the new '\texttt{ndo\_size}' member
+(as it was compiled against a 7.0 kernel), its idea of the corresponding
+memory location backing '\texttt{net\_device\_ops}' -- '\texttt{RH\_KABI\_RESERVE\_P(16)}'
+-- will contain the value '\texttt{0}' as a result of the module's
+'\texttt{struct net\_device\_ops}' allocation having been '\texttt{static}'.
+However, from the 7.5 kernel's perspective, the memory offset corresponds
+to the '\texttt{ndo\_size}' member. As a result, when the kernel attempts
+to access the member (94) via '\texttt{get\_ndo\_ext()}', the macro's
+computation will fail the guard's test and return a \texttt{NULL}
+value:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+get_ndo_ext(ops, field) {
+        const struct net_device_ops *__ops = (ops);        // Module's pointer
+        size_t __off = offsetof(struct net_device_ops, extended.field);        // 0x2E8
+        __ops->ndo_size > __off ? __ops->extended.field : NULL;        // 0x0 > 0x2E8 ?:=> NULL
+}
+\end{lstlisting}
+\end{minipage}}
+
+As \texttt{259662d355d}'s commit message states -- ``This is of
+somehow lesser concern, as forgetting it won't cause crashes, the
+pointer would just be ignored.'' -- the dereference (pointer) obtains
+a \texttt{NULL} value and can be ignored.
+
+Finally, consider the scenario, but, with respect to a driver module
+that is cognizant of NDO extensions. Assume, as a concrete example:
+\begin{itemize}
+\item the driver module was compiled against a 7.3 kernel;
+\item the driver module attaches to, and is running on, a 7.5 kernel;
+\item a routine within the kernel's networking subsystem's core, called
+by the module, accesses the last function pointer added onto the '\texttt{net\_device\_ops\_extended}'
+extension structure that the module is aware of - member 79's NDO
+-- via a pointer the module defined within itself.
+\end{itemize}
+When the kernel attempts to obtain member 79's NDO via '\texttt{get\_ndo\_ext()}',
+the access passes the guard's test and successfully obtains the '\texttt{\_\_ops->extended.field}'
+pointer:
+
+\shadowbox{\begin{minipage}[t]{\mpwidth}
+\begin{lstlisting}
+get_ndo_ext(ops, field) {
+        const struct net_device_ops *__ops = (ops);        // Kernel's pointer
+        size_t __off = offsetof(struct net_device_ops, extended.field);        // 0x270
+        __ops->ndo_size > __off ? __ops->extended.field : NULL;        // 0x278 > 0x270 ?:=> field
+}
+\end{lstlisting}
+\end{minipage}}
+
+As the analysis shows, there are a myriad of subtle, inter-related,
+aspects involved in successfully extending kernel data structures
+encumbered with protected symbols in a manner that accounts for kernel/module
+variance, and that doesn't break kABI (and KMI). These actions are
+similar, but expand upon such considerably, to the actions taken in
+case study \ref{sec:Case-Study:Adding-Members-Non-Centrally}, and
+represent the best currently known approach to date.
+
+One size does not necessarily fit all however, so actions similar
+to what were taken in case study \ref{sec:Case-Study:Adding-Members-Centrally}
+may be completely adequate {[}note the networking subsystem's similar
+approach that was taken in commit \texttt{112e7b85d12} ``Generalize
+ndo\_gso\_check to ndo\_features\_check''{]}.
+
+\subsection{Caveats}
+
+With respect to substitutions (exchanges) using the pre-reserved entries:
+\begin{itemize}
+\item In applications similar to commit \texttt{259662d355d}, the reserved
+slots above can be used only for performance critical operations.
+\item All code references of the new member(s) do not have to be modified
+during the initial, and all future subsequent, back-ports.
+\end{itemize}
+With respect to substitutions (exchanges) using the ``extension''
+structure:
+\begin{itemize}
+\item In applications similar to commit \texttt{259662d355d}, all new non-performance
+critical member(s) should be installed into the ``extension'' structure.
+\item As a direct result of new members being added to RHEL's specific extension
+structure, references to any such members will have to be adjusted
+during the initial, and all future subsequent, back-ports.
+\end{itemize}
+
+\end{document}
