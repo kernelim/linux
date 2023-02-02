@@ -30,8 +30,12 @@
 
 extern const char __hyp_panic_string[];
 
-extern struct exception_table_entry __start___kvm_ex_table;
-extern struct exception_table_entry __stop___kvm_ex_table;
+struct kvm_exception_table_entry {
+	int insn, fixup;
+};
+
+extern struct kvm_exception_table_entry __start___kvm_ex_table;
+extern struct kvm_exception_table_entry __stop___kvm_ex_table;
 
 /* Check whether the FP regs were dirtied while in the host-side run loop: */
 static inline bool update_fp_enabled(struct kvm_vcpu *vcpu)
@@ -517,7 +521,7 @@ static inline void __kvm_unexpected_el2_exception(void)
 {
 	unsigned long addr, fixup;
 	struct kvm_cpu_context *host_ctxt;
-	struct exception_table_entry *entry, *end;
+	struct kvm_exception_table_entry *entry, *end;
 	unsigned long elr_el2 = read_sysreg(elr_el2);
 
 	entry = hyp_symbol_addr(__start___kvm_ex_table);

@@ -1872,6 +1872,7 @@ static int xs_local_finish_connecting(struct rpc_xprt *xprt,
 		sk->sk_write_space = xs_udp_write_space;
 		sock_set_flag(sk, SOCK_FASYNC);
 		sk->sk_error_report = xs_error_report;
+		sk->sk_allocation = GFP_NOFS;
 
 		xprt_clear_connected(xprt);
 
@@ -2078,6 +2079,7 @@ static void xs_udp_finish_connecting(struct rpc_xprt *xprt, struct socket *sock)
 		sk->sk_data_ready = xs_data_ready;
 		sk->sk_write_space = xs_udp_write_space;
 		sock_set_flag(sk, SOCK_FASYNC);
+		sk->sk_allocation = GFP_NOFS;
 
 		xprt_set_connected(xprt);
 
@@ -2243,6 +2245,7 @@ static int xs_tcp_finish_connecting(struct rpc_xprt *xprt, struct socket *sock)
 		sk->sk_write_space = xs_tcp_write_space;
 		sock_set_flag(sk, SOCK_FASYNC);
 		sk->sk_error_report = xs_error_report;
+		sk->sk_allocation = GFP_NOFS;
 
 		/* socket options */
 		sock_reset_flag(sk, SOCK_LINGER);

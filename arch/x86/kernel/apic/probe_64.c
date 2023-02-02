@@ -42,9 +42,6 @@ void __init default_setup_apic_routing(void)
 			break;
 		}
 	}
-
-	if (x86_platform.apic_post_init)
-		x86_platform.apic_post_init();
 }
 
 /* Same for both flat and physical. */

@@ -15,6 +15,7 @@
 #include <asm/asm.h>
 #include <asm/smap.h>
 #include <asm/export.h>
+#include <asm/trapnr.h>
 
 .macro ALIGN_DESTINATION
 	/* check for bad alignment of destination */
@@ -223,6 +224,7 @@ EXPORT_SYMBOL(copy_user_enhanced_fast_string)
  * it is not necessary to optimize tail handling.
  *
  * Input:
+ * eax trap number written by ex_handler_copy()
  * rdi destination
  * rsi source
  * rdx count
@@ -232,9 +234,17 @@ EXPORT_SYMBOL(copy_user_enhanced_fast_string)
  */
 ALIGN;
 .Lcopy_user_handle_tail:
+	cmp $X86_TRAP_MC,%eax
+	je 3f
+
 	movl %edx,%ecx
 1:	rep movsb
 2:	mov %ecx,%eax
+	ASM_CLAC
+	RET
+
+3:
+	movl %edx,%eax
 	ASM_CLAC
 	RET
 

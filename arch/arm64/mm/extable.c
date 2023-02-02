@@ -6,19 +6,38 @@
 #include <linux/extable.h>
 #include <linux/uaccess.h>
 
-int fixup_exception(struct pt_regs *regs)
+#include <asm/asm-extable.h>
+
+typedef bool (*ex_handler_t)(const struct exception_table_entry *,
+			     struct pt_regs *);
+
+static inline unsigned long
+get_ex_fixup(const struct exception_table_entry *ex)
 {
-	const struct exception_table_entry *fixup;
+	return ((unsigned long)&ex->fixup + ex->fixup);
+}
 
-	fixup = search_exception_tables(instruction_pointer(regs));
-	if (!fixup)
-		return 0;
+static bool ex_handler_fixup(const struct exception_table_entry *ex,
+			     struct pt_regs *regs)
+{
+	regs->pc = get_ex_fixup(ex);
+	return true;
+}
 
-	if (IS_ENABLED(CONFIG_BPF_JIT) &&
-	    regs->pc >= BPF_JIT_REGION_START &&
-	    regs->pc < BPF_JIT_REGION_END)
-		return arm64_bpf_fixup_exception(fixup, regs);
+bool fixup_exception(struct pt_regs *regs)
+{
+	const struct exception_table_entry *ex;
 
-	regs->pc = (unsigned long)&fixup->fixup + fixup->fixup;
-	return 1;
+	ex = search_exception_tables(instruction_pointer(regs));
+	if (!ex)
+		return false;
+
+	switch (ex->type) {
+	case EX_TYPE_FIXUP:
+		return ex_handler_fixup(ex, regs);
+	case EX_TYPE_BPF:
+		return ex_handler_bpf(ex, regs);
+	}
+
+	BUG();
 }

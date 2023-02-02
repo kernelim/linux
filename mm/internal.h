@@ -38,6 +38,26 @@
 
 void page_writeback_init(void);
 
+void __acct_reclaim_writeback(pg_data_t *pgdat, struct page *page,
+						int nr_throttled);
+static inline void acct_reclaim_writeback(struct page *page)
+{
+	pg_data_t *pgdat = page_pgdat(page);
+	int nr_throttled = atomic_read(&pgdat->nr_writeback_throttled);
+
+	if (nr_throttled)
+		__acct_reclaim_writeback(pgdat, page, nr_throttled);
+}
+
+static inline void wake_throttle_isolated(pg_data_t *pgdat)
+{
+	wait_queue_head_t *wqh;
+
+	wqh = &pgdat->reclaim_wait[VMSCAN_THROTTLE_ISOLATED];
+	if (waitqueue_active(wqh))
+		wake_up(wqh);
+}
+
 vm_fault_t do_swap_page(struct vm_fault *vmf);
 
 void free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *start_vma,
@@ -116,6 +136,7 @@ extern unsigned long highest_memmap_pfn;
  */
 extern int isolate_lru_page(struct page *page);
 extern void putback_lru_page(struct page *page);
+extern void reclaim_throttle(pg_data_t *pgdat, enum vmscan_throttle_state reason);
 
 /*
  * in mm/rmap.c:

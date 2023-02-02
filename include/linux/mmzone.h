@@ -205,6 +205,7 @@ enum node_stat_item {
 	NR_VMSCAN_IMMEDIATE,	/* Prioritise for reclaim when writeback ends */
 	NR_DIRTIED,		/* page dirtyings since bootup */
 	NR_WRITTEN,		/* page writings since bootup */
+	RH_KABI_BROKEN_INSERT_ENUM(NR_THROTTLED_WRITTEN) /* NR_WRITTEN while reclaim throttled */
 	RH_KABI_RENAME(NR_INDIRECTLY_RECLAIMABLE_BYTES,
 		       NR_KERNEL_MISC_RECLAIMABLE),
 				/* reclaimable non-slab kernel pages */
@@ -278,6 +279,14 @@ enum lru_list {
 	LRU_ACTIVE_FILE = LRU_BASE + LRU_FILE + LRU_ACTIVE,
 	LRU_UNEVICTABLE,
 	NR_LRU_LISTS
+};
+
+enum vmscan_throttle_state {
+	VMSCAN_THROTTLE_WRITEBACK,
+	VMSCAN_THROTTLE_ISOLATED,
+	VMSCAN_THROTTLE_NOPROGRESS,
+	VMSCAN_THROTTLE_CONGESTED,
+	NR_VMSCAN_THROTTLE,
 };
 
 #define for_each_lru(lru) for (lru = 0; lru < NR_LRU_LISTS; lru++)
@@ -903,8 +912,18 @@ typedef struct pglist_data {
 
 	ZONE_PADDING(_pad2_)
 
-	RH_KABI_RESERVE(1)
-	RH_KABI_RESERVE(2)
+	RH_KABI_USE(1, atomic_t nr_writeback_throttled)	/* nr of writeback-throttled tasks */
+	RH_KABI_USE(2, unsigned long nr_reclaim_start)	/* nr pages written while throttled
+							 * when throttling started. */
+	/*
+	 * kABI note:
+	 * Anything inserted after here will change the offset of vm_stat[]
+	 * and per_cpu_nodestats which are not supposed to be accessed by
+	 * 3rd party kernel modules anyway.
+	 */
+
+	/* workqueues for throttling reclaim for different reasons. */
+	RH_KABI_BROKEN_INSERT(wait_queue_head_t reclaim_wait[NR_VMSCAN_THROTTLE])
 
 	/* Per-node vmstats */
 	struct per_cpu_nodestat __percpu *per_cpu_nodestats;

@@ -24,6 +24,7 @@
 #include <linux/printk.h>
 #include <linux/slab.h>
 
+#include <asm/asm-extable.h>
 #include <asm/byteorder.h>
 #include <asm/cacheflush.h>
 #include <asm/debug-monitors.h>
@@ -368,15 +369,15 @@ static void build_epilogue(struct jit_ctx *ctx)
 #define BPF_FIXUP_OFFSET_MASK	GENMASK(26, 0)
 #define BPF_FIXUP_REG_MASK	GENMASK(31, 27)
 
-int arm64_bpf_fixup_exception(const struct exception_table_entry *ex,
-			      struct pt_regs *regs)
+bool ex_handler_bpf(const struct exception_table_entry *ex,
+		    struct pt_regs *regs)
 {
 	off_t offset = FIELD_GET(BPF_FIXUP_OFFSET_MASK, ex->fixup);
 	int dst_reg = FIELD_GET(BPF_FIXUP_REG_MASK, ex->fixup);
 
 	regs->regs[dst_reg] = 0;
 	regs->pc = (unsigned long)&ex->fixup - offset;
-	return 1;
+	return true;
 }
 
 /* For accesses to BTF pointers, add an entry to the exception table */
@@ -421,6 +422,8 @@ static int add_exception_handler(const struct bpf_insn *insn,
 
 	ex->fixup = FIELD_PREP(BPF_FIXUP_OFFSET_MASK, offset) |
 		    FIELD_PREP(BPF_FIXUP_REG_MASK, dst_reg);
+
+	ex->type = EX_TYPE_BPF;
 
 	ctx->exentry_idx++;
 	return 0;
@@ -1149,12 +1152,14 @@ out:
 	return prog;
 }
 
+u64 bpf_jit_alloc_exec_limit(void)
+{
+	return VMALLOC_END - VMALLOC_START;
+}
+
 void *bpf_jit_alloc_exec(unsigned long size)
 {
-	return __vmalloc_node_range(size, PAGE_SIZE, BPF_JIT_REGION_START,
-				    BPF_JIT_REGION_END, GFP_KERNEL,
-				    PAGE_KERNEL, 0, NUMA_NO_NODE,
-				    __builtin_return_address(0));
+	return vmalloc(size);
 }
 
 void bpf_jit_free_exec(void *addr)

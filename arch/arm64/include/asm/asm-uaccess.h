@@ -3,10 +3,11 @@
 #define __ASM_ASM_UACCESS_H
 
 #include <asm/alternative.h>
+#include <asm/asm-extable.h>
+#include <asm/assembler.h>
 #include <asm/kernel-pgtable.h>
 #include <asm/mmu.h>
 #include <asm/sysreg.h>
-#include <asm/assembler.h>
 
 /*
  * User access enabling/disabling macros.

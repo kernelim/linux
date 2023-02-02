@@ -137,16 +137,6 @@ alternative_endif
 	hint	#22
 	.endm
 
-/*
- * Emit an entry into the exception table
- */
-	.macro		_asm_extable, from, to
-	.pushsection	__ex_table, "a"
-	.align		3
-	.long		(\from - .), (\to - .)
-	.popsection
-	.endm
-
 #define USER(l, x...)				\
 9999:	x;					\
 	_asm_extable	9999b, l
