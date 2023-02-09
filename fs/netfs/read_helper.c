@@ -248,6 +248,9 @@ static void netfs_rreq_unmark_after_write(struct netfs_read_request *rreq,
 		XA_STATE(xas, &rreq->mapping->i_pages, subreq->start / PAGE_SIZE);
 
 		xas_for_each(&xas, page, (subreq->start + subreq->len - 1) / PAGE_SIZE) {
+			if (xas_retry(&xas, page))
+				continue;
+
 			/* We might have multiple writes from the same huge
 			 * page, but we mustn't unlock a page more than once.
 			 */
@@ -374,9 +377,9 @@ static void netfs_rreq_unlock(struct netfs_read_request *rreq)
 {
 	struct netfs_read_subrequest *subreq;
 	struct page *page;
-	unsigned int iopos, account = 0;
 	pgoff_t start_page = rreq->start / PAGE_SIZE;
 	pgoff_t last_page = ((rreq->start + rreq->len) / PAGE_SIZE) - 1;
+	size_t account = 0;
 	bool subreq_failed = false;
 	int i;
 
@@ -397,18 +400,23 @@ static void netfs_rreq_unlock(struct netfs_read_request *rreq)
 	 */
 	subreq = list_first_entry(&rreq->subrequests,
 				  struct netfs_read_subrequest, rreq_link);
-	iopos = 0;
 	subreq_failed = (subreq->error < 0);
 
 	trace_netfs_rreq(rreq, netfs_rreq_trace_unlock);
 
 	rcu_read_lock();
 	xas_for_each(&xas, page, last_page) {
-		unsigned int pgpos = (page->index - start_page) * PAGE_SIZE;
-		unsigned int pgend = pgpos + thp_size(page);
+		loff_t pg_end;
 		bool pg_failed = false;
 
+		if (xas_retry(&xas, page))
+			continue;
+
+		pg_end = page_offset(page) + thp_size(page) - 1;
+
 		for (;;) {
+			loff_t sreq_end;
+
 			if (!subreq) {
 				pg_failed = true;
 				break;
@@ -416,11 +424,11 @@ static void netfs_rreq_unlock(struct netfs_read_request *rreq)
 			if (test_bit(NETFS_SREQ_WRITE_TO_CACHE, &subreq->flags))
 				set_page_fscache(page);
 			pg_failed |= subreq_failed;
-			if (pgend < iopos + subreq->len)
+			sreq_end = subreq->start + subreq->len - 1;
+			if (pg_end < sreq_end)
 				break;
 
 			account += subreq->transferred;
-			iopos += subreq->len;
 			if (!list_is_last(&subreq->rreq_link, &rreq->subrequests)) {
 				subreq = list_next_entry(subreq, rreq_link);
 				subreq_failed = (subreq->error < 0);
@@ -428,7 +436,8 @@ static void netfs_rreq_unlock(struct netfs_read_request *rreq)
 				subreq = NULL;
 				subreq_failed = false;
 			}
-			if (pgend == iopos)
+
+			if (pg_end == sreq_end)
 				break;
 		}
 

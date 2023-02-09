@@ -47,26 +47,19 @@ subsystems:
        email: ptalbert@redhat.com
        gluser: ptalbert
    # R:
-   reviewers:
+   # reviewers:
        # reviewers are added as required approvers for subsystem changes if requiredApproval is
        # true for this subsystem.
-     - name: Donald Zickus
-       email: dzickus@redhat.com
-       gluser: dzickusrh
        # Only unrestricted maintainers show up in the list of required reviewers. The restricted
        # element is optional and defaults to false if absent.
-       restricted: false
+       # restricted: false
    paths:
        # F:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
        # N:
        includeRegexes:
        # X:
-       excludes:
-          - redhat/configs/
    # T:
    scm: git https://gitlab.com/cki-project/kernel-ark.git
    # L:
@@ -89,11 +82,7 @@ subsystems:
        gluser: ahalaney
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: Automotive Stream Distribution Kernel Maintainer
    labels:
      name: redhat
@@ -111,6 +100,7 @@ subsystems:
        email: scweaver@redhat.com
        gluser: scweaver
    paths:
+       # Focus is on main-automotive branch
        includes:
           - makefile
           - Makefile.rhelver
@@ -132,11 +122,7 @@ subsystems:
        gluser: hertonrk-rh
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
    scm: git https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9.git
  - subsystem: CentOS Stream 9 Real Time Kernel Maintainer
    labels:
@@ -153,11 +139,7 @@ subsystems:
        gluser: lgoncalv
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL 9.1 Kernel Maintainer
    labels:
      name: redhat
@@ -173,11 +155,7 @@ subsystems:
        gluser: ptalbert
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL/ARK/Centos-Stream General Kernel Reviewers
    labels:
      name: redhat
@@ -187,15 +165,34 @@ subsystems:
    qe-sst:
      - rhel-sst-kernel-maintainers
    requiredApproval: true
+   maintainers:
+     - name: Herton R. Krzesinski
+       email: herton@redhat.com
+       gluser: hertonrk-rh
+     - name: Justin Forbes
+       email: jforbes@fedoraproject.org
+       gluser: jmflinuxtx
    reviewers:
      - name: Jan Stancek
        email: jstancek@redhat.com
        gluser: jstancek
+     - name: Luis Claudio Goncalves
+       email: lgoncalv@redhat.com
+       gluser: lgoncalv
+     - name: Donald Zickus
+       email: dzickus@redhat.com
+       gluser: dzickusrh
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
    paths:
        includes:
           - makefile
-          - Makefile.rhelver
           - redhat/
+          - Kconfig.redhat
        excludes:
           - redhat/configs/
  - subsystem: RHEL 9.1 Real Time Kernel Maintainer
@@ -213,11 +210,7 @@ subsystems:
        gluser: lgoncalv
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL 9.0 Kernel Maintainer
    labels:
      name: redhat
@@ -233,11 +226,7 @@ subsystems:
        gluser: jstancek
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL 9.0 Real Time Kernel Maintainer
    labels:
      name: redhat
@@ -256,11 +245,7 @@ subsystems:
        gluser: lleshchi
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL 8.8 Kernel Maintainer
    labels:
      name: redhat
@@ -276,11 +261,7 @@ subsystems:
        gluser: lzampier
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL 8.8 Real Time Kernel Maintainer
    labels:
      name: redhat
@@ -299,11 +280,7 @@ subsystems:
        gluser: chwhite1
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL 8.7 Kernel Maintainer
    labels:
      name: redhat
@@ -319,11 +296,7 @@ subsystems:
        gluser: jwilsonrh
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL 8.7 Real Time Kernel Maintainer
    labels:
      name: redhat
@@ -339,11 +312,7 @@ subsystems:
        gluser: chwhite1
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL 8.6 Kernel Maintainer
    labels:
      name: redhat
@@ -359,11 +328,7 @@ subsystems:
        gluser: caringi
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL 8.6 Real Time Kernel Maintainer
    labels:
      name: redhat
@@ -379,11 +344,7 @@ subsystems:
        gluser: chwhite1
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL 8.4 Kernel Maintainer
    labels:
      name: redhat
@@ -399,11 +360,7 @@ subsystems:
        gluser: scweaver
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL 8.4 Real Time Kernel Maintainer
    labels:
      name: redhat
@@ -419,11 +376,7 @@ subsystems:
        gluser: debarbos
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL 8.2 Kernel Maintainer
    labels:
      name: redhat
@@ -439,11 +392,7 @@ subsystems:
        gluser: jfaracco
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL 8.2 Real Time Kernel Maintainer
    labels:
      name: redhat
@@ -459,11 +408,7 @@ subsystems:
        gluser: tyberry
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL 8.1 Kernel Maintainer
    labels:
      name: redhat
@@ -479,11 +424,7 @@ subsystems:
        gluser: scweaver
    paths:
        includes:
-          - makefile
           - Makefile.rhelver
-          - redhat/
-       excludes:
-          - redhat/configs/
  - subsystem: RHEL 7.9 Kernel Maintainer
    labels:
      name: redhat
@@ -499,10 +440,7 @@ subsystems:
        gluser: rvrbovsk
    paths:
        includes:
-          - makefile
-          - redhat/
-       excludes:
-          - redhat/configs/
+          - Makefile
  - subsystem: RHEL 7.9 Real Time Kernel Maintainer
    labels:
      name: redhat
@@ -518,10 +456,7 @@ subsystems:
        gluser: swood3
    paths:
        includes:
-          - makefile
-          - redhat/
-       excludes:
-          - redhat/configs/
+          - Makefile
  - subsystem: RHEL 7.7 Kernel Maintainer
    labels:
      name: redhat
@@ -537,10 +472,7 @@ subsystems:
        gluser: rvrbovsk
    paths:
        includes:
-          - makefile
-          - redhat/
-       excludes:
-          - redhat/configs/
+          - Makefile
  - subsystem: RHEL 7.6 Kernel Maintainer
    labels:
      name: redhat
@@ -556,10 +488,7 @@ subsystems:
        gluser: dvlasenk
    paths:
        includes:
-          - makefile
-          - redhat/
-       excludes:
-          - redhat/configs/
+          - Makefile
  - subsystem: RHEL 7.6 Real Time Kernel Maintainer
    labels:
      name: redhat
@@ -575,10 +504,7 @@ subsystems:
        gluser: lgoncalv
    paths:
        includes:
-          - makefile
-          - redhat/
-       excludes:
-          - redhat/configs/
+          - Makefile
  - subsystem: RHEL 7.4 Kernel Maintainer
    labels:
      name: redhat
@@ -594,10 +520,7 @@ subsystems:
        gluser: dvlasenk
    paths:
        includes:
-          - makefile
-          - redhat/
-       excludes:
-          - redhat/configs/
+          - Makefile
  - subsystem: RHEL 7.3 Kernel Maintainer
    labels:
      name: redhat
@@ -613,10 +536,7 @@ subsystems:
        gluser: dvlasenk
    paths:
        includes:
-          - makefile
-          - redhat/
-       excludes:
-          - redhat/configs/
+          - Makefile
  - subsystem: RHEL 6.10 Kernel Maintainer
    labels:
      name: redhat
@@ -632,10 +552,7 @@ subsystems:
        gluser: dvlasenk
    paths:
        includes:
-          - makefile
-          - redhat/
-       excludes:
-          - redhat/configs/
+          - Makefile
  - subsystem: 3ware 9000 Storage Controller Linux Driver (3w-9xxx)
    labels:
      name: 3w-9xxx
@@ -1220,6 +1137,9 @@ subsystems:
      - name: Ondrej Mosnacek
        email: omosnace@redhat.com
        gluser: omos
+     - name: Ricardo Robaina
+       email: rrobaina@redhat.com
+       gluser: rrobaina
    paths:
        includes:
           - include/linux/audit.h
@@ -1230,9 +1150,9 @@ subsystems:
      name: automotive
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhivos-ft-auto-kernel
    qe-sst:
-     - rhel-sst-null
+     - rhivos-ft-auto-kernel
    maintainers:
      - name: Julio Faracco
        email: jfaracco@redhat.com
@@ -1309,9 +1229,6 @@ subsystems:
      - rhel-sst-arch-hw
    requiredApproval: false
    maintainers:
-     - name: Al Stone
-       email: ahs3@redhat.com
-       gluser: ahs3
      - name: Lenny Szubowicz
        email: lszubowi@redhat.com
        gluser: lszubowi
@@ -1352,9 +1269,9 @@ subsystems:
      - rhel-sst-arch-hw
    requiredApproval: false
    maintainers:
-     - name: Gopal Tiwari
-       email: gtiwari@redhat.com
-       gluser: gtiwari1
+     - name: David Marlin
+       email: dmarlin@redhat.com
+       gluser: dmarlin
    paths:
        includes:
           - drivers/bluetooth/
@@ -1496,7 +1413,7 @@ subsystems:
      name: bnxt_re
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-nic-rdma
    qe-sst:
      - rhel-sst-null
    requiredApproval: false
@@ -1714,6 +1631,10 @@ subsystems:
    qe-sst:
      - rhel-sst-null
    requiredApproval: false
+   maintainers:
+     - name: Ronnie Sahlberg
+       email: lsahlber@redhat.com
+       gluser: lsahlber
    paths:
        includes:
           - fs/cifs/
@@ -1754,6 +1675,26 @@ subsystems:
    paths:
        includes:
           - drivers/net/ethernet/cisco/enic/
+ - subsystem: CLOCKSOURCE
+   labels:
+     name: clocksource
+   status: Supported
+   devel-sst:
+     - rhel-sst-arch-hw
+   qe-sst:
+     - rhel-sst-arch-hw
+   requiredApproval: false
+   maintainers:
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+   paths:
+       includes:
+          - drivers/clocksource
+       excludes:
+          - drivers/clocksource/hyperv_timer.c
+          - drivers/clocksource/arm_arch_timer.c
+          - drivers/clocksource/timer-qcom.c
  - subsystem: COMEDI DRIVERS
    labels:
      name: comedi
@@ -1831,15 +1772,34 @@ subsystems:
        includes:
           - fs/configfs/
           - include/linux/configfs.h
+ - subsystem: CONNECTOR
+   labels:
+     name: connector
+   status: Provided
+   devel-sst:
+     - rhel-sst-arch-hw
+   qe-sst:
+     - rhel-sst-arch-hw
+   requiredApproval: false
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/connector/
  - subsystem: Continuous Integration (CKI)
    labels:
      name: cki
      emailLabel: INTERNAL
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-cki
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-cki
    requiredApproval: true
    maintainers:
      - name: Veronika Kabatova
@@ -1974,10 +1934,11 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-security
+     - rhel-sst-security-crypto
    qe-sst:
      - rhel-sst-kernel-security
      - rhel-sst-security-crypto
-   requiredApproval: false
+   requiredApproval: true
    maintainers:
      - name: Herbert Xu
        email: herbert.xu@redhat.com
@@ -1988,6 +1949,12 @@ subsystems:
      - name: Vladis Dronov
        email: vdronov@redhat.com
        gluser: NefigTut
+     - name: Clemens Lang
+       email: cllang@redhat.com
+       gluser: cllang
+     - name: Simo Sorce
+       email: simo@redhat.com
+       gluser: simo5
    reviewers:
      - name: Ondrej Mosnacek
        email: omosnace@redhat.com
@@ -2508,7 +2475,7 @@ subsystems:
      name: libfc
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-storage-io
    qe-sst:
      - rhel-sst-null
    requiredApproval: false
@@ -2603,7 +2570,7 @@ subsystems:
      name: fs_dax
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-filesystems
    qe-sst:
      - rhel-sst-null
    requiredApproval: false
@@ -2796,6 +2763,21 @@ subsystems:
           - kernel/futex/
           - tools/perf/bench/futex*
           - tools/testing/selftests/futex/
+ - subsystem: GCOV
+   labels:
+     name: redhat
+   status: Internal
+   devel-sst:
+     - rhel-sst-kernel-maintainers
+   qe-sst:
+     - rhel-sst-kernel-maintainers
+   requiredApproval: false
+   maintainers:
+     - name: Jan Stancek
+       email: jstancek@redhat.com
+   paths:
+       includes:
+          - kernel/gcov
  - subsystem: GENERIC PHY FRAMEWORK
    labels:
      name: phy
@@ -2984,6 +2966,22 @@ subsystems:
    paths:
        includes:
           - drivers/hwtracing/
+ - subsystem: HIBERNATION (aka Software Suspend, aka swsusp)
+   labels:
+     name: sleep
+   status: Supported
+   devel-sst:
+     - rhel-sst-arch-hw
+   qe-sst:
+     - rhel-sst-arch-hw
+   requiredApproval: false
+   maintainers:
+     - name: Lenny Szubowicz
+       email: lszubowi@redhat.com
+       gluser: lszubowi
+   paths:
+       includes:
+          - kernel/power/
  - subsystem: HID CORE LAYER
    labels:
      name: hid
@@ -3113,9 +3111,6 @@ subsystems:
      - rhel-sst-arch-hw
    requiredApproval: false
    maintainers:
-     - name: Gopal Tiwari
-       email: gtiwari@redhat.com
-       gluser: gtiwari1
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
@@ -3575,10 +3570,9 @@ subsystems:
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
-
    paths:
        includes:
-          - drivers/powercap/intel_rapl.c
+          - drivers/powercap/intel*
  - subsystem: INTERCONNECT API
    labels:
      name: interconnect
@@ -3745,6 +3739,26 @@ subsystems:
        includes:
           - drivers/scsi/*iscsi*
           - include/scsi/*iscsi*
+ - subsystem: IUCV
+   labels:
+     name: iucv
+   status: Provided
+   devel-sst:
+     - rhel-sst-arch-hw
+   qe-sst:
+     - rhel-sst-arch-hw
+   requiredApproval: false
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - include/net/iucv/
+          - net/iucv/
  - subsystem: JOURNALLING LAYER FOR BLOCK DEVICES (JBD2)
    labels:
      name: jbd2
@@ -3808,6 +3822,8 @@ subsystems:
           - kernel/kexec*
           - kernel/rcu/
           - kernel/trace/
+          - kernel/time/
+          - kernel/power/
  - subsystem: KERNEL VIRTUAL MACHINE (KVM)
    labels:
      name: kvm
@@ -3829,6 +3845,7 @@ subsystems:
        gluser: vkuznets
    paths:
        includes:
+          - drivers/virt/tdx
           - Documentation/virt/kvm/
           - include/trace/events/kvm.h
           - include/uapi/asm-generic/kvm*
@@ -4125,6 +4142,7 @@ subsystems:
           - arch/x86/kernel/livepatch.c
           - include/linux/livepatch.h
           - kernel/livepatch/
+          - kernel/module/livepatch.c
           - lib/livepatch/
           - samples/livepatch/
           - tools/objtool/
@@ -4407,6 +4425,9 @@ subsystems:
      - name: Waiman Long
        email: longman@redhat.com
        gluser: llong1
+     - name: Ricardo Robaina
+       email: rrobaina@redhat.com
+       gluser: rrobaina
    paths:
        includes:
           - arch/arm64/mm/
@@ -4480,23 +4501,6 @@ subsystems:
    paths:
        includes:
           - drivers/mfd/
- - subsystem: MICRON PCIe SSD DRIVER (mtip32xx)
-   labels:
-     name: mtip32xx
-   status: Supported
-   devel-sst:
-     - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
-   requiredApproval: false
-   maintainers:
-     - name: Gopal Tiwari
-       email: gtiwari@redhat.com
-       gluser: gtiwari1
-   paths:
-       includes:
-          - drivers/block/mtip32xx/mtip32xx.c
-          - drivers/block/mtip32xx/mtip32xx.h
  - subsystem: MICROSEMI SMART ARRAY SMARTPQI DRIVER (smartpqi)
    labels:
      name: smartpqi
@@ -4633,9 +4637,9 @@ subsystems:
      - rhel-sst-arch-hw
    requiredApproval: false
    maintainers:
-     - name: Gopal Tiwari
-       email: gtiwari@redhat.com
-       gluser: gtiwari1
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
    paths:
        includes:
           - Documentation/mmc/
@@ -4680,7 +4684,7 @@ subsystems:
      name: namespaces
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-kernel-ft
    qe-sst:
      - rhel-sst-null
    requiredApproval: true
@@ -4692,7 +4696,7 @@ subsystems:
        email: agladkov@redhat.com
        gluser: legionus
    reviewers:
-     - name: Chris von Recklinghausen
+     - name: Christoph von Recklinghausen
        email: crecklin@redhat.com
        gluser: crecklin
    paths:
@@ -5042,9 +5046,9 @@ subsystems:
      emailLabel: net
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-networking
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-networking
    requiredApproval: false
    maintainers:
      - name: Jason Wang
@@ -5344,14 +5348,14 @@ subsystems:
      name: nvme
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-storage-io
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-storage-io
    requiredApproval: false
    maintainers:
-     - name: Gopal Tiwari
-       email: gtiwari@redhat.com
-       gluser: gtiwari1
+     - name: Maurizio Lombardi
+       email: mlombard@redhat.com
+       gluser: mlombard
    reviewers:
      - name: John Meneghini
        email: jmeneghi@redhat.com
@@ -5362,14 +5366,10 @@ subsystems:
      - name: Ewan D. Milne
        email: emilne@redhat.com
        gluser: e-milne
-     - name: Maurizio Lombardi
-       email: mlombard@redhat.com
-       gluser: mlombard
    paths:
        includes:
           - drivers/nvme/
           - include/linux/nvme.h
-          - include/linux/nvme-rdma*.h
           - include/uapi/linux/nvme_ioctl.h
  - subsystem: NVM EXPRESS DRIVER FC
    labels:
@@ -5378,7 +5378,7 @@ subsystems:
    devel-sst:
      - rhel-sst-storage-io
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-storage-io
    requiredApproval: false
    maintainers:
      - name: Ewan D. Milne
@@ -5393,6 +5393,58 @@ subsystems:
           - drivers/nvme/host/fc.c
           - drivers/nvme/target/fc.c
           - include/linux/nvme-fc*.h
+ - subsystem: NVM EXPRESS DRIVER PCI
+   labels:
+     name: nvme-pci
+   status: Supported
+   devel-sst:
+     - rhel-sst-arch-hw
+   qe-sst:
+     - rhel-sst-arch-hw
+   requiredApproval: false
+   maintainers:
+     - name: John Meneghini
+       email: jmeneghi@redhat.com
+       gluser: johnmeneghini
+   reviewers:
+     - name: Maurizio Lombardi
+       email: mlombard@redhat.com
+       gluser: mlombard
+     - name: Ewan D. Milne
+       email: emilne@redhat.com
+       gluser: e-milne
+   paths:
+       includes:
+          - drivers/nvme/host/pci.c
+          - drivers/nvme/target/pci.c
+ - subsystem: NVM EXPRESS DRIVER RDMA
+   labels:
+     name: nvme-rdma
+   status: Supported
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   requiredApproval: false
+   maintainers:
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+   reviewers:
+     - name: John Meneghini
+       email: jmeneghi@redhat.com
+       gluser: johnmeneghini
+     - name: Chris Leech
+       email: cleech@redhat.com
+       gluser: cleech
+     - name: Ewan D. Milne
+       email: emilne@redhat.com
+       gluser: e-milne
+   paths:
+       includes:
+          - drivers/nvme/host/rdma.c
+          - drivers/nvme/target/rdma.c
+          - include/linux/nvme-rdma*.h
  - subsystem: NVM EXPRESS DRIVER TCP
    labels:
      name: nvme-tcp
@@ -5400,7 +5452,7 @@ subsystems:
    devel-sst:
      - rhel-sst-storage-io
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-storage-io
    requiredApproval: false
    maintainers:
      - name: Chris Leech
@@ -5596,16 +5648,20 @@ subsystems:
  - subsystem: PCS NETWORK DRIVERS
    labels:
      name: pcs
-   status: Unassigned
+   status: Provided
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-nic-rdma
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-nic-rdma
    requiredApproval: false
    maintainers:
+     - name: Corinna Vinschen
+       email: vinschen@redhat.com
+       gluser: vinschen
    paths:
        includes:
           - drivers/net/pcs/
+            include/linux/pcs/
  - subsystem: Pensando Ethernet IONIC Driver
    labels:
      name: ionic
@@ -5684,15 +5740,16 @@ subsystems:
      - rhel-sst-arch-hw
    requiredApproval: false
    maintainers:
-     - name: David Arcari
-       email: darcari@redhat.com
-       gluser: darcari
      - name: Mark Langsdorf
        email: mlangsdo@redhat.com
        gluser: mlangsdorf
    paths:
        includes:
           - drivers/platform/Kconfig
+          - drivers/platform/*
+       excludes:
+          - drivers/platform/x86/
+          - drivers/platform/mellanox/
  - subsystem: PLATFORM DRIVERS MELLANOX
    labels:
      name: platform_mellanox
@@ -5802,6 +5859,27 @@ subsystems:
           - drivers/firmware/psci*.c
           - include/linux/psci.h
           - include/uapi/linux/psci.h
+ - subsystem: POWERCAP
+   labels:
+     name: powercap
+   status: Provided
+   devel-sst:
+     - rhel-sst-arch-hw
+   qe-sst:
+     - rhel-sst-arch-hw
+   requiredApproval: false
+   maintainers:
+     - name: Mark Langsdorf
+       email: mlangsdo@redhat.com
+       gluser: mlangsdorf
+     - name: Lenny Szubowicz
+       email: lszubowi@redhat.com
+       gluser: lszubowi
+   paths:
+       includes:
+          - drivers/powercap/
+       excludes:
+          - drivers/powercap/intel*
  - subsystem: POWERPC (64-BIT)
    labels:
      name: ppc64
@@ -5851,9 +5929,6 @@ subsystems:
      - name: Lenny Szubowicz
        email: lszubowi@redhat.com
        gluser: lszubowi
-     - name: Al Stone
-       email: ahs3@redhat.com
-       gluser: ahs3
    paths:
        includes:
           - Documentation/ABI/testing/pstore
@@ -6227,7 +6302,7 @@ subsystems:
      name: rtc
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-arch-hw
    qe-sst:
      - rhel-sst-null
    requiredApproval: false
@@ -6319,14 +6394,39 @@ subsystems:
    paths:
        includes:
           - drivers/rpmsg/
+ - subsystem: S390 ARCHITECTURE
+   labels:
+     name: s390
+   status: Supported
+   devel-sst:
+     - rhel-sst-arch-hw
+   qe-sst:
+     - rhel-sst-arch-hw
+   requiredApproval: false
+   maintainers:
+     - name: Steve Best
+       email: sbest@redhat.com
+       gluser: sfbest
+   paths:
+       includes:
+          - arch/s390/
+          - drivers/s390/
+       excludes:
+          - arch/s390/include/uapi/asm/kvm*
+          - arch/s390/include/asm/gmap.h
+          - arch/s390/include/asm/kvm*
+          - arch/s390/kvm/
+          - arch/s390/mm/
+          - drivers/s390/cio/vfio_ccw*
+          - drivers/s390/virtio/
  - subsystem: S390 VFIO-CCW DRIVER
    labels:
      name: vfio-ccw
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    requiredApproval: false
    maintainers:
      - name: Cornelia Huck
@@ -6376,6 +6476,9 @@ subsystems:
      - name: Valentin Schneider
        email: vschneid@redhat.com
        gluser: vschneid
+     - name: John B. Wyatt IV
+       email: jwyatt@redhat.com
+       gluser: jwyatt-rh
    paths:
        includes:
           - kernel/sched/
@@ -6383,6 +6486,9 @@ subsystems:
           - include/linux/sched.h
           - include/uapi/linux/sched.h
           - include/linux/wait.h
+          - kernel/time/tick-*
+          - kernel/time/sched_clock.c
+          - kernel/Kconfig.hz
  - subsystem: SCSI CORE SUBSYSTEM (NOT INDIVIDUAL DRIVERS)
    labels:
      name: scsi_core
@@ -6886,9 +6992,6 @@ subsystems:
      - rhel-sst-arch-hw
    requiredApproval: false
    maintainers:
-     - name: Al Stone
-       email: ahs3@redhat.com
-       gluser: ahs3
      - name: Lenny Szubowicz
        email: lszubowi@redhat.com
        gluser: lszubowi
@@ -7015,6 +7118,51 @@ subsystems:
           - drivers/thunderbolt/
           - drivers/platform/x86/intel-wmi-thunderbolt.c
           - include/linux/thunderbolt.h
+ - subsystem: TIME
+   labels:
+     name: time
+   status: Maintained
+   devel-sst:
+     - rhel-sst-arch-hw
+   qe-sst:
+     - rhel-sst-arch-hw
+   requiredApproval: true
+   maintainers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   reviewers:
+     - name: Phil Auld
+       email: pauld@redhat.com
+       gluser: prauld
+     - name: Waiman Long
+       email: longman@redhat.com
+       gluser: llong1
+     - name: Tony Camuso
+       email: tcamuso@redhat.com
+       gluser: tcamuso
+     - name: Miroslav Lichvar
+       email: mlichvar@redhat.com
+       gluser: mlichvar
+   paths:
+       includes:
+          - kernel/time/
+          - include/linux/time32.h
+          - include/linux/time64.h
+          - include/linux/timecounter.h
+          - include/linux/time.h
+          - include/linux/timekeeper_internal.h
+          - include/linux/timekeeping.h
+          - include/linux/time_namespace.h
+          - include/linux/timerfd.h
+          - include/linux/timer.h
+          - include/linux/timerqueue.h
+          - include/linux/timex.h
+          - include/time/hrtimer.c
+       excludes:
+          - kernel/time/namespace.c
+          - kernel/time/tick-*
+          - kernel/time/sched_clock.c
  - subsystem: TIPC PROTOCOL
    labels:
      name: tipc
@@ -7022,7 +7170,7 @@ subsystems:
        - lnst
    status: Provided
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-networking
    qe-sst:
      - rhel-sst-null
    requiredApproval: false
@@ -7119,9 +7267,6 @@ subsystems:
      - name: Lenny Szubowicz
        email: lszubowi@redhat.com
        gluser: lszubowi
-     - name: Al Stone
-       email: ahs3@redhat.com
-       gluser: ahs3
      - name: Myron Stowe
        email: myron.stowe@redhat.com
        gluser: mstowe1
@@ -7213,9 +7358,9 @@ subsystems:
      name: vfio
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    requiredApproval: false
    maintainers:
      - name: Alex Williamson
@@ -7224,6 +7369,9 @@ subsystems:
      - name: Eric Auger
        email: eric.auger@redhat.com
        gluser: eauger1
+     - name: Cédric Le Goater
+       email: clg@redhat.com
+       gluser: clegoate
    paths:
        includes:
           - Documentation/vfio.txt
@@ -7236,9 +7384,9 @@ subsystems:
      name: vfio-mdev
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    requiredApproval: false
    maintainers:
      - name: Alex Williamson
@@ -7247,6 +7395,9 @@ subsystems:
      - name: Eric Auger
        email: eric.auger@redhat.com
        gluser: eauger1
+     - name: Cédric Le Goater
+       email: clg@redhat.com
+       gluser: clegoate
    paths:
        includes:
           - Documentation/vfio-mediated-device.txt
@@ -7259,9 +7410,9 @@ subsystems:
      name: virt_lib
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    requiredApproval: false
    maintainers:
      - name: Alex Williamson
@@ -7278,9 +7429,9 @@ subsystems:
      name: virtio_vsock
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    requiredApproval: false
    maintainers:
      - name: Stefan Hajnoczi
@@ -7305,9 +7456,9 @@ subsystems:
      name: virtio_cons
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    requiredApproval: false
    maintainers:
      - name: '"Michael S. Tsirkin"'
@@ -7327,9 +7478,9 @@ subsystems:
      name: virtio
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-networking
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-networking
    requiredApproval: false
    maintainers:
      - name: '"Michael S. Tsirkin"'
@@ -7357,9 +7508,9 @@ subsystems:
      name: virtio_crypto
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-networking
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-networking
    requiredApproval: false
    maintainers:
      - name: '"Michael S. Tsirkin"'
@@ -7378,9 +7529,9 @@ subsystems:
      name: virtio_s390
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    requiredApproval: false
    maintainers:
      - name: Cornelia Huck
@@ -7395,9 +7546,9 @@ subsystems:
      name: virtio_gpu
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    requiredApproval: false
    maintainers:
      - name: Gerd Hoffmann
@@ -7413,9 +7564,9 @@ subsystems:
      name: virtio_host
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-networking
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-networking
    requiredApproval: false
    maintainers:
      - name: '"Michael S. Tsirkin"'
@@ -7434,9 +7585,9 @@ subsystems:
      name: virtio_input
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    requiredApproval: false
    maintainers:
      - name: Gerd Hoffmann
@@ -7494,6 +7645,9 @@ subsystems:
      - rhel-sst-null
    requiredApproval: false
    maintainers:
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
      - name: Kamal Heib
        email: kheib@redhat.com
        gluser: kheib
@@ -7584,12 +7738,12 @@ subsystems:
      name: lr_wpan
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-arch-hw
    qe-sst:
      - rhel-sst-null
    requiredApproval: false
    maintainers:
-     - name: Chris von Recklinghausen
+     - name: Christoph von Recklinghausen
        email: crecklin@redhat.com
        gluser: crecklin
    paths:

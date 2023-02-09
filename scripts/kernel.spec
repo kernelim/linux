@@ -121,13 +121,13 @@ Summary: The Linux kernel
 %define kversion 5.14
 
 %define rpmversion 5.14.0
-%define pkgrelease 162.12.1.el9_1
+%define pkgrelease 162.18.1.el9_1
 
 # This is needed to do merge window version magic
 %define patchlevel 14
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 162.12.1%{?buildid}%{?dist}
+%define specrelease 162.18.1%{?buildid}%{?dist}
 
 %define pkg_release %{specrelease}
 
@@ -538,7 +538,7 @@ Name: kernel
 License: GPLv2 and Redistributable, no modification permitted
 URL: https://www.kernel.org/
 Version: %{rpmversion}
-Release: %{pkg_release}.0.1
+Release: %{pkg_release}
 # DO NOT CHANGE THE 'ExclusiveArch' LINE TO TEMPORARILY EXCLUDE AN ARCHITECTURE BUILD.
 # SET %%nobuildarches (ABOVE) INSTEAD
 %if 0%{?fedora}
@@ -678,7 +678,7 @@ BuildRequires: lld
 # exact git commit you can run
 #
 # xzcat -qq ${TARBALL} | git get-tar-commit-id
-Source0: linux-5.14.0-162.12.1.el9_1.tar.xz
+Source0: linux-5.14.0-162.18.1.el9_1.tar.xz
 
 Source1: Makefile.rhelver
 
@@ -1348,8 +1348,8 @@ ApplyOptionalPatch()
   fi
 }
 
-%setup -q -n kernel-5.14.0-162.12.1.el9_1 -c
-mv linux-5.14.0-162.12.1.el9_1 linux-%{KVERREL}
+%setup -q -n kernel-5.14.0-162.18.1.el9_1 -c
+mv linux-5.14.0-162.18.1.el9_1 linux-%{KVERREL}
 
 cd linux-%{KVERREL}
 cp -a %{SOURCE1} .
@@ -3016,9 +3016,53 @@ fi
 #
 #
 %changelog
-* Mon Jan 23 2023 Release Engineering <releng@rockylinux.org> - 5.14.0-162.12.1.0.1
-- Porting to 9.0, debranding and Rocky branding with new release pkg (Sherif Nagy)
-- Porting to 9.0, debranding and Rocky branding (Louis Abel)
+* Tue Feb 28 2023 Release Engineering <releng@rockylinux.org> - 5.14.0-162.18.1
+- Porting to 9.1, debranding and Rocky branding with new release pkg (Sherif Nagy)
+- Porting to 9.1, debranding and Rocky branding (Louis Abel)
+
+* Thu Feb 09 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.18.1.el9_1]
+- powerpc/pseries: Use lparcfg to reconfig VAS windows for DLPAR CPU (Steve Best) [2154305 2133101]
+- redhat/configs: Change the amd-pstate driver from builtin to loadable (David Arcari) [2151274 2143793]
+- powerpc/pseries/mobility: set NMI watchdog factor during an LPM (Steve Best) [2140085 2122830]
+- powerpc/watchdog: introduce a NMI watchdog's factor (Steve Best) [2140085 2122830]
+- watchdog: export lockup_detector_reconfigure (Steve Best) [2140085 2122830]
+- powerpc/mobility: wait for memory transfer to complete (Steve Best) [2140085 2122830]
+
+* Thu Feb 02 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.17.1.el9_1]
+- PCI: hv: Only reuse existing IRTE allocation for Multi-MSI (Emanuele Giuseppe Esposito) [2155459 2100404]
+- PCI: hv: Fix the definition of vector in hv_compose_msi_msg() (Emanuele Giuseppe Esposito) [2155459 2100404]
+- PCI: hv: Fix interrupt mapping for multi-MSI (Emanuele Giuseppe Esposito) [2155459 2100404]
+- PCI: hv: Reuse existing IRTE allocation in compose_msi_msg() (Emanuele Giuseppe Esposito) [2155459 2100404]
+- PCI: hv: Fix hv_arch_irq_unmask() for multi-MSI (Emanuele Giuseppe Esposito) [2155459 2100404]
+- PCI: hv: Fix multi-MSI to allow more than one MSI vector (Emanuele Giuseppe Esposito) [2155459 2100404]
+- proc: proc_skip_spaces() shouldn't think it is working on C strings (Wander Lairson Costa) [2152580 2152581] {CVE-2022-4378}
+- proc: avoid integer type confusion in get_proc_long (Wander Lairson Costa) [2152580 2152581] {CVE-2022-4378}
+- blk-mq: run queue no matter whether the request is the last request (Ming Lei) [2162535 2118511]
+- netfilter: nft_payload: incorrect arithmetics when fetching VLAN header bits (Florian Westphal) [2161724 2161725] {CVE-2023-0179}
+- nvme-tcp: fix regression that causes sporadic requests to time out (Gopal Tiwari) [2161344 2124526]
+- netfs: Fix dodgy maths (Xiubo Li) [2161418 2138981]
+- netfs: Fix missing xas_retry() calls in xarray iteration (Xiubo Li) [2161418 2138981]
+
+* Thu Jan 26 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.16.1.el9_1]
+- Bluetooth: L2CAP: Fix use-after-free caused by l2cap_reassemble_sdu (Ricardo Robaina) [2152929 2152931] {CVE-2022-3564}
+- gitlab-ci: use CI templates from production branch (Michael Hofmann)
+
+* Thu Jan 19 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.15.1.el9_1]
+- KVM: s390: vsie: Fix the initialization of the epoch extension (epdx) field (Thomas Huth) [2158815 2140899]
+- x86/fpu: Do not leak fpstate pointer on fork (Rafael Aquini) [2133083 2120448]
+- Revert "usb: typec: ucsi: add a common function ucsi_unregister_connectors()" (Torez Smith) [2153277 2113003]
+- i2c: ismt: Fix an out-of-bounds bug in ismt_access() (David Arcari) [2154859 2119067] {CVE-2022-2873}
+
+* Thu Jan 12 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.14.1.el9_1]
+- NFSD: fix use-after-free in __nfs42_ssc_open() (Benjamin Coddington) [2152815 2152816] {CVE-2022-4379}
+- PCI: hv: Fix synchronization between channel callback and hv_pci_bus_exit() (Mohammed Gamal) [2155930 2155277]
+- PCI: hv: Fix synchronization between channel callback and hv_compose_msi_msg() (Mohammed Gamal) [2155930 2155277]
+- PCI: hv: Use vmbus_requestor to generate transaction IDs for VMbus hardening (Mohammed Gamal) [2155930 2155277]
+- sched/core: Always flush pending blk_plug (Phil Auld) [2153792 2115520]
+
+* Thu Jan 05 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.13.1.el9_1]
+- scsi: qla2xxx: Fix crash when I/O abort times out (Nilesh Javali) [2152178 2115892]
+- net: mana: Fix race on per-CQ variable napi work_done (Emanuele Giuseppe Esposito) [2155145 2153431]
 
 * Tue Dec 20 2022 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.12.1.el9_1]
 - x86/fpu: Drop fpregs lock before inheriting FPU permissions (Valentin Schneider) [2154407 2153181]

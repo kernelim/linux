@@ -46,6 +46,10 @@ The most common questions related to contributing to Red Hat-based kernel projec
 ... https://cki-project.org/docs/user_docs/gitlab-mr-testing/full_picture/#blocking-on-missing-targeted-testing[This is intended to transition to a blocking tag in the future], but there are no timelines attached to this effort currently.
 .. It is currently consumed by QA teams that are working on identifying testing gaps.  The label indicates that the changed code in this commit did not have any specific tests that target the affected area.  Baseline testing (booting, functional, standard regression, etc.) is still performed and validated.
 
+=== What does image:images/qsg-label_image_lnst_needsinfo.png["lnstNeedsInfo label"] indicate?
+:sectnums:
+.. This label indicates that the Merge Request has been identified by the Networking Team as requiring additional testing.  Questions on network testing can be sent to mailto:kernel-net-submaint@redhat.com[kernel-net-submaint@redhat.com].
+
 == MR Interactions
 :sectnums:
 === How do I make the webhook re-evaluate the readiness of a MR?
@@ -102,3 +106,25 @@ image::images/qsg-faq-datawarehouse-search-for-builds.png["Search for Builds"]
 .. Find the most recent build and click the pipeline number +
 +
 image::images/qsg-faq-pipelines_jobs.png["Pipeline Jobs Links"]
+
+=== When I attempt to click the new Merge Request link after a push, I get an error.  How do I resolve it? +
+:sectnums:
+
+Occasionally, when clicking the link that is provided after a `git push`, the browser page that opens returns an HTTP 500 error.
+
+```
+   500
+   Whoops, something went wrong on our end.
+   Request ID: 01GQ0QHBS01AZNMPGYFC0JBEG9
+
+   Try refreshing the page, or going back and attempting the action again.
+
+   Please contact your GitLab administrator if this problem persists.
+```
+
+This is caused by an issue on the GitLab server side.  Try the following steps to resolve or work around the problem:
+
+. Retry after a few minutes. (Try this step a couple of times before moving on)
+.. Sometimes it can just be a transient problem and waiting 5-10 minutes may be enough to fix the problem.
+. Consider opening a https://gitlab.com/redhat/rhel/gitlab#user-content-service-issues[support ticket] with GitLab.
+. Work around the problem by using xref:lab.adoc[the lab utility] or https://gitlab.com/gitlab-org/cli[gitlab-cli].

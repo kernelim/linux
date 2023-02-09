@@ -1,1 +1,2 @@
-CONFIG_X86_AMD_PSTATE=y
+# This must remain as 'm' for AMD servers which will load ACPI drivers before the amd_pstate driver
+CONFIG_X86_AMD_PSTATE=m

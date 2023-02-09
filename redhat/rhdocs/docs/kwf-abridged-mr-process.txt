@@ -117,15 +117,11 @@ Abridged MR Submission Process
 
 Addendum
 
-While synchronizing your fork to the latest commit in origin is not
-necessary, it is annoying to see dozens of commits having nothing
-to do with your work being pushed to your fork, because it is out
-of sync with the origin.
-
-If you want to update your fork before pushing your changes to it,
-a force push may be required depending on the state of your local
-branch or the remote branch. In which case, you must assure that
-it allows a forced push.
+Synchronizing your fork to the latest commit in origin is not necessary.
+However, if you want to update your fork before pushing your changes to it,
+a force push may be required depending on the state of your local branch or
+the remote branch. Therefore, you must assure that your remote fork allows
+a forced push.
 
 * All your forks are listed at https://gitlab/<username>
 * Select one of your forks to synchronize.
@@ -135,4 +131,4 @@ it allows a forced push.
 * Click the 'Expand' button to the right of the  'Protected Branches' field
 * Scroll down to the bottom of that entry where it lists protected branches
   to the row starting with 'main'.
-* Slide the 'Allow to force push' to its 'ON' position.
+* Move the 'Allow to force push' slider to its 'ON' position.

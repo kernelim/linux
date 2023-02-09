@@ -6,7 +6,7 @@
 
 include:
   - project: cki-project/pipeline-definition
-    ref: main
+    ref: production
     file: kernel_templates.yml
 
 workflow: !reference [.workflow]
