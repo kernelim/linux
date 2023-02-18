@@ -836,6 +836,7 @@ struct kvm_irqfd {
 
 /* Do not use 1, KVM_CHECK_EXTENSION returned it before we had flags.  */
 #define KVM_CLOCK_TSC_STABLE		2
+#define KVM_CLOCK_CORRECT_TSC_SHIFT	(1 << 6)
 
 struct kvm_clock_data {
 	__u64 clock;

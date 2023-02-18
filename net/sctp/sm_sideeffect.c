@@ -1247,10 +1247,6 @@ static int sctp_cmd_interpreter(sctp_event_t event_type,
 			sctp_endpoint_add_asoc(ep, asoc);
 			break;
 
-		case SCTP_CMD_UPDATE_ASSOC:
-		       sctp_assoc_update(asoc, cmd->obj.asoc);
-		       break;
-
 		case SCTP_CMD_PURGE_OUTQUEUE:
 		       sctp_outq_teardown(&asoc->outqueue);
 		       break;

@@ -1435,23 +1435,23 @@ static int set_tsc_khz(struct kvm_vcpu *vcpu, u32 user_tsc_khz, bool scale)
 	return 0;
 }
 
-static int kvm_set_tsc_khz(struct kvm_vcpu *vcpu, u32 this_tsc_khz)
+static int kvm_set_tsc_khz(struct kvm_vcpu *vcpu, u32 user_tsc_khz)
 {
 	u32 thresh_lo, thresh_hi;
 	int use_scaling = 0;
 
 	/* tsc_khz can be zero if TSC calibration fails */
-	if (this_tsc_khz == 0) {
+	if (user_tsc_khz == 0) {
 		/* set tsc_scaling_ratio to a safe value */
 		vcpu->arch.tsc_scaling_ratio = kvm_default_tsc_scaling_ratio;
 		return -1;
 	}
 
 	/* Compute a scale to convert nanoseconds in TSC cycles */
-	kvm_get_time_scale(this_tsc_khz, NSEC_PER_SEC / 1000,
+	kvm_get_time_scale(user_tsc_khz, NSEC_PER_SEC / 1000,
 			   &vcpu->arch.virtual_tsc_shift,
 			   &vcpu->arch.virtual_tsc_mult);
-	vcpu->arch.virtual_tsc_khz = this_tsc_khz;
+	vcpu->arch.virtual_tsc_khz = user_tsc_khz;
 
 	/*
 	 * Compute the variation in TSC rate which is acceptable
@@ -1461,11 +1461,11 @@ static int kvm_set_tsc_khz(struct kvm_vcpu *vcpu, u32 this_tsc_khz)
 	 */
 	thresh_lo = adjust_tsc_khz(tsc_khz, -tsc_tolerance_ppm);
 	thresh_hi = adjust_tsc_khz(tsc_khz, tsc_tolerance_ppm);
-	if (this_tsc_khz < thresh_lo || this_tsc_khz > thresh_hi) {
-		pr_debug("kvm: requested TSC rate %u falls outside tolerance [%u,%u]\n", this_tsc_khz, thresh_lo, thresh_hi);
+	if (user_tsc_khz < thresh_lo || user_tsc_khz > thresh_hi) {
+		pr_debug("kvm: requested TSC rate %u falls outside tolerance [%u,%u]\n", user_tsc_khz, thresh_lo, thresh_hi);
 		use_scaling = 1;
 	}
-	return set_tsc_khz(vcpu, this_tsc_khz, use_scaling);
+	return set_tsc_khz(vcpu, user_tsc_khz, use_scaling);
 }
 
 static u64 compute_guest_tsc(struct kvm_vcpu *vcpu, s64 kernel_ns)
@@ -1960,7 +1960,7 @@ static void kvm_setup_pvclock_page(struct kvm_vcpu *v)
 
 static int kvm_guest_time_update(struct kvm_vcpu *v)
 {
-	unsigned long flags, this_tsc_khz, tgt_tsc_khz;
+	unsigned long flags, tgt_tsc_khz;
 	struct kvm_vcpu_arch *vcpu = &v->arch;
 	struct kvm_arch *ka = &v->kvm->arch;
 	s64 kernel_ns;
@@ -1985,8 +1985,8 @@ static int kvm_guest_time_update(struct kvm_vcpu *v)
 
 	/* Keep irq disabled to prevent changes to the clock */
 	local_irq_save(flags);
-	this_tsc_khz = __this_cpu_read(cpu_tsc_khz);
-	if (unlikely(this_tsc_khz == 0)) {
+	tgt_tsc_khz = __this_cpu_read(cpu_tsc_khz);
+	if (unlikely(tgt_tsc_khz == 0)) {
 		local_irq_restore(flags);
 		kvm_make_request(KVM_REQ_CLOCK_UPDATE, v);
 		return 1;
@@ -2020,13 +2020,14 @@ static int kvm_guest_time_update(struct kvm_vcpu *v)
 
 	/* With all the info we got, fill in the values */
 
-	if (unlikely(vcpu->hw_tsc_khz != this_tsc_khz)) {
-		tgt_tsc_khz = kvm_has_tsc_control ?
-			vcpu->virtual_tsc_khz : this_tsc_khz;
+	if (kvm_has_tsc_control)
+		tgt_tsc_khz = kvm_scale_tsc(v, tgt_tsc_khz);
+
+	if (unlikely(vcpu->hw_tsc_khz != tgt_tsc_khz)) {
 		kvm_get_time_scale(NSEC_PER_SEC / 1000, tgt_tsc_khz,
 				   &vcpu->hv_clock.tsc_shift,
 				   &vcpu->hv_clock.tsc_to_system_mul);
-		vcpu->hw_tsc_khz = this_tsc_khz;
+		vcpu->hw_tsc_khz = tgt_tsc_khz;
 	}
 
 	vcpu->hv_clock.tsc_timestamp = tsc_timestamp;
@@ -4378,6 +4379,7 @@ long kvm_arch_vm_ioctl(struct file *filp,
 		now_ns = get_kvmclock_ns(kvm);
 		user_ns.clock = now_ns;
 		user_ns.flags = kvm->arch.use_master_clock ? KVM_CLOCK_TSC_STABLE : 0;
+		user_ns.flags |= KVM_CLOCK_CORRECT_TSC_SHIFT;
 		memset(&user_ns.pad, 0, sizeof(user_ns.pad));
 
 		r = -EFAULT;

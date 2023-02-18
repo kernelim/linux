@@ -227,6 +227,8 @@ static void flush_end_io(struct request *flush_rq, int error)
 	if (q->mq_ops) {
 		struct blk_mq_hw_ctx *hctx;
 
+		clear_bit(REQ_ATOM_STARTED, &flush_rq->atomic_flags);
+
 		/* release the tag's ownership to the req cloned from */
 		spin_lock_irqsave(&fq->mq_flush_lock, flags);
 		hctx = blk_mq_map_queue(q, flush_rq->mq_ctx->cpu);

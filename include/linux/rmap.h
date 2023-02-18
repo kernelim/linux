@@ -47,12 +47,15 @@ struct anon_vma {
 	struct rb_root rb_root;	/* Interval tree of private "related" vmas */
 
 	/*
-	 * Count of child anon_vmas and VMAs which points to this anon_vma.
+	 * Count of child anon_vmas. Equals to the count of all anon_vmas that
+	 * have ->parent pointing to this one, including itself.
 	 *
 	 * This counter is used for making decision about reusing anon_vma
 	 * instead of forking new one. See comments in function anon_vma_clone.
 	 */
-	RH_KABI_EXTEND(unsigned degree)
+	RH_KABI_EXTEND(unsigned long num_children)
+	/* Count of VMAs whose ->anon_vma pointer points to this object. */
+	RH_KABI_EXTEND(unsigned long num_active_vmas)
 
 	RH_KABI_EXTEND(struct anon_vma *parent)	/* Parent of this anon_vma */
 };
@@ -156,10 +159,18 @@ static inline void anon_vma_unlock_read(struct anon_vma *anon_vma)
  * anon_vma helper functions.
  */
 void anon_vma_init(void);	/* create anon_vma_cachep */
-int  anon_vma_prepare(struct vm_area_struct *);
+int  __anon_vma_prepare(struct vm_area_struct *);
 void unlink_anon_vmas(struct vm_area_struct *);
 int anon_vma_clone(struct vm_area_struct *, struct vm_area_struct *);
 int anon_vma_fork(struct vm_area_struct *, struct vm_area_struct *);
+
+static inline int anon_vma_prepare(struct vm_area_struct *vma)
+{
+	if (likely(vma->anon_vma))
+		return 0;
+
+	return __anon_vma_prepare(vma);
+}
 
 static inline void anon_vma_merge(struct vm_area_struct *vma,
 				  struct vm_area_struct *next)

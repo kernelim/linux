@@ -413,7 +413,7 @@ extern int
 qla24xx_lun_reset(struct fc_port *, unsigned int, int);
 extern int
 qla2x00_eh_wait_for_pending_commands(scsi_qla_host_t *, unsigned int,
-	unsigned int, enum nexus_wait_type);
+	uint64_t, enum nexus_wait_type);
 extern int
 qla2x00_system_error(scsi_qla_host_t *);
 
