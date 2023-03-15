@@ -33,10 +33,10 @@ In general, users can submit an MR and use the CKI build artifacts.  In cases wh
 make dist-brew
 ----
 
-Specific architectures can be built by setting the BREW_FLAGS variable.  For example, to build the x86_64 and noarch architectures,
+Specific architectures can be built by setting the BUILD_FLAGS variable.  For example, to build the x86_64 and noarch architectures,
 
 ----
-make dist-brew BREW_FLAGS="--arch-override=x86_64,noarch"
+make dist-brew BUILD_FLAGS="--arch-override=x86_64,noarch"
 ----
 
 == Command Help

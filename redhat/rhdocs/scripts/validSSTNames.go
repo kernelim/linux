@@ -1,6 +1,7 @@
 package main
 
 var validSSTNames = []string {"rhel-sst-null",
+			      "rhel-sst-accelerators",
 			      "rhel-ssg-arr",
 			      "rhel-sst-arch-hw",
 			      "rhel-sst-cee-supportability",

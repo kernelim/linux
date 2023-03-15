@@ -121,13 +121,13 @@ Summary: The Linux kernel
 %define kversion 5.14
 
 %define rpmversion 5.14.0
-%define pkgrelease 162.18.1.el9_1
+%define pkgrelease 162.22.2.el9_1
 
 # This is needed to do merge window version magic
 %define patchlevel 14
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 162.18.1%{?buildid}%{?dist}
+%define specrelease 162.22.2%{?buildid}%{?dist}
 
 %define pkg_release %{specrelease}
 
@@ -678,7 +678,7 @@ BuildRequires: lld
 # exact git commit you can run
 #
 # xzcat -qq ${TARBALL} | git get-tar-commit-id
-Source0: linux-5.14.0-162.18.1.el9_1.tar.xz
+Source0: linux-5.14.0-162.22.2.el9_1.tar.xz
 
 Source1: Makefile.rhelver
 
@@ -1348,8 +1348,8 @@ ApplyOptionalPatch()
   fi
 }
 
-%setup -q -n kernel-5.14.0-162.18.1.el9_1 -c
-mv linux-5.14.0-162.18.1.el9_1 linux-%{KVERREL}
+%setup -q -n kernel-5.14.0-162.22.2.el9_1 -c
+mv linux-5.14.0-162.22.2.el9_1 linux-%{KVERREL}
 
 cd linux-%{KVERREL}
 cp -a %{SOURCE1} .
@@ -3016,9 +3016,54 @@ fi
 #
 #
 %changelog
-* Tue Feb 28 2023 Release Engineering <releng@rockylinux.org> - 5.14.0-162.18.1
+* Thu Mar 30 2023 Release Engineering <releng@rockylinux.org> - 5.14.0-162.22.2
 - Porting to 9.1, debranding and Rocky branding with new release pkg (Sherif Nagy)
 - Porting to 9.1, debranding and Rocky branding (Louis Abel)
+
+* Wed Mar 15 2023 Lucas Zampieri <lzampier@redhat.com> [5.14.0-162.22.2.el9_1]
+- tun: avoid double free in tun_free_netdev (Jon Maloy) [2156373] {CVE-2022-4744}
+
+* Thu Mar 09 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.22.1.el9_1]
+- ALSA: pcm: Move rwsem lock inside snd_ctl_elem_read to prevent UAF (Jaroslav Kysela) [2163390 2125540] {CVE-2023-0266}
+
+* Thu Mar 02 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.21.1.el9_1]
+- s390/boot: add secure boot trailer (Tobias Huschle) [2151528 2141966]
+- s390/kexec: fix ipl report address for kdump (Tobias Huschle) [2166903 2161327]
+- s390/qeth: cache link_info for ethtool (Tobias Huschle) [2166304 2110436]
+- scsi: zfcp: Fix missing auto port scan and thus missing target ports (Tobias Huschle) [2127880 2121088]
+
+* Thu Feb 23 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.20.1.el9_1]
+- cgroup/cpuset: remove unreachable code (Waiman Long) [2161105 1946801]
+- kselftest/cgroup: Add cpuset v2 partition root state test (Waiman Long) [2161105 1946801]
+- cgroup/cpuset: Update description of cpuset.cpus.partition in cgroup-v2.rst (Waiman Long) [2161105 1946801]
+- cgroup/cpuset: Make partition invalid if cpumask change violates exclusivity rule (Waiman Long) [2161105 1946801]
+- cgroup/cpuset: Relocate a code block in validate_change() (Waiman Long) [2161105 1946801]
+- cgroup/cpuset: Show invalid partition reason string (Waiman Long) [2161105 1946801]
+- cgroup/cpuset: Add a new isolated cpus.partition type (Waiman Long) [2161105 1946801]
+- cgroup/cpuset: Relax constraints to partition & cpus changes (Waiman Long) [2161105 1946801]
+- cgroup/cpuset: Allow no-task partition to have empty cpuset.cpus.effective (Waiman Long) [2161105 1946801]
+- cgroup/cpuset: Miscellaneous cleanups & add helper functions (Waiman Long) [2161105 1946801]
+- cgroup/cpuset: Enable update_tasks_cpumask() on top_cpuset (Waiman Long) [2161105 1946801]
+- cpuset: convert 'allowed' in __cpuset_node_allowed() to be boolean (Waiman Long) [2161105 1946801]
+- cgroup/cpuset: Remove cpus_allowed/mems_allowed setup in cpuset_init_smp() (Waiman Long) [2161105 1946801]
+- cgroup: cleanup comments (Waiman Long) [2161105 1946801]
+- act_mirred: use the backlog for nested calls to mirred ingress (Davide Caratti) [2164655 2150278] {CVE-2022-4269}
+- net/sched: act_mirred: better wording on protection against excessive stack growth (Davide Caratti) [2164655 2150278] {CVE-2022-4269}
+- scsi: storvsc: Fix swiotlb bounce buffer leak in confidential VM (Emanuele Giuseppe Esposito) [2170227 2150660]
+
+* Thu Feb 16 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.19.1.el9_1]
+- sched/core: Use kfree_rcu() in do_set_cpus_allowed() (Waiman Long) [2160614 2143847]
+- sched/core: Fix use-after-free bug in dup_user_cpus_ptr() (Waiman Long) [2160614 2143847]
+- sched: Always clear user_cpus_ptr in do_set_cpus_allowed() (Waiman Long) [2143766 2107354]
+- sched: Enforce user requested affinity (Waiman Long) [2143766 2107354]
+- sched: Always preserve the user requested cpumask (Waiman Long) [2143766 2107354]
+- sched: Introduce affinity_context (Waiman Long) [2143766 2107354]
+- sched: Add __releases annotations to affine_move_task() (Waiman Long) [2143766 2107354]
+- x86/fpu: Fix copy_xstate_to_uabi() to copy init states correctly (Dean Nelson) [2168382 2122851]
+- x86/fpu: Exclude dynamic states from init_fpstate (Dean Nelson) [2168382 2122851]
+- x86/fpu: Fix the init_fpstate size check with the actual size (Dean Nelson) [2168382 2122851]
+- x86/fpu: Configure init_fpstate attributes orderly (Dean Nelson) [2168382 2122851]
+- x86/fpu/xstate: Fix the ARCH_REQ_XCOMP_PERM implementation (Dean Nelson) [2168382 2122851]
 
 * Thu Feb 09 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.18.1.el9_1]
 - powerpc/pseries: Use lparcfg to reconfig VAS windows for DLPAR CPU (Steve Best) [2154305 2133101]

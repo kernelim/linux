@@ -10,6 +10,8 @@ summary: The RHEL Kernel Workflow is used by Red Hat-based kernel projects inclu
 
 https://red.ht/kernel_workflow_doc[https://red.ht/kernel_workflow_doc]
 
+{{< toc >}}
+
 The RHEL Kernel Workflow is used by Red Hat-based kernel projects including RHEL Kernels, CentOS Stream kernels, the Fedora kernel, and the Always Ready Kernel (ARK).  The RHEL Kernel Workflow is built upon the standard https://docs.gitlab.com/ee/topics/gitlab_flow.html[GitLab workflow] and uses GitLab Merge Requests as the only way to make changes to the Red Hat kernel.
 
 At Red Hat, all work is directed through the analysis of user bug reports.  Contributors (ie, engineers) review bugs and identify work to be completed for each bug.  For each bug, a contributor codes a fix and submits the code for review.  Reviewers analyze the fix, and when they are satisfied with the fix, the maintainers accept the fix into the codebase.  The modified codebase is tested by Quality Engineering, and when they are satisfied with the results of testing, the Documentation team will document the changes for our customers.
@@ -93,7 +95,7 @@ Contributors may both provide and review code to Red Hat kernel projects via Git
 
 ==== Setup
 
-New users should follow the <<Account Setup & Configuration>> and configure link:rhel_kernel_workflow.adoc#Tools[tooling for working with the Red Hat kernel trees] sections below.  Advanced users may optionally reference the link:README.adoc[Developer Quick Start Guide].
+New users should follow the <<Account Setup & Configuration>> and configure link:rhel_kernel_workflow.adoc#user-content-tools[tooling for working with the Red Hat kernel trees] sections below.  Advanced users may optionally reference the link:README.adoc[Developer Quick Start Guide].
 
 ==== Developers for RHEL
 
@@ -197,7 +199,7 @@ Contributors can follow link:general_build_instructions.adoc[these instructions]
 
 ==== Submitting a Merge Request
 
-Contributors can follow these general https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html[instructions on submitting an MR] using the GitLab UI.  Contributors to RHEL kernel projects should also follow these Red Hat specific instructions on link:lab.adoc[lab] GitLab command line tool can also be used to submit Merge Requests.
+Contributors can follow these general https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html[instructions on submitting an MR] using the GitLab UI.  Contributors to RHEL kernel projects should also follow these Red Hat specific instructions of the link:CommitRules.adoc[Commit Rules]. The link:lab.adoc[lab] GitLab command line tool can also be used to submit Merge Requests.
 
 The <<Kernel-webhooks>> will automatically assign reviewers based on the changeset's code content.  Changesets that modify many subsystems or drivers will result in a large number of reviewers assigned to the merge request.  To avoid this problem it is strongly encouraged that Merge Request Authors follow upstream's guidance on separating code changes: "https://www.kernel.org/doc/html/latest/process/submitting-patches.html#separate-your-changes[If you cannot condense your patch set into a smaller set of patches, then only post say 15 or so at a time and wait for review and integration]".
 

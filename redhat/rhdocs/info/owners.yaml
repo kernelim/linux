@@ -74,7 +74,7 @@ subsystems:
      - rhel-sst-kernel-rts
    requiredApproval: true
    maintainers:
-     - name: Clark Wiliams
+     - name: Clark Williams
        email: williams@redhat.com
        gluser: clrkwllms
      - name: Andrew Halaney
@@ -272,7 +272,7 @@ subsystems:
      - rhel-sst-kernel-rts
    requiredApproval: true
    maintainers:
-     - name: John Wyatt
+     - name: John B. Wyatt IV
        email: jwyatt@redhat.com
        gluser: jwyatt-rh
      - name: Chris White
@@ -610,9 +610,6 @@ subsystems:
    qe-sst:
      - rhel-sst-null
    maintainers:
-     - name: Torez Smith
-       email: torez@redhat.com
-       gluser: torez
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
@@ -679,9 +676,9 @@ subsystems:
      name: aio
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-storage-io
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-storage-io
    requiredApproval: false
    maintainers:
      - name: Jeff Moyer
@@ -729,6 +726,40 @@ subsystems:
      - name: Josef Oskera
        email: joskera@redhat.com
        gluser: joskera
+   reviewers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+     - name: Stefan Assmann
+       email: sassmann@redhat.com
+       gluser: sassmann_rh
+     - name: Corinna Vinschen
+       email: vinschen@redhat.com
+       gluser: vinschen
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
+     - name: Jonathan Toppins
+       email: jtoppins@redhat.com
+       gluser: jtoppins_redhat
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
    paths:
        includes:
           - Documentation/networking/ena.txt
@@ -744,6 +775,9 @@ subsystems:
      - rhel-sst-nic-rdma
    requiredApproval: false
    maintainers:
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
      - name: Kamal Heib
        email: kheib@redhat.com
        gluser: kheib
@@ -766,12 +800,12 @@ subsystems:
        gluser: jsnitsel
    reviewers:
      - name: Myron Stowe
-       email: myron.stowe@redhat.com
+       email: mstowe@redhat.com
        gluser: mstowe1
      - name: Alex Williamson
        email: alex.williamson@redhat.com
        gluser: alex.williamson
-     - name: Don Dutile
+     - name: Donald Dutile
        email: ddutile@redhat.com
        gluser: ddutile
    paths:
@@ -788,7 +822,7 @@ subsystems:
      - rhel-sst-arch-hw
    requiredApproval: false
    maintainers:
-     - name: John W. Linville
+     - name: John Linville
        email: linville@redhat.com
        gluser: linville-rh
      - name: Myron Stowe
@@ -796,7 +830,7 @@ subsystems:
        gluser: mstowe1
    paths:
        includes:
-          - drivers/dma/ptdma
+          - drivers/dma/ptdma/
  - subsystem: AMD SEV/SEV-ES/SEV-SNP Guest Side
    labels:
      name: amd_sevx_guest
@@ -879,6 +913,22 @@ subsystems:
    paths:
        includes:
           - arch/Kconfig
+ - subsystem: ARCnet drivers
+   labels:
+     name: arcnet
+   status: Disabled
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/net/arcnet/
+          - Documentation/networking/arcnet*
  - subsystem: ARECA (ARC11xx/12xx/16xx/1880) SATA/SAS RAID Host Bus Adapter (arcmsr)
    labels:
      name: arcmsr
@@ -1103,6 +1153,25 @@ subsystems:
           - arch/arm64/
        excludes:
           - arch/arm64/net/
+ - subsystem: Asynchronous Transfer Mode (ATM) drivers
+   labels:
+     name: atm_drivers
+   status: Disabled
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/atm/
+          - include/linux/atmdev.h
+          - include/net/atmclip.h
+          - include/uapi/linux/atmdev.h
+          - Documentation/networking/device_drivers/atm/
  - subsystem: ATHEROS ETHERNET DRIVERS
    labels:
      name: atheros
@@ -1203,6 +1272,22 @@ subsystems:
    paths:
        includes:
           - drivers/auxdisplay/
+ - subsystem: BCACHE
+   labels:
+     name: bcache
+   status: Disabled
+   devel-sst:
+     - rhel-sst-logical-storage
+   qe-sst:
+     - rhel-sst-logical-storage
+   requiredApproval: false
+   maintainers:
+     - name: Mike Snitzer
+       email: snitzer@redhat.com
+       gluser: snitm
+   paths:
+       includes:
+          - drivers/md/bcache/
  - subsystem: BE2NET ETHERNET DRIVER (be2net)
    labels:
      name: be2net
@@ -1294,10 +1379,52 @@ subsystems:
      - name: Jarod Wilson
        email: jarod@redhat.com
        gluser: jwilsonrh
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+     - name: Stefan Assmann
+       email: sassmann@redhat.com
+       gluser: sassmann_rh
+     - name: Corinna Vinschen
+       email: vinschen@redhat.com
+       gluser: vinschen
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
+     - name: Jonathan Toppins
+       email: jtoppins@redhat.com
+       gluser: jtoppins_redhat
+     - name: Josef Oskera
+       email: joskera@redhat.com
+       gluser: joskera
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
    paths:
        includes:
+          - Documentation/networking/bonding.rst
           - drivers/net/bonding/
-          - include/linux/if_bonding.h
+          - include/net/bond_3ad.h
+          - include/net/bond_alb.h
+          - include/net/bonding.h
+          - include/net/bond_options.h
+          - include/uapi/linux/if_bonding.h
+          - tools/testing/selftests/drivers/net/bonding/
  - subsystem: BPF (Safe dynamic programs and tools)
    labels:
      name: bpf
@@ -1415,13 +1542,16 @@ subsystems:
    devel-sst:
      - rhel-sst-nic-rdma
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-nic-rdma
    requiredApproval: false
    maintainers:
      - name: Selvin Xavier
        email: sxavier@redhat.com
        gluser: sxavier_rh
        restricted: true
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
    paths:
        includes:
           - drivers/infiniband/hw/bnxt_re/
@@ -1478,6 +1608,25 @@ subsystems:
    paths:
        includes:
           - drivers/net/ethernet/broadcom/cnic*
+ - subsystem: Broadcom specific AMBA
+   labels:
+     name: bcma
+   status: Provided
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   maintainers:
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/bcma/
+          - include/linux/bcma/
  - subsystem: BROADCOM TG3 GIGABIT ETHERNET DRIVER
    labels:
      name: tg3
@@ -1635,6 +1784,19 @@ subsystems:
      - name: Ronnie Sahlberg
        email: lsahlber@redhat.com
        gluser: lsahlber
+   reviewers:
+     - name: Benjamin Coddington
+       email: bcodding@redhat.com
+       gluser: bcodding
+     - name: Jeffrey Layton
+       email: jlayton@redhat.com
+       gluser: jtlayton
+     - name: Steve Dickson
+       email: steved@redhat.com
+       gluser: steved92
+     - name: Scott Mayhew
+       email: smayhew@redhat.com
+       gluser: smayhew
    paths:
        includes:
           - fs/cifs/
@@ -1668,10 +1830,9 @@ subsystems:
      - rhel-sst-nic-rdma
    requiredApproval: false
    maintainers:
-     - name: Govindarajulu Varadarajan
-       email: gvaradar@redhat.com
-       gluser: null
-       restricted: true
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
    paths:
        includes:
           - drivers/net/ethernet/cisco/enic/
@@ -1690,7 +1851,7 @@ subsystems:
        gluser: msalter
    paths:
        includes:
-          - drivers/clocksource
+          - drivers/clocksource/
        excludes:
           - drivers/clocksource/hyperv_timer.c
           - drivers/clocksource/arm_arch_timer.c
@@ -1733,6 +1894,26 @@ subsystems:
           - include/linux/clk-pr*
           - include/linux/clk/
           - include/linux/of_clk.h
+ - subsystem: COMPUTE ACCELERATION
+   labels:
+     name: accel
+   status: Disabled
+   devel-sst:
+     - rhel-sst-accelerators
+   qe-sst:
+     - rhel-sst-null
+   requiredApproval: false
+   maintainers:
+     - name: Tom Rix
+       email: trix@redhat.com
+       gluser: tomrix
+   reviewers:
+     - name: Marco Pagani
+       email: marpagan@redhat.com
+       gluser: marpagan
+   paths:
+       includes:
+          - drivers/accel/
  - subsystem: COMPUTE EXPRESS LINK (CXL)
    labels:
      name: cxl
@@ -1802,9 +1983,9 @@ subsystems:
      - rhel-sst-cki
    requiredApproval: true
    maintainers:
-     - name: Veronika Kabatova
-       email: vkabatov@redhat.com
-       gluser: veruu
+     - name: Tino Calancha
+       email: tcalanch@redhat.com
+       gluser: calancha
      - name: Michael Hofmann
        email: mhofmann@redhat.com
        gluser: mh21
@@ -2014,9 +2195,13 @@ subsystems:
      - rhel-sst-nic-rdma
    requiredApproval: false
    maintainers:
-     - name: Michal Schmidt
-       email: mschmidt@redhat.com
-       gluser: mschmidt2
+     - name: Rahul Lakkireddy
+       email: rlakkire@redhat.com
+       gluser: rlakkire
+       restricted: true
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
    paths:
        includes:
           - drivers/infiniband/hw/cxgb4/
@@ -2145,9 +2330,11 @@ subsystems:
      name: direct_io
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-storage-io
+     - rhel-sst-filesystems
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-storage-io
+     - rhel-sst-filesystems
    requiredApproval: false
    maintainers:
      - name: Jeff Moyer
@@ -2382,13 +2569,52 @@ subsystems:
    qe-sst:
      - rhel-sst-nic-rdma
    requiredApproval: false
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
    reviewers:
      - name: Jarod Wilson
        email: jarod@redhat.com
        gluser: jwilsonrh
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+     - name: Stefan Assmann
+       email: sassmann@redhat.com
+       gluser: sassmann_rh
+     - name: Corinna Vinschen
+       email: vinschen@redhat.com
+       gluser: vinschen
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
+     - name: Jonathan Toppins
+       email: jtoppins@redhat.com
+       gluser: jtoppins_redhat
+     - name: Josef Oskera
+       email: joskera@redhat.com
+       gluser: joskera
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
    paths:
        includes:
           - drivers/net/ethernet/
+       excludes:
+          - drivers/net/ethernet/microsoft/
  - subsystem: ETHERNET BRIDGE
    labels:
      name: if_bridge
@@ -2422,12 +2648,48 @@ subsystems:
      - name: Petr Oros
        email: poros@redhat.com
        gluser: poros2
+   reviewers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+     - name: Stefan Assmann
+       email: sassmann@redhat.com
+       gluser: sassmann_rh
+     - name: Corinna Vinschen
+       email: vinschen@redhat.com
+       gluser: vinschen
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
+     - name: Jonathan Toppins
+       email: jtoppins@redhat.com
+       gluser: jtoppins_redhat
+     - name: Josef Oskera
+       email: joskera@redhat.com
+       gluser: joskera
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
    paths:
        includes:
           - Documentation/networking/phy.rst
+          - drivers/net/mdio/
           - drivers/net/phy/
           - drivers/of/of_mdio.c
           - include/linux/*mdio*.h
+          - include/linux/mdio/
           - include/linux/phy.h
           - include/linux/phy_fixed.h
           - include/linux/platform_data/mdio-bcm-unimac.h
@@ -2498,6 +2760,23 @@ subsystems:
           - include/scsi/fc/
        excludes:
           - drivers/scsi/fcoe/fcoe.c
+ - subsystem: FDDI drivers
+   labels:
+     name: fddi
+   status: Disabled
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/net/fddi/
+          - include/linux/fddidevice.h
+          - Documentation/networking/device_drivers/fddi/
  - subsystem: FEDORA
    labels:
      name: fedora
@@ -2548,7 +2827,6 @@ subsystems:
           - fs/ceph/
           - fs/cifs/
           - fs/configfs/
-          - fs/cramfs/
           - fs/dax.c
           - fs/direct-io.c
           - fs/dlm/
@@ -2643,6 +2921,26 @@ subsystems:
    paths:
        includes:
           - drivers/net/ethernet/nvidia/forcedeth.c
+ - subsystem: FPGA AND DFL
+   labels:
+     name: fpga
+   status: Disabled
+   devel-sst:
+     - rhel-sst-accelerators
+   qe-sst:
+     - rhel-sst-null
+   requiredApproval: false
+   maintainers:
+     - name: Tom Rix
+       email: trix@redhat.com
+       gluser: tomrix
+   reviewers:
+     - name: Marco Pagani
+       email: marpagan@redhat.com
+       gluser: marpagan
+   paths:
+       includes:
+          - drivers/fpga/
  - subsystem: FSI SUBSYSTEM
    labels:
      name: fsi
@@ -2775,9 +3073,10 @@ subsystems:
    maintainers:
      - name: Jan Stancek
        email: jstancek@redhat.com
+       gluser: jstancek
    paths:
        includes:
-          - kernel/gcov
+          - kernel/gcov/
  - subsystem: GENERIC PHY FRAMEWORK
    labels:
      name: phy
@@ -3000,6 +3299,23 @@ subsystems:
           - drivers/hid/
           - include/linux/hid*
           - include/uapi/linux/hid*
+ - subsystem: HIPPI drivers
+   labels:
+     name: hippi
+   status: Disabled
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/net/hippi/
+          - include/linux/hippidevice.h
+          - net/802/hippi.c
  - subsystem: HSI SUBSYSTEM
    labels:
      name: hsi
@@ -3018,6 +3334,34 @@ subsystems:
    paths:
        includes:
           - drivers/hsi/
+ - subsystem: HTE SUBSYSTEM (HARDWARE TIMESTAMP ENGINE)
+   labels:
+     name: hte
+   status: Supported
+   devel-sst:
+     - rhivos-ft-auto-kernel
+   qe-sst:
+     - rhivos-ft-auto-kernel
+   requiredApproval: false
+   maintainers:
+     - name: Adrien Thierry
+       email: athierry@redhat.com
+       gluser: athierry1
+     - name: Andrew Halaney
+       email: ahalaney@redhat.com
+       gluser: ahalaney
+     - name: Brian Masney
+       email: bmasney@redhat.com
+       gluser: bmasney
+     - name: Eric Chanudet
+       email: echanude@redhat.com
+       gluser: echanude
+   paths:
+       includes:
+          - Documentation/devicetree/bindings/timestamp/
+          - Documentation/driver-api/hte/
+          - drivers/hte/
+          - include/linux/hte.h
  - subsystem: HWMON SUBSYSTEM
    labels:
      name: hwmon
@@ -3073,14 +3417,14 @@ subsystems:
    paths:
        includes:
           - Documentation/networking/device_drivers/microsoft/netvsc.txt
-          - arch/arm64/hyperv
+          - arch/arm64/hyperv/
           - arch/arm64/include/asm/hyperv-tlfs.h
           - arch/arm64/include/asm/mshyperv.h
           - arch/x86/include/asm/mshyperv.h
           - arch/x86/include/asm/trace/hyperv.h
           - arch/x86/include/asm/hyperv-tlfs.h
           - arch/x86/kernel/cpu/mshyperv.c
-          - arch/x86/hyperv
+          - arch/x86/hyperv/
           - drivers/clocksource/hyperv_timer.c
           - drivers/hid/hid-hyperv.c
           - drivers/hv/
@@ -3141,7 +3485,7 @@ subsystems:
        gluser: darcari
    paths:
        includes:
-          - drivers/i3c
+          - drivers/i3c/
  - subsystem: INDUSTRIAL I/O SUBSYSTEM (IIO)
    labels:
      name: iio
@@ -3192,6 +3536,40 @@ subsystems:
      - name: Kamal Heib
        email: kheib@redhat.com
        gluser: kheib
+   reviewers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
+     - name: Stefan Assmann
+       email: sassmann@redhat.com
+       gluser: sassmann_rh
+     - name: Corinna Vinschen
+       email: vinschen@redhat.com
+       gluser: vinschen
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
+     - name: Jonathan Toppins
+       email: jtoppins@redhat.com
+       gluser: jtoppins_redhat
+     - name: Josef Oskera
+       email: joskera@redhat.com
+       gluser: joskera
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
    paths:
        includes:
           - drivers/infiniband/
@@ -3199,6 +3577,8 @@ subsystems:
           - include/uapi/rdma/
           - include/uapi/linux/if_infiniband.h
           - Documentation/infiniband/
+          - include/linux/mlx4/
+          - include/linux/mlx5/
  - subsystem: INIT
    labels:
      name: init
@@ -3333,9 +3713,61 @@ subsystems:
      - name: Petr Oros
        email: poros@redhat.com
        gluser: poros2
+   reviewers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+     - name: Stefan Assmann
+       email: sassmann@redhat.com
+       gluser: sassmann_rh
+     - name: Corinna Vinschen
+       email: vinschen@redhat.com
+       gluser: vinschen
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
+     - name: Jonathan Toppins
+       email: jtoppins@redhat.com
+       gluser: jtoppins_redhat
+     - name: Josef Oskera
+       email: joskera@redhat.com
+       gluser: joskera
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
    paths:
        includes:
           - drivers/net/ethernet/intel/ice/
+          - include/linux/net/intel/
+ - subsystem: INTEL ETHERNET PROTOCOL DRIVER FOR RDMA (irdma)
+   labels:
+     name: irdma
+   status: Supported
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   requiredApproval: false
+   maintainers:
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+   paths:
+       includes:
+          - drivers/infiniband/hw/irdma/
+          - include/uapi/rdma/irdma-abi.h
  - subsystem: INTEL I40E ETHERNET DRIVERS (i40e)
    labels:
      name: i40e
@@ -3452,12 +3884,12 @@ subsystems:
        gluser: jsnitsel
    reviewers:
      - name: Myron Stowe
-       email: myron.stowe@redhat.com
+       email: mstowe@redhat.com
        gluser: mstowe1
      - name: Alex Williamson
        email: alex.williamson@redhat.com
        gluser: alex.williamson
-     - name: Don Dutile
+     - name: Donald Dutile
        email: ddutile@redhat.com
        gluser: ddutile
    paths:
@@ -3660,12 +4092,12 @@ subsystems:
        gluser: jsnitsel
    reviewers:
      - name: Myron Stowe
-       email: myron.stowe@redhat.com
+       email: mstowe@redhat.com
        gluser: mstowe1
      - name: Alex Williamson
        email: alex.williamson@redhat.com
        gluser: alex.williamson
-     - name: Don Dutile
+     - name: Donald Dutile
        email: ddutile@redhat.com
        gluser: ddutile
    paths:
@@ -3739,6 +4171,24 @@ subsystems:
        includes:
           - drivers/scsi/*iscsi*
           - include/scsi/*iscsi*
+ - subsystem: ISDN drivers
+   labels:
+     name: isdn
+   status: Disabled
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/isdn/
+          - include/linux/isdn/
+          - include/uapi/linux/isdn/
+          - Documentation/isdn/
  - subsystem: IUCV
    labels:
      name: iucv
@@ -3845,7 +4295,7 @@ subsystems:
        gluser: vkuznets
    paths:
        includes:
-          - drivers/virt/tdx
+          - drivers/virt/tdx/
           - Documentation/virt/kvm/
           - include/trace/events/kvm.h
           - include/uapi/asm-generic/kvm*
@@ -4173,7 +4623,7 @@ subsystems:
      - name: Phil Auld
        email: pauld@redhat.com
        gluser: prauld
-     - name: Wander Costa
+     - name: Wander Lairson Costa
        email: wander@redhat.com
        gluser: walac
    paths:
@@ -4300,9 +4750,18 @@ subsystems:
      - rhel-sst-null
    requiredApproval: false
    maintainers:
-     - name: Al Stone
-       email: ahs3@redhat.com
-       gluser: ahs3
+     - name: Adrien Thierry
+       email: athierry@redhat.com
+       gluser: athierry1
+     - name: Andrew Halaney
+       email: ahalaney@redhat.com
+       gluser: ahalaney
+     - name: Brian Masney
+       email: bmasney@redhat.com
+       gluser: bmasney
+     - name: Eric Chanudet
+       email: echanude@redhat.com
+       gluser: echanude
    paths:
        includes:
           - drivers/mailbox/
@@ -4410,7 +4869,7 @@ subsystems:
      - name: Christoph von Recklinghausen
        email: crecklin@redhat.com
        gluser: crecklin
-     - name: Don Dutile
+     - name: Donald Dutile
        email: ddutile@redhat.com
        gluser: ddutile
      - name: Herton R. Krzesinski
@@ -4542,7 +5001,7 @@ subsystems:
        restricted: true
      - name: Mohammad Kabat
        email: mkabat@redhat.com
-       gluser: kkabat
+       gluser: mkabat
        restricted: true
      - name: Kamal Heib
        email: kheib@redhat.com
@@ -4566,7 +5025,7 @@ subsystems:
        restricted: true
      - name: Mohammad Kabat
        email: mkabat@redhat.com
-       gluser: kkabat
+       gluser: mkabat
        restricted: true
      - name: Kamal Heib
        email: kheib@redhat.com
@@ -4592,7 +5051,7 @@ subsystems:
        restricted: true
      - name: Mohammad Kabat
        email: mkabat@redhat.com
-       gluser: kkabat
+       gluser: mkabat
        restricted: true
      - name: Kamal Heib
        email: kheib@redhat.com
@@ -4617,7 +5076,7 @@ subsystems:
        restricted: true
      - name: Mohammad Kabat
        email: mkabat@redhat.com
-       gluser: kkabat
+       gluser: mkabat
        restricted: true
      - name: Kamal Heib
        email: kheib@redhat.com
@@ -4689,13 +5148,13 @@ subsystems:
      - rhel-sst-null
    requiredApproval: true
    maintainers:
-     - name: Eric W. Biederman
-       email: ebiederm@redhat.com
-       gluser: ebiederm
      - name: Alex Gladkov
        email: agladkov@redhat.com
        gluser: legionus
    reviewers:
+     - name: Eric W. Biederman
+       email: ebiederm@redhat.com
+       gluser: ebiederm
      - name: Christoph von Recklinghausen
        email: crecklin@redhat.com
        gluser: crecklin
@@ -4713,6 +5172,22 @@ subsystems:
           - kernel/user_namespace.c
           - tools/testing/selftests/pid_namespace/
           - tools/testing/selftests/rlimits/
+ - subsystem: NCSI (Network Controller Sideband Interface)
+   labels:
+     name: ncsi
+   status: Disabled
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - net/ncsi/
+          - include/net/ncsi.h
  - subsystem: NETFILTER
    labels:
      name: netfilter
@@ -4777,6 +5252,40 @@ subsystems:
      - name: Ivan Vecera
        email: ivecera@redhat.com
        gluser: ivecera
+   reviewers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+     - name: Stefan Assmann
+       email: sassmann@redhat.com
+       gluser: sassmann_rh
+     - name: Corinna Vinschen
+       email: vinschen@redhat.com
+       gluser: vinschen
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
+     - name: Jonathan Toppins
+       email: jtoppins@redhat.com
+       gluser: jtoppins_redhat
+     - name: Josef Oskera
+       email: joskera@redhat.com
+       gluser: joskera
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
    paths:
        includes:
           - Documentation/devicetree/bindings/net/dsa/
@@ -4871,7 +5380,9 @@ subsystems:
           - net/
           - Documentation/admin-guide/sysctl/net.rst
           - Documentation/networking/
+          - drivers/net/Kconfig
           - drivers/net/Space.c
+          - drivers/net/appletalk/
           - drivers/net/bareudp.c
           - drivers/net/dummy.c
           - drivers/net/geneve.c
@@ -4950,6 +5461,7 @@ subsystems:
           - Documentation/networking/rds*
           - Documentation/networking/regulatory*
           - Documentation/networking/rxrpc*
+          - include/linux/net/intel/
           - include/linux/netfs.h
           - include/net/*80211*
           - include/net/*80215*
@@ -4957,7 +5469,6 @@ subsystems:
           - include/net/bluetooth/
           - include/net/calipso.h
           - include/net/cipso_ipv4.h
-          - include/net/intel/
           - include/net/irda/
           - include/net/iucv/
           - include/net/iw*
@@ -4987,7 +5498,6 @@ subsystems:
           - net/vmw_vsock/
           - net/wimax/
           - net/wireless/
-          - net/x25/
  - subsystem: NETWORKING [LABELED] (NetLabel, Labeled IPsec, SECMARK)
    labels:
      name: netlabel
@@ -5081,6 +5591,25 @@ subsystems:
    paths:
        includes:
           - drivers/net/ethernet/qlogic/netxen/
+ - subsystem: NFC (Near Field Communication)
+   labels:
+     name: nfc
+   status: Disabled
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - net/nfc/
+          - drivers/nfc/
+          - include/net/nfc/
+          - include/uapi/linux/nfc.h
+          - Documentation/networking/nfc.rst
  - subsystem: NFS FILE SYSTEM (nfs)
    labels:
      name: nfs
@@ -5131,107 +5660,6 @@ subsystems:
    paths:
        includes:
           - fs/nfsd/
- - subsystem: NIC DRIVERS AND RDMA
-   labels:
-     name: nic_rdma
-   status: Supported
-   devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
-   requiredApproval: false
-   reviewers:
-     - name: Michal Schmidt
-       email: mschmidt@redhat.com
-       gluser: mschmidt2
-     - name: Petr Oros
-       email: poros@redhat.com
-       gluser: poros2
-     - name: Ken Cox
-       email: jkc@redhat.com
-       gluser: kencox
-     - name: José Ignacio Tornos Martínez
-       email: jtornosm@redhat.com
-       gluser: jtornosm
-     - name: Kamal Heib
-       email: kheib@redhat.com
-       gluser: kheib
-     - name: Stefan Assmann
-       email: sassmann@redhat.com
-       gluser: sassmann_rh
-     - name: Corinna Vinschen
-       email: vinschen@redhat.com
-       gluser: vinschen
-     - name: Ivan Vecera
-       email: ivecera@redhat.com
-       gluser: ivecera
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
-     - name: Jonathan Toppins
-       email: jtoppins@redhat.com
-       gluser: jtoppins_redhat
-     - name: Josef Oskera
-       email: joskera@redhat.com
-       gluser: joskera
-     - name: Izabela Bakollari
-       email: ibakolla@redhat.com
-       gluser: ibakolla
-   paths:
-       includes:
-          # ethernet
-          - drivers/net/ethernet/
-          # infiniband
-          - drivers/infiniband/
-          - include/rdma/
-          - include/uapi/rdma/
-          - include/uapi/linux/if_infiniband.h
-          - Documentation/infiniband/
-          - include/linux/mlx4/
-          - include/linux/mlx5/
-          # wireless
-          - Documentation/networking/mac80211*
-          - Documentation/networking/regulatory*
-          - drivers/net/wireless/
-          - net/mac80211/
-          - net/wireless/
-          - net/rfkill/
-          - include/linux/*80211*
-          - include/net/*80211*
-          - include/net/iw*
-          - include/net/regulatory.h
-          - include/uapi/linux/nl80211.h
-          - include/uapi/linux/wireless.h
-          # bonding
-          - drivers/net/bonding/
-          - include/linux/if_bonding.h
-          # phy
-          - Documentation/networking/phy.rst
-          - drivers/net/phy/
-          - drivers/of/of_mdio.c
-          - include/linux/*mdio*.h
-          - include/linux/phy.h
-          - include/linux/phy_fixed.h
-          - include/linux/platform_data/mdio-bcm-unimac.h
-          - include/linux/platform_data/mdio-gpio.h
-          - include/trace/events/mdio.h
-          - include/uapi/linux/mdio.h
-          - include/uapi/linux/mii.h
-          # ice
-          - include/net/intel/
-          # dsa
-          - Documentation/devicetree/bindings/net/dsa/
-          - Documentation/networking/dsa/
-          - drivers/net/dsa/
-          - include/linux/dsa/
-          - include/linux/platform_data/dsa.h
-          - include/net/dsa.h
-          - net/dsa/
-          # ena
-          - Documentation/networking/ena.txt
-          - Documentation/networking/device_drivers/ethernet/amazon/ena.rst
-       excludes:
-          - drivers/net/ethernet/microsoft/
  - subsystem: NITRO ENCLAVES (NE)
    labels:
      name: ne
@@ -5477,6 +5905,9 @@ subsystems:
      - rhel-sst-nic-rdma
    requiredApproval: false
    maintainers:
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
      - name: Kamal Heib
        email: kheib@redhat.com
        gluser: kheib
@@ -5575,7 +6006,7 @@ subsystems:
        email: prarit@redhat.com
        gluser: prarit
      - name: Myron Stowe
-       email: myron.stowe@redhat.com
+       email: mstowe@redhat.com
        gluser: mstowe1
    paths:
        includes:
@@ -5591,7 +6022,7 @@ subsystems:
    requiredApproval: false
    maintainers:
      - name: Myron Stowe
-       email: myron.stowe@redhat.com
+       email: mstowe@redhat.com
        gluser: mstowe1
      - name: Prarit Bhargava
        email: prarit@redhat.com
@@ -5614,17 +6045,17 @@ subsystems:
        email: linville@redhat.com
        gluser: linville-rh
      - name: Myron Stowe
-       email: myron.stowe@redhat.com
+       email: mstowe@redhat.com
        gluser: mstowe1
    paths:
        includes:
           - drivers/pci/
-          - tools/testing/selftests/ntb
+          - tools/testing/selftests/ntb/
           - include/linux/ntb.h
           - include/linux/ntb_transport.h
           - Documentation/driver-api/ntb.rst
           - Documentation/PCI/endpoint/
-          - drivers/ntb
+          - drivers/ntb/
           - drivers/pci/endpoint/
           - drivers/net/ntb_netdev.c
  - subsystem: PCMCIA SUBSYSTEM
@@ -5661,7 +6092,7 @@ subsystems:
    paths:
        includes:
           - drivers/net/pcs/
-            include/linux/pcs/
+          - include/linux/pcs/
  - subsystem: Pensando Ethernet IONIC Driver
    labels:
      name: ionic
@@ -5710,6 +6141,25 @@ subsystems:
           - arch/*/kernel/perf_callchain.c
           - tools/perf/
           - tools/lib/
+ - subsystem: Phone Network protocol (PhoNet)
+   labels:
+     name: phonet
+   status: Disabled
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - net/phonet/
+          - include/linux/phonet.h
+          - include/net/phonet/
+          - include/uapi/linux/phonet.h
+          - Documentation/networking/phonet.rst
  - subsystem: PIN CONTROL SUBSYSTEM
    labels:
      name: pinctrl
@@ -5746,7 +6196,7 @@ subsystems:
    paths:
        includes:
           - drivers/platform/Kconfig
-          - drivers/platform/*
+          - drivers/platform/
        excludes:
           - drivers/platform/x86/
           - drivers/platform/mellanox/
@@ -5800,7 +6250,23 @@ subsystems:
        gluser: prarit
    paths:
        includes:
-          - drivers/peci
+          - drivers/peci/
+ - subsystem: PLIP (Parallel Line Internet Protocol)
+   labels:
+     name: plip
+   status: Disabled
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/net/plip/
+          - Documentation/networking/plip.rst
  - subsystem: PNP SUPPORT
    labels:
      name: pnp
@@ -5959,14 +6425,21 @@ subsystems:
      name: ptp_kvm
    status: Supported
    devel-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    qe-sst:
-     - rhel-sst-null
+     - rhel-sst-virtualization-hwe
    requiredApproval: false
    maintainers:
      - name: Marcelo Tosatti
        email: mtosatti@redhat.com
        gluser: mtosatti
+   reviewers:
+     - name: Vitaly Kuznetsov
+       email: vkuznets@redhat.com
+       gluser: vkuznets
+     - name: Paolo Bonzini
+       email: pbonzini@redhat.com
+       gluser: bonzini
    paths:
        includes:
           - drivers/ptp/ptp_kvm.c
@@ -6069,12 +6542,13 @@ subsystems:
        email: mchopra@redhat.com
        gluser: mchopra
        restricted: true
-     - name: Michal Schmidt
-       email: mschmidt@redhat.com
-       gluser: mschmidt2
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
    paths:
        includes:
           - drivers/infiniband/hw/qedr/
+          - include/uapi/rdma/qedr-abi.h
  - subsystem: QLOGIC QL41xxx FCOE DRIVER
    labels:
      name: qedf
@@ -6251,6 +6725,25 @@ subsystems:
           - Documentation/ABI/testing/sysfs-bus-rbd
           - drivers/block/rbd.c
           - drivers/block/rbd_types.h
+ - subsystem: RapidIO
+   labels:
+     name: rapidio
+   status: Disabled
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/rapidio/
+          - include/linux/rio*
+          - include/uapi/linux/rio_*
+          - Documentation/admin-guide/rapidio.rst
+          - Documentation/driver-api/rapidio/
  - subsystem: RAS INFRASTRUCTURE
    labels:
      name: ras
@@ -6289,7 +6782,7 @@ subsystems:
      - name: Phil Auld
        email: pauld@redhat.com
        gluser: prauld
-     - name: Wander Costa
+     - name: Wander Lairson Costa
        email: wander@redhat.com
        gluser: walac
    paths:
@@ -6323,6 +6816,23 @@ subsystems:
           - include/linux/rtc/
           - include/uapi/linux/rtc.h
           - tools/testing/selftests/rtc/
+ - subsystem: Reliable Datagram Sockets Protocol
+   labels:
+     name: rds
+   status: Disabled
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - net/rds/
+          - include/uapi/linux/rds.h
+          - Documentation/networking/rds.rst
  - subsystem: REMOTE PROCESSOR (REMOTEPROC) SUBSYSTEM
    labels:
      name: remoteproc
@@ -6545,7 +7055,7 @@ subsystems:
      - rhel-sst-null
    requiredApproval: false
    maintainers:
-     - name: Marcelo Ricardo Leitner
+     - name: Marcelo Leitner
        email: mleitner@redhat.com
        gluser: marcelo.leitner
      - name: Xin Long
@@ -6582,7 +7092,7 @@ subsystems:
      - name: Vladis Dronov
        email: vdronov@redhat.com
        gluser: NefigTut
-     - name: Wander Costa
+     - name: Wander Lairson Costa
        email: wander@redhat.com
        gluser: walac
      - name: Yannick Cote
@@ -6617,7 +7127,7 @@ subsystems:
      - name: Richard Guy Briggs
        email: rbriggs@redhat.com
        gluser: rbriggs
-     - name: Wander Costa
+     - name: Wander Lairson Costa
        email: wander@redhat.com
        gluser: walac
    paths:
@@ -6781,6 +7291,22 @@ subsystems:
    paths:
        includes:
           - drivers/net/ethernet/marvell/sky2.*
+ - subsystem: SLIP (serial line)
+   labels:
+     name: slip
+   status: Supported
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   requiredApproval: false
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/net/slip/
  - subsystem: SOFT-IWARP DRIVER (siw)
    labels:
      name: siw
@@ -6899,9 +7425,18 @@ subsystems:
      - rhel-sst-null
    requiredApproval: false
    maintainers:
-     - name: Al Stone
-       email: ahs3@redhat.com
-       gluser: ahs3
+     - name: Adrien Thierry
+       email: athierry@redhat.com
+       gluser: athierry1
+     - name: Andrew Halaney
+       email: ahalaney@redhat.com
+       gluser: ahalaney
+     - name: Brian Masney
+       email: bmasney@redhat.com
+       gluser: bmasney
+     - name: Eric Chanudet
+       email: echanude@redhat.com
+       gluser: echanude
    paths:
        includes:
           - drivers/spi/
@@ -6933,13 +7468,28 @@ subsystems:
      - rhel-sst-null
    requiredApproval: false
    maintainers:
-     - name: Abhijith Das
+     - name: Abhi Das
        email: adas@redhat.com
        gluser: adas7
    paths:
        includes:
           - Documentation/filesystems/squashfs.txt
           - fs/squashfs/
+ - subsystem: Staging drivers
+   labels:
+     name: staging
+   status: Disabled
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/staging/
  - subsystem: STMICRO ETHERNET DRIVER
    labels:
      name: stmicro
@@ -7105,9 +7655,9 @@ subsystems:
      - rhel-sst-arch-hw
    requiredApproval: false
    maintainers:
-     - name: Torez Smith
-       email: torez@redhat.com
-       gluser: torez
+     - name: Desnes Nunes
+       email: desnesn@redhat.com
+       gluser: desnesn
    reviewers:
      - name: Jarod Wilson
        email: jarod@redhat.com
@@ -7268,7 +7818,7 @@ subsystems:
        email: lszubowi@redhat.com
        gluser: lszubowi
      - name: Myron Stowe
-       email: myron.stowe@redhat.com
+       email: mstowe@redhat.com
        gluser: mstowe1
      - name: Prarit Bhargava
        email: prarit@redhat.com
@@ -7277,9 +7827,35 @@ subsystems:
        includes:
           - arch/x86/kernel/efi*
           - include/linux/efi.h
- - subsystem: USB CDC ETHERNET DRIVER
+ - subsystem: UNIVERSAL FLASH STORAGE HOST CONTROLLER
    labels:
-     name: cdc_ether
+     name: ufs
+   status: Supported
+   devel-sst:
+     - rhivos-ft-auto-kernel
+   qe-sst:
+     - rhivos-ft-auto-kernel
+   requiredApproval: false
+   maintainers:
+     - name: Adrien Thierry
+       email: athierry@redhat.com
+       gluser: athierry1
+     - name: Andrew Halaney
+       email: ahalaney@redhat.com
+       gluser: ahalaney
+     - name: Brian Masney
+       email: bmasney@redhat.com
+       gluser: bmasney
+     - name: Eric Chanudet
+       email: echanude@redhat.com
+       gluser: echanude
+   paths:
+       includes:
+          - drivers/ufs/
+          - include/ufs/
+ - subsystem: USB network drivers
+   labels:
+     name: usb_net
    status: Supported
    devel-sst:
      - rhel-sst-nic-rdma
@@ -7292,7 +7868,7 @@ subsystems:
        gluser: jtornosm
    paths:
        includes:
-          - drivers/net/usb/cdc_ether.c
+          - drivers/net/usb/
  - subsystem: USB SUBSYSTEM
    labels:
      name: usb
@@ -7303,9 +7879,9 @@ subsystems:
      - rhel-sst-arch-hw
    requiredApproval: false
    maintainers:
-     - name: Torez Smith
-       email: torez@redhat.com
-       gluser: torez
+     - name: Desnes Nunes
+       email: desnesn@redhat.com
+       gluser: desnesn
    paths:
        includes:
           - drivers/usb/
@@ -7599,6 +8175,30 @@ subsystems:
           - include/uapi/linux/virtio_input.h
    mailingList: rhvirt-patches@redhat.com
    mailingList: rhvirt-patches@redhat.com
+ - subsystem: VIRTUALIZATION SUPPORT DRIVERS
+   labels:
+     name: virt_drivers
+   status: Supported
+   devel-sst:
+     - rhel-sst-virtualization-hwe
+     - rhel-sst-virtualization-cloud
+   qe-sst:
+     - rhel-sst-virtualization-cloud
+     - rhel-sst-virtualization-hwe
+   requiredApproval: false
+   maintainers:
+     - name: Vitaly Kuznetsov
+       email: vkuznets@redhat.com
+       gluser: vkuznets
+     - name: Cathy Avery
+       email: cavery@redhat.com
+       gluser: cavery
+     - name: Mohammed Gamal
+       email: mgamal@redhat.com
+       gluser: mgamal-rh
+   paths:
+       includes:
+          - drivers/virt/
  - subsystem: VME SUBSYSTEM
    labels:
      name: vme
@@ -7696,6 +8296,23 @@ subsystems:
           - drivers/acpi/acpi_watchdog.c
           - include/linux/watchdog.h
           - include/uapi/linux/watchdog.h
+ - subsystem: Wide Area Networks (WAN)
+   labels:
+     name: wan
+   status: Supported
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   requiredApproval: false
+   maintainers:
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+   paths:
+       includes:
+          - drivers/net/wan/
+          - Documentation/networking/device_drivers/wan/
  - subsystem: WIRELESS DRIVERS AND STACK
    labels:
      name: wireless
@@ -7719,6 +8336,36 @@ subsystems:
      - name: John Linville
        email: linville@redhat.com
        gluser: linville-rh
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+     - name: Stefan Assmann
+       email: sassmann@redhat.com
+       gluser: sassmann_rh
+     - name: Corinna Vinschen
+       email: vinschen@redhat.com
+       gluser: vinschen
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+     - name: Jonathan Toppins
+       email: jtoppins@redhat.com
+       gluser: jtoppins_redhat
+     - name: Josef Oskera
+       email: joskera@redhat.com
+       gluser: joskera
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
    paths:
        includes:
           - Documentation/networking/mac80211*
@@ -7749,11 +8396,30 @@ subsystems:
    paths:
        includes:
           - Documentation/networking/ieee802154.rst
-          - drivers/net/ieee802154/fakelb.c
+          - drivers/net/ieee802154/
           - include/linux/*802154*
           - include/net/*802154*
           - net/ieee802154/
           - net/mac802154/
+ - subsystem: WWAN (Wireless WAN)
+   labels:
+     name: wwan
+   status: Supported
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   requiredApproval: false
+   maintainers:
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
+   paths:
+       includes:
+          - drivers/net/wwan/
+          - include/linux/wwan.h
+          - include/uapi/linux/wwan.h
+          - Documentation/networking/device_drivers/wwan/
  - subsystem: X86 ARCHITECTURE
    labels:
      name: x86
@@ -7831,6 +8497,7 @@ subsystems:
           - drivers/cpufreq/amd-pstate.c
           - drivers/cpufreq/amd-pstate-trace.c
           - drivers/idle/intel_idle.c
+          - drivers/idle/Kconfig
  - subsystem: X86 FPU SUBSYSTEM
    labels:
      name: x86fpu
@@ -7909,9 +8576,6 @@ subsystems:
      - name: Igor Mammedov
        email: imammedo@redhat.com
        gluser: imammedo
-     - name: Andrew Jones
-       email: drjones@redhat.com
-       gluser: rhdrjones
    paths:
        includes:
           - drivers/block/xen-blkfront.c

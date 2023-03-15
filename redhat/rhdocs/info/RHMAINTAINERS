@@ -67,7 +67,7 @@ I:	INTERNAL
 T:	git https://gitlab.com/cki-project/kernel-ark.git
 
 ARK Real Time Kernel Maintainer
-M:	Clark Wiliams <williams@redhat.com>
+M:	Clark Williams <williams@redhat.com>
 M:	Andrew Halaney <ahalaney@redhat.com>
 S:	Supported
 F:	Makefile.rhelver
@@ -133,7 +133,7 @@ S:	Supported
 F:	Makefile.rhelver
 
 RHEL 8.8 Real Time Kernel Maintainer
-M:	John Wyatt <jwyatt@redhat.com>
+M:	John B. Wyatt IV <jwyatt@redhat.com>
 M:	Chris White <chwhite@redhat.com>
 S:	Supported
 F:	Makefile.rhelver
@@ -239,7 +239,6 @@ S:	Supported
 F:	drivers/net/ethernet/realtek/r8169*
 
 ACCESSIBILITY SUBSYSTEM
-M:	Torez Smith <torez@redhat.com>
 M:	Doug Ledford <dledford@redhat.com>
 M:	Prarit Bhargava <prarit@redhat.com>
 S:	Provided
@@ -287,12 +286,24 @@ F:	drivers/media/usb/tm6000/tm6000-alsa.c
 
 AMAZON ETHERNET DRIVERS
 M:	Josef Oskera <joskera@redhat.com>
+R:	Michal Schmidt <mschmidt@redhat.com>
+R:	Petr Oros <poros@redhat.com>
+R:	Ken Cox <jkc@redhat.com>
+R:	José Ignacio Tornos Martínez <jtornosm@redhat.com>
+R:	Kamal Heib <kheib@redhat.com>
+R:	Stefan Assmann <sassmann@redhat.com>
+R:	Corinna Vinschen <vinschen@redhat.com>
+R:	Ivan Vecera <ivecera@redhat.com>
+R:	Íñigo Huguet <ihuguet@redhat.com>
+R:	Jonathan Toppins <jtoppins@redhat.com>
+R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	Documentation/networking/ena.txt
 F:	Documentation/networking/device_drivers/ethernet/amazon/ena.rst
 F:	drivers/net/ethernet/amazon/
 
 AMAZON RDMA EFA DRIVER (efa)
+M:	Izabela Bakollari <ibakolla@redhat.com>
 M:	Kamal Heib <kheib@redhat.com>
 S:	Supported
 F:	drivers/infiniband/hw/efa/
@@ -300,18 +311,18 @@ F:	include/uapi/rdma/efa-abi.h
 
 AMD IOMMU (AMD-VI)
 M:	Jerry Snitselaar <jsnitsel@redhat.com>
-R:	Myron Stowe <myron.stowe@redhat.com>
+R:	Myron Stowe <mstowe@redhat.com>
 R:	Alex Williamson <alex.williamson@redhat.com>
-R:	Don Dutile <ddutile@redhat.com>
+R:	Donald Dutile <ddutile@redhat.com>
 S:	Supported
 F:	drivers/iommu/amd/
 F:	include/linux/amd-iommu.h
 
 AMD PTDMA DRIVER
-M:	John W. Linville <linville@redhat.com>
+M:	John Linville <linville@redhat.com>
 M:	Myron Stowe <mstowe@redhat.com>
 S:	Supported
-F:	drivers/dma/ptdma
+F:	drivers/dma/ptdma/
 
 AMD SEV/SEV-ES/SEV-SNP Guest Side
 M:	Vitaly Kuznetsov <vkuznets@redhat.com>
@@ -480,9 +491,27 @@ F:	net/bluetooth/
 BONDING DRIVER
 M:	Jonathan Toppins <jtoppins@redhat.com>
 R:	Jarod Wilson <jarod@redhat.com>
+R:	Michal Schmidt <mschmidt@redhat.com>
+R:	Petr Oros <poros@redhat.com>
+R:	Ken Cox <jkc@redhat.com>
+R:	José Ignacio Tornos Martínez <jtornosm@redhat.com>
+R:	Kamal Heib <kheib@redhat.com>
+R:	Stefan Assmann <sassmann@redhat.com>
+R:	Corinna Vinschen <vinschen@redhat.com>
+R:	Ivan Vecera <ivecera@redhat.com>
+R:	Íñigo Huguet <ihuguet@redhat.com>
+R:	Jonathan Toppins <jtoppins@redhat.com>
+R:	Josef Oskera <joskera@redhat.com>
+R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
+F:	Documentation/networking/bonding.rst
 F:	drivers/net/bonding/
-F:	include/linux/if_bonding.h
+F:	include/net/bond_3ad.h
+F:	include/net/bond_alb.h
+F:	include/net/bonding.h
+F:	include/net/bond_options.h
+F:	include/uapi/linux/if_bonding.h
+F:	tools/testing/selftests/drivers/net/bonding/
 
 BPF (Safe dynamic programs and tools)
 M:	Yauheni Kaliuta <ykaliuta@redhat.com>
@@ -529,6 +558,7 @@ F:	drivers/net/ethernet/broadcom/Kconfig
 
 BROADCOM BNXT_RE RDMA ROCE DRIVER
 M:	Selvin Xavier <sxavier@redhat.com>
+M:	Kamal Heib <kheib@redhat.com>
 S:	Supported
 F:	drivers/infiniband/hw/bnxt_re/
 F:	include/uapi/rdma/bnxt_re-abi.h
@@ -548,6 +578,13 @@ Broadcom NetXtreme II CNIC Driver (cnic)
 M:	Maurizio Lombardi <mlombard@redhat.com>
 S:	Supported
 F:	drivers/net/ethernet/broadcom/cnic*
+
+Broadcom specific AMBA
+M:	José Ignacio Tornos Martínez <jtornosm@redhat.com>
+M:	Michal Schmidt <mschmidt@redhat.com>
+S:	Provided
+F:	drivers/bcma/
+F:	include/linux/bcma/
 
 BROADCOM TG3 GIGABIT ETHERNET DRIVER
 M:	Ken Cox <jkc@redhat.com>
@@ -605,6 +642,10 @@ F:	include/linux/miscdevice.h
 
 CIFS FILESYSTEM
 M:	Ronnie Sahlberg <lsahlber@redhat.com>
+R:	Benjamin Coddington <bcodding@redhat.com>
+R:	Jeffrey Layton <jlayton@redhat.com>
+R:	Steve Dickson <steved@redhat.com>
+R:	Scott Mayhew <smayhew@redhat.com>
 S:	Supported
 F:	fs/cifs/
 
@@ -615,14 +656,14 @@ S:	Supported
 F:	drivers/scsi/fnic/
 
 CISCO VIC ETHERNET NIC DRIVER
-M:	Govindarajulu Varadarajan <gvaradar@redhat.com>
+M:	Michal Schmidt <mschmidt@redhat.com>
 S:	Supported
 F:	drivers/net/ethernet/cisco/enic/
 
 CLOCKSOURCE
 M:	Mark Salter <msalter@redhat.com>
 S:	Supported
-F:	drivers/clocksource
+F:	drivers/clocksource/
 X:	drivers/clocksource/hyperv_timer.c
 X:	drivers/clocksource/arm_arch_timer.c
 X:	drivers/clocksource/timer-qcom.c
@@ -658,7 +699,7 @@ S:	Provided
 F:	drivers/connector/
 
 Continuous Integration (CKI)
-M:	Veronika Kabatova <vkabatov@redhat.com>
+M:	Tino Calancha <tcalanch@redhat.com>
 M:	Michael Hofmann <mhofmann@redhat.com>
 M:	Serhii Turivnyi <sturivny@redhat.com>
 S:	Supported
@@ -738,7 +779,8 @@ S:	Supported
 F:	drivers/net/ethernet/chelsio/cxgb4/
 
 CXGB4 IWARP DRIVER (IW_CXGB4)
-M:	Michal Schmidt <mschmidt@redhat.com>
+M:	Rahul Lakkireddy <rlakkire@redhat.com>
+M:	Kamal Heib <kheib@redhat.com>
 S:	Supported
 F:	drivers/infiniband/hw/cxgb4/
 F:	include/uapi/rdma/cxgb4-abi.h
@@ -846,9 +888,22 @@ S:	Supported
 F:	drivers/scsi/lpfc/
 
 ETHERNET
+M:	Michal Schmidt <mschmidt@redhat.com>
 R:	Jarod Wilson <jarod@redhat.com>
+R:	Petr Oros <poros@redhat.com>
+R:	Ken Cox <jkc@redhat.com>
+R:	José Ignacio Tornos Martínez <jtornosm@redhat.com>
+R:	Kamal Heib <kheib@redhat.com>
+R:	Stefan Assmann <sassmann@redhat.com>
+R:	Corinna Vinschen <vinschen@redhat.com>
+R:	Ivan Vecera <ivecera@redhat.com>
+R:	Íñigo Huguet <ihuguet@redhat.com>
+R:	Jonathan Toppins <jtoppins@redhat.com>
+R:	Josef Oskera <joskera@redhat.com>
+R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	drivers/net/ethernet/
+X:	drivers/net/ethernet/microsoft/
 
 ETHERNET BRIDGE
 M:	Ivan Vecera <ivecera@redhat.com>
@@ -859,11 +914,24 @@ F:	include/linux/if_bridge.h
 
 ETHERNET PHY LIBRARY
 M:	Petr Oros <poros@redhat.com>
+R:	Michal Schmidt <mschmidt@redhat.com>
+R:	Ken Cox <jkc@redhat.com>
+R:	José Ignacio Tornos Martínez <jtornosm@redhat.com>
+R:	Kamal Heib <kheib@redhat.com>
+R:	Stefan Assmann <sassmann@redhat.com>
+R:	Corinna Vinschen <vinschen@redhat.com>
+R:	Ivan Vecera <ivecera@redhat.com>
+R:	Íñigo Huguet <ihuguet@redhat.com>
+R:	Jonathan Toppins <jtoppins@redhat.com>
+R:	Josef Oskera <joskera@redhat.com>
+R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	Documentation/networking/phy.rst
+F:	drivers/net/mdio/
 F:	drivers/net/phy/
 F:	drivers/of/of_mdio.c
 F:	include/linux/*mdio*.h
+F:	include/linux/mdio/
 F:	include/linux/phy.h
 F:	include/linux/phy_fixed.h
 F:	include/linux/platform_data/mdio-bcm-unimac.h
@@ -915,7 +983,6 @@ X:	fs/aio.c
 X:	fs/ceph/
 X:	fs/cifs/
 X:	fs/configfs/
-X:	fs/cramfs/
 X:	fs/dax.c
 X:	fs/direct-io.c
 X:	fs/dlm/
@@ -994,7 +1061,7 @@ F:	tools/testing/selftests/futex/
 GCOV
 M:	Jan Stancek <jstancek@redhat.com>
 S:	Internal
-F:	kernel/gcov
+F:	kernel/gcov/
 
 GENERIC PHY FRAMEWORK
 M:	Petr Oros <poros@redhat.com>
@@ -1074,6 +1141,17 @@ F:	drivers/hid/
 F:	include/linux/hid*
 F:	include/uapi/linux/hid*
 
+HTE SUBSYSTEM (HARDWARE TIMESTAMP ENGINE)
+M:	Adrien Thierry <athierry@redhat.com>
+M:	Andrew Halaney <ahalaney@redhat.com>
+M:	Brian Masney <bmasney@redhat.com>
+M:	Eric Chanudet <echanude@redhat.com>
+S:	Supported
+F:	Documentation/devicetree/bindings/timestamp/
+F:	Documentation/driver-api/hte/
+F:	drivers/hte/
+F:	include/linux/hte.h
+
 HWMON SUBSYSTEM
 M:	Dean Nelson <dnelson@redhat.com>
 S:	Supported
@@ -1091,14 +1169,14 @@ M:	Mohammed Gamal <mgamal@redhat.com>
 M:	Vitaly Kuznetsov <vkuznets@redhat.com>
 S:	Supported
 F:	Documentation/networking/device_drivers/microsoft/netvsc.txt
-F:	arch/arm64/hyperv
+F:	arch/arm64/hyperv/
 F:	arch/arm64/include/asm/hyperv-tlfs.h
 F:	arch/arm64/include/asm/mshyperv.h
 F:	arch/x86/include/asm/mshyperv.h
 F:	arch/x86/include/asm/trace/hyperv.h
 F:	arch/x86/include/asm/hyperv-tlfs.h
 F:	arch/x86/kernel/cpu/mshyperv.c
-F:	arch/x86/hyperv
+F:	arch/x86/hyperv/
 F:	drivers/clocksource/hyperv_timer.c
 F:	drivers/hid/hid-hyperv.c
 F:	drivers/hv/
@@ -1140,12 +1218,25 @@ F:	drivers/iio/
 
 INFINIBAND SUBSYSTEM
 M:	Kamal Heib <kheib@redhat.com>
+R:	Michal Schmidt <mschmidt@redhat.com>
+R:	Petr Oros <poros@redhat.com>
+R:	Ken Cox <jkc@redhat.com>
+R:	José Ignacio Tornos Martínez <jtornosm@redhat.com>
+R:	Stefan Assmann <sassmann@redhat.com>
+R:	Corinna Vinschen <vinschen@redhat.com>
+R:	Ivan Vecera <ivecera@redhat.com>
+R:	Íñigo Huguet <ihuguet@redhat.com>
+R:	Jonathan Toppins <jtoppins@redhat.com>
+R:	Josef Oskera <joskera@redhat.com>
+R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	drivers/infiniband/
 F:	include/rdma/
 F:	include/uapi/rdma/
 F:	include/uapi/linux/if_infiniband.h
 F:	Documentation/infiniband/
+F:	include/linux/mlx4/
+F:	include/linux/mlx5/
 
 INIT
 M:	Prarit Bhargava <prarit@redhat.com>
@@ -1191,8 +1282,26 @@ F:	drivers/net/ethernet/intel/e1000e/
 
 INTEL ETHERNET CONNECTION E800 SERIES (ice)
 M:	Petr Oros <poros@redhat.com>
+R:	Michal Schmidt <mschmidt@redhat.com>
+R:	Ken Cox <jkc@redhat.com>
+R:	José Ignacio Tornos Martínez <jtornosm@redhat.com>
+R:	Kamal Heib <kheib@redhat.com>
+R:	Stefan Assmann <sassmann@redhat.com>
+R:	Corinna Vinschen <vinschen@redhat.com>
+R:	Ivan Vecera <ivecera@redhat.com>
+R:	Íñigo Huguet <ihuguet@redhat.com>
+R:	Jonathan Toppins <jtoppins@redhat.com>
+R:	Josef Oskera <joskera@redhat.com>
+R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	drivers/net/ethernet/intel/ice/
+F:	include/linux/net/intel/
+
+INTEL ETHERNET PROTOCOL DRIVER FOR RDMA (irdma)
+M:	Kamal Heib <kheib@redhat.com>
+S:	Supported
+F:	drivers/infiniband/hw/irdma/
+F:	include/uapi/rdma/irdma-abi.h
 
 INTEL I40E ETHERNET DRIVERS (i40e)
 M:	Ivan Vecera <ivecera@redhat.com>
@@ -1229,9 +1338,9 @@ F:	drivers/net/ethernet/intel/igc/
 
 INTEL IOMMU (VT-d)
 M:	Jerry Snitselaar <jsnitsel@redhat.com>
-R:	Myron Stowe <myron.stowe@redhat.com>
+R:	Myron Stowe <mstowe@redhat.com>
 R:	Alex Williamson <alex.williamson@redhat.com>
-R:	Don Dutile <ddutile@redhat.com>
+R:	Donald Dutile <ddutile@redhat.com>
 S:	Supported
 F:	drivers/iommu/intel/
 F:	include/linux/intel-iommu.h
@@ -1295,9 +1404,9 @@ X:	include/linux/irqchip/arm-gic*
 
 IOMMU DRIVERS
 M:	Jerry Snitselaar <jsnitsel@redhat.com>
-R:	Myron Stowe <myron.stowe@redhat.com>
+R:	Myron Stowe <mstowe@redhat.com>
 R:	Alex Williamson <alex.williamson@redhat.com>
-R:	Don Dutile <ddutile@redhat.com>
+R:	Donald Dutile <ddutile@redhat.com>
 S:	Supported
 F:	drivers/iommu/
 F:	include/linux/iommu*h
@@ -1372,7 +1481,7 @@ M:	Paolo Bonzini <pbonzini@redhat.com>
 M:	Bandan Das <bsd@redhat.com>
 M:	Vitaly Kuznetsov <vkuznets@redhat.com>
 S:	Supported
-F:	drivers/virt/tdx
+F:	drivers/virt/tdx/
 F:	Documentation/virt/kvm/
 F:	include/trace/events/kvm.h
 F:	include/uapi/asm-generic/kvm*
@@ -1519,7 +1628,7 @@ R:	Artem Savkov <asavkov@redhat.com>
 R:	Clark Williams <williams@redhat.com>
 R:	Oleg Nesterov <onestero@redhat.com>
 R:	Phil Auld <pauld@redhat.com>
-R:	Wander Costa <wander@redhat.com>
+R:	Wander Lairson Costa <wander@redhat.com>
 S:	Supported
 F:	Documentation/locking/
 F:	arch/*/include/asm/mutex*.h
@@ -1561,7 +1670,10 @@ S:	Supported
 F:	arch/x86/kernel/cpu/mcheck/
 
 MAILBOX DRIVERS
-M:	Al Stone <ahs3@redhat.com>
+M:	Adrien Thierry <athierry@redhat.com>
+M:	Andrew Halaney <ahalaney@redhat.com>
+M:	Brian Masney <bmasney@redhat.com>
+M:	Eric Chanudet <echanude@redhat.com>
 S:	Supported
 F:	drivers/mailbox/
 
@@ -1594,7 +1706,7 @@ R:	Aristeu Rozanski <arozansk@redhat.com>
 R:	Artem Savkov <asavkov@redhat.com>
 R:	Baoquan He <bhe@redhat.com>
 R:	Christoph von Recklinghausen <crecklin@redhat.com>
-R:	Don Dutile <ddutile@redhat.com>
+R:	Donald Dutile <ddutile@redhat.com>
 R:	Herton R. Krzesinski <herton@redhat.com>
 R:	Leah Leshchinsky <lleshchi@redhat.com>
 R:	Nico Pache <npache@redhat.com>
@@ -1697,8 +1809,8 @@ S:	Supported
 F:	drivers/net/ethernet/myricom/myri10ge/
 
 NAMESPACES
-M:	Eric W. Biederman <ebiederm@redhat.com>
 M:	Alex Gladkov <agladkov@redhat.com>
+R:	Eric W. Biederman <ebiederm@redhat.com>
 R:	Christoph von Recklinghausen <crecklin@redhat.com>
 S:	Supported
 F:	Documentation/admin-guide/namespaces/
@@ -1737,6 +1849,17 @@ F:	fs/lockd/
 
 NETWORKING [DSA]
 M:	Ivan Vecera <ivecera@redhat.com>
+R:	Michal Schmidt <mschmidt@redhat.com>
+R:	Petr Oros <poros@redhat.com>
+R:	Ken Cox <jkc@redhat.com>
+R:	José Ignacio Tornos Martínez <jtornosm@redhat.com>
+R:	Kamal Heib <kheib@redhat.com>
+R:	Stefan Assmann <sassmann@redhat.com>
+R:	Corinna Vinschen <vinschen@redhat.com>
+R:	Íñigo Huguet <ihuguet@redhat.com>
+R:	Jonathan Toppins <jtoppins@redhat.com>
+R:	Josef Oskera <joskera@redhat.com>
+R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	Documentation/devicetree/bindings/net/dsa/
 F:	Documentation/networking/dsa/
@@ -1773,7 +1896,9 @@ S:	Supported
 F:	net/
 F:	Documentation/admin-guide/sysctl/net.rst
 F:	Documentation/networking/
+F:	drivers/net/Kconfig
 F:	drivers/net/Space.c
+F:	drivers/net/appletalk/
 F:	drivers/net/bareudp.c
 F:	drivers/net/dummy.c
 F:	drivers/net/geneve.c
@@ -1851,6 +1976,7 @@ X:	Documentation/networking/phonet*
 X:	Documentation/networking/rds*
 X:	Documentation/networking/regulatory*
 X:	Documentation/networking/rxrpc*
+X:	include/linux/net/intel/
 X:	include/linux/netfs.h
 X:	include/net/*80211*
 X:	include/net/*80215*
@@ -1858,7 +1984,6 @@ X:	include/net/af_vsock.h
 X:	include/net/bluetooth/
 X:	include/net/calipso.h
 X:	include/net/cipso_ipv4.h
-X:	include/net/intel/
 X:	include/net/irda/
 X:	include/net/iucv/
 X:	include/net/iw*
@@ -1888,7 +2013,6 @@ X:	net/sunrpc/
 X:	net/vmw_vsock/
 X:	net/wimax/
 X:	net/wireless/
-X:	net/x25/
 I:	net
 
 NETWORKING [LABELED] (NetLabel, Labeled IPsec, SECMARK)
@@ -1946,65 +2070,6 @@ M:	Steve Dickson <steved@redhat.com>
 M:	Scott Mayhew <smayhew@redhat.com>
 S:	Supported
 F:	fs/nfsd/
-
-NIC DRIVERS AND RDMA
-R:	Michal Schmidt <mschmidt@redhat.com>
-R:	Petr Oros <poros@redhat.com>
-R:	Ken Cox <jkc@redhat.com>
-R:	José Ignacio Tornos Martínez <jtornosm@redhat.com>
-R:	Kamal Heib <kheib@redhat.com>
-R:	Stefan Assmann <sassmann@redhat.com>
-R:	Corinna Vinschen <vinschen@redhat.com>
-R:	Ivan Vecera <ivecera@redhat.com>
-R:	Íñigo Huguet <ihuguet@redhat.com>
-R:	Jonathan Toppins <jtoppins@redhat.com>
-R:	Josef Oskera <joskera@redhat.com>
-R:	Izabela Bakollari <ibakolla@redhat.com>
-S:	Supported
-F:	drivers/net/ethernet/
-F:	drivers/infiniband/
-F:	include/rdma/
-F:	include/uapi/rdma/
-F:	include/uapi/linux/if_infiniband.h
-F:	Documentation/infiniband/
-F:	include/linux/mlx4/
-F:	include/linux/mlx5/
-F:	Documentation/networking/mac80211*
-F:	Documentation/networking/regulatory*
-F:	drivers/net/wireless/
-F:	net/mac80211/
-F:	net/wireless/
-F:	net/rfkill/
-F:	include/linux/*80211*
-F:	include/net/*80211*
-F:	include/net/iw*
-F:	include/net/regulatory.h
-F:	include/uapi/linux/nl80211.h
-F:	include/uapi/linux/wireless.h
-F:	drivers/net/bonding/
-F:	include/linux/if_bonding.h
-F:	Documentation/networking/phy.rst
-F:	drivers/net/phy/
-F:	drivers/of/of_mdio.c
-F:	include/linux/*mdio*.h
-F:	include/linux/phy.h
-F:	include/linux/phy_fixed.h
-F:	include/linux/platform_data/mdio-bcm-unimac.h
-F:	include/linux/platform_data/mdio-gpio.h
-F:	include/trace/events/mdio.h
-F:	include/uapi/linux/mdio.h
-F:	include/uapi/linux/mii.h
-F:	include/net/intel/
-F:	Documentation/devicetree/bindings/net/dsa/
-F:	Documentation/networking/dsa/
-F:	drivers/net/dsa/
-F:	include/linux/dsa/
-F:	include/linux/platform_data/dsa.h
-F:	include/net/dsa.h
-F:	net/dsa/
-F:	Documentation/networking/ena.txt
-F:	Documentation/networking/device_drivers/ethernet/amazon/ena.rst
-X:	drivers/net/ethernet/microsoft/
 
 NITRO ENCLAVES (NE)
 M:	Cathy Avery <cavery@redhat.com>
@@ -2097,6 +2162,7 @@ F:	drivers/nvme/target/tcp.c
 F:	include/linux/nvme-tcp*.h
 
 OMNI-PATH ARCHITECTURE (opa)
+M:	Izabela Bakollari <ibakolla@redhat.com>
 M:	Kamal Heib <kheib@redhat.com>
 S:	Supported
 F:	drivers/infiniband/hw/hfi*
@@ -2130,12 +2196,12 @@ F:	drivers/parport/
 
 PCI HOTPLUG
 M:	Prarit Bhargava <prarit@redhat.com>
-M:	Myron Stowe <myron.stowe@redhat.com>
+M:	Myron Stowe <mstowe@redhat.com>
 S:	Supported
 F:	drivers/pci/hotplug/
 
 PCI SUBSYSTEM
-M:	Myron Stowe <myron.stowe@redhat.com>
+M:	Myron Stowe <mstowe@redhat.com>
 M:	Prarit Bhargava <prarit@redhat.com>
 S:	Supported
 F:	drivers/pci/
@@ -2143,22 +2209,23 @@ F:	include/linux/pci*
 
 PCI-E NON-TRANSPARENT BRIDGE
 M:	John Linville <linville@redhat.com>
-M:	Myron Stowe <myron.stowe@redhat.com>
+M:	Myron Stowe <mstowe@redhat.com>
 S:	Supported
 F:	drivers/pci/
-F:	tools/testing/selftests/ntb
+F:	tools/testing/selftests/ntb/
 F:	include/linux/ntb.h
 F:	include/linux/ntb_transport.h
 F:	Documentation/driver-api/ntb.rst
 F:	Documentation/PCI/endpoint/
-F:	drivers/ntb
+F:	drivers/ntb/
 F:	drivers/pci/endpoint/
 F:	drivers/net/ntb_netdev.c
 
 PCS NETWORK DRIVERS
 M:	Corinna Vinschen <vinschen@redhat.com>
 S:	Provided
-F:	drivers/net/pcs/ include/linux/pcs/
+F:	drivers/net/pcs/
+F:	include/linux/pcs/
 
 Pensando Ethernet IONIC Driver
 M:	Jonathan Toppins <jtoppins@redhat.com>
@@ -2192,7 +2259,7 @@ PLATFORM DRIVERS
 M:	Mark Langsdorf <mlangsdo@redhat.com>
 S:	Supported
 F:	drivers/platform/Kconfig
-F:	drivers/platform/*
+F:	drivers/platform/
 X:	drivers/platform/x86/
 X:	drivers/platform/mellanox/
 
@@ -2261,6 +2328,8 @@ F:	include/linux/ptp_cl*
 
 PTP KVM
 M:	Marcelo Tosatti <mtosatti@redhat.com>
+R:	Vitaly Kuznetsov <vkuznets@redhat.com>
+R:	Paolo Bonzini <pbonzini@redhat.com>
 S:	Supported
 F:	drivers/ptp/ptp_kvm.c
 
@@ -2297,9 +2366,10 @@ F:	drivers/net/ethernet/qlogic/qede/
 
 QLOGIC QEDR RDMA ETHERNET NETWORK DRIVER
 M:	Manish Chopra <mchopra@redhat.com>
-M:	Michal Schmidt <mschmidt@redhat.com>
+M:	Kamal Heib <kheib@redhat.com>
 S:	Supported
 F:	drivers/infiniband/hw/qedr/
+F:	include/uapi/rdma/qedr-abi.h
 
 QLOGIC QL41xxx FCOE DRIVER
 M:	Nilesh Javali <njavali@redhat.com>
@@ -2367,7 +2437,7 @@ M:	Waiman Long <longman@redhat.com>
 R:	Artem Savkov <asavkov@redhat.com>
 R:	Clark Williams <williams@redhat.com>
 R:	Phil Auld <pauld@redhat.com>
-R:	Wander Costa <wander@redhat.com>
+R:	Wander Lairson Costa <wander@redhat.com>
 S:	Supported
 F:	Documentation/RCU/
 F:	include/linux/rcu*
@@ -2455,7 +2525,7 @@ F:	drivers/target/
 F:	include/target/
 
 SCTP PROTOCOL
-M:	Marcelo Ricardo Leitner <mleitner@redhat.com>
+M:	Marcelo Leitner <mleitner@redhat.com>
 M:	Xin Long <lxin@redhat.com>
 S:	Supported
 F:	net/sctp/
@@ -2468,7 +2538,7 @@ M:	Ondrej Mosnacek <omosnace@redhat.com>
 R:	Christoph von Recklinghausen <crecklin@redhat.com>
 R:	Richard Guy Briggs <rbriggs@redhat.com>
 R:	Vladis Dronov <vdronov@redhat.com>
-R:	Wander Costa <wander@redhat.com>
+R:	Wander Lairson Costa <wander@redhat.com>
 R:	Yannick Cote <ycote@redhat.com>
 S:	Supported
 F:	include/linux/lsm_*
@@ -2484,7 +2554,7 @@ F:	security/Makefile
 SELINUX SECURITY MODULE
 M:	Ondrej Mosnacek <omosnace@redhat.com>
 R:	Richard Guy Briggs <rbriggs@redhat.com>
-R:	Wander Costa <wander@redhat.com>
+R:	Wander Lairson Costa <wander@redhat.com>
 S:	Supported
 F:	include/linux/selinux*
 F:	security/selinux/
@@ -2536,6 +2606,11 @@ M:	Mark Langsdorf <mlangsdo@redhat.com>
 S:	Provided
 F:	drivers/net/ethernet/marvell/sky2.*
 
+SLIP (serial line)
+M:	Michal Schmidt <mschmidt@redhat.com>
+S:	Supported
+F:	drivers/net/slip/
+
 SOFT-IWARP DRIVER (siw)
 M:	Kamal Heib <kheib@redhat.com>
 S:	Supported
@@ -2570,12 +2645,15 @@ S:	Provided
 F:	drivers/soundwire/
 
 SPI DRIVERS (Serial Peripheral Interface)
-M:	Al Stone <ahs3@redhat.com>
+M:	Adrien Thierry <athierry@redhat.com>
+M:	Andrew Halaney <ahalaney@redhat.com>
+M:	Brian Masney <bmasney@redhat.com>
+M:	Eric Chanudet <echanude@redhat.com>
 S:	Supported
 F:	drivers/spi/
 
 SQUASHFS FILE SYSTEM
-M:	Abhijith Das <adas@redhat.com>
+M:	Abhi Das <adas@redhat.com>
 S:	Supported
 F:	Documentation/filesystems/squashfs.txt
 F:	fs/squashfs/
@@ -2638,7 +2716,7 @@ F:	include/linux/cpu_cooling.h
 F:	include/linux/thermal.h
 
 THUNDERBOLT SUBSYSTEM
-M:	Torez Smith <torez@redhat.com>
+M:	Desnes Nunes <desnesn@redhat.com>
 R:	Jarod Wilson <jarod@redhat.com>
 S:	Supported
 F:	drivers/net/thunderbolt.c
@@ -2705,19 +2783,28 @@ F:	include/uapi/linux/tty.h
 
 UNIVERSAL EXTENSIBLE FIRMWARE INTERFACE (UEFI/EFI)
 M:	Lenny Szubowicz <lszubowi@redhat.com>
-M:	Myron Stowe <myron.stowe@redhat.com>
+M:	Myron Stowe <mstowe@redhat.com>
 M:	Prarit Bhargava <prarit@redhat.com>
 S:	Supported
 F:	arch/x86/kernel/efi*
 F:	include/linux/efi.h
 
-USB CDC ETHERNET DRIVER
+UNIVERSAL FLASH STORAGE HOST CONTROLLER
+M:	Adrien Thierry <athierry@redhat.com>
+M:	Andrew Halaney <ahalaney@redhat.com>
+M:	Brian Masney <bmasney@redhat.com>
+M:	Eric Chanudet <echanude@redhat.com>
+S:	Supported
+F:	drivers/ufs/
+F:	include/ufs/
+
+USB network drivers
 M:	José Ignacio Tornos Martínez <jtornosm@redhat.com>
 S:	Supported
-F:	drivers/net/usb/cdc_ether.c
+F:	drivers/net/usb/
 
 USB SUBSYSTEM
-M:	Torez Smith <torez@redhat.com>
+M:	Desnes Nunes <desnesn@redhat.com>
 S:	Supported
 F:	drivers/usb/
 
@@ -2842,6 +2929,13 @@ S:	Supported
 F:	drivers/virtio/virtio_input.c
 F:	include/uapi/linux/virtio_input.h
 
+VIRTUALIZATION SUPPORT DRIVERS
+M:	Vitaly Kuznetsov <vkuznets@redhat.com>
+M:	Cathy Avery <cavery@redhat.com>
+M:	Mohammed Gamal <mgamal@redhat.com>
+S:	Supported
+F:	drivers/virt/
+
 VMWARE PVRDMA DRIVER (vmw_pvrdma)
 M:	Kamal Heib <kheib@redhat.com>
 S:	Supported
@@ -2864,11 +2958,27 @@ F:	drivers/acpi/acpi_watchdog.c
 F:	include/linux/watchdog.h
 F:	include/uapi/linux/watchdog.h
 
+Wide Area Networks (WAN)
+M:	Michal Schmidt <mschmidt@redhat.com>
+S:	Supported
+F:	drivers/net/wan/
+F:	Documentation/networking/device_drivers/wan/
+
 WIRELESS DRIVERS AND STACK
 M:	Íñigo Huguet <ihuguet@redhat.com>
 M:	José Ignacio Tornos Martínez <jtornosm@redhat.com>
 R:	Jarod Wilson <jarod@redhat.com>
 R:	John Linville <linville@redhat.com>
+R:	Michal Schmidt <mschmidt@redhat.com>
+R:	Petr Oros <poros@redhat.com>
+R:	Ken Cox <jkc@redhat.com>
+R:	Kamal Heib <kheib@redhat.com>
+R:	Stefan Assmann <sassmann@redhat.com>
+R:	Corinna Vinschen <vinschen@redhat.com>
+R:	Ivan Vecera <ivecera@redhat.com>
+R:	Jonathan Toppins <jtoppins@redhat.com>
+R:	Josef Oskera <joskera@redhat.com>
+R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	Documentation/networking/mac80211*
 F:	Documentation/networking/regulatory*
@@ -2887,11 +2997,19 @@ WIRELESS [LR-WPAN] (IEEE 802.15.4)
 M:	Christoph von Recklinghausen <crecklin@redhat.com>
 S:	Supported
 F:	Documentation/networking/ieee802154.rst
-F:	drivers/net/ieee802154/fakelb.c
+F:	drivers/net/ieee802154/
 F:	include/linux/*802154*
 F:	include/net/*802154*
 F:	net/ieee802154/
 F:	net/mac802154/
+
+WWAN (Wireless WAN)
+M:	José Ignacio Tornos Martínez <jtornosm@redhat.com>
+S:	Supported
+F:	drivers/net/wwan/
+F:	include/linux/wwan.h
+F:	include/uapi/linux/wwan.h
+F:	Documentation/networking/device_drivers/wwan/
 
 X86 ARCHITECTURE
 M:	David Arcari <darcari@redhat.com>
@@ -2934,6 +3052,7 @@ F:	drivers/cpufreq/amd_freq_sensitivity.c
 F:	drivers/cpufreq/amd-pstate.c
 F:	drivers/cpufreq/amd-pstate-trace.c
 F:	drivers/idle/intel_idle.c
+F:	drivers/idle/Kconfig
 
 X86 FPU SUBSYSTEM
 M:	Dean Nelson <dnelson@redhat.com>
@@ -2967,7 +3086,6 @@ F:	tools/testing/selftests/bpf/*/*xdp*
 XEN
 M:	Vitaly Kuznetsov <vkuznets@redhat.com>
 M:	Igor Mammedov <imammedo@redhat.com>
-M:	Andrew Jones <drjones@redhat.com>
 S:	Supported
 F:	drivers/block/xen-blkfront.c
 F:	drivers/input/misc/xen-kbdfront.c
