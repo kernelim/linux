@@ -195,6 +195,7 @@ typedef enum exit_fastpath_completion fastpath_t;
 
 struct x86_emulate_ctxt;
 struct x86_exception;
+union kvm_smram;
 enum x86_intercept;
 enum x86_intercept_stage;
 
@@ -1468,8 +1469,8 @@ struct kvm_x86_ops {
 	void (*setup_mce)(struct kvm_vcpu *vcpu);
 
 	int (*smi_allowed)(struct kvm_vcpu *vcpu, bool for_injection);
-	int (*enter_smm)(struct kvm_vcpu *vcpu, char *smstate);
-	int (*leave_smm)(struct kvm_vcpu *vcpu, const char *smstate);
+	int (*enter_smm)(struct kvm_vcpu *vcpu, union kvm_smram *smram);
+	int (*leave_smm)(struct kvm_vcpu *vcpu, const union kvm_smram *smram);
 	void (*enable_smi_window)(struct kvm_vcpu *vcpu);
 
 	int (*mem_enc_ioctl)(struct kvm *kvm, void __user *argp);
@@ -1717,6 +1718,7 @@ int kvm_emulate_ap_reset_hold(struct kvm_vcpu *vcpu);
 int kvm_emulate_wbinvd(struct kvm_vcpu *vcpu);
 
 void kvm_get_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg);
+void kvm_set_segment(struct kvm_vcpu *vcpu, struct kvm_segment *var, int seg);
 int kvm_load_segment_descriptor(struct kvm_vcpu *vcpu, u16 selector, int seg);
 void kvm_vcpu_deliver_sipi_vector(struct kvm_vcpu *vcpu, u8 vector);
 
@@ -1960,12 +1962,6 @@ static inline int kvm_cpu_get_apicid(int mps_cpu)
 	return BAD_APICID;
 #endif
 }
-
-#define put_smstate(type, buf, offset, val)                      \
-	*(type *)((buf) + (offset) - 0x7e00) = val
-
-#define GET_SMSTATE(type, buf, offset)		\
-	(*(type *)((buf) + (offset) - 0x7e00))
 
 int kvm_cpu_dirty_log_size(void);
 

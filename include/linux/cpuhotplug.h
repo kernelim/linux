@@ -153,7 +153,7 @@ enum cpuhp_state {
 	CPUHP_AP_SMPBOOT_THREADS,
 	RH_KABI_BROKEN_REMOVE_ENUM(CPUHP_AP_X86_VDSO_VMA_ONLINE)
 	CPUHP_AP_IRQ_AFFINITY_ONLINE,
-	RH_KABI_BROKEN_INSERT_ENUM(CPUHP_AP_X86_INTEL_EPB_ONLINE)
+	/* KABI: CPUHP_AP_X86_INTEL_EPB_ONLINE == CPUHP_AP_ONLINE_DYN */
 	CPUHP_AP_PERF_ONLINE,
 	CPUHP_AP_PERF_X86_ONLINE,
 	CPUHP_AP_PERF_X86_UNCORE_ONLINE,
@@ -221,6 +221,9 @@ enum cpuhp_state {
 
 #define CPUHP_AP_PERF_X86_IDXD_ONLINE \
 	        CPUHP_AP_PERF_ARM_L2X0_ONLINE
+
+/* CPUHP_AP_ONLINE_DYN is not an unused entry like the above entries */
+#define CPUHP_AP_X86_INTEL_EPB_ONLINE CPUHP_AP_ONLINE_DYN
 
 int __cpuhp_setup_state(enum cpuhp_state state,	const char *name, bool invoke,
 			int (*startup)(unsigned int cpu),

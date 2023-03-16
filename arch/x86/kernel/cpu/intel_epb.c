@@ -229,7 +229,15 @@ static __init int intel_epb_init(void)
 	return 0;
 
 err_out_online:
-	cpuhp_remove_state(CPUHP_AP_X86_INTEL_EPB_ONLINE);
+	/*
+	 * RHEL: CPUHP_AP_X86_INTEL_EPB_ONLINE is defined as CPUHP_AP_ONLINE_DYN
+	 * which is a shared state. CPUHP_AP_ONLINE_DYN cannot be removed as
+	 * all entries will be executed.  This could cause a problem with
+	 * CPU hotplug is some cases where EPB was not enabled properly, however,
+	 * the case where CPU hotplug is used along with EPB in production
+	 * environments are few and far between.
+	 */
+	/* cpuhp_remove_state(CPUHP_AP_X86_INTEL_EPB_ONLINE); */
 	return ret;
 }
 subsys_initcall(intel_epb_init);

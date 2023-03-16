@@ -270,6 +270,9 @@ static bool fib6_rule_suppress(struct fib_rule *rule, struct fib_lookup_arg *arg
 	struct rt6_info *rt = (struct rt6_info *) arg->result;
 	struct net_device *dev = NULL;
 
+	if (arg->lookup_ptr == fib6_table_lookup)
+		return false;
+
 	if (rt->rt6i_idev)
 		dev = rt->rt6i_idev->dev;
 
