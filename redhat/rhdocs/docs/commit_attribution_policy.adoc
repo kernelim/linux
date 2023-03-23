@@ -12,7 +12,7 @@ Red Hat requires that all commits must be attributed to the contributor of the M
 
 == Backported Commits
 
-In cases where the upstream commit author is not the Red Hat contributor, the Red Hat contributor must be listed as the Red Hat commit author.  In the example below the Red Hat Git Repository Author, or the Merge Request Contributor, is ‘Prarit Bhargava <mailto:prarit@redhat.com[prarit@redhat.com]>’, and the upstream commit author, or the Upstream Contributor, is ‘Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>’.
+In cases where the upstream commit author is not the Red Hat contributor, the Red Hat contributor must be listed as the Red Hat commit author.  In the example below the Red Hat Git Repository Author, or the Merge Request Contributor, is ‘+Prarit Bhargava <prarit@redhat.com>+’, and the upstream commit author, or the Upstream Contributor, is ‘+Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>+’.
 
 ----
 commit b97a3956576a2f97bbb3c7205214919d743f4b41
@@ -45,4 +45,4 @@ Patches unique to Red Hat repositories must be attributed to the author of the M
 == Tips and Tricks for Attributing commits
 
 * If using https://gitlab.com/redhat/centos-stream/src/kernel/utils/tools/-/blob/main/git-backport[git-backport] and https://git-scm.com/docs/git-commit[git-commit] to apply backported commits, there is no need for further action.  git-backport correctly adds a “From:” line to all backported commits and can be applied using git-commit.
-* If using https://git-scm.com/docs/git-cherry-pick[git-cherry-pick] and https://git-scm.com/docs/git-commit[git-commit] to apply backported commits, the commits can be correctly attributed by using git-commit’s --reset-author option, or, by adding a “From: FirstName LastName <user@redhat.com>” line to the first line of the backported commits.
+* If using https://git-scm.com/docs/git-cherry-pick[git-cherry-pick] and https://git-scm.com/docs/git-commit[git-commit] to apply backported commits, the commits can be correctly attributed by using git-commit’s --reset-author option, or, by adding a +“From: FirstName LastName <user@redhat.com>”+ line to the first line of the backported commits.

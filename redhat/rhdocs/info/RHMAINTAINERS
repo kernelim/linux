@@ -333,8 +333,18 @@ F:	arch/x86/include/asm/sev*.h
 F:	arch/x86/kernel/sev*.[cS]
 
 AQUANTIA ATLANTIC ETHERNET DRIVER
-M:	Igor Russkikh <irusskik@redhat.com>
-M:	Michal Schmidt <mschmidt@redhat.com>
+M:	Íñigo Huguet <ihuguet@redhat.com>
+R:	Michal Schmidt <mschmidt@redhat.com>
+R:	Petr Oros <poros@redhat.com>
+R:	Ken Cox <jkc@redhat.com>
+R:	José Ignacio Tornos Martínez <jtornosm@redhat.com>
+R:	Kamal Heib <kheib@redhat.com>
+R:	Stefan Assmann <sassmann@redhat.com>
+R:	Corinna Vinschen <vinschen@redhat.com>
+R:	Ivan Vecera <ivecera@redhat.com>
+R:	Jonathan Toppins <jtoppins@redhat.com>
+R:	Josef Oskera <joskera@redhat.com>
+R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	drivers/net/ethernet/aquantia/
 
@@ -632,6 +642,12 @@ S:	Supported
 F:	Documentation/filesystems/ceph.txt
 F:	fs/ceph/
 
+CERTIFICATES
+M:	David Howells <dhowells@redhat.com>
+S:	Supported
+F:	certs/
+F:	security/keys/
+
 CHAR and MISC DRIVERS
 M:	Doug Ledford <dledford@redhat.com>
 M:	Prarit Bhargava <prarit@redhat.com>
@@ -913,15 +929,15 @@ F:	net/bridge/
 F:	include/linux/if_bridge.h
 
 ETHERNET PHY LIBRARY
-M:	Petr Oros <poros@redhat.com>
+M:	Íñigo Huguet <ihuguet@redhat.com>
 R:	Michal Schmidt <mschmidt@redhat.com>
+R:	Petr Oros <poros@redhat.com>
 R:	Ken Cox <jkc@redhat.com>
 R:	José Ignacio Tornos Martínez <jtornosm@redhat.com>
 R:	Kamal Heib <kheib@redhat.com>
 R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
-R:	Íñigo Huguet <ihuguet@redhat.com>
 R:	Jonathan Toppins <jtoppins@redhat.com>
 R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
@@ -1194,6 +1210,7 @@ F:	include/clocksource/hyperv_timer.h
 F:	include/linux/hyperv.h
 F:	include/uapi/linux/hyperv.h
 F:	include/asm-generic/mshyperv.h
+F:	include/net/mana/
 F:	tools/hv/
 F:	Documentation/ABI/stable/sysfs-bus-vmbus
 F:	Documentation/ABI/testing/debugfs-hyperv
@@ -1373,6 +1390,7 @@ M:	Vladis Dronov <vdronov@redhat.com>
 M:	Tony Camuso <tcamuso@redhat.com>
 S:	Supported
 F:	drivers/crypto/qat/
+F:	Documentation/ABI/testing/sysfs-driver-qat
 
 INTEL RAPL DRIVER
 M:	Prarit Bhargava <prarit@redhat.com>
@@ -1471,10 +1489,12 @@ X:	kernel/bpf/
 X:	kernel/crash_*.c
 X:	kernel/futex.c
 X:	kernel/kexec*
+X:	kernel/module/
+X:	kernel/module_signature.c
+X:	kernel/power/
 X:	kernel/rcu/
 X:	kernel/trace/
 X:	kernel/time/
-X:	kernel/power/
 
 KERNEL VIRTUAL MACHINE (KVM)
 M:	Paolo Bonzini <pbonzini@redhat.com>
@@ -1803,6 +1823,13 @@ F:	Documentation/mmc/
 F:	include/linux/mmc/
 F:	drivers/mmc/
 
+MODULES
+M:	Prarit Bhargava <prarit@redhat.com>
+S:	Supported
+F:	kernel/module/
+F:	kernel/module_signature.c
+X:	kernel/module/livepatch.c
+
 MYRICOM MYRI-10G 10GbE DRIVER (MYRI10GE)
 M:	Jarod Wilson <jarod@redhat.com>
 S:	Supported
@@ -1970,6 +1997,7 @@ F:	tools/testing/selftests/net/
 F:	tools/testing/selftests/wireguard/
 X:	Documentation/networking/can.rst
 X:	Documentation/networking/device_drivers/
+X:	Documentation/networking/devlink/
 X:	Documentation/networking/mac80211*
 X:	Documentation/networking/ieee802154*
 X:	Documentation/networking/phonet*
@@ -1987,6 +2015,7 @@ X:	include/net/cipso_ipv4.h
 X:	include/net/irda/
 X:	include/net/iucv/
 X:	include/net/iw*
+X:	include/net/mana/
 X:	include/net/netlabel.h
 X:	include/net/regulatory.h
 X:	include/net/vsock_addr.h
@@ -2488,6 +2517,13 @@ F:	drivers/s390/cio/vfio_ccw*
 F:	Documentation/s390/vfio-ccw.txt
 F:	include/uapi/linux/vfio_ccw.h
 
+SAMPLES
+M:	Alex Williamson <alex.williamson@redhat.com>
+M:	Sebastian Mitterle <smitterl@redhat.com>
+M:	Zhiyi Guo <zhguo@redhat.com>
+S:	Internal
+F:	samples/Kconfig
+
 SCHEDULER
 M:	Phil Auld <pauld@redhat.com>
 R:	Andrew Halaney <ahalaney@redhat.com>
@@ -2550,6 +2586,14 @@ F:	security/min_addr.c
 F:	security/security.c
 F:	security/Kconfig
 F:	security/Makefile
+F:	security/apparmor/
+F:	security/landlock/
+F:	security/loadpin/
+F:	security/lockdown/
+F:	security/safesetid/
+F:	security/smack/
+F:	security/tomoyo/
+F:	security/yama/
 
 SELINUX SECURITY MODULE
 M:	Ondrej Mosnacek <omosnace@redhat.com>
@@ -2965,8 +3009,8 @@ F:	drivers/net/wan/
 F:	Documentation/networking/device_drivers/wan/
 
 WIRELESS DRIVERS AND STACK
-M:	Íñigo Huguet <ihuguet@redhat.com>
 M:	José Ignacio Tornos Martínez <jtornosm@redhat.com>
+M:	Íñigo Huguet <ihuguet@redhat.com>
 R:	Jarod Wilson <jarod@redhat.com>
 R:	John Linville <linville@redhat.com>
 R:	Michal Schmidt <mschmidt@redhat.com>

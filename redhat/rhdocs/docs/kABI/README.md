@@ -1,4 +1,7 @@
-# A Kernel Developer's Guide to kABI
+---
+title: A Kernel Developer's Guide to kABI
+weight: 100
+---
 Contained within is a "guiding document" that can be used for people who need to understand kABI.
 
 There can be a prohibitively restrictive burden associated with maintaining RHEL's kABI (Kernel Application Binary Interface) commitment that persists throughout the release's entire lifecycle if subsystem maintainers don't proactively accommodate for upstream back-ports.  RHEL kernel developers need to be aware of, and fully comprehend, such restrictions, which is the focus of this document.

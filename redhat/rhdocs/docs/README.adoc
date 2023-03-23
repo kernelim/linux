@@ -80,11 +80,11 @@ _This does not apply to External Contributors.  Instructions will be provide in 
 . Install and configure your utilities for performing contributor and reviewer actions. +
 You can choose from: +
 * Internal Tools:
-** https://gitlab.cee.redhat.com/kernel-review/revumatic[revumatic] - A review tool that provides a text user interface to review GitLab Merge Requests.
 ** https://gitlab.com/prarit/rhstatus[rhstatus] - Provides a terminal based report based on the current status of a developer's TODO list and open Merge Requests.
 * External Tools:
-** https://gitlab.com/redhat/centos-stream/src/kernel/documentation/-/blob/main/docs/bichon.adoc[bichon] - A terminal based user interface for reviewing GitLab Merge Requests.
-** https://gitlab.com/redhat/centos-stream/src/kernel/documentation/-/blob/main/docs/lab.adoc[lab] - Interact with repositories on GitLab (creating/editing Merge Requests, forking projects, etc.) via command line.
+** https://gitlab.com/redhat/centos-stream/src/kernel/utils/revumatic/[revumatic] - A review tool that provides a text user interface to review GitLab Merge Requests.
+** xref:bichon.adoc[bichon] - A terminal based user interface for reviewing GitLab Merge Requests.
+** xref:lab.adoc[lab] - Interact with repositories on GitLab (creating/editing Merge Requests, forking projects, etc.) via command line.
 +
 IMPORTANT: We recommend using the `lab` utility to create forks and subsequent MRs to provide a consistent experience. Proceeding with this document assumes that `lab` is configured.
 
@@ -128,14 +128,14 @@ Note that kernel repositories take a long time to fork.
 . Find the name of the fork.
 * `git remote -v | grep _<GitLab_username>_` +
 Note that GitLab username is used for the remote name.
-. Modify your fork while following the details outlined in xref:CommitRules.adoc#commitdescriptioninfo[CommitRules Section 3: Commit-Specific Description Information]
+. Modify your fork while following the details outlined in link:CommitRules.adoc#commitdescriptioninfo[Commit Rules Section 3: Commit-Specific Description Information]
 
 . Push the updated branch to your kernel fork on GitLab.
 * `git push -u _<GitLab_fork_name>_ _<branch_name>_`
 
 == Creating merge requests
 
-. Familiarize yourself with xref:CommitRules.adoc[CommitRules] and xref:verifying_a_gitlab_mr.adoc[Verify the MR information] documents.
+. Familiarize yourself with link:CommitRules.adoc[Commit Rules] and xref:verifying_a_gitlab_mr.adoc[Verify the MR information] documents.
 
 . When done with your work, create a merge request (MR) on some branch other than the `main` branch. +
 `git checkout -b <branch_name>` +
@@ -301,12 +301,10 @@ All approved MR's, assuming they have the +readyForMerge+ label, will normally b
 == Additional resources
 
 * https://source.redhat.com/groups/public/kernel[General Kernel Info Page]
-* https://gitlab.com/redhat/centos-stream/src/kernel/documentation/-/blob/main/docs/what_is_a_GitLab_fork.adoc[What is a GitLab Fork?]
+* link:what_is_a_GitLab_fork.adoc[What is a GitLab Fork?]
 * xref:faq.adoc[Frequently Asked Questions]
-* xref:CommitRules.adoc[CommitRules]
 * xref:rh_and_gitlab_configuration.adoc[Red Hat and GitLab Configuration]
 * xref:lab.adoc[Gitlab 'lab' utility and the Red Hat Kernel]
-* https://gitlab.cee.redhat.com/kernel-review/revumatic/[Red Hat Specific 'revumatic' tool]
 * https://gitlab.com/prarit/rhstatus[rhstatus]
 * https://red.ht/kernel_workflow_doc[Main KWF documentation]
 * https://one.redhat.com/rhel-developer-guide[RHEL Developer guide]

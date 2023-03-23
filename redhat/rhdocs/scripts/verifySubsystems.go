@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 	"strings"
+	"regexp"
 
 	"gopkg.in/yaml.v2"
 )
@@ -97,7 +99,11 @@ func main() {
 	//
 	// General data verification
 	//
-
+	r := regexp.MustCompile(`[-.\*]`)
+	validIncludeFiles := []string {"makefile",
+				       "Makefile",
+				       "Kconfig",
+				      }
 	for _, s := range subSystems.SubSys {
 		// check that devel-sst is set
 		if s.DevelSst == nil {
@@ -119,5 +125,138 @@ func main() {
 				log.Fatalf("error: '%s' qe-sst entry (%s) is not valid", s.Subsystem, sst)
 			}
 		}
+
+		if s.Maintainers != nil {
+			if len(s.Maintainers) == 0 {
+				log.Fatalf("error: '%s' must have a maintainer listed", s.Subsystem)
+			}
+			for _, maintainer := range s.Maintainers {
+				// Name Email Gluser
+				if maintainer.Name == "" || maintainer.Email == "" || maintainer.Gluser == "" {
+					log.Fatalf("error: '%s' maintainer fields (name, email, and gluser) cannot be empty", s.Subsystem)
+				}
+			}
+			for _, reviewer := range s.Reviewers {
+				// Name Email Gluser
+				if reviewer.Name == "" || reviewer.Email == "" || reviewer.Gluser == "" {
+					log.Fatalf("error: '%s' reviewer fields (name, email, and gluser) cannot be empty", s.Subsystem)
+				}
+			}
+		}
+
+		// check for '/' at the end of directories
+		for _, include := range s.Paths.Includes {
+			parts := strings.SplitAfter(include, "/")
+			// This implies the last char before the newline was
+			// a '/'.  This is good, we can skip.
+			if parts[len(parts)-1] == "" {
+				continue
+			}
+			if parts[0] == "Documentation/" {
+				continue
+			}
+			file := parts[len(parts)-1]
+			matches := r.FindAllString(file, -1)
+			if matches != nil {
+				continue
+			}
+			if contains(validIncludeFiles, file) {
+				continue
+			}
+			log.Fatalf("error: '%s:%s' is a bad includes entry (missing directory '/'?)", s.Subsystem, include)
+		}
 	}
+
+	// The maintainer and reviewer data has been verified.  Now, make sure
+	// user entries are consistent (ie, gluser prarit isn't gluser PraritB
+	// in another entry).  This is tricky to do as users could have two
+	// names, two email addresses or two GitLab user names.  The only way
+	// to "verify" the data is to cross-reference it.
+
+	type checkName struct {
+		string1 string
+		string2 string
+	}
+
+	emailList := make(map[string]checkName)
+	gluserList := make(map[string]checkName)
+	nameList := make(map[string]checkName)
+	for _, s := range subSystems.SubSys {
+		if len(s.Maintainers) == 0 {
+			log.Fatalf("%s has no maintainers listed\n", s.Subsystem)
+		}
+		for _, maintainer := range s.Maintainers {
+			if maintainer.Email == "jforbes@fedoraproject.org" {
+				// we know that Justin has both a redhat and fedora account listed
+				continue
+			}
+			if _, exists := emailList[maintainer.Email]; exists {
+				if maintainer.Name != emailList[maintainer.Email].string1 ||
+				   maintainer.Gluser != emailList[maintainer.Email].string2 {
+					   fmt.Println(s.Subsystem, maintainer, emailList[maintainer.Email])
+					log.Fatalf("error: 1) Multiple maintainer entries found for user %s[%s:%s]\n", maintainer.Name, maintainer.Email, maintainer.Gluser)
+				}
+			} else {
+				emailList[maintainer.Email] = checkName{ string1:maintainer.Name, string2: maintainer.Gluser }
+			}
+
+			if _, exists := gluserList[maintainer.Gluser]; exists {
+				if maintainer.Email != gluserList[maintainer.Gluser].string1 ||
+				   maintainer.Name != gluserList[maintainer.Gluser].string2 {
+					   fmt.Println(s.Subsystem, maintainer, gluserList[maintainer.Gluser])
+					log.Fatalf("error: 2) Multiple maintainer entries found for user %s[%s:%s]\n", maintainer.Name, maintainer.Email, maintainer.Gluser)
+				}
+			} else {
+				gluserList[maintainer.Gluser] = checkName{ string1:maintainer.Email, string2: maintainer.Name }
+			}
+
+			if _, exists := nameList[maintainer.Name]; exists {
+				if maintainer.Email != nameList[maintainer.Name].string1 ||
+				   maintainer.Gluser != nameList[maintainer.Name].string2 {
+					   fmt.Println(s.Subsystem, maintainer, nameList[maintainer.Name])
+					log.Fatalf("error: 3) Multiple maintainer entries found for user %s[%s:%s]\n", maintainer.Name, maintainer.Email, maintainer.Gluser)
+				}
+			} else {
+				nameList[maintainer.Name] = checkName{ string1:maintainer.Email, string2: maintainer.Gluser }
+			}
+		}
+		for _, reviewer := range s.Reviewers {
+			if reviewer.Email == "jforbes@fedoraproject.org" {
+				// we know that Justin has both a redhat and fedora account listed
+				continue
+			}
+			if _, exists := emailList[reviewer.Email]; exists {
+				if reviewer.Name != emailList[reviewer.Email].string1 ||
+				   reviewer.Gluser != emailList[reviewer.Email].string2 {
+					   fmt.Println(s.Subsystem, reviewer, emailList[reviewer.Email])
+					log.Fatalf("error: 1) Multiple reviewer entries found for user %s[%s:%s]\n", reviewer.Name, reviewer.Email, reviewer.Gluser)
+				}
+			} else {
+				emailList[reviewer.Email] = checkName{ string1:reviewer.Name, string2: reviewer.Gluser }
+			}
+
+			if _, exists := gluserList[reviewer.Gluser]; exists {
+				if reviewer.Email != gluserList[reviewer.Gluser].string1 ||
+				   reviewer.Name != gluserList[reviewer.Gluser].string2 {
+					   fmt.Println(s.Subsystem, reviewer, gluserList[reviewer.Gluser])
+					log.Fatalf("error: 2) Multiple reviewer entries found for user %s[%s:%s]\n", reviewer.Name, reviewer.Email, reviewer.Gluser)
+				}
+			} else {
+				gluserList[reviewer.Gluser] = checkName{ string1:reviewer.Email, string2: reviewer.Name }
+			}
+
+			if _, exists := nameList[reviewer.Name]; exists {
+				if reviewer.Email != nameList[reviewer.Name].string1 ||
+				   reviewer.Gluser != nameList[reviewer.Name].string2 {
+					   fmt.Println(s.Subsystem, reviewer, nameList[reviewer.Name])
+					log.Fatalf("error: 3) Multiple reviewer entries found for user %s[%s:%s]\n", reviewer.Name, reviewer.Email, reviewer.Gluser)
+				}
+			} else {
+				nameList[reviewer.Name] = checkName{ string1:reviewer.Email, string2: reviewer.Gluser }
+			}
+		}
+
+	}
+
+
 }

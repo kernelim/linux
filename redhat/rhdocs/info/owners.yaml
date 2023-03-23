@@ -881,13 +881,43 @@ subsystems:
      - rhel-sst-nic-rdma
    requiredApproval: false
    maintainers:
-     - name: Igor Russkikh
-       email: irusskik@redhat.com
-       gluser: irusskik
-       restricted: true
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
+   reviewers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
        gluser: mschmidt2
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
+     - name: Ken Cox
+       email: jkc@redhat.com
+       gluser: kencox
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
+     - name: Kamal Heib
+       email: kheib@redhat.com
+       gluser: kheib
+     - name: Stefan Assmann
+       email: sassmann@redhat.com
+       gluser: sassmann_rh
+     - name: Corinna Vinschen
+       email: vinschen@redhat.com
+       gluser: vinschen
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+     - name: Jonathan Toppins
+       email: jtoppins@redhat.com
+       gluser: jtoppins_redhat
+     - name: Josef Oskera
+       email: joskera@redhat.com
+       gluser: joskera
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
    paths:
        includes:
           - drivers/net/ethernet/aquantia/
@@ -1750,6 +1780,23 @@ subsystems:
        includes:
           - Documentation/filesystems/ceph.txt
           - fs/ceph/
+ - subsystem: CERTIFICATES
+   labels:
+     name: certificates
+   status: Supported
+   devel-sst:
+     - rhel-sst-filesystems
+   qe-sst:
+     - rhel-sst-filesystems
+   requiredApproval: false
+   maintainers:
+     - name: David Howells
+       email: dhowells@redhat.com
+       gluser: dhowells1
+   paths:
+       includes:
+          - certs/
+          - security/keys/
  - subsystem: CHAR and MISC DRIVERS
    labels:
      name: char
@@ -1906,7 +1953,7 @@ subsystems:
    maintainers:
      - name: Tom Rix
        email: trix@redhat.com
-       gluser: tomrix
+       gluser: trixirt
    reviewers:
      - name: Marco Pagani
        email: marpagan@redhat.com
@@ -2645,13 +2692,16 @@ subsystems:
      - rhel-sst-nic-rdma
    requiredApproval: false
    maintainers:
-     - name: Petr Oros
-       email: poros@redhat.com
-       gluser: poros2
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
    reviewers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
        gluser: mschmidt2
+     - name: Petr Oros
+       email: poros@redhat.com
+       gluser: poros2
      - name: Ken Cox
        email: jkc@redhat.com
        gluser: kencox
@@ -2670,9 +2720,6 @@ subsystems:
      - name: Ivan Vecera
        email: ivecera@redhat.com
        gluser: ivecera
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
      - name: Jonathan Toppins
        email: jtoppins@redhat.com
        gluser: jtoppins_redhat
@@ -2933,7 +2980,7 @@ subsystems:
    maintainers:
      - name: Tom Rix
        email: trix@redhat.com
-       gluser: tomrix
+       gluser: trixirt
    reviewers:
      - name: Marco Pagani
        email: marpagan@redhat.com
@@ -3442,6 +3489,7 @@ subsystems:
           - include/linux/hyperv.h
           - include/uapi/linux/hyperv.h
           - include/asm-generic/mshyperv.h
+          - include/net/mana/
           - tools/hv/
           - Documentation/ABI/stable/sysfs-bus-vmbus
           - Documentation/ABI/testing/debugfs-hyperv
@@ -3986,6 +4034,7 @@ subsystems:
    paths:
        includes:
           - drivers/crypto/qat/
+          - Documentation/ABI/testing/sysfs-driver-qat
  - subsystem: INTEL RAPL DRIVER
    labels:
      name: intel_rapl
@@ -4270,10 +4319,12 @@ subsystems:
           - kernel/crash_*.c
           - kernel/futex.c
           - kernel/kexec*
+          - kernel/module/
+          - kernel/module_signature.c
+          - kernel/power/
           - kernel/rcu/
           - kernel/trace/
           - kernel/time/
-          - kernel/power/
  - subsystem: KERNEL VIRTUAL MACHINE (KVM)
    labels:
      name: kvm
@@ -5104,6 +5155,25 @@ subsystems:
           - Documentation/mmc/
           - include/linux/mmc/
           - drivers/mmc/
+ - subsystem: MODULES
+   labels:
+     name: modules
+   status: Supported
+   devel-sst:
+     - rhel-sst-arch-hw
+   qe-sst:
+     - rhel-sst-arch-hw
+   requiredApproval: false
+   maintainers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - kernel/module/
+          - kernel/module_signature.c
+       excludes:
+          - kernel/module/livepatch.c
  - subsystem: MOST SUBSYSTEM
    labels:
      name: most
@@ -5455,6 +5525,7 @@ subsystems:
        excludes:
           - Documentation/networking/can.rst
           - Documentation/networking/device_drivers/
+          - Documentation/networking/devlink/
           - Documentation/networking/mac80211*
           - Documentation/networking/ieee802154*
           - Documentation/networking/phonet*
@@ -5472,6 +5543,7 @@ subsystems:
           - include/net/irda/
           - include/net/iucv/
           - include/net/iw*
+          - include/net/mana/
           - include/net/netlabel.h
           - include/net/regulatory.h
           - include/net/vsock_addr.h
@@ -6948,6 +7020,28 @@ subsystems:
           - Documentation/s390/vfio-ccw.txt
           - include/uapi/linux/vfio_ccw.h
    mailingList: rhvirt-patches@redhat.com
+ - subsystem: SAMPLES
+   labels:
+     name: samples
+   status: Internal
+   devel-sst:
+     - rhel-sst-virtualization-hwe
+   qe-sst:
+     - rhel-sst-virtualization-hwe
+   requiredApproval: false
+   maintainers:
+     - name: Alex Williamson
+       email: alex.williamson@redhat.com
+       gluser: alex.williamson
+     - name: Sebastian Mitterle
+       email: smitterl@redhat.com
+       gluser: smitterl
+     - name: Zhiyi Guo
+       email: zhguo@redhat.com
+       gluser: zhguo1
+   paths:
+       includes:
+          - samples/Kconfig
  - subsystem: SCHEDULER
    labels:
      name: scheduler
@@ -7109,6 +7203,14 @@ subsystems:
           - security/security.c
           - security/Kconfig
           - security/Makefile
+          - security/apparmor/
+          - security/landlock/
+          - security/loadpin/
+          - security/lockdown/
+          - security/safesetid/
+          - security/smack/
+          - security/tomoyo/
+          - security/yama/
  - subsystem: SELINUX SECURITY MODULE
    labels:
      name: selinux
@@ -8323,12 +8425,12 @@ subsystems:
      - rhel-sst-arch-hw
    requiredApproval: true
    maintainers:
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
      - name: José Ignacio Tornos Martínez
        email: jtornosm@redhat.com
        gluser: jtornosm
+     - name: Íñigo Huguet
+       email: ihuguet@redhat.com
+       gluser: ihuguet-rh
    reviewers:
      - name: Jarod Wilson
        email: jarod@redhat.com

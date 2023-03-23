@@ -154,7 +154,7 @@ arch/x86/include/asm/sev*.h	vkuznets@redhat.com wehuang@redhat.com
 arch/x86/kernel/sev*.[cS]	vkuznets@redhat.com wehuang@redhat.com
 
 ^[AQUANTIA ATLANTIC ETHERNET DRIVER]
-drivers/net/ethernet/aquantia/	irusskik@redhat.com mschmidt@redhat.com
+drivers/net/ethernet/aquantia/	ihuguet@redhat.com
 
 ^[ARCHITECTURE DIRECTORY FILES]
 arch/Kconfig	prarit@redhat.com darcari@redhat.com msalter@redhat.com
@@ -335,6 +335,10 @@ include/linux/crush/	idryomov@redhat.com xiubli@redhat.com
 Documentation/filesystems/ceph.txt	xiubli@redhat.com
 fs/ceph/	xiubli@redhat.com
 
+^[CERTIFICATES]
+certs/	dhowells@redhat.com
+security/keys/	dhowells@redhat.com
+
 ^[CHAR and MISC DRIVERS]
 drivers/char/	dledford@redhat.com prarit@redhat.com
 drivers/misc/	dledford@redhat.com prarit@redhat.com
@@ -487,19 +491,19 @@ net/bridge/	ivecera@redhat.com haliu@redhat.com
 include/linux/if_bridge.h	ivecera@redhat.com haliu@redhat.com
 
 ^[ETHERNET PHY LIBRARY]
-Documentation/networking/phy.rst	poros@redhat.com
-drivers/net/mdio/	poros@redhat.com
-drivers/net/phy/	poros@redhat.com
-drivers/of/of_mdio.c	poros@redhat.com
-include/linux/*mdio*.h	poros@redhat.com
-include/linux/mdio/	poros@redhat.com
-include/linux/phy.h	poros@redhat.com
-include/linux/phy_fixed.h	poros@redhat.com
-include/linux/platform_data/mdio-bcm-unimac.h	poros@redhat.com
-include/linux/platform_data/mdio-gpio.h	poros@redhat.com
-include/trace/events/mdio.h	poros@redhat.com
-include/uapi/linux/mdio.h	poros@redhat.com
-include/uapi/linux/mii.h	poros@redhat.com
+Documentation/networking/phy.rst	ihuguet@redhat.com
+drivers/net/mdio/	ihuguet@redhat.com
+drivers/net/phy/	ihuguet@redhat.com
+drivers/of/of_mdio.c	ihuguet@redhat.com
+include/linux/*mdio*.h	ihuguet@redhat.com
+include/linux/mdio/	ihuguet@redhat.com
+include/linux/phy.h	ihuguet@redhat.com
+include/linux/phy_fixed.h	ihuguet@redhat.com
+include/linux/platform_data/mdio-bcm-unimac.h	ihuguet@redhat.com
+include/linux/platform_data/mdio-gpio.h	ihuguet@redhat.com
+include/trace/events/mdio.h	ihuguet@redhat.com
+include/uapi/linux/mdio.h	ihuguet@redhat.com
+include/uapi/linux/mii.h	ihuguet@redhat.com
 
 ^[EXT4 FILE SYSTEM]
 Documentation/filesystems/ext4/ext4.rst	lczerner@redhat.com
@@ -666,6 +670,7 @@ include/clocksource/hyperv_timer.h	cavery@redhat.com mgamal@redhat.com vkuznets@
 include/linux/hyperv.h	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
 include/uapi/linux/hyperv.h	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
 include/asm-generic/mshyperv.h	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
+include/net/mana/	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
 tools/hv/	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
 Documentation/ABI/stable/sysfs-bus-vmbus	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
 Documentation/ABI/testing/debugfs-hyperv	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
@@ -760,6 +765,7 @@ drivers/counter/intel-qep.c	prarit@redhat.com darcari@redhat.com
 
 ^[INTEL QUICK ASSIST TECHNOLOGY (QAT)]
 drivers/crypto/qat/	vdronov@redhat.com tcamuso@redhat.com
+Documentation/ABI/testing/sysfs-driver-qat	vdronov@redhat.com tcamuso@redhat.com
 
 [INTEL RAPL DRIVER]
 drivers/powercap/intel*	prarit@redhat.com darcari@redhat.com
@@ -823,10 +829,12 @@ kernel/*.[ch]	prarit@redhat.com
 ^kernel/crash_*.c	prarit@redhat.com
 ^kernel/futex.c	prarit@redhat.com
 ^kernel/kexec*	prarit@redhat.com
+^kernel/module/	prarit@redhat.com
+^kernel/module_signature.c	prarit@redhat.com
+^kernel/power/	prarit@redhat.com
 ^kernel/rcu/	prarit@redhat.com
 ^kernel/trace/	prarit@redhat.com
 ^kernel/time/	prarit@redhat.com
-^kernel/power/	prarit@redhat.com
 
 ^[KERNEL VIRTUAL MACHINE (KVM)]
 drivers/virt/tdx/	pbonzini@redhat.com bsd@redhat.com vkuznets@redhat.com
@@ -1033,6 +1041,11 @@ Documentation/mmc/	msalter@redhat.com
 include/linux/mmc/	msalter@redhat.com
 drivers/mmc/	msalter@redhat.com
 
+^[MODULES]
+kernel/module/	prarit@redhat.com
+kernel/module_signature.c	prarit@redhat.com
+^kernel/module/livepatch.c	prarit@redhat.com
+
 ^[MYRICOM MYRI-10G 10GbE DRIVER (MYRI10GE)]
 drivers/net/ethernet/myricom/myri10ge/	jarod@redhat.com
 
@@ -1151,6 +1164,7 @@ tools/testing/selftests/net/	jbenc@redhat.com mleitner@redhat.com
 tools/testing/selftests/wireguard/	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/can.rst	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/device_drivers/	jbenc@redhat.com mleitner@redhat.com
+^Documentation/networking/devlink/	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/mac80211*	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/ieee802154*	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/phonet*	jbenc@redhat.com mleitner@redhat.com
@@ -1168,6 +1182,7 @@ tools/testing/selftests/wireguard/	jbenc@redhat.com mleitner@redhat.com
 ^include/net/irda/	jbenc@redhat.com mleitner@redhat.com
 ^include/net/iucv/	jbenc@redhat.com mleitner@redhat.com
 ^include/net/iw*	jbenc@redhat.com mleitner@redhat.com
+^include/net/mana/	jbenc@redhat.com mleitner@redhat.com
 ^include/net/netlabel.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/regulatory.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/vsock_addr.h	jbenc@redhat.com mleitner@redhat.com
@@ -1482,6 +1497,9 @@ drivers/s390/cio/vfio_ccw*	cohuck@redhat.com
 Documentation/s390/vfio-ccw.txt	cohuck@redhat.com
 include/uapi/linux/vfio_ccw.h	cohuck@redhat.com
 
+^[SAMPLES]
+samples/Kconfig	alex.williamson@redhat.com smitterl@redhat.com zhguo@redhat.com
+
 ^[SCHEDULER]
 kernel/sched/	pauld@redhat.com
 include/linux/sched/	pauld@redhat.com
@@ -1516,6 +1534,14 @@ security/min_addr.c	omosnace@redhat.com
 security/security.c	omosnace@redhat.com
 security/Kconfig	omosnace@redhat.com
 security/Makefile	omosnace@redhat.com
+security/apparmor/	omosnace@redhat.com
+security/landlock/	omosnace@redhat.com
+security/loadpin/	omosnace@redhat.com
+security/lockdown/	omosnace@redhat.com
+security/safesetid/	omosnace@redhat.com
+security/smack/	omosnace@redhat.com
+security/tomoyo/	omosnace@redhat.com
+security/yama/	omosnace@redhat.com
 
 ^[SELINUX SECURITY MODULE]
 include/linux/selinux*	omosnace@redhat.com
@@ -1780,18 +1806,18 @@ drivers/net/wan/	mschmidt@redhat.com
 Documentation/networking/device_drivers/wan/	mschmidt@redhat.com
 
 [WIRELESS DRIVERS AND STACK]
-Documentation/networking/mac80211*	ihuguet@redhat.com jtornosm@redhat.com
-Documentation/networking/regulatory*	ihuguet@redhat.com jtornosm@redhat.com
-drivers/net/wireless/	ihuguet@redhat.com jtornosm@redhat.com
-net/mac80211/	ihuguet@redhat.com jtornosm@redhat.com
-net/wireless/	ihuguet@redhat.com jtornosm@redhat.com
-net/rfkill/	ihuguet@redhat.com jtornosm@redhat.com
-include/linux/*80211*	ihuguet@redhat.com jtornosm@redhat.com
-include/net/*80211*	ihuguet@redhat.com jtornosm@redhat.com
-include/net/iw*	ihuguet@redhat.com jtornosm@redhat.com
-include/net/regulatory.h	ihuguet@redhat.com jtornosm@redhat.com
-include/uapi/linux/nl80211.h	ihuguet@redhat.com jtornosm@redhat.com
-include/uapi/linux/wireless.h	ihuguet@redhat.com jtornosm@redhat.com
+Documentation/networking/mac80211*	jtornosm@redhat.com ihuguet@redhat.com
+Documentation/networking/regulatory*	jtornosm@redhat.com ihuguet@redhat.com
+drivers/net/wireless/	jtornosm@redhat.com ihuguet@redhat.com
+net/mac80211/	jtornosm@redhat.com ihuguet@redhat.com
+net/wireless/	jtornosm@redhat.com ihuguet@redhat.com
+net/rfkill/	jtornosm@redhat.com ihuguet@redhat.com
+include/linux/*80211*	jtornosm@redhat.com ihuguet@redhat.com
+include/net/*80211*	jtornosm@redhat.com ihuguet@redhat.com
+include/net/iw*	jtornosm@redhat.com ihuguet@redhat.com
+include/net/regulatory.h	jtornosm@redhat.com ihuguet@redhat.com
+include/uapi/linux/nl80211.h	jtornosm@redhat.com ihuguet@redhat.com
+include/uapi/linux/wireless.h	jtornosm@redhat.com ihuguet@redhat.com
 
 ^[WIRELESS [LR-WPAN] (IEEE 802.15.4)]
 Documentation/networking/ieee802154.rst	crecklin@redhat.com

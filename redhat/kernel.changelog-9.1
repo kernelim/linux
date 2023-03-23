@@ -1,6 +1,12 @@
-* Wed Mar 15 2023 Lucas Zampieri <lzampier@redhat.com> [5.14.0-162.22.2.el9_1]
-- tun: avoid double free in tun_free_netdev (Jon Maloy) [2156373] {CVE-2022-4744}
-Resolves: rhbz#2156373
+* Thu Mar 23 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.23.1.el9_1]
+- ovl: fail on invalid uid/gid mapping at copy up (Miklos Szeredi) [2165344 2165345] {CVE-2023-0386}
+- intel_idle: make SPR C1 and C1E be independent (David Arcari) [2168361 2125352]
+- intel_idle: Add a new flag to initialize the AMX state (David Arcari) [2168361 2117766]
+- x86/fpu: Add a helper to prepare AMX state for low-power CPU idle (David Arcari) [2168361 2117766]
+- x86/insn: Add AMX instructions to the x86 instruction decoder (Michael Petlan) [2168361 2140492]
+- futex: Resend potentially swallowed owner death notification (Rafael Aquini) [2168836 2161817]
+- tun: avoid double free in tun_free_netdev (Jon Maloy) [2156373 2156374] {CVE-2022-4744}
+Resolves: rhbz#2165344, rhbz#2168361, rhbz#2168836, rhbz#2156373
 
 * Thu Mar 09 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.22.1.el9_1]
 - ALSA: pcm: Move rwsem lock inside snd_ctl_elem_read to prevent UAF (Jaroslav Kysela) [2163390 2125540] {CVE-2023-0266}

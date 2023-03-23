@@ -121,13 +121,13 @@ Summary: The Linux kernel
 %define kversion 5.14
 
 %define rpmversion 5.14.0
-%define pkgrelease 162.22.2.el9_1
+%define pkgrelease 162.23.1.el9_1
 
 # This is needed to do merge window version magic
 %define patchlevel 14
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 162.22.2%{?buildid}%{?dist}
+%define specrelease 162.23.1%{?buildid}%{?dist}
 
 %define pkg_release %{specrelease}
 
@@ -678,7 +678,7 @@ BuildRequires: lld
 # exact git commit you can run
 #
 # xzcat -qq ${TARBALL} | git get-tar-commit-id
-Source0: linux-5.14.0-162.22.2.el9_1.tar.xz
+Source0: linux-5.14.0-162.23.1.el9_1.tar.xz
 
 Source1: Makefile.rhelver
 
@@ -1348,8 +1348,8 @@ ApplyOptionalPatch()
   fi
 }
 
-%setup -q -n kernel-5.14.0-162.22.2.el9_1 -c
-mv linux-5.14.0-162.22.2.el9_1 linux-%{KVERREL}
+%setup -q -n kernel-5.14.0-162.23.1.el9_1 -c
+mv linux-5.14.0-162.23.1.el9_1 linux-%{KVERREL}
 
 cd linux-%{KVERREL}
 cp -a %{SOURCE1} .
@@ -3016,12 +3016,18 @@ fi
 #
 #
 %changelog
-* Thu Mar 30 2023 Release Engineering <releng@rockylinux.org> - 5.14.0-162.22.2
+* Tue Apr 11 2023 Release Engineering <releng@rockylinux.org> - 5.14.0-162.23.1
 - Porting to 9.1, debranding and Rocky branding with new release pkg (Sherif Nagy)
 - Porting to 9.1, debranding and Rocky branding (Louis Abel)
 
-* Wed Mar 15 2023 Lucas Zampieri <lzampier@redhat.com> [5.14.0-162.22.2.el9_1]
-- tun: avoid double free in tun_free_netdev (Jon Maloy) [2156373] {CVE-2022-4744}
+* Thu Mar 23 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.23.1.el9_1]
+- ovl: fail on invalid uid/gid mapping at copy up (Miklos Szeredi) [2165344 2165345] {CVE-2023-0386}
+- intel_idle: make SPR C1 and C1E be independent (David Arcari) [2168361 2125352]
+- intel_idle: Add a new flag to initialize the AMX state (David Arcari) [2168361 2117766]
+- x86/fpu: Add a helper to prepare AMX state for low-power CPU idle (David Arcari) [2168361 2117766]
+- x86/insn: Add AMX instructions to the x86 instruction decoder (Michael Petlan) [2168361 2140492]
+- futex: Resend potentially swallowed owner death notification (Rafael Aquini) [2168836 2161817]
+- tun: avoid double free in tun_free_netdev (Jon Maloy) [2156373 2156374] {CVE-2022-4744}
 
 * Thu Mar 09 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-162.22.1.el9_1]
 - ALSA: pcm: Move rwsem lock inside snd_ctl_elem_read to prevent UAF (Jaroslav Kysela) [2163390 2125540] {CVE-2023-0266}
