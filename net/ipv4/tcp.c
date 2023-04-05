@@ -3215,8 +3215,9 @@ int tcp_setsockopt(struct sock *sk, int level, int optname, char __user *optval,
 	const struct inet_connection_sock *icsk = inet_csk(sk);
 
 	if (level != SOL_TCP)
-		return icsk->icsk_af_ops->setsockopt(sk, level, optname,
-						     optval, optlen);
+		/* Paired with WRITE_ONCE() in do_ipv6_setsockopt() and tcp_v6_connect() */
+		return READ_ONCE(icsk->icsk_af_ops)->setsockopt(sk, level, optname,
+								optval, optlen);
 	return do_tcp_setsockopt(sk, level, optname, optval, optlen);
 }
 EXPORT_SYMBOL(tcp_setsockopt);
@@ -3767,8 +3768,9 @@ int tcp_getsockopt(struct sock *sk, int level, int optname, char __user *optval,
 	struct inet_connection_sock *icsk = inet_csk(sk);
 
 	if (level != SOL_TCP)
-		return icsk->icsk_af_ops->getsockopt(sk, level, optname,
-						     optval, optlen);
+		/* Paired with WRITE_ONCE() in do_ipv6_setsockopt() and tcp_v6_connect() */
+		return READ_ONCE(icsk->icsk_af_ops)->getsockopt(sk, level, optname,
+								optval, optlen);
 	return do_tcp_getsockopt(sk, level, optname, optval, optlen);
 }
 EXPORT_SYMBOL(tcp_getsockopt);
@@ -3835,8 +3837,11 @@ bool tcp_alloc_md5sig_pool(void)
 	if (unlikely(!tcp_md5sig_pool_populated)) {
 		mutex_lock(&tcp_md5sig_mutex);
 
-		if (!tcp_md5sig_pool_populated)
+		if (!tcp_md5sig_pool_populated) {
 			__tcp_alloc_md5sig_pool();
+			if (tcp_md5sig_pool_populated)
+				static_key_slow_inc(&tcp_md5_needed);
+		}
 
 		mutex_unlock(&tcp_md5sig_mutex);
 	}
@@ -3917,6 +3922,77 @@ int tcp_md5_hash_key(struct tcp_md5sig_pool *hp, const struct tcp_md5sig_key *ke
 	return data_race(crypto_ahash_update(hp->md5_req));
 }
 EXPORT_SYMBOL(tcp_md5_hash_key);
+
+/* Called with rcu_read_lock() */
+enum skb_drop_reason
+tcp_inbound_md5_hash(const struct sock *sk, const struct sk_buff *skb,
+		     const void *saddr, const void *daddr,
+		     int family, int dif, int sdif)
+{
+	/*
+	 * This gets called for each TCP segment that arrives
+	 * so we want to be efficient.
+	 * We have 3 drop cases:
+	 * o No MD5 hash and one expected.
+	 * o MD5 hash and we're not expecting one.
+	 * o MD5 hash and its wrong.
+	 */
+	const __u8 *hash_location = NULL;
+	struct tcp_md5sig_key *hash_expected;
+	const struct tcphdr *th = tcp_hdr(skb);
+	struct tcp_sock *tp = tcp_sk(sk);
+	int genhash;
+	u8 newhash[16];
+
+	hash_expected = tcp_md5_do_lookup(sk, saddr, family);
+	hash_location = tcp_parse_md5sig_option(th);
+
+	/* We've parsed the options - do we have a hash? */
+	if (!hash_expected && !hash_location)
+		return SKB_NOT_DROPPED_YET;
+
+	if (hash_expected && !hash_location) {
+		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPMD5NOTFOUND);
+		return SKB_DROP_REASON_TCP_MD5NOTFOUND;
+	}
+
+	if (!hash_expected && hash_location) {
+		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPMD5UNEXPECTED);
+		return SKB_DROP_REASON_TCP_MD5UNEXPECTED;
+	}
+
+	/* Check the signature.
+	 * To support dual stack listeners, we need to handle
+	 * IPv4-mapped case.
+	 */
+	if (family == AF_INET)
+		genhash = tcp_v4_md5_hash_skb(newhash,
+					      hash_expected,
+					      NULL, skb);
+	else
+		genhash = tp->af_specific->calc_md5_hash(newhash,
+							 hash_expected,
+							 NULL, skb);
+
+	if (genhash || memcmp(hash_location, newhash, 16) != 0) {
+		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPMD5FAILURE);
+		if (family == AF_INET) {
+			net_info_ratelimited("MD5 Hash failed for (%pI4, %d)->(%pI4, %d)%s\n",
+					saddr, ntohs(th->source),
+					daddr, ntohs(th->dest),
+					genhash ? " tcp_v4_calc_md5_hash failed"
+					: "");
+		} else {
+			net_info_ratelimited("MD5 Hash %s for [%pI6c]:%u->[%pI6c]:%u\n",
+					genhash ? "failed" : "mismatch",
+					saddr, ntohs(th->source),
+					daddr, ntohs(th->dest));
+		}
+		return SKB_DROP_REASON_TCP_MD5FAILURE;
+	}
+	return SKB_NOT_DROPPED_YET;
+}
+EXPORT_SYMBOL(tcp_inbound_md5_hash);
 
 #endif
 

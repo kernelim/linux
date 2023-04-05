@@ -1750,7 +1750,7 @@ static int vxlan_rcv(struct sock *sk, struct sk_buff *skb)
 
 	if (unlikely(!(vxlan->dev->flags & IFF_UP))) {
 		rcu_read_unlock();
-		atomic_long_inc(&vxlan->dev->rx_dropped);
+		dev_core_stats_rx_dropped_inc(vxlan->dev);
 		goto drop;
 	}
 
@@ -3572,8 +3572,7 @@ static void vxlan_config_apply(struct net_device *dev,
 	if (lowerdev) {
 		dst->remote_ifindex = conf->remote_ifindex;
 
-		netif_set_gso_max_size(dev, lowerdev->gso_max_size);
-		netif_set_gso_max_segs(dev, lowerdev->gso_max_segs);
+		netif_inherit_tso_max(dev, lowerdev);
 
 		needed_headroom = lowerdev->hard_header_len;
 

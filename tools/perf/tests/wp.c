@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/ioctl.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/kernel.h>
@@ -56,8 +57,10 @@ static int __event(int wp_type, void *wp_addr, unsigned long wp_len)
 	get__perf_event_attr(&attr, wp_type, wp_addr, wp_len);
 	fd = sys_perf_event_open(&attr, 0, -1, -1,
 				 perf_event_open_cloexec_flag());
-	if (fd < 0)
+	if (fd < 0) {
+		fd = -errno;
 		pr_debug("failed opening event %x\n", attr.bp_type);
+	}
 
 	return fd;
 }
@@ -69,7 +72,7 @@ static int wp_ro_test(void)
 
 	fd = __event(HW_BREAKPOINT_R, (void *)&data1, sizeof(data1));
 	if (fd < 0)
-		return -1;
+		return fd == -ENODEV ? TEST_SKIP : -1;
 
 	tmp = data1;
 	WP_TEST_ASSERT_VAL(fd, "RO watchpoint", 1);
@@ -88,7 +91,7 @@ static int wp_wo_test(void)
 
 	fd = __event(HW_BREAKPOINT_W, (void *)&data1, sizeof(data1));
 	if (fd < 0)
-		return -1;
+		return fd == -ENODEV ? TEST_SKIP : -1;
 
 	tmp = data1;
 	WP_TEST_ASSERT_VAL(fd, "WO watchpoint", 0);
@@ -108,7 +111,7 @@ static int wp_rw_test(void)
 	fd = __event(HW_BREAKPOINT_R | HW_BREAKPOINT_W, (void *)&data1,
 		     sizeof(data1));
 	if (fd < 0)
-		return -1;
+		return fd == -ENODEV ? TEST_SKIP : -1;
 
 	tmp = data1;
 	WP_TEST_ASSERT_VAL(fd, "RW watchpoint", 1);
@@ -128,7 +131,7 @@ static int wp_modify_test(void)
 
 	fd = __event(HW_BREAKPOINT_W, (void *)&data1, sizeof(data1));
 	if (fd < 0)
-		return -1;
+		return fd == -ENODEV ? TEST_SKIP : -1;
 
 	data1 = tmp;
 	WP_TEST_ASSERT_VAL(fd, "Modify watchpoint", 1);

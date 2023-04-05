@@ -90,12 +90,6 @@ static inline struct hidma_chan *to_hidma_chan(struct dma_chan *dmach)
 	return container_of(dmach, struct hidma_chan, chan);
 }
 
-static inline
-struct hidma_desc *to_hidma_desc(struct dma_async_tx_descriptor *t)
-{
-	return container_of(t, struct hidma_desc, desc);
-}
-
 static void hidma_free(struct hidma_dev *dmadev)
 {
 	INIT_LIST_HEAD(&dmadev->ddev.channels);
@@ -138,24 +132,25 @@ static void hidma_process_completed(struct hidma_chan *mchan)
 		desc = &mdesc->desc;
 		last_cookie = desc->cookie;
 
+		llstat = hidma_ll_status(mdma->lldev, mdesc->tre_ch);
+
 		spin_lock_irqsave(&mchan->lock, irqflags);
+		if (llstat == DMA_COMPLETE) {
+			mchan->last_success = last_cookie;
+			result.result = DMA_TRANS_NOERROR;
+		} else {
+			result.result = DMA_TRANS_ABORTED;
+		}
+
 		dma_cookie_complete(desc);
 		spin_unlock_irqrestore(&mchan->lock, irqflags);
 
-		llstat = hidma_ll_status(mdma->lldev, mdesc->tre_ch);
 		dmaengine_desc_get_callback(desc, &cb);
 
 		dma_run_dependencies(desc);
 
 		spin_lock_irqsave(&mchan->lock, irqflags);
 		list_move(&mdesc->node, &mchan->free);
-
-		if (llstat == DMA_COMPLETE) {
-			mchan->last_success = last_cookie;
-			result.result = DMA_TRANS_NOERROR;
-		} else
-			result.result = DMA_TRANS_ABORTED;
-
 		spin_unlock_irqrestore(&mchan->lock, irqflags);
 
 		dmaengine_desc_callback_invoke(&cb, &result);
@@ -415,6 +410,7 @@ hidma_prep_dma_memcpy(struct dma_chan *dmach, dma_addr_t dest, dma_addr_t src,
 	if (!mdesc)
 		return NULL;
 
+	mdesc->desc.flags = flags;
 	hidma_ll_set_transfer_params(mdma->lldev, mdesc->tre_ch,
 				     src, dest, len, flags,
 				     HIDMA_TRE_MEMCPY);
@@ -435,6 +431,7 @@ hidma_prep_dma_memset(struct dma_chan *dmach, dma_addr_t dest, int value,
 	struct hidma_desc *mdesc = NULL;
 	struct hidma_dev *mdma = mchan->dmadev;
 	unsigned long irqflags;
+	u64 byte_pattern, fill_pattern;
 
 	/* Get free descriptor */
 	spin_lock_irqsave(&mchan->lock, irqflags);
@@ -447,8 +444,19 @@ hidma_prep_dma_memset(struct dma_chan *dmach, dma_addr_t dest, int value,
 	if (!mdesc)
 		return NULL;
 
+	byte_pattern = (char)value;
+	fill_pattern =	(byte_pattern << 56) |
+			(byte_pattern << 48) |
+			(byte_pattern << 40) |
+			(byte_pattern << 32) |
+			(byte_pattern << 24) |
+			(byte_pattern << 16) |
+			(byte_pattern << 8) |
+			byte_pattern;
+
+	mdesc->desc.flags = flags;
 	hidma_ll_set_transfer_params(mdma->lldev, mdesc->tre_ch,
-				     value, dest, len, flags,
+				     fill_pattern, dest, len, flags,
 				     HIDMA_TRE_MEMSET);
 
 	/* Place descriptor in prepared list */
@@ -547,7 +555,7 @@ static void hidma_free_chan_resources(struct dma_chan *dmach)
 		kfree(mdesc);
 	}
 
-	mchan->allocated = 0;
+	mchan->allocated = false;
 	spin_unlock_irqrestore(&mchan->lock, irqflags);
 }
 
@@ -847,9 +855,7 @@ static int hidma_probe(struct platform_device *pdev)
 	rc = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
 	if (rc) {
 		dev_warn(&pdev->dev, "unable to set coherent mask to 64");
-		rc = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
-		if (rc)
-			goto dmafree;
+		goto dmafree;
 	}
 
 	dmadev->lldev = hidma_ll_init(dmadev->ddev.dev,
@@ -894,7 +900,6 @@ uninit:
 	if (msi)
 		hidma_free_msis(dmadev);
 
-	hidma_debug_uninit(dmadev);
 	hidma_ll_uninit(dmadev->lldev);
 dmafree:
 	if (dmadev)

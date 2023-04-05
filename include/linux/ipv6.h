@@ -360,8 +360,7 @@ static inline void inet_sk_copy_descendant(struct sock *sk_to,
 	__inet_sk_copy_descendant(sk_to, sk_from, ancestor_size);
 }
 
-#define __ipv6_only_sock(sk)	(sk->sk_ipv6only)
-#define ipv6_only_sock(sk)	(__ipv6_only_sock(sk))
+#define ipv6_only_sock(sk)	(sk->sk_ipv6only)
 #define ipv6_sk_rxinfo(sk)	((sk)->sk_family == PF_INET6 && \
 				 inet6_sk(sk)->rxopt.bits.rxinfo)
 
@@ -378,7 +377,6 @@ static inline int inet_v6_ipv6only(const struct sock *sk)
 	return ipv6_only_sock(sk);
 }
 #else
-#define __ipv6_only_sock(sk)	0
 #define ipv6_only_sock(sk)	0
 #define ipv6_sk_rxinfo(sk)	0
 

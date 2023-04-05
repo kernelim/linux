@@ -1156,7 +1156,7 @@ static int ar5523_get_wlan_mode(struct ar5523 *ar,
 		ar5523_info(ar, "STA not found!\n");
 		return WLAN_MODE_11b;
 	}
-	sta_rate_set = sta->supp_rates[ar->hw->conf.chandef.chan->band];
+	sta_rate_set = sta->deflink.supp_rates[ar->hw->conf.chandef.chan->band];
 
 	for (bit = 0; bit < band->n_bitrates; bit++) {
 		if (sta_rate_set & 1) {
@@ -1194,7 +1194,7 @@ static void ar5523_create_rateset(struct ar5523 *ar,
 		ar5523_info(ar, "STA not found. Cannot set rates\n");
 		sta_rate_set = bss_conf->basic_rates;
 	} else
-		sta_rate_set = sta->supp_rates[ar->hw->conf.chandef.chan->band];
+		sta_rate_set = sta->deflink.supp_rates[ar->hw->conf.chandef.chan->band];
 
 	ar5523_dbg(ar, "sta rate_set = %08x\n", sta_rate_set);
 
@@ -1252,14 +1252,14 @@ static int ar5523_create_connection(struct ar5523 *ar,
 				sizeof(create), 0);
 }
 
-static int ar5523_write_associd(struct ar5523 *ar,
-				struct ieee80211_bss_conf *bss)
+static int ar5523_write_associd(struct ar5523 *ar, struct ieee80211_vif *vif)
 {
+	struct ieee80211_bss_conf *bss = &vif->bss_conf;
 	struct ar5523_cmd_set_associd associd;
 
 	memset(&associd, 0, sizeof(associd));
 	associd.defaultrateix = cpu_to_be32(0);	/* XXX */
-	associd.associd = cpu_to_be32(bss->aid);
+	associd.associd = cpu_to_be32(vif->cfg.aid);
 	associd.timoffset = cpu_to_be32(0x3b);	/* XXX */
 	memcpy(associd.bssid, bss->bssid, ETH_ALEN);
 	return ar5523_cmd_write(ar, WDCMSG_WRITE_ASSOCID, &associd,
@@ -1269,7 +1269,7 @@ static int ar5523_write_associd(struct ar5523 *ar,
 static void ar5523_bss_info_changed(struct ieee80211_hw *hw,
 				    struct ieee80211_vif *vif,
 				    struct ieee80211_bss_conf *bss,
-				    u32 changed)
+				    u64 changed)
 {
 	struct ar5523 *ar = hw->priv;
 	int error;
@@ -1280,7 +1280,7 @@ static void ar5523_bss_info_changed(struct ieee80211_hw *hw,
 	if (!(changed & BSS_CHANGED_ASSOC))
 		goto out_unlock;
 
-	if (bss->assoc) {
+	if (vif->cfg.assoc) {
 		error = ar5523_create_connection(ar, vif, bss);
 		if (error) {
 			ar5523_err(ar, "could not create connection\n");
@@ -1293,7 +1293,7 @@ static void ar5523_bss_info_changed(struct ieee80211_hw *hw,
 			goto out_unlock;
 		}
 
-		error = ar5523_write_associd(ar, bss);
+		error = ar5523_write_associd(ar, vif);
 		if (error) {
 			ar5523_err(ar, "could not set association\n");
 			goto out_unlock;

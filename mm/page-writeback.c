@@ -849,7 +849,7 @@ static long long pos_ratio_polynom(unsigned long setpoint,
  *     ^ pos_ratio
  *     |
  *     |            |<===== global dirty control scope ======>|
- * 2.0 .............*
+ * 2.0  * * * * * * *
  *     |            .*
  *     |            . *
  *     |            .   *
@@ -1957,6 +1957,8 @@ bool wb_over_bg_thresh(struct bdi_writeback *wb)
 	struct dirty_throttle_control * const gdtc = &gdtc_stor;
 	struct dirty_throttle_control * const mdtc = mdtc_valid(&mdtc_stor) ?
 						     &mdtc_stor : NULL;
+	unsigned long reclaimable;
+	unsigned long thresh;
 
 	/*
 	 * Similar to balance_dirty_pages() but ignores pages being written
@@ -1969,8 +1971,13 @@ bool wb_over_bg_thresh(struct bdi_writeback *wb)
 	if (gdtc->dirty > gdtc->bg_thresh)
 		return true;
 
-	if (wb_stat(wb, WB_RECLAIMABLE) >
-	    wb_calc_thresh(gdtc->wb, gdtc->bg_thresh))
+	thresh = wb_calc_thresh(gdtc->wb, gdtc->bg_thresh);
+	if (thresh < 2 * wb_stat_error())
+		reclaimable = wb_stat_sum(wb, WB_RECLAIMABLE);
+	else
+		reclaimable = wb_stat(wb, WB_RECLAIMABLE);
+
+	if (reclaimable > thresh)
 		return true;
 
 	if (mdtc) {
@@ -1984,8 +1991,13 @@ bool wb_over_bg_thresh(struct bdi_writeback *wb)
 		if (mdtc->dirty > mdtc->bg_thresh)
 			return true;
 
-		if (wb_stat(wb, WB_RECLAIMABLE) >
-		    wb_calc_thresh(mdtc->wb, mdtc->bg_thresh))
+		thresh = wb_calc_thresh(mdtc->wb, mdtc->bg_thresh);
+		if (thresh < 2 * wb_stat_error())
+			reclaimable = wb_stat_sum(wb, WB_RECLAIMABLE);
+		else
+			reclaimable = wb_stat(wb, WB_RECLAIMABLE);
+
+		if (reclaimable > thresh)
 			return true;
 	}
 
@@ -2017,7 +2029,6 @@ int dirty_writeback_centisecs_handler(struct ctl_table *table, int write,
 	return ret;
 }
 
-#ifdef CONFIG_BLOCK
 void laptop_mode_timer_fn(struct timer_list *t)
 {
 	struct backing_dev_info *backing_dev_info =
@@ -2052,7 +2063,6 @@ void laptop_sync_completion(void)
 
 	rcu_read_unlock();
 }
-#endif
 
 /*
  * If ratelimit_pages is too high then we can get into dirty-data overload
@@ -2188,7 +2198,6 @@ int write_cache_pages(struct address_space *mapping,
 	int error;
 	struct pagevec pvec;
 	int nr_pages;
-	pgoff_t uninitialized_var(writeback_index);
 	pgoff_t index;
 	pgoff_t end;		/* Inclusive */
 	pgoff_t done_index;
@@ -2197,8 +2206,7 @@ int write_cache_pages(struct address_space *mapping,
 
 	pagevec_init(&pvec);
 	if (wbc->range_cyclic) {
-		writeback_index = mapping->writeback_index; /* prev offset */
-		index = writeback_index;
+		index = mapping->writeback_index; /* prev offset */
 		end = -1;
 	} else {
 		index = wbc->range_start >> PAGE_SHIFT;
@@ -2206,12 +2214,12 @@ int write_cache_pages(struct address_space *mapping,
 		if (wbc->range_start == 0 && wbc->range_end == LLONG_MAX)
 			range_whole = 1;
 	}
-	if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
-		tag = PAGECACHE_TAG_TOWRITE;
-	else
-		tag = PAGECACHE_TAG_DIRTY;
-	if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
+	if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages) {
 		tag_pages_for_writeback(mapping, index, end);
+		tag = PAGECACHE_TAG_TOWRITE;
+	} else {
+		tag = PAGECACHE_TAG_DIRTY;
+	}
 	done_index = index;
 	while (!done && (index <= end)) {
 		int i;
@@ -2470,7 +2478,7 @@ void account_page_dirtied(struct page *page, struct address_space *mapping)
 		inc_wb_stat(wb, WB_DIRTIED);
 		task_io_account_write(PAGE_SIZE);
 		current->nr_dirtied++;
-		this_cpu_inc(bdp_ratelimits);
+		__this_cpu_inc(bdp_ratelimits);
 
 		mem_cgroup_track_foreign_dirty(page, wb);
 	}
@@ -2539,8 +2547,8 @@ EXPORT_SYMBOL(__set_page_dirty_nobuffers);
 
 /*
  * Call this whenever redirtying a page, to de-account the dirty counters
- * (NR_DIRTIED, BDI_DIRTIED, tsk->nr_dirtied), so that they match the written
- * counters (NR_WRITTEN, BDI_WRITTEN) in long term. The mismatches will lead to
+ * (NR_DIRTIED, WB_DIRTIED, tsk->nr_dirtied), so that they match the written
+ * counters (NR_WRITTEN, WB_WRITTEN) in long term. The mismatches will lead to
  * systematic errors in balanced_dirty_ratelimit and the dirty pages position
  * control.
  */
@@ -2769,7 +2777,7 @@ static void wb_inode_writeback_end(struct bdi_writeback *wb)
 	 * that if multiple inodes end writeback at a similar time, they get
 	 * batched into one bandwidth update.
 	 */
-	queue_delayed_work(bdi_wq, wb->bw_dwork, BANDWIDTH_INTERVAL);
+	queue_delayed_work(bdi_wq, &wb->_rh->bw_dwork, BANDWIDTH_INTERVAL);
 }
 
 int test_clear_page_writeback(struct page *page)
@@ -2884,7 +2892,7 @@ EXPORT_SYMBOL(__test_set_page_writeback);
  */
 void wait_on_page_writeback(struct page *page)
 {
-	if (PageWriteback(page)) {
+	while (PageWriteback(page)) {
 		trace_wait_on_page_writeback(page, page_mapping(page));
 		wait_on_page_bit(page, PG_writeback);
 	}

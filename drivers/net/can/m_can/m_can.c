@@ -28,9 +28,6 @@
 #include <linux/can/dev.h>
 #include <linux/pinctrl/consumer.h>
 
-/* napi related */
-#define M_CAN_NAPI_WEIGHT	64
-
 /* message ram configuration data length */
 #define MRAM_CFG_LEN	8
 
@@ -1257,7 +1254,7 @@ static int m_can_dev_setup(struct platform_device *pdev, struct net_device *dev,
 	}
 
 	priv = netdev_priv(dev);
-	netif_napi_add(dev, &priv->napi, m_can_poll, M_CAN_NAPI_WEIGHT);
+	netif_napi_add(dev, &priv->napi, m_can_poll);
 
 	/* Shared properties of all M_CAN versions */
 	priv->version = m_can_version;

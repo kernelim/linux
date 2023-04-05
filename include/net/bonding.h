@@ -150,11 +150,6 @@ struct bond_params {
 	u8 ad_actor_system[ETH_ALEN + 2];
 };
 
-struct bond_parm_tbl {
-	char *modename;
-	int mode;
-};
-
 struct slave {
 	struct net_device *dev; /* first - useful for panic debug */
 	struct bonding *bond; /* our master */
@@ -194,7 +189,7 @@ static inline struct slave *to_slave(struct kobject *kobj)
 struct bond_up_slave {
 	unsigned int	count;
 	struct rcu_head rcu;
-	struct slave	*arr[0];
+	struct slave	*arr[];
 };
 
 /*
@@ -702,20 +697,6 @@ static inline struct slave *bond_slave_has_mac(struct bonding *bond,
 }
 
 /* Caller must hold rcu_read_lock() for read */
-static inline struct slave *bond_slave_has_mac_rcu(struct bonding *bond,
-					       const u8 *mac)
-{
-	struct list_head *iter;
-	struct slave *tmp;
-
-	bond_for_each_slave_rcu(bond, tmp, iter)
-		if (ether_addr_equal_64bits(mac, tmp->dev->dev_addr))
-			return tmp;
-
-	return NULL;
-}
-
-/* Caller must hold rcu_read_lock() for read */
 static inline bool bond_slave_has_mac_rx(struct bonding *bond, const u8 *mac)
 {
 	struct list_head *iter;
@@ -754,13 +735,6 @@ static inline int bond_get_targets_ip(__be32 *targets, __be32 ip)
 
 /* exported from bond_main.c */
 extern unsigned int bond_net_id;
-extern const struct bond_parm_tbl bond_lacp_tbl[];
-extern const struct bond_parm_tbl xmit_hashtype_tbl[];
-extern const struct bond_parm_tbl arp_validate_tbl[];
-extern const struct bond_parm_tbl arp_all_targets_tbl[];
-extern const struct bond_parm_tbl fail_over_mac_tbl[];
-extern const struct bond_parm_tbl pri_reselect_tbl[];
-extern struct bond_parm_tbl ad_select_tbl[];
 
 /* exported from bond_netlink.c */
 extern struct rtnl_link_ops bond_link_ops;
@@ -768,9 +742,12 @@ extern struct rtnl_link_ops bond_link_ops;
 /* exported from bond_sysfs_slave.c */
 extern const struct sysfs_ops slave_sysfs_ops;
 
+/* exported from bond_3ad.c */
+extern const u8 lacpdu_mcast_addr[];
+
 static inline netdev_tx_t bond_tx_drop(struct net_device *dev, struct sk_buff *skb)
 {
-	atomic_long_inc(&dev->tx_dropped);
+	dev_core_stats_tx_dropped_inc(dev);
 	dev_kfree_skb_any(skb);
 	return NET_XMIT_DROP;
 }

@@ -475,7 +475,8 @@ static int crypto_ccm_create_common(struct crypto_template *tmpl,
 		return -EINVAL;
 
 	mac_alg = crypto_find_alg(mac_name, &crypto_ahash_type,
-				  CRYPTO_ALG_TYPE_HASH,
+				  CRYPTO_ALG_TYPE_HASH |
+				  CRYPTO_ALG_FIPS_INTERNAL,
 				  CRYPTO_ALG_TYPE_AHASH_MASK |
 				  CRYPTO_ALG_ASYNC);
 	if (IS_ERR(mac_alg))

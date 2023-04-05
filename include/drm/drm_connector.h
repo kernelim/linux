@@ -38,6 +38,7 @@ struct drm_modeset_acquire_ctx;
 struct drm_device;
 struct drm_crtc;
 struct drm_encoder;
+struct drm_panel;
 struct drm_property;
 struct drm_property_blob;
 struct drm_printer;
@@ -318,8 +319,8 @@ enum drm_panel_orientation {
  *             EDID's detailed monitor range
  */
 struct drm_monitor_range_info {
-	u8 min_vfreq;
-	u8 max_vfreq;
+	u16 min_vfreq;
+	u16 max_vfreq;
 };
 
 /**
@@ -634,6 +635,12 @@ struct drm_display_info {
 	 * @mso_pixel_overlap: eDP MSO segment pixel overlap, 0-8 pixels.
 	 */
 	u8 mso_pixel_overlap;
+
+	/**
+	 * @max_dsc_bpp: Maximum DSC target bitrate, if it is set to 0 the
+	 * monitor's default value is used instead.
+	 */
+	u32 max_dsc_bpp;
 };
 
 int drm_display_info_set_bus_formats(struct drm_display_info *info,
@@ -1526,7 +1533,11 @@ struct drm_connector {
 	struct drm_cmdline_mode cmdline_mode;
 	/** @force: a DRM_FORCE_<foo> state for forced mode sets */
 	enum drm_connector_force force;
-	/** @override_edid: has the EDID been overwritten through debugfs for testing? */
+	/**
+	 * @override_edid: has the EDID been overwritten through debugfs for
+	 * testing? Do not modify outside of drm_edid_override_set() and
+	 * drm_edid_override_reset().
+	 */
 	bool override_edid;
 	/** @epoch_counter: used to detect any other changes in connector, besides status */
 	u64 epoch_counter;
@@ -1784,9 +1795,6 @@ int drm_mode_create_aspect_ratio_property(struct drm_device *dev);
 int drm_mode_create_hdmi_colorspace_property(struct drm_connector *connector);
 int drm_mode_create_dp_colorspace_property(struct drm_connector *connector);
 int drm_mode_create_content_type_property(struct drm_device *dev);
-void drm_hdmi_avi_infoframe_content_type(struct hdmi_avi_infoframe *frame,
-					 const struct drm_connector_state *conn_state);
-
 int drm_mode_create_suggested_offset_properties(struct drm_device *dev);
 
 int drm_connector_set_path_property(struct drm_connector *connector,
@@ -1805,6 +1813,9 @@ int drm_connector_set_panel_orientation_with_quirk(
 	struct drm_connector *connector,
 	enum drm_panel_orientation panel_orientation,
 	int width, int height);
+int drm_connector_set_orientation_from_panel(
+	struct drm_connector *connector,
+	struct drm_panel *panel);
 int drm_connector_attach_max_bpc_property(struct drm_connector *connector,
 					  int min, int max);
 void drm_connector_create_privacy_screen_properties(struct drm_connector *conn);

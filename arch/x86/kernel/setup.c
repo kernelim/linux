@@ -139,7 +139,7 @@ RESERVE_BRK(dmi_alloc, 65536);
 #endif
 
 
-static __initdata unsigned long _brk_start = (unsigned long)__brk_base;
+unsigned long _brk_start = (unsigned long)__brk_base;
 unsigned long _brk_end = (unsigned long)__brk_base;
 
 struct boot_params boot_params;
@@ -558,7 +558,7 @@ static void __init reserve_crashkernel(void)
 	 * When SME/SEV is active, it will always required an extra SWIOTLB
 	 * region.
 	 */
-	if (mem_encrypt_active())
+	if (cc_platform_has(CC_ATTR_MEM_ENCRYPT))
 		mem_enc_req = min(ALIGN(swiotlb_size_or_default(), SZ_1M), 64UL << 20);
 	else
 		mem_enc_req = 0;

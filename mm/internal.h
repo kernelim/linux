@@ -356,7 +356,7 @@ static inline bool is_data_mapping(vm_flags_t flags)
 
 /* mm/util.c */
 void __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
-		struct vm_area_struct *prev, struct rb_node *rb_parent);
+		struct vm_area_struct *prev);
 
 #ifdef CONFIG_MMU
 extern long populate_vma_page_range(struct vm_area_struct *vma,
@@ -670,5 +670,7 @@ struct migration_target_control {
 };
 
 DECLARE_PER_CPU(struct per_cpu_nodestat, boot_nodestats);
+
+void free_zone_device_page(struct page *page);
 
 #endif	/* __MM_INTERNAL_H */

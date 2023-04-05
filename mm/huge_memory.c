@@ -317,24 +317,6 @@ static ssize_t hpage_pmd_size_show(struct kobject *kobj,
 static struct kobj_attribute hpage_pmd_size_attr =
 	__ATTR_RO(hpage_pmd_size);
 
-#ifdef CONFIG_DEBUG_VM
-static ssize_t debug_cow_show(struct kobject *kobj,
-				struct kobj_attribute *attr, char *buf)
-{
-	return single_hugepage_flag_show(kobj, attr, buf,
-				TRANSPARENT_HUGEPAGE_DEBUG_COW_FLAG);
-}
-static ssize_t debug_cow_store(struct kobject *kobj,
-			       struct kobj_attribute *attr,
-			       const char *buf, size_t count)
-{
-	return single_hugepage_flag_store(kobj, attr, buf, count,
-				 TRANSPARENT_HUGEPAGE_DEBUG_COW_FLAG);
-}
-static struct kobj_attribute debug_cow_attr =
-	__ATTR(debug_cow, 0644, debug_cow_show, debug_cow_store);
-#endif /* CONFIG_DEBUG_VM */
-
 static struct attribute *hugepage_attr[] = {
 	&enabled_attr.attr,
 	&defrag_attr.attr,
@@ -342,9 +324,6 @@ static struct attribute *hugepage_attr[] = {
 	&hpage_pmd_size_attr.attr,
 #ifdef CONFIG_SHMEM
 	&shmem_enabled_attr.attr,
-#endif
-#ifdef CONFIG_DEBUG_VM
-	&debug_cow_attr.attr,
 #endif
 	NULL,
 };
@@ -1747,7 +1726,7 @@ int zap_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 
 			VM_BUG_ON(!is_pmd_migration_entry(orig_pmd));
 			entry = pmd_to_swp_entry(orig_pmd);
-			page = pfn_to_page(swp_offset(entry));
+			page = pfn_swap_entry_to_page(entry);
 			flush_needed = 0;
 		} else
 			WARN_ONCE(1, "Non present huge pmd without pmd migration enabled!");
@@ -1982,7 +1961,6 @@ spinlock_t *__pud_trans_huge_lock(pud_t *pud, struct vm_area_struct *vma)
 int zap_huge_pud(struct mmu_gather *tlb, struct vm_area_struct *vma,
 		 pud_t *pud, unsigned long addr)
 {
-	pud_t orig_pud;
 	spinlock_t *ptl;
 
 	ptl = __pud_trans_huge_lock(pud, vma);
@@ -1994,8 +1972,7 @@ int zap_huge_pud(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	 * pgtable_trans_huge_withdraw after finishing pudp related
 	 * operations.
 	 */
-	orig_pud = pudp_huge_get_and_clear_full(tlb->mm, addr, pud,
-			tlb->fullmm);
+	pudp_huge_get_and_clear_full(tlb->mm, addr, pud, tlb->fullmm);
 	tlb_remove_pud_tlb_entry(tlb, pud, addr);
 	if (vma_is_special_huge(vma)) {
 		spin_unlock(ptl);
@@ -2112,7 +2089,7 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 			swp_entry_t entry;
 
 			entry = pmd_to_swp_entry(old_pmd);
-			page = migration_entry_to_page(entry);
+			page = pfn_swap_entry_to_page(entry);
 		} else {
 			page = pmd_page(old_pmd);
 			if (!PageDirty(page) && pmd_dirty(old_pmd))
@@ -2166,7 +2143,7 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		swp_entry_t entry;
 
 		entry = pmd_to_swp_entry(old_pmd);
-		page = pfn_to_page(swp_offset(entry));
+		page = pfn_swap_entry_to_page(entry);
 		write = is_write_migration_entry(entry);
 		young = false;
 		soft_dirty = pmd_swp_soft_dirty(old_pmd);

@@ -355,13 +355,13 @@ static int vfio_pci_enable(struct vfio_pci_device *vdev)
 		pci_write_config_word(pdev, PCI_COMMAND, cmd);
 	}
 
+	ret = vfio_pci_zdev_open_device(vdev);
+	if (ret)
+		goto out_free_state;
+
 	ret = vfio_config_init(vdev);
-	if (ret) {
-		kfree(vdev->pci_saved_state);
-		vdev->pci_saved_state = NULL;
-		pci_disable_device(pdev);
-		return ret;
-	}
+	if (ret)
+		goto out_free_zdev;
 
 	msix_pos = pdev->msix_cap;
 	if (msix_pos) {
@@ -416,6 +416,14 @@ static int vfio_pci_enable(struct vfio_pci_device *vdev)
 disable_exit:
 	vfio_pci_disable(vdev);
 	return ret;
+
+out_free_zdev:
+	vfio_pci_zdev_close_device(vdev);
+out_free_state:
+	kfree(vdev->pci_saved_state);
+	vdev->pci_saved_state = NULL;
+	pci_disable_device(pdev);
+	return ret;
 }
 
 static void vfio_pci_disable(struct vfio_pci_device *vdev)
@@ -469,6 +477,8 @@ static void vfio_pci_disable(struct vfio_pci_device *vdev)
 	}
 
 	vdev->needs_reset = true;
+
+	vfio_pci_zdev_close_device(vdev);
 
 	/*
 	 * If we have saved state, restore it.  If we can reset the device,
@@ -809,6 +819,7 @@ static long vfio_pci_ioctl(void *device_data,
 		struct vfio_device_info info;
 		struct vfio_info_cap caps = { .buf = NULL, .size = 0 };
 		unsigned long capsz;
+		int ret;
 
 		minsz = offsetofend(struct vfio_device_info, num_irqs);
 
@@ -834,13 +845,10 @@ static long vfio_pci_ioctl(void *device_data,
 		info.num_regions = VFIO_PCI_NUM_REGIONS + vdev->num_regions;
 		info.num_irqs = VFIO_PCI_NUM_IRQS;
 
-		if (IS_ENABLED(CONFIG_VFIO_PCI_ZDEV)) {
-			int ret = vfio_pci_info_zdev_add_caps(vdev, &caps);
-
-			if (ret && ret != -ENODEV) {
-				pci_warn(vdev->pdev, "Failed to setup zPCI info capabilities\n");
-				return ret;
-			}
+		ret = vfio_pci_info_zdev_add_caps(vdev, &caps);
+		if (ret && ret != -ENODEV) {
+			pci_warn(vdev->pdev, "Failed to setup zPCI info capabilities\n");
+			return ret;
 		}
 
 		if (caps.size) {

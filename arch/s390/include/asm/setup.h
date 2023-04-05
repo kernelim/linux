@@ -13,8 +13,6 @@
 #define EP_OFFSET		0x10008
 #define EP_STRING		"S390EP"
 #define PARMAREA		0x10400
-#define EARLY_SCCB_OFFSET	0x11000
-#define HEAD_END		0x12000
 
 /*
  * Machine features detected in early.c
@@ -55,7 +53,9 @@
 #define OLDMEM_BASE_OFFSET	0x10418
 #define OLDMEM_SIZE_OFFSET	0x10420
 #define COMMAND_LINE_OFFSET	0x10480
+#define HEAD_END	COMMAND_LINE_OFFSET + COMMAND_LINE_SIZE
 
+#define LEGACY_COMMAND_LINE_SIZE	896
 #ifndef __ASSEMBLY__
 
 #include <asm/lowcore.h>
@@ -74,8 +74,10 @@ struct parmarea {
 	unsigned long initrd_size;			/* 0x10410 */
 	unsigned long oldmem_base;			/* 0x10418 */
 	unsigned long oldmem_size;			/* 0x10420 */
-	char pad1[0x10480 - 0x10428];			/* 0x10428 - 0x10480 */
-	char command_line[ARCH_COMMAND_LINE_SIZE];	/* 0x10480 */
+	unsigned long kernel_version;			/* 0x10428 */
+	unsigned long max_command_line_size;		/* 0x10430 */
+	char pad1[0x10480 - 0x10438];			/* 0x10438 - 0x10480 */
+	char command_line[COMMAND_LINE_SIZE];		/* 0x10480 */
 };
 
 extern unsigned int zlib_dfltcc_support;
@@ -91,6 +93,9 @@ extern unsigned long memory_end;
 extern unsigned long vmalloc_size;
 extern unsigned long max_physmem_end;
 extern unsigned long __swsusp_reset_dma;
+
+/* The Write Back bit position in the physaddr is given by the SLPC PCI */
+extern unsigned long mio_wb_bit_mask;
 
 #define MACHINE_IS_VM		(S390_lowcore.machine_flags & MACHINE_FLAG_VM)
 #define MACHINE_IS_KVM		(S390_lowcore.machine_flags & MACHINE_FLAG_KVM)

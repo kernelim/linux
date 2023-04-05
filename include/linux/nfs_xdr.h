@@ -745,8 +745,7 @@ struct nfs_auth_info {
  */
 struct nfs_entry {
 	__u64			ino;
-	__u64			cookie,
-				prev_cookie;
+	__u64			cookie;
 	const char *		name;
 	unsigned int		len;
 	int			eof;
@@ -1720,7 +1719,7 @@ struct nfs_rpc_ops {
 			    struct nfs_fh *, struct nfs_fattr *);
 	int	(*lookupp) (struct inode *, struct nfs_fh *,
 			    struct nfs_fattr *);
-	int	(*access)  (struct inode *, struct nfs_access_entry *);
+	int	(*access)  (struct inode *, struct nfs_access_entry *, const struct cred *);
 	int	(*readlink)(struct inode *, struct page *, unsigned int,
 			    unsigned int);
 	int	(*create)  (struct inode *, struct dentry *,

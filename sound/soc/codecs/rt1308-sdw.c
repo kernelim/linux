@@ -608,13 +608,26 @@ static const struct sdw_slave_ops rt1308_slave_ops = {
 	.bus_config = rt1308_bus_config,
 };
 
+static int rt1308_sdw_component_probe(struct snd_soc_component *component)
+{
+	int ret;
+
+	ret = pm_runtime_resume(component->dev);
+	if (ret < 0 && ret != -EACCES)
+		return ret;
+
+	return 0;
+}
+
 static const struct snd_soc_component_driver soc_component_sdw_rt1308 = {
+	.probe = rt1308_sdw_component_probe,
 	.controls = rt1308_snd_controls,
 	.num_controls = ARRAY_SIZE(rt1308_snd_controls),
 	.dapm_widgets = rt1308_dapm_widgets,
 	.num_dapm_widgets = ARRAY_SIZE(rt1308_dapm_widgets),
 	.dapm_routes = rt1308_dapm_routes,
 	.num_dapm_routes = ARRAY_SIZE(rt1308_dapm_routes),
+	.endianness = 1,
 };
 
 static const struct snd_soc_dai_ops rt1308_aif_dai_ops = {

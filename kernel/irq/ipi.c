@@ -24,7 +24,7 @@ int irq_reserve_ipi(struct irq_domain *domain,
 			     const struct cpumask *dest)
 {
 	unsigned int nr_irqs, offset;
-	struct irq_data *data;
+	struct irq_desc *desc;
 	int virq, i;
 
 	if (!domain ||!irq_domain_is_ipi(domain)) {
@@ -90,9 +90,9 @@ int irq_reserve_ipi(struct irq_domain *domain,
 	}
 
 	for (i = 0; i < nr_irqs; i++) {
-		data = irq_get_irq_data(virq + i);
-		cpumask_copy(data->common->affinity, dest);
-		data->common->ipi_offset = offset;
+		desc = irq_to_desc(virq + i);
+		cpumask_copy(desc->irq_common_data.affinity, dest);
+		desc->ipi_offset = offset;
 		irq_set_status_flags(virq + i, IRQ_NO_BALANCING);
 	}
 	return virq;
@@ -114,7 +114,8 @@ free_descs:
  */
 int irq_destroy_ipi(unsigned int irq, const struct cpumask *dest)
 {
-	struct irq_data *data = irq_get_irq_data(irq);
+	struct irq_desc *desc = irq_to_desc(irq);
+	struct irq_data *data = desc ? &desc->irq_data : NULL;
 	struct cpumask *ipimask = data ? irq_data_get_affinity_mask(data) : NULL;
 	struct irq_domain *domain;
 	unsigned int nr_irqs;
@@ -139,7 +140,7 @@ int irq_destroy_ipi(unsigned int irq, const struct cpumask *dest)
 		return -EINVAL;
 
 	if (irq_domain_is_ipi_per_cpu(domain)) {
-		irq = irq + cpumask_first(dest) - data->common->ipi_offset;
+		irq = irq + cpumask_first(dest) - desc->ipi_offset;
 		nr_irqs = cpumask_weight(dest);
 	} else {
 		nr_irqs = 1;
@@ -161,7 +162,8 @@ int irq_destroy_ipi(unsigned int irq, const struct cpumask *dest)
  */
 irq_hw_number_t ipi_get_hwirq(unsigned int irq, unsigned int cpu)
 {
-	struct irq_data *data = irq_get_irq_data(irq);
+	struct irq_desc *desc = irq_to_desc(irq);
+	struct irq_data *data = desc ? &desc->irq_data : NULL;
 	struct cpumask *ipimask = data ? irq_data_get_affinity_mask(data) : NULL;
 
 	if (!data || !ipimask || cpu >= nr_cpu_ids)
@@ -177,7 +179,7 @@ irq_hw_number_t ipi_get_hwirq(unsigned int irq, unsigned int cpu)
 	 * needs to take care of the cpu destinations.
 	 */
 	if (irq_domain_is_ipi_per_cpu(data->domain))
-		data = irq_get_irq_data(irq + cpu - data->common->ipi_offset);
+		data = irq_get_irq_data(irq + cpu - desc->ipi_offset);
 
 	return data ? irqd_to_hwirq(data) : INVALID_HWIRQ;
 }
@@ -239,9 +241,9 @@ int __ipi_send_single(struct irq_desc *desc, unsigned int cpu)
 
 	/* FIXME: Store this information in irqdata flags */
 	if (irq_domain_is_ipi_per_cpu(data->domain) &&
-	    cpu != data->common->ipi_offset) {
+	    cpu != desc->ipi_offset) {
 		/* use the correct data for that cpu */
-		unsigned irq = data->irq + cpu - data->common->ipi_offset;
+		unsigned irq = data->irq + cpu - desc->ipi_offset;
 
 		data = irq_get_irq_data(irq);
 	}
@@ -284,7 +286,7 @@ int __ipi_send_mask(struct irq_desc *desc, const struct cpumask *dest)
 		unsigned int base = data->irq;
 
 		for_each_cpu(cpu, dest) {
-			unsigned irq = base + cpu - data->common->ipi_offset;
+			unsigned irq = base + cpu - desc->ipi_offset;
 
 			data = irq_get_irq_data(irq);
 			chip->ipi_send_single(data, cpu);

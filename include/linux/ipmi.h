@@ -80,6 +80,11 @@ struct ipmi_recv_msg {
 	RH_KABI_AUX_EMBED(ipmi_recv_msg)
 };
 
+#define INIT_IPMI_RECV_MSG(done_handler) \
+{					\
+	.done = done_handler		\
+}
+
 /* Allocate and free the receive message. */
 void ipmi_free_recv_msg(struct ipmi_recv_msg *msg);
 

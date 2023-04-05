@@ -134,7 +134,7 @@ struct r5l_log {
 					 * reclaimed.  if it's 0, reclaim spaces
 					 * used by io_units which are in
 					 * IO_UNIT_STRIPE_END state (eg, reclaim
-					 * dones't wait for specific io_unit
+					 * doesn't wait for specific io_unit
 					 * switching to IO_UNIT_STRIPE_END
 					 * state) */
 	wait_queue_head_t iounit_wait;
@@ -1336,9 +1336,9 @@ static void r5l_write_super_and_discard_space(struct r5l_log *log,
 	 * superblock is updated to new log tail. Updating superblock (either
 	 * directly call md_update_sb() or depend on md thread) must hold
 	 * reconfig mutex. On the other hand, raid5_quiesce is called with
-	 * reconfig_mutex hold. The first step of raid5_quiesce() is waitting
-	 * for all IO finish, hence waitting for reclaim thread, while reclaim
-	 * thread is calling this function and waitting for reconfig mutex. So
+	 * reconfig_mutex hold. The first step of raid5_quiesce() is waiting
+	 * for all IO finish, hence waiting for reclaim thread, while reclaim
+	 * thread is calling this function and waiting for reconfig mutex. So
 	 * there is a deadlock. We workaround this issue with a trylock.
 	 * FIXME: we could miss discard if we can't take reconfig mutex
 	 */
@@ -1599,18 +1599,13 @@ void r5l_quiesce(struct r5l_log *log, int quiesce)
 
 bool r5l_log_disk_error(struct r5conf *conf)
 {
-	struct r5l_log *log;
-	bool ret;
-	/* don't allow write if journal disk is missing */
-	rcu_read_lock();
-	log = rcu_dereference(conf->log);
+	struct r5l_log *log = conf->log;
 
+	/* don't allow write if journal disk is missing */
 	if (!log)
-		ret = test_bit(MD_HAS_JOURNAL, &conf->mddev->flags);
+		return test_bit(MD_HAS_JOURNAL, &conf->mddev->flags);
 	else
-		ret = test_bit(Faulty, &log->rdev->flags);
-	rcu_read_unlock();
-	return ret;
+		return test_bit(Faulty, &log->rdev->flags);
 }
 
 #define R5L_RECOVERY_PAGE_POOL_SIZE 256
@@ -1940,7 +1935,8 @@ r5c_recovery_alloc_stripe(
 {
 	struct stripe_head *sh;
 
-	sh = raid5_get_active_stripe(conf, stripe_sect, 0, noblock, 0);
+	sh = raid5_get_active_stripe(conf, NULL, stripe_sect,
+				     noblock ? R5_GAS_NOBLOCK : 0);
 	if (!sh)
 		return NULL;  /* no more stripe available */
 
@@ -2546,12 +2542,13 @@ static ssize_t r5c_journal_mode_show(struct mddev *mddev, char *page)
 	struct r5conf *conf;
 	int ret;
 
-	spin_lock(&mddev->lock);
+	ret = mddev_lock(mddev);
+	if (ret)
+		return ret;
+
 	conf = mddev->private;
-	if (!conf || !conf->log) {
-		spin_unlock(&mddev->lock);
-		return 0;
-	}
+	if (!conf || !conf->log)
+		goto out_unlock;
 
 	switch (conf->log->r5c_journal_mode) {
 	case R5C_JOURNAL_MODE_WRITE_THROUGH:
@@ -2569,7 +2566,9 @@ static ssize_t r5c_journal_mode_show(struct mddev *mddev, char *page)
 	default:
 		ret = 0;
 	}
-	spin_unlock(&mddev->lock);
+
+out_unlock:
+	mddev_unlock(mddev);
 	return ret;
 }
 
@@ -2651,7 +2650,7 @@ int r5c_try_caching_write(struct r5conf *conf,
 	int i;
 	struct r5dev *dev;
 	int to_cache = 0;
-	void **pslot;
+	void __rcu **pslot;
 	sector_t tree_index;
 	int ret;
 	uintptr_t refcount;
@@ -2818,7 +2817,7 @@ void r5c_finish_stripe_write_out(struct r5conf *conf,
 	int i;
 	int do_wakeup = 0;
 	sector_t tree_index;
-	void **pslot;
+	void __rcu **pslot;
 	uintptr_t refcount;
 
 	if (!log || !test_bit(R5_InJournal, &sh->dev[sh->pd_idx].flags))
@@ -3159,7 +3158,7 @@ int r5l_init_log(struct r5conf *conf, struct md_rdev *rdev)
 	spin_lock_init(&log->stripe_in_journal_lock);
 	atomic_set(&log->stripe_in_journal_count, 0);
 
-	rcu_assign_pointer(conf->log, log);
+	conf->log = log;
 
 	set_bit(MD_HAS_JOURNAL, &conf->mddev->flags);
 	return 0;
@@ -3181,13 +3180,13 @@ void r5l_exit_log(struct r5conf *conf)
 {
 	struct r5l_log *log = conf->log;
 
-	conf->log = NULL;
-	synchronize_rcu();
-
 	/* Ensure disable_writeback_work wakes up and exits */
 	wake_up(&conf->mddev->sb_wait);
 	flush_work(&log->disable_writeback_work);
 	md_unregister_thread(&log->reclaim_thread);
+
+	conf->log = NULL;
+
 	mempool_exit(&log->meta_pool);
 	bioset_exit(&log->bs);
 	mempool_exit(&log->io_pool);

@@ -430,7 +430,7 @@ static struct srp_fr_pool *srp_create_fr_pool(struct ib_device *device,
 	spin_lock_init(&pool->lock);
 	INIT_LIST_HEAD(&pool->free_list);
 
-	if (device->attrs.device_cap_flags & IB_DEVICE_SG_GAPS_REG)
+	if (device->attrs.kernel_cap_flags & IBK_SG_GAPS_REG)
 		mr_type = IB_MR_TYPE_SG_GAPS;
 	else
 		mr_type = IB_MR_TYPE_MEM_REG;
@@ -2166,6 +2166,7 @@ static void srp_handle_qp_err(struct ib_cq *cq, struct ib_wc *wc,
 
 static int srp_queuecommand(struct Scsi_Host *shost, struct scsi_cmnd *scmnd)
 {
+	struct request *rq = scsi_cmd_to_rq(scmnd);
 	struct srp_target_port *target = host_to_target(shost);
 	struct srp_rdma_ch *ch;
 	struct srp_request *req;
@@ -2181,8 +2182,8 @@ static int srp_queuecommand(struct Scsi_Host *shost, struct scsi_cmnd *scmnd)
 	if (unlikely(scmnd->result))
 		goto err;
 
-	WARN_ON_ONCE(scmnd->request->tag < 0);
-	tag = blk_mq_unique_tag(scmnd->request);
+	WARN_ON_ONCE(rq->tag < 0);
+	tag = blk_mq_unique_tag(rq);
 	ch = &target->ch[blk_mq_unique_tag_to_hwq(tag)];
 	idx = blk_mq_unique_tag_to_tag(tag);
 	WARN_ONCE(idx >= target->req_ring_size, "%s: tag %#x: idx %d >= %d\n",
@@ -2803,7 +2804,7 @@ static int srp_send_tsk_mgmt(struct srp_rdma_ch *ch, u64 req_tag, u64 lun,
 static int srp_abort(struct scsi_cmnd *scmnd)
 {
 	struct srp_target_port *target = host_to_target(scmnd->device->host);
-	struct srp_request *req = (struct srp_request *) scmnd->host_scribble;
+	struct srp_request *req = scsi_cmd_priv(scmnd);
 	u32 tag;
 	u16 ch_idx;
 	struct srp_rdma_ch *ch;
@@ -2811,9 +2812,7 @@ static int srp_abort(struct scsi_cmnd *scmnd)
 
 	shost_printk(KERN_ERR, target->scsi_host, "SRP abort called\n");
 
-	if (!req)
-		return SUCCESS;
-	tag = blk_mq_unique_tag(scmnd->request);
+	tag = blk_mq_unique_tag(scsi_cmd_to_rq(scmnd));
 	ch_idx = blk_mq_unique_tag_to_hwq(tag);
 	if (WARN_ON_ONCE(ch_idx >= target->ch_count))
 		return SUCCESS;
@@ -2882,7 +2881,7 @@ static int srp_slave_alloc(struct scsi_device *sdev)
 	struct srp_device *srp_dev = target->srp_host->srp_dev;
 	struct ib_device *ibdev = srp_dev->dev;
 
-	if (!(ibdev->attrs.device_cap_flags & IB_DEVICE_SG_GAPS_REG))
+	if (!(ibdev->attrs.kernel_cap_flags & IBK_SG_GAPS_REG))
 		blk_queue_virt_boundary(sdev->request_queue,
 					~srp_dev->mr_page_mask);
 
@@ -3729,8 +3728,8 @@ static ssize_t add_target_store(struct device *dev,
 	}
 
 	if (srp_dev->use_fast_reg) {
-		bool gaps_reg = (ibdev->attrs.device_cap_flags &
-				 IB_DEVICE_SG_GAPS_REG);
+		bool gaps_reg = ibdev->attrs.kernel_cap_flags &
+				 IBK_SG_GAPS_REG;
 
 		max_sectors_per_mr = srp_dev->max_pages_per_mr <<
 				  (ilog2(srp_dev->mr_page_size) - 9);

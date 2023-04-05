@@ -115,4 +115,15 @@ void can_init_proc(struct net *net);
 void can_remove_proc(struct net *net);
 void can_stat_update(struct timer_list *t);
 
+static inline struct can_dev_rcv_lists *can_get_ml_priv(struct net_device *dev)
+{
+	return netdev_get_ml_priv(dev, ML_PRIV_CAN);
+}
+
+static inline void can_set_ml_priv(struct net_device *dev,
+				   struct can_dev_rcv_lists *ml_priv)
+{
+	netdev_set_ml_priv(dev, ml_priv, ML_PRIV_CAN);
+}
+
 #endif /* AF_CAN_H */

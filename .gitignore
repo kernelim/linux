@@ -133,6 +133,9 @@ all.config
 # Kdevelop4
 *.kdev4
 
+# Clang's compilation database file
+/compile_commands.json
+
 #
 # Red Hat
 #

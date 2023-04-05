@@ -1677,7 +1677,7 @@ static int macb_start_xmit(struct sk_buff *skb, struct net_device *dev)
 			/* only queue eth + ip headers separately for UDP */
 			hdrlen = skb_transport_offset(skb);
 		else
-			hdrlen = skb_transport_offset(skb) + tcp_hdrlen(skb);
+			hdrlen = skb_tcp_all_headers(skb);
 		if (skb_headlen(skb) < hdrlen) {
 			netdev_err(bp->dev, "Error - LSO headers fragmented!!!\n");
 			/* if this is required, would need to copy to single buffer */
@@ -3298,7 +3298,7 @@ static int macb_init(struct platform_device *pdev)
 
 		queue = &bp->queues[q];
 		queue->bp = bp;
-		netif_napi_add(dev, &queue->napi, macb_poll, 64);
+		netif_napi_add(dev, &queue->napi, macb_poll);
 		if (hw_q) {
 			queue->ISR  = GEM_ISR(hw_q - 1);
 			queue->IER  = GEM_IER(hw_q - 1);

@@ -29,6 +29,7 @@
 #include <linux/pagemap.h>
 #include <linux/file.h>
 #include <linux/mm.h>
+#include <linux/random.h>
 #include <linux/sched/signal.h>
 #include <linux/export.h>
 #include <linux/swap.h>
@@ -2225,7 +2226,7 @@ static struct inode *shmem_get_inode(struct super_block *sb, const struct inode 
 		inode_init_owner(inode, dir, mode);
 		inode->i_blocks = 0;
 		inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
-		inode->i_generation = get_seconds();
+		inode->i_generation = prandom_u32();
 		info = SHMEM_I(inode);
 		memset(info, 0, (char *)inode - (char *)info);
 		spin_lock_init(&info->lock);
@@ -3384,8 +3385,6 @@ static const struct constant_table shmem_param_enums_huge[] = {
 	{"always",	SHMEM_HUGE_ALWAYS },
 	{"within_size",	SHMEM_HUGE_WITHIN_SIZE },
 	{"advise",	SHMEM_HUGE_ADVISE },
-	{"deny",	SHMEM_HUGE_DENY },
-	{"force",	SHMEM_HUGE_FORCE },
 	{}
 };
 
@@ -4187,7 +4186,7 @@ EXPORT_SYMBOL_GPL(shmem_file_setup_with_mnt);
 
 /**
  * shmem_zero_setup - setup a shared anonymous mapping
- * @vma: the vma to be mmapped is prepared by do_mmap_pgoff
+ * @vma: the vma to be mmapped is prepared by do_mmap
  */
 int shmem_zero_setup(struct vm_area_struct *vma)
 {

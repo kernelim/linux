@@ -106,18 +106,47 @@ void bnxt_tx_int_xdp(struct bnxt *bp, struct bnxt_napi *bnapi, int nr_pkts)
 	}
 }
 
+bool bnxt_xdp_attached(struct bnxt *bp, struct bnxt_rx_ring_info *rxr)
+{
+	struct bpf_prog *xdp_prog = READ_ONCE(rxr->xdp_prog);
+
+	return !!xdp_prog;
+}
+
+void bnxt_xdp_buff_init(struct bnxt *bp, struct bnxt_rx_ring_info *rxr,
+			u16 cons, u8 *data_ptr, unsigned int len,
+			struct xdp_buff *xdp)
+{
+	struct bnxt_sw_rx_bd *rx_buf;
+	u32 buflen = PAGE_SIZE;
+	struct pci_dev *pdev;
+	dma_addr_t mapping;
+	u32 offset;
+
+	pdev = bp->pdev;
+	rx_buf = &rxr->rx_buf_ring[cons];
+	offset = bp->rx_offset;
+
+	mapping = rx_buf->mapping - bp->rx_dma_offset;
+	dma_sync_single_for_cpu(&pdev->dev, mapping + offset, len, bp->rx_dir);
+
+	xdp_init_buff(xdp, buflen, &rxr->xdp_rxq);
+	xdp_prepare_buff(xdp, data_ptr - offset, offset, len, false);
+
+}
+
 /* returns the following:
  * true    - packet consumed by XDP and new buffer is allocated.
  * false   - packet should be passed to the stack.
  */
 bool bnxt_rx_xdp(struct bnxt *bp, struct bnxt_rx_ring_info *rxr, u16 cons,
-		 struct page *page, u8 **data_ptr, unsigned int *len, u8 *event)
+		 struct xdp_buff xdp, struct page *page, u8 **data_ptr,
+		 unsigned int *len, u8 *event)
 {
 	struct bpf_prog *xdp_prog = READ_ONCE(rxr->xdp_prog);
 	struct bnxt_tx_ring_info *txr;
 	struct bnxt_sw_rx_bd *rx_buf;
 	struct pci_dev *pdev;
-	struct xdp_buff xdp;
 	dma_addr_t mapping;
 	void *orig_data;
 	u32 tx_avail;
@@ -128,16 +157,10 @@ bool bnxt_rx_xdp(struct bnxt *bp, struct bnxt_rx_ring_info *rxr, u16 cons,
 		return false;
 
 	pdev = bp->pdev;
-	rx_buf = &rxr->rx_buf_ring[cons];
 	offset = bp->rx_offset;
-
-	mapping = rx_buf->mapping - bp->rx_dma_offset;
-	dma_sync_single_for_cpu(&pdev->dev, mapping + offset, *len, bp->rx_dir);
 
 	txr = rxr->bnapi->tx_ring;
 	/* BNXT_RX_PAGE_MODE(bp) when XDP enabled */
-	xdp_init_buff(&xdp, PAGE_SIZE, &rxr->xdp_rxq);
-	xdp_prepare_buff(&xdp, *data_ptr - offset, offset, *len, false);
 	orig_data = xdp.data;
 
 	act = bpf_prog_run_xdp(xdp_prog, &xdp);
@@ -154,11 +177,15 @@ bool bnxt_rx_xdp(struct bnxt *bp, struct bnxt_rx_ring_info *rxr, u16 cons,
 		offset = xdp.data - xdp.data_hard_start;
 		*data_ptr = xdp.data_hard_start + offset;
 	}
+
 	switch (act) {
 	case XDP_PASS:
 		return false;
 
 	case XDP_TX:
+		rx_buf = &rxr->rx_buf_ring[cons];
+		mapping = rx_buf->mapping - bp->rx_dma_offset;
+
 		if (tx_avail < 1) {
 			trace_xdp_exception(bp->dev, xdp_prog, act);
 			bnxt_reuse_rx_data(rxr, cons, page);
@@ -177,6 +204,8 @@ bool bnxt_rx_xdp(struct bnxt *bp, struct bnxt_rx_ring_info *rxr, u16 cons,
 		 * redirect is coming from a frame received by the
 		 * bnxt_en driver.
 		 */
+		rx_buf = &rxr->rx_buf_ring[cons];
+		mapping = rx_buf->mapping - bp->rx_dma_offset;
 		dma_unmap_page_attrs(&pdev->dev, mapping,
 				     PAGE_SIZE, bp->rx_dir,
 				     DMA_ATTR_WEAK_ORDERING);
@@ -198,10 +227,10 @@ bool bnxt_rx_xdp(struct bnxt *bp, struct bnxt_rx_ring_info *rxr, u16 cons,
 		break;
 	default:
 		bpf_warn_invalid_xdp_action(bp->dev, xdp_prog, act);
-		/* Fall thru */
+		fallthrough;
 	case XDP_ABORTED:
 		trace_xdp_exception(bp->dev, xdp_prog, act);
-		/* Fall thru */
+		fallthrough;
 	case XDP_DROP:
 		bnxt_reuse_rx_data(rxr, cons, page);
 		break;

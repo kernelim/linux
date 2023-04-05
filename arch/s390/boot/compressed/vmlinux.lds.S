@@ -52,7 +52,10 @@ SECTIONS
 		KEEP(*(.dma.ex_table))
 		_stop_dma_ex_table = .;
 	}
-	.dma.data : { *(.dma.data) }
+	.dma.data : {
+		*(.dma.data)
+	}
+
 	_edma = .;
 
 	BOOT_DATA

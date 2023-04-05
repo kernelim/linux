@@ -278,7 +278,7 @@ static struct extra_reg intel_spr_extra_regs[] __read_mostly = {
 	INTEL_UEVENT_EXTRA_REG(0x012a, MSR_OFFCORE_RSP_0, 0x3fffffffffull, RSP_0),
 	INTEL_UEVENT_EXTRA_REG(0x012b, MSR_OFFCORE_RSP_1, 0x3fffffffffull, RSP_1),
 	INTEL_UEVENT_PEBS_LDLAT_EXTRA_REG(0x01cd),
-	INTEL_UEVENT_EXTRA_REG(0x01c6, MSR_PEBS_FRONTEND, 0x7fff17, FE),
+	INTEL_UEVENT_EXTRA_REG(0x01c6, MSR_PEBS_FRONTEND, 0x7fff1f, FE),
 	INTEL_UEVENT_EXTRA_REG(0x40ad, MSR_PEBS_FRONTEND, 0x7, FE),
 	INTEL_UEVENT_EXTRA_REG(0x04c2, MSR_PEBS_FRONTEND, 0x8, FE),
 	EVENT_EXTRA_END
@@ -2077,6 +2077,15 @@ static struct extra_reg intel_tnt_extra_regs[] __read_mostly = {
 	EVENT_EXTRA_END
 };
 
+EVENT_ATTR_STR(mem-loads,	mem_ld_grt,	"event=0xd0,umask=0x5,ldlat=3");
+EVENT_ATTR_STR(mem-stores,	mem_st_grt,	"event=0xd0,umask=0x6");
+
+static struct attribute *grt_mem_attrs[] = {
+	EVENT_PTR(mem_ld_grt),
+	EVENT_PTR(mem_st_grt),
+	NULL
+};
+
 static struct extra_reg intel_grt_extra_regs[] __read_mostly = {
 	/* must define OFFCORE_RSP_X first, see intel_fixup_er() */
 	INTEL_UEVENT_EXTRA_REG(0x01b7, MSR_OFFCORE_RSP_0, 0x3fffffffffull, RSP_0),
@@ -2142,19 +2151,19 @@ static __initconst const u64 knl_hw_cache_extra_regs
  * However, there are some cases which may change PEBS status, e.g. PMI
  * throttle. The PEBS_ENABLE should be updated where the status changes.
  */
-static void __intel_pmu_disable_all(void)
+static __always_inline void __intel_pmu_disable_all(bool bts)
 {
 	struct cpu_hw_events *cpuc = this_cpu_ptr(&cpu_hw_events);
 
 	wrmsrl(MSR_CORE_PERF_GLOBAL_CTRL, 0);
 
-	if (test_bit(INTEL_PMC_IDX_FIXED_BTS, cpuc->active_mask))
+	if (bts && test_bit(INTEL_PMC_IDX_FIXED_BTS, cpuc->active_mask))
 		intel_pmu_disable_bts();
 }
 
-static void intel_pmu_disable_all(void)
+static __always_inline void intel_pmu_disable_all(void)
 {
-	__intel_pmu_disable_all();
+	__intel_pmu_disable_all(true);
 	intel_pmu_pebs_disable_all();
 	intel_pmu_lbr_disable_all();
 }
@@ -2183,6 +2192,47 @@ static void intel_pmu_enable_all(int added)
 {
 	intel_pmu_pebs_enable_all();
 	__intel_pmu_enable_all(added, false);
+}
+
+static noinline int
+__intel_pmu_snapshot_branch_stack(struct perf_branch_entry *entries,
+				  unsigned int cnt, unsigned long flags)
+{
+	struct cpu_hw_events *cpuc = this_cpu_ptr(&cpu_hw_events);
+
+	intel_pmu_lbr_read();
+	cnt = min_t(unsigned int, cnt, x86_pmu.lbr_nr);
+
+	memcpy(entries, cpuc->lbr_entries, sizeof(struct perf_branch_entry) * cnt);
+	intel_pmu_enable_all(0);
+	local_irq_restore(flags);
+	return cnt;
+}
+
+static int
+intel_pmu_snapshot_branch_stack(struct perf_branch_entry *entries, unsigned int cnt)
+{
+	unsigned long flags;
+
+	/* must not have branches... */
+	local_irq_save(flags);
+	__intel_pmu_disable_all(false); /* we don't care about BTS */
+	__intel_pmu_lbr_disable();
+	/*            ... until here */
+	return __intel_pmu_snapshot_branch_stack(entries, cnt, flags);
+}
+
+static int
+intel_pmu_snapshot_arch_branch_stack(struct perf_branch_entry *entries, unsigned int cnt)
+{
+	unsigned long flags;
+
+	/* must not have branches... */
+	local_irq_save(flags);
+	__intel_pmu_disable_all(false); /* we don't care about BTS */
+	__intel_pmu_arch_lbr_disable();
+	/*            ... until here */
+	return __intel_pmu_snapshot_branch_stack(entries, cnt, flags);
 }
 
 /*
@@ -2928,7 +2978,7 @@ static int intel_pmu_handle_irq(struct pt_regs *regs)
 		apic_write(APIC_LVTPC, APIC_DM_NMI);
 	intel_bts_disable_local();
 	cpuc->enabled = 0;
-	__intel_pmu_disable_all();
+	__intel_pmu_disable_all(true);
 	handled = intel_pmu_drain_bts_buffer();
 	handled += intel_bts_interrupt();
 	status = intel_pmu_get_status();
@@ -4080,6 +4130,8 @@ tnt_get_event_constraints(struct cpu_hw_events *cpuc, int idx,
 {
 	struct event_constraint *c;
 
+	c = intel_get_event_constraints(cpuc, idx, event);
+
 	/*
 	 * :ppp means to do reduced skid PEBS,
 	 * which is available on PMC0 and fixed counter 0.
@@ -4091,8 +4143,6 @@ tnt_get_event_constraints(struct cpu_hw_events *cpuc, int idx,
 
 		return &counter0_constraint;
 	}
-
-	c = intel_get_event_constraints(cpuc, idx, event);
 
 	return c;
 }
@@ -5788,6 +5838,36 @@ __init int intel_pmu_init(void)
 		name = "Tremont";
 		break;
 
+	case INTEL_FAM6_ALDERLAKE_N:
+		x86_pmu.mid_ack = true;
+		memcpy(hw_cache_event_ids, glp_hw_cache_event_ids,
+		       sizeof(hw_cache_event_ids));
+		memcpy(hw_cache_extra_regs, tnt_hw_cache_extra_regs,
+		       sizeof(hw_cache_extra_regs));
+		hw_cache_event_ids[C(ITLB)][C(OP_READ)][C(RESULT_ACCESS)] = -1;
+
+		x86_pmu.event_constraints = intel_slm_event_constraints;
+		x86_pmu.pebs_constraints = intel_grt_pebs_event_constraints;
+		x86_pmu.extra_regs = intel_grt_extra_regs;
+
+		x86_pmu.pebs_aliases = NULL;
+		x86_pmu.pebs_prec_dist = true;
+		x86_pmu.pebs_block = true;
+		x86_pmu.lbr_pt_coexist = true;
+		x86_pmu.flags |= PMU_FL_HAS_RSP_1;
+		x86_pmu.flags |= PMU_FL_INSTR_LATENCY;
+
+		intel_pmu_pebs_data_source_grt();
+		x86_pmu.pebs_latency_data = adl_latency_data_small;
+		x86_pmu.get_event_constraints = tnt_get_event_constraints;
+		x86_pmu.limit_period = spr_limit_period;
+		td_attr = tnt_events_attrs;
+		mem_attr = grt_mem_attrs;
+		extra_attr = nhm_format_attr;
+		pr_cont("Gracemont events, ");
+		name = "gracemont";
+		break;
+
 	case INTEL_FAM6_WESTMERE:
 	case INTEL_FAM6_WESTMERE_EP:
 	case INTEL_FAM6_WESTMERE_EX:
@@ -6130,7 +6210,6 @@ __init int intel_pmu_init(void)
 
 	case INTEL_FAM6_ALDERLAKE:
 	case INTEL_FAM6_ALDERLAKE_L:
-	case INTEL_FAM6_ALDERLAKE_N:
 	case INTEL_FAM6_RAPTORLAKE:
 	case INTEL_FAM6_RAPTORLAKE_P:
 		/*
@@ -6155,7 +6234,8 @@ __init int intel_pmu_init(void)
 		x86_pmu.flags |= PMU_FL_INSTR_LATENCY;
 		x86_pmu.flags |= PMU_FL_MEM_LOADS_AUX;
 		x86_pmu.lbr_pt_coexist = true;
-		intel_pmu_pebs_data_source_skl(false);
+		intel_pmu_pebs_data_source_adl();
+		x86_pmu.pebs_latency_data = adl_latency_data_small;
 		x86_pmu.num_topdown_events = 8;
 		x86_pmu.update_topdown_event = adl_update_topdown_event;
 		x86_pmu.set_topdown_event_period = adl_set_topdown_event_period;
@@ -6311,6 +6391,17 @@ __init int intel_pmu_init(void)
 		intel_pmu_lbr_init();
 
 		pr_cont("%d-deep LBR, ", x86_pmu.lbr_nr);
+
+		/* only support branch_stack snapshot for perfmon >= v2 */
+		if (x86_pmu.disable_all == intel_pmu_disable_all) {
+			if (boot_cpu_has(X86_FEATURE_ARCH_LBR)) {
+				static_call_update(perf_snapshot_branch_stack,
+						   intel_pmu_snapshot_arch_branch_stack);
+			} else {
+				static_call_update(perf_snapshot_branch_stack,
+						   intel_pmu_snapshot_branch_stack);
+			}
+		}
 	}
 
 	intel_pmu_check_extra_regs(x86_pmu.extra_regs);

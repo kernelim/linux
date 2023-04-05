@@ -16,6 +16,8 @@
 
 #define DIV_ROUND_UP(n,d) (((n) + (d) - 1) / (d))
 
+#define _RET_IP_		((unsigned long)__builtin_return_address(0))
+
 #define PERF_ALIGN(x, a)	__PERF_ALIGN_MASK(x, (typeof(x))(a)-1)
 #define __PERF_ALIGN_MASK(x, mask)	(((x)+(mask))&~(mask))
 
@@ -60,6 +62,10 @@
 }                                                      \
 )
 #endif
+
+#define max_t(type, x, y)	max((type)x, (type)y)
+#define min_t(type, x, y)	min((type)x, (type)y)
+#define clamp(val, lo, hi)	min((typeof(val))max(val, lo), hi)
 
 #ifndef BUG_ON
 #ifdef NDEBUG

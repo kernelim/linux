@@ -2440,6 +2440,21 @@ static inline bool tcp_may_undo(const struct tcp_sock *tp)
 	return tp->undo_marker && (!tp->undo_retrans || tcp_packet_delayed(tp));
 }
 
+static bool tcp_is_non_sack_preventing_reopen(struct sock *sk)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+
+	if (tp->snd_una == tp->high_seq && tcp_is_reno(tp)) {
+		/* Hold old state until something *above* high_seq
+		 * is ACKed. For Reno it is MUST to prevent false
+		 * fast retransmits (RFC2582). SACK TCP is safe. */
+		if (!tcp_any_retrans_done(sk))
+			tp->retrans_stamp = 0;
+		return true;
+	}
+	return false;
+}
+
 /* People celebrate: "We love our President!" */
 static bool tcp_try_undo_recovery(struct sock *sk)
 {
@@ -2462,14 +2477,8 @@ static bool tcp_try_undo_recovery(struct sock *sk)
 	} else if (tp->rack.reo_wnd_persist) {
 		tp->rack.reo_wnd_persist--;
 	}
-	if (tp->snd_una == tp->high_seq && tcp_is_reno(tp)) {
-		/* Hold old state until something *above* high_seq
-		 * is ACKed. For Reno it is MUST to prevent false
-		 * fast retransmits (RFC2582). SACK TCP is safe. */
-		if (!tcp_any_retrans_done(sk))
-			tp->retrans_stamp = 0;
+	if (tcp_is_non_sack_preventing_reopen(sk))
 		return true;
-	}
 	tcp_set_ca_state(sk, TCP_CA_Open);
 	tp->is_sack_reneg = 0;
 	return false;
@@ -2505,6 +2514,8 @@ static bool tcp_try_undo_loss(struct sock *sk, bool frto_undo)
 			NET_INC_STATS(sock_net(sk),
 					LINUX_MIB_TCPSPURIOUSRTOS);
 		inet_csk(sk)->icsk_retransmits = 0;
+		if (tcp_is_non_sack_preventing_reopen(sk))
+			return true;
 		if (frto_undo || tcp_is_sack(tp)) {
 			tcp_set_ca_state(sk, TCP_CA_Open);
 			tp->is_sack_reneg = 0;
@@ -2638,12 +2649,15 @@ static void tcp_mtup_probe_success(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct inet_connection_sock *icsk = inet_csk(sk);
+	u64 val;
 
-	/* FIXME: breaks with very large cwnd */
 	tp->prior_ssthresh = tcp_current_ssthresh(sk);
-	tp->snd_cwnd = tp->snd_cwnd *
-		       tcp_mss_to_mtu(sk, tp->mss_cache) /
-		       icsk->icsk_mtup.probe_size;
+
+	val = (u64)tp->snd_cwnd * tcp_mss_to_mtu(sk, tp->mss_cache);
+	do_div(val, icsk->icsk_mtup.probe_size);
+	BUILD_BUG_ON_INVALID((u32)val != val);
+	tp->snd_cwnd = max_t(u32, 1U, val); 
+
 	tp->snd_cwnd_cnt = 0;
 	tp->snd_cwnd_stamp = tcp_jiffies32;
 	tp->snd_ssthresh = tcp_current_ssthresh(sk);
@@ -3520,7 +3534,7 @@ bool tcp_oow_rate_limited(struct net *net, const struct sk_buff *skb,
 }
 
 /* RFC 5961 7 [ACK Throttling] */
-static void tcp_send_challenge_ack(struct sock *sk, const struct sk_buff *skb)
+static void tcp_send_challenge_ack(struct sock *sk)
 {
 	/* unprotected vars, we dont care of overwrites */
 	static u32 challenge_timestamp;
@@ -3681,8 +3695,8 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 		/* RFC 5961 5.2 [Blind Data Injection Attack].[Mitigation] */
 		if (before(ack, prior_snd_una - tp->max_window)) {
 			if (!(flag & FLAG_NO_CHALLENGE_ACK))
-				tcp_send_challenge_ack(sk, skb);
-			return -1;
+				tcp_send_challenge_ack(sk);
+			return -SKB_DROP_REASON_TCP_TOO_OLD_ACK;
 		}
 		goto old_ack;
 	}
@@ -3768,7 +3782,8 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 		tcp_process_tlp_ack(sk, ack, flag);
 
 	if (tcp_ack_is_dubious(sk, flag)) {
-		if (!(flag & (FLAG_SND_UNA_ADVANCED | FLAG_NOT_DUP))) {
+		if (!(flag & (FLAG_SND_UNA_ADVANCED |
+			      FLAG_NOT_DUP | FLAG_DSACKING_ACK))) {
 			num_dupack = 1;
 			/* Consider if pure acks were aggregated in tcp_add_backlog() */
 			if (!(flag & FLAG_DATA))
@@ -3812,7 +3827,7 @@ no_queue:
 
 invalid_ack:
 	SOCK_DEBUG(sk, "Ack %u after %u:%u\n", ack, tp->snd_una, tp->snd_nxt);
-	return -1;
+	return -SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
 
 old_ack:
 	/* If data was SACKed, tag it and see if we should send more data.
@@ -4535,7 +4550,7 @@ static bool tcp_ooo_try_coalesce(struct sock *sk,
 {
 	bool res = tcp_try_coalesce(sk, to, from, fragstolen);
 
-	/* In case tcp_drop() is called later, update to->gso_segs */
+	/* In case tcp_drop_reason() is called later, update to->gso_segs */
 	if (res) {
 		u32 gso_segs = max_t(u16, 1, skb_shinfo(to)->gso_segs) +
 			       max_t(u16, 1, skb_shinfo(from)->gso_segs);
@@ -4545,10 +4560,11 @@ static bool tcp_ooo_try_coalesce(struct sock *sk,
 	return res;
 }
 
-static void tcp_drop(struct sock *sk, struct sk_buff *skb)
+static void tcp_drop_reason(struct sock *sk, struct sk_buff *skb,
+			    enum skb_drop_reason reason)
 {
 	sk_drops_add(sk, skb);
-	__kfree_skb(skb);
+	kfree_skb_reason(skb, reason);
 }
 
 /* This one checks to see if we can put data from the
@@ -4579,7 +4595,7 @@ static void tcp_ofo_queue(struct sock *sk)
 
 		if (unlikely(!after(TCP_SKB_CB(skb)->end_seq, tp->rcv_nxt))) {
 			SOCK_DEBUG(sk, "ofo packet was already received\n");
-			tcp_drop(sk, skb);
+			tcp_drop_reason(sk, skb, SKB_DROP_REASON_TCP_OFO_DROP);
 			continue;
 		}
 		SOCK_DEBUG(sk, "ofo requeuing : rcv_next %X seq %X - %X\n",
@@ -4638,7 +4654,7 @@ static void tcp_data_queue_ofo(struct sock *sk, struct sk_buff *skb)
 	if (unlikely(tcp_try_rmem_schedule(sk, skb, skb->truesize))) {
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPOFODROP);
 		sk->sk_data_ready(sk);
-		tcp_drop(sk, skb);
+		tcp_drop_reason(sk, skb, SKB_DROP_REASON_PROTO_MEM);
 		return;
 	}
 
@@ -4703,7 +4719,8 @@ coalesce_done:
 				/* All the bits are present. Drop. */
 				NET_INC_STATS(sock_net(sk),
 					      LINUX_MIB_TCPOFOMERGE);
-				tcp_drop(sk, skb);
+				tcp_drop_reason(sk, skb,
+						SKB_DROP_REASON_TCP_OFOMERGE);
 				skb = NULL;
 				tcp_dsack_set(sk, seq, end_seq);
 				goto add_sack;
@@ -4722,7 +4739,8 @@ coalesce_done:
 						 TCP_SKB_CB(skb1)->end_seq);
 				NET_INC_STATS(sock_net(sk),
 					      LINUX_MIB_TCPOFOMERGE);
-				tcp_drop(sk, skb1);
+				tcp_drop_reason(sk, skb1,
+						SKB_DROP_REASON_TCP_OFOMERGE);
 				goto merge_right;
 			}
 		} else if (tcp_ooo_try_coalesce(sk, skb1,
@@ -4750,7 +4768,7 @@ merge_right:
 		tcp_dsack_extend(sk, TCP_SKB_CB(skb1)->seq,
 				 TCP_SKB_CB(skb1)->end_seq);
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPOFOMERGE);
-		tcp_drop(sk, skb1);
+		tcp_drop_reason(sk, skb1, SKB_DROP_REASON_TCP_OFOMERGE);
 	}
 	/* If there is no skb after us, we are the last_skb ! */
 	if (!skb1)
@@ -4857,6 +4875,7 @@ void tcp_data_ready(struct sock *sk)
 static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
+	enum skb_drop_reason reason;
 	bool fragstolen;
 	int eaten;
 
@@ -4877,6 +4896,7 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 
 	tcp_ecn_accept_cwr(sk, skb);
 
+	reason = SKB_DROP_REASON_NOT_SPECIFIED;
 	tp->rx_opt.dsack = 0;
 
 	/*  Queue data for delivery to the user.
@@ -4885,6 +4905,7 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 	 */
 	if (TCP_SKB_CB(skb)->seq == tp->rcv_nxt) {
 		if (tcp_receive_window(tp) == 0) {
+			reason = SKB_DROP_REASON_TCP_ZEROWINDOW;
 			NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPZEROWINDOWDROP);
 			goto out_of_window;
 		}
@@ -4894,6 +4915,7 @@ queue_and_out:
 		if (skb_queue_len(&sk->sk_receive_queue) == 0)
 			sk_forced_mem_schedule(sk, skb->truesize);
 		else if (tcp_try_rmem_schedule(sk, skb, skb->truesize)) {
+			reason = SKB_DROP_REASON_PROTO_MEM;
 			NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPRCVQDROP);
 			sk->sk_data_ready(sk);
 			goto drop;
@@ -4930,6 +4952,7 @@ queue_and_out:
 
 	if (!after(TCP_SKB_CB(skb)->end_seq, tp->rcv_nxt)) {
 		/* A retransmit, 2nd most common case.  Force an immediate ack. */
+		reason = SKB_DROP_REASON_TCP_OLD_DATA;
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_DELAYEDACKLOST);
 		tcp_dsack_set(sk, TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
 
@@ -4937,13 +4960,16 @@ out_of_window:
 		tcp_enter_quickack_mode(sk, TCP_MAX_QUICKACKS);
 		inet_csk_schedule_ack(sk);
 drop:
-		tcp_drop(sk, skb);
+		tcp_drop_reason(sk, skb, reason);
 		return;
 	}
 
 	/* Out of window. F.e. zero window probe. */
-	if (!before(TCP_SKB_CB(skb)->seq, tp->rcv_nxt + tcp_receive_window(tp)))
+	if (!before(TCP_SKB_CB(skb)->seq,
+		    tp->rcv_nxt + tcp_receive_window(tp))) {
+		reason = SKB_DROP_REASON_TCP_OVERWINDOW;
 		goto out_of_window;
+	}
 
 	if (before(TCP_SKB_CB(skb)->seq, tp->rcv_nxt)) {
 		/* Partial packet, seq < rcv_next < end_seq */
@@ -4957,6 +4983,7 @@ drop:
 		 * remembering D-SACK for its head made in previous line.
 		 */
 		if (!tcp_receive_window(tp)) {
+			reason = SKB_DROP_REASON_TCP_ZEROWINDOW;
 			NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPZEROWINDOWDROP);
 			goto out_of_window;
 		}
@@ -5198,7 +5225,8 @@ static bool tcp_prune_ofo_queue(struct sock *sk)
 		prev = rb_prev(node);
 		rb_erase(node, &tp->out_of_order_queue);
 		goal -= rb_to_skb(node)->truesize;
-		tcp_drop(sk, rb_to_skb(node));
+		tcp_drop_reason(sk, rb_to_skb(node),
+				SKB_DROP_REASON_TCP_OFO_QUEUE_PRUNE);
 		if (!prev || goal <= 0) {
 			sk_mem_reclaim(sk);
 			if (atomic_read(&sk->sk_rmem_alloc) <= sk->sk_rcvbuf &&
@@ -5534,7 +5562,7 @@ static bool tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 				  const struct tcphdr *th, int syn_inerr)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
-	bool rst_seq_match = false;
+	SKB_DR(reason);
 
 	/* RFC1323: H1. Apply PAWS check first. */
 	if (tcp_fast_parse_options(sock_net(sk), skb, th, tp) &&
@@ -5546,6 +5574,7 @@ static bool tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 						  LINUX_MIB_TCPACKSKIPPEDPAWS,
 						  &tp->last_oow_ack_time))
 				tcp_send_dupack(sk, skb);
+			SKB_DR_SET(reason, TCP_RFC7323_PAWS);
 			goto discard;
 		}
 		/* Reset is accepted even if it did not pass PAWS. */
@@ -5567,8 +5596,9 @@ static bool tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 						  &tp->last_oow_ack_time))
 				tcp_send_dupack(sk, skb);
 		} else if (tcp_reset_check(sk, skb)) {
-			tcp_reset(sk, skb);
+			goto reset;
 		}
+		SKB_DR_SET(reason, TCP_INVALID_SEQUENCE);
 		goto discard;
 	}
 
@@ -5584,9 +5614,10 @@ static bool tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 		 *     Send a challenge ACK
 		 */
 		if (TCP_SKB_CB(skb)->seq == tp->rcv_nxt ||
-		    tcp_reset_check(sk, skb)) {
-			rst_seq_match = true;
-		} else if (tcp_is_sack(tp) && tp->rx_opt.num_sacks > 0) {
+		    tcp_reset_check(sk, skb))
+			goto reset;
+
+		if (tcp_is_sack(tp) && tp->rx_opt.num_sacks > 0) {
 			struct tcp_sack_block *sp = &tp->selective_acks[0];
 			int max_sack = sp[0].end_seq;
 			int this_sack;
@@ -5599,21 +5630,18 @@ static bool tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 			}
 
 			if (TCP_SKB_CB(skb)->seq == max_sack)
-				rst_seq_match = true;
+				goto reset;
 		}
 
-		if (rst_seq_match)
-			tcp_reset(sk, skb);
-		else {
-			/* Disable TFO if RST is out-of-order
-			 * and no data has been received
-			 * for current active TFO socket
-			 */
-			if (tp->syn_fastopen && !tp->data_segs_in &&
-			    sk->sk_state == TCP_ESTABLISHED)
-				tcp_fastopen_active_disable(sk);
-			tcp_send_challenge_ack(sk, skb);
-		}
+		/* Disable TFO if RST is out-of-order
+		 * and no data has been received
+		 * for current active TFO socket
+		 */
+		if (tp->syn_fastopen && !tp->data_segs_in &&
+		    sk->sk_state == TCP_ESTABLISHED)
+			tcp_fastopen_active_disable(sk);
+		tcp_send_challenge_ack(sk);
+		SKB_DR_SET(reason, TCP_RESET);
 		goto discard;
 	}
 
@@ -5627,7 +5655,8 @@ syn_challenge:
 		if (syn_inerr)
 			TCP_INC_STATS(sock_net(sk), TCP_MIB_INERRS);
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPSYNCHALLENGE);
-		tcp_send_challenge_ack(sk, skb);
+		tcp_send_challenge_ack(sk);
+		SKB_DR_SET(reason, TCP_INVALID_SYN);
 		goto discard;
 	}
 
@@ -5636,7 +5665,12 @@ syn_challenge:
 	return true;
 
 discard:
-	tcp_drop(sk, skb);
+	tcp_drop_reason(sk, skb, reason);
+	return false;
+
+reset:
+	tcp_reset(sk, skb);
+	__kfree_skb(skb);
 	return false;
 }
 
@@ -5665,6 +5699,7 @@ discard:
  */
 void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
 {
+	enum skb_drop_reason reason = SKB_DROP_REASON_NOT_SPECIFIED;
 	const struct tcphdr *th = (const struct tcphdr *)skb->data;
 	struct tcp_sock *tp = tcp_sk(sk);
 	unsigned int len = skb->len;
@@ -5748,6 +5783,7 @@ void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
 				tcp_data_snd_check(sk);
 				return;
 			} else { /* Header too small */
+				reason = SKB_DROP_REASON_PKT_TOO_SMALL;
 				TCP_INC_STATS(sock_net(sk), TCP_MIB_INERRS);
 				goto discard;
 			}
@@ -5803,8 +5839,10 @@ slow_path:
 	if (len < (th->doff << 2) || tcp_checksum_complete(skb))
 		goto csum_error;
 
-	if (!th->ack && !th->rst && !th->syn)
+	if (!th->ack && !th->rst && !th->syn) {
+		reason = SKB_DROP_REASON_TCP_FLAGS;
 		goto discard;
+	}
 
 	/*
 	 *	Standard slow path.
@@ -5814,9 +5852,11 @@ slow_path:
 		return;
 
 step5:
-	if (tcp_ack(sk, skb, FLAG_SLOWPATH | FLAG_UPDATE_TS_RECENT) < 0)
+	reason = tcp_ack(sk, skb, FLAG_SLOWPATH | FLAG_UPDATE_TS_RECENT);
+	if ((int)reason < 0) {
+		reason = -reason;
 		goto discard;
-
+	}
 	tcp_rcv_rtt_measure_ts(sk, skb);
 
 	/* Process urgent data. */
@@ -5830,11 +5870,12 @@ step5:
 	return;
 
 csum_error:
+	reason = SKB_DROP_REASON_TCP_CSUM;
 	TCP_INC_STATS(sock_net(sk), TCP_MIB_CSUMERRORS);
 	TCP_INC_STATS(sock_net(sk), TCP_MIB_INERRS);
 
 discard:
-	tcp_drop(sk, skb);
+	tcp_drop_reason(sk, skb, reason);
 }
 EXPORT_SYMBOL(tcp_rcv_established);
 
@@ -5975,6 +6016,7 @@ static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
 	struct tcp_fastopen_cookie foc = { .len = -1 };
 	int saved_clamp = tp->rx_opt.mss_clamp;
 	bool fastopen_fail;
+	SKB_DR(reason);
 
 	tcp_parse_options(sock_net(sk), skb, &tp->rx_opt, 0, &foc);
 	if (tp->rx_opt.saw_tstamp && tp->rx_opt.rcv_tsecr)
@@ -6011,7 +6053,9 @@ static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
 
 		if (th->rst) {
 			tcp_reset(sk, skb);
-			goto discard;
+consume:
+			__kfree_skb(skb);
+			return 0;
 		}
 
 		/* rfc793:
@@ -6021,9 +6065,10 @@ static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
 		 *    See note below!
 		 *                                        --ANK(990513)
 		 */
-		if (!th->syn)
+		if (!th->syn) {
+			SKB_DR_SET(reason, TCP_FLAGS);
 			goto discard_and_undo;
-
+		}
 		/* rfc793:
 		 *   "If the SYN bit is on ...
 		 *    are acceptable then ...
@@ -6099,13 +6144,9 @@ static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
 			tcp_enter_quickack_mode(sk, TCP_MAX_QUICKACKS);
 			inet_csk_reset_xmit_timer(sk, ICSK_TIME_DACK,
 						  TCP_DELACK_MAX, TCP_RTO_MAX);
-
-discard:
-			tcp_drop(sk, skb);
-			return 0;
-		} else {
-			tcp_send_ack(sk);
+			goto consume;
 		}
+		tcp_send_ack(sk);
 		return -1;
 	}
 
@@ -6117,15 +6158,16 @@ discard:
 		 *
 		 *      Otherwise (no ACK) drop the segment and return."
 		 */
-
+		SKB_DR_SET(reason, TCP_RESET);
 		goto discard_and_undo;
 	}
 
 	/* PAWS check. */
 	if (tp->rx_opt.ts_recent_stamp && tp->rx_opt.saw_tstamp &&
-	    tcp_paws_reject(&tp->rx_opt, 0))
+	    tcp_paws_reject(&tp->rx_opt, 0)) {
+		SKB_DR_SET(reason, TCP_RFC7323_PAWS);
 		goto discard_and_undo;
-
+	}
 	if (th->syn) {
 		/* We see SYN without ACK. It is attempt of
 		 * simultaneous connect with crossed SYNs.
@@ -6174,7 +6216,7 @@ discard:
 		 */
 		return -1;
 #else
-		goto discard;
+		goto consume;
 #endif
 	}
 	/* "fifth, if neither of the SYN or RST bits is set then
@@ -6184,7 +6226,8 @@ discard:
 discard_and_undo:
 	tcp_clear_options(&tp->rx_opt);
 	tp->rx_opt.mss_clamp = saved_clamp;
-	goto discard;
+	tcp_drop_reason(sk, skb, reason);
+	return 0;
 
 reset_and_undo:
 	tcp_clear_options(&tp->rx_opt);
@@ -6207,21 +6250,26 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
 	struct request_sock *req;
 	int queued = 0;
 	bool acceptable;
+	SKB_DR(reason);
 
 	switch (sk->sk_state) {
 	case TCP_CLOSE:
+		SKB_DR_SET(reason, TCP_CLOSE);
 		goto discard;
 
 	case TCP_LISTEN:
 		if (th->ack)
 			return 1;
 
-		if (th->rst)
+		if (th->rst) {
+			SKB_DR_SET(reason, TCP_RESET);
 			goto discard;
-
+		}
 		if (th->syn) {
-			if (th->fin)
+			if (th->fin) {
+				SKB_DR_SET(reason, TCP_FLAGS);
 				goto discard;
+			}
 			/* It is possible that we process SYN packets from backlog,
 			 * so we need to make sure to disable BH and RCU right there.
 			 */
@@ -6236,6 +6284,7 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
 			consume_skb(skb);
 			return 0;
 		}
+		SKB_DR_SET(reason, TCP_FLAGS);
 		goto discard;
 
 	case TCP_SYN_SENT:
@@ -6262,13 +6311,16 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
 		WARN_ON_ONCE(sk->sk_state != TCP_SYN_RECV &&
 		    sk->sk_state != TCP_FIN_WAIT1);
 
-		if (!tcp_check_req(sk, skb, req, true, &req_stolen))
+		if (!tcp_check_req(sk, skb, req, true, &req_stolen)) {
+			SKB_DR_SET(reason, TCP_FASTOPEN);
 			goto discard;
+		}
 	}
 
-	if (!th->ack && !th->rst && !th->syn)
+	if (!th->ack && !th->rst && !th->syn) {
+		SKB_DR_SET(reason, TCP_FLAGS);
 		goto discard;
-
+	}
 	if (!tcp_validate_incoming(sk, skb, th, 0))
 		return 0;
 
@@ -6280,7 +6332,8 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
 	if (!acceptable) {
 		if (sk->sk_state == TCP_SYN_RECV)
 			return 1;	/* send one RST */
-		tcp_send_challenge_ack(sk, skb);
+		tcp_send_challenge_ack(sk);
+		SKB_DR_SET(reason, TCP_OLD_ACK);
 		goto discard;
 	}
 	switch (sk->sk_state) {
@@ -6392,7 +6445,7 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
 			inet_csk_reset_keepalive_timer(sk, tmo);
 		} else {
 			tcp_time_wait(sk, TCP_FIN_WAIT2, tmo);
-			goto discard;
+			goto consume;
 		}
 		break;
 	}
@@ -6400,7 +6453,7 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
 	case TCP_CLOSING:
 		if (tp->snd_una == tp->write_seq) {
 			tcp_time_wait(sk, TCP_TIME_WAIT, 0);
-			goto discard;
+			goto consume;
 		}
 		break;
 
@@ -6408,7 +6461,7 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
 		if (tp->snd_una == tp->write_seq) {
 			tcp_update_metrics(sk);
 			tcp_done(sk);
-			goto discard;
+			goto consume;
 		}
 		break;
 	}
@@ -6459,8 +6512,12 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
 
 	if (!queued) {
 discard:
-		tcp_drop(sk, skb);
+		tcp_drop_reason(sk, skb, reason);
 	}
+	return 0;
+
+consume:
+	__kfree_skb(skb);
 	return 0;
 }
 EXPORT_SYMBOL(tcp_rcv_state_process);
@@ -6574,11 +6631,14 @@ static bool tcp_syn_flood_action(const struct sock *sk, const char *proto)
 {
 	struct request_sock_queue *queue = &inet_csk(sk)->icsk_accept_queue;
 	const char *msg = "Dropping request";
-	bool want_cookie = false;
 	struct net *net = sock_net(sk);
+	bool want_cookie = false;
+	u8 syncookies;
+
+	syncookies = READ_ONCE(net->ipv4.sysctl_tcp_syncookies);
 
 #ifdef CONFIG_SYN_COOKIES
-	if (net->ipv4.sysctl_tcp_syncookies) {
+	if (syncookies) {
 		msg = "Sending cookies";
 		want_cookie = true;
 		__NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPREQQFULLDOCOOKIES);
@@ -6586,11 +6646,18 @@ static bool tcp_syn_flood_action(const struct sock *sk, const char *proto)
 #endif
 		__NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPREQQFULLDROP);
 
-	if (!queue->synflood_warned &&
-	    net->ipv4.sysctl_tcp_syncookies != 2 &&
-	    xchg(&queue->synflood_warned, 1) == 0)
-		net_info_ratelimited("%s: Possible SYN flooding on port %d. %s.  Check SNMP counters.\n",
-				     proto, sk->sk_num, msg);
+	if (!READ_ONCE(queue->synflood_warned) && syncookies != 2 &&
+	    xchg(&queue->synflood_warned, 1) == 0) {
+		if (IS_ENABLED(CONFIG_IPV6) && sk->sk_family == AF_INET6) {
+			net_info_ratelimited("%s: Possible SYN flooding on port [%pI6c]:%u. %s.\n",
+					proto, inet6_rcv_saddr(sk),
+					sk->sk_num, msg);
+		} else {
+			net_info_ratelimited("%s: Possible SYN flooding on port %pI4:%u. %s.\n",
+					proto, &sk->sk_rcv_saddr,
+					sk->sk_num, msg);
+		}
+	}
 
 	return want_cookie;
 }
@@ -6636,7 +6703,7 @@ u16 tcp_get_syncookie_mss(struct request_sock_ops *rsk_ops,
 	struct tcp_sock *tp = tcp_sk(sk);
 	u16 mss;
 
-	if (sock_net(sk)->ipv4.sysctl_tcp_syncookies != 2 &&
+	if (READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_syncookies) != 2 &&
 	    !inet_csk_reqsk_queue_is_full(sk))
 		return 0;
 
@@ -6670,13 +6737,15 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 	bool want_cookie = false;
 	struct dst_entry *dst;
 	struct flowi fl;
+	u8 syncookies;
+
+	syncookies = READ_ONCE(net->ipv4.sysctl_tcp_syncookies);
 
 	/* TW buckets are converted to open requests without
 	 * limitations, they conserve resources and peer is
 	 * evidently real one.
 	 */
-	if ((net->ipv4.sysctl_tcp_syncookies == 2 ||
-	     inet_csk_reqsk_queue_is_full(sk)) && !isn) {
+	if ((syncookies == 2 || inet_csk_reqsk_queue_is_full(sk)) && !isn) {
 		want_cookie = tcp_syn_flood_action(sk, rsk_ops->slab_name);
 		if (!want_cookie)
 			goto drop;
@@ -6726,7 +6795,7 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 
 	if (!want_cookie && !isn) {
 		/* Kill the following clause, if you dislike this way. */
-		if (!net->ipv4.sysctl_tcp_syncookies &&
+		if (!syncookies &&
 		    (net->ipv4.sysctl_max_syn_backlog - inet_csk_reqsk_queue_len(sk) <
 		     (net->ipv4.sysctl_max_syn_backlog >> 2)) &&
 		    !tcp_peer_is_proven(req, dst)) {

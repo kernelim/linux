@@ -8,6 +8,7 @@
  * the Free Software Foundation.
  */
 
+#include <linux/ethtool.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/netdevice.h>
@@ -622,7 +623,7 @@ static int bnxt_hwrm_func_vf_resc_cfg(struct bnxt *bp, int num_vfs, bool reset)
 		hw_resc->max_stat_ctxs -= le16_to_cpu(req->min_stat_ctx) * n;
 		hw_resc->max_vnics -= le16_to_cpu(req->min_vnics) * n;
 		if (bp->flags & BNXT_FLAG_CHIP_P5)
-			hw_resc->max_irqs -= vf_msix * n;
+			hw_resc->max_nqs -= vf_msix;
 
 		rc = pf->active_vfs;
 	}
@@ -822,14 +823,19 @@ static int bnxt_sriov_enable(struct bnxt *bp, int *num_vfs)
 		goto err_out2;
 
 	rc = pci_enable_sriov(bp->pdev, *num_vfs);
-	if (rc)
+	if (rc) {
+		bnxt_ulp_sriov_cfg(bp, 0);
 		goto err_out2;
+	}
 
 	return 0;
 
 err_out2:
 	/* Free the resources reserved for various VF's */
 	bnxt_hwrm_func_vf_resource_free(bp, *num_vfs);
+
+	/* Restore the max resources */
+	bnxt_hwrm_func_qcaps(bp);
 
 err_out1:
 	bnxt_free_vf_resources(bp);
@@ -1150,7 +1156,7 @@ void bnxt_hwrm_exec_fwd_req(struct bnxt *bp)
 	}
 }
 
-int bnxt_approve_mac(struct bnxt *bp, u8 *mac, bool strict)
+int bnxt_approve_mac(struct bnxt *bp, const u8 *mac, bool strict)
 {
 	struct hwrm_func_vf_cfg_input *req;
 	int rc = 0;
@@ -1245,7 +1251,7 @@ void bnxt_update_vf_mac(struct bnxt *bp)
 {
 }
 
-int bnxt_approve_mac(struct bnxt *bp, u8 *mac, bool strict)
+int bnxt_approve_mac(struct bnxt *bp, const u8 *mac, bool strict)
 {
 	return 0;
 }

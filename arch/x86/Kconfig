@@ -142,6 +142,7 @@ config X86
 	select HAVE_ARCH_HUGE_VMAP		if X86_64 || X86_PAE
 	select HAVE_ARCH_JUMP_LABEL
 	select HAVE_ARCH_KASAN			if X86_64
+	select HAVE_ARCH_KASAN_VMALLOC		if X86_64
 	select HAVE_ARCH_KGDB
 	select HAVE_ARCH_MMAP_RND_BITS		if MMU
 	select HAVE_ARCH_MMAP_RND_COMPAT_BITS	if MMU && COMPAT
@@ -203,8 +204,8 @@ config X86
 	select HAVE_HARDLOCKUP_DETECTOR_PERF	if PERF_EVENTS && HAVE_PERF_EVENTS_NMI
 	select HAVE_PERF_REGS
 	select HAVE_PERF_USER_STACK_DUMP
-	select HAVE_RCU_TABLE_FREE		if PARAVIRT
-	select HAVE_RCU_TABLE_INVALIDATE	if HAVE_RCU_TABLE_FREE
+	select MMU_GATHER_RCU_TABLE_FREE		if PARAVIRT
+	select MMU_GATHER_MERGE_VMAS
 	select HAVE_REGS_AND_STACK_ACCESS_API
 	select HAVE_RELIABLE_STACKTRACE		if X86_64 && (UNWINDER_FRAME_POINTER || UNWINDER_ORC) && STACK_VALIDATION
 	select HAVE_STACKPROTECTOR		if CC_HAS_SANE_STACKPROTECTOR
@@ -845,6 +846,21 @@ config JAILHOUSE_GUEST
 	  This option allows to run Linux as guest in a Jailhouse non-root
 	  cell. You can leave this option disabled if you only want to start
 	  Jailhouse and run Linux afterwards in the root cell.
+
+config INTEL_TDX_GUEST
+	bool "Intel TDX (Trust Domain Extensions) - Guest Support"
+	depends on X86_64 && CPU_SUP_INTEL
+	depends on X86_X2APIC
+	select ARCH_HAS_CC_PLATFORM
+	select X86_MEM_ENCRYPT
+	select X86_MCE
+	help
+	  Support running as a guest under Intel TDX.  Without this support,
+	  the guest kernel can not boot or run under TDX.
+	  TDX includes memory encryption and integrity capabilities
+	  which protect the confidentiality and integrity of guest
+	  memory contents and CPU state. TDX guests are protected from
+	  some attacks from the VMM.
 
 endif #HYPERVISOR_GUEST
 
@@ -1517,14 +1533,20 @@ config X86_CPA_STATISTICS
 	  helps to determine the effectiveness of preserving large and huge
 	  page mappings when mapping protections are changed.
 
+config X86_MEM_ENCRYPT
+	select ARCH_HAS_FORCE_DMA_UNENCRYPTED
+	select DYNAMIC_PHYSICAL_MASK
+	select ARCH_HAS_RESTRICTED_VIRTIO_MEMORY_ACCESS
+	def_bool n
+
 config AMD_MEM_ENCRYPT
 	bool "AMD Secure Memory Encryption (SME) support"
 	depends on X86_64 && CPU_SUP_AMD
 	select DMA_COHERENT_POOL
-	select DYNAMIC_PHYSICAL_MASK
-	select ARCH_HAS_FORCE_DMA_UNENCRYPTED
 	select INSTRUCTION_DECODER
 	select ARCH_HAS_CC_PLATFORM
+	select ARCH_HAS_RESTRICTED_VIRTIO_MEMORY_ACCESS
+	select X86_MEM_ENCRYPT
 	---help---
 	  Say yes to enable support for the encryption of system memory.
 	  This requires an AMD processor that supports Secure Memory
@@ -1985,11 +2007,12 @@ config EFI
 	  platforms.
 
 config EFI_STUB
-       bool "EFI stub support"
-       depends on EFI && !X86_USE_3DNOW
-       select RELOCATABLE
-       ---help---
-          This kernel feature allows a bzImage to be loaded directly
+	bool "EFI stub support"
+	depends on EFI && !X86_USE_3DNOW
+	depends on $(cc-option,-mabi=ms) || X86_32
+	select RELOCATABLE
+	---help---
+	  This kernel feature allows a bzImage to be loaded directly
 	  by EFI firmware without the use of a bootloader.
 
 	  See Documentation/efi-stub.txt for more information.
@@ -2799,7 +2822,6 @@ config PCI_OLPC
 config PCI_XEN
 	def_bool y
 	depends on PCI && XEN
-	select SWIOTLB_XEN
 
 config PCI_DOMAINS
 	def_bool y

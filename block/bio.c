@@ -645,8 +645,6 @@ EXPORT_SYMBOL(bio_phys_segments);
 static int __bio_clone(struct bio *bio, struct bio *bio_src, gfp_t gfp)
 {
 	bio_set_flag(bio, BIO_CLONED);
-	if (bio_flagged(bio_src, BIO_THROTTLED))
-		bio_set_flag(bio, BIO_THROTTLED);
 	bio->bi_ioprio = bio_src->bi_ioprio;
 	bio->bi_write_hint = bio_src->bi_write_hint;
 	bio->bi_iter = bio_src->bi_iter;
@@ -679,14 +677,15 @@ struct bio *bio_clone_fast(struct bio *bio_src, gfp_t gfp, struct bio_set *bs)
 	if (!bio)
 		return NULL;
 
-	if (__bio_clone(bio, bio_src, gfp) < 0) {
-		bio_put(bio);
-		return NULL;
-	}
 	bio->bi_disk = bio_src->bi_disk;
 	bio->bi_partno = bio_src->bi_partno;
 	bio->bi_opf = bio_src->bi_opf;
 	bio->bi_io_vec = bio_src->bi_io_vec;
+
+	if (__bio_clone(bio, bio_src, gfp) < 0) {
+		bio_put(bio);
+		return NULL;
+	}
 
 	return bio;
 }

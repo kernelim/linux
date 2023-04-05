@@ -537,7 +537,7 @@ static void ceph_async_create_cb(struct ceph_mds_client *mdsc,
 
 		ceph_inode_shutdown(inode);
 
-		pr_warn("ceph: async create failure path=(%llx)%s result=%d!\n",
+		pr_warn("async create failure path=(%llx)%s result=%d!\n",
 			base, IS_ERR(path) ? "<<bad>>" : path, result);
 		ceph_mdsc_free_path(path, pathlen);
 	}
@@ -578,6 +578,7 @@ static int ceph_finish_async_create(struct inode *dir, struct dentry *dentry,
 	struct ceph_mds_reply_inode in = { };
 	struct ceph_mds_reply_info_in iinfo = { .in = &in };
 	struct ceph_inode_info *ci = ceph_inode(dir);
+	struct ceph_dentry_info *di = ceph_dentry(dentry);
 	struct inode *inode;
 	struct timespec64 now;
 	struct ceph_string *pool_ns;
@@ -617,10 +618,6 @@ static int ceph_finish_async_create(struct inode *dir, struct dentry *dentry,
 		/* Directories always inherit the setgid bit. */
 		if (S_ISDIR(mode))
 			mode |= S_ISGID;
-		else if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP) &&
-			 !in_group_p(dir->i_gid) &&
-			 !capable_wrt_inode_uidgid(dir, CAP_FSETID))
-			mode &= ~S_ISGID;
 	} else {
 		in.gid = cpu_to_le32(from_kgid(&init_user_ns, current_fsgid()));
 	}
@@ -674,6 +671,12 @@ static int ceph_finish_async_create(struct inode *dir, struct dentry *dentry,
 		*opened |= FILE_CREATED;
 		ret = finish_open(file, dentry, ceph_open, opened);
 	}
+
+	spin_lock(&dentry->d_lock);
+	di->flags &= ~CEPH_DENTRY_ASYNC_CREATE;
+	wake_up_bit(&di->flags, CEPH_DENTRY_ASYNC_CREATE_BIT);
+	spin_unlock(&dentry->d_lock);
+
 	return ret;
 }
 
@@ -700,6 +703,15 @@ int ceph_atomic_open(struct inode *dir, struct dentry *dentry,
 
 	if (dentry->d_name.len > NAME_MAX)
 		return -ENAMETOOLONG;
+
+	err = ceph_wait_on_conflict_unlink(dentry);
+	if (err)
+		return err;
+	/*
+	 * Do not truncate the file, since atomic_open is called before the
+	 * permission check. The caller will do the truncation afterward.
+	 */
+	flags &= ~O_TRUNC;
 
 	if (flags & O_CREAT) {
 		if (ceph_quota_is_max_files_exceeded(dir))
@@ -743,9 +755,16 @@ retry:
 		    (req->r_dir_caps =
 		      try_prep_async_create(dir, dentry, &lo,
 					    &req->r_deleg_ino))) {
+			struct ceph_dentry_info *di = ceph_dentry(dentry);
+
 			set_bit(CEPH_MDS_R_ASYNC, &req->r_req_flags);
 			req->r_args.open.flags |= cpu_to_le32(CEPH_O_EXCL);
 			req->r_callback = ceph_async_create_cb;
+
+			spin_lock(&dentry->d_lock);
+			di->flags |= CEPH_DENTRY_ASYNC_CREATE;
+			spin_unlock(&dentry->d_lock);
+
 			err = ceph_mdsc_submit_request(mdsc, dir, req);
 			if (!err) {
 				err = ceph_finish_async_create(dir, dentry,
@@ -764,9 +783,7 @@ retry:
 	}
 
 	set_bit(CEPH_MDS_R_PARENT_LOCKED, &req->r_req_flags);
-	err = ceph_mdsc_do_request(mdsc,
-				   (flags & (O_CREAT|O_TRUNC)) ? dir : NULL,
-				   req);
+	err = ceph_mdsc_do_request(mdsc, (flags & O_CREAT) ? dir : NULL, req);
 	if (err == -ENOENT) {
 		dentry = ceph_handle_snapdir(req, dentry);
 		if (IS_ERR(dentry)) {
@@ -1893,57 +1910,15 @@ out_unlocked:
  */
 static loff_t ceph_llseek(struct file *file, loff_t offset, int whence)
 {
-	struct inode *inode = file->f_mapping->host;
-	struct ceph_fs_client *fsc = ceph_inode_to_client(inode);
-	loff_t i_size;
-	loff_t ret;
-
-	inode_lock(inode);
-
 	if (whence == SEEK_END || whence == SEEK_DATA || whence == SEEK_HOLE) {
+		struct inode *inode = file_inode(file);
+		int ret;
+
 		ret = ceph_do_getattr(inode, CEPH_STAT_CAP_SIZE, false);
 		if (ret < 0)
-			goto out;
+			return ret;
 	}
-
-	i_size = i_size_read(inode);
-	switch (whence) {
-	case SEEK_END:
-		offset += i_size;
-		break;
-	case SEEK_CUR:
-		/*
-		 * Here we special-case the lseek(fd, 0, SEEK_CUR)
-		 * position-querying operation.  Avoid rewriting the "same"
-		 * f_pos value back to the file because a concurrent read(),
-		 * write() or lseek() might have altered it
-		 */
-		if (offset == 0) {
-			ret = file->f_pos;
-			goto out;
-		}
-		offset += file->f_pos;
-		break;
-	case SEEK_DATA:
-		if (offset < 0 || offset >= i_size) {
-			ret = -ENXIO;
-			goto out;
-		}
-		break;
-	case SEEK_HOLE:
-		if (offset < 0 || offset >= i_size) {
-			ret = -ENXIO;
-			goto out;
-		}
-		offset = i_size;
-		break;
-	}
-
-	ret = vfs_setpos(file, offset, max(i_size, fsc->max_file_size));
-
-out:
-	inode_unlock(inode);
-	return ret;
+	return generic_file_llseek(file, offset, whence);
 }
 
 static inline void ceph_zero_partial_page(

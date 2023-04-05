@@ -84,6 +84,15 @@ void gfs2_remove_from_ail(struct gfs2_bufdata *bd)
 	brelse(bd->bd_bh);
 }
 
+static int __gfs2_writepage(struct page *page, struct writeback_control *wbc,
+		       void *data)
+{
+	struct address_space *mapping = data;
+	int ret = mapping->a_ops->writepage(page, wbc);
+	mapping_set_error(mapping, ret);
+	return ret;
+}
+
 /**
  * gfs2_ail1_start_one - Start I/O on a part of the AIL
  * @sdp: the filesystem
@@ -135,7 +144,7 @@ __acquires(&sdp->sd_ail_lock)
 		if (!mapping)
 			continue;
 		spin_unlock(&sdp->sd_ail_lock);
-		ret = generic_writepages(mapping, wbc);
+		ret = write_cache_pages(mapping, wbc, __gfs2_writepage, mapping);
 		if (need_resched()) {
 			blk_finish_plug(plug);
 			cond_resched();
@@ -187,8 +196,7 @@ restart:
 	spin_unlock(&sdp->sd_ail_lock);
 	blk_finish_plug(&plug);
 	if (ret) {
-		gfs2_lm(sdp, "gfs2_ail1_start_one (generic_writepages) "
-			"returned: %d\n", ret);
+		gfs2_lm(sdp, "gfs2_ail1_start_one returned: %d\n", ret);
 		gfs2_withdraw(sdp);
 	}
 	trace_gfs2_ail_flush(sdp, wbc, 0);

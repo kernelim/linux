@@ -563,13 +563,14 @@ static void md_end_flush(struct bio *bio)
 	struct md_rdev *rdev = bio->bi_private;
 	struct mddev *mddev = rdev->mddev;
 
+	bio_put(bio);
+
 	rdev_dec_pending(rdev, mddev);
 
 	if (atomic_dec_and_test(&mddev->flush_pending)) {
 		/* The pre-request flush has finished */
 		queue_work(md_wq, &mddev->flush_work);
 	}
-	bio_put(bio);
 }
 
 static void md_submit_flush_data(struct work_struct *ws);
@@ -765,6 +766,7 @@ static dev_t mddev_alloc_unit(void)
 	return dev;
 }
 
+#ifndef MODULE
 static struct mddev *mddev_find(dev_t unit)
 {
 	struct mddev *mddev;
@@ -780,6 +782,7 @@ static struct mddev *mddev_find(dev_t unit)
 
 	return mddev;
 }
+#endif
 
 static struct mddev *mddev_alloc(dev_t unit)
 {
@@ -972,10 +975,12 @@ static void super_written(struct bio *bio)
 	} else
 		clear_bit(LastDev, &rdev->flags);
 
+	bio_put(bio);
+
+	rdev_dec_pending(rdev, mddev);
+
 	if (atomic_dec_and_test(&mddev->pending_writes))
 		wake_up(&mddev->sb_wait);
-	rdev_dec_pending(rdev, mddev);
-	bio_put(bio);
 }
 
 void md_super_write(struct mddev *mddev, struct md_rdev *rdev,
@@ -4886,8 +4891,21 @@ action_store(struct mddev *mddev, const char *page, size_t len)
 			if (work_pending(&mddev->del_work))
 				flush_workqueue(md_misc_wq);
 			if (mddev->sync_thread) {
+				sector_t save_rp = mddev->reshape_position;
+
+				mddev_unlock(mddev);
 				set_bit(MD_RECOVERY_INTR, &mddev->recovery);
-				md_reap_sync_thread(mddev, true);
+				md_unregister_thread(&mddev->sync_thread);
+				mddev_lock_nointr(mddev);
+				/*
+				 * set RECOVERY_INTR again and restore reshape
+				 * position in case others changed them after
+				 * got lock, eg, reshape_position_store and
+				 * md_check_recovery.
+				 */
+				mddev->reshape_position = save_rp;
+				set_bit(MD_RECOVERY_INTR, &mddev->recovery);
+				md_reap_sync_thread(mddev);
 			}
 			mddev_unlock(mddev);
 		}
@@ -5057,7 +5075,7 @@ static ssize_t
 sync_speed_show(struct mddev *mddev, char *page)
 {
 	unsigned long resync, dt, db;
-	if (mddev->curr_resync == 0)
+	if (mddev->curr_resync == MD_RESYNC_NONE)
 		return sprintf(page, "none\n");
 	resync = mddev->curr_mark_cnt - atomic_read(&mddev->recovery_active);
 	dt = (jiffies - mddev->resync_mark) / HZ;
@@ -5076,8 +5094,8 @@ sync_completed_show(struct mddev *mddev, char *page)
 	if (!test_bit(MD_RECOVERY_RUNNING, &mddev->recovery))
 		return sprintf(page, "none\n");
 
-	if (mddev->curr_resync == 1 ||
-	    mddev->curr_resync == 2)
+	if (mddev->curr_resync == MD_RESYNC_YIELDED ||
+	    mddev->curr_resync == MD_RESYNC_DELAYED)
 		return sprintf(page, "delayed\n");
 
 	if (test_bit(MD_RECOVERY_SYNC, &mddev->recovery) ||
@@ -5682,7 +5700,7 @@ int mddev_init_writes_pending(struct mddev *mddev)
 }
 EXPORT_SYMBOL_GPL(mddev_init_writes_pending);
 
-static int md_alloc(dev_t dev, char *name)
+int md_alloc(dev_t dev, char *name)
 {
 	/*
 	 * If dev is zero, name is the name of a device to allocate with
@@ -5706,6 +5724,7 @@ static int md_alloc(dev_t dev, char *name)
 	 * removed (mddev_delayed_delete).
 	 */
 	flush_workqueue(md_misc_wq);
+	flush_workqueue(md_rdev_misc_wq);
 
 	mutex_lock(&disks_mutex);
 	mddev = mddev_alloc(dev);
@@ -6267,7 +6286,8 @@ static void __md_stop_writes(struct mddev *mddev)
 		flush_workqueue(md_misc_wq);
 	if (mddev->sync_thread) {
 		set_bit(MD_RECOVERY_INTR, &mddev->recovery);
-		md_reap_sync_thread(mddev, true);
+		md_unregister_thread(&mddev->sync_thread);
+		md_reap_sync_thread(mddev);
 	}
 
 	del_timer_sync(&mddev->safemode_timer);
@@ -6336,6 +6356,7 @@ void md_stop(struct mddev *mddev)
 	/* stop the array and free an attached data structures.
 	 * This is called from dm-raid
 	 */
+	__md_stop_writes(mddev);
 	__md_stop(mddev);
 	bioset_exit(&mddev->bio_set);
 	bioset_exit(&mddev->sync_set);
@@ -8109,16 +8130,26 @@ static int status_resync(struct seq_file *seq, struct mddev *mddev)
 		max_sectors = mddev->dev_sectors;
 
 	resync = mddev->curr_resync;
-	if (resync <= 3) {
+	if (resync < MD_RESYNC_ACTIVE) {
 		if (test_bit(MD_RECOVERY_DONE, &mddev->recovery))
 			/* Still cleaning up */
 			resync = max_sectors;
-	} else if (resync > max_sectors)
+	} else if (resync > max_sectors) {
 		resync = max_sectors;
-	else
+	} else {
 		resync -= atomic_read(&mddev->recovery_active);
+		if (resync < MD_RESYNC_ACTIVE) {
+			/*
+			 * Resync has started, but the subtraction has
+			 * yielded one of the special values. Force it
+			 * to active to ensure the status reports an
+			 * active resync.
+			 */
+			resync = MD_RESYNC_ACTIVE;
+		}
+	}
 
-	if (resync == 0) {
+	if (resync == MD_RESYNC_NONE) {
 		if (test_bit(MD_RESYNCING_REMOTE, &mddev->recovery)) {
 			struct md_rdev *rdev;
 
@@ -8142,7 +8173,7 @@ static int status_resync(struct seq_file *seq, struct mddev *mddev)
 		}
 		return 0;
 	}
-	if (resync < 3) {
+	if (resync < MD_RESYNC_ACTIVE) {
 		seq_printf(seq, "\tresync=DELAYED");
 		return 1;
 	}
@@ -8242,7 +8273,6 @@ static void *md_seq_start(struct seq_file *seq, loff_t *pos)
 	list_for_each(tmp,&all_mddevs)
 		if (!l--) {
 			mddev = list_entry(tmp, struct mddev, all_mddevs);
-			mddev_get(mddev);
 			spin_unlock(&all_mddevs_lock);
 			return mddev;
 		}
@@ -8821,13 +8851,7 @@ void md_do_sync(struct md_thread *thread)
 
 	mddev->last_sync_action = action ?: desc;
 
-	/* we overload curr_resync somewhat here.
-	 * 0 == not engaged in resync at all
-	 * 2 == checking that there is no conflict with another sync
-	 * 1 == like 2, but have yielded to allow conflicting resync to
-	 *		commence
-	 * other == active in resync - this many blocks
-	 *
+	/*
 	 * Before starting a resync we must have set curr_resync to
 	 * 2, and then checked that every "conflicting" array has curr_resync
 	 * less than ours.  When we find one that is the same or higher
@@ -8839,7 +8863,7 @@ void md_do_sync(struct md_thread *thread)
 
 	do {
 		int mddev2_minor = -1;
-		mddev->curr_resync = 2;
+		mddev->curr_resync = MD_RESYNC_DELAYED;
 
 	try_again:
 		if (test_bit(MD_RECOVERY_INTR, &mddev->recovery))
@@ -8851,12 +8875,14 @@ void md_do_sync(struct md_thread *thread)
 			&&  mddev2->curr_resync
 			&&  match_mddev_units(mddev, mddev2)) {
 				DEFINE_WAIT(wq);
-				if (mddev < mddev2 && mddev->curr_resync == 2) {
+				if (mddev < mddev2 &&
+				    mddev->curr_resync == MD_RESYNC_DELAYED) {
 					/* arbitrarily yield */
-					mddev->curr_resync = 1;
+					mddev->curr_resync = MD_RESYNC_YIELDED;
 					wake_up(&resync_wait);
 				}
-				if (mddev > mddev2 && mddev->curr_resync == 1)
+				if (mddev > mddev2 &&
+				    mddev->curr_resync == MD_RESYNC_YIELDED)
 					/* no need to wait here, we can wait the next
 					 * time 'round when curr_resync == 2
 					 */
@@ -8884,7 +8910,7 @@ void md_do_sync(struct md_thread *thread)
 				finish_wait(&resync_wait, &wq);
 			}
 		}
-	} while (mddev->curr_resync < 2);
+	} while (mddev->curr_resync < MD_RESYNC_DELAYED);
 
 	j = 0;
 	if (test_bit(MD_RECOVERY_SYNC, &mddev->recovery)) {
@@ -8968,7 +8994,7 @@ void md_do_sync(struct md_thread *thread)
 			 desc, mdname(mddev));
 		mddev->curr_resync = j;
 	} else
-		mddev->curr_resync = 3; /* no longer delayed */
+		mddev->curr_resync = MD_RESYNC_ACTIVE; /* no longer delayed */
 	mddev->curr_resync_completed = j;
 	sysfs_notify_dirent_safe(mddev->sysfs_completed);
 	md_new_event();
@@ -9103,14 +9129,14 @@ void md_do_sync(struct md_thread *thread)
 
 	if (!test_bit(MD_RECOVERY_RESHAPE, &mddev->recovery) &&
 	    !test_bit(MD_RECOVERY_INTR, &mddev->recovery) &&
-	    mddev->curr_resync > 3) {
+	    mddev->curr_resync >= MD_RESYNC_ACTIVE) {
 		mddev->curr_resync_completed = mddev->curr_resync;
 		sysfs_notify_dirent_safe(mddev->sysfs_completed);
 	}
 	mddev->pers->sync_request(mddev, max_sectors, &skipped);
 
 	if (!test_bit(MD_RECOVERY_CHECK, &mddev->recovery) &&
-	    mddev->curr_resync > 3) {
+	    mddev->curr_resync >= MD_RESYNC_ACTIVE) {
 		if (test_bit(MD_RECOVERY_SYNC, &mddev->recovery)) {
 			if (test_bit(MD_RECOVERY_INTR, &mddev->recovery)) {
 				if (mddev->curr_resync >= mddev->recovery_cp) {
@@ -9175,7 +9201,7 @@ void md_do_sync(struct md_thread *thread)
 	} else if (test_bit(MD_RECOVERY_REQUESTED, &mddev->recovery))
 		mddev->resync_min = mddev->curr_resync_completed;
 	set_bit(MD_RECOVERY_DONE, &mddev->recovery);
-	mddev->curr_resync = 0;
+	mddev->curr_resync = MD_RESYNC_NONE;
 	spin_unlock(&mddev->lock);
 
 	wake_up(&resync_wait);
@@ -9396,7 +9422,8 @@ void md_check_recovery(struct mddev *mddev)
 			 * ->spare_active and clear saved_raid_disk
 			 */
 			set_bit(MD_RECOVERY_INTR, &mddev->recovery);
-			md_reap_sync_thread(mddev, true);
+			md_unregister_thread(&mddev->sync_thread);
+			md_reap_sync_thread(mddev);
 			clear_bit(MD_RECOVERY_RECOVER, &mddev->recovery);
 			clear_bit(MD_RECOVERY_NEEDED, &mddev->recovery);
 			clear_bit(MD_SB_CHANGE_PENDING, &mddev->sb_flags);
@@ -9431,7 +9458,8 @@ void md_check_recovery(struct mddev *mddev)
 			goto unlock;
 		}
 		if (mddev->sync_thread) {
-			md_reap_sync_thread(mddev, true);
+			md_unregister_thread(&mddev->sync_thread);
+			md_reap_sync_thread(mddev);
 			goto unlock;
 		}
 		/* Set RUNNING before clearing NEEDED to avoid
@@ -9504,18 +9532,13 @@ void md_check_recovery(struct mddev *mddev)
 }
 EXPORT_SYMBOL(md_check_recovery);
 
-void md_reap_sync_thread(struct mddev *mddev, bool reconfig_mutex_held)
+void md_reap_sync_thread(struct mddev *mddev)
 {
 	struct md_rdev *rdev;
 	sector_t old_dev_sectors = mddev->dev_sectors;
 	bool is_reshaped = false;
 
-	if (reconfig_mutex_held)
-		mddev_unlock(mddev);
-	/* resync has finished, collect result */
-	md_unregister_thread(&mddev->sync_thread);
-	if (reconfig_mutex_held)
-		mddev_lock_nointr(mddev);
+	/* sync_thread should be unregistered, collect result */
 	if (!test_bit(MD_RECOVERY_INTR, &mddev->recovery) &&
 	    !test_bit(MD_RECOVERY_REQUESTED, &mddev->recovery) &&
 	    mddev->degraded != mddev->raid_disks) {
@@ -9563,6 +9586,7 @@ void md_reap_sync_thread(struct mddev *mddev, bool reconfig_mutex_held)
 	wake_up(&resync_wait);
 	/* flag recovery needed just to double check */
 	set_bit(MD_RECOVERY_NEEDED, &mddev->recovery);
+	sysfs_notify_dirent_safe(mddev->sysfs_completed);
 	sysfs_notify_dirent_safe(mddev->sysfs_action);
 	md_new_event();
 	if (mddev->event_work.func)

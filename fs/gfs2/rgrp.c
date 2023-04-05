@@ -1199,9 +1199,8 @@ static void rgrp_set_bitmap_flags(struct gfs2_rgrpd *rgd)
  * Returns: errno
  */
 
-int gfs2_rgrp_go_instantiate(struct gfs2_holder *gh)
+int gfs2_rgrp_go_instantiate(struct gfs2_glock *gl)
 {
-	struct gfs2_glock *gl = gh->gh_gl;
 	struct gfs2_rgrpd *rgd = gl->gl_object;
 	struct gfs2_sbd *sdp = rgd->rd_sbd;
 	unsigned int length = rgd->rd_length;
@@ -1420,7 +1419,8 @@ int gfs2_fitrim(struct file *filp, void __user *argp)
 
 	start = r.start >> bs_shift;
 	end = start + (r.len >> bs_shift);
-	minlen = max_t(u64, r.minlen,
+	minlen = max_t(u64, r.minlen, sdp->sd_sb.sb_bsize);
+	minlen = max_t(u64, minlen,
 		       q->limits.discard_granularity) >> bs_shift;
 
 	if (end <= start || minlen > sdp->sd_max_rg_data)
@@ -1882,7 +1882,7 @@ static void try_rgrp_unlink(struct gfs2_rgrpd *rgd, u64 *last_unlinked, u64 skip
 		 */
 		ip = gl->gl_object;
 
-		if (ip || !gfs2_queue_delete_work(gl, 0))
+		if (ip || !gfs2_queue_try_to_evict(gl))
 			gfs2_glock_put(gl);
 		else
 			found++;

@@ -16,4 +16,7 @@ extern ssize_t xfs_vn_listxattr(struct dentry *, char *data, size_t size);
 extern void xfs_setattr_time(struct xfs_inode *ip, struct iattr *iattr);
 extern int xfs_vn_setattr_size(struct dentry *dentry, struct iattr *vap);
 
+int xfs_inode_init_security(struct inode *inode, struct inode *dir,
+		const struct qstr *qstr);
+
 #endif /* __XFS_IOPS_H__ */

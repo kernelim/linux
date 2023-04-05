@@ -131,6 +131,40 @@ typedef enum {
 	PHY_INTERFACE_MODE_MAX,
 } phy_interface_t;
 
+/* PHY interface mode bitmap handling */
+#define DECLARE_PHY_INTERFACE_MASK(name) \
+	DECLARE_BITMAP(name, PHY_INTERFACE_MODE_MAX)
+
+static inline void phy_interface_zero(unsigned long *intf)
+{
+	bitmap_zero(intf, PHY_INTERFACE_MODE_MAX);
+}
+
+static inline bool phy_interface_empty(const unsigned long *intf)
+{
+	return bitmap_empty(intf, PHY_INTERFACE_MODE_MAX);
+}
+
+static inline void phy_interface_and(unsigned long *dst, const unsigned long *a,
+				     const unsigned long *b)
+{
+	bitmap_and(dst, a, b, PHY_INTERFACE_MODE_MAX);
+}
+
+static inline void phy_interface_or(unsigned long *dst, const unsigned long *a,
+				    const unsigned long *b)
+{
+	bitmap_or(dst, a, b, PHY_INTERFACE_MODE_MAX);
+}
+
+static inline void phy_interface_set_rgmii(unsigned long *intf)
+{
+	__set_bit(PHY_INTERFACE_MODE_RGMII, intf);
+	__set_bit(PHY_INTERFACE_MODE_RGMII_ID, intf);
+	__set_bit(PHY_INTERFACE_MODE_RGMII_RXID, intf);
+	__set_bit(PHY_INTERFACE_MODE_RGMII_TXID, intf);
+}
+
 /**
  * phy_supported_speeds - return all speeds currently supported by a phy device
  * @phy: The phy device to return supported speeds of.
@@ -1322,10 +1356,37 @@ struct phy_device *phy_device_create(struct mii_bus *bus, int addr, u32 phy_id,
 				     bool is_c45,
 				     struct phy_c45_device_ids *c45_ids);
 #if IS_ENABLED(CONFIG_PHYLIB)
+struct mdio_device *fwnode_mdio_find_device(struct fwnode_handle *fwnode);
+struct phy_device *fwnode_phy_find_device(struct fwnode_handle *phy_fwnode);
+struct phy_device *device_phy_find_device(struct device *dev);
+struct fwnode_handle *fwnode_get_phy_node(struct fwnode_handle *fwnode);
 struct phy_device *get_phy_device(struct mii_bus *bus, int addr, bool is_c45);
 int phy_device_register(struct phy_device *phy);
 void phy_device_free(struct phy_device *phydev);
 #else
+static inline
+struct mdio_device *fwnode_mdio_find_device(struct fwnode_handle *fwnode)
+{
+	return 0;
+}
+
+static inline
+struct phy_device *fwnode_phy_find_device(struct fwnode_handle *phy_fwnode)
+{
+	return NULL;
+}
+
+static inline struct phy_device *device_phy_find_device(struct device *dev)
+{
+	return NULL;
+}
+
+static inline
+struct fwnode_handle *fwnode_get_phy_node(struct fwnode_handle *fwnode)
+{
+	return NULL;
+}
+
 static inline
 struct phy_device *get_phy_device(struct mii_bus *bus, int addr, bool is_c45)
 {

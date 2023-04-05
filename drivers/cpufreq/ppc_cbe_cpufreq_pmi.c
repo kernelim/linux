@@ -25,9 +25,9 @@
 #include <linux/timer.h>
 #include <linux/init.h>
 #include <linux/of_platform.h>
+#include <linux/slab.h>
 
 #include <asm/processor.h>
-#include <asm/prom.h>
 #include <asm/pmi.h>
 #include <asm/cell-regs.h>
 

@@ -16,6 +16,8 @@
 #include <linux/export.h>
 #include <linux/list.h>
 
+#include "dev.h"
+
 /*
  * General list handling functions
  */

@@ -36,8 +36,8 @@
 #define MLX5_CT_STATE_RELATED_BIT BIT(5)
 #define MLX5_CT_STATE_INVALID_BIT BIT(6)
 
-#define MLX5_CT_LABELS_BITS (mlx5e_tc_attr_to_reg_mappings[LABELS_TO_REG].mlen)
-#define MLX5_CT_LABELS_MASK GENMASK(MLX5_CT_LABELS_BITS - 1, 0)
+#define MLX5_CT_LABELS_BITS MLX5_REG_MAPPING_MBITS(LABELS_TO_REG)
+#define MLX5_CT_LABELS_MASK MLX5_REG_MAPPING_MASK(LABELS_TO_REG)
 
 /* Statically allocate modify actions for
  * ipv6 and port nat (5) + tuple fields (4) + nic mode zone restore (1) = 10.
@@ -1821,7 +1821,6 @@ __mlx5_tc_ct_flow_offload(struct mlx5_tc_ct_priv *ct_priv,
 
 	ct_flow = kzalloc(sizeof(*ct_flow), GFP_KERNEL);
 	if (!ct_flow) {
-		kfree(ct_flow);
 		return ERR_PTR(-ENOMEM);
 	}
 
@@ -2063,7 +2062,7 @@ mlx5_tc_ct_init_check_support(struct mlx5e_priv *priv,
 		/* Ignore_flow_level support isn't supported by default for VFs and so post_act
 		 * won't be supported. Skip showing error msg.
 		 */
-		if (priv->mdev->coredev_type != MLX5_COREDEV_VF)
+		if (priv->mdev->coredev_type == MLX5_COREDEV_PF)
 			err_msg = "post action is missing";
 		err = -EOPNOTSUPP;
 		goto out_err;
@@ -2081,14 +2080,9 @@ out_err:
 static void
 mlx5_ct_tc_create_dbgfs(struct mlx5_tc_ct_priv *ct_priv)
 {
-	bool is_fdb = ct_priv->ns_type == MLX5_FLOW_NAMESPACE_FDB;
 	struct mlx5_tc_ct_debugfs *ct_dbgfs = &ct_priv->debugfs;
-	char dirname[16] = {};
 
-	if (sscanf(dirname, "ct_%s", is_fdb ? "fdb" : "nic") < 0)
-		return;
-
-	ct_dbgfs->root = debugfs_create_dir(dirname, mlx5_debugfs_get_dev_root(ct_priv->dev));
+	ct_dbgfs->root = debugfs_create_dir("ct", mlx5_debugfs_get_dev_root(ct_priv->dev));
 	debugfs_create_atomic_t("offloaded", 0400, ct_dbgfs->root,
 				&ct_dbgfs->stats.offloaded);
 	debugfs_create_atomic_t("rx_dropped", 0400, ct_dbgfs->root,

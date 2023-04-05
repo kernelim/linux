@@ -886,8 +886,8 @@ static int nvme_rdma_configure_admin_queue(struct nvme_rdma_ctrl *ctrl,
 	/* Check rdma_pi_enable before checking T10-PI capability */
 
 	if(rdma_pi_enable) {
-		if (ctrl->device->dev->attrs.device_cap_flags &
-			IB_DEVICE_INTEGRITY_HANDOVER)
+		if (ctrl->device->dev->attrs.kernel_cap_flags &
+			IBK_INTEGRITY_HANDOVER)
 			pi_capable = true;
 	}
 

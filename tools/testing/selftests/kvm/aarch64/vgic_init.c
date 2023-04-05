@@ -381,8 +381,8 @@ static void test_v3_new_redist_regions(void)
 	v = vm_gic_create_with_vcpus(KVM_DEV_TYPE_ARM_VGIC_V3, NR_VCPUS);
 	subtest_v3_redist_regions(&v);
 
-	_kvm_device_access(v.gic_fd, KVM_DEV_ARM_VGIC_GRP_ADDR,
-			  KVM_VGIC_V3_ADDR_TYPE_REDIST_REGION, dummy, true);
+	ret = _kvm_device_access(v.gic_fd, KVM_DEV_ARM_VGIC_GRP_ADDR,
+				 KVM_VGIC_V3_ADDR_TYPE_REDIST_REGION, dummy, true);
 	TEST_ASSERT(ret && errno == EFAULT,
 		    "register a third region allowing to cover the 4 vcpus");
 
@@ -426,8 +426,9 @@ static void test_v3_typer_accesses(void)
 			  KVM_DEV_ARM_VGIC_CTRL_INIT, NULL, true);
 
 	for (i = 0; i < NR_VCPUS ; i++) {
-		ret = access_v3_redist_reg(v.gic_fd, 0, GICR_TYPER, &val, false);
-		TEST_ASSERT(!ret && !val, "read GICR_TYPER before rdist region setting");
+		ret = access_v3_redist_reg(v.gic_fd, i, GICR_TYPER, &val, false);
+		TEST_ASSERT(!ret && val == i * 0x100,
+			    "read GICR_TYPER before rdist region setting");
 	}
 
 	addr = REDIST_REGION_ATTR_ADDR(2, 0x200000, 0, 0);
@@ -670,7 +671,7 @@ int test_kvm_device(uint32_t gic_dev_type)
 
 	if (!_kvm_create_device(v.vm, other, true, &fd)) {
 		ret = _kvm_create_device(v.vm, other, false, &fd);
-		TEST_ASSERT(ret && errno == EINVAL,
+		TEST_ASSERT(ret && (errno == EINVAL || errno == EEXIST),
 				"create GIC device while other version exists");
 	}
 
@@ -698,6 +699,7 @@ int main(int ac, char **av)
 {
 	int ret;
 	int pa_bits;
+	int cnt_impl = 0;
 
 	pa_bits = vm_guest_mode_params[VM_MODE_DEFAULT].pa_bits;
 	max_phys_size = 1ULL << pa_bits;
@@ -706,17 +708,19 @@ int main(int ac, char **av)
 	if (!ret) {
 		pr_info("Running GIC_v3 tests.\n");
 		run_tests(KVM_DEV_TYPE_ARM_VGIC_V3);
-		return 0;
+		cnt_impl++;
 	}
 
 	ret = test_kvm_device(KVM_DEV_TYPE_ARM_VGIC_V2);
 	if (!ret) {
 		pr_info("Running GIC_v2 tests.\n");
 		run_tests(KVM_DEV_TYPE_ARM_VGIC_V2);
-		return 0;
+		cnt_impl++;
 	}
 
-	print_skip("No GICv2 nor GICv3 support");
-	exit(KSFT_SKIP);
+	if (!cnt_impl) {
+		print_skip("No GICv2 nor GICv3 support");
+		exit(KSFT_SKIP);
+	}
 	return 0;
 }

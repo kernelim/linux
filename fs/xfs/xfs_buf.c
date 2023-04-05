@@ -10,7 +10,6 @@
 #include "xfs_format.h"
 #include "xfs_log_format.h"
 #include "xfs_trans_resv.h"
-#include "xfs_sb.h"
 #include "xfs_mount.h"
 #include "xfs_trace.h"
 #include "xfs_log.h"
@@ -19,6 +18,7 @@
 #include "xfs_buf_item.h"
 #include "xfs_errortag.h"
 #include "xfs_error.h"
+#include "xfs_ag.h"
 
 static kmem_zone_t *xfs_buf_zone;
 
@@ -79,7 +79,7 @@ static inline int
 xfs_buf_vmap_len(
 	struct xfs_buf	*bp)
 {
-	return (bp->b_page_count * PAGE_SIZE) - bp->b_offset;
+	return (bp->b_page_count * PAGE_SIZE);
 }
 
 /*
@@ -329,8 +329,8 @@ xfs_buf_free(
 		uint		i;
 
 		if (xfs_buf_is_vmapped(bp))
-			vm_unmap_ram(bp->b_addr - bp->b_offset,
-					bp->b_page_count);
+			vm_unmap_ram(bp->b_addr, bp->b_page_count);
+
 
 		for (i = 0; i < bp->b_page_count; i++) {
 			struct page	*page = bp->b_pages[i];
@@ -347,65 +347,55 @@ xfs_buf_free(
 	kmem_cache_free(xfs_buf_zone, bp);
 }
 
-/*
- * Allocates all the pages for buffer in question and builds it's page list.
- */
-STATIC int
-xfs_buf_allocate_memory(
-	struct xfs_buf		*bp,
-	uint			flags)
+static int
+xfs_buf_alloc_kmem(
+	struct xfs_buf	*bp,
+	size_t		size,
+	xfs_buf_flags_t	flags)
 {
-	size_t			size;
-	size_t			nbytes, offset;
-	gfp_t			gfp_mask = xb_to_gfp(flags);
-	unsigned short		page_count, i;
-	xfs_off_t		start, end;
-	int			error;
-	xfs_km_flags_t		kmflag_mask = 0;
+	int		align_mask = xfs_buftarg_dma_alignment(bp->b_target);
+	xfs_km_flags_t	kmflag_mask = KM_NOFS;
 
-	/*
-	 * assure zeroed buffer for non-read cases.
-	 */
-	if (!(flags & XBF_READ)) {
+	/* Assure zeroed buffer for non-read cases. */
+	if (!(flags & XBF_READ))
 		kmflag_mask |= KM_ZERO;
+
+	bp->b_addr = kmem_alloc_io(size, align_mask, kmflag_mask);
+	if (!bp->b_addr)
+		return -ENOMEM;
+
+	if (((unsigned long)(bp->b_addr + size - 1) & PAGE_MASK) !=
+	    ((unsigned long)bp->b_addr & PAGE_MASK)) {
+		/* b_addr spans two pages - use alloc_page instead */
+		kmem_free(bp->b_addr);
+		bp->b_addr = NULL;
+		return -ENOMEM;
+	}
+	bp->b_offset = offset_in_page(bp->b_addr);
+	bp->b_pages = bp->b_page_array;
+	bp->b_pages[0] = kmem_to_page(bp->b_addr);
+	bp->b_page_count = 1;
+	bp->b_flags |= _XBF_KMEM;
+	return 0;
+}
+
+static int
+xfs_buf_alloc_pages(
+	struct xfs_buf	*bp,
+	uint		page_count,
+	xfs_buf_flags_t	flags)
+{
+	gfp_t		gfp_mask = xb_to_gfp(flags);
+	size_t		size;
+	size_t		offset;
+	size_t		nbytes;
+	int		i;
+	int		error;
+
+	/* Assure zeroed buffer for non-read cases. */
+	if (!(flags & XBF_READ))
 		gfp_mask |= __GFP_ZERO;
-	}
 
-	/*
-	 * for buffers that are contained within a single page, just allocate
-	 * the memory from the heap - there's no need for the complexity of
-	 * page arrays to keep allocation down to order 0.
-	 */
-	size = BBTOB(bp->b_length);
-	if (size < PAGE_SIZE) {
-		int align_mask = xfs_buftarg_dma_alignment(bp->b_target);
-		bp->b_addr = kmem_alloc_io(size, align_mask,
-					   KM_NOFS | kmflag_mask);
-		if (!bp->b_addr) {
-			/* low memory - use alloc_page loop instead */
-			goto use_alloc_page;
-		}
-
-		if (((unsigned long)(bp->b_addr + size - 1) & PAGE_MASK) !=
-		    ((unsigned long)bp->b_addr & PAGE_MASK)) {
-			/* b_addr spans two pages - use alloc_page instead */
-			kmem_free(bp->b_addr);
-			bp->b_addr = NULL;
-			goto use_alloc_page;
-		}
-		bp->b_offset = offset_in_page(bp->b_addr);
-		bp->b_pages = bp->b_page_array;
-		bp->b_pages[0] = kmem_to_page(bp->b_addr);
-		bp->b_page_count = 1;
-		bp->b_flags |= _XBF_KMEM;
-		return 0;
-	}
-
-use_alloc_page:
-	start = BBTOB(bp->b_maps[0].bm_bn) >> PAGE_SHIFT;
-	end = (BBTOB(bp->b_maps[0].bm_bn + bp->b_length) + PAGE_SIZE - 1)
-								>> PAGE_SHIFT;
-	page_count = end - start;
 	error = _xfs_buf_get_pages(bp, page_count);
 	if (unlikely(error))
 		return error;
@@ -458,6 +448,38 @@ out_free_pages:
 	return error;
 }
 
+
+/*
+ * Allocates all the pages for buffer in question and builds it's page list.
+ */
+static int
+xfs_buf_allocate_memory(
+	struct xfs_buf		*bp,
+	uint			flags)
+{
+	size_t			size;
+	xfs_off_t		start, end;
+	int			error;
+
+	/*
+	 * For buffers that fit entirely within a single page, first attempt to
+	 * allocate the memory from the heap to minimise memory usage. If we
+	 * can't get heap memory for these small buffers, we fall back to using
+	 * the page allocator.
+	 */
+	size = BBTOB(bp->b_length);
+	if (size < PAGE_SIZE) {
+		error = xfs_buf_alloc_kmem(bp, size, flags);
+		if (!error)
+			return 0;
+	}
+
+	start = BBTOB(bp->b_maps[0].bm_bn) >> PAGE_SHIFT;
+	end = (BBTOB(bp->b_maps[0].bm_bn + bp->b_length) + PAGE_SIZE - 1)
+								>> PAGE_SHIFT;
+	return xfs_buf_alloc_pages(bp, end - start, flags);
+}
+
 /*
  *	Map buffer into kernel address-space if necessary.
  */
@@ -469,7 +491,7 @@ _xfs_buf_map_pages(
 	ASSERT(bp->b_flags & _XBF_PAGES);
 	if (bp->b_page_count == 1) {
 		/* A single page buffer is always mappable */
-		bp->b_addr = page_address(bp->b_pages[0]) + bp->b_offset;
+		bp->b_addr = page_address(bp->b_pages[0]);
 	} else if (flags & XBF_UNMAPPED) {
 		bp->b_addr = NULL;
 	} else {
@@ -496,7 +518,6 @@ _xfs_buf_map_pages(
 
 		if (!bp->b_addr)
 			return -ENOMEM;
-		bp->b_addr += bp->b_offset;
 	}
 
 	return 0;
@@ -707,7 +728,7 @@ xfs_buf_get_map(
 {
 	struct xfs_buf		*bp;
 	struct xfs_buf		*new_bp;
-	int			error = 0;
+	int			error;
 
 	*bpp = NULL;
 	error = xfs_buf_find(target, map, nmaps, flags, NULL, &bp);
@@ -721,16 +742,12 @@ xfs_buf_get_map(
 		return error;
 
 	error = xfs_buf_allocate_memory(new_bp, flags);
-	if (error) {
-		xfs_buf_free(new_bp);
-		return error;
-	}
+	if (error)
+		goto out_free_buf;
 
 	error = xfs_buf_find(target, map, nmaps, flags, new_bp, &bp);
-	if (error) {
-		xfs_buf_free(new_bp);
-		return error;
-	}
+	if (error)
+		goto out_free_buf;
 
 	if (bp != new_bp)
 		xfs_buf_free(new_bp);
@@ -758,6 +775,9 @@ found:
 	trace_xfs_buf_get(bp, flags, _RET_IP_);
 	*bpp = bp;
 	return 0;
+out_free_buf:
+	xfs_buf_free(new_bp);
+	return error;
 }
 
 int
@@ -951,7 +971,7 @@ xfs_buf_get_uncached(
 	struct xfs_buf		**bpp)
 {
 	unsigned long		page_count;
-	int			error, i;
+	int			error;
 	struct xfs_buf		*bp;
 	DEFINE_SINGLE_BUF_MAP(map, XFS_BUF_DADDR_NULL, numblks);
 
@@ -960,41 +980,26 @@ xfs_buf_get_uncached(
 	/* flags might contain irrelevant bits, pass only what we care about */
 	error = _xfs_buf_alloc(target, &map, 1, flags & XBF_NO_IOACCT, &bp);
 	if (error)
-		goto fail;
+		return error;
 
 	page_count = PAGE_ALIGN(numblks << BBSHIFT) >> PAGE_SHIFT;
-	error = _xfs_buf_get_pages(bp, page_count);
+	error = xfs_buf_alloc_pages(bp, page_count, flags);
 	if (error)
 		goto fail_free_buf;
-
-	for (i = 0; i < page_count; i++) {
-		bp->b_pages[i] = alloc_page(xb_to_gfp(flags));
-		if (!bp->b_pages[i]) {
-			error = -ENOMEM;
-			goto fail_free_mem;
-		}
-	}
-	bp->b_flags |= _XBF_PAGES;
 
 	error = _xfs_buf_map_pages(bp, 0);
 	if (unlikely(error)) {
 		xfs_warn(target->bt_mount,
 			"%s: failed to map pages", __func__);
-		goto fail_free_mem;
+		goto fail_free_buf;
 	}
 
 	trace_xfs_buf_get_uncached(bp, _RET_IP_);
 	*bpp = bp;
 	return 0;
 
- fail_free_mem:
-	while (--i >= 0)
-		__free_page(bp->b_pages[i]);
-	_xfs_buf_free_pages(bp);
- fail_free_buf:
-	xfs_buf_free_maps(bp);
-	kmem_cache_free(xfs_buf_zone, bp);
- fail:
+fail_free_buf:
+	xfs_buf_free(bp);
 	return error;
 }
 
@@ -1722,7 +1727,6 @@ xfs_buf_offset(
 	if (bp->b_addr)
 		return bp->b_addr + offset;
 
-	offset += bp->b_offset;
 	page = bp->b_pages[offset >> PAGE_SHIFT];
 	return page_address(page) + (offset & (PAGE_SIZE-1));
 }
@@ -1958,7 +1962,7 @@ xfs_free_buftarg(
 	percpu_counter_destroy(&btp->bt_io_count);
 	list_lru_destroy(&btp->bt_lru);
 
-	xfs_blkdev_issue_flush(btp);
+	blkdev_issue_flush(btp->bt_bdev);
 
 	kmem_free(btp);
 }

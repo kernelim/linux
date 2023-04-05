@@ -7,6 +7,8 @@ TARGETS += cgroup
 TARGETS += core
 TARGETS += cpufreq
 TARGETS += cpu-hotplug
+TARGETS += drivers/net/bonding
+TARGETS += drivers/net/team
 TARGETS += efivarfs
 TARGETS += exec
 TARGETS += filesystems
@@ -48,6 +50,7 @@ TARGETS += static_keys
 TARGETS += sync
 TARGETS += sysctl
 TARGETS += tc-testing
+TARGETS += tdx
 TARGETS += timens
 ifneq (1, $(quicktest))
 TARGETS += timers

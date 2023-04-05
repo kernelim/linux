@@ -83,9 +83,9 @@ typedef int (*dev_page_fault_t)(struct vm_area_struct *vma,
 typedef void (*dev_page_free_t)(struct page *page, void *data);
 struct dev_pagemap_ops {
 	/*
-	 * Called once the page refcount reaches 1.  (ZONE_DEVICE pages never
-	 * reach 0 refcount unless there is a refcount bug. This allows the
-	 * device driver to implement its own memory management.)
+	 * Called once the page refcount reaches 0.  The reference count will be
+	 * reset to one by the core code after the method is called to prepare
+	 * for handing out the page again.
 	 */
 	void (*page_free)(struct page *page);
 
@@ -116,6 +116,11 @@ struct dev_pagemap_ops {
  * @done: completion for @internal_ref
  * @type: memory type: see MEMORY_* in memory_hotplug.h
  * @flags: PGMAP_* flags to specify defailed behavior
+ * @vmemmap_shift: structural definition of how the vmemmap page metadata
+ *      is populated, specifically the metadata page order.
+ *	A zero value (default) uses base pages as the vmemmap metadata
+ *	representation. A bigger value will set up compound struct pages
+ *	of the requested order value.
  * @ops: method table
  * @owner: an opaque pointer identifying the entity that manages this
  *	instance.  Used by various helpers to make sure that no
@@ -141,6 +146,7 @@ struct dev_pagemap {
 	RH_KABI_EXTEND(struct completion done)
 	RH_KABI_EXTEND(void *owner)
 	RH_KABI_EXTEND(int nr_range)
+	RH_KABI_BROKEN_INSERT(unsigned long vmemmap_shift)
 	RH_KABI_BROKEN_INSERT_BLOCK(
 	union {
 		struct range range;
@@ -154,6 +160,11 @@ static inline struct vmem_altmap *pgmap_altmap(struct dev_pagemap *pgmap)
 	if (pgmap->flags & PGMAP_ALTMAP_VALID)
 		return &pgmap->altmap;
 	return NULL;
+}
+
+static inline unsigned long pgmap_vmemmap_nr(struct dev_pagemap *pgmap)
+{
+	return 1 << pgmap->vmemmap_shift;
 }
 
 #ifdef CONFIG_ZONE_DEVICE

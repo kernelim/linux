@@ -111,17 +111,9 @@ static void __put_compound_page(struct page *page)
 
 void __put_page(struct page *page)
 {
-	if (is_zone_device_page(page)) {
-		put_dev_pagemap(page->pgmap);
-
-		/*
-		 * The page belongs to the device that created pgmap. Do
-		 * not return it to page allocator.
-		 */
-		return;
-	}
-
-	if (unlikely(PageCompound(page)))
+	if (unlikely(is_zone_device_page(page)))
+		free_zone_device_page(page);
+	else if (unlikely(PageCompound(page)))
 		__put_compound_page(page);
 	else
 		__put_single_page(page);
@@ -257,8 +249,20 @@ void rotate_reclaimable_page(struct page *page)
 	}
 }
 
-void lru_note_cost(struct lruvec *lruvec, bool file, unsigned int nr_pages)
+void lru_note_cost(struct lruvec *lruvec, bool file,
+		   unsigned int nr_io, unsigned int nr_rotated)
 {
+	unsigned long cost;
+
+	/*
+	 * Reflect the relative cost of incurring IO and spending CPU
+	 * time on rotations. This doesn't attempt to make a precise
+	 * comparison, it just says: if reloads are about comparable
+	 * between the LRU lists, or rotations are overwhelmingly
+	 * different between them, adjust scan balance for CPU work.
+	 */
+	cost = nr_io * SWAP_CLUSTER_MAX + nr_rotated;
+
 	do {
 		unsigned long lrusize;
 
@@ -272,9 +276,9 @@ void lru_note_cost(struct lruvec *lruvec, bool file, unsigned int nr_pages)
 		spin_lock_irq(&lruvec->lru_lock);
 		/* Record cost event */
 		if (file)
-			lruvec->file_cost += nr_pages;
+			lruvec->file_cost += cost;
 		else
-			lruvec->anon_cost += nr_pages;
+			lruvec->anon_cost += cost;
 
 		/*
 		 * Decay previous events
@@ -297,10 +301,10 @@ void lru_note_cost(struct lruvec *lruvec, bool file, unsigned int nr_pages)
 	} while ((lruvec = parent_lruvec(lruvec)));
 }
 
-void lru_note_cost_page(struct page *page)
+void lru_note_cost_refault(struct page *page)
 {
 	lru_note_cost(mem_cgroup_page_lruvec(page),
-		      page_is_file_lru(page), thp_nr_pages(page));
+			page_is_file_lru(page), thp_nr_pages(page), 0);
 }
 
 static void __activate_page(struct page *page, struct lruvec *lruvec)
@@ -474,9 +478,7 @@ EXPORT_SYMBOL(lru_cache_add);
  * @vma:   vma in which page is mapped for determining reclaimability
  *
  * Place @page on the inactive or unevictable LRU list, depending on its
- * evictability.  Note that if the page is not evictable, it goes
- * directly back onto it's zone's unevictable list, it does NOT use a
- * per cpu pagevec.
+ * evictability.
  */
 void lru_cache_add_inactive_or_unevictable(struct page *page,
 					 struct vm_area_struct *vma)
@@ -612,7 +614,8 @@ void lru_add_drain_cpu(int cpu)
 		__pagevec_lru_add(pvec);
 
 	pvec = &per_cpu(lru_rotate.pvec, cpu);
-	if (pagevec_count(pvec)) {
+	/* Disabling interrupts below acts as a compiler barrier. */
+	if (data_race(pagevec_count(pvec))) {
 		unsigned long flags;
 
 		/* No harm done if a racing interrupt already did this */
@@ -758,7 +761,7 @@ void lru_add_drain_all(void)
 		struct work_struct *work = &per_cpu(lru_add_drain_work, cpu);
 
 		if (pagevec_count(&per_cpu(lru_pvecs.lru_add, cpu)) ||
-		    pagevec_count(&per_cpu(lru_rotate.pvec, cpu)) ||
+		    data_race(pagevec_count(&per_cpu(lru_rotate.pvec, cpu))) ||
 		    pagevec_count(&per_cpu(lru_pvecs.lru_deactivate_file, cpu)) ||
 		    pagevec_count(&per_cpu(lru_pvecs.lru_deactivate, cpu)) ||
 		    pagevec_count(&per_cpu(lru_pvecs.lru_lazyfree, cpu)) ||
@@ -813,16 +816,11 @@ void release_pages(struct page **pages, int nr)
 				unlock_page_lruvec_irqrestore(lruvec, flags);
 				lruvec = NULL;
 			}
-			/*
-			 * ZONE_DEVICE pages that return 'false' from
-			 * put_devmap_managed_page() do not require special
-			 * processing, and instead, expect a call to
-			 * put_page_testzero().
-			 */
-			if (page_is_devmap_managed(page)) {
-				put_devmap_managed_page(page);
+			if (put_devmap_managed_page(page))
 				continue;
-			}
+			if (put_page_testzero(page))
+				free_zone_device_page(page);
+			continue;
 		}
 
 		if (!put_page_testzero(page))
@@ -1070,29 +1068,6 @@ void __init swap_setup(void)
 	 * _really_ don't want to cluster much more
 	 */
 }
-
-#ifdef CONFIG_DEV_PAGEMAP_OPS
-void put_devmap_managed_page(struct page *page)
-{
-	int count;
-
-	if (WARN_ON_ONCE(!page_is_devmap_managed(page)))
-		return;
-
-	count = page_ref_dec_return(page);
-
-	/*
-	 * devmap page refcounts are 1-based, rather than 0-based: if
-	 * refcount is 1, then the page is free and the refcount is
-	 * stable because nobody holds a reference on the page.
-	 */
-	if (count == 1)
-		free_devmap_managed_page(page);
-	else if (!count)
-		__put_page(page);
-}
-EXPORT_SYMBOL(put_devmap_managed_page);
-#endif
 
 /*
  * Retain lru_cache_add_file() for kABI compatbility.

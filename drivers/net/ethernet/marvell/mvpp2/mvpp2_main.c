@@ -3883,8 +3883,7 @@ static int mvpp2_simple_queue_vectors_init(struct mvpp2_port *port,
 	v->irq = irq_of_parse_and_map(port_node, 0);
 	if (v->irq <= 0)
 		return -EINVAL;
-	netif_napi_add(port->dev, &v->napi, mvpp2_poll,
-		       NAPI_POLL_WEIGHT);
+	netif_napi_add(port->dev, &v->napi, mvpp2_poll);
 
 	port->nqvecs = 1;
 
@@ -3933,8 +3932,7 @@ static int mvpp2_multi_queue_vectors_init(struct mvpp2_port *port,
 			goto err;
 		}
 
-		netif_napi_add(port->dev, &v->napi, mvpp2_poll,
-			       NAPI_POLL_WEIGHT);
+		netif_napi_add(port->dev, &v->napi, mvpp2_poll);
 	}
 
 	return 0;
@@ -4716,7 +4714,7 @@ static int mvpp2_port_probe(struct platform_device *pdev,
 	}
 
 	dev->vlan_features |= features;
-	netif_set_gso_max_segs(dev, MVPP2_MAX_TSO_SEGS);
+	netif_set_tso_max_segs(dev, MVPP2_MAX_TSO_SEGS);
 	dev->priv_flags |= IFF_UNICAST_FLT;
 
 	/* MTU range: 68 - 9704 */

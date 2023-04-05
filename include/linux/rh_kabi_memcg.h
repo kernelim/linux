@@ -13,6 +13,30 @@ struct mem_cgroup_stat_cpu {
 	unsigned long targets[MEM_CGROUP_NTARGETS];
 };
 
+/*
+ * per-node information in memory controller.
+ */
+struct mem_cgroup_per_node {
+	struct lruvec		lruvec;
+
+	/* Subtree VM stats (batched updates) */
+	struct lruvec_stat __percpu *lruvec_stat_cpu;
+	atomic_long_t		lruvec_stat[NR_VM_NODE_STAT_ITEMS];
+
+	unsigned long		lru_zone_size[MAX_NR_ZONES][NR_LRU_LISTS];
+
+	struct mem_cgroup_reclaim_iter iter[DEF_PRIORITY + 1];
+
+	struct rb_node		tree_node;	/* RB tree node */
+	unsigned long		usage_in_excess;/* Set to the value by which */
+						/* the soft limit is exceeded*/
+	bool			on_tree;
+	bool			congested;
+
+	struct mem_cgroup	*memcg;		/* Back pointer, we cannot */
+						/* use container_of	   */
+};
+
 struct mem_cgroup {
 	struct cgroup_subsys_state css;
 

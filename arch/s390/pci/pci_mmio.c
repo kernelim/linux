@@ -49,8 +49,7 @@ static inline int __pcistg_mio_inuser(
 		void __iomem *ioaddr, const void __user *src,
 		u64 ulen, u8 *status)
 {
-	register u64 addr asm("2") = (u64 __force) ioaddr;
-	register u64 len asm("3") = ulen;
+	union register_pair ioaddr_len = {.even = (u64 __force)ioaddr, .odd = ulen};
 	int cc = -ENXIO;
 	u64 val = 0;
 	u64 cnt = ulen;
@@ -64,22 +63,21 @@ static inline int __pcistg_mio_inuser(
 	asm volatile (
 		"       sacf    256\n"
 		"0:     llgc    %[tmp],0(%[src])\n"
-		"       sllg    %[val],%[val],8\n"
+		"4:	sllg	%[val],%[val],8\n"
 		"       aghi    %[src],1\n"
 		"       ogr     %[val],%[tmp]\n"
 		"       brctg   %[cnt],0b\n"
-		"1:     .insn   rre,0xb9d40000,%[val],%[ioaddr]\n"
+		"1:     .insn   rre,0xb9d40000,%[val],%[ioaddr_len]\n"
 		"2:     ipm     %[cc]\n"
 		"       srl     %[cc],28\n"
 		"3:     sacf    768\n"
-		EX_TABLE(0b, 3b) EX_TABLE(1b, 3b) EX_TABLE(2b, 3b)
+		EX_TABLE(0b, 3b) EX_TABLE(4b, 3b) EX_TABLE(1b, 3b) EX_TABLE(2b, 3b)
 		:
 		[src] "+a" (src), [cnt] "+d" (cnt),
 		[val] "+d" (val), [tmp] "=d" (tmp),
-		[len] "+d" (len), [cc] "+d" (cc),
-		[ioaddr] "+a" (addr)
+		[cc] "+d" (cc), [ioaddr_len] "+&d" (ioaddr_len.pair)
 		:: "cc", "memory");
-	*status = len >> 24 & 0xff;
+	*status = ioaddr_len.odd >> 24 & 0xff;
 
 	/* did we read everything from user memory? */
 	if (!cc && cnt != 0)
@@ -119,33 +117,15 @@ static inline int __memcpy_toio_inuser(void __iomem *dst,
 	return rc;
 }
 
-static long get_pfn(unsigned long user_addr, unsigned long access,
-		    unsigned long *pfn)
-{
-	struct vm_area_struct *vma;
-	long ret;
-
-	mmap_read_lock(current->mm);
-	ret = -EINVAL;
-	vma = find_vma(current->mm, user_addr);
-	if (!vma)
-		goto out;
-	ret = -EACCES;
-	if (!(vma->vm_flags & access))
-		goto out;
-	ret = follow_pfn(vma, user_addr, pfn);
-out:
-	mmap_read_unlock(current->mm);
-	return ret;
-}
-
 SYSCALL_DEFINE3(s390_pci_mmio_write, unsigned long, mmio_addr,
 		const void __user *, user_buffer, size_t, length)
 {
 	u8 local_buf[64];
 	void __iomem *io_addr;
 	void *buf;
-	unsigned long pfn;
+	struct vm_area_struct *vma;
+	pte_t *ptep;
+	spinlock_t *ptl;
 	long ret;
 
 	if (!zpci_is_enabled())
@@ -155,10 +135,12 @@ SYSCALL_DEFINE3(s390_pci_mmio_write, unsigned long, mmio_addr,
 		return -EINVAL;
 
 	/*
-	 * Only support read access to MIO capable devices on a MIO enabled
-	 * system. Otherwise we would have to check for every address if it is
-	 * a special ZPCI_ADDR and we would have to do a get_pfn() which we
-	 * don't need for MIO capable devices.
+	 * We only support write access to MIO capable devices if we are on
+	 * a MIO enabled system. Otherwise we would have to check for every
+	 * address if it is a special ZPCI_ADDR and would have to do
+	 * a pfn lookup which we don't need for MIO capable devices.  Currently
+	 * ISM devices are the only devices without MIO support and there is no
+	 * known need for accessing these from userspace.
 	 */
 	if (static_branch_likely(&have_mio)) {
 		ret = __memcpy_toio_inuser((void  __iomem *) mmio_addr,
@@ -174,21 +156,37 @@ SYSCALL_DEFINE3(s390_pci_mmio_write, unsigned long, mmio_addr,
 	} else
 		buf = local_buf;
 
-	ret = get_pfn(mmio_addr, VM_WRITE, &pfn);
+	ret = -EFAULT;
+	if (copy_from_user(buf, user_buffer, length))
+		goto out_free;
+
+	mmap_read_lock(current->mm);
+	ret = -EINVAL;
+	vma = vma_lookup(current->mm, mmio_addr);
+	if (!vma)
+		goto out_unlock_mmap;
+	if (!(vma->vm_flags & (VM_IO | VM_PFNMAP)))
+		goto out_unlock_mmap;
+	ret = -EACCES;
+	if (!(vma->vm_flags & VM_WRITE))
+		goto out_unlock_mmap;
+
+	ret = follow_pte_pmd(vma->vm_mm, mmio_addr, NULL, &ptep, NULL, &ptl);
 	if (ret)
-		goto out;
-	io_addr = (void __iomem *)((pfn << PAGE_SHIFT) |
+		goto out_unlock_mmap;
+
+	io_addr = (void __iomem *)((pte_pfn(*ptep) << PAGE_SHIFT) |
 			(mmio_addr & ~PAGE_MASK));
 
-	ret = -EFAULT;
 	if ((unsigned long) io_addr < ZPCI_IOMAP_ADDR_BASE)
-		goto out;
-
-	if (copy_from_user(buf, user_buffer, length))
-		goto out;
+		goto out_unlock_pt;
 
 	ret = zpci_memcpy_toio(io_addr, buf, length);
-out:
+out_unlock_pt:
+	pte_unmap_unlock(ptep, ptl);
+out_unlock_mmap:
+	mmap_read_unlock(current->mm);
+out_free:
 	if (buf != local_buf)
 		kfree(buf);
 	return ret;
@@ -198,8 +196,7 @@ static inline int __pcilg_mio_inuser(
 		void __user *dst, const void __iomem *ioaddr,
 		u64 ulen, u8 *status)
 {
-	register u64 addr asm("2") = (u64 __force) ioaddr;
-	register u64 len asm("3") = ulen;
+	union register_pair ioaddr_len = {.even = (u64 __force)ioaddr, .odd = ulen};
 	u64 cnt = ulen;
 	int shift = ulen * 8;
 	int cc = -ENXIO;
@@ -212,7 +209,7 @@ static inline int __pcilg_mio_inuser(
 	 */
 	asm volatile (
 		"       sacf    256\n"
-		"0:     .insn   rre,0xb9d60000,%[val],%[ioaddr]\n"
+		"0:     .insn   rre,0xb9d60000,%[val],%[ioaddr_len]\n"
 		"1:     ipm     %[cc]\n"
 		"       srl     %[cc],28\n"
 		"       ltr     %[cc],%[cc]\n"
@@ -220,23 +217,22 @@ static inline int __pcilg_mio_inuser(
 		"2:     ahi     %[shift],-8\n"
 		"       srlg    %[tmp],%[val],0(%[shift])\n"
 		"3:     stc     %[tmp],0(%[dst])\n"
-		"       aghi    %[dst],1\n"
+		"5:	aghi	%[dst],1\n"
 		"       brctg   %[cnt],2b\n"
 		"4:     sacf    768\n"
-		EX_TABLE(0b, 4b) EX_TABLE(1b, 4b) EX_TABLE(3b, 4b)
+		EX_TABLE(0b, 4b) EX_TABLE(1b, 4b) EX_TABLE(3b, 4b) EX_TABLE(5b, 4b)
 		:
-		[cc] "+d" (cc), [val] "=d" (val), [len] "+d" (len),
+		[ioaddr_len] "+&d" (ioaddr_len.pair),
+		[cc] "+d" (cc), [val] "=d" (val),
 		[dst] "+a" (dst), [cnt] "+d" (cnt), [tmp] "=d" (tmp),
 		[shift] "+d" (shift)
-		:
-		[ioaddr] "a" (addr)
-		: "cc", "memory");
+		:: "cc", "memory");
 
 	/* did we write everything to the user space buffer? */
 	if (!cc && cnt != 0)
 		cc = -EFAULT;
 
-	*status = len >> 24 & 0xff;
+	*status = ioaddr_len.odd >> 24 & 0xff;
 	return cc;
 }
 
@@ -272,7 +268,9 @@ SYSCALL_DEFINE3(s390_pci_mmio_read, unsigned long, mmio_addr,
 	u8 local_buf[64];
 	void __iomem *io_addr;
 	void *buf;
-	unsigned long pfn;
+	struct vm_area_struct *vma;
+	pte_t *ptep;
+	spinlock_t *ptl;
 	long ret;
 
 	if (!zpci_is_enabled())
@@ -282,10 +280,12 @@ SYSCALL_DEFINE3(s390_pci_mmio_read, unsigned long, mmio_addr,
 		return -EINVAL;
 
 	/*
-	 * Only support write access to MIO capable devices on a MIO enabled
-	 * system. Otherwise we would have to check for every address if it is
-	 * a special ZPCI_ADDR and we would have to do a get_pfn() which we
-	 * don't need for MIO capable devices.
+	 * We only support read access to MIO capable devices if we are on
+	 * a MIO enabled system. Otherwise we would have to check for every
+	 * address if it is a special ZPCI_ADDR and would have to do
+	 * a pfn lookup which we don't need for MIO capable devices.  Currently
+	 * ISM devices are the only devices without MIO support and there is no
+	 * known need for accessing these from userspace.
 	 */
 	if (static_branch_likely(&have_mio)) {
 		ret = __memcpy_fromio_inuser(
@@ -302,22 +302,38 @@ SYSCALL_DEFINE3(s390_pci_mmio_read, unsigned long, mmio_addr,
 		buf = local_buf;
 	}
 
-	ret = get_pfn(mmio_addr, VM_READ, &pfn);
+	mmap_read_lock(current->mm);
+	ret = -EINVAL;
+	vma = vma_lookup(current->mm, mmio_addr);
+	if (!vma)
+		goto out_unlock_mmap;
+	if (!(vma->vm_flags & (VM_IO | VM_PFNMAP)))
+		goto out_unlock_mmap;
+	ret = -EACCES;
+	if (!(vma->vm_flags & VM_WRITE))
+		goto out_unlock_mmap;
+
+	ret = follow_pte_pmd(vma->vm_mm, mmio_addr, NULL, &ptep, NULL, &ptl);
 	if (ret)
-		goto out;
-	io_addr = (void __iomem *)((pfn << PAGE_SHIFT) | (mmio_addr & ~PAGE_MASK));
+		goto out_unlock_mmap;
+
+	io_addr = (void __iomem *)((pte_pfn(*ptep) << PAGE_SHIFT) |
+			(mmio_addr & ~PAGE_MASK));
 
 	if ((unsigned long) io_addr < ZPCI_IOMAP_ADDR_BASE) {
 		ret = -EFAULT;
-		goto out;
+		goto out_unlock_pt;
 	}
 	ret = zpci_memcpy_fromio(buf, io_addr, length);
-	if (ret)
-		goto out;
-	if (copy_to_user(user_buffer, buf, length))
+
+out_unlock_pt:
+	pte_unmap_unlock(ptep, ptl);
+out_unlock_mmap:
+	mmap_read_unlock(current->mm);
+
+	if (!ret && copy_to_user(user_buffer, buf, length))
 		ret = -EFAULT;
 
-out:
 	if (buf != local_buf)
 		kfree(buf);
 	return ret;

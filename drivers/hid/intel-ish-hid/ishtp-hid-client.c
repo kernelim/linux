@@ -328,7 +328,7 @@ do_get_report:
 
 /**
  * ish_cl_event_cb() - bus driver callback for incoming message/packet
- * @device:	Pointer to the the ishtp client device for which this message
+ * @device:	Pointer to the ishtp client device for which this message
  *		is targeted
  *
  * Remove the packet from the list and process the message by calling
@@ -984,4 +984,3 @@ MODULE_AUTHOR("Daniel Drubin <daniel.drubin@intel.com>");
 MODULE_AUTHOR("Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>");
 
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("ishtp:*");

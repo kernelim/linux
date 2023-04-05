@@ -629,6 +629,19 @@ __iomap_write_begin(struct inode *inode, loff_t pos, unsigned len, int flags,
 	return 0;
 }
 
+static void __iomap_put_folio(struct iomap *iomap, struct inode *inode,
+			      loff_t pos, size_t ret, struct page *page)
+{
+	const struct iomap_page_ops *page_ops = iomap->page_ops;
+
+	if (page_ops && page_ops->page_done)
+		page_ops->page_done(inode, pos, ret, page);
+	else if (page) {
+		unlock_page(page);
+		put_page(page);
+	}
+}
+
 static int iomap_write_begin_inline(struct inode *inode,
 		struct page *page, struct iomap *srcmap)
 {
@@ -663,7 +676,8 @@ iomap_write_begin(struct inode *inode, loff_t pos, unsigned len, unsigned flags,
 			AOP_FLAG_NOFS);
 	if (!page) {
 		status = -ENOMEM;
-		goto out_no_page;
+		__iomap_put_folio(iomap, inode, pos, 0, NULL);
+		return status;
 	}
 
 	if (srcmap->type == IOMAP_INLINE)
@@ -681,13 +695,9 @@ iomap_write_begin(struct inode *inode, loff_t pos, unsigned len, unsigned flags,
 	return 0;
 
 out_unlock:
-	unlock_page(page);
-	put_page(page);
+	__iomap_put_folio(iomap, inode, pos, 0, page);
 	iomap_write_failed(inode, pos, len);
 
-out_no_page:
-	if (page_ops && page_ops->page_done)
-		page_ops->page_done(inode, pos, 0, NULL);
 	return status;
 }
 
@@ -761,7 +771,6 @@ static size_t iomap_write_end(struct inode *inode, loff_t pos, size_t len,
 		size_t copied, struct page *page, struct iomap *iomap,
 		struct iomap *srcmap)
 {
-	const struct iomap_page_ops *page_ops = iomap->page_ops;
 	loff_t old_size = inode->i_size;
 	size_t ret;
 
@@ -783,13 +792,10 @@ static size_t iomap_write_end(struct inode *inode, loff_t pos, size_t len,
 		i_size_write(inode, pos + ret);
 		iomap->flags |= IOMAP_F_SIZE_CHANGED;
 	}
-	unlock_page(page);
+	__iomap_put_folio(iomap, inode, pos, ret, page);
 
 	if (old_size < pos)
 		pagecache_isize_extended(inode, old_size, pos);
-	if (page_ops && page_ops->page_done)
-		page_ops->page_done(inode, pos, ret, page);
-	put_page(page);
 
 	if (ret < len)
 		iomap_write_failed(inode, pos + ret, len - ret);

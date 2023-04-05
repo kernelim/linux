@@ -69,6 +69,8 @@
 #include <linux/dax.h>
 #include <linux/oom.h>
 #include <linux/numa.h>
+#include RH_KABI_HIDE_INCLUDE(<linux/perf_event.h>)
+#include RH_KABI_HIDE_INCLUDE(<linux/ptrace.h>)
 
 #include <asm/io.h>
 #include <asm/mmu_context.h>
@@ -696,7 +698,7 @@ copy_nonpresent_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		}
 		rss[MM_SWAPENTS]++;
 	} else if (is_migration_entry(entry)) {
-		page = migration_entry_to_page(entry);
+		page = pfn_swap_entry_to_page(entry);
 
 		rss[mm_counter(page)]++;
 
@@ -715,7 +717,7 @@ copy_nonpresent_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 			set_pte_at(src_mm, addr, src_pte, pte);
 		}
 	} else if (is_device_private_entry(entry)) {
-		page = device_private_entry_to_page(entry);
+		page = pfn_swap_entry_to_page(entry);
 
 		/*
 		 * Update rss count even for unaddressable pages, as
@@ -1242,8 +1244,8 @@ again:
 		}
 
 		entry = pte_to_swp_entry(ptent);
-		if (non_swap_entry(entry) && is_device_private_entry(entry)) {
-			struct page *page = device_private_entry_to_page(entry);
+		if (is_device_private_entry(entry)) {
+			struct page *page = pfn_swap_entry_to_page(entry);
 
 			if (unlikely(details && details->check_mapping)) {
 				/*
@@ -1273,7 +1275,7 @@ again:
 		else if (is_migration_entry(entry)) {
 			struct page *page;
 
-			page = migration_entry_to_page(entry);
+			page = pfn_swap_entry_to_page(entry);
 			rss[mm_counter(page)]--;
 		}
 		if (unlikely(!free_swap_and_cache(entry)))
@@ -1501,13 +1503,13 @@ void zap_page_range(struct vm_area_struct *vma, unsigned long start,
 	lru_add_drain();
 	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, vma, vma->vm_mm,
 				start, start + size);
-	tlb_gather_mmu(&tlb, vma->vm_mm, start, range.end);
+	tlb_gather_mmu(&tlb, vma->vm_mm);
 	update_hiwater_rss(vma->vm_mm);
 	mmu_notifier_invalidate_range_start(&range);
 	for ( ; vma && vma->vm_start < range.end; vma = vma->vm_next)
 		unmap_single_vma(&tlb, vma, start, range.end, NULL);
 	mmu_notifier_invalidate_range_end(&range);
-	tlb_finish_mmu(&tlb, start, range.end);
+	tlb_finish_mmu(&tlb);
 }
 
 /**
@@ -1528,12 +1530,12 @@ static void zap_page_range_single(struct vm_area_struct *vma, unsigned long addr
 	lru_add_drain();
 	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, vma, vma->vm_mm,
 				address, address + size);
-	tlb_gather_mmu(&tlb, vma->vm_mm, address, range.end);
+	tlb_gather_mmu(&tlb, vma->vm_mm);
 	update_hiwater_rss(vma->vm_mm);
 	mmu_notifier_invalidate_range_start(&range);
 	unmap_single_vma(&tlb, vma, address, range.end, details);
 	mmu_notifier_invalidate_range_end(&range);
-	tlb_finish_mmu(&tlb, address, range.end);
+	tlb_finish_mmu(&tlb);
 }
 
 /**
@@ -3164,7 +3166,7 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 			migration_entry_wait(vma->vm_mm, vmf->pmd,
 					     vmf->address);
 		} else if (is_device_private_entry(entry)) {
-			vmf->page = device_private_entry_to_page(entry);
+			vmf->page = pfn_swap_entry_to_page(entry);
 			ret = vmf->page->pgmap->ops->migrate_to_ram(vmf);
 		} else if (is_hwpoison_entry(entry)) {
 			ret = VM_FAULT_HWPOISON;
@@ -3183,8 +3185,8 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 	if (!page) {
 		struct swap_info_struct *si = swp_swap_info(entry);
 
-		if (si->flags & SWP_SYNCHRONOUS_IO &&
-				__swap_count(entry) == 1) {
+		if (data_race(si->flags & SWP_SYNCHRONOUS_IO) &&
+		    __swap_count(entry) == 1) {
 			/* skip swapcache */
 			page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma,
 							vmf->address);
@@ -4160,11 +4162,6 @@ fallback:
 	return VM_FAULT_FALLBACK;
 }
 
-static inline bool vma_is_accessible(struct vm_area_struct *vma)
-{
-	return vma->vm_flags & (VM_READ | VM_EXEC | VM_WRITE);
-}
-
 static vm_fault_t create_huge_pud(struct vm_fault *vmf)
 {
 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) &&			\
@@ -4399,6 +4396,67 @@ retry_pud:
 	return handle_pte_fault(&vmf);
 }
 
+/**
+ * mm_account_fault - Do page fault accountings
+ *
+ * @regs: the pt_regs struct pointer.  When set to NULL, will skip accounting
+ *        of perf event counters, but we'll still do the per-task accounting to
+ *        the task who triggered this page fault.
+ * @address: the faulted address.
+ * @flags: the fault flags.
+ * @ret: the fault retcode.
+ *
+ * This will take care of most of the page fault accountings.  Meanwhile, it
+ * will also include the PERF_COUNT_SW_PAGE_FAULTS_[MAJ|MIN] perf counter
+ * updates.  However note that the handling of PERF_COUNT_SW_PAGE_FAULTS should
+ * still be in per-arch page fault handlers at the entry of page fault.
+ */
+static inline void mm_account_fault(struct pt_regs *regs,
+				    unsigned long address, unsigned int flags,
+				    vm_fault_t ret)
+{
+	bool major;
+
+	/*
+	 * We don't do accounting for some specific faults:
+	 *
+	 * - Unsuccessful faults (e.g. when the address wasn't valid).  That
+	 *   includes arch_vma_access_permitted() failing before reaching here.
+	 *   So this is not a "this many hardware page faults" counter.  We
+	 *   should use the hw profiling for that.
+	 *
+	 * - Incomplete faults (VM_FAULT_RETRY).  They will only be counted
+	 *   once they're completed.
+	 */
+	if (ret & (VM_FAULT_ERROR | VM_FAULT_RETRY))
+		return;
+
+	/*
+	 * We define the fault as a major fault when the final successful fault
+	 * is VM_FAULT_MAJOR, or if it retried (which implies that we couldn't
+	 * handle it immediately previously).
+	 */
+	major = (ret & VM_FAULT_MAJOR) || (flags & FAULT_FLAG_TRIED);
+
+	if (major)
+		current->maj_flt++;
+	else
+		current->min_flt++;
+
+	/*
+	 * If the fault is done for GUP, regs will be NULL.  We only do the
+	 * accounting for the per thread fault counters who triggered the
+	 * fault, and we skip the perf event updates.
+	 */
+	if (!regs)
+		return;
+
+	if (major)
+		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ, 1, regs, address);
+	else
+		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN, 1, regs, address);
+}
+
 /*
  * By the time we get here, we already hold the mm semaphore
  *
@@ -4406,7 +4464,7 @@ retry_pud:
  * return value.  See filemap_fault() and __lock_page_or_retry().
  */
 vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
-		unsigned int flags)
+			   unsigned int flags, struct pt_regs *regs)
 {
 	vm_fault_t ret;
 
@@ -4446,6 +4504,8 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 		if (task_in_memcg_oom(current) && !(ret & VM_FAULT_OOM))
 			mem_cgroup_oom_synchronize(false);
 	}
+
+	mm_account_fault(regs, address, flags, ret);
 
 	return ret;
 }

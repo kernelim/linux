@@ -5,10 +5,12 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/limits.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/inotify.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -16,6 +18,7 @@
 
 #include "cgroup_util.h"
 
+/* Returns read len on success, or -errno on failure. */
 static ssize_t read_text(const char *path, char *buf, size_t max_len)
 {
 	ssize_t len;
@@ -23,35 +26,29 @@ static ssize_t read_text(const char *path, char *buf, size_t max_len)
 
 	fd = open(path, O_RDONLY);
 	if (fd < 0)
-		return fd;
+		return -errno;
 
 	len = read(fd, buf, max_len - 1);
-	if (len < 0)
-		goto out;
 
-	buf[len] = 0;
-out:
+	if (len >= 0)
+		buf[len] = 0;
+
 	close(fd);
-	return len;
+	return len < 0 ? -errno : len;
 }
 
+/* Returns written len on success, or -errno on failure. */
 static ssize_t write_text(const char *path, char *buf, ssize_t len)
 {
 	int fd;
 
 	fd = open(path, O_WRONLY | O_APPEND);
 	if (fd < 0)
-		return fd;
+		return -errno;
 
 	len = write(fd, buf, len);
-	if (len < 0) {
-		close(fd);
-		return len;
-	}
-
 	close(fd);
-
-	return len;
+	return len < 0 ? -errno : len;
 }
 
 char *cg_name(const char *root, const char *name)
@@ -74,32 +71,53 @@ char *cg_name_indexed(const char *root, const char *name, int index)
 	return ret;
 }
 
+char *cg_control(const char *cgroup, const char *control)
+{
+	size_t len = strlen(cgroup) + strlen(control) + 2;
+	char *ret = malloc(len);
+
+	snprintf(ret, len, "%s/%s", cgroup, control);
+
+	return ret;
+}
+
+/* Returns 0 on success, or -errno on failure. */
 int cg_read(const char *cgroup, const char *control, char *buf, size_t len)
 {
 	char path[PATH_MAX];
+	ssize_t ret;
 
 	snprintf(path, sizeof(path), "%s/%s", cgroup, control);
 
-	if (read_text(path, buf, len) >= 0)
-		return 0;
-
-	return -1;
+	ret = read_text(path, buf, len);
+	return ret >= 0 ? 0 : ret;
 }
 
 int cg_read_strcmp(const char *cgroup, const char *control,
 		   const char *expected)
 {
-	size_t size = strlen(expected) + 1;
+	size_t size;
 	char *buf;
+	int ret;
+
+	/* Handle the case of comparing against empty string */
+	if (!expected)
+		return -1;
+	else
+		size = strlen(expected) + 1;
 
 	buf = malloc(size);
 	if (!buf)
 		return -1;
 
-	if (cg_read(cgroup, control, buf, size))
+	if (cg_read(cgroup, control, buf, size)) {
+		free(buf);
 		return -1;
+	}
 
-	return strcmp(expected, buf);
+	ret = strcmp(expected, buf);
+	free(buf);
+	return ret;
 }
 
 int cg_read_strstr(const char *cgroup, const char *control, const char *needle)
@@ -137,17 +155,31 @@ long cg_read_key_long(const char *cgroup, const char *control, const char *key)
 	return atol(ptr + strlen(key));
 }
 
+long cg_read_lc(const char *cgroup, const char *control)
+{
+	char buf[PAGE_SIZE];
+	const char delim[] = "\n";
+	char *line;
+	long cnt = 0;
+
+	if (cg_read(cgroup, control, buf, sizeof(buf)))
+		return -1;
+
+	for (line = strtok(buf, delim); line; line = strtok(NULL, delim))
+		cnt++;
+
+	return cnt;
+}
+
+/* Returns 0 on success, or -errno on failure. */
 int cg_write(const char *cgroup, const char *control, char *buf)
 {
 	char path[PATH_MAX];
-	ssize_t len = strlen(buf);
+	ssize_t len = strlen(buf), ret;
 
 	snprintf(path, sizeof(path), "%s/%s", cgroup, control);
-
-	if (write_text(path, buf, len) == len)
-		return 0;
-
-	return -1;
+	ret = write_text(path, buf, len);
+	return ret == len ? 0 : ret;
 }
 
 int cg_find_unified_root(char *root, size_t len)
@@ -170,8 +202,7 @@ int cg_find_unified_root(char *root, size_t len)
 		strtok(NULL, delim);
 		strtok(NULL, delim);
 
-		if (strcmp(fs, "cgroup") == 0 &&
-		    strcmp(type, "cgroup2") == 0) {
+		if (strcmp(type, "cgroup2") == 0) {
 			strncpy(root, mount, len);
 			return 0;
 		}
@@ -185,7 +216,32 @@ int cg_create(const char *cgroup)
 	return mkdir(cgroup, 0644);
 }
 
-static int cg_killall(const char *cgroup)
+int cg_wait_for_proc_count(const char *cgroup, int count)
+{
+	char buf[10 * PAGE_SIZE] = {0};
+	int attempts;
+	char *ptr;
+
+	for (attempts = 10; attempts >= 0; attempts--) {
+		int nr = 0;
+
+		if (cg_read(cgroup, "cgroup.procs", buf, sizeof(buf)))
+			break;
+
+		for (ptr = buf; *ptr; ptr++)
+			if (*ptr == '\n')
+				nr++;
+
+		if (nr >= count)
+			return 0;
+
+		usleep(100000);
+	}
+
+	return -1;
+}
+
+int cg_killall(const char *cgroup)
 {
 	char buf[PAGE_SIZE];
 	char *ptr = buf;
@@ -225,6 +281,24 @@ retry:
 		ret = 0;
 
 	return ret;
+}
+
+int cg_enter(const char *cgroup, int pid)
+{
+	char pidbuf[64];
+
+	snprintf(pidbuf, sizeof(pidbuf), "%d", pid);
+	return cg_write(cgroup, "cgroup.procs", pidbuf);
+}
+
+int cg_enter_current(const char *cgroup)
+{
+	return cg_write(cgroup, "cgroup.procs", "0");
+}
+
+int cg_enter_current_thread(const char *cgroup)
+{
+	return cg_write(cgroup, "cgroup.threads", "0");
 }
 
 int cg_run(const char *cgroup,
@@ -326,4 +400,115 @@ int is_swap_enabled(void)
 		cnt++;
 
 	return cnt > 1;
+}
+
+int set_oom_adj_score(int pid, int score)
+{
+	char path[PATH_MAX];
+	int fd, len;
+
+	sprintf(path, "/proc/%d/oom_score_adj", pid);
+
+	fd = open(path, O_WRONLY | O_APPEND);
+	if (fd < 0)
+		return fd;
+
+	len = dprintf(fd, "%d", score);
+	if (len < 0) {
+		close(fd);
+		return len;
+	}
+
+	close(fd);
+	return 0;
+}
+
+int proc_mount_contains(const char *option)
+{
+	char buf[4 * PAGE_SIZE];
+	ssize_t read;
+
+	read = read_text("/proc/mounts", buf, sizeof(buf));
+	if (read < 0)
+		return read;
+
+	return strstr(buf, option) != NULL;
+}
+
+ssize_t proc_read_text(int pid, bool thread, const char *item, char *buf, size_t size)
+{
+	char path[PATH_MAX];
+
+	if (!pid)
+		snprintf(path, sizeof(path), "/proc/%s/%s",
+			 thread ? "thread-self" : "self", item);
+	else
+		snprintf(path, sizeof(path), "/proc/%d/%s", pid, item);
+
+	size = read_text(path, buf, size);
+	return size < 0 ? -1 : size;
+}
+
+int proc_read_strstr(int pid, bool thread, const char *item, const char *needle)
+{
+	char buf[PAGE_SIZE];
+
+	if (proc_read_text(pid, thread, item, buf, sizeof(buf)) < 0)
+		return -1;
+
+	return strstr(buf, needle) ? 0 : -1;
+}
+
+static int __prepare_for_wait(const char *cgroup, const char *filename)
+{
+	int fd, ret = -1;
+
+	fd = inotify_init1(0);
+	if (fd == -1)
+		return fd;
+
+	ret = inotify_add_watch(fd, cg_control(cgroup, filename), IN_MODIFY);
+	if (ret == -1) {
+		close(fd);
+		fd = -1;
+	}
+
+	return fd;
+}
+
+int cg_prepare_for_wait(const char *cgroup)
+{
+	return __prepare_for_wait(cgroup, "cgroup.events");
+}
+
+int memcg_prepare_for_wait(const char *cgroup)
+{
+	return __prepare_for_wait(cgroup, "memory.events");
+}
+
+int cg_wait_for(int fd)
+{
+	int ret = -1;
+	struct pollfd fds = {
+		.fd = fd,
+		.events = POLLIN,
+	};
+
+	while (true) {
+		ret = poll(&fds, 1, 10000);
+
+		if (ret == -1) {
+			if (errno == EINTR)
+				continue;
+
+			break;
+		}
+
+		if (ret > 0 && fds.revents & POLLIN) {
+			ret = 0;
+			break;
+		}
+	}
+
+	return ret;
 }

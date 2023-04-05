@@ -879,7 +879,7 @@ static void xgene_perf_pmu_enable(struct pmu *pmu)
 {
 	struct xgene_pmu_dev *pmu_dev = to_pmu_dev(pmu);
 	struct xgene_pmu *xgene_pmu = pmu_dev->parent;
-	int enabled = bitmap_weight(pmu_dev->cntr_assign_mask,
+	bool enabled = !bitmap_empty(pmu_dev->cntr_assign_mask,
 			pmu_dev->max_counters);
 
 	if (!enabled)
@@ -1243,10 +1243,9 @@ static irqreturn_t xgene_pmu_isr(int irq, void *dev_id)
 	u32 intr_mcu, intr_mcb, intr_l3c, intr_iob;
 	struct xgene_pmu_dev_ctx *ctx;
 	struct xgene_pmu *xgene_pmu = dev_id;
-	unsigned long flags;
 	u32 val;
 
-	raw_spin_lock_irqsave(&xgene_pmu->lock, flags);
+	raw_spin_lock(&xgene_pmu->lock);
 
 	/* Get Interrupt PMU source */
 	val = readl(xgene_pmu->pcppmu_csr + PCPPMU_INTSTATUS_REG);
@@ -1282,7 +1281,7 @@ static irqreturn_t xgene_pmu_isr(int irq, void *dev_id)
 		}
 	}
 
-	raw_spin_unlock_irqrestore(&xgene_pmu->lock, flags);
+	raw_spin_unlock(&xgene_pmu->lock);
 
 	return IRQ_HANDLED;
 }
@@ -1562,14 +1561,12 @@ static const struct acpi_device_id *xgene_pmu_acpi_match_type(
 static acpi_status acpi_pmu_dev_add(acpi_handle handle, u32 level,
 				    void *data, void **return_value)
 {
+	struct acpi_device *adev = acpi_fetch_acpi_dev(handle);
 	const struct acpi_device_id *acpi_id;
 	struct xgene_pmu *xgene_pmu = data;
 	struct xgene_pmu_dev_ctx *ctx;
-	struct acpi_device *adev;
 
-	if (acpi_bus_get_device(handle, &adev))
-		return AE_OK;
-	if (acpi_bus_get_status(adev) || !adev->status.present)
+	if (!adev || acpi_bus_get_status(adev) || !adev->status.present)
 		return AE_OK;
 
 	acpi_id = xgene_pmu_acpi_match_type(xgene_pmu_acpi_type_match, adev);

@@ -18,7 +18,7 @@
 #include <linux/notifier.h>
 #include <linux/smp.h>
 #include <asm/processor.h>
-
+#include <linux/kasan.h>
 
 static DEFINE_PER_CPU(struct llist_head, raised_list);
 static DEFINE_PER_CPU(struct llist_head, lazy_list);
@@ -96,6 +96,8 @@ bool irq_work_queue_on(struct irq_work *work, int cpu)
 	/* Only queue if not already pending */
 	if (!irq_work_claim(work))
 		return false;
+
+	kasan_record_aux_stack_noalloc(work);
 
 	preempt_disable();
 	if (cpu != smp_processor_id()) {

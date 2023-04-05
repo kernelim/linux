@@ -192,6 +192,9 @@ struct ip_set_type_variant {
 	bool (*same_set)(const struct ip_set *a, const struct ip_set *b);
 };
 
+/* Max range where every element is added/deleted in one step */
+#define IPSET_MAX_RANGE		(1<<14)
+
 /* The core set type structure */
 struct ip_set_type {
 	struct list_head list;

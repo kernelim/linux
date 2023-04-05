@@ -51,7 +51,6 @@ struct dm_md_mempools;
  *---------------------------------------------------------------*/
 void dm_table_event_callback(struct dm_table *t,
 			     void (*fn)(void *), void *context);
-struct dm_target *dm_table_get_target(struct dm_table *t, unsigned int index);
 struct dm_target *dm_table_find_target(struct dm_table *t, sector_t sector);
 bool dm_table_has_no_data_devices(struct dm_table *table);
 int dm_calculate_queue_limits(struct dm_table *table,

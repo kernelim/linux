@@ -124,7 +124,8 @@ static inline bool iomap_inline_data_valid(struct iomap *iomap)
  *
  * When page_prepare succeeds, page_done will always be called to do any
  * cleanup work necessary.  In that page_done call, @page will be NULL if the
- * associated page could not be obtained.
+ * associated page could not be obtained.  When @page is not NULL, page_done
+ * is responsible for unlocking and putting the folio.
  */
 struct iomap_page_ops {
 	int (*page_prepare)(struct inode *inode, loff_t pos, unsigned len);

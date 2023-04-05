@@ -407,6 +407,7 @@ struct lpfc_trunk_link  {
 				     link1,
 				     link2,
 				     link3;
+	u32 phy_lnk_speed;
 };
 
 /* Format of congestion module parameters */
@@ -612,6 +613,7 @@ struct lpfc_vport {
 #define FC_CT_RSNN_NN		0x4	 /* RSNN_NN accepted by switch */
 #define FC_CT_RSPN_ID		0x8	 /* RSPN_ID accepted by switch */
 #define FC_CT_RFT_ID		0x10	 /* RFT_ID accepted by switch */
+#define FC_CT_RPRT_DEFER	0x20	 /* Defer issuing FDMI RPRT */
 
 	struct list_head fc_nodes;
 
@@ -1039,6 +1041,7 @@ struct lpfc_hba {
 #define HBA_HBEAT_INP		0x4000000 /* mbox HBEAT is in progress */
 #define HBA_HBEAT_TMO		0x8000000 /* HBEAT initiated after timeout */
 #define HBA_FLOGI_OUTSTANDING	0x10000000 /* FLOGI is outstanding */
+#define HBA_RHBA_CMPL		0x20000000 /* RHBA FDMI command is successful */
 
 	struct completion *fw_dump_cmpl; /* cmpl event tracker for fw_dump */
 	uint32_t fcp_ring_in_use; /* When polling test if intr-hndlr active*/
@@ -1549,16 +1552,13 @@ struct lpfc_hba {
 		/* cgn_reg_signal and cgn_init_reg_signal use
 		 * enum fc_edc_cg_signal_cap_types
 		 */
-	u16 cgn_fpin_frequency;
+	u16 cgn_fpin_frequency;		/* In units of msecs */
 #define LPFC_FPIN_INIT_FREQ	0xffff
 	u32 cgn_sig_freq;
 	u32 cgn_acqe_cnt;
 
 	/* RX monitor handling for CMF */
-	struct rxtable_entry *rxtable;  /* RX_monitor information */
-	atomic_t rxtable_idx_head;
-#define LPFC_RXMONITOR_TABLE_IN_USE     (LPFC_MAX_RXMONITOR_ENTRY + 73)
-	atomic_t rxtable_idx_tail;
+	struct lpfc_rx_info_monitor *rx_monitor;
 	atomic_t rx_max_read_cnt;       /* Maximum read bytes */
 	uint64_t rx_block_cnt;
 
@@ -1595,6 +1595,11 @@ struct lpfc_hba {
 
 	char os_host_name[MAXHOSTNAMELEN];
 
+	/* LD Signaling */
+	u32 degrade_activate_threshold;
+	u32 degrade_deactivate_threshold;
+	u32 fec_degrade_interval;
+
 	/* SCSI host template information - for physical port */
 	struct scsi_host_template port_template;
 	/* SCSI host template information - for all vports */
@@ -1607,7 +1612,7 @@ struct lpfc_hba {
 
 #define LPFC_MAX_RXMONITOR_ENTRY	800
 #define LPFC_MAX_RXMONITOR_DUMP		32
-struct rxtable_entry {
+struct rx_info_entry {
 	uint64_t cmf_bytes;	/* Total no of read bytes for CMF_SYNC_WQE */
 	uint64_t total_bytes;   /* Total no of read bytes requested */
 	uint64_t rcv_bytes;     /* Total no of read bytes completed */
@@ -1620,6 +1625,13 @@ struct rxtable_entry {
 	uint32_t io_cnt;
 	uint32_t timer_utilization;
 	uint32_t timer_interval;
+};
+
+struct lpfc_rx_info_monitor {
+	struct rx_info_entry *ring; /* info organized in a circular buffer */
+	u32 head_idx, tail_idx; /* index to head/tail of ring */
+	spinlock_t lock; /* spinlock for ring */
+	u32 entries; /* storing number entries/size of ring */
 };
 
 static inline struct Scsi_Host *

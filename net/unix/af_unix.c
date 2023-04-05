@@ -1477,7 +1477,8 @@ static int unix_accept(struct socket *sock, struct socket *newsock, int flags,
 	 * so that no locks are necessary.
 	 */
 
-	skb = skb_recv_datagram(sk, 0, flags&O_NONBLOCK, &err);
+	skb = skb_recv_datagram(sk, (flags & O_NONBLOCK) ? MSG_DONTWAIT : 0,
+				&err);
 	if (!skb) {
 		/* This means receive shutdown. */
 		if (err == 0)

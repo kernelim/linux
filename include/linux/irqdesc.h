@@ -83,6 +83,9 @@ struct irq_desc {
 #endif
 	unsigned long		threads_oneshot;
 	atomic_t		threads_active;
+#ifdef CONFIG_GENERIC_IRQ_IPI
+	RH_KABI_FILL_HOLE(unsigned int ipi_offset)
+#endif
 	wait_queue_head_t       wait_for_threads;
 #ifdef CONFIG_PM_SLEEP
 	unsigned int		nr_actions;

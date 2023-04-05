@@ -1136,9 +1136,37 @@ PAGE_SIZE multiple when read back.
 	Under certain circumstances, the usage may go over the limit
 	temporarily.
 
+	In default configuration regular 0-order allocations always
+	succeed unless OOM killer chooses current task as a victim.
+
+	Some kinds of allocations don't invoke the OOM killer.
+	Caller could retry them differently, return into userspace
+	as -ENOMEM or silently ignore in cases like disk readahead.
+
 	This is the ultimate protection mechanism.  As long as the
 	high limit is used and monitored properly, this limit's
 	utility is limited to providing the final safety net.
+
+  memory.reclaim
+	A write-only nested-keyed file which exists for all cgroups.
+
+	This is a simple interface to trigger memory reclaim in the
+	target cgroup.
+
+	This file accepts a single key, the number of bytes to reclaim.
+	No nested keys are currently supported.
+
+	Example::
+
+	  echo "1G" > memory.reclaim
+
+	The interface can be later extended with nested keys to
+	configure the reclaim behavior. For example, specify the
+	type of memory to reclaim from (anon, file, ..).
+
+	Please note that the kernel can over or under reclaim from
+	the target cgroup. If less bytes are reclaimed than the
+	specified amount, -EAGAIN is returned.
 
   memory.oom.group
 	A read-write single value file which exists on non-root
@@ -1192,17 +1220,9 @@ PAGE_SIZE multiple when read back.
 		The number of time the cgroup's memory usage was
 		reached the limit and allocation was about to fail.
 
-		Depending on context result could be invocation of OOM
-		killer and retrying allocation or failing allocation.
-
-		Failed allocation in its turn could be returned into
-		userspace as -ENOMEM or silently ignored in cases like
-		disk readahead.  For now OOM in memory cgroup kills
-		tasks iff shortage has happened inside page fault.
-
 		This event is not raised if the OOM killer is not
 		considered as an option, e.g. for failed high-order
-		allocations.
+		allocations or if caller asked to not retry attempts.
 
 	  oom_kill
 		The number of processes belonging to this cgroup
@@ -1226,9 +1246,9 @@ PAGE_SIZE multiple when read back.
 	can show up in the middle. Don't rely on items remaining in a
 	fixed position; use the keys to look up specific values!
 
-	If the entry has no per-node counter(or not show in the
-	mempry.numa_stat). We use 'npn'(non-per-node) as the tag
-	to indicate that it will not show in the mempry.numa_stat.
+	If the entry has no per-node counter (or not show in the
+	memory.numa_stat). We use 'npn' (non-per-node) as the tag
+	to indicate that it will not show in the memory.numa_stat.
 
 	  anon
 		Amount of memory used in anonymous mappings such as
@@ -1244,11 +1264,11 @@ PAGE_SIZE multiple when read back.
 	  pagetables
                 Amount of memory allocated for page tables.
 
-	  percpu(npn)
+	  percpu (npn)
 		Amount of memory used for storing per-cpu kernel
 		data structures.
 
-	  sock(npn)
+	  sock (npn)
 		Amount of memory used in network transmission buffers
 
 	  shmem
@@ -1295,7 +1315,7 @@ PAGE_SIZE multiple when read back.
 		Part of "slab" that cannot be reclaimed on memory
 		pressure.
 
-	  slab(npn)
+	  slab (npn)
 		Amount of memory used for storing in-kernel data
 		structures.
 
@@ -1323,39 +1343,51 @@ PAGE_SIZE multiple when read back.
 	  workingset_nodereclaim
 		Number of times a shadow node has been reclaimed
 
-	  pgfault(npn)
-		Total number of page faults incurred
-
-	  pgmajfault(npn)
-		Number of major page faults incurred
-
-	  pgrefill(npn)
-		Amount of scanned pages (in an active LRU list)
-
-	  pgscan(npn)
+	  pgscan (npn)
 		Amount of scanned pages (in an inactive LRU list)
 
-	  pgsteal(npn)
+	  pgsteal (npn)
 		Amount of reclaimed pages
 
-	  pgactivate(npn)
+	  pgscan_kswapd (npn)
+		Amount of scanned pages by kswapd (in an inactive LRU list)
+
+	  pgscan_direct (npn)
+		Amount of scanned pages directly  (in an inactive LRU list)
+
+	  pgsteal_kswapd (npn)
+		Amount of reclaimed pages by kswapd
+
+	  pgsteal_direct (npn)
+		Amount of reclaimed pages directly
+
+	  pgfault (npn)
+		Total number of page faults incurred
+
+	  pgmajfault (npn)
+		Number of major page faults incurred
+
+	  pgrefill (npn)
+		Amount of scanned pages (in an active LRU list)
+
+	  pgactivate (npn)
 		Amount of pages moved to the active LRU list
 
-	  pgdeactivate(npn)
+	  pgdeactivate (npn)
 		Amount of pages moved to the inactive LRU list
 
-	  pglazyfree(npn)
+	  pglazyfree (npn)
 		Amount of pages postponed to be freed under memory pressure
 
-	  pglazyfreed(npn)
+	  pglazyfreed (npn)
 		Amount of reclaimed lazyfree pages
 
-	  thp_fault_alloc(npn)
+	  thp_fault_alloc (npn)
 		Number of transparent hugepages which were allocated to satisfy
 		a page fault. This counter is not present when CONFIG_TRANSPARENT_HUGEPAGE
                 is not set.
 
-	  thp_collapse_alloc(npn)
+	  thp_collapse_alloc (npn)
 		Number of transparent hugepages which were allocated to allow
 		collapsing an existing range of pages. This counter is not
 		present when CONFIG_TRANSPARENT_HUGEPAGE is not set.

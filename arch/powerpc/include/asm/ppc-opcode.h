@@ -486,6 +486,15 @@
 #define __PPC_PRFX_R(r)	(((r) & 0x1) << 20)
 
 /*
+ * Both low and high 16 bits are added as SIGNED additions, so if low 16 bits
+ * has high bit set, high 16 bits must be adjusted. These macros do that (stolen
+ * from binutils).
+ */
+#define PPC_LO(v)	((v) & 0xffff)
+#define PPC_HI(v)	(((v) >> 16) & 0xffff)
+#define PPC_HA(v)	PPC_HI((v) + 0x8000)
+
+/*
  * Only use the larx hint bit on 64bit CPUs. e500v1/v2 based CPUs will treat a
  * larx with EH set as an illegal instruction.
  */
@@ -544,6 +553,10 @@
 #define PPC_RAW_STBCIX(s, a, b)		(PPC_INST_STBCIX | __PPC_RS(s) | __PPC_RA(a) | __PPC_RB(b))
 #define PPC_RAW_DCBFPS(a, b)		(PPC_INST_DCBF | ___PPC_RA(a) | ___PPC_RB(b) | (4 << 21))
 #define PPC_RAW_DCBSTPS(a, b)		(PPC_INST_DCBF | ___PPC_RA(a) | ___PPC_RB(b) | (6 << 21))
+
+#define PPC_RAW_SYNC()			(0x7c0004ac)
+#define PPC_RAW_ISYNC()			(0x4c00012c)
+
 /*
  * Define what the VSX XX1 form instructions will look like, then add
  * the 128 bit load store instructions based on that.
@@ -625,6 +638,7 @@
 #define PPC_RAW_LDX(r, base, b)		(PPC_INST_LDX | ___PPC_RT(r) | ___PPC_RA(base) | ___PPC_RB(b))
 #define PPC_RAW_LHZ(r, base, i)		(PPC_INST_LHZ | ___PPC_RT(r) | ___PPC_RA(base) | IMM_L(i))
 #define PPC_RAW_LHBRX(r, base, b)	(PPC_INST_LHBRX | ___PPC_RT(r) | ___PPC_RA(base) | ___PPC_RB(b))
+#define PPC_RAW_LWBRX(r, base, b)	(0x7c00042c | ___PPC_RT(r) | ___PPC_RA(base) | ___PPC_RB(b))
 #define PPC_RAW_LDBRX(r, base, b)	(PPC_INST_LDBRX | ___PPC_RT(r) | ___PPC_RA(base) | ___PPC_RB(b))
 #define PPC_RAW_STWCX(s, a, b)		(PPC_INST_STWCX | ___PPC_RS(s) | ___PPC_RA(a) | ___PPC_RB(b))
 #define PPC_RAW_CMPWI(a, i)		(PPC_INST_CMPWI | ___PPC_RA(a) | IMM_L(i))
@@ -680,6 +694,12 @@
 #define PPC_RAW_SRDI(d, a, i)		PPC_RAW_RLDICL(d, a, 64-(i), i)
 
 #define PPC_RAW_NEG(d, a)		(PPC_INST_NEG | ___PPC_RT(d) | ___PPC_RA(a))
+
+#define PPC_RAW_MFSPR(d, spr)		(0x7c0002a6 | ___PPC_RT(d) | __PPC_SPR(spr))
+#define PPC_RAW_MTSPR(spr, d)		(0x7c0003a6 | ___PPC_RS(d) | __PPC_SPR(spr))
+#define PPC_RAW_EIEIO()			(0x7c0006ac)
+
+#define PPC_RAW_BRANCH(addr)		(PPC_INST_BRANCH | ((addr) & 0x03fffffc))
 
 /* Deal with instructions that older assemblers aren't aware of */
 #define	PPC_BCCTR_FLUSH		stringify_in_c(.long PPC_INST_BCCTR_FLUSH)

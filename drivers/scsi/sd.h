@@ -69,6 +69,23 @@ enum {
 	SD_ZERO_WS10_UNMAP,	/* Use WRITE SAME(10) with UNMAP */
 };
 
+/**
+ * struct zoned_disk_info - Specific properties of a ZBC SCSI device.
+ * @nr_zones: number of zones.
+ * @zone_blocks: number of logical blocks per zone.
+ *
+ * This data structure holds the ZBC SCSI device properties that are retrieved
+ * twice: a first time before the gendisk capacity is known and a second time
+ * after the gendisk capacity is known.
+ *
+ * NOTE:  Additional KABI changes may be needed if any changes are made
+ *        to this structure.
+ */
+struct zoned_disk_info {
+	u32		nr_zones;
+	u32		zone_blocks;
+};
+
 struct scsi_disk_aux {
 	u32		*zones_wp_offset;
 	spinlock_t	zones_wp_offset_lock;
@@ -77,9 +94,22 @@ struct scsi_disk_aux {
 	struct work_struct zone_wp_offset_work;
 	char		*zone_wp_update_buf;
 	struct scsi_disk *sdkp;
-	u32		rev_nr_zones;
-	u32		rev_zone_blocks;
+	/* Updated during revalidation before the gendisk capacity is known. */
+	/*
+	 * NOTE:  Pair of u32 structure members replaced by a structure
+	 *        "zoned_disk_info" containing the same 2 structure members
+	 *        This does not actually break KABI *unless* changes are made
+	 *        to the structure definition.
+	 */
+	RH_KABI_BROKEN_REMOVE(u32		rev_nr_zones)
+	RH_KABI_BROKEN_REMOVE(u32		rev_zone_blocks)
+	RH_KABI_BROKEN_INSERT(struct zoned_disk_info	early_zone_info)
 	int		max_retries;
+	/*
+	 * Either zero or a power of two. If not zero it means that the offset
+	 * between zone starting LBAs is constant.
+	 */
+	u32		zone_starting_lba_gran;
 };
 
 struct scsi_disk {
@@ -89,8 +119,16 @@ struct scsi_disk {
 	struct gendisk	*disk;
 	struct opal_dev *opal_dev;
 #if 1 /* CONFIG_BLK_DEV_ZONED */
-	u32		nr_zones;
-	u32		zone_blocks;
+	/* Updated during revalidation after the gendisk capacity is known. */
+	/*
+	 * NOTE:  Pair of u32 structure members replaced by a structure
+	 *        "zoned_disk_info" containing the same 2 structure members
+	 *        This does not actually break KABI *unless* changes are made
+	 *        to the structure definition.
+	 */
+	RH_KABI_BROKEN_REMOVE(u32		nr_zones)
+	RH_KABI_BROKEN_REMOVE(u32		zone_blocks)
+	RH_KABI_BROKEN_INSERT(struct zoned_disk_info	zone_info)
 	u32		zones_optimal_open;
 	u32		zones_optimal_nonseq;
 	u32		zones_max_open;
@@ -293,8 +331,8 @@ static inline int sd_is_zoned(struct scsi_disk *sdkp)
 
 #ifdef CONFIG_BLK_DEV_ZONED
 
-void sd_zbc_release_disk(struct scsi_disk *sdkp);
-int sd_zbc_read_zones(struct scsi_disk *sdkp, unsigned char *buffer);
+void sd_zbc_free_zone_info(struct scsi_disk *sdkp);
+int sd_zbc_read_zones(struct scsi_disk *sdkp, u8 buf[SD_BUF_SIZE]);
 int sd_zbc_revalidate_zones(struct scsi_disk *sdkp);
 blk_status_t sd_zbc_setup_zone_mgmt_cmnd(struct scsi_cmnd *cmd,
 					 unsigned char op, bool all);
@@ -308,10 +346,9 @@ blk_status_t sd_zbc_prepare_zone_append(struct scsi_cmnd *cmd, sector_t *lba,
 
 #else /* CONFIG_BLK_DEV_ZONED */
 
-static inline void sd_zbc_release_disk(struct scsi_disk *sdkp) {}
+static inline void sd_zbc_free_zone_info(struct scsi_disk *sdkp) {}
 
-static inline int sd_zbc_read_zones(struct scsi_disk *sdkp,
-				    unsigned char *buf)
+static inline int sd_zbc_read_zones(struct scsi_disk *sdkp, u8 buf[SD_BUF_SIZE])
 {
 	return 0;
 }

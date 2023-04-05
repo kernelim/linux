@@ -15,12 +15,15 @@
 #include <linux/vmalloc.h>
 #include <linux/init.h>
 #include <linux/slab.h>
+#include <linux/sched/isolation.h>
 
 #include <net/ip.h>
 #include <net/sock.h>
 #include <net/net_ratelimit.h>
 #include <net/busy_poll.h>
 #include <net/pkt_sched.h>
+
+#include "dev.h"
 
 static int two __maybe_unused = 2;
 static int min_sndbuf = SOCK_MIN_SNDBUF;
@@ -34,7 +37,84 @@ static int net_msg_warn;	/* Unused, but still a sysctl */
 int sysctl_fb_tunnels_only_for_init_net __read_mostly = 0;
 EXPORT_SYMBOL(sysctl_fb_tunnels_only_for_init_net);
 
+#if IS_ENABLED(CONFIG_NET_FLOW_LIMIT) || IS_ENABLED(CONFIG_RPS)
+static int dump_cpumask(void __user *buffer, size_t *lenp, loff_t *ppos,
+			struct cpumask *mask)
+{
+	char kbuf[128];
+	int len;
+
+	if (*ppos || !*lenp) {
+		*lenp = 0;
+		return 0;
+	}
+
+	len = min(sizeof(kbuf) - 1, *lenp);
+	len = scnprintf(kbuf, len, "%*pb", cpumask_pr_args(mask));
+	if (!len) {
+		*lenp = 0;
+		return 0;
+	}
+
+	if (len < *lenp)
+		kbuf[len++] = '\n';
+	if (copy_to_user(buffer, kbuf, len))
+		return -EFAULT;
+	*lenp = len;
+	*ppos += len;
+	return 0;
+}
+#endif
+
 #ifdef CONFIG_RPS
+
+static struct cpumask *rps_default_mask_cow_alloc(struct net *net)
+{
+	struct cpumask *rps_default_mask;
+
+	if (net->core_rps_default_mask)
+		return net->core_rps_default_mask;
+
+	rps_default_mask = kzalloc(cpumask_size(), GFP_KERNEL);
+	if (!rps_default_mask)
+		return NULL;
+
+	/* pairs with READ_ONCE in rx_queue_default_mask() */
+	WRITE_ONCE(net->core_rps_default_mask, rps_default_mask);
+	return rps_default_mask;
+}
+
+static int rps_default_mask_sysctl(struct ctl_table *table, int write,
+				   void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	struct net *net = (struct net *)table->data;
+	int err = 0;
+
+	rtnl_lock();
+	if (write) {
+		struct cpumask *rps_default_mask = rps_default_mask_cow_alloc(net);
+
+		err = -ENOMEM;
+		if (!rps_default_mask)
+			goto done;
+
+		err = cpumask_parse_user(buffer, *lenp, rps_default_mask);
+		if (err)
+			goto done;
+
+		err = rps_cpumask_housekeeping(rps_default_mask);
+		if (err)
+			goto done;
+	} else {
+		dump_cpumask(buffer, lenp, ppos,
+			     net->core_rps_default_mask ? : cpu_none_mask);
+	}
+
+done:
+	rtnl_unlock();
+	return err;
+}
+
 static int rps_sock_flow_sysctl(struct ctl_table *table, int write,
 				void __user *buffer, size_t *lenp, loff_t *ppos)
 {
@@ -147,13 +227,6 @@ static int flow_limit_cpu_sysctl(struct ctl_table *table, int write,
 write_unlock:
 		mutex_unlock(&flow_limit_update_mutex);
 	} else {
-		char kbuf[128];
-
-		if (*ppos || !*lenp) {
-			*lenp = 0;
-			goto done;
-		}
-
 		cpumask_clear(mask);
 		rcu_read_lock();
 		for_each_possible_cpu(i) {
@@ -163,20 +236,7 @@ write_unlock:
 		}
 		rcu_read_unlock();
 
-		len = min(sizeof(kbuf) - 1, *lenp);
-		len = scnprintf(kbuf, len, "%*pb", cpumask_pr_args(mask));
-		if (!len) {
-			*lenp = 0;
-			goto done;
-		}
-		if (len < *lenp)
-			kbuf[len++] = '\n';
-		if (copy_to_user(buffer, kbuf, len)) {
-			ret = -EFAULT;
-			goto done;
-		}
-		*lenp = len;
-		*ppos += len;
+		ret = dump_cpumask(buffer, lenp, ppos, mask);
 	}
 
 done:
@@ -229,14 +289,17 @@ static int set_default_qdisc(struct ctl_table *table, int write,
 static int proc_do_dev_weight(struct ctl_table *table, int write,
 			   void __user *buffer, size_t *lenp, loff_t *ppos)
 {
-	int ret;
+	static DEFINE_MUTEX(dev_weight_mutex);
+	int ret, weight;
 
+	mutex_lock(&dev_weight_mutex);
 	ret = proc_dointvec(table, write, buffer, lenp, ppos);
-	if (ret != 0)
-		return ret;
-
-	dev_rx_weight = weight_p * dev_weight_rx_bias;
-	dev_tx_weight = weight_p * dev_weight_tx_bias;
+	if (!ret && write) {
+		weight = READ_ONCE(weight_p);
+		WRITE_ONCE(dev_rx_weight, weight * dev_weight_rx_bias);
+		WRITE_ONCE(dev_tx_weight, weight * dev_weight_tx_bias);
+	}
+	mutex_unlock(&dev_weight_mutex);
 
 	return ret;
 }
@@ -548,6 +611,14 @@ static struct ctl_table net_core_table[] = {
 };
 
 static struct ctl_table netns_core_table[] = {
+#if IS_ENABLED(CONFIG_RPS)
+	{
+		.procname	= "rps_default_mask",
+		.data		= &init_net,
+		.mode		= 0644,
+		.proc_handler	= rps_default_mask_sysctl
+	},
+#endif
 	{
 		.procname	= "somaxconn",
 		.data		= &init_net.core.sysctl_somaxconn,
@@ -561,7 +632,7 @@ static struct ctl_table netns_core_table[] = {
 
 static __net_init int sysctl_core_net_init(struct net *net)
 {
-	struct ctl_table *tbl;
+	struct ctl_table *tbl, *tmp;
 
 	tbl = netns_core_table;
 	if (!net_eq(net, &init_net)) {
@@ -569,7 +640,8 @@ static __net_init int sysctl_core_net_init(struct net *net)
 		if (tbl == NULL)
 			goto err_dup;
 
-		tbl[0].data = &net->core.sysctl_somaxconn;
+		for (tmp = tbl; tmp->procname; tmp++)
+			tmp->data += (char *)net - (char *)&init_net;
 
 		/* Don't export any sysctls to unprivileged users */
 		if (net->user_ns != &init_user_ns) {
@@ -597,6 +669,9 @@ static __net_exit void sysctl_core_net_exit(struct net *net)
 	tbl = net->core.sysctl_hdr->ctl_table_arg;
 	unregister_net_sysctl_table(net->core.sysctl_hdr);
 	BUG_ON(tbl == netns_core_table);
+#if IS_ENABLED(CONFIG_RPS)
+	kfree(net->core_rps_default_mask);
+#endif
 	kfree(tbl);
 }
 

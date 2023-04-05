@@ -559,7 +559,7 @@ void ceph_evict_inode(struct inode *inode)
 
 	__ceph_remove_caps(ci);
 
-	if (__ceph_has_any_quota(ci))
+	if (__ceph_has_quota(ci, QUOTA_GET_ANY))
 		ceph_adjust_quota_realms_count(inode, false);
 
 	/*
@@ -2244,6 +2244,36 @@ int ceph_setattr(struct dentry *dentry, struct iattr *attr)
 	return err;
 }
 
+int ceph_try_to_choose_auth_mds(struct inode *inode, int mask)
+{
+	int issued = ceph_caps_issued(ceph_inode(inode));
+
+	/*
+	 * If any 'x' caps is issued we can just choose the auth MDS
+	 * instead of the random replica MDSes. Because only when the
+	 * Locker is in LOCK_EXEC state will the loner client could
+	 * get the 'x' caps. And if we send the getattr requests to
+	 * any replica MDS it must auth pin and tries to rdlock from
+	 * the auth MDS, and then the auth MDS need to do the Locker
+	 * state transition to LOCK_SYNC. And after that the lock state
+	 * will change back.
+	 *
+	 * This cost much when doing the Locker state transition and
+	 * usually will need to revoke caps from clients.
+	 *
+	 * And for the 'Xs' caps for getxattr we will also choose the
+	 * auth MDS, because the MDS side code is buggy due to setxattr
+	 * won't notify the replica MDSes when the values changed and
+	 * the replica MDS will return the old values. Though we will
+	 * fix it in MDS code, but this still makes sense for old ceph.
+	 */
+	if (((mask & CEPH_CAP_ANY_SHARED) && (issued & CEPH_CAP_ANY_EXCL))
+	    || (mask & (CEPH_STAT_RSTAT | CEPH_STAT_CAP_XATTR)))
+		return USE_AUTH_MDS;
+	else
+		return USE_ANY_MDS;
+}
+
 /*
  * Verify that we have a lease on the given mask.  If not,
  * do a getattr against an mds.
@@ -2267,7 +2297,7 @@ int __ceph_do_getattr(struct inode *inode, struct page *locked_page,
 	if (!force && ceph_caps_issued_mask_metric(ceph_inode(inode), mask, 1))
 			return 0;
 
-	mode = (mask & CEPH_STAT_RSTAT) ? USE_AUTH_MDS : USE_ANY_MDS;
+	mode = ceph_try_to_choose_auth_mds(inode, mask);
 	req = ceph_mdsc_create_request(mdsc, CEPH_MDS_OP_GETATTR, mode);
 	if (IS_ERR(req))
 		return PTR_ERR(req);

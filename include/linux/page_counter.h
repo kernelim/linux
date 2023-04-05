@@ -7,13 +7,52 @@
 #include <linux/rh_kabi.h>
 #include <asm/page.h>
 
+/*
+ * RHEL8 KABI Notes
+ * ----------------
+ * The page_counter structures are only embedded in the mem_cgroup and
+ * hugetlb_cgroup structures. Both these structures are not supposed
+ * to be viewed or used directly by 3rd party kernel modules. So we
+ * are going to rearrange the page_counter layout. Any direct access
+ * to page_counter, mem_cgroup and hugetlb_cgroup from 3rd party
+ * kernel modules will be broken.
+ */
+#ifdef __GENKSYMS__
+
 struct page_counter {
 	atomic_long_t usage;
 	unsigned long min;
 	unsigned long low;
-	RH_KABI_BROKEN_INSERT(unsigned long high)
 	unsigned long max;
-	RH_KABI_BROKEN_REMOVE(struct page_counter *parent)
+	struct page_counter *parent;
+	unsigned long emin;
+	atomic_long_t min_usage;
+	atomic_long_t children_min_usage;
+	unsigned long elow;
+	atomic_long_t low_usage;
+	atomic_long_t children_low_usage;
+	unsigned long watermark;
+	unsigned long failcnt;
+};
+
+#else
+
+#if defined(CONFIG_SMP)
+struct pc_padding {
+	char x[0];
+} ____cacheline_internodealigned_in_smp;
+#define PC_PADDING(name)	struct pc_padding name
+#else
+#define PC_PADDING(name)
+#endif
+
+struct page_counter {
+	/*
+	 * Make sure 'usage' does not share cacheline with any other field. The
+	 * memcg->memory.usage is a hot member of struct mem_cgroup.
+	 */
+	atomic_long_t usage;
+	PC_PADDING(_pad1_);
 
 	/* effective memory.min and memory.min usage tracking */
 	unsigned long emin;
@@ -25,18 +64,20 @@ struct page_counter {
 	atomic_long_t low_usage;
 	atomic_long_t children_low_usage;
 
-	/* legacy */
 	unsigned long watermark;
 	unsigned long failcnt;
 
-	/*
-	 * 'parent' is placed here to be far from 'usage' to reduce
-	 * cache false sharing, as 'usage' is written mostly while
-	 * parent is frequently read for cgroup's hierarchical
-	 * counting nature.
-	 */
-	RH_KABI_BROKEN_INSERT(struct page_counter *parent)
-};
+	/* Keep all the read most fields in a separete cacheline. */
+	PC_PADDING(_pad2_);
+
+	unsigned long min;
+	unsigned long low;
+	unsigned long high;
+	unsigned long max;
+	struct page_counter *parent;
+} ____cacheline_internodealigned_in_smp;
+
+#endif
 
 #if BITS_PER_LONG == 32
 #define PAGE_COUNTER_MAX LONG_MAX

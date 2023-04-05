@@ -811,20 +811,10 @@ static int pvrdma_pci_probe(struct pci_dev *pdev,
 	}
 
 	/* Enable 64-Bit DMA */
-	if (pci_set_dma_mask(pdev, DMA_BIT_MASK(64)) == 0) {
-		ret = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(64));
-		if (ret != 0) {
-			dev_err(&pdev->dev,
-				"pci_set_consistent_dma_mask failed\n");
-			goto err_free_resource;
-		}
-	} else {
-		ret = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
-		if (ret != 0) {
-			dev_err(&pdev->dev,
-				"pci_set_dma_mask failed\n");
-			goto err_free_resource;
-		}
+	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
+	if (ret) {
+		dev_err(&pdev->dev, "dma_set_mask failed\n");
+		goto err_free_resource;
 	}
 	dma_set_max_seg_size(&pdev->dev, UINT_MAX);
 	pci_set_master(pdev);

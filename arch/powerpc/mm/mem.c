@@ -45,6 +45,7 @@
 #include <asm/pgtable.h>
 #include <asm/mmu.h>
 #include <asm/smp.h>
+#include <asm/swiotlb.h>
 #include <asm/machdep.h>
 #include <asm/btext.h>
 #include <asm/tlb.h>
@@ -325,10 +326,7 @@ void __init mem_init(void)
 	BUILD_BUG_ON(MMU_PAGE_COUNT > 16);
 
 #ifdef CONFIG_SWIOTLB
-	if (is_secure_guest())
-		svm_swiotlb_init();
-	else
-		swiotlb_init(0);
+	swiotlb_init(ppc_swiotlb_enable, ppc_swiotlb_flags);
 #endif
 
 	high_memory = (void *) __va(max_low_pfn * PAGE_SIZE);

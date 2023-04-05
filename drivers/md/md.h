@@ -295,6 +295,21 @@ struct serial_info {
 	sector_t _subtree_last; /* highest sector in subtree of rb node */
 };
 
+/*
+ * mddev->curr_resync stores the current sector of the resync but
+ * also has some overloaded values.
+ */
+enum {
+	/* No resync in progress */
+	MD_RESYNC_NONE = 0,
+	/* Yielded to allow another conflicting resync to commence */
+	MD_RESYNC_YIELDED = 1,
+	/* Delayed to check that there is no conflict with another sync */
+	MD_RESYNC_DELAYED = 2,
+	/* Any value greater than or equal to this is in an active resync */
+	MD_RESYNC_ACTIVE = 3,
+};
+
 struct mddev {
 	void				*private;
 	struct md_personality		*pers;
@@ -729,7 +744,7 @@ extern struct md_thread *md_register_thread(
 extern void md_unregister_thread(struct md_thread **threadp);
 extern void md_wakeup_thread(struct md_thread *thread);
 extern void md_check_recovery(struct mddev *mddev);
-extern void md_reap_sync_thread(struct mddev *mddev, bool reconfig_mutex_held);
+extern void md_reap_sync_thread(struct mddev *mddev);
 extern int mddev_init_writes_pending(struct mddev *mddev);
 extern bool md_write_start(struct mddev *mddev, struct bio *bi);
 extern void md_write_inc(struct mddev *mddev, struct bio *bi);
@@ -762,6 +777,7 @@ extern int md_integrity_add_rdev(struct md_rdev *rdev, struct mddev *mddev);
 extern int strict_strtoul_scaled(const char *cp, unsigned long *res, int scale);
 
 extern void mddev_init(struct mddev *mddev);
+int md_alloc(dev_t dev, char *name);
 extern int md_run(struct mddev *mddev);
 extern int md_start(struct mddev *mddev);
 extern void md_stop(struct mddev *mddev);

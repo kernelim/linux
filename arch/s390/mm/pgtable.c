@@ -26,6 +26,26 @@
 #include <asm/mmu_context.h>
 #include <asm/page-states.h>
 
+pgprot_t pgprot_writecombine(pgprot_t prot)
+{
+	/*
+	 * mio_wb_bit_mask may be set on a different CPU, but it is only set
+	 * once at init and only read afterwards.
+	 */
+	return __pgprot(pgprot_val(prot) | mio_wb_bit_mask);
+}
+EXPORT_SYMBOL_GPL(pgprot_writecombine);
+
+pgprot_t pgprot_writethrough(pgprot_t prot)
+{
+	/*
+	 * mio_wb_bit_mask may be set on a different CPU, but it is only set
+	 * once at init and only read afterwards.
+	 */
+	return __pgprot(pgprot_val(prot) & ~mio_wb_bit_mask);
+}
+EXPORT_SYMBOL_GPL(pgprot_writethrough);
+
 static inline void ptep_ipte_local(struct mm_struct *mm, unsigned long addr,
 				   pte_t *ptep, int nodat)
 {
@@ -689,7 +709,7 @@ static void ptep_zap_swap_entry(struct mm_struct *mm, swp_entry_t entry)
 	if (!non_swap_entry(entry))
 		dec_mm_counter(mm, MM_SWAPENTS);
 	else if (is_migration_entry(entry)) {
-		struct page *page = migration_entry_to_page(entry);
+		struct page *page = pfn_swap_entry_to_page(entry);
 
 		dec_mm_counter(mm, mm_counter(page));
 	}
@@ -732,7 +752,7 @@ void ptep_zap_key(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
 	pgste_val(pgste) |= PGSTE_GR_BIT | PGSTE_GC_BIT;
 	ptev = pte_val(*ptep);
 	if (!(ptev & _PAGE_INVALID) && (ptev & _PAGE_WRITE))
-		page_set_storage_key(ptev & PAGE_MASK, PAGE_DEFAULT_KEY, 1);
+		page_set_storage_key(ptev & PAGE_MASK, PAGE_DEFAULT_KEY, 0);
 	pgste_set_unlock(ptep, pgste);
 	preempt_enable();
 }

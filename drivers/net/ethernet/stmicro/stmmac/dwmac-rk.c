@@ -1,5 +1,5 @@
 /**
- * dwmac-rk.c - Rockchip RK3288 DWMAC specific glue layer
+ * DOC: dwmac-rk.c - Rockchip RK3288 DWMAC specific glue layer
  *
  * Copyright (C) 2014 Chen-Zhi (Roger Chen)
  *

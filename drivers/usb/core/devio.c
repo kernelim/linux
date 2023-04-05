@@ -1210,7 +1210,7 @@ static int do_proc_bulk(struct usb_dev_state *ps,
 		pipe = usb_rcvbulkpipe(dev, bulk->ep & 0x7f);
 	else
 		pipe = usb_sndbulkpipe(dev, bulk->ep & 0x7f);
-	if (!usb_maxpacket(dev, pipe, !(bulk->ep & USB_DIR_IN)))
+	if (!usb_maxpacket(dev, pipe))
 		return -EINVAL;
 	len1 = bulk->len;
 	if (len1 >= (INT_MAX - sizeof(struct urb)))

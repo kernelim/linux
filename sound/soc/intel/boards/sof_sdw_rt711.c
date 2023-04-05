@@ -24,12 +24,22 @@
 static int rt711_add_codec_device_props(struct device *sdw_dev)
 {
 	struct property_entry props[MAX_NO_PROPS] = {};
+	struct fwnode_handle *fwnode;
+	int ret;
 
 	if (!SOF_RT711_JDSRC(sof_sdw_quirk))
 		return 0;
 	props[0] = PROPERTY_ENTRY_U32("realtek,jd-src", SOF_RT711_JDSRC(sof_sdw_quirk));
 
-	return device_add_properties(sdw_dev, props);
+	fwnode = fwnode_create_software_node(props, NULL);
+	if (IS_ERR(fwnode))
+		return PTR_ERR(fwnode);
+
+	ret = device_add_software_node(sdw_dev, to_software_node(fwnode));
+
+	fwnode_handle_put(fwnode);
+
+	return ret;
 }
 
 static const struct snd_soc_dapm_widget rt711_widgets[] = {
@@ -96,13 +106,13 @@ static int rt711_rtd_init(struct snd_soc_pcm_runtime *rtd)
 		return ret;
 	}
 
-	ret = snd_soc_card_jack_new(rtd->card, "Headset Jack",
-				    SND_JACK_HEADSET | SND_JACK_BTN_0 |
-				    SND_JACK_BTN_1 | SND_JACK_BTN_2 |
-				    SND_JACK_BTN_3,
-				    &ctx->sdw_headset,
-				    rt711_jack_pins,
-				    ARRAY_SIZE(rt711_jack_pins));
+	ret = snd_soc_card_jack_new_pins(rtd->card, "Headset Jack",
+					 SND_JACK_HEADSET | SND_JACK_BTN_0 |
+					 SND_JACK_BTN_1 | SND_JACK_BTN_2 |
+					 SND_JACK_BTN_3,
+					 &ctx->sdw_headset,
+					 rt711_jack_pins,
+					 ARRAY_SIZE(rt711_jack_pins));
 	if (ret) {
 		dev_err(rtd->card->dev, "Headset Jack creation failed: %d\n",
 			ret);
@@ -129,7 +139,10 @@ int sof_sdw_rt711_exit(struct snd_soc_card *card, struct snd_soc_dai_link *dai_l
 {
 	struct mc_private *ctx = snd_soc_card_get_drvdata(card);
 
-	device_remove_properties(ctx->headset_codec_dev);
+	if (!ctx->headset_codec_dev)
+		return 0;
+
+	device_remove_software_node(ctx->headset_codec_dev);
 	put_device(ctx->headset_codec_dev);
 
 	return 0;

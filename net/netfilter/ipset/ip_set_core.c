@@ -1519,9 +1519,10 @@ call_ad(struct sock *ctnl, struct sk_buff *skb, struct ip_set *set,
 		ret = set->variant->uadt(set, tb, adt, &lineno, flags, retried);
 		spin_unlock_bh(&set->lock);
 		retried = true;
-	} while (ret == -EAGAIN &&
-		 set->variant->resize &&
-		 (ret = set->variant->resize(set, retried)) == 0);
+	} while (ret == -ERANGE ||
+		 (ret == -EAGAIN &&
+		  set->variant->resize &&
+		  (ret = set->variant->resize(set, retried)) == 0));
 
 	if (!ret || (ret == -IPSET_ERR_EXIST && eexist))
 		return 0;

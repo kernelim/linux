@@ -553,7 +553,7 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 
 			get_file(file);
 			if (tmp->vm_flags & VM_DENYWRITE)
-				atomic_dec(&inode->i_writecount);
+				put_write_access(inode);
 			i_mmap_lock_write(mapping);
 			if (tmp->vm_flags & VM_SHARED)
 				atomic_inc(&mapping->i_mmap_writable);
@@ -1898,15 +1898,6 @@ static __latent_entropy struct task_struct *copy_process(
 	if (clone_flags & CLONE_THREAD) {
 		if ((clone_flags & (CLONE_NEWUSER | CLONE_NEWPID)) ||
 		    (task_active_pid_ns(current) != nsp->pid_ns_for_children))
-			return ERR_PTR(-EINVAL);
-	}
-
-	/*
-	 * If the new process will be in a different time namespace
-	 * do not allow it to share VM or a thread group with the forking task.
-	 */
-	if (clone_flags & (CLONE_THREAD | CLONE_VM)) {
-		if (nsp->time_ns != nsp->time_ns_for_children)
 			return ERR_PTR(-EINVAL);
 	}
 

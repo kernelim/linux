@@ -1085,7 +1085,9 @@ static int byt_rt5640_add_codec_device_props(struct device *i2c_dev,
 					     struct byt_rt5640_private *priv)
 {
 	struct property_entry props[MAX_NO_PROPS] = {};
+	struct fwnode_handle *fwnode;
 	int cnt = 0;
+	int ret;
 
 	switch (BYT_RT5640_MAP(byt_rt5640_quirk)) {
 	case BYT_RT5640_DMIC1_MAP:
@@ -1127,7 +1129,17 @@ static int byt_rt5640_add_codec_device_props(struct device *i2c_dev,
 	if (byt_rt5640_quirk & BYT_RT5640_JD_NOT_INV)
 		props[cnt++] = PROPERTY_ENTRY_BOOL("realtek,jack-detect-not-inverted");
 
-	return device_add_properties(i2c_dev, props);
+	fwnode = fwnode_create_software_node(props, NULL);
+	if (IS_ERR(fwnode)) {
+		/* put_device() is handled in caller */
+		return PTR_ERR(fwnode);
+	}
+
+	ret = device_add_software_node(i2c_dev, to_software_node(fwnode));
+
+	fwnode_handle_put(fwnode);
+
+	return ret;
 }
 
 /* Some Android devs specify IRQs/GPIOS in a special AMCR0F28 ACPI device */
@@ -1302,10 +1314,10 @@ static int byt_rt5640_init(struct snd_soc_pcm_runtime *runtime)
 	}
 
 	if (BYT_RT5640_JDSRC(byt_rt5640_quirk)) {
-		ret = snd_soc_card_jack_new(card, "Headset",
-					    SND_JACK_HEADSET | SND_JACK_BTN_0,
-					    &priv->jack, rt5640_pins,
-					    ARRAY_SIZE(rt5640_pins));
+		ret = snd_soc_card_jack_new_pins(card, "Headset",
+						 SND_JACK_HEADSET | SND_JACK_BTN_0,
+						 &priv->jack, rt5640_pins,
+						 ARRAY_SIZE(rt5640_pins));
 		if (ret) {
 			dev_err(card->dev, "Jack creation failed %d\n", ret);
 			return ret;
@@ -1323,17 +1335,17 @@ static int byt_rt5640_init(struct snd_soc_pcm_runtime *runtime)
 	}
 
 	if (byt_rt5640_quirk & BYT_RT5640_JD_HP_ELITEP_1000G2) {
-		ret = snd_soc_card_jack_new(card, "Headset",
-					    SND_JACK_HEADSET,
-					    &priv->jack, rt5640_pins,
-					    ARRAY_SIZE(rt5640_pins));
+		ret = snd_soc_card_jack_new_pins(card, "Headset",
+						 SND_JACK_HEADSET,
+						 &priv->jack, rt5640_pins,
+						 ARRAY_SIZE(rt5640_pins));
 		if (ret)
 			return ret;
 
-		ret = snd_soc_card_jack_new(card, "Headset 2",
-					    SND_JACK_HEADSET,
-					    &priv->jack2, rt5640_pins2,
-					    ARRAY_SIZE(rt5640_pins2));
+		ret = snd_soc_card_jack_new_pins(card, "Headset 2",
+						 SND_JACK_HEADSET,
+						 &priv->jack2, rt5640_pins2,
+						 ARRAY_SIZE(rt5640_pins2));
 		if (ret)
 			return ret;
 
@@ -1401,7 +1413,7 @@ static int byt_rt5640_codec_fixup(struct snd_soc_pcm_runtime *rtd,
 	ret = snd_soc_dai_set_fmt(asoc_rtd_to_cpu(rtd, 0),
 				  SND_SOC_DAIFMT_I2S     |
 				  SND_SOC_DAIFMT_NB_NF   |
-				  SND_SOC_DAIFMT_CBC_CFC);
+				  SND_SOC_DAIFMT_BP_FP);
 	if (ret < 0) {
 		dev_err(rtd->dev, "can't set format to I2S, err %d\n", ret);
 		return ret;
@@ -1624,7 +1636,7 @@ static int snd_byt_rt5640_mc_probe(struct platform_device *pdev)
 		 * with the codec driver/pdata are non-existent
 		 */
 
-		struct acpi_chan_package chan_package;
+		struct acpi_chan_package chan_package = { 0 };
 
 		/* format specified: 2 64-bit integers */
 		struct acpi_buffer format = {sizeof("NN"), "NN"};
@@ -1798,6 +1810,7 @@ static int snd_byt_rt5640_mc_probe(struct platform_device *pdev)
 	return ret_val;
 
 err:
+	device_remove_software_node(priv->codec_dev);
 err_remove_gpios:
 	if (byt_rt5640_quirk & BYT_RT5640_JD_HP_ELITEP_1000G2)
 		acpi_dev_remove_driver_gpios(ACPI_COMPANION(priv->codec_dev));
@@ -1814,6 +1827,7 @@ static int snd_byt_rt5640_mc_remove(struct platform_device *pdev)
 	if (byt_rt5640_quirk & BYT_RT5640_JD_HP_ELITEP_1000G2)
 		acpi_dev_remove_driver_gpios(ACPI_COMPANION(priv->codec_dev));
 
+	device_remove_software_node(priv->codec_dev);
 	put_device(priv->codec_dev);
 	return 0;
 }

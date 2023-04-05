@@ -1998,8 +1998,6 @@ int scsi_decide_disposition(struct scsi_cmnd *scmd)
 			    "reservation conflict\n");
 		set_host_byte(scmd, DID_NEXUS_FAILURE);
 		return SUCCESS; /* causes immediate i/o error */
-	default:
-		return FAILED;
 	}
 	return FAILED;
 

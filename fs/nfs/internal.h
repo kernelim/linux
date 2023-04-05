@@ -366,8 +366,8 @@ extern struct nfs_client *nfs_init_client(struct nfs_client *clp,
 			   const struct nfs_client_initdata *);
 
 /* dir.c */
-extern void nfs_advise_use_readdirplus(struct inode *dir);
-extern void nfs_force_use_readdirplus(struct inode *dir);
+extern void nfs_readdir_record_entry_cache_hit(struct inode *dir);
+extern void nfs_readdir_record_entry_cache_miss(struct inode *dir);
 extern unsigned long nfs_access_cache_count(struct shrinker *shrink,
 					    struct shrink_control *sc);
 extern unsigned long nfs_access_cache_scan(struct shrinker *shrink,
@@ -566,6 +566,38 @@ nfs_write_match_verf(const struct nfs_writeverf *verf,
 {
 	return verf->committed > NFS_UNSTABLE &&
 		!nfs_write_verifier_cmp(&req->wb_verf, &verf->verifier);
+}
+
+static inline gfp_t nfs_io_gfp_mask(void)
+{
+	if (current->flags & PF_WQ_WORKER)
+		return GFP_KERNEL | __GFP_NORETRY | __GFP_NOWARN;
+	return GFP_KERNEL;
+}
+
+/*
+ * Special version of should_remove_suid() that ignores capabilities.
+ */
+static inline int nfs_should_remove_suid(const struct inode *inode)
+{
+	umode_t mode = inode->i_mode;
+	int kill = 0;
+
+	/* suid always must be killed */
+	if (unlikely(mode & S_ISUID))
+		kill = ATTR_KILL_SUID;
+
+	/*
+	 * sgid without any exec bits is just a mandatory locking mark; leave
+	 * it alone.  If some exec bits are set, it's a real sgid; kill it.
+	 */
+	if (unlikely((mode & S_ISGID) && (mode & S_IXGRP)))
+		kill |= ATTR_KILL_SGID;
+
+	if (unlikely(kill && S_ISREG(mode)))
+		return kill;
+
+	return 0;
 }
 
 /* unlink.c */

@@ -1650,40 +1650,43 @@ static void csi_m(struct vc_data *vc)
 	update_attr(vc);
 }
 
-static void respond_string(const char *p, struct tty_port *port)
+static void respond_string(const char *p, size_t len, struct tty_port *port)
 {
-	while (*p) {
-		tty_insert_flip_char(port, *p, 0);
-		p++;
-	}
-	tty_schedule_flip(port);
+	tty_insert_flip_string(port, p, len);
+	tty_flip_buffer_push(port);
 }
 
 static void cursor_report(struct vc_data *vc, struct tty_struct *tty)
 {
 	char buf[40];
+	int len;
 
-	sprintf(buf, "\033[%d;%dR", vc->vc_y + (vc->vc_decom ? vc->vc_top + 1 : 1), vc->vc_x + 1);
-	respond_string(buf, tty->port);
+	len = sprintf(buf, "\033[%d;%dR", vc->vc_y +
+			(vc->vc_decom ? vc->vc_top + 1 : 1),
+			vc->vc_x + 1);
+	respond_string(buf, len, tty->port);
 }
 
 static inline void status_report(struct tty_struct *tty)
 {
-	respond_string("\033[0n", tty->port);	/* Terminal ok */
+	static const char teminal_ok[] = "\033[0n";
+
+	respond_string(teminal_ok, strlen(teminal_ok), tty->port);
 }
 
 static inline void respond_ID(struct tty_struct *tty)
 {
-	respond_string(VT102ID, tty->port);
+	respond_string(VT102ID, strlen(VT102ID), tty->port);
 }
 
 void mouse_report(struct tty_struct *tty, int butt, int mrx, int mry)
 {
 	char buf[8];
+	int len;
 
-	sprintf(buf, "\033[M%c%c%c", (char)(' ' + butt), (char)('!' + mrx),
-		(char)('!' + mry));
-	respond_string(buf, tty->port);
+	len = sprintf(buf, "\033[M%c%c%c", (char)(' ' + butt),
+			(char)('!' + mrx), (char)('!' + mry));
+	respond_string(buf, len, tty->port);
 }
 
 /* invoked via ioctl(TIOCLINUX) and through set_selection_user */
@@ -3197,8 +3200,9 @@ static int __init con_init(void)
 
 	console_lock();
 
-	if (conswitchp)
-		display_desc = conswitchp->con_startup();
+	if (!conswitchp)
+		conswitchp = &dummy_con;
+	display_desc = conswitchp->con_startup();
 	if (!display_desc) {
 		fg_console = 0;
 		console_unlock();
@@ -4307,16 +4311,8 @@ static int con_font_get(struct vc_data *vc, struct console_font_op *op)
 
 	if (op->data && font.charcount > op->charcount)
 		rc = -ENOSPC;
-	if (!(op->flags & KD_FONT_FLAG_OLD)) {
-		if (font.width > op->width || font.height > op->height) 
-			rc = -ENOSPC;
-	} else {
-		if (font.width != 8)
-			rc = -EIO;
-		else if ((op->height && font.height > op->height) ||
-			 font.height > 32)
-			rc = -ENOSPC;
-	}
+	if (font.width > op->width || font.height > op->height)
+		rc = -ENOSPC;
 	if (rc)
 		goto out;
 
@@ -4344,7 +4340,7 @@ static int con_font_set(struct vc_data *vc, struct console_font_op *op)
 		return -EINVAL;
 	if (op->charcount > 512)
 		return -EINVAL;
-	if (op->width <= 0 || op->width > 32 || op->height > 32)
+	if (op->width <= 0 || op->width > 32 || !op->height || op->height > 32)
 		return -EINVAL;
 	size = (op->width+7)/8 * 32 * op->charcount;
 	if (size > max_font_size)
@@ -4353,31 +4349,6 @@ static int con_font_set(struct vc_data *vc, struct console_font_op *op)
 	font.data = memdup_user(op->data, size);
 	if (IS_ERR(font.data))
 		return PTR_ERR(font.data);
-
-	if (!op->height) {		/* Need to guess font height [compat] */
-		int h, i;
-		u8 *charmap = font.data;
-
-		/*
-		 * If from KDFONTOP ioctl, don't allow things which can be done
-		 * in userland,so that we can get rid of this soon
-		 */
-		if (!(op->flags & KD_FONT_FLAG_OLD)) {
-			kfree(font.data);
-			return -EINVAL;
-		}
-
-		for (h = 32; h > 0; h--)
-			for (i = 0; i < op->charcount; i++)
-				if (charmap[32*i+h-1])
-					goto nonzero;
-
-		kfree(font.data);
-		return -EINVAL;
-
-	nonzero:
-		op->height = h;
-	}
 
 	font.charcount = op->charcount;
 	font.width = op->width;

@@ -1491,8 +1491,6 @@ static int init_subsystems(void)
 		goto out;
 
 	kvm_perf_init();
-	kvm_coproc_table_init();
-
 out:
 	on_each_cpu(_kvm_arch_hardware_disable, NULL, 1);
 
@@ -1683,6 +1681,12 @@ int kvm_arch_init(void *opaque)
 	if (!in_hyp_mode && kvm_arch_requires_vhe()) {
 		kvm_pr_unimpl("CPU unsupported in non-VHE mode, not initializing\n");
 		return -ENODEV;
+	}
+
+	err = kvm_sys_reg_table_init();
+	if (err) {
+		kvm_info("Error initializing system register tables");
+		return err;
 	}
 
 	if (cpus_have_final_cap(ARM64_WORKAROUND_DEVICE_LOAD_ACQUIRE) ||

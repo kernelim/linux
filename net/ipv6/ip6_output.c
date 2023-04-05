@@ -125,7 +125,7 @@ static int ip6_finish_output2(struct net *net, struct sock *sk, struct sk_buff *
 	rcu_read_unlock_bh();
 
 	IP6_INC_STATS(net, ip6_dst_idev(dst), IPSTATS_MIB_OUTNOROUTES);
-	kfree_skb(skb);
+	kfree_skb_reason(skb, SKB_DROP_REASON_NEIGH_CREATEFAIL);
 	return -EINVAL;
 }
 
@@ -197,7 +197,7 @@ static int ip6_finish_output(struct net *net, struct sock *sk, struct sk_buff *s
 	case NET_XMIT_CN:
 		return __ip6_finish_output(net, sk, skb) ? : ret;
 	default:
-		kfree_skb(skb);
+		kfree_skb_reason(skb, SKB_DROP_REASON_BPF_CGROUP_EGRESS);
 		return ret;
 	}
 }
@@ -212,7 +212,7 @@ int ip6_output(struct net *net, struct sock *sk, struct sk_buff *skb)
 
 	if (unlikely(idev->cnf.disable_ipv6)) {
 		IP6_INC_STATS(net, idev, IPSTATS_MIB_OUTDISCARDS);
-		kfree_skb(skb);
+		kfree_skb_reason(skb, SKB_DROP_REASON_IPV6DISABLED);
 		return 0;
 	}
 
@@ -462,6 +462,7 @@ int ip6_forward(struct sk_buff *skb)
 	struct inet6_skb_parm *opt = IP6CB(skb);
 	struct net *net = dev_net(dst->dev);
 	struct inet6_dev *idev;
+	SKB_DR(reason);
 	u32 mtu;
 
 	idev = __in6_dev_get_safely(dev_get_by_index_rcu(net, IP6CB(skb)->iif));
@@ -513,7 +514,7 @@ int ip6_forward(struct sk_buff *skb)
 		icmpv6_send(skb, ICMPV6_TIME_EXCEED, ICMPV6_EXC_HOPLIMIT, 0);
 		__IP6_INC_STATS(net, idev, IPSTATS_MIB_INHDRERRORS);
 
-		kfree_skb(skb);
+		kfree_skb_reason(skb, SKB_DROP_REASON_IP_INHDR);
 		return -ETIMEDOUT;
 	}
 
@@ -531,6 +532,7 @@ int ip6_forward(struct sk_buff *skb)
 
 	if (!xfrm6_route_forward(skb)) {
 		__IP6_INC_STATS(net, idev, IPSTATS_MIB_INDISCARDS);
+		SKB_DR_SET(reason, XFRM_POLICY);
 		goto drop;
 	}
 	dst = skb_dst(skb);
@@ -590,7 +592,7 @@ int ip6_forward(struct sk_buff *skb)
 		__IP6_INC_STATS(net, idev, IPSTATS_MIB_INTOOBIGERRORS);
 		__IP6_INC_STATS(net, ip6_dst_idev(dst),
 				IPSTATS_MIB_FRAGFAILS);
-		kfree_skb(skb);
+		kfree_skb_reason(skb, SKB_DROP_REASON_PKT_TOO_BIG);
 		return -EMSGSIZE;
 	}
 
@@ -612,8 +614,9 @@ int ip6_forward(struct sk_buff *skb)
 
 error:
 	__IP6_INC_STATS(net, idev, IPSTATS_MIB_INADDRERRORS);
+	SKB_DR_SET(reason, IP_INADDRERRORS);
 drop:
-	kfree_skb(skb);
+	kfree_skb_reason(skb, reason);
 	return -EINVAL;
 }
 
@@ -976,8 +979,7 @@ static struct dst_entry *ip6_sk_dst_check(struct sock *sk,
 #ifdef CONFIG_IPV6_SUBTREES
 	    ip6_rt_check(&rt->rt6i_src, &fl6->saddr, np->saddr_cache) ||
 #endif
-	   (!(fl6->flowi6_flags & FLOWI_FLAG_SKIP_NH_OIF) &&
-	      (fl6->flowi6_oif && fl6->flowi6_oif != dst->dev->ifindex))) {
+	   (fl6->flowi6_oif && fl6->flowi6_oif != dst->dev->ifindex)) {
 		dst_release(dst);
 		dst = NULL;
 	}
@@ -1231,8 +1233,7 @@ struct dst_entry *ip6_dst_lookup_tunnel(struct sk_buff *skb,
 	fl6.daddr = info->key.u.ipv6.dst;
 	fl6.saddr = info->key.u.ipv6.src;
 	prio = info->key.tos;
-	fl6.flowlabel = ip6_make_flowinfo(RT_TOS(prio),
-					  info->key.label);
+	fl6.flowlabel = ip6_make_flowinfo(prio, info->key.label);
 
 	dst = ipv6_stub->ipv6_dst_lookup_flow(net, sock->sk, &fl6,
 					      NULL);

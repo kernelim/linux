@@ -17,7 +17,6 @@ void ext_int_handler(void);
 void io_int_handler(void);
 void mcck_int_handler(void);
 void restart_int_handler(void);
-void restart_call_handler(void);
 
 asmlinkage long do_syscall_trace_enter(struct pt_regs *regs);
 asmlinkage void do_syscall_trace_exit(struct pt_regs *regs);
@@ -62,13 +61,10 @@ void do_notify_resume(struct pt_regs *regs);
 void __init init_IRQ(void);
 void do_IRQ(struct pt_regs *regs, int irq);
 void do_restart(void);
-void __init startup_init_nobss(void);
 void __init startup_init(void);
 void die(struct pt_regs *regs, const char *str);
 int setup_profiling_timer(unsigned int multiplier);
 void __init time_init(void);
-int pfn_is_nosave(unsigned long);
-void s390_early_resume(void);
 unsigned long prepare_ftrace_return(unsigned long parent, unsigned long ip);
 
 struct s390_mmap_arg_struct;

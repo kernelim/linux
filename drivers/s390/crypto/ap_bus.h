@@ -82,12 +82,6 @@ static inline int ap_test_bit(unsigned int *ptr, unsigned int nr)
 #define AP_FUNC_APXA  6
 
 /*
- * AP interrupt states
- */
-#define AP_INTR_DISABLED	0	/* AP interrupt disabled */
-#define AP_INTR_ENABLED		1	/* AP interrupt enabled */
-
-/*
  * AP queue state machine states
  */
 enum ap_sm_state {
@@ -114,7 +108,7 @@ enum ap_sm_event {
  * AP queue state wait behaviour
  */
 enum ap_sm_wait {
-	AP_SM_WAIT_AGAIN,	/* retry immediately */
+	AP_SM_WAIT_AGAIN = 0,	/* retry immediately */
 	AP_SM_WAIT_TIMEOUT,	/* wait for timeout */
 	AP_SM_WAIT_INTERRUPT,	/* wait for thin interrupt (if available) */
 	AP_SM_WAIT_NONE,	/* no wait */
@@ -150,6 +144,23 @@ struct ap_driver {
 
 	int (*probe)(struct ap_device *);
 	void (*remove)(struct ap_device *);
+	int (*in_use)(unsigned long *apm, unsigned long *aqm);
+	/*
+	 * Called at the start of the ap bus scan function when
+	 * the crypto config information (qci) has changed.
+	 * This callback is not invoked if there is no AP
+	 * QCI support available.
+	 */
+	void (*on_config_changed)(struct ap_config_info *new_config_info,
+				  struct ap_config_info *old_config_info);
+	/*
+	 * Called at the end of the ap bus scan function when
+	 * the crypto config information (qci) has changed.
+	 * This callback is not invoked if there is no AP
+	 * QCI support available.
+	 */
+	void (*on_scan_complete)(struct ap_config_info *new_config_info,
+				 struct ap_config_info *old_config_info);
 	void (*suspend)(struct ap_device *);
 	void (*resume)(struct ap_device *);
 };
@@ -161,7 +172,6 @@ void ap_driver_unregister(struct ap_driver *);
 
 struct ap_device {
 	struct device device;
-	struct ap_driver *drv;		/* Pointer to AP device driver. */
 	int device_type;		/* AP device type. */
 };
 
@@ -192,7 +202,7 @@ struct ap_queue {
 	bool config;			/* configured state */
 	bool chkstop;			/* checkstop state */
 	ap_qid_t qid;			/* AP queue id. */
-	int interrupt;			/* indicate if interrupts are enabled */
+	bool interrupt;			/* indicate if interrupts are enabled */
 	int queue_count;		/* # messages currently on AP queue. */
 	int pendingq_count;		/* # requests on pendingq list. */
 	int requestq_count;		/* # requests on requestq list. */
@@ -308,11 +318,15 @@ void ap_queue_init_state(struct ap_queue *aq);
 struct ap_card *ap_card_create(int id, int queue_depth, int raw_type,
 			       int comp_type, unsigned int functions, int ml);
 
+#define APMASKSIZE (BITS_TO_LONGS(AP_DEVICES) * sizeof(unsigned long))
+#define AQMASKSIZE (BITS_TO_LONGS(AP_DOMAINS) * sizeof(unsigned long))
+
 struct ap_perms {
 	unsigned long ioctlm[BITS_TO_LONGS(AP_IOCTLS)];
 	unsigned long apm[BITS_TO_LONGS(AP_DEVICES)];
 	unsigned long aqm[BITS_TO_LONGS(AP_DOMAINS)];
 };
+
 extern struct ap_perms ap_perms;
 extern struct mutex ap_perms_mutex;
 

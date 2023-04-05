@@ -786,7 +786,7 @@ static struct cluster_pmu *l2_cache_associate_cpu_with_cluster(
 {
 	u64 mpidr;
 	int cpu_cluster_id;
-	struct cluster_pmu *cluster = NULL;
+	struct cluster_pmu *cluster;
 
 	/*
 	 * This assumes that the cluster_id is in MPIDR[aff1] for
@@ -808,10 +808,10 @@ static struct cluster_pmu *l2_cache_associate_cpu_with_cluster(
 			 cluster->cluster_id);
 		cpumask_set_cpu(cpu, &cluster->cluster_cpus);
 		*per_cpu_ptr(l2cache_pmu->pmu_cluster, cpu) = cluster;
-		break;
+		return cluster;
 	}
 
-	return cluster;
+	return NULL;
 }
 
 static int l2cache_pmu_online_cpu(unsigned int cpu, struct hlist_node *node)
@@ -917,14 +917,14 @@ static int l2_cache_pmu_probe_cluster(struct device *dev, void *data)
 			fw_cluster_id);
 		return irq;
 	}
-	irq_set_status_flags(irq, IRQ_NOAUTOEN);
 	cluster->irq = irq;
 
 	cluster->l2cache_pmu = l2cache_pmu;
 	cluster->on_cpu = -1;
 
 	err = devm_request_irq(&pdev->dev, irq, l2_cache_handle_irq,
-			       IRQF_NOBALANCING | IRQF_NO_THREAD,
+			       IRQF_NOBALANCING | IRQF_NO_THREAD |
+			       IRQF_NO_AUTOEN,
 			       "l2-cache-pmu", cluster);
 	if (err) {
 		dev_err(&pdev->dev,

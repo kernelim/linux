@@ -3,6 +3,7 @@
 #define __NET_FRAG_H__
 
 #include <linux/rhashtable-types.h>
+#include <net/dropreason.h>
 
 struct netns_frags {
 	/* sysctls */
@@ -24,11 +25,13 @@ struct netns_frags {
  * @INET_FRAG_FIRST_IN: first fragment has arrived
  * @INET_FRAG_LAST_IN: final fragment has arrived
  * @INET_FRAG_COMPLETE: frag queue has been processed and is due for destruction
+ * @INET_FRAG_DROP: if skbs must be dropped (instead of being consumed)
  */
 enum {
 	INET_FRAG_FIRST_IN	= BIT(0),
 	INET_FRAG_LAST_IN	= BIT(1),
 	INET_FRAG_COMPLETE	= BIT(2),
+	INET_FRAG_DROP		= BIT(4),
 };
 
 struct frag_v4_compare_key {
@@ -117,7 +120,8 @@ void inet_frag_destroy(struct inet_frag_queue *q);
 struct inet_frag_queue *inet_frag_find(struct netns_frags *nf, void *key);
 
 /* Free all skbs in the queue; return the sum of their truesizes. */
-unsigned int inet_frag_rbtree_purge(struct rb_root *root);
+unsigned int inet_frag_rbtree_purge(struct rb_root *root,
+				    enum skb_drop_reason reason);
 
 static inline void inet_frag_put(struct inet_frag_queue *q)
 {

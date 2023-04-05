@@ -265,7 +265,7 @@ struct bio {
 #define BIO_QUIET	6	/* Make BIO Quiet */
 #define BIO_CHAIN	7	/* chained bio, ->bi_remaining in effect */
 #define BIO_REFFED	8	/* bio has elevated ->bi_cnt */
-#define BIO_THROTTLED	9	/* This bio has already been subjected to
+#define BIO_BPS_THROTTLED	9	/* This bio has already been subjected to
 				 * throttling rules. Don't do it again. */
 #define BIO_TRACE_COMPLETION 10	/* bio_endio() should trace the final completion
 				 * of this bio. */

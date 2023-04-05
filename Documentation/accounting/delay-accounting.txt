@@ -12,6 +12,8 @@ a) waiting for a CPU (while being runnable)
 b) completion of synchronous block I/O initiated by the task
 c) swapping in pages
 d) memory reclaim
+e) thrashing
+f) direct compact
 
 and makes these statistics available to userspace through
 the taskstats interface.

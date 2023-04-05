@@ -1711,7 +1711,11 @@ static int vmci_transport_dgram_enqueue(
 	if (!dg)
 		return -ENOMEM;
 
-	memcpy_from_msg(VMCI_DG_PAYLOAD(dg), msg, len);
+	err = memcpy_from_msg(VMCI_DG_PAYLOAD(dg), msg, len);
+	if (err) {
+		kfree(dg);
+		return err;
+	}
 
 	dg->dst = vmci_make_handle(remote_addr->svm_cid,
 				   remote_addr->svm_port);
@@ -1732,19 +1736,16 @@ static int vmci_transport_dgram_dequeue(struct vsock_sock *vsk,
 					int flags)
 {
 	int err;
-	int noblock;
 	struct vmci_datagram *dg;
 	size_t payload_len;
 	struct sk_buff *skb;
-
-	noblock = flags & MSG_DONTWAIT;
 
 	if (flags & MSG_OOB || flags & MSG_ERRQUEUE)
 		return -EOPNOTSUPP;
 
 	/* Retrieve the head sk_buff from the socket's receive queue. */
 	err = 0;
-	skb = skb_recv_datagram(&vsk->sk, flags, noblock, &err);
+	skb = skb_recv_datagram(&vsk->sk, flags, &err);
 	if (!skb)
 		return err;
 

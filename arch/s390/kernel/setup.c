@@ -128,6 +128,12 @@ struct lowcore *lowcore_ptr[NR_CPUS];
 EXPORT_SYMBOL(lowcore_ptr);
 
 /*
+ * The Write Back bit position in the physaddr is given by the SLPC PCI.
+ * Leaving the mask zero always uses write through which is safe
+ */
+unsigned long mio_wb_bit_mask __ro_after_init;
+
+/*
  * This is set up by the setup-routine at boot-time
  * for S390 need to find out, what we have to setup
  * using address 0x10400 ...
@@ -379,11 +385,9 @@ static void __init setup_lowcore_dat_off(void)
 	mem_assign_absolute(S390_lowcore.restart_source, lc->restart_source);
 	mem_assign_absolute(S390_lowcore.restart_psw, lc->restart_psw);
 
-#ifdef CONFIG_SMP
 	lc->spinlock_lockval = arch_spin_lockval(0);
 	lc->spinlock_index = 0;
 	arch_spin_lock_setup(0);
-#endif
 	lc->br_r1_trampoline = 0x07f1;	/* br %r1 */
 	lc->return_lpswe = gen_lpswe(__LC_RETURN_PSW);
 	lc->return_mcck_lpswe = gen_lpswe(__LC_RETURN_MCCK_PSW);
@@ -762,6 +766,7 @@ static void __init reserve_kernel(void)
 	unsigned long start_pfn = PFN_UP(__pa(_end));
 
 	memblock_reserve(0, HEAD_END);
+	memblock_reserve((unsigned long)sclp_early_sccb, EXT_SCCB_READ_SCP);
 	memblock_reserve((unsigned long)_stext, PFN_PHYS(start_pfn)
 			 - (unsigned long)_stext);
 	memblock_reserve(__sdma, __edma - __sdma);

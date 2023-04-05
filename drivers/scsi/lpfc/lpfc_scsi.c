@@ -5564,9 +5564,7 @@ static int lpfc_vmid_get_appid(struct lpfc_vport *vport, char *uuid, struct
 		/* allocate the per cpu variable for holding */
 		/* the last access time stamp only if VMID is enabled */
 		if (!vmp->last_io_time)
-			vmp->last_io_time = __alloc_percpu(sizeof(u64),
-							   __alignof__(struct
-							   lpfc_vmid));
+			vmp->last_io_time = alloc_percpu_gfp(u64, GFP_ATOMIC);
 		if (!vmp->last_io_time) {
 			hash_del(&vmp->hnode);
 			vmp->flag = LPFC_VMID_SLOT_FREE;

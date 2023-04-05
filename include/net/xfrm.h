@@ -130,11 +130,17 @@ struct xfrm_state_walk {
 	RH_KABI_RESERVE(1)
 };
 
+enum {
+	XFRM_DEV_OFFLOAD_IN = 1,
+	XFRM_DEV_OFFLOAD_OUT,
+};
+
 struct xfrm_state_offload {
 	struct net_device	*dev;
 	unsigned long		offload_handle;
 	unsigned int		num_exthdrs;
 	u8			flags;
+	RH_KABI_FILL_HOLE(u8	dir : 2)
 
 	RH_KABI_USE(1, struct net_device *real_dev)
 	RH_KABI_RESERVE(2)

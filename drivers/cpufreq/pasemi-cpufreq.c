@@ -32,7 +32,6 @@
 
 #include <asm/hw_irq.h>
 #include <asm/io.h>
-#include <asm/prom.h>
 #include <asm/time.h>
 #include <asm/smp.h>
 

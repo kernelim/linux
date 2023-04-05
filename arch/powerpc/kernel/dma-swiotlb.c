@@ -15,6 +15,7 @@
 #include <asm/swiotlb.h>
 
 unsigned int ppc_swiotlb_enable;
+unsigned int ppc_swiotlb_flags;
 
 void __init swiotlb_detect_4g(void)
 {

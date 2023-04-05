@@ -40,6 +40,7 @@
 #include <linux/in6.h>
 #include <linux/if_packet.h>
 #include <net/flow.h>
+#include <net/dropreason.h>
 
 #include <linux/rh_kabi.h>
 
@@ -1092,11 +1093,17 @@ static inline bool skb_unref(struct sk_buff *skb)
 	return true;
 }
 
+void __fix_address
+kfree_skb_reason(struct sk_buff *skb, enum skb_drop_reason reason);
+
 void skb_release_head_state(struct sk_buff *skb);
 void kfree_skb(struct sk_buff *skb);
 void kfree_skb_list(struct sk_buff *segs);
+void kfree_skb_list_reason(struct sk_buff *segs,
+			   enum skb_drop_reason reason);
 void skb_dump(const char *level, const struct sk_buff *skb, bool full_pkt);
 void skb_tx_error(struct sk_buff *skb);
+
 void consume_skb(struct sk_buff *skb);
 void __consume_stateless_skb(struct sk_buff *skb);
 void  __kfree_skb(struct sk_buff *skb);
@@ -3615,8 +3622,7 @@ struct sk_buff *__skb_recv_datagram(struct sock *sk,
 				    void (*destructor)(struct sock *sk,
 						       struct sk_buff *skb),
 				    int *off, int *err);
-struct sk_buff *skb_recv_datagram(struct sock *sk, unsigned flags, int noblock,
-				  int *err);
+struct sk_buff *skb_recv_datagram(struct sock *sk, unsigned int flags, int *err);
 __poll_t datagram_poll(struct file *file, struct socket *sock,
 			   struct poll_table_struct *wait);
 int skb_copy_datagram_iter(const struct sk_buff *from, int offset,

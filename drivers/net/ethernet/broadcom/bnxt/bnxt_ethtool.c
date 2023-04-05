@@ -11,6 +11,7 @@
 #include <linux/ctype.h>
 #include <linux/stringify.h>
 #include <linux/ethtool.h>
+#include <linux/ethtool_netlink.h>
 #include <linux/linkmode.h>
 #include <linux/interrupt.h>
 #include <linux/pci.h>
@@ -811,9 +812,11 @@ static void bnxt_get_ringparam(struct net_device *dev,
 	if (bp->flags & BNXT_FLAG_AGG_RINGS) {
 		ering->rx_max_pending = BNXT_MAX_RX_DESC_CNT_JUM_ENA;
 		ering->rx_jumbo_max_pending = BNXT_MAX_RX_JUM_DESC_CNT;
+		kernel_ering->tcp_data_split = ETHTOOL_TCP_DATA_SPLIT_ENABLED;
 	} else {
 		ering->rx_max_pending = BNXT_MAX_RX_DESC_CNT;
 		ering->rx_jumbo_max_pending = 0;
+		kernel_ering->tcp_data_split = ETHTOOL_TCP_DATA_SPLIT_DISABLED;
 	}
 	ering->tx_max_pending = BNXT_MAX_TX_DESC_CNT;
 
@@ -1128,7 +1131,7 @@ static int bnxt_grxfh(struct bnxt *bp, struct ethtool_rxnfc *cmd)
 		if (bp->rss_hash_cfg & VNIC_RSS_CFG_REQ_HASH_TYPE_UDP_IPV4)
 			cmd->data |= RXH_IP_SRC | RXH_IP_DST |
 				     RXH_L4_B_0_1 | RXH_L4_B_2_3;
-		/* fall through */
+		fallthrough;
 	case SCTP_V4_FLOW:
 	case AH_ESP_V4_FLOW:
 	case AH_V4_FLOW:
@@ -1147,7 +1150,7 @@ static int bnxt_grxfh(struct bnxt *bp, struct ethtool_rxnfc *cmd)
 		if (bp->rss_hash_cfg & VNIC_RSS_CFG_REQ_HASH_TYPE_UDP_IPV6)
 			cmd->data |= RXH_IP_SRC | RXH_IP_DST |
 				     RXH_L4_B_0_1 | RXH_L4_B_2_3;
-		/* fall through */
+		fallthrough;
 	case SCTP_V6_FLOW:
 	case AH_ESP_V6_FLOW:
 	case AH_V6_FLOW:
@@ -1368,9 +1371,9 @@ static void bnxt_get_drvinfo(struct net_device *dev,
 {
 	struct bnxt *bp = netdev_priv(dev);
 
-	strlcpy(info->driver, DRV_MODULE_NAME, sizeof(info->driver));
-	strlcpy(info->fw_version, bp->fw_ver_str, sizeof(info->fw_version));
-	strlcpy(info->bus_info, pci_name(bp->pdev), sizeof(info->bus_info));
+	strscpy(info->driver, DRV_MODULE_NAME, sizeof(info->driver));
+	strscpy(info->fw_version, bp->fw_ver_str, sizeof(info->fw_version));
+	strscpy(info->bus_info, pci_name(bp->pdev), sizeof(info->bus_info));
 	info->n_stats = bnxt_get_num_stats(bp);
 	info->testinfo_len = bp->num_tests;
 	/* TODO CHIMP_FW: eeprom dump details */
@@ -2173,14 +2176,14 @@ static void bnxt_print_admin_err(struct bnxt *bp)
 	netdev_info(bp->dev, "PF does not have admin privileges to flash or reset the device\n");
 }
 
-static int bnxt_find_nvram_item(struct net_device *dev, u16 type, u16 ordinal,
-				u16 ext, u16 *index, u32 *item_length,
-				u32 *data_length);
+int bnxt_find_nvram_item(struct net_device *dev, u16 type, u16 ordinal,
+			 u16 ext, u16 *index, u32 *item_length,
+			 u32 *data_length);
 
-static int bnxt_flash_nvram(struct net_device *dev, u16 dir_type,
-			    u16 dir_ordinal, u16 dir_ext, u16 dir_attr,
-			    u32 dir_item_len, const u8 *data,
-			    size_t data_len)
+int bnxt_flash_nvram(struct net_device *dev, u16 dir_type,
+		     u16 dir_ordinal, u16 dir_ext, u16 dir_attr,
+		     u32 dir_item_len, const u8 *data,
+		     size_t data_len)
 {
 	struct bnxt *bp = netdev_priv(dev);
 	struct hwrm_nvm_write_input *req;
@@ -2833,8 +2836,8 @@ static int bnxt_get_nvram_directory(struct net_device *dev, u32 len, u8 *data)
 	return rc;
 }
 
-static int bnxt_get_nvram_item(struct net_device *dev, u32 index, u32 offset,
-			       u32 length, u8 *data)
+int bnxt_get_nvram_item(struct net_device *dev, u32 index, u32 offset,
+			u32 length, u8 *data)
 {
 	struct bnxt *bp = netdev_priv(dev);
 	int rc;
@@ -2868,9 +2871,9 @@ static int bnxt_get_nvram_item(struct net_device *dev, u32 index, u32 offset,
 	return rc;
 }
 
-static int bnxt_find_nvram_item(struct net_device *dev, u16 type, u16 ordinal,
-				u16 ext, u16 *index, u32 *item_length,
-				u32 *data_length)
+int bnxt_find_nvram_item(struct net_device *dev, u16 type, u16 ordinal,
+			 u16 ext, u16 *index, u32 *item_length,
+			 u32 *data_length)
 {
 	struct hwrm_nvm_find_dir_entry_output *output;
 	struct hwrm_nvm_find_dir_entry_input *req;
@@ -3815,6 +3818,9 @@ static int bnxt_get_ts_info(struct net_device *dev,
 	info->rx_filters = (1 << HWTSTAMP_FILTER_NONE) |
 			   (1 << HWTSTAMP_FILTER_PTP_V2_L2_EVENT) |
 			   (1 << HWTSTAMP_FILTER_PTP_V2_L4_EVENT);
+
+	if (bp->fw_cap & BNXT_FW_CAP_RX_ALL_PKT_TS)
+		info->rx_filters |= (1 << HWTSTAMP_FILTER_ALL);
 	return 0;
 }
 
@@ -3870,7 +3876,7 @@ void bnxt_ethtool_init(struct bnxt *bp)
 		} else if (i == BNXT_IRQ_TEST_IDX) {
 			strcpy(str, "Interrupt_test (offline)");
 		} else {
-			strlcpy(str, fw_str, ETH_GSTRING_LEN);
+			strscpy(str, fw_str, ETH_GSTRING_LEN);
 			strncat(str, " test", ETH_GSTRING_LEN - strlen(str));
 			if (test_info->offline_mask & (1 << i))
 				strncat(str, " (offline)",

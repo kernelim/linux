@@ -601,7 +601,7 @@ static void mlx5_fw_reporter_err_work(struct work_struct *work)
 	fw_reporter_ctx.miss_counter = health->miss_counter;
 	if (fw_reporter_ctx.err_synd) {
 		devlink_health_report(health->fw_reporter,
-				      "FW syndrom reported", &fw_reporter_ctx);
+				      "FW syndrome reported", &fw_reporter_ctx);
 		return;
 	}
 	if (fw_reporter_ctx.miss_counter)
@@ -666,16 +666,27 @@ static void mlx5_fw_fatal_reporter_err_work(struct work_struct *work)
 	struct mlx5_fw_reporter_ctx fw_reporter_ctx;
 	struct mlx5_core_health *health;
 	struct mlx5_core_dev *dev;
+	struct devlink *devlink;
 	struct mlx5_priv *priv;
 
 	health = container_of(work, struct mlx5_core_health, fatal_report_work);
 	priv = container_of(health, struct mlx5_priv, health);
 	dev = container_of(priv, struct mlx5_core_dev, priv);
+	devlink = priv_to_devlink(dev);
 
+	mutex_lock(&dev->intf_state_mutex);
+	if (test_bit(MLX5_DROP_NEW_HEALTH_WORK, &health->flags)) {
+		mlx5_core_err(dev, "health works are not permitted at this stage\n");
+		mutex_unlock(&dev->intf_state_mutex);
+		return;
+	}
+	mutex_unlock(&dev->intf_state_mutex);
 	enter_error_state(dev, false);
 	if (IS_ERR_OR_NULL(health->fw_fatal_reporter)) {
+		devl_lock(devlink);
 		if (mlx5_health_try_recover(dev))
 			mlx5_core_err(dev, "health recovery failed\n");
+		devl_unlock(devlink);
 		return;
 	}
 	fw_reporter_ctx.err_synd = health->synd;

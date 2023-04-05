@@ -73,6 +73,7 @@ struct sched_domain_shared {
 	atomic_t	ref;
 	atomic_t	nr_busy_cpus;
 	int		has_idle_cores;
+	RH_KABI_EXTEND(int nr_idle_scan)
 };
 
 struct sched_domain {

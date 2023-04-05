@@ -400,8 +400,8 @@ static int check_export(struct inode *inode, int *flags, unsigned char *uuid)
 	 */
 	if (!strcmp(inode->i_sb->s_type->name, "nfs") ||
 	    !strcmp(inode->i_sb->s_type->name, "nfs4"))
-		mark_tech_preview("Re-exporting NFS", NULL);
-
+			pr_warn("NFSD WARNING: Re-exporting NFS is not a supported "
+					"configuration in RHEL.  Unexpected client behavior may result.\n"); 
 	return 0;
 
 }

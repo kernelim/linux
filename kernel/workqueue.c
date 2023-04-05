@@ -855,8 +855,17 @@ void wq_worker_running(struct task_struct *task)
 
 	if (!worker->sleeping)
 		return;
+
+	/*
+	 * If preempted by unbind_workers() between the WORKER_NOT_RUNNING check
+	 * and the nr_running increment below, we may ruin the nr_running reset
+	 * and leave with an unexpected pool->nr_running == 1 on the newly unbound
+	 * pool. Protect against such race.
+	 */
+	preempt_disable();
 	if (!(worker->flags & WORKER_NOT_RUNNING))
 		atomic_inc(&worker->pool->nr_running);
+	preempt_enable();
 	worker->sleeping = 0;
 }
 
@@ -1329,6 +1338,9 @@ static void insert_work(struct pool_workqueue *pwq, struct work_struct *work,
 			struct list_head *head, unsigned int extra_flags)
 {
 	struct worker_pool *pool = pwq->pool;
+
+	/* record the work call stack in order to print it in KASAN reports */
+	kasan_record_aux_stack_noalloc(work);
 
 	/* we own @work, set data and link */
 	set_work_pwq(work, pwq, extra_flags);
@@ -3217,6 +3229,15 @@ static bool __cancel_work(struct work_struct *work, bool is_dwork)
 	return ret;
 }
 
+/*
+ * See cancel_delayed_work()
+ */
+bool cancel_work(struct work_struct *work)
+{
+	return __cancel_work(work, false);
+}
+EXPORT_SYMBOL(cancel_work);
+
 /**
  * cancel_delayed_work - cancel a delayed work
  * @dwork: delayed_work to cancel
@@ -4901,9 +4922,10 @@ static void unbind_workers(int cpu)
 		/*
 		 * We've blocked all attach/detach operations. Make all workers
 		 * unbound and set DISASSOCIATED.  Before this, all workers
-		 * except for the ones which are still executing works from
-		 * before the last CPU down must be on the cpu.  After
-		 * this, they may become diasporas.
+		 * must be on the cpu.  After this, they may become diasporas.
+		 * And the preemption disabled section in their sched callbacks
+		 * are guaranteed to see WORKER_UNBOUND since the code here
+		 * is on the same cpu.
 		 */
 		for_each_pool_worker(worker, pool)
 			worker->flags |= WORKER_UNBOUND;
@@ -4914,18 +4936,13 @@ static void unbind_workers(int cpu)
 
 		for_each_pool_worker(worker, pool) {
 			kthread_set_per_cpu(worker->task, -1);
-			WARN_ON_ONCE(set_cpus_allowed_ptr(worker->task, cpu_possible_mask) < 0);
+			if (cpumask_intersects(wq_unbound_cpumask, cpu_active_mask))
+				WARN_ON_ONCE(set_cpus_allowed_ptr(worker->task, wq_unbound_cpumask) < 0);
+			else
+				WARN_ON_ONCE(set_cpus_allowed_ptr(worker->task, cpu_possible_mask) < 0);
 		}
 
 		mutex_unlock(&wq_pool_attach_mutex);
-
-		/*
-		 * Call schedule() so that we cross rq->lock and thus can
-		 * guarantee sched callbacks see the %WORKER_UNBOUND flag.
-		 * This is necessary as scheduler callbacks may be invoked
-		 * from other cpus.
-		 */
-		schedule();
 
 		/*
 		 * Sched callbacks are disabled now.  Zap nr_running.
@@ -4979,17 +4996,6 @@ static void rebind_workers(struct worker_pool *pool)
 
 	for_each_pool_worker(worker, pool) {
 		unsigned int worker_flags = worker->flags;
-
-		/*
-		 * A bound idle worker should actually be on the runqueue
-		 * of the associated CPU for local wake-ups targeting it to
-		 * work.  Kick all idle workers so that they migrate to the
-		 * associated CPU.  Doing this in the same loop as
-		 * replacing UNBOUND with REBOUND is safe as no worker will
-		 * be bound before @pool->lock is released.
-		 */
-		if (worker_flags & WORKER_IDLE)
-			wake_up_process(worker->task);
 
 		/*
 		 * We want to clear UNBOUND but can't directly call

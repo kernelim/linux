@@ -968,7 +968,7 @@ static int iscsi_iser_slave_alloc(struct scsi_device *sdev)
 	}
 	ib_dev = iser_conn->ib_conn.device->ib_device;
 
-	if (!(ib_dev->attrs.device_cap_flags & IB_DEVICE_SG_GAPS_REG))
+	if (!(ib_dev->attrs.kernel_cap_flags & IBK_SG_GAPS_REG))
 		blk_queue_virt_boundary(sdev->request_queue, SZ_4K - 1);
 
 	mutex_unlock(&unbind_iser_conn_mutex);

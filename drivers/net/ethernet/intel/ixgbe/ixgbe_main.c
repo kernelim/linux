@@ -151,8 +151,8 @@ MODULE_PARM_DESC(max_vfs,
 		 "Maximum number of virtual functions to allocate per physical function - default is zero and maximum value is 63. (Deprecated)");
 #endif /* CONFIG_PCI_IOV */
 
-static unsigned int allow_unsupported_sfp;
-module_param(allow_unsupported_sfp, uint, 0);
+static bool allow_unsupported_sfp;
+module_param(allow_unsupported_sfp, bool, 0);
 MODULE_PARM_DESC(allow_unsupported_sfp,
 		 "Allow unsupported and untested SFP+ modules on 82599-based adapters");
 
@@ -1810,7 +1810,7 @@ static void ixgbe_pull_tail(struct ixgbe_ring *rx_ring,
 
 	/* update all of the pointers */
 	skb_frag_size_sub(frag, pull_len);
-	frag->page_offset += pull_len;
+	skb_frag_off_add(frag, pull_len);
 	skb->data_len -= pull_len;
 	skb->tail += pull_len;
 }
@@ -1842,7 +1842,7 @@ static void ixgbe_dma_sync_frag(struct ixgbe_ring *rx_ring,
 
 		dma_sync_single_range_for_cpu(rx_ring->dev,
 					      IXGBE_CB(skb)->dma,
-					      frag->page_offset,
+					      skb_frag_off(frag),
 					      skb_frag_size(frag),
 					      DMA_FROM_DEVICE);
 	}
@@ -3248,8 +3248,8 @@ static int ixgbe_request_msix_irqs(struct ixgbe_adapter *adapter)
 		/* If Flow Director is enabled, set interrupt affinity */
 		if (adapter->flags & IXGBE_FLAG_FDIR_HASH_CAPABLE) {
 			/* assign the mask for this irq */
-			irq_set_affinity_hint(entry->vector,
-					      &q_vector->affinity_mask);
+			irq_update_affinity_hint(entry->vector,
+						 &q_vector->affinity_mask);
 		}
 	}
 
@@ -3265,8 +3265,8 @@ static int ixgbe_request_msix_irqs(struct ixgbe_adapter *adapter)
 free_queue_irqs:
 	while (vector) {
 		vector--;
-		irq_set_affinity_hint(adapter->msix_entries[vector].vector,
-				      NULL);
+		irq_update_affinity_hint(adapter->msix_entries[vector].vector,
+					 NULL);
 		free_irq(adapter->msix_entries[vector].vector,
 			 adapter->q_vector[vector]);
 	}
@@ -3399,7 +3399,7 @@ static void ixgbe_free_irq(struct ixgbe_adapter *adapter)
 			continue;
 
 		/* clear the affinity_mask in the IRQ descriptor */
-		irq_set_affinity_hint(entry->vector, NULL);
+		irq_update_affinity_hint(entry->vector, NULL);
 
 		free_irq(entry->vector, q_vector);
 	}
@@ -5052,12 +5052,12 @@ static void ixgbe_configure_dcb(struct ixgbe_adapter *adapter)
 
 	if (!(adapter->flags & IXGBE_FLAG_DCB_ENABLED)) {
 		if (hw->mac.type == ixgbe_mac_82598EB)
-			netif_set_gso_max_size(adapter->netdev, 65536);
+			netif_set_tso_max_size(adapter->netdev, 65536);
 		return;
 	}
 
 	if (hw->mac.type == ixgbe_mac_82598EB)
-		netif_set_gso_max_size(adapter->netdev, 32768);
+		netif_set_tso_max_size(adapter->netdev, 32768);
 
 #ifdef IXGBE_FCOE
 	if (adapter->netdev->features & NETIF_F_FCOE_MTU)
@@ -5161,7 +5161,7 @@ static int ixgbe_hpbthresh(struct ixgbe_adapter *adapter, int pb)
 }
 
 /**
- * ixgbe_lpbthresh - calculate low water mark for for flow control
+ * ixgbe_lpbthresh - calculate low water mark for flow control
  *
  * @adapter: board private structure to calculate for
  * @pb: packet buffer to calculate
@@ -5549,6 +5549,47 @@ static int ixgbe_non_sfp_link_config(struct ixgbe_hw *hw)
 	return ret;
 }
 
+/**
+ * ixgbe_clear_vf_stats_counters - Clear out VF stats after reset
+ * @adapter: board private structure
+ *
+ * On a reset we need to clear out the VF stats or accounting gets
+ * messed up because they're not clear on read.
+ **/
+static void ixgbe_clear_vf_stats_counters(struct ixgbe_adapter *adapter)
+{
+	struct ixgbe_hw *hw = &adapter->hw;
+	int i;
+
+	for (i = 0; i < adapter->num_vfs; i++) {
+		adapter->vfinfo[i].last_vfstats.gprc =
+			IXGBE_READ_REG(hw, IXGBE_PVFGPRC(i));
+		adapter->vfinfo[i].saved_rst_vfstats.gprc +=
+			adapter->vfinfo[i].vfstats.gprc;
+		adapter->vfinfo[i].vfstats.gprc = 0;
+		adapter->vfinfo[i].last_vfstats.gptc =
+			IXGBE_READ_REG(hw, IXGBE_PVFGPTC(i));
+		adapter->vfinfo[i].saved_rst_vfstats.gptc +=
+			adapter->vfinfo[i].vfstats.gptc;
+		adapter->vfinfo[i].vfstats.gptc = 0;
+		adapter->vfinfo[i].last_vfstats.gorc =
+			IXGBE_READ_REG(hw, IXGBE_PVFGORC_LSB(i));
+		adapter->vfinfo[i].saved_rst_vfstats.gorc +=
+			adapter->vfinfo[i].vfstats.gorc;
+		adapter->vfinfo[i].vfstats.gorc = 0;
+		adapter->vfinfo[i].last_vfstats.gotc =
+			IXGBE_READ_REG(hw, IXGBE_PVFGOTC_LSB(i));
+		adapter->vfinfo[i].saved_rst_vfstats.gotc +=
+			adapter->vfinfo[i].vfstats.gotc;
+		adapter->vfinfo[i].vfstats.gotc = 0;
+		adapter->vfinfo[i].last_vfstats.mprc =
+			IXGBE_READ_REG(hw, IXGBE_PVFMPRC(i));
+		adapter->vfinfo[i].saved_rst_vfstats.mprc +=
+			adapter->vfinfo[i].vfstats.mprc;
+		adapter->vfinfo[i].vfstats.mprc = 0;
+	}
+}
+
 static void ixgbe_setup_gpie(struct ixgbe_adapter *adapter)
 {
 	struct ixgbe_hw *hw = &adapter->hw;
@@ -5684,10 +5725,14 @@ static void ixgbe_up_complete(struct ixgbe_adapter *adapter)
 	adapter->link_check_timeout = jiffies;
 	mod_timer(&adapter->service_timer, jiffies);
 
+	ixgbe_clear_vf_stats_counters(adapter);
 	/* Set PF Reset Done bit so PF/VF Mail Ops can work */
 	ctrl_ext = IXGBE_READ_REG(hw, IXGBE_CTRL_EXT);
 	ctrl_ext |= IXGBE_CTRL_EXT_PFRSTD;
 	IXGBE_WRITE_REG(hw, IXGBE_CTRL_EXT, ctrl_ext);
+
+	/* update setting rx tx for all active vfs */
+	ixgbe_set_all_vfs(adapter);
 }
 
 void ixgbe_reinit_locked(struct ixgbe_adapter *adapter)
@@ -5949,8 +5994,8 @@ void ixgbe_reset(struct ixgbe_adapter *adapter)
 	case IXGBE_ERR_SFP_NOT_PRESENT:
 	case IXGBE_ERR_SFP_NOT_SUPPORTED:
 		break;
-	case IXGBE_ERR_MASTER_REQUESTS_PENDING:
-		e_dev_err("master disable timed out\n");
+	case IXGBE_ERR_PRIMARY_REQUESTS_PENDING:
+		e_dev_err("primary disable timed out\n");
 		break;
 	case IXGBE_ERR_EEPROM_VERSION:
 		/* We are running on a pre-production device, log a warning */
@@ -6145,11 +6190,8 @@ void ixgbe_down(struct ixgbe_adapter *adapter)
 		for (i = 0 ; i < adapter->num_vfs; i++)
 			adapter->vfinfo[i].clear_to_send = false;
 
-		/* ping all the active vfs to let them know we are going down */
-		ixgbe_ping_all_vfs(adapter);
-
-		/* Disable all VFTE/VFRE TX/RX */
-		ixgbe_disable_tx_rx(adapter);
+		/* update setting rx tx for all active vfs */
+		ixgbe_set_all_vfs(adapter);
 	}
 
 	/* disable transmits in the hardware now that interrupts are off */
@@ -7274,6 +7316,32 @@ void ixgbe_update_stats(struct ixgbe_adapter *adapter)
 	netdev->stats.rx_length_errors = hwstats->rlec;
 	netdev->stats.rx_crc_errors = hwstats->crcerrs;
 	netdev->stats.rx_missed_errors = total_mpc;
+
+	/* VF Stats Collection - skip while resetting because these
+	 * are not clear on read and otherwise you'll sometimes get
+	 * crazy values.
+	 */
+	if (!test_bit(__IXGBE_RESETTING, &adapter->state)) {
+		for (i = 0; i < adapter->num_vfs; i++) {
+			UPDATE_VF_COUNTER_32bit(IXGBE_PVFGPRC(i),
+						adapter->vfinfo[i].last_vfstats.gprc,
+						adapter->vfinfo[i].vfstats.gprc);
+			UPDATE_VF_COUNTER_32bit(IXGBE_PVFGPTC(i),
+						adapter->vfinfo[i].last_vfstats.gptc,
+						adapter->vfinfo[i].vfstats.gptc);
+			UPDATE_VF_COUNTER_36bit(IXGBE_PVFGORC_LSB(i),
+						IXGBE_PVFGORC_MSB(i),
+						adapter->vfinfo[i].last_vfstats.gorc,
+						adapter->vfinfo[i].vfstats.gorc);
+			UPDATE_VF_COUNTER_36bit(IXGBE_PVFGOTC_LSB(i),
+						IXGBE_PVFGOTC_MSB(i),
+						adapter->vfinfo[i].last_vfstats.gotc,
+						adapter->vfinfo[i].vfstats.gotc);
+			UPDATE_VF_COUNTER_32bit(IXGBE_PVFMPRC(i),
+						adapter->vfinfo[i].last_vfstats.mprc,
+						adapter->vfinfo[i].vfstats.mprc);
+		}
+	}
 }
 
 /**
@@ -7617,6 +7685,27 @@ static void ixgbe_watchdog_flush_tx(struct ixgbe_adapter *adapter)
 }
 
 #ifdef CONFIG_PCI_IOV
+static void ixgbe_bad_vf_abort(struct ixgbe_adapter *adapter, u32 vf)
+{
+	struct ixgbe_hw *hw = &adapter->hw;
+
+	if (adapter->hw.mac.type == ixgbe_mac_82599EB &&
+	    adapter->flags2 & IXGBE_FLAG2_AUTO_DISABLE_VF) {
+		adapter->vfinfo[vf].primary_abort_count++;
+		if (adapter->vfinfo[vf].primary_abort_count ==
+		    IXGBE_PRIMARY_ABORT_LIMIT) {
+			ixgbe_set_vf_link_state(adapter, vf,
+						IFLA_VF_LINK_STATE_DISABLE);
+			adapter->vfinfo[vf].primary_abort_count = 0;
+
+			e_info(drv,
+			       "Malicious Driver Detection event detected on PF %d VF %d MAC: %pM mdd-disable-vf=on",
+			       hw->bus.func, vf,
+			       adapter->vfinfo[vf].vf_mac_addresses);
+		}
+	}
+}
+
 static void ixgbe_check_for_bad_vf(struct ixgbe_adapter *adapter)
 {
 	struct ixgbe_hw *hw = &adapter->hw;
@@ -7648,8 +7737,10 @@ static void ixgbe_check_for_bad_vf(struct ixgbe_adapter *adapter)
 			continue;
 		pci_read_config_word(vfdev, PCI_STATUS, &status_reg);
 		if (status_reg != IXGBE_FAILED_READ_CFG_WORD &&
-		    status_reg & PCI_STATUS_REC_MASTER_ABORT)
+		    status_reg & PCI_STATUS_REC_MASTER_ABORT) {
+			ixgbe_bad_vf_abort(adapter, vf);
 			pcie_flr(vfdev);
+		}
 	}
 }
 
@@ -8801,7 +8892,7 @@ static int ixgbe_set_mac(struct net_device *netdev, void *p)
 	if (!is_valid_ether_addr(addr->sa_data))
 		return -EADDRNOTAVAIL;
 
-	memcpy(netdev->dev_addr, addr->sa_data, netdev->addr_len);
+	eth_hw_addr_set(netdev, addr->sa_data);
 	memcpy(hw->mac.addr, addr->sa_data, netdev->addr_len);
 
 	ixgbe_mac_set_default_filter(adapter);
@@ -8975,6 +9066,23 @@ static void ixgbe_get_stats64(struct net_device *netdev,
 	stats->rx_length_errors	= netdev->stats.rx_length_errors;
 	stats->rx_crc_errors	= netdev->stats.rx_crc_errors;
 	stats->rx_missed_errors	= netdev->stats.rx_missed_errors;
+}
+
+static int ixgbe_ndo_get_vf_stats(struct net_device *netdev, int vf,
+				  struct ifla_vf_stats *vf_stats)
+{
+	struct ixgbe_adapter *adapter = netdev_priv(netdev);
+
+	if (vf < 0 || vf >= adapter->num_vfs)
+		return -EINVAL;
+
+	vf_stats->rx_packets = adapter->vfinfo[vf].vfstats.gprc;
+	vf_stats->rx_bytes   = adapter->vfinfo[vf].vfstats.gorc;
+	vf_stats->tx_packets = adapter->vfinfo[vf].vfstats.gptc;
+	vf_stats->tx_bytes   = adapter->vfinfo[vf].vfstats.gotc;
+	vf_stats->multicast  = adapter->vfinfo[vf].vfstats.mprc;
+
+	return 0;
 }
 
 #ifdef CONFIG_IXGBE_DCB
@@ -10289,9 +10397,11 @@ static const struct net_device_ops ixgbe_netdev_ops = {
 	.ndo_set_vf_vlan	= ixgbe_ndo_set_vf_vlan,
 	.ndo_set_vf_rate	= ixgbe_ndo_set_vf_bw,
 	.ndo_set_vf_spoofchk	= ixgbe_ndo_set_vf_spoofchk,
+	.ndo_set_vf_link_state	= ixgbe_ndo_set_vf_link_state,
 	.ndo_set_vf_rss_query_en = ixgbe_ndo_set_vf_rss_query_en,
 	.ndo_set_vf_trust	= ixgbe_ndo_set_vf_trust,
 	.ndo_get_vf_config	= ixgbe_ndo_get_vf_config,
+	.ndo_get_vf_stats	= ixgbe_ndo_get_vf_stats,
 	.ndo_get_stats64	= ixgbe_get_stats64,
 	.ndo_setup_tc		= __ixgbe_setup_tc,
 #ifdef IXGBE_FCOE
@@ -10716,7 +10826,7 @@ static int ixgbe_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	netdev->netdev_ops = &ixgbe_netdev_ops;
 	ixgbe_set_ethtool_ops(netdev);
 	netdev->watchdog_timeo = 5 * HZ;
-	strlcpy(netdev->name, pci_name(pdev), sizeof(netdev->name));
+	strscpy(netdev->name, pci_name(pdev), sizeof(netdev->name));
 
 	/* Setup hw api */
 	hw->mac.ops   = *ii->mac_ops;
@@ -10751,6 +10861,9 @@ static int ixgbe_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	err = ixgbe_sw_init(adapter, ii);
 	if (err)
 		goto err_sw_init;
+
+	if (adapter->hw.mac.type == ixgbe_mac_82599EB)
+		adapter->flags2 |= IXGBE_FLAG2_AUTO_DISABLE_VF;
 
 	switch (adapter->hw.mac.type) {
 	case ixgbe_mac_X550:
@@ -10932,7 +11045,7 @@ skip_sriov:
 	eth_platform_get_mac_address(&adapter->pdev->dev,
 				     adapter->hw.mac.perm_addr);
 
-	memcpy(netdev->dev_addr, hw->mac.perm_addr, netdev->addr_len);
+	eth_hw_addr_set(netdev, hw->mac.perm_addr);
 
 	if (!is_valid_ether_addr(netdev->dev_addr)) {
 		e_dev_err("invalid MAC address\n");
@@ -11004,7 +11117,7 @@ skip_sriov:
 
 	err = ixgbe_read_pba_string_generic(hw, part_str, sizeof(part_str));
 	if (err)
-		strlcpy(part_str, "Unknown", sizeof(part_str));
+		strscpy(part_str, "Unknown", sizeof(part_str));
 	if (ixgbe_is_sfp(hw) && hw->phy.sfp_type != ixgbe_sfp_type_not_present)
 		e_dev_info("MAC: %d, PHY: %d, SFP+: %d, PBA No: %s\n",
 			   hw->mac.type, hw->phy.type, hw->phy.sfp_type,

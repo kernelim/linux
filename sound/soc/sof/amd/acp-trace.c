@@ -34,7 +34,7 @@ int acp_sof_trace_release(struct snd_sof_dev *sdev)
 }
 EXPORT_SYMBOL(acp_sof_trace_release);
 
-int acp_sof_trace_init(struct snd_sof_dev *sdev,
+int acp_sof_trace_init(struct snd_sof_dev *sdev, struct snd_dma_buffer *dmab,
 		       struct sof_ipc_dma_trace_params_ext *dtrace_params)
 {
 	struct acp_dsp_stream *stream;
@@ -46,7 +46,7 @@ int acp_sof_trace_init(struct snd_sof_dev *sdev,
 	if (!stream)
 		return -ENODEV;
 
-	stream->dmab = &sdev->dmatb;
+	stream->dmab = dmab;
 	stream->num_pages = NUM_PAGES;
 
 	ret = acp_dsp_stream_config(sdev, stream);

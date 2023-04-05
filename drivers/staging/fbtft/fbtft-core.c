@@ -441,7 +441,7 @@ static void fbtft_deferred_io(struct fb_info *info, struct list_head *pagelist)
 {
 	struct fbtft_par *par = info->par;
 	unsigned int dirty_lines_start, dirty_lines_end;
-	struct page *page;
+	struct fb_deferred_io_pageref *pageref;
 	unsigned long index;
 	unsigned int y_low = 0, y_high = 0;
 	int count = 0;
@@ -455,7 +455,8 @@ static void fbtft_deferred_io(struct fb_info *info, struct list_head *pagelist)
 	spin_unlock(&par->dirty_lock);
 
 	/* Mark display lines as dirty */
-	list_for_each_entry(page, pagelist, lru) {
+	list_for_each_entry(pageref, pagelist, list) {
+		struct page *page = pageref->page;
 		count++;
 		index = page->index << PAGE_SHIFT;
 		y_low = index / info->fix.line_length;
@@ -766,10 +767,11 @@ struct fb_info *fbtft_framebuffer_alloc(struct fbtft_display *display,
 	fbops->fb_imageblit =      fbtft_fb_imageblit;
 	fbops->fb_setcolreg =      fbtft_fb_setcolreg;
 	fbops->fb_blank     =      fbtft_fb_blank;
+	fbops->fb_mmap      =      fb_deferred_io_mmap;
 
-	fbdefio->delay =           HZ/fps;
+	fbdefio->delay =           HZ / fps;
+	fbdefio->sort_pagelist =   true;
 	fbdefio->deferred_io =     fbtft_deferred_io;
-	fb_deferred_io_init(info);
 
 	strncpy(info->fix.id, dev->driver->name, 16);
 	info->fix.type =           FB_TYPE_PACKED_PIXELS;
@@ -780,6 +782,7 @@ struct fb_info *fbtft_framebuffer_alloc(struct fbtft_display *display,
 	info->fix.line_length =    width * bpp / 8;
 	info->fix.accel =          FB_ACCEL_NONE;
 	info->fix.smem_len =       vmem_size;
+	fb_deferred_io_init(info);
 
 	info->var.rotate =         pdata->rotate;
 	info->var.xres =           width;
@@ -1007,7 +1010,9 @@ int fbtft_unregister_framebuffer(struct fb_info *fb_info)
 	if (par->fbtftops.unregister_backlight)
 		par->fbtftops.unregister_backlight(par);
 	fbtft_sysfs_exit(par);
-	return unregister_framebuffer(fb_info);
+	unregister_framebuffer(fb_info);
+
+	return 0;
 }
 EXPORT_SYMBOL(fbtft_unregister_framebuffer);
 

@@ -620,8 +620,8 @@ struct cfs_rq {
 	s64			runtime_remaining;
 
 	u64			throttled_clock;
-	u64			throttled_clock_task;
-	u64			throttled_clock_task_time;
+	u64	RH_KABI_RENAME(throttled_clock_task, throttled_clock_pelt);
+	u64	RH_KABI_RENAME(throttled_clock_task_time, throttled_clock_pelt_time);
 	int			throttled;
 	int			throttle_count;
 	struct list_head	throttled_list;
@@ -1443,6 +1443,11 @@ queue_balance_callback(struct rq *rq,
 {
 	lockdep_assert_held(&rq->lock);
 
+	/*
+	 * Don't (re)queue an already queued item; nor queue anything when
+	 * balance_push() is active, see the comment with
+	 * balance_push_callback.
+	 */
 	if (unlikely(head->next || rq->balance_callback == &balance_push_callback))
 		return;
 
@@ -1562,15 +1567,6 @@ static inline struct cpumask *sched_group_span(struct sched_group *sg)
 static inline struct cpumask *group_balance_mask(struct sched_group *sg)
 {
 	return to_cpumask(sg->sgc->cpumask);
-}
-
-/**
- * group_first_cpu - Returns the first CPU in the cpumask of a sched_group.
- * @group: The group whose first CPU is to be returned.
- */
-static inline unsigned int group_first_cpu(struct sched_group *group)
-{
-	return cpumask_first(sched_group_span(group));
 }
 
 extern int group_balance_cpu(struct sched_group *sg);
@@ -1781,7 +1777,6 @@ static inline int task_on_rq_migrating(struct task_struct *p)
 
 #define WF_SYNC     0x02 /* Waker goes to sleep after wakeup */
 #define WF_MIGRATED 0x20 /* Internal use, task got migrated */
-#define WF_ON_CPU   0x40 /* Wakee is on_cpu */
 
 #ifdef CONFIG_SMP
 static_assert(WF_EXEC == SD_BALANCE_EXEC);

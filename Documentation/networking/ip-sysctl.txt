@@ -138,8 +138,8 @@ neigh/default/gc_thresh2 - INTEGER
 	Default: 512
 
 neigh/default/gc_thresh3 - INTEGER
-	Maximum number of neighbor entries allowed.  Increase this
-	when using large numbers of interfaces and when communicating
+	Maximum number of non-PERMANENT neighbor entries allowed.  Increase
+	this when using large numbers of interfaces and when communicating
 	with large numbers of directly-connected peers.
 	Default: 1024
 
@@ -829,10 +829,7 @@ udp_rmem_min - INTEGER
 	Default: 4K
 
 udp_wmem_min - INTEGER
-	Minimal size of send buffer used by UDP sockets in moderation.
-	Each UDP socket is able to use the size for sending data, even if
-	total pages of UDP sockets exceed udp_mem pressure. The unit is byte.
-	Default: 4K
+	UDP does not have tx memory accounting and this tunable has no effect.
 
 CIPSOv4 Variables:
 

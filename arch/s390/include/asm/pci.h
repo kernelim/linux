@@ -9,6 +9,7 @@
 #include <asm-generic/pci.h>
 #include <asm/pci_clp.h>
 #include <asm/pci_debug.h>
+#include <asm/pci_insn.h>
 #include <asm/sclp.h>
 
 #define PCIBIOS_MIN_IO		0x1000
@@ -58,6 +59,10 @@ struct zpci_fmb_fmt2 {
 	u64 max_work_units;
 };
 
+struct zpci_fmb_fmt3 {
+	u64 tx_bytes;
+};
+
 struct zpci_fmb {
 	u32 format	: 8;
 	u32 fmt_ind	: 24;
@@ -73,6 +78,7 @@ struct zpci_fmb {
 		struct zpci_fmb_fmt0 fmt0;
 		struct zpci_fmb_fmt1 fmt1;
 		struct zpci_fmb_fmt2 fmt2;
+		struct zpci_fmb_fmt3 fmt3;
 	};
 } __packed __aligned(128);
 
@@ -80,7 +86,6 @@ enum zpci_state {
 	ZPCI_FN_STATE_STANDBY = 0,
 	ZPCI_FN_STATE_CONFIGURED = 1,
 	ZPCI_FN_STATE_RESERVED = 2,
-	ZPCI_FN_STATE_ONLINE = 3,
 };
 
 struct zpci_bar_struct {
@@ -93,6 +98,7 @@ struct zpci_bar_struct {
 };
 
 struct s390_domain;
+struct kvm_zdev;
 
 #define ZPCI_FUNCTIONS_PER_BUS 256
 struct zpci_bus {
@@ -119,16 +125,21 @@ struct zpci_dev {
 	enum zpci_state state;
 	u32		fid;		/* function ID, used by sclp */
 	u32		fh;		/* function handle, used by insn's */
+	u32		gisa;		/* GISA designation for passthrough */
 	u16		vfn;		/* virtual function number */
 	u16		pchid;		/* physical channel ID */
+	u16		maxstbl;	/* Maximum store block size */
 	u8		pfgid;		/* function group ID */
 	u8		pft;		/* pci function type */
 	u8		port;
+	u8		dtsm;		/* Supported DT mask */
 	u8		rid_available	: 1;
 	u8		has_hp_slot	: 1;
+	u8		has_resources	: 1;
 	u8		is_physfn	: 1;
 	u8		util_str_avail	: 1;
-	u8		reserved	: 4;
+	u8		irqs_registered	: 1;
+	u8		reserved	: 2;
 	unsigned int	devfn;		/* DEVFN part of the RID*/
 
 	struct mutex lock;
@@ -179,9 +190,12 @@ struct zpci_dev {
 	enum pci_bus_speed max_bus_speed;
 
 	struct dentry	*debugfs_dev;
-	struct dentry	*debugfs_perf;
 
+	/* IOMMU and passthrough */
 	struct s390_domain *s390_domain; /* s390 IOMMU domain data */
+	struct kvm_zdev *kzdev;
+	struct mutex kzdev_lock;
+	struct notifier_block kzd_group_notifier;	/* RHEL8 specific */
 };
 
 static inline bool zdev_enabled(struct zpci_dev *zdev)
@@ -193,29 +207,36 @@ extern const struct attribute_group *zpci_attr_groups[];
 extern unsigned int s390_pci_force_floating __initdata;
 extern unsigned int s390_pci_no_rid;
 
+extern union zpci_sic_iib *zpci_aipb;
+extern struct airq_iv *zpci_aif_sbv;
+
 /* -----------------------------------------------------------------------------
   Prototypes
 ----------------------------------------------------------------------------- */
 /* Base stuff */
-int zpci_create_device(struct zpci_dev *);
-void zpci_remove_device(struct zpci_dev *zdev);
+struct zpci_dev *zpci_create_device(u32 fid, u32 fh, enum zpci_state state);
 int zpci_enable_device(struct zpci_dev *);
 int zpci_disable_device(struct zpci_dev *);
+int zpci_scan_configured_device(struct zpci_dev *zdev, u32 fh);
+int zpci_deconfigure_device(struct zpci_dev *zdev);
 void zpci_device_reserved(struct zpci_dev *zdev);
 bool zpci_is_device_configured(struct zpci_dev *zdev);
 
+int zpci_hot_reset_device(struct zpci_dev *zdev);
 int zpci_register_ioat(struct zpci_dev *, u8, u64, u64, u64);
 int zpci_unregister_ioat(struct zpci_dev *, u8);
 void zpci_remove_reserved_devices(void);
+void zpci_update_fh(struct zpci_dev *zdev, u32 fh);
 
 /* CLP */
+int rhel8_clp_rescan_pci_devices_simple(void);
+int clp_setup_writeback_mio(void);
 int clp_scan_pci_devices(void);
-int clp_rescan_pci_devices(void);
-int clp_rescan_pci_devices_simple(u32 *fid);
-int clp_add_pci_device(u32, u32, int);
-int clp_enable_fh(struct zpci_dev *, u8);
-int clp_disable_fh(struct zpci_dev *);
+int clp_query_pci_fn(struct zpci_dev *zdev);
+int clp_enable_fh(struct zpci_dev *zdev, u32 *fh, u8 nr_dma_as);
+int clp_disable_fh(struct zpci_dev *zdev, u32 *fh);
 int clp_get_state(u32 fid, enum zpci_state *state);
+int clp_refresh_fh(u32 fid, u32 *fh);
 
 /* UID */
 void update_uid_checking(bool new);
@@ -270,7 +291,10 @@ struct zpci_dev *get_zdev_by_fid(u32);
 /* DMA */
 int zpci_dma_init(void);
 void zpci_dma_exit(void);
+int zpci_dma_init_device(struct zpci_dev *zdev);
+int zpci_dma_exit_device(struct zpci_dev *zdev);
 
+/* IRQ */
 int __init zpci_irq_init(void);
 void __init zpci_irq_exit(void);
 
@@ -283,10 +307,11 @@ int zpci_debug_init(void);
 void zpci_debug_exit(void);
 void zpci_debug_init_device(struct zpci_dev *, const char *);
 void zpci_debug_exit_device(struct zpci_dev *);
-void zpci_debug_info(struct zpci_dev *, struct seq_file *);
 
-/* Error reporting */
+/* Error handling */
 int zpci_report_error(struct pci_dev *, struct zpci_report_error_header *);
+int zpci_clear_error_state(struct zpci_dev *zdev);
+int zpci_reset_load_store_blocked(struct zpci_dev *zdev);
 
 #ifdef CONFIG_NUMA
 

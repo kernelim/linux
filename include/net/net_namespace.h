@@ -211,6 +211,10 @@ struct net {
 	RH_KABI_EXTEND(struct hlist_head	__rcu *xfrm_state_byseq)
 	RH_KABI_EXTEND(u32	ipv4_sysctl_fib_multipath_hash_fields)
 	RH_KABI_EXTEND(u32	ipv6_sysctl_multipath_hash_fields)
+#if IS_ENABLED(CONFIG_RPS) && IS_ENABLED(CONFIG_SYSCTL)
+	RH_KABI_EXTEND(struct cpumask *core_rps_default_mask)
+#endif
+
 } __randomize_layout;
 
 #include <linux/seq_file_net.h>

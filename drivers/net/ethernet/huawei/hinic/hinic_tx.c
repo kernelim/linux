@@ -666,7 +666,7 @@ static int free_tx_poll(struct napi_struct *napi, int budget)
 
 static void tx_napi_add(struct hinic_txq *txq, int weight)
 {
-	netif_napi_add(txq->netdev, &txq->napi, free_tx_poll, weight);
+	netif_napi_add_weight(txq->netdev, &txq->napi, free_tx_poll, weight);
 	napi_enable(&txq->napi);
 }
 

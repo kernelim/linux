@@ -8,8 +8,8 @@ NAME = Merciless Moray
 #
 # DRM backport version
 #
-RHEL_DRM_VERSION = 5
-RHEL_DRM_PATCHLEVEL = 18
+RHEL_DRM_VERSION = 6
+RHEL_DRM_PATCHLEVEL = 0
 RHEL_DRM_SUBLEVEL = 
 RHEL_DRM_EXTRAVERSION = 
 
@@ -272,6 +272,17 @@ ifneq ($(filter install,$(MAKECMDGOALS)),)
         ifneq ($(filter modules_install,$(MAKECMDGOALS)),)
 	        mixed-targets := 1
         endif
+endif
+
+# CKI/cross compilation hack
+# Do we need to rebuild scripts after cross compilation?
+# If kernel was cross-compiled, these scripts have arch of build host.
+REBUILD_SCRIPTS_FOR_CROSS:=0
+
+# Regenerating config with incomplete source tree will produce different
+# config options. Disable it.
+ifeq ($(REBUILD_SCRIPTS_FOR_CROSS),1)
+skip-config:=1
 endif
 
 ifeq ($(mixed-targets),1)
@@ -565,7 +576,7 @@ endif
 # in addition to whatever we do anyway.
 # Just "make" or "make all" shall build modules as well
 
-ifneq ($(filter all _all modules,$(MAKECMDGOALS)),)
+ifneq ($(filter all _all modules %compile_commands.json clang-%,$(MAKECMDGOALS)),)
   KBUILD_MODULES := 1
 endif
 
@@ -613,6 +624,7 @@ ARCH_AFLAGS :=
 ARCH_CFLAGS :=
 include arch/$(SRCARCH)/Makefile
 
+ifeq ($(skip-config),)
 ifeq ($(dot-config),1)
 ifeq ($(KBUILD_EXTMOD),)
 # Read in dependencies to all Kconfig* files, make sure to run syncconfig if
@@ -648,6 +660,7 @@ else
 # Dummy target needed, because used as prerequisite
 include/config/auto.conf: ;
 endif # $(dot-config)
+endif # $(skip-config)
 
 KBUILD_CFLAGS	+= -fno-delete-null-pointer-checks
 KBUILD_CFLAGS	+= $(call cc-disable-warning,frame-address,)
@@ -1281,6 +1294,21 @@ ifdef CONFIG_MODULES
 
 # By default, build modules as well
 
+scripts_build:
+	$(MAKE) $(build)=scripts/basic
+	$(MAKE) $(build)=scripts/mod
+	$(MAKE) $(build)=scripts scripts/module-common.lds
+	$(MAKE) $(build)=scripts scripts/unifdef
+	$(MAKE) $(build)=scripts
+
+prepare_after_cross:
+	# disable STACK_VALIDATION to avoid building objtool
+	sed -i '/^CONFIG_STACK_VALIDATION/d' ./include/config/auto.conf || true
+	# build minimum set of scripts to allow building external modules
+	$(MAKE) KBUILD_EXTMOD="" M="" scripts_build V=1
+
+PHONY += prepare_after_cross scripts_build
+
 all: modules
 
 # Build modules
@@ -1362,6 +1390,7 @@ endif # CONFIG_MODULES
 
 # Directories & files removed with 'make clean'
 CLEAN_DIRS  += $(MODVERDIR) include/ksym
+CLEAN_FILES += compile_commands.json
 
 # Directories & files removed with 'make mrproper'
 MRPROPER_DIRS  += include/config usr/include include/generated          \
@@ -1478,6 +1507,8 @@ help:
 	@echo  '  headers_check   - Sanity check on exported headers'
 	@echo  '  headerdep       - Detect inclusion cycles in headers'
 	@echo  '  coccicheck      - Check with Coccinelle'
+	@echo  '  clang-analyzer  - Check with clang static analyzer'
+	@echo  '  clang-tidy      - Check with clang-tidy'
 	@echo  ''
 	@echo  'Kernel selftest:'
 	@echo  '  kselftest       - Build and run kernel selftest (run as root)'
@@ -1601,6 +1632,9 @@ PHONY += _emodinst_post
 _emodinst_post: _emodinst_
 	$(call cmd,depmod)
 
+compile_commands.json: $(KBUILD_EXTMOD)/compile_commands.json
+PHONY += compile_commands.json
+
 clean-dirs := $(addprefix _clean_,$(KBUILD_EXTMOD))
 
 PHONY += $(clean-dirs) clean
@@ -1608,7 +1642,8 @@ $(clean-dirs):
 	$(Q)$(MAKE) $(clean)=$(patsubst _clean_%,%,$@)
 
 clean:	rm-dirs := $(MODVERDIR)
-clean: rm-files := $(KBUILD_EXTMOD)/Module.symvers
+clean: rm-files := $(KBUILD_EXTMOD)/Module.symvers \
+	$(KBUILD_EXTMOD)/compile_commands.json
 
 PHONY += help
 help:
@@ -1651,6 +1686,37 @@ quiet_cmd_tags = GEN     $@
 
 tags TAGS cscope gtags: FORCE
 	$(call cmd,tags)
+
+# Clang Tooling
+# ---------------------------------------------------------------------------
+
+COMPILE_COMMANDS_JSON = $(if $(KBUILD_EXTMOD),$(KBUILD_EXTMOD)/)compile_commands.json
+
+quiet_cmd_gen_compile_commands = GEN     $@
+      cmd_gen_compile_commands = $(PYTHON3) $< -a $(AR) -o $@ $(filter-out $< $(PHONY), $^) \
+					$(if $(KBUILD_EXTMOD),$(KBUILD_EXTMOD)/)modules.order
+
+$(COMPILE_COMMANDS_JSON): scripts/clang-tools/gen_compile_commands.py \
+	$(if $(KBUILD_EXTMOD),modules, \
+		$(KBUILD_VMLINUX_INIT) $(KBUILD_VMLINUX_MAIN) $(KBUILD_VMLINUX_LIBS) \
+		$(if $(CONFIG_MODULES),modules)) FORCE
+	$(call if_changed,gen_compile_commands)
+
+targets += $(COMPILE_COMMANDS_JSON)
+
+PHONY += clang-tidy clang-analyzer
+
+ifdef CONFIG_CC_IS_CLANG
+quiet_cmd_clang_tools = CHECK   $<
+      cmd_clang_tools = $(PYTHON3) $(srctree)/scripts/clang-tools/run-clang-tools.py $@ $<
+
+clang-tidy clang-analyzer: $(COMPILE_COMMANDS_JSON)
+	$(call cmd,clang_tools)
+else
+clang-tidy clang-analyzer:
+	@echo "$@ requires CC=clang" >&2
+	@false
+endif
 
 # Scripts to check various things for consistency
 # ---------------------------------------------------------------------------

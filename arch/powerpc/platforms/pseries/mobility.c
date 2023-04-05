@@ -663,11 +663,19 @@ static int pseries_migrate_partition(u64 handle)
 {
 	int ret;
 
+	/*
+	 * When the migration is initiated, the hypervisor changes VAS
+	 * mappings to prepare before OS gets the notification and
+	 * closes all VAS windows. NX generates continuous faults during
+	 * this time and the user space can not differentiate these
+	 * faults from the migration event. So reduce this time window
+	 * by closing VAS windows at the beginning of this function.
+	 */
+	vas_migration_handler(VAS_SUSPEND);
+
 	ret = wait_for_vasi_session_suspending(handle);
 	if (ret)
-		return ret;
-
-	vas_migration_handler(VAS_SUSPEND);
+		goto out;
 
 	ret = pseries_suspend(handle);
 	if (ret == 0)
@@ -675,6 +683,7 @@ static int pseries_migrate_partition(u64 handle)
 	else
 		pseries_cancel_migration(handle, ret);
 
+out:
 	vas_migration_handler(VAS_RESUME);
 
 	return ret;

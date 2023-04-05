@@ -232,7 +232,7 @@ static int can_rx_offload_init_queue(struct net_device *dev, struct can_rx_offlo
 	skb_queue_head_init(&offload->skb_queue);
 
 	can_rx_offload_reset(offload);
-	netif_napi_add(dev, &offload->napi, can_rx_offload_napi_poll, weight);
+	netif_napi_add_weight(dev, &offload->napi, can_rx_offload_napi_poll, weight);
 
 	dev_dbg(dev->dev.parent, "%s: skb_queue_len_max=%d\n",
 		__func__, offload->skb_queue_len_max);

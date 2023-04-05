@@ -15,6 +15,7 @@
 #include <linux/ctype.h>
 #include <linux/dma-mapping.h>
 #include <linux/delay.h>
+#include <linux/fbcon.h>
 #include <linux/gpio.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -443,13 +444,15 @@ static int sh_mobile_lcdc_sginit(struct fb_info *info,
 {
 	struct sh_mobile_lcdc_chan *ch = info->par;
 	unsigned int nr_pages_max = ch->fb_size >> PAGE_SHIFT;
-	struct page *page;
+	struct fb_deferred_io_pageref *pageref;
 	int nr_pages = 0;
 
 	sg_init_table(ch->sglist, nr_pages_max);
 
-	list_for_each_entry(page, pagelist, lru)
+	list_for_each_entry(pageref, pagelist, list) {
+		struct page *page = pageref->page;
 		sg_set_page(&ch->sglist[nr_pages++], page, PAGE_SIZE, 0);
+	}
 
 	return nr_pages;
 }
@@ -1566,6 +1569,9 @@ sh_mobile_lcdc_overlay_mmap(struct fb_info *info, struct vm_area_struct *vma)
 {
 	struct sh_mobile_lcdc_overlay *ovl = info->par;
 
+	if (info->fbdefio)
+		return fb_deferred_io_mmap(info, vma);
+
 	return dma_mmap_coherent(ovl->channel->lcdc->dev, vma, ovl->fb_mem,
 				 ovl->dma_handle, ovl->fb_size);
 }
@@ -1838,8 +1844,6 @@ static void sh_mobile_fb_reconfig(struct fb_info *info)
 	struct sh_mobile_lcdc_chan *ch = info->par;
 	struct fb_var_screeninfo var;
 	struct fb_videomode mode;
-	struct fb_event event;
-	int evnt = FB_EVENT_MODE_CHANGE_ALL;
 
 	if (ch->use_count > 1 || (ch->use_count == 1 && !info->fbcon_par))
 		/* More framebuffer users are active */
@@ -1861,14 +1865,7 @@ static void sh_mobile_fb_reconfig(struct fb_info *info)
 		/* Couldn't reconfigure, hopefully, can continue as before */
 		return;
 
-	/*
-	 * fb_set_var() calls the notifier change internally, only if
-	 * FBINFO_MISC_USEREVENT flag is set. Since we do not want to fake a
-	 * user event, we have to call the chain ourselves.
-	 */
-	event.info = info;
-	event.data = &ch->display.mode;
-	fb_notifier_call_chain(evnt, &event);
+	fbcon_update_vcs(info, true);
 }
 
 /*
@@ -2049,6 +2046,9 @@ static int
 sh_mobile_lcdc_mmap(struct fb_info *info, struct vm_area_struct *vma)
 {
 	struct sh_mobile_lcdc_chan *ch = info->par;
+
+	if (info->fbdefio)
+		return fb_deferred_io_mmap(info, vma);
 
 	return dma_mmap_coherent(ch->lcdc->dev, vma, ch->fb_mem,
 				 ch->dma_handle, ch->fb_size);

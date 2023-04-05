@@ -1056,7 +1056,6 @@ static struct sk_buff *ixgbevf_run_xdp(struct ixgbevf_adapter *adapter,
 	struct bpf_prog *xdp_prog;
 	u32 act;
 
-	rcu_read_lock();
 	xdp_prog = READ_ONCE(rx_ring->xdp_prog);
 
 	if (!xdp_prog)
@@ -1084,7 +1083,6 @@ out_failure:
 		break;
 	}
 xdp_out:
-	rcu_read_unlock();
 	return ERR_PTR(-result);
 }
 
@@ -2295,7 +2293,9 @@ static void ixgbevf_negotiate_api(struct ixgbevf_adapter *adapter)
 static void ixgbevf_up_complete(struct ixgbevf_adapter *adapter)
 {
 	struct net_device *netdev = adapter->netdev;
+	struct pci_dev *pdev = adapter->pdev;
 	struct ixgbe_hw *hw = &adapter->hw;
+	bool state;
 
 	ixgbevf_configure_msix(adapter);
 
@@ -2307,6 +2307,11 @@ static void ixgbevf_up_complete(struct ixgbevf_adapter *adapter)
 		hw->mac.ops.set_rar(hw, 0, hw->mac.perm_addr, 0);
 
 	spin_unlock_bh(&adapter->mbx_lock);
+
+	state = adapter->link_state;
+	hw->mac.ops.get_link_state(hw, &adapter->link_state);
+	if (state && state != adapter->link_state)
+		dev_info(&pdev->dev, "VF is administratively disabled\n");
 
 	smp_mb__before_atomic();
 	clear_bit(__IXGBEVF_DOWN, &adapter->state);
@@ -2545,7 +2550,7 @@ void ixgbevf_reset(struct ixgbevf_adapter *adapter)
 	}
 
 	if (is_valid_ether_addr(adapter->hw.mac.addr)) {
-		ether_addr_copy(netdev->dev_addr, adapter->hw.mac.addr);
+		eth_hw_addr_set(netdev, adapter->hw.mac.addr);
 		ether_addr_copy(netdev->perm_addr, adapter->hw.mac.addr);
 	}
 
@@ -2722,7 +2727,7 @@ static int ixgbevf_alloc_q_vector(struct ixgbevf_adapter *adapter, int v_idx,
 		return -ENOMEM;
 
 	/* initialize NAPI */
-	netif_napi_add(adapter->netdev, &q_vector->napi, ixgbevf_poll, 64);
+	netif_napi_add(adapter->netdev, &q_vector->napi, ixgbevf_poll);
 
 	/* tie q_vector and adapter together */
 	adapter->q_vector[v_idx] = q_vector;
@@ -2749,7 +2754,7 @@ static int ixgbevf_alloc_q_vector(struct ixgbevf_adapter *adapter, int v_idx,
 		ring->reg_idx = reg_idx;
 
 		/* assign ring to adapter */
-		 adapter->tx_ring[txr_idx] = ring;
+		adapter->tx_ring[txr_idx] = ring;
 
 		/* update count and index */
 		txr_count--;
@@ -3059,7 +3064,7 @@ static int ixgbevf_sw_init(struct ixgbevf_adapter *adapter)
 		else if (is_zero_ether_addr(adapter->hw.mac.addr))
 			dev_info(&pdev->dev,
 				 "MAC address not assigned by administrator.\n");
-		ether_addr_copy(netdev->dev_addr, hw->mac.addr);
+		eth_hw_addr_set(netdev, hw->mac.addr);
 	}
 
 	if (!is_valid_ether_addr(netdev->dev_addr)) {
@@ -3076,6 +3081,8 @@ static int ixgbevf_sw_init(struct ixgbevf_adapter *adapter)
 	/* set default ring sizes */
 	adapter->tx_ring_count = IXGBEVF_DEFAULT_TXD;
 	adapter->rx_ring_count = IXGBEVF_DEFAULT_RXD;
+
+	adapter->link_state = true;
 
 	set_bit(__IXGBEVF_DOWN, &adapter->state);
 	return 0;
@@ -3309,7 +3316,7 @@ static void ixgbevf_watchdog_subtask(struct ixgbevf_adapter *adapter)
 
 	ixgbevf_watchdog_update_link(adapter);
 
-	if (adapter->link_up)
+	if (adapter->link_up && adapter->link_state)
 		ixgbevf_watchdog_link_is_up(adapter);
 	else
 		ixgbevf_watchdog_link_is_down(adapter);
@@ -4236,7 +4243,7 @@ static int ixgbevf_set_mac(struct net_device *netdev, void *p)
 
 	ether_addr_copy(hw->mac.addr, addr->sa_data);
 	ether_addr_copy(hw->mac.perm_addr, addr->sa_data);
-	ether_addr_copy(netdev->dev_addr, addr->sa_data);
+	eth_hw_addr_set(netdev, addr->sa_data);
 
 	return 0;
 }
@@ -4773,7 +4780,7 @@ static pci_ers_result_t ixgbevf_io_error_detected(struct pci_dev *pdev,
 		pci_disable_device(pdev);
 	rtnl_unlock();
 
-	/* Request a slot slot reset. */
+	/* Request a slot reset. */
 	return PCI_ERS_RESULT_NEED_RESET;
 }
 

@@ -18,7 +18,6 @@ struct completion;
 struct module;
 struct scsi_cmnd;
 struct scsi_device;
-struct scsi_host_cmd_pool;
 struct scsi_target;
 struct Scsi_Host;
 struct scsi_transport_template;
@@ -470,7 +469,7 @@ struct scsi_host_template {
 	 * Additional per-command data allocated for the driver.
 	 */
 	unsigned int cmd_size;
-	struct scsi_host_cmd_pool *cmd_pool;
+	RH_KABI_DEPRECATE(struct scsi_host_cmd_pool *, cmd_pool)
 
 	/*
 	 * The commit_rqs function is used to trigger a hardware
@@ -540,6 +539,12 @@ enum scsi_host_state {
 	SHOST_RECOVERY,
 	SHOST_CANCEL_RECOVERY,
 	SHOST_DEL_RECOVERY,
+};
+
+struct Scsi_Host_Aux {
+	struct Scsi_Host *host;
+	struct kref             tagset_refcnt;
+	struct completion       tagset_freed;
 };
 
 struct Scsi_Host {
@@ -723,13 +728,13 @@ struct Scsi_Host {
 
 	RH_KABI_USE(1, unsigned nr_maps)
 	RH_KABI_USE(2, 3, struct list_head eh_abort_list)
+	RH_KABI_USE(4, struct Scsi_Host_Aux *aux)
 
 	/* FOR RH USE ONLY
 	 *
 	 * The following padding has been inserted before ABI freeze to
 	 * allow extending the structure while preserving ABI.
 	 */
-	RH_KABI_RESERVE(4)
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)
 

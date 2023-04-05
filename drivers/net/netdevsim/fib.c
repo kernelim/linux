@@ -883,7 +883,7 @@ static void nsim_fib_set_max_all(struct nsim_fib_data *data,
 		int err;
 		u64 val;
 
-		err = devlink_resource_size_get(devlink, res_ids[i], &val);
+		err = devl_resource_size_get(devlink, res_ids[i], &val);
 		if (err)
 			val = (u64) -1;
 		nsim_fib_set_max(data, res_ids[i], val);
@@ -917,22 +917,22 @@ struct nsim_fib_data *nsim_fib_create(struct devlink *devlink,
 		goto err_rhashtable_destroy;
 	}
 
-	devlink_resource_occ_get_register(devlink,
-					  NSIM_RESOURCE_IPV4_FIB,
-					  nsim_fib_ipv4_resource_occ_get,
-					  data);
-	devlink_resource_occ_get_register(devlink,
-					  NSIM_RESOURCE_IPV4_FIB_RULES,
-					  nsim_fib_ipv4_rules_res_occ_get,
-					  data);
-	devlink_resource_occ_get_register(devlink,
-					  NSIM_RESOURCE_IPV6_FIB,
-					  nsim_fib_ipv6_resource_occ_get,
-					  data);
-	devlink_resource_occ_get_register(devlink,
-					  NSIM_RESOURCE_IPV6_FIB_RULES,
-					  nsim_fib_ipv6_rules_res_occ_get,
-					  data);
+	devl_resource_occ_get_register(devlink,
+				       NSIM_RESOURCE_IPV4_FIB,
+				       nsim_fib_ipv4_resource_occ_get,
+				       data);
+	devl_resource_occ_get_register(devlink,
+				       NSIM_RESOURCE_IPV4_FIB_RULES,
+				       nsim_fib_ipv4_rules_res_occ_get,
+				       data);
+	devl_resource_occ_get_register(devlink,
+				       NSIM_RESOURCE_IPV6_FIB,
+				       nsim_fib_ipv6_resource_occ_get,
+				       data);
+	devl_resource_occ_get_register(devlink,
+				       NSIM_RESOURCE_IPV6_FIB_RULES,
+				       nsim_fib_ipv6_rules_res_occ_get,
+				       data);
 	return data;
 
 err_rhashtable_destroy:
@@ -945,14 +945,14 @@ err_data_free:
 
 void nsim_fib_destroy(struct devlink *devlink, struct nsim_fib_data *data)
 {
-	devlink_resource_occ_get_unregister(devlink,
-					    NSIM_RESOURCE_IPV6_FIB_RULES);
-	devlink_resource_occ_get_unregister(devlink,
-					    NSIM_RESOURCE_IPV6_FIB);
-	devlink_resource_occ_get_unregister(devlink,
-					    NSIM_RESOURCE_IPV4_FIB_RULES);
-	devlink_resource_occ_get_unregister(devlink,
-					    NSIM_RESOURCE_IPV4_FIB);
+	devl_resource_occ_get_unregister(devlink,
+					 NSIM_RESOURCE_IPV6_FIB_RULES);
+	devl_resource_occ_get_unregister(devlink,
+					 NSIM_RESOURCE_IPV6_FIB);
+	devl_resource_occ_get_unregister(devlink,
+					 NSIM_RESOURCE_IPV4_FIB_RULES);
+	devl_resource_occ_get_unregister(devlink,
+					 NSIM_RESOURCE_IPV4_FIB);
 	unregister_fib_notifier(devlink_net(devlink), &data->fib_nb);
 	rhashtable_free_and_destroy(&data->fib_rt_ht, nsim_fib_rt_free,
 				    data);

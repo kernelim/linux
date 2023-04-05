@@ -4,7 +4,8 @@
 TEST_PROGS := nft_trans_stress.sh nft_nat.sh \
 	conntrack_icmp_related.sh nft_flowtable.sh ipvs.sh \
 	nft_queue.sh nft_meta.sh \
-	conntrack_tcp_unreplied.sh
+	conntrack_tcp_unreplied.sh \
+	rpath.sh
 
 LDLIBS = -lmnl
 TEST_GEN_FILES =  nf-queue connect_close

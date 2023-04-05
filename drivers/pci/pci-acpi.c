@@ -1394,6 +1394,9 @@ void pci_acpi_setup(struct device *dev, struct acpi_device *adev)
 		device_wakeup_enable(dev);
 
 	acpi_pci_wakeup(pci_dev, false);
+
+	if (pci_is_bridge(pci_dev))
+		acpi_dev_power_up_children_with_adr(adev);
 }
 
 void pci_acpi_cleanup(struct device *dev, struct acpi_device *adev)

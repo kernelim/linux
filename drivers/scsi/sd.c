@@ -3053,8 +3053,7 @@ static void sd_read_write_same(struct scsi_disk *sdkp, unsigned char *buffer)
 	}
 
 	if (scsi_report_opcode(sdev, buffer, SD_BUF_SIZE, INQUIRY) < 0) {
-		/* too large values might cause issues with arcmsr */
-		int vpd_buf_len = 64;
+		struct scsi_vpd *vpd;
 
 		sdev->no_report_opcodes = 1;
 
@@ -3062,8 +3061,11 @@ static void sd_read_write_same(struct scsi_disk *sdkp, unsigned char *buffer)
 		 * CODES is unsupported and the device has an ATA
 		 * Information VPD page (SAT).
 		 */
-		if (!scsi_get_vpd_page(sdev, 0x89, buffer, vpd_buf_len))
+		rcu_read_lock();
+		vpd = rcu_dereference(sdev->vpd_pg89);
+		if (vpd)
 			sdev->no_write_same = 1;
+		rcu_read_unlock();
 	}
 
 	if (scsi_report_opcode(sdev, buffer, SD_BUF_SIZE, WRITE_SAME_16) == 1)
@@ -3471,15 +3473,16 @@ static int sd_probe(struct device *dev)
 	}
 
 	device_initialize(&sdkp->dev);
-	sdkp->dev.parent = dev;
+	sdkp->dev.parent = get_device(dev);
 	sdkp->dev.class = &sd_disk_class;
 	dev_set_name(&sdkp->dev, "%s", dev_name(dev));
 
 	error = device_add(&sdkp->dev);
-	if (error)
-		goto out_free_index;
+	if (error) {
+		put_device(&sdkp->dev);
+		goto out;
+	}
 
-	get_device(dev);
 	dev_set_drvdata(dev, sdkp);
 
 	get_device(&sdkp->dev);	/* prevent release before async_schedule */
@@ -3492,7 +3495,6 @@ static int sd_probe(struct device *dev)
  out_put:
 	put_disk(gd);
  out_free:
-	sd_zbc_release_disk(sdkp);
 	kfree(sdkp->aux);
 	kfree(sdkp);
  out:
@@ -3565,7 +3567,7 @@ static void scsi_disk_release(struct device *dev)
 	disk->private_data = NULL;
 	put_disk(disk);
 
-	sd_zbc_release_disk(sdkp);
+	sd_zbc_free_zone_info(sdkp);
 	put_device(&sdkp->device->sdev_gendev);
 
 	kfree(sdkp->aux);

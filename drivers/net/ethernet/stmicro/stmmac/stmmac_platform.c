@@ -19,6 +19,7 @@
 *******************************************************************************/
 
 #include <linux/platform_device.h>
+#include <linux/pm_runtime.h>
 #include <linux/module.h>
 #include <linux/io.h>
 #include <linux/of.h>
@@ -135,6 +136,7 @@ static struct stmmac_axi *stmmac_axi_setup(struct platform_device *pdev)
 /**
  * stmmac_mtl_setup - parse DT parameters for multiple queues configuration
  * @pdev: platform device
+ * @plat: enet data
  */
 static int stmmac_mtl_setup(struct platform_device *pdev,
 			    struct plat_stmmacenet_data *plat)
@@ -370,7 +372,7 @@ static int stmmac_dt_phy(struct plat_stmmacenet_data *plat,
 
 /**
  * stmmac_of_get_mac_mode - retrieves the interface of the MAC
- * @np - device-tree node
+ * @np: - device-tree node
  * Description:
  * Similar to `of_get_phy_mode()`, this function will retrieve (from
  * the device-tree) the interface mode on the MAC side. This assumes
@@ -408,6 +410,7 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 	struct device_node *np = pdev->dev.of_node;
 	struct plat_stmmacenet_data *plat;
 	struct stmmac_dma_cfg *dma_cfg;
+	void *ret;
 	int rc;
 
 	plat = devm_kzalloc(&pdev->dev, sizeof(*plat), GFP_KERNEL);
@@ -438,8 +441,7 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 	plat->phylink_node = np;
 
 	/* Get max speed of operation from device tree */
-	if (of_property_read_u32(np, "max-speed", &plat->max_speed))
-		plat->max_speed = -1;
+	of_property_read_u32(np, "max-speed", &plat->max_speed);
 
 	plat->bus_id = of_alias_get_id(np, "ethernet");
 	if (plat->bus_id < 0)
@@ -515,6 +517,14 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 		plat->pmt = 1;
 	}
 
+	if (of_device_is_compatible(np, "snps,dwmac-3.40a")) {
+		plat->has_gmac = 1;
+		plat->enh_desc = 1;
+		plat->tx_coe = 1;
+		plat->bugged_jumbo = 1;
+		plat->pmt = 1;
+	}
+
 	if (of_device_is_compatible(np, "snps,dwmac-4.00") ||
 	    of_device_is_compatible(np, "snps,dwmac-4.10a") ||
 	    of_device_is_compatible(np, "snps,dwmac-4.20a")) {
@@ -578,12 +588,10 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 		clk_prepare_enable(plat->stmmac_clk);
 	}
 
-	plat->pclk = devm_clk_get(&pdev->dev, "pclk");
+	plat->pclk = devm_clk_get_optional(&pdev->dev, "pclk");
 	if (IS_ERR(plat->pclk)) {
-		if (PTR_ERR(plat->pclk) == -EPROBE_DEFER)
-			goto error_pclk_get;
-
-		plat->pclk = NULL;
+		ret = plat->pclk;
+		goto error_pclk_get;
 	}
 	clk_prepare_enable(plat->pclk);
 
@@ -598,14 +606,18 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 		dev_dbg(&pdev->dev, "PTP rate %d\n", plat->clk_ptp_rate);
 	}
 
-	plat->stmmac_rst = devm_reset_control_get(&pdev->dev,
-						  STMMAC_RESOURCE_NAME);
+	plat->stmmac_rst = devm_reset_control_get_optional(&pdev->dev,
+							   STMMAC_RESOURCE_NAME);
 	if (IS_ERR(plat->stmmac_rst)) {
-		if (PTR_ERR(plat->stmmac_rst) == -EPROBE_DEFER)
-			goto error_hw_init;
+		ret = plat->stmmac_rst;
+		goto error_hw_init;
+	}
 
-		dev_info(&pdev->dev, "no reset control found\n");
-		plat->stmmac_rst = NULL;
+	plat->stmmac_ahb_rst = devm_reset_control_get_optional_shared(
+							&pdev->dev, "ahb");
+	if (IS_ERR(plat->stmmac_ahb_rst)) {
+		ret = plat->stmmac_ahb_rst;
+		goto error_hw_init;
 	}
 
 	return plat;
@@ -615,7 +627,7 @@ error_hw_init:
 error_pclk_get:
 	clk_disable_unprepare(plat->stmmac_clk);
 
-	return ERR_PTR(-EPROBE_DEFER);
+	return ret;
 }
 
 /**
@@ -773,9 +785,58 @@ static int __maybe_unused stmmac_runtime_resume(struct device *dev)
 	return stmmac_bus_clks_config(priv, true);
 }
 
+static int __maybe_unused stmmac_pltfr_noirq_suspend(struct device *dev)
+{
+	struct net_device *ndev = dev_get_drvdata(dev);
+	struct stmmac_priv *priv = netdev_priv(ndev);
+	int ret;
+
+	if (!netif_running(ndev))
+		return 0;
+
+	if (!device_may_wakeup(priv->device) || !priv->plat->pmt) {
+		/* Disable clock in case of PWM is off */
+		clk_disable_unprepare(priv->plat->clk_ptp_ref);
+
+		ret = pm_runtime_force_suspend(dev);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int __maybe_unused stmmac_pltfr_noirq_resume(struct device *dev)
+{
+	struct net_device *ndev = dev_get_drvdata(dev);
+	struct stmmac_priv *priv = netdev_priv(ndev);
+	int ret;
+
+	if (!netif_running(ndev))
+		return 0;
+
+	if (!device_may_wakeup(priv->device) || !priv->plat->pmt) {
+		/* enable the clk previously disabled */
+		ret = pm_runtime_force_resume(dev);
+		if (ret)
+			return ret;
+
+		ret = clk_prepare_enable(priv->plat->clk_ptp_ref);
+		if (ret < 0) {
+			netdev_warn(priv->dev,
+				    "failed to enable PTP reference clock: %pe\n",
+				    ERR_PTR(ret));
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
 const struct dev_pm_ops stmmac_pltfr_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(stmmac_pltfr_suspend, stmmac_pltfr_resume)
 	SET_RUNTIME_PM_OPS(stmmac_runtime_suspend, stmmac_runtime_resume, NULL)
+	SET_NOIRQ_SYSTEM_SLEEP_PM_OPS(stmmac_pltfr_noirq_suspend, stmmac_pltfr_noirq_resume)
 };
 EXPORT_SYMBOL_GPL(stmmac_pltfr_pm_ops);
 

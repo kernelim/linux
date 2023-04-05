@@ -89,13 +89,7 @@ struct wb_completion {
 #define DEFINE_WB_COMPLETION(cmpl, bdi)	\
 	struct wb_completion cmpl = WB_COMPLETION_INIT(bdi)
 
-/*
- * For cgroup writeback, multiple wb's may map to the same blkcg.  Those
- * wb's can operate mostly independently but should share the congested
- * state.  To facilitate such sharing, the congested state is tracked using
- * the following struct which is created on demand, indexed by blkcg ID on
- * its bdi, and refcounted.
- */
+/* RH_KABI_DEPRECATE - keep for kABI purpose */
 struct bdi_writeback_congested {
 	unsigned long state;		/* WB_[a]sync_congested flags */
 	/* nr of attached wb's and blkg */
@@ -109,6 +103,15 @@ struct bdi_writeback_congested {
 	struct rb_node rb_node;		/* on bdi->cgwb_congestion_tree */
 #endif
 };
+
+/*
+ * kABI extension to bdi_writeback
+ */
+struct bdi_writeback_rh {
+	struct delayed_work bw_dwork;	/* work item used for bandwidth estimate */
+	struct list_head _b_attached;	/* attached inodes, protected by list_lock */
+};
+#define b_attached	_rh->_b_attached
 
 /*
  * Each wb (bdi_writeback) can perform writeback operations, is measured
@@ -147,7 +150,9 @@ struct bdi_writeback {
 
 	struct percpu_counter stat[NR_WB_STAT_ITEMS];
 
-	struct bdi_writeback_congested *congested;
+	RH_KABI_REPLACE(struct bdi_writeback_congested *congested,
+			/* WB_[a]sync_congested flags */
+		        unsigned long			congested)
 
 	unsigned long bw_time_stamp;	/* last time write bw is updated */
 	unsigned long dirtied_stamp;
@@ -190,11 +195,10 @@ struct bdi_writeback {
 	};
 #endif
 
-	/* work item used for bandwidth estimate */
-	RH_KABI_USE(1,struct delayed_work *bw_dwork)
-	RH_KABI_RESERVE(2)
-	RH_KABI_RESERVE(3)
-	RH_KABI_RESERVE(4)
+	RH_KABI_USE_AUX_PTR(1, 2, bdi_writeback)
+
+	/* anchored at offline_cgwbs */
+	RH_KABI_USE(3, 4, struct list_head offline_node)
 };
 
 struct backing_dev_info {
@@ -221,10 +225,8 @@ struct backing_dev_info {
 	struct list_head wb_list; /* list of all wbs */
 #ifdef CONFIG_CGROUP_WRITEBACK
 	struct radix_tree_root cgwb_tree; /* radix tree of active cgroup wbs */
-	struct rb_root cgwb_congested_tree; /* their congested states */
+	RH_KABI_DEPRECATE(struct rb_root, cgwb_congested_tree)
 	struct mutex cgwb_release_mutex;  /* protect shutdown of wb structs */
-#else
-	struct bdi_writeback_congested *wb_congested;
 #endif
 	wait_queue_head_t wb_waitq;
 
@@ -261,18 +263,8 @@ enum {
 	BLK_RW_SYNC	= 1,
 };
 
-void clear_wb_congested(struct bdi_writeback_congested *congested, int sync);
-void set_wb_congested(struct bdi_writeback_congested *congested, int sync);
-
-static inline void clear_bdi_congested(struct backing_dev_info *bdi, int sync)
-{
-	clear_wb_congested(bdi->wb.congested, sync);
-}
-
-static inline void set_bdi_congested(struct backing_dev_info *bdi, int sync)
-{
-	set_wb_congested(bdi->wb.congested, sync);
-}
+void clear_bdi_congested(struct backing_dev_info *bdi, int sync);
+void set_bdi_congested(struct backing_dev_info *bdi, int sync);
 
 struct wb_lock_cookie {
 	bool locked;
@@ -305,8 +297,9 @@ static inline void wb_get(struct bdi_writeback *wb)
 /**
  * wb_put - decrement a wb's refcount
  * @wb: bdi_writeback to put
+ * @nr: number of references to put
  */
-static inline void wb_put(struct bdi_writeback *wb)
+static inline void wb_put_many(struct bdi_writeback *wb, unsigned long nr)
 {
 	if (WARN_ON_ONCE(!wb->bdi)) {
 		/*
@@ -317,7 +310,16 @@ static inline void wb_put(struct bdi_writeback *wb)
 	}
 
 	if (wb != &wb->bdi->wb)
-		percpu_ref_put(&wb->refcnt);
+		percpu_ref_put_many(&wb->refcnt, nr);
+}
+
+/**
+ * wb_put - decrement a wb's refcount
+ * @wb: bdi_writeback to put
+ */
+static inline void wb_put(struct bdi_writeback *wb)
+{
+	wb_put_many(wb, 1);
 }
 
 /**
@@ -343,6 +345,10 @@ static inline void wb_get(struct bdi_writeback *wb)
 }
 
 static inline void wb_put(struct bdi_writeback *wb)
+{
+}
+
+static inline void wb_put_many(struct bdi_writeback *wb, unsigned long nr)
 {
 }
 

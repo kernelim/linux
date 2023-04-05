@@ -1057,10 +1057,10 @@ static void enqueue_huge_page(struct hstate *h, struct page *page)
 static struct page *dequeue_huge_page_node_exact(struct hstate *h, int nid)
 {
 	struct page *page;
-	bool nocma = !!(current->flags & PF_MEMALLOC_NOCMA);
+	bool pin = !!(current->flags & PF_MEMALLOC_PIN);
 
 	list_for_each_entry(page, &h->hugepage_freelists[nid], lru) {
-		if (nocma && is_migrate_cma_page(page))
+		if (pin && !is_pinnable_page(page))
 			continue;
 
 		if (!PageHWPoison(page))
@@ -1237,8 +1237,7 @@ static void destroy_compound_gigantic_page(struct page *page,
 	struct page *p = page + 1;
 
 	atomic_set(compound_mapcount_ptr(page), 0);
-	if (hpage_pincount_available(page))
-		atomic_set(compound_pincount_ptr(page), 0);
+	atomic_set(compound_pincount_ptr(page), 0);
 
 	for (i = 1; i < nr_pages; i++, p = mem_map_next(p, page, i)) {
 		clear_compound_head(p);
@@ -1246,6 +1245,7 @@ static void destroy_compound_gigantic_page(struct page *page,
 	}
 
 	set_compound_order(page, 0);
+	page[1].compound_nr = 0;
 	__ClearPageHead(page);
 }
 
@@ -1336,8 +1336,6 @@ static struct page *alloc_gigantic_page(struct hstate *h, gfp_t gfp_mask,
 	return NULL;
 }
 
-static void prep_new_huge_page(struct hstate *h, struct page *page, int nid);
-static void prep_compound_gigantic_page(struct page *page, unsigned int order);
 #else /* !CONFIG_CONTIG_ALLOC */
 static struct page *alloc_gigantic_page(struct hstate *h, gfp_t gfp_mask,
 					int nid, nodemask_t *nodemask)
@@ -1522,9 +1520,9 @@ static void prep_new_huge_page(struct hstate *h, struct page *page, int nid)
 	spin_unlock(&hugetlb_lock);
 }
 
-static void prep_compound_gigantic_page(struct page *page, unsigned int order)
+static bool prep_compound_gigantic_page(struct page *page, unsigned int order)
 {
-	int i;
+	int i, j;
 	int nr_pages = 1 << order;
 	struct page *p = page + 1;
 
@@ -1546,13 +1544,47 @@ static void prep_compound_gigantic_page(struct page *page, unsigned int order)
 		 * after get_user_pages().
 		 */
 		__ClearPageReserved(p);
-		set_page_count(p, 0);
+		/*
+		 * Subtle and very unlikely
+		 *
+		 * Gigantic 'page allocators' such as memblock or cma will
+		 * return a set of pages with each page ref counted.  We need
+		 * to turn this set of pages into a compound page with tail
+		 * page ref counts set to zero.  Code such as speculative page
+		 * cache adding could take a ref on a 'to be' tail page.
+		 * We need to respect any increased ref count, and only set
+		 * the ref count to zero if count is currently 1.  If count
+		 * is not 1, we call synchronize_rcu in the hope that a rcu
+		 * grace period will cause ref count to drop and then retry.
+		 * If count is still inflated on retry we return an error and
+		 * must discard the pages.
+		 */
+		if (!page_ref_freeze(p, 1)) {
+			pr_info("HugeTLB unexpected inflated ref count on freshly allocated page\n");
+			synchronize_rcu();
+			if (!page_ref_freeze(p, 1))
+				goto out_error;
+		}
 		set_compound_head(p, page);
 	}
 	atomic_set(compound_mapcount_ptr(page), -1);
+	atomic_set(compound_pincount_ptr(page), 0);
+	return true;
 
-	if (hpage_pincount_available(page))
-		atomic_set(compound_pincount_ptr(page), 0);
+out_error:
+	/* undo tail page modifications made above */
+	p = page + 1;
+	for (j = 1; j < i; j++, p = mem_map_next(p, page, j)) {
+		clear_compound_head(p);
+		set_page_refcounted(p);
+	}
+	/* need to clear PG_reserved on remaining tail pages  */
+	for (; j < nr_pages; j++, p = mem_map_next(p, page, j))
+		__ClearPageReserved(p);
+	set_compound_order(page, 0);
+	page[1].compound_nr = 0;
+	__ClearPageHead(page);
+	return false;
 }
 
 /*
@@ -1672,7 +1704,9 @@ static struct page *alloc_fresh_huge_page(struct hstate *h,
 		nodemask_t *node_alloc_noretry)
 {
 	struct page *page;
+	bool retry = false;
 
+retry:
 	if (hstate_is_gigantic(h))
 		page = alloc_gigantic_page(h, gfp_mask, nid, nmask);
 	else
@@ -1681,8 +1715,21 @@ static struct page *alloc_fresh_huge_page(struct hstate *h,
 	if (!page)
 		return NULL;
 
-	if (hstate_is_gigantic(h))
-		prep_compound_gigantic_page(page, huge_page_order(h));
+	if (hstate_is_gigantic(h)) {
+		if (!prep_compound_gigantic_page(page, huge_page_order(h))) {
+			/*
+			 * Rare failure to convert pages to compound page.
+			 * Free pages and try again - ONCE!
+			 */
+			free_gigantic_page(page, huge_page_order(h));
+			if (!retry) {
+				retry = true;
+				goto retry;
+			}
+			pr_warn("HugeTLB page can not be used due to unexpected inflated ref count\n");
+			return NULL;
+		}
+	}
 	prep_new_huge_page(h, page, page_to_nid(page));
 
 	return page;
@@ -2446,45 +2493,35 @@ found:
 	return 1;
 }
 
-static void __init prep_compound_huge_page(struct page *page,
-		unsigned int order)
-{
-	if (unlikely(order > (MAX_ORDER - 1)))
-		prep_compound_gigantic_page(page, order);
-	else
-		prep_compound_page(page, order);
-}
-
-/* Put bootmem huge pages into the standard lists after mem_map is up */
+/*
+ * Put bootmem huge pages into the standard lists after mem_map is up.
+ * Note: This only applies to gigantic (order > MAX_ORDER) pages.
+ */
 static void __init gather_bootmem_prealloc(void)
 {
 	struct huge_bootmem_page *m;
 
 	list_for_each_entry(m, &huge_boot_pages, list) {
+		struct page *page = virt_to_page(m);
 		struct hstate *h = m->hstate;
-		struct page *page;
 
-#ifdef CONFIG_HIGHMEM
-		page = pfn_to_page(m->phys >> PAGE_SHIFT);
-		memblock_free_late(__pa(m),
-				   sizeof(struct huge_bootmem_page));
-#else
-		page = virt_to_page(m);
-#endif
+		VM_BUG_ON(!hstate_is_gigantic(h));
 		WARN_ON(page_count(page) != 1);
-		prep_compound_huge_page(page, h->order);
-		WARN_ON(PageReserved(page));
-		prep_new_huge_page(h, page, page_to_nid(page));
-		put_page(page); /* free it into the hugepage allocator */
+		if (prep_compound_gigantic_page(page, huge_page_order(h))) {
+			WARN_ON(PageReserved(page));
+			prep_new_huge_page(h, page, page_to_nid(page));
+			put_page(page); /* add to the hugepage allocator */
+		} else {
+			free_gigantic_page(page, huge_page_order(h));
+			pr_warn("HugeTLB page can not be used due to unexpected inflated ref count\n");
+		}
 
 		/*
-		 * If we had gigantic hugepages allocated at boot time, we need
-		 * to restore the 'stolen' pages to totalram_pages in order to
-		 * fix confusing memory reports from free(1) and another
-		 * side-effects, like CommitLimit going negative.
+		 * We need to restore the 'stolen' pages to totalram_pages
+		 * in order to fix confusing memory reports from free(1) and
+		 * other side-effects, like CommitLimit going negative.
 		 */
-		if (hstate_is_gigantic(h))
-			adjust_managed_page_count(page, 1 << h->order);
+		adjust_managed_page_count(page, pages_per_huge_page(h));
 		cond_resched();
 	}
 }
@@ -4082,25 +4119,11 @@ void __unmap_hugepage_range_final(struct mmu_gather *tlb,
 void unmap_hugepage_range(struct vm_area_struct *vma, unsigned long start,
 			  unsigned long end, struct page *ref_page)
 {
-	struct mm_struct *mm;
 	struct mmu_gather tlb;
-	unsigned long tlb_start = start;
-	unsigned long tlb_end = end;
 
-	/*
-	 * If shared PMDs were possibly used within this vma range, adjust
-	 * start/end for worst case tlb flushing.
-	 * Note that we can not be sure if PMDs are shared until we try to
-	 * unmap pages.  However, we want to make sure TLB flushing covers
-	 * the largest possible range.
-	 */
-	adjust_range_if_pmd_sharing_possible(vma, &tlb_start, &tlb_end);
-
-	mm = vma->vm_mm;
-
-	tlb_gather_mmu(&tlb, mm, tlb_start, tlb_end);
+	tlb_gather_mmu(&tlb, vma->vm_mm);
 	__unmap_hugepage_range(&tlb, vma, start, end, ref_page);
-	tlb_finish_mmu(&tlb, tlb_start, tlb_end);
+	tlb_finish_mmu(&tlb);
 }
 
 /*
@@ -4385,10 +4408,28 @@ int huge_add_to_page_cache(struct page *page, struct address_space *mapping,
 	return 0;
 }
 
+/*
+ * Recheck pte with pgtable lock.  Returns true if pte didn't change, or
+ * false if pte changed or is changing.
+ */
+static bool hugetlb_pte_stable(struct hstate *h, struct mm_struct *mm,
+			       pte_t *ptep, pte_t old_pte)
+{
+	spinlock_t *ptl;
+	bool same;
+
+	ptl = huge_pte_lock(h, mm, ptep);
+	same = pte_same(huge_ptep_get(ptep), old_pte);
+	spin_unlock(ptl);
+
+	return same;
+}
+
 static vm_fault_t hugetlb_no_page(struct mm_struct *mm,
 			struct vm_area_struct *vma,
 			struct address_space *mapping, pgoff_t idx,
-			unsigned long address, pte_t *ptep, unsigned int flags)
+			unsigned long address, pte_t *ptep,
+			pte_t old_pte, unsigned int flags)
 {
 	struct hstate *h = hstate_vma(vma);
 	vm_fault_t ret = VM_FAULT_SIGBUS;
@@ -4442,6 +4483,28 @@ retry:
 			};
 
 			/*
+			 * Since hugetlb_no_page() was examining pte
+			 * without pgtable lock, we need to re-test under
+			 * lock because the pte may not be stable and could
+			 * have changed from under us.  Try to detect
+			 * either changed or during-changing ptes and retry
+			 * properly when needed.
+			 *
+			 * Note that userfaultfd is actually fine with
+			 * false positives (e.g. caused by pte changed),
+			 * but not wrong logical events (e.g. caused by
+			 * reading a pte during changing).  The latter can
+			 * confuse the userspace, so the strictness is very
+			 * much preferred.  E.g., MISSING event should
+			 * never happen on the page after UFFDIO_COPY has
+			 * correctly installed the page and returned.
+			 */
+			if (!hugetlb_pte_stable(h, mm, ptep, old_pte)) {
+				ret = 0;
+				goto out;
+			}
+
+			/*
 			 * hugetlb_fault_mutex and i_mmap_rwsem must be
 			 * dropped before handling userfault.  Reacquire
 			 * after handling fault to make calling code simpler.
@@ -4469,14 +4532,10 @@ retry:
 			 * here.  Before returning error, get ptl and make
 			 * sure there really is no pte entry.
 			 */
-			ptl = huge_pte_lock(h, mm, ptep);
-			if (!huge_pte_none(huge_ptep_get(ptep))) {
+			if (hugetlb_pte_stable(h, mm, ptep, old_pte))
+				ret = vmf_error(PTR_ERR(page));
+			else
 				ret = 0;
-				spin_unlock(ptl);
-				goto out;
-			}
-			spin_unlock(ptl);
-			ret = vmf_error(PTR_ERR(page));
 			goto out;
 		}
 		clear_huge_page(page, address, pages_per_huge_page(h));
@@ -4529,7 +4588,8 @@ retry:
 
 	ptl = huge_pte_lock(h, mm, ptep);
 	ret = 0;
-	if (!huge_pte_none(huge_ptep_get(ptep)))
+	/* If pte changed from under us, retry */
+	if (!pte_same(huge_ptep_get(ptep), old_pte))
 		goto backout;
 
 	if (anon_rmap) {
@@ -4618,7 +4678,7 @@ vm_fault_t hugetlb_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 		 */
 		entry = huge_ptep_get(ptep);
 		if (unlikely(is_hugetlb_entry_migration(entry))) {
-			migration_entry_wait_huge(vma, mm, ptep);
+			migration_entry_wait_huge(vma, ptep);
 			return 0;
 		} else if (unlikely(is_hugetlb_entry_hwpoisoned(entry)))
 			return VM_FAULT_HWPOISON_LARGE |
@@ -4655,7 +4715,8 @@ vm_fault_t hugetlb_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	entry = huge_ptep_get(ptep);
 	if (huge_pte_none(entry)) {
-		ret = hugetlb_no_page(mm, vma, mapping, idx, address, ptep, flags);
+		ret = hugetlb_no_page(mm, vma, mapping, idx, address, ptep,
+				      entry, flags);
 		goto out_mutex;
 	}
 
@@ -5448,10 +5509,16 @@ void adjust_range_if_pmd_sharing_possible(struct vm_area_struct *vma,
  * !shared pmd case because we can allocate the pmd later as well, it makes the
  * code much cleaner.
  *
- * This routine must be called with i_mmap_rwsem held in at least read mode.
- * For hugetlbfs, this prevents removal of any page table entries associated
- * with the address space.  This is important as we are setting up sharing
- * based on existing page table entries (mappings).
+ * This routine must be called with i_mmap_rwsem held in at least read mode if
+ * sharing is possible.  For hugetlbfs, this prevents removal of any page
+ * table entries associated with the address space.  This is important as we
+ * are setting up sharing based on existing page table entries (mappings).
+ *
+ * NOTE: This routine is only called from huge_pte_alloc.  Some callers of
+ * huge_pte_alloc know that sharing is not possible and do not take
+ * i_mmap_rwsem as a performance optimization.  This is handled by the
+ * if !vma_shareable check at the beginning of the routine. i_mmap_rwsem is
+ * only required for subsequent processing.
  */
 pte_t *huge_pmd_share(struct mm_struct *mm, unsigned long addr, pud_t *pud)
 {
@@ -5468,6 +5535,7 @@ pte_t *huge_pmd_share(struct mm_struct *mm, unsigned long addr, pud_t *pud)
 	if (!vma_shareable(vma, addr))
 		return (pte_t *)pmd_alloc(mm, pud, addr);
 
+	i_mmap_assert_locked(mapping);
 	vma_interval_tree_foreach(svma, &mapping->i_mmap, idx, idx) {
 		if (svma == vma)
 			continue;
@@ -5584,8 +5652,8 @@ pte_t *huge_pte_alloc(struct mm_struct *mm,
  * huge_pte_offset() - Walk the page table to resolve the hugepage
  * entry at address @addr
  *
- * Return: Pointer to page table or swap entry (PUD or PMD) for
- * address @addr, or NULL if a p*d_none() entry is encountered and the
+ * Return: Pointer to page table entry (PUD or PMD) for
+ * address @addr, or NULL if a !p*d_present() entry is encountered and the
  * size @sz doesn't match the hugepage size at this level of the page
  * table.
  */
@@ -5605,20 +5673,16 @@ pte_t *huge_pte_offset(struct mm_struct *mm,
 		return NULL;
 
 	pud = pud_offset(p4d, addr);
-	if (sz != PUD_SIZE && pud_none(*pud))
-		return NULL;
-	/* hugepage or swap? */
-	if (pud_huge(*pud) || !pud_present(*pud))
+	if (sz == PUD_SIZE)
+		/* must be pud huge, non-present or none */
 		return (pte_t *)pud;
+	if (!pud_present(*pud))
+		return NULL;
+	/* must have a valid entry and size to go further */
 
 	pmd = pmd_offset(pud, addr);
-	if (sz != PMD_SIZE && pmd_none(*pmd))
-		return NULL;
-	/* hugepage or swap? */
-	if (pmd_huge(*pmd) || !pmd_present(*pmd))
-		return (pte_t *)pmd;
-
-	return NULL;
+	/* must be pmd huge, non-present or none */
+	return (pte_t *)pmd;
 }
 
 #endif /* CONFIG_ARCH_WANT_GENERAL_HUGETLB */
@@ -5643,12 +5707,13 @@ follow_huge_pd(struct vm_area_struct *vma,
 }
 
 struct page * __weak
-follow_huge_pmd(struct mm_struct *mm, unsigned long address,
-		pmd_t *pmd, int flags)
+follow_huge_pmd_pte(struct vm_area_struct *vma, unsigned long address, int flags)
 {
+	struct hstate *h = hstate_vma(vma);
+	struct mm_struct *mm = vma->vm_mm;
 	struct page *page = NULL;
 	spinlock_t *ptl;
-	pte_t pte;
+	pte_t *ptep, pte;
 
 	/* FOLL_GET and FOLL_PIN are mutually exclusive. */
 	if (WARN_ON_ONCE((flags & (FOLL_PIN | FOLL_GET)) ==
@@ -5656,17 +5721,14 @@ follow_huge_pmd(struct mm_struct *mm, unsigned long address,
 		return NULL;
 
 retry:
-	ptl = pmd_lockptr(mm, pmd);
-	spin_lock(ptl);
-	/*
-	 * make sure that the address range covered by this pmd is not
-	 * unmapped from other threads.
-	 */
-	if (!pmd_huge(*pmd))
-		goto out;
-	pte = huge_ptep_get((pte_t *)pmd);
+	ptep = huge_pte_offset(mm, address, huge_page_size(h));
+	if (!ptep)
+		return NULL;
+
+	ptl = huge_pte_lock(h, mm, ptep);
+	pte = huge_ptep_get(ptep);
 	if (pte_present(pte)) {
-		struct page *head_page = pmd_page(*pmd);
+		struct page *head_page = pte_page(pte);
 		/*
 		 * gup_must_unshare() isn't strictly needed in
 		 * follow_page() as long as all follow_page() users
@@ -5682,7 +5744,8 @@ retry:
 			page = NULL;
 			goto out;
 		}
-		page = head_page + ((address & ~PMD_MASK) >> PAGE_SHIFT);
+		page = pte_page(pte) +
+			((address & ~huge_page_mask(h)) >> PAGE_SHIFT);
 		/*
 		 * try_grab_page() should always succeed here, because: a) we
 		 * hold the pmd (ptl) lock, and b) we've just checked that the
@@ -5698,7 +5761,7 @@ retry:
 	} else {
 		if (is_hugetlb_entry_migration(pte)) {
 			spin_unlock(ptl);
-			__migration_entry_wait(mm, (pte_t *)pmd, ptl);
+			__migration_entry_wait_huge(ptep, ptl);
 			goto retry;
 		}
 		/*

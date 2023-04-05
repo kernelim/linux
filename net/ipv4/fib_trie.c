@@ -1546,11 +1546,8 @@ found:
 			    nh->nh_flags & RTNH_F_LINKDOWN &&
 			    !(fib_flags & FIB_LOOKUP_IGNORE_LINKSTATE))
 				continue;
-			if (!(flp->flowi4_flags & FLOWI_FLAG_SKIP_NH_OIF)) {
-				if (flp->flowi4_oif &&
-				    flp->flowi4_oif != nh->nh_oif)
-					continue;
-			}
+			if (flp->flowi4_oif && flp->flowi4_oif != nh->nh_oif)
+				continue;
 
 			if (!(fib_flags & FIB_LOOKUP_NOREF))
 				refcount_inc(&fi->fib_clntref);

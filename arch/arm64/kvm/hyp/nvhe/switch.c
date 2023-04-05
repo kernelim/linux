@@ -107,7 +107,7 @@ static void __hyp_vgic_save_state(struct kvm_vcpu *vcpu)
 	}
 }
 
-/* Restore VGICv3 state on non_VEH systems */
+/* Restore VGICv3 state on non-VHE systems */
 static void __hyp_vgic_restore_state(struct kvm_vcpu *vcpu)
 {
 	if (static_branch_unlikely(&kvm_vgic_global_state.gicv3_cpuif)) {
@@ -116,7 +116,7 @@ static void __hyp_vgic_restore_state(struct kvm_vcpu *vcpu)
 	}
 }
 
-/**
+/*
  * Disable host events, enable guest events
  */
 static bool __pmu_switch_to_guest(struct kvm_cpu_context *host_ctxt)
@@ -136,7 +136,7 @@ static bool __pmu_switch_to_guest(struct kvm_cpu_context *host_ctxt)
 	return (pmu->events_host || pmu->events_guest);
 }
 
-/**
+/*
  * Disable guest events, enable host events
  */
 static void __pmu_switch_to_host(struct kvm_cpu_context *host_ctxt)
@@ -282,5 +282,5 @@ void __noreturn hyp_panic(struct kvm_cpu_context *host_ctxt)
 
 asmlinkage void kvm_unexpected_el2_exception(void)
 {
-	return __kvm_unexpected_el2_exception();
+	__kvm_unexpected_el2_exception();
 }

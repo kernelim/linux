@@ -40,7 +40,6 @@
 #include <linux/iommu.h>
 #include <linux/workqueue.h>
 #include <linux/list.h>
-#include <linux/pci.h>
 #include <rdma/ib_verbs.h>
 
 #include "usnic_log.h"
@@ -96,7 +95,6 @@ static int usnic_uiom_get_pages(unsigned long addr, size_t size, int writable,
 	int ret;
 	int off;
 	int i;
-	int flags;
 	dma_addr_t pa;
 	unsigned int gup_flags;
 	struct mm_struct *mm;
@@ -133,8 +131,6 @@ static int usnic_uiom_get_pages(unsigned long addr, size_t size, int writable,
 		goto out;
 	}
 
-	flags = IOMMU_READ | IOMMU_CACHE;
-	flags |= (writable) ? IOMMU_WRITE : 0;
 	gup_flags = FOLL_WRITE;
 	gup_flags |= (writable) ? 0 : FOLL_FORCE;
 	cur_base = addr & PAGE_MASK;
@@ -439,7 +435,7 @@ void usnic_uiom_reg_release(struct usnic_uiom_reg *uiomr)
 	__usnic_uiom_release_tail(uiomr);
 }
 
-struct usnic_uiom_pd *usnic_uiom_alloc_pd(void)
+struct usnic_uiom_pd *usnic_uiom_alloc_pd(struct device *dev)
 {
 	struct usnic_uiom_pd *pd;
 	void *domain;
@@ -448,7 +444,7 @@ struct usnic_uiom_pd *usnic_uiom_alloc_pd(void)
 	if (!pd)
 		return ERR_PTR(-ENOMEM);
 
-	pd->domain = domain = iommu_domain_alloc(&pci_bus_type);
+	pd->domain = domain = iommu_domain_alloc(dev->bus);
 	if (!domain) {
 		usnic_err("Failed to allocate IOMMU domain");
 		kfree(pd);
@@ -555,14 +551,4 @@ out:
 void usnic_uiom_free_dev_list(struct device **devs)
 {
 	kfree(devs);
-}
-
-int usnic_uiom_init(char *drv_name)
-{
-	if (!iommu_present(&pci_bus_type)) {
-		usnic_err("IOMMU required but not present or enabled.  USNIC QPs will not function w/o enabling IOMMU\n");
-		return -EPERM;
-	}
-
-	return 0;
 }

@@ -212,5 +212,6 @@ int main(void)
 	OFFSET(__KEXEC_SHA_REGION_START, kexec_sha_region, start);
 	OFFSET(__KEXEC_SHA_REGION_LEN, kexec_sha_region, len);
 	DEFINE(__KEXEC_SHA_REGION_SIZE, sizeof(struct kexec_sha_region));
+	DEFINE(MAX_COMMAND_LINE_SIZE, PARMAREA + offsetof(struct parmarea, max_command_line_size));
 	return 0;
 }

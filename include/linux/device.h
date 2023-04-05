@@ -102,6 +102,8 @@ extern void bus_remove_file(struct bus_type *, struct bus_attribute *);
  *		bus supports.
  * @dma_configure:	Called to setup DMA configuration on a device on
  *			this bus.
+ * @dma_cleanup:	Called to cleanup DMA configuration on a device on
+ *			this bus.
  * @pm:		Power management operations of this bus, callback the specific
  *		device driver's pm-ops.
  * @iommu_ops:  IOMMU specific operations for this bus, used to attach IOMMU
@@ -156,6 +158,7 @@ struct bus_type {
 	bool need_parent_lock;
 
 	RH_KABI_EXTEND(void (*sync_state)(struct device *dev))
+	RH_KABI_EXTEND(void (*dma_cleanup)(struct device *dev))
 };
 
 extern int __must_check bus_register(struct bus_type *bus);
@@ -439,6 +442,8 @@ extern int __must_check driver_create_file(struct device_driver *driver,
 extern void driver_remove_file(struct device_driver *driver,
 			       const struct driver_attribute *attr);
 
+int driver_set_override(struct device *dev, const char **override,
+			const char *s, size_t len);
 extern int __must_check driver_for_each_device(struct device_driver *drv,
 					       struct device *start,
 					       void *data,
@@ -925,6 +930,8 @@ extern int devres_release_group(struct device *dev, void *id);
 
 /* managed devm_k.alloc/kfree for device drivers */
 extern void *devm_kmalloc(struct device *dev, size_t size, gfp_t gfp) __malloc;
+extern void *devm_krealloc(struct device *dev, void *ptr, size_t size,
+			   gfp_t gfp) __must_check;
 extern __printf(3, 0)
 char *devm_kvasprintf(struct device *dev, gfp_t gfp, const char *fmt,
 		      va_list ap) __malloc;
@@ -1122,6 +1129,75 @@ struct device_extended_rh {
 };
 
 /**
+ * enum device_physical_location_panel - Describes which panel surface of the
+ * system's housing the device connection point resides on.
+ * @DEVICE_PANEL_TOP: Device connection point is on the top panel.
+ * @DEVICE_PANEL_BOTTOM: Device connection point is on the bottom panel.
+ * @DEVICE_PANEL_LEFT: Device connection point is on the left panel.
+ * @DEVICE_PANEL_RIGHT: Device connection point is on the right panel.
+ * @DEVICE_PANEL_FRONT: Device connection point is on the front panel.
+ * @DEVICE_PANEL_BACK: Device connection point is on the back panel.
+ * @DEVICE_PANEL_UNKNOWN: The panel with device connection point is unknown.
+ */
+enum device_physical_location_panel {
+	DEVICE_PANEL_TOP,
+	DEVICE_PANEL_BOTTOM,
+	DEVICE_PANEL_LEFT,
+	DEVICE_PANEL_RIGHT,
+	DEVICE_PANEL_FRONT,
+	DEVICE_PANEL_BACK,
+	DEVICE_PANEL_UNKNOWN,
+};
+
+/**
+ * enum device_physical_location_vertical_position - Describes vertical
+ * position of the device connection point on the panel surface.
+ * @DEVICE_VERT_POS_UPPER: Device connection point is at upper part of panel.
+ * @DEVICE_VERT_POS_CENTER: Device connection point is at center part of panel.
+ * @DEVICE_VERT_POS_LOWER: Device connection point is at lower part of panel.
+ */
+enum device_physical_location_vertical_position {
+	DEVICE_VERT_POS_UPPER,
+	DEVICE_VERT_POS_CENTER,
+	DEVICE_VERT_POS_LOWER,
+};
+
+/**
+ * enum device_physical_location_horizontal_position - Describes horizontal
+ * position of the device connection point on the panel surface.
+ * @DEVICE_HORI_POS_LEFT: Device connection point is at left part of panel.
+ * @DEVICE_HORI_POS_CENTER: Device connection point is at center part of panel.
+ * @DEVICE_HORI_POS_RIGHT: Device connection point is at right part of panel.
+ */
+enum device_physical_location_horizontal_position {
+	DEVICE_HORI_POS_LEFT,
+	DEVICE_HORI_POS_CENTER,
+	DEVICE_HORI_POS_RIGHT,
+};
+
+/**
+ * struct device_physical_location - Device data related to physical location
+ * of the device connection point.
+ * @panel: Panel surface of the system's housing that the device connection
+ *         point resides on.
+ * @vertical_position: Vertical position of the device connection point within
+ *                     the panel.
+ * @horizontal_position: Horizontal position of the device connection point
+ *                       within the panel.
+ * @dock: Set if the device connection point resides in a docking station or
+ *        port replicator.
+ * @lid: Set if this device connection point resides on the lid of laptop
+ *       system.
+ */
+struct device_physical_location {
+	enum device_physical_location_panel panel;
+	enum device_physical_location_vertical_position vertical_position;
+	enum device_physical_location_horizontal_position horizontal_position;
+	bool dock;
+	bool lid;
+};
+
+/**
  * struct device - The basic device structure
  * @parent:	The device's "parent" device, the device to which it is attached.
  * 		In most cases, a parent device is some sort of bus or host
@@ -1154,6 +1230,7 @@ struct device_extended_rh {
  * 		along with subsystem-level and driver-level callbacks.
  * @pins:	For device pin management.
  *		See Documentation/driver-api/pin-control.rst for details.
+ * @msi_lock:	Lock to protect MSI mask cache and mask register
  * @msi_list:	Hosts MSI descriptors
  * @msi_domain: The generic MSI domain this device is using.
  * @numa_node:	NUMA node this device is close to.
@@ -1186,6 +1263,8 @@ struct device_extended_rh {
  * 		device (i.e. the bus driver that discovered the device).
  * @iommu_group: IOMMU group the device belongs to.
  * @iommu:	Per device generic IOMMU runtime data
+ * @physical_location: Describes physical location of the device connection
+ *		point in the system housing.
  * @removable:  Whether the device can be removed from the system. This
  *              should be set by the subsystem / bus driver that discovered
  *              the device.
@@ -1264,7 +1343,7 @@ struct device {
 					     allocations such descriptors. */
 	u64		RH_KABI_RENAME(bus_dma_mask,
 					bus_dma_limit); /* upstream dma constraint */
-	RH_KABI_BROKEN_REPLACE(unsigned long	dma_pfn_offset, const struct bus_dma_region *dma_range_map)
+	RH_KABI_REPLACE(unsigned long	dma_pfn_offset, const struct bus_dma_region *dma_range_map)
 
 	struct device_dma_parameters *dma_parms;
 
@@ -1320,13 +1399,13 @@ struct device {
 #endif
 
 	/* NB: See the note for struct dev_links_info: */
-	RH_KABI_RESERVE(3)
+	RH_KABI_USE(3, struct device_physical_location *physical_location)
 	RH_KABI_RESERVE(4)
 	RH_KABI_RESERVE(5)
 	RH_KABI_USE(6, 7, struct list_head links_defer_sync)
 
 	RH_KABI_USE(8, enum device_removable   removable)
-	RH_KABI_RESERVE(9)
+	RH_KABI_USE(9, raw_spinlock_t msi_lock)
 	RH_KABI_RESERVE(10)
 	RH_KABI_RESERVE(11)
 	RH_KABI_RESERVE(12)
@@ -1593,6 +1672,9 @@ extern int device_for_each_child_reverse(struct device *dev, void *data,
 		     int (*fn)(struct device *dev, void *data));
 extern struct device *device_find_child(struct device *dev, void *data,
 				int (*match)(struct device *dev, void *data));
+extern struct device *device_find_child_by_name(struct device *parent,
+						const char *name);
+extern struct device *device_find_any_child(struct device *parent);
 extern int device_rename(struct device *dev, const char *new_name);
 extern int device_move(struct device *dev, struct device *new_parent,
 		       enum dpm_order dpm_order);

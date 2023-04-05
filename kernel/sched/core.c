@@ -2438,15 +2438,11 @@ void wake_up_if_idle(int cpu)
 	if (!is_idle_task(rcu_dereference(rq->curr)))
 		goto out;
 
-	if (set_nr_if_polling(rq->idle)) {
-		trace_sched_wake_idle_without_ipi(cpu);
-	} else {
-		rq_lock_irqsave(rq, &rf);
-		if (is_idle_task(rq->curr))
-			smp_send_reschedule(cpu);
-		/* Else CPU is not idle, do nothing here: */
-		rq_unlock_irqrestore(rq, &rf);
-	}
+	rq_lock_irqsave(rq, &rf);
+	if (is_idle_task(rq->curr))
+		resched_curr(rq);
+	/* Else CPU is not idle, do nothing here: */
+	rq_unlock_irqrestore(rq, &rf);
 
 out:
 	rcu_read_unlock();
@@ -2460,13 +2456,17 @@ bool cpus_share_cache(int this_cpu, int that_cpu)
 	return per_cpu(sd_llc_id, this_cpu) == per_cpu(sd_llc_id, that_cpu);
 }
 
-static inline bool ttwu_queue_cond(int cpu, int wake_flags)
+static inline bool ttwu_queue_cond(struct task_struct *p, int cpu)
 {
 	/*
 	 * Do not complicate things with the async wake_list while the CPU is
 	 * in hotplug state.
 	 */
 	if (!cpu_active(cpu))
+		return false;
+
+	/* Ensure the task will still be allowed to run on the CPU. */
+	if (!cpumask_test_cpu(cpu, p->cpus_ptr))
 		return false;
 
 	/*
@@ -2476,13 +2476,21 @@ static inline bool ttwu_queue_cond(int cpu, int wake_flags)
 	if (!cpus_share_cache(smp_processor_id(), cpu))
 		return true;
 
+	if (cpu == smp_processor_id())
+		return false;
+
 	/*
-	 * If the task is descheduling and the only running task on the
-	 * CPU then use the wakelist to offload the task activation to
-	 * the soon-to-be-idle CPU as the current CPU is likely busy.
-	 * nr_running is checked to avoid unnecessary task stacking.
+	 * If the wakee cpu is idle, or the task is descheduling and the
+	 * only running task on the CPU, then use the wakelist to offload
+	 * the task activation to the idle (or soon-to-be-idle) CPU as
+	 * the current CPU is likely busy. nr_running is checked to
+	 * avoid unnecessary task stacking.
+	 *
+	 * Note that we can only get here with (wakee) p->on_rq=0,
+	 * p->on_cpu can be whatever, we've done the dequeue, so
+	 * the wakee has been accounted out of ->nr_running.
 	 */
-	if ((wake_flags & WF_ON_CPU) && cpu_rq(cpu)->nr_running <= 1)
+	if (!cpu_rq(cpu)->nr_running)
 		return true;
 
 	return false;
@@ -2490,10 +2498,7 @@ static inline bool ttwu_queue_cond(int cpu, int wake_flags)
 
 static bool ttwu_queue_wakelist(struct task_struct *p, int cpu, int wake_flags)
 {
-	if (sched_feat(TTWU_QUEUE) && ttwu_queue_cond(cpu, wake_flags)) {
-		if (WARN_ON_ONCE(cpu == smp_processor_id()))
-			return false;
-
+	if (sched_feat(TTWU_QUEUE) && ttwu_queue_cond(p, cpu)) {
 		sched_clock_cpu(cpu); /* Sync clocks across CPUs */
 		__ttwu_queue_wakelist(p, cpu, wake_flags);
 		return true;
@@ -2815,7 +2820,7 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 * scheduling.
 	 */
 	if (smp_load_acquire(&p->on_cpu) &&
-	    ttwu_queue_wakelist(p, task_cpu(p), wake_flags | WF_ON_CPU))
+	    ttwu_queue_wakelist(p, task_cpu(p), wake_flags))
 		goto unlock;
 
 	/*
@@ -2856,46 +2861,61 @@ out:
 }
 
 /**
- * try_invoke_on_locked_down_task - Invoke a function on task in fixed state
+ * task_call_func - Invoke a function on task in fixed state
  * @p: Process for which the function is to be invoked, can be @current.
  * @func: Function to invoke.
  * @arg: Argument to function.
  *
- * If the specified task can be quickly locked into a definite state
- * (either sleeping or on a given runqueue), arrange to keep it in that
- * state while invoking @func(@arg).  This function can use ->on_rq and
- * task_curr() to work out what the state is, if required.  Given that
- * @func can be invoked with a runqueue lock held, it had better be quite
- * lightweight.
+ * Fix the task in it's current state by avoiding wakeups and or rq operations
+ * and call @func(@arg) on it.  This function can use ->on_rq and task_curr()
+ * to work out what the state is, if required.  Given that @func can be invoked
+ * with a runqueue lock held, it had better be quite lightweight.
  *
  * Returns:
- *	@false if the task slipped out from under the locks.
- *	@true if the task was locked onto a runqueue or is sleeping.
- *		However, @func can override this by returning @false.
+ *   Whatever @func returns
  */
-bool try_invoke_on_locked_down_task(struct task_struct *p, bool (*func)(struct task_struct *t, void *arg), void *arg)
+int task_call_func(struct task_struct *p, task_call_f func, void *arg)
 {
+	struct rq *rq = NULL;
+	unsigned int state;
 	struct rq_flags rf;
-	bool ret = false;
-	struct rq *rq;
+	int ret;
 
 	raw_spin_lock_irqsave(&p->pi_lock, rf.flags);
-	if (p->on_rq) {
+
+	state = READ_ONCE(p->__state);
+
+	/*
+	 * Ensure we load p->on_rq after p->__state, otherwise it would be
+	 * possible to, falsely, observe p->on_rq == 0.
+	 *
+	 * See try_to_wake_up() for a longer comment.
+	 */
+	smp_rmb();
+
+	/*
+	 * Since pi->lock blocks try_to_wake_up(), we don't need rq->lock when
+	 * the task is blocked. Make sure to check @state since ttwu() can drop
+	 * locks at the end, see ttwu_queue_wakelist().
+	 */
+	if (state == TASK_RUNNING || state == TASK_WAKING || p->on_rq)
 		rq = __task_rq_lock(p, &rf);
-		if (task_rq(p) == rq)
-			ret = func(p, arg);
+
+	/*
+	 * At this point the task is pinned; either:
+	 *  - blocked and we're holding off wakeups	 (pi->lock)
+	 *  - woken, and we're holding off enqueue	 (rq->lock)
+	 *  - queued, and we're holding off schedule	 (rq->lock)
+	 *  - running, and we're holding off de-schedule (rq->lock)
+	 *
+	 * The called function (@func) can use: task_curr(), p->on_rq and
+	 * p->__state to differentiate between these states.
+	 */
+	ret = func(p, arg);
+
+	if (rq)
 		rq_unlock(rq, &rf);
-	} else {
-		switch (READ_ONCE(p->__state)) {
-		case TASK_RUNNING:
-		case TASK_WAKING:
-			break;
-		default:
-			smp_rmb(); // See smp_rmb() comment in try_to_wake_up().
-			if (!p->on_rq)
-				ret = func(p, arg);
-		}
-	}
+
 	raw_spin_unlock_irqrestore(&p->pi_lock, rf.flags);
 	return ret;
 }
@@ -3332,7 +3352,8 @@ static inline void prepare_task(struct task_struct *next)
 	 * Claim the task as running, we do this before switching to it
 	 * such that any running task will have this set.
 	 *
-	 * See the ttwu() WF_ON_CPU case and its ordering comment.
+	 * See the smp_load_acquire(&p->on_cpu) case in ttwu() and
+	 * its ordering comment.
 	 */
 	WRITE_ONCE(next->on_cpu, 1);
 #endif
@@ -3377,25 +3398,55 @@ static void do_balance_callbacks(struct rq *rq, struct callback_head *head)
 
 static void balance_push(struct rq *rq);
 
+/*
+ * balance_push_callback is a right abuse of the callback interface and plays
+ * by significantly different rules.
+ *
+ * Where the normal balance_callback's purpose is to be ran in the same context
+ * that queued it (only later, when it's safe to drop rq->lock again),
+ * balance_push_callback is specifically targeted at __schedule().
+ *
+ * This abuse is tolerated because it places all the unlikely/odd cases behind
+ * a single test, namely: rq->balance_callback == NULL.
+ */
 struct callback_head balance_push_callback = {
 	.next = NULL,
 	.func = (void (*)(struct callback_head *))balance_push,
 };
 
-static inline struct callback_head *splice_balance_callbacks(struct rq *rq)
+static inline struct callback_head *
+__splice_balance_callbacks(struct rq *rq, bool split)
 {
 	struct callback_head *head = rq->balance_callback;
 
+	if (likely(!head))
+		return NULL;
+
 	lockdep_assert_held(&rq->lock);
-	if (head)
+	/*
+	 * Must not take balance_push_callback off the list when
+	 * splice_balance_callbacks() and balance_callbacks() are not
+	 * in the same rq->lock section.
+	 *
+	 * In that case it would be possible for __schedule() to interleave
+	 * and observe the list empty.
+	 */
+	if (split && head == &balance_push_callback)
+		head = NULL;
+	else
 		rq->balance_callback = NULL;
 
 	return head;
 }
 
+static inline struct callback_head *splice_balance_callbacks(struct rq *rq)
+{
+	return __splice_balance_callbacks(rq, true);
+}
+
 static void __balance_callbacks(struct rq *rq)
 {
-	do_balance_callbacks(rq, splice_balance_callbacks(rq));
+	do_balance_callbacks(rq, __splice_balance_callbacks(rq, false));
 }
 
 static inline void balance_callbacks(struct rq *rq, struct callback_head *head)
@@ -4513,8 +4564,12 @@ static inline void sched_submit_work(struct task_struct *tsk)
 		preempt_enable_no_resched();
 	}
 
-	if (tsk_is_pi_blocked(tsk))
-		return;
+	/*
+	 * spinlock and rwlock must not flush block requests.  This will
+	 * deadlock if the callback attempts to acquire a lock which is
+	 * already acquired.
+	 */
+	SCHED_WARN_ON(current->__state & TASK_RTLOCK_WAIT);
 
 	/*
 	 * If we are going to sleep and we have plugged IO queued,
@@ -4971,17 +5026,29 @@ out_unlock:
 EXPORT_SYMBOL(set_user_nice);
 
 /*
+ * is_nice_reduction - check if nice value is an actual reduction
+ *
+ * Similar to can_nice() but does not perform a capability check.
+ *
+ * @p: task
+ * @nice: nice value
+ */
+static bool is_nice_reduction(const struct task_struct *p, const int nice)
+{
+	/* Convert nice value [19,-20] to rlimit style value [1,40]: */
+	int nice_rlim = nice_to_rlimit(nice);
+
+	return (nice_rlim <= task_rlimit(p, RLIMIT_NICE));
+}
+
+/*
  * can_nice - check if a task can reduce its nice value
  * @p: task
  * @nice: nice value
  */
 int can_nice(const struct task_struct *p, const int nice)
 {
-	/* Convert nice value [19,-20] to rlimit style value [1,40]: */
-	int nice_rlim = nice_to_rlimit(nice);
-
-	return (nice_rlim <= task_rlimit(p, RLIMIT_NICE) ||
-		capable(CAP_SYS_NICE));
+	return is_nice_reduction(p, nice) || capable(CAP_SYS_NICE);
 }
 
 #ifdef __ARCH_WANT_SYS_NICE
@@ -5142,6 +5209,69 @@ static bool check_same_owner(struct task_struct *p)
 	return match;
 }
 
+/*
+ * Allow unprivileged RT tasks to decrease priority.
+ * Only issue a capable test if needed and only once to avoid an audit
+ * event on permitted non-privileged operations:
+ */
+static int user_check_sched_setscheduler(struct task_struct *p,
+					 const struct sched_attr *attr,
+					 int policy, int reset_on_fork)
+{
+	if (fair_policy(policy)) {
+		if (attr->sched_nice < task_nice(p) &&
+		    !is_nice_reduction(p, attr->sched_nice))
+			goto req_priv;
+	}
+
+	if (rt_policy(policy)) {
+		unsigned long rlim_rtprio = task_rlimit(p, RLIMIT_RTPRIO);
+
+		/* Can't set/change the rt policy: */
+		if (policy != p->policy && !rlim_rtprio)
+			goto req_priv;
+
+		/* Can't increase priority: */
+		if (attr->sched_priority > p->rt_priority &&
+		    attr->sched_priority > rlim_rtprio)
+			goto req_priv;
+	}
+
+	/*
+	 * Can't set/change SCHED_DEADLINE policy at all for now
+	 * (safest behavior); in the future we would like to allow
+	 * unprivileged DL tasks to increase their relative deadline
+	 * or reduce their runtime (both ways reducing utilization)
+	 */
+	if (dl_policy(policy))
+		goto req_priv;
+
+	/*
+	 * Treat SCHED_IDLE as nice 20. Only allow a switch to
+	 * SCHED_NORMAL if the RLIMIT_NICE would normally permit it.
+	 */
+	if (task_has_idle_policy(p) && !idle_policy(policy)) {
+		if (!is_nice_reduction(p, task_nice(p)))
+			goto req_priv;
+	}
+
+	/* Can't change other user's priorities: */
+	if (!check_same_owner(p))
+		goto req_priv;
+
+	/* Normal users shall not reset the sched_reset_on_fork flag: */
+	if (p->sched_reset_on_fork && !reset_on_fork)
+		goto req_priv;
+
+	return 0;
+
+req_priv:
+	if (!capable(CAP_SYS_NICE))
+		return -EPERM;
+
+	return 0;
+}
+
 static int __sched_setscheduler(struct task_struct *p,
 				const struct sched_attr *attr,
 				bool user, bool pi)
@@ -5184,58 +5314,11 @@ recheck:
 	    (rt_policy(policy) != (attr->sched_priority != 0)))
 		return -EINVAL;
 
-	/*
-	 * Allow unprivileged RT tasks to decrease priority:
-	 */
-	if (user && !capable(CAP_SYS_NICE)) {
-		if (fair_policy(policy)) {
-			if (attr->sched_nice < task_nice(p) &&
-			    !can_nice(p, attr->sched_nice))
-				return -EPERM;
-		}
-
-		if (rt_policy(policy)) {
-			unsigned long rlim_rtprio =
-					task_rlimit(p, RLIMIT_RTPRIO);
-
-			/* Can't set/change the rt policy: */
-			if (policy != p->policy && !rlim_rtprio)
-				return -EPERM;
-
-			/* Can't increase priority: */
-			if (attr->sched_priority > p->rt_priority &&
-			    attr->sched_priority > rlim_rtprio)
-				return -EPERM;
-		}
-
-		 /*
-		  * Can't set/change SCHED_DEADLINE policy at all for now
-		  * (safest behavior); in the future we would like to allow
-		  * unprivileged DL tasks to increase their relative deadline
-		  * or reduce their runtime (both ways reducing utilization)
-		  */
-		if (dl_policy(policy))
-			return -EPERM;
-
-		/*
-		 * Treat SCHED_IDLE as nice 20. Only allow a switch to
-		 * SCHED_NORMAL if the RLIMIT_NICE would normally permit it.
-		 */
-		if (task_has_idle_policy(p) && !idle_policy(policy)) {
-			if (!can_nice(p, task_nice(p)))
-				return -EPERM;
-		}
-
-		/* Can't change other user's priorities: */
-		if (!check_same_owner(p))
-			return -EPERM;
-
-		/* Normal users shall not reset the sched_reset_on_fork flag: */
-		if (p->sched_reset_on_fork && !reset_on_fork)
-			return -EPERM;
-	}
-
 	if (user) {
+		retval = user_check_sched_setscheduler(p, attr, policy, reset_on_fork);
+		if (retval)
+			return retval;
+
 		if (attr->sched_flags & SCHED_FLAG_SUGOV)
 			return -EINVAL;
 

@@ -357,7 +357,7 @@ static bool access_error(bool is_write, bool is_exec, struct vm_area_struct *vma
 		return false;
 	}
 
-	if (unlikely(!(vma->vm_flags & (VM_READ | VM_EXEC | VM_WRITE))))
+	if (unlikely(!vma_is_accessible(vma)))
 		return true;
 	/*
 	 * We should ideally do the vma pkey access check here. But in the
@@ -448,7 +448,22 @@ static void sanity_check_fault(bool is_write, bool is_user,
 #if defined(CONFIG_PPC_8xx)
 #define page_fault_is_bad(__err)	((__err) & DSISR_NOEXEC_OR_G)
 #elif defined(CONFIG_PPC64)
-#define page_fault_is_bad(__err)	((__err) & DSISR_BAD_FAULT_64S)
+static int page_fault_is_bad(unsigned long err)
+{
+	unsigned long flag = DSISR_BAD_FAULT_64S;
+
+	/*
+	 * PAPR+ v2.11 § 14.15.3.4.1 (unreleased)
+	 * If byte 0, bit 3 of pi-attribute-specifier-type in
+	 * ibm,pi-features property is defined, ignore the DSI error
+	 * which is caused by the paste instruction on the
+	 * suspended NX window.
+	 */
+	if (mmu_has_feature(MMU_FTR_NX_DSI))
+		flag &= ~DSISR_BAD_COPYPASTE;
+
+	return err & flag;
+}
 #else
 #define page_fault_is_bad(__err)	((__err) & DSISR_BAD_FAULT_32S)
 #endif
@@ -602,7 +617,7 @@ good_area:
 	 * make sure we exit gracefully rather than endlessly redo
 	 * the fault.
 	 */
-	fault = handle_mm_fault(vma, address, flags);
+	fault = handle_mm_fault(vma, address, flags, regs);
 
 	major |= fault & VM_FAULT_MAJOR;
 
@@ -628,14 +643,9 @@ good_area:
 	/*
 	 * Major/minor page fault accounting.
 	 */
-	if (major) {
-		current->maj_flt++;
-		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ, 1, regs, address);
+	if (major)
 		cmo_account_page_fault();
-	} else {
-		current->min_flt++;
-		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN, 1, regs, address);
-	}
+
 	return 0;
 }
 NOKPROBE_SYMBOL(__do_page_fault);

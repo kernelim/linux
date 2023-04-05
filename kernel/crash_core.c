@@ -262,9 +262,9 @@ static int __init __parse_crashkernel(char *cmdline,
 
 	if (strncmp(ck_cmdline, "auto", 4) == 0) {
 #if defined(CONFIG_X86_64) || defined(CONFIG_S390)
-		ck_cmdline = "1G-4G:160M,4G-64G:192M,64G-1T:256M,1T-:512M";
+		ck_cmdline = "1G-4G:192M,4G-64G:256M,64G-:512M";
 #elif defined(CONFIG_ARM64)
-		ck_cmdline = "2G-:448M";
+		ck_cmdline = "2G-:480M";
 #elif defined(CONFIG_PPC64)
 		char *fadump_cmdline;
 

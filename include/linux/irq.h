@@ -153,9 +153,6 @@ struct irq_common_data {
 #ifdef CONFIG_GENERIC_IRQ_EFFECTIVE_AFF_MASK
 	cpumask_var_t		effective_affinity;
 #endif
-#ifdef CONFIG_GENERIC_IRQ_IPI
-	unsigned int		ipi_offset;
-#endif
 };
 
 /**

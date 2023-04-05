@@ -651,8 +651,6 @@ struct amd_iommu {
 	u32 flags;
 	volatile u64 *cmd_sem;
 	u64 cmd_sem_val;
-	/* IRQ notifier for IntCapXT interrupt */
-	struct irq_affinity_notify intcapxt_notify;
 
 #ifdef CONFIG_AMD_IOMMU_DEBUGFS
 	/* DebugFS Info */
@@ -791,12 +789,6 @@ extern u16 amd_iommu_last_bdf;
 
 /* allocation bitmap for domain ids */
 extern unsigned long *amd_iommu_pd_alloc_bitmap;
-
-/*
- * If true, the addresses will be flushed on unmap time, not when
- * they are reused
- */
-extern bool amd_iommu_unmap_flush;
 
 /* Smallest max PASID supported by any IOMMU in the system */
 extern u32 amd_iommu_max_pasid;

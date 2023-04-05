@@ -1738,10 +1738,15 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 	 * unmapped afterwards, the call to kvm_unmap_gfn will take it away
 	 * from us again properly. This smp_rmb() interacts with the smp_wmb()
 	 * in kvm_mmu_notifier_invalidate_<page|range_end>.
+	 *
+	 * Besides, __gfn_to_pfn_memslot() instead of gfn_to_pfn_prot() is
+	 * used to avoid unnecessary overhead introduced to locate the memory
+	 * slot because it's always fixed even @gfn is adjusted for huge pages.
 	 */
 	smp_rmb();
 
-	pfn = gfn_to_pfn_prot(kvm, gfn, write_fault, &writable);
+	pfn = __gfn_to_pfn_memslot(memslot, gfn, false, NULL,
+				   write_fault, &writable, NULL);
 	if (pfn == KVM_PFN_ERR_HWPOISON) {
 		kvm_send_hwpoison_signal(hva, vma_shift);
 		return 0;
@@ -1837,7 +1842,7 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 
 		if (writable) {
 			new_pte = kvm_s2pte_mkwrite(new_pte);
-			mark_page_dirty(kvm, gfn);
+			mark_page_dirty_in_slot(kvm, memslot, gfn);
 		}
 
 		if (needs_exec)
@@ -1920,6 +1925,25 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 
 	fault_ipa = kvm_vcpu_get_fault_ipa(vcpu);
 	is_iabt = kvm_vcpu_trap_is_iabt(vcpu);
+
+	if (fault_status == FSC_FAULT) {
+		/* Beyond sanitised PARange (which is the IPA limit) */
+		if (fault_ipa >= BIT_ULL(get_kvm_ipa_limit())) {
+			kvm_inject_size_fault(vcpu);
+			return 1;
+		}
+
+		/* Falls between the IPA range and the PARange? */
+		if (fault_ipa >= kvm_phys_size(vcpu->kvm)) {
+			fault_ipa |= kvm_vcpu_get_hfar(vcpu) & GENMASK(11, 0);
+
+			if (is_iabt)
+				kvm_inject_pabt(vcpu, fault_ipa);
+			else
+				kvm_inject_dabt(vcpu, fault_ipa);
+			return 1;
+		}
+	}
 
 	/* Synchronous External Abort? */
 	if (kvm_vcpu_abt_issea(vcpu)) {

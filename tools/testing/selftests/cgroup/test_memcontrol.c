@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 
 #include <linux/limits.h>
+#include <linux/oom.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,9 +16,13 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <errno.h>
+#include <sys/mman.h>
 
 #include "../kselftest.h"
 #include "cgroup_util.h"
+
+static bool has_localevents;
+static bool has_recursiveprot;
 
 /*
  * This test creates two nested cgroups with and without enabling
@@ -25,7 +30,7 @@
  */
 static int test_memcg_subtree_control(const char *root)
 {
-	char *parent, *child, *parent2, *child2;
+	char *parent, *child, *parent2 = NULL, *child2 = NULL;
 	int ret = KSFT_FAIL;
 	char buf[PAGE_SIZE];
 
@@ -33,50 +38,54 @@ static int test_memcg_subtree_control(const char *root)
 	parent = cg_name(root, "memcg_test_0");
 	child = cg_name(root, "memcg_test_0/memcg_test_1");
 	if (!parent || !child)
-		goto cleanup;
+		goto cleanup_free;
 
 	if (cg_create(parent))
-		goto cleanup;
+		goto cleanup_free;
 
 	if (cg_write(parent, "cgroup.subtree_control", "+memory"))
-		goto cleanup;
+		goto cleanup_parent;
 
 	if (cg_create(child))
-		goto cleanup;
+		goto cleanup_parent;
 
 	if (cg_read_strstr(child, "cgroup.controllers", "memory"))
-		goto cleanup;
+		goto cleanup_child;
 
 	/* Create two nested cgroups without enabling memory controller */
 	parent2 = cg_name(root, "memcg_test_1");
 	child2 = cg_name(root, "memcg_test_1/memcg_test_1");
 	if (!parent2 || !child2)
-		goto cleanup;
+		goto cleanup_free2;
 
 	if (cg_create(parent2))
-		goto cleanup;
+		goto cleanup_free2;
 
 	if (cg_create(child2))
-		goto cleanup;
+		goto cleanup_parent2;
 
 	if (cg_read(child2, "cgroup.controllers", buf, sizeof(buf)))
-		goto cleanup;
+		goto cleanup_all;
 
 	if (!cg_read_strstr(child2, "cgroup.controllers", "memory"))
-		goto cleanup;
+		goto cleanup_all;
 
 	ret = KSFT_PASS;
 
-cleanup:
-	cg_destroy(child);
-	cg_destroy(parent);
-	free(parent);
-	free(child);
-
+cleanup_all:
 	cg_destroy(child2);
+cleanup_parent2:
 	cg_destroy(parent2);
+cleanup_free2:
 	free(parent2);
 	free(child2);
+cleanup_child:
+	cg_destroy(child);
+cleanup_parent:
+	cg_destroy(parent);
+cleanup_free:
+	free(parent);
+	free(child);
 
 	return ret;
 }
@@ -202,14 +211,48 @@ static int alloc_pagecache_50M_noexit(const char *cgroup, void *arg)
 	return 0;
 }
 
+static int alloc_anon_noexit(const char *cgroup, void *arg)
+{
+	int ppid = getppid();
+	size_t size = (unsigned long)arg;
+	char *buf, *ptr;
+
+	buf = malloc(size);
+	for (ptr = buf; ptr < buf + size; ptr += PAGE_SIZE)
+		*ptr = 0;
+
+	while (getppid() == ppid)
+		sleep(1);
+
+	free(buf);
+	return 0;
+}
+
+/*
+ * Wait until processes are killed asynchronously by the OOM killer
+ * If we exceed a timeout, fail.
+ */
+static int cg_test_proc_killed(const char *cgroup)
+{
+	int limit;
+
+	for (limit = 10; limit > 0; limit--) {
+		if (cg_read_strcmp(cgroup, "cgroup.procs", "") == 0)
+			return 0;
+
+		usleep(100000);
+	}
+	return -1;
+}
+
 /*
  * First, this test creates the following hierarchy:
  * A       memory.min = 50M,  memory.max = 200M
  * A/B     memory.min = 50M,  memory.current = 50M
  * A/B/C   memory.min = 75M,  memory.current = 50M
  * A/B/D   memory.min = 25M,  memory.current = 50M
- * A/B/E   memory.min = 500M, memory.current = 0
- * A/B/F   memory.min = 0,    memory.current = 50M
+ * A/B/E   memory.min = 0,    memory.current = 50M
+ * A/B/F   memory.min = 500M, memory.current = 0
  *
  * Usages are pagecache, but the test keeps a running
  * process in every leaf cgroup.
@@ -219,7 +262,7 @@ static int alloc_pagecache_50M_noexit(const char *cgroup, void *arg)
  * A/B    memory.current ~= 50M
  * A/B/C  memory.current ~= 33M
  * A/B/D  memory.current ~= 17M
- * A/B/E  memory.current ~= 0
+ * A/B/F  memory.current ~= 0
  *
  * After that it tries to allocate more than there is
  * unprotected memory in A available, and checks
@@ -285,7 +328,7 @@ static int test_memcg_min(const char *root)
 		if (cg_create(children[i]))
 			goto cleanup;
 
-		if (i == 2)
+		if (i > 2)
 			continue;
 
 		cg_run_nowait(children[i], alloc_pagecache_50M_noexit,
@@ -300,9 +343,9 @@ static int test_memcg_min(const char *root)
 		goto cleanup;
 	if (cg_write(children[1], "memory.min", "25M"))
 		goto cleanup;
-	if (cg_write(children[2], "memory.min", "500M"))
+	if (cg_write(children[2], "memory.min", "0"))
 		goto cleanup;
-	if (cg_write(children[3], "memory.min", "0"))
+	if (cg_write(children[3], "memory.min", "500M"))
 		goto cleanup;
 
 	attempts = 0;
@@ -328,7 +371,7 @@ static int test_memcg_min(const char *root)
 	if (!values_close(c[1], MB(17), 10))
 		goto cleanup;
 
-	if (!values_close(c[2], 0, 1))
+	if (c[3] != 0)
 		goto cleanup;
 
 	if (!cg_run(parent[2], alloc_anon, (void *)MB(170)))
@@ -365,8 +408,8 @@ cleanup:
  * A/B     memory.low = 50M,  memory.current = 50M
  * A/B/C   memory.low = 75M,  memory.current = 50M
  * A/B/D   memory.low = 25M,  memory.current = 50M
- * A/B/E   memory.low = 500M, memory.current = 0
- * A/B/F   memory.low = 0,    memory.current = 50M
+ * A/B/E   memory.low = 0,    memory.current = 50M
+ * A/B/F   memory.low = 500M, memory.current = 0
  *
  * Usages are pagecache.
  * Then it creates A/G an creates a significant
@@ -376,7 +419,7 @@ cleanup:
  * A/B    memory.current ~= 50M
  * A/B/   memory.current ~= 33M
  * A/B/D  memory.current ~= 17M
- * A/B/E  memory.current ~= 0
+ * A/B/F  memory.current ~= 0
  *
  * After that it tries to allocate more than there is
  * unprotected memory in A available,
@@ -440,7 +483,7 @@ static int test_memcg_low(const char *root)
 		if (cg_create(children[i]))
 			goto cleanup;
 
-		if (i == 2)
+		if (i > 2)
 			continue;
 
 		if (cg_run(children[i], alloc_pagecache_50M, (void *)(long)fd))
@@ -455,9 +498,9 @@ static int test_memcg_low(const char *root)
 		goto cleanup;
 	if (cg_write(children[1], "memory.low", "25M"))
 		goto cleanup;
-	if (cg_write(children[2], "memory.low", "500M"))
+	if (cg_write(children[2], "memory.low", "0"))
 		goto cleanup;
-	if (cg_write(children[3], "memory.low", "0"))
+	if (cg_write(children[3], "memory.low", "500M"))
 		goto cleanup;
 
 	if (cg_run(parent[2], alloc_anon, (void *)MB(148)))
@@ -475,7 +518,7 @@ static int test_memcg_low(const char *root)
 	if (!values_close(c[1], MB(17), 10))
 		goto cleanup;
 
-	if (!values_close(c[2], 0, 1))
+	if (c[3] != 0)
 		goto cleanup;
 
 	if (cg_run(parent[2], alloc_anon, (void *)MB(166))) {
@@ -485,15 +528,18 @@ static int test_memcg_low(const char *root)
 	}
 
 	for (i = 0; i < ARRAY_SIZE(children); i++) {
+		int no_low_events_index = 1;
+
 		oom = cg_read_key_long(children[i], "memory.events", "oom ");
 		low = cg_read_key_long(children[i], "memory.events", "low ");
 
 		if (oom)
 			goto cleanup;
-		if (i < 2 && low <= 0)
+		if (i <= no_low_events_index && low <= 0)
 			goto cleanup;
-		if (i >= 2 && low)
+		if (i > no_low_events_index && low)
 			goto cleanup;
+
 	}
 
 	ret = KSFT_PASS;
@@ -522,8 +568,13 @@ static int alloc_pagecache_max_30M(const char *cgroup, void *arg)
 {
 	size_t size = MB(50);
 	int ret = -1;
-	long current;
+	long current, high, max;
 	int fd;
+
+	high = cg_read_long(cgroup, "memory.high");
+	max = cg_read_long(cgroup, "memory.max");
+	if (high != MB(30) && max != MB(30))
+		return -1;
 
 	fd = get_temp_fd();
 	if (fd < 0)
@@ -533,7 +584,7 @@ static int alloc_pagecache_max_30M(const char *cgroup, void *arg)
 		goto cleanup;
 
 	current = cg_read_long(cgroup, "memory.current");
-	if (current <= MB(29) || current > MB(30))
+	if (!values_close(current, MB(30), 5))
 		goto cleanup;
 
 	ret = 0;
@@ -571,7 +622,7 @@ static int test_memcg_high(const char *root)
 	if (cg_write(memcg, "memory.high", "30M"))
 		goto cleanup;
 
-	if (cg_run(memcg, alloc_anon, (void *)MB(100)))
+	if (cg_run(memcg, alloc_anon, (void *)MB(31)))
 		goto cleanup;
 
 	if (!cg_run(memcg, alloc_pagecache_50M_check, NULL))
@@ -587,6 +638,82 @@ static int test_memcg_high(const char *root)
 	ret = KSFT_PASS;
 
 cleanup:
+	cg_destroy(memcg);
+	free(memcg);
+
+	return ret;
+}
+
+static int alloc_anon_mlock(const char *cgroup, void *arg)
+{
+	size_t size = (size_t)arg;
+	void *buf;
+
+	buf = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON,
+		   0, 0);
+	if (buf == MAP_FAILED)
+		return -1;
+
+	mlock(buf, size);
+	munmap(buf, size);
+	return 0;
+}
+
+/*
+ * This test checks that memory.high is able to throttle big single shot
+ * allocation i.e. large allocation within one kernel entry.
+ */
+static int test_memcg_high_sync(const char *root)
+{
+	int ret = KSFT_FAIL, pid, fd = -1;
+	char *memcg;
+	long pre_high, pre_max;
+	long post_high, post_max;
+
+	memcg = cg_name(root, "memcg_test");
+	if (!memcg)
+		goto cleanup;
+
+	if (cg_create(memcg))
+		goto cleanup;
+
+	pre_high = cg_read_key_long(memcg, "memory.events", "high ");
+	pre_max = cg_read_key_long(memcg, "memory.events", "max ");
+	if (pre_high < 0 || pre_max < 0)
+		goto cleanup;
+
+	if (cg_write(memcg, "memory.swap.max", "0"))
+		goto cleanup;
+
+	if (cg_write(memcg, "memory.high", "30M"))
+		goto cleanup;
+
+	if (cg_write(memcg, "memory.max", "140M"))
+		goto cleanup;
+
+	fd = memcg_prepare_for_wait(memcg);
+	if (fd < 0)
+		goto cleanup;
+
+	pid = cg_run_nowait(memcg, alloc_anon_mlock, (void *)MB(200));
+	if (pid < 0)
+		goto cleanup;
+
+	cg_wait_for(fd);
+
+	post_high = cg_read_key_long(memcg, "memory.events", "high ");
+	post_max = cg_read_key_long(memcg, "memory.events", "max ");
+	if (post_high < 0 || post_max < 0)
+		goto cleanup;
+
+	if (pre_high == post_high || pre_max != post_max)
+		goto cleanup;
+
+	ret = KSFT_PASS;
+
+cleanup:
+	if (fd >= 0)
+		close(fd);
 	cg_destroy(memcg);
 	free(memcg);
 
@@ -640,6 +767,111 @@ static int test_memcg_max(const char *root)
 cleanup:
 	cg_destroy(memcg);
 	free(memcg);
+
+	return ret;
+}
+
+/*
+ * This test checks that memory.reclaim reclaims the given
+ * amount of memory (from both anon and file, if possible).
+ */
+static int test_memcg_reclaim(const char *root)
+{
+	int ret = KSFT_FAIL, fd, retries;
+	char *memcg;
+	long current, expected_usage, to_reclaim;
+	char buf[64];
+
+	memcg = cg_name(root, "memcg_test");
+	if (!memcg)
+		goto cleanup;
+
+	if (cg_create(memcg))
+		goto cleanup;
+
+	current = cg_read_long(memcg, "memory.current");
+	if (current != 0)
+		goto cleanup;
+
+	fd = get_temp_fd();
+	if (fd < 0)
+		goto cleanup;
+
+	cg_run_nowait(memcg, alloc_pagecache_50M_noexit, (void *)(long)fd);
+
+	/*
+	 * If swap is enabled, try to reclaim from both anon and file, else try
+	 * to reclaim from file only.
+	 */
+	if (is_swap_enabled()) {
+		cg_run_nowait(memcg, alloc_anon_noexit, (void *) MB(50));
+		expected_usage = MB(100);
+	} else
+		expected_usage = MB(50);
+
+	/*
+	 * Wait until current usage reaches the expected usage (or we run out of
+	 * retries).
+	 */
+	retries = 5;
+	while (!values_close(cg_read_long(memcg, "memory.current"),
+			    expected_usage, 10)) {
+		if (retries--) {
+			sleep(1);
+			continue;
+		} else {
+			fprintf(stderr,
+				"failed to allocate %ld for memcg reclaim test\n",
+				expected_usage);
+			goto cleanup;
+		}
+	}
+
+	/*
+	 * Reclaim until current reaches 30M, this makes sure we hit both anon
+	 * and file if swap is enabled.
+	 */
+	retries = 5;
+	while (true) {
+		int err;
+
+		current = cg_read_long(memcg, "memory.current");
+		to_reclaim = current - MB(30);
+
+		/*
+		 * We only keep looping if we get EAGAIN, which means we could
+		 * not reclaim the full amount.
+		 */
+		if (to_reclaim <= 0)
+			goto cleanup;
+
+
+		snprintf(buf, sizeof(buf), "%ld", to_reclaim);
+		err = cg_write(memcg, "memory.reclaim", buf);
+		if (!err) {
+			/*
+			 * If writing succeeds, then the written amount should have been
+			 * fully reclaimed (and maybe more).
+			 */
+			current = cg_read_long(memcg, "memory.current");
+			if (!values_close(current, MB(30), 3) && current > MB(30))
+				goto cleanup;
+			break;
+		}
+
+		/* The kernel could not reclaim the full amount, try again. */
+		if (err == -EAGAIN && retries--)
+			continue;
+
+		/* We got an unexpected error or ran out of retries. */
+		goto cleanup;
+	}
+
+	ret = KSFT_PASS;
+cleanup:
+	cg_destroy(memcg);
+	free(memcg);
+	close(fd);
 
 	return ret;
 }
@@ -875,9 +1107,6 @@ static int tcp_client(const char *cgroup, unsigned short port)
 		if (current < 0 || sock < 0)
 			goto close_sk;
 
-		if (current < sock)
-			goto close_sk;
-
 		if (values_close(current, sock, 10)) {
 			ret = KSFT_PASS;
 			break;
@@ -964,6 +1193,187 @@ cleanup:
 	return ret;
 }
 
+/*
+ * This test disables swapping and tries to allocate anonymous memory
+ * up to OOM with memory.group.oom set. Then it checks that all
+ * processes in the leaf were killed. It also checks that oom_events
+ * were propagated to the parent level.
+ */
+static int test_memcg_oom_group_leaf_events(const char *root)
+{
+	int ret = KSFT_FAIL;
+	char *parent, *child;
+	long parent_oom_events;
+
+	parent = cg_name(root, "memcg_test_0");
+	child = cg_name(root, "memcg_test_0/memcg_test_1");
+
+	if (!parent || !child)
+		goto cleanup;
+
+	if (cg_create(parent))
+		goto cleanup;
+
+	if (cg_create(child))
+		goto cleanup;
+
+	if (cg_write(parent, "cgroup.subtree_control", "+memory"))
+		goto cleanup;
+
+	if (cg_write(child, "memory.max", "50M"))
+		goto cleanup;
+
+	if (cg_write(child, "memory.swap.max", "0"))
+		goto cleanup;
+
+	if (cg_write(child, "memory.oom.group", "1"))
+		goto cleanup;
+
+	cg_run_nowait(parent, alloc_anon_noexit, (void *) MB(60));
+	cg_run_nowait(child, alloc_anon_noexit, (void *) MB(1));
+	cg_run_nowait(child, alloc_anon_noexit, (void *) MB(1));
+	if (!cg_run(child, alloc_anon, (void *)MB(100)))
+		goto cleanup;
+
+	if (cg_test_proc_killed(child))
+		goto cleanup;
+
+	if (cg_read_key_long(child, "memory.events", "oom_kill ") <= 0)
+		goto cleanup;
+
+	parent_oom_events = cg_read_key_long(
+			parent, "memory.events", "oom_kill ");
+	/*
+	 * If memory_localevents is not enabled (the default), the parent should
+	 * count OOM events in its children groups. Otherwise, it should not
+	 * have observed any events.
+	 */
+	if (has_localevents && parent_oom_events != 0)
+		goto cleanup;
+	else if (!has_localevents && parent_oom_events <= 0)
+		goto cleanup;
+
+	ret = KSFT_PASS;
+
+cleanup:
+	if (child)
+		cg_destroy(child);
+	if (parent)
+		cg_destroy(parent);
+	free(child);
+	free(parent);
+
+	return ret;
+}
+
+/*
+ * This test disables swapping and tries to allocate anonymous memory
+ * up to OOM with memory.group.oom set. Then it checks that all
+ * processes in the parent and leaf were killed.
+ */
+static int test_memcg_oom_group_parent_events(const char *root)
+{
+	int ret = KSFT_FAIL;
+	char *parent, *child;
+
+	parent = cg_name(root, "memcg_test_0");
+	child = cg_name(root, "memcg_test_0/memcg_test_1");
+
+	if (!parent || !child)
+		goto cleanup;
+
+	if (cg_create(parent))
+		goto cleanup;
+
+	if (cg_create(child))
+		goto cleanup;
+
+	if (cg_write(parent, "memory.max", "80M"))
+		goto cleanup;
+
+	if (cg_write(parent, "memory.swap.max", "0"))
+		goto cleanup;
+
+	if (cg_write(parent, "memory.oom.group", "1"))
+		goto cleanup;
+
+	cg_run_nowait(parent, alloc_anon_noexit, (void *) MB(60));
+	cg_run_nowait(child, alloc_anon_noexit, (void *) MB(1));
+	cg_run_nowait(child, alloc_anon_noexit, (void *) MB(1));
+
+	if (!cg_run(child, alloc_anon, (void *)MB(100)))
+		goto cleanup;
+
+	if (cg_test_proc_killed(child))
+		goto cleanup;
+	if (cg_test_proc_killed(parent))
+		goto cleanup;
+
+	ret = KSFT_PASS;
+
+cleanup:
+	if (child)
+		cg_destroy(child);
+	if (parent)
+		cg_destroy(parent);
+	free(child);
+	free(parent);
+
+	return ret;
+}
+
+/*
+ * This test disables swapping and tries to allocate anonymous memory
+ * up to OOM with memory.group.oom set. Then it checks that all
+ * processes were killed except those set with OOM_SCORE_ADJ_MIN
+ */
+static int test_memcg_oom_group_score_events(const char *root)
+{
+	int ret = KSFT_FAIL;
+	char *memcg;
+	int safe_pid;
+
+	memcg = cg_name(root, "memcg_test_0");
+
+	if (!memcg)
+		goto cleanup;
+
+	if (cg_create(memcg))
+		goto cleanup;
+
+	if (cg_write(memcg, "memory.max", "50M"))
+		goto cleanup;
+
+	if (cg_write(memcg, "memory.swap.max", "0"))
+		goto cleanup;
+
+	if (cg_write(memcg, "memory.oom.group", "1"))
+		goto cleanup;
+
+	safe_pid = cg_run_nowait(memcg, alloc_anon_noexit, (void *) MB(1));
+	if (set_oom_adj_score(safe_pid, OOM_SCORE_ADJ_MIN))
+		goto cleanup;
+
+	cg_run_nowait(memcg, alloc_anon_noexit, (void *) MB(1));
+	if (!cg_run(memcg, alloc_anon, (void *)MB(100)))
+		goto cleanup;
+
+	if (cg_read_key_long(memcg, "memory.events", "oom_kill ") != 3)
+		goto cleanup;
+
+	if (kill(safe_pid, SIGKILL))
+		goto cleanup;
+
+	ret = KSFT_PASS;
+
+cleanup:
+	if (memcg)
+		cg_destroy(memcg);
+	free(memcg);
+
+	return ret;
+}
+
 #define T(x) { x, #x }
 struct memcg_test {
 	int (*fn)(const char *root);
@@ -974,17 +1384,22 @@ struct memcg_test {
 	T(test_memcg_min),
 	T(test_memcg_low),
 	T(test_memcg_high),
+	T(test_memcg_high_sync),
 	T(test_memcg_max),
+	T(test_memcg_reclaim),
 	T(test_memcg_oom_events),
 	T(test_memcg_swap_max),
 	T(test_memcg_sock),
+	T(test_memcg_oom_group_leaf_events),
+	T(test_memcg_oom_group_parent_events),
+	T(test_memcg_oom_group_score_events),
 };
 #undef T
 
 int main(int argc, char **argv)
 {
 	char root[PATH_MAX];
-	int i, ret = EXIT_SUCCESS;
+	int i, proc_status, ret = EXIT_SUCCESS;
 
 	if (cg_find_unified_root(root, sizeof(root)))
 		ksft_exit_skip("cgroup v2 isn't mounted\n");
@@ -995,6 +1410,20 @@ int main(int argc, char **argv)
 	 */
 	if (cg_read_strstr(root, "cgroup.controllers", "memory"))
 		ksft_exit_skip("memory controller isn't available\n");
+
+	if (cg_read_strstr(root, "cgroup.subtree_control", "memory"))
+		if (cg_write(root, "cgroup.subtree_control", "+memory"))
+			ksft_exit_skip("Failed to set memory controller\n");
+
+	proc_status = proc_mount_contains("memory_recursiveprot");
+	if (proc_status < 0)
+		ksft_exit_skip("Failed to query cgroup mount option\n");
+	has_recursiveprot = proc_status;
+
+	proc_status = proc_mount_contains("memory_localevents");
+	if (proc_status < 0)
+		ksft_exit_skip("Failed to query cgroup mount option\n");
+	has_localevents = proc_status;
 
 	for (i = 0; i < ARRAY_SIZE(tests); i++) {
 		switch (tests[i].fn(root)) {

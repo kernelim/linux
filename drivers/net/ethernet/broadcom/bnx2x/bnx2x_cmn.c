@@ -43,8 +43,7 @@ static void bnx2x_add_all_napi_cnic(struct bnx2x *bp)
 
 	/* Add NAPI objects */
 	for_each_rx_queue_cnic(bp, i) {
-		netif_napi_add(bp->dev, &bnx2x_fp(bp, i, napi),
-			       bnx2x_poll, NAPI_POLL_WEIGHT);
+		netif_napi_add(bp->dev, &bnx2x_fp(bp, i, napi), bnx2x_poll);
 	}
 }
 
@@ -54,8 +53,7 @@ static void bnx2x_add_all_napi(struct bnx2x *bp)
 
 	/* Add NAPI objects */
 	for_each_eth_queue(bp, i) {
-		netif_napi_add(bp->dev, &bnx2x_fp(bp, i, napi),
-			       bnx2x_poll, NAPI_POLL_WEIGHT);
+		netif_napi_add(bp->dev, &bnx2x_fp(bp, i, napi), bnx2x_poll);
 	}
 }
 
@@ -3419,12 +3417,9 @@ static int bnx2x_pkt_req_lin(struct bnx2x *bp, struct sk_buff *skb,
 
 			/* Headers length */
 			if (xmit_type & XMIT_GSO_ENC)
-				hlen = (int)(skb_inner_transport_header(skb) -
-					     skb->data) +
-					     inner_tcp_hdrlen(skb);
+				hlen = skb_inner_tcp_all_headers(skb);
 			else
-				hlen = (int)(skb_transport_header(skb) -
-					     skb->data) + tcp_hdrlen(skb);
+				hlen = skb_tcp_all_headers(skb);
 
 			/* Amount of data (w/o headers) on linear part of SKB*/
 			first_bd_sz = skb_headlen(skb) - hlen;
@@ -3532,15 +3527,13 @@ static u8 bnx2x_set_pbd_csum_enc(struct bnx2x *bp, struct sk_buff *skb,
 			ETH_TX_PARSE_BD_E2_TCP_HDR_LENGTH_DW_SHIFT) &
 			ETH_TX_PARSE_BD_E2_TCP_HDR_LENGTH_DW;
 
-		return skb_inner_transport_header(skb) +
-			inner_tcp_hdrlen(skb) - skb->data;
+		return skb_inner_tcp_all_headers(skb);
 	}
 
 	/* We support checksum offload for TCP and UDP only.
 	 * No need to pass the UDP header length - it's a constant.
 	 */
-	return skb_inner_transport_header(skb) +
-		sizeof(struct udphdr) - skb->data;
+	return skb_inner_transport_offset(skb) + sizeof(struct udphdr);
 }
 
 /**
@@ -3566,12 +3559,12 @@ static u8 bnx2x_set_pbd_csum_e2(struct bnx2x *bp, struct sk_buff *skb,
 			ETH_TX_PARSE_BD_E2_TCP_HDR_LENGTH_DW_SHIFT) &
 			ETH_TX_PARSE_BD_E2_TCP_HDR_LENGTH_DW;
 
-		return skb_transport_header(skb) + tcp_hdrlen(skb) - skb->data;
+		return skb_tcp_all_headers(skb);
 	}
 	/* We support checksum offload for TCP and UDP only.
 	 * No need to pass the UDP header length - it's a constant.
 	 */
-	return skb_transport_header(skb) + sizeof(struct udphdr) - skb->data;
+	return skb_transport_offset(skb) + sizeof(struct udphdr);
 }
 
 /* set FW indication according to inner or outer protocols if tunneled */

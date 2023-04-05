@@ -11,6 +11,8 @@ Linux Virtualization Support
    paravirt_ops
    guest-halt-polling
    ne_overview
+   coco/sev-guest
+   coco/tdx-guest
 
 .. only:: html and subproject
 

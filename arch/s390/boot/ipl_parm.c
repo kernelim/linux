@@ -152,10 +152,10 @@ static inline int has_ebcdic_char(const char *str)
 
 void setup_boot_command_line(void)
 {
-	COMMAND_LINE[ARCH_COMMAND_LINE_SIZE - 1] = 0;
+	COMMAND_LINE[COMMAND_LINE_SIZE - 1] = 0;
 	/* convert arch command line to ascii if necessary */
 	if (has_ebcdic_char(COMMAND_LINE))
-		EBCASC(COMMAND_LINE, ARCH_COMMAND_LINE_SIZE);
+		EBCASC(COMMAND_LINE, COMMAND_LINE_SIZE);
 	/* copy arch command line */
 	strcpy(early_command_line, strim(COMMAND_LINE));
 
@@ -178,7 +178,7 @@ static void parse_mem_opt(void)
 		args = next_arg(args, &param, &val);
 
 		if (!strcmp(param, "mem")) {
-			memory_end = memparse(val, NULL);
+			memory_end = round_down(memparse(val, NULL), PAGE_SIZE);
 			memory_end_set = 1;
 		}
 

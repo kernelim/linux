@@ -1,12 +1,72 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-2.0
-#please run as root
+# Please run as root
 
 # Kselftest framework requirement - SKIP code is 4.
 ksft_skip=4
 
 mnt=./huge
 exitcode=0
+
+usage() {
+       cat <<EOF
+usage: ${BASH_SOURCE[0]:-$0} [ -h | -t "<categories>"]
+  -t: specify specific categories to tests to run
+  -h: display this message
+
+The default behavior is to run all tests.
+
+Alternatively, specific groups tests can be run by passing a string
+to the -t argument containing one or more of the following categories
+separated by spaces:
+- mmap
+       tests for mmap(2)
+- gup_test
+       tests for gup using gup_test interface
+- userfaultfd
+       tests for  userfaultfd(2)
+- compaction
+       a test for the patch "Allow compaction of unevictable pages"
+- mlock
+       tests for mlock(2)
+- hugevm
+       tests for very large virtual address space
+- vmalloc
+       vmalloc smoke tests
+- hmm
+       hmm smoke tests
+- ksm
+       ksm tests that do not require >=2 NUMA nodes
+- ksm_numa
+       ksm tests that require >=2 NUMA nodes
+example: ./run_vmtests.sh -t "hmm mmap ksm"
+EOF
+       exit 0
+}
+
+while getopts "ht:" OPT; do
+       case ${OPT} in
+               "h") usage ;;
+               "t") VM_SELFTEST_ITEMS=${OPTARG} ;;
+       esac
+done
+shift $((OPTIND -1))
+
+# default behavior: run all tests
+VM_SELFTEST_ITEMS=${VM_SELFTEST_ITEMS:-default}
+
+test_selected() {
+       if [ "$VM_SELFTEST_ITEMS" == "default" ]; then
+               # If no VM_SELFTEST_ITEMS are specified, run all tests
+               return 0
+       fi
+       # If test selected argument is one of the test items
+       if [[ " ${VM_SELFTEST_ITEMS[*]} " =~ " ${1} " ]]; then
+               return 0
+       else
+	       return 1
+       fi
+}
 
 #get huge pagesize and freepages from /proc/meminfo
 while read name size unit; do
@@ -58,266 +118,99 @@ else
 	exit 1
 fi
 
-#filter 64bit architectures
+# filter 64bit architectures
 ARCH64STR="arm64 ia64 mips64 parisc64 ppc64 ppc64le riscv64 s390x sh64 sparc64 x86_64"
 if [ -z $ARCH ]; then
   ARCH=`uname -m 2>/dev/null | sed -e 's/aarch64.*/arm64/'`
 fi
 VADDR64=0
-echo "$ARCH64STR" | grep $ARCH && VADDR64=1
+echo "$ARCH64STR" | grep "$ARCH" &>/dev/null && VADDR64=1
 
-mkdir $mnt
-mount -t hugetlbfs none $mnt
+# Usage: run_test [test binary] [arbitrary test arguments...]
+run_test() {
+	if test_selected ${CATEGORY}; then
+		local title="running $*"
+		local sep=$(echo -n "$title" | tr "[:graph:][:space:]" -)
+		printf "%s\n%s\n%s\n" "$sep" "$title" "$sep"
 
-echo "---------------------"
-echo "running hugepage-mmap"
-echo "---------------------"
-./hugepage-mmap
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
+		"$@"
+		local ret=$?
+		if [ $ret -eq 0 ]; then
+			echo "[PASS]"
+		elif [ $ret -eq $ksft_skip ]; then
+			echo "[SKIP]"
+			exitcode=$ksft_skip
+		else
+			echo "[FAIL]"
+			exitcode=1
+		fi
+	fi # test_selected
+}
+
+# Mount directory for HugeTLB
+mkdir "$mnt"
+mount -t hugetlbfs none "$mnt"
+
+CATEGORY="hugetlb" run_test ./hugepage-mmap
 
 shmmax=`cat /proc/sys/kernel/shmmax`
 shmall=`cat /proc/sys/kernel/shmall`
 echo 268435456 > /proc/sys/kernel/shmmax
 echo 4194304 > /proc/sys/kernel/shmall
-echo "--------------------"
-echo "running hugepage-shm"
-echo "--------------------"
-./hugepage-shm
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
-echo $shmmax > /proc/sys/kernel/shmmax
-echo $shmall > /proc/sys/kernel/shmall
+CATEGORY="hugetlb" run_test ./hugepage-shm
+echo "$shmmax" > /proc/sys/kernel/shmmax
+echo "$shmall" > /proc/sys/kernel/shmall
 
-echo "-------------------"
-echo "running map_hugetlb"
-echo "-------------------"
-./map_hugetlb
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
+CATEGORY="hugetlb" run_test ./map_hugetlb
+
+if test_selected "hugetlb"; then
+	echo "NOTE: The above hugetlb tests provide minimal coverage.  Use"
+	echo "      https://github.com/libhugetlbfs/libhugetlbfs.git for"
+	echo "      hugetlb regression testing."
 fi
 
-echo "NOTE: The above hugetlb tests provide minimal coverage.  Use"
-echo "      https://github.com/libhugetlbfs/libhugetlbfs.git for"
-echo "      hugetlb regression testing."
+CATEGORY="mmap" run_test ./map_fixed_noreplace
 
-echo "------------------------------------------------------"
-echo "running: gup_test -u # get_user_pages_fast() benchmark"
-echo "------------------------------------------------------"
-./gup_test -u
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
+# get_user_pages_fast() benchmark
+CATEGORY="gup_test" run_test ./gup_test -u
+# pin_user_pages_fast() benchmark
+CATEGORY="gup_test" run_test ./gup_test -a
+# Dump pages 0, 19, and 4096, using pin_user_pages:
+CATEGORY="gup_test" run_test ./gup_test -ct -F 0x1 0 19 0x1000
 
-echo "------------------------------------------------------"
-echo "running: gup_test -a # pin_user_pages_fast() benchmark"
-echo "------------------------------------------------------"
-./gup_test -a
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
-
-echo "------------------------------------------------------------"
-echo "# Dump pages 0, 19, and 4096, using pin_user_pages:"
-echo "running: gup_test -ct -F 0x1 0 19 0x1000 # dump_page() test"
-echo "------------------------------------------------------------"
-./gup_test -ct -F 0x1 0 19 0x1000
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
-
-echo "---------------------------"
-echo "running map_fixed_noreplace"
-echo "---------------------------"
-./map_fixed_noreplace
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
-
-echo "-------------------"
-echo "running userfaultfd"
-echo "-------------------"
-./userfaultfd anon 20 16
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
-
-echo "---------------------------"
-echo "running userfaultfd_hugetlb"
-echo "---------------------------"
+CATEGORY="userfaultfd" run_test ./userfaultfd anon 20 16
 # Test requires source and destination huge pages.  Size of source
 # (half_ufd_size_MB) is passed as argument to test.
-./userfaultfd hugetlb $half_ufd_size_MB 32 $mnt/ufd_test_file
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
-rm -f $mnt/ufd_test_file
+CATEGORY="userfaultfd" run_test ./userfaultfd hugetlb "$half_ufd_size_MB" 32 $mnt/ufd_test_file
+CATEGORY="userfaultfd" run_test ./userfaultfd shmem 20 16
 
-echo "-------------------------"
-echo "running userfaultfd_shmem"
-echo "-------------------------"
-./userfaultfd shmem 20 16
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
+#cleanup hugeTLB
+umount "$mnt"
+rm -rf "$mnt"
+echo "$nr_hugepgs" > /proc/sys/vm/nr_hugepages
 
-#cleanup
-umount $mnt
-rm -rf $mnt
-echo $nr_hugepgs > /proc/sys/vm/nr_hugepages
+CATEGORY="compaction" run_test ./compaction_test
 
-echo "-----------------------"
-echo "running compaction_test"
-echo "-----------------------"
-./compaction_test
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
+CATEGORY="mlock" run_test sudo -u nobody ./on-fault-limit
 
-echo "----------------------"
-echo "running on-fault-limit"
-echo "----------------------"
-sudo -u nobody ./on-fault-limit
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
+CATEGORY="mmap" run_test ./map_populate
 
-echo "--------------------"
-echo "running map_populate"
-echo "--------------------"
-./map_populate
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
+CATEGORY="mlock" run_test ./mlock-random-test
 
-echo "-------------------------"
-echo "running mlock-random-test"
-echo "-------------------------"
-./mlock-random-test
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
+CATEGORY="mlock" run_test ./mlock2-tests
 
-echo "--------------------"
-echo "running mlock2-tests"
-echo "--------------------"
-./mlock2-tests
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
-
-echo "-----------------"
-echo "running thuge-gen"
-echo "-----------------"
-./thuge-gen
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
+CATEGORY="hugetlb" run_test ./thuge-gen
 
 if [ $VADDR64 -ne 0 ]; then
-echo "-----------------------------"
-echo "running virtual_address_range"
-echo "-----------------------------"
-./virtual_address_range
-if [ $? -ne 0 ]; then
-	echo "[FAIL]"
-	exitcode=1
-else
-	echo "[PASS]"
-fi
+	CATEGORY="hugevm" run_test ./virtual_address_range
 
-echo "-----------------------------"
-echo "running virtual address 128TB switch test"
-echo "-----------------------------"
-./va_128TBswitch
-if [ $? -ne 0 ]; then
-    echo "[FAIL]"
-    exitcode=1
-else
-    echo "[PASS]"
-fi
+	# virtual address 128TB switch test
+	CATEGORY="hugevm" run_test ./va_128TBswitch
 fi # VADDR64
 
-echo "------------------------------------"
-echo "running vmalloc stability smoke test"
-echo "------------------------------------"
-./test_vmalloc.sh smoke
-ret_val=$?
+# vmalloc stability smoke test
+CATEGORY="vmalloc" run_test ./test_vmalloc.sh smoke
 
-if [ $ret_val -eq 0 ]; then
-	echo "[PASS]"
-elif [ $ret_val -eq $ksft_skip ]; then
-	 echo "[SKIP]"
-	 exitcode=$ksft_skip
-else
-	echo "[FAIL]"
-	exitcode=1
-fi
-
-echo "------------------------------------"
-echo "running HMM smoke test"
-echo "------------------------------------"
-./test_hmm.sh smoke
-ret_val=$?
-
-if [ $ret_val -eq 0 ]; then
-	echo "[PASS]"
-elif [ $ret_val -eq $ksft_skip ]; then
-	echo "[SKIP]"
-	exitcode=$ksft_skip
-else
-	echo "[FAIL]"
-	exitcode=1
-fi
+CATEGORY="hmm" run_test ./test_hmm.sh smoke
 
 exit $exitcode

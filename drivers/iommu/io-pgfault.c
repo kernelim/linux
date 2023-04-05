@@ -114,7 +114,7 @@ iopf_handle_single(struct iopf_fault *iopf)
 		/* Access fault */
 		goto out_put_mm;
 
-	ret = handle_mm_fault(vma, prm->addr, fault_flags);
+	ret = handle_mm_fault(vma, prm->addr, fault_flags, NULL);
 	status = ret & VM_FAULT_ERROR ? IOMMU_PAGE_RESP_INVALID :
 		IOMMU_PAGE_RESP_SUCCESS;
 

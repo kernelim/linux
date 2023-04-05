@@ -76,7 +76,7 @@ enum hugetlb_param {
 static const struct fs_parameter_spec hugetlb_fs_parameters[] = {
 	fsparam_u32   ("gid",		Opt_gid),
 	fsparam_string("min_size",	Opt_min_size),
-	fsparam_u32   ("mode",		Opt_mode),
+	fsparam_u32oct("mode",		Opt_mode),
 	fsparam_string("nr_inodes",	Opt_nr_inodes),
 	fsparam_string("pagesize",	Opt_pagesize),
 	fsparam_string("size",		Opt_size),
@@ -139,7 +139,7 @@ static int hugetlbfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 	 * already been checked by prepare_hugepage_range.  If you add
 	 * any error returns here, do so after setting VM_HUGETLB, so
 	 * is_vm_hugetlb_page tests below unmap_region go the right
-	 * way when do_mmap_pgoff unwinds (may be important on powerpc
+	 * way when do_mmap unwinds (may be important on powerpc
 	 * and ia64).
 	 */
 	vma->vm_flags |= VM_HUGETLB | VM_DONTEXPAND;

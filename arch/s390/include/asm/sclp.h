@@ -86,6 +86,11 @@ struct sclp_info {
 	unsigned char has_diag318 : 1;
 	unsigned char has_sipl : 1;
 	unsigned char has_dirq : 1;
+	unsigned char has_iplcc : 1;
+	unsigned char has_zpci_lsi : 1;
+	unsigned char has_aisii : 1;
+	unsigned char has_aeni : 1;
+	unsigned char has_aisi : 1;
 	unsigned int ibc;
 	unsigned int mtid;
 	unsigned int mtid_cp;
@@ -113,6 +118,9 @@ struct zpci_report_error_header {
 	u8 data[0];	/* Subsequent Data passed verbatim to SCLP ET 24 */
 } __packed;
 
+extern char *sclp_early_sccb;
+
+void sclp_early_set_buffer(void *sccb);
 int sclp_early_read_info(void);
 int sclp_early_read_storage_info(void);
 int sclp_early_get_core_info(struct sclp_core_info *info);

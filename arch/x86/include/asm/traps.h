@@ -31,6 +31,9 @@ asmlinkage void general_protection(void);
 #if IS_ENABLED(CONFIG_KVM_INTEL)
 asmlinkage void nmi_noist(void);
 #endif
+#ifdef CONFIG_INTEL_TDX_GUEST
+asmlinkage void virtualization_exception(void);
+#endif
 asmlinkage void page_fault(void);
 asmlinkage void async_page_fault(void);
 asmlinkage void spurious_interrupt_bug(void);
@@ -130,5 +133,7 @@ void __noreturn handle_stack_overflow(const char *message,
 				      struct pt_regs *regs,
 				      unsigned long fault_address);
 #endif
+
+dotraplinkage void do_virtualization_exception(struct pt_regs *regs, long error_code);
 
 #endif /* _ASM_X86_TRAPS_H */

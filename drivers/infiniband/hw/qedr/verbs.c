@@ -134,7 +134,8 @@ int qedr_query_device(struct ib_device *ibdev,
 	attr->max_qp_wr = max_t(u32, qattr->max_sqe, qattr->max_rqe);
 	attr->device_cap_flags = IB_DEVICE_CURR_QP_STATE_MOD |
 	    IB_DEVICE_RC_RNR_NAK_GEN |
-	    IB_DEVICE_LOCAL_DMA_LKEY | IB_DEVICE_MEM_MGT_EXTENSIONS;
+	    IB_DEVICE_MEM_MGT_EXTENSIONS;
+	attr->kernel_cap_flags = IBK_LOCAL_DMA_LKEY;
 
 	if (!rdma_protocol_iwarp(&dev->ibdev, 1))
 		attr->device_cap_flags |= IB_DEVICE_XRC;
@@ -3084,7 +3085,7 @@ static struct qedr_mr *__qedr_alloc_mr(struct ib_pd *ibpd,
 		else
 			DP_ERR(dev, "roce alloc tid returned error %d\n", rc);
 
-		goto err0;
+		goto err1;
 	}
 
 	/* Index only, 18 bit long, lkey = itid << 8 | key */
@@ -3108,7 +3109,7 @@ static struct qedr_mr *__qedr_alloc_mr(struct ib_pd *ibpd,
 	rc = dev->ops->rdma_register_tid(dev->rdma_ctx, &mr->hw_mr);
 	if (rc) {
 		DP_ERR(dev, "roce register tid returned an error %d\n", rc);
-		goto err1;
+		goto err2;
 	}
 
 	mr->ibmr.lkey = mr->hw_mr.itid << 8 | mr->hw_mr.key;
@@ -3117,8 +3118,10 @@ static struct qedr_mr *__qedr_alloc_mr(struct ib_pd *ibpd,
 	DP_DEBUG(dev, QEDR_MSG_MR, "alloc frmr: %x\n", mr->ibmr.lkey);
 	return mr;
 
-err1:
+err2:
 	dev->ops->rdma_free_tid(dev->rdma_ctx, mr->hw_mr.itid);
+err1:
+	qedr_free_pbl(dev, &mr->info.pbl_info, mr->info.pbl_table);
 err0:
 	kfree(mr);
 	return ERR_PTR(rc);

@@ -65,7 +65,10 @@
 #include <asm/mpx.h>
 #include <asm/vm86.h>
 #include <asm/umip.h>
+#include <asm/insn.h>
+#include <asm/insn-eval.h>
 #include <asm/vdso.h>
+#include <asm/tdx.h>
 
 #ifdef CONFIG_X86_64
 #include <asm/x86_init.h>
@@ -526,11 +529,84 @@ static bool try_fixup_enqcmd_gp(void)
 #endif
 }
 
-dotraplinkage void
-do_general_protection(struct pt_regs *regs, long error_code)
+enum kernel_gp_hint {
+	GP_NO_HINT,
+	GP_NON_CANONICAL,
+	GP_CANONICAL
+};
+
+/*
+ * When an uncaught #GP occurs, try to determine the memory address accessed by
+ * the instruction and return that address to the caller. Also, try to figure
+ * out whether any part of the access to that address was non-canonical.
+ */
+static enum kernel_gp_hint get_kernel_gp_address(struct pt_regs *regs,
+						 unsigned long *addr)
 {
-	const char *desc = "general protection fault";
-	struct task_struct *tsk;
+	u8 insn_buf[MAX_INSN_SIZE];
+	struct insn insn;
+
+	if (probe_kernel_read(insn_buf, (void *)regs->ip, MAX_INSN_SIZE))
+		return GP_NO_HINT;
+
+	kernel_insn_init(&insn, insn_buf, MAX_INSN_SIZE);
+	insn_get_modrm(&insn);
+	insn_get_sib(&insn);
+
+	*addr = (unsigned long)insn_get_addr_ref(&insn, regs);
+	if (*addr == -1UL)
+		return GP_NO_HINT;
+
+#ifdef CONFIG_X86_64
+	/*
+	 * Check that:
+	 *  - the operand is not in the kernel half
+	 *  - the last byte of the operand is not in the user canonical half
+	 */
+	if (*addr < ~__VIRTUAL_MASK &&
+	    *addr + insn.opnd_bytes - 1 > __VIRTUAL_MASK)
+		return GP_NON_CANONICAL;
+#endif
+
+	return GP_CANONICAL;
+}
+
+#define GPFSTR "general protection fault"
+
+static bool gp_try_fixup_and_notify(struct pt_regs *regs, int trapnr,
+				    unsigned long error_code, const char *str)
+{
+	if (fixup_exception(regs, trapnr))
+		return true;
+
+	current->thread.error_code = error_code;
+	current->thread.trap_nr = trapnr;
+
+	/*
+	 * To be potentially processing a kprobe fault and to trust the result
+	 * from kprobe_running(), we have to be non-preemptible.
+	 */
+	if (!preemptible() && kprobe_running() &&
+	    kprobe_fault_handler(regs, trapnr))
+		return true;
+
+	return notify_die(DIE_GPF, str, regs, error_code, trapnr, SIGSEGV) == NOTIFY_STOP;
+}
+
+static void gp_user_force_sig_segv(struct pt_regs *regs, int trapnr,
+				   unsigned long error_code, const char *str)
+{
+	current->thread.error_code = error_code;
+	current->thread.trap_nr = trapnr;
+	show_signal(current, SIGSEGV, "", str, regs, error_code);
+	force_sig(SIGSEGV, current);
+}
+
+dotraplinkage void do_general_protection(struct pt_regs *regs, long error_code)
+{
+	char desc[sizeof(GPFSTR) + 50 + 2*sizeof(unsigned long) + 1] = GPFSTR;
+	enum kernel_gp_hint hint = GP_NO_HINT;
+	unsigned long gp_addr;
 
 	RCU_LOCKDEP_WARN(!rcu_is_watching(), "entry code didn't wake RCU");
 
@@ -550,28 +626,37 @@ do_general_protection(struct pt_regs *regs, long error_code)
 		return;
 	}
 
-	tsk = current;
-	if (!user_mode(regs)) {
-		if (fixup_exception(regs, X86_TRAP_GP))
+	if (user_mode(regs)) {
+		if (fixup_vdso_exception(regs, X86_TRAP_GP, error_code, 0))
 			return;
 
-		tsk->thread.error_code = error_code;
-		tsk->thread.trap_nr = X86_TRAP_GP;
-		if (notify_die(DIE_GPF, desc, regs, error_code,
-			       X86_TRAP_GP, SIGSEGV) != NOTIFY_STOP)
-			die(desc, regs, error_code);
+		gp_user_force_sig_segv(regs, X86_TRAP_GP, error_code, desc);
 		return;
 	}
 
-	tsk->thread.error_code = error_code;
-	tsk->thread.trap_nr = X86_TRAP_GP;
-
-	if (fixup_vdso_exception(regs, X86_TRAP_GP, error_code, 0))
+	if (gp_try_fixup_and_notify(regs, X86_TRAP_GP, error_code, desc))
 		return;
 
-	show_signal(tsk, SIGSEGV, "", desc, regs, error_code);
+	if (error_code)
+		snprintf(desc, sizeof(desc), "segment-related " GPFSTR);
+	else
+		hint = get_kernel_gp_address(regs, &gp_addr);
 
-	force_sig(SIGSEGV, tsk);
+	if (hint != GP_NO_HINT)
+		snprintf(desc, sizeof(desc), GPFSTR ", %s 0x%lx",
+			 (hint == GP_NON_CANONICAL) ? "probably for non-canonical address"
+						    : "maybe for address",
+			 gp_addr);
+
+	/*
+	 * KASAN is interested only in the non-canonical case, clear it
+	 * otherwise.
+	 */
+	if (hint != GP_NON_CANONICAL)
+		gp_addr = 0;
+
+	die_addr(desc, regs, error_code, gp_addr);
+
 }
 NOKPROBE_SYMBOL(do_general_protection);
 
@@ -1031,6 +1116,91 @@ do_device_not_available(struct pt_regs *regs, long error_code)
 }
 NOKPROBE_SYMBOL(do_device_not_available);
 
+#ifdef CONFIG_INTEL_TDX_GUEST
+
+#define VE_FAULT_STR "VE fault"
+
+static void ve_raise_fault(struct pt_regs *regs, long error_code)
+{
+	if (user_mode(regs)) {
+		gp_user_force_sig_segv(regs, X86_TRAP_VE, error_code, VE_FAULT_STR);
+		return;
+	}
+
+	if (gp_try_fixup_and_notify(regs, X86_TRAP_VE, error_code, VE_FAULT_STR))
+		return;
+
+	die_addr(VE_FAULT_STR, regs, error_code, 0);
+}
+
+/*
+ * Virtualization Exceptions (#VE) are delivered to TDX guests due to
+ * specific guest actions which may happen in either user space or the
+ * kernel:
+ *
+ *  * Specific instructions (WBINVD, for example)
+ *  * Specific MSR accesses
+ *  * Specific CPUID leaf accesses
+ *  * Access to specific guest physical addresses
+ *
+ * In the settings that Linux will run in, virtualization exceptions are
+ * never generated on accesses to normal, TD-private memory that has been
+ * accepted (by BIOS or with tdx_enc_status_changed()).
+ *
+ * Syscall entry code has a critical window where the kernel stack is not
+ * yet set up. Any exception in this window leads to hard to debug issues
+ * and can be exploited for privilege escalation. Exceptions in the NMI
+ * entry code also cause issues. Returning from the exception handler with
+ * IRET will re-enable NMIs and nested NMI will corrupt the NMI stack.
+ *
+ * For these reasons, the kernel avoids #VEs during the syscall gap and
+ * the NMI entry code. Entry code paths do not access TD-shared memory,
+ * MMIO regions, use #VE triggering MSRs, instructions, or CPUID leaves
+ * that might generate #VE. VMM can remove memory from TD at any point,
+ * but access to unaccepted (or missing) private memory leads to VM
+ * termination, not to #VE.
+ *
+ * Similarly to page faults and breakpoints, #VEs are allowed in NMI
+ * handlers once the kernel is ready to deal with nested NMIs.
+ *
+ * During #VE delivery, all interrupts, including NMIs, are blocked until
+ * TDGETVEINFO is called. It prevents #VE nesting until the kernel reads
+ * the VE info.
+ *
+ * If a guest kernel action which would normally cause a #VE occurs in
+ * the interrupt-disabled region before TDGETVEINFO, a #DF (fault
+ * exception) is delivered to the guest which will result in an oops.
+ *
+ * The entry code has been audited carefully for following these expectations.
+ * Changes in the entry code have to be audited for correctness vs. this
+ * aspect. Similarly to #PF, #VE in these places will expose kernel to
+ * privilege escalation or may lead to random crashes.
+ */
+dotraplinkage void do_virtualization_exception(struct pt_regs *regs, long error_code)
+{
+	struct ve_info ve;
+
+	/*
+	 * NMIs/Machine-checks/Interrupts will be in a disabled state
+	 * till TDGETVEINFO TDCALL is executed. This ensures that VE
+	 * info cannot be overwritten by a nested #VE.
+	 */
+	tdx_get_ve_info(&ve);
+
+	cond_local_irq_enable(regs);
+
+	/*
+	 * If tdx_handle_virt_exception() could not process
+	 * it successfully, treat it as #GP(0) and handle it.
+	 */
+	if (!tdx_handle_virt_exception(regs, &ve))
+		ve_raise_fault(regs, 0);
+
+	cond_local_irq_disable(regs);
+}
+
+#endif
+
 #ifdef CONFIG_X86_32
 dotraplinkage void do_iret_error(struct pt_regs *regs, long error_code)
 {
@@ -1053,23 +1223,11 @@ void __init trap_init(void)
 	/* Init GHCB memory pages when running as an SEV-ES guest */
 	sev_es_init_vc_handling();
 
+	/* Initialize TSS before setting up traps so ISTs work */
+	cpu_init_exception_handling();
+	/* Setup traps as cpu_init() might #GP */
 	idt_setup_traps();
-
-	/*
-	 * Set the IDT descriptor to a fixed read-only location, so that the
-	 * "sidt" instruction will not leak the location of the kernel, and
-	 * to defend the IDT against arbitrary memory write vulnerabilities.
-	 * It will be reloaded in cpu_init() */
-	cea_set_pte(CPU_ENTRY_AREA_RO_IDT_VADDR, __pa_symbol(idt_table),
-		    PAGE_KERNEL_RO);
-	idt_descr.address = CPU_ENTRY_AREA_RO_IDT;
-
-	/*
-	 * Should be a barrier for any external CPU state:
-	 */
 	cpu_init();
-
-	idt_setup_ist_traps();
 
 	idt_setup_debugidt_traps();
 }

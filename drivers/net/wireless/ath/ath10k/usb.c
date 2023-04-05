@@ -1014,8 +1014,7 @@ static int ath10k_usb_probe(struct usb_interface *interface,
 		return -ENOMEM;
 	}
 
-	netif_napi_add(&ar->napi_dev, &ar->napi, ath10k_usb_napi_poll,
-		       ATH10K_NAPI_BUDGET);
+	netif_napi_add(&ar->napi_dev, &ar->napi, ath10k_usb_napi_poll);
 
 	usb_get_dev(dev);
 	vendor_id = le16_to_cpu(dev->descriptor.idVendor);
@@ -1038,6 +1037,7 @@ static int ath10k_usb_probe(struct usb_interface *interface,
 	bus_params.dev_type = ATH10K_DEV_TYPE_HL;
 	/* TODO: don't know yet how to get chip_id with USB */
 	bus_params.chip_id = 0;
+	bus_params.hl_msdu_ids = true;
 	ret = ath10k_core_register(ar, &bus_params);
 	if (ret) {
 		ath10k_warn(ar, "failed to register driver core: %d\n", ret);

@@ -852,7 +852,7 @@ static void *arm_spe_pmu_setup_aux(struct perf_event *event, void **pages,
 	 * parts and give userspace a fighting chance of getting some
 	 * useful data out of it.
 	 */
-	if (!nr_pages || (snapshot && (nr_pages & 1)))
+	if (snapshot && (nr_pages & 1))
 		return NULL;
 
 	if (cpu == -1)
@@ -1046,6 +1046,9 @@ static void __arm_spe_pmu_dev_probe(void *info)
 		/* Fallthrough */
 	case 2:
 		spe_pmu->counter_sz = 12;
+		break;
+	case 3:
+		spe_pmu->counter_sz = 16;
 	}
 
 	dev_info(dev,

@@ -108,6 +108,13 @@
 #define __weak		__attribute__((weak))
 #define __alias(symbol)	__attribute__((alias(#symbol)))
 
+/*
+ * Used by functions that use '__builtin_return_address'. These function
+ * don't want to be splited or made inline, which can make
+ * the '__builtin_return_address' get unexpected address.
+ */
+#define __fix_address noinline __noclone
+
 #ifdef RETPOLINE
 #define __noretpoline __attribute__((indirect_branch("keep")))
 #endif

@@ -27,6 +27,7 @@
 
 #define get_ds()	(KERNEL_DS)
 #define get_fs()	(current->thread.addr_limit)
+
 static inline void set_fs(mm_segment_t fs)
 {
 	current->thread.addr_limit = fs;

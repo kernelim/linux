@@ -159,6 +159,7 @@ int seg6_lookup_nexthop(struct sk_buff *skb, struct in6_addr *nhaddr,
 	struct rt6_info *rt;
 	struct flowi6 fl6;
 
+	memset(&fl6, 0, sizeof(fl6));
 	fl6.flowi6_iif = skb->dev->ifindex;
 	fl6.daddr = nhaddr ? *nhaddr : hdr->daddr;
 	fl6.saddr = hdr->saddr;

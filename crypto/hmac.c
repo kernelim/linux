@@ -20,6 +20,7 @@
 #include <crypto/internal/hash.h>
 #include <crypto/scatterwalk.h>
 #include <linux/err.h>
+#include <linux/fips.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -55,6 +56,9 @@ static int hmac_setkey(struct crypto_shash *parent,
 	struct crypto_shash *hash = ctx->hash;
 	SHASH_DESC_ON_STACK(shash, hash);
 	unsigned int i;
+
+	if (fips_enabled && (keylen < 112 / 8))
+		return -EINVAL;
 
 	shash->tfm = hash;
 	shash->flags = crypto_shash_get_flags(parent)

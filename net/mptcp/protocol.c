@@ -1282,6 +1282,9 @@ static int mptcp_sendmsg_frag(struct sock *sk, struct sock *ssk,
 			 info->limit > dfrag->data_len))
 		return 0;
 
+	if (unlikely(!__tcp_can_send(ssk)))
+		return -EAGAIN;
+
 	/* compute send limit */
 	info->mss_now = tcp_send_mss(ssk, &info->size_goal, info->flags);
 	copy = info->size_goal;
@@ -1445,7 +1448,8 @@ static struct sock *mptcp_subflow_get_send(struct mptcp_sock *msk)
 	if (__mptcp_check_fallback(msk)) {
 		if (!msk->first)
 			return NULL;
-		return sk_stream_memory_free(msk->first) ? msk->first : NULL;
+		return __tcp_can_send(msk->first) &&
+		       sk_stream_memory_free(msk->first) ? msk->first : NULL;
 	}
 
 	/* re-use last subflow, if the burst allow that */
@@ -1570,6 +1574,8 @@ void __mptcp_push_pending(struct sock *sk, unsigned int flags)
 
 			ret = mptcp_sendmsg_frag(sk, ssk, dfrag, &info);
 			if (ret <= 0) {
+				if (ret == -EAGAIN)
+					continue;
 				mptcp_push_release(ssk, &info);
 				goto out;
 			}
@@ -2240,11 +2246,7 @@ static void __mptcp_close_ssk(struct sock *sk, struct sock *ssk,
 
 	lock_sock_nested(ssk, SINGLE_DEPTH_NESTING);
 
-	/* if we are invoked by the msk cleanup code, the subflow is
-	 * already orphaned
-	 */
-	if (ssk->sk_socket)
-		sock_orphan(ssk);
+	sock_orphan(ssk);
 
 	need_push = __mptcp_retransmit_pending_data(sk);
 	subflow->disposable = 1;
@@ -2553,7 +2555,7 @@ static void __mptcp_clear_xmit(struct sock *sk)
 		dfrag_clear(sk, dfrag);
 }
 
-static void mptcp_cancel_work(struct sock *sk)
+void mptcp_cancel_work(struct sock *sk)
 {
 	struct mptcp_sock *msk = mptcp_sk(sk);
 
@@ -2671,25 +2673,15 @@ static void __mptcp_wr_shutdown(struct sock *sk)
 
 static void __mptcp_destroy_sock(struct sock *sk)
 {
-	struct mptcp_subflow_context *subflow, *tmp;
 	struct mptcp_sock *msk = mptcp_sk(sk);
-	LIST_HEAD(conn_list);
 
 	pr_debug("msk=%p", msk);
 
 	might_sleep();
 
-	/* join list will be eventually flushed (with rst) at sock lock release time*/
-	list_splice_init(&msk->conn_list, &conn_list);
-
 	sk_stop_timer(sk, &msk->sk.icsk_retransmit_timer);
 	sk_stop_timer(sk, &sk->sk_timer);
 	msk->pm.status = 0;
-
-	list_for_each_entry_safe(subflow, tmp, &conn_list, node) {
-		struct sock *ssk = mptcp_subflow_tcp_sock(subflow);
-		__mptcp_close_ssk(sk, ssk, subflow);
-	}
 
 	sk->sk_prot->destroy(sk);
 
@@ -2703,12 +2695,11 @@ static void __mptcp_destroy_sock(struct sock *sk)
 	sock_put(sk);
 }
 
-static void mptcp_close(struct sock *sk, long timeout)
+bool __mptcp_close(struct sock *sk, long timeout)
 {
 	struct mptcp_subflow_context *subflow;
 	bool do_cancel_work = false;
 
-	lock_sock(sk);
 	sk->sk_shutdown = SHUTDOWN_MASK;
 
 	if ((1 << sk->sk_state) & (TCPF_LISTEN | TCPF_CLOSE)) {
@@ -2728,7 +2719,11 @@ cleanup:
 		struct sock *ssk = mptcp_subflow_tcp_sock(subflow);
 		bool slow = lock_sock_fast_nested(ssk);
 
-		sock_orphan(ssk);
+		/* detach from the parent socket, but allow data_ready to
+		 * push incoming data into the mptcp stack, to properly ack it
+		 */
+		ssk->sk_socket = NULL;
+		ssk->sk_wq = NULL;
 		unlock_sock_fast(ssk, slow);
 	}
 	sock_orphan(sk);
@@ -2741,6 +2736,17 @@ cleanup:
 	} else {
 		sk_reset_timer(sk, &sk->sk_timer, jiffies + TCP_TIMEWAIT_LEN);
 	}
+
+	return do_cancel_work;
+}
+
+static void mptcp_close(struct sock *sk, long timeout)
+{
+	bool do_cancel_work;
+
+	lock_sock(sk);
+
+	do_cancel_work = __mptcp_close(sk, timeout);
 	release_sock(sk);
 	if (do_cancel_work)
 		mptcp_cancel_work(sk);
@@ -2916,11 +2922,16 @@ out:
 	return newsk;
 }
 
-void mptcp_destroy_common(struct mptcp_sock *msk)
+void mptcp_destroy_common(struct mptcp_sock *msk, unsigned int flags)
 {
+	struct mptcp_subflow_context *subflow, *tmp;
 	struct sock *sk = (struct sock *)msk;
 
 	__mptcp_clear_xmit(sk);
+
+	/* join list will be eventually flushed (with rst) at sock lock release time */
+	list_for_each_entry_safe(subflow, tmp, &msk->conn_list, node)
+		__mptcp_close_ssk(sk, mptcp_subflow_tcp_sock(subflow), subflow);
 
 	/* move to sk_receive_queue, sk_stream_kill_queues will purge it */
 	skb_queue_splice_tail_init(&msk->receive_queue, &sk->sk_receive_queue);
@@ -2934,7 +2945,7 @@ static void mptcp_destroy(struct sock *sk)
 {
 	struct mptcp_sock *msk = mptcp_sk(sk);
 
-	mptcp_destroy_common(msk);
+	mptcp_destroy_common(msk, 0);
 	sk_sockets_allocated_dec(sk);
 }
 
@@ -3552,8 +3563,8 @@ void __init mptcp_proto_init(void)
 	for_each_possible_cpu(cpu) {
 		delegated = per_cpu_ptr(&mptcp_delegated_actions, cpu);
 		INIT_LIST_HEAD(&delegated->head);
-		netif_tx_napi_add(&mptcp_napi_dev, &delegated->napi, mptcp_napi_poll,
-				  NAPI_POLL_WEIGHT);
+		netif_napi_add_tx(&mptcp_napi_dev, &delegated->napi,
+				  mptcp_napi_poll);
 		napi_enable(&delegated->napi);
 	}
 

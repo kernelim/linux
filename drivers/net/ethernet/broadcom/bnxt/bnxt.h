@@ -18,6 +18,7 @@
 #define DRV_VER_MIN	10
 #define DRV_VER_UPD	2
 
+#include <linux/ethtool.h>
 #include <linux/interrupt.h>
 #include <linux/rhashtable.h>
 #include <linux/crash_dump.h>
@@ -588,9 +589,19 @@ struct nqe_cn {
 #define BNXT_RX_PAGE_SIZE (1 << BNXT_RX_PAGE_SHIFT)
 
 #define BNXT_MAX_MTU		9500
-#define BNXT_MAX_PAGE_MODE_MTU	\
+
+/* First RX buffer page in XDP multi-buf mode
+ *
+ * +-------------------------------------------------------------------------+
+ * | XDP_PACKET_HEADROOM | bp->rx_buf_use_size              | skb_shared_info|
+ * | (bp->rx_dma_offset) |                                  |                |
+ * +-------------------------------------------------------------------------+
+ */
+#define BNXT_MAX_PAGE_MODE_MTU_SBUF \
 	((unsigned int)PAGE_SIZE - VLAN_ETH_HLEN - NET_IP_ALIGN -	\
-	 XDP_PACKET_HEADROOM - \
+	 XDP_PACKET_HEADROOM)
+#define BNXT_MAX_PAGE_MODE_MTU	\
+	(BNXT_MAX_PAGE_MODE_MTU_SBUF - \
 	 SKB_DATA_ALIGN((unsigned int)sizeof(struct skb_shared_info)))
 
 #define BNXT_MIN_PKT_SIZE	52
@@ -1814,6 +1825,7 @@ struct bnxt {
 #define BNXT_SUPPORTS_TPA(bp)	(!BNXT_CHIP_TYPE_NITRO_A0(bp) &&	\
 				 (!((bp)->flags & BNXT_FLAG_CHIP_P5) ||	\
 				  (bp)->max_tpa_v2) && !is_kdump_kernel())
+#define BNXT_RX_JUMBO_MODE(bp)	((bp)->flags & BNXT_FLAG_JUMBO)
 
 #define BNXT_CHIP_SR2(bp)			\
 	((bp)->chip_num == CHIP_NUM_58818)
@@ -1963,6 +1975,7 @@ struct bnxt {
 	#define BNXT_FW_CAP_ERR_RECOVER_RELOAD		0x00100000
 	#define BNXT_FW_CAP_HOT_RESET			0x00200000
 	#define BNXT_FW_CAP_PTP_RTC			0x00400000
+	#define BNXT_FW_CAP_RX_ALL_PKT_TS		0x00800000
 	#define BNXT_FW_CAP_VLAN_RX_STRIP		0x01000000
 	#define BNXT_FW_CAP_VLAN_TX_INSERT		0x02000000
 	#define BNXT_FW_CAP_EXT_HW_STATS_SUPPORTED	0x04000000
@@ -2126,6 +2139,7 @@ struct bnxt {
 	struct bpf_prog		*xdp_prog;
 
 	struct bnxt_ptp_cfg	*ptp_cfg;
+	u8			ptp_all_rx_tstamp;
 
 	/* devlink interface and vf-rep structs */
 	struct devlink		*dl;
@@ -2307,6 +2321,7 @@ int bnxt_cancel_reservations(struct bnxt *bp, bool fw_reset);
 int bnxt_hwrm_alloc_wol_fltr(struct bnxt *bp);
 int bnxt_hwrm_free_wol_fltr(struct bnxt *bp);
 int bnxt_hwrm_func_resc_qcaps(struct bnxt *bp, bool all);
+int bnxt_hwrm_func_qcaps(struct bnxt *bp);
 int bnxt_hwrm_fw_set_time(struct bnxt *);
 int bnxt_open_nic(struct bnxt *, bool, bool);
 int bnxt_half_open_nic(struct bnxt *bp);

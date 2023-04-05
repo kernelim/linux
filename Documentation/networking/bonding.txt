@@ -536,7 +536,8 @@ miimon
 	link monitoring.  A value of 100 is a good starting point.
 	The use_carrier option, below, affects how the link state is
 	determined.  See the High Availability section for additional
-	information.  The default value is 0.
+	information.  The default value is 100 if arp_interval is not
+	set.
 
 min_links
 
@@ -795,7 +796,7 @@ primary_reselect
 tlb_dynamic_lb
 
 	Specifies if dynamic shuffling of flows is enabled in tlb
-	mode. The value has no effect on any other modes.
+	or alb mode. The value has no effect on any other modes.
 
 	The default behavior of tlb mode is to shuffle active flows across
 	slaves based on the load in that interval. This gives nice lb
@@ -854,7 +855,7 @@ xmit_hash_policy
 		Uses XOR of hardware MAC addresses and packet type ID
 		field to generate the hash. The formula is
 
-		hash = source MAC XOR destination MAC XOR packet type ID
+		hash = source MAC[5] XOR destination MAC[5] XOR packet type ID
 		slave number = hash modulo slave count
 
 		This algorithm will place all traffic to a particular
@@ -870,7 +871,7 @@ xmit_hash_policy
 		Uses XOR of hardware MAC addresses and IP addresses to
 		generate the hash.  The formula is
 
-		hash = source MAC XOR destination MAC XOR packet type ID
+		hash = source MAC[5] XOR destination MAC[5] XOR packet type ID
 		hash = hash XOR source IP XOR destination IP
 		hash = hash XOR (hash RSHIFT 16)
 		hash = hash XOR (hash RSHIFT 8)
@@ -905,6 +906,7 @@ xmit_hash_policy
 		hash = hash XOR source IP XOR destination IP
 		hash = hash XOR (hash RSHIFT 16)
 		hash = hash XOR (hash RSHIFT 8)
+		hash = hash RSHIFT 1
 		And then hash is reduced modulo slave count.
 
 		If the protocol is IPv6 then the source and destination
@@ -1956,7 +1958,7 @@ netif_carrier.
 	If use_carrier is 0, then the MII monitor will first query the
 device's (via ioctl) MII registers and check the link state.  If that
 request fails (not just that it returns carrier down), then the MII
-monitor will make an ethtool ETHOOL_GLINK request to attempt to obtain
+monitor will make an ethtool ETHTOOL_GLINK request to attempt to obtain
 the same information.  If both methods fail (i.e., the driver either
 does not support or had some error in processing both the MII register
 and ethtool requests), then the MII monitor will assume the link is
@@ -2822,18 +2824,7 @@ version of the linux kernel, found on http://kernel.org
 	The latest version of this document can be found in the latest kernel
 source (named Documentation/networking/bonding.txt).
 
-	Discussions regarding the usage of the bonding driver take place on the
-bonding-devel mailing list, hosted at sourceforge.net. If you have questions or
-problems, post them to the list.  The list address is:
-
-bonding-devel@lists.sourceforge.net
-
-	The administrative interface (to subscribe or unsubscribe) can
-be found at:
-
-https://lists.sourceforge.net/lists/listinfo/bonding-devel
-
-	Discussions regarding the development of the bonding driver take place
+Discussions regarding the development of the bonding driver take place
 on the main Linux network mailing list, hosted at vger.kernel.org. The list
 address is:
 
@@ -2843,11 +2834,3 @@ netdev@vger.kernel.org
 be found at:
 
 http://vger.kernel.org/vger-lists.html#netdev
-
-Donald Becker's Ethernet Drivers and diag programs may be found at :
- - http://web.archive.org/web/*/http://www.scyld.com/network/ 
-
-You will also find a lot of information regarding Ethernet, NWay, MII,
-etc. at www.scyld.com.
-
--- END --

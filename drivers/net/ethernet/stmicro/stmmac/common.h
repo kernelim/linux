@@ -63,6 +63,16 @@
 #undef FRAME_FILTER_DEBUG
 /* #define FRAME_FILTER_DEBUG */
 
+struct stmmac_txq_stats {
+	unsigned long tx_pkt_n;
+	unsigned long tx_normal_irq_n;
+};
+
+struct stmmac_rxq_stats {
+	unsigned long rx_pkt_n;
+	unsigned long rx_normal_irq_n;
+};
+
 /* Extra statistic and debug information exposed by ethtool */
 struct stmmac_extra_stats {
 	/* Transmit errors */
@@ -194,6 +204,9 @@ struct stmmac_extra_stats {
 	unsigned long mtl_est_hlbf;
 	unsigned long mtl_est_btre;
 	unsigned long mtl_est_btrlm;
+	/* per queue statistics */
+	struct stmmac_txq_stats txq_stats[MTL_MAX_TX_QUEUES];
+	struct stmmac_rxq_stats rxq_stats[MTL_MAX_RX_QUEUES];
 };
 
 /* Safety Feature statistics exposed by ethtool */
@@ -309,6 +322,7 @@ enum tx_frame_status {
 	tx_not_ls = 0x1,
 	tx_err = 0x2,
 	tx_dma_own = 0x4,
+	tx_err_bump_tc = 0x8,
 };
 
 enum dma_irq_status {
@@ -508,8 +522,7 @@ struct mac_device_info {
 	const struct stmmac_hwtimestamp *ptp;
 	const struct stmmac_tc_ops *tc;
 	const struct stmmac_mmc_ops *mmc;
-	const struct mdio_xpcs_ops *xpcs;
-	struct mdio_xpcs_args xpcs_args;
+	struct dw_xpcs *xpcs;
 	struct mii_regs mii;	/* MII register Addresses */
 	struct mac_link link;
 	void __iomem *pcsr;     /* vpointer to device CSRs */

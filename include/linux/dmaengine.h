@@ -62,6 +62,8 @@ enum dma_transaction_type {
 	DMA_SLAVE,
 	DMA_CYCLIC,
 	DMA_INTERLEAVE,
+	DMA_REPEAT,
+	DMA_LOAD_EOT,
 	DMA_COMPLETION_NO_ORDER,
 /* last transaction type for creation of the capabilities mask */
 	DMA_TX_TYPE_END,
@@ -164,7 +166,7 @@ struct dma_interleaved_template {
  * @DMA_PREP_INTERRUPT - trigger an interrupt (callback) upon completion of
  *  this transaction
  * @DMA_CTRL_ACK - if clear, the descriptor cannot be reused until the client
- *  acknowledges receipt, i.e. has has a chance to establish any dependency
+ *  acknowledges receipt, i.e. has a chance to establish any dependency
  *  chains
  * @DMA_PREP_PQ_DISABLE_P - prevent generation of P while generating Q
  * @DMA_PREP_PQ_DISABLE_Q - prevent generation of Q while generating P
@@ -178,6 +180,16 @@ struct dma_interleaved_template {
  * @DMA_PREP_CMD: tell the driver that the data passed to DMA API is command
  *  data and the descriptor should be in different format from normal
  *  data descriptors.
+ * @DMA_PREP_REPEAT: tell the driver that the transaction shall be automatically
+ *  repeated when it ends until a transaction is issued on the same channel
+ *  with the DMA_PREP_LOAD_EOT flag set. This flag is only applicable to
+ *  interleaved transactions and is ignored for all other transaction types.
+ * @DMA_PREP_LOAD_EOT: tell the driver that the transaction shall replace any
+ *  active repeated (as indicated by DMA_PREP_REPEAT) transaction when the
+ *  repeated transaction ends. Not setting this flag when the previously queued
+ *  transaction is marked with DMA_PREP_REPEAT will cause the new transaction
+ *  to never be processed and stay in the issued queue forever. The flag is
+ *  ignored if the previous transaction is not a repeated transaction.
  */
 enum dma_ctrl_flags {
 	DMA_PREP_INTERRUPT = (1 << 0),
@@ -188,6 +200,8 @@ enum dma_ctrl_flags {
 	DMA_PREP_FENCE = (1 << 5),
 	DMA_CTRL_REUSE = (1 << 6),
 	DMA_PREP_CMD = (1 << 7),
+	DMA_PREP_REPEAT = (1 << 8),
+	DMA_PREP_LOAD_EOT = (1 << 9),
 };
 
 /**
@@ -214,12 +228,6 @@ enum sum_check_flags {
  * See linux/cpumask.h
  */
 typedef struct { DECLARE_BITMAP(bits, DMA_TX_TYPE_END); } dma_cap_mask_t;
-
-/**
- * struct dma_chan_percpu - the per-CPU part of struct dma_chan
- * @memcpy_count: transaction counter
- * @bytes_transferred: byte counter
- */
 
 /**
  * enum dma_desc_metadata_mode - per descriptor metadata mode types supported
@@ -277,6 +285,11 @@ enum dma_desc_metadata_mode {
 	DESC_METADATA_ENGINE = BIT(1),
 };
 
+/**
+ * struct dma_chan_percpu - the per-CPU part of struct dma_chan
+ * @memcpy_count: transaction counter
+ * @bytes_transferred: byte counter
+ */
 struct dma_chan_percpu {
 	/* stats */
 	unsigned long memcpy_count;
@@ -343,11 +356,14 @@ struct dma_chan {
  * @chan: driver channel device
  * @device: sysfs device
  * @dev_id: parent dma_device dev_id
+ * @chan_dma_dev: The channel is using custom/different dma-mapping
+ * compared to the parent dma_device
  */
 struct dma_chan_dev {
 	struct dma_chan *chan;
 	struct device device;
 	int dev_id;
+	bool chan_dma_dev;
 };
 
 /**
@@ -364,6 +380,7 @@ enum dma_slave_buswidth {
 	DMA_SLAVE_BUSWIDTH_16_BYTES = 16,
 	DMA_SLAVE_BUSWIDTH_32_BYTES = 32,
 	DMA_SLAVE_BUSWIDTH_64_BYTES = 64,
+	DMA_SLAVE_BUSWIDTH_128_BYTES = 128,
 };
 
 /**
@@ -382,7 +399,7 @@ enum dma_slave_buswidth {
  * @src_addr_width: this is the width in bytes of the source (RX)
  * register where DMA data shall be read. If the source
  * is memory this may be ignored depending on architecture.
- * Legal values: 1, 2, 3, 4, 8, 16, 32, 64.
+ * Legal values: 1, 2, 3, 4, 8, 16, 32, 64, 128.
  * @dst_addr_width: same as src_addr_width but for destination
  * target (TX) mutatis mutandis.
  * @src_maxburst: the maximum number of words (note: words, as in
@@ -401,9 +418,9 @@ enum dma_slave_buswidth {
  * @device_fc: Flow Controller Settings. Only valid for slave channels. Fill
  * with 'true' if peripheral should be flow controller. Direction will be
  * selected at Runtime.
- * @slave_id: Slave requester id. Only valid for slave channels. The dma
- * slave peripheral will have unique id as dma requester which need to be
- * pass as slave config.
+ * @peripheral_config: peripheral configuration for programming peripheral
+ * for dmaengine transfer
+ * @peripheral_size: peripheral configuration buffer size
  *
  * This struct is passed in as configuration data to a DMA engine
  * in order to set up a certain channel for DMA transport at runtime.
@@ -428,7 +445,8 @@ struct dma_slave_config {
 	u32 src_port_window_size;
 	u32 dst_port_window_size;
 	bool device_fc;
-	unsigned int slave_id;
+	void *peripheral_config;
+	size_t peripheral_size;
 };
 
 /**
@@ -723,6 +741,8 @@ enum dmaengine_alignment {
 	DMAENGINE_ALIGN_16_BYTES = 4,
 	DMAENGINE_ALIGN_32_BYTES = 5,
 	DMAENGINE_ALIGN_64_BYTES = 6,
+	DMAENGINE_ALIGN_128_BYTES = 7,
+	DMAENGINE_ALIGN_256_BYTES = 8,
 };
 
 /**
@@ -786,6 +806,7 @@ struct dma_filter {
  *	by tx_status
  * @device_alloc_chan_resources: allocate resources and return the
  *	number of allocated descriptors
+ * @device_router_config: optional callback for DMA router configuration
  * @device_free_chan_resources: release DMA channel's resources
  * @device_prep_dma_memcpy: prepares a memcpy operation
  * @device_prep_dma_xor: prepares a xor operation
@@ -848,7 +869,6 @@ struct dma_device {
 	struct device *dev;
 	struct module *owner;
 	struct ida chan_ida;
-	struct mutex chan_mutex;	/* to protect chan_ida */
 
 	u32 src_addr_widths;
 	u32 dst_addr_widths;
@@ -860,6 +880,7 @@ struct dma_device {
 	enum dma_residue_granularity residue_granularity;
 
 	int (*device_alloc_chan_resources)(struct dma_chan *chan);
+	int (*device_router_config)(struct dma_chan *chan);
 	void (*device_free_chan_resources)(struct dma_chan *chan);
 
 	struct dma_async_tx_descriptor *(*device_prep_dma_memcpy)(
@@ -918,10 +939,8 @@ struct dma_device {
 	void (*device_issue_pending)(struct dma_chan *chan);
 	void (*device_release)(struct dma_device *dev);
 	/* debugfs support */
-#ifdef CONFIG_DEBUG_FS
 	void (*dbg_summary_show)(struct seq_file *s, struct dma_device *dev);
 	struct dentry *dbg_dev_root;
-#endif
 };
 
 static inline int dmaengine_slave_config(struct dma_chan *chan,
@@ -998,10 +1017,21 @@ static inline struct dma_async_tx_descriptor *dmaengine_prep_interleaved_dma(
 {
 	if (!chan || !chan->device || !chan->device->device_prep_interleaved_dma)
 		return NULL;
+	if (flags & DMA_PREP_REPEAT &&
+	    !test_bit(DMA_REPEAT, chan->device->cap_mask.bits))
+		return NULL;
 
 	return chan->device->device_prep_interleaved_dma(chan, xt, flags);
 }
 
+/**
+ * dmaengine_prep_dma_memset() - Prepare a DMA memset descriptor.
+ * @chan: The channel to be used for this descriptor
+ * @dest: Address of buffer to be set
+ * @value: Treated as a single byte value that fills the destination buffer
+ * @len: The total size of dest
+ * @flags: DMA engine flags
+ */
 static inline struct dma_async_tx_descriptor *dmaengine_prep_dma_memset(
 		struct dma_chan *chan, dma_addr_t dest, int value, size_t len,
 		unsigned long flags)
@@ -1593,4 +1623,13 @@ dmaengine_get_direction_text(enum dma_transfer_direction dir)
 		return "invalid";
 	}
 }
+
+static inline struct device *dmaengine_get_dma_device(struct dma_chan *chan)
+{
+	if (chan->dev->chan_dma_dev)
+		return &chan->dev->device;
+
+	return chan->device->dev;
+}
+
 #endif /* DMAENGINE_H */

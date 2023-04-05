@@ -50,8 +50,6 @@ int __init early_set_memory_encrypted(unsigned long vaddr, unsigned long size);
 void __init early_set_mem_enc_dec_hypercall(unsigned long vaddr, int npages,
 					    bool enc);
 
-/* Architecture __weak replacement functions */
-void __init mem_encrypt_init(void);
 void __init mem_encrypt_free_decrypted_mem(void);
 
 void __init sev_es_init_vc_handling(void);
@@ -91,6 +89,9 @@ early_set_mem_enc_dec_hypercall(unsigned long vaddr, int npages, bool enc) {}
 
 #endif	/* CONFIG_AMD_MEM_ENCRYPT */
 
+/* Architecture __weak replacement functions */
+void __init mem_encrypt_init(void);
+
 /*
  * The __sme_pa() and __sme_pa_nodebug() macros are meant for use when
  * writing to or comparing values from the cr3 register.  Having the
@@ -101,11 +102,6 @@ early_set_mem_enc_dec_hypercall(unsigned long vaddr, int npages, bool enc) {}
 #define __sme_pa_nodebug(x)	(__pa_nodebug(x) | sme_me_mask)
 
 extern char __start_bss_decrypted[], __end_bss_decrypted[], __start_bss_decrypted_unused[];
-
-static inline bool mem_encrypt_active(void)
-{
-	return sme_me_mask;
-}
 
 static inline u64 sme_get_me_mask(void)
 {

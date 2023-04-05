@@ -254,6 +254,13 @@ test_bit(unsigned int nr, const volatile unsigned long *addr)
 	return ((mask & *addr) != 0);
 }
 
+static __always_inline bool
+test_bit_acquire(unsigned long nr, const volatile unsigned long *addr)
+{
+	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
+	return 1UL & (smp_load_acquire(p) >> (nr & (BITS_PER_LONG-1)));
+}
+
 #ifdef CONFIG_ISA_ARCOMPACT
 
 /*

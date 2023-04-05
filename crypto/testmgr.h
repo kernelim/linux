@@ -41,6 +41,7 @@ struct hash_testvec {
 	unsigned short psize;
 	unsigned char np;
 	unsigned char ksize;
+	bool fips_skip;
 };
 
 /*
@@ -4048,7 +4049,8 @@ static const struct hash_testvec hmac_sha1_tv_template[] = {
 		.digest	= "\xef\xfc\xdf\x6a\xe5\xeb\x2f\xa2\xd2\x74"
 			  "\x16\xd5\xf1\x84\xdf\x9c\x25\x9a\x7c\x79",
 		.np	= 2,
-		.tap	= { 14, 14 }
+		.tap	= { 14, 14 },
+		.fips_skip = 1,
 	}, {
 		.key	= "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa",
 		.ksize	= 20,
@@ -4139,7 +4141,8 @@ static const struct hash_testvec hmac_sha224_tv_template[] = {
 			"\x8b\xbe\xa2\xa3\x9e\x61\x48\x00"
 			"\x8f\xd0\x5e\x44",
 		.np = 4,
-		.tap    = { 7, 7, 7, 7 }
+		.tap    = { 7, 7, 7, 7 },
+		.fips_skip = 1,
 	}, {
 		.key    = "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
 			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
@@ -4284,7 +4287,8 @@ static const struct hash_testvec hmac_sha256_tv_template[] = {
 			  "\x5a\x00\x3f\x08\x9d\x27\x39\x83"
 			  "\x9d\xec\x58\xb9\x64\xec\x38\x43",
 		.np	= 2,
-		.tap	= { 14, 14 }
+		.tap	= { 14, 14 },
+		.fips_skip = 1,
 	}, {
 		.key	= "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
 			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
@@ -4739,7 +4743,8 @@ static const struct hash_testvec hmac_sha384_tv_template[] = {
 			  "\x8e\x22\x40\xca\x5e\x69\xe2\xc7"
 			  "\x8b\x32\x39\xec\xfa\xb2\x16\x49",
 		.np	= 4,
-		.tap	= { 7, 7, 7, 7 }
+		.tap	= { 7, 7, 7, 7 },
+		.fips_skip = 1,
 	}, {
 		.key	= "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
 			  "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
@@ -4841,7 +4846,8 @@ static const struct hash_testvec hmac_sha512_tv_template[] = {
 			  "\xca\xea\xb1\xa3\x4d\x4a\x6b\x4b"
 			  "\x63\x6e\x07\x0a\x38\xbc\xe7\x37",
 		.np	= 4,
-		.tap	= { 7, 7, 7, 7 }
+		.tap	= { 7, 7, 7, 7 },
+		.fips_skip = 1,
 	}, {
 		.key	= "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
 			  "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
@@ -4938,7 +4944,8 @@ static const struct hash_testvec hmac_sha3_224_tv_template[] = {
 			  "\xc2\xcf\xc8\x5b\xfa\xf5\xd5\x2b"
 			  "\xba\xce\x5e\x66",
 		.np	= 4,
-		.tap	= { 7, 7, 7, 7 }
+		.tap	= { 7, 7, 7, 7 },
+		.fips_skip = 1,
 	}, {
 		.key	= "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
 			  "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
@@ -5027,7 +5034,8 @@ static const struct hash_testvec hmac_sha3_256_tv_template[] = {
 			  "\xc9\x17\x1f\x93\x09\x5b\x29\x4a"
 			  "\xe8\x57\xfb\xe2\x64\x5e\x1b\xa5",
 		.np	= 4,
-		.tap	= { 7, 7, 7, 7 }
+		.tap	= { 7, 7, 7, 7 },
+		.fips_skip = 1,
 	}, {
 		.key	= "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
 			  "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
@@ -5120,7 +5128,8 @@ static const struct hash_testvec hmac_sha3_384_tv_template[] = {
 			  "\x48\xc0\x45\xdc\x00\x7f\x26\xa2"
 			  "\x1b\x3f\x5e\x0e\x9d\xf4\xc2\x0a",
 		.np	= 4,
-		.tap	= { 7, 7, 7, 7 }
+		.tap	= { 7, 7, 7, 7 },
+		.fips_skip = 1,
 	}, {
 		.key	= "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
 			  "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
@@ -5221,7 +5230,8 @@ static const struct hash_testvec hmac_sha3_512_tv_template[] = {
 			  "\x1f\xc9\x2b\xa9\xd7\x7d\xf8\x83"
 			  "\x96\x02\x75\xbe\xb4\xe6\x20\x24",
 		.np	= 4,
-		.tap	= { 7, 7, 7, 7 }
+		.tap	= { 7, 7, 7, 7 },
+		.fips_skip = 1,
 	}, {
 		.key	= "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
 			  "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"

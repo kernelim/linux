@@ -52,7 +52,7 @@ void ucall_init(struct kvm_vm *vm, void *arg)
 	 * lower and won't match physical addresses.
 	 */
 	bits = vm->va_bits - 1;
-	bits = vm->pa_bits < bits ? vm->pa_bits : bits;
+	bits = min(vm->pa_bits, bits);
 	end = 1ul << bits;
 	start = end * 5 / 8;
 	step = end / 16;
@@ -73,20 +73,19 @@ void ucall_uninit(struct kvm_vm *vm)
 
 void ucall(uint64_t cmd, int nargs, ...)
 {
-	struct ucall uc = {
-		.cmd = cmd,
-	};
+	struct ucall uc = {};
 	va_list va;
 	int i;
 
-	nargs = nargs <= UCALL_MAX_ARGS ? nargs : UCALL_MAX_ARGS;
+	WRITE_ONCE(uc.cmd, cmd);
+	nargs = min(nargs, UCALL_MAX_ARGS);
 
 	va_start(va, nargs);
 	for (i = 0; i < nargs; ++i)
-		uc.args[i] = va_arg(va, uint64_t);
+		WRITE_ONCE(uc.args[i], va_arg(va, uint64_t));
 	va_end(va);
 
-	*ucall_exit_mmio_addr = (vm_vaddr_t)&uc;
+	WRITE_ONCE(*ucall_exit_mmio_addr, (vm_vaddr_t)&uc);
 }
 
 uint64_t get_ucall(struct kvm_vm *vm, uint32_t vcpu_id, struct ucall *uc)

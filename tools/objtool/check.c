@@ -109,6 +109,20 @@ static struct instruction *next_insn_same_func(struct objtool_file *file,
 	for (insn = next_insn_same_sec(file, insn); insn;		\
 	     insn = next_insn_same_sec(file, insn))
 
+static bool is_sibling_call(struct instruction *insn)
+{
+	/* An indirect jump is either a sibling call or a jump to a table. */
+	if (insn->type == INSN_JUMP_DYNAMIC)
+		return list_empty(&insn->alts);
+
+	if (insn->type != INSN_JUMP_CONDITIONAL &&
+	    insn->type != INSN_JUMP_UNCONDITIONAL)
+		return false;
+
+	/* add_jump_destinations() sets insn->call_dest for sibling calls. */
+	return !!insn->call_dest;
+}
+
 /*
  * This checks to see if the given function is a "noreturn" function.
  *
@@ -117,14 +131,9 @@ static struct instruction *next_insn_same_func(struct objtool_file *file,
  *
  * For local functions, we have to detect them manually by simply looking for
  * the lack of a return instruction.
- *
- * Returns:
- *  -1: error
- *   0: no dead end
- *   1: dead end
  */
-static int __dead_end_function(struct objtool_file *file, struct symbol *func,
-			       int recursion)
+static bool __dead_end_function(struct objtool_file *file, struct symbol *func,
+				int recursion)
 {
 	int i;
 	struct instruction *insn;
@@ -151,29 +160,29 @@ static int __dead_end_function(struct objtool_file *file, struct symbol *func,
 	};
 
 	if (func->bind == STB_WEAK)
-		return 0;
+		return false;
 
 	if (func->bind == STB_GLOBAL)
 		for (i = 0; i < ARRAY_SIZE(global_noreturns); i++)
 			if (!strcmp(func->name, global_noreturns[i]))
-				return 1;
+				return true;
 
 	if (!func->len)
-		return 0;
+		return false;
 
 	insn = find_insn(file, func->sec, func->offset);
 	if (!insn->func)
-		return 0;
+		return false;
 
 	func_for_each_insn_all(file, func, insn) {
 		empty = false;
 
 		if (insn->type == INSN_RETURN)
-			return 0;
+			return false;
 	}
 
 	if (empty)
-		return 0;
+		return false;
 
 	/*
 	 * A function can have a sibling call instead of a return.  In that
@@ -181,40 +190,31 @@ static int __dead_end_function(struct objtool_file *file, struct symbol *func,
 	 * of the sibling call returns.
 	 */
 	func_for_each_insn_all(file, func, insn) {
-		if (insn->type == INSN_JUMP_UNCONDITIONAL) {
+		if (is_sibling_call(insn)) {
 			struct instruction *dest = insn->jump_dest;
 
 			if (!dest)
 				/* sibling call to another file */
-				return 0;
+				return false;
 
-			if (dest->func && dest->func->pfunc != insn->func->pfunc) {
-
-				/* local sibling call */
-				if (recursion == 5) {
-					/*
-					 * Infinite recursion: two functions
-					 * have sibling calls to each other.
-					 * This is a very rare case.  It means
-					 * they aren't dead ends.
-					 */
-					return 0;
-				}
-
-				return __dead_end_function(file, dest->func,
-							   recursion + 1);
+			/* local sibling call */
+			if (recursion == 5) {
+				/*
+				 * Infinite recursion: two functions have
+				 * sibling calls to each other.  This is a very
+				 * rare case.  It means they aren't dead ends.
+				 */
+				return false;
 			}
-		}
 
-		if (insn->type == INSN_JUMP_DYNAMIC && list_empty(&insn->alts))
-			/* sibling call */
-			return 0;
+			return __dead_end_function(file, dest->func, recursion+1);
+		}
 	}
 
-	return 1;
+	return true;
 }
 
-static int dead_end_function(struct objtool_file *file, struct symbol *func)
+static bool dead_end_function(struct objtool_file *file, struct symbol *func)
 {
 	return __dead_end_function(file, func, 0);
 }
@@ -668,16 +668,19 @@ static int add_jump_destinations(struct objtool_file *file)
 			 * Retpoline jumps are really dynamic jumps in
 			 * disguise, so convert them accordingly.
 			 */
-			insn->type = INSN_JUMP_DYNAMIC;
+			if (insn->type == INSN_JUMP_UNCONDITIONAL)
+				insn->type = INSN_JUMP_DYNAMIC;
+			else
+				insn->type = INSN_JUMP_DYNAMIC_CONDITIONAL;
+
 			insn->retpoline_safe = true;
 			continue;
 		} else if (rela->sym->return_thunk) {
 			add_return_call(file, insn, true);
 			continue;
 		} else {
-			/* sibling call */
+			/* external sibling call */
 			insn->call_dest = rela->sym;
-			insn->jump_dest = NULL;
 			continue;
 		}
 
@@ -741,9 +744,8 @@ static int add_jump_destinations(struct objtool_file *file)
 			} else if (insn->jump_dest->func->pfunc != insn->func->pfunc &&
 				   insn->jump_dest->offset == insn->jump_dest->func->offset) {
 
-				/* sibling class */
+				/* internal sibling call */
 				insn->call_dest = insn->jump_dest->func;
-				insn->jump_dest = NULL;
 			}
 		}
 	}
@@ -2124,7 +2126,7 @@ static inline bool func_uaccess_safe(struct symbol *func)
 	return false;
 }
 
-static inline const char *insn_dest_name(struct instruction *insn)
+static inline const char *call_dest_name(struct instruction *insn)
 {
 	if (insn->call_dest)
 		return insn->call_dest->name;
@@ -2136,13 +2138,13 @@ static int validate_call(struct instruction *insn, struct insn_state *state)
 {
 	if (state->uaccess && !func_uaccess_safe(insn->call_dest)) {
 		WARN_FUNC("call to %s() with UACCESS enabled",
-				insn->sec, insn->offset, insn_dest_name(insn));
+				insn->sec, insn->offset, call_dest_name(insn));
 		return 1;
 	}
 
 	if (state->df) {
 		WARN_FUNC("call to %s() with DF set",
-				insn->sec, insn->offset, insn_dest_name(insn));
+				insn->sec, insn->offset, call_dest_name(insn));
 		return 1;
 	}
 
@@ -2298,6 +2300,12 @@ static int validate_branch(struct objtool_file *file, struct symbol *func,
 		switch (insn->type) {
 
 		case INSN_RETURN:
+			if (next_insn && next_insn->type == INSN_TRAP) {
+				next_insn->ignore = true;
+			} else if (sls && !insn->retpoline_safe) {
+				WARN_FUNC("missing int3 after ret",
+					  insn->sec, insn->offset);
+			}
 			return validate_return(func, insn, &state);
 
 		case INSN_CALL:
@@ -2310,11 +2318,8 @@ static int validate_branch(struct objtool_file *file, struct symbol *func,
 				if (is_fentry_call(insn))
 					break;
 
-				ret = dead_end_function(file, insn->call_dest);
-				if (ret == 1)
+				if (dead_end_function(file, insn->call_dest))
 					return 0;
-				if (ret == -1)
-					return 1;
 			}
 
 			if (!no_fp && func && !has_valid_stack_frame(&state)) {
@@ -2326,14 +2331,12 @@ static int validate_branch(struct objtool_file *file, struct symbol *func,
 
 		case INSN_JUMP_CONDITIONAL:
 		case INSN_JUMP_UNCONDITIONAL:
-			if (func && !insn->jump_dest) {
+			if (func && is_sibling_call(insn)) {
 				ret = validate_sibling_call(insn, &state);
 				if (ret)
 					return ret;
 
-			} else if (insn->jump_dest &&
-				   (!func || !insn->jump_dest->func ||
-				    insn->jump_dest->func->pfunc == func)) {
+			} else if (insn->jump_dest) {
 				ret = validate_branch(file, func,
 						      insn->jump_dest, state);
 				if (ret) {
@@ -2349,13 +2352,25 @@ static int validate_branch(struct objtool_file *file, struct symbol *func,
 			break;
 
 		case INSN_JUMP_DYNAMIC:
-			if (func && list_empty(&insn->alts)) {
+			if (next_insn && next_insn->type == INSN_TRAP) {
+				next_insn->ignore = true;
+			} else if (sls && !insn->retpoline_safe) {
+				WARN_FUNC("missing int3 after indirect jump",
+					  insn->sec, insn->offset);
+			}
+
+			/* fallthrough */
+		case INSN_JUMP_DYNAMIC_CONDITIONAL:
+			if (func && is_sibling_call(insn)) {
 				ret = validate_sibling_call(insn, &state);
 				if (ret)
 					return ret;
 			}
 
-			return 0;
+			if (insn->type == INSN_JUMP_DYNAMIC)
+				return 0;
+
+			break;
 
 		case INSN_EXCEPTION_RETURN:
 			if (handle_insn_ops(insn, &state))

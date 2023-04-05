@@ -778,10 +778,9 @@ static void nfs4_slot_sequence_record_sent(struct nfs4_slot *slot,
 	if ((s32)(seqnr - slot->seq_nr_highest_sent) > 0)
 		slot->seq_nr_highest_sent = seqnr;
 }
-static void nfs4_slot_sequence_acked(struct nfs4_slot *slot,
-		u32 seqnr)
+static void nfs4_slot_sequence_acked(struct nfs4_slot *slot, u32 seqnr)
 {
-	slot->seq_nr_highest_sent = seqnr;
+	nfs4_slot_sequence_record_sent(slot, seqnr);
 	slot->seq_nr_last_acked = seqnr;
 }
 
@@ -848,7 +847,6 @@ static int nfs41_sequence_process(struct rpc_task *task,
 			__func__,
 			slot->slot_nr,
 			slot->seq_nr);
-		nfs4_slot_sequence_acked(slot, slot->seq_nr);
 		goto out_retry;
 	case -NFS4ERR_RETRY_UNCACHED_REP:
 	case -NFS4ERR_SEQ_FALSE_RETRY:
@@ -2651,9 +2649,8 @@ static int nfs4_opendata_access(const struct cred *cred,
 	} else if ((fmode & FMODE_READ) && !opendata->file_created)
 		mask = NFS4_ACCESS_READ;
 
-	cache.cred = cred;
 	nfs_access_set_mask(&cache, opendata->o_res.access_result);
-	nfs_access_add_cache(state->inode, &cache);
+	nfs_access_add_cache(state->inode, &cache, cred);
 
 	flags = NFS4_ACCESS_READ | NFS4_ACCESS_EXECUTE | NFS4_ACCESS_LOOKUP;
 	if ((mask & ~cache.mask & flags) == 0)
@@ -4557,7 +4554,8 @@ static int nfs4_proc_lookupp(struct inode *inode, struct nfs_fh *fhandle,
 	return err;
 }
 
-static int _nfs4_proc_access(struct inode *inode, struct nfs_access_entry *entry)
+static int _nfs4_proc_access(struct inode *inode, struct nfs_access_entry *entry,
+			     const struct cred *cred)
 {
 	struct nfs_server *server = NFS_SERVER(inode);
 	struct nfs4_accessargs args = {
@@ -4571,7 +4569,7 @@ static int _nfs4_proc_access(struct inode *inode, struct nfs_access_entry *entry
 		.rpc_proc = &nfs4_procedures[NFSPROC4_CLNT_ACCESS],
 		.rpc_argp = &args,
 		.rpc_resp = &res,
-		.rpc_cred = entry->cred,
+		.rpc_cred = cred,
 	};
 	int status = 0;
 
@@ -4591,14 +4589,15 @@ static int _nfs4_proc_access(struct inode *inode, struct nfs_access_entry *entry
 	return status;
 }
 
-static int nfs4_proc_access(struct inode *inode, struct nfs_access_entry *entry)
+static int nfs4_proc_access(struct inode *inode, struct nfs_access_entry *entry,
+			    const struct cred *cred)
 {
 	struct nfs4_exception exception = {
 		.interruptible = true,
 	};
 	int err;
 	do {
-		err = _nfs4_proc_access(inode, entry);
+		err = _nfs4_proc_access(inode, entry, cred);
 		trace_nfs4_access(inode, err);
 		err = nfs4_handle_exception(NFS_SERVER(inode), err,
 				&exception);
@@ -7070,6 +7069,7 @@ static void nfs4_lock_done(struct rpc_task *task, void *calldata)
 {
 	struct nfs4_lockdata *data = calldata;
 	struct nfs4_lock_state *lsp = data->lsp;
+	struct nfs_server *server = NFS_SERVER(d_inode(data->ctx->dentry));
 
 	if (!nfs4_sequence_done(task, &data->res.seq_res))
 		return;
@@ -7077,8 +7077,7 @@ static void nfs4_lock_done(struct rpc_task *task, void *calldata)
 	data->rpc_status = task->tk_status;
 	switch (task->tk_status) {
 	case 0:
-		renew_lease(NFS_SERVER(d_inode(data->ctx->dentry)),
-				data->timestamp);
+		renew_lease(server, data->timestamp);
 		if (data->arg.new_lock && !data->cancelled) {
 			data->fl.fl_flags &= ~(FL_SLEEP | FL_ACCESS);
 			if (locks_lock_inode_wait(lsp->ls_state->inode, &data->fl) < 0)
@@ -7098,6 +7097,8 @@ static void nfs4_lock_done(struct rpc_task *task, void *calldata)
 		if (data->arg.new_lock_owner != 0) {
 			if (!nfs4_stateid_match(&data->arg.open_stateid,
 						&lsp->ls_state->open_stateid))
+				goto out_restart;
+			else if (nfs4_async_handle_error(task, server, lsp->ls_state, NULL) == -EAGAIN)
 				goto out_restart;
 		} else if (!nfs4_stateid_match(&data->arg.lock_stateid,
 						&lsp->ls_stateid))
@@ -7693,7 +7694,7 @@ static int nfs4_xattr_set_nfs4_user(const struct xattr_handler *handler,
 				    const char *key, const void *buf,
 				    size_t buflen, int flags)
 {
-	struct nfs_access_entry cache;
+	u32 mask;
 	int ret;
 
 	if (!nfs_server_capable(inode, NFS_CAP_XATTR))
@@ -7708,8 +7709,8 @@ static int nfs4_xattr_set_nfs4_user(const struct xattr_handler *handler,
 	 * do a cached access check for the XA* flags to possibly avoid
 	 * doing an RPC and getting EACCES back.
 	 */
-	if (!nfs_access_get_cached(inode, current_cred(), &cache, true)) {
-		if (!(cache.mask & NFS_ACCESS_XAWRITE))
+	if (!nfs_access_get_cached(inode, current_cred(), &mask, true)) {
+		if (!(mask & NFS_ACCESS_XAWRITE))
 			return -EACCES;
 	}
 
@@ -7730,14 +7731,14 @@ static int nfs4_xattr_get_nfs4_user(const struct xattr_handler *handler,
 				    struct dentry *unused, struct inode *inode,
 				    const char *key, void *buf, size_t buflen)
 {
-	struct nfs_access_entry cache;
+	u32 mask;
 	ssize_t ret;
 
 	if (!nfs_server_capable(inode, NFS_CAP_XATTR))
 		return -EOPNOTSUPP;
 
-	if (!nfs_access_get_cached(inode, current_cred(), &cache, true)) {
-		if (!(cache.mask & NFS_ACCESS_XAREAD))
+	if (!nfs_access_get_cached(inode, current_cred(), &mask, true)) {
+		if (!(mask & NFS_ACCESS_XAREAD))
 			return -EACCES;
 	}
 
@@ -7762,13 +7763,13 @@ nfs4_listxattr_nfs4_user(struct inode *inode, char *list, size_t list_len)
 	ssize_t ret, size;
 	char *buf;
 	size_t buflen;
-	struct nfs_access_entry cache;
+	u32 mask;
 
 	if (!nfs_server_capable(inode, NFS_CAP_XATTR))
 		return 0;
 
-	if (!nfs_access_get_cached(inode, current_cred(), &cache, true)) {
-		if (!(cache.mask & NFS_ACCESS_XALIST))
+	if (!nfs_access_get_cached(inode, current_cred(), &mask, true)) {
+		if (!(mask & NFS_ACCESS_XALIST))
 			return 0;
 	}
 

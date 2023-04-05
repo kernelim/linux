@@ -4,6 +4,7 @@
 
 struct ctl_table_header;
 struct prot_inuse;
+struct cpumask;
 
 struct netns_core {
 	/* core sysctls */

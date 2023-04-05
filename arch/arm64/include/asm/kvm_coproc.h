@@ -37,8 +37,7 @@ int kvm_handle_cp15_32(struct kvm_vcpu *vcpu);
 int kvm_handle_cp15_64(struct kvm_vcpu *vcpu);
 int kvm_handle_sys_reg(struct kvm_vcpu *vcpu);
 
-#define kvm_coproc_table_init kvm_sys_reg_table_init
-void kvm_sys_reg_table_init(void);
+int kvm_sys_reg_table_init(void);
 
 struct kvm_one_reg;
 int kvm_arm_copy_sys_reg_indices(struct kvm_vcpu *vcpu, u64 __user *uindices);

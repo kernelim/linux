@@ -966,6 +966,7 @@ static int ip_error(struct sk_buff *skb)
 	struct inet_peer *peer;
 	unsigned long now;
 	struct net *net;
+	SKB_DR(reason);
 	bool send;
 	int code;
 
@@ -985,10 +986,12 @@ static int ip_error(struct sk_buff *skb)
 	if (!IN_DEV_FORWARD(in_dev)) {
 		switch (rt->dst.error) {
 		case EHOSTUNREACH:
+			SKB_DR_SET(reason, IP_INADDRERRORS);
 			__IP_INC_STATS(net, IPSTATS_MIB_INADDRERRORS);
 			break;
 
 		case ENETUNREACH:
+			SKB_DR_SET(reason, IP_INNOROUTES);
 			__IP_INC_STATS(net, IPSTATS_MIB_INNOROUTES);
 			break;
 		}
@@ -1004,6 +1007,7 @@ static int ip_error(struct sk_buff *skb)
 		break;
 	case ENETUNREACH:
 		code = ICMP_NET_UNREACH;
+		SKB_DR_SET(reason, IP_INNOROUTES);
 		__IP_INC_STATS(net, IPSTATS_MIB_INNOROUTES);
 		break;
 	case EACCES:
@@ -1030,7 +1034,7 @@ static int ip_error(struct sk_buff *skb)
 	if (send)
 		icmp_send(skb, ICMP_DEST_UNREACH, code, 0);
 
-out:	kfree_skb(skb);
+out:	kfree_skb_reason(skb, reason);
 	return 0;
 }
 
@@ -2209,6 +2213,7 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 	/*
 	 *	Now we are ready to route packet.
 	 */
+	fl4.flowi4_l3mdev = 0;
 	fl4.flowi4_oif = 0;
 	fl4.flowi4_iif = dev->ifindex;
 	fl4.flowi4_mark = skb->mark;
@@ -2680,8 +2685,7 @@ struct rtable *ip_route_output_key_hash_rcu(struct net *net, struct flowi4 *fl4,
 		res->fi = NULL;
 		res->table = NULL;
 		if (fl4->flowi4_oif &&
-		    (ipv4_is_multicast(fl4->daddr) ||
-		    !netif_index_is_l3_master(net, fl4->flowi4_oif))) {
+		    (ipv4_is_multicast(fl4->daddr) || !fl4->flowi4_l3mdev)) {
 			/* Apparently, routing tables are wrong. Assume,
 			   that the destination is on link.
 

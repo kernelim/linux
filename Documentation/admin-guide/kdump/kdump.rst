@@ -344,9 +344,9 @@ crashkernel syntax
 
    The automatically reserved memory size varies based on architecture.
    The size changes according to system memory size like below:
-       x86_64: 1G-4G:160M,4G-64G:192M,64G-1T:256M,1T-:512M
-       s390x:  1G-4G:160M,4G-64G:192M,64G-1T:256M,1T-:512M
-       arm64:  2G-:448M
+       x86_64: 1G-4G:192M,4G-64G:256M,64G-:512M
+       s390x:  1G-4G:192M,4G-64G:256M,64G-:512M
+       arm64:  2G-:480M
        ppc64:  2G-4G:384M,4G-16G:512M,16G-64G:1G,64G-128G:2G,128G-:4G
 
 Boot into System Kernel

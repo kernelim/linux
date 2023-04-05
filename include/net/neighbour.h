@@ -161,8 +161,7 @@ struct neighbour {
 	struct rcu_head		rcu;
 	struct net_device	*dev;
 
-	RH_KABI_RESERVE(1)
-	RH_KABI_RESERVE(2)
+	RH_KABI_USE(1, 2, struct list_head	gc_list)
 	u8			primary_key[0];
 } __randomize_layout;
 
@@ -228,6 +227,9 @@ struct neigh_table {
 	struct neigh_statistics	__percpu *stats;
 	struct neigh_hash_table __rcu *nht;
 	struct pneigh_entry	**phash_buckets;
+	RH_KABI_EXTEND(atomic_t		gc_entries)
+	RH_KABI_EXTEND(struct list_head	gc_list)
+	RH_KABI_EXTEND(int			(*is_multicast)(const void *pkey))
 };
 
 enum {
@@ -556,20 +558,17 @@ static inline void neigh_ha_snapshot(char *dst, const struct neighbour *n,
 	} while (read_seqretry(&n->ha_lock, seq));
 }
 
-static inline void neigh_update_ext_learned(struct neighbour *neigh, u32 flags,
-					    int *notify)
+static inline void neigh_update_is_router(struct neighbour *neigh, u32 flags,
+					  int *notify)
 {
 	u8 ndm_flags = 0;
 
-	if (!(flags & NEIGH_UPDATE_F_ADMIN))
-		return;
-
-	ndm_flags |= (flags & NEIGH_UPDATE_F_EXT_LEARNED) ? NTF_EXT_LEARNED : 0;
-	if ((neigh->flags ^ ndm_flags) & NTF_EXT_LEARNED) {
-		if (ndm_flags & NTF_EXT_LEARNED)
-			neigh->flags |= NTF_EXT_LEARNED;
+	ndm_flags |= (flags & NEIGH_UPDATE_F_ISROUTER) ? NTF_ROUTER : 0;
+	if ((neigh->flags ^ ndm_flags) & NTF_ROUTER) {
+		if (ndm_flags & NTF_ROUTER)
+			neigh->flags |= NTF_ROUTER;
 		else
-			neigh->flags &= ~NTF_EXT_LEARNED;
+			neigh->flags &= ~NTF_ROUTER;
 		*notify = 1;
 	}
 }

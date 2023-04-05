@@ -857,9 +857,6 @@ static void clear_hwpoisoned_pages(struct page *memmap, int nr_pages)
 {
 	int i;
 
-	if (!memmap)
-		return;
-
 	for (i = 0; i < nr_pages; i++) {
 		if (PageHWPoison(&memmap[i])) {
 			atomic_long_sub(1, &num_poisoned_pages);

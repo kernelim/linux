@@ -63,7 +63,6 @@ enum memcg_memory_event {
 enum percpu_stats_state {
 	MEMCG_PERCPU_STATS_ACTIVE = 0,
 	MEMCG_PERCPU_STATS_DISABLED,
-	MEMCG_PERCPU_VMSTATS_FLUSHED,
 	MEMCG_PERCPU_STATS_FLUSHED,
 	MEMCG_PERCPU_STATS_FREED
 };
@@ -77,6 +76,10 @@ struct mem_cgroup_reclaim_cookie {
 
 #define MEM_CGROUP_ID_SHIFT	16
 #define MEM_CGROUP_ID_MAX	USHRT_MAX
+
+#ifdef __GENKSYMS__
+#define mem_cgroup_per_node	__mem_cgroup_per_node
+#endif
 
 struct mem_cgroup_id {
 	int id;
@@ -96,29 +99,8 @@ enum mem_cgroup_events_target {
 	MEM_CGROUP_NTARGETS,
 };
 
-struct memcg_vmstats_percpu {
-	/* Local (CPU and cgroup) page state & events */
-	long			state[MEMCG_NR_STAT];
-	unsigned long		events[NR_VM_EVENT_ITEMS];
-
-	/* Delta calculation for lockless upward propagation */
-	long			state_prev[MEMCG_NR_STAT];
-	unsigned long		events_prev[NR_VM_EVENT_ITEMS];
-
-	/* Cgroup1: threshold notifications & softlimit tree updates */
-	unsigned long		nr_page_events;
-	unsigned long		targets[MEM_CGROUP_NTARGETS];
-};
-
-struct memcg_vmstats {
-	/* Aggregated (CPU and subtree) page state & events */
-	long			state[MEMCG_NR_STAT];
-	unsigned long		events[NR_VM_EVENT_ITEMS];
-
-	/* Pending child counts during tree propagation */
-	long			state_pending[MEMCG_NR_STAT];
-	unsigned long		events_pending[NR_VM_EVENT_ITEMS];
-};
+struct memcg_vmstats_percpu;
+struct memcg_vmstats;
 
 struct mem_cgroup_reclaim_iter {
 	struct mem_cgroup *position;
@@ -128,10 +110,6 @@ struct mem_cgroup_reclaim_iter {
 
 struct lruvec_stat {
 	long count[NR_VM_NODE_STAT_ITEMS];
-};
-
-struct batched_lruvec_stat {
-	s32 count[NR_VM_NODE_STAT_ITEMS];
 };
 
 /*
@@ -144,45 +122,47 @@ struct shrinker_info {
 	unsigned long *map;
 };
 
+struct lruvec_stats_percpu {
+	/* Local (CPU and cgroup) state */
+	long state[NR_VM_NODE_STAT_ITEMS];
+
+	/* Delta calculation for lockless upward propagation */
+	long state_prev[NR_VM_NODE_STAT_ITEMS];
+};
+
+struct lruvec_stats {
+	/* Aggregated (CPU and subtree) state */
+	long state[NR_VM_NODE_STAT_ITEMS];
+
+	/* Pending child counts during tree propagation */
+	long state_pending[NR_VM_NODE_STAT_ITEMS];
+};
+
 /*
  * per-node information in memory controller.
  */
 struct mem_cgroup_per_node {
 	struct lruvec		lruvec;
 
-	/* Subtree VM stats (batched updates) */
-	RH_KABI_REPLACE(struct lruvec_stat __percpu *lruvec_stat_cpu,
-			struct batched_lruvec_stat __percpu *lruvec_stat_cpu)
-	atomic_long_t		lruvec_stat[NR_VM_NODE_STAT_ITEMS];
+	struct lruvec_stats_percpu __percpu	*lruvec_stats_percpu;
+	struct lruvec_stats			lruvec_stats;
 
 	unsigned long		lru_zone_size[MAX_NR_ZONES][NR_LRU_LISTS];
 
-	RH_KABI_REPLACE_SPLIT(struct mem_cgroup_reclaim_iter iter[DEF_PRIORITY + 1],
-			      struct mem_cgroup_reclaim_iter iter,
-	/*
-	 * Legacy local VM stats. This should be struct lruvec_stat and
-	 * cannot be optimized to struct batched_lruvec_stat. Because
-	 * the threshold of the lruvec_stat_cpu can be as big as
-	 * MEMCG_CHARGE_BATCH * PAGE_SIZE. It can fit into s32. But this
-	 * filed has no upper limit.
-	 */
-			      struct lruvec_stat __percpu *lruvec_stat_local)
+	struct mem_cgroup_reclaim_iter	iter;
+
+	struct shrinker_info __rcu	*shrinker_info;
 
 	struct rb_node		tree_node;	/* RB tree node */
 	unsigned long		usage_in_excess;/* Set to the value by which */
 						/* the soft limit is exceeded*/
 	bool			on_tree;
-	RH_KABI_DEPRECATE(bool,	congested)
-	RH_KABI_FILL_HOLE(unsigned short nid)
-
+	unsigned short		nid;
 	struct mem_cgroup	*memcg;		/* Back pointer, we cannot */
 						/* use container_of	   */
-	/*
-	 * RHEL8: The mem_cgroup_per_node is dynamically allocated at
-	 * boot time and so is perfectly fine to be extended in size.
-	 */
-	RH_KABI_EXTEND(struct shrinker_info __rcu	*shrinker_info)
 };
+
+#undef mem_cgroup_per_node
 
 struct mem_cgroup_threshold {
 	struct eventfd_ctx *eventfd;
@@ -366,7 +346,7 @@ struct mem_cgroup {
 	enum percpu_stats_state percpu_stats_disabled;
 
 	/* memory.stat */
-	struct memcg_vmstats	vmstats;
+	struct memcg_vmstats	*vmstats;
 
 	/* memory.events */
 	atomic_long_t		memory_events[MEMCG_NR_MEMORY_EVENTS];
@@ -415,10 +395,11 @@ struct mem_cgroup {
 #endif /* __GENKSYMS__ */
 
 /*
- * size of first charge trial. "32" comes from vmscan.c's magic value.
- * TODO: maybe necessary to use big numbers in big irons.
+ * size of first charge trial.
+ * TODO: maybe necessary to use big numbers in big irons or dynamic based of the
+ * workload.
  */
-#define MEMCG_CHARGE_BATCH 32U
+#define MEMCG_CHARGE_BATCH 64U
 
 extern struct mem_cgroup *root_mem_cgroup;
 
@@ -949,7 +930,7 @@ unsigned long mem_cgroup_get_zone_lru_size(struct lruvec *lruvec,
 	struct mem_cgroup_per_node *mz;
 
 	mz = container_of(lruvec, struct mem_cgroup_per_node, lruvec);
-	return mz->lru_zone_size[zone_idx][lru];
+	return READ_ONCE(mz->lru_zone_size[zone_idx][lru]);
 }
 
 void mem_cgroup_handle_over_high(void);
@@ -1005,6 +986,8 @@ static inline void mod_memcg_state(struct mem_cgroup *memcg,
 	local_irq_restore(flags);
 }
 
+unsigned long memcg_page_state(struct mem_cgroup *memcg, int idx);
+
 static inline unsigned long lruvec_page_state(struct lruvec *lruvec,
 					      enum node_stat_item idx)
 {
@@ -1015,7 +998,7 @@ static inline unsigned long lruvec_page_state(struct lruvec *lruvec,
 		return node_page_state(lruvec_pgdat(lruvec), idx);
 
 	pn = container_of(lruvec, struct mem_cgroup_per_node, lruvec);
-	x = atomic_long_read(&pn->lruvec_stat[idx]);
+	x = READ_ONCE(pn->lruvec_stats.state[idx]);
 #ifdef CONFIG_SMP
 	if (x < 0)
 		x = 0;
@@ -1038,13 +1021,16 @@ static inline unsigned long lruvec_page_state_local(struct lruvec *lruvec,
 		return 0;
 
 	for_each_possible_cpu(cpu)
-		x += per_cpu(pn->lruvec_stat_local->count[idx], cpu);
+		x += per_cpu(pn->lruvec_stats_percpu->state[idx], cpu);
 #ifdef CONFIG_SMP
 	if (x < 0)
 		x = 0;
 #endif
 	return x;
 }
+
+void mem_cgroup_flush_stats(void);
+void mem_cgroup_flush_stats_delayed(void);
 
 void __mod_memcg_lruvec_state(struct lruvec *lruvec, enum node_stat_item idx,
 			      int val);
@@ -1439,6 +1425,11 @@ static inline void mod_memcg_state(struct mem_cgroup *memcg,
 {
 }
 
+static inline unsigned long memcg_page_state(struct mem_cgroup *memcg, int idx)
+{
+	return 0;
+}
+
 static inline unsigned long lruvec_page_state(struct lruvec *lruvec,
 					      enum node_stat_item idx)
 {
@@ -1449,6 +1440,14 @@ static inline unsigned long lruvec_page_state_local(struct lruvec *lruvec,
 						    enum node_stat_item idx)
 {
 	return node_page_state(lruvec_pgdat(lruvec), idx);
+}
+
+static inline void mem_cgroup_flush_stats(void)
+{
+}
+
+static inline void mem_cgroup_flush_stats_delayed(void)
+{
 }
 
 static inline void __mod_memcg_lruvec_state(struct lruvec *lruvec,

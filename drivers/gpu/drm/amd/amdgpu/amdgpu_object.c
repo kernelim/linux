@@ -446,33 +446,30 @@ static bool amdgpu_bo_validate_size(struct amdgpu_device *adev,
 
 	/*
 	 * If GTT is part of requested domains the check must succeed to
-	 * allow fall back to GTT
+	 * allow fall back to GTT.
 	 */
 	if (domain & AMDGPU_GEM_DOMAIN_GTT) {
 		man = ttm_manager_type(&adev->mman.bdev, TTM_PL_TT);
 
-		if (size < man->size)
+		if (man && size < man->size)
 			return true;
-		else
-			goto fail;
-	}
-
-	if (domain & AMDGPU_GEM_DOMAIN_VRAM) {
+		else if (!man)
+			WARN_ON_ONCE("GTT domain requested but GTT mem manager uninitialized");
+		goto fail;
+	} else if (domain & AMDGPU_GEM_DOMAIN_VRAM) {
 		man = ttm_manager_type(&adev->mman.bdev, TTM_PL_VRAM);
 
-		if (size < man->size)
+		if (man && size < man->size)
 			return true;
-		else
-			goto fail;
+		goto fail;
 	}
-
 
 	/* TODO add more domains checks, such as AMDGPU_GEM_DOMAIN_CPU */
 	return true;
 
 fail:
 	DRM_DEBUG("BO size %lu > total memory in domain: %llu\n", size,
-		  man->size << PAGE_SHIFT);
+		  man->size);
 	return false;
 }
 
@@ -567,6 +564,7 @@ int amdgpu_bo_create(struct amdgpu_device *adev,
 		bp->domain;
 	bo->allowed_domains = bo->preferred_domains;
 	if (bp->type != ttm_bo_type_kernel &&
+	    !(bp->flags & AMDGPU_GEM_CREATE_DISCARDABLE) &&
 	    bo->allowed_domains == AMDGPU_GEM_DOMAIN_VRAM)
 		bo->allowed_domains |= AMDGPU_GEM_DOMAIN_GTT;
 
@@ -612,9 +610,8 @@ int amdgpu_bo_create(struct amdgpu_device *adev,
 		if (unlikely(r))
 			goto fail_unreserve;
 
-		amdgpu_bo_fence(bo, fence, false);
-		dma_fence_put(bo->tbo.moving);
-		bo->tbo.moving = dma_fence_get(fence);
+		dma_resv_add_fence(bo->tbo.base.resv, fence,
+				   DMA_RESV_USAGE_KERNEL);
 		dma_fence_put(fence);
 	}
 	if (!bp->resv)
@@ -761,17 +758,17 @@ int amdgpu_bo_kmap(struct amdgpu_bo *bo, void **ptr)
 	if (bo->flags & AMDGPU_GEM_CREATE_NO_CPU_ACCESS)
 		return -EPERM;
 
+	r = dma_resv_wait_timeout(bo->tbo.base.resv, DMA_RESV_USAGE_KERNEL,
+				  false, MAX_SCHEDULE_TIMEOUT);
+	if (r < 0)
+		return r;
+
 	kptr = amdgpu_bo_kptr(bo);
 	if (kptr) {
 		if (ptr)
 			*ptr = kptr;
 		return 0;
 	}
-
-	r = dma_resv_wait_timeout(bo->tbo.base.resv, false, false,
-				  MAX_SCHEDULE_TIMEOUT);
-	if (r < 0)
-		return r;
 
 	r = ttm_bo_kmap(&bo->tbo, 0, bo->tbo.resource->num_pages, &bo->kmap);
 	if (r)
@@ -881,6 +878,10 @@ int amdgpu_bo_pin_restricted(struct amdgpu_bo *bo, u32 domain,
 
 	if (WARN_ON_ONCE(min_offset > max_offset))
 		return -EINVAL;
+
+	/* Check domain to be pinned to against preferred domains */
+	if (bo->preferred_domains & domain)
+		domain = bo->preferred_domains & domain;
 
 	/* A shared bo cannot be migrated to VRAM */
 	if (bo->tbo.base.import_attach) {
@@ -1019,7 +1020,9 @@ static const char *amdgpu_vram_names[] = {
 	"DDR3",
 	"DDR4",
 	"GDDR6",
-	"DDR5"
+	"DDR5",
+	"LPDDR4",
+	"LPDDR5"
 };
 
 /**
@@ -1390,11 +1393,17 @@ void amdgpu_bo_fence(struct amdgpu_bo *bo, struct dma_fence *fence,
 		     bool shared)
 {
 	struct dma_resv *resv = bo->tbo.base.resv;
+	int r;
 
-	if (shared)
-		dma_resv_add_shared_fence(resv, fence);
-	else
-		dma_resv_add_excl_fence(resv, fence);
+	r = dma_resv_reserve_fences(resv, 1);
+	if (r) {
+		/* As last resort on OOM we block for the fence */
+		dma_fence_wait(fence, false);
+		return;
+	}
+
+	dma_resv_add_fence(resv, fence, shared ? DMA_RESV_USAGE_READ :
+			   DMA_RESV_USAGE_WRITE);
 }
 
 /**
@@ -1494,7 +1503,8 @@ u64 amdgpu_bo_gpu_offset_no_check(struct amdgpu_bo *bo)
 uint32_t amdgpu_bo_get_preferred_domain(struct amdgpu_device *adev,
 					    uint32_t domain)
 {
-	if (domain == (AMDGPU_GEM_DOMAIN_VRAM | AMDGPU_GEM_DOMAIN_GTT)) {
+	if ((domain == (AMDGPU_GEM_DOMAIN_VRAM | AMDGPU_GEM_DOMAIN_GTT)) &&
+	    ((adev->asic_type == CHIP_CARRIZO) || (adev->asic_type == CHIP_STONEY))) {
 		domain = AMDGPU_GEM_DOMAIN_VRAM;
 		if (adev->gmc.real_vram_size <= AMDGPU_SG_THRESHOLD)
 			domain = AMDGPU_GEM_DOMAIN_GTT;

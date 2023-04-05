@@ -144,14 +144,19 @@ struct fwnode_operations {
 			 struct device *dev))
 	RH_KABI_EXTEND(const char *(*get_name)(const struct fwnode_handle *fwnode))
 	RH_KABI_EXTEND(const char *(*get_name_prefix)(const struct fwnode_handle *fwnode))
+	RH_KABI_EXTEND(bool (*device_dma_supported)(const struct fwnode_handle *fwnode))
+	RH_KABI_EXTEND(enum dev_dma_attr
+	               (*device_get_dma_attr)(const struct fwnode_handle *fwnode))
+	RH_KABI_EXTEND(void __iomem *(*iomap)(struct fwnode_handle *fwnode, int index))
+	RH_KABI_EXTEND( int (*irq_get)(const struct fwnode_handle *fwnode, unsigned int index))
 };
 
-#define fwnode_has_op(fwnode, op)				\
-	((fwnode) && (fwnode)->ops && (fwnode)->ops->op)
+#define fwnode_has_op(fwnode, op)					\
+	(!IS_ERR_OR_NULL(fwnode) && (fwnode)->ops && (fwnode)->ops->op)
+
 #define fwnode_call_int_op(fwnode, op, ...)				\
-	(fwnode ? (fwnode_has_op(fwnode, op) ?				\
-		   (fwnode)->ops->op(fwnode, ## __VA_ARGS__) : -ENXIO) : \
-	 -EINVAL)
+	(fwnode_has_op(fwnode, op) ?					\
+	 (fwnode)->ops->op(fwnode, ## __VA_ARGS__) : (IS_ERR_OR_NULL(fwnode) ? -EINVAL : -ENXIO))
 
 #define fwnode_call_bool_op(fwnode, op, ...)		\
 	(fwnode_has_op(fwnode, op) ?			\

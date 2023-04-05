@@ -1,7 +1,9 @@
+#include "misc.h"
 #include <asm/e820/types.h>
 #include <asm/processor.h>
 #include "pgtable.h"
 #include "../string.h"
+#include "efi.h"
 
 /*
  * __force_order is used by special_insns.h asm code to force instruction

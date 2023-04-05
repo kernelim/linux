@@ -1033,9 +1033,10 @@ static int do_replace_finish(struct net *net, struct ebt_replace *repl,
 		goto free_iterate;
 	}
 
-	/* the table doesn't like it */
-	if (t->check && (ret = t->check(newinfo, repl->valid_hooks)))
+	if (repl->valid_hooks != t->valid_hooks) {
+		ret = -EINVAL;
 		goto free_unlock;
+	}
 
 	if (repl->num_counters && repl->num_counters != t->private->nentries) {
 		BUGPRINT("Wrong nr. of counters requested\n");
@@ -1225,16 +1226,8 @@ int ebt_register_table(struct net *net, const struct ebt_table *input_table,
 				((char *)repl->hook_entry[i] - repl->entries);
 	}
 	ret = translate_table(net, repl->name, newinfo);
-	if (ret != 0) {
-		BUGPRINT("Translate_table failed\n");
+	if (ret != 0)
 		goto free_chainstack;
-	}
-
-	if (table->check && table->check(newinfo, table->valid_hooks)) {
-		BUGPRINT("The table doesn't like its own initial data, lol\n");
-		ret = -EINVAL;
-		goto free_chainstack;
-	}
 
 	table->private = newinfo;
 	rwlock_init(&table->lock);

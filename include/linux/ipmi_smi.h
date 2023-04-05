@@ -30,11 +30,6 @@ struct device;
 /* Structure for the low-level drivers. */
 typedef struct ipmi_smi *ipmi_smi_t;
 
-/* RHEL extension for struct ipmi_smi_msg
- */
-struct ipmi_smi_msg_rh {
-};
-
 /*
  * Flags for set_check_watch() below.  Tells if the SMI should be
  * waiting for watchdog timeouts, commands and/or messages.
@@ -42,6 +37,65 @@ struct ipmi_smi_msg_rh {
 #define IPMI_WATCH_MASK_CHECK_MESSAGES	(1 << 0)
 #define IPMI_WATCH_MASK_CHECK_WATCHDOG	(1 << 1)
 #define IPMI_WATCH_MASK_CHECK_COMMANDS	(1 << 2)
+
+/*
+ * SMI messages
+ *
+ * When communicating with an SMI, messages come in two formats:
+ *
+ * * Normal (to a BMC over a BMC interface)
+ *
+ * * IPMB (over a IPMB to another MC)
+ *
+ * When normal, commands are sent using the format defined by a
+ * standard message over KCS (NetFn must be even):
+ *
+ *   +-----------+-----+------+
+ *   | NetFn/LUN | Cmd | Data |
+ *   +-----------+-----+------+
+ *
+ * And responses, similarly, with an completion code added (NetFn must
+ * be odd):
+ *
+ *   +-----------+-----+------+------+
+ *   | NetFn/LUN | Cmd | CC   | Data |
+ *   +-----------+-----+------+------+
+ *
+ * With normal messages, only commands are sent and only responses are
+ * received.
+ *
+ * In IPMB mode, we are acting as an IPMB device. Commands will be in
+ * the following format (NetFn must be even):
+ *
+ *   +-------------+------+-------------+-----+------+
+ *   | NetFn/rsLUN | Addr | rqSeq/rqLUN | Cmd | Data |
+ *   +-------------+------+-------------+-----+------+
+ *
+ * Responses will using the following format:
+ *
+ *   +-------------+------+-------------+-----+------+------+
+ *   | NetFn/rqLUN | Addr | rqSeq/rsLUN | Cmd | CC   | Data |
+ *   +-------------+------+-------------+-----+------+------+
+ *
+ * This is similar to the format defined in the IPMB manual section
+ * 2.11.1 with the checksums and the first address removed.  Also, the
+ * address is always the remote address.
+ *
+ * IPMB messages can be commands and responses in both directions.
+ * Received commands are handled as received commands from the message
+ * queue.
+ */
+
+enum ipmi_smi_msg_type {
+	IPMI_SMI_MSG_TYPE_NORMAL = 0,
+	IPMI_SMI_MSG_TYPE_IPMB_DIRECT
+};
+
+/* RHEL extension for struct ipmi_smi_msg
+ */
+struct ipmi_smi_msg_rh {
+	enum ipmi_smi_msg_type type;
+};
 
 /*
  * Messages to/from the lower layer.  The smi interface will take one
@@ -84,6 +138,12 @@ struct ipmi_smi_msg {
  */
 struct ipmi_smi_handlers_rh {
 };
+
+#define INIT_IPMI_SMI_MSG(done_handler) \
+{						\
+	.done = done_handler,			\
+	._rh.type = IPMI_SMI_MSG_TYPE_NORMAL	\
+}
 
 struct ipmi_smi_handlers {
 	struct module *owner;
@@ -172,7 +232,20 @@ struct ipmi_smi_handlers {
 	 */
 	void (*set_maintenance_mode)(void *send_info, bool enable);
 
-	RH_KABI_AUX_PTR(ipmi_smi_handlers)
+	/* Capabilities of the SMI. */
+#define IPMI_SMI_CAN_HANDLE_IPMB_DIRECT		(1 << 0)
+
+#ifndef __GENKSYMS__
+	/* The RH_KABI_AUX_PTR macro inserts two 8-byte fields
+	 * - an 8-byte size_t field for the size of the aux pointer's target
+	 * - an 8-byte pointer
+	 */
+	unsigned int flags;	/* 4 bytes */
+	unsigned int pad_1;	/* 4 bytes */
+	void *pad_2;		/* 8 bytes */
+#else
+	RH_KABI_AUX_PTR(ipmi_smi_handlers)	/* 16 bytes */
+#endif
 };
 
 struct ipmi_device_id {

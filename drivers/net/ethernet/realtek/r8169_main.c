@@ -5383,7 +5383,7 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	dev->ethtool_ops = &rtl8169_ethtool_ops;
 
-	netif_napi_add(dev, &tp->napi, rtl8169_poll, NAPI_POLL_WEIGHT);
+	netif_napi_add(dev, &tp->napi, rtl8169_poll);
 
 	dev->hw_features = NETIF_F_IP_CSUM | NETIF_F_RXCSUM |
 			   NETIF_F_HW_VLAN_CTAG_TX | NETIF_F_HW_VLAN_CTAG_RX;
@@ -5410,12 +5410,12 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	 */
 	if (rtl_chip_supports_csum_v2(tp)) {
 		dev->hw_features |= NETIF_F_SG | NETIF_F_TSO | NETIF_F_TSO6;
-		netif_set_gso_max_size(dev, RTL_GSO_MAX_SIZE_V2);
-		netif_set_gso_max_segs(dev, RTL_GSO_MAX_SEGS_V2);
+		netif_set_tso_max_size(dev, RTL_GSO_MAX_SIZE_V2);
+		netif_set_tso_max_segs(dev, RTL_GSO_MAX_SEGS_V2);
 	} else {
 		dev->hw_features |= NETIF_F_SG | NETIF_F_TSO;
-		netif_set_gso_max_size(dev, RTL_GSO_MAX_SIZE_V1);
-		netif_set_gso_max_segs(dev, RTL_GSO_MAX_SEGS_V1);
+		netif_set_tso_max_size(dev, RTL_GSO_MAX_SIZE_V1);
+		netif_set_tso_max_segs(dev, RTL_GSO_MAX_SEGS_V1);
 	}
 
 	dev->hw_features |= NETIF_F_RXALL;

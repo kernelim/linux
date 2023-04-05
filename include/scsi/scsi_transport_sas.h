@@ -7,6 +7,7 @@
 #include <linux/mutex.h>
 #include <scsi/sas.h>
 #include <linux/bsg-lib.h>
+#include <linux/rh_kabi.h>
 
 struct scsi_transport_template;
 struct sas_rphy;
@@ -41,6 +42,7 @@ enum sas_linkrate {
 	SAS_LINK_RATE_G2 = SAS_LINK_RATE_3_0_GBPS,
 	SAS_LINK_RATE_6_0_GBPS = 10,
 	SAS_LINK_RATE_12_0_GBPS = 11,
+	RH_KABI_BROKEN_INSERT_ENUM(SAS_LINK_RATE_22_5_GBPS = 12)
 	/* These are virtual to the transport class and may never
 	 * be signalled normally since the standard defined field
 	 * is only 4 bits */

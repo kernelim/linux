@@ -1441,7 +1441,7 @@ static int rndis_netdev_set_hwcaps(struct rndis_device *rndis_device,
 	 */
 	net->features &= ~NETVSC_SUPPORTED_HW_FEATURES | net->hw_features;
 
-	netif_set_gso_max_size(net, gso_max_size);
+	netif_set_tso_max_size(net, gso_max_size);
 
 	ret = rndis_filter_set_offload_params(net, nvdev, &offloads);
 
@@ -1585,7 +1585,7 @@ struct netvsc_device *rndis_filter_device_add(struct hv_device *dev,
 
 	for (i = 1; i < net_device->num_chn; i++)
 		netif_napi_add(net, &net_device->chan_table[i].napi,
-			       netvsc_poll, NAPI_POLL_WEIGHT);
+			       netvsc_poll);
 
 	return net_device;
 

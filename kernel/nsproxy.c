@@ -155,12 +155,12 @@ int copy_namespaces(unsigned long flags, struct task_struct *tsk)
 	struct nsproxy *old_ns = tsk->nsproxy;
 	struct user_namespace *user_ns = task_cred_xxx(tsk, user_ns);
 	struct nsproxy *new_ns;
-	int ret;
 
 	if (likely(!(flags & (CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC |
 			      CLONE_NEWPID | CLONE_NEWNET |
 			      CLONE_NEWCGROUP | CLONE_NEWTIME)))) {
-		if (likely(old_ns->time_ns_for_children == old_ns->time_ns)) {
+		if ((flags & CLONE_VM) ||
+		    likely(old_ns->time_ns_for_children == old_ns->time_ns)) {
 			get_nsproxy(old_ns);
 			return 0;
 		}
@@ -182,11 +182,8 @@ int copy_namespaces(unsigned long flags, struct task_struct *tsk)
 	if (IS_ERR(new_ns))
 		return  PTR_ERR(new_ns);
 
-	ret = timens_on_fork(new_ns, tsk);
-	if (ret) {
-		free_nsproxy(new_ns);
-		return ret;
-	}
+	if ((flags & CLONE_VM) == 0)
+		timens_on_fork(new_ns, tsk);
 
 	tsk->nsproxy = new_ns;
 	return 0;
@@ -259,6 +256,23 @@ void switch_task_namespaces(struct task_struct *p, struct nsproxy *new)
 void exit_task_namespaces(struct task_struct *p)
 {
 	switch_task_namespaces(p, NULL);
+}
+
+int exec_task_namespaces(void)
+{
+	struct task_struct *tsk = current;
+	struct nsproxy *new;
+
+	if (tsk->nsproxy->time_ns_for_children == tsk->nsproxy->time_ns)
+		return 0;
+
+	new = create_new_namespaces(0, tsk, current_user_ns(), tsk->fs);
+	if (IS_ERR(new))
+		return PTR_ERR(new);
+
+	timens_on_fork(new, tsk);
+	switch_task_namespaces(tsk, new);
+	return 0;
 }
 
 SYSCALL_DEFINE2(setns, int, fd, int, nstype)

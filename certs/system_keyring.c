@@ -19,7 +19,6 @@
 #include <keys/asymmetric-type.h>
 #include <keys/system_keyring.h>
 #include <crypto/pkcs7.h>
-#include "common.h"
 
 static struct key *builtin_trusted_keys;
 #ifdef CONFIG_SECONDARY_TRUSTED_KEYRING
@@ -143,8 +142,9 @@ static __init int load_system_certificate_list(void)
 {
 	pr_notice("Loading compiled-in X.509 certificates\n");
 
-	return load_certificate_list(system_certificate_list, system_certificate_list_size,
-				     builtin_trusted_keys);
+	return x509_load_certificate_list(system_certificate_list,
+					  system_certificate_list_size,
+					  builtin_trusted_keys);
 }
 late_initcall(load_system_certificate_list);
 

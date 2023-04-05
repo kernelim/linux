@@ -25,6 +25,7 @@ available subsections can be seen below.
    component
    message-based
    sound
+   aperture
    frame-buffer
    regulator
    iio/index

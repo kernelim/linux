@@ -1775,8 +1775,7 @@ static int xennet_create_queues(struct netfront_info *info,
 			break;
 		}
 
-		netif_napi_add(queue->info->netdev, &queue->napi,
-			       xennet_poll, 64);
+		netif_napi_add(queue->info->netdev, &queue->napi, xennet_poll);
 		if (netif_running(info->netdev))
 			napi_enable(&queue->napi);
 	}

@@ -1599,8 +1599,8 @@ static int rcar_canfd_channel_probe(struct rcar_canfd_global *gpriv, u32 ch,
 	priv->gpriv = gpriv;
 	SET_NETDEV_DEV(ndev, &pdev->dev);
 
-	netif_napi_add(ndev, &priv->napi, rcar_canfd_rx_poll,
-		       RCANFD_NAPI_WEIGHT);
+	netif_napi_add_weight(ndev, &priv->napi, rcar_canfd_rx_poll,
+			      RCANFD_NAPI_WEIGHT);
 	err = register_candev(ndev);
 	if (err) {
 		dev_err(&pdev->dev,

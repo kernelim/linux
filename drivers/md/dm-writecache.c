@@ -1596,7 +1596,8 @@ done:
 
 	default:
 		BUG();
-		return -1;
+		wc_unlock(wc);
+		return DM_MAPIO_KILL;
 	}
 }
 

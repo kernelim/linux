@@ -641,21 +641,6 @@ static int rt6_score_route(struct fib6_info *rt, int oif, int strict)
 	return m;
 }
 
-/* called with rc_read_lock held */
-static inline bool fib6_ignore_linkdown(const struct fib6_info *f6i)
-{
-	const struct net_device *dev = fib6_info_nh_dev(f6i);
-	bool rc = false;
-
-	if (dev) {
-		const struct inet6_dev *idev = __in6_dev_get(dev);
-
-		rc = !!idev->cnf.ignore_routes_with_linkdown;
-	}
-
-	return rc;
-}
-
 static struct fib6_info *find_match(struct fib6_info *rt, int oif, int strict,
 				   int *mpri, struct fib6_info *match,
 				   bool *do_rr)
@@ -666,7 +651,7 @@ static struct fib6_info *find_match(struct fib6_info *rt, int oif, int strict,
 	if (rt->fib6_nh.nh_flags & RTNH_F_DEAD)
 		goto out;
 
-	if (fib6_ignore_linkdown(rt) &&
+	if (ip6_ignore_linkdown(rt->fib6_nh.nh_dev) &&
 	    rt->fib6_nh.nh_flags & RTNH_F_LINKDOWN &&
 	    !(strict & RT6_LOOKUP_F_IGNORE_LINKSTATE))
 		goto out;
@@ -1069,9 +1054,6 @@ static struct rt6_info *ip6_pol_route_lookup(struct net *net,
 	struct fib6_info *f6i;
 	struct fib6_node *fn;
 	struct rt6_info *rt;
-
-	if (fl6->flowi6_flags & FLOWI_FLAG_SKIP_NH_OIF)
-		flags &= ~RT6_LOOKUP_F_IFACE;
 
 	rcu_read_lock();
 	fn = fib6_node_lookup(&table->tb6_root, &fl6->daddr, &fl6->saddr);
@@ -1858,9 +1840,6 @@ struct fib6_info *fib6_table_lookup(struct net *net, struct fib6_table *table,
 	fn = fib6_node_lookup(&table->tb6_root, &fl6->daddr, &fl6->saddr);
 	saved_fn = fn;
 
-	if (fl6->flowi6_flags & FLOWI_FLAG_SKIP_NH_OIF)
-		oif = 0;
-
 redo_rt6_select:
 	f6i = rt6_select(net, fn, oif, strict);
 	if (f6i == net->ipv6.fib6_null_entry) {
@@ -2644,12 +2623,6 @@ static struct rt6_info *__ip6_route_redirect(struct net *net,
 	struct rt6_info *ret = NULL, *rt_cache;
 	struct fib6_info *rt;
 	struct fib6_node *fn;
-
-	/* l3mdev_update_flow overrides oif if the device is enslaved; in
-	 * this case we must match on the real ingress device, so reset it
-	 */
-	if (fl6->flowi6_flags & FLOWI_FLAG_SKIP_NH_OIF)
-		fl6->flowi6_oif = skb->dev->ifindex;
 
 	/* Get the "current" route for this destination and
 	 * check if the redirect has come from appropriate router.
@@ -3916,25 +3889,29 @@ int ipv6_route_ioctl(struct net *net, unsigned int cmd, void __user *arg)
 
 static int ip6_pkt_drop(struct sk_buff *skb, u8 code, int ipstats_mib_noroutes)
 {
+	SKB_DR(reason);
 	int type;
 	struct dst_entry *dst = skb_dst(skb);
 	switch (ipstats_mib_noroutes) {
 	case IPSTATS_MIB_INNOROUTES:
 		type = ipv6_addr_type(&ipv6_hdr(skb)->daddr);
 		if (type == IPV6_ADDR_ANY) {
+			SKB_DR_SET(reason, IP_INADDRERRORS);
 			IP6_INC_STATS(dev_net(dst->dev),
 				      __in6_dev_get_safely(skb->dev),
 				      IPSTATS_MIB_INADDRERRORS);
 			break;
 		}
+		SKB_DR_SET(reason, IP_INNOROUTES);
 		/* FALLTHROUGH */
 	case IPSTATS_MIB_OUTNOROUTES:
+		SKB_DR_OR(reason, IP_OUTNOROUTES);
 		IP6_INC_STATS(dev_net(dst->dev), ip6_dst_idev(dst),
 			      ipstats_mib_noroutes);
 		break;
 	}
 	icmpv6_send(skb, ICMPV6_DEST_UNREACH, code, 0);
-	kfree_skb(skb);
+	kfree_skb_reason(skb, reason);
 	return 0;
 }
 
@@ -4097,7 +4074,7 @@ static bool rt6_is_dead(const struct fib6_info *rt)
 {
 	if (rt->fib6_nh.nh_flags & RTNH_F_DEAD ||
 	    (rt->fib6_nh.nh_flags & RTNH_F_LINKDOWN &&
-	     fib6_ignore_linkdown(rt)))
+	     ip6_ignore_linkdown(rt->fib6_nh.nh_dev)))
 		return true;
 
 	return false;
@@ -4924,7 +4901,7 @@ static int rt6_nexthop_info(struct sk_buff *skb, struct fib6_info *rt,
 		*flags |= RTNH_F_LINKDOWN;
 
 		rcu_read_lock();
-		if (fib6_ignore_linkdown(rt))
+		if (ip6_ignore_linkdown(rt->fib6_nh.nh_dev))
 			*flags |= RTNH_F_DEAD;
 		rcu_read_unlock();
 	}

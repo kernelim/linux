@@ -873,8 +873,8 @@ __bad_area_nosemaphore(struct pt_regs *regs, unsigned long error_code,
 
 		if (si_code == SEGV_PKUERR)
 			force_sig_pkuerr((void __user *)address, pkey);
-
-		force_sig_fault(SIGSEGV, si_code, (void __user *)address, tsk);
+		else
+			force_sig_fault(SIGSEGV, si_code, (void __user *)address, tsk);
 
 		return;
 	}
@@ -1197,7 +1197,7 @@ access_error(unsigned long error_code, struct vm_area_struct *vma)
 		return 1;
 
 	/* read, not present: */
-	if (unlikely(!(vma->vm_flags & (VM_READ | VM_EXEC | VM_WRITE))))
+	if (unlikely(!vma_is_accessible(vma)))
 		return 1;
 
 	return 0;
@@ -1287,7 +1287,7 @@ void do_user_addr_fault(struct pt_regs *regs,
 	struct vm_area_struct *vma;
 	struct task_struct *tsk;
 	struct mm_struct *mm;
-	vm_fault_t fault, major = 0;
+	vm_fault_t fault;
 	unsigned int flags = FAULT_FLAG_DEFAULT;
 
 	tsk = current;
@@ -1434,8 +1434,7 @@ good_area:
 	 * userland). The return to userland is identified whenever
 	 * FAULT_FLAG_USER|FAULT_FLAG_KILLABLE are both set in flags.
 	 */
-	fault = handle_mm_fault(vma, address, flags);
-	major |= fault & VM_FAULT_MAJOR;
+	fault = handle_mm_fault(vma, address, flags, regs);
 
 	/* Quick path to respond to signals */
 	if (fault_signal_pending(fault, regs)) {
@@ -1460,18 +1459,6 @@ good_area:
 	if (unlikely(fault & VM_FAULT_ERROR)) {
 		mm_fault_error(regs, sw_error_code, address, fault);
 		return;
-	}
-
-	/*
-	 * Major/minor page fault accounting. If any of the events
-	 * returned VM_FAULT_MAJOR, we account it as a major fault.
-	 */
-	if (major) {
-		tsk->maj_flt++;
-		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ, 1, regs, address);
-	} else {
-		tsk->min_flt++;
-		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN, 1, regs, address);
 	}
 
 	check_v8086_mode(regs, address, tsk);

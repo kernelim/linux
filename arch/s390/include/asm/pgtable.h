@@ -1201,6 +1201,12 @@ void gmap_pmdp_invalidate(struct mm_struct *mm, unsigned long vmaddr);
 void gmap_pmdp_idte_local(struct mm_struct *mm, unsigned long vmaddr);
 void gmap_pmdp_idte_global(struct mm_struct *mm, unsigned long vmaddr);
 
+#define pgprot_writecombine	pgprot_writecombine
+pgprot_t pgprot_writecombine(pgprot_t prot);
+
+#define pgprot_writethrough	pgprot_writethrough
+pgprot_t pgprot_writethrough(pgprot_t prot);
+
 /*
  * Certain architectures need to do special things when PTEs
  * within a page table are directly modified.  Thus, the following
@@ -1209,8 +1215,6 @@ void gmap_pmdp_idte_global(struct mm_struct *mm, unsigned long vmaddr);
 static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
 			      pte_t *ptep, pte_t entry)
 {
-	if (!MACHINE_HAS_NX)
-		pte_val(entry) &= ~_PAGE_NOEXEC;
 	if (pte_present(entry))
 		pte_val(entry) &= ~_PAGE_UNUSED;
 	if (mm_has_pgste(mm))
@@ -1226,7 +1230,10 @@ static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
 static inline pte_t mk_pte_phys(unsigned long physpage, pgprot_t pgprot)
 {
 	pte_t __pte;
-	pte_val(__pte) = physpage + pgprot_val(pgprot);
+
+	pte_val(__pte) = physpage | pgprot_val(pgprot);
+	if (!MACHINE_HAS_NX)
+		pte_val(__pte) &= ~_PAGE_NOEXEC;
 	return pte_mkyoung(__pte);
 }
 

@@ -142,8 +142,8 @@ exit:
 }
 
 static int prism2_add_key(struct wiphy *wiphy, struct net_device *dev,
-			  u8 key_index, bool pairwise, const u8 *mac_addr,
-			  struct key_params *params)
+			  int link_id, u8 key_index, bool pairwise,
+			  const u8 *mac_addr, struct key_params *params)
 {
 	struct wlandevice *wlandev = dev->ml_priv;
 	u32 did;
@@ -185,7 +185,7 @@ exit:
 }
 
 static int prism2_get_key(struct wiphy *wiphy, struct net_device *dev,
-			  u8 key_index, bool pairwise,
+			  int link_id, u8 key_index, bool pairwise,
 			  const u8 *mac_addr, void *cookie,
 			  void (*callback)(void *cookie, struct key_params*))
 {
@@ -215,7 +215,8 @@ static int prism2_get_key(struct wiphy *wiphy, struct net_device *dev,
 }
 
 static int prism2_del_key(struct wiphy *wiphy, struct net_device *dev,
-			  u8 key_index, bool pairwise, const u8 *mac_addr)
+			  int link_id, u8 key_index, bool pairwise,
+			  const u8 *mac_addr)
 {
 	struct wlandevice *wlandev = dev->ml_priv;
 	u32 did;
@@ -240,7 +241,8 @@ static int prism2_del_key(struct wiphy *wiphy, struct net_device *dev,
 }
 
 static int prism2_set_default_key(struct wiphy *wiphy, struct net_device *dev,
-				  u8 key_index, bool unicast, bool multicast)
+				  int link_id, u8 key_index, bool unicast,
+				  bool multicast)
 {
 	struct wlandevice *wlandev = dev->ml_priv;
 
@@ -668,7 +670,7 @@ void prism2_disconnected(struct wlandevice *wlandev)
 void prism2_roamed(struct wlandevice *wlandev)
 {
 	struct cfg80211_roam_info roam_info = {
-		.bssid = wlandev->bssid,
+		.links[0].bssid = wlandev->bssid,
 	};
 
 	cfg80211_roamed(wlandev->netdev, &roam_info, GFP_KERNEL);

@@ -176,11 +176,6 @@ int intel_svm_finish_prq(struct intel_iommu *iommu)
 	return 0;
 }
 
-static inline bool intel_svm_capable(struct intel_iommu *iommu)
-{
-	return iommu->flags & VTD_FLAG_SVM_CAPABLE;
-}
-
 void intel_svm_check(struct intel_iommu *iommu)
 {
 	if (!pasid_supported(iommu))
@@ -979,6 +974,10 @@ bad_req:
 			       iommu->name);
 			goto bad_req;
 		}
+
+		/* Drop Stop Marker message. No need for a response. */
+		if (unlikely(req->lpig && !req->rd_req && !req->wr_req))
+			goto prq_advance;
 
 		if (!svm || svm->pasid != req->pasid) {
 			/*

@@ -1438,21 +1438,20 @@ void __init apic_intr_mode_init(void)
 		return;
 	case APIC_VIRTUAL_WIRE:
 		pr_info("APIC: Switch to virtual wire mode setup\n");
-		default_setup_apic_routing();
 		break;
 	case APIC_VIRTUAL_WIRE_NO_CONFIG:
 		pr_info("APIC: Switch to virtual wire mode setup with no configuration\n");
 		upmode = true;
-		default_setup_apic_routing();
 		break;
 	case APIC_SYMMETRIC_IO:
 		pr_info("APIC: Switch to symmetric I/O mode setup\n");
-		default_setup_apic_routing();
 		break;
 	case APIC_SYMMETRIC_IO_NO_ROUTING:
 		pr_info("APIC: Switch to symmetric I/O mode setup in no SMP routine\n");
 		break;
 	}
+
+	default_setup_apic_routing();
 
 	if (x86_platform.apic_post_init)
 		x86_platform.apic_post_init();
@@ -2309,6 +2308,11 @@ static int cpuid_to_apicid[] = {
 	[0 ... NR_CPUS - 1] = -1,
 };
 
+bool arch_match_cpu_phys_id(int cpu, u64 phys_id)
+{
+	return phys_id == cpuid_to_apicid[cpu];
+}
+
 #ifdef CONFIG_SMP
 /**
  * apic_id_is_primary_thread - Check whether APIC ID belongs to a primary thread
@@ -2515,6 +2519,16 @@ u32 x86_msi_msg_get_destid(struct msi_msg *msg, bool extid)
 	return dest;
 }
 EXPORT_SYMBOL_GPL(x86_msi_msg_get_destid);
+
+#ifdef CONFIG_X86_64
+void __init acpi_wake_cpu_handler_update(wakeup_cpu_handler handler)
+{
+	struct apic **drv;
+
+	for (drv = __apicdrivers; drv < __apicdrivers_end; drv++)
+		(*drv)->wakeup_secondary_cpu_64 = handler;
+}
+#endif
 
 /*
  * Override the generic EOI implementation with an optimized version.

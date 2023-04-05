@@ -52,7 +52,6 @@ MODULE_AUTHOR("Paul Diefenbaugh");
 MODULE_DESCRIPTION("ACPI AC Adapter Driver");
 MODULE_LICENSE("GPL");
 
-
 static int acpi_ac_add(struct acpi_device *device);
 static int acpi_ac_remove(struct acpi_device *device);
 static void acpi_ac_notify(struct acpi_device *device, u32 event);
@@ -157,6 +156,7 @@ static int get_ac_property(struct power_supply *psy,
 	default:
 		return -EINVAL;
 	}
+
 	return 0;
 }
 
@@ -421,6 +421,7 @@ static int acpi_ac_resume(struct device *dev)
 		return 0;
 	if (old_state != ac->state)
 		kobject_uevent(&ac->charger->dev.kobj, KOBJ_CHANGE);
+
 	return 0;
 }
 #else
@@ -430,7 +431,6 @@ static int acpi_ac_resume(struct device *dev)
 static int acpi_ac_remove(struct acpi_device *device)
 {
 	struct acpi_ac *ac = NULL;
-
 
 	if (!device || !acpi_driver_data(device))
 		return -EINVAL;

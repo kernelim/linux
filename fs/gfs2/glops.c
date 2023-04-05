@@ -193,7 +193,7 @@ static int rgrp_go_sync(struct gfs2_glock *gl)
 	struct gfs2_rgrpd *rgd = gfs2_glock2rgrp(gl);
 	int error;
 
-	if (!test_and_clear_bit(GLF_DIRTY, &gl->gl_flags))
+	if (!rgd || !test_and_clear_bit(GLF_DIRTY, &gl->gl_flags))
 		return 0;
 	GLOCK_BUG_ON(gl, gl->gl_state != LM_ST_EXCLUSIVE);
 
@@ -222,9 +222,12 @@ static void rgrp_go_inval(struct gfs2_glock *gl, int flags)
 	struct address_space *mapping = &sdp->sd_aspace;
 	struct gfs2_rgrpd *rgd = gfs2_glock2rgrp(gl);
 	const unsigned bsize = sdp->sd_sb.sb_bsize;
-	loff_t start = (rgd->rd_addr * bsize) & PAGE_MASK;
-	loff_t end = PAGE_ALIGN((rgd->rd_addr + rgd->rd_length) * bsize) - 1;
+	loff_t start, end;
 
+	if (!rgd)
+		return;
+	start = (rgd->rd_addr * bsize) & PAGE_MASK;
+	end = PAGE_ALIGN((rgd->rd_addr + rgd->rd_length) * bsize) - 1;
 	gfs2_rgrp_brelse(rgd);
 	WARN_ON_ONCE(!(flags & DIO_METADATA));
 	truncate_inode_pages_range(mapping, start, end);
@@ -480,35 +483,33 @@ int gfs2_inode_refresh(struct gfs2_inode *ip)
  * Returns: errno
  */
 
-static int inode_go_instantiate(struct gfs2_holder *gh)
+static int inode_go_instantiate(struct gfs2_glock *gl)
+{
+	struct gfs2_inode *ip = gl->gl_object;
+
+	if (!ip) /* no inode to populate - read it in later */
+		return 0;
+
+	return gfs2_inode_refresh(ip);
+}
+
+static int inode_go_held(struct gfs2_holder *gh)
 {
 	struct gfs2_glock *gl = gh->gh_gl;
-	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
 	struct gfs2_inode *ip = gl->gl_object;
 	int error = 0;
 
 	if (!ip) /* no inode to populate - read it in later */
-		goto out;
-
-	error = gfs2_inode_refresh(ip);
-	if (error)
-		goto out;
+		return 0;
 
 	if (gh->gh_state != LM_ST_DEFERRED)
 		inode_dio_wait(&ip->i_inode);
 
 	if ((ip->i_diskflags & GFS2_DIF_TRUNC_IN_PROG) &&
 	    (gl->gl_state == LM_ST_EXCLUSIVE) &&
-	    (gh->gh_state == LM_ST_EXCLUSIVE)) {
-		spin_lock(&sdp->sd_trunc_lock);
-		if (list_empty(&ip->i_trunc_list))
-			list_add(&ip->i_trunc_list, &sdp->sd_trunc_list);
-		spin_unlock(&sdp->sd_trunc_lock);
-		wake_up(&sdp->sd_quota_wait);
-		error = 1;
-	}
+	    (gh->gh_state == LM_ST_EXCLUSIVE))
+		error = gfs2_truncatei_resume(ip);
 
-out:
 	return error;
 }
 
@@ -643,15 +644,9 @@ static void iopen_go_callback(struct gfs2_glock *gl, bool remote)
 	if (gl->gl_demote_state == LM_ST_UNLOCKED &&
 	    gl->gl_state == LM_ST_SHARED && ip) {
 		gl->gl_lockref.count++;
-		if (!queue_delayed_work(gfs2_delete_workqueue,
-					&gl->gl_delete, 0))
+		if (!gfs2_queue_try_to_evict(gl))
 			gl->gl_lockref.count--;
 	}
-}
-
-static int iopen_go_demote_ok(const struct gfs2_glock *gl)
-{
-       return !gfs2_delete_work_queued(gl);
 }
 
 /**
@@ -731,6 +726,7 @@ const struct gfs2_glock_operations gfs2_inode_glops = {
 	.go_inval = inode_go_inval,
 	.go_demote_ok = inode_go_demote_ok,
 	.go_instantiate = inode_go_instantiate,
+	.go_held = inode_go_held,
 	.go_dump = inode_go_dump,
 	.go_type = LM_TYPE_INODE,
 	.go_flags = GLOF_ASPACE | GLOF_LRU | GLOF_LVB,
@@ -757,7 +753,7 @@ const struct gfs2_glock_operations gfs2_freeze_glops = {
 const struct gfs2_glock_operations gfs2_iopen_glops = {
 	.go_type = LM_TYPE_IOPEN,
 	.go_callback = iopen_go_callback,
-	.go_demote_ok = iopen_go_demote_ok,
+	.go_dump = inode_go_dump,
 	.go_flags = GLOF_LRU | GLOF_NONDISK,
 	.go_subclass = 1,
 };

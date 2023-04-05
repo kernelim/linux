@@ -300,9 +300,11 @@ static int __driver_deferred_probe_check_state(struct device *dev)
  * driver_deferred_probe_check_state() - Check deferred probe state
  * @dev: device to check
  *
- * Returns -ENODEV if init is done and all built-in drivers have had a chance
- * to probe (i.e. initcalls are done), -ETIMEDOUT if deferred probe debug
- * timeout has expired, or -EPROBE_DEFER if none of those conditions are met.
+ * Return:
+ * * -ENODEV if initcalls have completed and modules are disabled.
+ * * -ETIMEDOUT if the deferred probe timeout was set and has expired
+ *   and modules are enabled.
+ * * -EPROBE_DEFER in other cases.
  *
  * Drivers or subsystems can opt-in to calling this function instead of directly
  * returning -EPROBE_DEFER.
@@ -715,6 +717,8 @@ sysfs_failed:
 	if (dev->bus)
 		blocking_notifier_call_chain(&dev->bus->p->bus_notifier,
 					     BUS_NOTIFY_DRIVER_NOT_BOUND, dev);
+	if (dev->bus && dev->bus->dma_cleanup)
+		dev->bus->dma_cleanup(dev);
 pinctrl_bind_failed:
 	device_links_no_driver(dev);
 	device_unbind_cleanup(dev);
@@ -881,6 +885,11 @@ static int __device_attach_driver(struct device_driver *drv, void *_data)
 		dev_dbg(dev, "Device match requests probe deferral\n");
 		dev->can_match = true;
 		driver_deferred_probe_add(dev);
+		/*
+		 * Device can't match with a driver right now, so don't attempt
+		 * to match or bind with other drivers on the bus.
+		 */
+		return ret;
 	} else if (ret < 0) {
 		dev_dbg(dev, "Bus failed to match device: %d", ret);
 		return ret;
@@ -943,6 +952,7 @@ out_unlock:
 static int __device_attach(struct device *dev, bool allow_async)
 {
 	int ret = 0;
+	bool async = false;
 
 	device_lock(dev);
 	if (dev->driver) {
@@ -979,7 +989,7 @@ static int __device_attach(struct device *dev, bool allow_async)
 			 */
 			dev_dbg(dev, "scheduling asynchronous probe\n");
 			get_device(dev);
-			async_schedule_dev(__device_attach_async_helper, dev);
+			async = true;
 		} else {
 			pm_request_idle(dev);
 		}
@@ -989,6 +999,8 @@ static int __device_attach(struct device *dev, bool allow_async)
 	}
 out_unlock:
 	device_unlock(dev);
+	if (async)
+		async_schedule_dev(__device_attach_async_helper, dev);
 	return ret;
 }
 
@@ -1082,6 +1094,7 @@ static void __driver_attach_async_helper(void *_dev, async_cookie_t cookie)
 
 	__device_driver_lock(dev, dev->parent);
 	drv = dev->p->async_driver;
+	dev->p->async_driver = NULL;
 	ret = driver_probe_device(drv, dev);
 	__device_driver_unlock(dev, dev->parent);
 
@@ -1093,6 +1106,7 @@ static void __driver_attach_async_helper(void *_dev, async_cookie_t cookie)
 static int __driver_attach(struct device *dev, void *data)
 {
 	struct device_driver *drv = data;
+	bool async = false;
 	int ret;
 
 	/*
@@ -1113,6 +1127,11 @@ static int __driver_attach(struct device *dev, void *data)
 		dev_dbg(dev, "Device match requests probe deferral\n");
 		dev->can_match = true;
 		driver_deferred_probe_add(dev);
+		/*
+		 * Driver could not match with device, but may match with
+		 * another device on the bus.
+		 */
+		return 0;
 	} else if (ret < 0) {
 		dev_dbg(dev, "Bus failed to match device: %d", ret);
 		return ret;
@@ -1128,12 +1147,14 @@ static int __driver_attach(struct device *dev, void *data)
 		 */
 		dev_dbg(dev, "probing driver %s asynchronously\n", drv->name);
 		device_lock(dev);
-		if (!dev->driver) {
+		if (!dev->driver && !dev->p->async_driver) {
 			get_device(dev);
 			dev->p->async_driver = drv;
-			async_schedule_dev(__driver_attach_async_helper, dev);
+			async = true;
 		}
 		device_unlock(dev);
+		if (async)
+			async_schedule_dev(__driver_attach_async_helper, dev);
 		return 0;
 	}
 
@@ -1197,6 +1218,9 @@ static void __device_release_driver(struct device *dev, struct device *parent)
 		pm_runtime_put_sync(dev);
 
 		device_remove(dev);
+
+		if (dev->bus && dev->bus->dma_cleanup)
+			dev->bus->dma_cleanup(dev);
 
 		device_links_driver_cleanup(dev);
 		device_unbind_cleanup(dev);

@@ -10,22 +10,6 @@
 #include "stmmac.h"
 #include "stmmac_ptp.h"
 
-#define INTEL_MGBE_ADHOC_ADDR	0x15
-#define INTEL_MGBE_XPCS_ADDR	0x16
-
-/* Selection for PTP Clock Freq belongs to PSE & PCH GbE */
-#define PSE_PTP_CLK_FREQ_MASK		(GMAC_GPO0 | GMAC_GPO3)
-#define PSE_PTP_CLK_FREQ_19_2MHZ	(GMAC_GPO0)
-#define PSE_PTP_CLK_FREQ_200MHZ		(GMAC_GPO0 | GMAC_GPO3)
-#define PSE_PTP_CLK_FREQ_256MHZ		(0)
-#define PCH_PTP_CLK_FREQ_MASK		(GMAC_GPO0)
-#define PCH_PTP_CLK_FREQ_19_2MHZ	(GMAC_GPO0)
-#define PCH_PTP_CLK_FREQ_200MHZ		(0)
-
-/* Cross-timestamping defines */
-#define ART_CPUID_LEAF		0x15
-#define EHL_PSE_ART_MHZ		19200000
-
 struct intel_priv_data {
 	int mdio_adhoc_addr;	/* mdio address for serdes & etc */
 	unsigned long crossts_adj;
@@ -101,6 +85,22 @@ static int intel_serdes_powerup(struct net_device *ndev, void *priv_data)
 		return 0;
 
 	serdes_phy_addr = intel_priv->mdio_adhoc_addr;
+
+	/* Set the serdes rate and the PCLK rate */
+	data = mdiobus_read(priv->mii, serdes_phy_addr,
+			    SERDES_GCR0);
+
+	data &= ~SERDES_RATE_MASK;
+	data &= ~SERDES_PCLK_MASK;
+
+	if (priv->plat->max_speed == 2500)
+		data |= SERDES_RATE_PCIE_GEN2 << SERDES_RATE_PCIE_SHIFT |
+			SERDES_PCLK_37p5MHZ << SERDES_PCLK_SHIFT;
+	else
+		data |= SERDES_RATE_PCIE_GEN1 << SERDES_RATE_PCIE_SHIFT |
+			SERDES_PCLK_70MHZ << SERDES_PCLK_SHIFT;
+
+	mdiobus_write(priv->mii, serdes_phy_addr, SERDES_GCR0, data);
 
 	/* assert clk_req */
 	data = mdiobus_read(priv->mii, serdes_phy_addr, SERDES_GCR0);
@@ -230,6 +230,31 @@ static void intel_serdes_powerdown(struct net_device *ndev, void *intel_data)
 	}
 }
 
+static void intel_speed_mode_2500(struct net_device *ndev, void *intel_data)
+{
+	struct intel_priv_data *intel_priv = intel_data;
+	struct stmmac_priv *priv = netdev_priv(ndev);
+	int serdes_phy_addr = 0;
+	u32 data = 0;
+
+	serdes_phy_addr = intel_priv->mdio_adhoc_addr;
+
+	/* Determine the link speed mode: 2.5Gbps/1Gbps */
+	data = mdiobus_read(priv->mii, serdes_phy_addr,
+			    SERDES_GCR);
+
+	if (((data & SERDES_LINK_MODE_MASK) >> SERDES_LINK_MODE_SHIFT) ==
+	    SERDES_LINK_MODE_2G5) {
+		dev_info(priv->device, "Link Speed Mode: 2.5Gbps\n");
+		priv->plat->max_speed = 2500;
+		priv->plat->phy_interface = PHY_INTERFACE_MODE_2500BASEX;
+		priv->plat->mdio_bus_data->xpcs_an_inband = false;
+	} else {
+		priv->plat->max_speed = 1000;
+		priv->plat->mdio_bus_data->xpcs_an_inband = true;
+	}
+}
+
 /* Program PTP Clock Frequency for different variant of
  * Intel mGBE that has slightly different GPO mapping
  */
@@ -272,6 +297,11 @@ static void get_arttime(struct mii_bus *mii, int intel_adhoc_addr,
 	*art_time = ns;
 }
 
+static int stmmac_cross_ts_isr(struct stmmac_priv *priv)
+{
+	return (readl(priv->ioaddr + GMAC_INT_STATUS) & GMAC_INT_TSIE);
+}
+
 static int intel_crosststamp(ktime_t *device,
 			     struct system_counterval_t *system,
 			     void *ctx)
@@ -287,8 +317,6 @@ static int intel_crosststamp(ktime_t *device,
 	u32 num_snapshot;
 	u32 gpio_value;
 	u32 acr_value;
-	int ret;
-	u32 v;
 	int i;
 
 	if (!boot_cpu_has(X86_FEATURE_ART))
@@ -301,6 +329,8 @@ static int intel_crosststamp(ktime_t *device,
 	 */
 	if (priv->plat->ext_snapshot_en)
 		return -EBUSY;
+
+	priv->plat->int_snapshot_en = 1;
 
 	mutex_lock(&priv->aux_ts_lock);
 	/* Enable Internal snapshot trigger */
@@ -321,6 +351,7 @@ static int intel_crosststamp(ktime_t *device,
 		break;
 	default:
 		mutex_unlock(&priv->aux_ts_lock);
+		priv->plat->int_snapshot_en = 0;
 		return -EINVAL;
 	}
 	writel(acr_value, ptpaddr + PTP_ACR);
@@ -342,13 +373,12 @@ static int intel_crosststamp(ktime_t *device,
 	gpio_value |= GMAC_GPO1;
 	writel(gpio_value, ioaddr + GMAC_GPIO_STATUS);
 
-	/* Poll for time sync operation done */
-	ret = readl_poll_timeout(priv->ioaddr + GMAC_INT_STATUS, v,
-				 (v & GMAC_INT_TSIE), 100, 10000);
-
-	if (ret == -ETIMEDOUT) {
-		pr_err("%s: Wait for time sync operation timeout\n", __func__);
-		return ret;
+	/* Time sync done Indication - Interrupt method */
+	if (!wait_event_interruptible_timeout(priv->tstamp_busy_wait,
+					      stmmac_cross_ts_isr(priv),
+					      HZ / 100)) {
+		priv->plat->int_snapshot_en = 0;
+		return -ETIMEDOUT;
 	}
 
 	num_snapshot = (readl(ioaddr + GMAC_TIMESTAMP_STATUS) &
@@ -357,15 +387,16 @@ static int intel_crosststamp(ktime_t *device,
 
 	/* Repeat until the timestamps are from the FIFO last segment */
 	for (i = 0; i < num_snapshot; i++) {
-		spin_lock_irqsave(&priv->ptp_lock, flags);
+		read_lock_irqsave(&priv->ptp_lock, flags);
 		stmmac_get_ptptime(priv, ptpaddr, &ptp_time);
 		*device = ns_to_ktime(ptp_time);
-		spin_unlock_irqrestore(&priv->ptp_lock, flags);
+		read_unlock_irqrestore(&priv->ptp_lock, flags);
 		get_arttime(priv->mii, intel_priv->mdio_adhoc_addr, &art_time);
 		*system = convert_art_to_tsc(art_time);
 	}
 
 	system->cycles *= intel_priv->crossts_adj;
+	priv->plat->int_snapshot_en = 0;
 
 	return 0;
 }
@@ -417,6 +448,7 @@ static void common_default_data(struct plat_stmmacenet_data *plat)
 static int intel_mgbe_common_data(struct pci_dev *pdev,
 				  struct plat_stmmacenet_data *plat)
 {
+	struct fwnode_handle *fwnode;
 	char clk_name[20];
 	int ret;
 	int i;
@@ -428,6 +460,18 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	plat->has_gmac4 = 1;
 	plat->force_sf_dma_mode = 0;
 	plat->tso_en = 1;
+	plat->sph_disable = 1;
+
+	/* Multiplying factor to the clk_eee_i clock time
+	 * period to make it closer to 100 ns. This value
+	 * should be programmed such that the clk_eee_time_period *
+	 * (MULT_FACT_100NS + 1) should be within 80 ns to 120 ns
+	 * clk_eee frequency is 19.2Mhz
+	 * clk_eee_time_period is 52ns
+	 * 52ns * (1 + 1) = 104ns
+	 * MULT_FACT_100NS = 1
+	 */
+	plat->mult_fact_100ns = 1;
 
 	plat->rx_sched_algorithm = MTL_RX_ALGORITHM_SP;
 
@@ -523,10 +567,40 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	/* Use the last Rx queue */
 	plat->vlan_fail_q = plat->rx_queues_to_use - 1;
 
+	/* For fixed-link setup, we allow phy-mode setting */
+	fwnode = dev_fwnode(&pdev->dev);
+	if (fwnode) {
+		int phy_mode;
+
+		/* "phy-mode" setting is optional. If it is set,
+		 *  we allow either sgmii or 1000base-x for now.
+		 */
+		phy_mode = fwnode_get_phy_mode(fwnode);
+		if (phy_mode >= 0) {
+			if (phy_mode == PHY_INTERFACE_MODE_SGMII ||
+			    phy_mode == PHY_INTERFACE_MODE_1000BASEX)
+				plat->phy_interface = phy_mode;
+			else
+				dev_warn(&pdev->dev, "Invalid phy-mode\n");
+		}
+	}
+
 	/* Intel mgbe SGMII interface uses pcs-xcps */
-	if (plat->phy_interface == PHY_INTERFACE_MODE_SGMII) {
+	if (plat->phy_interface == PHY_INTERFACE_MODE_SGMII ||
+	    plat->phy_interface == PHY_INTERFACE_MODE_1000BASEX) {
 		plat->mdio_bus_data->has_xpcs = true;
 		plat->mdio_bus_data->xpcs_an_inband = true;
+	}
+
+	/* For fixed-link setup, we clear xpcs_an_inband */
+	if (fwnode) {
+		struct fwnode_handle *fixed_node;
+
+		fixed_node = fwnode_get_named_child_node(fwnode, "fixed-link");
+		if (fixed_node)
+			plat->mdio_bus_data->xpcs_an_inband = false;
+
+		fwnode_handle_put(fixed_node);
 	}
 
 	/* Ensure mdio bus scan skips intel serdes and pcs-xpcs */
@@ -538,6 +612,7 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 
 	plat->has_crossts = true;
 	plat->crosststamp = intel_crosststamp;
+	plat->int_snapshot_en = 0;
 
 	/* Setup MSI vector offset specific to Intel mGbE controller */
 	plat->msi_mac_vec = 29;
@@ -555,7 +630,17 @@ static int ehl_common_data(struct pci_dev *pdev,
 {
 	plat->rx_queues_to_use = 8;
 	plat->tx_queues_to_use = 8;
-	plat->clk_ptp_rate = 200000000;
+	plat->use_phy_wol = 1;
+
+	plat->safety_feat_cfg->tsoee = 1;
+	plat->safety_feat_cfg->mrxpee = 1;
+	plat->safety_feat_cfg->mestee = 1;
+	plat->safety_feat_cfg->mrxee = 1;
+	plat->safety_feat_cfg->mtxee = 1;
+	plat->safety_feat_cfg->epsi = 0;
+	plat->safety_feat_cfg->edpp = 0;
+	plat->safety_feat_cfg->prtyen = 0;
+	plat->safety_feat_cfg->tmouten = 0;
 
 	return intel_mgbe_common_data(pdev, plat);
 }
@@ -565,9 +650,11 @@ static int ehl_sgmii_data(struct pci_dev *pdev,
 {
 	plat->bus_id = 1;
 	plat->phy_interface = PHY_INTERFACE_MODE_SGMII;
-
+	plat->speed_mode_2500 = intel_speed_mode_2500;
 	plat->serdes_powerup = intel_serdes_powerup;
 	plat->serdes_powerdown = intel_serdes_powerdown;
+
+	plat->clk_ptp_rate = 204800000;
 
 	return ehl_common_data(pdev, plat);
 }
@@ -581,6 +668,8 @@ static int ehl_rgmii_data(struct pci_dev *pdev,
 {
 	plat->bus_id = 1;
 	plat->phy_interface = PHY_INTERFACE_MODE_RGMII;
+
+	plat->clk_ptp_rate = 204800000;
 
 	return ehl_common_data(pdev, plat);
 }
@@ -597,6 +686,8 @@ static int ehl_pse0_common_data(struct pci_dev *pdev,
 	intel_priv->is_pse = true;
 	plat->bus_id = 2;
 	plat->addr64 = 32;
+
+	plat->clk_ptp_rate = 200000000;
 
 	intel_mgbe_pse_crossts_adj(intel_priv, EHL_PSE_ART_MHZ);
 
@@ -618,6 +709,7 @@ static int ehl_pse0_sgmii1g_data(struct pci_dev *pdev,
 				 struct plat_stmmacenet_data *plat)
 {
 	plat->phy_interface = PHY_INTERFACE_MODE_SGMII;
+	plat->speed_mode_2500 = intel_speed_mode_2500;
 	plat->serdes_powerup = intel_serdes_powerup;
 	plat->serdes_powerdown = intel_serdes_powerdown;
 	return ehl_pse0_common_data(pdev, plat);
@@ -635,6 +727,8 @@ static int ehl_pse1_common_data(struct pci_dev *pdev,
 	intel_priv->is_pse = true;
 	plat->bus_id = 3;
 	plat->addr64 = 32;
+
+	plat->clk_ptp_rate = 200000000;
 
 	intel_mgbe_pse_crossts_adj(intel_priv, EHL_PSE_ART_MHZ);
 
@@ -656,6 +750,7 @@ static int ehl_pse1_sgmii1g_data(struct pci_dev *pdev,
 				 struct plat_stmmacenet_data *plat)
 {
 	plat->phy_interface = PHY_INTERFACE_MODE_SGMII;
+	plat->speed_mode_2500 = intel_speed_mode_2500;
 	plat->serdes_powerup = intel_serdes_powerup;
 	plat->serdes_powerdown = intel_serdes_powerdown;
 	return ehl_pse1_common_data(pdev, plat);
@@ -670,7 +765,18 @@ static int tgl_common_data(struct pci_dev *pdev,
 {
 	plat->rx_queues_to_use = 6;
 	plat->tx_queues_to_use = 4;
-	plat->clk_ptp_rate = 200000000;
+	plat->clk_ptp_rate = 204800000;
+	plat->speed_mode_2500 = intel_speed_mode_2500;
+
+	plat->safety_feat_cfg->tsoee = 1;
+	plat->safety_feat_cfg->mrxpee = 0;
+	plat->safety_feat_cfg->mestee = 1;
+	plat->safety_feat_cfg->mrxee = 1;
+	plat->safety_feat_cfg->mtxee = 1;
+	plat->safety_feat_cfg->epsi = 0;
+	plat->safety_feat_cfg->edpp = 0;
+	plat->safety_feat_cfg->prtyen = 0;
+	plat->safety_feat_cfg->tmouten = 0;
 
 	return intel_mgbe_common_data(pdev, plat);
 }
@@ -929,8 +1035,6 @@ static int intel_eth_pci_probe(struct pci_dev *pdev,
 	struct stmmac_resources res;
 	int ret;
 
-	mark_tech_preview("intel-eth-pci", THIS_MODULE);
-
 	intel_priv = devm_kzalloc(&pdev->dev, sizeof(*intel_priv), GFP_KERNEL);
 	if (!intel_priv)
 		return -ENOMEM;
@@ -948,6 +1052,12 @@ static int intel_eth_pci_probe(struct pci_dev *pdev,
 	plat->dma_cfg = devm_kzalloc(&pdev->dev, sizeof(*plat->dma_cfg),
 				     GFP_KERNEL);
 	if (!plat->dma_cfg)
+		return -ENOMEM;
+
+	plat->safety_feat_cfg = devm_kzalloc(&pdev->dev,
+					     sizeof(*plat->safety_feat_cfg),
+					     GFP_KERNEL);
+	if (!plat->safety_feat_cfg)
 		return -ENOMEM;
 
 	/* Enable pci device */
@@ -1006,13 +1116,11 @@ static int intel_eth_pci_probe(struct pci_dev *pdev,
 
 	ret = stmmac_dvr_probe(&pdev->dev, plat, &res);
 	if (ret) {
-		goto err_dvr_probe;
+		goto err_alloc_irq;
 	}
 
 	return 0;
 
-err_dvr_probe:
-	pci_free_irq_vectors(pdev);
 err_alloc_irq:
 	clk_disable_unprepare(plat->stmmac_clk);
 	clk_unregister_fixed_rate(plat->stmmac_clk);
@@ -1022,7 +1130,7 @@ err_alloc_irq:
 /**
  * intel_eth_pci_remove
  *
- * @pdev: platform device pointer
+ * @pdev: pci device pointer
  * Description: this function calls the main to free the net resources
  * and releases the PCI resources.
  */
@@ -1033,9 +1141,8 @@ static void intel_eth_pci_remove(struct pci_dev *pdev)
 
 	stmmac_dvr_remove(&pdev->dev);
 
+	clk_disable_unprepare(priv->plat->stmmac_clk);
 	clk_unregister_fixed_rate(priv->plat->stmmac_clk);
-
-	pcim_iounmap_regions(pdev, BIT(0));
 }
 
 static int __maybe_unused intel_eth_pci_suspend(struct device *dev)
@@ -1052,6 +1159,7 @@ static int __maybe_unused intel_eth_pci_suspend(struct device *dev)
 		return ret;
 
 	pci_wake_from_d3(pdev, true);
+	pci_set_power_state(pdev, PCI_D3hot);
 	return 0;
 }
 
@@ -1093,6 +1201,8 @@ static SIMPLE_DEV_PM_OPS(intel_eth_pm_ops, intel_eth_pci_suspend,
 #define PCI_DEVICE_ID_INTEL_TGL_SGMII1G		0xa0ac
 #define PCI_DEVICE_ID_INTEL_ADLS_SGMII1G_0	0x7aac
 #define PCI_DEVICE_ID_INTEL_ADLS_SGMII1G_1	0x7aad
+#define PCI_DEVICE_ID_INTEL_ADLN_SGMII1G	0x54ac
+#define PCI_DEVICE_ID_INTEL_RPLP_SGMII1G	0x51ac
 
 static const struct pci_device_id intel_eth_pci_id_table[] = {
 	{ PCI_DEVICE_DATA(INTEL, QUARK, &quark_info) },
@@ -1110,6 +1220,8 @@ static const struct pci_device_id intel_eth_pci_id_table[] = {
 	{ PCI_DEVICE_DATA(INTEL, TGLH_SGMII1G_1, &tgl_sgmii1g_phy1_info) },
 	{ PCI_DEVICE_DATA(INTEL, ADLS_SGMII1G_0, &adls_sgmii1g_phy0_info) },
 	{ PCI_DEVICE_DATA(INTEL, ADLS_SGMII1G_1, &adls_sgmii1g_phy1_info) },
+	{ PCI_DEVICE_DATA(INTEL, ADLN_SGMII1G, &tgl_sgmii1g_phy0_info) },
+	{ PCI_DEVICE_DATA(INTEL, RPLP_SGMII1G, &tgl_sgmii1g_phy0_info) },
 	{}
 };
 MODULE_DEVICE_TABLE(pci, intel_eth_pci_id_table);

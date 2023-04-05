@@ -31,6 +31,7 @@
 #include <linux/dma-map-ops.h> /* for dma_default_coherent */
 
 #include "base.h"
+#include "physical_location.h"
 #include "power/power.h"
 
 #ifdef CONFIG_SYSFS_DEPRECATED
@@ -2626,8 +2627,17 @@ static int device_add_attrs(struct device *dev)
 			goto err_remove_dev_waiting_for_supplier;
 	}
 
+	if (dev_add_physical_location(dev)) {
+		error = device_add_group(dev,
+			&dev_attr_physical_location_group);
+		if (error)
+			goto err_remove_dev_removable;
+	}
+
 	return 0;
 
+ err_remove_dev_removable:
+	device_remove_file(dev, &dev_attr_removable);
  err_remove_dev_waiting_for_supplier:
 	device_remove_file(dev, &dev_attr_waiting_for_supplier);
  err_remove_dev_online:
@@ -2648,6 +2658,11 @@ static void device_remove_attrs(struct device *dev)
 {
 	struct class *class = dev->class;
 	const struct device_type *type = dev->type;
+
+	if (dev->physical_location) {
+		device_remove_group(dev, &dev_attr_physical_location_group);
+		kfree(dev->physical_location);
+	}
 
 	device_remove_file(dev, &dev_attr_removable);
 	device_remove_file(dev, &dev_attr_waiting_for_supplier);
@@ -2847,6 +2862,7 @@ void device_initialize(struct device *dev)
 	device_pm_init(dev);
 	set_dev_node(dev, NUMA_NO_NODE);
 #ifdef CONFIG_GENERIC_MSI_IRQ
+	raw_spin_lock_init(&dev->msi_lock);
 	INIT_LIST_HEAD(&dev->msi_list);
 #endif
 	INIT_LIST_HEAD(&dev->links.consumers);
@@ -3760,6 +3776,54 @@ struct device *device_find_child(struct device *parent, void *data,
 	return child;
 }
 EXPORT_SYMBOL_GPL(device_find_child);
+
+/**
+ * device_find_child_by_name - device iterator for locating a child device.
+ * @parent: parent struct device
+ * @name: name of the child device
+ *
+ * This is similar to the device_find_child() function above, but it
+ * returns a reference to a device that has the name @name.
+ *
+ * NOTE: you will need to drop the reference with put_device() after use.
+ */
+struct device *device_find_child_by_name(struct device *parent,
+					 const char *name)
+{
+	struct klist_iter i;
+	struct device *child;
+
+	if (!parent)
+		return NULL;
+
+	klist_iter_init(&parent->p->klist_children, &i);
+	while ((child = next_device(&i)))
+		if (!strcmp(dev_name(child), name) && get_device(child))
+			break;
+	klist_iter_exit(&i);
+	return child;
+}
+EXPORT_SYMBOL_GPL(device_find_child_by_name);
+
+static int match_any(struct device *dev, void *unused)
+{
+	return 1;
+}
+
+/**
+ * device_find_any_child - device iterator for locating a child device, if any.
+ * @parent: parent struct device
+ *
+ * This is similar to the device_find_child() function above, but it
+ * returns a reference to a child device, if any.
+ *
+ * NOTE: you will need to drop the reference with put_device() after use.
+ */
+struct device *device_find_any_child(struct device *parent)
+{
+	return device_find_child(parent, NULL, match_any);
+}
+EXPORT_SYMBOL_GPL(device_find_any_child);
 
 int __init devices_init(void)
 {

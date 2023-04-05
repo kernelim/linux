@@ -263,7 +263,7 @@ void *memdup_user_nul(const void __user *src, size_t len)
 EXPORT_SYMBOL(memdup_user_nul);
 
 void __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
-		struct vm_area_struct *prev, struct rb_node *rb_parent)
+		struct vm_area_struct *prev)
 {
 	struct vm_area_struct *next;
 
@@ -272,12 +272,8 @@ void __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 		next = prev->vm_next;
 		prev->vm_next = vma;
 	} else {
+		next = mm->mmap;
 		mm->mmap = vma;
-		if (rb_parent)
-			next = rb_entry(rb_parent,
-					struct vm_area_struct, vm_rb);
-		else
-			next = NULL;
 	}
 	vma->vm_next = next;
 	if (next)
@@ -399,8 +395,8 @@ unsigned long vm_mmap_pgoff(struct file *file, unsigned long addr,
 	if (!ret) {
 		if (mmap_write_lock_killable(mm))
 			return -EINTR;
-		ret = do_mmap_pgoff(file, addr, len, prot, flag, pgoff,
-				    &populate, &uf);
+		ret = do_mmap(file, addr, len, prot, flag, pgoff, &populate,
+			      &uf);
 		mmap_write_unlock(mm);
 		userfaultfd_unmap_complete(mm, &uf);
 		if (populate)
@@ -489,6 +485,24 @@ void kvfree(const void *addr)
 		kfree(addr);
 }
 EXPORT_SYMBOL(kvfree);
+
+/**
+ * kvfree_sensitive - Free a data object containing sensitive information.
+ * @addr: address of the data object to be freed.
+ * @len: length of the data object.
+ *
+ * Use the special memzero_explicit() function to clear the content of a
+ * kvmalloc'ed object containing sensitive data to make sure that the
+ * compiler won't optimize out the data clearing.
+ */
+void kvfree_sensitive(const void *addr, size_t len)
+{
+	if (likely(!ZERO_OR_NULL_PTR(addr))) {
+		memzero_explicit((void *)addr, len);
+		kvfree(addr);
+	}
+}
+EXPORT_SYMBOL(kvfree_sensitive);
 
 static inline void *__page_rmapping(struct page *page)
 {

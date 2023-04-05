@@ -121,6 +121,7 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_MAX98373_I2C
 	imply SND_SOC_MAX98373_SDW
 	imply SND_SOC_MAX98390
+	imply SND_SOC_MAX98396
 	imply SND_SOC_MAX9850
 	imply SND_SOC_MAX9860
 	imply SND_SOC_MAX9759
@@ -187,6 +188,7 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_RT715_SDCA_SDW
 	imply SND_SOC_RT1308_SDW
 	imply SND_SOC_RT1316_SDW
+	imply SND_SOC_RT1318_SDW
 	imply SND_SOC_RT9120
 	imply SND_SOC_SDW_MOCKUP
 	imply SND_SOC_SGTL5000
@@ -205,6 +207,7 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_STI_SAS
 	imply SND_SOC_TAS2552
 	imply SND_SOC_TAS2562
+	imply SND_SOC_TAS2764
 	imply SND_SOC_TAS2770
 	imply SND_SOC_TAS5086
 	imply SND_SOC_TAS571X
@@ -249,7 +252,8 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_WM8711
 	imply SND_SOC_WM8727
 	imply SND_SOC_WM8728
-	imply SND_SOC_WM8731
+	imply SND_SOC_WM8731_I2C
+	imply SND_SOC_WM8731_SPI
 	imply SND_SOC_WM8737
 	imply SND_SOC_WM8741
 	imply SND_SOC_WM8750
@@ -857,6 +861,16 @@ config SND_SOC_HDAC_HDA
 	tristate
 	select SND_HDA
 
+config SND_SOC_HDA
+	tristate "HD-Audio codec driver"
+	select SND_HDA_EXT_CORE
+	select SND_HDA
+	help
+	  This enables HD-Audio codec support in ASoC subsystem. Compared
+	  to SND_SOC_HDAC_HDA, driver's behavior is identical to HD-Audio
+	  legacy solution - including the dynamic resource allocation
+	  based on actual codec capabilities.
+
 config SND_SOC_ICS43432
 	tristate "ICS43423 and compatible i2s microphones"
 
@@ -953,6 +967,15 @@ config SND_SOC_MAX98373_SDW
 config SND_SOC_MAX98390
 	tristate "Maxim Integrated MAX98390 Speaker Amplifier"
 	depends on I2C
+
+config SND_SOC_MAX98396
+	tristate "Analog Devices MAX98396 Speaker Amplifier"
+	depends on I2C
+	help
+	  Enable support for Analog Devices MAX98396 audio
+	  amplifier. The device provides a PCM interface for
+	  audio data and a standard I2C interface for control
+	  data communication.
 
 config SND_SOC_MAX9850
 	tristate
@@ -1167,6 +1190,11 @@ config SND_SOC_RT1308_SDW
 
 config SND_SOC_RT1316_SDW
 	tristate "Realtek RT1316 Codec - SDW"
+	depends on SOUNDWIRE
+	select REGMAP_SOUNDWIRE
+
+config SND_SOC_RT1318_SDW
+	tristate "Realtek RT1318 Codec - SDW"
 	depends on SOUNDWIRE
 	select REGMAP_SOUNDWIRE
 
@@ -1401,6 +1429,10 @@ config SND_SOC_TAS2562
 	tristate "Texas Instruments TAS2562 Mono Audio amplifier"
 	depends on I2C
 
+config SND_SOC_TAS2764
+	tristate "Texas Instruments TAS2764 Mono Audio amplifier"
+	depends on I2C
+
 config SND_SOC_TAS2770
 	tristate "Texas Instruments TAS2770 speaker amplifier"
 	depends on I2C
@@ -1633,8 +1665,19 @@ config SND_SOC_WM8728
 	depends on SND_SOC_I2C_AND_SPI
 
 config SND_SOC_WM8731
-	tristate "Wolfson Microelectronics WM8731 CODEC"
-	depends on SND_SOC_I2C_AND_SPI
+	tristate
+
+config SND_SOC_WM8731_I2C
+	tristate "Wolfson Microelectronics WM8731 CODEC with I2C"
+	depends on I2C
+	select REGMAP
+	select SND_SOC_WM8731
+
+config SND_SOC_WM8731_SPI
+	tristate "Wolfson Microelectronics WM8731 CODEC with SPI"
+	depends on SPI
+	select REGMAP
+	select SND_SOC_WM8731
 
 config SND_SOC_WM8737
 	tristate "Wolfson Microelectronics WM8737 ADC"
@@ -1691,7 +1734,7 @@ config SND_SOC_WM8904
 	depends on I2C
 
 config SND_SOC_WM8940
-	tristate
+	tristate "Wolfson Microelectronics WM8940 codec"
 	depends on I2C
 
 config SND_SOC_WM8955

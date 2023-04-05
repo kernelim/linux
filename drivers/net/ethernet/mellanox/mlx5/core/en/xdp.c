@@ -281,7 +281,7 @@ mlx5e_xmit_xdp_frame_mpwqe(struct mlx5e_xdpsq *sq, struct mlx5e_xmit_data *xdptx
 
 	mlx5e_xdp_mpwqe_add_dseg(sq, xdptxd, stats);
 
-	if (unlikely(mlx5e_xdp_mpqwe_is_full(session, sq->max_sq_mpw_wqebbs)))
+	if (unlikely(mlx5e_xdp_mpwqe_is_full(session, sq->max_sq_mpw_wqebbs)))
 		mlx5e_xdp_mpwqe_complete(sq);
 
 	mlx5e_xdpi_fifo_push(&sq->db.xdpi_fifo, xdpi);

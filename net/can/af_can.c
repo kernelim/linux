@@ -327,7 +327,7 @@ static struct can_dev_rcv_lists *find_dev_rcv_lists(struct net *net,
 	if (!dev)
 		return net->can.can_rx_alldev_list;
 	else
-		return (struct can_dev_rcv_lists *)dev->ml_priv;
+		return can_get_ml_priv(dev);
 }
 
 /**
@@ -470,7 +470,7 @@ int can_rx_register(struct net *net, struct net_device *dev, canid_t can_id,
 
 	/* insert new receiver  (dev,canid,mask) -> (func,data) */
 
-	if (dev && dev->type != ARPHRD_CAN)
+	if (dev && (dev->type != ARPHRD_CAN || !can_get_ml_priv(dev)))
 		return -ENODEV;
 
 	if (dev && !net_eq(net, dev_net(dev)))
@@ -594,7 +594,7 @@ void can_rx_unregister(struct net *net, struct net_device *dev, canid_t can_id,
 	/* remove device structure requested by NETDEV_UNREGISTER */
 	if (d->remove_on_zero_entries && !d->entries) {
 		kfree(d);
-		dev->ml_priv = NULL;
+		can_set_ml_priv(dev, NULL);
 	}
 
  out:
@@ -852,21 +852,21 @@ static int can_notifier(struct notifier_block *nb, unsigned long msg,
 		d = kzalloc(sizeof(*d), GFP_KERNEL);
 		if (!d)
 			return NOTIFY_DONE;
-		BUG_ON(dev->ml_priv);
-		dev->ml_priv = d;
+		BUG_ON(can_get_ml_priv(dev));
+		can_set_ml_priv(dev, d);
 
 		break;
 
 	case NETDEV_UNREGISTER:
 		spin_lock(&dev_net(dev)->can.can_rcvlists_lock);
 
-		d = dev->ml_priv;
+		d = can_get_ml_priv(dev);
 		if (d) {
 			if (d->entries)
 				d->remove_on_zero_entries = 1;
 			else {
 				kfree(d);
-				dev->ml_priv = NULL;
+				can_set_ml_priv(dev, NULL);
 			}
 		} else
 			pr_err("can: notifier: receive list not found for dev "
@@ -918,26 +918,11 @@ static int can_pernet_init(struct net *net)
 
 static void can_pernet_exit(struct net *net)
 {
-	struct net_device *dev;
-
 	if (IS_ENABLED(CONFIG_PROC_FS)) {
 		can_remove_proc(net);
 		if (stats_timer)
 			del_timer_sync(&net->can.can_stattimer);
 	}
-
-	/* remove created dev_rcv_lists from still registered CAN devices */
-	rcu_read_lock();
-	for_each_netdev_rcu(net, dev) {
-		if (dev->type == ARPHRD_CAN && dev->ml_priv) {
-			struct can_dev_rcv_lists *d = dev->ml_priv;
-
-			BUG_ON(d->entries);
-			kfree(d);
-			dev->ml_priv = NULL;
-		}
-	}
-	rcu_read_unlock();
 
 	kfree(net->can.can_rx_alldev_list);
 	kfree(net->can.can_stats);

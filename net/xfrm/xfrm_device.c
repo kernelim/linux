@@ -119,7 +119,7 @@ struct sk_buff *validate_xmit_xfrm(struct sk_buff *skb, netdev_features_t featur
 		esp_features = features & ~(NETIF_F_SG | NETIF_F_CSUM_MASK);
 
 	x = skb->sp->xvec[skb->sp->len - 1];
-	if (xo->flags & XFRM_GRO || x->xso.flags & XFRM_OFFLOAD_INBOUND)
+	if (xo->flags & XFRM_GRO || x->xso.dir == XFRM_DEV_OFFLOAD_IN)
 		return skb;
 
 	/* This skb was already validated on the master dev */
@@ -145,7 +145,7 @@ struct sk_buff *validate_xmit_xfrm(struct sk_buff *skb, netdev_features_t featur
 		segs = skb_gso_segment(skb, esp_features);
 		if (IS_ERR(segs)) {
 			kfree_skb(skb);
-			atomic_long_inc(&dev->tx_dropped);
+			dev_core_stats_tx_dropped_inc(dev);
 			return NULL;
 		} else {
 			consume_skb(skb);
@@ -272,11 +272,17 @@ int xfrm_dev_state_add(struct net *net, struct xfrm_state *x,
 	xso->num_exthdrs = 1;
 	xso->flags = xuo->flags;
 
+	if (xuo->flags & XFRM_OFFLOAD_INBOUND)
+		xso->dir = XFRM_DEV_OFFLOAD_IN;
+	else
+		xso->dir = XFRM_DEV_OFFLOAD_OUT;
+
 	err = dev->xfrmdev_ops->xdo_dev_state_add(x);
 	if (err) {
 		xso->num_exthdrs = 0;
 		xso->flags = 0;
 		xso->dev = NULL;
+		xso->dir = 0;
 		xso->real_dev = NULL;
 		dev_put(dev);
 

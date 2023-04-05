@@ -7,6 +7,8 @@
 #include <linux/wireless.h>
 #include <net/wext.h>
 
+#include "dev.h"
+
 /*
  *	Map an interface index to its name (SIOCGIFNAME)
  */

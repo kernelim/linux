@@ -20,10 +20,13 @@
  */
 
 #include <linux/acpi_iort.h>
+#include <linux/atomic.h>
+#include <linux/crash_dump.h>
 #include <linux/device.h>
-#include <linux/dma-map-ops.h>
+#include <linux/dma-direct.h>
 #include <linux/dma-contiguous.h>
 #include <linux/dma-iommu.h>
+#include <linux/dma-map-ops.h>
 #include <linux/gfp.h>
 #include <linux/huge_mm.h>
 #include <linux/iommu.h>
@@ -32,11 +35,10 @@
 #include <linux/mm.h>
 #include <linux/mutex.h>
 #include <linux/pci.h>
-#include <linux/swiotlb.h>
 #include <linux/scatterlist.h>
+#include <linux/spinlock.h>
+#include <linux/swiotlb.h>
 #include <linux/vmalloc.h>
-#include <linux/crash_dump.h>
-#include <linux/dma-direct.h>
 
 struct iommu_dma_msi_page {
 	struct list_head	list;
@@ -53,7 +55,19 @@ struct iommu_dma_cookie {
 	enum iommu_dma_cookie_type	type;
 	union {
 		/* Full allocator for IOMMU_DMA_IOVA_COOKIE */
-		struct iova_domain	iovad;
+		struct {
+			struct iova_domain	iovad;
+
+			struct iova_fq __percpu *fq;	/* Flush queue */
+			/* Number of TLB flushes that have been started */
+			atomic64_t		fq_flush_start_cnt;
+			/* Number of TLB flushes that have been finished */
+			atomic64_t		fq_flush_finish_cnt;
+			/* Timer to regularily empty the flush queues */
+			struct timer_list	fq_timer;
+			/* 1 when timer is active, 0 when not */
+			atomic_t		fq_timer_on;
+		};
 		/* Trivial linear page allocator for IOMMU_DMA_MSI_COOKIE */
 		dma_addr_t		msi_iova;
 	};
@@ -61,6 +75,7 @@ struct iommu_dma_cookie {
 
 	/* Domain for flush queue callback; NULL if flush queue not in use */
 	struct iommu_domain		*fq_domain;
+	struct mutex			mutex;
 };
 
 static DEFINE_STATIC_KEY_FALSE(iommu_deferred_attach_enabled);
@@ -76,16 +91,203 @@ static int __init iommu_dma_forcedac_setup(char *str)
 }
 early_param("iommu.forcedac", iommu_dma_forcedac_setup);
 
-static void iommu_dma_entry_dtor(unsigned long data)
+/* Number of entries per flush queue */
+#define IOVA_FQ_SIZE	256
+
+/* Timeout (in ms) after which entries are flushed from the queue */
+#define IOVA_FQ_TIMEOUT	10
+
+/* Flush queue entry for deferred flushing */
+struct iova_fq_entry {
+	unsigned long iova_pfn;
+	unsigned long pages;
+	struct list_head freelist;
+	u64 counter; /* Flush counter when this entry was added */
+};
+
+/* Per-CPU flush queue structure */
+struct iova_fq {
+	struct iova_fq_entry entries[IOVA_FQ_SIZE];
+	unsigned int head, tail;
+	spinlock_t lock;
+};
+
+#define fq_ring_for_each(i, fq) \
+	for ((i) = (fq)->head; (i) != (fq)->tail; (i) = ((i) + 1) % IOVA_FQ_SIZE)
+
+static inline bool fq_full(struct iova_fq *fq)
 {
-	struct page *freelist = (struct page *)data;
+	assert_spin_locked(&fq->lock);
+	return (((fq->tail + 1) % IOVA_FQ_SIZE) == fq->head);
+}
 
-	while (freelist) {
-		unsigned long p = (unsigned long)page_address(freelist);
+static inline unsigned int fq_ring_add(struct iova_fq *fq)
+{
+	unsigned int idx = fq->tail;
 
-		freelist = freelist->freelist;
-		free_page(p);
+	assert_spin_locked(&fq->lock);
+
+	fq->tail = (idx + 1) % IOVA_FQ_SIZE;
+
+	return idx;
+}
+
+static void fq_ring_free(struct iommu_dma_cookie *cookie, struct iova_fq *fq)
+{
+	u64 counter = atomic64_read(&cookie->fq_flush_finish_cnt);
+	unsigned int idx;
+
+	assert_spin_locked(&fq->lock);
+
+	fq_ring_for_each(idx, fq) {
+
+		if (fq->entries[idx].counter >= counter)
+			break;
+
+		put_pages_list(&fq->entries[idx].freelist);
+		free_iova_fast(&cookie->iovad,
+			       fq->entries[idx].iova_pfn,
+			       fq->entries[idx].pages);
+
+		fq->head = (fq->head + 1) % IOVA_FQ_SIZE;
 	}
+}
+
+static void fq_flush_iotlb(struct iommu_dma_cookie *cookie)
+{
+	atomic64_inc(&cookie->fq_flush_start_cnt);
+	cookie->fq_domain->ops->flush_iotlb_all(cookie->fq_domain);
+	atomic64_inc(&cookie->fq_flush_finish_cnt);
+}
+
+static void fq_flush_timeout(struct timer_list *t)
+{
+	struct iommu_dma_cookie *cookie = from_timer(cookie, t, fq_timer);
+	int cpu;
+
+	atomic_set(&cookie->fq_timer_on, 0);
+	fq_flush_iotlb(cookie);
+
+	for_each_possible_cpu(cpu) {
+		unsigned long flags;
+		struct iova_fq *fq;
+
+		fq = per_cpu_ptr(cookie->fq, cpu);
+		spin_lock_irqsave(&fq->lock, flags);
+		fq_ring_free(cookie, fq);
+		spin_unlock_irqrestore(&fq->lock, flags);
+	}
+}
+
+static void queue_iova(struct iommu_dma_cookie *cookie,
+		unsigned long pfn, unsigned long pages,
+		struct list_head *freelist)
+{
+	struct iova_fq *fq;
+	unsigned long flags;
+	unsigned int idx;
+
+	/*
+	 * Order against the IOMMU driver's pagetable update from unmapping
+	 * @pte, to guarantee that fq_flush_iotlb() observes that if called
+	 * from a different CPU before we release the lock below. Full barrier
+	 * so it also pairs with iommu_dma_init_fq() to avoid seeing partially
+	 * written fq state here.
+	 */
+	smp_mb();
+
+	fq = raw_cpu_ptr(cookie->fq);
+	spin_lock_irqsave(&fq->lock, flags);
+
+	/*
+	 * First remove all entries from the flush queue that have already been
+	 * flushed out on another CPU. This makes the fq_full() check below less
+	 * likely to be true.
+	 */
+	fq_ring_free(cookie, fq);
+
+	if (fq_full(fq)) {
+		fq_flush_iotlb(cookie);
+		fq_ring_free(cookie, fq);
+	}
+
+	idx = fq_ring_add(fq);
+
+	fq->entries[idx].iova_pfn = pfn;
+	fq->entries[idx].pages    = pages;
+	fq->entries[idx].counter  = atomic64_read(&cookie->fq_flush_start_cnt);
+	list_splice(freelist, &fq->entries[idx].freelist);
+
+	spin_unlock_irqrestore(&fq->lock, flags);
+
+	/* Avoid false sharing as much as possible. */
+	if (!atomic_read(&cookie->fq_timer_on) &&
+	    !atomic_xchg(&cookie->fq_timer_on, 1))
+		mod_timer(&cookie->fq_timer,
+			  jiffies + msecs_to_jiffies(IOVA_FQ_TIMEOUT));
+}
+
+static void iommu_dma_free_fq(struct iommu_dma_cookie *cookie)
+{
+	int cpu, idx;
+
+	if (!cookie->fq)
+		return;
+
+	del_timer_sync(&cookie->fq_timer);
+	/* The IOVAs will be torn down separately, so just free our queued pages */
+	for_each_possible_cpu(cpu) {
+		struct iova_fq *fq = per_cpu_ptr(cookie->fq, cpu);
+
+		fq_ring_for_each(idx, fq)
+			put_pages_list(&fq->entries[idx].freelist);
+	}
+
+	free_percpu(cookie->fq);
+}
+
+/* sysfs updates are serialised by the mutex of the group owning @domain */
+int iommu_dma_init_fq(struct iommu_domain *domain)
+{
+	struct iommu_dma_cookie *cookie = domain->iova_cookie;
+	struct iova_fq __percpu *queue;
+	int i, cpu;
+
+	if (cookie->fq_domain)
+		return 0;
+
+	atomic64_set(&cookie->fq_flush_start_cnt,  0);
+	atomic64_set(&cookie->fq_flush_finish_cnt, 0);
+
+	queue = alloc_percpu(struct iova_fq);
+	if (!queue) {
+		pr_warn("iova flush queue initialization failed\n");
+		return -ENOMEM;
+	}
+
+	for_each_possible_cpu(cpu) {
+		struct iova_fq *fq = per_cpu_ptr(queue, cpu);
+
+		fq->head = 0;
+		fq->tail = 0;
+
+		spin_lock_init(&fq->lock);
+
+		for (i = 0; i < IOVA_FQ_SIZE; i++)
+			INIT_LIST_HEAD(&fq->entries[i].freelist);
+	}
+
+	cookie->fq = queue;
+
+	timer_setup(&cookie->fq_timer, fq_flush_timeout, 0);
+	atomic_set(&cookie->fq_timer_on, 0);
+	/*
+	 * Prevent incomplete fq state being observable. Pairs with path from
+	 * __iommu_dma_unmap() through iommu_dma_free_iova() to queue_iova()
+	 */
+	smp_wmb();
+	WRITE_ONCE(cookie->fq_domain, domain);
+	return 0;
 }
 
 static inline size_t cookie_msi_granule(struct iommu_dma_cookie *cookie)
@@ -110,9 +312,6 @@ static struct iommu_dma_cookie *cookie_alloc(enum iommu_dma_cookie_type type)
 /**
  * iommu_get_dma_cookie - Acquire DMA-API resources for a domain
  * @domain: IOMMU domain to prepare for DMA-API usage
- *
- * IOMMU drivers should normally call this from their domain_alloc
- * callback when domain->type == IOMMU_DOMAIN_DMA.
  */
 int iommu_get_dma_cookie(struct iommu_domain *domain)
 {
@@ -123,9 +322,9 @@ int iommu_get_dma_cookie(struct iommu_domain *domain)
 	if (!domain->iova_cookie)
 		return -ENOMEM;
 
+	mutex_init(&domain->iova_cookie->mutex);
 	return 0;
 }
-EXPORT_SYMBOL(iommu_get_dma_cookie);
 
 /**
  * iommu_get_msi_cookie - Acquire just MSI remapping resources
@@ -163,8 +362,6 @@ EXPORT_SYMBOL(iommu_get_msi_cookie);
  * iommu_put_dma_cookie - Release a domain's DMA mapping resources
  * @domain: IOMMU domain previously prepared by iommu_get_dma_cookie() or
  *          iommu_get_msi_cookie()
- *
- * IOMMU drivers should normally call this from their domain_free callback.
  */
 void iommu_put_dma_cookie(struct iommu_domain *domain)
 {
@@ -174,8 +371,10 @@ void iommu_put_dma_cookie(struct iommu_domain *domain)
 	if (!cookie)
 		return;
 
-	if (cookie->type == IOMMU_DMA_IOVA_COOKIE && cookie->iovad.granule)
+	if (cookie->type == IOMMU_DMA_IOVA_COOKIE && cookie->iovad.granule) {
+		iommu_dma_free_fq(cookie);
 		put_iova_domain(&cookie->iovad);
+	}
 
 	list_for_each_entry_safe(msi, tmp, &cookie->msi_page_list, list) {
 		list_del(&msi->list);
@@ -184,7 +383,6 @@ void iommu_put_dma_cookie(struct iommu_domain *domain)
 	kfree(cookie);
 	domain->iova_cookie = NULL;
 }
-EXPORT_SYMBOL(iommu_put_dma_cookie);
 
 /**
  * iommu_dma_get_resv_regions - Reserved region driver helper
@@ -200,7 +398,7 @@ void iommu_dma_get_resv_regions(struct device *dev, struct list_head *list)
 {
 
 	if (!is_of_node(dev_iommu_fwspec_get(dev)->iommu_fwnode))
-		iort_iommu_msi_get_resv_regions(dev, list);
+		iort_iommu_get_resv_regions(dev, list);
 
 }
 EXPORT_SYMBOL(iommu_dma_get_resv_regions);
@@ -313,17 +511,6 @@ static int iova_reserve_iommu_regions(struct device *dev,
 	return ret;
 }
 
-static void iommu_dma_flush_iotlb_all(struct iova_domain *iovad)
-{
-	struct iommu_dma_cookie *cookie;
-	struct iommu_domain *domain;
-
-	cookie = container_of(iovad, struct iommu_dma_cookie, iovad);
-	domain = cookie->fq_domain;
-
-	domain->ops->flush_iotlb_all(domain);
-}
-
 static bool dev_is_untrusted(struct device *dev)
 {
 	return dev_is_pci(dev) && to_pci_dev(dev)->untrusted;
@@ -352,6 +539,7 @@ static int iommu_dma_init_domain(struct iommu_domain *domain, dma_addr_t base,
 	struct iommu_dma_cookie *cookie = domain->iova_cookie;
 	unsigned long order, base_pfn;
 	struct iova_domain *iovad;
+	int ret;
 
 	if (!cookie || cookie->type != IOMMU_DMA_IOVA_COOKIE)
 		return -EINVAL;
@@ -375,28 +563,33 @@ static int iommu_dma_init_domain(struct iommu_domain *domain, dma_addr_t base,
 	}
 
 	/* start_pfn is always nonzero for an already-initialised domain */
+	mutex_lock(&cookie->mutex);
 	if (iovad->start_pfn) {
 		if (1UL << order != iovad->granule ||
 		    base_pfn != iovad->start_pfn) {
 			pr_warn("Incompatible range for DMA domain\n");
-			return -EFAULT;
+			ret = -EFAULT;
+			goto done_unlock;
 		}
 
-		return 0;
+		ret = 0;
+		goto done_unlock;
 	}
 
 	init_iova_domain(iovad, 1UL << order, base_pfn);
+	ret = iova_domain_init_rcaches(iovad);
+	if (ret)
+		goto done_unlock;
 
-	if (!cookie->fq_domain && !dev_is_untrusted(dev) &&
-	    domain->ops->flush_iotlb_all && !iommu_get_dma_strict(domain)) {
-		if (init_iova_flush_queue(iovad, iommu_dma_flush_iotlb_all,
-					  iommu_dma_entry_dtor))
-			pr_warn("iova flush queue initialization failed\n");
-		else
-			cookie->fq_domain = domain;
-	}
+	/* If the FQ fails we can simply fall back to strict mode */
+	if (domain->type == IOMMU_DOMAIN_DMA_FQ && iommu_dma_init_fq(domain))
+		domain->type = IOMMU_DOMAIN_DMA;
 
-	return iova_reserve_iommu_regions(dev, domain);
+	ret = iova_reserve_iommu_regions(dev, domain);
+
+done_unlock:
+	mutex_unlock(&cookie->mutex);
+	return ret;
 }
 
 /**
@@ -442,14 +635,6 @@ static dma_addr_t iommu_dma_alloc_iova(struct iommu_domain *domain,
 
 	shift = iova_shift(iovad);
 	iova_len = size >> shift;
-	/*
-	 * Freeing non-power-of-two-sized allocations back into the IOVA caches
-	 * will come back to bite us badly, so we have to waste a bit of space
-	 * rounding up anything cacheable to make sure that can't happen. The
-	 * order of the unadjusted size will still match upon freeing.
-	 */
-	if (iova_len < (1 << (IOVA_RANGE_CACHE_MAX_SIZE - 1)))
-		iova_len = roundup_pow_of_two(iova_len);
 
 	dma_limit = min_not_zero(dma_limit, dev->bus_dma_limit);
 
@@ -469,17 +654,17 @@ static dma_addr_t iommu_dma_alloc_iova(struct iommu_domain *domain,
 }
 
 static void iommu_dma_free_iova(struct iommu_dma_cookie *cookie,
-		dma_addr_t iova, size_t size, struct page *freelist)
+		dma_addr_t iova, size_t size, struct iommu_iotlb_gather *gather)
 {
 	struct iova_domain *iovad = &cookie->iovad;
 
 	/* The MSI case is only ever cleaning up its most recent allocation */
 	if (cookie->type == IOMMU_DMA_MSI_COOKIE)
 		cookie->msi_iova -= size;
-	else if (cookie->fq_domain)	/* non-strict mode */
-		queue_iova(iovad, iova_pfn(iovad, iova),
+	else if (gather && gather->queued)
+		queue_iova(cookie, iova_pfn(iovad, iova),
 				size >> iova_shift(iovad),
-				(unsigned long)freelist);
+				&gather->freelist);
 	else
 		free_iova_fast(iovad, iova_pfn(iovad, iova),
 				size >> iova_shift(iovad));
@@ -498,13 +683,14 @@ static void __iommu_dma_unmap(struct device *dev, dma_addr_t dma_addr,
 	dma_addr -= iova_off;
 	size = iova_align(iovad, size + iova_off);
 	iommu_iotlb_gather_init(&iotlb_gather);
+	iotlb_gather.queued = READ_ONCE(cookie->fq_domain);
 
 	unmapped = iommu_unmap_fast(domain, dma_addr, size, &iotlb_gather);
 	WARN_ON(unmapped != size);
 
-	if (!cookie->fq_domain)
+	if (!iotlb_gather.queued)
 		iommu_iotlb_sync(domain, &iotlb_gather);
-	iommu_dma_free_iova(cookie, dma_addr, size, iotlb_gather.freelist);
+	iommu_dma_free_iova(cookie, dma_addr, size, &iotlb_gather);
 }
 
 static dma_addr_t __iommu_dma_map(struct device *dev, phys_addr_t phys,
@@ -550,7 +736,7 @@ static struct page **__iommu_dma_alloc_pages(struct device *dev,
 	if (!order_mask)
 		return NULL;
 
-	pages = kvzalloc(count * sizeof(*pages), GFP_KERNEL);
+	pages = kvcalloc(count, sizeof(*pages), GFP_KERNEL);
 	if (!pages)
 		return NULL;
 
@@ -1268,6 +1454,13 @@ static int iommu_dma_get_sgtable(struct device *dev, struct sg_table *sgt,
 	return ret;
 }
 
+static unsigned long iommu_dma_get_merge_boundary(struct device *dev)
+{
+	struct iommu_domain *domain = iommu_get_dma_domain(dev);
+
+	return (1UL << __ffs(domain->pgsize_bitmap)) - 1;
+}
+
 static const struct dma_map_ops iommu_dma_ops = {
 	.alloc			= iommu_dma_alloc,
 	.free			= iommu_dma_free,
@@ -1289,6 +1482,7 @@ static const struct dma_map_ops iommu_dma_ops = {
 	.sync_sg_for_device	= iommu_dma_sync_sg_for_device,
 	.map_resource		= iommu_dma_map_resource,
 	.unmap_resource		= iommu_dma_unmap_resource,
+	.get_merge_boundary	= iommu_dma_get_merge_boundary,
 };
 
 /*
@@ -1306,7 +1500,7 @@ void iommu_setup_dma_ops(struct device *dev, u64 dma_base, u64 dma_limit)
 	 * The IOMMU core code allocates the default DMA domain, which the
 	 * underlying IOMMU driver needs to support via the dma-iommu layer.
 	 */
-	if (domain->type == IOMMU_DOMAIN_DMA) {
+	if (iommu_is_dma_domain(domain)) {
 		if (iommu_dma_init_domain(domain, dma_base, dma_limit, dev))
 			goto out_err;
 		dev->dma_ops = &iommu_dma_ops;

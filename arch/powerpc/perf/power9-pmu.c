@@ -100,7 +100,7 @@ extern u64 PERF_REG_EXTENDED_MASK;
 #define PVR_POWER9_CUMULUS		0x00002000
 
 /* PowerISA v2.07 format attribute structure*/
-extern struct attribute_group isa207_pmu_format_group;
+extern const struct attribute_group isa207_pmu_format_group;
 
 int p9_dd21_bl_ev[] = {
 	PM_MRK_ST_DONE_L2,
@@ -221,7 +221,7 @@ static struct attribute *power9_events_attr[] = {
 	NULL
 };
 
-static struct attribute_group power9_pmu_events_group = {
+static const struct attribute_group power9_pmu_events_group = {
 	.name = "events",
 	.attrs = power9_events_attr,
 };
@@ -257,7 +257,7 @@ static struct attribute *power9_pmu_format_attr[] = {
 	NULL,
 };
 
-static struct attribute_group power9_pmu_format_group = {
+static const struct attribute_group power9_pmu_format_group = {
 	.name = "format",
 	.attrs = power9_pmu_format_attr,
 };

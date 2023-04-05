@@ -14,6 +14,7 @@
 #include <asm/page.h> /* I/O is all done through memory accesses */
 #include <linux/string.h> /* for memset() and memcpy() */
 #include <linux/types.h>
+#include <linux/cc_platform.h> /* RHEL only */
 
 #ifdef CONFIG_GENERIC_IOMAP
 #include <asm-generic/iomap.h>
@@ -1081,6 +1082,15 @@ static inline void *bus_to_virt(unsigned long address)
 
 #ifndef memset_io
 #define memset_io memset_io
+static void unrolled_memset_io(volatile void __iomem *a, int b, size_t c)
+{
+	volatile char __iomem *mem = a;
+	int i;
+
+	for (i = 0; i < c; ++i)
+		writeb(b, &mem[i]);
+}
+
 /**
  * memset_io	Set a range of I/O memory to a constant value
  * @addr:	The beginning of the I/O-memory range to set
@@ -1092,12 +1102,25 @@ static inline void *bus_to_virt(unsigned long address)
 static inline void memset_io(volatile void __iomem *addr, int value,
 			     size_t size)
 {
-	memset(__io_virt(addr), value, size);
+	if (cc_platform_has(CC_ATTR_GUEST_UNROLL_STRING_IO))
+		unrolled_memset_io(addr, value, size);
+	else
+		memset(__io_virt(addr), value, size);
 }
 #endif
 
 #ifndef memcpy_fromio
 #define memcpy_fromio memcpy_fromio
+static void unrolled_memcpy_fromio(void *to, const volatile void __iomem *from, size_t n)
+{
+	const volatile char __iomem *in = from;
+	char *out = to;
+	int i;
+
+	for (i = 0; i < n; ++i)
+		out[i] = readb(&in[i]);
+}
+
 /**
  * memcpy_fromio	Copy a block of data from I/O memory
  * @dst:		The (RAM) destination for the copy
@@ -1110,12 +1133,25 @@ static inline void memcpy_fromio(void *buffer,
 				 const volatile void __iomem *addr,
 				 size_t size)
 {
-	memcpy(buffer, __io_virt(addr), size);
+	if (cc_platform_has(CC_ATTR_GUEST_UNROLL_STRING_IO))
+		unrolled_memcpy_fromio(buffer, addr, size);
+	else
+		memcpy(buffer, __io_virt(addr), size);
 }
 #endif
 
 #ifndef memcpy_toio
 #define memcpy_toio memcpy_toio
+static void unrolled_memcpy_toio(volatile void __iomem *to, const void *from, size_t n)
+{
+	volatile char __iomem *out = to;
+	const char *in = from;
+	int i;
+
+	for (i = 0; i < n; ++i)
+		writeb(in[i], &out[i]);
+}
+
 /**
  * memcpy_toio		Copy a block of data into I/O memory
  * @dst:		The (I/O memory) destination for the copy
@@ -1127,7 +1163,10 @@ static inline void memcpy_fromio(void *buffer,
 static inline void memcpy_toio(volatile void __iomem *addr, const void *buffer,
 			       size_t size)
 {
-	memcpy(__io_virt(addr), buffer, size);
+	if (cc_platform_has(CC_ATTR_GUEST_UNROLL_STRING_IO))
+		unrolled_memcpy_toio(addr, buffer, size);
+	else
+		memcpy(__io_virt(addr), buffer, size);
 }
 #endif
 

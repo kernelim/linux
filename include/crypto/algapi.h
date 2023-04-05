@@ -50,7 +50,13 @@ struct crypto_instance {
 	struct crypto_alg alg;
 
 	struct crypto_template *tmpl;
-	struct hlist_node list;
+
+	RH_KABI_REPLACE(struct hlist_node list, union {
+		/* Node in list of instances after registration. */
+		struct hlist_node list;
+		/* List of attached spawns before registration. */
+		struct crypto_spawn *spawns;
+	})
 
 	void *__ctx[] CRYPTO_MINALIGN_ATTR;
 };
@@ -70,9 +76,17 @@ struct crypto_template {
 struct crypto_spawn {
 	struct list_head list;
 	struct crypto_alg *alg;
-	struct crypto_instance *inst;
+	union {
+		/* Back pointer to instance after registration.*/
+		struct crypto_instance *inst;
+		/* Spawn list pointer prior to registration. */
+		struct crypto_spawn *next;
+	};
 	const struct crypto_type *frontend;
 	u32 mask;
+	bool dead;
+	bool dropref;
+	bool registered;
 };
 
 struct crypto_queue {

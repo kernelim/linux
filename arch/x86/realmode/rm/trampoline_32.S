@@ -41,9 +41,6 @@ ENTRY(trampoline_start)
 
 	movl	tr_start, %eax	# where we need to go
 
-	movl	$0xA5A5A5A5, trampoline_status
-				# write marker for master knows we're running
-
 	/*
 	 * GDT tables in non default location kernel can be beyond 16MB and
 	 * lgdt will not be able to load the address as in real mode default
@@ -65,10 +62,10 @@ ENTRY(startup_32)			# note: also used from wakeup_asm.S
 
 	.bss
 	.balign 8
-GLOBAL(trampoline_header)
-	tr_start:		.space	4
-	tr_gdt_pad:		.space	2
-	tr_gdt:			.space	6
-END(trampoline_header)
+SYM_DATA_START(trampoline_header)
+	SYM_DATA_LOCAL(tr_start,	.space 4)
+	SYM_DATA_LOCAL(tr_gdt_pad,	.space 2)
+	SYM_DATA_LOCAL(tr_gdt,		.space 6)
+SYM_DATA_END(trampoline_header)
 	
 #include "trampoline_common.S"

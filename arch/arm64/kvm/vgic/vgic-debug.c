@@ -93,7 +93,7 @@ static bool end_of_vgic(struct vgic_state_iter *iter)
 
 static void *vgic_debug_start(struct seq_file *s, loff_t *pos)
 {
-	struct kvm *kvm = (struct kvm *)s->private;
+	struct kvm *kvm = s->private;
 	struct vgic_state_iter *iter;
 
 	mutex_lock(&kvm->lock);
@@ -121,7 +121,7 @@ out:
 
 static void *vgic_debug_next(struct seq_file *s, void *v, loff_t *pos)
 {
-	struct kvm *kvm = (struct kvm *)s->private;
+	struct kvm *kvm = s->private;
 	struct vgic_state_iter *iter = kvm->arch.vgic.iter;
 
 	++*pos;
@@ -133,7 +133,7 @@ static void *vgic_debug_next(struct seq_file *s, void *v, loff_t *pos)
 
 static void vgic_debug_stop(struct seq_file *s, void *v)
 {
-	struct kvm *kvm = (struct kvm *)s->private;
+	struct kvm *kvm = s->private;
 	struct vgic_state_iter *iter;
 
 	/*
@@ -240,8 +240,8 @@ static void print_irq_state(struct seq_file *s, struct vgic_irq *irq,
 
 static int vgic_debug_show(struct seq_file *s, void *v)
 {
-	struct kvm *kvm = (struct kvm *)s->private;
-	struct vgic_state_iter *iter = (struct vgic_state_iter *)v;
+	struct kvm *kvm = s->private;
+	struct vgic_state_iter *iter = v;
 	struct vgic_irq *irq;
 	struct kvm_vcpu *vcpu = NULL;
 	unsigned long flags;

@@ -34,10 +34,11 @@
 
 #define CEX3A_MAX_RESPONSE_SIZE	0x210	/* 512 bit modulus
 					 * (max outputdatalength) +
-					 * type80_hdr*/
+					 * type80_hdr
+					 */
 #define CEX3A_MAX_MESSAGE_SIZE	sizeof(struct type50_crb3_msg)
 
-#define CEX2A_CLEANUP_TIME	(15*HZ)
+#define CEX2A_CLEANUP_TIME	(15 * HZ)
 #define CEX3A_CLEANUP_TIME	CEX2A_CLEANUP_TIME
 
 MODULE_AUTHOR("IBM Corporation");

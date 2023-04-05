@@ -362,11 +362,11 @@ static struct dma_debug_entry *bucket_find_contain(struct hash_bucket **bucket,
 						   unsigned long *flags)
 {
 
-	unsigned int max_range = dma_get_max_seg_size(ref->dev);
 	struct dma_debug_entry *entry, index = *ref;
-	unsigned int range = 0;
+	int limit = min(HASH_SIZE, (index.dev_addr >> HASH_FN_SHIFT) + 1);
+	int i;
 
-	while (range <= max_range) {
+	for (i = 0; i < limit; i++) {
 		entry = __hash_bucket_find(*bucket, ref, containing_match);
 
 		if (entry)
@@ -376,7 +376,6 @@ static struct dma_debug_entry *bucket_find_contain(struct hash_bucket **bucket,
 		 * Nothing found, go back a hash bucket
 		 */
 		put_hash_bucket(*bucket, *flags);
-		range          += (1 << HASH_FN_SHIFT);
 		index.dev_addr -= (1 << HASH_FN_SHIFT);
 		*bucket = get_hash_bucket(&index, flags);
 	}
@@ -911,7 +910,7 @@ static __init int dma_debug_cmdline(char *str)
 		global_disable = true;
 	}
 
-	return 0;
+	return 1;
 }
 
 static __init int dma_debug_entries_cmdline(char *str)
@@ -920,7 +919,7 @@ static __init int dma_debug_entries_cmdline(char *str)
 		return -EINVAL;
 	if (!get_option(&str, &nr_prealloc_entries))
 		nr_prealloc_entries = PREALLOC_DMA_DEBUG_ENTRIES;
-	return 0;
+	return 1;
 }
 
 __setup("dma_debug=", dma_debug_cmdline);
@@ -1050,20 +1049,10 @@ static void check_for_stack(struct device *dev,
 	}
 }
 
-static inline bool overlap(void *addr, unsigned long len, void *start, void *end)
-{
-	unsigned long a1 = (unsigned long)addr;
-	unsigned long b1 = a1 + len;
-	unsigned long a2 = (unsigned long)start;
-	unsigned long b2 = (unsigned long)end;
-
-	return !(b1 <= a2 || a1 >= b2);
-}
-
 static void check_for_illegal_area(struct device *dev, void *addr, unsigned long len)
 {
-	if (overlap(addr, len, _stext, _etext) ||
-	    overlap(addr, len, __start_rodata, __end_rodata))
+	if (memory_intersects(_stext, _etext, addr, len) ||
+	    memory_intersects(__start_rodata, __end_rodata, addr, len))
 		err_printk(dev, NULL, "device driver maps memory from kernel text or rodata [addr=%p] [len=%lu]\n", addr, len);
 }
 

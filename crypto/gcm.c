@@ -617,7 +617,8 @@ static int crypto_gcm_create_common(struct crypto_template *tmpl,
 		return -EINVAL;
 
 	ghash_alg = crypto_find_alg(ghash_name, &crypto_ahash_type,
-				    CRYPTO_ALG_TYPE_HASH,
+				    CRYPTO_ALG_TYPE_HASH |
+				    CRYPTO_ALG_FIPS_INTERNAL,
 				    CRYPTO_ALG_TYPE_AHASH_MASK |
 				    crypto_requires_sync(algt->type,
 							 algt->mask));
