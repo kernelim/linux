@@ -36,8 +36,9 @@ int zap_huge_pud(struct mmu_gather *tlb, struct vm_area_struct *vma, pud_t *pud,
 		 unsigned long addr);
 bool move_huge_pmd(struct vm_area_struct *vma, unsigned long old_addr,
 		   unsigned long new_addr, pmd_t *old_pmd, pmd_t *new_pmd);
-int change_huge_pmd(struct vm_area_struct *vma, pmd_t *pmd, unsigned long addr,
-		    pgprot_t newprot, unsigned long cp_flags);
+int change_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
+		    pmd_t *pmd, unsigned long addr, pgprot_t newprot,
+		    unsigned long cp_flags);
 vm_fault_t vmf_insert_pfn_pmd_prot(struct vm_fault *vmf, pfn_t pfn,
 				   pgprot_t pgprot, bool write);
 
@@ -183,7 +184,6 @@ unsigned long thp_get_unmapped_area(struct file *filp, unsigned long addr,
 
 void prep_transhuge_page(struct page *page);
 void free_transhuge_page(struct page *page);
-bool is_transparent_hugepage(struct page *page);
 
 bool can_split_folio(struct folio *folio, int *pextra_pins);
 int split_huge_page_to_list(struct page *page, struct list_head *list);
@@ -194,7 +194,7 @@ static inline int split_huge_page(struct page *page)
 void deferred_split_huge_page(struct page *page);
 
 void __split_huge_pmd(struct vm_area_struct *vma, pmd_t *pmd,
-		unsigned long address, bool freeze, struct page *page);
+		unsigned long address, bool freeze, struct folio *folio);
 
 #define split_huge_pmd(__vma, __pmd, __address)				\
 	do {								\
@@ -207,7 +207,7 @@ void __split_huge_pmd(struct vm_area_struct *vma, pmd_t *pmd,
 
 
 void split_huge_pmd_address(struct vm_area_struct *vma, unsigned long address,
-		bool freeze, struct page *page);
+		bool freeze, struct folio *folio);
 
 void __split_huge_pud(struct vm_area_struct *vma, pud_t *pud,
 		unsigned long address);
@@ -303,71 +303,6 @@ static inline struct list_head *page_deferred_list(struct page *page)
 	return &page[2].deferred_list;
 }
 
-static __always_inline unsigned int *__page_mapcount_seq(struct page *page)
-{
-	/*
-	 * mapcount_seqcount serializes the mapcount transfer from
-	 * head to tail pages in __split_huge_pmd_locked() against THP
-	 * mapcount readers like page_trans_huge_map_swapcount() and
-	 * page_trans_huge_mapcount() that need full accuracy to
-	 * decide if to COW write protected THP anon pages.
-	 *
-	 * Ideally we should use a "struct seqcount" and we could use
-	 * another tail page to gain more space, but if the debug in
-	 * the structure grows it might not fit in the page struct. So
-	 * using an "unsigned long" looks safer here.
-	 *
-	 * The writer is serialized by the &page[1].flags PG_lock bit
-	 * spinlock
-	 * (page_trans_huge_mapcount_lock/page_trans_huge_mapcount_unlock).
-	 */
-	return &page[1].mapcount_seqcount;
-}
-
-static inline void page_mapcount_seq_init(struct page *page)
-{
-	*__page_mapcount_seq(page) = 0;
-}
-
-static inline unsigned long page_mapcount_seq_begin(struct page *page)
-{
-	unsigned int seqcount;
-	for (;;) {
-		seqcount = READ_ONCE(*__page_mapcount_seq(page));
-		if (likely(!(seqcount & 1)))
-			break;
-		cpu_relax();
-	}
-	smp_rmb();
-	return seqcount;
-}
-
-static inline bool page_mapcount_seq_retry(struct page *page,
-					   unsigned int seqcount)
-{
-	smp_rmb();
-	if (unlikely(seqcount != READ_ONCE(*__page_mapcount_seq(page)))) {
-		cpu_relax();
-		return true;
-	}
-	return false;
-}
-
-static inline void page_trans_huge_mapcount_lock(struct page *page)
-{
-	/* The page lock of THP tail subpages is not used */
-	bit_spin_lock(PG_locked, &page[1].flags);
-	*__page_mapcount_seq(page) += 1;
-	smp_wmb();
-}
-
-static inline void page_trans_huge_mapcount_unlock(struct page *page)
-{
-	smp_wmb();
-	*__page_mapcount_seq(page) += 1;
-	bit_spin_unlock(PG_locked, &page[1].flags);
-}
-
 #else /* CONFIG_TRANSPARENT_HUGEPAGE */
 #define HPAGE_PMD_SHIFT ({ BUILD_BUG(); 0; })
 #define HPAGE_PMD_MASK ({ BUILD_BUG(); 0; })
@@ -406,11 +341,6 @@ static inline bool transhuge_vma_enabled(struct vm_area_struct *vma,
 
 static inline void prep_transhuge_page(struct page *page) {}
 
-static inline bool is_transparent_hugepage(struct page *page)
-{
-	return false;
-}
-
 #define transparent_hugepage_flags 0UL
 
 #define thp_get_unmapped_area	NULL
@@ -435,9 +365,9 @@ static inline void deferred_split_huge_page(struct page *page) {}
 	do { } while (0)
 
 static inline void __split_huge_pmd(struct vm_area_struct *vma, pmd_t *pmd,
-		unsigned long address, bool freeze, struct page *page) {}
+		unsigned long address, bool freeze, struct folio *folio) {}
 static inline void split_huge_pmd_address(struct vm_area_struct *vma,
-		unsigned long address, bool freeze, struct page *page) {}
+		unsigned long address, bool freeze, struct folio *folio) {}
 
 #define split_huge_pud(__vma, __pmd, __address)	\
 	do { } while (0)
@@ -510,29 +440,7 @@ static inline bool thp_migration_supported(void)
 {
 	return false;
 }
-
-static inline unsigned long page_mapcount_seq_begin(struct page *page)
-{
-	return 0;
-}
-
-static inline bool page_mapcount_seq_retry(struct page *page,
-					   unsigned int seqcount)
-{
-	return false;
-}
-
-static inline void page_trans_huge_mapcount_lock(struct page *page)
-{
-}
-
-static inline void page_trans_huge_mapcount_unlock(struct page *page)
-{
-}
-
 #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
-
-extern bool page_trans_huge_anon_shared(struct page *);
 
 static inline int split_folio_to_list(struct folio *folio,
 		struct list_head *list)

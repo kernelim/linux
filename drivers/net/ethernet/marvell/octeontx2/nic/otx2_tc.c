@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Marvell OcteonTx2 RVU Physcial Function ethernet driver
+/* Marvell RVU Ethernet driver
  *
  * Copyright (C) 2021 Marvell.
+ *
  */
+
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/inetdevice.h>
@@ -26,12 +28,18 @@
 #define MAX_RATE_EXPONENT		0x0FULL
 #define MAX_RATE_MANTISSA		0xFFULL
 
+#define CN10K_MAX_BURST_MANTISSA	0x7FFFULL
+#define CN10K_MAX_BURST_SIZE		8453888ULL
+
 /* Bitfields in NIX_TLX_PIR register */
 #define TLX_RATE_MANTISSA		GENMASK_ULL(8, 1)
 #define TLX_RATE_EXPONENT		GENMASK_ULL(12, 9)
 #define TLX_RATE_DIVIDER_EXPONENT	GENMASK_ULL(16, 13)
 #define TLX_BURST_MANTISSA		GENMASK_ULL(36, 29)
 #define TLX_BURST_EXPONENT		GENMASK_ULL(40, 37)
+
+#define CN10K_TLX_BURST_MANTISSA	GENMASK_ULL(43, 29)
+#define CN10K_TLX_BURST_EXPONENT	GENMASK_ULL(47, 44)
 
 struct otx2_tc_flow_stats {
 	u64 bytes;
@@ -52,33 +60,65 @@ struct otx2_tc_flow {
 	bool				is_act_police;
 };
 
-static void otx2_get_egress_burst_cfg(u32 burst, u32 *burst_exp,
-				      u32 *burst_mantissa)
+int otx2_tc_alloc_ent_bitmap(struct otx2_nic *nic)
 {
+	struct otx2_tc_info *tc = &nic->tc_info;
+
+	if (!nic->flow_cfg->max_flows)
+		return 0;
+
+	/* Max flows changed, free the existing bitmap */
+	kfree(tc->tc_entries_bitmap);
+
+	tc->tc_entries_bitmap =
+			kcalloc(BITS_TO_LONGS(nic->flow_cfg->max_flows),
+				sizeof(long), GFP_KERNEL);
+	if (!tc->tc_entries_bitmap) {
+		netdev_err(nic->netdev,
+			   "Unable to alloc TC flow entries bitmap\n");
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(otx2_tc_alloc_ent_bitmap);
+
+static void otx2_get_egress_burst_cfg(struct otx2_nic *nic, u32 burst,
+				      u32 *burst_exp, u32 *burst_mantissa)
+{
+	int max_burst, max_mantissa;
 	unsigned int tmp;
+
+	if (is_dev_otx2(nic->pdev)) {
+		max_burst = MAX_BURST_SIZE;
+		max_mantissa = MAX_BURST_MANTISSA;
+	} else {
+		max_burst = CN10K_MAX_BURST_SIZE;
+		max_mantissa = CN10K_MAX_BURST_MANTISSA;
+	}
 
 	/* Burst is calculated as
 	 * ((256 + BURST_MANTISSA) << (1 + BURST_EXPONENT)) / 256
 	 * Max supported burst size is 130,816 bytes.
 	 */
-	burst = min_t(u32, burst, MAX_BURST_SIZE);
+	burst = min_t(u32, burst, max_burst);
 	if (burst) {
 		*burst_exp = ilog2(burst) ? ilog2(burst) - 1 : 0;
 		tmp = burst - rounddown_pow_of_two(burst);
-		if (burst < MAX_BURST_MANTISSA)
+		if (burst < max_mantissa)
 			*burst_mantissa = tmp * 2;
 		else
 			*burst_mantissa = tmp / (1ULL << (*burst_exp - 7));
 	} else {
 		*burst_exp = MAX_BURST_EXPONENT;
-		*burst_mantissa = MAX_BURST_MANTISSA;
+		*burst_mantissa = max_mantissa;
 	}
 }
 
-static void otx2_get_egress_rate_cfg(u32 maxrate, u32 *exp,
+static void otx2_get_egress_rate_cfg(u64 maxrate, u32 *exp,
 				     u32 *mantissa, u32 *div_exp)
 {
-	unsigned int tmp;
+	u64 tmp;
 
 	/* Rate calculation by hardware
 	 *
@@ -107,20 +147,43 @@ static void otx2_get_egress_rate_cfg(u32 maxrate, u32 *exp,
 	}
 }
 
-static int otx2_set_matchall_egress_rate(struct otx2_nic *nic, u32 burst, u32 maxrate)
+static u64 otx2_get_txschq_rate_regval(struct otx2_nic *nic,
+				       u64 maxrate, u32 burst)
+{
+	u32 burst_exp, burst_mantissa;
+	u32 exp, mantissa, div_exp;
+	u64 regval = 0;
+
+	/* Get exponent and mantissa values from the desired rate */
+	otx2_get_egress_burst_cfg(nic, burst, &burst_exp, &burst_mantissa);
+	otx2_get_egress_rate_cfg(maxrate, &exp, &mantissa, &div_exp);
+
+	if (is_dev_otx2(nic->pdev)) {
+		regval = FIELD_PREP(TLX_BURST_EXPONENT, (u64)burst_exp) |
+				FIELD_PREP(TLX_BURST_MANTISSA, (u64)burst_mantissa) |
+				FIELD_PREP(TLX_RATE_DIVIDER_EXPONENT, div_exp) |
+				FIELD_PREP(TLX_RATE_EXPONENT, exp) |
+				FIELD_PREP(TLX_RATE_MANTISSA, mantissa) | BIT_ULL(0);
+	} else {
+		regval = FIELD_PREP(CN10K_TLX_BURST_EXPONENT, (u64)burst_exp) |
+				FIELD_PREP(CN10K_TLX_BURST_MANTISSA, (u64)burst_mantissa) |
+				FIELD_PREP(TLX_RATE_DIVIDER_EXPONENT, div_exp) |
+				FIELD_PREP(TLX_RATE_EXPONENT, exp) |
+				FIELD_PREP(TLX_RATE_MANTISSA, mantissa) | BIT_ULL(0);
+	}
+
+	return regval;
+}
+
+static int otx2_set_matchall_egress_rate(struct otx2_nic *nic,
+					 u32 burst, u64 maxrate)
 {
 	struct otx2_hw *hw = &nic->hw;
 	struct nix_txschq_config *req;
-	u32 burst_exp, burst_mantissa;
-	u32 exp, mantissa, div_exp;
 	int txschq, err;
 
 	/* All SQs share the same TL4, so pick the first scheduler */
 	txschq = hw->txschq_list[NIX_TXSCH_LVL_TL4][0];
-
-	/* Get exponent and mantissa values from the desired rate */
-	otx2_get_egress_burst_cfg(burst, &burst_exp, &burst_mantissa);
-	otx2_get_egress_rate_cfg(maxrate, &exp, &mantissa, &div_exp);
 
 	mutex_lock(&nic->mbox.lock);
 	req = otx2_mbox_alloc_msg_nix_txschq_cfg(&nic->mbox);
@@ -132,11 +195,7 @@ static int otx2_set_matchall_egress_rate(struct otx2_nic *nic, u32 burst, u32 ma
 	req->lvl = NIX_TXSCH_LVL_TL4;
 	req->num_regs = 1;
 	req->reg[0] = NIX_AF_TL4X_PIR(txschq);
-	req->regval[0] = FIELD_PREP(TLX_BURST_EXPONENT, burst_exp) |
-			 FIELD_PREP(TLX_BURST_MANTISSA, burst_mantissa) |
-			 FIELD_PREP(TLX_RATE_DIVIDER_EXPONENT, div_exp) |
-			 FIELD_PREP(TLX_RATE_EXPONENT, exp) |
-			 FIELD_PREP(TLX_RATE_MANTISSA, mantissa) | BIT_ULL(0);
+	req->regval[0] = otx2_get_txschq_rate_regval(nic, maxrate, burst);
 
 	err = otx2_sync_mbox_msg(&nic->mbox);
 	mutex_unlock(&nic->mbox.lock);
@@ -205,7 +264,7 @@ static int otx2_tc_egress_matchall_install(struct otx2_nic *nic,
 	struct netlink_ext_ack *extack = cls->common.extack;
 	struct flow_action *actions = &cls->rule->action;
 	struct flow_action_entry *entry;
-	u32 rate;
+	u64 rate;
 	int err;
 
 	err = otx2_tc_validate_flow(nic, actions, extack);
@@ -231,7 +290,7 @@ static int otx2_tc_egress_matchall_install(struct otx2_nic *nic,
 		}
 		/* Convert bytes per second to Mbps */
 		rate = entry->police.rate_bytes_ps * 8;
-		rate = max_t(u32, rate / 1000000, 1);
+		rate = max_t(u64, rate / 1000000, 1);
 		err = otx2_set_matchall_egress_rate(nic, entry->police.burst, rate);
 		if (err)
 			return err;
@@ -473,6 +532,31 @@ static int otx2_tc_prepare_flow(struct otx2_nic *nic, struct otx2_tc_flow *node,
 			req->features |= BIT_ULL(NPC_IPPROTO_ICMP6);
 	}
 
+	if (flow_rule_match_key(rule, FLOW_DISSECTOR_KEY_CONTROL)) {
+		struct flow_match_control match;
+
+		flow_rule_match_control(rule, &match);
+		if (match.mask->flags & FLOW_DIS_FIRST_FRAG) {
+			NL_SET_ERR_MSG_MOD(extack, "HW doesn't support frag first/later");
+			return -EOPNOTSUPP;
+		}
+
+		if (match.mask->flags & FLOW_DIS_IS_FRAGMENT) {
+			if (ntohs(flow_spec->etype) == ETH_P_IP) {
+				flow_spec->ip_flag = IPV4_FLAG_MORE;
+				flow_mask->ip_flag = 0xff;
+				req->features |= BIT_ULL(NPC_IPFRAG_IPV4);
+			} else if (ntohs(flow_spec->etype) == ETH_P_IPV6) {
+				flow_spec->next_header = IPPROTO_FRAGMENT;
+				flow_mask->next_header = 0xff;
+				req->features |= BIT_ULL(NPC_IPFRAG_IPV6);
+			} else {
+				NL_SET_ERR_MSG_MOD(extack, "flow-type should be either IPv4 and IPv6");
+				return -EOPNOTSUPP;
+			}
+		}
+	}
+
 	if (flow_rule_match_key(rule, FLOW_DISSECTOR_KEY_ETH_ADDRS)) {
 		struct flow_match_eth_addrs match;
 
@@ -528,8 +612,8 @@ static int otx2_tc_prepare_flow(struct otx2_nic *nic, struct otx2_tc_flow *node,
 				   match.key->vlan_priority << 13;
 
 			vlan_tci_mask = match.mask->vlan_id |
-					match.key->vlan_dei << 12 |
-					match.key->vlan_priority << 13;
+					match.mask->vlan_dei << 12 |
+					match.mask->vlan_priority << 13;
 
 			flow_spec->vlan_tci = htons(vlan_tci);
 			flow_mask->vlan_tci = htons(vlan_tci_mask);
@@ -589,21 +673,27 @@ static int otx2_tc_prepare_flow(struct otx2_nic *nic, struct otx2_tc_flow *node,
 
 		flow_spec->dport = match.key->dst;
 		flow_mask->dport = match.mask->dst;
-		if (ip_proto == IPPROTO_UDP)
-			req->features |= BIT_ULL(NPC_DPORT_UDP);
-		else if (ip_proto == IPPROTO_TCP)
-			req->features |= BIT_ULL(NPC_DPORT_TCP);
-		else if (ip_proto == IPPROTO_SCTP)
-			req->features |= BIT_ULL(NPC_DPORT_SCTP);
+
+		if (flow_mask->dport) {
+			if (ip_proto == IPPROTO_UDP)
+				req->features |= BIT_ULL(NPC_DPORT_UDP);
+			else if (ip_proto == IPPROTO_TCP)
+				req->features |= BIT_ULL(NPC_DPORT_TCP);
+			else if (ip_proto == IPPROTO_SCTP)
+				req->features |= BIT_ULL(NPC_DPORT_SCTP);
+		}
 
 		flow_spec->sport = match.key->src;
 		flow_mask->sport = match.mask->src;
-		if (ip_proto == IPPROTO_UDP)
-			req->features |= BIT_ULL(NPC_SPORT_UDP);
-		else if (ip_proto == IPPROTO_TCP)
-			req->features |= BIT_ULL(NPC_SPORT_TCP);
-		else if (ip_proto == IPPROTO_SCTP)
-			req->features |= BIT_ULL(NPC_SPORT_SCTP);
+
+		if (flow_mask->sport) {
+			if (ip_proto == IPPROTO_UDP)
+				req->features |= BIT_ULL(NPC_SPORT_UDP);
+			else if (ip_proto == IPPROTO_TCP)
+				req->features |= BIT_ULL(NPC_SPORT_TCP);
+			else if (ip_proto == IPPROTO_SCTP)
+				req->features |= BIT_ULL(NPC_SPORT_SCTP);
+		}
 	}
 
 	return otx2_tc_parse_actions(nic, &rule->action, req, f, node);
@@ -639,6 +729,7 @@ static int otx2_del_mcam_flow_entry(struct otx2_nic *nic, u16 entry)
 static int otx2_tc_del_flow(struct otx2_nic *nic,
 			    struct flow_cls_offload *tc_flow_cmd)
 {
+	struct otx2_flow_config *flow_cfg = nic->flow_cfg;
 	struct otx2_tc_info *tc_info = &nic->tc_info;
 	struct otx2_tc_flow *flow_node;
 	int err;
@@ -681,7 +772,7 @@ static int otx2_tc_del_flow(struct otx2_nic *nic,
 	kfree_rcu(flow_node, rcu);
 
 	clear_bit(flow_node->bitpos, tc_info->tc_entries_bitmap);
-	tc_info->num_entries--;
+	flow_cfg->nr_flows--;
 
 	return 0;
 }
@@ -690,6 +781,7 @@ static int otx2_tc_add_flow(struct otx2_nic *nic,
 			    struct flow_cls_offload *tc_flow_cmd)
 {
 	struct netlink_ext_ack *extack = tc_flow_cmd->common.extack;
+	struct otx2_flow_config *flow_cfg = nic->flow_cfg;
 	struct otx2_tc_info *tc_info = &nic->tc_info;
 	struct otx2_tc_flow *new_node, *old_node;
 	struct npc_install_flow_req *req, dummy;
@@ -698,9 +790,9 @@ static int otx2_tc_add_flow(struct otx2_nic *nic,
 	if (!(nic->flags & OTX2_FLAG_TC_FLOWER_SUPPORT))
 		return -ENOMEM;
 
-	if (bitmap_full(tc_info->tc_entries_bitmap, nic->flow_cfg->tc_max_flows)) {
+	if (bitmap_full(tc_info->tc_entries_bitmap, flow_cfg->max_flows)) {
 		NL_SET_ERR_MSG_MOD(extack,
-				   "Not enough MCAM space to add the flow");
+				   "Free MCAM entry not available to add the flow");
 		return -ENOMEM;
 	}
 
@@ -738,10 +830,9 @@ static int otx2_tc_add_flow(struct otx2_nic *nic,
 	memcpy(req, &dummy, sizeof(struct npc_install_flow_req));
 
 	new_node->bitpos = find_first_zero_bit(tc_info->tc_entries_bitmap,
-					       nic->flow_cfg->tc_max_flows);
+					       flow_cfg->max_flows);
 	req->channel = nic->hw.rx_chan_base;
-	req->entry = nic->flow_cfg->flow_ent[nic->flow_cfg->tc_flower_offset +
-				nic->flow_cfg->tc_max_flows - new_node->bitpos];
+	req->entry = flow_cfg->flow_ent[flow_cfg->max_flows - new_node->bitpos - 1];
 	req->intf = NIX_INTF_RX;
 	req->set_cntr = 1;
 	new_node->entry = req->entry;
@@ -766,7 +857,7 @@ static int otx2_tc_add_flow(struct otx2_nic *nic,
 	}
 
 	set_bit(new_node->bitpos, tc_info->tc_entries_bitmap);
-	tc_info->num_entries++;
+	flow_cfg->nr_flows++;
 
 	return 0;
 
@@ -1040,6 +1131,7 @@ int otx2_setup_tc(struct net_device *netdev, enum tc_setup_type type,
 		return -EOPNOTSUPP;
 	}
 }
+EXPORT_SYMBOL(otx2_setup_tc);
 
 static const struct rhashtable_params tc_flow_ht_params = {
 	.head_offset = offsetof(struct otx2_tc_flow, node),
@@ -1051,17 +1143,36 @@ static const struct rhashtable_params tc_flow_ht_params = {
 int otx2_init_tc(struct otx2_nic *nic)
 {
 	struct otx2_tc_info *tc = &nic->tc_info;
+	int err;
 
 	/* Exclude receive queue 0 being used for police action */
 	set_bit(0, &nic->rq_bmap);
 
+	if (!nic->flow_cfg) {
+		netdev_err(nic->netdev,
+			   "Can't init TC, nic->flow_cfg is not setup\n");
+		return -EINVAL;
+	}
+
+	err = otx2_tc_alloc_ent_bitmap(nic);
+	if (err)
+		return err;
+
 	tc->flow_ht_params = tc_flow_ht_params;
-	return rhashtable_init(&tc->flow_table, &tc->flow_ht_params);
+	err = rhashtable_init(&tc->flow_table, &tc->flow_ht_params);
+	if (err) {
+		kfree(tc->tc_entries_bitmap);
+		tc->tc_entries_bitmap = NULL;
+	}
+	return err;
 }
+EXPORT_SYMBOL(otx2_init_tc);
 
 void otx2_shutdown_tc(struct otx2_nic *nic)
 {
 	struct otx2_tc_info *tc = &nic->tc_info;
 
+	kfree(tc->tc_entries_bitmap);
 	rhashtable_destroy(&tc->flow_table);
 }
+EXPORT_SYMBOL(otx2_shutdown_tc);

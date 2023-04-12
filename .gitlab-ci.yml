@@ -16,15 +16,30 @@ workflow: !reference [.workflow]
     srpm_make_target: dist-srpm
     native_tools: 'true'
     architectures: 'x86_64 ppc64le aarch64 s390x'
-    disttag_override: '.el9_1'
+    disttag_override: '.el9_2'
+
+.trigger_c9s_pipeline:
+  trigger:
+    branch: c9s
+  variables:
+    name: c9s
+    builder_image: quay.io/cki/builder-stream9
+    kpet_tree_family: c9s
 
 .trigger_rhel9_pipeline:
   trigger:
     branch: rhel9
   variables:
     name: rhel9
-    builder_image: quay.io/cki/builder-rhel9.1
+    builder_image: quay.io/cki/builder-rhel9
     kpet_tree_family: rhel9
+
+.realtime_check_c9s:
+  trigger:
+    branch: c9s-rt
+  variables:
+    name: kernel-rt-c9s
+    kpet_tree_family: c9s-rt
 
 .realtime_check_rhel9:
   trigger:
@@ -33,16 +48,120 @@ workflow: !reference [.workflow]
     name: kernel-rt-rhel9
     kpet_tree_family: rhel9-rt
 
+.trigger_rhel9_build:
+  extends: .trigger_rhel9_pipeline
+  variables:
+    skip_test: 'true'
+    skip_results: 'true'
+
+.realtime_full_c9s:
+  variables:
+    name: kernel-rt-c9s
+    kpet_tree_family: c9s-rt
+    RUN_ONLY_FOR_RT: 'true'
+
+.automotive_full_c9s:
+  variables:
+    name: kernel-automotive-c9s
+    kpet_tree_family: autosd-rhivos-rt
+    disttag_override: '.el9iv'
+    AWS_UPT_IMAGE_NAME_FILTER: 'auto-osbuild-qemu-cs9-cki-ostree-*'
+    RUN_ONLY_FOR_AUTOMOTIVE: 'true'
+
 .realtime_full_rhel9:
   variables:
     name: kernel-rt-rhel9
     kpet_tree_family: rhel9-rt
     RUN_ONLY_FOR_RT: 'true'
 
+.64k_full_c9s:
+  variables:
+    name: kernel-64k-c9s
+
+.64k_full_rhel9:
+  variables:
+    name: kernel-64k-rhel9
+
+.automotive_check_c9s_overrides:
+  trigger:
+    branch: c9s-automotive
+  variables:
+    RUN_ONLY_FOR_AUTOMOTIVE: 'false'
+
+.automotive_check_realtime_overrides:
+  variables:
+    RUN_ONLY_FOR_RT: 'true'
+    merge_branch: main-automotive  # Can't use CI_MERGE_REQUEST_TARGET_BRANCH_NAME due to -rt suffix
+
+# c9s CI
+c9s_merge_request:
+  extends: [.trusted, .merge_request, .rhel_common,
+            .9-common, .trigger_c9s_pipeline]
+
+c9s_64k_merge_request:
+  # Don't add .rhel_common as we overwrite those configs
+  extends: [.trusted, .merge_request,
+            .9-common, .trigger_c9s_pipeline,
+            .64k_common,
+            .64k_full_c9s]
+
+c9s_automotive_check_merge_request:
+  extends: [.trusted, .merge_request,
+            .9-common, .trigger_c9s_pipeline, .automotive_full_c9s, .automotive_check_c9s_overrides,
+            .automotive_check_common]
+
+c9s_realtime_check_merge_request:
+  extends: [.trusted, .merge_request,
+            .9-common,
+            .realtime_check_common,
+            .trigger_c9s_pipeline, .realtime_check_c9s]
+
+c9s_baseline_coverage_build:
+  extends: [.trusted, .baseline, .rhel_common, .only_build_and_publish, .coverage,
+            .9-common, .trigger_c9s_pipeline]
+
+c9s_rhel9_compat_merge_request:
+  extends: [.centos_stream_rhel_internal, .merge_request, .rhel_common, .with_notifications,
+            .9-common, .trigger_rhel9_build]
+
+# c9s realtime branch CI
+c9s_realtime_merge_request:
+  extends: [.trusted, .merge_request,
+            .9-common,
+            .realtime_pipeline_common,
+            .trigger_c9s_pipeline, .realtime_full_c9s]
+
+c9s_realtime_automotive_check_merge_request:
+  extends: [.trusted, .merge_request,
+            .9-common,
+            .trigger_c9s_pipeline, .automotive_full_c9s, .automotive_check_c9s_overrides,
+            .automotive_check_common,
+            .automotive_check_realtime_overrides]
+
+# c9s automotive branch CI
+c9s_automotive_merge_request:
+  extends: [.trusted, .merge_request,
+            .9-common,
+            .automotive_pipeline_common,
+            .trigger_c9s_pipeline, .automotive_full_c9s]
+
+c9s_automotive_baseline_coverage:
+  extends: [.trusted, .baseline, .9-common,
+            .automotive_pipeline_common,
+            .coverage,
+            .trigger_c9s_pipeline, .automotive_full_c9s]
+
 # RHEL9 CI
 rhel9_merge_request:
   extends: [.internal, .merge_request, .rhel_common, .with_notifications,
             .9-common, .trigger_rhel9_pipeline]
+
+rhel9_64k_merge_request:
+  # Don't add .rhel_common as we overwrite those configs
+  extends: [.internal, .merge_request, .with_notifications,
+            .9-common, .trigger_rhel9_pipeline,
+            .64k_common,
+            .64k_full_c9s]
 
 rhel9_realtime_check_merge_request:
   extends: [.internal, .merge_request,
@@ -65,6 +184,13 @@ rhel9_realtime_merge_request:
 rhel9_merge_request_private:
   extends: [.scratch, .merge_request, .rhel_common,
             .9-common, .trigger_rhel9_pipeline]
+
+rhel9_64k_merge_request_private:
+  # Don't add .rhel_common as we overwrite those configs
+  extends: [.scratch, .merge_request,
+            .9-common, .trigger_rhel9_pipeline,
+            .64k_common,
+            .64k_full_c9s]
 
 rhel9_realtime_check_merge_request_private:
   extends: [.scratch, .merge_request,

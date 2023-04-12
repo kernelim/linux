@@ -176,7 +176,7 @@ int pnv_setup_msi_irqs(struct pci_dev *pdev, int nvec, int type)
 		return -ENODEV;
 
 	for_each_pci_msi_entry(entry, pdev) {
-		if (!entry->msi_attrib.is_64 && !phb->msi32_support) {
+		if (!entry->pci.msi_attrib.is_64 && !phb->msi32_support) {
 			pr_warn("%s: Supports only 64-bit MSIs\n",
 				pci_name(pdev));
 			return -ENXIO;
@@ -195,7 +195,7 @@ int pnv_setup_msi_irqs(struct pci_dev *pdev, int nvec, int type)
 			return -ENOMEM;
 		}
 		rc = phb->msi_setup(phb, pdev, phb->msi_base + hwirq,
-				    virq, entry->msi_attrib.is_64, &msg);
+				    virq, entry->pci.msi_attrib.is_64, &msg);
 		if (rc) {
 			pr_warn("%s: Failed to setup MSI\n", pci_name(pdev));
 			irq_dispose_mapping(virq);

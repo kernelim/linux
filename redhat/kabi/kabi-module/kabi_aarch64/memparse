@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/cmdline.c
-0x27864d57	memparse	vmlinux	EXPORT_SYMBOL
+#2-
+0x27864d57	memparse	vmlinux	EXPORT_SYMBOL	

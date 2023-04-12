@@ -9,8 +9,9 @@
 #include "gt/intel_gt_pm_irq.h"
 #include "gt/intel_gt_regs.h"
 #include "intel_guc.h"
-#include "intel_guc_slpc.h"
 #include "intel_guc_ads.h"
+#include "intel_guc_capture.h"
+#include "intel_guc_slpc.h"
 #include "intel_guc_submission.h"
 #include "i915_drv.h"
 #include "i915_irq.h"
@@ -223,52 +224,21 @@ static u32 guc_ctl_feature_flags(struct intel_guc *guc)
 
 static u32 guc_ctl_log_params_flags(struct intel_guc *guc)
 {
-	u32 offset = intel_guc_ggtt_offset(guc, guc->log.vma) >> PAGE_SHIFT;
-	u32 flags;
+	struct intel_guc_log *log = &guc->log;
+	u32 offset, flags;
 
-	#if (((CRASH_BUFFER_SIZE) % SZ_1M) == 0)
-	#define LOG_UNIT SZ_1M
-	#define LOG_FLAG GUC_LOG_LOG_ALLOC_UNITS
-	#else
-	#define LOG_UNIT SZ_4K
-	#define LOG_FLAG 0
-	#endif
+	GEM_BUG_ON(!log->sizes_initialised);
 
-	#if (((CAPTURE_BUFFER_SIZE) % SZ_1M) == 0)
-	#define CAPTURE_UNIT SZ_1M
-	#define CAPTURE_FLAG GUC_LOG_CAPTURE_ALLOC_UNITS
-	#else
-	#define CAPTURE_UNIT SZ_4K
-	#define CAPTURE_FLAG 0
-	#endif
-
-	BUILD_BUG_ON(!CRASH_BUFFER_SIZE);
-	BUILD_BUG_ON(!IS_ALIGNED(CRASH_BUFFER_SIZE, LOG_UNIT));
-	BUILD_BUG_ON(!DEBUG_BUFFER_SIZE);
-	BUILD_BUG_ON(!IS_ALIGNED(DEBUG_BUFFER_SIZE, LOG_UNIT));
-	BUILD_BUG_ON(!CAPTURE_BUFFER_SIZE);
-	BUILD_BUG_ON(!IS_ALIGNED(CAPTURE_BUFFER_SIZE, CAPTURE_UNIT));
-
-	BUILD_BUG_ON((CRASH_BUFFER_SIZE / LOG_UNIT - 1) >
-			(GUC_LOG_CRASH_MASK >> GUC_LOG_CRASH_SHIFT));
-	BUILD_BUG_ON((DEBUG_BUFFER_SIZE / LOG_UNIT - 1) >
-			(GUC_LOG_DEBUG_MASK >> GUC_LOG_DEBUG_SHIFT));
-	BUILD_BUG_ON((CAPTURE_BUFFER_SIZE / CAPTURE_UNIT - 1) >
-			(GUC_LOG_CAPTURE_MASK >> GUC_LOG_CAPTURE_SHIFT));
+	offset = intel_guc_ggtt_offset(guc, log->vma) >> PAGE_SHIFT;
 
 	flags = GUC_LOG_VALID |
 		GUC_LOG_NOTIFY_ON_HALF_FULL |
-		CAPTURE_FLAG |
-		LOG_FLAG |
-		((CRASH_BUFFER_SIZE / LOG_UNIT - 1) << GUC_LOG_CRASH_SHIFT) |
-		((DEBUG_BUFFER_SIZE / LOG_UNIT - 1) << GUC_LOG_DEBUG_SHIFT) |
-		((CAPTURE_BUFFER_SIZE / CAPTURE_UNIT - 1) << GUC_LOG_CAPTURE_SHIFT) |
+		log->sizes[GUC_LOG_SECTIONS_DEBUG].flag |
+		log->sizes[GUC_LOG_SECTIONS_CAPTURE].flag |
+		(log->sizes[GUC_LOG_SECTIONS_CRASH].count << GUC_LOG_CRASH_SHIFT) |
+		(log->sizes[GUC_LOG_SECTIONS_DEBUG].count << GUC_LOG_DEBUG_SHIFT) |
+		(log->sizes[GUC_LOG_SECTIONS_CAPTURE].count << GUC_LOG_CAPTURE_SHIFT) |
 		(offset << GUC_LOG_BUF_ADDR_SHIFT);
-
-	#undef LOG_UNIT
-	#undef LOG_FLAG
-	#undef CAPTURE_UNIT
-	#undef CAPTURE_FLAG
 
 	return flags;
 }
@@ -290,6 +260,45 @@ static u32 guc_ctl_wa_flags(struct intel_guc *guc)
 	if (GRAPHICS_VER(gt->i915) >= 11 &&
 	    GRAPHICS_VER_FULL(gt->i915) < IP_VER(12, 50))
 		flags |= GUC_WA_POLLCS;
+
+	/* Wa_16011759253:dg2_g10:a0 */
+	if (IS_DG2_GRAPHICS_STEP(gt->i915, G10, STEP_A0, STEP_B0))
+		flags |= GUC_WA_GAM_CREDITS;
+
+	/* Wa_14014475959:dg2 */
+	if (IS_DG2(gt->i915))
+		flags |= GUC_WA_HOLD_CCS_SWITCHOUT;
+
+	/*
+	 * Wa_14012197797:dg2_g10:a0,dg2_g11:a0
+	 * Wa_22011391025:dg2_g10,dg2_g11,dg2_g12
+	 *
+	 * The same WA bit is used for both and 22011391025 is applicable to
+	 * all DG2.
+	 */
+	if (IS_DG2(gt->i915))
+		flags |= GUC_WA_DUAL_QUEUE;
+
+	/* Wa_22011802037: graphics version 11/12 */
+	if (IS_GRAPHICS_VER(gt->i915, 11, 12))
+		flags |= GUC_WA_PRE_PARSER;
+
+	/* Wa_16011777198:dg2 */
+	if (IS_DG2_GRAPHICS_STEP(gt->i915, G10, STEP_A0, STEP_C0) ||
+	    IS_DG2_GRAPHICS_STEP(gt->i915, G11, STEP_A0, STEP_B0))
+		flags |= GUC_WA_RCS_RESET_BEFORE_RC6;
+
+	/*
+	 * Wa_22012727170:dg2_g10[a0-c0), dg2_g11[a0..)
+	 * Wa_22012727685:dg2_g11[a0..)
+	 */
+	if (IS_DG2_GRAPHICS_STEP(gt->i915, G10, STEP_A0, STEP_C0) ||
+	    IS_DG2_GRAPHICS_STEP(gt->i915, G11, STEP_A0, STEP_FOREVER))
+		flags |= GUC_WA_CONTEXT_ISOLATION;
+
+	/* Wa_16015675438 */
+	if (!RCS_MASK(gt))
+		flags |= GUC_WA_RCS_REGS_IN_CCS_REGS_LIST;
 
 	return flags;
 }
@@ -349,6 +358,25 @@ void intel_guc_write_params(struct intel_guc *guc)
 	intel_uncore_forcewake_put(uncore, FORCEWAKE_GT);
 }
 
+void intel_guc_dump_time_info(struct intel_guc *guc, struct drm_printer *p)
+{
+	struct intel_gt *gt = guc_to_gt(guc);
+	intel_wakeref_t wakeref;
+	u32 stamp = 0;
+	u64 ktime;
+
+	intel_device_info_print_runtime(RUNTIME_INFO(gt->i915), p);
+
+	with_intel_runtime_pm(&gt->i915->runtime_pm, wakeref)
+		stamp = intel_uncore_read(gt->uncore, GUCPMTIMESTAMP);
+	ktime = ktime_get_boottime_ns();
+
+	drm_printf(p, "Kernel timestamp: 0x%08llX [%llu]\n", ktime, ktime);
+	drm_printf(p, "GuC timestamp: 0x%08X [%u]\n", stamp, stamp);
+	drm_printf(p, "CS timestamp frequency: %u Hz, %u ns\n",
+		   gt->clock_frequency, gt->clock_period_ns);
+}
+
 int intel_guc_init(struct intel_guc *guc)
 {
 	struct intel_gt *gt = guc_to_gt(guc);
@@ -362,9 +390,14 @@ int intel_guc_init(struct intel_guc *guc)
 	if (ret)
 		goto err_fw;
 
-	ret = intel_guc_ads_create(guc);
+	ret = intel_guc_capture_init(guc);
 	if (ret)
 		goto err_log;
+
+	ret = intel_guc_ads_create(guc);
+	if (ret)
+		goto err_capture;
+
 	GEM_BUG_ON(!guc->ads_vma);
 
 	ret = intel_guc_ct_init(&guc->ct);
@@ -403,11 +436,14 @@ err_ct:
 	intel_guc_ct_fini(&guc->ct);
 err_ads:
 	intel_guc_ads_destroy(guc);
+err_capture:
+	intel_guc_capture_destroy(guc);
 err_log:
 	intel_guc_log_destroy(&guc->log);
 err_fw:
 	intel_uc_fw_fini(&guc->fw);
 out:
+	intel_uc_fw_change_status(&guc->fw, INTEL_UC_FIRMWARE_INIT_FAIL);
 	i915_probe_error(gt->i915, "failed with %d\n", ret);
 	return ret;
 }
@@ -430,6 +466,7 @@ void intel_guc_fini(struct intel_guc *guc)
 	intel_guc_ct_fini(&guc->ct);
 
 	intel_guc_ads_destroy(guc);
+	intel_guc_capture_destroy(guc);
 	intel_guc_log_destroy(&guc->log);
 	intel_uc_fw_fini(&guc->fw);
 }

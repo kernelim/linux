@@ -89,6 +89,7 @@
 #include <linux/jhash.h>
 #include <net/dst.h>
 #include <net/dst_metadata.h>
+#include <net/inet_dscp.h>
 #include <net/net_namespace.h>
 #include <net/protocol.h>
 #include <net/ip.h>
@@ -952,6 +953,7 @@ static int ip_error(struct sk_buff *skb)
 	struct inet_peer *peer;
 	unsigned long now;
 	struct net *net;
+	SKB_DR(reason);
 	bool send;
 	int code;
 
@@ -971,10 +973,12 @@ static int ip_error(struct sk_buff *skb)
 	if (!IN_DEV_FORWARD(in_dev)) {
 		switch (rt->dst.error) {
 		case EHOSTUNREACH:
+			SKB_DR_SET(reason, IP_INADDRERRORS);
 			__IP_INC_STATS(net, IPSTATS_MIB_INADDRERRORS);
 			break;
 
 		case ENETUNREACH:
+			SKB_DR_SET(reason, IP_INNOROUTES);
 			__IP_INC_STATS(net, IPSTATS_MIB_INNOROUTES);
 			break;
 		}
@@ -990,6 +994,7 @@ static int ip_error(struct sk_buff *skb)
 		break;
 	case ENETUNREACH:
 		code = ICMP_NET_UNREACH;
+		SKB_DR_SET(reason, IP_INNOROUTES);
 		__IP_INC_STATS(net, IPSTATS_MIB_INNOROUTES);
 		break;
 	case EACCES:
@@ -1016,7 +1021,7 @@ static int ip_error(struct sk_buff *skb)
 	if (send)
 		icmp_send(skb, ICMP_DEST_UNREACH, code, 0);
 
-out:	kfree_skb(skb);
+out:	kfree_skb_reason(skb, reason);
 	return 0;
 }
 
@@ -1422,7 +1427,7 @@ u32 ip_mtu_from_fib_result(struct fib_result *res, __be32 daddr)
 	struct fib_info *fi = res->fi;
 	u32 mtu = 0;
 
-	if (dev_net(dev)->ipv4.sysctl_ip_fwd_use_pmtu ||
+	if (READ_ONCE(dev_net(dev)->ipv4.sysctl_ip_fwd_use_pmtu) ||
 	    fi->fib_metrics->metrics[RTAX_LOCK - 1] & (1 << RTAX_MTU))
 		mtu = fi->fib_mtu;
 
@@ -1940,7 +1945,7 @@ static u32 fib_multipath_custom_hash_outer(const struct net *net,
 					   const struct sk_buff *skb,
 					   bool *p_has_inner)
 {
-	u32 hash_fields = net->ipv4.sysctl_fib_multipath_hash_fields;
+	u32 hash_fields = READ_ONCE(net->ipv4.sysctl_fib_multipath_hash_fields);
 	struct flow_keys keys, hash_keys;
 
 	if (!(hash_fields & FIB_MULTIPATH_HASH_FIELD_OUTER_MASK))
@@ -1969,7 +1974,7 @@ static u32 fib_multipath_custom_hash_inner(const struct net *net,
 					   const struct sk_buff *skb,
 					   bool has_inner)
 {
-	u32 hash_fields = net->ipv4.sysctl_fib_multipath_hash_fields;
+	u32 hash_fields = READ_ONCE(net->ipv4.sysctl_fib_multipath_hash_fields);
 	struct flow_keys keys, hash_keys;
 
 	/* We assume the packet carries an encapsulation, but if none was
@@ -2029,7 +2034,7 @@ static u32 fib_multipath_custom_hash_skb(const struct net *net,
 static u32 fib_multipath_custom_hash_fl4(const struct net *net,
 					 const struct flowi4 *fl4)
 {
-	u32 hash_fields = net->ipv4.sysctl_fib_multipath_hash_fields;
+	u32 hash_fields = READ_ONCE(net->ipv4.sysctl_fib_multipath_hash_fields);
 	struct flow_keys hash_keys;
 
 	if (!(hash_fields & FIB_MULTIPATH_HASH_FIELD_OUTER_MASK))
@@ -2059,7 +2064,7 @@ int fib_multipath_hash(const struct net *net, const struct flowi4 *fl4,
 	struct flow_keys hash_keys;
 	u32 mhash = 0;
 
-	switch (net->ipv4.sysctl_fib_multipath_hash_policy) {
+	switch (READ_ONCE(net->ipv4.sysctl_fib_multipath_hash_policy)) {
 	case 0:
 		memset(&hash_keys, 0, sizeof(hash_keys));
 		hash_keys.control.addr_type = FLOW_DISSECTOR_KEY_IPV4_ADDRS;
@@ -2297,6 +2302,7 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 	/*
 	 *	Now we are ready to route packet.
 	 */
+	fl4.flowi4_l3mdev = 0;
 	fl4.flowi4_oif = 0;
 	fl4.flowi4_iif = dev->ifindex;
 	fl4.flowi4_mark = skb->mark;
@@ -2769,8 +2775,7 @@ struct rtable *ip_route_output_key_hash_rcu(struct net *net, struct flowi4 *fl4,
 		res->fi = NULL;
 		res->table = NULL;
 		if (fl4->flowi4_oif &&
-		    (ipv4_is_multicast(fl4->daddr) ||
-		    !netif_index_is_l3_master(net, fl4->flowi4_oif))) {
+		    (ipv4_is_multicast(fl4->daddr) || !fl4->flowi4_l3mdev)) {
 			/* Apparently, routing tables are wrong. Assume,
 			 * that the destination is on link.
 			 *
@@ -3415,7 +3420,7 @@ static int inet_rtm_getroute(struct sk_buff *in_skb, struct nlmsghdr *nlh,
 		fri.tb_id = table_id;
 		fri.dst = res.prefix;
 		fri.dst_len = res.prefixlen;
-		fri.tos = fl4.flowi4_tos;
+		fri.dscp = inet_dsfield_to_dscp(fl4.flowi4_tos);
 		fri.type = rt->rt_type;
 		fri.offload = 0;
 		fri.trap = 0;
@@ -3428,7 +3433,7 @@ static int inet_rtm_getroute(struct sk_buff *in_skb, struct nlmsghdr *nlh,
 
 				if (fa->fa_slen == slen &&
 				    fa->tb_id == fri.tb_id &&
-				    fa->fa_tos == fri.tos &&
+				    fa->fa_dscp == fri.dscp &&
 				    fa->fa_info == res.fi &&
 				    fa->fa_type == fri.type) {
 					fri.offload = READ_ONCE(fa->offload);

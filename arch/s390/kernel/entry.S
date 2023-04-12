@@ -6,7 +6,6 @@
  *    Author(s): Martin Schwidefsky (schwidefsky@de.ibm.com),
  *		 Hartmut Penner (hp@de.ibm.com),
  *		 Denis Joseph Barrow (djbarrow@de.ibm.com,barrow_dj@yahoo.com),
- *		 Heiko Carstens <heiko.carstens@de.ibm.com>
  */
 
 #include <linux/init.h>
@@ -175,7 +174,6 @@ oklabel\@:
 #endif
 
 	GEN_BR_THUNK %r14
-	GEN_BR_THUNK %r14,%r13
 
 	.section .kprobes.text, "ax"
 .Ldummy:
@@ -581,6 +579,7 @@ ENTRY(mcck_int_handler)
 	mvc	STACK_FRAME_OVERHEAD(__PT_SIZE,%r1),0(%r11)
 	xc	__SF_BACKCHAIN(8,%r1),__SF_BACKCHAIN(%r1)
 	la	%r11,STACK_FRAME_OVERHEAD(%r1)
+	lgr	%r2,%r11
 	lgr	%r15,%r1
 	brasl	%r14,s390_handle_mcck
 .Lmcck_return:

@@ -779,6 +779,9 @@ static int ufx_ops_mmap(struct fb_info *info, struct vm_area_struct *vma)
 	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
 	unsigned long page, pos;
 
+	if (info->fbdefio)
+		return fb_deferred_io_mmap(info, vma);
+
 	if (vma->vm_pgoff > (~0UL >> PAGE_SHIFT))
 		return -EINVAL;
 	if (size > info->fix.smem_len)
@@ -955,7 +958,7 @@ static void ufx_ops_fillrect(struct fb_info *info,
 static void ufx_dpy_deferred_io(struct fb_info *info,
 				struct list_head *pagelist)
 {
-	struct page *cur;
+	struct fb_deferred_io_pageref *pageref;
 	struct fb_deferred_io *fbdefio = info->fbdefio;
 	struct ufx_data *dev = info->par;
 
@@ -966,9 +969,10 @@ static void ufx_dpy_deferred_io(struct fb_info *info,
 		return;
 
 	/* walk the written page list and render each to device */
-	list_for_each_entry(cur, &fbdefio->pagelist, lru) {
+	list_for_each_entry(pageref, &fbdefio->pagelist, list) {
 		/* create a rectangle of full screen width that encloses the
 		 * entire dirty framebuffer page */
+		struct page *cur = pageref->page;
 		const int x = 0;
 		const int width = dev->info->var.xres;
 		const int y = (cur->index << PAGE_SHIFT) / (width * 2);

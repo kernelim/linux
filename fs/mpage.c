@@ -29,7 +29,6 @@
 #include <linux/writeback.h>
 #include <linux/backing-dev.h>
 #include <linux/pagevec.h>
-#include <linux/cleancache.h>
 #include "internal.h"
 
 /*
@@ -146,13 +145,13 @@ static struct bio *do_mpage_readpage(struct mpage_readpage_args *args)
 	struct block_device *bdev = NULL;
 	int length;
 	int fully_mapped = 1;
-	int op = REQ_OP_READ;
+	blk_opf_t opf = REQ_OP_READ;
 	unsigned nblocks;
 	unsigned relative_block;
 	gfp_t gfp = mapping_gfp_constraint(page->mapping, GFP_KERNEL);
 
 	if (args->is_readahead) {
-		op |= REQ_RAHEAD;
+		opf |= REQ_RAHEAD;
 		gfp |= __GFP_NORETRY | __GFP_NOWARN;
 	}
 
@@ -257,12 +256,6 @@ static struct bio *do_mpage_readpage(struct mpage_readpage_args *args)
 		SetPageMappedToDisk(page);
 	}
 
-	if (fully_mapped && blocks_per_page == 1 && !PageUptodate(page) &&
-	    cleancache_get_page(page) == 0) {
-		SetPageUptodate(page);
-		goto confused;
-	}
-
 	/*
 	 * This page will go to BIO.  Do we need to send this BIO off first?
 	 */
@@ -276,7 +269,7 @@ alloc_new:
 								page))
 				goto out;
 		}
-		args->bio = bio_alloc(bdev, bio_max_segs(args->nr_pages), op,
+		args->bio = bio_alloc(bdev, bio_max_segs(args->nr_pages), opf,
 				      gfp);
 		if (args->bio == NULL)
 			goto confused;
@@ -484,7 +477,7 @@ static int __mpage_writepage(struct page *page, struct writeback_control *wbc,
 			if (!buffer_mapped(bh)) {
 				/*
 				 * unmapped dirty buffers are created by
-				 * __set_page_dirty_buffers -> mmapped data
+				 * block_dirty_folio -> mmapped data
 				 */
 				if (buffer_dirty(bh))
 					goto confused;
@@ -593,7 +586,6 @@ alloc_new:
 				GFP_NOFS);
 		bio->bi_iter.bi_sector = blocks[0] << (blkbits - 9);
 		wbc_init_bio(wbc, bio);
-		bio->bi_write_hint = inode->i_write_hint;
 	}
 
 	/*

@@ -1,8 +1,7 @@
 #!/bin/sh
 
-GITID=$1
-TARBALL=$2
-DIR=$3
+# shellcheck disable=SC2153
+[ "$DISTRO" != "fedora" ] && _GITID="$GITID" || _GITID="$MARKER"
 
 # shellcheck disable=SC1083
 XZ_THREADS=$(rpm --eval %{_smp_mflags} | sed -e 's!^-j!--threads !')
@@ -17,8 +16,7 @@ fi
 
 if [ -f "$TARBALL" ]; then
 	TARID=$(xzcat -qq "$TARBALL" | git get-tar-commit-id 2>/dev/null)
-	GITID_NORMALIZE=$(git log --max-count=1 --pretty=format:%H "$GITID")
-	if [ "${GITID_NORMALIZE}" = "${TARID}" ]; then
+	if [ "$_GITID" = "$TARID" ]; then
 		echo "$(basename "$TARBALL") unchanged..."
 		exit 0
 	fi
@@ -30,4 +28,4 @@ trap 'rm -vf "$TARBALL"' INT
 # XZ_OPTIONS and XZ_THREADS DEPEND on word splitting, so don't disable it here:
 # shellcheck disable=SC2086
 cd ../ &&
-  git archive --prefix="$DIR"/ --format=tar "$GITID" | xz $XZ_OPTIONS $XZ_THREADS > "$TARBALL";
+  git archive --prefix="linux-$SPECTARFILE_RELEASE"/ --format=tar "$_GITID" | xz $XZ_OPTIONS $XZ_THREADS > "$TARBALL";

@@ -6,8 +6,7 @@ weight: 3
 summary: What is a GitLab Fork?
 ---
 
-= What is a GitLab Fork?
-
+{{< toc >}}
 
 There are two similar definitions of a “GitLab Fork” in the GitLab documentation:
 

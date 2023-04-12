@@ -190,6 +190,7 @@ static bool icmpv6_global_allow(struct net *net, int type)
 	if (icmp_global_allow())
 		return true;
 
+	__ICMP_INC_STATS(net, ICMP_MIB_RATELIMITGLOBAL);
 	return false;
 }
 
@@ -231,6 +232,9 @@ static bool icmpv6_xrlim_allow(struct sock *sk, u8 type,
 		if (peer)
 			inet_putpeer(peer);
 	}
+	if (!res)
+		__ICMP6_INC_STATS(net, ip6_dst_idev(dst),
+				  ICMP6_MIB_RATELIMITHOST);
 	dst_release(dst);
 	return res;
 }
@@ -636,12 +640,13 @@ out_bh_enable:
 }
 EXPORT_SYMBOL(icmp6_send);
 
-/* Slightly more convenient version of icmp6_send.
+/* Slightly more convenient version of icmp6_send with drop reasons.
  */
-void icmpv6_param_prob(struct sk_buff *skb, u8 code, int pos)
+void icmpv6_param_prob_reason(struct sk_buff *skb, u8 code, int pos,
+			      enum skb_drop_reason reason)
 {
 	icmp6_send(skb, ICMPV6_PARAMPROB, code, pos, NULL, IP6CB(skb));
-	kfree_skb(skb);
+	kfree_skb_reason(skb, reason);
 }
 
 /* Generate icmpv6 with type/code ICMPV6_DEST_UNREACH/ICMPV6_ADDR_UNREACH
@@ -868,21 +873,23 @@ out:
 
 static int icmpv6_rcv(struct sk_buff *skb)
 {
+	enum skb_drop_reason reason = SKB_DROP_REASON_NOT_SPECIFIED;
 	struct net *net = dev_net(skb->dev);
 	struct net_device *dev = icmp6_dev(skb);
 	struct inet6_dev *idev = __in6_dev_get(dev);
 	const struct in6_addr *saddr, *daddr;
 	struct icmp6hdr *hdr;
 	u8 type;
-	bool success = false;
 
 	if (!xfrm6_policy_check(NULL, XFRM_POLICY_IN, skb)) {
 		struct sec_path *sp = skb_sec_path(skb);
 		int nh;
 
 		if (!(sp && sp->xvec[sp->len - 1]->props.flags &
-				 XFRM_STATE_ICMP))
+				 XFRM_STATE_ICMP)) {
+			reason = SKB_DROP_REASON_XFRM_POLICY;
 			goto drop_no_count;
+		}
 
 		if (!pskb_may_pull(skb, sizeof(*hdr) + sizeof(struct ipv6hdr)))
 			goto drop_no_count;
@@ -890,8 +897,11 @@ static int icmpv6_rcv(struct sk_buff *skb)
 		nh = skb_network_offset(skb);
 		skb_set_network_header(skb, sizeof(*hdr));
 
-		if (!xfrm6_policy_check_reverse(NULL, XFRM_POLICY_IN, skb))
+		if (!xfrm6_policy_check_reverse(NULL, XFRM_POLICY_IN,
+						skb)) {
+			reason = SKB_DROP_REASON_XFRM_POLICY;
 			goto drop_no_count;
+		}
 
 		skb_set_network_header(skb, nh);
 	}
@@ -923,16 +933,16 @@ static int icmpv6_rcv(struct sk_buff *skb)
 		break;
 	case ICMPV6_EXT_ECHO_REQUEST:
 		if (!net->ipv6.sysctl.icmpv6_echo_ignore_all &&
-		    net->ipv4.sysctl_icmp_echo_enable_probe)
+		    READ_ONCE(net->ipv4.sysctl_icmp_echo_enable_probe))
 			icmpv6_echo_reply(skb);
 		break;
 
 	case ICMPV6_ECHO_REPLY:
-		success = ping_rcv(skb);
+		reason = ping_rcv(skb);
 		break;
 
 	case ICMPV6_EXT_ECHO_REPLY:
-		success = ping_rcv(skb);
+		reason = ping_rcv(skb);
 		break;
 
 	case ICMPV6_PKT_TOOBIG:
@@ -998,19 +1008,20 @@ static int icmpv6_rcv(struct sk_buff *skb)
 	/* until the v6 path can be better sorted assume failure and
 	 * preserve the status quo behaviour for the rest of the paths to here
 	 */
-	if (success)
-		consume_skb(skb);
+	if (reason)
+		kfree_skb_reason(skb, reason);
 	else
-		kfree_skb(skb);
+		consume_skb(skb);
 
 	return 0;
 
 csum_error:
+	reason = SKB_DROP_REASON_ICMP_CSUM;
 	__ICMP6_INC_STATS(dev_net(dev), idev, ICMP6_MIB_CSUMERRORS);
 discard_it:
 	__ICMP6_INC_STATS(dev_net(dev), idev, ICMP6_MIB_INERRORS);
 drop_no_count:
-	kfree_skb(skb);
+	kfree_skb_reason(skb, reason);
 	return 0;
 }
 

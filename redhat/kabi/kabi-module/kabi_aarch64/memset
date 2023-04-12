@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/arm64/lib/memset.S
-0xdcb764ad	memset	vmlinux	EXPORT_SYMBOL
+#2-
+0xdcb764ad	memset	vmlinux	EXPORT_SYMBOL	

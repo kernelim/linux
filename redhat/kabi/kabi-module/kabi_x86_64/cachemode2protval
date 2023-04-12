@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/mm/init.c
-0x46cf10eb	cachemode2protval	vmlinux	EXPORT_SYMBOL
+#2-
+0x46cf10eb	cachemode2protval	vmlinux	EXPORT_SYMBOL	

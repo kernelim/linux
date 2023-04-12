@@ -4,5 +4,5 @@ configs/*-merged
 
 kabi/Module.kabi_*
 kabi/kabi-current
-kabi/kabi-rhel9*
-kabi/kabi-rhel9*/*
+kabi/kabi-rhel*
+kabi/kabi-rhel*/*

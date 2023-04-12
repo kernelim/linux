@@ -19,7 +19,7 @@
 #include <linux/percpu-rwsem.h>
 #include <linux/u64_stats_sync.h>
 #include <linux/workqueue.h>
-#include <linux/bpf-cgroup.h>
+#include <linux/bpf-cgroup-defs.h>
 #include <linux/psi_types.h>
 
 #ifdef CONFIG_CGROUPS
@@ -264,7 +264,8 @@ struct css_set {
 	 * List of csets participating in the on-going migration either as
 	 * source or destination.  Protected by cgroup_mutex.
 	 */
-	struct list_head mg_preload_node;
+	struct list_head mg_src_preload_node;
+	struct list_head mg_dst_preload_node;
 	struct list_head mg_node;
 
 	/*
@@ -287,6 +288,10 @@ struct css_set {
 
 struct cgroup_base_stat {
 	struct task_cputime cputime;
+
+#ifdef CONFIG_SCHED_CORE
+	u64 forceidle_sum;
+#endif
 };
 
 /*
@@ -413,7 +418,7 @@ struct cgroup {
 	/*
 	 * The bitmask of subsystems enabled on the child cgroups.
 	 * ->subtree_control is the one configured through
-	 * "cgroup.subtree_control" while ->child_ss_mask is the effective
+	 * "cgroup.subtree_control" while ->subtree_ss_mask is the effective
 	 * one which may have more subsystems enabled.  Controller knobs
 	 * are made available iff it's enabled in ->subtree_control.
 	 */
@@ -475,7 +480,7 @@ struct cgroup {
 	struct work_struct release_agent_work;
 
 	/* used to track pressure stalls */
-	struct psi_group psi;
+	struct psi_group *psi;
 
 	/* used to store eBPF programs */
 	struct cgroup_bpf bpf;

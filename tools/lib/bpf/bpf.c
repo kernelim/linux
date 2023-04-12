@@ -28,6 +28,10 @@
 #include <asm/unistd.h>
 #include <errno.h>
 #include <linux/bpf.h>
+#include <linux/filter.h>
+#include <linux/kernel.h>
+#include <limits.h>
+#include <sys/resource.h>
 #include "bpf.h"
 #include "libbpf.h"
 #include "libbpf_internal.h"
@@ -74,158 +78,124 @@ static inline int sys_bpf_fd(enum bpf_cmd cmd, union bpf_attr *attr,
 	return ensure_good_fd(fd);
 }
 
-static inline int sys_bpf_prog_load(union bpf_attr *attr, unsigned int size)
+#define PROG_LOAD_ATTEMPTS 5
+
+static inline int sys_bpf_prog_load(union bpf_attr *attr, unsigned int size, int attempts)
 {
-	int retries = 5;
 	int fd;
 
 	do {
 		fd = sys_bpf_fd(BPF_PROG_LOAD, attr, size);
-	} while (fd < 0 && errno == EAGAIN && retries-- > 0);
+	} while (fd < 0 && errno == EAGAIN && --attempts > 0);
 
 	return fd;
 }
 
-int libbpf__bpf_create_map_xattr(const struct bpf_create_map_params *create_attr)
+/* Probe whether kernel switched from memlock-based (RLIMIT_MEMLOCK) to
+ * memcg-based memory accounting for BPF maps and progs. This was done in [0].
+ * We use the support for bpf_ktime_get_coarse_ns() helper, which was added in
+ * the same 5.11 Linux release ([1]), to detect memcg-based accounting for BPF.
+ *
+ *   [0] https://lore.kernel.org/bpf/20201201215900.3569844-1-guro@fb.com/
+ *   [1] d05512618056 ("bpf: Add bpf_ktime_get_coarse_ns helper")
+ */
+int probe_memcg_account(void)
 {
+	const size_t prog_load_attr_sz = offsetofend(union bpf_attr, attach_btf_obj_fd);
+	struct bpf_insn insns[] = {
+		BPF_EMIT_CALL(BPF_FUNC_ktime_get_coarse_ns),
+		BPF_EXIT_INSN(),
+	};
+	size_t insn_cnt = ARRAY_SIZE(insns);
 	union bpf_attr attr;
-	int fd;
+	int prog_fd;
 
-	memset(&attr, '\0', sizeof(attr));
+	/* attempt loading freplace trying to use custom BTF */
+	memset(&attr, 0, prog_load_attr_sz);
+	attr.prog_type = BPF_PROG_TYPE_SOCKET_FILTER;
+	attr.insns = ptr_to_u64(insns);
+	attr.insn_cnt = insn_cnt;
+	attr.license = ptr_to_u64("GPL");
 
-	attr.map_type = create_attr->map_type;
-	attr.key_size = create_attr->key_size;
-	attr.value_size = create_attr->value_size;
-	attr.max_entries = create_attr->max_entries;
-	attr.map_flags = create_attr->map_flags;
-	if (create_attr->name)
-		memcpy(attr.map_name, create_attr->name,
-		       min(strlen(create_attr->name), BPF_OBJ_NAME_LEN - 1));
-	attr.numa_node = create_attr->numa_node;
-	attr.btf_fd = create_attr->btf_fd;
-	attr.btf_key_type_id = create_attr->btf_key_type_id;
-	attr.btf_value_type_id = create_attr->btf_value_type_id;
-	attr.map_ifindex = create_attr->map_ifindex;
-	if (attr.map_type == BPF_MAP_TYPE_STRUCT_OPS)
-		attr.btf_vmlinux_value_type_id =
-			create_attr->btf_vmlinux_value_type_id;
-	else
-		attr.inner_map_fd = create_attr->inner_map_fd;
-	attr.map_extra = create_attr->map_extra;
-
-	fd = sys_bpf_fd(BPF_MAP_CREATE, &attr, sizeof(attr));
-	return libbpf_err_errno(fd);
-}
-
-int bpf_create_map_xattr(const struct bpf_create_map_attr *create_attr)
-{
-	struct bpf_create_map_params p = {};
-
-	p.map_type = create_attr->map_type;
-	p.key_size = create_attr->key_size;
-	p.value_size = create_attr->value_size;
-	p.max_entries = create_attr->max_entries;
-	p.map_flags = create_attr->map_flags;
-	p.name = create_attr->name;
-	p.numa_node = create_attr->numa_node;
-	p.btf_fd = create_attr->btf_fd;
-	p.btf_key_type_id = create_attr->btf_key_type_id;
-	p.btf_value_type_id = create_attr->btf_value_type_id;
-	p.map_ifindex = create_attr->map_ifindex;
-	if (p.map_type == BPF_MAP_TYPE_STRUCT_OPS)
-		p.btf_vmlinux_value_type_id =
-			create_attr->btf_vmlinux_value_type_id;
-	else
-		p.inner_map_fd = create_attr->inner_map_fd;
-
-	return libbpf__bpf_create_map_xattr(&p);
-}
-
-int bpf_create_map_node(enum bpf_map_type map_type, const char *name,
-			int key_size, int value_size, int max_entries,
-			__u32 map_flags, int node)
-{
-	struct bpf_create_map_attr map_attr = {};
-
-	map_attr.name = name;
-	map_attr.map_type = map_type;
-	map_attr.map_flags = map_flags;
-	map_attr.key_size = key_size;
-	map_attr.value_size = value_size;
-	map_attr.max_entries = max_entries;
-	if (node >= 0) {
-		map_attr.numa_node = node;
-		map_attr.map_flags |= BPF_F_NUMA_NODE;
+	prog_fd = sys_bpf_fd(BPF_PROG_LOAD, &attr, prog_load_attr_sz);
+	if (prog_fd >= 0) {
+		close(prog_fd);
+		return 1;
 	}
-
-	return bpf_create_map_xattr(&map_attr);
+	return 0;
 }
 
-int bpf_create_map(enum bpf_map_type map_type, int key_size,
-		   int value_size, int max_entries, __u32 map_flags)
+static bool memlock_bumped;
+static rlim_t memlock_rlim = RLIM_INFINITY;
+
+int libbpf_set_memlock_rlim(size_t memlock_bytes)
 {
-	struct bpf_create_map_attr map_attr = {};
+	if (memlock_bumped)
+		return libbpf_err(-EBUSY);
 
-	map_attr.map_type = map_type;
-	map_attr.map_flags = map_flags;
-	map_attr.key_size = key_size;
-	map_attr.value_size = value_size;
-	map_attr.max_entries = max_entries;
-
-	return bpf_create_map_xattr(&map_attr);
+	memlock_rlim = memlock_bytes;
+	return 0;
 }
 
-int bpf_create_map_name(enum bpf_map_type map_type, const char *name,
-			int key_size, int value_size, int max_entries,
-			__u32 map_flags)
+int bump_rlimit_memlock(void)
 {
-	struct bpf_create_map_attr map_attr = {};
+	struct rlimit rlim;
 
-	map_attr.name = name;
-	map_attr.map_type = map_type;
-	map_attr.map_flags = map_flags;
-	map_attr.key_size = key_size;
-	map_attr.value_size = value_size;
-	map_attr.max_entries = max_entries;
+	/* if kernel supports memcg-based accounting, skip bumping RLIMIT_MEMLOCK */
+	if (memlock_bumped || kernel_supports(NULL, FEAT_MEMCG_ACCOUNT))
+		return 0;
 
-	return bpf_create_map_xattr(&map_attr);
+	memlock_bumped = true;
+
+	/* zero memlock_rlim_max disables auto-bumping RLIMIT_MEMLOCK */
+	if (memlock_rlim == 0)
+		return 0;
+
+	rlim.rlim_cur = rlim.rlim_max = memlock_rlim;
+	if (setrlimit(RLIMIT_MEMLOCK, &rlim))
+		return -errno;
+
+	return 0;
 }
 
-int bpf_create_map_in_map_node(enum bpf_map_type map_type, const char *name,
-			       int key_size, int inner_map_fd, int max_entries,
-			       __u32 map_flags, int node)
+int bpf_map_create(enum bpf_map_type map_type,
+		   const char *map_name,
+		   __u32 key_size,
+		   __u32 value_size,
+		   __u32 max_entries,
+		   const struct bpf_map_create_opts *opts)
 {
+	const size_t attr_sz = offsetofend(union bpf_attr, map_extra);
 	union bpf_attr attr;
 	int fd;
 
-	memset(&attr, '\0', sizeof(attr));
+	bump_rlimit_memlock();
+
+	memset(&attr, 0, attr_sz);
+
+	if (!OPTS_VALID(opts, bpf_map_create_opts))
+		return libbpf_err(-EINVAL);
 
 	attr.map_type = map_type;
+	if (map_name)
+		libbpf_strlcpy(attr.map_name, map_name, sizeof(attr.map_name));
 	attr.key_size = key_size;
-	attr.value_size = 4;
-	attr.inner_map_fd = inner_map_fd;
+	attr.value_size = value_size;
 	attr.max_entries = max_entries;
-	attr.map_flags = map_flags;
-	if (name)
-		memcpy(attr.map_name, name,
-		       min(strlen(name), BPF_OBJ_NAME_LEN - 1));
 
-	if (node >= 0) {
-		attr.map_flags |= BPF_F_NUMA_NODE;
-		attr.numa_node = node;
-	}
+	attr.btf_fd = OPTS_GET(opts, btf_fd, 0);
+	attr.btf_key_type_id = OPTS_GET(opts, btf_key_type_id, 0);
+	attr.btf_value_type_id = OPTS_GET(opts, btf_value_type_id, 0);
+	attr.btf_vmlinux_value_type_id = OPTS_GET(opts, btf_vmlinux_value_type_id, 0);
 
-	fd = sys_bpf_fd(BPF_MAP_CREATE, &attr, sizeof(attr));
+	attr.inner_map_fd = OPTS_GET(opts, inner_map_fd, 0);
+	attr.map_flags = OPTS_GET(opts, map_flags, 0);
+	attr.map_extra = OPTS_GET(opts, map_extra, 0);
+	attr.numa_node = OPTS_GET(opts, numa_node, 0);
+	attr.map_ifindex = OPTS_GET(opts, map_ifindex, 0);
+
+	fd = sys_bpf_fd(BPF_MAP_CREATE, &attr, attr_sz);
 	return libbpf_err_errno(fd);
-}
-
-int bpf_create_map_in_map(enum bpf_map_type map_type, const char *name,
-			  int key_size, int inner_map_fd, int max_entries,
-			  __u32 map_flags)
-{
-	return bpf_create_map_in_map_node(map_type, name, key_size,
-					  inner_map_fd, max_entries, map_flags,
-					  -1);
 }
 
 static void *
@@ -253,58 +223,94 @@ alloc_zero_tailing_info(const void *orecord, __u32 cnt,
 	return info;
 }
 
-int libbpf__bpf_prog_load(const struct bpf_prog_load_params *load_attr)
+int bpf_prog_load(enum bpf_prog_type prog_type,
+		  const char *prog_name, const char *license,
+		  const struct bpf_insn *insns, size_t insn_cnt,
+		  const struct bpf_prog_load_opts *opts)
 {
 	void *finfo = NULL, *linfo = NULL;
+	const char *func_info, *line_info;
+	__u32 log_size, log_level, attach_prog_fd, attach_btf_obj_fd;
+	__u32 func_info_rec_size, line_info_rec_size;
+	int fd, attempts;
 	union bpf_attr attr;
-	int fd;
+	char *log_buf;
 
-	if (!load_attr->log_buf != !load_attr->log_buf_sz)
+	bump_rlimit_memlock();
+
+	if (!OPTS_VALID(opts, bpf_prog_load_opts))
 		return libbpf_err(-EINVAL);
 
-	if (load_attr->log_level > (4 | 2 | 1) || (load_attr->log_level && !load_attr->log_buf))
+	attempts = OPTS_GET(opts, attempts, 0);
+	if (attempts < 0)
 		return libbpf_err(-EINVAL);
+	if (attempts == 0)
+		attempts = PROG_LOAD_ATTEMPTS;
 
 	memset(&attr, 0, sizeof(attr));
-	attr.prog_type = load_attr->prog_type;
-	attr.expected_attach_type = load_attr->expected_attach_type;
 
-	if (load_attr->attach_prog_fd)
-		attr.attach_prog_fd = load_attr->attach_prog_fd;
+	attr.prog_type = prog_type;
+	attr.expected_attach_type = OPTS_GET(opts, expected_attach_type, 0);
+
+	attr.prog_btf_fd = OPTS_GET(opts, prog_btf_fd, 0);
+	attr.prog_flags = OPTS_GET(opts, prog_flags, 0);
+	attr.prog_ifindex = OPTS_GET(opts, prog_ifindex, 0);
+	attr.kern_version = OPTS_GET(opts, kern_version, 0);
+
+	if (prog_name)
+		libbpf_strlcpy(attr.prog_name, prog_name, sizeof(attr.prog_name));
+	attr.license = ptr_to_u64(license);
+
+	if (insn_cnt > UINT_MAX)
+		return libbpf_err(-E2BIG);
+
+	attr.insns = ptr_to_u64(insns);
+	attr.insn_cnt = (__u32)insn_cnt;
+
+	attach_prog_fd = OPTS_GET(opts, attach_prog_fd, 0);
+	attach_btf_obj_fd = OPTS_GET(opts, attach_btf_obj_fd, 0);
+
+	if (attach_prog_fd && attach_btf_obj_fd)
+		return libbpf_err(-EINVAL);
+
+	attr.attach_btf_id = OPTS_GET(opts, attach_btf_id, 0);
+	if (attach_prog_fd)
+		attr.attach_prog_fd = attach_prog_fd;
 	else
-		attr.attach_btf_obj_fd = load_attr->attach_btf_obj_fd;
-	attr.attach_btf_id = load_attr->attach_btf_id;
+		attr.attach_btf_obj_fd = attach_btf_obj_fd;
 
-	attr.prog_ifindex = load_attr->prog_ifindex;
-	attr.kern_version = load_attr->kern_version;
+	log_buf = OPTS_GET(opts, log_buf, NULL);
+	log_size = OPTS_GET(opts, log_size, 0);
+	log_level = OPTS_GET(opts, log_level, 0);
 
-	attr.insn_cnt = (__u32)load_attr->insn_cnt;
-	attr.insns = ptr_to_u64(load_attr->insns);
-	attr.license = ptr_to_u64(load_attr->license);
+	if (!!log_buf != !!log_size)
+		return libbpf_err(-EINVAL);
+	if (log_level > (4 | 2 | 1))
+		return libbpf_err(-EINVAL);
+	if (log_level && !log_buf)
+		return libbpf_err(-EINVAL);
 
-	attr.log_level = load_attr->log_level;
-	if (attr.log_level) {
-		attr.log_buf = ptr_to_u64(load_attr->log_buf);
-		attr.log_size = load_attr->log_buf_sz;
+	func_info_rec_size = OPTS_GET(opts, func_info_rec_size, 0);
+	func_info = OPTS_GET(opts, func_info, NULL);
+	attr.func_info_rec_size = func_info_rec_size;
+	attr.func_info = ptr_to_u64(func_info);
+	attr.func_info_cnt = OPTS_GET(opts, func_info_cnt, 0);
+
+	line_info_rec_size = OPTS_GET(opts, line_info_rec_size, 0);
+	line_info = OPTS_GET(opts, line_info, NULL);
+	attr.line_info_rec_size = line_info_rec_size;
+	attr.line_info = ptr_to_u64(line_info);
+	attr.line_info_cnt = OPTS_GET(opts, line_info_cnt, 0);
+
+	attr.fd_array = ptr_to_u64(OPTS_GET(opts, fd_array, NULL));
+
+	if (log_level) {
+		attr.log_buf = ptr_to_u64(log_buf);
+		attr.log_size = log_size;
+		attr.log_level = log_level;
 	}
 
-	attr.prog_btf_fd = load_attr->prog_btf_fd;
-	attr.prog_flags = load_attr->prog_flags;
-
-	attr.func_info_rec_size = load_attr->func_info_rec_size;
-	attr.func_info_cnt = load_attr->func_info_cnt;
-	attr.func_info = ptr_to_u64(load_attr->func_info);
-
-	attr.line_info_rec_size = load_attr->line_info_rec_size;
-	attr.line_info_cnt = load_attr->line_info_cnt;
-	attr.line_info = ptr_to_u64(load_attr->line_info);
-	attr.fd_array = ptr_to_u64(load_attr->fd_array);
-
-	if (load_attr->name)
-		memcpy(attr.prog_name, load_attr->name,
-		       min(strlen(load_attr->name), (size_t)BPF_OBJ_NAME_LEN - 1));
-
-	fd = sys_bpf_prog_load(&attr, sizeof(attr));
+	fd = sys_bpf_prog_load(&attr, sizeof(attr), attempts);
 	if (fd >= 0)
 		return fd;
 
@@ -314,11 +320,11 @@ int libbpf__bpf_prog_load(const struct bpf_prog_load_params *load_attr)
 	 */
 	while (errno == E2BIG && (!finfo || !linfo)) {
 		if (!finfo && attr.func_info_cnt &&
-		    attr.func_info_rec_size < load_attr->func_info_rec_size) {
+		    attr.func_info_rec_size < func_info_rec_size) {
 			/* try with corrected func info records */
-			finfo = alloc_zero_tailing_info(load_attr->func_info,
-							load_attr->func_info_cnt,
-							load_attr->func_info_rec_size,
+			finfo = alloc_zero_tailing_info(func_info,
+							attr.func_info_cnt,
+							func_info_rec_size,
 							attr.func_info_rec_size);
 			if (!finfo) {
 				errno = E2BIG;
@@ -326,13 +332,12 @@ int libbpf__bpf_prog_load(const struct bpf_prog_load_params *load_attr)
 			}
 
 			attr.func_info = ptr_to_u64(finfo);
-			attr.func_info_rec_size = load_attr->func_info_rec_size;
+			attr.func_info_rec_size = func_info_rec_size;
 		} else if (!linfo && attr.line_info_cnt &&
-			   attr.line_info_rec_size <
-			   load_attr->line_info_rec_size) {
-			linfo = alloc_zero_tailing_info(load_attr->line_info,
-							load_attr->line_info_cnt,
-							load_attr->line_info_rec_size,
+			   attr.line_info_rec_size < line_info_rec_size) {
+			linfo = alloc_zero_tailing_info(line_info,
+							attr.line_info_cnt,
+							line_info_rec_size,
 							attr.line_info_rec_size);
 			if (!linfo) {
 				errno = E2BIG;
@@ -340,116 +345,31 @@ int libbpf__bpf_prog_load(const struct bpf_prog_load_params *load_attr)
 			}
 
 			attr.line_info = ptr_to_u64(linfo);
-			attr.line_info_rec_size = load_attr->line_info_rec_size;
+			attr.line_info_rec_size = line_info_rec_size;
 		} else {
 			break;
 		}
 
-		fd = sys_bpf_prog_load(&attr, sizeof(attr));
+		fd = sys_bpf_prog_load(&attr, sizeof(attr), attempts);
 		if (fd >= 0)
 			goto done;
 	}
 
-	if (load_attr->log_level || !load_attr->log_buf)
-		goto done;
+	if (log_level == 0 && log_buf) {
+		/* log_level == 0 with non-NULL log_buf requires retrying on error
+		 * with log_level == 1 and log_buf/log_buf_size set, to get details of
+		 * failure
+		 */
+		attr.log_buf = ptr_to_u64(log_buf);
+		attr.log_size = log_size;
+		attr.log_level = 1;
 
-	/* Try again with log */
-	attr.log_buf = ptr_to_u64(load_attr->log_buf);
-	attr.log_size = load_attr->log_buf_sz;
-	attr.log_level = 1;
-	load_attr->log_buf[0] = 0;
-
-	fd = sys_bpf_prog_load(&attr, sizeof(attr));
+		fd = sys_bpf_prog_load(&attr, sizeof(attr), attempts);
+	}
 done:
 	/* free() doesn't affect errno, so we don't need to restore it */
 	free(finfo);
 	free(linfo);
-	return libbpf_err_errno(fd);
-}
-
-int bpf_load_program_xattr(const struct bpf_load_program_attr *load_attr,
-			   char *log_buf, size_t log_buf_sz)
-{
-	struct bpf_prog_load_params p = {};
-
-	if (!load_attr || !log_buf != !log_buf_sz)
-		return libbpf_err(-EINVAL);
-
-	p.prog_type = load_attr->prog_type;
-	p.expected_attach_type = load_attr->expected_attach_type;
-	switch (p.prog_type) {
-	case BPF_PROG_TYPE_STRUCT_OPS:
-	case BPF_PROG_TYPE_LSM:
-		p.attach_btf_id = load_attr->attach_btf_id;
-		break;
-	case BPF_PROG_TYPE_TRACING:
-	case BPF_PROG_TYPE_EXT:
-		p.attach_btf_id = load_attr->attach_btf_id;
-		p.attach_prog_fd = load_attr->attach_prog_fd;
-		break;
-	default:
-		p.prog_ifindex = load_attr->prog_ifindex;
-		p.kern_version = load_attr->kern_version;
-	}
-	p.insn_cnt = load_attr->insns_cnt;
-	p.insns = load_attr->insns;
-	p.license = load_attr->license;
-	p.log_level = load_attr->log_level;
-	p.log_buf = log_buf;
-	p.log_buf_sz = log_buf_sz;
-	p.prog_btf_fd = load_attr->prog_btf_fd;
-	p.func_info_rec_size = load_attr->func_info_rec_size;
-	p.func_info_cnt = load_attr->func_info_cnt;
-	p.func_info = load_attr->func_info;
-	p.line_info_rec_size = load_attr->line_info_rec_size;
-	p.line_info_cnt = load_attr->line_info_cnt;
-	p.line_info = load_attr->line_info;
-	p.name = load_attr->name;
-	p.prog_flags = load_attr->prog_flags;
-
-	return libbpf__bpf_prog_load(&p);
-}
-
-int bpf_load_program(enum bpf_prog_type type, const struct bpf_insn *insns,
-		     size_t insns_cnt, const char *license,
-		     __u32 kern_version, char *log_buf,
-		     size_t log_buf_sz)
-{
-	struct bpf_load_program_attr load_attr;
-
-	memset(&load_attr, 0, sizeof(struct bpf_load_program_attr));
-	load_attr.prog_type = type;
-	load_attr.expected_attach_type = 0;
-	load_attr.name = NULL;
-	load_attr.insns = insns;
-	load_attr.insns_cnt = insns_cnt;
-	load_attr.license = license;
-	load_attr.kern_version = kern_version;
-
-	return bpf_load_program_xattr(&load_attr, log_buf, log_buf_sz);
-}
-
-int bpf_verify_program(enum bpf_prog_type type, const struct bpf_insn *insns,
-		       size_t insns_cnt, __u32 prog_flags, const char *license,
-		       __u32 kern_version, char *log_buf, size_t log_buf_sz,
-		       int log_level)
-{
-	union bpf_attr attr;
-	int fd;
-
-	memset(&attr, 0, sizeof(attr));
-	attr.prog_type = type;
-	attr.insn_cnt = (__u32)insns_cnt;
-	attr.insns = ptr_to_u64(insns);
-	attr.license = ptr_to_u64(license);
-	attr.log_buf = ptr_to_u64(log_buf);
-	attr.log_size = log_buf_sz;
-	attr.log_level = log_level;
-	log_buf[0] = 0;
-	attr.kern_version = kern_version;
-	attr.prog_flags = prog_flags;
-
-	fd = sys_bpf_prog_load(&attr, sizeof(attr));
 	return libbpf_err_errno(fd);
 }
 
@@ -540,6 +460,20 @@ int bpf_map_delete_elem(int fd, const void *key)
 	return libbpf_err_errno(ret);
 }
 
+int bpf_map_delete_elem_flags(int fd, const void *key, __u64 flags)
+{
+	union bpf_attr attr;
+	int ret;
+
+	memset(&attr, 0, sizeof(attr));
+	attr.map_fd = fd;
+	attr.key = ptr_to_u64(key);
+	attr.flags = flags;
+
+	ret = sys_bpf(BPF_MAP_DELETE_ELEM, &attr, sizeof(attr));
+	return libbpf_err_errno(ret);
+}
+
 int bpf_map_get_next_key(int fd, const void *key, void *next_key)
 {
 	union bpf_attr attr;
@@ -593,11 +527,11 @@ static int bpf_map_batch_common(int cmd, int fd, void  *in_batch,
 	return libbpf_err_errno(ret);
 }
 
-int bpf_map_delete_batch(int fd, void *keys, __u32 *count,
+int bpf_map_delete_batch(int fd, const void *keys, __u32 *count,
 			 const struct bpf_map_batch_opts *opts)
 {
 	return bpf_map_batch_common(BPF_MAP_DELETE_BATCH, fd, NULL,
-				    NULL, keys, NULL, count, opts);
+				    NULL, (void *)keys, NULL, count, opts);
 }
 
 int bpf_map_lookup_batch(int fd, void *in_batch, void *out_batch, void *keys,
@@ -617,11 +551,11 @@ int bpf_map_lookup_and_delete_batch(int fd, void *in_batch, void *out_batch,
 				    count, opts);
 }
 
-int bpf_map_update_batch(int fd, void *keys, void *values, __u32 *count,
+int bpf_map_update_batch(int fd, const void *keys, const void *values, __u32 *count,
 			 const struct bpf_map_batch_opts *opts)
 {
 	return bpf_map_batch_common(BPF_MAP_UPDATE_BATCH, fd, NULL, NULL,
-				    keys, values, count, opts);
+				    (void *)keys, (void *)values, count, opts);
 }
 
 int bpf_obj_pin(int fd, const char *pathname)
@@ -639,11 +573,20 @@ int bpf_obj_pin(int fd, const char *pathname)
 
 int bpf_obj_get(const char *pathname)
 {
+	return bpf_obj_get_opts(pathname, NULL);
+}
+
+int bpf_obj_get_opts(const char *pathname, const struct bpf_obj_get_opts *opts)
+{
 	union bpf_attr attr;
 	int fd;
 
+	if (!OPTS_VALID(opts, bpf_obj_get_opts))
+		return libbpf_err(-EINVAL);
+
 	memset(&attr, 0, sizeof(attr));
 	attr.pathname = ptr_to_u64((void *)pathname);
+	attr.file_flags = OPTS_GET(opts, file_flags, 0);
 
 	fd = sys_bpf_fd(BPF_OBJ_GET, &attr, sizeof(attr));
 	return libbpf_err_errno(fd);
@@ -656,10 +599,10 @@ int bpf_prog_attach(int prog_fd, int target_fd, enum bpf_attach_type type,
 		.flags = flags,
 	);
 
-	return bpf_prog_attach_xattr(prog_fd, target_fd, type, &opts);
+	return bpf_prog_attach_opts(prog_fd, target_fd, type, &opts);
 }
 
-int bpf_prog_attach_xattr(int prog_fd, int target_fd,
+int bpf_prog_attach_opts(int prog_fd, int target_fd,
 			  enum bpf_attach_type type,
 			  const struct bpf_prog_attach_opts *opts)
 {
@@ -679,6 +622,11 @@ int bpf_prog_attach_xattr(int prog_fd, int target_fd,
 	ret = sys_bpf(BPF_PROG_ATTACH, &attr, sizeof(attr));
 	return libbpf_err_errno(ret);
 }
+
+__attribute__((alias("bpf_prog_attach_opts")))
+int bpf_prog_attach_xattr(int prog_fd, int target_fd,
+			  enum bpf_attach_type type,
+			  const struct bpf_prog_attach_opts *opts);
 
 int bpf_prog_detach(int target_fd, enum bpf_attach_type type)
 {
@@ -713,7 +661,7 @@ int bpf_link_create(int prog_fd, int target_fd,
 {
 	__u32 target_btf_id, iter_info_len;
 	union bpf_attr attr;
-	int fd;
+	int fd, err;
 
 	if (!OPTS_VALID(opts, bpf_link_create_opts))
 		return libbpf_err(-EINVAL);
@@ -750,6 +698,23 @@ int bpf_link_create(int prog_fd, int target_fd,
 		if (!OPTS_ZEROED(opts, perf_event))
 			return libbpf_err(-EINVAL);
 		break;
+	case BPF_TRACE_KPROBE_MULTI:
+		attr.link_create.kprobe_multi.flags = OPTS_GET(opts, kprobe_multi.flags, 0);
+		attr.link_create.kprobe_multi.cnt = OPTS_GET(opts, kprobe_multi.cnt, 0);
+		attr.link_create.kprobe_multi.syms = ptr_to_u64(OPTS_GET(opts, kprobe_multi.syms, 0));
+		attr.link_create.kprobe_multi.addrs = ptr_to_u64(OPTS_GET(opts, kprobe_multi.addrs, 0));
+		attr.link_create.kprobe_multi.cookies = ptr_to_u64(OPTS_GET(opts, kprobe_multi.cookies, 0));
+		if (!OPTS_ZEROED(opts, kprobe_multi))
+			return libbpf_err(-EINVAL);
+		break;
+	case BPF_TRACE_FENTRY:
+	case BPF_TRACE_FEXIT:
+	case BPF_MODIFY_RETURN:
+	case BPF_LSM_MAC:
+		attr.link_create.tracing.cookie = OPTS_GET(opts, tracing.cookie, 0);
+		if (!OPTS_ZEROED(opts, tracing))
+			return libbpf_err(-EINVAL);
+		break;
 	default:
 		if (!OPTS_ZEROED(opts, flags))
 			return libbpf_err(-EINVAL);
@@ -757,7 +722,37 @@ int bpf_link_create(int prog_fd, int target_fd,
 	}
 proceed:
 	fd = sys_bpf_fd(BPF_LINK_CREATE, &attr, sizeof(attr));
-	return libbpf_err_errno(fd);
+	if (fd >= 0)
+		return fd;
+	/* we'll get EINVAL if LINK_CREATE doesn't support attaching fentry
+	 * and other similar programs
+	 */
+	err = -errno;
+	if (err != -EINVAL)
+		return libbpf_err(err);
+
+	/* if user used features not supported by
+	 * BPF_RAW_TRACEPOINT_OPEN command, then just give up immediately
+	 */
+	if (attr.link_create.target_fd || attr.link_create.target_btf_id)
+		return libbpf_err(err);
+	if (!OPTS_ZEROED(opts, sz))
+		return libbpf_err(err);
+
+	/* otherwise, for few select kinds of programs that can be
+	 * attached using BPF_RAW_TRACEPOINT_OPEN command, try that as
+	 * a fallback for older kernels
+	 */
+	switch (attach_type) {
+	case BPF_TRACE_RAW_TP:
+	case BPF_LSM_MAC:
+	case BPF_TRACE_FENTRY:
+	case BPF_TRACE_FEXIT:
+	case BPF_MODIFY_RETURN:
+		return bpf_raw_tracepoint_open(NULL, prog_fd);
+	default:
+		return libbpf_err(err);
+	}
 }
 
 int bpf_link_detach(int link_fd)
@@ -803,80 +798,48 @@ int bpf_iter_create(int link_fd)
 	return libbpf_err_errno(fd);
 }
 
-int bpf_prog_query(int target_fd, enum bpf_attach_type type, __u32 query_flags,
-		   __u32 *attach_flags, __u32 *prog_ids, __u32 *prog_cnt)
+int bpf_prog_query_opts(int target_fd,
+			enum bpf_attach_type type,
+			struct bpf_prog_query_opts *opts)
 {
 	union bpf_attr attr;
 	int ret;
 
-	memset(&attr, 0, sizeof(attr));
-	attr.query.target_fd	= target_fd;
-	attr.query.attach_type	= type;
-	attr.query.query_flags	= query_flags;
-	attr.query.prog_cnt	= *prog_cnt;
-	attr.query.prog_ids	= ptr_to_u64(prog_ids);
-
-	ret = sys_bpf(BPF_PROG_QUERY, &attr, sizeof(attr));
-
-	if (attach_flags)
-		*attach_flags = attr.query.attach_flags;
-	*prog_cnt = attr.query.prog_cnt;
-
-	return libbpf_err_errno(ret);
-}
-
-int bpf_prog_test_run(int prog_fd, int repeat, void *data, __u32 size,
-		      void *data_out, __u32 *size_out, __u32 *retval,
-		      __u32 *duration)
-{
-	union bpf_attr attr;
-	int ret;
-
-	memset(&attr, 0, sizeof(attr));
-	attr.test.prog_fd = prog_fd;
-	attr.test.data_in = ptr_to_u64(data);
-	attr.test.data_out = ptr_to_u64(data_out);
-	attr.test.data_size_in = size;
-	attr.test.repeat = repeat;
-
-	ret = sys_bpf(BPF_PROG_TEST_RUN, &attr, sizeof(attr));
-
-	if (size_out)
-		*size_out = attr.test.data_size_out;
-	if (retval)
-		*retval = attr.test.retval;
-	if (duration)
-		*duration = attr.test.duration;
-
-	return libbpf_err_errno(ret);
-}
-
-int bpf_prog_test_run_xattr(struct bpf_prog_test_run_attr *test_attr)
-{
-	union bpf_attr attr;
-	int ret;
-
-	if (!test_attr->data_out && test_attr->data_size_out > 0)
+	if (!OPTS_VALID(opts, bpf_prog_query_opts))
 		return libbpf_err(-EINVAL);
 
 	memset(&attr, 0, sizeof(attr));
-	attr.test.prog_fd = test_attr->prog_fd;
-	attr.test.data_in = ptr_to_u64(test_attr->data_in);
-	attr.test.data_out = ptr_to_u64(test_attr->data_out);
-	attr.test.data_size_in = test_attr->data_size_in;
-	attr.test.data_size_out = test_attr->data_size_out;
-	attr.test.ctx_in = ptr_to_u64(test_attr->ctx_in);
-	attr.test.ctx_out = ptr_to_u64(test_attr->ctx_out);
-	attr.test.ctx_size_in = test_attr->ctx_size_in;
-	attr.test.ctx_size_out = test_attr->ctx_size_out;
-	attr.test.repeat = test_attr->repeat;
 
-	ret = sys_bpf(BPF_PROG_TEST_RUN, &attr, sizeof(attr));
+	attr.query.target_fd	= target_fd;
+	attr.query.attach_type	= type;
+	attr.query.query_flags	= OPTS_GET(opts, query_flags, 0);
+	attr.query.prog_cnt	= OPTS_GET(opts, prog_cnt, 0);
+	attr.query.prog_ids	= ptr_to_u64(OPTS_GET(opts, prog_ids, NULL));
+	attr.query.prog_attach_flags = ptr_to_u64(OPTS_GET(opts, prog_attach_flags, NULL));
 
-	test_attr->data_size_out = attr.test.data_size_out;
-	test_attr->ctx_size_out = attr.test.ctx_size_out;
-	test_attr->retval = attr.test.retval;
-	test_attr->duration = attr.test.duration;
+	ret = sys_bpf(BPF_PROG_QUERY, &attr, sizeof(attr));
+
+	OPTS_SET(opts, attach_flags, attr.query.attach_flags);
+	OPTS_SET(opts, prog_cnt, attr.query.prog_cnt);
+
+	return libbpf_err_errno(ret);
+}
+
+int bpf_prog_query(int target_fd, enum bpf_attach_type type, __u32 query_flags,
+		   __u32 *attach_flags, __u32 *prog_ids, __u32 *prog_cnt)
+{
+	LIBBPF_OPTS(bpf_prog_query_opts, opts);
+	int ret;
+
+	opts.query_flags = query_flags;
+	opts.prog_ids = prog_ids;
+	opts.prog_cnt = *prog_cnt;
+
+	ret = bpf_prog_query_opts(target_fd, type, &opts);
+
+	if (attach_flags)
+		*attach_flags = opts.attach_flags;
+	*prog_cnt = opts.prog_cnt;
 
 	return libbpf_err_errno(ret);
 }
@@ -891,6 +854,7 @@ int bpf_prog_test_run_opts(int prog_fd, struct bpf_test_run_opts *opts)
 
 	memset(&attr, 0, sizeof(attr));
 	attr.test.prog_fd = prog_fd;
+	attr.test.batch_size = OPTS_GET(opts, batch_size, 0);
 	attr.test.cpu = OPTS_GET(opts, cpu, 0);
 	attr.test.flags = OPTS_GET(opts, flags, 0);
 	attr.test.repeat = OPTS_GET(opts, repeat, 0);
@@ -1028,29 +992,51 @@ int bpf_raw_tracepoint_open(const char *name, int prog_fd)
 	return libbpf_err_errno(fd);
 }
 
-int bpf_load_btf(const void *btf, __u32 btf_size, char *log_buf, __u32 log_buf_size,
-		 bool do_log)
+int bpf_btf_load(const void *btf_data, size_t btf_size, const struct bpf_btf_load_opts *opts)
 {
-	union bpf_attr attr = {};
+	const size_t attr_sz = offsetofend(union bpf_attr, btf_log_level);
+	union bpf_attr attr;
+	char *log_buf;
+	size_t log_size;
+	__u32 log_level;
 	int fd;
 
-	attr.btf = ptr_to_u64(btf);
+	bump_rlimit_memlock();
+
+	memset(&attr, 0, attr_sz);
+
+	if (!OPTS_VALID(opts, bpf_btf_load_opts))
+		return libbpf_err(-EINVAL);
+
+	log_buf = OPTS_GET(opts, log_buf, NULL);
+	log_size = OPTS_GET(opts, log_size, 0);
+	log_level = OPTS_GET(opts, log_level, 0);
+
+	if (log_size > UINT_MAX)
+		return libbpf_err(-EINVAL);
+	if (log_size && !log_buf)
+		return libbpf_err(-EINVAL);
+
+	attr.btf = ptr_to_u64(btf_data);
 	attr.btf_size = btf_size;
-
-retry:
-	if (do_log && log_buf && log_buf_size) {
-		attr.btf_log_level = 1;
-		attr.btf_log_size = log_buf_size;
+	/* log_level == 0 and log_buf != NULL means "try loading without
+	 * log_buf, but retry with log_buf and log_level=1 on error", which is
+	 * consistent across low-level and high-level BTF and program loading
+	 * APIs within libbpf and provides a sensible behavior in practice
+	 */
+	if (log_level) {
 		attr.btf_log_buf = ptr_to_u64(log_buf);
+		attr.btf_log_size = (__u32)log_size;
+		attr.btf_log_level = log_level;
 	}
 
-	fd = sys_bpf_fd(BPF_BTF_LOAD, &attr, sizeof(attr));
-
-	if (fd < 0 && !do_log && log_buf && log_buf_size) {
-		do_log = true;
-		goto retry;
+	fd = sys_bpf_fd(BPF_BTF_LOAD, &attr, attr_sz);
+	if (fd < 0 && log_buf && log_level == 0) {
+		attr.btf_log_buf = ptr_to_u64(log_buf);
+		attr.btf_log_size = (__u32)log_size;
+		attr.btf_log_level = 1;
+		fd = sys_bpf_fd(BPF_BTF_LOAD, &attr, attr_sz);
 	}
-
 	return libbpf_err_errno(fd);
 }
 

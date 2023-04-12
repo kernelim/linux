@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/time/timekeeping.c
-0x9ec6ca96	ktime_get_real_ts64	vmlinux	EXPORT_SYMBOL
+#2-
+0x9ec6ca96	ktime_get_real_ts64	vmlinux	EXPORT_SYMBOL	

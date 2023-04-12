@@ -9609,7 +9609,7 @@ static int rtl8152_probe(struct usb_interface *intf,
 	}
 
 	netdev->ethtool_ops = &ops;
-	netif_set_gso_max_size(netdev, RTL_LIMITED_TSO_SIZE);
+	netif_set_tso_max_size(netdev, RTL_LIMITED_TSO_SIZE);
 
 	/* MTU range: 68 - 1500 or 9194 */
 	netdev->min_mtu = ETH_MIN_MTU;
@@ -9683,10 +9683,8 @@ static int rtl8152_probe(struct usb_interface *intf,
 
 	usb_set_intfdata(intf, tp);
 
-	if (tp->support_2500full)
-		netif_napi_add(netdev, &tp->napi, r8152_poll, 256);
-	else
-		netif_napi_add(netdev, &tp->napi, r8152_poll, 64);
+	netif_napi_add_weight(netdev, &tp->napi, r8152_poll,
+			      tp->support_2500full ? 256 : 64);
 
 	ret = register_netdev(netdev);
 	if (ret != 0) {

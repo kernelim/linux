@@ -223,6 +223,7 @@ FIXTURE_VARIANT(tls)
 {
 	uint16_t tls_version;
 	uint16_t cipher_type;
+	bool nopad;
 };
 
 FIXTURE_VARIANT_ADD(tls, 12_gcm)
@@ -273,9 +274,17 @@ FIXTURE_VARIANT_ADD(tls, 13_aes_gcm_256)
 	.cipher_type = TLS_CIPHER_AES_GCM_256,
 };
 
+FIXTURE_VARIANT_ADD(tls, 13_nopad)
+{
+	.tls_version = TLS_1_3_VERSION,
+	.cipher_type = TLS_CIPHER_AES_GCM_128,
+	.nopad = true,
+};
+
 FIXTURE_SETUP(tls)
 {
 	struct tls_crypto_info_keys tls12;
+	int one = 1;
 	int ret;
 
 	tls_crypto_info_init(variant->tls_version, variant->cipher_type,
@@ -291,6 +300,12 @@ FIXTURE_SETUP(tls)
 
 	ret = setsockopt(self->cfd, SOL_TLS, TLS_RX, &tls12, tls12.len);
 	ASSERT_EQ(ret, 0);
+
+	if (variant->nopad) {
+		ret = setsockopt(self->cfd, SOL_TLS, TLS_RX_EXPECT_NO_PAD,
+				 (void *)&one, sizeof(one));
+		ASSERT_EQ(ret, 0);
+	}
 }
 
 FIXTURE_TEARDOWN(tls)
@@ -605,12 +620,14 @@ TEST_F(tls, splice_from_pipe2)
 	int p2[2];
 	int p[2];
 
+	memrnd(mem_send, sizeof(mem_send));
+
 	ASSERT_GE(pipe(p), 0);
 	ASSERT_GE(pipe(p2), 0);
-	EXPECT_GE(write(p[1], mem_send, 8000), 0);
-	EXPECT_GE(splice(p[0], NULL, self->fd, NULL, 8000, 0), 0);
-	EXPECT_GE(write(p2[1], mem_send + 8000, 8000), 0);
-	EXPECT_GE(splice(p2[0], NULL, self->fd, NULL, 8000, 0), 0);
+	EXPECT_EQ(write(p[1], mem_send, 8000), 8000);
+	EXPECT_EQ(splice(p[0], NULL, self->fd, NULL, 8000, 0), 8000);
+	EXPECT_EQ(write(p2[1], mem_send + 8000, 8000), 8000);
+	EXPECT_EQ(splice(p2[0], NULL, self->fd, NULL, 8000, 0), 8000);
 	EXPECT_EQ(recv(self->cfd, mem_recv, send_len, MSG_WAITALL), send_len);
 	EXPECT_EQ(memcmp(mem_send, mem_recv, send_len), 0);
 }
@@ -644,10 +661,107 @@ TEST_F(tls, splice_to_pipe)
 	char mem_recv[TLS_PAYLOAD_MAX_LEN];
 	int p[2];
 
+	memrnd(mem_send, sizeof(mem_send));
+
 	ASSERT_GE(pipe(p), 0);
-	EXPECT_GE(send(self->fd, mem_send, send_len, 0), 0);
-	EXPECT_GE(splice(self->cfd, NULL, p[1], NULL, send_len, 0), 0);
-	EXPECT_GE(read(p[0], mem_recv, send_len), 0);
+	EXPECT_EQ(send(self->fd, mem_send, send_len, 0), send_len);
+	EXPECT_EQ(splice(self->cfd, NULL, p[1], NULL, send_len, 0), send_len);
+	EXPECT_EQ(read(p[0], mem_recv, send_len), send_len);
+	EXPECT_EQ(memcmp(mem_send, mem_recv, send_len), 0);
+}
+
+TEST_F(tls, splice_cmsg_to_pipe)
+{
+	char *test_str = "test_read";
+	char record_type = 100;
+	int send_len = 10;
+	char buf[10];
+	int p[2];
+
+	if (self->notls)
+		SKIP(return, "no TLS support");
+
+	ASSERT_GE(pipe(p), 0);
+	EXPECT_EQ(tls_send_cmsg(self->fd, 100, test_str, send_len, 0), 10);
+	EXPECT_EQ(splice(self->cfd, NULL, p[1], NULL, send_len, 0), -1);
+	EXPECT_EQ(errno, EINVAL);
+	EXPECT_EQ(recv(self->cfd, buf, send_len, 0), -1);
+	EXPECT_EQ(errno, EIO);
+	EXPECT_EQ(tls_recv_cmsg(_metadata, self->cfd, record_type,
+				buf, sizeof(buf), MSG_WAITALL),
+		  send_len);
+	EXPECT_EQ(memcmp(test_str, buf, send_len), 0);
+}
+
+TEST_F(tls, splice_dec_cmsg_to_pipe)
+{
+	char *test_str = "test_read";
+	char record_type = 100;
+	int send_len = 10;
+	char buf[10];
+	int p[2];
+
+	if (self->notls)
+		SKIP(return, "no TLS support");
+
+	ASSERT_GE(pipe(p), 0);
+	EXPECT_EQ(tls_send_cmsg(self->fd, 100, test_str, send_len, 0), 10);
+	EXPECT_EQ(recv(self->cfd, buf, send_len, 0), -1);
+	EXPECT_EQ(errno, EIO);
+	EXPECT_EQ(splice(self->cfd, NULL, p[1], NULL, send_len, 0), -1);
+	EXPECT_EQ(errno, EINVAL);
+	EXPECT_EQ(tls_recv_cmsg(_metadata, self->cfd, record_type,
+				buf, sizeof(buf), MSG_WAITALL),
+		  send_len);
+	EXPECT_EQ(memcmp(test_str, buf, send_len), 0);
+}
+
+TEST_F(tls, recv_and_splice)
+{
+	int send_len = TLS_PAYLOAD_MAX_LEN;
+	char mem_send[TLS_PAYLOAD_MAX_LEN];
+	char mem_recv[TLS_PAYLOAD_MAX_LEN];
+	int half = send_len / 2;
+	int p[2];
+
+	ASSERT_GE(pipe(p), 0);
+	EXPECT_EQ(send(self->fd, mem_send, send_len, 0), send_len);
+	/* Recv hald of the record, splice the other half */
+	EXPECT_EQ(recv(self->cfd, mem_recv, half, MSG_WAITALL), half);
+	EXPECT_EQ(splice(self->cfd, NULL, p[1], NULL, half, SPLICE_F_NONBLOCK),
+		  half);
+	EXPECT_EQ(read(p[0], &mem_recv[half], half), half);
+	EXPECT_EQ(memcmp(mem_send, mem_recv, send_len), 0);
+}
+
+TEST_F(tls, peek_and_splice)
+{
+	int send_len = TLS_PAYLOAD_MAX_LEN;
+	char mem_send[TLS_PAYLOAD_MAX_LEN];
+	char mem_recv[TLS_PAYLOAD_MAX_LEN];
+	int chunk = TLS_PAYLOAD_MAX_LEN / 4;
+	int n, i, p[2];
+
+	memrnd(mem_send, sizeof(mem_send));
+
+	ASSERT_GE(pipe(p), 0);
+	for (i = 0; i < 4; i++)
+		EXPECT_EQ(send(self->fd, &mem_send[chunk * i], chunk, 0),
+			  chunk);
+
+	EXPECT_EQ(recv(self->cfd, mem_recv, chunk * 5 / 2,
+		       MSG_WAITALL | MSG_PEEK),
+		  chunk * 5 / 2);
+	EXPECT_EQ(memcmp(mem_send, mem_recv, chunk * 5 / 2), 0);
+
+	n = 0;
+	while (n < send_len) {
+		i = splice(self->cfd, NULL, p[1], NULL, send_len - n, 0);
+		EXPECT_GT(i, 0);
+		n += i;
+	}
+	EXPECT_EQ(n, send_len);
+	EXPECT_EQ(read(p[0], mem_recv, send_len), send_len);
 	EXPECT_EQ(memcmp(mem_send, mem_recv, send_len), 0);
 }
 
@@ -741,6 +855,8 @@ TEST_F(tls, multiple_send_single_recv)
 	char recv_mem[2 * 10];
 	char send_mem[10];
 
+	memrnd(send_mem, sizeof(send_mem));
+
 	EXPECT_GE(send(self->fd, send_mem, send_len, 0), 0);
 	EXPECT_GE(send(self->fd, send_mem, send_len, 0), 0);
 	memset(recv_mem, 0, total_len);
@@ -756,6 +872,8 @@ TEST_F(tls, single_send_multiple_recv_non_align)
 	const unsigned int recv_len = 10;
 	char recv_mem[recv_len * 2];
 	char send_mem[total_len];
+
+	memrnd(send_mem, sizeof(send_mem));
 
 	EXPECT_GE(send(self->fd, send_mem, total_len, 0), 0);
 	memset(recv_mem, 0, total_len);
@@ -802,10 +920,10 @@ TEST_F(tls, recv_peek)
 	char buf[15];
 
 	EXPECT_EQ(send(self->fd, test_str, send_len, 0), send_len);
-	EXPECT_NE(recv(self->cfd, buf, send_len, MSG_PEEK), -1);
+	EXPECT_EQ(recv(self->cfd, buf, send_len, MSG_PEEK), send_len);
 	EXPECT_EQ(memcmp(test_str, buf, send_len), 0);
 	memset(buf, 0, sizeof(buf));
-	EXPECT_NE(recv(self->cfd, buf, send_len, 0), -1);
+	EXPECT_EQ(recv(self->cfd, buf, send_len, 0), send_len);
 	EXPECT_EQ(memcmp(test_str, buf, send_len), 0);
 }
 
@@ -1463,6 +1581,38 @@ TEST_F(tls_err, bad_cmsg)
 	EXPECT_EQ(errno, EBADMSG);
 }
 
+TEST_F(tls_err, timeo)
+{
+	struct timeval tv = { .tv_usec = 10000, };
+	char buf[128];
+	int ret;
+
+	if (self->notls)
+		SKIP(return, "no TLS support");
+
+	ret = setsockopt(self->cfd2, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+	ASSERT_EQ(ret, 0);
+
+	ret = fork();
+	ASSERT_GE(ret, 0);
+
+	if (ret) {
+		usleep(1000); /* Give child a head start */
+
+		EXPECT_EQ(recv(self->cfd2, buf, sizeof(buf), 0), -1);
+		EXPECT_EQ(errno, EAGAIN);
+
+		EXPECT_EQ(recv(self->cfd2, buf, sizeof(buf), 0), -1);
+		EXPECT_EQ(errno, EAGAIN);
+
+		wait(&ret);
+	} else {
+		EXPECT_EQ(recv(self->cfd2, buf, sizeof(buf), 0), -1);
+		EXPECT_EQ(errno, EAGAIN);
+		exit(0);
+	}
+}
+
 TEST(non_established) {
 	struct tls12_crypto_info_aes_gcm_256 tls12;
 	struct sockaddr_in addr;
@@ -1538,6 +1688,112 @@ TEST(keysizes) {
 
 	close(fd);
 	close(cfd);
+}
+
+TEST(no_pad) {
+	struct tls12_crypto_info_aes_gcm_256 tls12;
+	int ret, fd, cfd, val;
+	socklen_t len;
+	bool notls;
+
+	memset(&tls12, 0, sizeof(tls12));
+	tls12.info.version = TLS_1_3_VERSION;
+	tls12.info.cipher_type = TLS_CIPHER_AES_GCM_256;
+
+	ulp_sock_pair(_metadata, &fd, &cfd, &notls);
+
+	if (notls)
+		exit(KSFT_SKIP);
+
+	ret = setsockopt(fd, SOL_TLS, TLS_TX, &tls12, sizeof(tls12));
+	EXPECT_EQ(ret, 0);
+
+	ret = setsockopt(cfd, SOL_TLS, TLS_RX, &tls12, sizeof(tls12));
+	EXPECT_EQ(ret, 0);
+
+	val = 1;
+	ret = setsockopt(cfd, SOL_TLS, TLS_RX_EXPECT_NO_PAD,
+			 (void *)&val, sizeof(val));
+	EXPECT_EQ(ret, 0);
+
+	len = sizeof(val);
+	val = 2;
+	ret = getsockopt(cfd, SOL_TLS, TLS_RX_EXPECT_NO_PAD,
+			 (void *)&val, &len);
+	EXPECT_EQ(ret, 0);
+	EXPECT_EQ(val, 1);
+	EXPECT_EQ(len, 4);
+
+	val = 0;
+	ret = setsockopt(cfd, SOL_TLS, TLS_RX_EXPECT_NO_PAD,
+			 (void *)&val, sizeof(val));
+	EXPECT_EQ(ret, 0);
+
+	len = sizeof(val);
+	val = 2;
+	ret = getsockopt(cfd, SOL_TLS, TLS_RX_EXPECT_NO_PAD,
+			 (void *)&val, &len);
+	EXPECT_EQ(ret, 0);
+	EXPECT_EQ(val, 0);
+	EXPECT_EQ(len, 4);
+
+	close(fd);
+	close(cfd);
+}
+
+TEST(tls_v6ops) {
+	struct tls_crypto_info_keys tls12;
+	struct sockaddr_in6 addr, addr2;
+	int sfd, ret, fd;
+	socklen_t len, len2;
+
+	tls_crypto_info_init(TLS_1_2_VERSION, TLS_CIPHER_AES_GCM_128, &tls12);
+
+	addr.sin6_family = AF_INET6;
+	addr.sin6_addr = in6addr_any;
+	addr.sin6_port = 0;
+
+	fd = socket(AF_INET6, SOCK_STREAM, 0);
+	sfd = socket(AF_INET6, SOCK_STREAM, 0);
+
+	ret = bind(sfd, &addr, sizeof(addr));
+	ASSERT_EQ(ret, 0);
+	ret = listen(sfd, 10);
+	ASSERT_EQ(ret, 0);
+
+	len = sizeof(addr);
+	ret = getsockname(sfd, &addr, &len);
+	ASSERT_EQ(ret, 0);
+
+	ret = connect(fd, &addr, sizeof(addr));
+	ASSERT_EQ(ret, 0);
+
+	len = sizeof(addr);
+	ret = getsockname(fd, &addr, &len);
+	ASSERT_EQ(ret, 0);
+
+	ret = setsockopt(fd, IPPROTO_TCP, TCP_ULP, "tls", sizeof("tls"));
+	if (ret) {
+		ASSERT_EQ(errno, ENOENT);
+		SKIP(return, "no TLS support");
+	}
+	ASSERT_EQ(ret, 0);
+
+	ret = setsockopt(fd, SOL_TLS, TLS_TX, &tls12, tls12.len);
+	ASSERT_EQ(ret, 0);
+
+	ret = setsockopt(fd, SOL_TLS, TLS_RX, &tls12, tls12.len);
+	ASSERT_EQ(ret, 0);
+
+	len2 = sizeof(addr2);
+	ret = getsockname(fd, &addr2, &len2);
+	ASSERT_EQ(ret, 0);
+
+	EXPECT_EQ(len2, len);
+	EXPECT_EQ(memcmp(&addr, &addr2, len), 0);
+
+	close(fd);
+	close(sfd);
 }
 
 TEST_HARNESS_MAIN

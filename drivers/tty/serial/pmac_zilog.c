@@ -1228,7 +1228,7 @@ static void pmz_irda_setup(struct uart_pmac_port *uap, unsigned long *baud)
 
 
 static void __pmz_set_termios(struct uart_port *port, struct ktermios *termios,
-			      struct ktermios *old)
+			      const struct ktermios *old)
 {
 	struct uart_pmac_port *uap = to_pmz(port);
 	unsigned long baud;
@@ -1276,7 +1276,7 @@ static void __pmz_set_termios(struct uart_port *port, struct ktermios *termios,
 
 /* The port lock is not held.  */
 static void pmz_set_termios(struct uart_port *port, struct ktermios *termios,
-			    struct ktermios *old)
+			    const struct ktermios *old)
 {
 	struct uart_pmac_port *uap = to_pmz(port);
 	unsigned long flags;
@@ -1940,7 +1940,7 @@ static void __exit exit_pmz(void)
 
 #ifdef CONFIG_SERIAL_PMACZILOG_CONSOLE
 
-static void pmz_console_putchar(struct uart_port *port, int ch)
+static void pmz_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	struct uart_pmac_port *uap =
 		container_of(port, struct uart_pmac_port, port);

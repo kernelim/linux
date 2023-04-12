@@ -1,0 +1,54 @@
+---
+main:
+  - name: Quick Start Guide
+    ref: docs/README
+    sub:
+    - name: Create a Merge Request for z-stream
+      ref: create-a-merge-request-for-zstream
+  - name: RHEL Kernel Workflow
+    ref: rhel_kernel_workflow
+    sub:
+    - name: Email-based patch vs GitLab Merge Request
+      ref: email_vs_GitLabMR
+    - name: General Build Instructions
+      ref: general_build_instructions
+    - name: Kernel changeset Notifications
+      ref: kernel_changeset_notifications
+    - name: Kernel Git Repository Information
+      ref: kernel_git_repo_info
+    - name: Bugzilla Lifecycle
+      ref: bz_lifecycle
+    - name: Owners Yaml Principles
+      ref: owners_yaml_principles
+    - name: kwf-abridged-mr-process.txt
+      ref: docs/kwf-abridged-mr-process.txt
+  - name: Commit Rules
+    ref: CommitRules
+    sub:
+    - name: Red Hat Commit Attribution Policy
+      ref: commit_attribution_policy
+  - name: GitLab
+    sub:
+    - name: Red Hat and GitLab Configuration
+      ref: RH_and_GitLab_Configuration
+    - name: Verifying a GitLab Merge Request
+      ref: verifying_a_gitlab_MR
+    - name: What is a GitLab Fork?
+      ref: what_is_a_GitLab_fork
+    - name: Merge Request Approvals and Blocks
+      ref: merge_request_approvals_and_blocks
+  - name: Utilities
+    sub:
+    - name: lab
+      ref: lab
+    - name: Updating or Fixing a Merge Request
+      ref: updating_or_fixing_a_MR
+    - name: Compile `lab` and `bichon`
+      ref: go_tools_compile
+    - name: Revumatic
+      ref: Revumatic
+  - name: FAQ
+    ref: FAQ
+  - name: All Pages
+    ref: docs/
+# Manual: https://geekdocs.de/usage/menus/#bundle-menu

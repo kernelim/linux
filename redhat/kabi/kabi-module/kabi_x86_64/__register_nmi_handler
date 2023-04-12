@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/kernel/nmi.c
-0xde4eeab5	__register_nmi_handler	vmlinux	EXPORT_SYMBOL
+#2-
+0xde4eeab5	__register_nmi_handler	vmlinux	EXPORT_SYMBOL	

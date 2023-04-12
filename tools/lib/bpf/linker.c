@@ -210,6 +210,7 @@ void bpf_linker__free(struct bpf_linker *linker)
 	}
 	free(linker->secs);
 
+	free(linker->glob_syms);
 	free(linker);
 }
 
@@ -694,11 +695,6 @@ static int linker_load_obj_file(struct bpf_linker *linker, const char *filename,
 	err = err ?: linker_fixup_btf(obj);
 
 	return err;
-}
-
-static bool is_pow_of_2(size_t x)
-{
-	return x && (x & (x - 1)) == 0;
 }
 
 static int linker_sanity_check_elf(struct src_obj *obj)
@@ -1339,6 +1335,7 @@ recur:
 	case BTF_KIND_STRUCT:
 	case BTF_KIND_UNION:
 	case BTF_KIND_ENUM:
+	case BTF_KIND_ENUM64:
 	case BTF_KIND_FWD:
 	case BTF_KIND_FUNC:
 	case BTF_KIND_VAR:
@@ -1361,6 +1358,7 @@ recur:
 	case BTF_KIND_INT:
 	case BTF_KIND_FLOAT:
 	case BTF_KIND_ENUM:
+	case BTF_KIND_ENUM64:
 		/* ignore encoding for int and enum values for enum */
 		if (t1->size != t2->size) {
 			pr_warn("global '%s': incompatible %s '%s' size %u and %u\n",
@@ -1999,7 +1997,7 @@ add_sym:
 static int linker_append_elf_relos(struct bpf_linker *linker, struct src_obj *obj)
 {
 	struct src_sec *src_symtab = &obj->secs[obj->symtab_sec_idx];
-	struct dst_sec *dst_symtab = &linker->secs[linker->symtab_sec_idx];
+	struct dst_sec *dst_symtab;
 	int i, err;
 
 	for (i = 1; i < obj->sec_cnt; i++) {
@@ -2031,6 +2029,9 @@ static int linker_append_elf_relos(struct bpf_linker *linker, struct src_obj *ob
 			pr_warn("sections %s are not compatible\n", src_sec->sec_name);
 			return -1;
 		}
+
+		/* add_dst_sec() above could have invalidated linker->secs */
+		dst_symtab = &linker->secs[linker->symtab_sec_idx];
 
 		/* shdr->sh_link points to SYMTAB */
 		dst_sec->shdr->sh_link = linker->symtab_sec_idx;
@@ -2650,6 +2651,7 @@ static int emit_elf_data_sec(struct bpf_linker *linker, const char *sec_name,
 
 static int finalize_btf(struct bpf_linker *linker)
 {
+	LIBBPF_OPTS(btf_dedup_opts, opts);
 	struct btf *btf = linker->btf;
 	const void *raw_data;
 	int i, j, id, err;
@@ -2686,7 +2688,8 @@ static int finalize_btf(struct bpf_linker *linker)
 		return err;
 	}
 
-	err = btf__dedup(linker->btf, linker->btf_ext, NULL);
+	opts.btf_ext = linker->btf_ext;
+	err = btf__dedup(linker->btf, &opts);
 	if (err) {
 		pr_warn("BTF dedup failed: %d\n", err);
 		return err;

@@ -12,6 +12,7 @@ property-entry-test
 qos-test
 resource_kunit
 soc-topology-test
+soc-utils-test
 string-stream-test
 test_linear_ranges
 test_bits
@@ -23,6 +24,9 @@ rational-test
 test_list_sort
 slub_kunit
 memcpy_kunit
+dev_addr_lists_test
+kfence_test
+test_hash
 locktorture
 mac80211_hwsim
 netdevsim
@@ -30,7 +34,6 @@ pktgen
 rcutorture
 rocker
 scftorture
-test_bpf
 test_klp_atomic_replace
 test_klp_callbacks_demo
 test_klp_callbacks_demo2
@@ -44,6 +47,18 @@ test_klp_state3
 torture
 refscale
 rcuscale
-test_vmalloc
-test_hmm
+memcpy_kunit
+dev_addr_lists_test
+test_hash
+test_bpf
+stackinit_kunit
+overflow_kunit
+clk-gate_test
+clk_test
 mtty
+test_hmm
+test_vmalloc
+test_cpumask
+iio-test-format
+iio-test-rescale
+cros_kunit

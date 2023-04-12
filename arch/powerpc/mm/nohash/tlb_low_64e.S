@@ -128,6 +128,13 @@ END_BTB_FLUSH_SECTION
 
 	bne	tlb_miss_kernel_bolted
 
+tlb_miss_user_bolted:
+#ifdef CONFIG_PPC_KUAP
+	mfspr	r10,SPRN_MAS1
+	rlwinm.	r10,r10,0,0x3fff0000
+	beq-	tlb_miss_fault_bolted /* KUAP fault */
+#endif
+
 tlb_miss_common_bolted:
 /*
  * This is the guts of the TLB miss handler for bolted-linear.
@@ -222,7 +229,7 @@ tlb_miss_kernel_bolted:
 
 tlb_miss_fault_bolted:
 	/* We need to check if it was an instruction miss */
-	andi.	r10,r11,_PAGE_EXEC|_PAGE_BAP_SX
+	andi.	r10,r11,_PAGE_BAP_UX|_PAGE_BAP_SX
 	bne	itlb_miss_fault_bolted
 dtlb_miss_fault_bolted:
 	tlb_epilog_bolted
@@ -239,14 +246,14 @@ itlb_miss_fault_bolted:
 	srdi	r15,r16,60		/* get region */
 	bne-	itlb_miss_fault_bolted
 
-	li	r11,_PAGE_PRESENT|_PAGE_EXEC	/* Base perm */
+	li	r11,_PAGE_PRESENT|_PAGE_BAP_UX	/* Base perm */
 
 	/* We do the user/kernel test for the PID here along with the RW test
 	 */
 
 	cmpldi	cr0,r15,0			/* Check for user region */
 	oris	r11,r11,_PAGE_ACCESSED@h
-	beq	tlb_miss_common_bolted
+	beq	tlb_miss_user_bolted
 	b	itlb_miss_kernel_bolted
 
 #ifdef CONFIG_PPC_FSL_BOOK3E
@@ -576,7 +583,7 @@ itlb_miss_fault_e6500:
 	 */
 	rlwimi	r11,r14,32-19,27,27
 	rlwimi	r11,r14,32-16,19,19
-	beq	normal_tlb_miss
+	beq	normal_tlb_miss_user
 	/* XXX replace the RMW cycles with immediate loads + writes */
 1:	mfspr	r10,SPRN_MAS1
 	cmpldi	cr0,r15,8		/* Check for vmalloc region */
@@ -614,12 +621,12 @@ itlb_miss_fault_e6500:
 
 	/* We do the user/kernel test for the PID here along with the RW test
 	 */
-	li	r11,_PAGE_PRESENT|_PAGE_EXEC	/* Base perm */
+	li	r11,_PAGE_PRESENT|_PAGE_BAP_UX	/* Base perm */
 	oris	r11,r11,_PAGE_ACCESSED@h
 
 	cmpldi	cr0,r15,0			/* Check for user region */
 	std	r14,EX_TLB_ESR(r12)		/* write crazy -1 to frame */
-	beq	normal_tlb_miss
+	beq	normal_tlb_miss_user
 
 	li	r11,_PAGE_PRESENT|_PAGE_BAP_SX	/* Base perm */
 	oris	r11,r11,_PAGE_ACCESSED@h
@@ -646,6 +653,12 @@ itlb_miss_fault_e6500:
  * r11 = PTE permission mask
  * r10 = crap (free to use)
  */
+normal_tlb_miss_user:
+#ifdef CONFIG_PPC_KUAP
+	mfspr	r14,SPRN_MAS1
+	rlwinm.	r14,r14,0,0x3fff0000
+	beq-	normal_tlb_miss_access_fault /* KUAP fault */
+#endif
 normal_tlb_miss:
 	/* So we first construct the page table address. We do that by
 	 * shifting the bottom of the address (not the region ID) by
@@ -689,13 +702,13 @@ finish_normal_tlb_miss:
 	 *
 	 * TODO: mix up code below for better scheduling
 	 */
-	clrrdi	r11,r16,12		/* Clear low crap in EA */
-	rlwimi	r11,r14,32-19,27,31	/* Insert WIMGE */
-	mtspr	SPRN_MAS2,r11
+	clrrdi	r10,r16,12		/* Clear low crap in EA */
+	rlwimi	r10,r14,32-19,27,31	/* Insert WIMGE */
+	mtspr	SPRN_MAS2,r10
 
 	/* Check page size, if not standard, update MAS1 */
-	rldicl	r11,r14,64-8,64-8
-	cmpldi	cr0,r11,BOOK3E_PAGESZ_4K
+	rldicl	r10,r14,64-8,64-8
+	cmpldi	cr0,r10,BOOK3E_PAGESZ_4K
 	beq-	1f
 	mfspr	r11,SPRN_MAS1
 	rlwimi	r11,r14,31,21,24
@@ -734,7 +747,7 @@ normal_tlb_miss_done:
 
 normal_tlb_miss_access_fault:
 	/* We need to check if it was an instruction miss */
-	andi.	r10,r11,_PAGE_EXEC
+	andi.	r10,r11,_PAGE_BAP_UX
 	bne	1f
 	ld	r14,EX_TLB_DEAR(r12)
 	ld	r15,EX_TLB_ESR(r12)
@@ -786,7 +799,16 @@ virt_page_table_tlb_miss:
 	mfspr	r10,SPRN_MAS1
 	rlwinm	r10,r10,0,16,1			/* Clear TID */
 	mtspr	SPRN_MAS1,r10
+#ifdef CONFIG_PPC_KUAP
+	b	2f
 1:
+	mfspr	r10,SPRN_MAS1
+	rlwinm.	r10,r10,0,0x3fff0000
+	beq-	virt_page_table_tlb_miss_fault /* KUAP fault */
+2:
+#else
+1:
+#endif
 BEGIN_MMU_FTR_SECTION
 	/* Search if we already have a TLB entry for that virtual address, and
 	 * if we do, bail out.
@@ -1027,6 +1049,11 @@ virt_page_table_tlb_miss_whacko_fault:
  * avoid too much complication, it will save/restore things for us
  */
 htw_tlb_miss:
+#ifdef CONFIG_PPC_KUAP
+	mfspr	r10,SPRN_MAS1
+	rlwinm.	r10,r10,0,0x3fff0000
+	beq-	htw_tlb_miss_fault /* KUAP fault */
+#endif
 	/* Search if we already have a TLB entry for that virtual address, and
 	 * if we do, bail out.
 	 *

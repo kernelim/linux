@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/sched/core.c
-0x760a0f4f	yield	vmlinux	EXPORT_SYMBOL
+#2-
+0x760a0f4f	yield	vmlinux	EXPORT_SYMBOL	

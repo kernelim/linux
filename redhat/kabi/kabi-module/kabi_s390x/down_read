@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/locking/rwsem.c
-0x103bafd6	down_read	vmlinux	EXPORT_SYMBOL
+#2-
+0x103bafd6	down_read	vmlinux	EXPORT_SYMBOL	

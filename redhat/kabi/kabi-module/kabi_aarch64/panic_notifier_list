@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/panic.c
-0x07ceeac9	panic_notifier_list	vmlinux	EXPORT_SYMBOL
+#2-
+0x07ceeac9	panic_notifier_list	vmlinux	EXPORT_SYMBOL	

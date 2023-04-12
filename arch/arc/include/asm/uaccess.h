@@ -23,35 +23,6 @@
 
 #include <linux/string.h>	/* for generic string functions */
 
-
-#define __kernel_ok		(uaccess_kernel())
-
-/*
- * Algorithmically, for __user_ok() we want do:
- * 	(start < TASK_SIZE) && (start+len < TASK_SIZE)
- * where TASK_SIZE could either be retrieved from thread_info->addr_limit or
- * emitted directly in code.
- *
- * This can however be rewritten as follows:
- *	(len <= TASK_SIZE) && (start+len < TASK_SIZE)
- *
- * Because it essentially checks if buffer end is within limit and @len is
- * non-ngeative, which implies that buffer start will be within limit too.
- *
- * The reason for rewriting being, for majority of cases, @len is generally
- * compile time constant, causing first sub-expression to be compile time
- * subsumed.
- *
- * The second part would generate weird large LIMMs e.g. (0x6000_0000 - 0x10),
- * so we check for TASK_SIZE using get_fs() since the addr_limit load from mem
- * would already have been done at this call site for __kernel_ok()
- *
- */
-#define __user_ok(addr, sz)	(((sz) <= TASK_SIZE) && \
-				 ((addr) <= (get_fs() - (sz))))
-#define __access_ok(addr, sz)	(unlikely(__kernel_ok) || \
-				 likely(__user_ok((addr), (sz))))
-
 /*********** Single byte/hword/word copies ******************/
 
 #define __get_user_fn(sz, u, k)					\
@@ -661,6 +632,9 @@ __arc_strncpy_from_user(char *dst, const char __user *src, long count)
 	long res = 0;
 	char val;
 
+	if (!access_ok(src, 1))
+		return -EFAULT;
+
 	if (count == 0)
 		return 0;
 
@@ -693,6 +667,9 @@ static inline long __arc_strnlen_user(const char __user *s, long n)
 	long res, tmp1, cnt;
 	char val;
 
+	if (!access_ok(s, 1))
+		return 0;
+
 	__asm__ __volatile__(
 	"	mov %2, %1			\n"
 	"1:	ldb.ab  %3, [%0, 1]		\n"
@@ -724,8 +701,8 @@ static inline long __arc_strnlen_user(const char __user *s, long n)
 #define INLINE_COPY_FROM_USER
 
 #define __clear_user(d, n)		__arc_clear_user(d, n)
-#define __strncpy_from_user(d, s, n)	__arc_strncpy_from_user(d, s, n)
-#define __strnlen_user(s, n)		__arc_strnlen_user(s, n)
+#define strncpy_from_user(d, s, n)	__arc_strncpy_from_user(d, s, n)
+#define strnlen_user(s, n)		__arc_strnlen_user(s, n)
 #else
 extern unsigned long arc_clear_user_noinline(void __user *to,
 		unsigned long n);
@@ -734,8 +711,8 @@ extern long arc_strncpy_from_user_noinline (char *dst, const char __user *src,
 extern long arc_strnlen_user_noinline(const char __user *src, long n);
 
 #define __clear_user(d, n)		arc_clear_user_noinline(d, n)
-#define __strncpy_from_user(d, s, n)	arc_strncpy_from_user_noinline(d, s, n)
-#define __strnlen_user(s, n)		arc_strnlen_user_noinline(s, n)
+#define strncpy_from_user(d, s, n)	arc_strncpy_from_user_noinline(d, s, n)
+#define strnlen_user(s, n)		arc_strnlen_user_noinline(s, n)
 
 #endif
 

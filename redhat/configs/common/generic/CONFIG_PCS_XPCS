@@ -1,1 +1,1 @@
-# CONFIG_PCS_XPCS is not set
+CONFIG_PCS_XPCS=m

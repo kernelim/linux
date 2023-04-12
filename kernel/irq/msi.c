@@ -14,18 +14,21 @@
 #include <linux/irqdomain.h>
 #include <linux/msi.h>
 #include <linux/slab.h>
+#include <linux/sysfs.h>
 #include <linux/pci.h>
 
 #include "internals.h"
 
 /**
- * alloc_msi_entry - Allocate an initialize msi_entry
+ * alloc_msi_entry - Allocate an initialized msi_desc
  * @dev:	Pointer to the device for which this is allocated
  * @nvec:	The number of vectors used in this entry
  * @affinity:	Optional pointer to an affinity mask array size of @nvec
  *
- * If @affinity is not NULL then an affinity array[@nvec] is allocated
+ * If @affinity is not %NULL then an affinity array[@nvec] is allocated
  * and the affinity masks and flags from @affinity are copied.
+ *
+ * Return: pointer to allocated &msi_desc on success or %NULL on failure
  */
 struct msi_desc *alloc_msi_entry(struct device *dev, int nvec,
 				 const struct irq_affinity_desc *affinity)
@@ -70,6 +73,7 @@ void get_cached_msi_msg(unsigned int irq, struct msi_msg *msg)
 }
 EXPORT_SYMBOL_GPL(get_cached_msi_msg);
 
+#ifdef CONFIG_SYSFS
 static ssize_t msi_mode_show(struct device *dev, struct device_attribute *attr,
 			     char *buf)
 {
@@ -87,7 +91,7 @@ static ssize_t msi_mode_show(struct device *dev, struct device_attribute *attr,
 		return -ENODEV;
 
 	if (dev_is_pci(dev))
-		is_msix = entry->msi_attrib.is_msix;
+		is_msix = entry->pci.msi_attrib.is_msix;
 
 	return sysfs_emit(buf, "%s\n", is_msix ? "msix" : "msi");
 }
@@ -202,6 +206,7 @@ void msi_destroy_sysfs(struct device *dev, const struct attribute_group **msi_ir
 		kfree(msi_irq_groups);
 	}
 }
+#endif
 
 #ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
 static inline void irq_chip_write_msi_msg(struct irq_data *data,
@@ -231,6 +236,8 @@ static void msi_check_level(struct irq_domain *domain, struct msi_msg *msg)
  *
  * Intended to be used by MSI interrupt controllers which are
  * implemented with hierarchical domains.
+ *
+ * Return: IRQ_SET_MASK_* result code
  */
 int msi_domain_set_affinity(struct irq_data *irq_data,
 			    const struct cpumask *mask, bool force)
@@ -411,10 +418,12 @@ static void msi_domain_update_chip_ops(struct msi_domain_info *info)
 }
 
 /**
- * msi_create_irq_domain - Create a MSI interrupt domain
+ * msi_create_irq_domain - Create an MSI interrupt domain
  * @fwnode:	Optional fwnode of the interrupt controller
  * @info:	MSI domain info
  * @parent:	Parent irq domain
+ *
+ * Return: pointer to the created &struct irq_domain or %NULL on failure
  */
 struct irq_domain *msi_create_irq_domain(struct fwnode_handle *fwnode,
 					 struct msi_domain_info *info,
@@ -526,7 +535,28 @@ static bool msi_check_reservation_mode(struct irq_domain *domain,
 	 * masking and MSI does so when the can_mask attribute is set.
 	 */
 	desc = first_msi_entry(dev);
-	return desc->msi_attrib.is_msix || desc->msi_attrib.can_mask;
+	return desc->pci.msi_attrib.is_msix || desc->pci.msi_attrib.can_mask;
+}
+
+static int msi_handle_pci_fail(struct irq_domain *domain, struct msi_desc *desc,
+			       int allocated)
+{
+	switch(domain->bus_token) {
+	case DOMAIN_BUS_PCI_MSI:
+	case DOMAIN_BUS_VMD_MSI:
+		if (IS_ENABLED(CONFIG_PCI_MSI))
+			break;
+		fallthrough;
+	default:
+		return -ENOSPC;
+	}
+
+	/* Let a failed PCI multi MSI allocation retry */
+	if (desc->nvec_used > 1)
+		return 1;
+
+	/* If there was a successful allocation let the caller know */
+	return allocated ? allocated : -ENOSPC;
 }
 
 int __msi_domain_alloc_irqs(struct irq_domain *domain, struct device *dev,
@@ -537,6 +567,7 @@ int __msi_domain_alloc_irqs(struct irq_domain *domain, struct device *dev,
 	struct irq_data *irq_data;
 	struct msi_desc *desc;
 	msi_alloc_info_t arg = { };
+	int allocated = 0;
 	int i, ret, virq;
 	bool can_reserve;
 
@@ -551,22 +582,16 @@ int __msi_domain_alloc_irqs(struct irq_domain *domain, struct device *dev,
 					       dev_to_node(dev), &arg, false,
 					       desc->affinity);
 		if (virq < 0) {
-			ret = -ENOSPC;
-			if (ops->handle_error)
-				ret = ops->handle_error(domain, desc, ret);
-			if (ops->msi_finish)
-				ops->msi_finish(&arg, ret);
-			return ret;
+			ret = msi_handle_pci_fail(domain, desc, allocated);
+			goto cleanup;
 		}
 
 		for (i = 0; i < desc->nvec_used; i++) {
 			irq_set_msi_desc_off(virq, i, desc);
 			irq_debugfs_copy_devname(virq + i, dev);
 		}
+		allocated++;
 	}
-
-	if (ops->msi_finish)
-		ops->msi_finish(&arg, 0);
 
 	can_reserve = msi_check_reservation_mode(domain, info, dev);
 
@@ -621,7 +646,7 @@ cleanup:
  *		are allocated
  * @nvec:	The number of interrupts to allocate
  *
- * Returns 0 on success or an error code.
+ * Return: %0 on success or an error code.
  */
 int msi_domain_alloc_irqs(struct irq_domain *domain, struct device *dev,
 			  int nvec)
@@ -658,7 +683,7 @@ void __msi_domain_free_irqs(struct irq_domain *domain, struct device *dev)
 }
 
 /**
- * __msi_domain_free_irqs - Free interrupts from a MSI interrupt @domain associated tp @dev
+ * msi_domain_free_irqs - Free interrupts from a MSI interrupt @domain associated to @dev
  * @domain:	The domain to managing the interrupts
  * @dev:	Pointer to device struct of the device for which the interrupts
  *		are free
@@ -675,8 +700,7 @@ void msi_domain_free_irqs(struct irq_domain *domain, struct device *dev)
  * msi_get_domain_info - Get the MSI interrupt domain info for @domain
  * @domain:	The interrupt domain to retrieve data from
  *
- * Returns the pointer to the msi_domain_info stored in
- * @domain->host_data.
+ * Return: the pointer to the msi_domain_info stored in @domain->host_data.
  */
 struct msi_domain_info *msi_get_domain_info(struct irq_domain *domain)
 {

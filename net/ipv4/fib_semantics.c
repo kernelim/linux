@@ -31,6 +31,7 @@
 #include <linux/netlink.h>
 
 #include <net/arp.h>
+#include <net/inet_dscp.h>
 #include <net/ip.h>
 #include <net/protocol.h>
 #include <net/route.h>
@@ -416,6 +417,7 @@ static struct fib_info *fib_find_info(struct fib_info *nfi)
 		    nfi->fib_prefsrc == fi->fib_prefsrc &&
 		    nfi->fib_priority == fi->fib_priority &&
 		    nfi->fib_type == fi->fib_type &&
+		    nfi->fib_tb_id == fi->fib_tb_id &&
 		    memcmp(nfi->fib_metrics, fi->fib_metrics,
 			   sizeof(u32) * RTAX_MAX) == 0 &&
 		    !((nfi->fib_flags ^ fi->fib_flags) & ~RTNH_COMPARE_MASK) &&
@@ -518,7 +520,7 @@ void rtmsg_fib(int event, __be32 key, struct fib_alias *fa,
 	fri.tb_id = tb_id;
 	fri.dst = key;
 	fri.dst_len = dst_len;
-	fri.tos = fa->fa_tos;
+	fri.dscp = fa->fa_dscp;
 	fri.type = fa->fa_type;
 	fri.offload = READ_ONCE(fa->offload);
 	fri.trap = READ_ONCE(fa->trap);
@@ -882,12 +884,14 @@ int fib_nh_match(struct net *net, struct fib_config *cfg, struct fib_info *fi,
 		return 1;
 	}
 
+	if (fi->nh) {
+		if (cfg->fc_oif || cfg->fc_gw_family || cfg->fc_mp)
+			return 1;
+		return 0;
+	}
+
 	if (cfg->fc_oif || cfg->fc_gw_family) {
 		struct fib_nh *nh;
-
-		/* cannot match on nexthop object attributes */
-		if (fi->nh)
-			return 1;
 
 		nh = fib_info_nh(fi, 0);
 		if (cfg->fc_encap) {
@@ -1799,7 +1803,7 @@ int fib_dump_info(struct sk_buff *skb, u32 portid, u32 seq, int event,
 	rtm->rtm_family = AF_INET;
 	rtm->rtm_dst_len = fri->dst_len;
 	rtm->rtm_src_len = 0;
-	rtm->rtm_tos = fri->tos;
+	rtm->rtm_tos = inet_dscp_to_dsfield(fri->dscp);
 	if (tb_id < 256)
 		rtm->rtm_table = tb_id;
 	else
@@ -1829,7 +1833,7 @@ int fib_dump_info(struct sk_buff *skb, u32 portid, u32 seq, int event,
 			goto nla_put_failure;
 		if (nexthop_is_blackhole(fi->nh))
 			rtm->rtm_type = RTN_BLACKHOLE;
-		if (!fi->fib_net->ipv4.sysctl_nexthop_compat_mode)
+		if (!READ_ONCE(fi->fib_net->ipv4.sysctl_nexthop_compat_mode))
 			goto offload;
 	}
 
@@ -2065,7 +2069,7 @@ static void fib_select_default(const struct flowi4 *flp, struct fib_result *res)
 	int order = -1, last_idx = -1;
 	struct fib_alias *fa, *fa1 = NULL;
 	u32 last_prio = res->fi->fib_priority;
-	u8 last_tos = 0;
+	dscp_t last_dscp = 0;
 
 	hlist_for_each_entry_rcu(fa, fa_head, fa_list) {
 		struct fib_info *next_fi = fa->fa_info;
@@ -2073,19 +2077,20 @@ static void fib_select_default(const struct flowi4 *flp, struct fib_result *res)
 
 		if (fa->fa_slen != slen)
 			continue;
-		if (fa->fa_tos && fa->fa_tos != flp->flowi4_tos)
+		if (fa->fa_dscp &&
+		    fa->fa_dscp != inet_dsfield_to_dscp(flp->flowi4_tos))
 			continue;
 		if (fa->tb_id != tb->tb_id)
 			continue;
 		if (next_fi->fib_priority > last_prio &&
-		    fa->fa_tos == last_tos) {
-			if (last_tos)
+		    fa->fa_dscp == last_dscp) {
+			if (last_dscp)
 				continue;
 			break;
 		}
 		if (next_fi->fib_flags & RTNH_F_DEAD)
 			continue;
-		last_tos = fa->fa_tos;
+		last_dscp = fa->fa_dscp;
 		last_prio = next_fi->fib_priority;
 
 		if (next_fi->fib_scope != res->scope ||
@@ -2237,7 +2242,7 @@ void fib_select_multipath(struct fib_result *res, int hash)
 	}
 
 	change_nexthops(fi) {
-		if (net->ipv4.sysctl_fib_multipath_use_neigh) {
+		if (READ_ONCE(net->ipv4.sysctl_fib_multipath_use_neigh)) {
 			if (!fib_good_nh(nexthop_nh))
 				continue;
 			if (!first) {
@@ -2260,7 +2265,7 @@ void fib_select_multipath(struct fib_result *res, int hash)
 void fib_select_path(struct net *net, struct fib_result *res,
 		     struct flowi4 *fl4, const struct sk_buff *skb)
 {
-	if (fl4->flowi4_oif && !(fl4->flowi4_flags & FLOWI_FLAG_SKIP_NH_OIF))
+	if (fl4->flowi4_oif)
 		goto check_saddr;
 
 #ifdef CONFIG_IP_ROUTE_MULTIPATH

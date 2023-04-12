@@ -384,10 +384,6 @@ struct pci_dev {
 	unsigned int	mmio_always_on:1;	/* Disallow turning off io/mem
 						   decoding during BAR sizing */
 	unsigned int	wakeup_prepared:1;
-	unsigned int	runtime_d3cold:1;	/* Whether go through runtime
-						   D3cold, not set for devices
-						   powered on/off by the
-						   corresponding bridge */
 	unsigned int	skip_bus_pm:1;	/* Internal: Skip bus-level PM */
 	unsigned int	ignore_hotplug:1;	/* Ignore hotplug events */
 	unsigned int	hotplug_user_indicators:1; /* SlotCtl indicators
@@ -483,11 +479,14 @@ struct pci_dev {
 	unsigned int	broken_cmd_compl:1;	/* No compl for some cmds */
 #endif
 #ifdef CONFIG_PCIE_PTM
+	u16		ptm_cap;		/* PTM Capability */
 	unsigned int	ptm_root:1;
 	unsigned int	ptm_enabled:1;
 	u8		ptm_granularity;
 #endif
 #ifdef CONFIG_PCI_MSI
+	void __iomem	*msix_base;
+	raw_spinlock_t	msi_lock;
 	const struct attribute_group **msi_irq_groups;
 #endif
 	RH_KABI_EXCLUDE(struct pci_vpd	vpd);
@@ -933,6 +932,13 @@ struct module;
  *              created once it is bound to the driver.
  * @driver:	Driver model structure.
  * @dynids:	List of dynamically added device IDs.
+ * @driver_managed_dma: Device driver doesn't use kernel DMA API for DMA.
+ *		For most device drivers, no need to care about this flag
+ *		as long as all DMAs are handled through the kernel DMA API.
+ *		For some special ones, for example VFIO drivers, they know
+ *		how to manage the DMA themselves and set this flag so that
+ *		the IOMMU layer will allow them to setup and manage their
+ *		own I/O address space.
  */
 struct pci_driver {
 	struct list_head	node;
@@ -957,6 +963,7 @@ struct pci_driver {
 	const struct attribute_group **dev_groups;
 	struct device_driver	driver;
 	struct pci_dynids	dynids;
+	bool driver_managed_dma;
 
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)
@@ -1197,6 +1204,7 @@ u16 pci_find_ext_capability(struct pci_dev *dev, int cap);
 u16 pci_find_next_ext_capability(struct pci_dev *dev, u16 pos, int cap);
 struct pci_bus *pci_find_next_bus(const struct pci_bus *from);
 u16 pci_find_vsec_capability(struct pci_dev *dev, u16 vendor, int cap);
+u16 pci_find_dvsec_capability(struct pci_dev *dev, u16 vendor, u16 dvsec);
 
 u64 pci_get_dsn(struct pci_dev *dev);
 
@@ -1733,10 +1741,12 @@ bool pci_ats_disabled(void);
 
 #ifdef CONFIG_PCIE_PTM
 int pci_enable_ptm(struct pci_dev *dev, u8 *granularity);
+void pci_disable_ptm(struct pci_dev *dev);
 bool pcie_ptm_enabled(struct pci_dev *dev);
 #else
 static inline int pci_enable_ptm(struct pci_dev *dev, u8 *granularity)
 { return -EINVAL; }
+static inline void pci_disable_ptm(struct pci_dev *dev) { }
 static inline bool pcie_ptm_enabled(struct pci_dev *dev)
 { return false; }
 #endif
@@ -1745,6 +1755,7 @@ void pci_cfg_access_lock(struct pci_dev *dev);
 bool pci_cfg_access_trylock(struct pci_dev *dev);
 void pci_cfg_access_unlock(struct pci_dev *dev);
 
+void pci_dev_lock(struct pci_dev *dev);
 int pci_dev_trylock(struct pci_dev *dev);
 void pci_dev_unlock(struct pci_dev *dev);
 
@@ -1964,24 +1975,14 @@ pci_alloc_irq_vectors(struct pci_dev *dev, unsigned int min_vecs,
 
 #include <asm/pci.h>
 
-/* These two functions provide almost identical functionality. Depending
- * on the architecture, one will be implemented as a wrapper around the
- * other (in drivers/pci/mmap.c).
- *
+/*
  * pci_mmap_resource_range() maps a specific BAR, and vm->vm_pgoff
  * is expected to be an offset within that region.
  *
- * pci_mmap_page_range() is the legacy architecture-specific interface,
- * which accepts a "user visible" resource address converted by
- * pci_resource_to_user(), as used in the legacy mmap() interface in
- * /proc/bus/pci/.
  */
 int pci_mmap_resource_range(struct pci_dev *dev, int bar,
 			    struct vm_area_struct *vma,
 			    enum pci_mmap_state mmap_state, int write_combine);
-int pci_mmap_page_range(struct pci_dev *pdev, int bar,
-			struct vm_area_struct *vma,
-			enum pci_mmap_state mmap_state, int write_combine);
 
 #ifndef arch_can_pci_mmap_wc
 #define arch_can_pci_mmap_wc()		0

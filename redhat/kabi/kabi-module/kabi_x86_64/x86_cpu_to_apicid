@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/kernel/apic/apic.c
-0xa50bcff0	x86_cpu_to_apicid	vmlinux	EXPORT_SYMBOL
+#2-
+0xa50bcff0	x86_cpu_to_apicid	vmlinux	EXPORT_SYMBOL	

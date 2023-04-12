@@ -2690,7 +2690,7 @@ again:
 		 * send loop that we are still in the
 		 * header portion of the TSO packet.
 		 * TSO header can be at most 1KB long */
-		cum_len = -(skb_transport_offset(skb) + tcp_hdrlen(skb));
+		cum_len = -skb_tcp_all_headers(skb);
 
 		/* for IPv6 TSO, the checksum offset stores the
 		 * TCP header length, to save the firmware from
@@ -3586,8 +3586,8 @@ static int myri10ge_alloc_slices(struct myri10ge_priv *mgp)
 			goto abort;
 		ss->mgp = mgp;
 		ss->dev = mgp->dev;
-		netif_napi_add(ss->dev, &ss->napi, myri10ge_poll,
-			       myri10ge_napi_weight);
+		netif_napi_add_weight(ss->dev, &ss->napi, myri10ge_poll,
+				      myri10ge_napi_weight);
 	}
 	return 0;
 abort:

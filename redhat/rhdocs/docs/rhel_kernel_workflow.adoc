@@ -26,7 +26,7 @@ This guide is written to provide contributors, maintainers, and management with 
 
 === Documentation Contributor Instructions
 
-Constructive updates and contributions are welcomed and are greatly appreciated.  Contributors should understand this document focuses on the experience of engineers in different roles (maintainers, developers, reviewers, etc).  Small and medium process changes should not result in changes to this top-level document. Implementation details should be kept to a minimum; please reference projects’ URLs or projects’ documentation instead of providing advanced details.  Where possible, please reference other documents through hyperlinks in this document.
+Constructive updates and contributions are welcomed and are greatly appreciated.  Contributors should understand this document focuses on the experience of engineers in different roles (maintainers, developers, reviewers, etc).  Small and medium process changes should not result in changes to this top-level document. Implementation details should be kept to a minimum; please reference projects' URLs or projects' documentation instead of providing advanced details.  Where possible, please reference other documents through hyperlinks in this document.
 
 Problems or concerns with the workflow can be addressed on mailto:kernel-info@redhat.com[kernel-info@redhat.com] or by filing a GitLab issue at https://gitlab.com/redhat/rhel/src/kernel/bugreports[Red Hat Kernel bug reports].
 
@@ -209,7 +209,7 @@ After the merge request has been created, the developer can follow the status of
 
 === Contributor Reviewer Processes
 
-All reviews can be completed through the GitLab WebUI.  Red Hat recommends the GitLab command line interface tool, link:bichon.adoc[bichon], for reviews.  Reviews for the can also be completed by replying to email from the Email Bridge.
+All reviews can be completed through the GitLab WebUI.  Red Hat recommends using the xref:revumatic.adoc[revumatic] utility for reviews for a terminal-based experience.
 
 ==== Approving and Blocking Merge Requests
 
@@ -219,7 +219,7 @@ Community Contributors and Stream Partner Engineer Contributors are able to part
 
 ==== Finding Merge Requests to review
 
-Reviewers can find MRs to review by using the ‘Merge Requests’ tab on the GitLab UI for the Project, or use the https://gitlab.com/prarit/rhstatus[rhstatus] tool.  Additionally both the link:https://gitlab.com/zaquestion/lab[lab] and https://gitlab.com/bichon-project/bichon/[bichon] tools provide functionality to import and display MRs.
+Reviewers can find MRs to review by using the `Merge Requests` tab on the GitLab UI for the Project, or use one of the utilities such as xref:revumatic.adoc[revumatic] or https://gitlab.com/prarit/rhstatus[rhstatus].  Additionally the link:https://gitlab.com/zaquestion/lab[lab] tool provides functionality to import and display MRs.
 
 Reviewers that are interested in watching change in specific areas of the kernel should review the <<Notifications>> section.
 
@@ -239,11 +239,11 @@ TBD.
 
 === Bugzilla Configuration
 
-Red Hat uses its own Bugzilla instance, https://bugzilla.redhat.com[https://bugzilla.redhat.com], to track feature requests and bug reports.  Red Hat requires that all contributions must be associated with a bugzilla so *all contributors must have a Red Hat bugzilla account*.  To open a new bugzilla account see https://bugzilla.redhat.com/createaccount.cgi[https://bugzilla.redhat.com/createaccount.cgi].  For additional reference or questions read https://bugzilla.redhat.com/docs/en/html/using/index.html[Red Hat’s Bugzilla User Guide].
+Red Hat uses its own Bugzilla instance, https://bugzilla.redhat.com[https://bugzilla.redhat.com], to track feature requests and bug reports.  Red Hat requires that all contributions must be associated with a bugzilla so *all contributors must have a Red Hat bugzilla account*.  To open a new bugzilla account see https://bugzilla.redhat.com/createaccount.cgi[https://bugzilla.redhat.com/createaccount.cgi].  For additional reference or questions read https://bugzilla.redhat.com/docs/en/html/using/index.html[Red Hat's Bugzilla User Guide].
 
 Red Hat employees must associate their redhat.com email address with their bugzilla account, and must be part of the "Redhat: Red Hat Employee (internal)" group.  Red Hat employees can request access to the group https://bugzilla.redhat.com/page.cgi?id=workflows/group_request.html[here].
 
-Instructions for https://bugzilla.redhat.com/docs/en/html/using/filing.html#reporting-a-new-bug[creating bugzillas] can also be found in Red Hat’s Bugzilla User Guide.  When creating a bugzilla for the kernel, reporters should be sure to clearly explain what the problem they encountered was, how it occurred, and if necessary, what platform (vendor and model) it was seen on.  Reporters are encouraged, but not required, to provide a solution (link to an upstream patch or a suggestion for a fix, etc.).  Reporters and contributors should not reuse bugzillas for multiple issues or problems.
+Instructions for https://bugzilla.redhat.com/docs/en/html/using/filing.html#reporting-a-new-bug[creating bugzillas] can also be found in Red Hat's Bugzilla User Guide.  When creating a bugzilla for the kernel, reporters should be sure to clearly explain what the problem they encountered was, how it occurred, and if necessary, what platform (vendor and model) it was seen on.  Reporters are encouraged, but not required, to provide a solution (link to an upstream patch or a suggestion for a fix, etc.).  Reporters and contributors should not reuse bugzillas for multiple issues or problems.
 
 == GitLab Work Environment
 
@@ -259,23 +259,15 @@ While Red Hat Engineers may use different tools, *it is strongly recommended tha
 
 === lab
 
-https://github.com/zaquestion/lab[lab] is a command line utility for GitLab.  Similar to the widely used ‘hub’ command for github, lab provides a simple to use command line interface to many of GitLab’s UI procedures.  For the Red Hat process, lab will be primarily used as a developer and maintainer tool.
+https://github.com/zaquestion/lab[lab] is a command line utility for GitLab.  Similar to the widely used `hub` command for github, lab provides a simple to use command line interface to many of GitLab's UI procedures.  For the Red Hat process, lab will be primarily used as a developer and maintainer tool.
 
 Instructions on installing and configuring lab can be found link:lab.adoc[here].
 
 lab bugs can be reported by opening up issues at https://github.com/zaquestion/lab/issues[https://github.com/zaquestion/lab/issues].
 
-=== bichon
-
-https://gitlab.com/bichon-project/bichon/[bichon] provides a terminal based user interface for reviewing GitLab merge requests. It provides mutt-like keyboard based interaction, and unlike lab, it allows for off-line code review caching information until reconnected to the network.  For the Red Hat process, *bichon will be primarily used as a review tool*.
-
-Instructions on installing and configuring bichon can be found link:bichon.adoc[here].
-
-Bichon bugs can be reported by opening up issues at https://gitlab.com/bichon-project/bichon/-/issues[https://gitlab.com/bichon-project/bichon/-/issues]
-
 === revumatic
 
-https://gitlab.cee.redhat.com/kernel-review/revumatic/[revumatic] is a GitLab code review tool that is specifically tailored to the Red Hat kernel workflow.  It detects issues like missing commit dependencies, KABI issues, and upstream code comparison issues.  Instructions for installing revumatic can be found in the repository’s https://gitlab.cee.redhat.com/kernel-review/revumatic/-/blob/main/README.md[README.md].
+https://gitlab.com/redhat/centos-stream/src/kernel/utils/revumatic/[revumatic] is a GitLab code review tool that is specifically tailored to the Red Hat kernel workflow.  It detects issues like missing commit dependencies, KABI issues, and upstream code comparison issues.  Instructions for installing revumatic can be found in the repository’s https://gitlab.com/redhat/centos-stream/src/kernel/utils/revumatic/-/blob/main/README.md[README.md].
 
 === rhstatus
 
@@ -294,7 +286,7 @@ Location: http://gitlab.com/redhat/[http://gitlab.com/redhat]
 
 The webhooks services are executed in response to selected gitlab events.  These hooks are generally used to automate routine merge request validation tasks, updating labels and comments in the MR as needed to reflect readiness for merge by the maintainer.
 
-Each of the webhooks has a scoped label that each hook is responsible for managing, and each one typically contains _NeedsReview_ or OK.  Some examples include _Signoff::OK_, _Bugzilla::NeedsReview_, _Acks::NeedsReview_.  +++<u>+++You can force a webhook to rerun, and for some webhooks additional detailed information back via a comment, by removing the webhook’s Merge Request label.+++</u>+++
+Each of the webhooks has a scoped label that each hook is responsible for managing, and each one typically contains _NeedsReview_ or OK.  Some examples include _Signoff::OK_, _Bugzilla::NeedsReview_, _Acks::NeedsReview_.  [.underline]#You can force a webhook to rerun, and for some webhooks additional detailed information back via a comment, by removing the webhook's Merge Request label.#
 
 *Source Code:* https://gitlab.com/cki-project/kernel-webhooks/[https://gitlab.com/cki-project/kernel-webhooks/]
 
@@ -320,17 +312,17 @@ This will be handled by CKI.
 
 == FAQ
 
-. I’ve read this document and I have questions and/or concerns.  Where can I ask for help?
+. I've read this document and I have questions and/or concerns.  Where can I ask for help?
 	You can ask questions on mailto:kernel-info@redhat.com[kernel-info@redhat.com] or by opening an issue at the https://gitlab.com/redhat/centos-stream/src/kernel/bugreports[Red Hat Kernel bugreports project].
 
 . Can I use other tools with GitLab?
-	The GitLab WebUI is supported, and Red Hat recommends lab and bichon.  You can use other tools, but please be aware that we cannot help you with debugging or enhancing those tools.
+	The GitLab WebUI is supported, and Red Hat recommends xref:lab.adoc[lab], xref:revumatic.adoc[revumatic] and rhstatus.  You can use other tools, but please be aware that we cannot help you with debugging or enhancing those tools.
 
 . Is there a scratch space to work in?  I want to test out my own workflow/patch tools.
 	You can use the https://gitlab.com/redhat/rhel/src/kernel/kernel-test[kernel-test git repository].
 
 . How are Bugzillas and GitLab Merge Requests linked?
-	The <<Kernel-webhooks>> add a link to the MR in the associated Bugzillas’ Links section.   If the MR description was written to meet the requirements of link:CommitRules.adoc[CommitRules], then the MR will contain a link to the associated Bugzillas.
+	The <<Kernel-webhooks>> add a link to the MR in the associated Bugzillas' Links section.   If the MR description was written to meet the requirements of link:CommitRules.adoc[CommitRules], then the MR will contain a link to the associated Bugzillas.
 
 . Can I use my https://gitlab.cee.redhat.com[gitlab.cee.redhat.com] credentials on gitlab.com?
 	No.  gitlab.cee.redhat.com is a completely independent instance of GitLab.  No information is shared between the two instances and we have no plans to do so.  Using a token generated on one instance with the other instance will never work.

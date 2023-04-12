@@ -184,8 +184,6 @@ struct nfs_client *nfs_alloc_client(const struct nfs_client_initdata *cl_init)
 	clp->cl_net = get_net(cl_init->net);
 
 	clp->cl_principal = "*";
-	nfs_fscache_get_client_cookie(clp);
-
 	return clp;
 
 error_cleanup:
@@ -239,8 +237,6 @@ static void pnfs_init_server(struct nfs_server *server)
  */
 void nfs_free_client(struct nfs_client *clp)
 {
-	nfs_fscache_release_client_cookie(clp);
-
 	/* -EIO all pending I/O */
 	if (!IS_ERR(clp->cl_rpcclient))
 		rpc_shutdown_client(clp->cl_rpcclient);
@@ -712,9 +708,9 @@ static int nfs_init_server(struct nfs_server *server,
 	}
 
 	if (ctx->rsize)
-		server->rsize = nfs_block_size(ctx->rsize, NULL);
+		server->rsize = nfs_io_size(ctx->rsize, clp->cl_proto);
 	if (ctx->wsize)
-		server->wsize = nfs_block_size(ctx->wsize, NULL);
+		server->wsize = nfs_io_size(ctx->wsize, clp->cl_proto);
 
 	server->acregmin = ctx->acregmin * HZ;
 	server->acregmax = ctx->acregmax * HZ;
@@ -759,18 +755,19 @@ error:
 static void nfs_server_set_fsinfo(struct nfs_server *server,
 				  struct nfs_fsinfo *fsinfo)
 {
+	struct nfs_client *clp = server->nfs_client;
 	unsigned long max_rpc_payload, raw_max_rpc_payload;
 
 	/* Work out a lot of parameters */
 	if (server->rsize == 0)
-		server->rsize = nfs_block_size(fsinfo->rtpref, NULL);
+		server->rsize = nfs_io_size(fsinfo->rtpref, clp->cl_proto);
 	if (server->wsize == 0)
-		server->wsize = nfs_block_size(fsinfo->wtpref, NULL);
+		server->wsize = nfs_io_size(fsinfo->wtpref, clp->cl_proto);
 
 	if (fsinfo->rtmax >= 512 && server->rsize > fsinfo->rtmax)
-		server->rsize = nfs_block_size(fsinfo->rtmax, NULL);
+		server->rsize = nfs_io_size(fsinfo->rtmax, clp->cl_proto);
 	if (fsinfo->wtmax >= 512 && server->wsize > fsinfo->wtmax)
-		server->wsize = nfs_block_size(fsinfo->wtmax, NULL);
+		server->wsize = nfs_io_size(fsinfo->wtmax, clp->cl_proto);
 
 	raw_max_rpc_payload = rpc_max_payload(server->client);
 	max_rpc_payload = nfs_block_size(raw_max_rpc_payload, NULL);
@@ -858,6 +855,14 @@ static int nfs_probe_fsinfo(struct nfs_server *server, struct nfs_fh *mntfh, str
 
 		if (clp->rpc_ops->pathconf(server, mntfh, &pathinfo) >= 0)
 			server->namelen = pathinfo.max_namelen;
+	}
+
+	if (clp->rpc_ops->discover_trunking != NULL &&
+			(server->caps & NFS_CAP_FS_LOCATIONS &&
+			 (server->flags & NFS_MOUNT_TRUNK_DISCOVERY))) {
+		error = clp->rpc_ops->discover_trunking(server, mntfh);
+		if (error < 0)
+			return error;
 	}
 
 	return 0;

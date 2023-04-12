@@ -952,12 +952,27 @@ static int drms_uA_update(struct regulator_dev *rdev)
 			rdev_err(rdev, "failed to set load %d: %pe\n",
 				 current_uA, ERR_PTR(err));
 	} else {
+		/*
+		 * Unfortunately in some cases the constraints->valid_ops has
+		 * REGULATOR_CHANGE_DRMS but there are no valid modes listed.
+		 * That's not really legit but we won't consider it a fatal
+		 * error here. We'll treat it as if REGULATOR_CHANGE_DRMS
+		 * wasn't set.
+		 */
+		if (!rdev->constraints->valid_modes_mask) {
+			rdev_dbg(rdev, "Can change modes; but no valid mode\n");
+			return 0;
+		}
+
 		/* get output voltage */
 		output_uV = regulator_get_voltage_rdev(rdev);
-		if (output_uV <= 0) {
-			rdev_err(rdev, "invalid output voltage found\n");
-			return -EINVAL;
-		}
+
+		/*
+		 * Don't return an error; if regulator driver cares about
+		 * output_uV then it's up to the driver to validate.
+		 */
+		if (output_uV <= 0)
+			rdev_dbg(rdev, "invalid output voltage found\n");
 
 		/* get input voltage */
 		input_uV = 0;
@@ -965,10 +980,13 @@ static int drms_uA_update(struct regulator_dev *rdev)
 			input_uV = regulator_get_voltage(rdev->supply);
 		if (input_uV <= 0)
 			input_uV = rdev->constraints->input_uV;
-		if (input_uV <= 0) {
-			rdev_err(rdev, "invalid input voltage found\n");
-			return -EINVAL;
-		}
+
+		/*
+		 * Don't return an error; if regulator driver cares about
+		 * input_uV then it's up to the driver to validate.
+		 */
+		if (input_uV <= 0)
+			rdev_dbg(rdev, "invalid input voltage found\n");
 
 		/* now get the optimum mode for our new total regulator load */
 		mode = rdev->desc->ops->get_optimum_mode(rdev, input_uV,

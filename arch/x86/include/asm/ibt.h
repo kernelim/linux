@@ -31,6 +31,16 @@
 
 #define __noendbr	__attribute__((nocf_check))
 
+/*
+ * Create a dummy function pointer reference to prevent objtool from marking
+ * the function as needing to be "sealed" (i.e. ENDBR converted to NOP by
+ * apply_ibt_endbr()).
+ */
+#define IBT_NOSEAL(fname)				\
+	".pushsection .discard.ibt_endbr_noseal\n\t"	\
+	_ASM_PTR fname "\n\t"				\
+	".popsection\n\t"
+
 static inline __attribute_const__ u32 gen_endbr(void)
 {
 	u32 endbr;
@@ -46,11 +56,26 @@ static inline __attribute_const__ u32 gen_endbr(void)
 	return endbr;
 }
 
+static inline __attribute_const__ u32 gen_endbr_poison(void)
+{
+	/*
+	 * 4 byte NOP that isn't NOP4 (in fact it is OSP NOP3), such that it
+	 * will be unique to (former) ENDBR sites.
+	 */
+	return 0x001f0f66; /* osp nopl (%rax) */
+}
+
 static inline bool is_endbr(u32 val)
 {
+	if (val == gen_endbr_poison())
+		return true;
+
 	val &= ~0x01000000U; /* ENDBR32 -> ENDBR64 */
 	return val == gen_endbr();
 }
+
+extern __noendbr u64 ibt_save(void);
+extern __noendbr void ibt_restore(u64 save);
 
 #else /* __ASSEMBLY__ */
 
@@ -69,10 +94,14 @@ static inline bool is_endbr(u32 val)
 #ifndef __ASSEMBLY__
 
 #define ASM_ENDBR
+#define IBT_NOSEAL(name)
 
 #define __noendbr
 
 static inline bool is_endbr(u32 val) { return false; }
+
+static inline u64 ibt_save(void) { return 0; }
+static inline void ibt_restore(u64 save) { }
 
 #else /* __ASSEMBLY__ */
 

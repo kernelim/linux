@@ -2397,6 +2397,8 @@ ice_parse_1588_dev_caps(struct ice_hw *hw, struct ice_hw_dev_caps *dev_p,
 	info->tmr1_owned = ((number & ICE_TS_TMR1_OWND_M) != 0);
 	info->tmr1_ena = ((number & ICE_TS_TMR1_ENA_M) != 0);
 
+	info->ts_ll_read = ((number & ICE_TS_LL_TX_TS_READ_M) != 0);
+
 	info->ena_ports = logical_id;
 	info->tmr_own_map = phys_id;
 
@@ -2414,6 +2416,8 @@ ice_parse_1588_dev_caps(struct ice_hw *hw, struct ice_hw_dev_caps *dev_p,
 		  info->tmr1_owned);
 	ice_debug(hw, ICE_DBG_INIT, "dev caps: tmr1_ena = %u\n",
 		  info->tmr1_ena);
+	ice_debug(hw, ICE_DBG_INIT, "dev caps: ts_ll_read = %u\n",
+		  info->ts_ll_read);
 	ice_debug(hw, ICE_DBG_INIT, "dev caps: ieee_1588 ena_ports = %u\n",
 		  info->ena_ports);
 	ice_debug(hw, ICE_DBG_INIT, "dev caps: tmr_own_map = %u\n",
@@ -3532,6 +3536,121 @@ ice_aq_set_port_id_led(struct ice_port_info *pi, bool is_orig_mode,
 		cmd->ident_mode = ICE_AQC_PORT_IDENT_LED_BLINK;
 
 	return ice_aq_send_cmd(hw, &desc, NULL, 0, cd);
+}
+
+/**
+ * ice_aq_get_port_options
+ * @hw: pointer to the HW struct
+ * @options: buffer for the resultant port options
+ * @option_count: input - size of the buffer in port options structures,
+ *                output - number of returned port options
+ * @lport: logical port to call the command with (optional)
+ * @lport_valid: when false, FW uses port owned by the PF instead of lport,
+ *               when PF owns more than 1 port it must be true
+ * @active_option_idx: index of active port option in returned buffer
+ * @active_option_valid: active option in returned buffer is valid
+ * @pending_option_idx: index of pending port option in returned buffer
+ * @pending_option_valid: pending option in returned buffer is valid
+ *
+ * Calls Get Port Options AQC (0x06ea) and verifies result.
+ */
+int
+ice_aq_get_port_options(struct ice_hw *hw,
+			struct ice_aqc_get_port_options_elem *options,
+			u8 *option_count, u8 lport, bool lport_valid,
+			u8 *active_option_idx, bool *active_option_valid,
+			u8 *pending_option_idx, bool *pending_option_valid)
+{
+	struct ice_aqc_get_port_options *cmd;
+	struct ice_aq_desc desc;
+	int status;
+	u8 i;
+
+	/* options buffer shall be able to hold max returned options */
+	if (*option_count < ICE_AQC_PORT_OPT_COUNT_M)
+		return -EINVAL;
+
+	cmd = &desc.params.get_port_options;
+	ice_fill_dflt_direct_cmd_desc(&desc, ice_aqc_opc_get_port_options);
+
+	if (lport_valid)
+		cmd->lport_num = lport;
+	cmd->lport_num_valid = lport_valid;
+
+	status = ice_aq_send_cmd(hw, &desc, options,
+				 *option_count * sizeof(*options), NULL);
+	if (status)
+		return status;
+
+	/* verify direct FW response & set output parameters */
+	*option_count = FIELD_GET(ICE_AQC_PORT_OPT_COUNT_M,
+				  cmd->port_options_count);
+	ice_debug(hw, ICE_DBG_PHY, "options: %x\n", *option_count);
+	*active_option_valid = FIELD_GET(ICE_AQC_PORT_OPT_VALID,
+					 cmd->port_options);
+	if (*active_option_valid) {
+		*active_option_idx = FIELD_GET(ICE_AQC_PORT_OPT_ACTIVE_M,
+					       cmd->port_options);
+		if (*active_option_idx > (*option_count - 1))
+			return -EIO;
+		ice_debug(hw, ICE_DBG_PHY, "active idx: %x\n",
+			  *active_option_idx);
+	}
+
+	*pending_option_valid = FIELD_GET(ICE_AQC_PENDING_PORT_OPT_VALID,
+					  cmd->pending_port_option_status);
+	if (*pending_option_valid) {
+		*pending_option_idx = FIELD_GET(ICE_AQC_PENDING_PORT_OPT_IDX_M,
+						cmd->pending_port_option_status);
+		if (*pending_option_idx > (*option_count - 1))
+			return -EIO;
+		ice_debug(hw, ICE_DBG_PHY, "pending idx: %x\n",
+			  *pending_option_idx);
+	}
+
+	/* mask output options fields */
+	for (i = 0; i < *option_count; i++) {
+		options[i].pmd = FIELD_GET(ICE_AQC_PORT_OPT_PMD_COUNT_M,
+					   options[i].pmd);
+		options[i].max_lane_speed = FIELD_GET(ICE_AQC_PORT_OPT_MAX_LANE_M,
+						      options[i].max_lane_speed);
+		ice_debug(hw, ICE_DBG_PHY, "pmds: %x max speed: %x\n",
+			  options[i].pmd, options[i].max_lane_speed);
+	}
+
+	return 0;
+}
+
+/**
+ * ice_aq_set_port_option
+ * @hw: pointer to the HW struct
+ * @lport: logical port to call the command with
+ * @lport_valid: when false, FW uses port owned by the PF instead of lport,
+ *               when PF owns more than 1 port it must be true
+ * @new_option: new port option to be written
+ *
+ * Calls Set Port Options AQC (0x06eb).
+ */
+int
+ice_aq_set_port_option(struct ice_hw *hw, u8 lport, u8 lport_valid,
+		       u8 new_option)
+{
+	struct ice_aqc_set_port_option *cmd;
+	struct ice_aq_desc desc;
+
+	if (new_option > ICE_AQC_PORT_OPT_COUNT_M)
+		return -EINVAL;
+
+	cmd = &desc.params.set_port_option;
+	ice_fill_dflt_direct_cmd_desc(&desc, ice_aqc_opc_set_port_option);
+
+	if (lport_valid)
+		cmd->lport_num = lport;
+
+	cmd->lport_num_valid = lport_valid;
+	cmd->selected_port_option = new_option;
+
+	return ice_aq_send_cmd(hw, &desc, NULL, 0, NULL);
 }
 
 /**
@@ -4823,7 +4942,7 @@ ice_aq_read_i2c(struct ice_hw *hw, struct ice_aqc_link_topo_addr topo_addr,
 	int status;
 
 	ice_fill_dflt_direct_cmd_desc(&desc, ice_aqc_opc_read_i2c);
-	cmd = &desc.params.read_i2c;
+	cmd = &desc.params.read_write_i2c;
 
 	if (!data)
 		return -EINVAL;
@@ -4848,6 +4967,51 @@ ice_aq_read_i2c(struct ice_hw *hw, struct ice_aqc_link_topo_addr topo_addr,
 	}
 
 	return status;
+}
+
+/**
+ * ice_aq_write_i2c
+ * @hw: pointer to the hw struct
+ * @topo_addr: topology address for a device to communicate with
+ * @bus_addr: 7-bit I2C bus address
+ * @addr: I2C memory address (I2C offset) with up to 16 bits
+ * @params: I2C parameters: bit [4] - I2C address type, bits [3:0] - data size to write (0-7 bytes)
+ * @data: pointer to data (0 to 4 bytes) to be written to the I2C device
+ * @cd: pointer to command details structure or NULL
+ *
+ * Write I2C (0x06E3)
+ *
+ * * Return:
+ * * 0             - Successful write to the i2c device
+ * * -EINVAL       - Data size greater than 4 bytes
+ * * -EIO          - FW error
+ */
+int
+ice_aq_write_i2c(struct ice_hw *hw, struct ice_aqc_link_topo_addr topo_addr,
+		 u16 bus_addr, __le16 addr, u8 params, u8 *data,
+		 struct ice_sq_cd *cd)
+{
+	struct ice_aq_desc desc = { 0 };
+	struct ice_aqc_i2c *cmd;
+	u8 data_size;
+
+	ice_fill_dflt_direct_cmd_desc(&desc, ice_aqc_opc_write_i2c);
+	cmd = &desc.params.read_write_i2c;
+
+	data_size = FIELD_GET(ICE_AQC_I2C_DATA_SIZE_M, params);
+
+	/* data_size limited to 4 */
+	if (data_size > 4)
+		return -EINVAL;
+
+	cmd->i2c_bus_addr = cpu_to_le16(bus_addr);
+	cmd->topo_addr = topo_addr;
+	cmd->i2c_params = params;
+	cmd->i2c_addr = addr;
+
+	memcpy(cmd->i2c_data, data, data_size);
+
+	return ice_aq_send_cmd(hw, &desc, NULL, 0, cd);
 }
 
 /**

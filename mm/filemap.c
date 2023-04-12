@@ -35,7 +35,6 @@
 #include <linux/cpuset.h>
 #include <linux/hugetlb.h>
 #include <linux/memcontrol.h>
-#include <linux/cleancache.h>
 #include <linux/shmem_fs.h>
 #include <linux/rmap.h>
 #include <linux/delayacct.h>
@@ -73,7 +72,7 @@
  * Lock ordering:
  *
  *  ->i_mmap_rwsem		(truncate_pagecache)
- *    ->private_lock		(__free_pte->__set_page_dirty_buffers)
+ *    ->private_lock		(__free_pte->block_dirty_folio)
  *      ->swap_lock		(exclusive_swap_page, others)
  *        ->i_pages lock
  *
@@ -116,7 +115,7 @@
  *    ->memcg->move_lock	(page_remove_rmap->lock_page_memcg)
  *    bdi.wb->list_lock		(zap_pte_range->set_page_dirty)
  *    ->inode->i_lock		(zap_pte_range->set_page_dirty)
- *    ->private_lock		(zap_pte_range->__set_page_dirty_buffers)
+ *    ->private_lock		(zap_pte_range->block_dirty_folio)
  *
  * ->i_mmap_rwsem
  *   ->tasklist_lock            (memory_failure, collect_procs_ao)
@@ -150,16 +149,6 @@ static void filemap_unaccount_folio(struct address_space *mapping,
 		struct folio *folio)
 {
 	long nr;
-
-	/*
-	 * if we're uptodate, flush out into the cleancache, otherwise
-	 * invalidate any existing cleancache entries.  We can't leave
-	 * stale data around in the cleancache once our page is gone
-	 */
-	if (folio_test_uptodate(folio) && folio_test_mappedtodisk(folio))
-		cleancache_put_page(&folio->page);
-	else
-		cleancache_invalidate_page(mapping, &folio->page);
 
 	VM_BUG_ON_FOLIO(folio_mapped(folio), folio);
 	if (!IS_ENABLED(CONFIG_DEBUG_VM) && unlikely(folio_mapped(folio))) {
@@ -261,9 +250,13 @@ void filemap_remove_folio(struct folio *folio)
 	struct address_space *mapping = folio->mapping;
 
 	BUG_ON(!folio_test_locked(folio));
+	spin_lock(&mapping->host->i_lock);
 	xa_lock_irq(&mapping->i_pages);
 	__filemap_remove_folio(folio, NULL);
 	xa_unlock_irq(&mapping->i_pages);
+	if (mapping_shrinkable(mapping))
+		inode_add_lru(mapping->host);
+	spin_unlock(&mapping->host->i_lock);
 
 	filemap_free_folio(mapping, folio);
 }
@@ -330,6 +323,7 @@ void delete_from_page_cache_batch(struct address_space *mapping,
 	if (!folio_batch_count(fbatch))
 		return;
 
+	spin_lock(&mapping->host->i_lock);
 	xa_lock_irq(&mapping->i_pages);
 	for (i = 0; i < folio_batch_count(fbatch); i++) {
 		struct folio *folio = fbatch->folios[i];
@@ -339,6 +333,9 @@ void delete_from_page_cache_batch(struct address_space *mapping,
 	}
 	page_cache_delete_batch(mapping, fbatch);
 	xa_unlock_irq(&mapping->i_pages);
+	if (mapping_shrinkable(mapping))
+		inode_add_lru(mapping->host);
+	spin_unlock(&mapping->host->i_lock);
 
 	for (i = 0; i < folio_batch_count(fbatch); i++)
 		filemap_free_folio(mapping, fbatch->folios[i]);
@@ -369,6 +366,32 @@ static int filemap_check_and_keep_errors(struct address_space *mapping)
 }
 
 /**
+ * filemap_fdatawrite_wbc - start writeback on mapping dirty pages in range
+ * @mapping:	address space structure to write
+ * @wbc:	the writeback_control controlling the writeout
+ *
+ * Call writepages on the mapping using the provided wbc to control the
+ * writeout.
+ *
+ * Return: %0 on success, negative error code otherwise.
+ */
+int filemap_fdatawrite_wbc(struct address_space *mapping,
+			   struct writeback_control *wbc)
+{
+	int ret;
+
+	if (!mapping_can_writeback(mapping) ||
+	    !mapping_tagged(mapping, PAGECACHE_TAG_DIRTY))
+		return 0;
+
+	wbc_attach_fdatawrite_inode(wbc, mapping->host);
+	ret = do_writepages(mapping, wbc);
+	wbc_detach_inode(wbc);
+	return ret;
+}
+EXPORT_SYMBOL(filemap_fdatawrite_wbc);
+
+/**
  * __filemap_fdatawrite_range - start writeback on mapping dirty pages in range
  * @mapping:	address space structure to write
  * @start:	offset in bytes where the range starts
@@ -388,7 +411,6 @@ static int filemap_check_and_keep_errors(struct address_space *mapping)
 int __filemap_fdatawrite_range(struct address_space *mapping, loff_t start,
 				loff_t end, int sync_mode)
 {
-	int ret;
 	struct writeback_control wbc = {
 		.sync_mode = sync_mode,
 		.nr_to_write = LONG_MAX,
@@ -396,14 +418,7 @@ int __filemap_fdatawrite_range(struct address_space *mapping, loff_t start,
 		.range_end = end,
 	};
 
-	if (!mapping_can_writeback(mapping) ||
-	    !mapping_tagged(mapping, PAGECACHE_TAG_DIRTY))
-		return 0;
-
-	wbc_attach_fdatawrite_inode(&wbc, mapping->host);
-	ret = do_writepages(mapping, &wbc);
-	wbc_detach_inode(&wbc);
-	return ret;
+	return filemap_fdatawrite_wbc(mapping, &wbc);
 }
 
 static inline int __filemap_fdatawrite(struct address_space *mapping,
@@ -1633,6 +1648,7 @@ void folio_end_writeback(struct folio *folio)
 
 	smp_mb__after_atomic();
 	folio_wake(folio, PG_writeback);
+	acct_reclaim_writeback(folio);
 	folio_put(folio);
 }
 EXPORT_SYMBOL(folio_end_writeback);
@@ -2215,8 +2231,9 @@ out:
  * @nr_pages:	The maximum number of pages
  * @pages:	Where the resulting pages are placed
  *
- * find_get_pages_contig() works exactly like find_get_pages(), except
- * that the returned number of pages are guaranteed to be contiguous.
+ * find_get_pages_contig() works exactly like find_get_pages_range(),
+ * except that the returned number of pages are guaranteed to be
+ * contiguous.
  *
  * Return: the number of pages which were found.
  */
@@ -2276,9 +2293,9 @@ EXPORT_SYMBOL(find_get_pages_contig);
  * @nr_pages:	the maximum number of pages
  * @pages:	where the resulting pages are placed
  *
- * Like find_get_pages(), except we only return head pages which are tagged
- * with @tag.  @index is updated to the index immediately after the last
- * page we return, ready for the next iteration.
+ * Like find_get_pages_range(), except we only return head pages which are
+ * tagged with @tag.  @index is updated to the index immediately after the
+ * last page we return, ready for the next iteration.
  *
  * Return: the number of pages which were found.
  */
@@ -2368,6 +2385,8 @@ static void filemap_get_read_batch(struct address_space *mapping,
 			continue;
 		if (xas.xa_index > max || xa_is_value(folio))
 			break;
+		if (xa_is_sibling(folio))
+			break;
 		if (!folio_try_get_rcu(folio))
 			goto retry;
 
@@ -2393,6 +2412,8 @@ retry:
 static int filemap_read_folio(struct file *file, struct address_space *mapping,
 		struct folio *folio)
 {
+	bool workingset = folio_test_workingset(folio);
+	unsigned long pflags;
 	int error;
 
 	/*
@@ -2401,8 +2422,13 @@ static int filemap_read_folio(struct file *file, struct address_space *mapping,
 	 * fails.
 	 */
 	folio_clear_error(folio);
+
 	/* Start the actual read. The read will unlock the page. */
+	if (unlikely(workingset))
+		psi_memstall_enter(&pflags);
 	error = mapping->a_ops->readpage(file, &folio->page);
+	if (unlikely(workingset))
+		psi_memstall_leave(&pflags);
 	if (error)
 		return error;
 
@@ -2438,7 +2464,7 @@ static bool filemap_range_uptodate(struct address_space *mapping,
 		pos -= folio_pos(folio);
 	}
 
-	return mapping->a_ops->is_partially_uptodate(&folio->page, pos, count);
+	return mapping->a_ops->is_partially_uptodate(folio, pos, count);
 }
 
 static int filemap_update_page(struct kiocb *iocb,
@@ -2515,7 +2541,7 @@ static int filemap_create_folio(struct file *file,
 	 * the page cache as the locked folio would then be enough to
 	 * synchronize with hole punching. But there are code paths
 	 * such as filemap_update_page() filling in partially uptodate
-	 * pages or ->readpages() that need to hold invalidate_lock
+	 * pages or ->readahead() that need to hold invalidate_lock
 	 * while mapping blocks for IO so let's hold the lock here as
 	 * well to keep locking rules simple.
 	 */
@@ -2656,6 +2682,9 @@ ssize_t filemap_read(struct kiocb *iocb, struct iov_iter *iter,
 		if ((iocb->ki_flags & IOCB_WAITQ) && already_read)
 			iocb->ki_flags |= IOCB_NOWAIT;
 
+		if (unlikely(iocb->ki_pos >= i_size_read(inode)))
+			break;
+
 		error = filemap_get_pages(iocb, iter, &fbatch);
 		if (error < 0)
 			break;
@@ -2764,9 +2793,7 @@ generic_file_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 		struct file *file = iocb->ki_filp;
 		struct address_space *mapping = file->f_mapping;
 		struct inode *inode = mapping->host;
-		loff_t size;
 
-		size = i_size_read(inode);
 		if (iocb->ki_flags & IOCB_NOWAIT) {
 			if (filemap_range_needs_writeback(mapping, iocb->ki_pos,
 						iocb->ki_pos + count - 1))
@@ -2798,8 +2825,9 @@ generic_file_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 		 * the rest of the read.  Buffered reads will not work for
 		 * DAX files, so don't bother trying.
 		 */
-		if (retval < 0 || !count || iocb->ki_pos >= size ||
-		    IS_DAX(inode))
+		if (retval < 0 || !count || IS_DAX(inode))
+			return retval;
+		if (iocb->ki_pos >= i_size_read(inode))
 			return retval;
 	}
 
@@ -2828,7 +2856,7 @@ static inline loff_t folio_seek_hole_data(struct xa_state *xas,
 	offset = offset_in_folio(folio, start) & ~(bsz - 1);
 
 	do {
-		if (ops->is_partially_uptodate(&folio->page, offset, bsz) ==
+		if (ops->is_partially_uptodate(folio, offset, bsz) ==
 							seek_data)
 			break;
 		start = (start + bsz) & ~(bsz - 1);
@@ -3249,15 +3277,8 @@ static bool filemap_map_pmd(struct vm_fault *vmf, struct page *page)
 		}
 	}
 
-	if (pmd_none(*vmf->pmd)) {
-		vmf->ptl = pmd_lock(mm, vmf->pmd);
-		if (likely(pmd_none(*vmf->pmd))) {
-			mm_inc_nr_ptes(mm);
-			pmd_populate(mm, vmf->pmd, vmf->prealloc_pte);
-			vmf->prealloc_pte = NULL;
-		}
-		spin_unlock(vmf->ptl);
-	}
+	if (pmd_none(*vmf->pmd))
+		pmd_install(mm, vmf->pmd, &vmf->prealloc_pte);
 
 	/* See comment in handle_pte_fault() */
 	if (pmd_devmap_trans_unstable(vmf->pmd)) {
@@ -3735,9 +3756,10 @@ out:
 }
 EXPORT_SYMBOL(generic_file_direct_write);
 
-ssize_t generic_perform_write(struct file *file,
-				struct iov_iter *i, loff_t pos)
+ssize_t generic_perform_write(struct kiocb *iocb, struct iov_iter *i)
 {
+	struct file *file = iocb->ki_filp;
+	loff_t pos = iocb->ki_pos;
 	struct address_space *mapping = file->f_mapping;
 	const struct address_space_operations *a_ops = mapping->a_ops;
 	long status = 0;
@@ -3867,7 +3889,8 @@ ssize_t __generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 		if (written < 0 || !iov_iter_count(from) || IS_DAX(inode))
 			goto out;
 
-		status = generic_perform_write(file, from, pos = iocb->ki_pos);
+		pos = iocb->ki_pos;
+		status = generic_perform_write(iocb, from);
 		/*
 		 * If generic_perform_write() returned a synchronous error
 		 * then we want to return the number of bytes which were
@@ -3899,7 +3922,7 @@ ssize_t __generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 			 */
 		}
 	} else {
-		written = generic_perform_write(file, from, iocb->ki_pos);
+		written = generic_perform_write(iocb, from);
 		if (likely(written > 0))
 			iocb->ki_pos += written;
 	}

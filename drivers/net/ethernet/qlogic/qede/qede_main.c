@@ -1904,8 +1904,7 @@ static void qede_napi_add_enable(struct qede_dev *edev)
 
 	/* Add NAPI objects */
 	for_each_queue(i) {
-		netif_napi_add(edev->ndev, &edev->fp_array[i].napi,
-			       qede_poll, NAPI_POLL_WEIGHT);
+		netif_napi_add(edev->ndev, &edev->fp_array[i].napi, qede_poll);
 		napi_enable(&edev->fp_array[i].napi);
 	}
 }
@@ -1916,7 +1915,6 @@ static void qede_sync_free_irqs(struct qede_dev *edev)
 
 	for (i = 0; i < edev->int_info.used_cnt; i++) {
 		if (edev->int_info.msix_cnt) {
-			synchronize_irq(edev->int_info.msix[i].vector);
 			free_irq(edev->int_info.msix[i].vector,
 				 &edev->fp_array[i]);
 		} else {

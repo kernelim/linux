@@ -6,7 +6,6 @@
 #include <linux/init.h>
 #include <linux/kern_levels.h>
 #include <linux/linkage.h>
-#include <linux/cache.h>
 #include <linux/ratelimit_types.h>
 #include <linux/once_lite.h>
 
@@ -75,11 +74,7 @@ static inline void console_silent(void)
 	console_loglevel = CONSOLE_LOGLEVEL_SILENT;
 }
 
-static inline void console_verbose(void)
-{
-	if (console_loglevel)
-		console_loglevel = CONSOLE_LOGLEVEL_MOTORMOUTH;
-}
+extern void console_verbose(void);
 
 /* strlen("ratelimit") + 1 */
 #define DEVKMSG_STR_MAX_SIZE 10
@@ -162,12 +157,12 @@ asmlinkage __printf(1, 0)
 int vprintk(const char *fmt, va_list args);
 
 asmlinkage __printf(1, 2) __cold
-int printk(const char *fmt, ...);
+int _printk(const char *fmt, ...);
 
 /*
  * Special printk facility for scheduler/timekeeping use only, _DO_NOT_USE_ !
  */
-__printf(1, 2) __cold int printk_deferred(const char *fmt, ...);
+__printf(1, 2) __cold int _printk_deferred(const char *fmt, ...);
 
 extern void __printk_safe_enter(void);
 extern void __printk_safe_exit(void);
@@ -178,6 +173,8 @@ extern void __printk_safe_exit(void);
  */
 #define printk_deferred_enter __printk_safe_enter
 #define printk_deferred_exit __printk_safe_exit
+
+extern bool pr_flush(int timeout_ms, bool reset_on_progress);
 
 /*
  * Please don't use printk_ratelimit(), because it shares ratelimiting state
@@ -191,10 +188,6 @@ extern bool printk_timed_ratelimit(unsigned long *caller_jiffies,
 
 extern int printk_delay_msec;
 extern int dmesg_restrict;
-
-extern int
-devkmsg_sysctl_set_loglvl(struct ctl_table *table, int write, void *buf,
-			  size_t *lenp, loff_t *ppos);
 
 extern void wake_up_klogd(void);
 
@@ -215,12 +208,12 @@ int vprintk(const char *s, va_list args)
 	return 0;
 }
 static inline __printf(1, 2) __cold
-int printk(const char *s, ...)
+int _printk(const char *s, ...)
 {
 	return 0;
 }
 static inline __printf(1, 2) __cold
-int printk_deferred(const char *s, ...)
+int _printk_deferred(const char *s, ...)
 {
 	return 0;
 }
@@ -231,6 +224,11 @@ static inline void printk_deferred_enter(void)
 
 static inline void printk_deferred_exit(void)
 {
+}
+
+static inline bool pr_flush(int timeout_ms, bool reset_on_progress)
+{
+	return true;
 }
 
 static inline int printk_ratelimit(void)
@@ -290,43 +288,55 @@ static inline void printk_trigger_flush(void)
 #endif
 
 #ifdef CONFIG_SMP
-extern int __printk_cpu_trylock(void);
-extern void __printk_wait_on_cpu_lock(void);
-extern void __printk_cpu_unlock(void);
+extern int __printk_cpu_sync_try_get(void);
+extern void __printk_cpu_sync_wait(void);
+extern void __printk_cpu_sync_put(void);
 
 /**
- * printk_cpu_lock_irqsave() - Acquire the printk cpu-reentrant spinning
- *                             lock and disable interrupts.
+ * printk_cpu_sync_get_irqsave() - Acquire the printk cpu-reentrant spinning
+ *                                 lock and disable interrupts.
  * @flags: Stack-allocated storage for saving local interrupt state,
- *         to be passed to printk_cpu_unlock_irqrestore().
+ *         to be passed to printk_cpu_sync_put_irqrestore().
  *
  * If the lock is owned by another CPU, spin until it becomes available.
  * Interrupts are restored while spinning.
+ *
+ * CAUTION: This function must be used carefully. It does not behave like a
+ * typical lock. Here are important things to watch out for...
+ *
+ *     * This function is reentrant on the same CPU. Therefore the calling
+ *       code must not assume exclusive access to data if code accessing the
+ *       data can run reentrant or within NMI context on the same CPU.
+ *
+ *     * If there exists usage of this function from NMI context, it becomes
+ *       unsafe to perform any type of locking or spinning to wait for other
+ *       CPUs after calling this function from any context. This includes
+ *       using spinlocks or any other busy-waiting synchronization methods.
  */
-#define printk_cpu_lock_irqsave(flags)		\
-	for (;;) {				\
-		local_irq_save(flags);		\
-		if (__printk_cpu_trylock())	\
-			break;			\
-		local_irq_restore(flags);	\
-		__printk_wait_on_cpu_lock();	\
+#define printk_cpu_sync_get_irqsave(flags)		\
+	for (;;) {					\
+		local_irq_save(flags);			\
+		if (__printk_cpu_sync_try_get())	\
+			break;				\
+		local_irq_restore(flags);		\
+		__printk_cpu_sync_wait();		\
 	}
 
 /**
- * printk_cpu_unlock_irqrestore() - Release the printk cpu-reentrant spinning
- *                                  lock and restore interrupts.
- * @flags: Caller's saved interrupt state, from printk_cpu_lock_irqsave().
+ * printk_cpu_sync_put_irqrestore() - Release the printk cpu-reentrant spinning
+ *                                    lock and restore interrupts.
+ * @flags: Caller's saved interrupt state, from printk_cpu_sync_get_irqsave().
  */
-#define printk_cpu_unlock_irqrestore(flags)	\
+#define printk_cpu_sync_put_irqrestore(flags)	\
 	do {					\
-		__printk_cpu_unlock();		\
+		__printk_cpu_sync_put();	\
 		local_irq_restore(flags);	\
-	} while (0)				\
+	} while (0)
 
 #else
 
-#define printk_cpu_lock_irqsave(flags) ((void)flags)
-#define printk_cpu_unlock_irqrestore(flags) ((void)flags)
+#define printk_cpu_sync_get_irqsave(flags) ((void)flags)
+#define printk_cpu_sync_put_irqrestore(flags) ((void)flags)
 
 #endif /* CONFIG_SMP */
 
@@ -348,6 +358,117 @@ extern int kptr_restrict;
 #ifndef pr_fmt
 #define pr_fmt(fmt) fmt
 #endif
+
+struct module;
+
+#ifdef CONFIG_PRINTK_INDEX
+struct pi_entry {
+	const char *fmt;
+	const char *func;
+	const char *file;
+	unsigned int line;
+
+	/*
+	 * While printk and pr_* have the level stored in the string at compile
+	 * time, some subsystems dynamically add it at runtime through the
+	 * format string. For these dynamic cases, we allow the subsystem to
+	 * tell us the level at compile time.
+	 *
+	 * NULL indicates that the level, if any, is stored in fmt.
+	 */
+	const char *level;
+
+	/*
+	 * The format string used by various subsystem specific printk()
+	 * wrappers to prefix the message.
+	 *
+	 * Note that the static prefix defined by the pr_fmt() macro is stored
+	 * directly in the message format (@fmt), not here.
+	 */
+	const char *subsys_fmt_prefix;
+} __packed;
+
+#define __printk_index_emit(_fmt, _level, _subsys_fmt_prefix)		\
+	do {								\
+		if (__builtin_constant_p(_fmt) && __builtin_constant_p(_level)) { \
+			/*
+			 * We check __builtin_constant_p multiple times here
+			 * for the same input because GCC will produce an error
+			 * if we try to assign a static variable to fmt if it
+			 * is not a constant, even with the outer if statement.
+			 */						\
+			static const struct pi_entry _entry		\
+			__used = {					\
+				.fmt = __builtin_constant_p(_fmt) ? (_fmt) : NULL, \
+				.func = __func__,			\
+				.file = __FILE__,			\
+				.line = __LINE__,			\
+				.level = __builtin_constant_p(_level) ? (_level) : NULL, \
+				.subsys_fmt_prefix = _subsys_fmt_prefix,\
+			};						\
+			static const struct pi_entry *_entry_ptr	\
+			__used __section(".printk_index") = &_entry;	\
+		}							\
+	} while (0)
+
+#else /* !CONFIG_PRINTK_INDEX */
+#define __printk_index_emit(...) do {} while (0)
+#endif /* CONFIG_PRINTK_INDEX */
+
+/*
+ * Some subsystems have their own custom printk that applies a va_format to a
+ * generic format, for example, to include a device number or other metadata
+ * alongside the format supplied by the caller.
+ *
+ * In order to store these in the way they would be emitted by the printk
+ * infrastructure, the subsystem provides us with the start, fixed string, and
+ * any subsequent text in the format string.
+ *
+ * We take a variable argument list as pr_fmt/dev_fmt/etc are sometimes passed
+ * as multiple arguments (eg: `"%s: ", "blah"`), and we must only take the
+ * first one.
+ *
+ * subsys_fmt_prefix must be known at compile time, or compilation will fail
+ * (since this is a mistake). If fmt or level is not known at compile time, no
+ * index entry will be made (since this can legitimately happen).
+ */
+#define printk_index_subsys_emit(subsys_fmt_prefix, level, fmt, ...) \
+	__printk_index_emit(fmt, level, subsys_fmt_prefix)
+
+#define printk_index_wrap(_p_func, _fmt, ...)				\
+	({								\
+		__printk_index_emit(_fmt, NULL, NULL);			\
+		_p_func(_fmt, ##__VA_ARGS__);				\
+	})
+
+
+/**
+ * printk - print a kernel message
+ * @fmt: format string
+ *
+ * This is printk(). It can be called from any context. We want it to work.
+ *
+ * If printk indexing is enabled, _printk() is called from printk_index_wrap.
+ * Otherwise, printk is simply #defined to _printk.
+ *
+ * We try to grab the console_lock. If we succeed, it's easy - we log the
+ * output and call the console drivers.  If we fail to get the semaphore, we
+ * place the output into the log buffer and return. The current holder of
+ * the console_sem will notice the new output in console_unlock(); and will
+ * send it to the consoles before releasing the lock.
+ *
+ * One effect of this deferred printing is that code which calls printk() and
+ * then changes console_loglevel may break. This is because console_loglevel
+ * is inspected when the actual printing occurs.
+ *
+ * See also:
+ * printf(3)
+ *
+ * See the vsnprintf() documentation for format string extensions over C99.
+ */
+#define printk(fmt, ...) printk_index_wrap(_printk, fmt, ##__VA_ARGS__)
+#define printk_deferred(fmt, ...)					\
+	printk_index_wrap(_printk_deferred, fmt, ##__VA_ARGS__)
 
 /**
  * pr_emerg - Print an emergency-level message

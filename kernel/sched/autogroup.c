@@ -8,12 +8,35 @@ unsigned int __read_mostly sysctl_sched_autogroup_enabled = 1;
 static struct autogroup autogroup_default;
 static atomic_t autogroup_seq_nr;
 
+#ifdef CONFIG_SYSCTL
+static struct ctl_table sched_autogroup_sysctls[] = {
+	{
+		.procname       = "sched_autogroup_enabled",
+		.data           = &sysctl_sched_autogroup_enabled,
+		.maxlen         = sizeof(unsigned int),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec_minmax,
+		.extra1         = SYSCTL_ZERO,
+		.extra2         = SYSCTL_ONE,
+	},
+	{}
+};
+
+static void __init sched_autogroup_sysctl_init(void)
+{
+	register_sysctl_init("kernel", sched_autogroup_sysctls);
+}
+#else
+#define sched_autogroup_sysctl_init() do { } while (0)
+#endif
+
 void __init autogroup_init(struct task_struct *init_task)
 {
 	autogroup_default.tg = &root_task_group;
 	kref_init(&autogroup_default.kref);
 	init_rwsem(&autogroup_default.lock);
 	init_task->signal->autogroup = &autogroup_default;
+	sched_autogroup_sysctl_init();
 }
 
 void autogroup_free(struct task_group *tg)

@@ -226,6 +226,8 @@ void *vmalloc(unsigned long size)
 }
 EXPORT_SYMBOL(vmalloc);
 
+void *vmalloc_huge(unsigned long size, gfp_t gfp_mask) __weak __alias(__vmalloc);
+
 /*
  *	vzalloc - allocate virtually contiguous memory with zero fill
  *
@@ -1637,12 +1639,6 @@ int remap_vmalloc_range(struct vm_area_struct *vma, void *addr,
 	return 0;
 }
 EXPORT_SYMBOL(remap_vmalloc_range);
-
-unsigned long arch_get_unmapped_area(struct file *file, unsigned long addr,
-	unsigned long len, unsigned long pgoff, unsigned long flags)
-{
-	return -ENOMEM;
-}
 
 vm_fault_t filemap_fault(struct vm_fault *vmf)
 {

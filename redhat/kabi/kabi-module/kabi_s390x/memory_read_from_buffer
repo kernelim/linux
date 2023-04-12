@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:fs/libfs.c
-0x189b6bac	memory_read_from_buffer	vmlinux	EXPORT_SYMBOL
+#2-
+0x189b6bac	memory_read_from_buffer	vmlinux	EXPORT_SYMBOL	

@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/notifier.c
-0xb1b1c93e	atomic_notifier_chain_unregister	vmlinux	EXPORT_SYMBOL_GPL
+#2-
+0xb1b1c93e	atomic_notifier_chain_unregister	vmlinux	EXPORT_SYMBOL_GPL	

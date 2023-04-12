@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/softirq.c
-0x350f6ce5	tasklet_unlock_wait	vmlinux	EXPORT_SYMBOL_GPL
+#2-
+0x350f6ce5	tasklet_unlock_wait	vmlinux	EXPORT_SYMBOL_GPL	

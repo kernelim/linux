@@ -190,20 +190,6 @@ config ACER_WMI
 	  If you have an ACPI-WMI compatible Acer/ Wistron laptop, say Y or M
 	  here.
 
-config AMD_PMC
-	tristate "AMD SoC PMC driver"
-	depends on ACPI && PCI && RTC_CLASS
-	help
-	  The driver provides support for AMD Power Management Controller
-	  primarily responsible for S2Idle transactions that are driven from
-	  a platform firmware running on SMU. This driver also provides a debug
-	  mechanism to investigate the S2Idle transactions and failures.
-
-	  Say Y or M here if you have a notebook powered by AMD RYZEN CPU/APU.
-
-	  If you choose to compile this driver as a module the module will be
-	  called amd-pmc.
-
 config AMD_HSMP
 	tristate "AMD HSMP Driver"
 	depends on AMD_NB && X86_64
@@ -216,6 +202,8 @@ config AMD_HSMP
 
 	  If you choose to compile this driver as a module the module will be
 	  called amd_hsmp.
+
+source "drivers/platform/x86/amd/Kconfig"
 
 config ADV_SWBUTTON
 	tristate "Advantech ACPI Software Button Driver"
@@ -1047,16 +1035,16 @@ config TOPSTAR_LAPTOP
 
 	  If you have a Topstar laptop, say Y or M here.
 
-config I2C_MULTI_INSTANTIATE
-	tristate "I2C multi instantiate pseudo device driver"
-	depends on I2C && ACPI
+config SERIAL_MULTI_INSTANTIATE
+	tristate "Serial bus multi instantiate pseudo device driver"
+	depends on I2C && SPI && ACPI
 	help
-	  Some ACPI-based systems list multiple i2c-devices in a single ACPI
-	  firmware-node. This driver will instantiate separate i2c-clients
+	  Some ACPI-based systems list multiple devices in a single ACPI
+	  firmware-node. This driver will instantiate separate clients
 	  for each device in the firmware-node.
 
 	  To compile this driver as a module, choose M here: the module
-	  will be called i2c-multi-instantiate.
+	  will be called serial-multi-instantiate.
 
 config MLX_PLATFORM
 	tristate "Mellanox Technologies platform support"

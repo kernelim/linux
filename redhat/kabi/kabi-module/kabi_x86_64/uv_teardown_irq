@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/platform/uv/uv_irq.c
-0x5d9317d7	uv_teardown_irq	vmlinux	EXPORT_SYMBOL_GPL
+#2-
+0x5d9317d7	uv_teardown_irq	vmlinux	EXPORT_SYMBOL_GPL	

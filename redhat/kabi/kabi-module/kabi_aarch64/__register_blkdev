@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:block/genhd.c
-0x720a27a7	__register_blkdev	vmlinux	EXPORT_SYMBOL
+#2-
+0x720a27a7	__register_blkdev	vmlinux	EXPORT_SYMBOL	

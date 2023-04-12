@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/sched/build_utility.c
-0x92540fbf	finish_wait	vmlinux	EXPORT_SYMBOL
+#2-
+0x92540fbf	finish_wait	vmlinux	EXPORT_SYMBOL	

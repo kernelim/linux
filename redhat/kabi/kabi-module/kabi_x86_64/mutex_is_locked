@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/locking/mutex.c
-0x364c23ad	mutex_is_locked	vmlinux	EXPORT_SYMBOL
+#2-
+0x364c23ad	mutex_is_locked	vmlinux	EXPORT_SYMBOL	

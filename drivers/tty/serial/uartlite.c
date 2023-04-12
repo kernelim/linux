@@ -299,8 +299,9 @@ static void ulite_shutdown(struct uart_port *port)
 	clk_disable(pdata->clk);
 }
 
-static void ulite_set_termios(struct uart_port *port, struct ktermios *termios,
-			      struct ktermios *old)
+static void ulite_set_termios(struct uart_port *port,
+			      struct ktermios *termios,
+			      const struct ktermios *old)
 {
 	unsigned long flags;
 	unsigned int baud;
@@ -468,7 +469,7 @@ static void ulite_console_wait_tx(struct uart_port *port)
 	}
 }
 
-static void ulite_console_putchar(struct uart_port *port, int ch)
+static void ulite_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	ulite_console_wait_tx(port);
 	uart_out32(ch, ULITE_TX, port);
@@ -546,7 +547,7 @@ static struct console ulite_console = {
 	.data	= &ulite_uart_driver,
 };
 
-static void early_uartlite_putc(struct uart_port *port, int c)
+static void early_uartlite_putc(struct uart_port *port, unsigned char c)
 {
 	/*
 	 * Limit how many times we'll spin waiting for TX FIFO status.

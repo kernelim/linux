@@ -106,8 +106,8 @@ static void altera_jtaguart_break_ctl(struct uart_port *port, int break_state)
 }
 
 static void altera_jtaguart_set_termios(struct uart_port *port,
-					struct ktermios *termios,
-					struct ktermios *old)
+				        struct ktermios *termios,
+				        const struct ktermios *old)
 {
 	/* Just copy the old termios settings back */
 	if (old)
@@ -298,7 +298,7 @@ static struct altera_jtaguart altera_jtaguart_ports[ALTERA_JTAGUART_MAXPORTS];
 #if defined(CONFIG_SERIAL_ALTERA_JTAGUART_CONSOLE)
 
 #if defined(CONFIG_SERIAL_ALTERA_JTAGUART_CONSOLE_BYPASS)
-static void altera_jtaguart_console_putc(struct uart_port *port, int c)
+static void altera_jtaguart_console_putc(struct uart_port *port, unsigned char c)
 {
 	unsigned long status;
 	unsigned long flags;
@@ -318,7 +318,7 @@ static void altera_jtaguart_console_putc(struct uart_port *port, int c)
 	spin_unlock_irqrestore(&port->lock, flags);
 }
 #else
-static void altera_jtaguart_console_putc(struct uart_port *port, int c)
+static void altera_jtaguart_console_putc(struct uart_port *port, unsigned char c)
 {
 	unsigned long flags;
 

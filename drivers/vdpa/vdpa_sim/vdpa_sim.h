@@ -66,11 +66,13 @@ struct vdpasim {
 	u32 generation;
 	u64 features;
 	u32 groups;
+	bool running;
 	/* spinlock to synchronize iommu table */
 	spinlock_t iommu_lock;
 };
 
-struct vdpasim *vdpasim_create(struct vdpasim_dev_attr *attr);
+struct vdpasim *vdpasim_create(struct vdpasim_dev_attr *attr,
+			       const struct vdpa_dev_set_config *config);
 
 /* TODO: cross-endian support */
 static inline bool vdpasim_is_little_endian(struct vdpasim *vdpasim)

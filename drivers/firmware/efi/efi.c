@@ -47,6 +47,9 @@ struct efi __read_mostly efi = {
 #ifdef CONFIG_LOAD_UEFI_KEYS
 	.mokvar_table		= EFI_INVALID_TABLE_ADDR,
 #endif
+#ifdef CONFIG_EFI_COCO_SECRET
+	.coco_secret		= EFI_INVALID_TABLE_ADDR,
+#endif
 };
 EXPORT_SYMBOL(efi);
 
@@ -213,7 +216,7 @@ static int __init efivar_ssdt_setup(char *str)
 		memcpy(efivar_ssdt, str, strlen(str));
 	else
 		pr_warn("efivar_ssdt: name too long: %s\n", str);
-	return 0;
+	return 1;
 }
 __setup("efivar_ssdt=", efivar_ssdt_setup);
 
@@ -423,6 +426,11 @@ static int __init efisubsys_init(void)
 	if (efi_enabled(EFI_DBG) && efi_enabled(EFI_PRESERVE_BS_REGIONS))
 		efi_debugfs_init();
 
+#ifdef CONFIG_EFI_COCO_SECRET
+	if (efi.coco_secret != EFI_INVALID_TABLE_ADDR)
+		platform_device_register_simple("efi_secret", 0, NULL, 0);
+#endif
+
 	return 0;
 
 err_remove_group:
@@ -529,6 +537,9 @@ static const efi_config_table_type_t common_tables[] __initconst = {
 #endif
 #ifdef CONFIG_LOAD_UEFI_KEYS
 	{LINUX_EFI_MOK_VARIABLE_TABLE_GUID,	&efi.mokvar_table,	"MOKvar"	},
+#endif
+#ifdef CONFIG_EFI_COCO_SECRET
+	{LINUX_EFI_COCO_SECRET_AREA_GUID,	&efi.coco_secret,	"CocoSecret"	},
 #endif
 	{},
 };
@@ -723,6 +734,13 @@ void __init efi_systab_report_header(const efi_table_hdr_t *systab_hdr,
 		systab_hdr->revision >> 16,
 		systab_hdr->revision & 0xffff,
 		vendor);
+
+	if (IS_ENABLED(CONFIG_X86_64) &&
+	    systab_hdr->revision > EFI_1_10_SYSTEM_TABLE_REVISION &&
+	    !strcmp(vendor, "Apple")) {
+		pr_info("Apple Mac detected, using EFI v1.10 runtime services only\n");
+		efi.runtime_version = EFI_1_10_SYSTEM_TABLE_REVISION;
+	}
 }
 
 static __initdata char memory_type_name[][13] = {

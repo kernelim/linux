@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/radix-tree.c
-0x4e6e4b41	radix_tree_delete	vmlinux	EXPORT_SYMBOL
+#2-
+0x4e6e4b41	radix_tree_delete	vmlinux	EXPORT_SYMBOL	

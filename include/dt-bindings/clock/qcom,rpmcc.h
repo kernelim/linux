@@ -149,5 +149,11 @@
 #define RPM_SMD_CE2_A_CLK			103
 #define RPM_SMD_CE3_CLK				104
 #define RPM_SMD_CE3_A_CLK			105
+#define RPM_SMD_HWKM_CLK			116
+#define RPM_SMD_HWKM_A_CLK			117
+#define RPM_SMD_PKA_CLK				118
+#define RPM_SMD_PKA_A_CLK			119
+#define RPM_SMD_CPUSS_GNOC_CLK			120
+#define RPM_SMD_CPUSS_GNOC_A_CLK		121
 
 #endif

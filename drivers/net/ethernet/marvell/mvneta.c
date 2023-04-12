@@ -2598,8 +2598,8 @@ static inline void
 mvneta_tso_put_hdr(struct sk_buff *skb,
 		   struct mvneta_port *pp, struct mvneta_tx_queue *txq)
 {
-	int hdr_len = skb_transport_offset(skb) + tcp_hdrlen(skb);
 	struct mvneta_tx_buf *buf = &txq->buf[txq->txq_put_index];
+	int hdr_len = skb_tcp_all_headers(skb);
 	struct mvneta_tx_desc *tx_desc;
 
 	tx_desc = mvneta_txq_next_desc_get(txq);
@@ -2661,8 +2661,8 @@ static int mvneta_tx_tso(struct sk_buff *skb, struct net_device *dev,
 	if ((txq->count + tso_count_descs(skb)) >= txq->size)
 		return 0;
 
-	if (skb_headlen(skb) < (skb_transport_offset(skb) + tcp_hdrlen(skb))) {
-		pr_info("*** Is this even  possible???!?!?\n");
+	if (skb_headlen(skb) < skb_tcp_all_headers(skb)) {
+		pr_info("*** Is this even possible?\n");
 		return 0;
 	}
 
@@ -3233,7 +3233,8 @@ static int mvneta_create_page_pool(struct mvneta_port *pp,
 		return err;
 	}
 
-	err = xdp_rxq_info_reg(&rxq->xdp_rxq, pp->dev, rxq->id, 0);
+	err = __xdp_rxq_info_reg(&rxq->xdp_rxq, pp->dev, rxq->id, 0,
+				 PAGE_SIZE);
 	if (err < 0)
 		goto err_free_pp;
 
@@ -5327,14 +5328,13 @@ static int mvneta_probe(struct platform_device *pdev)
 	 * operation, so only single NAPI should be initialized.
 	 */
 	if (pp->neta_armada3700) {
-		netif_napi_add(dev, &pp->napi, mvneta_poll, NAPI_POLL_WEIGHT);
+		netif_napi_add(dev, &pp->napi, mvneta_poll);
 	} else {
 		for_each_present_cpu(cpu) {
 			struct mvneta_pcpu_port *port =
 				per_cpu_ptr(pp->ports, cpu);
 
-			netif_napi_add(dev, &port->napi, mvneta_poll,
-				       NAPI_POLL_WEIGHT);
+			netif_napi_add(dev, &port->napi, mvneta_poll);
 			port->pp = pp;
 		}
 	}
@@ -5344,7 +5344,7 @@ static int mvneta_probe(struct platform_device *pdev)
 	dev->hw_features |= dev->features;
 	dev->vlan_features |= dev->features;
 	dev->priv_flags |= IFF_LIVE_ADDR_CHANGE;
-	netif_set_gso_max_segs(dev, MVNETA_MAX_TSO_SEGS);
+	netif_set_tso_max_segs(dev, MVNETA_MAX_TSO_SEGS);
 
 	/* MTU range: 68 - 9676 */
 	dev->min_mtu = ETH_MIN_MTU;

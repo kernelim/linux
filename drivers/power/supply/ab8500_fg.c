@@ -1077,7 +1077,7 @@ static int ab8500_fg_calc_cap_discharge_voltage(struct ab8500_fg *di, bool comp)
 	int permille, mah;
 
 	if (comp)
-		permille = ab8500_fg_load_comp_volt_to_capacity(di);
+	permille = ab8500_fg_load_comp_volt_to_capacity(di);
 	else
 		permille = ab8500_fg_uncomp_volt_to_capacity(di);
 

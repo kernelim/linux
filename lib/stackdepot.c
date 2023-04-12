@@ -23,6 +23,7 @@
 #include <linux/jhash.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
+#include <linux/mutex.h>
 #include <linux/percpu.h>
 #include <linux/printk.h>
 #include <linux/slab.h>
@@ -64,6 +65,9 @@ struct stack_record {
 	union handle_parts handle;
 	unsigned long entries[];	/* Variable-sized array of entries. */
 };
+
+static bool __stack_depot_want_early_init __initdata = IS_ENABLED(CONFIG_STACKDEPOT_ALWAYS_INIT);
+static bool __stack_depot_early_init_passed __initdata;
 
 static void *stack_slabs[STACK_ALLOC_MAX_SLABS];
 
@@ -161,18 +165,60 @@ static int __init is_stack_depot_disabled(char *str)
 }
 early_param("stack_depot_disable", is_stack_depot_disabled);
 
-int __init stack_depot_init(void)
+void __init stack_depot_want_early_init(void)
 {
-	if (!stack_depot_disable) {
-		size_t size = (STACK_HASH_SIZE * sizeof(struct stack_record *));
-		int i;
+	/* Too late to request early init now */
+	WARN_ON(__stack_depot_early_init_passed);
 
-		stack_table = memblock_alloc(size, size);
-		for (i = 0; i < STACK_HASH_SIZE;  i++)
-			stack_table[i] = NULL;
+	__stack_depot_want_early_init = true;
+}
+
+int __init stack_depot_early_init(void)
+{
+	size_t size;
+
+	/* This is supposed to be called only once, from mm_init() */
+	if (WARN_ON(__stack_depot_early_init_passed))
+		return 0;
+
+	__stack_depot_early_init_passed = true;
+
+	if (!__stack_depot_want_early_init || stack_depot_disable)
+		return 0;
+
+	size = (STACK_HASH_SIZE * sizeof(struct stack_record *));
+	pr_info("Stack Depot early init allocating hash table with memblock_alloc, %zu bytes\n",
+		size);
+	stack_table = memblock_alloc(size, SMP_CACHE_BYTES);
+
+	if (!stack_table) {
+		pr_err("Stack Depot hash table allocation failed, disabling\n");
+		stack_depot_disable = true;
+		return -ENOMEM;
 	}
+
 	return 0;
 }
+
+int stack_depot_init(void)
+{
+	static DEFINE_MUTEX(stack_depot_init_mutex);
+	int ret = 0;
+
+	mutex_lock(&stack_depot_init_mutex);
+	if (!stack_depot_disable && !stack_table) {
+		pr_info("Stack Depot allocating hash table with kvcalloc\n");
+		stack_table = kvcalloc(STACK_HASH_SIZE, sizeof(struct stack_record *), GFP_KERNEL);
+		if (!stack_table) {
+			pr_err("Stack Depot hash table allocation failed, disabling\n");
+			stack_depot_disable = true;
+			ret = -ENOMEM;
+		}
+	}
+	mutex_unlock(&stack_depot_init_mutex);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(stack_depot_init);
 
 /* Calculate hash for a stack */
 static inline u32 hash_stack(unsigned long *entries, unsigned int size)
@@ -305,6 +351,9 @@ EXPORT_SYMBOL_GPL(stack_depot_fetch);
  * (allocates using GFP flags of @alloc_flags). If @can_alloc is %false, avoids
  * any allocations and will fail if no space is left to store the stack trace.
  *
+ * If the stack trace in @entries is from an interrupt, only the portion up to
+ * interrupt entry is saved.
+ *
  * Context: Any context, but setting @can_alloc to %false is required if
  *          alloc_pages() cannot be used from the current context. Currently
  *          this is the case from contexts where neither %GFP_ATOMIC nor
@@ -322,6 +371,16 @@ depot_stack_handle_t __stack_depot_save(unsigned long *entries,
 	void *prealloc = NULL;
 	unsigned long flags;
 	u32 hash;
+
+	/*
+	 * If this stack trace is from an interrupt, including anything before
+	 * interrupt entry usually leads to unbounded stackdepot growth.
+	 *
+	 * Because use of filter_irq_stacks() is a requirement to ensure
+	 * stackdepot can efficiently deduplicate interrupt stacks, always
+	 * filter_irq_stacks() to simplify all callers' use of stackdepot.
+	 */
+	nr_entries = filter_irq_stacks(entries, nr_entries);
 
 	if (unlikely(nr_entries == 0) || stack_depot_disable)
 		goto fast_exit;

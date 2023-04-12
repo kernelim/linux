@@ -93,6 +93,31 @@ void dev_remove_offload(struct packet_offload *po)
 EXPORT_SYMBOL(dev_remove_offload);
 
 /**
+ *	skb_eth_gso_segment - segmentation handler for ethernet protocols.
+ *	@skb: buffer to segment
+ *	@features: features for the output path (see dev->features)
+ *	@type: Ethernet Protocol ID
+ */
+struct sk_buff *skb_eth_gso_segment(struct sk_buff *skb,
+				    netdev_features_t features, __be16 type)
+{
+	struct sk_buff *segs = ERR_PTR(-EPROTONOSUPPORT);
+	struct packet_offload *ptype;
+
+	rcu_read_lock();
+	list_for_each_entry_rcu(ptype, &offload_base, list) {
+		if (ptype->type == type && ptype->callbacks.gso_segment) {
+			segs = ptype->callbacks.gso_segment(skb, features);
+			break;
+		}
+	}
+	rcu_read_unlock();
+
+	return segs;
+}
+EXPORT_SYMBOL(skb_eth_gso_segment);
+
+/**
  *	skb_mac_gso_segment - mac layer segmentation handler.
  *	@skb: buffer to segment
  *	@features: features for the output path (see dev->features)
@@ -132,11 +157,23 @@ int skb_gro_receive(struct sk_buff *p, struct sk_buff *skb)
 	unsigned int headlen = skb_headlen(skb);
 	unsigned int len = skb_gro_len(skb);
 	unsigned int delta_truesize;
+	unsigned int gro_max_size;
 	unsigned int new_truesize;
 	struct sk_buff *lp;
 
-	if (unlikely(p->len + len >= 65536 || NAPI_GRO_CB(skb)->flush))
+	/* pairs with WRITE_ONCE() in netif_set_gro_max_size() */
+	gro_max_size = READ_ONCE(p->dev->gro_max_size);
+
+	if (unlikely(p->len + len >= gro_max_size || NAPI_GRO_CB(skb)->flush))
 		return -E2BIG;
+
+	if (unlikely(p->len + len >= GRO_LEGACY_MAX_SIZE)) {
+		if (p->protocol != htons(ETH_P_IPV6) ||
+		    skb_headroom(p) < sizeof(struct hop_jumbo_hdr) ||
+		    ipv6_hdr(p)->nexthdr != IPPROTO_TCP ||
+		    p->encapsulation)
+			return -E2BIG;
+	}
 
 	lp = NAPI_GRO_CB(p)->last;
 	pinfo = skb_shinfo(lp);

@@ -4,6 +4,15 @@
 
 #ifndef __ASSEMBLER__
 
+
+/*
+ * RHEL-9.2-only -- increase max NR_IRQS from 64+8192 default
+ *    for large, HPC arm64 kernels with 64K page-size
+ */
+#if defined(CONFIG_ARM_GIC_V3_ITS) && defined(CONFIG_ARM64_64K_PAGES)
+#define  NR_IRQS  (1 << 19)
+#endif
+
 #include <asm-generic/irq.h>
 
 struct pt_regs;

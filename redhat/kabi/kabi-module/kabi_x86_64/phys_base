@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/kernel/head_64.S
-0x4c9d28b0	phys_base	vmlinux	EXPORT_SYMBOL
+#2-
+0x4c9d28b0	phys_base	vmlinux	EXPORT_SYMBOL	

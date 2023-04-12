@@ -66,7 +66,7 @@ struct vdpa_mgmt_dev;
  * @dma_dev: the actual device that is performing DMA
  * @driver_override: driver name to force a match
  * @config: the configuration ops for this device.
- * @cf_mutex: Protects get and set access to configuration layout.
+ * @cf_lock: Protects get and set access to configuration layout.
  * @index: device index
  * @features_valid: were features initialized? for legacy guests
  * @ngroups: the number of virtqueue groups
@@ -81,11 +81,11 @@ struct vdpa_device {
 	struct device *dma_dev;
 	const char *driver_override;
 	const struct vdpa_config_ops *config;
-	struct mutex cf_mutex; /* Protects get/set config */
+	struct rw_semaphore cf_lock; /* Protects get/set config */
 	unsigned int index;
 	bool features_valid;
 	bool use_va;
-	int nvqs;
+	u32 nvqs;
 	struct vdpa_mgmt_dev *mdev;
 	unsigned int ngroups;
 	unsigned int nas;
@@ -102,6 +102,7 @@ struct vdpa_iova_range {
 };
 
 struct vdpa_dev_set_config {
+	u64 device_features;
 	struct {
 		u8 mac[ETH_ALEN];
 		u16 mtu;
@@ -176,7 +177,8 @@ struct vdpa_map_file {
  *				for the device
  *				@vdev: vdpa device
  *				Returns virtqueue algin requirement
- * @get_vq_group:		Get the group id for a specific virtqueue
+ * @get_vq_group:		Get the group id for a specific
+ *				virtqueue (optional)
  *				@vdev: vdpa device
  *				@idx: virtqueue index
  *				Returns u32: group id for this virtqueue
@@ -215,7 +217,11 @@ struct vdpa_map_file {
  * @reset:			Reset device
  *				@vdev: vdpa device
  *				Returns integer: success (0) or error (< 0)
- * @get_config_size:		Get the size of the configuration space
+ * @suspend:			Suspend or resume the device (optional)
+ *				@vdev: vdpa device
+ *				Returns integer: success (0) or error (< 0)
+ * @get_config_size:		Get the size of the configuration space includes
+ *				fields that are conditional on feature bits.
  *				@vdev: vdpa device
  *				Returns size_t: configuration size
  * @get_config:			Read from device specific configuration space
@@ -240,7 +246,7 @@ struct vdpa_map_file {
  *				Returns the iova range supported by
  *				the device.
  * @set_group_asid:		Set address space identifier for a
- *				virtqueue group
+ *				virtqueue group (optional)
  *				@vdev: vdpa device
  *				@group: virtqueue group
  *				@asid: address space id for this group
@@ -292,6 +298,9 @@ struct vdpa_config_ops {
 			    const struct vdpa_vq_state *state);
 	int (*get_vq_state)(struct vdpa_device *vdev, u16 idx,
 			    struct vdpa_vq_state *state);
+	int (*get_vendor_vq_stats)(struct vdpa_device *vdev, u16 idx,
+				   struct sk_buff *msg,
+				   struct netlink_ext_ack *extack);
 	struct vdpa_notification_area
 	(*get_vq_notification)(struct vdpa_device *vdev, u16 idx);
 	/* vq irq is not expected to be changed once DRIVER_OK is set */
@@ -312,6 +321,7 @@ struct vdpa_config_ops {
 	u8 (*get_status)(struct vdpa_device *vdev);
 	void (*set_status)(struct vdpa_device *vdev, u8 status);
 	int (*reset)(struct vdpa_device *vdev);
+	int (*suspend)(struct vdpa_device *vdev);
 	size_t (*get_config_size)(struct vdpa_device *vdev);
 	void (*get_config)(struct vdpa_device *vdev, unsigned int offset,
 			   void *buf, unsigned int len);
@@ -363,10 +373,10 @@ struct vdpa_device *__vdpa_alloc_device(struct device *parent,
 				       dev_struct, member))), name, use_va)), \
 				       dev_struct, member)
 
-int vdpa_register_device(struct vdpa_device *vdev, int nvqs);
+int vdpa_register_device(struct vdpa_device *vdev, u32 nvqs);
 void vdpa_unregister_device(struct vdpa_device *vdev);
 
-int _vdpa_register_device(struct vdpa_device *vdev, int nvqs);
+int _vdpa_register_device(struct vdpa_device *vdev, u32 nvqs);
 void _vdpa_unregister_device(struct vdpa_device *vdev);
 
 /**
@@ -420,25 +430,31 @@ static inline int vdpa_reset(struct vdpa_device *vdev)
 	const struct vdpa_config_ops *ops = vdev->config;
 	int ret;
 
-	mutex_lock(&vdev->cf_mutex);
+	down_write(&vdev->cf_lock);
 	vdev->features_valid = false;
 	ret = ops->reset(vdev);
-	mutex_unlock(&vdev->cf_mutex);
+	up_write(&vdev->cf_lock);
 	return ret;
 }
 
-static inline int vdpa_set_features(struct vdpa_device *vdev, u64 features, bool locked)
+static inline int vdpa_set_features_unlocked(struct vdpa_device *vdev, u64 features)
 {
 	const struct vdpa_config_ops *ops = vdev->config;
 	int ret;
 
-	if (!locked)
-		mutex_lock(&vdev->cf_mutex);
-
 	vdev->features_valid = true;
 	ret = ops->set_driver_features(vdev, features);
-	if (!locked)
-		mutex_unlock(&vdev->cf_mutex);
+
+	return ret;
+}
+
+static inline int vdpa_set_features(struct vdpa_device *vdev, u64 features)
+{
+	int ret;
+
+	down_write(&vdev->cf_lock);
+	ret = vdpa_set_features_unlocked(vdev, features);
+	up_write(&vdev->cf_lock);
 
 	return ret;
 }
@@ -482,7 +498,7 @@ struct vdpa_mgmtdev_ops {
 struct vdpa_mgmt_dev {
 	struct device *device;
 	const struct vdpa_mgmtdev_ops *ops;
-	const struct virtio_device_id *id_table;
+	struct virtio_device_id *id_table;
 	u64 config_attr_mask;
 	struct list_head list;
 	u64 supported_features;

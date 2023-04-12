@@ -362,29 +362,25 @@ static inline void user_single_step_report(struct pt_regs *regs)
 #ifndef arch_ptrace_stop_needed
 /**
  * arch_ptrace_stop_needed - Decide whether arch_ptrace_stop() should be called
- * @code:	current->exit_code value ptrace will stop with
- * @info:	siginfo_t pointer (or %NULL) for signal ptrace will stop with
  *
  * This is called with the siglock held, to decide whether or not it's
- * necessary to release the siglock and call arch_ptrace_stop() with the
- * same @code and @info arguments.  It can be defined to a constant if
- * arch_ptrace_stop() is never required, or always is.  On machines where
- * this makes sense, it should be defined to a quick test to optimize out
- * calling arch_ptrace_stop() when it would be superfluous.  For example,
- * if the thread has not been back to user mode since the last stop, the
- * thread state might indicate that nothing needs to be done.
+ * necessary to release the siglock and call arch_ptrace_stop().  It can be
+ * defined to a constant if arch_ptrace_stop() is never required, or always
+ * is.  On machines where this makes sense, it should be defined to a quick
+ * test to optimize out calling arch_ptrace_stop() when it would be
+ * superfluous.  For example, if the thread has not been back to user mode
+ * since the last stop, the thread state might indicate that nothing needs
+ * to be done.
  *
  * This is guaranteed to be invoked once before a task stops for ptrace and
  * may include arch-specific operations necessary prior to a ptrace stop.
  */
-#define arch_ptrace_stop_needed(code, info)	(0)
+#define arch_ptrace_stop_needed()	(0)
 #endif
 
 #ifndef arch_ptrace_stop
 /**
  * arch_ptrace_stop - Do machine-specific work before stopping for ptrace
- * @code:	current->exit_code value ptrace will stop with
- * @info:	siginfo_t pointer (or %NULL) for signal ptrace will stop with
  *
  * This is called with no locks held when arch_ptrace_stop_needed() has
  * just returned nonzero.  It is allowed to block, e.g. for user memory
@@ -394,7 +390,7 @@ static inline void user_single_step_report(struct pt_regs *regs)
  * we only do it when the arch requires it for this particular stop, as
  * indicated by arch_ptrace_stop_needed().
  */
-#define arch_ptrace_stop(code, info)		do { } while (0)
+#define arch_ptrace_stop()		do { } while (0)
 #endif
 
 #ifndef current_pt_regs
@@ -417,4 +413,82 @@ static inline void user_single_step_report(struct pt_regs *regs)
 extern int task_current_syscall(struct task_struct *target, struct syscall_info *info);
 
 extern void sigaction_compat_abi(struct k_sigaction *act, struct k_sigaction *oact);
+
+/*
+ * ptrace report for syscall entry and exit looks identical.
+ */
+static inline int ptrace_report_syscall(unsigned long message)
+{
+	int ptrace = current->ptrace;
+
+	if (!(ptrace & PT_PTRACED))
+		return 0;
+
+	current->ptrace_message = message;
+	ptrace_notify(SIGTRAP | ((ptrace & PT_TRACESYSGOOD) ? 0x80 : 0));
+
+	/*
+	 * this isn't the same as continuing with a signal, but it will do
+	 * for normal use.  strace only continues with a signal if the
+	 * stopping signal is not SIGTRAP.  -brl
+	 */
+	if (current->exit_code) {
+		send_sig(current->exit_code, current, 1);
+		current->exit_code = 0;
+	}
+
+	current->ptrace_message = 0;
+	return fatal_signal_pending(current);
+}
+
+/**
+ * ptrace_report_syscall_entry - task is about to attempt a system call
+ * @regs:		user register state of current task
+ *
+ * This will be called if %SYSCALL_WORK_SYSCALL_TRACE or
+ * %SYSCALL_WORK_SYSCALL_EMU have been set, when the current task has just
+ * entered the kernel for a system call.  Full user register state is
+ * available here.  Changing the values in @regs can affect the system
+ * call number and arguments to be tried.  It is safe to block here,
+ * preventing the system call from beginning.
+ *
+ * Returns zero normally, or nonzero if the calling arch code should abort
+ * the system call.  That must prevent normal entry so no system call is
+ * made.  If @task ever returns to user mode after this, its register state
+ * is unspecified, but should be something harmless like an %ENOSYS error
+ * return.  It should preserve enough information so that syscall_rollback()
+ * can work (see asm-generic/syscall.h).
+ *
+ * Called without locks, just after entering kernel mode.
+ */
+static inline __must_check int ptrace_report_syscall_entry(
+	struct pt_regs *regs)
+{
+	return ptrace_report_syscall(PTRACE_EVENTMSG_SYSCALL_ENTRY);
+}
+
+/**
+ * ptrace_report_syscall_exit - task has just finished a system call
+ * @regs:		user register state of current task
+ * @step:		nonzero if simulating single-step or block-step
+ *
+ * This will be called if %SYSCALL_WORK_SYSCALL_TRACE has been set, when
+ * the current task has just finished an attempted system call.  Full
+ * user register state is available here.  It is safe to block here,
+ * preventing signals from being processed.
+ *
+ * If @step is nonzero, this report is also in lieu of the normal
+ * trap that would follow the system call instruction because
+ * user_enable_block_step() or user_enable_single_step() was used.
+ * In this case, %SYSCALL_WORK_SYSCALL_TRACE might not be set.
+ *
+ * Called without locks, just before checking for pending signals.
+ */
+static inline void ptrace_report_syscall_exit(struct pt_regs *regs, int step)
+{
+	if (step)
+		user_single_step_report(regs);
+	else
+		ptrace_report_syscall(PTRACE_EVENTMSG_SYSCALL_EXIT);
+}
 #endif

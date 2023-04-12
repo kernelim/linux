@@ -6,3 +6,4 @@ generic-y += qspinlock.h
 generic-y += user.h
 
 generated-y += cpucaps.h
+generated-y += sysreg-defs.h

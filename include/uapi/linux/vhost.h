@@ -145,6 +145,11 @@
 /* Get the valid iova range */
 #define VHOST_VDPA_GET_IOVA_RANGE	_IOR(VHOST_VIRTIO, 0x78, \
 					     struct vhost_vdpa_iova_range)
+/* Get the config size */
+#define VHOST_VDPA_GET_CONFIG_SIZE	_IOR(VHOST_VIRTIO, 0x79, __u32)
+
+/* Get the count of all virtqueues */
+#define VHOST_VDPA_GET_VQS_COUNT	_IOR(VHOST_VIRTIO, 0x80, __u32)
 
 /* Get the number of virtqueue groups. */
 #define VHOST_VDPA_GET_GROUP_NUM	_IOR(VHOST_VIRTIO, 0x81, __u32)
@@ -165,5 +170,14 @@
  */
 #define VHOST_VDPA_SET_GROUP_ASID	_IOW(VHOST_VIRTIO, 0x7C, \
 					     struct vhost_vring_state)
+
+/* Suspend a device so it does not process virtqueue requests anymore
+ *
+ * After the return of ioctl the device must preserve all the necessary state
+ * (the virtqueue vring base plus the possible device specific states) that is
+ * required for restoring in the future. The device must not change its
+ * configuration after that point.
+ */
+#define VHOST_VDPA_SUSPEND		_IO(VHOST_VIRTIO, 0x7D)
 
 #endif

@@ -466,7 +466,6 @@ static void ppl_submit_iounit(struct ppl_io_unit *io)
 	bio->bi_end_io = ppl_log_endio;
 	bio->bi_iter.bi_sector = log->next_io_sector;
 	bio_add_page(bio, io->header_page, PAGE_SIZE, 0);
-	bio->bi_write_hint = ppl_conf->write_hint;
 
 	pr_debug("%s: log->current_io_sector: %llu\n", __func__,
 	    (unsigned long long)log->next_io_sector);
@@ -496,7 +495,6 @@ static void ppl_submit_iounit(struct ppl_io_unit *io)
 			bio = bio_alloc_bioset(prev->bi_bdev, BIO_MAX_VECS,
 					       prev->bi_opf, GFP_NOIO,
 					       &ppl_conf->bs);
-			bio->bi_write_hint = prev->bi_write_hint;
 			bio->bi_iter.bi_sector = bio_end_sector(prev);
 			bio_add_page(bio, sh->ppl_page, PAGE_SIZE, 0);
 
@@ -681,7 +679,7 @@ void ppl_quiesce(struct r5conf *conf, int quiesce)
 	}
 }
 
-int ppl_handle_flush_request(struct r5l_log *log, struct bio *bio)
+int ppl_handle_flush_request(struct bio *bio)
 {
 	if (bio->bi_iter.bi_size == 0) {
 		bio_endio(bio);
@@ -899,7 +897,7 @@ static int ppl_recover_entry(struct ppl_log *log, struct ppl_header_entry *e,
 				 __func__, indent, "", rdev->bdev,
 				 (unsigned long long)sector);
 			if (!sync_page_io(rdev, sector, block_size, page2,
-					REQ_OP_READ, 0, false)) {
+					REQ_OP_READ, false)) {
 				md_error(mddev, rdev);
 				pr_debug("%s:%*s read failed!\n", __func__,
 					 indent, "");
@@ -921,7 +919,7 @@ static int ppl_recover_entry(struct ppl_log *log, struct ppl_header_entry *e,
 				 (unsigned long long)(ppl_sector + i));
 			if (!sync_page_io(log->rdev,
 					ppl_sector - log->rdev->data_offset + i,
-					block_size, page2, REQ_OP_READ, 0,
+					block_size, page2, REQ_OP_READ,
 					false)) {
 				pr_debug("%s:%*s read failed!\n", __func__,
 					 indent, "");
@@ -948,7 +946,7 @@ static int ppl_recover_entry(struct ppl_log *log, struct ppl_header_entry *e,
 			 (unsigned long long)parity_sector,
 			 parity_rdev->bdev);
 		if (!sync_page_io(parity_rdev, parity_sector, block_size,
-				page1, REQ_OP_WRITE, 0, false)) {
+				  page1, REQ_OP_WRITE, false)) {
 			pr_debug("%s:%*s parity write error!\n", __func__,
 				 indent, "");
 			md_error(mddev, parity_rdev);
@@ -1000,7 +998,7 @@ static int ppl_recover(struct ppl_log *log, struct ppl_header *pplhdr,
 			int s = pp_size > PAGE_SIZE ? PAGE_SIZE : pp_size;
 
 			if (!sync_page_io(rdev, sector - rdev->data_offset,
-					s, page, REQ_OP_READ, 0, false)) {
+					s, page, REQ_OP_READ, false)) {
 				md_error(mddev, rdev);
 				ret = -EIO;
 				goto out;
@@ -1064,7 +1062,7 @@ static int ppl_write_empty_header(struct ppl_log *log)
 
 	if (!sync_page_io(rdev, rdev->ppl.sector - rdev->data_offset,
 			  PPL_HEADER_SIZE, page, REQ_OP_WRITE | REQ_SYNC |
-			  REQ_FUA, 0, false)) {
+			  REQ_FUA, false)) {
 		md_error(rdev->mddev, rdev);
 		ret = -EIO;
 	}
@@ -1102,7 +1100,7 @@ static int ppl_load_distributed(struct ppl_log *log)
 		if (!sync_page_io(rdev,
 				  rdev->ppl.sector - rdev->data_offset +
 				  pplhdr_offset, PAGE_SIZE, page, REQ_OP_READ,
-				  0, false)) {
+				  false)) {
 			md_error(mddev, rdev);
 			ret = -EIO;
 			/* if not able to read - don't recover any PPL */
@@ -1303,8 +1301,6 @@ static int ppl_validate_rdev(struct md_rdev *rdev)
 
 static void ppl_init_child_log(struct ppl_log *log, struct md_rdev *rdev)
 {
-	struct request_queue *q;
-
 	if ((rdev->ppl.size << 9) >= (PPL_SPACE_SIZE +
 				      PPL_HEADER_SIZE) * 2) {
 		log->use_multippl = true;
@@ -1318,8 +1314,7 @@ static void ppl_init_child_log(struct ppl_log *log, struct md_rdev *rdev)
 	}
 	log->next_io_sector = rdev->ppl.sector;
 
-	q = bdev_get_queue(rdev->bdev);
-	if (test_bit(QUEUE_FLAG_WC, &q->queue_flags))
+	if (bdev_write_cache(rdev->bdev))
 		log->wb_cache_on = true;
 }
 
@@ -1399,7 +1394,6 @@ int ppl_init_log(struct r5conf *conf)
 	atomic64_set(&ppl_conf->seq, 0);
 	INIT_LIST_HEAD(&ppl_conf->no_mem_stripes);
 	spin_lock_init(&ppl_conf->no_mem_stripes_lock);
-	ppl_conf->write_hint = RWH_WRITE_LIFE_NOT_SET;
 
 	if (!mddev->external) {
 		ppl_conf->signature = ~crc32c_le(~0, mddev->uuid, sizeof(mddev->uuid));
@@ -1499,25 +1493,13 @@ int ppl_modify_log(struct r5conf *conf, struct md_rdev *rdev, bool add)
 static ssize_t
 ppl_write_hint_show(struct mddev *mddev, char *buf)
 {
-	size_t ret = 0;
-	struct r5conf *conf;
-	struct ppl_conf *ppl_conf = NULL;
-
-	spin_lock(&mddev->lock);
-	conf = mddev->private;
-	if (conf && raid5_has_ppl(conf))
-		ppl_conf = conf->log_private;
-	ret = sprintf(buf, "%d\n", ppl_conf ? ppl_conf->write_hint : 0);
-	spin_unlock(&mddev->lock);
-
-	return ret;
+	return sprintf(buf, "%d\n", 0);
 }
 
 static ssize_t
 ppl_write_hint_store(struct mddev *mddev, const char *page, size_t len)
 {
 	struct r5conf *conf;
-	struct ppl_conf *ppl_conf;
 	int err = 0;
 	unsigned short new;
 
@@ -1531,17 +1513,10 @@ ppl_write_hint_store(struct mddev *mddev, const char *page, size_t len)
 		return err;
 
 	conf = mddev->private;
-	if (!conf) {
+	if (!conf)
 		err = -ENODEV;
-	} else if (raid5_has_ppl(conf)) {
-		ppl_conf = conf->log_private;
-		if (!ppl_conf)
-			err = -EINVAL;
-		else
-			ppl_conf->write_hint = new;
-	} else {
+	else if (!raid5_has_ppl(conf) || !conf->log_private)
 		err = -EINVAL;
-	}
 
 	mddev_unlock(mddev);
 

@@ -40,6 +40,7 @@
 #include <asm/extable.h>
 #include <asm/trapnr.h>
 #include <asm/sev.h>
+#include <asm/tdx.h>
 
 /*
  * Manage page tables very early on.
@@ -417,6 +418,9 @@ void __init do_early_exception(struct pt_regs *regs, int trapnr)
 	    trapnr == X86_TRAP_VC && handle_vc_boot_ghcb(regs))
 		return;
 
+	if (trapnr == X86_TRAP_VE && tdx_early_handle_ve(regs))
+		return;
+
 	early_fixup_exception(regs, trapnr);
 }
 
@@ -488,6 +492,10 @@ asmlinkage __visible void __init x86_64_start_kernel(char * real_mode_data)
 
 	clear_bss();
 
+	/*
+	 * This needs to happen *before* kasan_early_init() because latter maps stuff
+	 * into that page.
+	 */
 	clear_page(init_top_pgt);
 
 	/*
@@ -499,7 +507,20 @@ asmlinkage __visible void __init x86_64_start_kernel(char * real_mode_data)
 
 	kasan_early_init();
 
+	/*
+	 * Flush global TLB entries which could be left over from the trampoline page
+	 * table.
+	 *
+	 * This needs to happen *after* kasan_early_init() as KASAN-enabled .configs
+	 * instrument native_write_cr4() so KASAN must be initialized for that
+	 * instrumentation to work.
+	 */
+	__native_tlb_flush_global(this_cpu_read(cpu_tlbstate.cr4));
+
 	idt_setup_early_handler();
+
+	/* Needed before cc_platform_has() can be used for TDX */
+	tdx_early_init();
 
 	copy_bootdata(__va(real_mode_data));
 

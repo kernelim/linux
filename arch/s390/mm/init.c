@@ -34,6 +34,7 @@
 #include <asm/processor.h>
 #include <linux/uaccess.h>
 #include <asm/pgalloc.h>
+#include <asm/kfence.h>
 #include <asm/ptdump.h>
 #include <asm/dma.h>
 #include <asm/lowcore.h>
@@ -56,8 +57,6 @@ unsigned long s390_invalid_asce;
 unsigned long empty_zero_page, zero_page_mask;
 EXPORT_SYMBOL(empty_zero_page);
 EXPORT_SYMBOL(zero_page_mask);
-
-bool initmem_freed;
 
 static void __init setup_zero_pages(void)
 {
@@ -186,8 +185,7 @@ static void pv_init(void)
 		return;
 
 	/* make sure bounce buffers are shared */
-	swiotlb_force = SWIOTLB_FORCE;
-	swiotlb_init(1);
+	swiotlb_init(true, SWIOTLB_FORCE | SWIOTLB_VERBOSE);
 	swiotlb_update_mem_attributes();
 }
 
@@ -200,7 +198,7 @@ void __init mem_init(void)
         high_memory = (void *) __va(max_low_pfn * PAGE_SIZE);
 
 	pv_init();
-
+	kfence_split_mapping();
 	/* Setup guest page hinting */
 	cmma_init();
 
@@ -213,10 +211,12 @@ void __init mem_init(void)
 
 void free_initmem(void)
 {
-	initmem_freed = true;
 	__set_memory((unsigned long)_sinittext,
 		     (unsigned long)(_einittext - _sinittext) >> PAGE_SHIFT,
 		     SET_MEMORY_RW | SET_MEMORY_NX);
+	free_reserved_area(sclp_early_sccb,
+			   sclp_early_sccb + EXT_SCCB_READ_SCP,
+			   POISON_FREE_INITMEM, "unused early sccb");
 	free_initmem_default(POISON_FREE_INITMEM);
 }
 

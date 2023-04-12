@@ -24,8 +24,8 @@
 #include <linux/slab.h>
 #include <linux/cma.h>
 #include <linux/hugetlb.h>
+#include <linux/debugfs.h>
 
-#include <asm/debugfs.h>
 #include <asm/page.h>
 #include <asm/prom.h>
 #include <asm/fadump.h>
@@ -365,6 +365,11 @@ static unsigned long __init get_fadump_area_size(void)
 
 	size += fw_dump.cpu_state_data_size;
 	size += fw_dump.hpte_region_size;
+	/*
+	 * Account for pagesize alignment of boot memory area destination address.
+	 * This faciliates in mmap reading of first kernel's memory.
+	 */
+	size = PAGE_ALIGN(size);
 	size += fw_dump.boot_memory_size;
 	size += sizeof(struct fadump_crash_info_header);
 	size += sizeof(struct elfhdr); /* ELF core header.*/
@@ -752,7 +757,7 @@ u32 *__init fadump_regs_to_elf_notes(u32 *buf, struct pt_regs *regs)
 	 * FIXME: How do i get PID? Do I really need it?
 	 * prstatus.pr_pid = ????
 	 */
-	elf_core_copy_kernel_regs(&prstatus.pr_reg, regs);
+	elf_core_copy_regs(&prstatus.pr_reg, regs);
 	buf = append_elf_note(buf, CRASH_CORE_NOTE_NAME, NT_PRSTATUS,
 			      &prstatus, sizeof(prstatus));
 	return buf;
@@ -867,7 +872,6 @@ static int fadump_alloc_mem_ranges(struct fadump_mrange_info *mrange_info)
 				       sizeof(struct fadump_memory_range));
 	return 0;
 }
-
 static inline int fadump_add_mem_range(struct fadump_mrange_info *mrange_info,
 				       u64 base, u64 end)
 {
@@ -886,7 +890,12 @@ static inline int fadump_add_mem_range(struct fadump_mrange_info *mrange_info,
 		start = mem_ranges[mrange_info->mem_range_cnt - 1].base;
 		size  = mem_ranges[mrange_info->mem_range_cnt - 1].size;
 
-		if ((start + size) == base)
+		/*
+		 * Boot memory area needs separate PT_LOAD segment(s) as it
+		 * is moved to a different location at the time of crash.
+		 * So, fold only if the region is not boot memory area.
+		 */
+		if ((start + size) == base && start >= fw_dump.boot_mem_top)
 			is_adjacent = true;
 	}
 	if (!is_adjacent) {
@@ -1568,7 +1577,7 @@ static void __init fadump_init_files(void)
 		return;
 	}
 
-	debugfs_create_file("fadump_region", 0444, powerpc_debugfs_root, NULL,
+	debugfs_create_file("fadump_region", 0444, arch_debugfs_dir, NULL,
 			    &fadump_region_fops);
 
 	if (fw_dump.dump_active) {

@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:drivers/firmware/dmi_scan.c
-0x81e6b37f	dmi_get_system_info	vmlinux	EXPORT_SYMBOL
+#2-
+0x81e6b37f	dmi_get_system_info	vmlinux	EXPORT_SYMBOL	

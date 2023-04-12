@@ -178,7 +178,7 @@ static void iser_set_dif_domain(struct scsi_cmnd *sc,
 {
 	domain->sig_type = IB_SIG_TYPE_T10_DIF;
 	domain->sig.dif.pi_interval = scsi_prot_interval(sc);
-	domain->sig.dif.ref_tag = t10_pi_ref_tag(sc->request);
+	domain->sig.dif.ref_tag = t10_pi_ref_tag(scsi_cmd_to_rq(sc));
 	/*
 	 * At the moment we hard code those, but in the future
 	 * we will take them from sc.

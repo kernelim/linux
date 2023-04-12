@@ -16,6 +16,8 @@
 
 #include <crypto/sha1.h>
 
+#include "kallsyms_internal.h"
+
 /* vmcoreinfo stuff */
 unsigned char *vmcoreinfo_data;
 size_t vmcoreinfo_size;
@@ -231,9 +233,6 @@ static __init char *get_last_crashkernel(char *cmdline,
 next:
 		p = strstr(p+1, name);
 	}
-
-	if (!ck_cmdline)
-		return NULL;
 
 	return ck_cmdline;
 }
@@ -492,6 +491,19 @@ static int __init crash_save_vmcoreinfo_init(void)
 #define PAGE_OFFLINE_MAPCOUNT_VALUE	(~PG_offline)
 	VMCOREINFO_NUMBER(PAGE_OFFLINE_MAPCOUNT_VALUE);
 #endif
+
+#ifdef CONFIG_KALLSYMS
+	VMCOREINFO_SYMBOL(kallsyms_names);
+	VMCOREINFO_SYMBOL(kallsyms_num_syms);
+	VMCOREINFO_SYMBOL(kallsyms_token_table);
+	VMCOREINFO_SYMBOL(kallsyms_token_index);
+#ifdef CONFIG_KALLSYMS_BASE_RELATIVE
+	VMCOREINFO_SYMBOL(kallsyms_offsets);
+	VMCOREINFO_SYMBOL(kallsyms_relative_base);
+#else
+	VMCOREINFO_SYMBOL(kallsyms_addresses);
+#endif /* CONFIG_KALLSYMS_BASE_RELATIVE */
+#endif /* CONFIG_KALLSYMS */
 
 	arch_crash_save_vmcoreinfo();
 	update_vmcoreinfo_note();

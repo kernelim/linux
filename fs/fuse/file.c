@@ -686,7 +686,7 @@ static void fuse_aio_complete(struct fuse_io_priv *io, int err, ssize_t pos)
 			spin_unlock(&fi->lock);
 		}
 
-		io->iocb->ki_complete(io->iocb, res, 0);
+		io->iocb->ki_complete(io->iocb, res);
 	}
 
 	kref_put(&io->refcnt, fuse_io_release);
@@ -2307,17 +2307,17 @@ unlock:
 	return copied;
 }
 
-static int fuse_launder_page(struct page *page)
+static int fuse_launder_folio(struct folio *folio)
 {
 	int err = 0;
-	if (clear_page_dirty_for_io(page)) {
-		struct inode *inode = page->mapping->host;
+	if (folio_clear_dirty_for_io(folio)) {
+		struct inode *inode = folio->mapping->host;
 
 		/* Serialize with pending writeback for the same page */
-		fuse_wait_on_page_writeback(inode, page->index);
-		err = fuse_writepage_locked(page);
+		fuse_wait_on_page_writeback(inode, folio->index);
+		err = fuse_writepage_locked(&folio->page);
 		if (!err)
-			fuse_wait_on_page_writeback(inode, page->index);
+			fuse_wait_on_page_writeback(inode, folio->index);
 	}
 	return err;
 }
@@ -2908,11 +2908,9 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 		.mode = mode
 	};
 	int err;
-	bool lock_inode = !(mode & FALLOC_FL_KEEP_SIZE) ||
-			   (mode & (FALLOC_FL_PUNCH_HOLE |
-				    FALLOC_FL_ZERO_RANGE));
-
-	bool block_faults = FUSE_IS_DAX(inode) && lock_inode;
+	bool block_faults = FUSE_IS_DAX(inode) &&
+		(!(mode & FALLOC_FL_KEEP_SIZE) ||
+		 (mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE)));
 
 	if (mode & ~(FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE |
 		     FALLOC_FL_ZERO_RANGE))
@@ -2921,22 +2919,20 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 	if (fm->fc->no_fallocate)
 		return -EOPNOTSUPP;
 
-	if (lock_inode) {
-		inode_lock(inode);
-		if (block_faults) {
-			down_write(&fi->i_mmap_sem);
-			err = fuse_dax_break_layouts(inode, 0, 0);
-			if (err)
-				goto out;
-		}
+	inode_lock(inode);
+	if (block_faults) {
+		down_write(&fi->i_mmap_sem);
+		err = fuse_dax_break_layouts(inode, 0, 0);
+		if (err)
+			goto out;
+	}
 
-		if (mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE)) {
-			loff_t endbyte = offset + length - 1;
+	if (mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE)) {
+		loff_t endbyte = offset + length - 1;
 
-			err = fuse_writeback_range(inode, offset, endbyte);
-			if (err)
-				goto out;
-		}
+		err = fuse_writeback_range(inode, offset, endbyte);
+		if (err)
+			goto out;
 	}
 
 	if (!(mode & FALLOC_FL_KEEP_SIZE) &&
@@ -2945,6 +2941,10 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 		if (err)
 			goto out;
 	}
+
+	err = file_modified(file);
+	if (err)
+		goto out;
 
 	if (!(mode & FALLOC_FL_KEEP_SIZE))
 		set_bit(FUSE_I_SIZE_UNSTABLE, &fi->state);
@@ -2982,8 +2982,7 @@ out:
 	if (block_faults)
 		up_write(&fi->i_mmap_sem);
 
-	if (lock_inode)
-		inode_unlock(inode);
+	inode_unlock(inode);
 
 	return err;
 }
@@ -3138,8 +3137,8 @@ static const struct address_space_operations fuse_file_aops  = {
 	.readahead	= fuse_readahead,
 	.writepage	= fuse_writepage,
 	.writepages	= fuse_writepages,
-	.launder_page	= fuse_launder_page,
-	.set_page_dirty	= __set_page_dirty_nobuffers,
+	.launder_folio	= fuse_launder_folio,
+	.dirty_folio	= filemap_dirty_folio,
 	.bmap		= fuse_bmap,
 	.direct_IO	= fuse_direct_IO,
 	.write_begin	= fuse_write_begin,

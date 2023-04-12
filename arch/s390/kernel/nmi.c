@@ -6,7 +6,6 @@
  *    Author(s): Ingo Adlung <adlung@de.ibm.com>,
  *		 Martin Schwidefsky <schwidefsky@de.ibm.com>,
  *		 Cornelia Huck <cornelia.huck@de.ibm.com>,
- *		 Heiko Carstens <heiko.carstens@de.ibm.com>,
  */
 
 #include <linux/kernel_stat.h>
@@ -30,6 +29,8 @@
 #include <asm/switch_to.h>
 #include <asm/ctl_reg.h>
 #include <asm/asm-offsets.h>
+#include <asm/pai.h>
+
 #include <linux/kvm_host.h>
 
 struct mcck_struct {
@@ -175,14 +176,16 @@ void __s390_handle_mcck(void)
 		       "malfunction (code 0x%016lx).\n", mcck.mcck_code);
 		printk(KERN_EMERG "mcck: task: %s, pid: %d.\n",
 		       current->comm, current->pid);
-		do_exit(SIGSEGV);
+		make_task_dead(SIGSEGV);
 	}
 }
 
-void noinstr s390_handle_mcck(void)
+void noinstr s390_handle_mcck(struct pt_regs *regs)
 {
 	trace_hardirqs_off();
+	pai_kernel_enter(regs);
 	__s390_handle_mcck();
+	pai_kernel_exit(regs);
 	trace_hardirqs_on();
 }
 /*

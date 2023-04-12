@@ -132,7 +132,7 @@ static inline bool is_multicast_ether_addr(const u8 *addr)
 #endif
 }
 
-static inline bool is_multicast_ether_addr_64bits(const u8 addr[6+2])
+static inline bool is_multicast_ether_addr_64bits(const u8 *addr)
 {
 #if defined(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS) && BITS_PER_LONG == 64
 #ifdef __BIG_ENDIAN
@@ -369,8 +369,7 @@ static inline bool ether_addr_equal(const u8 *addr1, const u8 *addr2)
  * Please note that alignment of addr1 & addr2 are only guaranteed to be 16 bits.
  */
 
-static inline bool ether_addr_equal_64bits(const u8 addr1[6+2],
-					   const u8 addr2[6+2])
+static inline bool ether_addr_equal_64bits(const u8 *addr1, const u8 *addr2)
 {
 #if defined(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS) && BITS_PER_LONG == 64
 	u64 fold = (*(const u64 *)addr1) ^ (*(const u64 *)addr2);
@@ -546,6 +545,27 @@ static inline unsigned long compare_ether_header(const void *a, const void *b)
 	return (*(u16 *)a ^ *(u16 *)b) | (a32[0] ^ b32[0]) |
 	       (a32[1] ^ b32[1]) | (a32[2] ^ b32[2]);
 #endif
+}
+
+/**
+ * eth_hw_addr_gen - Generate and assign Ethernet address to a port
+ * @dev: pointer to port's net_device structure
+ * @base_addr: base Ethernet address
+ * @id: offset to add to the base address
+ *
+ * Generate a MAC address using a base address and an offset and assign it
+ * to a net_device. Commonly used by switch drivers which need to compute
+ * addresses for all their ports. addr_assign_type is not changed.
+ */
+static inline void eth_hw_addr_gen(struct net_device *dev, const u8 *base_addr,
+				   unsigned int id)
+{
+	u64 u = ether_addr_to_u64(base_addr);
+	u8 addr[ETH_ALEN];
+
+	u += id;
+	u64_to_ether_addr(u, addr);
+	eth_hw_addr_set(dev, addr);
 }
 
 /**

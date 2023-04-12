@@ -35,6 +35,7 @@
 #include <linux/kfence.h>
 #include <linux/pkeys.h>
 
+#include <asm/asm-prototypes.h>
 #include <asm/firmware.h>
 #include <asm/interrupt.h>
 #include <asm/page.h>
@@ -367,7 +368,22 @@ static void sanity_check_fault(bool is_write, bool is_user,
 #elif defined(CONFIG_PPC_8xx)
 #define page_fault_is_bad(__err)	((__err) & DSISR_NOEXEC_OR_G)
 #elif defined(CONFIG_PPC64)
-#define page_fault_is_bad(__err)	((__err) & DSISR_BAD_FAULT_64S)
+static int page_fault_is_bad(unsigned long err)
+{
+	unsigned long flag = DSISR_BAD_FAULT_64S;
+
+	/*
+	 * PAPR+ v2.11 § 14.15.3.4.1 (unreleased)
+	 * If byte 0, bit 3 of pi-attribute-specifier-type in
+	 * ibm,pi-features property is defined, ignore the DSI error
+	 * which is caused by the paste instruction on the
+	 * suspended NX window.
+	 */
+	if (mmu_has_feature(MMU_FTR_NX_DSI))
+		flag &= ~DSISR_BAD_COPYPASTE;
+
+	return err & flag;
+}
 #else
 #define page_fault_is_bad(__err)	((__err) & DSISR_BAD_FAULT_32S)
 #endif
@@ -516,10 +532,8 @@ retry:
 	 * case.
 	 */
 	if (unlikely(fault & VM_FAULT_RETRY)) {
-		if (flags & FAULT_FLAG_ALLOW_RETRY) {
-			flags |= FAULT_FLAG_TRIED;
-			goto retry;
-		}
+		flags |= FAULT_FLAG_TRIED;
+		goto retry;
 	}
 
 	mmap_read_unlock(current->mm);
@@ -568,17 +582,23 @@ NOKPROBE_SYMBOL(hash__do_page_fault);
 static void __bad_page_fault(struct pt_regs *regs, int sig)
 {
 	int is_write = page_fault_is_write(regs->dsisr);
+	const char *msg;
 
 	/* kernel has accessed a bad area */
 
+	if (regs->dar < PAGE_SIZE)
+		msg = "Kernel NULL pointer dereference";
+	else
+		msg = "Unable to handle kernel data access";
+
 	switch (TRAP(regs)) {
 	case INTERRUPT_DATA_STORAGE:
-	case INTERRUPT_DATA_SEGMENT:
 	case INTERRUPT_H_DATA_STORAGE:
-		pr_alert("BUG: %s on %s at 0x%08lx\n",
-			 regs->dar < PAGE_SIZE ? "Kernel NULL pointer dereference" :
-			 "Unable to handle kernel data access",
+		pr_alert("BUG: %s on %s at 0x%08lx\n", msg,
 			 is_write ? "write" : "read", regs->dar);
+		break;
+	case INTERRUPT_DATA_SEGMENT:
+		pr_alert("BUG: %s at 0x%08lx\n", msg, regs->dar);
 		break;
 	case INTERRUPT_INST_STORAGE:
 	case INTERRUPT_INST_SEGMENT:
@@ -619,5 +639,28 @@ void bad_page_fault(struct pt_regs *regs, int sig)
 DEFINE_INTERRUPT_HANDLER(do_bad_page_fault_segv)
 {
 	bad_page_fault(regs, SIGSEGV);
+}
+
+/*
+ * In radix, segment interrupts indicate the EA is not addressable by the
+ * page table geometry, so they are always sent here.
+ *
+ * In hash, this is called if do_slb_fault returns error. Typically it is
+ * because the EA was outside the region allowed by software.
+ */
+DEFINE_INTERRUPT_HANDLER(do_bad_segment_interrupt)
+{
+	int err = regs->result;
+
+	if (err == -EFAULT) {
+		if (user_mode(regs))
+			_exception(SIGSEGV, regs, SEGV_BNDERR, regs->dar);
+		else
+			bad_page_fault(regs, SIGSEGV);
+	} else if (err == -EINVAL) {
+		unrecoverable_exception(regs);
+	} else {
+		BUG();
+	}
 }
 #endif

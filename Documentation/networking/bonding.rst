@@ -566,7 +566,8 @@ miimon
 	link monitoring.  A value of 100 is a good starting point.
 	The use_carrier option, below, affects how the link state is
 	determined.  See the High Availability section for additional
-	information.  The default value is 0.
+	information.  The default value is 100 if arp_interval is not
+	set.
 
 min_links
 
@@ -835,7 +836,7 @@ primary_reselect
 tlb_dynamic_lb
 
 	Specifies if dynamic shuffling of flows is enabled in tlb
-	mode. The value has no effect on any other modes.
+	or alb mode. The value has no effect on any other modes.
 
 	The default behavior of tlb mode is to shuffle active flows across
 	slaves based on the load in that interval. This gives nice lb
@@ -894,7 +895,7 @@ xmit_hash_policy
 		Uses XOR of hardware MAC addresses and packet type ID
 		field to generate the hash. The formula is
 
-		hash = source MAC XOR destination MAC XOR packet type ID
+		hash = source MAC[5] XOR destination MAC[5] XOR packet type ID
 		slave number = hash modulo slave count
 
 		This algorithm will place all traffic to a particular
@@ -910,7 +911,7 @@ xmit_hash_policy
 		Uses XOR of hardware MAC addresses and IP addresses to
 		generate the hash.  The formula is
 
-		hash = source MAC XOR destination MAC XOR packet type ID
+		hash = source MAC[5] XOR destination MAC[5] XOR packet type ID
 		hash = hash XOR source IP XOR destination IP
 		hash = hash XOR (hash RSHIFT 16)
 		hash = hash XOR (hash RSHIFT 8)
@@ -945,6 +946,7 @@ xmit_hash_policy
 		hash = hash XOR source IP XOR destination IP
 		hash = hash XOR (hash RSHIFT 16)
 		hash = hash XOR (hash RSHIFT 8)
+		hash = hash RSHIFT 1
 		And then hash is reduced modulo slave count.
 
 		If the protocol is IPv6 then the source and destination
@@ -1970,15 +1972,6 @@ queries to one or more designated peer systems on the network, and
 uses the response as an indication that the link is operating.  This
 gives some assurance that traffic is actually flowing to and from one
 or more peers on the local network.
-
-The ARP monitor relies on the device driver itself to verify
-that traffic is flowing.  In particular, the driver must keep up to
-date the last receive time, dev->last_rx.  Drivers that use NETIF_F_LLTX
-flag must also update netdev_queue->trans_start.  If they do not, then the
-ARP monitor will immediately fail any slaves using that driver, and
-those slaves will stay down.  If networking monitoring (tcpdump, etc)
-shows the ARP requests and replies on the network, then it may be that
-your device driver is not updating last_rx and trans_start.
 
 7.2 Configuring Multiple ARP Targets
 ------------------------------------

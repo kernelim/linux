@@ -10,6 +10,16 @@ config RTC_MC146818_LIB
 	bool
 	select RTC_LIB
 
+config RTC_LIB_KUNIT_TEST
+	tristate "KUnit test for RTC lib functions" if !KUNIT_ALL_TESTS
+	depends on KUNIT
+	default KUNIT_ALL_TESTS
+	select RTC_LIB
+	help
+	  Enable this option to test RTC library functions.
+
+	  If unsure, say N.
+
 menuconfig RTC_CLASS
 	bool "Real Time Clock"
 	default n
@@ -432,6 +442,7 @@ config RTC_DRV_X1205
 
 config RTC_DRV_PCF8523
 	tristate "NXP PCF8523"
+	select REGMAP_I2C
 	help
 	  If you say yes here you get support for the NXP PCF8523 RTC
 	  chips.
@@ -1278,6 +1289,16 @@ config RTC_DRV_OPAL
 
 	  This driver can also be built as a module. If so, the module
 	  will be called rtc-opal.
+
+config RTC_DRV_OPTEE
+	tristate "OP-TEE based RTC driver"
+	depends on OPTEE
+	help
+	  Select this to get support for OP-TEE based RTC control on SoCs where
+	  RTC are not accessible to the normal world (Linux).
+
+	  This driver can also be built as a module. If so, the module
+	  will be called rtc-optee.
 
 config RTC_DRV_ZYNQMP
 	tristate "Xilinx Zynq Ultrascale+ MPSoC RTC"

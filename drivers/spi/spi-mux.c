@@ -137,6 +137,13 @@ static int spi_mux_probe(struct spi_device *spi)
 	priv = spi_controller_get_devdata(ctlr);
 	priv->spi = spi;
 
+	/*
+	 * Increase lockdep class as these lock are taken while the parent bus
+	 * already holds their instance's lock.
+	 */
+	lockdep_set_subclass(&ctlr->io_mutex, 1);
+	lockdep_set_subclass(&ctlr->add_lock, 1);
+
 	priv->mux = devm_mux_control_get(&spi->dev, NULL);
 	if (IS_ERR(priv->mux)) {
 		ret = dev_err_probe(&spi->dev, PTR_ERR(priv->mux),
@@ -154,6 +161,7 @@ static int spi_mux_probe(struct spi_device *spi)
 	ctlr->num_chipselect = mux_control_states(priv->mux);
 	ctlr->bus_num = -1;
 	ctlr->dev.of_node = spi->dev.of_node;
+	ctlr->must_async = true;
 
 	ret = devm_spi_register_controller(&spi->dev, ctlr);
 	if (ret)

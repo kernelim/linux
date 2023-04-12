@@ -23,6 +23,7 @@
 #include "smb2glob.h"
 #include "smb2pdu.h"
 #include "smb2proto.h"
+#include "cached_dir.h"
 
 static void
 free_set_inf_compound(struct smb_rqst *rqst)
@@ -512,16 +513,19 @@ smb2_query_path_info(const unsigned int xid, struct cifs_tcon *tcon,
 	if (smb2_data == NULL)
 		return -ENOMEM;
 
+	if (strcmp(full_path, ""))
+		rc = -ENOENT;
+	else
+		rc = open_cached_dir(xid, tcon, full_path, cifs_sb, false, &cfid);
 	/* If it is a root and its handle is cached then use it */
-	rc = open_cached_dir(xid, tcon, full_path, cifs_sb, &cfid);
 	if (!rc) {
-		if (tcon->crfid.file_all_info_is_valid) {
+		if (cfid->file_all_info_is_valid) {
 			move_smb2_info_to_cifs(data,
-					       &tcon->crfid.file_all_info);
+					       &cfid->file_all_info);
 		} else {
 			rc = SMB2_query_info(xid, tcon,
-					     cfid->fid->persistent_fid,
-					     cfid->fid->volatile_fid, smb2_data);
+					     cfid->fid.persistent_fid,
+					     cfid->fid.volatile_fid, smb2_data);
 			if (!rc)
 				move_smb2_info_to_cifs(data, smb2_data);
 		}
@@ -646,6 +650,7 @@ int
 smb2_rmdir(const unsigned int xid, struct cifs_tcon *tcon, const char *name,
 	   struct cifs_sb_info *cifs_sb)
 {
+	drop_cached_dir_by_name(xid, tcon, name, cifs_sb);
 	return smb2_compound_op(xid, tcon, cifs_sb, name, DELETE, FILE_OPEN,
 				CREATE_NOT_FILE, ACL_NO_MODE,
 				NULL, SMB2_OP_RMDIR, NULL);
@@ -689,6 +694,7 @@ smb2_rename_path(const unsigned int xid, struct cifs_tcon *tcon,
 {
 	struct cifsFileInfo *cfile;
 
+	drop_cached_dir_by_name(xid, tcon, from_name, cifs_sb);
 	cifs_get_writable_path(tcon, from_name, FIND_WR_WITH_DELETE, &cfile);
 
 	return smb2_set_path_attr(xid, tcon, from_name, to_name,

@@ -6,11 +6,11 @@ weight: 2
 summary: Git repository information.
 ---
 
-== Kernel Git Repository Information
+{{< toc >}}
 
 There are many source-git and dist-git repositories that are used to construct Red Hat kernels.  Some of these repositories are used for testing (CKI), but most of these repositories are used for code that is shipped to customers.   Red Hat kernel git repositories use ‘main’ in place of git’s default ‘master’ branch.
 
-=== source-git repositories
+== source-git repositories
 
 Public git repositories can be used by Red Hat contributors, Community Contributors, and all Partner Engineer contributors.  Private git repositories are restricted to Red Hat contributors and Partner contributors.
 
@@ -48,7 +48,7 @@ For example, the rhel-8 repository contains branches and the main branch (as of 
 |Embargoed|Private, with additional restricted access.   In some cases, these are Red Hat internal only.|Used to resolve CVE and other partner-related embargoed issues.
 |===
 
-=== dist-git repositories
+== dist-git repositories
 
 Public git repositories can be used by Red Hat contributors, Community Contributors, and all Partner Engineer contributors.  Private git repositories are restricted to Red Hat contributors and Partner contributors.
 
@@ -62,7 +62,7 @@ Public git repositories can be used by Red Hat contributors, Community Contribut
 |CentOS (private)|TBD|TBD (The public CentOS-Stream tree is mirrored to both the private Red Hat and public CentOS dist-git trees.)
 |===
 
-=== CI repositories
+== CI repositories
 
 The kernel workflow relies heavily on CI automation which is implemented in various repositories under the CKI namespace.
 |===
@@ -73,7 +73,7 @@ The kernel workflow relies heavily on CI automation which is implemented in vari
 |https://gitlab.com/redhat/red-hat-ci-tools/kernel[Pipeline runs]|public group, specific projects restricted|Pipeline runs and logs. People don't need to access the projects directly but through merge request links unless setting things up.
 |===
 
-=== DataWarehouse
+== DataWarehouse
 
 DataWarehouse is the CKI database and dashboard. It includes build and test information for all non-embargoed CKI runs. Data for public kernels (upstream, CentOS Stream) is publicly readable, access to RHEL kernel data requires sign in with Red Hat SSO.
 

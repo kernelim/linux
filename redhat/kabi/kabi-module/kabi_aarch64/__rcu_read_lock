@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/rcu/tree.c
-0x8d522714	__rcu_read_lock	vmlinux	EXPORT_SYMBOL_GPL
+#2-
+0x8d522714	__rcu_read_lock	vmlinux	EXPORT_SYMBOL_GPL	

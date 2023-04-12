@@ -617,7 +617,7 @@ static void virtio_vsock_vqs_del(struct virtio_vsock *vsock)
 					virtio_vsock_reset_sock);
 
 	/* Stop all work handlers to make sure no one is accessing the device,
-	 * so we can safely call vdev->config->reset().
+	 * so we can safely call virtio_reset_device().
 	 */
 	mutex_lock(&vsock->rx_lock);
 	vsock->rx_run = false;
@@ -634,7 +634,7 @@ static void virtio_vsock_vqs_del(struct virtio_vsock *vsock)
 	/* Flush all device writes and interrupts, device will not use any
 	 * more buffers.
 	 */
-	vdev->config->reset(vdev);
+	virtio_reset_device(vdev);
 
 	mutex_lock(&vsock->rx_lock);
 	while ((pkt = virtqueue_detach_unused_buf(vsock->vqs[VSOCK_VQ_RX])))

@@ -12,8 +12,8 @@
 #include <linux/export.h>
 #include <linux/of_platform.h>
 #include <linux/slab.h>
+#include <linux/debugfs.h>
 
-#include <asm/debugfs.h>
 #include <asm/dcr.h>
 #include <asm/machdep.h>
 #include <asm/prom.h>
@@ -212,7 +212,7 @@ static int setup_msi_msg_address(struct pci_dev *dev, struct msi_msg *msg)
 	entry = first_pci_msi_entry(dev);
 
 	for (; dn; dn = of_get_next_parent(dn)) {
-		if (entry->msi_attrib.is_64) {
+		if (entry->pci.msi_attrib.is_64) {
 			prop = of_get_property(dn, "msi-address-64", &len);
 			if (prop)
 				break;
@@ -480,6 +480,6 @@ void axon_msi_debug_setup(struct device_node *dn, struct axon_msic *msic)
 
 	snprintf(name, sizeof(name), "msic_%d", of_node_to_nid(dn));
 
-	debugfs_create_file(name, 0600, powerpc_debugfs_root, msic, &fops_msic);
+	debugfs_create_file(name, 0600, arch_debugfs_dir, msic, &fops_msic);
 }
 #endif /* DEBUG */

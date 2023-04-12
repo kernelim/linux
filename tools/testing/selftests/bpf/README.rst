@@ -14,10 +14,11 @@ It's now possible to run the selftests using ``tools/testing/selftests/bpf/vmtes
 The script tries to ensure that the tests are run with the same environment as they
 would be run post-submit in the CI used by the Maintainers.
 
-This script downloads a suitable Kconfig and VM userspace image from the system used by
-the CI. It builds the kernel (without overwriting your existing Kconfig), recompiles the
-bpf selftests, runs them (by default ``tools/testing/selftests/bpf/test_progs``) and
-saves the resulting output (by default in ``~/.bpf_selftests``).
+This script uses the in-tree kernel configuration and downloads a VM userspace
+image from the system used by the CI. It builds the kernel (without overwriting
+your existing Kconfig), recompiles the bpf selftests, runs them (by default
+``tools/testing/selftests/bpf/test_progs``) and saves the resulting output (by
+default in ``~/.bpf_selftests``).
 
 Script dependencies:
 - clang (preferably built from sources, https://github.com/llvm/llvm-project);
@@ -26,17 +27,25 @@ Script dependencies:
 - docutils (for ``rst2man``);
 - libcap-devel.
 
-For more information on about using the script, run:
+For more information about using the script, run:
 
 .. code-block:: console
 
   $ tools/testing/selftests/bpf/vmtest.sh -h
 
+In case of linker errors when running selftests, try using static linking:
+
+.. code-block:: console
+
+  $ LDLIBS=-static vmtest.sh
+
+.. note:: Some distros may not support static linking.
+
 .. note:: The script uses pahole and clang based on host environment setting.
           If you want to change pahole and llvm, you can change `PATH` environment
           variable in the beginning of script.
 
-.. note:: The script currently only supports x86_64.
+.. note:: The script currently only supports x86_64 and s390x architectures.
 
 Additional information about selftest failures are
 documented here.
@@ -204,16 +213,19 @@ __ https://reviews.llvm.org/D93563
 btf_tag test and Clang version
 ==============================
 
-The btf_tag selftest require LLVM support to recognize the btf_decl_tag attribute.
-It was introduced in `Clang 14`__.
+The btf_tag selftest requires LLVM support to recognize the btf_decl_tag and
+btf_type_tag attributes. They are introduced in `Clang 14` [0_, 1_].
+The subtests ``btf_type_tag_user_{mod1, mod2, vmlinux}`` also requires
+pahole version ``1.23``.
 
-Without it, the btf_tag selftest will be skipped and you will observe:
+Without them, the btf_tag selftest will be skipped and you will observe:
 
 .. code-block:: console
 
   #<test_num> btf_tag:SKIP
 
-__ https://reviews.llvm.org/D111588
+.. _0: https://reviews.llvm.org/D111588
+.. _1: https://reviews.llvm.org/D111199
 
 Clang dependencies for static linking tests
 ===========================================

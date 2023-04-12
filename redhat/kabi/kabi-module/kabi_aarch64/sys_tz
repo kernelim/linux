@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/time/time.c
-0xfe5d4bb2	sys_tz	vmlinux	EXPORT_SYMBOL
+#2-
+0xfe5d4bb2	sys_tz	vmlinux	EXPORT_SYMBOL	

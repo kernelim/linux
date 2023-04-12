@@ -81,6 +81,7 @@ void cpu_detect_mhz_feature(void);
 extern const struct seq_operations cpuinfo_op;
 extern void execve_tail(void);
 extern void __bpon(void);
+unsigned long vdso_size(void);
 
 /*
  * User space process size: 2GB for 31 bit, 4TB or 8PT for 64 bit.
@@ -93,9 +94,10 @@ extern void __bpon(void);
 #define TASK_SIZE		TASK_SIZE_OF(current)
 #define TASK_SIZE_MAX		(-PAGE_SIZE)
 
-#define STACK_TOP		(test_thread_flag(TIF_31BIT) ? \
-					_REGION3_SIZE : _REGION2_SIZE)
-#define STACK_TOP_MAX		_REGION2_SIZE
+#define VDSO_BASE		(STACK_TOP + PAGE_SIZE)
+#define VDSO_LIMIT		(test_thread_flag(TIF_31BIT) ? _REGION3_SIZE : _REGION2_SIZE)
+#define STACK_TOP		(VDSO_LIMIT - vdso_size() - PAGE_SIZE)
+#define STACK_TOP_MAX		(_REGION2_SIZE - vdso_size() - PAGE_SIZE)
 
 #define HAVE_ARCH_PICK_MMAP_LAYOUT
 
@@ -199,13 +201,7 @@ unsigned long __get_wchan(struct task_struct *p);
 /* Has task runtime instrumentation enabled ? */
 #define is_ri_task(tsk) (!!(tsk)->thread.ri_cb)
 
-static __always_inline unsigned long current_stack_pointer(void)
-{
-	unsigned long sp;
-
-	asm volatile("la %0,0(15)" : "=a" (sp));
-	return sp;
-}
+register unsigned long current_stack_pointer asm("r15");
 
 static __always_inline unsigned short stap(void)
 {
@@ -316,7 +312,7 @@ extern void (*s390_base_pgm_handler_fn)(void);
 
 #define ARCH_LOW_ADDRESS_LIMIT	0x7fffffffUL
 
-extern int memcpy_real(void *, void *, size_t);
+extern int memcpy_real(void *, unsigned long, size_t);
 extern void memcpy_absolute(void *, void *, size_t);
 
 #define mem_assign_absolute(dest, val) do {			\

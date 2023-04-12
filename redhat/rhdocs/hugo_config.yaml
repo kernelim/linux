@@ -38,6 +38,7 @@ menu:
     weight: 2
 
 params:
+  geekdocMenuBundle: true
   google_analytics_id: ""
   homepage_button_link: '/docs'
   homepage_button_text: 'Read The Docs'

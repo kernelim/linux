@@ -12,9 +12,15 @@ redhat/	jfaracco@redhat.com scweaver@redhat.com
 ^redhat/configs/	jfaracco@redhat.com scweaver@redhat.com
 
 [CentOS Stream 9 Kernel Maintainer]
-Makefile.rhelver	herton@redhat.com
+Makefile.rhelver	jstancek@redhat.com
 
 [CentOS Stream 9 Real Time Kernel Maintainer]
+Makefile.rhelver	lgoncalv@redhat.com
+
+[RHEL 9.2 Kernel Maintainer]
+Makefile.rhelver	herton@redhat.com
+
+[RHEL 9.2 Real Time Kernel Maintainer]
 Makefile.rhelver	lgoncalv@redhat.com
 
 [RHEL 9.1 Kernel Maintainer]
@@ -506,8 +512,8 @@ include/uapi/linux/mdio.h	ihuguet@redhat.com
 include/uapi/linux/mii.h	ihuguet@redhat.com
 
 ^[EXT4 FILE SYSTEM]
-Documentation/filesystems/ext4/ext4.rst	lczerner@redhat.com
-fs/ext4/	lczerner@redhat.com
+Documentation/filesystems/ext4/ext4.rst	cmaiolino@redhat.com
+fs/ext4/	cmaiolino@redhat.com
 
 ^[EXTERNAL CONNECTOR SUBSYSTEM (EXTCON)]
 drivers/extcon/	dledford@redhat.com prarit@redhat.com
@@ -815,8 +821,8 @@ include/net/iucv/	dledford@redhat.com prarit@redhat.com
 net/iucv/	dledford@redhat.com prarit@redhat.com
 
 ^[JOURNALLING LAYER FOR BLOCK DEVICES (JBD2)]
-fs/jbd2/	lczerner@redhat.com
-include/linux/jbd2.h	lczerner@redhat.com
+fs/jbd2/	cmaiolino@redhat.com
+include/linux/jbd2.h	cmaiolino@redhat.com
 
 ^[KASLR]
 arch/x86/boot/compressed/kaslr.c	jdenham@redhat.com
@@ -966,6 +972,14 @@ include/uapi/linux/videodev2.h	dnelson@redhat.com
 include/uapi/linux/media.h	dnelson@redhat.com
 include/uapi/linux/v4l2-*	dnelson@redhat.com
 include/uapi/linux/ivtv*	dnelson@redhat.com
+^drivers/media/pci/saa7134/saa7134-alsa.c	dnelson@redhat.com
+^drivers/media/pci/cx23885/cx23885-alsa.c	dnelson@redhat.com
+^drivers/media/pci/cx25821/cx25821-alsa.c	dnelson@redhat.com
+^drivers/media/pci/cx18/cx18-alsa*	dnelson@redhat.com
+^drivers/media/pci/cx88/cx88-alsa*	dnelson@redhat.com
+^drivers/media/pci/cobalt/cobalt-alsa*	dnelson@redhat.com
+^drivers/media/pci/ivtv/ivtv-alsa*	dnelson@redhat.com
+^drivers/media/usb/	dnelson@redhat.com
 
 ^[MELLANOX ETHERNET SWITCH DRIVERS]
 drivers/net/ethernet/mellanox/mlxsw/	ivecera@redhat.com
@@ -1649,6 +1663,7 @@ include/linux/thermal.h	darcari@redhat.com
 
 ^[THUNDERBOLT SUBSYSTEM]
 drivers/net/thunderbolt.c	desnesn@redhat.com
+drivers/net/thunderbolt/	desnesn@redhat.com
 drivers/thunderbolt/	desnesn@redhat.com
 drivers/platform/x86/intel-wmi-thunderbolt.c	desnesn@redhat.com
 include/linux/thunderbolt.h	desnesn@redhat.com
@@ -1709,6 +1724,8 @@ drivers/net/usb/	jtornosm@redhat.com
 
 ^[USB SUBSYSTEM]
 drivers/usb/	desnesn@redhat.com
+drivers/media/usb/	desnesn@redhat.com
+^drivers/media/usb/tm6000/tm6000-alsa.c	desnesn@redhat.com
 
 ^[USERSPACE I/O DRIVERS (UIO)]
 include/linux/uio_driver.h	arozansk@redhat.com

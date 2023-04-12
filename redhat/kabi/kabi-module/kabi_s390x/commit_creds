@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/cred.c
-0xe8390737	commit_creds	vmlinux	EXPORT_SYMBOL
+#2-
+0xe8390737	commit_creds	vmlinux	EXPORT_SYMBOL	

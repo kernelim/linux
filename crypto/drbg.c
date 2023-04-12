@@ -1957,6 +1957,7 @@ static int drbg_kcapi_random(struct crypto_rng *tfm,
 	struct drbg_state *drbg = crypto_rng_ctx(tfm);
 	struct drbg_string *addtl = NULL;
 	struct drbg_string string;
+	int err;
 
 	if (slen) {
 		/* linked list variable is now local to allow modification */
@@ -1964,10 +1965,15 @@ static int drbg_kcapi_random(struct crypto_rng *tfm,
 		addtl = &string;
 	}
 
-	return drbg_generate_long(drbg, dst, dlen, addtl,
-				  (crypto_tfm_get_flags(crypto_rng_tfm(tfm)) &
-				   CRYPTO_TFM_REQ_NEED_RESEED) ==
-				  CRYPTO_TFM_REQ_NEED_RESEED);
+	err = drbg_generate_long(drbg, dst, dlen, addtl,
+				 (crypto_tfm_get_flags(crypto_rng_tfm(tfm)) &
+				  CRYPTO_TFM_REQ_NEED_RESEED) ==
+				 CRYPTO_TFM_REQ_NEED_RESEED);
+
+	crypto_tfm_clear_flags(crypto_rng_tfm(tfm),
+			       CRYPTO_TFM_REQ_NEED_RESEED);
+
+	return err;
 }
 
 /*

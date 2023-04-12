@@ -20,6 +20,7 @@
 #include <linux/iommu.h>
 #include <linux/rculist.h>
 #include <linux/sizes.h>
+#include <linux/debugfs.h>
 
 #include <asm/sections.h>
 #include <asm/io.h>
@@ -32,7 +33,6 @@
 #include <asm/iommu.h>
 #include <asm/tce.h>
 #include <asm/xics.h>
-#include <asm/debugfs.h>
 #include <asm/firmware.h>
 #include <asm/pnv-pci.h>
 #include <asm/mmzone.h>
@@ -2167,7 +2167,7 @@ static void pnv_ioda_setup_pe_res(struct pnv_ioda_pe *pe,
 
 /*
  * This function is supposed to be called on basis of PE from top
- * to bottom style. So the the I/O or MMIO segment assigned to
+ * to bottom style. So the I/O or MMIO segment assigned to
  * parent PE could be overridden by its child PEs if necessary.
  */
 static void pnv_ioda_setup_pe_seg(struct pnv_ioda_pe *pe)
@@ -2259,7 +2259,7 @@ static void pnv_pci_ioda_create_dbgfs(void)
 		phb = hose->private_data;
 
 		sprintf(name, "PCI%04x", hose->global_number);
-		phb->dbgfs = debugfs_create_dir(name, powerpc_debugfs_root);
+		phb->dbgfs = debugfs_create_dir(name, arch_debugfs_dir);
 
 		debugfs_create_file_unsafe("dump_diag_regs", 0200, phb->dbgfs,
 					   phb, &pnv_pci_diag_data_fops);

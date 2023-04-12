@@ -13,6 +13,7 @@
 #include "cache.h"
 #include "xdr3.h"
 #include "vfs.h"
+#include "filecache.h"
 
 #define NFSDDBG_FACILITY		NFSDDBG_PROC
 
@@ -67,12 +68,15 @@ nfsd3_proc_setattr(struct svc_rqst *rqstp)
 {
 	struct nfsd3_sattrargs *argp = rqstp->rq_argp;
 	struct nfsd3_attrstat *resp = rqstp->rq_resp;
+	struct nfsd_attrs attrs = {
+		.na_iattr	= &argp->attrs,
+	};
 
 	dprintk("nfsd: SETATTR(3)  %s\n",
 				SVCFH_fmt(&argp->fh));
 
 	fh_copy(&resp->fh, &argp->fh);
-	resp->status = nfsd_setattr(rqstp, &resp->fh, &argp->attrs,
+	resp->status = nfsd_setattr(rqstp, &resp->fh, &attrs,
 				    argp->check_guard, argp->guardtime);
 	return rpc_success;
 }
@@ -212,15 +216,11 @@ nfsd3_proc_write(struct svc_rqst *rqstp)
 	fh_copy(&resp->fh, &argp->fh);
 	resp->committed = argp->stable;
 	nvecs = svc_fill_write_vector(rqstp, &argp->payload);
-	if (!nvecs) {
-		resp->status = nfserr_io;
-		goto out;
-	}
+
 	resp->status = nfsd_write(rqstp, &resp->fh, argp->offset,
 				  rqstp->rq_vec, nvecs, &cnt,
 				  resp->committed, resp->verf);
 	resp->count = cnt;
-out:
 	return rpc_success;
 }
 
@@ -237,6 +237,9 @@ nfsd3_create_file(struct svc_rqst *rqstp, struct svc_fh *fhp,
 {
 	struct iattr *iap = &argp->attrs;
 	struct dentry *parent, *child;
+	struct nfsd_attrs attrs = {
+		.na_iattr	= iap,
+	};
 	__u32 v_mtime, v_atime;
 	struct inode *inode;
 	__be32 status;
@@ -258,7 +261,7 @@ nfsd3_create_file(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	if (host_err)
 		return nfserrno(host_err);
 
-	fh_lock_nested(fhp, I_MUTEX_PARENT);
+	inode_lock_nested(inode, I_MUTEX_PARENT);
 
 	child = lookup_one_len(argp->name, parent, argp->len);
 	if (IS_ERR(child)) {
@@ -316,11 +319,13 @@ nfsd3_create_file(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	if (!IS_POSIXACL(inode))
 		iap->ia_mode &= ~current_umask();
 
+	fh_fill_pre_attrs(fhp);
 	host_err = vfs_create(&init_user_ns, inode, child, iap->ia_mode, true);
 	if (host_err < 0) {
 		status = nfserrno(host_err);
 		goto out;
 	}
+	fh_fill_post_attrs(fhp);
 
 	/* A newly created file already has a file size of zero. */
 	if ((iap->ia_valid & ATTR_SIZE) && (iap->ia_size == 0))
@@ -335,10 +340,10 @@ nfsd3_create_file(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	}
 
 set_attr:
-	status = nfsd_create_setattr(rqstp, fhp, resfhp, iap);
+	status = nfsd_create_setattr(rqstp, fhp, resfhp, &attrs);
 
 out:
-	fh_unlock(fhp);
+	inode_unlock(inode);
 	if (child && !IS_ERR(child))
 		dput(child);
 	fh_drop_write(fhp);
@@ -372,6 +377,9 @@ nfsd3_proc_mkdir(struct svc_rqst *rqstp)
 {
 	struct nfsd3_createargs *argp = rqstp->rq_argp;
 	struct nfsd3_diropres *resp = rqstp->rq_resp;
+	struct nfsd_attrs attrs = {
+		.na_iattr	= &argp->attrs,
+	};
 
 	dprintk("nfsd: MKDIR(3)    %s %.*s\n",
 				SVCFH_fmt(&argp->fh),
@@ -382,8 +390,7 @@ nfsd3_proc_mkdir(struct svc_rqst *rqstp)
 	fh_copy(&resp->dirfh, &argp->fh);
 	fh_init(&resp->fh, NFS3_FHSIZE);
 	resp->status = nfsd_create(rqstp, &resp->dirfh, argp->name, argp->len,
-				   &argp->attrs, S_IFDIR, 0, &resp->fh);
-	fh_unlock(&resp->dirfh);
+				   &attrs, S_IFDIR, 0, &resp->fh);
 	return rpc_success;
 }
 
@@ -392,6 +399,9 @@ nfsd3_proc_symlink(struct svc_rqst *rqstp)
 {
 	struct nfsd3_symlinkargs *argp = rqstp->rq_argp;
 	struct nfsd3_diropres *resp = rqstp->rq_resp;
+	struct nfsd_attrs attrs = {
+		.na_iattr	= &argp->attrs,
+	};
 
 	if (argp->tlen == 0) {
 		resp->status = nfserr_inval;
@@ -418,7 +428,7 @@ nfsd3_proc_symlink(struct svc_rqst *rqstp)
 	fh_copy(&resp->dirfh, &argp->ffh);
 	fh_init(&resp->fh, NFS3_FHSIZE);
 	resp->status = nfsd_symlink(rqstp, &resp->dirfh, argp->fname,
-				    argp->flen, argp->tname, &resp->fh);
+				    argp->flen, argp->tname, &attrs, &resp->fh);
 	kfree(argp->tname);
 out:
 	return rpc_success;
@@ -432,6 +442,9 @@ nfsd3_proc_mknod(struct svc_rqst *rqstp)
 {
 	struct nfsd3_mknodargs *argp = rqstp->rq_argp;
 	struct nfsd3_diropres  *resp = rqstp->rq_resp;
+	struct nfsd_attrs attrs = {
+		.na_iattr	= &argp->attrs,
+	};
 	int type;
 	dev_t	rdev = 0;
 
@@ -457,8 +470,7 @@ nfsd3_proc_mknod(struct svc_rqst *rqstp)
 
 	type = nfs3_ftypes[argp->ftype];
 	resp->status = nfsd_create(rqstp, &resp->dirfh, argp->name, argp->len,
-				   &argp->attrs, type, rdev, &resp->fh);
-	fh_unlock(&resp->dirfh);
+				   &attrs, type, rdev, &resp->fh);
 out:
 	return rpc_success;
 }
@@ -481,7 +493,6 @@ nfsd3_proc_remove(struct svc_rqst *rqstp)
 	fh_copy(&resp->fh, &argp->fh);
 	resp->status = nfsd_unlink(rqstp, &resp->fh, -S_IFDIR,
 				   argp->name, argp->len);
-	fh_unlock(&resp->fh);
 	return rpc_success;
 }
 
@@ -502,7 +513,6 @@ nfsd3_proc_rmdir(struct svc_rqst *rqstp)
 	fh_copy(&resp->fh, &argp->fh);
 	resp->status = nfsd_unlink(rqstp, &resp->fh, S_IFDIR,
 				   argp->name, argp->len);
-	fh_unlock(&resp->fh);
 	return rpc_success;
 }
 
@@ -762,6 +772,7 @@ nfsd3_proc_commit(struct svc_rqst *rqstp)
 {
 	struct nfsd3_commitargs *argp = rqstp->rq_argp;
 	struct nfsd3_commitres *resp = rqstp->rq_resp;
+	struct nfsd_file *nf;
 
 	dprintk("nfsd: COMMIT(3)   %s %u@%Lu\n",
 				SVCFH_fmt(&argp->fh),
@@ -769,8 +780,14 @@ nfsd3_proc_commit(struct svc_rqst *rqstp)
 				(unsigned long long) argp->offset);
 
 	fh_copy(&resp->fh, &argp->fh);
-	resp->status = nfsd_commit(rqstp, &resp->fh, argp->offset,
+	resp->status = nfsd_file_acquire_gc(rqstp, &resp->fh, NFSD_MAY_WRITE |
+					    NFSD_MAY_NOT_BREAK_LEASE, &nf);
+	if (resp->status)
+		goto out;
+	resp->status = nfsd_commit(rqstp, &resp->fh, nf, argp->offset,
 				   argp->count, resp->verf);
+	nfsd_file_put(nf);
+out:
 	return rpc_success;
 }
 

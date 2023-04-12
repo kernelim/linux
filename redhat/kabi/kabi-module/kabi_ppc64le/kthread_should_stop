@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/kthread.c
-0xb3f7646e	kthread_should_stop	vmlinux	EXPORT_SYMBOL
+#2-
+0xb3f7646e	kthread_should_stop	vmlinux	EXPORT_SYMBOL	

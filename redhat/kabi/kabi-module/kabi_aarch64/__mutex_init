@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/locking/mutex.c
-0xcefb0c9f	__mutex_init	vmlinux	EXPORT_SYMBOL
+#2-
+0xcefb0c9f	__mutex_init	vmlinux	EXPORT_SYMBOL	

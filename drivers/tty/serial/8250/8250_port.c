@@ -2062,10 +2062,7 @@ static void serial8250_break_ctl(struct uart_port *port, int break_state)
 	serial8250_rpm_put(up);
 }
 
-/*
- *	Wait for transmitter & holding register to empty
- */
-static void wait_for_xmitr(struct uart_8250_port *up, int bits)
+static void wait_for_lsr(struct uart_8250_port *up, int bits)
 {
 	unsigned int status, tmout = 10000;
 
@@ -2082,6 +2079,16 @@ static void wait_for_xmitr(struct uart_8250_port *up, int bits)
 		udelay(1);
 		touch_nmi_watchdog();
 	}
+}
+
+/*
+ *	Wait for transmitter & holding register to empty
+ */
+static void wait_for_xmitr(struct uart_8250_port *up, int bits)
+{
+	unsigned int tmout;
+
+	wait_for_lsr(up, bits);
 
 	/* Wait up to 1s for flow control if necessary */
 	if (up->port.flags & UPF_CONS_FLOW) {
@@ -2657,7 +2664,7 @@ static void serial8250_set_divisor(struct uart_port *port, unsigned int baud,
 
 static unsigned int serial8250_get_baud_rate(struct uart_port *port,
 					     struct ktermios *termios,
-					     struct ktermios *old)
+					     const struct ktermios *old)
 {
 	unsigned int tolerance = port->uartclk / 100;
 	unsigned int min;
@@ -2693,21 +2700,32 @@ static unsigned int serial8250_get_baud_rate(struct uart_port *port,
 void serial8250_update_uartclk(struct uart_port *port, unsigned int uartclk)
 {
 	struct uart_8250_port *up = up_to_u8250p(port);
+	struct tty_port *tport = &port->state->port;
 	unsigned int baud, quot, frac = 0;
 	struct ktermios *termios;
+	struct tty_struct *tty;
 	unsigned long flags;
 
-	mutex_lock(&port->state->port.mutex);
+	tty = tty_port_tty_get(tport);
+	if (!tty) {
+		mutex_lock(&tport->mutex);
+		port->uartclk = uartclk;
+		mutex_unlock(&tport->mutex);
+		return;
+	}
+
+	down_write(&tty->termios_rwsem);
+	mutex_lock(&tport->mutex);
 
 	if (port->uartclk == uartclk)
 		goto out_lock;
 
 	port->uartclk = uartclk;
 
-	if (!tty_port_initialized(&port->state->port))
+	if (!tty_port_initialized(tport))
 		goto out_lock;
 
-	termios = &port->state->port.tty->termios;
+	termios = &tty->termios;
 
 	baud = serial8250_get_baud_rate(port, termios, NULL);
 	quot = serial8250_get_divisor(port, baud, &frac);
@@ -2724,13 +2742,15 @@ void serial8250_update_uartclk(struct uart_port *port, unsigned int uartclk)
 	serial8250_rpm_put(up);
 
 out_lock:
-	mutex_unlock(&port->state->port.mutex);
+	mutex_unlock(&tport->mutex);
+	up_write(&tty->termios_rwsem);
+	tty_kref_put(tty);
 }
 EXPORT_SYMBOL_GPL(serial8250_update_uartclk);
 
 void
 serial8250_do_set_termios(struct uart_port *port, struct ktermios *termios,
-			  struct ktermios *old)
+		          const struct ktermios *old)
 {
 	struct uart_8250_port *up = up_to_u8250p(port);
 	unsigned char cval;
@@ -2868,7 +2888,7 @@ EXPORT_SYMBOL(serial8250_do_set_termios);
 
 static void
 serial8250_set_termios(struct uart_port *port, struct ktermios *termios,
-		       struct ktermios *old)
+		       const struct ktermios *old)
 {
 	if (port->set_termios)
 		port->set_termios(port, termios, old);
@@ -3287,7 +3307,7 @@ EXPORT_SYMBOL_GPL(serial8250_set_defaults);
 
 #ifdef CONFIG_SERIAL_8250_CONSOLE
 
-static void serial8250_console_putchar(struct uart_port *port, int ch)
+static void serial8250_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	struct uart_8250_port *up = up_to_u8250p(port);
 
@@ -3317,6 +3337,35 @@ static void serial8250_console_restore(struct uart_8250_port *up)
 }
 
 /*
+ * Print a string to the serial port using the device FIFO
+ *
+ * It sends fifosize bytes and then waits for the fifo
+ * to get empty.
+ */
+static void serial8250_console_fifo_write(struct uart_8250_port *up,
+					  const char *s, unsigned int count)
+{
+	int i;
+	const char *end = s + count;
+	unsigned int fifosize = up->tx_loadsz;
+	bool cr_sent = false;
+
+	while (s != end) {
+		wait_for_lsr(up, UART_LSR_THRE);
+
+		for (i = 0; i < fifosize && s != end; ++i) {
+			if (*s == '\n' && !cr_sent) {
+				serial_out(up, UART_TX, '\r');
+				cr_sent = true;
+			} else {
+				serial_out(up, UART_TX, *s++);
+				cr_sent = false;
+			}
+		}
+	}
+}
+
+/*
  *	Print a string to the serial port trying not to disturb
  *	any possible real use of the port...
  *
@@ -3331,7 +3380,7 @@ void serial8250_console_write(struct uart_8250_port *up, const char *s,
 	struct uart_8250_em485 *em485 = up->em485;
 	struct uart_port *port = &up->port;
 	unsigned long flags;
-	unsigned int ier;
+	unsigned int ier, use_fifo;
 	int locked = 1;
 
 	touch_nmi_watchdog();
@@ -3363,7 +3412,30 @@ void serial8250_console_write(struct uart_8250_port *up, const char *s,
 		mdelay(port->rs485.delay_rts_before_send);
 	}
 
-	uart_console_write(port, s, count, serial8250_console_putchar);
+	use_fifo = (up->capabilities & UART_CAP_FIFO) &&
+		/*
+		 * BCM283x requires to check the fifo
+		 * after each byte.
+		 */
+		!(up->capabilities & UART_CAP_MINI) &&
+		/*
+		 * tx_loadsz contains the transmit fifo size
+		 */
+		up->tx_loadsz > 1 &&
+		(up->fcr & UART_FCR_ENABLE_FIFO) &&
+		port->state &&
+		test_bit(TTY_PORT_INITIALIZED, &port->state->port.iflags) &&
+		/*
+		 * After we put a data in the fifo, the controller will send
+		 * it regardless of the CTS state. Therefore, only use fifo
+		 * if we don't use control flow.
+		 */
+		!(up->port.flags & UPF_CONS_FLOW);
+
+	if (likely(use_fifo))
+		serial8250_console_fifo_write(up, s, count);
+	else
+		uart_console_write(port, s, count, serial8250_console_putchar);
 
 	/*
 	 *	Finally, wait for transmitter to become empty

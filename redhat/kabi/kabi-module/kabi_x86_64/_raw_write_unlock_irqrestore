@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/locking/spinlock.c
-0xeb078aee	_raw_write_unlock_irqrestore	vmlinux	EXPORT_SYMBOL
+#2-
+0xeb078aee	_raw_write_unlock_irqrestore	vmlinux	EXPORT_SYMBOL	

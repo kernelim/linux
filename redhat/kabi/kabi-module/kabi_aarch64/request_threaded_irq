@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/irq/manage.c
-0x92d5838e	request_threaded_irq	vmlinux	EXPORT_SYMBOL
+#2-
+0x92d5838e	request_threaded_irq	vmlinux	EXPORT_SYMBOL	

@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/vsprintf.c
-0x9adc9c67	vsnprintf	vmlinux	EXPORT_SYMBOL
+#2-
+0x9adc9c67	vsnprintf	vmlinux	EXPORT_SYMBOL	

@@ -623,7 +623,7 @@ static int bnxt_hwrm_func_vf_resc_cfg(struct bnxt *bp, int num_vfs, bool reset)
 		hw_resc->max_stat_ctxs -= le16_to_cpu(req->min_stat_ctx) * n;
 		hw_resc->max_vnics -= le16_to_cpu(req->min_vnics) * n;
 		if (bp->flags & BNXT_FLAG_CHIP_P5)
-			hw_resc->max_irqs -= vf_msix * n;
+			hw_resc->max_nqs -= vf_msix;
 
 		rc = pf->active_vfs;
 	}
@@ -851,7 +851,7 @@ void bnxt_sriov_disable(struct bnxt *bp)
 		return;
 
 	/* synchronize VF and VF-rep create and destroy */
-	mutex_lock(&bp->sriov_lock);
+	devl_lock(bp->dl);
 	bnxt_vf_reps_destroy(bp);
 
 	if (pci_vfs_assigned(bp->pdev)) {
@@ -864,7 +864,7 @@ void bnxt_sriov_disable(struct bnxt *bp)
 		/* Free the HW resources reserved for various VF's */
 		bnxt_hwrm_func_vf_resource_free(bp, num_vfs);
 	}
-	mutex_unlock(&bp->sriov_lock);
+	devl_unlock(bp->dl);
 
 	bnxt_free_vf_resources(bp);
 

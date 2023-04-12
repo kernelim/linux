@@ -434,65 +434,6 @@ static int ovs_ct_set_labels(struct nf_conn *ct, struct sw_flow_key *key,
 	return 0;
 }
 
-/* 'skb' should already be pulled to nh_ofs. */
-static int ovs_ct_helper(struct sk_buff *skb, u16 proto)
-{
-	const struct nf_conntrack_helper *helper;
-	const struct nf_conn_help *help;
-	enum ip_conntrack_info ctinfo;
-	unsigned int protoff;
-	struct nf_conn *ct;
-	int err;
-
-	ct = nf_ct_get(skb, &ctinfo);
-	if (!ct || ctinfo == IP_CT_RELATED_REPLY)
-		return NF_ACCEPT;
-
-	help = nfct_help(ct);
-	if (!help)
-		return NF_ACCEPT;
-
-	helper = rcu_dereference(help->helper);
-	if (!helper)
-		return NF_ACCEPT;
-
-	switch (proto) {
-	case NFPROTO_IPV4:
-		protoff = ip_hdrlen(skb);
-		break;
-	case NFPROTO_IPV6: {
-		u8 nexthdr = ipv6_hdr(skb)->nexthdr;
-		__be16 frag_off;
-		int ofs;
-
-		ofs = ipv6_skip_exthdr(skb, sizeof(struct ipv6hdr), &nexthdr,
-				       &frag_off);
-		if (ofs < 0 || (frag_off & htons(~0x7)) != 0) {
-			pr_debug("proto header not found\n");
-			return NF_ACCEPT;
-		}
-		protoff = ofs;
-		break;
-	}
-	default:
-		WARN_ONCE(1, "helper invoked on non-IP family!");
-		return NF_DROP;
-	}
-
-	err = helper->help(skb, protoff, ct, ctinfo);
-	if (err != NF_ACCEPT)
-		return err;
-
-	/* Adjust seqs after helper.  This is needed due to some helpers (e.g.,
-	 * FTP with NAT) adusting the TCP payload size when mangling IP
-	 * addresses and/or port numbers in the text-based control connection.
-	 */
-	if (test_bit(IPS_SEQ_ADJUST_BIT, &ct->status) &&
-	    !nf_ct_seq_adjust(skb, ct, ctinfo, protoff))
-		return NF_DROP;
-	return NF_ACCEPT;
-}
-
 /* Returns 0 on success, -EINPROGRESS if 'skb' is stolen, or other nonzero
  * value if 'skb' is freed.
  */
@@ -794,10 +735,7 @@ static int ovs_ct_nat_execute(struct sk_buff *skb, struct nf_conn *ct,
 			      const struct nf_nat_range2 *range,
 			      enum nf_nat_manip_type maniptype, struct sw_flow_key *key)
 {
-	int hooknum, nh_off, err = NF_ACCEPT;
-
-	nh_off = skb_network_offset(skb);
-	skb_pull_rcsum(skb, nh_off);
+	int hooknum, err = NF_ACCEPT;
 
 	/* See HOOK2MANIP(). */
 	if (maniptype == NF_NAT_MANIP_SRC)
@@ -814,7 +752,7 @@ static int ovs_ct_nat_execute(struct sk_buff *skb, struct nf_conn *ct,
 			if (!nf_nat_icmp_reply_translation(skb, ct, ctinfo,
 							   hooknum))
 				err = NF_DROP;
-			goto push;
+			goto out;
 		} else if (IS_ENABLED(CONFIG_IPV6) &&
 			   skb->protocol == htons(ETH_P_IPV6)) {
 			__be16 frag_off;
@@ -829,7 +767,7 @@ static int ovs_ct_nat_execute(struct sk_buff *skb, struct nf_conn *ct,
 								     hooknum,
 								     hdrlen))
 					err = NF_DROP;
-				goto push;
+				goto out;
 			}
 		}
 		/* Non-ICMP, fall thru to initialize if needed. */
@@ -847,7 +785,7 @@ static int ovs_ct_nat_execute(struct sk_buff *skb, struct nf_conn *ct,
 				? nf_nat_setup_info(ct, range, maniptype)
 				: nf_nat_alloc_null_binding(ct, hooknum);
 			if (err != NF_ACCEPT)
-				goto push;
+				goto out;
 		}
 		break;
 
@@ -857,13 +795,11 @@ static int ovs_ct_nat_execute(struct sk_buff *skb, struct nf_conn *ct,
 
 	default:
 		err = NF_DROP;
-		goto push;
+		goto out;
 	}
 
 	err = nf_nat_packet(ct, ctinfo, hooknum, skb);
-push:
-	skb_push_rcsum(skb, nh_off);
-
+out:
 	/* Update the flow key if NAT successful. */
 	if (err == NF_ACCEPT)
 		ovs_nat_update_key(key, skb, maniptype);
@@ -880,17 +816,19 @@ static int ovs_ct_nat(struct net *net, struct sw_flow_key *key,
 	enum nf_nat_manip_type maniptype;
 	int err;
 
+	if (!(info->nat & OVS_CT_NAT))
+		return NF_ACCEPT;
+
 	/* Add NAT extension if not confirmed yet. */
 	if (!nf_ct_is_confirmed(ct) && !nf_ct_nat_ext_add(ct))
-		return NF_ACCEPT;   /* Can't NAT. */
+		return NF_DROP;   /* Can't NAT. */
 
 	/* Determine NAT type.
 	 * Check if the NAT type can be deduced from the tracked connection.
 	 * Make sure new expected connections (IP_CT_RELATED) are NATted only
 	 * when committing.
 	 */
-	if (info->nat & OVS_CT_NAT && ctinfo != IP_CT_NEW &&
-	    ct->status & IPS_NAT_MASK &&
+	if (ctinfo != IP_CT_NEW && ct->status & IPS_NAT_MASK &&
 	    (ctinfo != IP_CT_RELATED || info->commit)) {
 		/* NAT an established or related connection like before. */
 		if (CTINFO2DIR(ctinfo) == IP_CT_DIR_REPLY)
@@ -1015,7 +953,8 @@ static int __ovs_ct_lookup(struct net *net, struct sw_flow_key *key,
 		 * connections which we will commit, we may need to attach
 		 * the helper here.
 		 */
-		if (info->commit && info->helper && !nfct_help(ct)) {
+		if (!nf_ct_is_confirmed(ct) && info->commit &&
+		    info->helper && !nfct_help(ct)) {
 			int err = __nf_ct_try_assign_helper(ct, info->ct,
 							    GFP_ATOMIC);
 			if (err)
@@ -1037,7 +976,7 @@ static int __ovs_ct_lookup(struct net *net, struct sw_flow_key *key,
 		 */
 		if ((nf_ct_is_confirmed(ct) ? !cached || add_helper :
 					      info->commit) &&
-		    ovs_ct_helper(skb, info->family) != NF_ACCEPT) {
+		    nf_ct_helper(skb, ct, ctinfo, info->family) != NF_ACCEPT) {
 			return -EINVAL;
 		}
 
@@ -1347,43 +1286,6 @@ int ovs_ct_clear(struct sk_buff *skb, struct sw_flow_key *key)
 		ovs_ct_fill_key(skb, key, false);
 
 	return 0;
-}
-
-static int ovs_ct_add_helper(struct ovs_conntrack_info *info, const char *name,
-			     const struct sw_flow_key *key, bool log)
-{
-	struct nf_conntrack_helper *helper;
-	struct nf_conn_help *help;
-	int ret = 0;
-
-	helper = nf_conntrack_helper_try_module_get(name, info->family,
-						    key->ip.proto);
-	if (!helper) {
-		OVS_NLERR(log, "Unknown helper \"%s\"", name);
-		return -EINVAL;
-	}
-
-	help = nf_ct_helper_ext_add(info->ct, GFP_KERNEL);
-	if (!help) {
-		nf_conntrack_helper_put(helper);
-		return -ENOMEM;
-	}
-
-#if IS_ENABLED(CONFIG_NF_NAT)
-	if (info->nat) {
-		ret = nf_nat_helper_try_module_get(name, info->family,
-						   key->ip.proto);
-		if (ret) {
-			nf_conntrack_helper_put(helper);
-			OVS_NLERR(log, "Failed to load \"%s\" NAT helper, error: %d",
-				  name, ret);
-			return ret;
-		}
-	}
-#endif
-	rcu_assign_pointer(help->helper, helper);
-	info->helper = helper;
-	return ret;
 }
 
 #if IS_ENABLED(CONFIG_NF_NAT)
@@ -1719,9 +1621,12 @@ int ovs_ct_copy_action(struct net *net, const struct nlattr *attr,
 	}
 
 	if (helper) {
-		err = ovs_ct_add_helper(&ct_info, helper, key, log);
-		if (err)
+		err = nf_ct_add_helper(ct_info.ct, helper, ct_info.family,
+				       key->ip.proto, ct_info.nat, &ct_info.helper);
+		if (err) {
+			OVS_NLERR(log, "Failed to add %s helper %d", helper, err);
 			goto err_free_ct;
+		}
 	}
 
 	err = ovs_nla_add_action(sfa, OVS_ACTION_ATTR_CT, &ct_info,
@@ -1982,7 +1887,8 @@ static int ovs_ct_limit_set_zone_limit(struct nlattr *nla_zone_limit,
 		} else {
 			struct ovs_ct_limit *ct_limit;
 
-			ct_limit = kmalloc(sizeof(*ct_limit), GFP_KERNEL);
+			ct_limit = kmalloc(sizeof(*ct_limit),
+					   GFP_KERNEL_ACCOUNT);
 			if (!ct_limit)
 				return -ENOMEM;
 
@@ -2252,14 +2158,16 @@ exit_err:
 static const struct genl_small_ops ct_limit_genl_ops[] = {
 	{ .cmd = OVS_CT_LIMIT_CMD_SET,
 		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
-		.flags = GENL_ADMIN_PERM, /* Requires CAP_NET_ADMIN
-					   * privilege. */
+		.flags = GENL_UNS_ADMIN_PERM, /* Requires CAP_NET_ADMIN
+					       * privilege.
+					       */
 		.doit = ovs_ct_limit_cmd_set,
 	},
 	{ .cmd = OVS_CT_LIMIT_CMD_DEL,
 		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
-		.flags = GENL_ADMIN_PERM, /* Requires CAP_NET_ADMIN
-					   * privilege. */
+		.flags = GENL_UNS_ADMIN_PERM, /* Requires CAP_NET_ADMIN
+					       * privilege.
+					       */
 		.doit = ovs_ct_limit_cmd_del,
 	},
 	{ .cmd = OVS_CT_LIMIT_CMD_GET,

@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/freezer.c
-0x9e61bb05	set_freezable	vmlinux	EXPORT_SYMBOL
+#2-
+0x9e61bb05	set_freezable	vmlinux	EXPORT_SYMBOL	

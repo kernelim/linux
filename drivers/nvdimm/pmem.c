@@ -232,7 +232,7 @@ static void pmem_submit_bio(struct bio *bio)
 }
 
 static int pmem_rw_page(struct block_device *bdev, sector_t sector,
-		       struct page *page, unsigned int op)
+		       struct page *page, enum req_op op)
 {
 	struct pmem_device *pmem = bdev->bd_disk->private_data;
 	blk_status_t rc;
@@ -340,7 +340,7 @@ static void pmem_release_disk(void *__pmem)
 	put_dax(pmem->dax_dev);
 	del_gendisk(pmem->disk);
 
-	blk_cleanup_disk(pmem->disk);
+	put_disk(pmem->disk);
 }
 
 static int pmem_attach_disk(struct device *dev,
@@ -480,7 +480,7 @@ out_cleanup_dax:
 	kill_dax(pmem->dax_dev);
 	put_dax(pmem->dax_dev);
 out:
-	blk_cleanup_disk(pmem->disk);
+	put_disk(pmem->disk);
 	return rc;
 }
 

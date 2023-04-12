@@ -726,8 +726,6 @@ cache in your filesystem.  The following members are defined:
 		int (*writepages)(struct address_space *, struct writeback_control *);
 		bool (*dirty_folio)(struct address_space *, struct folio *);
 		void (*readahead)(struct readahead_control *);
-		int (*readpages)(struct file *filp, struct address_space *mapping,
-				 struct list_head *pages, unsigned nr_pages);
 		int (*write_begin)(struct file *, struct address_space *mapping,
 				   loff_t pos, unsigned len, unsigned flags,
 				struct page **pagep, void **fsdata);
@@ -748,8 +746,8 @@ cache in your filesystem.  The following members are defined:
 		void (*putback_page) (struct page *);
 		int (*launder_folio) (struct folio *);
 
-		int (*is_partially_uptodate) (struct page *, unsigned long,
-					      unsigned long);
+		bool (*is_partially_uptodate) (struct folio *, size_t from,
+					       size_t count);
 		void (*is_dirty_writeback) (struct page *, bool *, bool *);
 		int (*error_remove_page) (struct mapping *mapping, struct page *page);
 		int (*swap_activate)(struct file *);
@@ -807,21 +805,16 @@ cache in your filesystem.  The following members are defined:
 	object.  The pages are consecutive in the page cache and are
 	locked.  The implementation should decrement the page refcount
 	after starting I/O on each page.  Usually the page will be
-	unlocked by the I/O completion handler.  If the filesystem decides
-	to stop attempting I/O before reaching the end of the readahead
-	window, it can simply return.  The caller will decrement the page
-	refcount and unlock the remaining pages for you.  Set PageUptodate
-	if the I/O completes successfully.  Setting PageError on any page
-	will be ignored; simply unlock the page if an I/O error occurs.
-
-``readpages``
-	called by the VM to read pages associated with the address_space
-	object.  This is essentially just a vector version of readpage.
-	Instead of just one page, several pages are requested.
-	readpages is only used for read-ahead, so read errors are
-	ignored.  If anything goes wrong, feel free to give up.
-	This interface is deprecated and will be removed by the end of
-	2020; implement readahead instead.
+	unlocked by the I/O completion handler.  The set of pages are
+	divided into some sync pages followed by some async pages,
+	rac->ra->async_size gives the number of async pages.  The
+	filesystem should attempt to read all sync pages but may decide
+	to stop once it reaches the async pages.  If it does decide to
+	stop attempting I/O, it can simply return.  The caller will
+	remove the remaining pages from the address space, unlock them
+	and decrement the page refcount.  Set PageUptodate if the I/O
+	completes successfully.  Setting PageError on any page will be
+	ignored; simply unlock the page if an I/O error occurs.
 
 ``write_begin``
 	Called by the generic buffered write code to ask the filesystem
@@ -938,9 +931,9 @@ cache in your filesystem.  The following members are defined:
 
 ``is_partially_uptodate``
 	Called by the VM when reading a file through the pagecache when
-	the underlying blocksize != pagesize.  If the required block is
-	up to date then the read can complete without needing the IO to
-	bring the whole page up to date.
+	the underlying blocksize is smaller than the size of the folio.
+	If the required block is up to date then the read can complete
+	without needing I/O to bring the whole page up to date.
 
 ``is_dirty_writeback``
 	Called by the VM when attempting to reclaim a page.  The VM uses

@@ -1206,8 +1206,18 @@ static void bq24190_input_current_limit_work(struct work_struct *work)
 	struct bq24190_dev_info *bdi =
 		container_of(work, struct bq24190_dev_info,
 			     input_current_limit_work.work);
+	union power_supply_propval val;
+	int ret;
 
-	power_supply_set_input_current_limit_from_supplier(bdi->charger);
+	ret = power_supply_get_property_from_supplier(bdi->charger,
+						      POWER_SUPPLY_PROP_CURRENT_MAX,
+						      &val);
+	if (ret)
+		return;
+
+	bq24190_charger_set_property(bdi->charger,
+				     POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
+				     &val);
 }
 
 /* Sync the input-current-limit with our parent supply (if we have one) */
@@ -1670,7 +1680,7 @@ static int bq24190_hw_init(struct bq24190_dev_info *bdi)
 static int bq24190_get_config(struct bq24190_dev_info *bdi)
 {
 	const char * const s = "ti,system-minimum-microvolt";
-	struct power_supply_battery_info info = {};
+	struct power_supply_battery_info *info;
 	int v;
 
 	if (device_property_read_u32(bdi->dev, s, &v) == 0) {
@@ -1684,7 +1694,7 @@ static int bq24190_get_config(struct bq24190_dev_info *bdi)
 
 	if (bdi->dev->of_node &&
 	    !power_supply_get_battery_info(bdi->charger, &info)) {
-		v = info.precharge_current_ua / 1000;
+		v = info->precharge_current_ua / 1000;
 		if (v >= BQ24190_REG_PCTCC_IPRECHG_MIN
 		 && v <= BQ24190_REG_PCTCC_IPRECHG_MAX)
 			bdi->iprechg = v;
@@ -1692,7 +1702,7 @@ static int bq24190_get_config(struct bq24190_dev_info *bdi)
 			dev_warn(bdi->dev, "invalid value for battery:precharge-current-microamp: %d\n",
 				 v);
 
-		v = info.charge_term_current_ua / 1000;
+		v = info->charge_term_current_ua / 1000;
 		if (v >= BQ24190_REG_PCTCC_ITERM_MIN
 		 && v <= BQ24190_REG_PCTCC_ITERM_MAX)
 			bdi->iterm = v;

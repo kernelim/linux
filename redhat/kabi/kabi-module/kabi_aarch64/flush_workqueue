@@ -1,4 +1,0 @@
-#0-
-#I:0
-#P:kernel/workqueue.c
-0x42160169	flush_workqueue	vmlinux	EXPORT_SYMBOL

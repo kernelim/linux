@@ -21,6 +21,7 @@
 #include <linux/acpi.h>
 #include <linux/kernel.h>
 #include <linux/dma-map-ops.h>
+#include <linux/iommu.h>
 #include "pci.h"
 #include "pcie/portdrv.h"
 
@@ -544,7 +545,7 @@ static int pci_device_probe(struct device *dev)
 	return error;
 }
 
-static int pci_device_remove(struct device *dev)
+static void pci_device_remove(struct device *dev)
 {
 	struct pci_dev *pci_dev = to_pci_dev(dev);
 	struct pci_driver *drv = pci_dev->driver;
@@ -578,7 +579,6 @@ static int pci_device_remove(struct device *dev)
 	 */
 
 	pci_dev_put(pci_dev);
-	return 0;
 }
 
 static void pci_device_shutdown(struct device *dev)
@@ -602,9 +602,9 @@ static void pci_device_shutdown(struct device *dev)
 		pci_clear_master(pci_dev);
 }
 
-#ifdef CONFIG_PM
+#ifdef CONFIG_PM_SLEEP
 
-/* Auxiliary functions used for system resume and run-time resume. */
+/* Auxiliary functions used for system resume */
 
 /**
  * pci_restore_standard_config - restore standard config registers of PCI device
@@ -624,6 +624,11 @@ static int pci_restore_standard_config(struct pci_dev *pci_dev)
 	pci_pme_restore(pci_dev);
 	return 0;
 }
+#endif /* CONFIG_PM_SLEEP */
+
+#ifdef CONFIG_PM
+
+/* Auxiliary functions used for system resume and run-time resume */
 
 static void pci_pm_default_resume(struct pci_dev *pci_dev)
 {
@@ -631,17 +636,33 @@ static void pci_pm_default_resume(struct pci_dev *pci_dev)
 	pci_enable_wake(pci_dev, PCI_D0, false);
 }
 
-#endif
-
-#ifdef CONFIG_PM_SLEEP
-
-static void pci_pm_default_resume_early(struct pci_dev *pci_dev)
+static void pci_pm_power_up_and_verify_state(struct pci_dev *pci_dev)
 {
 	pci_power_up(pci_dev);
 	pci_update_current_state(pci_dev, PCI_D0);
+}
+
+static void pci_pm_default_resume_early(struct pci_dev *pci_dev)
+{
+	pci_pm_power_up_and_verify_state(pci_dev);
 	pci_restore_state(pci_dev);
 	pci_pme_restore(pci_dev);
 }
+
+static void pci_pm_bridge_power_up_actions(struct pci_dev *pci_dev)
+{
+	pci_bridge_wait_for_secondary_bus(pci_dev);
+	/*
+	 * When powering on a bridge from D3cold, the whole hierarchy may be
+	 * powered on into D0uninitialized state, resume them to give them a
+	 * chance to suspend again
+	 */
+	pci_resume_bus(pci_dev->subordinate);
+}
+
+#endif /* CONFIG_PM */
+
+#ifdef CONFIG_PM_SLEEP
 
 /*
  * Default "suspend" method for devices that have no driver provided suspend,
@@ -832,6 +853,12 @@ static int pci_pm_suspend(struct device *dev)
 
 	pci_dev->skip_bus_pm = false;
 
+	/*
+	 * Disabling PTM allows some systems, e.g., Intel mobile chips
+	 * since Coffee Lake, to enter a lower-power PM state.
+	 */
+	pci_suspend_ptm(pci_dev);
+
 	if (pci_has_legacy_pm_support(pci_dev))
 		return pci_legacy_suspend(dev, PMSG_SUSPEND);
 
@@ -925,20 +952,15 @@ static int pci_pm_suspend_noirq(struct device *dev)
 		}
 	}
 
-	if (pci_dev->skip_bus_pm) {
-		/*
-		 * Either the device is a bridge with a child in D0 below it, or
-		 * the function is running for the second time in a row without
-		 * going through full resume, which is possible only during
-		 * suspend-to-idle in a spurious wakeup case.  The device should
-		 * be in D0 at this point, but if it is a bridge, it may be
-		 * necessary to save its state.
-		 */
-		if (!pci_dev->state_saved)
-			pci_save_state(pci_dev);
-	} else if (!pci_dev->state_saved) {
+	if (!pci_dev->state_saved) {
 		pci_save_state(pci_dev);
-		if (pci_power_manageable(pci_dev))
+
+		/*
+		 * If the device is a bridge with a child in D0 below it,
+		 * it needs to stay in D0, so check skip_bus_pm to avoid
+		 * putting it into a low-power state in that case.
+		 */
+		if (!pci_dev->skip_bus_pm && pci_power_manageable(pci_dev))
 			pci_prepare_to_sleep(pci_dev);
 	}
 
@@ -1014,7 +1036,7 @@ static int pci_pm_resume_noirq(struct device *dev)
 	pcie_pme_root_status_cleanup(pci_dev);
 
 	if (!skip_bus_pm && prev_state == PCI_D3cold)
-		pci_bridge_wait_for_secondary_bus(pci_dev);
+		pci_pm_bridge_power_up_actions(pci_dev);
 
 	if (pci_has_legacy_pm_support(pci_dev))
 		return 0;
@@ -1044,6 +1066,8 @@ static int pci_pm_resume(struct device *dev)
 	 */
 	if (pci_dev->state_saved)
 		pci_restore_standard_config(pci_dev);
+
+	pci_resume_ptm(pci_dev);
 
 	if (pci_has_legacy_pm_support(pci_dev))
 		return pci_legacy_resume(dev);
@@ -1148,7 +1172,7 @@ static int pci_pm_thaw_noirq(struct device *dev)
 	 * in case the driver's "freeze" callbacks put it into a low-power
 	 * state.
 	 */
-	pci_set_power_state(pci_dev, PCI_D0);
+	pci_pm_power_up_and_verify_state(pci_dev);
 	pci_restore_state(pci_dev);
 
 	if (pci_has_legacy_pm_support(pci_dev))
@@ -1332,6 +1356,8 @@ static int pci_pm_runtime_suspend(struct device *dev)
 	pci_power_t prev = pci_dev->current_state;
 	int error;
 
+	pci_suspend_ptm(pci_dev);
+
 	/*
 	 * If pci_dev->driver is not set (unbound), we leave the device in D0,
 	 * but it may go to D3cold when the bridge above it runtime suspends.
@@ -1392,7 +1418,8 @@ static int pci_pm_runtime_resume(struct device *dev)
 	 * to a driver because although we left it in D0, it may have gone to
 	 * D3cold when the bridge above it runtime suspended.
 	 */
-	pci_restore_standard_config(pci_dev);
+	pci_pm_default_resume_early(pci_dev);
+	pci_resume_ptm(pci_dev);
 
 	if (!pci_dev->driver)
 		return 0;
@@ -1401,12 +1428,10 @@ static int pci_pm_runtime_resume(struct device *dev)
 	pci_pm_default_resume(pci_dev);
 
 	if (prev_state == PCI_D3cold)
-		pci_bridge_wait_for_secondary_bus(pci_dev);
+		pci_pm_bridge_power_up_actions(pci_dev);
 
 	if (pm && pm->runtime_resume)
 		error = pm->runtime_resume(dev);
-
-	pci_dev->runtime_d3cold = false;
 
 	return error;
 }
@@ -1681,6 +1706,7 @@ static int pci_bus_num_vf(struct device *dev)
  */
 static int pci_dma_configure(struct device *dev)
 {
+	struct pci_driver *driver = to_pci_driver(dev->driver);
 	struct device *bridge;
 	int ret = 0;
 
@@ -1696,7 +1722,22 @@ static int pci_dma_configure(struct device *dev)
 	}
 
 	pci_put_host_bridge_device(bridge);
+
+	if (!ret && !driver->driver_managed_dma) {
+		ret = iommu_device_use_default_domain(dev);
+		if (ret)
+			arch_teardown_dma_ops(dev);
+	}
+
 	return ret;
+}
+
+static void pci_dma_cleanup(struct device *dev)
+{
+	struct pci_driver *driver = to_pci_driver(dev->driver);
+
+	if (!driver->driver_managed_dma)
+		iommu_device_unuse_default_domain(dev);
 }
 
 struct bus_type pci_bus_type = {
@@ -1712,6 +1753,7 @@ struct bus_type pci_bus_type = {
 	.pm		= PCI_PM_OPS_PTR,
 	.num_vf		= pci_bus_num_vf,
 	.dma_configure	= pci_dma_configure,
+	.dma_cleanup	= pci_dma_cleanup,
 };
 EXPORT_SYMBOL(pci_bus_type);
 

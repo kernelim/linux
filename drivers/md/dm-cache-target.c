@@ -907,14 +907,14 @@ static void abort_transaction(struct cache *cache)
 	if (get_cache_mode(cache) >= CM_READ_ONLY)
 		return;
 
-	if (dm_cache_metadata_set_needs_check(cache->cmd)) {
-		DMERR("%s: failed to set 'needs_check' flag in metadata", dev_name);
-		set_cache_mode(cache, CM_FAIL);
-	}
-
 	DMERR_LIMIT("%s: aborting current metadata transaction", dev_name);
 	if (dm_cache_metadata_abort(cache->cmd)) {
 		DMERR("%s: failed to abort metadata transaction", dev_name);
+		set_cache_mode(cache, CM_FAIL);
+	}
+
+	if (dm_cache_metadata_set_needs_check(cache->cmd)) {
+		DMERR("%s: failed to set 'needs_check' flag in metadata", dev_name);
 		set_cache_mode(cache, CM_FAIL);
 	}
 }
@@ -1887,6 +1887,7 @@ static void destroy(struct cache *cache)
 	if (cache->prison)
 		dm_bio_prison_destroy_v2(cache->prison);
 
+	cancel_delayed_work_sync(&cache->waker);
 	if (cache->wq)
 		destroy_workqueue(cache->wq);
 
@@ -2775,7 +2776,7 @@ static int load_mapping(void *context, dm_oblock_t oblock, dm_cblock_t cblock,
 
 /*
  * The discard block size in the on disk metadata is not
- * neccessarily the same as we're currently using.  So we have to
+ * necessarily the same as we're currently using.  So we have to
  * be careful to only set the discarded attribute if we know it
  * covers a complete block of the new size.
  */

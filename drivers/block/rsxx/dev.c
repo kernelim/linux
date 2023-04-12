@@ -125,7 +125,7 @@ static void rsxx_submit_bio(struct bio *bio)
 	struct rsxx_bio_meta *bio_meta;
 	blk_status_t st = BLK_STS_IOERR;
 
-	blk_queue_split(&bio);
+	bio = bio_split_to_limits(bio);
 
 	might_sleep();
 
@@ -208,7 +208,7 @@ int rsxx_attach_dev(struct rsxx_cardinfo *card)
 	mutex_unlock(&card->dev_lock);
 
 	if (err)
-		blk_cleanup_disk(card->gendisk);
+		put_disk(card->gendisk);
 
 	return err;
 }
@@ -282,7 +282,7 @@ void rsxx_destroy_dev(struct rsxx_cardinfo *card)
 	if (!enable_blkdev)
 		return;
 
-	blk_cleanup_disk(card->gendisk);
+	put_disk(card->gendisk);
 	card->gendisk = NULL;
 	unregister_blkdev(card->major, DRIVER_NAME);
 }

@@ -132,14 +132,19 @@
  * the owner value concurrently without lock. Read from owner, however,
  * may not need READ_ONCE() as long as the pointer value is only used
  * for comparison and isn't being dereferenced.
+ *
+ * Both rwsem_{set,clear}_owner() functions should be in the same
+ * preempt disable section as the atomic op that changes sem->count.
  */
 static inline void rwsem_set_owner(struct rw_semaphore *sem)
 {
+	lockdep_assert_preemption_disabled();
 	atomic_long_set(&sem->owner, (long)current);
 }
 
 static inline void rwsem_clear_owner(struct rw_semaphore *sem)
 {
+	lockdep_assert_preemption_disabled();
 	atomic_long_set(&sem->owner, 0);
 }
 
@@ -250,13 +255,16 @@ static inline bool rwsem_read_trylock(struct rw_semaphore *sem, long *cntp)
 static inline bool rwsem_write_trylock(struct rw_semaphore *sem)
 {
 	long tmp = RWSEM_UNLOCKED_VALUE;
+	bool ret = false;
 
+	preempt_disable();
 	if (atomic_long_try_cmpxchg_acquire(&sem->count, &tmp, RWSEM_WRITER_LOCKED)) {
 		rwsem_set_owner(sem);
-		return true;
+		ret = true;
 	}
 
-	return false;
+	preempt_enable();
+	return ret;
 }
 
 /*
@@ -856,7 +864,7 @@ done:
  */
 static inline void clear_nonspinnable(struct rw_semaphore *sem)
 {
-	if (rwsem_test_oflags(sem, RWSEM_NONSPINNABLE))
+	if (unlikely(rwsem_test_oflags(sem, RWSEM_NONSPINNABLE)))
 		atomic_long_andnot(RWSEM_NONSPINNABLE, &sem->owner);
 }
 
@@ -881,6 +889,31 @@ rwsem_spin_on_owner(struct rw_semaphore *sem)
 #endif
 
 /*
+ * Prepare to wake up waiter(s) in the wait queue by putting them into the
+ * given wake_q if the rwsem lock owner isn't a writer. If rwsem is likely
+ * reader-owned, wake up read lock waiters in queue front or wake up any
+ * front waiter otherwise.
+
+ * This is being called from both reader and writer slow paths.
+ */
+static inline void rwsem_cond_wake_waiter(struct rw_semaphore *sem, long count,
+					  struct wake_q_head *wake_q)
+{
+	enum rwsem_wake_type wake_type;
+
+	if (count & RWSEM_WRITER_MASK)
+		return;
+
+	if (count & RWSEM_READER_MASK) {
+		wake_type = RWSEM_WAKE_READERS;
+	} else {
+		wake_type = RWSEM_WAKE_ANY;
+		clear_nonspinnable(sem);
+	}
+	rwsem_mark_wake(sem, wake_type, wake_q);
+}
+
+/*
  * Wait for the read lock to be granted
  */
 static struct rw_semaphore __sched *
@@ -890,7 +923,6 @@ rwsem_down_read_slowpath(struct rw_semaphore *sem, long count, unsigned int stat
 	long rcnt = (count >> RWSEM_READER_SHIFT);
 	struct rwsem_waiter waiter;
 	DEFINE_WAKE_Q(wake_q);
-	bool wake = false;
 
 	/*
 	 * To prevent a constant stream of readers from starving a sleeping
@@ -952,22 +984,11 @@ queue:
 	/* we're now waiting on the lock, but no longer actively locking */
 	count = atomic_long_add_return(adjustment, &sem->count);
 
-	/*
-	 * If there are no active locks, wake the front queued process(es).
-	 *
-	 * If there are no writers and we are first in the queue,
-	 * wake our own waiter to join the existing active readers !
-	 */
-	if (!(count & RWSEM_LOCK_MASK)) {
-		clear_nonspinnable(sem);
-		wake = true;
-	}
-	if (wake || (!(count & RWSEM_WRITER_MASK) &&
-		    (adjustment & RWSEM_FLAG_WAITERS)))
-		rwsem_mark_wake(sem, RWSEM_WAKE_ANY, &wake_q);
-
+	rwsem_cond_wake_waiter(sem, count, &wake_q);
 	raw_spin_unlock_irq(&sem->wait_lock);
-	wake_up_q(&wake_q);
+
+	if (!wake_q_empty(&wake_q))
+		wake_up_q(&wake_q);
 
 	/* wait to be given the lock */
 	for (;;) {
@@ -1039,23 +1060,8 @@ rwsem_down_write_slowpath(struct rw_semaphore *sem, int state)
 
 	/* we're now waiting on the lock */
 	if (wstate == WRITER_NOT_FIRST) {
-		count = atomic_long_read(&sem->count);
-
-		/*
-		 * If there were already threads queued before us and:
-		 *  1) there are no active locks, wake the front
-		 *     queued process(es) as the handoff bit might be set.
-		 *  2) there are no active writers and some readers, the lock
-		 *     must be read owned; so we try to wake any read lock
-		 *     waiters that were queued ahead of us.
-		 */
-		if (count & RWSEM_WRITER_MASK)
-			goto wait;
-
-		rwsem_mark_wake(sem, (count & RWSEM_READER_MASK)
-					? RWSEM_WAKE_READERS
-					: RWSEM_WAKE_ANY, &wake_q);
-
+		rwsem_cond_wake_waiter(sem, atomic_long_read(&sem->count),
+				       &wake_q);
 		if (!wake_q_empty(&wake_q)) {
 			/*
 			 * We want to minimize wait_lock hold time especially
@@ -1070,7 +1076,6 @@ rwsem_down_write_slowpath(struct rw_semaphore *sem, int state)
 		atomic_long_or(RWSEM_FLAG_WAITERS, &sem->count);
 	}
 
-wait:
 	/* wait until we successfully acquire the lock */
 	set_current_state(state);
 	for (;;) {
@@ -1240,17 +1245,14 @@ static inline int __down_read_trylock(struct rw_semaphore *sem)
 
 	DEBUG_RWSEMS_WARN_ON(sem->magic != sem, sem);
 
-	/*
-	 * Optimize for the case when the rwsem is not locked at all.
-	 */
-	tmp = RWSEM_UNLOCKED_VALUE;
-	do {
+	tmp = atomic_long_read(&sem->count);
+	while (!(tmp & RWSEM_READ_FAILED_MASK)) {
 		if (atomic_long_try_cmpxchg_acquire(&sem->count, &tmp,
-					tmp + RWSEM_READER_BIAS)) {
+						    tmp + RWSEM_READER_BIAS)) {
 			rwsem_set_reader_owned(sem);
 			return 1;
 		}
-	} while (!(tmp & RWSEM_READ_FAILED_MASK));
+	}
 	return 0;
 }
 
@@ -1318,8 +1320,10 @@ static inline void __up_write(struct rw_semaphore *sem)
 	DEBUG_RWSEMS_WARN_ON((rwsem_owner(sem) != current) &&
 			    !rwsem_test_oflags(sem, RWSEM_NONSPINNABLE), sem);
 
+	preempt_disable();
 	rwsem_clear_owner(sem);
 	tmp = atomic_long_fetch_add_release(-RWSEM_WRITER_LOCKED, &sem->count);
+	preempt_enable();
 	if (unlikely(tmp & RWSEM_FLAG_WAITERS))
 		rwsem_wake(sem);
 }

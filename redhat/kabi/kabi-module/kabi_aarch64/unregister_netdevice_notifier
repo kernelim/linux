@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:net/core/dev.c
-0x9d0d6206	unregister_netdevice_notifier	vmlinux	EXPORT_SYMBOL
+#2-
+0x9d0d6206	unregister_netdevice_notifier	vmlinux	EXPORT_SYMBOL	

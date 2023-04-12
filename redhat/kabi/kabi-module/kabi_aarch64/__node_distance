@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:drivers/base/arch_numa.c
-0x46c47fb6	__node_distance	vmlinux	EXPORT_SYMBOL
+#2-
+0x46c47fb6	__node_distance	vmlinux	EXPORT_SYMBOL	

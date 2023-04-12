@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/arm64/lib/strlen.S
-0x98cf60b3	strlen	vmlinux	EXPORT_SYMBOL
+#2-
+0x98cf60b3	strlen	vmlinux	EXPORT_SYMBOL	

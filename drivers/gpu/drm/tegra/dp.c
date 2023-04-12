@@ -4,8 +4,8 @@
  * Copyright (C) 2015 Rob Clark
  */
 
+#include <drm/display/drm_dp_helper.h>
 #include <drm/drm_crtc.h>
-#include <drm/drm_dp_helper.h>
 #include <drm/drm_print.h>
 
 #include "dp.h"
@@ -548,20 +548,29 @@ static void drm_dp_link_get_adjustments(struct drm_dp_link *link,
 					u8 status[DP_LINK_STATUS_SIZE])
 {
 	struct drm_dp_link_train_set *adjust = &link->train.adjust;
-	unsigned int i;
+        unsigned int i;
+        u8 post_cursor;
+        int err;
 
-	for (i = 0; i < link->lanes; i++) {
-		adjust->voltage_swing[i] =
-			drm_dp_get_adjust_request_voltage(status, i) >>
-				DP_TRAIN_VOLTAGE_SWING_SHIFT;
+        err = drm_dp_dpcd_read(link->aux, DP_ADJUST_REQUEST_POST_CURSOR2,
+                               &post_cursor, sizeof(post_cursor));
+        if (err < 0) {
+                DRM_ERROR("failed to read post_cursor2: %d\n", err);
+                post_cursor = 0;
+        }
 
-		adjust->pre_emphasis[i] =
-			drm_dp_get_adjust_request_pre_emphasis(status, i) >>
-				DP_TRAIN_PRE_EMPHASIS_SHIFT;
+        for (i = 0; i < link->lanes; i++) {
+                adjust->voltage_swing[i] =
+                        drm_dp_get_adjust_request_voltage(status, i) >>
+                                DP_TRAIN_VOLTAGE_SWING_SHIFT;
 
-		adjust->post_cursor[i] =
-			drm_dp_get_adjust_request_post_cursor(status, i);
-	}
+                adjust->pre_emphasis[i] =
+                        drm_dp_get_adjust_request_pre_emphasis(status, i) >>
+                                DP_TRAIN_PRE_EMPHASIS_SHIFT;
+
+                adjust->post_cursor[i] =
+                        (post_cursor >> (i << 1)) & 0x3;
+        }
 }
 
 static void drm_dp_link_train_adjust(struct drm_dp_link_train *train)

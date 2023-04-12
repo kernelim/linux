@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/powerpc/mm/ioremap.c
-0x254c9287	ioremap	vmlinux	EXPORT_SYMBOL
+#2-
+0x254c9287	ioremap	vmlinux	EXPORT_SYMBOL	

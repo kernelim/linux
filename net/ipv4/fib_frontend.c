@@ -32,6 +32,7 @@
 #include <linux/list.h>
 #include <linux/slab.h>
 
+#include <net/inet_dscp.h>
 #include <net/ip.h>
 #include <net/protocol.h>
 #include <net/route.h>
@@ -290,7 +291,7 @@ __be32 fib_compute_spec_dst(struct sk_buff *skb)
 		bool vmark = in_dev && IN_DEV_SRC_VMARK(in_dev);
 		struct flowi4 fl4 = {
 			.flowi4_iif = LOOPBACK_IFINDEX,
-			.flowi4_oif = l3mdev_master_ifindex_rcu(dev),
+			.flowi4_l3mdev = l3mdev_master_ifindex_rcu(dev),
 			.daddr = ip_hdr(skb)->saddr,
 			.flowi4_tos = ip_hdr(skb)->tos & IPTOS_RT_MASK,
 			.flowi4_scope = scope,
@@ -352,9 +353,8 @@ static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
 	bool dev_match;
 
 	fl4.flowi4_oif = 0;
-	fl4.flowi4_iif = l3mdev_master_ifindex_rcu(dev);
-	if (!fl4.flowi4_iif)
-		fl4.flowi4_iif = oif ? : LOOPBACK_IFINDEX;
+	fl4.flowi4_l3mdev = l3mdev_master_ifindex_rcu(dev);
+	fl4.flowi4_iif = oif ? : LOOPBACK_IFINDEX;
 	fl4.daddr = src;
 	fl4.saddr = dst;
 	fl4.flowi4_tos = tos;
@@ -735,8 +735,16 @@ static int rtm_to_fib_config(struct net *net, struct sk_buff *skb,
 	memset(cfg, 0, sizeof(*cfg));
 
 	rtm = nlmsg_data(nlh);
+
+	if (!inet_validate_dscp(rtm->rtm_tos)) {
+		NL_SET_ERR_MSG(extack,
+			       "Invalid dsfield (tos): ECN bits must be 0");
+		err = -EINVAL;
+		goto errout;
+	}
+	cfg->fc_dscp = inet_dsfield_to_dscp(rtm->rtm_tos);
+
 	cfg->fc_dst_len = rtm->rtm_dst_len;
-	cfg->fc_tos = rtm->rtm_tos;
 	cfg->fc_table = rtm->rtm_table;
 	cfg->fc_protocol = rtm->rtm_protocol;
 	cfg->fc_scope = rtm->rtm_scope;
@@ -829,6 +837,9 @@ static int rtm_to_fib_config(struct net *net, struct sk_buff *skb,
 			       "Nexthop configuration can not contain both GATEWAY and VIA");
 		return -EINVAL;
 	}
+
+	if (!cfg->fc_table)
+		cfg->fc_table = RT_TABLE_MAIN;
 
 	return 0;
 errout:

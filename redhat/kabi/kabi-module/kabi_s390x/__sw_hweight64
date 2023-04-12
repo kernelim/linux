@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/hweight.c
-0x9f46ced8	__sw_hweight64	vmlinux	EXPORT_SYMBOL
+#2-
+0x9f46ced8	__sw_hweight64	vmlinux	EXPORT_SYMBOL	

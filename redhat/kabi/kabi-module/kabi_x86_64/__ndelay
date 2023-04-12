@@ -1,3 +1,2 @@
-#0-
-#I:0
-0xdf8c695a	__ndelay	vmlinux	EXPORT_SYMBOL
+#2-
+0xdf8c695a	__ndelay	vmlinux	EXPORT_SYMBOL	

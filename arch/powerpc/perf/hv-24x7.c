@@ -204,7 +204,7 @@ static struct attribute *format_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group format_group = {
+static const struct attribute_group format_group = {
 	.name = "format",
 	.attrs = format_attrs,
 };
@@ -1148,7 +1148,7 @@ static struct attribute *cpumask_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group cpumask_attr_group = {
+static const struct attribute_group cpumask_attr_group = {
 	.attrs = cpumask_attrs,
 };
 
@@ -1162,7 +1162,7 @@ static struct attribute *if_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group if_group = {
+static const struct attribute_group if_group = {
 	.name = "interface",
 	.bin_attrs = if_bin_attrs,
 	.attrs = if_attrs,
@@ -1718,16 +1718,16 @@ static int hv_24x7_init(void)
 {
 	int r;
 	unsigned long hret;
+	unsigned int pvr = mfspr(SPRN_PVR);
 	struct hv_perf_caps caps;
 
 	if (!firmware_has_feature(FW_FEATURE_LPAR)) {
 		pr_debug("not a virtualized system, not enabling\n");
 		return -ENODEV;
-	} else if (!cur_cpu_spec->oprofile_cpu_type)
-		return -ENODEV;
+	}
 
 	/* POWER8 only supports v1, while POWER9 only supports v2. */
-	if (!strcmp(cur_cpu_spec->oprofile_cpu_type, "ppc64/power8"))
+	if (PVR_VER(pvr) == PVR_POWER8)
 		interface_version = 1;
 	else {
 		interface_version = 2;

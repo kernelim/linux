@@ -4,7 +4,6 @@
  *
  *    Copyright IBM Corp. 2005, 2012
  *    Author(s): Michael Holzheu <holzheu@de.ibm.com>
- *		 Heiko Carstens <heiko.carstens@de.ibm.com>
  *		 Volker Sameske <sameske@de.ibm.com>
  */
 
@@ -2082,7 +2081,7 @@ void s390_reset_system(void)
 
 	/* Disable lowcore protection */
 	__ctl_clear_bit(0, 28);
-	diag_dma_ops.diag308_reset();
+	diag_amode31_ops.diag308_reset();
 }
 
 #ifdef CONFIG_KEXEC_FILE

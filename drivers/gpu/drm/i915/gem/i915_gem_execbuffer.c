@@ -4,8 +4,8 @@
  * Copyright © 2008,2010 Intel Corporation
  */
 
-#include <linux/intel-iommu.h>
 #include <linux/dma-resv.h>
+#include <linux/highmem.h>
 #include <linux/sync_file.h>
 #include <linux/uaccess.h>
 
@@ -729,32 +729,69 @@ static int eb_reserve(struct i915_execbuffer *eb)
 	bool unpinned;
 
 	/*
-	 * Attempt to pin all of the buffers into the GTT.
-	 * This is done in 2 phases:
+	 * We have one more buffers that we couldn't bind, which could be due to
+	 * various reasons. To resolve this we have 4 passes, with every next
+	 * level turning the screws tighter:
 	 *
-	 * 1. Unbind all objects that do not match the GTT constraints for
-	 *    the execbuffer (fenceable, mappable, alignment etc).
-	 * 2. Bind new objects.
+	 * 0. Unbind all objects that do not match the GTT constraints for the
+	 * execbuffer (fenceable, mappable, alignment etc). Bind all new
+	 * objects.  This avoids unnecessary unbinding of later objects in order
+	 * to make room for the earlier objects *unless* we need to defragment.
 	 *
-	 * This avoid unnecessary unbinding of later objects in order to make
-	 * room for the earlier objects *unless* we need to defragment.
+	 * 1. Reorder the buffers, where objects with the most restrictive
+	 * placement requirements go first (ignoring fixed location buffers for
+	 * now).  For example, objects needing the mappable aperture (the first
+	 * 256M of GTT), should go first vs objects that can be placed just
+	 * about anywhere. Repeat the previous pass.
 	 *
-	 * Defragmenting is skipped if all objects are pinned at a fixed location.
+	 * 2. Consider buffers that are pinned at a fixed location. Also try to
+	 * evict the entire VM this time, leaving only objects that we were
+	 * unable to lock. Try again to bind the buffers. (still using the new
+	 * buffer order).
+	 *
+	 * 3. We likely have object lock contention for one or more stubborn
+	 * objects in the VM, for which we need to evict to make forward
+	 * progress (perhaps we are fighting the shrinker?). When evicting the
+	 * VM this time around, anything that we can't lock we now track using
+	 * the busy_bo, using the full lock (after dropping the vm->mutex to
+	 * prevent deadlocks), instead of trylock. We then continue to evict the
+	 * VM, this time with the stubborn object locked, which we can now
+	 * hopefully unbind (if still bound in the VM). Repeat until the VM is
+	 * evicted. Finally we should be able bind everything.
 	 */
-	for (pass = 0; pass <= 2; pass++) {
+	for (pass = 0; pass <= 3; pass++) {
 		int pin_flags = PIN_USER | PIN_VALIDATE;
 
 		if (pass == 0)
 			pin_flags |= PIN_NONBLOCK;
 
 		if (pass >= 1)
-			unpinned = eb_unbind(eb, pass == 2);
+			unpinned = eb_unbind(eb, pass >= 2);
 
 		if (pass == 2) {
 			err = mutex_lock_interruptible(&eb->context->vm->mutex);
 			if (!err) {
-				err = i915_gem_evict_vm(eb->context->vm, &eb->ww);
+				err = i915_gem_evict_vm(eb->context->vm, &eb->ww, NULL);
 				mutex_unlock(&eb->context->vm->mutex);
+			}
+			if (err)
+				return err;
+		}
+
+		if (pass == 3) {
+retry:
+			err = mutex_lock_interruptible(&eb->context->vm->mutex);
+			if (!err) {
+				struct drm_i915_gem_object *busy_bo = NULL;
+
+				err = i915_gem_evict_vm(eb->context->vm, &eb->ww, &busy_bo);
+				mutex_unlock(&eb->context->vm->mutex);
+				if (err && busy_bo) {
+					err = i915_gem_object_lock(busy_bo, &eb->ww);
+					i915_gem_object_put(busy_bo);
+					if (!err)
+						goto retry;
+				}
 			}
 			if (err)
 				return err;
@@ -998,11 +1035,10 @@ static int eb_validate_vmas(struct i915_execbuffer *eb)
 			}
 		}
 
-		if (!(ev->flags & EXEC_OBJECT_WRITE)) {
-			err = dma_resv_reserve_shared(vma->obj->base.resv, 1);
-			if (err)
-				return err;
-		}
+		/* Reserve enough slots to accommodate composite fences */
+		err = dma_resv_reserve_fences(vma->obj->base.resv, eb->num_batches);
+		if (err)
+			return err;
 
 		GEM_BUG_ON(drm_mm_node_allocated(&vma->node) &&
 			   eb_vma_misplaced(&eb->exec[i], vma, ev->flags));
@@ -1320,10 +1356,8 @@ static void *reloc_vaddr(struct i915_vma *vma,
 static void clflush_write32(u32 *addr, u32 value, unsigned int flushes)
 {
 	if (unlikely(flushes & (CLFLUSH_BEFORE | CLFLUSH_AFTER))) {
-		if (flushes & CLFLUSH_BEFORE) {
-			clflushopt(addr);
-			mb();
-		}
+		if (flushes & CLFLUSH_BEFORE)
+			drm_clflush_virt_range(addr, sizeof(*addr));
 
 		*addr = value;
 
@@ -1335,7 +1369,7 @@ static void clflush_write32(u32 *addr, u32 value, unsigned int flushes)
 		 * to ensure ordering of clflush wrt to the system.
 		 */
 		if (flushes & CLFLUSH_AFTER)
-			clflushopt(addr);
+			drm_clflush_virt_range(addr, sizeof(*addr));
 	} else
 		*addr = value;
 }
@@ -1953,7 +1987,7 @@ eb_find_first_request_added(struct i915_execbuffer *eb)
 #if IS_ENABLED(CONFIG_DRM_I915_CAPTURE_ERROR)
 
 /* Stage with GFP_KERNEL allocations before we enter the signaling critical path */
-static void eb_capture_stage(struct i915_execbuffer *eb)
+static int eb_capture_stage(struct i915_execbuffer *eb)
 {
 	const unsigned int count = eb->buffer_count;
 	unsigned int i = count, j;
@@ -1965,6 +1999,10 @@ static void eb_capture_stage(struct i915_execbuffer *eb)
 
 		if (!(flags & EXEC_OBJECT_CAPTURE))
 			continue;
+
+		if (i915_gem_context_is_recoverable(eb->gem_context) &&
+		    (IS_DGFX(eb->i915) || GRAPHICS_VER_FULL(eb->i915) > IP_VER(12, 0)))
+			return -EINVAL;
 
 		for_each_batch_create_order(eb, j) {
 			struct i915_capture_list *capture;
@@ -1978,6 +2016,8 @@ static void eb_capture_stage(struct i915_execbuffer *eb)
 			eb->capture_lists[j] = capture;
 		}
 	}
+
+	return 0;
 }
 
 /* Commit once we're in the critical path */
@@ -2019,8 +2059,9 @@ static void eb_capture_list_clear(struct i915_execbuffer *eb)
 
 #else
 
-static void eb_capture_stage(struct i915_execbuffer *eb)
+static int eb_capture_stage(struct i915_execbuffer *eb)
 {
+	return 0;
 }
 
 static void eb_capture_commit(struct i915_execbuffer *eb)
@@ -2301,7 +2342,7 @@ static int eb_parse(struct i915_execbuffer *eb)
 	if (IS_ERR(batch))
 		return PTR_ERR(batch);
 
-	err = dma_resv_reserve_shared(shadow->obj->base.resv, 1);
+	err = dma_resv_reserve_fences(shadow->obj->base.resv, 1);
 	if (err)
 		return err;
 
@@ -2689,6 +2730,11 @@ eb_select_engine(struct i915_execbuffer *eb)
 	if (err)
 		goto err;
 
+	if (!i915_vm_tryget(ce->vm)) {
+		err = -ENOENT;
+		goto err;
+	}
+
 	eb->context = ce;
 	eb->gt = ce->engine->gt;
 
@@ -2712,6 +2758,7 @@ eb_put_engine(struct i915_execbuffer *eb)
 {
 	struct intel_context *child;
 
+	i915_vm_put(eb->context->vm);
 	intel_gt_pm_put(eb->gt);
 	for_each_child(eb->context, child)
 		intel_context_put(child);
@@ -2944,11 +2991,6 @@ await_fence_array(struct i915_execbuffer *eb,
 	int err;
 
 	for (n = 0; n < eb->num_fences; n++) {
-		struct drm_syncobj *syncobj;
-		unsigned int flags;
-
-		syncobj = ptr_unpack_bits(eb->fences[n].syncobj, &flags, 2);
-
 		if (!eb->fences[n].dma_fence)
 			continue;
 
@@ -3406,7 +3448,9 @@ i915_gem_do_execbuffer(struct drm_device *dev,
 	}
 
 	ww_acquire_done(&eb.ww.ctx);
-	eb_capture_stage(&eb);
+	err = eb_capture_stage(&eb);
+	if (err)
+		goto err_vma;
 
 	out_fence = eb_requests_create(&eb, in_fence, out_fence_fd);
 	if (IS_ERR(out_fence)) {

@@ -19,6 +19,7 @@
 #include <asm/hw_irq.h>
 #include <asm/apic.h>
 #include <asm/irq_remapping.h>
+#include <asm/xen/hypervisor.h>
 
 struct irq_domain *x86_pci_msi_default_domain __ro_after_init;
 
@@ -163,7 +164,7 @@ int pci_msi_prepare(struct irq_domain *domain, struct device *dev, int nvec,
 	struct msi_desc *desc = first_pci_msi_entry(pdev);
 
 	init_irq_alloc_info(arg, NULL);
-	if (desc->msi_attrib.is_msix) {
+	if (desc->pci.msi_attrib.is_msix) {
 		arg->type = X86_IRQ_ALLOC_TYPE_PCI_MSIX;
 	} else {
 		arg->type = X86_IRQ_ALLOC_TYPE_PCI_MSI;
@@ -345,3 +346,8 @@ void dmar_free_hwirq(int irq)
 	irq_domain_free_irqs(irq, 1);
 }
 #endif
+
+bool arch_restore_msi_irqs(struct pci_dev *dev)
+{
+	return xen_initdom_restore_msi(dev);
+}

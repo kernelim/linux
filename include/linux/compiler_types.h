@@ -4,6 +4,13 @@
 
 #ifndef __ASSEMBLY__
 
+#if defined(CONFIG_DEBUG_INFO_BTF) && defined(CONFIG_PAHOLE_HAS_BTF_TAG) && \
+	__has_attribute(btf_type_tag)
+# define BTF_TYPE_TAG(value) __attribute__((btf_type_tag(#value)))
+#else
+# define BTF_TYPE_TAG(value) /* nothing */
+#endif
+
 #ifdef __CHECKER__
 /* address spaces */
 # define __kernel	__attribute__((address_space(0)))
@@ -32,10 +39,10 @@ static inline void __chk_io_ptr(const volatile void __iomem *ptr) { }
 # ifdef STRUCTLEAK_PLUGIN
 #  define __user	__attribute__((user))
 # else
-#  define __user
+#  define __user	BTF_TYPE_TAG(user)
 # endif
 # define __iomem
-# define __percpu
+# define __percpu	BTF_TYPE_TAG(percpu)
 # define __rcu
 # define __chk_user_ptr(x)	(void)0
 # define __chk_io_ptr(x)	(void)0
@@ -316,7 +323,13 @@ struct ftrace_likely_data {
 #ifdef __OPTIMIZE__
 # define __compiletime_assert(condition, msg, prefix, suffix)		\
 	do {								\
-		extern void prefix ## suffix(void) __compiletime_error(msg); \
+		/*							\
+		 * __noreturn is needed to give the compiler enough	\
+		 * information to avoid certain possibly-uninitialized	\
+		 * warnings (regardless of the build failing).		\
+		 */							\
+		__noreturn extern void prefix ## suffix(void)		\
+			__compiletime_error(msg);			\
 		if (!(condition))					\
 			prefix ## suffix();				\
 	} while (0)
@@ -361,5 +374,9 @@ struct ftrace_likely_data {
 	__diag_ ## compiler(version, warn, option)
 #define __diag_error(compiler, version, option, comment) \
 	__diag_ ## compiler(version, error, option)
+
+#ifndef __diag_ignore_all
+#define __diag_ignore_all(option, comment)
+#endif
 
 #endif /* __LINUX_COMPILER_TYPES_H */

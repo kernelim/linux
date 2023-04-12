@@ -62,6 +62,9 @@ static bool receive_filter(struct vdpasim *vdpasim, size_t len)
 	if (len < ETH_ALEN + hdr_len)
 		return false;
 
+	if (is_broadcast_ether_addr(vdpasim->buffer + hdr_len) ||
+	    is_multicast_ether_addr(vdpasim->buffer + hdr_len))
+		return true;
 	if (!strncmp(vdpasim->buffer + hdr_len, vio_config->mac, ETH_ALEN))
 		return true;
 
@@ -153,6 +156,9 @@ static void vdpasim_net_work(struct work_struct *work)
 	int err;
 
 	spin_lock(&vdpasim->lock);
+
+	if (!vdpasim->running)
+		goto out;
 
 	if (!(vdpasim->status & VIRTIO_CONFIG_S_DRIVER_OK))
 		goto out;
@@ -251,7 +257,7 @@ static int vdpasim_net_dev_add(struct vdpa_mgmt_dev *mdev, const char *name,
 	dev_attr.work_fn = vdpasim_net_work;
 	dev_attr.buffer_size = PAGE_SIZE;
 
-	simdev = vdpasim_create(&dev_attr);
+	simdev = vdpasim_create(&dev_attr, config);
 	if (IS_ERR(simdev))
 		return PTR_ERR(simdev);
 
@@ -291,7 +297,8 @@ static struct vdpa_mgmt_dev mgmt_dev = {
 	.id_table = id_table,
 	.ops = &vdpasim_net_mgmtdev_ops,
 	.config_attr_mask = (1 << VDPA_ATTR_DEV_NET_CFG_MACADDR |
-			     1 << VDPA_ATTR_DEV_NET_CFG_MTU),
+			     1 << VDPA_ATTR_DEV_NET_CFG_MTU |
+		             1 << VDPA_ATTR_DEV_FEATURES),
 	.max_supported_vqs = VDPASIM_NET_VQ_NUM,
 	.supported_features = VDPASIM_NET_FEATURES,
 };
@@ -301,8 +308,10 @@ static int __init vdpasim_net_init(void)
 	int ret;
 
 	ret = device_register(&vdpasim_net_mgmtdev);
-	if (ret)
+	if (ret) {
+		put_device(&vdpasim_net_mgmtdev);
 		return ret;
+	}
 
 	ret = vdpa_mgmtdev_register(&mgmt_dev);
 	if (ret)

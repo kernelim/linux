@@ -1,3 +1,2 @@
-#0-
-#I:0
-0x25ec1b28	strlen	vmlinux	EXPORT_SYMBOL
+#2-
+0x25ec1b28	strlen	vmlinux	EXPORT_SYMBOL	

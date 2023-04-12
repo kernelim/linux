@@ -896,7 +896,7 @@ sunsu_change_speed(struct uart_port *port, unsigned int cflag,
 
 static void
 sunsu_set_termios(struct uart_port *port, struct ktermios *termios,
-		  struct ktermios *old)
+		  const struct ktermios *old)
 {
 	unsigned int baud, quot;
 
@@ -1278,7 +1278,7 @@ static void wait_for_xmitr(struct uart_sunsu_port *up)
 	}
 }
 
-static void sunsu_console_putchar(struct uart_port *port, int ch)
+static void sunsu_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	struct uart_sunsu_port *up =
 		container_of(port, struct uart_sunsu_port, port);

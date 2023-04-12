@@ -23,15 +23,13 @@ static int mdev_probe(struct device *dev)
 	return drv->probe(to_mdev_device(dev));
 }
 
-static int mdev_remove(struct device *dev)
+static void mdev_remove(struct device *dev)
 {
 	struct mdev_driver *drv =
 		container_of(dev->driver, struct mdev_driver, driver);
 
 	if (drv->remove)
 		drv->remove(to_mdev_device(dev));
-
-	return 0;
 }
 
 static int mdev_match(struct device *dev, struct device_driver *drv)
@@ -76,13 +74,3 @@ void mdev_unregister_driver(struct mdev_driver *drv)
 	driver_unregister(&drv->driver);
 }
 EXPORT_SYMBOL(mdev_unregister_driver);
-
-int mdev_bus_register(void)
-{
-	return bus_register(&mdev_bus_type);
-}
-
-void mdev_bus_unregister(void)
-{
-	bus_unregister(&mdev_bus_type);
-}

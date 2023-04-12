@@ -33,9 +33,9 @@
 
 #define VERSION "0.1"
 
-#define MTKBTSDIO_AUTOSUSPEND_DELAY	8000
+#define MTKBTSDIO_AUTOSUSPEND_DELAY	1000
 
-static bool enable_autosuspend;
+static bool enable_autosuspend = true;
 
 struct btmtksdio_data {
 	const char *fwname;
@@ -95,6 +95,7 @@ MODULE_DEVICE_TABLE(sdio, btmtksdio_table);
 #define TX_EMPTY		BIT(2)
 #define TX_FIFO_OVERFLOW	BIT(8)
 #define FW_MAILBOX_INT		BIT(15)
+#define INT_MASK		GENMASK(15, 0)
 #define RX_PKT_LEN		GENMASK(31, 16)
 
 #define MTK_REG_CSICR		0xc0
@@ -378,14 +379,8 @@ static int btmtksdio_recv_event(struct hci_dev *hdev, struct sk_buff *skb)
 {
 	struct btmtksdio_dev *bdev = hci_get_drvdata(hdev);
 	struct hci_event_hdr *hdr = (void *)skb->data;
+	u8 evt = hdr->evt;
 	int err;
-
-	/* Fix up the vendor event id with 0xff for vendor specific instead
-	 * of 0xe4 so that event send via monitoring socket can be parsed
-	 * properly.
-	 */
-	if (hdr->evt == 0xe4)
-		hdr->evt = HCI_EV_VENDOR;
 
 	/* When someone waits for the WMT event, the skb is being cloned
 	 * and being processed the events from there then.
@@ -402,7 +397,7 @@ static int btmtksdio_recv_event(struct hci_dev *hdev, struct sk_buff *skb)
 	if (err < 0)
 		goto err_free_skb;
 
-	if (hdr->evt == HCI_EV_VENDOR) {
+	if (evt == HCI_EV_WMT) {
 		if (test_and_clear_bit(BTMTKSDIO_TX_WAIT_VND_EVT,
 				       &bdev->tx_state)) {
 			/* Barrier to sync with other CPUs */
@@ -576,6 +571,7 @@ static void btmtksdio_txrx_work(struct work_struct *work)
 		 * FIFO.
 		 */
 		sdio_writel(bdev->func, int_status, MTK_REG_CHISR, NULL);
+		int_status &= INT_MASK;
 
 		if ((int_status & FW_MAILBOX_INT) &&
 		    bdev->data->chipid == 0x7921) {
@@ -896,15 +892,10 @@ static int mt79xx_setup(struct hci_dev *hdev, const char *fwname)
 	return err;
 }
 
-static int btsdio_mtk_reg_read(struct hci_dev *hdev, u32 reg, u32 *val)
+static int btmtksdio_mtk_reg_read(struct hci_dev *hdev, u32 reg, u32 *val)
 {
 	struct btmtk_hci_wmt_params wmt_params;
-	struct reg_read_cmd {
-		u8 type;
-		u8 rsv;
-		u8 num;
-		__le32 addr;
-	} __packed reg_read = {
+	struct reg_read_cmd reg_read = {
 		.type = 1,
 		.num = 1,
 	};
@@ -920,7 +911,7 @@ static int btsdio_mtk_reg_read(struct hci_dev *hdev, u32 reg, u32 *val)
 
 	err = mtk_hci_wmt_sync(hdev, &wmt_params);
 	if (err < 0) {
-		bt_dev_err(hdev, "Failed to read reg(%d)", err);
+		bt_dev_err(hdev, "Failed to read reg (%d)", err);
 		return err;
 	}
 
@@ -951,6 +942,62 @@ static int btmtksdio_mtk_reg_write(struct hci_dev *hdev, u32 reg, u32 val, u32 m
 	if (err < 0)
 		bt_dev_err(hdev, "Failed to write reg (%d)", err);
 
+	return err;
+}
+
+static int btmtksdio_get_data_path_id(struct hci_dev *hdev, __u8 *data_path_id)
+{
+	/* uses 1 as data path id for all the usecases */
+	*data_path_id = 1;
+	return 0;
+}
+
+static int btmtksdio_get_codec_config_data(struct hci_dev *hdev,
+					   __u8 link, struct bt_codec *codec,
+					   __u8 *ven_len, __u8 **ven_data)
+{
+	int err = 0;
+
+	if (!ven_data || !ven_len)
+		return -EINVAL;
+
+	*ven_len = 0;
+	*ven_data = NULL;
+
+	if (link != ESCO_LINK) {
+		bt_dev_err(hdev, "Invalid link type(%u)", link);
+		return -EINVAL;
+	}
+
+	*ven_data = kmalloc(sizeof(__u8), GFP_KERNEL);
+	if (!*ven_data) {
+		err = -ENOMEM;
+		goto error;
+	}
+
+	/* supports only CVSD and mSBC offload codecs */
+	switch (codec->id) {
+	case 0x02:
+		**ven_data = 0x00;
+		break;
+	case 0x05:
+		**ven_data = 0x01;
+		break;
+	default:
+		err = -EINVAL;
+		bt_dev_err(hdev, "Invalid codec id(%u)", codec->id);
+		goto error;
+	}
+	/* codec and its capabilities are pre-defined to ids
+	 * preset id = 0x00 represents CVSD codec with sampling rate 8K
+	 * preset id = 0x01 represents mSBC codec with sampling rate 16K
+	 */
+	*ven_len = sizeof(__u8);
+	return err;
+
+error:
+	kfree(*ven_data);
+	*ven_data = NULL;
 	return err;
 }
 
@@ -986,7 +1033,14 @@ static int btmtksdio_sco_setting(struct hci_dev *hdev)
 		return err;
 
 	val |= 0x00000101;
-	return btmtksdio_mtk_reg_write(hdev, MT7921_PINMUX_1, val, ~0);
+	err =  btmtksdio_mtk_reg_write(hdev, MT7921_PINMUX_1, val, ~0);
+	if (err < 0)
+		return err;
+
+	hdev->get_data_path_id = btmtksdio_get_data_path_id;
+	hdev->get_codec_config_data = btmtksdio_get_codec_config_data;
+
+	return err;
 }
 
 static int btmtksdio_reset_setting(struct hci_dev *hdev)
@@ -1044,13 +1098,13 @@ static int btmtksdio_setup(struct hci_dev *hdev)
 			clear_bit(BTMTKSDIO_HW_RESET_ACTIVE, &bdev->tx_state);
 		}
 
-		err = btsdio_mtk_reg_read(hdev, 0x70010200, &dev_id);
+		err = btmtksdio_mtk_reg_read(hdev, 0x70010200, &dev_id);
 		if (err < 0) {
 			bt_dev_err(hdev, "Failed to get device id (%d)", err);
 			return err;
 		}
 
-		err = btsdio_mtk_reg_read(hdev, 0x80021004, &fw_version);
+		err = btmtksdio_mtk_reg_read(hdev, 0x80021004, &fw_version);
 		if (err < 0) {
 			bt_dev_err(hdev, "Failed to get fw version (%d)", err);
 			return err;
@@ -1070,6 +1124,9 @@ static int btmtksdio_setup(struct hci_dev *hdev)
 			return err;
 		}
 
+		/* Enable WBS with mSBC codec */
+		set_bit(HCI_QUIRK_WIDEBAND_SPEECH_SUPPORTED, &hdev->quirks);
+
 		/* Enable GPIO reset mechanism */
 		if (bdev->reset) {
 			err = btmtksdio_reset_setting(hdev);
@@ -1079,6 +1136,9 @@ static int btmtksdio_setup(struct hci_dev *hdev)
 				bdev->reset = NULL;
 			}
 		}
+
+		/* Valid LE States quirk for MediaTek 7921 */
+		set_bit(HCI_QUIRK_VALID_LE_STATES, &hdev->quirks);
 
 		break;
 	case 0x7663:
@@ -1128,6 +1188,10 @@ static int btmtksdio_shutdown(struct hci_dev *hdev)
 	 * in btmtksdio_setup.
 	 */
 	pm_runtime_get_sync(bdev->dev);
+
+	/* wmt command only works until the reset is complete */
+	if (test_bit(BTMTKSDIO_HW_RESET_ACTIVE, &bdev->tx_state))
+		goto ignore_wmt_cmd;
 
 	/* wmt command only works until the reset is complete */
 	if (test_bit(BTMTKSDIO_HW_RESET_ACTIVE, &bdev->tx_state))
@@ -1216,10 +1280,18 @@ static void btmtksdio_cmd_timeout(struct hci_dev *hdev)
 err:
 	sdio_release_host(bdev->func);
 
+ignore_wmt_cmd:
 	pm_runtime_put_noidle(bdev->dev);
 	pm_runtime_disable(bdev->dev);
 
 	hci_reset_dev(hdev);
+}
+
+static bool btmtksdio_sdio_inband_wakeup(struct hci_dev *hdev)
+{
+	struct btmtksdio_dev *bdev = hci_get_drvdata(hdev);
+
+	return device_may_wakeup(bdev->dev);
 }
 
 static bool btmtksdio_sdio_wakeup(struct hci_dev *hdev)
@@ -1289,6 +1361,14 @@ static int btmtksdio_probe(struct sdio_func *func,
 	hdev->shutdown = btmtksdio_shutdown;
 	hdev->send     = btmtksdio_send_frame;
 	hdev->wakeup   = btmtksdio_sdio_wakeup;
+	/*
+	 * If SDIO controller supports wake on Bluetooth, sending a wakeon
+	 * command is not necessary.
+	 */
+	if (device_can_wakeup(func->card->host->parent))
+		hdev->wakeup = btmtksdio_sdio_inband_wakeup;
+	else
+		hdev->wakeup = btmtksdio_sdio_wakeup;
 	hdev->set_bdaddr = btmtk_set_bdaddr;
 
 	SET_HCIDEV_DEV(hdev, &func->dev);
@@ -1296,14 +1376,14 @@ static int btmtksdio_probe(struct sdio_func *func,
 	hdev->manufacturer = 70;
 	set_bit(HCI_QUIRK_NON_PERSISTENT_SETUP, &hdev->quirks);
 
+	sdio_set_drvdata(func, bdev);
+
 	err = hci_register_dev(hdev);
 	if (err < 0) {
 		dev_err(&func->dev, "Can't register HCI device\n");
 		hci_free_dev(hdev);
 		return err;
 	}
-
-	sdio_set_drvdata(func, bdev);
 
 	/* pm_runtime_enable would be done after the firmware is being
 	 * downloaded because the core layer probably already enables
@@ -1374,7 +1454,7 @@ static int btmtksdio_runtime_suspend(struct device *dev)
 
 	err = btmtksdio_fw_pmctrl(bdev);
 
-	bt_dev_info(bdev->hdev, "status (%d) return ownership to device", err);
+	bt_dev_dbg(bdev->hdev, "status (%d) return ownership to device", err);
 
 	return err;
 }
@@ -1394,7 +1474,7 @@ static int btmtksdio_runtime_resume(struct device *dev)
 
 	err = btmtksdio_drv_pmctrl(bdev);
 
-	bt_dev_info(bdev->hdev, "status (%d) get ownership from device", err);
+	bt_dev_dbg(bdev->hdev, "status (%d) get ownership from device", err);
 
 	return err;
 }

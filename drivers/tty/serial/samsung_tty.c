@@ -1517,7 +1517,7 @@ static u16 udivslot_table[16] = {
 
 static void s3c24xx_serial_set_termios(struct uart_port *port,
 				       struct ktermios *termios,
-				       struct ktermios *old)
+				       const struct ktermios *old)
 {
 	struct s3c2410_uartcfg *cfg = s3c24xx_port_to_cfg(port);
 	struct s3c24xx_uart_port *ourport = to_ourport(port);
@@ -2469,7 +2469,7 @@ static void s3c24xx_serial_put_poll_char(struct uart_port *port,
 #endif /* CONFIG_CONSOLE_POLL */
 
 static void
-s3c24xx_serial_console_putchar(struct uart_port *port, int ch)
+s3c24xx_serial_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	unsigned int ufcon = rd_regl(port, S3C2410_UFCON);
 
@@ -2919,7 +2919,7 @@ static void samsung_early_busyuart_fifo(struct uart_port *port)
 		;
 }
 
-static void samsung_early_putc(struct uart_port *port, int c)
+static void samsung_early_putc(struct uart_port *port, unsigned char c)
 {
 	if (readl(port->membase + S3C2410_UFCON) & S3C2410_UFCON_FIFOMODE)
 		samsung_early_busyuart_fifo(port);

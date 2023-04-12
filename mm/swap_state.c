@@ -286,7 +286,7 @@ void clear_shadow_from_swap_cache(int type, unsigned long begin,
  * try_to_free_swap() _with_ the lock.
  * 					- Marcelo
  */
-static inline void free_swap_cache(struct page *page)
+void free_swap_cache(struct page *page)
 {
 	if (PageSwapCache(page) && !page_mapped(page) && trylock_page(page)) {
 		try_to_free_swap(page);
@@ -478,7 +478,7 @@ struct page *__read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 		 * __read_swap_cache_async(), which has set SWAP_HAS_CACHE
 		 * in swap_map, but not yet added its page to swap cache.
 		 */
-		cond_resched();
+		schedule_timeout_uninterruptible(1);
 	}
 
 	/*

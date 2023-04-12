@@ -21,10 +21,12 @@
 #include <linux/sfp.h>
 
 #include "nfpcore/nfp.h"
+#include "nfpcore/nfp_dev.h"
 #include "nfpcore/nfp_nsp.h"
 #include "nfp_app.h"
 #include "nfp_main.h"
 #include "nfp_net_ctrl.h"
+#include "nfp_net_dp.h"
 #include "nfp_net.h"
 #include "nfp_port.h"
 
@@ -217,7 +219,7 @@ nfp_net_get_drvinfo(struct net_device *netdev, struct ethtool_drvinfo *drvinfo)
 	struct nfp_net *nn = netdev_priv(netdev);
 
 	snprintf(vnic_version, sizeof(vnic_version), "%d.%d.%d.%d",
-		 nn->fw_ver.resv, nn->fw_ver.class,
+		 nn->fw_ver.extend, nn->fw_ver.class,
 		 nn->fw_ver.major, nn->fw_ver.minor);
 	strlcpy(drvinfo->bus_info, pci_name(nn->pdev),
 		sizeof(drvinfo->bus_info));
@@ -287,8 +289,6 @@ nfp_net_get_link_ksettings(struct net_device *netdev,
 
 	/* Init to unknowns */
 	ethtool_link_ksettings_add_link_mode(cmd, supported, FIBRE);
-	ethtool_link_ksettings_add_link_mode(cmd, supported, Pause);
-	ethtool_link_ksettings_add_link_mode(cmd, advertising, Pause);
 	cmd->base.port = PORT_OTHER;
 	cmd->base.speed = SPEED_UNKNOWN;
 	cmd->base.duplex = DUPLEX_UNKNOWN;
@@ -296,6 +296,8 @@ nfp_net_get_link_ksettings(struct net_device *netdev,
 	port = nfp_port_from_netdev(netdev);
 	eth_port = nfp_port_get_eth_port(port);
 	if (eth_port) {
+		ethtool_link_ksettings_add_link_mode(cmd, supported, Pause);
+		ethtool_link_ksettings_add_link_mode(cmd, advertising, Pause);
 		cmd->base.autoneg = eth_port->aneg != NFP_ANEG_DISABLED ?
 			AUTONEG_ENABLE : AUTONEG_DISABLE;
 		nfp_net_set_fec_link_mode(eth_port, cmd);
@@ -386,9 +388,10 @@ static void nfp_net_get_ringparam(struct net_device *netdev,
 				  struct netlink_ext_ack *extack)
 {
 	struct nfp_net *nn = netdev_priv(netdev);
+	u32 qc_max = nn->dev_info->max_qc_size;
 
-	ring->rx_max_pending = NFP_NET_MAX_RX_DESCS;
-	ring->tx_max_pending = NFP_NET_MAX_TX_DESCS;
+	ring->rx_max_pending = qc_max;
+	ring->tx_max_pending = qc_max / nn->dp.ops->tx_min_desc_per_pkt;
 	ring->rx_pending = nn->dp.rxd_cnt;
 	ring->tx_pending = nn->dp.txd_cnt;
 }
@@ -412,19 +415,22 @@ static int nfp_net_set_ringparam(struct net_device *netdev,
 				 struct kernel_ethtool_ringparam *kernel_ring,
 				 struct netlink_ext_ack *extack)
 {
+	u32 tx_dpp, qc_min, qc_max, rxd_cnt, txd_cnt;
 	struct nfp_net *nn = netdev_priv(netdev);
-	u32 rxd_cnt, txd_cnt;
 
 	/* We don't have separate queues/rings for small/large frames. */
 	if (ring->rx_mini_pending || ring->rx_jumbo_pending)
 		return -EINVAL;
 
+	qc_min = nn->dev_info->min_qc_size;
+	qc_max = nn->dev_info->max_qc_size;
+	tx_dpp = nn->dp.ops->tx_min_desc_per_pkt;
 	/* Round up to supported values */
 	rxd_cnt = roundup_pow_of_two(ring->rx_pending);
 	txd_cnt = roundup_pow_of_two(ring->tx_pending);
 
-	if (rxd_cnt < NFP_NET_MIN_RX_DESCS || rxd_cnt > NFP_NET_MAX_RX_DESCS ||
-	    txd_cnt < NFP_NET_MIN_TX_DESCS || txd_cnt > NFP_NET_MAX_TX_DESCS)
+	if (rxd_cnt < qc_min || rxd_cnt > qc_max ||
+	    txd_cnt < qc_min / tx_dpp || txd_cnt > qc_max / tx_dpp)
 		return -EINVAL;
 
 	if (nn->dp.rxd_cnt == rxd_cnt && nn->dp.txd_cnt == txd_cnt)
@@ -1092,6 +1098,9 @@ static int nfp_net_get_coalesce(struct net_device *netdev,
 	if (!(nn->cap & NFP_NET_CFG_CTRL_IRQMOD))
 		return -EINVAL;
 
+	ec->use_adaptive_rx_coalesce = nn->rx_coalesce_adapt_on;
+	ec->use_adaptive_tx_coalesce = nn->tx_coalesce_adapt_on;
+
 	ec->rx_coalesce_usecs       = nn->rx_coalesce_usecs;
 	ec->rx_max_coalesced_frames = nn->rx_coalesce_max_frames;
 	ec->tx_coalesce_usecs       = nn->tx_coalesce_usecs;
@@ -1345,7 +1354,7 @@ static int nfp_net_set_coalesce(struct net_device *netdev,
 	 * ME timestamp ticks.  There are 16 ME clock cycles for each timestamp
 	 * count.
 	 */
-	factor = nn->me_freq_mhz / 16;
+	factor = nn->tlv_caps.me_freq_mhz / 16;
 
 	/* Each pair of (usecs, max_frames) fields specifies that interrupts
 	 * should be coalesced until
@@ -1370,19 +1379,18 @@ static int nfp_net_set_coalesce(struct net_device *netdev,
 	if (!ec->tx_coalesce_usecs && !ec->tx_max_coalesced_frames)
 		return -EINVAL;
 
-	if (ec->rx_coalesce_usecs * factor >= ((1 << 16) - 1))
+	if (nfp_net_coalesce_para_check(ec->rx_coalesce_usecs * factor,
+					ec->rx_max_coalesced_frames))
 		return -EINVAL;
 
-	if (ec->tx_coalesce_usecs * factor >= ((1 << 16) - 1))
-		return -EINVAL;
-
-	if (ec->rx_max_coalesced_frames >= ((1 << 16) - 1))
-		return -EINVAL;
-
-	if (ec->tx_max_coalesced_frames >= ((1 << 16) - 1))
+	if (nfp_net_coalesce_para_check(ec->tx_coalesce_usecs * factor,
+					ec->tx_max_coalesced_frames))
 		return -EINVAL;
 
 	/* configuration is valid */
+	nn->rx_coalesce_adapt_on = !!ec->use_adaptive_rx_coalesce;
+	nn->tx_coalesce_adapt_on = !!ec->use_adaptive_tx_coalesce;
+
 	nn->rx_coalesce_usecs      = ec->rx_coalesce_usecs;
 	nn->rx_coalesce_max_frames = ec->rx_max_coalesced_frames;
 	nn->tx_coalesce_usecs      = ec->tx_coalesce_usecs;
@@ -1454,7 +1462,8 @@ static int nfp_net_set_channels(struct net_device *netdev,
 
 static const struct ethtool_ops nfp_net_ethtool_ops = {
 	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
-				     ETHTOOL_COALESCE_MAX_FRAMES,
+				     ETHTOOL_COALESCE_MAX_FRAMES |
+				     ETHTOOL_COALESCE_USE_ADAPTIVE,
 	.get_drvinfo		= nfp_net_get_drvinfo,
 	.get_link		= ethtool_op_get_link,
 	.get_ringparam		= nfp_net_get_ringparam,

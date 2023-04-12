@@ -344,7 +344,7 @@ unsigned long randomize_stack_top(unsigned long stack_top)
 }
 
 #ifdef CONFIG_ARCH_WANT_DEFAULT_TOPDOWN_MMAP_LAYOUT
-unsigned long arch_randomize_brk(struct mm_struct *mm)
+unsigned long __weak arch_randomize_brk(struct mm_struct *mm)
 {
 	/* Is the current task 32bit ? */
 	if (!IS_ENABLED(CONFIG_64BIT) || is_compat_task())
@@ -549,12 +549,9 @@ EXPORT_SYMBOL(vm_mmap);
  * Uses kmalloc to get the memory but if the allocation fails then falls back
  * to the vmalloc allocator. Use kvfree for freeing the memory.
  *
- * Reclaim modifiers - __GFP_NORETRY and __GFP_NOFAIL are not supported.
+ * GFP_NOWAIT and GFP_ATOMIC are not supported, neither is the __GFP_NORETRY modifier.
  * __GFP_RETRY_MAYFAIL is supported, and it should be used only if kmalloc is
  * preferable to the vmalloc fallback, due to visible performance drawbacks.
- *
- * Please note that any use of gfp flags outside of GFP_KERNEL is careful to not
- * fall back to vmalloc.
  *
  * Return: pointer to the allocated memory of %NULL in case of failure
  */
@@ -562,13 +559,6 @@ void *kvmalloc_node(size_t size, gfp_t flags, int node)
 {
 	gfp_t kmalloc_flags = flags;
 	void *ret;
-
-	/*
-	 * vmalloc uses GFP_KERNEL for some internal allocations (e.g page tables)
-	 * so the given set of flags has to be compatible.
-	 */
-	if ((flags & GFP_KERNEL) != GFP_KERNEL)
-		return kmalloc_node(size, flags, node);
 
 	/*
 	 * We want to attempt a large physically contiguous block first because
@@ -582,6 +572,9 @@ void *kvmalloc_node(size_t size, gfp_t flags, int node)
 
 		if (!(kmalloc_flags & __GFP_RETRY_MAYFAIL))
 			kmalloc_flags |= __GFP_NORETRY;
+
+		/* nofail semantic is implemented by the vmalloc fallback */
+		kmalloc_flags &= ~__GFP_NOFAIL;
 	}
 
 	ret = kmalloc_node(size, kmalloc_flags, node);
@@ -593,14 +586,25 @@ void *kvmalloc_node(size_t size, gfp_t flags, int node)
 	if (ret || size <= PAGE_SIZE)
 		return ret;
 
+	/* non-sleeping allocations are not supported by vmalloc */
+	if (!gfpflags_allow_blocking(flags))
+		return NULL;
+
 	/* Don't even allow crazy sizes */
 	if (unlikely(size > INT_MAX)) {
 		WARN_ON_ONCE(!(flags & __GFP_NOWARN));
 		return NULL;
 	}
 
-	return __vmalloc_node(size, 1, flags, node,
-			__builtin_return_address(0));
+	/*
+	 * kvmalloc() can always use VM_ALLOW_HUGE_VMAP,
+	 * since the callers already cannot assume anything
+	 * about the resulting pointer, and cannot play
+	 * protection games.
+	 */
+	return __vmalloc_node_range(size, 1, VMALLOC_START, VMALLOC_END,
+			flags, PAGE_KERNEL, VM_ALLOW_HUGE_VMAP,
+			node, __builtin_return_address(0));
 }
 EXPORT_SYMBOL(kvmalloc_node);
 
@@ -781,32 +785,19 @@ EXPORT_SYMBOL(folio_mapping);
 /* Slow path of page_mapcount() for compound pages */
 int __page_mapcount(struct page *page)
 {
-	unsigned int seqcount;
 	int ret;
-	struct page *head;
 
+	ret = atomic_read(&page->_mapcount) + 1;
 	/*
 	 * For file THP page->_mapcount contains total number of mapping
 	 * of the page: no need to look into compound_mapcount.
 	 */
-	if (PageHuge(page)) {
-		VM_WARN_ON_ONCE_PAGE(atomic_read(&page->_mapcount) >= 0, page);
-		return compound_mapcount(page);
-	}
-	if (!PageAnon(page))
-		return atomic_read(&page->_mapcount) + 1;
-
-	head = compound_head(page);
-again:
-	seqcount = page_mapcount_seq_begin(head);
-
-	ret = atomic_read(&page->_mapcount) + 1;
-	ret += atomic_read(compound_mapcount_ptr(head)) + 1;
-	if (PageDoubleMap(head))
+	if (!PageAnon(page) && !PageHuge(page))
+		return ret;
+	page = compound_head(page);
+	ret += atomic_read(compound_mapcount_ptr(page)) + 1;
+	if (PageDoubleMap(page))
 		ret--;
-
-	if (page_mapcount_seq_retry(head, seqcount))
-		goto again;
 	return ret;
 }
 EXPORT_SYMBOL_GPL(__page_mapcount);

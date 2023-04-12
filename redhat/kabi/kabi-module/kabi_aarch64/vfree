@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:mm/vmalloc.c
-0x999e8297	vfree	vmlinux	EXPORT_SYMBOL
+#2-
+0x999e8297	vfree	vmlinux	EXPORT_SYMBOL	

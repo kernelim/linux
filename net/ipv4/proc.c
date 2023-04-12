@@ -53,7 +53,7 @@ static int sockstat_seq_show(struct seq_file *seq, void *v)
 	struct net *net = seq->private;
 	int orphans, sockets;
 
-	orphans = percpu_counter_sum_positive(&tcp_orphan_count);
+	orphans = tcp_orphan_count_sum();
 	sockets = proto_sockets_allocated_sum_positive(&tcp_prot);
 
 	socket_seq_show(seq);
@@ -352,7 +352,7 @@ static void icmp_put(struct seq_file *seq)
 	seq_puts(seq, "\nIcmp: InMsgs InErrors InCsumErrors");
 	for (i = 0; icmpmibmap[i].name; i++)
 		seq_printf(seq, " In%s", icmpmibmap[i].name);
-	seq_puts(seq, " OutMsgs OutErrors");
+	seq_puts(seq, " OutMsgs OutErrors OutRateLimitGlobal OutRateLimitHost");
 	for (i = 0; icmpmibmap[i].name; i++)
 		seq_printf(seq, " Out%s", icmpmibmap[i].name);
 	seq_printf(seq, "\nIcmp: %lu %lu %lu",
@@ -362,9 +362,11 @@ static void icmp_put(struct seq_file *seq)
 	for (i = 0; icmpmibmap[i].name; i++)
 		seq_printf(seq, " %lu",
 			   atomic_long_read(ptr + icmpmibmap[i].index));
-	seq_printf(seq, " %lu %lu",
+	seq_printf(seq, " %lu %lu %lu %lu",
 		snmp_fold_field(net->mib.icmp_statistics, ICMP_MIB_OUTMSGS),
-		snmp_fold_field(net->mib.icmp_statistics, ICMP_MIB_OUTERRORS));
+		snmp_fold_field(net->mib.icmp_statistics, ICMP_MIB_OUTERRORS),
+		snmp_fold_field(net->mib.icmp_statistics, ICMP_MIB_RATELIMITGLOBAL),
+		snmp_fold_field(net->mib.icmp_statistics, ICMP_MIB_RATELIMITHOST));
 	for (i = 0; icmpmibmap[i].name; i++)
 		seq_printf(seq, " %lu",
 			   atomic_long_read(ptr + (icmpmibmap[i].index | 0x100)));
@@ -387,7 +389,7 @@ static int snmp_seq_show_ipstats(struct seq_file *seq, void *v)
 
 	seq_printf(seq, "\nIp: %d %d",
 		   IPV4_DEVCONF_ALL(net, FORWARDING) ? 1 : 2,
-		   net->ipv4.sysctl_ip_default_ttl);
+		   READ_ONCE(net->ipv4.sysctl_ip_default_ttl));
 
 	BUILD_BUG_ON(offsetof(struct ipstats_mib, mibs) != 0);
 	snmp_get_cpu_field64_batch(buff64, snmp4_ipstats_list,

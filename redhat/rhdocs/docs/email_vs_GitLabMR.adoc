@@ -74,7 +74,7 @@ to view the PCI change.
 
 == Changesets requiring review
 
-To obtain the list of outstanding changesets, users can use the GitLab WebUI, link:bichon.adoc[bichon] tool (preferred for the command line), https://gitlab.com/prarit/rhstatus[rhstatus] or execute
+To obtain the list of outstanding changesets, users can use the GitLab WebUI, xref:revumatic.adoc[revumatic], https://gitlab.com/prarit/rhstatus[rhstatus] or, using xref:lab.adoc[lab], execute
 
 	git fetch upstream
 	lab mr list
@@ -100,7 +100,7 @@ The patches can be exported to a mbox file with the ‘--stdout’ argument to �
 
 == lab config files
 
-The lab utility has config files that allow for per-instruction configuration.  For example,
+The xref:lab.adoc[lab] utility has config files that allow for per-instruction configuration.  For example,
 
 	lab mr create <branch_name> --cover-letter --force-linebreak
 

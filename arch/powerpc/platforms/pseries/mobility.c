@@ -522,11 +522,15 @@ static void prod_others(void)
 
 static u16 clamp_slb_size(void)
 {
+#ifdef CONFIG_PPC_64S_HASH_MMU
 	u16 prev = mmu_slb_size;
 
 	slb_set_size(SLB_MIN_SIZE);
 
 	return prev;
+#else
+	return 0;
+#endif
 }
 
 static int do_suspend(void)
@@ -736,11 +740,19 @@ static int pseries_migrate_partition(u64 handle)
 #ifdef CONFIG_PPC_WATCHDOG
 	factor = nmi_wd_lpm_factor;
 #endif
+	/*
+	 * When the migration is initiated, the hypervisor changes VAS
+	 * mappings to prepare before OS gets the notification and
+	 * closes all VAS windows. NX generates continuous faults during
+	 * this time and the user space can not differentiate these
+	 * faults from the migration event. So reduce this time window
+	 * by closing VAS windows at the beginning of this function.
+	 */
+	vas_migration_handler(VAS_SUSPEND);
+
 	ret = wait_for_vasi_session_suspending(handle);
 	if (ret)
-		return ret;
-
-	vas_migration_handler(VAS_SUSPEND);
+		goto out;
 
 	if (factor)
 		watchdog_nmi_set_timeout_pct(factor);
@@ -761,6 +773,7 @@ static int pseries_migrate_partition(u64 handle)
 	if (factor)
 		watchdog_nmi_set_timeout_pct(0);
 
+out:
 	vas_migration_handler(VAS_RESUME);
 
 	return ret;

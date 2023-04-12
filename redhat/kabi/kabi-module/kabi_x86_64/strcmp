@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/string.c
-0xe2d5255a	strcmp	vmlinux	EXPORT_SYMBOL
+#2-
+0xe2d5255a	strcmp	vmlinux	EXPORT_SYMBOL	

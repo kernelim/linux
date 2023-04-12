@@ -642,7 +642,7 @@ static void isotp_rcv(struct sk_buff *skb, void *data)
 		if (cf->len <= CAN_MAX_DLEN) {
 			isotp_rcv_sf(sk, cf, SF_PCI_SZ4 + ae, skb, sf_dl);
 		} else {
-			if (skb->len == CANFD_MTU) {
+			if (can_is_canfd_skb(skb)) {
 				/* We have a CAN FD frame and CAN_DL is greater than 8:
 				 * Only frames with the SF_DL == 0 ESC value are valid.
 				 *
@@ -971,12 +971,8 @@ static int isotp_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
 	struct sock *sk = sock->sk;
 	struct sk_buff *skb;
 	int err = 0;
-	int noblock;
 
-	noblock = flags & MSG_DONTWAIT;
-	flags &= ~MSG_DONTWAIT;
-
-	skb = skb_recv_datagram(sk, flags, noblock, &err);
+	skb = skb_recv_datagram(sk, flags, &err);
 	if (!skb)
 		return err;
 

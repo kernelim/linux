@@ -82,31 +82,6 @@ static int gfs2_get_block_noalloc(struct inode *inode, sector_t lblock,
 }
 
 /**
- * gfs2_writepage - Write page for writeback mappings
- * @page: The page
- * @wbc: The writeback control
- */
-static int gfs2_writepage(struct page *page, struct writeback_control *wbc)
-{
-	struct inode *inode = page->mapping->host;
-	struct gfs2_inode *ip = GFS2_I(inode);
-	struct gfs2_sbd *sdp = GFS2_SB(inode);
-	struct iomap_writepage_ctx wpc = { };
-
-	if (gfs2_assert_withdraw(sdp, gfs2_glock_is_held_excl(ip->i_gl)))
-		goto out;
-	if (current->journal_info)
-		goto redirty;
-	return iomap_writepage(page, wbc, &wpc, &gfs2_writeback_ops);
-
-redirty:
-	redirty_page_for_writepage(wbc, page);
-out:
-	unlock_page(page);
-	return 0;
-}
-
-/**
  * gfs2_write_jdata_page - gfs2 jdata-specific version of block_write_full_page
  * @page: The page to write
  * @wbc: The writeback control
@@ -452,8 +427,6 @@ static int stuffed_readpage(struct gfs2_inode *ip, struct page *page)
 		return error;
 
 	kaddr = kmap_atomic(page);
-	if (dsize > gfs2_max_stuffed_size(ip))
-		dsize = gfs2_max_stuffed_size(ip);
 	memcpy(kaddr, dibh->b_data + sizeof(struct gfs2_dinode), dsize);
 	memset(kaddr + dsize, 0, PAGE_SIZE - dsize);
 	kunmap_atomic(kaddr);
@@ -606,18 +579,12 @@ out:
 	gfs2_trans_end(sdp);
 }
 
-/**
- * jdata_set_page_dirty - Page dirtying function
- * @page: The page to dirty
- *
- * Returns: 1 if it dirtyed the page, or 0 otherwise
- */
- 
-static int jdata_set_page_dirty(struct page *page)
+static bool jdata_dirty_folio(struct address_space *mapping,
+		struct folio *folio)
 {
 	if (current->journal_info)
-		SetPageChecked(page);
-	return __set_page_dirty_buffers(page);
+		folio_set_checked(folio);
+	return block_dirty_folio(mapping, folio);
 }
 
 /**
@@ -775,11 +742,10 @@ cannot_release:
 }
 
 static const struct address_space_operations gfs2_aops = {
-	.writepage = gfs2_writepage,
 	.writepages = gfs2_writepages,
 	.readpage = gfs2_readpage,
 	.readahead = gfs2_readahead,
-	.set_page_dirty = __set_page_dirty_nobuffers,
+	.dirty_folio = filemap_dirty_folio,
 	.releasepage = iomap_releasepage,
 	.invalidatepage = iomap_invalidatepage,
 	.bmap = gfs2_bmap,
@@ -794,7 +760,7 @@ static const struct address_space_operations gfs2_jdata_aops = {
 	.writepages = gfs2_jdata_writepages,
 	.readpage = gfs2_readpage,
 	.readahead = gfs2_readahead,
-	.set_page_dirty = jdata_set_page_dirty,
+	.dirty_folio = jdata_dirty_folio,
 	.bmap = gfs2_bmap,
 	.invalidatepage = gfs2_invalidatepage,
 	.releasepage = gfs2_releasepage,

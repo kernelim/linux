@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/kernel/smpboot.c
-0x19dbaa31	cpu_info	vmlinux	EXPORT_SYMBOL
+#2-
+0x92eacd23	cpu_info	vmlinux	EXPORT_SYMBOL	

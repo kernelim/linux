@@ -4,6 +4,8 @@
 #ifndef _TEST_BTF_H
 #define _TEST_BTF_H
 
+#define BTF_END_RAW 0xdeadbeef
+
 #define BTF_INFO_ENC(kind, kind_flag, vlen)			\
 	((!!(kind_flag) << 31) | ((kind) << 24) | ((vlen) & BTF_MAX_VLEN))
 
@@ -39,6 +41,7 @@
 #define BTF_MEMBER_ENC(name, type, bits_offset)	\
 	(name), (type), (bits_offset)
 #define BTF_ENUM_ENC(name, val) (name), (val)
+#define BTF_ENUM64_ENC(name, val_lo32, val_hi32) (name), (val_lo32), (val_hi32)
 #define BTF_MEMBER_OFFSET(bitfield_size, bits_offset) \
 	((bitfield_size) << 24 | (bits_offset))
 
@@ -71,5 +74,8 @@
 
 #define BTF_DECL_TAG_ENC(value, type, component_idx)	\
 	BTF_TYPE_ENC(value, BTF_INFO_ENC(BTF_KIND_DECL_TAG, 0, 0), type), (component_idx)
+
+#define BTF_TYPE_TAG_ENC(value, type)	\
+	BTF_TYPE_ENC(value, BTF_INFO_ENC(BTF_KIND_TYPE_TAG, 0, 0), type)
 
 #endif /* _TEST_BTF_H */

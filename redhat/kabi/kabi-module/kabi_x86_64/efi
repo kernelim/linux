@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:drivers/firmware/efi/efi.c
-0xb2fabf63	efi	vmlinux	EXPORT_SYMBOL
+#2-
+0x1f1821ae	efi	vmlinux	EXPORT_SYMBOL	

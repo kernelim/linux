@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/kernel/cpu/common.c
-0x4629334c	__preempt_count	vmlinux	EXPORT_SYMBOL
+#2-
+0x4629334c	__preempt_count	vmlinux	EXPORT_SYMBOL	

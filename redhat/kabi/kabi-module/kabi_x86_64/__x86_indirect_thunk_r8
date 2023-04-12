@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/lib/retpoline.S
-0xf90a1e85	__x86_indirect_thunk_r8	vmlinux	EXPORT_SYMBOL
+#2-
+0xf90a1e85	__x86_indirect_thunk_r8	vmlinux	EXPORT_SYMBOL	

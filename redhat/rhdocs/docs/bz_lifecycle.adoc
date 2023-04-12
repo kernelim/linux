@@ -6,7 +6,7 @@ weight: 2
 summary: The Bugzilla/Kernel lifecycle
 ---
 
-= Bugzilla Lifecycle
+{{< toc >}}
 
 For every modification against the RHEL kernel, an approved https://bugzilla.redhat.com[Bugzilla] (or BZ) is required for that change to make it into the release.  This document provides an overview of a modification to the RHEL kernel from the perspective of the BZ and how it evolves through the journey.
 

@@ -1024,7 +1024,7 @@ static int mmc_blk_reset(struct mmc_blk_data *md, struct mmc_host *host,
 		return -EEXIST;
 
 	md->reset_done |= type;
-	err = mmc_hw_reset(host);
+	err = mmc_hw_reset(host->card);
 	/* Ensure we switch back to the correct partition */
 	if (err) {
 		struct mmc_blk_data *main_md =
@@ -2459,11 +2459,11 @@ static struct mmc_blk_data *mmc_blk_alloc_req(struct mmc_card *card,
 		dev_set_drvdata(&card->dev, md);
 	ret = device_add_disk(md->parent, md->disk, mmc_disk_attr_groups);
 	if (ret)
-		goto err_cleanup_queue;
+		goto err_put_disk;
 	return md;
 
- err_cleanup_queue:
-	blk_cleanup_queue(md->disk->queue);
+ err_put_disk:
+	put_disk(md->disk);
 	blk_mq_free_tag_set(&md->queue.tag_set);
  err_kfree:
 	kfree(md);

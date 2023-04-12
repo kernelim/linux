@@ -4,10 +4,6 @@ ORDER=common ark fedora
 x86_64=generic:generic-x86:generic-x86-x86_64
 x86_64-debug=generic:generic-x86:generic-x86-x86_64:debug:debug-x86-x86_64
 
-# i686
-i686=generic:generic-x86:generic-x86-i686
-i686-debug=generic:generic-x86:generic-x86-i686:debug:debug-x86
-
 # ppc64le
 ppc64le=generic:generic-powerpc
 ppc64le-debug=generic:generic-powerpc:debug:debug-powerpc
@@ -20,6 +16,8 @@ s390x-zfcpdump=generic:generic-s390x:generic-s390x-zfcpdump
 # aarch64
 aarch64=generic:generic-arm:generic-arm-aarch64
 aarch64-debug=generic:generic-arm:generic-arm-aarch64:debug:debug-arm-aarch64
+aarch64-64k=generic:generic-arm:generic-arm-aarch64:generic-arm-aarch64-64k
+aarch64-64k-debug=generic:generic-arm:generic-arm-aarch64:generic-arm-aarch64-64k:debug:debug-arm-aarch64:debug-arm-aarch64-64k
 
 # arm
 armv7hl=generic:generic-arm:generic-arm-armv7:generic-arm-armv7-armv7

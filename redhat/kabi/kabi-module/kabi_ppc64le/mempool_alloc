@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:mm/mempool.c
-0xcada3b60	mempool_alloc	vmlinux	EXPORT_SYMBOL
+#2-
+0xcada3b60	mempool_alloc	vmlinux	EXPORT_SYMBOL	

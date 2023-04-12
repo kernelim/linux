@@ -1,5 +1,5 @@
 ---
-title: 'Lab'
+title: 'Lab - Gitlab utility'
 date: 2021-07-20T19:30:08+10:00
 draft: false
 weight: 5
@@ -8,7 +8,9 @@ summary: An overview of the gitlab ‘lab’ utility and how to use it to perfor
 
 = Gitlab ‘lab’ utility and the Red Hat Kernel
 
-An overview of the gitlab ‘lab’ utility and how to use it to perform basic contributor and reviewer actions on the command line with Red Hat kernels hosted on GitLab.  Bugs and feature requests for the lab utility can be filed at https://github.com/zaquestion/lab/issues[https://github.com/zaquestion/lab/issues].
+{{< toc >}}
+
+An overview of the gitlab https://github.com/zaquestion/lab[lab] utility and how to use it to perform basic contributor and reviewer actions on the command line with Red Hat kernels hosted on GitLab.  Bugs and feature requests for the lab utility can be filed at https://github.com/zaquestion/lab/issues[https://github.com/zaquestion/lab/issues].
 
 == Scope
 
@@ -260,7 +262,7 @@ Branches can be rebased using git.  A typical action is to rebase a branch again
 
 == Reviewer Actions
 
-The common reviewer actions are checking out the merge request code for review, viewing a merge request’s comments, and adding comments to a merge request.  While lab supports reviewer actions, it is strongly recommended that reviewers use the ‘link:bichon.adoc[bichon]’ tool for reviews.
+The common reviewer actions are checking out the merge request code for review, viewing a merge request’s comments, and adding comments to a merge request.
 
 === Checking out a Merge Request
 

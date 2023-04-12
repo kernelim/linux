@@ -31,7 +31,6 @@
 #include "ab8500-bm.h"
 
 #define VTVOUT_V			1800
-
 #define BTEMP_THERMAL_LOW_LIMIT		-10
 #define BTEMP_THERMAL_MED_LIMIT		0
 #define BTEMP_THERMAL_HIGH_LIMIT_52	52
@@ -135,7 +134,6 @@ static int ab8500_btemp_batctrl_volt_to_res(struct ab8500_btemp *di,
 	int v_batctrl, int inst_curr)
 {
 	int rbs;
-
 	if (is_ab8500_1p1_or_earlier(di->parent)) {
 		/*
 		 * For ABB cut1.0 and 1.1 BAT_CTRL is internally
@@ -153,10 +151,10 @@ static int ab8500_btemp_batctrl_volt_to_res(struct ab8500_btemp *di,
 		       - di->bm->gnd_lift_resistance * inst_curr)
 		      / di->curr_source;
 	} else {
-		/*
-		 * BAT_CTRL is internally
-		 * connected to 1.8V through a 80k resistor
-		 */
+	/*
+	 * BAT_CTRL is internally
+	 * connected to 1.8V through a 80k resistor
+	 */
 		rbs = (80000 * (v_batctrl)) / (1800 - v_batctrl);
 	}
 
@@ -358,7 +356,6 @@ static int ab8500_btemp_get_batctrl_res(struct ab8500_btemp *di)
 		dev_err(di->dev, "%s curr source enabled failed\n", __func__);
 		return ret;
 	}
-
 	if (!di->fg)
 		di->fg = ab8500_fg_get();
 	if (!di->fg) {
@@ -399,7 +396,6 @@ static int ab8500_btemp_get_batctrl_res(struct ab8500_btemp *di)
 		dev_err(di->dev, "%s curr source disable failed\n", __func__);
 		return ret;
 	}
-
 	dev_dbg(di->dev, "%s batctrl: %d res: %d inst_curr: %d samples: %d\n",
 		__func__, batctrl, res, inst_curr, i);
 
@@ -574,6 +570,7 @@ static void ab8500_btemp_periodic_work(struct work_struct *work)
 	}
 
 	bat_temp = ab8500_btemp_measure_temp(di);
+
 	/*
 	 * Filter battery temperature.
 	 * Allow direct updates on temperature only if two samples result in

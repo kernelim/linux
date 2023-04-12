@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/signal.c
-0x6df1aaf1	kernel_sigaction	vmlinux	EXPORT_SYMBOL
+#2-
+0x6df1aaf1	kernel_sigaction	vmlinux	EXPORT_SYMBOL	

@@ -218,6 +218,13 @@ Description:
 		Will always return 0.  Don't rely on any specific behavior
 		for discards, and don't read this file.
 
+What:		/sys/block/<disk>/queue/dma_alignment
+Date:		May 2022
+Contact:	linux-block@vger.kernel.org
+Description:
+		Reports the alignment that user space addresses must have to be
+		used for raw block device access with O_DIRECT and other driver
+		specific passthrough mechanisms.
 
 What:		/sys/block/<disk>/queue/io_timeout
 Date:		November 2018

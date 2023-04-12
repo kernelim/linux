@@ -376,7 +376,7 @@ static void wcn36xx_change_ps(struct wcn36xx *wcn, bool enable)
 	list_for_each_entry(tmp, &wcn->vif_list, list) {
 		vif = wcn36xx_priv_to_vif(tmp);
 		if (enable && !wcn->sw_scan) {
-			if (vif->bss_conf.ps) /* ps allowed ? */
+			if (vif->cfg.ps) /* ps allowed ? */
 				wcn36xx_pmc_enter_bmps_state(wcn, vif);
 		} else {
 			wcn36xx_pmc_exit_bmps_state(wcn, vif);
@@ -805,7 +805,7 @@ void wcn36xx_set_default_rates_v1(struct wcn36xx_hal_supported_rates_v1 *rates)
 static void wcn36xx_bss_info_changed(struct ieee80211_hw *hw,
 				     struct ieee80211_vif *vif,
 				     struct ieee80211_bss_conf *bss_conf,
-				     u32 changed)
+				     u64 changed)
 {
 	struct wcn36xx *wcn = hw->priv;
 	struct sk_buff *skb = NULL;
@@ -813,7 +813,7 @@ static void wcn36xx_bss_info_changed(struct ieee80211_hw *hw,
 	enum wcn36xx_hal_link_state link_state;
 	struct wcn36xx_vif *vif_priv = wcn36xx_vif_to_priv(vif);
 
-	wcn36xx_dbg(WCN36XX_DBG_MAC, "mac bss info changed vif %p changed 0x%08x\n",
+	wcn36xx_dbg(WCN36XX_DBG_MAC, "mac bss info changed vif %p changed 0x%llx\n",
 		    vif, changed);
 
 	mutex_lock(&wcn->conf_mutex);
@@ -942,7 +942,7 @@ static void wcn36xx_bss_info_changed(struct ieee80211_hw *hw,
 			wcn36xx_smd_config_bss(wcn, vif, NULL,
 					       vif->addr, false);
 			skb = ieee80211_beacon_get_tim(hw, vif, &tim_off,
-						       &tim_len);
+						       &tim_len, 0);
 			if (!skb) {
 				wcn36xx_err("failed to alloc beacon skb\n");
 				goto out;

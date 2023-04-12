@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/kernel/setup_percpu.c
-0x53569707	this_cpu_off	vmlinux	EXPORT_SYMBOL
+#2-
+0x53569707	this_cpu_off	vmlinux	EXPORT_SYMBOL	

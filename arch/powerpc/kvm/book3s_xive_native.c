@@ -20,7 +20,6 @@
 #include <asm/xive.h>
 #include <asm/xive-regs.h>
 #include <asm/debug.h>
-#include <asm/debugfs.h>
 #include <asm/opal.h>
 
 #include <linux/debugfs.h>
@@ -204,7 +203,7 @@ static int kvmppc_xive_native_reset_mapped(struct kvm *kvm, unsigned long irq)
 
 	/*
 	 * Clear the ESB pages of the IRQ number being mapped (or
-	 * unmapped) into the guest and let the the VM fault handler
+	 * unmapped) into the guest and let the VM fault handler
 	 * repopulate with the appropriate ESB pages (device or IC)
 	 */
 	pr_debug("clearing esb pages for girq 0x%lx\n", irq);
@@ -1257,7 +1256,7 @@ static void xive_native_debugfs_init(struct kvmppc_xive *xive)
 		return;
 	}
 
-	xive->dentry = debugfs_create_file(name, 0444, powerpc_debugfs_root,
+	xive->dentry = debugfs_create_file(name, 0444, arch_debugfs_dir,
 					   xive, &xive_native_debug_fops);
 
 	pr_debug("%s: created %s\n", __func__, name);

@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/arm64/lib/delay.c
-0x9e7d6bd0	__udelay	vmlinux	EXPORT_SYMBOL
+#2-
+0x9e7d6bd0	__udelay	vmlinux	EXPORT_SYMBOL	

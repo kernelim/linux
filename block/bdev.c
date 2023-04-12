@@ -24,9 +24,9 @@
 #include <linux/pseudo_fs.h>
 #include <linux/uio.h>
 #include <linux/namei.h>
-#include <linux/cleancache.h>
 #include <linux/part_stat.h>
 #include <linux/uaccess.h>
+#include <linux/stat.h>
 #include "../fs/internal.h"
 #include "blk.h"
 
@@ -55,12 +55,10 @@ static void bdev_write_inode(struct block_device *bdev)
 	while (inode->i_state & I_DIRTY) {
 		spin_unlock(&inode->i_lock);
 		ret = write_inode_now(inode, true);
-		if (ret) {
-			char name[BDEVNAME_SIZE];
-			pr_warn_ratelimited("VFS: Dirty inode writeback failed "
-					    "for block device %s (err=%d).\n",
-					    bdevname(bdev, name), ret);
-		}
+		if (ret)
+			pr_warn_ratelimited(
+	"VFS: Dirty inode writeback failed for block device %pg (err=%d).\n",
+				bdev, ret);
 		spin_lock(&inode->i_lock);
 	}
 	spin_unlock(&inode->i_lock);
@@ -88,10 +86,6 @@ void invalidate_bdev(struct block_device *bdev)
 		lru_add_drain_all();	/* make sure all lru add caches are flushed */
 		invalidate_mapping_pages(mapping, 0, -1);
 	}
-	/* 99% of the time, we don't need to flush the cleancache on the bdev.
-	 * But, for the strange corners, lets be cautious
-	 */
-	cleancache_invalidate_inode(mapping);
 }
 EXPORT_SYMBOL(invalidate_bdev);
 
@@ -1068,4 +1062,26 @@ void sync_bdevs(bool wait)
 	}
 	spin_unlock(&blockdev_superblock->s_inode_list_lock);
 	iput(old_inode);
+}
+
+/*
+ * Handle STATX_DIOALIGN for block devices.
+ *
+ * Note that the inode passed to this is the inode of a block device node file,
+ * not the block device's internal inode.  Therefore it is *not* valid to use
+ * I_BDEV() here; the block device has to be looked up by i_rdev instead.
+ */
+void bdev_statx_dioalign(struct inode *inode, struct kstat *stat)
+{
+	struct block_device *bdev;
+
+	bdev = blkdev_get_no_open(inode->i_rdev);
+	if (!bdev)
+		return;
+
+	stat->dio_mem_align = bdev_dma_alignment(bdev) + 1;
+	stat->dio_offset_align = bdev_logical_block_size(bdev);
+	stat->result_mask |= STATX_DIOALIGN;
+
+	blkdev_put_no_open(bdev);
 }

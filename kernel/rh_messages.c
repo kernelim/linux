@@ -163,7 +163,7 @@ void mark_tech_preview(const char *msg, struct module *mod)
 	if (msg)
 		str = msg;
 #ifdef CONFIG_MODULES
-	else if (mod && mod->name)
+	else if (mod)
 		str = mod->name;
 #endif
 
@@ -177,3 +177,32 @@ void mark_tech_preview(const char *msg, struct module *mod)
 #endif
 }
 EXPORT_SYMBOL(mark_tech_preview);
+
+/**
+ * mark_partner_supported() - Mark driver or kernel subsystem as 'Partner Supported'
+ * @msg: Driver or kernel subsystem name
+ *
+ * Called to minimize the support status of a new driver.  This does TAINT the
+ * kernel.  Calling this function indicates that the driver or subsystem has
+ * is not supported directly by Red Hat but by a partner engineer.
+ */
+void mark_partner_supported(const char *msg, struct module *mod)
+{
+	const char *str = NULL;
+
+	if (msg)
+		str = msg;
+#ifdef CONFIG_MODULES
+	else if (mod && mod->name)
+		str = mod->name;
+#endif
+
+	pr_warn("Warning: %s is a Partner supported GPL module and not supported directly by Red Hat.\n",
+		(str ? str : "kernel"));
+	add_taint(TAINT_PARTNER_SUPPORTED, LOCKDEP_STILL_OK);
+#ifdef CONFIG_MODULES
+	if (mod)
+		mod->taints |= (1U << TAINT_PARTNER_SUPPORTED);
+#endif
+}
+EXPORT_SYMBOL(mark_partner_supported);

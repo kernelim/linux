@@ -6,7 +6,7 @@ weight: 4
 summary: Some ways to get notifications from Gitlab.
 ---
 
-= Red Hat Kernel & Changeset Notifications
+{{< toc >}}
 
 GitLab-based workflows provide several notification options to code maintainers and interested parties to be notified of merge requests.  These options include GitLab Email and ‘@’ notifications, GitLab RSS, GitLab CODEOWNERS, CKI, and Red Hat kernel-watch project.
 

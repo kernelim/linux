@@ -101,6 +101,9 @@ Values:
 	- 1 - enable JIT hardening for unprivileged users only
 	- 2 - enable JIT hardening for all users
 
+where "privileged user" in this context means a process having
+CAP_BPF or CAP_SYS_ADMIN in the root user name space.
+
 bpf_jit_kallsyms
 ----------------
 
@@ -211,6 +214,12 @@ rmem_max
 
 The maximum receive socket buffer size in bytes.
 
+rps_default_mask
+----------------
+
+The default RPS CPU mask used on newly created network devices. An empty
+mask means RPS disabled by default.
+
 tstamp_allow_data
 -----------------
 Allow processes to receive tx timestamps looped together with the original
@@ -271,7 +280,7 @@ poll cycle or the number of packets processed reaches netdev_budget.
 netdev_max_backlog
 ------------------
 
-Maximum number  of  packets,  queued  on  the  INPUT  side, when the interface
+Maximum number of packets, queued on the INPUT side, when the interface
 receives packets faster than kernel can process them.
 
 netdev_rss_key
@@ -364,6 +373,15 @@ settings are forced to inherit from current ones in the netns where this
 new netns has been created.
 
 Default : 0  (for compatibility reasons)
+
+txrehash
+--------
+
+Controls default hash rethink behaviour on listening socket when SO_TXREHASH
+option is set to SOCK_TXREHASH_DEFAULT (i. e. not overridden by setsockopt).
+
+If set to 1 (default), hash rethink is performed on listening socket.
+If set to 0, hash rethink is not performed.
 
 gro_normal_batch
 ----------------

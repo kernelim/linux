@@ -28,6 +28,12 @@ enum iter_type {
 	ITER_DISCARD,
 };
 
+struct iov_iter_state {
+	size_t iov_offset;
+	size_t count;
+	unsigned long nr_segs;
+};
+
 struct iov_iter {
 	u8 iter_type;
 	bool nofault;
@@ -54,6 +60,14 @@ struct iov_iter {
 static inline enum iter_type iov_iter_type(const struct iov_iter *i)
 {
 	return i->iter_type;
+}
+
+static inline void iov_iter_save_state(struct iov_iter *iter,
+				       struct iov_iter_state *state)
+{
+	state->iov_offset = iter->iov_offset;
+	state->count = iter->count;
+	state->nr_segs = iter->nr_segs;
 }
 
 static inline bool iter_is_iovec(const struct iov_iter *i)
@@ -223,6 +237,8 @@ size_t copy_mc_to_iter(void *addr, size_t bytes, struct iov_iter *i)
 }
 
 size_t iov_iter_zero(size_t bytes, struct iov_iter *);
+bool iov_iter_is_aligned(const struct iov_iter *i, unsigned addr_mask,
+			unsigned len_mask);
 unsigned long iov_iter_alignment(const struct iov_iter *i);
 unsigned long iov_iter_gap_alignment(const struct iov_iter *i);
 void iov_iter_init(struct iov_iter *i, unsigned int direction, const struct iovec *iov,
@@ -241,6 +257,7 @@ ssize_t iov_iter_get_pages(struct iov_iter *i, struct page **pages,
 ssize_t iov_iter_get_pages_alloc(struct iov_iter *i, struct page ***pages,
 			size_t maxsize, size_t *start);
 int iov_iter_npages(const struct iov_iter *i, int maxpages);
+void iov_iter_restore(struct iov_iter *i, struct iov_iter_state *state);
 
 const void *dup_iter(struct iov_iter *new, struct iov_iter *old, gfp_t flags);
 

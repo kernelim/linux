@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/kernel/apic/x2apic_uv_x.c
-0x8ad5ceb1	__uv_hub_info_list	vmlinux	EXPORT_SYMBOL_GPL
+#2-
+0x8ad5ceb1	__uv_hub_info_list	vmlinux	EXPORT_SYMBOL_GPL	

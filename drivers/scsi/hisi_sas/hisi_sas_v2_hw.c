@@ -3547,7 +3547,7 @@ static struct device_attribute *host_attrs_v2_hw[] = {
 	NULL
 };
 
-static int map_queues_v2_hw(struct Scsi_Host *shost)
+static void map_queues_v2_hw(struct Scsi_Host *shost)
 {
 	struct hisi_hba *hisi_hba = shost_priv(shost);
 	struct blk_mq_queue_map *qmap = &shost->tag_set.map[HCTX_TYPE_DEFAULT];
@@ -3562,9 +3562,6 @@ static int map_queues_v2_hw(struct Scsi_Host *shost)
 		for_each_cpu(cpu, mask)
 			qmap->mq_map[cpu] = qmap->queue_offset + queue;
 	}
-
-	return 0;
-
 }
 
 static struct scsi_host_template sht_v2_hw = {

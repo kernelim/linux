@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/bitmap.c
-0x63c4d61f	__bitmap_weight	vmlinux	EXPORT_SYMBOL
+#2-
+0x63c4d61f	__bitmap_weight	vmlinux	EXPORT_SYMBOL	

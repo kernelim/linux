@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/s390/lib/string.c
-0x672144bd	strlcpy	vmlinux	EXPORT_SYMBOL
+#2-
+0x672144bd	strlcpy	vmlinux	EXPORT_SYMBOL	

@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/string.c
-0x1e6d26a8	strstr	vmlinux	EXPORT_SYMBOL
+#2-
+0x1e6d26a8	strstr	vmlinux	EXPORT_SYMBOL	

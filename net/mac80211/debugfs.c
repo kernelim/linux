@@ -4,7 +4,7 @@
  *
  * Copyright 2007	Johannes Berg <johannes@sipsolutions.net>
  * Copyright 2013-2014  Intel Mobile Communications GmbH
- * Copyright (C) 2018 - 2019, 2021 Intel Corporation
+ * Copyright (C) 2018 - 2019, 2021-2022 Intel Corporation
  */
 
 #include <linux/debugfs.h>
@@ -197,6 +197,36 @@ static ssize_t airtime_flags_write(struct file *file,
 static const struct file_operations airtime_flags_ops = {
 	.write = airtime_flags_write,
 	.read = airtime_flags_read,
+	.open = simple_open,
+	.llseek = default_llseek,
+};
+
+static ssize_t aql_pending_read(struct file *file,
+				char __user *user_buf,
+				size_t count, loff_t *ppos)
+{
+	struct ieee80211_local *local = file->private_data;
+	char buf[400];
+	int len = 0;
+
+	len = scnprintf(buf, sizeof(buf),
+			"AC     AQL pending\n"
+			"VO     %u us\n"
+			"VI     %u us\n"
+			"BE     %u us\n"
+			"BK     %u us\n"
+			"total  %u us\n",
+			atomic_read(&local->aql_ac_pending_airtime[IEEE80211_AC_VO]),
+			atomic_read(&local->aql_ac_pending_airtime[IEEE80211_AC_VI]),
+			atomic_read(&local->aql_ac_pending_airtime[IEEE80211_AC_BE]),
+			atomic_read(&local->aql_ac_pending_airtime[IEEE80211_AC_BK]),
+			atomic_read(&local->aql_total_pending_airtime));
+	return simple_read_from_buffer(user_buf, count, ppos,
+				       buf, len);
+}
+
+static const struct file_operations aql_pending_ops = {
+	.read = aql_pending_read,
 	.open = simple_open,
 	.llseek = default_llseek,
 };
@@ -464,6 +494,8 @@ static const char *hw_flag_names[] = {
 	FLAG(SUPPORTS_TX_ENCAP_OFFLOAD),
 	FLAG(SUPPORTS_RX_DECAP_OFFLOAD),
 	FLAG(SUPPORTS_CONC_MON_RX_DECAP),
+	FLAG(DETECTS_COLOR_COLLISION),
+	FLAG(MLO_MCAST_MULTI_LINK_TX),
 #undef FLAG
 };
 
@@ -630,6 +662,7 @@ void debugfs_hw_add(struct ieee80211_local *local)
 	DEBUGFS_ADD(hw_conf);
 	DEBUGFS_ADD_MODE(force_tx_status, 0600);
 	DEBUGFS_ADD_MODE(aql_enable, 0600);
+	DEBUGFS_ADD(aql_pending);
 
 	if (local->ops->wake_tx_queue)
 		DEBUGFS_ADD_MODE(aqm, 0600);

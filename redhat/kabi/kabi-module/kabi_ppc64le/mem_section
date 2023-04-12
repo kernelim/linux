@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:mm/sparse.c
-0xe9b7b1ce	mem_section	vmlinux	EXPORT_SYMBOL
+#2-
+0xe9b7b1ce	mem_section	vmlinux	EXPORT_SYMBOL	

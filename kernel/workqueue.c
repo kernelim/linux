@@ -868,8 +868,17 @@ void wq_worker_running(struct task_struct *task)
 
 	if (!worker->sleeping)
 		return;
+
+	/*
+	 * If preempted by unbind_workers() between the WORKER_NOT_RUNNING check
+	 * and the nr_running increment below, we may ruin the nr_running reset
+	 * and leave with an unexpected pool->nr_running == 1 on the newly unbound
+	 * pool. Protect against such race.
+	 */
+	preempt_disable();
 	if (!(worker->flags & WORKER_NOT_RUNNING))
 		atomic_inc(&worker->pool->nr_running);
+	preempt_enable();
 	worker->sleeping = 0;
 }
 
@@ -2797,13 +2806,13 @@ static bool flush_workqueue_prep_pwqs(struct workqueue_struct *wq,
 }
 
 /**
- * flush_workqueue - ensure that any scheduled work has run to completion.
+ * __flush_workqueue - ensure that any scheduled work has run to completion.
  * @wq: workqueue to flush
  *
  * This function sleeps until all work items which were queued on entry
  * have finished execution, but it is not livelocked by new incoming ones.
  */
-void flush_workqueue(struct workqueue_struct *wq)
+void __flush_workqueue(struct workqueue_struct *wq)
 {
 	struct wq_flusher this_flusher = {
 		.list = LIST_HEAD_INIT(this_flusher.list),
@@ -2952,7 +2961,7 @@ void flush_workqueue(struct workqueue_struct *wq)
 out_unlock:
 	mutex_unlock(&wq->mutex);
 }
-EXPORT_SYMBOL(flush_workqueue);
+EXPORT_SYMBOL(__flush_workqueue);
 
 /**
  * drain_workqueue - drain a workqueue
@@ -2980,7 +2989,7 @@ void drain_workqueue(struct workqueue_struct *wq)
 		wq->flags |= __WQ_DRAINING;
 	mutex_unlock(&wq->mutex);
 reflush:
-	flush_workqueue(wq);
+	__flush_workqueue(wq);
 
 	mutex_lock(&wq->mutex);
 
@@ -3266,6 +3275,15 @@ static bool __cancel_work(struct work_struct *work, bool is_dwork)
 	local_irq_restore(flags);
 	return ret;
 }
+
+/*
+ * See cancel_delayed_work()
+ */
+bool cancel_work(struct work_struct *work)
+{
+	return __cancel_work(work, false);
+}
+EXPORT_SYMBOL(cancel_work);
 
 /**
  * cancel_delayed_work - cancel a delayed work
@@ -4979,9 +4997,10 @@ static void unbind_workers(int cpu)
 		/*
 		 * We've blocked all attach/detach operations. Make all workers
 		 * unbound and set DISASSOCIATED.  Before this, all workers
-		 * except for the ones which are still executing works from
-		 * before the last CPU down must be on the cpu.  After
-		 * this, they may become diasporas.
+		 * must be on the cpu.  After this, they may become diasporas.
+		 * And the preemption disabled section in their sched callbacks
+		 * are guaranteed to see WORKER_UNBOUND since the code here
+		 * is on the same cpu.
 		 */
 		for_each_pool_worker(worker, pool)
 			worker->flags |= WORKER_UNBOUND;
@@ -4992,18 +5011,13 @@ static void unbind_workers(int cpu)
 
 		for_each_pool_worker(worker, pool) {
 			kthread_set_per_cpu(worker->task, -1);
-			WARN_ON_ONCE(set_cpus_allowed_ptr(worker->task, cpu_possible_mask) < 0);
+			if (cpumask_intersects(wq_unbound_cpumask, cpu_active_mask))
+				WARN_ON_ONCE(set_cpus_allowed_ptr(worker->task, wq_unbound_cpumask) < 0);
+			else
+				WARN_ON_ONCE(set_cpus_allowed_ptr(worker->task, cpu_possible_mask) < 0);
 		}
 
 		mutex_unlock(&wq_pool_attach_mutex);
-
-		/*
-		 * Call schedule() so that we cross rq->lock and thus can
-		 * guarantee sched callbacks see the %WORKER_UNBOUND flag.
-		 * This is necessary as scheduler callbacks may be invoked
-		 * from other cpus.
-		 */
-		schedule();
 
 		/*
 		 * Sched callbacks are disabled now.  Zap nr_running.
@@ -5057,17 +5071,6 @@ static void rebind_workers(struct worker_pool *pool)
 
 	for_each_pool_worker(worker, pool) {
 		unsigned int worker_flags = worker->flags;
-
-		/*
-		 * A bound idle worker should actually be on the runqueue
-		 * of the associated CPU for local wake-ups targeting it to
-		 * work.  Kick all idle workers so that they migrate to the
-		 * associated CPU.  Doing this in the same loop as
-		 * replacing UNBOUND with REBOUND is safe as no worker will
-		 * be bound before @pool->lock is released.
-		 */
-		if (worker_flags & WORKER_IDLE)
-			wake_up_process(worker->task);
 
 		/*
 		 * We want to clear UNBOUND but can't directly call
@@ -6140,3 +6143,11 @@ void __init workqueue_init(void)
 	wq_online = true;
 	wq_watchdog_init();
 }
+
+/*
+ * Despite the naming, this is a no-op function which is here only for avoiding
+ * link error. Since compile-time warning may fail to catch, we will need to
+ * emit run-time warning from __flush_workqueue().
+ */
+void __warn_flushing_systemwide_wq(void) { }
+EXPORT_SYMBOL(__warn_flushing_systemwide_wq);

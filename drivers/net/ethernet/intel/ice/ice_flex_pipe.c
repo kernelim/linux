@@ -1805,15 +1805,42 @@ static struct ice_buf_build *ice_pkg_buf_alloc(struct ice_hw *hw)
 	return bld;
 }
 
+static bool ice_is_gtp_u_profile(u16 prof_idx)
+{
+	return (prof_idx >= ICE_PROFID_IPV6_GTPU_TEID &&
+		prof_idx <= ICE_PROFID_IPV6_GTPU_IPV6_TCP_INNER) ||
+	       prof_idx == ICE_PROFID_IPV4_GTPU_TEID;
+}
+
+static bool ice_is_gtp_c_profile(u16 prof_idx)
+{
+	switch (prof_idx) {
+	case ICE_PROFID_IPV4_GTPC_TEID:
+	case ICE_PROFID_IPV4_GTPC_NO_TEID:
+	case ICE_PROFID_IPV6_GTPC_TEID:
+	case ICE_PROFID_IPV6_GTPC_NO_TEID:
+		return true;
+	default:
+		return false;
+	}
+}
+
 /**
  * ice_get_sw_prof_type - determine switch profile type
  * @hw: pointer to the HW structure
  * @fv: pointer to the switch field vector
+ * @prof_idx: profile index to check
  */
 static enum ice_prof_type
-ice_get_sw_prof_type(struct ice_hw *hw, struct ice_fv *fv)
+ice_get_sw_prof_type(struct ice_hw *hw, struct ice_fv *fv, u32 prof_idx)
 {
 	u16 i;
+
+	if (ice_is_gtp_c_profile(prof_idx))
+		return ICE_PROF_TUN_GTPC;
+
+	if (ice_is_gtp_u_profile(prof_idx))
+		return ICE_PROF_TUN_GTPU;
 
 	for (i = 0; i < hw->blk[ICE_BLK_SW].es.fvw; i++) {
 		/* UDP tunnel will have UDP_OF protocol ID and VNI offset */
@@ -1861,7 +1888,7 @@ ice_get_sw_fv_bitmap(struct ice_hw *hw, enum ice_prof_type req_profs,
 
 		if (fv) {
 			/* Determine field vector type */
-			prof_type = ice_get_sw_prof_type(hw, fv);
+			prof_type = ice_get_sw_prof_type(hw, fv, offset);
 
 			if (req_profs & prof_type)
 				set_bit((u16)offset, bm);
@@ -1937,8 +1964,11 @@ ice_get_sw_fv_list(struct ice_hw *hw, struct ice_prot_lkup_ext *lkups,
 			}
 		}
 	} while (fv);
-	if (list_empty(fv_list))
+	if (list_empty(fv_list)) {
+		dev_warn(ice_hw_to_dev(hw), "Required profiles not found in currently loaded DDP package");
 		return -EIO;
+	}
+
 	return 0;
 
 err:
@@ -2612,7 +2642,7 @@ ice_ptg_remove_ptype(struct ice_hw *hw, enum ice_block blk, u16 ptype, u8 ptg)
  *
  * This function will either add or move a ptype to a particular PTG depending
  * on if the ptype is already part of another group. Note that using a
- * a destination PTG ID of ICE_DEFAULT_PTG (0) will move the ptype to the
+ * destination PTG ID of ICE_DEFAULT_PTG (0) will move the ptype to the
  * default PTG.
  */
 static int

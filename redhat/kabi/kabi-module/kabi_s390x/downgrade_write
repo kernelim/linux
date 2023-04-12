@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/locking/rwsem.c
-0x4e9e6a05	downgrade_write	vmlinux	EXPORT_SYMBOL
+#2-
+0x4e9e6a05	downgrade_write	vmlinux	EXPORT_SYMBOL	

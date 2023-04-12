@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/kernel/tsc.c
-0x44aaf30f	tsc_khz	vmlinux	EXPORT_SYMBOL
+#2-
+0x44aaf30f	tsc_khz	vmlinux	EXPORT_SYMBOL	

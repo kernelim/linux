@@ -24,7 +24,6 @@
 #include "priv.h"
 #include "acpi.h"
 
-#include <core/notify.h>
 #include <core/option.h>
 
 #include <subdev/bios.h>
@@ -2405,7 +2404,7 @@ nv162_chipset = {
 	.bus      = { 0x00000001, gf100_bus_new },
 	.devinit  = { 0x00000001, tu102_devinit_new },
 	.fault    = { 0x00000001, tu102_fault_new },
-	.fb       = { 0x00000001, gv100_fb_new },
+	.fb       = { 0x00000001, tu102_fb_new },
 	.fuse     = { 0x00000001, gm107_fuse_new },
 	.gpio     = { 0x00000001, gk104_gpio_new },
 	.gsp      = { 0x00000001, gv100_gsp_new },
@@ -2439,7 +2438,7 @@ nv164_chipset = {
 	.bus      = { 0x00000001, gf100_bus_new },
 	.devinit  = { 0x00000001, tu102_devinit_new },
 	.fault    = { 0x00000001, tu102_fault_new },
-	.fb       = { 0x00000001, gv100_fb_new },
+	.fb       = { 0x00000001, tu102_fb_new },
 	.fuse     = { 0x00000001, gm107_fuse_new },
 	.gpio     = { 0x00000001, gk104_gpio_new },
 	.gsp      = { 0x00000001, gv100_gsp_new },
@@ -2473,7 +2472,7 @@ nv166_chipset = {
 	.bus      = { 0x00000001, gf100_bus_new },
 	.devinit  = { 0x00000001, tu102_devinit_new },
 	.fault    = { 0x00000001, tu102_fault_new },
-	.fb       = { 0x00000001, gv100_fb_new },
+	.fb       = { 0x00000001, tu102_fb_new },
 	.fuse     = { 0x00000001, gm107_fuse_new },
 	.gpio     = { 0x00000001, gk104_gpio_new },
 	.gsp      = { 0x00000001, gv100_gsp_new },
@@ -2507,7 +2506,7 @@ nv167_chipset = {
 	.bus      = { 0x00000001, gf100_bus_new },
 	.devinit  = { 0x00000001, tu102_devinit_new },
 	.fault    = { 0x00000001, tu102_fault_new },
-	.fb       = { 0x00000001, gv100_fb_new },
+	.fb       = { 0x00000001, tu102_fb_new },
 	.fuse     = { 0x00000001, gm107_fuse_new },
 	.gpio     = { 0x00000001, gk104_gpio_new },
 	.gsp      = { 0x00000001, gv100_gsp_new },
@@ -2541,7 +2540,7 @@ nv168_chipset = {
 	.bus      = { 0x00000001, gf100_bus_new },
 	.devinit  = { 0x00000001, tu102_devinit_new },
 	.fault    = { 0x00000001, tu102_fault_new },
-	.fb       = { 0x00000001, gv100_fb_new },
+	.fb       = { 0x00000001, tu102_fb_new },
 	.fuse     = { 0x00000001, gm107_fuse_new },
 	.gpio     = { 0x00000001, gk104_gpio_new },
 	.gsp      = { 0x00000001, gv100_gsp_new },
@@ -2687,24 +2686,6 @@ nv177_chipset = {
 	.disp     = { 0x00000001, ga102_disp_new },
 	.dma      = { 0x00000001, gv100_dma_new },
 	.fifo     = { 0x00000001, ga102_fifo_new },
-};
-
-static int
-nvkm_device_event_ctor(struct nvkm_object *object, void *data, u32 size,
-		       struct nvkm_notify *notify)
-{
-	if (!WARN_ON(size != 0)) {
-		notify->size  = 0;
-		notify->types = 1;
-		notify->index = 0;
-		return 0;
-	}
-	return -EINVAL;
-}
-
-static const struct nvkm_event_func
-nvkm_device_event_func = {
-	.ctor = nvkm_device_event_ctor,
 };
 
 struct nvkm_subdev *
@@ -2859,8 +2840,6 @@ nvkm_device_del(struct nvkm_device **pdevice)
 		list_for_each_entry_safe_reverse(subdev, subtmp, &device->subdev, head)
 			nvkm_subdev_del(&subdev);
 
-		nvkm_event_fini(&device->event);
-
 		if (device->pri)
 			iounmap(device->pri);
 		list_del(&device->head);
@@ -2935,10 +2914,6 @@ nvkm_device_ctor(const struct nvkm_device_func *func,
 	device->debug = nvkm_dbgopt(device->dbgopt, "device");
 	INIT_LIST_HEAD(&device->subdev);
 
-	ret = nvkm_event_init(&nvkm_device_event_func, 1, 1, &device->event);
-	if (ret)
-		goto done;
-
 	mmio_base = device->func->resource_addr(device, 0);
 	mmio_size = device->func->resource_size(device, 0);
 
@@ -2956,7 +2931,7 @@ nvkm_device_ctor(const struct nvkm_device_func *func,
 		/* switch mmio to cpu's native endianness */
 		if (!nvkm_device_endianness(device)) {
 			nvdev_error(device,
-				    "Couldn't switch GPU to CPUs endianess\n");
+				    "Couldn't switch GPU to CPUs endianness\n");
 			ret = -ENOSYS;
 			goto done;
 		}

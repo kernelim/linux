@@ -117,14 +117,46 @@ subsystems:
      - rhel-sst-kernel-maintainers
    requiredApproval: true
    maintainers:
+     - name: Jan Stancek
+       email: jstancek@redhat.com
+       gluser: jstancek
+   paths:
+       includes:
+          - Makefile.rhelver
+   scm: git https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9.git
+ - subsystem: CentOS Stream 9 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   devel-sst:
+     - rhel-sst-kernel-rts
+   qe-sst:
+     - rhel-sst-kernel-rts
+   requiredApproval: true
+   maintainers:
+     - name: Luis Claudio Goncalves
+       email: lgoncalv@redhat.com
+       gluser: lgoncalv
+   paths:
+       includes:
+          - Makefile.rhelver
+ - subsystem: RHEL 9.2 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   devel-sst:
+     - rhel-sst-kernel-maintainers
+   qe-sst:
+     - rhel-sst-kernel-maintainers
+   requiredApproval: true
+   maintainers:
      - name: Herton R. Krzesinski
        email: herton@redhat.com
        gluser: hertonrk-rh
    paths:
        includes:
           - Makefile.rhelver
-   scm: git https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9.git
- - subsystem: CentOS Stream 9 Real Time Kernel Maintainer
+ - subsystem: RHEL 9.2 Real Time Kernel Maintainer
    labels:
      name: redhat
    status: Supported
@@ -2744,6 +2776,23 @@ subsystems:
           - include/trace/events/mdio.h
           - include/uapi/linux/mdio.h
           - include/uapi/linux/mii.h
+ - subsystem: ETHERNET POWER SOURCING EQUIPMENT
+   labels:
+     name: pse-pd
+   status: Disabled
+   devel-sst:
+     - rhel-sst-nic-rdma
+   qe-sst:
+     - rhel-sst-nic-rdma
+   requiredApproval: false
+   maintainers:
+     - name: Ivan Vecera
+       email: ivecera@redhat.com
+       gluser: ivecera
+   paths:
+       includes:
+          - drivers/net/pse-pd/
+          - include/linux/pse-pd/
  - subsystem: EXT4 FILE SYSTEM
    labels:
      name: ext4
@@ -2754,9 +2803,9 @@ subsystems:
      - rhel-sst-null
    requiredApproval: false
    maintainers:
-     - name: Lukas Czerner
-       email: lczerner@redhat.com
-       gluser: lczerner
+     - name: Carlos Maiolino
+       email: cmaiolino@redhat.com
+       gluser: cmaiolino
    paths:
        includes:
           - Documentation/filesystems/ext4/ext4.rst
@@ -4268,9 +4317,9 @@ subsystems:
      - rhel-sst-null
    requiredApproval: false
    maintainers:
-     - name: Lukas Czerner
-       email: lczerner@redhat.com
-       gluser: lczerner
+     - name: Carlos Maiolino
+       email: cmaiolino@redhat.com
+       gluser: cmaiolino
    paths:
        includes:
           - fs/jbd2/
@@ -4842,6 +4891,15 @@ subsystems:
           - include/uapi/linux/media.h
           - include/uapi/linux/v4l2-*
           - include/uapi/linux/ivtv*
+       excludes:
+          - drivers/media/pci/saa7134/saa7134-alsa.c
+          - drivers/media/pci/cx23885/cx23885-alsa.c
+          - drivers/media/pci/cx25821/cx25821-alsa.c
+          - drivers/media/pci/cx18/cx18-alsa*
+          - drivers/media/pci/cx88/cx88-alsa*
+          - drivers/media/pci/cobalt/cobalt-alsa*
+          - drivers/media/pci/ivtv/ivtv-alsa*
+          - drivers/media/usb/
  - subsystem: MELLANOX ETHERNET SWITCH DRIVERS
    labels:
      name: mlxsw
@@ -5222,9 +5280,6 @@ subsystems:
        email: agladkov@redhat.com
        gluser: legionus
    reviewers:
-     - name: Eric W. Biederman
-       email: ebiederm@redhat.com
-       gluser: ebiederm
      - name: Christoph von Recklinghausen
        email: crecklin@redhat.com
        gluser: crecklin
@@ -7767,6 +7822,7 @@ subsystems:
    paths:
        includes:
           - drivers/net/thunderbolt.c
+          - drivers/net/thunderbolt/
           - drivers/thunderbolt/
           - drivers/platform/x86/intel-wmi-thunderbolt.c
           - include/linux/thunderbolt.h
@@ -7987,6 +8043,9 @@ subsystems:
    paths:
        includes:
           - drivers/usb/
+          - drivers/media/usb/
+       excludes:
+          - drivers/media/usb/tm6000/tm6000-alsa.c
  - subsystem: USERSPACE I/O DRIVERS (UIO)
    labels:
      name: uio

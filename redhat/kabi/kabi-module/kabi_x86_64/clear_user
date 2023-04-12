@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/lib/usercopy_64.c
-0xd8cef6e1	clear_user	vmlinux	EXPORT_SYMBOL
+#2-
+0xd8cef6e1	clear_user	vmlinux	EXPORT_SYMBOL	

@@ -83,7 +83,7 @@ static inline void set_arch_panic_timeout(int timeout, int arch_default_timeout)
 #define TAINT_23			23
 #define TAINT_24			24
 #define TAINT_25			25
-#define TAINT_26			26
+#define TAINT_PARTNER_SUPPORTED 	26
 #define TAINT_SUPPORT_REMOVED		27
 /* Bits 28 - 31 are reserved for Red Hat use only */
 #define TAINT_RESERVED28		28

@@ -548,7 +548,7 @@ struct sock_fprog_kern {
 #define BPF_IMAGE_ALIGNMENT 8
 
 struct bpf_binary_header {
-	u32 pages;
+	u32 size;
 	u8 image[] __aligned(BPF_IMAGE_ALIGNMENT);
 };
 
@@ -558,36 +558,6 @@ struct bpf_prog_stats {
 	u64_stats_t misses;
 	struct u64_stats_sync syncp;
 } __aligned(2 * sizeof(u64));
-
-struct bpf_prog {
-	u16			pages;		/* Number of allocated pages */
-	u16			jited:1,	/* Is our filter JIT'ed? */
-				jit_requested:1,/* archs need to JIT the prog */
-				gpl_compatible:1, /* Is filter GPL compatible? */
-				cb_access:1,	/* Is control block accessed? */
-				dst_needed:1,	/* Do we need dst entry? */
-				blinded:1,	/* Was blinded */
-				is_func:1,	/* program is a bpf function */
-				kprobe_override:1, /* Do we override a kprobe? */
-				has_callchain_buf:1, /* callchain buffer allocated? */
-				enforce_expected_attach_type:1, /* Enforce expected_attach_type checking at attach time */
-				call_get_stack:1, /* Do we call bpf_get_stack() or bpf_get_stackid() */
-				call_get_func_ip:1; /* Do we call get_func_ip() */
-	enum bpf_prog_type	type;		/* Type of BPF program */
-	enum bpf_attach_type	expected_attach_type; /* For some prog types */
-	u32			len;		/* Number of filter blocks */
-	u32			jited_len;	/* Size of jited insns in bytes */
-	u8			tag[BPF_TAG_SIZE];
-	struct bpf_prog_stats __percpu *stats;
-	int __percpu		*active;
-	unsigned int		(*bpf_func)(const void *ctx,
-					    const struct bpf_insn *insn);
-	struct bpf_prog_aux	*aux;		/* Auxiliary fields */
-	struct sock_fprog_kern	*orig_prog;	/* Original BPF program */
-	/* Instructions for interpreter */
-	struct sock_filter	insns[0];
-	struct bpf_insn		insnsi[];
-};
 
 struct sk_filter {
 	refcount_t	refcnt;
@@ -884,17 +854,8 @@ static inline void bpf_prog_lock_ro(struct bpf_prog *fp)
 static inline void bpf_jit_binary_lock_ro(struct bpf_binary_header *hdr)
 {
 	set_vm_flush_reset_perms(hdr);
-	set_memory_ro((unsigned long)hdr, hdr->pages);
-	set_memory_x((unsigned long)hdr, hdr->pages);
-}
-
-static inline struct bpf_binary_header *
-bpf_jit_binary_hdr(const struct bpf_prog *fp)
-{
-	unsigned long real_start = (unsigned long)fp->bpf_func;
-	unsigned long addr = real_start & PAGE_MASK;
-
-	return (void *)addr;
+	set_memory_ro((unsigned long)hdr, hdr->size >> PAGE_SHIFT);
+	set_memory_x((unsigned long)hdr, hdr->size >> PAGE_SHIFT);
 }
 
 int sk_filter_trim_cap(struct sock *sk, struct sk_buff *skb, unsigned int cap);
@@ -953,6 +914,7 @@ u64 __bpf_call_base(u64 r1, u64 r2, u64 r3, u64 r4, u64 r5);
 struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog);
 void bpf_jit_compile(struct bpf_prog *prog);
 bool bpf_jit_needs_zext(void);
+bool bpf_jit_supports_subprog_tailcalls(void);
 bool bpf_jit_supports_kfunc_call(void);
 bool bpf_helper_changes_pkt_data(void *func);
 
@@ -1017,6 +979,10 @@ int xdp_do_generic_redirect(struct net_device *dev, struct sk_buff *skb,
 int xdp_do_redirect(struct net_device *dev,
 		    struct xdp_buff *xdp,
 		    struct bpf_prog *prog);
+int xdp_do_redirect_frame(struct net_device *dev,
+			  struct xdp_buff *xdp,
+			  struct xdp_frame *xdpf,
+			  struct bpf_prog *prog);
 void xdp_do_flush(void);
 
 /* The xdp_do_flush_map() helper has been renamed to drop the _map suffix, as
@@ -1061,6 +1027,26 @@ u64 bpf_jit_alloc_exec_limit(void);
 void *bpf_jit_alloc_exec(unsigned long size);
 void bpf_jit_free_exec(void *addr);
 void bpf_jit_free(struct bpf_prog *fp);
+struct bpf_binary_header *
+bpf_jit_binary_pack_hdr(const struct bpf_prog *fp);
+
+static inline bool bpf_prog_kallsyms_verify_off(const struct bpf_prog *fp)
+{
+	return list_empty(&fp->aux->ksym.lnode) ||
+	       fp->aux->ksym.lnode.prev == LIST_POISON2;
+}
+
+struct bpf_binary_header *
+bpf_jit_binary_pack_alloc(unsigned int proglen, u8 **ro_image,
+			  unsigned int alignment,
+			  struct bpf_binary_header **rw_hdr,
+			  u8 **rw_image,
+			  bpf_jit_fill_hole_t bpf_fill_ill_insns);
+int bpf_jit_binary_pack_finalize(struct bpf_prog *prog,
+				 struct bpf_binary_header *ro_header,
+				 struct bpf_binary_header *rw_header);
+void bpf_jit_binary_pack_free(struct bpf_binary_header *ro_header,
+			      struct bpf_binary_header *rw_header);
 
 int bpf_jit_add_poke_descriptor(struct bpf_prog *prog,
 				struct bpf_jit_poke_descriptor *poke);
@@ -1114,7 +1100,7 @@ static inline bool bpf_jit_blinding_enabled(struct bpf_prog *prog)
 		return false;
 	if (!bpf_jit_harden)
 		return false;
-	if (bpf_jit_harden == 1 && capable(CAP_SYS_ADMIN))
+	if (bpf_jit_harden == 1 && bpf_capable())
 		return false;
 
 	return true;
@@ -1350,7 +1336,10 @@ struct bpf_sockopt_kern {
 	s32		level;
 	s32		optname;
 	s32		optlen;
-	s32		retval;
+	/* for retval in struct bpf_cg_run_ctx */
+	struct task_struct *current_task;
+	/* Temporary "register" for indirect stores to ppos. */
+	u64		tmp_reg;
 };
 
 int copy_bpf_fprog_from_user(struct sock_fprog *dst, sockptr_t src, int len);
@@ -1369,6 +1358,7 @@ struct bpf_sk_lookup_kern {
 		const struct in6_addr *daddr;
 	} v6;
 	struct sock	*selected_sk;
+	u32		ingress_ifindex;
 	bool		no_reuseport;
 };
 
@@ -1431,7 +1421,7 @@ extern struct static_key_false bpf_sk_lookup_enabled;
 static inline bool bpf_sk_lookup_run_v4(struct net *net, int protocol,
 					const __be32 saddr, const __be16 sport,
 					const __be32 daddr, const u16 dport,
-					struct sock **psk)
+					const int ifindex, struct sock **psk)
 {
 	struct bpf_prog_array *run_array;
 	struct sock *selected_sk = NULL;
@@ -1447,6 +1437,7 @@ static inline bool bpf_sk_lookup_run_v4(struct net *net, int protocol,
 			.v4.daddr	= daddr,
 			.sport		= sport,
 			.dport		= dport,
+			.ingress_ifindex	= ifindex,
 		};
 		u32 act;
 
@@ -1469,7 +1460,7 @@ static inline bool bpf_sk_lookup_run_v6(struct net *net, int protocol,
 					const __be16 sport,
 					const struct in6_addr *daddr,
 					const u16 dport,
-					struct sock **psk)
+					const int ifindex, struct sock **psk)
 {
 	struct bpf_prog_array *run_array;
 	struct sock *selected_sk = NULL;
@@ -1485,6 +1476,7 @@ static inline bool bpf_sk_lookup_run_v6(struct net *net, int protocol,
 			.v6.daddr	= daddr,
 			.sport		= sport,
 			.dport		= dport,
+			.ingress_ifindex	= ifindex,
 		};
 		u32 act;
 

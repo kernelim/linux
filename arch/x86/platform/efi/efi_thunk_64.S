@@ -8,7 +8,7 @@
  * The below thunking functions are only used after ExitBootServices()
  * has been called. This simplifies things considerably as compared with
  * the early EFI thunking because we can leave all the kernel state
- * intact (GDT, IDT, etc) and simply invoke the the 32-bit EFI runtime
+ * intact (GDT, IDT, etc) and simply invoke the 32-bit EFI runtime
  * services from __KERNEL32_CS. This means we can continue to service
  * interrupts across an EFI mixed mode call.
  *
@@ -40,6 +40,17 @@ STACK_FRAME_NON_STANDARD __efi64_thunk
 	push	%rax
 
 	/*
+	 * Copy args passed via the stack
+	 */
+	subq	$0x24, %rsp
+	movq	0x18(%rax), %rbp
+	movq	0x20(%rax), %rbx
+	movq	0x28(%rax), %rax
+	movl	%ebp, 0x18(%rsp)
+	movl	%ebx, 0x1c(%rsp)
+	movl	%eax, 0x20(%rsp)
+
+	/*
 	 * Calculate the physical address of the kernel text.
 	 */
 	movq	$__START_KERNEL_map, %rax
@@ -50,7 +61,6 @@ STACK_FRAME_NON_STANDARD __efi64_thunk
 	subq	%rax, %rbp
 	subq	%rax, %rbx
 
-	subq	$28, %rsp
 	movl	%ebx, 0x0(%rsp)		/* return address */
 	movl	%esi, 0x4(%rsp)
 	movl	%edx, 0x8(%rsp)
@@ -63,7 +73,7 @@ STACK_FRAME_NON_STANDARD __efi64_thunk
 	pushq	%rdi			/* EFI runtime service address */
 	lretq
 
-1:	movq	24(%rsp), %rsp
+1:	movq	0x20(%rsp), %rsp
 	pop	%rbx
 	pop	%rbp
 	ANNOTATE_UNRET_SAFE

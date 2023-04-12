@@ -776,7 +776,7 @@ static void sunsab_convert_to_sab(struct uart_sunsab_port *up, unsigned int cfla
 
 /* port->lock is not held.  */
 static void sunsab_set_termios(struct uart_port *port, struct ktermios *termios,
-			       struct ktermios *old)
+			       const struct ktermios *old)
 {
 	struct uart_sunsab_port *up =
 		container_of(port, struct uart_sunsab_port, port);
@@ -846,7 +846,7 @@ static struct uart_sunsab_port *sunsab_ports;
 
 #ifdef CONFIG_SERIAL_SUNSAB_CONSOLE
 
-static void sunsab_console_putchar(struct uart_port *port, int c)
+static void sunsab_console_putchar(struct uart_port *port, unsigned char c)
 {
 	struct uart_sunsab_port *up =
 		container_of(port, struct uart_sunsab_port, port);

@@ -283,7 +283,7 @@ static void ar933x_uart_get_scale_step(unsigned int clk,
 
 static void ar933x_uart_set_termios(struct uart_port *port,
 				    struct ktermios *new,
-				    struct ktermios *old)
+				    const struct ktermios *old)
 {
 	struct ar933x_uart_port *up =
 		container_of(port, struct ar933x_uart_port, port);
@@ -613,7 +613,7 @@ static void ar933x_uart_wait_xmitr(struct ar933x_uart_port *up)
 	} while ((status & AR933X_UART_DATA_TX_CSR) == 0);
 }
 
-static void ar933x_uart_console_putchar(struct uart_port *port, int ch)
+static void ar933x_uart_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	struct ar933x_uart_port *up =
 		container_of(port, struct ar933x_uart_port, port);

@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:mm/mempool.c
-0xc972449f	mempool_alloc_slab	vmlinux	EXPORT_SYMBOL
+#2-
+0xc972449f	mempool_alloc_slab	vmlinux	EXPORT_SYMBOL	

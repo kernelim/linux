@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:drivers/cpufreq/cpufreq.c
-0x7c46233a	cpufreq_quick_get	vmlinux	EXPORT_SYMBOL
+#2-
+0x7c46233a	cpufreq_quick_get	vmlinux	EXPORT_SYMBOL	

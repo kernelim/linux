@@ -34,6 +34,10 @@ LD="$1"
 KBUILD_LDFLAGS="$2"
 LDFLAGS_vmlinux="$3"
 
+is_enabled() {
+	grep -q "^$1=y" include/config/auto.conf
+}
+
 # Nice output in kbuild format
 # Will be supressed by "make -s"
 info()
@@ -80,11 +84,11 @@ modpost_link()
 		${KBUILD_VMLINUX_LIBS}				\
 		--end-group"
 
-	if [ -n "${CONFIG_LTO_CLANG}" ]; then
+	if is_enabled CONFIG_LTO_CLANG; then
 		gen_initcalls
 		lds="-T .tmp_initcalls.lds"
 
-		if [ -n "${CONFIG_MODVERSIONS}" ]; then
+		if is_enabled CONFIG_MODVERSIONS; then
 			gen_symversions
 			lds="${lds} -T .tmp_symversions.lds"
 		fi
@@ -104,46 +108,70 @@ objtool_link()
 	local objtoolcmd;
 	local objtoolopt;
 
-	if [ "${CONFIG_LTO_CLANG} ${CONFIG_STACK_VALIDATION}" = "y y" ]; then
-		# Don't perform vmlinux validation unless explicitly requested,
-		# but run objtool on vmlinux.o now that we have an object file.
-		if [ -n "${CONFIG_UNWINDER_ORC}" ]; then
-			objtoolcmd="orc generate"
+	if ! is_enabled CONFIG_OBJTOOL; then
+		return;
+	fi
+
+	if is_enabled CONFIG_LTO_CLANG || is_enabled CONFIG_X86_KERNEL_IBT; then
+
+		# For LTO and IBT, objtool doesn't run on individual
+		# translation units.  Run everything on vmlinux instead.
+
+		if is_enabled CONFIG_HAVE_JUMP_LABEL_HACK; then
+			objtoolopt="${objtoolopt} --hacks=jump_label"
 		fi
 
-		objtoolopt="${objtoolopt} --duplicate"
+		if is_enabled CONFIG_HAVE_NOINSTR_HACK; then
+			objtoolopt="${objtoolopt} --hacks=noinstr"
+		fi
 
-		if [ -n "${CONFIG_FTRACE_MCOUNT_USE_OBJTOOL}" ]; then
+		if is_enabled CONFIG_X86_KERNEL_IBT; then
+			objtoolopt="${objtoolopt} --ibt"
+		fi
+
+		if is_enabled CONFIG_FTRACE_MCOUNT_USE_OBJTOOL; then
 			objtoolopt="${objtoolopt} --mcount"
+		fi
+
+		if is_enabled CONFIG_UNWINDER_ORC; then
+			objtoolopt="${objtoolopt} --orc"
+		fi
+
+		if is_enabled CONFIG_RETPOLINE; then
+			objtoolopt="${objtoolopt} --retpoline"
+		fi
+
+		if is_enabled CONFIG_SLS; then
+			objtoolopt="${objtoolopt} --sls"
+		fi
+
+		if is_enabled CONFIG_STACK_VALIDATION; then
+			objtoolopt="${objtoolopt} --stackval"
+		fi
+
+		if is_enabled CONFIG_HAVE_STATIC_CALL_INLINE; then
+			objtoolopt="${objtoolopt} --static-call"
+		fi
+
+		if is_enabled CONFIG_X86_SMAP; then
+			objtoolopt="${objtoolopt} --uaccess"
 		fi
 	fi
 
-	if [ -n "${CONFIG_VMLINUX_VALIDATION}" ]; then
+	if is_enabled CONFIG_NOINSTR_VALIDATION; then
 		objtoolopt="${objtoolopt} --noinstr"
 	fi
 
 	if [ -n "${objtoolopt}" ]; then
-		if [ -z "${objtoolcmd}" ]; then
-			objtoolcmd="check"
-		fi
-		objtoolopt="${objtoolopt} --vmlinux"
-		if [ -z "${CONFIG_FRAME_POINTER}" ]; then
-			objtoolopt="${objtoolopt} --no-fp"
-		fi
-		if [ -n "${CONFIG_GCOV_KERNEL}" ] || [ -n "${CONFIG_LTO_CLANG}" ]; then
+
+		if is_enabled CONFIG_GCOV_KERNEL; then
 			objtoolopt="${objtoolopt} --no-unreachable"
 		fi
-		if [ -n "${CONFIG_RETPOLINE}" ]; then
-			objtoolopt="${objtoolopt} --retpoline"
-		fi
-		if [ -n "${CONFIG_X86_SMAP}" ]; then
-			objtoolopt="${objtoolopt} --uaccess"
-		fi
-		if [ -n "${CONFIG_SLS}" ]; then
-			objtoolopt="${objtoolopt} --sls"
-		fi
+
+		objtoolopt="${objtoolopt} --link"
+
 		info OBJTOOL ${1}
-		tools/objtool/objtool ${objtoolcmd} ${objtoolopt} ${1}
+		tools/objtool/objtool ${objtoolopt} ${1}
 	fi
 }
 
@@ -168,12 +196,12 @@ vmlinux_link()
 		strip_debug=-Wl,--strip-debug
 	fi
 
-	if [ -n "${CONFIG_VMLINUX_MAP}" ]; then
+	if is_enabled CONFIG_VMLINUX_MAP; then
 		map_option="-Map=${output}.map"
 	fi
 
 	if [ "${SRCARCH}" != "um" ]; then
-		if [ -n "${CONFIG_LTO_CLANG}" ]; then
+		if is_enabled CONFIG_LTO_CLANG || is_enabled CONFIG_X86_KERNEL_IBT; then
 			# Use vmlinux.o instead of performing the slow LTO
 			# link again.
 			objects="--whole-archive		\
@@ -214,7 +242,6 @@ vmlinux_link()
 		rm -f linux
 	fi
 }
-
 # generate .BTF typeinfo from DWARF debuginfo
 # ${1} - vmlinux image
 # ${2} - file to dump raw BTF data into
@@ -255,15 +282,15 @@ kallsyms()
 {
 	local kallsymopt;
 
-	if [ -n "${CONFIG_KALLSYMS_ALL}" ]; then
+	if is_enabled CONFIG_KALLSYMS_ALL; then
 		kallsymopt="${kallsymopt} --all-symbols"
 	fi
 
-	if [ -n "${CONFIG_KALLSYMS_ABSOLUTE_PERCPU}" ]; then
+	if is_enabled CONFIG_KALLSYMS_ABSOLUTE_PERCPU; then
 		kallsymopt="${kallsymopt} --absolute-percpu"
 	fi
 
-	if [ -n "${CONFIG_KALLSYMS_BASE_RELATIVE}" ]; then
+	if is_enabled CONFIG_KALLSYMS_BASE_RELATIVE; then
 		kallsymopt="${kallsymopt} --base-relative"
 	fi
 
@@ -328,9 +355,6 @@ if [ "$1" = "clean" ]; then
 	exit 0
 fi
 
-# We need access to CONFIG_ symbols
-. include/config/auto.conf
-
 # Update version
 info GEN .version
 if [ -r .version ]; then
@@ -359,7 +383,7 @@ tr '\0' '\n' < modules.builtin.modinfo | sed -n 's/^[[:alnum:]:_]*\.file=//p' |
 	tr ' ' '\n' | uniq | sed -e 's:^:kernel/:' -e 's/$/.ko/' > modules.builtin
 
 btf_vmlinux_bin_o=""
-if [ -n "${CONFIG_DEBUG_INFO_BTF}" ]; then
+if is_enabled CONFIG_DEBUG_INFO_BTF; then
 	btf_vmlinux_bin_o=.btf.vmlinux.bin.o
 	if ! gen_btf .tmp_vmlinux.btf $btf_vmlinux_bin_o ; then
 		echo >&2 "Failed to generate BTF for vmlinux"
@@ -371,7 +395,7 @@ fi
 kallsymso=""
 kallsymso_prev=""
 kallsyms_vmlinux=""
-if [ -n "${CONFIG_KALLSYMS}" ]; then
+if is_enabled CONFIG_KALLSYMS; then
 
 	# kallsyms support
 	# Generate section listing all symbols and add it into vmlinux
@@ -411,12 +435,12 @@ fi
 vmlinux_link vmlinux "${kallsymso}" ${btf_vmlinux_bin_o}
 
 # fill in BTF IDs
-if [ -n "${CONFIG_DEBUG_INFO_BTF}" -a -n "${CONFIG_BPF}" ]; then
+if is_enabled CONFIG_DEBUG_INFO_BTF && is_enabled CONFIG_BPF; then
 	info BTFIDS vmlinux
 	${RESOLVE_BTFIDS} vmlinux
 fi
 
-if [ -n "${CONFIG_BUILDTIME_TABLE_SORT}" ]; then
+if is_enabled CONFIG_BUILDTIME_TABLE_SORT; then
 	info SORTTAB vmlinux
 	if ! sorttable vmlinux; then
 		echo >&2 Failed to sort kernel tables
@@ -428,7 +452,7 @@ info SYSMAP System.map
 mksysmap vmlinux System.map
 
 # step a (see comment above)
-if [ -n "${CONFIG_KALLSYMS}" ]; then
+if is_enabled CONFIG_KALLSYMS; then
 	mksysmap ${kallsyms_vmlinux} .tmp_System.map
 
 	if ! cmp -s System.map .tmp_System.map; then

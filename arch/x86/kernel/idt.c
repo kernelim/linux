@@ -69,6 +69,9 @@ static const __initconst struct idt_data early_idts[] = {
 	 */
 	INTG(X86_TRAP_PF,		asm_exc_page_fault),
 #endif
+#ifdef CONFIG_INTEL_TDX_GUEST
+	INTG(X86_TRAP_VE,		asm_exc_virtualization_exception),
+#endif
 };
 
 /*
@@ -102,6 +105,10 @@ static const __initconst struct idt_data def_idts[] = {
 
 #ifdef CONFIG_X86_MCE
 	ISTG(X86_TRAP_MC,		asm_exc_machine_check, IST_INDEX_MCE),
+#endif
+
+#ifdef CONFIG_X86_KERNEL_IBT
+	INTG(X86_TRAP_CP,		asm_exc_control_protection),
 #endif
 
 #ifdef CONFIG_AMD_MEM_ENCRYPT

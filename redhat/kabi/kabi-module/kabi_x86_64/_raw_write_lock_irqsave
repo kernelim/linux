@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/locking/spinlock.c
-0x5021bd81	_raw_write_lock_irqsave	vmlinux	EXPORT_SYMBOL
+#2-
+0x5021bd81	_raw_write_lock_irqsave	vmlinux	EXPORT_SYMBOL	

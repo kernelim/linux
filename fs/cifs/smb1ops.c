@@ -7,6 +7,7 @@
 
 #include <linux/pagemap.h>
 #include <linux/vfs.h>
+#include <uapi/linux/magic.h>
 #include "cifsglob.h"
 #include "cifsproto.h"
 #include "cifs_debug.h"
@@ -37,10 +38,10 @@ send_nt_cancel(struct TCP_Server_Info *server, struct smb_rqst *rqst,
 	in_buf->WordCount = 0;
 	put_bcc(0, in_buf);
 
-	mutex_lock(&server->srv_mutex);
+	cifs_server_lock(server);
 	rc = cifs_sign_smb(in_buf, server, &mid->sequence_number);
 	if (rc) {
-		mutex_unlock(&server->srv_mutex);
+		cifs_server_unlock(server);
 		return rc;
 	}
 
@@ -54,7 +55,7 @@ send_nt_cancel(struct TCP_Server_Info *server, struct smb_rqst *rqst,
 	if (rc < 0)
 		server->sequence_number--;
 
-	mutex_unlock(&server->srv_mutex);
+	cifs_server_unlock(server);
 
 	cifs_dbg(FYI, "issued NT_CANCEL for mid %u, rc = %d\n",
 		 get_mid(in_buf), rc);
@@ -91,17 +92,17 @@ cifs_find_mid(struct TCP_Server_Info *server, char *buffer)
 	struct smb_hdr *buf = (struct smb_hdr *)buffer;
 	struct mid_q_entry *mid;
 
-	spin_lock(&GlobalMid_Lock);
+	spin_lock(&server->mid_lock);
 	list_for_each_entry(mid, &server->pending_mid_q, qhead) {
 		if (compare_mid(mid->mid, buf) &&
 		    mid->mid_state == MID_REQUEST_SUBMITTED &&
 		    le16_to_cpu(mid->command) == buf->Command) {
 			kref_get(&mid->refcount);
-			spin_unlock(&GlobalMid_Lock);
+			spin_unlock(&server->mid_lock);
 			return mid;
 		}
 	}
-	spin_unlock(&GlobalMid_Lock);
+	spin_unlock(&server->mid_lock);
 	return NULL;
 }
 
@@ -163,9 +164,9 @@ cifs_get_next_mid(struct TCP_Server_Info *server)
 {
 	__u64 mid = 0;
 	__u16 last_mid, cur_mid;
-	bool collision;
+	bool collision, reconnect = false;
 
-	spin_lock(&GlobalMid_Lock);
+	spin_lock(&server->mid_lock);
 
 	/* mid is 16 bit only for CIFS/SMB */
 	cur_mid = (__u16)((server->CurrentMid) & 0xffff);
@@ -215,7 +216,7 @@ cifs_get_next_mid(struct TCP_Server_Info *server)
 		 * an eventual reconnect to clean out the pending_mid_q.
 		 */
 		if (num_mids > 32768)
-			server->tcpStatus = CifsNeedReconnect;
+			reconnect = true;
 
 		if (!collision) {
 			mid = (__u64)cur_mid;
@@ -224,7 +225,12 @@ cifs_get_next_mid(struct TCP_Server_Info *server)
 		}
 		cur_mid++;
 	}
-	spin_unlock(&GlobalMid_Lock);
+	spin_unlock(&server->mid_lock);
+
+	if (reconnect) {
+		cifs_signal_cifsd_for_reconnect(server, false);
+	}
+
 	return mid;
 }
 
@@ -414,14 +420,16 @@ cifs_need_neg(struct TCP_Server_Info *server)
 }
 
 static int
-cifs_negotiate(const unsigned int xid, struct cifs_ses *ses)
+cifs_negotiate(const unsigned int xid,
+	       struct cifs_ses *ses,
+	       struct TCP_Server_Info *server)
 {
 	int rc;
-	rc = CIFSSMBNegotiate(xid, ses);
+	rc = CIFSSMBNegotiate(xid, ses, server);
 	if (rc == -EAGAIN) {
 		/* retry only once on 1st time connection */
-		set_credits(ses->server, 1);
-		rc = CIFSSMBNegotiate(xid, ses);
+		set_credits(server, 1);
+		rc = CIFSSMBNegotiate(xid, ses, server);
 		if (rc == -EAGAIN)
 			rc = -EHOSTDOWN;
 	}
@@ -878,7 +886,7 @@ cifs_queryfs(const unsigned int xid, struct cifs_tcon *tcon,
 {
 	int rc = -EOPNOTSUPP;
 
-	buf->f_type = CIFS_MAGIC_NUMBER;
+	buf->f_type = CIFS_SUPER_MAGIC;
 
 	/*
 	 * We could add a second check for a QFS Unix capability bit

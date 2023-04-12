@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/string.c
-0xcbd4898c	fortify_panic	vmlinux	EXPORT_SYMBOL
+#2-
+0xcbd4898c	fortify_panic	vmlinux	EXPORT_SYMBOL	

@@ -111,7 +111,7 @@ __secondary_hold_acknowledge:
 #ifdef CONFIG_RELOCATABLE
 	/* This flag is set to 1 by a loader if the kernel should run
 	 * at the loaded address instead of the linked address.  This
-	 * is used by kexec-tools to keep the the kdump kernel in the
+	 * is used by kexec-tools to keep the kdump kernel in the
 	 * crash_kernel region.  The loader is responsible for
 	 * observing the alignment requirement.
 	 */
@@ -711,6 +711,8 @@ _GLOBAL(copy_and_flush)
 	addi	r6,r6,8
 	isync
 	blr
+
+_ASM_NOKPROBE_SYMBOL(copy_and_flush); /* Called in real mode */
 
 .align 8
 copy_to_here:

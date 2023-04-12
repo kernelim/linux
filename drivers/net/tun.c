@@ -268,8 +268,7 @@ static void tun_napi_init(struct tun_struct *tun, struct tun_file *tfile,
 	tfile->napi_enabled = napi_en;
 	tfile->napi_frags_enabled = napi_en && napi_frags;
 	if (napi_en) {
-		netif_tx_napi_add(tun->dev, &tfile->napi, tun_napi_poll,
-				  NAPI_POLL_WEIGHT);
+		netif_napi_add_tx(tun->dev, &tfile->napi, tun_napi_poll);
 		napi_enable(&tfile->napi);
 	}
 }
@@ -1058,6 +1057,7 @@ static unsigned int run_ebpf_filter(struct tun_struct *tun,
 static netdev_tx_t tun_net_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct tun_struct *tun = netdev_priv(dev);
+	enum skb_drop_reason drop_reason;
 	int txq = skb->queue_mapping;
 	struct netdev_queue *queue;
 	struct tun_file *tfile;
@@ -1067,8 +1067,10 @@ static netdev_tx_t tun_net_xmit(struct sk_buff *skb, struct net_device *dev)
 	tfile = rcu_dereference(tun->tfiles[txq]);
 
 	/* Drop packet if interface is not attached */
-	if (!tfile)
+	if (!tfile) {
+		drop_reason = SKB_DROP_REASON_DEV_READY;
 		goto drop;
+	}
 
 	if (!rcu_dereference(tun->steering_prog))
 		tun_automq_xmit(tun, skb);
@@ -1078,19 +1080,32 @@ static netdev_tx_t tun_net_xmit(struct sk_buff *skb, struct net_device *dev)
 	/* Drop if the filter does not like it.
 	 * This is a noop if the filter is disabled.
 	 * Filter can be enabled only for the TAP devices. */
-	if (!check_filter(&tun->txflt, skb))
+	if (!check_filter(&tun->txflt, skb)) {
+		drop_reason = SKB_DROP_REASON_TAP_TXFILTER;
 		goto drop;
+	}
 
 	if (tfile->socket.sk->sk_filter &&
-	    sk_filter(tfile->socket.sk, skb))
+	    sk_filter(tfile->socket.sk, skb)) {
+		drop_reason = SKB_DROP_REASON_SOCKET_FILTER;
 		goto drop;
+	}
 
 	len = run_ebpf_filter(tun, skb, len);
-	if (len == 0 || pskb_trim(skb, len))
+	if (len == 0) {
+		drop_reason = SKB_DROP_REASON_TAP_FILTER;
 		goto drop;
+	}
 
-	if (unlikely(skb_orphan_frags_rx(skb, GFP_ATOMIC)))
+	if (pskb_trim(skb, len)) {
+		drop_reason = SKB_DROP_REASON_NOMEM;
 		goto drop;
+	}
+
+	if (unlikely(skb_orphan_frags_rx(skb, GFP_ATOMIC))) {
+		drop_reason = SKB_DROP_REASON_SKB_UCOPY_FAULT;
+		goto drop;
+	}
 
 	skb_tx_timestamp(skb);
 
@@ -1101,8 +1116,10 @@ static netdev_tx_t tun_net_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	nf_reset_ct(skb);
 
-	if (ptr_ring_produce(&tfile->tx_ring, skb))
+	if (ptr_ring_produce(&tfile->tx_ring, skb)) {
+		drop_reason = SKB_DROP_REASON_FULL_RING;
 		goto drop;
+	}
 
 	/* NETIF_F_LLTX requires to do our own update of trans_start */
 	queue = netdev_get_tx_queue(dev, txq);
@@ -1117,9 +1134,9 @@ static netdev_tx_t tun_net_xmit(struct sk_buff *skb, struct net_device *dev)
 	return NETDEV_TX_OK;
 
 drop:
-	atomic_long_inc(&dev->tx_dropped);
+	dev_core_stats_tx_dropped_inc(dev);
 	skb_tx_error(skb);
-	kfree_skb(skb);
+	kfree_skb_reason(skb, drop_reason);
 	rcu_read_unlock();
 	return NET_XMIT_DROP;
 }
@@ -1273,7 +1290,7 @@ resample:
 		void *frame = tun_xdp_to_ptr(xdp);
 
 		if (__ptr_ring_produce(&tfile->tx_ring, frame)) {
-			atomic_long_inc(&dev->tx_dropped);
+			dev_core_stats_tx_dropped_inc(dev);
 			break;
 		}
 		nxmit++;
@@ -1608,7 +1625,7 @@ static int tun_xdp_act(struct tun_struct *tun, struct bpf_prog *xdp_prog,
 		trace_xdp_exception(tun->dev, xdp_prog, act);
 		fallthrough;
 	case XDP_DROP:
-		atomic_long_inc(&tun->dev->rx_dropped);
+		dev_core_stats_rx_dropped_inc(tun->dev);
 		break;
 	}
 
@@ -1717,6 +1734,7 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 	u32 rxhash = 0;
 	int skb_xdp = 1;
 	bool frags = tun_napi_frags_enabled(tfile);
+	enum skb_drop_reason drop_reason;
 
 	if (!(tun->flags & IFF_NO_PI)) {
 		if (len < sizeof(pi))
@@ -1778,7 +1796,7 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 		 */
 		skb = tun_build_skb(tun, tfile, from, &gso, len, &skb_xdp);
 		if (IS_ERR(skb)) {
-			atomic_long_inc(&tun->dev->rx_dropped);
+			dev_core_stats_rx_dropped_inc(tun->dev);
 			return PTR_ERR(skb);
 		}
 		if (!skb)
@@ -1807,7 +1825,7 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 
 		if (IS_ERR(skb)) {
 			if (PTR_ERR(skb) != -EAGAIN)
-				atomic_long_inc(&tun->dev->rx_dropped);
+				dev_core_stats_rx_dropped_inc(tun->dev);
 			if (frags)
 				mutex_unlock(&tfile->napi_mutex);
 			return PTR_ERR(skb);
@@ -1820,9 +1838,10 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 
 		if (err) {
 			err = -EFAULT;
+			drop_reason = SKB_DROP_REASON_SKB_UCOPY_FAULT;
 drop:
-			atomic_long_inc(&tun->dev->rx_dropped);
-			kfree_skb(skb);
+			dev_core_stats_rx_dropped_inc(tun->dev);
+			kfree_skb_reason(skb, drop_reason);
 			if (frags) {
 				tfile->napi.skb = NULL;
 				mutex_unlock(&tfile->napi_mutex);
@@ -1856,7 +1875,7 @@ drop:
 				pi.proto = htons(ETH_P_IPV6);
 				break;
 			default:
-				atomic_long_inc(&tun->dev->rx_dropped);
+				dev_core_stats_rx_dropped_inc(tun->dev);
 				kfree_skb(skb);
 				return -EINVAL;
 			}
@@ -1869,6 +1888,7 @@ drop:
 	case IFF_TAP:
 		if (frags && !pskb_may_pull(skb, ETH_HLEN)) {
 			err = -ENOMEM;
+			drop_reason = SKB_DROP_REASON_HDR_TRUNC;
 			goto drop;
 		}
 		skb->protocol = eth_type_trans(skb, tun->dev);
@@ -1922,6 +1942,7 @@ drop:
 	if (unlikely(!(tun->dev->flags & IFF_UP))) {
 		err = -EIO;
 		rcu_read_unlock();
+		drop_reason = SKB_DROP_REASON_DEV_READY;
 		goto drop;
 	}
 
@@ -1934,7 +1955,7 @@ drop:
 					  skb_headlen(skb));
 
 		if (unlikely(headlen > skb_headlen(skb))) {
-			atomic_long_inc(&tun->dev->rx_dropped);
+			dev_core_stats_rx_dropped_inc(tun->dev);
 			napi_free_frags(&tfile->napi);
 			rcu_read_unlock();
 			mutex_unlock(&tfile->napi_mutex);

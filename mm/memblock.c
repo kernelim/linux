@@ -366,14 +366,20 @@ void __init memblock_discard(void)
 		addr = __pa(memblock.reserved.regions);
 		size = PAGE_ALIGN(sizeof(struct memblock_region) *
 				  memblock.reserved.max);
-		__memblock_free_late(addr, size);
+		if (memblock_reserved_in_slab)
+			kfree(memblock.reserved.regions);
+		else
+			memblock_free_late(addr, size);
 	}
 
 	if (memblock.memory.regions != memblock_memory_init_regions) {
 		addr = __pa(memblock.memory.regions);
 		size = PAGE_ALIGN(sizeof(struct memblock_region) *
 				  memblock.memory.max);
-		__memblock_free_late(addr, size);
+		if (memblock_memory_in_slab)
+			kfree(memblock.memory.regions);
+		else
+			memblock_free_late(addr, size);
 	}
 
 	memblock_memory = NULL;
@@ -655,6 +661,7 @@ repeat:
  * @base: base address of the new region
  * @size: size of the new region
  * @nid: nid of the new region
+ * @flags: flags of the new region
  *
  * Add new memblock region [@base, @base + @size) to the "memory"
  * type. See memblock_add_range() description for mode details
@@ -663,14 +670,14 @@ repeat:
  * 0 on success, -errno on failure.
  */
 int __init_memblock memblock_add_node(phys_addr_t base, phys_addr_t size,
-				       int nid)
+				      int nid, enum memblock_flags flags)
 {
 	phys_addr_t end = base + size - 1;
 
-	memblock_dbg("%s: [%pa-%pa] nid=%d %pS\n", __func__,
-		     &base, &end, nid, (void *)_RET_IP_);
+	memblock_dbg("%s: [%pa-%pa] nid=%d flags=%x %pS\n", __func__,
+		     &base, &end, nid, flags, (void *)_RET_IP_);
 
-	return memblock_add_range(&memblock.memory, base, size, nid, 0);
+	return memblock_add_range(&memblock.memory, base, size, nid, flags);
 }
 
 /**
@@ -981,6 +988,10 @@ static bool should_skip_region(struct memblock_type *type,
 	if (!(flags & MEMBLOCK_NOMAP) && memblock_is_nomap(m))
 		return true;
 
+	/* skip driver-managed memory unless we were asked for it explicitly */
+	if (!(flags & MEMBLOCK_DRIVER_MANAGED) && memblock_is_driver_managed(m))
+		return true;
+
 	return false;
 }
 
@@ -1273,11 +1284,10 @@ __next_mem_pfn_range_in_zone(u64 *idx, struct zone *zone,
 {
 	int zone_nid = zone_to_nid(zone);
 	phys_addr_t spa, epa;
-	int nid;
 
 	__next_mem_range(idx, zone_nid, MEMBLOCK_NONE,
 			 &memblock.memory, &memblock.reserved,
-			 &spa, &epa, &nid);
+			 &spa, &epa, NULL);
 
 	while (*idx != U64_MAX) {
 		unsigned long epfn = PFN_DOWN(epa);
@@ -1304,7 +1314,7 @@ __next_mem_pfn_range_in_zone(u64 *idx, struct zone *zone,
 
 		__next_mem_range(idx, zone_nid, MEMBLOCK_NONE,
 				 &memblock.memory, &memblock.reserved,
-				 &spa, &epa, &nid);
+				 &spa, &epa, NULL);
 	}
 
 	/* signal end of iteration */
@@ -1335,8 +1345,8 @@ __next_mem_pfn_range_in_zone(u64 *idx, struct zone *zone,
  * from the regions with mirroring enabled and then retried from any
  * memory region.
  *
- * In addition, function sets the min_count to 0 using kmemleak_alloc_phys for
- * allocated boot memory block, so that it is never reported as leaks.
+ * In addition, function using kmemleak_alloc_phys for allocated boot
+ * memory block, it is never reported as leaks.
  *
  * Return:
  * Physical address of allocated memory block on success, %0 on failure.
@@ -1388,12 +1398,12 @@ done:
 	 */
 	if (end != MEMBLOCK_ALLOC_NOLEAKTRACE)
 		/*
-		 * The min_count is set to 0 so that memblock allocated
-		 * blocks are never reported as leaks. This is because many
-		 * of these blocks are only referred via the physical
-		 * address which is not looked up by kmemleak.
+		 * Memblock allocated blocks are never reported as
+		 * leaks. This is because many of these blocks are
+		 * only referred via the physical address which is
+		 * not looked up by kmemleak.
 		 */
-		kmemleak_alloc_phys(found, size, 0, 0);
+		kmemleak_alloc_phys(found, size, 0);
 
 	return found;
 }
@@ -1592,7 +1602,7 @@ void * __init memblock_alloc_try_nid(
 }
 
 /**
- * __memblock_free_late - free pages directly to buddy allocator
+ * memblock_free_late - free pages directly to buddy allocator
  * @base: phys starting address of the  boot memory block
  * @size: size of the boot memory block in bytes
  *
@@ -1600,7 +1610,7 @@ void * __init memblock_alloc_try_nid(
  * down, but we are still initializing the system.  Pages are released directly
  * to the buddy allocator.
  */
-void __init __memblock_free_late(phys_addr_t base, phys_addr_t size)
+void __init memblock_free_late(phys_addr_t base, phys_addr_t size)
 {
 	phys_addr_t cursor, end;
 

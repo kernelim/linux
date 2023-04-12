@@ -139,7 +139,7 @@ static bool scsi_eh_should_retry_cmd(struct scsi_cmnd *cmd)
  *
  * Note: this function must be called only for a command that has timed out.
  * Because the block layer marks a request as complete before it calls
- * scsi_times_out(), a .scsi_done() call from the LLD for a command that has
+ * scsi_timeout(), a .scsi_done() call from the LLD for a command that has
  * timed out do not have any effect. Hence it is safe to call
  * scsi_finish_command() from this function.
  */
@@ -316,7 +316,7 @@ void scsi_eh_scmd_add(struct scsi_cmnd *scmd)
 }
 
 /**
- * scsi_times_out - Timeout function for normal scsi commands.
+ * scsi_timeout - Timeout function for normal scsi commands.
  * @req:	request that is timing out.
  *
  * Notes:
@@ -325,7 +325,7 @@ void scsi_eh_scmd_add(struct scsi_cmnd *scmd)
  *     normal completion function determines that the timer has already
  *     fired, then it mustn't do anything.
  */
-enum blk_eh_timer_return scsi_times_out(struct request *req)
+enum blk_eh_timer_return scsi_timeout(struct request *req)
 {
 	struct scsi_cmnd *scmd = blk_mq_rq_to_pdu(req);
 	enum blk_eh_timer_return rtn = BLK_EH_DONE;
@@ -463,14 +463,12 @@ static void scsi_report_sense(struct scsi_device *sdev,
 			evt_type = SDEV_EVT_LUN_CHANGE_REPORTED;
 			scsi_report_lun_change(sdev);
 			sdev_printk(KERN_WARNING, sdev,
-				    "Warning! Received an indication that the "
 				    "LUN assignments on this target have "
 				    "changed. The Linux SCSI layer does not "
 				    "automatically remap LUN assignments.\n");
 		} else if (sshdr->asc == 0x3f)
 			sdev_printk(KERN_WARNING, sdev,
-				    "Warning! Received an indication that the "
-				    "operating parameters on this target have "
+				    "Operating parameters on this target have "
 				    "changed. The Linux SCSI layer does not "
 				    "automatically adjust these parameters.\n");
 
@@ -1781,7 +1779,7 @@ static void scsi_eh_offline_sdevs(struct list_head *work_q,
  * scsi_noretry_cmd - determine if command should be failed fast
  * @scmd:	SCSI cmd to examine.
  */
-int scsi_noretry_cmd(struct scsi_cmnd *scmd)
+bool scsi_noretry_cmd(struct scsi_cmnd *scmd)
 {
 	struct request *req = scsi_cmd_to_rq(scmd);
 
@@ -1791,19 +1789,19 @@ int scsi_noretry_cmd(struct scsi_cmnd *scmd)
 	case DID_TIME_OUT:
 		goto check_type;
 	case DID_BUS_BUSY:
-		return req->cmd_flags & REQ_FAILFAST_TRANSPORT;
+		return !!(req->cmd_flags & REQ_FAILFAST_TRANSPORT);
 	case DID_PARITY:
-		return req->cmd_flags & REQ_FAILFAST_DEV;
+		return !!(req->cmd_flags & REQ_FAILFAST_DEV);
 	case DID_ERROR:
 		if (get_status_byte(scmd) == SAM_STAT_RESERVATION_CONFLICT)
-			return 0;
+			return false;
 		fallthrough;
 	case DID_SOFT_ERROR:
-		return req->cmd_flags & REQ_FAILFAST_DRIVER;
+		return !!(req->cmd_flags & REQ_FAILFAST_DRIVER);
 	}
 
 	if (!scsi_status_is_check_condition(scmd->result))
-		return 0;
+		return false;
 
 check_type:
 	/*
@@ -1811,9 +1809,9 @@ check_type:
 	 * the check condition was retryable.
 	 */
 	if (req->cmd_flags & REQ_FAILFAST_DEV || blk_rq_is_passthrough(req))
-		return 1;
+		return true;
 
-	return 0;
+	return false;
 }
 
 /**
@@ -1989,8 +1987,6 @@ enum scsi_disposition scsi_decide_disposition(struct scsi_cmnd *scmd)
 			    "reservation conflict\n");
 		set_host_byte(scmd, DID_NEXUS_FAILURE);
 		return SUCCESS; /* causes immediate i/o error */
-	default:
-		return FAILED;
 	}
 	return FAILED;
 
@@ -2010,9 +2006,11 @@ maybe_retry:
 	}
 }
 
-static void eh_lock_door_done(struct request *req, blk_status_t status)
+static enum rq_end_io_ret eh_lock_door_done(struct request *req,
+					    blk_status_t status)
 {
 	blk_mq_free_request(req);
+	return RQ_END_IO_NONE;
 }
 
 /**

@@ -152,6 +152,7 @@ static void esp_free_tcp_sk(struct rcu_head *head)
 static struct sock *esp6_find_tcp_sk(struct xfrm_state *x)
 {
 	struct xfrm_encap_tmpl *encap = x->encap;
+	struct net *net = xs_net(x);
 	struct esp_tcp_sk *esk;
 	__be16 sport, dport;
 	struct sock *nsk;
@@ -178,7 +179,7 @@ static struct sock *esp6_find_tcp_sk(struct xfrm_state *x)
 	}
 	spin_unlock_bh(&x->lock);
 
-	sk = __inet6_lookup_established(xs_net(x), &tcp_hashinfo, &x->id.daddr.in6,
+	sk = __inet6_lookup_established(net, net->ipv4.tcp_death_row.hashinfo, &x->id.daddr.in6,
 					dport, &x->props.saddr.in6, ntohs(sport), 0, 0);
 	if (!sk)
 		return ERR_PTR(-ENOENT);
@@ -712,7 +713,7 @@ static int esp6_output(struct xfrm_state *x, struct sk_buff *skb)
 		struct xfrm_dst *dst = (struct xfrm_dst *)skb_dst(skb);
 		u32 padto;
 
-		padto = min(x->tfcpad, __xfrm_state_mtu(x, dst->child_mtu_cached));
+		padto = min(x->tfcpad, xfrm_state_mtu(x, dst->child_mtu_cached));
 		if (skb->len < padto)
 			esp.tfclen = padto - skb->len;
 	}

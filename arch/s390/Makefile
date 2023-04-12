@@ -32,6 +32,8 @@ KBUILD_CFLAGS_DECOMPRESSOR += -fno-stack-protector
 KBUILD_CFLAGS_DECOMPRESSOR += $(call cc-disable-warning, address-of-packed-member)
 KBUILD_CFLAGS_DECOMPRESSOR += $(if $(CONFIG_DEBUG_INFO),-g)
 KBUILD_CFLAGS_DECOMPRESSOR += $(if $(CONFIG_DEBUG_INFO_DWARF4), $(call cc-option, -gdwarf-4,))
+KBUILD_CFLAGS_DECOMPRESSOR += $(if $(CONFIG_CC_NO_ARRAY_BOUNDS),-Wno-array-bounds)
+
 UTS_MACHINE	:= s390x
 STACK_SIZE	:= $(if $(CONFIG_KASAN),65536,16384)
 CHECKFLAGS	+= -D__s390__ -D__s390x__
@@ -70,7 +72,7 @@ cflags-y += -Wa,-I$(srctree)/arch/$(ARCH)/include
 #
 cflags-$(CONFIG_FRAME_POINTER) += -fno-optimize-sibling-calls
 
-ifeq ($(call cc-option-yn,-mpacked-stack -mbackchain -msoft-float),y)
+ifneq ($(call cc-option,-mpacked-stack -mbackchain -msoft-float),)
 cflags-$(CONFIG_PACK_STACK)  += -mpacked-stack -D__PACK_STACK
 aflags-$(CONFIG_PACK_STACK)  += -D__PACK_STACK
 endif
@@ -78,36 +80,33 @@ endif
 KBUILD_AFLAGS_DECOMPRESSOR += $(aflags-y)
 KBUILD_CFLAGS_DECOMPRESSOR += $(cflags-y)
 
-ifeq ($(call cc-option-yn,-mstack-size=8192 -mstack-guard=128),y)
+ifneq ($(call cc-option,-mstack-size=8192 -mstack-guard=128),)
 cflags-$(CONFIG_CHECK_STACK) += -mstack-size=$(STACK_SIZE)
-ifneq ($(call cc-option-yn,-mstack-size=8192),y)
+ifeq ($(call cc-option,-mstack-size=8192),)
 cflags-$(CONFIG_CHECK_STACK) += -mstack-guard=$(CONFIG_STACK_GUARD)
 endif
 endif
 
-ifdef CONFIG_WARN_DYNAMIC_STACK
-  ifeq ($(call cc-option-yn,-mwarn-dynamicstack),y)
-    KBUILD_CFLAGS += -mwarn-dynamicstack
-    KBUILD_CFLAGS_DECOMPRESSOR += -mwarn-dynamicstack
-  endif
-endif
-
 ifdef CONFIG_EXPOLINE
-  ifeq ($(call cc-option-yn,$(CC_FLAGS_MARCH) -mindirect-branch=thunk),y)
+  ifdef CONFIG_EXPOLINE_EXTERN
+    KBUILD_LDFLAGS_MODULE += arch/s390/lib/expoline/expoline.o
+    CC_FLAGS_EXPOLINE := -mindirect-branch=thunk-extern
+    CC_FLAGS_EXPOLINE += -mfunction-return=thunk-extern
+  else
     CC_FLAGS_EXPOLINE := -mindirect-branch=thunk
     CC_FLAGS_EXPOLINE += -mfunction-return=thunk
-    CC_FLAGS_EXPOLINE += -mindirect-branch-table
-    export CC_FLAGS_EXPOLINE
-    cflags-y += $(CC_FLAGS_EXPOLINE) -DCC_USING_EXPOLINE
-    aflags-y += -DCC_USING_EXPOLINE
   endif
+  CC_FLAGS_EXPOLINE += -mindirect-branch-table
+  export CC_FLAGS_EXPOLINE
+  cflags-y += $(CC_FLAGS_EXPOLINE) -DCC_USING_EXPOLINE
+  aflags-y += -DCC_USING_EXPOLINE
 endif
 
 ifdef CONFIG_FUNCTION_TRACER
-  ifeq ($(call cc-option-yn,-mfentry -mnop-mcount),n)
+  ifeq ($(call cc-option,-mfentry -mnop-mcount),)
     # make use of hotpatch feature if the compiler supports it
     cc_hotpatch	:= -mhotpatch=0,3
-    ifeq ($(call cc-option-yn,$(cc_hotpatch)),y)
+    ifneq ($(call cc-option,$(cc_hotpatch)),)
       CC_FLAGS_FTRACE := $(cc_hotpatch)
       KBUILD_AFLAGS	+= -DCC_USING_HOTPATCH
       KBUILD_CFLAGS	+= -DCC_USING_HOTPATCH
@@ -175,6 +174,12 @@ vdso_prepare: prepare0
 	$(Q)$(MAKE) $(build)=arch/s390/kernel/vdso64 include/generated/vdso64-offsets.h
 	$(if $(CONFIG_COMPAT),$(Q)$(MAKE) \
 		$(build)=arch/s390/kernel/vdso32 include/generated/vdso32-offsets.h)
+
+ifdef CONFIG_EXPOLINE_EXTERN
+modules_prepare: expoline_prepare
+expoline_prepare: prepare0
+	$(Q)$(MAKE) $(build)=arch/s390/lib/expoline arch/s390/lib/expoline/expoline.o
+endif
 endif
 
 # Don't use tabs in echo arguments

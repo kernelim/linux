@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/time/timeconv.c
-0x0fff5afc	time64_to_tm	vmlinux	EXPORT_SYMBOL
+#2-
+0x0fff5afc	time64_to_tm	vmlinux	EXPORT_SYMBOL	

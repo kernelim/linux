@@ -120,20 +120,12 @@ LIBBPF_API struct btf *libbpf_find_kernel_btf(void);
 
 LIBBPF_API struct btf *btf__load_from_kernel_by_id(__u32 id);
 LIBBPF_API struct btf *btf__load_from_kernel_by_id_split(__u32 id, struct btf *base_btf);
-LIBBPF_DEPRECATED_SINCE(0, 6, "use btf__load_from_kernel_by_id instead")
-LIBBPF_API int btf__get_from_id(__u32 id, struct btf **btf);
 
-LIBBPF_DEPRECATED_SINCE(0, 6, "intended for internal libbpf use only")
-LIBBPF_API int btf__finalize_data(struct bpf_object *obj, struct btf *btf);
-LIBBPF_DEPRECATED_SINCE(0, 6, "use btf__load_into_kernel instead")
-LIBBPF_API int btf__load(struct btf *btf);
 LIBBPF_API int btf__load_into_kernel(struct btf *btf);
 LIBBPF_API __s32 btf__find_by_name(const struct btf *btf,
 				   const char *type_name);
 LIBBPF_API __s32 btf__find_by_name_kind(const struct btf *btf,
 					const char *type_name, __u32 kind);
-LIBBPF_DEPRECATED_SINCE(0, 7, "use btf__type_cnt() instead; note that btf__get_nr_types() == btf__type_cnt() - 1")
-LIBBPF_API __u32 btf__get_nr_types(const struct btf *btf);
 LIBBPF_API __u32 btf__type_cnt(const struct btf *btf);
 LIBBPF_API const struct btf *btf__base_btf(const struct btf *btf);
 LIBBPF_API const struct btf_type *btf__type_by_id(const struct btf *btf,
@@ -147,32 +139,13 @@ LIBBPF_API int btf__resolve_type(const struct btf *btf, __u32 type_id);
 LIBBPF_API int btf__align_of(const struct btf *btf, __u32 id);
 LIBBPF_API int btf__fd(const struct btf *btf);
 LIBBPF_API void btf__set_fd(struct btf *btf, int fd);
-LIBBPF_DEPRECATED_SINCE(0, 7, "use btf__raw_data() instead")
-LIBBPF_API const void *btf__get_raw_data(const struct btf *btf, __u32 *size);
 LIBBPF_API const void *btf__raw_data(const struct btf *btf, __u32 *size);
 LIBBPF_API const char *btf__name_by_offset(const struct btf *btf, __u32 offset);
 LIBBPF_API const char *btf__str_by_offset(const struct btf *btf, __u32 offset);
-LIBBPF_API int btf__get_map_kv_tids(const struct btf *btf, const char *map_name,
-				    __u32 expected_key_size,
-				    __u32 expected_value_size,
-				    __u32 *key_type_id, __u32 *value_type_id);
 
-LIBBPF_API struct btf_ext *btf_ext__new(__u8 *data, __u32 size);
+LIBBPF_API struct btf_ext *btf_ext__new(const __u8 *data, __u32 size);
 LIBBPF_API void btf_ext__free(struct btf_ext *btf_ext);
-LIBBPF_API const void *btf_ext__get_raw_data(const struct btf_ext *btf_ext,
-					     __u32 *size);
-LIBBPF_API LIBBPF_DEPRECATED("btf_ext__reloc_func_info was never meant as a public API and has wrong assumptions embedded in it; it will be removed in the future libbpf versions")
-int btf_ext__reloc_func_info(const struct btf *btf,
-			     const struct btf_ext *btf_ext,
-			     const char *sec_name, __u32 insns_cnt,
-			     void **func_info, __u32 *cnt);
-LIBBPF_API LIBBPF_DEPRECATED("btf_ext__reloc_line_info was never meant as a public API and has wrong assumptions embedded in it; it will be removed in the future libbpf versions")
-int btf_ext__reloc_line_info(const struct btf *btf,
-			     const struct btf_ext *btf_ext,
-			     const char *sec_name, __u32 insns_cnt,
-			     void **line_info, __u32 *cnt);
-LIBBPF_API __u32 btf_ext__func_info_rec_size(const struct btf_ext *btf_ext);
-LIBBPF_API __u32 btf_ext__line_info_rec_size(const struct btf_ext *btf_ext);
+LIBBPF_API const void *btf_ext__raw_data(const struct btf_ext *btf_ext, __u32 *size);
 
 LIBBPF_API int btf__find_str(struct btf *btf, const char *s);
 LIBBPF_API int btf__add_str(struct btf *btf, const char *s);
@@ -215,6 +188,8 @@ LIBBPF_API int btf__add_field(struct btf *btf, const char *name, int field_type_
 /* enum construction APIs */
 LIBBPF_API int btf__add_enum(struct btf *btf, const char *name, __u32 bytes_sz);
 LIBBPF_API int btf__add_enum_value(struct btf *btf, const char *name, __s64 value);
+LIBBPF_API int btf__add_enum64(struct btf *btf, const char *name, __u32 bytes_sz, bool is_signed);
+LIBBPF_API int btf__add_enum64_value(struct btf *btf, const char *name, __u64 value);
 
 enum btf_fwd_kind {
 	BTF_FWD_STRUCT = 0,
@@ -227,6 +202,7 @@ LIBBPF_API int btf__add_typedef(struct btf *btf, const char *name, int ref_type_
 LIBBPF_API int btf__add_volatile(struct btf *btf, int ref_type_id);
 LIBBPF_API int btf__add_const(struct btf *btf, int ref_type_id);
 LIBBPF_API int btf__add_restrict(struct btf *btf, int ref_type_id);
+LIBBPF_API int btf__add_type_tag(struct btf *btf, const char *value, int ref_type_id);
 
 /* func and func_proto construction APIs */
 LIBBPF_API int btf__add_func(struct btf *btf, const char *name,
@@ -245,25 +221,31 @@ LIBBPF_API int btf__add_decl_tag(struct btf *btf, const char *value, int ref_typ
 			    int component_idx);
 
 struct btf_dedup_opts {
-	unsigned int dedup_table_size;
-	bool dont_resolve_fwds;
+	size_t sz;
+	/* optional .BTF.ext info to dedup along the main BTF info */
+	struct btf_ext *btf_ext;
+	/* force hash collisions (used for testing) */
+	bool force_collisions;
+	size_t :0;
 };
+#define btf_dedup_opts__last_field force_collisions
 
-LIBBPF_API int btf__dedup(struct btf *btf, struct btf_ext *btf_ext,
-			  const struct btf_dedup_opts *opts);
+LIBBPF_API int btf__dedup(struct btf *btf, const struct btf_dedup_opts *opts);
 
 struct btf_dump;
 
 struct btf_dump_opts {
-	void *ctx;
+	size_t sz;
 };
+#define btf_dump_opts__last_field sz
 
 typedef void (*btf_dump_printf_fn_t)(void *ctx, const char *fmt, va_list args);
 
 LIBBPF_API struct btf_dump *btf_dump__new(const struct btf *btf,
-					  const struct btf_ext *btf_ext,
-					  const struct btf_dump_opts *opts,
-					  btf_dump_printf_fn_t printf_fn);
+					  btf_dump_printf_fn_t printf_fn,
+					  void *ctx,
+					  const struct btf_dump_opts *opts);
+
 LIBBPF_API void btf_dump__free(struct btf_dump *d);
 
 LIBBPF_API int btf_dump__dump_type(struct btf_dump *d, __u32 id);
@@ -331,9 +313,10 @@ btf_dump__dump_type_data(struct btf_dump *d, __u32 id,
 #ifndef BTF_KIND_FLOAT
 #define BTF_KIND_FLOAT		16	/* Floating point	*/
 #endif
-/* The kernel header switched to enums, so these two were never #defined */
+/* The kernel header switched to enums, so the following were never #defined */
 #define BTF_KIND_DECL_TAG	17	/* Decl Tag */
 #define BTF_KIND_TYPE_TAG	18	/* Type Tag */
+#define BTF_KIND_ENUM64		19	/* Enum for up-to 64bit values */
 
 static inline __u16 btf_kind(const struct btf_type *t)
 {
@@ -392,6 +375,11 @@ static inline bool btf_is_enum(const struct btf_type *t)
 	return btf_kind(t) == BTF_KIND_ENUM;
 }
 
+static inline bool btf_is_enum64(const struct btf_type *t)
+{
+	return btf_kind(t) == BTF_KIND_ENUM64;
+}
+
 static inline bool btf_is_fwd(const struct btf_type *t)
 {
 	return btf_kind(t) == BTF_KIND_FWD;
@@ -423,7 +411,8 @@ static inline bool btf_is_mod(const struct btf_type *t)
 
 	return kind == BTF_KIND_VOLATILE ||
 	       kind == BTF_KIND_CONST ||
-	       kind == BTF_KIND_RESTRICT;
+	       kind == BTF_KIND_RESTRICT ||
+	       kind == BTF_KIND_TYPE_TAG;
 }
 
 static inline bool btf_is_func(const struct btf_type *t)
@@ -456,6 +445,23 @@ static inline bool btf_is_decl_tag(const struct btf_type *t)
 	return btf_kind(t) == BTF_KIND_DECL_TAG;
 }
 
+static inline bool btf_is_type_tag(const struct btf_type *t)
+{
+	return btf_kind(t) == BTF_KIND_TYPE_TAG;
+}
+
+static inline bool btf_is_any_enum(const struct btf_type *t)
+{
+	return btf_is_enum(t) || btf_is_enum64(t);
+}
+
+static inline bool btf_kind_core_compat(const struct btf_type *t1,
+					const struct btf_type *t2)
+{
+	return btf_kind(t1) == btf_kind(t2) ||
+	       (btf_is_any_enum(t1) && btf_is_any_enum(t2));
+}
+
 static inline __u8 btf_int_encoding(const struct btf_type *t)
 {
 	return BTF_INT_ENCODING(*(__u32 *)(t + 1));
@@ -479,6 +485,39 @@ static inline struct btf_array *btf_array(const struct btf_type *t)
 static inline struct btf_enum *btf_enum(const struct btf_type *t)
 {
 	return (struct btf_enum *)(t + 1);
+}
+
+struct btf_enum64;
+
+static inline struct btf_enum64 *btf_enum64(const struct btf_type *t)
+{
+	return (struct btf_enum64 *)(t + 1);
+}
+
+static inline __u64 btf_enum64_value(const struct btf_enum64 *e)
+{
+	/* struct btf_enum64 is introduced in Linux 6.0, which is very
+	 * bleeding-edge. Here we are avoiding relying on struct btf_enum64
+	 * definition coming from kernel UAPI headers to support wider range
+	 * of system-wide kernel headers.
+	 *
+	 * Given this header can be also included from C++ applications, that
+	 * further restricts C tricks we can use (like using compatible
+	 * anonymous struct). So just treat struct btf_enum64 as
+	 * a three-element array of u32 and access second (lo32) and third
+	 * (hi32) elements directly.
+	 *
+	 * For reference, here is a struct btf_enum64 definition:
+	 *
+	 * const struct btf_enum64 {
+	 *	__u32	name_off;
+	 *	__u32	val_lo32;
+	 *	__u32	val_hi32;
+	 * };
+	 */
+	const __u32 *e64 = (const __u32 *)e;
+
+	return ((__u64)e64[2] << 32) | e64[1];
 }
 
 static inline struct btf_member *btf_members(const struct btf_type *t)

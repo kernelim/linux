@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/watchdog.c
-0x6fcb87a1	touch_softlockup_watchdog	vmlinux	EXPORT_SYMBOL
+#2-
+0x6fcb87a1	touch_softlockup_watchdog	vmlinux	EXPORT_SYMBOL	

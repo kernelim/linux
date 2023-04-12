@@ -73,7 +73,7 @@ EXPORT_SYMBOL(memstart_addr);
  * In this scheme a comparatively quicker boot is observed.
  *
  * If ZONE_DMA configs are defined, crash kernel memory reservation
- * is delayed until DMA zone memory range size initilazation performed in
+ * is delayed until DMA zone memory range size initialization performed in
  * zone_sizes_init().  The defer is necessary to steer clear of DMA zone
  * memory range to avoid overlap allocation.  So crash kernel memory boundaries
  * are not known when mapping all bank memory ranges, which otherwise means
@@ -81,7 +81,7 @@ EXPORT_SYMBOL(memstart_addr);
  * so page-granularity mappings are created for the entire memory range.
  * Hence a slightly slower boot is observed.
  *
- * Note: Page-granularity mapppings are necessary for crash kernel memory
+ * Note: Page-granularity mappings are necessary for crash kernel memory
  * range for shrinking its size via /sys/kernel/kexec_crash_size interface.
  */
 #if IS_ENABLED(CONFIG_ZONE_DMA) || IS_ENABLED(CONFIG_ZONE_DMA32)
@@ -95,6 +95,8 @@ phys_addr_t __ro_after_init arm64_dma_phys_limit = PHYS_MASK + 1;
 
 #define CRASH_ADDR_LOW_MAX		arm64_dma_phys_limit
 #define CRASH_ADDR_HIGH_MAX		(PHYS_MASK + 1)
+
+#define DEFAULT_CRASH_KERNEL_LOW_SIZE	(128UL << 20)
 
 static int __init reserve_crashkernel_low(unsigned long long low_size)
 {
@@ -130,6 +132,7 @@ static void __init reserve_crashkernel(void)
 	unsigned long long crash_max = CRASH_ADDR_LOW_MAX;
 	char *cmdline = boot_command_line;
 	int ret;
+	bool fixed_base = false;
 
 	if (!IS_ENABLED(CONFIG_KEXEC_CORE))
 		return;
@@ -147,7 +150,9 @@ static void __init reserve_crashkernel(void)
 		 * is not allowed.
 		 */
 		ret = parse_crashkernel_low(cmdline, 0, &crash_low_size, &crash_base);
-		if (ret && (ret != -ENOENT))
+		if (ret == -ENOENT)
+			crash_low_size = DEFAULT_CRASH_KERNEL_LOW_SIZE;
+		else if (ret)
 			return;
 
 		crash_max = CRASH_ADDR_HIGH_MAX;
@@ -159,20 +164,34 @@ static void __init reserve_crashkernel(void)
 	crash_size = PAGE_ALIGN(crash_size);
 
 	/* User specifies base address explicitly. */
-	if (crash_base)
+	if (crash_base) {
+		fixed_base = true;
 		crash_max = crash_base + crash_size;
+	}
 
+retry:
 	crash_base = memblock_phys_alloc_range(crash_size, CRASH_ALIGN,
 					       crash_base, crash_max);
 	if (!crash_base) {
+		/*
+		 * If the first attempt was for low memory, fall back to
+		 * high memory, the minimum required low memory will be
+		 * reserved later.
+		 */
+		if (!fixed_base && (crash_max == CRASH_ADDR_LOW_MAX)) {
+			crash_max = CRASH_ADDR_HIGH_MAX;
+			crash_low_size = DEFAULT_CRASH_KERNEL_LOW_SIZE;
+			goto retry;
+		}
+
 		pr_warn("cannot allocate crashkernel (size:0x%llx)\n",
 			crash_size);
 		return;
 	}
 
-	if ((crash_base >= CRASH_ADDR_LOW_MAX) &&
+	if ((crash_base > CRASH_ADDR_LOW_MAX - crash_low_size) &&
 	     crash_low_size && reserve_crashkernel_low(crash_low_size)) {
-		memblock_free(crash_base, crash_size);
+		memblock_phys_free(crash_base, crash_size);
 		return;
 	}
 
@@ -210,7 +229,7 @@ static phys_addr_t __init max_zone_phys(unsigned int zone_bits)
 	return min(zone_mask, memblock_end_of_DRAM() - 1) + 1;
 }
 
-static void __init zone_sizes_init(unsigned long min, unsigned long max)
+static void __init zone_sizes_init(void)
 {
 	unsigned long max_zone_pfns[MAX_NR_ZONES]  = {0};
 	unsigned int __maybe_unused acpi_zone_dma_bits;
@@ -229,7 +248,7 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 	if (!arm64_dma_phys_limit)
 		arm64_dma_phys_limit = dma32_phys_limit;
 #endif
-	max_zone_pfns[ZONE_NORMAL] = max;
+	max_zone_pfns[ZONE_NORMAL] = max_pfn;
 
 	free_area_init(max_zone_pfns);
 }
@@ -427,7 +446,7 @@ void __init bootmem_init(void)
 	 * done after the fixed reservations
 	 */
 	sparse_init();
-	zone_sizes_init(min, max);
+	zone_sizes_init();
 
 	/*
 	 * Reserve the CMA area after arm64_dma_phys_limit was initialised.
@@ -451,11 +470,7 @@ void __init bootmem_init(void)
  */
 void __init mem_init(void)
 {
-	if (swiotlb_force == SWIOTLB_FORCE ||
-	    max_pfn > PFN_DOWN(arm64_dma_phys_limit))
-		swiotlb_init(1);
-	else if (!xen_swiotlb_detect())
-		swiotlb_force = SWIOTLB_NO_FORCE;
+	swiotlb_init(max_pfn > PFN_DOWN(arm64_dma_phys_limit), SWIOTLB_VERBOSE);
 
 	/* this will put all unused low memory onto the freelists */
 	memblock_free_all();

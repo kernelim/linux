@@ -13,11 +13,12 @@
 #include <linux/clk.h>
 #include <linux/errno.h>
 #include <linux/err.h>
-#include <linux/slab.h>
 #include <linux/device.h>
 #include <linux/export.h>
 #include <linux/pm_domain.h>
 #include <linux/regulator/consumer.h>
+#include <linux/slab.h>
+#include <linux/xarray.h>
 
 #include "opp.h"
 
@@ -35,6 +36,9 @@ LIST_HEAD(lazy_opp_tables);
 DEFINE_MUTEX(opp_table_lock);
 /* Flag indicating that opp_tables list is being updated at the moment */
 static bool opp_tables_busy;
+
+/* OPP ID allocator */
+static DEFINE_XARRAY_ALLOC1(opp_configs);
 
 static bool _find_opp_dev(const struct device *dev, struct opp_table *opp_table)
 {
@@ -112,6 +116,31 @@ unsigned long dev_pm_opp_get_voltage(struct dev_pm_opp *opp)
 	return opp->supplies[0].u_volt;
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_get_voltage);
+
+/**
+ * dev_pm_opp_get_power() - Gets the power corresponding to an opp
+ * @opp:	opp for which power has to be returned for
+ *
+ * Return: power in micro watt corresponding to the opp, else
+ * return 0
+ *
+ * This is useful only for devices with single power supply.
+ */
+unsigned long dev_pm_opp_get_power(struct dev_pm_opp *opp)
+{
+	unsigned long opp_power = 0;
+	int i;
+
+	if (IS_ERR_OR_NULL(opp)) {
+		pr_err("%s: Invalid parameters\n", __func__);
+		return 0;
+	}
+	for (i = 0; i < opp->opp_table->regulator_count; i++)
+		opp_power += opp->supplies[i].u_watt;
+
+	return opp_power;
+}
+EXPORT_SYMBOL_GPL(dev_pm_opp_get_power);
 
 /**
  * dev_pm_opp_get_freq() - Gets the frequency corresponding to an available opp
@@ -842,8 +871,8 @@ static int _set_opp_custom(const struct opp_table *opp_table,
 	int size;
 
 	/*
-	 * We support this only if dev_pm_opp_set_regulators() was called
-	 * earlier.
+	 * We support this only if dev_pm_opp_set_config() was called
+	 * earlier to set regulators.
 	 */
 	if (opp_table->sod_supplies) {
 		size = sizeof(*old_opp->supplies) * opp_table->regulator_count;
@@ -1461,9 +1490,8 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_put);
  */
 void dev_pm_opp_remove(struct device *dev, unsigned long freq)
 {
-	struct dev_pm_opp *opp;
+	struct dev_pm_opp *opp = NULL, *iter;
 	struct opp_table *opp_table;
-	bool found = false;
 
 	opp_table = _find_opp_table(dev);
 	if (IS_ERR(opp_table))
@@ -1471,16 +1499,16 @@ void dev_pm_opp_remove(struct device *dev, unsigned long freq)
 
 	mutex_lock(&opp_table->lock);
 
-	list_for_each_entry(opp, &opp_table->opp_list, node) {
-		if (opp->rate == freq) {
-			found = true;
+	list_for_each_entry(iter, &opp_table->opp_list, node) {
+		if (iter->rate == freq) {
+			opp = iter;
 			break;
 		}
 	}
 
 	mutex_unlock(&opp_table->lock);
 
-	if (found) {
+	if (opp) {
 		dev_pm_opp_put(opp);
 
 		/* Drop the reference taken by dev_pm_opp_add() */
@@ -1804,7 +1832,7 @@ free_opp:
 }
 
 /**
- * dev_pm_opp_set_supported_hw() - Set supported platforms
+ * _opp_set_supported_hw() - Set supported platforms
  * @dev: Device for which supported-hw has to be set.
  * @versions: Array of hierarchy of versions to match.
  * @count: Number of elements in the array.
@@ -1814,84 +1842,39 @@ free_opp:
  * OPPs, which are available for those versions, based on its 'opp-supported-hw'
  * property.
  */
-struct opp_table *dev_pm_opp_set_supported_hw(struct device *dev,
-			const u32 *versions, unsigned int count)
+static int _opp_set_supported_hw(struct opp_table *opp_table,
+				 const u32 *versions, unsigned int count)
 {
-	struct opp_table *opp_table;
-
-	opp_table = _add_opp_table(dev, false);
-	if (IS_ERR(opp_table))
-		return opp_table;
-
-	/* Make sure there are no concurrent readers while updating opp_table */
-	WARN_ON(!list_empty(&opp_table->opp_list));
-
 	/* Another CPU that shares the OPP table has set the property ? */
 	if (opp_table->supported_hw)
-		return opp_table;
+		return 0;
 
 	opp_table->supported_hw = kmemdup(versions, count * sizeof(*versions),
 					GFP_KERNEL);
-	if (!opp_table->supported_hw) {
-		dev_pm_opp_put_opp_table(opp_table);
-		return ERR_PTR(-ENOMEM);
-	}
+	if (!opp_table->supported_hw)
+		return -ENOMEM;
 
 	opp_table->supported_hw_count = count;
 
-	return opp_table;
+	return 0;
 }
-EXPORT_SYMBOL_GPL(dev_pm_opp_set_supported_hw);
 
 /**
- * dev_pm_opp_put_supported_hw() - Releases resources blocked for supported hw
- * @opp_table: OPP table returned by dev_pm_opp_set_supported_hw().
+ * _opp_put_supported_hw() - Releases resources blocked for supported hw
+ * @opp_table: OPP table returned by _opp_set_supported_hw().
  *
  * This is required only for the V2 bindings, and is called for a matching
- * dev_pm_opp_set_supported_hw(). Until this is called, the opp_table structure
+ * _opp_set_supported_hw(). Until this is called, the opp_table structure
  * will not be freed.
  */
-void dev_pm_opp_put_supported_hw(struct opp_table *opp_table)
+static void _opp_put_supported_hw(struct opp_table *opp_table)
 {
-	if (unlikely(!opp_table))
-		return;
-
-	kfree(opp_table->supported_hw);
-	opp_table->supported_hw = NULL;
-	opp_table->supported_hw_count = 0;
-
-	dev_pm_opp_put_opp_table(opp_table);
+	if (opp_table->supported_hw) {
+		kfree(opp_table->supported_hw);
+		opp_table->supported_hw = NULL;
+		opp_table->supported_hw_count = 0;
+	}
 }
-EXPORT_SYMBOL_GPL(dev_pm_opp_put_supported_hw);
-
-static void devm_pm_opp_supported_hw_release(void *data)
-{
-	dev_pm_opp_put_supported_hw(data);
-}
-
-/**
- * devm_pm_opp_set_supported_hw() - Set supported platforms
- * @dev: Device for which supported-hw has to be set.
- * @versions: Array of hierarchy of versions to match.
- * @count: Number of elements in the array.
- *
- * This is a resource-managed variant of dev_pm_opp_set_supported_hw().
- *
- * Return: 0 on success and errorno otherwise.
- */
-int devm_pm_opp_set_supported_hw(struct device *dev, const u32 *versions,
-				 unsigned int count)
-{
-	struct opp_table *opp_table;
-
-	opp_table = dev_pm_opp_set_supported_hw(dev, versions, count);
-	if (IS_ERR(opp_table))
-		return PTR_ERR(opp_table);
-
-	return devm_add_action_or_reset(dev, devm_pm_opp_supported_hw_release,
-					opp_table);
-}
-EXPORT_SYMBOL_GPL(devm_pm_opp_set_supported_hw);
 
 /**
  * dev_pm_opp_set_prop_name() - Set prop-extn name
@@ -1949,7 +1932,7 @@ void dev_pm_opp_put_prop_name(struct opp_table *opp_table)
 EXPORT_SYMBOL_GPL(dev_pm_opp_put_prop_name);
 
 /**
- * dev_pm_opp_set_regulators() - Set regulator names for the device
+ * _opp_set_regulators() - Set regulator names for the device
  * @dev: Device for which regulator name is being set.
  * @names: Array of pointers to the names of the regulator.
  * @count: Number of regulators.
@@ -1960,44 +1943,37 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_put_prop_name);
  *
  * This must be called before any OPPs are initialized for the device.
  */
-struct opp_table *dev_pm_opp_set_regulators(struct device *dev,
-					    const char * const names[],
-					    unsigned int count)
+static int _opp_set_regulators(struct opp_table *opp_table, struct device *dev,
+			       const char * const names[])
 {
 	struct dev_pm_opp_supply *supplies;
-	struct opp_table *opp_table;
+	const char * const *temp = names;
 	struct regulator *reg;
-	int ret, i;
+	int count = 0, ret, i;
 
-	opp_table = _add_opp_table(dev, false);
-	if (IS_ERR(opp_table))
-		return opp_table;
+	/* Count number of regulators */
+	while (*temp++)
+		count++;
 
-	/* This should be called before OPPs are initialized */
-	if (WARN_ON(!list_empty(&opp_table->opp_list))) {
-		ret = -EBUSY;
-		goto err;
-	}
+	if (!count)
+		return -EINVAL;
 
 	/* Another CPU that shares the OPP table has set the regulators ? */
 	if (opp_table->regulators)
-		return opp_table;
+		return 0;
 
 	opp_table->regulators = kmalloc_array(count,
 					      sizeof(*opp_table->regulators),
 					      GFP_KERNEL);
-	if (!opp_table->regulators) {
-		ret = -ENOMEM;
-		goto err;
-	}
+	if (!opp_table->regulators)
+		return -ENOMEM;
 
 	for (i = 0; i < count; i++) {
 		reg = regulator_get_optional(dev, names[i]);
 		if (IS_ERR(reg)) {
-			ret = PTR_ERR(reg);
-			if (ret != -EPROBE_DEFER)
-				dev_err(dev, "%s: no regulator (%s) found: %d\n",
-					__func__, names[i], ret);
+			ret = dev_err_probe(dev, PTR_ERR(reg),
+					    "%s: no regulator (%s) found\n",
+					    __func__, names[i]);
 			goto free_regulators;
 		}
 
@@ -2020,7 +1996,7 @@ struct opp_table *dev_pm_opp_set_regulators(struct device *dev,
 	}
 	mutex_unlock(&opp_table->lock);
 
-	return opp_table;
+	return 0;
 
 free_regulators:
 	while (i != 0)
@@ -2029,26 +2005,20 @@ free_regulators:
 	kfree(opp_table->regulators);
 	opp_table->regulators = NULL;
 	opp_table->regulator_count = -1;
-err:
-	dev_pm_opp_put_opp_table(opp_table);
 
-	return ERR_PTR(ret);
+	return ret;
 }
-EXPORT_SYMBOL_GPL(dev_pm_opp_set_regulators);
 
 /**
- * dev_pm_opp_put_regulators() - Releases resources blocked for regulator
- * @opp_table: OPP table returned from dev_pm_opp_set_regulators().
+ * _opp_put_regulators() - Releases resources blocked for regulator
+ * @opp_table: OPP table returned from _opp_set_regulators().
  */
-void dev_pm_opp_put_regulators(struct opp_table *opp_table)
+static void _opp_put_regulators(struct opp_table *opp_table)
 {
 	int i;
 
-	if (unlikely(!opp_table))
-		return;
-
 	if (!opp_table->regulators)
-		goto put_opp_table;
+		return;
 
 	if (opp_table->enabled) {
 		for (i = opp_table->regulator_count - 1; i >= 0; i--)
@@ -2071,41 +2041,7 @@ void dev_pm_opp_put_regulators(struct opp_table *opp_table)
 	kfree(opp_table->regulators);
 	opp_table->regulators = NULL;
 	opp_table->regulator_count = -1;
-
-put_opp_table:
-	dev_pm_opp_put_opp_table(opp_table);
 }
-EXPORT_SYMBOL_GPL(dev_pm_opp_put_regulators);
-
-static void devm_pm_opp_regulators_release(void *data)
-{
-	dev_pm_opp_put_regulators(data);
-}
-
-/**
- * devm_pm_opp_set_regulators() - Set regulator names for the device
- * @dev: Device for which regulator name is being set.
- * @names: Array of pointers to the names of the regulator.
- * @count: Number of regulators.
- *
- * This is a resource-managed variant of dev_pm_opp_set_regulators().
- *
- * Return: 0 on success and errorno otherwise.
- */
-int devm_pm_opp_set_regulators(struct device *dev,
-			       const char * const names[],
-			       unsigned int count)
-{
-	struct opp_table *opp_table;
-
-	opp_table = dev_pm_opp_set_regulators(dev, names, count);
-	if (IS_ERR(opp_table))
-		return PTR_ERR(opp_table);
-
-	return devm_add_action_or_reset(dev, devm_pm_opp_regulators_release,
-					opp_table);
-}
-EXPORT_SYMBOL_GPL(devm_pm_opp_set_regulators);
 
 /**
  * dev_pm_opp_set_clkname() - Set clk name for the device
@@ -2143,11 +2079,8 @@ struct opp_table *dev_pm_opp_set_clkname(struct device *dev, const char *name)
 	/* Find clk for the device */
 	opp_table->clk = clk_get(dev, name);
 	if (IS_ERR(opp_table->clk)) {
-		ret = PTR_ERR(opp_table->clk);
-		if (ret != -EPROBE_DEFER) {
-			dev_err(dev, "%s: Couldn't find clock: %d\n", __func__,
-				ret);
-		}
+		ret = dev_err_probe(dev, PTR_ERR(opp_table->clk),
+				    "%s: Couldn't find clock\n", __func__);
 		goto err;
 	}
 
@@ -2348,12 +2281,12 @@ static void _opp_detach_genpd(struct opp_table *opp_table)
  * "required-opps" are added in DT.
  */
 struct opp_table *dev_pm_opp_attach_genpd(struct device *dev,
-		const char **names, struct device ***virt_devs)
+		const char * const *names, struct device ***virt_devs)
 {
 	struct opp_table *opp_table;
 	struct device *virt_dev;
 	int index = 0, ret = -EINVAL;
-	const char **name = names;
+	const char * const *name = names;
 
 	opp_table = _add_opp_table(dev, false);
 	if (IS_ERR(opp_table))
@@ -2457,7 +2390,7 @@ static void devm_pm_opp_detach_genpd(void *data)
  *
  * Return: 0 on success and errorno otherwise.
  */
-int devm_pm_opp_attach_genpd(struct device *dev, const char **names,
+int devm_pm_opp_attach_genpd(struct device *dev, const char * const *names,
 			     struct device ***virt_devs)
 {
 	struct opp_table *opp_table;
@@ -2470,6 +2403,226 @@ int devm_pm_opp_attach_genpd(struct device *dev, const char **names,
 					opp_table);
 }
 EXPORT_SYMBOL_GPL(devm_pm_opp_attach_genpd);
+
+static void _opp_clear_config(struct opp_config_data *data)
+{
+	if (data->flags & OPP_CONFIG_GENPD)
+		dev_pm_opp_detach_genpd(data->opp_table);
+	if (data->flags & OPP_CONFIG_REGULATOR)
+		_opp_put_regulators(data->opp_table);
+	if (data->flags & OPP_CONFIG_SUPPORTED_HW)
+		_opp_put_supported_hw(data->opp_table);
+	if (data->flags & OPP_CONFIG_REGULATOR_HELPER)
+		dev_pm_opp_unregister_set_opp_helper(data->opp_table);
+	if (data->flags & OPP_CONFIG_PROP_NAME)
+		dev_pm_opp_put_prop_name(data->opp_table);
+	if (data->flags & OPP_CONFIG_CLK)
+		dev_pm_opp_put_clkname(data->opp_table);
+
+	dev_pm_opp_put_opp_table(data->opp_table);
+	kfree(data);
+}
+
+/**
+ * dev_pm_opp_set_config() - Set OPP configuration for the device.
+ * @dev: Device for which configuration is being set.
+ * @config: OPP configuration.
+ *
+ * This allows all device OPP configurations to be performed at once.
+ *
+ * This must be called before any OPPs are initialized for the device. This may
+ * be called multiple times for the same OPP table, for example once for each
+ * CPU that share the same table. This must be balanced by the same number of
+ * calls to dev_pm_opp_clear_config() in order to free the OPP table properly.
+ *
+ * This returns a token to the caller, which must be passed to
+ * dev_pm_opp_clear_config() to free the resources later. The value of the
+ * returned token will be >= 1 for success and negative for errors. The minimum
+ * value of 1 is chosen here to make it easy for callers to manage the resource.
+ */
+int dev_pm_opp_set_config(struct device *dev, struct dev_pm_opp_config *config)
+{
+	struct opp_table *opp_table, *err;
+	struct opp_config_data *data;
+	unsigned int id;
+	int ret;
+
+	data = kmalloc(sizeof(*data), GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
+
+	opp_table = _add_opp_table(dev, false);
+	if (IS_ERR(opp_table)) {
+		kfree(data);
+		return PTR_ERR(opp_table);
+	}
+
+	data->opp_table = opp_table;
+	data->flags = 0;
+
+	/* This should be called before OPPs are initialized */
+	if (WARN_ON(!list_empty(&opp_table->opp_list))) {
+		ret = -EBUSY;
+		goto err;
+	}
+
+	/* Configure clocks */
+	if (config->clk_names) {
+		const char * const *temp = config->clk_names;
+		int count = 0;
+
+		/* Count number of clks */
+		while (*temp++)
+			count++;
+
+		/*
+		 * This is a special case where we have a single clock, whose
+		 * connection id name is NULL, i.e. first two entries are NULL
+		 * in the array.
+		 */
+		if (!count && !config->clk_names[1])
+			count = 1;
+
+		/* We support only one clock name for now */
+		if (count != 1) {
+			ret = -EINVAL;
+			goto err;
+		}
+
+		err = dev_pm_opp_set_clkname(dev, config->clk_names[0]);
+		if (IS_ERR(err)) {
+			ret = PTR_ERR(err);
+			goto err;
+		}
+
+		data->flags |= OPP_CONFIG_CLK;
+	}
+
+	/* Configure property names */
+	if (config->prop_name) {
+		err = dev_pm_opp_set_prop_name(dev, config->prop_name);
+		if (IS_ERR(err)) {
+			ret = PTR_ERR(err);
+			goto err;
+		}
+
+		data->flags |= OPP_CONFIG_PROP_NAME;
+	}
+
+	/* Configure opp helper */
+	if (config->set_opp) {
+		err = dev_pm_opp_register_set_opp_helper(dev, config->set_opp);
+		if (IS_ERR(err)) {
+			ret = PTR_ERR(err);
+			goto err;
+		}
+
+		data->flags |= OPP_CONFIG_REGULATOR_HELPER;
+	}
+
+	/* Configure supported hardware */
+	if (config->supported_hw) {
+		ret = _opp_set_supported_hw(opp_table, config->supported_hw,
+					    config->supported_hw_count);
+		if (ret)
+			goto err;
+
+		data->flags |= OPP_CONFIG_SUPPORTED_HW;
+	}
+
+	/* Configure supplies */
+	if (config->regulator_names) {
+		ret = _opp_set_regulators(opp_table, dev,
+					  config->regulator_names);
+		if (ret)
+			goto err;
+
+		data->flags |= OPP_CONFIG_REGULATOR;
+	}
+
+	/* Attach genpds */
+	if (config->genpd_names) {
+		err = dev_pm_opp_attach_genpd(dev, config->genpd_names,
+					      config->virt_devs);
+		if (IS_ERR(err)) {
+			ret = PTR_ERR(err);
+			goto err;
+		}
+
+		data->flags |= OPP_CONFIG_GENPD;
+	}
+
+	ret = xa_alloc(&opp_configs, &id, data, XA_LIMIT(1, INT_MAX),
+		       GFP_KERNEL);
+	if (ret)
+		goto err;
+
+	return id;
+
+err:
+	_opp_clear_config(data);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(dev_pm_opp_set_config);
+
+/**
+ * dev_pm_opp_clear_config() - Releases resources blocked for OPP configuration.
+ * @opp_table: OPP table returned from dev_pm_opp_set_config().
+ *
+ * This allows all device OPP configurations to be cleared at once. This must be
+ * called once for each call made to dev_pm_opp_set_config(), in order to free
+ * the OPPs properly.
+ *
+ * Currently the first call itself ends up freeing all the OPP configurations,
+ * while the later ones only drop the OPP table reference. This works well for
+ * now as we would never want to use an half initialized OPP table and want to
+ * remove the configurations together.
+ */
+void dev_pm_opp_clear_config(int token)
+{
+	struct opp_config_data *data;
+
+	/*
+	 * This lets the callers call this unconditionally and keep their code
+	 * simple.
+	 */
+	if (unlikely(token <= 0))
+		return;
+
+	data = xa_erase(&opp_configs, token);
+	if (WARN_ON(!data))
+		return;
+
+	_opp_clear_config(data);
+}
+EXPORT_SYMBOL_GPL(dev_pm_opp_clear_config);
+
+static void devm_pm_opp_config_release(void *token)
+{
+	dev_pm_opp_clear_config((unsigned long)token);
+}
+
+/**
+ * devm_pm_opp_set_config() - Set OPP configuration for the device.
+ * @dev: Device for which configuration is being set.
+ * @config: OPP configuration.
+ *
+ * This allows all device OPP configurations to be performed at once.
+ * This is a resource-managed variant of dev_pm_opp_set_config().
+ *
+ * Return: 0 on success and errorno otherwise.
+ */
+int devm_pm_opp_set_config(struct device *dev, struct dev_pm_opp_config *config)
+{
+	int token = dev_pm_opp_set_config(dev, config);
+
+	if (token < 0)
+		return token;
+
+	return devm_add_action_or_reset(dev, devm_pm_opp_config_release,
+					(void *) ((unsigned long) token));
+}
+EXPORT_SYMBOL_GPL(devm_pm_opp_set_config);
 
 /**
  * dev_pm_opp_xlate_required_opp() - Find required OPP for @src_table OPP.

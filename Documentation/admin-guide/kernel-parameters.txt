@@ -789,7 +789,7 @@
 			memory region [offset, offset + size] for that kernel
 			image. If '@offset' is omitted, then a suitable offset
 			is selected automatically.
-			[KNL, X86-64] Select a region under 4G first, and
+			[KNL, X86-64, ARM64] Select a region under 4G first, and
 			fall back to reserve region above 4G when '@offset'
 			hasn't been specified.
 			See Documentation/admin-guide/kdump/kdump.rst for further details.
@@ -809,25 +809,22 @@
 			available.
 			It will be ignored if crashkernel=X is specified.
 	crashkernel=size[KMG],low
-			[KNL, X86-64] range under 4G. When crashkernel=X,high
+			[KNL, X86-64, ARM64] range under 4G. When crashkernel=X,high
 			is passed, kernel could allocate physical memory region
 			above 4G, that cause second kernel crash on system
 			that require some amount of low memory, e.g. swiotlb
 			requires at least 64M+32K low memory, also enough extra
 			low memory is needed to make sure DMA buffers for 32-bit
 			devices won't run out. Kernel would try to allocate
-			at least 256M below 4G automatically.
+			default	size of memory below 4G automatically. The default
+			size is	platform dependent.
+			  --> x86: max(swiotlb_size_or_default() + 8MiB, 256MiB)
+			  --> arm64: 128MiB
 			This one lets the user specify own low range under 4G
 			for second kernel instead.
 			0: to disable low allocation.
 			It will be ignored when crashkernel=X,high is not used
 			or memory reserved is below 4G.
-
-			[KNL, ARM64] range in low memory.
-			This one lets the user specify a low range in the
-			DMA zone for the crash dump kernel.
-			It will be ignored when crashkernel=X,high is not used
-			or memory reserved is located in the DMA zones.
 
 	cryptomgr.notests
 			[KNL] Disable crypto self-tests
@@ -950,8 +947,10 @@
 			[KNL] Debugging option to set a timeout in seconds for
 			deferred probe to give up waiting on dependencies to
 			probe. Only specific dependencies (subsystems or
-			drivers) that have opted in will be ignored. A timeout of 0
-			will timeout at the end of initcalls. This option will also
+			drivers) that have opted in will be ignored. A timeout
+			of 0 will timeout at the end of initcalls. If the time
+			out hasn't expired, it'll be restarted by each
+			successful driver registration. This option will also
 			dump out devices still on the deferred probe list after
 			retrying.
 
@@ -1057,7 +1056,10 @@
 			driver later using sysfs.
 
 	driver_async_probe=  [KNL]
-			List of driver names to be probed asynchronously.
+			List of driver names to be probed asynchronously. *
+			matches with all driver names. If * is specified, the
+			rest of the listed driver names are those that will NOT
+			match the *.
 			Format: <driver_name1>,<driver_name2>...
 
 	drm.edid_firmware=[<connector>:]<file>[,[<connector>:]<file>]
@@ -1602,8 +1604,10 @@
 			registers.  Default set by CONFIG_HPET_MMAP_DEFAULT.
 
 	hugetlb_cma=	[HW,CMA] The size of a CMA area used for allocation
-			of gigantic hugepages.
-			Format: nn[KMGTPE]
+			of gigantic hugepages. Or using node format, the size
+			of a CMA area per node can be specified.
+			Format: nn[KMGTPE] or (node format)
+				<node>:nn[KMGTPE][,<node>:nn[KMGTPE]]
 
 			Reserve a CMA area of given size and allocate gigantic
 			hugepages using the CMA allocator. If enabled, the
@@ -1614,9 +1618,11 @@
 			the number of pages of hugepagesz to be allocated.
 			If this is the first HugeTLB parameter on the command
 			line, it specifies the number of pages to allocate for
-			the default huge page size.  See also
-			Documentation/admin-guide/mm/hugetlbpage.rst.
-			Format: <integer>
+			the default huge page size. If using node format, the
+			number of pages to allocate per-node can be specified.
+			See also Documentation/admin-guide/mm/hugetlbpage.rst.
+			Format: <integer> or (node format)
+				<node>:<integer>[,<node>:<integer>]
 
 	hugepagesz=
 			[HW] The size of the HugeTLB pages.  This is used in
@@ -1629,16 +1635,16 @@
 			Format: size[KMG]
 
 	hugetlb_free_vmemmap=
-			[KNL] Reguires CONFIG_HUGETLB_PAGE_FREE_VMEMMAP
+			[KNL] Reguires CONFIG_HUGETLB_PAGE_OPTIMIZE_VMEMMAP
 			enabled.
 			Allows heavy hugetlb users to free up some more
-			memory (6 * PAGE_SIZE for each 2MB hugetlb page).
-			Format: { on | off (default) }
+			memory (7 * PAGE_SIZE for each 2MB hugetlb page).
+			Format: { [oO][Nn]/Y/y/1 | [oO][Ff]/N/n/0 (default) }
 
-			on:  enable the feature
-			off: disable the feature
+			[oO][Nn]/Y/y/1: enable the feature
+			[oO][Ff]/N/n/0: disable the feature
 
-			Built with CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON=y,
+			Built with CONFIG_HUGETLB_PAGE_OPTIMIZE_VMEMMAP_DEFAULT_ON=y,
 			the default is on.
 
 			This is not compatible with memory_hotplug.memmap_on_memory.
@@ -2215,23 +2221,39 @@
 
 	ivrs_ioapic	[HW,X86-64]
 			Provide an override to the IOAPIC-ID<->DEVICE-ID
-			mapping provided in the IVRS ACPI table. For
-			example, to map IOAPIC-ID decimal 10 to
-			PCI device 00:14.0 write the parameter as:
+			mapping provided in the IVRS ACPI table.
+			By default, PCI segment is 0, and can be omitted.
+			For example:
+			* To map IOAPIC-ID decimal 10 to PCI device 00:14.0
+			  write the parameter as:
 				ivrs_ioapic[10]=00:14.0
+			* To map IOAPIC-ID decimal 10 to PCI segment 0x1 and
+			  PCI device 00:14.0 write the parameter as:
+				ivrs_ioapic[10]=0001:00:14.0
 
 	ivrs_hpet	[HW,X86-64]
 			Provide an override to the HPET-ID<->DEVICE-ID
-			mapping provided in the IVRS ACPI table. For
-			example, to map HPET-ID decimal 0 to
-			PCI device 00:14.0 write the parameter as:
+			mapping provided in the IVRS ACPI table.
+			By default, PCI segment is 0, and can be omitted.
+			For example:
+			* To map HPET-ID decimal 0 to PCI device 00:14.0
+			  write the parameter as:
 				ivrs_hpet[0]=00:14.0
+			* To map HPET-ID decimal 10 to PCI segment 0x1 and
+			  PCI device 00:14.0 write the parameter as:
+				ivrs_ioapic[10]=0001:00:14.0
 
 	ivrs_acpihid	[HW,X86-64]
 			Provide an override to the ACPI-HID:UID<->DEVICE-ID
-			mapping provided in the IVRS ACPI table. For
-			example, to map UART-HID:UID AMD0020:0 to
-			PCI device 00:14.5 write the parameter as:
+			mapping provided in the IVRS ACPI table.
+
+			For example, to map UART-HID:UID AMD0020:0 to
+			PCI segment 0x1 and PCI device ID 00:14.5,
+			write the parameter as:
+				ivrs_acpihid[0001:00:14.5]=AMD0020:0
+
+			By default, PCI segment is 0, and can be omitted.
+			For example, PCI device 00:14.5 write the parameter as:
 				ivrs_acpihid[00:14.5]=AMD0020:0
 
 	js=		[HW,JOY] Analog joystick
@@ -2367,8 +2389,7 @@
 			the KVM_CLEAR_DIRTY ioctl, and only for the pages being
 			cleared.
 
-			Eager page splitting currently only supports splitting
-			huge pages mapped by the TDP MMU.
+			Eager page splitting is only supported when kvm.tdp_mmu=Y.
 
 			Default is Y (on).
 
@@ -2418,7 +2439,6 @@
 
 			protected: nVHE-based mode with support for guests whose
 				   state is kept private from the host.
-				   Not valid if the kernel is running in EL2.
 
 			Defaults to VHE/nVHE based on hardware support.
 
@@ -3438,7 +3458,7 @@
 			Disable SMAP (Supervisor Mode Access Prevention)
 			even if it is supported by processor.
 
-	nosmep		[X86,PPC]
+	nosmep		[X86,PPC64s]
 			Disable SMEP (Supervisor Mode Execution Prevention)
 			even if it is supported by processor.
 
@@ -4040,6 +4060,15 @@
 				please report a bug.
 		nocrs		[X86] Ignore PCI host bridge windows from ACPI.
 				If you need to use this, please report a bug.
+		use_e820	[X86] Use E820 reservations to exclude parts of
+				PCI host bridge windows. This is a workaround
+				for BIOS defects in host bridge _CRS methods.
+				If you need to use this, please report a bug to
+				<linux-pci@vger.kernel.org>.
+		no_e820		[X86] Ignore E820 reservations for PCI host
+				bridge windows. This is the default on modern
+				hardware. If you need to use this, please report
+				a bug to <linux-pci@vger.kernel.org>.
 		routeirq	Do IRQ routing for all PCI devices.
 				This is normally done in pci_enable_device(),
 				so this option is a temporary workaround
@@ -4288,6 +4317,15 @@
 			panics
 			Format: <bool>  (1/Y/y=enable, 0/N/n=disable)
 			default: disabled
+
+	printk.console_no_auto_verbose=
+			Disable console loglevel raise on oops, panic
+			or lockdep-detected issues (only if lock debug is on).
+			With an exception to setups with low baudrate on
+			serial console, keeping this 0 is a good choice
+			in order to provide more debug information.
+			Format: <bool>
+			default: 0 (auto_verbose is enabled)
 
 	printk.devkmsg={on,off,ratelimit}
 			Control writing to /dev/kmsg.
@@ -4850,6 +4888,18 @@
 
 	rcupdate.rcu_cpu_stall_timeout= [KNL]
 			Set timeout for RCU CPU stall warning messages.
+			The value is in seconds and the maximum allowed
+			value is 300 seconds.
+
+	rcupdate.rcu_exp_cpu_stall_timeout= [KNL]
+			Set timeout for expedited RCU CPU stall warning
+			messages.  The value is in milliseconds
+			and the maximum allowed value is 21000
+			milliseconds. Please note that this value is
+			adjusted to an arch timer tick resolution.
+			Setting this to zero causes the value from
+			rcupdate.rcu_cpu_stall_timeout to be used (after
+			conversion from seconds to milliseconds).
 
 	rcupdate.rcu_expedited= [KNL]
 			Use expedited grace-period primitives, for
@@ -4912,10 +4962,34 @@
 			number avoids disturbing real-time workloads,
 			but lengthens grace periods.
 
+	rcupdate.rcu_task_stall_info= [KNL]
+			Set initial timeout in jiffies for RCU task stall
+			informational messages, which give some indication
+			of the problem for those not patient enough to
+			wait for ten minutes.  Informational messages are
+			only printed prior to the stall-warning message
+			for a given grace period. Disable with a value
+			less than or equal to zero.  Defaults to ten
+			seconds.  A change in value does not take effect
+			until the beginning of the next grace period.
+
+	rcupdate.rcu_task_stall_info_mult= [KNL]
+			Multiplier for time interval between successive
+			RCU task stall informational messages for a given
+			RCU tasks grace period.  This value is clamped
+			to one through ten, inclusive.	It defaults to
+			the value three, so that the first informational
+			message is printed 10 seconds into the grace
+			period, the second at 40 seconds, the third at
+			160 seconds, and then the stall warning at 600
+			seconds would prevent a fourth at 640 seconds.
+
 	rcupdate.rcu_task_stall_timeout= [KNL]
-			Set timeout in jiffies for RCU task stall warning
-			messages.  Disable with a value less than or equal
-			to zero.
+			Set timeout in jiffies for RCU task stall
+			warning messages.  Disable with a value less
+			than or equal to zero.	Defaults to ten minutes.
+			A change in value does not take effect until
+			the beginning of the next grace period.
 
 	rcupdate.rcu_self_test= [KNL]
 			Run the RCU early boot self tests
@@ -5049,20 +5123,33 @@
 			Speculative Code Execution with Return Instructions)
 			vulnerability.
 
+			AMD-based UNRET and IBPB mitigations alone do not stop
+			sibling threads from influencing the predictions of other
+			sibling threads. For that reason, STIBP is used on pro-
+			cessors that support it, and mitigate SMT on processors
+			that don't.
+
 			off          - no mitigation
 			auto         - automatically select a migitation
 			auto,nosmt   - automatically select a mitigation,
 				       disabling SMT if necessary for
 				       the full mitigation (only on Zen1
 				       and older without STIBP).
-			ibpb	     - mitigate short speculation windows on
-				       basic block boundaries too. Safe, highest
-				       perf impact.
-			unret        - force enable untrained return thunks,
-				       only effective on AMD f15h-f17h
-				       based systems.
-			unret,nosmt  - like unret, will disable SMT when STIBP
-			               is not available.
+			ibpb         - On AMD, mitigate short speculation
+				       windows on basic block boundaries too.
+				       Safe, highest perf impact. It also
+				       enables STIBP if present. Not suitable
+				       on Intel.
+			ibpb,nosmt   - Like "ibpb" above but will disable SMT
+				       when STIBP is not available. This is
+				       the alternative for systems which do not
+				       have STIBP.
+			unret        - Force enable untrained return thunks,
+				       only effective on AMD f15h-f17h based
+				       systems.
+			unret,nosmt  - Like unret, but will disable SMT when STIBP
+				       is not available. This is the alternative for
+				       systems which do not have STIBP.
 
 			Selecting 'auto' will choose a mitigation method at run
 			time according to the CPU.
@@ -5362,6 +5449,17 @@
 	smart2=		[HW]
 			Format: <io1>[,<io2>[,...,<io8>]]
 
+	smp.csd_lock_timeout= [KNL]
+			Specify the period of time in milliseconds
+			that smp_call_function() and friends will wait
+			for a CPU to release the CSD lock.  This is
+			useful when diagnosing bugs involving CPUs
+			disabling interrupts for extended periods
+			of time.  Defaults to 5,000 milliseconds, and
+			setting a value of zero disables this feature.
+			This feature may be more efficiently disabled
+			using the csdlock_debug- kernel parameter.
+
 	smsc-ircc2.nopnp	[HW] Don't use PNP to discover SMC devices
 	smsc-ircc2.ircc_cfg=	[HW] Device configuration I/O port
 	smsc-ircc2.ircc_sir=	[HW] SIR base I/O port
@@ -5594,6 +5692,30 @@
 			off:    Disable mitigation and remove
 				performance impact to RDRAND and RDSEED
 
+	srcutree.big_cpu_lim [KNL]
+			Specifies the number of CPUs constituting a
+			large system, such that srcu_struct structures
+			should immediately allocate an srcu_node array.
+			This kernel-boot parameter defaults to 128,
+			but takes effect only when the low-order four
+			bits of srcutree.convert_to_big is equal to 3
+			(decide at boot).
+
+	srcutree.convert_to_big [KNL]
+			Specifies under what conditions an SRCU tree
+			srcu_struct structure will be converted to big
+			form, that is, with an rcu_node tree:
+
+				   0:  Never.
+				   1:  At init_srcu_struct() time.
+				   2:  When rcutorture decides to.
+				   3:  Decide at boot time (default).
+				0x1X:  Above plus if high contention.
+
+			Either way, the srcu_node tree will be sized based
+			on the actual runtime number of CPUs (nr_cpu_ids)
+			instead of the compile-time CONFIG_NR_CPUS.
+
 	srcutree.counter_wrap_check [KNL]
 			Specifies how frequently to check for
 			grace-period sequence counter wrap for the
@@ -5610,6 +5732,32 @@
 			grace period will be considered for automatic
 			expediting.  Set to zero to disable automatic
 			expediting.
+
+	srcutree.srcu_max_nodelay [KNL]
+			Specifies the number of no-delay instances
+			per jiffy for which the SRCU grace period
+			worker thread will be rescheduled with zero
+			delay. Beyond this limit, worker thread will
+			be rescheduled with a sleep delay of one jiffy.
+
+	srcutree.srcu_max_nodelay_phase [KNL]
+			Specifies the per-grace-period phase, number of
+			non-sleeping polls of readers. Beyond this limit,
+			grace period worker thread will be rescheduled
+			with a sleep delay of one jiffy, between each
+			rescan of the readers, for a grace period phase.
+
+	srcutree.srcu_retry_check_delay [KNL]
+			Specifies number of microseconds of non-sleeping
+			delay between each non-sleeping poll of readers.
+
+	srcutree.small_contention_lim [KNL]
+			Specifies the number of update-side contention
+			events per jiffy will be tolerated before
+			initiating a conversion of an srcu_struct
+			structure to big form.	Note that the value of
+			srcutree.convert_to_big must have the 0x10 bit
+			set for contention-based conversions to occur.
 
 	ssbd=		[ARM64,HW]
 			Speculative Store Bypass Disable control
@@ -5735,8 +5883,11 @@
 			it if 0 is given (See Documentation/admin-guide/cgroup-v1/memory.rst)
 
 	swiotlb=	[ARM,IA-64,PPC,MIPS,X86]
-			Format: { <int> | force | noforce }
+			Format: { <int> [,<int>] | force | noforce }
 			<int> -- Number of I/O TLB slabs
+			<int> -- Second integer after comma. Number of swiotlb
+				 areas with their own lock. Will be rounded up
+				 to a power of 2.
 			force -- force using of bounce buffers even if they
 			         wouldn't be automatically used by the kernel
 			noforce -- Never use bounce buffers (for debugging)

@@ -1,2 +1,2 @@
-test_bpffs
-verif_scale_seg6_loop
+// C string with comma separated list of subtests to skip
+"test_bpffs,verif_scale_seg6_loop,libbpf_probe_prog_types/BPF_PROG_TYPE_LIRC_MODE2"

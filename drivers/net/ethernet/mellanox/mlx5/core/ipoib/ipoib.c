@@ -70,6 +70,10 @@ static void mlx5i_build_nic_params(struct mlx5_core_dev *mdev,
 	params->packet_merge.type = MLX5E_PACKET_MERGE_NONE;
 	params->hard_mtu = MLX5_IB_GRH_BYTES + MLX5_IPOIB_HARD_LEN;
 	params->tunneled_offload_en = false;
+
+	/* CQE compression is not supported for IPoIB */
+	params->rx_cqe_compress_def = false;
+	MLX5E_SET_PFLAG(params, MLX5E_PFLAG_RX_CQE_COMPRESS, params->rx_cqe_compress_def);
 }
 
 /* Called directly after IPoIB netdevice was created to initialize SW structs */
@@ -153,6 +157,44 @@ void mlx5i_get_stats(struct net_device *dev, struct rtnl_link_stats64 *stats)
 	stats->tx_packets = sstats->tx_packets;
 	stats->tx_bytes   = sstats->tx_bytes;
 	stats->tx_dropped = sstats->tx_queue_dropped;
+}
+
+struct net_device *mlx5i_parent_get(struct net_device *netdev)
+{
+	struct mlx5e_priv *priv = mlx5i_epriv(netdev);
+	struct mlx5i_priv *ipriv, *parent_ipriv;
+	struct net_device *parent_dev;
+	int parent_ifindex;
+
+	ipriv = priv->ppriv;
+
+	parent_ifindex = netdev->netdev_ops->ndo_get_iflink(netdev);
+	parent_dev = dev_get_by_index(dev_net(netdev), parent_ifindex);
+	if (!parent_dev)
+		return NULL;
+
+	parent_ipriv = netdev_priv(parent_dev);
+
+	ASSERT_RTNL();
+	parent_ipriv->num_sub_interfaces++;
+
+	ipriv->parent_dev = parent_dev;
+
+	return parent_dev;
+}
+
+void mlx5i_parent_put(struct net_device *netdev)
+{
+	struct mlx5e_priv *priv = mlx5i_epriv(netdev);
+	struct mlx5i_priv *ipriv, *parent_ipriv;
+
+	ipriv = priv->ppriv;
+	parent_ipriv = netdev_priv(ipriv->parent_dev);
+
+	ASSERT_RTNL();
+	parent_ipriv->num_sub_interfaces--;
+
+	dev_put(ipriv->parent_dev);
 }
 
 int mlx5i_init_underlay_qp(struct mlx5e_priv *priv)
@@ -322,10 +364,10 @@ static int mlx5i_create_flow_steering(struct mlx5e_priv *priv)
 {
 	int err;
 
-	priv->fs.ns = mlx5_get_flow_namespace(priv->mdev,
+	priv->fs->ns = mlx5_get_flow_namespace(priv->mdev,
 					       MLX5_FLOW_NAMESPACE_KERNEL);
 
-	if (!priv->fs.ns)
+	if (!priv->fs->ns)
 		return -EINVAL;
 
 	err = mlx5e_arfs_create_tables(priv);
@@ -364,9 +406,18 @@ static int mlx5i_init_rx(struct mlx5e_priv *priv)
 	struct mlx5_core_dev *mdev = priv->mdev;
 	int err;
 
-	priv->rx_res = mlx5e_rx_res_alloc();
-	if (!priv->rx_res)
+	priv->fs = mlx5e_fs_init(priv->profile, mdev,
+				 !test_bit(MLX5E_STATE_DESTROYING, &priv->state));
+	if (!priv->fs) {
+		netdev_err(priv->netdev, "FS allocation failed\n");
 		return -ENOMEM;
+	}
+
+	priv->rx_res = mlx5e_rx_res_alloc();
+	if (!priv->rx_res) {
+		err = -ENOMEM;
+		goto err_free_fs;
+	}
 
 	mlx5e_create_q_counters(priv);
 
@@ -397,6 +448,8 @@ err_destroy_q_counters:
 	mlx5e_destroy_q_counters(priv);
 	mlx5e_rx_res_free(priv->rx_res);
 	priv->rx_res = NULL;
+err_free_fs:
+	mlx5e_fs_cleanup(priv->fs);
 	return err;
 }
 
@@ -408,6 +461,7 @@ static void mlx5i_cleanup_rx(struct mlx5e_priv *priv)
 	mlx5e_destroy_q_counters(priv);
 	mlx5e_rx_res_free(priv->rx_res);
 	priv->rx_res = NULL;
+	mlx5e_fs_cleanup(priv->fs);
 }
 
 /* The stats groups order is opposite to the update_stats() order calls */

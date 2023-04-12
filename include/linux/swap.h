@@ -56,6 +56,19 @@ static inline int current_is_kswapd(void)
  */
 
 /*
+ * PTE markers are used to persist information onto PTEs that are mapped with
+ * file-backed memories.  As its name "PTE" hints, it should only be applied to
+ * the leaves of pgtables.
+ */
+#ifdef CONFIG_PTE_MARKER
+#define SWP_PTE_MARKER_NUM 1
+#define SWP_PTE_MARKER     (MAX_SWAPFILES + SWP_HWPOISON_NUM + \
+			    SWP_MIGRATION_NUM + SWP_DEVICE_NUM)
+#else
+#define SWP_PTE_MARKER_NUM 0
+#endif
+
+/*
  * Unaddressable device memory support. See include/linux/hmm.h and
  * Documentation/vm/hmm.rst. Short description is we need struct pages for
  * device memory that is unaddressable (inaccessible) by CPU, so that we can
@@ -78,12 +91,19 @@ static inline int current_is_kswapd(void)
 #endif
 
 /*
- * NUMA node memory migration support
+ * Page migration support.
+ *
+ * SWP_MIGRATION_READ_EXCLUSIVE is only applicable to anonymous pages and
+ * indicates that the referenced (part of) an anonymous page is exclusive to
+ * a single process. For SWP_MIGRATION_WRITE, that information is implicit:
+ * (part of) an anonymous page that are mapped writable are exclusive to a
+ * single process.
  */
 #ifdef CONFIG_MIGRATION
-#define SWP_MIGRATION_NUM 2
-#define SWP_MIGRATION_READ	(MAX_SWAPFILES + SWP_HWPOISON_NUM)
-#define SWP_MIGRATION_WRITE	(MAX_SWAPFILES + SWP_HWPOISON_NUM + 1)
+#define SWP_MIGRATION_NUM 3
+#define SWP_MIGRATION_READ (MAX_SWAPFILES + SWP_HWPOISON_NUM)
+#define SWP_MIGRATION_READ_EXCLUSIVE (MAX_SWAPFILES + SWP_HWPOISON_NUM + 1)
+#define SWP_MIGRATION_WRITE (MAX_SWAPFILES + SWP_HWPOISON_NUM + 2)
 #else
 #define SWP_MIGRATION_NUM 0
 #endif
@@ -100,7 +120,7 @@ static inline int current_is_kswapd(void)
 
 #define MAX_SWAPFILES \
 	((1 << MAX_SWAPFILES_SHIFT) - SWP_DEVICE_NUM - \
-	SWP_MIGRATION_NUM - SWP_HWPOISON_NUM)
+	SWP_MIGRATION_NUM - SWP_HWPOISON_NUM - SWP_PTE_MARKER_NUM)
 
 /*
  * Magic header for a swap area. The first part of the union is
@@ -347,7 +367,6 @@ extern struct list_lru shadow_nodes;
 
 /* linux/mm/page_alloc.c */
 extern unsigned long totalreserve_pages;
-extern unsigned long nr_free_buffer_pages(void);
 
 /* Definition of global_zone_page_state not available yet */
 #define nr_free_pages() global_zone_page_state(NR_FREE_PAGES)
@@ -390,7 +409,6 @@ extern void lru_cache_add_inactive_or_unevictable(struct page *page,
 extern unsigned long zone_reclaimable_pages(struct zone *zone);
 extern unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 					gfp_t gfp_mask, nodemask_t *mask);
-extern bool __isolate_lru_page_prepare(struct page *page, isolate_mode_t mode);
 extern unsigned long try_to_free_mem_cgroup_pages(struct mem_cgroup *memcg,
 						  unsigned long nr_pages,
 						  gfp_t gfp_mask,
@@ -463,6 +481,7 @@ extern void __delete_from_swap_cache(struct page *page,
 extern void delete_from_swap_cache(struct page *);
 extern void clear_shadow_from_swap_cache(int type, unsigned long begin,
 				unsigned long end);
+extern void free_swap_cache(struct page *);
 extern void free_page_and_swap_cache(struct page *);
 extern void free_pages_and_swap_cache(struct page **, int);
 extern struct page *lookup_swap_cache(swp_entry_t entry,
@@ -519,8 +538,6 @@ extern int __swp_swapcount(swp_entry_t entry);
 extern int swp_swapcount(swp_entry_t entry);
 extern struct swap_info_struct *page_swap_info(struct page *);
 extern struct swap_info_struct *swp_swap_info(swp_entry_t entry);
-extern bool can_read_pin_swap_page(struct page *);
-extern bool reuse_swap_page(struct page *, int *);
 extern int try_to_free_swap(struct page *);
 struct backing_dev_info;
 extern int init_swap_address_space(unsigned int type, unsigned long nr_pages);
@@ -572,6 +589,10 @@ static inline struct address_space *swap_address_space(swp_entry_t entry)
 	put_page(page)
 #define free_pages_and_swap_cache(pages, nr) \
 	release_pages((pages), (nr));
+
+static inline void free_swap_cache(struct page *page)
+{
+}
 
 static inline void show_swap_cache_info(void)
 {
@@ -682,16 +703,6 @@ static inline int swp_swapcount(swp_entry_t entry)
 	return 0;
 }
 
-static inline bool can_read_pin_swap_page(struct page *page)
-{
-	if (unlikely(PageKsm(page)))
-		return true;
-	return page_trans_huge_mapcount(page, NULL) <= 1;
-}
-
-#define reuse_swap_page(page, total_map_swapcount) \
-	(page_trans_huge_mapcount(page, total_map_swapcount) == 1)
-
 static inline int try_to_free_swap(struct page *page)
 {
 	return 0;
@@ -733,6 +744,11 @@ static inline int mem_cgroup_swappiness(struct mem_cgroup *mem)
 {
 	return vm_swappiness;
 }
+#endif
+
+#ifdef CONFIG_ZSWAP
+extern u64 zswap_pool_total_size;
+extern atomic_t zswap_stored_pages;
 #endif
 
 #if defined(CONFIG_SWAP) && defined(CONFIG_MEMCG) && defined(CONFIG_BLK_CGROUP)

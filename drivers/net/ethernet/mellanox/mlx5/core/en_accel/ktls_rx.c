@@ -3,7 +3,7 @@
 
 #include <net/inet6_hashtables.h>
 #include "en_accel/en_accel.h"
-#include "en_accel/tls.h"
+#include "en_accel/ktls.h"
 #include "en_accel/ktls_txrx.h"
 #include "en_accel/ktls_utils.h"
 #include "en_accel/fs_tcp.h"
@@ -231,8 +231,7 @@ mlx5e_set_ktls_rx_priv_ctx(struct tls_context *tls_ctx,
 	struct mlx5e_ktls_offload_context_rx **ctx =
 		__tls_driver_ctx(tls_ctx, TLS_OFFLOAD_CTX_DIR_RX);
 
-	BUILD_BUG_ON(sizeof(struct mlx5e_ktls_offload_context_rx *) >
-		     TLS_OFFLOAD_CONTEXT_SIZE_RX);
+	BUILD_BUG_ON(sizeof(priv_rx) > TLS_DRIVER_STATE_SIZE_RX);
 
 	*ctx = priv_rx;
 }
@@ -462,6 +461,7 @@ static void resync_update_sn(struct mlx5e_rq *rq, struct sk_buff *skb)
 {
 	struct ethhdr *eth = (struct ethhdr *)(skb->data);
 	struct net_device *netdev = rq->netdev;
+	struct net *net = dev_net(netdev);
 	struct sock *sk = NULL;
 	unsigned int datalen;
 	struct iphdr *iph;
@@ -476,7 +476,7 @@ static void resync_update_sn(struct mlx5e_rq *rq, struct sk_buff *skb)
 		depth += sizeof(struct iphdr);
 		th = (void *)iph + sizeof(struct iphdr);
 
-		sk = inet_lookup_established(dev_net(netdev), &tcp_hashinfo,
+		sk = inet_lookup_established(net, net->ipv4.tcp_death_row.hashinfo,
 					     iph->saddr, th->source, iph->daddr,
 					     th->dest, netdev->ifindex);
 #if IS_ENABLED(CONFIG_IPV6)
@@ -486,7 +486,7 @@ static void resync_update_sn(struct mlx5e_rq *rq, struct sk_buff *skb)
 		depth += sizeof(struct ipv6hdr);
 		th = (void *)ipv6h + sizeof(struct ipv6hdr);
 
-		sk = __inet6_lookup_established(dev_net(netdev), &tcp_hashinfo,
+		sk = __inet6_lookup_established(net, net->ipv4.tcp_death_row.hashinfo,
 						&ipv6h->saddr, th->source,
 						&ipv6h->daddr, ntohs(th->dest),
 						netdev->ifindex, 0);

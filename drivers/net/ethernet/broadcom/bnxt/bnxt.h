@@ -701,13 +701,12 @@ struct bnxt_sw_tx_bd {
 	};
 	DEFINE_DMA_UNMAP_ADDR(mapping);
 	DEFINE_DMA_UNMAP_LEN(len);
+	struct page		*page;
 	u8			is_gso;
 	u8			is_push;
 	u8			action;
-	union {
-		unsigned short		nr_frags;
-		u16			rx_prod;
-	};
+	unsigned short		nr_frags;
+	u16			rx_prod;
 };
 
 struct bnxt_sw_rx_bd {
@@ -2079,12 +2078,6 @@ struct bnxt {
 	wait_queue_head_t	sriov_cfg_wait;
 	bool			sriov_cfg;
 #define BNXT_SRIOV_CFG_WAIT_TMO	msecs_to_jiffies(10000)
-
-	/* lock to protect VF-rep creation/cleanup via
-	 * multiple paths such as ->sriov_configure() and
-	 * devlink ->eswitch_mode_set()
-	 */
-	struct mutex		sriov_lock;
 #endif
 
 #if BITS_PER_LONG == 32
@@ -2137,6 +2130,7 @@ struct bnxt {
 #define BNXT_DUMP_CRASH		1
 
 	struct bpf_prog		*xdp_prog;
+	u8			xdp_has_frags;
 
 	struct bnxt_ptp_cfg	*ptp_cfg;
 	u8			ptp_all_rx_tstamp;

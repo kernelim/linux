@@ -1,4 +1,0 @@
-#0-
-#I:0
-#P:kernel/printk/printk.c
-0xc5850110	printk	vmlinux	EXPORT_SYMBOL

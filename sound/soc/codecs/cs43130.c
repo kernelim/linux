@@ -2303,7 +2303,7 @@ static int cs43130_probe(struct snd_soc_component *component)
 	}
 
 	ret = snd_soc_card_jack_new(card, "Headphone", CS43130_JACK_MASK,
-				    &cs43130->jack, NULL, 0);
+				    &cs43130->jack);
 	if (ret < 0) {
 		dev_err(component->dev, "Cannot create jack\n");
 		return ret;
@@ -2345,7 +2345,6 @@ static struct snd_soc_component_driver soc_component_dev_cs43130 = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct regmap_config cs43130_regmap = {
@@ -2418,8 +2417,7 @@ static int cs43130_handle_device_data(struct i2c_client *i2c_client,
 	return 0;
 }
 
-static int cs43130_i2c_probe(struct i2c_client *client,
-			     const struct i2c_device_id *id)
+static int cs43130_i2c_probe(struct i2c_client *client)
 {
 	struct cs43130_private *cs43130;
 	int ret;
@@ -2702,7 +2700,7 @@ static struct i2c_driver cs43130_i2c_driver = {
 		.pm             = &cs43130_runtime_pm,
 	},
 	.id_table	= cs43130_i2c_id,
-	.probe		= cs43130_i2c_probe,
+	.probe_new	= cs43130_i2c_probe,
 	.remove		= cs43130_i2c_remove,
 };
 

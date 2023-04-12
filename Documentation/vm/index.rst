@@ -15,7 +15,6 @@ algorithms.  If you are looking for advice on simply allocating memory, see the
    active_mm
    arch_pgtable_helpers
    balance
-   cleancache
    damon/index
    free_page_reporting
    frontswap
@@ -31,6 +30,7 @@ algorithms.  If you are looking for advice on simply allocating memory, see the
    page_migration
    page_frags
    page_owner
+   page_table_check
    remap_file_pages
    slub
    split_page_table_lock

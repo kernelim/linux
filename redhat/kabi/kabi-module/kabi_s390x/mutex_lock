@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/locking/mutex.c
-0x860efa2c	mutex_lock	vmlinux	EXPORT_SYMBOL
+#2-
+0x860efa2c	mutex_lock	vmlinux	EXPORT_SYMBOL	

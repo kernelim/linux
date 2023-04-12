@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/workqueue.c
-0xdf9208c0	alloc_workqueue	vmlinux	EXPORT_SYMBOL_GPL
+#2-
+0xdf9208c0	alloc_workqueue	vmlinux	EXPORT_SYMBOL_GPL	

@@ -121,17 +121,9 @@ static void __put_compound_page(struct page *page)
 
 void __put_page(struct page *page)
 {
-	if (is_zone_device_page(page)) {
-		put_dev_pagemap(page->pgmap);
-
-		/*
-		 * The page belongs to the device that created pgmap. Do
-		 * not return it to page allocator.
-		 */
-		return;
-	}
-
-	if (unlikely(PageCompound(page)))
+	if (unlikely(is_zone_device_page(page)))
+		free_zone_device_page(page);
+	else if (unlikely(PageCompound(page)))
 		__put_compound_page(page);
 	else
 		__put_single_page(page);
@@ -142,18 +134,27 @@ EXPORT_SYMBOL(__put_page);
  * put_pages_list() - release a list of pages
  * @pages: list of pages threaded on page->lru
  *
- * Release a list of pages which are strung together on page.lru.  Currently
- * used by read_cache_pages() and related error recovery code.
+ * Release a list of pages which are strung together on page.lru.
  */
 void put_pages_list(struct list_head *pages)
 {
-	while (!list_empty(pages)) {
-		struct page *victim;
+	struct page *page, *next;
 
-		victim = lru_to_page(pages);
-		list_del(&victim->lru);
-		put_page(victim);
+	list_for_each_entry_safe(page, next, pages, lru) {
+		if (!put_page_testzero(page)) {
+			list_del(&page->lru);
+			continue;
+		}
+		if (PageHead(page)) {
+			list_del(&page->lru);
+			__put_compound_page(page);
+			continue;
+		}
+		/* Cannot be PageLRU because it's passed to us using the lru */
 	}
+
+	free_unref_page_list(pages);
+	INIT_LIST_HEAD(pages);
 }
 EXPORT_SYMBOL(put_pages_list);
 
@@ -879,7 +880,7 @@ void lru_cache_disable(void)
 	 * lru_disable_count = 0 will have exited the critical
 	 * section when synchronize_rcu() returns.
 	 */
-	synchronize_rcu();
+	synchronize_rcu_expedited();
 #ifdef CONFIG_SMP
 	__lru_add_drain_all(true);
 #else
@@ -929,7 +930,7 @@ void release_pages(struct page **pages, int nr)
 			if (put_devmap_managed_page(page))
 				continue;
 			if (put_page_testzero(page))
-				put_dev_pagemap(page->pgmap);
+				free_zone_device_page(page);
 			continue;
 		}
 

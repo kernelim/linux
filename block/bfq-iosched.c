@@ -668,19 +668,19 @@ static bool bfqq_request_over_limit(struct bfq_queue *bfqq, int limit)
  * significantly affect service guarantees coming from the BFQ scheduling
  * algorithm.
  */
-static void bfq_limit_depth(unsigned int op, struct blk_mq_alloc_data *data)
+static void bfq_limit_depth(blk_opf_t opf, struct blk_mq_alloc_data *data)
 {
 	struct bfq_data *bfqd = data->q->elevator->elevator_data;
 	struct bfq_io_cq *bic = bfq_bic_lookup(data->q);
-	struct bfq_queue *bfqq = bic ? bic_to_bfqq(bic, op_is_sync(op)) : NULL;
+	struct bfq_queue *bfqq = bic ? bic_to_bfqq(bic, op_is_sync(opf)) : NULL;
 	int depth;
 	unsigned limit = data->q->nr_requests;
 
 	/* Sync reads have full depth available */
-	if (op_is_sync(op) && !op_is_write(op)) {
+	if (op_is_sync(opf) && !op_is_write(opf)) {
 		depth = 0;
 	} else {
-		depth = bfqd->word_depths[!!bfqd->wr_busy_queues][op_is_sync(op)];
+		depth = bfqd->word_depths[!!bfqd->wr_busy_queues][op_is_sync(opf)];
 		limit = (limit * depth) >> bfqd->full_depth_shift;
 	}
 
@@ -693,7 +693,7 @@ static void bfq_limit_depth(unsigned int op, struct blk_mq_alloc_data *data)
 		depth = 1;
 
 	bfq_log(bfqd, "[%s] wr_busy %d sync %d depth %u",
-		__func__, bfqd->wr_busy_queues, op_is_sync(op), depth);
+		__func__, bfqd->wr_busy_queues, op_is_sync(opf), depth);
 	if (depth)
 		data->shallow_depth = depth;
 }
@@ -1925,7 +1925,7 @@ static void bfq_bfqq_handle_idle_busy_switch(struct bfq_data *bfqd,
 	bfqq->service_from_backlogged = 0;
 	bfq_clear_bfqq_softrt_update(bfqq);
 
-	bfq_add_bfqq_busy(bfqd, bfqq);
+	bfq_add_bfqq_busy(bfqq);
 
 	/*
 	 * Expire in-service queue if preemption may be needed for
@@ -2419,7 +2419,7 @@ static void bfq_remove_request(struct request_queue *q,
 		bfqq->next_rq = NULL;
 
 		if (bfq_bfqq_busy(bfqq) && bfqq != bfqd->in_service_queue) {
-			bfq_del_bfqq_busy(bfqd, bfqq, false);
+			bfq_del_bfqq_busy(bfqq, false);
 			/*
 			 * bfqq emptied. In normal operation, when
 			 * bfqq is empty, bfqq->entity.service and
@@ -3098,7 +3098,7 @@ void bfq_release_process_ref(struct bfq_data *bfqd, struct bfq_queue *bfqq)
 	 */
 	if (bfq_bfqq_busy(bfqq) && RB_EMPTY_ROOT(&bfqq->sort_list) &&
 	    bfqq != bfqd->in_service_queue)
-		bfq_del_bfqq_busy(bfqd, bfqq, false);
+		bfq_del_bfqq_busy(bfqq, false);
 
 	bfq_reassign_last_bfqq(bfqq, NULL);
 
@@ -3908,7 +3908,7 @@ static bool __bfq_bfqq_expire(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 			 */
 			bfqq->budget_timeout = jiffies;
 
-		bfq_del_bfqq_busy(bfqd, bfqq, true);
+		bfq_del_bfqq_busy(bfqq, true);
 	} else {
 		bfq_requeue_bfqq(bfqd, bfqq, true);
 		/*
@@ -5255,9 +5255,7 @@ void bfq_put_queue(struct bfq_queue *bfqq)
 	struct hlist_node *n;
 	struct bfq_group *bfqg = bfqq_group(bfqq);
 
-	if (bfqq->bfqd)
-		bfq_log_bfqq(bfqq->bfqd, bfqq, "put_queue: %p %d",
-			     bfqq, bfqq->ref);
+	bfq_log_bfqq(bfqq->bfqd, bfqq, "put_queue: %p %d", bfqq, bfqq->ref);
 
 	bfqq->ref--;
 	if (bfqq->ref)
@@ -5321,7 +5319,7 @@ void bfq_put_queue(struct bfq_queue *bfqq)
 		hlist_del_init(&item->woken_list_node);
 	}
 
-	if (bfqq->bfqd && bfqq->bfqd->last_completed_rq_bfqq == bfqq)
+	if (bfqq->bfqd->last_completed_rq_bfqq == bfqq)
 		bfqq->bfqd->last_completed_rq_bfqq = NULL;
 
 	kmem_cache_free(bfq_pool, bfqq);
@@ -6104,7 +6102,7 @@ static bool __bfq_insert_request(struct bfq_data *bfqd, struct request *rq)
 static void bfq_update_insert_stats(struct request_queue *q,
 				    struct bfq_queue *bfqq,
 				    bool idle_timer_disabled,
-				    unsigned int cmd_flags)
+				    blk_opf_t cmd_flags)
 {
 	if (!bfqq)
 		return;
@@ -6129,7 +6127,7 @@ static void bfq_update_insert_stats(struct request_queue *q,
 static inline void bfq_update_insert_stats(struct request_queue *q,
 					   struct bfq_queue *bfqq,
 					   bool idle_timer_disabled,
-					   unsigned int cmd_flags) {}
+					   blk_opf_t cmd_flags) {}
 #endif /* CONFIG_BFQ_CGROUP_DEBUG */
 
 static struct bfq_queue *bfq_init_rq(struct request *rq);
@@ -6141,7 +6139,7 @@ static void bfq_insert_request(struct blk_mq_hw_ctx *hctx, struct request *rq,
 	struct bfq_data *bfqd = q->elevator->elevator_data;
 	struct bfq_queue *bfqq;
 	bool idle_timer_disabled = false;
-	unsigned int cmd_flags;
+	blk_opf_t cmd_flags;
 	LIST_HEAD(free);
 
 #ifdef CONFIG_BFQ_GROUP_IOSCHED

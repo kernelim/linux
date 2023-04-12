@@ -14,7 +14,7 @@ summary: Approving and blocking instructions for reviewers.
 :warning-caption: pass:[<span style="font-size: 2em">⚠</span>]
 :sectnums:
 
-Users with sufficient permissions can Approve and Block Merge Requests.  Reviewers should use GitLab's Approve interface to link:merge_request_approvals_and_blocks.adoc#approving-a-merge-request[Approve Merge Requests].  Reviewers can also approve (aka ACK) or block (aka NACK) merge requests by adding a comment via the GitLab UI for the merge request using a `blocking thread` or using the `/block` and `/unblock` keywords, or by using the link:bichon.adoc[bichon] utilities to add a comment to the MR.
+Users with sufficient permissions can Approve and Block Merge Requests.  Reviewers should use GitLab's Approve interface to link:merge_request_approvals_and_blocks.adoc#approving-a-merge-request[Approve Merge Requests].  Reviewers can also approve (aka ACK) or block (aka NACK) merge requests by adding a comment via the GitLab UI for the merge request using a `blocking thread` or using the `/block` and `/unblock` keywords.
 
 {{< toc >}}
 
@@ -44,14 +44,12 @@ This image shows what the approval interface looks like when the necessary privi
 
 NOTE: There are various reasons for being ineligible to review a MR including (but not limited to) being the original author for this MR, and also not having developer permissions to the project.
 
-== Approving a Merge Request using the 'lab' or 'bichon' utilities
+== Approving a Merge Request using the 'lab' utilities
 :sectnums:
 
 This action can also be completed in lab by executing:
 
 `lab mr approve <mr_id>`
-
-or by pressing `A` in bichon in the Merge Request view.
 
 == Blocking a Merge Request with a Blocking Thread
 :sectnums:

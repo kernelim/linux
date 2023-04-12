@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:mm/page_alloc.c
-0xf09b5d9a	get_zeroed_page	vmlinux	EXPORT_SYMBOL
+#2-
+0xf09b5d9a	get_zeroed_page	vmlinux	EXPORT_SYMBOL	

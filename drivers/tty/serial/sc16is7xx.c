@@ -858,7 +858,7 @@ static void sc16is7xx_break_ctl(struct uart_port *port, int break_state)
 
 static void sc16is7xx_set_termios(struct uart_port *port,
 				  struct ktermios *termios,
-				  struct ktermios *old)
+				  const struct ktermios *old)
 {
 	struct sc16is7xx_port *s = dev_get_drvdata(port->dev);
 	unsigned int lcr, flow = 0;

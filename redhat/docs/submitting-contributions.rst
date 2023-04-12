@@ -77,6 +77,11 @@ review from Red Hat kernel developers, where-as the configurations in
 ``fedora`` can be changed with the approval of the Fedora kernel
 maintainers.
 
+Makefile changes
+----------------
+
+Guidelines for makefile target and variable changes are found in the :ref:`makefile-changes` doc.
+
 Commit messages
 ---------------
 

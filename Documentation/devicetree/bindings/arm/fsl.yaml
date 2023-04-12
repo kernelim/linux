@@ -906,6 +906,12 @@ properties:
           - const: kontron,sl28
           - const: fsl,ls1028a
 
+      - description: i.MX93 based Boards
+        items:
+          - enum:
+              - fsl,imx93-11x11-evk       # i.MX93 11x11 EVK Board
+          - const: fsl,imx93
+
       - description:
           Kontron SMARC-sAL28 board (base). This is used in the base device
           tree which is compatible with the overlays provided by the

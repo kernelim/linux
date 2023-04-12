@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:mm/vmstat.c
-0xba0676e2	vm_zone_stat	vmlinux	EXPORT_SYMBOL
+#2-
+0xba0676e2	vm_zone_stat	vmlinux	EXPORT_SYMBOL	

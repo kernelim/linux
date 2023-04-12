@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/powerpc/kernel/smp.c
-0x04f158be	cpu_sibling_map	vmlinux	EXPORT_SYMBOL
+#2-
+0x04f158be	cpu_sibling_map	vmlinux	EXPORT_SYMBOL	

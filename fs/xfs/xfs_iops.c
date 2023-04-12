@@ -72,9 +72,8 @@ xfs_initxattrs(
  * these attrs can be journalled at inode creation time (along with the
  * inode, of course, such that log replay can't cause these to be lost).
  */
-
-STATIC int
-xfs_init_security(
+int
+xfs_inode_init_security(
 	struct inode	*inode,
 	struct inode	*dir,
 	const struct qstr *qstr)
@@ -119,7 +118,7 @@ xfs_cleanup_inode(
 
 	/* Oh, the horror.
 	 * If we can't add the ACL or we fail in
-	 * xfs_init_security we must back out.
+	 * xfs_inode_init_security we must back out.
 	 * ENOSPC can hit here, among other things.
 	 */
 	xfs_dentry_to_name(&teardown, dentry);
@@ -205,7 +204,7 @@ xfs_generic_create(
 
 	inode = VFS_I(ip);
 
-	error = xfs_init_security(inode, dir, &dentry->d_name);
+	error = xfs_inode_init_security(inode, dir, &dentry->d_name);
 	if (unlikely(error))
 		goto out_cleanup_inode;
 
@@ -393,7 +392,7 @@ xfs_vn_unlink(
 	 * but still hashed. This is incompatible with case-insensitive
 	 * mode, so invalidate (unhash) the dentry in CI-mode.
 	 */
-	if (xfs_sb_version_hasasciici(&XFS_M(dir->i_sb)->m_sb))
+	if (xfs_has_asciici(XFS_M(dir->i_sb)))
 		d_invalidate(dentry);
 	return 0;
 }
@@ -423,7 +422,7 @@ xfs_vn_symlink(
 
 	inode = VFS_I(cip);
 
-	error = xfs_init_security(inode, dir, &dentry->d_name);
+	error = xfs_inode_init_security(inode, dir, &dentry->d_name);
 	if (unlikely(error))
 		goto out_cleanup_inode;
 
@@ -537,10 +536,10 @@ xfs_stat_blksize(
 	 * default buffered I/O size, return that, otherwise return the compat
 	 * default.
 	 */
-	if (mp->m_flags & XFS_MOUNT_LARGEIO) {
+	if (xfs_has_large_iosize(mp)) {
 		if (mp->m_swidth)
 			return XFS_FSB_TO_B(mp, mp->m_swidth);
-		if (mp->m_flags & XFS_MOUNT_ALLOCSIZE)
+		if (xfs_has_allocsize(mp))
 			return 1U << mp->m_allocsize_log;
 	}
 
@@ -561,7 +560,7 @@ xfs_vn_getattr(
 
 	trace_xfs_getattr(ip);
 
-	if (XFS_FORCED_SHUTDOWN(mp))
+	if (xfs_is_shutdown(mp))
 		return -EIO;
 
 	stat->size = XFS_ISIZE(ip);
@@ -576,7 +575,7 @@ xfs_vn_getattr(
 	stat->ctime = inode->i_ctime;
 	stat->blocks = XFS_FSB_TO_BB(mp, ip->i_nblocks + ip->i_delayed_blks);
 
-	if (xfs_sb_version_has_v3inode(&mp->m_sb)) {
+	if (xfs_has_v3inodes(mp)) {
 		if (request_mask & STATX_BTIME) {
 			stat->result_mask |= STATX_BTIME;
 			stat->btime = ip->i_crtime;
@@ -604,6 +603,16 @@ xfs_vn_getattr(
 		stat->blksize = BLKDEV_IOSIZE;
 		stat->rdev = inode->i_rdev;
 		break;
+	case S_IFREG:
+		if (request_mask & STATX_DIOALIGN) {
+			struct xfs_buftarg	*target = xfs_inode_buftarg(ip);
+			struct block_device	*bdev = target->bt_bdev;
+
+			stat->result_mask |= STATX_DIOALIGN;
+			stat->dio_mem_align = bdev_dma_alignment(bdev) + 1;
+			stat->dio_offset_align = bdev_logical_block_size(bdev);
+		}
+		fallthrough;
 	default:
 		stat->blksize = xfs_stat_blksize(ip);
 		stat->rdev = 0;
@@ -621,10 +630,10 @@ xfs_vn_change_ok(
 {
 	struct xfs_mount	*mp = XFS_I(d_inode(dentry))->i_mount;
 
-	if (mp->m_flags & XFS_MOUNT_RDONLY)
+	if (xfs_is_readonly(mp))
 		return -EROFS;
 
-	if (XFS_FORCED_SHUTDOWN(mp))
+	if (xfs_is_shutdown(mp))
 		return -EIO;
 
 	return setattr_prepare(mnt_userns, dentry, iattr);
@@ -716,7 +725,7 @@ xfs_setattr_nonsize(
 		 * in the transaction.
 		 */
 		if (!uid_eq(iuid, uid)) {
-			if (XFS_IS_QUOTA_RUNNING(mp) && XFS_IS_UQUOTA_ON(mp)) {
+			if (XFS_IS_UQUOTA_ON(mp)) {
 				ASSERT(mask & ATTR_UID);
 				ASSERT(udqp);
 				olddquot1 = xfs_qm_vop_chown(tp, ip,
@@ -724,8 +733,8 @@ xfs_setattr_nonsize(
 			}
 		}
 		if (!gid_eq(igid, gid)) {
-			if (XFS_IS_QUOTA_RUNNING(mp) && XFS_IS_GQUOTA_ON(mp)) {
-				ASSERT(xfs_sb_version_has_pquotino(&mp->m_sb) ||
+			if (XFS_IS_GQUOTA_ON(mp)) {
+				ASSERT(xfs_has_pquotino(mp) ||
 				       !XFS_IS_PQUOTA_ON(mp));
 				ASSERT(mask & ATTR_GID);
 				ASSERT(gdqp);
@@ -740,7 +749,7 @@ xfs_setattr_nonsize(
 
 	XFS_STATS_INC(mp, xs_ig_attrchg);
 
-	if (mp->m_flags & XFS_MOUNT_WSYNC)
+	if (xfs_has_wsync(mp))
 		xfs_trans_set_sync(tp);
 	error = xfs_trans_commit(tp);
 
@@ -966,7 +975,7 @@ xfs_setattr_size(
 
 	XFS_STATS_INC(mp, xs_ig_attrchg);
 
-	if (mp->m_flags & XFS_MOUNT_WSYNC)
+	if (xfs_has_wsync(mp))
 		xfs_trans_set_sync(tp);
 
 	error = xfs_trans_commit(tp);
@@ -1208,11 +1217,11 @@ xfs_inode_should_enable_dax(
 {
 	if (!IS_ENABLED(CONFIG_FS_DAX))
 		return false;
-	if (ip->i_mount->m_flags & XFS_MOUNT_DAX_NEVER)
+	if (xfs_has_dax_never(ip->i_mount))
 		return false;
 	if (!xfs_inode_supports_dax(ip))
 		return false;
-	if (ip->i_mount->m_flags & XFS_MOUNT_DAX_ALWAYS)
+	if (xfs_has_dax_always(ip->i_mount))
 		return true;
 	if (ip->i_diflags2 & XFS_DIFLAG2_DAX)
 		return true;
@@ -1322,7 +1331,7 @@ xfs_setup_iops(
 			inode->i_mapping->a_ops = &xfs_address_space_operations;
 		break;
 	case S_IFDIR:
-		if (xfs_sb_version_hasasciici(&XFS_M(inode->i_sb)->m_sb))
+		if (xfs_has_asciici(XFS_M(inode->i_sb)))
 			inode->i_op = &xfs_dir_ci_inode_operations;
 		else
 			inode->i_op = &xfs_dir_inode_operations;

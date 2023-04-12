@@ -43,11 +43,6 @@ extern void arch_refresh_nodedata(int nid, pg_data_t *pgdat);
 ({								\
 	memblock_alloc(sizeof(*pgdat), SMP_CACHE_BYTES);	\
 })
-/*
- * This definition is just for error path in node hotadd.
- * For node hotremove, we have to replace this.
- */
-#define generic_free_nodedata(pgdat)	kfree(pgdat)
 
 extern pg_data_t *node_data[];
 static inline void arch_refresh_nodedata(int nid, pg_data_t *pgdat)
@@ -62,9 +57,6 @@ static inline pg_data_t *generic_alloc_nodedata(int nid)
 {
 	BUG();
 	return NULL;
-}
-static inline void generic_free_nodedata(pg_data_t *pgdat)
-{
 }
 static inline void arch_refresh_nodedata(int nid, pg_data_t *pgdat)
 {
@@ -350,5 +342,14 @@ extern int arch_create_linear_mapping(int nid, u64 start, u64 size,
 void arch_remove_linear_mapping(u64 start, u64 size);
 extern bool mhp_supports_memmap_on_memory(unsigned long size);
 #endif /* CONFIG_MEMORY_HOTPLUG */
+
+#ifdef CONFIG_MHP_MEMMAP_ON_MEMORY
+bool mhp_memmap_on_memory(void);
+#else
+static inline bool mhp_memmap_on_memory(void)
+{
+	return false;
+}
+#endif
 
 #endif /* __LINUX_MEMORY_HOTPLUG_H */

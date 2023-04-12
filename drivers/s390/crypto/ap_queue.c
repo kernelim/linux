@@ -19,22 +19,22 @@
 static void __ap_flush_queue(struct ap_queue *aq);
 
 /**
- * ap_queue_enable_interruption(): Enable interruption on an AP queue.
- * @qid: The AP queue number
+ * ap_queue_enable_irq(): Enable interrupt support on this AP queue.
+ * @aq: The AP queue
  * @ind: the notification indicator byte
  *
  * Enables interruption on AP queue via ap_aqic(). Based on the return
  * value it waits a while and tests the AP queue if interrupts
  * have been switched on using ap_test_queue().
  */
-static int ap_queue_enable_interruption(struct ap_queue *aq, void *ind)
+static int ap_queue_enable_irq(struct ap_queue *aq, void *ind)
 {
 	struct ap_queue_status status;
 	struct ap_qirq_ctrl qirqctrl = { 0 };
 
 	qirqctrl.ir = 1;
 	qirqctrl.isc = AP_ISC;
-	status = ap_aqic(aq->qid, qirqctrl, ind);
+	status = ap_aqic(aq->qid, qirqctrl, virt_to_phys(ind));
 	switch (status.response_code) {
 	case AP_RESPONSE_NORMAL:
 	case AP_RESPONSE_OTHERWISE_CHANGED:
@@ -99,7 +99,7 @@ int ap_recv(ap_qid_t qid, unsigned long long *psmid, void *msg, size_t length)
 {
 	struct ap_queue_status status;
 
-	if (msg == NULL)
+	if (!msg)
 		return -EINVAL;
 	status = ap_dqap(qid, psmid, msg, length, NULL, NULL);
 	switch (status.response_code) {
@@ -157,6 +157,8 @@ static struct ap_queue_status ap_sm_recv(struct ap_queue *aq)
 	switch (status.response_code) {
 	case AP_RESPONSE_NORMAL:
 		aq->queue_count = max_t(int, 0, aq->queue_count - 1);
+		if (!status.queue_empty && !aq->queue_count)
+			aq->queue_count++;
 		if (aq->queue_count > 0)
 			mod_timer(&aq->timeout,
 				  jiffies + aq->request_timeout);
@@ -218,7 +220,8 @@ static enum ap_sm_wait ap_sm_read(struct ap_queue *aq)
 		return AP_SM_WAIT_NONE;
 	case AP_RESPONSE_NO_PENDING_REPLY:
 		if (aq->queue_count > 0)
-			return AP_SM_WAIT_INTERRUPT;
+			return aq->interrupt ?
+				AP_SM_WAIT_INTERRUPT : AP_SM_WAIT_TIMEOUT;
 		aq->sm_state = AP_SM_STATE_IDLE;
 		return AP_SM_WAIT_NONE;
 	default:
@@ -273,7 +276,8 @@ static enum ap_sm_wait ap_sm_write(struct ap_queue *aq)
 		fallthrough;
 	case AP_RESPONSE_Q_FULL:
 		aq->sm_state = AP_SM_STATE_QUEUE_FULL;
-		return AP_SM_WAIT_INTERRUPT;
+		return aq->interrupt ?
+			AP_SM_WAIT_INTERRUPT : AP_SM_WAIT_TIMEOUT;
 	case AP_RESPONSE_RESET_IN_PROGRESS:
 		aq->sm_state = AP_SM_STATE_RESET_WAIT;
 		return AP_SM_WAIT_TIMEOUT;
@@ -310,7 +314,7 @@ static enum ap_sm_wait ap_sm_read_write(struct ap_queue *aq)
 
 /**
  * ap_sm_reset(): Reset an AP queue.
- * @qid: The AP queue number
+ * @aq: The AP queue
  *
  * Submit the Reset command to an AP queue.
  */
@@ -323,7 +327,7 @@ static enum ap_sm_wait ap_sm_reset(struct ap_queue *aq)
 	case AP_RESPONSE_NORMAL:
 	case AP_RESPONSE_RESET_IN_PROGRESS:
 		aq->sm_state = AP_SM_STATE_RESET_WAIT;
-		aq->interrupt = AP_INTR_DISABLED;
+		aq->interrupt = false;
 		return AP_SM_WAIT_TIMEOUT;
 	default:
 		aq->dev_state = AP_DEV_STATE_ERROR;
@@ -356,7 +360,7 @@ static enum ap_sm_wait ap_sm_reset_wait(struct ap_queue *aq)
 	switch (status.response_code) {
 	case AP_RESPONSE_NORMAL:
 		lsi_ptr = ap_airq_ptr();
-		if (lsi_ptr && ap_queue_enable_interruption(aq, lsi_ptr) == 0)
+		if (lsi_ptr && ap_queue_enable_irq(aq, lsi_ptr) == 0)
 			aq->sm_state = AP_SM_STATE_SETIRQ_WAIT;
 		else
 			aq->sm_state = (aq->queue_count > 0) ?
@@ -397,7 +401,7 @@ static enum ap_sm_wait ap_sm_setirq_wait(struct ap_queue *aq)
 
 	if (status.irq_enabled == 1) {
 		/* Irqs are now enabled */
-		aq->interrupt = AP_INTR_ENABLED;
+		aq->interrupt = true;
 		aq->sm_state = (aq->queue_count > 0) ?
 			AP_SM_STATE_WORKING : AP_SM_STATE_IDLE;
 	}
@@ -588,7 +592,7 @@ static ssize_t interrupt_show(struct device *dev,
 	spin_lock_bh(&aq->lock);
 	if (aq->sm_state == AP_SM_STATE_SETIRQ_WAIT)
 		rc = scnprintf(buf, PAGE_SIZE, "Enable Interrupt pending.\n");
-	else if (aq->interrupt == AP_INTR_ENABLED)
+	else if (aq->interrupt)
 		rc = scnprintf(buf, PAGE_SIZE, "Interrupts enabled.\n");
 	else
 		rc = scnprintf(buf, PAGE_SIZE, "Interrupts disabled.\n");
@@ -599,7 +603,7 @@ static ssize_t interrupt_show(struct device *dev,
 static DEVICE_ATTR_RO(interrupt);
 
 static ssize_t config_show(struct device *dev,
-			     struct device_attribute *attr, char *buf)
+			   struct device_attribute *attr, char *buf)
 {
 	struct ap_queue *aq = to_ap_queue(dev);
 	int rc;
@@ -784,7 +788,7 @@ struct ap_queue *ap_queue_create(ap_qid_t qid, int device_type)
 	aq->ap_dev.device.type = &ap_queue_type;
 	aq->ap_dev.device_type = device_type;
 	aq->qid = qid;
-	aq->interrupt = AP_INTR_DISABLED;
+	aq->interrupt = false;
 	spin_lock_init(&aq->lock);
 	INIT_LIST_HEAD(&aq->pendingq);
 	INIT_LIST_HEAD(&aq->requestq);
@@ -823,8 +827,9 @@ int ap_queue_message(struct ap_queue *aq, struct ap_message *ap_msg)
 		aq->requestq_count++;
 		aq->total_request_count++;
 		atomic64_inc(&aq->card->total_request_count);
-	} else
+	} else {
 		rc = -ENODEV;
+	}
 
 	/* Send/receive as many request from the queue as possible. */
 	ap_wait(ap_sm_event_loop(aq, AP_SM_EVENT_POLL));

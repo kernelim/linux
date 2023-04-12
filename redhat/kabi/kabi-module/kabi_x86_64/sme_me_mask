@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/mm/mem_encrypt_amd.c
-0x8a35b432	sme_me_mask	vmlinux	EXPORT_SYMBOL
+#2-
+0x8a35b432	sme_me_mask	vmlinux	EXPORT_SYMBOL	

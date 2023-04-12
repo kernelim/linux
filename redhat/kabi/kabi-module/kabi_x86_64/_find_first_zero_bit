@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/find_bit.c
-0x7b37d4a7	_find_first_zero_bit	vmlinux	EXPORT_SYMBOL
+#2-
+0x7b37d4a7	_find_first_zero_bit	vmlinux	EXPORT_SYMBOL	

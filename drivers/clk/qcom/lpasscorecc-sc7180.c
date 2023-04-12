@@ -356,32 +356,18 @@ static const struct qcom_cc_desc lpass_audio_hm_sc7180_desc = {
 	.num_gdscs = ARRAY_SIZE(lpass_audio_hm_sc7180_gdscs),
 };
 
-static void lpass_pm_runtime_disable(void *data)
-{
-	pm_runtime_disable(data);
-}
-
-static void lpass_pm_clk_destroy(void *data)
-{
-	pm_clk_destroy(data);
-}
-
-static int lpass_create_pm_clks(struct platform_device *pdev)
+static int lpass_setup_runtime_pm(struct platform_device *pdev)
 {
 	int ret;
 
 	pm_runtime_use_autosuspend(&pdev->dev);
 	pm_runtime_set_autosuspend_delay(&pdev->dev, 500);
-	pm_runtime_enable(&pdev->dev);
 
-	ret = devm_add_action_or_reset(&pdev->dev, lpass_pm_runtime_disable, &pdev->dev);
+	ret = devm_pm_runtime_enable(&pdev->dev);
 	if (ret)
 		return ret;
 
-	ret = pm_clk_create(&pdev->dev);
-	if (ret)
-		return ret;
-	ret = devm_add_action_or_reset(&pdev->dev, lpass_pm_clk_destroy, &pdev->dev);
+	ret = devm_pm_clk_create(&pdev->dev);
 	if (ret)
 		return ret;
 
@@ -389,7 +375,7 @@ static int lpass_create_pm_clks(struct platform_device *pdev)
 	if (ret < 0)
 		dev_err(&pdev->dev, "failed to acquire iface clock\n");
 
-	return ret;
+	return pm_runtime_resume_and_get(&pdev->dev);
 }
 
 static int lpass_core_cc_sc7180_probe(struct platform_device *pdev)
@@ -398,7 +384,7 @@ static int lpass_core_cc_sc7180_probe(struct platform_device *pdev)
 	struct regmap *regmap;
 	int ret;
 
-	ret = lpass_create_pm_clks(pdev);
+	ret = lpass_setup_runtime_pm(pdev);
 	if (ret)
 		return ret;
 
@@ -406,12 +392,14 @@ static int lpass_core_cc_sc7180_probe(struct platform_device *pdev)
 	desc = &lpass_audio_hm_sc7180_desc;
 	ret = qcom_cc_probe_by_index(pdev, 1, desc);
 	if (ret)
-		return ret;
+		goto exit;
 
 	lpass_core_cc_sc7180_regmap_config.name = "lpass_core_cc";
 	regmap = qcom_cc_map(pdev, &lpass_core_cc_sc7180_desc);
-	if (IS_ERR(regmap))
-		return PTR_ERR(regmap);
+	if (IS_ERR(regmap)) {
+		ret = PTR_ERR(regmap);
+		goto exit;
+	}
 
 	/*
 	 * Keep the CLK always-ON
@@ -429,6 +417,7 @@ static int lpass_core_cc_sc7180_probe(struct platform_device *pdev)
 	ret = qcom_cc_really_probe(pdev, &lpass_core_cc_sc7180_desc, regmap);
 
 	pm_runtime_mark_last_busy(&pdev->dev);
+exit:
 	pm_runtime_put_autosuspend(&pdev->dev);
 
 	return ret;
@@ -439,14 +428,19 @@ static int lpass_hm_core_probe(struct platform_device *pdev)
 	const struct qcom_cc_desc *desc;
 	int ret;
 
-	ret = lpass_create_pm_clks(pdev);
+	ret = lpass_setup_runtime_pm(pdev);
 	if (ret)
 		return ret;
 
 	lpass_core_cc_sc7180_regmap_config.name = "lpass_hm_core";
 	desc = &lpass_core_hm_sc7180_desc;
 
-	return qcom_cc_probe_by_index(pdev, 0, desc);
+	ret = qcom_cc_probe_by_index(pdev, 0, desc);
+
+	pm_runtime_mark_last_busy(&pdev->dev);
+	pm_runtime_put_autosuspend(&pdev->dev);
+
+	return ret;
 }
 
 static const struct of_device_id lpass_hm_sc7180_match_table[] = {
@@ -465,7 +459,7 @@ static const struct of_device_id lpass_core_cc_sc7180_match_table[] = {
 };
 MODULE_DEVICE_TABLE(of, lpass_core_cc_sc7180_match_table);
 
-static const struct dev_pm_ops lpass_core_cc_pm_ops = {
+static const struct dev_pm_ops lpass_pm_ops = {
 	SET_RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)
 };
 
@@ -474,12 +468,8 @@ static struct platform_driver lpass_core_cc_sc7180_driver = {
 	.driver = {
 		.name = "lpass_core_cc-sc7180",
 		.of_match_table = lpass_core_cc_sc7180_match_table,
-		.pm = &lpass_core_cc_pm_ops,
+		.pm = &lpass_pm_ops,
 	},
-};
-
-static const struct dev_pm_ops lpass_hm_pm_ops = {
-	SET_RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)
 };
 
 static struct platform_driver lpass_hm_sc7180_driver = {
@@ -487,7 +477,7 @@ static struct platform_driver lpass_hm_sc7180_driver = {
 	.driver = {
 		.name = "lpass_hm-sc7180",
 		.of_match_table = lpass_hm_sc7180_match_table,
-		.pm = &lpass_hm_pm_ops,
+		.pm = &lpass_pm_ops,
 	},
 };
 

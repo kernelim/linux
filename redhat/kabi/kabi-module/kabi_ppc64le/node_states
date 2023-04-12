@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:mm/page_alloc.c
-0x916758a3	node_states	vmlinux	EXPORT_SYMBOL
+#2-
+0x916758a3	node_states	vmlinux	EXPORT_SYMBOL	

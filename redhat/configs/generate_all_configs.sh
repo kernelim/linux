@@ -1,30 +1,26 @@
 #!/bin/sh
 
 # Adjusts the configuration options to build the variants correctly
-#
-# arg1: configuration to go in the primary variant
-# arg2: are we only generating debug configs
 
+test -n "$RHTEST" && exit 0
 
-PRIMARY=$1
-DEBUGBUILDSENABLED=$2
-
-if [ -z "$2" ]; then
+DEBUGBUILDSENABLED=$1
+if [ -z "$DEBUGBUILDSENABLED" ]; then
 	exit 1
 fi
 
-if [ -z "$PRIMARY" ]; then
-	PRIMARY=rhel
+if [ -z "$FLAVOR" ]; then
+	FLAVOR=rhel
 fi
 
-if [ "$PRIMARY" = "fedora" ]; then
+if [ "$FLAVOR" = "fedora" ]; then
 	SECONDARY=rhel
 else
 	SECONDARY=fedora
 fi
 
-for i in kernel-*-"$PRIMARY".config; do
-	NEW=kernel-"$VERSION"-$(echo "$i" | cut -d - -f2- | sed s/-"$PRIMARY"//)
+for i in kernel-*-"$FLAVOR".config; do
+	NEW=kernel-"$SPECVERSION"-$(echo "$i" | cut -d - -f2- | sed s/-"$FLAVOR"//)
 	#echo $NEW
 	mv "$i" "$NEW"
 done

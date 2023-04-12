@@ -461,6 +461,10 @@ static int init_vq(struct virtio_blk *vblk)
 				   &num_vqs);
 	if (err)
 		num_vqs = 1;
+	if (!err && !num_vqs) {
+		dev_err(&vdev->dev, "MQ advertisted but zero queues reported\n");
+		return -EINVAL;
+	}
 
 	num_vqs = min_t(unsigned int, nr_cpu_ids, num_vqs);
 
@@ -634,11 +638,11 @@ static int virtblk_init_request(struct blk_mq_tag_set *set, struct request *rq,
 	return 0;
 }
 
-static int virtblk_map_queues(struct blk_mq_tag_set *set)
+static void virtblk_map_queues(struct blk_mq_tag_set *set)
 {
 	struct virtio_blk *vblk = set->driver_data;
 
-	return blk_mq_virtio_map_queues(&set->map[HCTX_TYPE_DEFAULT],
+	blk_mq_virtio_map_queues(&set->map[HCTX_TYPE_DEFAULT],
 					vblk->vdev, 0);
 }
 
@@ -850,7 +854,7 @@ static int virtblk_probe(struct virtio_device *vdev)
 	return 0;
 
 out_cleanup_disk:
-	blk_cleanup_disk(vblk->disk);
+	put_disk(vblk->disk);
 out_free_tags:
 	blk_mq_free_tag_set(&vblk->tag_set);
 out_free_vq:
@@ -872,13 +876,12 @@ static void virtblk_remove(struct virtio_device *vdev)
 	flush_work(&vblk->config_work);
 
 	del_gendisk(vblk->disk);
-	blk_cleanup_queue(vblk->disk->queue);
 	blk_mq_free_tag_set(&vblk->tag_set);
 
 	mutex_lock(&vblk->vdev_mutex);
 
 	/* Stop all the virtqueues. */
-	vdev->config->reset(vdev);
+	virtio_reset_device(vdev);
 
 	/* Virtqueues are stopped, nothing can use vblk->vdev anymore. */
 	vblk->vdev = NULL;
@@ -897,7 +900,7 @@ static int virtblk_freeze(struct virtio_device *vdev)
 	struct virtio_blk *vblk = vdev->priv;
 
 	/* Ensure we don't receive any more interrupts */
-	vdev->config->reset(vdev);
+	virtio_reset_device(vdev);
 
 	/* Make sure no work handler is accessing the device. */
 	flush_work(&vblk->config_work);

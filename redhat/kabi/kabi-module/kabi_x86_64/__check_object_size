@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:mm/usercopy.c
-0x88db9f48	__check_object_size	vmlinux	EXPORT_SYMBOL
+#2-
+0x88db9f48	__check_object_size	vmlinux	EXPORT_SYMBOL	

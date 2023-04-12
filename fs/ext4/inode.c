@@ -136,8 +136,6 @@ static inline int ext4_begin_ordered_truncate(struct inode *inode,
 						   new_size);
 }
 
-static void ext4_invalidatepage(struct page *page, unsigned int offset,
-				unsigned int length);
 static int __ext4_journalled_writepage(struct page *page, unsigned int len);
 static int ext4_meta_trans_blocks(struct inode *inode, int lblocks,
 				  int pextents);
@@ -179,13 +177,15 @@ void ext4_evict_inode(struct inode *inode)
 
 	trace_ext4_evict_inode(inode);
 
+	if (EXT4_I(inode)->i_flags & EXT4_EA_INODE_FL)
+		ext4_evict_ea_inode(inode);
 	if (inode->i_nlink) {
 		/*
 		 * When journalling data dirty buffers are tracked only in the
 		 * journal. So although mm thinks everything is clean and
 		 * ready for reaping the inode might still have some pages to
 		 * write in the running transaction or waiting to be
-		 * checkpointed. Thus calling jbd2_journal_invalidatepage()
+		 * checkpointed. Thus calling jbd2_journal_invalidate_folio()
 		 * (via truncate_inode_pages()) to discard these buffers can
 		 * cause data loss. Also even if we did not discard these
 		 * buffers, we would have no way to find them after the inode
@@ -223,13 +223,13 @@ void ext4_evict_inode(struct inode *inode)
 
 	/*
 	 * For inodes with journalled data, transaction commit could have
-	 * dirtied the inode. Flush worker is ignoring it because of I_FREEING
-	 * flag but we still need to remove the inode from the writeback lists.
+	 * dirtied the inode. And for inodes with dioread_nolock, unwritten
+	 * extents converting worker could merge extents and also have dirtied
+	 * the inode. Flush worker is ignoring it because of I_FREEING flag but
+	 * we still need to remove the inode from the writeback lists.
 	 */
-	if (!list_empty_careful(&inode->i_io_list)) {
-		WARN_ON_ONCE(!ext4_should_journal_data(inode));
+	if (!list_empty_careful(&inode->i_io_list))
 		inode_io_list_del(inode);
-	}
 
 	/*
 	 * Protect us against freezing - iput() caller didn't have to have any
@@ -823,7 +823,7 @@ int ext4_get_block_unwritten(struct inode *inode, sector_t iblock,
 	ext4_debug("ext4_get_block_unwritten: inode %lu, create flag %d\n",
 		   inode->i_ino, create);
 	return _ext4_get_block(inode, iblock, bh_result,
-			       EXT4_GET_BLOCKS_IO_CREATE_EXT);
+			       EXT4_GET_BLOCKS_CREATE_UNWRIT_EXT);
 }
 
 /* Maximum number of blocks we map for direct IO at once. */
@@ -1157,7 +1157,7 @@ static int ext4_write_begin(struct file *file, struct address_space *mapping,
 
 	if (ext4_test_inode_state(inode, EXT4_STATE_MAY_INLINE_DATA)) {
 		ret = ext4_try_to_write_inline_data(mapping, inode, pos, len,
-						    flags, pagep);
+						    pagep);
 		if (ret < 0)
 			return ret;
 		if (ret == 1)
@@ -1175,6 +1175,13 @@ retry_grab:
 	page = grab_cache_page_write_begin(mapping, index, flags);
 	if (!page)
 		return -ENOMEM;
+	/*
+	 * The same as page allocation, we prealloc buffer heads before
+	 * starting the handle.
+	 */
+	if (!page_has_buffers(page))
+		create_empty_buffers(page, inode->i_sb->s_blocksize, 0);
+
 	unlock_page(page);
 
 retry_journal:
@@ -1289,7 +1296,8 @@ static int ext4_write_end(struct file *file,
 
 	trace_ext4_write_end(inode, pos, len, copied);
 
-	if (ext4_has_inline_data(inode))
+	if (ext4_has_inline_data(inode) &&
+	    ext4_test_inode_state(inode, EXT4_STATE_MAY_INLINE_DATA))
 		return ext4_write_inline_data_end(inode, pos, len, copied, page);
 
 	copied = block_write_end(file, mapping, pos, len, copied, page, fsdata);
@@ -1560,7 +1568,14 @@ static void mpage_release_unused_pages(struct mpage_da_data *mpd,
 		ext4_lblk_t start, last;
 		start = index << (PAGE_SHIFT - inode->i_blkbits);
 		last = end << (PAGE_SHIFT - inode->i_blkbits);
+
+		/*
+		 * avoid racing with extent status tree scans made by
+		 * ext4_insert_delayed_block()
+		 */
+		down_write(&EXT4_I(inode)->i_data_sem);
 		ext4_es_remove_extent(inode, start, last - start + 1);
+		up_write(&EXT4_I(inode)->i_data_sem);
 	}
 
 	pagevec_init(&pvec);
@@ -1570,16 +1585,18 @@ static void mpage_release_unused_pages(struct mpage_da_data *mpd,
 			break;
 		for (i = 0; i < nr_pages; i++) {
 			struct page *page = pvec.pages[i];
+			struct folio *folio = page_folio(page);
 
-			BUG_ON(!PageLocked(page));
-			BUG_ON(PageWriteback(page));
+			BUG_ON(!folio_test_locked(folio));
+			BUG_ON(folio_test_writeback(folio));
 			if (invalidate) {
-				if (page_mapped(page))
-					clear_page_dirty_for_io(page);
-				block_invalidatepage(page, 0, PAGE_SIZE);
-				ClearPageUptodate(page);
+				if (folio_mapped(folio))
+					folio_clear_dirty_for_io(folio);
+				block_invalidate_folio(folio, 0,
+						folio_size(folio));
+				folio_clear_uptodate(folio);
 			}
-			unlock_page(page);
+			folio_unlock(folio);
 		}
 		pagevec_release(&pvec);
 	}
@@ -1970,6 +1987,7 @@ out_no_pagelock:
 static int ext4_writepage(struct page *page,
 			  struct writeback_control *wbc)
 {
+	struct folio *folio = page_folio(page);
 	int ret = 0;
 	loff_t size;
 	unsigned int len;
@@ -1979,8 +1997,8 @@ static int ext4_writepage(struct page *page,
 	bool keep_towrite = false;
 
 	if (unlikely(ext4_forced_shutdown(EXT4_SB(inode->i_sb)))) {
-		inode->i_mapping->a_ops->invalidatepage(page, 0, PAGE_SIZE);
-		unlock_page(page);
+		folio_invalidate(folio, 0, folio_size(folio));
+		folio_unlock(folio);
 		return -EIO;
 	}
 
@@ -2952,8 +2970,7 @@ static int ext4_da_write_begin(struct file *file, struct address_space *mapping,
 	trace_ext4_da_write_begin(inode, pos, len, flags);
 
 	if (ext4_test_inode_state(inode, EXT4_STATE_MAY_INLINE_DATA)) {
-		ret = ext4_da_write_inline_data_begin(mapping, inode,
-						      pos, len, flags,
+		ret = ext4_da_write_inline_data_begin(mapping, inode, pos, len,
 						      pagep, fsdata);
 		if (ret < 0)
 			return ret;
@@ -3128,13 +3145,15 @@ static sector_t ext4_bmap(struct address_space *mapping, sector_t block)
 {
 	struct inode *inode = mapping->host;
 	journal_t *journal;
+	sector_t ret = 0;
 	int err;
 
+	inode_lock_shared(inode);
 	/*
 	 * We can get here for an inline file via the FIBMAP ioctl
 	 */
 	if (ext4_has_inline_data(inode))
-		return 0;
+		goto out;
 
 	if (mapping_tagged(mapping, PAGECACHE_TAG_DIRTY) &&
 			test_opt(inode->i_sb, DELALLOC)) {
@@ -3173,10 +3192,14 @@ static sector_t ext4_bmap(struct address_space *mapping, sector_t block)
 		jbd2_journal_unlock_updates(journal);
 
 		if (err)
-			return 0;
+			goto out;
 	}
 
-	return iomap_bmap(mapping, block, &ext4_iomap_ops);
+	ret = iomap_bmap(mapping, block, &ext4_iomap_ops);
+
+out:
+	inode_unlock_shared(inode);
+	return ret;
 }
 
 static int ext4_readpage(struct file *file, struct page *page)
@@ -3206,40 +3229,39 @@ static void ext4_readahead(struct readahead_control *rac)
 	ext4_mpage_readpages(inode, rac, NULL);
 }
 
-static void ext4_invalidatepage(struct page *page, unsigned int offset,
-				unsigned int length)
+static void ext4_invalidate_folio(struct folio *folio, size_t offset,
+				size_t length)
 {
-	trace_ext4_invalidatepage(page, offset, length);
+	trace_ext4_invalidate_folio(folio, offset, length);
 
 	/* No journalling happens on data buffers when this function is used */
-	WARN_ON(page_has_buffers(page) && buffer_jbd(page_buffers(page)));
+	WARN_ON(folio_buffers(folio) && buffer_jbd(folio_buffers(folio)));
 
-	block_invalidatepage(page, offset, length);
+	block_invalidate_folio(folio, offset, length);
 }
 
-static int __ext4_journalled_invalidatepage(struct page *page,
-					    unsigned int offset,
-					    unsigned int length)
+static int __ext4_journalled_invalidate_folio(struct folio *folio,
+					    size_t offset, size_t length)
 {
-	journal_t *journal = EXT4_JOURNAL(page->mapping->host);
+	journal_t *journal = EXT4_JOURNAL(folio->mapping->host);
 
-	trace_ext4_journalled_invalidatepage(page, offset, length);
+	trace_ext4_journalled_invalidate_folio(folio, offset, length);
 
 	/*
 	 * If it's a full truncate we just forget about the pending dirtying
 	 */
-	if (offset == 0 && length == PAGE_SIZE)
-		ClearPageChecked(page);
+	if (offset == 0 && length == folio_size(folio))
+		folio_clear_checked(folio);
 
-	return jbd2_journal_invalidatepage(journal, page, offset, length);
+	return jbd2_journal_invalidate_folio(journal, folio, offset, length);
 }
 
 /* Wrapper for aops... */
-static void ext4_journalled_invalidatepage(struct page *page,
-					   unsigned int offset,
-					   unsigned int length)
+static void ext4_journalled_invalidate_folio(struct folio *folio,
+					   size_t offset,
+					   size_t length)
 {
-	WARN_ON(__ext4_journalled_invalidatepage(page, offset, length) < 0);
+	WARN_ON(__ext4_journalled_invalidate_folio(folio, offset, length) < 0);
 }
 
 static int ext4_releasepage(struct page *page, gfp_t wait)
@@ -3559,31 +3581,31 @@ const struct iomap_ops ext4_iomap_report_ops = {
 };
 
 /*
- * Whenever the page is being dirtied, corresponding buffers should already be
- * attached to the transaction (we take care of this in ext4_page_mkwrite() and
- * ext4_write_begin()). However we cannot move buffers to dirty transaction
- * lists here because ->set_page_dirty is called under VFS locks and the page
- * is not necessarily locked.
+ * Folios can be marked dirty completely asynchronously from ext4's
+ * journalling activity.  By filemap_sync_pte(), try_to_unmap_one(), etc.
+ * We cannot do much here because ->dirty_folio may be called with the
+ * page table lock held.  The folio is not necessarily locked.
  *
- * We cannot just dirty the page and leave attached buffers clean, because the
+ * We cannot just dirty the folio and leave attached buffers clean, because the
  * buffers' dirty state is "definitive".  We cannot just set the buffers dirty
  * or jbddirty because all the journalling code will explode.
  *
- * So what we do is to mark the page "pending dirty" and next time writepage
+ * So what we do is to mark the folio "pending dirty" and next time writepage
  * is called, propagate that into the buffers appropriately.
  */
-static int ext4_journalled_set_page_dirty(struct page *page)
+static bool ext4_journalled_dirty_folio(struct address_space *mapping,
+		struct folio *folio)
 {
-	WARN_ON_ONCE(!page_has_buffers(page));
-	SetPageChecked(page);
-	return __set_page_dirty_nobuffers(page);
+	WARN_ON_ONCE(!folio_buffers(folio));
+	folio_set_checked(folio);
+	return filemap_dirty_folio(mapping, folio);
 }
 
-static int ext4_set_page_dirty(struct page *page)
+static bool ext4_dirty_folio(struct address_space *mapping, struct folio *folio)
 {
-	WARN_ON_ONCE(!PageLocked(page) && !PageDirty(page));
-	WARN_ON_ONCE(!page_has_buffers(page));
-	return __set_page_dirty_buffers(page);
+	WARN_ON_ONCE(!folio_test_locked(folio) && !folio_test_dirty(folio));
+	WARN_ON_ONCE(!folio_buffers(folio));
+	return block_dirty_folio(mapping, folio);
 }
 
 static int ext4_iomap_swap_activate(struct swap_info_struct *sis,
@@ -3600,9 +3622,9 @@ static const struct address_space_operations ext4_aops = {
 	.writepages		= ext4_writepages,
 	.write_begin		= ext4_write_begin,
 	.write_end		= ext4_write_end,
-	.set_page_dirty		= ext4_set_page_dirty,
+	.dirty_folio		= ext4_dirty_folio,
 	.bmap			= ext4_bmap,
-	.invalidatepage		= ext4_invalidatepage,
+	.invalidate_folio	= ext4_invalidate_folio,
 	.releasepage		= ext4_releasepage,
 	.direct_IO		= noop_direct_IO,
 	.migratepage		= buffer_migrate_page,
@@ -3618,9 +3640,9 @@ static const struct address_space_operations ext4_journalled_aops = {
 	.writepages		= ext4_writepages,
 	.write_begin		= ext4_write_begin,
 	.write_end		= ext4_journalled_write_end,
-	.set_page_dirty		= ext4_journalled_set_page_dirty,
+	.dirty_folio		= ext4_journalled_dirty_folio,
 	.bmap			= ext4_bmap,
-	.invalidatepage		= ext4_journalled_invalidatepage,
+	.invalidate_folio	= ext4_journalled_invalidate_folio,
 	.releasepage		= ext4_releasepage,
 	.direct_IO		= noop_direct_IO,
 	.is_partially_uptodate  = block_is_partially_uptodate,
@@ -3635,9 +3657,9 @@ static const struct address_space_operations ext4_da_aops = {
 	.writepages		= ext4_writepages,
 	.write_begin		= ext4_da_write_begin,
 	.write_end		= ext4_da_write_end,
-	.set_page_dirty		= ext4_set_page_dirty,
+	.dirty_folio		= ext4_dirty_folio,
 	.bmap			= ext4_bmap,
-	.invalidatepage		= ext4_invalidatepage,
+	.invalidate_folio	= ext4_invalidate_folio,
 	.releasepage		= ext4_releasepage,
 	.direct_IO		= noop_direct_IO,
 	.migratepage		= buffer_migrate_page,
@@ -3649,9 +3671,8 @@ static const struct address_space_operations ext4_da_aops = {
 static const struct address_space_operations ext4_dax_aops = {
 	.writepages		= ext4_dax_writepages,
 	.direct_IO		= noop_direct_IO,
-	.set_page_dirty		= __set_page_dirty_no_writeback,
+	.dirty_folio		= noop_dirty_folio,
 	.bmap			= ext4_bmap,
-	.invalidatepage		= noop_invalidatepage,
 	.swap_activate		= ext4_iomap_swap_activate,
 };
 
@@ -4660,8 +4681,7 @@ static inline int ext4_iget_extra_inode(struct inode *inode,
 	__le32 *magic = (void *)raw_inode +
 			EXT4_GOOD_OLD_INODE_SIZE + ei->i_extra_isize;
 
-	if (EXT4_GOOD_OLD_INODE_SIZE + ei->i_extra_isize + sizeof(__le32) <=
-	    EXT4_INODE_SIZE(inode->i_sb) &&
+	if (EXT4_INODE_HAS_XATTR_SPACE(inode)  &&
 	    *magic == cpu_to_le32(EXT4_XATTR_MAGIC)) {
 		ext4_set_inode_state(inode, EXT4_STATE_XATTR);
 		return ext4_find_inline_data_nolock(inode);
@@ -5191,7 +5211,7 @@ int ext4_write_inode(struct inode *inode, struct writeback_control *wbc)
 
 	if (EXT4_SB(inode->i_sb)->s_journal) {
 		if (ext4_journal_current_handle()) {
-			jbd_debug(1, "called recursively, non-PF_MEMALLOC!\n");
+			ext4_debug("called recursively, non-PF_MEMALLOC!\n");
 			dump_stack();
 			return -EIO;
 		}
@@ -5229,13 +5249,12 @@ int ext4_write_inode(struct inode *inode, struct writeback_control *wbc)
 }
 
 /*
- * In data=journal mode ext4_journalled_invalidatepage() may fail to invalidate
- * buffers that are attached to a page stradding i_size and are undergoing
+ * In data=journal mode ext4_journalled_invalidate_folio() may fail to invalidate
+ * buffers that are attached to a folio straddling i_size and are undergoing
  * commit. In that case we have to wait for commit to finish and try again.
  */
 static void ext4_wait_for_tail_page_commit(struct inode *inode)
 {
-	struct page *page;
 	unsigned offset;
 	journal_t *journal = EXT4_SB(inode->i_sb)->s_journal;
 	tid_t commit_tid = 0;
@@ -5243,25 +5262,25 @@ static void ext4_wait_for_tail_page_commit(struct inode *inode)
 
 	offset = inode->i_size & (PAGE_SIZE - 1);
 	/*
-	 * If the page is fully truncated, we don't need to wait for any commit
-	 * (and we even should not as __ext4_journalled_invalidatepage() may
-	 * strip all buffers from the page but keep the page dirty which can then
-	 * confuse e.g. concurrent ext4_writepage() seeing dirty page without
+	 * If the folio is fully truncated, we don't need to wait for any commit
+	 * (and we even should not as __ext4_journalled_invalidate_folio() may
+	 * strip all buffers from the folio but keep the folio dirty which can then
+	 * confuse e.g. concurrent ext4_writepage() seeing dirty folio without
 	 * buffers). Also we don't need to wait for any commit if all buffers in
-	 * the page remain valid. This is most beneficial for the common case of
+	 * the folio remain valid. This is most beneficial for the common case of
 	 * blocksize == PAGESIZE.
 	 */
 	if (!offset || offset > (PAGE_SIZE - i_blocksize(inode)))
 		return;
 	while (1) {
-		page = find_lock_page(inode->i_mapping,
+		struct folio *folio = filemap_lock_folio(inode->i_mapping,
 				      inode->i_size >> PAGE_SHIFT);
-		if (!page)
+		if (!folio)
 			return;
-		ret = __ext4_journalled_invalidatepage(page, offset,
-						PAGE_SIZE - offset);
-		unlock_page(page);
-		put_page(page);
+		ret = __ext4_journalled_invalidate_folio(folio, offset,
+						folio_size(folio) - offset);
+		folio_unlock(folio);
+		folio_put(folio);
 		if (ret != -EBUSY)
 			return;
 		commit_tid = 0;
@@ -5515,6 +5534,19 @@ err_out:
 	return error;
 }
 
+u32 ext4_dio_alignment(struct inode *inode)
+{
+	if (fsverity_active(inode))
+		return 0;
+	if (ext4_should_journal_data(inode))
+		return 0;
+	if (ext4_has_inline_data(inode))
+		return 0;
+	if (IS_ENCRYPTED(inode))
+		return 0;
+	return 1; /* use the iomap defaults */
+}
+
 int ext4_getattr(struct user_namespace *mnt_userns, const struct path *path,
 		 struct kstat *stat, u32 request_mask, unsigned int query_flags)
 {
@@ -5528,6 +5560,29 @@ int ext4_getattr(struct user_namespace *mnt_userns, const struct path *path,
 		stat->result_mask |= STATX_BTIME;
 		stat->btime.tv_sec = ei->i_crtime.tv_sec;
 		stat->btime.tv_nsec = ei->i_crtime.tv_nsec;
+	}
+
+	/*
+	 * Return the DIO alignment restrictions if requested.  We only return
+	 * this information when requested, since on encrypted files it might
+	 * take a fair bit of work to get if the file wasn't opened recently.
+	 * (RHEL9: this comment isn't exactly correct on rhel9, because there
+	 * is no DIO support in fscrypt. But we'll leave the code as is.)
+	 */
+	if ((request_mask & STATX_DIOALIGN) && S_ISREG(inode->i_mode)) {
+		u32 dio_align = ext4_dio_alignment(inode);
+
+		stat->result_mask |= STATX_DIOALIGN;
+		if (dio_align == 1) {
+			struct block_device *bdev = inode->i_sb->s_bdev;
+
+			/* iomap defaults */
+			stat->dio_mem_align = bdev_dma_alignment(bdev) + 1;
+			stat->dio_offset_align = bdev_logical_block_size(bdev);
+		} else {
+			stat->dio_mem_align = dio_align;
+			stat->dio_offset_align = dio_align;
+		}
 	}
 
 	flags = ei->i_flags & EXT4_FL_USER_VISIBLE;
@@ -5696,7 +5751,12 @@ int ext4_mark_iloc_dirty(handle_t *handle,
 	}
 	ext4_fc_track_inode(handle, inode);
 
-	if (IS_I_VERSION(inode))
+	/*
+	 * ea_inodes are using i_version for storing reference count, don't
+	 * mess with it
+	 */
+	if (IS_I_VERSION(inode) &&
+	    !(EXT4_I(inode)->i_flags & EXT4_EA_INODE_FL))
 		inode_inc_iversion(inode);
 
 	/* the do_update_inode consumes one bh->b_count */

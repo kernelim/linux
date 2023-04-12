@@ -1,3 +1,2 @@
-#0-
-#I:0
-0x1c3e02e4	memcmp	vmlinux	EXPORT_SYMBOL
+#2-
+0x1c3e02e4	memcmp	vmlinux	EXPORT_SYMBOL	

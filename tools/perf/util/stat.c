@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <errno.h>
+#include <linux/err.h>
 #include <inttypes.h>
 #include <math.h>
 #include <string.h>
@@ -116,7 +117,9 @@ static void perf_stat_evsel_id_init(struct evsel *evsel)
 	/* ps->id is 0 hence PERF_STAT_EVSEL_ID__NONE by default */
 
 	for (i = 0; i < PERF_STAT_EVSEL_ID__MAX; i++) {
-		if (!strcmp(evsel__name(evsel), id_str[i])) {
+		if (!strcmp(evsel__name(evsel), id_str[i]) ||
+		    (strstr(evsel__name(evsel), id_str[i]) && evsel->pmu_name
+		     && strstr(evsel__name(evsel), evsel->pmu_name))) {
 			ps->id = i;
 			break;
 		}
@@ -309,7 +312,7 @@ static int check_per_pkg(struct evsel *counter, struct perf_counts_values *vals,
 
 	if (!mask) {
 		mask = hashmap__new(pkg_id_hash, pkg_id_equal, NULL);
-		if (!mask)
+		if (IS_ERR(mask))
 			return -ENOMEM;
 
 		counter->per_pkg_mask = mask;
@@ -398,6 +401,7 @@ process_counter_values(struct perf_stat_config *config, struct evsel *evsel,
 		aggr->ena += count->ena;
 		aggr->run += count->run;
 	case AGGR_UNSET:
+	case AGGR_MAX:
 	default:
 		break;
 	}

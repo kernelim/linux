@@ -79,10 +79,6 @@
 
 #define SYNTHVID_FB_SIZE_WIN8 (8 * 1024 * 1024)
 
-#define PCI_VENDOR_ID_MICROSOFT 0x1414
-#define PCI_DEVICE_ID_HYPERV_VIDEO 0x5353
-
-
 enum pipe_msg_type {
 	PIPE_MSG_INVALID,
 	PIPE_MSG_DATA,
@@ -426,7 +422,7 @@ static void synthvid_deferred_io(struct fb_info *p,
 				 struct list_head *pagelist)
 {
 	struct hvfb_par *par = p->par;
-	struct page *page;
+	struct fb_deferred_io_pageref *pageref;
 	unsigned long start, end;
 	int y1, y2, miny, maxy;
 
@@ -439,7 +435,8 @@ static void synthvid_deferred_io(struct fb_info *p,
 	 * in synthvid_update function by clamping the y2
 	 * value to yres.
 	 */
-	list_for_each_entry(page, pagelist, lru) {
+	list_for_each_entry(pageref, pagelist, list) {
+		struct page *page = pageref->page;
 		start = page->index << PAGE_SHIFT;
 		end = start + PAGE_SIZE - 1;
 		y1 = start / p->fix.line_length;
@@ -919,6 +916,7 @@ static const struct fb_ops hvfb_ops = {
 	.fb_copyarea = hvfb_cfb_copyarea,
 	.fb_imageblit = hvfb_cfb_imageblit,
 	.fb_blank = hvfb_blank,
+	.fb_mmap = fb_deferred_io_mmap,
 };
 
 

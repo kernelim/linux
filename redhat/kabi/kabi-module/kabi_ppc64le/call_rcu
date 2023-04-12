@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/rcu/tree.c
-0x28aa6a67	call_rcu	vmlinux	EXPORT_SYMBOL_GPL
+#2-
+0x28aa6a67	call_rcu	vmlinux	EXPORT_SYMBOL_GPL	

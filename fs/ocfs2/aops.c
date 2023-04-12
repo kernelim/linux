@@ -637,7 +637,7 @@ int ocfs2_map_page_blocks(struct page *page, u64 *p_blkno,
 			   !buffer_new(bh) &&
 			   ocfs2_should_read_blk(inode, page, block_start) &&
 			   (block_start < from || block_end > to)) {
-			ll_rw_block(REQ_OP_READ, 0, 1, &bh);
+			ll_rw_block(REQ_OP_READ, 1, &bh);
 			*wait_bh++=bh;
 		}
 
@@ -2453,7 +2453,7 @@ static ssize_t ocfs2_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 }
 
 const struct address_space_operations ocfs2_aops = {
-	.set_page_dirty		= __set_page_dirty_buffers,
+	.dirty_folio		= block_dirty_folio,
 	.readpage		= ocfs2_readpage,
 	.readahead		= ocfs2_readahead,
 	.writepage		= ocfs2_writepage,
@@ -2461,7 +2461,7 @@ const struct address_space_operations ocfs2_aops = {
 	.write_end		= ocfs2_write_end,
 	.bmap			= ocfs2_bmap,
 	.direct_IO		= ocfs2_direct_IO,
-	.invalidatepage		= block_invalidatepage,
+	.invalidate_folio	= block_invalidate_folio,
 	.releasepage		= ocfs2_releasepage,
 	.migratepage		= buffer_migrate_page,
 	.is_partially_uptodate	= block_is_partially_uptodate,

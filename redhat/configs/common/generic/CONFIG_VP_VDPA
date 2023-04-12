@@ -1,1 +1,1 @@
-CONFIG_VP_VDPA=m
+# CONFIG_VP_VDPA is not set

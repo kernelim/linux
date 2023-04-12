@@ -155,6 +155,7 @@
 
 #define MII_88E1318S_PHY_WOL_CTRL				0x10
 #define MII_88E1318S_PHY_WOL_CTRL_CLEAR_WOL_STATUS		BIT(12)
+#define MII_88E1318S_PHY_WOL_CTRL_LINK_UP_ENABLE		BIT(13)
 #define MII_88E1318S_PHY_WOL_CTRL_MAGIC_PACKET_MATCH_ENABLE	BIT(14)
 
 #define MII_PHY_LED_CTRL	        16
@@ -178,6 +179,8 @@
 #define MII_88E1510_GEN_CTRL_REG_1_MODE_MASK	0x7
 #define MII_88E1510_GEN_CTRL_REG_1_MODE_SGMII	0x1	/* SGMII to copper */
 #define MII_88E1510_GEN_CTRL_REG_1_RESET	0x8000	/* Soft reset */
+
+#define MII_88E1510_MSCR_2		0x15
 
 #define MII_VCT5_TX_RX_MDI0_COUPLING	0x10
 #define MII_VCT5_TX_RX_MDI1_COUPLING	0x11
@@ -1746,13 +1749,19 @@ static void m88e1318_get_wol(struct phy_device *phydev,
 {
 	int ret;
 
-	wol->supported = WAKE_MAGIC;
+	wol->supported = WAKE_MAGIC | WAKE_PHY;
 	wol->wolopts = 0;
 
 	ret = phy_read_paged(phydev, MII_MARVELL_WOL_PAGE,
 			     MII_88E1318S_PHY_WOL_CTRL);
-	if (ret >= 0 && ret & MII_88E1318S_PHY_WOL_CTRL_MAGIC_PACKET_MATCH_ENABLE)
+	if (ret < 0)
+		return;
+
+	if (ret & MII_88E1318S_PHY_WOL_CTRL_MAGIC_PACKET_MATCH_ENABLE)
 		wol->wolopts |= WAKE_MAGIC;
+
+	if (ret & MII_88E1318S_PHY_WOL_CTRL_LINK_UP_ENABLE)
+		wol->wolopts |= WAKE_PHY;
 }
 
 static int m88e1318_set_wol(struct phy_device *phydev,
@@ -1764,7 +1773,7 @@ static int m88e1318_set_wol(struct phy_device *phydev,
 	if (oldpage < 0)
 		goto error;
 
-	if (wol->wolopts & WAKE_MAGIC) {
+	if (wol->wolopts & (WAKE_MAGIC | WAKE_PHY)) {
 		/* Explicitly switch to page 0x00, just to be sure */
 		err = marvell_write_page(phydev, MII_MARVELL_COPPER_PAGE);
 		if (err < 0)
@@ -1796,7 +1805,9 @@ static int m88e1318_set_wol(struct phy_device *phydev,
 				   MII_88E1318S_PHY_LED_TCR_INT_ACTIVE_LOW);
 		if (err < 0)
 			goto error;
+	}
 
+	if (wol->wolopts & WAKE_MAGIC) {
 		err = marvell_write_page(phydev, MII_MARVELL_WOL_PAGE);
 		if (err < 0)
 			goto error;
@@ -1832,6 +1843,30 @@ static int m88e1318_set_wol(struct phy_device *phydev,
 		/* Clear WOL status and disable magic packet matching */
 		err = __phy_modify(phydev, MII_88E1318S_PHY_WOL_CTRL,
 				   MII_88E1318S_PHY_WOL_CTRL_MAGIC_PACKET_MATCH_ENABLE,
+				   MII_88E1318S_PHY_WOL_CTRL_CLEAR_WOL_STATUS);
+		if (err < 0)
+			goto error;
+	}
+
+	if (wol->wolopts & WAKE_PHY) {
+		err = marvell_write_page(phydev, MII_MARVELL_WOL_PAGE);
+		if (err < 0)
+			goto error;
+
+		/* Clear WOL status and enable link up event */
+		err = __phy_modify(phydev, MII_88E1318S_PHY_WOL_CTRL, 0,
+				   MII_88E1318S_PHY_WOL_CTRL_CLEAR_WOL_STATUS |
+				   MII_88E1318S_PHY_WOL_CTRL_LINK_UP_ENABLE);
+		if (err < 0)
+			goto error;
+	} else {
+		err = marvell_write_page(phydev, MII_MARVELL_WOL_PAGE);
+		if (err < 0)
+			goto error;
+
+		/* Clear WOL status and disable link up event */
+		err = __phy_modify(phydev, MII_88E1318S_PHY_WOL_CTRL,
+				   MII_88E1318S_PHY_WOL_CTRL_LINK_UP_ENABLE,
 				   MII_88E1318S_PHY_WOL_CTRL_CLEAR_WOL_STATUS);
 		if (err < 0)
 			goto error;
@@ -1888,6 +1923,60 @@ static void marvell_get_stats(struct phy_device *phydev,
 
 	for (i = 0; i < count; i++)
 		data[i] = marvell_get_stat(phydev, i);
+}
+
+static int m88e1510_loopback(struct phy_device *phydev, bool enable)
+{
+	int err;
+
+	if (enable) {
+		u16 bmcr_ctl = 0, mscr2_ctl = 0;
+
+		if (phydev->speed == SPEED_1000)
+			bmcr_ctl = BMCR_SPEED1000;
+		else if (phydev->speed == SPEED_100)
+			bmcr_ctl = BMCR_SPEED100;
+
+		if (phydev->duplex == DUPLEX_FULL)
+			bmcr_ctl |= BMCR_FULLDPLX;
+
+		err = phy_write(phydev, MII_BMCR, bmcr_ctl);
+		if (err < 0)
+			return err;
+
+		if (phydev->speed == SPEED_1000)
+			mscr2_ctl = BMCR_SPEED1000;
+		else if (phydev->speed == SPEED_100)
+			mscr2_ctl = BMCR_SPEED100;
+
+		err = phy_modify_paged(phydev, MII_MARVELL_MSCR_PAGE,
+				       MII_88E1510_MSCR_2, BMCR_SPEED1000 |
+				       BMCR_SPEED100, mscr2_ctl);
+		if (err < 0)
+			return err;
+
+		/* Need soft reset to have speed configuration takes effect */
+		err = genphy_soft_reset(phydev);
+		if (err < 0)
+			return err;
+
+		err = phy_modify(phydev, MII_BMCR, BMCR_LOOPBACK,
+				 BMCR_LOOPBACK);
+
+		if (!err) {
+			/* It takes some time for PHY device to switch
+			 * into/out-of loopback mode.
+			 */
+			msleep(1000);
+		}
+		return err;
+	} else {
+		err = phy_modify(phydev, MII_BMCR, BMCR_LOOPBACK, 0);
+		if (err < 0)
+			return err;
+
+		return phy_config_aneg(phydev);
+	}
 }
 
 static int marvell_vct5_wait_complete(struct phy_device *phydev)
@@ -2942,7 +3031,7 @@ static struct phy_driver marvell_drivers[] = {
 		.get_sset_count = marvell_get_sset_count,
 		.get_strings = marvell_get_strings,
 		.get_stats = marvell_get_stats,
-		.set_loopback = genphy_loopback,
+		.set_loopback = m88e1510_loopback,
 		.get_tunable = m88e1011_get_tunable,
 		.set_tunable = m88e1011_set_tunable,
 		.cable_test_start = marvell_vct7_cable_test_start,

@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/vsprintf.c
-0x61b7b126	simple_strtoull	vmlinux	EXPORT_SYMBOL
+#2-
+0x61b7b126	simple_strtoull	vmlinux	EXPORT_SYMBOL	

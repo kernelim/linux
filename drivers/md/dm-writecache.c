@@ -522,8 +522,7 @@ static void ssd_commit_flushed(struct dm_writecache *wc, bool wait_for_ios)
 
 		region.sector += wc->start_sector;
 		atomic_inc(&endio.count);
-		req.bi_op = REQ_OP_WRITE;
-		req.bi_op_flags = REQ_SYNC;
+		req.bi_opf = REQ_OP_WRITE | REQ_SYNC;
 		req.mem.type = DM_IO_VMA;
 		req.mem.ptr.vma = (char *)wc->memory_map + (size_t)i * BITMAP_GRANULARITY;
 		req.client = wc->dm_io;
@@ -561,8 +560,7 @@ static void ssd_commit_superblock(struct dm_writecache *wc)
 
 	region.sector += wc->start_sector;
 
-	req.bi_op = REQ_OP_WRITE;
-	req.bi_op_flags = REQ_SYNC | REQ_FUA;
+	req.bi_opf = REQ_OP_WRITE | REQ_SYNC | REQ_FUA;
 	req.mem.type = DM_IO_VMA;
 	req.mem.ptr.vma = (char *)wc->memory_map;
 	req.client = wc->dm_io;
@@ -591,8 +589,7 @@ static void writecache_disk_flush(struct dm_writecache *wc, struct dm_dev *dev)
 	region.bdev = dev->bdev;
 	region.sector = 0;
 	region.count = 0;
-	req.bi_op = REQ_OP_WRITE;
-	req.bi_op_flags = REQ_PREFLUSH;
+	req.bi_opf = REQ_OP_WRITE | REQ_PREFLUSH;
 	req.mem.type = DM_IO_KMEM;
 	req.mem.ptr.addr = NULL;
 	req.client = wc->dm_io;
@@ -980,8 +977,7 @@ static int writecache_read_metadata(struct dm_writecache *wc, sector_t n_sectors
 	region.bdev = wc->ssd_dev->bdev;
 	region.sector = wc->start_sector;
 	region.count = n_sectors;
-	req.bi_op = REQ_OP_READ;
-	req.bi_op_flags = REQ_SYNC;
+	req.bi_opf = REQ_OP_READ | REQ_SYNC;
 	req.mem.type = DM_IO_VMA;
 	req.mem.ptr.vma = (char *)wc->memory_map;
 	req.client = wc->dm_io;
@@ -1597,7 +1593,8 @@ done:
 
 	default:
 		BUG();
-		return -1;
+		wc_unlock(wc);
+		return DM_MAPIO_KILL;
 	}
 }
 

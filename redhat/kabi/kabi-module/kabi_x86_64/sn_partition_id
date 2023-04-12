@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/platform/uv/bios_uv.c
-0x1e5a5f22	sn_partition_id	vmlinux	EXPORT_SYMBOL_GPL
+#2-
+0x1e5a5f22	sn_partition_id	vmlinux	EXPORT_SYMBOL_GPL	

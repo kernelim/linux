@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/time/timer.c
-0x8ddd8aad	schedule_timeout	vmlinux	EXPORT_SYMBOL
+#2-
+0x8ddd8aad	schedule_timeout	vmlinux	EXPORT_SYMBOL	

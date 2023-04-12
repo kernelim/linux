@@ -8195,9 +8195,10 @@ static struct btrfs_dio_private *btrfs_create_dio_private(struct bio *dio_bio,
 	return dip;
 }
 
-static void btrfs_submit_direct(struct inode *inode, struct iomap *iomap,
+static void btrfs_submit_direct(const struct iomap_iter *iter,
 		struct bio *dio_bio, loff_t file_offset)
 {
+	struct inode *inode = iter->inode;
 	const bool write = (btrfs_op(dio_bio) == BTRFS_MAP_WRITE);
 	struct btrfs_fs_info *fs_info = btrfs_sb(inode->i_sb);
 	const bool raid56 = (btrfs_data_alloc_profile(fs_info) &
@@ -8213,7 +8214,7 @@ static void btrfs_submit_direct(struct inode *inode, struct iomap *iomap,
 	int ret;
 	blk_status_t status;
 	struct btrfs_io_geometry geom;
-	struct btrfs_dio_data *dio_data = iomap->private;
+	struct btrfs_dio_data *dio_data = iter->iomap.private;
 	struct extent_map *em = NULL;
 
 	dip = btrfs_create_dio_private(dio_bio, inode, file_offset);
@@ -10254,11 +10255,6 @@ int btrfs_prealloc_file_range_trans(struct inode *inode,
 					   min_size, actual_len, alloc_hint, trans);
 }
 
-static int btrfs_set_page_dirty(struct page *page)
-{
-	return __set_page_dirty_nobuffers(page);
-}
-
 static int btrfs_permission(struct user_namespace *mnt_userns,
 			    struct inode *inode, int mask)
 {
@@ -10810,7 +10806,7 @@ static const struct address_space_operations btrfs_aops = {
 #ifdef CONFIG_MIGRATION
 	.migratepage	= btrfs_migratepage,
 #endif
-	.set_page_dirty	= btrfs_set_page_dirty,
+	.dirty_folio	= filemap_dirty_folio,
 	.error_remove_page = generic_error_remove_page,
 	.swap_activate	= btrfs_swap_activate,
 	.swap_deactivate = btrfs_swap_deactivate,

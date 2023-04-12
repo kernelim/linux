@@ -158,6 +158,7 @@ SYM_INNER_LABEL(vmx_vmexit, SYM_L_GLOBAL)
 
 	/* Restore unwind state from before the VMRESUME/VMLAUNCH. */
 	UNWIND_HINT_RESTORE
+	ENDBR
 
 	/* Temporarily save guest's RAX. */
 	push %_ASM_AX

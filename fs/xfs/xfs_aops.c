@@ -98,7 +98,7 @@ xfs_end_ioend(
 	/*
 	 * Just clean up the in-memory structures if the fs has been shut down.
 	 */
-	if (XFS_FORCED_SHUTDOWN(mp)) {
+	if (xfs_is_shutdown(mp)) {
 		error = -EIO;
 		goto done;
 	}
@@ -114,9 +114,8 @@ xfs_end_ioend(
 	if (unlikely(error)) {
 		if (ioend->io_flags & IOMAP_F_SHARED) {
 			xfs_reflink_cancel_cow_range(ip, offset, size, true);
-			xfs_bmap_punch_delalloc_range(ip,
-						      XFS_B_TO_FSBT(mp, offset),
-						      XFS_B_TO_FSB(mp, size));
+			xfs_bmap_punch_delalloc_range(ip, offset,
+					offset + size);
 		}
 		goto done;
 	}
@@ -269,7 +268,7 @@ xfs_map_blocks(
 	int			retries = 0;
 	int			error = 0;
 
-	if (XFS_FORCED_SHUTDOWN(mp))
+	if (xfs_is_shutdown(mp))
 		return -EIO;
 
 	/*
@@ -359,7 +358,7 @@ retry:
 	    isnullstartblock(imap.br_startblock))
 		goto allocate_blocks;
 
-	xfs_bmbt_to_iomap(ip, &wpc->iomap, &imap, 0);
+	xfs_bmbt_to_iomap(ip, &wpc->iomap, &imap, 0, XFS_WPC(wpc)->data_seq);
 	trace_xfs_map_blocks_found(ip, offset, count, whichfork, &imap);
 	return 0;
 allocate_blocks:
@@ -426,39 +425,44 @@ xfs_prepare_ioend(
 }
 
 /*
- * If the page has delalloc blocks on it, we need to punch them out before we
- * invalidate the page.  If we don't, we leave a stale delalloc mapping on the
- * inode that can trip up a later direct I/O read operation on the same region.
+ * If the page has delalloc blocks on it, the caller is asking us to punch them
+ * out. If we don't, we can leave a stale delalloc mapping covered by a clean
+ * page that needs to be dirtied again before the delalloc mapping can be
+ * converted. This stale delalloc mapping can trip up a later direct I/O read
+ * operation on the same region.
  *
- * We prevent this by truncating away the delalloc regions on the page.  Because
+ * We prevent this by truncating away the delalloc regions on the page. Because
  * they are delalloc, we can do this without needing a transaction. Indeed - if
  * we get ENOSPC errors, we have to be able to do this truncation without a
- * transaction as there is no space left for block reservation (typically why we
- * see a ENOSPC in writeback).
+ * transaction as there is no space left for block reservation (typically why
+ * we see a ENOSPC in writeback).
  */
 static void
 xfs_discard_page(
 	struct page		*page,
 	loff_t			fileoff)
 {
-	struct inode		*inode = page->mapping->host;
-	struct xfs_inode	*ip = XFS_I(inode);
+	struct xfs_inode	*ip = XFS_I(page->mapping->host);
 	struct xfs_mount	*mp = ip->i_mount;
 	unsigned int		pageoff = offset_in_page(fileoff);
-	xfs_fileoff_t		start_fsb = XFS_B_TO_FSBT(mp, fileoff);
-	xfs_fileoff_t		pageoff_fsb = XFS_B_TO_FSBT(mp, pageoff);
 	int			error;
 
-	if (XFS_FORCED_SHUTDOWN(mp))
+	if (xfs_is_shutdown(mp))
 		goto out_invalidate;
 
 	xfs_alert_ratelimited(mp,
 		"page discard on page "PTR_FMT", inode 0x%llx, offset %llu.",
 			page, ip->i_ino, fileoff);
 
-	error = xfs_bmap_punch_delalloc_range(ip, start_fsb,
-			i_blocks_per_page(inode, page) - pageoff_fsb);
-	if (error && !XFS_FORCED_SHUTDOWN(mp))
+	/*
+	 * The end of the punch range is always the offset of the the first
+	 * byte of the next page. Hence the end offset is only dependent on the
+	 * page itself and not the start offset that is passed in.
+	 */
+	error = xfs_bmap_punch_delalloc_range(ip, fileoff,
+				page_offset(page) + PAGE_SIZE);
+
+	if (error && !xfs_is_shutdown(mp))
 		xfs_alert(mp, "page discard unable to remove delalloc mapping.");
 out_invalidate:
 	iomap_invalidatepage(page, pageoff, PAGE_SIZE - pageoff);
@@ -469,22 +473,6 @@ static const struct iomap_writeback_ops xfs_writeback_ops = {
 	.prepare_ioend		= xfs_prepare_ioend,
 	.discard_page		= xfs_discard_page,
 };
-
-STATIC int
-xfs_vm_writepage(
-	struct page		*page,
-	struct writeback_control *wbc)
-{
-	struct xfs_writepage_ctx wpc = { };
-
-	if (WARN_ON_ONCE(current->journal_info)) {
-		redirty_page_for_writepage(wbc, page);
-		unlock_page(page);
-		return 0;
-	}
-
-	return iomap_writepage(page, wbc, &wpc.ctx, &xfs_writeback_ops);
-}
 
 STATIC int
 xfs_vm_writepages(
@@ -568,9 +556,8 @@ xfs_iomap_swapfile_activate(
 const struct address_space_operations xfs_address_space_operations = {
 	.readpage		= xfs_vm_readpage,
 	.readahead		= xfs_vm_readahead,
-	.writepage		= xfs_vm_writepage,
 	.writepages		= xfs_vm_writepages,
-	.set_page_dirty		= __set_page_dirty_nobuffers,
+	.dirty_folio		= filemap_dirty_folio,
 	.releasepage		= iomap_releasepage,
 	.invalidatepage		= iomap_invalidatepage,
 	.bmap			= xfs_vm_bmap,
@@ -584,7 +571,6 @@ const struct address_space_operations xfs_address_space_operations = {
 const struct address_space_operations xfs_dax_aops = {
 	.writepages		= xfs_dax_writepages,
 	.direct_IO		= noop_direct_IO,
-	.set_page_dirty		= __set_page_dirty_no_writeback,
-	.invalidatepage		= noop_invalidatepage,
+	.dirty_folio		= noop_dirty_folio,
 	.swap_activate		= xfs_iomap_swapfile_activate,
 };

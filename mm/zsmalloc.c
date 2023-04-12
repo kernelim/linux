@@ -482,12 +482,12 @@ static inline struct page *get_first_page(struct zspage *zspage)
 	return first_page;
 }
 
-static inline int get_first_obj_offset(struct page *page)
+static inline unsigned int get_first_obj_offset(struct page *page)
 {
 	return page->page_type;
 }
 
-static inline void set_first_obj_offset(struct page *page, int offset)
+static inline void set_first_obj_offset(struct page *page, unsigned int offset)
 {
 	page->page_type = offset;
 }
@@ -1594,7 +1594,7 @@ static void zs_object_copy(struct size_class *class, unsigned long dst,
 static unsigned long find_alloced_obj(struct size_class *class,
 					struct page *page, int *obj_idx)
 {
-	int offset = 0;
+	unsigned int offset;
 	int index = *obj_idx;
 	unsigned long handle = 0;
 	void *addr = kmap_atomic(page);
@@ -1718,11 +1718,40 @@ static enum fullness_group putback_zspage(struct size_class *class,
  */
 static void lock_zspage(struct zspage *zspage)
 {
-	struct page *page = get_first_page(zspage);
+	struct page *curr_page, *page;
 
-	do {
-		lock_page(page);
-	} while ((page = get_next_page(page)) != NULL);
+	/*
+	 * Pages we haven't locked yet can be migrated off the list while we're
+	 * trying to lock them, so we need to be careful and only attempt to
+	 * lock each page under migrate_read_lock(). Otherwise, the page we lock
+	 * may no longer belong to the zspage. This means that we may wait for
+	 * the wrong page to unlock, so we must take a reference to the page
+	 * prior to waiting for it to unlock outside migrate_read_lock().
+	 */
+	while (1) {
+		migrate_read_lock(zspage);
+		page = get_first_page(zspage);
+		if (trylock_page(page))
+			break;
+		get_page(page);
+		migrate_read_unlock(zspage);
+		wait_on_page_locked(page);
+		put_page(page);
+	}
+
+	curr_page = page;
+	while ((page = get_next_page(curr_page))) {
+		if (trylock_page(page)) {
+			curr_page = page;
+		} else {
+			get_page(page);
+			migrate_read_unlock(zspage);
+			wait_on_page_locked(page);
+			put_page(page);
+			migrate_read_lock(zspage);
+		}
+	}
+	migrate_read_unlock(zspage);
 }
 
 static int zs_init_fs_context(struct fs_context *fc)
@@ -1844,7 +1873,7 @@ static int zs_page_migrate(struct address_space *mapping, struct page *newpage,
 	struct zspage *zspage;
 	struct page *dummy;
 	void *s_addr, *d_addr, *addr;
-	int offset;
+	unsigned int offset;
 	unsigned long handle;
 	unsigned long old_obj, new_obj;
 	unsigned int obj_idx;

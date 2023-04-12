@@ -8,6 +8,7 @@
 #include <linux/kmemleak.h>
 #include <linux/page_owner.h>
 #include <linux/page_idle.h>
+#include <linux/page_table_check.h>
 
 /*
  * struct page extension
@@ -74,6 +75,9 @@ static struct page_ext_operations *page_ext_ops[] __initdata = {
 #endif
 #if defined(CONFIG_PAGE_IDLE_FLAG) && !defined(CONFIG_64BIT)
 	&page_idle_ops,
+#endif
+#ifdef CONFIG_PAGE_TABLE_CHECK
+	&page_table_check_ops,
 #endif
 };
 
@@ -201,7 +205,7 @@ fail:
 	panic("Out of memory");
 }
 
-#else /* CONFIG_FLATMEM */
+#else /* CONFIG_SPARSEMEM */
 
 struct page_ext *lookup_page_ext(const struct page *page)
 {
@@ -316,7 +320,7 @@ static int __meminit online_page_ext(unsigned long start_pfn,
 		 * online__pages(), and start_pfn should exist.
 		 */
 		nid = pfn_to_nid(start_pfn);
-		VM_BUG_ON(!node_state(nid, N_ONLINE));
+		VM_BUG_ON(!node_online(nid));
 	}
 
 	for (pfn = start; !fail && pfn < end; pfn += PAGES_PER_SECTION)

@@ -13,7 +13,7 @@ summary: Entry point.
 :tip-caption: pass:[<span style="font-size: 2em">💡</span>]
 :warning-caption: pass:[<span style="font-size: 2em">⚠</span>]
 
-== Introduction
+{{< toc >}}
 
 This document aims to help you quickly get started with contributing to the Red Hat-based kernel projects including https://gitlab.com/redhat/rhel/src/kernel[RHEL kernels], https://gitlab.com/centos-stream/src/kernel[CentOS Stream kernels], and https://gitlab.com/cki-project/kernel-ark[the Fedora/ARK kernel].
 
@@ -24,40 +24,10 @@ The target audience of this document is a Red Hat Kernel Developer or Partner En
 
 Looking for the xref:faq.adoc[FAQ?]
 
-|===
-| *Topic* | *Description*
-| <<Preparing to contribute for RHEL kernel>> a|
-* Learn how to create and set up Red Hat Bugzilla and GitLab accounts.
-* Get familiar with the most important Red Hat kernel-related projects.
-* Fork and configure Red Hat kernel projects.
-
-| <<Creating merge requests>> a|
-* Get familiar with the Red Hat kernel engineering guidelines and best practices for commits and merge requests (MRs).
-* Learn how to verify your merge request's data before submitting the merge request.
-* Learn how to create a proper MR of your work.
-
-| <<Performing additional operations on merge requests>> a|
-* Get a list of MRs.
-* Get patches from an MR.
-* Show comments on your MR.
-* Approve your MR.
-* Close your MR.
-* And Others.
-
-| <<Additional resources>> a|
-* GitLab forks.
-* The `lab`, `rhstatus`, and `revumatic` utilities for performing basic contributor and reviewer actions.
-* The RHEL kernel workflow process.
-* And others.
-
-| <<Appendix>> a|
-* Acronym expansions.
-
-|===
-
 == Preparing to contribute for RHEL kernel
 
-. Working on the RHEL kernel requires an appropriately configured Bugzilla and GitLab account.
+=== Configuring Bugzilla and GitLab accounts
+
 * Create and configure your https://bugzilla.redhat.com/createaccount.cgi[Red Hat Bugzilla account].
 .. Red Hat Developers must be a member of the `redhat` bugzilla group to properly associate their account with GitLab.
 .. Red Hat Partner Engineers must be a member of `redhat_partner_engineer_staff` to properly associate their account with GitLab.
@@ -77,23 +47,27 @@ This link should be used when starting fresh, or when common issues such as thes
 NOTE: It is recommended to renew the SSO association on a regular basis (monthly or quarterly) as it can expire and cause unintended behavior. +
 _This does not apply to External Contributors.  Instructions will be provide in a separate document._
 
-. Install and configure your utilities for performing contributor and reviewer actions. +
+=== Utilities
+Install and configure your utilities for performing contributor and reviewer actions. +
 You can choose from: +
+
 * Internal Tools:
 ** https://gitlab.com/prarit/rhstatus[rhstatus] - Provides a terminal based report based on the current status of a developer's TODO list and open Merge Requests.
 * External Tools:
 ** https://gitlab.com/redhat/centos-stream/src/kernel/utils/revumatic/[revumatic] - A review tool that provides a text user interface to review GitLab Merge Requests.
-** xref:bichon.adoc[bichon] - A terminal based user interface for reviewing GitLab Merge Requests.
 ** xref:lab.adoc[lab] - Interact with repositories on GitLab (creating/editing Merge Requests, forking projects, etc.) via command line.
 +
 IMPORTANT: We recommend using the `lab` utility to create forks and subsequent MRs to provide a consistent experience. Proceeding with this document assumes that `lab` is configured.
 
-. Review notable Red Hat projects.
+=== Notable Red Hat projects
+
 ** https://red.ht/GitLab[Main Red Hat RHEL namespace]
 ** https://gitlab.com/redhat/rhel/src/kernel/rhel-8[Private rhel-8 kernel source]
 ** https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9[Public centos-stream-9 kernel source (You want to contribute here!)]
 ** https://gitlab.com/redhat/rhel/src/kernel/rhel-9[Private rhel-9 z-stream/EUS contribution kernel source]
-. Create a Bugzilla ticket for the bug you want to fix or for the feature you want to add.
+
+=== Createing a Bugzilla ticket
+
 * Select the appropriate release in the product and version fields. +
 _For example, for RHEL 9:_ +
 *Product*: Red Hat Enterprise Linux 9 +
@@ -102,7 +76,11 @@ _For example, for RHEL 9:_ +
 *Sub Component*: select the suitable one or select “other” if there is no such one.
 +
 image::images/qsg-bugzilla_image.png[align="center"]
-. anchor:getreleaseapproval[] Get release approval. _(This does not apply to External Contributors)_
+
+=== anchor:getreleaseapproval[] Get release approval
+
+_This does not apply to External Contributors_
+
 .. http://pkgs.devel.redhat.com/rules.html[Requirements for release+ can be found here.] +
 _Example: RHEL8.6 search for rhel-8.6.0_ +
 _Example: c9s (for RHEL9 bugzillas)_
@@ -112,6 +90,8 @@ _(This guidance may vary and/or change down the road)_
 `ITR, DTM, ITM, devel_ack+, qa_ack+ = release+`
 ... After ITM 26: +
 Same requirements, but also `exception+` or `blocker+` based on schedule.
+
+=== Clone, fork and push
 . Clone the project you want to contribute to. +
 `git clone _<project_SSH_URL>_`
 * *RHEL9*:
@@ -137,35 +117,44 @@ Note that GitLab username is used for the remote name.
 
 . Familiarize yourself with link:CommitRules.adoc[Commit Rules] and xref:verifying_a_gitlab_mr.adoc[Verify the MR information] documents.
 
-. When done with your work, create a merge request (MR) on some branch other than the `main` branch. +
+=== Creating a merge request draft
+
+When done with your work, create a merge request (MR) on some branch other than the `main` branch. +
 `git checkout -b <branch_name>` +
 `# do your work` +
 `git push -u _<GitLab_username>_ _<branch_name>_` +
 `lab mr create --draft --force-linebreak _[<origin>]_` +
 _Note that the previous command produces a MR URL that contains a MR ID._
-+
+
 We strongly recommend that users of the `lab` utility use the `--draft` option to verify the changes pass the https://gitlab.com/cki-project/kernel-webhooks/[kernel project's webhooks]. +
 To achieve “optimal” formatting of the MR overview text, it is recommended that you use the `--force-linebreak` option with the `lab` utility. +
-+
-Here are a couple of examples with the same input template with and without --force-linebreak:
-+
-.With --force-linebreak
-image::images/qsg-lab_mr_create-forcelinebreak.png[caption=""]
-+
-.Without --force-linebreak
-image::images/qsg-lab_mr_create-noforcelinebreak.png[caption=""]
-+
-Some tips:
 
-.. If you choose to use Markdown, some common formatting problems can be found and addressed in xref:faq.adoc#commonformattingissues[FAQ "I followed the commit rules as detailed, why do I have a red label that is seemingly satisfied?"] and xref:faq.adoc#badformatting[FAQ "The formatting is bad, how do I fix it?"].
-.. While editing the MR description, if you decide you don't want to create it just yet, exiting the editor with a non-zero return value (e.g. vim's `:cq`), or saving an empty file for the MR description will cause `lab` to abort the MR creation. +
-+
+Here are a couple of examples with the same input template
+
+with `--force-linebreak`:
+
+image::images/qsg-lab_mr_create-forcelinebreak.png[caption=""]
+
+and without `--force-linebreak`:
+
+image::images/qsg-lab_mr_create-noforcelinebreak.png[caption=""]
+
+
+=== Some tips
+
+If you choose to use Markdown, some common formatting problems can be found and addressed in xref:faq.adoc#commonformattingissues[FAQ "I followed the commit rules as detailed, why do I have a red label that is seemingly satisfied?"] and xref:faq.adoc#badformatting[FAQ "The formatting is bad, how do I fix it?"].
+
+While editing the MR description, if you decide you don't want to create it just yet, exiting the editor with a non-zero return value (e.g. vim's `:cq`), or saving an empty file for the MR description will cause `lab` to abort the MR creation. +
+
+
+=== MR status
+
 For a MR to be approved and subsequently merged, it must meet certain requirements. The label panel on the right shows the current status. For example:
-+
+
 image::images/qsg-mr_labels_grouped.png[align="center"]
-+
-*Label Color Descriptions* +
-+
+
+==== Label Color Descriptions
+
 |===
 |*Color*|*Description*|*Example*
 
@@ -191,14 +180,17 @@ image::images/qsg-label_image-darkgreen.png[]
 image::images/qsg-label_image-lightgreen.png[]
 
 |===
-+
+
 The full list of possible labels is https://gitlab.com/cki-project/kernel-webhooks/-/blob/main/utils/labels.yaml[available for reference]. +
-+
-.. As various automated bot jobs run, different labels will be added or removed based on analysis of the MR or BZ or the results of tests performed: +
-+
+
+As various automated bot jobs run, different labels will be added or removed based on analysis of the MR or BZ or the results of tests performed: +
+
 image::images/qsg-bot_activity.png[align="center"]
-+
+
 _If you don't like the relative timestamps, they can be turned off (changed to date+time) in your GitLab preferences._
+
+=== Bugzilla ticket status
+
 .. The CKI KWF Bot updates Bugzillas when applicable. +
 Some examples include:
 ... When a BZ is detected in an MR, it automatically adds the link to the BZ.
@@ -221,6 +213,9 @@ image::images/qsg-bot_bz_modified.png[]
 NOTE: If a CKI test fails, you should check https://cki-project.org/docs/user_docs/gitlab-mr-testing/faq/#a-test-failed-and-i-dont-understand-why[CKI test debugging FAQ]. If you're new to CKI start at the https://cki-project.org/docs/user_docs/gitlab-mr-testing/faq/#steps-for-developers-to-follow-to-get-a-green-check-mark[generic guide] which has further pointers. +
 _If you encounter a failed test that results in a new purple label “CKI_RT::Failed:merge”, this can be ignored._ +
 
+
+=== Submitting MR
+
 . Once your MR has passed the initial webhooks checks and is ready for review by others, move it out of `draft` state. +
 `lab mr edit <mrID> --ready` +
 +
@@ -233,12 +228,12 @@ All approved MR's, assuming they have the +readyForMerge+ label, will normally b
 
 . xref:create-a-merge-request-for-zstream.adoc[Create MR targeting a specific branch (i.e. z-stream)]
 
+
 == Performing additional operations on merge requests
 
+=== Checking out and viewing
+
 * Get a list of MRs.
-** `bichon` +
-+
--or-
 ** `git fetch --all` +
 `lab mr list --all`
 
@@ -256,41 +251,25 @@ All approved MR's, assuming they have the +readyForMerge+ label, will normally b
 ** `git-format-patch origin/main`
 
 * View the code without checkout.
-** `bichon` # select MR from main page +
-+
--or-
 ** `lab mr show --patch`
 
 * Show comments on an MR.
-** `bichon` +
-+
--or-
 ** `lab mr show <mrID> --comments`
+
+=== Performing actions
 
 * Comment on an MR.
 ** Non-blocking
-*** `bichon` # select description, and add comment +
-+
--or-
 *** `lab mr comment _<mrID>_`
 
 ** Blocking (NACK)
-*** `bichon` # select commit, add comment, select 'Enable replies to comment' +
-+
--or-
 *** `lab mr discussion _<mrID>_`
 *** `lab mr reply _<mrID>:<comment_id>_`
 
 * Approve an MR.
-** `bichon` # select MR and 'a' +
-+
--or-
 ** `lab mr approve _<mrID>_`
 
 * Unapprove an MR (Rescind-Acked-by).
-** `bichon` # select MR and 'A' +
-+
--or-
 ** `lab mr unapprove _<mrID>_`
 
 * Close an MR.
@@ -298,7 +277,10 @@ All approved MR's, assuming they have the +readyForMerge+ label, will normally b
 
 * xref:updating_or_fixing_a_mr.adoc[Update or Fix your MR if needed.]
 
-== Additional resources
+
+== Appendix
+
+=== Additional resources
 
 * https://source.redhat.com/groups/public/kernel[General Kernel Info Page]
 * link:what_is_a_GitLab_fork.adoc[What is a GitLab Fork?]
@@ -313,7 +295,8 @@ All approved MR's, assuming they have the +readyForMerge+ label, will normally b
 * https://gitlab.com/redhat/rhel/src/kernel/rhel-8[RHEL-8 Kernel Tree]
 * https://groups.google.com/a/redhat.com/g/kernel-info[kernel-info mailing list]
 
-== Appendix
+
+=== Acronyms
 
 |===
 | *Acronym* | *Description*

@@ -422,7 +422,7 @@ static void serial_pxa_shutdown(struct uart_port *port)
 
 static void
 serial_pxa_set_termios(struct uart_port *port, struct ktermios *termios,
-		       struct ktermios *old)
+		       const struct ktermios *old)
 {
 	struct uart_pxa_port *up = (struct uart_pxa_port *)port;
 	unsigned char cval, fcr = 0;
@@ -619,7 +619,7 @@ static void wait_for_xmitr(struct uart_pxa_port *up)
 	}
 }
 
-static void serial_pxa_console_putchar(struct uart_port *port, int ch)
+static void serial_pxa_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	struct uart_pxa_port *up = (struct uart_pxa_port *)port;
 

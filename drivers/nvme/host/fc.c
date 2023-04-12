@@ -259,7 +259,7 @@ nvme_fc_free_lport(struct kref *ref)
 		complete(&nvme_fc_unload_proceed);
 	spin_unlock_irqrestore(&nvme_fc_lock, flags);
 
-	ida_simple_remove(&nvme_fc_local_port_cnt, lport->localport.port_num);
+	ida_free(&nvme_fc_local_port_cnt, lport->localport.port_num);
 	ida_destroy(&lport->endp_cnt);
 
 	put_device(lport->dev);
@@ -399,7 +399,7 @@ nvme_fc_register_localport(struct nvme_fc_port_info *pinfo,
 		goto out_reghost_failed;
 	}
 
-	idx = ida_simple_get(&nvme_fc_local_port_cnt, 0, 0, GFP_KERNEL);
+	idx = ida_alloc(&nvme_fc_local_port_cnt, GFP_KERNEL);
 	if (idx < 0) {
 		ret = -ENOSPC;
 		goto out_fail_kfree;
@@ -439,7 +439,7 @@ nvme_fc_register_localport(struct nvme_fc_port_info *pinfo,
 	return 0;
 
 out_ida_put:
-	ida_simple_remove(&nvme_fc_local_port_cnt, idx);
+	ida_free(&nvme_fc_local_port_cnt, idx);
 out_fail_kfree:
 	kfree(newrec);
 out_reghost_failed:
@@ -535,7 +535,7 @@ nvme_fc_free_rport(struct kref *ref)
 	spin_unlock_irqrestore(&nvme_fc_lock, flags);
 
 	WARN_ON(!list_empty(&rport->disc_list));
-	ida_simple_remove(&lport->endp_cnt, rport->remoteport.port_num);
+	ida_free(&lport->endp_cnt, rport->remoteport.port_num);
 
 	kfree(rport);
 
@@ -713,7 +713,7 @@ nvme_fc_register_remoteport(struct nvme_fc_local_port *localport,
 		goto out_lport_put;
 	}
 
-	idx = ida_simple_get(&lport->endp_cnt, 0, 0, GFP_KERNEL);
+	idx = ida_alloc(&lport->endp_cnt, GFP_KERNEL);
 	if (idx < 0) {
 		ret = -ENOSPC;
 		goto out_kfree_rport;
@@ -2392,7 +2392,7 @@ nvme_fc_ctrl_free(struct kref *ref)
 	unsigned long flags;
 
 	if (ctrl->ctrl.tagset) {
-		blk_cleanup_queue(ctrl->ctrl.connect_q);
+		blk_mq_destroy_queue(ctrl->ctrl.connect_q);
 		blk_mq_free_tag_set(&ctrl->tag_set);
 	}
 
@@ -2402,8 +2402,8 @@ nvme_fc_ctrl_free(struct kref *ref)
 	spin_unlock_irqrestore(&ctrl->rport->lock, flags);
 
 	nvme_start_admin_queue(&ctrl->ctrl);
-	blk_cleanup_queue(ctrl->ctrl.admin_q);
-	blk_cleanup_queue(ctrl->ctrl.fabrics_q);
+	blk_mq_destroy_queue(ctrl->ctrl.admin_q);
+	blk_mq_destroy_queue(ctrl->ctrl.fabrics_q);
 	blk_mq_free_tag_set(&ctrl->admin_tag_set);
 
 	kfree(ctrl->queues);
@@ -2411,7 +2411,7 @@ nvme_fc_ctrl_free(struct kref *ref)
 	put_device(ctrl->dev);
 	nvme_fc_rport_put(ctrl->rport);
 
-	ida_simple_remove(&nvme_fc_ctrl_cnt, ctrl->cnum);
+	ida_free(&nvme_fc_ctrl_cnt, ctrl->cnum);
 	if (ctrl->ctrl.opts)
 		nvmf_free_options(ctrl->ctrl.opts);
 	kfree(ctrl);
@@ -2456,8 +2456,7 @@ nvme_fc_nvme_ctrl_freed(struct nvme_ctrl *nctrl)
  * status. The done path will return the io request back to the block
  * layer with an error status.
  */
-static bool
-nvme_fc_terminate_exchange(struct request *req, void *data, bool reserved)
+static bool nvme_fc_terminate_exchange(struct request *req, void *data)
 {
 	struct nvme_ctrl *nctrl = data;
 	struct nvme_fc_ctrl *ctrl = to_fc_ctrl(nctrl);
@@ -2567,8 +2566,7 @@ nvme_fc_error_recovery(struct nvme_fc_ctrl *ctrl, char *errmsg)
 	nvme_reset_ctrl(&ctrl->ctrl);
 }
 
-static enum blk_eh_timer_return
-nvme_fc_timeout(struct request *rq, bool reserved)
+static enum blk_eh_timer_return nvme_fc_timeout(struct request *rq)
 {
 	struct nvme_fc_fcp_op *op = blk_mq_rq_to_pdu(rq);
 	struct nvme_fc_ctrl *ctrl = op->ctrl;
@@ -2862,7 +2860,7 @@ nvme_fc_complete_rq(struct request *rq)
 	nvme_fc_ctrl_put(ctrl);
 }
 
-static int nvme_fc_map_queues(struct blk_mq_tag_set *set)
+static void nvme_fc_map_queues(struct blk_mq_tag_set *set)
 {
 	struct nvme_fc_ctrl *ctrl = set->driver_data;
 	int i;
@@ -2882,7 +2880,6 @@ static int nvme_fc_map_queues(struct blk_mq_tag_set *set)
 		else
 			blk_mq_map_queues(map);
 	}
-	return 0;
 }
 
 static const struct blk_mq_ops nvme_fc_mq_ops = {
@@ -2936,11 +2933,9 @@ nvme_fc_create_io_queues(struct nvme_fc_ctrl *ctrl)
 
 	ctrl->ctrl.tagset = &ctrl->tag_set;
 
-	ctrl->ctrl.connect_q = blk_mq_init_queue(&ctrl->tag_set);
-	if (IS_ERR(ctrl->ctrl.connect_q)) {
-		ret = PTR_ERR(ctrl->ctrl.connect_q);
+	ret = nvme_ctrl_init_connect_q(&(ctrl->ctrl));
+	if (ret)
 		goto out_free_tag_set;
-	}
 
 	ret = nvme_fc_create_hw_io_queues(ctrl, ctrl->ctrl.sqsize + 1);
 	if (ret)
@@ -2957,7 +2952,7 @@ nvme_fc_create_io_queues(struct nvme_fc_ctrl *ctrl)
 out_delete_hw_queues:
 	nvme_fc_delete_hw_io_queues(ctrl);
 out_cleanup_blk_queue:
-	blk_cleanup_queue(ctrl->ctrl.connect_q);
+	blk_mq_destroy_queue(ctrl->ctrl.connect_q);
 out_free_tag_set:
 	blk_mq_free_tag_set(&ctrl->tag_set);
 	nvme_fc_free_io_queues(ctrl);
@@ -3492,7 +3487,7 @@ nvme_fc_init_ctrl(struct device *dev, struct nvmf_ctrl_options *opts,
 		goto out_fail;
 	}
 
-	idx = ida_simple_get(&nvme_fc_ctrl_cnt, 0, 0, GFP_KERNEL);
+	idx = ida_alloc(&nvme_fc_ctrl_cnt, GFP_KERNEL);
 	if (idx < 0) {
 		ret = -ENOSPC;
 		goto out_free_ctrl;
@@ -3646,16 +3641,16 @@ fail_ctrl:
 	return ERR_PTR(-EIO);
 
 out_cleanup_admin_q:
-	blk_cleanup_queue(ctrl->ctrl.admin_q);
+	blk_mq_destroy_queue(ctrl->ctrl.admin_q);
 out_cleanup_fabrics_q:
-	blk_cleanup_queue(ctrl->ctrl.fabrics_q);
+	blk_mq_destroy_queue(ctrl->ctrl.fabrics_q);
 out_free_admin_tag_set:
 	blk_mq_free_tag_set(&ctrl->admin_tag_set);
 out_free_queues:
 	kfree(ctrl->queues);
 out_free_ida:
 	put_device(ctrl->dev);
-	ida_simple_remove(&nvme_fc_ctrl_cnt, ctrl->cnum);
+	ida_free(&nvme_fc_ctrl_cnt, ctrl->cnum);
 out_free_ctrl:
 	kfree(ctrl);
 out_fail:

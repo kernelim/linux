@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/arm64/lib/strcmp.S
-0xe2d5255a	strcmp	vmlinux	EXPORT_SYMBOL
+#2-
+0xe2d5255a	strcmp	vmlinux	EXPORT_SYMBOL	

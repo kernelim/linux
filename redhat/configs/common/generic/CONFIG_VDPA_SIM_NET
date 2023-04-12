@@ -1,1 +1,1 @@
-CONFIG_VDPA_SIM_NET=m
+# CONFIG_VDPA_SIM_NET is not set

@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:mm/mempool.c
-0x487048b0	mempool_create_node	vmlinux	EXPORT_SYMBOL
+#2-
+0x487048b0	mempool_create_node	vmlinux	EXPORT_SYMBOL	

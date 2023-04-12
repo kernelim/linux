@@ -5,8 +5,14 @@ draft: false
 weight: 2
 summary: Red Hat Kernel Engineering Guidelines and 'Best Practices' for commits and Merge Requests (MRs) Titles and Descriptions for the Red Hat Linux Kernels, aka “Commit Rules”.
 ---
+// Borrowed from https://github.com/asciidoctor/asciidoctor.org/issues/571
+:caution-caption: pass:[<span style="font-size: 2em">☠</span>]
+:important-caption: pass:[<span style="font-size: 2em">❗</span>]
+:note-caption: pass:[<span style="font-size: 2em">🛈</span>]
+:tip-caption: pass:[<span style="font-size: 2em">💡</span>]
+:warning-caption: pass:[<span style="font-size: 2em">⚠</span>]
 
-= CommitRules
+{{< toc >}}
 
 https://red.ht/kwf_commit_rules[https://red.ht/kwf_commit_rules]
 
@@ -16,7 +22,7 @@ Following the upstream kernel patch guidelines will satisfy the general construc
 
 This document assumes that the reader is comfortable with the concepts of git, GitLab, commit and patch generation, and has a general knowledge of the upstream linux.git's Documentation/SubmittingPatches.  *The explanation of these concepts are not within the scope of this document*.
 
-Red Hat uses GitLab to manage the patch workflow, and all changes must be submitted as GitLab merge requests.  Contributors can use the GitLab UI to submit merge requests.  Red Hat recommends using the ‘link:bichon.adoc[bichon]’ command line interface open source tools when working with merge requests in the RHEL kernel trees.
+Red Hat uses GitLab to manage the patch workflow, and all changes must be submitted as GitLab merge requests.  Contributors can use the GitLab UI to submit merge requests.  Alternatively, tools such as xref:lab.adoc[lab] or xref:revumatic.adoc[revumatic] can be used to work with the merge requests.
 
 == Alternative Code Submission Formats
 Contributors may submit changesets in formats other than are detailed in this document.  Contributors using alternative code submission formats must obtain consensus with their reviewers, approvers, and maintainers on acceptance of the alternative format.  When submitting with an alternative format contributors may be asked for future commitments to security and z-stream fixes.
@@ -79,16 +85,16 @@ The following is an example of a valid Merge Request title and description.  The
 [link:CommitRules.adoc#user-content-5-dco-signed-off-by-tag[5]] Signed-off-by: Shadow Man +<shadow.man@redhat.com>+ +
 [link:CommitRules.adoc#user-content-6-internal-contributors[6]] Cc: Fedora Friend +<fedora.friend@redhat.com>+
 
-== Section Descriptions
+=== Section Descriptions
 
 The following sections provide the format that developers should follow in order to help both engineers review changesets and maintainers process commits and MRs as quickly and as efficiently as possible.
 
-=== 1. Title
+==== 1. Title
 For commits, use the upstream commit title.  In general, for Merge Requests, use the upstream format of <arch,subsystem>: <summary>.  Copying upstream commit subject lines is acceptable and commonplace; however, the title should attempt to capture what the commit does and not what the commit fixes.  Not all upstream summaries are sufficient; for example “treewide” commits may be altered to indicate the specific section of code they are modifying.
 
 Commits that are unique to RHEL (commonly referred to as RHEL-only commits) in a changeset must have a unique commit description that identifies it from other commits.  Duplicate commit titles usually cause confusion for reviewers and maintainers alike. As is the case with upstream, the title must contain a descriptive explanation of the entire changeset.
 
-==== 1a.  z-stream Merge Request Title
+===== 1a.  z-stream Merge Request Title
 In addition to the requirements in link:CommitRules.adoc#user-content-1-title[section 1], z-stream Merge Request titles should be appended with the targeted z-stream name in square brackets.  For example,
 
 	A Merge Request Title [rhel-8.2.z]
@@ -96,10 +102,10 @@ In addition to the requirements in link:CommitRules.adoc#user-content-1-title[se
 
 Additional metadata, such as the bugzilla ID or CVE ID, should be included in the Merge Request description and not the title.
 
-===  2. Description
+====  2. Description
 In order to handle and prioritize the large number of MRs submitted to the Red Hat Kernel project, the description must contain metadata necessary to assist in integrating changesets into official kernel releases.  The metadata section contains a required bugzilla reference, testing details, and some additional metadata that may be required depending on the circumstances surrounding the commit or MR.
 
-==== 2a. Bugzilla Reference (required)
+===== 2a. Bugzilla Reference (required)
 Each commit in a changeset and the MR description must reference at least one Red Hat bugzilla URL on a line beginning with “Bugzilla: https://bugzilla.redhat.com/”.  If the MR resolves multiple bugzillas, the description must include only one bugzilla URL per “Bugzilla:” line.  *Bugzilla IDs (ie, just a number) are not acceptable*.
 
 Changesets that are lacking a bugzilla number will not be committed and will be immediately flagged by the project’s webhooks.  Every changeset needs to be coordinated with other groups at Red Hat(management, QE, Documentation, etc.) and the coordination is handled through bugzilla flags and state.  If the link:pkgs.devel.redhat.com/rules.html[bugzilla flags] and state are appropriately set on a bugzilla, then and only then, will the associated changeset be considered for inclusion into the project by the maintainers.
@@ -112,10 +118,10 @@ Good examples for bugzilla URLS in the description:
     Bugzilla: https://bugzilla.redhat.com/783023
     Bugzilla: INTERNAL
 
-==== 2b. Testing Details (required)
+===== 2b. Testing Details (required)
 The MR description must include information about how the changeset was tested.  This information can include links to test results in a bugzilla or a text description of the results.
 
-==== 2c. Upstream Status (required for commits not in upstream tree)
+===== 2c. Upstream Status (required for commits not in upstream tree)
 If the upstream source tree is not linux.git, the description must include a URL for the upstream source tree.  Commits with an identified source must also specify a link:CommitRules.adoc#user-content-3a-commit-sha1-format-required[commit sha1] in their description.
 
 If the changeset is not in Linus' linux.git tree, please specify the URL of the source tree, a URL to the patch posting on a mailing list, or explain why the changeset is unique to RHEL.
@@ -149,22 +155,30 @@ Red Hat's automated tooling attempts to do basic validation of upstream git tree
 * https://github.com/
 * https://git.samba.org/
 
-==== 2d. Changeset Dependencies (optional)
-If the changeset has dependencies on other changesets, the MR description must include a mention of those changesets or their bugzillas.  Use one 'Depends:' line for each dependent changeset or bugzilla. +++<u>+++Follow the above 'Bugzilla:' guidelines for ‘Depends:’ lines referencing bugzillas (ie. Bugzillas must be specified as URLS and not IDs)+++</u>+++. Alternatively, you can include a full URL referencing another merge request in the same project to specify your dependencies, and the requisite bugzilla numbers will be extracted from the dependent changeset's description. Missing dependencies and malformed ‘Depends:’ lines will be identified by the project’s webhooks.
+===== 2d. Changeset Dependencies (optional)
+If your changeset depends on another changeset being accepted and merged first, then you need to make sure that the description of your MR contains a reference to the dependent change.
 
-Commits from dependent changesets *cannot* be mixed with commits of the submitted changeset. Dependencies, as the name implies, *must* precede all changes from the submitted set. The webhooks rely on ordering to identify the last commit that is part of your changeset and the first commit of a dependency changeset, and will stop walking the commit list when reaching the first dependency commit. Dependencies intermingled with your changes will not be properly evaluated by the webhooks.
+For each dependency, your description must contain a unique line starting with `Depends:`.  The content after the keyword should be a specific URL pointing at another MR in the same project.
 
-The maintainers understand that conflicts with other patches will happen. When possible, please coordinate with others before posting.  If a commit or MR has an explicit dependency on another MR, be careful to include that dependency so the maintainers can coordinate their integration properly. Make sure all dependent patches are posted *before* submitting an MR.
+NOTE: Additional syntax is allowed, such as a Bugzilla link or Jira link, but the functionality may be limited to only a MR URL in the future.
 
-==== 2e. CVE Reference (optional)
+When assembling the commits on your dependent changeset, you must make sure that the changes for your MR are layered over the dependent changes as displayed in the graphic below.  Dependencies, as the name implies, must precede all changes from the submitted set.  The webhooks rely on ordering to identify the last commit that is part of your changeset and the first commit of a dependency chagneset, and will stop walking the commit list when reaching the first dependency commit.  Dependencies intermingled with your changes will not be properly evaluated by the webhooks.
+
+image::images/kwf-branch-dependencies.png[align="center"]
+
+In the event of a conflicting change from either the parent repository or the upstream (aka `origin`) repository, you will need to make sure to rebase your changes in order from eldest to youngest.  For example, in the above graphics, a new commit was added to the upstream repository (commit `1d1d6d`).  You will need to make sure that `Dependent Change 1` (aka `parent`) is rebased on `origin`, and then you can rebase `Dependent Change 2` (aka `child`) on `Dependent Change 1` (aka `parent`).  This pattern needs to be repeated for every level of dependency in the chain.
+
+IMPORTANT: Careful coordination should be used when working with dependencies.  You shouldn't post a changeset that has a dependency against something that hasn't already been posted itself.  Similarly, a dependent change cannot be merged until the parent itself has been merged *first*.  It is very easy for the various pieces of the chain to become out of sync with each other.
+
+===== 2e. CVE Reference (optional)
 If the changeset resolves a bugzilla that has an associated CVE number, each commit in the changeset and the MR description must include the CVE reference ID.  Use one “CVE:” line for each CVE that the changeset resolves, and include the number as described in the bugzilla, e.g "CVE-YYYY-XXXXX".
 
 Unreleased critical CVEs can use link:CommitRules.adoc#user-content-2c-upstream-status-required["Upstream Status: Embargoed"] in place of referencing an upstream commit ID.
 
-==== 2f. Differences from the upstream patch (optional)
+===== 2f. Differences from the upstream patch (optional)
 If the commit differs from the original upstream commit, a short description of the differences should be included on a line that begins with “Conflicts:”.  Simple patch conflicts like fuzz do not need to be documented.
 
-==== 2g. Omitted Fixes (optional)
+===== 2g. Omitted Fixes (optional)
 If there is a subsequent upstream commit with any reference to the backported commit which is not included in the changeset it should be included on a line that begins with "Omitted-fix:".  The "Omitted-fix:" line should include a minimum 12-character commit ID and the title of the omitted fix.  The following line(s) must include a reason for omitting the fix.
 
 The use of the "Omitted-Fix:" tag does not imply the decision to omit the fix is correct.  The usage of the tag only means the author has chosen to omit that particular fix from their changeset.  Reviewers must take care to confirm the decision to omit these commits is correct.
@@ -178,7 +192,7 @@ Good examples of omitted fixes:
     Omitted-fix: fedcba654321 ("another subject")
                  Patched code is not enabled in RHEL
 
-==  anchor:commitdescriptioninfo[] 3. Commit-Specific Description Information
+====  anchor:commitdescriptioninfo[] 3. Commit-Specific Description Information
 _Only commits and __single-commit MR__s must include the information in this section._
 
 A detailed changelog is required for all changes made to the Red Hat Kernel sources.  The maintainers and reviewers do not allow empty commits or MR descriptions.
@@ -189,7 +203,7 @@ Reviewers prefer to have the *entire* commit message as it appears upstream, inc
 
 Do not include local commit IDs in changeset submissions.  These only confuse reviewers, as reviewers don't have access to the originating trees.  MRs that include local commit IDs will be blocked by webhooks.
 
-=== 3a. “commit” sha1 format (required)
+===== 3a. “commit” sha1 format (required)
 Red Hat follows an “upstream-first” philosophy, so commits with an link:CommitRules.adoc#user-content-2c-upstream-status-required[Upstream Status] that identify them as originating from an external tree must specify the git sha1 ID.  Red Hat Kernel project’s tools parse the commit sha1 for analysis, so *the format of the git sha1 ID is strictly enforced*.
 
 The upstream sha1 ID must be referenced using one of these three formats (pick one that suits better your workflow):
@@ -202,15 +216,15 @@ The commit line starts at the first column (no whitespace at front is allowed) a
 
     ^commit ([0-9a-f]{40})( \(.*\))?$|^\(cherry picked from commit ([0-9a-f]{40})\)$
 
-=== 3b. Email Bridge & Upstream contributors (required)
+===== 3b. Email Bridge & Upstream contributors (required)
 Upstream contributors Cc’s, Signed-off-by:, and other tags must be shifted right by 4 spaces to avoid the email bridge erroneously cc’ing non-redhat.com email addresses.
 
-== 4. Version Information (if necessary)
+==== 4. Version Information (if necessary)
 If the changeset has been updated, the Merge Request Description, and the updated commits must contain information on the changes.
 
 Minor modifications to an existing MR comment are allowed.  A minor modification can be defined mostly as correcting a typo or adjusting the language of a sentence that is otherwise unclear (i.e. perhaps there's a word missing).  It is important to keep comments as close to their original intent as possible since they are used for auditing purposes.
 
-== 5. DCO & Signed-off-by Tag
+==== 5. DCO & Signed-off-by Tag
 A "Signed-off-by:" tag on each commit of a changeset is required on all commits and MR descriptions.  This sign-off must be completed using your redhat.com email address.
 
 The Linux Kernel Community has required an acknowledgement of the Developer's Certificate of Origin (DCO), https://www.developercertificate.org[https://www.developercertificate.org], for many years.  The DCO is a way of handling contributions to an open source project in which each contribution is associated with a certification signifying that the contributor has the right to submit the contribution under +
@@ -232,6 +246,6 @@ Signed-off-by: Shadow Man <shadow.man@redhat.com>
 
 Contributors must add a Signed-off-by: tag regardless of having signed-off on the original upstream commit.
 
-== 6. Internal Contributors
+==== 6. Internal Contributors
 Internal “Cc:” or additional “Signed-off-by” tags can be added at the end of the merge request description.  The GitLab Email Bridge will cc email addresses in the MR description.
 

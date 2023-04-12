@@ -37,7 +37,7 @@ static struct attribute *isa207_pmu_format_attr[] = {
 	NULL,
 };
 
-struct attribute_group isa207_pmu_format_group = {
+const struct attribute_group isa207_pmu_format_group = {
 	.name = "format",
 	.attrs = isa207_pmu_format_attr,
 };
@@ -683,6 +683,9 @@ int isa207_compute_mmcr(u64 event[], int n_ev,
 			else
 				mmcr2 |= MMCR2_FCS(pmc);
 		}
+
+		if (pevents[i]->attr.exclude_idle)
+			mmcr2 |= MMCR2_FCWAIT(pmc);
 
 		if (cpu_has_feature(CPU_FTR_ARCH_31)) {
 			if (pmc <= 4) {

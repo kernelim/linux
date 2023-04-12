@@ -27,7 +27,7 @@
  * Inode locking rules:
  *
  * inode->i_lock protects:
- *   inode->i_state, inode->i_hash, __iget()
+ *   inode->i_state, inode->i_hash, __iget(), inode->i_io_list
  * Inode LRU list locks protect:
  *   inode->i_sb->s_inode_lru, inode->i_lru
  * inode->i_sb->s_inode_list_lock protects:
@@ -426,11 +426,20 @@ void ihold(struct inode *inode)
 }
 EXPORT_SYMBOL(ihold);
 
-static void inode_lru_list_add(struct inode *inode)
+static void __inode_add_lru(struct inode *inode, bool rotate)
 {
+	if (inode->i_state & (I_DIRTY_ALL | I_SYNC | I_FREEING | I_WILL_FREE))
+		return;
+	if (atomic_read(&inode->i_count))
+		return;
+	if (!(inode->i_sb->s_flags & SB_ACTIVE))
+		return;
+	if (!mapping_shrinkable(&inode->i_data))
+		return;
+
 	if (list_lru_add(&inode->i_sb->s_inode_lru, &inode->i_lru))
 		this_cpu_inc(nr_unused);
-	else
+	else if (rotate)
 		inode->i_state |= I_REFERENCED;
 }
 
@@ -441,16 +450,11 @@ static void inode_lru_list_add(struct inode *inode)
  */
 void inode_add_lru(struct inode *inode)
 {
-	if (!(inode->i_state & (I_DIRTY_ALL | I_SYNC |
-				I_FREEING | I_WILL_FREE)) &&
-	    !atomic_read(&inode->i_count) && inode->i_sb->s_flags & SB_ACTIVE)
-		inode_lru_list_add(inode);
+	__inode_add_lru(inode, false);
 }
-
 
 static void inode_lru_list_del(struct inode *inode)
 {
-
 	if (list_lru_del(&inode->i_sb->s_inode_lru, &inode->i_lru))
 		this_cpu_dec(nr_unused);
 }
@@ -521,6 +525,55 @@ void __remove_inode_hash(struct inode *inode)
 	spin_unlock(&inode_hash_lock);
 }
 EXPORT_SYMBOL(__remove_inode_hash);
+
+void dump_mapping(const struct address_space *mapping)
+{
+	struct inode *host;
+	const struct address_space_operations *a_ops;
+	struct hlist_node *dentry_first;
+	struct dentry *dentry_ptr;
+	struct dentry dentry;
+	unsigned long ino;
+
+	/*
+	 * If mapping is an invalid pointer, we don't want to crash
+	 * accessing it, so probe everything depending on it carefully.
+	 */
+	if (get_kernel_nofault(host, &mapping->host) ||
+	    get_kernel_nofault(a_ops, &mapping->a_ops)) {
+		pr_warn("invalid mapping:%px\n", mapping);
+		return;
+	}
+
+	if (!host) {
+		pr_warn("aops:%ps\n", a_ops);
+		return;
+	}
+
+	if (get_kernel_nofault(dentry_first, &host->i_dentry.first) ||
+	    get_kernel_nofault(ino, &host->i_ino)) {
+		pr_warn("aops:%ps invalid inode:%px\n", a_ops, host);
+		return;
+	}
+
+	if (!dentry_first) {
+		pr_warn("aops:%ps ino:%lx\n", a_ops, ino);
+		return;
+	}
+
+	dentry_ptr = container_of(dentry_first, struct dentry, d_u.d_alias);
+	if (get_kernel_nofault(dentry, dentry_ptr)) {
+		pr_warn("aops:%ps ino:%lx invalid dentry:%px\n",
+				a_ops, ino, dentry_ptr);
+		return;
+	}
+
+	/*
+	 * if dentry is corrupted, the %pd handler may still crash,
+	 * but it's unlikely that we reach here with a corrupt mapping
+	 */
+	pr_warn("aops:%ps ino:%lx dentry name:\"%pd\"\n", a_ops, ino, &dentry);
+}
 
 void clear_inode(struct inode *inode)
 {
@@ -726,10 +779,6 @@ again:
 /*
  * Isolate the inode from the LRU in preparation for freeing it.
  *
- * Any inodes which are pinned purely because of attached pagecache have their
- * pagecache removed.  If the inode has metadata buffers attached to
- * mapping->private_list then try to remove them.
- *
  * If the inode has the I_REFERENCED flag set, then it means that it has been
  * used recently - the flag is set in iput_final(). When we encounter such an
  * inode, clear the flag and move it to the back of the LRU so it gets another
@@ -745,31 +794,39 @@ static enum lru_status inode_lru_isolate(struct list_head *item,
 	struct inode	*inode = container_of(item, struct inode, i_lru);
 
 	/*
-	 * we are inverting the lru lock/inode->i_lock here, so use a trylock.
-	 * If we fail to get the lock, just skip it.
+	 * We are inverting the lru lock/inode->i_lock here, so use a
+	 * trylock. If we fail to get the lock, just skip it.
 	 */
 	if (!spin_trylock(&inode->i_lock))
 		return LRU_SKIP;
 
 	/*
-	 * Referenced or dirty inodes are still in use. Give them another pass
-	 * through the LRU as we canot reclaim them now.
+	 * Inodes can get referenced, redirtied, or repopulated while
+	 * they're already on the LRU, and this can make them
+	 * unreclaimable for a while. Remove them lazily here; iput,
+	 * sync, or the last page cache deletion will requeue them.
 	 */
 	if (atomic_read(&inode->i_count) ||
-	    (inode->i_state & ~I_REFERENCED)) {
+	    (inode->i_state & ~I_REFERENCED) ||
+	    !mapping_shrinkable(&inode->i_data)) {
 		list_lru_isolate(lru, &inode->i_lru);
 		spin_unlock(&inode->i_lock);
 		this_cpu_dec(nr_unused);
 		return LRU_REMOVED;
 	}
 
-	/* recently referenced inodes get one more pass */
+	/* Recently referenced inodes get one more pass */
 	if (inode->i_state & I_REFERENCED) {
 		inode->i_state &= ~I_REFERENCED;
 		spin_unlock(&inode->i_lock);
 		return LRU_ROTATE;
 	}
 
+	/*
+	 * On highmem systems, mapping_shrinkable() permits dropping
+	 * page cache in order to free up struct inodes: lowmem might
+	 * be under pressure before the cache inside the highmem zone.
+	 */
 	if (inode_has_buffers(inode) || !mapping_empty(&inode->i_data)) {
 		__iget(inode);
 		spin_unlock(&inode->i_lock);
@@ -1636,7 +1693,7 @@ static void iput_final(struct inode *inode)
 	if (!drop &&
 	    !(inode->i_state & I_DONTCACHE) &&
 	    (sb->s_flags & SB_ACTIVE)) {
-		inode_add_lru(inode);
+		__inode_add_lru(inode, true);
 		spin_unlock(&inode->i_lock);
 		return;
 	}
@@ -2163,10 +2220,6 @@ void inode_init_owner(struct user_namespace *mnt_userns, struct inode *inode,
 		/* Directories are special, and always inherit S_ISGID */
 		if (S_ISDIR(mode))
 			mode |= S_ISGID;
-		else if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP) &&
-			 !in_group_p(i_gid_into_mnt(mnt_userns, dir)) &&
-			 !capable_wrt_inode_uidgid(mnt_userns, dir, CAP_FSETID))
-			mode &= ~S_ISGID;
 	} else
 		inode_fsgid_set(inode, mnt_userns);
 	inode->i_mode = mode;
@@ -2322,3 +2375,33 @@ struct timespec64 current_time(struct inode *inode)
 	return timestamp_truncate(now, inode);
 }
 EXPORT_SYMBOL(current_time);
+
+/**
+ * mode_strip_sgid - handle the sgid bit for non-directories
+ * @mnt_userns: User namespace of the mount the inode was created from
+ * @dir: parent directory inode
+ * @mode: mode of the file to be created in @dir
+ *
+ * If the @mode of the new file has both the S_ISGID and S_IXGRP bit
+ * raised and @dir has the S_ISGID bit raised ensure that the caller is
+ * either in the group of the parent directory or they have CAP_FSETID
+ * in their user namespace and are privileged over the parent directory.
+ * In all other cases, strip the S_ISGID bit from @mode.
+ *
+ * Return: the new mode to use for the file
+ */
+umode_t mode_strip_sgid(struct user_namespace *mnt_userns,
+			const struct inode *dir, umode_t mode)
+{
+	if ((mode & (S_ISGID | S_IXGRP)) != (S_ISGID | S_IXGRP))
+		return mode;
+	if (S_ISDIR(mode) || !dir || !(dir->i_mode & S_ISGID))
+		return mode;
+	if (in_group_p(i_gid_into_mnt(mnt_userns, dir)))
+		return mode;
+	if (capable_wrt_inode_uidgid(mnt_userns, dir, CAP_FSETID))
+		return mode;
+
+	return mode & ~S_ISGID;
+}
+EXPORT_SYMBOL(mode_strip_sgid);

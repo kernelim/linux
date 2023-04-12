@@ -17,11 +17,12 @@
 #include "xfs_trans_priv.h"
 #include "xfs_buf_item.h"
 #include "xfs_log.h"
+#include "xfs_log_priv.h"
 #include "xfs_error.h"
 
 #include <linux/iversion.h>
 
-kmem_zone_t	*xfs_ili_zone;		/* inode log item zone */
+struct kmem_cache	*xfs_ili_cache;		/* inode log item */
 
 static inline struct xfs_inode_log_item *INODE_ITEM(struct xfs_log_item *lip)
 {
@@ -396,7 +397,7 @@ xfs_inode_to_log_dinode(
 	/* log a dummy value to ensure log structure is fully initialised */
 	to->di_next_unlinked = NULLAGINO;
 
-	if (xfs_sb_version_has_v3inode(&ip->i_mount->m_sb)) {
+	if (xfs_has_v3inodes(ip->i_mount)) {
 		to->di_version = 3;
 		to->di_changecount = inode_peek_iversion(inode);
 		to->di_crtime = xfs_inode_to_log_dinode_ts(ip, ip->i_crtime);
@@ -672,7 +673,7 @@ xfs_inode_item_init(
 	struct xfs_inode_log_item *iip;
 
 	ASSERT(ip->i_itemp == NULL);
-	iip = ip->i_itemp = kmem_cache_zalloc(xfs_ili_zone,
+	iip = ip->i_itemp = kmem_cache_zalloc(xfs_ili_cache,
 					      GFP_KERNEL | __GFP_NOFAIL);
 
 	iip->ili_inode = ip;
@@ -694,7 +695,7 @@ xfs_inode_item_destroy(
 
 	ip->i_itemp = NULL;
 	kmem_free(iip->ili_item.li_lv_shadow);
-	kmem_cache_free(xfs_ili_zone, iip);
+	kmem_cache_free(xfs_ili_cache, iip);
 }
 
 
@@ -719,6 +720,17 @@ xfs_iflush_ail_updates(
 		clear_bit(XFS_LI_FAILED, &lip->li_flags);
 		if (INODE_ITEM(lip)->ili_flush_lsn != lip->li_lsn)
 			continue;
+
+		/*
+		 * dgc: Not sure how this happens, but it happens very
+		 * occassionaly via generic/388.  xfs_iflush_abort() also
+		 * silently handles this same "under writeback but not in AIL at
+		 * shutdown" condition via xfs_trans_ail_delete().
+		 */
+		if (!test_bit(XFS_LI_IN_AIL, &lip->li_flags)) {
+			ASSERT(xlog_is_shutdown(lip->li_log));
+			continue;
+		}
 
 		lsn = xfs_ail_delete_one(ailp, lip);
 		if (!tail_lsn && lsn)

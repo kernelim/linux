@@ -2024,14 +2024,8 @@ static int sh_eth_phy_init(struct net_device *ndev)
 	}
 
 	/* mask with MAC supported features */
-	if (mdp->cd->register_type != SH_ETH_REG_GIGABIT) {
-		int err = phy_set_max_speed(phydev, SPEED_100);
-		if (err) {
-			netdev_err(ndev, "failed to limit PHY to 100 Mbit/s\n");
-			phy_disconnect(phydev);
-			return err;
-		}
-	}
+	if (mdp->cd->register_type != SH_ETH_REG_GIGABIT)
+		phy_set_max_speed(phydev, SPEED_100);
 
 	phy_attached_info(phydev);
 
@@ -3370,7 +3364,7 @@ static int sh_eth_drv_probe(struct platform_device *pdev)
 		goto out_release;
 	}
 
-	netif_napi_add(ndev, &mdp->napi, sh_eth_poll, 64);
+	netif_napi_add(ndev, &mdp->napi, sh_eth_poll);
 
 	/* network device register */
 	ret = register_netdev(ndev);

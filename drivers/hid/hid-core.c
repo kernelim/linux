@@ -1315,6 +1315,9 @@ static s32 snto32(__u32 value, unsigned n)
 	if (!value || !n)
 		return 0;
 
+	if (n > 32)
+		n = 32;
+
 	switch (n) {
 	case 8:  return ((__s8)value);
 	case 16: return ((__s16)value);
@@ -1662,7 +1665,7 @@ static void hid_process_report(struct hid_device *hid,
 
 	/* first retrieve all incoming values in data */
 	for (a = 0; a < report->maxfield; a++)
-		hid_input_fetch_field(hid, field = report->field[a], data);
+		hid_input_fetch_field(hid, report->field[a], data);
 
 	if (!list_empty(&report->field_entry_list)) {
 		/* INPUT_REPORT, we have a priority list of fields */
@@ -2222,6 +2225,10 @@ int hid_connect(struct hid_device *hdev, unsigned int connect_mask)
 	case BUS_VIRTUAL:
 		bus = "VIRTUAL";
 		break;
+	case BUS_INTEL_ISHTP:
+	case BUS_AMD_SFH:
+		bus = "SENSOR HUB";
+		break;
 	default:
 		bus = "<UNKNOWN>";
 	}
@@ -2609,7 +2616,7 @@ end:
 	return ret;
 }
 
-static int hid_device_remove(struct device *dev)
+static void hid_device_remove(struct device *dev)
 {
 	struct hid_device *hdev = to_hid_device(dev);
 	struct hid_driver *hdrv;
@@ -2629,8 +2636,6 @@ static int hid_device_remove(struct device *dev)
 
 	if (!hdev->io_started)
 		up(&hdev->driver_input_lock);
-
-	return 0;
 }
 
 static ssize_t modalias_show(struct device *dev, struct device_attribute *a,

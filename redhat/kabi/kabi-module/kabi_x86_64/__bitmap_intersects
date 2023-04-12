@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/bitmap.c
-0xbb35675b	__bitmap_intersects	vmlinux	EXPORT_SYMBOL
+#2-
+0xbb35675b	__bitmap_intersects	vmlinux	EXPORT_SYMBOL	

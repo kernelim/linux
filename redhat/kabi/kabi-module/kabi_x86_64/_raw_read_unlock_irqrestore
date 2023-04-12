@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/locking/spinlock.c
-0xdf2ebb87	_raw_read_unlock_irqrestore	vmlinux	EXPORT_SYMBOL
+#2-
+0xdf2ebb87	_raw_read_unlock_irqrestore	vmlinux	EXPORT_SYMBOL	

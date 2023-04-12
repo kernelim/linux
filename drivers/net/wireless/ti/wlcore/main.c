@@ -2927,10 +2927,12 @@ static int wlcore_set_assoc(struct wl1271 *wl, struct wl12xx_vif *wlvif,
 			    struct ieee80211_bss_conf *bss_conf,
 			    u32 sta_rate_set)
 {
+	struct ieee80211_vif *vif = container_of(bss_conf, struct ieee80211_vif,
+						 bss_conf);
 	int ieoffset;
 	int ret;
 
-	wlvif->aid = bss_conf->aid;
+	wlvif->aid = vif->cfg.aid;
 	wlvif->channel_type = cfg80211_get_chandef_type(&bss_conf->chandef);
 	wlvif->beacon_int = bss_conf->beacon_int;
 	wlvif->wmm_enabled = bss_conf->qos;
@@ -3980,7 +3982,6 @@ static int wl1271_ap_set_probe_resp_tmpl_legacy(struct wl1271 *wl,
 					     u32 rates)
 {
 	struct wl12xx_vif *wlvif = wl12xx_vif_to_data(vif);
-	struct ieee80211_bss_conf *bss_conf = &vif->bss_conf;
 	u8 probe_rsp_templ[WL1271_CMD_TEMPL_MAX_SIZE];
 	int ssid_ie_offset, ie_offset, templ_len;
 	const u8 *ptr;
@@ -3993,7 +3994,7 @@ static int wl1271_ap_set_probe_resp_tmpl_legacy(struct wl1271 *wl,
 					       probe_rsp_len, 0,
 					       rates);
 
-	if (probe_rsp_len + bss_conf->ssid_len > WL1271_CMD_TEMPL_MAX_SIZE) {
+	if (probe_rsp_len + vif->cfg.ssid_len > WL1271_CMD_TEMPL_MAX_SIZE) {
 		wl1271_error("probe_rsp template too big");
 		return -EINVAL;
 	}
@@ -4015,12 +4016,12 @@ static int wl1271_ap_set_probe_resp_tmpl_legacy(struct wl1271 *wl,
 
 	/* insert SSID from bss_conf */
 	probe_rsp_templ[ssid_ie_offset] = WLAN_EID_SSID;
-	probe_rsp_templ[ssid_ie_offset + 1] = bss_conf->ssid_len;
+	probe_rsp_templ[ssid_ie_offset + 1] = vif->cfg.ssid_len;
 	memcpy(probe_rsp_templ + ssid_ie_offset + 2,
-	       bss_conf->ssid, bss_conf->ssid_len);
-	templ_len = ssid_ie_offset + 2 + bss_conf->ssid_len;
+	       vif->cfg.ssid, vif->cfg.ssid_len);
+	templ_len = ssid_ie_offset + 2 + vif->cfg.ssid_len;
 
-	memcpy(probe_rsp_templ + ssid_ie_offset + 2 + bss_conf->ssid_len,
+	memcpy(probe_rsp_templ + ssid_ie_offset + 2 + vif->cfg.ssid_len,
 	       ptr, probe_rsp_len - (ptr - probe_rsp_data));
 	templ_len += probe_rsp_len - (ptr - probe_rsp_data);
 
@@ -4083,7 +4084,7 @@ static int wlcore_set_beacon_template(struct wl1271 *wl,
 	u32 min_rate;
 	int ret;
 	int ieoffset = offsetof(struct ieee80211_mgmt, u.beacon.variable);
-	struct sk_buff *beacon = ieee80211_beacon_get(wl->hw, vif);
+	struct sk_buff *beacon = ieee80211_beacon_get(wl->hw, vif, 0);
 	u16 tmpl_id;
 
 	if (!beacon) {
@@ -4300,15 +4301,15 @@ out:
 }
 
 static int wlcore_set_bssid(struct wl1271 *wl, struct wl12xx_vif *wlvif,
-			    struct ieee80211_bss_conf *bss_conf,
-			    u32 sta_rate_set)
+			    struct ieee80211_vif *vif, u32 sta_rate_set)
 {
+	struct ieee80211_bss_conf *bss_conf = &vif->bss_conf;
 	u32 rates;
 	int ret;
 
 	wl1271_debug(DEBUG_MAC80211,
 	     "changed_bssid: %pM, aid: %d, bcn_int: %d, brates: 0x%x sta_rate_set: 0x%x",
-	     bss_conf->bssid, bss_conf->aid,
+	     bss_conf->bssid, vif->cfg.aid,
 	     bss_conf->beacon_int,
 	     bss_conf->basic_rates, sta_rate_set);
 
@@ -4396,7 +4397,7 @@ static void wl1271_bss_info_changed_sta(struct wl1271 *wl,
 	}
 
 	if (changed & BSS_CHANGED_IBSS) {
-		if (bss_conf->ibss_joined) {
+		if (vif->cfg.ibss_joined) {
 			set_bit(WLVIF_FLAG_IBSS_JOINED, &wlvif->flags);
 			ibss_joined = true;
 		} else {
@@ -4420,7 +4421,7 @@ static void wl1271_bss_info_changed_sta(struct wl1271 *wl,
 	}
 
 	if (changed & BSS_CHANGED_IDLE && !is_ibss)
-		wl1271_sta_handle_idle(wl, wlvif, bss_conf->idle);
+		wl1271_sta_handle_idle(wl, wlvif, vif->cfg.idle);
 
 	if (changed & BSS_CHANGED_CQM) {
 		bool enable = false;
@@ -4439,15 +4440,15 @@ static void wl1271_bss_info_changed_sta(struct wl1271 *wl,
 		rcu_read_lock();
 		sta = ieee80211_find_sta(vif, bss_conf->bssid);
 		if (sta) {
-			u8 *rx_mask = sta->ht_cap.mcs.rx_mask;
+			u8 *rx_mask = sta->deflink.ht_cap.mcs.rx_mask;
 
 			/* save the supp_rates of the ap */
-			sta_rate_set = sta->supp_rates[wlvif->band];
-			if (sta->ht_cap.ht_supported)
+			sta_rate_set = sta->deflink.supp_rates[wlvif->band];
+			if (sta->deflink.ht_cap.ht_supported)
 				sta_rate_set |=
 					(rx_mask[0] << HW_HT_RATES_OFFSET) |
 					(rx_mask[1] << HW_MIMO_RATES_OFFSET);
-			sta_ht_cap = sta->ht_cap;
+			sta_ht_cap = sta->deflink.ht_cap;
 			sta_exists = true;
 		}
 
@@ -4456,7 +4457,7 @@ static void wl1271_bss_info_changed_sta(struct wl1271 *wl,
 
 	if (changed & BSS_CHANGED_BSSID) {
 		if (!is_zero_ether_addr(bss_conf->bssid)) {
-			ret = wlcore_set_bssid(wl, wlvif, bss_conf,
+			ret = wlcore_set_bssid(wl, wlvif, vif,
 					       sta_rate_set);
 			if (ret < 0)
 				goto out;
@@ -4472,9 +4473,9 @@ static void wl1271_bss_info_changed_sta(struct wl1271 *wl,
 
 	if (changed & BSS_CHANGED_IBSS) {
 		wl1271_debug(DEBUG_ADHOC, "ibss_joined: %d",
-			     bss_conf->ibss_joined);
+			     vif->cfg.ibss_joined);
 
-		if (bss_conf->ibss_joined) {
+		if (vif->cfg.ibss_joined) {
 			u32 rates = bss_conf->basic_rates;
 			wlvif->basic_rate_set =
 				wl1271_tx_enabled_rates_get(wl, rates,
@@ -4511,7 +4512,7 @@ static void wl1271_bss_info_changed_sta(struct wl1271 *wl,
 	}
 
 	if (changed & BSS_CHANGED_ASSOC) {
-		if (bss_conf->assoc) {
+		if (vif->cfg.assoc) {
 			ret = wlcore_set_assoc(wl, wlvif, bss_conf,
 					       sta_rate_set);
 			if (ret < 0)
@@ -4525,7 +4526,7 @@ static void wl1271_bss_info_changed_sta(struct wl1271 *wl,
 	}
 
 	if (changed & BSS_CHANGED_PS) {
-		if ((bss_conf->ps) &&
+		if (vif->cfg.ps &&
 		    test_bit(WLVIF_FLAG_STA_ASSOCIATED, &wlvif->flags) &&
 		    !test_bit(WLVIF_FLAG_IN_PS, &wlvif->flags)) {
 			int ps_mode;
@@ -4545,7 +4546,7 @@ static void wl1271_bss_info_changed_sta(struct wl1271 *wl,
 			if (ret < 0)
 				wl1271_warning("enter %s ps failed %d",
 					       ps_mode_str, ret);
-		} else if (!bss_conf->ps &&
+		} else if (!vif->cfg.ps &&
 			   test_bit(WLVIF_FLAG_IN_PS, &wlvif->flags)) {
 			wl1271_debug(DEBUG_PSM, "auto ps disabled");
 
@@ -4586,11 +4587,11 @@ static void wl1271_bss_info_changed_sta(struct wl1271 *wl,
 	/* Handle arp filtering. Done after join. */
 	if ((changed & BSS_CHANGED_ARP_FILTER) ||
 	    (!is_ibss && (changed & BSS_CHANGED_QOS))) {
-		__be32 addr = bss_conf->arp_addr_list[0];
+		__be32 addr = vif->cfg.arp_addr_list[0];
 		wlvif->sta.qos = bss_conf->qos;
 		WARN_ON(wlvif->bss_type != BSS_TYPE_STA_BSS);
 
-		if (bss_conf->arp_addr_cnt == 1 && bss_conf->assoc) {
+		if (vif->cfg.arp_addr_cnt == 1 && vif->cfg.assoc) {
 			wlvif->ip_addr = addr;
 			/*
 			 * The template should have been configured only upon
@@ -4624,7 +4625,7 @@ out:
 static void wl1271_op_bss_info_changed(struct ieee80211_hw *hw,
 				       struct ieee80211_vif *vif,
 				       struct ieee80211_bss_conf *bss_conf,
-				       u32 changed)
+				       u64 changed)
 {
 	struct wl1271 *wl = hw->priv;
 	struct wl12xx_vif *wlvif = wl12xx_vif_to_data(vif);
@@ -4724,7 +4725,7 @@ static void wlcore_op_change_chanctx(struct ieee80211_hw *hw,
 		struct ieee80211_vif *vif = wl12xx_wlvif_to_vif(wlvif);
 
 		rcu_read_lock();
-		if (rcu_access_pointer(vif->chanctx_conf) != ctx) {
+		if (rcu_access_pointer(vif->bss_conf.chanctx_conf) != ctx) {
 			rcu_read_unlock();
 			continue;
 		}
@@ -4749,6 +4750,7 @@ out:
 
 static int wlcore_op_assign_vif_chanctx(struct ieee80211_hw *hw,
 					struct ieee80211_vif *vif,
+					struct ieee80211_bss_conf *link_conf,
 					struct ieee80211_chanctx_conf *ctx)
 {
 	struct wl1271 *wl = hw->priv;
@@ -4801,6 +4803,7 @@ out:
 
 static void wlcore_op_unassign_vif_chanctx(struct ieee80211_hw *hw,
 					   struct ieee80211_vif *vif,
+					   struct ieee80211_bss_conf *link_conf,
 					   struct ieee80211_chanctx_conf *ctx)
 {
 	struct wl1271 *wl = hw->priv;
@@ -4916,7 +4919,8 @@ out:
 }
 
 static int wl1271_op_conf_tx(struct ieee80211_hw *hw,
-			     struct ieee80211_vif *vif, u16 queue,
+			     struct ieee80211_vif *vif,
+			     unsigned int link_id, u16 queue,
 			     const struct ieee80211_tx_queue_params *params)
 {
 	struct wl1271 *wl = hw->priv;
@@ -5225,7 +5229,8 @@ static int wl12xx_update_sta_state(struct wl1271 *wl,
 		if (ret < 0)
 			return ret;
 
-		ret = wl1271_acx_set_ht_capabilities(wl, &sta->ht_cap, true,
+		ret = wl1271_acx_set_ht_capabilities(wl, &sta->deflink.ht_cap,
+						     true,
 						     wl_sta->hlid);
 		if (ret)
 			return ret;
@@ -5556,7 +5561,7 @@ static const void *wlcore_get_beacon_ie(struct wl1271 *wl,
 {
 	int ieoffset = offsetof(struct ieee80211_mgmt, u.beacon.variable);
 	struct sk_buff *beacon =
-		ieee80211_beacon_get(wl->hw, wl12xx_wlvif_to_vif(wlvif));
+		ieee80211_beacon_get(wl->hw, wl12xx_wlvif_to_vif(wlvif), 0);
 
 	if (!beacon)
 		return NULL;
@@ -5786,8 +5791,9 @@ static void wlcore_op_sta_rc_update(struct ieee80211_hw *hw,
 		return;
 
 	/* this callback is atomic, so schedule a new work */
-	wlvif->rc_update_bw = sta->bandwidth;
-	memcpy(&wlvif->rc_ht_cap, &sta->ht_cap, sizeof(sta->ht_cap));
+	wlvif->rc_update_bw = sta->deflink.bandwidth;
+	memcpy(&wlvif->rc_ht_cap, &sta->deflink.ht_cap,
+	       sizeof(sta->deflink.ht_cap));
 	ieee80211_queue_work(hw, &wlvif->rc_update_work);
 }
 

@@ -561,7 +561,7 @@ static int __kvmppc_svm_page_out(struct vm_area_struct *vma,
 				  gpa, 0, page_shift);
 
 	if (ret == U_SUCCESS)
-		*mig.dst = migrate_pfn(pfn) | MIGRATE_PFN_LOCKED;
+		*mig.dst = migrate_pfn(pfn);
 	else {
 		unlock_page(dpage);
 		__free_page(dpage);
@@ -713,7 +713,6 @@ static struct page *kvmppc_uvmem_get_page(unsigned long gpa, struct kvm *kvm)
 
 	dpage = pfn_to_page(uvmem_pfn);
 	dpage->zone_device_data = pvt;
-	get_page(dpage);
 	lock_page(dpage);
 	return dpage;
 out_clear:
@@ -775,7 +774,7 @@ static int kvmppc_svm_page_in(struct vm_area_struct *vma,
 		}
 	}
 
-	*mig.dst = migrate_pfn(page_to_pfn(dpage)) | MIGRATE_PFN_LOCKED;
+	*mig.dst = migrate_pfn(page_to_pfn(dpage));
 	migrate_vma_pages(&mig);
 out_finalize:
 	migrate_vma_finalize(&mig);

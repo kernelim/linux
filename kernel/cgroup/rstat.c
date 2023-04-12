@@ -88,6 +88,7 @@ static struct cgroup *cgroup_rstat_cpu_pop_updated(struct cgroup *pos,
 						   struct cgroup *root, int cpu)
 {
 	struct cgroup_rstat_cpu *rstatc;
+	struct cgroup *parent;
 
 	if (pos == root)
 		return NULL;
@@ -96,10 +97,14 @@ static struct cgroup *cgroup_rstat_cpu_pop_updated(struct cgroup *pos,
 	 * We're gonna walk down to the first leaf and visit/remove it.  We
 	 * can pick whatever unvisited node as the starting point.
 	 */
-	if (!pos)
+	if (!pos) {
 		pos = root;
-	else
+		/* return NULL if this subtree is not on-list */
+		if (!cgroup_rstat_cpu(pos, cpu)->updated_next)
+			return NULL;
+	} else {
 		pos = cgroup_parent(pos);
+	}
 
 	/* walk down to the first leaf */
 	while (true) {
@@ -115,33 +120,25 @@ static struct cgroup *cgroup_rstat_cpu_pop_updated(struct cgroup *pos,
 	 * However, due to the way we traverse, @pos will be the first
 	 * child in most cases. The only exception is @root.
 	 */
-	if (rstatc->updated_next) {
-		struct cgroup *parent = cgroup_parent(pos);
+	parent = cgroup_parent(pos);
+	if (parent) {
+		struct cgroup_rstat_cpu *prstatc;
+		struct cgroup **nextp;
 
-		if (parent) {
-			struct cgroup_rstat_cpu *prstatc;
-			struct cgroup **nextp;
+		prstatc = cgroup_rstat_cpu(parent, cpu);
+		nextp = &prstatc->updated_children;
+		while (*nextp != pos) {
+			struct cgroup_rstat_cpu *nrstatc;
 
-			prstatc = cgroup_rstat_cpu(parent, cpu);
-			nextp = &prstatc->updated_children;
-			while (true) {
-				struct cgroup_rstat_cpu *nrstatc;
-
-				nrstatc = cgroup_rstat_cpu(*nextp, cpu);
-				if (*nextp == pos)
-					break;
-				WARN_ON_ONCE(*nextp == parent);
-				nextp = &nrstatc->updated_next;
-			}
-			*nextp = rstatc->updated_next;
+			nrstatc = cgroup_rstat_cpu(*nextp, cpu);
+			WARN_ON_ONCE(*nextp == parent);
+			nextp = &nrstatc->updated_next;
 		}
-
-		rstatc->updated_next = NULL;
-		return pos;
+		*nextp = rstatc->updated_next;
 	}
 
-	/* only happens for @root */
-	return NULL;
+	rstatc->updated_next = NULL;
+	return pos;
 }
 
 /* see cgroup_rstat_flush() */
@@ -313,6 +310,9 @@ static void cgroup_base_stat_add(struct cgroup_base_stat *dst_bstat,
 	dst_bstat->cputime.utime += src_bstat->cputime.utime;
 	dst_bstat->cputime.stime += src_bstat->cputime.stime;
 	dst_bstat->cputime.sum_exec_runtime += src_bstat->cputime.sum_exec_runtime;
+#ifdef CONFIG_SCHED_CORE
+	dst_bstat->forceidle_sum += src_bstat->forceidle_sum;
+#endif
 }
 
 static void cgroup_base_stat_sub(struct cgroup_base_stat *dst_bstat,
@@ -321,6 +321,9 @@ static void cgroup_base_stat_sub(struct cgroup_base_stat *dst_bstat,
 	dst_bstat->cputime.utime -= src_bstat->cputime.utime;
 	dst_bstat->cputime.stime -= src_bstat->cputime.stime;
 	dst_bstat->cputime.sum_exec_runtime -= src_bstat->cputime.sum_exec_runtime;
+#ifdef CONFIG_SCHED_CORE
+	dst_bstat->forceidle_sum -= src_bstat->forceidle_sum;
+#endif
 }
 
 static void cgroup_base_stat_flush(struct cgroup *cgrp, int cpu)
@@ -402,6 +405,11 @@ void __cgroup_account_cputime_field(struct cgroup *cgrp,
 	case CPUTIME_SOFTIRQ:
 		rstatc->bstat.cputime.stime += delta_exec;
 		break;
+#ifdef CONFIG_SCHED_CORE
+	case CPUTIME_FORCEIDLE:
+		rstatc->bstat.forceidle_sum += delta_exec;
+		break;
+#endif
 	default:
 		break;
 	}
@@ -415,8 +423,9 @@ void __cgroup_account_cputime_field(struct cgroup *cgrp,
  * with how it is done by __cgroup_account_cputime_field for each bit of
  * cpu time attributed to a cgroup.
  */
-static void root_cgroup_cputime(struct task_cputime *cputime)
+static void root_cgroup_cputime(struct cgroup_base_stat *bstat)
 {
+	struct task_cputime *cputime = &bstat->cputime;
 	int i;
 
 	cputime->stime = 0;
@@ -442,6 +451,10 @@ static void root_cgroup_cputime(struct task_cputime *cputime)
 		cputime->sum_exec_runtime += user;
 		cputime->sum_exec_runtime += sys;
 		cputime->sum_exec_runtime += cpustat[CPUTIME_STEAL];
+
+#ifdef CONFIG_SCHED_CORE
+		bstat->forceidle_sum += cpustat[CPUTIME_FORCEIDLE];
+#endif
 	}
 }
 
@@ -449,27 +462,43 @@ void cgroup_base_stat_cputime_show(struct seq_file *seq)
 {
 	struct cgroup *cgrp = seq_css(seq)->cgroup;
 	u64 usage, utime, stime;
-	struct task_cputime cputime;
+	struct cgroup_base_stat bstat;
+#ifdef CONFIG_SCHED_CORE
+	u64 forceidle_time;
+#endif
 
 	if (cgroup_parent(cgrp)) {
 		cgroup_rstat_flush_hold(cgrp);
 		usage = cgrp->bstat.cputime.sum_exec_runtime;
 		cputime_adjust(&cgrp->bstat.cputime, &cgrp->prev_cputime,
 			       &utime, &stime);
+#ifdef CONFIG_SCHED_CORE
+		forceidle_time = cgrp->bstat.forceidle_sum;
+#endif
 		cgroup_rstat_flush_release();
 	} else {
-		root_cgroup_cputime(&cputime);
-		usage = cputime.sum_exec_runtime;
-		utime = cputime.utime;
-		stime = cputime.stime;
+		root_cgroup_cputime(&bstat);
+		usage = bstat.cputime.sum_exec_runtime;
+		utime = bstat.cputime.utime;
+		stime = bstat.cputime.stime;
+#ifdef CONFIG_SCHED_CORE
+		forceidle_time = bstat.forceidle_sum;
+#endif
 	}
 
 	do_div(usage, NSEC_PER_USEC);
 	do_div(utime, NSEC_PER_USEC);
 	do_div(stime, NSEC_PER_USEC);
+#ifdef CONFIG_SCHED_CORE
+	do_div(forceidle_time, NSEC_PER_USEC);
+#endif
 
 	seq_printf(seq, "usage_usec %llu\n"
 		   "user_usec %llu\n"
 		   "system_usec %llu\n",
 		   usage, utime, stime);
+
+#ifdef CONFIG_SCHED_CORE
+	seq_printf(seq, "core_sched.force_idle_usec %llu\n", forceidle_time);
+#endif
 }

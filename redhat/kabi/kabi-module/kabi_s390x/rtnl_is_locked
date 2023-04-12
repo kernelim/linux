@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:net/core/rtnetlink.c
-0x85670f1d	rtnl_is_locked	vmlinux	EXPORT_SYMBOL
+#2-
+0x85670f1d	rtnl_is_locked	vmlinux	EXPORT_SYMBOL	

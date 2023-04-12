@@ -22,7 +22,6 @@
 #include <linux/buffer_head.h>	/* grr. try_to_release_page,
 				   do_invalidatepage */
 #include <linux/shmem_fs.h>
-#include <linux/cleancache.h>
 #include <linux/rmap.h>
 #include "internal.h"
 
@@ -45,9 +44,13 @@ static inline void __clear_shadow_entry(struct address_space *mapping,
 static void clear_shadow_entry(struct address_space *mapping, pgoff_t index,
 			       void *entry)
 {
+	spin_lock(&mapping->host->i_lock);
 	xa_lock_irq(&mapping->i_pages);
 	__clear_shadow_entry(mapping, index, entry);
 	xa_unlock_irq(&mapping->i_pages);
+	if (mapping_shrinkable(mapping))
+		inode_add_lru(mapping->host);
+	spin_unlock(&mapping->host->i_lock);
 }
 
 /*
@@ -73,8 +76,10 @@ static void truncate_folio_batch_exceptionals(struct address_space *mapping,
 		return;
 
 	dax = dax_mapping(mapping);
-	if (!dax)
+	if (!dax) {
+		spin_lock(&mapping->host->i_lock);
 		xa_lock_irq(&mapping->i_pages);
+	}
 
 	for (i = j; i < folio_batch_count(fbatch); i++) {
 		struct folio *folio = fbatch->folios[i];
@@ -93,8 +98,12 @@ static void truncate_folio_batch_exceptionals(struct address_space *mapping,
 		__clear_shadow_entry(mapping, index, folio);
 	}
 
-	if (!dax)
+	if (!dax) {
 		xa_unlock_irq(&mapping->i_pages);
+		if (mapping_shrinkable(mapping))
+			inode_add_lru(mapping->host);
+		spin_unlock(&mapping->host->i_lock);
+	}
 	fbatch->nr = j;
 }
 
@@ -154,10 +163,6 @@ void folio_invalidate(struct folio *folio, size_t offset, size_t length)
 	}
 
 	invalidatepage = aops->invalidatepage;
-#ifdef CONFIG_BLOCK
-	if (!invalidatepage)
-		invalidatepage = block_invalidatepage;
-#endif
 	if (invalidatepage)
 		(*invalidatepage)(&folio->page, offset, length);
 }
@@ -239,7 +244,6 @@ bool truncate_inode_partial_folio(struct folio *folio, loff_t start, loff_t end)
 	 */
 	folio_zero_range(folio, offset, length);
 
-	cleancache_invalidate_page(folio->mapping, &folio->page);
 	if (folio_has_private(folio))
 		folio_invalidate(folio, offset, length);
 	if (!folio_test_large(folio))
@@ -344,7 +348,7 @@ void truncate_inode_pages_range(struct address_space *mapping,
 	bool		same_folio;
 
 	if (mapping_empty(mapping))
-		goto out;
+		return;
 
 	/*
 	 * 'start' and 'end' always covers the range of pages to be fully
@@ -435,9 +439,6 @@ void truncate_inode_pages_range(struct address_space *mapping,
 		folio_batch_release(&fbatch);
 		index++;
 	}
-
-out:
-	cleancache_invalidate_inode(mapping);
 }
 EXPORT_SYMBOL(truncate_inode_pages_range);
 
@@ -491,10 +492,6 @@ void truncate_inode_pages_final(struct address_space *mapping)
 		xa_unlock_irq(&mapping->i_pages);
 	}
 
-	/*
-	 * Cleancache needs notification even if there are no pages or shadow
-	 * entries.
-	 */
 	truncate_inode_pages(mapping, 0);
 }
 EXPORT_SYMBOL(truncate_inode_pages_final);
@@ -596,6 +593,7 @@ static int invalidate_complete_folio2(struct address_space *mapping,
 	    !filemap_release_folio(folio, GFP_KERNEL))
 		return 0;
 
+	spin_lock(&mapping->host->i_lock);
 	xa_lock_irq(&mapping->i_pages);
 	if (folio_test_dirty(folio))
 		goto failed;
@@ -603,11 +601,15 @@ static int invalidate_complete_folio2(struct address_space *mapping,
 	BUG_ON(folio_has_private(folio));
 	__filemap_remove_folio(folio, NULL);
 	xa_unlock_irq(&mapping->i_pages);
+	if (mapping_shrinkable(mapping))
+		inode_add_lru(mapping->host);
+	spin_unlock(&mapping->host->i_lock);
 
 	filemap_free_folio(mapping, folio);
 	return 1;
 failed:
 	xa_unlock_irq(&mapping->i_pages);
+	spin_unlock(&mapping->host->i_lock);
 	return 0;
 }
 
@@ -643,7 +645,7 @@ int invalidate_inode_pages2_range(struct address_space *mapping,
 	int did_range_unmap = 0;
 
 	if (mapping_empty(mapping))
-		goto out;
+		return 0;
 
 	folio_batch_init(&fbatch);
 	index = start;
@@ -707,8 +709,6 @@ int invalidate_inode_pages2_range(struct address_space *mapping,
 	if (dax_mapping(mapping)) {
 		unmap_mapping_pages(mapping, start, end - start + 1, false);
 	}
-out:
-	cleancache_invalidate_inode(mapping);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(invalidate_inode_pages2_range);

@@ -16,8 +16,8 @@
 # kernel.config files are build on the fly based on this config,
 # the first arg is arch and variant, the second is a hierarchy of
 # config options, lowest priority to highest
-ORDER=common ark pending-common custom-overrides
-EMPTY=armv7hl armv7hl-debug armv7hl-lpae armv7hl-lpae-debug i686 i686-debug
+ORDER=common ark pending-ark custom-overrides
+EMPTY=armv7hl armv7hl-debug armv7hl-lpae armv7hl-lpae-debug
 
 # x86_64
 x86_64=generic:generic-x86:generic-x86-x86_64
@@ -39,3 +39,5 @@ s390x-kgcov=generic:generic-s390x:kgcov
 aarch64=generic:generic-arm:generic-arm-aarch64
 aarch64-debug=generic:generic-arm:generic-arm-aarch64:debug:debug-arm-aarch64
 aarch64-kgcov=generic:generic-arm:generic-arm-aarch64:kgcov
+aarch64-64k=generic:generic-arm:generic-arm-aarch64:generic-arm-aarch64-64k
+aarch64-64k-debug=generic:generic-arm:generic-arm-aarch64:generic-arm-aarch64-64k:debug:debug-arm-aarch64:debug-arm-aarch64-64k

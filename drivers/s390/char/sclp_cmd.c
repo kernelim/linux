@@ -2,8 +2,7 @@
 /*
  * Copyright IBM Corp. 2007,2012
  *
- * Author(s): Heiko Carstens <heiko.carstens@de.ibm.com>,
- *	      Peter Oberparleiter <peter.oberparleiter@de.ibm.com>
+ * Author(s): Peter Oberparleiter <peter.oberparleiter@de.ibm.com>
  */
 
 #define KMSG_COMPONENT "sclp_cmd"
@@ -457,7 +456,7 @@ static int __init sclp_detect_standby_memory(void)
 	struct read_storage_sccb *sccb;
 	int i, id, assigned, rc;
 
-	if (OLDMEM_BASE) /* No standby memory in kdump mode */
+	if (oldmem_data.start) /* No standby memory in kdump mode */
 		return 0;
 	if ((sclp.facilities & 0xe00000000000ULL) != 0xe00000000000ULL)
 		return 0;

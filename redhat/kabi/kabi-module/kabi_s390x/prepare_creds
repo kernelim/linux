@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/cred.c
-0x00b1e78e	prepare_creds	vmlinux	EXPORT_SYMBOL
+#2-
+0x00b1e78e	prepare_creds	vmlinux	EXPORT_SYMBOL	

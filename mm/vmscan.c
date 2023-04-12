@@ -56,6 +56,7 @@
 
 #include <linux/swapops.h>
 #include <linux/balloon_compaction.h>
+#include <linux/sched/sysctl.h>
 
 #include "internal.h"
 
@@ -951,7 +952,7 @@ out:
 	return freed;
 }
 
-void drop_slab_node(int nid)
+static void drop_slab_node(int nid)
 {
 	unsigned long freed;
 	int shift = 0;
@@ -989,17 +990,6 @@ static inline int is_page_cache_freeable(struct folio *folio)
 		1 + folio_nr_pages(folio);
 }
 
-static int may_write_to_inode(struct inode *inode)
-{
-	if (current->flags & PF_SWAPWRITE)
-		return 1;
-	if (!inode_write_congested(inode))
-		return 1;
-	if (inode_to_bdi(inode) == current->backing_dev_info)
-		return 1;
-	return 0;
-}
-
 /*
  * We detected a synchronous write error writing a folio out.  Probably
  * -ENOSPC.  We need to propagate that into the address_space for a subsequent
@@ -1019,6 +1009,134 @@ static void handle_write_error(struct address_space *mapping,
 	if (folio_mapping(folio) == mapping)
 		mapping_set_error(mapping, error);
 	folio_unlock(folio);
+}
+
+static bool skip_throttle_noprogress(pg_data_t *pgdat)
+{
+	int reclaimable = 0, write_pending = 0;
+	int i;
+
+	/*
+	 * If kswapd is disabled, reschedule if necessary but do not
+	 * throttle as the system is likely near OOM.
+	 */
+	if (pgdat->kswapd_failures >= MAX_RECLAIM_RETRIES)
+		return true;
+
+	/*
+	 * If there are a lot of dirty/writeback pages then do not
+	 * throttle as throttling will occur when the pages cycle
+	 * towards the end of the LRU if still under writeback.
+	 */
+	for (i = 0; i < MAX_NR_ZONES; i++) {
+		struct zone *zone = pgdat->node_zones + i;
+
+		if (!populated_zone(zone))
+			continue;
+
+		reclaimable += zone_reclaimable_pages(zone);
+		write_pending += zone_page_state_snapshot(zone,
+						  NR_ZONE_WRITE_PENDING);
+	}
+	if (2 * write_pending <= reclaimable)
+		return true;
+
+	return false;
+}
+
+void reclaim_throttle(pg_data_t *pgdat, enum vmscan_throttle_state reason)
+{
+	wait_queue_head_t *wqh = &pgdat->reclaim_wait[reason];
+	long timeout, ret;
+	DEFINE_WAIT(wait);
+
+	/*
+	 * Do not throttle IO workers, kthreads other than kswapd or
+	 * workqueues. They may be required for reclaim to make
+	 * forward progress (e.g. journalling workqueues or kthreads).
+	 */
+	if (!current_is_kswapd() &&
+	    current->flags & (PF_IO_WORKER|PF_KTHREAD)) {
+		cond_resched();
+		return;
+	}
+
+	/*
+	 * These figures are pulled out of thin air.
+	 * VMSCAN_THROTTLE_ISOLATED is a transient condition based on too many
+	 * parallel reclaimers which is a short-lived event so the timeout is
+	 * short. Failing to make progress or waiting on writeback are
+	 * potentially long-lived events so use a longer timeout. This is shaky
+	 * logic as a failure to make progress could be due to anything from
+	 * writeback to a slow device to excessive references pages at the tail
+	 * of the inactive LRU.
+	 */
+	switch(reason) {
+	case VMSCAN_THROTTLE_WRITEBACK:
+		timeout = HZ/10;
+
+		if (atomic_inc_return(&pgdat->nr_writeback_throttled) == 1) {
+			WRITE_ONCE(pgdat->nr_reclaim_start,
+				node_page_state(pgdat, NR_THROTTLED_WRITTEN));
+		}
+
+		break;
+	case VMSCAN_THROTTLE_CONGESTED:
+		fallthrough;
+	case VMSCAN_THROTTLE_NOPROGRESS:
+		if (skip_throttle_noprogress(pgdat)) {
+			cond_resched();
+			return;
+		}
+
+		timeout = 1;
+
+		break;
+	case VMSCAN_THROTTLE_ISOLATED:
+		timeout = HZ/50;
+		break;
+	default:
+		WARN_ON_ONCE(1);
+		timeout = HZ;
+		break;
+	}
+
+	prepare_to_wait(wqh, &wait, TASK_UNINTERRUPTIBLE);
+	ret = schedule_timeout(timeout);
+	finish_wait(wqh, &wait);
+
+	if (reason == VMSCAN_THROTTLE_WRITEBACK)
+		atomic_dec(&pgdat->nr_writeback_throttled);
+
+	trace_mm_vmscan_throttled(pgdat->node_id, jiffies_to_usecs(timeout),
+				jiffies_to_usecs(timeout - ret),
+				reason);
+}
+
+/*
+ * Account for pages written if tasks are throttled waiting on dirty
+ * pages to clean. If enough pages have been cleaned since throttling
+ * started then wakeup the throttled tasks.
+ */
+void __acct_reclaim_writeback(pg_data_t *pgdat, struct folio *folio,
+							int nr_throttled)
+{
+	unsigned long nr_written;
+
+	node_stat_add_folio(folio, NR_THROTTLED_WRITTEN);
+
+	/*
+	 * This is an inaccurate read as the per-cpu deltas may not
+	 * be synchronised. However, given that the system is
+	 * writeback throttled, it is not worth taking the penalty
+	 * of getting an accurate count. At worst, the throttle
+	 * timeout guarantees forward progress.
+	 */
+	nr_written = node_page_state(pgdat, NR_THROTTLED_WRITTEN) -
+		READ_ONCE(pgdat->nr_reclaim_start);
+
+	if (nr_written > SWAP_CLUSTER_MAX * nr_throttled)
+		wake_up(&pgdat->reclaim_wait[VMSCAN_THROTTLE_WRITEBACK]);
 }
 
 /* possible outcome of pageout() */
@@ -1073,8 +1191,6 @@ static pageout_t pageout(struct folio *folio, struct address_space *mapping)
 	}
 	if (mapping->a_ops->writepage == NULL)
 		return PAGE_ACTIVATE;
-	if (!may_write_to_inode(mapping->host))
-		return PAGE_KEEP;
 
 	if (folio_clear_dirty_for_io(folio)) {
 		int res;
@@ -1120,6 +1236,8 @@ static int __remove_mapping(struct address_space *mapping, struct folio *folio,
 	BUG_ON(!folio_test_locked(folio));
 	BUG_ON(mapping != folio_mapping(folio));
 
+	if (!folio_test_swapcache(folio))
+		spin_lock(&mapping->host->i_lock);
 	xa_lock_irq(&mapping->i_pages);
 	/*
 	 * The non racy check for a busy page.
@@ -1188,6 +1306,9 @@ static int __remove_mapping(struct address_space *mapping, struct folio *folio,
 			shadow = workingset_eviction(folio, target_memcg);
 		__filemap_remove_folio(folio, shadow);
 		xa_unlock_irq(&mapping->i_pages);
+		if (mapping_shrinkable(mapping))
+			inode_add_lru(mapping->host);
+		spin_unlock(&mapping->host->i_lock);
 
 		if (freepage != NULL)
 			freepage(&folio->page);
@@ -1197,6 +1318,8 @@ static int __remove_mapping(struct address_space *mapping, struct folio *folio,
 
 cannot_free:
 	xa_unlock_irq(&mapping->i_pages);
+	if (!folio_test_swapcache(folio))
+		spin_unlock(&mapping->host->i_lock);
 	return 0;
 }
 
@@ -1269,7 +1392,7 @@ static enum page_references folio_check_references(struct folio *folio,
 		/*
 		 * All mapped folios start out with page table
 		 * references from the instantiating fault, so we need
-		 * to look twice if a mapped file folio is used more
+		 * to look twice if a mapped file/anon folio is used more
 		 * than once.
 		 *
 		 * Mark it and spare it for another trip around the
@@ -1358,7 +1481,6 @@ static unsigned int demote_page_list(struct list_head *demote_pages,
 {
 	int target_nid = next_demotion_node(pgdat->node_id);
 	unsigned int nr_succeeded;
-	int err;
 
 	if (list_empty(demote_pages))
 		return 0;
@@ -1367,7 +1489,7 @@ static unsigned int demote_page_list(struct list_head *demote_pages,
 		return 0;
 
 	/* Demotion ignores all cpuset and mempolicy settings */
-	err = migrate_pages(demote_pages, alloc_demote_page, NULL,
+	migrate_pages(demote_pages, alloc_demote_page, NULL,
 			    target_nid, MIGRATE_ASYNC, MR_DEMOTION,
 			    &nr_succeeded);
 
@@ -1435,9 +1557,8 @@ retry:
 
 		/*
 		 * The number of dirty pages determines if a node is marked
-		 * reclaim_congested which affects wait_iff_congested. kswapd
-		 * will stall and start writing pages if the tail of the LRU
-		 * is all dirty unqueued pages.
+		 * reclaim_congested. kswapd will stall and start writing
+		 * pages if the tail of the LRU is all dirty unqueued pages.
 		 */
 		folio_check_dirty_writeback(folio, &dirty, &writeback);
 		if (dirty || writeback)
@@ -1453,9 +1574,7 @@ retry:
 		 * end of the LRU a second time.
 		 */
 		mapping = page_mapping(page);
-		if (((dirty || writeback) && mapping &&
-		     inode_write_congested(mapping->host)) ||
-		    (writeback && PageReclaim(page)))
+		if (writeback && PageReclaim(page))
 			stat->nr_congested += nr_pages;
 
 		/*
@@ -1569,6 +1688,8 @@ retry:
 		if (PageAnon(page) && PageSwapBacked(page)) {
 			if (!PageSwapCache(page)) {
 				if (!(sc->gfp_mask & __GFP_IO))
+					goto keep_locked;
+				if (page_maybe_dma_pinned(page))
 					goto keep_locked;
 				if (PageTransHuge(page)) {
 					/* cannot split THP, skip it */
@@ -1888,69 +2009,6 @@ unsigned int reclaim_clean_pages_from_list(struct zone *zone,
 }
 
 /*
- * Attempt to remove the specified page from its LRU.  Only take this page
- * if it is of the appropriate PageActive status.  Pages which are being
- * freed elsewhere are also ignored.
- *
- * page:	page to consider
- * mode:	one of the LRU isolation modes defined above
- *
- * returns true on success, false on failure.
- */
-bool __isolate_lru_page_prepare(struct page *page, isolate_mode_t mode)
-{
-	/* Only take pages on the LRU. */
-	if (!PageLRU(page))
-		return false;
-
-	/* Compaction should not handle unevictable pages but CMA can do so */
-	if (PageUnevictable(page) && !(mode & ISOLATE_UNEVICTABLE))
-		return false;
-
-	/*
-	 * To minimise LRU disruption, the caller can indicate that it only
-	 * wants to isolate pages it will be able to operate on without
-	 * blocking - clean pages for the most part.
-	 *
-	 * ISOLATE_ASYNC_MIGRATE is used to indicate that it only wants to pages
-	 * that it is possible to migrate without blocking
-	 */
-	if (mode & ISOLATE_ASYNC_MIGRATE) {
-		/* All the caller can do on PageWriteback is block */
-		if (PageWriteback(page))
-			return false;
-
-		if (PageDirty(page)) {
-			struct address_space *mapping;
-			bool migrate_dirty;
-
-			/*
-			 * Only pages without mappings or that have a
-			 * ->migratepage callback are possible to migrate
-			 * without blocking. However, we can be racing with
-			 * truncation so it's necessary to lock the page
-			 * to stabilise the mapping as truncation holds
-			 * the page lock until after the page is removed
-			 * from the page cache.
-			 */
-			if (!trylock_page(page))
-				return false;
-
-			mapping = page_mapping(page);
-			migrate_dirty = !mapping || mapping->a_ops->migratepage;
-			unlock_page(page);
-			if (!migrate_dirty)
-				return false;
-		}
-	}
-
-	if ((mode & ISOLATE_UNMAPPED) && page_mapped(page))
-		return false;
-
-	return true;
-}
-
-/*
  * Update LRU sizes after isolating pages. The LRU size updates must
  * be complete before mem_cgroup_update_lru_size due to a sanity check.
  */
@@ -2001,11 +2059,11 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 	unsigned long skipped = 0;
 	unsigned long scan, total_scan, nr_pages;
 	LIST_HEAD(pages_skipped);
-	isolate_mode_t mode = (sc->may_unmap ? 0 : ISOLATE_UNMAPPED);
 
 	total_scan = 0;
 	scan = 0;
 	while (scan < nr_to_scan && !list_empty(src)) {
+		struct list_head *move_to = src;
 		struct page *page;
 
 		page = lru_to_page(src);
@@ -2015,9 +2073,9 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 		total_scan += nr_pages;
 
 		if (page_zonenum(page) > sc->reclaim_idx) {
-			list_move(&page->lru, &pages_skipped);
 			nr_skipped[page_zonenum(page)] += nr_pages;
-			continue;
+			move_to = &pages_skipped;
+			goto move;
 		}
 
 		/*
@@ -2025,37 +2083,34 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 		 * return with no isolated pages if the LRU mostly contains
 		 * ineligible pages.  This causes the VM to not reclaim any
 		 * pages, triggering a premature OOM.
-		 *
-		 * Account all tail pages of THP.  This would not cause
-		 * premature OOM since __isolate_lru_page() returns -EBUSY
-		 * only when the page is being freed somewhere else.
+		 * Account all tail pages of THP.
 		 */
 		scan += nr_pages;
-		if (!__isolate_lru_page_prepare(page, mode)) {
-			/* It is being freed elsewhere */
-			list_move(&page->lru, src);
-			continue;
-		}
+
+		if (!PageLRU(page))
+			goto move;
+		if (!sc->may_unmap && page_mapped(page))
+			goto move;
+
 		/*
 		 * Be careful not to clear PageLRU until after we're
 		 * sure the page is not being freed elsewhere -- the
 		 * page release code relies on it.
 		 */
-		if (unlikely(!get_page_unless_zero(page))) {
-			list_move(&page->lru, src);
-			continue;
-		}
+		if (unlikely(!get_page_unless_zero(page)))
+			goto move;
 
 		if (!TestClearPageLRU(page)) {
 			/* Another thread is already isolating this page */
 			put_page(page);
-			list_move(&page->lru, src);
-			continue;
+			goto move;
 		}
 
 		nr_taken += nr_pages;
 		nr_zone_taken[page_zonenum(page)] += nr_pages;
-		list_move(&page->lru, dst);
+		move_to = dst;
+move:
+		list_move(&page->lru, move_to);
 	}
 
 	/*
@@ -2079,7 +2134,8 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 	}
 	*nr_scanned = total_scan;
 	trace_mm_vmscan_lru_isolate(sc->reclaim_idx, sc->order, nr_to_scan,
-				    total_scan, skipped, nr_taken, mode, lru);
+				    total_scan, skipped, nr_taken,
+				    sc->may_unmap ? 0 : ISOLATE_UNMAPPED, lru);
 	update_lru_sizes(lruvec, lru, nr_zone_taken);
 	return nr_taken;
 }
@@ -2137,6 +2193,7 @@ static int too_many_isolated(struct pglist_data *pgdat, int file,
 		struct scan_control *sc)
 {
 	unsigned long inactive, isolated;
+	bool too_many;
 
 	if (current_is_kswapd())
 		return 0;
@@ -2160,7 +2217,13 @@ static int too_many_isolated(struct pglist_data *pgdat, int file,
 	if ((sc->gfp_mask & (__GFP_IO | __GFP_FS)) == (__GFP_IO | __GFP_FS))
 		inactive >>= 3;
 
-	return isolated > inactive;
+	too_many = isolated > inactive;
+
+	/* Wake up tasks throttled due to too_many_isolated. */
+	if (!too_many)
+		wake_throttle_isolated(pgdat);
+
+	return too_many;
 }
 
 /*
@@ -2241,9 +2304,7 @@ static unsigned int move_pages_to_lru(struct lruvec *lruvec,
  */
 static int current_may_throttle(void)
 {
-	return !(current->flags & PF_LOCAL_THROTTLE) ||
-		current->backing_dev_info == NULL ||
-		bdi_write_congested(current->backing_dev_info);
+	return !(current->flags & PF_LOCAL_THROTTLE);
 }
 
 /*
@@ -2269,8 +2330,8 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 			return 0;
 
 		/* wait a bit for the reclaimer. */
-		msleep(100);
 		stalled = true;
+		reclaim_throttle(pgdat, VMSCAN_THROTTLE_ISOLATED);
 
 		/* We are about to die and free our memory. Return now. */
 		if (fatal_signal_pending(current))
@@ -3084,6 +3145,11 @@ again:
 	if (!sc->force_deactivate) {
 		unsigned long refaults;
 
+		/*
+		 * When refaults are being observed, it means a new
+		 * workingset is being established. Deactivate to get
+		 * rid of any stale active pages quickly.
+		 */
 		refaults = lruvec_page_state(target_lruvec,
 				WORKINGSET_ACTIVATE_ANON);
 		if (refaults != target_lruvec->refaults[0] ||
@@ -3092,11 +3158,6 @@ again:
 		else
 			sc->may_deactivate &= ~DEACTIVATE_ANON;
 
-		/*
-		 * When refaults are being observed, it means a new
-		 * workingset is being established. Deactivate to get
-		 * rid of any stale active pages quickly.
-		 */
 		refaults = lruvec_page_state(target_lruvec,
 				WORKINGSET_ACTIVATE_FILE);
 		if (refaults != target_lruvec->refaults[1] ||
@@ -3201,19 +3262,19 @@ again:
 		 * If kswapd scans pages marked for immediate
 		 * reclaim and under writeback (nr_immediate), it
 		 * implies that pages are cycling through the LRU
-		 * faster than they are written so also forcibly stall.
+		 * faster than they are written so forcibly stall
+		 * until some pages complete writeback.
 		 */
 		if (sc->nr.immediate)
-			congestion_wait(BLK_RW_ASYNC, HZ/10);
+			reclaim_throttle(pgdat, VMSCAN_THROTTLE_WRITEBACK);
 	}
 
 	/*
-	 * Tag a node/memcg as congested if all the dirty pages
-	 * scanned were backed by a congested BDI and
-	 * wait_iff_congested will stall.
+	 * Tag a node/memcg as congested if all the dirty pages were marked
+	 * for writeback and immediate reclaim (counted in nr.congested).
 	 *
 	 * Legacy memcg will stall in page writeback so avoid forcibly
-	 * stalling in wait_iff_congested().
+	 * stalling in reclaim_throttle().
 	 */
 	if ((current_is_kswapd() ||
 	     (cgroup_reclaim(sc) && writeback_throttling_sane(sc))) &&
@@ -3221,15 +3282,15 @@ again:
 		set_bit(LRUVEC_CONGESTED, &target_lruvec->flags);
 
 	/*
-	 * Stall direct reclaim for IO completions if underlying BDIs
-	 * and node is congested. Allow kswapd to continue until it
+	 * Stall direct reclaim for IO completions if the lruvec is
+	 * node is congested. Allow kswapd to continue until it
 	 * starts encountering unqueued dirty pages or cycling through
 	 * the LRU too quickly.
 	 */
 	if (!current_is_kswapd() && current_may_throttle() &&
 	    !sc->hibernation_mode &&
 	    test_bit(LRUVEC_CONGESTED, &target_lruvec->flags))
-		wait_iff_congested(BLK_RW_ASYNC, HZ/10);
+		reclaim_throttle(pgdat, VMSCAN_THROTTLE_CONGESTED);
 
 	if (should_continue_reclaim(pgdat, sc->nr_reclaimed - nr_reclaimed,
 				    sc))
@@ -3277,6 +3338,36 @@ static inline bool compaction_ready(struct zone *zone, struct scan_control *sc)
 	return zone_watermark_ok_safe(zone, 0, watermark, sc->reclaim_idx);
 }
 
+static void consider_reclaim_throttle(pg_data_t *pgdat, struct scan_control *sc)
+{
+	/*
+	 * If reclaim is making progress greater than 12% efficiency then
+	 * wake all the NOPROGRESS throttled tasks.
+	 */
+	if (sc->nr_reclaimed > (sc->nr_scanned >> 3)) {
+		wait_queue_head_t *wqh;
+
+		wqh = &pgdat->reclaim_wait[VMSCAN_THROTTLE_NOPROGRESS];
+		if (waitqueue_active(wqh))
+			wake_up(wqh);
+
+		return;
+	}
+
+	/*
+	 * Do not throttle kswapd or cgroup reclaim on NOPROGRESS as it will
+	 * throttle on VMSCAN_THROTTLE_WRITEBACK if there are too many pages
+	 * under writeback and marked for immediate reclaim at the tail of the
+	 * LRU.
+	 */
+	if (current_is_kswapd() || cgroup_reclaim(sc))
+		return;
+
+	/* Throttle if making no progress at high prioities. */
+	if (sc->priority == 1 && !sc->nr_reclaimed)
+		reclaim_throttle(pgdat, VMSCAN_THROTTLE_NOPROGRESS);
+}
+
 /*
  * This is the direct reclaim path, for page-allocating processes.  We only
  * try to reclaim pages from zones which will satisfy the caller's allocation
@@ -3293,6 +3384,7 @@ static void shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 	unsigned long nr_soft_scanned;
 	gfp_t orig_mask;
 	pg_data_t *last_pgdat = NULL;
+	pg_data_t *first_pgdat = NULL;
 
 	/*
 	 * If the number of buffer_heads in the machine exceeds the maximum
@@ -3356,12 +3448,18 @@ static void shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 			/* need some check for avoid more shrink_zone() */
 		}
 
+		if (!first_pgdat)
+			first_pgdat = zone->zone_pgdat;
+
 		/* See comment about same check for global reclaim above */
 		if (zone->zone_pgdat == last_pgdat)
 			continue;
 		last_pgdat = zone->zone_pgdat;
 		shrink_node(zone->zone_pgdat, sc);
 	}
+
+	if (first_pgdat)
+		consider_reclaim_throttle(first_pgdat, sc);
 
 	/*
 	 * Restore to original mask to avoid the impact on the caller if we
@@ -3805,7 +3903,10 @@ static bool pgdat_balanced(pg_data_t *pgdat, int order, int highest_zoneidx)
 		if (!managed_zone(zone))
 			continue;
 
-		mark = high_wmark_pages(zone);
+		if (sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING)
+			mark = wmark_pages(zone, WMARK_PROMO);
+		else
+			mark = high_wmark_pages(zone);
 		if (zone_watermark_ok_safe(zone, order, mark, highest_zoneidx))
 			return true;
 	}
@@ -4302,11 +4403,12 @@ static int kswapd(void *p)
 	 * us from recursively trying to free more memory as we're
 	 * trying to free the first piece of memory in the first place).
 	 */
-	tsk->flags |= PF_MEMALLOC | PF_SWAPWRITE | PF_KSWAPD;
+	tsk->flags |= PF_MEMALLOC | PF_KSWAPD;
 	set_freezable();
 
 	WRITE_ONCE(pgdat->kswapd_order, 0);
 	WRITE_ONCE(pgdat->kswapd_highest_zoneidx, MAX_NR_ZONES);
+	atomic_set(&pgdat->nr_writeback_throttled, 0);
 	for ( ; ; ) {
 		bool ret;
 
@@ -4352,7 +4454,7 @@ kswapd_try_sleep:
 			goto kswapd_try_sleep;
 	}
 
-	tsk->flags &= ~(PF_MEMALLOC | PF_SWAPWRITE | PF_KSWAPD);
+	tsk->flags &= ~(PF_MEMALLOC | PF_KSWAPD);
 
 	return 0;
 }
@@ -4593,11 +4695,8 @@ static int __node_reclaim(struct pglist_data *pgdat, gfp_t gfp_mask, unsigned in
 	fs_reclaim_acquire(sc.gfp_mask);
 	/*
 	 * We need to be able to allocate from the reserves for RECLAIM_UNMAP
-	 * and we also need to be able to write out pages for RECLAIM_WRITE
-	 * and RECLAIM_UNMAP.
 	 */
 	noreclaim_flag = memalloc_noreclaim_save();
-	p->flags |= PF_SWAPWRITE;
 	set_task_reclaim_state(p, &sc.reclaim_state);
 
 	if (node_pagecache_reclaimable(pgdat) > pgdat->min_unmapped_pages) {
@@ -4611,7 +4710,6 @@ static int __node_reclaim(struct pglist_data *pgdat, gfp_t gfp_mask, unsigned in
 	}
 
 	set_task_reclaim_state(p, NULL);
-	current->flags &= ~PF_SWAPWRITE;
 	memalloc_noreclaim_restore(noreclaim_flag);
 	fs_reclaim_release(sc.gfp_mask);
 	psi_memstall_leave(&pflags);

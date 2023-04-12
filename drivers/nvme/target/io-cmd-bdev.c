@@ -77,6 +77,14 @@ int nvmet_bdev_ns_enable(struct nvmet_ns *ns)
 {
 	int ret;
 
+	/*
+	 * When buffered_io namespace attribute is enabled that means user want
+	 * this block device to be used as a file, so block device can take
+	 * an advantage of cache.
+	 */
+	if (ns->buffered_io)
+		return -ENOTBLK;
+
 	ns->bdev = blkdev_get_by_path(ns->device_path,
 			FMODE_READ | FMODE_WRITE, NULL);
 	if (IS_ERR(ns->bdev)) {
@@ -238,7 +246,8 @@ static void nvmet_bdev_execute_rw(struct nvmet_req *req)
 	struct scatterlist *sg;
 	struct blk_plug plug;
 	sector_t sector;
-	int op, i, rc;
+	blk_opf_t opf;
+	int i, rc;
 	struct sg_mapping_iter prot_miter;
 	unsigned int iter_flags;
 	unsigned int total_len = nvmet_rw_data_len(req) + req->metadata_len;
@@ -252,26 +261,26 @@ static void nvmet_bdev_execute_rw(struct nvmet_req *req)
 	}
 
 	if (req->cmd->rw.opcode == nvme_cmd_write) {
-		op = REQ_OP_WRITE | REQ_SYNC | REQ_IDLE;
+		opf = REQ_OP_WRITE | REQ_SYNC | REQ_IDLE;
 		if (req->cmd->rw.control & cpu_to_le16(NVME_RW_FUA))
-			op |= REQ_FUA;
+			opf |= REQ_FUA;
 		iter_flags = SG_MITER_TO_SG;
 	} else {
-		op = REQ_OP_READ;
+		opf = REQ_OP_READ;
 		iter_flags = SG_MITER_FROM_SG;
 	}
 
 	if (is_pci_p2pdma_page(sg_page(req->sg)))
-		op |= REQ_NOMERGE;
+		opf |= REQ_NOMERGE;
 
 	sector = nvmet_lba_to_sect(req->ns, req->cmd->rw.slba);
 
 	if (nvmet_use_inline_bvec(req)) {
 		bio = &req->b.inline_bio;
 		bio_init(bio, req->ns->bdev, req->inline_bvec,
-			 ARRAY_SIZE(req->inline_bvec), op);
+			 ARRAY_SIZE(req->inline_bvec), opf);
 	} else {
-		bio = bio_alloc(req->ns->bdev, bio_max_segs(sg_cnt), op,
+		bio = bio_alloc(req->ns->bdev, bio_max_segs(sg_cnt), opf,
 				GFP_KERNEL);
 	}
 	bio->bi_iter.bi_sector = sector;
@@ -298,7 +307,7 @@ static void nvmet_bdev_execute_rw(struct nvmet_req *req)
 			}
 
 			bio = bio_alloc(req->ns->bdev, bio_max_segs(sg_cnt),
-					op, GFP_KERNEL);
+					opf, GFP_KERNEL);
 			bio->bi_iter.bi_sector = sector;
 
 			bio_chain(bio, prev);

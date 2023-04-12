@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/xarray.c
-0x7dcf4135	__xa_insert	vmlinux	EXPORT_SYMBOL
+#2-
+0x7dcf4135	__xa_insert	vmlinux	EXPORT_SYMBOL	

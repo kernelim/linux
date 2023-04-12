@@ -55,11 +55,13 @@ config S390
 	# Note: keep this list sorted alphabetically
 	#
 	imply IMA_SECURE_AND_OR_TRUSTED_BOOT
+	select ALTERNATE_USER_ADDRESS_SPACE
 	select ARCH_32BIT_USTAT_F_TINODE
 	select ARCH_BINFMT_ELF_STATE
 	select ARCH_ENABLE_MEMORY_HOTPLUG if SPARSEMEM
 	select ARCH_ENABLE_MEMORY_HOTREMOVE
 	select ARCH_ENABLE_SPLIT_PMD_PTLOCK if PGTABLE_LEVELS > 2
+	select ARCH_HAS_CURRENT_STACK_POINTER
 	select ARCH_HAS_DEBUG_VM_PGTABLE
 	select ARCH_HAS_DEBUG_WX
 	select ARCH_HAS_DEVMEM_IS_ALLOWED
@@ -122,11 +124,11 @@ config S390
 	select CPU_NO_EFFICIENT_FFS if !HAVE_MARCH_Z9_109_FEATURES
 	select DMA_OPS if PCI
 	select DYNAMIC_FTRACE if FUNCTION_TRACER
+	select GCC12_NO_ARRAY_BOUNDS
 	select GENERIC_ALLOCATOR
 	select GENERIC_CPU_AUTOPROBE
 	select GENERIC_CPU_VULNERABILITIES
 	select GENERIC_ENTRY
-	select GENERIC_FIND_FIRST_BIT
 	select GENERIC_GETTIMEOFDAY
 	select GENERIC_PTDUMP
 	select GENERIC_SMP_IDLE_THREAD
@@ -138,6 +140,7 @@ config S390
 	select HAVE_ARCH_JUMP_LABEL_RELATIVE
 	select HAVE_ARCH_KASAN
 	select HAVE_ARCH_KASAN_VMALLOC
+	select HAVE_ARCH_KFENCE
 	select HAVE_ARCH_RANDOMIZE_KSTACK_OFFSET
 	select HAVE_ARCH_SECCOMP_FILTER
 	select HAVE_ARCH_SOFT_DIRTY
@@ -195,6 +198,7 @@ config S390
 	select IOMMU_SUPPORT		if PCI
 	select MMU_GATHER_NO_GATHER
 	select MMU_GATHER_RCU_TABLE_FREE
+	select MMU_GATHER_MERGE_VMAS
 	select MODULES_USE_ELF_RELA
 	select NEED_DMA_MAP_STATE	if PCI
 	select NEED_SG_DMA_LENGTH	if PCI
@@ -430,6 +434,14 @@ endchoice
 config 64BIT
 	def_bool y
 
+config COMMAND_LINE_SIZE
+	int "Maximum size of kernel command line"
+	default 4096
+	range 896 1048576
+	help
+	  This allows you to specify the maximum length of the kernel command
+	  line.
+
 config COMPAT
 	def_bool y
 	prompt "Kernel support for 31 bit emulation"
@@ -570,6 +582,7 @@ config KERNEL_NOBP
 
 config EXPOLINE
 	def_bool n
+	depends on $(cc-option,-mindirect-branch=thunk)
 	prompt "Avoid speculative indirect branches in the kernel"
 	help
 	  Compile the kernel with the expoline compiler options to guard
@@ -577,6 +590,20 @@ config EXPOLINE
 	  branches.
 	  Requires a compiler with -mindirect-branch=thunk support for full
 	  protection. The kernel may run slower.
+
+	  If unsure, say N.
+
+config EXPOLINE_EXTERN
+	def_bool n
+	depends on EXPOLINE
+	depends on HAVE_MARCH_Z10_FEATURES
+	depends on CC_IS_GCC && GCC_VERSION >= 110200
+	depends on $(success,$(srctree)/arch/s390/tools/gcc-thunk-extern.sh $(CC))
+	prompt "Generate expolines as extern functions."
+	help
+	  This option is required for some tooling like kpatch. The kernel is
+	  compiled with -mindirect-branch=thunk-extern and requires a newer
+	  compiler.
 
 	  If unsure, say N.
 
@@ -680,16 +707,6 @@ config STACK_GUARD
 	  interrupt frame is 184 bytes for 31 bit and 328 bytes on 64 bit.
 	  The minimum size for the stack guard should be 256 for 31 bit and
 	  512 for 64 bit.
-
-config WARN_DYNAMIC_STACK
-	def_bool n
-	prompt "Emit compiler warnings for function with dynamic stack usage"
-	help
-	  This option enables the compiler option -mwarn-dynamicstack. If the
-	  compiler supports this options generates warnings for functions
-	  that dynamically allocate stack space using alloca.
-
-	  Say N if you are unsure.
 
 endmenu
 
@@ -944,6 +961,8 @@ menu "Selftests"
 
 config S390_UNWIND_SELFTEST
 	def_tristate n
+	depends on KUNIT
+	default KUNIT_ALL_TESTS
 	prompt "Test unwind functions"
 	help
 	  This option enables s390 specific stack unwinder testing kernel

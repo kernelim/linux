@@ -355,7 +355,7 @@ static void vt8500_shutdown(struct uart_port *port)
 
 static void vt8500_set_termios(struct uart_port *port,
 			       struct ktermios *termios,
-			       struct ktermios *old)
+			       const struct ktermios *old)
 {
 	struct vt8500_port *vt8500_port =
 			container_of(port, struct vt8500_port, uart);
@@ -484,7 +484,7 @@ static void wait_for_xmitr(struct uart_port *port)
 	} while (status & 0x10);
 }
 
-static void vt8500_console_putchar(struct uart_port *port, int c)
+static void vt8500_console_putchar(struct uart_port *port, unsigned char c)
 {
 	wait_for_xmitr(port);
 	writeb(c, port->membase + VT8500_TXFIFO);

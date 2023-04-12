@@ -22,6 +22,8 @@
  * IN THE SOFTWARE.
  */
 
+#include <linux/string_helpers.h>
+
 #include <drm/drm_print.h>
 
 #include "i915_params.h"
@@ -94,7 +96,7 @@ i915_param_named_unsafe(enable_hangcheck, bool, 0400,
 
 i915_param_named_unsafe(enable_psr, int, 0400,
 	"Enable PSR "
-	"(0=disabled, 1=enabled) "
+	"(0=disabled, 1=enable up to PSR1, 2=enable up to PSR2) "
 	"Default: -1 (use per-chip default)");
 
 i915_param_named(psr_safest_params, bool, 0400,
@@ -169,6 +171,18 @@ i915_param_named(guc_log_level, int, 0400,
 	"GuC firmware logging level. Requires GuC to be loaded. "
 	"(-1=auto [default], 0=disable, 1..4=enable with verbosity min..max)");
 
+i915_param_named(guc_log_size_crash, int, 0400,
+	"GuC firmware logging buffer size for crash dumps (in MB)"
+	"(-1=auto [default], NB: max = 4, other restrictions apply)");
+
+i915_param_named(guc_log_size_debug, int, 0400,
+	"GuC firmware logging buffer size for debug logs (in MB)"
+	"(-1=auto [default], NB: max = 16, other restrictions apply)");
+
+i915_param_named(guc_log_size_capture, int, 0400,
+	"GuC error capture register dump buffer size (in MB)"
+	"(-1=auto [default], NB: max = 4, other restrictions apply)");
+
 i915_param_named_unsafe(guc_firmware_path, charp, 0400,
 	"GuC firmware path to use instead of the default one");
 
@@ -200,13 +214,19 @@ i915_param_named_unsafe(request_timeout_ms, uint, 0600,
 			"Default request/fence/batch buffer expiration timeout.");
 #endif
 
+i915_param_named_unsafe(lmem_size, uint, 0400,
+			"Set the lmem size(in MiB) for each region. (default: 0, all memory)");
+i915_param_named_unsafe(lmem_bar_size, uint, 0400,
+			"Set the lmem bar size(in MiB).");
+
 static __always_inline void _print_param(struct drm_printer *p,
 					 const char *name,
 					 const char *type,
 					 const void *x)
 {
 	if (!__builtin_strcmp(type, "bool"))
-		drm_printf(p, "i915.%s=%s\n", name, yesno(*(const bool *)x));
+		drm_printf(p, "i915.%s=%s\n", name,
+			   str_yes_no(*(const bool *)x));
 	else if (!__builtin_strcmp(type, "int"))
 		drm_printf(p, "i915.%s=%d\n", name, *(const int *)x);
 	else if (!__builtin_strcmp(type, "unsigned int"))

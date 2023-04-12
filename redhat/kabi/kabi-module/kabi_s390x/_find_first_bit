@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/find_bit.c
-0x8810754a	_find_first_bit	vmlinux	EXPORT_SYMBOL
+#2-
+0x8810754a	_find_first_bit	vmlinux	EXPORT_SYMBOL	

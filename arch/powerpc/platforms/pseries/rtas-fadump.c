@@ -108,6 +108,12 @@ static u64 rtas_fadump_init_mem_struct(struct fw_dump *fadump_conf)
 	fdm.hpte_region.destination_address = cpu_to_be64(addr);
 	addr += fadump_conf->hpte_region_size;
 
+	/*
+	 * Align boot memory area destination address to page boundary to
+	 * be able to mmap read this area in the vmcore.
+	 */
+	addr = PAGE_ALIGN(addr);
+
 	/* RMA region section */
 	fdm.rmr_region.request_flag = cpu_to_be32(RTAS_FADUMP_REQUEST_FLAG);
 	fdm.rmr_region.source_data_type =
@@ -462,10 +468,10 @@ static void rtas_fadump_region_show(struct fw_dump *fadump_conf,
 		   be64_to_cpu(fdm_ptr->rmr_region.source_len),
 		   be64_to_cpu(fdm_ptr->rmr_region.bytes_dumped));
 
-	/* Dump is active. Show reserved area start address. */
+	/* Dump is active. Show preserved area start address. */
 	if (fdm_active) {
-		seq_printf(m, "\nMemory above %#016lx is reserved for saving crash dump\n",
-			   fadump_conf->reserve_dump_area_start);
+		seq_printf(m, "\nMemory above %#016llx is reserved for saving crash dump\n",
+			   fadump_conf->boot_mem_top);
 	}
 }
 

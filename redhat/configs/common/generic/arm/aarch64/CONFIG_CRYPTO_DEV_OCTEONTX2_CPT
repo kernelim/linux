@@ -1,1 +1,18 @@
+# CONFIG_CRYPTO_DEV_OCTEONTX2_CPT:
+# 
+# This driver allows you to utilize the Marvell Cryptographic
+# Accelerator Unit(CPT) found in OcteonTX2 series of processors.
+# 
+# Symbol: CRYPTO_DEV_OCTEONTX2_CPT [=n]
+# Type  : tristate
+# Defined at drivers/crypto/marvell/Kconfig:39
+#   Prompt: Marvell OcteonTX2 CPT driver
+#   Depends on: CRYPTO [=y] && CRYPTO_HW [=y] && (ARCH_THUNDER2 [=y] || COMPILE_TEST [=n]) && PCI_MSI [=y] && 64BIT [=y] && CRYPTO_LIB_AES [=y] && NET_VENDOR_MARVELL [=y]
+#   Location:
+#     -> Cryptographic API (CRYPTO [=y])
+#       -> Hardware crypto devices (CRYPTO_HW [=y])
+# Selects: OCTEONTX2_MBOX [=m] && CRYPTO_DEV_MARVELL [=m] && CRYPTO_SKCIPHER [=y] && CRYPTO_HASH [=y] && CRYPTO_AEAD [=y]
+# 
+# 
+# 
 CONFIG_CRYPTO_DEV_OCTEONTX2_CPT=m

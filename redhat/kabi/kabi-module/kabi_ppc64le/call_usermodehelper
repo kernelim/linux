@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/umh.c
-0xa7eedcc4	call_usermodehelper	vmlinux	EXPORT_SYMBOL
+#2-
+0xa7eedcc4	call_usermodehelper	vmlinux	EXPORT_SYMBOL	

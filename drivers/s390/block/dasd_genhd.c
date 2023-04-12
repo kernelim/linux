@@ -34,15 +34,15 @@ int dasd_gendisk_alloc(struct dasd_block *block)
 {
 	struct gendisk *gdp;
 	struct dasd_device *base;
-	int len;
+	int len, rc;
 
 	/* Make sure the minor for this device exists. */
 	base = block->base;
 	if (base->devindex >= DASD_PER_MAJOR)
 		return -EBUSY;
 
-	gdp = __alloc_disk_node(block->request_queue, NUMA_NO_NODE,
-				&dasd_bio_compl_lkclass);
+	gdp = blk_mq_alloc_disk_for_queue(block->request_queue,
+					  &dasd_bio_compl_lkclass);
 	if (!gdp)
 		return -ENOMEM;
 
@@ -80,7 +80,13 @@ int dasd_gendisk_alloc(struct dasd_block *block)
 	dasd_add_link_to_gendisk(gdp, base);
 	block->gdp = gdp;
 	set_capacity(block->gdp, 0);
-	device_add_disk(&base->cdev->dev, block->gdp, NULL);
+
+	rc = device_add_disk(&base->cdev->dev, block->gdp, NULL);
+	if (rc) {
+		dasd_gendisk_free(block);
+		return rc;
+	}
+
 	return 0;
 }
 

@@ -81,6 +81,9 @@ enum trace_type {
 #undef __dynamic_array
 #define __dynamic_array(type, item)	type	item[];
 
+#undef __rel_dynamic_array
+#define __rel_dynamic_array(type, item)	type	item[];
+
 #undef F_STRUCT
 #define F_STRUCT(args...)		args
 
@@ -1938,5 +1941,14 @@ struct trace_min_max_param {
 #define U64_STR_SIZE		24	/* 20 digits max */
 
 extern const struct file_operations trace_min_max_fops;
+
+#ifdef CONFIG_RV
+extern int rv_init_interface(void);
+#else
+static inline int rv_init_interface(void)
+{
+	return 0;
+}
+#endif
 
 #endif /* _LINUX_KERNEL_TRACE_H */

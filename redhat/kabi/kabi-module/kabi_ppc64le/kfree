@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:mm/slub.c
-0x037a0cba	kfree	vmlinux	EXPORT_SYMBOL
+#2-
+0x037a0cba	kfree	vmlinux	EXPORT_SYMBOL	

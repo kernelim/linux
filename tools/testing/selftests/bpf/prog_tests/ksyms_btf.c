@@ -8,6 +8,7 @@
 #include "test_ksyms_btf_null_check.skel.h"
 #include "test_ksyms_weak.skel.h"
 #include "test_ksyms_weak.lskel.h"
+#include "test_ksyms_btf_write_check.skel.h"
 
 static int duration;
 
@@ -137,6 +138,20 @@ cleanup:
 	test_ksyms_weak_lskel__destroy(skel);
 }
 
+static void test_write_check(bool test_handler1)
+{
+	struct test_ksyms_btf_write_check *skel;
+
+	skel = test_ksyms_btf_write_check__open();
+	if (!ASSERT_OK_PTR(skel, "test_ksyms_btf_write_check__open"))
+		return;
+	bpf_program__set_autoload(test_handler1 ? skel->progs.handler2 : skel->progs.handler1, false);
+	ASSERT_ERR(test_ksyms_btf_write_check__load(skel),
+		   "unexpected load of a prog writing to ksym memory\n");
+
+	test_ksyms_btf_write_check__destroy(skel);
+}
+
 void test_ksyms_btf(void)
 {
 	int percpu_datasec;
@@ -167,4 +182,10 @@ void test_ksyms_btf(void)
 
 	if (test__start_subtest("weak_ksyms_lskel"))
 		test_weak_syms_lskel();
+
+	if (test__start_subtest("write_check1"))
+		test_write_check(true);
+
+	if (test__start_subtest("write_check2"))
+		test_write_check(false);
 }

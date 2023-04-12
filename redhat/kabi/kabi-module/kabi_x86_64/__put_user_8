@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/lib/putuser.S
-0xb8e7ce2c	__put_user_8	vmlinux	EXPORT_SYMBOL
+#2-
+0xb8e7ce2c	__put_user_8	vmlinux	EXPORT_SYMBOL	

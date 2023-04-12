@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/xarray.c
-0x429dcdc0	xa_find_after	vmlinux	EXPORT_SYMBOL
+#2-
+0x429dcdc0	xa_find_after	vmlinux	EXPORT_SYMBOL	

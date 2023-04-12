@@ -1079,7 +1079,7 @@ ipv6_add_addr(struct inet6_dev *idev, struct ifa6_config *cfg,
 			goto out;
 	}
 
-	ifa = kzalloc(sizeof(*ifa), gfp_flags);
+	ifa = kzalloc(sizeof(*ifa), gfp_flags | __GFP_ACCOUNT);
 	if (!ifa) {
 		err = -ENOBUFS;
 		goto out;
@@ -3528,11 +3528,15 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 		fallthrough;
 	case NETDEV_UP:
 	case NETDEV_CHANGE:
-		if (dev->flags & IFF_SLAVE)
-			break;
-
 		if (idev && idev->cnf.disable_ipv6)
 			break;
+
+		if (dev->flags & IFF_SLAVE) {
+			if (event == NETDEV_UP && !IS_ERR_OR_NULL(idev) &&
+			    dev->flags & IFF_UP && dev->flags & IFF_MULTICAST)
+				ipv6_mc_up(idev);
+			break;
+		}
 
 		if (event == NETDEV_UP) {
 			/* restore routes for permanent addresses */
@@ -5125,9 +5129,9 @@ next:
 		fillargs->event = RTM_GETMULTICAST;
 
 		/* multicast address */
-		for (ifmca = rcu_dereference(idev->mc_list);
+		for (ifmca = rtnl_dereference(idev->mc_list);
 		     ifmca;
-		     ifmca = rcu_dereference(ifmca->next), ip_idx++) {
+		     ifmca = rtnl_dereference(ifmca->next), ip_idx++) {
 			if (ip_idx < s_ip_idx)
 				continue;
 			err = inet6_fill_ifmcaddr(skb, ifmca, fillargs);
@@ -5795,7 +5799,8 @@ static int check_stable_privacy(struct inet6_dev *idev, struct net *net,
 }
 
 static int inet6_validate_link_af(const struct net_device *dev,
-				  const struct nlattr *nla)
+				  const struct nlattr *nla,
+				  struct netlink_ext_ack *extack)
 {
 	struct nlattr *tb[IFLA_INET6_MAX + 1];
 	struct inet6_dev *idev = NULL;
@@ -5808,7 +5813,7 @@ static int inet6_validate_link_af(const struct net_device *dev,
 	}
 
 	err = nla_parse_nested_deprecated(tb, IFLA_INET6_MAX, nla,
-					  inet6_af_policy, NULL);
+					  inet6_af_policy, extack);
 	if (err)
 		return err;
 
@@ -7051,9 +7056,8 @@ static int __net_init addrconf_init_net(struct net *net)
 	if (!dflt)
 		goto err_alloc_dflt;
 
-	if (IS_ENABLED(CONFIG_SYSCTL) &&
-	    !net_eq(net, &init_net)) {
-		switch (sysctl_devconf_inherit_init_net) {
+	if (!net_eq(net, &init_net)) {
+		switch (net_inherit_devconf()) {
 		case 1:  /* copy from init_net */
 			memcpy(all, init_net.ipv6.devconf_all,
 			       sizeof(ipv6_devconf));

@@ -2373,7 +2373,7 @@ static void sci_reset(struct uart_port *port)
 }
 
 static void sci_set_termios(struct uart_port *port, struct ktermios *termios,
-			    struct ktermios *old)
+		            const struct ktermios *old)
 {
 	unsigned int baud, smr_val = SCSMR_ASYNC, scr_val = 0, i, bits;
 	unsigned int brr = 255, cks = 0, srr = 15, dl = 0, sccks = 0;
@@ -2981,7 +2981,7 @@ static void sci_cleanup_single(struct sci_port *port)
 
 #if defined(CONFIG_SERIAL_SH_SCI_CONSOLE) || \
     defined(CONFIG_SERIAL_SH_SCI_EARLYCON)
-static void serial_console_putchar(struct uart_port *port, int ch)
+static void serial_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	sci_poll_put_char(port, ch);
 }

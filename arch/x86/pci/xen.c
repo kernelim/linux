@@ -305,7 +305,7 @@ static int xen_initdom_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 				return -EINVAL;
 
 			map_irq.table_base = pci_resource_start(dev, bir);
-			map_irq.entry_nr = msidesc->msi_attrib.entry_nr;
+			map_irq.entry_nr = msidesc->pci.msi_attrib.entry_nr;
 		}
 
 		ret = -EINVAL;
@@ -350,9 +350,12 @@ out:
 	return ret;
 }
 
-static void xen_initdom_restore_msi_irqs(struct pci_dev *dev)
+bool xen_initdom_restore_msi(struct pci_dev *dev)
 {
 	int ret = 0;
+
+	if (!xen_initial_domain())
+		return true;
 
 	if (pci_seg_supported) {
 		struct physdev_pci_device restore_ext;
@@ -374,10 +377,10 @@ static void xen_initdom_restore_msi_irqs(struct pci_dev *dev)
 		ret = HYPERVISOR_physdev_op(PHYSDEVOP_restore_msi, &restore);
 		WARN(ret && ret != -ENOSYS, "restore_msi -> %d\n", ret);
 	}
+	return false;
 }
 #else /* CONFIG_XEN_DOM0 */
 #define xen_initdom_setup_msi_irqs	NULL
-#define xen_initdom_restore_msi_irqs	NULL
 #endif /* !CONFIG_XEN_DOM0 */
 
 static void xen_teardown_msi_irqs(struct pci_dev *dev)
@@ -397,7 +400,7 @@ static void xen_pv_teardown_msi_irqs(struct pci_dev *dev)
 {
 	struct msi_desc *msidesc = first_pci_msi_entry(dev);
 
-	if (msidesc->msi_attrib.is_msix)
+	if (msidesc->pci.msi_attrib.is_msix)
 		xen_pci_frontend_disable_msix(dev);
 	else
 		xen_pci_frontend_disable_msi(dev);
@@ -413,7 +416,7 @@ static int xen_msi_domain_alloc_irqs(struct irq_domain *domain,
 	if (WARN_ON_ONCE(!dev_is_pci(dev)))
 		return -EINVAL;
 
-	if (first_msi_entry(dev)->msi_attrib.is_msix)
+	if (first_msi_entry(dev)->pci.msi_attrib.is_msix)
 		type = PCI_CAP_ID_MSIX;
 	else
 		type = PCI_CAP_ID_MSI;
@@ -465,12 +468,10 @@ static __init struct irq_domain *xen_create_pci_msi_domain(void)
 static __init void xen_setup_pci_msi(void)
 {
 	if (xen_pv_domain()) {
-		if (xen_initial_domain()) {
+		if (xen_initial_domain())
 			xen_msi_ops.setup_msi_irqs = xen_initdom_setup_msi_irqs;
-			x86_msi.restore_msi_irqs = xen_initdom_restore_msi_irqs;
-		} else {
+		else
 			xen_msi_ops.setup_msi_irqs = xen_setup_msi_irqs;
-		}
 		xen_msi_ops.teardown_msi_irqs = xen_pv_teardown_msi_irqs;
 		pci_msi_ignore_mask = 1;
 	} else if (xen_hvm_domain()) {

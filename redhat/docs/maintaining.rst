@@ -128,6 +128,78 @@ above Fedora build.
 
 To kick off manually run
 
+Rebasing
+--------
+
+When a new major version of Linux is released upstream, we can rebase the
+os-build branch.
+
+Rebasing from time to time, helps reduce the clutter of the extra changes
+on top of upstream and future merge conflicts. This periodic rebase addresses
+the needs of the Fedora community's desire to separate upstream from Fedora
+specific changes, helps keep it clear what patches changed in the final form
+upstream, and what a Fedora specific patch looks like currently as opposed to
+split across various conflict patches.
+
+While rebasing has a negative effect on developer contribution, we believe
+saving the rebase for the end of release cycle allows for minimal developer
+contribution disruption while gaining the above advantages.
+
+This process is open to feedback for improvements.
+
+To do the os-build rebase, the following steps can be done:
+
+::
+
+   # Create a rebase branch from latest os-build branch and start the process
+   # For any conflicts that arise, check and fix them, following git instructions
+   git fetch origin
+   git checkout -b rebase origin/os-build
+   marker=$(cat redhat/marker)
+   git rebase $marker
+
+   # After you finish the rebase, check the results against the current os-build
+   git diff origin/os-build..
+   # If there are differences shown, you might have fixed conflicts wrongly or
+   # in a different way. To fix, you may want to add extra on top commits and
+   # rebase again interactively
+   <make change related to a previous commit to make it equal os-build> && git add
+   # create dummy commit
+   git commit
+   # You may need to create more than one commit, if changes are related to
+   # more than one previous commit. Then squash commits into the existing
+   # previous commits related to the change with:
+   git rebase -i $marker
+
+   # Now cleanup any commits that we might have reverted, and release commits.
+   # When editor opens with the commit list in interactive mode, search for any
+   # commits starting with "Revert " in the subject and if they match a previous
+   # commit which is being reverted, you can remove both. For release commits,
+   # search commits with subject starting with "[redhat] kernel-" and delete/
+   # remove them
+   git rebase -i $marker
+
+   # Check results again doing a diff against os-build branch. Because of cleanup
+   # in the previous step, some differences will appear now, and that's ok
+   # because of the removal of the release commits. The only differences that
+   # should appear are on Makefile.rhelver, redhat/kernel.changelog and
+   # redhat/marker
+   git diff origin/os-build..
+
+   # If differences shown are expected, we are ok and rebase is done.
+   # Check if origin didn't change by fetching again. If origin/os-build
+   # changed, you might need to do a rebase again or cherry-pick latest ark
+   # only changes into the rebase branch
+   git fetch origin
+   <if origin/os-build changed, fix up, fetch origin again ... loop>
+
+   # We can now force push/update the os-build branch. Also save the current
+   # os-build branch just for backup purposes
+   git checkout -b os-build-save origin/os-build
+   git checkout os-build
+   git reset --hard rebase
+   git push -f origin os-build os-build-save
+
 ::
 
    TODO FILL ME IN

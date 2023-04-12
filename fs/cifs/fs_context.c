@@ -37,6 +37,8 @@
 #include "rfc1002pdu.h"
 #include "fs_context.h"
 
+static DEFINE_MUTEX(cifs_mount_mutex);
+
 static const match_table_t cifs_smb_version_tokens = {
 	{ Smb_1, SMB1_VERSION_STRING },
 	{ Smb_20, SMB20_VERSION_STRING},
@@ -310,7 +312,6 @@ smb3_fs_context_dup(struct smb3_fs_context *new_ctx, struct smb3_fs_context *ctx
 	new_ctx->password = NULL;
 	new_ctx->server_hostname = NULL;
 	new_ctx->domainname = NULL;
-	new_ctx->workstation_name = NULL;
 	new_ctx->UNC = NULL;
 	new_ctx->source = NULL;
 	new_ctx->iocharset = NULL;
@@ -325,7 +326,6 @@ smb3_fs_context_dup(struct smb3_fs_context *new_ctx, struct smb3_fs_context *ctx
 	DUP_CTX_STR(UNC);
 	DUP_CTX_STR(source);
 	DUP_CTX_STR(domainname);
-	DUP_CTX_STR(workstation_name);
 	DUP_CTX_STR(nodename);
 	DUP_CTX_STR(iocharset);
 
@@ -707,10 +707,14 @@ static int smb3_get_tree_common(struct fs_context *fc)
 static int smb3_get_tree(struct fs_context *fc)
 {
 	int err = smb3_fs_context_validate(fc);
+	int ret;
 
 	if (err)
 		return err;
-	return smb3_get_tree_common(fc);
+	mutex_lock(&cifs_mount_mutex);
+	ret = smb3_get_tree_common(fc);
+	mutex_unlock(&cifs_mount_mutex);
+	return ret;
 }
 
 static void smb3_fs_context_free(struct fs_context *fc)
@@ -760,8 +764,7 @@ static int smb3_verify_reconfigure_ctx(struct fs_context *fc,
 		cifs_errorf(fc, "can not change domainname during remount\n");
 		return -EINVAL;
 	}
-	if (new_ctx->workstation_name &&
-	    (!old_ctx->workstation_name || strcmp(new_ctx->workstation_name, old_ctx->workstation_name))) {
+	if (strcmp(new_ctx->workstation_name, old_ctx->workstation_name)) {
 		cifs_errorf(fc, "can not change workstation_name during remount\n");
 		return -EINVAL;
 	}
@@ -808,7 +811,6 @@ static int smb3_reconfigure(struct fs_context *fc)
 	STEAL_STRING(cifs_sb, ctx, username);
 	STEAL_STRING(cifs_sb, ctx, password);
 	STEAL_STRING(cifs_sb, ctx, domainname);
-	STEAL_STRING(cifs_sb, ctx, workstation_name);
 	STEAL_STRING(cifs_sb, ctx, nodename);
 	STEAL_STRING(cifs_sb, ctx, iocharset);
 
@@ -1461,22 +1463,15 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 
 int smb3_init_fs_context(struct fs_context *fc)
 {
-	int rc;
 	struct smb3_fs_context *ctx;
 	char *nodename = utsname()->nodename;
 	int i;
 
 	ctx = kzalloc(sizeof(struct smb3_fs_context), GFP_KERNEL);
-	if (unlikely(!ctx)) {
-		rc = -ENOMEM;
-		goto err_exit;
-	}
+	if (unlikely(!ctx))
+		return -ENOMEM;
 
-	ctx->workstation_name = kstrdup(nodename, GFP_KERNEL);
-	if (unlikely(!ctx->workstation_name)) {
-		rc = -ENOMEM;
-		goto err_exit;
-	}
+	strscpy(ctx->workstation_name, nodename, sizeof(ctx->workstation_name));
 
 	/*
 	 * does not have to be perfect mapping since field is
@@ -1549,14 +1544,6 @@ int smb3_init_fs_context(struct fs_context *fc)
 	fc->fs_private = ctx;
 	fc->ops = &smb3_fs_context_ops;
 	return 0;
-
-err_exit:
-	if (ctx) {
-		kfree(ctx->workstation_name);
-		kfree(ctx);
-	}
-
-	return rc;
 }
 
 void
@@ -1582,8 +1569,6 @@ smb3_cleanup_fs_context_contents(struct smb3_fs_context *ctx)
 	ctx->source = NULL;
 	kfree(ctx->domainname);
 	ctx->domainname = NULL;
-	kfree(ctx->workstation_name);
-	ctx->workstation_name = NULL;
 	kfree(ctx->nodename);
 	ctx->nodename = NULL;
 	kfree(ctx->iocharset);

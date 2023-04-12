@@ -18,6 +18,7 @@
 #include <linux/cgroup.h>
 #include <linux/kthread.h>
 #include <linux/blk-mq.h>
+#include <linux/llist.h>
 
 struct blkcg_gq;
 struct blkg_policy_data;
@@ -43,6 +44,9 @@ struct blkg_iostat {
 
 struct blkg_iostat_set {
 	struct u64_stats_sync		sync;
+	struct blkcg_gq		       *blkg;
+	struct llist_node		lnode;
+	int				lqueued;	/* queued in llist */
 	struct blkg_iostat		cur;
 	struct blkg_iostat		last;
 };
@@ -97,6 +101,12 @@ struct blkcg {
 	struct blkcg_policy_data	*cpd[BLKCG_MAX_POLS];
 
 	struct list_head		all_blkcgs_node;
+
+	/*
+	 * List of updated percpu blkg_iostat_set's since the last flush.
+	 */
+	struct llist_head __percpu	*lhead;
+
 #ifdef CONFIG_BLK_CGROUP_FC_APPID
 	char                            fc_app_id[FC_APPID_LEN];
 #endif
@@ -178,10 +188,8 @@ struct blkcg_policy {
 extern struct blkcg blkcg_root;
 extern bool blkcg_debug_stats;
 
-struct blkcg_gq *blkg_lookup_slowpath(struct blkcg *blkcg,
-				      struct request_queue *q, bool update_hint);
-int blkcg_init_queue(struct request_queue *q);
-void blkcg_exit_queue(struct request_queue *q);
+int blkcg_init_disk(struct gendisk *disk);
+void blkcg_exit_disk(struct gendisk *disk);
 
 /* Blkio controller policy registration */
 int blkcg_policy_register(struct blkcg_policy *pol);
@@ -227,21 +235,20 @@ static inline bool bio_issue_as_root_blkg(struct bio *bio)
 }
 
 /**
- * __blkg_lookup - internal version of blkg_lookup()
+ * blkg_lookup - lookup blkg for the specified blkcg - q pair
  * @blkcg: blkcg of interest
  * @q: request_queue of interest
- * @update_hint: whether to update lookup hint with the result or not
  *
- * This is internal version and shouldn't be used by policy
- * implementations.  Looks up blkgs for the @blkcg - @q pair regardless of
- * @q's bypass state.  If @update_hint is %true, the caller should be
- * holding @q->queue_lock and lookup hint is updated on success.
+ * Lookup blkg for the @blkcg - @q pair.
+
+ * Must be called in a RCU critical section.
  */
-static inline struct blkcg_gq *__blkg_lookup(struct blkcg *blkcg,
-					     struct request_queue *q,
-					     bool update_hint)
+static inline struct blkcg_gq *blkg_lookup(struct blkcg *blkcg,
+					   struct request_queue *q)
 {
 	struct blkcg_gq *blkg;
+
+	WARN_ON_ONCE(!rcu_read_lock_held());
 
 	if (blkcg == &blkcg_root)
 		return q->root_blkg;
@@ -250,33 +257,10 @@ static inline struct blkcg_gq *__blkg_lookup(struct blkcg *blkcg,
 	if (blkg && blkg->q == q)
 		return blkg;
 
-	return blkg_lookup_slowpath(blkcg, q, update_hint);
-}
-
-/**
- * blkg_lookup - lookup blkg for the specified blkcg - q pair
- * @blkcg: blkcg of interest
- * @q: request_queue of interest
- *
- * Lookup blkg for the @blkcg - @q pair.  This function should be called
- * under RCU read lock.
- */
-static inline struct blkcg_gq *blkg_lookup(struct blkcg *blkcg,
-					   struct request_queue *q)
-{
-	WARN_ON_ONCE(!rcu_read_lock_held());
-	return __blkg_lookup(blkcg, q, false);
-}
-
-/**
- * blk_queue_root_blkg - return blkg for the (blkcg_root, @q) pair
- * @q: request_queue of interest
- *
- * Lookup blkg for @q at the root level. See also blkg_lookup().
- */
-static inline struct blkcg_gq *blk_queue_root_blkg(struct request_queue *q)
-{
-	return q->root_blkg;
+	blkg = radix_tree_lookup(&blkcg->blkg_tree, q->id);
+	if (blkg && blkg->q != q)
+		blkg = NULL;
+	return blkg;
 }
 
 /**
@@ -373,8 +357,8 @@ static inline void blkg_put(struct blkcg_gq *blkg)
  */
 #define blkg_for_each_descendant_pre(d_blkg, pos_css, p_blkg)		\
 	css_for_each_descendant_pre((pos_css), &(p_blkg)->blkcg->css)	\
-		if (((d_blkg) = __blkg_lookup(css_to_blkcg(pos_css),	\
-					      (p_blkg)->q, false)))
+		if (((d_blkg) = blkg_lookup(css_to_blkcg(pos_css),	\
+					    (p_blkg)->q)))
 
 /**
  * blkg_for_each_descendant_post - post-order walk of a blkg's descendants
@@ -388,8 +372,8 @@ static inline void blkg_put(struct blkcg_gq *blkg)
  */
 #define blkg_for_each_descendant_post(d_blkg, pos_css, p_blkg)		\
 	css_for_each_descendant_post((pos_css), &(p_blkg)->blkcg->css)	\
-		if (((d_blkg) = __blkg_lookup(css_to_blkcg(pos_css),	\
-					      (p_blkg)->q, false)))
+		if (((d_blkg) = blkg_lookup(css_to_blkcg(pos_css),	\
+					    (p_blkg)->q)))
 
 bool __blkcg_punt_bio_submit(struct bio *bio);
 
@@ -430,12 +414,8 @@ static inline int blkcg_unuse_delay(struct blkcg_gq *blkg)
 	 * then check to see if we were the last delay so we can drop the
 	 * congestion count on the cgroup.
 	 */
-	while (old) {
-		int cur = atomic_cmpxchg(&blkg->use_delay, old, old - 1);
-		if (cur == old)
-			break;
-		old = cur;
-	}
+	while (old && !atomic_try_cmpxchg(&blkg->use_delay, &old, old - 1))
+		;
 
 	if (old == 0)
 		return 0;
@@ -458,7 +438,7 @@ static inline void blkcg_set_delay(struct blkcg_gq *blkg, u64 delay)
 	int old = atomic_read(&blkg->use_delay);
 
 	/* We only want 1 person setting the congestion count for this blkg. */
-	if (!old && atomic_cmpxchg(&blkg->use_delay, old, -1) == old)
+	if (!old && atomic_try_cmpxchg(&blkg->use_delay, &old, -1))
 		atomic_inc(&blkg->blkcg->css.cgroup->congestion_count);
 
 	atomic64_set(&blkg->delay_nsec, delay);
@@ -475,7 +455,7 @@ static inline void blkcg_clear_delay(struct blkcg_gq *blkg)
 	int old = atomic_read(&blkg->use_delay);
 
 	/* We only want 1 person clearing the congestion count for this blkg. */
-	if (old && atomic_cmpxchg(&blkg->use_delay, old, 0) == old)
+	if (old && atomic_try_cmpxchg(&blkg->use_delay, &old, 0))
 		atomic_dec(&blkg->blkcg->css.cgroup->congestion_count);
 }
 
@@ -511,10 +491,8 @@ struct blkcg {
 };
 
 static inline struct blkcg_gq *blkg_lookup(struct blkcg *blkcg, void *key) { return NULL; }
-static inline struct blkcg_gq *blk_queue_root_blkg(struct request_queue *q)
-{ return NULL; }
-static inline int blkcg_init_queue(struct request_queue *q) { return 0; }
-static inline void blkcg_exit_queue(struct request_queue *q) { }
+static inline int blkcg_init_disk(struct gendisk *disk) { return 0; }
+static inline void blkcg_exit_disk(struct gendisk *disk) { }
 static inline int blkcg_policy_register(struct blkcg_policy *pol) { return 0; }
 static inline void blkcg_policy_unregister(struct blkcg_policy *pol) { }
 static inline int blkcg_activate_policy(struct request_queue *q,

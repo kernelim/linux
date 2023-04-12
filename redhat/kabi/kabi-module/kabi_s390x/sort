@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/sort.c
-0x6ccc34dd	sort	vmlinux	EXPORT_SYMBOL
+#2-
+0x6ccc34dd	sort	vmlinux	EXPORT_SYMBOL	

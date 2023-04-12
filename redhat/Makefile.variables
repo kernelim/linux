@@ -1,3 +1,10 @@
+# Only the variables listed in this file, ../Makefile.rhelver, and
+# Makefile.rhpkg are available for command line modification.  There is no
+# guarantee on the stability of variables found in this file, or any other
+# redhat/ Makefile.
+#
+# Merge requests to include additional variables in _this_ file must include
+# details of why the variable must be exported.
 
 # Variables below should be changed as needed for building on a different
 # branch, or with a different upstream branch. This should be the only
@@ -7,6 +14,14 @@
 # This is the source branch that you are building out of typically this is
 # the current branch.
 DIST_BRANCH ?= "main"
+
+# This is the dist release suffix used in the package release, eg. .fc34,
+# .el8 etc. In a different branch this may be set to a fixed value.
+DIST ?= .el9_2
+
+# This is a human readable distribution variable that is used to determine the
+# OS version (fedora, centos, or rhel).
+DISTRO ?=
 
 # The branch used as upstream. This is what the upstream tarball is it
 # should be tracked in a local branch. This would be "master" for the
@@ -25,13 +40,6 @@ VERSION_ON_UPSTREAM:=0
 # when you expect every build to use a different base kernel version.
 BUMP_RELEASE:=yes
 
-# Should DIST tag be present also in source tags and commits? For ARK
-# it should be '0' since rpms may be re-build in multiple buildroots.
-# Downstream releases with single buildroot are expected to use '1'
-# which makes produced rpms match source tags, changelog, etc. including
-# dist tag.
-USE_DIST_IN_SOURCE:=1
-
 # INCLUDE_*_FILES determines whether or not the specific OS flavor files will
 # be included as part of the source RPM.  Downstream projects, such as
 # centos-stream or RHEL, can disable file inclusion by setting these values
@@ -39,10 +47,74 @@ USE_DIST_IN_SOURCE:=1
 INCLUDE_FEDORA_FILES:=0
 INCLUDE_RHEL_FILES:=1
 
+# In case PATCHLIST_URL is not set to "none", Patchlist.changelog is added to
+# the kernel src.rpm, which will contain shas and commits not upstream. The
+# value of PATCHLIST_URL in this case should point to the git repository where
+# the commits are located, and will be added as a prefix to the shas listed.
+PATCHLIST_URL ?= "https://gitlab.com/cki-project/kernel-ark/-/commit"
+
 # This can be used to change the filename of the specfile.  For example, it can
 # be set to "kernel" for kernel.spec or "kernel-rt" for kernel-rt.spec.  This
 # is useful for other projects with different specfile names.
 PACKAGE_NAME ?= kernel
 
-# This is the executable for 'git' commands.
+# This is the executable for 'git' commands.  It is used by the redhat/self-test
+# tests to provide testing information on git hashes (see redhat/self-test/egit.sh)
 GIT ?= git
+
+# This is the referenced HEAD commit for git commands and can be used to change
+# the "top of tree" commit ID.  This is useful in cases where users want to
+# build against an older commit but do not want to check out the tree.
+HEAD ?= HEAD
+
+# This is the brew/koji scratch build target.  A list of targets can be found
+# by executing the 'brew list-targets' or 'koji list-targets' command.  The
+# default values can be found in redhat/Makefile and are dependent on the
+# target OS.  The target OS can be changed by setting the DIST or DISTRO
+# variables.
+BUILD_TARGET ?=
+
+# This sets the koji/brew configuration profile variable.
+BUILD_PROFILE ?=
+
+# This sets the koji|brew build flags for the dist[g]-koji|brew targets.  These
+# options are passed directly to the brew and koji commands in those targets.
+BUILD_FLAGS ?=
+
+# This sets the incremental build version value in the rpm NVR.  If unset, this
+# defaults to RHEL_RELEASE from Makefile.rhelver
+BUILD ?=
+
+# Builds may include a s390x+zfcpdump arch build, which results in the build
+# failing because the UTS_RELEASE field exceeded 64 chars.  This variable can
+# be set to 1 to decrease the kernel UTS_RELEASE and SPECBUILD by 11 characters
+# (YYYYMMDDgit).
+UPSTREAMBUILD_GIT_ONLY ?=
+
+# This overrides the default git repository for the distg-* targets.  See
+# the 'make dist-full-help' entry for distg-brew for information on setting
+# rhg.url.
+RHGITURL ?= $(shell $(GIT) config rhg.url || $(GIT) config remote.origin.url)
+
+# This sets the base commit ID for distg-* targets, and must be set on the
+# commandline with distg-* targets.
+RHGITCOMMIT ?= $(HEAD)
+
+# This sets the number of threads that scripts called by Makefile targets can
+# use.  By default, this variable is set by the makefile '-j' parameter.
+RHJOBS ?=
+
+# This disables the CONFIG error checking in redhat/configs/process_configs.sh.
+NO_CONFIGCHECKS ?=
+
+# This variable is only used to create self-test data.  It should not be
+# considered stable and may be changed or removed without warning.
+RHSELFTESTDATA ?=
+
+# This variable is used by the redhat/self-tests.  It should not be
+# considered stable and my be changed or removed without warning.
+RHDISTDATADIR ?=
+
+# This appends 5 characters of the top-of-tree commit ID to the BUILD variable,
+# which is then reflected in the package NVR.
+ADD_COMMITID_TO_VERSION ?=

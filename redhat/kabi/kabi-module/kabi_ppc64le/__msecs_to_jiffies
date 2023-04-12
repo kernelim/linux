@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/time/time.c
-0x7f02188f	__msecs_to_jiffies	vmlinux	EXPORT_SYMBOL
+#2-
+0x7f02188f	__msecs_to_jiffies	vmlinux	EXPORT_SYMBOL	

@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:mm/mempool.c
-0x604d06e2	mempool_create	vmlinux	EXPORT_SYMBOL
+#2-
+0x604d06e2	mempool_create	vmlinux	EXPORT_SYMBOL	

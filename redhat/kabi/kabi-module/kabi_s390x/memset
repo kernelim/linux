@@ -1,3 +1,2 @@
-#0-
-#I:0
-0xde0bdcff	memset	vmlinux	EXPORT_SYMBOL
+#2-
+0xde0bdcff	memset	vmlinux	EXPORT_SYMBOL	

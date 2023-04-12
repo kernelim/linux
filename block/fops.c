@@ -15,6 +15,7 @@
 #include <linux/falloc.h>
 #include <linux/suspend.h>
 #include <linux/fs.h>
+#include <linux/module.h>
 #include "blk.h"
 
 static inline struct inode *bdev_file_inode(struct file *file)
@@ -31,14 +32,21 @@ static int blkdev_get_block(struct inode *inode, sector_t iblock,
 	return 0;
 }
 
-static unsigned int dio_bio_write_op(struct kiocb *iocb)
+static blk_opf_t dio_bio_write_op(struct kiocb *iocb)
 {
-	unsigned int op = REQ_OP_WRITE | REQ_SYNC | REQ_IDLE;
+	blk_opf_t opf = REQ_OP_WRITE | REQ_SYNC | REQ_IDLE;
 
 	/* avoid the need for a I/O completion work item */
 	if (iocb->ki_flags & IOCB_DSYNC)
-		op |= REQ_FUA;
-	return op;
+		opf |= REQ_FUA;
+	return opf;
+}
+
+static bool blkdev_dio_unaligned(struct block_device *bdev, loff_t pos,
+			      struct iov_iter *iter)
+{
+	return pos & (bdev_logical_block_size(bdev) - 1) ||
+		!bdev_iter_is_aligned(bdev, iter);
 }
 
 #define DIO_INLINE_BIO_VECS 4
@@ -53,8 +61,7 @@ static ssize_t __blkdev_direct_IO_simple(struct kiocb *iocb,
 	struct bio bio;
 	ssize_t ret;
 
-	if ((pos | iov_iter_alignment(iter)) &
-	    (bdev_logical_block_size(bdev) - 1))
+	if (blkdev_dio_unaligned(bdev, pos, iter))
 		return -EINVAL;
 
 	if (nr_pages <= DIO_INLINE_BIO_VECS)
@@ -74,7 +81,6 @@ static ssize_t __blkdev_direct_IO_simple(struct kiocb *iocb,
 		bio_init(&bio, bdev, vecs, nr_pages, dio_bio_write_op(iocb));
 	}
 	bio.bi_iter.bi_sector = pos >> SECTOR_SHIFT;
-	bio.bi_write_hint = iocb->ki_hint;
 	bio.bi_ioprio = iocb->ki_ioprio;
 
 	ret = bio_iov_iter_get_pages(&bio, iter);
@@ -143,7 +149,7 @@ static void blkdev_bio_end_io(struct bio *bio)
 				ret = blk_status_to_errno(dio->bio.bi_status);
 			}
 
-			dio->iocb->ki_complete(iocb, ret, 0);
+			dio->iocb->ki_complete(iocb, ret);
 			bio_put(&dio->bio);
 		} else {
 			struct task_struct *waiter = dio->waiter;
@@ -169,12 +175,11 @@ static ssize_t __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter,
 	struct blkdev_dio *dio;
 	struct bio *bio;
 	bool is_read = (iov_iter_rw(iter) == READ), is_sync;
-	unsigned int opf = is_read ? REQ_OP_READ : dio_bio_write_op(iocb);
+	blk_opf_t opf = is_read ? REQ_OP_READ : dio_bio_write_op(iocb);
 	loff_t pos = iocb->ki_pos;
 	int ret = 0;
 
-	if ((pos | iov_iter_alignment(iter)) &
-	    (bdev_logical_block_size(bdev) - 1))
+	if (blkdev_dio_unaligned(bdev, pos, iter))
 		return -EINVAL;
 
 	if (iocb->ki_flags & IOCB_ALLOC_CACHE)
@@ -206,7 +211,6 @@ static ssize_t __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter,
 
 	for (;;) {
 		bio->bi_iter.bi_sector = pos >> SECTOR_SHIFT;
-		bio->bi_write_hint = iocb->ki_hint;
 		bio->bi_private = dio;
 		bio->bi_end_io = blkdev_bio_end_io;
 		bio->bi_ioprio = iocb->ki_ioprio;
@@ -277,7 +281,7 @@ static void blkdev_bio_end_io_async(struct bio *bio)
 		ret = blk_status_to_errno(bio->bi_status);
 	}
 
-	iocb->ki_complete(iocb, ret, 0);
+	iocb->ki_complete(iocb, ret);
 
 	if (dio->flags & DIO_SHOULD_DIRTY) {
 		bio_check_pages_dirty(bio);
@@ -293,14 +297,13 @@ static ssize_t __blkdev_direct_IO_async(struct kiocb *iocb,
 {
 	struct block_device *bdev = iocb->ki_filp->private_data;
 	bool is_read = iov_iter_rw(iter) == READ;
-	unsigned int opf = is_read ? REQ_OP_READ : dio_bio_write_op(iocb);
+	blk_opf_t opf = is_read ? REQ_OP_READ : dio_bio_write_op(iocb);
 	struct blkdev_dio *dio;
 	struct bio *bio;
 	loff_t pos = iocb->ki_pos;
 	int ret = 0;
 
-	if ((pos | iov_iter_alignment(iter)) &
-	    (bdev_logical_block_size(bdev) - 1))
+	if (blkdev_dio_unaligned(bdev, pos, iter))
 		return -EINVAL;
 
 	if (iocb->ki_flags & IOCB_ALLOC_CACHE)
@@ -311,7 +314,6 @@ static ssize_t __blkdev_direct_IO_async(struct kiocb *iocb,
 	dio->flags = 0;
 	dio->iocb = iocb;
 	bio->bi_iter.bi_sector = pos >> SECTOR_SHIFT;
-	bio->bi_write_hint = iocb->ki_hint;
 	bio->bi_end_io = blkdev_bio_end_io_async;
 	bio->bi_ioprio = iocb->ki_ioprio;
 
@@ -412,7 +414,8 @@ static int blkdev_writepages(struct address_space *mapping,
 }
 
 const struct address_space_operations def_blk_aops = {
-	.set_page_dirty	= __set_page_dirty_buffers,
+	.dirty_folio	= block_dirty_folio,
+	.invalidate_folio = block_invalidate_folio,
 	.readpage	= blkdev_readpage,
 	.readahead	= blkdev_readahead,
 	.writepage	= blkdev_writepage,

@@ -107,6 +107,9 @@ static void __init kasan_early_pgtable_populate(unsigned long address,
 		sgt_prot &= ~_SEGMENT_ENTRY_NOEXEC;
 	}
 
+	/*
+	 * The first 1MB of 1:1 mapping is mapped with 4KB pages
+	 */
 	while (address < end) {
 		pg_dir = pgd_offset_k(address);
 		if (pgd_none(*pg_dir)) {
@@ -157,30 +160,26 @@ static void __init kasan_early_pgtable_populate(unsigned long address,
 
 		pm_dir = pmd_offset(pu_dir, address);
 		if (pmd_none(*pm_dir)) {
-			if (mode == POPULATE_ZERO_SHADOW &&
-			    IS_ALIGNED(address, PMD_SIZE) &&
+			if (IS_ALIGNED(address, PMD_SIZE) &&
 			    end - address >= PMD_SIZE) {
-				pmd_populate(&init_mm, pm_dir,
-						kasan_early_shadow_pte);
-				address = (address + PMD_SIZE) & PMD_MASK;
-				continue;
-			}
-			/* the first megabyte of 1:1 is mapped with 4k pages */
-			if (has_edat && address && end - address >= PMD_SIZE &&
-			    mode != POPULATE_ZERO_SHADOW) {
-				void *page;
+				if (mode == POPULATE_ZERO_SHADOW) {
+					pmd_populate(&init_mm, pm_dir, kasan_early_shadow_pte);
+					address = (address + PMD_SIZE) & PMD_MASK;
+					continue;
+				} else if (has_edat && address) {
+					void *page;
 
-				if (mode == POPULATE_ONE2ONE) {
-					page = (void *)address;
-				} else {
-					page = kasan_early_alloc_segment();
-					memset(page, 0, _SEGMENT_SIZE);
+					if (mode == POPULATE_ONE2ONE) {
+						page = (void *)address;
+					} else {
+						page = kasan_early_alloc_segment();
+						memset(page, 0, _SEGMENT_SIZE);
+					}
+					set_pmd(pm_dir, __pmd(__pa(page) | sgt_prot));
+					address = (address + PMD_SIZE) & PMD_MASK;
+					continue;
 				}
-				pmd_val(*pm_dir) = __pa(page) | sgt_prot;
-				address = (address + PMD_SIZE) & PMD_MASK;
-				continue;
 			}
-
 			pt_dir = kasan_early_pte_alloc();
 			pmd_populate(&init_mm, pm_dir, pt_dir);
 		} else if (pmd_large(*pm_dir)) {
@@ -195,16 +194,16 @@ static void __init kasan_early_pgtable_populate(unsigned long address,
 			switch (mode) {
 			case POPULATE_ONE2ONE:
 				page = (void *)address;
-				pte_val(*pt_dir) = __pa(page) | pgt_prot;
+				set_pte(pt_dir, __pte(__pa(page) | pgt_prot));
 				break;
 			case POPULATE_MAP:
 				page = kasan_early_alloc_pages(0);
 				memset(page, 0, PAGE_SIZE);
-				pte_val(*pt_dir) = __pa(page) | pgt_prot;
+				set_pte(pt_dir, __pte(__pa(page) | pgt_prot));
 				break;
 			case POPULATE_ZERO_SHADOW:
 				page = kasan_early_shadow_page;
-				pte_val(*pt_dir) = __pa(page) | pgt_prot_zero;
+				set_pte(pt_dir, __pte(__pa(page) | pgt_prot_zero));
 				break;
 			case POPULATE_SHALLOW:
 				/* should never happen */
@@ -300,7 +299,7 @@ void __init kasan_early_init(void)
 	pgalloc_low = round_up((unsigned long)_end, _SEGMENT_SIZE);
 	if (IS_ENABLED(CONFIG_BLK_DEV_INITRD)) {
 		initrd_end =
-		    round_up(INITRD_START + INITRD_SIZE, _SEGMENT_SIZE);
+		    round_up(initrd_data.start + initrd_data.size, _SEGMENT_SIZE);
 		pgalloc_low = max(pgalloc_low, initrd_end);
 	}
 

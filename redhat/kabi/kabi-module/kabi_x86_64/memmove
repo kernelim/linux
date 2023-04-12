@@ -1,3 +1,2 @@
-#0-
-#I:0
-0xb0e602eb	memmove	vmlinux	EXPORT_SYMBOL
+#2-
+0xb0e602eb	memmove	vmlinux	EXPORT_SYMBOL	

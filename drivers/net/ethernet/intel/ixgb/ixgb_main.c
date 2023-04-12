@@ -420,7 +420,7 @@ ixgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	netdev->netdev_ops = &ixgb_netdev_ops;
 	ixgb_set_ethtool_ops(netdev);
 	netdev->watchdog_timeo = 5 * HZ;
-	netif_napi_add(netdev, &adapter->napi, ixgb_clean, 64);
+	netif_napi_add(netdev, &adapter->napi, ixgb_clean);
 
 	strncpy(netdev->name, pci_name(pdev), sizeof(netdev->name) - 1);
 
@@ -1194,7 +1194,7 @@ ixgb_tso(struct ixgb_adapter *adapter, struct sk_buff *skb)
 		if (err < 0)
 			return err;
 
-		hdr_len = skb_transport_offset(skb) + tcp_hdrlen(skb);
+		hdr_len = skb_tcp_all_headers(skb);
 		mss = skb_shinfo(skb)->gso_size;
 		iph = ip_hdr(skb);
 		iph->tot_len = 0;

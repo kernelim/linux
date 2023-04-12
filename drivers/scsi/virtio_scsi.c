@@ -712,12 +712,12 @@ static int virtscsi_abort(struct scsi_cmnd *sc)
 	return virtscsi_tmf(vscsi, cmd);
 }
 
-static int virtscsi_map_queues(struct Scsi_Host *shost)
+static void virtscsi_map_queues(struct Scsi_Host *shost)
 {
 	struct virtio_scsi *vscsi = shost_priv(shost);
 	struct blk_mq_queue_map *qmap = &shost->tag_set.map[HCTX_TYPE_DEFAULT];
 
-	return blk_mq_virtio_map_queues(qmap, vscsi->vdev, 2);
+	blk_mq_virtio_map_queues(qmap, vscsi->vdev, 2);
 }
 
 static void virtscsi_commit_rqs(struct Scsi_Host *shost, u16 hwq)
@@ -779,7 +779,7 @@ static void virtscsi_init_vq(struct virtio_scsi_vq *virtscsi_vq,
 static void virtscsi_remove_vqs(struct virtio_device *vdev)
 {
 	/* Stop all the virtqueues. */
-	vdev->config->reset(vdev);
+	virtio_reset_device(vdev);
 	vdev->config->del_vqs(vdev);
 }
 

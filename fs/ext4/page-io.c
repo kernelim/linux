@@ -375,7 +375,6 @@ void ext4_io_submit(struct ext4_io_submit *io)
 	if (bio) {
 		if (io->io_wbc->sync_mode == WB_SYNC_ALL)
 			io->io_bio->bi_opf |= REQ_SYNC;
-		io->io_bio->bi_write_hint = io->io_end->inode->i_write_hint;
 		submit_bio(io->io_bio);
 	}
 	io->io_bio = NULL;
@@ -420,10 +419,8 @@ static void io_submit_add_bh(struct ext4_io_submit *io,
 submit_and_retry:
 		ext4_io_submit(io);
 	}
-	if (io->io_bio == NULL) {
+	if (io->io_bio == NULL)
 		io_submit_init_bio(io, bh);
-		io->io_bio->bi_write_hint = inode->i_write_hint;
-	}
 	ret = bio_add_page(io->io_bio, page, bh->b_size, bh_offset(bh));
 	if (ret != bh->b_size)
 		goto submit_and_retry;
@@ -468,7 +465,7 @@ int ext4_bio_write_page(struct ext4_io_submit *io,
 	/*
 	 * In the first loop we prepare and mark buffers to submit. We have to
 	 * mark all buffers in the page before submitting so that
-	 * end_page_writeback() cannot be called from ext4_bio_end_io() when IO
+	 * end_page_writeback() cannot be called from ext4_end_bio() when IO
 	 * on the first buffer finishes and we are still working on submitting
 	 * the second buffer.
 	 */

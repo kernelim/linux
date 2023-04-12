@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/locking/rwsem.c
-0xbf9a5a1e	__init_rwsem	vmlinux	EXPORT_SYMBOL
+#2-
+0xbf9a5a1e	__init_rwsem	vmlinux	EXPORT_SYMBOL	

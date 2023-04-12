@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/bitmap.c
-0x63a7c28c	bitmap_find_free_region	vmlinux	EXPORT_SYMBOL
+#2-
+0x63a7c28c	bitmap_find_free_region	vmlinux	EXPORT_SYMBOL	

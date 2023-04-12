@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:security/security.c
-0xb48d4d22	security_sb_eat_lsm_opts	vmlinux	EXPORT_SYMBOL
+#2-
+0xb48d4d22	security_sb_eat_lsm_opts	vmlinux	EXPORT_SYMBOL	

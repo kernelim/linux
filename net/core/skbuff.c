@@ -90,6 +90,14 @@ static struct kmem_cache *skbuff_ext_cache __ro_after_init;
 int sysctl_max_skb_frags __read_mostly = MAX_SKB_FRAGS;
 EXPORT_SYMBOL(sysctl_max_skb_frags);
 
+#undef FN
+#define FN(reason) [SKB_DROP_REASON_##reason] = #reason,
+const char * const drop_reasons[] = {
+	[SKB_CONSUMED] = "CONSUMED",
+	DEFINE_DROP_REASON(FN, FN)
+};
+EXPORT_SYMBOL(drop_reasons);
+
 /**
  *	skb_panic - private function for out-of-line support
  *	@skb:	buffer
@@ -126,8 +134,66 @@ static void skb_under_panic(struct sk_buff *skb, unsigned int sz, void *addr)
 #define NAPI_SKB_CACHE_BULK	16
 #define NAPI_SKB_CACHE_HALF	(NAPI_SKB_CACHE_SIZE / 2)
 
+#if PAGE_SIZE == SZ_4K
+
+#define NAPI_HAS_SMALL_PAGE_FRAG	1
+#define NAPI_SMALL_PAGE_PFMEMALLOC(nc)	((nc).pfmemalloc)
+
+/* specialized page frag allocator using a single order 0 page
+ * and slicing it into 1K sized fragment. Constrained to systems
+ * with a very limited amount of 1K fragments fitting a single
+ * page - to avoid excessive truesize underestimation
+ */
+
+struct page_frag_1k {
+	void *va;
+	u16 offset;
+	bool pfmemalloc;
+};
+
+static void *page_frag_alloc_1k(struct page_frag_1k *nc, gfp_t gfp)
+{
+	struct page *page;
+	int offset;
+
+	offset = nc->offset - SZ_1K;
+	if (likely(offset >= 0))
+		goto use_frag;
+
+	page = alloc_pages_node(NUMA_NO_NODE, gfp, 0);
+	if (!page)
+		return NULL;
+
+	nc->va = page_address(page);
+	nc->pfmemalloc = page_is_pfmemalloc(page);
+	offset = PAGE_SIZE - SZ_1K;
+	page_ref_add(page, offset / SZ_1K);
+
+use_frag:
+	nc->offset = offset;
+	return nc->va + offset;
+}
+#else
+
+/* the small page is actually unused in this build; add dummy helpers
+ * to please the compiler and avoid later preprocessor's conditionals
+ */
+#define NAPI_HAS_SMALL_PAGE_FRAG	0
+#define NAPI_SMALL_PAGE_PFMEMALLOC(nc)	false
+
+struct page_frag_1k {
+};
+
+static void *page_frag_alloc_1k(struct page_frag_1k *nc, gfp_t gfp_mask)
+{
+	return NULL;
+}
+
+#endif
+
 struct napi_alloc_cache {
 	struct page_frag_cache page;
+	struct page_frag_1k page_small;
 	unsigned int skb_count;
 	void *skb_cache[NAPI_SKB_CACHE_SIZE];
 };
@@ -141,6 +207,23 @@ static void *__alloc_frag_align(unsigned int fragsz, gfp_t gfp_mask,
 	struct napi_alloc_cache *nc = this_cpu_ptr(&napi_alloc_cache);
 
 	return page_frag_alloc_align(&nc->page, fragsz, gfp_mask, align_mask);
+}
+
+/* Double check that napi_get_frags() allocates skbs with
+ * skb->head being backed by slab, not a page fragment.
+ * This is to make sure bug fixed in 3226b158e67c
+ * ("net: avoid 32 x truesize under-estimation for tiny skbs")
+ * does not accidentally come back.
+ */
+void napi_get_frags_check(struct napi_struct *napi)
+{
+	struct sk_buff *skb;
+
+	local_bh_disable();
+	skb = napi_get_frags(napi);
+	WARN_ON_ONCE(!NAPI_HAS_SMALL_PAGE_FRAG && skb && skb->head_frag);
+	napi_free_frags(napi);
+	local_bh_enable();
 }
 
 void *__napi_alloc_frag_align(unsigned int fragsz, unsigned int align_mask)
@@ -555,14 +638,17 @@ struct sk_buff *__napi_alloc_skb(struct napi_struct *napi, unsigned int len,
 {
 	struct napi_alloc_cache *nc;
 	struct sk_buff *skb;
+	bool pfmemalloc;
 	void *data;
 
 	len += NET_SKB_PAD + NET_IP_ALIGN;
 
 	/* If requested length is either too small or too big,
 	 * we use kmalloc() for skb->head allocation.
+	 * When the small frag allocator is available, prefer it over kmalloc
+	 * for small fragments
 	 */
-	if (len <= SKB_WITH_OVERHEAD(1024) ||
+	if ((!NAPI_HAS_SMALL_PAGE_FRAG && len <= SKB_WITH_OVERHEAD(1024)) ||
 	    len > SKB_WITH_OVERHEAD(PAGE_SIZE) ||
 	    (gfp_mask & (__GFP_DIRECT_RECLAIM | GFP_DMA))) {
 		skb = __alloc_skb(len, gfp_mask, SKB_ALLOC_RX | SKB_ALLOC_NAPI,
@@ -573,13 +659,33 @@ struct sk_buff *__napi_alloc_skb(struct napi_struct *napi, unsigned int len,
 	}
 
 	nc = this_cpu_ptr(&napi_alloc_cache);
-	len += SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
-	len = SKB_DATA_ALIGN(len);
 
 	if (sk_memalloc_socks())
 		gfp_mask |= __GFP_MEMALLOC;
 
-	data = page_frag_alloc(&nc->page, len, gfp_mask);
+	if (NAPI_HAS_SMALL_PAGE_FRAG && len <= SKB_WITH_OVERHEAD(1024)) {
+		/* we are artificially inflating the allocation size, but
+		 * that is not as bad as it may look like, as:
+		 * - 'len' less than GRO_MAX_HEAD makes little sense
+		 * - On most systems, larger 'len' values lead to fragment
+		 *   size above 512 bytes
+		 * - kmalloc would use the kmalloc-1k slab for such values
+		 * - Builds with smaller GRO_MAX_HEAD will very likely do
+		 *   little networking, as that implies no WiFi and no
+		 *   tunnels support, and 32 bits arches.
+		 */
+		len = SZ_1K;
+
+		data = page_frag_alloc_1k(&nc->page_small, gfp_mask);
+		pfmemalloc = NAPI_SMALL_PAGE_PFMEMALLOC(nc->page_small);
+	} else {
+		len += SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
+		len = SKB_DATA_ALIGN(len);
+
+		data = page_frag_alloc(&nc->page, len, gfp_mask);
+		pfmemalloc = nc->page.pfmemalloc;
+	}
+
 	if (unlikely(!data))
 		return NULL;
 
@@ -589,7 +695,7 @@ struct sk_buff *__napi_alloc_skb(struct napi_struct *napi, unsigned int len,
 		return NULL;
 	}
 
-	if (nc->page.pfmemalloc)
+	if (pfmemalloc)
 		skb->pfmemalloc = 1;
 	skb->head_frag = 1;
 
@@ -656,7 +762,7 @@ static void skb_free_head(struct sk_buff *skb)
 	}
 }
 
-static void skb_release_data(struct sk_buff *skb)
+static void skb_release_data(struct sk_buff *skb, enum skb_drop_reason reason)
 {
 	struct skb_shared_info *shinfo = skb_shinfo(skb);
 	int i;
@@ -672,7 +778,7 @@ static void skb_release_data(struct sk_buff *skb)
 		__skb_frag_unref(&shinfo->frags[i], skb->pp_recycle);
 
 	if (shinfo->frag_list)
-		kfree_skb_list(shinfo->frag_list);
+		kfree_skb_list_reason(shinfo->frag_list, reason);
 
 	skb_free_head(skb);
 exit:
@@ -735,11 +841,11 @@ void skb_release_head_state(struct sk_buff *skb)
 }
 
 /* Free everything but the sk_buff shell. */
-static void skb_release_all(struct sk_buff *skb)
+static void skb_release_all(struct sk_buff *skb, enum skb_drop_reason reason)
 {
 	skb_release_head_state(skb);
 	if (likely(skb->head))
-		skb_release_data(skb);
+		skb_release_data(skb, reason);
 }
 
 /**
@@ -753,7 +859,7 @@ static void skb_release_all(struct sk_buff *skb)
 
 void __kfree_skb(struct sk_buff *skb)
 {
-	skb_release_all(skb);
+	skb_release_all(skb, SKB_DROP_REASON_NOT_SPECIFIED);
 	kfree_skbmem(skb);
 }
 EXPORT_SYMBOL(__kfree_skb);
@@ -767,26 +873,33 @@ EXPORT_SYMBOL(__kfree_skb);
  *	hit zero. Meanwhile, pass the drop reason to 'kfree_skb'
  *	tracepoint.
  */
-void kfree_skb_reason(struct sk_buff *skb, enum skb_drop_reason reason)
+void __fix_address
+kfree_skb_reason(struct sk_buff *skb, enum skb_drop_reason reason)
 {
-	if (!skb_unref(skb))
+	if (unlikely(!skb_unref(skb)))
 		return;
 
-	trace_kfree_skb(skb, __builtin_return_address(0), reason);
+	BUILD_BUG_ON_INVALID(reason <= 0 || reason >= SKB_DROP_REASON_MAX);
+
+	if (reason == SKB_CONSUMED)
+		trace_consume_skb(skb);
+	else
+		trace_kfree_skb(skb, __builtin_return_address(0), reason);
 	__kfree_skb(skb);
 }
 EXPORT_SYMBOL(kfree_skb_reason);
 
-void kfree_skb_list(struct sk_buff *segs)
+void kfree_skb_list_reason(struct sk_buff *segs,
+			   enum skb_drop_reason reason)
 {
 	while (segs) {
 		struct sk_buff *next = segs->next;
 
-		kfree_skb(segs);
+		kfree_skb_reason(segs, reason);
 		segs = next;
 	}
 }
-EXPORT_SYMBOL(kfree_skb_list);
+EXPORT_SYMBOL(kfree_skb_list_reason);
 
 /* Dump skb information and contents.
  *
@@ -926,7 +1039,7 @@ EXPORT_SYMBOL(consume_skb);
 void __consume_stateless_skb(struct sk_buff *skb)
 {
 	trace_consume_skb(skb);
-	skb_release_data(skb);
+	skb_release_data(skb, SKB_CONSUMED);
 	kfree_skbmem(skb);
 }
 
@@ -951,7 +1064,7 @@ static void napi_skb_cache_put(struct sk_buff *skb)
 
 void __kfree_skb_defer(struct sk_buff *skb)
 {
-	skb_release_all(skb);
+	skb_release_all(skb, SKB_DROP_REASON_NOT_SPECIFIED);
 	napi_skb_cache_put(skb);
 }
 
@@ -989,17 +1102,15 @@ void napi_consume_skb(struct sk_buff *skb, int budget)
 		return;
 	}
 
-	skb_release_all(skb);
+	skb_release_all(skb, SKB_CONSUMED);
 	napi_skb_cache_put(skb);
 }
 EXPORT_SYMBOL(napi_consume_skb);
 
-/* Make sure a field is enclosed inside headers_start/headers_end section */
+/* Make sure a field is contained by headers group */
 #define CHECK_SKB_FIELD(field) \
-	BUILD_BUG_ON(offsetof(struct sk_buff, field) <		\
-		     offsetof(struct sk_buff, headers_start));	\
-	BUILD_BUG_ON(offsetof(struct sk_buff, field) >		\
-		     offsetof(struct sk_buff, headers_end));	\
+	BUILD_BUG_ON(offsetof(struct sk_buff, field) !=		\
+		     offsetof(struct sk_buff, headers.field));	\
 
 static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 {
@@ -1011,14 +1122,12 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 	__skb_ext_copy(new, old);
 	__nf_copy(new, old, false);
 
-	/* Note : this field could be in headers_start/headers_end section
+	/* Note : this field could be in the headers group.
 	 * It is not yet because we do not want to have a 16 bit hole
 	 */
 	new->queue_mapping = old->queue_mapping;
 
-	memcpy(&new->headers_start, &old->headers_start,
-	       offsetof(struct sk_buff, headers_end) -
-	       offsetof(struct sk_buff, headers_start));
+	memcpy(&new->headers, &old->headers, sizeof(new->headers));
 	CHECK_SKB_FIELD(protocol);
 	CHECK_SKB_FIELD(csum);
 	CHECK_SKB_FIELD(hash);
@@ -1123,7 +1232,7 @@ EXPORT_SYMBOL_GPL(alloc_skb_for_msg);
  */
 struct sk_buff *skb_morph(struct sk_buff *dst, struct sk_buff *src)
 {
-	skb_release_all(dst);
+	skb_release_all(dst, SKB_CONSUMED);
 	return __skb_clone(dst, src);
 }
 EXPORT_SYMBOL_GPL(skb_morph);
@@ -1731,7 +1840,7 @@ int pskb_expand_head(struct sk_buff *skb, int nhead, int ntail,
 		if (skb_has_frag_list(skb))
 			skb_clone_fraglist(skb);
 
-		skb_release_data(skb);
+		skb_release_data(skb, SKB_CONSUMED);
 	} else {
 		skb_free_head(skb);
 	}
@@ -3845,7 +3954,7 @@ int skb_append_pagefrags(struct sk_buff *skb, struct page *page,
 		skb_frag_size_add(&skb_shinfo(skb)->frags[i - 1], size);
 	} else if (i < MAX_SKB_FRAGS) {
 		get_page(page);
-		skb_fill_page_desc(skb, i, page, offset, size);
+		skb_fill_page_desc_noacc(skb, i, page, offset, size);
 	} else {
 		return -EMSGSIZE;
 	}
@@ -3899,7 +4008,7 @@ struct sk_buff *skb_segment_list(struct sk_buff *skb,
 	unsigned int delta_len = 0;
 	struct sk_buff *tail = NULL;
 	struct sk_buff *nskb, *tmp;
-	int err;
+	int len_diff, err;
 
 	skb_push(skb, -skb_network_offset(skb) + offset);
 
@@ -3939,9 +4048,11 @@ struct sk_buff *skb_segment_list(struct sk_buff *skb,
 		skb_push(nskb, -skb_network_offset(nskb) + offset);
 
 		skb_release_head_state(nskb);
-		 __copy_skb_header(nskb, skb);
+		len_diff = skb_network_header_len(nskb) - skb_network_header_len(skb);
+		__copy_skb_header(nskb, skb);
 
 		skb_headers_offset_update(nskb, skb_headroom(nskb) - skb_headroom(skb));
+		nskb->transport_header += len_diff;
 		skb_copy_from_linear_data_offset(skb, -tnl_hlen,
 						 nskb->data - tnl_hlen,
 						 offset + tnl_hlen);
@@ -4006,23 +4117,25 @@ struct sk_buff *skb_segment(struct sk_buff *head_skb,
 	int i = 0;
 	int pos;
 
-	if (list_skb && !list_skb->head_frag && skb_headlen(list_skb) &&
-	    (skb_shinfo(head_skb)->gso_type & SKB_GSO_DODGY)) {
-		/* gso_size is untrusted, and we have a frag_list with a linear
-		 * non head_frag head.
-		 *
-		 * (we assume checking the first list_skb member suffices;
-		 * i.e if either of the list_skb members have non head_frag
-		 * head, then the first one has too).
-		 *
-		 * If head_skb's headlen does not fit requested gso_size, it
-		 * means that the frag_list members do NOT terminate on exact
-		 * gso_size boundaries. Hence we cannot perform skb_frag_t page
-		 * sharing. Therefore we must fallback to copying the frag_list
-		 * skbs; we do so by disabling SG.
-		 */
-		if (mss != GSO_BY_FRAGS && mss != skb_headlen(head_skb))
-			features &= ~NETIF_F_SG;
+	if ((skb_shinfo(head_skb)->gso_type & SKB_GSO_DODGY) &&
+	    mss != GSO_BY_FRAGS && mss != skb_headlen(head_skb)) {
+		struct sk_buff *check_skb;
+
+		for (check_skb = list_skb; check_skb; check_skb = check_skb->next) {
+			if (skb_headlen(check_skb) && !check_skb->head_frag) {
+				/* gso_size is untrusted, and we have a frag_list with
+				 * a linear non head_frag item.
+				 *
+				 * If head_skb's headlen does not fit requested gso_size,
+				 * it means that the frag_list members do NOT terminate
+				 * on exact gso_size boundaries. Hence we cannot perform
+				 * skb_frag_t page sharing. Therefore we must fallback to
+				 * copying the frag_list skbs; we do so by disabling SG.
+				 */
+				features &= ~NETIF_F_SG;
+				break;
+			}
+		}
 	}
 
 	__skb_push(head_skb, doffset);
@@ -4771,7 +4884,7 @@ static bool skb_may_tx_timestamp(struct sock *sk, bool tsonly)
 {
 	bool ret;
 
-	if (likely(sysctl_tstamp_allow_data || tsonly))
+	if (likely(READ_ONCE(sysctl_tstamp_allow_data) || tsonly))
 		return true;
 
 	read_lock_bh(&sk->sk_callback_lock);
@@ -4848,7 +4961,7 @@ void __skb_tstamp_tx(struct sk_buff *orig_skb,
 	if (hwtstamps)
 		*skb_hwtstamps(skb) = *hwtstamps;
 	else
-		skb->tstamp = ktime_get_real();
+		__net_timestamp(skb);
 
 	__skb_complete_tx_timestamp(skb, sk, tstype, opt_stats);
 }
@@ -5385,7 +5498,7 @@ void skb_scrub_packet(struct sk_buff *skb, bool xnet)
 
 	ipvs_reset(skb);
 	skb->mark = 0;
-	skb->tstamp = 0;
+	skb_clear_tstamp(skb);
 }
 EXPORT_SYMBOL_GPL(skb_scrub_packet);
 
@@ -5597,7 +5710,7 @@ err_free:
 }
 EXPORT_SYMBOL(skb_vlan_untag);
 
-int skb_ensure_writable(struct sk_buff *skb, int write_len)
+int skb_ensure_writable(struct sk_buff *skb, unsigned int write_len)
 {
 	if (!pskb_may_pull(skb, write_len))
 		return -ENOMEM;
@@ -6068,7 +6181,7 @@ static int pskb_carve_inside_header(struct sk_buff *skb, const u32 off,
 			skb_frag_ref(skb, i);
 		if (skb_has_frag_list(skb))
 			skb_clone_fraglist(skb);
-		skb_release_data(skb);
+		skb_release_data(skb, SKB_CONSUMED);
 	} else {
 		/* we can reuse existing recount- all we did was
 		 * relocate values
@@ -6212,7 +6325,7 @@ static int pskb_carve_inside_nonlinear(struct sk_buff *skb, const u32 off,
 		kfree(data);
 		return -ENOMEM;
 	}
-	skb_release_data(skb);
+	skb_release_data(skb, SKB_CONSUMED);
 
 	skb->head = data;
 	skb->head_frag = 0;
@@ -6291,6 +6404,7 @@ void skb_condense(struct sk_buff *skb)
 	 */
 	skb->truesize = SKB_TRUESIZE(skb_end_offset(skb));
 }
+EXPORT_SYMBOL(skb_condense);
 
 #ifdef CONFIG_SKB_EXTENSIONS
 static void *skb_ext_get_ptr(struct skb_ext *ext, enum skb_ext_id id)

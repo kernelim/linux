@@ -731,12 +731,12 @@ static void abx500_chargalg_check_temp(struct abx500_chargalg *di)
 		di->t_hyst_norm = 0;
 		di->t_hyst_lowhigh = 0;
 	} else {
-		if (((di->batt_data.temp >= di->bm->temp_high) &&
+		if (((di->batt_data.temp >= bi->temp_alert_max) &&
 			(di->batt_data.temp <
-				(di->bm->temp_over - di->t_hyst_lowhigh))) ||
+				(bi->temp_max - di->t_hyst_lowhigh))) ||
 			((di->batt_data.temp >
-				(di->bm->temp_under + di->t_hyst_lowhigh)) &&
-			(di->batt_data.temp <= di->bm->temp_low))) {
+				(bi->temp_min + di->t_hyst_lowhigh)) &&
+			(di->batt_data.temp <= bi->temp_alert_min))) {
 			/* TEMP minor!!!!! */
 			di->events.btemp_underover = false;
 			di->events.btemp_lowhigh = true;
@@ -888,7 +888,7 @@ static enum maxim_ret abx500_chargalg_chg_curr_maxim(struct abx500_chargalg *di)
 		di->ccm.max_current) {
 		if (di->ccm.condition_cnt-- == 0) {
 			/* Increse the iset with cco.test_delta_i */
-			di->ccm.condition_cnt = di->bm->maxi->wait_cycles;
+	di->ccm.condition_cnt = di->bm->maxi->wait_cycles;
 			di->ccm.current_iset += di->ccm.test_delta_i;
 			di->ccm.level++;
 			dev_dbg(di->dev, " Maximization needed, increase"
@@ -900,8 +900,8 @@ static enum maxim_ret abx500_chargalg_chg_curr_maxim(struct abx500_chargalg *di)
 				di->ccm.level);
 			return MAXIM_RET_CHANGE;
 		} else {
-			return MAXIM_RET_NOACTION;
-		}
+	return MAXIM_RET_NOACTION;
+}
 	}  else {
 		di->ccm.condition_cnt = di->bm->maxi->wait_cycles;
 		return MAXIM_RET_NOACTION;
@@ -1329,7 +1329,6 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 		di->charge_state == STATE_SUSPENDED) {
 		/* We don't do anything here, just don,t continue */
 	}
-
 	/* Safety timer expiration */
 	else if (di->events.safety_timer_expired) {
 		if (di->charge_state != STATE_SAFETY_TIMER_EXPIRED)
@@ -1443,7 +1442,6 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_SUSPENDED:
 		/* CHARGING is suspended */
 		break;
-
 	case STATE_BATT_REMOVED_INIT:
 		abx500_chargalg_stop_charging(di);
 		abx500_chargalg_state_to(di, STATE_BATT_REMOVED);
@@ -1591,12 +1589,10 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 		break;
 
 	case STATE_TEMP_LOWHIGH_INIT:
-		abx500_chargalg_start_charging(di,
-			di->bm->bat_type[
-				di->bm->batt_id].low_high_vol_lvl,
-			di->bm->bat_type[
-				di->bm->batt_id].low_high_cur_lvl);
-		abx500_chargalg_stop_maintenance_timer(di);
+		ab8500_chargalg_start_charging(di,
+			di->bm->bat_type->low_high_vol_lvl,
+			di->bm->bat_type->low_high_cur_lvl);
+		ab8500_chargalg_stop_maintenance_timer(di);
 		di->charge_status = POWER_SUPPLY_STATUS_CHARGING;
 		abx500_chargalg_state_to(di, STATE_TEMP_LOWHIGH);
 		power_supply_changed(di->chargalg_psy);
@@ -2060,7 +2056,6 @@ static int abx500_chargalg_probe(struct platform_device *pdev)
 		return ret;
 	}
 	di->curr_status.curr_step = CHARGALG_CURR_STEP_HIGH;
-
 	dev_info(di->dev, "probe success\n");
 	return component_add(dev, &abx500_chargalg_component_ops);
 }

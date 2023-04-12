@@ -6,7 +6,7 @@ weight: 2
 summary: It is required that Red Hat employees and Red Hat Partner Engineers must associate their Red Hat email account with a GitLab account.
 ---
 
-= Red Hat and GitLab Configuration
+{{< toc >}}
 
 The Red Hat kernel workflow process uses several GitLab features. Project owners and maintainers must be able to differentiate users based on whether or not they are Red Hat employees.  *It is required that Red Hat employees and Red Hat Partner Engineers must associate their Red Hat email account with a GitLab account*.
 
@@ -56,13 +56,13 @@ To test that the ssh-key is configured properly, follow the instructions at http
 
 == anchor:tokens[] GitLab Personal Access Tokens
 
-GitLab provides another authentication mechanism that allows authentication from scripts and other utilities.  This mechanism is the Personal Access Token (PAT) and is used by the Kernel Team’s recommended GitLab command line interaction utilities, bichon and lab.  A user’s PAT is stored in both utilities and avoids the user from having to authenticate passwords when running the utilities.
+GitLab provides another authentication mechanism that allows authentication from scripts and other utilities.  This mechanism is the Personal Access Token (PAT) and is used by the Kernel Team's recommended GitLab command line interaction utilities.  A user's PAT is stored in both utilities and avoids the user from having to authenticate passwords when running the utilities.
 
-PATs can be created by following the instructions at the URL below when tools like lab or bichon prompt for an access token.  +++<u>+++*Both *+++</u>++++++<u>+++*lab*+++</u>++++++<u>+++* and bichon require “API” and the ability to read repository scope tokens, ie) select “api” and “read_repository” on step 5 in the URL instructions.*+++</u>+++
+PATs can be created by following the instructions at the URL below when tools like lab prompt for an access token.  *Both* xref:lab.adoc[lab] and xref:revumatic.adoc[revumatic] require the “API” scope and the ability to read repository scope tokens.  xref:lab.adoc[lab] also requires the read repository scope., ie) select “api” and “read_repository” on step 5 in the URL instructions.
 
-	https://docs.gitlab.com/ee/user/profile/personal_access_tokens.html#creating-a-personal-access-token[https://docs.gitlab.com/ee/user/profile/personal_access_tokens.html#creating-a-personal-access-token].
+	https://docs.gitlab.com/ee/user/profile/personal_access_tokens.html#creating-a-personal-access-token
 
-Tokens created with “API” privilege grant full access to your gitlab account.  This token should be protected as if it were a password.  Both recommended GitLab tools can protect your token: lab provides an option to store the password in a password manager, and bichon encrypts tokens.
+Tokens created with “API” privilege grant full access to your gitlab account.  This token should be protected as if it were a password.  Some GitLab tools like lab provide an option to store the password in a password manager, others may encrypt it.
 
 == Access to the RHEL kernel repositories
 

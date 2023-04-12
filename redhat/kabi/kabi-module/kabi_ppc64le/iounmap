@@ -1,3 +1,2 @@
-#0-
-#I:0
-0xedc03953	iounmap	vmlinux	EXPORT_SYMBOL
+#2-
+0xedc03953	iounmap	vmlinux	EXPORT_SYMBOL	

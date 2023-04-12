@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/kernel/apic/x2apic_uv_x.c
-0xf3189f7e	__uv_cpu_info	vmlinux	EXPORT_SYMBOL_GPL
+#2-
+0xf3189f7e	__uv_cpu_info	vmlinux	EXPORT_SYMBOL_GPL	

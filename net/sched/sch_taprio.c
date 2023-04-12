@@ -18,6 +18,7 @@
 #include <linux/module.h>
 #include <linux/spinlock.h>
 #include <linux/rcupdate.h>
+#include <linux/time.h>
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
 #include <net/pkt_cls.h>
@@ -66,6 +67,7 @@ struct taprio_sched {
 	u32 flags;
 	enum tk_offsets tk_offset;
 	int clockid;
+	bool offloaded;
 	atomic64_t picos_per_byte; /* Using picoseconds because for 10Gbps+
 				    * speeds it's sub-nanoseconds per byte
 				    */
@@ -176,7 +178,7 @@ static ktime_t get_interval_end_time(struct sched_gate_list *sched,
 
 static int length_to_duration(struct taprio_sched *q, int len)
 {
-	return div_u64(len * atomic64_read(&q->picos_per_byte), 1000);
+	return div_u64(len * atomic64_read(&q->picos_per_byte), PSEC_PER_NSEC);
 }
 
 /* Returns the entry corresponding to next available interval. If
@@ -551,7 +553,7 @@ static struct sk_buff *taprio_peek(struct Qdisc *sch)
 static void taprio_set_budget(struct taprio_sched *q, struct sched_entry *entry)
 {
 	atomic_set(&entry->budget,
-		   div64_u64((u64)entry->interval * 1000,
+		   div64_u64((u64)entry->interval * PSEC_PER_NSEC,
 			     atomic64_read(&q->picos_per_byte)));
 }
 
@@ -1278,6 +1280,8 @@ static int taprio_enable_offload(struct net_device *dev,
 		goto done;
 	}
 
+	q->offloaded = true;
+
 done:
 	taprio_offload_free(offload);
 
@@ -1292,11 +1296,8 @@ static int taprio_disable_offload(struct net_device *dev,
 	struct tc_taprio_qopt_offload *offload;
 	int err;
 
-	if (!FULL_OFFLOAD_IS_ENABLED(q->flags))
+	if (!q->offloaded)
 		return 0;
-
-	if (!ops->ndo_setup_tc)
-		return -EOPNOTSUPP;
 
 	offload = taprio_offload_alloc(0);
 	if (!offload) {
@@ -1312,6 +1313,8 @@ static int taprio_disable_offload(struct net_device *dev,
 			       "Device failed to disable offload");
 		goto out;
 	}
+
+	q->offloaded = false;
 
 out:
 	taprio_offload_free(offload);
@@ -1630,6 +1633,7 @@ static void taprio_reset(struct Qdisc *sch)
 	int i;
 
 	hrtimer_cancel(&q->advance_timer);
+
 	if (q->qdiscs) {
 		for (i = 0; i < dev->num_tx_queues; i++)
 			if (q->qdiscs[i])
@@ -1653,6 +1657,7 @@ static void taprio_destroy(struct Qdisc *sch)
 	 * happens in qdisc_create(), after taprio_init() has been called.
 	 */
 	hrtimer_cancel(&q->advance_timer);
+	qdisc_synchronize(sch);
 
 	taprio_disable_offload(dev, q, NULL);
 

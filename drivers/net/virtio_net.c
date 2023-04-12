@@ -2964,10 +2964,11 @@ static int virtnet_alloc_queues(struct virtnet_info *vi)
 	INIT_DELAYED_WORK(&vi->refill, refill_work);
 	for (i = 0; i < vi->max_queue_pairs; i++) {
 		vi->rq[i].pages = NULL;
-		netif_napi_add(vi->dev, &vi->rq[i].napi, virtnet_poll,
-			       napi_weight);
-		netif_tx_napi_add(vi->dev, &vi->sq[i].napi, virtnet_poll_tx,
-				  napi_tx ? napi_weight : 0);
+		netif_napi_add_weight(vi->dev, &vi->rq[i].napi, virtnet_poll,
+				      napi_weight);
+		netif_napi_add_tx_weight(vi->dev, &vi->sq[i].napi,
+					 virtnet_poll_tx,
+					 napi_tx ? napi_weight : 0);
 
 		sg_init_table(vi->rq[i].sg, ARRAY_SIZE(vi->rq[i].sg));
 		ewma_pkt_len_init(&vi->rq[i].mrg_avg_pkt_len);
@@ -3099,6 +3100,12 @@ static int virtnet_validate(struct virtio_device *vdev)
 			__virtio_clear_bit(vdev, VIRTIO_NET_F_MTU);
 	}
 
+	if (virtio_has_feature(vdev, VIRTIO_NET_F_STANDBY) &&
+	    !virtio_has_feature(vdev, VIRTIO_NET_F_MAC)) {
+		dev_warn(&vdev->dev, "device advertises feature VIRTIO_NET_F_STANDBY but not VIRTIO_NET_F_MAC, disabling standby");
+		__virtio_clear_bit(vdev, VIRTIO_NET_F_STANDBY);
+	}
+
 	return 0;
 }
 
@@ -3179,8 +3186,11 @@ static int virtnet_probe(struct virtio_device *vdev)
 		virtio_cread_bytes(vdev,
 				   offsetof(struct virtio_net_config, mac),
 				   dev->dev_addr, dev->addr_len);
-	else
+	else {
 		eth_hw_addr_random(dev);
+		dev_info(&vdev->dev, "Assigned random MAC address %pM\n",
+			 dev->dev_addr);
+	}
 
 	/* Set up our device-specific information */
 	vi = netdev_priv(dev);
@@ -3268,13 +3278,37 @@ static int virtnet_probe(struct virtio_device *vdev)
 		}
 	}
 
-	err = register_netdev(dev);
+	/* serialize netdev register + virtio_device_ready() with ndo_open() */
+	rtnl_lock();
+
+	err = register_netdevice(dev);
 	if (err) {
 		pr_debug("virtio_net: registering device failed\n");
+		rtnl_unlock();
 		goto free_failover;
 	}
 
 	virtio_device_ready(vdev);
+
+	/* a random MAC address has been assigned, notify the device.
+	 * We don't fail probe if VIRTIO_NET_F_CTRL_MAC_ADDR is not there
+	 * because many devices work fine without getting MAC explicitly
+	 */
+	if (!virtio_has_feature(vdev, VIRTIO_NET_F_MAC) &&
+	    virtio_has_feature(vi->vdev, VIRTIO_NET_F_CTRL_MAC_ADDR)) {
+		struct scatterlist sg;
+
+		sg_init_one(&sg, dev->dev_addr, dev->addr_len);
+		if (!virtnet_send_command(vi, VIRTIO_NET_CTRL_MAC,
+					  VIRTIO_NET_CTRL_MAC_ADDR_SET, &sg)) {
+			pr_debug("virtio_net: setting MAC address failed\n");
+			rtnl_unlock();
+			err = -EINVAL;
+			goto free_unregister_netdev;
+		}
+	}
+
+	rtnl_unlock();
 
 	err = virtnet_cpu_notif_add(vi);
 	if (err) {
@@ -3306,7 +3340,7 @@ static int virtnet_probe(struct virtio_device *vdev)
 	return 0;
 
 free_unregister_netdev:
-	vi->vdev->config->reset(vdev);
+	virtio_reset_device(vdev);
 
 	unregister_netdev(dev);
 free_failover:
@@ -3322,7 +3356,7 @@ free:
 
 static void remove_vq_common(struct virtnet_info *vi)
 {
-	vi->vdev->config->reset(vi->vdev);
+	virtio_reset_device(vi->vdev);
 
 	/* Free unused buffers in both send and recv, if any. */
 	free_unused_bufs(vi);

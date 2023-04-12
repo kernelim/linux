@@ -74,11 +74,11 @@
 
 #define pr_fmt(fmt) "UDP: " fmt
 
+#include <linux/bpf-cgroup.h>
 #include <linux/uaccess.h>
 #include <asm/ioctls.h>
 #include <linux/memblock.h>
 #include <linux/highmem.h>
-#include <linux/swap.h>
 #include <linux/types.h>
 #include <linux/fcntl.h>
 #include <linux/module.h>
@@ -125,6 +125,8 @@ EXPORT_SYMBOL(sysctl_udp_mem);
 
 atomic_long_t udp_memory_allocated;
 EXPORT_SYMBOL(udp_memory_allocated);
+DEFINE_PER_CPU(int, udp_memory_per_cpu_fw_alloc);
+EXPORT_PER_CPU_SYMBOL_GPL(udp_memory_per_cpu_fw_alloc);
 
 #define MAX_UDP_PORTS 65536
 #define PORTS_PER_CHAIN (MAX_UDP_PORTS / UDP_HTABLE_SIZE_MIN)
@@ -232,8 +234,8 @@ int udp_lib_get_port(struct sock *sk, unsigned short snum,
 {
 	struct udp_hslot *hslot, *hslot2;
 	struct udp_table *udptable = sk->sk_prot->h.udp_table;
-	int    error = 1;
 	struct net *net = sock_net(sk);
+	int error = -EADDRINUSE;
 
 	if (!snum) {
 		int low, high, remaining;
@@ -446,7 +448,7 @@ static struct sock *udp4_lib_lookup2(struct net *net,
 			result = lookup_reuseport(net, sk, skb,
 						  saddr, sport, daddr, hnum);
 			/* Fall back to scoring if group has connections */
-			if (result && !reuseport_has_conns(sk, false))
+			if (result && !reuseport_has_conns(sk))
 				return result;
 
 			result = result ? : sk;
@@ -460,7 +462,7 @@ static struct sock *udp4_lookup_run_bpf(struct net *net,
 					struct udp_table *udptable,
 					struct sk_buff *skb,
 					__be32 saddr, __be16 sport,
-					__be32 daddr, u16 hnum)
+					__be32 daddr, u16 hnum, const int dif)
 {
 	struct sock *sk, *reuse_sk;
 	bool no_reuseport;
@@ -468,8 +470,8 @@ static struct sock *udp4_lookup_run_bpf(struct net *net,
 	if (udptable != &udp_table)
 		return NULL; /* only UDP is supported */
 
-	no_reuseport = bpf_sk_lookup_run_v4(net, IPPROTO_UDP,
-					    saddr, sport, daddr, hnum, &sk);
+	no_reuseport = bpf_sk_lookup_run_v4(net, IPPROTO_UDP, saddr, sport,
+					    daddr, hnum, dif, &sk);
 	if (no_reuseport || IS_ERR_OR_NULL(sk))
 		return sk;
 
@@ -505,7 +507,7 @@ struct sock *__udp4_lib_lookup(struct net *net, __be32 saddr,
 	/* Lookup redirect from BPF */
 	if (static_branch_unlikely(&bpf_sk_lookup_enabled)) {
 		sk = udp4_lookup_run_bpf(net, udptable, skb,
-					 saddr, sport, daddr, hnum);
+					 saddr, sport, daddr, hnum, dif);
 		if (sk) {
 			result = sk;
 			goto done;
@@ -1444,7 +1446,7 @@ static void udp_rmem_release(struct sock *sk, int size, int partial,
 	if (likely(partial)) {
 		up->forward_deficit += size;
 		size = up->forward_deficit;
-		if (size < (sk->sk_rcvbuf >> 2) &&
+		if (size < READ_ONCE(up->forward_threshold) &&
 		    !skb_queue_empty(&up->reader_queue))
 			return;
 	} else {
@@ -1461,11 +1463,11 @@ static void udp_rmem_release(struct sock *sk, int size, int partial,
 
 
 	sk->sk_forward_alloc += size;
-	amt = (sk->sk_forward_alloc - partial) & ~(SK_MEM_QUANTUM - 1);
+	amt = (sk->sk_forward_alloc - partial) & ~(PAGE_SIZE - 1);
 	sk->sk_forward_alloc -= amt;
 
 	if (amt)
-		__sk_mem_reduce_allocated(sk, amt >> SK_MEM_QUANTUM_SHIFT);
+		__sk_mem_reduce_allocated(sk, amt >> PAGE_SHIFT);
 
 	atomic_sub(size, &sk->sk_rmem_alloc);
 
@@ -1558,7 +1560,7 @@ int __udp_enqueue_schedule_skb(struct sock *sk, struct sk_buff *skb)
 	spin_lock(&list->lock);
 	if (size >= sk->sk_forward_alloc) {
 		amt = sk_mem_pages(size);
-		delta = amt << SK_MEM_QUANTUM_SHIFT;
+		delta = amt << PAGE_SHIFT;
 		if (!__sk_mem_raise_allocated(sk, delta, amt, SK_MEM_RECV)) {
 			err = -ENOBUFS;
 			spin_unlock(&list->lock);
@@ -1594,7 +1596,7 @@ drop:
 }
 EXPORT_SYMBOL_GPL(__udp_enqueue_schedule_skb);
 
-void udp_destruct_sock(struct sock *sk)
+void udp_destruct_common(struct sock *sk)
 {
 	/* reclaim completely the forward allocated memory */
 	struct udp_sock *up = udp_sk(sk);
@@ -1607,18 +1609,21 @@ void udp_destruct_sock(struct sock *sk)
 		kfree_skb(skb);
 	}
 	udp_rmem_release(sk, total, 0, true);
+}
+EXPORT_SYMBOL_GPL(udp_destruct_common);
 
+static void udp_destruct_sock(struct sock *sk)
+{
+	udp_destruct_common(sk);
 	inet_sock_destruct(sk);
 }
-EXPORT_SYMBOL_GPL(udp_destruct_sock);
 
 int udp_init_sock(struct sock *sk)
 {
-	skb_queue_head_init(&udp_sk(sk)->reader_queue);
+	udp_lib_init_sock(sk);
 	sk->sk_destruct = udp_destruct_sock;
 	return 0;
 }
-EXPORT_SYMBOL_GPL(udp_init_sock);
 
 void skb_consume_udp(struct sock *sk, struct sk_buff *skb, int len)
 {
@@ -1796,8 +1801,7 @@ busy_check:
 }
 EXPORT_SYMBOL(__skb_recv_udp);
 
-int udp_read_sock(struct sock *sk, read_descriptor_t *desc,
-		  sk_read_actor_t recv_actor)
+int udp_read_skb(struct sock *sk, skb_read_actor_t recv_actor)
 {
 	int copied = 0;
 
@@ -1819,7 +1823,8 @@ int udp_read_sock(struct sock *sk, read_descriptor_t *desc,
 			continue;
 		}
 
-		used = recv_actor(desc, skb, 0, skb->len);
+		WARN_ON(!skb_set_owner_sk_safe(skb, sk));
+		used = recv_actor(sk, skb);
 		if (used <= 0) {
 			if (!copied)
 				copied = used;
@@ -1830,13 +1835,12 @@ int udp_read_sock(struct sock *sk, read_descriptor_t *desc,
 		}
 
 		kfree_skb(skb);
-		if (!desc->count)
-			break;
+		break;
 	}
 
 	return copied;
 }
-EXPORT_SYMBOL(udp_read_sock);
+EXPORT_SYMBOL(udp_read_skb);
 
 /*
  * 	This should be easy, if there is something there we
@@ -2093,16 +2097,20 @@ static int __udp_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	rc = __udp_enqueue_schedule_skb(sk, skb);
 	if (rc < 0) {
 		int is_udplite = IS_UDPLITE(sk);
+		int drop_reason;
 
 		/* Note that an ENOMEM error is charged twice */
-		if (rc == -ENOMEM)
+		if (rc == -ENOMEM) {
 			UDP_INC_STATS(sock_net(sk), UDP_MIB_RCVBUFERRORS,
 					is_udplite);
-		else
+			drop_reason = SKB_DROP_REASON_SOCKET_RCVBUFF;
+		} else {
 			UDP_INC_STATS(sock_net(sk), UDP_MIB_MEMERRORS,
 				      is_udplite);
+			drop_reason = SKB_DROP_REASON_PROTO_MEM;
+		}
 		UDP_INC_STATS(sock_net(sk), UDP_MIB_INERRORS, is_udplite);
-		kfree_skb(skb);
+		kfree_skb_reason(skb, drop_reason);
 		trace_udp_fail_queue_rcv_skb(rc, sk);
 		return -1;
 	}
@@ -2120,14 +2128,17 @@ static int __udp_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
  */
 static int udp_queue_rcv_one_skb(struct sock *sk, struct sk_buff *skb)
 {
+	int drop_reason = SKB_DROP_REASON_NOT_SPECIFIED;
 	struct udp_sock *up = udp_sk(sk);
 	int is_udplite = IS_UDPLITE(sk);
 
 	/*
 	 *	Charge it to the socket, dropping if the queue is full.
 	 */
-	if (!xfrm4_policy_check(sk, XFRM_POLICY_IN, skb))
+	if (!xfrm4_policy_check(sk, XFRM_POLICY_IN, skb)) {
+		drop_reason = SKB_DROP_REASON_XFRM_POLICY;
 		goto drop;
+	}
 	nf_reset_ct(skb);
 
 	if (static_branch_unlikely(&udp_encap_needed_key) && up->encap_type) {
@@ -2204,8 +2215,10 @@ static int udp_queue_rcv_one_skb(struct sock *sk, struct sk_buff *skb)
 	    udp_lib_checksum_complete(skb))
 			goto csum_error;
 
-	if (sk_filter_trim_cap(sk, skb, sizeof(struct udphdr)))
+	if (sk_filter_trim_cap(sk, skb, sizeof(struct udphdr))) {
+		drop_reason = SKB_DROP_REASON_SOCKET_FILTER;
 		goto drop;
+	}
 
 	udp_csum_pull_header(skb);
 
@@ -2213,11 +2226,12 @@ static int udp_queue_rcv_one_skb(struct sock *sk, struct sk_buff *skb)
 	return __udp_queue_rcv_skb(sk, skb);
 
 csum_error:
+	drop_reason = SKB_DROP_REASON_UDP_CSUM;
 	__UDP_INC_STATS(sock_net(sk), UDP_MIB_CSUMERRORS, is_udplite);
 drop:
 	__UDP_INC_STATS(sock_net(sk), UDP_MIB_INERRORS, is_udplite);
 	atomic_inc(&sk->sk_drops);
-	kfree_skb(skb);
+	kfree_skb_reason(skb, drop_reason);
 	return -1;
 }
 
@@ -2554,8 +2568,7 @@ static struct sock *__udp4_lib_demux_lookup(struct net *net,
 	struct sock *sk;
 
 	udp_portaddr_for_each_entry_rcu(sk, &hslot2->head) {
-		if (INET_MATCH(sk, net, acookie, rmt_addr,
-			       loc_addr, ports, dif, sdif))
+		if (inet_match(net, sk, acookie, ports, dif, sdif))
 			return sk;
 		/* Only check first socket in chain */
 		break;
@@ -2668,6 +2681,18 @@ int udp_lib_setsockopt(struct sock *sk, int level, int optname,
 	int val, valbool;
 	int err = 0;
 	int is_udplite = IS_UDPLITE(sk);
+
+	if (level == SOL_SOCKET) {
+		err = sk_setsockopt(sk, level, optname, optval, optlen);
+
+		if (optname == SO_RCVBUF || optname == SO_RCVBUFFORCE) {
+			lock_sock(sk);
+			/* paired with READ_ONCE in udp_rmem_release() */
+			WRITE_ONCE(up->forward_threshold, sk->sk_rcvbuf >> 2);
+			release_sock(sk);
+		}
+		return err;
+	}
 
 	if (optlen < sizeof(int))
 		return -EINVAL;
@@ -2782,7 +2807,7 @@ EXPORT_SYMBOL(udp_lib_setsockopt);
 int udp_setsockopt(struct sock *sk, int level, int optname, sockptr_t optval,
 		   unsigned int optlen)
 {
-	if (level == SOL_UDP  ||  level == SOL_UDPLITE)
+	if (level == SOL_UDP  ||  level == SOL_UDPLITE || level == SOL_SOCKET)
 		return udp_lib_setsockopt(sk, level, optname,
 					  optval, optlen,
 					  udp_push_pending_frames);
@@ -2933,10 +2958,13 @@ struct proto udp_prot = {
 	.unhash			= udp_lib_unhash,
 	.rehash			= udp_v4_rehash,
 	.get_port		= udp_v4_get_port,
+	.put_port		= udp_lib_unhash,
 #ifdef CONFIG_BPF_SYSCALL
 	.psock_update_sk_prot	= udp_bpf_update_proto,
 #endif
 	.memory_allocated	= &udp_memory_allocated,
+	.per_cpu_fw_alloc	= &udp_memory_per_cpu_fw_alloc,
+
 	.sysctl_mem		= sysctl_udp_mem,
 	.sysctl_wmem_offset	= offsetof(struct net, ipv4.sysctl_udp_wmem_min),
 	.sysctl_rmem_offset	= offsetof(struct net, ipv4.sysctl_udp_rmem_min),
@@ -3082,7 +3110,7 @@ int udp4_seq_show(struct seq_file *seq, void *v)
 {
 	seq_setwidth(seq, 127);
 	if (v == SEQ_START_TOKEN)
-		seq_puts(seq, "  sl  local_address rem_address   st tx_queue "
+		seq_puts(seq, "   sl  local_address rem_address   st tx_queue "
 			   "rx_queue tr tm->when retrnsmt   uid  timeout "
 			   "inode ref pointer drops");
 	else {
@@ -3252,19 +3280,15 @@ u32 udp_flow_hashrnd(void)
 }
 EXPORT_SYMBOL(udp_flow_hashrnd);
 
-static void __udp_sysctl_init(struct net *net)
+static int __net_init udp_sysctl_init(struct net *net)
 {
-	net->ipv4.sysctl_udp_rmem_min = SK_MEM_QUANTUM;
-	net->ipv4.sysctl_udp_wmem_min = SK_MEM_QUANTUM;
+	net->ipv4.sysctl_udp_rmem_min = PAGE_SIZE;
+	net->ipv4.sysctl_udp_wmem_min = PAGE_SIZE;
 
 #ifdef CONFIG_NET_L3_MASTER_DEV
 	net->ipv4.sysctl_udp_l3mdev_accept = 0;
 #endif
-}
 
-static int __net_init udp_sysctl_init(struct net *net)
-{
-	__udp_sysctl_init(net);
 	return 0;
 }
 
@@ -3339,8 +3363,6 @@ void __init udp_init(void)
 	sysctl_udp_mem[0] = limit / 4 * 3;
 	sysctl_udp_mem[1] = limit;
 	sysctl_udp_mem[2] = sysctl_udp_mem[0] * 2;
-
-	__udp_sysctl_init(&init_net);
 
 	/* 16 spinlocks per cpu */
 	udp_busylocks_log = ilog2(nr_cpu_ids) + 4;

@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/sched/build_utility.c
-0x9cadbd3b	__init_swait_queue_head	vmlinux	EXPORT_SYMBOL
+#2-
+0x9cadbd3b	__init_swait_queue_head	vmlinux	EXPORT_SYMBOL	

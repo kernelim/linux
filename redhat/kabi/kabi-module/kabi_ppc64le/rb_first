@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/rbtree.c
-0xece784c2	rb_first	vmlinux	EXPORT_SYMBOL
+#2-
+0xece784c2	rb_first	vmlinux	EXPORT_SYMBOL	

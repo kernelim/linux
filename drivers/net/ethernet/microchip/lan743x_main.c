@@ -914,8 +914,7 @@ static int lan743x_phy_reset(struct lan743x_adapter *adapter)
 }
 
 static void lan743x_phy_update_flowcontrol(struct lan743x_adapter *adapter,
-					   u8 duplex, u16 local_adv,
-					   u16 remote_adv)
+					   u16 local_adv, u16 remote_adv)
 {
 	struct lan743x_phy *phy = &adapter->phy;
 	u8 cap;
@@ -943,7 +942,6 @@ static void lan743x_phy_link_status_change(struct net_device *netdev)
 
 	phy_print_status(phydev);
 	if (phydev->state == PHY_RUNNING) {
-		struct ethtool_link_ksettings ksettings;
 		int remote_advertisement = 0;
 		int local_advertisement = 0;
 
@@ -980,18 +978,14 @@ static void lan743x_phy_link_status_change(struct net_device *netdev)
 		}
 		lan743x_csr_write(adapter, MAC_CR, data);
 
-		memset(&ksettings, 0, sizeof(ksettings));
-		phy_ethtool_get_link_ksettings(netdev, &ksettings);
 		local_advertisement =
 			linkmode_adv_to_mii_adv_t(phydev->advertising);
 		remote_advertisement =
 			linkmode_adv_to_mii_adv_t(phydev->lp_advertising);
 
-		lan743x_phy_update_flowcontrol(adapter,
-					       ksettings.base.duplex,
-					       local_advertisement,
+		lan743x_phy_update_flowcontrol(adapter, local_advertisement,
 					       remote_advertisement);
-		lan743x_ptp_update_latency(adapter, ksettings.base.speed);
+		lan743x_ptp_update_latency(adapter, phydev->speed);
 	}
 }
 
@@ -1893,9 +1887,9 @@ static int lan743x_tx_open(struct lan743x_tx *tx)
 	tx->vector_flags = lan743x_intr_get_vector_flags(adapter,
 							 INT_BIT_DMA_TX_
 							 (tx->channel_number));
-	netif_tx_napi_add(adapter->netdev,
-			  &tx->napi, lan743x_tx_napi_poll,
-			  tx->ring_size - 1);
+	netif_napi_add_tx_weight(adapter->netdev,
+				 &tx->napi, lan743x_tx_napi_poll,
+				 tx->ring_size - 1);
 	napi_enable(&tx->napi);
 
 	data = 0;
@@ -2362,9 +2356,7 @@ static int lan743x_rx_open(struct lan743x_rx *rx)
 	if (ret)
 		goto return_error;
 
-	netif_napi_add(adapter->netdev,
-		       &rx->napi, lan743x_rx_napi_poll,
-		       NAPI_POLL_WEIGHT);
+	netif_napi_add(adapter->netdev, &rx->napi, lan743x_rx_napi_poll);
 
 	lan743x_csr_write(adapter, DMAC_CMD,
 			  DMAC_CMD_RX_SWR_(rx->channel_number));

@@ -1,5 +1,7 @@
-= Red Hat Kernel Team Policies and owners.yaml
-
+---
+title: Red Hat Kernel Team Policies and `owners.yaml` principles
+weight: 100
+---
 
 https://gitlab.com/redhat/centos-stream/src/kernel/documentation/-/blob/main/info/owners.yaml[owners.yaml] is a collection of data which maps which Red Hat SSTs (Sub System Team) are responsible for kernel technologies (aka subsystems) that Red Hat supports.  The owners.yaml file includes other data such as Kernel technology maintainers and reviewers that is useful for the https://gitlab.com/cki-project/kernel-webhooks/[kernel-webhooks] and other utilities.
 

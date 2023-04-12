@@ -24,6 +24,8 @@ extern void __iomem *pci_iomap_wc_range(struct pci_dev *dev, int bar,
 #ifdef CONFIG_NO_GENERIC_PCI_IOPORT_MAP
 extern void __iomem *__pci_ioport_map(struct pci_dev *dev, unsigned long port,
 				      unsigned int nr);
+#elif !defined(CONFIG_HAS_IOPORT_MAP)
+#define __pci_ioport_map(dev, port, nr) NULL
 #else
 #define __pci_ioport_map(dev, port, nr) ioport_map((port), (nr))
 #endif

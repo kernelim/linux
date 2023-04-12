@@ -1,4 +1,0 @@
-#0-
-#I:0
-#P:kernel/exit.c
-0x26cc73c3	complete_and_exit	vmlinux	EXPORT_SYMBOL

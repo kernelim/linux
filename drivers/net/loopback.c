@@ -74,7 +74,7 @@ static netdev_tx_t loopback_xmit(struct sk_buff *skb,
 	skb_tx_timestamp(skb);
 
 	/* do not fool net_timestamp_check() with various clock bases */
-	skb->tstamp = 0;
+	skb_clear_tstamp(skb);
 
 	skb_orphan(skb);
 
@@ -191,6 +191,8 @@ static void gen_lo_setup(struct net_device *dev,
 	dev->netdev_ops		= dev_ops;
 	dev->needs_free_netdev	= true;
 	dev->priv_destructor	= dev_destructor;
+
+	netif_set_tso_max_size(dev, GSO_MAX_SIZE);
 }
 
 /* The loopback device is special. There is only one instance

@@ -15,6 +15,7 @@
 
 #include <linux/errno.h>
 #include <linux/mm.h>
+#include <linux/mm_inline.h>
 #include <linux/fs.h>
 #include <linux/mman.h>
 #include <linux/sched.h>
@@ -474,7 +475,7 @@ static int break_ksm(struct vm_area_struct *vma, unsigned long addr)
 		cond_resched();
 		page = follow_page(vma, addr,
 				FOLL_GET | FOLL_MIGRATION | FOLL_REMOTE);
-		if (IS_ERR_OR_NULL(page))
+		if (IS_ERR_OR_NULL(page) || is_zone_device_page(page))
 			break;
 		if (PageKsm(page))
 			ret = handle_mm_fault(vma, addr,
@@ -559,7 +560,7 @@ static struct page *get_mergeable_page(struct rmap_item *rmap_item)
 		goto out;
 
 	page = follow_page(vma, addr, FOLL_GET);
-	if (IS_ERR_OR_NULL(page))
+	if (IS_ERR_OR_NULL(page) || is_zone_device_page(page))
 		goto out;
 	if (PageAnon(page)) {
 		flush_anon_page(vma, page, addr);
@@ -651,10 +652,8 @@ static void remove_node_from_stable_tree(struct stable_node *stable_node)
 	 * from &migrate_nodes. This will verify that future list.h changes
 	 * don't break STABLE_NODE_DUP_HEAD. Only recent gcc can handle it.
 	 */
-#if defined(GCC_VERSION) && GCC_VERSION >= 40903
 	BUILD_BUG_ON(STABLE_NODE_DUP_HEAD <= &migrate_nodes);
 	BUILD_BUG_ON(STABLE_NODE_DUP_HEAD >= &migrate_nodes + 1);
-#endif
 
 	if (stable_node->head == &migrate_nodes)
 		list_del(&stable_node->list);
@@ -867,6 +866,7 @@ static inline struct stable_node *page_stable_node(struct page *page)
 static inline void set_page_stable_node(struct page *page,
 					struct stable_node *stable_node)
 {
+	VM_BUG_ON_PAGE(PageAnon(page) && PageAnonExclusive(page), page);
 	page->mapping = (void *)((unsigned long)stable_node | PAGE_MAPPING_KSM);
 }
 
@@ -1039,6 +1039,7 @@ static int write_protect_page(struct vm_area_struct *vma, struct page *page,
 	int swapped;
 	int err = -EFAULT;
 	struct mmu_notifier_range range;
+	bool anon_exclusive;
 
 	pvmw.address = page_address_in_vma(page, vma);
 	if (pvmw.address == -EFAULT)
@@ -1056,9 +1057,10 @@ static int write_protect_page(struct vm_area_struct *vma, struct page *page,
 	if (WARN_ONCE(!pvmw.pte, "Unexpected PMD mapping?"))
 		goto out_unlock;
 
+	anon_exclusive = PageAnonExclusive(page);
 	if (pte_write(*pvmw.pte) || pte_dirty(*pvmw.pte) ||
 	    (pte_protnone(*pvmw.pte) && pte_savedwrite(*pvmw.pte)) ||
-						mm_tlb_flush_pending(mm)) {
+	    anon_exclusive || mm_tlb_flush_pending(mm)) {
 		pte_t entry;
 
 		swapped = PageSwapCache(page);
@@ -1086,6 +1088,12 @@ static int write_protect_page(struct vm_area_struct *vma, struct page *page,
 			set_pte_at(mm, pvmw.address, pvmw.pte, entry);
 			goto out_unlock;
 		}
+
+		if (anon_exclusive && page_try_share_anon_rmap(page)) {
+			set_pte_at(mm, pvmw.address, pvmw.pte, entry);
+			goto out_unlock;
+		}
+
 		if (pte_dirty(entry))
 			set_page_dirty(page);
 
@@ -1144,6 +1152,8 @@ static int replace_page(struct vm_area_struct *vma, struct page *page,
 		pte_unmap_unlock(ptep, ptl);
 		goto out_mn;
 	}
+	VM_BUG_ON_PAGE(PageAnonExclusive(page), page);
+	VM_BUG_ON_PAGE(PageAnon(kpage) && PageAnonExclusive(kpage), kpage);
 
 	/*
 	 * No need to check ksm_use_zero_pages here: we can only have a
@@ -1151,7 +1161,7 @@ static int replace_page(struct vm_area_struct *vma, struct page *page,
 	 */
 	if (!is_zero_pfn(page_to_pfn(kpage))) {
 		get_page(kpage);
-		page_add_anon_rmap(kpage, vma, addr, false);
+		page_add_anon_rmap(kpage, vma, addr, RMAP_NONE);
 		newpte = mk_pte(kpage, vma->vm_page_prot);
 	} else {
 		newpte = pte_mkspecial(pfn_pte(page_to_pfn(kpage),
@@ -2290,7 +2300,7 @@ next_mm:
 			if (ksm_test_exit(mm))
 				break;
 			*page = follow_page(vma, ksm_scan.address, FOLL_GET);
-			if (IS_ERR_OR_NULL(*page)) {
+			if (IS_ERR_OR_NULL(*page) || is_zone_device_page(*page)) {
 				ksm_scan.address += PAGE_SIZE;
 				cond_resched();
 				continue;
@@ -2565,8 +2575,8 @@ struct page *ksm_might_need_to_copy(struct page *page,
 			return page;	/* no need to copy it */
 	} else if (!anon_vma) {
 		return page;		/* no need to copy it */
-	} else if (anon_vma->root == vma->anon_vma->root &&
-		 page->index == linear_page_index(vma, address)) {
+	} else if (page->index == linear_page_index(vma, address) &&
+			anon_vma->root == vma->anon_vma->root) {
 		return page;		/* still no need to copy it */
 	}
 	if (!PageUptodate(page))
@@ -2584,6 +2594,9 @@ struct page *ksm_might_need_to_copy(struct page *page,
 		SetPageDirty(new_page);
 		__SetPageUptodate(new_page);
 		__SetPageLocked(new_page);
+#ifdef CONFIG_SWAP
+		count_vm_event(KSM_SWPIN_COPY);
+#endif
 	}
 
 	return new_page;
@@ -2653,31 +2666,6 @@ again:
 		goto again;
 }
 
-bool reuse_ksm_page(struct page *page,
-		    struct vm_area_struct *vma,
-		    unsigned long address)
-{
-#ifdef CONFIG_DEBUG_VM
-	if (WARN_ON(is_zero_pfn(page_to_pfn(page))) ||
-			WARN_ON(!page_mapped(page)) ||
-			WARN_ON(!PageLocked(page))) {
-		dump_page(page, "reuse_ksm_page");
-		return false;
-	}
-#endif
-
-	if (PageSwapCache(page) || !page_stable_node(page))
-		return false;
-	/* Prohibit parallel get_ksm_page() */
-	if (!page_ref_freeze(page, 1))
-		return false;
-
-	page_move_anon_rmap(page, vma);
-	page->index = linear_page_index(vma, address);
-	page_ref_unfreeze(page, 1);
-
-	return true;
-}
 #ifdef CONFIG_MIGRATION
 void folio_migrate_ksm(struct folio *newfolio, struct folio *folio)
 {
@@ -2840,8 +2828,7 @@ static void wait_while_offlining(void)
 #define KSM_ATTR_RO(_name) \
 	static struct kobj_attribute _name##_attr = __ATTR_RO(_name)
 #define KSM_ATTR(_name) \
-	static struct kobj_attribute _name##_attr = \
-		__ATTR(_name, 0644, _name##_show, _name##_store)
+	static struct kobj_attribute _name##_attr = __ATTR_RW(_name)
 
 static ssize_t sleep_millisecs_show(struct kobject *kobj,
 				    struct kobj_attribute *attr, char *buf)

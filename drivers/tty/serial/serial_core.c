@@ -222,7 +222,11 @@ static int uart_port_startup(struct tty_struct *tty, struct uart_state *state,
 	if (retval == 0) {
 		if (uart_console(uport) && uport->cons->cflag) {
 			tty->termios.c_cflag = uport->cons->cflag;
+			tty->termios.c_ispeed = uport->cons->ispeed;
+			tty->termios.c_ospeed = uport->cons->ospeed;
 			uport->cons->cflag = 0;
+			uport->cons->ispeed = 0;
+			uport->cons->ospeed = 0;
 		}
 		/*
 		 * Initialise the hardware port settings.
@@ -290,8 +294,11 @@ static void uart_shutdown(struct tty_struct *tty, struct uart_state *state)
 		/*
 		 * Turn off DTR and RTS early.
 		 */
-		if (uport && uart_console(uport) && tty)
+		if (uport && uart_console(uport) && tty) {
 			uport->cons->cflag = tty->termios.c_cflag;
+			uport->cons->ispeed = tty->termios.c_ispeed;
+			uport->cons->ospeed = tty->termios.c_ospeed;
+		}
 
 		if (!tty || C_HUPCL(tty))
 			uart_port_dtr_rts(uport, 0);
@@ -368,7 +375,7 @@ EXPORT_SYMBOL(uart_update_timeout);
  */
 unsigned int
 uart_get_baud_rate(struct uart_port *port, struct ktermios *termios,
-		   struct ktermios *old, unsigned int min, unsigned int max)
+		   const struct ktermios *old, unsigned int min, unsigned int max)
 {
 	unsigned int try;
 	unsigned int baud;
@@ -1888,11 +1895,6 @@ static int uart_proc_show(struct seq_file *m, void *v)
 }
 #endif
 
-static inline bool uart_console_enabled(struct uart_port *port)
-{
-	return uart_console(port) && (port->cons->flags & CON_ENABLED);
-}
-
 static void uart_port_spin_lock_init(struct uart_port *port)
 {
 	spin_lock_init(&port->lock);
@@ -1909,7 +1911,7 @@ static void uart_port_spin_lock_init(struct uart_port *port)
  */
 void uart_console_write(struct uart_port *port, const char *s,
 			unsigned int count,
-			void (*putchar)(struct uart_port *, int))
+			void (*putchar)(struct uart_port *, unsigned char))
 {
 	unsigned int i;
 
@@ -2094,8 +2096,11 @@ uart_set_options(struct uart_port *port, struct console *co,
 	 * Allow the setting of the UART parameters with a NULL console
 	 * too:
 	 */
-	if (co)
+	if (co) {
 		co->cflag = termios.c_cflag;
+		co->ispeed = termios.c_ispeed;
+		co->ospeed = termios.c_ospeed;
+	}
 
 	return 0;
 }
@@ -2155,9 +2160,17 @@ int uart_suspend_port(struct uart_driver *drv, struct uart_port *uport)
 	}
 	put_device(tty_dev);
 
-	/* Nothing to do if the console is not suspending */
-	if (!console_suspend_enabled && uart_console(uport))
+	/*
+	 * Nothing to do if the console is not suspending
+	 * except stop_rx to prevent any asynchronous data
+	 * over RX line. However ensure that we will be
+	 * able to Re-start_rx later.
+	 */
+	if (!console_suspend_enabled && uart_console(uport)) {
+		if (uport->ops->start_rx)
+			uport->ops->stop_rx(uport);
 		goto unlock;
+	}
 
 	uport->suspended = 1;
 
@@ -2229,6 +2242,8 @@ int uart_resume_port(struct uart_driver *drv, struct uart_port *uport)
 		 */
 		memset(&termios, 0, sizeof(struct ktermios));
 		termios.c_cflag = uport->cons->cflag;
+		termios.c_ispeed = uport->cons->ispeed;
+		termios.c_ospeed = uport->cons->ospeed;
 
 		/*
 		 * If that's unset, use the tty termios setting.
@@ -2239,6 +2254,8 @@ int uart_resume_port(struct uart_driver *drv, struct uart_port *uport)
 		if (console_suspend_enabled)
 			uart_change_pm(state, UART_PM_STATE_ON);
 		uport->ops->set_termios(uport, &termios, NULL);
+		if (!console_suspend_enabled && uport->ops->start_rx)
+			uport->ops->start_rx(uport);
 		if (console_suspend_enabled)
 			console_start(uport->cons);
 	}

@@ -88,6 +88,7 @@ if major >= 3:
             "__used",
             "__weak",
             "noinline",
+            "__fix_address",
 
             # include/linux/memblock.h:
             "__init_memblock",

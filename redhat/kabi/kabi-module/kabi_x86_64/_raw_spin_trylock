@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/locking/spinlock.c
-0xfef216eb	_raw_spin_trylock	vmlinux	EXPORT_SYMBOL
+#2-
+0xfef216eb	_raw_spin_trylock	vmlinux	EXPORT_SYMBOL	

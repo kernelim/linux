@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/workqueue.c
-0xc5b6f236	queue_work_on	vmlinux	EXPORT_SYMBOL
+#2-
+0xc5b6f236	queue_work_on	vmlinux	EXPORT_SYMBOL	

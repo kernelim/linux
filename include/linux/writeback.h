@@ -68,6 +68,7 @@ struct writeback_control {
 	unsigned for_reclaim:1;		/* Invoked from the page allocator */
 	unsigned range_cyclic:1;	/* range_start is cyclic */
 	unsigned for_sync:1;		/* sync(2) WB_SYNC_ALL writeback */
+	unsigned unpinned_fscache_wb:1;	/* Cleared I_PINNING_FSCACHE_WB */
 
 	/*
 	 * When writeback IOs are bounced through async layers, only the
@@ -93,9 +94,9 @@ struct writeback_control {
 #endif
 };
 
-static inline int wbc_to_write_flags(struct writeback_control *wbc)
+static inline blk_opf_t wbc_to_write_flags(struct writeback_control *wbc)
 {
-	int flags = 0;
+	blk_opf_t flags = 0;
 
 	if (wbc->punt_to_cgroup)
 		flags = REQ_CGROUP_PUNT;

@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/arm64/lib/strrchr.S
-0x9f984513	strrchr	vmlinux	EXPORT_SYMBOL
+#2-
+0x9f984513	strrchr	vmlinux	EXPORT_SYMBOL	

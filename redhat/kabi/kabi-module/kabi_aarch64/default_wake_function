@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/sched/core.c
-0xaad8c7d6	default_wake_function	vmlinux	EXPORT_SYMBOL
+#2-
+0xaad8c7d6	default_wake_function	vmlinux	EXPORT_SYMBOL	

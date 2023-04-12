@@ -237,7 +237,6 @@ static int cros_ec_spi_receive_packet(struct cros_ec_device *ec_dev,
 	 * start of our buffer
 	 */
 	todo = end - ++ptr;
-	BUG_ON(todo < 0 || todo > ec_dev->din_size);
 	todo = min(todo, need_len);
 	memmove(ec_dev->din, ptr, todo);
 	ptr = ec_dev->din + todo;
@@ -345,7 +344,6 @@ static int cros_ec_spi_receive_response(struct cros_ec_device *ec_dev,
 	 * start of our buffer
 	 */
 	todo = end - ++ptr;
-	BUG_ON(todo < 0 || todo > ec_dev->din_size);
 	todo = min(todo, need_len);
 	memmove(ec_dev->din, ptr, todo);
 	ptr = ec_dev->din + todo;
@@ -401,6 +399,8 @@ static int do_cros_ec_pkt_xfer_spi(struct cros_ec_device *ec_dev,
 	unsigned long delay;
 
 	len = cros_ec_prepare_tx(ec_dev, ec_msg);
+	if (len < 0)
+		return len;
 	dev_dbg(ec_dev->dev, "prepared, len=%d\n", len);
 
 	/* If it's too soon to do another transaction, wait */
@@ -544,6 +544,8 @@ static int do_cros_ec_cmd_xfer_spi(struct cros_ec_device *ec_dev,
 	unsigned long delay;
 
 	len = cros_ec_prepare_tx(ec_dev, ec_msg);
+	if (len < 0)
+		return len;
 	dev_dbg(ec_dev->dev, "prepared, len=%d\n", len);
 
 	/* If it's too soon to do another transaction, wait */

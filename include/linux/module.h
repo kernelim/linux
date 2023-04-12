@@ -512,6 +512,11 @@ struct module {
 	struct klp_modinfo *klp_info;
 #endif
 
+#ifdef CONFIG_PRINTK_INDEX
+	unsigned int printk_index_size;
+	struct pi_entry **printk_index_start;
+#endif
+
 #ifdef CONFIG_MODULE_UNLOAD
 	/* What modules depend on me? */
 	struct list_head source_list;
@@ -591,9 +596,9 @@ int module_get_kallsym(unsigned int symnum, unsigned long *value, char *type,
 /* Look for this name: can be of form module:name. */
 unsigned long module_kallsyms_lookup_name(const char *name);
 
-extern void __noreturn __module_put_and_exit(struct module *mod,
+extern void __noreturn __module_put_and_kthread_exit(struct module *mod,
 			long code);
-#define module_put_and_exit(code) __module_put_and_exit(THIS_MODULE, code)
+#define module_put_and_kthread_exit(code) __module_put_and_kthread_exit(THIS_MODULE, code)
 
 #ifdef CONFIG_MODULE_UNLOAD
 int module_refcount(struct module *mod);
@@ -786,7 +791,7 @@ static inline int unregister_module_notifier(struct notifier_block *nb)
 	return 0;
 }
 
-#define module_put_and_exit(code) do_exit(code)
+#define module_put_and_kthread_exit(code) kthread_exit(code)
 
 static inline void print_modules(void)
 {

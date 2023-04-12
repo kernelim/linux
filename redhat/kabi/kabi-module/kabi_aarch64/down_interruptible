@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/locking/semaphore.c
-0x6bd0e573	down_interruptible	vmlinux	EXPORT_SYMBOL
+#2-
+0x6bd0e573	down_interruptible	vmlinux	EXPORT_SYMBOL	

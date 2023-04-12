@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/platform/uv/bios_uv.c
-0xcd8e8f82	uv_bios_enum_objs	vmlinux	EXPORT_SYMBOL_GPL
+#2-
+0xcd8e8f82	uv_bios_enum_objs	vmlinux	EXPORT_SYMBOL_GPL	

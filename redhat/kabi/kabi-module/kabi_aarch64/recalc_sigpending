@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/signal.c
-0xfb6af58d	recalc_sigpending	vmlinux	EXPORT_SYMBOL
+#2-
+0xfb6af58d	recalc_sigpending	vmlinux	EXPORT_SYMBOL	

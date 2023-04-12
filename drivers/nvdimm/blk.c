@@ -228,7 +228,7 @@ static const struct block_device_operations nd_blk_fops = {
 static void nd_blk_release_disk(void *disk)
 {
 	del_gendisk(disk);
-	blk_cleanup_disk(disk);
+	put_disk(disk);
 }
 
 static int nsblk_attach_disk(struct nd_namespace_blk *nsblk)
@@ -274,7 +274,7 @@ static int nsblk_attach_disk(struct nd_namespace_blk *nsblk)
 	return 0;
 
 out_before_devm_err:
-	blk_cleanup_disk(disk);
+	put_disk(disk);
 	return rc;
 }
 

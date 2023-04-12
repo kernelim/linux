@@ -6,9 +6,14 @@
 #ifndef __PINCTRL_LPASS_LPI_H__
 #define __PINCTRL_LPASS_LPI_H__
 
-#include <linux/bitops.h>
-#include <linux/bitfield.h>
+#include <linux/bits.h>
+#include <linux/kernel.h>
+
 #include "../core.h"
+
+struct platform_device;
+
+struct pinctrl_pin_desc;
 
 #define LPI_SLEW_RATE_CTL_REG	0xa000
 #define LPI_TLMM_REG_OFFSET		0x1000
@@ -77,7 +82,6 @@ struct lpi_pinctrl_variant_data {
 	int ngroups;
 	const struct lpi_function *functions;
 	int nfunctions;
-	bool is_clk_optional;
 };
 
 int lpi_pinctrl_probe(struct platform_device *pdev);

@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/reboot.c
-0xac1a55be	unregister_reboot_notifier	vmlinux	EXPORT_SYMBOL
+#2-
+0xac1a55be	unregister_reboot_notifier	vmlinux	EXPORT_SYMBOL	

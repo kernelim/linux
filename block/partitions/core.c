@@ -9,7 +9,6 @@
 #include <linux/slab.h>
 #include <linux/ctype.h>
 #include <linux/vmalloc.h>
-#include <linux/blktrace_api.h>
 #include <linux/raid/detect.h>
 #include "check.h"
 
@@ -331,7 +330,7 @@ static struct block_device *add_partition(struct gendisk *disk, int partno,
 	case BLK_ZONED_HA:
 		pr_info("%s: disabling host aware zoned block device support due to partitions\n",
 			disk->disk_name);
-		blk_queue_set_zoned(disk, BLK_ZONED_NONE);
+		disk_set_zoned(disk, BLK_ZONED_NONE);
 		break;
 	case BLK_ZONED_NONE:
 		break;
@@ -595,6 +594,9 @@ static int blk_add_partitions(struct gendisk *disk)
 	int ret = -EAGAIN, p;
 
 	if (disk->flags & GENHD_FL_NO_PART)
+		return 0;
+
+	if (test_bit(GD_SUPPRESS_PART_SCAN, &disk->state))
 		return 0;
 
 	state = check_partition(disk);

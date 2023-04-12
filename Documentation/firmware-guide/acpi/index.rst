@@ -28,3 +28,4 @@ ACPI Support
    video_extension
    extcon-intel-int3496
    intel-pmc-mux
+   chromeos-acpi-device

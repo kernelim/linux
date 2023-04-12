@@ -52,6 +52,8 @@ int filemap_fdatawrite_range(struct address_space *mapping,
 		loff_t start, loff_t end);
 int filemap_check_errors(struct address_space *mapping);
 void __filemap_set_wb_err(struct address_space *mapping, int err);
+int filemap_fdatawrite_wbc(struct address_space *mapping,
+			   struct writeback_control *wbc);
 
 static inline int filemap_write_and_wait(struct address_space *mapping)
 {
@@ -133,6 +135,56 @@ static inline int inode_drain_writes(struct inode *inode)
 static inline bool mapping_empty(struct address_space *mapping)
 {
 	return xa_empty(&mapping->i_pages);
+}
+
+/*
+ * mapping_shrinkable - test if page cache state allows inode reclaim
+ * @mapping: the page cache mapping
+ *
+ * This checks the mapping's cache state for the pupose of inode
+ * reclaim and LRU management.
+ *
+ * The caller is expected to hold the i_lock, but is not required to
+ * hold the i_pages lock, which usually protects cache state. That's
+ * because the i_lock and the list_lru lock that protect the inode and
+ * its LRU state don't nest inside the irq-safe i_pages lock.
+ *
+ * Cache deletions are performed under the i_lock, which ensures that
+ * when an inode goes empty, it will reliably get queued on the LRU.
+ *
+ * Cache additions do not acquire the i_lock and may race with this
+ * check, in which case we'll report the inode as shrinkable when it
+ * has cache pages. This is okay: the shrinker also checks the
+ * refcount and the referenced bit, which will be elevated or set in
+ * the process of adding new cache pages to an inode.
+ */
+static inline bool mapping_shrinkable(struct address_space *mapping)
+{
+	void *head;
+
+	/*
+	 * On highmem systems, there could be lowmem pressure from the
+	 * inodes before there is highmem pressure from the page
+	 * cache. Make inodes shrinkable regardless of cache state.
+	 */
+	if (IS_ENABLED(CONFIG_HIGHMEM))
+		return true;
+
+	/* Cache completely empty? Shrink away. */
+	head = rcu_access_pointer(mapping->i_pages.xa_head);
+	if (!head)
+		return true;
+
+	/*
+	 * The xarray stores single offset-0 entries directly in the
+	 * head pointer, which allows non-resident page cache entries
+	 * to escape the shadow shrinker's list of xarray nodes. The
+	 * inode shrinker needs to pick them up under memory pressure.
+	 */
+	if (!xa_is_node(head) && xa_is_value(head))
+		return true;
+
+	return false;
 }
 
 /*
@@ -480,6 +532,24 @@ static inline struct folio *filemap_get_folio(struct address_space *mapping,
 }
 
 /**
+ * filemap_lock_folio - Find and lock a folio.
+ * @mapping: The address_space to search.
+ * @index: The page index.
+ *
+ * Looks up the page cache entry at @mapping & @index.  If a folio is
+ * present, it is returned locked with an increased refcount.
+ *
+ * Context: May sleep.
+ * Return: A folio or %NULL if there is no folio in the cache for this
+ * index.  Will not return a shadow, swap or DAX entry.
+ */
+static inline struct folio *filemap_lock_folio(struct address_space *mapping,
+					pgoff_t index)
+{
+	return __filemap_get_folio(mapping, index, FGP_LOCK, 0);
+}
+
+/**
  * find_get_page - find and get a page reference
  * @mapping: the address_space to search
  * @offset: the page index
@@ -651,13 +721,6 @@ static inline struct page *find_subpage(struct page *head, pgoff_t index)
 unsigned find_get_pages_range(struct address_space *mapping, pgoff_t *start,
 			pgoff_t end, unsigned int nr_pages,
 			struct page **pages);
-static inline unsigned find_get_pages(struct address_space *mapping,
-			pgoff_t *start, unsigned int nr_pages,
-			struct page **pages)
-{
-	return find_get_pages_range(mapping, start, (pgoff_t)-1, nr_pages,
-				    pages);
-}
 unsigned find_get_pages_contig(struct address_space *mapping, pgoff_t start,
 			       unsigned int nr_pages, struct page **pages);
 unsigned find_get_pages_range_tag(struct address_space *mapping, pgoff_t *index,
@@ -689,8 +752,6 @@ struct page *read_cache_page(struct address_space *, pgoff_t index,
 		filler_t *filler, void *data);
 extern struct page * read_cache_page_gfp(struct address_space *mapping,
 				pgoff_t index, gfp_t gfp_mask);
-extern int read_cache_pages(struct address_space *mapping,
-		struct list_head *pages, filler_t *filler, void *data);
 
 static inline struct page *read_mapping_page(struct address_space *mapping,
 				pgoff_t index, struct file *file)
@@ -968,25 +1029,9 @@ static inline int __must_check write_one_page(struct page *page)
 }
 
 int __set_page_dirty_nobuffers(struct page *page);
-int __set_page_dirty_no_writeback(struct page *page);
+bool noop_dirty_folio(struct address_space *mapping, struct folio *folio);
 
 void page_endio(struct page *page, bool is_write, int err);
-
-/**
- * set_page_private_2 - Set PG_private_2 on a page and take a ref
- * @page: The page.
- *
- * Set the PG_private_2 flag on a page and take the reference needed for the VM
- * to handle its lifetime correctly.  This sets the flag and takes the
- * reference unconditionally, so care must be taken not to set the flag again
- * if it's already set.
- */
-static inline void set_page_private_2(struct page *page)
-{
-	page = compound_head(page);
-	get_page(page);
-	SetPagePrivate2(page);
-}
 
 void folio_end_private_2(struct folio *folio);
 void folio_wait_private_2(struct folio *folio);
@@ -1072,6 +1117,8 @@ struct readahead_control {
 	pgoff_t _index;
 	unsigned int _nr_pages;
 	unsigned int _batch_count;
+	bool _workingset;
+	unsigned long _pflags;
 };
 
 #define DEFINE_READAHEAD(ractl, f, r, m, i)				\

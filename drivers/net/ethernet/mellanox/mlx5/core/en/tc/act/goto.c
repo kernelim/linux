@@ -21,7 +21,7 @@ validate_goto_chain(struct mlx5e_priv *priv,
 	u32 max_chain;
 
 	esw = priv->mdev->priv.eswitch;
-	chains = is_esw ? esw_chains(esw) : mlx5e_nic_chains(priv);
+	chains = is_esw ? esw_chains(esw) : mlx5e_nic_chains(priv->fs->tc);
 	max_chain = mlx5_chains_get_chain_range(chains);
 	reformat_and_fwd = is_esw ?
 			   MLX5_CAP_ESW_FLOWTABLE_FDB(priv->mdev, reformat_and_fwd_to_table) :
@@ -120,4 +120,5 @@ struct mlx5e_tc_act mlx5e_tc_act_goto = {
 	.can_offload = tc_act_can_offload_goto,
 	.parse_action = tc_act_parse_goto,
 	.post_parse = tc_act_post_parse_goto,
+	.is_terminating_action = true,
 };

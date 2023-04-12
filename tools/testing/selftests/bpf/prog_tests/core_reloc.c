@@ -2,6 +2,7 @@
 #include <test_progs.h>
 #include "progs/core_reloc_types.h"
 #include "bpf_testmod/bpf_testmod.h"
+#include <linux/limits.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <bpf/btf.h>
@@ -10,7 +11,7 @@ static int duration = 0;
 
 #define STRUCT_TO_CHAR_PTR(struct_name) (const char *)&(struct struct_name)
 
-#define MODULES_CASE(name, sec_name, tp_name) {				\
+#define MODULES_CASE(name, pg_name, tp_name) {				\
 	.case_name = name,						\
 	.bpf_obj_file = "test_core_reloc_module.o",			\
 	.btf_src_file = NULL, /* find in kernel module BTFs */		\
@@ -28,7 +29,7 @@ static int duration = 0;
 		.comm_len = sizeof("test_progs"),			\
 	},								\
 	.output_len = sizeof(struct core_reloc_module_output),		\
-	.prog_sec_name = sec_name,					\
+	.prog_name = pg_name,						\
 	.raw_tp_name = tp_name,						\
 	.trigger = __trigger_module_test_read,				\
 	.needs_testmod = true,						\
@@ -43,7 +44,9 @@ static int duration = 0;
 #define FLAVORS_CASE_COMMON(name)					\
 	.case_name = #name,						\
 	.bpf_obj_file = "test_core_reloc_flavors.o",			\
-	.btf_src_file = "btf__core_reloc_" #name ".o"			\
+	.btf_src_file = "btf__core_reloc_" #name ".o",			\
+	.raw_tp_name = "sys_enter",					\
+	.prog_name = "test_core_flavors"				\
 
 #define FLAVORS_CASE(name) {						\
 	FLAVORS_CASE_COMMON(name),					\
@@ -66,7 +69,9 @@ static int duration = 0;
 #define NESTING_CASE_COMMON(name)					\
 	.case_name = #name,						\
 	.bpf_obj_file = "test_core_reloc_nesting.o",			\
-	.btf_src_file = "btf__core_reloc_" #name ".o"
+	.btf_src_file = "btf__core_reloc_" #name ".o",			\
+	.raw_tp_name = "sys_enter",					\
+	.prog_name = "test_core_nesting"				\
 
 #define NESTING_CASE(name) {						\
 	NESTING_CASE_COMMON(name),					\
@@ -79,6 +84,7 @@ static int duration = 0;
 #define NESTING_ERR_CASE(name) {					\
 	NESTING_CASE_COMMON(name),					\
 	.fails = true,							\
+	.run_btfgen_fails = true,							\
 }
 
 #define ARRAYS_DATA(struct_name) STRUCT_TO_CHAR_PTR(struct_name) {	\
@@ -91,7 +97,9 @@ static int duration = 0;
 #define ARRAYS_CASE_COMMON(name)					\
 	.case_name = #name,						\
 	.bpf_obj_file = "test_core_reloc_arrays.o",			\
-	.btf_src_file = "btf__core_reloc_" #name ".o"
+	.btf_src_file = "btf__core_reloc_" #name ".o",			\
+	.raw_tp_name = "sys_enter",					\
+	.prog_name = "test_core_arrays"					\
 
 #define ARRAYS_CASE(name) {						\
 	ARRAYS_CASE_COMMON(name),					\
@@ -123,7 +131,9 @@ static int duration = 0;
 #define PRIMITIVES_CASE_COMMON(name)					\
 	.case_name = #name,						\
 	.bpf_obj_file = "test_core_reloc_primitives.o",			\
-	.btf_src_file = "btf__core_reloc_" #name ".o"
+	.btf_src_file = "btf__core_reloc_" #name ".o",			\
+	.raw_tp_name = "sys_enter",					\
+	.prog_name = "test_core_primitives"				\
 
 #define PRIMITIVES_CASE(name) {						\
 	PRIMITIVES_CASE_COMMON(name),					\
@@ -158,6 +168,8 @@ static int duration = 0;
 		.e = 5, .f = 6, .g = 7, .h = 8,				\
 	},								\
 	.output_len = sizeof(struct core_reloc_mods_output),		\
+	.raw_tp_name = "sys_enter",					\
+	.prog_name = "test_core_mods",					\
 }
 
 #define PTR_AS_ARR_CASE(name) {						\
@@ -174,6 +186,8 @@ static int duration = 0;
 		.a = 3,							\
 	},								\
 	.output_len = sizeof(struct core_reloc_ptr_as_arr),		\
+	.raw_tp_name = "sys_enter",					\
+	.prog_name = "test_core_ptr_as_arr",				\
 }
 
 #define INTS_DATA(struct_name) STRUCT_TO_CHAR_PTR(struct_name) {	\
@@ -190,7 +204,9 @@ static int duration = 0;
 #define INTS_CASE_COMMON(name)						\
 	.case_name = #name,						\
 	.bpf_obj_file = "test_core_reloc_ints.o",			\
-	.btf_src_file = "btf__core_reloc_" #name ".o"
+	.btf_src_file = "btf__core_reloc_" #name ".o",			\
+	.raw_tp_name = "sys_enter",					\
+	.prog_name = "test_core_ints"
 
 #define INTS_CASE(name) {						\
 	INTS_CASE_COMMON(name),						\
@@ -208,7 +224,9 @@ static int duration = 0;
 #define FIELD_EXISTS_CASE_COMMON(name)					\
 	.case_name = #name,						\
 	.bpf_obj_file = "test_core_reloc_existence.o",			\
-	.btf_src_file = "btf__core_reloc_" #name ".o"			\
+	.btf_src_file = "btf__core_reloc_" #name ".o",			\
+	.raw_tp_name = "sys_enter",					\
+	.prog_name = "test_core_existence"
 
 #define BITFIELDS_CASE_COMMON(objfile, test_name_prefix,  name)		\
 	.case_name = test_name_prefix#name,				\
@@ -223,6 +241,8 @@ static int duration = 0;
 	.output = STRUCT_TO_CHAR_PTR(core_reloc_bitfields_output)	\
 		__VA_ARGS__,						\
 	.output_len = sizeof(struct core_reloc_bitfields_output),	\
+	.raw_tp_name = "sys_enter",					\
+	.prog_name = "test_core_bitfields",				\
 }, {									\
 	BITFIELDS_CASE_COMMON("test_core_reloc_bitfields_direct.o",	\
 			      "direct:", name),				\
@@ -231,7 +251,7 @@ static int duration = 0;
 	.output = STRUCT_TO_CHAR_PTR(core_reloc_bitfields_output)	\
 		__VA_ARGS__,						\
 	.output_len = sizeof(struct core_reloc_bitfields_output),	\
-	.prog_sec_name = "tp_btf/sys_enter",				\
+	.prog_name = "test_core_bitfields_direct",			\
 }
 
 
@@ -239,28 +259,42 @@ static int duration = 0;
 	BITFIELDS_CASE_COMMON("test_core_reloc_bitfields_probed.o",	\
 			      "probed:", name),				\
 	.fails = true,							\
+	.run_btfgen_fails = true,							\
+	.raw_tp_name = "sys_enter",					\
+	.prog_name = "test_core_bitfields",				\
 }, {									\
 	BITFIELDS_CASE_COMMON("test_core_reloc_bitfields_direct.o",	\
 			      "direct:", name),				\
-	.prog_sec_name = "tp_btf/sys_enter",				\
 	.fails = true,							\
+	.run_btfgen_fails = true,							\
+	.prog_name = "test_core_bitfields_direct",			\
 }
 
 #define SIZE_CASE_COMMON(name)						\
 	.case_name = #name,						\
 	.bpf_obj_file = "test_core_reloc_size.o",			\
-	.btf_src_file = "btf__core_reloc_" #name ".o"
+	.btf_src_file = "btf__core_reloc_" #name ".o",			\
+	.raw_tp_name = "sys_enter",					\
+	.prog_name = "test_core_size"
 
 #define SIZE_OUTPUT_DATA(type)						\
 	STRUCT_TO_CHAR_PTR(core_reloc_size_output) {			\
 		.int_sz = sizeof(((type *)0)->int_field),		\
+		.int_off = offsetof(type, int_field),			\
 		.struct_sz = sizeof(((type *)0)->struct_field),		\
+		.struct_off = offsetof(type, struct_field),		\
 		.union_sz = sizeof(((type *)0)->union_field),		\
+		.union_off = offsetof(type, union_field),		\
 		.arr_sz = sizeof(((type *)0)->arr_field),		\
-		.arr_elem_sz = sizeof(((type *)0)->arr_field[0]),	\
+		.arr_off = offsetof(type, arr_field),			\
+		.arr_elem_sz = sizeof(((type *)0)->arr_field[1]),	\
+		.arr_elem_off = offsetof(type, arr_field[1]),		\
 		.ptr_sz = 8, /* always 8-byte pointer for BPF */	\
+		.ptr_off = offsetof(type, ptr_field),			\
 		.enum_sz = sizeof(((type *)0)->enum_field),		\
+		.enum_off = offsetof(type, enum_field),			\
 		.float_sz = sizeof(((type *)0)->float_field),		\
+		.float_off = offsetof(type, float_field),		\
 	}
 
 #define SIZE_CASE(name) {						\
@@ -273,12 +307,15 @@ static int duration = 0;
 #define SIZE_ERR_CASE(name) {						\
 	SIZE_CASE_COMMON(name),						\
 	.fails = true,							\
+	.run_btfgen_fails = true,							\
 }
 
 #define TYPE_BASED_CASE_COMMON(name)					\
 	.case_name = #name,						\
-	.bpf_obj_file = "test_core_reloc_type_based.o",		\
-	.btf_src_file = "btf__core_reloc_" #name ".o"			\
+	.bpf_obj_file = "test_core_reloc_type_based.o",			\
+	.btf_src_file = "btf__core_reloc_" #name ".o",			\
+	.raw_tp_name = "sys_enter",					\
+	.prog_name = "test_core_type_based"
 
 #define TYPE_BASED_CASE(name, ...) {					\
 	TYPE_BASED_CASE_COMMON(name),					\
@@ -295,7 +332,9 @@ static int duration = 0;
 #define TYPE_ID_CASE_COMMON(name)					\
 	.case_name = #name,						\
 	.bpf_obj_file = "test_core_reloc_type_id.o",			\
-	.btf_src_file = "btf__core_reloc_" #name ".o"			\
+	.btf_src_file = "btf__core_reloc_" #name ".o",			\
+	.raw_tp_name = "sys_enter",					\
+	.prog_name = "test_core_type_id"
 
 #define TYPE_ID_CASE(name, setup_fn) {					\
 	TYPE_ID_CASE_COMMON(name),					\
@@ -312,7 +351,9 @@ static int duration = 0;
 #define ENUMVAL_CASE_COMMON(name)					\
 	.case_name = #name,						\
 	.bpf_obj_file = "test_core_reloc_enumval.o",			\
-	.btf_src_file = "btf__core_reloc_" #name ".o"			\
+	.btf_src_file = "btf__core_reloc_" #name ".o",			\
+	.raw_tp_name = "sys_enter",					\
+	.prog_name = "test_core_enumval"
 
 #define ENUMVAL_CASE(name, ...) {					\
 	ENUMVAL_CASE_COMMON(name),					\
@@ -323,6 +364,25 @@ static int duration = 0;
 
 #define ENUMVAL_ERR_CASE(name) {					\
 	ENUMVAL_CASE_COMMON(name),					\
+	.fails = true,							\
+}
+
+#define ENUM64VAL_CASE_COMMON(name)					\
+	.case_name = #name,						\
+	.bpf_obj_file = "test_core_reloc_enum64val.o",			\
+	.btf_src_file = "btf__core_reloc_" #name ".o",			\
+	.raw_tp_name = "sys_enter",					\
+	.prog_name = "test_core_enum64val"
+
+#define ENUM64VAL_CASE(name, ...) {					\
+	ENUM64VAL_CASE_COMMON(name),					\
+	.output = STRUCT_TO_CHAR_PTR(core_reloc_enum64val_output)	\
+			__VA_ARGS__,					\
+	.output_len = sizeof(struct core_reloc_enum64val_output),	\
+}
+
+#define ENUM64VAL_ERR_CASE(name) {					\
+	ENUM64VAL_CASE_COMMON(name),					\
 	.fails = true,							\
 }
 
@@ -340,9 +400,10 @@ struct core_reloc_test_case {
 	const char *output;
 	int output_len;
 	bool fails;
+	bool run_btfgen_fails;
 	bool needs_testmod;
 	bool relaxed_core_relocs;
-	const char *prog_sec_name;
+	const char *prog_name;
 	const char *raw_tp_name;
 	setup_test_fn setup;
 	trigger_test_fn trigger;
@@ -433,7 +494,7 @@ static int setup_type_id_case_local(struct core_reloc_test_case *test)
 
 static int setup_type_id_case_success(struct core_reloc_test_case *test) {
 	struct core_reloc_type_id_output *exp = (void *)test->output;
-	struct btf *targ_btf = btf__parse(test->btf_src_file, NULL);
+	struct btf *targ_btf;
 	int err;
 
 	err = setup_type_id_case_local(test);
@@ -482,8 +543,7 @@ static int __trigger_module_test_read(const struct core_reloc_test_case *test)
 	return 0;
 }
 
-
-static struct core_reloc_test_case test_cases[] = {
+static const struct core_reloc_test_case test_cases[] = {
 	/* validate we can find kernel image and use its BTF for relocs */
 	{
 		.case_name = "kernel",
@@ -495,13 +555,16 @@ static struct core_reloc_test_case test_cases[] = {
 			.valid = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, },
 			.comm = "test_progs",
 			.comm_len = sizeof("test_progs"),
+			.local_task_struct_matches = true,
 		},
 		.output_len = sizeof(struct core_reloc_kernel_output),
+		.raw_tp_name = "sys_enter",
+		.prog_name = "test_core_kernel",
 	},
 
 	/* validate we can find kernel module BTF types for relocs/attach */
-	MODULES_CASE("module_probed", "raw_tp/bpf_testmod_test_read", "bpf_testmod_test_read"),
-	MODULES_CASE("module_direct", "tp_btf/bpf_testmod_test_read", NULL),
+	MODULES_CASE("module_probed", "test_core_module_probed", "bpf_testmod_test_read"),
+	MODULES_CASE("module_direct", "test_core_module_direct", NULL),
 
 	/* validate BPF program can use multiple flavors to match against
 	 * single target BTF type
@@ -580,6 +643,8 @@ static struct core_reloc_test_case test_cases[] = {
 			.c = 0, /* BUG in clang, should be 3 */
 		},
 		.output_len = sizeof(struct core_reloc_misc_output),
+		.raw_tp_name = "sys_enter",
+		.prog_name = "test_core_misc",
 	},
 
 	/* validate field existence checks */
@@ -681,14 +746,16 @@ static struct core_reloc_test_case test_cases[] = {
 	}),
 	BITFIELDS_ERR_CASE(bitfields___err_too_big_bitfield),
 
-	/* size relocation checks */
+	/* field size and offset relocation checks */
 	SIZE_CASE(size),
 	SIZE_CASE(size___diff_sz),
+	SIZE_CASE(size___diff_offs),
 	SIZE_ERR_CASE(size___err_ambiguous),
 
-	/* validate type existence and size relocations */
+	/* validate type existence, match, and size relocations */
 	TYPE_BASED_CASE(type_based, {
 		.struct_exists = 1,
+		.complex_struct_exists = 1,
 		.union_exists = 1,
 		.enum_exists = 1,
 		.typedef_named_struct_exists = 1,
@@ -697,8 +764,24 @@ static struct core_reloc_test_case test_cases[] = {
 		.typedef_int_exists = 1,
 		.typedef_enum_exists = 1,
 		.typedef_void_ptr_exists = 1,
+		.typedef_restrict_ptr_exists = 1,
 		.typedef_func_proto_exists = 1,
 		.typedef_arr_exists = 1,
+
+		.struct_matches = 1,
+		.complex_struct_matches = 1,
+		.union_matches = 1,
+		.enum_matches = 1,
+		.typedef_named_struct_matches = 1,
+		.typedef_anon_struct_matches = 1,
+		.typedef_struct_ptr_matches = 1,
+		.typedef_int_matches = 1,
+		.typedef_enum_matches = 1,
+		.typedef_void_ptr_matches = 1,
+		.typedef_restrict_ptr_matches = 1,
+		.typedef_func_proto_matches = 1,
+		.typedef_arr_matches = 1,
+
 		.struct_sz = sizeof(struct a_struct),
 		.union_sz = sizeof(union a_union),
 		.enum_sz = sizeof(enum an_enum),
@@ -714,6 +797,45 @@ static struct core_reloc_test_case test_cases[] = {
 	TYPE_BASED_CASE(type_based___all_missing, {
 		/* all zeros */
 	}),
+	TYPE_BASED_CASE(type_based___diff, {
+		.struct_exists = 1,
+		.complex_struct_exists = 1,
+		.union_exists = 1,
+		.enum_exists = 1,
+		.typedef_named_struct_exists = 1,
+		.typedef_anon_struct_exists = 1,
+		.typedef_struct_ptr_exists = 1,
+		.typedef_int_exists = 1,
+		.typedef_enum_exists = 1,
+		.typedef_void_ptr_exists = 1,
+		.typedef_func_proto_exists = 1,
+		.typedef_arr_exists = 1,
+
+		.struct_matches = 1,
+		.complex_struct_matches = 1,
+		.union_matches = 1,
+		.enum_matches = 1,
+		.typedef_named_struct_matches = 1,
+		.typedef_anon_struct_matches = 1,
+		.typedef_struct_ptr_matches = 1,
+		.typedef_int_matches = 0,
+		.typedef_enum_matches = 1,
+		.typedef_void_ptr_matches = 1,
+		.typedef_func_proto_matches = 0,
+		.typedef_arr_matches = 0,
+
+		.struct_sz = sizeof(struct a_struct___diff),
+		.union_sz = sizeof(union a_union___diff),
+		.enum_sz = sizeof(enum an_enum___diff),
+		.typedef_named_struct_sz = sizeof(named_struct_typedef___diff),
+		.typedef_anon_struct_sz = sizeof(anon_struct_typedef___diff),
+		.typedef_struct_ptr_sz = sizeof(struct_ptr_typedef___diff),
+		.typedef_int_sz = sizeof(int_typedef___diff),
+		.typedef_enum_sz = sizeof(enum_typedef___diff),
+		.typedef_void_ptr_sz = sizeof(void_ptr_typedef___diff),
+		.typedef_func_proto_sz = sizeof(func_proto_typedef___diff),
+		.typedef_arr_sz = sizeof(arr_typedef___diff),
+	}),
 	TYPE_BASED_CASE(type_based___diff_sz, {
 		.struct_exists = 1,
 		.union_exists = 1,
@@ -726,6 +848,19 @@ static struct core_reloc_test_case test_cases[] = {
 		.typedef_void_ptr_exists = 1,
 		.typedef_func_proto_exists = 1,
 		.typedef_arr_exists = 1,
+
+		.struct_matches = 0,
+		.union_matches = 0,
+		.enum_matches = 0,
+		.typedef_named_struct_matches = 0,
+		.typedef_anon_struct_matches = 0,
+		.typedef_struct_ptr_matches = 1,
+		.typedef_int_matches = 0,
+		.typedef_enum_matches = 0,
+		.typedef_void_ptr_matches = 1,
+		.typedef_func_proto_matches = 0,
+		.typedef_arr_matches = 0,
+
 		.struct_sz = sizeof(struct a_struct___diff_sz),
 		.union_sz = sizeof(union a_union___diff_sz),
 		.enum_sz = sizeof(enum an_enum___diff_sz),
@@ -740,10 +875,12 @@ static struct core_reloc_test_case test_cases[] = {
 	}),
 	TYPE_BASED_CASE(type_based___incompat, {
 		.enum_exists = 1,
+		.enum_matches = 1,
 		.enum_sz = sizeof(enum an_enum),
 	}),
 	TYPE_BASED_CASE(type_based___fn_wrong_args, {
 		.struct_exists = 1,
+		.struct_matches = 1,
 		.struct_sz = sizeof(struct a_struct),
 	}),
 
@@ -789,6 +926,45 @@ static struct core_reloc_test_case test_cases[] = {
 		.anon_val2 = 0x222,
 	}),
 	ENUMVAL_ERR_CASE(enumval___err_missing),
+
+	/* 64bit enumerator value existence and value relocations */
+	ENUM64VAL_CASE(enum64val, {
+		.unsigned_val1_exists = true,
+		.unsigned_val2_exists = true,
+		.unsigned_val3_exists = true,
+		.signed_val1_exists = true,
+		.signed_val2_exists = true,
+		.signed_val3_exists = true,
+		.unsigned_val1 = 0x1ffffffffULL,
+		.unsigned_val2 = 0x2,
+		.signed_val1 = 0x1ffffffffLL,
+		.signed_val2 = -2,
+	}),
+	ENUM64VAL_CASE(enum64val___diff, {
+		.unsigned_val1_exists = true,
+		.unsigned_val2_exists = true,
+		.unsigned_val3_exists = true,
+		.signed_val1_exists = true,
+		.signed_val2_exists = true,
+		.signed_val3_exists = true,
+		.unsigned_val1 = 0x101ffffffffULL,
+		.unsigned_val2 = 0x202ffffffffULL,
+		.signed_val1 = -101,
+		.signed_val2 = -202,
+	}),
+	ENUM64VAL_CASE(enum64val___val3_missing, {
+		.unsigned_val1_exists = true,
+		.unsigned_val2_exists = true,
+		.unsigned_val3_exists = false,
+		.signed_val1_exists = true,
+		.signed_val2_exists = true,
+		.signed_val3_exists = false,
+		.unsigned_val1 = 0x111ffffffffULL,
+		.unsigned_val2 = 0x222,
+		.signed_val1 = 0x111ffffffffLL,
+		.signed_val2 = -222,
+	}),
+	ENUM64VAL_ERR_CASE(enum64val___err_missing),
 };
 
 struct data {
@@ -804,13 +980,27 @@ static size_t roundup_page(size_t sz)
 	return (sz + page_size - 1) / page_size * page_size;
 }
 
-void test_core_reloc(void)
+static int run_btfgen(const char *src_btf, const char *dst_btf, const char *objpath)
+{
+	char command[4096];
+	int n;
+
+	n = snprintf(command, sizeof(command),
+		     "./bpftool gen min_core_btf %s %s %s",
+		     src_btf, dst_btf, objpath);
+	if (n < 0 || n >= sizeof(command))
+		return -1;
+
+	return system(command);
+}
+
+static void run_core_reloc_tests(bool use_btfgen)
 {
 	const size_t mmap_sz = roundup_page(sizeof(struct data));
 	DECLARE_LIBBPF_OPTS(bpf_object_open_opts, open_opts);
-	struct core_reloc_test_case *test_case;
+	struct core_reloc_test_case *test_case, test_case_copy;
 	const char *tp_name, *probe_name;
-	int err, i, equal;
+	int err, i, equal, fd;
 	struct bpf_link *link = NULL;
 	struct bpf_map *data_map;
 	struct bpf_program *prog;
@@ -822,13 +1012,37 @@ void test_core_reloc(void)
 	my_pid_tgid = getpid() | ((uint64_t)syscall(SYS_gettid) << 32);
 
 	for (i = 0; i < ARRAY_SIZE(test_cases); i++) {
-		test_case = &test_cases[i];
+		char btf_file[] = "/tmp/core_reloc.btf.XXXXXX";
+
+		test_case_copy = test_cases[i];
+		test_case = &test_case_copy;
+
 		if (!test__start_subtest(test_case->case_name))
 			continue;
 
 		if (test_case->needs_testmod && !env.has_testmod) {
 			test__skip();
 			continue;
+		}
+
+		/* generate a "minimal" BTF file and use it as source */
+		if (use_btfgen) {
+
+			if (!test_case->btf_src_file || test_case->run_btfgen_fails) {
+				test__skip();
+				continue;
+			}
+
+			fd = mkstemp(btf_file);
+			if (!ASSERT_GE(fd, 0, "btf_tmp"))
+				continue;
+			close(fd); /* we only need the path */
+			err = run_btfgen(test_case->btf_src_file, btf_file,
+					 test_case->bpf_obj_file);
+			if (!ASSERT_OK(err, "run_btfgen"))
+				continue;
+
+			test_case->btf_src_file = btf_file;
 		}
 
 		if (test_case->setup) {
@@ -840,7 +1054,7 @@ void test_core_reloc(void)
 		if (test_case->btf_src_file) {
 			err = access(test_case->btf_src_file, R_OK);
 			if (!ASSERT_OK(err, "btf_src_file"))
-				goto cleanup;
+				continue;
 		}
 
 		open_opts.btf_custom_path = test_case->btf_src_file;
@@ -848,14 +1062,9 @@ void test_core_reloc(void)
 		if (!ASSERT_OK_PTR(obj, "obj_open"))
 			goto cleanup;
 
-		probe_name = "raw_tracepoint/sys_enter";
-		tp_name = "sys_enter";
-		if (test_case->prog_sec_name) {
-			probe_name = test_case->prog_sec_name;
-			tp_name = test_case->raw_tp_name; /* NULL for tp_btf */
-		}
-
-		prog = bpf_object__find_program_by_title(obj, probe_name);
+		probe_name = test_case->prog_name;
+		tp_name = test_case->raw_tp_name; /* NULL for tp_btf */
+		prog = bpf_object__find_program_by_name(obj, probe_name);
 		if (CHECK(!prog, "find_probe",
 			  "prog '%s' not found\n", probe_name))
 			goto cleanup;
@@ -881,7 +1090,8 @@ void test_core_reloc(void)
 		data = mmap_data;
 
 		memset(mmap_data, 0, sizeof(*data));
-		memcpy(data->in, test_case->input, test_case->input_len);
+		if (test_case->input_len)
+			memcpy(data->in, test_case->input, test_case->input_len);
 		data->my_pid_tgid = my_pid_tgid;
 
 		link = bpf_program__attach_raw_tracepoint(prog, tp_name);
@@ -926,8 +1136,20 @@ cleanup:
 			CHECK_FAIL(munmap(mmap_data, mmap_sz));
 			mmap_data = NULL;
 		}
+		if (use_btfgen)
+			remove(test_case->btf_src_file);
 		bpf_link__destroy(link);
 		link = NULL;
 		bpf_object__close(obj);
 	}
+}
+
+void test_core_reloc(void)
+{
+	run_core_reloc_tests(false);
+}
+
+void test_core_reloc_btfgen(void)
+{
+	run_core_reloc_tests(true);
 }

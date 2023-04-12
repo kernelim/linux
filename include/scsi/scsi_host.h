@@ -18,7 +18,6 @@ struct completion;
 struct module;
 struct scsi_cmnd;
 struct scsi_device;
-struct scsi_host_cmd_pool;
 struct scsi_target;
 struct Scsi_Host;
 struct scsi_transport_template;
@@ -279,7 +278,7 @@ struct scsi_host_template {
 	 *
 	 * Status: OPTIONAL
 	 */
-	int (* map_queues)(struct Scsi_Host *shost);
+	void (* map_queues)(struct Scsi_Host *shost);
 
 	/*
 	 * SCSI interface of blk_poll - poll for IO completions.
@@ -500,7 +499,7 @@ struct scsi_host_template {
 	 */
 	u64 vendor_id;
 
-	struct scsi_host_cmd_pool *cmd_pool;
+	RH_KABI_DEPRECATE(struct scsi_host_cmd_pool *, cmd_pool)
 
 	/* Delay for runtime autosuspend */
 	int rpm_autosuspend_delay;
@@ -548,6 +547,12 @@ enum scsi_host_state {
 	SHOST_RECOVERY,
 	SHOST_CANCEL_RECOVERY,
 	SHOST_DEL_RECOVERY,
+};
+
+struct Scsi_Host_Aux {
+	struct Scsi_Host *host;
+	struct kref             tagset_refcnt;
+	struct completion       tagset_freed;
 };
 
 struct Scsi_Host {
@@ -722,13 +727,14 @@ struct Scsi_Host {
 	 */
 	struct device *dma_dev;
 
+	RH_KABI_USE(1, struct Scsi_Host_Aux *aux)
+
 	/* FOR RH USE ONLY
 	 *
 	 * The following padding has been inserted before ABI freeze to
 	 * allow extending the structure while preserving ABI.
 	 */
 
-	RH_KABI_RESERVE(1)
 	RH_KABI_RESERVE(2)
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
@@ -820,7 +826,7 @@ extern int scsi_host_block(struct Scsi_Host *shost);
 extern int scsi_host_unblock(struct Scsi_Host *shost, int new_state);
 
 void scsi_host_busy_iter(struct Scsi_Host *,
-			 bool (*fn)(struct scsi_cmnd *, void *, bool), void *priv);
+			 bool (*fn)(struct scsi_cmnd *, void *), void *priv);
 
 struct class_container;
 

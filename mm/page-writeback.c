@@ -324,18 +324,6 @@ static unsigned long highmem_dirtyable_memory(unsigned long total)
 	}
 
 	/*
-	 * Unreclaimable memory (kernel memory or anonymous memory
-	 * without swap) can bring down the dirtyable pages below
-	 * the zone's dirty balance reserve and the above calculation
-	 * will underflow.  However we still want to add in nodes
-	 * which are below threshold (negative values) to get a more
-	 * accurate calculation but make sure that the total never
-	 * underflows.
-	 */
-	if ((long)x < 0)
-		x = 0;
-
-	/*
 	 * Make sure that the number of highmem pages is never larger
 	 * than the number of the total dirtyable memory. This can only
 	 * occur in very strange VM situations but we want to make sure
@@ -2366,8 +2354,15 @@ int do_writepages(struct address_space *mapping, struct writeback_control *wbc)
 			ret = generic_writepages(mapping, wbc);
 		if ((ret != -ENOMEM) || (wbc->sync_mode != WB_SYNC_ALL))
 			break;
-		cond_resched();
-		congestion_wait(BLK_RW_ASYNC, HZ/50);
+
+		/*
+		 * Lacking an allocation context or the locality or writeback
+		 * state of any of the inode's pages, throttle based on
+		 * writeback activity on the local node. It's as good a
+		 * guess as any.
+		 */
+		reclaim_throttle(NODE_DATA(numa_node_id()),
+			VMSCAN_THROTTLE_WRITEBACK);
 	}
 	/*
 	 * Usually few pages are written by now from those we've just submitted
@@ -2423,13 +2418,13 @@ EXPORT_SYMBOL(folio_write_one);
 /*
  * For address_spaces which do not use buffers nor write back.
  */
-int __set_page_dirty_no_writeback(struct page *page)
+bool noop_dirty_folio(struct address_space *mapping, struct folio *folio)
 {
-	if (!PageDirty(page))
-		return !TestSetPageDirty(page);
-	return 0;
+	if (!folio_test_dirty(folio))
+		return !folio_test_set_dirty(folio);
+	return false;
 }
-EXPORT_SYMBOL(__set_page_dirty_no_writeback);
+EXPORT_SYMBOL(noop_dirty_folio);
 
 /*
  * Helper function for set_page_dirty family.
@@ -2521,7 +2516,7 @@ void __folio_mark_dirty(struct folio *folio, struct address_space *mapping,
  * This is also sometimes used by filesystems which use buffer_heads when
  * a single buffer is being dirtied: we want to set the folio dirty in
  * that case, but not all the buffers.  This is a "bottom-up" dirtying,
- * whereas __set_page_dirty_buffers() is a "top-down" dirtying.
+ * whereas block_dirty_folio() is a "top-down" dirtying.
  *
  * The caller must ensure this doesn't race with truncation.  Most will
  * simply hold the folio lock, but e.g. zap_pte_range() calls with the
@@ -2632,15 +2627,10 @@ bool folio_mark_dirty(struct folio *folio)
 		 */
 		if (folio_test_reclaim(folio))
 			folio_clear_reclaim(folio);
-		if (mapping->a_ops->dirty_folio)
-			return mapping->a_ops->dirty_folio(mapping, folio);
-		return mapping->a_ops->set_page_dirty(&folio->page);
+		return mapping->a_ops->dirty_folio(mapping, folio);
 	}
-	if (!folio_test_dirty(folio)) {
-		if (!folio_test_set_dirty(folio))
-			return true;
-	}
-	return false;
+
+	return noop_dirty_folio(mapping, folio);
 }
 EXPORT_SYMBOL(folio_mark_dirty);
 
@@ -2784,6 +2774,7 @@ static void wb_inode_writeback_start(struct bdi_writeback *wb)
 
 static void wb_inode_writeback_end(struct bdi_writeback *wb)
 {
+	unsigned long flags;
 	atomic_dec(&wb->writeback_inodes);
 	/*
 	 * Make sure estimate of writeback throughput gets updated after
@@ -2792,7 +2783,10 @@ static void wb_inode_writeback_end(struct bdi_writeback *wb)
 	 * that if multiple inodes end writeback at a similar time, they get
 	 * batched into one bandwidth update.
 	 */
-	queue_delayed_work(bdi_wq, &wb->bw_dwork, BANDWIDTH_INTERVAL);
+	spin_lock_irqsave(&wb->work_lock, flags);
+	if (test_bit(WB_registered, &wb->state))
+		queue_delayed_work(bdi_wq, &wb->bw_dwork, BANDWIDTH_INTERVAL);
+	spin_unlock_irqrestore(&wb->work_lock, flags);
 }
 
 bool __folio_end_writeback(struct folio *folio)

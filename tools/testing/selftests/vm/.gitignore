@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: GPL-2.0-only
 hugepage-mmap
+hugepage-mremap
 hugepage-shm
+hugepage-vmemmap
+hugetlb-madvise
 khugepaged
 map_hugetlb
 map_populate
 thuge-gen
 compaction_test
+migration
 mlock2-tests
 mremap_dontunmap
 mremap_test
@@ -25,6 +29,5 @@ map_fixed_noreplace
 write_to_hugetlbfs
 hmm-tests
 memfd_secret
-local_config.*
 split_huge_page_test
 ksm_tests

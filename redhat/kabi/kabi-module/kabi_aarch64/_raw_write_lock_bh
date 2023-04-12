@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/locking/spinlock.c
-0x51a511eb	_raw_write_lock_bh	vmlinux	EXPORT_SYMBOL
+#2-
+0x51a511eb	_raw_write_lock_bh	vmlinux	EXPORT_SYMBOL	

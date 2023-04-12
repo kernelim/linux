@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/resource.c
-0x77358855	iomem_resource	vmlinux	EXPORT_SYMBOL
+#2-
+0x77358855	iomem_resource	vmlinux	EXPORT_SYMBOL	

@@ -1,4 +1,4 @@
-# variables that can be overrided by ~/.rhel8git.mk or $(TOPDIR)/.rhel8git.mk
+# variables that can be overrided by ~/.rhpkg.mk or $(TOPDIR)/.rhpkg.mk
 #
 
 # Command to invoke rhpkg
@@ -10,21 +10,23 @@ else
 	RHPKG_BIN:=rhpkg
 endif
 # Kerberos username for pkgs.devel.redhat.com
-RHDISTGIT_USER:="$(shell whoami)"
+ifndef RHSELFTESTDATA
+  RHDISTGIT_USER:="$(shell whoami)"
+else
+  RHDISTGIT_USER:="shadowman"
+endif
 # Local dist-git _clean_ clone. To be used when updating dist-git
 #RHDISTGIT_CACHE:=
 # Temporary directory to clone the dist-git repo to. Change this if you
 # have a faster storage
 RHDISTGIT_TMP:=/tmp
-# Branch it should be switched into
-RHDISTGIT_BRANCH:=${RHPRODUCT}
 
 # load configuration, starting with home directory then local
 ifeq ("$(RHDISTGIT_CACHE)", "")
- ifneq ("$(wildcard ${HOME}/.rhel9git.mk)", "")
-  include ${HOME}/.rhel9git.mk
+ ifneq ("$(wildcard ${HOME}/.rhpkg.mk)", "")
+  include ${HOME}/.rhpkg.mk
  endif
- ifneq ("$(wildcard $(TOPDIR)/.rhel9git.mk)", "")
-  include $(TOPDIR)/.rhel9git.mk
+ ifneq ("$(wildcard $(TOPDIR)/.rhpkg.mk)", "")
+  include $(TOPDIR)/.rhpkg.mk
  endif
 endif

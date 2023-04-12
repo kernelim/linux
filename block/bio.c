@@ -239,14 +239,13 @@ static void bio_free(struct bio *bio)
  * when IO has completed, or when the bio is released.
  */
 void bio_init(struct bio *bio, struct block_device *bdev, struct bio_vec *table,
-	      unsigned short max_vecs, unsigned int opf)
+	      unsigned short max_vecs, blk_opf_t opf)
 {
 	bio->bi_next = NULL;
 	bio->bi_bdev = bdev;
 	bio->bi_opf = opf;
 	bio->bi_flags = 0;
 	bio->bi_ioprio = 0;
-	bio->bi_write_hint = 0;
 	bio->bi_status = 0;
 	bio->bi_iter.bi_sector = 0;
 	bio->bi_iter.bi_size = 0;
@@ -293,7 +292,7 @@ EXPORT_SYMBOL(bio_init);
  *   preserved are the ones that are initialized by bio_alloc_bioset(). See
  *   comment in struct bio.
  */
-void bio_reset(struct bio *bio, struct block_device *bdev, unsigned int opf)
+void bio_reset(struct bio *bio, struct block_device *bdev, blk_opf_t opf)
 {
 	bio_uninit(bio);
 	memset(bio, 0, BIO_RESET_BYTES);
@@ -342,7 +341,7 @@ void bio_chain(struct bio *bio, struct bio *parent)
 EXPORT_SYMBOL(bio_chain);
 
 struct bio *blk_next_bio(struct bio *bio, struct block_device *bdev,
-		unsigned int nr_pages, unsigned int opf, gfp_t gfp)
+		unsigned int nr_pages, blk_opf_t opf, gfp_t gfp)
 {
 	struct bio *new = bio_alloc(bdev, nr_pages, opf, gfp);
 
@@ -410,7 +409,7 @@ static void punt_bios_to_rescuer(struct bio_set *bs)
 }
 
 static struct bio *bio_alloc_percpu_cache(struct block_device *bdev,
-		unsigned short nr_vecs, unsigned int opf, gfp_t gfp,
+		unsigned short nr_vecs, blk_opf_t opf, gfp_t gfp,
 		struct bio_set *bs)
 {
 	struct bio_alloc_cache *cache;
@@ -469,7 +468,7 @@ static struct bio *bio_alloc_percpu_cache(struct block_device *bdev,
  * Returns: Pointer to new bio on success, NULL on failure.
  */
 struct bio *bio_alloc_bioset(struct block_device *bdev, unsigned short nr_vecs,
-			     unsigned int opf, gfp_t gfp_mask,
+			     blk_opf_t opf, gfp_t gfp_mask,
 			     struct bio_set *bs)
 {
 	gfp_t saved_gfp = gfp_mask;
@@ -568,7 +567,7 @@ EXPORT_SYMBOL(bio_alloc_bioset);
  * be reused by calling bio_uninit() before calling bio_init() again.
  *
  * Note that unlike bio_alloc() or bio_alloc_bioset() allocations from this
- * function are not backed by a mempool can can fail.  Do not use this function
+ * function are not backed by a mempool can fail.  Do not use this function
  * for allocations in the file system I/O path.
  *
  * Returns: Pointer to new bio on success, NULL on failure.
@@ -742,7 +741,7 @@ void bio_put(struct bio *bio)
 			return;
 	}
 
-	if (bio->bi_opf & REQ_ALLOC_CACHE) {
+	if ((bio->bi_opf & REQ_ALLOC_CACHE) && !WARN_ON_ONCE(in_interrupt())) {
 		struct bio_alloc_cache *cache;
 
 		bio_uninit(bio);
@@ -761,10 +760,7 @@ EXPORT_SYMBOL(bio_put);
 static int __bio_clone(struct bio *bio, struct bio *bio_src, gfp_t gfp)
 {
 	bio_set_flag(bio, BIO_CLONED);
-	if (bio_flagged(bio_src, BIO_THROTTLED))
-		bio_set_flag(bio, BIO_THROTTLED);
 	bio->bi_ioprio = bio_src->bi_ioprio;
-	bio->bi_write_hint = bio_src->bi_write_hint;
 	bio->bi_iter = bio_src->bi_iter;
 
 	if (bio->bi_bdev) {
@@ -967,7 +963,7 @@ int bio_add_hw_page(struct request_queue *q, struct bio *bio,
 		 * would create a gap, disallow it.
 		 */
 		bvec = &bio->bi_io_vec[bio->bi_vcnt - 1];
-		if (bvec_gap_to_prev(q, bvec, offset))
+		if (bvec_gap_to_prev(&q->limits, bvec, offset))
 			return 0;
 	}
 
@@ -1035,7 +1031,7 @@ int bio_add_zone_append_page(struct bio *bio, struct page *page,
 	if (WARN_ON_ONCE(bio_op(bio) != REQ_OP_ZONE_APPEND))
 		return 0;
 
-	if (WARN_ON_ONCE(!blk_queue_is_zoned(q)))
+	if (WARN_ON_ONCE(!bdev_is_zoned(bio->bi_bdev)))
 		return 0;
 
 	return bio_add_hw_page(q, bio, page, len, offset,
@@ -1067,9 +1063,6 @@ void __bio_add_page(struct bio *bio, struct page *page,
 
 	bio->bi_iter.bi_size += len;
 	bio->bi_vcnt++;
-
-	if (!bio_flagged(bio, BIO_WORKINGSET) && unlikely(PageWorkingset(page)))
-		bio_set_flag(bio, BIO_WORKINGSET);
 }
 EXPORT_SYMBOL_GPL(__bio_add_page);
 
@@ -1153,12 +1146,33 @@ void bio_iov_bvec_set(struct bio *bio, struct iov_iter *iter)
 	bio_set_flag(bio, BIO_CLONED);
 }
 
-static void bio_put_pages(struct page **pages, size_t size, size_t off)
+static int bio_iov_add_page(struct bio *bio, struct page *page,
+		unsigned int len, unsigned int offset)
 {
-	size_t i, nr = DIV_ROUND_UP(size + (off & ~PAGE_MASK), PAGE_SIZE);
+	bool same_page = false;
 
-	for (i = 0; i < nr; i++)
-		put_page(pages[i]);
+	if (!__bio_try_merge_page(bio, page, len, offset, &same_page)) {
+		__bio_add_page(bio, page, len, offset);
+		return 0;
+	}
+
+	if (same_page)
+		put_page(page);
+	return 0;
+}
+
+static int bio_iov_add_zone_append_page(struct bio *bio, struct page *page,
+		unsigned int len, unsigned int offset)
+{
+	struct request_queue *q = bdev_get_queue(bio->bi_bdev);
+	bool same_page = false;
+
+	if (bio_add_hw_page(q, bio, page, len, offset,
+			queue_max_zone_append_sectors(q), &same_page) != len)
+		return -EINVAL;
+	if (same_page)
+		put_page(page);
+	return 0;
 }
 
 #define PAGE_PTRS_PER_BVEC     (sizeof(struct bio_vec) / sizeof(struct page *))
@@ -1179,60 +1193,10 @@ static int __bio_iov_iter_get_pages(struct bio *bio, struct iov_iter *iter)
 	unsigned short entries_left = bio->bi_max_vecs - bio->bi_vcnt;
 	struct bio_vec *bv = bio->bi_io_vec + bio->bi_vcnt;
 	struct page **pages = (struct page **)bv;
-	bool same_page = false;
 	ssize_t size, left;
-	unsigned len, i;
-	size_t offset;
-
-	/*
-	 * Move page array up in the allocated memory for the bio vecs as far as
-	 * possible so that we can start filling biovecs from the beginning
-	 * without overwriting the temporary page array.
-	*/
-	BUILD_BUG_ON(PAGE_PTRS_PER_BVEC < 2);
-	pages += entries_left * (PAGE_PTRS_PER_BVEC - 1);
-
-	size = iov_iter_get_pages(iter, pages, LONG_MAX, nr_pages, &offset);
-	if (unlikely(size <= 0))
-		return size ? size : -EFAULT;
-
-	for (left = size, i = 0; left > 0; left -= len, i++) {
-		struct page *page = pages[i];
-
-		len = min_t(size_t, PAGE_SIZE - offset, left);
-
-		if (__bio_try_merge_page(bio, page, len, offset, &same_page)) {
-			if (same_page)
-				put_page(page);
-		} else {
-			if (WARN_ON_ONCE(bio_full(bio, len))) {
-				bio_put_pages(pages + i, left, offset);
-				return -EINVAL;
-			}
-			__bio_add_page(bio, page, len, offset);
-		}
-		offset = 0;
-	}
-
-	iov_iter_advance(iter, size);
-	return 0;
-}
-
-static int __bio_iov_append_get_pages(struct bio *bio, struct iov_iter *iter)
-{
-	unsigned short nr_pages = bio->bi_max_vecs - bio->bi_vcnt;
-	unsigned short entries_left = bio->bi_max_vecs - bio->bi_vcnt;
-	struct request_queue *q = bdev_get_queue(bio->bi_bdev);
-	unsigned int max_append_sectors = queue_max_zone_append_sectors(q);
-	struct bio_vec *bv = bio->bi_io_vec + bio->bi_vcnt;
-	struct page **pages = (struct page **)bv;
-	ssize_t size, left;
-	unsigned len, i;
+	unsigned len, i = 0;
 	size_t offset;
 	int ret = 0;
-
-	if (WARN_ON_ONCE(!max_append_sectors))
-		return 0;
 
 	/*
 	 * Move page array up in the allocated memory for the bio vecs as far as
@@ -1242,27 +1206,46 @@ static int __bio_iov_append_get_pages(struct bio *bio, struct iov_iter *iter)
 	BUILD_BUG_ON(PAGE_PTRS_PER_BVEC < 2);
 	pages += entries_left * (PAGE_PTRS_PER_BVEC - 1);
 
-	size = iov_iter_get_pages(iter, pages, LONG_MAX, nr_pages, &offset);
-	if (unlikely(size <= 0))
-		return size ? size : -EFAULT;
+	/*
+	 * Each segment in the iov is required to be a block size multiple.
+	 * However, we may not be able to get the entire segment if it spans
+	 * more pages than bi_max_vecs allows, so we have to ALIGN_DOWN the
+	 * result to ensure the bio's total size is correct. The remainder of
+	 * the iov data will be picked up in the next bio iteration.
+	 */
+	size = iov_iter_get_pages(iter, pages, UINT_MAX - bio->bi_iter.bi_size,
+				  nr_pages, &offset);
+	if (size > 0) {
+		nr_pages = DIV_ROUND_UP(offset + size, PAGE_SIZE);
+		size = ALIGN_DOWN(size, bdev_logical_block_size(bio->bi_bdev));
+	} else
+		nr_pages = 0;
+
+	if (unlikely(size <= 0)) {
+		ret = size ? size : -EFAULT;
+		goto out;
+	}
 
 	for (left = size, i = 0; left > 0; left -= len, i++) {
 		struct page *page = pages[i];
-		bool same_page = false;
 
 		len = min_t(size_t, PAGE_SIZE - offset, left);
-		if (bio_add_hw_page(q, bio, page, len, offset,
-				max_append_sectors, &same_page) != len) {
-			bio_put_pages(pages + i, left, offset);
-			ret = -EINVAL;
-			break;
-		}
-		if (same_page)
-			put_page(page);
+		if (bio_op(bio) == REQ_OP_ZONE_APPEND) {
+			ret = bio_iov_add_zone_append_page(bio, page, len,
+					offset);
+			if (ret)
+				break;
+		} else
+			bio_iov_add_page(bio, page, len, offset);
+
 		offset = 0;
 	}
 
 	iov_iter_advance(iter, size - left);
+out:
+	while (i < nr_pages)
+		put_page(pages[i++]);
+
 	return ret;
 }
 
@@ -1285,9 +1268,6 @@ static int __bio_iov_append_get_pages(struct bio *bio, struct iov_iter *iter)
  * fit into the bio, or are requested in @iter, whatever is smaller. If
  * MM encounters an error pinning the requested pages, it stops. Error
  * is returned only if 0 pages could be pinned.
- *
- * It's intended for direct IO, so doesn't do PSI tracking, the caller is
- * responsible for setting BIO_WORKINGSET if necessary.
  */
 int bio_iov_iter_get_pages(struct bio *bio, struct iov_iter *iter)
 {
@@ -1300,14 +1280,9 @@ int bio_iov_iter_get_pages(struct bio *bio, struct iov_iter *iter)
 	}
 
 	do {
-		if (bio_op(bio) == REQ_OP_ZONE_APPEND)
-			ret = __bio_iov_append_get_pages(bio, iter);
-		else
-			ret = __bio_iov_iter_get_pages(bio, iter);
+		ret = __bio_iov_iter_get_pages(bio, iter);
 	} while (!ret && iov_iter_count(iter) && !bio_full(bio, 0));
 
-	/* don't account direct I/O as memory stall */
-	bio_clear_flag(bio, BIO_WORKINGSET);
 	return bio->bi_vcnt ? 0 : ret;
 }
 EXPORT_SYMBOL_GPL(bio_iov_iter_get_pages);
@@ -1766,7 +1741,8 @@ static int __init init_bio(void)
 	cpuhp_setup_state_multi(CPUHP_BIO_DEAD, "block/bio:dead", NULL,
 					bio_cpu_dead);
 
-	if (bioset_init(&fs_bio_set, BIO_POOL_SIZE, 0, BIOSET_NEED_BVECS))
+	if (bioset_init(&fs_bio_set, BIO_POOL_SIZE, 0,
+			BIOSET_NEED_BVECS | BIOSET_PERCPU_CACHE))
 		panic("bio: can't allocate bios\n");
 
 	if (bioset_integrity_create(&fs_bio_set, BIO_POOL_SIZE))

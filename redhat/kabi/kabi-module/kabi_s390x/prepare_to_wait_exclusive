@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/sched/build_utility.c
-0x90abb542	prepare_to_wait_exclusive	vmlinux	EXPORT_SYMBOL
+#2-
+0x90abb542	prepare_to_wait_exclusive	vmlinux	EXPORT_SYMBOL	

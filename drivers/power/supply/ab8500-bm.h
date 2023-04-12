@@ -300,7 +300,6 @@ struct abx500_v_to_cap {
 	int voltage;
 	int capacity;
 };
-
 /* Forward declaration */
 struct abx500_fg;
 

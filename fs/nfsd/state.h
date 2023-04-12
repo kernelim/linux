@@ -57,11 +57,11 @@ typedef struct {
 } stateid_t;
 
 typedef struct {
-	stateid_t		stid;
+	stateid_t		cs_stid;
 #define NFS4_COPY_STID 1
 #define NFS4_COPYNOTIFY_STID 2
-	unsigned char		sc_type;
-	refcount_t		sc_count;
+	unsigned char		cs_type;
+	refcount_t		cs_count;
 } copy_stateid_t;
 
 struct nfsd4_callback {
@@ -174,7 +174,7 @@ static inline struct nfs4_delegation *delegstateid(struct nfs4_stid *s)
 /* Maximum number of slots per session. 160 is useful for long haul TCP */
 #define NFSD_MAX_SLOTS_PER_SESSION     160
 /* Maximum number of operations per session compound */
-#define NFSD_MAX_OPS_PER_COMPOUND	16
+#define NFSD_MAX_OPS_PER_COMPOUND	50
 /* Maximum  session per slot cache size */
 #define NFSD_SLOT_CACHE_SIZE		2048
 /* Maximum number of NFSD_SLOT_CACHE_SIZE slots per session */
@@ -510,16 +510,13 @@ struct nfs4_clnt_odstate {
  * inode can have multiple filehandles associated with it, so there is
  * (potentially) a many to one relationship between this struct and struct
  * inode.
- *
- * These are hashed by filehandle in the file_hashtbl, which is protected by
- * the global state_lock spinlock.
  */
 struct nfs4_file {
 	refcount_t		fi_ref;
 	struct inode *		fi_inode;
 	bool			fi_aliased;
 	spinlock_t		fi_lock;
-	struct hlist_node       fi_hash;	/* hash on fi_fhandle */
+	struct rhlist_head	fi_rlist;
 	struct list_head        fi_stateids;
 	union {
 		struct list_head	fi_delegations;
@@ -568,6 +565,10 @@ struct nfs4_ol_stateid {
 	struct list_head		st_locks;
 	struct nfs4_stateowner		*st_stateowner;
 	struct nfs4_clnt_odstate	*st_clnt_odstate;
+/*
+ * These bitmasks use 3 separate bits for READ, ALLOW, and BOTH; see the
+ * comment above bmap_to_share_mode() for explanation:
+ */
 	unsigned char			st_access_bmap;
 	unsigned char			st_deny_bmap;
 	struct nfs4_ol_stateid		*st_openstp;
@@ -629,6 +630,7 @@ struct nfsd4_blocked_lock {
 	struct file_lock	nbl_lock;
 	struct knfsd_fh		nbl_fh;
 	struct nfsd4_callback	nbl_cb;
+	struct kref		nbl_kref;
 };
 
 struct nfsd4_compound_state;
@@ -672,9 +674,6 @@ extern struct nfs4_client_reclaim *nfs4_client_to_reclaim(struct xdr_netobj name
 extern bool nfs4_has_reclaimed_state(struct xdr_netobj name, struct nfsd_net *nn);
 
 void put_nfs4_file(struct nfs4_file *fi);
-extern void nfs4_put_copy(struct nfsd4_copy *copy);
-extern struct nfsd4_copy *
-find_async_copy(struct nfs4_client *clp, stateid_t *staetid);
 extern void nfs4_put_cpntf_state(struct nfsd_net *nn,
 				 struct nfs4_cpntf_state *cps);
 extern __be32 manage_cpntf_state(struct nfsd_net *nn, stateid_t *st,

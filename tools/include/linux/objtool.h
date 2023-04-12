@@ -40,7 +40,9 @@ struct unwind_hint {
 #define UNWIND_HINT_TYPE_SAVE		5
 #define UNWIND_HINT_TYPE_RESTORE	6
 
-#ifdef CONFIG_STACK_VALIDATION
+#ifdef CONFIG_OBJTOOL
+
+#include <asm/asm.h>
 
 #ifndef __ASSEMBLY__
 
@@ -62,7 +64,7 @@ struct unwind_hint {
  * It should only be used in special cases where you're 100% sure it won't
  * affect the reliability of frame pointers and kernel stack traces.
  *
- * For more information, see tools/objtool/Documentation/stack-validation.txt.
+ * For more information, see tools/objtool/Documentation/objtool.txt.
  */
 #define STACK_FRAME_NON_STANDARD(func) \
 	static void __used __section(".discard.func_stack_frame_non_standard") \
@@ -83,6 +85,12 @@ struct unwind_hint {
 	"986: \n\t"						\
 	".pushsection .discard.noendbr\n\t"			\
 	_ASM_PTR " 986b\n\t"					\
+	".popsection\n\t"
+
+#define ASM_REACHABLE							\
+	"998:\n\t"							\
+	".pushsection .discard.reachable\n\t"				\
+	".long 998b - .\n\t"						\
 	".popsection\n\t"
 
 #else /* __ASSEMBLY__ */
@@ -133,8 +141,14 @@ struct unwind_hint {
 
 .macro STACK_FRAME_NON_STANDARD func:req
 	.pushsection .discard.func_stack_frame_non_standard, "aw"
-		.long \func - .
+	_ASM_PTR \func
 	.popsection
+.endm
+
+.macro STACK_FRAME_NON_STANDARD_FP func:req
+#ifdef CONFIG_FRAME_POINTER
+	STACK_FRAME_NON_STANDARD \func
+#endif
 .endm
 
 .macro ANNOTATE_NOENDBR
@@ -144,9 +158,16 @@ struct unwind_hint {
 	.popsection
 .endm
 
+.macro REACHABLE
+.Lhere_\@:
+	.pushsection .discard.reachable
+	.long	.Lhere_\@ - .
+	.popsection
+.endm
+
 #endif /* __ASSEMBLY__ */
 
-#else /* !CONFIG_STACK_VALIDATION */
+#else /* !CONFIG_OBJTOOL */
 
 #ifndef __ASSEMBLY__
 
@@ -155,6 +176,7 @@ struct unwind_hint {
 #define STACK_FRAME_NON_STANDARD(func)
 #define STACK_FRAME_NON_STANDARD_FP(func)
 #define ANNOTATE_NOENDBR
+#define ASM_REACHABLE
 #else
 #define ANNOTATE_INTRA_FUNCTION_CALL
 .macro UNWIND_HINT type:req sp_reg=0 sp_offset=0 end=0
@@ -163,8 +185,10 @@ struct unwind_hint {
 .endm
 .macro ANNOTATE_NOENDBR
 .endm
+.macro REACHABLE
+.endm
 #endif
 
-#endif /* CONFIG_STACK_VALIDATION */
+#endif /* CONFIG_OBJTOOL */
 
 #endif /* _LINUX_OBJTOOL_H */

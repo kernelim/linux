@@ -188,7 +188,7 @@ static blk_qc_t xpram_submit_bio(struct bio *bio)
 	unsigned long page_addr;
 	unsigned long bytes;
 
-	blk_queue_split(&bio);
+	bio = bio_split_to_limits(bio);
 
 	if ((bio->bi_iter.bi_sector & 7) != 0 ||
 	    (bio->bi_iter.bi_size & 4095) != 0)
@@ -377,7 +377,7 @@ static int __init xpram_setup_blkdev(void)
 	return 0;
 out:
 	while (i--)
-		blk_cleanup_disk(xpram_disks[i]);
+		put_disk(xpram_disks[i]);
 	return rc;
 }
 
@@ -389,7 +389,7 @@ static void __exit xpram_exit(void)
 	int i;
 	for (i = 0; i < xpram_devs; i++) {
 		del_gendisk(xpram_disks[i]);
-		blk_cleanup_disk(xpram_disks[i]);
+		put_disk(xpram_disks[i]);
 	}
 	unregister_blkdev(XPRAM_MAJOR, XPRAM_NAME);
 }

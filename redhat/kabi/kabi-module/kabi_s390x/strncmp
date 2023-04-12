@@ -1,3 +1,2 @@
-#0-
-#I:0
-0x85abc85f	strncmp	vmlinux	EXPORT_SYMBOL
+#2-
+0x85abc85f	strncmp	vmlinux	EXPORT_SYMBOL	

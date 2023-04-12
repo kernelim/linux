@@ -34,16 +34,6 @@ static inline bool on_stack(struct stack_info *info,
 	return addr >= info->begin && addr + len <= info->end;
 }
 
-static __always_inline unsigned long get_stack_pointer(struct task_struct *task,
-						       struct pt_regs *regs)
-{
-	if (regs)
-		return (unsigned long) kernel_stack_pointer(regs);
-	if (task == current)
-		return current_stack_pointer();
-	return (unsigned long) task->thread.ksp;
-}
-
 /*
  * Stack layout of a C stack frame.
  */
@@ -64,7 +54,7 @@ struct stack_frame {
 #endif
 
 /*
- * Unlike current_stack_pointer() which simply returns current value of %r15
+ * Unlike current_stack_pointer which simply contains the current value of %r15
  * current_frame_address() returns function stack frame address, which matches
  * %r15 upon function invocation. It may differ from %r15 later if function
  * allocates stack for local variables or new stack frame to call other
@@ -73,6 +63,16 @@ struct stack_frame {
 #define current_frame_address()						\
 	((unsigned long)__builtin_frame_address(0) -			\
 	 offsetof(struct stack_frame, back_chain))
+
+static __always_inline unsigned long get_stack_pointer(struct task_struct *task,
+						       struct pt_regs *regs)
+{
+	if (regs)
+		return (unsigned long)kernel_stack_pointer(regs);
+	if (task == current)
+		return current_frame_address();
+	return (unsigned long)task->thread.ksp;
+}
 
 /*
  * To keep this simple mark register 2-6 as being changed (volatile)

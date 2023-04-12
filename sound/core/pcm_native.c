@@ -1432,8 +1432,10 @@ static int snd_pcm_do_start(struct snd_pcm_substream *substream,
 static void snd_pcm_undo_start(struct snd_pcm_substream *substream,
 			       snd_pcm_state_t state)
 {
-	if (substream->runtime->trigger_master == substream)
+	if (substream->runtime->trigger_master == substream) {
 		substream->ops->trigger(substream, SNDRV_PCM_TRIGGER_STOP);
+		substream->runtime->stop_operating = true;
+	}
 }
 
 static void snd_pcm_post_start(struct snd_pcm_substream *substream,
@@ -3412,6 +3414,8 @@ static long snd_pcm_ioctl(struct file *file, unsigned int cmd,
  * The function is provided primarily for OSS layer and USB gadget drivers,
  * and it allows only the limited set of ioctls (hw_params, sw_params,
  * prepare, start, drain, drop, forward).
+ *
+ * Return: zero if successful, or a negative error code
  */
 int snd_pcm_kernel_ioctl(struct snd_pcm_substream *substream,
 			 unsigned int cmd, void *arg)
@@ -3810,6 +3814,8 @@ static const struct vm_operations_struct snd_pcm_vm_ops_data_fault = {
  *
  * This is the default mmap handler for PCM data.  When mmap pcm_ops is NULL,
  * this function is invoked implicitly.
+ *
+ * Return: zero if successful, or a negative error code
  */
 int snd_pcm_lib_default_mmap(struct snd_pcm_substream *substream,
 			     struct vm_area_struct *area)
@@ -3836,6 +3842,8 @@ EXPORT_SYMBOL_GPL(snd_pcm_lib_default_mmap);
  * When your hardware uses the iomapped pages as the hardware buffer and
  * wants to mmap it, pass this function as mmap pcm_ops.  Note that this
  * is supposed to work only on limited architectures.
+ *
+ * Return: zero if successful, or a negative error code
  */
 int snd_pcm_lib_mmap_iomem(struct snd_pcm_substream *substream,
 			   struct vm_area_struct *area)
@@ -3945,7 +3953,7 @@ static int snd_pcm_fasync(int fd, struct file * file, int on)
 	runtime = substream->runtime;
 	if (runtime->status->state == SNDRV_PCM_STATE_DISCONNECTED)
 		return -EBADFD;
-	return fasync_helper(fd, file, on, &runtime->fasync);
+	return snd_fasync_helper(fd, file, on, &runtime->fasync);
 }
 
 /*

@@ -238,7 +238,7 @@ static void rda_uart_change_baudrate(struct rda_uart_port *rda_port,
 
 static void rda_uart_set_termios(struct uart_port *port,
 				 struct ktermios *termios,
-				 struct ktermios *old)
+				 const struct ktermios *old)
 {
 	struct rda_uart_port *rda_port = to_rda_uart_port(port);
 	unsigned long flags;
@@ -573,7 +573,7 @@ static const struct uart_ops rda_uart_ops = {
 
 #ifdef CONFIG_SERIAL_RDA_CONSOLE
 
-static void rda_console_putchar(struct uart_port *port, int ch)
+static void rda_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	if (!port->membase)
 		return;

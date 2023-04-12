@@ -430,7 +430,7 @@ static struct srp_fr_pool *srp_create_fr_pool(struct ib_device *device,
 	spin_lock_init(&pool->lock);
 	INIT_LIST_HEAD(&pool->free_list);
 
-	if (device->attrs.device_cap_flags & IB_DEVICE_SG_GAPS_REG)
+	if (device->attrs.kernel_cap_flags & IBK_SG_GAPS_REG)
 		mr_type = IB_MR_TYPE_SG_GAPS;
 	else
 		mr_type = IB_MR_TYPE_MEM_REG;
@@ -1266,7 +1266,7 @@ static void srp_finish_req(struct srp_rdma_ch *ch, struct srp_request *req,
 	if (scmnd) {
 		srp_free_req(ch, req, scmnd, 0);
 		scmnd->result = result;
-		scmnd->scsi_done(scmnd);
+		scsi_done(scmnd);
 	}
 }
 
@@ -1275,12 +1275,11 @@ struct srp_terminate_context {
 	int scsi_result;
 };
 
-static bool srp_terminate_cmd(struct scsi_cmnd *scmnd, void *context_ptr,
-			      bool reserved)
+static bool srp_terminate_cmd(struct scsi_cmnd *scmnd, void *context_ptr)
 {
 	struct srp_terminate_context *context = context_ptr;
 	struct srp_target_port *target = context->srp_target;
-	u32 tag = blk_mq_unique_tag(scmnd->request);
+	u32 tag = blk_mq_unique_tag(scsi_cmd_to_rq(scmnd));
 	struct srp_rdma_ch *ch = &target->ch[blk_mq_unique_tag_to_hwq(tag)];
 	struct srp_request *req = scsi_cmd_priv(scmnd);
 
@@ -1955,7 +1954,8 @@ static void srp_process_rsp(struct srp_rdma_ch *ch, struct srp_rsp *rsp)
 		if (scmnd) {
 			req = scsi_cmd_priv(scmnd);
 			scmnd = srp_claim_req(ch, req, NULL, scmnd);
-		} else {
+		}
+		if (!scmnd) {
 			shost_printk(KERN_ERR, target->scsi_host,
 				     "Null scmnd for RSP w/tag %#016llx received on ch %td / QP %#x\n",
 				     rsp->tag, ch - target->ch, ch->qp->qp_num);
@@ -1987,7 +1987,7 @@ static void srp_process_rsp(struct srp_rdma_ch *ch, struct srp_rsp *rsp)
 		srp_free_req(ch, req, scmnd,
 			     be32_to_cpu(rsp->req_lim_delta));
 
-		scmnd->scsi_done(scmnd);
+		scsi_done(scmnd);
 	}
 }
 
@@ -2152,6 +2152,7 @@ static void srp_handle_qp_err(struct ib_cq *cq, struct ib_wc *wc,
 
 static int srp_queuecommand(struct Scsi_Host *shost, struct scsi_cmnd *scmnd)
 {
+	struct request *rq = scsi_cmd_to_rq(scmnd);
 	struct srp_target_port *target = host_to_target(shost);
 	struct srp_rdma_ch *ch;
 	struct srp_request *req = scsi_cmd_priv(scmnd);
@@ -2166,8 +2167,8 @@ static int srp_queuecommand(struct Scsi_Host *shost, struct scsi_cmnd *scmnd)
 	if (unlikely(scmnd->result))
 		goto err;
 
-	WARN_ON_ONCE(scmnd->request->tag < 0);
-	tag = blk_mq_unique_tag(scmnd->request);
+	WARN_ON_ONCE(rq->tag < 0);
+	tag = blk_mq_unique_tag(rq);
 	ch = &target->ch[blk_mq_unique_tag_to_hwq(tag)];
 
 	spin_lock_irqsave(&ch->lock, flags);
@@ -2238,7 +2239,7 @@ err_iu:
 
 err:
 	if (scmnd->result) {
-		scmnd->scsi_done(scmnd);
+		scsi_done(scmnd);
 		ret = 0;
 	} else {
 		ret = SCSI_MLQUEUE_HOST_BUSY;
@@ -2781,7 +2782,7 @@ static int srp_send_tsk_mgmt(struct srp_rdma_ch *ch, u64 req_tag, u64 lun,
 static int srp_abort(struct scsi_cmnd *scmnd)
 {
 	struct srp_target_port *target = host_to_target(scmnd->device->host);
-	struct srp_request *req = (struct srp_request *) scmnd->host_scribble;
+	struct srp_request *req = scsi_cmd_priv(scmnd);
 	u32 tag;
 	u16 ch_idx;
 	struct srp_rdma_ch *ch;
@@ -2789,9 +2790,7 @@ static int srp_abort(struct scsi_cmnd *scmnd)
 
 	shost_printk(KERN_ERR, target->scsi_host, "SRP abort called\n");
 
-	if (!req)
-		return SUCCESS;
-	tag = blk_mq_unique_tag(scmnd->request);
+	tag = blk_mq_unique_tag(scsi_cmd_to_rq(scmnd));
 	ch_idx = blk_mq_unique_tag_to_hwq(tag);
 	if (WARN_ON_ONCE(ch_idx >= target->ch_count))
 		return SUCCESS;
@@ -2810,7 +2809,7 @@ static int srp_abort(struct scsi_cmnd *scmnd)
 	if (ret == SUCCESS) {
 		srp_free_req(ch, req, scmnd, 0);
 		scmnd->result = DID_ABORT << 16;
-		scmnd->scsi_done(scmnd);
+		scsi_done(scmnd);
 	}
 
 	return ret;
@@ -3640,7 +3639,7 @@ static ssize_t add_target_store(struct device *dev,
 	target_host->max_cmd_len = sizeof ((struct srp_cmd *) (void *) 0L)->cdb;
 	target_host->max_segment_size = ib_dma_max_seg_size(ibdev);
 
-	if (!(ibdev->attrs.device_cap_flags & IB_DEVICE_SG_GAPS_REG))
+	if (!(ibdev->attrs.kernel_cap_flags & IBK_SG_GAPS_REG))
 		target_host->virt_boundary_mask = ~srp_dev->mr_page_mask;
 
 	target = host_to_target(target_host);
@@ -3696,8 +3695,8 @@ static ssize_t add_target_store(struct device *dev,
 	}
 
 	if (srp_dev->use_fast_reg) {
-		bool gaps_reg = (ibdev->attrs.device_cap_flags &
-				 IB_DEVICE_SG_GAPS_REG);
+		bool gaps_reg = ibdev->attrs.kernel_cap_flags &
+				 IBK_SG_GAPS_REG;
 
 		max_sectors_per_mr = srp_dev->max_pages_per_mr <<
 				  (ilog2(srp_dev->mr_page_size) - 9);

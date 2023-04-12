@@ -243,7 +243,7 @@ static void serial21285_shutdown(struct uart_port *port)
 
 static void
 serial21285_set_termios(struct uart_port *port, struct ktermios *termios,
-			struct ktermios *old)
+			const struct ktermios *old)
 {
 	unsigned long flags;
 	unsigned int baud, quot, h_lcr, b;
@@ -403,7 +403,7 @@ static void serial21285_setup_ports(void)
 }
 
 #ifdef CONFIG_SERIAL_21285_CONSOLE
-static void serial21285_console_putchar(struct uart_port *port, int ch)
+static void serial21285_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	while (*CSR_UARTFLG & 0x20)
 		barrier();

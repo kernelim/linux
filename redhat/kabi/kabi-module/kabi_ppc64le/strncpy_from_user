@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/strncpy_from_user.c
-0x24428be5	strncpy_from_user	vmlinux	EXPORT_SYMBOL
+#2-
+0x24428be5	strncpy_from_user	vmlinux	EXPORT_SYMBOL	

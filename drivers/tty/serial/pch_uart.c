@@ -1355,7 +1355,8 @@ static void pch_uart_shutdown(struct uart_port *port)
  *bits.  Update read_status_mask and ignore_status_mask to indicate
  *the types of events we are interested in receiving.  */
 static void pch_uart_set_termios(struct uart_port *port,
-				 struct ktermios *termios, struct ktermios *old)
+				 struct ktermios *termios,
+				 const struct ktermios *old)
 {
 	int rtn;
 	unsigned int baud, parity, bits, stb;
@@ -1600,7 +1601,7 @@ static const struct uart_ops pch_uart_ops = {
 
 #ifdef CONFIG_SERIAL_PCH_UART_CONSOLE
 
-static void pch_console_putchar(struct uart_port *port, int ch)
+static void pch_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	struct eg20t_port *priv =
 		container_of(port, struct eg20t_port, port);

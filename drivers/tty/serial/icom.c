@@ -1084,9 +1084,8 @@ static void icom_close(struct uart_port *port)
 	kref_put(&ICOM_PORT->adapter->kref, icom_kref_release);
 }
 
-static void icom_set_termios(struct uart_port *port,
-			     struct ktermios *termios,
-			     struct ktermios *old_termios)
+static void icom_set_termios(struct uart_port *port, struct ktermios *termios,
+			     const struct ktermios *old_termios)
 {
 	int baud;
 	unsigned cflag, iflag;

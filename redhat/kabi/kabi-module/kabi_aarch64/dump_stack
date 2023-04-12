@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/dump_stack.c
-0x6b2dc060	dump_stack	vmlinux	EXPORT_SYMBOL
+#2-
+0x6b2dc060	dump_stack	vmlinux	EXPORT_SYMBOL	

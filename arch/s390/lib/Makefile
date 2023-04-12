@@ -16,3 +16,5 @@ obj-$(CONFIG_S390_UNWIND_SELFTEST) += test_unwind.o
 CFLAGS_test_unwind.o += -fno-optimize-sibling-calls
 
 lib-$(CONFIG_FUNCTION_ERROR_INJECTION) += error-inject.o
+
+obj-$(CONFIG_EXPOLINE_EXTERN) += expoline/

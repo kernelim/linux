@@ -30,7 +30,7 @@
 #include <linux/dma-mapping.h>
 
 #include <asm/irq.h>
-#include <linux/platform_data/dma-imx.h>
+#include <linux/dma/imx-dma.h>
 
 #include "serial_mctrl_gpio.h"
 
@@ -1607,7 +1607,7 @@ static void imx_uart_flush_buffer(struct uart_port *port)
 
 static void
 imx_uart_set_termios(struct uart_port *port, struct ktermios *termios,
-		     struct ktermios *old)
+		     const struct ktermios *old)
 {
 	struct imx_port *sport = (struct imx_port *)port;
 	unsigned long flags;
@@ -1955,7 +1955,7 @@ static const struct uart_ops imx_uart_pops = {
 static struct imx_port *imx_uart_ports[UART_NR];
 
 #if IS_ENABLED(CONFIG_SERIAL_IMX_CONSOLE)
-static void imx_uart_console_putchar(struct uart_port *port, int ch)
+static void imx_uart_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	struct imx_port *sport = (struct imx_port *)port;
 

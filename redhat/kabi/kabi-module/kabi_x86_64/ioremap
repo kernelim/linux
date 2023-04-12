@@ -1,3 +1,2 @@
-#0-
-#I:0
-0xde80cd09	ioremap	vmlinux	EXPORT_SYMBOL
+#2-
+0xde80cd09	ioremap	vmlinux	EXPORT_SYMBOL	

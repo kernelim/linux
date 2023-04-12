@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/time/jiffies.c
-0xe798236d	jiffies	vmlinux	EXPORT_SYMBOL
+#2-
+0xe798236d	jiffies	vmlinux	EXPORT_SYMBOL	

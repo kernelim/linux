@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/workqueue.c
-0xf39d6569	cancel_delayed_work_sync	vmlinux	EXPORT_SYMBOL
+#2-
+0xf39d6569	cancel_delayed_work_sync	vmlinux	EXPORT_SYMBOL	

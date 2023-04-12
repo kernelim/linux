@@ -341,7 +341,7 @@ static int check_msix_entries(struct pci_dev *pdev)
 
 	expected = 0;
 	for_each_pci_msi_entry(entry, pdev) {
-		if (entry->msi_attrib.entry_nr != expected) {
+		if (entry->pci.msi_attrib.entry_nr != expected) {
 			pr_debug("rtas_msi: bad MSI-X entries.\n");
 			return -EINVAL;
 		}

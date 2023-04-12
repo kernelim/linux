@@ -4637,7 +4637,6 @@ static const struct alg_test_desc alg_test_descs[] = {
 	}, {
 		.alg = "dh",
 		.test = alg_test_kpp,
-		.fips_allowed = 1,
 		.suite = {
 			.kpp = __VECS(dh_tv_template)
 		}
@@ -4683,7 +4682,6 @@ static const struct alg_test_desc alg_test_descs[] = {
 	}, {
 		/* covered by drbg_nopr_hmac_sha256 test */
 		.alg = "drbg_nopr_hmac_sha384",
-		.fips_allowed = 1,
 		.test = alg_test_null,
 	}, {
 		.alg = "drbg_nopr_hmac_sha512",
@@ -4706,7 +4704,6 @@ static const struct alg_test_desc alg_test_descs[] = {
 	}, {
 		/* covered by drbg_nopr_sha256 test */
 		.alg = "drbg_nopr_sha384",
-		.fips_allowed = 1,
 		.test = alg_test_null,
 	}, {
 		.alg = "drbg_nopr_sha512",
@@ -4742,7 +4739,6 @@ static const struct alg_test_desc alg_test_descs[] = {
 	}, {
 		/* covered by drbg_pr_hmac_sha256 test */
 		.alg = "drbg_pr_hmac_sha384",
-		.fips_allowed = 1,
 		.test = alg_test_null,
 	}, {
 		.alg = "drbg_pr_hmac_sha512",
@@ -4762,7 +4758,6 @@ static const struct alg_test_desc alg_test_descs[] = {
 	}, {
 		/* covered by drbg_pr_sha256 test */
 		.alg = "drbg_pr_sha384",
-		.fips_allowed = 1,
 		.test = alg_test_null,
 	}, {
 		.alg = "drbg_pr_sha512",
@@ -4910,14 +4905,12 @@ static const struct alg_test_desc alg_test_descs[] = {
 	}, {
 		.alg = "ecdh-nist-p256",
 		.test = alg_test_kpp,
-		.fips_allowed = 1,
 		.suite = {
 			.kpp = __VECS(ecdh_p256_tv_template)
 		}
 	}, {
 		.alg = "ecdh-nist-p384",
 		.test = alg_test_kpp,
-		.fips_allowed = 1,
 		.suite = {
 			.kpp = __VECS(ecdh_p384_tv_template)
 		}
@@ -4960,6 +4953,43 @@ static const struct alg_test_desc alg_test_descs[] = {
 			.cipher = __VECS(essiv_aes_cbc_tv_template)
 		}
 	}, {
+#if IS_ENABLED(CONFIG_CRYPTO_DH_RFC7919_GROUPS)
+		.alg = "ffdhe2048(dh)",
+		.test = alg_test_kpp,
+		.fips_allowed = 1,
+		.suite = {
+			.kpp = __VECS(ffdhe2048_dh_tv_template)
+		}
+	}, {
+		.alg = "ffdhe3072(dh)",
+		.test = alg_test_kpp,
+		.fips_allowed = 1,
+		.suite = {
+			.kpp = __VECS(ffdhe3072_dh_tv_template)
+		}
+	}, {
+		.alg = "ffdhe4096(dh)",
+		.test = alg_test_kpp,
+		.fips_allowed = 1,
+		.suite = {
+			.kpp = __VECS(ffdhe4096_dh_tv_template)
+		}
+	}, {
+		.alg = "ffdhe6144(dh)",
+		.test = alg_test_kpp,
+		.fips_allowed = 1,
+		.suite = {
+			.kpp = __VECS(ffdhe6144_dh_tv_template)
+		}
+	}, {
+		.alg = "ffdhe8192(dh)",
+		.test = alg_test_kpp,
+		.fips_allowed = 1,
+		.suite = {
+			.kpp = __VECS(ffdhe8192_dh_tv_template)
+		}
+	}, {
+#endif /* CONFIG_CRYPTO_DH_RFC7919_GROUPS */
 		.alg = "gcm(aes)",
 		.generic_driver = "gcm_base(ctr(aes-generic),ghash-generic)",
 		.test = alg_test_aead,

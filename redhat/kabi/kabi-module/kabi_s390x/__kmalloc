@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:mm/slub.c
-0x1dadd920	__kmalloc	vmlinux	EXPORT_SYMBOL
+#2-
+0x1dadd920	__kmalloc	vmlinux	EXPORT_SYMBOL	

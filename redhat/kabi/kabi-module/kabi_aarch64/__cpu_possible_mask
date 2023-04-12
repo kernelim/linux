@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/cpu.c
-0x6053f4b4	__cpu_possible_mask	vmlinux	EXPORT_SYMBOL
+#2-
+0x6053f4b4	__cpu_possible_mask	vmlinux	EXPORT_SYMBOL	

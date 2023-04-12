@@ -688,7 +688,8 @@ static void cdns_uart_break_ctl(struct uart_port *port, int ctl)
  * @old: Values of the previously saved termios structure
  */
 static void cdns_uart_set_termios(struct uart_port *port,
-				struct ktermios *termios, struct ktermios *old)
+				  struct ktermios *termios,
+				  const struct ktermios *old)
 {
 	u32 cval = 0;
 	unsigned int baud, minbaud, maxbaud;
@@ -1141,7 +1142,7 @@ static struct uart_driver cdns_uart_uart_driver;
  * @port: Handle to the uart port structure
  * @ch: Character to be written
  */
-static void cdns_uart_console_putchar(struct uart_port *port, int ch)
+static void cdns_uart_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	while (readl(port->membase + CDNS_UART_SR) & CDNS_UART_SR_TXFULL)
 		cpu_relax();

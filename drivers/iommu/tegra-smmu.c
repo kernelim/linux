@@ -272,11 +272,6 @@ static void tegra_smmu_free_asid(struct tegra_smmu *smmu, unsigned int id)
 	clear_bit(id, smmu->asids);
 }
 
-static bool tegra_smmu_capable(enum iommu_cap cap)
-{
-	return false;
-}
-
 static struct iommu_domain *tegra_smmu_domain_alloc(unsigned type)
 {
 	struct tegra_smmu_as *as;
@@ -808,8 +803,10 @@ static struct tegra_smmu *tegra_smmu_find(struct device_node *np)
 		return NULL;
 
 	mc = platform_get_drvdata(pdev);
-	if (!mc)
+	if (!mc) {
+		put_device(&pdev->dev);
 		return NULL;
+	}
 
 	return mc->smmu;
 }
@@ -866,8 +863,6 @@ static struct iommu_device *tegra_smmu_probe_device(struct device *dev)
 
 	return &smmu->iommu;
 }
-
-static void tegra_smmu_release_device(struct device *dev) {}
 
 static const struct tegra_smmu_group_soc *
 tegra_smmu_find_group(struct tegra_smmu *smmu, unsigned int swgroup)
@@ -967,10 +962,8 @@ static int tegra_smmu_of_xlate(struct device *dev,
 }
 
 static const struct iommu_ops tegra_smmu_ops = {
-	.capable = tegra_smmu_capable,
 	.domain_alloc = tegra_smmu_domain_alloc,
 	.probe_device = tegra_smmu_probe_device,
-	.release_device = tegra_smmu_release_device,
 	.device_group = tegra_smmu_device_group,
 	.of_xlate = tegra_smmu_of_xlate,
 	.pgsize_bitmap = SZ_4K,
@@ -1081,7 +1074,6 @@ struct tegra_smmu *tegra_smmu_probe(struct device *dev,
 				    struct tegra_mc *mc)
 {
 	struct tegra_smmu *smmu;
-	size_t size;
 	u32 value;
 	int err;
 
@@ -1099,9 +1091,7 @@ struct tegra_smmu *tegra_smmu_probe(struct device *dev,
 	 */
 	mc->smmu = smmu;
 
-	size = BITS_TO_LONGS(soc->num_asids) * sizeof(long);
-
-	smmu->asids = devm_kzalloc(dev, size, GFP_KERNEL);
+	smmu->asids = devm_bitmap_zalloc(dev, soc->num_asids, GFP_KERNEL);
 	if (!smmu->asids)
 		return ERR_PTR(-ENOMEM);
 

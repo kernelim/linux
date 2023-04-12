@@ -246,7 +246,6 @@ static struct abx500_battery_type bat_type_thermistor[] = {
 		.v_to_cap_tbl = cap_tbl_a_thermistor,
 		.n_batres_tbl_elements = ARRAY_SIZE(temp_to_batres_tbl_thermistor),
 		.batres_tbl = temp_to_batres_tbl_thermistor,
-
 	},
 	{
 		.name = POWER_SUPPLY_TECHNOLOGY_LIPO,
@@ -281,8 +280,8 @@ static struct abx500_battery_type bat_type_ext_thermistor[] = {
 	[BATTERY_UNKNOWN] = {
 		/* First element always represent the UNKNOWN battery */
 		.name = POWER_SUPPLY_TECHNOLOGY_UNKNOWN,
-		.resis_high = 0,
-		.resis_low = 0,
+	.resis_high = 0,
+	.resis_low = 0,
 		.battery_resistance = 300,
 		.charge_full_design = 612,
 		.nominal_voltage = 3700,
@@ -297,8 +296,8 @@ static struct abx500_battery_type bat_type_ext_thermistor[] = {
 		.maint_b_cur_lvl = 400,
 		.maint_b_vol_lvl = 4000,
 		.maint_b_chg_timer_h = 200,
-		.low_high_cur_lvl = 300,
-		.low_high_vol_lvl = 4000,
+	.low_high_cur_lvl = 300,
+	.low_high_vol_lvl = 4000,
 		.n_temp_tbl_elements = ARRAY_SIZE(temp_tbl),
 		.r_to_t_tbl = temp_tbl,
 		.n_v_cap_tbl_elements = ARRAY_SIZE(cap_tbl),

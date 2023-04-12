@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/time/timekeeping.c
-0x5e515be6	ktime_get_ts64	vmlinux	EXPORT_SYMBOL_GPL
+#2-
+0x5e515be6	ktime_get_ts64	vmlinux	EXPORT_SYMBOL_GPL	

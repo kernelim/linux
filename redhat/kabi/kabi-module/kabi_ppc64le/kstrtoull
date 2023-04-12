@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/kstrtox.c
-0x5c3c7387	kstrtoull	vmlinux	EXPORT_SYMBOL
+#2-
+0x5c3c7387	kstrtoull	vmlinux	EXPORT_SYMBOL	

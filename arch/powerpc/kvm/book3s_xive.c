@@ -22,7 +22,6 @@
 #include <asm/xive.h>
 #include <asm/xive-regs.h>
 #include <asm/debug.h>
-#include <asm/debugfs.h>
 #include <asm/time.h>
 #include <asm/opal.h>
 
@@ -2332,7 +2331,7 @@ static void xive_debugfs_init(struct kvmppc_xive *xive)
 		return;
 	}
 
-	xive->dentry = debugfs_create_file(name, S_IRUGO, powerpc_debugfs_root,
+	xive->dentry = debugfs_create_file(name, S_IRUGO, arch_debugfs_dir,
 					   xive, &xive_debug_fops);
 
 	pr_debug("%s: created %s\n", __func__, name);

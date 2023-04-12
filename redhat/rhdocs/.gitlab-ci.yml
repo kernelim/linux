@@ -71,31 +71,20 @@ build:
   variables:
     PAGES_BASE_URL: $CI_PAGES_URL
   script:
-    - hugo new site rhdocs
-    - pushd rhdocs
-    - mkdir -p themes/hugo-geekdoc/
+    - mkdir -p themes/hugo-geekdoc/ content
     - wget https://github.com/thegeeklab/hugo-geekdoc/releases/latest/download/hugo-geekdoc.tar.gz
     - tar xfz hugo-geekdoc.tar.gz -C themes/hugo-geekdoc/
 
-    # cleanup and populate our site
-    - mv ../docs content
-
-    # use our own hugo config file
-    - rm config.toml
     - echo $CI_PAGES_URL
     - echo $PAGES_BASE_URL
-    - cp ../hugo_config.yaml config.yaml
+    - ln -s ../docs content
+    - ln -s hugo_config.yaml config.yaml
 
     # fix links with the help of the `ref` shortcode
     - |
       for i in content/docs/*.adoc ; do sed 's/link:\([^.]*\.adoc\)/link:{{< ref \1 >}}/g' -i $i; done
 
-    # finally run hugo
     - hugo --config config.yaml --baseURL $PAGES_BASE_URL
-
-    - popd
-
-    - mv rhdocs/public .
   artifacts:
     paths:
     - public

@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/locking/spinlock.c
-0xe46021ca	_raw_spin_unlock_bh	vmlinux	EXPORT_SYMBOL
+#2-
+0xe46021ca	_raw_spin_unlock_bh	vmlinux	EXPORT_SYMBOL	

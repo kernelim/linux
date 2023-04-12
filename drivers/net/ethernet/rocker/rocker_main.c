@@ -1995,17 +1995,6 @@ static int rocker_port_get_phys_port_name(struct net_device *dev,
 	return err ? -EOPNOTSUPP : 0;
 }
 
-static int rocker_port_change_proto_down(struct net_device *dev,
-					 bool proto_down)
-{
-	struct rocker_port *rocker_port = netdev_priv(dev);
-
-	if (rocker_port->dev->flags & IFF_UP)
-		rocker_port_set_enable(rocker_port, !proto_down);
-	rocker_port->dev->proto_down = proto_down;
-	return 0;
-}
-
 static void rocker_port_neigh_destroy(struct net_device *dev,
 				      struct neighbour *n)
 {
@@ -2037,7 +2026,6 @@ static const struct net_device_ops rocker_port_netdev_ops = {
 	.ndo_set_mac_address		= rocker_port_set_mac_address,
 	.ndo_change_mtu			= rocker_port_change_mtu,
 	.ndo_get_phys_port_name		= rocker_port_get_phys_port_name,
-	.ndo_change_proto_down		= rocker_port_change_proto_down,
 	.ndo_neigh_destroy		= rocker_port_neigh_destroy,
 	.ndo_get_port_parent_id		= rocker_port_get_port_parent_id,
 };
@@ -2583,10 +2571,8 @@ static int rocker_probe_port(struct rocker *rocker, unsigned int port_number)
 	rocker_port_dev_addr_init(rocker_port);
 	dev->netdev_ops = &rocker_port_netdev_ops;
 	dev->ethtool_ops = &rocker_port_ethtool_ops;
-	netif_tx_napi_add(dev, &rocker_port->napi_tx, rocker_port_poll_tx,
-			  NAPI_POLL_WEIGHT);
-	netif_napi_add(dev, &rocker_port->napi_rx, rocker_port_poll_rx,
-		       NAPI_POLL_WEIGHT);
+	netif_napi_add_tx(dev, &rocker_port->napi_tx, rocker_port_poll_tx);
+	netif_napi_add(dev, &rocker_port->napi_rx, rocker_port_poll_rx);
 	rocker_carrier_init(rocker_port);
 
 	dev->features |= NETIF_F_NETNS_LOCAL | NETIF_F_SG;

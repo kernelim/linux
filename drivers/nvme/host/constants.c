@@ -4,10 +4,8 @@
  * Copyright (c) 2022, Oracle and/or its affiliates
  */
 
-#include <linux/blkdev.h>
 #include "nvme.h"
 
-#ifdef CONFIG_NVME_VERBOSE_ERRORS
 static const char * const nvme_ops[] = {
 	[nvme_cmd_flush] = "Flush",
 	[nvme_cmd_write] = "Write",
@@ -92,6 +90,7 @@ static const char * const nvme_statuses[] = {
 	[NVME_SC_NS_WRITE_PROTECTED] = "Namespace is Write Protected",
 	[NVME_SC_CMD_INTERRUPTED] = "Command Interrupted",
 	[NVME_SC_TRANSIENT_TR_ERR] = "Transient Transport Error",
+	[NVME_SC_ADMIN_COMMAND_MEDIA_NOT_READY] = "Admin Command Media Not Ready",
 	[NVME_SC_INVALID_IO_CMD_SET] = "Invalid IO Command Set",
 	[NVME_SC_LBA_RANGE] = "LBA Out of Range",
 	[NVME_SC_CAP_EXCEEDED] = "Capacity Exceeded",
@@ -178,6 +177,7 @@ const unsigned char *nvme_get_opcode_str(u8 opcode)
 		return nvme_ops[opcode];
 	return "Unknown";
 }
+EXPORT_SYMBOL_GPL(nvme_get_opcode_str);
 
 const unsigned char *nvme_get_admin_opcode_str(u8 opcode)
 {
@@ -185,4 +185,3 @@ const unsigned char *nvme_get_admin_opcode_str(u8 opcode)
 		return nvme_admin_ops[opcode];
 	return "Unknown";
 }
-#endif /* CONFIG_NVME_VERBOSE_ERRORS */

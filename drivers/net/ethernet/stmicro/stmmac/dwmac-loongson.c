@@ -109,8 +109,10 @@ static int loongson_dwmac_probe(struct pci_dev *pdev, const struct pci_device_id
 		plat->bus_id = pci_dev_id(pdev);
 
 	phy_mode = device_get_phy_mode(&pdev->dev);
-	if (phy_mode < 0)
+	if (phy_mode < 0) {
 		dev_err(&pdev->dev, "phy_mode not found\n");
+		return phy_mode;
+	}
 
 	plat->phy_interface = phy_mode;
 	plat->interface = PHY_INTERFACE_MODE_GMII;
@@ -203,7 +205,7 @@ static const struct pci_device_id loongson_dwmac_id_table[] = {
 };
 MODULE_DEVICE_TABLE(pci, loongson_dwmac_id_table);
 
-struct pci_driver loongson_dwmac_driver = {
+static struct pci_driver loongson_dwmac_driver = {
 	.name = "dwmac-loongson-pci",
 	.id_table = loongson_dwmac_id_table,
 	.probe = loongson_dwmac_probe,

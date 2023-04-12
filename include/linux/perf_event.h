@@ -60,6 +60,7 @@ struct perf_guest_info_callbacks {
 #include <linux/refcount.h>
 #include <linux/security.h>
 #include <linux/static_call.h>
+#include <linux/lockdep.h>
 #include <asm/local.h>
 
 struct perf_callchain_entry {
@@ -622,6 +623,7 @@ struct swevent_hlist {
 #define PERF_ATTACH_SCHED_CB	0x20
 #define PERF_ATTACH_CHILD	0x40
 
+struct bpf_prog;
 struct perf_cgroup;
 struct perf_buffer;
 
@@ -630,7 +632,23 @@ struct pmu_event_list {
 	struct list_head	list;
 };
 
+/*
+ * event->sibling_list is modified whole holding both ctx->lock and ctx->mutex
+ * as such iteration must hold either lock. However, since ctx->lock is an IRQ
+ * safe lock, and is only held by the CPU doing the modification, having IRQs
+ * disabled is sufficient since it will hold-off the IPIs.
+ */
+#ifdef CONFIG_PROVE_LOCKING
+#define lockdep_assert_event_ctx(event)				\
+	WARN_ON_ONCE(__lockdep_enabled &&			\
+		     (this_cpu_read(hardirqs_enabled) &&	\
+		      lockdep_is_held(&(event)->ctx->mutex) != LOCK_STATE_HELD))
+#else
+#define lockdep_assert_event_ctx(event)
+#endif
+
 #define for_each_sibling_event(sibling, event)			\
+	lockdep_assert_event_ctx(event);			\
 	if ((event)->group_leader == (event))			\
 		list_for_each_entry((sibling), &(event)->sibling_list, sibling_list)
 
@@ -757,6 +775,8 @@ struct perf_event {
 
 	struct pid_namespace		*ns;
 	u64				id;
+
+	atomic64_t			lost_samples;
 
 	u64				(*clock)(void);
 	perf_overflow_handler_t		overflow_handler;
@@ -1060,6 +1080,22 @@ static inline void perf_sample_data_init(struct perf_sample_data *data,
 	data->weight.full = 0;
 	data->data_src.val = PERF_MEM_NA;
 	data->txn = 0;
+}
+
+/*
+ * Clear all bitfields in the perf_branch_entry.
+ * The to and from fields are not cleared because they are
+ * systematically modified by caller.
+ */
+static inline void perf_clear_branch_entry_bitfields(struct perf_branch_entry *br)
+{
+	br->mispred = 0;
+	br->predicted = 0;
+	br->in_tx = 0;
+	br->abort = 0;
+	br->cycles = 0;
+	br->type = 0;
+	br->reserved = 0;
 }
 
 extern void perf_output_sample(struct perf_output_handle *handle,
@@ -1658,5 +1694,11 @@ extern __weak u64 arch_perf_get_page_size(struct mm_struct *mm, unsigned long ad
 typedef int (perf_snapshot_branch_stack_t)(struct perf_branch_entry *entries,
 					   unsigned int cnt);
 DECLARE_STATIC_CALL(perf_snapshot_branch_stack, perf_snapshot_branch_stack_t);
+
+#ifndef PERF_NEEDS_LOPWR_CB
+static inline void perf_lopwr_cb(bool mode)
+{
+}
+#endif
 
 #endif /* _LINUX_PERF_EVENT_H */

@@ -16,6 +16,24 @@
 #include <linux/fs.h>
 #include "dax-private.h"
 
+/**
+ * struct dax_device - anchor object for dax services
+ * @inode: core vfs
+ * @cdev: optional character interface for "device dax"
+ * @host: optional name for lookups where the device path is not available
+ * @private: dax driver private data
+ * @flags: state and boolean properties
+ */
+struct dax_device {
+	struct hlist_node list;
+	struct inode inode;
+	struct cdev cdev;
+	const char *host;
+	void *private;
+	unsigned long flags;
+	const struct dax_operations *ops;
+};
+
 static dev_t dax_devt;
 DEFINE_STATIC_SRCU(dax_srcu);
 static struct vfsmount *dax_mnt;
@@ -38,6 +56,42 @@ void dax_read_unlock(int id)
 	srcu_read_unlock(&dax_srcu, id);
 }
 EXPORT_SYMBOL_GPL(dax_read_unlock);
+
+static int dax_host_hash(const char *host)
+{
+	return hashlen_hash(hashlen_string("DAX", host)) % DAX_HASH_SIZE;
+}
+
+/**
+ * dax_get_by_host() - temporary lookup mechanism for filesystem-dax
+ * @host: alternate name for the device registered by a dax driver
+ */
+static struct dax_device *dax_get_by_host(const char *host)
+{
+	struct dax_device *dax_dev, *found = NULL;
+	int hash, id;
+
+	if (!host)
+		return NULL;
+
+	hash = dax_host_hash(host);
+
+	id = dax_read_lock();
+	spin_lock(&dax_host_lock);
+	hlist_for_each_entry(dax_dev, &dax_host_list[hash], list) {
+		if (!dax_alive(dax_dev)
+				|| strcmp(host, dax_dev->host) != 0)
+			continue;
+
+		if (igrab(&dax_dev->inode))
+			found = dax_dev;
+		break;
+	}
+	spin_unlock(&dax_host_lock);
+	dax_read_unlock(id);
+
+	return found;
+}
 
 #ifdef CONFIG_BLOCK
 #include <linux/blkdev.h>
@@ -64,9 +118,8 @@ struct dax_device *fs_dax_get_by_bdev(struct block_device *bdev)
 	return dax_get_by_host(bdev->bd_disk->disk_name);
 }
 EXPORT_SYMBOL_GPL(fs_dax_get_by_bdev);
-#endif
 
-bool __generic_fsdax_supported(struct dax_device *dax_dev,
+bool generic_fsdax_supported(struct dax_device *dax_dev,
 		struct block_device *bdev, int blocksize, sector_t start,
 		sector_t sectors)
 {
@@ -99,51 +152,27 @@ bool __generic_fsdax_supported(struct dax_device *dax_dev,
 
 	return true;
 }
-EXPORT_SYMBOL_GPL(__generic_fsdax_supported);
+EXPORT_SYMBOL_GPL(generic_fsdax_supported);
 
-/**
- * __bdev_dax_supported() - Check if the device supports dax for filesystem
- * @bdev: block device to check
- * @blocksize: The block size of the device
- *
- * This is a library function for filesystems to check if the block device
- * can be mounted with dax option.
- *
- * Return: true if supported, false if unsupported
- */
-bool __bdev_dax_supported(struct block_device *bdev, int blocksize)
+bool dax_supported(struct dax_device *dax_dev, struct block_device *bdev,
+		int blocksize, sector_t start, sector_t len)
 {
-	struct dax_device *dax_dev;
-	struct request_queue *q;
-	char buf[BDEVNAME_SIZE];
-	bool ret;
+	bool ret = false;
 	int id;
 
-	q = bdev_get_queue(bdev);
-	if (!q || !blk_queue_dax(q)) {
-		pr_debug("%s: error: request queue doesn't support dax\n",
-				bdevname(bdev, buf));
+	if (!dax_dev)
 		return false;
-	}
-
-	dax_dev = dax_get_by_host(bdev->bd_disk->disk_name);
-	if (!dax_dev) {
-		pr_debug("%s: error: device does not support dax\n",
-				bdevname(bdev, buf));
-		return false;
-	}
 
 	id = dax_read_lock();
-	ret = dax_supported(dax_dev, bdev, blocksize, 0,
-			i_size_read(bdev->bd_inode) / 512);
+	if (dax_alive(dax_dev) && dax_dev->ops->dax_supported)
+		ret = dax_dev->ops->dax_supported(dax_dev, bdev, blocksize,
+						  start, len);
 	dax_read_unlock(id);
-
-	put_dax(dax_dev);
-
 	return ret;
 }
-EXPORT_SYMBOL_GPL(__bdev_dax_supported);
-#endif
+EXPORT_SYMBOL_GPL(dax_supported);
+#endif /* CONFIG_FS_DAX */
+#endif /* CONFIG_BLOCK */
 
 enum dax_device_flags {
 	/* !alive + rcu grace period == no new operations / mappings */
@@ -152,24 +181,6 @@ enum dax_device_flags {
 	DAXDEV_WRITE_CACHE,
 	/* flag to check if device supports synchronous flush */
 	DAXDEV_SYNC,
-};
-
-/**
- * struct dax_device - anchor object for dax services
- * @inode: core vfs
- * @cdev: optional character interface for "device dax"
- * @host: optional name for lookups where the device path is not available
- * @private: dax driver private data
- * @flags: state and boolean properties
- */
-struct dax_device {
-	struct hlist_node list;
-	struct inode inode;
-	struct cdev cdev;
-	const char *host;
-	void *private;
-	unsigned long flags;
-	const struct dax_operations *ops;
 };
 
 static ssize_t write_cache_show(struct device *dev,
@@ -269,19 +280,6 @@ long dax_direct_access(struct dax_device *dax_dev, pgoff_t pgoff, long nr_pages,
 }
 EXPORT_SYMBOL_GPL(dax_direct_access);
 
-bool dax_supported(struct dax_device *dax_dev, struct block_device *bdev,
-		int blocksize, sector_t start, sector_t len)
-{
-	if (!dax_dev)
-		return false;
-
-	if (!dax_alive(dax_dev))
-		return false;
-
-	return dax_dev->ops->dax_supported(dax_dev, bdev, blocksize, start, len);
-}
-EXPORT_SYMBOL_GPL(dax_supported);
-
 size_t dax_copy_from_iter(struct dax_device *dax_dev, pgoff_t pgoff, void *addr,
 		size_t bytes, struct iov_iter *i)
 {
@@ -368,11 +366,6 @@ bool dax_alive(struct dax_device *dax_dev)
 	return test_bit(DAXDEV_ALIVE, &dax_dev->flags);
 }
 EXPORT_SYMBOL_GPL(dax_alive);
-
-static int dax_host_hash(const char *host)
-{
-	return hashlen_hash(hashlen_string("DAX", host)) % DAX_HASH_SIZE;
-}
 
 /*
  * Note, rcu is not protecting the liveness of dax_dev, rcu is ensuring
@@ -569,38 +562,6 @@ void put_dax(struct dax_device *dax_dev)
 	iput(&dax_dev->inode);
 }
 EXPORT_SYMBOL_GPL(put_dax);
-
-/**
- * dax_get_by_host() - temporary lookup mechanism for filesystem-dax
- * @host: alternate name for the device registered by a dax driver
- */
-struct dax_device *dax_get_by_host(const char *host)
-{
-	struct dax_device *dax_dev, *found = NULL;
-	int hash, id;
-
-	if (!host)
-		return NULL;
-
-	hash = dax_host_hash(host);
-
-	id = dax_read_lock();
-	spin_lock(&dax_host_lock);
-	hlist_for_each_entry(dax_dev, &dax_host_list[hash], list) {
-		if (!dax_alive(dax_dev)
-				|| strcmp(host, dax_dev->host) != 0)
-			continue;
-
-		if (igrab(&dax_dev->inode))
-			found = dax_dev;
-		break;
-	}
-	spin_unlock(&dax_host_lock);
-	dax_read_unlock(id);
-
-	return found;
-}
-EXPORT_SYMBOL_GPL(dax_get_by_host);
 
 /**
  * inode_dax: convert a public inode into its dax_dev

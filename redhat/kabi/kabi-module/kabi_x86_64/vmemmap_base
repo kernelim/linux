@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/kernel/head64.c
-0x97651e6c	vmemmap_base	vmlinux	EXPORT_SYMBOL
+#2-
+0x97651e6c	vmemmap_base	vmlinux	EXPORT_SYMBOL	

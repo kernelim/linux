@@ -3713,10 +3713,10 @@ static int lan78xx_probe(struct usb_interface *intf,
 
 	/* MTU range: 68 - 9000 */
 	netdev->max_mtu = MAX_SINGLE_PACKET_SIZE;
-	netif_set_gso_max_size(netdev, MAX_SINGLE_PACKET_SIZE - MAX_HEADER);
+	netif_set_tso_max_size(netdev, MAX_SINGLE_PACKET_SIZE - MAX_HEADER);
 
 	period = ep_intr->desc.bInterval;
-	maxp = usb_maxpacket(dev->udev, dev->pipe_intr, 0);
+	maxp = usb_maxpacket(dev->udev, dev->pipe_intr);
 	buf = kmalloc(maxp, GFP_KERNEL);
 	if (buf) {
 		dev->urb_intr = usb_alloc_urb(0, GFP_KERNEL);
@@ -3732,7 +3732,7 @@ static int lan78xx_probe(struct usb_interface *intf,
 		}
 	}
 
-	dev->maxpacket = usb_maxpacket(dev->udev, dev->pipe_out, 1);
+	dev->maxpacket = usb_maxpacket(dev->udev, dev->pipe_out);
 
 	/* driver requires remote-wakeup capability during autosuspend. */
 	intf->needs_remote_wakeup = 1;

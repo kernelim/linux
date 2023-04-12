@@ -3,7 +3,8 @@
 # ARM CPU Idle drivers
 #
 config ARM_CPUIDLE
-	bool "Generic ARM/ARM64 CPU idle Driver"
+	bool "Generic ARM CPU idle Driver"
+	depends on ARM
 	select DT_IDLE_STATES
 	select CPU_IDLE_MULTIPLE_DRIVERS
 	help
@@ -113,6 +114,7 @@ config ARM_QCOM_SPM_CPUIDLE
 	select CPU_IDLE_MULTIPLE_DRIVERS
 	select DT_IDLE_STATES
 	select QCOM_SCM
+	select QCOM_SPM
 	help
 	  Select this to enable cpuidle for Qualcomm processors.
 	  The Subsystem Power Manager (SPM) controls low power modes for the

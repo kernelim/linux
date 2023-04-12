@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/panic.c
-0x3ea1b6e4	__stack_chk_fail	vmlinux	EXPORT_SYMBOL
+#2-
+0x3ea1b6e4	__stack_chk_fail	vmlinux	EXPORT_SYMBOL	

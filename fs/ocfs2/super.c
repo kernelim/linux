@@ -25,7 +25,6 @@
 #include <linux/mount.h>
 #include <linux/seq_file.h>
 #include <linux/quotaops.h>
-#include <linux/cleancache.h>
 #include <linux/signal.h>
 
 #define CREATE_TRACE_POINTS
@@ -1789,7 +1788,7 @@ static int ocfs2_get_sector(struct super_block *sb,
 	if (!buffer_dirty(*bh))
 		clear_buffer_uptodate(*bh);
 	unlock_buffer(*bh);
-	ll_rw_block(REQ_OP_READ, 0, 1, bh);
+	ll_rw_block(REQ_OP_READ, 1, bh);
 	wait_on_buffer(*bh);
 	if (!buffer_uptodate(*bh)) {
 		mlog_errno(-EIO);
@@ -2305,7 +2304,6 @@ static int ocfs2_initialize_super(struct super_block *sb,
 		mlog_errno(status);
 		goto bail;
 	}
-	cleancache_init_shared_fs(sb);
 
 	osb->ocfs2_wq = alloc_ordered_workqueue("ocfs2_wq", WQ_MEM_RECLAIM);
 	if (!osb->ocfs2_wq) {

@@ -427,7 +427,7 @@ static int check_export(struct path *path, int *flags, unsigned char *uuid)
 		return -EINVAL;
 	}
 
-	if (mnt_user_ns(path->mnt) != &init_user_ns) {
+	if (is_idmapped_mnt(path->mnt)) {
 		dprintk("exp_export: export of idmapped mounts not yet supported.\n");
 		return -EINVAL;
 	}
@@ -438,6 +438,12 @@ static int check_export(struct path *path, int *flags, unsigned char *uuid)
 			__func__, inode->i_sb->s_type->name);
 		return -EINVAL;
 	}
+
+	if (!strcmp(inode->i_sb->s_type->name, "nfs") ||
+		!strcmp(inode->i_sb->s_type->name, "nfs4"))
+		pr_warn("NFSD WARNING: Re-exporting NFS is not a supported "
+				"configuration in RHEL.  Unexpected client behavior may result.\n");
+
 	return 0;
 
 }

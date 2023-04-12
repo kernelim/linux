@@ -1,3 +1,2 @@
-#0-
-#I:0
-0xad4aee39	strncpy	vmlinux	EXPORT_SYMBOL
+#2-
+0xad4aee39	strncpy	vmlinux	EXPORT_SYMBOL	

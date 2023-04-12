@@ -977,8 +977,10 @@ static int xennet_get_responses(struct netfront_queue *queue,
 			}
 		}
 		rcu_read_unlock();
-next:
+
 		__skb_queue_tail(list, skb);
+
+next:
 		if (!(rx->flags & XEN_NETRXF_more_data))
 			break;
 
@@ -2067,8 +2069,7 @@ static int xennet_create_queues(struct netfront_info *info,
 			return ret;
 		}
 
-		netif_napi_add(queue->info->netdev, &queue->napi,
-			       xennet_poll, 64);
+		netif_napi_add(queue->info->netdev, &queue->napi, xennet_poll);
 		if (netif_running(info->netdev))
 			napi_enable(&queue->napi);
 	}

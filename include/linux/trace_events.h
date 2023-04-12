@@ -15,6 +15,7 @@ struct array_buffer;
 struct tracer;
 struct dentry;
 struct bpf_prog;
+union bpf_attr;
 
 const char *trace_print_flags_seq(struct trace_seq *p, const char *delim,
 				  unsigned long flags,
@@ -172,6 +173,7 @@ enum trace_flag_type {
 	TRACE_FLAG_SOFTIRQ		= 0x10,
 	TRACE_FLAG_PREEMPT_RESCHED	= 0x20,
 	TRACE_FLAG_NMI			= 0x40,
+	TRACE_FLAG_BH_OFF		= 0x80,
 };
 
 #ifdef CONFIG_TRACE_IRQFLAGS_SUPPORT
@@ -685,6 +687,7 @@ void bpf_put_raw_tracepoint(struct bpf_raw_event_map *btp);
 int bpf_get_perf_event_info(const struct perf_event *event, u32 *prog_id,
 			    u32 *fd_type, const char **buf,
 			    u64 *probe_offset, u64 *probe_addr);
+int bpf_kprobe_multi_link_attach(const union bpf_attr *attr, struct bpf_prog *prog);
 #else
 static inline unsigned int trace_call_bpf(struct trace_event_call *call, void *ctx)
 {
@@ -723,6 +726,11 @@ static inline int bpf_get_perf_event_info(const struct perf_event *event,
 					  u32 *prog_id, u32 *fd_type,
 					  const char **buf, u64 *probe_offset,
 					  u64 *probe_addr)
+{
+	return -EOPNOTSUPP;
+}
+static inline int
+bpf_kprobe_multi_link_attach(const union bpf_attr *attr, struct bpf_prog *prog)
 {
 	return -EOPNOTSUPP;
 }
@@ -847,5 +855,23 @@ perf_trace_buf_submit(void *raw_data, int size, int rctx, u16 type,
 }
 
 #endif
+
+#define TRACE_EVENT_STR_MAX	512
+
+/*
+ * gcc warns that you can not use a va_list in an inlined
+ * function. But lets me make it into a macro :-/
+ */
+#define __trace_event_vstr_len(fmt, va)			\
+({							\
+	va_list __ap;					\
+	int __ret;					\
+							\
+	va_copy(__ap, *(va));				\
+	__ret = vsnprintf(NULL, 0, fmt, __ap) + 1;	\
+	va_end(__ap);					\
+							\
+	min(__ret, TRACE_EVENT_STR_MAX);		\
+})
 
 #endif /* _LINUX_TRACE_EVENT_H */

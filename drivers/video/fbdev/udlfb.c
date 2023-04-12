@@ -326,6 +326,9 @@ static int dlfb_ops_mmap(struct fb_info *info, struct vm_area_struct *vma)
 	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
 	unsigned long page, pos;
 
+	if (info->fbdefio)
+		return fb_deferred_io_mmap(info, vma);
+
 	if (vma->vm_pgoff > (~0UL >> PAGE_SHIFT))
 		return -EINVAL;
 	if (size > info->fix.smem_len)
@@ -781,7 +784,7 @@ static void dlfb_ops_fillrect(struct fb_info *info,
 static void dlfb_dpy_deferred_io(struct fb_info *info,
 				struct list_head *pagelist)
 {
-	struct page *cur;
+	struct fb_deferred_io_pageref *pageref;
 	struct fb_deferred_io *fbdefio = info->fbdefio;
 	struct dlfb_data *dlfb = info->par;
 	struct urb *urb;
@@ -808,7 +811,8 @@ static void dlfb_dpy_deferred_io(struct fb_info *info,
 	cmd = urb->transfer_buffer;
 
 	/* walk the written page list and render each to device */
-	list_for_each_entry(cur, &fbdefio->pagelist, lru) {
+	list_for_each_entry(pageref, &fbdefio->pagelist, list) {
+		struct page *cur = pageref->page;
 
 		if (dlfb_render_hline(dlfb, &urb, (char *) info->fix.smem_start,
 				  &cmd, cur->index << PAGE_SHIFT,
@@ -980,6 +984,7 @@ static int dlfb_ops_open(struct fb_info *info, int user)
 
 		if (fbdefio) {
 			fbdefio->delay = DL_DEFIO_WRITE_DELAY;
+			fbdefio->sort_pagelist = true;
 			fbdefio->deferred_io = dlfb_dpy_deferred_io;
 		}
 

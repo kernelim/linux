@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/groups.c
-0x43d22fb9	groups_alloc	vmlinux	EXPORT_SYMBOL
+#2-
+0x43d22fb9	groups_alloc	vmlinux	EXPORT_SYMBOL	

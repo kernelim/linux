@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:drivers/scsi/scsi_common.c
-0x0334da4e	scsi_command_size_tbl	vmlinux	EXPORT_SYMBOL
+#2-
+0x0334da4e	scsi_command_size_tbl	vmlinux	EXPORT_SYMBOL	

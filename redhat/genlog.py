@@ -15,20 +15,26 @@
 import re
 import sys
 
-def find_bz_in_line(line, prefix):
-    """Return bug number from properly formated Bugzilla: line."""
-    # BZs must begin with '{prefix}: ' and contain a complete BZ URL or id
-    _bugs = set()
+def find_ticket_in_line(line, prefix, tkt_re, tkt_groups):
+    """Return ticket referenced in the given line"""
+    _tkts = set()
     if not line.startswith(f"{prefix}: "):
-        return _bugs
+        return _tkts
+    for match in tkt_re.finditer(line[len(f"{prefix}:"):]):
+        for group in tkt_groups:
+            if match.group(group):
+                tid = match.group(group).strip()
+                _tkts.add(tid)
+    return _tkts
+
+def find_bz_in_line(line, prefix):
     bznum_re = re.compile(r'(?P<bug_ids> \d{4,8})|'
         r'( http(s)?://bugzilla\.redhat\.com/(show_bug\.cgi\?id=)?(?P<url_bugs>\d{4,8}))')
-    for match in bznum_re.finditer(line[len(f"{prefix}:"):]):
-        for group in [ 'bug_ids', 'url_bugs' ]:
-            if match.group(group):
-                bid = match.group(group).strip()
-                _bugs.add(bid)
-    return _bugs
+    return find_ticket_in_line(line, prefix, bznum_re, [ 'bug_ids', 'url_bugs' ])
+
+def find_ji_in_line(line, prefix):
+    ji_re = re.compile(r' https://issues\.redhat\.com/(?:browse|projects/RHEL/issues)/(?P<jira_id>RHEL-\d{1,8})\s*$')
+    return find_ticket_in_line(line, prefix, ji_re, [ 'jira_id' ])
 
 def find_cve_in_line(line):
     """Return cve number from properly formated CVE: line."""
@@ -56,6 +62,7 @@ def parse_commit(commit):
     cve_set = set()
     bug_set = set()
     zbug_set = set()
+    jira_set = set()
     for line in lines[1:]:
         # Metadata in git notes has priority over commit log
         # If we found any BZ/ZBZ/CVE in git notes, we ignore commit log
@@ -70,41 +77,49 @@ def parse_commit(commit):
         # Grab CVE tags if they are present
         cve_set.update(find_cve_in_line(line))
 
-    return (log_entry, sorted(cve_set), sorted(bug_set), sorted(zbug_set))
+        # Process Jira issues
+        jira_set.update(find_ji_in_line(line, 'JIRA'))
+
+    return (log_entry, cve_set, bug_set, zbug_set, jira_set)
 
 
 if __name__ == "__main__":
-    all_bzs = []
-    all_zbzs = []
+    all_bzs = set()
+    all_zbzs = set()
+    all_jiras = set()
     commits = sys.stdin.read().split('\0')
     for c in commits:
         if not c:
             continue
-        log_item, cves, bugs, zbugs = parse_commit(c)
+        log_item, cves, bugs, zbugs, jiras = parse_commit(c)
         entry = f"{log_item}"
-        if bugs or zbugs:
+        if bugs or zbugs or jiras:
             entry += " ["
             if zbugs:
-                entry += " ".join(zbugs)
-                all_zbzs.extend(zbugs)
-            if bugs and zbugs:
-                entry += " "
+                entry += " ".join(sorted(zbugs))
+                all_zbzs.update(zbugs)
             if bugs:
-                entry += " ".join(bugs)
-                all_bzs.extend(bugs)
+                entry += " " if zbugs else ""
+                entry += " ".join(sorted(bugs))
+                all_bzs.update(bugs)
+            if jiras:
+                entry += " " if bugs or zbugs else ""
+                entry += " ".join(sorted(jiras))
+                all_jiras.update(jiras)
             entry += "]"
         if cves:
-            entry += " {" + " ".join(cves) + "}"
+            entry += " {" + " ".join(sorted(cves)) + "}"
         print(entry)
 
-    resolved_bzs = []
-    for bzid in (all_zbzs if all_zbzs else all_bzs):
-        if not bzid in resolved_bzs:
-            resolved_bzs.append(bzid)
+    resolved_bzs = all_zbzs if all_zbzs else all_bzs
     print("Resolves: ", end="")
-    for i, bzid in enumerate(resolved_bzs):
+    for i, bzid in enumerate(sorted(resolved_bzs)):
         if i:
             print(", ", end="")
         print(f"rhbz#{bzid}", end="")
+    for j, jid in enumerate(sorted(all_jiras)):
+        if j or resolved_bzs:
+           print(", ", end="")
+        print(f"{jid}", end="")
     print("\n")
 

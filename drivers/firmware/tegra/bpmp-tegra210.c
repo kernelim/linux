@@ -137,8 +137,8 @@ static int tegra210_bpmp_channel_init(struct tegra_bpmp_channel *channel,
 				      unsigned int index)
 {
 	struct tegra210_bpmp *priv = bpmp->priv;
+	void __iomem *p;
 	u32 address;
-	void *p;
 
 	/* Retrieve channel base address from BPMP */
 	writel(index << TRIGGER_ID_SHIFT | TRIGGER_CMD_GET,
@@ -149,8 +149,9 @@ static int tegra210_bpmp_channel_init(struct tegra_bpmp_channel *channel,
 	if (!p)
 		return -ENOMEM;
 
-	channel->ib = p;
-	channel->ob = p;
+	iosys_map_set_vaddr_iomem(&channel->ib, p);
+	iosys_map_set_vaddr_iomem(&channel->ob, p);
+
 	channel->index = index;
 	init_completion(&channel->completion);
 	channel->bpmp = bpmp;
@@ -162,7 +163,6 @@ static int tegra210_bpmp_init(struct tegra_bpmp *bpmp)
 {
 	struct platform_device *pdev = to_platform_device(bpmp->dev);
 	struct tegra210_bpmp *priv;
-	struct resource *res;
 	unsigned int i;
 	int err;
 
@@ -172,13 +172,11 @@ static int tegra210_bpmp_init(struct tegra_bpmp *bpmp)
 
 	bpmp->priv = priv;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->atomics = devm_ioremap_resource(&pdev->dev, res);
+	priv->atomics = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(priv->atomics))
 		return PTR_ERR(priv->atomics);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-	priv->arb_sema = devm_ioremap_resource(&pdev->dev, res);
+	priv->arb_sema = devm_platform_ioremap_resource(pdev, 1);
 	if (IS_ERR(priv->arb_sema))
 		return PTR_ERR(priv->arb_sema);
 

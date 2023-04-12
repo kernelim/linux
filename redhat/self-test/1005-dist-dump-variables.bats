@@ -1,57 +1,25 @@
 #!/usr/bin/env bats
+# Purpose: This test creates a set of Makefile variables, and a set of
+# variables that are used in the specfile.  This data is diff'd against a
+# "known good" set of data and if there is a difference an error is reported.
 
-function prologue()
-{
-    tag=$1
-    ofile=$BATS_TMPDIR/$tag.out
-    # Have to unset environment variables that may be inherited from supra-make:
-    make dist-dump-variables | grep "=" | cut -d"=" -f1 | while read VAR; do unset "$VAR"; done
-    GIT=$BATS_TEST_DIRNAME/egit.sh HEAD=$tag EGIT_OVERRIDE_DESCRIBE=$tag DIST=.fc33 make dist-dump-variables > $ofile
+load test-lib.bash
+
+@test "self-test-data check" {
+	mkdir -p $BATS_TMPDIR/data
+	RHDISTDATADIR=$BATS_TMPDIR/data make dist-self-test-data
+
+	redhat=$(make dist-dump-variables | grep "REDHAT=" | cut -d"=" -f2 | xargs)
+
+	echo "Diffing directories ${redhat}/self-test/data and $BATS_TMPDIR/data"
+	run diff -urNp -x create-data.sh ${redhat}/self-test/data $BATS_TMPDIR/data
+	[ -d $BATS_TMPDIR ] && rm -rf $BATS_TMPDIR/data
+	check_status
 }
 
-function checkversion()
-{
-	echo "verifying _TAG=$1"
-	grep -E "^_TAG=$1" $ofile
-	echo "verifying RPMKVERSION=$2"
-	grep -E "^RPMKVERSION=$2" $ofile
-	echo "verifying RPMPATCHLEVEL=$3"
-	grep -E "^RPMKPATCHLEVEL=$3" $ofile
-	echo "verifying RPMSUBLEVEL=$4"
-	grep -E "^RPMKSUBLEVEL=$4" $ofile
-	echo "verifying RPMEXTRAVERSION=$5"
-	grep -E "^RPMKEXTRAVERSION=$5" $ofile
-	echo "verifying KEXTRAVERSION=$6"
-	grep -E "^KEXTRAVERSION=$6" $ofile
-	echo "verifying SNAPSHOT=$6"
-	grep -E "^SNAPSHOT=$7" $ofile
-	status=0
-}
-
-@test "dist-dump-variables v5.8" {
-    tag=v5.8
-    prologue $tag
-    checkversion $tag "5" "8" "0" "" "" "0"
-    [ "$status" = 0 ]
-}
-
-@test "dist-dump-variables v5.8-rc7" {
-    tag=v5.8-rc7
-    prologue $tag
-    checkversion $tag "5" "8" "0" "-rc7" ".rc7" "0"
-    [ "$status" = 0 ]
-}
-
-@test "dist-dump-variables v5.8-9-g565674d613d7" {
-    tag=v5.8-9-g565674d613d7
-    prologue $tag
-    checkversion $tag "5" "9" "0" "" ".rc0" "1"
-    [ "$status" = 0 ]
-}
-
-@test "dist-dump-variables v5.8-rc5-99-g25ccd24ffd91" {
-    tag=v5.8-rc5-99-g25ccd24ffd91
-    prologue $tag
-    checkversion $tag "5" "8" "0" "-rc5" ".rc5" "1"
-    [ "$status" = 0 ]
+# Purpose: This test verifies the BUILD_TARGET value is "eln" for DIST=".eln".
+@test "eln BUILD_TARGET test" {
+	bt=$(make DIST=".eln" dist-dump-variables | grep "BUILD_TARGET=" | cut -d"=" -f2)
+	run [ "$bt" != "eln" ]
+	check_status
 }

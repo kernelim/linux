@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:lib/list_debug.c
-0xe1537255	__list_del_entry_valid	vmlinux	EXPORT_SYMBOL
+#2-
+0xe1537255	__list_del_entry_valid	vmlinux	EXPORT_SYMBOL	

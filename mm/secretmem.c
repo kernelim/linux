@@ -152,10 +152,26 @@ static void secretmem_freepage(struct page *page)
 }
 
 const struct address_space_operations secretmem_aops = {
-	.set_page_dirty	= __set_page_dirty_no_writeback,
+	.dirty_folio	= noop_dirty_folio,
 	.freepage	= secretmem_freepage,
 	.migratepage	= secretmem_migratepage,
 	.isolate_page	= secretmem_isolate_page,
+};
+
+static int secretmem_setattr(struct user_namespace *mnt_userns,
+			     struct dentry *dentry, struct iattr *iattr)
+{
+	struct inode *inode = d_inode(dentry);
+	unsigned int ia_valid = iattr->ia_valid;
+
+	if ((ia_valid & ATTR_SIZE) && inode->i_size)
+		return -EINVAL;
+
+	return simple_setattr(mnt_userns, dentry, iattr);
+}
+
+static const struct inode_operations secretmem_iops = {
+	.setattr = secretmem_setattr,
 };
 
 static struct vfsmount *secretmem_mnt;
@@ -177,6 +193,7 @@ static struct file *secretmem_file_create(unsigned long flags)
 	mapping_set_gfp_mask(inode->i_mapping, GFP_HIGHUSER);
 	mapping_set_unevictable(inode->i_mapping);
 
+	inode->i_op = &secretmem_iops;
 	inode->i_mapping->a_ops = &secretmem_aops;
 
 	/* pretend we are a normal file with zero size */
@@ -247,7 +264,7 @@ static int secretmem_init(void)
 
 	secretmem_mnt = kern_mount(&secretmem_fs);
 	if (IS_ERR(secretmem_mnt))
-		ret = PTR_ERR(secretmem_mnt);
+		return PTR_ERR(secretmem_mnt);
 
 	/* prevent secretmem mappings from ever getting PROT_EXEC */
 	secretmem_mnt->mnt_flags |= MNT_NOEXEC;

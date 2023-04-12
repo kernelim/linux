@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:kernel/time/timer.c
-0x402a960a	jiffies_64	vmlinux	EXPORT_SYMBOL
+#2-
+0x402a960a	jiffies_64	vmlinux	EXPORT_SYMBOL	

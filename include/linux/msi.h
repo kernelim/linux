@@ -2,7 +2,7 @@
 #ifndef LINUX_MSI_H
 #define LINUX_MSI_H
 
-#include <linux/kobject.h>
+#include <linux/cpumask.h>
 #include <linux/list.h>
 #include <asm/msi.h>
 
@@ -69,6 +69,42 @@ typedef void (*irq_write_msi_msg_t)(struct msi_desc *desc,
 				    struct msi_msg *msg);
 
 /**
+ * pci_msi_desc - PCI/MSI specific MSI descriptor data
+ *
+ * @msi_mask:	[PCI MSI]   MSI cached mask bits
+ * @msix_ctrl:	[PCI MSI-X] MSI-X cached per vector control bits
+ * @is_msix:	[PCI MSI/X] True if MSI-X
+ * @multiple:	[PCI MSI/X] log2 num of messages allocated
+ * @multi_cap:	[PCI MSI/X] log2 num of messages supported
+ * @can_mask:	[PCI MSI/X] Masking supported?
+ * @is_64:	[PCI MSI/X] Address size: 0=32bit 1=64bit
+ * @entry_nr:	[PCI MSI/X] Entry which is described by this descriptor
+ * @default_irq:[PCI MSI/X] The default pre-assigned non-MSI irq
+ * @mask_pos:	[PCI MSI]   Mask register position
+ * @mask_base:	[PCI MSI-X] Mask register base address
+ */
+struct pci_msi_desc {
+	union {
+		u32 msi_mask;
+		u32 msix_ctrl;
+	};
+	struct {
+		u8	is_msix		: 1;
+		u8	multiple	: 3;
+		u8	multi_cap	: 3;
+		u8	can_mask	: 1;
+		u8	is_64		: 1;
+		u8	is_virtual	: 1;
+		u16	entry_nr;
+		unsigned default_irq;
+	} msi_attrib;
+	union {
+		u8	mask_pos;
+		void __iomem *mask_base;
+	};
+};
+
+/**
  * platform_msi_desc - Platform device specific msi descriptor data
  * @msi_priv_data:	Pointer to platform private data
  * @msi_index:		The index of the MSI descriptor for multi MSI
@@ -107,17 +143,7 @@ struct ti_sci_inta_msi_desc {
  *			address or data changes
  * @write_msi_msg_data:	Data parameter for the callback.
  *
- * @msi_mask:	[PCI MSI]   MSI cached mask bits
- * @msix_ctrl:	[PCI MSI-X] MSI-X cached per vector control bits
- * @is_msix:	[PCI MSI/X] True if MSI-X
- * @multiple:	[PCI MSI/X] log2 num of messages allocated
- * @multi_cap:	[PCI MSI/X] log2 num of messages supported
- * @maskbit:	[PCI MSI/X] Mask-Pending bit supported?
- * @is_64:	[PCI MSI/X] Address size: 0=32bit 1=64bit
- * @entry_nr:	[PCI MSI/X] Entry which is described by this descriptor
- * @default_irq:[PCI MSI/X] The default pre-assigned non-MSI irq
- * @mask_pos:	[PCI MSI]   Mask register position
- * @mask_base:	[PCI MSI-X] Mask register base address
+ * @pci:	[PCI]	    PCI speficic msi descriptor data
  * @platform:	[platform]  Platform device specific msi descriptor data
  * @fsl_mc:	[fsl-mc]    FSL MC device specific msi descriptor data
  * @inta:	[INTA]	    TISCI based INTA specific msi descriptor data
@@ -138,38 +164,10 @@ struct msi_desc {
 	void *write_msi_msg_data;
 
 	union {
-		/* PCI MSI/X specific data */
-		struct {
-			union {
-				u32 msi_mask;
-				u32 msix_ctrl;
-			};
-			struct {
-				u8	is_msix		: 1;
-				u8	multiple	: 3;
-				u8	multi_cap	: 3;
-				u8	can_mask	: 1;
-				u8	is_64		: 1;
-				u8	is_virtual	: 1;
-				u16	entry_nr;
-				unsigned default_irq;
-			} msi_attrib;
-			union {
-				u8	mask_pos;
-				void __iomem *mask_base;
-			};
-		};
-
-		/*
-		 * Non PCI variants add their data structure here. New
-		 * entries need to use a named structure. We want
-		 * proper name spaces for this. The PCI part is
-		 * anonymous for now as it would require an immediate
-		 * tree wide cleanup.
-		 */
-		struct platform_msi_desc platform;
-		struct fsl_mc_msi_desc fsl_mc;
-		struct ti_sci_inta_msi_desc inta;
+		struct pci_msi_desc		pci;
+		struct platform_msi_desc	platform;
+		struct fsl_mc_msi_desc		fsl_mc;
+		struct ti_sci_inta_msi_desc	inta;
 	};
 };
 
@@ -218,13 +216,8 @@ static inline void msi_desc_set_iommu_cookie(struct msi_desc *desc,
 	for_each_msi_entry((desc), &(pdev)->dev)
 
 struct pci_dev *msi_desc_to_pci_dev(struct msi_desc *desc);
-void *msi_desc_to_pci_sysdata(struct msi_desc *desc);
 void pci_write_msi_msg(unsigned int irq, struct msi_msg *msg);
 #else /* CONFIG_PCI_MSI */
-static inline void *msi_desc_to_pci_sysdata(struct msi_desc *desc)
-{
-	return NULL;
-}
 static inline void pci_write_msi_msg(unsigned int irq, struct msi_msg *msg)
 {
 }
@@ -239,9 +232,19 @@ void __pci_write_msi_msg(struct msi_desc *entry, struct msi_msg *msg);
 void pci_msi_mask_irq(struct irq_data *data);
 void pci_msi_unmask_irq(struct irq_data *data);
 
+#ifdef CONFIG_SYSFS
 const struct attribute_group **msi_populate_sysfs(struct device *dev);
 void msi_destroy_sysfs(struct device *dev,
 		       const struct attribute_group **msi_irq_groups);
+#else
+static inline const struct attribute_group **msi_populate_sysfs(struct device *dev)
+{
+	return NULL;
+}
+static inline void msi_destroy_sysfs(struct device *dev, const struct attribute_group **msi_irq_groups)
+{
+}
+#endif
 
 /*
  * The arch hooks to setup up msi irqs. Default functions are implemented
@@ -256,25 +259,13 @@ int arch_setup_msi_irq(struct pci_dev *dev, struct msi_desc *desc);
 void arch_teardown_msi_irq(unsigned int irq);
 int arch_setup_msi_irqs(struct pci_dev *dev, int nvec, int type);
 void arch_teardown_msi_irqs(struct pci_dev *dev);
-#else
-static inline int arch_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
-{
-	WARN_ON_ONCE(1);
-	return -ENODEV;
-}
-
-static inline void arch_teardown_msi_irqs(struct pci_dev *dev)
-{
-	WARN_ON_ONCE(1);
-}
 #endif
 
 /*
- * The restore hooks are still available as they are useful even
- * for fully irq domain based setups. Courtesy to XEN/X86.
+ * The restore hook is still available even for fully irq domain based
+ * setups. Courtesy to XEN/X86.
  */
-void arch_restore_msi_irqs(struct pci_dev *dev);
-void default_restore_msi_irqs(struct pci_dev *dev);
+bool arch_restore_msi_irqs(struct pci_dev *dev);
 
 #ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
 
@@ -294,20 +285,17 @@ struct msi_domain_info;
  * @msi_free:		Domain specific function to free a MSI interrupts
  * @msi_check:		Callback for verification of the domain/info/dev data
  * @msi_prepare:	Prepare the allocation of the interrupts in the domain
- * @msi_finish:		Optional callback to finalize the allocation
  * @set_desc:		Set the msi descriptor for an interrupt
- * @handle_error:	Optional error handler if the allocation fails
  * @domain_alloc_irqs:	Optional function to override the default allocation
  *			function.
  * @domain_free_irqs:	Optional function to override the default free
  *			function.
  *
- * @get_hwirq, @msi_init and @msi_free are callbacks used by
- * msi_create_irq_domain() and related interfaces
+ * @get_hwirq, @msi_init and @msi_free are callbacks used by the underlying
+ * irqdomain.
  *
- * @msi_check, @msi_prepare, @msi_finish, @set_desc and @handle_error
- * are callbacks used by msi_domain_alloc_irqs() and related
- * interfaces which are based on msi_desc.
+ * @msi_check, @msi_prepare and @set_desc are callbacks used by
+ * msi_domain_alloc/free_irqs().
  *
  * @domain_alloc_irqs, @domain_free_irqs can be used to override the
  * default allocation/free functions (__msi_domain_alloc/free_irqs). This
@@ -341,11 +329,8 @@ struct msi_domain_ops {
 	int		(*msi_prepare)(struct irq_domain *domain,
 				       struct device *dev, int nvec,
 				       msi_alloc_info_t *arg);
-	void		(*msi_finish)(msi_alloc_info_t *arg, int retval);
 	void		(*set_desc)(msi_alloc_info_t *arg,
 				    struct msi_desc *desc);
-	int		(*handle_error)(struct irq_domain *domain,
-					struct msi_desc *desc, int error);
 	int		(*domain_alloc_irqs)(struct irq_domain *domain,
 					     struct device *dev, int nvec);
 	void		(*domain_free_irqs)(struct irq_domain *domain,
@@ -448,12 +433,9 @@ void *platform_msi_get_host_data(struct irq_domain *domain);
 #endif /* CONFIG_GENERIC_MSI_IRQ_DOMAIN */
 
 #ifdef CONFIG_PCI_MSI_IRQ_DOMAIN
-void pci_msi_domain_write_msg(struct irq_data *irq_data, struct msi_msg *msg);
 struct irq_domain *pci_msi_create_irq_domain(struct fwnode_handle *fwnode,
 					     struct msi_domain_info *info,
 					     struct irq_domain *parent);
-int pci_msi_domain_check_cap(struct irq_domain *domain,
-			     struct msi_domain_info *info, struct device *dev);
 u32 pci_msi_domain_get_msi_rid(struct irq_domain *domain, struct pci_dev *pdev);
 struct irq_domain *pci_msi_get_device_domain(struct pci_dev *pdev);
 bool pci_dev_has_special_msi_domain(struct pci_dev *pdev);

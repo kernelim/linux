@@ -1033,7 +1033,7 @@ static void carl9170_op_configure_filter(struct ieee80211_hw *hw,
 static void carl9170_op_bss_info_changed(struct ieee80211_hw *hw,
 					 struct ieee80211_vif *vif,
 					 struct ieee80211_bss_conf *bss_conf,
-					 u32 changed)
+					 u64 changed)
 {
 	struct ar9170 *ar = hw->priv;
 	struct ath_common *common = &ar->common;
@@ -1116,7 +1116,7 @@ static void carl9170_op_bss_info_changed(struct ieee80211_hw *hw,
 	}
 
 	if (changed & BSS_CHANGED_ASSOC) {
-		ar->common.curaid = bss_conf->aid;
+		ar->common.curaid = vif->cfg.aid;
 		err = carl9170_set_beacon_timers(ar);
 		if (err)
 			goto out;
@@ -1307,8 +1307,8 @@ static int carl9170_op_sta_add(struct ieee80211_hw *hw,
 
 	atomic_set(&sta_info->pending_frames, 0);
 
-	if (sta->ht_cap.ht_supported) {
-		if (sta->ht_cap.ampdu_density > 6) {
+	if (sta->deflink.ht_cap.ht_supported) {
+		if (sta->deflink.ht_cap.ampdu_density > 6) {
 			/*
 			 * HW does support 16us AMPDU density.
 			 * No HT-Xmit for station.
@@ -1320,7 +1320,7 @@ static int carl9170_op_sta_add(struct ieee80211_hw *hw,
 		for (i = 0; i < ARRAY_SIZE(sta_info->agg); i++)
 			RCU_INIT_POINTER(sta_info->agg[i], NULL);
 
-		sta_info->ampdu_max_len = 1 << (3 + sta->ht_cap.ampdu_factor);
+		sta_info->ampdu_max_len = 1 << (3 + sta->deflink.ht_cap.ampdu_factor);
 		sta_info->ht_sta = true;
 	}
 
@@ -1336,7 +1336,7 @@ static int carl9170_op_sta_remove(struct ieee80211_hw *hw,
 	unsigned int i;
 	bool cleanup = false;
 
-	if (sta->ht_cap.ht_supported) {
+	if (sta->deflink.ht_cap.ht_supported) {
 
 		sta_info->ht_sta = false;
 
@@ -1366,7 +1366,8 @@ static int carl9170_op_sta_remove(struct ieee80211_hw *hw,
 }
 
 static int carl9170_op_conf_tx(struct ieee80211_hw *hw,
-			       struct ieee80211_vif *vif, u16 queue,
+			       struct ieee80211_vif *vif,
+			       unsigned int link_id, u16 queue,
 			       const struct ieee80211_tx_queue_params *param)
 {
 	struct ar9170 *ar = hw->priv;

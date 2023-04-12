@@ -45,13 +45,14 @@ struct uart_ops {
 	void		(*unthrottle)(struct uart_port *);
 	void		(*send_xchar)(struct uart_port *, char ch);
 	void		(*stop_rx)(struct uart_port *);
+	void		(*start_rx)(struct uart_port *);
 	void		(*enable_ms)(struct uart_port *);
 	void		(*break_ctl)(struct uart_port *, int ctl);
 	int		(*startup)(struct uart_port *);
 	void		(*shutdown)(struct uart_port *);
 	void		(*flush_buffer)(struct uart_port *);
 	void		(*set_termios)(struct uart_port *, struct ktermios *new,
-				       struct ktermios *old);
+				       const struct ktermios *old);
 	void		(*set_ldisc)(struct uart_port *, struct ktermios *);
 	void		(*pm)(struct uart_port *, unsigned int state,
 			      unsigned int oldstate);
@@ -111,7 +112,7 @@ struct uart_port {
 	void			(*serial_out)(struct uart_port *, int, int);
 	void			(*set_termios)(struct uart_port *,
 				               struct ktermios *new,
-				               struct ktermios *old);
+				               const struct ktermios *old);
 	void			(*set_ldisc)(struct uart_port *,
 					     struct ktermios *);
 	unsigned int		(*get_mctrl)(struct uart_port *);
@@ -328,7 +329,7 @@ void uart_write_wakeup(struct uart_port *port);
 void uart_update_timeout(struct uart_port *port, unsigned int cflag,
 			 unsigned int baud);
 unsigned int uart_get_baud_rate(struct uart_port *port, struct ktermios *termios,
-				struct ktermios *old, unsigned int min,
+				const struct ktermios *old, unsigned int min,
 				unsigned int max);
 unsigned int uart_get_divisor(struct uart_port *port, unsigned int baud);
 
@@ -388,6 +389,11 @@ static const bool earlycon_acpi_spcr_enable EARLYCON_USED_OR_UNUSED;
 static inline int setup_earlycon(char *buf) { return 0; }
 #endif
 
+static inline bool uart_console_enabled(struct uart_port *port)
+{
+	return uart_console(port) && (port->cons->flags & CON_ENABLED);
+}
+
 struct uart_port *uart_get_console(struct uart_port *ports, int nr,
 				   struct console *c);
 int uart_parse_earlycon(char *p, unsigned char *iotype, resource_size_t *addr,
@@ -399,7 +405,7 @@ int uart_set_options(struct uart_port *port, struct console *co, int baud,
 struct tty_driver *uart_console_device(struct console *co, int *index);
 void uart_console_write(struct uart_port *port, const char *s,
 			unsigned int count,
-			void (*putchar)(struct uart_port *, int));
+			void (*putchar)(struct uart_port *, unsigned char));
 
 /*
  * Port/driver registration/removal

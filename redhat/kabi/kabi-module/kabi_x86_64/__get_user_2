@@ -1,4 +1,2 @@
-#0-
-#I:0
-#P:arch/x86/lib/getuser.S
-0x8f9c199c	__get_user_2	vmlinux	EXPORT_SYMBOL
+#2-
+0x8f9c199c	__get_user_2	vmlinux	EXPORT_SYMBOL	
