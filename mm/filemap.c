@@ -1401,7 +1401,7 @@ void migration_entry_wait_on_locked(swp_entry_t entry, pte_t *ptep,
 	unsigned long pflags;
 	bool in_thrashing;
 	wait_queue_head_t *q;
-	struct page *page = pfn_swap_entry_to_page(entry);
+	struct page *page = compound_head(pfn_swap_entry_to_page(entry));
 
 	q = page_waitqueue(page);
 	if (!PageUptodate(page) && PageWorkingset(page)) {
