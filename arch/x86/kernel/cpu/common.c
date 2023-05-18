@@ -77,6 +77,37 @@ void __init setup_cpu_local_masks(void)
 	alloc_bootmem_cpumask_var(&cpu_sibling_setup_mask);
 }
 
+/*
+ * It is known that Intel family 6 CPUs before Skylake are not vulnerable
+ * to Retbleed.
+ */
+static const bool cpu_in_retbleed_whitelist(struct cpuinfo_x86 *c)
+{
+	static const bool retbleed_whitelist[] = {
+		[INTEL_FAM6_WESTMERE]		= true,
+		[INTEL_FAM6_WESTMERE_EP]	= true,
+		[INTEL_FAM6_WESTMERE_EX]	= true,
+		[INTEL_FAM6_SANDYBRIDGE]	= true,
+		[INTEL_FAM6_SANDYBRIDGE_X]	= true,
+		[INTEL_FAM6_IVYBRIDGE]		= true,
+		[INTEL_FAM6_IVYBRIDGE_X]	= true,
+		[INTEL_FAM6_HASWELL_CORE]	= true,
+		[INTEL_FAM6_HASWELL_X]		= true,
+		[INTEL_FAM6_HASWELL_ULT]	= true,
+		[INTEL_FAM6_HASWELL_GT3E]	= true,
+		[INTEL_FAM6_BROADWELL_CORE]	= true,
+		[INTEL_FAM6_BROADWELL_GT3E]	= true,
+		[INTEL_FAM6_BROADWELL_X]	= true,
+		[INTEL_FAM6_BROADWELL_XEON_D]	= true,
+	};
+
+	if ((c->x86_vendor != X86_VENDOR_INTEL) || (c->x86 != 6) ||
+	    (c->x86_model >= ARRAY_SIZE(retbleed_whitelist)))
+		return false;
+	else
+		return retbleed_whitelist[c->x86_model];
+}
+
 static void default_init(struct cpuinfo_x86 *c)
 {
 #ifdef CONFIG_X86_64
@@ -1130,7 +1161,8 @@ static void __init cpu_set_bug_bits(struct cpuinfo_x86 *c)
 		setup_force_cpu_bug(X86_BUG_MMIO_STALE_DATA);
 
 	if (!cpu_has(c, X86_FEATURE_BTC_NO)) {
-		if (cpu_matches(cpu_vuln_blacklist, RETBLEED) || (ia32_cap & ARCH_CAP_RSBA))
+		if (cpu_matches(cpu_vuln_blacklist, RETBLEED) ||
+		   ((ia32_cap & ARCH_CAP_RSBA) && !cpu_in_retbleed_whitelist(c)))
 			setup_force_cpu_bug(X86_BUG_RETBLEED);
 	}
 
