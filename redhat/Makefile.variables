@@ -72,7 +72,7 @@ HEAD ?= HEAD
 # default values can be found in redhat/Makefile and are dependent on the
 # target OS.  The target OS can be changed by setting the DIST or DISTRO
 # variables.
-BUILD_TARGET ?=
+BUILD_TARGET ?= rhel-$(RHEL_MAJOR).$(RHEL_MINOR).0-z-test-pesign
 
 # This sets the koji/brew configuration profile variable.
 BUILD_PROFILE ?=

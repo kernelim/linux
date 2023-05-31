@@ -38,7 +38,7 @@ In the new RHEL kernel development workflow uses git & GitLab to submit patches 
 	git-backport or git-cherry-pick # apply backport patches to RHEL git tree
 	# test
 	git push <repo_remote_name> <branch_name>
-	lab mr create <branch_name> --cover-letter --force-linebreak
+	lab mr create --remove-source-branch <branch_name> --cover-letter --force-linebreak
 
 The last command ‘lab mr create <branch_name>’, will open a $GIT_EDITOR window in which a cover-letter can be created.  Saving and exiting the editor results in a Red Hat tool called the ‘GitLab Email Bridge’ sending patch emails to mailto:rhkernel-list@redhat.com[rhkernel-list@redhat.com] so that engineers can review the submitted patches, and maintainers can process and apply the reviewed patches.
 
@@ -102,13 +102,14 @@ The patches can be exported to a mbox file with the ‘--stdout’ argument to �
 
 The xref:lab.adoc[lab] utility has config files that allow for per-instruction configuration.  For example,
 
-	lab mr create <branch_name> --cover-letter --force-linebreak
+	lab mr create <branch_name> --cover-letter --force-linebreak --remove-source-branch
 
 Can be shortened to ‘lab mr create <branch_name>’ by adding
 
 	[mr_create]
 	 cover-letter = true
 	 force-linebreak = true
+         remove-source-branch = true
 
 to the local .git/lab/lab.toml file.
 

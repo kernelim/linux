@@ -62,3 +62,8 @@ params:
   logo:
       mobile: "/images/logo-mobile.svg"
       standard: "/images/logo.svg"
+
+security:
+  exec:
+    allow:
+      - ^asciidoctor$

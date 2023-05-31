@@ -1,6 +1,6 @@
 include:
-  - remote: 'https://gitlab.freedesktop.org/freedesktop/ci-templates/-/raw/856dc00a017ae22617d188b4a952bba7d3ec943b/templates/ci-fairy.yml'
-  - remote: 'https://gitlab.freedesktop.org/freedesktop/ci-templates/-/raw/856dc00a017ae22617d188b4a952bba7d3ec943b/templates/alpine.yml'
+  - remote: 'https://gitlab.freedesktop.org/freedesktop/ci-templates/-/raw/HEAD/templates/ci-fairy.yml'
+  - remote: 'https://gitlab.freedesktop.org/freedesktop/ci-templates/-/raw/HEAD/templates/alpine.yml'
 
 stages:
   - container prep
@@ -21,10 +21,10 @@ workflow:
 .common_variables:
   variables:
     FDO_UPSTREAM_REPO: centos-stream/rhel/src/kernel/documentation
-    FDO_DISTRIBUTION_TAG: 2021-07-21.3
     FDO_DISTRIBUTION_PACKAGES: make git hugo asciidoctor
-    # too tired of manually pulling the various go packages
-    FDO_BASE_IMAGE: golang:alpine3.14
+    # FDO_BASE_IMAGE and FDO_DISTRIBUTION_TAG define hugo version
+    FDO_BASE_IMAGE: golang:alpine3.16
+    FDO_DISTRIBUTION_TAG: '2023-04-12'
 
 prep alpine container:
   stage: container prep
@@ -49,6 +49,32 @@ check-commit:
     reports:
       junit: results.xml
 
+gluser check:
+  stage: sanity check
+  extends:
+    - .fdo.distribution-image@alpine
+    - .common_variables
+  rules:
+    - if: '$CI_MERGE_REQUEST_DIFF_BASE_SHA'
+  script:
+    - |
+      result=0
+      for user in $(git diff $CI_MERGE_REQUEST_DIFF_BASE_SHA..$CI_COMMIT_SHA -- info/owners.yaml | sed -n 's/^+[ \t]*gluser:[ \t]*\(.*\)/\1/p'); do
+        if ! wget -q -O - "https://gitlab.com/api/v4/users?username=$user" | grep -q username; then
+          if [ $result = 0 ]; then
+            echo '-----------------------------------------------------------------'
+            echo
+          fi
+          echo " Error: user '$user' is not a valid GitLab user."
+          result=1
+        fi
+      done
+      if [ $result = 1 ]; then
+        echo
+        echo '-----------------------------------------------------------------'
+      fi
+      exit $result
+
 build:
   stage: build
   extends:
@@ -71,20 +97,19 @@ build:
   variables:
     PAGES_BASE_URL: $CI_PAGES_URL
   script:
-    - mkdir -p themes/hugo-geekdoc/ content
-    - wget https://github.com/thegeeklab/hugo-geekdoc/releases/latest/download/hugo-geekdoc.tar.gz
+    - mkdir -p themes/hugo-geekdoc/
+    - wget https://github.com/thegeeklab/hugo-geekdoc/releases/download/v0.38.1/hugo-geekdoc.tar.gz
     - tar xfz hugo-geekdoc.tar.gz -C themes/hugo-geekdoc/
 
     - echo $CI_PAGES_URL
-    - echo $PAGES_BASE_URL
-    - ln -s ../docs content
-    - ln -s hugo_config.yaml config.yaml
+    - echo "Link to preview:"
+    - echo ${PAGES_BASE_URL}index.html
 
     # fix links with the help of the `ref` shortcode
     - |
       for i in content/docs/*.adoc ; do sed 's/link:\([^.]*\.adoc\)/link:{{< ref \1 >}}/g' -i $i; done
 
-    - hugo --config config.yaml --baseURL $PAGES_BASE_URL
+    - hugo --baseURL $PAGES_BASE_URL
   artifacts:
     paths:
     - public
@@ -105,8 +130,6 @@ pages CI check:
 
 check:
   stage: check
-  needs:
-    - build
   extends:
     - .fdo.distribution-image@alpine
     - .common_variables

@@ -6027,6 +6027,10 @@ int hugetlb_mcopy_atomic_pte(struct mm_struct *dst_mm,
 	if (idx >= size)
 		goto out_release_unlock;
 
+	ret = -EIO;
+	if (PageHWPoison(page))
+		goto out_release_unlock;
+
 	ret = -EEXIST;
 	if (!huge_pte_none(huge_ptep_get(dst_pte)))
 		goto out_release_unlock;

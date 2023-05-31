@@ -98,7 +98,7 @@ S:	Supported
 F:	Makefile.rhelver
 
 RHEL 9.2 Real Time Kernel Maintainer
-M:	Luis Claudio Goncalves <lgoncalv@redhat.com>
+M:	Derek Barbosa <debarbos@redhat.com>
 S:	Supported
 F:	Makefile.rhelver
 
@@ -115,25 +115,28 @@ R:	Luis Claudio Goncalves <lgoncalv@redhat.com>
 R:	Donald Zickus <dzickus@redhat.com>
 R:	Prarit Bhargava <prarit@redhat.com>
 R:	Jarod Wilson <jarod@redhat.com>
+R:	John B. Wyatt IV <jwyatt@redhat.com>
+R:	Derek Barbosa <debarbos@redhat.com>
+R:	Eder Zulian <ezulian@redhat.com>
 S:	Supported
 F:	makefile
+F:	Makefile
 F:	redhat/
 F:	Kconfig.redhat
 X:	redhat/configs/
 
-RHEL 9.1 Real Time Kernel Maintainer
-M:	Luis Claudio Goncalves <lgoncalv@redhat.com>
-S:	Supported
-F:	Makefile.rhelver
-
 RHEL 9.0 Kernel Maintainer
-M:	Jan Stancek <jstancek@redhat.com>
+M:	Julio Faracco <jfaracco@redhat.com>
 S:	Supported
 F:	Makefile.rhelver
 
 RHEL 9.0 Real Time Kernel Maintainer
-M:	Luis Claudio Goncalves <lgoncalv@redhat.com>
-M:	Leah Leshchinsky <lleshchi@redhat.com>
+M:	Eder Zulian <ezulian@redhat.com>
+S:	Supported
+F:	Makefile.rhelver
+
+CentOS Stream 8 Real Time Kernel Maintainer
+M:	John B. Wyatt IV <jwyatt@redhat.com>
 S:	Supported
 F:	Makefile.rhelver
 
@@ -143,18 +146,12 @@ S:	Supported
 F:	Makefile.rhelver
 
 RHEL 8.8 Real Time Kernel Maintainer
-M:	John B. Wyatt IV <jwyatt@redhat.com>
-M:	Chris White <chwhite@redhat.com>
+M:	Tyonnchie Berry <tyberry@redhat.com>
 S:	Supported
 F:	Makefile.rhelver
 
 RHEL 8.7 Kernel Maintainer
 M:	Jarod Wilson <jarod@redhat.com>
-S:	Supported
-F:	Makefile.rhelver
-
-RHEL 8.7 Real Time Kernel Maintainer
-M:	Chris White <chwhite@redhat.com>
 S:	Supported
 F:	Makefile.rhelver
 
@@ -199,7 +196,7 @@ S:	Supported
 F:	Makefile
 
 RHEL 7.9 Real Time Kernel Maintainer
-M:	Scott Wood <swood@redhat.com>
+M:	Crystal Wood <swood@redhat.com>
 S:	Supported
 F:	Makefile
 
@@ -210,11 +207,6 @@ F:	Makefile
 
 RHEL 7.6 Kernel Maintainer
 M:	Denys Vlasenko <dvlasenk@redhat.com>
-S:	Supported
-F:	Makefile
-
-RHEL 7.6 Real Time Kernel Maintainer
-M:	Luis Claudio Goncalves <lgoncalv@redhat.com>
 S:	Supported
 F:	Makefile
 
@@ -305,7 +297,6 @@ R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
 R:	Íñigo Huguet <ihuguet@redhat.com>
-R:	Jonathan Toppins <jtoppins@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	Documentation/networking/ena.txt
@@ -352,7 +343,6 @@ R:	Kamal Heib <kheib@redhat.com>
 R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
-R:	Jonathan Toppins <jtoppins@redhat.com>
 R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
@@ -509,7 +499,8 @@ F:	include/net/bluetooth/
 F:	net/bluetooth/
 
 BONDING DRIVER
-M:	Jonathan Toppins <jtoppins@redhat.com>
+M:	Hangbin Liu <haliu@redhat.com>
+M:	Xin Long <lxin@redhat.com>
 R:	Jarod Wilson <jarod@redhat.com>
 R:	Michal Schmidt <mschmidt@redhat.com>
 R:	Petr Oros <poros@redhat.com>
@@ -520,7 +511,6 @@ R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
 R:	Íñigo Huguet <ihuguet@redhat.com>
-R:	Jonathan Toppins <jtoppins@redhat.com>
 R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
@@ -618,7 +608,7 @@ S:	Supported
 F:	drivers/bus/
 
 CAN BUS
-M:	Peter Robinson <pbrobinson@redhat.com>
+M:	Peter Robinson <perobins@redhat.com>
 S:	Supported
 F:	Documentation/networking/can.rst
 F:	include/linux/can/
@@ -924,7 +914,6 @@ R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
 R:	Íñigo Huguet <ihuguet@redhat.com>
-R:	Jonathan Toppins <jtoppins@redhat.com>
 R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
@@ -948,7 +937,6 @@ R:	Kamal Heib <kheib@redhat.com>
 R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
-R:	Jonathan Toppins <jtoppins@redhat.com>
 R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
@@ -1191,7 +1179,6 @@ F:	mm/hwpoison-inject.c
 
 Hyper-V CORE AND DRIVERS
 M:	Cathy Avery <cavery@redhat.com>
-M:	Mohammed Gamal <mgamal@redhat.com>
 M:	Vitaly Kuznetsov <vkuznets@redhat.com>
 S:	Supported
 F:	Documentation/networking/device_drivers/microsoft/netvsc.txt
@@ -1253,7 +1240,6 @@ R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
 R:	Íñigo Huguet <ihuguet@redhat.com>
-R:	Jonathan Toppins <jtoppins@redhat.com>
 R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
@@ -1317,7 +1303,6 @@ R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
 R:	Íñigo Huguet <ihuguet@redhat.com>
-R:	Jonathan Toppins <jtoppins@redhat.com>
 R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
@@ -1397,7 +1382,8 @@ F:	drivers/counter/intel-qep.c
 
 INTEL QUICK ASSIST TECHNOLOGY (QAT)
 M:	Vladis Dronov <vdronov@redhat.com>
-M:	Tony Camuso <tcamuso@redhat.com>
+M:	Stepan Horacek <shoracek@redhat.com>
+R:	Tony Camuso <tcamuso@redhat.com>
 S:	Supported
 F:	drivers/crypto/qat/
 F:	Documentation/ABI/testing/sysfs-driver-qat
@@ -1564,6 +1550,7 @@ KERNEL VIRTUAL MACHINE for s390 (KVM/s390)
 M:	Thomas Huth <thuth@redhat.com>
 M:	Cornelia Huck <cohuck@redhat.com>
 M:	David Hildenbrand <david@redhat.com>
+M:	Cédric Le Goater <clg@redhat.com>
 L:	rhvirt-patches@redhat.com
 S:	Supported
 F:	arch/s390/include/uapi/asm/kvm*
@@ -1571,6 +1558,9 @@ F:	arch/s390/include/asm/gmap.h
 F:	arch/s390/include/asm/kvm*
 F:	arch/s390/kvm/
 F:	arch/s390/mm/gmap.c
+F:	tools/testing/selftests/drivers/s390x/uvdevice/
+F:	tools/testing/selftests/kvm/*/s390x/
+F:	tools/testing/selftests/kvm/s390x/
 
 KERNEL VIRTUAL MACHINE FOR X86 (KVM/x86)
 M:	Paolo Bonzini <pbonzini@redhat.com>
@@ -1901,7 +1891,6 @@ R:	Kamal Heib <kheib@redhat.com>
 R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Íñigo Huguet <ihuguet@redhat.com>
-R:	Jonathan Toppins <jtoppins@redhat.com>
 R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
@@ -2119,7 +2108,6 @@ F:	fs/nfsd/
 
 NITRO ENCLAVES (NE)
 M:	Cathy Avery <cavery@redhat.com>
-M:	Mohammed Gamal <mgamal@redhat.com>
 M:	Vitaly Kuznetsov <vkuznets@redhat.com>
 S:	Supported
 F:	Documentation/virt/ne_overview.rst
@@ -2274,7 +2262,7 @@ F:	drivers/net/pcs/
 F:	include/linux/pcs/
 
 Pensando Ethernet IONIC Driver
-M:	Jonathan Toppins <jtoppins@redhat.com>
+M:	Michal Schmidt <mschmidt@redhat.com>
 S:	Supported
 F:	drivers/net/ethernet/pensando/
 
@@ -2282,6 +2270,7 @@ PERFORMANCE EVENTS SUBSYSTEM
 M:	Michael Petlan <mpetlan@redhat.com>
 R:	Jerome Marchand <jmarchan@redhat.com>
 R:	Yauheni Kaliuta <ykaliuta@redhat.com>
+R:	Cestmir Kalina <ckalina@redhat.com>
 S:	Supported
 F:	kernel/events/
 F:	include/linux/perf_event.h
@@ -2528,6 +2517,7 @@ X:	drivers/s390/virtio/
 
 S390 VFIO-CCW DRIVER
 M:	Cornelia Huck <cohuck@redhat.com>
+M:	Cédric Le Goater <clg@redhat.com>
 L:	rhvirt-patches@redhat.com
 S:	Supported
 F:	drivers/s390/cio/vfio_ccw*
@@ -2967,6 +2957,7 @@ F:	include/uapi/linux/virtio_crypto.h
 
 VIRTIO DRIVERS FOR S390
 M:	Cornelia Huck <cohuck@redhat.com>
+M:	Cédric Le Goater <clg@redhat.com>
 L:	rhvirt-patches@redhat.com
 S:	Supported
 F:	drivers/s390/virtio/
@@ -2996,7 +2987,6 @@ F:	include/uapi/linux/virtio_input.h
 VIRTUALIZATION SUPPORT DRIVERS
 M:	Vitaly Kuznetsov <vkuznets@redhat.com>
 M:	Cathy Avery <cavery@redhat.com>
-M:	Mohammed Gamal <mgamal@redhat.com>
 S:	Supported
 F:	drivers/virt/
 
@@ -3040,7 +3030,6 @@ R:	Kamal Heib <kheib@redhat.com>
 R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
-R:	Jonathan Toppins <jtoppins@redhat.com>
 R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
@@ -3170,6 +3159,7 @@ M:	Carlos Maiolino <cmaiolino@redhat.com>
 M:	Eric Sandeen <esandeen@redhat.com>
 M:	Bill O'Donnell <bodonnel@redhat.com>
 M:	Dave Chinner <dchinner@redhat.com>
+M:	Andrey Albershteyn <aalbersh@redhat.com>
 S:	Supported
 F:	Documentation/filesystems/xfs.txt
 F:	fs/xfs/

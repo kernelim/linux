@@ -1,3 +1,106 @@
+* Wed May 31 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.18.1.el9_2]
+- x86/i8259: Mark legacy PIC interrupts with IRQ_LEVEL (Baoquan He) [2210614 2116317]
+- bluetooth: Perform careful capability checks in hci_sock_ioctl() (Ricardo Robaina) [2196340 2196341] {CVE-2023-2002}
+- perf vendor events intel: Refresh jaketown metrics and events (Michael Petlan) [2207471 2190010]
+- perf vendor events: Update Intel jaketown (Michael Petlan) [2207471 2190010]
+- perf vendor events intel: Refresh ivytown metrics and events (Michael Petlan) [2207471 2190010]
+- perf vendor events: Update Intel ivytown (Michael Petlan) [2207471 2190010]
+- hugetlbfs: don't delete error page from pagecache (Aristeu Rozanski) [2192348 2184858]
+Resolves: rhbz#2192348, rhbz#2196340, rhbz#2207471, rhbz#2210614
+
+* Thu May 25 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.17.1.el9_2]
+- cifs: fix wrong unlock before return from cifs_tree_connect() (Ronnie Sahlberg) [2209045 2182524]
+- CI: Use GA builder container (Michael Hofmann)
+- Remove the unnecessary unicode character (Tao Liu) [2208242 2187350]
+- workqueue: Fold rebind_worker() within rebind_workers() (Waiman Long) [2203229 2182337]
+- workqueue: Unbind kworkers before sending them to exit() (Waiman Long) [2203229 2182337]
+- workqueue: Don't hold any lock while rcuwait'ing for !POOL_MANAGER_ACTIVE (Waiman Long) [2203229 2182337]
+- workqueue: Convert the idle_timer to a timer + work_struct (Waiman Long) [2203229 2182337]
+- workqueue: Factorize unbind/rebind_workers() logic (Waiman Long) [2203229 2182337]
+- workqueue: Protects wq_unbound_cpumask with wq_pool_attach_mutex (Waiman Long) [2203229 2182337]
+- workqueue: don't skip lockdep work dependency in cancel_work_sync() (Waiman Long) [2203229 2182337]
+- workqueue: Change the comments of the synchronization about the idle_list (Waiman Long) [2203229 2182337]
+- workqueue: Remove the mb() pair between wq_worker_sleeping() and insert_work() (Waiman Long) [2203229 2182337]
+- workqueue: Remove the cacheline_aligned for nr_running (Waiman Long) [2203229 2182337]
+- workqueue: Move the code of waking a worker up in unbind_workers() (Waiman Long) [2203229 2182337]
+- workqueue: Remove the outdated comment before wq_worker_sleeping() (Waiman Long) [2203229 2182337]
+- workqueue: Fix unbind_workers() VS wq_worker_sleeping() race (Waiman Long) [2203229 2182337]
+- NFSD: RHEL-only bug introduced in fix for COMMIT and NFS4ERR_DELAY loop (Benjamin Coddington) [2203335 2196432]
+- NFSD: Fix problem of COMMIT and NFS4ERR_DELAY in infinite loop (Benjamin Coddington) [2203335 2196432]
+- net: tls: fix possible race condition between do_tls_getsockopt_conf() and do_tls_setsockopt_conf() (Sabrina Dubroca) [2184152 2179816] {CVE-2023-28466}
+- netfilter: nf_tables: deactivate anonymous set from preparation phase (Florian Westphal) [2196134 2196135] {CVE-2023-32233}
+- xfs: verify buffer contents when we skip log replay (Andrey Albershteyn) [2187447 2187448] {CVE-2023-2124}
+- watchdog: wdat_wdt: Avoid unimplemented get_timeleft (David Arcari) [2192585 2189867]
+- watchdog: wdat_wdt: Set the min and max timeout values properly (David Arcari) [2192585 2189867]
+- watchdog: wdat_wdt: Remove #ifdef guards for PM related functions (David Arcari) [2192585 2189867]
+- watchdog: wdat_wdt: Stop watchdog when uninstalling module (David Arcari) [2192585 2189867]
+- watchdog: wdat_wdt: Stop watchdog when rebooting the system (David Arcari) [2192585 2189867]
+- watchdog: wdat_wdt: Using the existing function to check parameter timeout (David Arcari) [2192585 2189867]
+- i2c: xgene-slimpro: Fix out-of-bounds bug in xgene_slimpro_i2c_xfer() (Tony Camuso) [2189487 2188409] {CVE-2023-2194}
+- mm/filemap: fix page end in filemap_get_read_batch (Nico Pache) [2189349 2181263]
+Resolves: rhbz#2184152, rhbz#2187447, rhbz#2189349, rhbz#2189487, rhbz#2192585, rhbz#2196134, rhbz#2203229, rhbz#2203335, rhbz#2208242, rhbz#2209045
+
+* Thu May 18 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.16.1.el9_2]
+- perf: Fix check before add_event_to_groups() in perf_group_detach() (Michael Petlan) [2192659 2192660] {CVE-2023-2235}
+- sched/core: Fix arch_scale_freq_tick() on tickless systems (Phil Auld) [2203178 1996625]
+- ice: sleep, don't busy-wait, in the SQ send retry loop (Michal Schmidt) [2203154 RHEL-406]
+- ice: remove unused buffer copy code in ice_sq_send_cmd_retry() (Michal Schmidt) [2203154 RHEL-406]
+- ice: sleep, don't busy-wait, for ICE_CTL_Q_SQ_CMD_TIMEOUT (Michal Schmidt) [2203154 RHEL-406]
+- ice: remove ice_ctl_q_info::sq_cmd_timeout (Michal Schmidt) [2203154 RHEL-406]
+- ice: increase the GNSS data polling interval to 20 ms (Michal Schmidt) [2203154 RHEL-406]
+- ice: do not busy-wait to read GNSS data (Michal Schmidt) [2203154 RHEL-406]
+- redhat: set default zstream brew target for 9.2 (Herton R. Krzesinski)
+Resolves: rhbz#2192659, rhbz#2203154, rhbz#2203178
+
+* Thu May 11 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.15.1.el9_2]
+- redhat/configs: Fix incorrect configs location and content (Vladis Dronov)
+- wifi: iwlwifi: mvm: protect TXQ list manipulation (Jose Ignacio Tornos Martinez) [2186723 2183490]
+- wifi: iwlwifi: mvm: fix mvmtxq->stopped handling (Jose Ignacio Tornos Martinez) [2186723 2183490]
+Resolves: rhbz#2186723
+
+* Fri May 05 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.14.1.el9_2]
+- cpufreq: intel_pstate: hybrid: Use known scaling factor for P-cores (David Arcari) [2178857 2155861]
+- cpufreq: intel_pstate: Read all MSRs on the target CPU (David Arcari) [2178857 2155861]
+Resolves: rhbz#2178857
+
+* Thu Apr 27 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.13.1.el9_2]
+- sched/deadline: Add more reschedule cases to prio_changed_dl() (Valentin Schneider) [2188655 2123590]
+- sched/rt: Fix bad task migration for rt tasks (Valentin Schneider) [2187709 2182900]
+- crypto: qat - add support for 402xx devices (Vladis Dronov) [2176846 2144528]
+- crypto: qat - drop log level of msg in get_instance_node() (Vladis Dronov) [2176846 2144528]
+- crypto: qat - fix out-of-bounds read (Vladis Dronov) [2176846 2144528]
+- Documentation: qat: change kernel version (Vladis Dronov) [2176846 2144528]
+- crypto: qat - add qat_zlib_deflate (Vladis Dronov) [2176846 2144528]
+- crypto: qat - extend buffer list logic interface (Vladis Dronov) [2176846 2144528]
+- crypto: qat - fix spelling mistakes from 'bufer' to 'buffer' (Vladis Dronov) [2176846 2144528]
+- crypto: qat - add resubmit logic for decompression (Vladis Dronov) [2176846 2144528]
+- crypto: acomp - define max size for destination (Vladis Dronov) [2176846 2144528]
+- crypto: qat - enable deflate for QAT GEN4 (Vladis Dronov) [2176846 2144528]
+- crypto: qat - expose deflate through acomp api for QAT GEN2 (Vladis Dronov) [2176846 2144528]
+- crypto: qat - rename and relocate GEN2 config function (Vladis Dronov) [2176846 2144528]
+- crypto: qat - relocate qat_algs_alloc_flags() (Vladis Dronov) [2176846 2144528]
+- crypto: qat - relocate backlog related structures (Vladis Dronov) [2176846 2144528]
+- crypto: qat - extend buffer list interface (Vladis Dronov) [2176846 2144528]
+- crypto: qat - generalize crypto request buffers (Vladis Dronov) [2176846 2144528]
+- crypto: qat - change bufferlist logic interface (Vladis Dronov) [2176846 2144528]
+- crypto: qat - rename bufferlist functions (Vladis Dronov) [2176846 2144528]
+- crypto: qat - relocate bufferlist logic (Vladis Dronov) [2176846 2144528]
+- crypto: qat - Use helper to set reqsize (Vladis Dronov) [2176846 2144528]
+- crypto: kpp - Add helper to set reqsize (Vladis Dronov) [2176846 2144528]
+- crypto: qat - fix error return code in adf_probe (Vladis Dronov) [2176846 2144528]
+- crypto: qat - remove ADF_STATUS_PF_RUNNING flag from probe (Vladis Dronov) [2176846 2144528]
+Resolves: rhbz#2176846, rhbz#2187709, rhbz#2188655
+
+* Thu Apr 20 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.12.1.el9_2]
+- blk-mq: directly poll requests (Ming Lei) [2187536 2186507]
+- crypto: drbg - Only fail when jent is unavailable in FIPS mode (Vladis Dronov) [2181727 2175240]
+- crypto: jitter - permanent and intermittent health errors (Vladis Dronov) [2181727 2175240]
+- crypto: jitter - quit sample collection loop upon RCT failure (Vladis Dronov) [2181727 2175240]
+- crypto: jitter - don't limit ->health_failure check to FIPS mode (Vladis Dronov) [2181727 2175240]
+- crypto: jitter - drop kernel-doc notation (Vladis Dronov) [2181727 2175240]
+- KVM: VMX: Fix crash due to uninitialized current_vmcs (Vitaly Kuznetsov) [2186822 2181329]
+Resolves: rhbz#2181727, rhbz#2186822, rhbz#2187536
+
 * Wed Apr 12 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.11.1.el9_2]
 - vfio: Make the group FD disassociate from the iommu_group (Alex Williamson) [2180649]
 - vfio: Hold a reference to the iommu_group in kvm for SPAPR (Alex Williamson) [2180649]

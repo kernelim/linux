@@ -23,7 +23,7 @@ Merge requests can be created by pushing code to their fork and targeting <targe
 
 ----
 	git push -u <fork_name> <branch_name>
-	lab mr create  <origin> <target branch name>
+	lab mr create --remove-source-branch <origin> <target branch name>
 ----
 
 The last command will output the Merge Request URL that contains the Merge Request ID.

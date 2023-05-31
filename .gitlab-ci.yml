@@ -31,7 +31,7 @@ workflow: !reference [.workflow]
     branch: rhel9
   variables:
     name: rhel9
-    builder_image: quay.io/cki/builder-rhel9
+    builder_image: quay.io/cki/builder-rhel9.2
     kpet_tree_family: rhel9
 
 .realtime_check_c9s:

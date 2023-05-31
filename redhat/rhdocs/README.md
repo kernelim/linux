@@ -56,12 +56,12 @@ executed from the top level of documentation:
 Users making changes must include a "Signed-off-by:" tag on all commits that
 acknowledges the DCO, https://developercertificate.org.
 
-*** How to create a git commit ***
+**How to create a git commit**
 
 1. Fork https://gitlab.com/redhat/centos-stream/src/kernel/documentation in Gitlab
 2. Git clone your forked repository and create a private branch for your changes
 3. Don't touch the RHMAINTAINERS & CODEOWNERS files - only edit info/owners.yaml
-4. Run `make` after changing info/onwners.yaml but before before you `git commit`
+4. Run `make` after changing info/owners.yaml but before before you `git commit`
 5. Git push your private branch to Gitlab and create your merge request
 
 ```
@@ -97,7 +97,7 @@ the QE SST being added.
 MR authors, reviewers, and maintainers should discuss disagreements about ownership or role changes
 with their management.
 
-** validSSTNames.go Changes**
+**validSSTNames.go Changes**
 
 These changes include validSSTNames.go changes.  You must ensure the SST names themselves, and the SST name changes in the file are approved by RHEL management.  Changes to this file that have not been verified by management will be removed by reverting commits.
 

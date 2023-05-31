@@ -103,6 +103,7 @@ Abridged MR Submission Process
   command line steps.
   $ git checkout <workbranch>
   $ lab mr create \
+      --remove-source-branch \
       -f <edited-MR-description>.txt \
       --force-linebreak \
       -r <reviewer> -r <reviewer> -r <reviewer> \

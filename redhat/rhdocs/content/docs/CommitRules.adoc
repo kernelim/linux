@@ -20,7 +20,7 @@ These are the Red Hat Kernel Engineering Guidelines and 'Best Practices' for com
 
 Following the upstream kernel patch guidelines will satisfy the general construction of commits, but there are additional rules specific to Red Hat to assist in changeset tracking, accounting, and reviewing.  Other than the differences noted in this document, following the upstream process is generally accepted as good practice.
 
-This document assumes that the reader is comfortable with the concepts of git, GitLab, commit and patch generation, and has a general knowledge of the upstream linux.git's Documentation/SubmittingPatches.  *The explanation of these concepts are not within the scope of this document*.
+https://redhat.gitlab.io/centos-stream/src/kernel/documentation/[Please ensure that you are familiar with the technical requirements.]
 
 Red Hat uses GitLab to manage the patch workflow, and all changes must be submitted as GitLab merge requests.  Contributors can use the GitLab UI to submit merge requests.  Alternatively, tools such as xref:lab.adoc[lab] or xref:revumatic.adoc[revumatic] can be used to work with the merge requests.
 

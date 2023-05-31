@@ -30,23 +30,55 @@ For example, the rhel-8 repository contains branches and the main branch (as of 
   remotes/origin/main +
   remotes/origin/main-rt
 
-|===
-|Name|Type|Description
 
-|https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9[CentOS-Stream 9 kernel]|public|Public kernel tree for future RHEL9 development
-|https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-8[CentOS-Stream 8 kernel]|public|Public kernel tree for future RHEL8 development
-|https://gitlab.com/cki-project/kernel-ark.git[Fedora/ARK]|public|https://cki-project.gitlab.io/kernel-ark/[https://cki-project.gitlab.io/kernel-ark/]
-|https://gitlab.com/redhat/rhel/src/kernel/rhel-5[RHEL-5]|private|RHEL-5 is a private tree restricted to Red Hat employees only.  The git history of this tree contains Red Hat private information and partner data.  This tree will never be made public.
-|https://gitlab.com/redhat/rhel/src/kernel/rhel-6[RHEL-6]|private|RHEL-6 is a private tree restricted to Red Hat employees only.  The git history of this tree contains Red Hat private information and partner data.  This tree will never be made public.
-|https://gitlab.com/redhat/rhel/src/kernel/rhel-7[RHEL-7]|private|RHEL-7 is a private tree restricted to Red Hat employees only.  The git history of this tree contains Red Hat private information and partner data.  This tree will never be made public.
-|https://gitlab.com/redhat/rhel/src/kernel/rhel-alt-7[RHEL-alt-7]|private|RHEL-alt-7 is a private tree restricted to Red Hat employees only.  The git history of this tree contains Red Hat private information and partner data.  This tree will never be made public.
-|https://gitlab.com/redhat/rhel/src/kernel/rhel-8[RHEL-8]|private|RHEL-8 is a private tree restricted to Red Hat employees only.  The git history of this tree contains Red Hat private information and partner data.  This tree will never be made public.  Various sanitized versions exist through CentOS-Stream or the partner program.
-|https://gitlab.com/redhat/rhel/src/kernel/rhel-9[RHEL-9]|private|Future tree for RHEL-9 development. See CentOS-Stream for tree location for main development. The CentOS-Stream 9 repository should be used for general development.  The RHEL-9 tree only contains z-stream branches.
-|https://gitlab.com/redhat/rhel/kernel/8.y/kernel-test/[kernel-test]|private|Private tree to test webhooks, internal scripts, user process, user’s scripts, etc.
-|https://gitlab.com/redhat/centos-stream/src/kernel/utils/tools[Kernel tools]|public|A collection of useful tools and scripts for working with the RHEL, Fedora, and CentOS kernels.  This repository contains the git-backport tool.
-|https://gitlab.com/redhat/centos-stream/src/kernel/documentation[Kernel documentation]|public|Documentation on RHEL, Fedora, and CentOS kernels.
-|Embargoed|Private, with additional restricted access.   In some cases, these are Red Hat internal only.|Used to resolve CVE and other partner-related embargoed issues.
-|===
+=== Public
+
+https://gitlab.com/redhat/centos-stream/src/kernel/documentation[Documentation on RHEL, Fedora, and CentOS kernel workflow]
+
+https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-8[CentOS-Stream 8 kernel]
+for future RHEL8 development
+
+https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9[CentOS-Stream 9 kernel]
+for general and future RHEL9 development
+
+https://gitlab.com/cki-project/kernel-ark.git[Fedora/ARK] and
+https://cki-project.gitlab.io/kernel-ark/[Fedora/ARK kernel documentation]
+
+https://gitlab.com/redhat/centos-stream/src/kernel/utils/tools[Kernel tools] &ndash;
+a collection of useful tools and scripts including
+https://gitlab.com/redhat/centos-stream/src/kernel/utils/tools/-/blob/main/git-backport[git-backport] tool
+
+
+=== Private
+
+Private repositories contain Red Hat private information and partner data
+and are restricted to Red Hat employees only.
+These repositories will never be made public.
+
+https://gitlab.com/redhat/rhel/src/kernel/rhel-8-sandbox[RHEL-8 sandbox],
+https://gitlab.com/redhat/rhel/src/kernel/rhel-9-sandbox[RHEL-9 sandbox]
+&ndash; to test webhooks, internal scripts, user process, user’s scripts, etc.
+
+https://gitlab.com/redhat/rhel/src/kernel/rhel-8[RHEL-8] &ndash;
+private, but various sanitized versions exist through CentOS-Stream or the partner program.
+
+https://gitlab.com/redhat/rhel/src/kernel/rhel-9[RHEL-9] &ndash;
+Future tree for RHEL-9 development.
+See CentOS-Stream for tree location for main development.
+The CentOS-Stream 9 repository should be used for general development.
+The RHEL-9 tree only contains z-stream branches.
+
+https://gitlab.com/redhat/rhel/src/kernel/rhel-5[RHEL-5],
+https://gitlab.com/redhat/rhel/src/kernel/rhel-6[RHEL-6],
+https://gitlab.com/redhat/rhel/src/kernel/rhel-7[RHEL-7]
+
+https://gitlab.com/redhat/rhel/src/kernel/rhel-alt-7[RHEL-alt-7]
+&ndash; archived project.
+
+Embargoed &ndash; with additional restricted access.
+In some cases, these are Red Hat internal only.
+Used to resolve CVE and other partner-related embargoed issues.
+
 
 == dist-git repositories
 

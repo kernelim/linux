@@ -21,37 +21,35 @@ Makefile.rhelver	lgoncalv@redhat.com
 Makefile.rhelver	herton@redhat.com
 
 [RHEL 9.2 Real Time Kernel Maintainer]
-Makefile.rhelver	lgoncalv@redhat.com
+Makefile.rhelver	debarbos@redhat.com
 
 [RHEL 9.1 Kernel Maintainer]
 Makefile.rhelver	ptalbert@redhat.com
 
 [RHEL/ARK/Centos-Stream General Kernel Reviewers]
 makefile	herton@redhat.com jforbes@fedoraproject.org
+Makefile	herton@redhat.com jforbes@fedoraproject.org
 redhat/	herton@redhat.com jforbes@fedoraproject.org
 Kconfig.redhat	herton@redhat.com jforbes@fedoraproject.org
 ^redhat/configs/	herton@redhat.com jforbes@fedoraproject.org
 
-[RHEL 9.1 Real Time Kernel Maintainer]
-Makefile.rhelver	lgoncalv@redhat.com
-
 [RHEL 9.0 Kernel Maintainer]
-Makefile.rhelver	jstancek@redhat.com
+Makefile.rhelver	jfaracco@redhat.com
 
 [RHEL 9.0 Real Time Kernel Maintainer]
-Makefile.rhelver	lgoncalv@redhat.com lleshchi@redhat.com
+Makefile.rhelver	ezulian@redhat.com
+
+[CentOS Stream 8 Real Time Kernel Maintainer]
+Makefile.rhelver	jwyatt@redhat.com
 
 [RHEL 8.8 Kernel Maintainer]
 Makefile.rhelver	lzampier@redhat.com
 
 [RHEL 8.8 Real Time Kernel Maintainer]
-Makefile.rhelver	jwyatt@redhat.com chwhite@redhat.com
+Makefile.rhelver	tyberry@redhat.com
 
 [RHEL 8.7 Kernel Maintainer]
 Makefile.rhelver	jarod@redhat.com
-
-[RHEL 8.7 Real Time Kernel Maintainer]
-Makefile.rhelver	chwhite@redhat.com
 
 [RHEL 8.6 Kernel Maintainer]
 Makefile.rhelver	acaringi@redhat.com
@@ -85,9 +83,6 @@ Makefile	rvrbovsk@redhat.com
 
 [RHEL 7.6 Kernel Maintainer]
 Makefile	dvlasenk@redhat.com
-
-[RHEL 7.6 Real Time Kernel Maintainer]
-Makefile	lgoncalv@redhat.com
 
 [RHEL 7.4 Kernel Maintainer]
 Makefile	dvlasenk@redhat.com
@@ -255,14 +250,14 @@ include/net/bluetooth/	dmarlin@redhat.com
 net/bluetooth/	dmarlin@redhat.com
 
 ^[BONDING DRIVER]
-Documentation/networking/bonding.rst	jtoppins@redhat.com
-drivers/net/bonding/	jtoppins@redhat.com
-include/net/bond_3ad.h	jtoppins@redhat.com
-include/net/bond_alb.h	jtoppins@redhat.com
-include/net/bonding.h	jtoppins@redhat.com
-include/net/bond_options.h	jtoppins@redhat.com
-include/uapi/linux/if_bonding.h	jtoppins@redhat.com
-tools/testing/selftests/drivers/net/bonding/	jtoppins@redhat.com
+Documentation/networking/bonding.rst	haliu@redhat.com lxin@redhat.com
+drivers/net/bonding/	haliu@redhat.com lxin@redhat.com
+include/net/bond_3ad.h	haliu@redhat.com lxin@redhat.com
+include/net/bond_alb.h	haliu@redhat.com lxin@redhat.com
+include/net/bonding.h	haliu@redhat.com lxin@redhat.com
+include/net/bond_options.h	haliu@redhat.com lxin@redhat.com
+include/uapi/linux/if_bonding.h	haliu@redhat.com lxin@redhat.com
+tools/testing/selftests/drivers/net/bonding/	haliu@redhat.com lxin@redhat.com
 
 ^[BPF (Safe dynamic programs and tools)]
 arch/*/net/*	ykaliuta@redhat.com
@@ -318,12 +313,12 @@ drivers/net/ethernet/broadcom/Kconfig	jkc@redhat.com
 drivers/bus/	mstowe@redhat.com
 
 ^[CAN BUS]
-Documentation/networking/can.rst	pbrobinson@redhat.com
-include/linux/can/	pbrobinson@redhat.com
-include/uapi/linux/can/	pbrobinson@redhat.com
-include/uapi/linux/can.h	pbrobinson@redhat.com
-drivers/net/can/	pbrobinson@redhat.com
-net/can/	pbrobinson@redhat.com
+Documentation/networking/can.rst	perobins@redhat.com
+include/linux/can/	perobins@redhat.com
+include/uapi/linux/can/	perobins@redhat.com
+include/uapi/linux/can.h	perobins@redhat.com
+drivers/net/can/	perobins@redhat.com
+net/can/	perobins@redhat.com
 
 ^[CAVIUM LIQUIDIO NETWORK DRIVER]
 drivers/net/ethernet/cavium/liquidio/	ihuguet@redhat.com
@@ -650,36 +645,36 @@ mm/memory-failure.c	dnelson@redhat.com
 mm/hwpoison-inject.c	dnelson@redhat.com
 
 ^[Hyper-V CORE AND DRIVERS]
-Documentation/networking/device_drivers/microsoft/netvsc.txt	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-arch/arm64/hyperv/	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-arch/arm64/include/asm/hyperv-tlfs.h	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-arch/arm64/include/asm/mshyperv.h	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-arch/x86/include/asm/mshyperv.h	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-arch/x86/include/asm/trace/hyperv.h	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-arch/x86/include/asm/hyperv-tlfs.h	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-arch/x86/kernel/cpu/mshyperv.c	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-arch/x86/hyperv/	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-drivers/clocksource/hyperv_timer.c	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-drivers/hid/hid-hyperv.c	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-drivers/hv/	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-drivers/input/serio/hyperv-keyboard.c	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-drivers/pci/controller/pci-hyperv.c	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-drivers/pci/controller/pci-hyperv-intf.c	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-drivers/net/hyperv/	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-drivers/net/ethernet/microsoft/	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-drivers/scsi/storvsc_drv.c	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-drivers/uio/uio_hv_generic.c	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-drivers/video/fbdev/hyperv_fb.c	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-drivers/iommu/hyperv-iommu.c	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-net/vmw_vsock/hyperv_transport.c	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-include/clocksource/hyperv_timer.h	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-include/linux/hyperv.h	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-include/uapi/linux/hyperv.h	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-include/asm-generic/mshyperv.h	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-include/net/mana/	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-tools/hv/	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-Documentation/ABI/stable/sysfs-bus-vmbus	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-Documentation/ABI/testing/debugfs-hyperv	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
+Documentation/networking/device_drivers/microsoft/netvsc.txt	cavery@redhat.com vkuznets@redhat.com
+arch/arm64/hyperv/	cavery@redhat.com vkuznets@redhat.com
+arch/arm64/include/asm/hyperv-tlfs.h	cavery@redhat.com vkuznets@redhat.com
+arch/arm64/include/asm/mshyperv.h	cavery@redhat.com vkuznets@redhat.com
+arch/x86/include/asm/mshyperv.h	cavery@redhat.com vkuznets@redhat.com
+arch/x86/include/asm/trace/hyperv.h	cavery@redhat.com vkuznets@redhat.com
+arch/x86/include/asm/hyperv-tlfs.h	cavery@redhat.com vkuznets@redhat.com
+arch/x86/kernel/cpu/mshyperv.c	cavery@redhat.com vkuznets@redhat.com
+arch/x86/hyperv/	cavery@redhat.com vkuznets@redhat.com
+drivers/clocksource/hyperv_timer.c	cavery@redhat.com vkuznets@redhat.com
+drivers/hid/hid-hyperv.c	cavery@redhat.com vkuznets@redhat.com
+drivers/hv/	cavery@redhat.com vkuznets@redhat.com
+drivers/input/serio/hyperv-keyboard.c	cavery@redhat.com vkuznets@redhat.com
+drivers/pci/controller/pci-hyperv.c	cavery@redhat.com vkuznets@redhat.com
+drivers/pci/controller/pci-hyperv-intf.c	cavery@redhat.com vkuznets@redhat.com
+drivers/net/hyperv/	cavery@redhat.com vkuznets@redhat.com
+drivers/net/ethernet/microsoft/	cavery@redhat.com vkuznets@redhat.com
+drivers/scsi/storvsc_drv.c	cavery@redhat.com vkuznets@redhat.com
+drivers/uio/uio_hv_generic.c	cavery@redhat.com vkuznets@redhat.com
+drivers/video/fbdev/hyperv_fb.c	cavery@redhat.com vkuznets@redhat.com
+drivers/iommu/hyperv-iommu.c	cavery@redhat.com vkuznets@redhat.com
+net/vmw_vsock/hyperv_transport.c	cavery@redhat.com vkuznets@redhat.com
+include/clocksource/hyperv_timer.h	cavery@redhat.com vkuznets@redhat.com
+include/linux/hyperv.h	cavery@redhat.com vkuznets@redhat.com
+include/uapi/linux/hyperv.h	cavery@redhat.com vkuznets@redhat.com
+include/asm-generic/mshyperv.h	cavery@redhat.com vkuznets@redhat.com
+include/net/mana/	cavery@redhat.com vkuznets@redhat.com
+tools/hv/	cavery@redhat.com vkuznets@redhat.com
+Documentation/ABI/stable/sysfs-bus-vmbus	cavery@redhat.com vkuznets@redhat.com
+Documentation/ABI/testing/debugfs-hyperv	cavery@redhat.com vkuznets@redhat.com
 
 ^[I2C SUBSYSTEM]
 Documentation/devicetree/bindings/i2c/	darcari@redhat.com
@@ -770,8 +765,8 @@ drivers/thermal/intel_powerclamp.c	prarit@redhat.com darcari@redhat.com
 drivers/counter/intel-qep.c	prarit@redhat.com darcari@redhat.com
 
 ^[INTEL QUICK ASSIST TECHNOLOGY (QAT)]
-drivers/crypto/qat/	vdronov@redhat.com tcamuso@redhat.com
-Documentation/ABI/testing/sysfs-driver-qat	vdronov@redhat.com tcamuso@redhat.com
+drivers/crypto/qat/	vdronov@redhat.com shoracek@redhat.com
+Documentation/ABI/testing/sysfs-driver-qat	vdronov@redhat.com shoracek@redhat.com
 
 [INTEL RAPL DRIVER]
 drivers/powercap/intel*	prarit@redhat.com darcari@redhat.com
@@ -877,11 +872,14 @@ arch/powerpc/kvm/	dgibson@redhat.com lvivier@redhat.com gkurz@redhat.com
 arch/powerpc/kernel/kvm*	dgibson@redhat.com lvivier@redhat.com gkurz@redhat.com
 
 ^[KERNEL VIRTUAL MACHINE for s390 (KVM/s390)]
-arch/s390/include/uapi/asm/kvm*	thuth@redhat.com cohuck@redhat.com david@redhat.com
-arch/s390/include/asm/gmap.h	thuth@redhat.com cohuck@redhat.com david@redhat.com
-arch/s390/include/asm/kvm*	thuth@redhat.com cohuck@redhat.com david@redhat.com
-arch/s390/kvm/	thuth@redhat.com cohuck@redhat.com david@redhat.com
-arch/s390/mm/gmap.c	thuth@redhat.com cohuck@redhat.com david@redhat.com
+arch/s390/include/uapi/asm/kvm*	thuth@redhat.com cohuck@redhat.com david@redhat.com clg@redhat.com
+arch/s390/include/asm/gmap.h	thuth@redhat.com cohuck@redhat.com david@redhat.com clg@redhat.com
+arch/s390/include/asm/kvm*	thuth@redhat.com cohuck@redhat.com david@redhat.com clg@redhat.com
+arch/s390/kvm/	thuth@redhat.com cohuck@redhat.com david@redhat.com clg@redhat.com
+arch/s390/mm/gmap.c	thuth@redhat.com cohuck@redhat.com david@redhat.com clg@redhat.com
+tools/testing/selftests/drivers/s390x/uvdevice/	thuth@redhat.com cohuck@redhat.com david@redhat.com clg@redhat.com
+tools/testing/selftests/kvm/*/s390x/	thuth@redhat.com cohuck@redhat.com david@redhat.com clg@redhat.com
+tools/testing/selftests/kvm/s390x/	thuth@redhat.com cohuck@redhat.com david@redhat.com clg@redhat.com
 
 ^[KERNEL VIRTUAL MACHINE FOR X86 (KVM/x86)]
 arch/x86/kvm/	pbonzini@redhat.com bsd@redhat.com vkuznets@redhat.com
@@ -1259,11 +1257,11 @@ fs/nfs/	bcodding@redhat.com jlayton@redhat.com steved@redhat.com smayhew@redhat.
 fs/nfsd/	bcodding@redhat.com jlayton@redhat.com steved@redhat.com smayhew@redhat.com
 
 ^[NITRO ENCLAVES (NE)]
-Documentation/virt/ne_overview.rst	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-drivers/virt/nitro_enclaves/	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-include/linux/nitro_enclaves.h	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-include/uapi/linux/nitro_enclaves.h	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
-samples/nitro_enclaves/	cavery@redhat.com mgamal@redhat.com vkuznets@redhat.com
+Documentation/virt/ne_overview.rst	cavery@redhat.com vkuznets@redhat.com
+drivers/virt/nitro_enclaves/	cavery@redhat.com vkuznets@redhat.com
+include/linux/nitro_enclaves.h	cavery@redhat.com vkuznets@redhat.com
+include/uapi/linux/nitro_enclaves.h	cavery@redhat.com vkuznets@redhat.com
+samples/nitro_enclaves/	cavery@redhat.com vkuznets@redhat.com
 
 ^[NON TRANSPARENT BRIDGE]
 drivers/ntb/	mstowe@redhat.com prarit@redhat.com darcari@redhat.com
@@ -1355,7 +1353,7 @@ drivers/net/pcs/	vinschen@redhat.com
 include/linux/pcs/	vinschen@redhat.com
 
 ^[Pensando Ethernet IONIC Driver]
-drivers/net/ethernet/pensando/	jtoppins@redhat.com
+drivers/net/ethernet/pensando/	mschmidt@redhat.com
 
 ^[PERFORMANCE EVENTS SUBSYSTEM]
 kernel/events/	mpetlan@redhat.com
@@ -1507,9 +1505,9 @@ drivers/s390/	sbest@redhat.com
 ^drivers/s390/virtio/	sbest@redhat.com
 
 ^[S390 VFIO-CCW DRIVER]
-drivers/s390/cio/vfio_ccw*	cohuck@redhat.com
-Documentation/s390/vfio-ccw.txt	cohuck@redhat.com
-include/uapi/linux/vfio_ccw.h	cohuck@redhat.com
+drivers/s390/cio/vfio_ccw*	cohuck@redhat.com clg@redhat.com
+Documentation/s390/vfio-ccw.txt	cohuck@redhat.com clg@redhat.com
+include/uapi/linux/vfio_ccw.h	cohuck@redhat.com clg@redhat.com
 
 ^[SAMPLES]
 samples/Kconfig	alex.williamson@redhat.com smitterl@redhat.com zhguo@redhat.com
@@ -1787,7 +1785,7 @@ drivers/crypto/virtio/	mst@redhat.com jasowang@redhat.com
 include/uapi/linux/virtio_crypto.h	mst@redhat.com jasowang@redhat.com
 
 ^[VIRTIO DRIVERS FOR S390]
-drivers/s390/virtio/	cohuck@redhat.com
+drivers/s390/virtio/	cohuck@redhat.com clg@redhat.com
 
 ^[VIRTIO GPU DRIVER]
 drivers/gpu/drm/virtio/	kraxel@redhat.com
@@ -1802,7 +1800,7 @@ drivers/virtio/virtio_input.c	kraxel@redhat.com
 include/uapi/linux/virtio_input.h	kraxel@redhat.com
 
 ^[VIRTUALIZATION SUPPORT DRIVERS]
-drivers/virt/	vkuznets@redhat.com cavery@redhat.com mgamal@redhat.com
+drivers/virt/	vkuznets@redhat.com cavery@redhat.com
 
 ^[VMWARE PVRDMA DRIVER (vmw_pvrdma)]
 drivers/infiniband/hw/vmw_pvrdma/	kheib@redhat.com
@@ -1920,8 +1918,8 @@ arch/x86/pci/xen.c	vkuznets@redhat.com imammedo@redhat.com
 arch/x86/xen/	vkuznets@redhat.com imammedo@redhat.com
 
 ^[XFS FILESYSTEM]
-Documentation/filesystems/xfs.txt	bfoster@redhat.com cmaiolino@redhat.com esandeen@redhat.com bodonnel@redhat.com dchinner@redhat.com
-fs/xfs/	bfoster@redhat.com cmaiolino@redhat.com esandeen@redhat.com bodonnel@redhat.com dchinner@redhat.com
+Documentation/filesystems/xfs.txt	bfoster@redhat.com cmaiolino@redhat.com esandeen@redhat.com bodonnel@redhat.com dchinner@redhat.com aalbersh@redhat.com
+fs/xfs/	bfoster@redhat.com cmaiolino@redhat.com esandeen@redhat.com bodonnel@redhat.com dchinner@redhat.com aalbersh@redhat.com
 
 ^[ZRAM COMPRESSED RAM BLOCK DEVICE DRVIER]
 drivers/block/zram/	jmarchan@redhat.com

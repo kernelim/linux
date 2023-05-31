@@ -30,9 +30,7 @@ Constructive updates and contributions are welcomed and are greatly appreciated.
 
 Problems or concerns with the workflow can be addressed on mailto:kernel-info@redhat.com[kernel-info@redhat.com] or by filing a GitLab issue at https://gitlab.com/redhat/rhel/src/kernel/bugreports[Red Hat Kernel bug reports].
 
-== Scope
-
-It is expected that readers are familiar with the concepts of git, kernel code hacking, and backporting code changes from upstream trees.  *The explanation of these concepts are not found within this guide*.
+https://redhat.gitlab.io/centos-stream/src/kernel/documentation/[Please ensure that you are familiar with the technical requirements.]
 
 == Definitions
 
@@ -54,7 +52,42 @@ There are five roles (Red Hat Contributor, Red Hat Partner Contributor, Communit
 
 Each role will require a different level of code access.  For example, Maintainers will require access to both source-git and dist-git repositories, while Management may only require access to statistical information from the source-git repositories.
 
-image::images/rhel_kernel_workflow1.png[1200,800,align="center"]
+{{< mermaid >}}
+flowchart LR
+	subgraph GitLab
+		subgraph Kernel Workwflow
+			subgraph Public
+				public_src[source-git]
+				public_dist[dist-git]
+				public_src-->public_dist
+			end
+			subgraph Private
+				private_src[source-git]
+			end
+			subgraph Secret
+				secret_src[source-git]
+				secret_src --> private_src
+			end
+		end
+	end
+	private_src-->rh_dist
+	public_dist-->|Sync'd|rh_dist
+	public_dist-->|Sync'd|cos_dist
+	subgraph Red Hat
+		subgraph Red Hat Workwflow
+			rh_dist[dist-git]
+		end
+	end
+	subgraph CentOS
+		subgraph CentOS Workwflow
+			cos_dist[dist-git]
+		end
+	end
+{{< /mermaid >}}
+
+- Public: CentOS-Stream / RHEL-9, Fedora / ARK (common)
+- Private: RHEL-8 (common), RHEL-9 (z-stream)
+- Secret: CVE, Embargo (Uncommon)
 
 === What is my role?
 
@@ -85,7 +118,24 @@ Red Hat managers track changes made to the Red Hat kernels.  Managers that requi
 
 Contributors, maintainers, and management can interact with projects through the WebUI, through API/CLI tools, or via SSH.  Contributors can make direct contributions by submitting MRs to the main git tree, or make indirect contributions via submaintainers.
 
-image::images/rhel_kernel_workflow2.png[1200,800,align="center"]
+{{< mermaid >}}
+flowchart LR
+	Contributor((Contributor))
+	Contributor --> GitLab
+	Maintainer((Maintainer))
+	Maintainer --> GitLab
+	Management((Management))
+	Management --> GitLab
+	GitLab["GitLab interfaces:\nWebUI\nCLI / API\nSSH"]
+	subgraph " "
+		sub[Sub-main git tree]
+		main[Main git tree]
+		sub --> main
+		main ~~~ sub
+	end
+	GitLab -- Direct --> main
+	GitLab -- Indirect --> sub
+{{< /mermaid >}}
 
 Determine which role you are interested in from the diagram above, and read the section on that role below.
 
@@ -129,12 +179,6 @@ All Red Hat QE Engineers must have a link:rhel_kernel_workflow.adoc#bugzilla-con
 
 CI / Workflow contributors are responsible for the backend automation that implements https://gitlab.com/cki-project/kernel-webhooks[https://gitlab.com/cki-project/kernel-webhooks] project.
 
-=== Maintainer
-
-Maintainers are responsible for integrating GitLab MRs to the Red Hat kernel into a branch and ensuring the link:CommitRules.adoc[Red Hat Kernel Guidelines for Commits and Merge Requests] are followed.  Maintainers are  responsible for pushing branches to the next stage of development.
-
-The commit rules are enforced by <<Kernel-webhooks>> and GitLab.
-
 ==== Setup
 
 New users should follow the <<Account Setup & Configuration>>.
@@ -143,9 +187,9 @@ All Red Hat maintainers must have a link:rhel_kernel_workflow.adoc#bugzilla-conf
 
 ==== Kernel Maintainer
 
-The kernel maintainer is a maintainer that commits and pushes changes from the source git tree to the dist-git tree. They are responsible for following the TBD:<dist-git process>.
+The maintainers integrate GitLab MRs to the Red Hat kernel stream branch, ensuring compliance with the link:CommitRules.adoc[Red Hat Kernel Guidelines for Commits and Merge Requests]. They perform kernel builds for each stream, add bugs to erratas, and ensure proper bug triaging.
 
-Kernel maintainers can use the TBD:<Patch Ready Process> to determine which MRs can be committed to the git tree.
+The kernel maintainer commits and pushes changes from the source-git tree to the dist-git tree, following the link:https://gitlab.com/redhat/rhel/sst/kernel-maintainers/docs/-/blob/master/workflow-zstream.adoc[Z-stream] and link:https://gitlab.com/redhat/rhel/sst/kernel-maintainers/docs/-/blob/master/build-ystream.adoc[Y-stream] processes. Kernel maintainers can determine which MRs can be merged to the source-git by using the kernel-webhooks ReadyForMerge status on merge requests.
 
 ==== Kernel Submaintainer
 
@@ -294,7 +338,8 @@ Descriptions of the webhooks can be found in the https://gitlab.com/cki-project/
 
 One can subscribe to any label in GitLab, and receive any and all notifications for any merge request.
 
-=== Continuous Integration (CI)
+=== CI/CD
+==== Continuous Integration (CI)
 
 The CI service implemented by the Continuous Kernel Integration Project (CKI), is responsible for building test kernels and testing kernel changes.
 
@@ -302,7 +347,7 @@ We strongly encourage people new to the workflow to read the https://cki-project
 
 On a daily basis, people should refer to the https://cki-project.org/docs/user_docs/gitlab-mr-testing/faq/[FAQ] containing step by step debugging guides and answers for common questions.
 
-=== Continuous Delivery (CD)
+==== Continuous Delivery (CD)
 
 TBD.
 

@@ -17,7 +17,7 @@ summary: Entry point.
 
 This document aims to help you quickly get started with contributing to the Red Hat-based kernel projects including https://gitlab.com/redhat/rhel/src/kernel[RHEL kernels], https://gitlab.com/centos-stream/src/kernel[CentOS Stream kernels], and https://gitlab.com/cki-project/kernel-ark[the Fedora/ARK kernel].
 
-It is expected that readers are familiar with the concepts of git, kernel code hacking, and backporting code changes from upstream trees. *This guide does not cover explanations of such concepts*.
+https://redhat.gitlab.io/centos-stream/src/kernel/documentation/[Please ensure that you are familiar with the technical requirements.]
 
 The target audience of this document is a Red Hat Kernel Developer or Partner Engineer. +
 [.small]_Instructions for External Contributors will be provided in a separate document._
@@ -115,15 +115,16 @@ Note that GitLab username is used for the remote name.
 
 == Creating merge requests
 
-. Familiarize yourself with link:CommitRules.adoc[Commit Rules] and xref:verifying_a_gitlab_mr.adoc[Verify the MR information] documents.
+Familiarize yourself with link:CommitRules.adoc[Commit Rules] and xref:verifying_a_gitlab_mr.adoc[Verify the MR information] documents.
 
-=== Creating a merge request draft
+*Creating a merge request draft*
 
 When done with your work, create a merge request (MR) on some branch other than the `main` branch. +
 `git checkout -b <branch_name>` +
 `# do your work` +
 `git push -u _<GitLab_username>_ _<branch_name>_` +
-`lab mr create --draft --force-linebreak _[<origin>]_` +
+`lab mr create --remove-source-branch --draft --force-linebreak _[<origin>]_` +
+
 _Note that the previous command produces a MR URL that contains a MR ID._
 
 We strongly recommend that users of the `lab` utility use the `--draft` option to verify the changes pass the https://gitlab.com/cki-project/kernel-webhooks/[kernel project's webhooks]. +
@@ -140,7 +141,7 @@ and without `--force-linebreak`:
 image::images/qsg-lab_mr_create-noforcelinebreak.png[caption=""]
 
 
-=== Some tips
+*Some tips*
 
 If you choose to use Markdown, some common formatting problems can be found and addressed in xref:faq.adoc#commonformattingissues[FAQ "I followed the commit rules as detailed, why do I have a red label that is seemingly satisfied?"] and xref:faq.adoc#badformatting[FAQ "The formatting is bad, how do I fix it?"].
 
@@ -286,13 +287,7 @@ All approved MR's, assuming they have the +readyForMerge+ label, will normally b
 * link:what_is_a_GitLab_fork.adoc[What is a GitLab Fork?]
 * xref:faq.adoc[Frequently Asked Questions]
 * xref:rh_and_gitlab_configuration.adoc[Red Hat and GitLab Configuration]
-* xref:lab.adoc[Gitlab 'lab' utility and the Red Hat Kernel]
-* https://gitlab.com/prarit/rhstatus[rhstatus]
-* https://red.ht/kernel_workflow_doc[Main KWF documentation]
-* https://one.redhat.com/rhel-developer-guide[RHEL Developer guide]
 * https://gitlab.com/redhat/rhel/src/kernel/internal-docs/-/blob/main/CentOS-Stream-9_Workflow.adoc#user-content-red-hat-contributors[Which tree should I use for RHEL9?]
-* https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9[CentOS Stream 9 Kernel Tree]
-* https://gitlab.com/redhat/rhel/src/kernel/rhel-8[RHEL-8 Kernel Tree]
 * https://groups.google.com/a/redhat.com/g/kernel-info[kernel-info mailing list]
 
 

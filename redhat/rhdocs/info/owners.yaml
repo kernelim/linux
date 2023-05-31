@@ -166,9 +166,9 @@ subsystems:
      - rhel-sst-kernel-rts
    requiredApproval: true
    maintainers:
-     - name: Luis Claudio Goncalves
-       email: lgoncalv@redhat.com
-       gluser: lgoncalv
+     - name: Derek Barbosa
+       email: debarbos@redhat.com
+       gluser: debarbos
    paths:
        includes:
           - Makefile.rhelver
@@ -220,29 +220,23 @@ subsystems:
      - name: Jarod Wilson
        email: jarod@redhat.com
        gluser: jwilsonrh
+     - name: John B. Wyatt IV
+       email: jwyatt@redhat.com
+       gluser: jwyatt-rh
+     - name: Derek Barbosa
+       email: debarbos@redhat.com
+       gluser: debarbos
+     - name: Eder Zulian
+       email: ezulian@redhat.com
+       gluser: ezulian
    paths:
        includes:
           - makefile
+          - Makefile
           - redhat/
           - Kconfig.redhat
        excludes:
           - redhat/configs/
- - subsystem: RHEL 9.1 Real Time Kernel Maintainer
-   labels:
-     name: redhat
-   status: Supported
-   devel-sst:
-     - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-kernel-rts
-   requiredApproval: true
-   maintainers:
-     - name: Luis Claudio Goncalves
-       email: lgoncalv@redhat.com
-       gluser: lgoncalv
-   paths:
-       includes:
-          - Makefile.rhelver
  - subsystem: RHEL 9.0 Kernel Maintainer
    labels:
      name: redhat
@@ -253,9 +247,9 @@ subsystems:
      - rhel-sst-kernel-maintainers
    requiredApproval: true
    maintainers:
-     - name: Jan Stancek
-       email: jstancek@redhat.com
-       gluser: jstancek
+     - name: Julio Faracco
+       email: jfaracco@redhat.com
+       gluser: jfaracco
    paths:
        includes:
           - Makefile.rhelver
@@ -269,12 +263,25 @@ subsystems:
      - rhel-sst-kernel-rts
    requiredApproval: true
    maintainers:
-     - name: Luis Claudio Goncalves
-       email: lgoncalv@redhat.com
-       gluser: lgoncalv
-     - name: Leah Leshchinsky
-       email: lleshchi@redhat.com
-       gluser: lleshchi
+     - name: Eder Zulian
+       email: ezulian@redhat.com
+       gluser: ezulian
+   paths:
+       includes:
+          - Makefile.rhelver
+ - subsystem: CentOS Stream 8 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   devel-sst:
+     - rhel-sst-kernel-rts
+   qe-sst:
+     - rhel-sst-kernel-rts
+   requiredApproval: true
+   maintainers:
+     - name: John B. Wyatt IV
+       email: jwyatt@redhat.com
+       gluser: jwyatt-rh
    paths:
        includes:
           - Makefile.rhelver
@@ -304,12 +311,9 @@ subsystems:
      - rhel-sst-kernel-rts
    requiredApproval: true
    maintainers:
-     - name: John B. Wyatt IV
-       email: jwyatt@redhat.com
-       gluser: jwyatt-rh
-     - name: Chris White
-       email: chwhite@redhat.com
-       gluser: chwhite1
+     - name: Tyonnchie Berry
+       email: tyberry@redhat.com
+       gluser: tyberry
    paths:
        includes:
           - Makefile.rhelver
@@ -326,22 +330,6 @@ subsystems:
      - name: Jarod Wilson
        email: jarod@redhat.com
        gluser: jwilsonrh
-   paths:
-       includes:
-          - Makefile.rhelver
- - subsystem: RHEL 8.7 Real Time Kernel Maintainer
-   labels:
-     name: redhat
-   status: Supported
-   devel-sst:
-     - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-kernel-rts
-   requiredApproval: true
-   maintainers:
-     - name: Chris White
-       email: chwhite@redhat.com
-       gluser: chwhite1
    paths:
        includes:
           - Makefile.rhelver
@@ -483,7 +471,7 @@ subsystems:
      - rhel-sst-kernel-rts
    requiredApproval: true
    maintainers:
-     - name: Scott Wood
+     - name: Crystal Wood
        email: swood@redhat.com
        gluser: swood3
    paths:
@@ -518,22 +506,6 @@ subsystems:
      - name: Denys Vlasenko
        email: dvlasenk@redhat.com
        gluser: dvlasenk
-   paths:
-       includes:
-          - Makefile
- - subsystem: RHEL 7.6 Real Time Kernel Maintainer
-   labels:
-     name: redhat
-   status: Supported
-   devel-sst:
-     - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-kernel-rts
-   requiredApproval: true
-   maintainers:
-     - name: Luis Claudio Goncalves
-       email: lgoncalv@redhat.com
-       gluser: lgoncalv
    paths:
        includes:
           - Makefile
@@ -786,9 +758,6 @@ subsystems:
      - name: Íñigo Huguet
        email: ihuguet@redhat.com
        gluser: ihuguet-rh
-     - name: Jonathan Toppins
-       email: jtoppins@redhat.com
-       gluser: jtoppins_redhat
      - name: Izabela Bakollari
        email: ibakolla@redhat.com
        gluser: ibakolla
@@ -941,9 +910,6 @@ subsystems:
      - name: Ivan Vecera
        email: ivecera@redhat.com
        gluser: ivecera
-     - name: Jonathan Toppins
-       email: jtoppins@redhat.com
-       gluser: jtoppins_redhat
      - name: Josef Oskera
        email: joskera@redhat.com
        gluser: joskera
@@ -1429,14 +1395,17 @@ subsystems:
      name: bonding
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-networking
    qe-sst:
      - rhel-sst-nic-rdma
    requiredApproval: false
    maintainers:
-     - name: Jonathan Toppins
-       email: jtoppins@redhat.com
-       gluser: jtoppins_redhat
+     - name: Hangbin Liu
+       email: haliu@redhat.com
+       gluser: liuhangbin
+     - name: Xin Long
+       email: lxin@redhat.com
+       gluser: lxin.redhat
    reviewers:
      - name: Jarod Wilson
        email: jarod@redhat.com
@@ -1468,9 +1437,6 @@ subsystems:
      - name: Íñigo Huguet
        email: ihuguet@redhat.com
        gluser: ihuguet-rh
-     - name: Jonathan Toppins
-       email: jtoppins@redhat.com
-       gluser: jtoppins_redhat
      - name: Josef Oskera
        email: joskera@redhat.com
        gluser: joskera
@@ -1733,8 +1699,8 @@ subsystems:
    requiredApproval: false
    maintainers:
      - name: Peter Robinson
-       email: pbrobinson@redhat.com
-       gluser: pbrobinson
+       email: perobins@redhat.com
+       gluser: perobins
    paths:
        includes:
           - Documentation/networking/can.rst
@@ -2680,9 +2646,6 @@ subsystems:
      - name: Íñigo Huguet
        email: ihuguet@redhat.com
        gluser: ihuguet-rh
-     - name: Jonathan Toppins
-       email: jtoppins@redhat.com
-       gluser: jtoppins_redhat
      - name: Josef Oskera
        email: joskera@redhat.com
        gluser: joskera
@@ -2752,9 +2715,6 @@ subsystems:
      - name: Ivan Vecera
        email: ivecera@redhat.com
        gluser: ivecera
-     - name: Jonathan Toppins
-       email: jtoppins@redhat.com
-       gluser: jtoppins_redhat
      - name: Josef Oskera
        email: joskera@redhat.com
        gluser: joskera
@@ -3157,6 +3117,25 @@ subsystems:
           - kernel/futex/
           - tools/perf/bench/futex*
           - tools/testing/selftests/futex/
+ - subsystem: GCC PLUGINS
+   labels:
+     name: gccplugins
+   status: Disabled
+   devel-sst:
+     - rhel-sst-arch-hw
+   qe-sst:
+     - rhel-sst-arch-hw
+   requiredApproval: false
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - scripts/gcc-plugins/
  - subsystem: GCOV
    labels:
      name: redhat
@@ -3504,9 +3483,6 @@ subsystems:
      - name: Cathy Avery
        email: cavery@redhat.com
        gluser: cavery
-     - name: Mohammed Gamal
-       email: mgamal@redhat.com
-       gluser: mgamal-rh
      - name: Vitaly Kuznetsov
        email: vkuznets@redhat.com
        gluser: vkuznets
@@ -3658,9 +3634,6 @@ subsystems:
      - name: Íñigo Huguet
        email: ihuguet@redhat.com
        gluser: ihuguet-rh
-     - name: Jonathan Toppins
-       email: jtoppins@redhat.com
-       gluser: jtoppins_redhat
      - name: Josef Oskera
        email: joskera@redhat.com
        gluser: joskera
@@ -3835,9 +3808,6 @@ subsystems:
      - name: Íñigo Huguet
        email: ihuguet@redhat.com
        gluser: ihuguet-rh
-     - name: Jonathan Toppins
-       email: jtoppins@redhat.com
-       gluser: jtoppins_redhat
      - name: Josef Oskera
        email: joskera@redhat.com
        gluser: joskera
@@ -4069,7 +4039,7 @@ subsystems:
      name: intel_qat
    status: Supported
    devel-sst:
-     - rhel-sst-arch-hw
+     - rhel-sst-kernel-security
    qe-sst:
      - rhel-sst-arch-hw
    requiredApproval: false
@@ -4077,6 +4047,10 @@ subsystems:
      - name: Vladis Dronov
        email: vdronov@redhat.com
        gluser: NefigTut
+     - name: Stepan Horacek
+       email: shoracek@redhat.com
+       gluser: shoracek
+   reviewers:
      - name: Tony Camuso
        email: tcamuso@redhat.com
        gluser: tcamuso
@@ -4510,6 +4484,9 @@ subsystems:
      - name: David Hildenbrand
        email: david@redhat.com
        gluser: davidhildenbrand
+     - name: Cédric Le Goater
+       email: clg@redhat.com
+       gluser: clegoate
    paths:
        includes:
           - arch/s390/include/uapi/asm/kvm*
@@ -4517,6 +4494,9 @@ subsystems:
           - arch/s390/include/asm/kvm*
           - arch/s390/kvm/
           - arch/s390/mm/gmap.c
+          - tools/testing/selftests/drivers/s390x/uvdevice/
+          - tools/testing/selftests/kvm/*/s390x/
+          - tools/testing/selftests/kvm/s390x/
    mailingList: rhvirt-patches@redhat.com
  - subsystem: KERNEL VIRTUAL MACHINE FOR X86 (KVM/x86)
    labels:
@@ -5050,6 +5030,25 @@ subsystems:
    paths:
        includes:
           - drivers/mtd/
+ - subsystem: MEN CHAMELEON BUS (MCB)
+   labels:
+     name: menchameleon
+   status: Disabled
+   devel-sst:
+     - rhel-sst-arch-hw
+   qe-sst:
+     - rhel-sst-arch-hw
+   requiredApproval: false
+   maintainers:
+     - name: Doug Ledford
+       email: dledford@redhat.com
+       gluser: dledford
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
+   paths:
+       includes:
+          - drivers/mcb/
  - subsystem: MFD DRIVERS (Multi Function Devices)
    labels:
      name: mfd
@@ -5402,9 +5401,6 @@ subsystems:
      - name: Íñigo Huguet
        email: ihuguet@redhat.com
        gluser: ihuguet-rh
-     - name: Jonathan Toppins
-       email: jtoppins@redhat.com
-       gluser: jtoppins_redhat
      - name: Josef Oskera
        email: joskera@redhat.com
        gluser: joskera
@@ -5800,9 +5796,6 @@ subsystems:
      - name: Cathy Avery
        email: cavery@redhat.com
        gluser: cavery
-     - name: Mohammed Gamal
-       email: mgamal@redhat.com
-       gluser: mgamal-rh
      - name: Vitaly Kuznetsov
        email: vkuznets@redhat.com
        gluser: vkuznets
@@ -6230,9 +6223,9 @@ subsystems:
      - rhel-sst-nic-rdma
    requiredApproval: false
    maintainers:
-     - name: Jonathan Toppins
-       email: jtoppins@redhat.com
-       gluser: jtoppins_redhat
+     - name: Michal Schmidt
+       email: mschmidt@redhat.com
+       gluser: mschmidt2
    paths:
        includes:
           - drivers/net/ethernet/pensando/
@@ -6256,6 +6249,9 @@ subsystems:
      - name: Yauheni Kaliuta
        email: ykaliuta@redhat.com
        gluser: ykaliuta
+     - name: Cestmir Kalina
+       email: ckalina@redhat.com
+       gluser: ckalina
    paths:
        includes:
           - kernel/events/
@@ -7069,6 +7065,9 @@ subsystems:
      - name: Cornelia Huck
        email: cohuck@redhat.com
        gluser: cohuck
+     - name: Cédric Le Goater
+       email: clg@redhat.com
+       gluser: clegoate
    paths:
        includes:
           - drivers/s390/cio/vfio_ccw*
@@ -8274,6 +8273,9 @@ subsystems:
      - name: Cornelia Huck
        email: cohuck@redhat.com
        gluser: cohuck
+     - name: Cédric Le Goater
+       email: clg@redhat.com
+       gluser: clegoate
    paths:
        includes:
           - drivers/s390/virtio/
@@ -8354,9 +8356,6 @@ subsystems:
      - name: Cathy Avery
        email: cavery@redhat.com
        gluser: cavery
-     - name: Mohammed Gamal
-       email: mgamal@redhat.com
-       gluser: mgamal-rh
    paths:
        includes:
           - drivers/virt/
@@ -8518,9 +8517,6 @@ subsystems:
      - name: Ivan Vecera
        email: ivecera@redhat.com
        gluser: ivecera
-     - name: Jonathan Toppins
-       email: jtoppins@redhat.com
-       gluser: jtoppins_redhat
      - name: Josef Oskera
        email: joskera@redhat.com
        gluser: joskera
@@ -8776,6 +8772,9 @@ subsystems:
      - name: Dave Chinner
        email: dchinner@redhat.com
        gluser: dchinner
+     - name: Andrey Albershteyn
+       email: aalbersh@redhat.com
+       gluser: alberand-rh
    paths:
        includes:
           - Documentation/filesystems/xfs.txt

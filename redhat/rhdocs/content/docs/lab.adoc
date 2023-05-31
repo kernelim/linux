@@ -140,7 +140,7 @@ The common developer actions are forking a project, cloning a project, creating 
 A project link:what_is_a_GitLab_fork.adoc[can be forked] by executing
 
 ----
-	git clone mailto:git@gitlab.com[git@gitlab.com]:redhat/rhel/src/kernel/kernel-test
+	git clone git@gitlab.com:redhat/rhel/src/kernel/kernel-test
 	# The above command will fail if you have insufficient permissions for the project.
 	# See link:RH_and_GitLab_Configuration.adoc[Red Hat and GitLab Configuration] for information.
 	cd kernel-test
@@ -154,15 +154,15 @@ The fork process is the same process used on the gitlab webUI to create a fork. 
 A project can be cloned by executing a clone command on your resulting fork.  For example,
 
 ----
-	git clone mailto:git@gitlab.com[git@gitlab.com]:_prarit_/kernel-test.git
+	git clone git@gitlab.com:_prarit_/kernel-test.git
 ----
 
 Cloning the project will result in a different remote structure than forking a project.  It is recommended you execute
 
 ----
-	git remote add _prarit_ mailto:git@gitlab.com[git@gitlab.com]:_prarit_/kernel-test.git
+	git remote add _prarit_ git@gitlab.com:_prarit_/kernel-test.git
 	git remote remove origin
-	git remote add origin mailto:git@gitlab.com[git@gitlab.com]:redhat/rhel/src/kernel/kernel-test.git
+	git remote add origin git@gitlab.com:redhat/rhel/src/kernel/kernel-test.git
 ----
 
 so that the resulting remotes are (as seen with ‘git remote -v’),
