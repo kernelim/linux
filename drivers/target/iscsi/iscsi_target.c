@@ -3813,15 +3813,19 @@ static int iscsit_handle_response_queue(struct iscsi_conn *conn)
 
 int iscsi_target_tx_thread(void *arg)
 {
-	int ret = 0;
+	int ret = 0, flags;
 	struct iscsi_conn *conn = arg;
-	bool conn_freed = false;
+	bool conn_freed = false, loopback;
 
 	/*
 	 * Allow ourselves to be interrupted by SIGINT so that a
 	 * connection recovery / failure event can be triggered externally.
 	 */
 	allow_signal(SIGINT);
+
+	loopback = conn->loopback;
+	if (loopback)
+		flags = memalloc_noio_save();
 
 	while (!kthread_should_stop()) {
 		/*
@@ -3861,6 +3865,9 @@ transport_err:
 	if (conn->conn_state != TARG_CONN_STATE_IN_LOGIN)
 		iscsit_take_action_for_connection_exit(conn, &conn_freed);
 out:
+	if (loopback)
+		memalloc_noio_restore(flags);
+
 	if (!conn_freed) {
 		while (!kthread_should_stop()) {
 			msleep(100);
@@ -4041,7 +4048,7 @@ static void iscsit_get_rx_pdu(struct iscsi_conn *conn)
 
 int iscsi_target_rx_thread(void *arg)
 {
-	int rc;
+	int rc, flags;
 	struct iscsi_conn *conn = arg;
 	bool conn_freed = false;
 
@@ -4061,7 +4068,13 @@ int iscsi_target_rx_thread(void *arg)
 	if (!conn->conn_transport->iscsit_get_rx_pdu)
 		return 0;
 
+	if (conn->loopback)
+		flags = memalloc_noio_save();
+
 	conn->conn_transport->iscsit_get_rx_pdu(conn);
+
+	if (conn->loopback)
+		memalloc_noio_restore(flags);
 
 	if (!signal_pending(current))
 		atomic_set(&conn->transport_failed, 1);

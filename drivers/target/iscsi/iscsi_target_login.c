@@ -24,6 +24,7 @@
 #include <linux/idr.h>
 #include <linux/tcp.h>        /* TCP_NODELAY */
 #include <net/ipv6.h>         /* ipv6_addr_v4mapped() */
+#include <net/sock.h>
 #include <scsi/iscsi_proto.h>
 #include <target/target_core_base.h>
 #include <target/target_core_fabric.h>
@@ -963,6 +964,7 @@ int iscsi_target_setup_login_socket(
 int iscsit_accept_np(struct iscsi_np *np, struct iscsi_conn *conn)
 {
 	struct socket *new_sock, *sock = np->np_socket;
+	struct dst_entry *dst;
 	struct sockaddr_in sock_in;
 	struct sockaddr_in6 sock_in6;
 	int rc;
@@ -973,6 +975,11 @@ int iscsit_accept_np(struct iscsi_np *np, struct iscsi_conn *conn)
 
 	conn->sock = new_sock;
 	conn->login_family = np->np_sockaddr.ss_family;
+
+	dst = sk_dst_get(conn->sock->sk);
+	if (dst && dst->dev && dst->dev->flags & IFF_LOOPBACK)
+		conn->loopback = true;
+	dst_release(dst);
 
 	if (np->np_sockaddr.ss_family == AF_INET6) {
 		memset(&sock_in6, 0, sizeof(struct sockaddr_in6));

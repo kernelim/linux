@@ -17,7 +17,7 @@ workflow: !reference [.workflow]
   trigger:
     branch: rhel8
   variables:
-    builder_image: quay.io/cki/builder-rhel8
+    builder_image: quay.io/cki/builder-rhel8.8
     name: kernel-rhel8
     architectures: 'x86_64 ppc64le aarch64 s390x'
     kpet_tree_family: rhel8
@@ -29,7 +29,7 @@ workflow: !reference [.workflow]
   trigger:
     branch: rhel8-rt
   variables:
-    builder_image: quay.io/cki/builder-rhel8
+    builder_image: quay.io/cki/builder-rhel8.8
     name: kernel-rt-rhel8
     kpet_tree_family: rhel8-rt
     disttag_override: '.el8_8'
@@ -39,7 +39,7 @@ workflow: !reference [.workflow]
   trigger:
     branch: rhel8
   variables:
-    builder_image: quay.io/cki/builder-rhel8
+    builder_image: quay.io/cki/builder-rhel8.8
     name: kernel-rt-rhel8
     kpet_tree_family: rhel8-rt
     disttag_override: '.el8_8'

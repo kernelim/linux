@@ -539,6 +539,7 @@ struct iscsi_conn {
 	struct sockaddr_storage local_sockaddr;
 	int			conn_usage_count;
 	int			conn_waiting_on_uc;
+	bool			loopback;
 	atomic_t		check_immediate_queue;
 	atomic_t		conn_logout_remove;
 	atomic_t		connection_exit;

@@ -1292,8 +1292,8 @@ static int mlxsw_sp_trap_policers_init(struct mlxsw_sp *mlxsw_sp)
 
 	for (i = 0; i < trap->policers_count; i++) {
 		policer_item = &trap->policer_items_arr[i];
-		err = devlink_trap_policers_register(devlink,
-						     &policer_item->policer, 1);
+		err = devl_trap_policers_register(devlink,
+						  &policer_item->policer, 1);
 		if (err)
 			goto err_trap_policer_register;
 	}
@@ -1303,8 +1303,8 @@ static int mlxsw_sp_trap_policers_init(struct mlxsw_sp *mlxsw_sp)
 err_trap_policer_register:
 	for (i--; i >= 0; i--) {
 		policer_item = &trap->policer_items_arr[i];
-		devlink_trap_policers_unregister(devlink,
-						 &policer_item->policer, 1);
+		devl_trap_policers_unregister(devlink,
+					      &policer_item->policer, 1);
 	}
 	mlxsw_sp_trap_policer_items_arr_fini(mlxsw_sp);
 	return err;
@@ -1319,8 +1319,8 @@ static void mlxsw_sp_trap_policers_fini(struct mlxsw_sp *mlxsw_sp)
 
 	for (i = trap->policers_count - 1; i >= 0; i--) {
 		policer_item = &trap->policer_items_arr[i];
-		devlink_trap_policers_unregister(devlink,
-						 &policer_item->policer, 1);
+		devl_trap_policers_unregister(devlink,
+					      &policer_item->policer, 1);
 	}
 	mlxsw_sp_trap_policer_items_arr_fini(mlxsw_sp);
 }
@@ -1375,8 +1375,7 @@ static int mlxsw_sp_trap_groups_init(struct mlxsw_sp *mlxsw_sp)
 
 	for (i = 0; i < trap->groups_count; i++) {
 		group_item = &trap->group_items_arr[i];
-		err = devlink_trap_groups_register(devlink, &group_item->group,
-						   1);
+		err = devl_trap_groups_register(devlink, &group_item->group, 1);
 		if (err)
 			goto err_trap_group_register;
 	}
@@ -1386,7 +1385,7 @@ static int mlxsw_sp_trap_groups_init(struct mlxsw_sp *mlxsw_sp)
 err_trap_group_register:
 	for (i--; i >= 0; i--) {
 		group_item = &trap->group_items_arr[i];
-		devlink_trap_groups_unregister(devlink, &group_item->group, 1);
+		devl_trap_groups_unregister(devlink, &group_item->group, 1);
 	}
 	mlxsw_sp_trap_group_items_arr_fini(mlxsw_sp);
 	return err;
@@ -1402,7 +1401,7 @@ static void mlxsw_sp_trap_groups_fini(struct mlxsw_sp *mlxsw_sp)
 		const struct mlxsw_sp_trap_group_item *group_item;
 
 		group_item = &trap->group_items_arr[i];
-		devlink_trap_groups_unregister(devlink, &group_item->group, 1);
+		devl_trap_groups_unregister(devlink, &group_item->group, 1);
 	}
 	mlxsw_sp_trap_group_items_arr_fini(mlxsw_sp);
 }
@@ -1463,8 +1462,8 @@ static int mlxsw_sp_traps_init(struct mlxsw_sp *mlxsw_sp)
 
 	for (i = 0; i < trap->traps_count; i++) {
 		trap_item = &trap->trap_items_arr[i];
-		err = devlink_traps_register(devlink, &trap_item->trap, 1,
-					     mlxsw_sp);
+		err = devl_traps_register(devlink, &trap_item->trap, 1,
+					  mlxsw_sp);
 		if (err)
 			goto err_trap_register;
 	}
@@ -1474,7 +1473,7 @@ static int mlxsw_sp_traps_init(struct mlxsw_sp *mlxsw_sp)
 err_trap_register:
 	for (i--; i >= 0; i--) {
 		trap_item = &trap->trap_items_arr[i];
-		devlink_traps_unregister(devlink, &trap_item->trap, 1);
+		devl_traps_unregister(devlink, &trap_item->trap, 1);
 	}
 	mlxsw_sp_trap_items_arr_fini(mlxsw_sp);
 	return err;
@@ -1490,7 +1489,7 @@ static void mlxsw_sp_traps_fini(struct mlxsw_sp *mlxsw_sp)
 		const struct mlxsw_sp_trap_item *trap_item;
 
 		trap_item = &trap->trap_items_arr[i];
-		devlink_traps_unregister(devlink, &trap_item->trap, 1);
+		devl_traps_unregister(devlink, &trap_item->trap, 1);
 	}
 	mlxsw_sp_trap_items_arr_fini(mlxsw_sp);
 }

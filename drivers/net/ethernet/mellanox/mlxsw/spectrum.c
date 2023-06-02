@@ -2707,7 +2707,6 @@ static int mlxsw_sp_init(struct mlxsw_core *mlxsw_core,
 			 struct netlink_ext_ack *extack)
 {
 	struct mlxsw_sp *mlxsw_sp = mlxsw_core_driver_priv(mlxsw_core);
-	struct devlink *devlink = priv_to_devlink(mlxsw_core);
 	int err;
 
 	mlxsw_sp->core = mlxsw_core;
@@ -2861,9 +2860,7 @@ static int mlxsw_sp_init(struct mlxsw_core *mlxsw_core,
 		goto err_sample_trigger_init;
 	}
 
-	devl_lock(devlink);
 	err = mlxsw_sp_ports_create(mlxsw_sp);
-	devl_unlock(devlink);
 	if (err) {
 		dev_err(mlxsw_sp->bus_info->dev, "Failed to create ports\n");
 		goto err_ports_create;
@@ -3009,12 +3006,8 @@ static int mlxsw_sp3_init(struct mlxsw_core *mlxsw_core,
 static void mlxsw_sp_fini(struct mlxsw_core *mlxsw_core)
 {
 	struct mlxsw_sp *mlxsw_sp = mlxsw_core_driver_priv(mlxsw_core);
-	struct devlink *devlink = priv_to_devlink(mlxsw_core);
 
-	devl_lock(devlink);
 	mlxsw_sp_ports_remove(mlxsw_sp);
-	devl_unlock(devlink);
-
 	rhashtable_destroy(&mlxsw_sp->sample_trigger_ht);
 	mlxsw_sp_port_module_info_fini(mlxsw_sp);
 	mlxsw_sp_dpipe_fini(mlxsw_sp);
@@ -3149,19 +3142,19 @@ static int mlxsw_sp1_resources_kvd_register(struct mlxsw_core *mlxsw_core)
 					      &hash_single_size_params);
 
 	kvd_size = MLXSW_CORE_RES_GET(mlxsw_core, KVD_SIZE);
-	err = devlink_resource_register(devlink, MLXSW_SP_RESOURCE_NAME_KVD,
-					kvd_size, MLXSW_SP_RESOURCE_KVD,
-					DEVLINK_RESOURCE_ID_PARENT_TOP,
-					&kvd_size_params);
+	err = devl_resource_register(devlink, MLXSW_SP_RESOURCE_NAME_KVD,
+				     kvd_size, MLXSW_SP_RESOURCE_KVD,
+				     DEVLINK_RESOURCE_ID_PARENT_TOP,
+				     &kvd_size_params);
 	if (err)
 		return err;
 
 	linear_size = profile->kvd_linear_size;
-	err = devlink_resource_register(devlink, MLXSW_SP_RESOURCE_NAME_KVD_LINEAR,
-					linear_size,
-					MLXSW_SP_RESOURCE_KVD_LINEAR,
-					MLXSW_SP_RESOURCE_KVD,
-					&linear_size_params);
+	err = devl_resource_register(devlink, MLXSW_SP_RESOURCE_NAME_KVD_LINEAR,
+				     linear_size,
+				     MLXSW_SP_RESOURCE_KVD_LINEAR,
+				     MLXSW_SP_RESOURCE_KVD,
+				     &linear_size_params);
 	if (err)
 		return err;
 
@@ -3174,20 +3167,20 @@ static int mlxsw_sp1_resources_kvd_register(struct mlxsw_core *mlxsw_core)
 	double_size /= profile->kvd_hash_double_parts +
 		       profile->kvd_hash_single_parts;
 	double_size = rounddown(double_size, MLXSW_SP_KVD_GRANULARITY);
-	err = devlink_resource_register(devlink, MLXSW_SP_RESOURCE_NAME_KVD_HASH_DOUBLE,
-					double_size,
-					MLXSW_SP_RESOURCE_KVD_HASH_DOUBLE,
-					MLXSW_SP_RESOURCE_KVD,
-					&hash_double_size_params);
+	err = devl_resource_register(devlink, MLXSW_SP_RESOURCE_NAME_KVD_HASH_DOUBLE,
+				     double_size,
+				     MLXSW_SP_RESOURCE_KVD_HASH_DOUBLE,
+				     MLXSW_SP_RESOURCE_KVD,
+				     &hash_double_size_params);
 	if (err)
 		return err;
 
 	single_size = kvd_size - double_size - linear_size;
-	err = devlink_resource_register(devlink, MLXSW_SP_RESOURCE_NAME_KVD_HASH_SINGLE,
-					single_size,
-					MLXSW_SP_RESOURCE_KVD_HASH_SINGLE,
-					MLXSW_SP_RESOURCE_KVD,
-					&hash_single_size_params);
+	err = devl_resource_register(devlink, MLXSW_SP_RESOURCE_NAME_KVD_HASH_SINGLE,
+				     single_size,
+				     MLXSW_SP_RESOURCE_KVD_HASH_SINGLE,
+				     MLXSW_SP_RESOURCE_KVD,
+				     &hash_single_size_params);
 	if (err)
 		return err;
 
@@ -3208,10 +3201,10 @@ static int mlxsw_sp2_resources_kvd_register(struct mlxsw_core *mlxsw_core)
 					  MLXSW_SP_KVD_GRANULARITY,
 					  DEVLINK_RESOURCE_UNIT_ENTRY);
 
-	return devlink_resource_register(devlink, MLXSW_SP_RESOURCE_NAME_KVD,
-					 kvd_size, MLXSW_SP_RESOURCE_KVD,
-					 DEVLINK_RESOURCE_ID_PARENT_TOP,
-					 &kvd_size_params);
+	return devl_resource_register(devlink, MLXSW_SP_RESOURCE_NAME_KVD,
+				      kvd_size, MLXSW_SP_RESOURCE_KVD,
+				      DEVLINK_RESOURCE_ID_PARENT_TOP,
+				      &kvd_size_params);
 }
 
 static int mlxsw_sp_resources_span_register(struct mlxsw_core *mlxsw_core)
@@ -3227,10 +3220,10 @@ static int mlxsw_sp_resources_span_register(struct mlxsw_core *mlxsw_core)
 	devlink_resource_size_params_init(&span_size_params, max_span, max_span,
 					  1, DEVLINK_RESOURCE_UNIT_ENTRY);
 
-	return devlink_resource_register(devlink, MLXSW_SP_RESOURCE_NAME_SPAN,
-					 max_span, MLXSW_SP_RESOURCE_SPAN,
-					 DEVLINK_RESOURCE_ID_PARENT_TOP,
-					 &span_size_params);
+	return devl_resource_register(devlink, MLXSW_SP_RESOURCE_NAME_SPAN,
+				      max_span, MLXSW_SP_RESOURCE_SPAN,
+				      DEVLINK_RESOURCE_ID_PARENT_TOP,
+				      &span_size_params);
 }
 
 static int mlxsw_sp1_resources_register(struct mlxsw_core *mlxsw_core)
@@ -3257,7 +3250,7 @@ static int mlxsw_sp1_resources_register(struct mlxsw_core *mlxsw_core)
 
 err_resources_counter_register:
 err_resources_span_register:
-	devlink_resources_unregister(priv_to_devlink(mlxsw_core));
+	devl_resources_unregister(priv_to_devlink(mlxsw_core));
 	return err;
 }
 
@@ -3285,7 +3278,7 @@ static int mlxsw_sp2_resources_register(struct mlxsw_core *mlxsw_core)
 
 err_resources_counter_register:
 err_resources_span_register:
-	devlink_resources_unregister(priv_to_devlink(mlxsw_core));
+	devl_resources_unregister(priv_to_devlink(mlxsw_core));
 	return err;
 }
 
@@ -3309,15 +3302,15 @@ static int mlxsw_sp_kvd_sizes_get(struct mlxsw_core *mlxsw_core,
 	 * granularity from the profile. In case the user
 	 * provided the sizes they are obtained via devlink.
 	 */
-	err = devlink_resource_size_get(devlink,
-					MLXSW_SP_RESOURCE_KVD_LINEAR,
-					p_linear_size);
+	err = devl_resource_size_get(devlink,
+				     MLXSW_SP_RESOURCE_KVD_LINEAR,
+				     p_linear_size);
 	if (err)
 		*p_linear_size = profile->kvd_linear_size;
 
-	err = devlink_resource_size_get(devlink,
-					MLXSW_SP_RESOURCE_KVD_HASH_DOUBLE,
-					p_double_size);
+	err = devl_resource_size_get(devlink,
+				     MLXSW_SP_RESOURCE_KVD_HASH_DOUBLE,
+				     p_double_size);
 	if (err) {
 		double_size = MLXSW_CORE_RES_GET(mlxsw_core, KVD_SIZE) -
 			      *p_linear_size;
@@ -3328,9 +3321,9 @@ static int mlxsw_sp_kvd_sizes_get(struct mlxsw_core *mlxsw_core,
 					   MLXSW_SP_KVD_GRANULARITY);
 	}
 
-	err = devlink_resource_size_get(devlink,
-					MLXSW_SP_RESOURCE_KVD_HASH_SINGLE,
-					p_single_size);
+	err = devl_resource_size_get(devlink,
+				     MLXSW_SP_RESOURCE_KVD_HASH_SINGLE,
+				     p_single_size);
 	if (err)
 		*p_single_size = MLXSW_CORE_RES_GET(mlxsw_core, KVD_SIZE) -
 				 *p_double_size - *p_linear_size;
