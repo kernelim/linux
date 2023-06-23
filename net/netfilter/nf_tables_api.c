@@ -260,6 +260,34 @@ static inline void nft_rule_clear(struct net *net, struct nft_rule *rule)
 	rule->genmask &= ~nft_genmask_next(net);
 }
 
+static void nft_rule_expr_activate(const struct nft_ctx *ctx,
+				   struct nft_rule *rule)
+{
+	struct nft_expr *expr;
+
+	expr = nft_expr_first(rule);
+	while (expr != nft_expr_last(rule) && expr->ops) {
+		if (expr->ops->activate)
+			expr->ops->activate(ctx, expr);
+
+		expr = nft_expr_next(expr);
+	}
+}
+
+static void nft_rule_expr_deactivate(const struct nft_ctx *ctx,
+				     struct nft_rule *rule)
+{
+	struct nft_expr *expr;
+
+	expr = nft_expr_first(rule);
+	while (expr != nft_expr_last(rule) && expr->ops) {
+		if (expr->ops->deactivate)
+			expr->ops->deactivate(ctx, expr);
+
+		expr = nft_expr_next(expr);
+	}
+}
+
 static int
 nf_tables_delrule_deactivate(struct nft_ctx *ctx, struct nft_rule *rule)
 {
@@ -301,6 +329,7 @@ static int nft_delrule(struct nft_ctx *ctx, struct nft_rule *rule)
 		nft_trans_destroy(trans);
 		return err;
 	}
+	nft_rule_expr_deactivate(ctx, rule);
 
 	return 0;
 }
@@ -3015,6 +3044,21 @@ void nf_tables_unbind_set(const struct nft_ctx *ctx, struct nft_set *set,
 		nf_tables_set_destroy(ctx, set);
 }
 
+void nf_tables_activate_set(const struct nft_ctx *ctx, struct nft_set *set)
+{
+	if (nft_set_is_anonymous(set))
+		set->removed = 0;
+}
+EXPORT_SYMBOL_GPL(nf_tables_activate_set);
+
+void nf_tables_deactivate_set(const struct nft_ctx *ctx, struct nft_set *set,
+			      struct nft_set_binding *binding)
+{
+	if (nft_set_is_anonymous(set))
+		set->removed = 1;
+}
+EXPORT_SYMBOL_GPL(nf_tables_deactivate_set);
+
 const struct nft_set_ext_type nft_set_ext_types[] = {
 	[NFT_SET_EXT_KEY]		= {
 		.align	= __alignof__(u32),
@@ -3718,6 +3762,9 @@ static int nf_tables_delsetelem(struct net *net, struct sock *nlsk,
 	if (!list_empty(&set->bindings) && set->flags & NFT_SET_CONSTANT)
 		return -EBUSY;
 
+	if (set->removed)
+		return -ENOENT;
+
 	if (nla[NFTA_SET_ELEM_LIST_ELEMENTS] == NULL) {
 		struct nft_set_dump_args args = {
 			.iter	= {
@@ -4154,11 +4201,13 @@ static int __nf_tables_abort(struct net *net)
 			break;
 		case NFT_MSG_NEWRULE:
 			trans->ctx.chain->use--;
+			nft_rule_expr_deactivate(&trans->ctx, nft_trans_rule(trans));
 			list_del_rcu(&nft_trans_rule(trans)->list);
 			break;
 		case NFT_MSG_DELRULE:
 			trans->ctx.chain->use++;
 			nft_rule_clear(trans->ctx.net, nft_trans_rule(trans));
+			nft_rule_expr_activate(&trans->ctx, nft_trans_rule(trans));
 			nft_trans_destroy(trans);
 			break;
 		case NFT_MSG_NEWSET:

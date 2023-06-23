@@ -364,7 +364,8 @@ struct nft_set {
 	u32				ndeact;
 	u64				timeout;
 	u32				gc_int;
-	u16				policy;
+	u16				policy:15;
+	u16				removed:1;
 	u16				udlen;
 	unsigned char			*udata;
 	/* runtime data below here */
@@ -376,6 +377,11 @@ struct nft_set {
 	unsigned char			data[]
 		__attribute__((aligned(__alignof__(u64))));
 };
+
+static inline bool nft_set_is_anonymous(const struct nft_set *set)
+{
+	return set->flags & NFT_SET_ANONYMOUS;
+}
 
 static inline void *nft_set_priv(const struct nft_set *set)
 {
@@ -413,6 +419,9 @@ struct nft_set_binding {
 	u32				flags;
 };
 
+void nf_tables_activate_set(const struct nft_ctx *ctx, struct nft_set *set);
+void nf_tables_deactivate_set(const struct nft_ctx *ctx, struct nft_set *set,
+			      struct nft_set_binding *binding);
 int nf_tables_bind_set(const struct nft_ctx *ctx, struct nft_set *set,
 		       struct nft_set_binding *binding);
 void nf_tables_unbind_set(const struct nft_ctx *ctx, struct nft_set *set,
@@ -664,6 +673,8 @@ struct nft_expr_type {
  *	@size: full expression size, including private data size
  *	@init: initialization function
  *	@destroy: destruction function
+ *	@activate: activate expression in the next generation
+ *	@deactivate: deactivate expression in next generation
  *	@dump: function to dump parameters
  *	@type: expression type
  *	@validate: validate expression, called during loop detection
@@ -681,6 +692,10 @@ struct nft_expr_ops {
 	int				(*init)(const struct nft_ctx *ctx,
 						const struct nft_expr *expr,
 						const struct nlattr * const tb[]);
+	void				(*activate)(const struct nft_ctx *ctx,
+						    const struct nft_expr *expr);
+	void				(*deactivate)(const struct nft_ctx *ctx,
+						      const struct nft_expr *expr);
 	void				(*destroy)(const struct nft_ctx *ctx,
 						   const struct nft_expr *expr);
 	int				(*dump)(struct sk_buff *skb,
