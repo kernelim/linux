@@ -103,8 +103,7 @@ build:
 
     - echo $CI_PAGES_URL
     - echo "Link to preview:"
-    - echo ${PAGES_BASE_URL}index.html
-
+    - echo "https://${CI_PROJECT_ROOT_NAMESPACE}.${CI_PAGES_DOMAIN}/${CI_PROJECT_PATH/$CI_PROJECT_ROOT_NAMESPACE/-}/-/jobs/${CI_JOB_ID}/artifacts/public/index.html"
     # fix links with the help of the `ref` shortcode
     - |
       for i in content/docs/*.adoc ; do sed 's/link:\([^.]*\.adoc\)/link:{{< ref \1 >}}/g' -i $i; done

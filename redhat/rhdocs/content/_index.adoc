@@ -1,0 +1,23 @@
+---
+title: CentOS Stream Kernel Documentation
+---
+
+// scope
+Welcome to documentation about development of Red Hat-based Linux kernel projects: +
+&nbsp; - https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9[CentOS stream 9 kernel] +
+&nbsp; - https://gitlab.com/cki-project/kernel-ark[Fedora/ARK kernel] +
+&nbsp; - https://gitlab.com/redhat/rhel/src/kernel[Private RHEL kernels] +
+
+
+
+// prerequisites
+It is expected that readers are familiar with: +
+&nbsp; - https://git-scm.com/book/en/v2[Git] +
+&nbsp; - https://docs.gitlab.com/ee/user/project/repository/[GitLab] +
+&nbsp; - https://docs.kernel.org/#working-with-the-development-community[Linux kernel development] +
+&nbsp; - https://www.redhat.com/en/blog/what-backporting-and-how-does-it-apply-rhel-and-other-red-hat-products[Backporting code changes from upstream trees] +
+
+
+Main documents: +
+&nbsp; - link:{{<ref "docs/README.adoc" >}}[Quick start guide] +
+&nbsp; - link:{{<ref "docs/rhel_kernel_workflow.adoc" >}}[RHEL kernel workflow] +

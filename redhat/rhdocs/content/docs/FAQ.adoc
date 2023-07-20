@@ -128,3 +128,10 @@ This is caused by an issue on the GitLab server side.  Try the following steps t
 .. Sometimes it can just be a transient problem and waiting 5-10 minutes may be enough to fix the problem.
 . Consider opening a https://gitlab.com/redhat/rhel/gitlab#user-content-service-issues[support ticket] with GitLab.
 . Work around the problem by using xref:lab.adoc[the lab utility] or https://gitlab.com/gitlab-org/cli[gitlab-cli].
+
+=== Why is GitLab asking for credit card information in my MR?
+
+Pipelines are trying to run in your personal namespace. This can have various reasons:
+
+- You have submitted a merge request against your own fork instead of the gitlab.com/redhat namespace. You can resolve this by resubmitting the merge request against the correct target project.
+- You have used a source branch name that is protected *in the target project*, for example, 'main'.  You can resolve this by resubmitting your merge request from a source branch that does not match any of the protected branches of the target project.

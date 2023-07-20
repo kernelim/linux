@@ -118,6 +118,7 @@ R:	Jarod Wilson <jarod@redhat.com>
 R:	John B. Wyatt IV <jwyatt@redhat.com>
 R:	Derek Barbosa <debarbos@redhat.com>
 R:	Eder Zulian <ezulian@redhat.com>
+R:	Clark Williams <williams@redhat.com>
 S:	Supported
 F:	makefile
 F:	Makefile
@@ -265,6 +266,8 @@ R:	Alice Mitchell <ajmitchell@redhat.com>
 S:	Supported
 F:	fs/afs/
 F:	net/rxrpc/
+F:	Documentation/networking/rxrpc*
+F:	include/net/*rxrpc*
 
 AIO
 M:	Jeff Moyer <jmoyer@redhat.com>
@@ -402,6 +405,7 @@ M:	Adrien Thierry <athierry@redhat.com>
 M:	Andrew Halaney <ahalaney@redhat.com>
 M:	Brian Masney <bmasney@redhat.com>
 M:	Eric Chanudet <echanude@redhat.com>
+M:	Radu Rendec <rrendec@redhat.com>
 S:	Supported
 F:	Documentation/devicetree/bindings/*/qcom*
 F:	Documentation/devicetree/bindings/soc/qcom/
@@ -608,7 +612,7 @@ S:	Supported
 F:	drivers/bus/
 
 CAN BUS
-M:	Peter Robinson <perobins@redhat.com>
+M:	Radu Rendec <rrendec@redhat.com>
 S:	Supported
 F:	Documentation/networking/can.rst
 F:	include/linux/can/
@@ -715,6 +719,7 @@ S:	Provided
 F:	drivers/connector/
 
 Continuous Integration (CKI)
+M:	Tales da Aparecida <tdaapare@redhat.com>
 M:	Tino Calancha <tcalanch@redhat.com>
 M:	Michael Hofmann <mhofmann@redhat.com>
 M:	Serhii Turivnyi <sturivny@redhat.com>
@@ -754,10 +759,7 @@ M:	David Arcari <darcari@redhat.com>
 S:	Supported
 F:	drivers/cpufreq/
 X:	drivers/cpufreq/intel_pstate.c
-X:	drivers/cpufreq/amd-pstate-trace.h
-X:	drivers/cpufreq/amd_freq_sensitivity.c
-X:	drivers/cpufreq/amd-pstate.c
-X:	drivers/cpufreq/amd-pstate-trace.c
+X:	drivers/cpufreq/amd*
 
 CPU IDLE DRIVERS
 M:	Mark Langsdorf <mlangsdo@redhat.com>
@@ -1740,6 +1742,7 @@ R:	Leah Leshchinsky <lleshchi@redhat.com>
 R:	Nico Pache <npache@redhat.com>
 R:	Waiman Long <longman@redhat.com>
 R:	Ricardo Robaina <rrobaina@redhat.com>
+R:	Audra Mitchell <aubaker@redhat.com>
 S:	Supported
 F:	arch/arm64/mm/
 F:	arch/powerpc/mm/
@@ -2010,6 +2013,7 @@ X:	Documentation/networking/phonet*
 X:	Documentation/networking/rds*
 X:	Documentation/networking/regulatory*
 X:	Documentation/networking/rxrpc*
+X:	Documentation/networking/smc*
 X:	include/linux/net/intel/
 X:	include/linux/netfs.h
 X:	include/net/*80211*
@@ -2023,7 +2027,10 @@ X:	include/net/iucv/
 X:	include/net/iw*
 X:	include/net/mana/
 X:	include/net/netlabel.h
+X:	include/net/netns/smc.h
 X:	include/net/regulatory.h
+X:	include/net/*rxrpc*
+X:	include/net/smc.h
 X:	include/net/vsock_addr.h
 X:	net/bluetooth/
 X:	net/can/
@@ -2642,7 +2649,10 @@ F:	arch/x86/platform/uv/
 SHARED MEMORY COMMUNICATIONS
 M:	Steve Best <sbest@redhat.com>
 S:	Supported
+F:	Documentation/networking/smc*
 F:	net/smc/
+F:	include/net/netns/smc.h
+F:	include/net/smc.h
 F:	include/uapi/linux/smc.h
 F:	include/uapi/linux/smc_diag.h
 
@@ -3100,10 +3110,7 @@ R:	Dean Nelson <dnelson@redhat.com>
 S:	Supported
 F:	arch/x86/kernel/cpu/cpufreq/
 F:	drivers/cpufreq/intel_pstate.c
-F:	drivers/cpufreq/amd-pstate-trace.h
-F:	drivers/cpufreq/amd_freq_sensitivity.c
-F:	drivers/cpufreq/amd-pstate.c
-F:	drivers/cpufreq/amd-pstate-trace.c
+F:	drivers/cpufreq/amd*
 F:	drivers/idle/intel_idle.c
 F:	drivers/idle/Kconfig
 

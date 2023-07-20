@@ -426,10 +426,6 @@ lpfc_dev_loss_tmo_handler(struct lpfc_nodelist *ndlp)
 	name = (uint8_t *)&ndlp->nlp_portname;
 	phba = vport->phba;
 
-	spin_lock_irqsave(&ndlp->lock, iflags);
-	ndlp->nlp_flag &= ~NLP_IN_DEV_LOSS;
-	spin_unlock_irqrestore(&ndlp->lock, iflags);
-
 	if (phba->sli_rev == LPFC_SLI_REV4)
 		fcf_inuse = lpfc_fcf_inuse(phba);
 
@@ -451,22 +447,34 @@ lpfc_dev_loss_tmo_handler(struct lpfc_nodelist *ndlp)
 				 *name, *(name+1), *(name+2), *(name+3),
 				 *(name+4), *(name+5), *(name+6), *(name+7),
 				 ndlp->nlp_DID);
+
+		spin_lock_irqsave(&ndlp->lock, iflags);
+		ndlp->nlp_flag &= ~NLP_IN_DEV_LOSS;
+		spin_unlock_irqrestore(&ndlp->lock, iflags);
 		return fcf_inuse;
 	}
 
 	/* Fabric nodes are done. */
 	if (ndlp->nlp_type & NLP_FABRIC) {
 		spin_lock_irqsave(&ndlp->lock, iflags);
-		/* In massive vport configuration settings, it's possible
-		 * dev_loss_tmo fired during node recovery.  So, check if
-		 * fabric nodes are in discovery states outstanding.
+
+		/* The driver has to account for a race between any fabric
+		 * node that's in recovery when dev_loss_tmo expires. When this
+		 * happens, the driver has to allow node recovery.
 		 */
 		switch (ndlp->nlp_DID) {
 		case Fabric_DID:
 			fc_vport = vport->fc_vport;
-			if (fc_vport &&
-			    fc_vport->vport_state == FC_VPORT_INITIALIZING)
-				recovering = true;
+			if (fc_vport) {
+				/* NPIV path. */
+				if (fc_vport->vport_state ==
+				    FC_VPORT_INITIALIZING)
+					recovering = true;
+			} else {
+				/* Physical port path. */
+				if (phba->hba_flag & HBA_FLOGI_OUTSTANDING)
+					recovering = true;
+			}
 			break;
 		case Fabric_Cntl_DID:
 			if (ndlp->nlp_flag & NLP_REG_LOGIN_SEND)
@@ -478,6 +486,17 @@ lpfc_dev_loss_tmo_handler(struct lpfc_nodelist *ndlp)
 			if (ndlp->nlp_state >= NLP_STE_PLOGI_ISSUE &&
 			    ndlp->nlp_state <= NLP_STE_REG_LOGIN_ISSUE)
 				recovering = true;
+			break;
+		default:
+			/* Ensure the nlp_DID at least has the correct prefix.
+			 * The fabric domain controller's last three nibbles
+			 * vary so we handle it in the default case.
+			 */
+			if (ndlp->nlp_DID & Fabric_DID_MASK) {
+				if (ndlp->nlp_state >= NLP_STE_PLOGI_ISSUE &&
+				    ndlp->nlp_state <= NLP_STE_REG_LOGIN_ISSUE)
+					recovering = true;
+			}
 			break;
 		}
 		spin_unlock_irqrestore(&ndlp->lock, iflags);
@@ -514,6 +533,9 @@ lpfc_dev_loss_tmo_handler(struct lpfc_nodelist *ndlp)
 			return fcf_inuse;
 		}
 
+		spin_lock_irqsave(&ndlp->lock, iflags);
+		ndlp->nlp_flag &= ~NLP_IN_DEV_LOSS;
+		spin_unlock_irqrestore(&ndlp->lock, iflags);
 		lpfc_nlp_put(ndlp);
 		return fcf_inuse;
 	}
@@ -543,6 +565,9 @@ lpfc_dev_loss_tmo_handler(struct lpfc_nodelist *ndlp)
 				 ndlp->nlp_DID, ndlp->nlp_flag,
 				 ndlp->nlp_state, ndlp->nlp_rpi);
 	}
+	spin_lock_irqsave(&ndlp->lock, iflags);
+	ndlp->nlp_flag &= ~NLP_IN_DEV_LOSS;
+	spin_unlock_irqrestore(&ndlp->lock, iflags);
 
 	/* If we are devloss, but we are in the process of rediscovering the
 	 * ndlp, don't issue a NLP_EVT_DEVICE_RM event.
@@ -4495,14 +4520,6 @@ lpfc_register_remote_port(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp)
 	/* Don't add the remote port if unloading. */
 	if (vport->load_flag & FC_UNLOADING)
 		return;
-
-	/*
-	 * Disassociate any older association between this ndlp and rport
-	 */
-	if (ndlp->rport) {
-		rdata = ndlp->rport->dd_data;
-		rdata->pnode = NULL;
-	}
 
 	ndlp->rport = rport = fc_remote_port_add(shost, 0, &rport_ids);
 	if (!rport) {

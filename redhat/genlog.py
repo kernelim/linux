@@ -63,11 +63,13 @@ def parse_commit(commit):
     bug_set = set()
     zbug_set = set()
     jira_set = set()
+    zjira_set = set()
     for line in lines[1:]:
         # Metadata in git notes has priority over commit log
-        # If we found any BZ/ZBZ/CVE in git notes, we ignore commit log
+        # If we found any BZ/ZBZ/JIRA/ZJIRA/CVE in git notes,
+        # we ignore the commit log
         if line == "^^^NOTES-END^^^":
-            if bug_set or zbug_set or cve_set:
+            if bug_set or zbug_set or jira_set or zjira_set or cve_set:
                 break
 
         # Process Bugzilla and ZStream Bugzilla entries
@@ -79,21 +81,23 @@ def parse_commit(commit):
 
         # Process Jira issues
         jira_set.update(find_ji_in_line(line, 'JIRA'))
+        zjira_set.update(find_ji_in_line(line, 'Z-JIRA'))
 
-    return (log_entry, cve_set, bug_set, zbug_set, jira_set)
+    return (log_entry, cve_set, bug_set, zbug_set, jira_set, zjira_set)
 
 
 if __name__ == "__main__":
     all_bzs = set()
     all_zbzs = set()
     all_jiras = set()
+    all_zjiras = set()
     commits = sys.stdin.read().split('\0')
     for c in commits:
         if not c:
             continue
-        log_item, cves, bugs, zbugs, jiras = parse_commit(c)
+        log_item, cves, bugs, zbugs, jiras, zjiras = parse_commit(c)
         entry = f"{log_item}"
-        if bugs or zbugs or jiras:
+        if bugs or zbugs or jiras or zjiras:
             entry += " ["
             if zbugs:
                 entry += " ".join(sorted(zbugs))
@@ -106,18 +110,32 @@ if __name__ == "__main__":
                 entry += " " if bugs or zbugs else ""
                 entry += " ".join(sorted(jiras))
                 all_jiras.update(jiras)
+            if zjiras:
+                entry += " " if bugs or zbugs or jiras else ""
+                entry += " ".join(sorted(zjiras))
+                all_zjiras.update(zjiras)
             entry += "]"
         if cves:
             entry += " {" + " ".join(sorted(cves)) + "}"
         print(entry)
 
-    resolved_bzs = all_zbzs if all_zbzs else all_bzs
+    # If we are doing Z-Stream work, we are addressing Z-Stream tickets
+    # and not Y-Stream tickets, so we must make sure to list on Resolves
+    # line only the Z-Stream tickets
+    resolved_bzs = set()
+    resolved_jiras = set()
+    if all_zbzs or all_zjiras:
+        resolved_bzs = all_zbzs
+        resolved_jiras = all_zjiras
+    else:
+        resolved_bzs = all_bzs
+        resolved_jiras = all_jiras
     print("Resolves: ", end="")
     for i, bzid in enumerate(sorted(resolved_bzs)):
         if i:
             print(", ", end="")
         print(f"rhbz#{bzid}", end="")
-    for j, jid in enumerate(sorted(all_jiras)):
+    for j, jid in enumerate(sorted(resolved_jiras)):
         if j or resolved_bzs:
            print(", ", end="")
         print(f"{jid}", end="")

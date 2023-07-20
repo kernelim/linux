@@ -161,15 +161,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 284.18.1
+%define pkgrelease 284.25.1
 %define kversion 5
-%define tarfile_release 5.14.0-284.18.1.el9_2
+%define tarfile_release 5.14.0-284.25.1.el9_2
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 284.18.1%{?buildid}%{?dist}
+%define specrelease 284.25.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-284.18.1.el9_2
+%define kabiversion 5.14.0-284.25.1.el9_2
 
 #
 # End of genspec.sh variables
@@ -3435,9 +3435,125 @@ fi
 #
 #
 %changelog
-* Thu Jun 22 2023 Release Engineering <releng@rockylinux.org> - 5.14.0-284.18.1
+* Tue Aug 01 2023 Release Engineering <releng@rockylinux.org> - 5.14.0-284.25.1
 - Porting to 9.2, debranding and Rocky branding with new release pkg (Sherif Nagy)
 - Porting to 9.2, debranding and Rocky branding (Louis Abel)
+
+* Thu Jul 20 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-284.25.1.el9_2]
+- x86/speculation: Allow enabling STIBP with legacy IBRS (Ricardo Robaina) [2215014 2187269] {CVE-2023-1998}
+- netfilter: nf_dup_netdev: add and use recursion counter (Eric Garver) [2221169 1724795]
+- netfilter: nf_dup_netdev: do not push mac header a second time (Eric Garver) [2221169 1724795]
+- netfilter: egress: silence egress hook lockdep splats (Eric Garver) [2221169 1724795]
+- netfilter: nft_fwd_netdev: Support egress hook (Eric Garver) [2221169 1724795]
+- netfilter: nft_meta: add NFT_META_IFTYPE (Eric Garver) [2221169 1724795]
+- KVM: x86: Allow APICv APIC ID inhibit to be cleared (Maxim Levitsky) [2218871 2177720]
+- KVM: x86: Track required APICv inhibits with variable, not callback (Maxim Levitsky) [2218871 2177720]
+- Revert "KVM: SVM: Do not throw warning when calling avic_vcpu_load on a running vcpu" (Maxim Levitsky) [2218871 2177720]
+- KVM: SVM: Ignore writes to Remote Read Data on AVIC write traps (Maxim Levitsky) [2218871 2177720]
+- KVM: SVM: Handle multiple logical targets in AVIC kick fastpath (Maxim Levitsky) [2218871 2177720]
+- KVM: SVM: Require logical ID to be power-of-2 for AVIC entry (Maxim Levitsky) [2218871 2177720]
+- KVM: SVM: Update svm->ldr_reg cache even if LDR is "bad" (Maxim Levitsky) [2218871 2177720]
+- KVM: SVM: Always update local APIC on writes to logical dest register (Maxim Levitsky) [2218871 2177720]
+- KVM: SVM: Inhibit AVIC if vCPUs are aliased in logical mode (Maxim Levitsky) [2218871 2177720]
+- KVM: x86: Inhibit APICv/AVIC if the optimized physical map is disabled (Maxim Levitsky) [2218871 2177720]
+- KVM: x86: Honor architectural behavior for aliased 8-bit APIC IDs (Maxim Levitsky) [2218871 2177720]
+- KVM: x86: Disable APIC logical map if vCPUs are aliased in logical mode (Maxim Levitsky) [2218871 2177720]
+- KVM: x86: Disable APIC logical map if logical ID covers multiple MDAs (Maxim Levitsky) [2218871 2177720]
+- KVM: x86: Skip redundant x2APIC logical mode optimized cluster setup (Maxim Levitsky) [2218871 2177720]
+- KVM: x86: Explicitly track all possibilities for APIC map's logical modes (Maxim Levitsky) [2218871 2177720]
+- KVM: x86: Explicitly skip optimized logical map setup if vCPU's LDR==0 (Maxim Levitsky) [2218871 2177720]
+- KVM: SVM: Add helper to perform final AVIC "kick" of single vCPU (Maxim Levitsky) [2218871 2177720]
+- KVM: SVM: Document that vCPU ID == APIC ID in AVIC kick fastpatch (Maxim Levitsky) [2218871 2177720]
+- Revert "KVM: SVM: Use target APIC ID to complete x2AVIC IRQs when possible" (Maxim Levitsky) [2218871 2177720]
+- KVM: SVM: Fix x2APIC Logical ID calculation for avic_kick_target_vcpus_fast (Maxim Levitsky) [2218871 2177720]
+- KVM: SVM: Compute dest based on sender's x2APIC status for AVIC kick (Maxim Levitsky) [2218871 2177720]
+- KVM: SVM: Replace "avic_mode" enum with "x2avic_enabled" boolean (Maxim Levitsky) [2218871 2177720]
+- KVM: x86: Inhibit APIC memslot if x2APIC and AVIC are enabled (Maxim Levitsky) [2218871 2177720]
+- KVM: x86: Move APIC access page helper to common x86 code (Maxim Levitsky) [2218871 2177720]
+- KVM: x86: Handle APICv updates for APIC "mode" changes via request (Maxim Levitsky) [2218871 2177720]
+- KVM: SVM: Don't put/load AVIC when setting virtual APIC mode (Maxim Levitsky) [2218871 2177720]
+- KVM: SVM: Process ICR on AVIC IPI delivery failure due to invalid target (Maxim Levitsky) [2218871 2177720]
+- KVM: SVM: Flush the "current" TLB when activating AVIC (Maxim Levitsky) [2218871 2177720]
+- KVM: x86: Purge "highest ISR" cache when updating APICv state (Maxim Levitsky) [2218871 2177720]
+- KVM: x86: Blindly get current x2APIC reg value on "nodecode write" traps (Maxim Levitsky) [2218871 2177720]
+
+* Thu Jul 13 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-284.24.1.el9_2]
+- tracing/hwlat: Replace sched_setaffinity with set_cpus_allowed_ptr (Jerome Marchand) [2221157 2178234]
+- cifs: return a single-use cfid if we did not get a lease (Ronnie Sahlberg) [2221159 2175967]
+- cifs: Check the lease context if we actually got a lease (Ronnie Sahlberg) [2221159 2175967]
+- cifs: set rc to -ENOENT if we can not get a dentry for the cached dir (Ronnie Sahlberg) [2221159 2175967]
+- cifs: use LIST_HEAD() and list_move() to simplify code (Ronnie Sahlberg) [2221159 2175967]
+- ipvlan:Fix out-of-bounds caused by unclear skb->cb (Davide Caratti) [2219662 2218677] {CVE-2023-3090}
+- nvme: fix discard support without oncs (Ming Lei) [2192632 2174443]
+- nvme: fix handling single range discard request (Ming Lei) [2192632 2174443]
+- KVM: x86/mmu: Refresh CR0.WP prior to checking for emulated permission faults (Paolo Bonzini) [2218935 2210042]
+- KVM: x86: Add helpers to query individual CR0/CR4 bits (Paolo Bonzini) [2218935 2210042]
+- KVM: x86: Preserve TDP MMU roots until they are explicitly invalidated (Paolo Bonzini) [2218935 2210042]
+- KVM: x86/mmu: Replace open coded usage of tdp_mmu_page with is_tdp_mmu_page() (Paolo Bonzini) [2218935 2210042]
+- KVM: x86/mmu: fix some comment typos (Paolo Bonzini) [2218935 2210042]
+- KVM: x86/mmu: Move TDP MMU VM init/uninit behind tdp_mmu_enabled (Paolo Bonzini) [2218935 2210042]
+- KVM: x86/mmu: Change tdp_mmu to a read-only parameter (Paolo Bonzini) [2218935 2210042]
+- KVM: VMX: Make CR0.WP a guest owned bit (Paolo Bonzini) [2218935 2210042]
+- KVM: x86: Make use of kvm_read_cr*_bits() when testing bits (Paolo Bonzini) [2218935 2210042]
+- KVM: x86: Ignore CR0.WP toggles in non-paging mode (Paolo Bonzini) [2218935 2210042]
+- KVM: x86: Do not unload MMU roots when only toggling CR0.WP with TDP enabled (Paolo Bonzini) [2218935 2210042]
+- erspan: get the proto with the md version for collect_md (Xin Long) [2217493 2140037]
+- net/sched: flower: fix possible OOB write in fl_set_geneve_opt() (Davide Caratti) [2216991 2214029] {CVE-2023-35788}
+
+* Wed Jul 05 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.23.1.el9_2]
+- KVM: x86: Don't inhibit APICv/AVIC if xAPIC ID mismatch is due to 32-bit ID (Maxim Levitsky) [2218871 2177720]
+- KVM: x86: Don't inhibit APICv/AVIC on xAPIC ID "change" if APIC is disabled (Maxim Levitsky) [2218871 2177720]
+- KVM: x86: fix APICv/x2AVIC disabled when vm reboot by itself (Maxim Levitsky) [2218871 2177720]
+- locking/rwbase: Mitigate indefinite writer starvation (Eder Zulian) [2217939 2037670]
+- rbd: get snapshot context after exclusive lock is ensured to be held (Ilya Dryomov) [2216569 2212511]
+- rbd: move RBD_OBJ_FLAG_COPYUP_ENABLED flag setting (Ilya Dryomov) [2216569 2212511]
+
+* Thu Jun 29 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.22.1.el9_2]
+- PCI: hv: Add a per-bus mutex state_lock (Vitaly Kuznetsov) [2217066 2182619]
+- Revert "PCI: hv: Fix a timing issue which causes kdump to fail occasionally" (Vitaly Kuznetsov) [2217066 2182619]
+- PCI: hv: Remove the useless hv_pcichild_state from struct hv_pci_dev (Vitaly Kuznetsov) [2217066 2182619]
+- PCI: hv: Fix a race condition in hv_irq_unmask() that can cause panic (Vitaly Kuznetsov) [2217066 2182619]
+- PCI: hv: Fix a race condition bug in hv_pci_query_relations() (Vitaly Kuznetsov) [2217066 2182619]
+- hwmon: (coretemp) avoid RDMSR interrupts to isolated CPUs (Marcelo Tosatti) [2215552 2182083]
+- prlimit: do_prlimit needs to have a speculation check (Alex Gladkov) [2215015 2196316] {CVE-2023-0458}
+- x86: don't use REP_GOOD or ERMS for small memory clearing (Myron Stowe) [2196230 2190487]
+- x86/cpufeatures: Add macros for Intel's new fast rep string features (Myron Stowe) [2196230 2190487]
+
+* Thu Jun 22 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.21.1.el9_2]
+- crypto: jitter - correct health test during initialization (Vladis Dronov) [2215080 2214271]
+- mm: avoid unnecessary page fault retires on shared memory types (Nico Pache) [2213894 2160210]
+- scsi: lpfc: Account for fabric domain ctlr device loss recovery (Dick Kennedy) [2213616 2213029]
+- scsi: lpfc: Clear NLP_IN_DEV_LOSS flag if already in rediscovery (Dick Kennedy) [2213616 2213029]
+- scsi: lpfc: Fix use-after-free rport memory access in lpfc_register_remote_port() (Dick Kennedy) [2213616 2213029]
+- scsi: lpfc: Fix crash involving race between FLOGI timeout and devloss handler (Paul Ely) [2213616 2165043]
+- powerpc/vdso: Fix incorrect CFI in gettimeofday.S (Mamatha Inamdar) [2210074 2203363]
+- powerpc/vdso: Move cvdso_call macro into gettimeofday.S (Mamatha Inamdar) [2210074 2203363]
+- powerpc/vdso: Remove cvdso_call_time macro (Mamatha Inamdar) [2210074 2203363]
+- powerpc/vdso: Merge vdso64 and vdso32 into a single directory (Mamatha Inamdar) [2210074 2203363]
+- powerpc/vdso: Rework VDSO32 makefile to add a prefix to object files (Mamatha Inamdar) [2210074 2203363]
+- powerpc/vdso: augment VDSO32 functions to support 64 bits build (Mamatha Inamdar) [2210074 2203363]
+- redhat: configs: enable CONFIG_DELL_WMI_PRIVACY (Foggy Liu) [2209808 2186163]
+
+* Thu Jun 15 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.20.1.el9_2]
+- ice: make writes to /dev/gnssX synchronous (Michal Schmidt) [2213186 2175764]
+- KVM: x86/mmu: Fix race condition in direct_page_fault (Jon Maloy) [2213165 2179930] {CVE-2022-45869}
+- ALSA: hda: Add NVIDIA codec IDs a3 through a7 to patch table (Foggy Liu) [2211656 2209194]
+- locking/rwsem: Disable preemption in all down_write*() and up_write() code paths (Waiman Long) [2187507 2176147]
+- locking/rwsem: Disable preemption in all down_read*() and up_read() code paths (Waiman Long) [2187507 2176147]
+- locking/rwsem: Prevent non-first waiter from spinning in down_write() slowpath (Waiman Long) [2187507 2176147]
+- locking/rwsem: Allow slowpath writer to ignore handoff bit if not set by first waiter (Waiman Long) [2187507 2176147]
+- locking/rwsem: Always try to wake waiters in out_nolock path (Waiman Long) [2187507 2176147]
+- locking/rwsem: Conditionally wake waiters in reader/writer slowpaths (Waiman Long) [2187507 2176147]
+- locking/rwsem: No need to check for handoff bit if wait queue empty (Waiman Long) [2187507 2176147]
+- locking/rwsem: Make handoff bit handling more consistent (Waiman Long) [2187507 2176147]
+- Revert "locking/rwsem: Conditionally wake waiters in reader/writer slowpaths" (Waiman Long) [2187507 2176147]
+
+* Fri Jun 09 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.19.1.el9_2]
+- device-dax: Fix duplicate 'hmem' device registration (Jeff Moyer) [2212386 2207496]
+- redhat/genlog.py: add support to list/process zstream Jira tickets (Herton R. Krzesinski)
+- ice: Remove LAG+SRIOV mutual exclusion (Michal Schmidt) [2209284 2203243]
+- platform/x86: ISST: PUNIT device mapping with Sub-NUMA clustering (Prarit Bhargava) [2185605 2139964]
+- module: Don't wait for GOING modules (Mark Langsdorf) [2186562 2028238]
 
 * Wed May 31 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.18.1.el9_2]
 - x86/i8259: Mark legacy PIC interrupts with IRQ_LEVEL (Baoquan He) [2210614 2116317]

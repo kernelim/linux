@@ -229,6 +229,9 @@ subsystems:
      - name: Eder Zulian
        email: ezulian@redhat.com
        gluser: ezulian
+     - name: Clark Williams
+       email: williams@redhat.com
+       gluser: clrkwllms
    paths:
        includes:
           - makefile
@@ -675,6 +678,8 @@ subsystems:
        includes:
           - fs/afs/
           - net/rxrpc/
+          - Documentation/networking/rxrpc*
+          - include/net/*rxrpc*
  - subsystem: AIO
    labels:
      name: aio
@@ -786,6 +791,22 @@ subsystems:
        includes:
           - drivers/infiniband/hw/efa/
           - include/uapi/rdma/efa-abi.h
+ - subsystem: AMD CDX
+   labels:
+     name: cdx
+   status: Disabled
+   devel-sst:
+     - rhel-sst-accelerators
+   qe-sst:
+     - rhel-sst-null
+   requiredApproval: false
+   maintainers:
+     - name: Marco Pagani
+       email: marpagan@redhat.com
+       gluser: marpagan
+   paths:
+       includes:
+          - drivers/cdx/
  - subsystem: AMD IOMMU (AMD-VI)
    labels:
      name: amd_iommu
@@ -1120,6 +1141,9 @@ subsystems:
      - name: Eric Chanudet
        email: echanude@redhat.com
        gluser: echanude
+     - name: Radu Rendec
+       email: rrendec@redhat.com
+       gluser: rh-ee-rrendec
    paths:
        includes:
           - Documentation/devicetree/bindings/*/qcom*
@@ -1698,9 +1722,9 @@ subsystems:
      - rhel-sst-null
    requiredApproval: false
    maintainers:
-     - name: Peter Robinson
-       email: perobins@redhat.com
-       gluser: perobins
+     - name: Radu Rendec
+       email: rrendec@redhat.com
+       gluser: rh-ee-rrendec
    paths:
        includes:
           - Documentation/networking/can.rst
@@ -2028,12 +2052,15 @@ subsystems:
      - rhel-sst-cki
    requiredApproval: true
    maintainers:
+     - name: Tales da Aparecida
+       email: tdaapare@redhat.com
+       gluser: tales-aparecida
      - name: Tino Calancha
        email: tcalanch@redhat.com
        gluser: calancha
      - name: Michael Hofmann
        email: mhofmann@redhat.com
-       gluser: mh21
+       gluser: mh21_rh
      - name: Serhii Turivnyi
        email: sturivny@redhat.com
        gluser: sturivny
@@ -2128,10 +2155,7 @@ subsystems:
           - drivers/cpufreq/
        excludes:
           - drivers/cpufreq/intel_pstate.c
-          - drivers/cpufreq/amd-pstate-trace.h
-          - drivers/cpufreq/amd_freq_sensitivity.c
-          - drivers/cpufreq/amd-pstate.c
-          - drivers/cpufreq/amd-pstate-trace.c
+          - drivers/cpufreq/amd*
  - subsystem: CPU IDLE DRIVERS
    labels:
      name: cpuidle
@@ -4976,6 +5000,9 @@ subsystems:
      - name: Ricardo Robaina
        email: rrobaina@redhat.com
        gluser: rrobaina
+     - name: Audra Mitchell
+       email: aubaker@redhat.com
+       gluser: aubaker
    paths:
        includes:
           - arch/arm64/mm/
@@ -5583,6 +5610,7 @@ subsystems:
           - Documentation/networking/rds*
           - Documentation/networking/regulatory*
           - Documentation/networking/rxrpc*
+          - Documentation/networking/smc*
           - include/linux/net/intel/
           - include/linux/netfs.h
           - include/net/*80211*
@@ -5596,7 +5624,10 @@ subsystems:
           - include/net/iw*
           - include/net/mana/
           - include/net/netlabel.h
+          - include/net/netns/smc.h
           - include/net/regulatory.h
+          - include/net/*rxrpc*
+          - include/net/smc.h
           - include/net/vsock_addr.h
           - net/bluetooth/
           - net/can/
@@ -7391,7 +7422,10 @@ subsystems:
        gluser: sfbest
    paths:
        includes:
+          - Documentation/networking/smc*
           - net/smc/
+          - include/net/netns/smc.h
+          - include/net/smc.h
           - include/uapi/linux/smc.h
           - include/uapi/linux/smc_diag.h
  - subsystem: SIOX SUBSYSTEM
@@ -8292,7 +8326,7 @@ subsystems:
    maintainers:
      - name: Gerd Hoffmann
        email: kraxel@redhat.com
-       gluser: kraxel
+       gluser: kraxel.rh
    paths:
        includes:
           - drivers/gpu/drm/virtio/
@@ -8331,7 +8365,7 @@ subsystems:
    maintainers:
      - name: Gerd Hoffmann
        email: kraxel@redhat.com
-       gluser: kraxel
+       gluser: kraxel.rh
    paths:
        includes:
           - drivers/virtio/virtio_input.c
@@ -8649,10 +8683,7 @@ subsystems:
        includes:
           - arch/x86/kernel/cpu/cpufreq/
           - drivers/cpufreq/intel_pstate.c
-          - drivers/cpufreq/amd-pstate-trace.h
-          - drivers/cpufreq/amd_freq_sensitivity.c
-          - drivers/cpufreq/amd-pstate.c
-          - drivers/cpufreq/amd-pstate-trace.c
+          - drivers/cpufreq/amd*
           - drivers/idle/intel_idle.c
           - drivers/idle/Kconfig
  - subsystem: X86 FPU SUBSYSTEM
