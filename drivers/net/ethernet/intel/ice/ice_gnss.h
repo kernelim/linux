@@ -13,9 +13,9 @@
 #define ICE_GNSS_UBX_DATA_LEN_H		0xFD
 #define ICE_GNSS_UBX_DATA_LEN_WIDTH	2
 #define ICE_GNSS_UBX_EMPTY_DATA		0xFF
+#define ICE_GNSS_POLL_DATA_DELAY_TIME	(HZ / 50) /* poll every 20 ms */
 #define ICE_GNSS_TIMER_DELAY_TIME	(HZ / 10) /* 0.1 second per message */
 #define ICE_MAX_I2C_DATA_SIZE		FIELD_MAX(ICE_AQC_I2C_DATA_SIZE_M)
-#define ICE_MAX_UBX_READ_TRIES		255
 
 /**
  * struct gnss_serial - data used to initialize GNSS TTY port
