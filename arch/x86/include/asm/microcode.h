@@ -4,6 +4,7 @@
 #include <asm/cpu.h>
 #include <linux/earlycpio.h>
 #include <linux/initrd.h>
+#include <asm/microcode_amd.h>
 
 #define native_rdmsr(msr, val1, val2)			\
 do {							\

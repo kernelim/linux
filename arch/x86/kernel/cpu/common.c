@@ -1958,4 +1958,6 @@ void cpu_init(void)
 void microcode_check(void)
 {
 	perf_check_microcode();
+
+	amd_check_microcode();
 }
