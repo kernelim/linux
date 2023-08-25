@@ -6,10 +6,10 @@ Makefile.rhelver	jforbes@redhat.com jforbes@fedoraproject.org ptalbert@redhat.co
 Makefile.rhelver	williams@redhat.com ahalaney@redhat.com
 
 [Automotive Stream Distribution Kernel Maintainer]
-makefile	jfaracco@redhat.com scweaver@redhat.com
-Makefile.rhelver	jfaracco@redhat.com scweaver@redhat.com
-redhat/	jfaracco@redhat.com scweaver@redhat.com
-^redhat/configs/	jfaracco@redhat.com scweaver@redhat.com
+makefile	jarod@redhat.com jfaracco@redhat.com
+Makefile.rhelver	jarod@redhat.com jfaracco@redhat.com
+redhat/	jarod@redhat.com jfaracco@redhat.com
+^redhat/configs/	jarod@redhat.com jfaracco@redhat.com
 
 [CentOS Stream 9 Kernel Maintainer]
 Makefile.rhelver	jstancek@redhat.com
@@ -136,9 +136,9 @@ drivers/media/pci/ivtv/ivtv-alsa*	jkysela@redhat.com
 drivers/media/usb/tm6000/tm6000-alsa.c	jkysela@redhat.com
 
 ^[AMAZON ETHERNET DRIVERS]
-Documentation/networking/ena.txt	joskera@redhat.com
-Documentation/networking/device_drivers/ethernet/amazon/ena.rst	joskera@redhat.com
-drivers/net/ethernet/amazon/	joskera@redhat.com
+Documentation/networking/ena.txt	dacampbe@redhat.com
+Documentation/networking/device_drivers/ethernet/amazon/ena.rst	dacampbe@redhat.com
+drivers/net/ethernet/amazon/	dacampbe@redhat.com
 
 ^[AMAZON RDMA EFA DRIVER (efa)]
 drivers/infiniband/hw/efa/	ibakolla@redhat.com kheib@redhat.com
@@ -235,7 +235,7 @@ include/uapi/linux/audit.h	rbriggs@redhat.com
 kernel/audit*	rbriggs@redhat.com
 
 ^[AUTOMOTIVE]
-redhat/configs/automotive/	jfaracco@redhat.com scweaver@redhat.com
+redhat/configs/automotive/	jarod@redhat.com jfaracco@redhat.com
 
 ^[BE2NET ETHERNET DRIVER (be2net)]
 drivers/net/ethernet/emulex/benet/	poros@redhat.com
@@ -443,6 +443,7 @@ include/uapi/linux/dm-*.h	snitzer@redhat.com
 ^[DEVLINK]
 Documentation/networking/devlink/	poros@redhat.com ivecera@redhat.com
 net/core/devlink.c	poros@redhat.com ivecera@redhat.com
+net/devlink/	poros@redhat.com ivecera@redhat.com
 include/net/devlink.h	poros@redhat.com ivecera@redhat.com
 include/uapi/linux/devlink.h	poros@redhat.com ivecera@redhat.com
 
@@ -487,8 +488,11 @@ drivers/net/ethernet/	mschmidt@redhat.com
 ^drivers/net/ethernet/microsoft/	mschmidt@redhat.com
 
 ^[ETHERNET BRIDGE]
+Documentation/networking/bridge.rst	ivecera@redhat.com haliu@redhat.com
 net/bridge/	ivecera@redhat.com haliu@redhat.com
 include/linux/if_bridge.h	ivecera@redhat.com haliu@redhat.com
+include/uapi/linux/if_bridge.h	ivecera@redhat.com haliu@redhat.com
+include/uapi/linux/mrp_bridge.h	ivecera@redhat.com haliu@redhat.com
 
 ^[ETHERNET PHY LIBRARY]
 Documentation/networking/phy.rst	ihuguet@redhat.com
@@ -504,6 +508,9 @@ include/linux/platform_data/mdio-gpio.h	ihuguet@redhat.com
 include/trace/events/mdio.h	ihuguet@redhat.com
 include/uapi/linux/mdio.h	ihuguet@redhat.com
 include/uapi/linux/mii.h	ihuguet@redhat.com
+
+^[EXFAT FILE SYSTEM]
+fs/exfat/	preichl@redhat.com
 
 ^[EXT4 FILE SYSTEM]
 Documentation/filesystems/ext4/ext4.rst	cmaiolino@redhat.com
@@ -535,6 +542,7 @@ fs/	bfoster@redhat.com cmaiolino@redhat.com esandeen@redhat.com bodonnel@redhat.
 ^fs/dax.c	bfoster@redhat.com cmaiolino@redhat.com esandeen@redhat.com bodonnel@redhat.com dchinner@redhat.com
 ^fs/direct-io.c	bfoster@redhat.com cmaiolino@redhat.com esandeen@redhat.com bodonnel@redhat.com dchinner@redhat.com
 ^fs/dlm/	bfoster@redhat.com cmaiolino@redhat.com esandeen@redhat.com bodonnel@redhat.com dchinner@redhat.com
+^fs/exfat/	bfoster@redhat.com cmaiolino@redhat.com esandeen@redhat.com bodonnel@redhat.com dchinner@redhat.com
 ^fs/ext4/	bfoster@redhat.com cmaiolino@redhat.com esandeen@redhat.com bodonnel@redhat.com dchinner@redhat.com
 ^fs/fuse/	bfoster@redhat.com cmaiolino@redhat.com esandeen@redhat.com bodonnel@redhat.com dchinner@redhat.com
 ^fs/gfs2/	bfoster@redhat.com cmaiolino@redhat.com esandeen@redhat.com bodonnel@redhat.com dchinner@redhat.com
@@ -1075,15 +1083,23 @@ tools/testing/selftests/pid_namespace/	agladkov@redhat.com
 tools/testing/selftests/rlimits/	agladkov@redhat.com
 
 ^[NETFILTER]
+Documentation/networking/ipvs-sysctl.*	fwestpha@redhat.com
+Documentation/networking/netfilter-sysctl.*	fwestpha@redhat.com
+Documentation/networking/nf_conntrack-sysctl.*	fwestpha@redhat.com
+Documentation/networking/nf_flowtable.*	fwestpha@redhat.com
+Documentation/networking/tproxy.*	fwestpha@redhat.com
 net/netfilter/	fwestpha@redhat.com
-net/*/netfilter*	fwestpha@redhat.com
+net/*/*netfilter*	fwestpha@redhat.com
 include/linux/netfilter*	fwestpha@redhat.com
 include/net/netfilter/	fwestpha@redhat.com
+include/uapi/linux/ip_vs.h	fwestpha@redhat.com
 include/uapi/linux/netfilter*	fwestpha@redhat.com
+include/net/ip_vs.h	fwestpha@redhat.com
 include/net/netns/conntrack.h	fwestpha@redhat.com
 include/net/netns/netfilter.h	fwestpha@redhat.com
 include/net/netns/nftables.h	fwestpha@redhat.com
 include/net/netns/x_tables.h	fwestpha@redhat.com
+tools/testing/selftests/netfilter/	fwestpha@redhat.com
 
 ^[NETWORK LOCK MANAGER (lockd)]
 fs/lockd/	bcodding@redhat.com jlayton@redhat.com steved@redhat.com smayhew@redhat.com
@@ -1124,9 +1140,11 @@ include/linux/eth*	jbenc@redhat.com mleitner@redhat.com
 include/linux/filter.h	jbenc@redhat.com mleitner@redhat.com
 include/linux/icmp*	jbenc@redhat.com mleitner@redhat.com
 include/linux/if*	jbenc@redhat.com mleitner@redhat.com
+include/linux/igmp.h	jbenc@redhat.com mleitner@redhat.com
 include/linux/in[.6e]*	jbenc@redhat.com mleitner@redhat.com
 include/linux/ip.h	jbenc@redhat.com mleitner@redhat.com
 include/linux/ipv6*	jbenc@redhat.com mleitner@redhat.com
+include/linux/l2tp.h	jbenc@redhat.com mleitner@redhat.com
 include/linux/llc.h	jbenc@redhat.com mleitner@redhat.com
 include/linux/mroute*	jbenc@redhat.com mleitner@redhat.com
 include/linux/net*	jbenc@redhat.com mleitner@redhat.com
@@ -1142,47 +1160,78 @@ include/linux/sock*	jbenc@redhat.com mleitner@redhat.com
 include/linux/tcp.h	jbenc@redhat.com mleitner@redhat.com
 include/linux/tfrc.h	jbenc@redhat.com mleitner@redhat.com
 include/linux/udp.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/asm-generic/socket.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/*diag.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/dcbnl.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/devlink.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/erspan.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/eth*	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/fib_rules.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/filter.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/gen_stats.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/genetlink.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/hsr_netlink.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/icmp*	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/if*	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/igmp.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/in[.6e]*	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/in_route.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/ip[._sv6]*	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/l2tp.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/llc.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/lwtunnel.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/mpls.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/mpls_iptunnel.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/mptcp.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/mroute*	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/mrp_bridge.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/neighbour.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/net*	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/netlink*	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/nexthop.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/openvswitch.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/pfkeyv2.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/pkt_*	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/ppp-comp.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/ppp_defs.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/ppp-ioctl.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/psample.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/route.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/rpl.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/rpl_iptunnel.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/rtnetlink.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/sctp.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/seg6*	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/snmp.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/sock*	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/tc_*/*	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/tcp*	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/tipc*	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/tls.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/udp.h	jbenc@redhat.com mleitner@redhat.com
-include/uapi/linux/xfrm.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/veth.h	jbenc@redhat.com mleitner@redhat.com
 include/uapi/linux/wireguard.h	jbenc@redhat.com mleitner@redhat.com
+include/uapi/linux/xfrm.h	jbenc@redhat.com mleitner@redhat.com
 lib/nlattr.c	jbenc@redhat.com mleitner@redhat.com
 tools/testing/selftests/net/	jbenc@redhat.com mleitner@redhat.com
 tools/testing/selftests/wireguard/	jbenc@redhat.com mleitner@redhat.com
+^Documentation/networking/arcnet*	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/can.rst	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/device_drivers/	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/devlink/	jbenc@redhat.com mleitner@redhat.com
+^Documentation/networking/dsa/	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/mac80211*	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/ieee802154*	jbenc@redhat.com mleitner@redhat.com
+^Documentation/networking/nfc.*	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/phonet*	jbenc@redhat.com mleitner@redhat.com
+^Documentation/networking/phy.rst	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/rds*	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/regulatory*	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/rxrpc*	jbenc@redhat.com mleitner@redhat.com
 ^Documentation/networking/smc*	jbenc@redhat.com mleitner@redhat.com
+^Documentation/networking/tuntap.*	jbenc@redhat.com mleitner@redhat.com
+^include/linux/if_tap.h	jbenc@redhat.com mleitner@redhat.com
+^include/linux/if_tun.h	jbenc@redhat.com mleitner@redhat.com
 ^include/linux/net/intel/	jbenc@redhat.com mleitner@redhat.com
 ^include/linux/netfs.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/*80211*	jbenc@redhat.com mleitner@redhat.com
@@ -1191,18 +1240,26 @@ tools/testing/selftests/wireguard/	jbenc@redhat.com mleitner@redhat.com
 ^include/net/bluetooth/	jbenc@redhat.com mleitner@redhat.com
 ^include/net/calipso.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/cipso_ipv4.h	jbenc@redhat.com mleitner@redhat.com
+^include/net/dsa.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/irda/	jbenc@redhat.com mleitner@redhat.com
 ^include/net/iucv/	jbenc@redhat.com mleitner@redhat.com
 ^include/net/iw*	jbenc@redhat.com mleitner@redhat.com
 ^include/net/mana/	jbenc@redhat.com mleitner@redhat.com
+^include/net/ncsi.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/netlabel.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/netns/smc.h	jbenc@redhat.com mleitner@redhat.com
+^include/net/nfc/	jbenc@redhat.com mleitner@redhat.com
 ^include/net/regulatory.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/*rxrpc*	jbenc@redhat.com mleitner@redhat.com
 ^include/net/smc.h	jbenc@redhat.com mleitner@redhat.com
 ^include/net/vsock_addr.h	jbenc@redhat.com mleitner@redhat.com
+^include/uapi/linux/if_infiniband.h	jbenc@redhat.com mleitner@redhat.com
+^include/uapi/linux/if_tun.h	jbenc@redhat.com mleitner@redhat.com
+^include/uapi/linux/smc_diag.h	jbenc@redhat.com mleitner@redhat.com
+^include/uapi/linux/vm_sockets_diag.h	jbenc@redhat.com mleitner@redhat.com
 ^net/bluetooth/	jbenc@redhat.com mleitner@redhat.com
 ^net/can/	jbenc@redhat.com mleitner@redhat.com
+^net/dsa/	jbenc@redhat.com mleitner@redhat.com
 ^net/ceph/	jbenc@redhat.com mleitner@redhat.com
 ^net/ieee802154/	jbenc@redhat.com mleitner@redhat.com
 ^net/ipv4/cipso_ipv4.c	jbenc@redhat.com mleitner@redhat.com
@@ -1239,6 +1296,7 @@ net/netfilter/xt_CONNSECMARK.c	omosnace@redhat.com
 net/netfilter/xt_SECMARK.c	omosnace@redhat.com
 
 ^[NETWORKING [TEAM]]
+Documentation/networking/team.*	haliu@redhat.com lxin@redhat.com
 drivers/net/team/	haliu@redhat.com lxin@redhat.com
 include/linux/if_team.h	haliu@redhat.com lxin@redhat.com
 include/uapi/linux/if_team.h	haliu@redhat.com lxin@redhat.com
@@ -1323,6 +1381,7 @@ include/uapi/rdma/hfi*	ibakolla@redhat.com kheib@redhat.com
 drivers/of/	dledford@redhat.com prarit@redhat.com
 
 ^[OPENVSWITCH (OVS)]
+Documentation/networking/openvswitch.*	fbl@redhat.com
 net/openvswitch/	fbl@redhat.com
 include/linux/openvswitch.h	fbl@redhat.com
 include/uapi/linux/openvswitch.h	fbl@redhat.com
@@ -1383,8 +1442,8 @@ drivers/platform/	mlangsdo@redhat.com
 ^[PLATFORM DRIVERS MELLANOX]
 drivers/platform/mellanox/	mlangsdo@redhat.com
 
-^[PLATFORM DRIVERS X86]
-drivers/platform/x86/	darcari@redhat.com
+[PLATFORM DRIVERS X86]
+drivers/platform/x86/	darcari@redhat.com sbest@redhat.com prarit@redhat.com
 
 ^[PNP SUPPORT]
 drivers/pnp/	dledford@redhat.com prarit@redhat.com
@@ -1534,6 +1593,7 @@ drivers/target/	mlombard@redhat.com
 include/target/	mlombard@redhat.com
 
 ^[SCTP PROTOCOL]
+Documentation/networking/sctp.*	mleitner@redhat.com lxin@redhat.com
 net/sctp/	mleitner@redhat.com lxin@redhat.com
 include/linux/sctp.h	mleitner@redhat.com lxin@redhat.com
 include/net/sctp/	mleitner@redhat.com lxin@redhat.com
@@ -1647,15 +1707,24 @@ drivers/soc/	msalter@redhat.com
 include/linux/soc/	msalter@redhat.com
 
 ^[TC subsystem]
+Documentation/networking/tc-*	ivecera@redhat.com
 include/net/act_api.h	ivecera@redhat.com
+include/net/codel*.h	ivecera@redhat.com
+include/net/pie.h	ivecera@redhat.com
 include/net/pkt_cls.h	ivecera@redhat.com
 include/net/pkt_sched.h	ivecera@redhat.com
+include/net/red.h	ivecera@redhat.com
+include/net/sch_generic.h	ivecera@redhat.com
 include/net/tc_act/	ivecera@redhat.com
+include/net/tc_wrapper.h	ivecera@redhat.com
+include/trace/events/qdisc.h	ivecera@redhat.com
+include/uapi/linux/gen_stats.h	ivecera@redhat.com
 include/uapi/linux/pkt_cls.h	ivecera@redhat.com
 include/uapi/linux/pkt_sched.h	ivecera@redhat.com
 include/uapi/linux/tc_act/	ivecera@redhat.com
 include/uapi/linux/tc_ematch/	ivecera@redhat.com
 net/sched/	ivecera@redhat.com
+tools/testing/selftests/tc-testing/	ivecera@redhat.com
 
 ^[TEE SUBSYSTEM]
 drivers/tee/	dledford@redhat.com prarit@redhat.com
@@ -1691,6 +1760,7 @@ include/time/hrtimer.c	prarit@redhat.com
 ^kernel/time/sched_clock.c	prarit@redhat.com
 
 ^[TIPC PROTOCOL]
+Documentation/networking/tipc.rst	jmaloy@redhat.com lxin@redhat.com
 net/tipc/	jmaloy@redhat.com lxin@redhat.com
 include/net/tipc.h	jmaloy@redhat.com lxin@redhat.com
 include/uapi/linux/tipc.h	jmaloy@redhat.com lxin@redhat.com
@@ -1890,6 +1960,7 @@ arch/x86/include/asm/fpu/	dnelson@redhat.com
 arch/x86/kernel/fpu/	dnelson@redhat.com
 
 ^[XDP (eXpress Data Path)]
+Documentation/networking/page_pool.rst	brouer@redhat.com jbenc@redhat.com toke@redhat.com
 Documentation/networking/*xdp*	brouer@redhat.com jbenc@redhat.com toke@redhat.com
 kernel/bpf/devmap.c	brouer@redhat.com jbenc@redhat.com toke@redhat.com
 kernel/bpf/cpumap.c	brouer@redhat.com jbenc@redhat.com toke@redhat.com

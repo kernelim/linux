@@ -73,8 +73,8 @@ S:	Supported
 F:	Makefile.rhelver
 
 Automotive Stream Distribution Kernel Maintainer
+M:	Jarod Wilson <jarod@redhat.com>
 M:	Julio Faracco <jfaracco@redhat.com>
-M:	Scott Weaver <scweaver@redhat.com>
 S:	Supported
 F:	makefile
 F:	Makefile.rhelver
@@ -290,7 +290,7 @@ F:	drivers/media/pci/ivtv/ivtv-alsa*
 F:	drivers/media/usb/tm6000/tm6000-alsa.c
 
 AMAZON ETHERNET DRIVERS
-M:	Josef Oskera <joskera@redhat.com>
+M:	Dan Campbell <dacampbe@redhat.com>
 R:	Michal Schmidt <mschmidt@redhat.com>
 R:	Petr Oros <poros@redhat.com>
 R:	Ken Cox <jkc@redhat.com>
@@ -346,7 +346,6 @@ R:	Kamal Heib <kheib@redhat.com>
 R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
-R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	drivers/net/ethernet/aquantia/
@@ -465,8 +464,8 @@ F:	include/uapi/linux/audit.h
 F:	kernel/audit*
 
 AUTOMOTIVE
+M:	Jarod Wilson <jarod@redhat.com>
 M:	Julio Faracco <jfaracco@redhat.com>
-M:	Scott Weaver <scweaver@redhat.com>
 R:	Adrien Thierry <athierry@redhat.com>
 R:	Alessandro Carminati <acarmina@redhat.com>
 R:	Andrew Halaney <ahalaney@redhat.com>
@@ -515,7 +514,6 @@ R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
 R:	Íñigo Huguet <ihuguet@redhat.com>
-R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	Documentation/networking/bonding.rst
@@ -831,6 +829,7 @@ R:	Ivan Vecera <ivecera@redhat.com>
 S:	Supported
 F:	Documentation/networking/devlink/
 F:	net/core/devlink.c
+F:	net/devlink/
 F:	include/net/devlink.h
 F:	include/uapi/linux/devlink.h
 
@@ -916,7 +915,6 @@ R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
 R:	Íñigo Huguet <ihuguet@redhat.com>
-R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	drivers/net/ethernet/
@@ -926,8 +924,11 @@ ETHERNET BRIDGE
 M:	Ivan Vecera <ivecera@redhat.com>
 M:	Hangbin Liu <haliu@redhat.com>
 S:	Supported
+F:	Documentation/networking/bridge.rst
 F:	net/bridge/
 F:	include/linux/if_bridge.h
+F:	include/uapi/linux/if_bridge.h
+F:	include/uapi/linux/mrp_bridge.h
 
 ETHERNET PHY LIBRARY
 M:	Íñigo Huguet <ihuguet@redhat.com>
@@ -939,7 +940,6 @@ R:	Kamal Heib <kheib@redhat.com>
 R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
-R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	Documentation/networking/phy.rst
@@ -955,6 +955,11 @@ F:	include/linux/platform_data/mdio-gpio.h
 F:	include/trace/events/mdio.h
 F:	include/uapi/linux/mdio.h
 F:	include/uapi/linux/mii.h
+
+EXFAT FILE SYSTEM
+M:	Pavel Reichl <preichl@redhat.com>
+S:	Supported
+F:	fs/exfat/
 
 EXT4 FILE SYSTEM
 M:	Carlos Maiolino <cmaiolino@redhat.com>
@@ -1002,6 +1007,7 @@ X:	fs/configfs/
 X:	fs/dax.c
 X:	fs/direct-io.c
 X:	fs/dlm/
+X:	fs/exfat/
 X:	fs/ext4/
 X:	fs/fuse/
 X:	fs/gfs2/
@@ -1242,7 +1248,6 @@ R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
 R:	Íñigo Huguet <ihuguet@redhat.com>
-R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	drivers/infiniband/
@@ -1305,7 +1310,6 @@ R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
 R:	Íñigo Huguet <ihuguet@redhat.com>
-R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	drivers/net/ethernet/intel/ice/
@@ -1866,15 +1870,23 @@ F:	tools/testing/selftests/rlimits/
 NETFILTER
 M:	Florian Westphal <fwestpha@redhat.com>
 S:	Supported
+F:	Documentation/networking/ipvs-sysctl.*
+F:	Documentation/networking/netfilter-sysctl.*
+F:	Documentation/networking/nf_conntrack-sysctl.*
+F:	Documentation/networking/nf_flowtable.*
+F:	Documentation/networking/tproxy.*
 F:	net/netfilter/
-F:	net/*/netfilter*
+F:	net/*/*netfilter*
 F:	include/linux/netfilter*
 F:	include/net/netfilter/
+F:	include/uapi/linux/ip_vs.h
 F:	include/uapi/linux/netfilter*
+F:	include/net/ip_vs.h
 F:	include/net/netns/conntrack.h
 F:	include/net/netns/netfilter.h
 F:	include/net/netns/nftables.h
 F:	include/net/netns/x_tables.h
+F:	tools/testing/selftests/netfilter/
 
 NETWORK LOCK MANAGER (lockd)
 M:	Benjamin Coddington <bcodding@redhat.com>
@@ -1894,7 +1906,6 @@ R:	Kamal Heib <kheib@redhat.com>
 R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Íñigo Huguet <ihuguet@redhat.com>
-R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	Documentation/devicetree/bindings/net/dsa/
@@ -1955,9 +1966,11 @@ F:	include/linux/eth*
 F:	include/linux/filter.h
 F:	include/linux/icmp*
 F:	include/linux/if*
+F:	include/linux/igmp.h
 F:	include/linux/in[.6e]*
 F:	include/linux/ip.h
 F:	include/linux/ipv6*
+F:	include/linux/l2tp.h
 F:	include/linux/llc.h
 F:	include/linux/mroute*
 F:	include/linux/net*
@@ -1973,47 +1986,78 @@ F:	include/linux/sock*
 F:	include/linux/tcp.h
 F:	include/linux/tfrc.h
 F:	include/linux/udp.h
+F:	include/uapi/asm-generic/socket.h
+F:	include/uapi/linux/*diag.h
+F:	include/uapi/linux/dcbnl.h
 F:	include/uapi/linux/devlink.h
+F:	include/uapi/linux/erspan.h
 F:	include/uapi/linux/eth*
+F:	include/uapi/linux/fib_rules.h
 F:	include/uapi/linux/filter.h
+F:	include/uapi/linux/gen_stats.h
 F:	include/uapi/linux/genetlink.h
+F:	include/uapi/linux/hsr_netlink.h
 F:	include/uapi/linux/icmp*
 F:	include/uapi/linux/if*
+F:	include/uapi/linux/igmp.h
 F:	include/uapi/linux/in[.6e]*
+F:	include/uapi/linux/in_route.h
 F:	include/uapi/linux/ip[._sv6]*
+F:	include/uapi/linux/l2tp.h
 F:	include/uapi/linux/llc.h
 F:	include/uapi/linux/lwtunnel.h
+F:	include/uapi/linux/mpls.h
+F:	include/uapi/linux/mpls_iptunnel.h
+F:	include/uapi/linux/mptcp.h
 F:	include/uapi/linux/mroute*
+F:	include/uapi/linux/mrp_bridge.h
+F:	include/uapi/linux/neighbour.h
 F:	include/uapi/linux/net*
 F:	include/uapi/linux/netlink*
+F:	include/uapi/linux/nexthop.h
 F:	include/uapi/linux/openvswitch.h
+F:	include/uapi/linux/pfkeyv2.h
 F:	include/uapi/linux/pkt_*
 F:	include/uapi/linux/ppp-comp.h
 F:	include/uapi/linux/ppp_defs.h
 F:	include/uapi/linux/ppp-ioctl.h
+F:	include/uapi/linux/psample.h
+F:	include/uapi/linux/route.h
+F:	include/uapi/linux/rpl.h
+F:	include/uapi/linux/rpl_iptunnel.h
 F:	include/uapi/linux/rtnetlink.h
 F:	include/uapi/linux/sctp.h
 F:	include/uapi/linux/seg6*
+F:	include/uapi/linux/snmp.h
 F:	include/uapi/linux/sock*
 F:	include/uapi/linux/tc_*/*
 F:	include/uapi/linux/tcp*
+F:	include/uapi/linux/tipc*
 F:	include/uapi/linux/tls.h
 F:	include/uapi/linux/udp.h
-F:	include/uapi/linux/xfrm.h
+F:	include/uapi/linux/veth.h
 F:	include/uapi/linux/wireguard.h
+F:	include/uapi/linux/xfrm.h
 F:	lib/nlattr.c
 F:	tools/testing/selftests/net/
 F:	tools/testing/selftests/wireguard/
+X:	Documentation/networking/arcnet*
 X:	Documentation/networking/can.rst
 X:	Documentation/networking/device_drivers/
 X:	Documentation/networking/devlink/
+X:	Documentation/networking/dsa/
 X:	Documentation/networking/mac80211*
 X:	Documentation/networking/ieee802154*
+X:	Documentation/networking/nfc.*
 X:	Documentation/networking/phonet*
+X:	Documentation/networking/phy.rst
 X:	Documentation/networking/rds*
 X:	Documentation/networking/regulatory*
 X:	Documentation/networking/rxrpc*
 X:	Documentation/networking/smc*
+X:	Documentation/networking/tuntap.*
+X:	include/linux/if_tap.h
+X:	include/linux/if_tun.h
 X:	include/linux/net/intel/
 X:	include/linux/netfs.h
 X:	include/net/*80211*
@@ -2022,18 +2066,26 @@ X:	include/net/af_vsock.h
 X:	include/net/bluetooth/
 X:	include/net/calipso.h
 X:	include/net/cipso_ipv4.h
+X:	include/net/dsa.h
 X:	include/net/irda/
 X:	include/net/iucv/
 X:	include/net/iw*
 X:	include/net/mana/
+X:	include/net/ncsi.h
 X:	include/net/netlabel.h
 X:	include/net/netns/smc.h
+X:	include/net/nfc/
 X:	include/net/regulatory.h
 X:	include/net/*rxrpc*
 X:	include/net/smc.h
 X:	include/net/vsock_addr.h
+X:	include/uapi/linux/if_infiniband.h
+X:	include/uapi/linux/if_tun.h
+X:	include/uapi/linux/smc_diag.h
+X:	include/uapi/linux/vm_sockets_diag.h
 X:	net/bluetooth/
 X:	net/can/
+X:	net/dsa/
 X:	net/ceph/
 X:	net/ieee802154/
 X:	net/ipv4/cipso_ipv4.c
@@ -2076,6 +2128,7 @@ NETWORKING [TEAM]
 M:	Hangbin Liu <haliu@redhat.com>
 M:	Xin Long <lxin@redhat.com>
 S:	Supported
+F:	Documentation/networking/team.*
 F:	drivers/net/team/
 F:	include/linux/if_team.h
 F:	include/uapi/linux/if_team.h
@@ -2220,6 +2273,7 @@ OPENVSWITCH (OVS)
 M:	Flavio Leitner <fbl@redhat.com>
 R:	Eelco Chaudron <echaudro@redhat.com>
 S:	Supported
+F:	Documentation/networking/openvswitch.*
 F:	net/openvswitch/
 F:	include/linux/openvswitch.h
 F:	include/uapi/linux/openvswitch.h
@@ -2312,6 +2366,8 @@ F:	drivers/platform/mellanox/
 
 PLATFORM DRIVERS X86
 M:	David Arcari <darcari@redhat.com>
+M:	Steve Best <sbest@redhat.com>
+M:	Prarit Bhargava <prarit@redhat.com>
 S:	Supported
 F:	drivers/platform/x86/
 
@@ -2578,6 +2634,7 @@ SCTP PROTOCOL
 M:	Marcelo Leitner <mleitner@redhat.com>
 M:	Xin Long <lxin@redhat.com>
 S:	Supported
+F:	Documentation/networking/sctp.*
 F:	net/sctp/
 F:	include/linux/sctp.h
 F:	include/net/sctp/
@@ -2753,15 +2810,24 @@ F:	include/linux/soc/
 TC subsystem
 M:	Ivan Vecera <ivecera@redhat.com>
 S:	Supported
+F:	Documentation/networking/tc-*
 F:	include/net/act_api.h
+F:	include/net/codel*.h
+F:	include/net/pie.h
 F:	include/net/pkt_cls.h
 F:	include/net/pkt_sched.h
+F:	include/net/red.h
+F:	include/net/sch_generic.h
 F:	include/net/tc_act/
+F:	include/net/tc_wrapper.h
+F:	include/trace/events/qdisc.h
+F:	include/uapi/linux/gen_stats.h
 F:	include/uapi/linux/pkt_cls.h
 F:	include/uapi/linux/pkt_sched.h
 F:	include/uapi/linux/tc_act/
 F:	include/uapi/linux/tc_ematch/
 F:	net/sched/
+F:	tools/testing/selftests/tc-testing/
 
 TEE SUBSYSTEM
 M:	Doug Ledford <dledford@redhat.com>
@@ -2814,6 +2880,7 @@ TIPC PROTOCOL
 M:	Jon Maloy <jmaloy@redhat.com>
 M:	Xin Long <lxin@redhat.com>
 S:	Provided
+F:	Documentation/networking/tipc.rst
 F:	net/tipc/
 F:	include/net/tipc.h
 F:	include/uapi/linux/tipc.h
@@ -3040,7 +3107,6 @@ R:	Kamal Heib <kheib@redhat.com>
 R:	Stefan Assmann <sassmann@redhat.com>
 R:	Corinna Vinschen <vinschen@redhat.com>
 R:	Ivan Vecera <ivecera@redhat.com>
-R:	Josef Oskera <joskera@redhat.com>
 R:	Izabela Bakollari <ibakolla@redhat.com>
 S:	Supported
 F:	Documentation/networking/mac80211*
@@ -3127,6 +3193,7 @@ M:	Jesper Dangaard Brouer <brouer@redhat.com>
 M:	Jiri Benc <jbenc@redhat.com>
 M:	Toke Høiland-Jørgensen <toke@redhat.com>
 S:	Supported
+F:	Documentation/networking/page_pool.rst
 F:	Documentation/networking/*xdp*
 F:	kernel/bpf/devmap.c
 F:	kernel/bpf/cpumap.c

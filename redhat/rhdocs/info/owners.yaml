@@ -93,12 +93,12 @@ subsystems:
      - rhel-sst-kernel-maintainers
    requiredApproval: true
    maintainers:
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
      - name: Julio Faracco
        email: jfaracco@redhat.com
        gluser: jfaracco
-     - name: Scott Weaver
-       email: scweaver@redhat.com
-       gluser: scweaver
    paths:
        # Focus is on main-automotive branch
        includes:
@@ -732,9 +732,9 @@ subsystems:
      - rhel-sst-nic-rdma
    requiredApproval: false
    maintainers:
-     - name: Josef Oskera
-       email: joskera@redhat.com
-       gluser: joskera
+     - name: Dan Campbell
+       email: dacampbe@redhat.com
+       gluser: dacampbe
    reviewers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -931,9 +931,6 @@ subsystems:
      - name: Ivan Vecera
        email: ivecera@redhat.com
        gluser: ivecera
-     - name: Josef Oskera
-       email: joskera@redhat.com
-       gluser: joskera
      - name: Izabela Bakollari
        email: ibakolla@redhat.com
        gluser: ibakolla
@@ -1275,12 +1272,12 @@ subsystems:
    qe-sst:
      - rhivos-ft-auto-kernel
    maintainers:
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
      - name: Julio Faracco
        email: jfaracco@redhat.com
        gluser: jfaracco
-     - name: Scott Weaver
-       email: scweaver@redhat.com
-       gluser: scweaver
    reviewers:
      - name: Adrien Thierry
        email: athierry@redhat.com
@@ -1461,9 +1458,6 @@ subsystems:
      - name: Íñigo Huguet
        email: ihuguet@redhat.com
        gluser: ihuguet-rh
-     - name: Josef Oskera
-       email: joskera@redhat.com
-       gluser: joskera
      - name: Izabela Bakollari
        email: ibakolla@redhat.com
        gluser: ibakolla
@@ -2392,6 +2386,7 @@ subsystems:
        includes:
           - Documentation/networking/devlink/
           - net/core/devlink.c
+          - net/devlink/
           - include/net/devlink.h
           - include/uapi/linux/devlink.h
  - subsystem: DIRECT IO
@@ -2670,9 +2665,6 @@ subsystems:
      - name: Íñigo Huguet
        email: ihuguet@redhat.com
        gluser: ihuguet-rh
-     - name: Josef Oskera
-       email: joskera@redhat.com
-       gluser: joskera
      - name: Izabela Bakollari
        email: ibakolla@redhat.com
        gluser: ibakolla
@@ -2699,8 +2691,11 @@ subsystems:
        gluser: liuhangbin
    paths:
        includes:
+          - Documentation/networking/bridge.rst
           - net/bridge/
           - include/linux/if_bridge.h
+          - include/uapi/linux/if_bridge.h
+          - include/uapi/linux/mrp_bridge.h
  - subsystem: ETHERNET PHY LIBRARY
    labels:
      name: phylib
@@ -2739,9 +2734,6 @@ subsystems:
      - name: Ivan Vecera
        email: ivecera@redhat.com
        gluser: ivecera
-     - name: Josef Oskera
-       email: joskera@redhat.com
-       gluser: joskera
      - name: Izabela Bakollari
        email: ibakolla@redhat.com
        gluser: ibakolla
@@ -2777,6 +2769,22 @@ subsystems:
        includes:
           - drivers/net/pse-pd/
           - include/linux/pse-pd/
+ - subsystem: EXFAT FILE SYSTEM
+   labels:
+     name: exfat
+   status: Supported
+   devel-sst:
+     - rhel-sst-filesystems
+   qe-sst:
+     - rhel-sst-filesystems
+   requiredApproval: false
+   maintainers:
+     - name: Pavel Reichl
+       email: preichl@redhat.com
+       gluser: preichl1
+   paths:
+       includes:
+          - fs/exfat/
  - subsystem: EXT4 FILE SYSTEM
    labels:
      name: ext4
@@ -2910,6 +2918,7 @@ subsystems:
           - fs/dax.c
           - fs/direct-io.c
           - fs/dlm/
+          - fs/exfat/
           - fs/ext4/
           - fs/fuse/
           - fs/gfs2/
@@ -3658,9 +3667,6 @@ subsystems:
      - name: Íñigo Huguet
        email: ihuguet@redhat.com
        gluser: ihuguet-rh
-     - name: Josef Oskera
-       email: joskera@redhat.com
-       gluser: joskera
      - name: Izabela Bakollari
        email: ibakolla@redhat.com
        gluser: ibakolla
@@ -3832,9 +3838,6 @@ subsystems:
      - name: Íñigo Huguet
        email: ihuguet@redhat.com
        gluser: ihuguet-rh
-     - name: Josef Oskera
-       email: joskera@redhat.com
-       gluser: joskera
      - name: Izabela Bakollari
        email: ibakolla@redhat.com
        gluser: ibakolla
@@ -5356,15 +5359,23 @@ subsystems:
        gluser: fwestpha
    paths:
        includes:
+          - Documentation/networking/ipvs-sysctl.*
+          - Documentation/networking/netfilter-sysctl.*
+          - Documentation/networking/nf_conntrack-sysctl.*
+          - Documentation/networking/nf_flowtable.*
+          - Documentation/networking/tproxy.*
           - net/netfilter/
-          - net/*/netfilter*
+          - net/*/*netfilter*
           - include/linux/netfilter*
           - include/net/netfilter/
+          - include/uapi/linux/ip_vs.h
           - include/uapi/linux/netfilter*
+          - include/net/ip_vs.h
           - include/net/netns/conntrack.h
           - include/net/netns/netfilter.h
           - include/net/netns/nftables.h
           - include/net/netns/x_tables.h
+          - tools/testing/selftests/netfilter/
  - subsystem: NETWORK LOCK MANAGER (lockd)
    labels:
      name: lockd
@@ -5428,9 +5439,6 @@ subsystems:
      - name: Íñigo Huguet
        email: ihuguet@redhat.com
        gluser: ihuguet-rh
-     - name: Josef Oskera
-       email: joskera@redhat.com
-       gluser: joskera
      - name: Izabela Bakollari
        email: ibakolla@redhat.com
        gluser: ibakolla
@@ -5551,9 +5559,11 @@ subsystems:
           - include/linux/filter.h
           - include/linux/icmp*
           - include/linux/if*
+          - include/linux/igmp.h
           - include/linux/in[.6e]*
           - include/linux/ip.h
           - include/linux/ipv6*
+          - include/linux/l2tp.h
           - include/linux/llc.h
           - include/linux/mroute*
           - include/linux/net*
@@ -5569,48 +5579,79 @@ subsystems:
           - include/linux/tcp.h
           - include/linux/tfrc.h
           - include/linux/udp.h
+          - include/uapi/asm-generic/socket.h
+          - include/uapi/linux/*diag.h
+          - include/uapi/linux/dcbnl.h
           - include/uapi/linux/devlink.h
+          - include/uapi/linux/erspan.h
           - include/uapi/linux/eth*
+          - include/uapi/linux/fib_rules.h
           - include/uapi/linux/filter.h
+          - include/uapi/linux/gen_stats.h
           - include/uapi/linux/genetlink.h
+          - include/uapi/linux/hsr_netlink.h
           - include/uapi/linux/icmp*
           - include/uapi/linux/if*
+          - include/uapi/linux/igmp.h
           - include/uapi/linux/in[.6e]*
+          - include/uapi/linux/in_route.h
           - include/uapi/linux/ip[._sv6]*
+          - include/uapi/linux/l2tp.h
           - include/uapi/linux/llc.h
           - include/uapi/linux/lwtunnel.h
+          - include/uapi/linux/mpls.h
+          - include/uapi/linux/mpls_iptunnel.h
+          - include/uapi/linux/mptcp.h
           - include/uapi/linux/mroute*
+          - include/uapi/linux/mrp_bridge.h
+          - include/uapi/linux/neighbour.h
           - include/uapi/linux/net*
           - include/uapi/linux/netlink*
+          - include/uapi/linux/nexthop.h
           - include/uapi/linux/openvswitch.h
+          - include/uapi/linux/pfkeyv2.h
           - include/uapi/linux/pkt_*
           - include/uapi/linux/ppp-comp.h
           - include/uapi/linux/ppp_defs.h
           - include/uapi/linux/ppp-ioctl.h
+          - include/uapi/linux/psample.h
+          - include/uapi/linux/route.h
+          - include/uapi/linux/rpl.h
+          - include/uapi/linux/rpl_iptunnel.h
           - include/uapi/linux/rtnetlink.h
           - include/uapi/linux/sctp.h
           - include/uapi/linux/seg6*
+          - include/uapi/linux/snmp.h
           - include/uapi/linux/sock*
           - include/uapi/linux/tc_*/*
           - include/uapi/linux/tcp*
+          - include/uapi/linux/tipc*
           - include/uapi/linux/tls.h
           - include/uapi/linux/udp.h
-          - include/uapi/linux/xfrm.h
+          - include/uapi/linux/veth.h
           - include/uapi/linux/wireguard.h
+          - include/uapi/linux/xfrm.h
           - lib/nlattr.c
           - tools/testing/selftests/net/
           - tools/testing/selftests/wireguard/
        excludes:
+          - Documentation/networking/arcnet*
           - Documentation/networking/can.rst
           - Documentation/networking/device_drivers/
           - Documentation/networking/devlink/
+          - Documentation/networking/dsa/
           - Documentation/networking/mac80211*
           - Documentation/networking/ieee802154*
+          - Documentation/networking/nfc.*
           - Documentation/networking/phonet*
+          - Documentation/networking/phy.rst
           - Documentation/networking/rds*
           - Documentation/networking/regulatory*
           - Documentation/networking/rxrpc*
           - Documentation/networking/smc*
+          - Documentation/networking/tuntap.*
+          - include/linux/if_tap.h
+          - include/linux/if_tun.h
           - include/linux/net/intel/
           - include/linux/netfs.h
           - include/net/*80211*
@@ -5619,18 +5660,26 @@ subsystems:
           - include/net/bluetooth/
           - include/net/calipso.h
           - include/net/cipso_ipv4.h
+          - include/net/dsa.h
           - include/net/irda/
           - include/net/iucv/
           - include/net/iw*
           - include/net/mana/
+          - include/net/ncsi.h
           - include/net/netlabel.h
           - include/net/netns/smc.h
+          - include/net/nfc/
           - include/net/regulatory.h
           - include/net/*rxrpc*
           - include/net/smc.h
           - include/net/vsock_addr.h
+          - include/uapi/linux/if_infiniband.h
+          - include/uapi/linux/if_tun.h
+          - include/uapi/linux/smc_diag.h
+          - include/uapi/linux/vm_sockets_diag.h
           - net/bluetooth/
           - net/can/
+          - net/dsa/
           - net/ceph/
           - net/ieee802154/
           - net/ipv4/cipso_ipv4.c
@@ -5699,6 +5748,7 @@ subsystems:
        gluser: lxin.redhat
    paths:
        includes:
+          - Documentation/networking/team.*
           - drivers/net/team/
           - include/linux/if_team.h
           - include/uapi/linux/if_team.h
@@ -6106,6 +6156,7 @@ subsystems:
        gluser: echaudron
    paths:
        includes:
+          - Documentation/networking/openvswitch.*
           - net/openvswitch/
           - include/linux/openvswitch.h
           - include/uapi/linux/openvswitch.h
@@ -6378,11 +6429,17 @@ subsystems:
      - rhel-sst-arch-hw
    qe-sst:
      - rhel-sst-arch-hw
-   requiredApproval: false
+   requiredApproval: true
    maintainers:
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
+     - name: Steve Best
+       email: sbest@redhat.com
+       gluser: sfbest
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - drivers/platform/x86/
@@ -7242,6 +7299,7 @@ subsystems:
        gluser: lxin.redhat
    paths:
        includes:
+          - Documentation/networking/sctp.*
           - net/sctp/
           - include/linux/sctp.h
           - include/net/sctp/
@@ -7790,15 +7848,24 @@ subsystems:
        gluser: ivecera
    paths:
        includes:
+          - Documentation/networking/tc-*
           - include/net/act_api.h
+          - include/net/codel*.h
+          - include/net/pie.h
           - include/net/pkt_cls.h
           - include/net/pkt_sched.h
+          - include/net/red.h
+          - include/net/sch_generic.h
           - include/net/tc_act/
+          - include/net/tc_wrapper.h
+          - include/trace/events/qdisc.h
+          - include/uapi/linux/gen_stats.h
           - include/uapi/linux/pkt_cls.h
           - include/uapi/linux/pkt_sched.h
           - include/uapi/linux/tc_act/
           - include/uapi/linux/tc_ematch/
           - net/sched/
+          - tools/testing/selftests/tc-testing/
  - subsystem: TEE SUBSYSTEM
    labels:
      name: tee
@@ -7924,6 +7991,7 @@ subsystems:
        gluser: lxin.redhat
    paths:
        includes:
+          - Documentation/networking/tipc.rst
           - net/tipc/
           - include/net/tipc.h
           - include/uapi/linux/tipc.h
@@ -8551,9 +8619,6 @@ subsystems:
      - name: Ivan Vecera
        email: ivecera@redhat.com
        gluser: ivecera
-     - name: Josef Oskera
-       email: joskera@redhat.com
-       gluser: joskera
      - name: Izabela Bakollari
        email: ibakolla@redhat.com
        gluser: ibakolla
@@ -8733,6 +8798,7 @@ subsystems:
        gluser: tohojo
    paths:
        includes:
+          - Documentation/networking/page_pool.rst
           - Documentation/networking/*xdp*
           - kernel/bpf/devmap.c
           - kernel/bpf/cpumap.c

@@ -216,6 +216,11 @@ static __always_inline bool rt_mutex_cmpxchg_acquire(struct rt_mutex_base *lock,
 	return try_cmpxchg_acquire(&lock->owner, &old, new);
 }
 
+static __always_inline bool rt_mutex_try_acquire(struct rt_mutex_base *lock)
+{
+	return rt_mutex_cmpxchg_acquire(lock, NULL, current);
+}
+
 static __always_inline bool rt_mutex_cmpxchg_release(struct rt_mutex_base *lock,
 						     struct task_struct *old,
 						     struct task_struct *new)
@@ -293,6 +298,24 @@ static __always_inline bool rt_mutex_cmpxchg_acquire(struct rt_mutex_base *lock,
 {
 	return false;
 
+}
+
+static int __sched rt_mutex_slowtrylock(struct rt_mutex_base *lock);
+
+static __always_inline bool rt_mutex_try_acquire(struct rt_mutex_base *lock)
+{
+	/*
+	 * With debug enabled rt_mutex_cmpxchg trylock() will always fail,
+	 * which will unconditionally invoke sched_submit/resume_work() in
+	 * the slow path of __rt_mutex_lock() and __ww_rt_mutex_lock() even
+	 * in the non-contended case.
+	 *
+	 * Avoid that by using rt_mutex_slow_trylock() which is covered by
+	 * the debug code and can acquire a non-contended rtmutex. On
+	 * success the callsite avoids the sched_submit/resume_work()
+	 * dance.
+	 */
+	return rt_mutex_slowtrylock(lock);
 }
 
 static __always_inline bool rt_mutex_cmpxchg_release(struct rt_mutex_base *lock,
@@ -899,8 +922,9 @@ static int __sched rt_mutex_adjust_prio_chain(struct task_struct *task,
 		 * then we need to wake the new top waiter up to try
 		 * to get the lock.
 		 */
-		if (prerequeue_top_waiter != rt_mutex_top_waiter(lock))
-			wake_up_state(waiter->task, waiter->wake_state);
+		top_waiter = rt_mutex_top_waiter(lock);
+		if (prerequeue_top_waiter != top_waiter)
+			wake_up_state(top_waiter->task, top_waiter->wake_state);
 		raw_spin_unlock_irq(&lock->wait_lock);
 		return 0;
 	}
@@ -1552,7 +1576,7 @@ static int __sched rt_mutex_slowlock_block(struct rt_mutex_base *lock,
 		raw_spin_unlock_irq(&lock->wait_lock);
 
 		if (!owner || !rtmutex_spin_on_owner(lock, waiter, owner))
-			schedule();
+			schedule_rtmutex();
 
 		raw_spin_lock_irq(&lock->wait_lock);
 		set_current_state(state);
@@ -1581,7 +1605,7 @@ static void __sched rt_mutex_handle_deadlock(int res, int detect_deadlock,
 	WARN(1, "rtmutex deadlock detected\n");
 	while (1) {
 		set_current_state(TASK_INTERRUPTIBLE);
-		schedule();
+		schedule_rtmutex();
 	}
 }
 
@@ -1672,6 +1696,12 @@ static int __sched rt_mutex_slowlock(struct rt_mutex_base *lock,
 	int ret;
 
 	/*
+	 * The task is about to sleep. Invoke sched_submit_work() before
+	 * blocking as that might take locks and corrupt tsk::pi_blocked_on.
+	 */
+	sched_submit_work();
+
+	/*
 	 * Technically we could use raw_spin_[un]lock_irq() here, but this can
 	 * be called in early boot if the cmpxchg() fast path is disabled
 	 * (debug, no architecture support). In this case we will acquire the
@@ -1683,13 +1713,16 @@ static int __sched rt_mutex_slowlock(struct rt_mutex_base *lock,
 	ret = __rt_mutex_slowlock_locked(lock, ww_ctx, state);
 	raw_spin_unlock_irqrestore(&lock->wait_lock, flags);
 
+	sched_resume_work();
 	return ret;
 }
 
 static __always_inline int __rt_mutex_lock(struct rt_mutex_base *lock,
 					   unsigned int state)
 {
-	if (likely(rt_mutex_cmpxchg_acquire(lock, NULL, current)))
+	lockdep_assert(!current->pi_blocked_on);
+
+	if (likely(rt_mutex_try_acquire(lock)))
 		return 0;
 
 	return rt_mutex_slowlock(lock, NULL, state);

@@ -43,7 +43,7 @@ static void public_key_describe(const struct key *asymmetric_key,
 void public_key_free(struct public_key *key)
 {
 	if (key) {
-		kfree(key->key);
+		kfree_sensitive(key->key);
 		kfree(key->params);
 		kfree(key);
 	}
@@ -155,7 +155,7 @@ static int software_key_query(const struct kernel_pkey_params *params,
 	ret = 0;
 
 error_free_key:
-	kfree(key);
+	kfree_sensitive(key);
 error_free_tfm:
 	crypto_free_akcipher(tfm);
 	pr_devel("<==%s() = %d\n", __func__, ret);
@@ -241,7 +241,7 @@ static int software_key_eds_op(struct kernel_pkey_params *params,
 		ret = req->dst_len;
 
 error_free_key:
-	kfree(key);
+	kfree_sensitive(key);
 error_free_req:
 	akcipher_request_free(req);
 error_free_tfm:
@@ -377,7 +377,7 @@ int public_key_verify_signature(const struct public_key *pkey,
 	ret = crypto_wait_req(crypto_akcipher_verify(req), &cwait);
 
 error_free_key:
-	kfree(key);
+	kfree_sensitive(key);
 error_free_req:
 	akcipher_request_free(req);
 error_free_tfm:

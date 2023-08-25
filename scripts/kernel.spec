@@ -161,15 +161,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 284.25.1
+%define pkgrelease 284.30.1
 %define kversion 5
-%define tarfile_release 5.14.0-284.25.1.el9_2
+%define tarfile_release 5.14.0-284.30.1.el9_2
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 284.25.1%{?buildid}%{?dist}
+%define specrelease 284.30.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-284.25.1.el9_2
+%define kabiversion 5.14.0-284.30.1.el9_2
 
 #
 # End of genspec.sh variables
@@ -3435,9 +3435,121 @@ fi
 #
 #
 %changelog
-* Tue Aug 01 2023 Release Engineering <releng@rockylinux.org> - 5.14.0-284.25.1
+* Tue Sep 12 2023 Release Engineering <releng@rockylinux.org> - 5.14.0-284.30.1
 - Porting to 9.2, debranding and Rocky branding with new release pkg (Sherif Nagy)
 - Porting to 9.2, debranding and Rocky branding (Louis Abel)
+
+* Fri Aug 25 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.30.1.el9_2]
+- sched/core: Add __always_inline to schedule_loop() (Crystal Wood) [2233928 2232098]
+- x86/sev: Do not try to parse for the CC blob on non-AMD hardware (Tao Liu) [2232700 2182562]
+- arm64: efi: Make efi_rt_lock a raw_spinlock (Mark Salter) [2213499 2188323] {CVE-2023-21102}
+- efi: rt-wrapper: Add missing include (Mark Salter) [2213499 2188323] {CVE-2023-21102}
+- arm64: efi: Execute runtime services from a dedicated stack (Mark Salter) [2213499 2188323] {CVE-2023-21102}
+- crypto: rng - Fix lock imbalance in crypto_del_rng (Herbert Xu) [2232213 2229643]
+- drm/ast: Fix ARM compatibility (Robert Foss) [2232302 2192980]
+- irqchip/gicv3: Workaround for NVIDIA erratum T241-FABRIC-4 (Mark Salter) [2231962 2179060]
+- genirq: GENERIC_IRQ_EFFECTIVE_AFF_MASK depends on SMP (Mark Salter) [2231962 2179060]
+- scsi: storvsc: Handle SRB status value 0x30 (Cathy Avery) [2231990 2224933]
+- scsi: storvsc: Fix handling of virtual Fibre Channel timeouts (Cathy Avery) [2230747 2228298]
+- dm cache policy smq: ensure IO doesn't prevent cleaner policy progress (Benjamin Marzinski) [2228481 2159623]
+- net/sched: cls_fw: Fix improper refcount update leads to use-after-free (Davide Caratti) [2225642 2225102] {CVE-2023-3776}
+- md: add error_handlers for raid0 and linear (Nigel Croxon) [2221170 2162219]
+
+* Thu Aug 17 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.29.1.el9_2]
+- redhat: configs: Disable CONFIG_CRYPTO_STATS since performance issue for storage (Herbert Xu) [2231850 2227964]
+- i2c: tegra: Fix PEC support for SMBUS block read (Steve Best) [2230488 2214531]
+- i2c: tegra: Set ACPI node as primary fwnode (Steve Best) [2230483 2222101]
+- perf vendor events intel: Add Emerald Rapids (Michael Petlan) [2230175 2177180]
+- perf vendor events intel: Refresh sapphirerapids metrics and events (Michael Petlan) [2230175 2177180]
+- perf vendor events: Update Intel sapphirerapids (Michael Petlan) [2230175 2177180]
+- perf/x86/intel/cstate: Add Emerald Rapids (Michael Petlan) [2230175 2177180]
+- perf/x86/intel: Add Emerald Rapids (Michael Petlan) [2230175 2177180]
+- perf/x86/intel/uncore: Add Emerald Rapids (Michael Petlan) [2230175 2177180]
+- perf/x86/msr: Add Emerald Rapids (Michael Petlan) [2230175 2177180]
+- perf/x86/rapl: Add support for Intel Emerald Rapids (Michael Petlan) [2230175 2177180]
+- platform/x86: intel-uncore-freq: add Emerald Rapids support (Michael Petlan) [2230169 2156827]
+- netfilter: nf_tables: disallow rule addition to bound chain via NFTA_RULE_CHAIN_ID (Phil Sutter) [2228990 2225271] {CVE-2023-4147}
+- netfilter: nft_set_pipapo: fix improper element removal (Phil Sutter) [2227510 2225277] {CVE-2023-4004}
+
+* Thu Aug 10 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.28.1.el9_2]
+- iavf: fix reset task race with iavf_remove() (Petr Oros) [2228156 2223599]
+- iavf: fix a deadlock caused by rtnl and driver's lock circular dependencies (Petr Oros) [2228156 2223599]
+- Revert "iavf: Do not restart Tx queues after reset task failure" (Petr Oros) [2228156 2223599]
+- Revert "iavf: Detach device during reset task" (Petr Oros) [2228156 2223599]
+- iavf: Wait for reset in callbacks which trigger it (Petr Oros) [2228156 2223599]
+- iavf: use internal state to free traffic IRQs (Petr Oros) [2228156 2223599]
+- iavf: Fix out-of-bounds when setting channels on remove (Petr Oros) [2228156 2223599]
+- iavf: Fix use-after-free in free_netdev (Petr Oros) [2228156 2223599]
+- iavf: make functions static where possible (Petr Oros) [2228156 2223599]
+- iavf: fix err handling for MAC replace (Petr Oros) [2228156 2223599]
+- iavf: remove some unused functions and pointless wrappers (Petr Oros) [2228156 2223599]
+- iavf: remove mask from iavf_irq_enable_queues() (Petr Oros) [2228156 2223599]
+- iavf: send VLAN offloading caps once after VFR (Petr Oros) [2228156 2223599]
+- i40e: Wait for pending VF reset in VF set callbacks (Ivan Vecera) [2228158 2215498]
+- i40e: Add helper for VF inited state check with timeout (Ivan Vecera) [2228158 2215498]
+- KEYS: use kfree_sensitive with key (Vladis Dronov) [2227768 2223719]
+- locking/rtmutex: Add a lockdep assert to catch potential nested blocking (Crystal Wood) [2225623 2218724]
+- locking/rtmutex: Avoid pointless blk_flush_plug() invocations (Crystal Wood) [2225623 2218724]
+- locking/rtmutex: Submit/resume work explicitly before/after blocking (Crystal Wood) [2225623 2218724]
+- sched/core: Provide sched_rtmutex() and expose sched work helpers (Crystal Wood) [2225623 2218724]
+- cpufreq: intel_pstate: Enable HWP IO boost for all servers (David Arcari) [2210270 2175626]
+
+* Thu Aug 03 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.27.1.el9_2]
+- x86/cpu/amd: Add a Zenbleed fix (Waiman Long) [2226821 2226822] {CVE-2023-20593}
+- x86/cpu/amd: Move the errata checking functionality up (Waiman Long) [2226821 2226822] {CVE-2023-20593}
+- x86/microcode/core: Return an error only when necessary (Waiman Long) [2226821 2226822] {CVE-2023-20593}
+- x86/microcode/AMD: Fix mixed steppings support (Waiman Long) [2226821 2226822] {CVE-2023-20593}
+- x86/microcode/AMD: Add a @cpu parameter to the reloading functions (Waiman Long) [2226821 2226822] {CVE-2023-20593}
+- x86/microcode/amd: Remove load_microcode_amd()'s bsp parameter (Waiman Long) [2226821 2226822] {CVE-2023-20593}
+- x86/amd: Cache debug register values in percpu variables (Waiman Long) [2226821 2226822] {CVE-2023-20593}
+- x86/microcode: Adjust late loading result reporting message (Waiman Long) [2226821 2226822] {CVE-2023-20593}
+- x86/microcode: Check CPU capabilities after late microcode update correctly (Waiman Long) [2226821 2226822] {CVE-2023-20593}
+- x86/microcode: Add a parameter to microcode_check() to store CPU capabilities (Waiman Long) [2226821 2226822] {CVE-2023-20593}
+- x86/microcode/AMD: Rename a couple of functions (Waiman Long) [2226821 2226822] {CVE-2023-20593}
+- x86/microcode/AMD: Track patch allocation size explicitly (David Arcari) [2226821 1971938]
+- x86/microcode: Print previous version of microcode after reload (David Arcari) [2226821 1971938]
+- x86/cpu: Load microcode during restore_processor_state() (David Arcari) [2226821 1971938]
+- x86/pm: Add enumeration check before spec MSRs save/restore setup (Chris von Recklinghausen) [2226821 2181908] {CVE-2023-1637}
+- x86/tsx: Add a feature bit for TSX control MSR support (Chris von Recklinghausen) [2226821 2181908] {CVE-2023-1637}
+- x86/cpu: Restore AMD's DE_CFG MSR after resume (Chris von Recklinghausen) [2226821 2181908] {CVE-2023-1637}
+- x86/pm: Fix false positive kmemleak report in msr_build_context() (Chris von Recklinghausen) [2226821 2181908] {CVE-2023-1637}
+- x86/speculation: Restore speculation related MSRs during S3 resume (Chris von Recklinghausen) [2226821 2181908] {CVE-2023-1637}
+- x86/pm: Save the MSR validity status at context setup (Chris von Recklinghausen) [2226821 2181908] {CVE-2023-1637}
+- libceph: harden msgr2.1 frame segment length checks (Ilya Dryomov) [2227070 2222253]
+- seccomp: Move copy_seccomp() to no failure path. (Viktor Malik) [2226945 2218682]
+- bpf: Adjust insufficient default bpf_jit_limit (Viktor Malik) [2226945 2218682]
+- crypto: ccp: Get rid of __sev_platform_init_locked()'s local function pointer (Bandan Das) [2224587 2152249]
+- crypto: ccp - Name -1 return value as SEV_RET_NO_FW_CALL (Bandan Das) [2224587 2152249]
+- x86/sev: Change snp_guest_issue_request()'s fw_err argument (Bandan Das) [2224587 2152249]
+- virt/coco/sev-guest: Double-buffer messages (Bandan Das) [2224587 2152249]
+- virt/coco/sev-guest: Add throttling awareness (Bandan Das) [2224587 2152249]
+- virt/coco/sev-guest: Convert the sw_exit_info_2 checking to a switch-case (Bandan Das) [2224587 2152249]
+- virt/coco/sev-guest: Do some code style cleanups (Bandan Das) [2224587 2152249]
+- virt/coco/sev-guest: Carve out the request issuing logic into a helper (Bandan Das) [2224587 2152249]
+- virt/coco/sev-guest: Remove the disable_vmpck label in handle_guest_request() (Bandan Das) [2224587 2152249]
+- virt/coco/sev-guest: Simplify extended guest request handling (Bandan Das) [2224587 2152249]
+- virt/coco/sev-guest: Check SEV_SNP attribute at probe time (Bandan Das) [2224587 2152249]
+- virt/sev-guest: Return -EIO if certificate buffer is not large enough (Bandan Das) [2224587 2152249]
+- virt/sev-guest: Prevent IV reuse in the SNP guest driver (Bandan Das) [2224587 2152249]
+- x86/sev: Don't use cc_platform_has() for early SEV-SNP calls (Bandan Das) [2224587 2152249]
+
+* Thu Jul 27 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.26.1.el9_2]
+- net: openvswitch: fix upcall counter access before allocation (Eelco Chaudron) [2223310 2203263]
+- netfilter: nf_tables: prevent OOB access in nft_byteorder_eval (Florian Westphal) [2221727 2221047] {CVE-2023-35001}
+- netfilter: nf_tables: do not ignore genmask when looking up chain by id (Florian Westphal) [2221780 2221049] {CVE-2023-31248}
+- rtmutex: Ensure that the top waiter is always woken up (Joel Savitz) [2222121 2176147]
+- netfilter: nf_tables: unbind non-anonymous set if rule construction fails (Phil Sutter) [2216160 2213271] {CVE-2023-3390}
+- netfilter: nf_tables: add NFT_TRANS_PREPARE_ERROR to deal with bound set/chain (Phil Sutter) [2216160 2213271] {CVE-2023-3390}
+- netfilter: nf_tables: fix chain binding transaction logic (Phil Sutter) [2216160 2213271] {CVE-2023-3390 CVE-2023-3610}
+- netfilter: nf_tables: incorrect error path handling with NFT_MSG_NEWRULE (Phil Sutter) [2216160 2213271] {CVE-2023-3390}
+- netfilter: nf_tables: validate catch-all set elements (Florian Westphal) [2216160 2213271] {CVE-2023-3390}
+- thunderbolt: Increase DisplayPort Connection Manager handshake timeout (Desnes Nunes) [2219463 2168851]
+- thunderbolt: Increase timeout of DP OUT adapter handshake (Desnes Nunes) [2219463 2212495]
+- ASoC: Intel: sof_sdw: add quick for Dell SKU 0BDA (Jaroslav Kysela) [2218960 2217298]
+- ASoC: Intel: soc-acpi: add tables for Dell SKU 0B34 (Jaroslav Kysela) [2218960 2217298]
+- ASoC: Intel: sof-sdw: add Dell SKU 0B34 (Jaroslav Kysela) [2218960 2217298]
+- ASoC: Intel: soc-acpi: add table for RPL Dell SKU 0BDA (Jaroslav Kysela) [2218960 2217298]
+- ACPI: sleep: Avoid breaking S3 wakeup due to might_sleep() (Mark Langsdorf) [2218026 2215972]
 
 * Thu Jul 20 2023 Patrick Talbert <ptalbert@redhat.com> [5.14.0-284.25.1.el9_2]
 - x86/speculation: Allow enabling STIBP with legacy IBRS (Ricardo Robaina) [2215014 2187269] {CVE-2023-1998}
