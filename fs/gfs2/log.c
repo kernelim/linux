@@ -876,9 +876,8 @@ void gfs2_write_log_header(struct gfs2_sbd *sdp, struct gfs2_jdesc *jd,
 static void log_write_header(struct gfs2_sbd *sdp, u32 flags)
 {
 	int op_flags = REQ_PREFLUSH | REQ_FUA | REQ_META | REQ_SYNC;
-	enum gfs2_freeze_state state = atomic_read(&sdp->sd_freeze_state);
 
-	gfs2_assert_withdraw(sdp, (state != SFS_FROZEN));
+	gfs2_assert_withdraw(sdp, !test_bit(SDF_FROZEN, &sdp->sd_flags));
 
 	if (test_bit(SDF_NOBARRIERS, &sdp->sd_flags)) {
 		gfs2_ordered_wait(sdp);
@@ -975,7 +974,7 @@ void gfs2_log_flush(struct gfs2_sbd *sdp, struct gfs2_glock *gl, u32 flags)
 {
 	struct gfs2_trans *tr = NULL;
 	unsigned int reserved_blocks = 0, used_blocks = 0;
-	enum gfs2_freeze_state state = atomic_read(&sdp->sd_freeze_state);
+	bool frozen = test_bit(SDF_FROZEN, &sdp->sd_flags);
 	unsigned int first_log_head;
 	unsigned int reserved_revokes = 0;
 
@@ -1006,7 +1005,7 @@ repeat:
 		if (tr) {
 			sdp->sd_log_tr = NULL;
 			tr->tr_first = first_log_head;
-			if (unlikely (state == SFS_FROZEN)) {
+			if (unlikely(frozen)) {
 				if (gfs2_assert_withdraw_delayed(sdp,
 				       !tr->tr_num_buf_new && !tr->tr_num_databuf_new))
 					goto out_withdraw;
@@ -1031,7 +1030,7 @@ repeat:
 	if (flags & GFS2_LOG_HEAD_FLUSH_SHUTDOWN)
 		clear_bit(SDF_JOURNAL_LIVE, &sdp->sd_flags);
 
-	if (unlikely(state == SFS_FROZEN))
+	if (unlikely(frozen))
 		if (gfs2_assert_withdraw_delayed(sdp, !reserved_revokes))
 			goto out_withdraw;
 
@@ -1080,8 +1079,6 @@ repeat:
 		if (flags & (GFS2_LOG_HEAD_FLUSH_SHUTDOWN |
 			     GFS2_LOG_HEAD_FLUSH_FREEZE))
 			gfs2_log_shutdown(sdp);
-		if (flags & GFS2_LOG_HEAD_FLUSH_FREEZE)
-			atomic_set(&sdp->sd_freeze_state, SFS_FROZEN);
 	}
 
 out_end:

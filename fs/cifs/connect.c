@@ -3458,8 +3458,10 @@ int cifs_mount(struct cifs_sb_info *cifs_sb, struct smb3_fs_context *ctx)
 			rc = -ELOOP;
 	} while (rc == -EREMOTE);
 
-	if (rc)
+	if (rc || !tcon) {
+		rc = rc ? rc : -ENOENT;
 		goto error;
+	}
 
 	kfree(ref_path);
 	/*

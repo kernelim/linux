@@ -5389,8 +5389,19 @@ static void percpu_stats_free_rwork_fn(struct work_struct *work)
 						percpu_stats_rwork);
 	int node;
 
+	if (cmpxchg(&memcg->percpu_stats_disabled, MEMCG_PERCPU_STATS_DISABLED,
+		    MEMCG_PERCPU_STATS_FLUSHING) != MEMCG_PERCPU_STATS_DISABLED) {
+		static DEFINE_RATELIMIT_STATE(_rs,
+					      DEFAULT_RATELIMIT_INTERVAL,
+					      DEFAULT_RATELIMIT_BURST);
+
+		if (__ratelimit(&_rs))
+			WARN(1, "percpu_stats_free_rwork_fn() called more than once!\n");
+		return;
+	}
+
 	cgroup_rstat_flush_hold(memcg->css.cgroup);
-	memcg->percpu_stats_disabled = MEMCG_PERCPU_STATS_FLUSHED;
+	WRITE_ONCE(memcg->percpu_stats_disabled, MEMCG_PERCPU_STATS_FLUSHED);
 	cgroup_rstat_flush_release();
 
 	for_each_node(node) {
@@ -5400,12 +5411,19 @@ static void percpu_stats_free_rwork_fn(struct work_struct *work)
 			free_percpu(pn->lruvec_stats_percpu);
 	}
 	free_percpu(memcg->vmstats_percpu);
-	memcg->percpu_stats_disabled = MEMCG_PERCPU_STATS_FREED;
-	mem_cgroup_id_put(memcg);
+	WRITE_ONCE(memcg->percpu_stats_disabled, MEMCG_PERCPU_STATS_FREED);
+	css_put(&memcg->css);
 }
 
 static void memcg_percpu_stats_disable(struct mem_cgroup *memcg)
 {
+	/*
+	 * Block memcg from being freed before percpu_stats_free_rwork_fn()
+	 * is called. css_get() will succeed before a potential final
+	 * css_put() in mem_cgroup_id_put().
+	 */
+	css_get(&memcg->css);
+	mem_cgroup_id_put(memcg);
 	memcg->percpu_stats_disabled = MEMCG_PERCPU_STATS_DISABLED;
 	INIT_RCU_WORK(&memcg->percpu_stats_rwork, percpu_stats_free_rwork_fn);
 	queue_rcu_work(system_wq, &memcg->percpu_stats_rwork);

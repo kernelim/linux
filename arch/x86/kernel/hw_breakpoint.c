@@ -129,7 +129,7 @@ int arch_install_hw_breakpoint(struct perf_event *bp)
 
 	set_debugreg(*dr7, 7);
 	if (info->mask)
-		set_dr_addr_mask(info->mask, i);
+		amd_set_dr_addr_mask(info->mask, i);
 
 	return 0;
 }
@@ -166,7 +166,7 @@ void arch_uninstall_hw_breakpoint(struct perf_event *bp)
 
 	set_debugreg(*dr7, 7);
 	if (info->mask)
-		set_dr_addr_mask(0, i);
+		amd_set_dr_addr_mask(0, i);
 }
 
 static int arch_bp_generic_len(int x86_len)

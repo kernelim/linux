@@ -46,9 +46,8 @@ $(obj)/purgatory.chk: $(obj)/purgatory.ro FORCE
 
 targets += kexec-purgatory.c
 
-CMD_BIN2C = $(objtree)/scripts/basic/bin2c
 quiet_cmd_bin2c = BIN2C   $@
-      cmd_bin2c = $(CMD_BIN2C) kexec_purgatory < $< > $@
+      cmd_bin2c = $(objtree)/scripts/bin2c kexec_purgatory < $< > $@
 
 $(obj)/kexec-purgatory.c: $(obj)/purgatory.ro $(obj)/purgatory.chk FORCE
 	$(call if_changed,bin2c)

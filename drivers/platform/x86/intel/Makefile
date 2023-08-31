@@ -6,6 +6,7 @@
 obj-$(CONFIG_INTEL_PMC_CORE)		+= pmc/
 obj-$(CONFIG_INTEL_PMT_CLASS)		+= pmt/
 obj-$(CONFIG_INTEL_SPEED_SELECT_INTERFACE) += speed_select_if/
+obj-$(CONFIG_INTEL_UNCORE_FREQ_CONTROL)	+= uncore-frequency/
 
 # Intel miscellaneous drivers
 obj-$(CONFIG_INTEL_ISHTP_ECLITE)	+= ishtp_eclite.o
