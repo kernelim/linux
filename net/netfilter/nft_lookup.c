@@ -74,6 +74,7 @@ static int nft_lookup_init(const struct nft_ctx *ctx,
 	if (IS_ERR(set)) {
 		if (tb[NFTA_LOOKUP_SET_ID]) {
 			set = nf_tables_set_lookup_byid(ctx->net,
+							ctx->table,
 							tb[NFTA_LOOKUP_SET_ID]);
 		}
 		if (IS_ERR(set))

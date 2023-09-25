@@ -119,6 +119,7 @@ static int nft_dynset_init(const struct nft_ctx *ctx,
 	if (IS_ERR(set)) {
 		if (tb[NFTA_DYNSET_SET_ID])
 			set = nf_tables_set_lookup_byid(ctx->net,
+							ctx->table,
 							tb[NFTA_DYNSET_SET_ID]);
 		if (IS_ERR(set))
 			return PTR_ERR(set);

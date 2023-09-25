@@ -1515,23 +1515,22 @@ smb2_query_symlink(const unsigned int xid, struct cifs_tcon *tcon,
 	oparms.reconnect = false;
 
 	rc = SMB2_open(xid, &oparms, utf16_path, &oplock, NULL, &err_buf);
-
 	if (!rc || !err_buf) {
-		kfree(utf16_path);
-		return -ENOENT;
+		rc = -ENOENT;
+		goto querty_exit;
 	}
 
 	if (le32_to_cpu(err_buf->ByteCount) < sizeof(struct smb2_symlink_err_rsp) ||
 	    get_rfc1002_length(err_buf) + 4 < SMB2_SYMLINK_STRUCT_SIZE) {
-		kfree(utf16_path);
-		return -EINVAL;
+		rc = -EINVAL;
+		goto querty_exit;
 	}
 
 	symlink = (struct smb2_symlink_err_rsp *)err_buf->ErrorData;
 	if (le32_to_cpu(symlink->SymLinkErrorTag) != SYMLINK_ERROR_TAG ||
 	    le32_to_cpu(symlink->ReparseTag) != IO_REPARSE_TAG_SYMLINK) {
-		kfree(utf16_path);
-		return -EINVAL;
+		rc = -EINVAL;
+		goto querty_exit;
 	}
 
 	/* open must fail on symlink - reset rc */
@@ -1543,25 +1542,28 @@ smb2_query_symlink(const unsigned int xid, struct cifs_tcon *tcon,
 
 	if (get_rfc1002_length(err_buf) + 4 <
 			SMB2_SYMLINK_STRUCT_SIZE + sub_offset + sub_len) {
-		kfree(utf16_path);
-		return -EINVAL;
+		rc = -EINVAL;
+		goto querty_exit;
 	}
 
 	if (get_rfc1002_length(err_buf) + 4 <
 			SMB2_SYMLINK_STRUCT_SIZE + print_offset + print_len) {
-		kfree(utf16_path);
-		return -EINVAL;
+		rc = -EINVAL;
+		goto querty_exit;
 	}
 
 	*target_path = cifs_strndup_from_utf16(
 				(char *)symlink->PathBuffer + sub_offset,
 				sub_len, true, cifs_sb->local_nls);
 	if (!(*target_path)) {
-		kfree(utf16_path);
-		return -ENOMEM;
+		rc = -ENOMEM;
+		goto querty_exit;
 	}
 	convert_delimiter(*target_path, '/');
 	cifs_dbg(FYI, "%s: target path: %s\n", __func__, *target_path);
+
+ querty_exit:
+	kfree(err_buf);
 	kfree(utf16_path);
 	return rc;
 }

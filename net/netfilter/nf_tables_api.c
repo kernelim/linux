@@ -2431,22 +2431,28 @@ struct nft_set *nf_tables_set_lookup(const struct nft_table *table,
 		return ERR_PTR(-EINVAL);
 
 	list_for_each_entry(set, &table->sets, list) {
-		if (!nla_strcmp(nla, set->name))
+		if (!nla_strcmp(nla, set->name) && !set->removed)
 			return set;
 	}
 	return ERR_PTR(-ENOENT);
 }
 
 struct nft_set *nf_tables_set_lookup_byid(const struct net *net,
+					  const struct nft_table *table,
 					  const struct nlattr *nla)
 {
 	struct nft_trans *trans;
 	u32 id = ntohl(nla_get_be32(nla));
 
 	list_for_each_entry(trans, &net->nft.commit_list, list) {
-		if (trans->msg_type == NFT_MSG_NEWSET &&
-		    id == nft_trans_set_id(trans))
-			return nft_trans_set(trans);
+		if (trans->msg_type == NFT_MSG_NEWSET) {
+			struct nft_set *set = nft_trans_set(trans);
+
+			if (id == nft_trans_set_id(trans) &&
+			    trans->ctx.table == table &&
+			    !set->removed)
+				return set;
+		}
 	}
 	return ERR_PTR(-ENOENT);
 }
@@ -3640,6 +3646,7 @@ static int nf_tables_newsetelem(struct net *net, struct sock *nlsk,
 	if (IS_ERR(set)) {
 		if (nla[NFTA_SET_ELEM_LIST_SET_ID]) {
 			set = nf_tables_set_lookup_byid(net,
+					ctx.table,
 					nla[NFTA_SET_ELEM_LIST_SET_ID]);
 		}
 		if (IS_ERR(set))
@@ -3761,9 +3768,6 @@ static int nf_tables_delsetelem(struct net *net, struct sock *nlsk,
 		return PTR_ERR(set);
 	if (!list_empty(&set->bindings) && set->flags & NFT_SET_CONSTANT)
 		return -EBUSY;
-
-	if (set->removed)
-		return -ENOENT;
 
 	if (nla[NFTA_SET_ELEM_LIST_ELEMENTS] == NULL) {
 		struct nft_set_dump_args args = {

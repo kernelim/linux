@@ -396,6 +396,7 @@ static inline struct nft_set *nft_set_container_of(const void *priv)
 struct nft_set *nf_tables_set_lookup(const struct nft_table *table,
 				     const struct nlattr *nla);
 struct nft_set *nf_tables_set_lookup_byid(const struct net *net,
+					  const struct nft_table *table,
 					  const struct nlattr *nla);
 
 static inline unsigned long nft_set_gc_interval(const struct nft_set *set)
