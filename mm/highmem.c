@@ -455,7 +455,7 @@ void *__kmap_local_pfn_prot(unsigned long pfn, pgprot_t prot)
 
 	/*
 	 * Disable migration so resulting virtual address is stable
-	 * accross preemption.
+	 * across preemption.
 	 */
 	migrate_disable();
 	preempt_disable();

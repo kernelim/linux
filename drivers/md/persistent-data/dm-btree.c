@@ -493,7 +493,6 @@ out:
 	exit_ro_spine(&spine);
 	return r;
 }
-
 EXPORT_SYMBOL_GPL(dm_btree_lookup_next);
 
 /*----------------------------------------------------------------*/

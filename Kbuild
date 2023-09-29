@@ -35,7 +35,7 @@ define cmd_gentimeconst
 	(echo $(CONFIG_HZ) | bc -q $< ) > $@
 endef
 define filechk_gentimeconst
-	(echo $(CONFIG_HZ) | bc -q $< )
+	echo $(CONFIG_HZ) | bc -q $<
 endef
 
 $(obj)/$(timeconst-file): kernel/time/timeconst.bc FORCE

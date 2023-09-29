@@ -1689,6 +1689,20 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 		return -EFAULT;
 	}
 
+	/*
+	 * Permission faults just need to update the existing leaf entry,
+	 * and so normally don't require allocations from the memcache. The
+	 * only exception to this is when dirty logging is enabled at runtime
+	 * and a write fault needs to collapse a block entry into a table.
+	 */
+	if (fault_status != ESR_ELx_FSC_PERM ||
+	    (logging_active && write_fault)) {
+		ret = kvm_mmu_topup_memory_cache(memcache,
+						 kvm_mmu_cache_min_pages(kvm));
+		if (ret)
+			return ret;
+	}
+
 	/* Let's check if we will get back a huge page backed by hugetlbfs */
 	mmap_read_lock(current->mm);
 	vma = vma_lookup(current->mm, hva);
@@ -1722,28 +1736,17 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 	if (vma_pagesize == PMD_SIZE ||
 	    (vma_pagesize == PUD_SIZE && kvm_stage2_has_pmd(kvm)))
 		gfn = (fault_ipa & huge_page_mask(hstate_vma(vma))) >> PAGE_SHIFT;
-	mmap_read_unlock(current->mm);
 
-	/* We need minimum second+third level pages */
-	ret = kvm_mmu_topup_memory_cache(memcache, kvm_mmu_cache_min_pages(kvm));
-	if (ret)
-		return ret;
-
-	mmu_seq = vcpu->kvm->mmu_notifier_seq;
 	/*
-	 * Ensure the read of mmu_notifier_seq happens before we call
-	 * gfn_to_pfn_prot (which calls get_user_pages), so that we don't risk
-	 * the page we just got a reference to gets unmapped before we have a
-	 * chance to grab the mmu_lock, which ensure that if the page gets
-	 * unmapped afterwards, the call to kvm_unmap_gfn will take it away
-	 * from us again properly. This smp_rmb() interacts with the smp_wmb()
-	 * in kvm_mmu_notifier_invalidate_<page|range_end>.
+	 * Read mmu_notifier_seq so that KVM can detect if the results of
+	 * vma_lookup() or __gfn_to_pfn_memslot() become stale prior to
+	 * acquiring kvm->mmu_lock.
 	 *
-	 * Besides, __gfn_to_pfn_memslot() instead of gfn_to_pfn_prot() is
-	 * used to avoid unnecessary overhead introduced to locate the memory
-	 * slot because it's always fixed even @gfn is adjusted for huge pages.
+	 * Rely on mmap_read_unlock() for an implicit smp_rmb(), which pairs
+	 * with the smp_wmb() in kvm_dec_notifier_count().
 	 */
-	smp_rmb();
+	mmu_seq = vcpu->kvm->mmu_notifier_seq;
+	mmap_read_unlock(current->mm);
 
 	pfn = __gfn_to_pfn_memslot(memslot, gfn, false, NULL,
 				   write_fault, &writable, NULL);
@@ -2086,46 +2089,64 @@ bool kvm_set_spte_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 
 bool kvm_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 {
-	u64 size = (range->end - range->start) << PAGE_SHIFT;
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
+	bool young = false;
 
 	if (!kvm->arch.pgd)
 		return false;
 
-	WARN_ON(size != PAGE_SIZE && size != PMD_SIZE && size != PUD_SIZE);
-	if (!stage2_get_leaf_entry(kvm, range->start << PAGE_SHIFT, &pud, &pmd, &pte))
-		return 0;
+	while (range->start < range->end) {
+		if (!stage2_get_leaf_entry(kvm, range->start << PAGE_SHIFT, &pud, &pmd, &pte)) {
+			range->start += PAGE_SIZE;
+			continue;
+		}
 
-	if (pud)
-		return stage2_pudp_test_and_clear_young(pud);
-	else if (pmd)
-		return stage2_pmdp_test_and_clear_young(pmd);
-	else
-		return stage2_ptep_test_and_clear_young(pte);
+		if (pud) {
+			young |= stage2_pudp_test_and_clear_young(pud);
+			range->start += PUD_SIZE;
+		} else if (pmd) {
+			young |= stage2_pmdp_test_and_clear_young(pmd);
+			range->start += PMD_SIZE;
+		} else {
+			young |= stage2_ptep_test_and_clear_young(pte);
+			range->start += PAGE_SIZE;
+		}
+	}
+
+	return young;
 }
 
 bool kvm_test_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 {
-	u64 size = (range->end - range->start) << PAGE_SHIFT;
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
+	bool young = false;
 
 	if (!kvm->arch.pgd)
 		return false;
 
-	WARN_ON(size != PAGE_SIZE && size != PMD_SIZE && size != PUD_SIZE);
-	if (!stage2_get_leaf_entry(kvm, range->start << PAGE_SHIFT, &pud, &pmd, &pte))
-		return 0;
+	while (range->start < range->end) {
+		if (!stage2_get_leaf_entry(kvm, range->start << PAGE_SHIFT, &pud, &pmd, &pte)) {
+			range->start += PAGE_SIZE;
+			continue;
+		}
 
-	if (pud)
-		return kvm_s2pud_young(*pud);
-	else if (pmd)
-		return pmd_young(*pmd);
-	else
-		return pte_young(*pte);
+		if (pud) {
+			young |= kvm_s2pud_young(*pud);
+			range->start += PUD_SIZE;
+		} else if (pmd) {
+			young |= pmd_young(*pmd);
+			range->start += PMD_SIZE;
+		} else {
+			young |= pte_young(*pte);
+			range->start += PAGE_SIZE;
+		}
+	}
+
+	return young;
 }
 
 void kvm_mmu_free_memory_caches(struct kvm_vcpu *vcpu)

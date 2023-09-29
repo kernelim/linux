@@ -30,11 +30,13 @@
 	{ FORCEWAKE_MT,             0,      0, "FORCEWAKE" }
 
 #define COMMON_GEN9BASE_GLOBAL \
-	{ GEN8_FAULT_TLB_DATA0,     0,      0, "GEN8_FAULT_TLB_DATA0" }, \
-	{ GEN8_FAULT_TLB_DATA1,     0,      0, "GEN8_FAULT_TLB_DATA1" }, \
 	{ ERROR_GEN6,               0,      0, "ERROR_GEN6" }, \
 	{ DONE_REG,                 0,      0, "DONE_REG" }, \
 	{ HSW_GTT_CACHE_EN,         0,      0, "HSW_GTT_CACHE_EN" }
+
+#define GEN9_GLOBAL \
+	{ GEN8_FAULT_TLB_DATA0,     0,      0, "GEN8_FAULT_TLB_DATA0" }, \
+	{ GEN8_FAULT_TLB_DATA1,     0,      0, "GEN8_FAULT_TLB_DATA1" }
 
 #define COMMON_GEN12BASE_GLOBAL \
 	{ GEN12_FAULT_TLB_DATA0,    0,      0, "GEN12_FAULT_TLB_DATA0" }, \
@@ -132,10 +134,16 @@ static const struct __guc_mmio_reg_descr xe_lpd_blt_inst_regs[] = {
 	COMMON_BASE_ENGINE_INSTANCE,
 };
 
+/* XE_LPD - GSC Per-Engine-Instance */
+static const struct __guc_mmio_reg_descr xe_lpd_gsc_inst_regs[] = {
+	COMMON_BASE_ENGINE_INSTANCE,
+};
+
 /* GEN9 - Global */
 static const struct __guc_mmio_reg_descr default_global_regs[] = {
 	COMMON_BASE_GLOBAL,
 	COMMON_GEN9BASE_GLOBAL,
+	GEN9_GLOBAL,
 };
 
 static const struct __guc_mmio_reg_descr default_rc_class_regs[] = {
@@ -169,12 +177,16 @@ static const struct __guc_mmio_reg_descr_group default_lists[] = {
 	MAKE_REGLIST(default_global_regs, PF, GLOBAL, 0),
 	MAKE_REGLIST(default_rc_class_regs, PF, ENGINE_CLASS, GUC_RENDER_CLASS),
 	MAKE_REGLIST(xe_lpd_rc_inst_regs, PF, ENGINE_INSTANCE, GUC_RENDER_CLASS),
+	MAKE_REGLIST(default_rc_class_regs, PF, ENGINE_CLASS, GUC_COMPUTE_CLASS),
+	MAKE_REGLIST(xe_lpd_rc_inst_regs, PF, ENGINE_INSTANCE, GUC_COMPUTE_CLASS),
 	MAKE_REGLIST(empty_regs_list, PF, ENGINE_CLASS, GUC_VIDEO_CLASS),
 	MAKE_REGLIST(xe_lpd_vd_inst_regs, PF, ENGINE_INSTANCE, GUC_VIDEO_CLASS),
 	MAKE_REGLIST(empty_regs_list, PF, ENGINE_CLASS, GUC_VIDEOENHANCE_CLASS),
 	MAKE_REGLIST(xe_lpd_vec_inst_regs, PF, ENGINE_INSTANCE, GUC_VIDEOENHANCE_CLASS),
 	MAKE_REGLIST(empty_regs_list, PF, ENGINE_CLASS, GUC_BLITTER_CLASS),
 	MAKE_REGLIST(xe_lpd_blt_inst_regs, PF, ENGINE_INSTANCE, GUC_BLITTER_CLASS),
+	MAKE_REGLIST(empty_regs_list, PF, ENGINE_CLASS, GUC_GSC_OTHER_CLASS),
+	MAKE_REGLIST(xe_lpd_gsc_inst_regs, PF, ENGINE_INSTANCE, GUC_GSC_OTHER_CLASS),
 	{}
 };
 
@@ -182,12 +194,16 @@ static const struct __guc_mmio_reg_descr_group xe_lpd_lists[] = {
 	MAKE_REGLIST(xe_lpd_global_regs, PF, GLOBAL, 0),
 	MAKE_REGLIST(xe_lpd_rc_class_regs, PF, ENGINE_CLASS, GUC_RENDER_CLASS),
 	MAKE_REGLIST(xe_lpd_rc_inst_regs, PF, ENGINE_INSTANCE, GUC_RENDER_CLASS),
+	MAKE_REGLIST(xe_lpd_rc_class_regs, PF, ENGINE_CLASS, GUC_COMPUTE_CLASS),
+	MAKE_REGLIST(xe_lpd_rc_inst_regs, PF, ENGINE_INSTANCE, GUC_COMPUTE_CLASS),
 	MAKE_REGLIST(empty_regs_list, PF, ENGINE_CLASS, GUC_VIDEO_CLASS),
 	MAKE_REGLIST(xe_lpd_vd_inst_regs, PF, ENGINE_INSTANCE, GUC_VIDEO_CLASS),
 	MAKE_REGLIST(xe_lpd_vec_class_regs, PF, ENGINE_CLASS, GUC_VIDEOENHANCE_CLASS),
 	MAKE_REGLIST(xe_lpd_vec_inst_regs, PF, ENGINE_INSTANCE, GUC_VIDEOENHANCE_CLASS),
 	MAKE_REGLIST(empty_regs_list, PF, ENGINE_CLASS, GUC_BLITTER_CLASS),
 	MAKE_REGLIST(xe_lpd_blt_inst_regs, PF, ENGINE_INSTANCE, GUC_BLITTER_CLASS),
+	MAKE_REGLIST(empty_regs_list, PF, ENGINE_CLASS, GUC_GSC_OTHER_CLASS),
+	MAKE_REGLIST(xe_lpd_gsc_inst_regs, PF, ENGINE_INSTANCE, GUC_GSC_OTHER_CLASS),
 	{}
 };
 
@@ -240,19 +256,19 @@ static void guc_capture_free_extlists(struct __guc_mmio_reg_descr_group *reglist
 
 struct __ext_steer_reg {
 	const char *name;
-	i915_reg_t reg;
+	i915_mcr_reg_t reg;
 };
 
 static const struct __ext_steer_reg xe_extregs[] = {
-	{"GEN7_SAMPLER_INSTDONE", GEN7_SAMPLER_INSTDONE},
-	{"GEN7_ROW_INSTDONE", GEN7_ROW_INSTDONE}
+	{"GEN8_SAMPLER_INSTDONE", GEN8_SAMPLER_INSTDONE},
+	{"GEN8_ROW_INSTDONE", GEN8_ROW_INSTDONE}
 };
 
 static void __fill_ext_reg(struct __guc_mmio_reg_descr *ext,
 			   const struct __ext_steer_reg *extlist,
 			   int slice_id, int subslice_id)
 {
-	ext->reg = extlist->reg;
+	ext->reg = _MMIO(i915_mmio_reg_offset(extlist->reg));
 	ext->flags = FIELD_PREP(GUC_REGSET_STEERING_GROUP, slice_id);
 	ext->flags |= FIELD_PREP(GUC_REGSET_STEERING_INSTANCE, subslice_id);
 	ext->regname = extlist->name;
@@ -450,6 +466,8 @@ __stringify_engclass(u32 class)
 		return "Blitter";
 	case GUC_COMPUTE_CLASS:
 		return "Compute";
+	case GUC_GSC_OTHER_CLASS:
+		return "GSC-Other";
 	default:
 		break;
 	}
@@ -1450,33 +1468,22 @@ guc_capture_reg_to_str(const struct intel_guc *guc, u32 owner, u32 type,
 	return NULL;
 }
 
-#ifdef CONFIG_DRM_I915_DEBUG_GUC
-#define __out(a, ...) \
-	do { \
-		drm_warn((&(a)->i915->drm), __VA_ARGS__); \
-		i915_error_printf((a), __VA_ARGS__); \
-	} while (0)
-#else
-#define __out(a, ...) \
-	i915_error_printf(a, __VA_ARGS__)
-#endif
-
 #define GCAP_PRINT_INTEL_ENG_INFO(ebuf, eng) \
 	do { \
-		__out(ebuf, "    i915-Eng-Name: %s command stream\n", \
-		      (eng)->name); \
-		__out(ebuf, "    i915-Eng-Inst-Class: 0x%02x\n", (eng)->class); \
-		__out(ebuf, "    i915-Eng-Inst-Id: 0x%02x\n", (eng)->instance); \
-		__out(ebuf, "    i915-Eng-LogicalMask: 0x%08x\n", \
-		      (eng)->logical_mask); \
+		i915_error_printf(ebuf, "    i915-Eng-Name: %s command stream\n", \
+				  (eng)->name); \
+		i915_error_printf(ebuf, "    i915-Eng-Inst-Class: 0x%02x\n", (eng)->class); \
+		i915_error_printf(ebuf, "    i915-Eng-Inst-Id: 0x%02x\n", (eng)->instance); \
+		i915_error_printf(ebuf, "    i915-Eng-LogicalMask: 0x%08x\n", \
+				  (eng)->logical_mask); \
 	} while (0)
 
 #define GCAP_PRINT_GUC_INST_INFO(ebuf, node) \
 	do { \
-		__out(ebuf, "    GuC-Engine-Inst-Id: 0x%08x\n", \
-		      (node)->eng_inst); \
-		__out(ebuf, "    GuC-Context-Id: 0x%08x\n", (node)->guc_id); \
-		__out(ebuf, "    LRCA: 0x%08x\n", (node)->lrca); \
+		i915_error_printf(ebuf, "    GuC-Engine-Inst-Id: 0x%08x\n", \
+				  (node)->eng_inst); \
+		i915_error_printf(ebuf, "    GuC-Context-Id: 0x%08x\n", (node)->guc_id); \
+		i915_error_printf(ebuf, "    LRCA: 0x%08x\n", (node)->lrca); \
 	} while (0)
 
 int intel_guc_capture_print_engine_node(struct drm_i915_error_state_buf *ebuf,
@@ -1502,63 +1509,63 @@ int intel_guc_capture_print_engine_node(struct drm_i915_error_state_buf *ebuf,
 
 	if (!ebuf || !ee)
 		return -EINVAL;
-	cap = ee->capture;
+	cap = ee->guc_capture;
 	if (!cap || !ee->engine)
 		return -ENODEV;
 
 	guc = &ee->engine->gt->uc.guc;
 
-	__out(ebuf, "global --- GuC Error Capture on %s command stream:\n",
-	      ee->engine->name);
+	i915_error_printf(ebuf, "global --- GuC Error Capture on %s command stream:\n",
+			  ee->engine->name);
 
 	node = ee->guc_capture_node;
 	if (!node) {
-		__out(ebuf, "  No matching ee-node\n");
+		i915_error_printf(ebuf, "  No matching ee-node\n");
 		return 0;
 	}
 
-	__out(ebuf, "Coverage:  %s\n", grptype[node->is_partial]);
+	i915_error_printf(ebuf, "Coverage:  %s\n", grptype[node->is_partial]);
 
 	for (i = GUC_CAPTURE_LIST_TYPE_GLOBAL; i < GUC_CAPTURE_LIST_TYPE_MAX; ++i) {
-		__out(ebuf, "  RegListType: %s\n",
-		      datatype[i % GUC_CAPTURE_LIST_TYPE_MAX]);
-		__out(ebuf, "    Owner-Id: %d\n", node->reginfo[i].vfid);
+		i915_error_printf(ebuf, "  RegListType: %s\n",
+				  datatype[i % GUC_CAPTURE_LIST_TYPE_MAX]);
+		i915_error_printf(ebuf, "    Owner-Id: %d\n", node->reginfo[i].vfid);
 
 		switch (i) {
 		case GUC_CAPTURE_LIST_TYPE_GLOBAL:
 		default:
 			break;
 		case GUC_CAPTURE_LIST_TYPE_ENGINE_CLASS:
-			__out(ebuf, "    GuC-Eng-Class: %d\n", node->eng_class);
-			__out(ebuf, "    i915-Eng-Class: %d\n",
-			      guc_class_to_engine_class(node->eng_class));
+			i915_error_printf(ebuf, "    GuC-Eng-Class: %d\n", node->eng_class);
+			i915_error_printf(ebuf, "    i915-Eng-Class: %d\n",
+					  guc_class_to_engine_class(node->eng_class));
 			break;
 		case GUC_CAPTURE_LIST_TYPE_ENGINE_INSTANCE:
 			eng = intel_guc_lookup_engine(guc, node->eng_class, node->eng_inst);
 			if (eng)
 				GCAP_PRINT_INTEL_ENG_INFO(ebuf, eng);
 			else
-				__out(ebuf, "    i915-Eng-Lookup Fail!\n");
+				i915_error_printf(ebuf, "    i915-Eng-Lookup Fail!\n");
 			GCAP_PRINT_GUC_INST_INFO(ebuf, node);
 			break;
 		}
 
 		numregs = node->reginfo[i].num_regs;
-		__out(ebuf, "    NumRegs: %d\n", numregs);
+		i915_error_printf(ebuf, "    NumRegs: %d\n", numregs);
 		j = 0;
 		while (numregs--) {
 			regs = node->reginfo[i].regs;
 			str = guc_capture_reg_to_str(guc, GUC_CAPTURE_LIST_INDEX_PF, i,
 						     node->eng_class, 0, regs[j].offset, &is_ext);
 			if (!str)
-				__out(ebuf, "      REG-0x%08x", regs[j].offset);
+				i915_error_printf(ebuf, "      REG-0x%08x", regs[j].offset);
 			else
-				__out(ebuf, "      %s", str);
+				i915_error_printf(ebuf, "      %s", str);
 			if (is_ext)
-				__out(ebuf, "[%ld][%ld]",
-				      FIELD_GET(GUC_REGSET_STEERING_GROUP, regs[j].flags),
-				      FIELD_GET(GUC_REGSET_STEERING_INSTANCE, regs[j].flags));
-			__out(ebuf, ":  0x%08x\n", regs[j].value);
+				i915_error_printf(ebuf, "[%ld][%ld]",
+					FIELD_GET(GUC_REGSET_STEERING_GROUP, regs[j].flags),
+					FIELD_GET(GUC_REGSET_STEERING_INSTANCE, regs[j].flags));
+			i915_error_printf(ebuf, ":  0x%08x\n", regs[j].value);
 			++j;
 		}
 	}
@@ -1567,13 +1574,34 @@ int intel_guc_capture_print_engine_node(struct drm_i915_error_state_buf *ebuf,
 
 #endif //CONFIG_DRM_I915_CAPTURE_ERROR
 
+static void guc_capture_find_ecode(struct intel_engine_coredump *ee)
+{
+	struct gcap_reg_list_info *reginfo;
+	struct guc_mmio_reg *regs;
+	i915_reg_t reg_ipehr = RING_IPEHR(0);
+	i915_reg_t reg_instdone = RING_INSTDONE(0);
+	int i;
+
+	if (!ee->guc_capture_node)
+		return;
+
+	reginfo = ee->guc_capture_node->reginfo + GUC_CAPTURE_LIST_TYPE_ENGINE_INSTANCE;
+	regs = reginfo->regs;
+	for (i = 0; i < reginfo->num_regs; i++) {
+		if (regs[i].offset == reg_ipehr.reg)
+			ee->ipehr = regs[i].value;
+		else if (regs[i].offset == reg_instdone.reg)
+			ee->instdone.instdone = regs[i].value;
+	}
+}
+
 void intel_guc_capture_free_node(struct intel_engine_coredump *ee)
 {
 	if (!ee || !ee->guc_capture_node)
 		return;
 
-	guc_capture_add_node_to_cachelist(ee->capture, ee->guc_capture_node);
-	ee->capture = NULL;
+	guc_capture_add_node_to_cachelist(ee->guc_capture, ee->guc_capture_node);
+	ee->guc_capture = NULL;
 	ee->guc_capture_node = NULL;
 }
 
@@ -1607,7 +1635,8 @@ void intel_guc_capture_get_matching_node(struct intel_gt *gt,
 		    (ce->lrc.lrca & CTX_GTT_ADDRESS_MASK)) {
 			list_del(&n->link);
 			ee->guc_capture_node = n;
-			ee->capture = guc->capture;
+			ee->guc_capture = guc->capture;
+			guc_capture_find_ecode(ee);
 			return;
 		}
 	}

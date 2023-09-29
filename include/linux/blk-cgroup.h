@@ -717,8 +717,8 @@ static inline int blkcg_set_fc_appid(char *app_id, u64 cgrp_id, size_t app_id_le
 		return -EINVAL;
 
 	cgrp = cgroup_get_from_id(cgrp_id);
-	if (!cgrp)
-		return -ENOENT;
+	if (IS_ERR(cgrp))
+		return PTR_ERR(cgrp);
 	css = cgroup_get_e_css(cgrp, &io_cgrp_subsys);
 	if (!css) {
 		ret = -ENOENT;

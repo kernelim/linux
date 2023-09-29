@@ -86,22 +86,32 @@ static void __deactivate_traps(struct kvm_vcpu *vcpu)
 }
 NOKPROBE_SYMBOL(__deactivate_traps);
 
+/*
+ * Disable IRQs in {activate,deactivate}_traps_vhe_{load,put}() to
+ * prevent a race condition between context switching of PMUSERENR_EL0
+ * in __{activate,deactivate}_traps_common() and IPIs that attempts to
+ * update PMUSERENR_EL0. See also kvm_set_pmuserenr().
+ */
 void activate_traps_vhe_load(struct kvm_vcpu *vcpu)
 {
+	unsigned long flags;
+
+	local_irq_save(flags);
 	__activate_traps_common(vcpu);
+	local_irq_restore(flags);
 }
 
-void deactivate_traps_vhe_put(void)
+void deactivate_traps_vhe_put(struct kvm_vcpu *vcpu)
 {
-	u64 mdcr_el2 = read_sysreg(mdcr_el2);
+	unsigned long flags;
 
-	mdcr_el2 &= MDCR_EL2_HPMN_MASK |
-		    MDCR_EL2_E2PB_MASK << MDCR_EL2_E2PB_SHIFT |
-		    MDCR_EL2_TPMS;
+	vcpu->arch.mdcr_el2_host &= MDCR_EL2_HPMN_MASK |
+				    MDCR_EL2_E2PB_MASK << MDCR_EL2_E2PB_SHIFT |
+				    MDCR_EL2_TPMS;
 
-	write_sysreg(mdcr_el2, mdcr_el2);
-
-	__deactivate_traps_common();
+	local_irq_save(flags);
+	__deactivate_traps_common(vcpu);
+	local_irq_restore(flags);
 }
 
 /* Switch to the guest for VHE systems running in EL2 */
@@ -111,7 +121,7 @@ static int __kvm_vcpu_run_vhe(struct kvm_vcpu *vcpu)
 	struct kvm_cpu_context *guest_ctxt;
 	u64 exit_code;
 
-	host_ctxt = &__hyp_this_cpu_ptr(kvm_host_data)->host_ctxt;
+	host_ctxt = &this_cpu_ptr(&kvm_host_data)->host_ctxt;
 	host_ctxt->__hyp_running_vcpu = vcpu;
 	guest_ctxt = &vcpu->arch.ctxt;
 

@@ -18,6 +18,7 @@ if X86_PLATFORM_DRIVERS_INTEL
 source "drivers/platform/x86/intel/pmc/Kconfig"
 source "drivers/platform/x86/intel/pmt/Kconfig"
 source "drivers/platform/x86/intel/speed_select_if/Kconfig"
+source "drivers/platform/x86/intel/ifs/Kconfig"
 source "drivers/platform/x86/intel/uncore-frequency/Kconfig"
 
 config INTEL_ISHTP_ECLITE

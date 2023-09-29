@@ -1,5 +1,5 @@
 RHEL_MAJOR = 8
-RHEL_MINOR = 8
+RHEL_MINOR = 9
 
 #
 # RHEL_RELEASE
@@ -12,7 +12,7 @@ RHEL_MINOR = 8
 #
 # Use this spot to avoid future merge conflicts.
 # Do not trim this comment.
-RHEL_RELEASE = 477.27.1
+RHEL_RELEASE = 513.5.1
 
 #
 # ZSTREAM

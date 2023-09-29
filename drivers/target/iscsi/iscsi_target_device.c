@@ -29,7 +29,7 @@
 #define iscsit_needs_delayed_maxcmdsn_increment(conn) \
 	(conn->conn_transport->transport_type == ISCSI_INFINIBAND)
 
-void iscsit_determine_maxcmdsn(struct iscsi_session *sess)
+void iscsit_determine_maxcmdsn(struct iscsit_session *sess)
 {
 	struct se_node_acl *se_nacl;
 
@@ -54,7 +54,7 @@ void iscsit_determine_maxcmdsn(struct iscsi_session *sess)
 	atomic_add(se_nacl->queue_depth - 1, &sess->max_cmd_sn);
 }
 
-void __iscsit_increment_maxcmdsn(struct iscsi_cmd *cmd, struct iscsi_session *sess)
+void __iscsit_increment_maxcmdsn(struct iscsit_cmd *cmd, struct iscsit_session *sess)
 {
 	u32 max_cmd_sn;
 
@@ -67,7 +67,7 @@ void __iscsit_increment_maxcmdsn(struct iscsi_cmd *cmd, struct iscsi_session *se
 	pr_debug("Updated MaxCmdSN to 0x%08x\n", max_cmd_sn);
 }
 
-void iscsit_increment_maxcmdsn(struct iscsi_cmd *cmd, struct iscsi_session *sess)
+void iscsit_increment_maxcmdsn(struct iscsit_cmd *cmd, struct iscsit_session *sess)
 {
 	if (!iscsit_needs_delayed_maxcmdsn_increment(cmd->conn))
 		__iscsit_increment_maxcmdsn(cmd, sess);
@@ -76,7 +76,7 @@ EXPORT_SYMBOL(iscsit_increment_maxcmdsn);
 
 
 
-void iscsit_increment_maxcmdsn_on_release(struct iscsi_cmd *cmd, struct iscsi_session *sess)
+void iscsit_increment_maxcmdsn_on_release(struct iscsit_cmd *cmd, struct iscsit_session *sess)
 {
 	if (iscsit_needs_delayed_maxcmdsn_increment(cmd->conn) && !cmd->no_maxcmdsn_release) {
 		__iscsit_increment_maxcmdsn(cmd, sess);

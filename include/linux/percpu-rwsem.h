@@ -64,7 +64,7 @@ static inline void percpu_down_read(struct percpu_rw_semaphore *sem)
 	 * anything we did within this RCU-sched read-size critical section.
 	 */
 	if (likely(rcu_sync_is_idle(&sem->rss)))
-		__this_cpu_inc(*sem->read_count);
+		this_cpu_inc(*sem->read_count);
 	else
 		__percpu_down_read(sem, false); /* Unconditional memory barrier */
 	/*
@@ -83,7 +83,7 @@ static inline bool percpu_down_read_trylock(struct percpu_rw_semaphore *sem)
 	 * Same as in percpu_down_read().
 	 */
 	if (likely(rcu_sync_is_idle(&sem->rss)))
-		__this_cpu_inc(*sem->read_count);
+		this_cpu_inc(*sem->read_count);
 	else
 		ret = __percpu_down_read(sem, true); /* Unconditional memory barrier */
 	preempt_enable();
@@ -107,7 +107,7 @@ static inline void percpu_up_read(struct percpu_rw_semaphore *sem)
 	 * Same as in percpu_down_read().
 	 */
 	if (likely(rcu_sync_is_idle(&sem->rss))) {
-		__this_cpu_dec(*sem->read_count);
+		this_cpu_dec(*sem->read_count);
 	} else {
 		/*
 		 * slowpath; reader will only ever wake a single blocked
@@ -119,7 +119,7 @@ static inline void percpu_up_read(struct percpu_rw_semaphore *sem)
 		 * aggregate zero, as that is the only time it matters) they
 		 * will also see our critical section.
 		 */
-		__this_cpu_dec(*sem->read_count);
+		this_cpu_dec(*sem->read_count);
 		rcuwait_wake_up(&sem->writer);
 	}
 	preempt_enable();

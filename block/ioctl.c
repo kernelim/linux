@@ -82,6 +82,7 @@ static int compat_blkpg_ioctl(struct block_device *bdev,
 static int blkdev_reread_part(struct block_device *bdev, fmode_t mode)
 {
 	struct block_device *tmp;
+	int ret = 0;
 
 	if (!disk_part_scan_enabled(bdev->bd_disk) || bdev_is_partition(bdev))
 		return -EINVAL;
@@ -91,18 +92,39 @@ static int blkdev_reread_part(struct block_device *bdev, fmode_t mode)
 		return -EBUSY;
 
 	/*
+	 * If the device is opened exclusively by current thread already, it's
+	 * safe to scan partitons, otherwise, use bd_prepare_to_claim() to
+	 * synchronize with other exclusive openers and other partition
+	 * scanners.
+	 */
+	if (!(mode & FMODE_EXCL)) {
+		ret = bd_prepare_to_claim(bdev, bdev->bd_contains, blkdev_reread_part);
+		if (ret)
+			return ret;
+	}
+
+	/*
 	 * Reopen the device to revalidate the driver state and force a
 	 * partition rescan.
 	 */
-	mode &= ~FMODE_EXCL;
 	bdev->bd_invalidated = 1;
 	set_bit(GD_NEED_PART_SCAN, &bdev->bd_disk->state);
-
-	tmp = blkdev_get_by_dev(bdev->bd_dev, mode, NULL);
+	tmp = blkdev_get_by_dev(bdev->bd_dev, mode & ~FMODE_EXCL, NULL);
 	if (IS_ERR(tmp))
-		return PTR_ERR(tmp);
-	blkdev_put(tmp, mode);
-	return 0;
+		ret = PTR_ERR(tmp);
+	else
+		blkdev_put(tmp, mode & ~FMODE_EXCL);
+
+	/*
+	 * If blkdev_get_by_dev() failed early, GD_NEED_PART_SCAN is still set,
+	 * and this will cause that re-assemble partitioned raid device will
+	 * creat partition for underlying disk.
+	 */
+	clear_bit(GD_NEED_PART_SCAN, &bdev->bd_disk->state);
+	bdev->bd_invalidated = 0;
+	if (!(mode & FMODE_EXCL))
+		bd_abort_claiming(bdev, bdev->bd_contains, blkdev_reread_part);
+	return ret;
 }
 
 static int blk_ioctl_discard(struct block_device *bdev, fmode_t mode,

@@ -18,6 +18,7 @@ Linux Tracing Technologies
    events-nmi
    events-msr
    mmiotrace
+   histogram
    hwlat_detector
    osnoise-tracer
    timerlat-tracer

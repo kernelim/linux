@@ -62,6 +62,7 @@
 #define SE_SBPROC		0x0200
 #define SE_SBGENFS		0x0400
 #define SE_SBGENFS_XATTR	0x0800
+#define SE_SBNATIVE		0x1000
 
 /* RHEL8-only */
 #define SE_SBGENFS_SYMLINKS	0x8000

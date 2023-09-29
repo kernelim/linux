@@ -20,6 +20,7 @@
 #include <linux/vermagic.h>
 #include <net/gre.h>
 #include <net/pkt_cls.h>
+#include <net/pkt_sched.h>
 #include <net/vxlan.h>
 
 #include "hnae3.h"

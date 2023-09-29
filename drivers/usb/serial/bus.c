@@ -78,7 +78,6 @@ static int usb_serial_device_remove(struct device *dev)
 {
 	struct usb_serial_port *port = to_usb_serial_port(dev);
 	struct usb_serial_driver *driver;
-	int retval = 0;
 	int minor;
 	int autopm_err;
 
@@ -95,7 +94,7 @@ static int usb_serial_device_remove(struct device *dev)
 
 	driver = port->serial->type;
 	if (driver->port_remove)
-		retval = driver->port_remove(port);
+		driver->port_remove(port);
 
 	dev_info(dev, "%s converter now disconnected from ttyUSB%d\n",
 		 driver->description, minor);
@@ -103,7 +102,7 @@ static int usb_serial_device_remove(struct device *dev)
 	if (!autopm_err)
 		usb_autopm_put_interface(port->serial->interface);
 
-	return retval;
+	return 0;
 }
 
 static ssize_t new_id_store(struct device_driver *driver,

@@ -218,8 +218,8 @@ static int init_user_queue(struct process_queue_manager *pqm,
 	return 0;
 
 cleanup:
-	if (dev->shared_resources.enable_mes)
-		uninit_queue(*q);
+	uninit_queue(*q);
+	*q = NULL;
 	return retval;
 }
 
@@ -857,6 +857,13 @@ int kfd_criu_restore_queue(struct kfd_process *p,
 		ret = -EINVAL;
 		goto exit;
 	}
+
+	if (!pdd->doorbell_index &&
+	    kfd_alloc_process_doorbells(pdd->dev, &pdd->doorbell_index) < 0) {
+		ret = -ENOMEM;
+		goto exit;
+	}
+
 	/* data stored in this order: mqd, ctl_stack */
 	mqd = q_extra_data;
 	ctl_stack = mqd + q_data->mqd_size;

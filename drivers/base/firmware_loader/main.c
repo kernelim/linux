@@ -108,7 +108,7 @@ static bool fw_copy_to_prealloc_buf(struct firmware *fw,
 	return true;
 }
 
-static bool firmware_request_builtin(struct firmware *fw, const char *name)
+bool firmware_request_builtin(struct firmware *fw, const char *name)
 {
 	struct builtin_fw *b_fw;
 
@@ -125,6 +125,7 @@ static bool firmware_request_builtin(struct firmware *fw, const char *name)
 
 	return false;
 }
+EXPORT_SYMBOL_GPL(firmware_request_builtin);
 
 static bool firmware_request_builtin_buf(struct firmware *fw, const char *name,
 					 void *buf, size_t size)

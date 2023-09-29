@@ -352,8 +352,10 @@ static void adjust_total_allocated(struct dm_buffer *b, bool unlink)
  */
 static void __cache_size_refresh(void)
 {
-	BUG_ON(!mutex_is_locked(&dm_bufio_clients_lock));
-	BUG_ON(dm_bufio_client_count < 0);
+	if (WARN_ON(!mutex_is_locked(&dm_bufio_clients_lock)))
+		return;
+	if (WARN_ON(dm_bufio_client_count < 0))
+		return;
 
 	dm_bufio_cache_size_latch = READ_ONCE(dm_bufio_cache_size);
 
@@ -1109,7 +1111,8 @@ EXPORT_SYMBOL_GPL(dm_bufio_get);
 void *dm_bufio_read(struct dm_bufio_client *c, sector_t block,
 		    struct dm_buffer **bp)
 {
-	BUG_ON(dm_bufio_in_request());
+	if (WARN_ON_ONCE(dm_bufio_in_request()))
+		return ERR_PTR(-EINVAL);
 
 	return new_read(c, block, NF_READ, bp);
 }
@@ -1118,7 +1121,8 @@ EXPORT_SYMBOL_GPL(dm_bufio_read);
 void *dm_bufio_new(struct dm_bufio_client *c, sector_t block,
 		   struct dm_buffer **bp)
 {
-	BUG_ON(dm_bufio_in_request());
+	if (WARN_ON_ONCE(dm_bufio_in_request()))
+		return ERR_PTR(-EINVAL);
 
 	return new_read(c, block, NF_FRESH, bp);
 }
@@ -1131,7 +1135,8 @@ void dm_bufio_prefetch(struct dm_bufio_client *c,
 
 	LIST_HEAD(write_list);
 
-	BUG_ON(dm_bufio_in_request());
+	if (WARN_ON_ONCE(dm_bufio_in_request()))
+		return; /* should never happen */
 
 	blk_start_plug(&plug);
 	dm_bufio_lock(c);
@@ -1237,7 +1242,8 @@ void dm_bufio_write_dirty_buffers_async(struct dm_bufio_client *c)
 {
 	LIST_HEAD(write_list);
 
-	BUG_ON(dm_bufio_in_request());
+	if (WARN_ON_ONCE(dm_bufio_in_request()))
+		return; /* should never happen */
 
 	dm_bufio_lock(c);
 	__write_dirty_buffers_async(c, 0, &write_list);
@@ -1343,87 +1349,12 @@ int dm_bufio_issue_flush(struct dm_bufio_client *c)
 		.count = 0,
 	};
 
-	BUG_ON(dm_bufio_in_request());
+	if (WARN_ON_ONCE(dm_bufio_in_request()))
+		return -EINVAL;
 
 	return dm_io(&io_req, 1, &io_reg, NULL);
 }
 EXPORT_SYMBOL_GPL(dm_bufio_issue_flush);
-
-/*
- * We first delete any other buffer that may be at that new location.
- *
- * Then, we write the buffer to the original location if it was dirty.
- *
- * Then, if we are the only one who is holding the buffer, relink the buffer
- * in the buffer tree for the new location.
- *
- * If there was someone else holding the buffer, we write it to the new
- * location but not relink it, because that other user needs to have the buffer
- * at the same place.
- */
-void dm_bufio_release_move(struct dm_buffer *b, sector_t new_block)
-{
-	struct dm_bufio_client *c = b->c;
-	struct dm_buffer *new;
-
-	BUG_ON(dm_bufio_in_request());
-
-	dm_bufio_lock(c);
-
-retry:
-	new = __find(c, new_block);
-	if (new) {
-		if (new->hold_count) {
-			__wait_for_free_buffer(c);
-			goto retry;
-		}
-
-		/*
-		 * FIXME: Is there any point waiting for a write that's going
-		 * to be overwritten in a bit?
-		 */
-		__make_buffer_clean(new);
-		__unlink_buffer(new);
-		__free_buffer_wake(new);
-	}
-
-	BUG_ON(!b->hold_count);
-	BUG_ON(test_bit(B_READING, &b->state));
-
-	__write_dirty_buffer(b, NULL);
-	if (b->hold_count == 1) {
-		wait_on_bit_io(&b->state, B_WRITING,
-			       TASK_UNINTERRUPTIBLE);
-		set_bit(B_DIRTY, &b->state);
-		b->dirty_start = 0;
-		b->dirty_end = c->block_size;
-		__unlink_buffer(b);
-		__link_buffer(b, new_block, LIST_DIRTY);
-	} else {
-		sector_t old_block;
-		wait_on_bit_lock_io(&b->state, B_WRITING,
-				    TASK_UNINTERRUPTIBLE);
-		/*
-		 * Relink buffer to "new_block" so that write_callback
-		 * sees "new_block" as a block number.
-		 * After the write, link the buffer back to old_block.
-		 * All this must be done in bufio lock, so that block number
-		 * change isn't visible to other threads.
-		 */
-		old_block = b->block;
-		__unlink_buffer(b);
-		__link_buffer(b, new_block, b->list_mode);
-		submit_io(b, REQ_OP_WRITE, write_endio);
-		wait_on_bit_io(&b->state, B_WRITING,
-			       TASK_UNINTERRUPTIBLE);
-		__unlink_buffer(b);
-		__link_buffer(b, old_block, b->list_mode);
-	}
-
-	dm_bufio_unlock(c);
-	dm_bufio_release(b);
-}
-EXPORT_SYMBOL_GPL(dm_bufio_release_move);
 
 /*
  * Free the given buffer.
@@ -1511,7 +1442,8 @@ static void drop_buffers(struct dm_bufio_client *c)
 	int i;
 	bool warned = false;
 
-	BUG_ON(dm_bufio_in_request());
+	if (WARN_ON(dm_bufio_in_request()))
+		return; /* should never happen */
 
 	/*
 	 * An optimization so that the buffers are not written one-by-one.
@@ -1531,7 +1463,7 @@ static void drop_buffers(struct dm_bufio_client *c)
 			      (unsigned long long)b->block, b->hold_count, i);
 #ifdef CONFIG_DM_DEBUG_BLOCK_STACK_TRACING
 			stack_trace_print(b->stack_entries, b->stack_len, 1);
-			/* mark unclaimed to avoid BUG_ON below */
+			/* mark unclaimed to avoid WARN_ON below */
 			b->hold_count = 0;
 #endif
 		}
@@ -1542,7 +1474,7 @@ static void drop_buffers(struct dm_bufio_client *c)
 #endif
 
 	for (i = 0; i < LIST_SIZE; i++)
-		BUG_ON(!list_empty(&c->lru[i]));
+		WARN_ON(!list_empty(&c->lru[i]));
 
 	dm_bufio_unlock(c);
 }
@@ -1805,8 +1737,8 @@ void dm_bufio_client_destroy(struct dm_bufio_client *c)
 
 	mutex_unlock(&dm_bufio_clients_lock);
 
-	BUG_ON(!RB_EMPTY_ROOT(&c->buffer_tree));
-	BUG_ON(c->need_reserved_buffers);
+	WARN_ON(!RB_EMPTY_ROOT(&c->buffer_tree));
+	WARN_ON(c->need_reserved_buffers);
 
 	while (!list_empty(&c->reserved_buffers)) {
 		struct dm_buffer *b = list_entry(c->reserved_buffers.next,
@@ -1820,7 +1752,7 @@ void dm_bufio_client_destroy(struct dm_bufio_client *c)
 			DMERR("leaked buffer count %d: %ld", i, c->n_buffers[i]);
 
 	for (i = 0; i < LIST_SIZE; i++)
-		BUG_ON(c->n_buffers[i]);
+		WARN_ON(c->n_buffers[i]);
 
 	kmem_cache_destroy(c->slab_cache);
 	kmem_cache_destroy(c->slab_buffer);
@@ -2058,7 +1990,7 @@ static void __exit dm_bufio_exit(void)
 		bug = 1;
 	}
 
-	BUG_ON(bug);
+	WARN_ON(bug); /* leaks are not worth crashing the system */
 }
 
 module_init(dm_bufio_init)

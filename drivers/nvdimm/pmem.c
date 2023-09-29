@@ -33,6 +33,7 @@
 #include <linux/dax.h>
 #include <linux/nd.h>
 #include "pmem.h"
+#include "btt.h"
 #include "pfn.h"
 #include "nd.h"
 #include "nd-core.h"
@@ -596,7 +597,7 @@ static void nd_pmem_shutdown(struct device *dev)
 	nvdimm_flush(to_nd_region(dev->parent), NULL);
 }
 
-static void nd_pmem_notify(struct device *dev, enum nvdimm_event event)
+static void pmem_revalidate_poison(struct device *dev)
 {
 	struct nd_region *nd_region;
 	resource_size_t offset = 0, end_trunc = 0;
@@ -605,9 +606,6 @@ static void nd_pmem_notify(struct device *dev, enum nvdimm_event event)
 	struct badblocks *bb;
 	struct range range;
 	struct kernfs_node *bb_state;
-
-	if (event != NVDIMM_REVALIDATE_POISON)
-		return;
 
 	if (is_nd_btt(dev)) {
 		struct nd_btt *nd_btt = to_nd_btt(dev);
@@ -644,6 +642,37 @@ static void nd_pmem_notify(struct device *dev, enum nvdimm_event event)
 	nvdimm_badblocks_populate(nd_region, bb, &range);
 	if (bb_state)
 		sysfs_notify_dirent(bb_state);
+}
+
+static void pmem_revalidate_region(struct device *dev)
+{
+	struct pmem_device *pmem;
+
+	if (is_nd_btt(dev)) {
+		struct nd_btt *nd_btt = to_nd_btt(dev);
+		struct btt *btt = nd_btt->btt;
+
+		nvdimm_check_and_set_ro(btt->btt_disk);
+		return;
+	}
+
+	pmem = dev_get_drvdata(dev);
+	nvdimm_check_and_set_ro(pmem->disk);
+}
+
+static void nd_pmem_notify(struct device *dev, enum nvdimm_event event)
+{
+	switch (event) {
+	case NVDIMM_REVALIDATE_POISON:
+		pmem_revalidate_poison(dev);
+		break;
+	case NVDIMM_REVALIDATE_REGION:
+		pmem_revalidate_region(dev);
+		break;
+	default:
+		dev_WARN_ONCE(dev, 1, "notify: unknown event: %d\n", event);
+		break;
+	}
 }
 
 MODULE_ALIAS("pmem");

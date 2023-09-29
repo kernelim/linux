@@ -2337,7 +2337,7 @@ EXPORT_SYMBOL(vfio_unregister_notifier);
 /**
  * Module/class support
  */
-static char *vfio_devnode(struct device *dev, umode_t *mode)
+static char *vfio_devnode(const struct device *dev, umode_t *mode)
 {
 	return kasprintf(GFP_KERNEL, "vfio/%s", dev_name(dev));
 }

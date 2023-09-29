@@ -142,9 +142,12 @@ static int __init hyperv_prepare_irq_remapping(void)
 	struct fwnode_handle *fn;
 	int i;
 
+	/*
+	 * For a Hyper-V root partition, ms_hyperv_msi_ext_dest_id()
+	 * will always return false.
+	 */
 	if (!hypervisor_is_type(X86_HYPER_MS_HYPERV) ||
-	    x86_init.hyper.msi_ext_dest_id() ||
-	    !x2apic_supported())
+	    x86_init.hyper.msi_ext_dest_id())
 		return -ENODEV;
 
 	fn = irq_domain_alloc_named_id_fwnode("HYPERV-IR", 0);
@@ -180,7 +183,9 @@ static int __init hyperv_prepare_irq_remapping(void)
 
 static int __init hyperv_enable_irq_remapping(void)
 {
-	return IRQ_REMAP_X2APIC_MODE;
+	if (x2apic_supported())
+		return IRQ_REMAP_X2APIC_MODE;
+	return IRQ_REMAP_XAPIC_MODE;
 }
 
 static struct irq_domain *hyperv_get_irq_domain(struct irq_alloc_info *info)

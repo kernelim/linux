@@ -49,7 +49,7 @@ static struct nvmf_host *nvmf_host_add(const char *hostnqn)
 		goto out_unlock;
 
 	kref_init(&host->ref);
-	strlcpy(host->nqn, hostnqn, NVMF_NQN_SIZE);
+	strscpy(host->nqn, hostnqn, NVMF_NQN_SIZE);
 
 	list_add_tail(&host->list, &nvmf_hosts);
 out_unlock:
@@ -271,6 +271,12 @@ static void nvmf_log_connect_error(struct nvme_ctrl *ctrl,
 {
 	int err_sctype = errval & ~NVME_SC_DNR;
 
+	if (errval < 0) {
+		dev_err(ctrl->device,
+			"Connect command failed, errno: %d\n", errval);
+		return;
+	}
+
 	switch (err_sctype) {
 	case (NVME_SC_CONNECT_INVALID_PARAM):
 		if (offset >> 16) {
@@ -331,6 +337,10 @@ static void nvmf_log_connect_error(struct nvme_ctrl *ctrl,
 	case NVME_SC_HOST_PATH_ERROR:
 		dev_err(ctrl->device,
 			"Connect command failed: host path error\n");
+		break;
+	case NVME_SC_AUTH_REQUIRED:
+		dev_err(ctrl->device,
+			"Connect command failed: authentication required\n");
 		break;
 	default:
 		dev_err(ctrl->device,
@@ -894,13 +904,17 @@ bool nvmf_ip_options_match(struct nvme_ctrl *ctrl,
 		return false;
 
 	/*
-	 * Checking the local address is rough. In most cases, none is specified
-	 * and the host port is selected by the stack.
+	 * Checking the local address or host interfaces is rough.
+	 *
+	 * In most cases, none is specified and the host port or
+	 * host interface is selected by the stack.
 	 *
 	 * Assume no match if:
-	 * -  local address is specified and address is not the same
-	 * -  local address is not specified but remote is, or vice versa
-	 *    (admin using specific host_traddr when it matters).
+	 * -  local address or host interface is specified and address
+	 *    or host interface is not the same
+	 * -  local address or host interface is not specified but
+	 *    remote is, or vice versa (admin using specific
+	 *    host_traddr/host_iface when it matters).
 	 */
 	if ((opts->mask & NVMF_OPT_HOST_TRADDR) &&
 	    (ctrl->opts->mask & NVMF_OPT_HOST_TRADDR)) {
@@ -908,6 +922,15 @@ bool nvmf_ip_options_match(struct nvme_ctrl *ctrl,
 			return false;
 	} else if ((opts->mask & NVMF_OPT_HOST_TRADDR) ||
 		   (ctrl->opts->mask & NVMF_OPT_HOST_TRADDR)) {
+		return false;
+	}
+
+	if ((opts->mask & NVMF_OPT_HOST_IFACE) &&
+	    (ctrl->opts->mask & NVMF_OPT_HOST_IFACE)) {
+		if (strcmp(opts->host_iface, ctrl->opts->host_iface))
+			return false;
+	} else if ((opts->mask & NVMF_OPT_HOST_IFACE) ||
+		   (ctrl->opts->mask & NVMF_OPT_HOST_IFACE)) {
 		return false;
 	}
 
@@ -1156,7 +1179,7 @@ static int __init nvmf_init(void)
 	nvmf_device =
 		device_create(nvmf_class, NULL, MKDEV(0, 0), NULL, "ctl");
 	if (IS_ERR(nvmf_device)) {
-		pr_err("couldn't create nvme-fabris device!\n");
+		pr_err("couldn't create nvme-fabrics device!\n");
 		ret = PTR_ERR(nvmf_device);
 		goto out_destroy_class;
 	}

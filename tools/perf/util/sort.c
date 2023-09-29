@@ -50,6 +50,13 @@ static const char *const dynamic_headers[] = {"local_ins_lat", "ins_lat", "local
 static const char *const arch_specific_sort_keys[] = {"local_p_stage_cyc", "p_stage_cyc"};
 
 /*
+ * Some architectures have Adjacent Cacheline Prefetch feature, which
+ * behaves like the cacheline size is doubled. Enable this flag to
+ * check things in double cacheline granularity.
+ */
+bool chk_double_cl;
+
+/*
  * Replaces all occurrences of a char used with the:
  *
  * -t, --field-separator
@@ -1282,8 +1289,8 @@ sort__dcacheline_cmp(struct hist_entry *left, struct hist_entry *right)
 
 addr:
 	/* al_addr does all the right addr - start + offset calculations */
-	l = cl_address(left->mem_info->daddr.al_addr);
-	r = cl_address(right->mem_info->daddr.al_addr);
+	l = cl_address(left->mem_info->daddr.al_addr, chk_double_cl);
+	r = cl_address(right->mem_info->daddr.al_addr, chk_double_cl);
 
 	if (l > r) return -1;
 	if (l < r) return 1;
@@ -1302,7 +1309,7 @@ static int hist_entry__dcacheline_snprintf(struct hist_entry *he, char *bf,
 	if (he->mem_info) {
 		struct map *map = he->mem_info->daddr.ms.map;
 
-		addr = cl_address(he->mem_info->daddr.al_addr);
+		addr = cl_address(he->mem_info->daddr.al_addr, chk_double_cl);
 		ms = &he->mem_info->daddr.ms;
 
 		/* print [s] for shared data mmaps */
@@ -1875,6 +1882,8 @@ static struct sort_dimension common_sort_dimensions[] = {
 	DIM(SORT_GLOBAL_INS_LAT, "ins_lat", sort_global_ins_lat),
 	DIM(SORT_LOCAL_PIPELINE_STAGE_CYC, "local_p_stage_cyc", sort_local_p_stage_cyc),
 	DIM(SORT_GLOBAL_PIPELINE_STAGE_CYC, "p_stage_cyc", sort_global_p_stage_cyc),
+	DIM(SORT_LOCAL_RETIRE_LAT, "local_retire_lat", sort_local_p_stage_cyc),
+	DIM(SORT_GLOBAL_RETIRE_LAT, "retire_lat", sort_global_p_stage_cyc),
 };
 
 #undef DIM

@@ -3,14 +3,9 @@
 #error "Please don't include <linux/compiler-clang.h> directly, include <linux/compiler.h> instead."
 #endif
 
-/* Some compiler specific definitions are overwritten here
- * for Clang compiler
- */
+/* Compiler specific definitions for Clang compiler */
 
-#ifdef uninitialized_var
-#undef uninitialized_var
 #define uninitialized_var(x) x = *(&(x))
-#endif
 
 /* same as gcc, this was present in clang-2.6 so we can assume it works
  * with any version that can compile the kernel
@@ -20,7 +15,6 @@
 /* all clang versions usable with the kernel support KASAN ABI version 5 */
 #define KASAN_ABI_VERSION 5
 
-#undef __no_sanitize_address
 #if __has_feature(address_sanitizer) || __has_feature(hwaddress_sanitizer)
 /* Emulate GCC's __SANITIZE_ADDRESS__ flag */
 #define __SANITIZE_ADDRESS__
@@ -28,11 +22,6 @@
 		__attribute__((no_sanitize("address", "hwaddress")))
 #else
 #define __no_sanitize_address
-#endif
-
-/* Clang doesn't have a way to turn it off per-function, yet. */
-#ifdef __noretpoline
-#undef __noretpoline
 #endif
 
 #undef __no_sanitize_thread
@@ -45,6 +34,20 @@
 #define __no_sanitize_thread
 #endif
 
+#if defined(CONFIG_ARCH_USE_BUILTIN_BSWAP)
+#define __HAVE_BUILTIN_BSWAP32__
+#define __HAVE_BUILTIN_BSWAP64__
+#define __HAVE_BUILTIN_BSWAP16__
+#endif /* CONFIG_ARCH_USE_BUILTIN_BSWAP */
+
+#if __has_feature(undefined_behavior_sanitizer)
+/* GCC does not have __SANITIZE_UNDEFINED__ */
+#define __no_sanitize_undefined \
+		__attribute__((no_sanitize("undefined")))
+#else
+#define __no_sanitize_undefined
+#endif
+
 /*
  * Not all versions of clang implement the the type-generic versions
  * of the builtin overflow checkers. Fortunately, clang implements
@@ -52,7 +55,6 @@
  * checks. Unfortunately, we don't know which version of gcc clang
  * pretends to be, so the macro may or may not be defined.
  */
-#undef COMPILER_HAS_GENERIC_BUILTIN_OVERFLOW
 #if __has_builtin(__builtin_mul_overflow) && \
     __has_builtin(__builtin_add_overflow) && \
     __has_builtin(__builtin_sub_overflow)

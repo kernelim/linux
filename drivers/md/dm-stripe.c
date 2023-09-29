@@ -15,6 +15,8 @@
 #include <linux/slab.h>
 #include <linux/log2.h>
 
+static struct workqueue_struct *dm_stripe_wq;
+
 #define DM_MSG_PREFIX "striped"
 #define DM_IO_ERROR_THRESHOLD 15
 
@@ -461,7 +463,7 @@ static int stripe_end_io(struct dm_target *ti, struct bio *bio,
 			atomic_inc(&(sc->stripe[i].error_count));
 			if (atomic_read(&(sc->stripe[i].error_count)) <
 			    DM_IO_ERROR_THRESHOLD)
-				schedule_work(&sc->trigger_event);
+				queue_work(dm_stripe_wq, &sc->trigger_event);
 		}
 
 	return DM_ENDIO_DONE;
@@ -515,9 +517,14 @@ int __init dm_stripe_init(void)
 {
 	int r;
 
+	dm_stripe_wq = alloc_workqueue("dm_stripe_wq", 0, 0);
+	if (!dm_stripe_wq)
+		return -ENOMEM;
 	r = dm_register_target(&stripe_target);
-	if (r < 0)
+	if (r < 0) {
+		destroy_workqueue(dm_stripe_wq);
 		DMWARN("target registration failed");
+	}
 
 	return r;
 }
@@ -525,4 +532,5 @@ int __init dm_stripe_init(void)
 void dm_stripe_exit(void)
 {
 	dm_unregister_target(&stripe_target);
+	destroy_workqueue(dm_stripe_wq);
 }

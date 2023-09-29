@@ -3,7 +3,7 @@
 
 #include "mlx5_core.h"
 #include "ipsec.h"
-#include "lib/mlx5.h"
+#include "lib/crypto.h"
 
 u32 mlx5_ipsec_device_caps(struct mlx5_core_dev *mdev)
 {

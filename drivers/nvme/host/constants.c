@@ -4,7 +4,6 @@
  * Copyright (c) 2022, Oracle and/or its affiliates
  */
 
-#include <linux/blkdev.h>
 #include "nvme.h"
 
 #ifdef CONFIG_NVME_VERBOSE_ERRORS
@@ -178,6 +177,7 @@ const unsigned char *nvme_get_opcode_str(u8 opcode)
 		return nvme_ops[opcode];
 	return "Unknown";
 }
+EXPORT_SYMBOL_GPL(nvme_get_opcode_str);
 
 const unsigned char *nvme_get_admin_opcode_str(u8 opcode)
 {

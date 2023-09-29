@@ -8,4 +8,4 @@ config PRIME_NUMBERS
 	tristate
 
 config RATIONAL
-	bool
+	tristate

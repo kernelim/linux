@@ -24,6 +24,8 @@ struct pfn_array {
 	unsigned long		*pa_iova_pfn;
 	/* Array that receives PFNs of the pages pinned. */
 	unsigned long		*pa_pfn;
+	/* Array that holds offsets of pages within a PFN */
+	unsigned long		*pa_offset;
 	/* Number of pages pinned from @pa_iova. */
 	int			pa_nr;
 };
@@ -42,8 +44,7 @@ struct ccwchain {
 /*
  * pfn_array_alloc() - alloc memory for PFNs
  * @pa: pfn_array on which to perform the operation
- * @iova: target guest physical address
- * @len: number of bytes that should be pinned from @iova
+ * @len: number of pages that should be pinned from @iova
  *
  * Attempt to allocate memory for PFNs.
  *
@@ -56,34 +57,31 @@ struct ccwchain {
  *   -EINVAL if pa->pa_nr is not initially zero, or pa->pa_iova_pfn is not NULL
  *   -ENOMEM if alloc failed
  */
-static int pfn_array_alloc(struct pfn_array *pa, u64 iova, unsigned int len)
+static int pfn_array_alloc(struct pfn_array *pa, unsigned int len)
 {
-	int i;
-
 	if (pa->pa_nr || pa->pa_iova_pfn)
 		return -EINVAL;
 
-	pa->pa_iova = iova;
-
-	pa->pa_nr = ((iova & ~PAGE_MASK) + len + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
-	if (!pa->pa_nr)
+	if (len == 0)
 		return -EINVAL;
 
-	pa->pa_iova_pfn = kcalloc(pa->pa_nr,
-				  sizeof(*pa->pa_iova_pfn) +
-				  sizeof(*pa->pa_pfn),
-				  GFP_KERNEL);
-	if (unlikely(!pa->pa_iova_pfn)) {
-		pa->pa_nr = 0;
+	pa->pa_nr = len;
+
+	pa->pa_iova_pfn = kcalloc(len, sizeof(*pa->pa_iova_pfn), GFP_KERNEL);
+	if (!pa->pa_iova_pfn)
+		return -ENOMEM;
+
+	pa->pa_pfn = kcalloc(len, sizeof(*pa->pa_pfn), GFP_KERNEL);
+	if (!pa->pa_pfn) {
+		kfree(pa->pa_iova_pfn);
 		return -ENOMEM;
 	}
-	pa->pa_pfn = pa->pa_iova_pfn + pa->pa_nr;
 
-	pa->pa_iova_pfn[0] = pa->pa_iova >> PAGE_SHIFT;
-	pa->pa_pfn[0] = -1ULL;
-	for (i = 1; i < pa->pa_nr; i++) {
-		pa->pa_iova_pfn[i] = pa->pa_iova_pfn[i - 1] + 1;
-		pa->pa_pfn[i] = -1ULL;
+	pa->pa_offset = kcalloc(len, sizeof(*pa->pa_offset), GFP_KERNEL);
+	if (!pa->pa_offset) {
+		kfree(pa->pa_pfn);
+		kfree(pa->pa_iova_pfn);
+		return -ENOMEM;
 	}
 
 	return 0;
@@ -128,6 +126,8 @@ static void pfn_array_unpin_free(struct pfn_array *pa, struct device *mdev)
 	if (pa->pa_nr)
 		vfio_unpin_pages(mdev, pa->pa_iova_pfn, pa->pa_nr);
 	pa->pa_nr = 0;
+	kfree(pa->pa_offset);
+	kfree(pa->pa_pfn);
 	kfree(pa->pa_iova_pfn);
 }
 
@@ -158,10 +158,7 @@ static inline void pfn_array_idal_create_words(
 	 */
 
 	for (i = 0; i < pa->pa_nr; i++)
-		idaws[i] = pa->pa_pfn[i] << PAGE_SHIFT;
-
-	/* Adjust the first IDAW, since it may not start on a page boundary */
-	idaws[0] += pa->pa_iova & (PAGE_SIZE - 1);
+		idaws[i] = (pa->pa_pfn[i] << PAGE_SHIFT) + pa->pa_offset[i];
 }
 
 static void convert_ccw0_to_ccw1(struct ccw1 *source, unsigned long len)
@@ -199,9 +196,15 @@ static long copy_from_iova(struct device *mdev,
 	int i, ret;
 	unsigned long l, m;
 
-	ret = pfn_array_alloc(&pa, iova, n);
+	ret = pfn_array_alloc(&pa, idal_nr_words((void *)iova, n));
 	if (ret < 0)
 		return ret;
+
+	pa.pa_iova = iova;
+	pa.pa_iova_pfn[0] = pa.pa_iova >> PAGE_SHIFT;
+	pa.pa_offset[0] = pa.pa_iova & ~PAGE_MASK;
+	for (i = 1; i < pa.pa_nr; i++)
+		pa.pa_iova_pfn[i] = pa.pa_iova_pfn[i - 1] + 1;
 
 	ret = pfn_array_pin(&pa, mdev);
 	if (ret < 0) {
@@ -230,6 +233,8 @@ static long copy_from_iova(struct device *mdev,
 
 	return l;
 }
+
+#define idal_is_2k(_cp) (!(_cp)->orb.cmd.c64 || (_cp)->orb.cmd.i2k)
 
 /*
  * Helpers to operate ccwchain.
@@ -377,14 +382,6 @@ static int ccwchain_calc_length(u64 iova, struct channel_program *cp)
 		cnt++;
 
 		/*
-		 * As we don't want to fail direct addressing even if the
-		 * orb specified one of the unsupported formats, we defer
-		 * checking for IDAWs in unsupported formats to here.
-		 */
-		if ((!cp->orb.cmd.c64 || cp->orb.cmd.i2k) && ccw_is_idal(ccw))
-			return -EOPNOTSUPP;
-
-		/*
 		 * We want to keep counting if the current CCW has the
 		 * command-chaining flag enabled, or if it is a TIC CCW
 		 * that loops back into the current chain.  The latter
@@ -484,11 +481,9 @@ static int ccwchain_loop_tic(struct ccwchain *chain, struct channel_program *cp)
 	return 0;
 }
 
-static int ccwchain_fetch_tic(struct ccwchain *chain,
-			      int idx,
+static int ccwchain_fetch_tic(struct ccw1 *ccw,
 			      struct channel_program *cp)
 {
-	struct ccw1 *ccw = chain->ch_ccw + idx;
 	struct ccwchain *iter;
 	u32 ccw_head;
 
@@ -504,41 +499,118 @@ static int ccwchain_fetch_tic(struct ccwchain *chain,
 	return -EFAULT;
 }
 
-static int ccwchain_fetch_direct(struct ccwchain *chain,
-				 int idx,
-				 struct channel_program *cp)
+static unsigned long *get_guest_idal(struct ccw1 *ccw,
+				     struct channel_program *cp,
+				     int idaw_nr)
 {
-	struct ccw1 *ccw;
-	struct pfn_array *pa;
-	u64 iova;
 	unsigned long *idaws;
+	unsigned int *idaws_f1;
+	int idal_len = idaw_nr * sizeof(*idaws);
+	int idaw_size = idal_is_2k(cp) ? PAGE_SIZE / 2 : PAGE_SIZE;
+	int idaw_mask = ~(idaw_size - 1);
+	int i, ret;
+
+	idaws = kcalloc(idaw_nr, sizeof(*idaws), GFP_DMA | GFP_KERNEL);
+	if (!idaws)
+		return ERR_PTR(-ENOMEM);
+
+	if (ccw_is_idal(ccw)) {
+		/* Copy IDAL from guest */
+		ret = copy_from_iova(cp->mdev, idaws, ccw->cda, idal_len);
+		if (ret) {
+			kfree(idaws);
+			return ERR_PTR(ret);
+		}
+	} else {
+		/* Fabricate an IDAL based off CCW data address */
+		if (cp->orb.cmd.c64) {
+			idaws[0] = ccw->cda;
+			for (i = 1; i < idaw_nr; i++)
+				idaws[i] = (idaws[i - 1] + idaw_size) & idaw_mask;
+		} else {
+			idaws_f1 = (unsigned int *)idaws;
+			idaws_f1[0] = ccw->cda;
+			for (i = 1; i < idaw_nr; i++)
+				idaws_f1[i] = (idaws_f1[i - 1] + idaw_size) & idaw_mask;
+		}
+	}
+
+	return idaws;
+}
+
+/*
+ * ccw_count_idaws() - Calculate the number of IDAWs needed to transfer
+ * a specified amount of data
+ *
+ * @ccw: The Channel Command Word being translated
+ * @cp: Channel Program being processed
+ *
+ * The ORB is examined, since it specifies what IDAWs could actually be
+ * used by any CCW in the channel program, regardless of whether or not
+ * the CCW actually does. An ORB that does not specify Format-2-IDAW
+ * Control could still contain a CCW with an IDAL, which would be
+ * Format-1 and thus only move 2K with each IDAW. Thus all CCWs within
+ * the channel program must follow the same size requirements.
+ */
+static int ccw_count_idaws(struct ccw1 *ccw,
+			   struct channel_program *cp)
+{
+	u64 iova;
+	int size = cp->orb.cmd.c64 ? sizeof(u64) : sizeof(u32);
 	int ret;
 	int bytes = 1;
-	int idaw_nr, idal_len;
-	int i;
-
-	ccw = chain->ch_ccw + idx;
 
 	if (ccw->count)
 		bytes = ccw->count;
 
-	/* Calculate size of IDAL */
 	if (ccw_is_idal(ccw)) {
-		/* Read first IDAW to see if it's 4K-aligned or not. */
-		/* All subsequent IDAws will be 4K-aligned. */
-		ret = copy_from_iova(cp->mdev, &iova, ccw->cda, sizeof(iova));
+		/* Read first IDAW to check its starting address. */
+		/* All subsequent IDAWs will be 2K- or 4K-aligned. */
+		ret = copy_from_iova(cp->mdev, &iova, ccw->cda, size);
 		if (ret)
 			return ret;
+
+		/*
+		 * Format-1 IDAWs only occupy the first 32 bits,
+		 * and bit 0 is always off.
+		 */
+		if (!cp->orb.cmd.c64)
+			iova = iova >> 32;
 	} else {
 		iova = ccw->cda;
 	}
-	idaw_nr = idal_nr_words((void *)iova, bytes);
-	idal_len = idaw_nr * sizeof(*idaws);
+
+	/* Format-1 IDAWs operate on 2K each */
+	if (!cp->orb.cmd.c64)
+		return idal_2k_nr_words((void *)iova, bytes);
+
+	/* Using the 2K variant of Format-2 IDAWs? */
+	if (cp->orb.cmd.i2k)
+		return idal_2k_nr_words((void *)iova, bytes);
+
+	/* The 'usual' case is 4K Format-2 IDAWs */
+	return idal_nr_words((void *)iova, bytes);
+}
+
+static int ccwchain_fetch_ccw(struct ccw1 *ccw,
+			      struct pfn_array *pa,
+			      struct channel_program *cp)
+{
+	unsigned long *idaws;
+	unsigned int *idaws_f1;
+	int ret;
+	int idaw_nr;
+	int i;
+
+	/* Calculate size of IDAL */
+	idaw_nr = ccw_count_idaws(ccw, cp);
+	if (idaw_nr < 0)
+		return idaw_nr;
 
 	/* Allocate an IDAL from host storage */
-	idaws = kcalloc(idaw_nr, sizeof(*idaws), GFP_DMA | GFP_KERNEL);
-	if (!idaws) {
-		ret = -ENOMEM;
+	idaws = get_guest_idal(ccw, cp, idaw_nr);
+	if (IS_ERR(idaws)) {
+		ret = PTR_ERR(idaws);
 		goto out_init;
 	}
 
@@ -548,29 +620,29 @@ static int ccwchain_fetch_direct(struct ccwchain *chain,
 	 * required for the data transfer, since we only only support
 	 * 4K IDAWs today.
 	 */
-	pa = chain->ch_pa + idx;
-	ret = pfn_array_alloc(pa, iova, bytes);
+	ret = pfn_array_alloc(pa, idaw_nr);
 	if (ret < 0)
 		goto out_free_idaws;
 
-	if (ccw_is_idal(ccw)) {
-		/* Copy guest IDAL into host IDAL */
-		ret = copy_from_iova(cp->mdev, idaws, ccw->cda, idal_len);
-		if (ret)
-			goto out_unpin;
+	/*
+	 * Copy guest IDAWs into pfn_array, in case the memory they
+	 * occupy is not contiguous.
+	 */
+	idaws_f1 = (unsigned int *)idaws;
 
-		/*
-		 * Copy guest IDAWs into pfn_array, in case the memory they
-		 * occupy is not contiguous.
-		 */
-		for (i = 0; i < idaw_nr; i++)
+	if (cp->orb.cmd.c64)
+		pa->pa_iova = idaws[0];
+	else
+		pa->pa_iova = idaws_f1[0];
+
+	for (i = 0; i < idaw_nr; i++) {
+		if (cp->orb.cmd.c64) {
 			pa->pa_iova_pfn[i] = idaws[i] >> PAGE_SHIFT;
-	} else {
-		/*
-		 * No action is required here; the iova addresses in pfn_array
-		 * were initialized sequentially in pfn_array_alloc() beginning
-		 * with the contents of ccw->cda.
-		 */
+			pa->pa_offset[i] = idaws[i] & ~PAGE_MASK;
+		} else {
+			pa->pa_iova_pfn[i] = idaws_f1[i] >> PAGE_SHIFT;
+			pa->pa_offset[i] = idaws_f1[i] & ~PAGE_MASK;
+		}
 	}
 
 	if (ccw_does_data_transfer(ccw)) {
@@ -604,16 +676,15 @@ out_init:
  * and to get rid of the cda 2G limitiaion of ccw1, we'll translate
  * direct ccws to idal ccws.
  */
-static int ccwchain_fetch_one(struct ccwchain *chain,
-			      int idx,
+static int ccwchain_fetch_one(struct ccw1 *ccw,
+			      struct pfn_array *pa,
 			      struct channel_program *cp)
+
 {
-	struct ccw1 *ccw = chain->ch_ccw + idx;
-
 	if (ccw_is_tic(ccw))
-		return ccwchain_fetch_tic(chain, idx, cp);
+		return ccwchain_fetch_tic(ccw, cp);
 
-	return ccwchain_fetch_direct(chain, idx, cp);
+	return ccwchain_fetch_ccw(ccw, pa, cp);
 }
 
 /**
@@ -655,14 +726,8 @@ int cp_init(struct channel_program *cp, struct device *mdev, union orb *orb)
 	/* Build a ccwchain for the first CCW segment */
 	ret = ccwchain_handle_ccw(orb->cmd.cpa, cp);
 
-	if (!ret) {
+	if (!ret)
 		cp->initialized = true;
-
-		/* It is safe to force: if it was not set but idals used
-		 * ccwchain_calc_length would have returned an error.
-		 */
-		cp->orb.cmd.c64 = 1;
-	}
 
 	return ret;
 }
@@ -734,6 +799,8 @@ void cp_free(struct channel_program *cp)
 int cp_prefetch(struct channel_program *cp)
 {
 	struct ccwchain *chain;
+	struct ccw1 *ccw;
+	struct pfn_array *pa;
 	int len, idx, ret;
 
 	/* this is an error in the caller */
@@ -743,7 +810,10 @@ int cp_prefetch(struct channel_program *cp)
 	list_for_each_entry(chain, &cp->ccwchain_list, next) {
 		len = chain->ch_len;
 		for (idx = 0; idx < len; idx++) {
-			ret = ccwchain_fetch_one(chain, idx, cp);
+			ccw = chain->ch_ccw + idx;
+			pa = chain->ch_pa + idx;
+
+			ret = ccwchain_fetch_one(ccw, pa, cp);
 			if (ret)
 				goto out_err;
 		}
@@ -783,7 +853,15 @@ union orb *cp_get_orb(struct channel_program *cp, u32 intparm, u8 lpm)
 
 	orb->cmd.intparm = intparm;
 	orb->cmd.fmt = 1;
-	orb->cmd.key = PAGE_DEFAULT_KEY >> 4;
+
+	/*
+	 * Everything built by vfio-ccw is a Format-2 IDAL.
+	 * If the input was a Format-1 IDAL, indicate that
+	 * 2K Format-2 IDAWs were created here.
+	 */
+	if (!orb->cmd.c64)
+		orb->cmd.i2k = 1;
+	orb->cmd.c64 = 1;
 
 	if (orb->cmd.lpm == 0)
 		orb->cmd.lpm = lpm;

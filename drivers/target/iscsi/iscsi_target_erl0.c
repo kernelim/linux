@@ -32,14 +32,14 @@
 #include "iscsi_target.h"
 
 /*
- *	Used to set values in struct iscsi_cmd that iscsit_dataout_check_sequence()
+ *	Used to set values in struct iscsit_cmd that iscsit_dataout_check_sequence()
  *	checks against to determine a PDU's Offset+Length is within the current
  *	DataOUT Sequence.  Used for DataSequenceInOrder=Yes only.
  */
 void iscsit_set_dataout_sequence_values(
-	struct iscsi_cmd *cmd)
+	struct iscsit_cmd *cmd)
 {
-	struct iscsi_conn *conn = cmd->conn;
+	struct iscsit_conn *conn = cmd->conn;
 	/*
 	 * Still set seq_start_offset and seq_end_offset for Unsolicited
 	 * DataOUT, even if DataSequenceInOrder=No.
@@ -71,10 +71,10 @@ void iscsit_set_dataout_sequence_values(
 }
 
 static int iscsit_dataout_within_command_recovery_check(
-	struct iscsi_cmd *cmd,
+	struct iscsit_cmd *cmd,
 	unsigned char *buf)
 {
-	struct iscsi_conn *conn = cmd->conn;
+	struct iscsit_conn *conn = cmd->conn;
 	struct iscsi_data *hdr = (struct iscsi_data *) buf;
 	u32 payload_length = ntoh24(hdr->dlength);
 
@@ -137,11 +137,11 @@ dump:
 }
 
 static int iscsit_dataout_check_unsolicited_sequence(
-	struct iscsi_cmd *cmd,
+	struct iscsit_cmd *cmd,
 	unsigned char *buf)
 {
 	u32 first_burst_len;
-	struct iscsi_conn *conn = cmd->conn;
+	struct iscsit_conn *conn = cmd->conn;
 	struct iscsi_data *hdr = (struct iscsi_data *) buf;
 	u32 payload_length = ntoh24(hdr->dlength);
 
@@ -212,11 +212,11 @@ out:
 }
 
 static int iscsit_dataout_check_sequence(
-	struct iscsi_cmd *cmd,
+	struct iscsit_cmd *cmd,
 	unsigned char *buf)
 {
 	u32 next_burst_len;
-	struct iscsi_conn *conn = cmd->conn;
+	struct iscsit_conn *conn = cmd->conn;
 	struct iscsi_seq *seq = NULL;
 	struct iscsi_data *hdr = (struct iscsi_data *) buf;
 	u32 payload_length = ntoh24(hdr->dlength);
@@ -341,11 +341,11 @@ out:
 }
 
 static int iscsit_dataout_check_datasn(
-	struct iscsi_cmd *cmd,
+	struct iscsit_cmd *cmd,
 	unsigned char *buf)
 {
 	u32 data_sn = 0;
-	struct iscsi_conn *conn = cmd->conn;
+	struct iscsit_conn *conn = cmd->conn;
 	struct iscsi_data *hdr = (struct iscsi_data *) buf;
 	u32 payload_length = ntoh24(hdr->dlength);
 
@@ -392,17 +392,17 @@ dump:
 }
 
 static int iscsit_dataout_pre_datapduinorder_yes(
-	struct iscsi_cmd *cmd,
+	struct iscsit_cmd *cmd,
 	unsigned char *buf)
 {
 	int dump = 0, recovery = 0;
-	struct iscsi_conn *conn = cmd->conn;
+	struct iscsit_conn *conn = cmd->conn;
 	struct iscsi_data *hdr = (struct iscsi_data *) buf;
 	u32 payload_length = ntoh24(hdr->dlength);
 
 	/*
 	 * For DataSequenceInOrder=Yes: If the offset is greater than the global
-	 * DataPDUInOrder=Yes offset counter in struct iscsi_cmd a protcol error has
+	 * DataPDUInOrder=Yes offset counter in struct iscsit_cmd a protcol error has
 	 * occurred and fail the connection.
 	 *
 	 * For DataSequenceInOrder=No: If the offset is greater than the per
@@ -454,7 +454,7 @@ dump:
 }
 
 static int iscsit_dataout_pre_datapduinorder_no(
-	struct iscsi_cmd *cmd,
+	struct iscsit_cmd *cmd,
 	unsigned char *buf)
 {
 	struct iscsi_pdu *pdu;
@@ -485,7 +485,7 @@ static int iscsit_dataout_pre_datapduinorder_no(
 	return DATAOUT_NORMAL;
 }
 
-static int iscsit_dataout_update_r2t(struct iscsi_cmd *cmd, u32 offset, u32 length)
+static int iscsit_dataout_update_r2t(struct iscsit_cmd *cmd, u32 offset, u32 length)
 {
 	struct iscsi_r2t *r2t;
 
@@ -505,7 +505,7 @@ static int iscsit_dataout_update_r2t(struct iscsi_cmd *cmd, u32 offset, u32 leng
 }
 
 static int iscsit_dataout_update_datapduinorder_no(
-	struct iscsi_cmd *cmd,
+	struct iscsit_cmd *cmd,
 	u32 data_sn,
 	int f_bit)
 {
@@ -538,11 +538,11 @@ static int iscsit_dataout_update_datapduinorder_no(
 }
 
 static int iscsit_dataout_post_crc_passed(
-	struct iscsi_cmd *cmd,
+	struct iscsit_cmd *cmd,
 	unsigned char *buf)
 {
 	int ret, send_r2t = 0;
-	struct iscsi_conn *conn = cmd->conn;
+	struct iscsit_conn *conn = cmd->conn;
 	struct iscsi_seq *seq = NULL;
 	struct iscsi_data *hdr = (struct iscsi_data *) buf;
 	u32 payload_length = ntoh24(hdr->dlength);
@@ -649,10 +649,10 @@ static int iscsit_dataout_post_crc_passed(
 }
 
 static int iscsit_dataout_post_crc_failed(
-	struct iscsi_cmd *cmd,
+	struct iscsit_cmd *cmd,
 	unsigned char *buf)
 {
-	struct iscsi_conn *conn = cmd->conn;
+	struct iscsit_conn *conn = cmd->conn;
 	struct iscsi_pdu *pdu;
 	struct iscsi_data *hdr = (struct iscsi_data *) buf;
 	u32 payload_length = ntoh24(hdr->dlength);
@@ -687,11 +687,11 @@ recover:
  *	and CRC computed.
  */
 int iscsit_check_pre_dataout(
-	struct iscsi_cmd *cmd,
+	struct iscsit_cmd *cmd,
 	unsigned char *buf)
 {
 	int ret;
-	struct iscsi_conn *conn = cmd->conn;
+	struct iscsit_conn *conn = cmd->conn;
 
 	ret = iscsit_dataout_within_command_recovery_check(cmd, buf);
 	if ((ret == DATAOUT_WITHIN_COMMAND_RECOVERY) ||
@@ -725,11 +725,11 @@ int iscsit_check_pre_dataout(
  *	and CRC computed.
  */
 int iscsit_check_post_dataout(
-	struct iscsi_cmd *cmd,
+	struct iscsit_cmd *cmd,
 	unsigned char *buf,
 	u8 data_crc_failed)
 {
-	struct iscsi_conn *conn = cmd->conn;
+	struct iscsit_conn *conn = cmd->conn;
 
 	cmd->dataout_timeout_retries = 0;
 
@@ -751,7 +751,7 @@ int iscsit_check_post_dataout(
 
 void iscsit_handle_time2retain_timeout(struct timer_list *t)
 {
-	struct iscsi_session *sess = from_timer(sess, t, time2retain_timer);
+	struct iscsit_session *sess = from_timer(sess, t, time2retain_timer);
 	struct iscsi_portal_group *tpg = sess->tpg;
 	struct se_portal_group *se_tpg = &tpg->tpg_se_tpg;
 
@@ -776,7 +776,7 @@ void iscsit_handle_time2retain_timeout(struct timer_list *t)
 	iscsit_close_session(sess, false);
 }
 
-void iscsit_start_time2retain_handler(struct iscsi_session *sess)
+void iscsit_start_time2retain_handler(struct iscsit_session *sess)
 {
 	int tpg_active;
 	/*
@@ -802,7 +802,7 @@ void iscsit_start_time2retain_handler(struct iscsi_session *sess)
 		  jiffies + sess->sess_ops->DefaultTime2Retain * HZ);
 }
 
-int iscsit_stop_time2retain_timer(struct iscsi_session *sess)
+int iscsit_stop_time2retain_timer(struct iscsit_session *sess)
 {
 	struct iscsi_portal_group *tpg = sess->tpg;
 	struct se_portal_group *se_tpg = &tpg->tpg_se_tpg;
@@ -827,7 +827,7 @@ int iscsit_stop_time2retain_timer(struct iscsi_session *sess)
 	return 0;
 }
 
-void iscsit_connection_reinstatement_rcfr(struct iscsi_conn *conn)
+void iscsit_connection_reinstatement_rcfr(struct iscsit_conn *conn)
 {
 	spin_lock_bh(&conn->state_lock);
 	if (atomic_read(&conn->connection_exit)) {
@@ -851,7 +851,7 @@ sleep:
 	complete(&conn->conn_post_wait_comp);
 }
 
-void iscsit_cause_connection_reinstatement(struct iscsi_conn *conn, int sleep)
+void iscsit_cause_connection_reinstatement(struct iscsit_conn *conn, int sleep)
 {
 	spin_lock_bh(&conn->state_lock);
 	if (atomic_read(&conn->connection_exit)) {
@@ -888,7 +888,7 @@ void iscsit_cause_connection_reinstatement(struct iscsi_conn *conn, int sleep)
 }
 EXPORT_SYMBOL(iscsit_cause_connection_reinstatement);
 
-void iscsit_fall_back_to_erl0(struct iscsi_session *sess)
+void iscsit_fall_back_to_erl0(struct iscsit_session *sess)
 {
 	pr_debug("Falling back to ErrorRecoveryLevel=0 for SID:"
 			" %u\n", sess->sid);
@@ -896,9 +896,9 @@ void iscsit_fall_back_to_erl0(struct iscsi_session *sess)
 	atomic_set(&sess->session_fall_back_to_erl0, 1);
 }
 
-static void iscsit_handle_connection_cleanup(struct iscsi_conn *conn)
+static void iscsit_handle_connection_cleanup(struct iscsit_conn *conn)
 {
-	struct iscsi_session *sess = conn->sess;
+	struct iscsit_session *sess = conn->sess;
 
 	if ((sess->sess_ops->ErrorRecoveryLevel == 2) &&
 	    !atomic_read(&sess->session_reinstatement) &&
@@ -912,7 +912,7 @@ static void iscsit_handle_connection_cleanup(struct iscsi_conn *conn)
 	}
 }
 
-void iscsit_take_action_for_connection_exit(struct iscsi_conn *conn, bool *conn_freed)
+void iscsit_take_action_for_connection_exit(struct iscsit_conn *conn, bool *conn_freed)
 {
 	*conn_freed = false;
 

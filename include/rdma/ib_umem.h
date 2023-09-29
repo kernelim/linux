@@ -22,7 +22,6 @@ struct ib_umem {
 	unsigned long		address;
 	u32 writable : 1;
 	u32 is_odp : 1;
-	struct work_struct	work;
 	struct sg_append_table sgt_append;
 };
 

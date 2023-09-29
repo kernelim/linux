@@ -10,6 +10,8 @@
 #
 # Makefile for dcn314.
 
+ccflags-y += -std=gnu99
+
 DCN314 = dcn314_resource.o dcn314_hwseq.o dcn314_init.o \
 		dcn314_dio_stream_encoder.o dcn314_dccg.o dcn314_optc.o
 

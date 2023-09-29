@@ -52,6 +52,8 @@ static void class_release(struct kobject *kobj)
 
 	pr_debug("class '%s': release.\n", class->name);
 
+	class->p = NULL;
+
 	if (class->class_release)
 		class->class_release(class);
 	else
@@ -63,7 +65,7 @@ static void class_release(struct kobject *kobj)
 
 static const struct kobj_ns_type_operations *class_child_ns_type(struct kobject *kobj)
 {
-	struct subsys_private *cp = to_subsys_private(kobj);
+	const struct subsys_private *cp = to_subsys_private(kobj);
 	struct class *class = cp->class;
 
 	return class->ns_type;
@@ -96,6 +98,7 @@ int class_create_file_ns(struct class *cls, const struct class_attribute *attr,
 		error = -EINVAL;
 	return error;
 }
+EXPORT_SYMBOL_GPL(class_create_file_ns);
 
 void class_remove_file_ns(struct class *cls, const struct class_attribute *attr,
 			  const void *ns)
@@ -103,6 +106,7 @@ void class_remove_file_ns(struct class *cls, const struct class_attribute *attr,
 	if (cls)
 		sysfs_remove_file_ns(&cls->p->subsys.kobj, &attr->attr, ns);
 }
+EXPORT_SYMBOL_GPL(class_remove_file_ns);
 
 static struct class *class_get(struct class *cls)
 {
@@ -179,12 +183,21 @@ int __class_register(struct class *cls, struct lock_class_key *key)
 	cls->p = cp;
 
 	error = kset_register(&cp->subsys);
-	if (error) {
-		kfree(cp);
-		return error;
-	}
+	if (error)
+		goto err_out;
+
 	error = class_add_groups(class_get(cls), cls->class_groups);
 	class_put(cls);
+	if (error) {
+		kobject_del(&cp->subsys.kobj);
+		kfree_const(cp->subsys.kobj.name);
+		goto err_out;
+	}
+	return 0;
+
+err_out:
+	kfree(cp);
+	cls->p = NULL;
 	return error;
 }
 EXPORT_SYMBOL_GPL(__class_register);
@@ -195,6 +208,7 @@ void class_unregister(struct class *cls)
 	class_remove_groups(cls, cls->class_groups);
 	kset_unregister(&cls->p->subsys);
 }
+EXPORT_SYMBOL_GPL(class_unregister);
 
 static void class_create_release(struct class *cls)
 {
@@ -253,11 +267,12 @@ EXPORT_SYMBOL_GPL(__class_create);
  */
 void class_destroy(struct class *cls)
 {
-	if ((cls == NULL) || (IS_ERR(cls)))
+	if (IS_ERR_OR_NULL(cls))
 		return;
 
 	class_unregister(cls);
 }
+EXPORT_SYMBOL_GPL(class_destroy);
 
 /**
  * class_dev_iter_init - initialize class device iterator
@@ -442,6 +457,7 @@ int class_interface_register(struct class_interface *class_intf)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(class_interface_register);
 
 void class_interface_unregister(struct class_interface *class_intf)
 {
@@ -464,6 +480,7 @@ void class_interface_unregister(struct class_interface *class_intf)
 
 	class_put(parent);
 }
+EXPORT_SYMBOL_GPL(class_interface_unregister);
 
 ssize_t show_class_attr_string(struct class *class,
 			       struct class_attribute *attr, char *buf)
@@ -570,11 +587,3 @@ int __init classes_init(void)
 		return -ENOMEM;
 	return 0;
 }
-
-EXPORT_SYMBOL_GPL(class_create_file_ns);
-EXPORT_SYMBOL_GPL(class_remove_file_ns);
-EXPORT_SYMBOL_GPL(class_unregister);
-EXPORT_SYMBOL_GPL(class_destroy);
-
-EXPORT_SYMBOL_GPL(class_interface_register);
-EXPORT_SYMBOL_GPL(class_interface_unregister);

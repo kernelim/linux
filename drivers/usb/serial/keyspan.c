@@ -2964,7 +2964,7 @@ err_free_in_buffer:
 	return -ENOMEM;
 }
 
-static int keyspan_port_remove(struct usb_serial_port *port)
+static void keyspan_port_remove(struct usb_serial_port *port)
 {
 	struct keyspan_port_private *p_priv;
 	int i;
@@ -2993,8 +2993,6 @@ static int keyspan_port_remove(struct usb_serial_port *port)
 		kfree(p_priv->in_buffer[i]);
 
 	kfree(p_priv);
-
-	return 0;
 }
 
 /* Structs for the devices, pre and post renumeration. */

@@ -850,7 +850,7 @@ static const char *cache_device_name(struct cache *cache)
 
 static void notify_mode_switch(struct cache *cache, enum cache_metadata_mode mode)
 {
-	const char *descs[] = {
+	static const char *descs[] = {
 		"write",
 		"read-only",
 		"fail"
@@ -1807,6 +1807,7 @@ static void process_deferred_bios(struct work_struct *ws)
 
 		else
 			commit_needed = process_bio(cache, bio) || commit_needed;
+		cond_resched();
 	}
 
 	if (commit_needed)
@@ -1829,6 +1830,7 @@ static void requeue_deferred_bios(struct cache *cache)
 	while ((bio = bio_list_pop(&bios))) {
 		bio->bi_status = BLK_STS_DM_REQUEUE;
 		bio_endio(bio);
+		cond_resched();
 	}
 }
 
@@ -1869,6 +1871,8 @@ static void check_migrations(struct work_struct *ws)
 		r = mg_start(cache, op, NULL);
 		if (r)
 			break;
+
+		cond_resched();
 	}
 }
 
@@ -3433,7 +3437,6 @@ static int __init dm_cache_init(void)
 
 	r = dm_register_target(&cache_target);
 	if (r) {
-		DMERR("cache target registration failed: %d", r);
 		kmem_cache_destroy(migration_cache);
 		return r;
 	}

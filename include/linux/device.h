@@ -60,9 +60,8 @@ struct bus_attribute {
 #define BUS_ATTR_WO(_name) \
 	struct bus_attribute bus_attr_##_name = __ATTR_WO(_name)
 
-extern int __must_check bus_create_file(struct bus_type *,
-					struct bus_attribute *);
-extern void bus_remove_file(struct bus_type *, struct bus_attribute *);
+int __must_check bus_create_file(const struct bus_type *bus, struct bus_attribute *attr);
+void bus_remove_file(const struct bus_type *bus, struct bus_attribute *attr);
 
 /**
  * struct bus_type - The bus type of the device
@@ -111,7 +110,6 @@ extern void bus_remove_file(struct bus_type *, struct bus_attribute *);
  *              bus-specific setup
  * @p:		The private data of the driver core, only the driver core can
  *		touch this.
- * @lock_key:	Lock class key for use by the lock validator
  * @need_parent_lock:	When probing or removing a device on this bus, the
  *			device core should lock the device's parent.
  *
@@ -153,7 +151,7 @@ struct bus_type {
 	const struct iommu_ops *iommu_ops;
 
 	struct subsys_private *p;
-	struct lock_class_key lock_key;
+	RH_KABI_DEPRECATE(struct lock_class_key, lock_key)
 
 	bool need_parent_lock;
 
@@ -163,21 +161,11 @@ struct bus_type {
 
 extern int __must_check bus_register(struct bus_type *bus);
 
-extern void bus_unregister(struct bus_type *bus);
+extern void bus_unregister(const struct bus_type *bus);
 
 extern int __must_check bus_rescan_devices(struct bus_type *bus);
 
 /* iterator helpers for buses */
-struct subsys_dev_iter {
-	struct klist_iter		ki;
-	const struct device_type	*type;
-};
-void subsys_dev_iter_init(struct subsys_dev_iter *iter,
-			 struct bus_type *subsys,
-			 struct device *start,
-			 const struct device_type *type);
-struct device *subsys_dev_iter_next(struct subsys_dev_iter *iter);
-void subsys_dev_iter_exit(struct subsys_dev_iter *iter);
 
 int device_match_acpi_dev(struct device *dev, const void *adev);
 int device_match_acpi_handle(struct device *dev, const void *handle);
@@ -186,9 +174,9 @@ int device_match_of_node(struct device *dev, const void *np);
 int device_match_fwnode(struct device *dev, const void *fwnode);
 int device_match_devt(struct device *dev, const void *pdevt);
 
-int bus_for_each_dev(struct bus_type *bus, struct device *start, void *data,
+int bus_for_each_dev(const struct bus_type *bus, struct device *start, void *data,
 		     int (*fn)(struct device *dev, void *data));
-struct device *bus_find_device(struct bus_type *bus, struct device *start,
+struct device *bus_find_device(const struct bus_type *bus, struct device *start,
 			       const void *data,
 			       int (*match)(struct device *dev, const void *data));
 /**
@@ -198,7 +186,7 @@ struct device *bus_find_device(struct bus_type *bus, struct device *start,
  * @start: Device to begin with
  * @name: name of the device to match
  */
-static inline struct device *bus_find_device_by_name(struct bus_type *bus,
+static inline struct device *bus_find_device_by_name(const struct bus_type *bus,
 						     struct device *start,
 						     const char *name)
 {
@@ -212,7 +200,7 @@ static inline struct device *bus_find_device_by_name(struct bus_type *bus,
  * @np: of_node of the device to match.
  */
 static inline struct device *
-bus_find_device_by_of_node(struct bus_type *bus, const struct device_node *np)
+bus_find_device_by_of_node(const struct bus_type *bus, const struct device_node *np)
 {
 	return bus_find_device(bus, NULL, np, device_match_of_node);
 }
@@ -224,7 +212,7 @@ bus_find_device_by_of_node(struct bus_type *bus, const struct device_node *np)
  * @fwnode: fwnode of the device to match.
  */
 static inline struct device *
-bus_find_device_by_fwnode(struct bus_type *bus, const struct fwnode_handle *fwnode)
+bus_find_device_by_fwnode(const struct bus_type *bus, const struct fwnode_handle *fwnode)
 {
 	return bus_find_device(bus, NULL, fwnode, device_match_fwnode);
 }
@@ -235,7 +223,7 @@ bus_find_device_by_fwnode(struct bus_type *bus, const struct fwnode_handle *fwno
  * @bus: bus type
  * @devt: device type of the device to match.
  */
-static inline struct device *bus_find_device_by_devt(struct bus_type *bus,
+static inline struct device *bus_find_device_by_devt(const struct bus_type *bus,
 						     dev_t devt)
 {
 	return bus_find_device(bus, NULL, &devt, device_match_devt);
@@ -251,21 +239,19 @@ struct acpi_device;
  * @adev: ACPI COMPANION device to match.
  */
 static inline struct device *
-bus_find_device_by_acpi_dev(struct bus_type *bus, const struct acpi_device *adev)
+bus_find_device_by_acpi_dev(const struct bus_type *bus, const struct acpi_device *adev)
 {
 	return bus_find_device(bus, NULL, adev, device_match_acpi_dev);
 }
 #else
 static inline struct device *
-bus_find_device_by_acpi_dev(struct bus_type *bus, const void *adev)
+bus_find_device_by_acpi_dev(const struct bus_type *bus, const void *adev)
 {
 	return NULL;
 }
 #endif
 
-struct device *subsys_find_device_by_id(struct bus_type *bus, unsigned int id,
-					struct device *hint);
-int bus_for_each_drv(struct bus_type *bus, struct device_driver *start,
+int bus_for_each_drv(const struct bus_type *bus, struct device_driver *start,
 		     void *data, int (*fn)(struct device_driver *, void *));
 void bus_sort_breadthfirst(struct bus_type *bus,
 			   int (*compare)(const struct device *a,
@@ -278,29 +264,43 @@ void bus_sort_breadthfirst(struct bus_type *bus,
  */
 struct notifier_block;
 
-extern int bus_register_notifier(struct bus_type *bus,
+extern int bus_register_notifier(const struct bus_type *bus,
 				 struct notifier_block *nb);
-extern int bus_unregister_notifier(struct bus_type *bus,
+extern int bus_unregister_notifier(const struct bus_type *bus,
 				   struct notifier_block *nb);
 
-/* All 4 notifers below get called with the target struct device *
- * as an argument. Note that those functions are likely to be called
- * with the device lock held in the core, so be careful.
+/**
+ * enum bus_notifier_event - Bus Notifier events that have happened
+ * @BUS_NOTIFY_ADD_DEVICE: device is added to this bus
+ * @BUS_NOTIFY_DEL_DEVICE: device is about to be removed from this bus
+ * @BUS_NOTIFY_REMOVED_DEVICE: device is successfully removed from this bus
+ * @BUS_NOTIFY_BIND_DRIVER: a driver is about to be bound to this device on this bus
+ * @BUS_NOTIFY_BOUND_DRIVER: a driver is successfully bound to this device on this bus
+ * @BUS_NOTIFY_UNBIND_DRIVER: a driver is about to be unbound from this device on this bus
+ * @BUS_NOTIFY_UNBOUND_DRIVER: a driver is successfully unbound from this device on this bus
+ * @BUS_NOTIFY_DRIVER_NOT_BOUND: a driver failed to be bound to this device on this bus
+ *
+ * These are the value passed to a bus notifier when a specific event happens.
+ *
+ * Note that bus notifiers are likely to be called with the device lock already
+ * held by the driver core, so be careful in any notifier callback as to what
+ * you do with the device structure.
+ *
+ * All bus notifiers are called with the target struct device * as an argument.
  */
-#define BUS_NOTIFY_ADD_DEVICE		0x00000001 /* device added */
-#define BUS_NOTIFY_DEL_DEVICE		0x00000002 /* device to be removed */
-#define BUS_NOTIFY_REMOVED_DEVICE	0x00000003 /* device removed */
-#define BUS_NOTIFY_BIND_DRIVER		0x00000004 /* driver about to be
-						      bound */
-#define BUS_NOTIFY_BOUND_DRIVER		0x00000005 /* driver bound to device */
-#define BUS_NOTIFY_UNBIND_DRIVER	0x00000006 /* driver about to be
-						      unbound */
-#define BUS_NOTIFY_UNBOUND_DRIVER	0x00000007 /* driver is unbound
-						      from the device */
-#define BUS_NOTIFY_DRIVER_NOT_BOUND	0x00000008 /* driver fails to be bound */
+enum bus_notifier_event {
+	BUS_NOTIFY_ADD_DEVICE,
+	BUS_NOTIFY_DEL_DEVICE,
+	BUS_NOTIFY_REMOVED_DEVICE,
+	BUS_NOTIFY_BIND_DRIVER,
+	BUS_NOTIFY_BOUND_DRIVER,
+	BUS_NOTIFY_UNBIND_DRIVER,
+	BUS_NOTIFY_UNBOUND_DRIVER,
+	BUS_NOTIFY_DRIVER_NOT_BOUND,
+};
 
-extern struct kset *bus_get_kset(struct bus_type *bus);
-extern struct klist *bus_get_device_klist(struct bus_type *bus);
+extern struct kset *bus_get_kset(const struct bus_type *bus);
+struct device *bus_get_dev_root(const struct bus_type *bus);
 
 /**
  * enum probe_type - device driver probe type to try
@@ -420,6 +420,7 @@ extern struct device_driver *driver_find(const char *name,
 					 struct bus_type *bus);
 extern int driver_probe_done(void);
 extern void wait_for_device_probe(void);
+void __init wait_for_init_devices_probe(void);
 
 /* sysfs interface for exporting driver attributes */
 
@@ -600,8 +601,8 @@ struct class {
 	const struct attribute_group	**dev_groups;
 	struct kobject			*dev_kobj;
 
-	int (*dev_uevent)(struct device *dev, struct kobj_uevent_env *env);
-	char *(*devnode)(struct device *dev, umode_t *mode);
+	int (*dev_uevent)(RH_KABI_CONST struct device *dev, struct kobj_uevent_env *env);
+	char *(*devnode)(RH_KABI_CONST struct device *dev, umode_t *mode);
 
 	void (*class_release)(struct class *class);
 	void (*dev_release)(struct device *dev);
@@ -609,13 +610,13 @@ struct class {
 	int (*shutdown_pre)(struct device *dev);
 
 	const struct kobj_ns_type_operations *ns_type;
-	const void *(*namespace)(struct device *dev);
+	const void *(*namespace)(RH_KABI_CONST struct device *dev);
 
 	const struct dev_pm_ops *pm;
 
 	struct subsys_private *p;
 
-	RH_KABI_USE(1, void (*get_ownership)(struct device *dev, kuid_t *uid, kgid_t *gid))
+	RH_KABI_USE(1, void (*get_ownership)(RH_KABI_CONST struct device *dev, kuid_t *uid, kgid_t *gid))
 	RH_KABI_RESERVE(2)
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
@@ -820,7 +821,7 @@ struct device_type {
 	const char *name;
 	const struct attribute_group **groups;
 	int (*uevent)(struct device *dev, struct kobj_uevent_env *env);
-	char *(*devnode)(struct device *dev, umode_t *mode,
+	char *(*devnode)(RH_KABI_CONST struct device *dev, umode_t *mode,
 			 kuid_t *uid, kgid_t *gid);
 	void (*release)(struct device *dev);
 
@@ -1015,14 +1016,19 @@ struct device_dma_parameters {
 	RH_KABI_EXTEND(unsigned int min_align_mask)
 };
 
-typedef void *(*devcon_match_fn_t)(struct fwnode_handle *fwnode, const char *id,
+typedef void *(*devcon_match_fn_t)(const struct fwnode_handle *fwnode, const char *id,
 				   void *data);
 
-void *fwnode_connection_find_match(struct fwnode_handle *fwnode,
+void *fwnode_connection_find_match(const struct fwnode_handle *fwnode,
 				   const char *con_id, void *data,
 				   devcon_match_fn_t match);
-void *device_connection_find_match(struct device *dev, const char *con_id,
+void *device_connection_find_match(const struct device *dev, const char *con_id,
 				   void *data, devcon_match_fn_t match);
+
+int fwnode_connection_find_matches(const struct fwnode_handle *fwnode,
+				   const char *con_id, void *data,
+				   devcon_match_fn_t match,
+				   void **matches, unsigned int matches_len);
 
 /**
  * enum device_link_state - Device link states.
@@ -1064,6 +1070,7 @@ enum device_link_state {
 #define DL_FLAG_MANAGED			BIT(6)
 #define DL_FLAG_SYNC_STATE_ONLY		BIT(7)
 #define DL_FLAG_INFERRED		BIT(8)
+#define DL_FLAG_CYCLE			BIT(9)
 
 /**
  * enum dl_dev_state - Device driver presence tracking information.
@@ -1446,10 +1453,7 @@ struct device_link {
 	bool supplier_preactivated; /* Owned by consumer probe. */
 };
 
-static inline struct device *kobj_to_dev(struct kobject *kobj)
-{
-	return container_of(kobj, struct device, kobj);
-}
+#define kobj_to_dev(__kobj)	container_of_const(__kobj, struct device, kobj)
 
 /**
  * device_iommu_mapped - Returns true when the device DMA is translated
@@ -1679,9 +1683,6 @@ extern int device_rename(struct device *dev, const char *new_name);
 extern int device_move(struct device *dev, struct device *new_parent,
 		       enum dpm_order dpm_order);
 extern int device_change_owner(struct device *dev, kuid_t kuid, kgid_t kgid);
-extern const char *device_get_devnode(struct device *dev,
-				      umode_t *mode, kuid_t *uid, kgid_t *gid,
-				      const char **tmp);
 extern int device_is_dependent(struct device *dev, void *target);
 
 static inline bool device_supports_offline(struct device *dev)
@@ -1775,12 +1776,8 @@ static inline void device_remove_group(struct device *dev,
 
 extern int __must_check devm_device_add_groups(struct device *dev,
 					const struct attribute_group **groups);
-extern void devm_device_remove_groups(struct device *dev,
-				      const struct attribute_group **groups);
 extern int __must_check devm_device_add_group(struct device *dev,
 					const struct attribute_group *grp);
-extern void devm_device_remove_group(struct device *dev,
-				     const struct attribute_group *grp);
 
 /*
  * Platform "fixup" functions - allow the platform to have their say

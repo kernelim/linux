@@ -223,7 +223,6 @@ out_uevent_exit:
 
 static void local_exit(void)
 {
-	flush_scheduled_work();
 	destroy_workqueue(deferred_remove_workqueue);
 
 	unregister_blkdev(_major, _name);
@@ -1004,6 +1003,15 @@ static void dm_io_dec_pending(struct dm_io *io, blk_status_t error)
 		dm_io_set_error(io, error);
 
 	__dm_io_dec_pending(io);
+}
+
+/*
+ * The queue_limits are only valid as long as you have a reference
+ * count on 'md'. But _not_ imposing verification to avoid atomic_read(),
+ */
+static inline struct queue_limits *dm_get_queue_limits(struct mapped_device *md)
+{
+	return &md->queue->limits;
 }
 
 void disable_discard(struct mapped_device *md)
@@ -1992,7 +2000,9 @@ static struct mapped_device *alloc_dev(int minor)
 	if (!md->pending_io)
 		goto bad;
 
-	dm_stats_init(&md->stats);
+	r = dm_stats_init(&md->stats);
+	if (r < 0)
+		goto bad;
 
 	/* Populate the mapping, nobody knows we exist yet */
 	spin_lock(&_minor_lock);
@@ -2039,7 +2049,7 @@ static void event_callback(void *context)
 {
 	unsigned long flags;
 	LIST_HEAD(uevents);
-	struct mapped_device *md = (struct mapped_device *) context;
+	struct mapped_device *md = context;
 
 	spin_lock_irqsave(&md->uevent_lock, flags);
 	list_splice_init(&md->uevent_list, &uevents);
@@ -2187,17 +2197,6 @@ struct target_type *dm_get_immutable_target_type(struct mapped_device *md)
 {
 	return md->immutable_target_type;
 }
-
-/*
- * The queue_limits are only valid as long as you have a reference
- * count on 'md'.
- */
-struct queue_limits *dm_get_queue_limits(struct mapped_device *md)
-{
-	BUG_ON(!atomic_read(&md->holders));
-	return &md->queue->limits;
-}
-EXPORT_SYMBOL_GPL(dm_get_queue_limits);
 
 static void dm_init_congested_fn(struct mapped_device *md)
 {
@@ -2441,6 +2440,7 @@ static void dm_wq_work(struct work_struct *work)
 			break;
 
 		generic_make_request(bio);
+		cond_resched();
 	}
 }
 
@@ -2667,6 +2667,10 @@ retry:
 	}
 
 	map = rcu_dereference_protected(md->map, lockdep_is_held(&md->suspend_lock));
+	if (!map) {
+		/* avoid deadlock with fs/namespace.c:do_mount() */
+		suspend_flags &= ~DM_SUSPEND_LOCKFS_FLAG;
+	}
 
 	r = __dm_suspend(md, map, suspend_flags, TASK_INTERRUPTIBLE, DMF_SUSPENDED);
 	if (r)
@@ -2848,23 +2852,25 @@ EXPORT_SYMBOL_GPL(dm_internal_resume_fast);
  * Event notification.
  *---------------------------------------------------------------*/
 int dm_kobject_uevent(struct mapped_device *md, enum kobject_action action,
-		       unsigned cookie)
+		      unsigned cookie, bool need_resize_uevent)
 {
 	int r;
 	unsigned noio_flag;
 	char udev_cookie[DM_COOKIE_LENGTH];
-	char *envp[] = { udev_cookie, NULL };
+	char *envp[3] = { NULL, NULL, NULL };
+	char **envpp = envp;
+	if (cookie) {
+		snprintf(udev_cookie, DM_COOKIE_LENGTH, "%s=%u",
+			 DM_COOKIE_ENV_VAR_NAME, cookie);
+		*envpp++ = udev_cookie;
+	}
+	if (need_resize_uevent) {
+		*envpp++ = "RESIZE=1";
+	}
 
 	noio_flag = memalloc_noio_save();
 
-	if (!cookie)
-		r = kobject_uevent(&disk_to_dev(md->disk)->kobj, action);
-	else {
-		snprintf(udev_cookie, DM_COOKIE_LENGTH, "%s=%u",
-			 DM_COOKIE_ENV_VAR_NAME, cookie);
-		r = kobject_uevent_env(&disk_to_dev(md->disk)->kobj,
-				       action, envp);
-	}
+	r = kobject_uevent_env(&disk_to_dev(md->disk)->kobj, action, envp);
 
 	memalloc_noio_restore(noio_flag);
 

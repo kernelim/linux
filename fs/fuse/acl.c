@@ -70,6 +70,7 @@ int fuse_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 		return -EINVAL;
 
 	if (acl) {
+		unsigned int extra_flags = 0;
 		/*
 		 * Fuse userspace is responsible for updating access
 		 * permissions in the inode, if needed. fuse_setxattr
@@ -93,7 +94,11 @@ int fuse_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 			return ret;
 		}
 
-		ret = fuse_setxattr(inode, name, value, size, 0);
+		if (!in_group_p(inode->i_gid) &&
+		    !capable_wrt_inode_uidgid(inode, CAP_FSETID))
+			extra_flags |= FUSE_SETXATTR_ACL_KILL_SGID;
+
+		ret = fuse_setxattr(inode, name, value, size, 0, extra_flags);
 		kfree(value);
 	} else {
 		ret = fuse_removexattr(inode, name);

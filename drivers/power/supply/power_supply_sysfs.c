@@ -375,9 +375,9 @@ static char *kstruprdup(const char *str, gfp_t gfp)
 	return ret;
 }
 
-int power_supply_uevent(struct device *dev, struct kobj_uevent_env *env)
+int power_supply_uevent(const struct device *dev, struct kobj_uevent_env *env)
 {
-	struct power_supply *psy = dev_get_drvdata(dev);
+	const struct power_supply *psy = dev_get_drvdata(dev);
 	int ret = 0, j;
 	char *prop_buf;
 	char *attrname;
@@ -405,7 +405,7 @@ int power_supply_uevent(struct device *dev, struct kobj_uevent_env *env)
 
 		attr = &power_supply_attrs[psy->desc->properties[j]];
 
-		ret = power_supply_show_property(dev, attr, prop_buf);
+		ret = power_supply_show_property((struct device *)dev, attr, prop_buf);
 		if (ret == -ENODEV || ret == -ENODATA) {
 			/* When a battery is absent, we expect -ENODEV. Don't abort;
 			   send the uevent with at least the the PRESENT=0 property */

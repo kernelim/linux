@@ -241,7 +241,9 @@ static int wusb_ccm_mac(struct crypto_skcipher *tfm_cbc,
 	 * for MAC Header, EO, sec reserved and padding.
 	 */
 	scratch->b1.la = cpu_to_be16(blen + 14);
-	memcpy(&scratch->b1.mac_header, a, sizeof(*a));
+	unsafe_memcpy(&scratch->b1.mac_header, a, sizeof(*a), 
+			/* FORTIFY suppression, because there is no fix in upstream, but there is already compile time check for sizes, so it should be correct */
+			);
 
 	sg_init_table(sg, ARRAY_SIZE(sg));
 	sg_set_buf(&sg[0], &scratch->b0, sizeof(scratch->b0));

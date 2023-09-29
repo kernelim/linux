@@ -38,7 +38,6 @@
 #include <drm/drm_encoder.h>
 #include <drm/drm_mode.h>
 #include <drm/drm_framebuffer.h>
-#include <drm/drm_fb_helper.h>
 
 #define DRIVER_AUTHOR		"Dave Airlie"
 
@@ -87,7 +86,7 @@ enum ast_tx_chip {
 #define AST_DRAM_8Gx16   8
 
 /*
- * Cursor plane
+ * Hardware cursor
  */
 
 #define AST_MAX_HWC_WIDTH	64
@@ -95,8 +94,6 @@ enum ast_tx_chip {
 
 #define AST_HWC_SIZE		(AST_MAX_HWC_WIDTH * AST_MAX_HWC_HEIGHT * 2)
 #define AST_HWC_SIGNATURE_SIZE	32
-
-#define AST_DEFAULT_HWC_NUM	2
 
 /* define for signature structure */
 #define AST_HWC_SIGNATURE_CHECKSUM	0x00
@@ -107,22 +104,21 @@ enum ast_tx_chip {
 #define AST_HWC_SIGNATURE_HOTSPOTX	0x14
 #define AST_HWC_SIGNATURE_HOTSPOTY	0x18
 
-struct ast_cursor_plane {
+/*
+ * Planes
+ */
+
+struct ast_plane {
 	struct drm_plane base;
 
-	struct {
-		struct drm_gem_vram_object *gbo;
-		struct iosys_map map;
-		u64 off;
-	} hwc[AST_DEFAULT_HWC_NUM];
-
-	unsigned int next_hwc_index;
+	void __iomem *vaddr;
+	u64 offset;
+	unsigned long size;
 };
 
-static inline struct ast_cursor_plane *
-to_ast_cursor_plane(struct drm_plane *plane)
+static inline struct ast_plane *to_ast_plane(struct drm_plane *plane)
 {
-	return container_of(plane, struct ast_cursor_plane, base);
+	return container_of(plane, struct ast_plane, base);
 }
 
 /*
@@ -175,8 +171,13 @@ struct ast_private {
 	uint32_t dram_type;
 	uint32_t mclk;
 
-	struct drm_plane primary_plane;
-	struct ast_cursor_plane cursor_plane;
+	void __iomem	*vram;
+	unsigned long	vram_base;
+	unsigned long	vram_size;
+	unsigned long	vram_fb_available;
+
+	struct ast_plane primary_plane;
+	struct ast_plane cursor_plane;
 	struct drm_crtc crtc;
 	struct {
 		struct {
@@ -195,6 +196,10 @@ struct ast_private {
 			struct drm_encoder encoder;
 			struct drm_connector connector;
 		} astdp;
+		struct {
+			struct drm_encoder encoder;
+			struct drm_connector connector;
+		} bmc;
 	} output;
 
 	bool support_wide_screen;
@@ -488,6 +493,7 @@ void ast_patch_ahb_2500(struct ast_private *ast);
 /* ast dp501 */
 void ast_set_dp501_video_output(struct drm_device *dev, u8 mode);
 bool ast_backup_fw(struct drm_device *dev, u8 *addr, u32 size);
+bool ast_dp501_is_connected(struct ast_private *ast);
 bool ast_dp501_read_edid(struct drm_device *dev, u8 *ediddata);
 u8 ast_get_dp501_max_clk(struct drm_device *dev);
 void ast_init_3rdtx(struct drm_device *dev);
@@ -496,6 +502,7 @@ void ast_init_3rdtx(struct drm_device *dev);
 struct ast_i2c_chan *ast_i2c_create(struct drm_device *dev);
 
 /* aspeed DP */
+bool ast_astdp_is_connected(struct ast_private *ast);
 int ast_astdp_read_edid(struct drm_device *dev, u8 *ediddata);
 void ast_dp_launch(struct drm_device *dev, u8 bPower);
 void ast_dp_power_on_off(struct drm_device *dev, bool no);

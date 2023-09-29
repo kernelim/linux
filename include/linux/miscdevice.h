@@ -34,7 +34,7 @@
 #define STORE_QUEUE_MINOR	155	/* unused */
 #define I2O_MINOR		166
 #define HWRNG_MINOR		183
-#define MICROCODE_MINOR		184
+/*#define MICROCODE_MINOR	184	unused */
 #define IRNET_MINOR		187
 #define D7S_MINOR		193
 #define VFIO_MINOR		196

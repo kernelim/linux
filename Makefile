@@ -9,7 +9,7 @@ NAME = Merciless Moray
 # DRM backport version
 #
 RHEL_DRM_VERSION = 6
-RHEL_DRM_PATCHLEVEL = 0
+RHEL_DRM_PATCHLEVEL = 3
 RHEL_DRM_SUBLEVEL = 
 RHEL_DRM_EXTRAVERSION = 
 
@@ -1203,11 +1203,11 @@ define filechk_utsrelease.h
 	  echo '"$(KERNELRELEASE)" exceeds $(uts_len) characters' >&2;    \
 	  exit 1;                                                         \
 	fi;                                                               \
-	(echo \#define UTS_RELEASE \"$(KERNELRELEASE)\";)
+	echo \#define UTS_RELEASE \"$(KERNELRELEASE)\"
 endef
 
 define filechk_version.h
-	(echo \#define LINUX_VERSION_CODE $(shell                         \
+	echo \#define LINUX_VERSION_CODE $(shell                         \
 	expr $(VERSION) \* 65536 + 0$(PATCHLEVEL) \* 256 + 0$(SUBLEVEL)); \
 	echo '#define KERNEL_VERSION(a,b,c) (((a) << 16) + ((b) << 8) + (c))'; \
 	echo '#define RHEL_MAJOR $(RHEL_MAJOR)'; \
@@ -1215,7 +1215,10 @@ define filechk_version.h
 	echo '#define RHEL_RELEASE_VERSION(a,b) (((a) << 8) + (b))'; \
 	echo '#define RHEL_RELEASE_CODE \
 		$(shell expr $(RHEL_MAJOR) \* 256 + $(RHEL_MINOR))'; \
-	echo '#define RHEL_RELEASE "$(RHEL_RELEASE)"';)
+	echo '#define RHEL_RELEASE "$(RHEL_RELEASE)"';                 \
+	echo \#define LINUX_VERSION_MAJOR $(VERSION);                    \
+	echo \#define LINUX_VERSION_PATCHLEVEL $(PATCHLEVEL);            \
+	echo \#define LINUX_VERSION_SUBLEVEL $(SUBLEVEL)
 endef
 
 $(version_h): $(srctree)/Makefile $(srctree)/Makefile.rhelver FORCE

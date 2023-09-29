@@ -3023,14 +3023,12 @@ static int edge_port_probe(struct usb_serial_port *port)
 	return 0;
 }
 
-static int edge_port_remove(struct usb_serial_port *port)
+static void edge_port_remove(struct usb_serial_port *port)
 {
 	struct edgeport_port *edge_port;
 
 	edge_port = usb_get_serial_port_data(port);
 	kfree(edge_port);
-
-	return 0;
 }
 
 static struct usb_serial_driver edgeport_2port_device = {

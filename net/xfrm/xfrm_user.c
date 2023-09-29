@@ -521,7 +521,7 @@ static void xfrm_update_ae_params(struct xfrm_state *x, struct nlattr **attrs,
 	struct nlattr *et = attrs[XFRMA_ETIMER_THRESH];
 	struct nlattr *rt = attrs[XFRMA_REPLAY_THRESH];
 
-	if (re) {
+	if (re && x->replay_esn && x->preplay_esn) {
 		struct xfrm_replay_state_esn *replay_esn;
 		replay_esn = nla_data(re);
 		memcpy(x->replay_esn, replay_esn,
@@ -851,20 +851,124 @@ static int copy_user_offload(struct xfrm_state_offload *xso, struct sk_buff *skb
 	return 0;
 }
 
+static bool xfrm_redact(void)
+{
+#ifdef LOCKDOWN_XFRM_SECRET
+	return IS_ENABLED(CONFIG_SECURITY) &&
+		security_locked_down(LOCKDOWN_XFRM_SECRET);
+#else
+	return false;
+#endif
+}
+
 static int copy_to_user_auth(struct xfrm_algo_auth *auth, struct sk_buff *skb)
 {
 	struct xfrm_algo *algo;
+	struct xfrm_algo_auth *ap;
 	struct nlattr *nla;
+	bool redact_secret = xfrm_redact();
 
 	nla = nla_reserve(skb, XFRMA_ALG_AUTH,
 			  sizeof(*algo) + (auth->alg_key_len + 7) / 8);
 	if (!nla)
 		return -EMSGSIZE;
-
 	algo = nla_data(nla);
 	strncpy(algo->alg_name, auth->alg_name, sizeof(algo->alg_name));
-	memcpy(algo->alg_key, auth->alg_key, (auth->alg_key_len + 7) / 8);
+
+	if (redact_secret && auth->alg_key_len)
+		memset(algo->alg_key, 0, (auth->alg_key_len + 7) / 8);
+	else
+		memcpy(algo->alg_key, auth->alg_key,
+		       (auth->alg_key_len + 7) / 8);
 	algo->alg_key_len = auth->alg_key_len;
+
+	nla = nla_reserve(skb, XFRMA_ALG_AUTH_TRUNC, xfrm_alg_auth_len(auth));
+	if (!nla)
+		return -EMSGSIZE;
+	ap = nla_data(nla);
+	memcpy(ap, auth, sizeof(struct xfrm_algo_auth));
+	if (redact_secret && auth->alg_key_len)
+		memset(ap->alg_key, 0, (auth->alg_key_len + 7) / 8);
+	else
+		memcpy(ap->alg_key, auth->alg_key,
+		       (auth->alg_key_len + 7) / 8);
+	return 0;
+}
+
+static int copy_to_user_aead(struct xfrm_algo_aead *aead, struct sk_buff *skb)
+{
+	struct nlattr *nla = nla_reserve(skb, XFRMA_ALG_AEAD, aead_len(aead));
+	struct xfrm_algo_aead *ap;
+	bool redact_secret = xfrm_redact();
+
+	if (!nla)
+		return -EMSGSIZE;
+
+	ap = nla_data(nla);
+	strscpy_pad(ap->alg_name, aead->alg_name, sizeof(ap->alg_name));
+	ap->alg_key_len = aead->alg_key_len;
+	ap->alg_icv_len = aead->alg_icv_len;
+
+	if (redact_secret && aead->alg_key_len)
+		memset(ap->alg_key, 0, (aead->alg_key_len + 7) / 8);
+	else
+		memcpy(ap->alg_key, aead->alg_key,
+		       (aead->alg_key_len + 7) / 8);
+	return 0;
+}
+
+static int copy_to_user_ealg(struct xfrm_algo *ealg, struct sk_buff *skb)
+{
+	struct xfrm_algo *ap;
+	bool redact_secret = xfrm_redact();
+	struct nlattr *nla = nla_reserve(skb, XFRMA_ALG_CRYPT,
+					 xfrm_alg_len(ealg));
+	if (!nla)
+		return -EMSGSIZE;
+
+	ap = nla_data(nla);
+	strscpy_pad(ap->alg_name, ealg->alg_name, sizeof(ap->alg_name));
+	ap->alg_key_len = ealg->alg_key_len;
+
+	if (redact_secret && ealg->alg_key_len)
+		memset(ap->alg_key, 0, (ealg->alg_key_len + 7) / 8);
+	else
+		memcpy(ap->alg_key, ealg->alg_key,
+		       (ealg->alg_key_len + 7) / 8);
+
+	return 0;
+}
+
+static int copy_to_user_calg(struct xfrm_algo *calg, struct sk_buff *skb)
+{
+	struct nlattr *nla = nla_reserve(skb, XFRMA_ALG_COMP, sizeof(*calg));
+	struct xfrm_algo *ap;
+
+	if (!nla)
+		return -EMSGSIZE;
+
+	ap = nla_data(nla);
+	strscpy_pad(ap->alg_name, calg->alg_name, sizeof(ap->alg_name));
+	ap->alg_key_len = 0;
+
+	return 0;
+}
+
+static int copy_to_user_encap(struct xfrm_encap_tmpl *ep, struct sk_buff *skb)
+{
+	struct nlattr *nla = nla_reserve(skb, XFRMA_ENCAP, sizeof(*ep));
+	struct xfrm_encap_tmpl *uep;
+
+	if (!nla)
+		return -EMSGSIZE;
+
+	uep = nla_data(nla);
+	memset(uep, 0, sizeof(*uep));
+
+	uep->encap_type = ep->encap_type;
+	uep->encap_sport = ep->encap_sport;
+	uep->encap_dport = ep->encap_dport;
+	uep->encap_oa = ep->encap_oa;
 
 	return 0;
 }
@@ -910,30 +1014,27 @@ static int copy_to_user_state_extra(struct xfrm_state *x,
 			goto out;
 	}
 	if (x->aead) {
-		ret = nla_put(skb, XFRMA_ALG_AEAD, aead_len(x->aead), x->aead);
+		ret = copy_to_user_aead(x->aead, skb);
 		if (ret)
 			goto out;
 	}
 	if (x->aalg) {
 		ret = copy_to_user_auth(x->aalg, skb);
-		if (!ret)
-			ret = nla_put(skb, XFRMA_ALG_AUTH_TRUNC,
-				      xfrm_alg_auth_len(x->aalg), x->aalg);
 		if (ret)
 			goto out;
 	}
 	if (x->ealg) {
-		ret = nla_put(skb, XFRMA_ALG_CRYPT, xfrm_alg_len(x->ealg), x->ealg);
+		ret = copy_to_user_ealg(x->ealg, skb);
 		if (ret)
 			goto out;
 	}
 	if (x->calg) {
-		ret = nla_put(skb, XFRMA_ALG_COMP, sizeof(*(x->calg)), x->calg);
+		ret = copy_to_user_calg(x->calg, skb);
 		if (ret)
 			goto out;
 	}
 	if (x->encap) {
-		ret = nla_put(skb, XFRMA_ENCAP, sizeof(*x->encap), x->encap);
+		ret = copy_to_user_encap(x->encap, skb);
 		if (ret)
 			goto out;
 	}
@@ -2721,7 +2822,7 @@ static int build_expire(struct sk_buff *skb, struct xfrm_state *x, const struct 
 	copy_to_user_state(x, &ue->state);
 	ue->hard = (c->data.hard != 0) ? 1 : 0;
 	/* clear the padding bytes */
-	memset(&ue->hard + 1, 0, sizeof(*ue) - offsetofend(typeof(*ue), hard));
+	memset_after(ue, 0, hard);
 
 	err = xfrm_mark_put(skb, &x->mark);
 	if (err)

@@ -492,22 +492,17 @@ static void __init setup_memory_end(void)
 	unsigned long vmax, tmp;
 
 	/* Choose kernel address space layout: 3 or 4 levels. */
-	if (IS_ENABLED(CONFIG_KASAN)) {
-		vmax = IS_ENABLED(CONFIG_KASAN_S390_4_LEVEL_PAGING)
-			   ? _REGION1_SIZE
-			   : _REGION2_SIZE;
-	} else {
-		tmp = (memory_end ?: max_physmem_end) / PAGE_SIZE;
-		tmp = tmp * (sizeof(struct page) + PAGE_SIZE);
-		if (tmp + vmalloc_size + MODULES_LEN <= _REGION2_SIZE)
-			vmax = _REGION2_SIZE; /* 3-level kernel page table */
-		else
-			vmax = _REGION1_SIZE; /* 4-level kernel page table */
-	}
-
+	tmp = (memory_end ?: max_physmem_end) / PAGE_SIZE;
+	tmp = tmp * (sizeof(struct page) + PAGE_SIZE);
+	if (tmp + vmalloc_size + MODULES_LEN <= _REGION2_SIZE)
+		vmax = _REGION2_SIZE; /* 3-level kernel page table */
+	else
+		vmax = _REGION1_SIZE; /* 4-level kernel page table */
 	if (is_prot_virt_host())
 		adjust_to_uv_max(&vmax);
-
+#ifdef CONFIG_KASAN
+	vmax = kasan_vmax;
+#endif
 	/* module area is at the end of the kernel address space. */
 	MODULES_END = vmax;
 	MODULES_VADDR = MODULES_END - MODULES_LEN;
@@ -1085,16 +1080,7 @@ void __init setup_arch(char **cmdline_p)
 	free_mem_detect_info();
 	remove_oldmem();
 
-	/*
-	 * Make sure all chunks are MAX_ORDER aligned so we don't need the
-	 * extra checks that HOLES_IN_ZONE would require.
-	 *
-	 * Is this still required?
-	 */
-	memblock_trim_memory(1UL << (MAX_ORDER - 1 + PAGE_SHIFT));
-
-	if (is_prot_virt_host())
-		setup_uv();
+	setup_uv();
 	setup_memory_end();
 	setup_memory();
 	dma_contiguous_reserve(memory_end);

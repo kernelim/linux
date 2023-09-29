@@ -37,12 +37,6 @@
  * sets the GP register's most significant bits to 0 with an explicit cast.
  */
 
-static inline void gic_write_eoir(u32 irq)
-{
-	write_sysreg_s(irq, SYS_ICC_EOIR1_EL1);
-	isb();
-}
-
 static __always_inline void gic_write_dir(u32 irq)
 {
 	write_sysreg_s(irq, SYS_ICC_DIR_EL1);
@@ -184,7 +178,7 @@ static inline void gic_pmr_mask_irqs(void)
 
 static inline void gic_arch_enable_irqs(void)
 {
-	asm volatile ("msr daifclr, #2" : : : "memory");
+	asm volatile ("msr daifclr, #3" : : : "memory");
 }
 
 #endif /* __ASSEMBLY__ */

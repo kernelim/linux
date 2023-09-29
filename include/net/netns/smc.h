@@ -14,5 +14,11 @@ struct netns_smc {
 	struct smc_stats_rsn		*fback_rsn;
 
 	bool				limit_smc_hs;	/* constraint on handshake */
+#ifdef CONFIG_SYSCTL
+	struct ctl_table_header		*smc_hdr;
+#endif
+	unsigned int			sysctl_autocorking_size;
+	unsigned int			sysctl_smcr_buf_type;
+	int				sysctl_smcr_testlink_time;
 };
 #endif

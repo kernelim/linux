@@ -13,6 +13,8 @@
  * overwrite the default setting if needed.
  */
 
+#define pr_fmt(fmt) "devtmpfs: " fmt
+
 #include <linux/kernel.h>
 #include <linux/syscalls.h>
 #include <linux/mount.h>
@@ -376,9 +378,9 @@ int devtmpfs_mount(const char *mntdir)
 
 	err = ksys_mount("devtmpfs", mntdir, "devtmpfs", MS_SILENT, NULL);
 	if (err)
-		printk(KERN_INFO "devtmpfs: error mounting %i\n", err);
+		pr_info("error mounting %d\n", err);
 	else
-		printk(KERN_INFO "devtmpfs: mounted\n");
+		pr_info("mounted\n");
 	return err;
 }
 
@@ -441,14 +443,12 @@ int __init devtmpfs_init(void)
 
 	mnt = vfs_kern_mount(&internal_fs_type, 0, "devtmpfs", opts);
 	if (IS_ERR(mnt)) {
-		printk(KERN_ERR "devtmpfs: unable to create devtmpfs %ld\n",
-				PTR_ERR(mnt));
+		pr_err("unable to create devtmpfs %ld\n", PTR_ERR(mnt));
 		return PTR_ERR(mnt);
 	}
 	err = register_filesystem(&dev_fs_type);
 	if (err) {
-		printk(KERN_ERR "devtmpfs: unable to register devtmpfs "
-		       "type %i\n", err);
+		pr_err("unable to register devtmpfs type %d\n", err);
 		return err;
 	}
 
@@ -461,12 +461,12 @@ int __init devtmpfs_init(void)
 	}
 
 	if (err) {
-		printk(KERN_ERR "devtmpfs: unable to create devtmpfs %i\n", err);
+		pr_err("unable to create devtmpfs %d\n", err);
 		unregister_filesystem(&dev_fs_type);
 		thread = NULL;
 		return err;
 	}
 
-	printk(KERN_INFO "devtmpfs: initialized\n");
+	pr_info("initialized\n");
 	return 0;
 }

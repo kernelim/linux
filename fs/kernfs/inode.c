@@ -104,10 +104,11 @@ int __kernfs_setattr(struct kernfs_node *kn, const struct iattr *iattr)
 int kernfs_setattr(struct kernfs_node *kn, const struct iattr *iattr)
 {
 	int ret;
+	struct kernfs_root *root = kernfs_root(kn);
 
-	down_write(&kernfs_rwsem);
+	down_write(&root->kernfs_rwsem);
 	ret = __kernfs_setattr(kn, iattr);
-	up_write(&kernfs_rwsem);
+	up_write(&root->kernfs_rwsem);
 	return ret;
 }
 
@@ -115,12 +116,14 @@ int kernfs_iop_setattr(struct dentry *dentry, struct iattr *iattr)
 {
 	struct inode *inode = d_inode(dentry);
 	struct kernfs_node *kn = inode->i_private;
+	struct kernfs_root *root;
 	int error;
 
 	if (!kn)
 		return -EINVAL;
 
-	down_write(&kernfs_rwsem);
+	root = kernfs_root(kn);
+	down_write(&root->kernfs_rwsem);
 	error = setattr_prepare(dentry, iattr);
 	if (error)
 		goto out;
@@ -133,7 +136,7 @@ int kernfs_iop_setattr(struct dentry *dentry, struct iattr *iattr)
 	setattr_copy(inode, iattr);
 
 out:
-	up_write(&kernfs_rwsem);
+	up_write(&root->kernfs_rwsem);
 	return error;
 }
 
@@ -187,13 +190,12 @@ int kernfs_iop_getattr(const struct path *path, struct kstat *stat,
 {
 	struct inode *inode = d_inode(path->dentry);
 	struct kernfs_node *kn = inode->i_private;
+	struct kernfs_root *root = kernfs_root(kn);
 
-	down_read(&kernfs_rwsem);
-	spin_lock(&inode->i_lock);
+	down_read(&root->kernfs_rwsem);
 	kernfs_refresh_inode(kn, inode);
 	generic_fillattr(inode, stat);
-	spin_unlock(&inode->i_lock);
-	up_read(&kernfs_rwsem);
+	up_read(&root->kernfs_rwsem);
 
 	return 0;
 }
@@ -276,19 +278,19 @@ void kernfs_evict_inode(struct inode *inode)
 int kernfs_iop_permission(struct inode *inode, int mask)
 {
 	struct kernfs_node *kn;
+	struct kernfs_root *root;
 	int ret;
 
 	if (mask & MAY_NOT_BLOCK)
 		return -ECHILD;
 
 	kn = inode->i_private;
+	root = kernfs_root(kn);
 
-	down_read(&kernfs_rwsem);
-	spin_lock(&inode->i_lock);
+	down_read(&root->kernfs_rwsem);
 	kernfs_refresh_inode(kn, inode);
 	ret = generic_permission(inode, mask);
-	spin_unlock(&inode->i_lock);
-	up_read(&kernfs_rwsem);
+	up_read(&root->kernfs_rwsem);
 
 	return ret;
 }

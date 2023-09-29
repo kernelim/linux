@@ -553,7 +553,7 @@ static void softlockup_unpark_threads(void)
 	softlockup_update_smpboot_threads();
 }
 
-static void lockup_detector_reconfigure(void)
+static void __lockup_detector_reconfigure(void)
 {
 	cpus_read_lock();
 	watchdog_nmi_stop();
@@ -569,6 +569,13 @@ static void lockup_detector_reconfigure(void)
 	 * recursive locking in the perf code.
 	 */
 	__lockup_detector_cleanup();
+}
+
+void lockup_detector_reconfigure(void)
+{
+	mutex_lock(&watchdog_mutex);
+	__lockup_detector_reconfigure();
+	mutex_unlock(&watchdog_mutex);
 }
 
 /*
@@ -601,7 +608,7 @@ static __init void lockup_detector_setup(void)
 
 	mutex_lock(&watchdog_mutex);
 	softlockup_threads_initialized = true;
-	lockup_detector_reconfigure();
+	__lockup_detector_reconfigure();
 	mutex_unlock(&watchdog_mutex);
 }
 
@@ -610,7 +617,7 @@ static inline int watchdog_park_threads(void) { return 0; }
 static inline void watchdog_unpark_threads(void) { }
 static inline int watchdog_enable_all_cpus(void) { return 0; }
 static inline void watchdog_disable_all_cpus(void) { }
-static void lockup_detector_reconfigure(void)
+static void __lockup_detector_reconfigure(void)
 {
 	cpus_read_lock();
 	watchdog_nmi_stop();
@@ -618,9 +625,13 @@ static void lockup_detector_reconfigure(void)
 	watchdog_nmi_start();
 	cpus_read_unlock();
 }
+void lockup_detector_reconfigure(void)
+{
+	__lockup_detector_reconfigure();
+}
 static inline void lockup_detector_setup(void)
 {
-	lockup_detector_reconfigure();
+	__lockup_detector_reconfigure();
 }
 #endif /* !CONFIG_SOFTLOCKUP_DETECTOR */
 
@@ -660,7 +671,7 @@ static void proc_watchdog_update(void)
 {
 	/* Remove impossible cpus to keep sysctl output clean. */
 	cpumask_and(&watchdog_cpumask, &watchdog_cpumask, cpu_possible_mask);
-	lockup_detector_reconfigure();
+	__lockup_detector_reconfigure();
 }
 
 /*

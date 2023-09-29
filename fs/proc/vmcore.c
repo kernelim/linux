@@ -62,44 +62,69 @@ core_param(novmcoredd, vmcoredd_disabled, bool, 0);
 /* Device Dump Size */
 static size_t vmcoredd_orig_sz;
 
-/*
- * Returns > 0 for RAM pages, 0 for non-RAM pages, < 0 on error
- * The called function has to take care of module refcounting.
- */
-static int (*oldmem_pfn_is_ram)(unsigned long pfn);
+static DEFINE_SPINLOCK(vmcore_cb_lock);
+DEFINE_STATIC_SRCU(vmcore_cb_srcu);
+/* List of registered vmcore callbacks. */
+static LIST_HEAD(vmcore_cb_list);
+/* Whether the vmcore has been opened once. */
+static bool vmcore_opened;
 
-int register_oldmem_pfn_is_ram(int (*fn)(unsigned long pfn))
+void register_vmcore_cb(struct vmcore_cb *cb)
 {
-	if (oldmem_pfn_is_ram)
-		return -EBUSY;
-	oldmem_pfn_is_ram = fn;
-	return 0;
-}
-EXPORT_SYMBOL_GPL(register_oldmem_pfn_is_ram);
-
-void unregister_oldmem_pfn_is_ram(void)
-{
-	oldmem_pfn_is_ram = NULL;
-	wmb();
-}
-EXPORT_SYMBOL_GPL(unregister_oldmem_pfn_is_ram);
-
-static int pfn_is_ram(unsigned long pfn)
-{
-	int (*fn)(unsigned long pfn);
-	/* pfn is ram unless fn() checks pagetype */
-	int ret = 1;
-
+	INIT_LIST_HEAD(&cb->next);
+	spin_lock(&vmcore_cb_lock);
+	list_add_tail(&cb->next, &vmcore_cb_list);
 	/*
-	 * Ask hypervisor if the pfn is really ram.
-	 * A ballooned page contains no data and reading from such a page
-	 * will cause high load in the hypervisor.
+	 * Registering a vmcore callback after the vmcore was opened is
+	 * very unusual (e.g., manual driver loading).
 	 */
-	fn = oldmem_pfn_is_ram;
-	if (fn)
-		ret = fn(pfn);
+	if (vmcore_opened)
+		pr_warn_once("Unexpected vmcore callback registration\n");
+	spin_unlock(&vmcore_cb_lock);
+}
+EXPORT_SYMBOL_GPL(register_vmcore_cb);
+
+void unregister_vmcore_cb(struct vmcore_cb *cb)
+{
+	spin_lock(&vmcore_cb_lock);
+	list_del_rcu(&cb->next);
+	/*
+	 * Unregistering a vmcore callback after the vmcore was opened is
+	 * very unusual (e.g., forced driver removal), but we cannot stop
+	 * unregistering.
+	 */
+	if (vmcore_opened)
+		pr_warn_once("Unexpected vmcore callback unregistration\n");
+	spin_unlock(&vmcore_cb_lock);
+
+	synchronize_srcu(&vmcore_cb_srcu);
+}
+EXPORT_SYMBOL_GPL(unregister_vmcore_cb);
+
+static bool pfn_is_ram(unsigned long pfn)
+{
+	struct vmcore_cb *cb;
+	bool ret = true;
+
+	list_for_each_entry_srcu(cb, &vmcore_cb_list, next,
+				 srcu_read_lock_held(&vmcore_cb_srcu)) {
+		if (unlikely(!cb->pfn_is_ram))
+			continue;
+		ret = cb->pfn_is_ram(cb, pfn);
+		if (!ret)
+			break;
+	}
 
 	return ret;
+}
+
+static int open_vmcore(struct inode *inode, struct file *file)
+{
+	spin_lock(&vmcore_cb_lock);
+	vmcore_opened = true;
+	spin_unlock(&vmcore_cb_lock);
+
+	return 0;
 }
 
 /* Reads a page from the oldmem device from given offset. */
@@ -110,6 +135,7 @@ ssize_t read_from_oldmem(char *buf, size_t count,
 	unsigned long pfn, offset;
 	size_t nr_bytes;
 	ssize_t read = 0, tmp;
+	int idx;
 
 	if (!count)
 		return 0;
@@ -117,6 +143,7 @@ ssize_t read_from_oldmem(char *buf, size_t count,
 	offset = (unsigned long)(*ppos % PAGE_SIZE);
 	pfn = (unsigned long)(*ppos / PAGE_SIZE);
 
+	idx = srcu_read_lock(&vmcore_cb_srcu);
 	do {
 		if (count > (PAGE_SIZE - offset))
 			nr_bytes = PAGE_SIZE - offset;
@@ -124,9 +151,13 @@ ssize_t read_from_oldmem(char *buf, size_t count,
 			nr_bytes = count;
 
 		/* If pfn is not ram, return zeros for sparse dump files */
-		if (pfn_is_ram(pfn) == 0)
-			memset(buf, 0, nr_bytes);
-		else {
+		if (!pfn_is_ram(pfn)) {
+			tmp = 0;
+			if (!userbuf)
+				memset(buf, 0, nr_bytes);
+			else if (clear_user(buf, nr_bytes))
+				tmp = -EFAULT;
+		} else {
 			if (encrypted)
 				tmp = copy_oldmem_page_encrypted(pfn, buf,
 								 nr_bytes,
@@ -135,10 +166,12 @@ ssize_t read_from_oldmem(char *buf, size_t count,
 			else
 				tmp = copy_oldmem_page(pfn, buf, nr_bytes,
 						       offset, userbuf);
-
-			if (tmp < 0)
-				return tmp;
 		}
+		if (tmp < 0) {
+			srcu_read_unlock(&vmcore_cb_srcu, idx);
+			return tmp;
+		}
+
 		*ppos += nr_bytes;
 		count -= nr_bytes;
 		buf += nr_bytes;
@@ -146,6 +179,7 @@ ssize_t read_from_oldmem(char *buf, size_t count,
 		++pfn;
 		offset = 0;
 	} while (count);
+	srcu_read_unlock(&vmcore_cb_srcu, idx);
 
 	return read;
 }
@@ -535,14 +569,19 @@ static int vmcore_remap_oldmem_pfn(struct vm_area_struct *vma,
 			    unsigned long from, unsigned long pfn,
 			    unsigned long size, pgprot_t prot)
 {
+	int ret, idx;
+
 	/*
-	 * Check if oldmem_pfn_is_ram was registered to avoid
-	 * looping over all pages without a reason.
+	 * Check if a callback was registered to avoid looping over all
+	 * pages without a reason.
 	 */
-	if (oldmem_pfn_is_ram)
-		return remap_oldmem_pfn_checked(vma, from, pfn, size, prot);
+	idx = srcu_read_lock(&vmcore_cb_srcu);
+	if (!list_empty(&vmcore_cb_list))
+		ret = remap_oldmem_pfn_checked(vma, from, pfn, size, prot);
 	else
-		return remap_oldmem_pfn_range(vma, from, pfn, size, prot);
+		ret = remap_oldmem_pfn_range(vma, from, pfn, size, prot);
+	srcu_read_unlock(&vmcore_cb_srcu, idx);
+	return ret;
 }
 
 static int mmap_vmcore(struct file *file, struct vm_area_struct *vma)
@@ -666,6 +705,7 @@ static int mmap_vmcore(struct file *file, struct vm_area_struct *vma)
 #endif
 
 static const struct file_operations proc_vmcore_operations = {
+	.open		= open_vmcore,
 	.read		= read_vmcore,
 	.llseek		= default_llseek,
 	.mmap		= mmap_vmcore,

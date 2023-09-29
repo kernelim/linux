@@ -1106,7 +1106,7 @@ int match_target_ip(struct TCP_Server_Info *server,
 
 	cifs_dbg(FYI, "%s: target name: %s\n", __func__, target + 2);
 
-	rc = dns_resolve_server_name_to_ip(target, &tip);
+	rc = dns_resolve_server_name_to_ip(target, &tip, NULL);
 	if (rc < 0)
 		goto out;
 
@@ -1181,7 +1181,7 @@ int update_super_prepath(struct cifs_tcon *tcon, char *prefix)
 	kfree(cifs_sb->prepath);
 
 	if (prefix && *prefix) {
-		cifs_sb->prepath = kstrdup(prefix, GFP_ATOMIC);
+		cifs_sb->prepath = cifs_sanitize_prepath(prefix, GFP_ATOMIC);
 		if (!cifs_sb->prepath) {
 			rc = -ENOMEM;
 			goto out;

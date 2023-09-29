@@ -277,8 +277,7 @@ static void __gfs2_glock_put(struct gfs2_glock *gl)
 	if (mapping) {
 		truncate_inode_pages_final(mapping);
 		if (!gfs2_withdrawn(sdp))
-			GLOCK_BUG_ON(gl, mapping->nrpages ||
-				     mapping->nrexceptional);
+			GLOCK_BUG_ON(gl, !mapping_empty(mapping));
 	}
 	trace_gfs2_glock_put(gl);
 	sdp->sd_lockstruct.ls_ops->lm_put_lock(gl);
@@ -466,10 +465,10 @@ done:
  * do_promote - promote as many requests as possible on the current queue
  * @gl: The glock
  * 
- * Returns: 1 if there is a blocked holder at the head of the list
+ * Returns true on success (i.e., progress was made or there are no waiters).
  */
 
-static int do_promote(struct gfs2_glock *gl)
+static bool do_promote(struct gfs2_glock *gl)
 {
 	struct gfs2_holder *gh, *current_gh;
 
@@ -479,12 +478,13 @@ static int do_promote(struct gfs2_glock *gl)
 			continue;
 		if (!may_grant(gl, current_gh, gh)) {
 			/*
-			 * If we get here, it means we may not grant this holder for
-			 * some reason. If this holder is the head of the list, it
-			 * means we have a blocked holder at the head, so return 1.
+			 * If we get here, it means we may not grant this
+			 * holder for some reason. If this holder is at the
+			 * head of the list, it means we have a blocked holder
+			 * at the head, so return false.
 			 */
-			if (gh->gh_list.prev == &gl->gl_holders)
-				return 1;
+			if (list_is_first(&gh->gh_list, &gl->gl_holders))
+				return false;
 			do_error(gl, 0);
 			break;
 		}
@@ -494,7 +494,7 @@ static int do_promote(struct gfs2_glock *gl)
 		if (!current_gh)
 			current_gh = gh;
 	}
-	return 0;
+	return true;
 }
 
 /**
@@ -593,6 +593,8 @@ static void finish_xmote(struct gfs2_glock *gl, unsigned int ret)
 					list_move_tail(&gh->gh_list, &gl->gl_holders);
 				gh = find_first_waiter(gl);
 				gl->gl_target = gh->gh_state;
+				if (do_promote(gl))
+					goto out;
 				goto retry;
 			}
 			/* Some error or failed "try lock" - report it */
@@ -797,7 +799,7 @@ __acquires(&gl->gl_lockref.lock)
 	} else {
 		if (test_bit(GLF_DEMOTE, &gl->gl_flags))
 			gfs2_demote_wake(gl);
-		if (do_promote(gl) == 0)
+		if (do_promote(gl))
 			goto out_unlock;
 		gh = find_first_waiter(gl);
 		gl->gl_target = gh->gh_state;

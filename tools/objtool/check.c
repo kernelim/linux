@@ -157,6 +157,7 @@ static bool __dead_end_function(struct objtool_file *file, struct symbol *func,
 		"machine_real_restart",
 		"rewind_stack_do_exit",
 		"kunit_try_catch_throw",
+		"snp_abort",
 	};
 
 	if (func->bind == STB_WEAK)

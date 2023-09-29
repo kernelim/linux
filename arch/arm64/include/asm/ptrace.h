@@ -194,11 +194,13 @@ struct pt_regs {
 	};
 	u64 orig_x0;
 #ifdef __AARCH64EB__
-	u32 unused2;
+	/* Only valid for some EL1 exceptions. */
+	RH_KABI_REPLACE_SPLIT(u32 unused2, u16 lockdep_hardirqs, u16 exit_rcu)
 	s32 syscallno;
 #else
 	s32 syscallno;
-	u32 unused2;
+	/* Only valid for some EL1 exceptions. */
+	RH_KABI_REPLACE_SPLIT(u32 unused2, u16 lockdep_hardirqs, u16 exit_rcu)
 #endif
 
 	u64 orig_addr_limit;

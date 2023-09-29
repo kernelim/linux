@@ -260,7 +260,7 @@ struct css_set {
 	 * List of csets participating in the on-going migration either as
 	 * source or destination.  Protected by cgroup_mutex.
 	 */
-	struct list_head mg_preload_node;
+	struct list_head RH_KABI_RENAME(mg_preload_node, mg_src_preload_node);
 	struct list_head mg_node;
 
 	/*
@@ -285,6 +285,7 @@ struct css_set {
 	 *	  used by core kernel only.
 	 */
 	RH_KABI_EXTEND(struct list_head dying_tasks)
+	RH_KABI_EXTEND(struct list_head mg_dst_preload_node)
 };
 
 struct cgroup_base_stat {
@@ -425,7 +426,7 @@ struct cgroup {
 	/*
 	 * The bitmask of subsystems enabled on the child cgroups.
 	 * ->subtree_control is the one configured through
-	 * "cgroup.subtree_control" while ->child_ss_mask is the effective
+	 * "cgroup.subtree_control" while ->subtree_ss_mask is the effective
 	 * one which may have more subsystems enabled.  Controller knobs
 	 * are made available iff it's enabled in ->subtree_control.
 	 */

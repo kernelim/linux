@@ -45,6 +45,8 @@
 #include <asm/daifflags.h>
 #include <asm/debug-monitors.h>
 #include <asm/esr.h>
+#include <asm/exception.h>
+#include <asm/extable.h>
 #include <asm/insn.h>
 #include <asm/kprobes.h>
 #include <asm/traps.h>
@@ -54,13 +56,6 @@
 #include <asm/exception.h>
 #include <asm/system_misc.h>
 #include <asm/sysreg.h>
-
-static const char *handler[]= {
-	"Synchronous Abort",
-	"IRQ",
-	"FIQ",
-	"Error"
-};
 
 int show_unhandled_signals = 0;
 
@@ -822,25 +817,8 @@ const char *esr_get_class_string(u32 esr)
 }
 
 /*
- * bad_mode handles the impossible case in the exception vector. This is always
- * fatal.
- */
-asmlinkage void bad_mode(struct pt_regs *regs, int reason, unsigned int esr)
-{
-	console_verbose();
-
-	pr_crit("Bad mode in %s handler detected on CPU%d, code 0x%08x -- %s\n",
-		handler[reason], smp_processor_id(), esr,
-		esr_get_class_string(esr));
-
-	__show_regs(regs);
-	local_daif_mask();
-	panic("bad mode");
-}
-
-/*
  * bad_el0_sync handles unexpected, but potentially recoverable synchronous
- * exceptions taken from EL0. Unlike bad_mode, this returns.
+ * exceptions taken from EL0.
  */
 void bad_el0_sync(struct pt_regs *regs, int reason, unsigned int esr)
 {
@@ -858,13 +836,11 @@ void bad_el0_sync(struct pt_regs *regs, int reason, unsigned int esr)
 DEFINE_PER_CPU(unsigned long [OVERFLOW_STACK_SIZE/sizeof(long)], overflow_stack)
 	__aligned(16);
 
-asmlinkage void handle_bad_stack(struct pt_regs *regs)
+void panic_bad_stack(struct pt_regs *regs, unsigned int esr, unsigned long far)
 {
 	unsigned long tsk_stk = (unsigned long)current->stack;
 	unsigned long irq_stk = (unsigned long)this_cpu_read(irq_stack_ptr);
 	unsigned long ovf_stk = (unsigned long)this_cpu_ptr(overflow_stack);
-	unsigned int esr = read_sysreg(esr_el1);
-	unsigned long far = read_sysreg(far_el1);
 
 	console_verbose();
 	pr_emerg("Insufficient stack space to handle exception!");
@@ -937,23 +913,12 @@ bool arm64_is_fatal_ras_serror(struct pt_regs *regs, unsigned int esr)
 	}
 }
 
-asmlinkage void do_serror(struct pt_regs *regs, unsigned int esr)
+void do_serror(struct pt_regs *regs, unsigned int esr)
 {
-	nmi_enter();
-
 	/* non-RAS errors are not containable */
 	if (!arm64_is_ras_serror(esr) || arm64_is_fatal_ras_serror(regs, esr))
 		arm64_serror_panic(regs, esr);
-
-	nmi_exit();
 }
-
-asmlinkage void enter_from_user_mode(void)
-{
-	CT_WARN_ON(ct_state() != CONTEXT_USER);
-	user_exit_irqoff();
-}
-NOKPROBE_SYMBOL(enter_from_user_mode);
 
 void __pte_error(const char *file, int line, unsigned long val)
 {
@@ -1015,6 +980,21 @@ static int bug_handler(struct pt_regs *regs, unsigned int esr)
 static struct break_hook bug_break_hook = {
 	.fn = bug_handler,
 	.imm = BUG_BRK_IMM,
+};
+
+static int reserved_fault_handler(struct pt_regs *regs, unsigned int esr)
+{
+	pr_err("%s generated an invalid instruction at %pS!\n",
+		"Kernel text patching",
+		(void *)instruction_pointer(regs));
+
+	/* We cannot handle this */
+	return DBG_HOOK_ERROR;
+}
+
+static struct break_hook fault_break_hook = {
+	.fn = reserved_fault_handler,
+	.imm = FAULT_BRK_IMM,
 };
 
 #ifdef CONFIG_KASAN_SW_TAGS
@@ -1085,6 +1065,7 @@ int __init early_brk64(unsigned long addr, unsigned int esr,
 void __init trap_init(void)
 {
 	register_kernel_break_hook(&bug_break_hook);
+	register_kernel_break_hook(&fault_break_hook);
 #ifdef CONFIG_KASAN_SW_TAGS
 	register_kernel_break_hook(&kasan_break_hook);
 #endif

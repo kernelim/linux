@@ -146,6 +146,7 @@ struct scsi_device {
 	const char * model;		/* ... after scan; point to static string */
 	const char * rev;		/* ... "nullnullnullnull" before scan */
 
+#define SCSI_DEFAULT_VPD_LEN	255	/* default SCSI VPD page size (max) */
 	struct scsi_vpd __rcu *vpd_pg83;
 	struct scsi_vpd __rcu *vpd_pg80;
 	unsigned char current_tag;	/* current tag */
@@ -210,6 +211,7 @@ struct scsi_device {
 	RH_KABI_FILL_HOLE(unsigned offline_already:1) /* Device offline message logged */
 	RH_KABI_FILL_HOLE(unsigned ignore_media_change:1) /* Ignore MEDIA CHANGE on resume */
 	RH_KABI_FILL_HOLE(unsigned silence_suspend:1)	/* Do not print runtime PM related messages */
+	RH_KABI_FILL_HOLE(unsigned no_vpd_size:1)	/* No VPD size reported in header */
 
 	atomic_t disk_events_disable_depth; /* disable depth for disk events */
 
@@ -251,7 +253,7 @@ struct scsi_device {
 			)
 	RH_KABI_USE(4, struct sbitmap *budget_map)
 
-	RH_KABI_RESERVE(5)
+	RH_KABI_USE_SPLIT(5, atomic_t iotmo_cnt)	/* partial use */
 	RH_KABI_RESERVE(6)
 
 	unsigned long		sdev_data[0];

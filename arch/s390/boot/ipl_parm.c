@@ -83,6 +83,11 @@ static size_t ipl_block_get_ascii_scpdata(char *dest, size_t size,
 		scp_data_len = ipb->nvme.scp_data_len;
 		scp_data = ipb->nvme.scp_data;
 		break;
+	case IPL_PBT_ECKD:
+		scp_data_len = ipb->eckd.scp_data_len;
+		scp_data = ipb->eckd.scp_data;
+		break;
+
 	default:
 		goto out;
 	}
@@ -128,6 +133,7 @@ static void append_ipl_block_parm(void)
 		break;
 	case IPL_PBT_FCP:
 	case IPL_PBT_NVME:
+	case IPL_PBT_ECKD:
 		rc = ipl_block_get_ascii_scpdata(
 			parm, COMMAND_LINE_SIZE - len - 1, &ipl_block);
 		break;
@@ -206,6 +212,14 @@ static void parse_mem_opt(void)
 
 		if (!strcmp(param, "nokaslr"))
 			kaslr_enabled = 0;
+
+#if IS_ENABLED(CONFIG_KVM)
+		if (!strcmp(param, "prot_virt")) {
+			rc = kstrtobool(val, &enabled);
+			if (!rc && enabled)
+				prot_virt_host = 1;
+		}
+#endif
 	}
 }
 
@@ -216,6 +230,9 @@ static inline bool is_ipl_block_dump(void)
 		return true;
 	if (ipl_block.pb0_hdr.pbt == IPL_PBT_NVME &&
 	    ipl_block.nvme.opt == IPL_PB0_NVME_OPT_DUMP)
+		return true;
+	if (ipl_block.pb0_hdr.pbt == IPL_PBT_ECKD &&
+	    ipl_block.eckd.opt == IPL_PB0_ECKD_OPT_DUMP)
 		return true;
 	return false;
 }

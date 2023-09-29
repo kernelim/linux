@@ -47,6 +47,7 @@ TEST_PROGS = bridge_igmp.sh \
 	tc_flower.sh \
 	tc_mpls_l2vpn.sh \
 	tc_shblocks.sh \
+	tc_tunnel_key.sh \
 	tc_vlan_modify.sh \
 	vxlan_asymmetric.sh \
 	vxlan_bridge_1d_port_8472.sh \

@@ -1583,14 +1583,19 @@ are the contents of this file:
           unsigned int period_step;
           unsigned int sleep_min;		/* min ticks to sleep */
           snd_pcm_uframes_t start_threshold;
-          snd_pcm_uframes_t stop_threshold;
-          snd_pcm_uframes_t silence_threshold; /* Silence filling happens when
-                                                  noise is nearest than this */
-          snd_pcm_uframes_t silence_size;	/* Silence filling size */
+          /*
+           * The following two thresholds alleviate playback buffer underruns; when
+           * hw_avail drops below the threshold, the respective action is triggered:
+           */
+          snd_pcm_uframes_t stop_threshold;	/* - stop playback */
+          snd_pcm_uframes_t silence_threshold;	/* - pre-fill buffer with silence */
+          snd_pcm_uframes_t silence_size;       /* max size of silence pre-fill; when >= boundary,
+                                                 * fill played area with silence immediately */
           snd_pcm_uframes_t boundary;	/* pointers wrap point */
   
-          snd_pcm_uframes_t silenced_start;
-          snd_pcm_uframes_t silenced_size;
+          /* internal data of auto-silencer */
+          snd_pcm_uframes_t silence_start; /* starting pointer to silence area */
+          snd_pcm_uframes_t silence_filled; /* size filled with silence */
   
           snd_pcm_sync_id_t sync;		/* hardware synchronization ID */
   
@@ -1728,16 +1733,16 @@ Typically, you'll have a hardware descriptor as below:
 -  ``rate_min`` and ``rate_max`` define the minimum and maximum sample
    rate. This should correspond somehow to ``rates`` bits.
 
--  ``channel_min`` and ``channel_max`` define, as you might already
+-  ``channels_min`` and ``channels_max`` define, as you might already
    expected, the minimum and maximum number of channels.
 
 -  ``buffer_bytes_max`` defines the maximum buffer size in
    bytes. There is no ``buffer_bytes_min`` field, since it can be
    calculated from the minimum period size and the minimum number of
-   periods. Meanwhile, ``period_bytes_min`` and define the minimum and
-   maximum size of the period in bytes. ``periods_max`` and
-   ``periods_min`` define the maximum and minimum number of periods in
-   the buffer.
+   periods. Meanwhile, ``period_bytes_min`` and ``period_bytes_max``
+   define the minimum and maximum size of the period in bytes.
+   ``periods_max`` and ``periods_min`` define the maximum and minimum
+   number of periods in the buffer.
 
    The “period” is a term that corresponds to a fragment in the OSS
    world. The period defines the size at which a PCM interrupt is
@@ -2103,6 +2108,10 @@ This callback is also not mandatory. This callback is called when the
 emu10k1-fx and cs46xx need to track the current ``appl_ptr`` for the
 internal buffer, and this callback is useful only for such a purpose.
 
+The callback function may return 0 or a negative error. When the
+return value is ``-EPIPE``, PCM core treats as a buffer XRUN happens,
+and changes the state to ``SNDRV_PCM_STATE_XRUN`` automatically.
+
 This callback is atomic as default.
 
 page callback
@@ -2165,6 +2174,12 @@ Typical code would be like:
               return IRQ_HANDLED;
       }
 
+Also, when the device can detect a buffer underrun/overrun, the driver
+can notify the XRUN status to the PCM core by calling
+:c:func:`snd_pcm_stop_xrun()`. This function stops the stream and sets
+the PCM state to ``SNDRV_PCM_STATE_XRUN``. Note that it must be called
+outside the PCM stream lock, hence it can't be called from the atomic
+callback.
 
 
 High frequency timer interrupts
@@ -2244,8 +2259,9 @@ mutexes or semaphores instead.
 As already seen, some pcm callbacks are atomic and some are not. For
 example, the ``hw_params`` callback is non-atomic, while ``trigger``
 callback is atomic. This means, the latter is called already in a
-spinlock held by the PCM middle layer. Please take this atomicity into
-account when you choose a locking scheme in the callbacks.
+spinlock held by the PCM middle layer, the PCM stream lock. Please
+take this atomicity into account when you choose a locking scheme in
+the callbacks.
 
 In the atomic callbacks, you cannot use functions which may call
 :c:func:`schedule()` or go to :c:func:`sleep()`. Semaphores and
@@ -2267,6 +2283,13 @@ a case, you can set ``nonatomic`` filed of :c:type:`struct snd_pcm
 and rwsem are used internally in the PCM core instead of spin and
 rwlocks, so that you can call all PCM functions safely in a non-atomic
 context.
+
+Also, in some cases, you might need to call
+:c:func:`snd_pcm_period_elapsed()` in the atomic context (e.g. the
+period gets elapsed during ``ack`` or other callback). There is a
+variant that can be called inside the PCM stream lock
+:c:func:`snd_pcm_period_elapsed_under_stream_lock()` for that purpose,
+too.
 
 Constraints
 -----------

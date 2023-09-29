@@ -125,12 +125,6 @@ int dm_bufio_write_dirty_buffers(struct dm_bufio_client *c);
 int dm_bufio_issue_flush(struct dm_bufio_client *c);
 
 /*
- * Like dm_bufio_release but also move the buffer to the new
- * block. dm_bufio_write_dirty_buffers is needed to commit the new block.
- */
-void dm_bufio_release_move(struct dm_buffer *b, sector_t new_block);
-
-/*
  * Free the given buffer.
  * This is just a hint, if the buffer is in use or dirty, this function
  * does nothing.

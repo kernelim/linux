@@ -226,7 +226,6 @@ struct scsi_varlen_cdb_hdr {
 /*
  *  SENSE KEYS
  */
-
 #define NO_SENSE            0x00
 #define RECOVERED_ERROR     0x01
 #define NOT_READY           0x02
@@ -241,7 +240,7 @@ struct scsi_varlen_cdb_hdr {
 #define ABORTED_COMMAND     0x0b
 #define VOLUME_OVERFLOW     0x0d
 #define MISCOMPARE          0x0e
-
+#define COMPLETED	    0x0f
 
 /*
  *  DEVICE TYPES

@@ -64,6 +64,7 @@ netlink_kernel_create(struct net *net, int unit, struct netlink_kernel_cfg *cfg)
 
 /* this can be increased when necessary - don't expose to userland */
 #define NETLINK_MAX_COOKIE_LEN	20
+#define NETLINK_MAX_FMTMSG_LEN	80
 
 /**
  * struct netlink_ext_ack - netlink extended ACK report struct
@@ -72,19 +73,21 @@ netlink_kernel_create(struct net *net, int unit, struct netlink_kernel_cfg *cfg)
  * @bad_attr: attribute with error
  * @cookie: cookie data to return to userspace (for success)
  * @cookie_len: actual cookie data length
+ * @_msg_buf: output buffer for formatted message strings - don't access
+ *	directly, use %NL_SET_ERR_MSG_FMT
  */
 struct netlink_ext_ack {
 	const char *_msg;
 	const struct nlattr *bad_attr;
 	u8 cookie[NETLINK_MAX_COOKIE_LEN];
 	u8 cookie_len;
+	RH_KABI_EXTEND(char _msg_buf[NETLINK_MAX_FMTMSG_LEN])
 };
 
 /* Always use this macro, this allows later putting the
  * message into a separate section or such for things
  * like translation or listing all possible messages.
- * Currently string formatting is not supported (due
- * to the lack of an output buffer.)
+ * If string formatting is needed use NL_SET_ERR_MSG_FMT.
  */
 #define NL_SET_ERR_MSG(extack, msg) do {		\
 	static const char __msg[] = msg;		\
@@ -96,8 +99,30 @@ struct netlink_ext_ack {
 		__extack->_msg = __msg;			\
 } while (0)
 
+/* We splice fmt with %s at each end even in the snprintf so that both calls
+ * can use the same string constant, avoiding its duplication in .ro
+ */
+#define NL_SET_ERR_MSG_FMT(extack, fmt, args...) do {			       \
+	struct netlink_ext_ack *__extack = (extack);			       \
+									       \
+	if (!__extack)							       \
+		break;							       \
+	if (snprintf(__extack->_msg_buf, NETLINK_MAX_FMTMSG_LEN,	       \
+		     "%s" fmt "%s", "", ##args, "") >=			       \
+	    NETLINK_MAX_FMTMSG_LEN)					       \
+		net_warn_ratelimited("%s" fmt "%s", "truncated extack: ",      \
+				     ##args, "\n");			       \
+									       \
+	do_trace_netlink_extack(__extack->_msg_buf);			       \
+									       \
+	__extack->_msg = __extack->_msg_buf;				       \
+} while (0)
+
 #define NL_SET_ERR_MSG_MOD(extack, msg)			\
 	NL_SET_ERR_MSG((extack), KBUILD_MODNAME ": " msg)
+
+#define NL_SET_ERR_MSG_FMT_MOD(extack, fmt, args...)	\
+	NL_SET_ERR_MSG_FMT((extack), KBUILD_MODNAME ": " fmt, ##args)
 
 #define NL_SET_BAD_ATTR(extack, attr) do {		\
 	if ((extack))					\

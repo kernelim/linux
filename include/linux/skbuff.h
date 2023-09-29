@@ -292,12 +292,16 @@ struct nf_bridge_info {
  * and read by ovs to recirc_id.
  */
 struct tc_skb_ext {
-	__u32 chain;
+	union {
+		u64 act_miss_cookie;
+		__u32 chain;
+	};
 	__u16 mru;
 	__u16 zone;
 	u8 post_ct:1;
 	u8 post_ct_snat:1;
 	u8 post_ct_dnat:1;
+	u8 act_miss:1; /* Set if act_miss_cookie is used */
 };
 #endif
 
@@ -803,12 +807,15 @@ struct sk_buff {
 	/* RHEL: We have 1 byte hole here */
 	RH_KABI_FILL_HOLE(__u8	active_extensions)
 #endif
-	/* fields enclosed in headers_start/headers_end are copied
+
+	/* Fields enclosed in headers group are copied
 	 * using a single memcpy() in __copy_skb_header()
 	 */
-	/* private: */
-	__u32			headers_start[0];
-	/* public: */
+#ifdef __GENKSYMS__
+	__u32                   headers_start[0];
+#else
+	struct_group(headers,
+#endif
 
 /* if you move pkt_type around you also must adapt those constants */
 #ifdef __BIG_ENDIAN_BITFIELD
@@ -930,9 +937,11 @@ struct sk_buff {
 	char rh_reserved_start[0];
 #endif
 
-	/* private: */
-	__u32			headers_end[0];
-	/* public: */
+#ifdef __GENKSYMS__
+	__u32                   headers_end[0];
+#else
+	); /* end headers group */
+#endif
 
 #ifdef __GENKSYMS__
 	char rh_reserved[RH_KABI_SKBUFF_RESERVED];
@@ -2350,27 +2359,38 @@ static inline void *skb_pull_inline(struct sk_buff *skb, unsigned int len)
 
 void *__pskb_pull_tail(struct sk_buff *skb, int delta);
 
-static inline void *__pskb_pull(struct sk_buff *skb, unsigned int len)
+static inline enum skb_drop_reason
+pskb_may_pull_reason(struct sk_buff *skb, unsigned int len)
 {
-	if (len > skb_headlen(skb) &&
-	    !__pskb_pull_tail(skb, len - skb_headlen(skb)))
-		return NULL;
-	skb->len -= len;
-	return skb->data += len;
-}
+	if (likely(len <= skb_headlen(skb)))
+		return SKB_NOT_DROPPED_YET;
 
-static inline void *pskb_pull(struct sk_buff *skb, unsigned int len)
-{
-	return unlikely(len > skb->len) ? NULL : __pskb_pull(skb, len);
+	if (unlikely(len > skb->len))
+		return SKB_DROP_REASON_PKT_TOO_SMALL;
+
+	if (unlikely(!__pskb_pull_tail(skb, len - skb_headlen(skb))))
+		return SKB_DROP_REASON_NOMEM;
+
+	return SKB_NOT_DROPPED_YET;
 }
 
 static inline int pskb_may_pull(struct sk_buff *skb, unsigned int len)
 {
-	if (likely(len <= skb_headlen(skb)))
-		return 1;
-	if (unlikely(len > skb->len))
-		return 0;
-	return __pskb_pull_tail(skb, len - skb_headlen(skb)) != NULL;
+	return pskb_may_pull_reason(skb, len) == SKB_NOT_DROPPED_YET;
+}
+
+static inline void *pskb_pull(struct sk_buff *skb, unsigned int len)
+{
+	if (!pskb_may_pull(skb, len))
+		return NULL;
+
+	skb->len -= len;
+	return skb->data += len;
+}
+
+static inline void *__pskb_pull(struct sk_buff *skb, unsigned int len)
+{
+	return pskb_pull(skb, len);
 }
 
 void skb_condense(struct sk_buff *skb);
@@ -3710,11 +3730,11 @@ __wsum skb_checksum(const struct sk_buff *skb, int offset, int len,
 		    __wsum csum);
 
 static inline void * __must_check
-__skb_header_pointer(const struct sk_buff *skb, int offset,
-		     int len, void *data, int hlen, void *buffer)
+__skb_header_pointer(const struct sk_buff *skb, int offset, int len,
+		     const void *data, int hlen, void *buffer)
 {
 	if (hlen - offset >= len)
-		return data + offset;
+		return (void *)data + offset;
 
 	if (!skb ||
 	    skb_copy_bits(skb, offset, buffer, len) < 0)

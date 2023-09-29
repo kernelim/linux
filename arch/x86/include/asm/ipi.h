@@ -47,7 +47,7 @@ static inline unsigned int __prepare_ICR(unsigned int shortcut, int vector,
 
 static inline int __prepare_ICR2(unsigned int mask)
 {
-	return SET_APIC_DEST_FIELD(mask);
+	return SET_XAPIC_DEST_FIELD(mask);
 }
 
 static inline void __xapic_wait_icr_idle(void)

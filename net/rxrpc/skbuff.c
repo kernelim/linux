@@ -64,7 +64,7 @@ void rxrpc_free_skb(struct sk_buff *skb, enum rxrpc_skb_trace op)
 		CHECK_SLAB_OKAY(&skb->users);
 		n = atomic_dec_return(select_skb_count(op));
 		trace_rxrpc_skb(skb, op, refcount_read(&skb->users), n, here);
-		kfree_skb(skb);
+		kfree_skb_reason(skb, SKB_CONSUMED);
 	}
 }
 
@@ -79,7 +79,7 @@ void rxrpc_lose_skb(struct sk_buff *skb, enum rxrpc_skb_trace op)
 		CHECK_SLAB_OKAY(&skb->users);
 		n = atomic_dec_return(select_skb_count(op));
 		trace_rxrpc_skb(skb, op, refcount_read(&skb->users), n, here);
-		kfree_skb(skb);
+		consume_skb(skb);
 	}
 }
 
@@ -94,6 +94,6 @@ void rxrpc_purge_queue(struct sk_buff_head *list)
 		int n = atomic_dec_return(select_skb_count(rxrpc_skb_rx_purged));
 		trace_rxrpc_skb(skb, rxrpc_skb_rx_purged,
 				refcount_read(&skb->users), n, here);
-		kfree_skb(skb);
+		consume_skb(skb);
 	}
 }

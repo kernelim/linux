@@ -816,8 +816,7 @@ static int igen6_get_dimm_config(struct mem_ctl_info *mci)
 		ndimms = 0;
 
 		for (j = 0; j < NUM_DIMMS; j++) {
-			dimm = EDAC_DIMM_PTR(mci->layers, mci->dimms, mci->n_layers,
-					     i, j, 0);
+			dimm = edac_get_dimm(mci, i, j, 0);
 
 			if (j ^ imc->dimm_l_map[i]) {
 				dtype = get_width(0, mad_dimm);

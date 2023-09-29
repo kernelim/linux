@@ -361,13 +361,41 @@ static inline unsigned long __pack_fe01(unsigned int fpmode)
 }
 
 #ifdef CONFIG_PPC64
-#define cpu_relax()	do { HMT_low(); HMT_medium(); barrier(); } while (0)
+#define cpu_relax()							\
+do {									\
+	asm volatile(ASM_FTR_IFCLR(					\
+		/* Pre-POWER10 uses low ; medium priority nops */	\
+		"or 1,1,1 ; or 2,2,2",					\
+		/* POWER10 onward uses pause_short (wait 2,0) */	\
+		PPC_WAIT_BOOKS(2, 0),					\
+				%0) :: "i" (CPU_FTR_ARCH_31) : "memory"); \
+} while (0)
 
-#define spin_begin()	HMT_low()
+#define spin_begin()							\
+do {									\
+	asm volatile(ASM_FTR_IFCLR(					\
+		"or 1,1,1", /* HMT_LOW */				\
+		"nop",/* POWER10 onward uses pause_short (wait 2,0) */	\
+				%0) :: "i" (CPU_FTR_ARCH_31) : "memory"); \
+} while (0)
 
-#define spin_cpu_relax()	barrier()
+#define spin_cpu_relax()						\
+do {									\
+	asm volatile(ASM_FTR_IFCLR(					\
+		/* Pre-POWER10 uses low ; medium priority nops */	\
+		"nop",							\
+		/* POWER10 onward uses pause_short (wait 2,0) */	\
+		PPC_WAIT_BOOKS(2, 0),					\
+				%0) :: "i" (CPU_FTR_ARCH_31) : "memory"); \
+} while (0)
 
-#define spin_end()	HMT_medium()
+#define spin_end()							\
+do {									\
+	asm volatile(ASM_FTR_IFCLR(					\
+		"or 2,2,2", /* HMT_MEDIUM */				\
+		"nop",/* POWER10 onward uses pause_short (wait 2,0) */	\
+				%0) :: "i" (CPU_FTR_ARCH_31) : "memory"); \
+} while (0)
 
 #define spin_until_cond(cond)					\
 do {								\

@@ -583,6 +583,7 @@ void typec_unregister_altmode(struct typec_altmode *adev)
 {
 	if (IS_ERR_OR_NULL(adev))
 		return;
+	typec_retimer_put(to_altmode(adev)->retimer);
 	typec_mux_put(to_altmode(adev)->mux);
 	device_unregister(&adev->dev);
 }
@@ -820,6 +821,25 @@ void typec_partner_set_svdm_version(struct typec_partner *partner,
 	partner->svdm_version = svdm_version;
 }
 EXPORT_SYMBOL_GPL(typec_partner_set_svdm_version);
+
+/**
+ * typec_partner_usb_power_delivery_register - Register Type-C partner USB Power Delivery Support
+ * @partner: Type-C partner device.
+ * @desc: Description of the USB PD contract.
+ *
+ * This routine is a wrapper around usb_power_delivery_register(). It registers
+ * USB Power Delivery Capabilities for a Type-C partner device. Specifically,
+ * it sets the Type-C partner device as a parent for the resulting USB Power Delivery object.
+ *
+ * Returns handle to struct usb_power_delivery or ERR_PTR.
+ */
+struct usb_power_delivery *
+typec_partner_usb_power_delivery_register(struct typec_partner *partner,
+					  struct usb_power_delivery_desc *desc)
+{
+	return usb_power_delivery_register(&partner->dev, desc);
+}
+EXPORT_SYMBOL_GPL(typec_partner_usb_power_delivery_register);
 
 /**
  * typec_register_partner - Register a USB Type-C Partner
@@ -2046,16 +2066,26 @@ typec_port_register_altmode(struct typec_port *port,
 {
 	struct typec_altmode *adev;
 	struct typec_mux *mux;
+	struct typec_retimer *retimer;
 
 	mux = typec_mux_get(&port->dev, desc);
 	if (IS_ERR(mux))
 		return ERR_CAST(mux);
 
-	adev = typec_register_altmode(&port->dev, desc);
-	if (IS_ERR(adev))
+	retimer = typec_retimer_get(&port->dev);
+	if (IS_ERR(retimer)) {
 		typec_mux_put(mux);
-	else
+		return ERR_CAST(retimer);
+	}
+
+	adev = typec_register_altmode(&port->dev, desc);
+	if (IS_ERR(adev)) {
+		typec_retimer_put(retimer);
+		typec_mux_put(mux);
+	} else {
 		to_altmode(adev)->mux = mux;
+		to_altmode(adev)->retimer = retimer;
+	}
 
 	return adev;
 }
@@ -2175,8 +2205,6 @@ struct typec_port *typec_register_port(struct device *parent,
 
 	ida_init(&port->mode_ids);
 	mutex_init(&port->port_type_lock);
-	mutex_init(&port->port_list_lock);
-	INIT_LIST_HEAD(&port->port_list);
 
 	port->id = id;
 	port->ops = cap->ops;

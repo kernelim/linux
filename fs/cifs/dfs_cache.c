@@ -1325,7 +1325,7 @@ static bool target_share_equal(struct TCP_Server_Info *server, const char *s1, c
 	extract_unc_hostname(s1, &host, &hostlen);
 	scnprintf(unc, sizeof(unc), "\\\\%.*s", (int)hostlen, host);
 
-	rc = dns_resolve_server_name_to_ip(unc, &ip);
+	rc = dns_resolve_server_name_to_ip(unc, &ip, NULL);
 	if (rc < 0) {
 		cifs_dbg(FYI, "%s: could not resolve %.*s. assuming server address matches.\n",
 			 __func__, (int)hostlen, host);

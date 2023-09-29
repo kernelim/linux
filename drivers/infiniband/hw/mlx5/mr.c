@@ -36,9 +36,7 @@
 #include <linux/debugfs.h>
 #include <linux/export.h>
 #include <linux/delay.h>
-#include <rdma/ib_umem.h>
 #include <rdma/ib_umem_odp.h>
-#include <rdma/ib_verbs.h>
 #include "dm.h"
 #include "mlx5_ib.h"
 #include "ib_rep.h"
@@ -1790,10 +1788,8 @@ int mlx5_ib_alloc_mw(struct ib_mw *ibmw, struct ib_udata *udata)
 	ndescs = req.num_klms ? roundup(req.num_klms, 4) : roundup(1, 4);
 
 	in = kzalloc(inlen, GFP_KERNEL);
-	if (!in) {
-		err = -ENOMEM;
-		goto free;
-	}
+	if (!in)
+		return -ENOMEM;
 
 	mkc = MLX5_ADDR_OF(create_mkey_in, in, memory_key_mkey_entry);
 

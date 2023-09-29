@@ -1,4 +1,4 @@
-obj-y					+= core.o probe.o
+obj-y					+= core.o probe.o utils.o
 obj-$(CONFIG_PERF_EVENTS_INTEL_RAPL)	+= rapl.o
 obj-y					+= amd/
 obj-$(CONFIG_X86_LOCAL_APIC)            += msr.o

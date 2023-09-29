@@ -51,7 +51,7 @@ struct ptp_system_timestamp {
 };
 
 /**
- * struct ptp_clock_info - decribes a PTP hardware clock
+ * struct ptp_clock_info - describes a PTP hardware clock
  *
  * @owner:     The clock driver should set to THIS_MODULE.
  * @name:      A short "friendly name" to identify the clock and to
@@ -79,6 +79,9 @@ struct ptp_system_timestamp {
  *            the @adjfine method instead.
  *            parameter delta: Desired frequency offset from nominal frequency
  *            in parts per billion
+ *
+ * @adjphase:  Adjusts the phase offset of the hardware clock.
+ *             parameter delta: Desired change in nanoseconds.
  *
  * @adjtime:  Shifts the time of the hardware clock.
  *            parameter delta: Desired change in nanoseconds.
@@ -143,6 +146,7 @@ struct ptp_clock_info {
 	struct ptp_pin_desc *pin_config;
 	int (*adjfine)(struct ptp_clock_info *ptp, long scaled_ppm);
 	int (*adjfreq)(struct ptp_clock_info *ptp, s32 delta);
+	int (*adjphase)(struct ptp_clock_info *ptp, s32 phase);
 	int (*adjtime)(struct ptp_clock_info *ptp, s64 delta);
 	int (*gettime64)(struct ptp_clock_info *ptp, struct timespec64 *ts);
 	int (*gettimex64)(struct ptp_clock_info *ptp, struct timespec64 *ts,

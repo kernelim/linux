@@ -15,3 +15,4 @@ x86 architecture specifics
    elf_auxvec
    xstate
    intel-hfi
+   ifs

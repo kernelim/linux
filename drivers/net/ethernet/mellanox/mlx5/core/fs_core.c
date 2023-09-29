@@ -431,7 +431,8 @@ static bool is_fwd_dest_type(enum mlx5_flow_destination_type type)
 		type == MLX5_FLOW_DESTINATION_TYPE_UPLINK ||
 		type == MLX5_FLOW_DESTINATION_TYPE_VPORT ||
 		type == MLX5_FLOW_DESTINATION_TYPE_FLOW_SAMPLER ||
-		type == MLX5_FLOW_DESTINATION_TYPE_TIR;
+		type == MLX5_FLOW_DESTINATION_TYPE_TIR ||
+		type == MLX5_FLOW_DESTINATION_TYPE_RANGE;
 }
 
 static bool check_valid_spec(const struct mlx5_flow_spec *spec)
@@ -1561,7 +1562,13 @@ static bool mlx5_flow_dests_cmp(struct mlx5_flow_destination *d1,
 		    (d1->type == MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE_NUM &&
 		     d1->ft_num == d2->ft_num) ||
 		    (d1->type == MLX5_FLOW_DESTINATION_TYPE_FLOW_SAMPLER &&
-		     d1->sampler_id == d2->sampler_id))
+		     d1->sampler_id == d2->sampler_id) ||
+		    (d1->type == MLX5_FLOW_DESTINATION_TYPE_RANGE &&
+		     d1->range.field == d2->range.field &&
+		     d1->range.hit_ft == d2->range.hit_ft &&
+		     d1->range.miss_ft == d2->range.miss_ft &&
+		     d1->range.min == d2->range.min &&
+		     d1->range.max == d2->range.max))
 			return true;
 	}
 
@@ -1750,7 +1757,6 @@ static int build_match_list(struct match_list *match_head,
 {
 	struct rhlist_head *tmp, *list;
 	struct mlx5_flow_group *g;
-	int err = 0;
 
 	rcu_read_lock();
 	INIT_LIST_HEAD(&match_head->list);
@@ -1776,7 +1782,7 @@ static int build_match_list(struct match_list *match_head,
 		list_add_tail(&curr_match->list, &match_head->list);
 	}
 	rcu_read_unlock();
-	return err;
+	return 0;
 }
 
 static u64 matched_fgs_get_version(struct list_head *match_head)
@@ -1943,6 +1949,9 @@ _mlx5_add_flow_rules(struct mlx5_flow_table *ft,
 		return ERR_PTR(-EINVAL);
 
 	if (flow_act->fg && ft->autogroup.active)
+		return ERR_PTR(-EINVAL);
+
+	if (dest && dest_num <= 0)
 		return ERR_PTR(-EINVAL);
 
 	for (i = 0; i < dest_num; i++) {

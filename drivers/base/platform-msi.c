@@ -124,6 +124,7 @@ static void platform_msi_free_descs(struct device *dev, int base, int nvec)
 		}
 	}
 }
+EXPORT_SYMBOL_GPL(platform_msi_create_irq_domain);
 
 static int platform_msi_alloc_descs_with_irq(struct device *dev, int virq,
 					     int nvec,

@@ -979,7 +979,7 @@ static void __intel_vgpu_release(struct intel_vgpu *vgpu)
 	/* dereference module reference taken at open */
 	module_put(THIS_MODULE);
 
-	debugfs_remove(debugfs_lookup(KVMGT_DEBUGFS_FILENAME, vgpu->debugfs));
+	debugfs_lookup_and_remove(KVMGT_DEBUGFS_FILENAME, vgpu->debugfs);
 
 	kvm_page_track_unregister_notifier(vgpu->kvm, &vgpu->track_node);
 	kvm_put_kvm(vgpu->kvm);

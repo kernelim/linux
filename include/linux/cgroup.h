@@ -66,6 +66,7 @@ struct css_task_iter {
 	struct list_head		iters_node;	/* css_set->task_iters */
 };
 
+extern struct file_system_type cgroup_fs_type;
 extern struct cgroup_root cgrp_dfl_root;
 extern struct css_set init_css_set;
 
@@ -744,11 +745,6 @@ static inline bool task_under_cgroup_hierarchy(struct task_struct *task,
 
 static inline void cgroup_path_from_kernfs_id(u64 id, char *buf, size_t buflen)
 {}
-
-static inline struct cgroup *cgroup_get_from_id(u64 id)
-{
-	return NULL;
-}
 #endif /* !CONFIG_CGROUPS */
 
 #ifdef CONFIG_CGROUPS

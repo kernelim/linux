@@ -2,6 +2,7 @@
 #include <test_util.h>
 #include <kvm_util.h>
 #include <processor.h>
+#include <linux/bitfield.h>
 
 #define VCPU_ID 0
 
@@ -245,7 +246,7 @@ static int debug_version(struct kvm_vm *vm)
 	uint64_t id_aa64dfr0;
 
 	get_reg(vm, VCPU_ID, KVM_ARM64_SYS_REG(SYS_ID_AA64DFR0_EL1), &id_aa64dfr0);
-	return id_aa64dfr0 & 0xf;
+	return FIELD_GET(ARM64_FEATURE_MASK(ID_AA64DFR0_DEBUGVER), id_aa64dfr0);
 }
 
 int main(int argc, char *argv[])

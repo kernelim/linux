@@ -153,7 +153,7 @@ is 0x15 and the full version number is 0x234, this file will contain
 the value 340 = 0x154.
 
 See the type_of_loader and ext_loader_type fields in
-Documentation/x86/boot.txt for additional information.
+Documentation/x86/boot.rst for additional information.
 
 ==============================================================
 
@@ -165,7 +165,7 @@ The complete bootloader version number.  In the example above, this
 file will contain the value 564 = 0x234.
 
 See the type_of_loader and ext_loader_ver fields in
-Documentation/x86/boot.txt for additional information.
+Documentation/x86/boot.rst for additional information.
 
 ==============================================================
 
@@ -218,6 +218,7 @@ core_pattern is used to specify a core dumpfile pattern name.
 	%h	hostname
 	%e	executable filename (may be shortened)
 	%E	executable path
+	%C	CPU the task ran on
 	%<OTHER> both are dropped
 . If the first character of the pattern is a '|', the kernel will treat
   the rest of the pattern as a command to run.  The core dump will be
@@ -477,6 +478,18 @@ in a KVM virtual machine. This default can be overridden by adding
    nmi_watchdog=1
 
 to the guest kernel command line (see Documentation/admin-guide/kernel-parameters.rst).
+
+==============================================================
+
+nmi_wd_lpm_factor (PPC only)
+
+Factor to apply to the NMI watchdog timeout (only when nmi_watchdog is set
+to 1). This factor represents the percentage added to watchdog_thresh when
+calculating the NMI watchdog timeout during an LPM. The soft lockup timeout
+is not impacted.
+
+A value of 0 means no change. The default value is 200 meaning the NMI
+watchdog is set to 30s (based on watchdog_thresh equal to 10).
 
 ==============================================================
 

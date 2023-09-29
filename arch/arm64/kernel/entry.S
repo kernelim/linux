@@ -39,18 +39,12 @@
 #include <asm/unistd.h>
 
 /*
- * Context tracking subsystem.  Used to instrument transitions
- * between user and kernel mode.
+ * Context tracking and irqflag tracing need to instrument transitions between
+ * user and kernel mode.
  */
-	.macro ct_user_exit_irqoff
-#ifdef CONFIG_CONTEXT_TRACKING
-	bl	enter_from_user_mode
-#endif
-	.endm
-
-	.macro ct_user_enter
-#ifdef CONFIG_CONTEXT_TRACKING
-	bl	context_tracking_user_enter
+	.macro user_enter_irqoff
+#if defined(CONFIG_CONTEXT_TRACKING) || defined(CONFIG_TRACE_IRQFLAGS)
+	bl	exit_to_user_mode
 #endif
 	.endm
 
@@ -60,16 +54,7 @@
 	.endr
 	.endm
 
-/*
- * Bad Abort numbers
- *-----------------
- */
-#define BAD_SYNC	0
-#define BAD_IRQ		1
-#define BAD_FIQ		2
-#define BAD_ERROR	3
-
-	.macro kernel_ventry, el, label, regsize = 64
+	.macro kernel_ventry, el:req, ht:req, regsize:req, label:req
 	.align 7
 .Lventry_start\@:
 	.if	\el == 0
@@ -99,7 +84,7 @@
 	tbnz	x0, #THREAD_SHIFT, 0f
 	sub	x0, sp, x0			// x0'' = sp' - x0' = (sp + x0) - sp = x0
 	sub	sp, sp, x0			// sp'' = sp' - x0 = (sp + x0) - x0 = sp
-	b	el\()\el\()_\label
+	b	el\el\ht\()_\regsize\()_\label
 
 0:
 	/*
@@ -131,7 +116,7 @@
 	sub	sp, sp, x0
 	mrs	x0, tpidrro_el0
 #endif
-	b	el\()\el\()_\label
+	b	el\el\ht\()_\regsize\()_\label
 .org .Lventry_start\@ + 128	// Did we overflow the ventry slot?
 	.endm
 
@@ -226,28 +211,9 @@ alternative_cb_end
 	add	x29, sp, #S_STACKFRAME
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
-	/*
-	 * Set the TTBR0 PAN bit in SPSR. When the exception is taken from
-	 * EL0, there is no need to check the state of TTBR0_EL1 since
-	 * accesses are always enabled.
-	 * Note that the meaning of this bit differs from the ARMv8.1 PAN
-	 * feature as all TTBR0_EL1 accesses are disabled, not just those to
-	 * user mappings.
-	 */
-alternative_if ARM64_HAS_PAN
-	b	1f				// skip TTBR0 PAN
+alternative_if_not ARM64_HAS_PAN
+	bl	__swpan_entry_el\el
 alternative_else_nop_endif
-
-	.if	\el != 0
-	mrs	x21, ttbr0_el1
-	tst	x21, #TTBR_ASID_MASK		// Check for the reserved ASID
-	orr	x23, x23, #PSR_PAN_BIT		// Set the emulated PAN in the saved SPSR
-	b.eq	1f				// TTBR0 access already disabled
-	and	x23, x23, #~PSR_PAN_BIT		// Clear the emulated PAN in the saved SPSR
-	.endif
-
-	__uaccess_ttbr0_disable x21
-1:
 #endif
 
 	stp	x22, x23, [sp, #S_PC]
@@ -258,11 +224,15 @@ alternative_else_nop_endif
 	str	w21, [sp, #S_SYSCALLNO]
 	.endif
 
+#ifdef CONFIG_ARM64_PSEUDO_NMI
 	/* Save pmr */
 alternative_if ARM64_HAS_IRQ_PRIO_MASKING
 	mrs_s	x20, SYS_ICC_PMR_EL1
 	str	x20, [sp, #S_PMR_SAVE]
+	mov	x20, #GIC_PRIO_IRQON | GIC_PRIO_PSR_I_SET
+	msr_s	SYS_ICC_PMR_EL1, x20
 alternative_else_nop_endif
+#endif
 
 	/*
 	 * Registers that may be useful after this macro is invoked:
@@ -285,6 +255,7 @@ alternative_else_nop_endif
 	/* No need to restore UAO, it will be restored from SPSR_EL1 */
 	.endif
 
+#ifdef CONFIG_ARM64_PSEUDO_NMI
 	/* Restore pmr */
 alternative_if ARM64_HAS_IRQ_PRIO_MASKING
 	ldr	x20, [sp, #S_PMR_SAVE]
@@ -294,41 +265,14 @@ alternative_if ARM64_HAS_IRQ_PRIO_MASKING
 	dsb	sy				// Ensure priority change is seen by redistributor
 .L__skip_pmr_sync\@:
 alternative_else_nop_endif
+#endif
 
 	ldp	x21, x22, [sp, #S_PC]		// load ELR, SPSR
-	.if	\el == 0
-	ct_user_enter
-	.endif
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
-	/*
-	 * Restore access to TTBR0_EL1. If returning to EL0, no need for SPSR
-	 * PAN bit checking.
-	 */
-alternative_if ARM64_HAS_PAN
-	b	2f				// skip TTBR0 PAN
+alternative_if_not ARM64_HAS_PAN
+	bl	__swpan_exit_el\el
 alternative_else_nop_endif
-
-	.if	\el != 0
-	tbnz	x22, #22, 1f			// Skip re-enabling TTBR0 access if the PSR_PAN_BIT is set
-	.endif
-
-	__uaccess_ttbr0_enable x0, x1
-
-	.if	\el == 0
-	/*
-	 * Enable errata workarounds only if returning to user. The only
-	 * workaround currently required for TTBR0_EL1 changes are for the
-	 * Cavium erratum 27456 (broadcast TLBI instructions may cause I-cache
-	 * corruption).
-	 */
-	bl	post_ttbr_update_workaround
-	.endif
-1:
-	.if	\el != 0
-	and	x22, x22, #~PSR_PAN_BIT		// ARMv8.0 CPUs do not understand this bit
-	.endif
-2:
 #endif
 
 	.if	\el == 0
@@ -399,35 +343,48 @@ alternative_else_nop_endif
 	sb
 	.endm
 
-	.macro	irq_stack_entry
-	mov	x19, sp			// preserve the original sp
+#ifdef CONFIG_ARM64_SW_TTBR0_PAN
+	/*
+	 * Set the TTBR0 PAN bit in SPSR. When the exception is taken from
+	 * EL0, there is no need to check the state of TTBR0_EL1 since
+	 * accesses are always enabled.
+	 * Note that the meaning of this bit differs from the ARMv8.1 PAN
+	 * feature as all TTBR0_EL1 accesses are disabled, not just those to
+	 * user mappings.
+	 */
+SYM_CODE_START_LOCAL(__swpan_entry_el1)
+	mrs	x21, ttbr0_el1
+	tst	x21, #TTBR_ASID_MASK		// Check for the reserved ASID
+	orr	x23, x23, #PSR_PAN_BIT		// Set the emulated PAN in the saved SPSR
+	b.eq	1f				// TTBR0 access already disabled
+	and	x23, x23, #~PSR_PAN_BIT		// Clear the emulated PAN in the saved SPSR
+SYM_INNER_LABEL(__swpan_entry_el0, SYM_L_LOCAL)
+	__uaccess_ttbr0_disable x21
+1:	ret
+SYM_CODE_END(__swpan_entry_el1)
 
 	/*
-	 * Compare sp with the base of the task stack.
-	 * If the top ~(THREAD_SIZE - 1) bits match, we are on a task stack,
-	 * and should switch to the irq stack.
+	 * Restore access to TTBR0_EL1. If returning to EL0, no need for SPSR
+	 * PAN bit checking.
 	 */
-	ldr	x25, [tsk, TSK_STACK]
-	eor	x25, x25, x19
-	and	x25, x25, #~(THREAD_SIZE - 1)
-	cbnz	x25, 9998f
+SYM_CODE_START_LOCAL(__swpan_exit_el1)
+	tbnz	x22, #22, 1f			// Skip re-enabling TTBR0 access if the PSR_PAN_BIT is set
+	__uaccess_ttbr0_enable x0, x1
+1:	and	x22, x22, #~PSR_PAN_BIT		// ARMv8.0 CPUs do not understand this bit
+	ret
+SYM_CODE_END(__swpan_exit_el1)
 
-	ldr_this_cpu x25, irq_stack_ptr, x26
-	mov	x26, #IRQ_STACK_SIZE
-	add	x26, x25, x26
-
-	/* switch to the irq stack */
-	mov	sp, x26
-9998:
-	.endm
-
+SYM_CODE_START_LOCAL(__swpan_exit_el0)
+	__uaccess_ttbr0_enable x0, x1
 	/*
-	 * x19 should be preserved between irq_stack_entry and
-	 * irq_stack_exit.
+	 * Enable errata workarounds only if returning to user. The only
+	 * workaround currently required for TTBR0_EL1 changes are for the
+	 * Cavium erratum 27456 (broadcast TLBI instructions may cause I-cache
+	 * corruption).
 	 */
-	.macro	irq_stack_exit
-	mov	sp, x19
-	.endm
+	b	post_ttbr_update_workaround
+SYM_CODE_END(__swpan_exit_el0)
+#endif
 
 /* GPRs used by entry code */
 tsk	.req	x28		// current thread_info
@@ -435,41 +392,10 @@ tsk	.req	x28		// current thread_info
 /*
  * Interrupt handling.
  */
-	.macro	irq_handler
-	ldr_l	x1, handle_arch_irq
-	mov	x0, sp
-	irq_stack_entry
-	blr	x1
-	irq_stack_exit
-	.endm
-
-#ifdef CONFIG_ARM64_PSEUDO_NMI
-	/*
-	 * Set res to 0 if irqs were unmasked in interrupted context.
-	 * Otherwise set res to non-0 value.
-	 */
-	.macro	test_irqs_unmasked res:req, pmr:req
-alternative_if ARM64_HAS_IRQ_PRIO_MASKING
-	sub	\res, \pmr, #GIC_PRIO_IRQON
-alternative_else
-	mov	\res, xzr
-alternative_endif
-	.endm
-#endif
-
 	.macro	gic_prio_kentry_setup, tmp:req
 #ifdef CONFIG_ARM64_PSEUDO_NMI
 	alternative_if ARM64_HAS_IRQ_PRIO_MASKING
 	mov	\tmp, #(GIC_PRIO_PSR_I_SET | GIC_PRIO_IRQON)
-	msr_s	SYS_ICC_PMR_EL1, \tmp
-	alternative_else_nop_endif
-#endif
-	.endm
-
-	.macro	gic_prio_irq_setup, pmr:req, tmp:req
-#ifdef CONFIG_ARM64_PSEUDO_NMI
-	alternative_if ARM64_HAS_IRQ_PRIO_MASKING
-	orr	\tmp, \pmr, #GIC_PRIO_PSR_I_SET
 	msr_s	SYS_ICC_PMR_EL1, \tmp
 	alternative_else_nop_endif
 #endif
@@ -484,32 +410,25 @@ alternative_endif
 
 	.align	11
 SYM_CODE_START(vectors)
-	kernel_ventry	1, sync_invalid			// Synchronous EL1t
-	kernel_ventry	1, irq_invalid			// IRQ EL1t
-	kernel_ventry	1, fiq_invalid			// FIQ EL1t
-	kernel_ventry	1, error_invalid		// Error EL1t
+	kernel_ventry	1, t, 64, sync		// Synchronous EL1t
+	kernel_ventry	1, t, 64, irq		// IRQ EL1t
+	kernel_ventry	1, t, 64, fiq		// FIQ EL1h
+	kernel_ventry	1, t, 64, error		// Error EL1t
 
-	kernel_ventry	1, sync				// Synchronous EL1h
-	kernel_ventry	1, irq				// IRQ EL1h
-	kernel_ventry	1, fiq_invalid			// FIQ EL1h
-	kernel_ventry	1, error			// Error EL1h
+	kernel_ventry	1, h, 64, sync		// Synchronous EL1h
+	kernel_ventry	1, h, 64, irq		// IRQ EL1h
+	kernel_ventry	1, h, 64, fiq		// FIQ EL1h
+	kernel_ventry	1, h, 64, error		// Error EL1h
 
-	kernel_ventry	0, sync				// Synchronous 64-bit EL0
-	kernel_ventry	0, irq				// IRQ 64-bit EL0
-	kernel_ventry	0, fiq_invalid			// FIQ 64-bit EL0
-	kernel_ventry	0, error			// Error 64-bit EL0
+	kernel_ventry	0, t, 64, sync		// Synchronous 64-bit EL0
+	kernel_ventry	0, t, 64, irq		// IRQ 64-bit EL0
+	kernel_ventry	0, t, 64, fiq		// FIQ 64-bit EL0
+	kernel_ventry	0, t, 64, error		// Error 64-bit EL0
 
-#ifdef CONFIG_COMPAT
-	kernel_ventry	0, sync_compat, 32		// Synchronous 32-bit EL0
-	kernel_ventry	0, irq_compat, 32		// IRQ 32-bit EL0
-	kernel_ventry	0, fiq_invalid_compat, 32	// FIQ 32-bit EL0
-	kernel_ventry	0, error_compat, 32		// Error 32-bit EL0
-#else
-	kernel_ventry	0, sync_invalid, 32		// Synchronous 32-bit EL0
-	kernel_ventry	0, irq_invalid, 32		// IRQ 32-bit EL0
-	kernel_ventry	0, fiq_invalid, 32		// FIQ 32-bit EL0
-	kernel_ventry	0, error_invalid, 32		// Error 32-bit EL0
-#endif
+	kernel_ventry	0, t, 32, sync		// Synchronous 32-bit EL0
+	kernel_ventry	0, t, 32, irq		// IRQ 32-bit EL0
+	kernel_ventry	0, t, 32, fiq		// FIQ 32-bit EL0
+	kernel_ventry	0, t, 32, error		// Error 32-bit EL0
 SYM_CODE_END(vectors)
 
 #ifdef CONFIG_VMAP_STACK
@@ -540,203 +459,46 @@ __bad_stack:
 	ASM_BUG()
 #endif /* CONFIG_VMAP_STACK */
 
-/*
- * Invalid mode handlers
- */
-	.macro	inv_entry, el, reason, regsize = 64
+
+	.macro entry_handler el:req, ht:req, regsize:req, label:req
+SYM_CODE_START_LOCAL(el\el\ht\()_\regsize\()_\label)
 	kernel_entry \el, \regsize
 	mov	x0, sp
-	mov	x1, #\reason
-	mrs	x2, esr_el1
-	bl	bad_mode
-	ASM_BUG()
+	bl	el\el\ht\()_\regsize\()_\label\()_handler
+	.if \el == 0
+	b	ret_to_user
+	.else
+	b	ret_to_kernel
+	.endif
+SYM_CODE_END(el\el\ht\()_\regsize\()_\label)
 	.endm
 
-SYM_CODE_START_LOCAL(el0_sync_invalid)
-	inv_entry 0, BAD_SYNC
-SYM_CODE_END(el0_sync_invalid)
-
-SYM_CODE_START_LOCAL(el0_irq_invalid)
-	inv_entry 0, BAD_IRQ
-SYM_CODE_END(el0_irq_invalid)
-
-SYM_CODE_START_LOCAL(el0_fiq_invalid)
-	inv_entry 0, BAD_FIQ
-SYM_CODE_END(el0_fiq_invalid)
-
-SYM_CODE_START_LOCAL(el0_error_invalid)
-	inv_entry 0, BAD_ERROR
-SYM_CODE_END(el0_error_invalid)
-
-#ifdef CONFIG_COMPAT
-SYM_CODE_START_LOCAL(el0_fiq_invalid_compat)
-	inv_entry 0, BAD_FIQ, 32
-SYM_CODE_END(el0_fiq_invalid_compat)
-#endif
-
-SYM_CODE_START_LOCAL(el1_sync_invalid)
-	inv_entry 1, BAD_SYNC
-SYM_CODE_END(el1_sync_invalid)
-
-SYM_CODE_START_LOCAL(el1_irq_invalid)
-	inv_entry 1, BAD_IRQ
-SYM_CODE_END(el1_irq_invalid)
-
-SYM_CODE_START_LOCAL(el1_fiq_invalid)
-	inv_entry 1, BAD_FIQ
-SYM_CODE_END(el1_fiq_invalid)
-
-SYM_CODE_START_LOCAL(el1_error_invalid)
-	inv_entry 1, BAD_ERROR
-SYM_CODE_END(el1_error_invalid)
-
 /*
- * EL1 mode handlers.
+ * Early exception handlers
  */
-	.align	6
-SYM_CODE_START_LOCAL_NOALIGN(el1_sync)
-	kernel_entry 1
-	mov	x0, sp
-	bl	el1_sync_handler
+	entry_handler	1, t, 64, sync
+	entry_handler	1, t, 64, irq
+	entry_handler	1, t, 64, fiq
+	entry_handler	1, t, 64, error
+
+	entry_handler	1, h, 64, sync
+	entry_handler	1, h, 64, irq
+	entry_handler	1, h, 64, fiq
+	entry_handler	1, h, 64, error
+
+	entry_handler	0, t, 64, sync
+	entry_handler	0, t, 64, irq
+	entry_handler	0, t, 64, fiq
+	entry_handler	0, t, 64, error
+
+	entry_handler	0, t, 32, sync
+	entry_handler	0, t, 32, irq
+	entry_handler	0, t, 32, fiq
+	entry_handler	0, t, 32, error
+
+SYM_CODE_START_LOCAL(ret_to_kernel)
 	kernel_exit 1
-SYM_CODE_END(el1_sync)
-
-	.align	6
-SYM_CODE_START_LOCAL_NOALIGN(el1_irq)
-	kernel_entry 1
-	gic_prio_irq_setup pmr=x20, tmp=x1
-	enable_da_f
-
-#ifdef CONFIG_ARM64_PSEUDO_NMI
-	test_irqs_unmasked	res=x0, pmr=x20
-	cbz	x0, 1f
-	bl	asm_nmi_enter
-1:
-#endif
-
-#ifdef CONFIG_TRACE_IRQFLAGS
-	bl	trace_hardirqs_off
-#endif
-
-	irq_handler
-
-#ifdef CONFIG_PREEMPT
-	ldr	x24, [tsk, #TSK_TI_PREEMPT]	// get preempt count
-alternative_if ARM64_HAS_IRQ_PRIO_MASKING
-	/*
-	 * DA_F were cleared at start of handling. If anything is set in DAIF,
-	 * we come back from an NMI, so skip preemption
-	 */
-	mrs	x0, daif
-	orr	x24, x24, x0
-alternative_else_nop_endif
-	cbnz	x24, 1f				// preempt count != 0 || NMI return path
-	bl	arm64_preempt_schedule_irq	// irq en/disable is done inside
-1:
-#endif
-
-#ifdef CONFIG_ARM64_PSEUDO_NMI
-	/*
-	 * When using IRQ priority masking, we can get spurious interrupts while
-	 * PMR is set to GIC_PRIO_IRQOFF. An NMI might also have occurred in a
-	 * section with interrupts disabled. Skip tracing in those cases.
-	 */
-	test_irqs_unmasked	res=x0, pmr=x20
-	cbz	x0, 1f
-	bl	asm_nmi_exit
-1:
-#endif
-
-#ifdef CONFIG_TRACE_IRQFLAGS
-#ifdef CONFIG_ARM64_PSEUDO_NMI
-	test_irqs_unmasked	res=x0, pmr=x20
-	cbnz	x0, 1f
-#endif
-	bl	trace_hardirqs_on
-1:
-#endif
-
-	kernel_exit 1
-SYM_CODE_END(el1_irq)
-
-/*
- * EL0 mode handlers.
- */
-	.align	6
-SYM_CODE_START_LOCAL_NOALIGN(el0_sync)
-	kernel_entry 0
-	mov	x0, sp
-	bl	el0_sync_handler
-	b	ret_to_user
-SYM_CODE_END(el0_sync)
-
-#ifdef CONFIG_COMPAT
-	.align	6
-SYM_CODE_START_LOCAL_NOALIGN(el0_sync_compat)
-	kernel_entry 0, 32
-	mov	x0, sp
-	bl	el0_sync_compat_handler
-	b	ret_to_user
-SYM_CODE_END(el0_sync_compat)
-
-	.align	6
-SYM_CODE_START_LOCAL_NOALIGN(el0_irq_compat)
-	kernel_entry 0, 32
-	b	el0_irq_naked
-SYM_CODE_END(el0_irq_compat)
-
-SYM_CODE_START_LOCAL_NOALIGN(el0_error_compat)
-	kernel_entry 0, 32
-	b	el0_error_naked
-SYM_CODE_END(el0_error_compat)
-#endif
-
-	.align	6
-SYM_CODE_START_LOCAL_NOALIGN(el0_irq)
-	kernel_entry 0
-el0_irq_naked:
-	gic_prio_irq_setup pmr=x20, tmp=x0
-	ct_user_exit_irqoff
-	enable_da_f
-
-#ifdef CONFIG_TRACE_IRQFLAGS
-	bl	trace_hardirqs_off
-#endif
-
-	tbz	x22, #55, 1f
-	bl	do_el0_irq_bp_hardening
-1:
-	irq_handler
-
-#ifdef CONFIG_TRACE_IRQFLAGS
-	bl	trace_hardirqs_on
-#endif
-	b	ret_to_user
-SYM_CODE_END(el0_irq)
-
-SYM_CODE_START_LOCAL(el1_error)
-	kernel_entry 1
-	mrs	x1, esr_el1
-	gic_prio_kentry_setup tmp=x2
-	enable_dbg
-	mov	x0, sp
-	bl	do_serror
-	kernel_exit 1
-SYM_CODE_END(el1_error)
-
-SYM_CODE_START_LOCAL(el0_error)
-	kernel_entry 0
-el0_error_naked:
-	mrs	x25, esr_el1
-	gic_prio_kentry_setup tmp=x2
-	ct_user_exit_irqoff
-	enable_dbg
-	mov	x0, sp
-	mov	x1, x25
-	bl	do_serror
-	enable_da_f
-	b	ret_to_user
-SYM_CODE_END(el0_error)
+SYM_CODE_END(ret_to_kernel)
 
 /*
  * "slow" syscall return path.
@@ -744,11 +506,15 @@ SYM_CODE_END(el0_error)
 SYM_CODE_START_LOCAL(ret_to_user)
 	disable_daif
 	gic_prio_kentry_setup tmp=x3
-	ldr	x1, [tsk, #TSK_TI_FLAGS]
-	and	x2, x1, #_TIF_WORK_MASK
+#ifdef CONFIG_TRACE_IRQFLAGS
+	bl	trace_hardirqs_off
+#endif
+	ldr	x19, [tsk, #TSK_TI_FLAGS]
+	and	x2, x19, #_TIF_WORK_MASK
 	cbnz	x2, work_pending
 finish_ret_to_user:
-	enable_step_tsk x1, x2
+	user_enter_irqoff
+	enable_step_tsk x19, x2
 	kernel_exit 0
 
 /*
@@ -756,11 +522,9 @@ finish_ret_to_user:
  */
 work_pending:
 	mov	x0, sp				// 'regs'
+	mov	x1, x19
 	bl	do_notify_resume
-#ifdef CONFIG_TRACE_IRQFLAGS
-	bl	trace_hardirqs_on		// enabled while in userspace
-#endif
-	ldr	x1, [tsk, #TSK_TI_FLAGS]	// re-check for single-step
+	ldr	x19, [tsk, #TSK_TI_FLAGS]	// re-check for single-step
 	b	finish_ret_to_user
 SYM_CODE_END(ret_to_user)
 
@@ -955,15 +719,15 @@ SYM_DATA_END(__entry_tramp_data_start)
  */
 	.macro generate_el1_vector, bhb
 .Lvector_start\@:
-	kernel_ventry	1, sync_invalid			// Synchronous EL1t
-	kernel_ventry	1, irq_invalid			// IRQ EL1t
-	kernel_ventry	1, fiq_invalid			// FIQ EL1t
-	kernel_ventry	1, error_invalid		// Error EL1t
+	kernel_ventry	1, t, 64, sync			// Synchronous EL1t
+	kernel_ventry	1, t, 64, irq			// IRQ EL1t
+	kernel_ventry	1, t, 64, fiq			// FIQ EL1t
+	kernel_ventry	1, t, 64, error			// Error EL1t
 
-	kernel_ventry	1, sync				// Synchronous EL1h
-	kernel_ventry	1, irq				// IRQ EL1h
-	kernel_ventry	1, fiq_invalid			// FIQ EL1h
-	kernel_ventry	1, error			// Error EL1h
+	kernel_ventry	1, h, 64, sync			// Synchronous EL1h
+	kernel_ventry	1, h, 64, irq			// IRQ EL1h
+	kernel_ventry	1, h, 64, fiq			// FIQ EL1h
+	kernel_ventry	1, h, 64, error			// Error EL1h
 
 	.rept	4
 	tramp_ventry	.Lvector_start\@, 64, 0, \bhb
@@ -1032,6 +796,42 @@ SYM_CODE_START(ret_from_fork)
 	b	ret_to_user
 SYM_CODE_END(ret_from_fork)
 NOKPROBE(ret_from_fork)
+
+/*
+ * void call_on_irq_stack(struct pt_regs *regs,
+ * 		          void (*func)(struct pt_regs *));
+ *
+ * Calls func(regs) using this CPU's irq stack and shadow irq stack.
+ */
+SYM_FUNC_START(call_on_irq_stack)
+#ifdef CONFIG_SHADOW_CALL_STACK
+	stp	scs_sp, xzr, [sp, #-16]!
+	ldr_this_cpu scs_sp, irq_shadow_call_stack_ptr, x17
+#endif
+	/* Create a frame record to save our LR and SP (implicit in FP) */
+	stp	x29, x30, [sp, #-16]!
+	mov	x29, sp
+
+	ldr_this_cpu x16, irq_stack_ptr, x17
+	mov	x15, #IRQ_STACK_SIZE
+	add	x16, x16, x15
+
+	/* Move to the new stack and call the function there */
+	mov	sp, x16
+	blr	x1
+
+	/*
+	 * Restore the SP from the FP, and restore the FP and LR from the frame
+	 * record.
+	 */
+	mov	sp, x29
+	ldp	x29, x30, [sp], #16
+#ifdef CONFIG_SHADOW_CALL_STACK
+	ldp	scs_sp, xzr, [sp], #16
+#endif
+	ret
+SYM_FUNC_END(call_on_irq_stack)
+NOKPROBE(call_on_irq_stack)
 
 #ifdef CONFIG_ARM_SDE_INTERFACE
 

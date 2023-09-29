@@ -28,7 +28,6 @@
 #include <linux/sched/task.h>
 #include <linux/sched/task_stack.h>
 #include <linux/kernel.h>
-#include <linux/lockdep.h>
 #include <linux/mm.h>
 #include <linux/stddef.h>
 #include <linux/sysctl.h>
@@ -54,9 +53,9 @@
 #include <linux/prctl.h>
 
 #include <asm/alternative.h>
-#include <asm/arch_gicv3.h>
 #include <asm/compat.h>
 #include <asm/cpufeature.h>
+#include <asm/cpuidle.h>
 #include <asm/cacheflush.h>
 #include <asm/exec.h>
 #include <asm/fpsimd.h>
@@ -79,33 +78,6 @@ EXPORT_SYMBOL_GPL(pm_power_off);
 
 void (*arm_pm_restart)(enum reboot_mode reboot_mode, const char *cmd);
 
-static void __cpu_do_idle(void)
-{
-	dsb(sy);
-	wfi();
-}
-
-static void __cpu_do_idle_irqprio(void)
-{
-	unsigned long pmr;
-	unsigned long daif_bits;
-
-	daif_bits = read_sysreg(daif);
-	write_sysreg(daif_bits | PSR_I_BIT, daif);
-
-	/*
-	 * Unmask PMR before going idle to make sure interrupts can
-	 * be raised.
-	 */
-	pmr = gic_read_pmr();
-	gic_write_pmr(GIC_PRIO_IRQON | GIC_PRIO_PSR_I_SET);
-
-	__cpu_do_idle();
-
-	gic_write_pmr(pmr);
-	write_sysreg(daif_bits, daif);
-}
-
 /*
  *	cpu_do_idle()
  *
@@ -115,18 +87,22 @@ static void __cpu_do_idle_irqprio(void)
  *	ensure that interrupts are not masked at the PMR (because the core will
  *	not wake up if we block the wake up signal in the interrupt controller).
  */
-void cpu_do_idle(void)
+void noinstr cpu_do_idle(void)
 {
-	if (system_uses_irq_prio_masking())
-		__cpu_do_idle_irqprio();
-	else
-		__cpu_do_idle();
+	struct arm_cpuidle_irq_context context;
+
+	arm_cpuidle_save_irq_context(&context);
+
+	dsb(sy);
+	wfi();
+
+	arm_cpuidle_restore_irq_context(&context);
 }
 
 /*
  * This is our default idle handler.
  */
-void arch_cpu_idle(void)
+void noinstr arch_cpu_idle(void)
 {
 	/*
 	 * This should do all the clock switching and wait for interrupt
@@ -632,22 +608,6 @@ void arch_setup_new_exec(void)
 
 	ptrauth_thread_init_user(current);
 	erratum_1418040_new_exec();
-}
-
-asmlinkage void __sched arm64_preempt_schedule_irq(void)
-{
-	lockdep_assert_irqs_disabled();
-
-	/*
-	 * Preempting a task from an IRQ means we leave copies of PSTATE
-	 * on the stack. cpufeature's enable calls may modify PSTATE, but
-	 * resuming one of these preempted tasks would undo those changes.
-	 *
-	 * Only allow a task to be preempted once cpufeatures have been
-	 * enabled.
-	 */
-	if (system_capabilities_finalized())
-		preempt_schedule_irq();
 }
 
 #ifdef CONFIG_ARM64_TAGGED_ADDR_ABI

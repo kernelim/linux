@@ -651,9 +651,9 @@ static void remove_node_from_stable_tree(struct stable_node *stable_node)
 	 * list_head to stay clear from the rb_parent_color union
 	 * (aligned and different than any node) and also different
 	 * from &migrate_nodes. This will verify that future list.h changes
-	 * don't break STABLE_NODE_DUP_HEAD.
+	 * don't break STABLE_NODE_DUP_HEAD. Only recent gcc can handle it.
 	 */
-#if GCC_VERSION >= 40903 /* only recent gcc can handle it */
+#if defined(GCC_VERSION) && GCC_VERSION >= 40903
 	BUILD_BUG_ON(STABLE_NODE_DUP_HEAD <= &migrate_nodes);
 	BUILD_BUG_ON(STABLE_NODE_DUP_HEAD >= &migrate_nodes + 1);
 #endif
@@ -1053,7 +1053,7 @@ static int write_protect_page(struct vm_area_struct *vma, struct page *page,
 		/*
 		 * Ok this is tricky, when get_user_pages_fast() run it doesn't
 		 * take any lock, therefore the check that we are going to make
-		 * with the pagecount against the mapcount is racey and
+		 * with the pagecount against the mapcount is racy and
 		 * O_DIRECT can happen right after the check.
 		 * So we clear the pte and flush the tlb before the check
 		 * this assure us that no O_DIRECT can happen after the check
@@ -1423,7 +1423,7 @@ static struct page *stable_node_dup(struct stable_node **_stable_node_dup,
 			 */
 			*_stable_node = found;
 			/*
-			 * Just for robustneess as stable_node is
+			 * Just for robustness, as stable_node is
 			 * otherwise left as a stable pointer, the
 			 * compiler shall optimize it away at build
 			 * time.

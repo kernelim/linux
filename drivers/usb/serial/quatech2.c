@@ -712,7 +712,7 @@ err_buf:
 	return -ENOMEM;
 }
 
-static int qt2_port_remove(struct usb_serial_port *port)
+static void qt2_port_remove(struct usb_serial_port *port)
 {
 	struct qt2_port_private *port_priv;
 
@@ -720,8 +720,6 @@ static int qt2_port_remove(struct usb_serial_port *port)
 	usb_free_urb(port_priv->write_urb);
 	kfree(port_priv->write_buffer);
 	kfree(port_priv);
-
-	return 0;
 }
 
 static int qt2_tiocmget(struct tty_struct *tty)

@@ -10,6 +10,7 @@
 #include <linux/uaccess.h>
 
 #include <asm/alternative.h>
+#include <asm/exception.h>
 #include <asm/kprobes.h>
 #include <asm/mmu.h>
 #include <asm/ptrace.h>
@@ -178,13 +179,13 @@ unsigned long sdei_arch_get_entry_point(int conduit)
 }
 
 /*
- * __sdei_handler() returns one of:
+ * do_sdei_event() returns one of:
  *  SDEI_EV_HANDLED -  success, return to the interrupted context.
  *  SDEI_EV_FAILED  -  failure, return this error code to firmare.
  *  virtual-address -  success, return to this address.
  */
-static __kprobes unsigned long _sdei_handler(struct pt_regs *regs,
-					     struct sdei_registered_event *arg)
+unsigned long __kprobes do_sdei_event(struct pt_regs *regs,
+				      struct sdei_registered_event *arg)
 {
 	u32 mode;
 	int i, err = 0;
@@ -244,19 +245,4 @@ static __kprobes unsigned long _sdei_handler(struct pt_regs *regs,
 		return vbar + 0x680;
 
 	return vbar + 0x480;
-}
-
-
-asmlinkage __kprobes notrace unsigned long
-__sdei_handler(struct pt_regs *regs, struct sdei_registered_event *arg)
-{
-	unsigned long ret;
-
-	nmi_enter();
-
-	ret = _sdei_handler(regs, arg);
-
-	nmi_exit();
-
-	return ret;
 }

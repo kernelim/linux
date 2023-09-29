@@ -19,6 +19,8 @@ enum string_size_units {
 void string_get_size(u64 size, u64 blk_size, enum string_size_units units,
 		     char *buf, int len);
 
+int parse_int_array_user(const char __user *from, size_t count, int **array);
+
 #define UNESCAPE_SPACE		0x01
 #define UNESCAPE_OCTAL		0x02
 #define UNESCAPE_HEX		0x04
@@ -94,6 +96,8 @@ static inline void string_lower(char *dst, const char *src)
 char *kstrdup_quotable(const char *src, gfp_t gfp);
 char *kstrdup_quotable_cmdline(struct task_struct *task, gfp_t gfp);
 char *kstrdup_quotable_file(struct file *file, gfp_t gfp);
+
+void kfree_strarray(char **array, size_t n);
 
 static inline const char *str_yes_no(bool v)
 {

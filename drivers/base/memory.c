@@ -50,14 +50,14 @@ int memhp_online_type_from_str(const char *str)
 
 static int sections_per_block;
 
-static inline unsigned long base_memory_block_id(unsigned long section_nr)
+static inline unsigned long memory_block_id(unsigned long section_nr)
 {
 	return section_nr / sections_per_block;
 }
 
 static inline unsigned long pfn_to_block_id(unsigned long pfn)
 {
-	return base_memory_block_id(pfn_to_section_nr(pfn));
+	return memory_block_id(pfn_to_section_nr(pfn));
 }
 
 static inline unsigned long phys_to_block_id(unsigned long phys)
@@ -107,19 +107,15 @@ unsigned long __weak memory_block_size_bytes(void)
 {
 	return MIN_MEMORY_BLOCK_SIZE;
 }
+EXPORT_SYMBOL_GPL(memory_block_size_bytes);
 
-/*
- * Show the first physical section index (number) of this memory block.
- */
+/* Show the memory block ID, relative to the memory block size */
 static ssize_t phys_index_show(struct device *dev,
 			       struct device_attribute *attr, char *buf)
 {
 	struct memory_block *mem = to_memory_block(dev);
-	unsigned long phys_index;
 
-	phys_index = mem->start_section_nr / sections_per_block;
-
-	return sysfs_emit(buf, "%08lx\n", phys_index);
+	return sysfs_emit(buf, "%08lx\n", memory_block_id(mem->start_section_nr));
 }
 
 /*
@@ -458,7 +454,8 @@ static ssize_t probe_store(struct device *dev, struct device_attribute *attr,
 
 	nid = memory_add_physaddr_to_nid(phys_addr);
 	ret = __add_memory(nid, phys_addr,
-			   MIN_MEMORY_BLOCK_SIZE * sections_per_block);
+			   MIN_MEMORY_BLOCK_SIZE * sections_per_block,
+			   MHP_NONE);
 
 	if (ret)
 		goto out;
@@ -539,7 +536,7 @@ static struct memory_block *find_memory_block_by_id(unsigned long block_id)
  */
 struct memory_block *find_memory_block(unsigned long section_nr)
 {
-	unsigned long block_id = base_memory_block_id(section_nr);
+	unsigned long block_id = memory_block_id(section_nr);
 
 	return find_memory_block_by_id(block_id);
 }
@@ -716,7 +713,7 @@ static int add_memory_block(unsigned long base_section_nr)
 
 	if (section_count == 0)
 		return 0;
-	return init_memory_block(&mem, base_memory_block_id(base_section_nr),
+	return init_memory_block(&mem, memory_block_id(base_section_nr),
 				 MEM_ONLINE);
 }
 
@@ -794,12 +791,6 @@ void remove_memory_block_devices(unsigned long start, unsigned long size)
 		unregister_memory_block_under_nodes(mem);
 		unregister_memory(mem);
 	}
-}
-
-/* return true if the memory block is offlined, otherwise, return false */
-bool is_memblock_offlined(struct memory_block *mem)
-{
-	return mem->state == MEM_OFFLINE;
 }
 
 static struct attribute *memory_root_attrs[] = {
