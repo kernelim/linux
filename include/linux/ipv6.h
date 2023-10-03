@@ -129,6 +129,7 @@ struct inet6_skb_parm {
 	__u16			dsthao;
 #endif
 	__u16			frag_max_size;
+	__u16			srhoff;
 
 #define IP6SKB_XFRM_TRANSFORMED	1
 #define IP6SKB_FORWARDED	2
@@ -138,6 +139,7 @@ struct inet6_skb_parm {
 #define IP6SKB_HOPBYHOP        32
 #define IP6SKB_L3SLAVE         64
 #define IP6SKB_JUMBOGRAM      128
+#define IP6SKB_SEG6	      256
 #define IP6SKB_FAKEJUMBO      512
 };
 

@@ -49,7 +49,6 @@ properties:
               data-lanes:
                 description: array of physical DSI data lane indexes.
                 minItems: 1
-                maxItems: 4
                 items:
                   - const: 1
                   - const: 2
@@ -69,7 +68,6 @@ properties:
               data-lanes:
                 description: array of physical DSI data lane indexes.
                 minItems: 1
-                maxItems: 4
                 items:
                   - const: 1
                   - const: 2

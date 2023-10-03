@@ -415,7 +415,7 @@ static int mtk_iommu_domain_finalise(struct mtk_iommu_domain *dom,
 	dom->iop = alloc_io_pgtable_ops(ARM_V7S, &dom->cfg, data);
 	if (!dom->iop) {
 		dev_err(data->dev, "Failed to alloc io pgtable\n");
-		return -EINVAL;
+		return -ENOMEM;
 	}
 
 	/* Update our support page sizes bitmap */
@@ -469,7 +469,7 @@ static int mtk_iommu_attach_device(struct iommu_domain *domain,
 
 	if (!dom->data) {
 		if (mtk_iommu_domain_finalise(dom, data, domid))
-			return -ENODEV;
+			return ret;
 		dom->data = data;
 	}
 

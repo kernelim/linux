@@ -17,6 +17,7 @@
  *
  * From: xen-unstable 10676:af9809f51f81a3c43f276f00c81a52ef558afda4
  */
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/kvm_host.h>
 #include "kvm_cache_regs.h"
@@ -1135,9 +1136,11 @@ static int em_fnstsw(struct x86_emulate_ctxt *ctxt)
 static void decode_register_operand(struct x86_emulate_ctxt *ctxt,
 				    struct operand *op)
 {
-	unsigned reg = ctxt->modrm_reg;
+	unsigned int reg;
 
-	if (!(ctxt->d & ModRM))
+	if (ctxt->d & ModRM)
+		reg = ctxt->modrm_reg;
+	else
 		reg = (ctxt->b & 7) | ((ctxt->rex_prefix & 1) << 3);
 
 	if (ctxt->d & Sse) {
@@ -1631,12 +1634,20 @@ static int __load_segment_descriptor(struct x86_emulate_ctxt *ctxt,
 	case VCPU_SREG_SS:
 		/*
 		 * segment is not a writable data segment or segment
-		 * selector's RPL != CPL or segment selector's RPL != CPL
+		 * selector's RPL != CPL or DPL != CPL
 		 */
 		if (rpl != cpl || (seg_desc.type & 0xa) != 0x2 || dpl != cpl)
 			goto exception;
 		break;
 	case VCPU_SREG_CS:
+		/*
+		 * KVM uses "none" when loading CS as part of emulating Real
+		 * Mode exceptions and IRET (handled above).  In all other
+		 * cases, loading CS without a control transfer is a KVM bug.
+		 */
+		if (WARN_ON_ONCE(transfer == X86_TRANSFER_NONE))
+			goto exception;
+
 		if (!(seg_desc.type & 8))
 			goto exception;
 
@@ -1693,11 +1704,11 @@ static int __load_segment_descriptor(struct x86_emulate_ctxt *ctxt,
 		/*
 		 * segment is not a data or readable code segment or
 		 * ((segment is a data or nonconforming code segment)
-		 * and (both RPL and CPL > DPL))
+		 * and ((RPL > DPL) or (CPL > DPL)))
 		 */
 		if ((seg_desc.type & 0xa) == 0x8 ||
 		    (((seg_desc.type & 0xc) != 0xc) &&
-		     (rpl > dpl && cpl > dpl)))
+		     (rpl > dpl || cpl > dpl)))
 			goto exception;
 		break;
 	}
@@ -1951,7 +1962,7 @@ static int em_pop_sreg(struct x86_emulate_ctxt *ctxt)
 	if (rc != X86EMUL_CONTINUE)
 		return rc;
 
-	if (ctxt->modrm_reg == VCPU_SREG_SS)
+	if (seg == VCPU_SREG_SS)
 		ctxt->interruptibility = KVM_X86_SHADOW_INT_MOV_SS;
 	if (ctxt->op_bytes > 2)
 		rsp_increment(ctxt, ctxt->op_bytes - 2);
@@ -2307,7 +2318,7 @@ static int em_lseg(struct x86_emulate_ctxt *ctxt)
 
 static int em_rsm(struct x86_emulate_ctxt *ctxt)
 {
-	if ((ctxt->ops->get_hflags(ctxt) & X86EMUL_SMM_MASK) == 0)
+	if (!ctxt->ops->is_smm(ctxt))
 		return emulate_ud(ctxt);
 
 	if (ctxt->ops->leave_smm(ctxt))
@@ -2613,8 +2624,8 @@ static bool emulator_io_port_access_allowed(struct x86_emulate_ctxt *ctxt,
 	return true;
 }
 
-static bool emulator_io_permited(struct x86_emulate_ctxt *ctxt,
-				 u16 port, u16 len)
+static bool emulator_io_permitted(struct x86_emulate_ctxt *ctxt,
+				  u16 port, u16 len)
 {
 	if (ctxt->perm_ok)
 		return true;
@@ -3338,13 +3349,10 @@ static int em_wrmsr(struct x86_emulate_ctxt *ctxt)
 		| ((u64)reg_read(ctxt, VCPU_REGS_RDX) << 32);
 	r = ctxt->ops->set_msr_with_filter(ctxt, msr_index, msr_data);
 
-	if (r == X86EMUL_IO_NEEDED)
-		return r;
-
-	if (r > 0)
+	if (r == X86EMUL_PROPAGATE_FAULT)
 		return emulate_gp(ctxt, 0);
 
-	return r < 0 ? X86EMUL_UNHANDLEABLE : X86EMUL_CONTINUE;
+	return r;
 }
 
 static int em_rdmsr(struct x86_emulate_ctxt *ctxt)
@@ -3355,15 +3363,14 @@ static int em_rdmsr(struct x86_emulate_ctxt *ctxt)
 
 	r = ctxt->ops->get_msr_with_filter(ctxt, msr_index, &msr_data);
 
-	if (r == X86EMUL_IO_NEEDED)
-		return r;
-
-	if (r)
+	if (r == X86EMUL_PROPAGATE_FAULT)
 		return emulate_gp(ctxt, 0);
 
-	*reg_write(ctxt, VCPU_REGS_RAX) = (u32)msr_data;
-	*reg_write(ctxt, VCPU_REGS_RDX) = msr_data >> 32;
-	return X86EMUL_CONTINUE;
+	if (r == X86EMUL_CONTINUE) {
+		*reg_write(ctxt, VCPU_REGS_RAX) = (u32)msr_data;
+		*reg_write(ctxt, VCPU_REGS_RDX) = msr_data >> 32;
+	}
+	return r;
 }
 
 static int em_store_sreg(struct x86_emulate_ctxt *ctxt, int segment)
@@ -3864,8 +3871,7 @@ static int check_dr7_gd(struct x86_emulate_ctxt *ctxt)
 
 	ctxt->ops->get_dr(ctxt, 7, &dr7);
 
-	/* Check if DR7.Global_Enable is set */
-	return dr7 & (1 << 13);
+	return dr7 & DR7_GD;
 }
 
 static int check_dr_read(struct x86_emulate_ctxt *ctxt)
@@ -3964,7 +3970,7 @@ static int check_rdpmc(struct x86_emulate_ctxt *ctxt)
 static int check_perm_in(struct x86_emulate_ctxt *ctxt)
 {
 	ctxt->dst.bytes = min(ctxt->dst.bytes, 4u);
-	if (!emulator_io_permited(ctxt, ctxt->src.val, ctxt->dst.bytes))
+	if (!emulator_io_permitted(ctxt, ctxt->src.val, ctxt->dst.bytes))
 		return emulate_gp(ctxt, 0);
 
 	return X86EMUL_CONTINUE;
@@ -3973,7 +3979,7 @@ static int check_perm_in(struct x86_emulate_ctxt *ctxt)
 static int check_perm_out(struct x86_emulate_ctxt *ctxt)
 {
 	ctxt->src.bytes = min(ctxt->src.bytes, 4u);
-	if (!emulator_io_permited(ctxt, ctxt->dst.val, ctxt->src.bytes))
+	if (!emulator_io_permitted(ctxt, ctxt->dst.val, ctxt->src.bytes))
 		return emulate_gp(ctxt, 0);
 
 	return X86EMUL_CONTINUE;
@@ -5135,7 +5141,7 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 	const struct x86_emulate_ops *ops = ctxt->ops;
 	int rc = X86EMUL_CONTINUE;
 	int saved_dst_type = ctxt->dst.type;
-	unsigned emul_flags;
+	bool is_guest_mode = ctxt->ops->is_guest_mode(ctxt);
 
 	ctxt->mem_read.pos = 0;
 
@@ -5150,7 +5156,6 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 		goto done;
 	}
 
-	emul_flags = ctxt->ops->get_hflags(ctxt);
 	if (unlikely(ctxt->d &
 		     (No64|Undefined|Sse|Mmx|Intercept|CheckPerm|Priv|Prot|String))) {
 		if ((ctxt->mode == X86EMUL_MODE_PROT64 && (ctxt->d & No64)) ||
@@ -5184,7 +5189,7 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 				fetch_possible_mmx_operand(&ctxt->dst);
 		}
 
-		if (unlikely(emul_flags & X86EMUL_GUEST_MASK) && ctxt->intercept) {
+		if (unlikely(is_guest_mode) && ctxt->intercept) {
 			rc = emulator_check_intercept(ctxt, ctxt->intercept,
 						      X86_ICPT_PRE_EXCEPT);
 			if (rc != X86EMUL_CONTINUE)
@@ -5213,7 +5218,7 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 				goto done;
 		}
 
-		if (unlikely(emul_flags & X86EMUL_GUEST_MASK) && (ctxt->d & Intercept)) {
+		if (unlikely(is_guest_mode) && (ctxt->d & Intercept)) {
 			rc = emulator_check_intercept(ctxt, ctxt->intercept,
 						      X86_ICPT_POST_EXCEPT);
 			if (rc != X86EMUL_CONTINUE)
@@ -5267,7 +5272,7 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 
 special_insn:
 
-	if (unlikely(emul_flags & X86EMUL_GUEST_MASK) && (ctxt->d & Intercept)) {
+	if (unlikely(is_guest_mode) && (ctxt->d & Intercept)) {
 		rc = emulator_check_intercept(ctxt, ctxt->intercept,
 					      X86_ICPT_POST_MEMACCESS);
 		if (rc != X86EMUL_CONTINUE)

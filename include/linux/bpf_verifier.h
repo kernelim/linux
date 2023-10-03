@@ -19,7 +19,7 @@
  */
 #define BPF_MAX_VAR_SIZ	(1 << 29)
 /* size of type_str_buf in bpf_verifier. */
-#define TYPE_STR_BUF_LEN 64
+#define TYPE_STR_BUF_LEN 128
 
 /* Liveness marks, used for registers and spilled-regs (in stack slots).
  * Read marks propagate upwards until they find a write mark; they record that
@@ -41,6 +41,22 @@ enum bpf_reg_liveness {
 	REG_LIVE_READ = REG_LIVE_READ32 | REG_LIVE_READ64,
 	REG_LIVE_WRITTEN = 0x4, /* reg was written first, screening off later reads */
 	REG_LIVE_DONE = 0x8, /* liveness won't be updating this register anymore */
+};
+
+/* For every reg representing a map value or allocated object pointer,
+ * we consider the tuple of (ptr, id) for them to be unique in verifier
+ * context and conside them to not alias each other for the purposes of
+ * tracking lock state.
+ */
+struct bpf_active_lock {
+	/* This can either be reg->map_ptr or reg->btf. If ptr is NULL,
+	 * there's no active lock held, and other fields have no
+	 * meaning. If non-NULL, it indicates that a lock is held and
+	 * id member has the reg->id of the register which can be >= 0.
+	 */
+	void *ptr;
+	/* This will be reg->id */
+	u32 id;
 };
 
 struct bpf_reg_state {
@@ -70,7 +86,10 @@ struct bpf_reg_state {
 			u32 btf_id;
 		};
 
-		u32 mem_size; /* for PTR_TO_MEM | PTR_TO_MEM_OR_NULL */
+		struct { /* for PTR_TO_MEM | PTR_TO_MEM_OR_NULL */
+			u32 mem_size;
+			u32 dynptr_id; /* for dynptr slices */
+		};
 
 		/* For dynptr stack slots */
 		struct {
@@ -92,6 +111,26 @@ struct bpf_reg_state {
 
 		u32 subprogno; /* for PTR_TO_FUNC */
 	};
+	/* For scalar types (SCALAR_VALUE), this represents our knowledge of
+	 * the actual value.
+	 * For pointer types, this represents the variable part of the offset
+	 * from the pointed-to object, and is shared with all bpf_reg_states
+	 * with the same id as us.
+	 */
+	struct tnum var_off;
+	/* Used to determine if any memory access using this register will
+	 * result in a bad access.
+	 * These refer to the same value as var_off, not necessarily the actual
+	 * contents of the register.
+	 */
+	s64 smin_value; /* minimum possible (s64)value */
+	s64 smax_value; /* maximum possible (s64)value */
+	u64 umin_value; /* minimum possible (u64)value */
+	u64 umax_value; /* maximum possible (u64)value */
+	s32 s32_min_value; /* minimum possible (s32)value */
+	s32 s32_max_value; /* maximum possible (s32)value */
+	u32 u32_min_value; /* minimum possible (u32)value */
+	u32 u32_max_value; /* maximum possible (u32)value */
 	/* For PTR_TO_PACKET, used to find other pointers with the same variable
 	 * offset, so they can share range knowledge.
 	 * For PTR_TO_MAP_VALUE_OR_NULL this is used to share which map value we
@@ -144,26 +183,6 @@ struct bpf_reg_state {
 	 * allowed and has the same effect as bpf_sk_release(sk).
 	 */
 	u32 ref_obj_id;
-	/* For scalar types (SCALAR_VALUE), this represents our knowledge of
-	 * the actual value.
-	 * For pointer types, this represents the variable part of the offset
-	 * from the pointed-to object, and is shared with all bpf_reg_states
-	 * with the same id as us.
-	 */
-	struct tnum var_off;
-	/* Used to determine if any memory access using this register will
-	 * result in a bad access.
-	 * These refer to the same value as var_off, not necessarily the actual
-	 * contents of the register.
-	 */
-	s64 smin_value; /* minimum possible (s64)value */
-	s64 smax_value; /* maximum possible (s64)value */
-	u64 umin_value; /* minimum possible (u64)value */
-	u64 umax_value; /* maximum possible (u64)value */
-	s32 s32_min_value; /* minimum possible (s32)value */
-	s32 s32_max_value; /* maximum possible (s32)value */
-	u32 u32_min_value; /* minimum possible (u32)value */
-	u32 u32_max_value; /* maximum possible (u32)value */
 	/* parentage chain for liveness checking */
 	struct bpf_reg_state *parent;
 	/* Inside the callee two registers can be both PTR_TO_STACK like
@@ -212,6 +231,17 @@ struct bpf_reference_state {
 	 * is used purely to inform the user of a reference leak.
 	 */
 	int insn_idx;
+	/* There can be a case like:
+	 * main (frame 0)
+	 *  cb (frame 1)
+	 *   func (frame 3)
+	 *    cb (frame 4)
+	 * Hence for frame 4, if callback_ref just stored boolean, it would be
+	 * impossible to distinguish nested callback refs. Hence store the
+	 * frameno and compare that to callback_ref in check_reference_leak when
+	 * exiting a callback function.
+	 */
+	int callback_ref;
 };
 
 /* state of the program:
@@ -237,6 +267,7 @@ struct bpf_func_state {
 	 */
 	u32 async_entry_cnt;
 	bool in_callback_fn;
+	struct tnum callback_ret_range;
 	bool in_async_callback_fn;
 
 	/* The following fields should be last. See copy_func_state() */
@@ -256,9 +287,9 @@ struct bpf_id_pair {
 	u32 cur;
 };
 
-/* Maximum number of register states that can exist at once */
-#define BPF_ID_MAP_SIZE (MAX_BPF_REG + MAX_BPF_STACK / BPF_REG_SIZE)
 #define MAX_CALL_FRAMES 8
+/* Maximum number of register states that can exist at once */
+#define BPF_ID_MAP_SIZE ((MAX_BPF_REG + MAX_BPF_STACK / BPF_REG_SIZE) * MAX_CALL_FRAMES)
 struct bpf_verifier_state {
 	/* call stack tracking */
 	struct bpf_func_state *frame[MAX_CALL_FRAMES];
@@ -311,8 +342,10 @@ struct bpf_verifier_state {
 	u32 branches;
 	u32 insn_idx;
 	u32 curframe;
-	u32 active_spin_lock;
+
+	struct bpf_active_lock active_lock;
 	bool speculative;
+	bool active_rcu_lock;
 
 	/* first and last insn idx of this verifier state */
 	u32 first_insn_idx;
@@ -336,6 +369,27 @@ struct bpf_verifier_state {
 	for (iter = 0, reg = bpf_get_spilled_reg(iter, frame);		\
 	     iter < frame->allocated_stack / BPF_REG_SIZE;		\
 	     iter++, reg = bpf_get_spilled_reg(iter, frame))
+
+/* Invoke __expr over regsiters in __vst, setting __state and __reg */
+#define bpf_for_each_reg_in_vstate(__vst, __state, __reg, __expr)   \
+	({                                                               \
+		struct bpf_verifier_state *___vstate = __vst;            \
+		int ___i, ___j;                                          \
+		for (___i = 0; ___i <= ___vstate->curframe; ___i++) {    \
+			struct bpf_reg_state *___regs;                   \
+			__state = ___vstate->frame[___i];                \
+			___regs = __state->regs;                         \
+			for (___j = 0; ___j < MAX_BPF_REG; ___j++) {     \
+				__reg = &___regs[___j];                  \
+				(void)(__expr);                          \
+			}                                                \
+			bpf_for_each_spilled_reg(___j, __state, __reg) { \
+				if (!__reg)                              \
+					continue;                        \
+				(void)(__expr);                          \
+			}                                                \
+		}                                                        \
+	})
 
 /* linked list of verifier states used to prune search */
 struct bpf_verifier_state_list {
@@ -386,16 +440,20 @@ struct bpf_insn_aux_data {
 		 */
 		struct bpf_loop_inline_state loop_inline_state;
 	};
+	u64 obj_new_size; /* remember the size of type passed to bpf_obj_new to rewrite R1 */
+	struct btf_struct_meta *kptr_struct_meta;
 	u64 map_key_state; /* constant (32 bit) key tracking for maps */
 	int ctx_field_size; /* the ctx field size for load insn, maybe 0 */
 	u32 seen; /* this insn was processed by the verifier at env->pass_cnt */
 	bool sanitize_stack_spill; /* subject to Spectre v4 sanitation */
 	bool zext_dst; /* this insn zero extends dst reg */
+	bool storage_get_func_atomic; /* bpf_*_storage_get() with atomic memory alloc */
 	u8 alu_state; /* used in combination with alu_limit */
 
 	/* below fields are initialized once */
 	unsigned int orig_idx; /* original instruction index */
 	bool prune_point;
+	bool jmp_point;
 };
 
 #define MAX_USED_MAPS 64 /* max number of maps accessed by one eBPF program */
@@ -475,11 +533,11 @@ struct bpf_verifier_env {
 	bool explore_alu_limits;
 	bool allow_ptr_leaks;
 	bool allow_uninit_stack;
-	bool allow_ptr_to_map_access;
 	bool bpf_capable;
 	bool bypass_spec_v1;
 	bool bypass_spec_v4;
 	bool seen_direct_write;
+	bool rcu_tag_supported;
 	struct bpf_insn_aux_data *insn_aux_data; /* array of per-insn state */
 	const struct bpf_line_info *prev_linfo;
 	struct bpf_verifier_log log;
@@ -556,10 +614,11 @@ int check_ptr_off_reg(struct bpf_verifier_env *env,
 int check_func_arg_reg_off(struct bpf_verifier_env *env,
 			   const struct bpf_reg_state *reg, int regno,
 			   enum bpf_arg_type arg_type);
-int check_kfunc_mem_size_reg(struct bpf_verifier_env *env, struct bpf_reg_state *reg,
-			     u32 regno);
 int check_mem_reg(struct bpf_verifier_env *env, struct bpf_reg_state *reg,
 		   u32 regno, u32 mem_size);
+struct bpf_call_arg_meta;
+int process_dynptr_func(struct bpf_verifier_env *env, int regno,
+			enum bpf_arg_type arg_type, struct bpf_call_arg_meta *meta);
 
 /* this lives here instead of in bpf.h because it needs to dereference tgt_prog */
 static inline u64 bpf_trampoline_compute_key(const struct bpf_prog *tgt_prog,
@@ -587,6 +646,8 @@ int bpf_check_attach_target(struct bpf_verifier_log *log,
 			    struct bpf_attach_target_info *tgt_info);
 void bpf_free_kfunc_btf_tab(struct bpf_kfunc_btf_tab *tab);
 
+int mark_chain_precision(struct bpf_verifier_env *env, int regno);
+
 #define BPF_BASE_TYPE_MASK	GENMASK(BPF_BASE_TYPE_BITS - 1, 0)
 
 /* extract base type from bpf_{arg, return, reg}_type. */
@@ -602,10 +663,30 @@ static inline u32 type_flag(u32 type)
 }
 
 /* only use after check_attach_btf_id() */
-static inline enum bpf_prog_type resolve_prog_type(struct bpf_prog *prog)
+static inline enum bpf_prog_type resolve_prog_type(const struct bpf_prog *prog)
 {
 	return prog->type == BPF_PROG_TYPE_EXT ?
 		prog->aux->dst_prog->type : prog->type;
+}
+
+static inline bool bpf_prog_check_recur(const struct bpf_prog *prog)
+{
+	switch (resolve_prog_type(prog)) {
+	case BPF_PROG_TYPE_TRACING:
+		return prog->expected_attach_type != BPF_TRACE_ITER;
+	case BPF_PROG_TYPE_STRUCT_OPS:
+	case BPF_PROG_TYPE_LSM:
+		return false;
+	default:
+		return true;
+	}
+}
+
+#define BPF_REG_TRUSTED_MODIFIERS (MEM_ALLOC | PTR_TRUSTED)
+
+static inline bool bpf_type_has_unsafe_modifiers(u32 type)
+{
+	return type_flag(type) & ~BPF_REG_TRUSTED_MODIFIERS;
 }
 
 #endif /* _LINUX_BPF_VERIFIER_H */

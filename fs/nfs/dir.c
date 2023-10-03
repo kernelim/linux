@@ -55,7 +55,7 @@ static int nfs_closedir(struct inode *, struct file *);
 static int nfs_readdir(struct file *, struct dir_context *);
 static int nfs_fsync_dir(struct file *, loff_t, loff_t, int);
 static loff_t nfs_llseek_dir(struct file *, loff_t, int);
-static void nfs_readdir_clear_array(struct page*);
+static void nfs_readdir_free_folio(struct folio *);
 
 const struct file_operations nfs_dir_operations = {
 	.llseek		= nfs_llseek_dir,
@@ -67,7 +67,7 @@ const struct file_operations nfs_dir_operations = {
 };
 
 const struct address_space_operations nfs_dir_aops = {
-	.freepage = nfs_readdir_clear_array,
+	.free_folio = nfs_readdir_free_folio,
 };
 
 #define NFS_INIT_DTSIZE PAGE_SIZE
@@ -203,14 +203,14 @@ static void nfs_readdir_page_init_array(struct page *page, u64 last_cookie,
 {
 	struct nfs_cache_array *array;
 
-	array = kmap_atomic(page);
+	array = kmap_local_page(page);
 	array->change_attr = change_attr;
 	array->last_cookie = last_cookie;
 	array->size = 0;
 	array->page_full = 0;
 	array->page_is_eof = 0;
 	array->cookies_are_ordered = 1;
-	kunmap_atomic(array);
+	kunmap_local(array);
 }
 
 /*
@@ -221,11 +221,16 @@ static void nfs_readdir_clear_array(struct page *page)
 	struct nfs_cache_array *array;
 	unsigned int i;
 
-	array = kmap_atomic(page);
+	array = kmap_local_page(page);
 	for (i = 0; i < array->size; i++)
 		kfree(array->array[i].name);
 	array->size = 0;
-	kunmap_atomic(array);
+	kunmap_local(array);
+}
+
+static void nfs_readdir_free_folio(struct folio *folio)
+{
+	nfs_readdir_clear_array(&folio->page);
 }
 
 static void nfs_readdir_page_reinit_array(struct page *page, u64 last_cookie,
@@ -366,14 +371,14 @@ static pgoff_t nfs_readdir_page_cookie_hash(u64 cookie)
 static bool nfs_readdir_page_validate(struct page *page, u64 last_cookie,
 				      u64 change_attr)
 {
-	struct nfs_cache_array *array = kmap_atomic(page);
+	struct nfs_cache_array *array = kmap_local_page(page);
 	int ret = true;
 
 	if (array->change_attr != change_attr)
 		ret = false;
 	if (nfs_readdir_array_index_cookie(array) != last_cookie)
 		ret = false;
-	kunmap_atomic(array);
+	kunmap_local(array);
 	return ret;
 }
 
@@ -413,9 +418,9 @@ static u64 nfs_readdir_page_last_cookie(struct page *page)
 	struct nfs_cache_array *array;
 	u64 ret;
 
-	array = kmap_atomic(page);
+	array = kmap_local_page(page);
 	ret = array->last_cookie;
-	kunmap_atomic(array);
+	kunmap_local(array);
 	return ret;
 }
 
@@ -424,9 +429,9 @@ static bool nfs_readdir_page_needs_filling(struct page *page)
 	struct nfs_cache_array *array;
 	bool ret;
 
-	array = kmap_atomic(page);
+	array = kmap_local_page(page);
 	ret = !nfs_readdir_array_is_full(array);
-	kunmap_atomic(array);
+	kunmap_local(array);
 	return ret;
 }
 
@@ -434,9 +439,9 @@ static void nfs_readdir_page_set_eof(struct page *page)
 {
 	struct nfs_cache_array *array;
 
-	array = kmap_atomic(page);
+	array = kmap_local_page(page);
 	nfs_readdir_array_set_eof(array);
-	kunmap_atomic(array);
+	kunmap_local(array);
 }
 
 static struct page *nfs_readdir_page_get_next(struct address_space *mapping,
@@ -563,14 +568,14 @@ static int nfs_readdir_search_array(struct nfs_readdir_descriptor *desc)
 	struct nfs_cache_array *array;
 	int status;
 
-	array = kmap_atomic(desc->page);
+	array = kmap_local_page(desc->page);
 
 	if (desc->dir_cookie == 0)
 		status = nfs_readdir_search_for_pos(array, desc);
 	else
 		status = nfs_readdir_search_for_cookie(array, desc);
 
-	kunmap_atomic(array);
+	kunmap_local(array);
 	return status;
 }
 
@@ -1082,7 +1087,7 @@ static void nfs_do_filldir(struct nfs_readdir_descriptor *desc,
 	unsigned int i;
 	bool first_emit = !desc->dir_cookie;
 
-	array = kmap(desc->page);
+	array = kmap_local_page(desc->page);
 	for (i = desc->cache_entry_index; i < array->size; i++) {
 		struct nfs_cache_array_entry *ent;
 
@@ -1112,7 +1117,7 @@ static void nfs_do_filldir(struct nfs_readdir_descriptor *desc,
 	if (array->page_is_eof)
 		desc->eof = !desc->eob;
 
-	kunmap(desc->page);
+	kunmap_local(array);
 	dfprintk(DIRCACHE, "NFS: nfs_do_filldir() filling ended @ cookie %llu\n",
 			(unsigned long long)desc->dir_cookie);
 }
@@ -1739,6 +1744,10 @@ nfs_do_lookup_revalidate(struct inode *dir, struct dentry *dentry,
 		goto out_bad;
 	}
 
+	if ((flags & LOOKUP_RENAME_TARGET) && d_count(dentry) < 2 &&
+	    nfs_server_capable(dir, NFS_CAP_CASE_INSENSITIVE))
+		goto out_bad;
+
 	if (nfs_verifier_is_delegated(dentry))
 		return nfs_lookup_revalidate_delegated(dir, dentry, inode);
 
@@ -1778,6 +1787,8 @@ __nfs_lookup_revalidate(struct dentry *dentry, unsigned int flags,
 	int ret;
 
 	if (flags & LOOKUP_RCU) {
+		if (dentry->d_fsdata == NFS_FSDATA_BLOCKED)
+			return -ECHILD;
 		parent = READ_ONCE(dentry->d_parent);
 		dir = d_inode_rcu(parent);
 		if (!dir)
@@ -1786,6 +1797,9 @@ __nfs_lookup_revalidate(struct dentry *dentry, unsigned int flags,
 		if (parent != READ_ONCE(dentry->d_parent))
 			return -ECHILD;
 	} else {
+		/* Wait for unlink to complete */
+		wait_var_event(&dentry->d_fsdata,
+			       dentry->d_fsdata != NFS_FSDATA_BLOCKED);
 		parent = dget_parent(dentry);
 		ret = reval(d_inode(parent), dentry, flags);
 		dput(parent);
@@ -2013,7 +2027,7 @@ static int nfs_finish_open(struct nfs_open_context *ctx,
 	err = finish_open(file, dentry, do_open);
 	if (err)
 		goto out;
-	if (S_ISREG(file->f_path.dentry->d_inode->i_mode))
+	if (S_ISREG(file_inode(file)->i_mode))
 		nfs_file_set_open_context(file, ctx);
 	else
 		err = -EOPENSTALE;
@@ -2124,6 +2138,7 @@ int nfs_atomic_open(struct inode *dir, struct dentry *dentry,
 		}
 		goto out;
 	}
+	file->f_mode |= FMODE_CAN_ODIRECT;
 
 	err = nfs_finish_open(ctx, ctx->dentry, file, open_flags);
 	trace_nfs_atomic_open_exit(dir, ctx, open_flags, err);
@@ -2454,7 +2469,6 @@ out:
 int nfs_unlink(struct inode *dir, struct dentry *dentry)
 {
 	int error;
-	int need_rehash = 0;
 
 	dfprintk(VFS, "NFS: unlink(%s/%lu, %pd)\n", dir->i_sb->s_id,
 		dir->i_ino, dentry);
@@ -2469,15 +2483,26 @@ int nfs_unlink(struct inode *dir, struct dentry *dentry)
 		error = nfs_sillyrename(dir, dentry);
 		goto out;
 	}
-	if (!d_unhashed(dentry)) {
-		__d_drop(dentry);
-		need_rehash = 1;
+	/* We must prevent any concurrent open until the unlink
+	 * completes.  ->d_revalidate will wait for ->d_fsdata
+	 * to clear.  We set it here to ensure no lookup succeeds until
+	 * the unlink is complete on the server.
+	 */
+	error = -ETXTBSY;
+	if (WARN_ON(dentry->d_flags & DCACHE_NFSFS_RENAMED) ||
+	    WARN_ON(dentry->d_fsdata == NFS_FSDATA_BLOCKED)) {
+		spin_unlock(&dentry->d_lock);
+		goto out;
 	}
+	/* old devname */
+	kfree(dentry->d_fsdata);
+	dentry->d_fsdata = NFS_FSDATA_BLOCKED;
+
 	spin_unlock(&dentry->d_lock);
 	error = nfs_safe_remove(dentry);
 	nfs_dentry_remove_handle_error(dir, dentry, error);
-	if (need_rehash)
-		d_rehash(dentry);
+	dentry->d_fsdata = NULL;
+	wake_up_var(&dentry->d_fsdata);
 out:
 	trace_nfs_unlink_exit(dir, dentry, error);
 	return error;
@@ -2584,6 +2609,15 @@ nfs_link(struct dentry *old_dentry, struct inode *dir, struct dentry *dentry)
 }
 EXPORT_SYMBOL_GPL(nfs_link);
 
+static void
+nfs_unblock_rename(struct rpc_task *task, struct nfs_renamedata *data)
+{
+	struct dentry *new_dentry = data->new_dentry;
+
+	new_dentry->d_fsdata = NULL;
+	wake_up_var(&new_dentry->d_fsdata);
+}
+
 /*
  * RENAME
  * FIXME: Some nfsds, like the Linux user space nfsd, may generate a
@@ -2614,8 +2648,9 @@ int nfs_rename(struct user_namespace *mnt_userns, struct inode *old_dir,
 {
 	struct inode *old_inode = d_inode(old_dentry);
 	struct inode *new_inode = d_inode(new_dentry);
-	struct dentry *dentry = NULL, *rehash = NULL;
+	struct dentry *dentry = NULL;
 	struct rpc_task *task;
+	bool must_unblock = false;
 	int error = -EBUSY;
 
 	if (flags)
@@ -2633,17 +2668,26 @@ int nfs_rename(struct user_namespace *mnt_userns, struct inode *old_dir,
 	 * the new target.
 	 */
 	if (new_inode && !S_ISDIR(new_inode->i_mode)) {
-		/*
-		 * To prevent any new references to the target during the
-		 * rename, we unhash the dentry in advance.
+		/* We must prevent any concurrent open until the unlink
+		 * completes.  ->d_revalidate will wait for ->d_fsdata
+		 * to clear.  We set it here to ensure no lookup succeeds until
+		 * the unlink is complete on the server.
 		 */
-		if (!d_unhashed(new_dentry)) {
-			d_drop(new_dentry);
-			rehash = new_dentry;
+		error = -ETXTBSY;
+		if (WARN_ON(new_dentry->d_flags & DCACHE_NFSFS_RENAMED) ||
+		    WARN_ON(new_dentry->d_fsdata == NFS_FSDATA_BLOCKED))
+			goto out;
+		if (new_dentry->d_fsdata) {
+			/* old devname */
+			kfree(new_dentry->d_fsdata);
+			new_dentry->d_fsdata = NULL;
 		}
 
+		spin_lock(&new_dentry->d_lock);
 		if (d_count(new_dentry) > 2) {
 			int err;
+
+			spin_unlock(&new_dentry->d_lock);
 
 			/* copy the target dentry's name */
 			dentry = d_alloc(new_dentry->d_parent,
@@ -2657,14 +2701,19 @@ int nfs_rename(struct user_namespace *mnt_userns, struct inode *old_dir,
 				goto out;
 
 			new_dentry = dentry;
-			rehash = NULL;
 			new_inode = NULL;
+		} else {
+			new_dentry->d_fsdata = NFS_FSDATA_BLOCKED;
+			must_unblock = true;
+			spin_unlock(&new_dentry->d_lock);
 		}
+
 	}
 
 	if (S_ISREG(old_inode->i_mode))
 		nfs_sync_inode(old_inode);
-	task = nfs_async_rename(old_dir, new_dir, old_dentry, new_dentry, NULL);
+	task = nfs_async_rename(old_dir, new_dir, old_dentry, new_dentry,
+				must_unblock ? nfs_unblock_rename : NULL);
 	if (IS_ERR(task)) {
 		error = PTR_ERR(task);
 		goto out;
@@ -2688,8 +2737,6 @@ int nfs_rename(struct user_namespace *mnt_userns, struct inode *old_dir,
 		spin_unlock(&old_inode->i_lock);
 	}
 out:
-	if (rehash)
-		d_rehash(rehash);
 	trace_nfs_rename_exit(old_dir, old_dentry,
 			new_dir, new_dentry, error);
 	if (!error) {
@@ -2910,12 +2957,14 @@ static u64 nfs_access_login_time(const struct task_struct *task,
 				 const struct cred *cred)
 {
 	const struct task_struct *parent;
+	const struct cred *pcred;
 	u64 ret;
 
 	rcu_read_lock();
 	for (;;) {
 		parent = rcu_dereference(task->real_parent);
-		if (parent == task || cred_fscmp(parent->cred, cred) != 0)
+		pcred = rcu_dereference(parent->cred);
+		if (parent == task || cred_fscmp(pcred, cred) != 0)
 			break;
 		task = parent;
 	}

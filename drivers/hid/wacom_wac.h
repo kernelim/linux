@@ -1,7 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * drivers/input/tablet/wacom_wac.h
- */
+
 #ifndef WACOM_WAC_H
 #define WACOM_WAC_H
 
@@ -326,6 +324,7 @@ struct hid_data {
 	int ps_connected;
 	bool pad_input_event_flag;
 	unsigned short sequence_number;
+	int time_delayed;
 };
 
 struct wacom_remote_data {

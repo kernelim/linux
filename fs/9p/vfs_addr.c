@@ -276,7 +276,7 @@ v9fs_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 }
 
 static int v9fs_write_begin(struct file *filp, struct address_space *mapping,
-			    loff_t pos, unsigned int len, unsigned int flags,
+			    loff_t pos, unsigned int len,
 			    struct page **subpagep, void **fsdata)
 {
 	int retval;
@@ -291,7 +291,7 @@ static int v9fs_write_begin(struct file *filp, struct address_space *mapping,
 	 * file.  We need to do this before we get a lock on the page in case
 	 * there's more than one writer competing for the same cache block.
 	 */
-	retval = netfs_write_begin(filp, mapping, pos, len, flags, &folio, fsdata);
+	retval = netfs_write_begin(&v9inode->netfs, filp, mapping, pos, len, &folio, fsdata);
 	if (retval < 0)
 		return retval;
 
@@ -352,7 +352,7 @@ static int v9fs_set_page_dirty(struct page *page)
 #endif
 
 const struct address_space_operations v9fs_addr_operations = {
-	.readpage = netfs_readpage,
+	.read_folio = netfs_read_folio,
 	.readahead = netfs_readahead,
 	.set_page_dirty = v9fs_set_page_dirty,
 	.writepage = v9fs_vfs_writepage,

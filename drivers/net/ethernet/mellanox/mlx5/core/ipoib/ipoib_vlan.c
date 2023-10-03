@@ -229,12 +229,16 @@ static int mlx5i_pkey_open(struct net_device *netdev)
 		mlx5_core_warn(mdev, "opening child channels failed, %d\n", err);
 		goto err_clear_state_opened_flag;
 	}
-	epriv->profile->update_rx(epriv);
+	err = epriv->profile->update_rx(epriv);
+	if (err)
+		goto err_close_channels;
 	mlx5e_activate_priv_channels(epriv);
 	mutex_unlock(&epriv->state_lock);
 
 	return 0;
 
+err_close_channels:
+	mlx5e_close_channels(&epriv->channels);
 err_clear_state_opened_flag:
 	mlx5e_destroy_tis(mdev, epriv->tisn[0][0]);
 err_remove_rx_uderlay_qp:
@@ -357,7 +361,6 @@ static const struct mlx5e_profile mlx5i_pkey_nic_profile = {
 	.update_stats	   = NULL,
 	.rx_handlers       = &mlx5i_rx_handlers,
 	.max_tc		   = MLX5I_MAX_NUM_TC,
-	.rq_groups	   = MLX5E_NUM_RQ_GROUPS(REGULAR),
 };
 
 const struct mlx5e_profile *mlx5i_pkey_get_profile(void)

@@ -221,6 +221,24 @@ static ssize_t __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter,
 			bio_endio(bio);
 			break;
 		}
+		if (iocb->ki_flags & IOCB_NOWAIT) {
+			/*
+			 * This is nonblocking IO, and we need to allocate
+			 * another bio if we have data left to map. As we
+			 * cannot guarantee that one of the sub bios will not
+			 * fail getting issued FOR NOWAIT and as error results
+			 * are coalesced across all of them, be safe and ask for
+			 * a retry of this from blocking context.
+			 */
+			if (unlikely(iov_iter_count(iter))) {
+				bio_release_pages(bio, false);
+				bio_clear_flag(bio, BIO_REFFED);
+				bio_put(bio);
+				blk_finish_plug(&plug);
+				return -EAGAIN;
+			}
+			bio->bi_opf |= REQ_NOWAIT;
+		}
 
 		if (is_read) {
 			if (dio->flags & DIO_SHOULD_DIRTY)
@@ -228,9 +246,6 @@ static ssize_t __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter,
 		} else {
 			task_io_account_write(bio->bi_iter.bi_size);
 		}
-		if (iocb->ki_flags & IOCB_NOWAIT)
-			bio->bi_opf |= REQ_NOWAIT;
-
 		dio->size += bio->bi_iter.bi_size;
 		pos += bio->bi_iter.bi_size;
 
@@ -376,9 +391,9 @@ static int blkdev_writepage(struct page *page, struct writeback_control *wbc)
 	return block_write_full_page(page, blkdev_get_block, wbc);
 }
 
-static int blkdev_readpage(struct file * file, struct page * page)
+static int blkdev_read_folio(struct file *file, struct folio *folio)
 {
-	return block_read_full_page(page, blkdev_get_block);
+	return block_read_full_folio(folio, blkdev_get_block);
 }
 
 static void blkdev_readahead(struct readahead_control *rac)
@@ -387,11 +402,9 @@ static void blkdev_readahead(struct readahead_control *rac)
 }
 
 static int blkdev_write_begin(struct file *file, struct address_space *mapping,
-		loff_t pos, unsigned len, unsigned flags, struct page **pagep,
-		void **fsdata)
+		loff_t pos, unsigned len, struct page **pagep, void **fsdata)
 {
-	return block_write_begin(mapping, pos, len, flags, pagep,
-				 blkdev_get_block);
+	return block_write_begin(mapping, pos, len, pagep, blkdev_get_block);
 }
 
 static int blkdev_write_end(struct file *file, struct address_space *mapping,
@@ -407,23 +420,16 @@ static int blkdev_write_end(struct file *file, struct address_space *mapping,
 	return ret;
 }
 
-static int blkdev_writepages(struct address_space *mapping,
-			     struct writeback_control *wbc)
-{
-	return generic_writepages(mapping, wbc);
-}
-
 const struct address_space_operations def_blk_aops = {
 	.dirty_folio	= block_dirty_folio,
 	.invalidate_folio = block_invalidate_folio,
-	.readpage	= blkdev_readpage,
+	.read_folio	= blkdev_read_folio,
 	.readahead	= blkdev_readahead,
 	.writepage	= blkdev_writepage,
 	.write_begin	= blkdev_write_begin,
 	.write_end	= blkdev_write_end,
-	.writepages	= blkdev_writepages,
 	.direct_IO	= blkdev_direct_IO,
-	.migratepage	= buffer_migrate_page_norefs,
+	.migrate_folio	= buffer_migrate_folio_norefs,
 	.is_dirty_writeback = buffer_check_dirty_writeback,
 };
 

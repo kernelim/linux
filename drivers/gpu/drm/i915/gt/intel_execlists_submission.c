@@ -110,6 +110,7 @@
 #include <linux/string_helpers.h>
 
 #include "i915_drv.h"
+#include "i915_reg.h"
 #include "i915_trace.h"
 #include "i915_vgpu.h"
 #include "gen8_engine_cs.h"
@@ -1302,7 +1303,7 @@ static void execlists_dequeue(struct intel_engine_cs *engine)
 	 * and context switches) submission.
 	 */
 
-	spin_lock(&sched_engine->lock);
+	spin_lock_irq(&sched_engine->lock);
 
 	/*
 	 * If the queue is higher priority than the last
@@ -1402,7 +1403,7 @@ static void execlists_dequeue(struct intel_engine_cs *engine)
 				 * Even if ELSP[1] is occupied and not worthy
 				 * of timeslices, our queue might be.
 				 */
-				spin_unlock(&sched_engine->lock);
+				spin_unlock_irq(&sched_engine->lock);
 				return;
 			}
 		}
@@ -1428,7 +1429,7 @@ static void execlists_dequeue(struct intel_engine_cs *engine)
 
 		if (last && !can_merge_rq(last, rq)) {
 			spin_unlock(&ve->base.sched_engine->lock);
-			spin_unlock(&engine->sched_engine->lock);
+			spin_unlock_irq(&engine->sched_engine->lock);
 			return; /* leave this for another sibling */
 		}
 
@@ -1590,7 +1591,7 @@ done:
 	 */
 	sched_engine->queue_priority_hint = queue_prio(sched_engine);
 	i915_sched_engine_reset_on_empty(sched_engine);
-	spin_unlock(&sched_engine->lock);
+	spin_unlock_irq(&sched_engine->lock);
 
 	/*
 	 * We can skip poking the HW if we ended up with exactly the same set
@@ -1614,13 +1615,6 @@ done:
 			i915_request_put(*port);
 		*execlists->pending = NULL;
 	}
-}
-
-static void execlists_dequeue_irq(struct intel_engine_cs *engine)
-{
-	local_irq_disable(); /* Suspend interrupts across request submission */
-	execlists_dequeue(engine);
-	local_irq_enable(); /* flush irq_work (e.g. breadcrumb enabling) */
 }
 
 static void clear_ports(struct i915_request **ports, int count)
@@ -2017,6 +2011,8 @@ process_csb(struct intel_engine_cs *engine, struct i915_request **inactive)
 	 * inspecting the queue to see if we need to resumbit.
 	 */
 	if (*prev != *execlists->active) { /* elide lite-restores */
+		struct intel_context *prev_ce = NULL, *active_ce = NULL;
+
 		/*
 		 * Note the inherent discrepancy between the HW runtime,
 		 * recorded as part of the context switch, and the CPU
@@ -2028,9 +2024,15 @@ process_csb(struct intel_engine_cs *engine, struct i915_request **inactive)
 		 * and correct overselves later when updating from HW.
 		 */
 		if (*prev)
-			lrc_runtime_stop((*prev)->context);
+			prev_ce = (*prev)->context;
 		if (*execlists->active)
-			lrc_runtime_start((*execlists->active)->context);
+			active_ce = (*execlists->active)->context;
+		if (prev_ce != active_ce) {
+			if (prev_ce)
+				lrc_runtime_stop(prev_ce);
+			if (active_ce)
+				lrc_runtime_start(active_ce);
+		}
 		new_timeslice(execlists);
 	}
 
@@ -2468,7 +2470,7 @@ static void execlists_submission_tasklet(struct tasklet_struct *t)
 	}
 
 	if (!engine->execlists.pending[0]) {
-		execlists_dequeue_irq(engine);
+		execlists_dequeue(engine);
 		start_timeslice(engine);
 	}
 
@@ -2988,10 +2990,12 @@ static void execlists_reset_prepare(struct intel_engine_cs *engine)
 	intel_engine_stop_cs(engine);
 
 	/*
-	 * Wa_22011802037:gen11/gen12: In addition to stopping the cs, we need
+	 * Wa_22011802037: In addition to stopping the cs, we need
 	 * to wait for any pending mi force wakeups
 	 */
-	if (IS_GRAPHICS_VER(engine->i915, 11, 12))
+	if (IS_MTL_GRAPHICS_STEP(engine->i915, M, STEP_A0, STEP_B0) ||
+	    (GRAPHICS_VER(engine->i915) >= 11 &&
+	    GRAPHICS_VER_FULL(engine->i915) < IP_VER(12, 70)))
 		intel_engine_wait_for_pending_mi_fw(engine);
 
 	engine->execlists.reset_ccid = active_ccid(engine);
@@ -3471,9 +3475,9 @@ logical_ring_default_vfuncs(struct intel_engine_cs *engine)
 
 	if (GRAPHICS_VER_FULL(engine->i915) >= IP_VER(12, 50)) {
 		if (intel_engine_has_preemption(engine))
-			engine->emit_bb_start = gen125_emit_bb_start;
+			engine->emit_bb_start = xehp_emit_bb_start;
 		else
-			engine->emit_bb_start = gen125_emit_bb_start_noarb;
+			engine->emit_bb_start = xehp_emit_bb_start_noarb;
 	} else {
 		if (intel_engine_has_preemption(engine))
 			engine->emit_bb_start = gen8_emit_bb_start;
@@ -3921,6 +3925,7 @@ static struct intel_context *
 execlists_create_virtual(struct intel_engine_cs **siblings, unsigned int count,
 			 unsigned long flags)
 {
+	struct drm_i915_private *i915 = siblings[0]->i915;
 	struct virtual_engine *ve;
 	unsigned int n;
 	int err;
@@ -3929,7 +3934,7 @@ execlists_create_virtual(struct intel_engine_cs **siblings, unsigned int count,
 	if (!ve)
 		return ERR_PTR(-ENOMEM);
 
-	ve->base.i915 = siblings[0]->i915;
+	ve->base.i915 = i915;
 	ve->base.gt = siblings[0]->gt;
 	ve->base.uncore = siblings[0]->uncore;
 	ve->base.id = -1;
@@ -3988,8 +3993,9 @@ execlists_create_virtual(struct intel_engine_cs **siblings, unsigned int count,
 
 		GEM_BUG_ON(!is_power_of_2(sibling->mask));
 		if (sibling->mask & ve->base.mask) {
-			DRM_DEBUG("duplicate %s entry in load balancer\n",
-				  sibling->name);
+			drm_dbg(&i915->drm,
+				"duplicate %s entry in load balancer\n",
+				sibling->name);
 			err = -EINVAL;
 			goto err_put;
 		}
@@ -4023,8 +4029,9 @@ execlists_create_virtual(struct intel_engine_cs **siblings, unsigned int count,
 		 */
 		if (ve->base.class != OTHER_CLASS) {
 			if (ve->base.class != sibling->class) {
-				DRM_DEBUG("invalid mixing of engine class, sibling %d, already %d\n",
-					  sibling->class, ve->base.class);
+				drm_dbg(&i915->drm,
+					"invalid mixing of engine class, sibling %d, already %d\n",
+					sibling->class, ve->base.class);
 				err = -EINVAL;
 				goto err_put;
 			}
@@ -4142,6 +4149,22 @@ void intel_execlists_show_requests(struct intel_engine_cs *engine,
 	}
 
 	spin_unlock_irqrestore(&sched_engine->lock, flags);
+}
+
+void intel_execlists_dump_active_requests(struct intel_engine_cs *engine,
+					  struct i915_request *hung_rq,
+					  struct drm_printer *m)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&engine->sched_engine->lock, flags);
+
+	intel_engine_dump_active_requests(&engine->sched_engine->requests, hung_rq, m);
+
+	drm_printf(m, "\tOn hold?: %zu\n",
+		   list_count_nodes(&engine->sched_engine->hold));
+
+	spin_unlock_irqrestore(&engine->sched_engine->lock, flags);
 }
 
 #if IS_ENABLED(CONFIG_DRM_I915_SELFTEST)

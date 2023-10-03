@@ -1,2 +1,2 @@
-#2-
-0x66611eee	unregister_kprobe	vmlinux	EXPORT_SYMBOL_GPL	
+#3-
+0xf4ed648b	unregister_kprobe	vmlinux	EXPORT_SYMBOL_GPL	

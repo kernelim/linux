@@ -6,10 +6,10 @@ Makefile.rhelver	jforbes@redhat.com jforbes@fedoraproject.org ptalbert@redhat.co
 Makefile.rhelver	williams@redhat.com ahalaney@redhat.com
 
 [Automotive Stream Distribution Kernel Maintainer]
-makefile	jarod@redhat.com jfaracco@redhat.com
-Makefile.rhelver	jarod@redhat.com jfaracco@redhat.com
-redhat/	jarod@redhat.com jfaracco@redhat.com
-^redhat/configs/	jarod@redhat.com jfaracco@redhat.com
+makefile	jfaracco@redhat.com scweaver@redhat.com
+Makefile.rhelver	jfaracco@redhat.com scweaver@redhat.com
+redhat/	jfaracco@redhat.com scweaver@redhat.com
+^redhat/configs/	jfaracco@redhat.com scweaver@redhat.com
 
 [CentOS Stream 9 Kernel Maintainer]
 Makefile.rhelver	jstancek@redhat.com
@@ -235,7 +235,7 @@ include/uapi/linux/audit.h	rbriggs@redhat.com
 kernel/audit*	rbriggs@redhat.com
 
 ^[AUTOMOTIVE]
-redhat/configs/automotive/	jarod@redhat.com jfaracco@redhat.com
+redhat/configs/automotive/	jfaracco@redhat.com scweaver@redhat.com
 
 ^[BE2NET ETHERNET DRIVER (be2net)]
 drivers/net/ethernet/emulex/benet/	poros@redhat.com

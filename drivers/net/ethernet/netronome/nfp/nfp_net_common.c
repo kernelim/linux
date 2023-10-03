@@ -1915,7 +1915,6 @@ const struct net_device_ops nfp_nfd3_netdev_ops = {
 	.ndo_get_phys_port_name	= nfp_net_get_phys_port_name,
 	.ndo_bpf		= nfp_net_xdp,
 	.ndo_xsk_wakeup		= nfp_net_xsk_wakeup,
-	.ndo_get_devlink_port	= nfp_devlink_get_devlink_port,
 };
 
 const struct net_device_ops nfp_nfdk_netdev_ops = {
@@ -1942,7 +1941,6 @@ const struct net_device_ops nfp_nfdk_netdev_ops = {
 	.ndo_features_check	= nfp_net_features_check,
 	.ndo_get_phys_port_name	= nfp_net_get_phys_port_name,
 	.ndo_bpf		= nfp_net_xdp,
-	.ndo_get_devlink_port	= nfp_devlink_get_devlink_port,
 };
 
 static int nfp_udp_tunnel_sync(struct net_device *netdev, unsigned int table)
@@ -2302,10 +2300,15 @@ static void nfp_net_netdev_init(struct nfp_net *nn)
 	netdev->features &= ~(NETIF_F_TSO | NETIF_F_TSO6);
 	nn->dp.ctrl &= ~NFP_NET_CFG_CTRL_LSO_ANY;
 
+	netdev->xdp_features = NETDEV_XDP_ACT_BASIC;
+	if (nn->app && nn->app->type->id == NFP_APP_BPF_NIC)
+		netdev->xdp_features |= NETDEV_XDP_ACT_HW_OFFLOAD;
+
 	/* Finalise the netdev setup */
 	switch (nn->dp.ops->version) {
 	case NFP_NFD_VER_NFD3:
 		netdev->netdev_ops = &nfp_nfd3_netdev_ops;
+		netdev->xdp_features |= NETDEV_XDP_ACT_XSK_ZEROCOPY;
 		break;
 	case NFP_NFD_VER_NFDK:
 		netdev->netdev_ops = &nfp_nfdk_netdev_ops;

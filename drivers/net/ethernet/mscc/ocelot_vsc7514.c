@@ -943,10 +943,7 @@ static int mscc_ocelot_init_ports(struct platform_device *pdev,
 		return -ENOMEM;
 
 	for_each_available_child_of_node(ports, portnp) {
-		struct ocelot_port_private *priv;
-		struct ocelot_port *ocelot_port;
 		struct device_node *phy_node;
-		struct devlink_port *dlp;
 		phy_interface_t phy_mode;
 		struct phy_device *phy;
 		struct regmap *target;
@@ -997,12 +994,6 @@ static int mscc_ocelot_init_ports(struct platform_device *pdev,
 			of_node_put(portnp);
 			goto out_teardown;
 		}
-
-		ocelot_port = ocelot->ports[port];
-		priv = container_of(ocelot_port, struct ocelot_port_private,
-				    port);
-		dlp = &ocelot->devlink_ports[port];
-		devlink_port_type_eth_set(dlp, priv->dev);
 
 		of_get_phy_mode(portnp, &phy_mode);
 

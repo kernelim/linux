@@ -351,9 +351,9 @@ static int bcm2835_gpio_direction_output(struct gpio_chip *chip,
 	return pinctrl_gpio_direction_output(chip->base + offset);
 }
 
-static int bcm2835_of_gpio_ranges_fallback(struct gpio_chip *gc,
-					   struct device_node *np)
+static int bcm2835_add_pin_ranges_fallback(struct gpio_chip *gc)
 {
+	struct device_node *np = dev_of_node(gc->parent);
 	struct pinctrl_dev *pctldev = of_pinctrl_get(np);
 
 	of_node_put(np);
@@ -381,7 +381,7 @@ static const struct gpio_chip bcm2835_gpio_chip = {
 	.base = -1,
 	.ngpio = BCM2835_NUM_GPIOS,
 	.can_sleep = false,
-	.of_gpio_ranges_fallback = bcm2835_of_gpio_ranges_fallback,
+	.add_pin_ranges = bcm2835_add_pin_ranges_fallback,
 };
 
 static const struct gpio_chip bcm2711_gpio_chip = {
@@ -398,7 +398,7 @@ static const struct gpio_chip bcm2711_gpio_chip = {
 	.base = -1,
 	.ngpio = BCM2711_NUM_GPIOS,
 	.can_sleep = false,
-	.of_gpio_ranges_fallback = bcm2835_of_gpio_ranges_fallback,
+	.add_pin_ranges = bcm2835_add_pin_ranges_fallback,
 };
 
 static void bcm2835_gpio_irq_handle_bank(struct bcm2835_pinctrl *pc,
@@ -1240,7 +1240,6 @@ static int bcm2835_pinctrl_probe(struct platform_device *pdev)
 
 	pc->gpio_chip = *pdata->gpio_chip;
 	pc->gpio_chip.parent = dev;
-	pc->gpio_chip.of_node = np;
 
 	for (i = 0; i < BCM2835_NUM_BANKS; i++) {
 		unsigned long events;

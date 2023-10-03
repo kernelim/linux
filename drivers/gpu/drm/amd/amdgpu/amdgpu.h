@@ -52,8 +52,7 @@
 #include <linux/pci.h>
 #include <linux/aer.h>
 
-#include <drm/ttm/ttm_bo_api.h>
-#include <drm/ttm/ttm_bo_driver.h>
+#include <drm/ttm/ttm_bo.h>
 #include <drm/ttm/ttm_placement.h>
 #include <drm/ttm/ttm_execbuf_util.h>
 
@@ -82,7 +81,6 @@
 #include "amdgpu_vce.h"
 #include "amdgpu_vcn.h"
 #include "amdgpu_jpeg.h"
-#include "amdgpu_mn.h"
 #include "amdgpu_gmc.h"
 #include "amdgpu_gfx.h"
 #include "amdgpu_sdma.h"
@@ -151,7 +149,7 @@ struct amdgpu_watchdog_timer
  * Modules parameters.
  */
 extern int amdgpu_modeset;
-extern int amdgpu_vram_limit;
+extern unsigned int amdgpu_vram_limit;
 extern int amdgpu_vis_vram_limit;
 extern int amdgpu_gart_size;
 extern int amdgpu_gtt_size;
@@ -220,10 +218,12 @@ extern int amdgpu_use_xgmi_p2p;
 extern int sched_policy;
 extern bool debug_evictions;
 extern bool no_system_mem_limit;
+extern int halt_if_hws_hang;
 #else
 static const int __maybe_unused sched_policy = KFD_SCHED_POLICY_HWS;
 static const bool __maybe_unused debug_evictions; /* = false */
 static const bool __maybe_unused no_system_mem_limit;
+static const int __maybe_unused halt_if_hws_hang;
 #endif
 #ifdef CONFIG_HSA_AMD_P2P
 extern bool pcie_p2p;
@@ -242,6 +242,7 @@ extern int amdgpu_num_kcq;
 
 #define AMDGPU_VCNFW_LOG_SIZE (32 * 1024)
 extern int amdgpu_vcnfw_log;
+extern int amdgpu_sg_display;
 
 #define AMDGPU_VM_MAX_NUM_CTX			4096
 #define AMDGPU_SG_THRESHOLD			(256*1024*1024)
@@ -608,7 +609,7 @@ int amdgpu_cs_wait_fences_ioctl(struct drm_device *dev, void *data,
 				struct drm_file *filp);
 
 /* VRAM scratch page for HDP bug, default vram page */
-struct amdgpu_vram_scratch {
+struct amdgpu_mem_scratch {
 	struct amdgpu_bo		*robj;
 	volatile uint32_t		*ptr;
 	u64				gpu_addr;
@@ -676,7 +677,7 @@ enum amd_hw_ip_block_type {
 	MAX_HWIP
 };
 
-#define HWIP_MAX_INSTANCE	11
+#define HWIP_MAX_INSTANCE	28
 
 #define HW_ID_MAX		300
 #define IP_VERSION(mj, mn, rv) (((mj) << 16) | ((mn) << 8) | (rv))
@@ -754,6 +755,11 @@ struct amdgpu_mqd {
 #define AMDGPU_MAX_DF_PERFMONS 4
 #define AMDGPU_PRODUCT_NAME_LEN 64
 struct amdgpu_reset_domain;
+
+/*
+ * Non-zero (true) if the GPU has VRAM. Zero (false) otherwise.
+ */
+#define AMDGPU_HAS_VRAM(_adev) ((_adev)->gmc.real_vram_size)
 
 struct amdgpu_device {
 	struct device			*dev;
@@ -848,7 +854,7 @@ struct amdgpu_device {
 
 	/* memory management */
 	struct amdgpu_mman		mman;
-	struct amdgpu_vram_scratch	vram_scratch;
+	struct amdgpu_mem_scratch	mem_scratch;
 	struct amdgpu_wb		wb;
 	atomic64_t			num_bytes_moved;
 	atomic64_t			num_evictions;
@@ -870,7 +876,7 @@ struct amdgpu_device {
 	struct amdgpu_vkms_output       *amdgpu_vkms_output;
 	struct amdgpu_mode_info		mode_info;
 	/* For pre-DCE11. DCE11 and later are in "struct amdgpu_device->dm" */
-	struct work_struct		hotplug_work;
+	struct delayed_work         hotplug_work;
 	struct amdgpu_irq_src		crtc_irq;
 	struct amdgpu_irq_src		vline0_irq;
 	struct amdgpu_irq_src		vupdate_irq;
@@ -883,6 +889,7 @@ struct amdgpu_device {
 	u64				fence_context;
 	unsigned			num_rings;
 	struct amdgpu_ring		*rings[AMDGPU_MAX_RINGS];
+	struct dma_fence __rcu		*gang_submit;
 	bool				ib_pool_ready;
 	struct amdgpu_sa_manager	ib_pools[AMDGPU_IB_POOL_MAX];
 	struct amdgpu_sched		gpu_sched[AMDGPU_HW_IP_NUM][AMDGPU_RING_PRIO_MAX];
@@ -1061,6 +1068,9 @@ struct amdgpu_device {
 	uint32_t                        scpm_status;
 
 	struct work_struct		reset_work;
+
+	bool                            job_hang;
+	bool                            dc_enabled;
 };
 
 static inline struct amdgpu_device *drm_to_adev(struct drm_device *ddev)
@@ -1117,6 +1127,8 @@ void amdgpu_device_indirect_wreg64(struct amdgpu_device *adev,
 
 bool amdgpu_device_asic_has_dc_support(enum amd_asic_type asic_type);
 bool amdgpu_device_has_dc_support(struct amdgpu_device *adev);
+
+void amdgpu_device_set_sriov_virtual_display(struct amdgpu_device *adev);
 
 int amdgpu_device_pre_asic_reset(struct amdgpu_device *adev,
 				 struct amdgpu_reset_context *reset_context);
@@ -1260,6 +1272,7 @@ void amdgpu_device_pci_config_reset(struct amdgpu_device *adev);
 int amdgpu_device_pci_reset(struct amdgpu_device *adev);
 bool amdgpu_device_need_post(struct amdgpu_device *adev);
 bool amdgpu_device_should_use_aspm(struct amdgpu_device *adev);
+bool amdgpu_device_aspm_support_quirk(void);
 
 void amdgpu_cs_report_moved_bytes(struct amdgpu_device *adev, u64 num_bytes,
 				  u64 num_vis_bytes);
@@ -1289,6 +1302,9 @@ u32 amdgpu_device_pcie_port_rreg(struct amdgpu_device *adev,
 				u32 reg);
 void amdgpu_device_pcie_port_wreg(struct amdgpu_device *adev,
 				u32 reg, u32 v);
+struct dma_fence *amdgpu_device_switch_gang(struct amdgpu_device *adev,
+					    struct dma_fence *gang);
+bool amdgpu_device_has_display_hardware(struct amdgpu_device *adev);
 
 /* atpx handler */
 #if defined(CONFIG_VGA_SWITCHEROO)
@@ -1376,10 +1392,12 @@ int amdgpu_acpi_smart_shift_update(struct drm_device *dev, enum amdgpu_ss ss_sta
 int amdgpu_acpi_pcie_notify_device_ready(struct amdgpu_device *adev);
 
 void amdgpu_acpi_get_backlight_caps(struct amdgpu_dm_backlight_caps *caps);
+bool amdgpu_acpi_should_gpu_reset(struct amdgpu_device *adev);
 void amdgpu_acpi_detect(void);
 #else
 static inline int amdgpu_acpi_init(struct amdgpu_device *adev) { return 0; }
 static inline void amdgpu_acpi_fini(struct amdgpu_device *adev) { }
+static inline bool amdgpu_acpi_should_gpu_reset(struct amdgpu_device *adev) { return false; }
 static inline void amdgpu_acpi_detect(void) { }
 static inline bool amdgpu_acpi_is_power_shift_control_supported(void) { return false; }
 static inline int amdgpu_acpi_power_shift_control(struct amdgpu_device *adev,
@@ -1390,11 +1408,9 @@ static inline int amdgpu_acpi_smart_shift_update(struct drm_device *dev,
 
 #if defined(CONFIG_ACPI) && defined(CONFIG_SUSPEND)
 bool amdgpu_acpi_is_s3_active(struct amdgpu_device *adev);
-bool amdgpu_acpi_should_gpu_reset(struct amdgpu_device *adev);
 bool amdgpu_acpi_is_s0ix_active(struct amdgpu_device *adev);
 #else
 static inline bool amdgpu_acpi_is_s0ix_active(struct amdgpu_device *adev) { return false; }
-static inline bool amdgpu_acpi_should_gpu_reset(struct amdgpu_device *adev) { return false; }
 static inline bool amdgpu_acpi_is_s3_active(struct amdgpu_device *adev) { return false; }
 #endif
 

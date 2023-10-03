@@ -182,21 +182,6 @@ static inline int amd64_read_dct_pci_cfg(struct amd64_pvt *pvt, u8 dct,
  * other archs, we might not have access to the caches directly.
  */
 
-static inline void __f17h_set_scrubval(struct amd64_pvt *pvt, u32 scrubval)
-{
-	/*
-	 * Fam17h supports scrub values between 0x5 and 0x14. Also, the values
-	 * are shifted down by 0x5, so scrubval 0x5 is written to the register
-	 * as 0x0, scrubval 0x6 as 0x1, etc.
-	 */
-	if (scrubval >= 0x5 && scrubval <= 0x14) {
-		scrubval -= 0x5;
-		pci_write_bits32(pvt->F6, F17H_SCR_LIMIT_ADDR, scrubval, 0xF);
-		pci_write_bits32(pvt->F6, F17H_SCR_BASE_ADDR, 1, 0x1);
-	} else {
-		pci_write_bits32(pvt->F6, F17H_SCR_BASE_ADDR, 0, 0x1);
-	}
-}
 /*
  * Scan the scrub rate mapping table for a close or matching bandwidth value to
  * issue. If requested is too big, then use last maximum value found.
@@ -229,9 +214,7 @@ static int __set_scrub_rate(struct amd64_pvt *pvt, u32 new_bw, u32 min_rate)
 
 	scrubval = scrubrates[i].scrubval;
 
-	if (pvt->umc) {
-		__f17h_set_scrubval(pvt, scrubval);
-	} else if (pvt->fam == 0x15 && pvt->model == 0x60) {
+	if (pvt->fam == 0x15 && pvt->model == 0x60) {
 		f15h_select_dct(pvt, 0);
 		pci_write_bits32(pvt->F2, F15H_M60H_SCRCTRL, scrubval, 0x001F);
 		f15h_select_dct(pvt, 1);
@@ -271,16 +254,7 @@ static int get_scrub_rate(struct mem_ctl_info *mci)
 	int i, retval = -EINVAL;
 	u32 scrubval = 0;
 
-	if (pvt->umc) {
-		amd64_read_pci_cfg(pvt->F6, F17H_SCR_BASE_ADDR, &scrubval);
-		if (scrubval & BIT(0)) {
-			amd64_read_pci_cfg(pvt->F6, F17H_SCR_LIMIT_ADDR, &scrubval);
-			scrubval &= 0xF;
-			scrubval += 0x5;
-		} else {
-			scrubval = 0;
-		}
-	} else if (pvt->fam == 0x15) {
+	if (pvt->fam == 0x15) {
 		/* Erratum #505 */
 		if (pvt->model < 0x10)
 			f15h_select_dct(pvt, 0);
@@ -1008,6 +982,255 @@ static int sys_addr_to_csrow(struct mem_ctl_info *mci, u64 sys_addr)
 	return csrow;
 }
 
+/* Protect the PCI config register pairs used for DF indirect access. */
+static DEFINE_MUTEX(df_indirect_mutex);
+
+/*
+ * Data Fabric Indirect Access uses FICAA/FICAD.
+ *
+ * Fabric Indirect Configuration Access Address (FICAA): Constructed based
+ * on the device's Instance Id and the PCI function and register offset of
+ * the desired register.
+ *
+ * Fabric Indirect Configuration Access Data (FICAD): There are FICAD LO
+ * and FICAD HI registers but so far we only need the LO register.
+ */
+static int amd_df_indirect_read(u16 node, u8 func, u16 reg, u8 instance_id, u32 *lo)
+{
+	struct pci_dev *F4;
+	u32 ficaa;
+	int err = -ENODEV;
+
+	if (node >= amd_nb_num())
+		goto out;
+
+	F4 = node_to_amd_nb(node)->link;
+	if (!F4)
+		goto out;
+
+	ficaa  = 1;
+	ficaa |= reg & 0x3FC;
+	ficaa |= (func & 0x7) << 11;
+	ficaa |= instance_id << 16;
+
+	mutex_lock(&df_indirect_mutex);
+
+	err = pci_write_config_dword(F4, 0x5C, ficaa);
+	if (err) {
+		pr_warn("Error writing DF Indirect FICAA, FICAA=0x%x\n", ficaa);
+		goto out_unlock;
+	}
+
+	err = pci_read_config_dword(F4, 0x98, lo);
+	if (err)
+		pr_warn("Error reading DF Indirect FICAD LO, FICAA=0x%x.\n", ficaa);
+
+out_unlock:
+	mutex_unlock(&df_indirect_mutex);
+
+out:
+	return err;
+}
+
+static int umc_normaddr_to_sysaddr(u64 norm_addr, u16 nid, u8 umc, u64 *sys_addr)
+{
+	u64 dram_base_addr, dram_limit_addr, dram_hole_base;
+	/* We start from the normalized address */
+	u64 ret_addr = norm_addr;
+
+	u32 tmp;
+
+	u8 die_id_shift, die_id_mask, socket_id_shift, socket_id_mask;
+	u8 intlv_num_dies, intlv_num_chan, intlv_num_sockets;
+	u8 intlv_addr_sel, intlv_addr_bit;
+	u8 num_intlv_bits, hashed_bit;
+	u8 lgcy_mmio_hole_en, base = 0;
+	u8 cs_mask, cs_id = 0;
+	bool hash_enabled = false;
+
+	/* Read D18F0x1B4 (DramOffset), check if base 1 is used. */
+	if (amd_df_indirect_read(nid, 0, 0x1B4, umc, &tmp))
+		goto out_err;
+
+	/* Remove HiAddrOffset from normalized address, if enabled: */
+	if (tmp & BIT(0)) {
+		u64 hi_addr_offset = (tmp & GENMASK_ULL(31, 20)) << 8;
+
+		if (norm_addr >= hi_addr_offset) {
+			ret_addr -= hi_addr_offset;
+			base = 1;
+		}
+	}
+
+	/* Read D18F0x110 (DramBaseAddress). */
+	if (amd_df_indirect_read(nid, 0, 0x110 + (8 * base), umc, &tmp))
+		goto out_err;
+
+	/* Check if address range is valid. */
+	if (!(tmp & BIT(0))) {
+		pr_err("%s: Invalid DramBaseAddress range: 0x%x.\n",
+			__func__, tmp);
+		goto out_err;
+	}
+
+	lgcy_mmio_hole_en = tmp & BIT(1);
+	intlv_num_chan	  = (tmp >> 4) & 0xF;
+	intlv_addr_sel	  = (tmp >> 8) & 0x7;
+	dram_base_addr	  = (tmp & GENMASK_ULL(31, 12)) << 16;
+
+	/* {0, 1, 2, 3} map to address bits {8, 9, 10, 11} respectively */
+	if (intlv_addr_sel > 3) {
+		pr_err("%s: Invalid interleave address select %d.\n",
+			__func__, intlv_addr_sel);
+		goto out_err;
+	}
+
+	/* Read D18F0x114 (DramLimitAddress). */
+	if (amd_df_indirect_read(nid, 0, 0x114 + (8 * base), umc, &tmp))
+		goto out_err;
+
+	intlv_num_sockets = (tmp >> 8) & 0x1;
+	intlv_num_dies	  = (tmp >> 10) & 0x3;
+	dram_limit_addr	  = ((tmp & GENMASK_ULL(31, 12)) << 16) | GENMASK_ULL(27, 0);
+
+	intlv_addr_bit = intlv_addr_sel + 8;
+
+	/* Re-use intlv_num_chan by setting it equal to log2(#channels) */
+	switch (intlv_num_chan) {
+	case 0:	intlv_num_chan = 0; break;
+	case 1: intlv_num_chan = 1; break;
+	case 3: intlv_num_chan = 2; break;
+	case 5:	intlv_num_chan = 3; break;
+	case 7:	intlv_num_chan = 4; break;
+
+	case 8: intlv_num_chan = 1;
+		hash_enabled = true;
+		break;
+	default:
+		pr_err("%s: Invalid number of interleaved channels %d.\n",
+			__func__, intlv_num_chan);
+		goto out_err;
+	}
+
+	num_intlv_bits = intlv_num_chan;
+
+	if (intlv_num_dies > 2) {
+		pr_err("%s: Invalid number of interleaved nodes/dies %d.\n",
+			__func__, intlv_num_dies);
+		goto out_err;
+	}
+
+	num_intlv_bits += intlv_num_dies;
+
+	/* Add a bit if sockets are interleaved. */
+	num_intlv_bits += intlv_num_sockets;
+
+	/* Assert num_intlv_bits <= 4 */
+	if (num_intlv_bits > 4) {
+		pr_err("%s: Invalid interleave bits %d.\n",
+			__func__, num_intlv_bits);
+		goto out_err;
+	}
+
+	if (num_intlv_bits > 0) {
+		u64 temp_addr_x, temp_addr_i, temp_addr_y;
+		u8 die_id_bit, sock_id_bit, cs_fabric_id;
+
+		/*
+		 * Read FabricBlockInstanceInformation3_CS[BlockFabricID].
+		 * This is the fabric id for this coherent slave. Use
+		 * umc/channel# as instance id of the coherent slave
+		 * for FICAA.
+		 */
+		if (amd_df_indirect_read(nid, 0, 0x50, umc, &tmp))
+			goto out_err;
+
+		cs_fabric_id = (tmp >> 8) & 0xFF;
+		die_id_bit   = 0;
+
+		/* If interleaved over more than 1 channel: */
+		if (intlv_num_chan) {
+			die_id_bit = intlv_num_chan;
+			cs_mask	   = (1 << die_id_bit) - 1;
+			cs_id	   = cs_fabric_id & cs_mask;
+		}
+
+		sock_id_bit = die_id_bit;
+
+		/* Read D18F1x208 (SystemFabricIdMask). */
+		if (intlv_num_dies || intlv_num_sockets)
+			if (amd_df_indirect_read(nid, 1, 0x208, umc, &tmp))
+				goto out_err;
+
+		/* If interleaved over more than 1 die. */
+		if (intlv_num_dies) {
+			sock_id_bit  = die_id_bit + intlv_num_dies;
+			die_id_shift = (tmp >> 24) & 0xF;
+			die_id_mask  = (tmp >> 8) & 0xFF;
+
+			cs_id |= ((cs_fabric_id & die_id_mask) >> die_id_shift) << die_id_bit;
+		}
+
+		/* If interleaved over more than 1 socket. */
+		if (intlv_num_sockets) {
+			socket_id_shift	= (tmp >> 28) & 0xF;
+			socket_id_mask	= (tmp >> 16) & 0xFF;
+
+			cs_id |= ((cs_fabric_id & socket_id_mask) >> socket_id_shift) << sock_id_bit;
+		}
+
+		/*
+		 * The pre-interleaved address consists of XXXXXXIIIYYYYY
+		 * where III is the ID for this CS, and XXXXXXYYYYY are the
+		 * address bits from the post-interleaved address.
+		 * "num_intlv_bits" has been calculated to tell us how many "I"
+		 * bits there are. "intlv_addr_bit" tells us how many "Y" bits
+		 * there are (where "I" starts).
+		 */
+		temp_addr_y = ret_addr & GENMASK_ULL(intlv_addr_bit-1, 0);
+		temp_addr_i = (cs_id << intlv_addr_bit);
+		temp_addr_x = (ret_addr & GENMASK_ULL(63, intlv_addr_bit)) << num_intlv_bits;
+		ret_addr    = temp_addr_x | temp_addr_i | temp_addr_y;
+	}
+
+	/* Add dram base address */
+	ret_addr += dram_base_addr;
+
+	/* If legacy MMIO hole enabled */
+	if (lgcy_mmio_hole_en) {
+		if (amd_df_indirect_read(nid, 0, 0x104, umc, &tmp))
+			goto out_err;
+
+		dram_hole_base = tmp & GENMASK(31, 24);
+		if (ret_addr >= dram_hole_base)
+			ret_addr += (BIT_ULL(32) - dram_hole_base);
+	}
+
+	if (hash_enabled) {
+		/* Save some parentheses and grab ls-bit at the end. */
+		hashed_bit =	(ret_addr >> 12) ^
+				(ret_addr >> 18) ^
+				(ret_addr >> 21) ^
+				(ret_addr >> 30) ^
+				cs_id;
+
+		hashed_bit &= BIT(0);
+
+		if (hashed_bit != ((ret_addr >> intlv_addr_bit) & BIT(0)))
+			ret_addr ^= BIT(intlv_addr_bit);
+	}
+
+	/* Is calculated system address is above DRAM limit address? */
+	if (ret_addr > dram_limit_addr)
+		goto out_err;
+
+	*sys_addr = ret_addr;
+	return 0;
+
+out_err:
+	return -EINVAL;
+}
+
 static int get_channel_from_ecc_syndrome(struct mem_ctl_info *, u16);
 
 /*
@@ -1184,9 +1407,6 @@ static void __dump_misc_regs_df(struct amd64_pvt *pvt)
 
 		debug_display_dimm_sizes_df(pvt, i);
 	}
-
-	edac_dbg(1, "F0x104 (DRAM Hole Address): 0x%08x, base: 0x%08x\n",
-		 pvt->dhar, dhar_base(pvt));
 }
 
 /* Display and decode various NB registers for debug purposes. */
@@ -1221,6 +1441,8 @@ static void __dump_misc_regs(struct amd64_pvt *pvt)
 	/* Only if NOT ganged does dclr1 have valid info */
 	if (!dct_ganging_enabled(pvt))
 		debug_dump_dramcfg_low(pvt, pvt->dclr1, 1);
+
+	edac_dbg(1, "  DramHoleValid: %s\n", dhar_valid(pvt) ? "yes" : "no");
 }
 
 /* Display and decode various NB registers for debug purposes. */
@@ -1230,8 +1452,6 @@ static void dump_misc_regs(struct amd64_pvt *pvt)
 		__dump_misc_regs_df(pvt);
 	else
 		__dump_misc_regs(pvt);
-
-	edac_dbg(1, "  DramHoleValid: %s\n", dhar_valid(pvt) ? "yes" : "no");
 
 	amd64_info("using x%u syndromes.\n", pvt->ecc_sym_sz);
 }
@@ -2661,8 +2881,6 @@ static struct amd64_family_type family_types[] = {
 	},
 	[F17_CPUS] = {
 		.ctl_name = "F17h",
-		.f0_id = PCI_DEVICE_ID_AMD_17H_DF_F0,
-		.f6_id = PCI_DEVICE_ID_AMD_17H_DF_F6,
 		.max_mcs = 2,
 		.ops = {
 			.early_channel_count	= f17_early_channel_count,
@@ -2671,8 +2889,6 @@ static struct amd64_family_type family_types[] = {
 	},
 	[F17_M10H_CPUS] = {
 		.ctl_name = "F17h_M10h",
-		.f0_id = PCI_DEVICE_ID_AMD_17H_M10H_DF_F0,
-		.f6_id = PCI_DEVICE_ID_AMD_17H_M10H_DF_F6,
 		.max_mcs = 2,
 		.ops = {
 			.early_channel_count	= f17_early_channel_count,
@@ -2681,8 +2897,6 @@ static struct amd64_family_type family_types[] = {
 	},
 	[F17_M30H_CPUS] = {
 		.ctl_name = "F17h_M30h",
-		.f0_id = PCI_DEVICE_ID_AMD_17H_M30H_DF_F0,
-		.f6_id = PCI_DEVICE_ID_AMD_17H_M30H_DF_F6,
 		.max_mcs = 8,
 		.ops = {
 			.early_channel_count	= f17_early_channel_count,
@@ -2691,8 +2905,6 @@ static struct amd64_family_type family_types[] = {
 	},
 	[F17_M60H_CPUS] = {
 		.ctl_name = "F17h_M60h",
-		.f0_id = PCI_DEVICE_ID_AMD_17H_M60H_DF_F0,
-		.f6_id = PCI_DEVICE_ID_AMD_17H_M60H_DF_F6,
 		.max_mcs = 2,
 		.ops = {
 			.early_channel_count	= f17_early_channel_count,
@@ -2701,8 +2913,6 @@ static struct amd64_family_type family_types[] = {
 	},
 	[F17_M70H_CPUS] = {
 		.ctl_name = "F17h_M70h",
-		.f0_id = PCI_DEVICE_ID_AMD_17H_M70H_DF_F0,
-		.f6_id = PCI_DEVICE_ID_AMD_17H_M70H_DF_F6,
 		.max_mcs = 2,
 		.ops = {
 			.early_channel_count	= f17_early_channel_count,
@@ -2711,9 +2921,25 @@ static struct amd64_family_type family_types[] = {
 	},
 	[F19_CPUS] = {
 		.ctl_name = "F19h",
-		.f0_id = PCI_DEVICE_ID_AMD_19H_DF_F0,
-		.f6_id = PCI_DEVICE_ID_AMD_19H_DF_F6,
 		.max_mcs = 8,
+		.ops = {
+			.early_channel_count	= f17_early_channel_count,
+			.dbam_to_cs		= f17_addr_mask_to_cs_size,
+		}
+	},
+	[F19_M60H_CPUS] = {
+		.ctl_name = "F19h_M60h",
+		.max_mcs = 2,
+		.flags.zn_regs_v2 = 1,
+		.ops = {
+			.early_channel_count	= f17_early_channel_count,
+			.dbam_to_cs		= f17_addr_mask_to_cs_size,
+		}
+	},
+	[F19_M70H_CPUS] = {
+		.ctl_name = "F19h_M70h",
+		.max_mcs = 2,
+		.flags.zn_regs_v2 = 1,
 		.ops = {
 			.early_channel_count	= f17_early_channel_count,
 			.dbam_to_cs		= f17_addr_mask_to_cs_size,
@@ -2721,8 +2947,6 @@ static struct amd64_family_type family_types[] = {
 	},
 	[F19_M10H_CPUS] = {
 		.ctl_name = "F19h_M10h",
-		.f0_id = PCI_DEVICE_ID_AMD_19H_M10H_DF_F0,
-		.f6_id = PCI_DEVICE_ID_AMD_19H_M10H_DF_F6,
 		.max_mcs = 12,
 		.flags.zn_regs_v2 = 1,
 		.ops = {
@@ -3036,36 +3260,12 @@ log_error:
 /*
  * Use pvt->F3 which contains the F3 CPU PCI device to get the related
  * F1 (AddrMap) and F2 (Dct) devices. Return negative value on error.
- * Reserve F0 and F6 on systems with a UMC.
  */
 static int
 reserve_mc_sibling_devs(struct amd64_pvt *pvt, u16 pci_id1, u16 pci_id2)
 {
-	if (pvt->umc) {
-		pvt->F0 = pci_get_related_function(pvt->F3->vendor, pci_id1, pvt->F3);
-		if (!pvt->F0) {
-			edac_dbg(1, "F0 not found, device 0x%x\n", pci_id1);
-			return -ENODEV;
-		}
-
-		pvt->F6 = pci_get_related_function(pvt->F3->vendor, pci_id2, pvt->F3);
-		if (!pvt->F6) {
-			pci_dev_put(pvt->F0);
-			pvt->F0 = NULL;
-
-			edac_dbg(1, "F6 not found: device 0x%x\n", pci_id2);
-			return -ENODEV;
-		}
-
-		if (!pci_ctl_dev)
-			pci_ctl_dev = &pvt->F0->dev;
-
-		edac_dbg(1, "F0: %s\n", pci_name(pvt->F0));
-		edac_dbg(1, "F3: %s\n", pci_name(pvt->F3));
-		edac_dbg(1, "F6: %s\n", pci_name(pvt->F6));
-
+	if (pvt->umc)
 		return 0;
-	}
 
 	/* Reserve the ADDRESS MAP Device */
 	pvt->F1 = pci_get_related_function(pvt->F3->vendor, pci_id1, pvt->F3);
@@ -3097,8 +3297,7 @@ reserve_mc_sibling_devs(struct amd64_pvt *pvt, u16 pci_id1, u16 pci_id2)
 static void free_mc_sibling_devs(struct amd64_pvt *pvt)
 {
 	if (pvt->umc) {
-		pci_dev_put(pvt->F0);
-		pci_dev_put(pvt->F6);
+		return;
 	} else {
 		pci_dev_put(pvt->F1);
 		pci_dev_put(pvt->F2);
@@ -3188,7 +3387,6 @@ static void read_mc_regs(struct amd64_pvt *pvt)
 
 	if (pvt->umc) {
 		__read_mc_regs_df(pvt);
-		amd64_read_pci_cfg(pvt->F0, DF_DHAR, &pvt->dhar);
 
 		goto skip;
 	}
@@ -3687,6 +3885,9 @@ static void setup_mci_misc_attrs(struct mem_ctl_info *mci)
 	mci->dev_name		= pci_name(pvt->F3);
 	mci->ctl_page_to_phys	= NULL;
 
+	if (pvt->fam >= 0x17)
+		return;
+
 	/* memory scrubber interface */
 	mci->set_sdram_scrub_rate = set_scrub_rate;
 	mci->get_sdram_scrub_rate = get_scrub_rate;
@@ -3778,6 +3979,16 @@ static struct amd64_family_type *per_family_init(struct amd64_pvt *pvt)
 			pvt->ops = &family_types[F17_M70H_CPUS].ops;
 			fam_type->ctl_name = "F19h_M20h";
 			break;
+		} else if (pvt->model >= 0x60 && pvt->model <= 0x6f) {
+			fam_type = &family_types[F19_M60H_CPUS];
+			pvt->ops = &family_types[F19_M60H_CPUS].ops;
+			fam_type->ctl_name = "F19h_M60h";
+			break;
+		} else if (pvt->model >= 0x70 && pvt->model <= 0x7f) {
+			fam_type = &family_types[F19_M70H_CPUS];
+			pvt->ops = &family_types[F19_M70H_CPUS].ops;
+			fam_type->ctl_name = "F19h_M70h";
+			break;
 		} else if (pvt->model >= 0xa0 && pvt->model <= 0xaf) {
 			fam_type = &family_types[F19_M10H_CPUS];
 			pvt->ops = &family_types[F19_M10H_CPUS].ops;
@@ -3814,9 +4025,6 @@ static int hw_info_get(struct amd64_pvt *pvt)
 		pvt->umc = kcalloc(fam_type->max_mcs, sizeof(struct amd64_umc), GFP_KERNEL);
 		if (!pvt->umc)
 			return -ENOMEM;
-
-		pci_id1 = fam_type->f0_id;
-		pci_id2 = fam_type->f6_id;
 	} else {
 		pci_id1 = fam_type->f1_id;
 		pci_id2 = fam_type->f2_id;
@@ -3833,7 +4041,7 @@ static int hw_info_get(struct amd64_pvt *pvt)
 
 static void hw_info_put(struct amd64_pvt *pvt)
 {
-	if (pvt->F0 || pvt->F1)
+	if (pvt->F1)
 		free_mc_sibling_devs(pvt);
 
 	kfree(pvt->umc);
@@ -4051,7 +4259,7 @@ static int __init amd64_edac_init(void)
 	if (!x86_match_cpu(amd64_cpuids))
 		return -ENODEV;
 
-	if (amd_cache_northbridges() < 0)
+	if (!amd_nb_num())
 		return -ENODEV;
 
 	opstate_init();
@@ -4082,12 +4290,12 @@ static int __init amd64_edac_init(void)
 	}
 
 	/* register stuff with EDAC MCE */
-	if (boot_cpu_data.x86 >= 0x17)
+	if (boot_cpu_data.x86 >= 0x17) {
 		amd_register_ecc_decoder(decode_umc_error);
-	else
+	} else {
 		amd_register_ecc_decoder(decode_bus_error);
-
-	setup_pci_device();
+		setup_pci_device();
+	}
 
 #ifdef CONFIG_X86_32
 	amd64_err("%s on 32-bit is unsupported. USE AT YOUR OWN RISK!\n", EDAC_MOD_STR);

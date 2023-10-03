@@ -396,6 +396,7 @@ cifs_alloc_inode(struct super_block *sb)
 	cifs_inode->epoch = 0;
 	spin_lock_init(&cifs_inode->open_file_lock);
 	generate_random_uuid(cifs_inode->lease_key);
+	cifs_inode->symlink_target = NULL;
 
 	/*
 	 * Can not set i_flags here - they get immediately overwritten to zero
@@ -412,7 +413,11 @@ cifs_alloc_inode(struct super_block *sb)
 static void
 cifs_free_inode(struct inode *inode)
 {
-	kmem_cache_free(cifs_inode_cachep, CIFS_I(inode));
+	struct cifsInodeInfo *cinode = CIFS_I(inode);
+
+	if (S_ISLNK(inode->i_mode))
+		kfree(cinode->symlink_target);
+	kmem_cache_free(cifs_inode_cachep, cinode);
 }
 
 static void
@@ -594,6 +599,8 @@ cifs_show_options(struct seq_file *s, struct dentry *root)
 		seq_puts(s, ",nocase");
 	if (tcon->nodelete)
 		seq_puts(s, ",nodelete");
+	if (cifs_sb->ctx->no_sparse)
+		seq_puts(s, ",nosparse");
 	if (tcon->local_lease)
 		seq_puts(s, ",locallease");
 	if (tcon->retry)
@@ -671,9 +678,15 @@ cifs_show_options(struct seq_file *s, struct dentry *root)
 	seq_printf(s, ",echo_interval=%lu",
 			tcon->ses->server->echo_interval / HZ);
 
-	/* Only display max_credits if it was overridden on mount */
+	/* Only display the following if overridden on mount */
 	if (tcon->ses->server->max_credits != SMB2_MAX_CREDITS_AVAILABLE)
 		seq_printf(s, ",max_credits=%u", tcon->ses->server->max_credits);
+	if (tcon->ses->server->tcp_nodelay)
+		seq_puts(s, ",tcpnodelay");
+	if (tcon->ses->server->noautotune)
+		seq_puts(s, ",noautotune");
+	if (tcon->ses->server->noblocksnd)
+		seq_puts(s, ",noblocksend");
 
 	if (tcon->snapshot_time)
 		seq_printf(s, ",snapshot=%llu", tcon->snapshot_time);
@@ -691,6 +704,7 @@ cifs_show_options(struct seq_file *s, struct dentry *root)
 		seq_printf(s, ",acdirmax=%lu", cifs_sb->ctx->acdirmax / HZ);
 		seq_printf(s, ",acregmax=%lu", cifs_sb->ctx->acregmax / HZ);
 	}
+	seq_printf(s, ",closetimeo=%lu", cifs_sb->ctx->closetimeo / HZ);
 
 	if (tcon->ses->chan_max > 1)
 		seq_printf(s, ",multichannel,max_channels=%zu",
@@ -716,13 +730,16 @@ static void cifs_umount_begin(struct super_block *sb)
 	spin_lock(&tcon->tc_lock);
 	if ((tcon->tc_count > 1) || (tcon->status == TID_EXITING)) {
 		/* we have other mounts to same share or we have
-		   already tried to force umount this and woken up
+		   already tried to umount this and woken up
 		   all waiting network requests, nothing to do */
 		spin_unlock(&tcon->tc_lock);
 		spin_unlock(&cifs_tcp_ses_lock);
 		return;
-	} else if (tcon->tc_count == 1)
-		tcon->status = TID_EXITING;
+	}
+	/*
+	 * can not set tcon->status to TID_EXITING yet since we don't know if umount -f will
+	 * fail later (e.g. due to open files).  TID_EXITING will be set just before tdis req sent
+	 */
 	spin_unlock(&tcon->tc_lock);
 	spin_unlock(&cifs_tcp_ses_lock);
 
@@ -877,12 +894,6 @@ cifs_smb3_do_mount(struct file_system_type *fs_type,
 		goto out;
 	}
 	rc = smb3_fs_context_dup(cifs_sb->ctx, old_ctx);
-	if (rc) {
-		root = ERR_PTR(rc);
-		goto out;
-	}
-
-	rc = cifs_setup_volume_info(cifs_sb->ctx, NULL, NULL);
 	if (rc) {
 		root = ERR_PTR(rc);
 		goto out;
@@ -1135,6 +1146,30 @@ const struct inode_operations cifs_file_inode_ops = {
 	.fiemap = cifs_fiemap,
 };
 
+const char *cifs_get_link(struct dentry *dentry, struct inode *inode,
+			    struct delayed_call *done)
+{
+	char *target_path;
+
+	target_path = kmalloc(PATH_MAX, GFP_KERNEL);
+	if (!target_path)
+		return ERR_PTR(-ENOMEM);
+
+	spin_lock(&inode->i_lock);
+	if (likely(CIFS_I(inode)->symlink_target)) {
+		strscpy(target_path, CIFS_I(inode)->symlink_target, PATH_MAX);
+	} else {
+		kfree(target_path);
+		target_path = ERR_PTR(-EOPNOTSUPP);
+	}
+	spin_unlock(&inode->i_lock);
+
+	if (!IS_ERR(target_path))
+		set_delayed_call(done, kfree_link, target_path);
+
+	return target_path;
+}
+
 const struct inode_operations cifs_symlink_inode_ops = {
 	.get_link = cifs_get_link,
 	.permission = cifs_permission,
@@ -1245,6 +1280,12 @@ ssize_t cifs_file_copychunk_range(unsigned int xid,
 	lock_two_nondirectories(target_inode, src_inode);
 
 	cifs_dbg(FYI, "about to flush pages\n");
+
+	rc = filemap_write_and_wait_range(src_inode->i_mapping, off,
+					  off + len - 1);
+	if (rc)
+		goto unlock;
+
 	/* should we flush first and last page first */
 	truncate_inode_pages(&target_inode->i_data, 0);
 
@@ -1259,6 +1300,8 @@ ssize_t cifs_file_copychunk_range(unsigned int xid,
 	 * that target is updated on the server
 	 */
 	CIFS_I(target_inode)->time = 0;
+
+unlock:
 	/* although unlocking in the reverse order from locking is not
 	 * strictly necessary here it is a little cleaner to be consistent
 	 */
@@ -1288,8 +1331,11 @@ static ssize_t cifs_copy_file_range(struct file *src_file, loff_t off,
 	ssize_t rc;
 	struct cifsFileInfo *cfile = dst_file->private_data;
 
-	if (cfile->swapfile)
-		return -EOPNOTSUPP;
+	if (cfile->swapfile) {
+		rc = -EOPNOTSUPP;
+		free_xid(xid);
+		return rc;
+	}
 
 	rc = cifs_file_copychunk_range(xid, src_file, off, dst_file, destoff,
 					len, flags);
@@ -1550,8 +1596,7 @@ cifs_destroy_request_bufs(void)
 	kmem_cache_destroy(cifs_sm_req_cachep);
 }
 
-static int
-cifs_init_mids(void)
+static int init_mids(void)
 {
 	cifs_mid_cachep = kmem_cache_create("cifs_mpx_ids",
 					    sizeof(struct mid_q_entry), 0,
@@ -1569,8 +1614,7 @@ cifs_init_mids(void)
 	return 0;
 }
 
-static void
-cifs_destroy_mids(void)
+static void destroy_mids(void)
 {
 	mempool_destroy(cifs_mid_poolp);
 	kmem_cache_destroy(cifs_mid_cachep);
@@ -1667,7 +1711,7 @@ init_cifs(void)
 	if (rc)
 		goto out_destroy_deferredclose_wq;
 
-	rc = cifs_init_mids();
+	rc = init_mids();
 	if (rc)
 		goto out_destroy_inodecache;
 
@@ -1724,7 +1768,7 @@ out_destroy_request_bufs:
 #endif
 	cifs_destroy_request_bufs();
 out_destroy_mids:
-	cifs_destroy_mids();
+	destroy_mids();
 out_destroy_inodecache:
 	cifs_destroy_inodecache();
 out_destroy_deferredclose_wq:
@@ -1760,7 +1804,7 @@ exit_cifs(void)
 	dfs_cache_destroy();
 #endif
 	cifs_destroy_request_bufs();
-	cifs_destroy_mids();
+	destroy_mids();
 	cifs_destroy_inodecache();
 	destroy_workqueue(deferredclose_wq);
 	destroy_workqueue(cifsoplockd_wq);

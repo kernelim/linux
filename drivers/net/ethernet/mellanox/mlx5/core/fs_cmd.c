@@ -272,8 +272,6 @@ static int mlx5_cmd_create_flow_table(struct mlx5_flow_root_namespace *ns,
 	unsigned int size;
 	int err;
 
-	if (ft_attr->max_fte != POOL_NEXT_SIZE)
-		size = roundup_pow_of_two(ft_attr->max_fte);
 	size = mlx5_ft_pool_get_avail_sz(dev, ft->type, ft_attr->max_fte);
 	if (!size)
 		return -ENOSPC;
@@ -412,11 +410,6 @@ static int mlx5_cmd_create_flow_group(struct mlx5_flow_root_namespace *ns,
 		 MLX5_CMD_OP_CREATE_FLOW_GROUP);
 	MLX5_SET(create_flow_group_in, in, table_type, ft->type);
 	MLX5_SET(create_flow_group_in, in, table_id, ft->id);
-	if (ft->vport) {
-		MLX5_SET(create_flow_group_in, in, vport_number, ft->vport);
-		MLX5_SET(create_flow_group_in, in, other_vport, 1);
-	}
-
 	MLX5_SET(create_flow_group_in, in, vport_number, ft->vport);
 	MLX5_SET(create_flow_group_in, in, other_vport,
 		 !!(ft->flags & MLX5_FLOW_TABLE_OTHER_VPORT));
@@ -577,7 +570,10 @@ static int mlx5_cmd_set_fte(struct mlx5_core_dev *dev,
 		MLX5_SET(flow_context, in_flow_context, modify_header_id,
 			 fte->action.modify_hdr->id);
 
-	MLX5_SET(flow_context, in_flow_context, ipsec_obj_id, fte->action.ipsec_obj_id);
+	MLX5_SET(flow_context, in_flow_context, encrypt_decrypt_type,
+		 fte->action.crypto.type);
+	MLX5_SET(flow_context, in_flow_context, encrypt_decrypt_obj_id,
+		 fte->action.crypto.obj_id);
 
 	vlan = MLX5_ADDR_OF(flow_context, in_flow_context, push_vlan);
 
@@ -649,6 +645,12 @@ static int mlx5_cmd_set_fte(struct mlx5_core_dev *dev,
 			case MLX5_FLOW_DESTINATION_TYPE_FLOW_SAMPLER:
 				id = dst->dest_attr.sampler_id;
 				ifc_type = MLX5_IFC_FLOW_DESTINATION_TYPE_FLOW_SAMPLER;
+				break;
+			case MLX5_FLOW_DESTINATION_TYPE_TABLE_TYPE:
+				MLX5_SET(dest_format_struct, in_dests,
+					 destination_table_type, dst->dest_attr.ft->type);
+				id = dst->dest_attr.ft->id;
+				ifc_type = MLX5_IFC_FLOW_DESTINATION_TYPE_TABLE_TYPE;
 				break;
 			default:
 				id = dst->dest_attr.tir_num;
@@ -919,13 +921,15 @@ static int mlx5_cmd_modify_header_alloc(struct mlx5_flow_root_namespace *ns,
 		max_actions = MLX5_CAP_ESW_FLOWTABLE_FDB(dev, max_modify_header_actions);
 		table_type = FS_FT_FDB;
 		break;
+	case MLX5_FLOW_NAMESPACE_KERNEL_RX_MACSEC:
 	case MLX5_FLOW_NAMESPACE_KERNEL:
 	case MLX5_FLOW_NAMESPACE_BYPASS:
 		max_actions = MLX5_CAP_FLOWTABLE_NIC_RX(dev, max_modify_header_actions);
 		table_type = FS_FT_NIC_RX;
 		break;
 	case MLX5_FLOW_NAMESPACE_EGRESS:
-	case MLX5_FLOW_NAMESPACE_EGRESS_KERNEL:
+	case MLX5_FLOW_NAMESPACE_EGRESS_IPSEC:
+	case MLX5_FLOW_NAMESPACE_EGRESS_MACSEC:
 		max_actions = MLX5_CAP_FLOWTABLE_NIC_TX(dev, max_modify_header_actions);
 		table_type = FS_FT_NIC_TX;
 		break;

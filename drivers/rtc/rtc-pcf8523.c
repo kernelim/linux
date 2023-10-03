@@ -99,24 +99,24 @@ static irqreturn_t pcf8523_irq(int irq, void *dev_id)
 static int pcf8523_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
 	struct pcf8523 *pcf8523 = dev_get_drvdata(dev);
-	u8 regs[7];
+	u8 regs[10];
 	int err;
 
-	err = regmap_bulk_read(pcf8523->regmap, PCF8523_REG_SECONDS, regs,
+	err = regmap_bulk_read(pcf8523->regmap, PCF8523_REG_CONTROL1, regs,
 			       sizeof(regs));
 	if (err < 0)
 		return err;
 
-	if (regs[0] & PCF8523_SECONDS_OS)
+	if ((regs[0] & PCF8523_CONTROL1_STOP) || (regs[3] & PCF8523_SECONDS_OS))
 		return -EINVAL;
 
-	tm->tm_sec = bcd2bin(regs[0] & 0x7f);
-	tm->tm_min = bcd2bin(regs[1] & 0x7f);
-	tm->tm_hour = bcd2bin(regs[2] & 0x3f);
-	tm->tm_mday = bcd2bin(regs[3] & 0x3f);
-	tm->tm_wday = regs[4] & 0x7;
-	tm->tm_mon = bcd2bin(regs[5] & 0x1f) - 1;
-	tm->tm_year = bcd2bin(regs[6]) + 100;
+	tm->tm_sec = bcd2bin(regs[3] & 0x7f);
+	tm->tm_min = bcd2bin(regs[4] & 0x7f);
+	tm->tm_hour = bcd2bin(regs[5] & 0x3f);
+	tm->tm_mday = bcd2bin(regs[6] & 0x3f);
+	tm->tm_wday = regs[7] & 0x7;
+	tm->tm_mon = bcd2bin(regs[8] & 0x1f) - 1;
+	tm->tm_year = bcd2bin(regs[9]) + 100;
 
 	return 0;
 }
@@ -445,13 +445,18 @@ static int pcf8523_probe(struct i2c_client *client)
 	clear_bit(RTC_FEATURE_UPDATE_INTERRUPT, rtc->features);
 
 	if (client->irq > 0) {
+		unsigned long irqflags = IRQF_TRIGGER_LOW;
+
+		if (dev_fwnode(&client->dev))
+			irqflags = 0;
+
 		err = regmap_write(pcf8523->regmap, PCF8523_TMR_CLKOUT_CTRL, 0x38);
 		if (err < 0)
 			return err;
 
 		err = devm_request_threaded_irq(&client->dev, client->irq,
 						NULL, pcf8523_irq,
-						IRQF_SHARED | IRQF_ONESHOT | IRQF_TRIGGER_LOW,
+						IRQF_SHARED | IRQF_ONESHOT | irqflags,
 						dev_name(&rtc->dev), pcf8523);
 		if (err)
 			return err;

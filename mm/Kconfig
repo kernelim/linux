@@ -33,7 +33,7 @@ config ZSWAP
 	  pages that are in the process of being swapped out and attempts to
 	  compress them into a dynamically allocated RAM-based memory pool.
 	  This can result in a significant I/O reduction on swap device and,
-	  in the case where decompressing from RAM is faster that swap device
+	  in the case where decompressing from RAM is faster than swap device
 	  reads, can also improve workload performance.
 
 	  This is marked experimental because it is a new feature (as of
@@ -440,6 +440,12 @@ config SPARSEMEM_VMEMMAP
 	  SPARSEMEM_VMEMMAP uses a virtually mapped memmap to optimise
 	  pfn_to_page and page_to_pfn operations.  This is the most
 	  efficient option when sufficient kernel resources are available.
+#
+# Select this config option from the architecture Kconfig, if it is preferred
+# to enable the feature of HugeTLB/dev_dax vmemmap optimization.
+#
+config ARCH_WANT_OPTIMIZE_VMEMMAP
+	bool
 
 config HAVE_MEMBLOCK_PHYS_MAP
 	bool
@@ -579,6 +585,12 @@ config COMPACTION
 	  it and then we would be really interested to hear about that at
 	  linux-mm@kvack.org.
 
+config COMPACT_UNEVICTABLE_DEFAULT
+	int
+	depends on COMPACTION
+	default 0 if PREEMPT_RT
+	default 1
+
 #
 # support for free page reporting
 config PAGE_REPORTING
@@ -639,14 +651,6 @@ config BOUNCE
 	  memory available to the CPU. Enabled by default when HIGHMEM is
 	  selected, but you may say n to override this.
 
-config VIRT_TO_BUS
-	bool
-	help
-	  An architecture should select this if it implements the
-	  deprecated interface virt_to_bus().  All new architectures
-	  should probably not select this.
-
-
 config MMU_NOTIFIER
 	bool
 	select SRCU
@@ -663,7 +667,7 @@ config KSM
 	  the many instances by a single page with that content, so
 	  saving memory until one or another app needs to modify the content.
 	  Recommended for use with KVM, or with other duplicative applications.
-	  See Documentation/vm/ksm.rst for more information: KSM is inactive
+	  See Documentation/mm/ksm.rst for more information: KSM is inactive
 	  until a program has madvised that an area is MADV_MERGEABLE, and
 	  root has set /sys/kernel/mm/ksm/run to 1 (if CONFIG_SYSFS is set).
 
@@ -942,9 +946,6 @@ config IDLE_PAGE_TRACKING
 config ARCH_HAS_CACHE_LINE_SIZE
 	bool
 
-config ARCH_HAS_FILTER_PGPROT
-	bool
-
 config ARCH_HAS_VM_GET_PAGE_PROT
 	bool
 
@@ -997,9 +998,14 @@ config HMM_MIRROR
 	bool
 	depends on MMU
 
+config GET_FREE_REGION
+	depends on SPARSEMEM
+	bool
+
 config DEVICE_PRIVATE
 	bool "Unaddressable device memory (GPU memory, ...)"
 	depends on ZONE_DEVICE
+	select GET_FREE_REGION
 
 	help
 	  Allows creation of struct pages to represent unaddressable device
@@ -1013,6 +1019,14 @@ config ARCH_USES_HIGH_VMA_FLAGS
 	bool
 config ARCH_HAS_PKEYS
 	bool
+
+config ARCH_USES_PG_ARCH_X
+	bool
+	help
+	  Enable the definition of PG_arch_x page flags with x > 1. Only
+	  suitable for 64-bit architectures with CONFIG_FLATMEM or
+	  CONFIG_SPARSEMEM_VMEMMAP enabled, otherwise there may not be
+	  enough room for additional bits in page->flags.
 
 config VM_EVENT_COUNTERS
 	default y

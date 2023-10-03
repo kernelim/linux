@@ -361,7 +361,7 @@ int skl_int3472_discrete_probe(struct platform_device *pdev)
 	int3472->dev = &pdev->dev;
 	platform_set_drvdata(pdev, int3472);
 
-	int3472->sensor = acpi_dev_get_first_consumer_dev(adev);
+	int3472->sensor = acpi_dev_get_next_consumer_dev(adev, NULL);
 	if (!int3472->sensor) {
 		dev_err(&pdev->dev, "INT3472 seems to have no dependents.\n");
 		return -ENODEV;

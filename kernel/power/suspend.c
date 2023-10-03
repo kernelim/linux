@@ -237,7 +237,8 @@ EXPORT_SYMBOL_GPL(suspend_valid_only_mem);
 
 static bool sleep_state_supported(suspend_state_t state)
 {
-	return state == PM_SUSPEND_TO_IDLE || (suspend_ops && suspend_ops->enter);
+	return state == PM_SUSPEND_TO_IDLE ||
+		(suspend_ops && suspend_ops->enter && !cxl_mem_active());
 }
 
 static int platform_suspend_prepare(suspend_state_t state)

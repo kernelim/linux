@@ -112,9 +112,9 @@ static const struct iomap_ops zonefs_iomap_ops = {
 	.iomap_begin	= zonefs_iomap_begin,
 };
 
-static int zonefs_readpage(struct file *unused, struct page *page)
+static int zonefs_read_folio(struct file *unused, struct folio *folio)
 {
-	return iomap_readpage(page, &zonefs_iomap_ops);
+	return iomap_read_folio(folio, &zonefs_iomap_ops);
 }
 
 static void zonefs_readahead(struct readahead_control *rac)
@@ -180,14 +180,14 @@ static int zonefs_swap_activate(struct swap_info_struct *sis,
 }
 
 static const struct address_space_operations zonefs_file_aops = {
-	.readpage		= zonefs_readpage,
+	.read_folio		= zonefs_read_folio,
 	.readahead		= zonefs_readahead,
 	.writepage		= zonefs_writepage,
 	.writepages		= zonefs_writepages,
 	.dirty_folio		= filemap_dirty_folio,
-	.releasepage		= iomap_releasepage,
-	.invalidatepage		= iomap_invalidatepage,
-	.migratepage		= iomap_migrate_page,
+	.release_folio		= iomap_release_folio,
+	.invalidate_folio	= iomap_invalidate_folio,
+	.migrate_folio		= filemap_migrate_folio,
 	.is_partially_uptodate	= iomap_is_partially_uptodate,
 	.error_remove_page	= generic_error_remove_page,
 	.direct_IO		= noop_direct_IO,

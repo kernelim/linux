@@ -526,13 +526,18 @@ static ssize_t phys_port_name_show(struct device *dev,
 				   struct device_attribute *attr, char *buf)
 {
 	struct net_device *netdev = to_net_dev(dev);
+	struct devlink_port* devlink_port;
 	ssize_t ret = -EINVAL;
+
+	if (netdev->netdev_ops->__rh_deprecated_ndo_get_devlink_port)
+		devlink_port = netdev->netdev_ops->__rh_deprecated_ndo_get_devlink_port(netdev);
+	else devlink_port = netdev->devlink_port;
 
 	/* The checks are also done in dev_get_phys_port_name; this helps
 	 * returning early without hitting the trylock/restart below.
 	 */
 	if (!netdev->netdev_ops->ndo_get_phys_port_name &&
-	    !netdev->netdev_ops->ndo_get_devlink_port)
+	    !devlink_port)
 		return -EOPNOTSUPP;
 
 	if (!rtnl_trylock())
@@ -555,14 +560,19 @@ static ssize_t phys_switch_id_show(struct device *dev,
 				   struct device_attribute *attr, char *buf)
 {
 	struct net_device *netdev = to_net_dev(dev);
+	struct devlink_port* devlink_port;
 	ssize_t ret = -EINVAL;
+
+	if (netdev->netdev_ops->__rh_deprecated_ndo_get_devlink_port)
+		devlink_port = netdev->netdev_ops->__rh_deprecated_ndo_get_devlink_port(netdev);
+	else devlink_port = netdev->devlink_port;
 
 	/* The checks are also done in dev_get_phys_port_name; this helps
 	 * returning early without hitting the trylock/restart below. This works
 	 * because recurse is false when calling dev_get_port_parent_id.
 	 */
 	if (!netdev->netdev_ops->ndo_get_port_parent_id &&
-	    !netdev->netdev_ops->ndo_get_devlink_port)
+	    !devlink_port)
 		return -EOPNOTSUPP;
 
 	if (!rtnl_trylock())
@@ -1029,7 +1039,7 @@ static void rx_queue_release(struct kobject *kobj)
 #endif
 
 	memset(kobj, 0, sizeof(*kobj));
-	dev_put_track(queue->dev, &queue->dev_tracker);
+	netdev_put(queue->dev, &queue->dev_tracker);
 }
 
 static const void *rx_queue_namespace(struct kobject *kobj)
@@ -1081,7 +1091,7 @@ static int rx_queue_add_kobject(struct net_device *dev, int index)
 	/* Kobject_put later will trigger rx_queue_release call which
 	 * decreases dev refcount: Take that reference here
 	 */
-	dev_hold_track(queue->dev, &queue->dev_tracker, GFP_KERNEL);
+	netdev_hold(queue->dev, &queue->dev_tracker, GFP_KERNEL);
 
 	kobj->kset = dev->queues_kset;
 	error = kobject_init_and_add(kobj, &rx_queue_ktype, NULL,
@@ -1648,7 +1658,7 @@ static void netdev_queue_release(struct kobject *kobj)
 	struct netdev_queue *queue = to_netdev_queue(kobj);
 
 	memset(kobj, 0, sizeof(*kobj));
-	dev_put_track(queue->dev, &queue->dev_tracker);
+	netdev_put(queue->dev, &queue->dev_tracker);
 }
 
 static const void *netdev_queue_namespace(struct kobject *kobj)
@@ -1688,7 +1698,7 @@ static int netdev_queue_add_kobject(struct net_device *dev, int index)
 	/* Kobject_put later will trigger netdev_queue_release call
 	 * which decreases dev refcount: Take that reference here
 	 */
-	dev_hold_track(queue->dev, &queue->dev_tracker, GFP_KERNEL);
+	netdev_hold(queue->dev, &queue->dev_tracker, GFP_KERNEL);
 
 	kobj->kset = dev->queues_kset;
 	error = kobject_init_and_add(kobj, &netdev_queue_ktype, NULL,
@@ -1891,9 +1901,9 @@ const struct kobj_ns_type_operations net_ns_type_operations = {
 };
 EXPORT_SYMBOL_GPL(net_ns_type_operations);
 
-static int netdev_uevent(struct device *d, struct kobj_uevent_env *env)
+static int netdev_uevent(const struct device *d, struct kobj_uevent_env *env)
 {
-	struct net_device *dev = to_net_dev(d);
+	const struct net_device *dev = to_net_dev(d);
 	int retval;
 
 	/* pass interface to uevent. */
@@ -1928,16 +1938,16 @@ static void netdev_release(struct device *d)
 	netdev_freemem(dev);
 }
 
-static const void *net_namespace(struct device *d)
+static const void *net_namespace(const struct device *d)
 {
-	struct net_device *dev = to_net_dev(d);
+	const struct net_device *dev = to_net_dev(d);
 
 	return dev_net(dev);
 }
 
-static void net_get_ownership(struct device *d, kuid_t *uid, kgid_t *gid)
+static void net_get_ownership(const struct device *d, kuid_t *uid, kgid_t *gid)
 {
-	struct net_device *dev = to_net_dev(d);
+	const struct net_device *dev = to_net_dev(d);
 	const struct net *net = dev_net(dev);
 
 	net_ns_get_ownership(net, uid, gid);

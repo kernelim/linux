@@ -337,6 +337,29 @@
 			             This mode requires kvm-amd.avic=1.
 			             (Default when IOMMU HW support is present.)
 
+	amd_pstate=	[X86]
+			disable
+			  Do not enable amd_pstate as the default
+			  scaling driver for the supported processors
+			passive
+			  Use amd_pstate with passive mode as a scaling driver.
+			  In this mode autonomous selection is disabled.
+			  Driver requests a desired performance level and platform
+			  tries to match the same performance level if it is
+			  satisfied by guaranteed performance level.
+			active
+			  Use amd_pstate_epp driver instance as the scaling driver,
+			  driver provides a hint to the hardware if software wants
+			  to bias toward performance (0x0) or energy efficiency (0xff)
+			  to the CPPC firmware. then CPPC power algorithm will
+			  calculate the runtime workload and adjust the realtime cores
+			  frequency.
+			guided
+			  Activate guided autonomous mode. Driver requests minimum and
+			  maximum performance level and the platform autonomously
+			  selects a performance level in this range and appropriate
+			  to the current workload.
+
 	amijoy.map=	[HW,JOY] Amiga joystick support
 			Map of devices attached to JOY0DAT and JOY1DAT
 			Format: <a>,<b>
@@ -399,6 +422,12 @@
 
 	arm64.nomte	[ARM64] Unconditionally disable Memory Tagging Extension
 			support
+
+	arm64.nosve	[ARM64] Unconditionally disable Scalable Vector
+			Extension support
+
+	arm64.nosme	[ARM64] Unconditionally disable Scalable Matrix
+			Extension support
 
 	ataflop=	[HW,M68k]
 
@@ -549,6 +578,7 @@
 			Format: <string>
 			nosocket -- Disable socket memory accounting.
 			nokmem -- Disable kernel memory accounting.
+			nobpf -- Disable BPF memory accounting.
 
 	checkreqprot	[SELINUX] Set initial checkreqprot flag value.
 			Format: { "0" | "1" }
@@ -1522,6 +1552,26 @@
 			Format: off | on
 			default: on
 
+	gather_data_sampling=
+			[X86,INTEL] Control the Gather Data Sampling (GDS)
+			mitigation.
+
+			Gather Data Sampling is a hardware vulnerability which
+			allows unprivileged speculative access to data which was
+			previously stored in vector registers.
+
+			This issue is mitigated by default in updated microcode.
+			The mitigation may have a performance impact but can be
+			disabled. On systems without the microcode mitigation
+			disabling AVX serves as a mitigation.
+
+			force:	Disable AVX to mitigate systems without
+				microcode mitigation. No effect if the microcode
+				mitigation is present. Known to cause crashes in
+				userspace with buggy AVX enumeration.
+
+			off:	Disable GDS mitigation.
+
 	gcov_persist=	[GCOV] When non-zero (default), profiling data for
 			kernel modules is saved and remains accessible via
 			debugfs, even when the module is unloaded/reloaded.
@@ -1637,19 +1687,22 @@
 	hugetlb_free_vmemmap=
 			[KNL] Reguires CONFIG_HUGETLB_PAGE_OPTIMIZE_VMEMMAP
 			enabled.
+			Control if HugeTLB Vmemmap Optimization (HVO) is enabled.
 			Allows heavy hugetlb users to free up some more
 			memory (7 * PAGE_SIZE for each 2MB hugetlb page).
-			Format: { [oO][Nn]/Y/y/1 | [oO][Ff]/N/n/0 (default) }
+			Format: { on | off (default) }
 
-			[oO][Nn]/Y/y/1: enable the feature
-			[oO][Ff]/N/n/0: disable the feature
+			on: enable HVO
+			off: disable HVO
 
 			Built with CONFIG_HUGETLB_PAGE_OPTIMIZE_VMEMMAP_DEFAULT_ON=y,
 			the default is on.
 
-			This is not compatible with memory_hotplug.memmap_on_memory.
-			If both parameters are enabled, hugetlb_free_vmemmap takes
-			precedence over memory_hotplug.memmap_on_memory.
+			Note that the vmemmap pages may be allocated from the added
+			memory block itself when memory_hotplug.memmap_on_memory is
+			enabled, those vmemmap pages cannot be optimized even if this
+			feature is enabled.  Other vmemmap pages not allocated from
+			the added memory block itself do not be affected.
 
 	hung_task_panic=
 			[KNL] Should the hung task detector generate panics.
@@ -2012,6 +2065,16 @@
 			disable
 			  Do not enable intel_pstate as the default
 			  scaling driver for the supported processors
+                        active
+                          Use intel_pstate driver to bypass the scaling
+                          governors layer of cpufreq and provides it own
+                          algorithms for p-state selection. There are two
+                          P-state selection algorithms provided by
+                          intel_pstate in the active mode: powersave and
+                          performance.  The way they both operate depends
+                          on whether or not the hardware managed P-states
+                          (HWP) feature has been enabled in the processor
+                          and possibly on the processor model.
 			passive
 			  Use intel_pstate as a scaling driver, but configure it
 			  to work with generic cpufreq governors (instead of
@@ -2223,7 +2286,13 @@
 			Provide an override to the IOAPIC-ID<->DEVICE-ID
 			mapping provided in the IVRS ACPI table.
 			By default, PCI segment is 0, and can be omitted.
-			For example:
+
+			For example, to map IOAPIC-ID decimal 10 to
+			PCI segment 0x1 and PCI device 00:14.0,
+			write the parameter as:
+				ivrs_ioapic=10@0001:00:14.0
+
+			Deprecated formats:
 			* To map IOAPIC-ID decimal 10 to PCI device 00:14.0
 			  write the parameter as:
 				ivrs_ioapic[10]=00:14.0
@@ -2235,7 +2304,13 @@
 			Provide an override to the HPET-ID<->DEVICE-ID
 			mapping provided in the IVRS ACPI table.
 			By default, PCI segment is 0, and can be omitted.
-			For example:
+
+			For example, to map HPET-ID decimal 10 to
+			PCI segment 0x1 and PCI device 00:14.0,
+			write the parameter as:
+				ivrs_hpet=10@0001:00:14.0
+
+			Deprecated formats:
 			* To map HPET-ID decimal 0 to PCI device 00:14.0
 			  write the parameter as:
 				ivrs_hpet[0]=00:14.0
@@ -2246,15 +2321,20 @@
 	ivrs_acpihid	[HW,X86-64]
 			Provide an override to the ACPI-HID:UID<->DEVICE-ID
 			mapping provided in the IVRS ACPI table.
+			By default, PCI segment is 0, and can be omitted.
 
 			For example, to map UART-HID:UID AMD0020:0 to
 			PCI segment 0x1 and PCI device ID 00:14.5,
 			write the parameter as:
-				ivrs_acpihid[0001:00:14.5]=AMD0020:0
+				ivrs_acpihid=AMD0020:0@0001:00:14.5
 
-			By default, PCI segment is 0, and can be omitted.
-			For example, PCI device 00:14.5 write the parameter as:
+			Deprecated formats:
+			* To map UART-HID:UID AMD0020:0 to PCI segment is 0,
+			  PCI device ID 00:14.5, write the parameter as:
 				ivrs_acpihid[00:14.5]=AMD0020:0
+			* To map UART-HID:UID AMD0020:0 to PCI segment 0x1 and
+			  PCI device ID 00:14.5, write the parameter as:
+				ivrs_acpihid[0001:00:14.5]=AMD0020:0
 
 	js=		[HW,JOY] Analog joystick
 			See Documentation/input/joydev/joystick.rst.
@@ -2440,7 +2520,14 @@
 			protected: nVHE-based mode with support for guests whose
 				   state is kept private from the host.
 
-			Defaults to VHE/nVHE based on hardware support.
+			nested: VHE-based mode with support for nested
+				virtualization. Requires at least ARMv8.3
+				hardware.
+
+			Defaults to VHE/nVHE based on hardware support. Setting
+			mode to "protected" will disable kexec and hibernation
+			for the host. "nested" is experimental and should be
+			used with extreme caution.
 
 	kvm-arm.vgic_v3_group0_trap=
 			[KVM,ARM] Trap guest accesses to GICv3 group-0
@@ -2616,14 +2703,14 @@
 			when set.
 			Format: <int>
 
-	libata.force=	[LIBATA] Force configurations.  The format is comma-
-			separated list of "[ID:]VAL" where ID is
-			PORT[.DEVICE].  PORT and DEVICE are decimal numbers
-			matching port, link or device.  Basically, it matches
-			the ATA ID string printed on console by libata.  If
-			the whole ID part is omitted, the last PORT and DEVICE
-			values are used.  If ID hasn't been specified yet, the
-			configuration applies to all ports, links and devices.
+	libata.force=	[LIBATA] Force configurations.  The format is a comma-
+			separated list of "[ID:]VAL" where ID is PORT[.DEVICE].
+			PORT and DEVICE are decimal numbers matching port, link
+			or device.  Basically, it matches the ATA ID string
+			printed on console by libata.  If the whole ID part is
+			omitted, the last PORT and DEVICE values are used.  If
+			ID hasn't been specified yet, the configuration applies
+			to all ports, links and devices.
 
 			If only DEVICE is omitted, the parameter applies to
 			the port and all links and devices behind it.  DEVICE
@@ -2633,7 +2720,7 @@
 			host link and device attached to it.
 
 			The VAL specifies the configuration to force.  As long
-			as there's no ambiguity shortcut notation is allowed.
+			as there is no ambiguity, shortcut notation is allowed.
 			For example, both 1.5 and 1.5G would work for 1.5Gbps.
 			The following configurations can be forced.
 
@@ -2646,19 +2733,61 @@
 			  udma[/][16,25,33,44,66,100,133] notation is also
 			  allowed.
 
+			* nohrst, nosrst, norst: suppress hard, soft and both
+			  resets.
+
+			* rstonce: only attempt one reset during hot-unplug
+			  link recovery.
+
+			* [no]dbdelay: Enable or disable the extra 200ms delay
+			  before debouncing a link PHY and device presence
+			  detection.
+
 			* [no]ncq: Turn on or off NCQ.
 
-			* [no]ncqtrim: Turn off queued DSM TRIM.
+			* [no]ncqtrim: Enable or disable queued DSM TRIM.
 
-			* nohrst, nosrst, norst: suppress hard, soft
-			  and both resets.
+			* [no]ncqati: Enable or disable NCQ trim on ATI chipset.
 
-			* rstonce: only attempt one reset during
-			  hot-unplug link recovery
+			* [no]trim: Enable or disable (unqueued) TRIM.
 
-			* dump_id: dump IDENTIFY data.
+			* trim_zero: Indicate that TRIM command zeroes data.
 
-			* atapi_dmadir: Enable ATAPI DMADIR bridge support
+			* max_trim_128m: Set 128M maximum trim size limit.
+
+			* [no]dma: Turn on or off DMA transfers.
+
+			* atapi_dmadir: Enable ATAPI DMADIR bridge support.
+
+			* atapi_mod16_dma: Enable the use of ATAPI DMA for
+			  commands that are not a multiple of 16 bytes.
+
+			* [no]dmalog: Enable or disable the use of the
+			  READ LOG DMA EXT command to access logs.
+
+			* [no]iddevlog: Enable or disable access to the
+			  identify device data log.
+
+			* [no]logdir: Enable or disable access to the general
+			  purpose log directory.
+
+			* max_sec_128: Set transfer size limit to 128 sectors.
+
+			* max_sec_1024: Set or clear transfer size limit to
+			  1024 sectors.
+
+			* max_sec_lba48: Set or clear transfer size limit to
+			  65535 sectors.
+
+			* [no]lpm: Enable or disable link power management.
+
+			* [no]setxfer: Indicate if transfer speed mode setting
+			  should be skipped.
+
+			* [no]fua: Disable or enable FUA (Force Unit Access)
+			  support for devices supporting this feature.
+
+			* dump_id: Dump IDENTIFY data.
 
 			* disable: Disable this device.
 
@@ -2808,7 +2937,7 @@
 			different yeeloong laptops.
 			Example: machtype=lemote-yeeloong-2f-7inch
 
-	max_addr=nn[KMG]	[KNL,BOOT,ia64] All physical memory greater
+	max_addr=nn[KMG]	[KNL,BOOT,IA-64] All physical memory greater
 			than or equal to this physical address is ignored.
 
 	maxcpus=	[SMP] Maximum number of processors that	an SMP kernel
@@ -2975,10 +3104,12 @@
 			[KNL,X86,ARM] Boolean flag to enable this feature.
 			Format: {on | off (default)}
 			When enabled, runtime hotplugged memory will
-			allocate its internal metadata (struct pages)
-			from the hotadded memory which will allow to
-			hotadd a lot of memory without requiring
-			additional memory to do so.
+			allocate its internal metadata (struct pages,
+			those vmemmap pages cannot be optimized even
+			if hugetlb_free_vmemmap is enabled) from the
+			hotadded memory which will allow to hotadd a
+			lot of memory without requiring additional
+			memory to do so.
 			This feature is disabled by default because it
 			has some implication on large (e.g. GB)
 			allocations in some configurations (e.g. small
@@ -2987,10 +3118,6 @@
 			/sys/module/memory_hotplug/parameters/memmap_on_memory.
 			Note that even when enabled, there are a few cases where
 			the feature is not effective.
-
-			This is not compatible with hugetlb_free_vmemmap. If
-			both parameters are enabled, hugetlb_free_vmemmap takes
-			precedence over memory_hotplug.memmap_on_memory.
 
 	memtest=	[KNL,X86,ARM,PPC,RISCV] Enable memtest
 			Format: <integer>
@@ -3033,7 +3160,7 @@
 
 	mga=		[HW,DRM]
 
-	min_addr=nn[KMG]	[KNL,BOOT,ia64] All physical memory below this
+	min_addr=nn[KMG]	[KNL,BOOT,IA-64] All physical memory below this
 			physical address is ignored.
 
 	mini2440=	[ARM,HW,KNL]
@@ -3067,21 +3194,25 @@
 				Disable all optional CPU mitigations.  This
 				improves system performance, but it may also
 				expose users to several CPU vulnerabilities.
-				Equivalent to: nopti [X86,PPC]
-					       kpti=0 [ARM64]
-					       nospectre_v1 [X86,PPC]
-					       nobp=0 [S390]
-					       nospectre_v2 [X86,PPC,S390,ARM64]
-					       spectre_v2_user=off [X86]
-					       spec_store_bypass_disable=off [X86,PPC]
-					       ssbd=force-off [ARM64]
+				Equivalent to: if nokaslr then kpti=0 [ARM64]
+					       gather_data_sampling=off [X86]
+					       kvm.nx_huge_pages=off [X86]
 					       l1tf=off [X86]
 					       mds=off [X86]
-					       tsx_async_abort=off [X86]
-					       kvm.nx_huge_pages=off [X86]
+					       mmio_stale_data=off [X86]
 					       no_entry_flush [PPC]
 					       no_uaccess_flush [PPC]
-					       mmio_stale_data=off [X86]
+					       nobp=0 [S390]
+					       nopti [X86,PPC]
+					       nospectre_bhb [ARM64]
+					       nospectre_v1 [X86,PPC]
+					       nospectre_v2 [X86,PPC,S390,ARM64]
+					       retbleed=off [X86]
+					       spec_store_bypass_disable=off [X86,PPC]
+					       spectre_v2_user=off [X86]
+					       srbds=off [X86,INTEL]
+					       ssbd=force-off [ARM64]
+					       tsx_async_abort=off [X86]
 
 				Exceptions:
 					       This does not have any effect on
@@ -3104,6 +3235,7 @@
 					       mds=full,nosmt [X86]
 					       tsx_async_abort=full,nosmt [X86]
 					       mmio_stale_data=full,nosmt [X86]
+					       retbleed=auto,nosmt [X86]
 
 	mminit_loglevel=
 			[KNL] When CONFIG_DEBUG_MEMORY_INIT is set, this
@@ -3432,9 +3564,6 @@
 
 	noautogroup	Disable scheduler automatic task group creation.
 
-	nobats		[PPC] Do not use BATs for mapping kernel lowmem
-			on "Classic" PPC cores.
-
 	nocache		[ARM]
 
 	noclflush	[BUGS=X86] Don't use the CLFLUSH instruction
@@ -3477,7 +3606,7 @@
 
 	nohugeiomap	[KNL,X86,PPC,ARM64] Disable kernel huge I/O mappings.
 
-	nohugevmalloc	[PPC] Disable kernel huge vmalloc mappings.
+	nohugevmalloc	[KNL,X86,PPC,ARM64] Disable kernel huge vmalloc mappings.
 
 	nosmt		[KNL,S390] Disable symmetric multithreading (SMT).
 			Equivalent to smt=1.
@@ -3494,6 +3623,10 @@
 			the Spectre variant 2 (indirect branch prediction)
 			vulnerability. System may allow data leaks with this
 			option.
+
+	nospectre_bhb	[ARM64] Disable all mitigations for Spectre-BHB (branch
+			history injection) vulnerability. System may allow data leaks
+			with this option.
 
 	nospec_store_bypass_disable
 			[HW] Disable all mitigations for the Speculative Store Bypass vulnerability
@@ -3571,6 +3704,9 @@
 			just as if they had also been called out in the
 			rcu_nocbs= boot parameter.
 
+			Note that this argument takes precedence over
+			the CONFIG_RCU_NOCB_CPU_DEFAULT_ALL option.
+
 	noiotrap	[SH] Disables trapped I/O port accesses.
 
 	noirqdebug	[X86-32] Disables the code which attempts to detect and
@@ -3611,9 +3747,6 @@
 
 	nolapic_timer	[X86-32,APIC] Do not use the local APIC timer.
 
-	noltlbs		[PPC] Do not use large page/tlb entries for kernel
-			lowmem mapping on PPC40x and PPC8xx
-
 	nomca		[IA-64] Disable machine check abort handling
 
 	nomce		[X86-32] Disable Machine Check Exception
@@ -3625,12 +3758,15 @@
 			shutdown the other cpus.  Instead use the REBOOT_VECTOR
 			irq.
 
-	nomodeset	Disable kernel modesetting. DRM drivers will not perform
-			display-mode changes or accelerated rendering. Only the
-			system framebuffer will be available for use if this was
-			set-up by the firmware or boot loader.
+	nomodeset	Disable kernel modesetting. Most systems' firmware
+			sets up a display mode and provides framebuffer memory
+			for output. With nomodeset, DRM and fbdev drivers will
+			not load if they could possibly displace the pre-
+			initialized output. Only the system framebuffer will
+			be available for use. The respective drivers will not
+			perform display-mode changes or accelerated rendering.
 
-			Useful as fallback, or for testing and debugging.
+			Useful as error fallback, or for testing and debugging.
 
 	nomodule	Disable module load
 
@@ -4121,7 +4257,9 @@
 				specified, e.g., 12@pci:8086:9c22:103c:198f
 				for 4096-byte alignment.
 		ecrc=		Enable/disable PCIe ECRC (transaction layer
-				end-to-end CRC checking).
+				end-to-end CRC checking). Only effective if
+				OS has native AER control (either granted by
+				ACPI _OSC or forced via "pcie_ports=native")
 				bios: Use BIOS/firmware settings. This is the
 				the default.
 				off: Turn ECRC off
@@ -4469,6 +4607,9 @@
 			arguments are omitted, no CPU will be set to
 			no-callback mode from boot but the mode may be
 			toggled at runtime via cpusets.
+
+			Note that this argument takes precedence over
+			the CONFIG_RCU_NOCB_CPU_DEFAULT_ALL option.
 
 	rcu_nocb_poll	[KNL]
 			Rather than requiring that offloaded CPUs
@@ -5009,7 +5150,7 @@
 	rdt=		[HW,X86,RDT]
 			Turn on/off individual RDT features. List is:
 			cmt, mbmtotal, mbmlocal, l3cat, l3cdp, l2cat, l2cdp,
-			mba.
+			mba, smba, bmec.
 			E.g. to turn on cmt and turn off mba use:
 				rdt=cmt,!mba
 
@@ -5180,6 +5321,8 @@
 	rodata=		[KNL]
 		on	Mark read-only kernel memory as read-only (default).
 		off	Leave read-only kernel memory writable for debugging.
+		full	Mark read-only kernel memory and aliases as read-only
+		        [arm64]
 
 	rockchip.usb_uart
 			Enable the uart passthrough on the designated usb port
@@ -5403,7 +5546,7 @@
 			cache (risks via metadata attacks are mostly
 			unchanged). Debug options disable merging on their
 			own.
-			For more information see Documentation/vm/slub.rst.
+			For more information see Documentation/mm/slub.rst.
 
 	slab_max_order=	[MM, SLAB]
 			Determines the maximum allowed order for slabs.
@@ -5417,13 +5560,13 @@
 			slub_debug can create guard zones around objects and
 			may poison objects when not in use. Also tracks the
 			last alloc / free. For more information see
-			Documentation/vm/slub.rst.
+			Documentation/mm/slub.rst.
 
 	slub_max_order= [MM, SLUB]
 			Determines the maximum allowed order for slabs.
 			A high setting may cause OOMs due to memory
 			fragmentation. For more information see
-			Documentation/vm/slub.rst.
+			Documentation/mm/slub.rst.
 
 	slub_min_objects=	[MM, SLUB]
 			The minimum number of objects per slab. SLUB will
@@ -5432,12 +5575,12 @@
 			the number of objects indicated. The higher the number
 			of objects the smaller the overhead of tracking slabs
 			and the less frequently locks need to be acquired.
-			For more information see Documentation/vm/slub.rst.
+			For more information see Documentation/mm/slub.rst.
 
 	slub_min_order=	[MM, SLUB]
 			Determines the minimum page order for slabs. Must be
 			lower than slub_max_order.
-			For more information see Documentation/vm/slub.rst.
+			For more information see Documentation/mm/slub.rst.
 
 	slub_merge	[MM, SLUB]
 			Same with slab_merge.
@@ -5471,7 +5614,7 @@
 				1: Fast pin select (default)
 				2: ATC IRMode
 
-	smt		[KNL,S390] Set the maximum number of threads (logical
+	smt=		[KNL,S390] Set the maximum number of threads (logical
 			CPUs) to use per physical CPU on systems capable of
 			symmetric multithreading (SMT). Will be capped to the
 			actual hardware limit.
@@ -5526,9 +5669,9 @@
 			retpoline,generic - Retpolines
 			retpoline,lfence  - LFENCE; indirect branch
 			retpoline,amd     - alias for retpoline,lfence
-			eibrs		  - enhanced IBRS
-			eibrs,retpoline   - enhanced IBRS + Retpolines
-			eibrs,lfence      - enhanced IBRS + LFENCE
+			eibrs		  - Enhanced/Auto IBRS
+			eibrs,retpoline   - Enhanced/Auto IBRS + Retpolines
+			eibrs,lfence      - Enhanced/Auto IBRS + LFENCE
 			ibrs		  - use IBRS to protect kernel
 
 			Not specifying this option is equivalent to
@@ -5877,11 +6020,6 @@
 			This parameter controls use of the Protected
 			Execution Facility on pSeries.
 
-	swapaccount=[0|1]
-			[KNL] Enable accounting of swap in memory resource
-			controller if no parameter or 1 is given or disable
-			it if 0 is given (See Documentation/admin-guide/cgroup-v1/memory.rst)
-
 	swiotlb=	[ARM,IA-64,PPC,MIPS,X86]
 			Format: { <int> [,<int>] | force | noforce }
 			<int> -- Number of I/O TLB slabs
@@ -5927,7 +6065,8 @@
 
 	tdfx=		[HW,DRM]
 
-	test_suspend=	[SUSPEND][,N]
+	test_suspend=	[SUSPEND]
+			Format: { "mem" | "standby" | "freeze" }[,N]
 			Specify "mem" (for Suspend-to-RAM) or "standby" (for
 			standby suspend) or "freeze" (for suspend type freeze)
 			as the system sleep state during system startup with
@@ -6014,6 +6153,28 @@
 	trace_buf_size=nn[KMG]
 			[FTRACE] will set tracing buffer size on each cpu.
 
+	trace_clock=	[FTRACE] Set the clock used for tracing events
+			at boot up.
+			local - Use the per CPU time stamp counter
+				(converted into nanoseconds). Fast, but
+				depending on the architecture, may not be
+				in sync between CPUs.
+			global - Event time stamps are synchronize across
+				CPUs. May be slower than the local clock,
+				but better for some race conditions.
+			counter - Simple counting of events (1, 2, ..)
+				note, some counts may be skipped due to the
+				infrastructure grabbing the clock more than
+				once per event.
+			uptime - Use jiffies as the time stamp.
+			perf - Use the same clock that perf uses.
+			mono - Use ktime_get_mono_fast_ns() for time stamps.
+			mono_raw - Use ktime_get_raw_fast_ns() for time
+				stamps.
+			boot - Use ktime_get_boot_fast_ns() for time stamps.
+			Architectures may add more clocks. See
+			Documentation/trace/ftrace.rst for more details.
+
 	trace_event=[event-list]
 			[FTRACE] Set and start specified trace events in order
 			to facilitate early boot debugging. The event-list is a
@@ -6036,7 +6197,7 @@
 			See also Documentation/trace/ftrace.rst "trace options"
 			section.
 
-	tp_printk[FTRACE]
+	tp_printk	[FTRACE]
 			Have the tracepoints sent to printk as well as the
 			tracing ring buffer. This is useful for early boot up
 			where the system hangs or reboots and does not give the
@@ -6058,7 +6219,7 @@
 			frequency tracepoints such as irq or sched, can cause
 			the system to live lock.
 
-	tp_printk_stop_on_boot[FTRACE]
+	tp_printk_stop_on_boot [FTRACE]
 			When tp_printk (above) is set, it can cause a lot of noise
 			on the console. It may be useful to only include the
 			printing of events during boot up, as user space may
@@ -6118,6 +6279,10 @@
 			in situations with strict latency requirements (where
 			interruptions from clocksource watchdog are not
 			acceptable).
+			[x86] recalibrate: force recalibration against a HW timer
+			(HPET or PM timer) on systems whose TSC frequency was
+			obtained from HW or FW using either an MSR or CPUID(0x15).
+			Warn if the difference is more than 500 ppm.
 
 	tsc_early_khz=  [X86] Skip early TSC calibration and use the given
 			value instead. Useful when the early TSC frequency discovery
@@ -6416,7 +6581,7 @@
 					HIGHMEM regardless of setting
 					of CONFIG_HIGHPTE.
 
-	vdso=		[X86,SH]
+	vdso=		[X86,SH,SPARC]
 			On X86_32, this is an alias for vdso32=.  Otherwise:
 
 			vdso=1: enable VDSO (the default)
@@ -6442,11 +6607,12 @@
 	video=		[FB] Frame buffer configuration
 			See Documentation/fb/modedb.rst.
 
-	video.brightness_switch_enabled= [0,1]
+	video.brightness_switch_enabled= [ACPI]
+			Format: [0|1]
 			If set to 1, on receiving an ACPI notify event
 			generated by hotkey, video driver will adjust brightness
 			level and then send out the event to user space through
-			the allocated input device; If set to 0, video driver
+			the allocated input device. If set to 0, video driver
 			will only send out the event without touching backlight
 			brightness level.
 			default: 1
@@ -6747,3 +6913,4 @@
 				memory, and other data can't be written using
 				xmon commands.
 			off	xmon is disabled.
+

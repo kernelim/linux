@@ -199,8 +199,14 @@ static unsigned long htb_search(struct Qdisc *sch, u32 handle)
 {
 	return (unsigned long)htb_find(handle, sch);
 }
+
+#define HTB_DIRECT ((struct htb_class *)-1L)
+
 /**
  * htb_classify - classify a packet into class
+ * @skb: the socket buffer
+ * @sch: the active queue discipline
+ * @qerr: pointer for returned status code
  *
  * It returns NULL if the packet should be dropped or -1 if the packet
  * should be passed directly thru. In all other cases leaf class is returned.
@@ -211,8 +217,6 @@ static unsigned long htb_search(struct Qdisc *sch, u32 handle)
  * have no valid leaf we try to use MAJOR:default leaf. It still unsuccessful
  * then finish and return direct queue.
  */
-#define HTB_DIRECT ((struct htb_class *)-1L)
-
 static struct htb_class *htb_classify(struct sk_buff *skb, struct Qdisc *sch,
 				      int *qerr)
 {
@@ -427,7 +431,10 @@ static void htb_activate_prios(struct htb_sched *q, struct htb_class *cl)
 	while (cl->cmode == HTB_MAY_BORROW && p && mask) {
 		m = mask;
 		while (m) {
-			int prio = ffz(~m);
+			unsigned int prio = ffz(~m);
+
+			if (WARN_ON_ONCE(prio >= ARRAY_SIZE(p->inner.clprio)))
+				break;
 			m &= ~(1 << prio);
 
 			if (p->inner.clprio[prio].feed.rb_node)
@@ -1008,8 +1015,6 @@ static void htb_reset(struct Qdisc *sch)
 	}
 	qdisc_watchdog_cancel(&q->watchdog);
 	__qdisc_reset_queue(&q->direct_queue);
-	sch->q.qlen = 0;
-	sch->qstats.backlog = 0;
 	memset(q->hlevel, 0, sizeof(q->hlevel));
 	memset(q->row_mask, 0, sizeof(q->row_mask));
 }
@@ -1104,9 +1109,7 @@ static int htb_init(struct Qdisc *sch, struct nlattr *opt,
 
 	err = qdisc_class_hash_init(&q->clhash);
 	if (err < 0)
-		goto err_free_direct_qdiscs;
-
-	qdisc_skb_head_init(&q->direct_queue);
+		return err;
 
 	if (tb[TCA_HTB_DIRECT_QLEN])
 		q->direct_qlen = nla_get_u32(tb[TCA_HTB_DIRECT_QLEN]);
@@ -1127,8 +1130,7 @@ static int htb_init(struct Qdisc *sch, struct nlattr *opt,
 		qdisc = qdisc_create_dflt(dev_queue, &pfifo_qdisc_ops,
 					  TC_H_MAKE(sch->handle, 0), extack);
 		if (!qdisc) {
-			err = -ENOMEM;
-			goto err_free_qdiscs;
+			return -ENOMEM;
 		}
 
 		htb_set_lockdep_class_child(qdisc);
@@ -1146,7 +1148,7 @@ static int htb_init(struct Qdisc *sch, struct nlattr *opt,
 	};
 	err = htb_offload(dev, &offload_opt);
 	if (err)
-		goto err_free_qdiscs;
+		return err;
 
 	/* Defer this assignment, so that htb_destroy skips offload-related
 	 * parts (especially calling ndo_setup_tc) on errors.
@@ -1154,22 +1156,6 @@ static int htb_init(struct Qdisc *sch, struct nlattr *opt,
 	q->offload = true;
 
 	return 0;
-
-err_free_qdiscs:
-	for (ntx = 0; ntx < q->num_direct_qdiscs && q->direct_qdiscs[ntx];
-	     ntx++)
-		qdisc_put(q->direct_qdiscs[ntx]);
-
-	qdisc_class_hash_destroy(&q->clhash);
-	/* Prevent use-after-free and double-free when htb_destroy gets called.
-	 */
-	q->clhash.hash = NULL;
-	q->clhash.hashsize = 0;
-
-err_free_direct_qdiscs:
-	kfree(q->direct_qdiscs);
-	q->direct_qdiscs = NULL;
-	return err;
 }
 
 static void htb_attach_offload(struct Qdisc *sch)
@@ -1697,13 +1683,12 @@ static void htb_destroy(struct Qdisc *sch)
 	qdisc_class_hash_destroy(&q->clhash);
 	__qdisc_reset_queue(&q->direct_queue);
 
-	if (!q->offload)
-		return;
-
-	offload_opt = (struct tc_htb_qopt_offload) {
-		.command = TC_HTB_DESTROY,
-	};
-	htb_offload(dev, &offload_opt);
+	if (q->offload) {
+		offload_opt = (struct tc_htb_qopt_offload) {
+			.command = TC_HTB_DESTROY,
+		};
+		htb_offload(dev, &offload_opt);
+	}
 
 	if (!q->direct_qdiscs)
 		return;
@@ -2146,15 +2131,8 @@ static void htb_walk(struct Qdisc *sch, struct qdisc_walker *arg)
 
 	for (i = 0; i < q->clhash.hashsize; i++) {
 		hlist_for_each_entry(cl, &q->clhash.hash[i], common.hnode) {
-			if (arg->count < arg->skip) {
-				arg->count++;
-				continue;
-			}
-			if (arg->fn(sch, (unsigned long)cl, arg) < 0) {
-				arg->stop = 1;
+			if (!tc_qdisc_stats_dump(sch, (unsigned long)cl, arg))
 				return;
-			}
-			arg->count++;
 		}
 	}
 }

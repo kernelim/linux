@@ -16,11 +16,11 @@ common-ppc64le                 y  -    X    -  -    X
 common-s390x                   y  -    X    -  -    X
 common-s390x-zfcpdump          y  -    -    X  X    X
 common-aarch64                 y  -    -    -  X    -
-ark-x86_64                     y  -    -    -  X    -
-ark-ppc64le                    y  -    X    -  -    X
-ark-s390x                      y  -    X    -  -    X
-ark-s390x-zfcpdump             y  -    -    X  X    X
-ark-aarch64                    y  -    -    -  X    -
+rhel-x86_64                    y  -    -    -  X    -
+rhel-ppc64le                   y  -    X    -  -    X
+rhel-s390x                     y  -    X    -  -    X
+rhel-s390x-zfcpdump            y  -    -    X  X    X
+rhel-aarch64                   y  -    -    -  X    -
 pending-common-x86_64          -  -    -    -  X    -
 pending-common-ppc64le         -  -    X    -  -    X
 pending-common-s390x           -  -    X    -  -    X
@@ -44,8 +44,8 @@ da1 maps to nothing (more on this below)
 da2 maps to debug-x86-x86_64
 
 The left hand column indicates the directory and config-variant.  For
-example, ark-s390x-zfcpdump is the s390x-zfcpdump variant and the
-row beside it shows the config settings in the ark directory.
+example, rhel-s390x-zfcpdump is the s390x-zfcpdump variant and the
+row beside it shows the config settings in the rhel directory.
 
 The data contained in the output can have 5 values:
 
@@ -90,17 +90,17 @@ or a single CONFIG
 
 The Evaluate Output will show a different view than the Basic Output above:
 
-ERROR: (hierarchy) ark/generic/CONFIG_HEADER_TEST : superseding value has y.
-|CONFIG_HEADER_TEST (ark-aarch64)
+ERROR: (hierarchy) rhel/generic/CONFIG_HEADER_TEST : superseding value has y.
+|CONFIG_HEADER_TEST (rhel-aarch64)
 |g  ga1  ga2  d  da1  da2  g  ga1  ga2  d  da1  da2  g  ga1  ga2  d  da1  da2
 |y  -    -    -  X    -    y  -    -    -  X    -    -  -    -    -  X    -
-| Deleting ark/generic/CONFIG_HEADER_TEST
+| Deleting rhel/generic/CONFIG_HEADER_TEST
 
 This view is the Basic Output's aarch64 data in a single line,  From the
 above output,
 
 common-aarch64                 y  -    -    -  X    -
-ark-aarch64                    y  -    -    -  X    -
+rhel-aarch64                   y  -    -    -  X    -
 pending-common-aarch64         -  -    -    -  X    -
 
 The Evaluate output makes it easier to visually see a conflict.   One
@@ -110,7 +110,7 @@ X's in a line, then there is the possibility of a conflict.
 If the CONFIG setting is found to be incorrect it it automatically removed
 and a message
 
-| Deleting ark/generic/CONFIG_HEADER_TEST
+| Deleting rhel/generic/CONFIG_HEADER_TEST
 
 will be output.
 
@@ -118,7 +118,7 @@ Evaluate common Directory
 =========================
 
 This function does a 1-to-1 comparison of CONFIG settings in the
-ark and fedora directories, and checks to see if the CONFIG should be set
+rhel and fedora directories, and checks to see if the CONFIG should be set
 in the common directory.
 
 The output is the same as the Evaluate output.

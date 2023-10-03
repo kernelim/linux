@@ -134,6 +134,8 @@ struct mem_cgroup_per_node {
 	unsigned long		usage_in_excess;/* Set to the value by which */
 						/* the soft limit is exceeded*/
 	bool			on_tree;
+	RH_KABI_EXTEND(unsigned short nid)
+
 	struct mem_cgroup	*memcg;		/* Back pointer, we cannot */
 						/* use container_of	   */
 };
@@ -343,6 +345,12 @@ struct mem_cgroup {
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 	struct deferred_split deferred_split_queue;
 #endif
+	/*
+	 * Disable percpu stats when offline, flush and free them after one
+	 * grace period.
+	 */
+	RH_KABI_EXTEND(struct rcu_work	percpu_stats_rwork)
+	RH_KABI_EXTEND(int 		percpu_stats_disabled)
 
 	struct mem_cgroup_per_node *nodeinfo[];
 };
@@ -949,10 +957,6 @@ struct mem_cgroup *mem_cgroup_get_oom_group(struct task_struct *victim,
 					    struct mem_cgroup *oom_domain);
 void mem_cgroup_print_oom_group(struct mem_cgroup *memcg);
 
-#ifdef CONFIG_MEMCG_SWAP
-extern bool cgroup_memory_noswap;
-#endif
-
 void folio_memcg_lock(struct folio *folio);
 void folio_memcg_unlock(struct folio *folio);
 void lock_page_memcg(struct page *page);
@@ -1017,6 +1021,9 @@ static inline unsigned long lruvec_page_state_local(struct lruvec *lruvec,
 		return node_page_state(lruvec_pgdat(lruvec), idx);
 
 	pn = container_of(lruvec, struct mem_cgroup_per_node, lruvec);
+	if (pn->memcg->percpu_stats_disabled)
+		return 0;
+
 	for_each_possible_cpu(cpu)
 		x += per_cpu(pn->lruvec_stats_percpu->state[idx], cpu);
 #ifdef CONFIG_SMP
@@ -1074,6 +1081,15 @@ static inline void count_memcg_page_event(struct page *page,
 
 	if (memcg)
 		count_memcg_events(memcg, idx, 1);
+}
+
+static inline void count_memcg_folio_events(struct folio *folio,
+		enum vm_event_item idx, unsigned long nr)
+{
+	struct mem_cgroup *memcg = folio_memcg(folio);
+
+	if (memcg)
+		count_memcg_events(memcg, idx, nr);
 }
 
 static inline void count_memcg_event_mm(struct mm_struct *mm,
@@ -1529,6 +1545,11 @@ static inline void count_memcg_page_event(struct page *page,
 {
 }
 
+static inline void count_memcg_folio_events(struct folio *folio,
+		enum vm_event_item idx, unsigned long nr)
+{
+}
+
 static inline
 void count_memcg_event_mm(struct mm_struct *mm, enum vm_event_item idx)
 {
@@ -1720,6 +1741,12 @@ struct obj_cgroup *get_obj_cgroup_from_page(struct page *page);
 int obj_cgroup_charge(struct obj_cgroup *objcg, gfp_t gfp, size_t size);
 void obj_cgroup_uncharge(struct obj_cgroup *objcg, size_t size);
 
+extern struct static_key_false memcg_bpf_enabled_key;
+static inline bool memcg_bpf_enabled(void)
+{
+	return static_branch_likely(&memcg_bpf_enabled_key);
+}
+
 extern struct static_key_false memcg_kmem_enabled_key;
 
 static inline bool memcg_kmem_enabled(void)
@@ -1751,6 +1778,7 @@ static inline int memcg_kmem_id(struct mem_cgroup *memcg)
 }
 
 struct mem_cgroup *mem_cgroup_from_obj(void *p);
+struct mem_cgroup *mem_cgroup_from_slab_obj(void *p);
 
 static inline void count_objcg_event(struct obj_cgroup *objcg,
 				     enum vm_event_item idx)
@@ -1797,6 +1825,11 @@ static inline struct obj_cgroup *get_obj_cgroup_from_page(struct page *page)
 	return NULL;
 }
 
+static inline bool memcg_bpf_enabled(void)
+{
+	return false;
+}
+
 static inline bool memcg_kmem_enabled(void)
 {
 	return false;
@@ -1810,6 +1843,11 @@ static inline int memcg_kmem_id(struct mem_cgroup *memcg)
 static inline struct mem_cgroup *mem_cgroup_from_obj(void *p)
 {
        return NULL;
+}
+
+static inline struct mem_cgroup *mem_cgroup_from_slab_obj(void *p)
+{
+	return NULL;
 }
 
 static inline void count_objcg_event(struct obj_cgroup *objcg,

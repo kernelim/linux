@@ -49,7 +49,16 @@ struct ctl_dir;
 #define SYSCTL_THREE_THOUSAND		((void *)&sysctl_vals[8])
 #define SYSCTL_INT_MAX			((void *)&sysctl_vals[9])
 
+/* this is needed for the proc_dointvec_minmax for [fs_]overflow UID and GID */
+#define SYSCTL_MAXOLDUID		((void *)&sysctl_vals[10])
+
 extern const int sysctl_vals[];
+
+#define SYSCTL_LONG_ZERO	((void *)&sysctl_long_vals[0])
+#define SYSCTL_LONG_ONE		((void *)&sysctl_long_vals[1])
+#define SYSCTL_LONG_MAX		((void *)&sysctl_long_vals[2])
+
+extern const unsigned long sysctl_long_vals[];
 
 typedef int proc_handler(struct ctl_table *ctl, int write, void *buffer,
 		size_t *lenp, loff_t *ppos);
@@ -185,6 +194,20 @@ struct ctl_path {
 
 #ifdef CONFIG_SYSCTL
 
+#define DECLARE_SYSCTL_BASE(_name, _table)				\
+static struct ctl_table _name##_base_table[] = {			\
+	{								\
+		.procname	= #_name,				\
+		.mode		= 0555,					\
+		.child		= _table,				\
+	},								\
+	{ },								\
+}
+
+extern int __register_sysctl_base(struct ctl_table *base_table);
+
+#define register_sysctl_base(_name) __register_sysctl_base(_name##_base_table)
+
 void proc_sys_poll_notify(struct ctl_table_poll *poll);
 
 extern void setup_sysctl_set(struct ctl_table_set *p,
@@ -209,7 +232,15 @@ extern int sysctl_init(void);
 extern void __register_sysctl_init(const char *path, struct ctl_table *table,
 				 const char *table_name);
 #define register_sysctl_init(path, table) __register_sysctl_init(path, table, #table)
+extern struct ctl_table_header *register_sysctl_mount_point(const char *path);
+
 void do_sysctl_args(void);
+int do_proc_douintvec(struct ctl_table *table, int write,
+		      void *buffer, size_t *lenp, loff_t *ppos,
+		      int (*conv)(unsigned long *lvalp,
+				  unsigned int *valp,
+				  int write, void *data),
+		      void *data);
 
 extern int pwrsw_enabled;
 extern int unaligned_enabled;
@@ -218,10 +249,28 @@ extern int no_unaligned_warning;
 
 extern struct ctl_table sysctl_mount_point[];
 extern struct ctl_table firmware_config_table[];
-extern struct ctl_table epoll_table[];
 
 #else /* CONFIG_SYSCTL */
+
+#define DECLARE_SYSCTL_BASE(_name, _table)
+
+static inline int __register_sysctl_base(struct ctl_table *base_table)
+{
+	return 0;
+}
+
+#define register_sysctl_base(table) __register_sysctl_base(table)
+
 static inline struct ctl_table_header *register_sysctl_table(struct ctl_table * table)
+{
+	return NULL;
+}
+
+static inline void register_sysctl_init(const char *path, struct ctl_table *table)
+{
+}
+
+static inline struct ctl_table_header *register_sysctl_mount_point(const char *path)
 {
 	return NULL;
 }

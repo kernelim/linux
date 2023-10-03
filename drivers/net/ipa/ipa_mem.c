@@ -467,7 +467,8 @@ static int ipa_imem_init(struct ipa *ipa, unsigned long addr, size_t size)
 	size = PAGE_ALIGN(size + addr - phys);
 	iova = phys;	/* We just want a direct mapping */
 
-	ret = iommu_map(domain, iova, phys, size, IOMMU_READ | IOMMU_WRITE);
+	ret = iommu_map(domain, iova, phys, size, IOMMU_READ | IOMMU_WRITE,
+			GFP_KERNEL);
 	if (ret)
 		return ret;
 
@@ -575,7 +576,8 @@ static int ipa_smem_init(struct ipa *ipa, u32 item, size_t size)
 	size = PAGE_ALIGN(size + addr - phys);
 	iova = phys;	/* We just want a direct mapping */
 
-	ret = iommu_map(domain, iova, phys, size, IOMMU_READ | IOMMU_WRITE);
+	ret = iommu_map(domain, iova, phys, size, IOMMU_READ | IOMMU_WRITE,
+			GFP_KERNEL);
 	if (ret)
 		return ret;
 

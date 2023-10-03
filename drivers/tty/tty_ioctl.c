@@ -249,7 +249,7 @@ static void unset_locked_termios(struct tty_struct *tty, const struct ktermios *
  *	in some cases where only minimal reconfiguration is supported
  */
 
-void tty_termios_copy_hw(struct ktermios *new, struct ktermios *old)
+void tty_termios_copy_hw(struct ktermios *new, const struct ktermios *old)
 {
 	/* The bits a dumb device handles in software. Smart devices need
 	   to always provide a set_termios method */
@@ -562,10 +562,8 @@ static int set_sgttyb(struct tty_struct *tty, struct sgttyb __user *sgttyb)
 	termios.c_cc[VKILL] = tmp.sg_kill;
 	set_sgflags(&termios, tmp.sg_flags);
 	/* Try and encode into Bfoo format */
-#ifdef BOTHER
 	tty_termios_encode_baud_rate(&termios, termios.c_ispeed,
 						termios.c_ospeed);
-#endif
 	up_write(&tty->termios_rwsem);
 	tty_set_termios(tty, &termios);
 	return 0;

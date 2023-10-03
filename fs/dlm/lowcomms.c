@@ -667,6 +667,7 @@ static void add_listen_sock(struct socket *sock, struct listen_connection *con)
 
 	sk->sk_user_data = con;
 	sk->sk_allocation = GFP_NOFS;
+	sk->sk_use_task_frag = false;
 	/* Install a data_ready callback */
 	sk->sk_data_ready = lowcomms_listen_data_ready;
 	write_unlock_bh(&sk->sk_callback_lock);
@@ -686,6 +687,7 @@ static void add_sock(struct socket *sock, struct connection *con)
 	sk->sk_write_space = lowcomms_write_space;
 	sk->sk_state_change = lowcomms_state_change;
 	sk->sk_allocation = GFP_NOFS;
+	sk->sk_use_task_frag = false;
 	sk->sk_error_report = lowcomms_error_report;
 	write_unlock_bh(&sk->sk_callback_lock);
 }

@@ -141,6 +141,8 @@ obj-$(CONFIG_UNWINDER_GUESS)		+= unwind_guess.o
 
 obj-$(CONFIG_AMD_MEM_ENCRYPT)		+= sev.o
 
+obj-$(CONFIG_CALL_THUNKS)		+= callthunks.o
+
 ###
 # 64 bit specific files
 ifeq ($(CONFIG_X86_64),y)

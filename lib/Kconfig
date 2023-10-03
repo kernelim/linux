@@ -50,11 +50,17 @@ config HAVE_ARCH_BITREVERSE
 	  This option enables the use of hardware bit-reversal instructions on
 	  architectures which support such operations.
 
-config GENERIC_STRNCPY_FROM_USER
+config ARCH_HAS_STRNCPY_FROM_USER
 	bool
 
-config GENERIC_STRNLEN_USER
+config ARCH_HAS_STRNLEN_USER
 	bool
+
+config GENERIC_STRNCPY_FROM_USER
+	def_bool !ARCH_HAS_STRNCPY_FROM_USER
+
+config GENERIC_STRNLEN_USER
+	def_bool !ARCH_HAS_STRNLEN_USER
 
 config GENERIC_NET_UTILS
 	bool
@@ -112,6 +118,13 @@ config INDIRECT_IOMEM_FALLBACK
 	  If INDIRECT_IOMEM is selected, this enables falling back to plain
 	  mmio accesses when the IO memory address is not a registered
 	  emulated region.
+
+config TRACE_MMIO_ACCESS
+	bool "Register read/write tracing"
+	depends on TRACING && ARCH_HAVE_TRACE_MMIO_ACCESS
+	help
+	  Create tracepoints for MMIO read/write operations. These trace events
+	  can be used for logging all MMIO read/write operations.
 
 source "lib/crypto/Kconfig"
 
@@ -463,6 +476,10 @@ config INTERVAL_TREE
 
 	  for more information.
 
+config INTERVAL_TREE_SPAN_ITER
+	bool
+	depends on INTERVAL_TREE
+
 config XARRAY_MULTI
 	bool
 	help
@@ -645,6 +662,9 @@ config ARCH_HAS_PMEM_API
 	bool
 
 config MEMREGION
+	bool
+
+config ARCH_HAS_CPU_CACHE_INVALIDATE_MEMREGION
 	bool
 
 config ARCH_HAS_MEMREMAP_COMPAT_ALIGN

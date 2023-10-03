@@ -19,8 +19,7 @@
 #include "blk-wbt.h"
 
 /*
- * Mark a hardware queue as needing a restart. For shared queues, maintain
- * a count of how many hardware queues are marked for restart.
+ * Mark a hardware queue as needing a restart.
  */
 void blk_mq_sched_mark_restart_hctx(struct blk_mq_hw_ctx *hctx)
 {
@@ -82,7 +81,7 @@ dispatch:
 /*
  * Only SCSI implements .get_budget and .put_budget, and SCSI restarts
  * its queue by itself in its completion handler, so we don't need to
- * restart queue if .get_budget() returns BLK_STS_NO_RESOURCE.
+ * restart queue if .get_budget() fails to get the budget.
  *
  * Returns -EAGAIN if hctx->dispatch was found non-empty and run_work has to
  * be run again.  This is necessary to avoid starving flushes.
@@ -210,7 +209,7 @@ static struct blk_mq_ctx *blk_mq_next_ctx(struct blk_mq_hw_ctx *hctx,
 /*
  * Only SCSI implements .get_budget and .put_budget, and SCSI restarts
  * its queue by itself in its completion handler, so we don't need to
- * restart queue if .get_budget() returns BLK_STS_NO_RESOURCE.
+ * restart queue if .get_budget() fails to get the budget.
  *
  * Returns -EAGAIN if hctx->dispatch was found non-empty and run_work has to
  * be run again.  This is necessary to avoid starving flushes.
@@ -458,43 +457,6 @@ run:
 		blk_mq_run_hw_queue(hctx, async);
 }
 
-void blk_mq_sched_insert_requests(struct blk_mq_hw_ctx *hctx,
-				  struct blk_mq_ctx *ctx,
-				  struct list_head *list, bool run_queue_async)
-{
-	struct elevator_queue *e;
-	struct request_queue *q = hctx->queue;
-
-	/*
-	 * blk_mq_sched_insert_requests() is called from flush plug
-	 * context only, and hold one usage counter to prevent queue
-	 * from being released.
-	 */
-	percpu_ref_get(&q->q_usage_counter);
-
-	e = hctx->queue->elevator;
-	if (e) {
-		e->type->ops.insert_requests(hctx, list, false);
-	} else {
-		/*
-		 * try to issue requests directly if the hw queue isn't
-		 * busy in case of 'none' scheduler, and this way may save
-		 * us one extra enqueue & dequeue to sw queue.
-		 */
-		if (!hctx->dispatch_busy && !run_queue_async) {
-			blk_mq_run_dispatch_ops(hctx->queue,
-				blk_mq_try_issue_list_directly(hctx, list));
-			if (list_empty(list))
-				goto out;
-		}
-		blk_mq_insert_requests(hctx, ctx, list);
-	}
-
-	blk_mq_run_hw_queue(hctx, run_queue_async);
- out:
-	percpu_ref_put(&q->q_usage_counter);
-}
-
 static int blk_mq_sched_alloc_map_and_rqs(struct request_queue *q,
 					  struct blk_mq_hw_ctx *hctx,
 					  unsigned int hctx_idx)
@@ -555,6 +517,7 @@ static int blk_mq_init_sched_shared_tags(struct request_queue *queue)
 	return 0;
 }
 
+/* caller must have a reference to @e, will grab another one if successful */
 int blk_mq_init_sched(struct request_queue *q, struct elevator_type *e)
 {
 	unsigned int flags = q->tag_set->flags;
@@ -562,13 +525,6 @@ int blk_mq_init_sched(struct request_queue *q, struct elevator_type *e)
 	struct elevator_queue *eq;
 	unsigned long i;
 	int ret;
-
-	if (!e) {
-		blk_queue_flag_clear(QUEUE_FLAG_SQ_SCHED, q);
-		q->elevator = NULL;
-		q->nr_requests = q->tag_set->queue_depth;
-		return 0;
-	}
 
 	/*
 	 * Default to double of smaller one between hw queue_depth and 128,

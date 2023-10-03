@@ -22,6 +22,7 @@ properties:
           - nvidia,tegra210-xudc # For Tegra210
           - nvidia,tegra186-xudc # For Tegra186
           - nvidia,tegra194-xudc # For Tegra194
+          - nvidia,tegra234-xudc # For Tegra234
 
   reg:
     minItems: 2
@@ -83,7 +84,7 @@ properties:
       - const: ss
 
   nvidia,xusb-padctl:
-    $ref: /schemas/types.yaml#/definitions/phandle-array
+    $ref: /schemas/types.yaml#/definitions/phandle
     description:
       phandle to the XUSB pad controller that is used to configure the USB pads
       used by the XUDC controller.
@@ -111,6 +112,8 @@ properties:
 
   hvdd-usb-supply:
     description: USB controller power supply. Must supply 3.3 V.
+
+  dma-coherent: true
 
 required:
   - compatible
@@ -153,6 +156,7 @@ allOf:
             enum:
               - nvidia,tegra186-xudc
               - nvidia,tegra194-xudc
+              - nvidia,tegra234-xudc
     then:
       properties:
         reg:
@@ -163,6 +167,17 @@ allOf:
           maxItems: 4
         clock-names:
           maxItems: 4
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            enum:
+              - nvidia,tegra194-xudc
+              - nvidia,tegra234-xudc
+    then:
+      required:
+        - dma-coherent
 
 additionalProperties: false
 

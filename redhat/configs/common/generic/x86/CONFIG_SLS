@@ -1,1 +1,1 @@
-# CONFIG_SLS is not set
+CONFIG_SLS=y

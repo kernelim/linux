@@ -1,25 +1,25 @@
 kernel-ark CONFIG option scheme
 -------------------------------
 
-The kernel-ark repository contains both Fedora and ark (aka "RHEL next")
+The kernel-ark repository contains both Fedora and rhel (aka "RHEL next")
 CONFIGS.  This repository is constantly rebased as the upstream kernel releases
 new kernel version. New configuration options are reviewed and set with each
 release, typically during the -rc1 to -rc3 releases.
 
-The kernel-ark configs are broken out into ark, fedora, and common directories
+The kernel-ark configs are broken out into rhel, fedora, and common directories
 in which each directory provides a heirarchical layout of the configs starting
 with generic/CONFIG_* and debug/CONFIG_*, then generic/<arch>/CONFIG_* and
 generic/<arch>/<variant>/CONFIG_*, debug/<arch>/CONFIG_*, etc.  Users should be
 aware that it may not necessarily be the case that architecture support is
-consistent between ark and fedora.
+consistent between rhel and fedora.
 
 The config options are merged and properly layered according to the priority.*
 files in the same directory as this README to generate the final
 kernel-$VERSION-<arch>-<variant>.config files we need for building the actual
-kernels.  For example, the ark variant priorities are found in priority.rhel,
+kernels.  For example, the rhel variant priorities are found in priority.rhel,
 and in the case of x86_64 architecture, the specific information required is,
 
-ORDER=common ark pending-ark custom-overrides
+ORDER=common rhel pending-rhel custom-overrides
 
 and
 
@@ -30,12 +30,12 @@ This indicates that for the x86_64 variant, the order that of inheritance would 
 custom-overrides/generic/x86/x86_64	(highest override priority)
 custom-overrides/generic/x86
 custom-overrides/generic
-pending-ark/generic/x86/x86_64
-pending-ark/generic/x86
-pending-ark/generic
-ark/generic/x86/x86_64
-ark/generic/x86
-ark/generic
+pending-rhel/generic/x86/x86_64
+pending-rhel/generic/x86
+pending-rhel/generic
+rhel/generic/x86/x86_64
+rhel/generic/x86
+rhel/generic
 common/generic/x86/x86_64
 common/generic/x86
 common/generic				(lowest override priority)
@@ -50,16 +50,16 @@ Directory Layout
 
 The configuration is broken down into several directories:
 
-ark - contains all configuration options that have been reviewed by kernel
-developers for the ark kernel.
+rhel - contains all configuration options that have been reviewed by kernel
+developers for the rhel kernel.
 
 common - contains all configuration options that are common between the fedora
-and ark directories.  In other words, these config settings apply to both
-fedora and ark.
+and rhel directories.  In other words, these config settings apply to both
+fedora and rhel.
 
 custom-overrides - contains an empty set of the generic and debug arch-specific
 directory tree. Any config option set here is applied last and therefore will
-override anything set in the ark, fedora, or pending directories.  This feature
+override anything set in the rhel, fedora, or pending directories.  This feature
 was added to assist users executing custom builds to easily override a config
 option without altering the standard directories. Users can even maintain their
 own branch with a full set of custom configuration options that can be easily
@@ -68,15 +68,15 @@ be rebased on top of os-build without worrying about conflicts.
 fedora - contains all configuration options that have been reviewed by kernel
 developers for the fedora kernel.
 
-pending-[ark][common][fedora] - These directories contain configuration options
-that have not yet been fully reviewed for inclusion for ark, fedora, and both
+pending-[rhel][common][fedora] - These directories contain configuration options
+that have not yet been fully reviewed for inclusion for rhel, fedora, and both
 (common) kernels.  Due to the rate at which kernel options come out, the kernel
 maintainers cannot guarantee reviews of configs in these directories by the
 time a build occurs.  In the interest of letting the build proceed for other
 testing, configuration options are staged in these pending directories.
 
 As pending-* configs are reviewed, they are moved into the matching non-pending
-directory (ie, pending-ark -> ark, etc.) and it is expected that these
+directory (ie, pending-rhel -> rhel, etc.) and it is expected that these
 directories will be empty at branch time.
 
 Config files can be populated using the pending-* directories by using the

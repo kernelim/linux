@@ -50,7 +50,12 @@ typedef __s8  s8;
 #define __bitwise __bitwise__
 
 #define __force
+/* This is defined in linux/compiler_types.h and is left for backward
+ * compatibility.
+ */
+#ifndef __user
 #define __user
+#endif
 #define __must_check
 #define __cold
 

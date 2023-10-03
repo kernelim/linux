@@ -41,7 +41,7 @@ static int afs_symlink(struct user_namespace *mnt_userns, struct inode *dir,
 static int afs_rename(struct user_namespace *mnt_userns, struct inode *old_dir,
 		      struct dentry *old_dentry, struct inode *new_dir,
 		      struct dentry *new_dentry, unsigned int flags);
-static int afs_dir_releasepage(struct page *page, gfp_t gfp_flags);
+static bool afs_dir_release_folio(struct folio *folio, gfp_t gfp_flags);
 static void afs_dir_invalidate_folio(struct folio *folio, size_t offset,
 				   size_t length);
 
@@ -75,8 +75,9 @@ const struct inode_operations afs_dir_inode_operations = {
 
 const struct address_space_operations afs_dir_aops = {
 	.dirty_folio	= afs_dir_dirty_folio,
-	.releasepage	= afs_dir_releasepage,
+	.release_folio	= afs_dir_release_folio,
 	.invalidate_folio = afs_dir_invalidate_folio,
+	.migrate_folio	= filemap_migrate_folio,
 };
 
 const struct dentry_operations afs_fs_dentry_operations = {
@@ -274,6 +275,7 @@ static struct afs_read *afs_read_dir(struct afs_vnode *dvnode, struct key *key)
 	loff_t i_size;
 	int nr_pages, i;
 	int ret;
+	loff_t remote_size = 0;
 
 	_enter("");
 
@@ -288,6 +290,8 @@ static struct afs_read *afs_read_dir(struct afs_vnode *dvnode, struct key *key)
 
 expand:
 	i_size = i_size_read(&dvnode->netfs.inode);
+	if (i_size < remote_size)
+	    i_size = remote_size;
 	if (i_size < 2048) {
 		ret = afs_bad(dvnode, afs_file_error_dir_small);
 		goto error;
@@ -363,6 +367,7 @@ expand:
 			 * buffer.
 			 */
 			up_write(&dvnode->validate_lock);
+			remote_size = req->file_size;
 			goto expand;
 		}
 
@@ -1356,6 +1361,7 @@ static int afs_mkdir(struct user_namespace *mnt_userns, struct inode *dir,
 	op->dentry	= dentry;
 	op->create.mode	= S_IFDIR | mode;
 	op->create.reason = afs_edit_dir_for_mkdir;
+	op->mtime	= current_time(dir);
 	op->ops		= &afs_mkdir_operation;
 	return afs_do_sync_operation(op);
 }
@@ -1659,6 +1665,7 @@ static int afs_create(struct user_namespace *mnt_userns, struct inode *dir,
 	op->dentry	= dentry;
 	op->create.mode	= S_IFREG | mode;
 	op->create.reason = afs_edit_dir_for_create;
+	op->mtime	= current_time(dir);
 	op->ops		= &afs_create_operation;
 	return afs_do_sync_operation(op);
 
@@ -1794,6 +1801,7 @@ static int afs_symlink(struct user_namespace *mnt_userns, struct inode *dir,
 	op->ops			= &afs_symlink_operation;
 	op->create.reason	= afs_edit_dir_for_symlink;
 	op->create.symlink	= content;
+	op->mtime		= current_time(dir);
 	return afs_do_sync_operation(op);
 
 error:
@@ -2005,9 +2013,8 @@ error:
  * Release a directory folio and clean up its private state if it's not busy
  * - return true if the folio can now be released, false if not
  */
-static int afs_dir_releasepage(struct page *subpage, gfp_t gfp_flags)
+static bool afs_dir_release_folio(struct folio *folio, gfp_t gfp_flags)
 {
-	struct folio *folio = page_folio(subpage);
 	struct afs_vnode *dvnode = AFS_FS_I(folio_inode(folio));
 
 	_enter("{{%llx:%llu}[%lu]}", dvnode->fid.vid, dvnode->fid.vnode, folio_index(folio));

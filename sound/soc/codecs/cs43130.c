@@ -712,30 +712,30 @@ static int cs43130_set_sp_fmt(int dai_id, unsigned int bitwidth_sclk,
 	case CS43130_ASP_PCM_DAI:
 	case CS43130_ASP_DOP_DAI:
 		regmap_write(cs43130->regmap, CS43130_ASP_DEN_1,
-			     (clk_gen->den & CS43130_SP_M_LSB_DATA_MASK) >>
+			     (clk_gen->v.denominator & CS43130_SP_M_LSB_DATA_MASK) >>
 			     CS43130_SP_M_LSB_DATA_SHIFT);
 		regmap_write(cs43130->regmap, CS43130_ASP_DEN_2,
-			     (clk_gen->den & CS43130_SP_M_MSB_DATA_MASK) >>
+			     (clk_gen->v.denominator & CS43130_SP_M_MSB_DATA_MASK) >>
 			     CS43130_SP_M_MSB_DATA_SHIFT);
 		regmap_write(cs43130->regmap, CS43130_ASP_NUM_1,
-			     (clk_gen->num & CS43130_SP_N_LSB_DATA_MASK) >>
+			     (clk_gen->v.numerator & CS43130_SP_N_LSB_DATA_MASK) >>
 			     CS43130_SP_N_LSB_DATA_SHIFT);
 		regmap_write(cs43130->regmap, CS43130_ASP_NUM_2,
-			     (clk_gen->num & CS43130_SP_N_MSB_DATA_MASK) >>
+			     (clk_gen->v.numerator & CS43130_SP_N_MSB_DATA_MASK) >>
 			     CS43130_SP_N_MSB_DATA_SHIFT);
 		break;
 	case CS43130_XSP_DOP_DAI:
 		regmap_write(cs43130->regmap, CS43130_XSP_DEN_1,
-			     (clk_gen->den & CS43130_SP_M_LSB_DATA_MASK) >>
+			     (clk_gen->v.denominator & CS43130_SP_M_LSB_DATA_MASK) >>
 			     CS43130_SP_M_LSB_DATA_SHIFT);
 		regmap_write(cs43130->regmap, CS43130_XSP_DEN_2,
-			     (clk_gen->den & CS43130_SP_M_MSB_DATA_MASK) >>
+			     (clk_gen->v.denominator & CS43130_SP_M_MSB_DATA_MASK) >>
 			     CS43130_SP_M_MSB_DATA_SHIFT);
 		regmap_write(cs43130->regmap, CS43130_XSP_NUM_1,
-			     (clk_gen->num & CS43130_SP_N_LSB_DATA_MASK) >>
+			     (clk_gen->v.numerator & CS43130_SP_N_LSB_DATA_MASK) >>
 			     CS43130_SP_N_LSB_DATA_SHIFT);
 		regmap_write(cs43130->regmap, CS43130_XSP_NUM_2,
-			     (clk_gen->num & CS43130_SP_N_MSB_DATA_MASK) >>
+			     (clk_gen->v.numerator & CS43130_SP_N_MSB_DATA_MASK) >>
 			     CS43130_SP_N_MSB_DATA_SHIFT);
 		break;
 	default:
@@ -1666,10 +1666,9 @@ static int cs43130_show_dc(struct device *dev, char *buf, u8 ch)
 	struct cs43130_private *cs43130 = i2c_get_clientdata(client);
 
 	if (!cs43130->hpload_done)
-		return scnprintf(buf, PAGE_SIZE, "NO_HPLOAD\n");
+		return sysfs_emit(buf, "NO_HPLOAD\n");
 	else
-		return scnprintf(buf, PAGE_SIZE, "%u\n",
-				 cs43130->hpload_dc[ch]);
+		return sysfs_emit(buf, "%u\n", cs43130->hpload_dc[ch]);
 }
 
 static ssize_t hpload_dc_l_show(struct device *dev,
@@ -1705,8 +1704,8 @@ static int cs43130_show_ac(struct device *dev, char *buf, u8 ch)
 
 	if (cs43130->hpload_done && cs43130->ac_meas) {
 		for (i = 0; i < ARRAY_SIZE(cs43130_ac_freq); i++) {
-			tmp = scnprintf(buf + j, PAGE_SIZE - j, "%u\n",
-					cs43130->hpload_ac[i][ch]);
+			tmp = sysfs_emit_at(buf, j, "%u\n",
+					    cs43130->hpload_ac[i][ch]);
 			if (!tmp)
 				break;
 
@@ -1715,7 +1714,7 @@ static int cs43130_show_ac(struct device *dev, char *buf, u8 ch)
 
 		return j;
 	} else {
-		return scnprintf(buf, PAGE_SIZE, "NO_HPLOAD\n");
+		return sysfs_emit(buf, "NO_HPLOAD\n");
 	}
 }
 

@@ -123,7 +123,7 @@ EXPORT_SYMBOL(udp_table);
 long sysctl_udp_mem[3] __read_mostly;
 EXPORT_SYMBOL(sysctl_udp_mem);
 
-atomic_long_t udp_memory_allocated;
+atomic_long_t udp_memory_allocated ____cacheline_aligned_in_smp;
 EXPORT_SYMBOL(udp_memory_allocated);
 DEFINE_PER_CPU(int, udp_memory_per_cpu_fw_alloc);
 EXPORT_PER_CPU_SYMBOL_GPL(udp_memory_per_cpu_fw_alloc);
@@ -1622,6 +1622,7 @@ int udp_init_sock(struct sock *sk)
 {
 	udp_lib_init_sock(sk);
 	sk->sk_destruct = udp_destruct_sock;
+	set_bit(SOCK_SUPPORT_ZC, &sk->sk_socket->flags);
 	return 0;
 }
 
@@ -1803,42 +1804,27 @@ EXPORT_SYMBOL(__skb_recv_udp);
 
 int udp_read_skb(struct sock *sk, skb_read_actor_t recv_actor)
 {
-	int copied = 0;
+	struct sk_buff *skb;
+	int err;
 
-	while (1) {
-		struct sk_buff *skb;
-		int err, used;
+try_again:
+	skb = skb_recv_udp(sk, 0, 1, &err);
+	if (!skb)
+		return err;
 
-		skb = skb_recv_udp(sk, 0, 1, &err);
-		if (!skb)
-			return err;
+	if (udp_lib_checksum_complete(skb)) {
+		int is_udplite = IS_UDPLITE(sk);
+		struct net *net = sock_net(sk);
 
-		if (udp_lib_checksum_complete(skb)) {
-			__UDP_INC_STATS(sock_net(sk), UDP_MIB_CSUMERRORS,
-					IS_UDPLITE(sk));
-			__UDP_INC_STATS(sock_net(sk), UDP_MIB_INERRORS,
-					IS_UDPLITE(sk));
-			atomic_inc(&sk->sk_drops);
-			kfree_skb(skb);
-			continue;
-		}
-
-		WARN_ON(!skb_set_owner_sk_safe(skb, sk));
-		used = recv_actor(sk, skb);
-		if (used <= 0) {
-			if (!copied)
-				copied = used;
-			kfree_skb(skb);
-			break;
-		} else if (used <= skb->len) {
-			copied += used;
-		}
-
+		__UDP_INC_STATS(net, UDP_MIB_CSUMERRORS, is_udplite);
+		__UDP_INC_STATS(net, UDP_MIB_INERRORS, is_udplite);
+		atomic_inc(&sk->sk_drops);
 		kfree_skb(skb);
-		break;
+		goto try_again;
 	}
 
-	return copied;
+	WARN_ON(!skb_set_owner_sk_safe(skb, sk));
+	return recv_actor(sk, skb);
 }
 EXPORT_SYMBOL(udp_read_skb);
 

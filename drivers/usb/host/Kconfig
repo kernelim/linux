@@ -47,13 +47,12 @@ config USB_XHCI_PCI_RENESAS
 	tristate "Support for additional Renesas xHCI controller with firmware"
 	help
 	  Say 'Y' to enable the support for the Renesas xHCI controller with
-	  firmware. Make sure you have the firwmare for the device and
+	  firmware. Make sure you have the firmware for the device and
 	  installed on your system for this device to work.
 	  If unsure, say 'N'.
 
 config USB_XHCI_PLATFORM
 	tristate "Generic xHCI driver for a platform device"
-	select USB_XHCI_RCAR if ARCH_RENESAS
 	help
 	  Adds an xHCI host driver for a generic platform device, which
 	  provides a memory space and an irq.
@@ -91,6 +90,7 @@ config USB_XHCI_RCAR
 	tristate "xHCI support for Renesas R-Car SoCs"
 	depends on USB_XHCI_PLATFORM
 	depends on ARCH_RENESAS || COMPILE_TEST
+	default ARCH_RENESAS
 	help
 	  Say 'Y' to enable the support for the xHCI host controller
 	  found in Renesas R-Car ARM SoCs.
@@ -548,17 +548,6 @@ config USB_OHCI_HCD_SSB
 	  Broadcom based SSB bus.
 
 	  If unsure, say N.
-
-config USB_OHCI_SH
-	bool "OHCI support for SuperH USB controller (DEPRECATED)"
-	depends on SUPERH || COMPILE_TEST
-	select USB_OHCI_HCD_PLATFORM
-	help
-	  This option is deprecated now and the driver was removed, use
-	  USB_OHCI_HCD_PLATFORM instead.
-
-	  Enables support for the on-chip OHCI controller on the SuperH.
-	  If you use the PCI OHCI controller, this option is not necessary.
 
 config USB_OHCI_EXYNOS
 	tristate "OHCI support for Samsung S5P/Exynos SoC Series"

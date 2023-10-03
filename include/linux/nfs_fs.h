@@ -31,6 +31,10 @@
 #include <linux/sunrpc/auth.h>
 #include <linux/sunrpc/clnt.h>
 
+#ifdef CONFIG_NFS_FSCACHE
+#include <linux/netfs.h>
+#endif
+
 #include <linux/nfs.h>
 #include <linux/nfs2.h>
 #include <linux/nfs3.h>
@@ -84,7 +88,6 @@ struct nfs_open_context {
 	fmode_t mode;
 
 	unsigned long flags;
-#define NFS_CONTEXT_RESEND_WRITES	(1)
 #define NFS_CONTEXT_BAD			(2)
 #define NFS_CONTEXT_UNLOCK	(3)
 #define NFS_CONTEXT_FILE_OPEN		(4)
@@ -205,14 +208,15 @@ struct nfs_inode {
 	/* how many bytes have been written/read and how many bytes queued up */
 	__u64 write_io;
 	__u64 read_io;
-#ifdef CONFIG_NFS_FSCACHE
-	struct fscache_cookie	*fscache;
-#endif
-	struct inode		vfs_inode;
-
 #ifdef CONFIG_NFS_V4_2
 	struct nfs4_xattr_cache *xattr_cache;
 #endif
+	union {
+		struct inode		vfs_inode;
+#ifdef CONFIG_NFS_FSCACHE
+		struct netfs_inode	netfs; /* netfs context and VFS inode */
+#endif
+	};
 };
 
 struct nfs4_copy_state {
@@ -277,7 +281,6 @@ struct nfs4_copy_state {
 #define NFS_INO_ACL_LRU_SET	(2)		/* Inode is on the LRU list */
 #define NFS_INO_INVALIDATING	(3)		/* inode is being invalidated */
 #define NFS_INO_PRESERVE_UNLINKED (4)		/* preserve file if removed while open */
-#define NFS_INO_FSCACHE		(5)		/* inode can be cached by FS-Cache */
 #define NFS_INO_LAYOUTCOMMIT	(9)		/* layoutcommit required */
 #define NFS_INO_LAYOUTCOMMITTING (10)		/* layoutcommit inflight */
 #define NFS_INO_LAYOUTSTATS	(11)		/* layoutstats inflight */
@@ -328,15 +331,6 @@ static inline unsigned NFS_MAXATTRTIMEO(const struct inode *inode)
 static inline int NFS_STALE(const struct inode *inode)
 {
 	return test_bit(NFS_INO_STALE, &NFS_I(inode)->flags);
-}
-
-static inline struct fscache_cookie *nfs_i_fscache(struct inode *inode)
-{
-#ifdef CONFIG_NFS_FSCACHE
-	return NFS_I(inode)->fscache;
-#else
-	return NULL;
-#endif
 }
 
 static inline __u64 NFS_FILEID(const struct inode *inode)
@@ -509,7 +503,7 @@ static inline const struct cred *nfs_file_cred(struct file *file)
 /*
  * linux/fs/nfs/direct.c
  */
-extern ssize_t nfs_direct_IO(struct kiocb *, struct iov_iter *);
+int nfs_swap_rw(struct kiocb *iocb, struct iov_iter *iter);
 ssize_t nfs_file_direct_read(struct kiocb *iocb,
 			     struct iov_iter *iter, bool swap);
 ssize_t nfs_file_direct_write(struct kiocb *iocb,
@@ -570,8 +564,9 @@ extern void nfs_complete_unlink(struct dentry *dentry, struct inode *);
 extern int  nfs_congestion_kb;
 extern int  nfs_writepage(struct page *page, struct writeback_control *wbc);
 extern int  nfs_writepages(struct address_space *, struct writeback_control *);
-extern int  nfs_flush_incompatible(struct file *file, struct page *page);
-extern int  nfs_updatepage(struct file *, struct page *, unsigned int, unsigned int);
+extern int  nfs_flush_incompatible(struct file *file, struct folio *folio);
+extern int  nfs_update_folio(struct file *file, struct folio *folio,
+			     unsigned int offset, unsigned int count);
 
 /*
  * Try to write back everything synchronously (but check the
@@ -579,8 +574,8 @@ extern int  nfs_updatepage(struct file *, struct page *, unsigned int, unsigned 
  */
 extern int nfs_sync_inode(struct inode *inode);
 extern int nfs_wb_all(struct inode *inode);
-extern int nfs_wb_page(struct inode *inode, struct page *page);
-extern int nfs_wb_page_cancel(struct inode *inode, struct page* page);
+extern int nfs_wb_folio(struct inode *inode, struct folio *folio);
+int nfs_wb_folio_cancel(struct inode *inode, struct folio *folio);
 extern int  nfs_commit_inode(struct inode *, int);
 extern struct nfs_commit_data *nfs_commitdata_alloc(void);
 extern void nfs_commit_free(struct nfs_commit_data *data);
@@ -596,7 +591,7 @@ static inline bool nfs_have_writebacks(const struct inode *inode)
 /*
  * linux/fs/nfs/read.c
  */
-extern int  nfs_readpage(struct file *, struct page *);
+int  nfs_read_folio(struct file *, struct folio *);
 void nfs_readahead(struct readahead_control *);
 
 /*
@@ -619,6 +614,15 @@ nfs_fileid_to_ino_t(u64 fileid)
 
 #define NFS_JUKEBOX_RETRY_TIME (5 * HZ)
 
+/* We need to block new opens while a file is being unlinked.
+ * If it is opened *before* we decide to unlink, we will silly-rename
+ * instead. If it is opened *after*, then we need to create or will fail.
+ * If we allow the two to race, we could end up with a file that is open
+ * but deleted on the server resulting in ESTALE.
+ * So use ->d_fsdata to record when the unlink is happening
+ * and block dentry revalidation while it is set.
+ */
+#define NFS_FSDATA_BLOCKED ((void*)1)
 
 # undef ifdebug
 # ifdef NFS_DEBUG

@@ -5,6 +5,7 @@
 	\renewcommand\thesection*
 	\renewcommand\thesubsection*
 	\kerneldocCJKon
+	\kerneldocBeginSC{
 
 .. _linux_doc_zh:
 
@@ -97,12 +98,17 @@ TODOList:
    iio/index
    sound/index
    filesystems/index
+   virt/index
+   infiniband/index
+   accounting/index
+   scheduler/index
+   mm/index
+   peci/index
 
 TODOList:
 
 * driver-api/index
 * locking/index
-* accounting/index
 * block/index
 * cdrom/index
 * ide/index
@@ -111,7 +117,6 @@ TODOList:
 * hid/index
 * i2c/index
 * isdn/index
-* infiniband/index
 * leds/index
 * netlabel/index
 * networking/index
@@ -122,19 +127,16 @@ TODOList:
 * spi/index
 * w1/index
 * watchdog/index
-* virt/index
 * input/index
 * hwmon/index
 * gpu/index
 * security/index
 * crypto/index
-* vm/index
 * bpf/index
 * usb/index
 * PCI/index
 * scsi/index
 * misc-devices/index
-* scheduler/index
 * mhi/index
 
 体系结构无关文档
@@ -184,3 +186,7 @@ TODOList:
 ----------
 
 * :ref:`genindex`
+
+.. raw:: latex
+
+	}\kerneldocEndSC

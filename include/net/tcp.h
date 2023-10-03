@@ -292,6 +292,16 @@ static inline bool tcp_out_of_memory(struct sock *sk)
 	return false;
 }
 
+static inline void tcp_wmem_free_skb(struct sock *sk, struct sk_buff *skb)
+{
+	sk_wmem_queued_add(sk, -skb->truesize);
+	if (!skb_zcopy_pure(skb))
+		sk_mem_uncharge(sk, skb->truesize);
+	else
+		sk_mem_uncharge(sk, SKB_TRUESIZE(skb_end_offset(skb)));
+	__kfree_skb(skb);
+}
+
 void sk_forced_mem_schedule(struct sock *sk, int size);
 
 bool tcp_check_oom(struct sock *sk, int shift);
@@ -392,9 +402,13 @@ void tcp_init_sock(struct sock *sk);
 void tcp_init_transfer(struct sock *sk, int bpf_op, struct sk_buff *skb);
 __poll_t tcp_poll(struct file *file, struct socket *sock,
 		      struct poll_table_struct *wait);
+int do_tcp_getsockopt(struct sock *sk, int level,
+		      int optname, sockptr_t optval, sockptr_t optlen);
 int tcp_getsockopt(struct sock *sk, int level, int optname,
 		   char __user *optval, int __user *optlen);
 bool tcp_bpf_bypass_getsockopt(int level, int optname);
+int do_tcp_setsockopt(struct sock *sk, int level, int optname,
+		      sockptr_t optval, unsigned int optlen);
 int tcp_setsockopt(struct sock *sk, int level, int optname, sockptr_t optval,
 		   unsigned int optlen);
 void tcp_set_keepalive(struct sock *sk, int val);
@@ -927,7 +941,7 @@ extern const struct inet_connection_sock_af_ops ipv6_specific;
 
 INDIRECT_CALLABLE_DECLARE(void tcp_v6_send_check(struct sock *sk, struct sk_buff *skb));
 INDIRECT_CALLABLE_DECLARE(int tcp_v6_rcv(struct sk_buff *skb));
-INDIRECT_CALLABLE_DECLARE(void tcp_v6_early_demux(struct sk_buff *skb));
+void tcp_v6_early_demux(struct sk_buff *skb);
 
 #endif
 
@@ -974,7 +988,8 @@ static inline bool tcp_skb_can_collapse(const struct sk_buff *to,
 					const struct sk_buff *from)
 {
 	return likely(tcp_skb_can_collapse_to(to) &&
-		      mptcp_skb_can_collapse(to, from));
+		      mptcp_skb_can_collapse(to, from) &&
+		      skb_pure_zcopy_same(to, from));
 }
 
 /* Events passed to congestion control interface */
@@ -1907,7 +1922,7 @@ static inline void tcp_rtx_queue_unlink_and_free(struct sk_buff *skb, struct soc
 {
 	list_del(&skb->tcp_tsorted_anchor);
 	tcp_rtx_queue_unlink(skb, sk);
-	sk_wmem_free_skb(sk, skb);
+	tcp_wmem_free_skb(sk, skb);
 }
 
 static inline void tcp_push_pending_frames(struct sock *sk)
@@ -2263,8 +2278,8 @@ int tcp_bpf_update_proto(struct sock *sk, struct sk_psock *psock, bool restore);
 void tcp_bpf_clone(const struct sock *sk, struct sock *newsk);
 #endif /* CONFIG_BPF_SYSCALL */
 
-int tcp_bpf_sendmsg_redir(struct sock *sk, struct sk_msg *msg, u32 bytes,
-			  int flags);
+int tcp_bpf_sendmsg_redir(struct sock *sk, bool ingress,
+			  struct sk_msg *msg, u32 bytes, int flags);
 #endif /* CONFIG_NET_SOCK_MSG */
 
 #if !defined(CONFIG_BPF_SYSCALL) || !defined(CONFIG_NET_SOCK_MSG)

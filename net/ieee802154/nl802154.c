@@ -2157,7 +2157,8 @@ static int nl802154_del_llsec_seclevel(struct sk_buff *skb,
 #define NL802154_FLAG_CHECK_NETDEV_UP	0x08
 #define NL802154_FLAG_NEED_WPAN_DEV	0x10
 
-static int nl802154_pre_doit(const struct genl_ops *ops, struct sk_buff *skb,
+static int nl802154_pre_doit(const struct genl_split_ops *ops,
+			     struct sk_buff *skb,
 			     struct genl_info *info)
 {
 	struct cfg802154_registered_device *rdev;
@@ -2219,7 +2220,8 @@ static int nl802154_pre_doit(const struct genl_ops *ops, struct sk_buff *skb,
 	return 0;
 }
 
-static void nl802154_post_doit(const struct genl_ops *ops, struct sk_buff *skb,
+static void nl802154_post_doit(const struct genl_split_ops *ops,
+			       struct sk_buff *skb,
 			       struct genl_info *info)
 {
 	if (info->user_ptr[1]) {
@@ -2500,6 +2502,7 @@ static struct genl_family nl802154_fam __ro_after_init = {
 	.module = THIS_MODULE,
 	.ops = nl802154_ops,
 	.n_ops = ARRAY_SIZE(nl802154_ops),
+	.resv_start_op = NL802154_CMD_DEL_SEC_LEVEL + 1,
 	.mcgrps = nl802154_mcgrps,
 	.n_mcgrps = ARRAY_SIZE(nl802154_mcgrps),
 };

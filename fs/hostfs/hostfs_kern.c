@@ -462,12 +462,12 @@ static int hostfs_readpage(struct file *file, struct page *page)
 }
 
 static int hostfs_write_begin(struct file *file, struct address_space *mapping,
-			      loff_t pos, unsigned len, unsigned flags,
+			      loff_t pos, unsigned len,
 			      struct page **pagep, void **fsdata)
 {
 	pgoff_t index = pos >> PAGE_SHIFT;
 
-	*pagep = grab_cache_page_write_begin(mapping, index, flags);
+	*pagep = grab_cache_page_write_begin(mapping, index);
 	if (!*pagep)
 		return -ENOMEM;
 	return 0;

@@ -91,8 +91,12 @@ unsigned long	nfsd_drc_mem_used;
 #if defined(CONFIG_NFSD_V2_ACL) || defined(CONFIG_NFSD_V3_ACL)
 static struct svc_stat	nfsd_acl_svcstats;
 static const struct svc_version *nfsd_acl_version[] = {
+# if defined(CONFIG_NFSD_V2_ACL)
 	[2] = &nfsd_acl_version2,
+# endif
+# if defined(CONFIG_NFSD_V3_ACL)
 	[3] = &nfsd_acl_version3,
+# endif
 };
 
 #define NFSD_ACL_MINVERS            2
@@ -116,7 +120,9 @@ static struct svc_stat	nfsd_acl_svcstats = {
 #endif /* defined(CONFIG_NFSD_V2_ACL) || defined(CONFIG_NFSD_V3_ACL) */
 
 static const struct svc_version *nfsd_version[] = {
+#if defined(CONFIG_NFSD_V2)
 	[2] = &nfsd_version2,
+#endif
 	[3] = &nfsd_version3,
 #if defined(CONFIG_NFSD_V4)
 	[4] = &nfsd_version4,
@@ -807,7 +813,7 @@ nfsd_svc(int nrservs, struct net *net, const struct cred *cred)
 	if (nrservs == 0 && nn->nfsd_serv == NULL)
 		goto out;
 
-	strlcpy(nn->nfsd_name, utsname()->nodename,
+	strscpy(nn->nfsd_name, utsname()->nodename,
 		sizeof(nn->nfsd_name));
 
 	error = nfsd_create_serv(net);
@@ -1024,7 +1030,6 @@ out:
 /**
  * nfsd_dispatch - Process an NFS or NFSACL Request
  * @rqstp: incoming request
- * @statp: pointer to location of accept_stat field in RPC Reply buffer
  *
  * This RPC dispatcher integrates the NFS server's duplicate reply cache.
  *
@@ -1032,9 +1037,10 @@ out:
  *  %0: Processing complete; do not send a Reply
  *  %1: Processing complete; send Reply in rqstp->rq_res
  */
-int nfsd_dispatch(struct svc_rqst *rqstp, __be32 *statp)
+int nfsd_dispatch(struct svc_rqst *rqstp)
 {
 	const struct svc_procedure *proc = rqstp->rq_procinfo;
+	__be32 *statp = rqstp->rq_accept_statp;
 
 	/*
 	 * Give the xdr decoder a chance to change this if it wants
@@ -1042,7 +1048,6 @@ int nfsd_dispatch(struct svc_rqst *rqstp, __be32 *statp)
 	 */
 	rqstp->rq_cachetype = proc->pc_cachetype;
 
-	svcxdr_init_decode(rqstp);
 	if (!proc->pc_decode(rqstp, &rqstp->rq_arg_stream))
 		goto out_decode_err;
 
@@ -1055,14 +1060,8 @@ int nfsd_dispatch(struct svc_rqst *rqstp, __be32 *statp)
 		goto out_dropit;
 	}
 
-	/*
-	 * Need to grab the location to store the status, as
-	 * NFSv4 does some encoding while processing
-	 */
-	svcxdr_init_encode(rqstp);
-
 	*statp = proc->pc_func(rqstp);
-	if (*statp == rpc_drop_reply || test_bit(RQ_DROPME, &rqstp->rq_flags))
+	if (test_bit(RQ_DROPME, &rqstp->rq_flags))
 		goto out_update_drop;
 
 	if (!proc->pc_encode(rqstp, &rqstp->rq_res_stream))

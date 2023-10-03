@@ -159,6 +159,7 @@
 #ifdef CONFIG_ARM64_PA_BITS_52
 #define PTE_ADDR_HIGH		(_AT(pteval_t, 0xf) << 12)
 #define PTE_ADDR_MASK		(PTE_ADDR_LOW | PTE_ADDR_HIGH)
+#define PTE_ADDR_HIGH_SHIFT	36
 #else
 #define PTE_ADDR_MASK		PTE_ADDR_LOW
 #endif
@@ -281,10 +282,9 @@
  */
 #ifdef CONFIG_ARM64_PA_BITS_52
 /*
- * This should be GENMASK_ULL(47, 2).
  * TTBR_ELx[1] is RES0 in this configuration.
  */
-#define TTBR_BADDR_MASK_52	(((UL(1) << 46) - 1) << 2)
+#define TTBR_BADDR_MASK_52	GENMASK_ULL(47, 2)
 #endif
 
 #ifdef CONFIG_ARM64_VA_BITS_52

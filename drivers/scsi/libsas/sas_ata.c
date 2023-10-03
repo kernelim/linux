@@ -127,7 +127,7 @@ static void sas_ata_task_done(struct sas_task *task)
 		} else {
 			link->eh_info.err_mask |= ac_err_mask(dev->sata_dev.fis[2]);
 			if (unlikely(link->eh_info.err_mask))
-				qc->flags |= ATA_QCFLAG_FAILED;
+				qc->flags |= ATA_QCFLAG_EH;
 		}
 	} else {
 		ac = sas_to_ata_err(stat);
@@ -138,7 +138,7 @@ static void sas_ata_task_done(struct sas_task *task)
 				qc->err_mask = ac;
 			} else {
 				link->eh_info.err_mask |= AC_ERR_DEV;
-				qc->flags |= ATA_QCFLAG_FAILED;
+				qc->flags |= ATA_QCFLAG_EH;
 			}
 
 			dev->sata_dev.fis[3] = 0x04; /* status err */
@@ -234,12 +234,11 @@ static unsigned int sas_ata_qc_issue(struct ata_queued_cmd *qc)
 	return ret;
 }
 
-static bool sas_ata_qc_fill_rtf(struct ata_queued_cmd *qc)
+static void sas_ata_qc_fill_rtf(struct ata_queued_cmd *qc)
 {
 	struct domain_device *dev = qc->ap->private_data;
 
 	ata_tf_from_fis(dev->sata_dev.fis, &qc->result_tf);
-	return true;
 }
 
 static struct sas_internal *dev_to_sas_internal(struct domain_device *dev)
@@ -447,7 +446,7 @@ static void sas_ata_internal_abort(struct sas_task *task)
 
 static void sas_ata_post_internal(struct ata_queued_cmd *qc)
 {
-	if (qc->flags & ATA_QCFLAG_FAILED)
+	if (qc->flags & ATA_QCFLAG_EH)
 		qc->err_mask |= AC_ERR_OTHER;
 
 	if (qc->err_mask) {
@@ -602,7 +601,7 @@ void sas_ata_task_abort(struct sas_task *task)
 
 	/* Internal command, fake a timeout and complete. */
 	qc->flags &= ~ATA_QCFLAG_ACTIVE;
-	qc->flags |= ATA_QCFLAG_FAILED;
+	qc->flags |= ATA_QCFLAG_EH;
 	qc->err_mask |= AC_ERR_TIMEOUT;
 	waiting = qc->private_data;
 	complete(waiting);

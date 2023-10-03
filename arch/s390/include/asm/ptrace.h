@@ -97,6 +97,7 @@ struct pt_regs
 	};
 	unsigned long flags;
 	unsigned long cr1;
+	unsigned long last_break;
 };
 
 /*

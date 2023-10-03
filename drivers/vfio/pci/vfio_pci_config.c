@@ -26,7 +26,7 @@
 #include <linux/vfio.h>
 #include <linux/slab.h>
 
-#include <linux/vfio_pci_core.h>
+#include "vfio_pci_priv.h"
 
 /* Fake capability ID for standard config space */
 #define PCI_CAP_ID_BASIC	0
@@ -1166,7 +1166,7 @@ static int vfio_msi_config_write(struct vfio_pci_core_device *vdev, int pos,
 		flags = le16_to_cpu(*pflags);
 
 		/* MSI is enabled via ioctl */
-		if  (!is_msi(vdev))
+		if  (vdev->irq_type != VFIO_PCI_MSI_IRQ_INDEX)
 			flags &= ~PCI_MSI_FLAGS_ENABLE;
 
 		/* Check queue size */
@@ -1244,7 +1244,7 @@ static int vfio_msi_cap_len(struct vfio_pci_core_device *vdev, u8 pos)
 	if (vdev->msi_perm)
 		return len;
 
-	vdev->msi_perm = kmalloc(sizeof(struct perm_bits), GFP_KERNEL);
+	vdev->msi_perm = kmalloc(sizeof(struct perm_bits), GFP_KERNEL_ACCOUNT);
 	if (!vdev->msi_perm)
 		return -ENOMEM;
 
@@ -1559,8 +1559,8 @@ static int vfio_cap_init(struct vfio_pci_core_device *vdev)
 		}
 
 		if (!len) {
-			pci_info(pdev, "%s: hiding cap %#x@%#x\n", __func__,
-				 cap, pos);
+			pci_dbg(pdev, "%s: hiding cap %#x@%#x\n", __func__,
+				cap, pos);
 			*prev = next;
 			pos = next;
 			continue;
@@ -1636,8 +1636,8 @@ static int vfio_ecap_init(struct vfio_pci_core_device *vdev)
 		}
 
 		if (!len) {
-			pci_info(pdev, "%s: hiding ecap %#x@%#x\n",
-				 __func__, ecap, epos);
+			pci_dbg(pdev, "%s: hiding ecap %#x@%#x\n",
+				__func__, ecap, epos);
 
 			/* If not the first in the chain, we can skip over it */
 			if (prev) {
@@ -1731,11 +1731,11 @@ int vfio_config_init(struct vfio_pci_core_device *vdev)
 	 * no requirements on the length of a capability, so the gap between
 	 * capabilities needs byte granularity.
 	 */
-	map = kmalloc(pdev->cfg_size, GFP_KERNEL);
+	map = kmalloc(pdev->cfg_size, GFP_KERNEL_ACCOUNT);
 	if (!map)
 		return -ENOMEM;
 
-	vconfig = kmalloc(pdev->cfg_size, GFP_KERNEL);
+	vconfig = kmalloc(pdev->cfg_size, GFP_KERNEL_ACCOUNT);
 	if (!vconfig) {
 		kfree(map);
 		return -ENOMEM;

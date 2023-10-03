@@ -65,7 +65,7 @@ struct lowcore {
 	__u32	external_damage_code;		/* 0x00f4 */
 	__u64	failing_storage_address;	/* 0x00f8 */
 	__u8	pad_0x0100[0x0110-0x0100];	/* 0x0100 */
-	__u64	breaking_event_addr;		/* 0x0110 */
+	__u64	pgm_last_break;			/* 0x0110 */
 	__u8	pad_0x0118[0x0120-0x0118];	/* 0x0118 */
 	psw_t	restart_old_psw;		/* 0x0120 */
 	psw_t	external_old_psw;		/* 0x0130 */
@@ -93,9 +93,10 @@ struct lowcore {
 	psw_t	return_psw;			/* 0x0290 */
 	psw_t	return_mcck_psw;		/* 0x02a0 */
 
+	__u64	last_break;			/* 0x02b0 */
+
 	/* CPU accounting and timing values. */
-	__u64	sys_enter_timer;		/* 0x02b0 */
-	__u8	pad_0x02b8[0x02c0-0x02b8];	/* 0x02b8 */
+	__u64	sys_enter_timer;		/* 0x02b8 */
 	__u64	mcck_enter_timer;		/* 0x02c0 */
 	__u64	exit_timer;			/* 0x02c8 */
 	__u64	user_timer;			/* 0x02d0 */
@@ -124,7 +125,8 @@ struct lowcore {
 	/* Restart function and parameter. */
 	__u64	restart_fn;			/* 0x0370 */
 	__u64	restart_data;			/* 0x0378 */
-	__u64	restart_source;			/* 0x0380 */
+	__u32	restart_source;			/* 0x0380 */
+	__u32	restart_flags;			/* 0x0384 */
 
 	/* Address space pointer. */
 	__u64	kernel_asce;			/* 0x0388 */
@@ -151,11 +153,9 @@ struct lowcore {
 	__u64	gmap;				/* 0x03d0 */
 	__u8	pad_0x03d8[0x0400-0x03d8];	/* 0x03d8 */
 
-	/* br %r1 trampoline */
-	__u16	br_r1_trampoline;		/* 0x0400 */
-	__u32	return_lpswe;			/* 0x0402 */
-	__u32	return_mcck_lpswe;		/* 0x0406 */
-	__u8	pad_0x040a[0x0e00-0x040a];	/* 0x040a */
+	__u32	return_lpswe;			/* 0x0400 */
+	__u32	return_mcck_lpswe;		/* 0x0404 */
+	__u8	pad_0x040a[0x0e00-0x0408];	/* 0x0408 */
 
 	/*
 	 * 0xe00 contains the address of the IPL Parameter Information
@@ -187,7 +187,7 @@ struct lowcore {
 	__u32	tod_progreg_save_area;		/* 0x1324 */
 	__u32	cpu_timer_save_area[2];		/* 0x1328 */
 	__u32	clock_comp_save_area[2];	/* 0x1330 */
-	__u8	pad_0x1338[0x1340-0x1338];	/* 0x1338 */
+	__u64	last_break_save_area;		/* 0x1338 */
 	__u32	access_regs_save_area[16];	/* 0x1340 */
 	__u64	cregs_save_area[16];		/* 0x1380 */
 	__u8	pad_0x1400[0x1500-0x1400];	/* 0x1400 */

@@ -31,6 +31,7 @@
  */
 
 #include "en.h"
+#include "lib/crypto.h"
 
 /* mlx5e global resources should be placed in this file.
  * Global resources are common to all the netdevices created on the same nic.
@@ -46,8 +47,7 @@ void mlx5e_mkey_set_relaxed_ordering(struct mlx5_core_dev *mdev, void *mkc)
 	MLX5_SET(mkc, mkc, relaxed_ordering_write, ro_pci_enable && ro_write);
 }
 
-static int mlx5e_create_mkey(struct mlx5_core_dev *mdev, u32 pdn,
-			     u32 *mkey)
+int mlx5e_create_mkey(struct mlx5_core_dev *mdev, u32 pdn, u32 *mkey)
 {
 	int inlen = MLX5_ST_SZ_BYTES(create_mkey_in);
 	void *mkc;
@@ -105,6 +105,13 @@ int mlx5e_create_mdev_resources(struct mlx5_core_dev *mdev)
 	INIT_LIST_HEAD(&res->td.tirs_list);
 	mutex_init(&res->td.list_lock);
 
+	mdev->mlx5e_res.dek_priv = mlx5_crypto_dek_init(mdev);
+	if (IS_ERR(mdev->mlx5e_res.dek_priv)) {
+		mlx5_core_err(mdev, "crypto dek init failed, %ld\n",
+			      PTR_ERR(mdev->mlx5e_res.dek_priv));
+		mdev->mlx5e_res.dek_priv = NULL;
+	}
+
 	return 0;
 
 err_destroy_mkey:
@@ -120,6 +127,8 @@ void mlx5e_destroy_mdev_resources(struct mlx5_core_dev *mdev)
 {
 	struct mlx5e_hw_objs *res = &mdev->mlx5e_res.hw_objs;
 
+	mlx5_crypto_dek_cleanup(mdev->mlx5e_res.dek_priv);
+	mdev->mlx5e_res.dek_priv = NULL;
 	mlx5_free_bfreg(mdev, &res->bfreg);
 	mlx5_core_destroy_mkey(mdev, res->mkey);
 	mlx5_core_dealloc_transport_domain(mdev, res->td.tdn);
@@ -140,10 +149,8 @@ int mlx5e_refresh_tirs(struct mlx5e_priv *priv, bool enable_uc_lb,
 
 	inlen = MLX5_ST_SZ_BYTES(modify_tir_in);
 	in = kvzalloc(inlen, GFP_KERNEL);
-	if (!in) {
-		err = -ENOMEM;
-		goto out;
-	}
+	if (!in)
+		return -ENOMEM;
 
 	if (enable_uc_lb)
 		lb_flags = MLX5_TIRC_SELF_LB_BLOCK_BLOCK_UNICAST;
@@ -161,14 +168,13 @@ int mlx5e_refresh_tirs(struct mlx5e_priv *priv, bool enable_uc_lb,
 		tirn = tir->tirn;
 		err = mlx5_core_modify_tir(mdev, tirn, in);
 		if (err)
-			goto out;
+			break;
 	}
+	mutex_unlock(&mdev->mlx5e_res.hw_objs.td.list_lock);
 
-out:
 	kvfree(in);
 	if (err)
 		netdev_err(priv->netdev, "refresh tir(0x%x) failed, %d\n", tirn, err);
-	mutex_unlock(&mdev->mlx5e_res.hw_objs.td.list_lock);
 
 	return err;
 }

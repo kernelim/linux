@@ -56,6 +56,7 @@ void __init sev_es_init_vc_handling(void);
 #else	/* !CONFIG_AMD_MEM_ENCRYPT */
 
 #define sme_me_mask	0ULL
+#define sev_status	0ULL
 
 static inline void __init sme_early_encrypt(resource_size_t paddr,
 					    unsigned long size) { }
@@ -88,6 +89,8 @@ static inline void mem_encrypt_free_decrypted_mem(void) { }
 
 /* Architecture __weak replacement functions */
 void __init mem_encrypt_init(void);
+
+void add_encrypt_protection_map(void);
 
 /*
  * The __sme_pa() and __sme_pa_nodebug() macros are meant for use when

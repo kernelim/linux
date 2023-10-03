@@ -45,7 +45,7 @@
 #include <asm/irq.h>
 #include <asm/tlbflush.h>
 #include <asm/vtimer.h>
-#include <asm/lowcore.h>
+#include <asm/abs_lowcore.h>
 #include <asm/sclp.h>
 #include <asm/debug.h>
 #include <asm/os_info.h>
@@ -207,16 +207,19 @@ static int pcpu_alloc_lowcore(struct pcpu *pcpu, int cpu)
 	lc->cpu_nr = cpu;
 	lc->spinlock_lockval = arch_spin_lockval(cpu);
 	lc->spinlock_index = 0;
-	lc->br_r1_trampoline = 0x07f1;	/* br %r1 */
 	lc->return_lpswe = gen_lpswe(__LC_RETURN_PSW);
 	lc->return_mcck_lpswe = gen_lpswe(__LC_RETURN_MCCK_PSW);
 	lc->preempt_count = PREEMPT_DISABLED;
-	if (nmi_alloc_per_cpu(lc))
+	if (nmi_alloc_mcesa(&lc->mcesad))
 		goto out;
+	if (abs_lowcore_map(cpu, lc, true))
+		goto out_mcesa;
 	lowcore_ptr[cpu] = lc;
-	pcpu_sigp_retry(pcpu, SIGP_SET_PREFIX, (u32)(unsigned long) lc);
+	pcpu_sigp_retry(pcpu, SIGP_SET_PREFIX, __pa(lc));
 	return 0;
 
+out_mcesa:
+	nmi_free_mcesa(&lc->mcesad);
 out:
 	stack_free(mcck_stack);
 	stack_free(async_stack);
@@ -238,7 +241,8 @@ static void pcpu_free_lowcore(struct pcpu *pcpu)
 	mcck_stack = lc->mcck_stack - STACK_INIT_OFFSET;
 	pcpu_sigp_retry(pcpu, SIGP_SET_PREFIX, 0);
 	lowcore_ptr[cpu] = NULL;
-	nmi_free_per_cpu(lc);
+	abs_lowcore_unmap(cpu);
+	nmi_free_mcesa(&lc->mcesad);
 	stack_free(async_stack);
 	stack_free(mcck_stack);
 	free_pages(nodat_stack, THREAD_SIZE_ORDER);
@@ -252,6 +256,7 @@ static void pcpu_prepare_secondary(struct pcpu *pcpu, int cpu)
 	cpumask_set_cpu(cpu, &init_mm.context.cpu_attach_mask);
 	cpumask_set_cpu(cpu, mm_cpumask(&init_mm));
 	lc->cpu_nr = cpu;
+	lc->restart_flags = RESTART_FLAG_CTLREGS;
 	lc->spinlock_lockval = arch_spin_lockval(cpu);
 	lc->spinlock_index = 0;
 	lc->percpu_offset = __per_cpu_offset[cpu];
@@ -294,10 +299,10 @@ static void pcpu_start_fn(struct pcpu *pcpu, void (*func)(void *), void *data)
 
 	cpu = pcpu - pcpu_devices;
 	lc = lowcore_ptr[cpu];
-	lc->restart_stack = lc->nodat_stack;
+	lc->restart_stack = lc->kernel_stack;
 	lc->restart_fn = (unsigned long) func;
 	lc->restart_data = (unsigned long) data;
-	lc->restart_source = -1UL;
+	lc->restart_source = -1U;
 	pcpu_sigp_retry(pcpu, SIGP_RESTART, 0);
 }
 
@@ -311,13 +316,16 @@ static void __pcpu_delegate(pcpu_delegate_fn *func, void *data)
 	func(data);	/* should not return */
 }
 
-static void __no_sanitize_address pcpu_delegate(struct pcpu *pcpu,
-						pcpu_delegate_fn *func,
-						void *data, unsigned long stack)
+static void pcpu_delegate(struct pcpu *pcpu,
+			  pcpu_delegate_fn *func,
+			  void *data, unsigned long stack)
 {
-	struct lowcore *lc = lowcore_ptr[pcpu - pcpu_devices];
-	unsigned long source_cpu = stap();
+	struct lowcore *lc, *abs_lc;
+	unsigned int source_cpu;
+	unsigned long flags;
 
+	lc = lowcore_ptr[pcpu - pcpu_devices];
+	source_cpu = stap();
 	__load_psw_mask(PSW_KERNEL_BITS | PSW_MASK_DAT);
 	if (pcpu->address == source_cpu) {
 		call_on_stack(2, stack, void, __pcpu_delegate,
@@ -326,10 +334,19 @@ static void __no_sanitize_address pcpu_delegate(struct pcpu *pcpu,
 	/* Stop target cpu (if func returns this stops the current cpu). */
 	pcpu_sigp_retry(pcpu, SIGP_STOP, 0);
 	/* Restart func on the target cpu and stop the current cpu. */
-	mem_assign_absolute(lc->restart_stack, stack);
-	mem_assign_absolute(lc->restart_fn, (unsigned long) func);
-	mem_assign_absolute(lc->restart_data, (unsigned long) data);
-	mem_assign_absolute(lc->restart_source, source_cpu);
+	if (lc) {
+		lc->restart_stack = stack;
+		lc->restart_fn = (unsigned long)func;
+		lc->restart_data = (unsigned long)data;
+		lc->restart_source = source_cpu;
+	} else {
+		abs_lc = get_abs_lowcore(&flags);
+		abs_lc->restart_stack = stack;
+		abs_lc->restart_fn = (unsigned long)func;
+		abs_lc->restart_data = (unsigned long)data;
+		abs_lc->restart_source = source_cpu;
+		put_abs_lowcore(abs_lc, flags);
+	}
 	__bpon();
 	asm volatile(
 		"0:	sigp	0,%0,%2	# sigp restart to target cpu\n"
@@ -569,27 +586,32 @@ static void smp_ctl_bit_callback(void *info)
 	__ctl_load(cregs, 0, 15);
 }
 
-/*
- * Set a bit in a control register of all cpus
- */
-void smp_ctl_set_bit(int cr, int bit)
-{
-	struct ec_creg_mask_parms parms = { 1UL << bit, -1UL, cr };
+static DEFINE_SPINLOCK(ctl_lock);
 
+void smp_ctl_set_clear_bit(int cr, int bit, bool set)
+{
+	struct ec_creg_mask_parms parms = { .cr = cr, };
+	struct lowcore *abs_lc;
+	unsigned long flags;
+	u64 ctlreg;
+
+	if (set) {
+		parms.orval = 1UL << bit;
+		parms.andval = -1UL;
+	} else {
+		parms.orval = 0;
+		parms.andval = ~(1UL << bit);
+	}
+	spin_lock(&ctl_lock);
+	abs_lc = get_abs_lowcore(&flags);
+	ctlreg = abs_lc->cregs_save_area[cr];
+	ctlreg = (ctlreg & parms.andval) | parms.orval;
+	abs_lc->cregs_save_area[cr] = ctlreg;
+	put_abs_lowcore(abs_lc, flags);
+	spin_unlock(&ctl_lock);
 	on_each_cpu(smp_ctl_bit_callback, &parms, 1);
 }
-EXPORT_SYMBOL(smp_ctl_set_bit);
-
-/*
- * Clear a bit in a control register of all cpus
- */
-void smp_ctl_clear_bit(int cr, int bit)
-{
-	struct ec_creg_mask_parms parms = { 0, ~(1UL << bit), cr };
-
-	on_each_cpu(smp_ctl_bit_callback, &parms, 1);
-}
-EXPORT_SYMBOL(smp_ctl_clear_bit);
+EXPORT_SYMBOL(smp_ctl_set_clear_bit);
 
 #ifdef CONFIG_CRASH_DUMP
 
@@ -607,7 +629,7 @@ int smp_store_status(int cpu)
 		return -EIO;
 	if (!MACHINE_HAS_VX && !MACHINE_HAS_GS)
 		return 0;
-	pa = __pa(lc->mcesad & MCESA_ORIGIN_MASK);
+	pa = lc->mcesad & MCESA_ORIGIN_MASK;
 	if (MACHINE_HAS_GS)
 		pa |= lc->mcesad & MCESA_LC_MASK;
 	if (__pcpu_sigp_relax(pcpu->address, SIGP_STORE_ADDITIONAL_STATUS,
@@ -642,35 +664,36 @@ int smp_store_status(int cpu)
  *    This case does not exist for s390 anymore, setup_arch explicitly
  *    deactivates the elfcorehdr= kernel parameter
  */
-static __init void smp_save_cpu_vxrs(struct save_area *sa, u16 addr,
-				     bool is_boot_cpu, __vector128 *vxrs)
+static bool dump_available(void)
 {
-	if (is_boot_cpu)
-		vxrs = boot_cpu_vector_save_area;
-	else
-		__pcpu_sigp_relax(addr, SIGP_STORE_ADDITIONAL_STATUS, __pa(vxrs));
-	save_area_add_vxrs(sa, vxrs);
+	return oldmem_data.start || is_ipl_type_dump();
 }
 
-static __init void smp_save_cpu_regs(struct save_area *sa, u16 addr,
-				     bool is_boot_cpu, void *regs)
+void __init smp_save_dump_ipl_cpu(void)
 {
-	if (is_boot_cpu)
-		copy_oldmem_kernel(regs, __LC_FPREGS_SAVE_AREA, 512);
-	else
-		__pcpu_sigp_relax(addr, SIGP_STORE_STATUS_AT_ADDRESS, __pa(regs));
+	struct save_area *sa;
+	void *regs;
+
+	if (!dump_available())
+		return;
+	sa = save_area_alloc(true);
+	regs = memblock_alloc(512, 8);
+	if (!sa || !regs)
+		panic("could not allocate memory for boot CPU save area\n");
+	copy_oldmem_kernel(regs, __LC_FPREGS_SAVE_AREA, 512);
 	save_area_add_regs(sa, regs);
+	memblock_free(regs, 512);
+	if (MACHINE_HAS_VX)
+		save_area_add_vxrs(sa, boot_cpu_vector_save_area);
 }
 
-void __init smp_save_dump_cpus(void)
+void __init smp_save_dump_secondary_cpus(void)
 {
 	int addr, boot_cpu_addr, max_cpu_addr;
 	struct save_area *sa;
-	bool is_boot_cpu;
 	void *page;
 
-	if (!(oldmem_data.start || is_ipl_type_dump()))
-		/* No previous system present, normal boot. */
+	if (!dump_available())
 		return;
 	/* Allocate a page as dumping area for the store status sigps */
 	page = memblock_alloc_low(PAGE_SIZE, PAGE_SIZE);
@@ -683,26 +706,20 @@ void __init smp_save_dump_cpus(void)
 	boot_cpu_addr = stap();
 	max_cpu_addr = SCLP_MAX_CORES << sclp.mtid_prev;
 	for (addr = 0; addr <= max_cpu_addr; addr++) {
+		if (addr == boot_cpu_addr)
+			continue;
 		if (__pcpu_sigp_relax(addr, SIGP_SENSE, 0) ==
 		    SIGP_CC_NOT_OPERATIONAL)
 			continue;
-		is_boot_cpu = (addr == boot_cpu_addr);
-		/* Allocate save area */
-		sa = save_area_alloc(is_boot_cpu);
+		sa = save_area_alloc(false);
 		if (!sa)
 			panic("could not allocate memory for save area\n");
-		if (MACHINE_HAS_VX)
-			/* Get the vector registers */
-			smp_save_cpu_vxrs(sa, addr, is_boot_cpu, page);
-		/*
-		 * For a zfcp/nvme dump OLDMEM_BASE == NULL and the registers
-		 * of the boot CPU are stored in the HSA. To retrieve
-		 * these registers an SCLP request is required which is
-		 * done by drivers/s390/char/zcore.c:init_cpu_info()
-		 */
-		if (!is_boot_cpu || oldmem_data.start)
-			/* Get the CPU registers */
-			smp_save_cpu_regs(sa, addr, is_boot_cpu, page);
+		__pcpu_sigp_relax(addr, SIGP_STORE_STATUS_AT_ADDRESS, __pa(page));
+		save_area_add_regs(sa, page);
+		if (MACHINE_HAS_VX) {
+			__pcpu_sigp_relax(addr, SIGP_STORE_ADDITIONAL_STATUS, __pa(page));
+			save_area_add_vxrs(sa, page);
+		}
 	}
 	memblock_free(page, PAGE_SIZE);
 	diag_amode31_ops.diag308_reset();
@@ -864,11 +881,19 @@ void __init smp_detect_cpus(void)
 	memblock_free(info, sizeof(*info));
 }
 
-static void smp_init_secondary(void)
+/*
+ *	Activate a secondary processor.
+ */
+static void smp_start_secondary(void *cpuvoid)
 {
 	int cpu = raw_smp_processor_id();
 
 	S390_lowcore.last_update_clock = get_tod_clock();
+	S390_lowcore.restart_stack = (unsigned long)restart_stack;
+	S390_lowcore.restart_fn = (unsigned long)do_restart;
+	S390_lowcore.restart_data = 0;
+	S390_lowcore.restart_source = -1U;
+	S390_lowcore.restart_flags = 0;
 	restore_access_regs(S390_lowcore.access_regs_save_area);
 	cpu_init();
 	rcu_cpu_starting(cpu);
@@ -887,20 +912,6 @@ static void smp_init_secondary(void)
 	inc_irq_stat(CPU_RST);
 	local_irq_enable();
 	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
-}
-
-/*
- *	Activate a secondary processor.
- */
-static void __no_sanitize_address smp_start_secondary(void *cpuvoid)
-{
-	S390_lowcore.restart_stack = (unsigned long) restart_stack;
-	S390_lowcore.restart_fn = (unsigned long) do_restart;
-	S390_lowcore.restart_data = 0;
-	S390_lowcore.restart_source = -1UL;
-	__ctl_load(S390_lowcore.cregs_save_area, 0, 15);
-	__load_psw_mask(PSW_KERNEL_BITS | PSW_MASK_DAT);
-	call_on_stack_noreturn(smp_init_secondary, S390_lowcore.kernel_stack);
 }
 
 /* Upping and downing of CPUs */
@@ -1254,18 +1265,19 @@ static __always_inline void set_new_lowcore(struct lowcore *lc)
 		: "memory", "cc");
 }
 
-static int __init smp_reinit_ipl_cpu(void)
+int __init smp_reinit_ipl_cpu(void)
 {
 	unsigned long async_stack, nodat_stack, mcck_stack;
 	struct lowcore *lc, *lc_ipl;
-	unsigned long flags;
+	unsigned long flags, cr0;
+	u64 mcesad;
 
 	lc_ipl = lowcore_ptr[0];
 	lc = (struct lowcore *)	__get_free_pages(GFP_KERNEL | GFP_DMA, LC_ORDER);
 	nodat_stack = __get_free_pages(GFP_KERNEL, THREAD_SIZE_ORDER);
 	async_stack = stack_alloc();
 	mcck_stack = stack_alloc();
-	if (!lc || !nodat_stack || !async_stack || !mcck_stack)
+	if (!lc || !nodat_stack || !async_stack || !mcck_stack || nmi_alloc_mcesa(&mcesad))
 		panic("Couldn't allocate memory");
 
 	local_irq_save(flags);
@@ -1274,6 +1286,12 @@ static int __init smp_reinit_ipl_cpu(void)
 	S390_lowcore.nodat_stack = nodat_stack + STACK_INIT_OFFSET;
 	S390_lowcore.async_stack = async_stack + STACK_INIT_OFFSET;
 	S390_lowcore.mcck_stack = mcck_stack + STACK_INIT_OFFSET;
+	__ctl_store(cr0, 0, 0);
+	__ctl_clear_bit(0, 28); /* disable lowcore protection */
+	S390_lowcore.mcesad = mcesad;
+	__ctl_load(cr0, 0, 0);
+	if (abs_lowcore_map(0, lc, false))
+		panic("Couldn't remap absolute lowcore");
 	lowcore_ptr[0] = lc;
 	local_mcck_enable();
 	local_irq_restore(flags);
@@ -1284,4 +1302,3 @@ static int __init smp_reinit_ipl_cpu(void)
 
 	return 0;
 }
-early_initcall(smp_reinit_ipl_cpu);

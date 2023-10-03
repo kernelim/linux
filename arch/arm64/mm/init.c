@@ -369,8 +369,8 @@ void __init arm64_memblock_init(void)
 			"initrd not fully accessible via the linear mapping -- please check your bootloader ...\n")) {
 			phys_initrd_size = 0;
 		} else {
-			memblock_remove(base, size); /* clear MEMBLOCK_ flags */
 			memblock_add(base, size);
+			memblock_clear_nomap(base, size);
 			memblock_reserve(base, size);
 		}
 	}
@@ -379,7 +379,7 @@ void __init arm64_memblock_init(void)
 		extern u16 memstart_offset_seed;
 		u64 mmfr0 = read_cpuid(ID_AA64MMFR0_EL1);
 		int parange = cpuid_feature_extract_unsigned_field(
-					mmfr0, ID_AA64MMFR0_PARANGE_SHIFT);
+					mmfr0, ID_AA64MMFR0_EL1_PARANGE_SHIFT);
 		s64 range = linear_region_size -
 			    BIT(id_aa64mmfr0_parange_to_phys_shift(parange));
 
@@ -408,7 +408,7 @@ void __init arm64_memblock_init(void)
 
 	early_init_fdt_scan_reserved_mem();
 
-	if (!IS_ENABLED(CONFIG_ZONE_DMA) && !IS_ENABLED(CONFIG_ZONE_DMA32))
+	if (!defer_reserve_crashkernel())
 		reserve_crashkernel();
 
 	high_memory = __va(memblock_end_of_DRAM() - 1) + 1;
@@ -457,7 +457,7 @@ void __init bootmem_init(void)
 	 * request_standard_resources() depends on crashkernel's memory being
 	 * reserved, so do it here.
 	 */
-	if (IS_ENABLED(CONFIG_ZONE_DMA) || IS_ENABLED(CONFIG_ZONE_DMA32))
+	if (defer_reserve_crashkernel())
 		reserve_crashkernel();
 
 	memblock_dump_all();

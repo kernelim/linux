@@ -4237,7 +4237,7 @@ static int dpaa2_eth_setup_irqs(struct fsl_mc_device *ls_dev)
 	}
 
 	irq = ls_dev->irqs[0];
-	err = devm_request_threaded_irq(&ls_dev->dev, irq->msi_desc->irq,
+	err = devm_request_threaded_irq(&ls_dev->dev, irq->virq,
 					NULL, dpni_irq0_handler_thread,
 					IRQF_NO_SUSPEND | IRQF_ONESHOT,
 					dev_name(&ls_dev->dev), &ls_dev->dev);
@@ -4264,7 +4264,7 @@ static int dpaa2_eth_setup_irqs(struct fsl_mc_device *ls_dev)
 	return 0;
 
 free_irq:
-	devm_free_irq(&ls_dev->dev, irq->msi_desc->irq, &ls_dev->dev);
+	devm_free_irq(&ls_dev->dev, irq->virq, &ls_dev->dev);
 free_mc_irq:
 	fsl_mc_free_irqs(ls_dev);
 
@@ -4316,6 +4316,7 @@ static int dpaa2_eth_probe(struct fsl_mc_device *dpni_dev)
 
 	priv = netdev_priv(net_dev);
 	priv->net_dev = net_dev;
+	SET_NETDEV_DEVLINK_PORT(net_dev, &priv->devlink_port);
 
 	priv->iommu_domain = iommu_get_domain_for_dev(dev);
 

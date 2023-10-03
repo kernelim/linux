@@ -40,6 +40,7 @@
 #include <net/pkt_cls.h>
 
 #include "datapath.h"
+#include "drop.h"
 #include "flow.h"
 #include "flow_table.h"
 #include "flow_netlink.h"
@@ -714,6 +715,7 @@ static struct genl_family dp_packet_genl_family __ro_after_init = {
 	.parallel_ops = true,
 	.small_ops = dp_packet_genl_ops,
 	.n_small_ops = ARRAY_SIZE(dp_packet_genl_ops),
+	.resv_start_op = OVS_PACKET_CMD_EXECUTE + 1,
 	.module = THIS_MODULE,
 };
 
@@ -737,9 +739,9 @@ static void get_dp_stats(const struct datapath *dp, struct ovs_dp_stats *stats,
 		percpu_stats = per_cpu_ptr(dp->stats_percpu, i);
 
 		do {
-			start = u64_stats_fetch_begin_irq(&percpu_stats->syncp);
+			start = u64_stats_fetch_begin(&percpu_stats->syncp);
 			local_stats = *percpu_stats;
-		} while (u64_stats_fetch_retry_irq(&percpu_stats->syncp, start));
+		} while (u64_stats_fetch_retry(&percpu_stats->syncp, start));
 
 		stats->n_hit += local_stats.n_hit;
 		stats->n_missed += local_stats.n_missed;
@@ -1000,14 +1002,14 @@ static int ovs_flow_cmd_new(struct sk_buff *skb, struct genl_info *info)
 	key = kzalloc(sizeof(*key), GFP_KERNEL);
 	if (!key) {
 		error = -ENOMEM;
-		goto err_kfree_key;
+		goto err_kfree_flow;
 	}
 
 	ovs_match_init(&match, key, false, &mask);
 	error = ovs_nla_get_match(net, &match, a[OVS_FLOW_ATTR_KEY],
 				  a[OVS_FLOW_ATTR_MASK], log);
 	if (error)
-		goto err_kfree_flow;
+		goto err_kfree_key;
 
 	ovs_flow_mask_key(&new_flow->key, key, true, &mask);
 
@@ -1015,14 +1017,14 @@ static int ovs_flow_cmd_new(struct sk_buff *skb, struct genl_info *info)
 	error = ovs_nla_get_identifier(&new_flow->id, a[OVS_FLOW_ATTR_UFID],
 				       key, log);
 	if (error)
-		goto err_kfree_flow;
+		goto err_kfree_key;
 
 	/* Validate actions. */
 	error = ovs_nla_copy_actions(net, a[OVS_FLOW_ATTR_ACTIONS],
 				     &new_flow->key, &acts, log);
 	if (error) {
 		OVS_NLERR(log, "Flow actions may not be safe on all matching packets.");
-		goto err_kfree_flow;
+		goto err_kfree_key;
 	}
 
 	reply = ovs_flow_cmd_alloc_info(acts, &new_flow->id, info, false,
@@ -1122,10 +1124,10 @@ err_unlock_ovs:
 	kfree_skb(reply);
 err_kfree_acts:
 	ovs_nla_free_flow_actions(acts);
-err_kfree_flow:
-	ovs_flow_free(new_flow, false);
 err_kfree_key:
 	kfree(key);
+err_kfree_flow:
+	ovs_flow_free(new_flow, false);
 error:
 	return error;
 }
@@ -1538,6 +1540,7 @@ static struct genl_family dp_flow_genl_family __ro_after_init = {
 	.parallel_ops = true,
 	.small_ops = dp_flow_genl_ops,
 	.n_small_ops = ARRAY_SIZE(dp_flow_genl_ops),
+	.resv_start_op = OVS_FLOW_CMD_SET + 1,
 	.mcgrps = &ovs_dp_flow_multicast_group,
 	.n_mcgrps = 1,
 	.module = THIS_MODULE,
@@ -2083,6 +2086,7 @@ static struct genl_family dp_datapath_genl_family __ro_after_init = {
 	.parallel_ops = true,
 	.small_ops = dp_datapath_genl_ops,
 	.n_small_ops = ARRAY_SIZE(dp_datapath_genl_ops),
+	.resv_start_op = OVS_DP_CMD_SET + 1,
 	.mcgrps = &ovs_dp_datapath_multicast_group,
 	.n_mcgrps = 1,
 	.module = THIS_MODULE,
@@ -2574,6 +2578,7 @@ struct genl_family dp_vport_genl_family __ro_after_init = {
 	.parallel_ops = true,
 	.small_ops = dp_vport_genl_ops,
 	.n_small_ops = ARRAY_SIZE(dp_vport_genl_ops),
+	.resv_start_op = OVS_VPORT_CMD_SET + 1,
 	.mcgrps = &ovs_dp_vport_multicast_group,
 	.n_mcgrps = 1,
 	.module = THIS_MODULE,
@@ -2697,6 +2702,17 @@ static struct pernet_operations ovs_net_ops = {
 	.size = sizeof(struct ovs_net),
 };
 
+static const char * const ovs_drop_reasons[] = {
+#define S(x)	(#x),
+	OVS_DROP_REASONS(S)
+#undef S
+};
+
+static struct drop_reason_list drop_reason_list_ovs = {
+	.reasons = ovs_drop_reasons,
+	.n_reasons = ARRAY_SIZE(ovs_drop_reasons),
+};
+
 static int __init dp_init(void)
 {
 	int err;
@@ -2738,6 +2754,9 @@ static int __init dp_init(void)
 	if (err < 0)
 		goto error_unreg_netdev;
 
+	drop_reasons_register_subsys(SKB_DROP_REASON_SUBSYS_OPENVSWITCH,
+				     &drop_reason_list_ovs);
+
 	return 0;
 
 error_unreg_netdev:
@@ -2764,6 +2783,7 @@ static void dp_cleanup(void)
 	ovs_netdev_exit();
 	unregister_netdevice_notifier(&ovs_dp_device_notifier);
 	unregister_pernet_device(&ovs_net_ops);
+	drop_reasons_unregister_subsys(SKB_DROP_REASON_SUBSYS_OPENVSWITCH);
 	rcu_barrier();
 	ovs_vport_exit();
 	ovs_flow_exit();

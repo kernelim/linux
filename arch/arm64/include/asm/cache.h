@@ -16,6 +16,15 @@
 #define CLIDR_LOC(clidr)	(((clidr) >> CLIDR_LOC_SHIFT) & 0x7)
 #define CLIDR_LOUIS(clidr)	(((clidr) >> CLIDR_LOUIS_SHIFT) & 0x7)
 
+/* Ctypen, bits[3(n - 1) + 2 : 3(n - 1)], for n = 1 to 7 */
+#define CLIDR_CTYPE_SHIFT(level)	(3 * (level - 1))
+#define CLIDR_CTYPE_MASK(level)		(7 << CLIDR_CTYPE_SHIFT(level))
+#define CLIDR_CTYPE(clidr, level)	\
+	(((clidr) & CLIDR_CTYPE_MASK(level)) >> CLIDR_CTYPE_SHIFT(level))
+
+/* Ttypen, bits [2(n - 1) + 34 : 2(n - 1) + 33], for n = 1 to 7 */
+#define CLIDR_TTYPE_SHIFT(level)	(2 * ((level) - 1) + CLIDR_EL1_Ttypen_SHIFT)
+
 /*
  * Memory returned by kmalloc() may be used for DMA, so we must make
  * sure that all such allocations are cache aligned. Otherwise,
@@ -45,10 +54,6 @@ static inline unsigned int arch_slab_minalign(void)
 #define arch_slab_minalign() arch_slab_minalign()
 #endif
 
-#define CTR_CACHE_MINLINE_MASK	\
-	(0xf << CTR_EL0_DMINLINE_SHIFT | \
-	 CTR_EL0_IMINLINE_MASK << CTR_EL0_IMINLINE_SHIFT)
-
 #define CTR_L1IP(ctr)		SYS_FIELD_GET(CTR_EL0, L1Ip, ctr)
 
 #define ICACHEF_ALIASING	0
@@ -71,7 +76,7 @@ static __always_inline int icache_is_vpipt(void)
 
 static inline u32 cache_type_cwg(void)
 {
-	return (read_cpuid_cachetype() >> CTR_EL0_CWG_SHIFT) & CTR_EL0_CWG_MASK;
+	return SYS_FIELD_GET(CTR_EL0, CWG, read_cpuid_cachetype());
 }
 
 #define __read_mostly __section(".data..read_mostly")

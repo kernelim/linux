@@ -142,8 +142,6 @@ enum dcn31_clk_src_array_id {
  */
 
 /* DCN */
-/* TODO awful hack. fixup dcn20_dwb.h */
-#undef BASE_INNER
 #define BASE_INNER(seg) DCN_BASE__INST0_SEG ## seg
 
 #define BASE(seg) BASE_INNER(seg)
@@ -175,6 +173,9 @@ enum dcn31_clk_src_array_id {
 #define SRII_DWB(reg_name, temp_name, block, id)\
 	.reg_name[id] = BASE(reg ## block ## id ## _ ## temp_name ## _BASE_IDX) + \
 					reg ## block ## id ## _ ## temp_name
+
+#define SF_DWB2(reg_name, block, id, field_name, post_fix)	\
+	.field_name = reg_name ## __ ## field_name ## post_fix
 
 #define DCCG_SRII(reg_name, block, id)\
 	.block ## _ ## reg_name[id] = BASE(reg ## block ## id ## _ ## reg_name ## _BASE_IDX) + \
@@ -885,8 +886,6 @@ static const struct dc_debug_options debug_defaults_drv = {
 			.afmt = true,
 		}
 	},
-	.optimize_edp_link_rate = true,
-	.enable_sw_cntl_psr = true,
 };
 
 static const struct dc_debug_options debug_defaults_diags = {
@@ -905,6 +904,16 @@ static const struct dc_debug_options debug_defaults_diags = {
 	.dmub_command_table = true,
 	.enable_tri_buf = true,
 	.use_max_lb = true
+};
+
+static const struct dc_panel_config panel_config_defaults = {
+	.psr = {
+		.disable_psr = false,
+		.disallow_psrsu = false,
+	},
+	.ilr = {
+		.optimize_edp_link_rate = true,
+	},
 };
 
 static void dcn31_dpp_destroy(struct dpp **dpp)
@@ -1642,7 +1651,7 @@ static int dcn316_populate_dml_pipes_from_context(
 	const int max_usable_det = context->bw_ctx.dml.ip.config_return_buffer_size_in_kbytes - DCN3_16_MIN_COMPBUF_SIZE_KB;
 
 	DC_FP_START();
-	dcn20_populate_dml_pipes_from_context(dc, context, pipes, fast_validate);
+	dcn31x_populate_dml_pipes_from_context(dc, context, pipes, fast_validate);
 	DC_FP_END();
 
 	for (i = 0, pipe_cnt = 0; i < dc->res_pool->pipe_count; i++) {
@@ -1661,7 +1670,6 @@ static int dcn316_populate_dml_pipes_from_context(
 		pipes[pipe_cnt].pipe.src.immediate_flip = true;
 
 		pipes[pipe_cnt].pipe.src.unbounded_req_mode = false;
-		pipes[pipe_cnt].pipe.src.gpuvm = true;
 		pipes[pipe_cnt].pipe.dest.vfront_porch = timing->v_front_porch;
 		pipes[pipe_cnt].pipe.src.dcc_rate = 3;
 		pipes[pipe_cnt].dout.dsc_input_bpc = 0;
@@ -1711,6 +1719,11 @@ static int dcn316_populate_dml_pipes_from_context(
 	return pipe_cnt;
 }
 
+static void dcn316_get_panel_config_defaults(struct dc_panel_config *panel_config)
+{
+	*panel_config = panel_config_defaults;
+}
+
 static struct dc_cap_funcs cap_funcs = {
 	.get_dcc_compression_cap = dcn20_get_dcc_compression_cap
 };
@@ -1737,6 +1750,7 @@ static struct resource_funcs dcn316_res_pool_funcs = {
 	.release_post_bldn_3dlut = dcn30_release_post_bldn_3dlut,
 	.update_bw_bounding_box = dcn316_update_bw_bounding_box,
 	.patch_unknown_plane_state = dcn20_patch_unknown_plane_state,
+	.get_panel_config_defaults = dcn316_get_panel_config_defaults,
 };
 
 static bool dcn316_resource_construct(
@@ -1762,7 +1776,7 @@ static bool dcn316_resource_construct(
 	pool->base.mpcc_count = pool->base.res_cap->num_timing_generator;
 	dc->caps.max_downscale_ratio = 600;
 	dc->caps.i2c_speed_in_khz = 100;
-	dc->caps.i2c_speed_in_khz_hdcp = 100;
+	dc->caps.i2c_speed_in_khz_hdcp = 5; /*1.5 w/a applied by default*/
 	dc->caps.max_cursor_size = 256;
 	dc->caps.min_horizontal_blanking_period = 80;
 	dc->caps.dmdata_alloc_size = 2048;
@@ -1771,6 +1785,8 @@ static bool dcn316_resource_construct(
 	dc->caps.max_slave_rgb_planes = 2;
 	dc->caps.post_blend_color_processing = true;
 	dc->caps.force_dp_tps4_for_cp2520 = true;
+	if (dc->config.forceHBR2CP2520)
+		dc->caps.force_dp_tps4_for_cp2520 = false;
 	dc->caps.dp_hpo = true;
 	dc->caps.dp_hdmi21_pcon_support = true;
 	dc->caps.edp_dsc_support = true;

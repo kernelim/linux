@@ -188,6 +188,22 @@ DEVICE_ATTR(unload_heads, S_IRUGO | S_IWUSR,
 	    ata_scsi_park_show, ata_scsi_park_store);
 EXPORT_SYMBOL_GPL(dev_attr_unload_heads);
 
+bool ata_scsi_sense_is_valid(u8 sk, u8 asc, u8 ascq)
+{
+	/*
+	 * If sk == NO_SENSE, and asc + ascq == NO ADDITIONAL SENSE INFORMATION,
+	 * then there is no sense data to add.
+	 */
+	if (sk == 0 && asc == 0 && ascq == 0)
+		return false;
+
+	/* If sk > COMPLETED, sense data is bogus. */
+	if (sk > COMPLETED)
+		return false;
+
+	return true;
+}
+
 void ata_scsi_set_sense(struct ata_device *dev, struct scsi_cmnd *cmd,
 			u8 sk, u8 asc, u8 ascq)
 {
@@ -358,8 +374,12 @@ int ata_cmd_ioctl(struct scsi_device *scsidev, void __user *arg)
 	u8 scsi_cmd[MAX_COMMAND_SIZE];
 	u8 args[4], *argbuf = NULL;
 	int argsize = 0;
-	enum dma_data_direction data_dir;
 	struct scsi_sense_hdr sshdr;
+	const struct scsi_exec_args exec_args = {
+		.sshdr = &sshdr,
+		.sense = sensebuf,
+		.sense_len = sizeof(sensebuf),
+	};
 	int cmd_result;
 
 	if (arg == NULL)
@@ -382,11 +402,9 @@ int ata_cmd_ioctl(struct scsi_device *scsidev, void __user *arg)
 		scsi_cmd[1]  = (4 << 1); /* PIO Data-in */
 		scsi_cmd[2]  = 0x0e;     /* no off.line or cc, read from dev,
 					    block count in sector count field */
-		data_dir = DMA_FROM_DEVICE;
 	} else {
 		scsi_cmd[1]  = (3 << 1); /* Non-data */
 		scsi_cmd[2]  = 0x20;     /* cc but no off.line or data xfer */
-		data_dir = DMA_NONE;
 	}
 
 	scsi_cmd[0] = ATA_16;
@@ -404,9 +422,8 @@ int ata_cmd_ioctl(struct scsi_device *scsidev, void __user *arg)
 
 	/* Good values for timeout and retries?  Values below
 	   from scsi_ioctl_send_command() for default case... */
-	cmd_result = scsi_execute(scsidev, scsi_cmd, data_dir, argbuf, argsize,
-				  sensebuf, &sshdr, (10*HZ), 5, 0, 0, NULL);
-
+	cmd_result = scsi_execute_cmd(scsidev, scsi_cmd, REQ_OP_DRV_IN, argbuf,
+				      argsize, 10 * HZ, 5, &exec_args);
 	if (cmd_result < 0) {
 		rc = cmd_result;
 		goto error;
@@ -466,6 +483,11 @@ int ata_task_ioctl(struct scsi_device *scsidev, void __user *arg)
 	u8 args[7];
 	struct scsi_sense_hdr sshdr;
 	int cmd_result;
+	const struct scsi_exec_args exec_args = {
+		.sshdr = &sshdr,
+		.sense = sensebuf,
+		.sense_len = sizeof(sensebuf),
+	};
 
 	if (arg == NULL)
 		return -EINVAL;
@@ -488,9 +510,8 @@ int ata_task_ioctl(struct scsi_device *scsidev, void __user *arg)
 
 	/* Good values for timeout and retries?  Values below
 	   from scsi_ioctl_send_command() for default case... */
-	cmd_result = scsi_execute(scsidev, scsi_cmd, DMA_NONE, NULL, 0,
-				sensebuf, &sshdr, (10*HZ), 5, 0, 0, NULL);
-
+	cmd_result = scsi_execute_cmd(scsidev, scsi_cmd, REQ_OP_DRV_IN, NULL,
+				      0, 10 * HZ, 5, &exec_args);
 	if (cmd_result < 0) {
 		rc = cmd_result;
 		goto error;
@@ -530,13 +551,13 @@ int ata_task_ioctl(struct scsi_device *scsidev, void __user *arg)
 	return rc;
 }
 
-static int ata_ioc32(struct ata_port *ap)
+static bool ata_ioc32(struct ata_port *ap)
 {
 	if (ap->flags & ATA_FLAG_PIO_DMA)
-		return 1;
+		return true;
 	if (ap->pflags & ATA_PFLAG_PIO32)
-		return 1;
-	return 0;
+		return true;
+	return false;
 }
 
 /*
@@ -629,24 +650,48 @@ EXPORT_SYMBOL_GPL(ata_scsi_ioctl);
 static struct ata_queued_cmd *ata_scsi_qc_new(struct ata_device *dev,
 					      struct scsi_cmnd *cmd)
 {
+	struct ata_port *ap = dev->link->ap;
 	struct ata_queued_cmd *qc;
+	int tag;
 
-	qc = ata_qc_new_init(dev, cmd->request->tag);
-	if (qc) {
-		qc->scsicmd = cmd;
-		qc->scsidone = cmd->scsi_done;
+	if (unlikely(ata_port_is_frozen(ap)))
+		goto fail;
 
-		qc->sg = scsi_sglist(cmd);
-		qc->n_elem = scsi_sg_count(cmd);
-
-		if (cmd->request->rq_flags & RQF_QUIET)
-			qc->flags |= ATA_QCFLAG_QUIET;
+	if (ap->flags & ATA_FLAG_SAS_HOST) {
+		/*
+		 * SAS hosts may queue > ATA_MAX_QUEUE commands so use
+		 * unique per-device budget token as a tag.
+		 */
+		if (WARN_ON_ONCE(cmd->budget_token >= ATA_MAX_QUEUE))
+			goto fail;
+		tag = cmd->budget_token;
 	} else {
-		cmd->result = (DID_OK << 16) | SAM_STAT_TASK_SET_FULL;
-		cmd->scsi_done(cmd);
+		tag = scsi_cmd_to_rq(cmd)->tag;
 	}
 
+	qc = __ata_qc_from_tag(ap, tag);
+	qc->tag = qc->hw_tag = tag;
+	qc->ap = ap;
+	qc->dev = dev;
+
+	ata_qc_reinit(qc);
+
+	qc->scsicmd = cmd;
+	qc->scsidone = scsi_done;
+
+	qc->sg = scsi_sglist(cmd);
+	qc->n_elem = scsi_sg_count(cmd);
+
+	if (scsi_cmd_to_rq(cmd)->rq_flags & RQF_QUIET)
+		qc->flags |= ATA_QCFLAG_QUIET;
+
 	return qc;
+
+fail:
+	set_host_byte(cmd, DID_OK);
+	set_status_byte(cmd, SAM_STAT_TASK_SET_FULL);
+	scsi_done(cmd);
+	return NULL;
 }
 
 static void ata_qc_set_pc_nbytes(struct ata_queued_cmd *qc)
@@ -1020,11 +1065,13 @@ EXPORT_SYMBOL_GPL(ata_scsi_dma_need_drain);
 int ata_scsi_dev_config(struct scsi_device *sdev, struct ata_device *dev)
 {
 	struct request_queue *q = sdev->request_queue;
+	int depth = 1;
 
 	if (!ata_id_has_unload(dev->id))
 		dev->flags |= ATA_DFLAG_NO_UNLOAD;
 
 	/* configure max sectors */
+	dev->max_sectors = min(dev->max_sectors, sdev->host->max_sectors);
 	blk_queue_max_hw_sectors(q, dev->max_sectors);
 
 	if (dev->class == ATA_DEV_ATAPI) {
@@ -1064,13 +1111,10 @@ int ata_scsi_dev_config(struct scsi_device *sdev, struct ata_device *dev)
 	if (dev->flags & ATA_DFLAG_AN)
 		set_bit(SDEV_EVT_MEDIA_CHANGE, sdev->supported_events);
 
-	if (dev->flags & ATA_DFLAG_NCQ) {
-		int depth;
-
+	if (dev->flags & ATA_DFLAG_NCQ)
 		depth = min(sdev->host->can_queue, ata_id_queue_depth(dev->id));
-		depth = min(ATA_MAX_QUEUE, depth);
-		scsi_change_queue_depth(sdev, depth);
-	}
+	depth = min(ATA_MAX_QUEUE, depth);
+	scsi_change_queue_depth(sdev, depth);
 
 	if (dev->flags & ATA_DFLAG_TRUSTED)
 		sdev->security_supported = 1;
@@ -1569,9 +1613,7 @@ static unsigned int ata_scsi_rw_xlat(struct ata_queued_cmd *qc)
 	qc->flags |= ATA_QCFLAG_IO;
 	qc->nbytes = n_block * scmd->device->sector_size;
 
-	rc = ata_build_rw_tf(&qc->tf, qc->dev, block, n_block, tf_flags,
-			     qc->hw_tag, class);
-
+	rc = ata_build_rw_tf(qc, block, n_block, tf_flags, class);
 	if (likely(rc == 0))
 		return 0;
 
@@ -1606,7 +1648,8 @@ static void ata_scsi_qc_complete(struct ata_queued_cmd *qc)
 	struct ata_port *ap = qc->ap;
 	struct scsi_cmnd *cmd = qc->scsicmd;
 	u8 *cdb = cmd->cmnd;
-	int need_sense = (qc->err_mask != 0);
+	int need_sense = (qc->err_mask != 0) &&
+		!(qc->flags & ATA_QCFLAG_SENSE_VALID);
 
 	/* For ATA pass thru (SAT) commands, generate a sense block if
 	 * user mandated it or if there's an error.  Note that if we
@@ -1620,12 +1663,11 @@ static void ata_scsi_qc_complete(struct ata_queued_cmd *qc)
 	if (((cdb[0] == ATA_16) || (cdb[0] == ATA_12)) &&
 	    ((cdb[2] & 0x20) || need_sense))
 		ata_gen_passthru_sense(qc);
-	else if (qc->flags & ATA_QCFLAG_SENSE_VALID)
-		cmd->result = SAM_STAT_CHECK_CONDITION;
 	else if (need_sense)
 		ata_gen_ata_sense(qc);
 	else
-		cmd->result = SAM_STAT_GOOD;
+		/* Keep the SCSI ML and status byte, clear host byte. */
+		cmd->result &= 0x0000ffff;
 
 	if (need_sense && !ap->ops->error_handler)
 		ata_dump_status(ap, &qc->result_tf);
@@ -2090,7 +2132,7 @@ static unsigned int ata_scsiop_inq_b9(struct ata_scsi_args *args, u8 *rbuf)
 
 	/* SCSI Concurrent Positioning Ranges VPD page: SBC-5 rev 1 or later */
 	rbuf[1] = 0xb9;
-	put_unaligned_be16(64 + (int)cpr_log->nr_cpr * 32 - 4, &rbuf[3]);
+	put_unaligned_be16(64 + (int)cpr_log->nr_cpr * 32 - 4, &rbuf[2]);
 
 	for (i = 0; i < cpr_log->nr_cpr; i++, desc += 32) {
 		desc[0] = cpr_log->cpr[i].num;
@@ -2192,30 +2234,6 @@ static unsigned int ata_msense_rw_recovery(u8 *buf, bool changeable)
 	return sizeof(def_rw_recovery_mpage);
 }
 
-/*
- * We can turn this into a real blacklist if it's needed, for now just
- * blacklist any Maxtor BANC1G10 revision firmware
- */
-static int ata_dev_supports_fua(u16 *id)
-{
-	unsigned char model[ATA_ID_PROD_LEN + 1], fw[ATA_ID_FW_REV_LEN + 1];
-
-	if (!libata_fua)
-		return 0;
-	if (!ata_id_has_fua(id))
-		return 0;
-
-	ata_id_c_string(id, model, ATA_ID_PROD, sizeof(model));
-	ata_id_c_string(id, fw, ATA_ID_FW_REV, sizeof(fw));
-
-	if (strcmp(model, "Maxtor"))
-		return 1;
-	if (strcmp(fw, "BANC1G10"))
-		return 1;
-
-	return 0; /* blacklisted */
-}
-
 /**
  *	ata_scsiop_mode_sense - Simulate MODE SENSE 6, 10 commands
  *	@args: device IDENTIFY data / SCSI command of interest.
@@ -2239,7 +2257,7 @@ static unsigned int ata_scsiop_mode_sense(struct ata_scsi_args *args, u8 *rbuf)
 	};
 	u8 pg, spg;
 	unsigned int ebd, page_control, six_byte;
-	u8 dpofua, bp = 0xff;
+	u8 dpofua = 0, bp = 0xff;
 	u16 fp;
 
 	six_byte = (scsicmd[0] == MODE_SENSE);
@@ -2302,9 +2320,7 @@ static unsigned int ata_scsiop_mode_sense(struct ata_scsi_args *args, u8 *rbuf)
 		goto invalid_fld;
 	}
 
-	dpofua = 0;
-	if (ata_dev_supports_fua(args->id) && (dev->flags & ATA_DFLAG_LBA48) &&
-	    (!(dev->flags & ATA_DFLAG_PIO) || dev->multi_count))
+	if (dev->flags & ATA_DFLAG_FUA)
 		dpofua = 1 << 4;
 
 	if (six_byte) {
@@ -3218,11 +3234,12 @@ static unsigned int ata_scsiop_maint_in(struct ata_scsi_args *args, u8 *rbuf)
 	u8 supported = 0;
 	unsigned int err = 0;
 
-	if (cdb[2] != 1) {
+	if (cdb[2] != 1 && cdb[2] != 3) {
 		ata_dev_warn(dev, "invalid command format %d\n", cdb[2]);
 		err = 2;
 		goto out;
 	}
+
 	switch (cdb[3]) {
 	case INQUIRY:
 	case MODE_SENSE:
@@ -3232,6 +3249,7 @@ static unsigned int ata_scsiop_maint_in(struct ata_scsi_args *args, u8 *rbuf)
 	case REPORT_LUNS:
 	case REQUEST_SENSE:
 	case SYNCHRONIZE_CACHE:
+	case SYNCHRONIZE_CACHE_16:
 	case REZERO_UNIT:
 	case SEEK_6:
 	case SEEK_10:
@@ -3890,6 +3908,7 @@ static inline ata_xlat_func_t ata_get_xlat_func(struct ata_device *dev, u8 cmd)
 		return ata_scsi_write_same_xlat;
 
 	case SYNCHRONIZE_CACHE:
+	case SYNCHRONIZE_CACHE_16:
 		if (ata_try_flush_cache(dev))
 			return ata_scsi_flush_xlat;
 		break;
@@ -3930,8 +3949,18 @@ static inline ata_xlat_func_t ata_get_xlat_func(struct ata_device *dev, u8 cmd)
 
 int __ata_scsi_queuecmd(struct scsi_cmnd *scmd, struct ata_device *dev)
 {
+	struct ata_port *ap = dev->link->ap;
 	u8 scsi_op = scmd->cmnd[0];
 	ata_xlat_func_t xlat_func;
+
+	/*
+	 * scsi_queue_rq() will defer commands if scsi_host_in_recovery().
+	 * However, this check is done without holding the ap->lock (a libata
+	 * specific lock), so we can have received an error irq since then,
+	 * therefore we must check if EH is pending, while holding ap->lock.
+	 */
+	if (ap->pflags & (ATA_PFLAG_EH_PENDING | ATA_PFLAG_EH_IN_PROGRESS))
+		return SCSI_MLQUEUE_DEVICE_BUSY;
 
 	if (unlikely(!scmd->cmd_len))
 		goto bad_cdb_len;
@@ -4113,6 +4142,7 @@ void ata_scsi_simulate(struct ata_device *dev, struct scsi_cmnd *cmd)
 	 * turning this into a no-op.
 	 */
 	case SYNCHRONIZE_CACHE:
+	case SYNCHRONIZE_CACHE_16:
 		fallthrough;
 
 	/* no-op's, complete with success */

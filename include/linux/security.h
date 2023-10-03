@@ -31,6 +31,7 @@
 #include <linux/err.h>
 #include <linux/string.h>
 #include <linux/mm.h>
+#include <linux/sockptr.h>
 
 struct linux_binprm;
 struct cred;
@@ -353,7 +354,8 @@ int security_inode_readlink(struct dentry *dentry);
 int security_inode_follow_link(struct dentry *dentry, struct inode *inode,
 			       bool rcu);
 int security_inode_permission(struct inode *inode, int mask);
-int security_inode_setattr(struct dentry *dentry, struct iattr *attr);
+int security_inode_setattr(struct user_namespace *mnt_userns,
+			   struct dentry *dentry, struct iattr *attr);
 int security_inode_getattr(const struct path *path);
 int security_inode_setxattr(struct user_namespace *mnt_userns,
 			    struct dentry *dentry, const char *name,
@@ -459,7 +461,7 @@ int security_sem_semctl(struct kern_ipc_perm *sma, int cmd);
 int security_sem_semop(struct kern_ipc_perm *sma, struct sembuf *sops,
 			unsigned nsops, int alter);
 void security_d_instantiate(struct dentry *dentry, struct inode *inode);
-int security_getprocattr(struct task_struct *p, const char *lsm, char *name,
+int security_getprocattr(struct task_struct *p, const char *lsm, const char *name,
 			 char **value);
 int security_setprocattr(const char *lsm, const char *name, void *value,
 			 size_t size);
@@ -849,8 +851,9 @@ static inline int security_inode_permission(struct inode *inode, int mask)
 	return 0;
 }
 
-static inline int security_inode_setattr(struct dentry *dentry,
-					  struct iattr *attr)
+static inline int security_inode_setattr(struct user_namespace *mnt_userns,
+					 struct dentry *dentry,
+					 struct iattr *attr)
 {
 	return 0;
 }
@@ -1288,7 +1291,7 @@ static inline void security_d_instantiate(struct dentry *dentry,
 { }
 
 static inline int security_getprocattr(struct task_struct *p, const char *lsm,
-				       char *name, char **value)
+				       const char *name, char **value)
 {
 	return -EINVAL;
 }
@@ -1394,8 +1397,8 @@ int security_socket_getsockopt(struct socket *sock, int level, int optname);
 int security_socket_setsockopt(struct socket *sock, int level, int optname);
 int security_socket_shutdown(struct socket *sock, int how);
 int security_sock_rcv_skb(struct sock *sk, struct sk_buff *skb);
-int security_socket_getpeersec_stream(struct socket *sock, char __user *optval,
-				      int __user *optlen, unsigned len);
+int security_socket_getpeersec_stream(struct socket *sock, sockptr_t optval,
+				      sockptr_t optlen, unsigned int len);
 int security_socket_getpeersec_dgram(struct socket *sock, struct sk_buff *skb, u32 *secid);
 int security_sk_alloc(struct sock *sk, int family, gfp_t priority);
 void security_sk_free(struct sock *sk);
@@ -1426,6 +1429,7 @@ void security_sctp_sk_clone(struct sctp_association *asoc, struct sock *sk,
 			    struct sock *newsk);
 int security_sctp_assoc_established(struct sctp_association *asoc,
 				    struct sk_buff *skb);
+int security_mptcp_add_subflow(struct sock *sk, struct sock *ssk);
 
 #else	/* CONFIG_SECURITY_NETWORK */
 static inline int security_unix_stream_connect(struct sock *sock,
@@ -1531,8 +1535,10 @@ static inline int security_sock_rcv_skb(struct sock *sk,
 	return 0;
 }
 
-static inline int security_socket_getpeersec_stream(struct socket *sock, char __user *optval,
-						    int __user *optlen, unsigned len)
+static inline int security_socket_getpeersec_stream(struct socket *sock,
+						    sockptr_t optval,
+						    sockptr_t optlen,
+						    unsigned int len)
 {
 	return -ENOPROTOOPT;
 }
@@ -1648,6 +1654,11 @@ static inline void security_sctp_sk_clone(struct sctp_association *asoc,
 
 static inline int security_sctp_assoc_established(struct sctp_association *asoc,
 						  struct sk_buff *skb)
+{
+	return 0;
+}
+
+static inline int security_mptcp_add_subflow(struct sock *sk, struct sock *ssk)
 {
 	return 0;
 }
@@ -2051,12 +2062,17 @@ static inline int security_perf_event_write(struct perf_event *event)
 #ifdef CONFIG_SECURITY
 extern int security_uring_override_creds(const struct cred *new);
 extern int security_uring_sqpoll(void);
+extern int security_uring_cmd(struct io_uring_cmd *ioucmd);
 #else
 static inline int security_uring_override_creds(const struct cred *new)
 {
 	return 0;
 }
 static inline int security_uring_sqpoll(void)
+{
+	return 0;
+}
+static inline int security_uring_cmd(struct io_uring_cmd *ioucmd)
 {
 	return 0;
 }

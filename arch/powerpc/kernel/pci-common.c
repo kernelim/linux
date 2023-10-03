@@ -29,10 +29,11 @@
 #include <linux/slab.h>
 #include <linux/vgaarb.h>
 #include <linux/numa.h>
+#include <linux/msi.h>
+#include <linux/irqdomain.h>
 
 #include <asm/processor.h>
 #include <asm/io.h>
-#include <asm/prom.h>
 #include <asm/pci-bridge.h>
 #include <asm/byteorder.h>
 #include <asm/machdep.h>
@@ -1060,11 +1061,16 @@ void pcibios_bus_add_device(struct pci_dev *dev)
 
 int pcibios_device_add(struct pci_dev *dev)
 {
+	struct irq_domain *d;
+
 #ifdef CONFIG_PCI_IOV
 	if (ppc_md.pcibios_fixup_sriov)
 		ppc_md.pcibios_fixup_sriov(dev);
 #endif /* CONFIG_PCI_IOV */
 
+	d = dev_get_msi_domain(&dev->bus->dev);
+	if (d)
+		dev_set_msi_domain(&dev->dev, d);
 	return 0;
 }
 

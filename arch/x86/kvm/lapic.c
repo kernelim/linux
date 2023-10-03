@@ -15,6 +15,7 @@
  *
  * Based on Xen 3.1 code, Copyright (c) 2004, Intel Corporation.
  */
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/kvm_host.h>
 #include <linux/kvm.h>
@@ -160,7 +161,6 @@ bool kvm_can_use_hv_timer(struct kvm_vcpu *vcpu)
 	       && !(kvm_mwait_in_guest(vcpu->kvm) ||
 		    kvm_can_post_timer_interrupt(vcpu));
 }
-EXPORT_SYMBOL_GPL(kvm_can_use_hv_timer);
 
 static bool kvm_use_posted_timer_interrupt(struct kvm_vcpu *vcpu)
 {
@@ -219,6 +219,150 @@ static void kvm_apic_map_free(struct rcu_head *rcu)
 	kvfree(map);
 }
 
+static int kvm_recalculate_phys_map(struct kvm_apic_map *new,
+				    struct kvm_vcpu *vcpu,
+				    bool *xapic_id_mismatch)
+{
+	struct kvm_lapic *apic = vcpu->arch.apic;
+	u32 x2apic_id = kvm_x2apic_id(apic);
+	u32 xapic_id = kvm_xapic_id(apic);
+	u32 physical_id;
+
+	/*
+	 * For simplicity, KVM always allocates enough space for all possible
+	 * xAPIC IDs.  Yell, but don't kill the VM, as KVM can continue on
+	 * without the optimized map.
+	 */
+	if (WARN_ON_ONCE(xapic_id > new->max_apic_id))
+		return -EINVAL;
+
+	/*
+	 * Bail if a vCPU was added and/or enabled its APIC between allocating
+	 * the map and doing the actual calculations for the map.  Note, KVM
+	 * hardcodes the x2APIC ID to vcpu_id, i.e. there's no TOCTOU bug if
+	 * the compiler decides to reload x2apic_id after this check.
+	 */
+	if (x2apic_id > new->max_apic_id)
+		return -E2BIG;
+
+	/*
+	 * Deliberately truncate the vCPU ID when detecting a mismatched APIC
+	 * ID to avoid false positives if the vCPU ID, i.e. x2APIC ID, is a
+	 * 32-bit value.  Any unwanted aliasing due to truncation results will
+	 * be detected below.
+	 */
+	if (!apic_x2apic_mode(apic) && xapic_id != (u8)vcpu->vcpu_id)
+		*xapic_id_mismatch = true;
+
+	/*
+	 * Apply KVM's hotplug hack if userspace has enable 32-bit APIC IDs.
+	 * Allow sending events to vCPUs by their x2APIC ID even if the target
+	 * vCPU is in legacy xAPIC mode, and silently ignore aliased xAPIC IDs
+	 * (the x2APIC ID is truncated to 8 bits, causing IDs > 0xff to wrap
+	 * and collide).
+	 *
+	 * Honor the architectural (and KVM's non-optimized) behavior if
+	 * userspace has not enabled 32-bit x2APIC IDs.  Each APIC is supposed
+	 * to process messages independently.  If multiple vCPUs have the same
+	 * effective APIC ID, e.g. due to the x2APIC wrap or because the guest
+	 * manually modified its xAPIC IDs, events targeting that ID are
+	 * supposed to be recognized by all vCPUs with said ID.
+	 */
+	if (vcpu->kvm->arch.x2apic_format) {
+		/* See also kvm_apic_match_physical_addr(). */
+		if (apic_x2apic_mode(apic) || x2apic_id > 0xff)
+			new->phys_map[x2apic_id] = apic;
+
+		if (!apic_x2apic_mode(apic) && !new->phys_map[xapic_id])
+			new->phys_map[xapic_id] = apic;
+	} else {
+		/*
+		 * Disable the optimized map if the physical APIC ID is already
+		 * mapped, i.e. is aliased to multiple vCPUs.  The optimized
+		 * map requires a strict 1:1 mapping between IDs and vCPUs.
+		 */
+		if (apic_x2apic_mode(apic))
+			physical_id = x2apic_id;
+		else
+			physical_id = xapic_id;
+
+		if (new->phys_map[physical_id])
+			return -EINVAL;
+
+		new->phys_map[physical_id] = apic;
+	}
+
+	return 0;
+}
+
+static void kvm_recalculate_logical_map(struct kvm_apic_map *new,
+					struct kvm_vcpu *vcpu)
+{
+	struct kvm_lapic *apic = vcpu->arch.apic;
+	enum kvm_apic_logical_mode logical_mode;
+	struct kvm_lapic **cluster;
+	u16 mask;
+	u32 ldr;
+
+	if (new->logical_mode == KVM_APIC_MODE_MAP_DISABLED)
+		return;
+
+	if (!kvm_apic_sw_enabled(apic))
+		return;
+
+	ldr = kvm_lapic_get_reg(apic, APIC_LDR);
+	if (!ldr)
+		return;
+
+	if (apic_x2apic_mode(apic)) {
+		logical_mode = KVM_APIC_MODE_X2APIC;
+	} else {
+		ldr = GET_APIC_LOGICAL_ID(ldr);
+		if (kvm_lapic_get_reg(apic, APIC_DFR) == APIC_DFR_FLAT)
+			logical_mode = KVM_APIC_MODE_XAPIC_FLAT;
+		else
+			logical_mode = KVM_APIC_MODE_XAPIC_CLUSTER;
+	}
+
+	/*
+	 * To optimize logical mode delivery, all software-enabled APICs must
+	 * be configured for the same mode.
+	 */
+	if (new->logical_mode == KVM_APIC_MODE_SW_DISABLED) {
+		new->logical_mode = logical_mode;
+	} else if (new->logical_mode != logical_mode) {
+		new->logical_mode = KVM_APIC_MODE_MAP_DISABLED;
+		return;
+	}
+
+	/*
+	 * In x2APIC mode, the LDR is read-only and derived directly from the
+	 * x2APIC ID, thus is guaranteed to be addressable.  KVM reuses
+	 * kvm_apic_map.phys_map to optimize logical mode x2APIC interrupts by
+	 * reversing the LDR calculation to get cluster of APICs, i.e. no
+	 * additional work is required.
+	 */
+	if (apic_x2apic_mode(apic)) {
+		WARN_ON_ONCE(ldr != kvm_apic_calc_x2apic_ldr(kvm_x2apic_id(apic)));
+		return;
+	}
+
+	if (WARN_ON_ONCE(!kvm_apic_map_get_logical_dest(new, ldr,
+							&cluster, &mask))) {
+		new->logical_mode = KVM_APIC_MODE_MAP_DISABLED;
+		return;
+	}
+
+	if (!mask)
+		return;
+
+	ldr = ffs(mask) - 1;
+	if (!is_power_of_2(mask) || cluster[ldr])
+		new->logical_mode = KVM_APIC_MODE_MAP_DISABLED;
+	else
+		cluster[ldr] = apic;
+}
+
 /*
  * CLEAN -> DIRTY and UPDATE_IN_PROGRESS -> DIRTY changes happen without a lock.
  *
@@ -273,128 +417,16 @@ void kvm_recalculate_apic_map(struct kvm *kvm)
 	new->logical_mode = KVM_APIC_MODE_SW_DISABLED;
 
 	kvm_for_each_vcpu(i, vcpu, kvm) {
-		struct kvm_lapic *apic = vcpu->arch.apic;
-		struct kvm_lapic **cluster;
-		enum kvm_apic_logical_mode logical_mode;
-		u32 x2apic_id, physical_id;
-		u16 mask;
-		u32 ldr;
-		u8 xapic_id;
-
 		if (!kvm_apic_present(vcpu))
 			continue;
 
-		xapic_id = kvm_xapic_id(apic);
-		x2apic_id = kvm_x2apic_id(apic);
-
-		/*
-		 * Deliberately truncate the vCPU ID when detecting a mismatched
-		 * APIC ID to avoid false positives if the vCPU ID, i.e. x2APIC
-		 * ID, is a 32-bit value.  Any unwanted aliasing due to
-		 * truncation results will be detected below.
-		 */
-		if (!apic_x2apic_mode(apic) && xapic_id != (u8)vcpu->vcpu_id)
-			xapic_id_mismatch = true;
-
-		/*
-		 * Apply KVM's hotplug hack if userspace has enable 32-bit APIC
-		 * IDs.  Allow sending events to vCPUs by their x2APIC ID even
-		 * if the target vCPU is in legacy xAPIC mode, and silently
-		 * ignore aliased xAPIC IDs (the x2APIC ID is truncated to 8
-		 * bits, causing IDs > 0xff to wrap and collide).
-		 *
-		 * Honor the architectural (and KVM's non-optimized) behavior
-		 * if userspace has not enabled 32-bit x2APIC IDs.  Each APIC
-		 * is supposed to process messages independently.  If multiple
-		 * vCPUs have the same effective APIC ID, e.g. due to the
-		 * x2APIC wrap or because the guest manually modified its xAPIC
-		 * IDs, events targeting that ID are supposed to be recognized
-		 * by all vCPUs with said ID.
-		 */
-		if (kvm->arch.x2apic_format) {
-			/* See also kvm_apic_match_physical_addr(). */
-			if ((apic_x2apic_mode(apic) || x2apic_id > 0xff) &&
-			    x2apic_id <= new->max_apic_id)
-				new->phys_map[x2apic_id] = apic;
-
-			if (!apic_x2apic_mode(apic) && !new->phys_map[xapic_id])
-				new->phys_map[xapic_id] = apic;
-		} else {
-			/*
-			 * Disable the optimized map if the physical APIC ID is
-			 * already mapped, i.e. is aliased to multiple vCPUs.
-			 * The optimized map requires a strict 1:1 mapping
-			 * between IDs and vCPUs.
-			 */
-			if (apic_x2apic_mode(apic))
-				physical_id = x2apic_id;
-			else
-				physical_id = xapic_id;
-
-			if (new->phys_map[physical_id]) {
-				kvfree(new);
-				new = NULL;
-				goto out;
-			}
-			new->phys_map[physical_id] = apic;
+		if (kvm_recalculate_phys_map(new, vcpu, &xapic_id_mismatch)) {
+			kvfree(new);
+			new = NULL;
+			goto out;
 		}
 
-		if (new->logical_mode == KVM_APIC_MODE_MAP_DISABLED ||
-		    !kvm_apic_sw_enabled(apic))
-			continue;
-
-		ldr = kvm_lapic_get_reg(apic, APIC_LDR);
-		if (!ldr)
-			continue;
-
-		if (apic_x2apic_mode(apic)) {
-			logical_mode = KVM_APIC_MODE_X2APIC;
-		} else {
-			ldr = GET_APIC_LOGICAL_ID(ldr);
-			if (kvm_lapic_get_reg(apic, APIC_DFR) == APIC_DFR_FLAT)
-				logical_mode = KVM_APIC_MODE_XAPIC_FLAT;
-			else
-				logical_mode = KVM_APIC_MODE_XAPIC_CLUSTER;
-		}
-
-		/*
-		 * To optimize logical mode delivery, all software-enabled APICs must
-		 * be configured for the same mode.
-		 */
-		if (new->logical_mode == KVM_APIC_MODE_SW_DISABLED) {
-			new->logical_mode = logical_mode;
-		} else if (new->logical_mode != logical_mode) {
-			new->logical_mode = KVM_APIC_MODE_MAP_DISABLED;
-			continue;
-		}
-
-		/*
-		 * In x2APIC mode, the LDR is read-only and derived directly
-		 * from the x2APIC ID, thus is guaranteed to be addressable.
-		 * KVM reuses kvm_apic_map.phys_map to optimize logical mode
-		 * x2APIC interrupts by reversing the LDR calculation to get
-		 * cluster of APICs, i.e. no additional work is required.
-		 */
-		if (apic_x2apic_mode(apic)) {
-			WARN_ON_ONCE(ldr != kvm_apic_calc_x2apic_ldr(x2apic_id));
-			continue;
-		}
-
-		if (WARN_ON_ONCE(!kvm_apic_map_get_logical_dest(new, ldr,
-								&cluster, &mask))) {
-			new->logical_mode = KVM_APIC_MODE_MAP_DISABLED;
-			continue;
-		}
-
-		if (!mask)
-			continue;
-
-		ldr = ffs(mask) - 1;
-		if (!is_power_of_2(mask) || cluster[ldr]) {
-			new->logical_mode = KVM_APIC_MODE_MAP_DISABLED;
-			continue;
-		}
-		cluster[ldr] = apic;
+		kvm_recalculate_logical_map(new, vcpu);
 	}
 out:
 	/*
@@ -610,16 +642,22 @@ bool __kvm_apic_update_irr(u32 *pir, void *regs, int *max_irr)
 	*max_irr = -1;
 
 	for (i = vec = 0; i <= 7; i++, vec += 32) {
+		u32 *p_irr = (u32 *)(regs + APIC_IRR + i * 0x10);
+
+		irr_val = *p_irr;
 		pir_val = READ_ONCE(pir[i]);
-		irr_val = *((u32 *)(regs + APIC_IRR + i * 0x10));
+
 		if (pir_val) {
+			pir_val = xchg(&pir[i], 0);
+
 			prev_irr_val = irr_val;
-			irr_val |= xchg(&pir[i], 0);
-			*((u32 *)(regs + APIC_IRR + i * 0x10)) = irr_val;
-			if (prev_irr_val != irr_val) {
-				max_updated_irr =
-					__fls(irr_val ^ prev_irr_val) + vec;
-			}
+			do {
+				irr_val = prev_irr_val | pir_val;
+			} while (prev_irr_val != irr_val &&
+				 !try_cmpxchg(p_irr, &prev_irr_val, irr_val));
+
+			if (prev_irr_val != irr_val)
+				max_updated_irr = __fls(irr_val ^ prev_irr_val) + vec;
 		}
 		if (irr_val)
 			*max_irr = __fls(irr_val) + vec;
@@ -633,8 +671,11 @@ EXPORT_SYMBOL_GPL(__kvm_apic_update_irr);
 bool kvm_apic_update_irr(struct kvm_vcpu *vcpu, u32 *pir, int *max_irr)
 {
 	struct kvm_lapic *apic = vcpu->arch.apic;
+	bool irr_updated = __kvm_apic_update_irr(pir, apic->regs, max_irr);
 
-	return __kvm_apic_update_irr(pir, apic->regs, max_irr);
+	if (unlikely(!apic->apicv_active && irr_updated))
+		apic->irr_pending = true;
+	return irr_updated;
 }
 EXPORT_SYMBOL_GPL(kvm_apic_update_irr);
 
@@ -1049,8 +1090,7 @@ static void kvm_apic_disabled_lapic_found(struct kvm *kvm)
 {
 	if (!kvm->arch.disabled_lapic_found) {
 		kvm->arch.disabled_lapic_found = true;
-		printk(KERN_INFO
-		       "Disabled LAPIC found during irq injection\n");
+		pr_info("Disabled LAPIC found during irq injection\n");
 	}
 }
 
@@ -1472,7 +1512,6 @@ static u32 apic_get_tmcct(struct kvm_lapic *apic)
 {
 	ktime_t remaining, now;
 	s64 ns;
-	u32 tmcct;
 
 	ASSERT(apic != NULL);
 
@@ -1487,10 +1526,7 @@ static u32 apic_get_tmcct(struct kvm_lapic *apic)
 		remaining = 0;
 
 	ns = mod_64(ktime_to_ns(remaining), apic->lapic_timer.period);
-	tmcct = div64_u64(ns,
-			 (APIC_BUS_CYCLE_NS * apic->divide_count));
-
-	return tmcct;
+	return div64_u64(ns, (APIC_BUS_CYCLE_NS * apic->divide_count));
 }
 
 static void __report_tpr_access(struct kvm_lapic *apic, bool write)
@@ -1550,19 +1586,15 @@ static inline struct kvm_lapic *to_lapic(struct kvm_io_device *dev)
 #define APIC_REGS_MASK(first, count) \
 	(APIC_REG_MASK(first) * ((1ull << (count)) - 1))
 
-static int kvm_lapic_reg_read(struct kvm_lapic *apic, u32 offset, int len,
-			      void *data)
+u64 kvm_lapic_readable_reg_mask(struct kvm_lapic *apic)
 {
-	unsigned char alignment = offset & 0xf;
-	u32 result;
-	/* this bitmask has a bit cleared for each reserved register */
+	/* Leave bits '0' for reserved and write-only registers. */
 	u64 valid_reg_mask =
 		APIC_REG_MASK(APIC_ID) |
 		APIC_REG_MASK(APIC_LVR) |
 		APIC_REG_MASK(APIC_TASKPRI) |
 		APIC_REG_MASK(APIC_PROCPRI) |
 		APIC_REG_MASK(APIC_LDR) |
-		APIC_REG_MASK(APIC_DFR) |
 		APIC_REG_MASK(APIC_SPIV) |
 		APIC_REGS_MASK(APIC_ISR, APIC_ISR_NR) |
 		APIC_REGS_MASK(APIC_TMR, APIC_ISR_NR) |
@@ -1582,21 +1614,33 @@ static int kvm_lapic_reg_read(struct kvm_lapic *apic, u32 offset, int len,
 	if (kvm_lapic_lvt_supported(apic, LVT_CMCI))
 		valid_reg_mask |= APIC_REG_MASK(APIC_LVTCMCI);
 
-	/*
-	 * ARBPRI and ICR2 are not valid in x2APIC mode.  WARN if KVM reads ICR
-	 * in x2APIC mode as it's an 8-byte register in x2APIC and needs to be
-	 * manually handled by the caller.
-	 */
+	/* ARBPRI, DFR, and ICR2 are not valid in x2APIC mode. */
 	if (!apic_x2apic_mode(apic))
 		valid_reg_mask |= APIC_REG_MASK(APIC_ARBPRI) |
+				  APIC_REG_MASK(APIC_DFR) |
 				  APIC_REG_MASK(APIC_ICR2);
-	else
-		WARN_ON_ONCE(offset == APIC_ICR);
+
+	return valid_reg_mask;
+}
+EXPORT_SYMBOL_GPL(kvm_lapic_readable_reg_mask);
+
+static int kvm_lapic_reg_read(struct kvm_lapic *apic, u32 offset, int len,
+			      void *data)
+{
+	unsigned char alignment = offset & 0xf;
+	u32 result;
+
+	/*
+	 * WARN if KVM reads ICR in x2APIC mode, as it's an 8-byte register in
+	 * x2APIC and needs to be manually handled by the caller.
+	 */
+	WARN_ON_ONCE(apic_x2apic_mode(apic) && offset == APIC_ICR);
 
 	if (alignment + len > 4)
 		return 1;
 
-	if (offset > 0x3f0 || !(valid_reg_mask & APIC_REG_MASK(offset)))
+	if (offset > 0x3f0 ||
+	    !(kvm_lapic_readable_reg_mask(apic) & APIC_REG_MASK(offset)))
 		return 1;
 
 	result = __apic_read(apic, offset & ~0xf);
@@ -1668,7 +1712,7 @@ static void limit_periodic_timer_frequency(struct kvm_lapic *apic)
 
 		if (apic->lapic_timer.period < min_period) {
 			pr_info_ratelimited(
-			    "kvm: vcpu %i: requested %lld ns "
+			    "vcpu %i: requested %lld ns "
 			    "lapic timer period limited to %lld ns\n",
 			    apic->vcpu->vcpu_id,
 			    apic->lapic_timer.period, min_period);
@@ -1949,11 +1993,15 @@ static bool set_target_expiration(struct kvm_lapic *apic, u32 count_reg)
 		if (unlikely(count_reg != APIC_TMICT)) {
 			deadline = tmict_to_ns(apic,
 				     kvm_lapic_get_reg(apic, count_reg));
-			if (unlikely(deadline <= 0))
-				deadline = apic->lapic_timer.period;
+			if (unlikely(deadline <= 0)) {
+				if (apic_lvtt_period(apic))
+					deadline = apic->lapic_timer.period;
+				else
+					deadline = 0;
+			}
 			else if (unlikely(deadline > apic->lapic_timer.period)) {
 				pr_info_ratelimited(
-				    "kvm: vcpu %i: requested lapic timer restore with "
+				    "vcpu %i: requested lapic timer restore with "
 				    "starting count register %#x=%u (%lld ns) > initial count (%lld ns). "
 				    "Using initial count to start timer.\n",
 				    apic->vcpu->vcpu_id,
@@ -2021,7 +2069,6 @@ bool kvm_lapic_hv_timer_in_use(struct kvm_vcpu *vcpu)
 
 	return vcpu->arch.apic->lapic_timer.hv_timer_in_use;
 }
-EXPORT_SYMBOL_GPL(kvm_lapic_hv_timer_in_use);
 
 static void cancel_hv_timer(struct kvm_lapic *apic)
 {
@@ -2314,10 +2361,14 @@ static int kvm_lapic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 		break;
 
 	case APIC_SELF_IPI:
-		if (apic_x2apic_mode(apic))
-			kvm_apic_send_ipi(apic, APIC_DEST_SELF | (val & APIC_VECTOR_MASK), 0);
-		else
+		/*
+		 * Self-IPI exists only when x2APIC is enabled.  Bits 7:0 hold
+		 * the vector, everything else is reserved.
+		 */
+		if (!apic_x2apic_mode(apic) || (val & ~APIC_VECTOR_MASK))
 			ret = 1;
+		else
+			kvm_apic_send_ipi(apic, APIC_DEST_SELF | val, 0);
 		break;
 	default:
 		ret = 1;
@@ -2484,8 +2535,12 @@ void kvm_lapic_set_base(struct kvm_vcpu *vcpu, u64 value)
 		}
 	}
 
-	if (((old_value ^ value) & X2APIC_ENABLE) && (value & X2APIC_ENABLE))
-		kvm_apic_set_x2apic_id(apic, vcpu->vcpu_id);
+	if ((old_value ^ value) & X2APIC_ENABLE) {
+		if (value & X2APIC_ENABLE)
+			kvm_apic_set_x2apic_id(apic, vcpu->vcpu_id);
+		else if (value & MSR_IA32_APICBASE_ENABLE)
+			kvm_apic_set_xapic_id(apic, vcpu->vcpu_id);
+	}
 
 	if ((old_value ^ value) & (MSR_IA32_APICBASE_ENABLE | X2APIC_ENABLE)) {
 		kvm_make_request(KVM_REQ_APICV_UPDATE, vcpu);
@@ -2521,7 +2576,6 @@ void kvm_apic_update_apicv(struct kvm_vcpu *vcpu)
 	}
 	apic->highest_isr_cache = -1;
 }
-EXPORT_SYMBOL_GPL(kvm_apic_update_apicv);
 
 int kvm_alloc_apic_access_page(struct kvm *kvm)
 {
@@ -3101,12 +3155,16 @@ static int kvm_lapic_msr_read(struct kvm_lapic *apic, u32 reg, u64 *data)
 static int kvm_lapic_msr_write(struct kvm_lapic *apic, u32 reg, u64 data)
 {
 	/*
-	 * ICR is a 64-bit register in x2APIC mode (and Hyper'v PV vAPIC) and
+	 * ICR is a 64-bit register in x2APIC mode (and Hyper-V PV vAPIC) and
 	 * can be written as such, all other registers remain accessible only
 	 * through 32-bit reads/writes.
 	 */
 	if (reg == APIC_ICR)
 		return kvm_x2apic_icr_write(apic, data);
+
+	/* Bits 63:32 are reserved in all other registers. */
+	if (data >> 32)
+		return 1;
 
 	return kvm_lapic_reg_write(apic, reg, (u32)data);
 }
@@ -3128,9 +3186,6 @@ int kvm_x2apic_msr_read(struct kvm_vcpu *vcpu, u32 msr, u64 *data)
 	u32 reg = (msr - APIC_BASE_MSR) << 4;
 
 	if (!lapic_in_kernel(vcpu) || !apic_x2apic_mode(apic))
-		return 1;
-
-	if (reg == APIC_DFR)
 		return 1;
 
 	return kvm_lapic_msr_read(apic, reg, data);
@@ -3183,17 +3238,8 @@ int kvm_apic_accept_events(struct kvm_vcpu *vcpu)
 	struct kvm_lapic *apic = vcpu->arch.apic;
 	u8 sipi_vector;
 	int r;
-	unsigned long pe;
 
-	if (!lapic_in_kernel(vcpu))
-		return 0;
-
-	/*
-	 * Read pending events before calling the check_events
-	 * callback.
-	 */
-	pe = smp_load_acquire(&apic->pending_events);
-	if (!pe)
+	if (!kvm_apic_has_pending_init_or_sipi(vcpu))
 		return 0;
 
 	if (is_guest_mode(vcpu)) {
@@ -3201,38 +3247,31 @@ int kvm_apic_accept_events(struct kvm_vcpu *vcpu)
 		if (r < 0)
 			return r == -EBUSY ? 0 : r;
 		/*
-		 * If an event has happened and caused a vmexit,
-		 * we know INITs are latched and therefore
-		 * we will not incorrectly deliver an APIC
-		 * event instead of a vmexit.
+		 * Continue processing INIT/SIPI even if a nested VM-Exit
+		 * occurred, e.g. pending SIPIs should be dropped if INIT+SIPI
+		 * are blocked as a result of transitioning to VMX root mode.
 		 */
 	}
 
 	/*
-	 * INITs are blocked while CPU is in specific states
-	 * (SMM, VMX root mode, SVM with GIF=0).
-	 * Because a CPU cannot be in these states immediately
-	 * after it has processed an INIT signal (and thus in
-	 * KVM_MP_STATE_INIT_RECEIVED state), just eat SIPIs
-	 * and leave the INIT pending.
+	 * INITs are blocked while CPU is in specific states (SMM, VMX root
+	 * mode, SVM with GIF=0), while SIPIs are dropped if the CPU isn't in
+	 * wait-for-SIPI (WFS).
 	 */
 	if (!kvm_apic_init_sipi_allowed(vcpu)) {
 		WARN_ON_ONCE(vcpu->arch.mp_state == KVM_MP_STATE_INIT_RECEIVED);
-		if (test_bit(KVM_APIC_SIPI, &pe))
-			clear_bit(KVM_APIC_SIPI, &apic->pending_events);
+		clear_bit(KVM_APIC_SIPI, &apic->pending_events);
 		return 0;
 	}
 
-	if (test_bit(KVM_APIC_INIT, &pe)) {
-		clear_bit(KVM_APIC_INIT, &apic->pending_events);
+	if (test_and_clear_bit(KVM_APIC_INIT, &apic->pending_events)) {
 		kvm_vcpu_reset(vcpu, true);
 		if (kvm_vcpu_is_bsp(apic->vcpu))
 			vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
 		else
 			vcpu->arch.mp_state = KVM_MP_STATE_INIT_RECEIVED;
 	}
-	if (test_bit(KVM_APIC_SIPI, &pe)) {
-		clear_bit(KVM_APIC_SIPI, &apic->pending_events);
+	if (test_and_clear_bit(KVM_APIC_SIPI, &apic->pending_events)) {
 		if (vcpu->arch.mp_state == KVM_MP_STATE_INIT_RECEIVED) {
 			/* evaluate pending_events before reading the vector */
 			smp_rmb();

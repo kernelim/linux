@@ -41,8 +41,6 @@ struct ohci_platform_priv {
 	struct reset_control *resets;
 };
 
-static const char hcd_name[] = "ohci-platform";
-
 static int ohci_platform_power_on(struct platform_device *dev)
 {
 	struct usb_hcd *hcd = platform_get_drvdata(dev);
@@ -345,8 +343,6 @@ static int __init ohci_platform_init(void)
 {
 	if (usb_disabled())
 		return -ENODEV;
-
-	pr_info("%s: " DRIVER_DESC "\n", hcd_name);
 
 	ohci_init_driver(&ohci_platform_hc_driver, &platform_overrides);
 	return platform_driver_register(&ohci_platform_driver);

@@ -15,8 +15,12 @@ struct mlxsw_sp_router_nve_decap {
 	u8 valid:1;
 };
 
+/* gen_pool_alloc() returns 0 when allocation fails, so use an offset */
+#define MLXSW_SP_ROUTER_GENALLOC_OFFSET 0x100
+
 struct mlxsw_sp_router {
 	struct mlxsw_sp *mlxsw_sp;
+	struct gen_pool *rifs_table;
 	struct mlxsw_sp_rif **rifs;
 	struct idr rif_mac_profiles_idr;
 	atomic_t rif_mac_profiles_count;
@@ -82,7 +86,6 @@ struct mlxsw_sp_ipip_entry;
 
 struct mlxsw_sp_rif *mlxsw_sp_rif_by_index(const struct mlxsw_sp *mlxsw_sp,
 					   u16 rif_index);
-u16 mlxsw_sp_rif_index(const struct mlxsw_sp_rif *rif);
 u16 mlxsw_sp_ipip_lb_rif_index(const struct mlxsw_sp_rif_ipip_lb *rif);
 u16 mlxsw_sp_ipip_lb_ul_vr_id(const struct mlxsw_sp_rif_ipip_lb *rif);
 u16 mlxsw_sp_ipip_lb_ul_rif_id(const struct mlxsw_sp_rif_ipip_lb *lb_rif);

@@ -98,7 +98,7 @@ static void optc32_set_odm_combine(struct timing_generator *optc, int *opp_id, i
 	optc1->opp_count = opp_cnt;
 }
 
-static void optc32_set_h_timing_div_manual_mode(struct timing_generator *optc, bool manual_mode)
+void optc32_set_h_timing_div_manual_mode(struct timing_generator *optc, bool manual_mode)
 {
 	struct optc *optc1 = DCN10TG_FROM_TG(optc);
 
@@ -151,12 +151,12 @@ static bool optc32_disable_crtc(struct timing_generator *optc)
 	/* CRTC disabled, so disable  clock. */
 	REG_WAIT(OTG_CLOCK_CONTROL,
 			OTG_BUSY, 0,
-			1, 100000);
+			1, 150000);
 
 	return true;
 }
 
-void optc32_phantom_crtc_post_enable(struct timing_generator *optc)
+static void optc32_phantom_crtc_post_enable(struct timing_generator *optc)
 {
 	struct optc *optc1 = DCN10TG_FROM_TG(optc);
 
@@ -165,6 +165,13 @@ void optc32_phantom_crtc_post_enable(struct timing_generator *optc)
 
 	/* CRTC disabled, so disable  clock. */
 	REG_WAIT(OTG_CLOCK_CONTROL, OTG_BUSY, 0, 1, 100000);
+}
+
+static void optc32_disable_phantom_otg(struct timing_generator *optc)
+{
+	struct optc *optc1 = DCN10TG_FROM_TG(optc);
+
+	REG_UPDATE(OTG_CONTROL, OTG_MASTER_EN, 0);
 }
 
 static void optc32_set_odm_bypass(struct timing_generator *optc,
@@ -190,7 +197,7 @@ static void optc32_set_odm_bypass(struct timing_generator *optc,
 	optc1->opp_count = 1;
 }
 
-void optc32_setup_manual_trigger(struct timing_generator *optc)
+static void optc32_setup_manual_trigger(struct timing_generator *optc)
 {
 	struct optc *optc1 = DCN10TG_FROM_TG(optc);
 	struct dc *dc = optc->ctx->dc;
@@ -215,7 +222,7 @@ void optc32_setup_manual_trigger(struct timing_generator *optc)
 	}
 }
 
-void optc32_set_drr(
+static void optc32_set_drr(
 	struct timing_generator *optc,
 	const struct drr_params *params)
 {
@@ -260,6 +267,7 @@ static struct timing_generator_funcs dcn32_tg_funcs = {
 		.enable_crtc = optc32_enable_crtc,
 		.disable_crtc = optc32_disable_crtc,
 		.phantom_crtc_post_enable = optc32_phantom_crtc_post_enable,
+		.disable_phantom_crtc = optc32_disable_phantom_otg,
 		/* used by enable_timing_synchronization. Not need for FPGA */
 		.is_counter_moving = optc1_is_counter_moving,
 		.get_position = optc1_get_position,

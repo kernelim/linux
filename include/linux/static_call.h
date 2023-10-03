@@ -162,6 +162,8 @@ extern void arch_static_call_transform(void *site, void *tramp, void *func, bool
 
 extern int __init static_call_init(void);
 
+extern void static_call_force_reinit(void);
+
 struct static_call_mod {
 	struct static_call_mod *next;
 	struct module *mod; /* for vmlinux, mod == NULL */
@@ -248,10 +250,7 @@ static inline int static_call_text_reserved(void *start, void *end)
 	return 0;
 }
 
-static inline long __static_call_return0(void)
-{
-	return 0;
-}
+extern long __static_call_return0(void);
 
 #define EXPORT_STATIC_CALL(name)					\
 	EXPORT_SYMBOL(STATIC_CALL_KEY(name));				\

@@ -20,9 +20,10 @@
 #include <linux/export.h>
 #include <linux/nvram.h>
 #include <linux/pgtable.h>
+#include <linux/of_fdt.h>
+#include <linux/irq.h>
 
 #include <asm/io.h>
-#include <asm/prom.h>
 #include <asm/processor.h>
 #include <asm/setup.h>
 #include <asm/smp.h>
@@ -75,7 +76,7 @@ EXPORT_SYMBOL(DMA_MODE_WRITE);
 notrace void __init machine_init(u64 dt_ptr)
 {
 	u32 *addr = (u32 *)patch_site_addr(&patch__memset_nocache);
-	struct ppc_inst insn;
+	ppc_inst_t insn;
 
 	/* Configure static keys first, now that we're relocated. */
 	setup_feature_keys();

@@ -31,6 +31,7 @@ obj-$(CONFIG_SUN50I_H6_R_CCU)	+= ccu-sun50i-h6-r.o
 obj-$(CONFIG_SUN4I_A10_CCU)	+= ccu-sun4i-a10.o
 obj-$(CONFIG_SUN5I_CCU)		+= ccu-sun5i.o
 obj-$(CONFIG_SUN6I_A31_CCU)	+= ccu-sun6i-a31.o
+obj-$(CONFIG_SUN6I_RTC_CCU)	+= sun6i-rtc-ccu.o
 obj-$(CONFIG_SUN8I_A23_CCU)	+= ccu-sun8i-a23.o
 obj-$(CONFIG_SUN8I_A33_CCU)	+= ccu-sun8i-a33.o
 obj-$(CONFIG_SUN8I_A83T_CCU)	+= ccu-sun8i-a83t.o
@@ -42,3 +43,5 @@ obj-$(CONFIG_SUN8I_R40_CCU)	+= ccu-sun8i-r40.o
 obj-$(CONFIG_SUN9I_A80_CCU)	+= ccu-sun9i-a80.o
 obj-$(CONFIG_SUN9I_A80_CCU)	+= ccu-sun9i-a80-de.o
 obj-$(CONFIG_SUN9I_A80_CCU)	+= ccu-sun9i-a80-usb.o
+
+sun6i-rtc-ccu-y			+= ccu-sun6i-rtc.o

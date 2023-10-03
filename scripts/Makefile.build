@@ -85,17 +85,12 @@ ifdef need-builtin
 targets-for-builtin += $(obj)/built-in.a
 endif
 
-targets-for-modules :=
+targets-for-modules := $(foreach x, o mod $(if $(CONFIG_TRIM_UNUSED_KSYMS), usyms), \
+				$(patsubst %.o, %.$x, $(filter %.o, $(obj-m))))
 
-ifdef CONFIG_LTO_CLANG
-targets-for-modules += $(patsubst %.o, %.lto.o, $(filter %.o, $(obj-m)))
+ifneq ($(CONFIG_LTO_CLANG)$(CONFIG_X86_KERNEL_IBT),)
+targets-for-modules += $(patsubst %.o, %.prelink.o, $(filter %.o, $(obj-m)))
 endif
-
-ifdef CONFIG_X86_KERNEL_IBT
-targets-for-modules += $(patsubst %.o, %.objtool, $(filter %.o, $(obj-m)))
-endif
-
-targets-for-modules += $(patsubst %.o, %.mod, $(filter %.o, $(obj-m)))
 
 ifdef need-modorder
 targets-for-modules += $(obj)/modules.order
@@ -241,6 +236,7 @@ objtool := $(objtree)/tools/objtool/objtool
 objtool_args =								\
 	$(if $(CONFIG_HAVE_JUMP_LABEL_HACK), --hacks=jump_label)	\
 	$(if $(CONFIG_HAVE_NOINSTR_HACK), --hacks=noinstr)		\
+	$(if $(CONFIG_CALL_DEPTH_TRACKING), --hacks=skylake)		\
 	$(if $(CONFIG_X86_KERNEL_IBT), --ibt)				\
 	$(if $(CONFIG_FTRACE_MCOUNT_USE_OBJTOOL), --mcount)		\
 	$(if $(CONFIG_UNWINDER_ORC), --orc)				\
@@ -252,33 +248,18 @@ objtool_args =								\
 	$(if $(CONFIG_X86_SMAP), --uaccess)				\
 	$(if $(linked-object), --link)					\
 	$(if $(part-of-module), --module)				\
-	$(if $(CONFIG_GCOV_KERNEL), --no-unreachable)
+	$(if $(CONFIG_GCOV_KERNEL), --no-unreachable)			\
+	$(if $(CONFIG_PREFIX_SYMBOLS), --prefix=$(CONFIG_FUNCTION_PADDING_BYTES))
 
-cmd_objtool = $(if $(objtool-enabled), ; $(objtool) $(objtool_args) $(@:.objtool=.o))
-cmd_gen_objtooldep = $(if $(objtool-enabled), { echo ; echo '$(@:.objtool=.o): $$(wildcard $(objtool))' ; } >> $(dot-target).cmd)
+cmd_objtool = $(if $(objtool-enabled), ; $(objtool) $(objtool_args) $@)
+cmd_gen_objtooldep = $(if $(objtool-enabled), { echo ; echo '$@: $$(wildcard $(objtool))' ; } >> $(dot-target).cmd)
 
 endif # CONFIG_OBJTOOL
 
-ifdef CONFIG_LTO_CLANG
+ifneq ($(CONFIG_LTO_CLANG)$(CONFIG_X86_KERNEL_IBT),)
 
 # Skip objtool for LLVM bitcode
 $(obj)/%.o: objtool-enabled :=
-
-# objtool was skipped for LLVM bitcode, run it now that we have compiled
-# modules into native code
-$(obj)/%.lto.o: objtool-enabled = y
-$(obj)/%.lto.o: part-of-module := y
-$(obj)/%.lto.o: linked-object := y
-
-else ifdef CONFIG_X86_KERNEL_IBT
-
-# Skip objtool on individual files
-$(obj)/%.o: objtool-enabled :=
-
-# instead run objtool on the module as a whole, right before
-# the final link pass with the linker script.
-$(obj)/%.objtool: objtool-enabled = y
-$(obj)/%.objtool: part-of-module := y
 
 else
 
@@ -294,9 +275,6 @@ endif
 ifdef CONFIG_TRIM_UNUSED_KSYMS
 cmd_gen_ksymdeps = \
 	$(CONFIG_SHELL) $(srctree)/scripts/gen_ksymdeps.sh $@ >> $(dot-target).cmd
-
-# List module undefined symbols
-undefined_syms = $(NM) $< | $(AWK) '$$1 == "U" { printf("%s%s", x++ ? " " : "", $$2) }';
 endif
 
 define rule_cc_o_c
@@ -321,40 +299,40 @@ $(obj)/%.o: $(src)/%.c $(recordmcount_source) FORCE
 	$(call if_changed_rule,cc_o_c)
 	$(call cmd,force_checksrc)
 
-ifdef CONFIG_LTO_CLANG
+ifneq ($(CONFIG_LTO_CLANG)$(CONFIG_X86_KERNEL_IBT),)
 # Module .o files may contain LLVM bitcode, compile them into native code
 # before ELF processing
-quiet_cmd_cc_lto_link_modules = LTO [M] $@
-      cmd_cc_lto_link_modules =						\
+quiet_cmd_cc_prelink_modules = LD [M]  $@
+      cmd_cc_prelink_modules =						\
 	$(LD) $(ld_flags) -r -o $@					\
-		$(shell [ -s $(@:.lto.o=.o.symversions) ] &&		\
-			echo -T $(@:.lto.o=.o.symversions))		\
+               $(shell [ -s $(@:.prelink.o=.o.symversions) ] &&		\
+                       echo -T $(@:.prelink.o=.o.symversions))		\
 		--whole-archive $(filter-out FORCE,$^)			\
 		$(cmd_objtool)
 
-$(obj)/%.lto.o: $(obj)/%.o FORCE
-	$(call if_changed,cc_lto_link_modules)
+# objtool was skipped for LLVM bitcode, run it now that we have compiled
+# modules into native code
+$(obj)/%.prelink.o: objtool-enabled = y
+$(obj)/%.prelink.o: part-of-module := y
+$(obj)/%.prelink.o: linked-object := y
+
+$(obj)/%.prelink.o: $(obj)/%.o FORCE
+	$(call if_changed,cc_prelink_modules)
 endif
 
-cmd_mod = { \
-	echo $(if $($*-objs)$($*-y)$($*-m), $(addprefix $(obj)/, $($*-objs) $($*-y) $($*-m)), $(@:.mod=.o)); \
-	$(undefined_syms) echo; \
-	} > $@
+# To make this rule robust against "Argument list too long" error,
+# ensure to add $(obj)/ prefix by a shell command.
+cmd_mod = printf '%s\n' $(call real-search, $*.o, .o, -objs -y -m) | \
+	$(AWK) '!x[$$0]++ { print("$(obj)/"$$0) }' > $@
 
-$(obj)/%.mod: $(obj)/%$(mod-prelink-ext).o FORCE
+$(obj)/%.mod: FORCE
 	$(call if_changed,mod)
 
-#
-# Since objtool will re-write the file it will change the timestamps, therefore
-# it is critical that the %.objtool file gets a timestamp *after* objtool runs.
-#
-# Additionally, care must be had with ordering this rule against the other rules
-# that take %.o as a dependency.
-#
-cmd_objtool_mod = true $(cmd_objtool) ; touch $@
+# List module undefined symbols
+cmd_undefined_syms = $(NM) $< | sed -n 's/^  *U //p' > $@
 
-$(obj)/%.objtool: $(obj)/%$(mod-prelink-ext).o FORCE
-	$(call if_changed,objtool_mod)
+$(obj)/%.usyms: $(obj)/%$(mod-prelink-ext).o FORCE
+	$(call if_changed,undefined_syms)
 
 quiet_cmd_cc_lst_c = MKLST   $@
       cmd_cc_lst_c = $(CC) $(c_flags) -g -c -o $*.o $< && \
@@ -488,9 +466,14 @@ endif
 #
 # Rule to compile a set of .o files into one .a file (without symbol table)
 #
+# To make this rule robust against "Argument list too long" error,
+# remove $(obj)/ prefix, and restore it by a shell command.
 
 quiet_cmd_ar_builtin = AR      $@
-      cmd_ar_builtin = rm -f $@; $(AR) cDPrST $@ $(real-prereqs)
+      cmd_ar_builtin = rm -f $@; \
+		echo $(patsubst $(obj)/%,%,$(real-prereqs)) | \
+		sed -E 's:([^ ]+):$(obj)/\1:g' | \
+		xargs $(AR) cDPrST $@
 
 quiet_cmd_ar_and_symver = AR      $@
       cmd_ar_and_symver = $(cmd_update_lto_symversions); $(cmd_ar_builtin)
@@ -522,26 +505,21 @@ quiet_cmd_ar_lib = AR      $@
 $(obj)/lib.a: $(lib-y) FORCE
 	$(call if_changed,ar_lib)
 
-# NOTE:
-# Do not replace $(filter %.o,^) with $(real-prereqs). When a single object
-# module is turned into a multi object module, $^ will contain header file
-# dependencies recorded in the .*.cmd file.
-ifdef CONFIG_LTO_CLANG
+ifneq ($(CONFIG_LTO_CLANG)$(CONFIG_X86_KERNEL_IBT),)
 quiet_cmd_link_multi-m = AR [M]  $@
 cmd_link_multi-m =						\
 	$(cmd_update_lto_symversions);				\
 	rm -f $@; 						\
-	$(AR) cDPrsT $@ $(filter %.o,$^)
+	$(AR) cDPrsT $@ @$(patsubst %.o,%.mod,$@)
 else
 quiet_cmd_link_multi-m = LD [M]  $@
-      cmd_link_multi-m = $(LD) $(ld_flags) -r -o $@ $(filter %.o,$^)
+      cmd_link_multi-m = $(LD) $(ld_flags) -r -o $@ @$(patsubst %.o,%.mod,$@)
 endif
 
-$(multi-obj-m): FORCE
+$(multi-obj-m): %.o: %.mod FORCE
 	$(call if_changed,link_multi-m)
 $(call multi_depend, $(multi-obj-m), .o, -objs -y -m)
 
-targets += $(multi-obj-m)
 targets := $(filter-out $(PHONY), $(targets))
 
 # Add intermediate targets:

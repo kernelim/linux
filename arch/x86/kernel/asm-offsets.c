@@ -18,7 +18,6 @@
 #include <asm/bootparam.h>
 #include <asm/suspend.h>
 #include <asm/tlbflush.h>
-#include "../kvm/vmx/vmx.h"
 #include <asm/tdx.h>
 
 #ifdef CONFIG_XEN
@@ -38,9 +37,6 @@ static void __used common(void)
 #ifdef CONFIG_STACKPROTECTOR
 	OFFSET(TASK_stack_canary, task_struct, stack_canary);
 #endif
-
-	BLANK();
-	OFFSET(crypto_tfm_ctx_offset, crypto_tfm, __crt_ctx);
 
 	BLANK();
 	OFFSET(pbe_address, pbe, address);
@@ -111,9 +107,8 @@ static void __used common(void)
 	OFFSET(TSS_sp0, tss_struct, x86_tss.sp0);
 	OFFSET(TSS_sp1, tss_struct, x86_tss.sp1);
 	OFFSET(TSS_sp2, tss_struct, x86_tss.sp2);
-
-	if (IS_ENABLED(CONFIG_KVM_INTEL)) {
-		BLANK();
-		OFFSET(VMX_spec_ctrl, vcpu_vmx, spec_ctrl);
-	}
+	OFFSET(X86_top_of_stack, pcpu_hot, top_of_stack);
+#ifdef CONFIG_CALL_DEPTH_TRACKING
+	OFFSET(X86_call_depth, pcpu_hot, call_depth);
+#endif
 }

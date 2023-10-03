@@ -128,8 +128,8 @@ static netdev_tx_t vlan_dev_hard_start_xmit(struct sk_buff *skb,
 
 		stats = this_cpu_ptr(vlan->vlan_pcpu_stats);
 		u64_stats_update_begin(&stats->syncp);
-		stats->tx_packets++;
-		stats->tx_bytes += len;
+		u64_stats_inc(&stats->tx_packets);
+		u64_stats_add(&stats->tx_bytes, len);
 		u64_stats_update_end(&stats->syncp);
 	} else {
 		this_cpu_inc(vlan->vlan_pcpu_stats->tx_dropped);
@@ -365,7 +365,7 @@ static int vlan_dev_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 
 	switch (cmd) {
 	case SIOCSHWTSTAMP:
-		if (!net_eq(dev_net(dev), &init_net))
+		if (!net_eq(dev_net(dev), dev_net(real_dev)))
 			break;
 		fallthrough;
 	case SIOCGMIIPHY:
@@ -615,7 +615,7 @@ static int vlan_dev_init(struct net_device *dev)
 		return -ENOMEM;
 
 	/* Get vlan's reference to real_dev */
-	dev_hold_track(real_dev, &vlan->dev_tracker, GFP_KERNEL);
+	netdev_hold(real_dev, &vlan->dev_tracker, GFP_KERNEL);
 
 	return 0;
 }
@@ -637,12 +637,7 @@ void vlan_dev_free_egress_priority(const struct net_device *dev)
 
 static void vlan_dev_uninit(struct net_device *dev)
 {
-	struct vlan_dev_priv *vlan = vlan_dev_priv(dev);
-
 	vlan_dev_free_egress_priority(dev);
-
-	/* Get rid of the vlan's reference to real_dev */
-	dev_put_track(vlan->real_dev, &vlan->dev_tracker);
 }
 
 static netdev_features_t vlan_dev_fix_features(struct net_device *dev,
@@ -717,13 +712,13 @@ static void vlan_dev_get_stats64(struct net_device *dev,
 
 		p = per_cpu_ptr(vlan_dev_priv(dev)->vlan_pcpu_stats, i);
 		do {
-			start = u64_stats_fetch_begin_irq(&p->syncp);
-			rxpackets	= p->rx_packets;
-			rxbytes		= p->rx_bytes;
-			rxmulticast	= p->rx_multicast;
-			txpackets	= p->tx_packets;
-			txbytes		= p->tx_bytes;
-		} while (u64_stats_fetch_retry_irq(&p->syncp, start));
+			start = u64_stats_fetch_begin(&p->syncp);
+			rxpackets	= u64_stats_read(&p->rx_packets);
+			rxbytes		= u64_stats_read(&p->rx_bytes);
+			rxmulticast	= u64_stats_read(&p->rx_multicast);
+			txpackets	= u64_stats_read(&p->tx_packets);
+			txbytes		= u64_stats_read(&p->tx_bytes);
+		} while (u64_stats_fetch_retry(&p->syncp, start));
 
 		stats->rx_packets	+= rxpackets;
 		stats->rx_bytes		+= rxbytes;
@@ -731,8 +726,8 @@ static void vlan_dev_get_stats64(struct net_device *dev,
 		stats->tx_packets	+= txpackets;
 		stats->tx_bytes		+= txbytes;
 		/* rx_errors & tx_dropped are u32 */
-		rx_errors	+= p->rx_errors;
-		tx_dropped	+= p->tx_dropped;
+		rx_errors	+= READ_ONCE(p->rx_errors);
+		tx_dropped	+= READ_ONCE(p->tx_dropped);
 	}
 	stats->rx_errors  = rx_errors;
 	stats->tx_dropped = tx_dropped;
@@ -855,6 +850,9 @@ static void vlan_dev_free(struct net_device *dev)
 
 	free_percpu(vlan->vlan_pcpu_stats);
 	vlan->vlan_pcpu_stats = NULL;
+
+	/* Get rid of the vlan's reference to real_dev */
+	netdev_put(vlan->real_dev, &vlan->dev_tracker);
 }
 
 void vlan_setup(struct net_device *dev)

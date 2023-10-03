@@ -13,7 +13,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <asm/checksum.h>
-#include <asm/lowcore.h>
+#include <asm/abs_lowcore.h>
 #include <asm/os_info.h>
 #include <asm/asm-offsets.h>
 
@@ -46,7 +46,7 @@ void os_info_crashkernel_add(unsigned long base, unsigned long size)
  */
 void os_info_entry_add(int nr, void *ptr, u64 size)
 {
-	os_info.entry[nr].addr = (u64)(unsigned long)ptr;
+	os_info.entry[nr].addr = __pa(ptr);
 	os_info.entry[nr].size = size;
 	os_info.entry[nr].csum = (__force u32)csum_partial(ptr, size, 0);
 	os_info.csum = os_info_csum(&os_info);
@@ -57,13 +57,16 @@ void os_info_entry_add(int nr, void *ptr, u64 size)
  */
 void __init os_info_init(void)
 {
-	void *ptr = &os_info;
+	struct lowcore *abs_lc;
+	unsigned long flags;
 
 	os_info.version_major = OS_INFO_VERSION_MAJOR;
 	os_info.version_minor = OS_INFO_VERSION_MINOR;
 	os_info.magic = OS_INFO_MAGIC;
 	os_info.csum = os_info_csum(&os_info);
-	mem_assign_absolute(S390_lowcore.os_info, (unsigned long) ptr);
+	abs_lc = get_abs_lowcore(&flags);
+	abs_lc->os_info = __pa(&os_info);
+	put_abs_lowcore(abs_lc, flags);
 }
 
 #ifdef CONFIG_CRASH_DUMP

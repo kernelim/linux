@@ -85,12 +85,12 @@ ifndef DISTRO
 endif
 
 ifndef RHJOBS
-  RHJOBS=$(shell j=$$(echo $(MAKEFLAGS) | grep -Eo "\ -j[0-9]*" | xargs ); \
+  RHJOBS=$(shell j=$$(echo $(MAKEFLAGS) | grep -Eo "(^|[ ])-j[0-9]*" | xargs ); \
 	  if [ -z "$${j}" ]; then \
 	  	echo "1"; \
 	  else \
 	  	j=$$(echo "$${j}" | tr -d "\-j"); \
-	  	[ -z "$${j}" ] && nproc --all || echo $${j}; \
+	  	[ -z "$${j}" ] && nproc || echo $${j}; \
 	  fi)
 endif
 
@@ -637,6 +637,7 @@ sources-rh: $(TARBALL) generate-testpatch-tmp setup-source dist-configs-check
 		mod-denylist.sh \
 		mod-internal.list \
 		mod-partner.list \
+		mod-kvm.list \
 		mod-sign.sh \
 		configs/flavors \
 		configs/generate_all_configs.sh \
@@ -647,6 +648,8 @@ sources-rh: $(TARBALL) generate-testpatch-tmp setup-source dist-configs-check
 		README.rst \
 		kernel-local \
 		dracut-virt.conf \
+		uki-sb-cert-x86_64-centos.crt \
+		uki-sb-cert-x86_64-rhel.crt \
 		$(SOURCES)/
 	@for KABIARCH in $(ARCH_LIST); do \
 		cp kabi/Module.kabi_$$KABIARCH $(SOURCES)/; \

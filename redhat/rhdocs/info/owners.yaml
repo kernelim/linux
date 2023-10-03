@@ -93,12 +93,12 @@ subsystems:
      - rhel-sst-kernel-maintainers
    requiredApproval: true
    maintainers:
-     - name: Jarod Wilson
-       email: jarod@redhat.com
-       gluser: jwilsonrh
      - name: Julio Faracco
        email: jfaracco@redhat.com
        gluser: jfaracco
+     - name: Scott Weaver
+       email: scweaver@redhat.com
+       gluser: scweaver
    paths:
        # Focus is on main-automotive branch
        includes:
@@ -1272,12 +1272,12 @@ subsystems:
    qe-sst:
      - rhivos-ft-auto-kernel
    maintainers:
-     - name: Jarod Wilson
-       email: jarod@redhat.com
-       gluser: jwilsonrh
      - name: Julio Faracco
        email: jfaracco@redhat.com
        gluser: jfaracco
+     - name: Scott Weaver
+       email: scweaver@redhat.com
+       gluser: scweaver
    reviewers:
      - name: Adrien Thierry
        email: athierry@redhat.com

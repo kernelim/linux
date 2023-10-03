@@ -1266,7 +1266,7 @@ static int mtk_i2c_probe(struct platform_device *pdev)
 		clk = i2c->clk_pmic;
 	}
 
-	strlcpy(i2c->adap.name, I2C_DRV_NAME, sizeof(i2c->adap.name));
+	strscpy(i2c->adap.name, I2C_DRV_NAME, sizeof(i2c->adap.name));
 
 	ret = mtk_i2c_set_speed(i2c, clk_get_rate(clk));
 	if (ret) {

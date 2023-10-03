@@ -39,6 +39,7 @@
 #include "en_accel/ipsec_rxtx.h"
 #include "en_accel/ktls.h"
 #include "en_accel/ktls_txrx.h"
+#include <en_accel/macsec.h>
 #include "en.h"
 #include "en/txrx.h"
 
@@ -123,7 +124,7 @@ static inline bool mlx5e_accel_tx_begin(struct net_device *dev,
 		mlx5e_udp_gso_handle_tx_skb(skb);
 
 #ifdef CONFIG_MLX5_EN_TLS
-	/* May send SKBs and WQEs. */
+	/* May send WQEs. */
 	if (mlx5e_ktls_skb_offloaded(skb))
 		if (unlikely(!mlx5e_ktls_handle_tx_skb(dev, sq, skb,
 						       &state->tls)))
@@ -133,6 +134,15 @@ static inline bool mlx5e_accel_tx_begin(struct net_device *dev,
 #ifdef CONFIG_MLX5_EN_IPSEC
 	if (test_bit(MLX5E_SQ_STATE_IPSEC, &sq->state) && xfrm_offload(skb)) {
 		if (unlikely(!mlx5e_ipsec_handle_tx_skb(dev, skb, &state->ipsec)))
+			return false;
+	}
+#endif
+
+#ifdef CONFIG_MLX5_EN_MACSEC
+	if (unlikely(mlx5e_macsec_skb_is_offload(skb))) {
+		struct mlx5e_priv *priv = netdev_priv(dev);
+
+		if (unlikely(!mlx5e_macsec_handle_tx_skb(priv->macsec, skb)))
 			return false;
 	}
 #endif
@@ -161,6 +171,11 @@ static inline void mlx5e_accel_tx_eseg(struct mlx5e_priv *priv,
 #ifdef CONFIG_MLX5_EN_IPSEC
 	if (xfrm_offload(skb))
 		mlx5e_ipsec_tx_build_eseg(priv, skb, eseg);
+#endif
+
+#ifdef CONFIG_MLX5_EN_MACSEC
+	if (unlikely(mlx5e_macsec_skb_is_offload(skb)))
+		mlx5e_macsec_tx_build_eseg(priv->macsec, skb, eseg);
 #endif
 
 #if IS_ENABLED(CONFIG_GENEVE)

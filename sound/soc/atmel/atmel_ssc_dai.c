@@ -762,7 +762,6 @@ static int atmel_ssc_trigger(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-#ifdef CONFIG_PM
 static int atmel_ssc_suspend(struct snd_soc_component *component)
 {
 	struct atmel_ssc_info *ssc_p;
@@ -821,10 +820,6 @@ static int atmel_ssc_resume(struct snd_soc_component *component)
 
 	return 0;
 }
-#else /* CONFIG_PM */
-#  define atmel_ssc_suspend	NULL
-#  define atmel_ssc_resume	NULL
-#endif /* CONFIG_PM */
 
 #define ATMEL_SSC_FORMATS (SNDRV_PCM_FMTBIT_S8     | SNDRV_PCM_FMTBIT_S16_LE |\
 			  SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE)
@@ -859,8 +854,8 @@ static struct snd_soc_dai_driver atmel_ssc_dai = {
 
 static const struct snd_soc_component_driver atmel_ssc_component = {
 	.name			= "atmel-ssc",
-	.suspend		= atmel_ssc_suspend,
-	.resume			= atmel_ssc_resume,
+	.suspend		= pm_ptr(atmel_ssc_suspend),
+	.resume			= pm_ptr(atmel_ssc_resume),
 	.legacy_dai_naming	= 1,
 };
 
@@ -896,7 +891,6 @@ static int asoc_ssc_init(struct device *dev)
 int atmel_ssc_set_audio(int ssc_id)
 {
 	struct ssc_device *ssc;
-	int ret;
 
 	/* If we can grab the SSC briefly to parent the DAI device off it */
 	ssc = ssc_request(ssc_id);
@@ -908,9 +902,7 @@ int atmel_ssc_set_audio(int ssc_id)
 		ssc_info[ssc_id].ssc = ssc;
 	}
 
-	ret = asoc_ssc_init(&ssc->pdev->dev);
-
-	return ret;
+	return asoc_ssc_init(&ssc->pdev->dev);
 }
 EXPORT_SYMBOL_GPL(atmel_ssc_set_audio);
 

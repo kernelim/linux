@@ -109,7 +109,6 @@ static int npcm_rng_probe(struct platform_device *pdev)
 	priv->rng.name = pdev->name;
 	priv->rng.read = npcm_rng_read;
 	priv->rng.priv = (unsigned long)&pdev->dev;
-	priv->rng.quality = 1000;
 
 	writel(NPCM_RNG_M1ROSEL, priv->base + NPCM_RNGMODE_REG);
 

@@ -6,6 +6,9 @@
 #include <linux/jump_label.h>
 #endif
 
+
+#define DECLARE_DYNDBG_CLASSMAP(_var, _maptype, _base, ...)
+
 /*
  * An instance of this structure is created in a special
  * ELF section at every dynamic debug callsite.  At runtime,

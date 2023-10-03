@@ -58,7 +58,6 @@
 #include <linux/compiler.h>
 #include <linux/irqflags.h>
 #include <linux/thread_info.h>
-#include <linux/kernel.h>
 #include <linux/stringify.h>
 #include <linux/bottom_half.h>
 #include <linux/lockdep.h>
@@ -476,6 +475,15 @@ extern int _atomic_dec_and_lock_irqsave(atomic_t *atomic, spinlock_t *lock,
 					unsigned long *flags);
 #define atomic_dec_and_lock_irqsave(atomic, lock, flags) \
 		__cond_lock(lock, _atomic_dec_and_lock_irqsave(atomic, lock, &(flags)))
+
+extern int _atomic_dec_and_raw_lock(atomic_t *atomic, raw_spinlock_t *lock);
+#define atomic_dec_and_raw_lock(atomic, lock) \
+		__cond_lock(lock, _atomic_dec_and_raw_lock(atomic, lock))
+
+extern int _atomic_dec_and_raw_lock_irqsave(atomic_t *atomic, raw_spinlock_t *lock,
+					unsigned long *flags);
+#define atomic_dec_and_raw_lock_irqsave(atomic, lock, flags) \
+		__cond_lock(lock, _atomic_dec_and_raw_lock_irqsave(atomic, lock, &(flags)))
 
 int __alloc_bucket_spinlocks(spinlock_t **locks, unsigned int *lock_mask,
 			     size_t max_size, unsigned int cpu_mult,

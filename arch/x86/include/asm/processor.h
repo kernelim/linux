@@ -176,7 +176,8 @@ enum cpuid_regs_idx {
 #define X86_VENDOR_NSC		8
 #define X86_VENDOR_HYGON	9
 #define X86_VENDOR_ZHAOXIN	10
-#define X86_VENDOR_NUM		11
+#define X86_VENDOR_VORTEX	11
+#define X86_VENDOR_NUM		12
 
 #define X86_VENDOR_UNKNOWN	0xff
 
@@ -435,8 +436,6 @@ struct irq_stack {
 	char		stack[IRQ_STACK_SIZE];
 } __aligned(IRQ_STACK_SIZE);
 
-DECLARE_PER_CPU(unsigned long, cpu_current_top_of_stack);
-
 #ifdef CONFIG_X86_64
 struct fixed_percpu_data {
 	/*
@@ -459,8 +458,6 @@ static inline unsigned long cpu_kernelmode_gs_base(int cpu)
 	return (unsigned long)per_cpu(fixed_percpu_data.gs_base, cpu);
 }
 
-DECLARE_PER_CPU(void *, hardirq_stack_ptr);
-DECLARE_PER_CPU(bool, hardirq_stack_inuse);
 extern asmlinkage void ignore_sysret(void);
 
 /* Save actual FS/GS selectors and bases to current->thread */
@@ -469,8 +466,6 @@ void current_save_fsgs(void);
 #ifdef CONFIG_STACKPROTECTOR
 DECLARE_PER_CPU(unsigned long, __stack_chk_guard);
 #endif
-DECLARE_PER_CPU(struct irq_stack *, hardirq_stack_ptr);
-DECLARE_PER_CPU(struct irq_stack *, softirq_stack_ptr);
 #endif	/* !X86_64 */
 
 struct perf_event;
@@ -568,17 +563,17 @@ static __always_inline void native_swapgs(void)
 #endif
 }
 
-static inline unsigned long current_top_of_stack(void)
+static __always_inline unsigned long current_top_of_stack(void)
 {
 	/*
 	 *  We can't read directly from tss.sp0: sp0 on x86_32 is special in
 	 *  and around vm86 mode and sp0 on x86_64 is special because of the
 	 *  entry trampoline.
 	 */
-	return this_cpu_read_stable(cpu_current_top_of_stack);
+	return this_cpu_read_stable(pcpu_hot.top_of_stack);
 }
 
-static inline bool on_thread_stack(void)
+static __always_inline bool on_thread_stack(void)
 {
 	return (unsigned long)(current_top_of_stack() -
 			       current_stack_pointer) < THREAD_SIZE;
@@ -679,10 +674,9 @@ extern int sysenter_setup(void);
 /* Defined in head.S */
 extern struct desc_ptr		early_gdt_descr;
 
-extern void switch_to_new_gdt(int);
+extern void switch_gdt_and_percpu_base(int);
 extern void load_direct_gdt(int);
 extern void load_fixmap_gdt(int);
-extern void load_percpu_segment(int);
 extern void cpu_init(void);
 extern void cpu_init_secondary(void);
 extern void cpu_init_exception_handling(void);

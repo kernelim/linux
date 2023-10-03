@@ -38,9 +38,11 @@ extern struct start_info *xen_start_info;
 
 #include <asm/processor.h>
 
+#define XEN_SIGNATURE "XenVMMXenVMM"
+
 static inline uint32_t xen_cpuid_base(void)
 {
-	return hypervisor_cpuid_base("XenVMMXenVMM", 2);
+	return hypervisor_cpuid_base(XEN_SIGNATURE, 2);
 }
 
 #ifdef CONFIG_XEN
@@ -68,6 +70,11 @@ static inline bool xen_initdom_restore_msi(struct pci_dev *dev) { return true; }
 #ifdef CONFIG_HOTPLUG_CPU
 void xen_arch_register_cpu(int num);
 void xen_arch_unregister_cpu(int num);
+#endif
+
+#ifdef CONFIG_PVH
+void __init xen_pvh_init(struct boot_params *boot_params);
+void __init mem_map_via_hcall(struct boot_params *boot_params_p);
 #endif
 
 #endif /* _ASM_X86_XEN_HYPERVISOR_H */

@@ -67,7 +67,7 @@ module_param(enable_dma, int, 0444);
 MODULE_PARM_DESC(enable_dma,
 		 "Enable use of DMA on interfaces that support it (0=no dma [default], 1=use dma)");
 
-/**
+/*
  * Convert nanosecond based time to setting used in the
  * boot bus timing register, based on timing multiple
  */
@@ -114,7 +114,7 @@ static void octeon_cf_set_boot_reg_cfg(int cs, unsigned int multiplier)
 	cvmx_write_csr(CVMX_MIO_BOOT_REG_CFGX(cs), reg_cfg.u64);
 }
 
-/**
+/*
  * Called after libata determines the needed PIO mode. This
  * function programs the Octeon bootbus regions to support the
  * timing requirements of the PIO mode.
@@ -278,7 +278,7 @@ static void octeon_cf_set_dmamode(struct ata_port *ap, struct ata_device *dev)
 	cvmx_write_csr(cf_port->dma_base + DMA_TIM, dma_tim.u64);
 }
 
-/**
+/*
  * Handle an 8 bit I/O request.
  *
  * @qc:         Queued command
@@ -317,7 +317,7 @@ static unsigned int octeon_cf_data_xfer8(struct ata_queued_cmd *qc,
 	return buflen;
 }
 
-/**
+/*
  * Handle a 16 bit I/O request.
  *
  * @qc:         Queued command
@@ -372,7 +372,7 @@ static unsigned int octeon_cf_data_xfer16(struct ata_queued_cmd *qc,
 	return buflen;
 }
 
-/**
+/*
  * Read the taskfile for 16bit non-True IDE only.
  */
 static void octeon_cf_tf_read16(struct ata_port *ap, struct ata_taskfile *tf)
@@ -453,7 +453,7 @@ static int octeon_cf_softreset16(struct ata_link *link, unsigned int *classes,
 	return 0;
 }
 
-/**
+/*
  * Load the taskfile for 16bit non-True IDE only.  The device_addr is
  * not loaded, we do this as part of octeon_cf_exec_command16.
  */
@@ -525,7 +525,7 @@ static void octeon_cf_dma_setup(struct ata_queued_cmd *qc)
 	ap->ops->sff_exec_command(ap, &qc->tf);
 }
 
-/**
+/*
  * Start a DMA transfer that was already setup
  *
  * @qc:     Information about the DMA
@@ -580,7 +580,7 @@ static void octeon_cf_dma_start(struct ata_queued_cmd *qc)
 	cvmx_write_csr(cf_port->dma_base + DMA_CFG, mio_boot_dma_cfg.u64);
 }
 
-/**
+/*
  *
  *	LOCKING:
  *	spin_lock_irqsave(host lock)
@@ -856,12 +856,14 @@ static int octeon_cf_probe(struct platform_device *pdev)
 				int i;
 				res_dma = platform_get_resource(dma_dev, IORESOURCE_MEM, 0);
 				if (!res_dma) {
+					put_device(&dma_dev->dev);
 					of_node_put(dma_node);
 					return -EINVAL;
 				}
 				cf_port->dma_base = (u64)devm_ioremap(&pdev->dev, res_dma->start,
 									 resource_size(res_dma));
 				if (!cf_port->dma_base) {
+					put_device(&dma_dev->dev);
 					of_node_put(dma_node);
 					return -EINVAL;
 				}
@@ -871,6 +873,7 @@ static int octeon_cf_probe(struct platform_device *pdev)
 					irq = i;
 					irq_handler = octeon_cf_interrupt;
 				}
+				put_device(&dma_dev->dev);
 			}
 			of_node_put(dma_node);
 		}

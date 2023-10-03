@@ -4,7 +4,7 @@
 [ "$DISTRO" != "fedora" ] && _GITID="$GITID" || _GITID="$MARKER"
 
 # shellcheck disable=SC1083
-XZ_THREADS=$(rpm --eval %{_smp_mflags} | sed -e 's!^-j!--threads !')
+XZ_THREADS="--threads $RHJOBS"
 
 ARCH=$(arch)
 XZ_OPTIONS=""

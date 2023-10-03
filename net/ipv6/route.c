@@ -130,6 +130,7 @@ static struct fib6_info *rt6_get_route_info(struct net *net,
 struct uncached_list {
 	spinlock_t		lock;
 	struct list_head	head;
+	struct list_head	quarantine;
 };
 
 static DEFINE_PER_CPU_ALIGNED(struct uncached_list, rt6_uncached_list);
@@ -149,43 +150,46 @@ void rt6_uncached_list_del(struct rt6_info *rt)
 {
 	if (!list_empty(&rt->rt6i_uncached)) {
 		struct uncached_list *ul = rt->rt6i_uncached_list;
-		struct net *net = dev_net(rt->dst.dev);
 
 		spin_lock_bh(&ul->lock);
-		list_del(&rt->rt6i_uncached);
-		atomic_dec(&net->ipv6.rt6_stats->fib_rt_uncache);
+		list_del_init(&rt->rt6i_uncached);
 		spin_unlock_bh(&ul->lock);
 	}
 }
 
-static void rt6_uncached_list_flush_dev(struct net *net, struct net_device *dev)
+static void rt6_uncached_list_flush_dev(struct net_device *dev)
 {
-	struct net_device *loopback_dev = net->loopback_dev;
 	int cpu;
-
-	if (dev == loopback_dev)
-		return;
 
 	for_each_possible_cpu(cpu) {
 		struct uncached_list *ul = per_cpu_ptr(&rt6_uncached_list, cpu);
-		struct rt6_info *rt;
+		struct rt6_info *rt, *safe;
+
+		if (list_empty(&ul->head))
+			continue;
 
 		spin_lock_bh(&ul->lock);
-		list_for_each_entry(rt, &ul->head, rt6i_uncached) {
+		list_for_each_entry_safe(rt, safe, &ul->head, rt6i_uncached) {
 			struct inet6_dev *rt_idev = rt->rt6i_idev;
 			struct net_device *rt_dev = rt->dst.dev;
+			bool handled = false;
 
 			if (rt_idev->dev == dev) {
-				rt->rt6i_idev = in6_dev_get(loopback_dev);
+				rt->rt6i_idev = in6_dev_get(blackhole_netdev);
 				in6_dev_put(rt_idev);
+				handled = true;
 			}
 
 			if (rt_dev == dev) {
 				rt->dst.dev = blackhole_netdev;
-				dev_replace_track(rt_dev, blackhole_netdev,
-						  &rt->dst.dev_tracker,
-						  GFP_ATOMIC);
+				netdev_ref_replace(rt_dev, blackhole_netdev,
+						   &rt->dst.dev_tracker,
+						   GFP_ATOMIC);
+				handled = true;
 			}
+			if (handled)
+				list_move(&rt->rt6i_uncached,
+					  &ul->quarantine);
 		}
 		spin_unlock_bh(&ul->lock);
 	}
@@ -373,13 +377,12 @@ static void ip6_dst_ifdown(struct dst_entry *dst, struct net_device *dev,
 {
 	struct rt6_info *rt = (struct rt6_info *)dst;
 	struct inet6_dev *idev = rt->rt6i_idev;
-	struct net_device *loopback_dev =
-		dev_net(dev)->loopback_dev;
 
-	if (idev && idev->dev != loopback_dev) {
-		struct inet6_dev *loopback_idev = in6_dev_get(loopback_dev);
-		if (loopback_idev) {
-			rt->rt6i_idev = loopback_idev;
+	if (idev && idev->dev != blackhole_netdev) {
+		struct inet6_dev *blackhole_idev = in6_dev_get(blackhole_netdev);
+
+		if (blackhole_idev) {
+			rt->rt6i_idev = blackhole_idev;
 			in6_dev_put(idev);
 		}
 	}
@@ -604,7 +607,7 @@ static void rt6_probe_deferred(struct work_struct *w)
 
 	addrconf_addr_solict_mult(&work->target, &mcaddr);
 	ndisc_send_ns(work->dev, &work->target, &mcaddr, NULL, 0);
-	dev_put_track(work->dev, &work->dev_tracker);
+	netdev_put(work->dev, &work->dev_tracker);
 	kfree(work);
 }
 
@@ -658,7 +661,7 @@ static void rt6_probe(struct fib6_nh *fib6_nh)
 	} else {
 		INIT_WORK(&work->work, rt6_probe_deferred);
 		work->target = *nh_gw;
-		dev_hold_track(dev, &work->dev_tracker, GFP_ATOMIC);
+		netdev_hold(dev, &work->dev_tracker, GFP_ATOMIC);
 		work->dev = dev;
 		schedule_work(&work->work);
 	}
@@ -2238,7 +2241,6 @@ struct rt6_info *ip6_pol_route(struct net *net, struct fib6_table *table,
 			 * if caller sets RT6_LOOKUP_F_DST_NOREF flag.
 			 */
 			rt6_uncached_list_add(rt);
-			atomic_inc(&net->ipv6.rt6_stats->fib_rt_uncache);
 			rcu_read_unlock();
 
 			return rt;
@@ -3293,7 +3295,6 @@ struct dst_entry *icmp6_dst_alloc(struct net_device *dev,
 	 * do proper release of the net_device
 	 */
 	rt6_uncached_list_add(rt);
-	atomic_inc(&net->ipv6.rt6_stats->fib_rt_uncache);
 
 	dst = xfrm_lookup(net, &rt->dst, flowi6_to_flowi(fl6), NULL, 0);
 
@@ -4923,7 +4924,7 @@ void rt6_sync_down_dev(struct net_device *dev, unsigned long event)
 void rt6_disable_ip(struct net_device *dev, unsigned long event)
 {
 	rt6_sync_down_dev(dev, event);
-	rt6_uncached_list_flush_dev(dev_net(dev), dev);
+	rt6_uncached_list_flush_dev(dev);
 	neigh_ifdown(&nd_tbl, dev);
 }
 
@@ -5560,16 +5561,17 @@ static size_t rt6_nlmsg_size(struct fib6_info *f6i)
 		nexthop_for_each_fib6_nh(f6i->nh, rt6_nh_nlmsg_size,
 					 &nexthop_len);
 	} else {
+		struct fib6_info *sibling, *next_sibling;
 		struct fib6_nh *nh = f6i->fib6_nh;
 
 		nexthop_len = 0;
 		if (f6i->fib6_nsiblings) {
-			nexthop_len = nla_total_size(0)	 /* RTA_MULTIPATH */
-				    + NLA_ALIGN(sizeof(struct rtnexthop))
-				    + nla_total_size(16) /* RTA_GATEWAY */
-				    + lwtunnel_get_encap_size(nh->fib_nh_lws);
+			rt6_nh_nlmsg_size(nh, &nexthop_len);
 
-			nexthop_len *= f6i->fib6_nsiblings;
+			list_for_each_entry_safe(sibling, next_sibling,
+						 &f6i->fib6_siblings, fib6_siblings) {
+				rt6_nh_nlmsg_size(sibling->fib6_nh, &nexthop_len);
+			}
 		}
 		nexthop_len += lwtunnel_get_encap_size(nh->fib_nh_lws);
 	}
@@ -6764,6 +6766,7 @@ int __init ip6_route_init(void)
 		struct uncached_list *ul = per_cpu_ptr(&rt6_uncached_list, cpu);
 
 		INIT_LIST_HEAD(&ul->head);
+		INIT_LIST_HEAD(&ul->quarantine);
 		spin_lock_init(&ul->lock);
 	}
 

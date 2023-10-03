@@ -274,8 +274,8 @@ do {									\
 	unsigned int __gu_low, __gu_high;				\
 	const unsigned int __user *__gu_ptr;				\
 	__gu_ptr = (const void __user *)(ptr);				\
-	__get_user_asm(__gu_low, ptr, "l", "=r", label);		\
-	__get_user_asm(__gu_high, ptr+1, "l", "=r", label);		\
+	__get_user_asm(__gu_low, __gu_ptr, "l", "=r", label);		\
+	__get_user_asm(__gu_high, __gu_ptr+1, "l", "=r", label);	\
 	(x) = ((unsigned long long)__gu_high << 32) | __gu_low;		\
 } while (0)
 #else
@@ -287,11 +287,12 @@ do {									\
 do {									\
 	__chk_user_ptr(ptr);						\
 	switch (size) {							\
-	unsigned char x_u8__;						\
-	case 1:								\
+	case 1:	{							\
+		unsigned char x_u8__;					\
 		__get_user_asm(x_u8__, ptr, "b", "=q", label);		\
 		(x) = x_u8__;						\
 		break;							\
+	}								\
 	case 2:								\
 		__get_user_asm(x, ptr, "w", "=r", label);		\
 		break;							\
@@ -379,7 +380,7 @@ do {									\
 		     : [umem] "m" (__m(addr)),				\
 		       "0" (err))
 
-#endif // CONFIG_CC_ASM_GOTO_OUTPUT
+#endif // CONFIG_CC_HAS_ASM_GOTO_OUTPUT
 
 #ifdef CONFIG_CC_HAS_ASM_GOTO_TIED_OUTPUT
 #define __try_cmpxchg_user_asm(itype, ltype, _ptr, _pold, _new, label)	({ \
@@ -501,9 +502,6 @@ strncpy_from_user(char *dst, const char __user *src, long count);
 
 extern __must_check long strnlen_user(const char __user *str, long n);
 
-unsigned long __must_check clear_user(void __user *mem, unsigned long len);
-unsigned long __must_check __clear_user(void __user *mem, unsigned long len);
-
 #ifdef CONFIG_ARCH_HAS_COPY_MC
 unsigned long __must_check
 copy_mc_to_kernel(void *to, const void *from, unsigned len);
@@ -525,6 +523,8 @@ extern struct movsl_mask {
 #define ARCH_HAS_NOCACHE_UACCESS 1
 
 #ifdef CONFIG_X86_32
+unsigned long __must_check clear_user(void __user *mem, unsigned long len);
+unsigned long __must_check __clear_user(void __user *mem, unsigned long len);
 # include <asm/uaccess_32.h>
 #else
 # include <asm/uaccess_64.h>

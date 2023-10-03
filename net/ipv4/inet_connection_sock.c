@@ -963,6 +963,7 @@ struct sock *inet_csk_clone_lock(const struct sock *sk,
 	if (newsk) {
 		struct inet_connection_sock *newicsk = inet_csk(newsk);
 
+		newsk->sk_wait_pending = 0;
 		inet_sk_set_state(newsk, TCP_SYN_RECV);
 		newicsk->icsk_bind_hash = NULL;
 
@@ -1064,9 +1065,6 @@ int inet_csk_listen_start(struct sock *sk, int backlog)
 
 	sk->sk_ack_backlog = 0;
 	inet_csk_delack_init(sk);
-
-	if (sk->sk_txrehash == SOCK_TXREHASH_DEFAULT)
-		sk->sk_txrehash = READ_ONCE(sock_net(sk)->core.sysctl_txrehash);
 
 	/* There is race window here: we announce ourselves listening,
 	 * but this transition is still not validated by get_port().

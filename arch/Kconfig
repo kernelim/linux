@@ -24,6 +24,13 @@ config KEXEC_ELF
 config HAVE_IMA_KEXEC
 	bool
 
+config ARCH_HAS_SUBPAGE_FAULTS
+	bool
+	help
+	  Select if the architecture can check permissions at sub-page
+	  granularity (e.g. arm64 MTE). The probe_user_*() functions
+	  must be implemented.
+
 config HOTPLUG_SMT
 	bool
 
@@ -210,6 +217,9 @@ config HAVE_FUNCTION_ERROR_INJECTION
 config HAVE_NMI
 	bool
 
+config TRACE_IRQFLAGS_SUPPORT
+	bool
+
 #
 # An arch should select this if it provides all these things:
 #
@@ -268,6 +278,9 @@ config ARCH_HAS_DMA_SET_UNCACHED
 # to undo an in-place page table remap for uncached access.
 #
 config ARCH_HAS_DMA_CLEAR_UNCACHED
+	bool
+
+config ARCH_HAS_CPU_FINALIZE_INIT
 	bool
 
 # Select if arch init_task must go in the __init_task_data section
@@ -771,7 +784,7 @@ config HAVE_ARCH_WITHIN_STACK_FRAMES
 	  and similar) by implementing an inline arch_within_stack_frames(),
 	  which is used by CONFIG_HARDENED_USERCOPY.
 
-config HAVE_CONTEXT_TRACKING
+config HAVE_CONTEXT_TRACKING_USER
 	bool
 	help
 	  Provide kernel/user boundaries probes necessary for subsystems
@@ -779,10 +792,10 @@ config HAVE_CONTEXT_TRACKING
 	  Syscalls need to be wrapped inside user_exit()-user_enter(), either
 	  optimized behind static key or through the slow path using TIF_NOHZ
 	  flag. Exceptions handlers must be wrapped as well. Irqs are already
-	  protected inside rcu_irq_enter/rcu_irq_exit() but preemption or signal
+	  protected inside ct_irq_enter/ct_irq_exit() but preemption or signal
 	  handling on irq exit still need to be protected.
 
-config HAVE_CONTEXT_TRACKING_OFFSTACK
+config HAVE_CONTEXT_TRACKING_USER_OFFSTACK
 	bool
 	help
 	  Architecture neither relies on exception_enter()/exception_exit()
@@ -794,7 +807,7 @@ config HAVE_CONTEXT_TRACKING_OFFSTACK
 
 	  - Critical entry code isn't preemptible (or better yet:
 	    not interruptible).
-	  - No use of RCU read side critical sections, unless rcu_nmi_enter()
+	  - No use of RCU read side critical sections, unless ct_nmi_enter()
 	    got called.
 	  - No use of instrumentation, unless instrumentation_begin() got
 	    called.
@@ -904,6 +917,9 @@ config HAVE_SOFTIRQ_ON_OWN_STACK
 	help
 	  Architecture provides a function to run __do_softirq() on a
 	  seperate stack.
+
+config SOFTIRQ_ON_OWN_STACK
+	def_bool HAVE_SOFTIRQ_ON_OWN_STACK && !PREEMPT_RT
 
 config ALTERNATE_USER_ADDRESS_SPACE
 	bool
@@ -1357,6 +1373,9 @@ config ARCH_HAS_ELFCORE_COMPAT
 config ARCH_HAS_PARANOID_L1D_FLUSH
 	bool
 
+config ARCH_HAVE_TRACE_MMIO_ACCESS
+	bool
+
 config DYNAMIC_SIGFRAME
 	bool
 
@@ -1367,5 +1386,29 @@ config HAVE_ARCH_NODE_DEV_GROUP
 source "kernel/gcov/Kconfig"
 
 source "scripts/gcc-plugins/Kconfig"
+
+config FUNCTION_ALIGNMENT_4B
+	bool
+
+config FUNCTION_ALIGNMENT_8B
+	bool
+
+config FUNCTION_ALIGNMENT_16B
+	bool
+
+config FUNCTION_ALIGNMENT_32B
+	bool
+
+config FUNCTION_ALIGNMENT_64B
+	bool
+
+config FUNCTION_ALIGNMENT
+	int
+	default 64 if FUNCTION_ALIGNMENT_64B
+	default 32 if FUNCTION_ALIGNMENT_32B
+	default 16 if FUNCTION_ALIGNMENT_16B
+	default 8 if FUNCTION_ALIGNMENT_8B
+	default 4 if FUNCTION_ALIGNMENT_4B
+	default 0
 
 endmenu

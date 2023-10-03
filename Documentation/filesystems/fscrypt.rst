@@ -1189,7 +1189,7 @@ keys`_ and `DIRECT_KEY policies`_.
 Data path changes
 -----------------
 
-For the read path (->readpage()) of regular files, filesystems can
+For the read path (->read_folio()) of regular files, filesystems can
 read the ciphertext into the page cache and decrypt it in-place.  The
 page lock must be held until decryption has finished, to prevent the
 page from becoming visible to userspace prematurely.

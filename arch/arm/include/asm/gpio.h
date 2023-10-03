@@ -6,7 +6,6 @@
 #define ARCH_NR_GPIOS CONFIG_ARCH_NR_GPIO
 #endif
 
-/* Note: this may rely upon the value of ARCH_NR_GPIOS set in mach/gpio.h */
 #include <asm-generic/gpio.h>
 
 /* The trivial gpiolib dispatchers */

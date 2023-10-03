@@ -73,6 +73,11 @@ int mlx5e_poll_rx_cq(struct mlx5e_cq *cq, int budget);
 void mlx5e_free_rx_descs(struct mlx5e_rq *rq);
 void mlx5e_free_rx_in_progress_descs(struct mlx5e_rq *rq);
 
+static inline bool mlx5e_rx_hw_stamp(struct hwtstamp_config *config)
+{
+	return config->rx_filter == HWTSTAMP_FILTER_ALL;
+}
+
 /* TX */
 netdev_tx_t mlx5e_xmit(struct sk_buff *skb, struct net_device *dev);
 bool mlx5e_poll_tx_cq(struct mlx5e_cq *cq, int napi_budget);
@@ -81,7 +86,7 @@ void mlx5e_free_txqsq_descs(struct mlx5e_txqsq *sq);
 static inline bool
 mlx5e_skb_fifo_has_room(struct mlx5e_skb_fifo *fifo)
 {
-	return (*fifo->pc - *fifo->cc) < fifo->mask;
+	return (u16)(*fifo->pc - *fifo->cc) < fifo->mask;
 }
 
 static inline bool
@@ -176,6 +181,8 @@ static inline u16 mlx5e_txqsq_get_next_pi(struct mlx5e_txqsq *sq, u16 size)
 
 	return pi;
 }
+
+void mlx5e_txqsq_wake(struct mlx5e_txqsq *sq);
 
 static inline u16 mlx5e_shampo_get_cqe_header_index(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 {
@@ -297,6 +304,8 @@ void mlx5e_skb_fifo_push(struct mlx5e_skb_fifo *fifo, struct sk_buff *skb)
 static inline
 struct sk_buff *mlx5e_skb_fifo_pop(struct mlx5e_skb_fifo *fifo)
 {
+	WARN_ON_ONCE(*fifo->pc == *fifo->cc);
+
 	return *mlx5e_skb_fifo_get(fifo, (*fifo->cc)++);
 }
 
@@ -315,7 +324,6 @@ mlx5e_tx_dma_unmap(struct device *pdev, struct mlx5e_sq_dma *dma)
 	}
 }
 
-void mlx5e_sq_xmit_simple(struct mlx5e_txqsq *sq, struct sk_buff *skb, bool xmit_more);
 void mlx5e_tx_mpwqe_ensure_complete(struct mlx5e_txqsq *sq);
 
 static inline bool mlx5e_tx_mpwqe_is_full(struct mlx5e_tx_mpwqe *session, u8 max_sq_mpw_wqebbs)
@@ -445,7 +453,7 @@ mlx5e_set_eseg_swp(struct sk_buff *skb, struct mlx5_wqe_eth_seg *eseg,
 
 static inline u16 mlx5e_stop_room_for_wqe(struct mlx5_core_dev *mdev, u16 wqe_size)
 {
-	WARN_ON_ONCE(PAGE_SIZE / MLX5_SEND_WQE_BB < mlx5e_get_max_sq_wqebbs(mdev));
+	WARN_ON_ONCE(PAGE_SIZE / MLX5_SEND_WQE_BB < (u16)mlx5e_get_max_sq_wqebbs(mdev));
 
 	/* A WQE must not cross the page boundary, hence two conditions:
 	 * 1. Its size must not exceed the page size.
@@ -467,16 +475,24 @@ static inline u16 mlx5e_stop_room_for_max_wqe(struct mlx5_core_dev *mdev)
 	return MLX5E_STOP_ROOM(mlx5e_get_max_sq_wqebbs(mdev));
 }
 
+static inline u16 mlx5e_stop_room_for_mpwqe(struct mlx5_core_dev *mdev)
+{
+	u8 mpwqe_wqebbs = mlx5e_get_max_sq_aligned_wqebbs(mdev);
+
+	return mlx5e_stop_room_for_wqe(mdev, mpwqe_wqebbs);
+}
+
 static inline bool mlx5e_icosq_can_post_wqe(struct mlx5e_icosq *sq, u16 wqe_size)
 {
-	u16 room = sq->reserved_room;
-
-	WARN_ONCE(wqe_size > sq->max_sq_wqebbs,
-		  "wqe_size %u is greater than max SQ WQEBBs %u",
-		  wqe_size, sq->max_sq_wqebbs);
-
-	room += MLX5E_STOP_ROOM(wqe_size);
+	u16 room = sq->reserved_room + MLX5E_STOP_ROOM(wqe_size);
 
 	return mlx5e_wqc_has_room_for(&sq->wq, sq->cc, sq->pc, room);
+}
+
+static inline struct mlx5e_mpw_info *mlx5e_get_mpw_info(struct mlx5e_rq *rq, int i)
+{
+	size_t isz = struct_size(rq->mpwqe.info, alloc_units, rq->mpwqe.pages_per_wqe);
+
+	return (struct mlx5e_mpw_info *)((char *)rq->mpwqe.info + array_size(i, isz));
 }
 #endif

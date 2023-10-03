@@ -724,9 +724,7 @@ static int smaps_hugetlb_range(pte_t *pte, unsigned long hmask,
 			page = pfn_swap_entry_to_page(swpent);
 	}
 	if (page) {
-		int mapcount = page_mapcount(page);
-
-		if (mapcount >= 2)
+		if (page_mapcount(page) >= 2 || hugetlb_pmd_shared(pte))
 			mss->shared_hugetlb += huge_page_size(hstate_vma(vma));
 		else
 			mss->private_hugetlb += huge_page_size(hstate_vma(vma));
@@ -856,7 +854,7 @@ static int show_smap(struct seq_file *m, void *v)
 	__show_smap(m, &mss, false);
 
 	seq_printf(m, "THPeligible:    %d\n",
-		   transparent_hugepage_active(vma));
+		   hugepage_vma_check(vma, vma->vm_flags, true, false));
 
 	if (arch_pkeys_enabled())
 		seq_printf(m, "ProtectionKey:  %8u\n", vma_pkey(vma));
@@ -1410,9 +1408,19 @@ static pagemap_entry_t pte_to_pagemap_entry(struct pagemapread *pm,
 		if (pte_swp_uffd_wp(pte))
 			flags |= PM_UFFD_WP;
 		entry = pte_to_swp_entry(pte);
-		if (pm->show_pfn)
+		if (pm->show_pfn) {
+			pgoff_t offset;
+			/*
+			 * For PFN swap offsets, keeping the offset field
+			 * to be PFN only to be compatible with old smaps.
+			 */
+			if (is_pfn_swap_entry(entry))
+				offset = swp_offset_pfn(entry);
+			else
+				offset = swp_offset(entry);
 			frame = swp_type(entry) |
-				(swp_offset(entry) << MAX_SWAPFILES_SHIFT);
+			    (offset << MAX_SWAPFILES_SHIFT);
+		}
 		flags |= PM_SWAP;
 		migration = is_migration_entry(entry);
 		if (is_pfn_swap_entry(entry))
@@ -1467,7 +1475,11 @@ static int pagemap_pmd_range(pmd_t *pmdp, unsigned long addr, unsigned long end,
 			unsigned long offset;
 
 			if (pm->show_pfn) {
-				offset = swp_offset(entry) +
+				if (is_pfn_swap_entry(entry))
+					offset = swp_offset_pfn(entry);
+				else
+					offset = swp_offset(entry);
+				offset = offset +
 					((addr & ~PMD_MASK) >> PAGE_SHIFT);
 				frame = swp_type(entry) |
 					(offset << MAX_SWAPFILES_SHIFT);

@@ -64,8 +64,7 @@ struct readdir_cd {
 
 
 extern struct svc_program	nfsd_program;
-extern const struct svc_version	nfsd_version2, nfsd_version3,
-				nfsd_version4;
+extern const struct svc_version	nfsd_version2, nfsd_version3, nfsd_version4;
 extern struct mutex		nfsd_mutex;
 extern spinlock_t		nfsd_drc_lock;
 extern unsigned long		nfsd_drc_max_mem;
@@ -87,7 +86,7 @@ bool		nfssvc_encode_voidres(struct svc_rqst *rqstp,
  * Function prototypes.
  */
 int		nfsd_svc(int nrservs, struct net *net, const struct cred *cred);
-int		nfsd_dispatch(struct svc_rqst *rqstp, __be32 *statp);
+int		nfsd_dispatch(struct svc_rqst *rqstp);
 
 int		nfsd_nrthreads(struct net *);
 int		nfsd_nrpools(struct net *);
@@ -164,6 +163,7 @@ char * nfs4_recoverydir(void);
 bool nfsd4_spo_must_allow(struct svc_rqst *rqstp);
 int nfsd4_create_laundry_wq(void);
 void nfsd4_destroy_laundry_wq(void);
+bool nfsd_wait_for_delegreturn(struct svc_rqst *rqstp, struct inode *inode);
 #else
 static inline int nfsd4_init_slabs(void) { return 0; }
 static inline void nfsd4_free_slabs(void) { }
@@ -179,6 +179,11 @@ static inline bool nfsd4_spo_must_allow(struct svc_rqst *rqstp)
 }
 static inline int nfsd4_create_laundry_wq(void) { return 0; };
 static inline void nfsd4_destroy_laundry_wq(void) {};
+static inline bool nfsd_wait_for_delegreturn(struct svc_rqst *rqstp,
+					      struct inode *inode)
+{
+	return false;
+}
 #endif
 
 /*
@@ -340,6 +345,10 @@ void		nfsd_lockd_shutdown(void);
 #define COMPOUND_ERR_SLACK_SPACE	16     /* OP_SETATTR */
 
 #define NFSD_LAUNDROMAT_MINTIMEOUT      1   /* seconds */
+#define	NFSD_COURTESY_CLIENT_TIMEOUT	(24 * 60 * 60)	/* seconds */
+#define	NFSD_CLIENT_MAX_TRIM_PER_RUN	128
+#define	NFS4_CLIENTS_PER_GB		1024
+#define NFSD_DELEGRETURN_TIMEOUT	(HZ / 34)	/* 30ms */
 
 /*
  * The following attributes are currently not supported by the NFSv4 server:
@@ -503,7 +512,7 @@ static inline int nfsd4_is_junction(struct dentry *dentry)
 	return 0;
 }
 
-static inline void nfsd4_init_leases_net(struct nfsd_net *nn) {};
+static inline void nfsd4_init_leases_net(struct nfsd_net *nn) { };
 
 #define register_cld_notifier() 0
 #define unregister_cld_notifier() do { } while(0)

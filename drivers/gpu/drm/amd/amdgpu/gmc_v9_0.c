@@ -484,6 +484,14 @@ static int gmc_v9_0_vm_fault_interrupt_state(struct amdgpu_device *adev,
 			for (i = 0; i < 16; i++) {
 				reg = hub->vm_context0_cntl + i;
 
+				/* This works because this interrupt is only
+				 * enabled at init/resume and disabled in
+				 * fini/suspend, so the overall state doesn't
+				 * change over the course of suspend/resume.
+				 */
+				if (adev->in_s0ix && (j == AMDGPU_GFXHUB_0))
+					continue;
+
 				if (j == AMDGPU_GFXHUB_0)
 					tmp = RREG32_SOC15_IP(GC, reg);
 				else
@@ -503,6 +511,14 @@ static int gmc_v9_0_vm_fault_interrupt_state(struct amdgpu_device *adev,
 			hub = &adev->vmhub[j];
 			for (i = 0; i < 16; i++) {
 				reg = hub->vm_context0_cntl + i;
+
+				/* This works because this interrupt is only
+				 * enabled at init/resume and disabled in
+				 * fini/suspend, so the overall state doesn't
+				 * change over the course of suspend/resume.
+				 */
+				if (adev->in_s0ix && (j == AMDGPU_GFXHUB_0))
+					continue;
 
 				if (j == AMDGPU_GFXHUB_0)
 					tmp = RREG32_SOC15_IP(GC, reg);
@@ -537,32 +553,49 @@ static int gmc_v9_0_process_interrupt(struct amdgpu_device *adev,
 	const char *mmhub_cid;
 	const char *hub_name;
 	u64 addr;
+	uint32_t cam_index = 0;
+	int ret;
 
 	addr = (u64)entry->src_data[0] << 12;
 	addr |= ((u64)entry->src_data[1] & 0xf) << 44;
 
 	if (retry_fault) {
-		/* Returning 1 here also prevents sending the IV to the KFD */
+		if (adev->irq.retry_cam_enabled) {
+			/* Delegate it to a different ring if the hardware hasn't
+			 * already done it.
+			 */
+			if (entry->ih == &adev->irq.ih) {
+				amdgpu_irq_delegate(adev, entry, 8);
+				return 1;
+			}
 
-		/* Process it onyl if it's the first fault for this address */
-		if (entry->ih != &adev->irq.ih_soft &&
-		    amdgpu_gmc_filter_faults(adev, entry->ih, addr, entry->pasid,
+			cam_index = entry->src_data[2] & 0x3ff;
+
+			ret = amdgpu_vm_handle_fault(adev, entry->pasid, addr, write_fault);
+			WDOORBELL32(adev->irq.retry_cam_doorbell_index, cam_index);
+			if (ret)
+				return 1;
+		} else {
+			/* Process it onyl if it's the first fault for this address */
+			if (entry->ih != &adev->irq.ih_soft &&
+			    amdgpu_gmc_filter_faults(adev, entry->ih, addr, entry->pasid,
 					     entry->timestamp))
-			return 1;
+				return 1;
 
-		/* Delegate it to a different ring if the hardware hasn't
-		 * already done it.
-		 */
-		if (entry->ih == &adev->irq.ih) {
-			amdgpu_irq_delegate(adev, entry, 8);
-			return 1;
+			/* Delegate it to a different ring if the hardware hasn't
+			 * already done it.
+			 */
+			if (entry->ih == &adev->irq.ih) {
+				amdgpu_irq_delegate(adev, entry, 8);
+				return 1;
+			}
+
+			/* Try to handle the recoverable page faults by filling page
+			 * tables
+			 */
+			if (amdgpu_vm_handle_fault(adev, entry->pasid, addr, write_fault))
+				return 1;
 		}
-
-		/* Try to handle the recoverable page faults by filling page
-		 * tables
-		 */
-		if (amdgpu_vm_handle_fault(adev, entry->pasid, addr, write_fault))
-			return 1;
 	}
 
 	if (!printk_ratelimit())
@@ -1113,10 +1146,80 @@ static void gmc_v9_0_get_vm_pde(struct amdgpu_device *adev, int level,
 	}
 }
 
+static void gmc_v9_0_get_coherence_flags(struct amdgpu_device *adev,
+					 struct amdgpu_bo *bo,
+					 struct amdgpu_bo_va_mapping *mapping,
+					 uint64_t *flags)
+{
+	struct amdgpu_device *bo_adev = amdgpu_ttm_adev(bo->tbo.bdev);
+	bool is_vram = bo->tbo.resource->mem_type == TTM_PL_VRAM;
+	bool coherent = bo->flags & AMDGPU_GEM_CREATE_COHERENT;
+	bool uncached = bo->flags & AMDGPU_GEM_CREATE_UNCACHED;
+	unsigned int mtype;
+	bool snoop = false;
+
+	switch (adev->ip_versions[GC_HWIP][0]) {
+	case IP_VERSION(9, 4, 1):
+	case IP_VERSION(9, 4, 2):
+		if (is_vram) {
+			if (bo_adev == adev) {
+				if (uncached)
+					mtype = MTYPE_UC;
+				else if (coherent)
+					mtype = MTYPE_CC;
+				else
+					mtype = MTYPE_RW;
+				/* FIXME: is this still needed? Or does
+				 * amdgpu_ttm_tt_pde_flags already handle this?
+				 */
+				if (adev->ip_versions[GC_HWIP][0] ==
+					IP_VERSION(9, 4, 2) &&
+				    adev->gmc.xgmi.connected_to_cpu)
+					snoop = true;
+			} else {
+				if (uncached || coherent)
+					mtype = MTYPE_UC;
+				else
+					mtype = MTYPE_NC;
+				if (mapping->bo_va->is_xgmi)
+					snoop = true;
+			}
+		} else {
+			if (uncached || coherent)
+				mtype = MTYPE_UC;
+			else
+				mtype = MTYPE_NC;
+			/* FIXME: is this still needed? Or does
+			 * amdgpu_ttm_tt_pde_flags already handle this?
+			 */
+			snoop = true;
+		}
+		break;
+	default:
+		if (uncached || coherent)
+			mtype = MTYPE_UC;
+		else
+			mtype = MTYPE_NC;
+
+		/* FIXME: is this still needed? Or does
+		 * amdgpu_ttm_tt_pde_flags already handle this?
+		 */
+		if (!is_vram)
+			snoop = true;
+	}
+
+	if (mtype != MTYPE_NC)
+		*flags = (*flags & ~AMDGPU_PTE_MTYPE_VG10_MASK) |
+			 AMDGPU_PTE_MTYPE_VG10(mtype);
+	*flags |= snoop ? AMDGPU_PTE_SNOOPED : 0;
+}
+
 static void gmc_v9_0_get_vm_pte(struct amdgpu_device *adev,
 				struct amdgpu_bo_va_mapping *mapping,
 				uint64_t *flags)
 {
+	struct amdgpu_bo *bo = mapping->bo_va->base.bo;
+
 	*flags &= ~AMDGPU_PTE_EXECUTABLE;
 	*flags |= mapping->flags & AMDGPU_PTE_EXECUTABLE;
 
@@ -1128,14 +1231,9 @@ static void gmc_v9_0_get_vm_pte(struct amdgpu_device *adev,
 		*flags &= ~AMDGPU_PTE_VALID;
 	}
 
-	if ((adev->ip_versions[GC_HWIP][0] == IP_VERSION(9, 4, 1) ||
-	     adev->ip_versions[GC_HWIP][0] == IP_VERSION(9, 4, 2)) &&
-	    !(*flags & AMDGPU_PTE_SYSTEM) &&
-	    mapping->bo_va->is_xgmi)
-		*flags |= AMDGPU_PTE_SNOOPED;
-
-	if (adev->ip_versions[GC_HWIP][0] == IP_VERSION(9, 4, 2))
-		*flags |= mapping->flags & AMDGPU_PTE_SNOOPED;
+	if (bo && bo->tbo.resource)
+		gmc_v9_0_get_coherence_flags(adev, mapping->bo_va->base.bo,
+					     mapping, flags);
 }
 
 static unsigned gmc_v9_0_get_vbios_fb_size(struct amdgpu_device *adev)
@@ -1207,6 +1305,7 @@ static void gmc_v9_0_set_umc_funcs(struct amdgpu_device *adev)
 		adev->umc.channel_inst_num = UMC_V6_1_CHANNEL_INSTANCE_NUM;
 		adev->umc.umc_inst_num = UMC_V6_1_UMC_INSTANCE_NUM;
 		adev->umc.channel_offs = UMC_V6_1_PER_CHANNEL_OFFSET_VG20;
+		adev->umc.retire_unit = 1;
 		adev->umc.channel_idx_tbl = &umc_v6_1_channel_idx_tbl[0][0];
 		adev->umc.ras = &umc_v6_1_ras;
 		break;
@@ -1215,6 +1314,7 @@ static void gmc_v9_0_set_umc_funcs(struct amdgpu_device *adev)
 		adev->umc.channel_inst_num = UMC_V6_1_CHANNEL_INSTANCE_NUM;
 		adev->umc.umc_inst_num = UMC_V6_1_UMC_INSTANCE_NUM;
 		adev->umc.channel_offs = UMC_V6_1_PER_CHANNEL_OFFSET_ARCT;
+		adev->umc.retire_unit = 1;
 		adev->umc.channel_idx_tbl = &umc_v6_1_channel_idx_tbl[0][0];
 		adev->umc.ras = &umc_v6_1_ras;
 		break;
@@ -1224,6 +1324,7 @@ static void gmc_v9_0_set_umc_funcs(struct amdgpu_device *adev)
 		adev->umc.channel_inst_num = UMC_V6_7_CHANNEL_INSTANCE_NUM;
 		adev->umc.umc_inst_num = UMC_V6_7_UMC_INSTANCE_NUM;
 		adev->umc.channel_offs = UMC_V6_7_PER_CHANNEL_OFFSET;
+		adev->umc.retire_unit = (UMC_V6_7_NA_MAP_PA_NUM * 2);
 		if (!adev->gmc.xgmi.connected_to_cpu)
 			adev->umc.ras = &umc_v6_7_ras;
 		if (1 & adev->smuio.funcs->get_die_id(adev))
@@ -1471,10 +1572,7 @@ static int gmc_v9_0_mc_init(struct amdgpu_device *adev)
 	}
 
 #endif
-	/* In case the PCI BAR is larger than the actual amount of vram */
 	adev->gmc.visible_vram_size = adev->gmc.aper_size;
-	if (adev->gmc.visible_vram_size > adev->gmc.real_vram_size)
-		adev->gmc.visible_vram_size = adev->gmc.real_vram_size;
 
 	/* set the gart size */
 	if (amdgpu_gart_size == -1) {
@@ -1797,9 +1895,12 @@ static int gmc_v9_0_gart_enable(struct amdgpu_device *adev)
 	}
 
 	amdgpu_gtt_mgr_recover(&adev->mman.gtt_mgr);
-	r = adev->gfxhub.funcs->gart_enable(adev);
-	if (r)
-		return r;
+
+	if (!adev->in_s0ix) {
+		r = adev->gfxhub.funcs->gart_enable(adev);
+		if (r)
+			return r;
+	}
 
 	r = adev->mmhub.funcs->gart_enable(adev);
 	if (r)
@@ -1846,11 +1947,15 @@ static int gmc_v9_0_hw_init(void *handle)
 		value = true;
 
 	if (!amdgpu_sriov_vf(adev)) {
-		adev->gfxhub.funcs->set_fault_enable_default(adev, value);
+		if (!adev->in_s0ix)
+			adev->gfxhub.funcs->set_fault_enable_default(adev, value);
 		adev->mmhub.funcs->set_fault_enable_default(adev, value);
 	}
-	for (i = 0; i < adev->num_vmhubs; ++i)
+	for (i = 0; i < adev->num_vmhubs; ++i) {
+		if (adev->in_s0ix && (i == AMDGPU_GFXHUB_0))
+			continue;
 		gmc_v9_0_flush_gpu_tlb(adev, 0, i, 0);
+	}
 
 	if (adev->umc.funcs && adev->umc.funcs->init_registers)
 		adev->umc.funcs->init_registers(adev);
@@ -1874,7 +1979,8 @@ static int gmc_v9_0_hw_init(void *handle)
  */
 static void gmc_v9_0_gart_disable(struct amdgpu_device *adev)
 {
-	adev->gfxhub.funcs->gart_disable(adev);
+	if (!adev->in_s0ix)
+		adev->gfxhub.funcs->gart_disable(adev);
 	adev->mmhub.funcs->gart_disable(adev);
 }
 
@@ -1898,7 +2004,6 @@ static int gmc_v9_0_hw_fini(void *handle)
 	if (adev->mmhub.funcs->update_power_gating)
 		adev->mmhub.funcs->update_power_gating(adev, false);
 
-	amdgpu_irq_put(adev, &adev->gmc.ecc_irq, 0);
 	amdgpu_irq_put(adev, &adev->gmc.vm_fault, 0);
 
 	return 0;

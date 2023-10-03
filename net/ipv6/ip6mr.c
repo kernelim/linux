@@ -392,7 +392,7 @@ static struct mr_table *ip6mr_new_table(struct net *net, u32 id)
 
 static void ip6mr_free_table(struct mr_table *mrt)
 {
-	del_timer_sync(&mrt->ipmr_expire_timer);
+	timer_shutdown_sync(&mrt->ipmr_expire_timer);
 	mroute_clean_tables(mrt, MRT6_FLUSH_MIFS | MRT6_FLUSH_MIFS_STATIC |
 				 MRT6_FLUSH_MFC | MRT6_FLUSH_MFC_STATIC);
 	rhltable_destroy(&mrt->mfc_hash);
@@ -748,7 +748,7 @@ static int mif6_delete(struct mr_table *mrt, int vifi, int notify,
 	if ((v->flags & MIFF_REGISTER) && !notify)
 		unregister_netdevice_queue(dev, head);
 
-	dev_put_track(dev, &v->dev_tracker);
+	netdev_put(dev, &v->dev_tracker);
 	return 0;
 }
 
@@ -1804,8 +1804,8 @@ int ip6_mroute_setsockopt(struct sock *sk, int optname, sockptr_t optval,
  *	Getsock opt support for the multicast routing system.
  */
 
-int ip6_mroute_getsockopt(struct sock *sk, int optname, char __user *optval,
-			  int __user *optlen)
+int ip6_mroute_getsockopt(struct sock *sk, int optname, sockptr_t optval,
+			  sockptr_t optlen)
 {
 	int olr;
 	int val;
@@ -1836,16 +1836,16 @@ int ip6_mroute_getsockopt(struct sock *sk, int optname, char __user *optval,
 		return -ENOPROTOOPT;
 	}
 
-	if (get_user(olr, optlen))
+	if (copy_from_sockptr(&olr, optlen, sizeof(int)))
 		return -EFAULT;
 
 	olr = min_t(int, olr, sizeof(int));
 	if (olr < 0)
 		return -EINVAL;
 
-	if (put_user(olr, optlen))
+	if (copy_to_sockptr(optlen, &olr, sizeof(int)))
 		return -EFAULT;
-	if (copy_to_user(optval, &val, olr))
+	if (copy_to_sockptr(optval, &val, olr))
 		return -EFAULT;
 	return 0;
 }

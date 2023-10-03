@@ -1683,7 +1683,8 @@ int tcp_trim_head(struct sock *sk, struct sk_buff *skb, u32 len)
 	if (delta_truesize) {
 		skb->truesize	   -= delta_truesize;
 		sk_wmem_queued_add(sk, -delta_truesize);
-		sk_mem_uncharge(sk, delta_truesize);
+		if (!skb_zcopy_pure(skb))
+			sk_mem_uncharge(sk, delta_truesize);
 	}
 
 	/* Any change of skb->len requires recalculation of tso factor. */
@@ -2311,7 +2312,9 @@ static bool tcp_can_coalesce_send_queue_head(struct sock *sk, int len)
 		if (len <= skb->len)
 			break;
 
-		if (unlikely(TCP_SKB_CB(skb)->eor) || tcp_has_tx_tstamp(skb))
+		if (unlikely(TCP_SKB_CB(skb)->eor) ||
+		    tcp_has_tx_tstamp(skb) ||
+		    !skb_pure_zcopy_same(skb, next))
 			return false;
 
 		len -= skb->len;
@@ -2431,7 +2434,7 @@ static int tcp_mtu_probe(struct sock *sk)
 			TCP_SKB_CB(nskb)->eor = TCP_SKB_CB(skb)->eor;
 			tcp_skb_collapse_tstamp(nskb, skb);
 			tcp_unlink_write_queue(skb, sk);
-			sk_wmem_free_skb(sk, skb);
+			tcp_wmem_free_skb(sk, skb);
 		} else {
 			TCP_SKB_CB(nskb)->tcp_flags |= TCP_SKB_CB(skb)->tcp_flags &
 						   ~(TCPHDR_FIN|TCPHDR_PSH);
@@ -3614,7 +3617,7 @@ struct sk_buff *tcp_make_synack(const struct sock *sk, struct dst_entry *dst,
 	th->window = htons(min(req->rsk_rcv_wnd, 65535U));
 	tcp_options_write(th, NULL, &opts);
 	th->doff = (tcp_header_size >> 2);
-	__TCP_INC_STATS(sock_net(sk), TCP_MIB_OUTSEGS);
+	TCP_INC_STATS(sock_net(sk), TCP_MIB_OUTSEGS);
 
 #ifdef CONFIG_TCP_MD5SIG
 	/* Okay, we have all we need - do the md5 hash if needed */

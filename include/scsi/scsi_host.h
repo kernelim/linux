@@ -29,6 +29,18 @@ struct scsi_transport_template;
 #define MODE_INITIATOR 0x01
 #define MODE_TARGET 0x02
 
+/**
+ * enum scsi_timeout_action - How to handle a command that timed out.
+ * @SCSI_EH_DONE: The command has already been completed.
+ * @SCSI_EH_RESET_TIMER: Reset the timer and continue waiting for completion.
+ * @SCSI_EH_NOT_HANDLED: The command has not yet finished. Abort the command.
+ */
+enum scsi_timeout_action {
+	SCSI_EH_NOT_HANDLED = BLK_EH_DONE,
+	SCSI_EH_RESET_TIMER = BLK_EH_RESET_TIMER,
+	SCSI_EH_DONE = 2,
+};
+
 struct scsi_host_template {
 	/*
 	 * Put fields referenced in IO submission path together in
@@ -333,7 +345,7 @@ struct scsi_host_template {
 	 *
 	 * Status: OPTIONAL
 	 */
-	enum blk_eh_timer_return (*eh_timed_out)(struct scsi_cmnd *);
+	enum scsi_timeout_action (*eh_timed_out)(struct scsi_cmnd *);
 	/*
 	 * Optional routine that allows the transport to decide if a cmd
 	 * is retryable. Return true if the transport is in a state the
@@ -735,7 +747,7 @@ struct Scsi_Host {
 	 * allow extending the structure while preserving ABI.
 	 */
 
-	RH_KABI_RESERVE(2)
+	RH_KABI_USE_SPLIT(2, unsigned int opt_sectors)
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
 	RH_KABI_RESERVE(5)

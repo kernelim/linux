@@ -5,6 +5,7 @@
  */
 
 #include <inttypes.h>
+#include <linux/perf_event.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <errno.h>
@@ -97,6 +98,10 @@ struct intel_pt {
 	bool sample_instructions;
 	u64 instructions_sample_type;
 	u64 instructions_id;
+
+	bool sample_cycles;
+	u64 cycles_sample_type;
+	u64 cycles_id;
 
 	bool sample_branches;
 	u32 branches_filter;
@@ -214,6 +219,8 @@ struct intel_pt_queue {
 	u64 ipc_cyc_cnt;
 	u64 last_in_insn_cnt;
 	u64 last_in_cyc_cnt;
+	u64 last_cy_insn_cnt;
+	u64 last_cy_cyc_cnt;
 	u64 last_br_insn_cnt;
 	u64 last_br_cyc_cnt;
 	unsigned int cbr_seen;
@@ -842,7 +849,8 @@ static int intel_pt_walk_next_insn(struct intel_pt_insn *intel_pt_insn,
 						    offset, buf,
 						    INTEL_PT_INSN_BUF_SZ);
 			if (len <= 0) {
-				intel_pt_log("ERROR: failed to read at %" PRIu64 " ", offset);
+				intel_pt_log("ERROR: failed to read at offset %#" PRIx64 " ",
+					     offset);
 				if (intel_pt_enable_logging)
 					dso__fprintf(al.map->dso, intel_pt_log_fp());
 				return -EINVAL;
@@ -1318,7 +1326,7 @@ static struct intel_pt_queue *intel_pt_alloc_queue(struct intel_pt *pt,
 	if (pt->filts.cnt > 0)
 		params.pgd_ip = intel_pt_pgd_ip;
 
-	if (pt->synth_opts.instructions) {
+	if (pt->synth_opts.instructions || pt->synth_opts.cycles) {
 		if (pt->synth_opts.period) {
 			switch (pt->synth_opts.period_type) {
 			case PERF_ITRACE_PERIOD_INSTRUCTIONS:
@@ -1827,6 +1835,33 @@ static int intel_pt_synth_instruction_sample(struct intel_pt_queue *ptq)
 
 	return intel_pt_deliver_synth_event(pt, event, &sample,
 					    pt->instructions_sample_type);
+}
+
+static int intel_pt_synth_cycle_sample(struct intel_pt_queue *ptq)
+{
+	struct intel_pt *pt = ptq->pt;
+	union perf_event *event = ptq->event_buf;
+	struct perf_sample sample = { .ip = 0, };
+	u64 period = 0;
+
+	if (ptq->sample_ipc)
+		period = ptq->ipc_cyc_cnt - ptq->last_cy_cyc_cnt;
+
+	if (!period || intel_pt_skip_event(pt))
+		return 0;
+
+	intel_pt_prep_sample(pt, ptq, event, &sample);
+
+	sample.id = ptq->pt->cycles_id;
+	sample.stream_id = ptq->pt->cycles_id;
+	sample.period = period;
+
+	sample.cyc_cnt = period;
+	sample.insn_cnt = ptq->ipc_insn_cnt - ptq->last_cy_insn_cnt;
+	ptq->last_cy_insn_cnt = ptq->ipc_insn_cnt;
+	ptq->last_cy_cyc_cnt = ptq->ipc_cyc_cnt;
+
+	return intel_pt_deliver_synth_event(pt, event, &sample, pt->cycles_sample_type);
 }
 
 static int intel_pt_synth_transaction_sample(struct intel_pt_queue *ptq)
@@ -2418,6 +2453,8 @@ static int intel_pt_synth_error(struct intel_pt *pt, int code, int cpu,
 				pid_t pid, pid_t tid, u64 ip, u64 timestamp,
 				pid_t machine_pid, int vcpu)
 {
+	bool dump_log_on_error = pt->synth_opts.log_plus_flags & AUXTRACE_LOG_FLG_ON_ERROR;
+	bool log_on_stdout = pt->synth_opts.log_plus_flags & AUXTRACE_LOG_FLG_USE_STDOUT;
 	union perf_event event;
 	char msg[MAX_AUXTRACE_ERROR_MSG];
 	int err;
@@ -2436,6 +2473,16 @@ static int intel_pt_synth_error(struct intel_pt *pt, int code, int cpu,
 	auxtrace_synth_guest_error(&event.auxtrace_error, PERF_AUXTRACE_ERROR_ITRACE,
 				   code, cpu, pid, tid, ip, msg, timestamp,
 				   machine_pid, vcpu);
+
+	if (intel_pt_enable_logging && !log_on_stdout) {
+		FILE *fp = intel_pt_log_fp();
+
+		if (fp)
+			perf_event__fprintf_auxtrace_error(&event, fp);
+	}
+
+	if (code != INTEL_PT_ERR_LOST && dump_log_on_error)
+		intel_pt_log_dump_buf();
 
 	err = perf_session__deliver_synth_event(pt->session, &event, NULL);
 	if (err)
@@ -2585,10 +2632,17 @@ static int intel_pt_sample(struct intel_pt_queue *ptq)
 		}
 	}
 
-	if (pt->sample_instructions && (state->type & INTEL_PT_INSTRUCTION)) {
-		err = intel_pt_synth_instruction_sample(ptq);
-		if (err)
-			return err;
+	if (state->type & INTEL_PT_INSTRUCTION) {
+		if (pt->sample_instructions) {
+			err = intel_pt_synth_instruction_sample(ptq);
+			if (err)
+				return err;
+		}
+		if (pt->sample_cycles) {
+			err = intel_pt_synth_cycle_sample(ptq);
+			if (err)
+				return err;
+		}
 	}
 
 	if (pt->sample_transactions && (state->type & INTEL_PT_TRANSACTION)) {
@@ -3129,6 +3183,7 @@ static int intel_pt_sync_switch(struct intel_pt *pt, int cpu, pid_t tid,
 	return 1;
 }
 
+#ifdef HAVE_LIBTRACEEVENT
 static int intel_pt_process_switch(struct intel_pt *pt,
 				   struct perf_sample *sample)
 {
@@ -3152,6 +3207,7 @@ static int intel_pt_process_switch(struct intel_pt *pt,
 
 	return machine__set_current_tid(pt->machine, cpu, -1, tid);
 }
+#endif /* HAVE_LIBTRACEEVENT */
 
 static int intel_pt_context_switch_in(struct intel_pt *pt,
 				      struct perf_sample *sample)
@@ -3420,9 +3476,12 @@ static int intel_pt_process_event(struct perf_session *session,
 			return err;
 	}
 
+#ifdef HAVE_LIBTRACEEVENT
 	if (pt->switch_evsel && event->header.type == PERF_RECORD_SAMPLE)
 		err = intel_pt_process_switch(pt, sample);
-	else if (event->header.type == PERF_RECORD_ITRACE_START)
+	else
+#endif
+	if (event->header.type == PERF_RECORD_ITRACE_START)
 		err = intel_pt_process_itrace_start(pt, event, sample);
 	else if (event->header.type == PERF_RECORD_AUX_OUTPUT_HW_ID)
 		err = intel_pt_process_aux_output_hw_id(pt, event, sample);
@@ -3710,6 +3769,22 @@ static int intel_pt_synth_events(struct intel_pt *pt,
 		pt->sample_instructions = true;
 		pt->instructions_sample_type = attr.sample_type;
 		pt->instructions_id = id;
+		id += 1;
+	}
+
+	if (pt->synth_opts.cycles) {
+		attr.config = PERF_COUNT_HW_CPU_CYCLES;
+		if (pt->synth_opts.period_type == PERF_ITRACE_PERIOD_NANOSECS)
+			attr.sample_period =
+				intel_pt_ns_to_ticks(pt, pt->synth_opts.period);
+		else
+			attr.sample_period = pt->synth_opts.period;
+		err = intel_pt_synth_event(session, "cycles", &attr, id);
+		if (err)
+			return err;
+		pt->sample_cycles = true;
+		pt->cycles_sample_type = attr.sample_type;
+		pt->cycles_id = id;
 		id += 1;
 	}
 
@@ -4033,6 +4108,7 @@ static const char * const intel_pt_info_fmts[] = {
 	[INTEL_PT_SNAPSHOT_MODE]	= "  Snapshot mode       %"PRId64"\n",
 	[INTEL_PT_PER_CPU_MMAPS]	= "  Per-cpu maps        %"PRId64"\n",
 	[INTEL_PT_MTC_BIT]		= "  MTC bit             %#"PRIx64"\n",
+	[INTEL_PT_MTC_FREQ_BITS]	= "  MTC freq bits       %#"PRIx64"\n",
 	[INTEL_PT_TSC_CTC_N]		= "  TSC:CTC numerator   %"PRIu64"\n",
 	[INTEL_PT_TSC_CTC_D]		= "  TSC:CTC denominator %"PRIu64"\n",
 	[INTEL_PT_CYC_BIT]		= "  CYC bit             %#"PRIx64"\n",
@@ -4047,8 +4123,12 @@ static void intel_pt_print_info(__u64 *arr, int start, int finish)
 	if (!dump_trace)
 		return;
 
-	for (i = start; i <= finish; i++)
-		fprintf(stdout, intel_pt_info_fmts[i], arr[i]);
+	for (i = start; i <= finish; i++) {
+		const char *fmt = intel_pt_info_fmts[i];
+
+		if (fmt)
+			fprintf(stdout, fmt, arr[i]);
+	}
 }
 
 static void intel_pt_print_info_str(const char *name, const char *str)
@@ -4271,8 +4351,12 @@ int intel_pt_process_auxtrace_info(union perf_event *event,
 		goto err_delete_thread;
 	}
 
-	if (pt->synth_opts.log)
-		intel_pt_log_enable();
+	if (pt->synth_opts.log) {
+		bool log_on_error = pt->synth_opts.log_plus_flags & AUXTRACE_LOG_FLG_ON_ERROR;
+		unsigned int log_on_error_size = pt->synth_opts.log_on_error_size;
+
+		intel_pt_log_enable(log_on_error, log_on_error_size);
+	}
 
 	/* Maximum non-turbo ratio is TSC freq / 100 MHz */
 	if (pt->tc.time_mult) {
@@ -4351,6 +4435,12 @@ int intel_pt_process_auxtrace_info(union perf_event *event,
 		goto err_delete_thread;
 
 	intel_pt_setup_pebs_events(pt);
+
+	if (perf_data__is_pipe(session->data)) {
+		pr_warning("WARNING: Intel PT with pipe mode is not recommended.\n"
+			   "         The output cannot relied upon.  In particular,\n"
+			   "         timestamps and the order of events may be incorrect.\n");
+	}
 
 	if (pt->sampling_mode || list_empty(&session->auxtrace_index))
 		err = auxtrace_queue_data(session, true, true);

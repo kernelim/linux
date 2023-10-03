@@ -129,7 +129,7 @@ needed).
    sound/index
    crypto/index
    filesystems/index
-   vm/index
+   mm/index
    bpf/index
    usb/index
    PCI/index
@@ -138,7 +138,6 @@ needed).
    scheduler/index
    mhi/index
    tty/index
-   hte/index
 
 Architecture-agnostic documentation
 -----------------------------------

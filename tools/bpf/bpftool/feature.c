@@ -486,16 +486,16 @@ static void probe_kernel_image_config(const char *define_prefix)
 		}
 	}
 
-end_parse:
-	if (file)
-		gzclose(file);
-
 	for (i = 0; i < ARRAY_SIZE(options); i++) {
 		if (define_prefix && !options[i].macro_dump)
 			continue;
 		print_kernel_option(options[i].name, values[i], define_prefix);
 		free(values[i]);
 	}
+
+end_parse:
+	if (file)
+		gzclose(file);
 }
 
 static bool probe_bpf_syscall(const char *define_prefix)
@@ -1147,7 +1147,7 @@ exit_free:
 	return res;
 #else
 	/* Detection assumes user has specific privileges.
-	 * We do not use libpcap so let's approximate, and restrict usage to
+	 * We do not use libcap so let's approximate, and restrict usage to
 	 * root user only.
 	 */
 	if (geteuid()) {

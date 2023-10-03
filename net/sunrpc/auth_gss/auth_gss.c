@@ -49,6 +49,22 @@ static unsigned int gss_key_expire_timeo = GSS_KEY_EXPIRE_TIMEO;
 # define RPCDBG_FACILITY	RPCDBG_AUTH
 #endif
 
+/*
+ * This compile-time check verifies that we will not exceed the
+ * slack space allotted by the client and server auth_gss code
+ * before they call gss_wrap().
+ */
+#define GSS_KRB5_MAX_SLACK_NEEDED					\
+	(GSS_KRB5_TOK_HDR_LEN		/* gss token header */		\
+	+ GSS_KRB5_MAX_CKSUM_LEN	/* gss token checksum */	\
+	+ GSS_KRB5_MAX_BLOCKSIZE	/* confounder */		\
+	+ GSS_KRB5_MAX_BLOCKSIZE	/* possible padding */		\
+	+ GSS_KRB5_TOK_HDR_LEN		/* encrypted hdr in v2 token */	\
+	+ GSS_KRB5_MAX_CKSUM_LEN	/* encryption hmac */		\
+	+ XDR_UNIT * 2			/* RPC verifier */		\
+	+ GSS_KRB5_TOK_HDR_LEN						\
+	+ GSS_KRB5_MAX_CKSUM_LEN)
+
 #define GSS_CRED_SLACK		(RPC_MAX_AUTH_SIZE * 2)
 /* length of a krb5 verifier (48), plus data added before arguments when
  * using integrity (two 4-byte integers): */
@@ -1042,6 +1058,7 @@ gss_create_new(const struct rpc_auth_create_args *args, struct rpc_clnt *clnt)
 		goto err_put_mech;
 	auth = &gss_auth->rpc_auth;
 	auth->au_cslack = GSS_CRED_SLACK >> 2;
+	BUILD_BUG_ON(GSS_KRB5_MAX_SLACK_NEEDED > RPC_MAX_AUTH_SIZE);
 	auth->au_rslack = GSS_KRB5_MAX_SLACK_NEEDED >> 2;
 	auth->au_verfsize = GSS_VERF_SLACK >> 2;
 	auth->au_ralign = GSS_VERF_SLACK >> 2;
@@ -1355,14 +1372,11 @@ gss_hash_cred(struct auth_cred *acred, unsigned int hashbits)
 /*
  * Lookup RPCSEC_GSS cred for the current process
  */
-static struct rpc_cred *
-gss_lookup_cred(struct rpc_auth *auth, struct auth_cred *acred, int flags)
+static struct rpc_cred *gss_lookup_cred(struct rpc_auth *auth,
+					struct auth_cred *acred, int flags)
 {
-	gfp_t gfp = GFP_KERNEL;
-
-	if (flags & RPCAUTH_LOOKUP_ASYNC)
-		gfp = GFP_NOWAIT | __GFP_NOWARN;
-	return rpcauth_lookup_credcache(auth, acred, flags, gfp);
+	return rpcauth_lookup_credcache(auth, acred, flags,
+					rpc_task_gfp_mask());
 }
 
 static struct rpc_cred *
@@ -2007,7 +2021,7 @@ gss_unwrap_resp_integ(struct rpc_task *task, struct rpc_cred *cred,
 		goto unwrap_failed;
 	mic.len = len;
 	mic.data = kmalloc(len, GFP_KERNEL);
-	if (!mic.data)
+	if (ZERO_OR_NULL_PTR(mic.data))
 		goto unwrap_failed;
 	if (read_bytes_from_xdr_buf(rcv_buf, offset, mic.data, mic.len))
 		goto unwrap_failed;

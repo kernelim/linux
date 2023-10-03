@@ -619,27 +619,12 @@ static inline int cache_free_alien(struct kmem_cache *cachep, void *objp)
 	return 0;
 }
 
-static inline void *alternate_node_alloc(struct kmem_cache *cachep,
-		gfp_t flags)
-{
-	return NULL;
-}
-
-static inline void *____cache_alloc_node(struct kmem_cache *cachep,
-		 gfp_t flags, int nodeid)
-{
-	return NULL;
-}
-
 static inline gfp_t gfp_exact_node(gfp_t flags)
 {
 	return flags & ~__GFP_NOFAIL;
 }
 
 #else	/* CONFIG_NUMA */
-
-static void *____cache_alloc_node(struct kmem_cache *, gfp_t, int);
-static void *alternate_node_alloc(struct kmem_cache *, gfp_t);
 
 static struct alien_cache *__alloc_alien_cache(int node, int entries,
 						int batch, gfp_t gfp)
@@ -796,7 +781,7 @@ static inline int cache_free_alien(struct kmem_cache *cachep, void *objp)
 	int page_node = page_to_nid(virt_to_page(objp));
 	int node = numa_mem_id();
 	/*
-	 * Make sure we are not freeing a object from another node to the array
+	 * Make sure we are not freeing an object from another node to the array
 	 * cache on this cpu.
 	 */
 	if (likely(node == page_node))
@@ -847,7 +832,7 @@ static int init_cache_node(struct kmem_cache *cachep, int node, gfp_t gfp)
 
 	/*
 	 * The kmem_cache_nodes don't come and go as CPUs
-	 * come and go.  slab_mutex is sufficient
+	 * come and go.  slab_mutex provides sufficient
 	 * protection here.
 	 */
 	cachep->node[node] = n;
@@ -860,7 +845,7 @@ static int init_cache_node(struct kmem_cache *cachep, int node, gfp_t gfp)
  * Allocates and initializes node for a node on each slab cache, used for
  * either memory or cpu hotplug.  If memory is being hot-added, the kmem_cache_node
  * will be allocated off-node since memory is not yet online for the new node.
- * When hotplugging memory or a cpu, existing node are not replaced if
+ * When hotplugging memory or a cpu, existing nodes are not replaced if
  * already in use.
  *
  * Must hold slab_mutex.
@@ -1061,7 +1046,7 @@ int slab_prepare_cpu(unsigned int cpu)
  * offline.
  *
  * Even if all the cpus of a node are down, we don't free the
- * kmem_cache_node of any cache. This to avoid a race between cpu_down, and
+ * kmem_cache_node of any cache. This is to avoid a race between cpu_down, and
  * a kmalloc allocation from another cpu for memory from the node of
  * the cpu going down.  The kmem_cache_node structure is usually allocated from
  * kmem_cache_create() and gets destroyed at kmem_cache_destroy().
@@ -1905,7 +1890,7 @@ static bool set_on_slab_cache(struct kmem_cache *cachep,
  * @flags: SLAB flags
  *
  * Returns a ptr to the cache on success, NULL on failure.
- * Cannot be called within a int, but can be interrupted.
+ * Cannot be called within an int, but can be interrupted.
  * The @ctor is run when new pages are allocated by the cache.
  *
  * The flags are
@@ -2973,12 +2958,6 @@ direct_grow:
 	return ac->entry[--ac->avail];
 }
 
-static inline void cache_alloc_debugcheck_before(struct kmem_cache *cachep,
-						gfp_t flags)
-{
-	might_sleep_if(gfpflags_allow_blocking(flags));
-}
-
 #if DEBUG
 static void *cache_alloc_debugcheck_after(struct kmem_cache *cachep,
 				gfp_t flags, void *objp, unsigned long caller)
@@ -3055,6 +3034,8 @@ out:
 }
 
 #ifdef CONFIG_NUMA
+static void *____cache_alloc_node(struct kmem_cache *, gfp_t, int);
+
 /*
  * Try allocating on another node if PFA_SPREAD_SLAB is a mempolicy is set.
  *
@@ -3150,7 +3131,7 @@ retry:
 }
 
 /*
- * A interface to enable slab creation on nodeid
+ * An interface to enable slab creation on nodeid
  */
 static void *____cache_alloc_node(struct kmem_cache *cachep, gfp_t flags,
 				int nodeid)
@@ -3218,7 +3199,6 @@ slab_alloc_node(struct kmem_cache *cachep, gfp_t flags, int nodeid, size_t orig_
 	if (unlikely(ptr))
 		goto out_hooks;
 
-	cache_alloc_debugcheck_before(cachep, flags);
 	local_irq_save(save_flags);
 
 	if (nodeid == NUMA_NO_NODE)
@@ -3243,7 +3223,7 @@ slab_alloc_node(struct kmem_cache *cachep, gfp_t flags, int nodeid, size_t orig_
 	}
 	/* ___cache_alloc_node can fall back to other nodes */
 	ptr = ____cache_alloc_node(cachep, flags, nodeid);
-  out:
+out:
 	local_irq_restore(save_flags);
 	ptr = cache_alloc_debugcheck_after(cachep, flags, ptr, caller);
 	init = slab_want_init_on_alloc(flags, cachep);
@@ -3272,7 +3252,7 @@ __do_cache_alloc(struct kmem_cache *cache, gfp_t flags)
 	if (!objp)
 		objp = ____cache_alloc_node(cache, flags, numa_mem_id());
 
-  out:
+out:
 	return objp;
 }
 #else
@@ -3303,7 +3283,6 @@ slab_alloc(struct kmem_cache *cachep, struct list_lru *lru, gfp_t flags,
 	if (unlikely(objp))
 		goto out;
 
-	cache_alloc_debugcheck_before(cachep, flags);
 	local_irq_save(save_flags);
 	objp = __do_cache_alloc(cachep, flags);
 	local_irq_restore(save_flags);
@@ -3419,9 +3398,10 @@ static __always_inline void __cache_free(struct kmem_cache *cachep, void *objp,
 {
 	bool init;
 
+	memcg_slab_free_hook(cachep, virt_to_slab(objp), &objp, 1);
+
 	if (is_kfence_address(objp)) {
 		kmemleak_free_recursive(objp, cachep->flags);
-		memcg_slab_free_hook(cachep, &objp, 1);
 		__kfence_free(objp);
 		return;
 	}
@@ -3454,7 +3434,6 @@ void ___cache_free(struct kmem_cache *cachep, void *objp,
 	check_irq_off();
 	kmemleak_free_recursive(objp, cachep->flags);
 	objp = cache_free_debugcheck(cachep, objp, caller);
-	memcg_slab_free_hook(cachep, &objp, 1);
 
 	/*
 	 * Skip calling cache_free_alien() when the platform is not numa.
@@ -3491,7 +3470,7 @@ void *__kmem_cache_alloc_lru(struct kmem_cache *cachep, struct list_lru *lru,
 {
 	void *ret = slab_alloc(cachep, lru, flags, cachep->object_size, _RET_IP_);
 
-	trace_kmem_cache_alloc(_RET_IP_, ret,
+	trace_kmem_cache_alloc(_RET_IP_, ret, cachep,
 			       cachep->object_size, cachep->size, flags);
 
 	return ret;
@@ -3540,8 +3519,6 @@ int kmem_cache_alloc_bulk(struct kmem_cache *s, gfp_t flags, size_t size,
 	if (!s)
 		return 0;
 
-	cache_alloc_debugcheck_before(s, flags);
-
 	local_irq_disable();
 	for (i = 0; i < size; i++) {
 		void *objp = kfence_alloc(s, s->object_size, flags) ?: __do_cache_alloc(s, flags);
@@ -3566,7 +3543,7 @@ error:
 	local_irq_enable();
 	cache_alloc_debugcheck_after_bulk(s, flags, i, p, _RET_IP_);
 	slab_post_alloc_hook(s, objcg, flags, i, p, false);
-	__kmem_cache_free_bulk(s, i, p);
+	kmem_cache_free_bulk(s, i, p);
 	return 0;
 }
 EXPORT_SYMBOL(kmem_cache_alloc_bulk);
@@ -3580,7 +3557,7 @@ kmem_cache_alloc_trace(struct kmem_cache *cachep, gfp_t flags, size_t size)
 	ret = slab_alloc(cachep, NULL, flags, size, _RET_IP_);
 
 	ret = kasan_kmalloc(cachep, ret, size, flags);
-	trace_kmalloc(_RET_IP_, ret,
+	trace_kmalloc(_RET_IP_, ret, cachep,
 		      size, cachep->size, flags);
 	return ret;
 }
@@ -3605,7 +3582,7 @@ void *kmem_cache_alloc_node(struct kmem_cache *cachep, gfp_t flags, int nodeid)
 {
 	void *ret = slab_alloc_node(cachep, flags, nodeid, cachep->object_size, _RET_IP_);
 
-	trace_kmem_cache_alloc_node(_RET_IP_, ret,
+	trace_kmem_cache_alloc_node(_RET_IP_, ret, cachep,
 				    cachep->object_size, cachep->size,
 				    flags, nodeid);
 
@@ -3624,7 +3601,7 @@ void *kmem_cache_alloc_node_trace(struct kmem_cache *cachep,
 	ret = slab_alloc_node(cachep, flags, nodeid, size, _RET_IP_);
 
 	ret = kasan_kmalloc(cachep, ret, size, flags);
-	trace_kmalloc_node(_RET_IP_, ret,
+	trace_kmalloc_node(_RET_IP_, ret, cachep,
 			   size, cachep->size,
 			   flags, nodeid);
 	return ret;
@@ -3707,7 +3684,7 @@ static __always_inline void *__do_kmalloc(size_t size, gfp_t flags,
 	ret = slab_alloc(cachep, NULL, flags, size, caller);
 
 	ret = kasan_kmalloc(cachep, ret, size, flags);
-	trace_kmalloc(caller, ret,
+	trace_kmalloc(caller, ret, cachep,
 		      size, cachep->size, flags);
 
 	return ret;

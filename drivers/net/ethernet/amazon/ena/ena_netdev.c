@@ -597,7 +597,9 @@ static int ena_xdp_set(struct net_device *netdev, struct netdev_bpf *bpf)
 				if (rc)
 					return rc;
 			}
+			xdp_features_set_redirect_target(netdev, false);
 		} else if (old_bpf_prog) {
+			xdp_features_clear_redirect_target(netdev);
 			rc = ena_destroy_and_free_all_xdp_queues(adapter);
 			if (rc)
 				return rc;
@@ -3201,7 +3203,7 @@ static void ena_config_host_info(struct ena_com_dev *ena_dev, struct pci_dev *pd
 	host_info->bdf = (pdev->bus->number << 8) | pdev->devfn;
 	host_info->os_type = ENA_ADMIN_OS_LINUX;
 	host_info->kernel_ver = LINUX_VERSION_CODE;
-	strlcpy(host_info->kernel_ver_str, utsname()->version,
+	strscpy(host_info->kernel_ver_str, utsname()->version,
 		sizeof(host_info->kernel_ver_str) - 1);
 	host_info->os_dist = 0;
 	strncpy(host_info->os_dist_str, utsname()->release,
@@ -3305,10 +3307,10 @@ static void ena_get_stats64(struct net_device *netdev,
 		tx_ring = &adapter->tx_ring[i];
 
 		do {
-			start = u64_stats_fetch_begin_irq(&tx_ring->syncp);
+			start = u64_stats_fetch_begin(&tx_ring->syncp);
 			packets = tx_ring->tx_stats.cnt;
 			bytes = tx_ring->tx_stats.bytes;
-		} while (u64_stats_fetch_retry_irq(&tx_ring->syncp, start));
+		} while (u64_stats_fetch_retry(&tx_ring->syncp, start));
 
 		stats->tx_packets += packets;
 		stats->tx_bytes += bytes;
@@ -3316,20 +3318,20 @@ static void ena_get_stats64(struct net_device *netdev,
 		rx_ring = &adapter->rx_ring[i];
 
 		do {
-			start = u64_stats_fetch_begin_irq(&rx_ring->syncp);
+			start = u64_stats_fetch_begin(&rx_ring->syncp);
 			packets = rx_ring->rx_stats.cnt;
 			bytes = rx_ring->rx_stats.bytes;
-		} while (u64_stats_fetch_retry_irq(&rx_ring->syncp, start));
+		} while (u64_stats_fetch_retry(&rx_ring->syncp, start));
 
 		stats->rx_packets += packets;
 		stats->rx_bytes += bytes;
 	}
 
 	do {
-		start = u64_stats_fetch_begin_irq(&adapter->syncp);
+		start = u64_stats_fetch_begin(&adapter->syncp);
 		rx_drops = adapter->dev_stats.rx_drops;
 		tx_drops = adapter->dev_stats.tx_drops;
-	} while (u64_stats_fetch_retry_irq(&adapter->syncp, start));
+	} while (u64_stats_fetch_retry(&adapter->syncp, start));
 
 	stats->rx_dropped = rx_drops;
 	stats->tx_dropped = tx_drops;
@@ -4388,6 +4390,10 @@ static int ena_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	ena_config_debug_area(adapter);
+
+	if (ena_xdp_legal_queue_count(adapter, adapter->num_io_queues))
+		netdev->xdp_features = NETDEV_XDP_ACT_BASIC |
+				       NETDEV_XDP_ACT_REDIRECT;
 
 	memcpy(adapter->netdev->perm_addr, adapter->mac_addr, netdev->addr_len);
 

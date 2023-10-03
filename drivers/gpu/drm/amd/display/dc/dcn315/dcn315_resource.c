@@ -151,8 +151,6 @@ enum dcn31_clk_src_array_id {
  */
 
 /* DCN */
-/* TODO awful hack. fixup dcn20_dwb.h */
-#undef BASE_INNER
 #define BASE_INNER(seg) DCN_BASE__INST0_SEG ## seg
 
 #define BASE(seg) BASE_INNER(seg)
@@ -184,6 +182,9 @@ enum dcn31_clk_src_array_id {
 #define SRII_DWB(reg_name, temp_name, block, id)\
 	.reg_name[id] = BASE(reg ## block ## id ## _ ## temp_name ## _BASE_IDX) + \
 					reg ## block ## id ## _ ## temp_name
+
+#define SF_DWB2(reg_name, block, id, field_name, post_fix)	\
+	.field_name = reg_name ## __ ## field_name ## post_fix
 
 #define DCCG_SRII(reg_name, block, id)\
 	.block ## _ ## reg_name[id] = BASE(reg ## block ## id ## _ ## reg_name ## _BASE_IDX) + \
@@ -885,8 +886,6 @@ static const struct dc_debug_options debug_defaults_drv = {
 			.afmt = true,
 		}
 	},
-	.optimize_edp_link_rate = true,
-	.enable_sw_cntl_psr = true,
 	.psr_power_use_phy_fsm = 0,
 };
 
@@ -906,6 +905,16 @@ static const struct dc_debug_options debug_defaults_diags = {
 	.dmub_command_table = true,
 	.enable_tri_buf = true,
 	.use_max_lb = true
+};
+
+static const struct dc_panel_config panel_config_defaults = {
+	.psr = {
+		.disable_psr = false,
+		.disallow_psrsu = false,
+	},
+	.ilr = {
+		.optimize_edp_link_rate = true,
+	},
 };
 
 static void dcn31_dpp_destroy(struct dpp **dpp)
@@ -1619,6 +1628,7 @@ static struct clock_source *dcn31_clock_source_create(
 		return &clk_src->base;
 	}
 
+	kfree(clk_src);
 	BREAK_TO_DEBUGGER();
 	return NULL;
 }
@@ -1639,7 +1649,7 @@ static int dcn315_populate_dml_pipes_from_context(
 	const int max_usable_det = context->bw_ctx.dml.ip.config_return_buffer_size_in_kbytes - DCN3_15_MIN_COMPBUF_SIZE_KB;
 
 	DC_FP_START();
-	dcn20_populate_dml_pipes_from_context(dc, context, pipes, fast_validate);
+	dcn31x_populate_dml_pipes_from_context(dc, context, pipes, fast_validate);
 	DC_FP_END();
 
 	for (i = 0, pipe_cnt = 0; i < dc->res_pool->pipe_count; i++) {
@@ -1658,7 +1668,6 @@ static int dcn315_populate_dml_pipes_from_context(
 		pipes[pipe_cnt].pipe.src.immediate_flip = true;
 
 		pipes[pipe_cnt].pipe.src.unbounded_req_mode = false;
-		pipes[pipe_cnt].pipe.src.gpuvm = true;
 		pipes[pipe_cnt].pipe.dest.vfront_porch = timing->v_front_porch;
 		pipes[pipe_cnt].pipe.src.dcc_rate = 3;
 		pipes[pipe_cnt].dout.dsc_input_bpc = 0;
@@ -1699,7 +1708,9 @@ static int dcn315_populate_dml_pipes_from_context(
 			dc->config.enable_4to1MPC = true;
 			context->bw_ctx.dml.ip.det_buffer_size_kbytes =
 					(max_usable_det / DCN3_15_CRB_SEGMENT_SIZE_KB / 4) * DCN3_15_CRB_SEGMENT_SIZE_KB;
-		} else if (!is_dual_plane(pipe->plane_state->format) && pipe->plane_state->src_rect.width <= 5120) {
+		} else if (!is_dual_plane(pipe->plane_state->format)
+				&& pipe->plane_state->src_rect.width <= 5120
+				&& pipe->stream->timing.pix_clk_100hz < dcn_get_max_non_odm_pix_rate_100hz(&dc->dml.soc)) {
 			/* Limit to 5k max to avoid forced pipe split when there is not enough detile for swath */
 			context->bw_ctx.dml.ip.det_buffer_size_kbytes = 192;
 			pipes[0].pipe.src.unbounded_req_mode = true;
@@ -1707,6 +1718,11 @@ static int dcn315_populate_dml_pipes_from_context(
 	}
 
 	return pipe_cnt;
+}
+
+static void dcn315_get_panel_config_defaults(struct dc_panel_config *panel_config)
+{
+	*panel_config = panel_config_defaults;
 }
 
 static struct dc_cap_funcs cap_funcs = {
@@ -1722,7 +1738,7 @@ static struct resource_funcs dcn315_res_pool_funcs = {
 	.panel_cntl_create = dcn31_panel_cntl_create,
 	.validate_bandwidth = dcn31_validate_bandwidth,
 	.calculate_wm_and_dlg = dcn31_calculate_wm_and_dlg,
-	.update_soc_for_wm_a = dcn31_update_soc_for_wm_a,
+	.update_soc_for_wm_a = dcn315_update_soc_for_wm_a,
 	.populate_dml_pipes = dcn315_populate_dml_pipes_from_context,
 	.acquire_idle_pipe_for_layer = dcn20_acquire_idle_pipe_for_layer,
 	.add_stream_to_ctx = dcn30_add_stream_to_ctx,
@@ -1735,6 +1751,7 @@ static struct resource_funcs dcn315_res_pool_funcs = {
 	.release_post_bldn_3dlut = dcn30_release_post_bldn_3dlut,
 	.update_bw_bounding_box = dcn315_update_bw_bounding_box,
 	.patch_unknown_plane_state = dcn20_patch_unknown_plane_state,
+	.get_panel_config_defaults = dcn315_get_panel_config_defaults,
 };
 
 static bool dcn315_resource_construct(
@@ -1769,6 +1786,8 @@ static bool dcn315_resource_construct(
 	dc->caps.max_slave_rgb_planes = 2;
 	dc->caps.post_blend_color_processing = true;
 	dc->caps.force_dp_tps4_for_cp2520 = true;
+	if (dc->config.forceHBR2CP2520)
+		dc->caps.force_dp_tps4_for_cp2520 = false;
 	dc->caps.dp_hpo = true;
 	dc->caps.dp_hdmi21_pcon_support = true;
 	dc->caps.edp_dsc_support = true;

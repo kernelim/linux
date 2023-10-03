@@ -1,4 +1,4 @@
-ORDER=common ark fedora
+ORDER=common rhel fedora
 
 # x86_64
 x86_64=generic:generic-x86:generic-x86-x86_64

@@ -13,16 +13,19 @@ struct opts {
 	bool dump_orc;
 	bool hack_jump_label;
 	bool hack_noinstr;
+	bool hack_skylake;
 	bool ibt;
 	bool mcount;
 	bool noinstr;
 	bool orc;
 	bool retpoline;
 	bool rethunk;
+	bool unret;
 	bool sls;
 	bool stackval;
 	bool static_call;
 	bool uaccess;
+	int prefix;
 
 	/* options: */
 	bool backtrace;

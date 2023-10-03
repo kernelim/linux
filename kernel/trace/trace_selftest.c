@@ -750,7 +750,16 @@ static struct fgraph_ops fgraph_ops __initdata  = {
 	.retfunc		= &trace_graph_return,
 };
 
-noinline __noclone static void trace_direct_tramp(void) { }
+#ifdef CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS
+#ifndef CALL_DEPTH_ACCOUNT
+#define CALL_DEPTH_ACCOUNT ""
+#endif
+
+noinline __noclone static void trace_direct_tramp(void)
+{
+	asm(CALL_DEPTH_ACCOUNT);
+}
+#endif
 
 /*
  * Pretty much the same than for the function tracer from which the selftest
@@ -811,7 +820,7 @@ trace_selftest_startup_function_graph(struct tracer *trace,
 		goto out;
 	}
 
-#ifdef CONFIG_HAVE_DYNAMIC_FTRACE_WITH_ARGS
+#ifdef CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS
 	tracing_reset_online_cpus(&tr->array_buffer);
 	set_graph_array(tr);
 

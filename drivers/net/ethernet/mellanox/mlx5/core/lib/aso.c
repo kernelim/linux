@@ -334,9 +334,6 @@ err_cq:
 
 void mlx5_aso_destroy(struct mlx5_aso *aso)
 {
-	if (IS_ERR_OR_NULL(aso))
-		return;
-
 	mlx5_aso_destroy_sq(aso);
 	mlx5_aso_destroy_cq(&aso->cq);
 	kfree(aso);
@@ -356,12 +353,15 @@ void mlx5_aso_build_wqe(struct mlx5_aso *aso, u8 ds_cnt,
 	cseg->general_id = cpu_to_be32(obj_id);
 }
 
-void *mlx5_aso_get_wqe(struct mlx5_aso *aso)
+struct mlx5_aso_wqe *mlx5_aso_get_wqe(struct mlx5_aso *aso)
 {
+	struct mlx5_aso_wqe *wqe;
 	u16 pi;
 
 	pi = mlx5_wq_cyc_ctr2ix(&aso->wq, aso->pc);
-	return mlx5_wq_cyc_get_wqe(&aso->wq, pi);
+	wqe = mlx5_wq_cyc_get_wqe(&aso->wq, pi);
+	memset(wqe, 0, sizeof(*wqe));
+	return wqe;
 }
 
 void mlx5_aso_post_wqe(struct mlx5_aso *aso, bool with_data,
@@ -388,20 +388,12 @@ void mlx5_aso_post_wqe(struct mlx5_aso *aso, bool with_data,
 	WRITE_ONCE(doorbell_cseg, NULL);
 }
 
-int mlx5_aso_poll_cq(struct mlx5_aso *aso, bool with_data, u32 interval_ms)
+int mlx5_aso_poll_cq(struct mlx5_aso *aso, bool with_data)
 {
 	struct mlx5_aso_cq *cq = &aso->cq;
 	struct mlx5_cqe64 *cqe;
-	unsigned long expires;
 
 	cqe = mlx5_cqwq_get_cqe(&cq->wq);
-
-	expires = jiffies + msecs_to_jiffies(interval_ms);
-	while (!cqe && time_is_after_jiffies(expires)) {
-		usleep_range(2, 10);
-		cqe = mlx5_cqwq_get_cqe(&cq->wq);
-	}
-
 	if (!cqe)
 		return -ETIMEDOUT;
 

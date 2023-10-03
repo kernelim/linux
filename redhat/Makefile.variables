@@ -17,7 +17,7 @@ DIST_BRANCH ?= "main"
 
 # This is the dist release suffix used in the package release, eg. .fc34,
 # .el8 etc. In a different branch this may be set to a fixed value.
-DIST ?= .el9_2
+DIST ?= .el9_3
 
 # This is a human readable distribution variable that is used to determine the
 # OS version (fedora, centos, or rhel).
@@ -58,6 +58,9 @@ PATCHLIST_URL ?= "https://gitlab.com/cki-project/kernel-ark/-/commit"
 # is useful for other projects with different specfile names.
 PACKAGE_NAME ?= kernel
 
+# This overrides CONFIG_WERROR to 'y' for all arches.  RHEL requires this variable to be set.
+ENABLE_WERROR ?= 1
+
 # This is the executable for 'git' commands.  It is used by the redhat/self-test
 # tests to provide testing information on git hashes (see redhat/self-test/egit.sh)
 GIT ?= git
@@ -72,7 +75,7 @@ HEAD ?= HEAD
 # default values can be found in redhat/Makefile and are dependent on the
 # target OS.  The target OS can be changed by setting the DIST or DISTRO
 # variables.
-BUILD_TARGET ?= rhel-$(RHEL_MAJOR).$(RHEL_MINOR).0-z-test-pesign
+BUILD_TARGET ?=
 
 # This sets the koji/brew configuration profile variable.
 BUILD_PROFILE ?=

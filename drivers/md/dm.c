@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
  * Copyright (C) 2004-2008 Red Hat, Inc. All rights reserved.
@@ -49,8 +50,8 @@
 
 static const char *_name = DM_NAME;
 
-static unsigned int major = 0;
-static unsigned int _major = 0;
+static unsigned int major;
+static unsigned int _major;
 
 static DEFINE_IDR(_minor_idr);
 
@@ -83,7 +84,7 @@ struct clone_info {
 	struct bio *bio;
 	struct dm_io *io;
 	sector_t sector;
-	unsigned sector_count;
+	unsigned int sector_count;
 	bool is_abnormal_io:1;
 	bool submit_as_polled:1;
 };
@@ -104,6 +105,7 @@ EXPORT_SYMBOL_GPL(dm_per_bio_data);
 struct bio *dm_bio_from_per_bio_data(void *data, size_t data_size)
 {
 	struct dm_io *io = (struct dm_io *)((char *)data + data_size);
+
 	if (io->magic == DM_IO_MAGIC)
 		return (struct bio *)((char *)io + DM_IO_BIO_OFFSET);
 	BUG_ON(io->magic != DM_TIO_MAGIC);
@@ -111,7 +113,7 @@ struct bio *dm_bio_from_per_bio_data(void *data, size_t data_size)
 }
 EXPORT_SYMBOL_GPL(dm_bio_from_per_bio_data);
 
-unsigned dm_bio_get_target_bio_nr(const struct bio *bio)
+unsigned int dm_bio_get_target_bio_nr(const struct bio *bio)
 {
 	return container_of(bio, struct dm_target_io, clone)->target_bio_nr;
 }
@@ -127,6 +129,7 @@ static int swap_bios = DEFAULT_SWAP_BIOS;
 static int get_swap_bios(void)
 {
 	int latch = READ_ONCE(swap_bios);
+
 	if (unlikely(latch <= 0))
 		latch = DEFAULT_SWAP_BIOS;
 	return latch;
@@ -142,7 +145,7 @@ struct table_device {
  * Bio-based DM's mempools' reserved IOs set by the user.
  */
 #define RESERVED_BIO_BASED_IOS		16
-static unsigned reserved_bio_based_ios = RESERVED_BIO_BASED_IOS;
+static unsigned int reserved_bio_based_ios = RESERVED_BIO_BASED_IOS;
 
 static int __dm_get_module_param_int(int *module_param, int min, int max)
 {
@@ -165,11 +168,10 @@ static int __dm_get_module_param_int(int *module_param, int min, int max)
 	return param;
 }
 
-unsigned __dm_get_module_param(unsigned *module_param,
-			       unsigned def, unsigned max)
+unsigned int __dm_get_module_param(unsigned int *module_param, unsigned int def, unsigned int max)
 {
-	unsigned param = READ_ONCE(*module_param);
-	unsigned modified_param = 0;
+	unsigned int param = READ_ONCE(*module_param);
+	unsigned int modified_param = 0;
 
 	if (!param)
 		modified_param = def;
@@ -184,14 +186,14 @@ unsigned __dm_get_module_param(unsigned *module_param,
 	return param;
 }
 
-unsigned dm_get_reserved_bio_based_ios(void)
+unsigned int dm_get_reserved_bio_based_ios(void)
 {
 	return __dm_get_module_param(&reserved_bio_based_ios,
 				     RESERVED_BIO_BASED_IOS, DM_RESERVED_MAX_IOS);
 }
 EXPORT_SYMBOL_GPL(dm_get_reserved_bio_based_ios);
 
-static unsigned dm_get_numa_node(void)
+static unsigned int dm_get_numa_node(void)
 {
 	return __dm_get_module_param_int(&dm_numa_node,
 					 DM_NUMA_NODE, num_online_nodes() - 1);
@@ -231,7 +233,6 @@ out_uevent_exit:
 
 static void local_exit(void)
 {
-	flush_scheduled_work();
 	destroy_workqueue(deferred_remove_workqueue);
 
 	unregister_blkdev(_major, _name);
@@ -435,7 +436,7 @@ retry:
 	r = ti->type->prepare_ioctl(ti, bdev);
 	if (r == -ENOTCONN && !fatal_signal_pending(current)) {
 		dm_put_live_table(md, *srcu_idx);
-		msleep(10);
+		fsleep(10000);
 		goto retry;
 	}
 
@@ -604,7 +605,7 @@ static void free_io(struct dm_io *io)
 }
 
 static struct bio *alloc_tio(struct clone_info *ci, struct dm_target *ti,
-			     unsigned target_bio_nr, unsigned *len, gfp_t gfp_mask)
+			     unsigned int target_bio_nr, unsigned int *len, gfp_t gfp_mask)
 {
 	struct mapped_device *md = ci->io->md;
 	struct dm_target_io *tio;
@@ -736,7 +737,7 @@ static int open_table_device(struct table_device *td, dev_t dev,
 			     struct mapped_device *md)
 {
 	struct block_device *bdev;
-
+	u64 part_off;
 	int r;
 
 	BUG_ON(td->dm_dev.bdev);
@@ -752,7 +753,7 @@ static int open_table_device(struct table_device *td, dev_t dev,
 	}
 
 	td->dm_dev.bdev = bdev;
-	td->dm_dev.dax_dev = fs_dax_get_by_bdev(bdev);
+	td->dm_dev.dax_dev = fs_dax_get_by_bdev(bdev, &part_off, NULL, NULL);
 	return 0;
 }
 
@@ -1021,6 +1022,7 @@ static void dm_wq_requeue_work(struct work_struct *work)
 		io->next = NULL;
 		__dm_io_complete(io, false);
 		io = next;
+		cond_resched();
 	}
 }
 
@@ -1083,6 +1085,15 @@ static void dm_io_dec_pending(struct dm_io *io, blk_status_t error)
 	__dm_io_dec_pending(io);
 }
 
+/*
+ * The queue_limits are only valid as long as you have a reference
+ * count on 'md'. But _not_ imposing verification to avoid atomic_read(),
+ */
+static inline struct queue_limits *dm_get_queue_limits(struct mapped_device *md)
+{
+	return &md->queue->limits;
+}
+
 void disable_discard(struct mapped_device *md)
 {
 	struct queue_limits *limits = dm_get_queue_limits(md);
@@ -1128,6 +1139,7 @@ static void clone_endio(struct bio *bio)
 
 	if (endio) {
 		int r = endio(ti, bio, &error);
+
 		switch (r) {
 		case DM_ENDIO_REQUEUE:
 			if (static_branch_unlikely(&zoned_enabled)) {
@@ -1172,7 +1184,9 @@ static inline sector_t max_io_len_target_boundary(struct dm_target *ti,
 	return ti->len - target_offset;
 }
 
-static sector_t max_io_len(struct dm_target *ti, sector_t sector)
+static sector_t __max_io_len(struct dm_target *ti, sector_t sector,
+			     unsigned int max_granularity,
+			     unsigned int max_sectors)
 {
 	sector_t target_offset = dm_target_offset(ti, sector);
 	sector_t len = max_io_len_target_boundary(ti, target_offset);
@@ -1183,11 +1197,16 @@ static sector_t max_io_len(struct dm_target *ti, sector_t sector)
 	 *   explains why stacked chunk_sectors based splitting via
 	 *   bio_split_to_limits() isn't possible here.
 	 */
-	if (!ti->max_io_len)
+	if (!max_granularity)
 		return len;
 	return min_t(sector_t, len,
-		min(queue_max_sectors(ti->table->md->queue),
-		    blk_chunk_sectors_left(target_offset, ti->max_io_len)));
+		min(max_sectors ? : queue_max_sectors(ti->table->md->queue),
+		    blk_chunk_sectors_left(target_offset, max_granularity)));
+}
+
+static inline sector_t max_io_len(struct dm_target *ti, sector_t sector)
+{
+	return __max_io_len(ti, sector, ti->max_io_len, 0);
 }
 
 int dm_set_target_max_io_len(struct dm_target *ti, sector_t len)
@@ -1224,7 +1243,8 @@ static struct dm_target *dm_dax_get_live_target(struct mapped_device *md,
 }
 
 static long dm_dax_direct_access(struct dax_device *dax_dev, pgoff_t pgoff,
-				 long nr_pages, void **kaddr, pfn_t *pfn)
+		long nr_pages, enum dax_access_mode mode, void **kaddr,
+		pfn_t *pfn)
 {
 	struct mapped_device *md = dax_get_private(dax_dev);
 	sector_t sector = pgoff * PAGE_SECTORS;
@@ -1242,76 +1262,8 @@ static long dm_dax_direct_access(struct dax_device *dax_dev, pgoff_t pgoff,
 	if (len < 1)
 		goto out;
 	nr_pages = min(len, nr_pages);
-	ret = ti->type->direct_access(ti, pgoff, nr_pages, kaddr, pfn);
+	ret = ti->type->direct_access(ti, pgoff, nr_pages, mode, kaddr, pfn);
 
- out:
-	dm_put_live_table(md, srcu_idx);
-
-	return ret;
-}
-
-static bool dm_dax_supported(struct dax_device *dax_dev, struct block_device *bdev,
-		int blocksize, sector_t start, sector_t len)
-{
-	struct mapped_device *md = dax_get_private(dax_dev);
-	struct dm_table *map;
-	bool ret = false;
-	int srcu_idx;
-
-	map = dm_get_live_table(md, &srcu_idx);
-	if (!map)
-		goto out;
-
-	ret = dm_table_supports_dax(map, device_not_dax_capable, &blocksize);
-
-out:
-	dm_put_live_table(md, srcu_idx);
-
-	return ret;
-}
-
-static size_t dm_dax_copy_from_iter(struct dax_device *dax_dev, pgoff_t pgoff,
-				    void *addr, size_t bytes, struct iov_iter *i)
-{
-	struct mapped_device *md = dax_get_private(dax_dev);
-	sector_t sector = pgoff * PAGE_SECTORS;
-	struct dm_target *ti;
-	long ret = 0;
-	int srcu_idx;
-
-	ti = dm_dax_get_live_target(md, sector, &srcu_idx);
-
-	if (!ti)
-		goto out;
-	if (!ti->type->dax_copy_from_iter) {
-		ret = copy_from_iter(addr, bytes, i);
-		goto out;
-	}
-	ret = ti->type->dax_copy_from_iter(ti, pgoff, addr, bytes, i);
- out:
-	dm_put_live_table(md, srcu_idx);
-
-	return ret;
-}
-
-static size_t dm_dax_copy_to_iter(struct dax_device *dax_dev, pgoff_t pgoff,
-		void *addr, size_t bytes, struct iov_iter *i)
-{
-	struct mapped_device *md = dax_get_private(dax_dev);
-	sector_t sector = pgoff * PAGE_SECTORS;
-	struct dm_target *ti;
-	long ret = 0;
-	int srcu_idx;
-
-	ti = dm_dax_get_live_target(md, sector, &srcu_idx);
-
-	if (!ti)
-		goto out;
-	if (!ti->type->dax_copy_to_iter) {
-		ret = copy_to_iter(addr, bytes, i);
-		goto out;
-	}
-	ret = ti->type->dax_copy_to_iter(ti, pgoff, addr, bytes, i);
  out:
 	dm_put_live_table(md, srcu_idx);
 
@@ -1345,6 +1297,25 @@ static int dm_dax_zero_page_range(struct dax_device *dax_dev, pgoff_t pgoff,
 	return ret;
 }
 
+static size_t dm_dax_recovery_write(struct dax_device *dax_dev, pgoff_t pgoff,
+		void *addr, size_t bytes, struct iov_iter *i)
+{
+	struct mapped_device *md = dax_get_private(dax_dev);
+	sector_t sector = pgoff * PAGE_SECTORS;
+	struct dm_target *ti;
+	int srcu_idx;
+	long ret = 0;
+
+	ti = dm_dax_get_live_target(md, sector, &srcu_idx);
+	if (!ti || !ti->type->dax_recovery_write)
+		goto out;
+
+	ret = ti->type->dax_recovery_write(ti, pgoff, addr, bytes, i);
+out:
+	dm_put_live_table(md, srcu_idx);
+	return ret;
+}
+
 /*
  * A target may call dm_accept_partial_bio only from the map routine.  It is
  * allowed for all bio types except REQ_PREFLUSH, REQ_OP_ZONE_* zone management
@@ -1375,11 +1346,11 @@ static int dm_dax_zero_page_range(struct dax_device *dax_dev, pgoff_t pgoff,
  * the partially processed part (the sum of regions 1+2) must be the same for all
  * copies of the bio.
  */
-void dm_accept_partial_bio(struct bio *bio, unsigned n_sectors)
+void dm_accept_partial_bio(struct bio *bio, unsigned int n_sectors)
 {
 	struct dm_target_io *tio = clone_to_tio(bio);
 	struct dm_io *io = tio->io;
-	unsigned bio_sectors = bio_sectors(bio);
+	unsigned int bio_sectors = bio_sectors(bio);
 
 	BUG_ON(dm_tio_flagged(tio, DM_TIO_IS_DUPLICATE_BIO));
 	BUG_ON(op_is_zone_mgmt(bio_op(bio)));
@@ -1464,6 +1435,7 @@ static void __map_bio(struct bio *clone)
 	if (static_branch_unlikely(&swap_bios_enabled) &&
 	    unlikely(swap_bios_limit(ti, clone))) {
 		int latch = get_swap_bios();
+
 		if (unlikely(latch != md->swap_bios))
 			__set_swap_bios_limit(md, latch);
 		down(&md->swap_bios_semaphore);
@@ -1508,7 +1480,7 @@ static void __map_bio(struct bio *clone)
 	}
 }
 
-static void setup_split_accounting(struct clone_info *ci, unsigned len)
+static void setup_split_accounting(struct clone_info *ci, unsigned int len)
 {
 	struct dm_io *io = ci->io;
 
@@ -1524,7 +1496,7 @@ static void setup_split_accounting(struct clone_info *ci, unsigned len)
 }
 
 static void alloc_multiple_bios(struct bio_list *blist, struct clone_info *ci,
-				struct dm_target *ti, unsigned num_bios,
+				struct dm_target *ti, unsigned int num_bios,
 				unsigned *len)
 {
 	struct bio *bio;
@@ -1554,7 +1526,7 @@ static void alloc_multiple_bios(struct bio_list *blist, struct clone_info *ci,
 }
 
 static int __send_duplicate_bios(struct clone_info *ci, struct dm_target *ti,
-				 unsigned int num_bios, unsigned *len)
+				 unsigned int num_bios, unsigned int *len)
 {
 	struct bio_list blist = BIO_EMPTY_LIST;
 	struct bio *clone;
@@ -1622,13 +1594,14 @@ static void __send_empty_flush(struct clone_info *ci)
 }
 
 static void __send_changing_extent_only(struct clone_info *ci, struct dm_target *ti,
-					unsigned num_bios)
+					unsigned int num_bios,
+					unsigned int max_granularity,
+					unsigned int max_sectors)
 {
-	unsigned len;
-	unsigned int bios;
+	unsigned int len, bios;
 
 	len = min_t(sector_t, ci->sector_count,
-		    max_io_len_target_boundary(ti, dm_target_offset(ti, ci->sector)));
+		    __max_io_len(ti, ci->sector, max_granularity, max_sectors));
 
 	atomic_add(num_bios, &ci->io->io_count);
 	bios = __send_duplicate_bios(ci, ti, num_bios, &len);
@@ -1663,17 +1636,29 @@ static bool is_abnormal_io(struct bio *bio)
 static blk_status_t __process_abnormal_io(struct clone_info *ci,
 					  struct dm_target *ti)
 {
-	unsigned num_bios = 0;
+	unsigned int num_bios = 0;
+	unsigned int max_granularity = 0;
+	unsigned int max_sectors = 0;
+	struct queue_limits *limits = dm_get_queue_limits(ti->table->md);
 
 	switch (bio_op(ci->bio)) {
 	case REQ_OP_DISCARD:
 		num_bios = ti->num_discard_bios;
+		max_sectors = limits->max_discard_sectors;
+		if (ti->max_discard_granularity)
+			max_granularity = max_sectors;
 		break;
 	case REQ_OP_SECURE_ERASE:
 		num_bios = ti->num_secure_erase_bios;
+		max_sectors = limits->max_secure_erase_sectors;
+		if (ti->max_secure_erase_granularity)
+			max_granularity = max_sectors;
 		break;
 	case REQ_OP_WRITE_ZEROES:
 		num_bios = ti->num_write_zeroes_bios;
+		max_sectors = limits->max_write_zeroes_sectors;
+		if (ti->max_write_zeroes_granularity)
+			max_granularity = max_sectors;
 		break;
 	default:
 		break;
@@ -1688,7 +1673,8 @@ static blk_status_t __process_abnormal_io(struct clone_info *ci,
 	if (unlikely(!num_bios))
 		return BLK_STS_NOTSUPP;
 
-	__send_changing_extent_only(ci, ti, num_bios);
+	__send_changing_extent_only(ci, ti, num_bios,
+				    max_granularity, max_sectors);
 	return BLK_STS_OK;
 }
 
@@ -1741,7 +1727,7 @@ static blk_status_t __split_and_process_bio(struct clone_info *ci)
 {
 	struct bio *clone;
 	struct dm_target *ti;
-	unsigned len;
+	unsigned int len;
 
 	ti = dm_table_find_target(ci->map, ci->sector);
 	if (unlikely(!ti))
@@ -1806,6 +1792,8 @@ static void dm_split_and_process_bio(struct mapped_device *md,
 		 * otherwise associated queue_limits won't be imposed.
 		 */
 		bio = bio_split_to_limits(bio);
+		if (!bio)
+			return;
 	}
 
 	init_clone_info(&ci, md, map, bio, is_abnormal);
@@ -1936,9 +1924,11 @@ static int dm_poll_bio(struct bio *bio, struct io_comp_batch *iob,
 	return 1;
 }
 
-/*-----------------------------------------------------------------
+/*
+ *---------------------------------------------------------------
  * An IDR is used to keep track of allocated minor numbers.
- *---------------------------------------------------------------*/
+ *---------------------------------------------------------------
+ */
 static void free_minor(int minor)
 {
 	spin_lock(&_minor_lock);
@@ -2011,6 +2001,7 @@ static void cleanup_mapped_device(struct mapped_device *md)
 	dm_free_md_mempools(md->mempools);
 
 	if (md->dax_dev) {
+		dax_remove_host(md->disk);
 		kill_dax(md->dax_dev);
 		put_dax(md->dax_dev);
 		md->dax_dev = NULL;
@@ -2118,10 +2109,15 @@ static struct mapped_device *alloc_dev(int minor)
 	md->disk->private_data = md;
 	sprintf(md->disk->disk_name, "dm-%d", minor);
 
-	if (IS_ENABLED(CONFIG_DAX_DRIVER)) {
-		md->dax_dev = alloc_dax(md, md->disk->disk_name,
-					&dm_dax_ops, 0);
-		if (IS_ERR(md->dax_dev))
+	if (IS_ENABLED(CONFIG_FS_DAX)) {
+		md->dax_dev = alloc_dax(md, &dm_dax_ops);
+		if (IS_ERR(md->dax_dev)) {
+			md->dax_dev = NULL;
+			goto bad;
+		}
+		set_dax_nocache(md->dax_dev);
+		set_dax_nomc(md->dax_dev);
+		if (dax_add_host(md->dax_dev, md->disk))
 			goto bad;
 	}
 
@@ -2135,7 +2131,9 @@ static struct mapped_device *alloc_dev(int minor)
 	if (!md->pending_io)
 		goto bad;
 
-	dm_stats_init(&md->stats);
+	r = dm_stats_init(&md->stats);
+	if (r < 0)
+		goto bad;
 
 	/* Populate the mapping, nobody knows we exist yet */
 	spin_lock(&_minor_lock);
@@ -2182,7 +2180,7 @@ static void event_callback(void *context)
 {
 	unsigned long flags;
 	LIST_HEAD(uevents);
-	struct mapped_device *md = (struct mapped_device *) context;
+	struct mapped_device *md = context;
 
 	spin_lock_irqsave(&md->uevent_lock, flags);
 	list_splice_init(&md->uevent_list, &uevents);
@@ -2215,10 +2213,7 @@ static struct dm_table *__bind(struct mapped_device *md, struct dm_table *t,
 	if (size != dm_get_size(md))
 		memset(&md->geometry, 0, sizeof(md->geometry));
 
-	if (!get_capacity(md->disk))
-		set_capacity(md->disk, size);
-	else
-		set_capacity_and_notify(md->disk, size);
+	set_capacity(md->disk, size);
 
 	dm_table_event_callback(t, event_callback, md);
 
@@ -2333,17 +2328,6 @@ struct target_type *dm_get_immutable_target_type(struct mapped_device *md)
 }
 
 /*
- * The queue_limits are only valid as long as you have a reference
- * count on 'md'.
- */
-struct queue_limits *dm_get_queue_limits(struct mapped_device *md)
-{
-	BUG_ON(!atomic_read(&md->holders));
-	return &md->queue->limits;
-}
-EXPORT_SYMBOL_GPL(dm_get_queue_limits);
-
-/*
  * Setup the DM device's queue based on md's type
  */
 int dm_setup_md_queue(struct mapped_device *md, struct dm_table *t)
@@ -2394,7 +2378,7 @@ int dm_setup_md_queue(struct mapped_device *md, struct dm_table *t)
 struct mapped_device *dm_get_md(dev_t dev)
 {
 	struct mapped_device *md;
-	unsigned minor = MINOR(dev);
+	unsigned int minor = MINOR(dev);
 
 	if (MAJOR(dev) != _major || minor >= (1 << MINORBITS))
 		return NULL;
@@ -2476,7 +2460,7 @@ static void __dm_destroy(struct mapped_device *md, bool wait)
 		set_bit(DMF_POST_SUSPENDING, &md->flags);
 		dm_table_postsuspend_targets(map);
 	}
-	/* dm_put_live_table must be before msleep, otherwise deadlock is possible */
+	/* dm_put_live_table must be before fsleep, otherwise deadlock is possible */
 	dm_put_live_table(md, srcu_idx);
 	mutex_unlock(&md->suspend_lock);
 
@@ -2488,7 +2472,7 @@ static void __dm_destroy(struct mapped_device *md, bool wait)
 	 */
 	if (wait)
 		while (atomic_read(&md->holders))
-			msleep(1);
+			fsleep(1000);
 	else if (atomic_read(&md->holders))
 		DMWARN("%s: Forcibly removing mapped_device still in use! (%d users)",
 		       dm_device_name(md), atomic_read(&md->holders));
@@ -2565,7 +2549,7 @@ static int dm_wait_for_completion(struct mapped_device *md, unsigned int task_st
 			break;
 		}
 
-		msleep(5);
+		fsleep(5000);
 	}
 
 	return r;
@@ -2588,6 +2572,7 @@ static void dm_wq_work(struct work_struct *work)
 			break;
 
 		submit_bio_noacct(bio);
+		cond_resched();
 	}
 }
 
@@ -2676,7 +2661,7 @@ static void unlock_fs(struct mapped_device *md)
  * are being added to md->deferred list.
  */
 static int __dm_suspend(struct mapped_device *md, struct dm_table *map,
-			unsigned suspend_flags, unsigned int task_state,
+			unsigned int suspend_flags, unsigned int task_state,
 			int dmf_suspended_flag)
 {
 	bool do_lockfs = suspend_flags & DM_SUSPEND_LOCKFS_FLAG;
@@ -2783,7 +2768,7 @@ static int __dm_suspend(struct mapped_device *md, struct dm_table *map,
  *
  * To abort suspend, start the request_queue.
  */
-int dm_suspend(struct mapped_device *md, unsigned suspend_flags)
+int dm_suspend(struct mapped_device *md, unsigned int suspend_flags)
 {
 	struct dm_table *map = NULL;
 	int r = 0;
@@ -2806,6 +2791,10 @@ retry:
 	}
 
 	map = rcu_dereference_protected(md->map, lockdep_is_held(&md->suspend_lock));
+	if (!map) {
+		/* avoid deadlock with fs/namespace.c:do_mount() */
+		suspend_flags &= ~DM_SUSPEND_LOCKFS_FLAG;
+	}
 
 	r = __dm_suspend(md, map, suspend_flags, TASK_INTERRUPTIBLE, DMF_SUSPENDED);
 	if (r)
@@ -2824,6 +2813,7 @@ static int __dm_resume(struct mapped_device *md, struct dm_table *map)
 {
 	if (map) {
 		int r = dm_table_resume_targets(map);
+
 		if (r)
 			return r;
 	}
@@ -2885,7 +2875,7 @@ out:
  * It may be used only from the kernel.
  */
 
-static void __dm_internal_suspend(struct mapped_device *md, unsigned suspend_flags)
+static void __dm_internal_suspend(struct mapped_device *md, unsigned int suspend_flags)
 {
 	struct dm_table *map = NULL;
 
@@ -2983,27 +2973,31 @@ done:
 }
 EXPORT_SYMBOL_GPL(dm_internal_resume_fast);
 
-/*-----------------------------------------------------------------
+/*
+ *---------------------------------------------------------------
  * Event notification.
- *---------------------------------------------------------------*/
+ *---------------------------------------------------------------
+ */
 int dm_kobject_uevent(struct mapped_device *md, enum kobject_action action,
-		       unsigned cookie)
+		      unsigned int cookie, bool need_resize_uevent)
 {
 	int r;
-	unsigned noio_flag;
+	unsigned int noio_flag;
 	char udev_cookie[DM_COOKIE_LENGTH];
-	char *envp[] = { udev_cookie, NULL };
+	char *envp[3] = { NULL, NULL, NULL };
+	char **envpp = envp;
+	if (cookie) {
+		snprintf(udev_cookie, DM_COOKIE_LENGTH, "%s=%u",
+			 DM_COOKIE_ENV_VAR_NAME, cookie);
+		*envpp++ = udev_cookie;
+	}
+	if (need_resize_uevent) {
+		*envpp++ = "RESIZE=1";
+	}
 
 	noio_flag = memalloc_noio_save();
 
-	if (!cookie)
-		r = kobject_uevent(&disk_to_dev(md->disk)->kobj, action);
-	else {
-		snprintf(udev_cookie, DM_COOKIE_LENGTH, "%s=%u",
-			 DM_COOKIE_ENV_VAR_NAME, cookie);
-		r = kobject_uevent_env(&disk_to_dev(md->disk)->kobj,
-				       action, envp);
-	}
+	r = kobject_uevent_env(&disk_to_dev(md->disk)->kobj, action, envp);
 
 	memalloc_noio_restore(noio_flag);
 
@@ -3388,10 +3382,8 @@ static const struct block_device_operations dm_rq_blk_dops = {
 
 static const struct dax_operations dm_dax_ops = {
 	.direct_access = dm_dax_direct_access,
-	.dax_supported = dm_dax_supported,
-	.copy_from_iter = dm_dax_copy_from_iter,
-	.copy_to_iter = dm_dax_copy_to_iter,
 	.zero_page_range = dm_dax_zero_page_range,
+	.recovery_write = dm_dax_recovery_write,
 };
 
 /*
@@ -3403,13 +3395,13 @@ module_exit(dm_exit);
 module_param(major, uint, 0);
 MODULE_PARM_DESC(major, "The major number of the device mapper");
 
-module_param(reserved_bio_based_ios, uint, S_IRUGO | S_IWUSR);
+module_param(reserved_bio_based_ios, uint, 0644);
 MODULE_PARM_DESC(reserved_bio_based_ios, "Reserved IOs in bio-based mempools");
 
-module_param(dm_numa_node, int, S_IRUGO | S_IWUSR);
+module_param(dm_numa_node, int, 0644);
 MODULE_PARM_DESC(dm_numa_node, "NUMA node for DM device memory allocations");
 
-module_param(swap_bios, int, S_IRUGO | S_IWUSR);
+module_param(swap_bios, int, 0644);
 MODULE_PARM_DESC(swap_bios, "Maximum allowed inflight swap IOs");
 
 MODULE_DESCRIPTION(DM_NAME " driver");

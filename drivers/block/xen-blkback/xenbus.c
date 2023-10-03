@@ -527,7 +527,7 @@ static int xen_vbd_create(struct xen_blkif *blkif, blkif_vdev_t handle,
 	return 0;
 }
 
-static int xen_blkbk_remove(struct xenbus_device *dev)
+static void xen_blkbk_remove(struct xenbus_device *dev)
 {
 	struct backend_info *be = dev_get_drvdata(&dev->dev);
 
@@ -550,8 +550,6 @@ static int xen_blkbk_remove(struct xenbus_device *dev)
 		/* Put the reference we set in xen_blkif_alloc(). */
 		xen_blkif_put(be->blkif);
 	}
-
-	return 0;
 }
 
 int xen_blkbk_flush_diskcache(struct xenbus_transaction xbt,

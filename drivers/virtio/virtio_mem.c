@@ -38,10 +38,13 @@ module_param(bbm_block_size, ulong, 0444);
 MODULE_PARM_DESC(bbm_block_size,
 		 "Big Block size in bytes. Default is 0 (auto-detection).");
 
+/* RHEL: Hide the parameter, we don't want unsafe unplug to ever be active. */
 static bool bbm_safe_unplug = true;
+/*
 module_param(bbm_safe_unplug, bool, 0444);
 MODULE_PARM_DESC(bbm_safe_unplug,
 	     "Use a safe unplug mechanism in BBM, avoiding long/endless loops");
+*/
 
 /*
  * virtio-mem currently supports the following modes of operation:
@@ -862,8 +865,7 @@ static void virtio_mem_sbm_notify_online(struct virtio_mem *vm,
 					 unsigned long mb_id,
 					 unsigned long start_pfn)
 {
-	const bool is_movable = page_zonenum(pfn_to_page(start_pfn)) ==
-				ZONE_MOVABLE;
+	const bool is_movable = is_zone_movable_page(pfn_to_page(start_pfn));
 	int new_state;
 
 	switch (virtio_mem_sbm_get_mb_state(vm, mb_id)) {
@@ -1158,8 +1160,7 @@ static void virtio_mem_fake_online(unsigned long pfn, unsigned long nr_pages)
  */
 static int virtio_mem_fake_offline(unsigned long pfn, unsigned long nr_pages)
 {
-	const bool is_movable = page_zonenum(pfn_to_page(pfn)) ==
-				ZONE_MOVABLE;
+	const bool is_movable = is_zone_movable_page(pfn_to_page(pfn));
 	int rc, retry_count;
 
 	/*
@@ -2789,17 +2790,6 @@ static int virtio_mem_probe(struct virtio_device *vdev)
 
 	/* trigger a config update to start processing the requested_size */
 	if (!vm->in_kdump) {
-		static bool printed;
-
-		/*
-		 * virtio-mem, and especially its memory hot(un)plug
-		 * functionality, is tech-preview.
-		 */
-		if (!printed) {
-			printed = true;
-			mark_tech_preview("virtio_mem", THIS_MODULE);
-		}
-
 		atomic_set(&vm->config_changed, 1);
 		queue_work(system_freezable_wq, &vm->wq);
 	}

@@ -39,7 +39,7 @@ netprots="6lowpan appletalk atm ax25 batman-adv bluetooth can dccp dsa ieee80215
 
 drmdrvs="amd ast gma500 i2c i915 mgag200 nouveau radeon via "
 
-singlemods="ntb_netdev iscsi_ibft iscsi_boot_sysfs megaraid pmcraid qedi qla1280 9pnet_rdma rpcrdma nvmet-rdma nvme-rdma hid-picolcd hid-prodikeys hwa-hc hwpoison-inject hid-sensor-hub target_core_user sbp_target cxgbit iw_cxgb3 iw_cxgb4 cxgb3i cxgb3i cxgb3i_ddp cxgb4i chcr chtls parport_serial ism regmap-sdw regmap-sdw-mbq arizona-micsupp hid-asus nct6775 ntc_thermistor"
+singlemods="ntb_netdev iscsi_ibft iscsi_boot_sysfs megaraid pmcraid qedi qla1280 9pnet_rdma rpcrdma nvmet-rdma nvme-rdma hid-picolcd hid-prodikeys hwa-hc hwpoison-inject hid-sensor-hub target_core_user sbp_target cxgbit iw_cxgb3 iw_cxgb4 cxgb3i cxgb3i cxgb3i_ddp cxgb4i chcr chtls parport_serial ism regmap-sdw regmap-sdw-mbq arizona-micsupp hid-asus nct6775 ntc_thermistor video"
 
 # Grab the arch-specific filter list overrides
 source ./filter-$2.sh

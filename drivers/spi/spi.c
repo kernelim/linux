@@ -127,10 +127,10 @@ do {									\
 		unsigned int start;					\
 		pcpu_stats = per_cpu_ptr(in, i);			\
 		do {							\
-			start = u64_stats_fetch_begin_irq(		\
+			start = u64_stats_fetch_begin(		\
 					&pcpu_stats->syncp);		\
 			inc = u64_stats_read(&pcpu_stats->field);	\
-		} while (u64_stats_fetch_retry_irq(			\
+		} while (u64_stats_fetch_retry(			\
 					&pcpu_stats->syncp, start));	\
 		ret += inc;						\
 	}								\
@@ -4453,7 +4453,7 @@ static int acpi_spi_notify(struct notifier_block *nb, unsigned long value,
 
 	switch (value) {
 	case ACPI_RECONFIG_DEVICE_ADD:
-		ctlr = acpi_spi_find_controller_by_adev(adev->parent);
+		ctlr = acpi_spi_find_controller_by_adev(acpi_dev_parent(adev));
 		if (!ctlr)
 			break;
 

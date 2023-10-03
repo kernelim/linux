@@ -514,6 +514,7 @@ static int sock_xmit(struct nbd_device *nbd, int index, int send,
 	noreclaim_flag = memalloc_noreclaim_save();
 	do {
 		sock->sk->sk_allocation = GFP_NOIO | __GFP_MEMALLOC;
+		sock->sk->sk_use_task_frag = false;
 		msg.msg_name = NULL;
 		msg.msg_namelen = 0;
 		msg.msg_control = NULL;
@@ -2324,6 +2325,7 @@ static struct genl_family nbd_genl_family __ro_after_init = {
 	.module		= THIS_MODULE,
 	.small_ops	= nbd_connect_genl_ops,
 	.n_small_ops	= ARRAY_SIZE(nbd_connect_genl_ops),
+	.resv_start_op	= NBD_CMD_STATUS + 1,
 	.maxattr	= NBD_ATTR_MAX,
 	.policy = nbd_attr_policy,
 	.mcgrps		= nbd_mcast_grps,

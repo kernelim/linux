@@ -156,6 +156,11 @@ create_tcam_skeleton()
 
 setup_prepare()
 {
+	ip link set $eth0 up
+	ip link set $eth1 up
+	ip link set $eth2 up
+	ip link set $eth3 up
+
 	create_tcam_skeleton $eth0
 
 	ip link add br0 type bridge
@@ -210,15 +215,15 @@ test_vlan_pop()
 
 	sleep 1
 
-	tcpdump_stop
+	tcpdump_stop $eth2
 
-	if tcpdump_show | grep -q "$eth3_mac > $eth2_mac, ethertype IPv4"; then
+	if tcpdump_show $eth2 | grep -q "$eth3_mac > $eth2_mac, ethertype IPv4"; then
 		echo "OK"
 	else
 		echo "FAIL"
 	fi
 
-	tcpdump_cleanup
+	tcpdump_cleanup $eth2
 }
 
 test_vlan_push()
@@ -231,20 +236,20 @@ test_vlan_push()
 
 	sleep 1
 
-	tcpdump_stop
+	tcpdump_stop $eth3.100
 
-	if tcpdump_show | grep -q "$eth2_mac > $eth3_mac"; then
+	if tcpdump_show $eth3.100 | grep -q "$eth2_mac > $eth3_mac"; then
 		echo "OK"
 	else
 		echo "FAIL"
 	fi
 
-	tcpdump_cleanup
+	tcpdump_cleanup $eth3.100
 }
 
-test_vlan_modify()
+test_vlan_ingress_modify()
 {
-	printf "Testing VLAN modification..		"
+	printf "Testing ingress VLAN modification..		"
 
 	ip link set br0 type bridge vlan_filtering 1
 	bridge vlan add dev $eth0 vid 200
@@ -262,21 +267,59 @@ test_vlan_modify()
 
 	sleep 1
 
-	tcpdump_stop
+	tcpdump_stop $eth2
 
-	if tcpdump_show | grep -q "$eth3_mac > $eth2_mac, .* vlan 300"; then
+	if tcpdump_show $eth2 | grep -q "$eth3_mac > $eth2_mac, .* vlan 300"; then
 		echo "OK"
 	else
 		echo "FAIL"
 	fi
 
-	tcpdump_cleanup
+	tcpdump_cleanup $eth2
 
 	tc filter del dev $eth0 ingress chain $(IS1 2) pref 3
 
 	bridge vlan del dev $eth0 vid 200
 	bridge vlan del dev $eth0 vid 300
 	bridge vlan del dev $eth1 vid 300
+	ip link set br0 type bridge vlan_filtering 0
+}
+
+test_vlan_egress_modify()
+{
+	printf "Testing egress VLAN modification..		"
+
+	tc qdisc add dev $eth1 clsact
+
+	ip link set br0 type bridge vlan_filtering 1
+	bridge vlan add dev $eth0 vid 200
+	bridge vlan add dev $eth1 vid 200
+
+	tc filter add dev $eth1 egress chain $(ES0) pref 3 \
+		protocol 802.1Q flower skip_sw vlan_id 200 vlan_prio 0 \
+		action vlan modify id 300 priority 7
+
+	tcpdump_start $eth2
+
+	$MZ $eth3.200 -q -c 1 -p 64 -a $eth3_mac -b $eth2_mac -t ip
+
+	sleep 1
+
+	tcpdump_stop $eth2
+
+	if tcpdump_show $eth2 | grep -q "$eth3_mac > $eth2_mac, .* vlan 300"; then
+		echo "OK"
+	else
+		echo "FAIL"
+	fi
+
+	tcpdump_cleanup $eth2
+
+	tc filter del dev $eth1 egress chain $(ES0) pref 3
+	tc qdisc del dev $eth1 clsact
+
+	bridge vlan del dev $eth0 vid 200
+	bridge vlan del dev $eth1 vid 200
 	ip link set br0 type bridge vlan_filtering 0
 }
 
@@ -304,7 +347,8 @@ trap cleanup EXIT
 ALL_TESTS="
 	test_vlan_pop
 	test_vlan_push
-	test_vlan_modify
+	test_vlan_ingress_modify
+	test_vlan_egress_modify
 	test_skbedit_priority
 "
 

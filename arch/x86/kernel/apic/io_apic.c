@@ -66,6 +66,7 @@
 #include <asm/hw_irq.h>
 #include <asm/apic.h>
 #include <asm/pgtable.h>
+#include <asm/x86_init.h>
 
 #define	for_each_ioapic(idx)		\
 	for ((idx) = 0; (idx) < nr_ioapics; (idx)++)
@@ -765,7 +766,7 @@ static bool irq_active_low(int idx)
 static bool EISA_ELCR(unsigned int irq)
 {
 	if (irq < nr_legacy_irqs()) {
-		unsigned int port = 0x4d0 + (irq >> 3);
+		unsigned int port = PIC_ELCR1 + (irq >> 3);
 		return (inb(port) >> (irq & 7)) & 1;
 	}
 	apic_printk(APIC_VERBOSE, KERN_INFO
@@ -2364,17 +2365,14 @@ static int mp_irqdomain_create(int ioapic)
 		return -ENODEV;
 	}
 
-	ip->irqdomain = irq_domain_create_linear(fn, hwirqs, cfg->ops,
-						 (void *)(long)ioapic);
-
+	ip->irqdomain = irq_domain_create_hierarchy(parent, 0, hwirqs, fn, cfg->ops,
+						    (void *)(long)ioapic);
 	if (!ip->irqdomain) {
 		/* Release fw handle if it was allocated above */
 		if (!cfg->dev)
 			irq_domain_free_fwnode(fn);
 		return -ENOMEM;
 	}
-
-	ip->irqdomain->parent = parent;
 
 	if (cfg->type == IOAPIC_DOMAIN_LEGACY ||
 	    cfg->type == IOAPIC_DOMAIN_STRICT)
@@ -2683,10 +2681,15 @@ static void io_apic_set_fixmap(enum fixed_addresses idx, phys_addr_t phys)
 	pgprot_t flags = FIXMAP_PAGE_NOCACHE;
 
 	/*
-	 * Ensure fixmaps for IOAPIC MMIO respect memory encryption pgprot
+	 * Ensure fixmaps for IO-APIC MMIO respect memory encryption pgprot
 	 * bits, just like normal ioremap():
 	 */
-	flags = pgprot_decrypted(flags);
+	if (cc_platform_has(CC_ATTR_GUEST_MEM_ENCRYPT)) {
+		if (x86_platform.hyper.is_private_mmio(phys))
+			flags = pgprot_encrypted(flags);
+		else
+			flags = pgprot_decrypted(flags);
+	}
 
 	__set_fixmap(idx, phys, flags);
 }

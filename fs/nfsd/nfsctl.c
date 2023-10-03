@@ -14,7 +14,6 @@
 #include <linux/lockd/lockd.h>
 #include <linux/sunrpc/addr.h>
 #include <linux/sunrpc/gss_api.h>
-#include <linux/sunrpc/gss_krb5_enctypes.h>
 #include <linux/sunrpc/rpc_pipe_fs.h>
 #include <linux/module.h>
 #include <linux/fsnotify.h>
@@ -47,7 +46,6 @@ enum {
 	NFSD_MaxBlkSize,
 	NFSD_MaxConnections,
 	NFSD_Filecache,
-	NFSD_SupportedEnctypes,
 	/*
 	 * The below MUST come last.  Otherwise we leave a hole in nfsd_files[]
 	 * with !CONFIG_NFSD_V4 and simple_fill_super() goes oops
@@ -186,16 +184,6 @@ static int export_features_show(struct seq_file *m, void *v)
 }
 
 DEFINE_SHOW_ATTRIBUTE(export_features);
-
-#if defined(CONFIG_SUNRPC_GSS) || defined(CONFIG_SUNRPC_GSS_MODULE)
-static int supported_enctypes_show(struct seq_file *m, void *v)
-{
-	seq_printf(m, KRB5_SUPPORTED_ENCTYPES);
-	return 0;
-}
-
-DEFINE_SHOW_ATTRIBUTE(supported_enctypes);
-#endif /* CONFIG_SUNRPC_GSS or CONFIG_SUNRPC_GSS_MODULE */
 
 static const struct file_operations pool_stats_operations = {
 	.open		= nfsd_pool_stats_open,
@@ -581,7 +569,9 @@ static ssize_t __write_versions(struct file *file, char *buf, size_t size)
 
 			cmd = sign == '-' ? NFSD_CLEAR : NFSD_SET;
 			switch(num) {
+#ifdef CONFIG_NFSD_V2
 			case 2:
+#endif
 			case 3:
 				nfsd_vers(nn, num, cmd);
 				break;
@@ -601,7 +591,9 @@ static ssize_t __write_versions(struct file *file, char *buf, size_t size)
 				}
 				break;
 			default:
-				return -EINVAL;
+				/* Ignore requests to disable non-existent versions */
+				if (cmd == NFSD_SET)
+					return -EINVAL;
 			}
 			vers += len + 1;
 		} while ((len = qword_get(&mesg, vers, size)) > 0);
@@ -710,16 +702,11 @@ static ssize_t __write_ports_addfd(char *buf, struct net *net, const struct cred
 	if (err != 0 || fd < 0)
 		return -EINVAL;
 
-	if (svc_alien_sock(net, fd)) {
-		printk(KERN_ERR "%s: socket net is different to NFSd's one\n", __func__);
-		return -EINVAL;
-	}
-
 	err = nfsd_create_serv(net);
 	if (err != 0)
 		return err;
 
-	err = svc_addsock(nn->nfsd_serv, fd, buf, SIMPLE_TRANSACTION_LIMIT, cred);
+	err = svc_addsock(nn->nfsd_serv, net, fd, buf, SIMPLE_TRANSACTION_LIMIT, cred);
 
 	if (err >= 0 &&
 	    !nn->nfsd_serv->sv_nrthreads && !xchg(&nn->keep_active, 1))
@@ -1146,6 +1133,9 @@ static struct inode *nfsd_get_inode(struct super_block *sb, umode_t mode)
 		inode->i_op = &simple_dir_inode_operations;
 		inc_nlink(inode);
 		break;
+	case S_IFLNK:
+		inode->i_op = &simple_symlink_inode_operations;
+		break;
 	default:
 		break;
 	}
@@ -1190,6 +1180,54 @@ out_err:
 	dentry = ERR_PTR(ret);
 	goto out;
 }
+
+#if IS_ENABLED(CONFIG_SUNRPC_GSS)
+static int __nfsd_symlink(struct inode *dir, struct dentry *dentry,
+			  umode_t mode, const char *content)
+{
+	struct inode *inode;
+
+	inode = nfsd_get_inode(dir->i_sb, mode);
+	if (!inode)
+		return -ENOMEM;
+
+	inode->i_link = (char *)content;
+	inode->i_size = strlen(content);
+
+	d_add(dentry, inode);
+	inc_nlink(dir);
+	fsnotify_create(dir, dentry);
+	return 0;
+}
+
+/*
+ * @content is assumed to be a NUL-terminated string that lives
+ * longer than the symlink itself.
+ */
+static void nfsd_symlink(struct dentry *parent, const char *name,
+			 const char *content)
+{
+	struct inode *dir = parent->d_inode;
+	struct dentry *dentry;
+	int ret;
+
+	inode_lock(dir);
+	dentry = d_alloc_name(parent, name);
+	if (!dentry)
+		goto out;
+	ret = __nfsd_symlink(d_inode(parent), dentry, S_IFLNK | 0777, content);
+	if (ret)
+		dput(dentry);
+out:
+	inode_unlock(dir);
+}
+#else
+static inline void nfsd_symlink(struct dentry *parent, const char *name,
+				const char *content)
+{
+}
+
+#endif
 
 static void clear_ncl(struct inode *inode)
 {
@@ -1351,10 +1389,6 @@ static int nfsd_fill_super(struct super_block *sb, struct fs_context *fc)
 		[NFSD_MaxBlkSize] = {"max_block_size", &transaction_ops, S_IWUSR|S_IRUGO},
 		[NFSD_MaxConnections] = {"max_connections", &transaction_ops, S_IWUSR|S_IRUGO},
 		[NFSD_Filecache] = {"filecache", &nfsd_file_cache_stats_fops, S_IRUGO},
-#if defined(CONFIG_SUNRPC_GSS) || defined(CONFIG_SUNRPC_GSS_MODULE)
-		[NFSD_SupportedEnctypes] = {"supported_krb5_enctypes",
-					&supported_enctypes_fops, S_IRUGO},
-#endif /* CONFIG_SUNRPC_GSS or CONFIG_SUNRPC_GSS_MODULE */
 #ifdef CONFIG_NFSD_V4
 		[NFSD_Leasetime] = {"nfsv4leasetime", &transaction_ops, S_IWUSR|S_IRUSR},
 		[NFSD_Gracetime] = {"nfsv4gracetime", &transaction_ops, S_IWUSR|S_IRUSR},
@@ -1367,6 +1401,8 @@ static int nfsd_fill_super(struct super_block *sb, struct fs_context *fc)
 	ret = simple_fill_super(sb, 0x6e667364, nfsd_files);
 	if (ret)
 		return ret;
+	nfsd_symlink(sb->s_root, "supported_krb5_enctypes",
+		     "/proc/net/rpc/gss_krb5_enctypes");
 	dentry = nfsd_mkdir(sb->s_root, NULL, "clients");
 	if (IS_ERR(dentry))
 		return PTR_ERR(dentry);
@@ -1451,6 +1487,9 @@ static __net_init int nfsd_init_net(struct net *net)
 	retval = nfsd_idmap_init(net);
 	if (retval)
 		goto out_idmap_error;
+	retval = nfsd_net_reply_cache_init(nn);
+	if (retval)
+		goto out_repcache_error;
 	nn->nfsd_versions = NULL;
 	nn->nfsd4_minorversions = NULL;
 	nfsd4_init_leases_net(nn);
@@ -1459,6 +1498,8 @@ static __net_init int nfsd_init_net(struct net *net)
 
 	return 0;
 
+out_repcache_error:
+	nfsd_idmap_shutdown(net);
 out_idmap_error:
 	nfsd_export_shutdown(net);
 out_export_error:
@@ -1467,9 +1508,12 @@ out_export_error:
 
 static __net_exit void nfsd_exit_net(struct net *net)
 {
+	struct nfsd_net *nn = net_generic(net, nfsd_net_id);
+
+	nfsd_net_reply_cache_destroy(nn);
 	nfsd_idmap_shutdown(net);
 	nfsd_export_shutdown(net);
-	nfsd_netns_free_versions(net_generic(net, nfsd_net_id));
+	nfsd_netns_free_versions(nn);
 }
 
 static struct pernet_operations nfsd_net_ops = {

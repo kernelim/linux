@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2017-2022 Broadcom. All Rights Reserved. The term *
+ * Copyright (C) 2017-2023 Broadcom. All Rights Reserved. The term *
  * “Broadcom” refers to Broadcom Inc. and/or its subsidiaries.  *
  * Copyright (C) 2004-2016 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
@@ -134,7 +134,7 @@ lpfc_cmf_info_show(struct device *dev, struct device_attribute *attr,
 	scnprintf(tmp, sizeof(tmp),
 		  "Congestion Mgmt Info: E2Eattr %d Ver %d "
 		  "CMF %d cnt %d\n",
-		  phba->sli4_hba.pc_sli4_params.mi_ver,
+		  phba->sli4_hba.pc_sli4_params.mi_cap,
 		  cp ? cp->cgn_info_version : 0,
 		  phba->sli4_hba.pc_sli4_params.cmf, phba->cmf_timer_cnt);
 
@@ -1644,6 +1644,12 @@ lpfc_sli4_pdev_status_reg_wait(struct lpfc_hba *phba)
 	    !bf_get(lpfc_sliport_status_err, &portstat_reg))
 		return -EPERM;
 
+	/* There is no point to wait if the port is in an unrecoverable
+	 * state.
+	 */
+	if (lpfc_sli4_unrecoverable_port(&portstat_reg))
+		return -EIO;
+
 	/* wait for the SLI port firmware ready after firmware reset */
 	for (i = 0; i < LPFC_FW_RESET_MAXIMUM_WAIT_10MS_CNT; i++) {
 		msleep(10);
@@ -1905,8 +1911,7 @@ lpfc_xcvr_data_show(struct device *dev, struct device_attribute *attr,
 		goto out_free_rdp;
 	}
 
-	strncpy(chbuf, &rdp_context->page_a0[SSF_VENDOR_NAME], 16);
-	chbuf[16] = 0;
+	strscpy(chbuf, &rdp_context->page_a0[SSF_VENDOR_NAME], 16);
 
 	len = scnprintf(buf, PAGE_SIZE - len, "VendorName:\t%s\n", chbuf);
 	len += scnprintf(buf + len, PAGE_SIZE - len,
@@ -1914,17 +1919,13 @@ lpfc_xcvr_data_show(struct device *dev, struct device_attribute *attr,
 			 (uint8_t)rdp_context->page_a0[SSF_VENDOR_OUI],
 			 (uint8_t)rdp_context->page_a0[SSF_VENDOR_OUI + 1],
 			 (uint8_t)rdp_context->page_a0[SSF_VENDOR_OUI + 2]);
-	strncpy(chbuf, &rdp_context->page_a0[SSF_VENDOR_PN], 16);
-	chbuf[16] = 0;
+	strscpy(chbuf, &rdp_context->page_a0[SSF_VENDOR_PN], 16);
 	len += scnprintf(buf + len, PAGE_SIZE - len, "VendorPN:\t%s\n", chbuf);
-	strncpy(chbuf, &rdp_context->page_a0[SSF_VENDOR_SN], 16);
-	chbuf[16] = 0;
+	strscpy(chbuf, &rdp_context->page_a0[SSF_VENDOR_SN], 16);
 	len += scnprintf(buf + len, PAGE_SIZE - len, "VendorSN:\t%s\n", chbuf);
-	strncpy(chbuf, &rdp_context->page_a0[SSF_VENDOR_REV], 4);
-	chbuf[4] = 0;
+	strscpy(chbuf, &rdp_context->page_a0[SSF_VENDOR_REV], 4);
 	len += scnprintf(buf + len, PAGE_SIZE - len, "VendorRev:\t%s\n", chbuf);
-	strncpy(chbuf, &rdp_context->page_a0[SSF_DATE_CODE], 8);
-	chbuf[8] = 0;
+	strscpy(chbuf, &rdp_context->page_a0[SSF_DATE_CODE], 8);
 	len += scnprintf(buf + len, PAGE_SIZE - len, "DateCode:\t%s\n", chbuf);
 	len += scnprintf(buf + len, PAGE_SIZE - len, "Identifier:\t%xh\n",
 			 (uint8_t)rdp_context->page_a0[SSF_IDENTIFIER]);
@@ -1941,33 +1942,25 @@ lpfc_xcvr_data_show(struct device *dev, struct device_attribute *attr,
 			&rdp_context->page_a0[SSF_TRANSCEIVER_CODE_B7];
 
 	len += scnprintf(buf + len, PAGE_SIZE - len, "Speeds: \t");
-		if (*(uint8_t *)trasn_code_byte7 == 0) {
-			len += scnprintf(buf + len, PAGE_SIZE - len,
-					 "Unknown\n");
-		} else {
-			if (trasn_code_byte7->fc_sp_100MB)
-				len += scnprintf(buf + len, PAGE_SIZE - len,
-						 "1 ");
-			if (trasn_code_byte7->fc_sp_200mb)
-				len += scnprintf(buf + len, PAGE_SIZE - len,
-						 "2 ");
-			if (trasn_code_byte7->fc_sp_400MB)
-				len += scnprintf(buf + len, PAGE_SIZE - len,
-						 "4 ");
-			if (trasn_code_byte7->fc_sp_800MB)
-				len += scnprintf(buf + len, PAGE_SIZE - len,
-						 "8 ");
-			if (trasn_code_byte7->fc_sp_1600MB)
-				len += scnprintf(buf + len, PAGE_SIZE - len,
-						 "16 ");
-			if (trasn_code_byte7->fc_sp_3200MB)
-				len += scnprintf(buf + len, PAGE_SIZE - len,
-						 "32 ");
-			if (trasn_code_byte7->speed_chk_ecc)
-				len += scnprintf(buf + len, PAGE_SIZE - len,
-						 "64 ");
-			len += scnprintf(buf + len, PAGE_SIZE - len, "GB\n");
-		}
+	if (*(uint8_t *)trasn_code_byte7 == 0) {
+		len += scnprintf(buf + len, PAGE_SIZE - len, "Unknown\n");
+	} else {
+		if (trasn_code_byte7->fc_sp_100MB)
+			len += scnprintf(buf + len, PAGE_SIZE - len, "1 ");
+		if (trasn_code_byte7->fc_sp_200mb)
+			len += scnprintf(buf + len, PAGE_SIZE - len, "2 ");
+		if (trasn_code_byte7->fc_sp_400MB)
+			len += scnprintf(buf + len, PAGE_SIZE - len, "4 ");
+		if (trasn_code_byte7->fc_sp_800MB)
+			len += scnprintf(buf + len, PAGE_SIZE - len, "8 ");
+		if (trasn_code_byte7->fc_sp_1600MB)
+			len += scnprintf(buf + len, PAGE_SIZE - len, "16 ");
+		if (trasn_code_byte7->fc_sp_3200MB)
+			len += scnprintf(buf + len, PAGE_SIZE - len, "32 ");
+		if (trasn_code_byte7->speed_chk_ecc)
+			len += scnprintf(buf + len, PAGE_SIZE - len, "64 ");
+		len += scnprintf(buf + len, PAGE_SIZE - len, "GB\n");
+	}
 	temperature = (rdp_context->page_a2[SFF_TEMPERATURE_B1] << 8 |
 		       rdp_context->page_a2[SFF_TEMPERATURE_B0]);
 	vcc = (rdp_context->page_a2[SFF_VCC_B1] << 8 |
@@ -5906,8 +5899,8 @@ int lpfc_fabric_cgn_frequency = 100; /* 100 ms default */
 module_param(lpfc_fabric_cgn_frequency, int, 0444);
 MODULE_PARM_DESC(lpfc_fabric_cgn_frequency, "Congestion signaling fabric freq");
 
-int lpfc_acqe_cgn_frequency = 10; /* 10 sec default */
-module_param(lpfc_acqe_cgn_frequency, int, 0444);
+unsigned char lpfc_acqe_cgn_frequency = 10; /* 10 sec default */
+module_param(lpfc_acqe_cgn_frequency, byte, 0444);
 MODULE_PARM_DESC(lpfc_acqe_cgn_frequency, "Congestion signaling ACQE freq");
 
 int lpfc_use_cgn_signal = 1; /* 0 - only use FPINs, 1 - Use signals if avail  */

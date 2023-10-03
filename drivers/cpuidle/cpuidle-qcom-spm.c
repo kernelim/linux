@@ -17,7 +17,7 @@
 #include <linux/platform_device.h>
 #include <linux/cpuidle.h>
 #include <linux/cpu_pm.h>
-#include <linux/qcom_scm.h>
+#include <linux/firmware/qcom/qcom_scm.h>
 #include <soc/qcom/spm.h>
 
 #include <asm/proc-fns.h>
@@ -58,8 +58,8 @@ static int qcom_cpu_spc(struct spm_driver_data *drv)
 	return ret;
 }
 
-static int spm_enter_idle_state(struct cpuidle_device *dev,
-				struct cpuidle_driver *drv, int idx)
+static __cpuidle int spm_enter_idle_state(struct cpuidle_device *dev,
+					  struct cpuidle_driver *drv, int idx)
 {
 	struct cpuidle_qcom_spm_data *data = container_of(drv, struct cpuidle_qcom_spm_data,
 							  cpuidle_driver);
@@ -122,10 +122,6 @@ static int spm_cpuidle_register(struct device *cpuidle_dev, int cpu)
 	if (ret <= 0)
 		return ret ? : -ENODEV;
 
-	ret = qcom_scm_set_warm_boot_addr(cpu_resume_arm, cpumask_of(cpu));
-	if (ret)
-		return ret;
-
 	return cpuidle_register(&data->cpuidle_driver, NULL);
 }
 
@@ -135,6 +131,10 @@ static int spm_cpuidle_drv_probe(struct platform_device *pdev)
 
 	if (!qcom_scm_is_available())
 		return -EPROBE_DEFER;
+
+	ret = qcom_scm_set_warm_boot_addr(cpu_resume_arm);
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret, "set warm boot addr failed");
 
 	for_each_possible_cpu(cpu) {
 		ret = spm_cpuidle_register(&pdev->dev, cpu);

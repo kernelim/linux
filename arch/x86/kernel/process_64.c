@@ -562,7 +562,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	int cpu = smp_processor_id();
 
 	WARN_ON_ONCE(IS_ENABLED(CONFIG_DEBUG_ENTRY) &&
-		     this_cpu_read(hardirq_stack_inuse));
+		     this_cpu_read(pcpu_hot.hardirq_stack_inuse));
 
 	if (!test_thread_flag(TIF_NEED_FPU_LOAD))
 		switch_fpu_prepare(prev_fpu, cpu);
@@ -616,8 +616,8 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	/*
 	 * Switch the PDA and FPU contexts.
 	 */
-	this_cpu_write(current_task, next_p);
-	this_cpu_write(cpu_current_top_of_stack, task_top_of_stack(next_p));
+	raw_cpu_write(pcpu_hot.current_task, next_p);
+	raw_cpu_write(pcpu_hot.top_of_stack, task_top_of_stack(next_p));
 
 	switch_fpu_finish();
 
@@ -655,7 +655,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	}
 
 	/* Load the Intel cache allocation PQR MSR. */
-	resctrl_sched_in();
+	resctrl_sched_in(next_p);
 
 	return prev_p;
 }
@@ -844,7 +844,7 @@ SYSCALL_DEFINE2(arch_prctl, int, option, unsigned long, arg2)
 
 	ret = do_arch_prctl_64(current, option, arg2);
 	if (ret == -EINVAL)
-		ret = do_arch_prctl_common(current, option, arg2);
+		ret = do_arch_prctl_common(option, arg2);
 
 	return ret;
 }
@@ -852,7 +852,7 @@ SYSCALL_DEFINE2(arch_prctl, int, option, unsigned long, arg2)
 #ifdef CONFIG_IA32_EMULATION
 COMPAT_SYSCALL_DEFINE2(arch_prctl, int, option, unsigned long, arg2)
 {
-	return do_arch_prctl_common(current, option, arg2);
+	return do_arch_prctl_common(option, arg2);
 }
 #endif
 

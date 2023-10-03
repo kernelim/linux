@@ -45,6 +45,7 @@ struct iommu_ops;
 struct iommu_group;
 struct dev_pin_info;
 struct dev_iommu;
+struct msi_device_data;
 
 /**
  * struct subsys_interface - interfaces to device functions
@@ -88,7 +89,7 @@ struct device_type {
 	const char *name;
 	const struct attribute_group **groups;
 	int (*uevent)(struct device *dev, struct kobj_uevent_env *env);
-	char *(*devnode)(struct device *dev, umode_t *mode,
+	char *(*devnode)(const struct device *dev, umode_t *mode,
 			 kuid_t *uid, kgid_t *gid);
 	void (*release)(struct device *dev);
 
@@ -326,6 +327,7 @@ enum device_link_state {
 #define DL_FLAG_MANAGED			BIT(6)
 #define DL_FLAG_SYNC_STATE_ONLY		BIT(7)
 #define DL_FLAG_INFERRED		BIT(8)
+#define DL_FLAG_CYCLE			BIT(9)
 
 /**
  * enum dl_dev_state - Device driver presence tracking information.
@@ -441,6 +443,18 @@ struct device_physical_location {
 };
 
 /**
+ * struct dev_msi_info - Device data related to MSI
+ * @domain:	The MSI interrupt domain associated to the device
+ * @data:	Pointer to MSI device data
+ */
+struct dev_msi_info {
+#ifdef CONFIG_GENERIC_MSI_IRQ
+	struct irq_domain	*domain;
+	struct msi_device_data	*data;
+#endif
+};
+
+/**
  * struct device - The basic device structure
  * @parent:	The device's "parent" device, the device to which it is attached.
  * 		In most cases, a parent device is some sort of bus or host
@@ -454,8 +468,6 @@ struct device_physical_location {
  * 		This identifies the device type and carries type-specific
  * 		information.
  * @mutex:	Mutex to synchronize calls to its driver.
- * @lockdep_mutex: An optional debug lock that a subsystem can use as a
- * 		peer lock to gain localized lockdep coverage of the device_lock.
  * @bus:	Type of bus device is on.
  * @driver:	Which driver has allocated this
  * @platform_data: Platform data specific to the device.
@@ -476,8 +488,7 @@ struct device_physical_location {
  * @em_pd:	device's energy model performance domain
  * @pins:	For device pin management.
  *		See Documentation/driver-api/pin-control.rst for details.
- * @msi_list:	Hosts MSI descriptors
- * @msi_domain: The generic MSI domain this device is using.
+ * @msi:	MSI related data
  * @numa_node:	NUMA node this device is close to.
  * @dma_ops:    DMA mapping operations for this device.
  * @dma_mask:	Dma mask (if dma'ble device).
@@ -556,9 +567,6 @@ struct device {
 					   core doesn't touch it */
 	void		*driver_data;	/* Driver data, set and get with
 					   dev_set_drvdata/dev_get_drvdata */
-#ifdef CONFIG_PROVE_LOCKING
-	struct mutex		lockdep_mutex;
-#endif
 	struct mutex		mutex;	/* mutex to synchronize calls to
 					 * its driver.
 					 */
@@ -571,15 +579,10 @@ struct device {
 	struct em_perf_domain	*em_pd;
 #endif
 
-#ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
-	struct irq_domain	*msi_domain;
-#endif
 #ifdef CONFIG_PINCTRL
 	struct dev_pin_info	*pins;
 #endif
-#ifdef CONFIG_GENERIC_MSI_IRQ
-	struct list_head	msi_list;
-#endif
+	struct dev_msi_info	msi;
 #ifdef CONFIG_DMA_OPS
 	const struct dma_map_ops *dma_ops;
 #endif
@@ -676,10 +679,7 @@ struct device_link {
 	bool supplier_preactivated; /* Owned by consumer probe. */
 };
 
-static inline struct device *kobj_to_dev(struct kobject *kobj)
-{
-	return container_of(kobj, struct device, kobj);
-}
+#define kobj_to_dev(__kobj)	container_of_const(__kobj, struct device, kobj)
 
 /**
  * device_iommu_mapped - Returns true when the device DMA is translated
@@ -738,8 +738,8 @@ static inline void set_dev_node(struct device *dev, int node)
 
 static inline struct irq_domain *dev_get_msi_domain(const struct device *dev)
 {
-#ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
-	return dev->msi_domain;
+#ifdef CONFIG_GENERIC_MSI_IRQ
+	return dev->msi.domain;
 #else
 	return NULL;
 #endif
@@ -747,8 +747,8 @@ static inline struct irq_domain *dev_get_msi_domain(const struct device *dev)
 
 static inline void dev_set_msi_domain(struct device *dev, struct irq_domain *d)
 {
-#ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
-	dev->msi_domain = d;
+#ifdef CONFIG_GENERIC_MSI_IRQ
+	dev->msi.domain = d;
 #endif
 }
 
@@ -907,14 +907,55 @@ int device_rename(struct device *dev, const char *new_name);
 int device_move(struct device *dev, struct device *new_parent,
 		enum dpm_order dpm_order);
 int device_change_owner(struct device *dev, kuid_t kuid, kgid_t kgid);
-const char *device_get_devnode(struct device *dev, umode_t *mode, kuid_t *uid,
-			       kgid_t *gid, const char **tmp);
 int device_is_dependent(struct device *dev, void *target);
 
 static inline bool device_supports_offline(struct device *dev)
 {
 	return dev->bus && dev->bus->offline && dev->bus->online;
 }
+
+#define __device_lock_set_class(dev, name, key)                        \
+do {                                                                   \
+	struct device *__d2 __maybe_unused = dev;                      \
+	lock_set_class(&__d2->mutex.dep_map, name, key, 0, _THIS_IP_); \
+} while (0)
+
+/**
+ * device_lock_set_class - Specify a temporary lock class while a device
+ *			   is attached to a driver
+ * @dev: device to modify
+ * @key: lock class key data
+ *
+ * This must be called with the device_lock() already held, for example
+ * from driver ->probe(). Take care to only override the default
+ * lockdep_no_validate class.
+ */
+#ifdef CONFIG_LOCKDEP
+#define device_lock_set_class(dev, key)                                    \
+do {                                                                       \
+	struct device *__d = dev;                                          \
+	dev_WARN_ONCE(__d, !lockdep_match_class(&__d->mutex,               \
+						&__lockdep_no_validate__), \
+		 "overriding existing custom lock class\n");               \
+	__device_lock_set_class(__d, #key, key);                           \
+} while (0)
+#else
+#define device_lock_set_class(dev, key) __device_lock_set_class(dev, #key, key)
+#endif
+
+/**
+ * device_lock_reset_class - Return a device to the default lockdep novalidate state
+ * @dev: device to modify
+ *
+ * This must be called with the device_lock() already held, for example
+ * from driver ->remove().
+ */
+#define device_lock_reset_class(dev) \
+do { \
+	struct device *__d __maybe_unused = dev;                       \
+	lock_set_novalidate_class(&__d->mutex.dep_map, "&dev->mutex",  \
+				  _THIS_IP_);                          \
+} while (0)
 
 void lock_device_hotplug(void);
 void unlock_device_hotplug(void);
@@ -999,12 +1040,8 @@ static inline void device_remove_group(struct device *dev,
 
 int __must_check devm_device_add_groups(struct device *dev,
 					const struct attribute_group **groups);
-void devm_device_remove_groups(struct device *dev,
-			       const struct attribute_group **groups);
 int __must_check devm_device_add_group(struct device *dev,
 				       const struct attribute_group *grp);
-void devm_device_remove_group(struct device *dev,
-			      const struct attribute_group *grp);
 
 /*
  * Platform "fixup" functions - allow the platform to have their say

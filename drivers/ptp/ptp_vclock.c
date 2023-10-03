@@ -16,16 +16,16 @@
 static int ptp_vclock_adjfine(struct ptp_clock_info *ptp, long scaled_ppm)
 {
 	struct ptp_vclock *vclock = info_to_vclock(ptp);
-	unsigned long flags;
 	s64 adj;
 
 	adj = (s64)scaled_ppm << PTP_VCLOCK_FADJ_SHIFT;
 	adj = div_s64(adj, PTP_VCLOCK_FADJ_DENOMINATOR);
 
-	spin_lock_irqsave(&vclock->lock, flags);
+	if (mutex_lock_interruptible(&vclock->lock))
+		return -EINTR;
 	timecounter_read(&vclock->tc);
 	vclock->cc.mult = PTP_VCLOCK_CC_MULT + adj;
-	spin_unlock_irqrestore(&vclock->lock, flags);
+	mutex_unlock(&vclock->lock);
 
 	return 0;
 }
@@ -33,11 +33,11 @@ static int ptp_vclock_adjfine(struct ptp_clock_info *ptp, long scaled_ppm)
 static int ptp_vclock_adjtime(struct ptp_clock_info *ptp, s64 delta)
 {
 	struct ptp_vclock *vclock = info_to_vclock(ptp);
-	unsigned long flags;
 
-	spin_lock_irqsave(&vclock->lock, flags);
+	if (mutex_lock_interruptible(&vclock->lock))
+		return -EINTR;
 	timecounter_adjtime(&vclock->tc, delta);
-	spin_unlock_irqrestore(&vclock->lock, flags);
+	mutex_unlock(&vclock->lock);
 
 	return 0;
 }
@@ -46,12 +46,12 @@ static int ptp_vclock_gettime(struct ptp_clock_info *ptp,
 			      struct timespec64 *ts)
 {
 	struct ptp_vclock *vclock = info_to_vclock(ptp);
-	unsigned long flags;
 	u64 ns;
 
-	spin_lock_irqsave(&vclock->lock, flags);
+	if (mutex_lock_interruptible(&vclock->lock))
+		return -EINTR;
 	ns = timecounter_read(&vclock->tc);
-	spin_unlock_irqrestore(&vclock->lock, flags);
+	mutex_unlock(&vclock->lock);
 	*ts = ns_to_timespec64(ns);
 
 	return 0;
@@ -64,7 +64,6 @@ static int ptp_vclock_gettimex(struct ptp_clock_info *ptp,
 	struct ptp_vclock *vclock = info_to_vclock(ptp);
 	struct ptp_clock *pptp = vclock->pclock;
 	struct timespec64 pts;
-	unsigned long flags;
 	int err;
 	u64 ns;
 
@@ -72,9 +71,10 @@ static int ptp_vclock_gettimex(struct ptp_clock_info *ptp,
 	if (err)
 		return err;
 
-	spin_lock_irqsave(&vclock->lock, flags);
+	if (mutex_lock_interruptible(&vclock->lock))
+		return -EINTR;
 	ns = timecounter_cyc2time(&vclock->tc, timespec64_to_ns(&pts));
-	spin_unlock_irqrestore(&vclock->lock, flags);
+	mutex_unlock(&vclock->lock);
 
 	*ts = ns_to_timespec64(ns);
 
@@ -86,11 +86,11 @@ static int ptp_vclock_settime(struct ptp_clock_info *ptp,
 {
 	struct ptp_vclock *vclock = info_to_vclock(ptp);
 	u64 ns = timespec64_to_ns(ts);
-	unsigned long flags;
 
-	spin_lock_irqsave(&vclock->lock, flags);
+	if (mutex_lock_interruptible(&vclock->lock))
+		return -EINTR;
 	timecounter_init(&vclock->tc, &vclock->cc, ns);
-	spin_unlock_irqrestore(&vclock->lock, flags);
+	mutex_unlock(&vclock->lock);
 
 	return 0;
 }
@@ -100,7 +100,6 @@ static int ptp_vclock_getcrosststamp(struct ptp_clock_info *ptp,
 {
 	struct ptp_vclock *vclock = info_to_vclock(ptp);
 	struct ptp_clock *pptp = vclock->pclock;
-	unsigned long flags;
 	int err;
 	u64 ns;
 
@@ -108,9 +107,10 @@ static int ptp_vclock_getcrosststamp(struct ptp_clock_info *ptp,
 	if (err)
 		return err;
 
-	spin_lock_irqsave(&vclock->lock, flags);
+	if (mutex_lock_interruptible(&vclock->lock))
+		return -EINTR;
 	ns = timecounter_cyc2time(&vclock->tc, ktime_to_ns(xtstamp->device));
-	spin_unlock_irqrestore(&vclock->lock, flags);
+	mutex_unlock(&vclock->lock);
 
 	xtstamp->device = ns_to_ktime(ns);
 
@@ -179,7 +179,7 @@ struct ptp_vclock *ptp_vclock_register(struct ptp_clock *pclock)
 	snprintf(vclock->info.name, PTP_CLOCK_NAME_LEN, "ptp%d_virt",
 		 pclock->index);
 
-	spin_lock_init(&vclock->lock);
+	mutex_init(&vclock->lock);
 
 	vclock->clock = ptp_clock_register(&vclock->info, &pclock->dev);
 	if (IS_ERR_OR_NULL(vclock->clock)) {
@@ -241,7 +241,6 @@ ktime_t ptp_convert_timestamp(const struct skb_shared_hwtstamps *hwtstamps,
 	char name[PTP_CLOCK_NAME_LEN] = "";
 	struct ptp_vclock *vclock;
 	struct ptp_clock *ptp;
-	unsigned long flags;
 	struct device *dev;
 	u64 ns;
 
@@ -260,10 +259,14 @@ ktime_t ptp_convert_timestamp(const struct skb_shared_hwtstamps *hwtstamps,
 
 	ns = ktime_to_ns(hwtstamps->hwtstamp);
 
-	spin_lock_irqsave(&vclock->lock, flags);
+	if (mutex_lock_interruptible(&vclock->lock)) {
+		ns = 0;
+		goto out;
+	}
 	ns = timecounter_cyc2time(&vclock->tc, ns);
-	spin_unlock_irqrestore(&vclock->lock, flags);
+	mutex_unlock(&vclock->lock);
 
+out:
 	put_device(dev);
 	return ns_to_ktime(ns);
 }

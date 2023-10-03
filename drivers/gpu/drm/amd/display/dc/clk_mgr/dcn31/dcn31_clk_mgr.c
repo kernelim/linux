@@ -47,6 +47,12 @@
 #include "dcn30/dcn30_clk_mgr.h"
 
 #include "dc_dmub_srv.h"
+#include "link.h"
+
+#include "logger_types.h"
+#undef DC_LOGGER
+#define DC_LOGGER \
+	clk_mgr->base.base.ctx->logger
 
 #include "yellow_carp_offset.h"
 
@@ -604,8 +610,10 @@ static void dcn31_clk_mgr_helper_populate_bw_params(struct clk_mgr_internal *clk
 	}
 
 	bw_params->vram_type = bios_info->memory_type;
-	bw_params->num_channels = bios_info->ma_channel_number;
 
+	bw_params->dram_channel_width_bytes = bios_info->memory_type == 0x22 ? 8 : 4;
+	//bw_params->dram_channel_width_bytes = dc->ctx->asic_id.vram_width;
+	bw_params->num_channels = bios_info->ma_channel_number ? bios_info->ma_channel_number : 4;
 	for (i = 0; i < WM_SET_COUNT; i++) {
 		bw_params->wm_table.entries[i].wm_inst = i;
 
@@ -738,8 +746,49 @@ void dcn31_clk_mgr_construct(
 	clk_mgr->base.base.bw_params = &dcn31_bw_params;
 
 	if (clk_mgr->base.base.ctx->dc->debug.pstate_enabled) {
+		int i;
+
 		dcn31_get_dpm_table_from_smu(&clk_mgr->base, &smu_dpm_clks);
 
+		DC_LOG_SMU("NumDcfClkLevelsEnabled: %d\n"
+				   "NumDispClkLevelsEnabled: %d\n"
+				   "NumSocClkLevelsEnabled: %d\n"
+				   "VcnClkLevelsEnabled: %d\n"
+				   "NumDfPst atesEnabled: %d\n"
+				   "MinGfxClk: %d\n"
+				   "MaxGfxClk: %d\n",
+				   smu_dpm_clks.dpm_clks->NumDcfClkLevelsEnabled,
+				   smu_dpm_clks.dpm_clks->NumDispClkLevelsEnabled,
+				   smu_dpm_clks.dpm_clks->NumSocClkLevelsEnabled,
+				   smu_dpm_clks.dpm_clks->VcnClkLevelsEnabled,
+				   smu_dpm_clks.dpm_clks->NumDfPstatesEnabled,
+				   smu_dpm_clks.dpm_clks->MinGfxClk,
+				   smu_dpm_clks.dpm_clks->MaxGfxClk);
+		for (i = 0; i < smu_dpm_clks.dpm_clks->NumDcfClkLevelsEnabled; i++) {
+			DC_LOG_SMU("smu_dpm_clks.dpm_clks->DcfClocks[%d] = %d\n",
+					   i,
+					   smu_dpm_clks.dpm_clks->DcfClocks[i]);
+		}
+		for (i = 0; i < smu_dpm_clks.dpm_clks->NumDispClkLevelsEnabled; i++) {
+			DC_LOG_SMU("smu_dpm_clks.dpm_clks->DispClocks[%d] = %d\n",
+					   i, smu_dpm_clks.dpm_clks->DispClocks[i]);
+		}
+		for (i = 0; i < smu_dpm_clks.dpm_clks->NumSocClkLevelsEnabled; i++) {
+			DC_LOG_SMU("smu_dpm_clks.dpm_clks->SocClocks[%d] = %d\n",
+					   i, smu_dpm_clks.dpm_clks->SocClocks[i]);
+		}
+		for (i = 0; i < NUM_SOC_VOLTAGE_LEVELS; i++)
+			DC_LOG_SMU("smu_dpm_clks.dpm_clks->SocVoltage[%d] = %d\n",
+					   i, smu_dpm_clks.dpm_clks->SocVoltage[i]);
+
+		for (i = 0; i < NUM_DF_PSTATE_LEVELS; i++) {
+			DC_LOG_SMU("smu_dpm_clks.dpm_clks.DfPstateTable[%d].FClk = %d\n"
+					   "smu_dpm_clks.dpm_clks->DfPstateTable[%d].MemClk= %d\n"
+					   "smu_dpm_clks.dpm_clks->DfPstateTable[%d].Voltage = %d\n",
+					   i, smu_dpm_clks.dpm_clks->DfPstateTable[i].FClk,
+					   i, smu_dpm_clks.dpm_clks->DfPstateTable[i].MemClk,
+					   i, smu_dpm_clks.dpm_clks->DfPstateTable[i].Voltage);
+		}
 		if (ctx->dc_bios && ctx->dc_bios->integrated_info) {
 			dcn31_clk_mgr_helper_populate_bw_params(
 					&clk_mgr->base,

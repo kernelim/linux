@@ -172,6 +172,35 @@ nf_conntrack_timestamp - BOOLEAN
 
 	Enable connection tracking flow timestamping.
 
+nf_conntrack_sctp_timeout_closed - INTEGER (seconds)
+	default 10
+
+nf_conntrack_sctp_timeout_cookie_wait - INTEGER (seconds)
+	default 3
+
+nf_conntrack_sctp_timeout_cookie_echoed - INTEGER (seconds)
+	default 3
+
+nf_conntrack_sctp_timeout_established - INTEGER (seconds)
+	default 210
+
+	Default is set to (hb_interval * path_max_retrans + rto_max)
+
+nf_conntrack_sctp_timeout_shutdown_sent - INTEGER (seconds)
+	default 0.3
+
+nf_conntrack_sctp_timeout_shutdown_recd - INTEGER (seconds)
+	default 0.3
+
+nf_conntrack_sctp_timeout_shutdown_ack_sent - INTEGER (seconds)
+	default 3
+
+nf_conntrack_sctp_timeout_heartbeat_sent - INTEGER (seconds)
+	default 30
+
+	This timeout is used to setup conntrack entry on secondary paths.
+	Default is set to hb_interval.
+
 nf_conntrack_udp_timeout - INTEGER (seconds)
 	default 30
 
@@ -189,6 +218,13 @@ nf_conntrack_gre_timeout_stream - INTEGER (seconds)
 
 	This extended timeout will be used in case there is an GRE stream
 	detected.
+
+nf_hooks_lwtunnel - BOOLEAN
+	- 0 - disabled (default)
+	- not 0 - enabled
+
+	If this option is enabled, the lightweight tunnel netfilter hooks are
+	enabled. This option cannot be disabled once it is enabled.
 
 nf_flowtable_tcp_timeout - INTEGER (seconds)
         default 30

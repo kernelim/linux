@@ -26,14 +26,31 @@ static const struct file_operations proc_sys_dir_file_operations;
 static const struct inode_operations proc_sys_dir_operations;
 
 /* shared constants to be used in various sysctls */
-const int sysctl_vals[] = { -1, 0, 1, 2, 4, 100, 200, 1000, 3000, INT_MAX };
+const int sysctl_vals[] = { -1, 0, 1, 2, 4, 100, 200, 1000, 3000, INT_MAX, 65535 };
 EXPORT_SYMBOL(sysctl_vals);
+
+const unsigned long sysctl_long_vals[] = { 0, 1, LONG_MAX };
+EXPORT_SYMBOL_GPL(sysctl_long_vals);
 
 /* Support for permanently empty directories */
 
 struct ctl_table sysctl_mount_point[] = {
 	{ }
 };
+
+/**
+ * register_sysctl_mount_point() - registers a sysctl mount point
+ * @path: path for the mount point
+ *
+ * Used to create a permanently empty directory to serve as mount point.
+ * There are some subtle but important permission checks this allows in the
+ * case of unprivileged mounts.
+ */
+struct ctl_table_header *register_sysctl_mount_point(const char *path)
+{
+	return register_sysctl(path, sysctl_mount_point);
+}
+EXPORT_SYMBOL(register_sysctl_mount_point);
 
 static bool is_empty_dir(struct ctl_table_header *head)
 {
@@ -1629,6 +1646,15 @@ struct ctl_table_header *register_sysctl_table(struct ctl_table *table)
 	return register_sysctl_paths(null_path, table);
 }
 EXPORT_SYMBOL(register_sysctl_table);
+
+int __register_sysctl_base(struct ctl_table *base_table)
+{
+	struct ctl_table_header *hdr;
+
+	hdr = register_sysctl_table(base_table);
+	kmemleak_not_leak(hdr);
+	return 0;
+}
 
 static void put_links(struct ctl_table_header *header)
 {

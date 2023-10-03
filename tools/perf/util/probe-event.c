@@ -29,6 +29,7 @@
 #include "color.h"
 #include "map.h"
 #include "maps.h"
+#include "mutex.h"
 #include "symbol.h"
 #include <api/fs/fs.h>
 #include "trace-event.h"	/* For __maybe_unused */
@@ -180,8 +181,10 @@ struct map *get_target_map(const char *target, struct nsinfo *nsi, bool user)
 
 		map = dso__new_map(target);
 		if (map && map->dso) {
+			mutex_lock(&map->dso->lock);
 			nsinfo__put(map->dso->nsinfo);
 			map->dso->nsinfo = nsinfo__get(nsi);
+			mutex_unlock(&map->dso->lock);
 		}
 		return map;
 	} else {
@@ -914,7 +917,7 @@ static int try_to_find_probe_trace_events(struct perf_probe_event *pev,
 	dinfo = open_debuginfo(pev->target, pev->nsi, !need_dwarf);
 	if (!dinfo) {
 		if (need_dwarf)
-			return -ENOENT;
+			return -ENODATA;
 		pr_debug("Could not open debuginfo. Try to use symbols.\n");
 		return 0;
 	}
@@ -953,7 +956,7 @@ static int try_to_find_probe_trace_events(struct perf_probe_event *pev,
 	if (ntevs == 0)	{	/* No error but failed to find probe point. */
 		pr_warning("Probe point '%s' not found.\n",
 			   synthesize_perf_probe_point(&pev->point));
-		return -ENOENT;
+		return -ENODEV;
 	} else if (ntevs < 0) {
 		/* Error path : ntevs < 0 */
 		pr_debug("An error occurred in debuginfo analysis (%d).\n", ntevs);

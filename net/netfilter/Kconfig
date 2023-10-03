@@ -190,6 +190,9 @@ config NF_CONNTRACK_LABELS
 	  to connection tracking entries.  It can be used with xtables connlabel
 	  match and the nftables ct expression.
 
+config NF_CONNTRACK_OVS
+	bool
+
 config NF_CT_PROTO_DCCP
 	bool 'DCCP protocol connection tracking support'
 	depends on NETFILTER_ADVANCED
@@ -458,6 +461,9 @@ config NF_NAT_REDIRECT
 	bool
 
 config NF_NAT_MASQUERADE
+	bool
+
+config NF_NAT_OVS
 	bool
 
 config NETFILTER_SYNPROXY

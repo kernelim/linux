@@ -32,6 +32,7 @@
 #include <linux/uaccess.h>
 #include <linux/hugetlb.h>
 #include <linux/kfence.h>
+#include <asm/asm-extable.h>
 #include <asm/asm-offsets.h>
 #include <asm/diag.h>
 #include <asm/gmap.h>
@@ -93,6 +94,20 @@ static enum fault_type get_fault_type(struct pt_regs *regs)
 	}
 	/* home space exception -> access via kernel ASCE */
 	return KERNEL_FAULT;
+}
+
+static unsigned long get_fault_address(struct pt_regs *regs)
+{
+	unsigned long trans_exc_code = regs->int_parm_long;
+
+	return trans_exc_code & __FAIL_ADDR_MASK;
+}
+
+static bool fault_is_write(struct pt_regs *regs)
+{
+	unsigned long trans_exc_code = regs->int_parm_long;
+
+	return (trans_exc_code & store_indication) == 0x400;
 }
 
 static int bad_address(void *p)
@@ -227,32 +242,26 @@ static noinline void do_sigsegv(struct pt_regs *regs, int si_code)
 			(void __user *)(regs->int_parm_long & __FAIL_ADDR_MASK));
 }
 
-const struct exception_table_entry *s390_search_extables(unsigned long addr)
+static noinline void do_no_context(struct pt_regs *regs, vm_fault_t fault)
 {
-	const struct exception_table_entry *fixup;
+	enum fault_type fault_type;
+	unsigned long address;
+	bool is_write;
 
-	fixup = search_extable(__start_amode31_ex_table,
-			       __stop_amode31_ex_table - __start_amode31_ex_table,
-			       addr);
-	if (!fixup)
-		fixup = search_exception_tables(addr);
-	return fixup;
-}
-
-static noinline void do_no_context(struct pt_regs *regs)
-{
-	const struct exception_table_entry *fixup;
-
-	/* Are we prepared to handle this kernel fault?  */
-	fixup = s390_search_extables(regs->psw.addr);
-	if (fixup && ex_handle(fixup, regs))
+	if (fixup_exception(regs))
 		return;
-
+	fault_type = get_fault_type(regs);
+	if ((fault_type == KERNEL_FAULT) && (fault == VM_FAULT_BADCONTEXT)) {
+		address = get_fault_address(regs);
+		is_write = fault_is_write(regs);
+		if (kfence_handle_page_fault(address, is_write, regs))
+			return;
+	}
 	/*
 	 * Oops. The kernel tried to access some bad page. We'll have to
 	 * terminate things with extreme prejudice.
 	 */
-	if (get_fault_type(regs) == KERNEL_FAULT)
+	if (fault_type == KERNEL_FAULT)
 		printk(KERN_ALERT "Unable to handle kernel pointer dereference"
 		       " in virtual kernel address space\n");
 	else
@@ -271,7 +280,7 @@ static noinline void do_low_address(struct pt_regs *regs)
 		die (regs, "Low-address protection");
 	}
 
-	do_no_context(regs);
+	do_no_context(regs, VM_FAULT_BADACCESS);
 }
 
 static noinline void do_sigbus(struct pt_regs *regs)
@@ -284,8 +293,7 @@ static noinline void do_sigbus(struct pt_regs *regs)
 			(void __user *)(regs->int_parm_long & __FAIL_ADDR_MASK));
 }
 
-static noinline void do_fault_error(struct pt_regs *regs, int access,
-					vm_fault_t fault)
+static noinline void do_fault_error(struct pt_regs *regs, vm_fault_t fault)
 {
 	int si_code;
 
@@ -303,28 +311,28 @@ static noinline void do_fault_error(struct pt_regs *regs, int access,
 		fallthrough;
 	case VM_FAULT_BADCONTEXT:
 	case VM_FAULT_PFAULT:
-		do_no_context(regs);
+		do_no_context(regs, fault);
 		break;
 	case VM_FAULT_SIGNAL:
 		if (!user_mode(regs))
-			do_no_context(regs);
+			do_no_context(regs, fault);
 		break;
 	default: /* fault & VM_FAULT_ERROR */
 		if (fault & VM_FAULT_OOM) {
 			if (!user_mode(regs))
-				do_no_context(regs);
+				do_no_context(regs, fault);
 			else
 				pagefault_out_of_memory();
 		} else if (fault & VM_FAULT_SIGSEGV) {
 			/* Kernel mode? Handle exceptions or die */
 			if (!user_mode(regs))
-				do_no_context(regs);
+				do_no_context(regs, fault);
 			else
 				do_sigsegv(regs, SEGV_MAPERR);
 		} else if (fault & VM_FAULT_SIGBUS) {
 			/* Kernel mode? Handle exceptions or die */
 			if (!user_mode(regs))
-				do_no_context(regs);
+				do_no_context(regs, fault);
 			else
 				do_sigbus(regs);
 		} else
@@ -351,7 +359,6 @@ static inline vm_fault_t do_exception(struct pt_regs *regs, int access)
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
 	enum fault_type type;
-	unsigned long trans_exc_code;
 	unsigned long address;
 	unsigned int flags;
 	vm_fault_t fault;
@@ -368,9 +375,8 @@ static inline vm_fault_t do_exception(struct pt_regs *regs, int access)
 		return 0;
 
 	mm = tsk->mm;
-	trans_exc_code = regs->int_parm_long;
-	address = trans_exc_code & __FAIL_ADDR_MASK;
-	is_write = (trans_exc_code & store_indication) == 0x400;
+	address = get_fault_address(regs);
+	is_write = fault_is_write(regs);
 
 	/*
 	 * Verify that the fault happened in user space, that
@@ -381,8 +387,6 @@ static inline vm_fault_t do_exception(struct pt_regs *regs, int access)
 	type = get_fault_type(regs);
 	switch (type) {
 	case KERNEL_FAULT:
-		if (kfence_handle_page_fault(address, is_write, regs))
-			return 0;
 		goto out;
 	case USER_FAULT:
 	case GMAP_FAULT:
@@ -437,8 +441,6 @@ retry:
 	if (unlikely(!(vma->vm_flags & access)))
 		goto out_up;
 
-	if (is_vm_hugetlb_page(vma))
-		address &= HPAGE_MASK;
 	/*
 	 * If for any reason at all we couldn't handle the fault,
 	 * make sure we exit gracefully rather than endlessly redo
@@ -534,7 +536,7 @@ void do_protection_exception(struct pt_regs *regs)
 		fault = do_exception(regs, access);
 	}
 	if (unlikely(fault))
-		do_fault_error(regs, access, fault);
+		do_fault_error(regs, fault);
 }
 NOKPROBE_SYMBOL(do_protection_exception);
 
@@ -546,7 +548,7 @@ void do_dat_exception(struct pt_regs *regs)
 	access = VM_ACCESS_FLAGS;
 	fault = do_exception(regs, access);
 	if (unlikely(fault))
-		do_fault_error(regs, access, fault);
+		do_fault_error(regs, fault);
 }
 NOKPROBE_SYMBOL(do_dat_exception);
 
@@ -821,7 +823,7 @@ void do_secure_storage_access(struct pt_regs *regs)
 		addr = __gmap_translate(gmap, addr);
 		mmap_read_unlock(mm);
 		if (IS_ERR_VALUE(addr)) {
-			do_fault_error(regs, VM_ACCESS_FLAGS, VM_FAULT_BADMAP);
+			do_fault_error(regs, VM_FAULT_BADMAP);
 			break;
 		}
 		fallthrough;
@@ -831,7 +833,7 @@ void do_secure_storage_access(struct pt_regs *regs)
 		vma = find_vma(mm, addr);
 		if (!vma) {
 			mmap_read_unlock(mm);
-			do_fault_error(regs, VM_READ | VM_WRITE, VM_FAULT_BADMAP);
+			do_fault_error(regs, VM_FAULT_BADMAP);
 			break;
 		}
 		page = follow_page(vma, addr, FOLL_WRITE | FOLL_GET);
@@ -854,7 +856,7 @@ void do_secure_storage_access(struct pt_regs *regs)
 			BUG();
 		break;
 	default:
-		do_fault_error(regs, VM_READ | VM_WRITE, VM_FAULT_BADMAP);
+		do_fault_error(regs, VM_FAULT_BADMAP);
 		WARN_ON_ONCE(1);
 	}
 }
@@ -866,7 +868,7 @@ void do_non_secure_storage_access(struct pt_regs *regs)
 	struct gmap *gmap = (struct gmap *)S390_lowcore.gmap;
 
 	if (get_fault_type(regs) != GMAP_FAULT) {
-		do_fault_error(regs, VM_READ | VM_WRITE, VM_FAULT_BADMAP);
+		do_fault_error(regs, VM_FAULT_BADMAP);
 		WARN_ON_ONCE(1);
 		return;
 	}

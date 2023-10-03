@@ -114,7 +114,7 @@
 	 * them if required.
 	 */
 	.macro	apply_ssbd, state, tmp1, tmp2
-alternative_cb	spectre_v4_patch_fw_mitigation_enable
+alternative_cb	ARM64_ALWAYS_SYSTEM, spectre_v4_patch_fw_mitigation_enable
 	b	.L__asm_ssbd_skip\@		// Patched to NOP
 alternative_cb_end
 	ldr_this_cpu	\tmp2, arm64_ssbd_callback_required, \tmp1
@@ -123,7 +123,7 @@ alternative_cb_end
 	tbnz	\tmp2, #TIF_SSBD, .L__asm_ssbd_skip\@
 	mov	w0, #ARM_SMCCC_ARCH_WORKAROUND_2
 	mov	w1, #\state
-alternative_cb	smccc_patch_fw_mitigation_conduit
+alternative_cb	ARM64_ALWAYS_SYSTEM, smccc_patch_fw_mitigation_conduit
 	nop					// Patched to SMC/HVC #0
 alternative_cb_end
 .L__asm_ssbd_skip\@:
@@ -175,7 +175,7 @@ alternative_else_nop_endif
 
 	.macro mte_set_kernel_gcr, tmp, tmp2
 #ifdef CONFIG_KASAN_HW_TAGS
-alternative_cb	kasan_hw_tags_enable
+alternative_cb	ARM64_ALWAYS_SYSTEM, kasan_hw_tags_enable
 	b	1f
 alternative_cb_end
 	mov	\tmp, KERNEL_GCR_EL1
@@ -186,7 +186,7 @@ alternative_cb_end
 
 	.macro mte_set_user_gcr, tsk, tmp, tmp2
 #ifdef CONFIG_KASAN_HW_TAGS
-alternative_cb	kasan_hw_tags_enable
+alternative_cb	ARM64_ALWAYS_SYSTEM, kasan_hw_tags_enable
 	b	1f
 alternative_cb_end
 	ldr	\tmp, [\tsk, #THREAD_MTE_CTRL]
@@ -197,6 +197,9 @@ alternative_cb_end
 	.endm
 
 	.macro	kernel_entry, el, regsize = 64
+	.if	\el == 0
+	alternative_insn nop, SET_PSTATE_DIT(1), ARM64_HAS_DIT
+	.endif
 	.if	\regsize == 32
 	mov	w0, w0				// zero upper 32 bits of x0
 	.endif
@@ -272,7 +275,7 @@ alternative_if ARM64_HAS_ADDRESS_AUTH
 alternative_else_nop_endif
 1:
 
-	scs_load tsk
+	scs_load_current
 	.else
 	add	x21, sp, #PT_REGS_SIZE
 	get_current_task tsk
@@ -308,13 +311,16 @@ alternative_else_nop_endif
 	.endif
 
 #ifdef CONFIG_ARM64_PSEUDO_NMI
-	/* Save pmr */
-alternative_if ARM64_HAS_IRQ_PRIO_MASKING
+alternative_if_not ARM64_HAS_GIC_PRIO_MASKING
+	b	.Lskip_pmr_save\@
+alternative_else_nop_endif
+
 	mrs_s	x20, SYS_ICC_PMR_EL1
 	str	x20, [sp, #S_PMR_SAVE]
 	mov	x20, #GIC_PRIO_IRQON | GIC_PRIO_PSR_I_SET
 	msr_s	SYS_ICC_PMR_EL1, x20
-alternative_else_nop_endif
+
+.Lskip_pmr_save\@:
 #endif
 
 	/*
@@ -333,15 +339,19 @@ alternative_else_nop_endif
 	.endif
 
 #ifdef CONFIG_ARM64_PSEUDO_NMI
-	/* Restore pmr */
-alternative_if ARM64_HAS_IRQ_PRIO_MASKING
+alternative_if_not ARM64_HAS_GIC_PRIO_MASKING
+	b	.Lskip_pmr_restore\@
+alternative_else_nop_endif
+
 	ldr	x20, [sp, #S_PMR_SAVE]
 	msr_s	SYS_ICC_PMR_EL1, x20
-	mrs_s	x21, SYS_ICC_CTLR_EL1
-	tbz	x21, #6, .L__skip_pmr_sync\@	// Check for ICC_CTLR_EL1.PMHE
-	dsb	sy				// Ensure priority change is seen by redistributor
-.L__skip_pmr_sync\@:
+
+	/* Ensure priority change is seen by redistributor */
+alternative_if_not ARM64_HAS_GIC_PRIO_RELAXED_SYNC
+	dsb	sy
 alternative_else_nop_endif
+
+.Lskip_pmr_restore\@:
 #endif
 
 	ldp	x21, x22, [sp, #S_PC]		// load ELR, SPSR
@@ -502,7 +512,7 @@ tsk	.req	x28		// current thread_info
 SYM_CODE_START(vectors)
 	kernel_ventry	1, t, 64, sync		// Synchronous EL1t
 	kernel_ventry	1, t, 64, irq		// IRQ EL1t
-	kernel_ventry	1, t, 64, fiq		// FIQ EL1h
+	kernel_ventry	1, t, 64, fiq		// FIQ EL1t
 	kernel_ventry	1, t, 64, error		// Error EL1t
 
 	kernel_ventry	1, h, 64, sync		// Synchronous EL1h
@@ -636,18 +646,28 @@ alternative_else_nop_endif
 	 */
 	.endm
 
-	.macro tramp_data_page	dst
-	adr_l	\dst, .entry.tramp.text
-	sub	\dst, \dst, PAGE_SIZE
-	.endm
-
-	.macro tramp_data_read_var	dst, var
-#ifdef CONFIG_RANDOMIZE_BASE
-	tramp_data_page		\dst
-	add	\dst, \dst, #:lo12:__entry_tramp_data_\var
-	ldr	\dst, [\dst]
+	.macro		tramp_data_read_var	dst, var
+#ifdef CONFIG_RELOCATABLE
+	ldr		\dst, .L__tramp_data_\var
+	.ifndef		.L__tramp_data_\var
+	.pushsection	".entry.tramp.rodata", "a", %progbits
+	.align		3
+.L__tramp_data_\var:
+	.quad		\var
+	.popsection
+	.endif
 #else
-	ldr	\dst, =\var
+	/*
+	 * As !RELOCATABLE implies !RANDOMIZE_BASE the address is always a
+	 * compile time constant (and hence not secret and not worth hiding).
+	 *
+	 * As statically allocated kernel code and data always live in the top
+	 * 47 bits of the address space we can sign-extend bit 47 and avoid an
+	 * instruction to load the upper 16 bits (which must be 0xFFFF).
+	 */
+	movz		\dst, :abs_g2_s:\var
+	movk		\dst, :abs_g1_nc:\var
+	movk		\dst, :abs_g0_nc:\var
 #endif
 	.endm
 
@@ -695,7 +715,7 @@ alternative_else_nop_endif
 	msr	vbar_el1, x30
 	isb
 	.else
-	ldr	x30, =vectors
+	adr_l	x30, vectors
 	.endif // \kpti == 1
 
 	.if	\bhb == BHB_MITIGATION_FW
@@ -764,24 +784,7 @@ SYM_CODE_END(tramp_exit_native)
 SYM_CODE_START(tramp_exit_compat)
 	tramp_exit	32
 SYM_CODE_END(tramp_exit_compat)
-
-	.ltorg
 	.popsection				// .entry.tramp.text
-#ifdef CONFIG_RANDOMIZE_BASE
-	.pushsection ".rodata", "a"
-	.align PAGE_SHIFT
-SYM_DATA_START(__entry_tramp_data_start)
-__entry_tramp_data_vectors:
-	.quad	vectors
-#ifdef CONFIG_ARM_SDE_INTERFACE
-__entry_tramp_data___sdei_asm_handler:
-	.quad	__sdei_asm_handler
-#endif /* CONFIG_ARM_SDE_INTERFACE */
-__entry_tramp_data_this_cpu_vector:
-	.quad	this_cpu_vector
-SYM_DATA_END(__entry_tramp_data_start)
-	.popsection				// .rodata
-#endif /* CONFIG_RANDOMIZE_BASE */
 #endif /* CONFIG_UNMAP_KERNEL_AT_EL0 */
 
 /*
@@ -852,7 +855,7 @@ SYM_FUNC_START(cpu_switch_to)
 	msr	sp_el0, x1
 	ptrauth_keys_install_kernel x1, x8, x9, x10
 	scs_save x0
-	scs_load x1
+	scs_load_current
 	ret
 SYM_FUNC_END(cpu_switch_to)
 NOKPROBE(cpu_switch_to)
@@ -880,19 +883,19 @@ NOKPROBE(ret_from_fork)
  */
 SYM_FUNC_START(call_on_irq_stack)
 #ifdef CONFIG_SHADOW_CALL_STACK
-	stp	scs_sp, xzr, [sp, #-16]!
+	get_current_task x16
+	scs_save x16
 	ldr_this_cpu scs_sp, irq_shadow_call_stack_ptr, x17
 #endif
+
 	/* Create a frame record to save our LR and SP (implicit in FP) */
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
 
 	ldr_this_cpu x16, irq_stack_ptr, x17
-	mov	x15, #IRQ_STACK_SIZE
-	add	x16, x16, x15
 
 	/* Move to the new stack and call the function there */
-	mov	sp, x16
+	add	sp, x16, #IRQ_STACK_SIZE
 	blr	x1
 
 	/*
@@ -901,9 +904,7 @@ SYM_FUNC_START(call_on_irq_stack)
 	 */
 	mov	sp, x29
 	ldp	x29, x30, [sp], #16
-#ifdef CONFIG_SHADOW_CALL_STACK
-	ldp	scs_sp, xzr, [sp], #16
-#endif
+	scs_load_current
 	ret
 SYM_FUNC_END(call_on_irq_stack)
 NOKPROBE(call_on_irq_stack)
@@ -932,7 +933,6 @@ NOKPROBE(call_on_irq_stack)
  * This clobbers x4, __sdei_handler() will restore this from firmware's
  * copy.
  */
-.ltorg
 .pushsection ".entry.tramp.text", "ax"
 SYM_CODE_START(__sdei_asm_entry_trampoline)
 	mrs	x4, ttbr1_el1
@@ -967,7 +967,6 @@ SYM_CODE_START(__sdei_asm_exit_trampoline)
 1:	sdei_handler_exit exit_mode=x2
 SYM_CODE_END(__sdei_asm_exit_trampoline)
 NOKPROBE(__sdei_asm_exit_trampoline)
-	.ltorg
 .popsection		// .entry.tramp.text
 #endif /* CONFIG_UNMAP_KERNEL_AT_EL0 */
 

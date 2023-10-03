@@ -107,13 +107,13 @@ for f in "$config_bundles_dir"/*; do
 	# This loop actually grabs the help text to put in the commit
 	while read -r line; do
 		# last line is the actual config we need to put in the dir
-		tail -n 1 redhat/configs/pending-ark/generic/"$line" > redhat/configs/ark/generic/"$line"
+		tail -n 1 redhat/configs/pending-rhel/generic/"$line" > redhat/configs/rhel/generic/"$line"
 		# get everything except the last line for the commit text
-		head -n -1 redhat/configs/pending-ark/generic/"$line" | sed -e 's/^#//g' >> "$tmpdir"/commit
+		head -n -1 redhat/configs/pending-rhel/generic/"$line" | sed -e 's/^#//g' >> "$tmpdir"/commit
 		# add a nice separator that renders in gitlab
 		echo -ne "\n---\n\n" >> "$tmpdir"/commit
 		# remove the pending option
-		rm redhat/configs/pending-ark/generic/"$line"
+		rm redhat/configs/pending-rhel/generic/"$line"
 	done < "$f"
 	if [ -n "$RHMAINTAINERS" ] && [ -f ./scripts/get_maintainer.pl ] && [ -f "$RHMAINTAINERS" ]; then
 		echo "" >> "$tmpdir"/commit

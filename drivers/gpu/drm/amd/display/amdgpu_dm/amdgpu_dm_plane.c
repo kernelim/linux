@@ -67,7 +67,16 @@ static const uint32_t overlay_formats[] = {
 	DRM_FORMAT_RGBA8888,
 	DRM_FORMAT_XBGR8888,
 	DRM_FORMAT_ABGR8888,
-	DRM_FORMAT_RGB565
+	DRM_FORMAT_RGB565,
+	DRM_FORMAT_NV21,
+	DRM_FORMAT_NV12,
+	DRM_FORMAT_P010
+};
+
+static const uint32_t video_formats[] = {
+	DRM_FORMAT_NV21,
+	DRM_FORMAT_NV12,
+	DRM_FORMAT_P010
 };
 
 static const u32 cursor_formats[] = {
@@ -1527,7 +1536,7 @@ int dm_drm_plane_get_property(struct drm_plane *plane,
 static const struct drm_plane_funcs dm_plane_funcs = {
 	.update_plane	= drm_atomic_helper_update_plane,
 	.disable_plane	= drm_atomic_helper_disable_plane,
-	.destroy	= drm_primary_helper_destroy,
+	.destroy	= drm_plane_helper_destroy,
 	.reset = dm_drm_plane_reset,
 	.atomic_duplicate_state = dm_drm_plane_duplicate_state,
 	.atomic_destroy_state = dm_drm_plane_destroy_state,
@@ -1600,6 +1609,10 @@ int amdgpu_dm_plane_init(struct amdgpu_display_manager *dm,
 		drm_plane_create_rotation_property(plane, DRM_MODE_ROTATE_0,
 						   supported_rotations);
 
+	if (dm->adev->ip_versions[DCE_HWIP][0] > IP_VERSION(3, 0, 1) &&
+	    plane->type != DRM_PLANE_TYPE_CURSOR)
+		drm_plane_enable_fb_damage_clips(plane);
+
 	drm_plane_helper_add(plane, &dm_plane_helper_funcs);
 
 #ifdef CONFIG_DRM_AMD_DC_HDR
@@ -1610,5 +1623,16 @@ int amdgpu_dm_plane_init(struct amdgpu_display_manager *dm,
 		plane->funcs->reset(plane);
 
 	return 0;
+}
+
+bool is_video_format(uint32_t format)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(video_formats); i++)
+		if (format == video_formats[i])
+			return true;
+
+	return false;
 }
 

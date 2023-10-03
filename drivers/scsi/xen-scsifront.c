@@ -244,6 +244,48 @@ static void scsifront_gnttab_done(struct vscsifrnt_info *info,
 	kfree(shadow->sg);
 }
 
+static unsigned int scsifront_host_byte(int32_t rslt)
+{
+	switch (XEN_VSCSIIF_RSLT_HOST(rslt)) {
+	case XEN_VSCSIIF_RSLT_HOST_OK:
+		return DID_OK;
+	case XEN_VSCSIIF_RSLT_HOST_NO_CONNECT:
+		return DID_NO_CONNECT;
+	case XEN_VSCSIIF_RSLT_HOST_BUS_BUSY:
+		return DID_BUS_BUSY;
+	case XEN_VSCSIIF_RSLT_HOST_TIME_OUT:
+		return DID_TIME_OUT;
+	case XEN_VSCSIIF_RSLT_HOST_BAD_TARGET:
+		return DID_BAD_TARGET;
+	case XEN_VSCSIIF_RSLT_HOST_ABORT:
+		return DID_ABORT;
+	case XEN_VSCSIIF_RSLT_HOST_PARITY:
+		return DID_PARITY;
+	case XEN_VSCSIIF_RSLT_HOST_ERROR:
+		return DID_ERROR;
+	case XEN_VSCSIIF_RSLT_HOST_RESET:
+		return DID_RESET;
+	case XEN_VSCSIIF_RSLT_HOST_BAD_INTR:
+		return DID_BAD_INTR;
+	case XEN_VSCSIIF_RSLT_HOST_PASSTHROUGH:
+		return DID_PASSTHROUGH;
+	case XEN_VSCSIIF_RSLT_HOST_SOFT_ERROR:
+		return DID_SOFT_ERROR;
+	case XEN_VSCSIIF_RSLT_HOST_IMM_RETRY:
+		return DID_IMM_RETRY;
+	case XEN_VSCSIIF_RSLT_HOST_REQUEUE:
+		return DID_REQUEUE;
+	case XEN_VSCSIIF_RSLT_HOST_TRANSPORT_DISRUPTED:
+		return DID_TRANSPORT_DISRUPTED;
+	case XEN_VSCSIIF_RSLT_HOST_TRANSPORT_FAILFAST:
+		return DID_TRANSPORT_FAILFAST;
+	case XEN_VSCSIIF_RSLT_HOST_TRANSPORT_MARGINAL:
+		return DID_TRANSPORT_MARGINAL;
+	default:
+		return DID_ERROR;
+	}
+}
+
 static void scsifront_cdb_cmd_done(struct vscsifrnt_info *info,
 				   struct vscsiif_response *ring_rsp)
 {
@@ -251,7 +293,6 @@ static void scsifront_cdb_cmd_done(struct vscsifrnt_info *info,
 	struct scsi_cmnd *sc;
 	uint32_t id;
 	uint8_t sense_len;
-	int result;
 
 	id = ring_rsp->rqid;
 	shadow = info->shadow[id];
@@ -262,12 +303,8 @@ static void scsifront_cdb_cmd_done(struct vscsifrnt_info *info,
 	scsifront_gnttab_done(info, shadow);
 	scsifront_put_rqid(info, id);
 
-	result = ring_rsp->rslt;
-	if (result >> 24)
-		set_host_byte(sc, DID_ERROR);
-	else
-		set_host_byte(sc, host_byte(result));
-	set_status_byte(sc, result & 0xff);
+	set_host_byte(sc, scsifront_host_byte(ring_rsp->rslt));
+	set_status_byte(sc, XEN_VSCSIIF_RSLT_STATUS(ring_rsp->rslt));
 	scsi_set_resid(sc, ring_rsp->residual_len);
 
 	sense_len = min_t(uint8_t, VSCSIIF_SENSE_BUFFERSIZE,
@@ -291,7 +328,10 @@ static void scsifront_sync_cmd_done(struct vscsifrnt_info *info,
 	shadow->wait_reset = 1;
 	switch (shadow->rslt_reset) {
 	case RSLT_RESET_WAITING:
-		shadow->rslt_reset = ring_rsp->rslt;
+		if (ring_rsp->rslt == XEN_VSCSIIF_RSLT_RESET_SUCCESS)
+			shadow->rslt_reset = SUCCESS;
+		else
+			shadow->rslt_reset = FAILED;
 		break;
 	case RSLT_RESET_ERR:
 		kick = _scsifront_put_rqid(info, id);
@@ -928,7 +968,7 @@ static int scsifront_suspend(struct xenbus_device *dev)
 	return err;
 }
 
-static int scsifront_remove(struct xenbus_device *dev)
+static void scsifront_remove(struct xenbus_device *dev)
 {
 	struct vscsifrnt_info *info = dev_get_drvdata(&dev->dev);
 
@@ -944,8 +984,6 @@ static int scsifront_remove(struct xenbus_device *dev)
 
 	scsifront_free_ring(info);
 	scsi_host_put(info->host);
-
-	return 0;
 }
 
 static void scsifront_disconnect(struct vscsifrnt_info *info)

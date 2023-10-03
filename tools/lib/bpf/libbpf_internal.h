@@ -543,6 +543,7 @@ static inline int ensure_good_fd(int fd)
 		fd = fcntl(fd, F_DUPFD_CLOEXEC, 3);
 		saved_errno = errno;
 		close(old_fd);
+		errno = saved_errno;
 		if (fd < 0) {
 			pr_warn("failed to dup FD %d to FD > 2: %d\n", old_fd, -saved_errno);
 			errno = saved_errno;
@@ -572,5 +573,8 @@ static inline bool is_pow_of_2(size_t x)
 {
 	return x && (x & (x - 1)) == 0;
 }
+
+#define PROG_LOAD_ATTEMPTS 5
+int sys_bpf_prog_load(union bpf_attr *attr, unsigned int size, int attempts);
 
 #endif /* __LIBBPF_LIBBPF_INTERNAL_H */

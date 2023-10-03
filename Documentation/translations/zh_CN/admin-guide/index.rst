@@ -67,6 +67,8 @@ Todolist:
    cpu-load
    lockup-watchdogs
    unicode
+   sysrq
+   mm/index
 
 Todolist:
 
@@ -104,7 +106,6 @@ Todolist:
    LSM/index
    md
    media/index
-   mm/index
    module-signing
    mono
    namespaces/index
@@ -118,7 +119,6 @@ Todolist:
    rtc
    serial-console
    svga
-   sysrq
    thunderbolt
    ufs
    vga-softcursor

@@ -62,8 +62,6 @@
 #include <trace/events/skb.h>
 #include <net/busy_poll.h>
 
-#include "datagram.h"
-
 /*
  *	Is a socket 'connection oriented' ?
  */
@@ -612,10 +610,16 @@ fault:
 }
 EXPORT_SYMBOL(skb_copy_datagram_from_iter);
 
-int __zerocopy_sg_from_iter(struct sock *sk, struct sk_buff *skb,
-			    struct iov_iter *from, size_t length)
+int __zerocopy_sg_from_iter(struct msghdr *msg, struct sock *sk,
+			    struct sk_buff *skb, struct iov_iter *from,
+			    size_t length)
 {
-	int frag = skb_shinfo(skb)->nr_frags;
+	int frag;
+
+	if (msg && msg->msg_ubuf && msg->sg_from_iter)
+		return msg->sg_from_iter(sk, skb, from, length);
+
+	frag = skb_shinfo(skb)->nr_frags;
 
 	while (length && iov_iter_count(from)) {
 		struct page *pages[MAX_SKB_FRAGS];
@@ -642,7 +646,8 @@ int __zerocopy_sg_from_iter(struct sock *sk, struct sk_buff *skb,
 		skb->truesize += truesize;
 		if (sk && sk->sk_type == SOCK_STREAM) {
 			sk_wmem_queued_add(sk, truesize);
-			sk_mem_charge(sk, truesize);
+			if (!skb_zcopy_pure(skb))
+				sk_mem_charge(sk, truesize);
 		} else {
 			refcount_add(truesize, &skb->sk->sk_wmem_alloc);
 		}
@@ -700,7 +705,7 @@ int zerocopy_sg_from_iter(struct sk_buff *skb, struct iov_iter *from)
 	if (skb_copy_datagram_from_iter(skb, 0, from, copy))
 		return -EFAULT;
 
-	return __zerocopy_sg_from_iter(NULL, skb, from, ~0U);
+	return __zerocopy_sg_from_iter(NULL, NULL, skb, from, ~0U);
 }
 EXPORT_SYMBOL(zerocopy_sg_from_iter);
 

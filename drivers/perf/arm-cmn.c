@@ -36,7 +36,7 @@
 #define CMN_CI_CHILD_COUNT		GENMASK_ULL(15, 0)
 #define CMN_CI_CHILD_PTR_OFFSET		GENMASK_ULL(31, 16)
 
-#define CMN_CHILD_NODE_ADDR		GENMASK(27, 0)
+#define CMN_CHILD_NODE_ADDR		GENMASK(29, 0)
 #define CMN_CHILD_NODE_EXTERNAL		BIT(31)
 
 #define CMN_MAX_DIMENSION		12
@@ -166,7 +166,7 @@
 #define CMN_EVENT_BYNODEID(event)	FIELD_GET(CMN_CONFIG_BYNODEID, (event)->attr.config)
 #define CMN_EVENT_NODEID(event)		FIELD_GET(CMN_CONFIG_NODEID, (event)->attr.config)
 
-#define CMN_CONFIG_WP_COMBINE		GENMASK_ULL(27, 24)
+#define CMN_CONFIG_WP_COMBINE		GENMASK_ULL(30, 27)
 #define CMN_CONFIG_WP_DEV_SEL		GENMASK_ULL(50, 48)
 #define CMN_CONFIG_WP_CHN_SEL		GENMASK_ULL(55, 51)
 /* Note that we don't yet support the tertiary match group on newer IPs */
@@ -1576,7 +1576,6 @@ static int arm_cmn_event_init(struct perf_event *event)
 			hw->dn++;
 			continue;
 		}
-		hw->dtcs_used |= arm_cmn_node_to_xp(cmn, dn)->dtc;
 		hw->num_dns++;
 		if (bynodeid)
 			break;
@@ -1589,6 +1588,12 @@ static int arm_cmn_event_init(struct perf_event *event)
 			nodeid, nid.x, nid.y, nid.port, nid.dev, type);
 		return -EINVAL;
 	}
+	/*
+	 * Keep assuming non-cycles events count in all DTC domains; turns out
+	 * it's hard to make a worthwhile optimisation around this, short of
+	 * going all-in with domain-local counter allocation as well.
+	 */
+	hw->dtcs_used = (1U << cmn->num_dtcs) - 1;
 
 	return arm_cmn_validate_group(cmn, event);
 }
@@ -1865,6 +1870,7 @@ static void arm_cmn_init_dtm(struct arm_cmn_dtm *dtm, struct arm_cmn_node *xp, i
 
 	dtm->base = xp->pmu_base + CMN_DTM_OFFSET(idx);
 	dtm->pmu_config_low = CMN_DTM_PMU_CONFIG_PMU_EN;
+	writeq_relaxed(dtm->pmu_config_low, dtm->base + CMN_DTM_PMU_CONFIG);
 	for (i = 0; i < 4; i++) {
 		dtm->wp_event[i] = -1;
 		writeq_relaxed(0, dtm->base + CMN_DTM_WPn_MASK(i));

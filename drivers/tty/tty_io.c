@@ -3435,13 +3435,6 @@ void tty_driver_kref_put(struct tty_driver *driver)
 }
 EXPORT_SYMBOL(tty_driver_kref_put);
 
-void tty_set_operations(struct tty_driver *driver,
-			const struct tty_operations *op)
-{
-	driver->ops = op;
-};
-EXPORT_SYMBOL(tty_set_operations);
-
 void put_tty_driver(struct tty_driver *d)
 {
 	tty_driver_kref_put(d);
@@ -3534,7 +3527,7 @@ void tty_default_fops(struct file_operations *fops)
 	*fops = tty_fops;
 }
 
-static char *tty_devnode(struct device *dev, umode_t *mode)
+static char *tty_devnode(const struct device *dev, umode_t *mode)
 {
 	if (!mode)
 		return NULL;

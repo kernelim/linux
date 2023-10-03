@@ -387,16 +387,10 @@ do
 done
 
 KVERREL="$(test -n "$1" && echo "-$1" || echo "")"
-FLAVOR="$(test -n "$2" && echo "-$2" || echo "-ark")"
+FLAVOR="$(test -n "$2" && echo "-$2" || echo "-rhel")"
 # shellcheck disable=SC2015
 SCRIPT=$(readlink -f "$0")
 SCRIPT_DIR=$(dirname "$SCRIPT")
-
-# Config options for RHEL should target the pending-ark directory, not pending-common.
-if [ "$FLAVOR" = "-rhel" ]
-then
-	FLAVOR="-ark"
-fi
 
 # to handle this script being a symlink
 cd "$SCRIPT_DIR"

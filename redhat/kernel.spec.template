@@ -195,6 +195,8 @@ Summary: The Linux kernel
 %define with_zfcpdump  %{?_without_zfcpdump:  0} %{?!_without_zfcpdump:  1}
 # kernel-64k (aarch64 kernel with 64K page_size)
 %define with_arm64_64k %{?_without_arm64_64k: 0} %{?!_without_arm64_64k: 1}
+# kernel-rt (x86_64 and aarch64 only PREEMPT_RT enabled kernel)
+%define with_realtime  %{?_without_realtime:  0} %{?!_without_realtime:  1}
 # kernel-doc
 %define with_doc       %{?_without_doc:       0} %{?!_without_doc:       1}
 # kernel-headers
@@ -221,6 +223,8 @@ Summary: The Linux kernel
 %define with_paeonly   %{?_with_paeonly:      1} %{?!_with_paeonly:      0}
 # Only build the debug kernel (--with dbgonly):
 %define with_dbgonly   %{?_with_dbgonly:      1} %{?!_with_dbgonly:      0}
+# Only build the realtime kernel (--with rtonly):
+%define with_rtonly    %{?_with_rtonly:       1} %{?!_with_rtonly:       0}
 # Control whether we perform a compat. check against published ABI.
 %define with_kabichk   %{?_without_kabichk:   0} %{?!_without_kabichk:   1}
 # Control whether we perform a compat. check against DUP ABI.
@@ -356,10 +360,16 @@ Summary: The Linux kernel
 %define with_pae 0
 %endif
 
+# RT kernel is only built on x86_64 and aarch64
+%ifnarch x86_64 aarch64
+%define with_realtime 0
+%endif
+
 # if requested, only build base kernel
 %if %{with_baseonly}
 %define with_pae 0
 %define with_debug 0
+%define with_realtime 0
 %define with_vdso_install 0
 %define with_perf 0
 %define with_tools 0
@@ -375,11 +385,29 @@ Summary: The Linux kernel
 %if %{with_paeonly}
 %define with_up 0
 %define with_debug 0
+%define with_realtime 0
 %endif
 
 # if requested, only build debug kernel
 %if %{with_dbgonly}
 %define with_up 0
+%define with_realtime 0
+%define with_vdso_install 0
+%define with_perf 0
+%define with_tools 0
+%define with_bpftool 0
+%define with_kernel_abi_stablelists 0
+%define with_selftests 0
+%define with_cross 0
+%define with_cross_headers 0
+%define with_ipaclones 0
+%endif
+
+# if requested, only build realtime kernel
+%if %{with_rtonly}
+%define with_up 0
+%define with_pae 0
+%define with_debug 0
 %define with_vdso_install 0
 %define with_perf 0
 %define with_tools 0
@@ -428,6 +456,7 @@ Summary: The Linux kernel
 # don't build noarch kernels or headers (duh)
 %ifarch noarch
 %define with_up 0
+%define with_realtime 0
 %define with_headers 0
 %define with_cross_headers 0
 %define with_tools 0
@@ -544,6 +573,7 @@ Summary: The Linux kernel
 %define with_pae 0
 %define with_zfcpdump 0
 %define with_arm64_64k 0
+%define with_realtime 0
 
 %define with_debuginfo 0
 %define with_perf 0
@@ -609,6 +639,7 @@ ExclusiveOS: Linux
 Requires: kernel-core-uname-r = %{KVERREL}
 Requires: kernel-modules-uname-r = %{KVERREL}
 Requires: kernel-modules-core-uname-r = %{KVERREL}
+Provides: installonlypkg(kernel)
 %endif
 
 
@@ -746,7 +777,7 @@ BuildRequires: binutils
 # For the initrd
 BuildRequires: lvm2
 # For systemd-stub
-BuildRequires: (systemd-boot-unsigned or (systemd-udev >= 250-13 and systemd-udev < 252-8))
+BuildRequires: systemd-boot-unsigned
 # For systemd-pcrphase
 BuildRequires: systemd-udev >= 252-1
 # For TPM operations in UKI initramfs
@@ -827,6 +858,11 @@ Source41: x509.genkey.centos
 # ARM64 64K page-size kernel config
 Source42: kernel-aarch64-64k-rhel.config
 Source43: kernel-aarch64-64k-debug-rhel.config
+
+Source44: kernel-x86_64-rt-rhel.config
+Source45: kernel-x86_64-rt-debug-rhel.config
+Source46: kernel-aarch64-rt-rhel.config
+Source47: kernel-aarch64-rt-debug-rhel.config
 %endif
 
 %if 0%{?include_fedora}
@@ -862,11 +898,26 @@ Source82: update_scripts.sh
 
 Source84: mod-internal.list
 Source85: mod-partner.list
+Source86: mod-kvm.list
 
 Source100: rheldup3.x509
 Source101: rhelkpatch1.x509
+Source102: rhelimaca1.x509
+Source103: rhelima.x509
+Source104: rhelima_centos.x509
+
+%if 0%{?centos}
+%define ima_signing_cert %{SOURCE104}
+%else
+%define ima_signing_cert %{SOURCE103}
+%endif
+
+%define ima_cert_name ima.cer
 
 Source150: dracut-virt.conf
+# Remove this when https://bugzilla.redhat.com/show_bug.cgi?id=2225009 gets resolved
+Source151: uki-sb-cert-x86_64-centos.crt
+Source152: uki-sb-cert-x86_64-rhel.crt
 
 Source200: check-kabi
 
@@ -1026,6 +1077,34 @@ This package provides debug information for the perf python bindings.
 # the python_sitearch macro should already be defined from above
 %{expand:%%global _find_debuginfo_opts %{?_find_debuginfo_opts} -p '.*%%{python3_sitearch}/perf.*so(\.debug)?|XXX' -o python3-perf-debuginfo.list}
 
+%package -n libperf
+Summary: The perf library from kernel source
+License: GPLv2
+%description -n libperf
+This package contains the kernel source perf library.
+
+%package -n libperf-devel
+Summary: Developement files for the perf library from kernel source
+Requires: libperf = %{version}-%{release}
+License: GPLv2
+%description -n libperf-devel
+This package includes libraries and header files needed for development
+of applications which use perf library from kernel source.
+
+%package -n libperf-debuginfo
+Summary: Debug information for package libperf
+Group: Development/Debug
+Requires: %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}
+AutoReqProv: no
+%description -n libperf-debuginfo
+This package provides debug information for the libperf package.
+
+# Note that this pattern only works right to match the .build-id
+# symlinks because of the trailing nonmatching alternation and
+# the leading .*, because of find-debuginfo.sh's buggy handling
+# of matching the pattern against the symlinks file.
+%{expand:%%global _find_debuginfo_opts %{?_find_debuginfo_opts} -p '.*%%{_libdir}/libperf.so.*(\.debug)?|XXX' -o libperf-debuginfo.list}
+
 # with_perf
 %endif
 
@@ -1093,6 +1172,17 @@ the real-time properties of Linux. Instead of testing Linux as a black box,
 rtla leverages kernel tracing capabilities to provide precise information
 about the properties and root causes of unexpected results.
 
+%package -n rv
+Summary: RV: Runtime Verification
+License: GPLv2
+%description -n rv
+Runtime Verification (RV) is a lightweight (yet rigorous) method that
+complements classical exhaustive verification techniques (such as model
+checking and theorem proving) with a more practical approach for
+complex systems.
+The rv tool is the interface for a collection of monitors that aim
+analysing the logical and timing behavior of Linux.
+
 # with_tools
 %endif
 
@@ -1131,7 +1221,7 @@ This package provides debug information for the bpftool package.
 %package selftests-internal
 Summary: Kernel samples and selftests
 License: GPLv2
-Requires: binutils, bpftool, iproute-tc, nmap-ncat, python3, fuse-libs
+Requires: binutils, bpftool, iproute-tc, nmap-ncat, python3, fuse-libs, keyutils
 %description selftests-internal
 Kernel sample programs and selftests.
 
@@ -1146,12 +1236,12 @@ Kernel sample programs and selftests.
 # with_selftests
 %endif
 
-%if %{with_gcov}
-%package gcov
-Summary: gcov graph and source files for coverage data collection.
-%description gcov
-kernel-gcov includes the gcov graph and source files for gcov coverage collection.
-%endif
+%define kernel_gcov_package() \
+%package %{?1:%{1}-}gcov\
+Summary: gcov graph and source files for coverage data collection.\
+%description %{?1:%{1}-}gcov\
+%{?1:%{1}-}gcov includes the gcov graph and source files for gcov coverage collection.\
+%{nil}
 
 %package -n kernel-abi-stablelists
 Summary: The Red Hat Enterprise Linux kernel ABI symbol stablelists
@@ -1270,6 +1360,24 @@ AutoProv: yes\
 This package provides kernel modules for the %{?2:%{2} }kernel package for Red Hat internal usage.\
 %{nil}
 
+%if %{with_realtime}
+#
+# this macro creates a kernel-<subpackage>-kvm package
+# %%kernel_kvm_package <subpackage>
+#
+%define kernel_kvm_package() \
+%package %{?1:%{1}-}kvm\
+Summary: KVM modules for package kernel%{?1:-%{1}}\
+Group: System Environment/Kernel\
+Requires: kernel%{?1:-%{1}} = %{version}-%{release}\
+Provides: installonlypkg(kernel-module)\
+Provides: kernel%{?1:-%{1}}-kvm-%{_target_cpu} = %{version}-%{release}\
+AutoReq: no\
+%description -n kernel%{?1:-%{1}}-kvm\
+This package provides KVM modules for package kernel%{?1:-%{1}}.\
+%{nil}
+%endif
+
 #
 # This macro creates a kernel-<subpackage>-modules-extra package.
 #	%%kernel_modules_extra_package [-m] <subpackage> <pretty-name>
@@ -1349,6 +1457,9 @@ summary: kernel meta-package for the %{1} kernel\
 Requires: kernel-%{1}-core-uname-r = %{KVERREL}%{uname_suffix %{1}}\
 Requires: kernel-%{1}-modules-uname-r = %{KVERREL}%{uname_suffix %{1}}\
 Requires: kernel-%{1}-modules-core-uname-r = %{KVERREL}%{uname_suffix %{1}}\
+%if "%{1}" == "rt" || "%{1}" == "rt-debug"\
+Requires: realtime-setup\
+%endif\
 Provides: installonlypkg(kernel)\
 %description %{1}\
 The meta-package for the %{1} kernel\
@@ -1385,11 +1496,19 @@ Requires: kernel-%{?1:%{1}-}-modules-core-uname-r = %{KVERREL}%{uname_variant %{
 %{expand:%%kernel_debuginfo_package %{?1:%{1}}}\
 %endif\
 %if %{efiuki}\
+%if "%{1}" != "rt" && "%{1}" != "rt-debug"\
 %package %{?1:%{1}-}uki-virt\
 Summary: %{variant_summary} unified kernel image for virtual machines\
 Provides: installonlypkg(kernel)\
 Provides: kernel-%{?1:%{1}-}uname-r = %{KVERREL}%{uname_suffix %{?1:%{1}}}\
 Requires: kernel%{?1:-%{1}}-modules-core-uname-r = %{KVERREL}%{uname_suffix %{?1:%{1}}}\
+%endif\
+%endif\
+%if "%{1}" == "rt" || "%{1}" == "rt-debug"\
+%{expand:%%kernel_kvm_package %{?1:%{1}}} %{!?{-n}:%{1}}%{?{-n}:%{-n*}}}\
+%endif \
+%if %{with_gcov}\
+%{expand:%%kernel_gcov_package %{?1:%{1}}}\
 %endif\
 %{nil}
 
@@ -1452,6 +1571,24 @@ a 64K page size.
 The debug kernel package contains a variant of the ARM64 Linux kernel using
 a 64K page size.
 This variant of the kernel has numerous debugging options enabled.
+It should only be installed when trying to gather additional information
+on kernel bugs, as some of these options impact performance noticably.
+%endif
+
+%if %{with_realtime}
+%define variant_summary The Linux kernel compiled with PREEMPT_RT enabled
+%kernel_variant_package rt
+%description rt-core
+This package includes a version of the Linux kernel compiled with PREEMPT_RT
+(real-time preemption support).
+%endif
+
+%if %{with_debug} && %{with_realtime}
+%define variant_summary The Linux kernel compiled with PREEMPT_RT enabled
+%kernel_variant_package rt-debug
+%description rt-debug-core
+This package includes a version of the Linux kernel compiled with PREEMPT_RT
+(real-time preemption support) and has numerous debugging options enabled.
 It should only be installed when trying to gather additional information
 on kernel bugs, as some of these options impact performance noticably.
 %endif
@@ -1635,7 +1772,8 @@ done
 %if %{signkernel}%{signmodules}
 openssl x509 -inform der -in %{SOURCE100} -out rheldup3.pem
 openssl x509 -inform der -in %{SOURCE101} -out rhelkpatch1.pem
-cat rheldup3.pem rhelkpatch1.pem > ../certs/rhel.pem
+openssl x509 -inform der -in %{SOURCE102} -out rhelimaca1.pem
+cat rheldup3.pem rhelkpatch1.pem rhelimaca1.pem > ../certs/rhel.pem
 %if %{signkernel}
 %ifarch s390x ppc64le
 openssl x509 -inform der -in %{secureboot_ca_0} -out secureboot.pem
@@ -1781,6 +1919,17 @@ BuildKernel() {
     else
       CopyKernel=cp
     fi
+
+%if %{with_gcov}
+    # Make build directory unique for each variant, so that gcno symlinks
+    # are also unique for each variant.
+    if [ -n "$Variant" ]; then
+        ln -s $(pwd) ../linux-%{KVERREL}-${Variant}
+    fi
+    echo "GCOV - continuing build in: $(pwd)"
+    pushd ../linux-%{KVERREL}${Variant:+-${Variant}}
+    pwd > ../kernel${Variant:+-${Variant}}-gcov.list
+%endif
 
     InitBuildVars $Variant
 
@@ -2048,7 +2197,8 @@ BuildKernel() {
     cp --parents tools/build/Build $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
     cp --parents tools/build/fixdep.c $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
     cp --parents tools/objtool/sync-check.sh $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
-    cp -a --parents tools/bpf/resolve_btfids $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
+    cp -a --parents tools/bpf/resolve_btfids/main.c $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
+    cp -a --parents tools/bpf/resolve_btfids/Build $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
 
     cp --parents security/selinux/include/policycap_names.h $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
     cp --parents security/selinux/include/policycap.h $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
@@ -2216,6 +2366,10 @@ BuildKernel() {
     # Identify modules in the kernel-modules-partner package
     %{SOURCE20} $RPM_BUILD_ROOT lib/modules/$KernelVer %{SOURCE85} partner
 %endif
+    if [ "$Variant" = "rt" ] || [ "$Variant" = "rt-debug" ]; then
+        # Identify modules in the kernel-rt-kvm package
+        %{SOURCE20} $RPM_BUILD_ROOT lib/modules/$KernelVer %{SOURCE86} kvm
+    fi
 
     #
     # Generate the kernel-core and kernel-modules files lists
@@ -2237,6 +2391,10 @@ BuildKernel() {
     # don't include anything going int kernel-modules-partner in the file lists
     xargs rm -rf < mod-partner.list
 %endif
+    if [ "$Variant" = "rt" ] || [ "$Variant" = "rt-debug" ]; then
+        # don't include anything going into kernel-rt-kvm in the file lists
+        xargs rm -rf < mod-kvm.list
+    fi
 
     if [ $DoModules -eq 1 ]; then
 	# Find all the module files and filter them out into the core and
@@ -2267,38 +2425,78 @@ BuildKernel() {
     fi
 
 %if %{efiuki}
-    popd
+    if [ "$Variant" != "rt" ] && [ "$Variant" != "rt-debug" ]; then
+        popd
+    
+        KernelUnifiedImageDir="$RPM_BUILD_ROOT/lib/modules/$KernelVer"
+        KernelUnifiedImage="$KernelUnifiedImageDir/$InstallName-virt.efi"
+    
+        mkdir -p $KernelUnifiedImageDir
+    
+        dracut --conf=%{SOURCE150} \
+               --confdir=$(mktemp -d) \
+               --verbose \
+               --kver "$KernelVer" \
+               --kmoddir "$RPM_BUILD_ROOT/lib/modules/$KernelVer/" \
+               --logfile=$(mktemp) \
+               --uefi \
+               --kernel-image $(realpath $KernelImage) \
+               --kernel-cmdline 'console=tty0 console=ttyS0' \
+    	   $KernelUnifiedImage
 
-    KernelUnifiedImageDir="$RPM_BUILD_ROOT/lib/modules/$KernelVer"
-    KernelUnifiedImage="$KernelUnifiedImageDir/$InstallName-virt.efi"
-
-    mkdir -p $KernelUnifiedImageDir
-
-    dracut --conf=%{SOURCE150} \
-           --confdir=$(mktemp -d) \
-           --verbose \
-           --kver "$KernelVer" \
-           --kmoddir "$RPM_BUILD_ROOT/lib/modules/$KernelVer/" \
-           --logfile=$(mktemp) \
-           --uefi \
-           --kernel-image $(realpath $KernelImage) \
-           --kernel-cmdline 'console=tty0 console=ttyS0' \
-	   $KernelUnifiedImage
+        # Add RH specific .SBAT entries
+        # First, we need to save the original .sbat from UKI
+        objcopy -O binary --only-section=.sbat $KernelUnifiedImage $KernelUnifiedImage.sbat
+        # Remove all trailing zero bytes from the file
+        sed -i 's/\x0.*$//' $KernelUnifiedImage.sbat
+        # Add RHEL/CentOS specific entries
+%if 0%{?centos}
+        SBATsuffix="centos"
+%else
+        SBATsuffix="rhel"
+%endif
+        echo "linux,1,Red Hat,linux,$KernelVer,https://bugzilla.redhat.com/" >> $KernelUnifiedImage.sbat
+        echo "linux.$SBATsuffix,1,Red Hat,linux,$KernelVer,https://bugzilla.redhat.com/" >> $KernelUnifiedImage.sbat
+        echo "kernel-uki-virt.$SBATsuffix,1,Red Hat,kernel-uki-virt,$KernelVer,https://bugzilla.redhat.com/" >> $KernelUnifiedImage.sbat
+        # Remove the original .sbat section
+        objcopy --remove-section .sbat $KernelUnifiedImage
+        # Get the end of the last section
+        sbat_offt=$(objdump -h $KernelUnifiedImage | gawk 'NF==7 {size=strtonum("0x"$3); offset=strtonum("0x"$4)} END {print size + offset}')
+        # Align start of the new section to 512b
+        sbat_align=512
+        sbat_offt=$((sbat_offt + "$sbat_align" - sbat_offt % "$sbat_align"))
+        # Add the new .sbat section
+        objcopy -v --add-section .sbat=$KernelUnifiedImage.sbat --set-section-alignment .sbat=$sbat_align \
+                --change-section-vma .sbat=$sbat_offt $KernelUnifiedImage
+        rm -f $KernelUnifiedImage.sbat
 
 %if %{signkernel}
 
-    %pesign -s -i $KernelUnifiedImage -o $KernelUnifiedImage.signed -a %{secureboot_ca_0} -c %{secureboot_key_0} -n %{pesign_name_0}
-    if [ ! -s $KernelUnifiedImage.signed ]; then
-      echo "pesigning failed"
-      exit 1
-    fi
-    mv $KernelUnifiedImage.signed $KernelUnifiedImage
+%if 0%{?centos}
+	UKI_secureboot_name=centossecureboot204
+	UKI_secureboot_cert=%{SOURCE151}
+%else
+	UKI_secureboot_name=redhatsecureboot504
+	UKI_secureboot_cert=%{SOURCE152}
+%endif
+
+        %pesign -s -i $KernelUnifiedImage -o $KernelUnifiedImage.signed -a %{secureboot_ca_0} -c $UKI_secureboot_cert -n $UKI_secureboot_name
+        if [ ! -s $KernelUnifiedImage.signed ]; then
+          echo "pesigning failed"
+          exit 1
+        fi
+        mv $KernelUnifiedImage.signed $KernelUnifiedImage
+
+        mkdir -p $RPM_BUILD_ROOT%{_datadir}/doc/kernel-keys/$KernelVer
+        cp -a $UKI_secureboot_cert $RPM_BUILD_ROOT%{_datadir}/doc/kernel-keys/$KernelVer/secureboot-uki-%{_arch}.cer
 
 # signkernel
 %endif
 
-    pushd $RPM_BUILD_ROOT
+        pushd $RPM_BUILD_ROOT
 
+    # Variant != rt && Variant != rt-debug
+    fi
 # efiuki
 %endif
 
@@ -2331,6 +2529,9 @@ BuildKernel() {
 %if 0%{!?fedora:1}
     sed -e 's/^lib*/\/lib/' %{?zipsed} $RPM_BUILD_ROOT/mod-partner.list >> ../kernel${Variant:+-${Variant}}-modules-partner.list
 %endif
+    if [ "$Variant" = "rt" ] || [ "$Variant" = "rt-debug" ]; then
+        sed -e 's/^lib*/\/lib/' %{?zipsed} $RPM_BUILD_ROOT/mod-kvm.list >> ../kernel${Variant:+-${Variant}}-kvm.list
+    fi
 
     # Cleanup
     rm -f $RPM_BUILD_ROOT/k-d.list
@@ -2341,6 +2542,9 @@ BuildKernel() {
 %if 0%{!?fedora:1}
     rm -f $RPM_BUILD_ROOT/mod-partner.list
 %endif
+    if [ "$Variant" = "rt" ] || [ "$Variant" = "rt-debug" ]; then
+        rm -f $RPM_BUILD_ROOT/mod-kvm.list
+    fi
 
 %if %{with_cross}
     make -C $RPM_BUILD_ROOT/lib/modules/$KernelVer/build M=scripts clean
@@ -2381,6 +2585,11 @@ BuildKernel() {
     %endif
 %endif
 
+%if 0%{?rhel}
+    # Red Hat IMA code-signing cert, which is used to authenticate package files
+    install -m 0644 %{ima_signing_cert} $RPM_BUILD_ROOT%{_datadir}/doc/kernel-keys/$KernelVer/%{ima_cert_name}
+%endif
+
 %if %{signmodules}
     if [ $DoModules -eq 1 ]; then
         # Save the signing keys so we can sign the modules in __modsign_install_post
@@ -2407,6 +2616,9 @@ BuildKernel() {
     fi
 %endif
 
+%if %{with_gcov}
+    popd
+%endif
 }
 
 ###
@@ -2426,6 +2638,9 @@ BuildKernel %make_target %kernel_image %{_use_vdso} debug
 %if %{with_arm64_64k}
 BuildKernel %make_target %kernel_image %{_use_vdso} 64k-debug
 %endif
+%if %{with_realtime}
+BuildKernel %make_target %kernel_image %{_use_vdso} rt-debug
+%endif
 %endif
 
 %if %{with_zfcpdump}
@@ -2440,12 +2655,16 @@ BuildKernel %make_target %kernel_image %{_use_vdso} 64k
 BuildKernel %make_target %kernel_image %{use_vdso} lpae
 %endif
 
+%if %{with_realtime}
+BuildKernel %make_target %kernel_image %{use_vdso} rt
+%endif
+
 %if %{with_up}
 BuildKernel %make_target %kernel_image %{_use_vdso}
 %endif
 
 %ifnarch noarch i686
-%if !%{with_debug} && !%{with_zfcpdump} && !%{with_pae} && !%{with_up} && !%{with_arm64_64k}
+%if !%{with_debug} && !%{with_zfcpdump} && !%{with_pae} && !%{with_up} && !%{with_arm64_64k} && !%{with_realtime}
 # If only building the user space tools, then initialize the build environment
 # and some variables so that the various userspace tools can be built.
 InitBuildVars
@@ -2462,6 +2681,8 @@ InitBuildVars
 # make sure check-headers.sh is executable
 chmod +x tools/perf/check-headers.sh
 %{perf_make} DESTDIR=$RPM_BUILD_ROOT all
+# libperf
+make -C tools/lib/perf V=1
 %endif
 
 %global tools_make \
@@ -2506,6 +2727,9 @@ popd
 pushd tools/vm/
 %{tools_make} CFLAGS="${RPM_OPT_FLAGS}" LDFLAGS="%{__global_ldflags}" slabinfo page_owner_sort
 popd
+pushd tools/verification/rv/
+%{tools_make}
+popd
 pushd tools/tracing/rtla
 %{tools_make}
 popd
@@ -2544,7 +2768,7 @@ export BPFTOOL=$(pwd)/tools/bpf/bpftool/bpftool
 pushd tools/testing/selftests
 # We need to install here because we need to call make with ARCH set which
 # doesn't seem possible to do in the install section.
-%{make} %{?_smp_mflags} ARCH=$Arch V=1 TARGETS="bpf vm livepatch net net/forwarding net/mptcp netfilter tc-testing memfd" SKIP_TARGETS="" FORCE_TARGETS=1 INSTALL_PATH=%{buildroot}%{_libexecdir}/kselftests VMLINUX_H="${RPM_VMLINUX_H}" DEFAULT_INSTALL_HDR_PATH=0 install
+%{make} %{?_smp_mflags} ARCH=$Arch V=1 TARGETS="bpf vm livepatch net net/forwarding net/mptcp netfilter tc-testing memfd drivers/net/bonding" SKIP_TARGETS="" FORCE_TARGETS=1 INSTALL_PATH=%{buildroot}%{_libexecdir}/kselftests VMLINUX_H="${RPM_VMLINUX_H}" DEFAULT_INSTALL_HDR_PATH=0 install
 
 # 'make install' for bpf is broken and upstream refuses to fix it.
 # Install the needed files manually.
@@ -2562,6 +2786,7 @@ for dir in bpf bpf/no_alu32 bpf/progs; do
 done
 ln -sr  %{buildroot}%{_libexecdir}/kselftests/bpf/bpftool %{buildroot}%{_libexecdir}/kselftests/bpf/no_alu32/bpftool
 %buildroot_save_unstripped "usr/libexec/kselftests/bpf/test_progs"
+%buildroot_save_unstripped "usr/libexec/kselftests/bpf/test_progs-no_alu32"
 popd
 export -n BPFTOOL
 %endif
@@ -2593,6 +2818,9 @@ find Documentation -type d | xargs chmod u+w
     if [ "%{with_pae}" -ne "0" ]; then \
        %{modsign_cmd} certs/signing_key.pem.sign+lpae certs/signing_key.x509.sign+lpae $RPM_BUILD_ROOT/lib/modules/%{KVERREL}+lpae/ \
     fi \
+    if [ "%{with_realtime}" -ne "0" ]; then \
+       %{modsign_cmd} certs/signing_key.pem.sign+rt certs/signing_key.x509.sign+rt $RPM_BUILD_ROOT/lib/modules/%{KVERREL}+rt/ \
+    fi \
     if [ "%{with_debug}" -ne "0" ]; then \
          %{modsign_cmd} certs/signing_key.pem.sign+debug certs/signing_key.x509.sign+debug $RPM_BUILD_ROOT/lib/modules/%{KVERREL}+debug/ \
     fi \
@@ -2601,6 +2829,9 @@ find Documentation -type d | xargs chmod u+w
     fi \
     if [ "%{with_arm64_64k}" -ne "0" ] && [ "%{with_debug}" -ne "0" ]; then \
          %{modsign_cmd} certs/signing_key.pem.sign+64k-debug certs/signing_key.x509.sign+64k-debug $RPM_BUILD_ROOT/lib/modules/%{KVERREL}+64k-debug/ \
+    fi \
+    if [ "%{with_realtime}" -ne "0" ] && [ "%{with_debug}" -ne "0" ]; then \
+         %{modsign_cmd} certs/signing_key.pem.sign+rt-debug certs/signing_key.x509.sign+rt-debug $RPM_BUILD_ROOT/lib/modules/%{KVERREL}+rt-debug/ \
     fi \
     if [ "%{with_up}" -ne "0" ]; then \
       %{modsign_cmd} certs/signing_key.pem.sign certs/signing_key.x509.sign $RPM_BUILD_ROOT/lib/modules/%{KVERREL}/ \
@@ -2747,6 +2978,10 @@ mkdir -p %{buildroot}/%{_mandir}/man1
 # LIBTRACEEVENT_DYNAMIC=1 above in perf_make macro). Those files should already
 # ship with libtraceevent package.
 rm -rf %{buildroot}%{_libdir}/traceevent
+
+# libperf
+make -C tools/lib/perf DESTDIR=%{buildroot} prefix=%{_prefix} libdir=%{_libdir} V=1 install
+rm -f %{buildroot}%{_libdir}/libperf.a
 %endif
 
 %if %{with_tools}
@@ -2801,12 +3036,17 @@ pushd tools/vm/
 install -m755 slabinfo %{buildroot}%{_bindir}/slabinfo
 install -m755 page_owner_sort %{buildroot}%{_bindir}/page_owner_sort
 popd
+pushd tools/verification/rv/
+%{tools_make} DESTDIR=%{buildroot} install
+popd
 pushd tools/tracing/rtla/
 %{tools_make} DESTDIR=%{buildroot} install
+rm -f %{buildroot}%{_bindir}/hwnoise
 rm -f %{buildroot}%{_bindir}/osnoise
 rm -f %{buildroot}%{_bindir}/timerlat
 (cd %{buildroot}
 
+        ln -sf rtla ./%{_bindir}/hwnoise
         ln -sf rtla ./%{_bindir}/osnoise
         ln -sf rtla ./%{_bindir}/timerlat
 )
@@ -2861,6 +3101,12 @@ pushd tools/testing/selftests/drivers/net/netdevsim
 find -type d -exec install -d %{buildroot}%{_libexecdir}/kselftests/drivers/net/netdevsim/{} \;
 find -type f -executable -exec install -D -m755 {} %{buildroot}%{_libexecdir}/kselftests/drivers/net/netdevsim/{} \;
 find -type f ! -executable -exec install -D -m644 {} %{buildroot}%{_libexecdir}/kselftests/drivers/net/netdevsim/{} \;
+popd
+# install drivers/net/bonding selftests
+pushd tools/testing/selftests/drivers/net/bonding
+find -type d -exec install -d %{buildroot}%{_libexecdir}/kselftests/drivers/net/bonding/{} \;
+find -type f -executable -exec install -D -m755 {} %{buildroot}%{_libexecdir}/kselftests/drivers/net/bonding/{} \;
+find -type f ! -executable -exec install -D -m644 {} %{buildroot}%{_libexecdir}/kselftests/drivers/net/bonding/{} \;
 popd
 # install net/forwarding selftests
 pushd tools/testing/selftests/net/forwarding
@@ -2984,6 +3230,21 @@ fi\
 /sbin/depmod -a %{KVERREL}%{?1:+%{1}}\
 %{nil}
 
+%if %{with_realtime}
+#
+# This macro defines a %%post script for a kernel*-kvm package.
+# It also defines a %%postun script that does the same thing.
+#       %%kernel_kvm_post [<subpackage>]
+#
+%define kernel_kvm_post() \
+%{expand:%%post %{?1:%{1}-}kvm}\
+/sbin/depmod -a %{KVERREL}%{?1:+%{1}}\
+%{nil}\
+%{expand:%%postun %{?1:%{1}-}kvm}\
+/sbin/depmod -a %{KVERREL}%{?1:+%{1}}\
+%{nil}
+%endif
+
 #
 # This macro defines a %%post script for a kernel*-modules-partner package.
 # It also defines a %%postun script that does the same thing.
@@ -3070,6 +3331,9 @@ fi\
 %if 0%{!?fedora:1}\
 %{expand:%%kernel_modules_partner_post %{?-v*}}\
 %endif\
+%if "%{-v*}" == "rt" || "%{-v*}" == "rt-debug"\
+%{expand:%%kernel_kvm_post %{?-v*}}\
+%endif\
 %{expand:%%kernel_variant_posttrans %{?-v*}}\
 %{expand:%%post %{?-v*:%{-v*}-}core}\
 %{-r:\
@@ -3089,10 +3353,12 @@ touch %{_localstatedir}/lib/rpm-state/%{name}/installing_core_%{KVERREL}%{?-v:+%
 %define kernel_uki_virt_scripts() \
 %{expand:%%posttrans %{?1:%{1}-}uki-virt}\
 mkdir -p /boot/efi/EFI/Linux\
-cp /lib/modules/%{KVERREL}%{?1:+%{1}}/vmlinuz-virt.efi /boot/efi/EFI/Linux/vmlinuz-%{KVERREL}%{?1:+%{1}}-virt.efi\
+entry_token=$(kernel-install inspect | grep KERNEL_INSTALL_ENTRY_TOKEN: | cut -d ' ' -f2)\
+cp /lib/modules/%{KVERREL}%{?1:+%{1}}/vmlinuz-virt.efi /boot/efi/EFI/Linux/${entry_token}-%{KVERREL}%{?1:+%{1}}.efi\
 %{nil}\
 %{expand:%%postun %{?1:%{1}-}uki-virt}\
-rm -f /boot/efi/EFI/Linux/vmlinuz-%{KVERREL}%{?1:+%{1}}-virt.efi\
+entry_token=$(kernel-install inspect | grep KERNEL_INSTALL_ENTRY_TOKEN: | cut -d ' ' -f2)\
+rm -f /boot/efi/EFI/Linux/${entry_token}-%{KVERREL}%{?1:+%{1}}.efi\
 %{nil}
 
 #
@@ -3135,6 +3401,16 @@ fi\
 %kernel_variant_post -v 64k-debug
 %endif
 
+%if %{with_realtime}
+%kernel_variant_preun rt
+%kernel_variant_post -v rt
+%endif
+
+%if %{with_debug} && %{with_realtime}
+%kernel_variant_preun rt-debug
+%kernel_variant_post -v rt-debug
+%endif
+
 %if %{with_debug}
 %if %{efiuki}
 %kernel_uki_virt_scripts debug
@@ -3156,6 +3432,8 @@ fi
 %files headers
 /usr/include/*
 %exclude %{_includedir}/cpufreq.h
+%exclude %{_includedir}/internal/
+%exclude %{_includedir}/perf/
 %endif
 
 %if %{with_cross_headers}
@@ -3200,10 +3478,26 @@ fi
 %files -n python3-perf
 %{python3_sitearch}/*
 
+%files -n libperf
+%{_libdir}/libperf.so.0
+%{_libdir}/libperf.so.0.0.1
+
+%files -n libperf-devel
+%{_libdir}/libperf.so
+%{_libdir}/pkgconfig/libperf.pc
+%{_includedir}/perf/
+%{_includedir}/internal/
+%{_mandir}/man3/libperf.*
+%{_mandir}/man7/libperf-counting.*
+%{_mandir}/man7/libperf-sampling.*
+%{_docdir}/libperf/
+
 %if %{with_debuginfo}
 %files -f perf-debuginfo.list -n perf-debuginfo
 
 %files -f python3-perf-debuginfo.list -n python3-perf-debuginfo
+
+%files -f libperf-debuginfo.list -n libperf-debuginfo
 %endif
 # with_perf
 %endif
@@ -3263,8 +3557,10 @@ fi
 
 %files -n rtla
 %{_bindir}/rtla
+%{_bindir}/hwnoise
 %{_bindir}/osnoise
 %{_bindir}/timerlat
+%{_mandir}/man1/rtla-hwnoise.1.gz
 %{_mandir}/man1/rtla-osnoise-hist.1.gz
 %{_mandir}/man1/rtla-osnoise-top.1.gz
 %{_mandir}/man1/rtla-osnoise.1.gz
@@ -3272,6 +3568,14 @@ fi
 %{_mandir}/man1/rtla-timerlat-top.1.gz
 %{_mandir}/man1/rtla-timerlat.1.gz
 %{_mandir}/man1/rtla.1.gz
+
+%files -n rv
+%{_bindir}/rv
+%{_mandir}/man1/rv-list.1.gz
+%{_mandir}/man1/rv-mon-wip.1.gz
+%{_mandir}/man1/rv-mon-wwnr.1.gz
+%{_mandir}/man1/rv-mon.1.gz
+%{_mandir}/man1/rv.1.gz
 
 # with_tools
 %endif
@@ -3306,14 +3610,9 @@ fi
 %endif
 
 # empty meta-package
+%if %{with_up}
 %ifnarch %nobuildarches noarch
 %files
-%endif
-
-%if %{with_gcov}
-%ifnarch %nobuildarches noarch
-%files gcov
-%{_builddir}
 %endif
 %endif
 
@@ -3376,18 +3675,32 @@ fi
 %if 0%{!?fedora:1}\
 %{expand:%%files -f kernel-%{?3:%{3}-}modules-partner.list %{?3:%{3}-}modules-partner}\
 %endif\
+%if "%{3}" == "rt" || "%{3}" == "rt-debug"\
+%{expand:%%files -f kernel-%{?3:%{3}-}kvm.list %{?3:%{3}-}kvm}\
+%endif\
 %if %{with_debuginfo}\
 %ifnarch noarch\
 %{expand:%%files -f debuginfo%{?3}.list %{?3:%{3}-}debuginfo}\
 %endif\
 %endif\
 %if %{efiuki}\
+%if "%{3}" != "rt" && "%{3}" != "rt-debug"\
 %{expand:%%files %{?3:%{3}-}uki-virt}\
+%attr(0600, root, root) /lib/modules/%{KVERREL}%{?3:+%{3}}/System.map\
+/lib/modules/%{KVERREL}%{?3:+%{3}}/symvers.gz\
+/lib/modules/%{KVERREL}%{?3:+%{3}}/config\
+/lib/modules/%{KVERREL}%{?3:+%{3}}/modules.builtin*\
 /lib/modules/%{KVERREL}%{?3:+%{3}}/%{?-k:%{-k*}}%{!?-k:vmlinuz}-virt.efi\
-%ghost /%{image_install_path}/efi/EFI/Linux/%{?-k:%{-k*}}%{!?-k:vmlinuz}-%{KVERREL}%{?3:+%{3}}-virt.efi\
+%ghost /%{image_install_path}/efi/EFI/Linux/%{?-k:%{-k*}}%{!?-k:*}-%{KVERREL}%{?3:+%{3}}.efi\
+%endif\
 %endif\
 %if %{?3:1} %{!?3:0}\
 %{expand:%%files %{3}}\
+%endif\
+%if %{with_gcov}\
+%ifnarch %nobuildarches noarch\
+%{expand:%%files -f kernel-%{?3:%{3}-}gcov.list %{?3:%{3}-}gcov}\
+%endif\
 %endif\
 %endif\
 %{nil}
@@ -3396,6 +3709,10 @@ fi
 %kernel_variant_files %{_use_vdso} %{with_debug} debug
 %if %{with_arm64_64k}
 %kernel_variant_files %{_use_vdso} %{with_debug} 64k-debug
+%endif
+%kernel_variant_files %{_use_vdso} %{with_realtime} rt
+%if %{with_realtime}
+%kernel_variant_files %{_use_vdso} %{with_debug} rt-debug
 %endif
 %if %{with_debug_meta}
 %files debug

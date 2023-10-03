@@ -968,6 +968,12 @@ All cgroup core files are prefixed with "cgroup."
 	killing cgroups is a process directed operation, i.e. it affects
 	the whole thread-group.
 
+  irq.pressure
+	A read-write nested-keyed file.
+
+	Shows pressure stall information for IRQ/SOFTIRQ. See
+	:ref:`Documentation/accounting/psi.rst <psi>` for details.
+
 Controllers
 ===========
 
@@ -1229,6 +1235,20 @@ PAGE_SIZE multiple when read back.
 	the target cgroup. If less bytes are reclaimed than the
 	specified amount, -EAGAIN is returned.
 
+	Please note that the proactive reclaim (triggered by this
+	interface) is not meant to indicate memory pressure on the
+	memory cgroup. Therefore socket memory balancing triggered by
+	the memory reclaim normally is not exercised in this case.
+	This means that the networking layer will not adapt based on
+	reclaim induced by memory.reclaim.
+
+  memory.peak
+	A read-only single value file which exists on non-root
+	cgroups.
+
+	The max memory usage recorded for the cgroup and its
+	descendants since the creation of the cgroup.
+
   memory.oom.group
 	A read-write single value file which exists on non-root
 	cgroups.  The default value is "0".
@@ -1332,6 +1352,11 @@ PAGE_SIZE multiple when read back.
 
 	  pagetables
                 Amount of memory allocated for page tables.
+
+	  sec_pagetables
+		Amount of memory allocated for secondary page tables,
+		this currently includes KVM mmu allocations on x86
+		and arm64.
 
 	  percpu (npn)
 		Amount of memory used for storing per-cpu kernel
@@ -2156,6 +2181,49 @@ Cpuset Interface Files
 
 	Its value will be affected by memory nodes hotplug events.
 
+  cpuset.cpus.exclusive
+	A read-write multiple values file which exists on non-root
+	cpuset-enabled cgroups.
+
+	It lists all the exclusive CPUs that are allowed to be used
+	to create a new cpuset partition.  Its value is not used
+	unless the cgroup becomes a valid partition root.  See the
+	"cpuset.cpus.partition" section below for a description of what
+	a cpuset partition is.
+
+	When the cgroup becomes a partition root, the actual exclusive
+	CPUs that are allocated to that partition are listed in
+	"cpuset.cpus.exclusive.effective" which may be different
+	from "cpuset.cpus.exclusive".  If "cpuset.cpus.exclusive"
+	has previously been set, "cpuset.cpus.exclusive.effective"
+	is always a subset of it.
+
+	Users can manually set it to a value that is different from
+	"cpuset.cpus".	The only constraint in setting it is that the
+	list of CPUs must be exclusive with respect to its sibling.
+
+	For a parent cgroup, any one of its exclusive CPUs can only
+	be distributed to at most one of its child cgroups.  Having an
+	exclusive CPU appearing in two or more of its child cgroups is
+	not allowed (the exclusivity rule).  A value that violates the
+	exclusivity rule will be rejected with a write error.
+
+	The root cgroup is a partition root and all its available CPUs
+	are in its exclusive CPU set.
+
+  cpuset.cpus.exclusive.effective
+	A read-only multiple values file which exists on all non-root
+	cpuset-enabled cgroups.
+
+	This file shows the effective set of exclusive CPUs that
+	can be used to create a partition root.  The content of this
+	file will always be a subset of "cpuset.cpus" and its parent's
+	"cpuset.cpus.exclusive.effective" if its parent is not the root
+	cgroup.  It will also be a subset of "cpuset.cpus.exclusive"
+	if it is set.  If "cpuset.cpus.exclusive" is not set, it is
+	treated to have an implicit value of "cpuset.cpus" in the
+	formation of local partition.
+
   cpuset.cpus.partition
 	A read-write single value file which exists on non-root
 	cpuset-enabled cgroups.  This flag is owned by the parent cgroup
@@ -2169,25 +2237,40 @@ Cpuset Interface Files
 	  "isolated"	Partition root without load balancing
 	  ==========	=====================================
 
-	The root cgroup is always a partition root and its state
-	cannot be changed.  All other non-root cgroups start out as
-	"member".
+	A cpuset partition is a collection of cpuset-enabled cgroups with
+	a partition root at the top of the hierarchy and its descendants
+	except those that are separate partition roots themselves and
+	their descendants.  A partition has exclusive access to the
+	set of exclusive CPUs allocated to it.	Other cgroups outside
+	of that partition cannot use any CPUs in that set.
+
+	There are two types of partitions - local and remote.  A local
+	partition is one whose parent cgroup is also a valid partition
+	root.  A remote partition is one whose parent cgroup is not a
+	valid partition root itself.  Writing to "cpuset.cpus.exclusive"
+	is optional for the creation of a local partition as its
+	"cpuset.cpus.exclusive" file will assume an implicit value that
+	is the same as "cpuset.cpus" if it is not set.	Writing the
+	proper "cpuset.cpus.exclusive" values down the cgroup hierarchy
+	before the target partition root is mandatory for the creation
+	of a remote partition.
+
+	Currently, a remote partition cannot be created under a local
+	partition.  All the ancestors of a remote partition root except
+	the root cgroup cannot be a partition root.
+
+	The root cgroup is always a partition root and its state cannot
+	be changed.  All other non-root cgroups start out as "member".
 
 	When set to "root", the current cgroup is the root of a new
-	partition or scheduling domain that comprises itself and all
-	its descendants except those that are separate partition roots
-	themselves and their descendants.
+	partition or scheduling domain.  The set of exclusive CPUs is
+	determined by the value of its "cpuset.cpus.exclusive.effective".
 
-	When set to "isolated", the CPUs in that partition root will
+	When set to "isolated", the CPUs in that partition will
 	be in an isolated state without any load balancing from the
 	scheduler.  Tasks placed in such a partition with multiple
 	CPUs should be carefully distributed and bound to each of the
 	individual CPUs for optimal performance.
-
-	The value shown in "cpuset.cpus.effective" of a partition root
-	is the CPUs that the partition root can dedicate to a potential
-	new child partition root. The new child subtracts available
-	CPUs from its parent "cpuset.cpus.effective".
 
 	A partition root ("root" or "isolated") can be in one of the
 	two possible states - valid or invalid.  An invalid partition
@@ -2250,6 +2333,11 @@ Cpuset Interface Files
 	This will allow user space agents to monitor unexpected changes
 	to "cpuset.cpus.partition" without the need to do continuous
 	polling.
+
+	A user can pre-configure certain CPUs to an isolated state
+	with load balancing disabled at boot time with the "isolcpus"
+	kernel boot command line option.  If those CPUs are to be put
+	into a partition, they have to be used in an isolated partition.
 
 
 Device controller
@@ -2405,6 +2493,16 @@ Miscellaneous controller provides 3 interface files. If two misc resources (res_
 
         Limits can be set higher than the capacity value in the misc.capacity
         file.
+
+  misc.events
+	A read-only flat-keyed file which exists on non-root cgroups. The
+	following entries are defined. Unless specified otherwise, a value
+	change in this file generates a file modified event. All fields in
+	this file are hierarchical.
+
+	  max
+		The number of times the cgroup's resource usage was
+		about to go over the max boundary.
 
 Migration and Ownership
 ~~~~~~~~~~~~~~~~~~~~~~~

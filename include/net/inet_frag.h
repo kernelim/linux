@@ -4,7 +4,7 @@
 
 #include <linux/rhashtable-types.h>
 #include <linux/completion.h>
-#include <net/dropreason.h>
+#include <net/dropreason-core.h>
 
 /* Per netns frag queues directory */
 struct fqdir {

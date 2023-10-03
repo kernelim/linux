@@ -13,13 +13,19 @@ s390x)
 	QEMU_BINARY=qemu-system-s390x
 	QEMU_CONSOLE="ttyS1"
 	QEMU_FLAGS=(-smp 2)
-	BZIMAGE="arch/s390/boot/compressed/vmlinux"
+	BZIMAGE="arch/s390/boot/vmlinux"
 	;;
 x86_64)
 	QEMU_BINARY=qemu-system-x86_64
 	QEMU_CONSOLE="ttyS0,115200"
 	QEMU_FLAGS=(-cpu host -smp 8)
 	BZIMAGE="arch/x86/boot/bzImage"
+	;;
+aarch64)
+	QEMU_BINARY=qemu-system-aarch64
+	QEMU_CONSOLE="ttyAMA0,115200"
+	QEMU_FLAGS=(-M virt,gic-version=3 -cpu host -smp 8)
+	BZIMAGE="arch/arm64/boot/Image"
 	;;
 *)
 	echo "Unsupported architecture"
@@ -307,6 +313,20 @@ update_kconfig()
 	fi
 }
 
+catch()
+{
+	local exit_code=$1
+	local exit_status_file="${OUTPUT_DIR}/${EXIT_STATUS_FILE}"
+	# This is just a cleanup and the directory may
+	# have already been unmounted. So, don't let this
+	# clobber the error code we intend to return.
+	unmount_image || true
+	if [[ -f "${exit_status_file}" ]]; then
+		exit_code="$(cat ${exit_status_file})"
+	fi
+	exit ${exit_code}
+}
+
 main()
 {
 	local script_dir="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -319,7 +339,7 @@ main()
 	local exit_command="poweroff -f"
 	local debug_shell="no"
 
-	while getopts 'hskid:j:' opt; do
+	while getopts ':hskid:j:' opt; do
 		case ${opt} in
 		i)
 			update_image="yes"
@@ -352,6 +372,8 @@ main()
 		esac
 	done
 	shift $((OPTIND -1))
+
+	trap 'catch "$?"' EXIT
 
 	if [[ $# -eq 0  && "${debug_shell}" == "no" ]]; then
 		echo "No command specified, will run ${DEFAULT_COMMAND} in the vm"
@@ -408,21 +430,5 @@ main()
 		echo "Logs saved in ${OUTPUT_DIR}/${LOG_FILE}"
 	fi
 }
-
-catch()
-{
-	local exit_code=$1
-	local exit_status_file="${OUTPUT_DIR}/${EXIT_STATUS_FILE}"
-	# This is just a cleanup and the directory may
-	# have already been unmounted. So, don't let this
-	# clobber the error code we intend to return.
-	unmount_image || true
-	if [[ -f "${exit_status_file}" ]]; then
-		exit_code="$(cat ${exit_status_file})"
-	fi
-	exit ${exit_code}
-}
-
-trap 'catch "$?"' EXIT
 
 main "$@"

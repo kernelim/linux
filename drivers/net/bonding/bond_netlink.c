@@ -27,6 +27,7 @@ static size_t bond_get_slave_size(const struct net_device *bond_dev,
 		nla_total_size(sizeof(u16)) +	/* IFLA_BOND_SLAVE_AD_AGGREGATOR_ID */
 		nla_total_size(sizeof(u8)) +	/* IFLA_BOND_SLAVE_AD_ACTOR_OPER_PORT_STATE */
 		nla_total_size(sizeof(u16)) +	/* IFLA_BOND_SLAVE_AD_PARTNER_OPER_PORT_STATE */
+		nla_total_size(sizeof(s32)) +	/* IFLA_BOND_SLAVE_PRIO */
 		0;
 }
 
@@ -51,6 +52,9 @@ static int bond_fill_slave_info(struct sk_buff *skb,
 		goto nla_put_failure;
 
 	if (nla_put_u16(skb, IFLA_BOND_SLAVE_QUEUE_ID, slave->queue_id))
+		goto nla_put_failure;
+
+	if (nla_put_s32(skb, IFLA_BOND_SLAVE_PRIO, slave->prio))
 		goto nla_put_failure;
 
 	if (BOND_MODE(slave->bond) == BOND_MODE_8023AD) {
@@ -79,6 +83,11 @@ static int bond_fill_slave_info(struct sk_buff *skb,
 nla_put_failure:
 	return -EMSGSIZE;
 }
+
+/* Limit the max delay range to 300s */
+static struct netlink_range_validation delay_range = {
+	.max = 300000,
+};
 
 static const struct nla_policy bond_policy[IFLA_BOND_MAX + 1] = {
 	[IFLA_BOND_MODE]		= { .type = NLA_U8 },
@@ -110,13 +119,14 @@ static const struct nla_policy bond_policy[IFLA_BOND_MAX + 1] = {
 	[IFLA_BOND_AD_ACTOR_SYSTEM]	= { .type = NLA_BINARY,
 					    .len  = ETH_ALEN },
 	[IFLA_BOND_TLB_DYNAMIC_LB]	= { .type = NLA_U8 },
-	[IFLA_BOND_PEER_NOTIF_DELAY]    = { .type = NLA_U32 },
+	[IFLA_BOND_PEER_NOTIF_DELAY]    = NLA_POLICY_FULL_RANGE(NLA_U32, &delay_range),
 	[IFLA_BOND_MISSED_MAX]		= { .type = NLA_U8 },
 	[IFLA_BOND_NS_IP6_TARGET]	= { .type = NLA_NESTED },
 };
 
 static const struct nla_policy bond_slave_policy[IFLA_BOND_SLAVE_MAX + 1] = {
 	[IFLA_BOND_SLAVE_QUEUE_ID]	= { .type = NLA_U16 },
+	[IFLA_BOND_SLAVE_PRIO]		= { .type = NLA_S32 },
 };
 
 static int bond_validate(struct nlattr *tb[], struct nlattr *data[],
@@ -153,6 +163,16 @@ static int bond_slave_changelink(struct net_device *bond_dev,
 		bond_opt_initstr(&newval, queue_id_str);
 		err = __bond_opt_set(bond, BOND_OPT_QUEUE_ID, &newval,
 				     data[IFLA_BOND_SLAVE_QUEUE_ID], extack);
+		if (err)
+			return err;
+	}
+
+	if (data[IFLA_BOND_SLAVE_PRIO]) {
+		int prio = nla_get_s32(data[IFLA_BOND_SLAVE_PRIO]);
+
+		bond_opt_slave_initval(&newval, &slave_dev, prio);
+		err = __bond_opt_set(bond, BOND_OPT_PRIO, &newval,
+				     data[IFLA_BOND_SLAVE_PRIO], extack);
 		if (err)
 			return err;
 	}

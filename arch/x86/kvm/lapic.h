@@ -146,6 +146,8 @@ int kvm_hv_vapic_msr_read(struct kvm_vcpu *vcpu, u32 msr, u64 *data);
 int kvm_lapic_set_pv_eoi(struct kvm_vcpu *vcpu, u64 data, unsigned long len);
 void kvm_lapic_exit(void);
 
+u64 kvm_lapic_readable_reg_mask(struct kvm_lapic *apic);
+
 #define VEC_POS(v) ((v) & (32 - 1))
 #define REG_POS(v) (((v) >> 5) << 4)
 
@@ -190,11 +192,11 @@ static inline bool lapic_in_kernel(struct kvm_vcpu *vcpu)
 
 extern struct static_key_false_deferred apic_hw_disabled;
 
-static inline int kvm_apic_hw_enabled(struct kvm_lapic *apic)
+static inline bool kvm_apic_hw_enabled(struct kvm_lapic *apic)
 {
 	if (static_branch_unlikely(&apic_hw_disabled.key))
 		return apic->vcpu->arch.apic_base & MSR_IA32_APICBASE_ENABLE;
-	return MSR_IA32_APICBASE_ENABLE;
+	return true;
 }
 
 extern struct static_key_false_deferred apic_sw_disabled;
@@ -226,7 +228,7 @@ static inline bool kvm_vcpu_apicv_active(struct kvm_vcpu *vcpu)
 	return lapic_in_kernel(vcpu) && vcpu->arch.apic->apicv_active;
 }
 
-static inline bool kvm_apic_has_events(struct kvm_vcpu *vcpu)
+static inline bool kvm_apic_has_pending_init_or_sipi(struct kvm_vcpu *vcpu)
 {
 	return lapic_in_kernel(vcpu) && vcpu->arch.apic->pending_events;
 }

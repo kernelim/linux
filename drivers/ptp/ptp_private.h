@@ -64,7 +64,7 @@ struct ptp_vclock {
 	struct ptp_clock *clock;
 	struct cyclecounter cc;
 	struct timecounter tc;
-	spinlock_t lock;	/* protects tc/cc */
+	struct mutex lock;	/* protects tc/cc */
 };
 
 /*

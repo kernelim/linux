@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <byteswap.h>
 #include <unistd.h>
+#include <regex.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <linux/compiler.h>
@@ -55,6 +56,10 @@
 #include <linux/ctype.h>
 #include <internal/lib.h>
 
+#ifdef HAVE_LIBTRACEEVENT
+#include <traceevent/event-parse.h>
+#endif
+
 /*
  * magic2 = "PERFILE2"
  * must be a numerical value to let the endianness
@@ -79,12 +84,12 @@ struct perf_file_attr {
 
 void perf_header__set_feat(struct perf_header *header, int feat)
 {
-	set_bit(feat, header->adds_features);
+	__set_bit(feat, header->adds_features);
 }
 
 void perf_header__clear_feat(struct perf_header *header, int feat)
 {
-	clear_bit(feat, header->adds_features);
+	__clear_bit(feat, header->adds_features);
 }
 
 bool perf_header__has_feat(const struct perf_header *header, int feat)
@@ -298,6 +303,7 @@ static int do_read_bitmap(struct feat_fd *ff, unsigned long **pset, u64 *psize)
 	return 0;
 }
 
+#ifdef HAVE_LIBTRACEEVENT
 static int write_tracing_data(struct feat_fd *ff,
 			      struct evlist *evlist)
 {
@@ -306,6 +312,7 @@ static int write_tracing_data(struct feat_fd *ff,
 
 	return read_tracing_data(ff->fd, &evlist->core.entries);
 }
+#endif
 
 static int write_build_id(struct feat_fd *ff,
 			  struct evlist *evlist __maybe_unused)
@@ -1358,7 +1365,7 @@ static int memory_node__read(struct memory_node *n, unsigned long idx)
 	rewinddir(dir);
 
 	for_each_memory(phys, dir) {
-		set_bit(phys, n->set);
+		__set_bit(phys, n->set);
 	}
 
 	closedir(dir);
@@ -2394,12 +2401,14 @@ FEAT_PROCESS_STR_FUN(arch, arch);
 FEAT_PROCESS_STR_FUN(cpudesc, cpu_desc);
 FEAT_PROCESS_STR_FUN(cpuid, cpuid);
 
+#ifdef HAVE_LIBTRACEEVENT
 static int process_tracing_data(struct feat_fd *ff, void *data)
 {
 	ssize_t ret = trace_report(ff->fd, data, false);
 
 	return ret < 0 ? -1 : 0;
 }
+#endif
 
 static int process_build_id(struct feat_fd *ff, void *data __maybe_unused)
 {
@@ -3366,7 +3375,9 @@ err:
 const struct perf_header_feature_ops feat_ops[HEADER_LAST_FEATURE];
 
 const struct perf_header_feature_ops feat_ops[HEADER_LAST_FEATURE] = {
+#ifdef HAVE_LIBTRACEEVENT
 	FEAT_OPN(TRACING_DATA,	tracing_data,	false),
+#endif
 	FEAT_OPN(BUILD_ID,	build_id,	false),
 	FEAT_OPR(HOSTNAME,	hostname,	false),
 	FEAT_OPR(OSRELEASE,	osrelease,	false),
@@ -3952,7 +3963,7 @@ int perf_file_header__read(struct perf_file_header *header,
 
 		if (!test_bit(HEADER_HOSTNAME, header->adds_features)) {
 			bitmap_zero(header->adds_features, HEADER_FEAT_BITS);
-			set_bit(HEADER_BUILD_ID, header->adds_features);
+			__set_bit(HEADER_BUILD_ID, header->adds_features);
 		}
 	}
 
@@ -4082,6 +4093,7 @@ static int read_attr(int fd, struct perf_header *ph,
 	return ret <= 0 ? -1 : 0;
 }
 
+#ifdef HAVE_LIBTRACEEVENT
 static int evsel__prepare_tracepoint_event(struct evsel *evsel, struct tep_handle *pevent)
 {
 	struct tep_event *event;
@@ -4125,6 +4137,7 @@ static int evlist__prepare_tracepoint_events(struct evlist *evlist, struct tep_h
 
 	return 0;
 }
+#endif
 
 int perf_session__read_header(struct perf_session *session, int repipe_fd)
 {
@@ -4230,11 +4243,15 @@ int perf_session__read_header(struct perf_session *session, int repipe_fd)
 		lseek(fd, tmp, SEEK_SET);
 	}
 
+#ifdef HAVE_LIBTRACEEVENT
 	perf_header__process_sections(header, fd, &session->tevent,
 				      perf_file_section__process);
 
 	if (evlist__prepare_tracepoint_events(session->evlist, session->tevent.pevent))
 		goto out_delete_evlist;
+#else
+	perf_header__process_sections(header, fd, NULL, perf_file_section__process);
+#endif
 
 	return 0;
 out_errno:
@@ -4295,8 +4312,6 @@ out:
 size_t perf_event__fprintf_event_update(union perf_event *event, FILE *fp)
 {
 	struct perf_record_event_update *ev = &event->event_update;
-	struct perf_record_event_update_scale *ev_scale;
-	struct perf_record_event_update_cpus *ev_cpus;
 	struct perf_cpu_map *map;
 	size_t ret;
 
@@ -4304,20 +4319,18 @@ size_t perf_event__fprintf_event_update(union perf_event *event, FILE *fp)
 
 	switch (ev->type) {
 	case PERF_EVENT_UPDATE__SCALE:
-		ev_scale = (struct perf_record_event_update_scale *)ev->data;
-		ret += fprintf(fp, "... scale: %f\n", ev_scale->scale);
+		ret += fprintf(fp, "... scale: %f\n", ev->scale.scale);
 		break;
 	case PERF_EVENT_UPDATE__UNIT:
-		ret += fprintf(fp, "... unit:  %s\n", ev->data);
+		ret += fprintf(fp, "... unit:  %s\n", ev->unit);
 		break;
 	case PERF_EVENT_UPDATE__NAME:
-		ret += fprintf(fp, "... name:  %s\n", ev->data);
+		ret += fprintf(fp, "... name:  %s\n", ev->name);
 		break;
 	case PERF_EVENT_UPDATE__CPUS:
-		ev_cpus = (struct perf_record_event_update_cpus *)ev->data;
 		ret += fprintf(fp, "... ");
 
-		map = cpu_map__new_data(&ev_cpus->cpus);
+		map = cpu_map__new_data(&ev->cpus.cpus);
 		if (map)
 			ret += cpu_map__fprintf(map, fp);
 		else
@@ -4374,8 +4387,6 @@ int perf_event__process_event_update(struct perf_tool *tool __maybe_unused,
 				     struct evlist **pevlist)
 {
 	struct perf_record_event_update *ev = &event->event_update;
-	struct perf_record_event_update_scale *ev_scale;
-	struct perf_record_event_update_cpus *ev_cpus;
 	struct evlist *evlist;
 	struct evsel *evsel;
 	struct perf_cpu_map *map;
@@ -4395,19 +4406,17 @@ int perf_event__process_event_update(struct perf_tool *tool __maybe_unused,
 	switch (ev->type) {
 	case PERF_EVENT_UPDATE__UNIT:
 		free((char *)evsel->unit);
-		evsel->unit = strdup(ev->data);
+		evsel->unit = strdup(ev->unit);
 		break;
 	case PERF_EVENT_UPDATE__NAME:
 		free(evsel->name);
-		evsel->name = strdup(ev->data);
+		evsel->name = strdup(ev->name);
 		break;
 	case PERF_EVENT_UPDATE__SCALE:
-		ev_scale = (struct perf_record_event_update_scale *)ev->data;
-		evsel->scale = ev_scale->scale;
+		evsel->scale = ev->scale.scale;
 		break;
 	case PERF_EVENT_UPDATE__CPUS:
-		ev_cpus = (struct perf_record_event_update_cpus *)ev->data;
-		map = cpu_map__new_data(&ev_cpus->cpus);
+		map = cpu_map__new_data(&ev->cpus.cpus);
 		if (map) {
 			perf_cpu_map__put(evsel->core.own_cpus);
 			evsel->core.own_cpus = map;
@@ -4420,6 +4429,7 @@ int perf_event__process_event_update(struct perf_tool *tool __maybe_unused,
 	return 0;
 }
 
+#ifdef HAVE_LIBTRACEEVENT
 int perf_event__process_tracing_data(struct perf_session *session,
 				     union perf_event *event)
 {
@@ -4467,6 +4477,7 @@ int perf_event__process_tracing_data(struct perf_session *session,
 
 	return size_read + padding;
 }
+#endif
 
 int perf_event__process_build_id(struct perf_session *session,
 				 union perf_event *event)

@@ -94,7 +94,6 @@ static struct rxrpc_local *rxrpc_alloc_local(struct net *net,
 		local->net = net;
 		local->rxnet = rxrpc_net(net);
 		INIT_HLIST_NODE(&local->link);
-		init_rwsem(&local->defrag_sem);
 		init_completion(&local->io_thread_ready);
 		skb_queue_head_init(&local->rx_queue);
 		INIT_LIST_HEAD(&local->conn_attend_q);

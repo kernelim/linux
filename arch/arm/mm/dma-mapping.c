@@ -33,7 +33,7 @@
 #include <asm/dma-iommu.h>
 #include <asm/mach/map.h>
 #include <asm/system_info.h>
-#include <xen/swiotlb-xen.h>
+#include <asm/xen/xen-ops.h>
 
 #include "dma.h"
 #include "mm.h"
@@ -1333,7 +1333,8 @@ __iommu_create_mapping(struct device *dev, struct page **pages, size_t size,
 
 		len = (j - i) << PAGE_SHIFT;
 		ret = iommu_map(mapping->domain, iova, phys, len,
-				__dma_info_to_prot(DMA_BIDIRECTIONAL, attrs));
+				__dma_info_to_prot(DMA_BIDIRECTIONAL, attrs),
+				GFP_KERNEL);
 		if (ret < 0)
 			goto fail;
 		iova += len;
@@ -1602,7 +1603,8 @@ static int __map_sg_chunk(struct device *dev, struct scatterlist *sg,
 
 		prot = __dma_info_to_prot(dir, attrs);
 
-		ret = iommu_map(mapping->domain, iova, phys, len, prot);
+		ret = iommu_map(mapping->domain, iova, phys, len, prot,
+				GFP_KERNEL);
 		if (ret < 0)
 			goto fail;
 		count += len >> PAGE_SHIFT;
@@ -1813,7 +1815,8 @@ static dma_addr_t arm_coherent_iommu_map_page(struct device *dev, struct page *p
 
 	prot = __dma_info_to_prot(dir, attrs);
 
-	ret = iommu_map(mapping->domain, dma_addr, page_to_phys(page), len, prot);
+	ret = iommu_map(mapping->domain, dma_addr, page_to_phys(page), len,
+			prot, GFP_KERNEL);
 	if (ret < 0)
 		goto fail;
 
@@ -1919,7 +1922,7 @@ static dma_addr_t arm_iommu_map_resource(struct device *dev,
 
 	prot = __dma_info_to_prot(dir, attrs) | IOMMU_MMIO;
 
-	ret = iommu_map(mapping->domain, dma_addr, addr, len, prot);
+	ret = iommu_map(mapping->domain, dma_addr, addr, len, prot, GFP_KERNEL);
 	if (ret < 0)
 		goto fail;
 
@@ -2279,10 +2282,7 @@ void arch_setup_dma_ops(struct device *dev, u64 dma_base, u64 size,
 
 	set_dma_ops(dev, dma_ops);
 
-#ifdef CONFIG_XEN
-	if (xen_initial_domain())
-		dev->dma_ops = &xen_swiotlb_dma_ops;
-#endif
+	xen_setup_dma_ops(dev);
 	dev->archdata.dma_ops_setup = true;
 }
 

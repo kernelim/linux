@@ -49,7 +49,7 @@ static struct nvmf_host *nvmf_host_add(const char *hostnqn)
 		goto out_unlock;
 
 	kref_init(&host->ref);
-	strlcpy(host->nqn, hostnqn, NVMF_NQN_SIZE);
+	strscpy(host->nqn, hostnqn, NVMF_NQN_SIZE);
 
 	list_add_tail(&host->list, &nvmf_hosts);
 out_unlock:
@@ -416,7 +416,14 @@ int nvmf_connect_admin_queue(struct nvme_ctrl *ctrl)
 
 	result = le32_to_cpu(res.u32);
 	ctrl->cntlid = result & 0xFFFF;
-	if ((result >> 16) & 0x3) {
+	if (result & (NVME_CONNECT_AUTHREQ_ATR | NVME_CONNECT_AUTHREQ_ASCR)) {
+		/* Secure concatenation is not implemented */
+		if (result & NVME_CONNECT_AUTHREQ_ASCR) {
+			dev_warn(ctrl->device,
+				 "qid 0: secure concatenation is not supported\n");
+			ret = NVME_SC_AUTH_REQUIRED;
+			goto out_free_data;
+		}
 		/* Authentication required */
 		ret = nvme_auth_negotiate(ctrl, 0);
 		if (ret) {
@@ -492,7 +499,14 @@ int nvmf_connect_io_queue(struct nvme_ctrl *ctrl, u16 qid)
 				       &cmd, data);
 	}
 	result = le32_to_cpu(res.u32);
-	if ((result >> 16) & 2) {
+	if (result & (NVME_CONNECT_AUTHREQ_ATR | NVME_CONNECT_AUTHREQ_ASCR)) {
+		/* Secure concatenation is not implemented */
+		if (result & NVME_CONNECT_AUTHREQ_ASCR) {
+			dev_warn(ctrl->device,
+				 "qid 0: secure concatenation is not supported\n");
+			ret = NVME_SC_AUTH_REQUIRED;
+			goto out_free_data;
+		}
 		/* Authentication required */
 		ret = nvme_auth_negotiate(ctrl, qid);
 		if (ret) {
@@ -506,6 +520,7 @@ int nvmf_connect_io_queue(struct nvme_ctrl *ctrl, u16 qid)
 					 "qid %u: authentication failed\n", qid);
 		}
 	}
+out_free_data:
 	kfree(data);
 	return ret;
 }
@@ -977,13 +992,17 @@ bool nvmf_ip_options_match(struct nvme_ctrl *ctrl,
 		return false;
 
 	/*
-	 * Checking the local address is rough. In most cases, none is specified
-	 * and the host port is selected by the stack.
+	 * Checking the local address or host interfaces is rough.
+	 *
+	 * In most cases, none is specified and the host port or
+	 * host interface is selected by the stack.
 	 *
 	 * Assume no match if:
-	 * -  local address is specified and address is not the same
-	 * -  local address is not specified but remote is, or vice versa
-	 *    (admin using specific host_traddr when it matters).
+	 * -  local address or host interface is specified and address
+	 *    or host interface is not the same
+	 * -  local address or host interface is not specified but
+	 *    remote is, or vice versa (admin using specific
+	 *    host_traddr/host_iface when it matters).
 	 */
 	if ((opts->mask & NVMF_OPT_HOST_TRADDR) &&
 	    (ctrl->opts->mask & NVMF_OPT_HOST_TRADDR)) {
@@ -991,6 +1010,15 @@ bool nvmf_ip_options_match(struct nvme_ctrl *ctrl,
 			return false;
 	} else if ((opts->mask & NVMF_OPT_HOST_TRADDR) ||
 		   (ctrl->opts->mask & NVMF_OPT_HOST_TRADDR)) {
+		return false;
+	}
+
+	if ((opts->mask & NVMF_OPT_HOST_IFACE) &&
+	    (ctrl->opts->mask & NVMF_OPT_HOST_IFACE)) {
+		if (strcmp(opts->host_iface, ctrl->opts->host_iface))
+			return false;
+	} else if ((opts->mask & NVMF_OPT_HOST_IFACE) ||
+		   (ctrl->opts->mask & NVMF_OPT_HOST_IFACE)) {
 		return false;
 	}
 

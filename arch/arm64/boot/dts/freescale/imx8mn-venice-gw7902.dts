@@ -213,7 +213,6 @@
 		compatible = "microchip,mcp2515";
 		reg = <0>;
 		clocks = <&can20m>;
-		oscillator-frequency = <20000000>;
 		interrupt-parent = <&gpio2>;
 		interrupts = <3 IRQ_TYPE_LEVEL_LOW>;
 		spi-max-frequency = <10000000>;
@@ -632,7 +631,6 @@
 	pinctrl-0 = <&pinctrl_uart3>, <&pinctrl_uart3_gpio>;
 	rts-gpios = <&gpio2 1 GPIO_ACTIVE_LOW>;
 	cts-gpios = <&gpio2 0 GPIO_ACTIVE_LOW>;
-	uart-has-rtscts;
 	status = "okay";
 
 	bluetooth {

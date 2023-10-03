@@ -20,7 +20,7 @@ MODULE_DESCRIPTION("Broadcom's specific AMBA driver");
 MODULE_LICENSE("GPL");
 
 /* contains the number the next bus should get. */
-static unsigned int bcma_bus_next_num = 0;
+static unsigned int bcma_bus_next_num;
 
 /* bcma_buses_mutex locks the bcma_bus_next_num */
 static DEFINE_MUTEX(bcma_buses_mutex);
@@ -236,6 +236,7 @@ EXPORT_SYMBOL(bcma_core_irq);
 
 void bcma_prepare_core(struct bcma_bus *bus, struct bcma_device *core)
 {
+	device_initialize(&core->dev);
 	core->dev.release = bcma_release_core_dev;
 	core->dev.bus = &bcma_bus_type;
 	dev_set_name(&core->dev, "bcma%d:%d", bus->num, core->core_index);
@@ -277,11 +278,10 @@ static void bcma_register_core(struct bcma_bus *bus, struct bcma_device *core)
 {
 	int err;
 
-	err = device_register(&core->dev);
+	err = device_add(&core->dev);
 	if (err) {
 		bcma_err(bus, "Could not register dev for core 0x%03X\n",
 			 core->id.id);
-		put_device(&core->dev);
 		return;
 	}
 	core->dev_registered = true;
@@ -293,7 +293,7 @@ static int bcma_register_devices(struct bcma_bus *bus)
 	int err;
 
 	list_for_each_entry(core, &bus->cores, list) {
-		/* We support that cores ourself */
+		/* We support that core ourselves */
 		switch (core->id.id) {
 		case BCMA_CORE_4706_CHIPCOMMON:
 		case BCMA_CORE_CHIPCOMMON:
@@ -344,8 +344,10 @@ static int bcma_register_devices(struct bcma_bus *bus)
 	err = bcma_gpio_init(&bus->drv_cc);
 	if (err == -ENOTSUPP)
 		bcma_debug(bus, "GPIO driver not activated\n");
-	else if (err)
+	else if (err) {
 		bcma_err(bus, "Error registering GPIO driver: %i\n", err);
+		return err;
+	}
 
 	if (bus->hosttype == BCMA_HOSTTYPE_SOC) {
 		err = bcma_chipco_watchdog_register(&bus->drv_cc);
@@ -369,10 +371,10 @@ void bcma_unregister_cores(struct bcma_bus *bus)
 	if (bus->hosttype == BCMA_HOSTTYPE_SOC)
 		platform_device_unregister(bus->drv_cc.watchdog);
 
-	/* Now noone uses internally-handled cores, we can free them */
+	/* Now no one uses internally-handled cores, we can free them */
 	list_for_each_entry_safe(core, tmp, &bus->cores, list) {
 		list_del(&core->list);
-		kfree(core);
+		put_device(&core->dev);
 	}
 }
 

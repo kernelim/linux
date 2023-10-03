@@ -32,6 +32,7 @@
 #include <linux/bug.h>
 #include <linux/ratelimit.h>
 #include <linux/debugfs.h>
+#include <linux/context_tracking.h>
 #include <asm/sections.h>
 
 #define PANIC_TIMER_STEP 100
@@ -215,7 +216,6 @@ void panic(const char *fmt, ...)
 		panic_smp_self_stop();
 
 	console_verbose();
-	bust_spinlocks(1);
 	va_start(args, fmt);
 	len = vscnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
@@ -231,6 +231,11 @@ void panic(const char *fmt, ...)
 	if (!test_taint(TAINT_DIE) && oops_in_progress <= 1)
 		dump_stack();
 #endif
+
+	/* If atomic consoles are available, flush the kernel log. */
+	console_flush_on_panic(CONSOLE_ATOMIC_FLUSH_PENDING);
+
+	bust_spinlocks(1);
 
 	/*
 	 * If kgdb is enabled, give it a chance to run before we stop all
@@ -255,6 +260,7 @@ void panic(const char *fmt, ...)
 		 * unfortunately means it may not be hardened to work in a
 		 * panic situation.
 		 */
+		try_block_console_kthreads(10000);
 		smp_send_stop();
 	} else {
 		/*
@@ -262,6 +268,7 @@ void panic(const char *fmt, ...)
 		 * kmsg_dump, we will need architecture dependent extra
 		 * works in addition to stopping other CPUs.
 		 */
+		try_block_console_kthreads(10000);
 		crash_smp_send_stop();
 	}
 
@@ -384,7 +391,7 @@ const struct taint_flag taint_flags[TAINT_FLAGS_COUNT] = {
 	[ TAINT_LIVEPATCH ]		= { 'K', ' ', true },
 	[ TAINT_AUX ]			= { 'X', ' ', true },
 	[ TAINT_RANDSTRUCT ]		= { 'T', ' ', true },
-	[ TAINT_18 ]			= { '?', '-', false },
+	[ TAINT_TEST ]			= { 'N', ' ', true },
 	[ TAINT_19 ]			= { '?', '-', false },
 	[ TAINT_20 ]			= { '?', '-', false },
 	[ TAINT_21 ]			= { '?', '-', false },
@@ -590,6 +597,8 @@ void __warn(const char *file, int line, void *caller, unsigned taint,
 {
 	disable_trace_on_warning();
 
+	printk_prefer_direct_enter();
+
 	if (file)
 		pr_warn("WARNING: CPU: %d PID: %d at %s:%d %pS\n",
 			raw_smp_processor_id(), current->pid, file, line,
@@ -626,12 +635,15 @@ void __warn(const char *file, int line, void *caller, unsigned taint,
 
 	/* Just a warning, don't kill lockdep. */
 	add_taint(taint, LOCKDEP_STILL_OK);
+
+	printk_prefer_direct_exit();
 }
 
 #ifndef __WARN_FLAGS
 void warn_slowpath_fmt(const char *file, int line, unsigned taint,
 		       const char *fmt, ...)
 {
+	bool rcu = warn_rcu_enter();
 	struct warn_args args;
 
 	pr_warn(CUT_HERE);
@@ -646,11 +658,13 @@ void warn_slowpath_fmt(const char *file, int line, unsigned taint,
 	va_start(args.args, fmt);
 	__warn(file, line, __builtin_return_address(0), taint, NULL, &args);
 	va_end(args.args);
+	warn_rcu_exit(rcu);
 }
 EXPORT_SYMBOL(warn_slowpath_fmt);
 #else
 void __warn_printk(const char *fmt, ...)
 {
+	bool rcu = warn_rcu_enter();
 	va_list args;
 
 	pr_warn(CUT_HERE);
@@ -658,6 +672,7 @@ void __warn_printk(const char *fmt, ...)
 	va_start(args, fmt);
 	vprintk(fmt, args);
 	va_end(args);
+	warn_rcu_exit(rcu);
 }
 EXPORT_SYMBOL(__warn_printk);
 #endif

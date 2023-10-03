@@ -40,9 +40,6 @@ CHECKFLAGS	+= -D__s390__ -D__s390x__
 
 export LD_BFD
 
-mflags-$(CONFIG_MARCH_Z900)   := -march=z900
-mflags-$(CONFIG_MARCH_Z990)   := -march=z990
-mflags-$(CONFIG_MARCH_Z9_109) := -march=z9-109
 mflags-$(CONFIG_MARCH_Z10)    := -march=z10
 mflags-$(CONFIG_MARCH_Z196)   := -march=z196
 mflags-$(CONFIG_MARCH_ZEC12)  := -march=zEC12
@@ -55,9 +52,6 @@ export CC_FLAGS_MARCH := $(mflags-y)
 aflags-y += $(mflags-y)
 cflags-y += $(mflags-y)
 
-cflags-$(CONFIG_MARCH_Z900_TUNE)	+= -mtune=z900
-cflags-$(CONFIG_MARCH_Z990_TUNE)	+= -mtune=z990
-cflags-$(CONFIG_MARCH_Z9_109_TUNE)	+= -mtune=z9-109
 cflags-$(CONFIG_MARCH_Z10_TUNE)		+= -mtune=z10
 cflags-$(CONFIG_MARCH_Z196_TUNE)	+= -mtune=z196
 cflags-$(CONFIG_MARCH_ZEC12_TUNE)	+= -mtune=zEC12
@@ -141,7 +135,8 @@ all: bzImage
 KBUILD_IMAGE	:= $(boot)/bzImage
 
 install:
-	$(Q)$(MAKE) $(build)=$(boot) $@
+	sh -x $(srctree)/$(boot)/install.sh $(KERNELRELEASE) $(KBUILD_IMAGE) \
+	      System.map "$(INSTALL_PATH)"
 
 bzImage: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@

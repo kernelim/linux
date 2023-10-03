@@ -31,6 +31,7 @@
 #include <kern_util.h>
 #include <os.h>
 #include <skas.h>
+#include <registers.h>
 #include <linux/time-internal.h>
 
 /*
@@ -339,7 +340,7 @@ int singlestepping(void * t)
 {
 	struct task_struct *task = t ? t : current;
 
-	if (!(task->ptrace & PT_DTRACE))
+	if (!test_thread_flag(TIF_SINGLESTEP))
 		return 0;
 
 	if (task->thread.singlestep_syscall)

@@ -578,6 +578,7 @@ void __handle_sysrq(int key, bool check_mask)
 
 	rcu_sysrq_start();
 	rcu_read_lock();
+	printk_prefer_direct_enter();
 	/*
 	 * Raise the apparent loglevel to maximum so that the sysrq header
 	 * is shown to provide the user with positive feedback.  We do not
@@ -619,6 +620,7 @@ void __handle_sysrq(int key, bool check_mask)
 		pr_cont("\n");
 		console_loglevel = orig_log_level;
 	}
+	printk_prefer_direct_exit();
 	rcu_read_unlock();
 	rcu_sysrq_end();
 
@@ -998,7 +1000,7 @@ static void sysrq_disconnect(struct input_handle *handle)
 
 	input_close_device(handle);
 	cancel_work_sync(&sysrq->reinject_work);
-	del_timer_sync(&sysrq->keyreset_timer);
+	timer_shutdown_sync(&sysrq->keyreset_timer);
 	input_unregister_handle(handle);
 	kfree(sysrq);
 }

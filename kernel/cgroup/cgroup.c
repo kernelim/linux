@@ -57,6 +57,7 @@
 #include <linux/file.h>
 #include <linux/fs_parser.h>
 #include <linux/sched/cputime.h>
+#include <linux/sched/deadline.h>
 #include <linux/psi.h>
 #include <net/sock.h>
 
@@ -96,7 +97,7 @@ EXPORT_SYMBOL_GPL(css_set_lock);
 
 DEFINE_SPINLOCK(trace_cgroup_path_lock);
 char trace_cgroup_path[TRACE_CGROUP_PATH_LEN];
-bool cgroup_debug __read_mostly;
+static bool cgroup_debug __read_mostly;
 
 /*
  * Protects cgroup_idr and css_idr so that IDs can be released without
@@ -217,6 +218,7 @@ struct cgroup_namespace init_cgroup_ns = {
 
 static struct file_system_type cgroup2_fs_type;
 static struct cftype cgroup_base_files[];
+static struct cftype cgroup_psi_files[];
 
 /* cgroup optional features */
 enum cgroup_opt_features {
@@ -246,6 +248,12 @@ static void kill_css(struct cgroup_subsys_state *css);
 static int cgroup_addrm_files(struct cgroup_subsys_state *css,
 			      struct cgroup *cgrp, struct cftype cfts[],
 			      bool is_add);
+
+#ifdef CONFIG_DEBUG_CGROUP_REF
+#define CGROUP_REF_FN_ATTRS	noinline
+#define CGROUP_REF_EXPORT(fn)	EXPORT_SYMBOL_GPL(fn);
+#include <linux/cgroup_refcnt.h>
+#endif
 
 /**
  * cgroup_ssid_enabled - cgroup subsys enabled test by subsys ID
@@ -1304,7 +1312,7 @@ static struct css_set *find_css_set(struct css_set *old_cset,
 
 struct cgroup_root *cgroup_root_from_kf(struct kernfs_root *kf_root)
 {
-	struct cgroup *root_cgrp = kf_root->kn->priv;
+	struct cgroup *root_cgrp = kernfs_root_to_node(kf_root)->priv;
 
 	return root_cgrp->root;
 }
@@ -1694,12 +1702,16 @@ static void css_clear_dir(struct cgroup_subsys_state *css)
 	css->flags &= ~CSS_VISIBLE;
 
 	if (!css->ss) {
-		if (cgroup_on_dfl(cgrp))
-			cfts = cgroup_base_files;
-		else
-			cfts = cgroup1_base_files;
-
-		cgroup_addrm_files(css, cgrp, cfts, false);
+		if (cgroup_on_dfl(cgrp)) {
+			cgroup_addrm_files(css, cgrp,
+					   cgroup_base_files, false);
+			if (cgroup_psi_enabled())
+				cgroup_addrm_files(css, cgrp,
+						   cgroup_psi_files, false);
+		} else {
+			cgroup_addrm_files(css, cgrp,
+					   cgroup1_base_files, false);
+		}
 	} else {
 		list_for_each_entry(cfts, &css->ss->cfts, node)
 			cgroup_addrm_files(css, cgrp, cfts, false);
@@ -1722,14 +1734,22 @@ static int css_populate_dir(struct cgroup_subsys_state *css)
 		return 0;
 
 	if (!css->ss) {
-		if (cgroup_on_dfl(cgrp))
-			cfts = cgroup_base_files;
-		else
-			cfts = cgroup1_base_files;
+		if (cgroup_on_dfl(cgrp)) {
+			ret = cgroup_addrm_files(&cgrp->self, cgrp,
+						 cgroup_base_files, true);
+			if (ret < 0)
+				return ret;
 
-		ret = cgroup_addrm_files(&cgrp->self, cgrp, cfts, true);
-		if (ret < 0)
-			return ret;
+			if (cgroup_psi_enabled()) {
+				ret = cgroup_addrm_files(&cgrp->self, cgrp,
+							 cgroup_psi_files, true);
+				if (ret < 0)
+					return ret;
+			}
+		} else {
+			cgroup_addrm_files(css, cgrp,
+					   cgroup1_base_files, true);
+		}
 	} else {
 		list_for_each_entry(cfts, &css->ss->cfts, node) {
 			ret = cgroup_addrm_files(css, cgrp, cfts, true);
@@ -2042,9 +2062,9 @@ int cgroup_setup_root(struct cgroup_root *root, u16 ss_mask)
 		ret = PTR_ERR(root->kf_root);
 		goto exit_root_id;
 	}
-	root_cgrp->kn = root->kf_root->kn;
+	root_cgrp->kn = kernfs_root_to_node(root->kf_root);
 	WARN_ON_ONCE(cgroup_ino(root_cgrp) != 1);
-	root_cgrp->ancestor_ids[0] = cgroup_id(root_cgrp);
+	root_cgrp->ancestors[0] = root_cgrp;
 
 	ret = css_populate_dir(&root_cgrp->self);
 	if (ret)
@@ -2167,7 +2187,7 @@ static int cgroup_get_tree(struct fs_context *fc)
 	struct cgroup_fs_context *ctx = cgroup_fc2context(fc);
 	int ret;
 
-	cgrp_dfl_visible = true;
+	WRITE_ONCE(cgrp_dfl_visible, true);
 	cgroup_get_live(&cgrp_dfl_root.cgrp);
 	ctx->root = &cgrp_dfl_root;
 
@@ -2351,7 +2371,7 @@ int task_cgroup_path(struct task_struct *task, char *buf, size_t buflen)
 		ret = cgroup_path_ns_locked(cgrp, buf, buflen, &init_cgroup_ns);
 	} else {
 		/* if no hierarchy exists, everyone is in "/" */
-		ret = strlcpy(buf, "/", buflen);
+		ret = strscpy(buf, "/", buflen);
 	}
 
 	spin_unlock_irq(&css_set_lock);
@@ -2823,14 +2843,12 @@ int cgroup_migrate(struct task_struct *leader, bool threadgroup,
 	 * take an rcu_read_lock.
 	 */
 	spin_lock_irq(&css_set_lock);
-	rcu_read_lock();
 	task = leader;
 	do {
 		cgroup_migrate_add_task(task, mgctx);
 		if (!threadgroup)
 			break;
 	} while_each_thread(leader, task);
-	rcu_read_unlock();
 	spin_unlock_irq(&css_set_lock);
 
 	return cgroup_migrate_execute(mgctx);
@@ -3286,11 +3304,7 @@ static int cgroup_apply_control(struct cgroup *cgrp)
 	 * making the following cgroup_update_dfl_csses() properly update
 	 * css associations of all tasks in the subtree.
 	 */
-	ret = cgroup_update_dfl_csses(cgrp);
-	if (ret)
-		return ret;
-
-	return 0;
+	return cgroup_update_dfl_csses(cgrp);
 }
 
 /**
@@ -3683,21 +3697,21 @@ static int cpu_stat_show(struct seq_file *seq, void *v)
 static int cgroup_io_pressure_show(struct seq_file *seq, void *v)
 {
 	struct cgroup *cgrp = seq_css(seq)->cgroup;
-	struct psi_group *psi = cgroup_ino(cgrp) == 1 ? &psi_system : cgrp->psi;
+	struct psi_group *psi = cgroup_psi(cgrp);
 
 	return psi_show(seq, psi, PSI_IO);
 }
 static int cgroup_memory_pressure_show(struct seq_file *seq, void *v)
 {
 	struct cgroup *cgrp = seq_css(seq)->cgroup;
-	struct psi_group *psi = cgroup_ino(cgrp) == 1 ? &psi_system : cgrp->psi;
+	struct psi_group *psi = cgroup_psi(cgrp);
 
 	return psi_show(seq, psi, PSI_MEM);
 }
 static int cgroup_cpu_pressure_show(struct seq_file *seq, void *v)
 {
 	struct cgroup *cgrp = seq_css(seq)->cgroup;
-	struct psi_group *psi = cgroup_ino(cgrp) == 1 ? &psi_system : cgrp->psi;
+	struct psi_group *psi = cgroup_psi(cgrp);
 
 	return psi_show(seq, psi, PSI_CPU);
 }
@@ -3723,7 +3737,7 @@ static ssize_t cgroup_pressure_write(struct kernfs_open_file *of, char *buf,
 		return -EBUSY;
 	}
 
-	psi = cgroup_ino(cgrp) == 1 ? &psi_system : cgrp->psi;
+	psi = cgroup_psi(cgrp);
 	new = psi_trigger_create(psi, buf, res);
 	if (IS_ERR(new)) {
 		cgroup_put(cgrp);
@@ -3757,6 +3771,23 @@ static ssize_t cgroup_cpu_pressure_write(struct kernfs_open_file *of,
 	return cgroup_pressure_write(of, buf, nbytes, PSI_CPU);
 }
 
+#ifdef CONFIG_IRQ_TIME_ACCOUNTING
+static int cgroup_irq_pressure_show(struct seq_file *seq, void *v)
+{
+	struct cgroup *cgrp = seq_css(seq)->cgroup;
+	struct psi_group *psi = cgroup_psi(cgrp);
+
+	return psi_show(seq, psi, PSI_IRQ);
+}
+
+static ssize_t cgroup_irq_pressure_write(struct kernfs_open_file *of,
+					 char *buf, size_t nbytes,
+					 loff_t off)
+{
+	return cgroup_pressure_write(of, buf, nbytes, PSI_IRQ);
+}
+#endif
+
 static __poll_t cgroup_pressure_poll(struct kernfs_open_file *of,
 					  poll_table *pt)
 {
@@ -3774,6 +3805,9 @@ static void cgroup_pressure_release(struct kernfs_open_file *of)
 
 bool cgroup_psi_enabled(void)
 {
+	if (static_branch_likely(&psi_disabled))
+		return false;
+
 	return (cgroup_feature_disable_mask & (1 << OPT_FEATURE_PRESSURE)) == 0;
 }
 
@@ -4126,8 +4160,6 @@ static int cgroup_addrm_files(struct cgroup_subsys_state *css,
 restart:
 	for (cft = cfts; cft != cft_end && cft->name[0] != '\0'; cft++) {
 		/* does cft->flags tell us to skip this file on @cgrp? */
-		if ((cft->flags & CFTYPE_PRESSURE) && !cgroup_psi_enabled())
-			continue;
 		if ((cft->flags & __CFTYPE_ONLY_ON_DFL) && !cgroup_on_dfl(cgrp))
 			continue;
 		if ((cft->flags & __CFTYPE_NOT_ON_DFL) && cgroup_on_dfl(cgrp))
@@ -4192,21 +4224,25 @@ static void cgroup_exit_cftypes(struct cftype *cfts)
 		cft->ss = NULL;
 
 		/* revert flags set by cgroup core while adding @cfts */
-		cft->flags &= ~(__CFTYPE_ONLY_ON_DFL | __CFTYPE_NOT_ON_DFL);
+		cft->flags &= ~(__CFTYPE_ONLY_ON_DFL | __CFTYPE_NOT_ON_DFL |
+				__CFTYPE_ADDED);
 	}
 }
 
 static int cgroup_init_cftypes(struct cgroup_subsys *ss, struct cftype *cfts)
 {
 	struct cftype *cft;
+	int ret = 0;
 
 	for (cft = cfts; cft->name[0] != '\0'; cft++) {
 		struct kernfs_ops *kf_ops;
 
 		WARN_ON(cft->ss || cft->kf_ops);
 
-		if ((cft->flags & CFTYPE_PRESSURE) && !cgroup_psi_enabled())
-			continue;
+		if (cft->flags & __CFTYPE_ADDED) {
+			ret = -EBUSY;
+			break;
+		}
 
 		if (cft->seq_start)
 			kf_ops = &cgroup_kf_ops;
@@ -4220,25 +4256,25 @@ static int cgroup_init_cftypes(struct cgroup_subsys *ss, struct cftype *cfts)
 		if (cft->max_write_len && cft->max_write_len != PAGE_SIZE) {
 			kf_ops = kmemdup(kf_ops, sizeof(*kf_ops), GFP_KERNEL);
 			if (!kf_ops) {
-				cgroup_exit_cftypes(cfts);
-				return -ENOMEM;
+				ret = -ENOMEM;
+				break;
 			}
 			kf_ops->atomic_write_len = cft->max_write_len;
 		}
 
 		cft->kf_ops = kf_ops;
 		cft->ss = ss;
+		cft->flags |= __CFTYPE_ADDED;
 	}
 
-	return 0;
+	if (ret)
+		cgroup_exit_cftypes(cfts);
+	return ret;
 }
 
 static int cgroup_rm_cftypes_locked(struct cftype *cfts)
 {
 	lockdep_assert_held(&cgroup_mutex);
-
-	if (!cfts || !cfts[0].ss)
-		return -ENOENT;
 
 	list_del(&cfts->node);
 	cgroup_apply_cftypes(cfts, false);
@@ -4260,6 +4296,12 @@ static int cgroup_rm_cftypes_locked(struct cftype *cfts)
 int cgroup_rm_cftypes(struct cftype *cfts)
 {
 	int ret;
+
+	if (!cfts || cfts[0].name[0] == '\0')
+		return 0;
+
+	if (!(cfts[0].flags & __CFTYPE_ADDED))
+		return -ENOENT;
 
 	mutex_lock(&cgroup_mutex);
 	ret = cgroup_rm_cftypes_locked(cfts);
@@ -5125,10 +5167,13 @@ static struct cftype cgroup_base_files[] = {
 		.name = "cpu.stat",
 		.seq_show = cpu_stat_show,
 	},
+	{ }	/* terminate */
+};
+
+static struct cftype cgroup_psi_files[] = {
 #ifdef CONFIG_PSI
 	{
 		.name = "io.pressure",
-		.flags = CFTYPE_PRESSURE,
 		.seq_show = cgroup_io_pressure_show,
 		.write = cgroup_io_pressure_write,
 		.poll = cgroup_pressure_poll,
@@ -5136,7 +5181,6 @@ static struct cftype cgroup_base_files[] = {
 	},
 	{
 		.name = "memory.pressure",
-		.flags = CFTYPE_PRESSURE,
 		.seq_show = cgroup_memory_pressure_show,
 		.write = cgroup_memory_pressure_write,
 		.poll = cgroup_pressure_poll,
@@ -5144,12 +5188,20 @@ static struct cftype cgroup_base_files[] = {
 	},
 	{
 		.name = "cpu.pressure",
-		.flags = CFTYPE_PRESSURE,
 		.seq_show = cgroup_cpu_pressure_show,
 		.write = cgroup_cpu_pressure_write,
 		.poll = cgroup_pressure_poll,
 		.release = cgroup_pressure_release,
 	},
+#ifdef CONFIG_IRQ_TIME_ACCOUNTING
+	{
+		.name = "irq.pressure",
+		.seq_show = cgroup_irq_pressure_show,
+		.write = cgroup_irq_pressure_write,
+		.poll = cgroup_pressure_poll,
+		.release = cgroup_pressure_release,
+	},
+#endif
 #endif /* CONFIG_PSI */
 	{ }	/* terminate */
 };
@@ -5201,6 +5253,7 @@ static void css_free_rwork_fn(struct work_struct *work)
 		atomic_dec(&cgrp->root->nr_cgrps);
 		cgroup1_pidlist_destroy_all(cgrp);
 		cancel_work_sync(&cgrp->release_agent_work);
+		bpf_cgrp_storage_free(cgrp);
 
 		if (cgroup_parent(cgrp)) {
 			/*
@@ -5426,8 +5479,7 @@ static struct cgroup *cgroup_create(struct cgroup *parent, const char *name,
 	int ret;
 
 	/* allocate the cgroup and its ID, 0 is reserved for the root */
-	cgrp = kzalloc(struct_size(cgrp, ancestor_ids, (level + 1)),
-		       GFP_KERNEL);
+	cgrp = kzalloc(struct_size(cgrp, ancestors, (level + 1)), GFP_KERNEL);
 	if (!cgrp)
 		return ERR_PTR(-ENOMEM);
 
@@ -5479,7 +5531,7 @@ static struct cgroup *cgroup_create(struct cgroup *parent, const char *name,
 
 	spin_lock_irq(&css_set_lock);
 	for (tcgrp = cgrp; tcgrp; tcgrp = cgroup_parent(tcgrp)) {
-		cgrp->ancestor_ids[tcgrp->level] = cgroup_id(tcgrp);
+		cgrp->ancestors[tcgrp->level] = tcgrp;
 
 		if (tcgrp != cgrp) {
 			tcgrp->nr_descendants++;
@@ -5759,7 +5811,7 @@ static int cgroup_destroy_locked(struct cgroup *cgrp)
 	css_clear_dir(&cgrp->self);
 	kernfs_remove(cgrp->kn);
 
-	if (parent && cgroup_is_threaded(cgrp))
+	if (cgroup_is_threaded(cgrp))
 		parent->nr_threaded_children--;
 
 	spin_lock_irq(&css_set_lock);
@@ -5822,7 +5874,7 @@ static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early)
 
 	/* Create the root cgroup state for this subsystem */
 	ss->root = &cgrp_dfl_root;
-	css = ss->css_alloc(cgroup_css(&cgrp_dfl_root.cgrp, ss));
+	css = ss->css_alloc(NULL);
 	/* We don't handle early failures gracefully */
 	BUG_ON(IS_ERR(css));
 	init_and_link_css(css, ss, &cgrp_dfl_root.cgrp);
@@ -5912,6 +5964,7 @@ int __init cgroup_init(void)
 
 	BUILD_BUG_ON(CGROUP_SUBSYS_COUNT > 16);
 	BUG_ON(cgroup_init_cftypes(NULL, cgroup_base_files));
+	BUG_ON(cgroup_init_cftypes(NULL, cgroup_psi_files));
 	BUG_ON(cgroup_init_cftypes(NULL, cgroup1_base_files));
 
 	cgroup_rstat_boot();
@@ -6102,7 +6155,7 @@ int proc_cgroup_show(struct seq_file *m, struct pid_namespace *ns,
 		struct cgroup *cgrp;
 		int ssid, count = 0;
 
-		if (root == &cgrp_dfl_root && !cgrp_dfl_visible)
+		if (root == &cgrp_dfl_root && !READ_ONCE(cgrp_dfl_visible))
 			continue;
 
 		seq_printf(m, "%d:", root->hierarchy_id);
@@ -6168,16 +6221,37 @@ void cgroup_fork(struct task_struct *child)
 	INIT_LIST_HEAD(&child->cg_list);
 }
 
-static struct cgroup *cgroup_get_from_file(struct file *f)
+/**
+ * cgroup_v1v2_get_from_file - get a cgroup pointer from a file pointer
+ * @f: file corresponding to cgroup_dir
+ *
+ * Find the cgroup from a file pointer associated with a cgroup directory.
+ * Returns a pointer to the cgroup on success. ERR_PTR is returned if the
+ * cgroup cannot be found.
+ */
+static struct cgroup *cgroup_v1v2_get_from_file(struct file *f)
 {
 	struct cgroup_subsys_state *css;
-	struct cgroup *cgrp;
 
 	css = css_tryget_online_from_dir(f->f_path.dentry, NULL);
 	if (IS_ERR(css))
 		return ERR_CAST(css);
 
-	cgrp = css->cgroup;
+	return css->cgroup;
+}
+
+/**
+ * cgroup_get_from_file - same as cgroup_v1v2_get_from_file, but only supports
+ * cgroup2.
+ * @f: file corresponding to cgroup2_dir
+ */
+static struct cgroup *cgroup_get_from_file(struct file *f)
+{
+	struct cgroup *cgrp = cgroup_v1v2_get_from_file(f);
+
+	if (IS_ERR(cgrp))
+		return ERR_CAST(cgrp);
+
 	if (!cgroup_on_dfl(cgrp)) {
 		cgroup_put(cgrp);
 		return ERR_PTR(-EBADF);
@@ -6254,6 +6328,20 @@ static int cgroup_css_set_fork(struct kernel_clone_args *kargs)
 	if (ret)
 		goto err;
 
+	/*
+	 * Spawning a task directly into a cgroup works by passing a file
+	 * descriptor to the target cgroup directory. This can even be an O_PATH
+	 * file descriptor. But it can never be a cgroup.procs file descriptor.
+	 * This was done on purpose so spawning into a cgroup could be
+	 * conceptualized as an atomic
+	 *
+	 *   fd = openat(dfd_cgroup, "cgroup.procs", ...);
+	 *   write(fd, <child-pid>, ...);
+	 *
+	 * sequence, i.e. it's a shorthand for the caller opening and writing
+	 * cgroup.procs of the cgroup indicated by @dfd_cgroup. This allows us
+	 * to always use the caller's credentials.
+	 */
 	ret = cgroup_attach_permissions(cset->dfl_cgrp, dst_cgrp, sb,
 					!(kargs->flags & CLONE_THREAD),
 					current->nsproxy->cgroup_ns);
@@ -6317,6 +6405,7 @@ static void cgroup_css_set_put_fork(struct kernel_clone_args *kargs)
 /**
  * cgroup_can_fork - called on a new task before the process is exposed
  * @child: the child process
+ * @kargs: the arguments passed to create the child process
  *
  * This prepares a new css_set for the child process which the child will
  * be attached to in cgroup_post_fork().
@@ -6379,6 +6468,7 @@ void cgroup_cancel_fork(struct task_struct *child,
 /**
  * cgroup_post_fork - finalize cgroup setup for the child process
  * @child: the child process
+ * @kargs: the arguments passed to create the child process
  *
  * Attach the child process to its css_set calling the subsystem fork()
  * callbacks.
@@ -6488,6 +6578,9 @@ void cgroup_exit(struct task_struct *tsk)
 	css_set_move_task(tsk, cset, NULL, false);
 	list_add_tail(&tsk->cg_list, &cset->dying_tasks);
 	cset->nr_tasks--;
+
+	if (dl_task(tsk))
+		dec_dl_tasks_cs(tsk);
 
 	WARN_ON_ONCE(cgroup_task_frozen(tsk));
 	if (unlikely(!(tsk->flags & PF_KTHREAD) &&
@@ -6661,15 +6754,15 @@ out:
 EXPORT_SYMBOL_GPL(cgroup_get_from_path);
 
 /**
- * cgroup_get_from_fd - get a cgroup pointer from a fd
- * @fd: fd obtained by open(cgroup2_dir)
+ * cgroup_v1v2_get_from_fd - get a cgroup pointer from a fd
+ * @fd: fd obtained by open(cgroup_dir)
  *
  * Find the cgroup from a fd which should be obtained
  * by opening a cgroup directory.  Returns a pointer to the
  * cgroup on success. ERR_PTR is returned if the cgroup
  * cannot be found.
  */
-struct cgroup *cgroup_get_from_fd(int fd)
+struct cgroup *cgroup_v1v2_get_from_fd(int fd)
 {
 	struct cgroup *cgrp;
 	struct file *f;
@@ -6678,8 +6771,27 @@ struct cgroup *cgroup_get_from_fd(int fd)
 	if (!f)
 		return ERR_PTR(-EBADF);
 
-	cgrp = cgroup_get_from_file(f);
+	cgrp = cgroup_v1v2_get_from_file(f);
 	fput(f);
+	return cgrp;
+}
+
+/**
+ * cgroup_get_from_fd - same as cgroup_v1v2_get_from_fd, but only supports
+ * cgroup2.
+ * @fd: fd obtained by open(cgroup2_dir)
+ */
+struct cgroup *cgroup_get_from_fd(int fd)
+{
+	struct cgroup *cgrp = cgroup_v1v2_get_from_fd(fd);
+
+	if (IS_ERR(cgrp))
+		return ERR_CAST(cgrp);
+
+	if (!cgroup_on_dfl(cgrp)) {
+		cgroup_put(cgrp);
+		return ERR_PTR(-EBADF);
+	}
 	return cgrp;
 }
 EXPORT_SYMBOL_GPL(cgroup_get_from_fd);
@@ -6794,9 +6906,6 @@ static ssize_t show_delegatable_files(struct cftype *files, char *buf,
 		if (!(cft->flags & CFTYPE_NS_DELEGATABLE))
 			continue;
 
-		if ((cft->flags & CFTYPE_PRESSURE) && !cgroup_psi_enabled())
-			continue;
-
 		if (prefix)
 			ret += snprintf(buf + ret, size - ret, "%s.", prefix);
 
@@ -6816,8 +6925,11 @@ static ssize_t delegate_show(struct kobject *kobj, struct kobj_attribute *attr,
 	int ssid;
 	ssize_t ret = 0;
 
-	ret = show_delegatable_files(cgroup_base_files, buf, PAGE_SIZE - ret,
-				     NULL);
+	ret = show_delegatable_files(cgroup_base_files, buf + ret,
+				     PAGE_SIZE - ret, NULL);
+	if (cgroup_psi_enabled())
+		ret += show_delegatable_files(cgroup_psi_files, buf + ret,
+					      PAGE_SIZE - ret, NULL);
 
 	for_each_subsys(ss, ssid)
 		ret += show_delegatable_files(ss->dfl_cftypes, buf + ret,

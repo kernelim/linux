@@ -776,10 +776,22 @@ peer_notif_delay
 	Specify the delay, in milliseconds, between each peer
 	notification (gratuitous ARP and unsolicited IPv6 Neighbor
 	Advertisement) when they are issued after a failover event.
-	This delay should be a multiple of the link monitor interval
-	(arp_interval or miimon, whichever is active). The default
-	value is 0 which means to match the value of the link monitor
-	interval.
+	This delay should be a multiple of the MII link monitor interval
+	(miimon).
+
+	The valid range is 0 - 300000. The default value is 0, which means
+	to match the value of the MII link monitor interval.
+
+prio
+	Slave priority. A higher number means higher priority.
+	The primary slave has the highest priority. This option also
+	follows the primary_reselect rules.
+
+	This option could only be configured via netlink, and is only valid
+	for active-backup(1), balance-tlb (5) and balance-alb (6) mode.
+	The valid value range is a signed 32 bit integer.
+
+	The default value is 0.
 
 primary
 

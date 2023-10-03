@@ -130,12 +130,6 @@ Required properties for Pinctrl sub nodes:
 [2] Documentation/devicetree/bindings/power/power-domain.yaml
 [3] Documentation/devicetree/bindings/pinctrl/fsl,imx-pinctrl.txt
 
-RTC bindings based on SCU Message Protocol
-------------------------------------------------------------
-
-Required properties:
-- compatible: should be "fsl,imx8qxp-sc-rtc";
-
 OCOTP bindings based on SCU Message Protocol
 ------------------------------------------------------------
 Required properties:
@@ -237,10 +231,6 @@ firmware {
 		pd: imx8qx-pd {
 			compatible = "fsl,imx8qxp-scu-pd", "fsl,scu-pd";
 			#power-domain-cells = <1>;
-		};
-
-		rtc: rtc {
-			compatible = "fsl,imx8qxp-sc-rtc";
 		};
 
 		scu_key: scu-key {

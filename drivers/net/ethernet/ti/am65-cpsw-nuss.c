@@ -1444,12 +1444,12 @@ static void am65_cpsw_nuss_ndo_get_stats(struct net_device *dev,
 
 		cpu_stats = per_cpu_ptr(ndev_priv->stats, cpu);
 		do {
-			start = u64_stats_fetch_begin_irq(&cpu_stats->syncp);
+			start = u64_stats_fetch_begin(&cpu_stats->syncp);
 			rx_packets = cpu_stats->rx_packets;
 			rx_bytes   = cpu_stats->rx_bytes;
 			tx_packets = cpu_stats->tx_packets;
 			tx_bytes   = cpu_stats->tx_bytes;
-		} while (u64_stats_fetch_retry_irq(&cpu_stats->syncp, start));
+		} while (u64_stats_fetch_retry(&cpu_stats->syncp, start));
 
 		stats->rx_packets += rx_packets;
 		stats->rx_bytes   += rx_bytes;
@@ -1460,13 +1460,6 @@ static void am65_cpsw_nuss_ndo_get_stats(struct net_device *dev,
 	stats->rx_errors	= dev->stats.rx_errors;
 	stats->rx_dropped	= dev->stats.rx_dropped;
 	stats->tx_dropped	= dev->stats.tx_dropped;
-}
-
-static struct devlink_port *am65_cpsw_ndo_get_devlink_port(struct net_device *ndev)
-{
-	struct am65_cpsw_port *port = am65_ndev_to_port(ndev);
-
-	return &port->devlink_port;
 }
 
 static const struct net_device_ops am65_cpsw_nuss_netdev_ops = {
@@ -1482,7 +1475,6 @@ static const struct net_device_ops am65_cpsw_nuss_netdev_ops = {
 	.ndo_vlan_rx_kill_vid	= am65_cpsw_nuss_ndo_slave_kill_vid,
 	.ndo_eth_ioctl		= am65_cpsw_nuss_ndo_slave_ioctl,
 	.ndo_setup_tc           = am65_cpsw_qos_ndo_setup_tc,
-	.ndo_get_devlink_port   = am65_cpsw_ndo_get_devlink_port,
 };
 
 static void am65_cpsw_nuss_slave_disable_unused(struct am65_cpsw_port *port)
@@ -2518,6 +2510,8 @@ static int am65_cpsw_nuss_register_ndevs(struct am65_cpsw_common *common)
 
 		if (!port->ndev)
 			continue;
+
+		SET_NETDEV_DEVLINK_PORT(port->ndev, &port->devlink_port);
 
 		ret = register_netdev(port->ndev);
 		if (ret) {

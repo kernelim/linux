@@ -6,6 +6,10 @@
 #if !defined(_I915_TRACE_H_) || defined(TRACE_HEADER_MULTI_READ)
 #define _I915_TRACE_H_
 
+#ifdef CONFIG_PREEMPT_RT
+#define NOTRACE
+#endif
+
 #include <linux/stringify.h>
 #include <linux/types.h>
 #include <linux/tracepoint.h>
@@ -15,7 +19,6 @@
 #include "gt/intel_engine.h"
 
 #include "i915_drv.h"
-#include "i915_irq.h"
 
 /* object tracking */
 
@@ -323,7 +326,7 @@ DEFINE_EVENT(i915_request, i915_request_add,
 	     TP_ARGS(rq)
 );
 
-#if defined(CONFIG_DRM_I915_LOW_LEVEL_TRACEPOINTS)
+#if defined(CONFIG_DRM_I915_LOW_LEVEL_TRACEPOINTS) && !defined(NOTRACE)
 DEFINE_EVENT(i915_request, i915_request_guc_submit,
 	     TP_PROTO(struct i915_request *rq),
 	     TP_ARGS(rq)
@@ -669,21 +672,6 @@ TRACE_EVENT_CONDITION(i915_reg_rw,
 		__entry->reg, __entry->len,
 		(u32)(__entry->val & 0xffffffff),
 		(u32)(__entry->val >> 32))
-);
-
-TRACE_EVENT(intel_gpu_freq_change,
-	    TP_PROTO(u32 freq),
-	    TP_ARGS(freq),
-
-	    TP_STRUCT__entry(
-			     __field(u32, freq)
-			     ),
-
-	    TP_fast_assign(
-			   __entry->freq = freq;
-			   ),
-
-	    TP_printk("new_freq=%u", __entry->freq)
 );
 
 /**

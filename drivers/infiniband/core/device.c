@@ -422,7 +422,7 @@ int ib_device_rename(struct ib_device *ibdev, const char *name)
 		return ret;
 	}
 
-	strlcpy(ibdev->name, name, IB_DEVICE_NAME_MAX);
+	strscpy(ibdev->name, name, IB_DEVICE_NAME_MAX);
 	ret = rename_compat_devs(ibdev);
 
 	downgrade_write(&devices_rwsem);
@@ -511,7 +511,7 @@ static void ib_device_release(struct device *device)
 	kfree_rcu(dev, rcu_head);
 }
 
-static int ib_device_uevent(struct device *device,
+static int ib_device_uevent(const struct device *device,
 			    struct kobj_uevent_env *env)
 {
 	if (add_uevent_var(env, "NAME=%s", dev_name(device)))
@@ -524,9 +524,9 @@ static int ib_device_uevent(struct device *device,
 	return 0;
 }
 
-static const void *net_namespace(struct device *d)
+static const void *net_namespace(const struct device *d)
 {
-	struct ib_core_device *coredev =
+	const struct ib_core_device *coredev =
 			container_of(d, struct ib_core_device, dev);
 
 	return read_pnet(&coredev->rdma_net);
@@ -1217,7 +1217,7 @@ static int assign_name(struct ib_device *device, const char *name)
 		ret = -ENFILE;
 		goto out;
 	}
-	strlcpy(device->name, dev_name(&device->dev), IB_DEVICE_NAME_MAX);
+	strscpy(device->name, dev_name(&device->dev), IB_DEVICE_NAME_MAX);
 
 	ret = xa_alloc_cyclic(&devices, &device->index, device, xa_limit_31b,
 			&last_id, GFP_KERNEL);
@@ -2614,7 +2614,6 @@ void ib_set_device_ops(struct ib_device *dev, const struct ib_device_ops *ops)
 	SET_DEVICE_OP(dev_ops, create_counters);
 	SET_DEVICE_OP(dev_ops, create_cq);
 	SET_DEVICE_OP(dev_ops, create_flow);
-	SET_DEVICE_OP(dev_ops, create_flow_action_esp);
 	SET_DEVICE_OP(dev_ops, create_qp);
 	SET_DEVICE_OP(dev_ops, create_rwq_ind_table);
 	SET_DEVICE_OP(dev_ops, create_srq);
@@ -2677,7 +2676,6 @@ void ib_set_device_ops(struct ib_device *dev, const struct ib_device_ops *ops)
 	SET_DEVICE_OP(dev_ops, modify_ah);
 	SET_DEVICE_OP(dev_ops, modify_cq);
 	SET_DEVICE_OP(dev_ops, modify_device);
-	SET_DEVICE_OP(dev_ops, modify_flow_action_esp);
 	SET_DEVICE_OP(dev_ops, modify_hw_stat);
 	SET_DEVICE_OP(dev_ops, modify_port);
 	SET_DEVICE_OP(dev_ops, modify_qp);
@@ -2853,8 +2851,8 @@ err:
 static void __exit ib_core_cleanup(void)
 {
 	roce_gid_mgmt_cleanup();
-	nldev_exit();
 	rdma_nl_unregister(RDMA_NL_LS);
+	nldev_exit();
 	unregister_pernet_device(&rdma_dev_net_ops);
 	unregister_blocking_lsm_notifier(&ibdev_lsm_nb);
 	ib_sa_cleanup();

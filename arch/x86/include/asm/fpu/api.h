@@ -162,8 +162,7 @@ static inline bool fpstate_is_confidential(struct fpu_guest *gfpu)
 }
 
 /* prctl */
-struct task_struct;
-extern long fpu_xstate_prctl(struct task_struct *tsk, int option, unsigned long arg2);
+extern long fpu_xstate_prctl(int option, unsigned long arg2);
 
 extern void fpu_idle_fpregs(void);
 

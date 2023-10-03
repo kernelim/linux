@@ -269,23 +269,43 @@ static const struct ethnl_request_ops *
 ethnl_default_requests[__ETHTOOL_MSG_USER_CNT] = {
 	[ETHTOOL_MSG_STRSET_GET]	= &ethnl_strset_request_ops,
 	[ETHTOOL_MSG_LINKINFO_GET]	= &ethnl_linkinfo_request_ops,
+	[ETHTOOL_MSG_LINKINFO_SET]	= &ethnl_linkinfo_request_ops,
 	[ETHTOOL_MSG_LINKMODES_GET]	= &ethnl_linkmodes_request_ops,
+	[ETHTOOL_MSG_LINKMODES_SET]	= &ethnl_linkmodes_request_ops,
 	[ETHTOOL_MSG_LINKSTATE_GET]	= &ethnl_linkstate_request_ops,
 	[ETHTOOL_MSG_DEBUG_GET]		= &ethnl_debug_request_ops,
+	[ETHTOOL_MSG_DEBUG_SET]		= &ethnl_debug_request_ops,
 	[ETHTOOL_MSG_WOL_GET]		= &ethnl_wol_request_ops,
+	[ETHTOOL_MSG_WOL_SET]		= &ethnl_wol_request_ops,
 	[ETHTOOL_MSG_FEATURES_GET]	= &ethnl_features_request_ops,
 	[ETHTOOL_MSG_PRIVFLAGS_GET]	= &ethnl_privflags_request_ops,
+	[ETHTOOL_MSG_PRIVFLAGS_SET]	= &ethnl_privflags_request_ops,
 	[ETHTOOL_MSG_RINGS_GET]		= &ethnl_rings_request_ops,
+	[ETHTOOL_MSG_RINGS_SET]		= &ethnl_rings_request_ops,
 	[ETHTOOL_MSG_CHANNELS_GET]	= &ethnl_channels_request_ops,
+	[ETHTOOL_MSG_CHANNELS_SET]	= &ethnl_channels_request_ops,
 	[ETHTOOL_MSG_COALESCE_GET]	= &ethnl_coalesce_request_ops,
+	[ETHTOOL_MSG_COALESCE_SET]	= &ethnl_coalesce_request_ops,
 	[ETHTOOL_MSG_PAUSE_GET]		= &ethnl_pause_request_ops,
+	[ETHTOOL_MSG_PAUSE_SET]		= &ethnl_pause_request_ops,
 	[ETHTOOL_MSG_EEE_GET]		= &ethnl_eee_request_ops,
+	[ETHTOOL_MSG_EEE_SET]		= &ethnl_eee_request_ops,
 	[ETHTOOL_MSG_FEC_GET]		= &ethnl_fec_request_ops,
+	[ETHTOOL_MSG_FEC_SET]		= &ethnl_fec_request_ops,
 	[ETHTOOL_MSG_TSINFO_GET]	= &ethnl_tsinfo_request_ops,
 	[ETHTOOL_MSG_MODULE_EEPROM_GET]	= &ethnl_module_eeprom_request_ops,
 	[ETHTOOL_MSG_STATS_GET]		= &ethnl_stats_request_ops,
 	[ETHTOOL_MSG_PHC_VCLOCKS_GET]	= &ethnl_phc_vclocks_request_ops,
 	[ETHTOOL_MSG_MODULE_GET]	= &ethnl_module_request_ops,
+	[ETHTOOL_MSG_MODULE_SET]	= &ethnl_module_request_ops,
+	[ETHTOOL_MSG_PSE_GET]		= &ethnl_pse_request_ops,
+	[ETHTOOL_MSG_PSE_SET]		= &ethnl_pse_request_ops,
+	[ETHTOOL_MSG_RSS_GET]		= &ethnl_rss_request_ops,
+	[ETHTOOL_MSG_PLCA_GET_CFG]	= &ethnl_plca_cfg_request_ops,
+	[ETHTOOL_MSG_PLCA_SET_CFG]	= &ethnl_plca_cfg_request_ops,
+	[ETHTOOL_MSG_PLCA_GET_STATUS]	= &ethnl_plca_status_request_ops,
+	[ETHTOOL_MSG_MM_GET]		= &ethnl_mm_request_ops,
+	[ETHTOOL_MSG_MM_SET]		= &ethnl_mm_request_ops,
 };
 
 static struct ethnl_dump_ctx *ethnl_dump_context(struct netlink_callback *cb)
@@ -361,6 +381,9 @@ static int ethnl_default_doit(struct sk_buff *skb, struct genl_info *info)
 	ops = ethnl_default_requests[cmd];
 	if (WARN_ONCE(!ops, "cmd %u has no ethnl_request_ops\n", cmd))
 		return -EOPNOTSUPP;
+	if (GENL_REQ_ATTR_CHECK(info, ops->hdr_attr))
+		return -EINVAL;
+
 	req_info = kzalloc(ops->req_info_size, GFP_KERNEL);
 	if (!req_info)
 		return -ENOMEM;
@@ -402,7 +425,7 @@ static int ethnl_default_doit(struct sk_buff *skb, struct genl_info *info)
 		ops->cleanup_data(reply_data);
 
 	genlmsg_end(rskb, reply_payload);
-	dev_put_track(req_info->dev, &req_info->dev_tracker);
+	netdev_put(req_info->dev, &req_info->dev_tracker);
 	kfree(reply_data);
 	kfree(req_info);
 	return genlmsg_reply(rskb, info);
@@ -414,7 +437,7 @@ err_cleanup:
 	if (ops->cleanup_data)
 		ops->cleanup_data(reply_data);
 err_dev:
-	dev_put_track(req_info->dev, &req_info->dev_tracker);
+	netdev_put(req_info->dev, &req_info->dev_tracker);
 	kfree(reply_data);
 	kfree(req_info);
 	return ret;
@@ -550,7 +573,7 @@ static int ethnl_default_start(struct netlink_callback *cb)
 		 * same parser as for non-dump (doit) requests is used, it
 		 * would take reference to the device if it finds one
 		 */
-		dev_put_track(req_info->dev, &req_info->dev_tracker);
+		netdev_put(req_info->dev, &req_info->dev_tracker);
 		req_info->dev = NULL;
 	}
 	if (ret < 0)
@@ -583,6 +606,52 @@ static int ethnl_default_done(struct netlink_callback *cb)
 	return 0;
 }
 
+static int ethnl_default_set_doit(struct sk_buff *skb, struct genl_info *info)
+{
+	const struct ethnl_request_ops *ops;
+	struct ethnl_req_info req_info = {};
+	const u8 cmd = info->genlhdr->cmd;
+	int ret;
+
+	ops = ethnl_default_requests[cmd];
+	if (WARN_ONCE(!ops, "cmd %u has no ethnl_request_ops\n", cmd))
+		return -EOPNOTSUPP;
+	if (GENL_REQ_ATTR_CHECK(info, ops->hdr_attr))
+		return -EINVAL;
+
+	ret = ethnl_parse_header_dev_get(&req_info, info->attrs[ops->hdr_attr],
+					 genl_info_net(info), info->extack,
+					 true);
+	if (ret < 0)
+		return ret;
+
+	if (ops->set_validate) {
+		ret = ops->set_validate(&req_info, info);
+		/* 0 means nothing to do */
+		if (ret <= 0)
+			goto out_dev;
+	}
+
+	rtnl_lock();
+	ret = ethnl_ops_begin(req_info.dev);
+	if (ret < 0)
+		goto out_rtnl;
+
+	ret = ops->set(&req_info, info);
+	if (ret <= 0)
+		goto out_ops;
+	ethtool_notify(req_info.dev, ops->set_ntf_cmd, NULL);
+
+	ret = 0;
+out_ops:
+	ethnl_ops_complete(req_info.dev);
+out_rtnl:
+	rtnl_unlock();
+out_dev:
+	ethnl_parse_header_dev_put(&req_info);
+	return ret;
+}
+
 static const struct ethnl_request_ops *
 ethnl_default_notify_ops[ETHTOOL_MSG_KERNEL_MAX + 1] = {
 	[ETHTOOL_MSG_LINKINFO_NTF]	= &ethnl_linkinfo_request_ops,
@@ -598,6 +667,8 @@ ethnl_default_notify_ops[ETHTOOL_MSG_KERNEL_MAX + 1] = {
 	[ETHTOOL_MSG_EEE_NTF]		= &ethnl_eee_request_ops,
 	[ETHTOOL_MSG_FEC_NTF]		= &ethnl_fec_request_ops,
 	[ETHTOOL_MSG_MODULE_NTF]	= &ethnl_module_request_ops,
+	[ETHTOOL_MSG_PLCA_NTF]		= &ethnl_plca_cfg_request_ops,
+	[ETHTOOL_MSG_MM_NTF]		= &ethnl_mm_request_ops,
 };
 
 /* default notification handler */
@@ -691,6 +762,8 @@ static const ethnl_notify_handler_t ethnl_notify_handlers[] = {
 	[ETHTOOL_MSG_EEE_NTF]		= ethnl_default_notify,
 	[ETHTOOL_MSG_FEC_NTF]		= ethnl_default_notify,
 	[ETHTOOL_MSG_MODULE_NTF]	= ethnl_default_notify,
+	[ETHTOOL_MSG_PLCA_NTF]		= ethnl_default_notify,
+	[ETHTOOL_MSG_MM_NTF]		= ethnl_default_notify,
 };
 
 void ethtool_notify(struct net_device *dev, unsigned int cmd, const void *data)
@@ -755,7 +828,7 @@ static const struct genl_ops ethtool_genl_ops[] = {
 	{
 		.cmd	= ETHTOOL_MSG_LINKINFO_SET,
 		.flags	= GENL_UNS_ADMIN_PERM,
-		.doit	= ethnl_set_linkinfo,
+		.doit	= ethnl_default_set_doit,
 		.policy = ethnl_linkinfo_set_policy,
 		.maxattr = ARRAY_SIZE(ethnl_linkinfo_set_policy) - 1,
 	},
@@ -771,7 +844,7 @@ static const struct genl_ops ethtool_genl_ops[] = {
 	{
 		.cmd	= ETHTOOL_MSG_LINKMODES_SET,
 		.flags	= GENL_UNS_ADMIN_PERM,
-		.doit	= ethnl_set_linkmodes,
+		.doit	= ethnl_default_set_doit,
 		.policy = ethnl_linkmodes_set_policy,
 		.maxattr = ARRAY_SIZE(ethnl_linkmodes_set_policy) - 1,
 	},
@@ -796,7 +869,7 @@ static const struct genl_ops ethtool_genl_ops[] = {
 	{
 		.cmd	= ETHTOOL_MSG_DEBUG_SET,
 		.flags	= GENL_UNS_ADMIN_PERM,
-		.doit	= ethnl_set_debug,
+		.doit	= ethnl_default_set_doit,
 		.policy = ethnl_debug_set_policy,
 		.maxattr = ARRAY_SIZE(ethnl_debug_set_policy) - 1,
 	},
@@ -813,7 +886,7 @@ static const struct genl_ops ethtool_genl_ops[] = {
 	{
 		.cmd	= ETHTOOL_MSG_WOL_SET,
 		.flags	= GENL_UNS_ADMIN_PERM,
-		.doit	= ethnl_set_wol,
+		.doit	= ethnl_default_set_doit,
 		.policy = ethnl_wol_set_policy,
 		.maxattr = ARRAY_SIZE(ethnl_wol_set_policy) - 1,
 	},
@@ -845,7 +918,7 @@ static const struct genl_ops ethtool_genl_ops[] = {
 	{
 		.cmd	= ETHTOOL_MSG_PRIVFLAGS_SET,
 		.flags	= GENL_UNS_ADMIN_PERM,
-		.doit	= ethnl_set_privflags,
+		.doit	= ethnl_default_set_doit,
 		.policy = ethnl_privflags_set_policy,
 		.maxattr = ARRAY_SIZE(ethnl_privflags_set_policy) - 1,
 	},
@@ -861,7 +934,7 @@ static const struct genl_ops ethtool_genl_ops[] = {
 	{
 		.cmd	= ETHTOOL_MSG_RINGS_SET,
 		.flags	= GENL_UNS_ADMIN_PERM,
-		.doit	= ethnl_set_rings,
+		.doit	= ethnl_default_set_doit,
 		.policy = ethnl_rings_set_policy,
 		.maxattr = ARRAY_SIZE(ethnl_rings_set_policy) - 1,
 	},
@@ -877,7 +950,7 @@ static const struct genl_ops ethtool_genl_ops[] = {
 	{
 		.cmd	= ETHTOOL_MSG_CHANNELS_SET,
 		.flags	= GENL_UNS_ADMIN_PERM,
-		.doit	= ethnl_set_channels,
+		.doit	= ethnl_default_set_doit,
 		.policy = ethnl_channels_set_policy,
 		.maxattr = ARRAY_SIZE(ethnl_channels_set_policy) - 1,
 	},
@@ -893,7 +966,7 @@ static const struct genl_ops ethtool_genl_ops[] = {
 	{
 		.cmd	= ETHTOOL_MSG_COALESCE_SET,
 		.flags	= GENL_UNS_ADMIN_PERM,
-		.doit	= ethnl_set_coalesce,
+		.doit	= ethnl_default_set_doit,
 		.policy = ethnl_coalesce_set_policy,
 		.maxattr = ARRAY_SIZE(ethnl_coalesce_set_policy) - 1,
 	},
@@ -909,7 +982,7 @@ static const struct genl_ops ethtool_genl_ops[] = {
 	{
 		.cmd	= ETHTOOL_MSG_PAUSE_SET,
 		.flags	= GENL_UNS_ADMIN_PERM,
-		.doit	= ethnl_set_pause,
+		.doit	= ethnl_default_set_doit,
 		.policy = ethnl_pause_set_policy,
 		.maxattr = ARRAY_SIZE(ethnl_pause_set_policy) - 1,
 	},
@@ -925,7 +998,7 @@ static const struct genl_ops ethtool_genl_ops[] = {
 	{
 		.cmd	= ETHTOOL_MSG_EEE_SET,
 		.flags	= GENL_UNS_ADMIN_PERM,
-		.doit	= ethnl_set_eee,
+		.doit	= ethnl_default_set_doit,
 		.policy = ethnl_eee_set_policy,
 		.maxattr = ARRAY_SIZE(ethnl_eee_set_policy) - 1,
 	},
@@ -972,7 +1045,7 @@ static const struct genl_ops ethtool_genl_ops[] = {
 	{
 		.cmd	= ETHTOOL_MSG_FEC_SET,
 		.flags	= GENL_UNS_ADMIN_PERM,
-		.doit	= ethnl_set_fec,
+		.doit	= ethnl_default_set_doit,
 		.policy = ethnl_fec_set_policy,
 		.maxattr = ARRAY_SIZE(ethnl_fec_set_policy) - 1,
 	},
@@ -1016,9 +1089,72 @@ static const struct genl_ops ethtool_genl_ops[] = {
 	{
 		.cmd	= ETHTOOL_MSG_MODULE_SET,
 		.flags	= GENL_UNS_ADMIN_PERM,
-		.doit	= ethnl_set_module,
+		.doit	= ethnl_default_set_doit,
 		.policy = ethnl_module_set_policy,
 		.maxattr = ARRAY_SIZE(ethnl_module_set_policy) - 1,
+	},
+	{
+		.cmd	= ETHTOOL_MSG_PSE_GET,
+		.doit	= ethnl_default_doit,
+		.start	= ethnl_default_start,
+		.dumpit	= ethnl_default_dumpit,
+		.done	= ethnl_default_done,
+		.policy = ethnl_pse_get_policy,
+		.maxattr = ARRAY_SIZE(ethnl_pse_get_policy) - 1,
+	},
+	{
+		.cmd	= ETHTOOL_MSG_PSE_SET,
+		.flags	= GENL_UNS_ADMIN_PERM,
+		.doit	= ethnl_default_set_doit,
+		.policy = ethnl_pse_set_policy,
+		.maxattr = ARRAY_SIZE(ethnl_pse_set_policy) - 1,
+	},
+	{
+		.cmd	= ETHTOOL_MSG_RSS_GET,
+		.doit	= ethnl_default_doit,
+		.policy = ethnl_rss_get_policy,
+		.maxattr = ARRAY_SIZE(ethnl_rss_get_policy) - 1,
+	},
+	{
+		.cmd	= ETHTOOL_MSG_PLCA_GET_CFG,
+		.doit	= ethnl_default_doit,
+		.start	= ethnl_default_start,
+		.dumpit	= ethnl_default_dumpit,
+		.done	= ethnl_default_done,
+		.policy = ethnl_plca_get_cfg_policy,
+		.maxattr = ARRAY_SIZE(ethnl_plca_get_cfg_policy) - 1,
+	},
+	{
+		.cmd	= ETHTOOL_MSG_PLCA_SET_CFG,
+		.flags	= GENL_UNS_ADMIN_PERM,
+		.doit	= ethnl_default_set_doit,
+		.policy = ethnl_plca_set_cfg_policy,
+		.maxattr = ARRAY_SIZE(ethnl_plca_set_cfg_policy) - 1,
+	},
+	{
+		.cmd	= ETHTOOL_MSG_PLCA_GET_STATUS,
+		.doit	= ethnl_default_doit,
+		.start	= ethnl_default_start,
+		.dumpit	= ethnl_default_dumpit,
+		.done	= ethnl_default_done,
+		.policy = ethnl_plca_get_status_policy,
+		.maxattr = ARRAY_SIZE(ethnl_plca_get_status_policy) - 1,
+	},
+	{
+		.cmd	= ETHTOOL_MSG_MM_GET,
+		.doit	= ethnl_default_doit,
+		.start	= ethnl_default_start,
+		.dumpit	= ethnl_default_dumpit,
+		.done	= ethnl_default_done,
+		.policy = ethnl_mm_get_policy,
+		.maxattr = ARRAY_SIZE(ethnl_mm_get_policy) - 1,
+	},
+	{
+		.cmd	= ETHTOOL_MSG_MM_SET,
+		.flags	= GENL_UNS_ADMIN_PERM,
+		.doit	= ethnl_default_set_doit,
+		.policy = ethnl_mm_set_policy,
+		.maxattr = ARRAY_SIZE(ethnl_mm_set_policy) - 1,
 	},
 };
 
@@ -1033,6 +1169,7 @@ static struct genl_family ethtool_genl_family __ro_after_init = {
 	.parallel_ops	= true,
 	.ops		= ethtool_genl_ops,
 	.n_ops		= ARRAY_SIZE(ethtool_genl_ops),
+	.resv_start_op	= ETHTOOL_MSG_MODULE_GET + 1,
 	.mcgrps		= ethtool_nl_mcgrps,
 	.n_mcgrps	= ARRAY_SIZE(ethtool_nl_mcgrps),
 };

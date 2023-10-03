@@ -127,7 +127,7 @@ struct afs_call {
 	spinlock_t		state_lock;
 	int			error;		/* error code */
 	u32			abort_code;	/* Remote abort ID or 0 */
-	unsigned int		max_lifespan;	/* Maximum lifespan to set if not 0 */
+	unsigned int		max_lifespan;	/* Maximum lifespan in secs to set if not 0 */
 	unsigned		request_size;	/* size of request data */
 	unsigned		reply_max;	/* maximum size of reply */
 	unsigned		count2;		/* count used in unmarshalling */
@@ -310,7 +310,7 @@ struct afs_net {
 	atomic_t		n_lookup;	/* Number of lookups done */
 	atomic_t		n_reval;	/* Number of dentries needing revalidation */
 	atomic_t		n_inval;	/* Number of invalidations by the server */
-	atomic_t		n_relpg;	/* Number of invalidations by releasepage */
+	atomic_t		n_relpg;	/* Number of invalidations by release_folio */
 	atomic_t		n_read_dir;	/* Number of directory pages read */
 	atomic_t		n_dir_cr;	/* Number of directory entry creation edits */
 	atomic_t		n_dir_rm;	/* Number of directory entry removal edits */
@@ -669,7 +669,7 @@ struct afs_vnode {
 static inline struct fscache_cookie *afs_vnode_cache(struct afs_vnode *vnode)
 {
 #ifdef CONFIG_AFS_FSCACHE
-	return netfs_i_cookie(&vnode->netfs.inode);
+	return netfs_i_cookie(&vnode->netfs);
 #else
 	return NULL;
 #endif
@@ -1170,6 +1170,7 @@ extern struct inode *afs_iget(struct afs_operation *, struct afs_vnode_param *);
 extern struct inode *afs_root_iget(struct super_block *, struct key *);
 extern bool afs_check_validity(struct afs_vnode *);
 extern int afs_validate(struct afs_vnode *, struct key *);
+bool afs_pagecache_valid(struct afs_vnode *);
 extern int afs_getattr(struct user_namespace *mnt_userns, const struct path *,
 		       struct kstat *, u32, unsigned int);
 extern int afs_setattr(struct user_namespace *mnt_userns, struct dentry *, struct iattr *);
@@ -1521,7 +1522,7 @@ bool afs_dirty_folio(struct address_space *, struct folio *);
 #define afs_dirty_folio filemap_dirty_folio
 #endif
 extern int afs_write_begin(struct file *file, struct address_space *mapping,
-			loff_t pos, unsigned len, unsigned flags,
+			loff_t pos, unsigned len,
 			struct page **pagep, void **fsdata);
 extern int afs_write_end(struct file *file, struct address_space *mapping,
 			loff_t pos, unsigned len, unsigned copied,

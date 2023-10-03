@@ -141,10 +141,10 @@ static void virtscsi_complete_cmd(struct virtio_scsi *vscsi, void *buf)
 		set_host_byte(sc, DID_TRANSPORT_DISRUPTED);
 		break;
 	case VIRTIO_SCSI_S_TARGET_FAILURE:
-		set_host_byte(sc, DID_TARGET_FAILURE);
+		set_host_byte(sc, DID_BAD_TARGET);
 		break;
 	case VIRTIO_SCSI_S_NEXUS_FAILURE:
-		set_host_byte(sc, DID_NEXUS_FAILURE);
+		set_status_byte(sc, SAM_STAT_RESERVATION_CONFLICT);
 		break;
 	default:
 		scmd_printk(KERN_WARNING, sc, "Unknown response %d",
@@ -164,7 +164,7 @@ static void virtscsi_complete_cmd(struct virtio_scsi *vscsi, void *buf)
 			     VIRTIO_SCSI_SENSE_SIZE));
 	}
 
-	sc->scsi_done(sc);
+	scsi_done(sc);
 }
 
 static void virtscsi_vq_done(struct virtio_scsi *vscsi,
@@ -301,7 +301,7 @@ static void virtscsi_handle_transport_reset(struct virtio_scsi *vscsi,
 		}
 		break;
 	default:
-		pr_info("Unsupport virtio scsi event reason %x\n", event->reason);
+		pr_info("Unsupported virtio scsi event reason %x\n", event->reason);
 	}
 }
 
@@ -330,13 +330,16 @@ static void virtscsi_handle_param_change(struct virtio_scsi *vscsi,
 	scsi_device_put(sdev);
 }
 
-static void virtscsi_rescan_hotunplug(struct virtio_scsi *vscsi)
+static int virtscsi_rescan_hotunplug(struct virtio_scsi *vscsi)
 {
 	struct scsi_device *sdev;
 	struct Scsi_Host *shost = virtio_scsi_host(vscsi->vdev);
 	unsigned char scsi_cmd[MAX_COMMAND_SIZE];
 	int result, inquiry_len, inq_result_len = 256;
 	char *inq_result = kmalloc(inq_result_len, GFP_KERNEL);
+
+	if (!inq_result)
+		return -ENOMEM;
 
 	shost_for_each_device(sdev, shost) {
 		inquiry_len = sdev->inquiry_len ? sdev->inquiry_len : 36;
@@ -347,8 +350,8 @@ static void virtscsi_rescan_hotunplug(struct virtio_scsi *vscsi)
 
 		memset(inq_result, 0, inq_result_len);
 
-		result = scsi_execute_req(sdev, scsi_cmd, DMA_FROM_DEVICE,
-					  inq_result, inquiry_len, NULL,
+		result = scsi_execute_cmd(sdev, scsi_cmd, REQ_OP_DRV_IN,
+					  inq_result, inquiry_len,
 					  SD_TIMEOUT, SD_MAX_RETRIES, NULL);
 
 		if (result == 0 && inq_result[0] >> 5) {
@@ -366,6 +369,7 @@ static void virtscsi_rescan_hotunplug(struct virtio_scsi *vscsi)
 	}
 
 	kfree(inq_result);
+	return 0;
 }
 
 static void virtscsi_handle_event(struct work_struct *work)
@@ -377,9 +381,13 @@ static void virtscsi_handle_event(struct work_struct *work)
 
 	if (event->event &
 	    cpu_to_virtio32(vscsi->vdev, VIRTIO_SCSI_T_EVENTS_MISSED)) {
+		int ret;
+
 		event->event &= ~cpu_to_virtio32(vscsi->vdev,
 						   VIRTIO_SCSI_T_EVENTS_MISSED);
-		virtscsi_rescan_hotunplug(vscsi);
+		ret = virtscsi_rescan_hotunplug(vscsi);
+		if (ret)
+			return;
 		scsi_scan_host(virtio_scsi_host(vscsi->vdev));
 	}
 
@@ -393,7 +401,7 @@ static void virtscsi_handle_event(struct work_struct *work)
 		virtscsi_handle_param_change(vscsi, event);
 		break;
 	default:
-		pr_err("Unsupport virtio scsi event %x\n", event->event);
+		pr_err("Unsupported virtio scsi event %x\n", event->event);
 	}
 	virtscsi_kick_event(vscsi, event_node);
 }
@@ -520,7 +528,7 @@ static void virtio_scsi_init_hdr_pi(struct virtio_device *vdev,
 				    struct virtio_scsi_cmd_req_pi *cmd_pi,
 				    struct scsi_cmnd *sc)
 {
-	struct request *rq = sc->request;
+	struct request *rq = scsi_cmd_to_rq(sc);
 	struct blk_integrity *bi;
 
 	virtio_scsi_init_hdr(vdev, (struct virtio_scsi_cmd_req *)cmd_pi, sc);
@@ -544,7 +552,7 @@ static void virtio_scsi_init_hdr_pi(struct virtio_device *vdev,
 static struct virtio_scsi_vq *virtscsi_pick_vq_mq(struct virtio_scsi *vscsi,
 						  struct scsi_cmnd *sc)
 {
-	u32 tag = blk_mq_unique_tag(sc->request);
+	u32 tag = blk_mq_unique_tag(scsi_cmd_to_rq(sc));
 	u16 hwq = blk_mq_unique_tag_to_hwq(tag);
 
 	return &vscsi->req_vqs[hwq];
@@ -620,9 +628,8 @@ static int virtscsi_tmf(struct virtio_scsi *vscsi, struct virtio_scsi_cmd *cmd)
 	 * we're using independent interrupts (e.g. MSI).  Poll the
 	 * virtqueues once.
 	 *
-	 * In the abort case, sc->scsi_done will do nothing, because
-	 * the block layer must have detected a timeout and as a result
-	 * REQ_ATOM_COMPLETE has been set.
+	 * In the abort case, scsi_done() will do nothing, because the
+	 * command timed out and hence SCMD_STATE_COMPLETE has been set.
 	 */
 	virtscsi_poll_requests(vscsi);
 
@@ -732,9 +739,9 @@ static void virtscsi_commit_rqs(struct Scsi_Host *shost, u16 hwq)
  * latencies might be higher than on bare metal.  Reset the timer
  * unconditionally to give the host a chance to perform EH.
  */
-static enum blk_eh_timer_return virtscsi_eh_timed_out(struct scsi_cmnd *scmnd)
+static enum scsi_timeout_action virtscsi_eh_timed_out(struct scsi_cmnd *scmnd)
 {
-	return BLK_EH_RESET_TIMER;
+	return SCSI_EH_RESET_TIMER;
 }
 
 static struct scsi_host_template virtscsi_host_template = {
@@ -989,7 +996,7 @@ static struct virtio_driver virtio_scsi_driver = {
 	.remove = virtscsi_remove,
 };
 
-static int __init init(void)
+static int __init virtio_scsi_init(void)
 {
 	int ret = -ENOMEM;
 
@@ -1021,14 +1028,14 @@ error:
 	return ret;
 }
 
-static void __exit fini(void)
+static void __exit virtio_scsi_fini(void)
 {
 	unregister_virtio_driver(&virtio_scsi_driver);
 	mempool_destroy(virtscsi_cmd_pool);
 	kmem_cache_destroy(virtscsi_cmd_cache);
 }
-module_init(init);
-module_exit(fini);
+module_init(virtio_scsi_init);
+module_exit(virtio_scsi_fini);
 
 MODULE_DEVICE_TABLE(virtio, id_table);
 MODULE_DESCRIPTION("Virtio SCSI HBA driver");

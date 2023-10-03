@@ -159,13 +159,13 @@ static void vrf_get_stats64(struct net_device *dev,
 
 		dstats = per_cpu_ptr(dev->dstats, i);
 		do {
-			start = u64_stats_fetch_begin_irq(&dstats->syncp);
+			start = u64_stats_fetch_begin(&dstats->syncp);
 			tbytes = dstats->tx_bytes;
 			tpkts = dstats->tx_pkts;
 			tdrops = dstats->tx_drps;
 			rbytes = dstats->rx_bytes;
 			rpkts = dstats->rx_pkts;
-		} while (u64_stats_fetch_retry_irq(&dstats->syncp, start));
+		} while (u64_stats_fetch_retry(&dstats->syncp, start));
 		stats->tx_bytes += tbytes;
 		stats->tx_packets += tpkts;
 		stats->tx_dropped += tdrops;
@@ -814,8 +814,8 @@ static void vrf_rt6_release(struct net_device *dev, struct net_vrf *vrf)
 	 */
 	if (rt6) {
 		dst = &rt6->dst;
-		dev_replace_track(dst->dev, net->loopback_dev,
-				  &dst->dev_tracker, GFP_KERNEL);
+		netdev_ref_replace(dst->dev, net->loopback_dev,
+				   &dst->dev_tracker, GFP_KERNEL);
 		dst->dev = net->loopback_dev;
 		dst_release(dst);
 	}
@@ -1061,8 +1061,8 @@ static void vrf_rtable_release(struct net_device *dev, struct net_vrf *vrf)
 	 */
 	if (rth) {
 		dst = &rth->dst;
-		dev_replace_track(dst->dev, net->loopback_dev,
-				  &dst->dev_tracker, GFP_KERNEL);
+		netdev_ref_replace(dst->dev, net->loopback_dev,
+				   &dst->dev_tracker, GFP_KERNEL);
 		dst->dev = net->loopback_dev;
 		dst_release(dst);
 	}
@@ -1541,8 +1541,8 @@ static const struct l3mdev_ops vrf_l3mdev_ops = {
 static void vrf_get_drvinfo(struct net_device *dev,
 			    struct ethtool_drvinfo *info)
 {
-	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
+	strscpy(info->driver, DRV_NAME, sizeof(info->driver));
+	strscpy(info->version, DRV_VERSION, sizeof(info->version));
 }
 
 static const struct ethtool_ops vrf_ethtool_ops = {

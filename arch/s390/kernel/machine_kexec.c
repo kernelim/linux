@@ -21,6 +21,7 @@
 #include <asm/elf.h>
 #include <asm/asm-offsets.h>
 #include <asm/cacheflush.h>
+#include <asm/abs_lowcore.h>
 #include <asm/os_info.h>
 #include <asm/set_memory.h>
 #include <asm/stacktrace.h>
@@ -85,7 +86,7 @@ static noinline void __machine_kdump(void *image)
 			continue;
 	}
 	/* Store status of the boot CPU */
-	mcesa = (struct mcesa *)(S390_lowcore.mcesad & MCESA_ORIGIN_MASK);
+	mcesa = __va(S390_lowcore.mcesad & MCESA_ORIGIN_MASK);
 	if (MACHINE_HAS_VX)
 		save_vx_regs((__vector128 *) mcesa->vector_save_area);
 	if (MACHINE_HAS_GS) {
@@ -220,13 +221,18 @@ void machine_kexec_cleanup(struct kimage *image)
 
 void arch_crash_save_vmcoreinfo(void)
 {
+	struct lowcore *abs_lc;
+	unsigned long flags;
+
 	VMCOREINFO_SYMBOL(lowcore_ptr);
 	VMCOREINFO_SYMBOL(high_memory);
 	VMCOREINFO_LENGTH(lowcore_ptr, NR_CPUS);
 	vmcoreinfo_append_str("SAMODE31=%lx\n", __samode31);
 	vmcoreinfo_append_str("EAMODE31=%lx\n", __eamode31);
 	vmcoreinfo_append_str("KERNELOFFSET=%lx\n", kaslr_offset());
-	mem_assign_absolute(S390_lowcore.vmcore_info, paddr_vmcoreinfo_note());
+	abs_lc = get_abs_lowcore(&flags);
+	abs_lc->vmcore_info = paddr_vmcoreinfo_note();
+	put_abs_lowcore(abs_lc, flags);
 }
 
 void machine_shutdown(void)
@@ -262,7 +268,6 @@ static void __do_machine_kexec(void *data)
  */
 static void __machine_kexec(void *data)
 {
-	__arch_local_irq_stosm(0x04); /* enable DAT */
 	pfault_fini();
 	tracing_off();
 	debug_locks_off();

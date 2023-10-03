@@ -24,14 +24,13 @@
 #include <asm/set_memory.h>
 #include <asm/sections.h>
 #include <asm/dis.h>
+#include "kprobes.h"
 #include "entry.h"
 
 DEFINE_PER_CPU(struct kprobe *, current_kprobe);
 DEFINE_PER_CPU(struct kprobe_ctlblk, kprobe_ctlblk);
 
 struct kretprobe_blackpoint kretprobe_blacklist[] = { };
-
-DEFINE_INSN_CACHE_OPS(s390_insn);
 
 static int insn_page_in_use;
 
@@ -419,7 +418,6 @@ static int kprobe_trap_handler(struct pt_regs *regs, int trapnr)
 {
 	struct kprobe_ctlblk *kcb = get_kprobe_ctlblk();
 	struct kprobe *p = kprobe_running();
-	const struct exception_table_entry *entry;
 
 	switch(kcb->kprobe_status) {
 	case KPROBE_HIT_SS:
@@ -441,10 +439,8 @@ static int kprobe_trap_handler(struct pt_regs *regs, int trapnr)
 		 * In case the user-specified fault handler returned
 		 * zero, try to fix up.
 		 */
-		entry = s390_search_extables(regs->psw.addr);
-		if (entry && ex_handle(entry, regs))
+		if (fixup_exception(regs))
 			return 1;
-
 		/*
 		 * fixup_exception() could not handle it,
 		 * Let do_page_fault() fix it.

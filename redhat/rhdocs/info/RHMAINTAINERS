@@ -73,8 +73,8 @@ S:	Supported
 F:	Makefile.rhelver
 
 Automotive Stream Distribution Kernel Maintainer
-M:	Jarod Wilson <jarod@redhat.com>
 M:	Julio Faracco <jfaracco@redhat.com>
+M:	Scott Weaver <scweaver@redhat.com>
 S:	Supported
 F:	makefile
 F:	Makefile.rhelver
@@ -464,8 +464,8 @@ F:	include/uapi/linux/audit.h
 F:	kernel/audit*
 
 AUTOMOTIVE
-M:	Jarod Wilson <jarod@redhat.com>
 M:	Julio Faracco <jfaracco@redhat.com>
+M:	Scott Weaver <scweaver@redhat.com>
 R:	Adrien Thierry <athierry@redhat.com>
 R:	Alessandro Carminati <acarmina@redhat.com>
 R:	Andrew Halaney <ahalaney@redhat.com>

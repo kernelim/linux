@@ -14,16 +14,16 @@ static void mlxsw_sp_port_get_drvinfo(struct net_device *dev,
 	struct mlxsw_sp_port *mlxsw_sp_port = netdev_priv(dev);
 	struct mlxsw_sp *mlxsw_sp = mlxsw_sp_port->mlxsw_sp;
 
-	strlcpy(drvinfo->driver, mlxsw_sp->bus_info->device_kind,
+	strscpy(drvinfo->driver, mlxsw_sp->bus_info->device_kind,
 		sizeof(drvinfo->driver));
-	strlcpy(drvinfo->version, mlxsw_sp_driver_version,
+	strscpy(drvinfo->version, mlxsw_sp_driver_version,
 		sizeof(drvinfo->version));
 	snprintf(drvinfo->fw_version, sizeof(drvinfo->fw_version),
 		 "%d.%d.%d",
 		 mlxsw_sp->bus_info->fw_rev.major,
 		 mlxsw_sp->bus_info->fw_rev.minor,
 		 mlxsw_sp->bus_info->fw_rev.subminor);
-	strlcpy(drvinfo->bus_info, mlxsw_sp->bus_info->device_name,
+	strscpy(drvinfo->bus_info, mlxsw_sp->bus_info->device_name,
 		sizeof(drvinfo->bus_info));
 }
 
@@ -1672,6 +1672,19 @@ mlxsw_sp2_mask_ethtool_400gaui_8[] = {
 #define MLXSW_SP2_MASK_ETHTOOL_400GAUI_8_LEN \
 	ARRAY_SIZE(mlxsw_sp2_mask_ethtool_400gaui_8)
 
+static const enum ethtool_link_mode_bit_indices
+mlxsw_sp2_mask_ethtool_800gaui_8[] = {
+	ETHTOOL_LINK_MODE_800000baseCR8_Full_BIT,
+	ETHTOOL_LINK_MODE_800000baseKR8_Full_BIT,
+	ETHTOOL_LINK_MODE_800000baseDR8_Full_BIT,
+	ETHTOOL_LINK_MODE_800000baseDR8_2_Full_BIT,
+	ETHTOOL_LINK_MODE_800000baseSR8_Full_BIT,
+	ETHTOOL_LINK_MODE_800000baseVR8_Full_BIT,
+};
+
+#define MLXSW_SP2_MASK_ETHTOOL_800GAUI_8_LEN \
+	ARRAY_SIZE(mlxsw_sp2_mask_ethtool_800gaui_8)
+
 #define MLXSW_SP_PORT_MASK_WIDTH_1X	BIT(0)
 #define MLXSW_SP_PORT_MASK_WIDTH_2X	BIT(1)
 #define MLXSW_SP_PORT_MASK_WIDTH_4X	BIT(2)
@@ -1818,6 +1831,14 @@ static const struct mlxsw_sp2_port_link_mode mlxsw_sp2_port_link_mode[] = {
 		.m_ethtool_len	= MLXSW_SP2_MASK_ETHTOOL_400GAUI_8_LEN,
 		.mask_sup_width	= MLXSW_SP_PORT_MASK_WIDTH_8X,
 		.speed		= SPEED_400000,
+		.width		= 8,
+	},
+	{
+		.mask		= MLXSW_REG_PTYS_EXT_ETH_SPEED_800GAUI_8,
+		.mask_ethtool	= mlxsw_sp2_mask_ethtool_800gaui_8,
+		.m_ethtool_len	= MLXSW_SP2_MASK_ETHTOOL_800GAUI_8_LEN,
+		.mask_sup_width	= MLXSW_SP_PORT_MASK_WIDTH_8X,
+		.speed		= SPEED_800000,
 		.width		= 8,
 	},
 };

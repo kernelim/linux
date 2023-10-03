@@ -19,6 +19,7 @@
 #include <linux/module.h>
 #include <linux/irqbypass.h>
 #include <linux/kvm_irqfd.h>
+#include <linux/of.h>
 #include <asm/cputable.h>
 #include <linux/uaccess.h>
 #include <asm/kvm_ppc.h>
@@ -34,7 +35,6 @@
 #include <asm/ultravisor.h>
 
 #include "timing.h"
-#include "irq.h"
 #include "../mm/mmu_decl.h"
 
 #define CREATE_TRACE_POINTS
@@ -237,7 +237,6 @@ int kvmppc_kvm_pv(struct kvm_vcpu *vcpu)
 	case EV_HCALL_TOKEN(EV_IDLE):
 		r = EV_SUCCESS;
 		kvm_vcpu_halt(vcpu);
-		kvm_clear_request(KVM_REQ_UNHALT, vcpu);
 		break;
 	default:
 		r = EV_UNIMPLEMENTED;
@@ -413,21 +412,6 @@ int kvmppc_ld(struct kvm_vcpu *vcpu, ulong *eaddr, int size, void *ptr,
 }
 EXPORT_SYMBOL_GPL(kvmppc_ld);
 
-int kvm_arch_hardware_enable(void)
-{
-	return 0;
-}
-
-int kvm_arch_hardware_setup(void *opaque)
-{
-	return 0;
-}
-
-int kvm_arch_check_processor_compat(void *opaque)
-{
-	return kvmppc_core_check_processor_compat();
-}
-
 int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 {
 	struct kvmppc_ops *kvm_ops = NULL;
@@ -561,6 +545,12 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 		 */
 		r = xive_enabled() && !!cpu_has_feature(CPU_FTR_HVMODE) &&
 			kvmppc_xive_native_supported();
+		break;
+#endif
+
+#ifdef CONFIG_HAVE_KVM_IRQFD
+	case KVM_CAP_IRQFD_RESAMPLE:
+		r = !xive_enabled();
 		break;
 #endif
 
@@ -2122,10 +2112,25 @@ static int kvm_vm_ioctl_get_pvinfo(struct kvm_ppc_pvinfo *pvinfo)
 	return 0;
 }
 
+bool kvm_arch_irqchip_in_kernel(struct kvm *kvm)
+{
+	int ret = 0;
+
+#ifdef CONFIG_KVM_MPIC
+	ret = ret || (kvm->arch.mpic != NULL);
+#endif
+#ifdef CONFIG_KVM_XICS
+	ret = ret || (kvm->arch.xics != NULL);
+	ret = ret || (kvm->arch.xive != NULL);
+#endif
+	smp_rmb();
+	return ret;
+}
+
 int kvm_vm_ioctl_irq_line(struct kvm *kvm, struct kvm_irq_level *irq_event,
 			  bool line_status)
 {
-	if (!irqchip_in_kernel(kvm))
+	if (!kvm_arch_irqchip_in_kernel(kvm))
 		return -ENXIO;
 
 	irq_event->status = kvm_set_irq(kvm, KVM_USERSPACE_IRQ_SOURCE_ID,
@@ -2490,10 +2495,5 @@ void kvmppc_init_lpid(unsigned long nr_lpids_param)
 	memset(lpid_inuse, 0, sizeof(lpid_inuse));
 }
 EXPORT_SYMBOL_GPL(kvmppc_init_lpid);
-
-int kvm_arch_init(void *opaque)
-{
-	return 0;
-}
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_ppc_instr);

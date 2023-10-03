@@ -650,7 +650,7 @@ static void virtio_fs_vq_done(struct virtqueue *vq)
 static void virtio_fs_init_vq(struct virtio_fs_vq *fsvq, char *name,
 			      int vq_type)
 {
-	strncpy(fsvq->name, name, VQ_NAME_LEN);
+	strscpy(fsvq->name, name, VQ_NAME_LEN);
 	spin_lock_init(&fsvq->lock);
 	INIT_LIST_HEAD(&fsvq->queued_reqs);
 	INIT_LIST_HEAD(&fsvq->end_reqs);
@@ -729,8 +729,7 @@ out:
 }
 
 /* Free virtqueues (device must already be reset) */
-static void virtio_fs_cleanup_vqs(struct virtio_device *vdev,
-				  struct virtio_fs *fs)
+static void virtio_fs_cleanup_vqs(struct virtio_device *vdev)
 {
 	vdev->config->del_vqs(vdev);
 }
@@ -740,11 +739,12 @@ static void virtio_fs_cleanup_vqs(struct virtio_device *vdev,
  * offset.
  */
 static long virtio_fs_direct_access(struct dax_device *dax_dev, pgoff_t pgoff,
-				    long nr_pages, void **kaddr, pfn_t *pfn)
+				    long nr_pages, enum dax_access_mode mode,
+				    void **kaddr, pfn_t *pfn)
 {
 	struct virtio_fs *fs = dax_get_private(dax_dev);
 	phys_addr_t offset = PFN_PHYS(pgoff);
-	size_t max_nr_pages = fs->window_len/PAGE_SIZE - pgoff;
+	size_t max_nr_pages = fs->window_len / PAGE_SIZE - pgoff;
 
 	if (kaddr)
 		*kaddr = fs->window_kaddr + offset;
@@ -754,27 +754,14 @@ static long virtio_fs_direct_access(struct dax_device *dax_dev, pgoff_t pgoff,
 	return nr_pages > max_nr_pages ? max_nr_pages : nr_pages;
 }
 
-static size_t virtio_fs_copy_from_iter(struct dax_device *dax_dev,
-				       pgoff_t pgoff, void *addr,
-				       size_t bytes, struct iov_iter *i)
-{
-	return copy_from_iter(addr, bytes, i);
-}
-
-static size_t virtio_fs_copy_to_iter(struct dax_device *dax_dev,
-				       pgoff_t pgoff, void *addr,
-				       size_t bytes, struct iov_iter *i)
-{
-	return copy_to_iter(addr, bytes, i);
-}
-
 static int virtio_fs_zero_page_range(struct dax_device *dax_dev,
 				     pgoff_t pgoff, size_t nr_pages)
 {
 	long rc;
 	void *kaddr;
 
-	rc = dax_direct_access(dax_dev, pgoff, nr_pages, &kaddr, NULL);
+	rc = dax_direct_access(dax_dev, pgoff, nr_pages, DAX_ACCESS, &kaddr,
+			       NULL);
 	if (rc < 0)
 		return rc;
 	memset(kaddr, 0, nr_pages << PAGE_SHIFT);
@@ -784,8 +771,6 @@ static int virtio_fs_zero_page_range(struct dax_device *dax_dev,
 
 static const struct dax_operations virtio_fs_dax_ops = {
 	.direct_access = virtio_fs_direct_access,
-	.copy_from_iter = virtio_fs_copy_from_iter,
-	.copy_to_iter = virtio_fs_copy_to_iter,
 	.zero_page_range = virtio_fs_zero_page_range,
 };
 
@@ -851,7 +836,7 @@ static int virtio_fs_setup_dax(struct virtio_device *vdev, struct virtio_fs *fs)
 	dev_dbg(&vdev->dev, "%s: window kaddr 0x%px phys_addr 0x%llx len 0x%llx\n",
 		__func__, fs->window_kaddr, cache_reg.addr, cache_reg.len);
 
-	fs->dax_dev = alloc_dax(fs, NULL, &virtio_fs_dax_ops, 0);
+	fs->dax_dev = alloc_dax(fs, &virtio_fs_dax_ops);
 	if (IS_ERR(fs->dax_dev))
 		return PTR_ERR(fs->dax_dev);
 
@@ -897,7 +882,7 @@ static int virtio_fs_probe(struct virtio_device *vdev)
 
 out_vqs:
 	virtio_reset_device(vdev);
-	virtio_fs_cleanup_vqs(vdev, fs);
+	virtio_fs_cleanup_vqs(vdev);
 	kfree(fs->vqs);
 
 out:
@@ -929,7 +914,7 @@ static void virtio_fs_remove(struct virtio_device *vdev)
 	virtio_fs_stop_all_queues(fs);
 	virtio_fs_drain_all_queues_locked(fs);
 	virtio_reset_device(vdev);
-	virtio_fs_cleanup_vqs(vdev, fs);
+	virtio_fs_cleanup_vqs(vdev);
 
 	vdev->priv = NULL;
 	/* Put device reference on virtio_fs object */

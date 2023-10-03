@@ -7,19 +7,20 @@
 #include <drm/drm_blend.h>
 #include <drm/drm_damage_helper.h>
 #include <drm/drm_fourcc.h>
-#include <drm/drm_plane_helper.h>
 
 #include "i915_drv.h"
+#include "i915_irq.h"
+#include "i915_reg.h"
 #include "intel_atomic_plane.h"
 #include "intel_de.h"
 #include "intel_display_types.h"
 #include "intel_fb.h"
 #include "intel_fbc.h"
-#include "intel_pm.h"
 #include "intel_psr.h"
 #include "intel_sprite.h"
 #include "skl_scaler.h"
 #include "skl_universal_plane.h"
+#include "skl_watermark.h"
 #include "pxp/intel_pxp.h"
 
 static const u32 skl_plane_formats[] = {
@@ -245,6 +246,11 @@ bool icl_is_nv12_y_plane(struct drm_i915_private *dev_priv,
 {
 	return DISPLAY_VER(dev_priv) >= 11 &&
 		icl_nv12_y_plane_mask(dev_priv) & BIT(plane_id);
+}
+
+u8 icl_hdr_plane_mask(void)
+{
+	return BIT(PLANE_PRIMARY) | BIT(PLANE_SPRITE0) | BIT(PLANE_SPRITE1);
 }
 
 bool icl_is_hdr_plane(struct drm_i915_private *dev_priv, enum plane_id plane_id)
@@ -1621,7 +1627,7 @@ static int skl_check_main_surface(struct intel_plane_state *plane_state)
 	u32 offset;
 	int ret;
 
-	if (w > max_width || w < min_width || h > max_height) {
+	if (w > max_width || w < min_width || h > max_height || h < 1) {
 		drm_dbg_kms(&dev_priv->drm,
 			    "requested Y/RGB source size %dx%d outside limits (min: %dx1 max: %dx%d)\n",
 			    w, h, min_width, max_width, max_height);
@@ -1842,7 +1848,7 @@ static bool bo_has_valid_encryption(struct drm_i915_gem_object *obj)
 {
 	struct drm_i915_private *i915 = to_i915(obj->base.dev);
 
-	return intel_pxp_key_check(&to_gt(i915)->pxp, obj, false) == 0;
+	return intel_pxp_key_check(i915->pxp, obj, false) == 0;
 }
 
 static bool pxp_is_borked(struct drm_i915_gem_object *obj)
@@ -1856,8 +1862,8 @@ static int skl_plane_check(struct intel_crtc_state *crtc_state,
 	struct intel_plane *plane = to_intel_plane(plane_state->uapi.plane);
 	struct drm_i915_private *dev_priv = to_i915(plane->base.dev);
 	const struct drm_framebuffer *fb = plane_state->hw.fb;
-	int min_scale = DRM_PLANE_HELPER_NO_SCALING;
-	int max_scale = DRM_PLANE_HELPER_NO_SCALING;
+	int min_scale = DRM_PLANE_NO_SCALING;
+	int max_scale = DRM_PLANE_NO_SCALING;
 	int ret;
 
 	ret = skl_plane_check_fb(crtc_state, plane_state);
@@ -1929,7 +1935,7 @@ static enum intel_fbc_id skl_fbc_id_for_pipe(enum pipe pipe)
 static bool skl_plane_has_fbc(struct drm_i915_private *dev_priv,
 			      enum intel_fbc_id fbc_id, enum plane_id plane_id)
 {
-	if ((INTEL_INFO(dev_priv)->display.fbc_mask & BIT(fbc_id)) == 0)
+	if ((RUNTIME_INFO(dev_priv)->fbc_mask & BIT(fbc_id)) == 0)
 		return false;
 
 	return plane_id == PLANE_PRIMARY;
@@ -1941,7 +1947,7 @@ static struct intel_fbc *skl_plane_fbc(struct drm_i915_private *dev_priv,
 	enum intel_fbc_id fbc_id = skl_fbc_id_for_pipe(pipe);
 
 	if (skl_plane_has_fbc(dev_priv, fbc_id, plane_id))
-		return dev_priv->fbc[fbc_id];
+		return dev_priv->display.fbc[fbc_id];
 	else
 		return NULL;
 }

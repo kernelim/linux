@@ -288,7 +288,7 @@ static void hellcreek_get_strings(struct dsa_switch *ds, int port,
 	for (i = 0; i < ARRAY_SIZE(hellcreek_counter); ++i) {
 		const struct hellcreek_counter *counter = &hellcreek_counter[i];
 
-		strlcpy(data + i * ETH_GSTRING_LEN,
+		strscpy(data + i * ETH_GSTRING_LEN,
 			counter->name, ETH_GSTRING_LEN);
 	}
 }
@@ -1089,11 +1089,6 @@ static int hellcreek_devlink_info_get(struct dsa_switch *ds,
 				      struct netlink_ext_ack *extack)
 {
 	struct hellcreek *hellcreek = ds->priv;
-	int ret;
-
-	ret = devlink_info_driver_name_put(req, "hellcreek");
-	if (ret)
-		return ret;
 
 	return devlink_info_version_fixed_put(req,
 					      DEVLINK_INFO_VERSION_GENERIC_ASIC_ID,

@@ -14,7 +14,7 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
-#include <linux/qcom-geni-se.h>
+#include <linux/soc/qcom/geni-se.h>
 #include <linux/spinlock.h>
 
 #define SE_I2C_TX_TRANS_LEN		0x26c
@@ -833,7 +833,7 @@ static int geni_i2c_probe(struct platform_device *pdev)
 	i2c_set_adapdata(&gi2c->adap, gi2c);
 	gi2c->adap.dev.parent = dev;
 	gi2c->adap.dev.of_node = dev->of_node;
-	strlcpy(gi2c->adap.name, "Geni-I2C", sizeof(gi2c->adap.name));
+	strscpy(gi2c->adap.name, "Geni-I2C", sizeof(gi2c->adap.name));
 
 	ret = geni_icc_get(&gi2c->se, desc ? desc->icc_ddr : "qup-memory");
 	if (ret)

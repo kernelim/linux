@@ -1006,7 +1006,7 @@ int efx_siena_init_struct(struct efx_nic *efx,
 	efx->pci_dev = pci_dev;
 	efx->msg_enable = debug;
 	efx->state = STATE_UNINIT;
-	strlcpy(efx->name, pci_name(pci_dev), sizeof(efx->name));
+	strscpy(efx->name, pci_name(pci_dev), sizeof(efx->name));
 
 	efx->net_dev = net_dev;
 	efx->rx_prefix_size = efx->type->rx_prefix_size;
@@ -1178,7 +1178,7 @@ static ssize_t mcdi_logging_show(struct device *dev,
 	struct efx_nic *efx = dev_get_drvdata(dev);
 	struct efx_mcdi_iface *mcdi = efx_mcdi(efx);
 
-	return scnprintf(buf, PAGE_SIZE, "%d\n", mcdi->logging_enabled);
+	return sysfs_emit(buf, "%d\n", mcdi->logging_enabled);
 }
 
 static ssize_t mcdi_logging_store(struct device *dev,

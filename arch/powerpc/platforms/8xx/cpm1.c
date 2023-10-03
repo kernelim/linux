@@ -33,18 +33,18 @@
 #include <linux/module.h>
 #include <linux/spinlock.h>
 #include <linux/slab.h>
+#include <linux/of_irq.h>
 #include <asm/page.h>
 #include <asm/8xx_immap.h>
 #include <asm/cpm1.h>
 #include <asm/io.h>
 #include <asm/rheap.h>
-#include <asm/prom.h>
 #include <asm/cpm.h>
 
 #include <asm/fs_pd.h>
 
 #ifdef CONFIG_8xx_GPIO
-#include <linux/of_gpio.h>
+#include <linux/gpio/legacy-of-mm-gpiochip.h>
 #endif
 
 #define CPM_MAP_SIZE    (0x4000)
@@ -233,7 +233,7 @@ int cpm_command(u32 command, u8 opcode)
 	int i, ret;
 	unsigned long flags;
 
-	if (command & 0xffffff0f)
+	if (command & 0xffffff03)
 		return -EINVAL;
 
 	spin_lock_irqsave(&cmd_lock, flags);

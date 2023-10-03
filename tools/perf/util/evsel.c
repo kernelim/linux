@@ -12,7 +12,6 @@
 #include <linux/bitops.h>
 #include <api/fs/fs.h>
 #include <api/fs/tracing_path.h>
-#include <traceevent/event-parse.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/perf_event.h>
 #include <linux/compiler.h>
@@ -46,15 +45,20 @@
 #include "string2.h"
 #include "memswap.h"
 #include "util.h"
-#include "hashmap.h"
+#include "util/hashmap.h"
 #include "pmu-hybrid.h"
 #include "off_cpu.h"
 #include "../perf-sys.h"
 #include "util/parse-branch-options.h"
 #include <internal/xyarray.h>
 #include <internal/lib.h>
+#include <internal/threadmap.h>
 
 #include <linux/ctype.h>
+
+#ifdef HAVE_LIBTRACEEVENT
+#include <traceevent/event-parse.h>
+#endif
 
 struct perf_missing_features perf_missing_features;
 
@@ -281,8 +285,6 @@ void evsel__init(struct evsel *evsel,
 	evsel->sample_size = __evsel__sample_size(attr->sample_type);
 	evsel__calc_id_pos(evsel);
 	evsel->cmdline_group_boundary = false;
-	evsel->metric_expr   = NULL;
-	evsel->metric_name   = NULL;
 	evsel->metric_events = NULL;
 	evsel->per_pkg_mask  = NULL;
 	evsel->collect_stat  = false;
@@ -438,7 +440,9 @@ struct evsel *evsel__clone(struct evsel *orig)
 			goto out_err;
 	}
 	evsel->cgrp = cgroup__get(orig->cgrp);
+#ifdef HAVE_LIBTRACEEVENT
 	evsel->tp_format = orig->tp_format;
+#endif
 	evsel->handler = orig->handler;
 	evsel->core.leader = orig->core.leader;
 
@@ -463,6 +467,7 @@ struct evsel *evsel__clone(struct evsel *orig)
 	evsel->collect_stat = orig->collect_stat;
 	evsel->weak_group = orig->weak_group;
 	evsel->use_config_name = orig->use_config_name;
+	evsel->pmu = orig->pmu;
 
 	if (evsel__copy_config_terms(evsel, orig) < 0)
 		goto out_err;
@@ -477,6 +482,7 @@ out_err:
 /*
  * Returns pointer with encoded error via <linux/err.h> interface.
  */
+#ifdef HAVE_LIBTRACEEVENT
 struct evsel *evsel__newtp_idx(const char *sys, const char *name, int idx)
 {
 	struct evsel *evsel = zalloc(perf_evsel__object.size);
@@ -514,6 +520,7 @@ out_free:
 out_err:
 	return ERR_PTR(err);
 }
+#endif
 
 const char *const evsel__hw_names[PERF_COUNT_HW_MAX] = {
 	"cycles",
@@ -1157,6 +1164,7 @@ void evsel__config(struct evsel *evsel, struct record_opts *opts,
 	attr->sample_id_all = perf_missing_features.sample_id_all ? 0 : 1;
 	attr->inherit	    = !opts->no_inherit;
 	attr->write_backward = opts->overwrite ? 1 : 0;
+	attr->read_format   = PERF_FORMAT_LOST;
 
 	evsel__set_sample_bit(evsel, IP);
 	evsel__set_sample_bit(evsel, TID);
@@ -1520,13 +1528,8 @@ void evsel__compute_deltas(struct evsel *evsel, int cpu_map_idx, int thread,
 	if (!evsel->prev_raw_counts)
 		return;
 
-	if (cpu_map_idx == -1) {
-		tmp = evsel->prev_raw_counts->aggr;
-		evsel->prev_raw_counts->aggr = *count;
-	} else {
-		tmp = *perf_counts(evsel->prev_raw_counts, cpu_map_idx, thread);
-		*perf_counts(evsel->prev_raw_counts, cpu_map_idx, thread) = *count;
-	}
+	tmp = *perf_counts(evsel->prev_raw_counts, cpu_map_idx, thread);
+	*perf_counts(evsel->prev_raw_counts, cpu_map_idx, thread) = *count;
 
 	count->val = count->val - tmp.val;
 	count->ena = count->ena - tmp.ena;
@@ -1808,7 +1811,7 @@ static struct perf_thread_map *empty_thread_map;
 static int __evsel__prepare_open(struct evsel *evsel, struct perf_cpu_map *cpus,
 		struct perf_thread_map *threads)
 {
-	int nthreads;
+	int nthreads = perf_thread_map__nr(threads);
 
 	if ((perf_missing_features.write_backward && evsel->core.attr.write_backward) ||
 	    (perf_missing_features.aux_output     && evsel->core.attr.aux_output))
@@ -1834,11 +1837,6 @@ static int __evsel__prepare_open(struct evsel *evsel, struct perf_cpu_map *cpus,
 		threads = empty_thread_map;
 	}
 
-	if (evsel->core.system_wide)
-		nthreads = 1;
-	else
-		nthreads = threads->nr;
-
 	if (evsel->core.fd == NULL &&
 	    perf_evsel__alloc_fd(&evsel->core, perf_cpu_map__nr(cpus), nthreads) < 0)
 		return -ENOMEM;
@@ -1852,6 +1850,8 @@ static int __evsel__prepare_open(struct evsel *evsel, struct perf_cpu_map *cpus,
 
 static void evsel__disable_missing_features(struct evsel *evsel)
 {
+	if (perf_missing_features.read_lost)
+		evsel->core.attr.read_format &= ~PERF_FORMAT_LOST;
 	if (perf_missing_features.weight_struct) {
 		evsel__set_sample_bit(evsel, WEIGHT);
 		evsel__reset_sample_bit(evsel, WEIGHT_STRUCT);
@@ -1903,7 +1903,12 @@ bool evsel__detect_missing_features(struct evsel *evsel)
 	 * Must probe features in the order they were added to the
 	 * perf_event_attr interface.
 	 */
-	if (!perf_missing_features.weight_struct &&
+	if (!perf_missing_features.read_lost &&
+	    (evsel->core.attr.read_format & PERF_FORMAT_LOST)) {
+		perf_missing_features.read_lost = true;
+		pr_debug2("switching off PERF_FORMAT_LOST support\n");
+		return true;
+	} else if (!perf_missing_features.weight_struct &&
 	    (evsel->core.attr.sample_type & PERF_SAMPLE_WEIGHT_STRUCT)) {
 		perf_missing_features.weight_struct = true;
 		pr_debug2("switching off weight struct support\n");
@@ -1959,17 +1964,16 @@ bool evsel__detect_missing_features(struct evsel *evsel)
 		perf_missing_features.mmap2 = true;
 		pr_debug2_peo("switching off mmap2\n");
 		return true;
-	} else if ((evsel->core.attr.exclude_guest || evsel->core.attr.exclude_host) &&
-		   (evsel->pmu == NULL || evsel->pmu->missing_features.exclude_guest)) {
-		if (evsel->pmu == NULL) {
+	} else if (evsel->core.attr.exclude_guest || evsel->core.attr.exclude_host) {
+		if (evsel->pmu == NULL)
 			evsel->pmu = evsel__find_pmu(evsel);
-			if (evsel->pmu)
-				evsel->pmu->missing_features.exclude_guest = true;
-			else {
-				/* we cannot find PMU, disable attrs now */
-				evsel->core.attr.exclude_host = false;
-				evsel->core.attr.exclude_guest = false;
-			}
+
+		if (evsel->pmu)
+			evsel->pmu->missing_features.exclude_guest = true;
+		else {
+			/* we cannot find PMU, disable attrs now */
+			evsel->core.attr.exclude_host = false;
+			evsel->core.attr.exclude_guest = false;
 		}
 
 		if (evsel->exclude_GH) {
@@ -2049,10 +2053,7 @@ static int evsel__open_cpu(struct evsel *evsel, struct perf_cpu_map *cpus,
 	if (threads == NULL)
 		threads = empty_thread_map;
 
-	if (evsel->core.system_wide)
-		nthreads = 1;
-	else
-		nthreads = threads->nr;
+	nthreads = perf_thread_map__nr(threads);
 
 	if (evsel->cgrp)
 		pid = evsel->cgrp->fd;
@@ -2077,6 +2078,7 @@ retry_open:
 
 			test_attr__ready();
 
+			/* Debug message used by test scripts */
 			pr_debug2_peo("sys_perf_event_open: pid %d  cpu %d  group_fd %d  flags %#lx",
 				pid, perf_cpu_map__cpu(cpus, idx).cpu, group_fd, evsel->open_flags);
 
@@ -2102,6 +2104,7 @@ retry_open:
 						fd, group_fd, evsel->open_flags);
 			}
 
+			/* Debug message used by test scripts */
 			pr_debug2_peo(" = %d\n", fd);
 
 			if (evsel->bpf_fd >= 0) {
@@ -2314,7 +2317,10 @@ u64 evsel__bitfield_swap_branch_flags(u64 value)
 	 * 		abort:1		//transaction abort
 	 * 		cycles:16	//cycle count to last branch
 	 * 		type:4		//branch type
-	 * 		reserved:40
+	 * 		spec:2		//branch speculation info
+	 * 		new_type:4	//additional branch type
+	 * 		priv:3		//privilege level
+	 * 		reserved:31
 	 * 	}
 	 * }
 	 *
@@ -2322,18 +2328,18 @@ u64 evsel__bitfield_swap_branch_flags(u64 value)
 	 * as it has variable bit-field sizes. Instead the
 	 * macro takes the bit-field position/size,
 	 * swaps it based on the host endianness.
-	 *
-	 * tep_is_bigendian() is used here instead of
-	 * bigendian() to avoid python test fails.
 	 */
-	if (tep_is_bigendian()) {
+	if (host_is_bigendian()) {
 		new_val = bitfield_swap(value, 0, 1);
 		new_val |= bitfield_swap(value, 1, 1);
 		new_val |= bitfield_swap(value, 2, 1);
 		new_val |= bitfield_swap(value, 3, 1);
 		new_val |= bitfield_swap(value, 4, 16);
 		new_val |= bitfield_swap(value, 20, 4);
-		new_val |= bitfield_swap(value, 24, 40);
+		new_val |= bitfield_swap(value, 24, 2);
+		new_val |= bitfield_swap(value, 26, 4);
+		new_val |= bitfield_swap(value, 30, 3);
+		new_val |= bitfield_swap(value, 33, 31);
 	} else {
 		new_val = bitfield_swap(value, 63, 1);
 		new_val |= bitfield_swap(value, 62, 1);
@@ -2341,7 +2347,10 @@ u64 evsel__bitfield_swap_branch_flags(u64 value)
 		new_val |= bitfield_swap(value, 60, 1);
 		new_val |= bitfield_swap(value, 44, 16);
 		new_val |= bitfield_swap(value, 40, 4);
-		new_val |= bitfield_swap(value, 0, 40);
+		new_val |= bitfield_swap(value, 38, 2);
+		new_val |= bitfield_swap(value, 34, 4);
+		new_val |= bitfield_swap(value, 31, 3);
+		new_val |= bitfield_swap(value, 0, 31);
 	}
 
 	return new_val;
@@ -2763,6 +2772,7 @@ u16 evsel__id_hdr_size(struct evsel *evsel)
 	return size;
 }
 
+#ifdef HAVE_LIBTRACEEVENT
 struct tep_format_field *evsel__field(struct evsel *evsel, const char *name)
 {
 	return tep_find_field(evsel->tp_format, name);
@@ -2781,7 +2791,7 @@ void *evsel__rawptr(struct evsel *evsel, struct perf_sample *sample, const char 
 	if (field->flags & TEP_FIELD_IS_DYNAMIC) {
 		offset = *(int *)(sample->raw_data + field->offset);
 		offset &= 0xffff;
-		if (field->flags & TEP_FIELD_IS_RELATIVE)
+		if (tep_field_is_relative(field->flags))
 			offset += field->offset + field->size;
 	}
 
@@ -2836,6 +2846,7 @@ u64 evsel__intval(struct evsel *evsel, struct perf_sample *sample, const char *n
 
 	return field ? format_field__intval(field, sample, evsel->needs_swap) : 0;
 }
+#endif
 
 bool evsel__fallback(struct evsel *evsel, int err, char *msg, size_t msgsize)
 {
@@ -3117,13 +3128,13 @@ void evsel__zero_per_pkg(struct evsel *evsel)
 
 	if (evsel->per_pkg_mask) {
 		hashmap__for_each_entry(evsel->per_pkg_mask, cur, bkt)
-			free((char *)cur->key);
+			free((void *)cur->pkey);
 
 		hashmap__clear(evsel->per_pkg_mask);
 	}
 }
 
-bool evsel__is_hybrid(struct evsel *evsel)
+bool evsel__is_hybrid(const struct evsel *evsel)
 {
 	return evsel->pmu_name && perf_pmu__is_hybrid(evsel->pmu_name);
 }

@@ -2,6 +2,7 @@
 /* Copyright(c) 1999 - 2018 Intel Corporation. */
 
 #include "e1000.h"
+#include <linux/ethtool.h>
 
 static s32 e1000_wait_autoneg(struct e1000_hw *hw);
 static s32 e1000_access_phy_wakeup_reg_bm(struct e1000_hw *hw, u32 offset,
@@ -1011,6 +1012,8 @@ static s32 e1000_phy_setup_autoneg(struct e1000_hw *hw)
 		 */
 		mii_autoneg_adv_reg &=
 		    ~(ADVERTISE_PAUSE_ASYM | ADVERTISE_PAUSE_CAP);
+		phy->autoneg_advertised &=
+		    ~(ADVERTISED_Pause | ADVERTISED_Asym_Pause);
 		break;
 	case e1000_fc_rx_pause:
 		/* Rx Flow control is enabled, and Tx Flow control is
@@ -1024,6 +1027,8 @@ static s32 e1000_phy_setup_autoneg(struct e1000_hw *hw)
 		 */
 		mii_autoneg_adv_reg |=
 		    (ADVERTISE_PAUSE_ASYM | ADVERTISE_PAUSE_CAP);
+		phy->autoneg_advertised |=
+		    (ADVERTISED_Pause | ADVERTISED_Asym_Pause);
 		break;
 	case e1000_fc_tx_pause:
 		/* Tx Flow control is enabled, and Rx Flow control is
@@ -1031,6 +1036,8 @@ static s32 e1000_phy_setup_autoneg(struct e1000_hw *hw)
 		 */
 		mii_autoneg_adv_reg |= ADVERTISE_PAUSE_ASYM;
 		mii_autoneg_adv_reg &= ~ADVERTISE_PAUSE_CAP;
+		phy->autoneg_advertised |= ADVERTISED_Asym_Pause;
+		phy->autoneg_advertised &= ~ADVERTISED_Pause;
 		break;
 	case e1000_fc_full:
 		/* Flow control (both Rx and Tx) is enabled by a software
@@ -1038,6 +1045,8 @@ static s32 e1000_phy_setup_autoneg(struct e1000_hw *hw)
 		 */
 		mii_autoneg_adv_reg |=
 		    (ADVERTISE_PAUSE_ASYM | ADVERTISE_PAUSE_CAP);
+		phy->autoneg_advertised |=
+		    (ADVERTISED_Pause | ADVERTISED_Asym_Pause);
 		break;
 	default:
 		e_dbg("Flow control param set incorrectly\n");
@@ -2697,9 +2706,14 @@ static s32 e1000_access_phy_wakeup_reg_bm(struct e1000_hw *hw, u32 offset,
 void e1000_power_up_phy_copper(struct e1000_hw *hw)
 {
 	u16 mii_reg = 0;
+	int ret;
 
 	/* The PHY will retain its settings across a power down/up cycle */
-	e1e_rphy(hw, MII_BMCR, &mii_reg);
+	ret = e1e_rphy(hw, MII_BMCR, &mii_reg);
+	if (ret) {
+		e_dbg("Error reading PHY register\n");
+		return;
+	}
 	mii_reg &= ~BMCR_PDOWN;
 	e1e_wphy(hw, MII_BMCR, mii_reg);
 }
@@ -2715,9 +2729,14 @@ void e1000_power_up_phy_copper(struct e1000_hw *hw)
 void e1000_power_down_phy_copper(struct e1000_hw *hw)
 {
 	u16 mii_reg = 0;
+	int ret;
 
 	/* The PHY will retain its settings across a power down/up cycle */
-	e1e_rphy(hw, MII_BMCR, &mii_reg);
+	ret = e1e_rphy(hw, MII_BMCR, &mii_reg);
+	if (ret) {
+		e_dbg("Error reading PHY register\n");
+		return;
+	}
 	mii_reg |= BMCR_PDOWN;
 	e1e_wphy(hw, MII_BMCR, mii_reg);
 	usleep_range(1000, 2000);
@@ -3037,7 +3056,11 @@ s32 e1000_link_stall_workaround_hv(struct e1000_hw *hw)
 		return 0;
 
 	/* Do not apply workaround if in PHY loopback bit 14 set */
-	e1e_rphy(hw, MII_BMCR, &data);
+	ret_val = e1e_rphy(hw, MII_BMCR, &data);
+	if (ret_val) {
+		e_dbg("Error reading PHY register\n");
+		return ret_val;
+	}
 	if (data & BMCR_LOOPBACK)
 		return 0;
 

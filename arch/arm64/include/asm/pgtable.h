@@ -45,13 +45,19 @@
 	__flush_tlb_range(vma, addr, end, PUD_SIZE, false, 1)
 #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
 
+static inline bool arch_thp_swp_supported(void)
+{
+	return !system_supports_mte();
+}
+#define arch_thp_swp_supported arch_thp_swp_supported
+
 /*
  * Outside of a few very special situations (e.g. hibernation), we always
  * use broadcast TLB invalidation instructions, therefore a spurious page
  * fault on one CPU which has been handled concurrently by another CPU
  * does not need to perform additional invalidation.
  */
-#define flush_tlb_fix_spurious_fault(vma, address) do { } while (0)
+#define flush_tlb_fix_spurious_fault(vma, address, ptep) do { } while (0)
 
 /*
  * ZERO_PAGE is a global shared page that is always zero: used
@@ -71,11 +77,11 @@ extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
 static inline phys_addr_t __pte_to_phys(pte_t pte)
 {
 	return (pte_val(pte) & PTE_ADDR_LOW) |
-		((pte_val(pte) & PTE_ADDR_HIGH) << 36);
+		((pte_val(pte) & PTE_ADDR_HIGH) << PTE_ADDR_HIGH_SHIFT);
 }
 static inline pteval_t __phys_to_pte_val(phys_addr_t phys)
 {
-	return (phys | (phys >> 36)) & PTE_ADDR_MASK;
+	return (phys | (phys >> PTE_ADDR_HIGH_SHIFT)) & PTE_ADDR_MASK;
 }
 #else
 #define __pte_to_phys(pte)	(pte_val(pte) & PTE_ADDR_MASK)
@@ -425,6 +431,16 @@ static inline int pte_swp_exclusive(pte_t pte)
 static inline pte_t pte_swp_clear_exclusive(pte_t pte)
 {
 	return clear_pte_bit(pte, __pgprot(PTE_SWP_EXCLUSIVE));
+}
+
+/*
+ * Select all bits except the pfn
+ */
+static inline pgprot_t pte_pgprot(pte_t pte)
+{
+	unsigned long pfn = pte_pfn(pte);
+
+	return __pgprot(pte_val(pfn_pte(pfn, __pgprot(0))) ^ pte_val(pte));
 }
 
 #ifdef CONFIG_NUMA_BALANCING
@@ -1030,10 +1046,10 @@ static inline void arch_swap_invalidate_area(int type)
 }
 
 #define __HAVE_ARCH_SWAP_RESTORE
-static inline void arch_swap_restore(swp_entry_t entry, struct page *page)
+static inline void arch_swap_restore(swp_entry_t entry, struct folio *folio)
 {
-	if (system_supports_mte() && mte_restore_tags(entry, page))
-		set_bit(PG_mte_tagged, &page->flags);
+	if (system_supports_mte())
+		mte_restore_tags(entry, &folio->page);
 }
 
 #endif /* CONFIG_ARM64_MTE */
@@ -1090,6 +1106,15 @@ static inline bool pud_sect_supported(void)
 }
 
 
+#define __HAVE_ARCH_PTEP_MODIFY_PROT_TRANSACTION
+#define ptep_modify_prot_start ptep_modify_prot_start
+extern pte_t ptep_modify_prot_start(struct vm_area_struct *vma,
+				    unsigned long addr, pte_t *ptep);
+
+#define ptep_modify_prot_commit ptep_modify_prot_commit
+extern void ptep_modify_prot_commit(struct vm_area_struct *vma,
+				    unsigned long addr, pte_t *ptep,
+				    pte_t old_pte, pte_t new_pte);
 #endif /* !__ASSEMBLY__ */
 
 #endif /* __ASM_PGTABLE_H */

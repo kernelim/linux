@@ -146,6 +146,19 @@ config IBMEBUS
 	help
 	  Bus device driver for GX bus based adapters.
 
+config PSERIES_PLPKS
+	depends on PPC_PSERIES
+	select NLS
+	bool
+	# PowerVM provides an isolated Platform Keystore (PKS) storage
+	# allocation for each LPAR with individually managed access
+	# controls to store sensitive information securely. It can be
+	# used to store asymmetric public keys or secrets as required
+	# by different usecases.
+	#
+	# This option is selected by in-kernel consumers that require
+	# access to the PKS.
+
 config PAPR_SCM
 	depends on PPC_PSERIES && MEMORY_HOTPLUG && LIBNVDIMM
 	tristate "Support for the PAPR Storage Class Memory interface"

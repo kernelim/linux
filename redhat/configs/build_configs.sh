@@ -109,6 +109,12 @@ function merge_configs()
 	esac
 
 	sort config-merging."$count" >> "$name"
+
+	gcc_version=$(echo __GNUC__ | gcc -E -xc - | grep -v "#")
+	if [ "$arch" == "x86_64" ] && [ $gcc_version -eq 11 ] && [ -n "$ENABLE_WERROR" ]; then
+		sed -i "s|# CONFIG_WERROR is not set|CONFIG_WERROR=y|g" "$name"
+	fi
+
 	rm -f config-merged."$count" config-merging."$count"
 	echo "Building $name complete"
 }

@@ -35,7 +35,6 @@
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_atomic_state_helper.h>
 #include <drm/drm_crtc.h>
-#include <drm/drm_crtc_helper.h>
 #include <drm/drm_damage_helper.h>
 #include <drm/drm_edid.h>
 #include <drm/drm_format_helper.h>
@@ -44,7 +43,6 @@
 #include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/drm_gem_shmem_helper.h>
 #include <drm/drm_managed.h>
-#include <drm/drm_plane_helper.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_simple_kms_helper.h>
 
@@ -614,8 +612,8 @@ static int ast_primary_plane_helper_atomic_check(struct drm_plane *plane,
 		new_crtc_state = drm_atomic_get_new_crtc_state(state, new_plane_state->crtc);
 
 	ret = drm_atomic_helper_check_plane_state(new_plane_state, new_crtc_state,
-						  DRM_PLANE_HELPER_NO_SCALING,
-						  DRM_PLANE_HELPER_NO_SCALING,
+						  DRM_PLANE_NO_SCALING,
+						  DRM_PLANE_NO_SCALING,
 						  false, true);
 	if (ret) {
 		return ret;
@@ -637,11 +635,10 @@ static void ast_handle_damage(struct ast_plane *ast_plane, struct iosys_map *src
 			      struct drm_framebuffer *fb,
 			      const struct drm_rect *clip)
 {
-	void __iomem *dst = ast_plane->vaddr;
-	void *vaddr = src[0].vaddr;
+	struct iosys_map dst = IOSYS_MAP_INIT_VADDR_IOMEM(ast_plane->vaddr);
 
-	dst += drm_fb_clip_offset(fb->pitches[0], fb->format, clip);
-	drm_fb_memcpy_toio(dst, fb->pitches[0], vaddr, fb, clip);
+	iosys_map_incr(&dst, drm_fb_clip_offset(fb->pitches[0], fb->format, clip));
+	drm_fb_memcpy(&dst, fb->pitches, src, fb, clip);
 }
 
 static void ast_primary_plane_helper_atomic_update(struct drm_plane *plane,
@@ -859,8 +856,8 @@ static int ast_cursor_plane_helper_atomic_check(struct drm_plane *plane,
 		new_crtc_state = drm_atomic_get_new_crtc_state(state, new_plane_state->crtc);
 
 	ret = drm_atomic_helper_check_plane_state(new_plane_state, new_crtc_state,
-						  DRM_PLANE_HELPER_NO_SCALING,
-						  DRM_PLANE_HELPER_NO_SCALING,
+						  DRM_PLANE_NO_SCALING,
+						  DRM_PLANE_NO_SCALING,
 						  true, true);
 	if (ret || !new_plane_state->visible)
 		return ret;
@@ -1135,12 +1132,12 @@ static int ast_crtc_helper_atomic_check(struct drm_crtc *crtc,
 	bool succ;
 	int ret;
 
-	ret = drm_atomic_helper_check_crtc_state(crtc_state, false);
-	if (ret)
-		return ret;
-
 	if (!crtc_state->enable)
 		return 0;
+
+	ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
+	if (ret)
+		return ret;
 
 	ast_state = to_ast_crtc_state(crtc_state);
 
@@ -1769,7 +1766,6 @@ static const struct drm_mode_config_funcs ast_mode_config_funcs = {
 int ast_mode_config_init(struct ast_private *ast)
 {
 	struct drm_device *dev = &ast->base;
-	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	int ret;
 
 	ret = drmm_mode_config_init(dev);
@@ -1780,7 +1776,6 @@ int ast_mode_config_init(struct ast_private *ast)
 	dev->mode_config.min_width = 0;
 	dev->mode_config.min_height = 0;
 	dev->mode_config.preferred_depth = 24;
-	dev->mode_config.fb_base = pci_resource_start(pdev, 0);
 
 	if (ast->chip == AST2100 ||
 	    ast->chip == AST2200 ||

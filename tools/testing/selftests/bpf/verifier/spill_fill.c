@@ -84,7 +84,7 @@
 	},
 	.fixup_map_ringbuf = { 1 },
 	.result = REJECT,
-	.errstr = "R0 pointer arithmetic on alloc_mem_or_null prohibited",
+	.errstr = "R0 pointer arithmetic on ringbuf_mem_or_null prohibited",
 },
 {
 	"check corrupted spill/fill",
@@ -171,9 +171,10 @@
 	BPF_MOV64_IMM(BPF_REG_0, 0),
 	BPF_EXIT_INSN(),
 	},
-	.result = REJECT,
-	.errstr = "invalid read from stack off -4+0 size 4",
-	.prog_type = BPF_PROG_TYPE_SCHED_CLS,
+	.result_unpriv = REJECT,
+	.errstr_unpriv = "invalid read from stack off -4+0 size 4",
+	/* in privileged mode reads from uninitialized stack locations are permitted */
+	.result = ACCEPT,
 },
 {
 	"Spill a u32 const scalar.  Refill as u16.  Offset to skb->data",

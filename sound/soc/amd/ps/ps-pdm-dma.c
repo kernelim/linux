@@ -65,22 +65,26 @@ static void acp63_enable_pdm_clock(void __iomem *acp_base)
 	acp63_writel(pdm_ctrl, acp_base + ACP_WOV_MISC_CTRL);
 }
 
-static void acp63_enable_pdm_interrupts(void __iomem *acp_base)
+static void acp63_enable_pdm_interrupts(struct pdm_dev_data *adata)
 {
 	u32 ext_int_ctrl;
 
-	ext_int_ctrl = acp63_readl(acp_base + ACP_EXTERNAL_INTR_CNTL);
+	mutex_lock(adata->acp_lock);
+	ext_int_ctrl = acp63_readl(adata->acp63_base + ACP_EXTERNAL_INTR_CNTL);
 	ext_int_ctrl |= PDM_DMA_INTR_MASK;
-	acp63_writel(ext_int_ctrl, acp_base + ACP_EXTERNAL_INTR_CNTL);
+	acp63_writel(ext_int_ctrl, adata->acp63_base + ACP_EXTERNAL_INTR_CNTL);
+	mutex_unlock(adata->acp_lock);
 }
 
-static void acp63_disable_pdm_interrupts(void __iomem *acp_base)
+static void acp63_disable_pdm_interrupts(struct pdm_dev_data *adata)
 {
 	u32 ext_int_ctrl;
 
-	ext_int_ctrl = acp63_readl(acp_base + ACP_EXTERNAL_INTR_CNTL);
+	mutex_lock(adata->acp_lock);
+	ext_int_ctrl = acp63_readl(adata->acp63_base + ACP_EXTERNAL_INTR_CNTL);
 	ext_int_ctrl &= ~PDM_DMA_INTR_MASK;
-	acp63_writel(ext_int_ctrl, acp_base + ACP_EXTERNAL_INTR_CNTL);
+	acp63_writel(ext_int_ctrl, adata->acp63_base + ACP_EXTERNAL_INTR_CNTL);
+	mutex_unlock(adata->acp_lock);
 }
 
 static bool acp63_check_pdm_dma_status(void __iomem *acp_base)
@@ -202,7 +206,7 @@ static int acp63_pdm_dma_open(struct snd_soc_component *component,
 		return ret;
 	}
 
-	acp63_enable_pdm_interrupts(adata->acp63_base);
+	acp63_enable_pdm_interrupts(adata);
 
 	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
 		adata->capture_stream = substream;
@@ -278,7 +282,7 @@ static int acp63_pdm_dma_close(struct snd_soc_component *component,
 	struct pdm_dev_data *adata = dev_get_drvdata(component->dev);
 	struct snd_pcm_runtime *runtime = substream->runtime;
 
-	acp63_disable_pdm_interrupts(adata->acp63_base);
+	acp63_disable_pdm_interrupts(adata);
 	adata->capture_stream = NULL;
 	kfree(runtime->private_data);
 	return 0;
@@ -357,8 +361,12 @@ static int acp63_pdm_audio_probe(struct platform_device *pdev)
 {
 	struct resource *res;
 	struct pdm_dev_data *adata;
+	struct acp63_dev_data *acp_data;
+	struct device *parent;
 	int status;
 
+	parent = pdev->dev.parent;
+	acp_data = dev_get_drvdata(parent);
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
 		dev_err(&pdev->dev, "IORESOURCE_MEM FAILED\n");
@@ -374,7 +382,7 @@ static int acp63_pdm_audio_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	adata->capture_stream = NULL;
-
+	adata->acp_lock = &acp_data->acp_lock;
 	dev_set_drvdata(&pdev->dev, adata);
 	status = devm_snd_soc_register_component(&pdev->dev,
 						 &acp63_pdm_component,
@@ -414,7 +422,7 @@ static int __maybe_unused acp63_pdm_resume(struct device *dev)
 		acp63_init_pdm_ring_buffer(PDM_MEM_WINDOW_START, buffer_len,
 					   period_bytes, adata->acp63_base);
 	}
-	acp63_enable_pdm_interrupts(adata->acp63_base);
+	acp63_enable_pdm_interrupts(adata);
 	return 0;
 }
 
@@ -423,7 +431,7 @@ static int __maybe_unused acp63_pdm_suspend(struct device *dev)
 	struct pdm_dev_data *adata;
 
 	adata = dev_get_drvdata(dev);
-	acp63_disable_pdm_interrupts(adata->acp63_base);
+	acp63_disable_pdm_interrupts(adata);
 	return 0;
 }
 
@@ -432,7 +440,7 @@ static int __maybe_unused acp63_pdm_runtime_resume(struct device *dev)
 	struct pdm_dev_data *adata;
 
 	adata = dev_get_drvdata(dev);
-	acp63_enable_pdm_interrupts(adata->acp63_base);
+	acp63_enable_pdm_interrupts(adata);
 	return 0;
 }
 

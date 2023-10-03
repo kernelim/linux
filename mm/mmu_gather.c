@@ -47,8 +47,20 @@ static void tlb_batch_pages_flush(struct mmu_gather *tlb)
 	struct mmu_gather_batch *batch;
 
 	for (batch = &tlb->local; batch && batch->nr; batch = batch->next) {
-		free_pages_and_swap_cache(batch->pages, batch->nr);
-		batch->nr = 0;
+		struct page **pages = batch->pages;
+
+		do {
+			/*
+			 * limit free batch count when PAGE_SIZE > 4K
+			 */
+			unsigned int nr = min(512U, batch->nr);
+
+			free_pages_and_swap_cache(pages, nr);
+			pages += nr;
+			batch->nr -= nr;
+
+			cond_resched();
+		} while (batch->nr);
 	}
 	tlb->active = &tlb->local;
 }
@@ -140,7 +152,7 @@ static void tlb_remove_table_smp_sync(void *arg)
 	/* Simply deliver the interrupt */
 }
 
-static void tlb_remove_table_sync_one(void)
+void tlb_remove_table_sync_one(void)
 {
 	/*
 	 * This isn't an RCU grace period and hence the page-tables cannot be
@@ -163,8 +175,6 @@ static void tlb_remove_table_free(struct mmu_table_batch *batch)
 }
 
 #else /* !CONFIG_MMU_GATHER_RCU_TABLE_FREE */
-
-static void tlb_remove_table_sync_one(void) { }
 
 static void tlb_remove_table_free(struct mmu_table_batch *batch)
 {

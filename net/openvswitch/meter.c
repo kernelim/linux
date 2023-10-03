@@ -449,7 +449,7 @@ static int ovs_meter_cmd_set(struct sk_buff *skb, struct genl_info *info)
 
 	err = attach_meter(meter_tbl, meter);
 	if (err)
-		goto exit_unlock;
+		goto exit_free_old_meter;
 
 	ovs_unlock();
 
@@ -472,6 +472,8 @@ static int ovs_meter_cmd_set(struct sk_buff *skb, struct genl_info *info)
 	genlmsg_end(reply, ovs_reply_header);
 	return genlmsg_reply(reply, info);
 
+exit_free_old_meter:
+	ovs_meter_free(old_meter);
 exit_unlock:
 	ovs_unlock();
 	nlmsg_free(reply);
@@ -720,6 +722,7 @@ struct genl_family dp_meter_genl_family __ro_after_init = {
 	.parallel_ops = true,
 	.small_ops = dp_meter_genl_ops,
 	.n_small_ops = ARRAY_SIZE(dp_meter_genl_ops),
+	.resv_start_op = OVS_METER_CMD_GET + 1,
 	.mcgrps = &ovs_meter_multicast_group,
 	.n_mcgrps = 1,
 	.module = THIS_MODULE,

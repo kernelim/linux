@@ -48,19 +48,19 @@ The following is an example of a valid commit title & description.  The first co
 [link:CommitRules.adoc#user-content-2g-omitted-fixes-optional[2g]]                <omitted-fix explanation required> +
 [link:CommitRules.adoc#user-content-2g-omitted-fixes-optional[2g]] +
 [link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]] commit 7fff4beb311dfab4f18ff2cd64f78scd9296a39a +
-[link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]]  Author: John Upstream +<john.upstream@someupstreamplace.com>+ +
+[link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]]  Author: John Upstream <john.upstream@someupstreamplace.com> +
 [link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]]  Date:   Mon Mar 28 14:29:19 2011 -0700 +
 [link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]] +
 [link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]]     subsystem: include missing kernel.h header to fix compile +
 [link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]]     This is needed to compile this module.  It was missing from +
 [link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]]     the original commit. +
 [link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]] +
-[link:CommitRules.adoc#user-content-3b-email-bridge-upstream-contributors-required[3b]]     Signed-off-by: John Upstream +<john.upstream@someupstreamplace.com>+ +
-[link:CommitRules.adoc#user-content-3b-email-bridge-upstream-contributors-required[3b]]     Signed-off-by: Jane Upstream +<jane.upstream@someupstreamplace.com>+ +
+[link:CommitRules.adoc#user-content-3b-email-bridge-upstream-contributors-required[3b]]     Signed-off-by: John Upstream <john.upstream@someupstreamplace.com> +
+[link:CommitRules.adoc#user-content-3b-email-bridge-upstream-contributors-required[3b]]     Signed-off-by: Jane Upstream <jane.upstream@someupstreamplace.com> +
 [link:CommitRules.adoc#user-content-4-version-information-if-necessary[4]] +
 [link:CommitRules.adoc#user-content-4-version-information-if-necessary[4]] v2: Some information about the changes between v1 and v2 +
 [link:CommitRules.adoc#user-content-4-version-information-if-necessary[4]] +
-[link:CommitRules.adoc#user-content-5-dco-signed-off-by-tag[5]] Signed-off-by: Shadow Man +<shadow.man@redhat.com>+
+[link:CommitRules.adoc#user-content-5-dco-signed-off-by-tag[5]] Signed-off-by: Shadow Man <shadow.man@redhat.com>
 
 == Example Merge Request
 
@@ -82,8 +82,8 @@ The following is an example of a valid Merge Request title and description.  The
 [link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]] +
 [link:CommitRules.adoc#user-content-4-version-information-if-necessary[4]]  v2: Some information about the changes between v1 and v2 +
 [link:CommitRules.adoc#user-content-4-version-information-if-necessary[4]] +
-[link:CommitRules.adoc#user-content-5-dco-signed-off-by-tag[5]] Signed-off-by: Shadow Man +<shadow.man@redhat.com>+ +
-[link:CommitRules.adoc#user-content-6-internal-contributors[6]] Cc: Fedora Friend +<fedora.friend@redhat.com>+
+[link:CommitRules.adoc#user-content-5-dco-signed-off-by-tag[5]] Signed-off-by: Shadow Man <shadow.man@redhat.com> +
+[link:CommitRules.adoc#user-content-6-internal-contributors[6]] Cc: Fedora Friend <fedora.friend@redhat.com>
 
 === Section Descriptions
 

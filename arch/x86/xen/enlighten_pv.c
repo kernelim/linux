@@ -27,8 +27,6 @@
 #include <linux/export.h>
 #include <linux/mm.h>
 #include <linux/page-flags.h>
-#include <linux/highmem.h>
-#include <linux/console.h>
 #include <linux/pci.h>
 #include <linux/gfp.h>
 #include <linux/edd.h>
@@ -109,17 +107,6 @@ struct tls_descs {
  */
 static DEFINE_PER_CPU(struct tls_descs, shadow_tls_desc);
 
-static void __init xen_banner(void)
-{
-	unsigned version = HYPERVISOR_xen_version(XENVER_version, NULL);
-	struct xen_extraversion extra;
-	HYPERVISOR_xen_version(XENVER_extraversion, &extra);
-
-	pr_info("Booting paravirtualized kernel on %s\n", pv_info.name);
-	pr_info("Xen version: %d.%d%s (preserve-AD)\n",
-		version >> 16, version & 0xffff, extra.extraversion);
-}
-
 static void __init xen_pv_init_platform(void)
 {
 	populate_extra_pte(fix_to_virt(FIX_PARAVIRT_BOOTMAP));
@@ -140,22 +127,6 @@ static void __init xen_pv_guest_late_init(void)
 	/* Setup shared vcpu info for non-smp configurations */
 	xen_setup_vcpu_info_placement();
 #endif
-}
-
-/* Check if running on Xen version (major, minor) or later */
-bool
-xen_running_on_version_or_later(unsigned int major, unsigned int minor)
-{
-	unsigned int version;
-
-	if (!xen_domain())
-		return false;
-
-	version = HYPERVISOR_xen_version(XENVER_version, NULL);
-	if ((((version >> 16) == major) && ((version & 0xffff) >= minor)) ||
-		((version >> 16) > major))
-		return true;
-	return false;
 }
 
 static __read_mostly unsigned int cpuid_leaf5_ecx_val;
@@ -758,8 +729,8 @@ static void xen_write_idt_entry(gate_desc *dt, int entrynum, const gate_desc *g)
 	preempt_enable();
 }
 
-static void xen_convert_trap_info(const struct desc_ptr *desc,
-				  struct trap_info *traps)
+static unsigned xen_convert_trap_info(const struct desc_ptr *desc,
+				      struct trap_info *traps, bool full)
 {
 	unsigned in, out, count;
 
@@ -769,17 +740,18 @@ static void xen_convert_trap_info(const struct desc_ptr *desc,
 	for (in = out = 0; in < count; in++) {
 		gate_desc *entry = (gate_desc *)(desc->address) + in;
 
-		if (cvt_gate_to_trap(in, entry, &traps[out]))
+		if (cvt_gate_to_trap(in, entry, &traps[out]) || full)
 			out++;
 	}
-	traps[out].address = 0;
+
+	return out;
 }
 
 void xen_copy_trap_info(struct trap_info *traps)
 {
 	const struct desc_ptr *desc = this_cpu_ptr(&idt_desc);
 
-	xen_convert_trap_info(desc, traps);
+	xen_convert_trap_info(desc, traps, true);
 }
 
 /* Load a new IDT into Xen.  In principle this can be per-CPU, so we
@@ -789,6 +761,7 @@ static void xen_load_idt(const struct desc_ptr *desc)
 {
 	static DEFINE_SPINLOCK(lock);
 	static struct trap_info traps[257];
+	unsigned out;
 
 	trace_xen_cpu_load_idt(desc);
 
@@ -796,7 +769,8 @@ static void xen_load_idt(const struct desc_ptr *desc)
 
 	memcpy(this_cpu_ptr(&idt_desc), desc, sizeof(idt_desc));
 
-	xen_convert_trap_info(desc, traps);
+	out = xen_convert_trap_info(desc, traps, false);
+	memset(&traps[out], 0, sizeof(traps[0]));
 
 	xen_mc_flush();
 	if (HYPERVISOR_set_trap_table(traps))
@@ -1021,31 +995,13 @@ void __init xen_setup_vcpu_info_placement(void)
 	for_each_possible_cpu(cpu) {
 		/* Set up direct vCPU id mapping for PV guests. */
 		per_cpu(xen_vcpu_id, cpu) = cpu;
-
-		/*
-		 * xen_vcpu_setup(cpu) can fail  -- in which case it
-		 * falls back to the shared_info version for cpus
-		 * where xen_vcpu_nr(cpu) < MAX_VIRT_CPUS.
-		 *
-		 * xen_cpu_up_prepare_pv() handles the rest by failing
-		 * them in hotplug.
-		 */
-		(void) xen_vcpu_setup(cpu);
+		xen_vcpu_setup(cpu);
 	}
 
-	/*
-	 * xen_vcpu_setup managed to place the vcpu_info within the
-	 * percpu area for all cpus, so make use of it.
-	 */
-	if (xen_have_vcpu_info_placement) {
-		pv_ops.irq.save_fl = __PV_IS_CALLEE_SAVE(xen_save_fl_direct);
-		pv_ops.irq.irq_disable =
-			__PV_IS_CALLEE_SAVE(xen_irq_disable_direct);
-		pv_ops.irq.irq_enable =
-			__PV_IS_CALLEE_SAVE(xen_irq_enable_direct);
-		pv_ops.mmu.read_cr2 =
-			__PV_IS_CALLEE_SAVE(xen_read_cr2_direct);
-	}
+	pv_ops.irq.save_fl = __PV_IS_CALLEE_SAVE(xen_save_fl_direct);
+	pv_ops.irq.irq_disable = __PV_IS_CALLEE_SAVE(xen_irq_disable_direct);
+	pv_ops.irq.irq_enable = __PV_IS_CALLEE_SAVE(xen_irq_enable_direct);
+	pv_ops.mmu.read_cr2 = __PV_IS_CALLEE_SAVE(xen_read_cr2_direct);
 }
 
 static const struct pv_info xen_info __initconst = {
@@ -1208,7 +1164,7 @@ static void __init xen_setup_gdt(int cpu)
 	pv_ops.cpu.write_gdt_entry = xen_write_gdt_entry_boot;
 	pv_ops.cpu.load_gdt = xen_load_gdt_boot;
 
-	switch_to_new_gdt(cpu);
+	switch_gdt_and_percpu_base(cpu);
 
 	pv_ops.cpu.write_gdt_entry = xen_write_gdt_entry;
 	pv_ops.cpu.load_gdt = xen_load_gdt;
@@ -1220,6 +1176,11 @@ static void __init xen_dom0_set_legacy_features(void)
 }
 
 extern void early_xen_iret_patch(void);
+
+static void __init xen_domu_set_legacy_features(void)
+{
+	x86_platform.legacy.rtc = 0;
+}
 
 /* First C function to be called on Xen boot */
 asmlinkage __visible void __init xen_start_kernel(void)
@@ -1274,12 +1235,6 @@ asmlinkage __visible void __init xen_start_kernel(void)
 	/* Prevent unwanted bits from being set in PTEs. */
 	__supported_pte_mask &= ~_PAGE_GLOBAL;
 	__default_kernel_pte_mask &= ~_PAGE_GLOBAL;
-
-	/*
-	 * Prevent page tables from being allocated in highmem, even
-	 * if CONFIG_HIGHPTE is enabled.
-	 */
-	__userpte_alloc_gfp &= ~__GFP_HIGHMEM;
 
 	/* Get mfn list */
 	xen_build_dynamic_phys_to_machine();
@@ -1366,9 +1321,10 @@ asmlinkage __visible void __init xen_start_kernel(void)
 	boot_params.hdr.hardware_subarch = X86_SUBARCH_XEN;
 
 	if (!xen_initial_domain()) {
-		add_preferred_console("xenboot", 0, NULL);
 		if (pci_xen)
 			x86_init.pci.arch_init = pci_xen_init;
+		x86_platform.set_legacy_features =
+				xen_domu_set_legacy_features;
 	} else {
 		const struct dom0_vga_console_info *info =
 			(void *)((char *)xen_start_info +
@@ -1393,10 +1349,6 @@ asmlinkage __visible void __init xen_start_kernel(void)
 
 		xen_acpi_sleep_register();
 
-		/* Avoid searching for BIOS MP tables */
-		x86_init.mpparse.find_smp_config = x86_init_noop;
-		x86_init.mpparse.get_smp_config = x86_init_uint_noop;
-
 		xen_boot_params_init_edd();
 
 #ifdef CONFIG_ACPI
@@ -1409,11 +1361,7 @@ asmlinkage __visible void __init xen_start_kernel(void)
 #endif
 	}
 
-	if (!boot_params.screen_info.orig_video_isVGA)
-		add_preferred_console("tty", 0, NULL);
-	add_preferred_console("hvc", 0, NULL);
-	if (boot_params.screen_info.orig_video_isVGA)
-		add_preferred_console("tty", 0, NULL);
+	xen_add_preferred_consoles();
 
 #ifdef CONFIG_PCI
 	/* PCI BIOS service won't work from a PV guest. */

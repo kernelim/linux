@@ -7,7 +7,6 @@
  *             Kirti Wankhede <kwankhede@nvidia.com>
  */
 
-#include <linux/device.h>
 #include <linux/iommu.h>
 #include <linux/mdev.h>
 
@@ -57,10 +56,11 @@ EXPORT_SYMBOL_GPL(mdev_bus_type);
  **/
 int mdev_register_driver(struct mdev_driver *drv)
 {
+	if (!drv->device_api)
+		return -EINVAL;
+
 	/* initialize common driver fields */
 	drv->driver.bus = &mdev_bus_type;
-
-	/* register with core */
 	return driver_register(&drv->driver);
 }
 EXPORT_SYMBOL(mdev_register_driver);

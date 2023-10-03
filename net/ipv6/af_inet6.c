@@ -221,6 +221,7 @@ lookup_protocol:
 	np->pmtudisc	= IPV6_PMTUDISC_WANT;
 	np->repflow	= net->ipv6.sysctl.flowlabel_reflect & FLOWLABEL_REFLECT_ESTABLISHED;
 	sk->sk_ipv6only	= net->ipv6.sysctl.bindv6only;
+	sk->sk_txrehash = READ_ONCE(net->core.sysctl_txrehash);
 
 	/* Init the ipv4 part of the socket since we can have sockets
 	 * using v6 API for ipv4.
@@ -1063,6 +1064,8 @@ static const struct ipv6_stub ipv6_stub_impl = {
 static const struct ipv6_bpf_stub ipv6_bpf_stub_impl = {
 	.inet6_bind = __inet6_bind,
 	.udp6_lib_lookup = __udp6_lib_lookup,
+	.ipv6_setsockopt = do_ipv6_setsockopt,
+	.ipv6_getsockopt = do_ipv6_getsockopt,
 };
 
 static int __init inet6_init(void)

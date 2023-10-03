@@ -7657,7 +7657,7 @@ static struct r5conf *setup_conf(struct mddev *mddev)
 	conf->shrinker.count_objects = raid5_cache_count;
 	conf->shrinker.batch = 128;
 	conf->shrinker.flags = 0;
-	ret = register_shrinker(&conf->shrinker);
+	ret = register_shrinker(&conf->shrinker, "md-raid5:%s", mdname(mddev));
 	if (ret) {
 		pr_warn("md/raid:%s: couldn't register shrinker.\n",
 			mdname(mddev));
@@ -7716,7 +7716,6 @@ static void raid5_set_io_opt(struct r5conf *conf)
 static int raid5_run(struct mddev *mddev)
 {
 	struct r5conf *conf;
-	int working_disks = 0;
 	int dirty_parity_disks = 0;
 	struct md_rdev *rdev;
 	struct md_rdev *journal_dev = NULL;
@@ -7912,10 +7911,8 @@ static int raid5_run(struct mddev *mddev)
 			pr_warn("md: cannot handle concurrent replacement and reshape.\n");
 			goto abort;
 		}
-		if (test_bit(In_sync, &rdev->flags)) {
-			working_disks++;
+		if (test_bit(In_sync, &rdev->flags))
 			continue;
-		}
 		/* This disc is not fully in-sync.  However if it
 		 * just stored parity (beyond the recovery_offset),
 		 * when we don't need to be concerned about the

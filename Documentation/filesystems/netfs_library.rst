@@ -79,7 +79,7 @@ To help deal with the per-inode context, a number helper functions are
 provided.  Firstly, a function to perform basic initialisation on a context and
 set the operations table pointer::
 
-	void netfs_inode_init(struct inode *inode,
+	void netfs_inode_init(struct netfs_inode *ctx,
 			      const struct netfs_request_ops *ops);
 
 then a function to cast from the VFS inode structure to the netfs context::
@@ -89,13 +89,13 @@ then a function to cast from the VFS inode structure to the netfs context::
 and finally, a function to get the cache cookie pointer from the context
 attached to an inode (or NULL if fscache is disabled)::
 
-	struct fscache_cookie *netfs_i_cookie(struct inode *inode);
+	struct fscache_cookie *netfs_i_cookie(struct netfs_inode *ctx);
 
 
 Buffered Read Helpers
 =====================
 
-The library provides a set of read helpers that handle the ->readpage(),
+The library provides a set of read helpers that handle the ->read_folio(),
 ->readahead() and much of the ->write_begin() VM operations and translate them
 into a common call framework.
 
@@ -135,20 +135,20 @@ Read Helper Functions
 Three read helpers are provided::
 
 	void netfs_readahead(struct readahead_control *ractl);
-	int netfs_readpage(struct file *file,
-			   struct page *page);
-	int netfs_write_begin(struct file *file,
+	int netfs_read_folio(struct file *file,
+			     struct folio *folio);
+	int netfs_write_begin(struct netfs_inode *ctx,
+			      struct file *file,
 			      struct address_space *mapping,
 			      loff_t pos,
 			      unsigned int len,
-			      unsigned int flags,
 			      struct folio **_folio,
 			      void **_fsdata);
 
 Each corresponds to a VM address space operation.  These operations use the
 state in the per-inode context.
 
-For ->readahead() and ->readpage(), the network filesystem just point directly
+For ->readahead() and ->read_folio(), the network filesystem just point directly
 at the corresponding read helper; whereas for ->write_begin(), it may be a
 little more complicated as the network filesystem might want to flush
 conflicting writes or track dirty data and needs to put the acquired folio if

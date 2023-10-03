@@ -181,11 +181,19 @@ static inline int is_module_addr(void *addr)
 #define _PAGE_SOFT_DIRTY 0x000
 #endif
 
+#define _PAGE_SW_BITS	0xffUL		/* All SW bits */
+
 #define _PAGE_SWP_EXCLUSIVE _PAGE_LARGE	/* SW pte exclusive swap bit */
 
 /* Set of bits not changed in pte_modify */
 #define _PAGE_CHG_MASK		(PAGE_MASK | _PAGE_SPECIAL | _PAGE_DIRTY | \
 				 _PAGE_YOUNG | _PAGE_SOFT_DIRTY)
+
+/*
+ * Mask of bits that must not be changed with RDP. Allow only _PAGE_PROTECT
+ * HW bit and all SW bits.
+ */
+#define _PAGE_RDP_MASK		~(_PAGE_PROTECT | _PAGE_SW_BITS)
 
 /*
  * handle_pte_fault uses pte_present and pte_none to find out the pte type
@@ -1061,6 +1069,19 @@ static inline pte_t pte_mkhuge(pte_t pte)
 #define IPTE_NODAT	0x400
 #define IPTE_GUEST_ASCE	0x800
 
+static __always_inline void __ptep_rdp(unsigned long addr, pte_t *ptep,
+				       unsigned long opt, unsigned long asce,
+				       int local)
+{
+	unsigned long pto;
+
+	pto = __pa(ptep) & ~(PTRS_PER_PTE * sizeof(pte_t) - 1);
+	asm volatile(".insn rrf,0xb98b0000,%[r1],%[r2],%[asce],%[m4]"
+		     : "+m" (*ptep)
+		     : [r1] "a" (pto), [r2] "a" ((addr & PAGE_MASK) | opt),
+		       [asce] "a" (asce), [m4] "i" (local));
+}
+
 static __always_inline void __ptep_ipte(unsigned long address, pte_t *ptep,
 					unsigned long opt, unsigned long asce,
 					int local)
@@ -1182,9 +1203,22 @@ static inline pte_t ptep_get_and_clear_full(struct mm_struct *mm,
 	} else {
 		res = ptep_xchg_lazy(mm, addr, ptep, __pte(_PAGE_INVALID));
 	}
-	/* At this point the reference through the mapping is still present */
-	if (mm_is_protected(mm) && pte_present(res))
-		uv_convert_owned_from_secure(pte_val(res) & PAGE_MASK);
+	/* Nothing to do */
+	if (!mm_is_protected(mm) || !pte_present(res))
+		return res;
+	/*
+	 * At this point the reference through the mapping is still present.
+	 * The notifier should have destroyed all protected vCPUs at this
+	 * point, so the destroy should be successful.
+	 */
+	if (full && !uv_destroy_owned_page(pte_val(res) & PAGE_MASK))
+		return res;
+	/*
+	 * If something went wrong and the page could not be destroyed, or
+	 * if this is not a mm teardown, the slower export is used as
+	 * fallback instead.
+	 */
+	uv_convert_owned_from_secure(pte_val(res) & PAGE_MASK);
 	return res;
 }
 
@@ -1198,6 +1232,44 @@ static inline void ptep_set_wrprotect(struct mm_struct *mm,
 		ptep_xchg_lazy(mm, addr, ptep, pte_wrprotect(pte));
 }
 
+/*
+ * Check if PTEs only differ in _PAGE_PROTECT HW bit, but also allow SW PTE
+ * bits in the comparison. Those might change e.g. because of dirty and young
+ * tracking.
+ */
+static inline int pte_allow_rdp(pte_t old, pte_t new)
+{
+	/*
+	 * Only allow changes from RO to RW
+	 */
+	if (!(pte_val(old) & _PAGE_PROTECT) || pte_val(new) & _PAGE_PROTECT)
+		return 0;
+
+	return (pte_val(old) & _PAGE_RDP_MASK) == (pte_val(new) & _PAGE_RDP_MASK);
+}
+
+static inline void flush_tlb_fix_spurious_fault(struct vm_area_struct *vma,
+						unsigned long address,
+						pte_t *ptep)
+{
+	/*
+	 * RDP might not have propagated the PTE protection reset to all CPUs,
+	 * so there could be spurious TLB protection faults.
+	 * NOTE: This will also be called when a racing pagetable update on
+	 * another thread already installed the correct PTE. Both cases cannot
+	 * really be distinguished.
+	 * Therefore, only do the local TLB flush when RDP can be used, and the
+	 * PTE does not have _PAGE_PROTECT set, to avoid unnecessary overhead.
+	 * A local RDP can be used to do the flush.
+	 */
+	if (MACHINE_HAS_RDP && !(pte_val(*ptep) & _PAGE_PROTECT))
+		__ptep_rdp(address, ptep, 0, 0, 1);
+}
+#define flush_tlb_fix_spurious_fault flush_tlb_fix_spurious_fault
+
+void ptep_reset_dat_prot(struct mm_struct *mm, unsigned long addr, pte_t *ptep,
+			 pte_t new);
+
 #define __HAVE_ARCH_PTEP_SET_ACCESS_FLAGS
 static inline int ptep_set_access_flags(struct vm_area_struct *vma,
 					unsigned long addr, pte_t *ptep,
@@ -1205,7 +1277,10 @@ static inline int ptep_set_access_flags(struct vm_area_struct *vma,
 {
 	if (pte_same(*ptep, entry))
 		return 0;
-	ptep_xchg_direct(vma->vm_mm, addr, ptep, entry);
+	if (MACHINE_HAS_RDP && !mm_has_pgste(vma->vm_mm) && pte_allow_rdp(*ptep, entry))
+		ptep_reset_dat_prot(vma->vm_mm, addr, ptep, entry);
+	else
+		ptep_xchg_direct(vma->vm_mm, addr, ptep, entry);
 	return 1;
 }
 
@@ -1781,6 +1856,10 @@ static inline swp_entry_t __swp_entry(unsigned long type, unsigned long offset)
 
 extern int vmem_add_mapping(unsigned long start, unsigned long size);
 extern void vmem_remove_mapping(unsigned long start, unsigned long size);
+extern int __vmem_map_4k_page(unsigned long addr, unsigned long phys, pgprot_t prot, bool alloc);
+extern int vmem_map_4k_page(unsigned long addr, unsigned long phys, pgprot_t prot);
+extern void vmem_unmap_4k_page(unsigned long addr);
+extern pte_t *vmem_get_alloc_pte(unsigned long addr, bool alloc);
 extern int s390_enable_sie(void);
 extern int s390_enable_skey(void);
 extern void s390_reset_cmma(struct mm_struct *mm);

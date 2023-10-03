@@ -26,8 +26,17 @@
 #define ICE_TC_FLWR_FIELD_CVLAN			BIT(19)
 #define ICE_TC_FLWR_FIELD_PPPOE_SESSID		BIT(20)
 #define ICE_TC_FLWR_FIELD_PPP_PROTO		BIT(21)
+#define ICE_TC_FLWR_FIELD_IP_TOS		BIT(22)
+#define ICE_TC_FLWR_FIELD_IP_TTL		BIT(23)
+#define ICE_TC_FLWR_FIELD_ENC_IP_TOS		BIT(24)
+#define ICE_TC_FLWR_FIELD_ENC_IP_TTL		BIT(25)
+#define ICE_TC_FLWR_FIELD_L2TPV3_SESSID		BIT(26)
+#define ICE_TC_FLWR_FIELD_VLAN_PRIO		BIT(27)
+#define ICE_TC_FLWR_FIELD_CVLAN_PRIO		BIT(28)
 
 #define ICE_TC_FLOWER_MASK_32   0xFFFFFFFF
+
+#define ICE_IPV6_HDR_TC_MASK 0xFF00000
 
 struct ice_indr_block_priv {
 	struct net_device *netdev;
@@ -36,13 +45,26 @@ struct ice_indr_block_priv {
 };
 
 struct ice_tc_flower_action {
-	u32 tc_class;
+	/* forward action specific params */
+	union {
+		struct {
+			u32 tc_class; /* forward to hw_tc */
+			u32 rsvd;
+		} tc;
+		struct {
+			u16 queue; /* forward to queue */
+			/* To add filter in HW, absolute queue number in global
+			 * space of queues (between 0...N) is needed
+			 */
+			u16 hw_queue;
+		} q;
+	} fwd;
 	enum ice_sw_fwd_act_type fltr_act;
 };
 
 struct ice_tc_vlan_hdr {
 	__be16 vlan_id; /* Only last 12 bits valid */
-	u16 vlan_prio; /* Only last 3 bits valid (valid values: 0..7) */
+	__be16 vlan_prio; /* Only last 3 bits valid (valid values: 0..7) */
 	__be16 vlan_tpid;
 };
 
@@ -80,6 +102,10 @@ struct ice_tc_l3_hdr {
 	u8 ttl;
 };
 
+struct ice_tc_l2tpv3_hdr {
+	__be32 session_id;
+};
+
 struct ice_tc_l4_hdr {
 	__be16 dst_port;
 	__be16 src_port;
@@ -92,6 +118,7 @@ struct ice_tc_flower_lyr_2_4_hdrs {
 	struct ice_tc_vlan_hdr vlan_hdr;
 	struct ice_tc_vlan_hdr cvlan_hdr;
 	struct ice_tc_pppoe_hdr pppoe_hdr;
+	struct ice_tc_l2tpv3_hdr l2tpv3_hdr;
 	/* L3 (IPv4[6]) layer fields with their mask */
 	struct ice_tc_l3_hdr l3_key;
 	struct ice_tc_l3_hdr l3_mask;
@@ -117,11 +144,11 @@ struct ice_tc_flower_fltr {
 	 */
 	u16 rid;
 	u16 rule_id;
-	/* this could be queue/vsi_idx (sw handle)/queue_group, depending upon
-	 * destination type
+	/* VSI handle of the destination VSI (it could be main PF VSI, CHNL_VSI,
+	 * VF VSI)
 	 */
-	u16 dest_id;
-	/* if dest_id is vsi_idx, then need to store destination VSI ptr */
+	u16 dest_vsi_handle;
+	/* ptr to destination VSI */
 	struct ice_vsi *dest_vsi;
 	/* direction of fltr for eswitch use case */
 	enum ice_eswitch_fltr_direction direction;
@@ -148,12 +175,23 @@ struct ice_tc_flower_fltr {
  * @f: Pointer to tc-flower filter
  *
  * Criteria to determine of given filter is valid channel filter
- * or not is based on its "destination". If destination is hw_tc (aka tc_class)
- * and it is non-zero, then it is valid channel (aka ADQ) filter
+ * or not is based on its destination.
+ * For forward to VSI action, if destination is valid hw_tc (aka tc_class)
+ * and in supported range of TCs for ADQ, then return true.
+ * For forward to queue, as long as dest_vsi is valid and it is of type
+ * VSI_CHNL (PF ADQ VSI is of type VSI_CHNL), return true.
+ * NOTE: For forward to queue, correct dest_vsi is still set in tc_fltr based
+ * on destination queue specified.
  */
 static inline bool ice_is_chnl_fltr(struct ice_tc_flower_fltr *f)
 {
-	return !!f->action.tc_class;
+	if (f->action.fltr_act == ICE_FWD_TO_VSI)
+		return f->action.fwd.tc.tc_class >= ICE_CHNL_START_TC &&
+		       f->action.fwd.tc.tc_class < ICE_CHNL_MAX_TC;
+	else if (f->action.fltr_act == ICE_FWD_TO_Q)
+		return f->dest_vsi && f->dest_vsi->type == ICE_VSI_CHNL;
+
+	return false;
 }
 
 /**
@@ -165,6 +203,7 @@ static inline int ice_chnl_dmac_fltr_cnt(struct ice_pf *pf)
 	return pf->num_dmac_chnl_fltrs;
 }
 
+struct ice_vsi *ice_locate_vsi_using_queue(struct ice_vsi *vsi, int queue);
 int
 ice_add_cls_flower(struct net_device *netdev, struct ice_vsi *vsi,
 		   struct flow_cls_offload *cls_flower);
@@ -173,4 +212,14 @@ ice_del_cls_flower(struct ice_vsi *vsi, struct flow_cls_offload *cls_flower);
 void ice_replay_tc_fltrs(struct ice_pf *pf);
 bool ice_is_tunnel_supported(struct net_device *dev);
 
+static inline bool ice_is_forward_action(enum ice_sw_fwd_act_type fltr_act)
+{
+	switch (fltr_act) {
+	case ICE_FWD_TO_VSI:
+	case ICE_FWD_TO_Q:
+		return true;
+	default:
+		return false;
+	}
+}
 #endif /* _ICE_TC_LIB_H_ */

@@ -168,6 +168,7 @@ static int trace_define_generic_fields(void)
 
 	__generic_field(int, CPU, FILTER_CPU);
 	__generic_field(int, cpu, FILTER_CPU);
+	__generic_field(int, common_cpu, FILTER_CPU);
 	__generic_field(char *, COMM, FILTER_COMM);
 	__generic_field(char *, comm, FILTER_COMM);
 
@@ -184,6 +185,7 @@ static int trace_define_common_fields(void)
 	/* Holds both preempt_count and migrate_disable */
 	__common_field(unsigned char, preempt_count);
 	__common_field(int, pid);
+	__common_field(unsigned char, preempt_lazy_count);
 
 	return ret;
 }

@@ -11,6 +11,7 @@
 #include "expr.h"
 #include "expr-bison.h"
 #include "expr-flex.h"
+#include "util/hashmap.h"
 #include "smt.h"
 #include "tsc.h"
 #include <linux/err.h>
@@ -18,6 +19,7 @@
 #include <linux/zalloc.h>
 #include <ctype.h>
 #include <math.h>
+#include "pmu.h"
 
 #ifdef PARSER_DEBUG
 extern int expr_debug;
@@ -46,7 +48,7 @@ struct expr_id_data {
 	} kind;
 };
 
-static size_t key_hash(const void *key, void *ctx __maybe_unused)
+static size_t key_hash(long key, void *ctx __maybe_unused)
 {
 	const char *str = (const char *)key;
 	size_t hash = 0;
@@ -59,8 +61,7 @@ static size_t key_hash(const void *key, void *ctx __maybe_unused)
 	return hash;
 }
 
-static bool key_equal(const void *key1, const void *key2,
-		    void *ctx __maybe_unused)
+static bool key_equal(long key1, long key2, void *ctx __maybe_unused)
 {
 	return !strcmp((const char *)key1, (const char *)key2);
 }
@@ -84,8 +85,8 @@ void ids__free(struct hashmap *ids)
 		return;
 
 	hashmap__for_each_entry(ids, cur, bkt) {
-		free((char *)cur->key);
-		free(cur->value);
+		free((void *)cur->pkey);
+		free((void *)cur->pvalue);
 	}
 
 	hashmap__free(ids);
@@ -97,8 +98,7 @@ int ids__insert(struct hashmap *ids, const char *id)
 	char *old_key = NULL;
 	int ret;
 
-	ret = hashmap__set(ids, id, data_ptr,
-			   (const void **)&old_key, (void **)&old_data);
+	ret = hashmap__set(ids, id, data_ptr, &old_key, &old_data);
 	if (ret)
 		free(data_ptr);
 	free(old_key);
@@ -127,8 +127,7 @@ struct hashmap *ids__union(struct hashmap *ids1, struct hashmap *ids2)
 		ids2 = tmp;
 	}
 	hashmap__for_each_entry(ids2, cur, bkt) {
-		ret = hashmap__set(ids1, cur->key, cur->value,
-				(const void **)&old_key, (void **)&old_data);
+		ret = hashmap__set(ids1, cur->key, cur->value, &old_key, &old_data);
 		free(old_key);
 		free(old_data);
 
@@ -169,8 +168,7 @@ int expr__add_id_val_source_count(struct expr_parse_ctx *ctx, const char *id,
 	data_ptr->val.source_count = source_count;
 	data_ptr->kind = EXPR_ID_DATA__VALUE;
 
-	ret = hashmap__set(ctx->ids, id, data_ptr,
-			   (const void **)&old_key, (void **)&old_data);
+	ret = hashmap__set(ctx->ids, id, data_ptr, &old_key, &old_data);
 	if (ret)
 		free(data_ptr);
 	free(old_key);
@@ -182,7 +180,7 @@ int expr__add_ref(struct expr_parse_ctx *ctx, struct metric_ref *ref)
 {
 	struct expr_id_data *data_ptr = NULL, *old_data = NULL;
 	char *old_key = NULL;
-	char *name, *p;
+	char *name;
 	int ret;
 
 	data_ptr = zalloc(sizeof(*data_ptr));
@@ -196,15 +194,6 @@ int expr__add_ref(struct expr_parse_ctx *ctx, struct metric_ref *ref)
 	}
 
 	/*
-	 * The jevents tool converts all metric expressions
-	 * to lowercase, including metric references, hence
-	 * we need to add lowercase name for metric, so it's
-	 * properly found.
-	 */
-	for (p = name; *p; p++)
-		*p = tolower(*p);
-
-	/*
 	 * Intentionally passing just const char pointers,
 	 * originally from 'struct pmu_event' object.
 	 * We don't need to change them, so there's no
@@ -214,8 +203,7 @@ int expr__add_ref(struct expr_parse_ctx *ctx, struct metric_ref *ref)
 	data_ptr->ref.metric_expr = ref->metric_expr;
 	data_ptr->kind = EXPR_ID_DATA__REF;
 
-	ret = hashmap__set(ctx->ids, name, data_ptr,
-			   (const void **)&old_key, (void **)&old_data);
+	ret = hashmap__set(ctx->ids, name, data_ptr, &old_key, &old_data);
 	if (ret)
 		free(data_ptr);
 
@@ -230,7 +218,7 @@ int expr__add_ref(struct expr_parse_ctx *ctx, struct metric_ref *ref)
 int expr__get_id(struct expr_parse_ctx *ctx, const char *id,
 		 struct expr_id_data **data)
 {
-	return hashmap__find(ctx->ids, id, (void **)data) ? 0 : -1;
+	return hashmap__find(ctx->ids, id, data) ? 0 : -1;
 }
 
 bool expr__subset_of_ids(struct expr_parse_ctx *haystack,
@@ -241,7 +229,7 @@ bool expr__subset_of_ids(struct expr_parse_ctx *haystack,
 	struct expr_id_data *data;
 
 	hashmap__for_each_entry(needles->ids, cur, bkt) {
-		if (expr__get_id(haystack, cur->key, &data))
+		if (expr__get_id(haystack, cur->pkey, &data))
 			return false;
 	}
 	return true;
@@ -291,8 +279,7 @@ void expr__del_id(struct expr_parse_ctx *ctx, const char *id)
 	struct expr_id_data *old_val = NULL;
 	char *old_key = NULL;
 
-	hashmap__delete(ctx->ids, id,
-			(const void **)&old_key, (void **)&old_val);
+	hashmap__delete(ctx->ids, id, &old_key, &old_val);
 	free(old_key);
 	free(old_val);
 }
@@ -310,7 +297,9 @@ struct expr_parse_ctx *expr__ctx_new(void)
 		free(ctx);
 		return NULL;
 	}
-	ctx->runtime = 0;
+	ctx->sctx.user_requested_cpu_list = NULL;
+	ctx->sctx.runtime = 0;
+	ctx->sctx.system_wide = false;
 
 	return ctx;
 }
@@ -321,8 +310,8 @@ void expr__ctx_clear(struct expr_parse_ctx *ctx)
 	size_t bkt;
 
 	hashmap__for_each_entry(ctx->ids, cur, bkt) {
-		free((char *)cur->key);
-		free(cur->value);
+		free((void *)cur->pkey);
+		free(cur->pvalue);
 	}
 	hashmap__clear(ctx->ids);
 }
@@ -332,9 +321,13 @@ void expr__ctx_free(struct expr_parse_ctx *ctx)
 	struct hashmap_entry *cur;
 	size_t bkt;
 
+	if (!ctx)
+		return;
+
+	free(ctx->sctx.user_requested_cpu_list);
 	hashmap__for_each_entry(ctx->ids, cur, bkt) {
-		free((char *)cur->key);
-		free(cur->value);
+		free((void *)cur->pkey);
+		free(cur->pvalue);
 	}
 	hashmap__free(ctx->ids);
 	free(ctx);
@@ -344,16 +337,13 @@ static int
 __expr__parse(double *val, struct expr_parse_ctx *ctx, const char *expr,
 	      bool compute_ids)
 {
-	struct expr_scanner_ctx scanner_ctx = {
-		.runtime = ctx->runtime,
-	};
 	YY_BUFFER_STATE buffer;
 	void *scanner;
 	int ret;
 
 	pr_debug2("parsing metric: %s\n", expr);
 
-	ret = expr_lex_init_extra(&scanner_ctx, &scanner);
+	ret = expr_lex_init_extra(&ctx->sctx, &scanner);
 	if (ret)
 		return ret;
 
@@ -410,15 +400,10 @@ double arch_get_tsc_freq(void)
 }
 #endif
 
-double expr__get_literal(const char *literal)
+double expr__get_literal(const char *literal, const struct expr_scanner_ctx *ctx)
 {
 	static struct cpu_topology *topology;
 	double result = NAN;
-
-	if (!strcasecmp("#smt_on", literal)) {
-		result = smt_on() > 0 ? 1.0 : 0.0;
-		goto out;
-	}
 
 	if (!strcmp("#num_cpus", literal)) {
 		result = cpu__max_present_cpu().cpu;
@@ -443,6 +428,15 @@ double expr__get_literal(const char *literal)
 			goto out;
 		}
 	}
+	if (!strcasecmp("#smt_on", literal)) {
+		result = smt_on(topology) ? 1.0 : 0.0;
+		goto out;
+	}
+	if (!strcmp("#core_wide", literal)) {
+		result = core_wide(ctx->system_wide, ctx->user_requested_cpu_list, topology)
+			? 1.0 : 0.0;
+		goto out;
+	}
 	if (!strcmp("#num_packages", literal)) {
 		result = topology->package_cpus_lists;
 		goto out;
@@ -453,6 +447,10 @@ double expr__get_literal(const char *literal)
 	}
 	if (!strcmp("#num_cores", literal)) {
 		result = topology->core_cpus_lists;
+		goto out;
+	}
+	if (!strcmp("#slots", literal)) {
+		result = perf_pmu__cpu_slots_per_cycle();
 		goto out;
 	}
 

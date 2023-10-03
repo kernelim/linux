@@ -47,6 +47,15 @@ int reboot_cpu;
 enum reboot_type reboot_type = BOOT_ACPI;
 int reboot_force;
 
+struct sys_off_handler {
+	struct notifier_block nb;
+	int (*sys_off_cb)(struct sys_off_data *data);
+	void *cb_data;
+	enum sys_off_mode mode;
+	bool blocking;
+	void *list;
+};
+
 /*
  * If set, this is used for preparing the system to power off.
  */
@@ -73,6 +82,7 @@ void kernel_restart_prepare(char *cmd)
 {
 	blocking_notifier_call_chain(&reboot_notifier_list, SYS_RESTART, cmd);
 	system_state = SYSTEM_RESTART;
+	try_block_console_kthreads(10000);
 	usermodehelper_disable();
 	device_shutdown();
 }
@@ -261,6 +271,7 @@ static void kernel_shutdown_prepare(enum system_states state)
 	blocking_notifier_call_chain(&reboot_notifier_list,
 		(state == SYSTEM_HALT) ? SYS_HALT : SYS_POWER_OFF, NULL);
 	system_state = state;
+	try_block_console_kthreads(10000);
 	usermodehelper_disable();
 	device_shutdown();
 }
@@ -279,6 +290,179 @@ void kernel_halt(void)
 	machine_halt();
 }
 EXPORT_SYMBOL_GPL(kernel_halt);
+
+/*
+ *	Notifier list for kernel code which wants to be called
+ *	to prepare system for power off.
+ */
+static BLOCKING_NOTIFIER_HEAD(power_off_prep_handler_list);
+
+/*
+ *	Notifier list for kernel code which wants to be called
+ *	to power off system.
+ */
+static ATOMIC_NOTIFIER_HEAD(power_off_handler_list);
+
+static int sys_off_notify(struct notifier_block *nb,
+			  unsigned long mode, void *cmd)
+{
+	struct sys_off_handler *handler;
+	struct sys_off_data data = {};
+
+	handler = container_of(nb, struct sys_off_handler, nb);
+	data.cb_data = handler->cb_data;
+	data.mode = mode;
+	data.cmd = cmd;
+
+	return handler->sys_off_cb(&data);
+}
+
+/**
+ *	register_sys_off_handler - Register sys-off handler
+ *	@mode: Sys-off mode
+ *	@priority: Handler priority
+ *	@callback: Callback function
+ *	@cb_data: Callback argument
+ *
+ *	Registers system power-off or restart handler that will be invoked
+ *	at the step corresponding to the given sys-off mode. Handler's callback
+ *	should return NOTIFY_DONE to permit execution of the next handler in
+ *	the call chain or NOTIFY_STOP to break the chain (in error case for
+ *	example).
+ *
+ *	Multiple handlers can be registered at the default priority level.
+ *
+ *	Only one handler can be registered at the non-default priority level,
+ *	otherwise ERR_PTR(-EBUSY) is returned.
+ *
+ *	Returns a new instance of struct sys_off_handler on success, or
+ *	an ERR_PTR()-encoded error code otherwise.
+ */
+struct sys_off_handler *
+register_sys_off_handler(enum sys_off_mode mode,
+			 int priority,
+			 int (*callback)(struct sys_off_data *data),
+			 void *cb_data)
+{
+	struct sys_off_handler *handler;
+	int err;
+
+	handler = kzalloc(sizeof(*handler), GFP_KERNEL);
+	if (!handler)
+		return ERR_PTR(-ENOMEM);
+
+	switch (mode) {
+	case SYS_OFF_MODE_POWER_OFF_PREPARE:
+		handler->list = &power_off_prep_handler_list;
+		handler->blocking = true;
+		break;
+
+	case SYS_OFF_MODE_POWER_OFF:
+		handler->list = &power_off_handler_list;
+		break;
+
+	case SYS_OFF_MODE_RESTART:
+		handler->list = &restart_handler_list;
+		break;
+
+	default:
+		kfree(handler);
+		return ERR_PTR(-EINVAL);
+	}
+
+	handler->nb.notifier_call = sys_off_notify;
+	handler->nb.priority = priority;
+	handler->sys_off_cb = callback;
+	handler->cb_data = cb_data;
+	handler->mode = mode;
+
+	if (handler->blocking) {
+		if (priority == SYS_OFF_PRIO_DEFAULT)
+			err = blocking_notifier_chain_register(handler->list,
+							       &handler->nb);
+		else
+			err = blocking_notifier_chain_register_unique_prio(handler->list,
+									   &handler->nb);
+	} else {
+		if (priority == SYS_OFF_PRIO_DEFAULT)
+			err = atomic_notifier_chain_register(handler->list,
+							     &handler->nb);
+		else
+			err = atomic_notifier_chain_register_unique_prio(handler->list,
+									 &handler->nb);
+	}
+
+	if (err) {
+		kfree(handler);
+		return ERR_PTR(err);
+	}
+
+	return handler;
+}
+EXPORT_SYMBOL_GPL(register_sys_off_handler);
+
+/**
+ *	unregister_sys_off_handler - Unregister sys-off handler
+ *	@handler: Sys-off handler
+ *
+ *	Unregisters given sys-off handler.
+ */
+void unregister_sys_off_handler(struct sys_off_handler *handler)
+{
+	int err;
+
+	if (!handler)
+		return;
+
+	if (handler->blocking)
+		err = blocking_notifier_chain_unregister(handler->list,
+							 &handler->nb);
+	else
+		err = atomic_notifier_chain_unregister(handler->list,
+						       &handler->nb);
+
+	/* sanity check, shall never happen */
+	WARN_ON(err);
+
+	kfree(handler);
+}
+EXPORT_SYMBOL_GPL(unregister_sys_off_handler);
+
+static void devm_unregister_sys_off_handler(void *data)
+{
+	struct sys_off_handler *handler = data;
+
+	unregister_sys_off_handler(handler);
+}
+
+/**
+ *	devm_register_sys_off_handler - Register sys-off handler
+ *	@dev: Device that registers handler
+ *	@mode: Sys-off mode
+ *	@priority: Handler priority
+ *	@callback: Callback function
+ *	@cb_data: Callback argument
+ *
+ *	Registers resource-managed sys-off handler.
+ *
+ *	Returns zero on success, or error code on failure.
+ */
+int devm_register_sys_off_handler(struct device *dev,
+				  enum sys_off_mode mode,
+				  int priority,
+				  int (*callback)(struct sys_off_data *data),
+				  void *cb_data)
+{
+	struct sys_off_handler *handler;
+
+	handler = register_sys_off_handler(mode, priority, callback, cb_data);
+	if (IS_ERR(handler))
+		return PTR_ERR(handler);
+
+	return devm_add_action_or_reset(dev, devm_unregister_sys_off_handler,
+					handler);
+}
+EXPORT_SYMBOL_GPL(devm_register_sys_off_handler);
 
 /**
  *	kernel_power_off - power_off the system
@@ -446,9 +630,11 @@ static int __orderly_reboot(void)
 	ret = run_cmd(reboot_cmd);
 
 	if (ret) {
+		printk_prefer_direct_enter();
 		pr_warn("Failed to start orderly reboot: forcing the issue\n");
 		emergency_sync();
 		kernel_restart(NULL);
+		printk_prefer_direct_exit();
 	}
 
 	return ret;
@@ -461,6 +647,7 @@ static int __orderly_poweroff(bool force)
 	ret = run_cmd(poweroff_cmd);
 
 	if (ret && force) {
+		printk_prefer_direct_enter();
 		pr_warn("Failed to start orderly shutdown: forcing the issue\n");
 
 		/*
@@ -470,6 +657,7 @@ static int __orderly_poweroff(bool force)
 		 */
 		emergency_sync();
 		kernel_power_off();
+		printk_prefer_direct_exit();
 	}
 
 	return ret;
@@ -527,6 +715,8 @@ EXPORT_SYMBOL_GPL(orderly_reboot);
  */
 static void hw_failure_emergency_poweroff_func(struct work_struct *work)
 {
+	printk_prefer_direct_enter();
+
 	/*
 	 * We have reached here after the emergency shutdown waiting period has
 	 * expired. This means orderly_poweroff has not been able to shut off
@@ -543,6 +733,8 @@ static void hw_failure_emergency_poweroff_func(struct work_struct *work)
 	 */
 	pr_emerg("Hardware protection shutdown failed. Trying emergency restart\n");
 	emergency_restart();
+
+	printk_prefer_direct_exit();
 }
 
 static DECLARE_DELAYED_WORK(hw_failure_emergency_poweroff_work,
@@ -581,11 +773,13 @@ void hw_protection_shutdown(const char *reason, int ms_until_forced)
 {
 	static atomic_t allow_proceed = ATOMIC_INIT(1);
 
+	printk_prefer_direct_enter();
+
 	pr_emerg("HARDWARE PROTECTION shutdown (%s)\n", reason);
 
 	/* Shutdown should be initiated only once. */
 	if (!atomic_dec_and_test(&allow_proceed))
-		return;
+		goto out;
 
 	/*
 	 * Queue a backup emergency shutdown in the event of
@@ -593,6 +787,8 @@ void hw_protection_shutdown(const char *reason, int ms_until_forced)
 	 */
 	hw_failure_emergency_poweroff(ms_until_forced);
 	orderly_poweroff(true);
+out:
+	printk_prefer_direct_exit();
 }
 EXPORT_SYMBOL_GPL(hw_protection_shutdown);
 

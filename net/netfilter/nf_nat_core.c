@@ -16,7 +16,7 @@
 #include <linux/siphash.h>
 #include <linux/rtnetlink.h>
 
-#include <net/netfilter/nf_conntrack.h>
+#include <net/netfilter/nf_conntrack_bpf.h>
 #include <net/netfilter/nf_conntrack_core.h>
 #include <net/netfilter/nf_conntrack_helper.h>
 #include <net/netfilter/nf_conntrack_seqadj.h>
@@ -26,6 +26,9 @@
 #include <uapi/linux/netfilter/nf_nat.h>
 
 #include "nf_internals.h"
+
+#define NF_NAT_MAX_ATTEMPTS	128
+#define NF_NAT_HARDER_THRESH	(NF_NAT_MAX_ATTEMPTS / 4)
 
 static spinlock_t nf_nat_locks[CONNTRACK_LOCKS];
 
@@ -188,6 +191,88 @@ nf_nat_used_tuple(const struct nf_conntrack_tuple *tuple,
 
 	nf_ct_invert_tuple(&reply, tuple);
 	return nf_conntrack_tuple_taken(&reply, ignored_conntrack);
+}
+
+static bool nf_nat_may_kill(struct nf_conn *ct, unsigned long flags)
+{
+	static const unsigned long flags_refuse = IPS_FIXED_TIMEOUT |
+						  IPS_DYING;
+	static const unsigned long flags_needed = IPS_SRC_NAT;
+	enum tcp_conntrack old_state;
+
+	old_state = READ_ONCE(ct->proto.tcp.state);
+	if (old_state < TCP_CONNTRACK_TIME_WAIT)
+		return false;
+
+	if (flags & flags_refuse)
+		return false;
+
+	return (flags & flags_needed) == flags_needed;
+}
+
+/* reverse direction will send packets to new source, so
+ * make sure such packets are invalid.
+ */
+static bool nf_seq_has_advanced(const struct nf_conn *old, const struct nf_conn *new)
+{
+	return (__s32)(new->proto.tcp.seen[0].td_end -
+		       old->proto.tcp.seen[0].td_end) > 0;
+}
+
+static int
+nf_nat_used_tuple_harder(const struct nf_conntrack_tuple *tuple,
+			 const struct nf_conn *ignored_conntrack,
+			 unsigned int attempts_left)
+{
+	static const unsigned long flags_offload = IPS_OFFLOAD | IPS_HW_OFFLOAD;
+	struct nf_conntrack_tuple_hash *thash;
+	const struct nf_conntrack_zone *zone;
+	struct nf_conntrack_tuple reply;
+	unsigned long flags;
+	struct nf_conn *ct;
+	bool taken = true;
+	struct net *net;
+
+	nf_ct_invert_tuple(&reply, tuple);
+
+	if (attempts_left > NF_NAT_HARDER_THRESH ||
+	    tuple->dst.protonum != IPPROTO_TCP ||
+	    ignored_conntrack->proto.tcp.state != TCP_CONNTRACK_SYN_SENT)
+		return nf_conntrack_tuple_taken(&reply, ignored_conntrack);
+
+	/* :ast few attempts to find a free tcp port. Destructive
+	 * action: evict colliding if its in timewait state and the
+	 * tcp sequence number has advanced past the one used by the
+	 * old entry.
+	 */
+	net = nf_ct_net(ignored_conntrack);
+	zone = nf_ct_zone(ignored_conntrack);
+
+	thash = nf_conntrack_find_get(net, zone, &reply);
+	if (!thash)
+		return false;
+
+	ct = nf_ct_tuplehash_to_ctrack(thash);
+
+	if (thash->tuple.dst.dir == IP_CT_DIR_ORIGINAL)
+		goto out;
+
+	if (WARN_ON_ONCE(ct == ignored_conntrack))
+		goto out;
+
+	flags = READ_ONCE(ct->status);
+	if (!nf_nat_may_kill(ct, flags))
+		goto out;
+
+	if (!nf_seq_has_advanced(ct, ignored_conntrack))
+		goto out;
+
+	/* Even if we can evict do not reuse if entry is offloaded. */
+	if (nf_ct_kill(ct))
+		taken = flags & flags_offload;
+out:
+	nf_ct_put(ct);
+	return taken;
 }
 
 static bool nf_nat_inet_in_range(const struct nf_conntrack_tuple *t,
@@ -378,7 +463,6 @@ static void nf_nat_l4proto_unique_tuple(struct nf_conntrack_tuple *tuple,
 	unsigned int range_size, min, max, i, attempts;
 	__be16 *keyptr;
 	u16 off;
-	static const unsigned int max_attempts = 128;
 
 	switch (tuple->dst.protonum) {
 	case IPPROTO_ICMP:
@@ -464,8 +548,8 @@ find_free_id:
 		off = prandom_u32();
 
 	attempts = range_size;
-	if (attempts > max_attempts)
-		attempts = max_attempts;
+	if (attempts > NF_NAT_MAX_ATTEMPTS)
+		attempts = NF_NAT_MAX_ATTEMPTS;
 
 	/* We are in softirq; doing a search of the entire range risks
 	 * soft lockup when all tuples are already used.
@@ -476,7 +560,7 @@ find_free_id:
 another_round:
 	for (i = 0; i < attempts; i++, off++) {
 		*keyptr = htons(min + off % range_size);
-		if (!nf_nat_used_tuple(tuple, ct))
+		if (!nf_nat_used_tuple_harder(tuple, ct, attempts - i))
 			return;
 	}
 
@@ -1145,7 +1229,16 @@ static int __init nf_nat_init(void)
 	WARN_ON(nf_nat_hook != NULL);
 	RCU_INIT_POINTER(nf_nat_hook, &nat_hook);
 
-	return 0;
+	ret = register_nf_nat_bpf();
+	if (ret < 0) {
+		RCU_INIT_POINTER(nf_nat_hook, NULL);
+		nf_ct_helper_expectfn_unregister(&follow_master_nat);
+		synchronize_net();
+		unregister_pernet_subsys(&nat_net_ops);
+		kvfree(nf_nat_bysource);
+	}
+
+	return ret;
 }
 
 static void __exit nf_nat_cleanup(void)

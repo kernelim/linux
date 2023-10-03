@@ -28,7 +28,7 @@ struct mlx5e_flow_meter_aso_obj {
 	int base_id;
 	int total_meters;
 
-	unsigned long meters_map[0]; /* must be at the end of this struct */
+	unsigned long meters_map[]; /* must be at the end of this struct */
 };
 
 struct mlx5e_flow_meters {
@@ -115,6 +115,7 @@ mlx5e_tc_meter_modify(struct mlx5_core_dev *mdev,
 	struct mlx5e_flow_meters *flow_meters;
 	u8 cir_man, cir_exp, cbs_man, cbs_exp;
 	struct mlx5_aso_wqe *aso_wqe;
+	unsigned long expires;
 	struct mlx5_aso *aso;
 	u64 rate, burst;
 	u8 ds_cnt;
@@ -161,7 +162,6 @@ mlx5e_tc_meter_modify(struct mlx5_core_dev *mdev,
 			   MLX5_ACCESS_ASO_OPC_MOD_FLOW_METER);
 
 	aso_ctrl = &aso_wqe->aso_ctrl;
-	memset(aso_ctrl, 0, sizeof(*aso_ctrl));
 	aso_ctrl->data_mask_mode = MLX5_ASO_DATA_MASK_MODE_BYTEWISE_64BYTE << 6;
 	aso_ctrl->condition_1_0_operand = MLX5_ASO_ALWAYS_TRUE |
 					  MLX5_ASO_ALWAYS_TRUE << 4;
@@ -187,7 +187,12 @@ mlx5e_tc_meter_modify(struct mlx5_core_dev *mdev,
 	mlx5_aso_post_wqe(aso, true, &aso_wqe->ctrl);
 
 	/* With newer FW, the wait for the first ASO WQE is more than 2us, put the wait 10ms. */
-	err = mlx5_aso_poll_cq(aso, true, 10);
+	expires = jiffies + msecs_to_jiffies(10);
+	do {
+		err = mlx5_aso_poll_cq(aso, true);
+		if (err)
+			usleep_range(2, 10);
+	} while (err && time_is_after_jiffies(expires));
 	mutex_unlock(&flow_meters->aso_lock);
 
 	return err;
@@ -199,13 +204,15 @@ mlx5e_flow_meter_create_aso_obj(struct mlx5e_flow_meters *flow_meters, int *obj_
 	u32 in[MLX5_ST_SZ_DW(create_flow_meter_aso_obj_in)] = {};
 	u32 out[MLX5_ST_SZ_DW(general_obj_out_cmd_hdr)];
 	struct mlx5_core_dev *mdev = flow_meters->mdev;
-	void *obj;
+	void *obj, *param;
 	int err;
 
 	MLX5_SET(general_obj_in_cmd_hdr, in, opcode, MLX5_CMD_OP_CREATE_GENERAL_OBJECT);
 	MLX5_SET(general_obj_in_cmd_hdr, in, obj_type,
 		 MLX5_GENERAL_OBJECT_TYPES_FLOW_METER_ASO);
-	MLX5_SET(general_obj_in_cmd_hdr, in, log_obj_range, flow_meters->log_granularity);
+	param = MLX5_ADDR_OF(general_obj_in_cmd_hdr, in, op_param);
+	MLX5_SET(general_obj_create_param, param, log_obj_range,
+		 flow_meters->log_granularity);
 
 	obj = MLX5_ADDR_OF(create_flow_meter_aso_obj_in, in, flow_meter_aso_obj);
 	MLX5_SET(flow_meter_aso_obj, obj, meter_aso_access_pd, flow_meters->pdn);

@@ -114,6 +114,15 @@
 #define ESR_ELx_FSC_ACCESS	(0x08)
 #define ESR_ELx_FSC_FAULT	(0x04)
 #define ESR_ELx_FSC_PERM	(0x0C)
+#define ESR_ELx_FSC_SEA_TTW0	(0x14)
+#define ESR_ELx_FSC_SEA_TTW1	(0x15)
+#define ESR_ELx_FSC_SEA_TTW2	(0x16)
+#define ESR_ELx_FSC_SEA_TTW3	(0x17)
+#define ESR_ELx_FSC_SECC	(0x18)
+#define ESR_ELx_FSC_SECC_TTW0	(0x1c)
+#define ESR_ELx_FSC_SECC_TTW1	(0x1d)
+#define ESR_ELx_FSC_SECC_TTW2	(0x1e)
+#define ESR_ELx_FSC_SECC_TTW3	(0x1f)
 
 /* ISS field definitions for Data Aborts */
 #define ESR_ELx_ISV_SHIFT	(24)
@@ -234,6 +243,9 @@
 #define ESR_ELx_SYS64_ISS_SYS_CNTVCT	(ESR_ELx_SYS64_ISS_SYS_VAL(3, 3, 2, 14, 0) | \
 					 ESR_ELx_SYS64_ISS_DIR_READ)
 
+#define ESR_ELx_SYS64_ISS_SYS_CNTVCTSS	(ESR_ELx_SYS64_ISS_SYS_VAL(3, 3, 6, 14, 0) | \
+					 ESR_ELx_SYS64_ISS_DIR_READ)
+
 #define ESR_ELx_SYS64_ISS_SYS_CNTFRQ	(ESR_ELx_SYS64_ISS_SYS_VAL(3, 3, 0, 14, 0) | \
 					 ESR_ELx_SYS64_ISS_DIR_READ)
 
@@ -259,6 +271,10 @@
 		 ESR_ELx_SYS64_ISS_CRM_SHIFT),			\
 		(((e) & ESR_ELx_SYS64_ISS_OP2_MASK) >>		\
 		 ESR_ELx_SYS64_ISS_OP2_SHIFT))
+
+/* ISS field definitions for ERET/ERETAA/ERETAB trapping */
+#define ESR_ELx_ERET_ISS_ERET		0x2
+#define ESR_ELx_ERET_ISS_ERETA		0x1
 
 /*
  * ISS field definitions for floating-point exception traps
@@ -324,6 +340,9 @@
 #define ESR_ELx_CP15_64_ISS_SYS_CNTVCT	(ESR_ELx_CP15_64_ISS_SYS_VAL(1, 14) | \
 					 ESR_ELx_CP15_64_ISS_DIR_READ)
 
+#define ESR_ELx_CP15_64_ISS_SYS_CNTVCTSS (ESR_ELx_CP15_64_ISS_SYS_VAL(9, 14) | \
+					 ESR_ELx_CP15_64_ISS_DIR_READ)
+
 #define ESR_ELx_CP15_32_ISS_SYS_CNTFRQ	(ESR_ELx_CP15_32_ISS_SYS_VAL(0, 0, 14, 0) |\
 					 ESR_ELx_CP15_32_ISS_DIR_READ)
 
@@ -335,6 +354,7 @@
 #define ESR_ELx_SME_ISS_ILL		1
 #define ESR_ELx_SME_ISS_SM_DISABLED	2
 #define ESR_ELx_SME_ISS_ZA_DISABLED	3
+#define ESR_ELx_SME_ISS_ZT_DISABLED	4
 
 #ifndef __ASSEMBLY__
 #include <asm/types.h>

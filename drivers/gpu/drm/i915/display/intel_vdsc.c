@@ -10,6 +10,7 @@
 #include <drm/display/drm_dsc_helper.h>
 
 #include "i915_drv.h"
+#include "i915_reg.h"
 #include "intel_crtc.h"
 #include "intel_de.h"
 #include "intel_display_types.h"
@@ -344,16 +345,13 @@ bool intel_dsc_source_support(const struct intel_crtc_state *crtc_state)
 	struct drm_i915_private *i915 = to_i915(crtc->base.dev);
 	enum transcoder cpu_transcoder = crtc_state->cpu_transcoder;
 
-	if (!INTEL_INFO(i915)->display.has_dsc)
+	if (!HAS_DSC(i915))
 		return false;
 
-	if (DISPLAY_VER(i915) >= 12)
-		return true;
+	if (DISPLAY_VER(i915) == 11 && cpu_transcoder == TRANSCODER_A)
+		return false;
 
-	if (DISPLAY_VER(i915) >= 11 && cpu_transcoder != TRANSCODER_A)
-		return true;
-
-	return false;
+	return true;
 }
 
 static bool is_pipe_dsc(struct intel_crtc *crtc, enum transcoder cpu_transcoder)
@@ -596,6 +594,8 @@ static void intel_dsc_pps_configure(const struct intel_crtc_state *crtc_state)
 		DSC_VER_MIN_SHIFT |
 		vdsc_cfg->bits_per_component << DSC_BPC_SHIFT |
 		vdsc_cfg->line_buf_depth << DSC_LINE_BUF_DEPTH_SHIFT;
+	if (vdsc_cfg->dsc_version_minor == 2)
+		pps_val |= DSC_ALT_ICH_SEL;
 	if (vdsc_cfg->block_pred_enable)
 		pps_val |= DSC_BLOCK_PREDICTION;
 	if (vdsc_cfg->convert_rgb)

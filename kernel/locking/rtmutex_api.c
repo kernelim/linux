@@ -7,6 +7,11 @@
 
 #define RT_MUTEX_BUILD_MUTEX
 #include "rtmutex.c"
+/*
+ * JiraReadiness exercise
+ * https://issues.redhat.com/browse/RHELMISC-209
+ * jwyatt-rh will remove this comment
+ */ 
 
 /*
  * Max number of times we'll walk the boosting chain:

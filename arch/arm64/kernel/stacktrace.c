@@ -5,6 +5,7 @@
  * Copyright (C) 2012 ARM Ltd.
  */
 #include <linux/kernel.h>
+#include <linux/efi.h>
 #include <linux/export.h>
 #include <linux/ftrace.h>
 #include <linux/sched.h>
@@ -12,6 +13,7 @@
 #include <linux/sched/task_stack.h>
 #include <linux/stacktrace.h>
 
+#include <asm/efi.h>
 #include <asm/irq.h>
 #include <asm/stack_pointer.h>
 #include <asm/stacktrace.h>
@@ -23,8 +25,8 @@
  *
  * The regs must be on a stack currently owned by the calling task.
  */
-static inline void unwind_init_from_regs(struct unwind_state *state,
-					 struct pt_regs *regs)
+static __always_inline void unwind_init_from_regs(struct unwind_state *state,
+						  struct pt_regs *regs)
 {
 	unwind_init_common(state, current);
 
@@ -58,38 +60,13 @@ static __always_inline void unwind_init_from_caller(struct unwind_state *state)
  * duration of the unwind, or the unwind will be bogus. It is never valid to
  * call this for the current task.
  */
-static inline void unwind_init_from_task(struct unwind_state *state,
-					 struct task_struct *task)
+static __always_inline void unwind_init_from_task(struct unwind_state *state,
+						  struct task_struct *task)
 {
 	unwind_init_common(state, task);
 
 	state->fp = thread_saved_fp(task);
 	state->pc = thread_saved_pc(task);
-}
-
-/*
- * We can only safely access per-cpu stacks from current in a non-preemptible
- * context.
- */
-static bool on_accessible_stack(const struct task_struct *tsk,
-				unsigned long sp, unsigned long size,
-				struct stack_info *info)
-{
-	if (info)
-		info->type = STACK_TYPE_UNKNOWN;
-
-	if (on_task_stack(tsk, sp, size, info))
-		return true;
-	if (tsk != current || preemptible())
-		return false;
-	if (on_irq_stack(sp, size, info))
-		return true;
-	if (on_overflow_stack(sp, size, info))
-		return true;
-	if (on_sdei_stack(sp, size, info))
-		return true;
-
-	return false;
 }
 
 /*
@@ -103,14 +80,13 @@ static int notrace unwind_next(struct unwind_state *state)
 {
 	struct task_struct *tsk = state->task;
 	unsigned long fp = state->fp;
-	struct stack_info info;
 	int err;
 
 	/* Final frame; nothing to unwind */
 	if (fp == (unsigned long)task_pt_regs(tsk)->stackframe)
 		return -ENOENT;
 
-	err = unwind_next_common(state, &info, on_accessible_stack, NULL);
+	err = unwind_next_frame_record(state);
 	if (err)
 		return err;
 
@@ -190,11 +166,57 @@ void show_stack(struct task_struct *tsk, unsigned long *sp, const char *loglvl)
 	barrier();
 }
 
-noinline notrace void arch_stack_walk(stack_trace_consume_fn consume_entry,
+/*
+ * Per-cpu stacks are only accessible when unwinding the current task in a
+ * non-preemptible context.
+ */
+#define STACKINFO_CPU(name)					\
+	({							\
+		((task == current) && !preemptible())		\
+			? stackinfo_get_##name()		\
+			: stackinfo_get_unknown();		\
+	})
+
+/*
+ * SDEI stacks are only accessible when unwinding the current task in an NMI
+ * context.
+ */
+#define STACKINFO_SDEI(name)					\
+	({							\
+		((task == current) && in_nmi())			\
+			? stackinfo_get_sdei_##name()		\
+			: stackinfo_get_unknown();		\
+	})
+
+#define STACKINFO_EFI						\
+	({							\
+		((task == current) && current_in_efi())		\
+			? stackinfo_get_efi()			\
+			: stackinfo_get_unknown();		\
+	})
+
+noinline noinstr void arch_stack_walk(stack_trace_consume_fn consume_entry,
 			      void *cookie, struct task_struct *task,
 			      struct pt_regs *regs)
 {
-	struct unwind_state state;
+	struct stack_info stacks[] = {
+		stackinfo_get_task(task),
+		STACKINFO_CPU(irq),
+#if defined(CONFIG_VMAP_STACK)
+		STACKINFO_CPU(overflow),
+#endif
+#if defined(CONFIG_VMAP_STACK) && defined(CONFIG_ARM_SDE_INTERFACE)
+		STACKINFO_SDEI(normal),
+		STACKINFO_SDEI(critical),
+#endif
+#ifdef CONFIG_EFI
+		STACKINFO_EFI,
+#endif
+	};
+	struct unwind_state state = {
+		.stacks = stacks,
+		.nr_stacks = ARRAY_SIZE(stacks),
+	};
 
 	if (regs) {
 		if (task != current)

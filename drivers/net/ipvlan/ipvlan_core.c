@@ -19,10 +19,10 @@ void ipvlan_count_rx(const struct ipvl_dev *ipvlan,
 
 		pcptr = this_cpu_ptr(ipvlan->pcpu_stats);
 		u64_stats_update_begin(&pcptr->syncp);
-		pcptr->rx_pkts++;
-		pcptr->rx_bytes += len;
+		u64_stats_inc(&pcptr->rx_pkts);
+		u64_stats_add(&pcptr->rx_bytes, len);
 		if (mcast)
-			pcptr->rx_mcast++;
+			u64_stats_inc(&pcptr->rx_mcast);
 		u64_stats_update_end(&pcptr->syncp);
 	} else {
 		this_cpu_inc(ipvlan->pcpu_stats->rx_errs);
@@ -157,7 +157,7 @@ void *ipvlan_get_L3_hdr(struct ipvl_port *port, struct sk_buff *skb, int *type)
 			return NULL;
 
 		ip4h = ip_hdr(skb);
-		pktlen = ntohs(ip4h->tot_len);
+		pktlen = skb_ip_totlen(skb);
 		if (ip4h->ihl < 5 || ip4h->version != 4)
 			return NULL;
 		if (skb->len < pktlen || pktlen < (ip4h->ihl * 4))

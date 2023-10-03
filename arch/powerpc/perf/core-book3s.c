@@ -131,7 +131,7 @@ static unsigned long ebb_switch_in(bool ebb, struct cpu_hw_events *cpuhw)
 
 static inline void power_pmu_bhrb_enable(struct perf_event *event) {}
 static inline void power_pmu_bhrb_disable(struct perf_event *event) {}
-static void power_pmu_sched_task(struct perf_event_context *ctx, bool sched_in) {}
+static void power_pmu_sched_task(struct perf_event_pmu_context *pmu_ctx, bool sched_in) {}
 static inline void power_pmu_bhrb_read(struct perf_event *event, struct cpu_hw_events *cpuhw) {}
 static void pmao_restore_workaround(bool ebb) { }
 #endif /* CONFIG_PPC32 */
@@ -414,7 +414,7 @@ static void power_pmu_bhrb_enable(struct perf_event *event)
 		cpuhw->bhrb_context = event->ctx;
 	}
 	cpuhw->bhrb_users++;
-	perf_sched_cb_inc(event->ctx->pmu);
+	perf_sched_cb_inc(event->pmu);
 }
 
 static void power_pmu_bhrb_disable(struct perf_event *event)
@@ -426,7 +426,7 @@ static void power_pmu_bhrb_disable(struct perf_event *event)
 
 	WARN_ON_ONCE(!cpuhw->bhrb_users);
 	cpuhw->bhrb_users--;
-	perf_sched_cb_dec(event->ctx->pmu);
+	perf_sched_cb_dec(event->pmu);
 
 	if (!cpuhw->disabled && !cpuhw->bhrb_users) {
 		/* BHRB cannot be turned off when other
@@ -441,7 +441,7 @@ static void power_pmu_bhrb_disable(struct perf_event *event)
 /* Called from ctxsw to prevent one process's branch entries to
  * mingle with the other process's entries during context switch.
  */
-static void power_pmu_sched_task(struct perf_event_context *ctx, bool sched_in)
+static void power_pmu_sched_task(struct perf_event_pmu_context *pmu_ctx, bool sched_in)
 {
 	if (!ppmu->bhrb_nr)
 		return;
@@ -2303,17 +2303,20 @@ static void record_and_restart(struct perf_event *event, unsigned long val,
 			struct cpu_hw_events *cpuhw;
 			cpuhw = this_cpu_ptr(&cpu_hw_events);
 			power_pmu_bhrb_read(event, cpuhw);
-			data.br_stack = &cpuhw->bhrb_stack;
+			perf_sample_save_brstack(&data, event, &cpuhw->bhrb_stack);
 		}
 
 		if (event->attr.sample_type & PERF_SAMPLE_DATA_SRC &&
-						ppmu->get_mem_data_src)
+						ppmu->get_mem_data_src) {
 			ppmu->get_mem_data_src(&data.data_src, ppmu->flags, regs);
+			data.sample_flags |= PERF_SAMPLE_DATA_SRC;
+		}
 
 		if (event->attr.sample_type & PERF_SAMPLE_WEIGHT_TYPE &&
-						ppmu->get_mem_weight)
+						ppmu->get_mem_weight) {
 			ppmu->get_mem_weight(&data.weight.full, event->attr.sample_type);
-
+			data.sample_flags |= PERF_SAMPLE_WEIGHT_TYPE;
+		}
 		if (perf_event_overflow(event, &data, regs))
 			power_pmu_stop(event, 0);
 	} else if (period) {

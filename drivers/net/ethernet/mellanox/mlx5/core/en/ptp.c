@@ -86,7 +86,19 @@ static bool mlx5e_ptp_ts_cqe_drop(struct mlx5e_ptpsq *ptpsq, u16 skb_cc, u16 skb
 	return (ptpsq->ts_cqe_ctr_mask && (skb_cc != skb_id));
 }
 
-static void mlx5e_ptp_skb_fifo_ts_cqe_resync(struct mlx5e_ptpsq *ptpsq, u16 skb_cc, u16 skb_id)
+static bool mlx5e_ptp_ts_cqe_ooo(struct mlx5e_ptpsq *ptpsq, u16 skb_id)
+{
+	u16 skb_cc = PTP_WQE_CTR2IDX(ptpsq->skb_fifo_cc);
+	u16 skb_pc = PTP_WQE_CTR2IDX(ptpsq->skb_fifo_pc);
+
+	if (PTP_WQE_CTR2IDX(skb_id - skb_cc) >= PTP_WQE_CTR2IDX(skb_pc - skb_cc))
+		return true;
+
+	return false;
+}
+
+static void mlx5e_ptp_skb_fifo_ts_cqe_resync(struct mlx5e_ptpsq *ptpsq, u16 skb_cc,
+					     u16 skb_id, int budget)
 {
 	struct skb_shared_hwtstamps hwts = {};
 	struct sk_buff *skb;
@@ -98,6 +110,7 @@ static void mlx5e_ptp_skb_fifo_ts_cqe_resync(struct mlx5e_ptpsq *ptpsq, u16 skb_
 		hwts.hwtstamp = mlx5e_skb_cb_get_hwts(skb)->cqe_hwtstamp;
 		skb_tstamp_tx(skb, &hwts);
 		ptpsq->cq_stats->resync_cqe++;
+		napi_consume_skb(skb, budget);
 		skb_cc = PTP_WQE_CTR2IDX(ptpsq->skb_fifo_cc);
 	}
 }
@@ -118,8 +131,14 @@ static void mlx5e_ptp_handle_ts_cqe(struct mlx5e_ptpsq *ptpsq,
 		goto out;
 	}
 
-	if (mlx5e_ptp_ts_cqe_drop(ptpsq, skb_cc, skb_id))
-		mlx5e_ptp_skb_fifo_ts_cqe_resync(ptpsq, skb_cc, skb_id);
+	if (mlx5e_ptp_ts_cqe_drop(ptpsq, skb_cc, skb_id)) {
+		if (mlx5e_ptp_ts_cqe_ooo(ptpsq, skb_id)) {
+			/* already handled by a previous resync */
+			ptpsq->cq_stats->ooo_cqe_drop++;
+			return;
+		}
+		mlx5e_ptp_skb_fifo_ts_cqe_resync(ptpsq, skb_cc, skb_id, budget);
+	}
 
 	skb = mlx5e_skb_fifo_pop(&ptpsq->skb_fifo);
 	hwtstamp = mlx5e_cqe_ts_to_ns(sq->ptp_cyc2time, sq->clock, get_cqe_ts(cqe));
@@ -155,6 +174,8 @@ static bool mlx5e_ptp_poll_ts_cq(struct mlx5e_cq *cq, int budget)
 
 	/* ensure cq space is freed before enabling more cqes */
 	wmb();
+
+	mlx5e_txqsq_wake(&ptpsq->txqsq);
 
 	return work_done == budget;
 }
@@ -622,37 +643,39 @@ static int mlx5e_ptp_set_state(struct mlx5e_ptp *c, struct mlx5e_params *params)
 	return bitmap_empty(c->state, MLX5E_PTP_STATE_NUM_STATES) ? -EINVAL : 0;
 }
 
-static void mlx5e_ptp_rx_unset_fs(struct mlx5e_priv *priv)
+static void mlx5e_ptp_rx_unset_fs(struct mlx5e_flow_steering *fs)
 {
-	struct mlx5e_ptp_fs *ptp_fs = priv->fs->ptp_fs;
+	struct mlx5e_ptp_fs *ptp_fs = mlx5e_fs_get_ptp(fs);
 
 	if (!ptp_fs->valid)
 		return;
 
 	mlx5e_fs_tt_redirect_del_rule(ptp_fs->l2_rule);
-	mlx5e_fs_tt_redirect_any_destroy(priv);
+	mlx5e_fs_tt_redirect_any_destroy(fs);
 
 	mlx5e_fs_tt_redirect_del_rule(ptp_fs->udp_v6_rule);
 	mlx5e_fs_tt_redirect_del_rule(ptp_fs->udp_v4_rule);
-	mlx5e_fs_tt_redirect_udp_destroy(priv);
+	mlx5e_fs_tt_redirect_udp_destroy(fs);
 	ptp_fs->valid = false;
 }
 
 static int mlx5e_ptp_rx_set_fs(struct mlx5e_priv *priv)
 {
 	u32 tirn = mlx5e_rx_res_get_tirn_ptp(priv->rx_res);
-	struct mlx5e_ptp_fs *ptp_fs = priv->fs->ptp_fs;
+	struct mlx5e_flow_steering *fs = priv->fs;
 	struct mlx5_flow_handle *rule;
+	struct mlx5e_ptp_fs *ptp_fs;
 	int err;
 
+	ptp_fs = mlx5e_fs_get_ptp(fs);
 	if (ptp_fs->valid)
 		return 0;
 
-	err = mlx5e_fs_tt_redirect_udp_create(priv);
+	err = mlx5e_fs_tt_redirect_udp_create(fs);
 	if (err)
 		goto out_free;
 
-	rule = mlx5e_fs_tt_redirect_udp_add_rule(priv, MLX5_TT_IPV4_UDP,
+	rule = mlx5e_fs_tt_redirect_udp_add_rule(fs, MLX5_TT_IPV4_UDP,
 						 tirn, PTP_EV_PORT);
 	if (IS_ERR(rule)) {
 		err = PTR_ERR(rule);
@@ -660,7 +683,7 @@ static int mlx5e_ptp_rx_set_fs(struct mlx5e_priv *priv)
 	}
 	ptp_fs->udp_v4_rule = rule;
 
-	rule = mlx5e_fs_tt_redirect_udp_add_rule(priv, MLX5_TT_IPV6_UDP,
+	rule = mlx5e_fs_tt_redirect_udp_add_rule(fs, MLX5_TT_IPV6_UDP,
 						 tirn, PTP_EV_PORT);
 	if (IS_ERR(rule)) {
 		err = PTR_ERR(rule);
@@ -668,11 +691,11 @@ static int mlx5e_ptp_rx_set_fs(struct mlx5e_priv *priv)
 	}
 	ptp_fs->udp_v6_rule = rule;
 
-	err = mlx5e_fs_tt_redirect_any_create(priv);
+	err = mlx5e_fs_tt_redirect_any_create(fs);
 	if (err)
 		goto out_destroy_udp_v6_rule;
 
-	rule = mlx5e_fs_tt_redirect_any_add_rule(priv, tirn, ETH_P_1588);
+	rule = mlx5e_fs_tt_redirect_any_add_rule(fs, tirn, ETH_P_1588);
 	if (IS_ERR(rule)) {
 		err = PTR_ERR(rule);
 		goto out_destroy_fs_any;
@@ -683,13 +706,13 @@ static int mlx5e_ptp_rx_set_fs(struct mlx5e_priv *priv)
 	return 0;
 
 out_destroy_fs_any:
-	mlx5e_fs_tt_redirect_any_destroy(priv);
+	mlx5e_fs_tt_redirect_any_destroy(fs);
 out_destroy_udp_v6_rule:
 	mlx5e_fs_tt_redirect_del_rule(ptp_fs->udp_v6_rule);
 out_destroy_udp_v4_rule:
 	mlx5e_fs_tt_redirect_del_rule(ptp_fs->udp_v4_rule);
 out_destroy_fs_udp:
-	mlx5e_fs_tt_redirect_udp_destroy(priv);
+	mlx5e_fs_tt_redirect_udp_destroy(fs);
 out_free:
 	return err;
 }
@@ -769,8 +792,8 @@ void mlx5e_ptp_activate_channel(struct mlx5e_ptp *c)
 	if (test_bit(MLX5E_PTP_STATE_RX, c->state)) {
 		mlx5e_ptp_rx_set_fs(c->priv);
 		mlx5e_activate_rq(&c->rq);
-		mlx5e_trigger_napi_sched(&c->napi);
 	}
+	mlx5e_trigger_napi_sched(&c->napi);
 }
 
 void mlx5e_ptp_deactivate_channel(struct mlx5e_ptp *c)
@@ -797,29 +820,31 @@ int mlx5e_ptp_get_rqn(struct mlx5e_ptp *c, u32 *rqn)
 	return 0;
 }
 
-int mlx5e_ptp_alloc_rx_fs(struct mlx5e_priv *priv)
+int mlx5e_ptp_alloc_rx_fs(struct mlx5e_flow_steering *fs,
+			  const struct mlx5e_profile *profile)
 {
 	struct mlx5e_ptp_fs *ptp_fs;
 
-	if (!mlx5e_profile_feature_cap(priv->profile, PTP_RX))
+	if (!mlx5e_profile_feature_cap(profile, PTP_RX))
 		return 0;
 
 	ptp_fs = kzalloc(sizeof(*ptp_fs), GFP_KERNEL);
 	if (!ptp_fs)
 		return -ENOMEM;
+	mlx5e_fs_set_ptp(fs, ptp_fs);
 
-	priv->fs->ptp_fs = ptp_fs;
 	return 0;
 }
 
-void mlx5e_ptp_free_rx_fs(struct mlx5e_priv *priv)
+void mlx5e_ptp_free_rx_fs(struct mlx5e_flow_steering *fs,
+			  const struct mlx5e_profile *profile)
 {
-	struct mlx5e_ptp_fs *ptp_fs = priv->fs->ptp_fs;
+	struct mlx5e_ptp_fs *ptp_fs = mlx5e_fs_get_ptp(fs);
 
-	if (!mlx5e_profile_feature_cap(priv->profile, PTP_RX))
+	if (!mlx5e_profile_feature_cap(profile, PTP_RX))
 		return;
 
-	mlx5e_ptp_rx_unset_fs(priv);
+	mlx5e_ptp_rx_unset_fs(fs);
 	kfree(ptp_fs);
 }
 
@@ -845,6 +870,6 @@ int mlx5e_ptp_rx_manage_fs(struct mlx5e_priv *priv, bool set)
 		netdev_WARN_ONCE(priv->netdev, "Don't try to remove PTP RX-FS rules");
 		return -EINVAL;
 	}
-	mlx5e_ptp_rx_unset_fs(priv);
+	mlx5e_ptp_rx_unset_fs(priv->fs);
 	return 0;
 }

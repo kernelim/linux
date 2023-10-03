@@ -149,7 +149,7 @@ struct rxrpc_sock {
 	struct list_head	sock_calls;	/* List of calls owned by this socket */
 	struct list_head	to_be_accepted;	/* calls awaiting acceptance */
 	struct list_head	recvmsg_q;	/* Calls awaiting recvmsg's attention  */
-	rwlock_t		recvmsg_lock;	/* Lock for recvmsg_q */
+	spinlock_t		recvmsg_lock;	/* Lock for recvmsg_q */
 	struct key		*key;		/* security for this socket */
 	struct key		*securities;	/* list of server security descriptors */
 	struct rb_root		calls;		/* User ID -> call mapping */
@@ -284,7 +284,6 @@ struct rxrpc_local {
 	struct task_struct	*io_thread;
 	struct completion	io_thread_ready; /* Indication that the I/O thread started */
 	struct rxrpc_sock	*service;	/* Service(s) listening on this endpoint */
-	struct rw_semaphore	defrag_sem;	/* control re-enablement of IP DF bit */
 	struct sk_buff_head	rx_queue;	/* Received packets */
 	struct list_head	conn_attend_q;	/* Conns requiring immediate attention */
 	struct list_head	call_attend_q;	/* Calls requiring immediate attention */
@@ -614,6 +613,7 @@ struct rxrpc_call {
 	unsigned long		expect_term_by;	/* When we expect call termination by */
 	u32			next_rx_timo;	/* Timeout for next Rx packet (jif) */
 	u32			next_req_timo;	/* Timeout for next Rx request packet (jif) */
+	u32			hard_timo;	/* Maximum lifetime or 0 (jif) */
 	struct timer_list	timer;		/* Combined event timer */
 	struct work_struct	destroyer;	/* In-process-context destroyer */
 	rxrpc_notify_rx_t	notify_rx;	/* kernel service Rx notification function */
@@ -688,9 +688,11 @@ struct rxrpc_call {
 
 	/* Receive-phase ACK management (ACKs we send). */
 	u8			ackr_reason;	/* reason to ACK */
+	u16			ackr_sack_base;	/* Starting slot in SACK table ring */
 	rxrpc_serial_t		ackr_serial;	/* serial of packet being ACK'd */
-	atomic64_t		ackr_window;	/* Base (in LSW) and top (in MSW) of SACK window */
-	atomic_t		ackr_nr_unacked; /* Number of unacked packets */
+	rxrpc_seq_t		ackr_window;	/* Base of SACK window */
+	rxrpc_seq_t		ackr_wtop;	/* Base of SACK window */
+	unsigned int		ackr_nr_unacked; /* Number of unacked packets */
 	atomic_t		ackr_nr_consumed; /* Number of packets needing hard ACK */
 	struct {
 #define RXRPC_SACK_SIZE 256
@@ -1063,6 +1065,7 @@ int rxrpc_get_server_data_key(struct rxrpc_connection *, const void *, time64_t,
 /*
  * local_event.c
  */
+void rxrpc_gen_version_string(void);
 void rxrpc_send_version_request(struct rxrpc_local *local,
 				struct rxrpc_host_header *hdr,
 				struct sk_buff *skb);

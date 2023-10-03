@@ -515,7 +515,6 @@ static int mxser_set_baud(struct tty_struct *tty, speed_t newspd)
 	outb(quot >> 8, info->ioaddr + UART_DLM);	/* MS of divisor */
 	outb(cval, info->ioaddr + UART_LCR);	/* reset DLAB */
 
-#ifdef BOTHER
 	if (C_BAUD(tty) == BOTHER) {
 		quot = MXSER_BAUD_BASE % newspd;
 		quot *= 8;
@@ -526,9 +525,9 @@ static int mxser_set_baud(struct tty_struct *tty, speed_t newspd)
 			quot /= newspd;
 
 		mxser_set_must_enum_value(info->ioaddr, quot);
-	} else
-#endif
+	} else {
 		mxser_set_must_enum_value(info->ioaddr, 0);
+	}
 
 	return 0;
 }

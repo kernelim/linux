@@ -6,6 +6,9 @@ config MEDIA_COMMON_OPTIONS
 comment "common driver options"
 	depends on MEDIA_COMMON_OPTIONS
 
+config UVC_COMMON
+	tristate
+
 config VIDEO_CX2341X
 	tristate
 

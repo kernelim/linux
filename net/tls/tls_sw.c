@@ -67,7 +67,9 @@ noinline void tls_err_abort(struct sock *sk, int err)
 {
 	WARN_ON_ONCE(err >= 0);
 	/* sk->sk_err should contain a positive error code. */
-	sk->sk_err = -err;
+	WRITE_ONCE(sk->sk_err, -err);
+	/* Paired with smp_rmb() in tcp_poll() */
+	smp_wmb();
 	sk_error_report(sk);
 }
 
@@ -792,7 +794,7 @@ static int bpf_exec_tx_verdict(struct sk_msg *msg, struct sock *sk,
 	struct sk_psock *psock;
 	struct sock *sk_redir;
 	struct tls_rec *rec;
-	bool enospc, policy;
+	bool enospc, policy, redir_ingress;
 	int err = 0, send;
 	u32 delta = 0;
 
@@ -837,6 +839,7 @@ more_data:
 		}
 		break;
 	case __SK_REDIRECT:
+		redir_ingress = psock->redir_ingress;
 		sk_redir = psock->sk_redir;
 		memcpy(&msg_redir, msg, sizeof(*msg));
 		if (msg->apply_bytes < send)
@@ -846,7 +849,8 @@ more_data:
 		sk_msg_return_zero(sk, msg, send);
 		msg->sg.size -= send;
 		release_sock(sk);
-		err = tcp_bpf_sendmsg_redir(sk_redir, &msg_redir, send, flags);
+		err = tcp_bpf_sendmsg_redir(sk_redir, redir_ingress,
+					    &msg_redir, send, flags);
 		lock_sock(sk);
 		if (err < 0) {
 			*copied -= sk_msg_free_nocharge(sk, &msg_redir);
@@ -939,7 +943,9 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 			       MSG_CMSG_COMPAT))
 		return -EOPNOTSUPP;
 
-	mutex_lock(&tls_ctx->tx_lock);
+	ret = mutex_lock_interruptible(&tls_ctx->tx_lock);
+	if (ret)
+		return ret;
 	lock_sock(sk);
 
 	if (unlikely(msg->msg_controllen)) {
@@ -1273,7 +1279,9 @@ int tls_sw_sendpage(struct sock *sk, struct page *page,
 		      MSG_SENDPAGE_NOTLAST | MSG_SENDPAGE_NOPOLICY))
 		return -EOPNOTSUPP;
 
-	mutex_lock(&tls_ctx->tx_lock);
+	ret = mutex_lock_interruptible(&tls_ctx->tx_lock);
+	if (ret)
+		return ret;
 	lock_sock(sk);
 	ret = tls_sw_do_sendpage(sk, page, offset, size, flags);
 	release_sock(sk);
@@ -2113,7 +2121,7 @@ recv_end:
 		else
 			err = process_rx_list(ctx, msg, &control, 0,
 					      async_copy_bytes, is_peek);
-		decrypted = max(err, 0);
+		decrypted += max(err, 0);
 	}
 
 	copied += decrypted;
@@ -2286,8 +2294,12 @@ static void tls_data_ready(struct sock *sk)
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
 	struct tls_sw_context_rx *ctx = tls_sw_ctx_rx(tls_ctx);
 	struct sk_psock *psock;
+	gfp_t alloc_save;
 
+	alloc_save = sk->sk_allocation;
+	sk->sk_allocation = GFP_ATOMIC;
 	tls_strp_data_ready(&ctx->strp);
+	sk->sk_allocation = alloc_save;
 
 	psock = sk_psock_get(sk);
 	if (psock) {
@@ -2419,18 +2431,26 @@ static void tx_work_handler(struct work_struct *work)
 
 	if (!test_and_clear_bit(BIT_TX_SCHEDULED, &ctx->tx_bitmask))
 		return;
-	mutex_lock(&tls_ctx->tx_lock);
-	lock_sock(sk);
-	tls_tx_records(sk, -1);
-	release_sock(sk);
-	mutex_unlock(&tls_ctx->tx_lock);
+
+	if (mutex_trylock(&tls_ctx->tx_lock)) {
+		lock_sock(sk);
+		tls_tx_records(sk, -1);
+		release_sock(sk);
+		mutex_unlock(&tls_ctx->tx_lock);
+	} else if (!test_and_set_bit(BIT_TX_SCHEDULED, &ctx->tx_bitmask)) {
+		/* Someone is holding the tx_lock, they will likely run Tx
+		 * and cancel the work on their way out of the lock section.
+		 * Schedule a long delay just in case.
+		 */
+		schedule_delayed_work(&ctx->tx_work.work, msecs_to_jiffies(10));
+	}
 }
 
 static bool tls_is_tx_ready(struct tls_sw_context_tx *ctx)
 {
 	struct tls_rec *rec;
 
-	rec = list_first_entry(&ctx->tx_list, struct tls_rec, list);
+	rec = list_first_entry_or_null(&ctx->tx_list, struct tls_rec, list);
 	if (!rec)
 		return false;
 
@@ -2632,6 +2652,40 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx, int tx)
 		salt = sm4_ccm_info->salt;
 		salt_size = TLS_CIPHER_SM4_CCM_SALT_SIZE;
 		cipher_name = "ccm(sm4)";
+		break;
+	}
+	case TLS_CIPHER_ARIA_GCM_128: {
+		struct tls12_crypto_info_aria_gcm_128 *aria_gcm_128_info;
+
+		aria_gcm_128_info = (void *)crypto_info;
+		nonce_size = TLS_CIPHER_ARIA_GCM_128_IV_SIZE;
+		tag_size = TLS_CIPHER_ARIA_GCM_128_TAG_SIZE;
+		iv_size = TLS_CIPHER_ARIA_GCM_128_IV_SIZE;
+		iv = aria_gcm_128_info->iv;
+		rec_seq_size = TLS_CIPHER_ARIA_GCM_128_REC_SEQ_SIZE;
+		rec_seq = aria_gcm_128_info->rec_seq;
+		keysize = TLS_CIPHER_ARIA_GCM_128_KEY_SIZE;
+		key = aria_gcm_128_info->key;
+		salt = aria_gcm_128_info->salt;
+		salt_size = TLS_CIPHER_ARIA_GCM_128_SALT_SIZE;
+		cipher_name = "gcm(aria)";
+		break;
+	}
+	case TLS_CIPHER_ARIA_GCM_256: {
+		struct tls12_crypto_info_aria_gcm_256 *gcm_256_info;
+
+		gcm_256_info = (void *)crypto_info;
+		nonce_size = TLS_CIPHER_ARIA_GCM_256_IV_SIZE;
+		tag_size = TLS_CIPHER_ARIA_GCM_256_TAG_SIZE;
+		iv_size = TLS_CIPHER_ARIA_GCM_256_IV_SIZE;
+		iv = gcm_256_info->iv;
+		rec_seq_size = TLS_CIPHER_ARIA_GCM_256_REC_SEQ_SIZE;
+		rec_seq = gcm_256_info->rec_seq;
+		keysize = TLS_CIPHER_ARIA_GCM_256_KEY_SIZE;
+		key = gcm_256_info->key;
+		salt = gcm_256_info->salt;
+		salt_size = TLS_CIPHER_ARIA_GCM_256_SALT_SIZE;
+		cipher_name = "gcm(aria)";
 		break;
 	}
 	default:

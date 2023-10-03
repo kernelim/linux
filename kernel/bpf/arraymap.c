@@ -279,7 +279,8 @@ int bpf_percpu_array_copy(struct bpf_map *map, void *key, void *value)
 	rcu_read_lock();
 	pptr = array->pptrs[index & array->index_mask];
 	for_each_possible_cpu(cpu) {
-		bpf_long_memcpy(value + off, per_cpu_ptr(pptr, cpu), size);
+		copy_map_value_long(map, value + off, per_cpu_ptr(pptr, cpu));
+		check_and_init_map_value(map, value + off);
 		off += size;
 	}
 	rcu_read_unlock();
@@ -305,14 +306,6 @@ static int array_map_get_next_key(struct bpf_map *map, void *key, void *next_key
 	return 0;
 }
 
-static void check_and_free_fields(struct bpf_array *arr, void *val)
-{
-	if (map_value_has_timer(&arr->map))
-		bpf_timer_cancel_and_free(val + arr->map.timer_off);
-	if (map_value_has_kptrs(&arr->map))
-		bpf_map_free_kptrs(&arr->map, val);
-}
-
 /* Called from syscall or from eBPF program */
 static int array_map_update_elem(struct bpf_map *map, void *key, void *value,
 				 u64 map_flags)
@@ -334,12 +327,13 @@ static int array_map_update_elem(struct bpf_map *map, void *key, void *value,
 		return -EEXIST;
 
 	if (unlikely((map_flags & BPF_F_LOCK) &&
-		     !map_value_has_spin_lock(map)))
+		     !btf_record_has_field(map->record, BPF_SPIN_LOCK)))
 		return -EINVAL;
 
 	if (array->map.map_type == BPF_MAP_TYPE_PERCPU_ARRAY) {
-		memcpy(this_cpu_ptr(array->pptrs[index & array->index_mask]),
-		       value, map->value_size);
+		val = this_cpu_ptr(array->pptrs[index & array->index_mask]);
+		copy_map_value(map, val, value);
+		bpf_obj_free_fields(array->map.record, val);
 	} else {
 		val = array->value +
 			(u64)array->elem_size * (index & array->index_mask);
@@ -347,7 +341,7 @@ static int array_map_update_elem(struct bpf_map *map, void *key, void *value,
 			copy_map_value_locked(map, val, value, false);
 		else
 			copy_map_value(map, val, value);
-		check_and_free_fields(array, val);
+		bpf_obj_free_fields(array->map.record, val);
 	}
 	return 0;
 }
@@ -383,7 +377,8 @@ int bpf_percpu_array_update(struct bpf_map *map, void *key, void *value,
 	rcu_read_lock();
 	pptr = array->pptrs[index & array->index_mask];
 	for_each_possible_cpu(cpu) {
-		bpf_long_memcpy(per_cpu_ptr(pptr, cpu), value + off, size);
+		copy_map_value_long(map, per_cpu_ptr(pptr, cpu), value + off);
+		bpf_obj_free_fields(array->map.record, per_cpu_ptr(pptr, cpu));
 		off += size;
 	}
 	rcu_read_unlock();
@@ -406,12 +401,12 @@ static void array_map_free_timers(struct bpf_map *map)
 	struct bpf_array *array = container_of(map, struct bpf_array, map);
 	int i;
 
-	/* We don't reset or free kptr on uref dropping to zero. */
-	if (!map_value_has_timer(map))
+	/* We don't reset or free fields other than timer on uref dropping to zero. */
+	if (!btf_record_has_field(map->record, BPF_TIMER))
 		return;
 
 	for (i = 0; i < array->map.max_entries; i++)
-		bpf_timer_cancel_and_free(array_map_elem_ptr(array, i) + map->timer_off);
+		bpf_obj_free_timer(map->record, array_map_elem_ptr(array, i));
 }
 
 /* Called when map->refcnt goes to zero, either from workqueue or from syscall */
@@ -420,10 +415,21 @@ static void array_map_free(struct bpf_map *map)
 	struct bpf_array *array = container_of(map, struct bpf_array, map);
 	int i;
 
-	if (map_value_has_kptrs(map)) {
-		for (i = 0; i < array->map.max_entries; i++)
-			bpf_map_free_kptrs(map, array_map_elem_ptr(array, i));
-		bpf_map_free_kptr_off_tab(map);
+	if (!IS_ERR_OR_NULL(map->record)) {
+		if (array->map.map_type == BPF_MAP_TYPE_PERCPU_ARRAY) {
+			for (i = 0; i < array->map.max_entries; i++) {
+				void __percpu *pptr = array->pptrs[i & array->index_mask];
+				int cpu;
+
+				for_each_possible_cpu(cpu) {
+					bpf_obj_free_fields(map->record, per_cpu_ptr(pptr, cpu));
+					cond_resched();
+				}
+			}
+		} else {
+			for (i = 0; i < array->map.max_entries; i++)
+				bpf_obj_free_fields(map->record, array_map_elem_ptr(array, i));
+		}
 	}
 
 	if (array->map.map_type == BPF_MAP_TYPE_PERCPU_ARRAY)
@@ -608,9 +614,9 @@ static int __bpf_array_map_seq_show(struct seq_file *seq, void *v)
 			pptr = v;
 			size = array->elem_size;
 			for_each_possible_cpu(cpu) {
-				bpf_long_memcpy(info->percpu_value_buf + off,
-						per_cpu_ptr(pptr, cpu),
-						size);
+				copy_map_value_long(map, info->percpu_value_buf + off,
+						    per_cpu_ptr(pptr, cpu));
+				check_and_init_map_value(map, info->percpu_value_buf + off);
 				off += size;
 			}
 			ctx.value = info->percpu_value_buf;

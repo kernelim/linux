@@ -16,8 +16,6 @@ import sys
 import os
 import sphinx
 
-from subprocess import check_output
-
 # Get Sphinx version
 major, minor, patch = sphinx.version_info[:3]
 
@@ -100,6 +98,9 @@ if major >= 3:
 
             # include/linux/linkage.h:
             "asmlinkage",
+
+            # include/linux/btf.h
+            "__bpf_kfunc",
         ]
 
 else:
@@ -356,29 +357,81 @@ latex_elements = {
      ''',
 }
 
-# At least one book (translations) may have Asian characters
-# with are only displayed if xeCJK is used
+# Translations have Asian (CJK) characters which are only displayed if
+# xeCJK is used
 
-cjk_cmd = check_output(['fc-list', '--format="%{family[0]}\n"']).decode('utf-8', 'ignore')
-if cjk_cmd.find("Noto Sans CJK SC") >= 0:
-    latex_elements['preamble']  += '''
+latex_elements['preamble']  += '''
+    \\IfFontExistsTF{Noto Sans CJK SC}{
 	% This is needed for translations
-        \\usepackage{xeCJK}
-        \\setCJKmainfont{Noto Sans CJK SC}
+	\\usepackage{xeCJK}
+	\\setCJKmainfont{Noto Sans CJK SC}
+	\\setCJKsansfont{Noto Sans CJK SC}
+	\\setCJKmonofont{Noto Sans Mono CJK SC}
+	% CJK Language-specific font choices
+	\\newCJKfontfamily[SCmain]\\scmain{Noto Sans CJK SC}
+	\\newCJKfontfamily[SCsans]\\scsans{Noto Sans CJK SC}
+	\\newCJKfontfamily[SCmono]\\scmono{Noto Sans Mono CJK SC}
+	\\newCJKfontfamily[TCmain]\\tcmain{Noto Sans CJK TC}
+	\\newCJKfontfamily[TCsans]\\tcsans{Noto Sans CJK TC}
+	\\newCJKfontfamily[TCmono]\\tcmono{Noto Sans Mono CJK TC}
+	\\newCJKfontfamily[KRmain]\\krmain{Noto Sans CJK KR}
+	\\newCJKfontfamily[KRsans]\\krsans{Noto Sans CJK KR}
+	\\newCJKfontfamily[KRmono]\\krmono{Noto Sans Mono CJK KR}
+	\\newCJKfontfamily[JPmain]\\jpmain{Noto Sans CJK JP}
+	\\newCJKfontfamily[JPsans]\\jpsans{Noto Sans CJK JP}
+	\\newCJKfontfamily[JPmono]\\jpmono{Noto Sans Mono CJK JP}
 	% Define custom macros to on/off CJK
 	\\newcommand{\\kerneldocCJKon}{\\makexeCJKactive}
 	\\newcommand{\\kerneldocCJKoff}{\\makexeCJKinactive}
-	% To customize \sphinxtableofcontents
+	\\newcommand{\\kerneldocBeginSC}{%
+	    \\begingroup%
+	    \\scmain%
+	}
+	\\newcommand{\\kerneldocEndSC}{\\endgroup}
+	\\newcommand{\\kerneldocBeginTC}{%
+	    \\begingroup%
+	    \\tcmain%
+	    \\renewcommand{\\CJKsfdefault}{TCsans}%
+	    \\renewcommand{\\CJKttdefault}{TCmono}%
+	}
+	\\newcommand{\\kerneldocEndTC}{\\endgroup}
+	\\newcommand{\\kerneldocBeginKR}{%
+	    \\begingroup%
+	    \\krmain%
+	    \\renewcommand{\\CJKsfdefault}{KRsans}%
+	    \\renewcommand{\\CJKttdefault}{KRmono}%
+	}
+	\\newcommand{\\kerneldocEndKR}{\\endgroup}
+	\\newcommand{\\kerneldocBeginJP}{%
+	    \\begingroup%
+	    \\jpmain%
+	    \\renewcommand{\\CJKsfdefault}{JPsans}%
+	    \\renewcommand{\\CJKttdefault}{JPmono}%
+	}
+	\\newcommand{\\kerneldocEndJP}{\\endgroup}
+	% To customize \\sphinxtableofcontents
 	\\usepackage{etoolbox}
 	% Inactivate CJK after tableofcontents
 	\\apptocmd{\\sphinxtableofcontents}{\\kerneldocCJKoff}{}{}
-     '''
-else:
-    latex_elements['preamble']  += '''
+    }{ % No CJK font found
 	% Custom macros to on/off CJK (Dummy)
 	\\newcommand{\\kerneldocCJKon}{}
 	\\newcommand{\\kerneldocCJKoff}{}
-     '''
+	\\newcommand{\\kerneldocBeginSC}[1]{%
+	    \\begin{sphinxadmonition}{note}{Note:}
+		``Noto Sans CJK'' fonts are not found while building this PDF\\@.
+		Translations of zh\\_CN, zh\\_TW, ko\\_KR, and ja\\_JP are
+		skipped.
+	    \\end{sphinxadmonition}}
+	\\newcommand{\\kerneldocEndSC}{}
+	\\newcommand{\\kerneldocBeginTC}[1]{}
+	\\newcommand{\\kerneldocEndTC}{}
+	\\newcommand{\\kerneldocBeginKR}[1]{}
+	\\newcommand{\\kerneldocEndKR}{}
+	\\newcommand{\\kerneldocBeginJP}[1]{}
+	\\newcommand{\\kerneldocEndJP}{}
+    }
+'''
 
 # Fix reference escape troubles with Sphinx 1.4.x
 if major == 1:

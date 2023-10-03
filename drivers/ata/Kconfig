@@ -146,7 +146,7 @@ config SATA_AHCI_PLATFORM
 config AHCI_BRCM
 	tristate "Broadcom AHCI SATA support"
 	depends on ARCH_BRCMSTB || BMIPS_GENERIC || ARCH_BCM_NSP || \
-		   ARCH_BCM_63XX || COMPILE_TEST
+		   ARCH_BCMBCA || COMPILE_TEST
 	select SATA_HOST
 	help
 	  This option enables support for the AHCI SATA3 controller found on
@@ -176,7 +176,7 @@ config AHCI_DM816
 
 config AHCI_ST
 	tristate "ST AHCI SATA support"
-	depends on ARCH_STI
+	depends on ARCH_STI || COMPILE_TEST
 	select SATA_HOST
 	help
 	  This option enables support for ST AHCI SATA controller.
@@ -283,7 +283,7 @@ config SATA_FSL
 
 config SATA_GEMINI
 	tristate "Gemini SATA bridge support"
-	depends on ARCH_GEMINI || (OF && COMPILE_TEST)
+	depends on ARCH_GEMINI || COMPILE_TEST
 	select SATA_HOST
 	default ARCH_GEMINI
 	help
@@ -597,16 +597,6 @@ config PATA_ATP867X
 
 	  If unsure, say N.
 
-config PATA_BK3710
-	tristate "Palmchip BK3710 PATA support"
-	depends on ARCH_DAVINCI || COMPILE_TEST
-	select PATA_TIMINGS
-	help
-	  This option enables support for the integrated IDE controller on
-	  the TI DaVinci SoC.
-
-	  If unsure, say N.
-
 config PATA_CMD64X
 	tristate "CMD64x PATA support"
 	depends on PCI
@@ -638,6 +628,7 @@ config PATA_CS5530
 config PATA_CS5535
 	tristate "CS5535 PATA support (Experimental)"
 	depends on PCI && (X86_32 || (X86_64 && COMPILE_TEST))
+	depends on !UML
 	help
 	  This option enables support for the NatSemi/AMD CS5535
 	  companion chip used with the Geode processor family.
@@ -684,7 +675,6 @@ config PATA_EP93XX
 
 config PATA_FTIDE010
 	tristate "Faraday Technology FTIDE010 PATA support"
-	depends on OF
 	depends on ARM || COMPILE_TEST
 	depends on SATA_GEMINI
 	help
@@ -1081,15 +1071,6 @@ config PATA_OPTI
 
 	  If unsure, say N.
 
-config PATA_PALMLD
-	tristate "Palm LifeDrive PATA support"
-	depends on MACH_PALMLD
-	help
-	  This option enables support for Palm LifeDrive's internal ATA
-	  port via the new ATA layer.
-
-	  If unsure, say N.
-
 config PATA_PCMCIA
 	tristate "PCMCIA PATA support"
 	depends on PCMCIA
@@ -1139,16 +1120,6 @@ config PATA_RZ1000
 	depends on PCI
 	help
 	  This option enables basic support for the PC Tech RZ1000/1
-	  PATA controllers via the new ATA layer
-
-	  If unsure, say N.
-
-config PATA_SAMSUNG_CF
-	tristate "Samsung SoC PATA support"
-	depends on SAMSUNG_DEV_IDE || COMPILE_TEST
-	select PATA_TIMINGS
-	help
-	  This option enables basic support for Samsung's S3C/S5P board
 	  PATA controllers via the new ATA layer
 
 	  If unsure, say N.

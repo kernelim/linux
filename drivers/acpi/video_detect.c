@@ -17,8 +17,9 @@
  * Otherwise vendor specific drivers like thinkpad_acpi, asus-laptop,
  * sony_acpi,... can take care about backlight brightness.
  *
- * Backlight drivers can use acpi_video_get_backlight_type() to determine
- * which driver should handle the backlight.
+ * Backlight drivers can use acpi_video_get_backlight_type() to determine which
+ * driver should handle the backlight. RAW/GPU-driver backlight drivers must
+ * use the acpi_video_backlight_use_native() helper for this.
  *
  * If CONFIG_ACPI_VIDEO is neither set as "compiled in" (y) nor as a module (m)
  * this file will not be compiled and acpi_video_get_backlight_type() will
@@ -31,15 +32,12 @@
 #include <linux/dmi.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/platform_data/x86/nvidia-wmi-ec-backlight.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
 #include <acpi/video.h>
 
 void acpi_video_unregister_backlight(void);
-
-static bool backlight_notifier_registered;
-static struct notifier_block backlight_nb;
-static struct work_struct backlight_notify_work;
 
 static enum acpi_backlight_type acpi_backlight_cmdline = acpi_backlight_undef;
 static enum acpi_backlight_type acpi_backlight_dmi = acpi_backlight_undef;
@@ -52,6 +50,8 @@ static void acpi_video_parse_cmdline(void)
 		acpi_backlight_cmdline = acpi_backlight_video;
 	if (!strcmp("native", acpi_video_backlight_string))
 		acpi_backlight_cmdline = acpi_backlight_native;
+	if (!strcmp("nvidia_wmi_ec", acpi_video_backlight_string))
+		acpi_backlight_cmdline = acpi_backlight_nvidia_wmi_ec;
 	if (!strcmp("none", acpi_video_backlight_string))
 		acpi_backlight_cmdline = acpi_backlight_none;
 }
@@ -77,6 +77,36 @@ find_video(acpi_handle handle, u32 lvl, void *context, void **rv)
 	}
 	return AE_OK;
 }
+
+/* This depends on ACPI_WMI which is X86 only */
+#ifdef CONFIG_X86
+static bool nvidia_wmi_ec_supported(void)
+{
+	struct wmi_brightness_args args = {
+		.mode = WMI_BRIGHTNESS_MODE_GET,
+		.val = 0,
+		.ret = 0,
+	};
+	struct acpi_buffer buf = { (acpi_size)sizeof(args), &args };
+	acpi_status status;
+
+	status = wmi_evaluate_method(WMI_BRIGHTNESS_GUID, 0,
+				     WMI_BRIGHTNESS_METHOD_SOURCE, &buf, &buf);
+	if (ACPI_FAILURE(status))
+		return false;
+
+	/*
+	 * If brightness is handled by the EC then nvidia-wmi-ec-backlight
+	 * should be used, else the GPU driver(s) should be used.
+	 */
+	return args.ret == WMI_BRIGHTNESS_SOURCE_EC;
+}
+#else
+static bool nvidia_wmi_ec_supported(void)
+{
+	return false;
+}
+#endif
 
 /* Force to use vendor driver when the ACPI device is known to be
  * buggy */
@@ -158,6 +188,50 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "Xiaomi Inc"),
 			DMI_MATCH(DMI_PRODUCT_NAME, "Mipad2"),
+		},
+	},
+	{
+	 .callback = video_detect_force_native,
+	 .matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
+		DMI_MATCH(DMI_PRODUCT_NAME, "Vostro 15 3535"),
+		},
+	},
+
+	/*
+	 * Models which need acpi_video backlight control where the GPU drivers
+	 * do not call acpi_video_register_backlight() because no internal panel
+	 * is detected. Typically these are all-in-ones (monitors with builtin
+	 * PC) where the panel connection shows up as regular DP instead of eDP.
+	 */
+	{
+	 .callback = video_detect_force_video,
+	 /* Apple iMac14,1 */
+	 .matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "Apple Inc."),
+		DMI_MATCH(DMI_PRODUCT_NAME, "iMac14,1"),
+		},
+	},
+	{
+	 .callback = video_detect_force_video,
+	 /* Apple iMac14,2 */
+	 .matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "Apple Inc."),
+		DMI_MATCH(DMI_PRODUCT_NAME, "iMac14,2"),
+		},
+	},
+
+	/*
+	 * Older models with nvidia GPU which need acpi_video backlight
+	 * control and where the old nvidia binary driver series does not
+	 * call acpi_video_register_backlight().
+	 */
+	{
+	 .callback = video_detect_force_video,
+	 /* ThinkPad W530 */
+	 .matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+		DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad W530"),
 		},
 	},
 
@@ -382,6 +456,14 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	},
 	{
 	 .callback = video_detect_force_native,
+	 /* Acer Aspire 3830TG */
+	 .matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
+		DMI_MATCH(DMI_PRODUCT_NAME, "Aspire 3830TG"),
+		},
+	},
+	{
+	 .callback = video_detect_force_native,
 	 /* Acer Aspire 5738z */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
@@ -537,43 +619,30 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	{ },
 };
 
-/* This uses a workqueue to avoid various locking ordering issues */
-static void acpi_video_backlight_notify_work(struct work_struct *work)
+static bool google_cros_ec_present(void)
 {
-	if (acpi_video_get_backlight_type() != acpi_backlight_video)
-		acpi_video_unregister_backlight();
+	return acpi_dev_found("GOOG0004") || acpi_dev_found("GOOG000C");
 }
 
-static int acpi_video_backlight_notify(struct notifier_block *nb,
-				       unsigned long val, void *bd)
+/*
+ * Windows 8 and newer no longer use the ACPI video interface, so it often
+ * does not work. So on win8+ systems prefer native brightness control.
+ * Chromebooks should always prefer native backlight control.
+ */
+static bool prefer_native_over_acpi_video(void)
 {
-	struct backlight_device *backlight = bd;
-
-	/* A raw bl registering may change video -> native */
-	if (backlight->props.type == BACKLIGHT_RAW &&
-	    val == BACKLIGHT_REGISTERED)
-		schedule_work(&backlight_notify_work);
-
-	return NOTIFY_OK;
+	return acpi_osi_is_win8() || google_cros_ec_present();
 }
 
 /*
  * Determine which type of backlight interface to use on this system,
  * First check cmdline, then dmi quirks, then do autodetect.
- *
- * The autodetect order is:
- * 1) Is the acpi-video backlight interface supported ->
- *  no, use a vendor interface
- * 2) Is this a win8 "ready" BIOS and do we have a native interface ->
- *  yes, use a native interface
- * 3) Else use the acpi-video interface
- *
- * Arguably the native on win8 check should be done first, but that would
- * be a behavior change, which may causes issues.
  */
-enum acpi_backlight_type acpi_video_get_backlight_type(void)
+enum acpi_backlight_type __acpi_video_get_backlight_type(bool native, bool *auto_detect)
 {
 	static DEFINE_MUTEX(init_mutex);
+	static bool nvidia_wmi_ec_present;
+	static bool native_available;
 	static bool init_done;
 	static long video_caps;
 
@@ -585,31 +654,69 @@ enum acpi_backlight_type acpi_video_get_backlight_type(void)
 		acpi_walk_namespace(ACPI_TYPE_DEVICE, ACPI_ROOT_OBJECT,
 				    ACPI_UINT32_MAX, find_video, NULL,
 				    &video_caps, NULL);
-		INIT_WORK(&backlight_notify_work,
-			  acpi_video_backlight_notify_work);
-		backlight_nb.notifier_call = acpi_video_backlight_notify;
-		backlight_nb.priority = 0;
-		if (backlight_register_notifier(&backlight_nb) == 0)
-			backlight_notifier_registered = true;
+		nvidia_wmi_ec_present = nvidia_wmi_ec_supported();
 		init_done = true;
 	}
+	if (native)
+		native_available = true;
 	mutex_unlock(&init_mutex);
 
+	if (auto_detect)
+		*auto_detect = false;
+
+	/*
+	 * The below heuristics / detection steps are in order of descending
+	 * presedence. The commandline takes presedence over anything else.
+	 */
 	if (acpi_backlight_cmdline != acpi_backlight_undef)
 		return acpi_backlight_cmdline;
 
+	/* DMI quirks override any autodetection. */
 	if (acpi_backlight_dmi != acpi_backlight_undef)
 		return acpi_backlight_dmi;
 
-	if (!(video_caps & ACPI_VIDEO_BACKLIGHT))
-		return acpi_backlight_vendor;
+	/* Special cases such as nvidia_wmi_ec and apple gmux. */
+	if (nvidia_wmi_ec_present)
+		return acpi_backlight_nvidia_wmi_ec;
 
-	if (acpi_osi_is_win8() && backlight_device_get_by_type(BACKLIGHT_RAW))
+	if (auto_detect)
+		*auto_detect = true;
+
+	/* Use ACPI video if available, except when native should be preferred. */
+	if ((video_caps & ACPI_VIDEO_BACKLIGHT) &&
+	     !(native_available && prefer_native_over_acpi_video()))
+		return acpi_backlight_video;
+
+	/* Use native if available */
+	if (native_available)
 		return acpi_backlight_native;
 
-	return acpi_backlight_video;
+	/*
+	 * The vendor specific BIOS interfaces are only necessary for
+	 * laptops from before ~2008.
+	 *
+	 * For laptops from ~2008 till ~2023 this point is never reached
+	 * because on those (video_caps & ACPI_VIDEO_BACKLIGHT) above is true.
+	 *
+	 * Laptops from after ~2023 no longer support ACPI_VIDEO_BACKLIGHT,
+	 * if this point is reached on those, this likely means that
+	 * the GPU kms driver which sets native_available has not loaded yet.
+	 *
+	 * Returning acpi_backlight_vendor in this case is known to sometimes
+	 * cause a non working vendor specific /sys/class/backlight device to
+	 * get registered.
+	 *
+	 * Return acpi_backlight_none on laptops with ACPI tables written
+	 * for Windows 8 (laptops from after ~2012) to avoid this problem.
+	 */
+	if (acpi_osi_is_win8())
+		return acpi_backlight_none;
+
+	/* No ACPI video/native (old hw), use vendor specific fw methods. */
+	return acpi_backlight_vendor;
 }
-EXPORT_SYMBOL(acpi_video_get_backlight_type);
+
+EXPORT_SYMBOL(__acpi_video_get_backlight_type);
 
 /*
  * Set the preferred backlight interface type based on DMI info.
@@ -624,9 +731,3 @@ void acpi_video_set_dmi_backlight_type(enum acpi_backlight_type type)
 		acpi_video_unregister_backlight();
 }
 EXPORT_SYMBOL(acpi_video_set_dmi_backlight_type);
-
-void __exit acpi_video_detect_exit(void)
-{
-	if (backlight_notifier_registered)
-		backlight_unregister_notifier(&backlight_nb);
-}

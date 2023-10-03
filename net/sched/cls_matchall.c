@@ -12,6 +12,7 @@
 
 #include <net/sch_generic.h>
 #include <net/pkt_cls.h>
+#include <net/tc_wrapper.h>
 
 struct cls_mall_head {
 	struct tcf_exts exts;
@@ -24,8 +25,9 @@ struct cls_mall_head {
 	bool deleting;
 };
 
-static int mall_classify(struct sk_buff *skb, const struct tcf_proto *tp,
-			 struct tcf_result *res)
+TC_INDIRECT_SCOPE int mall_classify(struct sk_buff *skb,
+				    const struct tcf_proto *tp,
+				    struct tcf_result *res)
 {
 	struct cls_mall_head *head = rcu_dereference_bh(tp->root);
 
@@ -313,10 +315,7 @@ static int mall_reoffload(struct tcf_proto *tp, bool add, flow_setup_cb_t *cb,
 	tc_cleanup_offload_action(&cls_mall.rule->action);
 	kfree(cls_mall.rule);
 
-	if (err)
-		return err;
-
-	return 0;
+	return err;
 }
 
 static void mall_stats_hw_filter(struct tcf_proto *tp,
@@ -332,11 +331,7 @@ static void mall_stats_hw_filter(struct tcf_proto *tp,
 
 	tc_setup_cb_call(block, TC_SETUP_CLSMATCHALL, &cls_mall, false, true);
 
-	tcf_exts_hw_stats_update(&head->exts, cls_mall.stats.bytes,
-				 cls_mall.stats.pkts, cls_mall.stats.drops,
-				 cls_mall.stats.lastused,
-				 cls_mall.stats.used_hw_stats,
-				 cls_mall.stats.used_hw_stats_valid);
+	tcf_exts_hw_stats_update(&head->exts, &cls_mall.stats, cls_mall.use_act_stats);
 }
 
 static int mall_dump(struct net *net, struct tcf_proto *tp, void *fh,
@@ -397,12 +392,7 @@ static void mall_bind_class(void *fh, u32 classid, unsigned long cl, void *q,
 {
 	struct cls_mall_head *head = fh;
 
-	if (head && head->res.classid == classid) {
-		if (cl)
-			__tcf_bind_filter(q, &head->res, base);
-		else
-			__tcf_unbind_filter(q, &head->res);
-	}
+	tc_cls_bind_class(classid, cl, q, &head->res, base);
 }
 
 static struct tcf_proto_ops cls_mall_ops __read_mostly = {

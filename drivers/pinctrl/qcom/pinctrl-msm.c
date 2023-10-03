@@ -14,7 +14,7 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
-#include <linux/qcom_scm.h>
+#include <linux/firmware/qcom/qcom_scm.h>
 #include <linux/reboot.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
@@ -1297,7 +1297,6 @@ static int msm_gpio_init(struct msm_pinctrl *pctrl)
 	chip->label = dev_name(pctrl->dev);
 	chip->parent = pctrl->dev;
 	chip->owner = THIS_MODULE;
-	chip->of_node = pctrl->dev->of_node;
 	if (msm_gpio_needs_valid_mask(pctrl))
 		chip->init_valid_mask = msm_gpio_init_valid_mask;
 

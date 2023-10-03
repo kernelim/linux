@@ -39,11 +39,6 @@
 #define XFEATURE_MASK_XTILEDATA		(1 << XFEATURE_XTILEDATA)
 #define XFEATURE_MASK_XTILE		(XFEATURE_MASK_XTILECFG | XFEATURE_MASK_XTILEDATA)
 
-#define TILE_CPUID			0x1d
-#define XSTATE_CPUID			0xd
-#define TILE_PALETTE_CPUID_SUBLEAVE	0x1
-#define XSTATE_USER_STATE_SUBLEAVE	0x0
-
 #define XSAVE_HDR_OFFSET		512
 
 struct xsave_data {
@@ -124,76 +119,26 @@ static inline void check_cpuid_xsave(void)
 	GUEST_ASSERT(this_cpu_has(X86_FEATURE_OSXSAVE));
 }
 
-static bool check_xsave_supports_xtile(void)
+static void check_xtile_info(void)
 {
-	return __xgetbv(0) & XFEATURE_MASK_XTILE;
-}
+	GUEST_ASSERT(this_cpu_has_p(X86_PROPERTY_XSTATE_MAX_SIZE_XCR0));
+	GUEST_ASSERT(this_cpu_property(X86_PROPERTY_XSTATE_MAX_SIZE_XCR0) <= XSAVE_SIZE);
 
-static bool enum_xtile_config(void)
-{
-	u32 eax, ebx, ecx, edx;
+	xtile.xsave_offset = this_cpu_property(X86_PROPERTY_XSTATE_TILE_OFFSET);
+	GUEST_ASSERT(xtile.xsave_offset == 2816);
+	xtile.xsave_size = this_cpu_property(X86_PROPERTY_XSTATE_TILE_SIZE);
+	GUEST_ASSERT(xtile.xsave_size == 8192);
+	GUEST_ASSERT(sizeof(struct tile_data) >= xtile.xsave_size);
 
-	__cpuid(TILE_CPUID, TILE_PALETTE_CPUID_SUBLEAVE, &eax, &ebx, &ecx, &edx);
-	if (!eax || !ebx || !ecx)
-		return false;
-
-	xtile.max_names = ebx >> 16;
-	if (xtile.max_names < NUM_TILES)
-		return false;
-
-	xtile.bytes_per_tile = eax >> 16;
-	if (xtile.bytes_per_tile < TILE_SIZE)
-		return false;
-
-	xtile.bytes_per_row = ebx;
-	xtile.max_rows = ecx;
-
-	return true;
-}
-
-static bool enum_xsave_tile(void)
-{
-	u32 eax, ebx, ecx, edx;
-
-	__cpuid(XSTATE_CPUID, XFEATURE_XTILEDATA, &eax, &ebx, &ecx, &edx);
-	if (!eax || !ebx)
-		return false;
-
-	xtile.xsave_offset = ebx;
-	xtile.xsave_size = eax;
-
-	return true;
-}
-
-static bool check_xsave_size(void)
-{
-	u32 eax, ebx, ecx, edx;
-	bool valid = false;
-
-	__cpuid(XSTATE_CPUID, XSTATE_USER_STATE_SUBLEAVE, &eax, &ebx, &ecx, &edx);
-	if (ebx && ebx <= XSAVE_SIZE)
-		valid = true;
-
-	return valid;
-}
-
-static bool check_xtile_info(void)
-{
-	bool ret = false;
-
-	if (!check_xsave_size())
-		return ret;
-
-	if (!enum_xsave_tile())
-		return ret;
-
-	if (!enum_xtile_config())
-		return ret;
-
-	if (sizeof(struct tile_data) >= xtile.xsave_size)
-		ret = true;
-
-	return ret;
+	GUEST_ASSERT(this_cpu_has_p(X86_PROPERTY_AMX_NR_TILE_REGS));
+	xtile.max_names = this_cpu_property(X86_PROPERTY_AMX_NR_TILE_REGS);
+	GUEST_ASSERT(xtile.max_names == 8);
+	xtile.bytes_per_tile = this_cpu_property(X86_PROPERTY_AMX_BYTES_PER_TILE);
+	GUEST_ASSERT(xtile.bytes_per_tile == 1024);
+	xtile.bytes_per_row = this_cpu_property(X86_PROPERTY_AMX_BYTES_PER_ROW);
+	GUEST_ASSERT(xtile.bytes_per_row == 64);
+	xtile.max_rows = this_cpu_property(X86_PROPERTY_AMX_MAX_ROWS);
+	GUEST_ASSERT(xtile.max_rows == 16);
 }
 
 static void set_tilecfg(struct tile_config *cfg)
@@ -230,6 +175,7 @@ static void init_regs(void)
 	xcr0 = __xgetbv(0);
 	xcr0 |= XFEATURE_MASK_XTILE;
 	__xsetbv(0x0, xcr0);
+	GUEST_ASSERT(__xgetbv(0) & XFEATURE_MASK_XTILE);
 }
 
 static void __attribute__((__flatten__)) guest_code(struct tile_config *amx_cfg,
@@ -238,16 +184,7 @@ static void __attribute__((__flatten__)) guest_code(struct tile_config *amx_cfg,
 {
 	init_regs();
 	check_cpuid_xsave();
-	GUEST_ASSERT(check_xsave_supports_xtile());
-	GUEST_ASSERT(check_xtile_info());
-
-	/* check xtile configs */
-	GUEST_ASSERT(xtile.xsave_offset == 2816);
-	GUEST_ASSERT(xtile.xsave_size == 8192);
-	GUEST_ASSERT(xtile.max_names == 8);
-	GUEST_ASSERT(xtile.bytes_per_tile == 1024);
-	GUEST_ASSERT(xtile.bytes_per_row == 64);
-	GUEST_ASSERT(xtile.max_rows == 16);
+	check_xtile_info();
 	GUEST_SYNC(1);
 
 	/* xfd=0, enable amx */
@@ -299,7 +236,6 @@ int main(int argc, char *argv[])
 	struct kvm_regs regs1, regs2;
 	struct kvm_vcpu *vcpu;
 	struct kvm_vm *vm;
-	struct kvm_run *run;
 	struct kvm_x86_state *state;
 	int xsave_restore_size;
 	vm_vaddr_t amx_cfg, tiledata, xsavedata;
@@ -307,20 +243,25 @@ int main(int argc, char *argv[])
 	u32 amx_offset;
 	int stage, ret;
 
+	/*
+	 * Note, all off-by-default features must be enabled before anything
+	 * caches KVM_GET_SUPPORTED_CPUID, e.g. before using kvm_cpu_has().
+	 */
 	vm_xsave_require_permission(XSTATE_XTILE_DATA_BIT);
 
-	/* Create VM */
-	vm = vm_create_with_one_vcpu(&vcpu, guest_code);
-
+	TEST_REQUIRE(kvm_cpu_has(X86_FEATURE_XFD));
 	TEST_REQUIRE(kvm_cpu_has(X86_FEATURE_XSAVE));
 	TEST_REQUIRE(kvm_cpu_has(X86_FEATURE_AMX_TILE));
 	TEST_REQUIRE(kvm_cpu_has(X86_FEATURE_XTILECFG));
 	TEST_REQUIRE(kvm_cpu_has(X86_FEATURE_XTILEDATA));
 
-	/* Get xsave/restore max size */
-	xsave_restore_size = kvm_get_supported_cpuid_entry(0xd)->ecx;
+	/* Create VM */
+	vm = vm_create_with_one_vcpu(&vcpu, guest_code);
 
-	run = vcpu->run;
+	TEST_ASSERT(kvm_cpu_has_p(X86_PROPERTY_XSTATE_MAX_SIZE),
+		    "KVM should enumerate max XSAVE size when XSAVE is supported");
+	xsave_restore_size = kvm_cpu_property(X86_PROPERTY_XSTATE_MAX_SIZE);
+
 	vcpu_regs_get(vcpu, &regs1);
 
 	/* Register #NM handler */
@@ -343,10 +284,7 @@ int main(int argc, char *argv[])
 
 	for (stage = 1; ; stage++) {
 		vcpu_run(vcpu);
-		TEST_ASSERT(run->exit_reason == KVM_EXIT_IO,
-			    "Stage %d: unexpected exit reason: %u (%s),\n",
-			    stage, run->exit_reason,
-			    exit_reason_str(run->exit_reason));
+		TEST_ASSERT_KVM_EXIT_REASON(vcpu, KVM_EXIT_IO);
 
 		switch (get_ucall(vcpu, &uc)) {
 		case UCALL_ABORT:
@@ -402,7 +340,6 @@ int main(int argc, char *argv[])
 		/* Restore state in a new VM.  */
 		vcpu = vm_recreate_with_one_vcpu(vm);
 		vcpu_load_state(vcpu, state);
-		run = vcpu->run;
 		kvm_x86_state_cleanup(state);
 
 		memset(&regs2, 0, sizeof(regs2));

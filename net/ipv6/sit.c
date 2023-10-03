@@ -518,7 +518,7 @@ static void ipip6_tunnel_uninit(struct net_device *dev)
 		ipip6_tunnel_del_prl(tunnel, NULL);
 	}
 	dst_cache_reset(&tunnel->dst_cache);
-	dev_put_track(dev, &tunnel->dev_tracker);
+	netdev_put(dev, &tunnel->dev_tracker);
 }
 
 static int ipip6_err(struct sk_buff *skb, u32 info)
@@ -683,8 +683,6 @@ static int ipip6_rcv(struct sk_buff *skb)
 	tunnel = ipip6_tunnel_lookup(dev_net(skb->dev), skb->dev,
 				     iph->saddr, iph->daddr, sifindex);
 	if (tunnel) {
-		struct pcpu_sw_netstats *tstats;
-
 		if (tunnel->parms.iph.protocol != IPPROTO_IPV6 &&
 		    tunnel->parms.iph.protocol != 0)
 			goto out;
@@ -721,11 +719,7 @@ static int ipip6_rcv(struct sk_buff *skb)
 			}
 		}
 
-		tstats = this_cpu_ptr(tunnel->dev->tstats);
-		u64_stats_update_begin(&tstats->syncp);
-		tstats->rx_packets++;
-		tstats->rx_bytes += skb->len;
-		u64_stats_update_end(&tstats->syncp);
+		dev_sw_netstats_rx_add(tunnel->dev, skb->len);
 
 		netif_rx(skb);
 
@@ -1100,12 +1094,13 @@ tx_err:
 
 static void ipip6_tunnel_bind_dev(struct net_device *dev)
 {
+	struct ip_tunnel *tunnel = netdev_priv(dev);
+	int t_hlen = tunnel->hlen + sizeof(struct iphdr);
 	struct net_device *tdev = NULL;
-	struct ip_tunnel *tunnel;
+	int hlen = LL_MAX_HEADER;
 	const struct iphdr *iph;
 	struct flowi4 fl4;
 
-	tunnel = netdev_priv(dev);
 	iph = &tunnel->parms.iph;
 
 	if (iph->daddr) {
@@ -1128,14 +1123,15 @@ static void ipip6_tunnel_bind_dev(struct net_device *dev)
 		tdev = __dev_get_by_index(tunnel->net, tunnel->parms.link);
 
 	if (tdev && !netif_is_l3_master(tdev)) {
-		int t_hlen = tunnel->hlen + sizeof(struct iphdr);
 		int mtu;
 
 		mtu = tdev->mtu - t_hlen;
 		if (mtu < IPV6_MIN_MTU)
 			mtu = IPV6_MIN_MTU;
 		WRITE_ONCE(dev->mtu, mtu);
+		hlen = tdev->hard_header_len + tdev->needed_headroom;
 	}
+	dev->needed_headroom = t_hlen + hlen;
 }
 
 static void ipip6_tunnel_update(struct ip_tunnel *t, struct ip_tunnel_parm *p,
@@ -1462,7 +1458,7 @@ static int ipip6_tunnel_init(struct net_device *dev)
 		dev->tstats = NULL;
 		return err;
 	}
-	dev_hold_track(dev, &tunnel->dev_tracker, GFP_KERNEL);
+	netdev_hold(dev, &tunnel->dev_tracker, GFP_KERNEL);
 	return 0;
 }
 

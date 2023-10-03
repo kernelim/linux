@@ -96,7 +96,8 @@ static int nft_cmp_init(const struct nft_ctx *ctx, const struct nft_expr *expr,
 	return 0;
 }
 
-static int nft_cmp_dump(struct sk_buff *skb, const struct nft_expr *expr)
+static int nft_cmp_dump(struct sk_buff *skb,
+			const struct nft_expr *expr, bool reset)
 {
 	const struct nft_cmp_expr *priv = nft_expr_priv(expr);
 
@@ -242,7 +243,8 @@ static int nft_cmp_fast_offload(struct nft_offload_ctx *ctx,
 	return __nft_cmp_offload(ctx, flow, &cmp);
 }
 
-static int nft_cmp_fast_dump(struct sk_buff *skb, const struct nft_expr *expr)
+static int nft_cmp_fast_dump(struct sk_buff *skb,
+			     const struct nft_expr *expr, bool reset)
 {
 	const struct nft_cmp_fast_expr *priv = nft_expr_priv(expr);
 	enum nft_cmp_ops op = priv->inv ? NFT_CMP_NEQ : NFT_CMP_EQ;

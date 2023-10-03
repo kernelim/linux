@@ -332,6 +332,8 @@ tcp_app_win - INTEGER
 	Reserve max(window/2^tcp_app_win, mss) of window for application
 	buffer. Value 0 is special, it means that nothing is reserved.
 
+	Possible values are [0, 31], inclusive.
+
 	Default: 31
 
 tcp_autocorking - BOOLEAN
@@ -2895,6 +2897,15 @@ ecn_enable - BOOLEAN
         0: Disable ecn.
 
         Default: 1
+
+l3mdev_accept - BOOLEAN
+	Enabling this option allows a "global" bound socket to work
+	across L3 master domains (e.g., VRFs) with packets capable of
+	being received regardless of the L3 domain in which they
+	originated. Only valid when the kernel was compiled with
+	CONFIG_NET_L3_MASTER_DEV.
+
+	Default: 1 (enabled)
 
 
 ``/proc/sys/net/core/*``

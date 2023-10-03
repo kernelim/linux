@@ -626,7 +626,7 @@ static void do_break_handler(struct pt_regs *regs)
 {
 	struct arch_hw_breakpoint null_brk = {0};
 	struct arch_hw_breakpoint *info;
-	struct ppc_inst instr = ppc_inst(0);
+	ppc_inst_t instr = ppc_inst(0);
 	int type = 0;
 	int size = 0;
 	unsigned long ea;
@@ -1343,8 +1343,7 @@ static void show_instructions(struct pt_regs *regs)
 		if (!(i % 8))
 			pr_cont("\n");
 
-		if (!__kernel_text_address(pc) ||
-		    get_kernel_nofault(instr, (const void *)pc)) {
+		if (get_kernel_nofault(instr, (const void *)pc)) {
 			pr_cont("XXXXXXXX ");
 		} else {
 			if (nip == pc)

@@ -99,16 +99,6 @@ int pud_huge(pud_t pud)
 #endif
 }
 
-/*
- * Select all bits except the pfn
- */
-static inline pgprot_t pte_pgprot(pte_t pte)
-{
-	unsigned long pfn = pte_pfn(pte);
-
-	return __pgprot(pte_val(pfn_pte(pfn, __pgprot(0))) ^ pte_val(pte));
-}
-
 static int find_num_contig(struct mm_struct *mm, unsigned long addr,
 			   pte_t *ptep, size_t *pgsize)
 {
@@ -250,6 +240,13 @@ static void clear_flush(struct mm_struct *mm,
 	flush_tlb_range(&vma, saddr, addr);
 }
 
+static inline struct folio *hugetlb_swap_entry_to_folio(swp_entry_t entry)
+{
+	VM_BUG_ON(!is_migration_entry(entry) && !is_hwpoison_entry(entry));
+
+	return page_folio(pfn_to_page(swp_offset_pfn(entry)));
+}
+
 void set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
 			    pte_t *ptep, pte_t pte)
 {
@@ -259,11 +256,16 @@ void set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
 	unsigned long pfn, dpfn;
 	pgprot_t hugeprot;
 
-	/*
-	 * Code needs to be expanded to handle huge swap and migration
-	 * entries. Needed for HUGETLB and MEMORY_FAILURE.
-	 */
-	WARN_ON(!pte_present(pte));
+	if (!pte_present(pte)) {
+		struct folio *folio;
+
+		folio = hugetlb_swap_entry_to_folio(pte_to_swp_entry(pte));
+		ncontig = num_contig_ptes(folio_size(folio), &pgsize);
+
+		for (i = 0; i < ncontig; i++, ptep++)
+			set_pte_at(mm, addr, ptep, pte);
+		return;
+	}
 
 	if (!pte_cont(pte)) {
 		set_pte_at(mm, addr, ptep, pte);
@@ -279,18 +281,6 @@ void set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
 
 	for (i = 0; i < ncontig; i++, ptep++, addr += pgsize, pfn += dpfn)
 		set_pte_at(mm, addr, ptep, pfn_pte(pfn, hugeprot));
-}
-
-void set_huge_swap_pte_at(struct mm_struct *mm, unsigned long addr,
-			  pte_t *ptep, pte_t pte, unsigned long sz)
-{
-	int i, ncontig;
-	size_t pgsize;
-
-	ncontig = num_contig_ptes(sz, &pgsize);
-
-	for (i = 0; i < ncontig; i++, ptep++)
-		set_pte(ptep, pte);
 }
 
 pte_t *huge_pte_alloc(struct mm_struct *mm, struct vm_area_struct *vma,
@@ -378,6 +368,28 @@ pte_t *huge_pte_offset(struct mm_struct *mm,
 		return pte_offset_kernel(pmdp, (addr & CONT_PTE_MASK));
 
 	return NULL;
+}
+
+unsigned long hugetlb_mask_last_page(struct hstate *h)
+{
+	unsigned long hp_size = huge_page_size(h);
+
+	switch (hp_size) {
+#ifndef __PAGETABLE_PMD_FOLDED
+	case PUD_SIZE:
+		return PGDIR_SIZE - PUD_SIZE;
+#endif
+	case CONT_PMD_SIZE:
+		return PUD_SIZE - CONT_PMD_SIZE;
+	case PMD_SIZE:
+		return PUD_SIZE - PMD_SIZE;
+	case CONT_PTE_SIZE:
+		return PMD_SIZE - CONT_PTE_SIZE;
+	default:
+		break;
+	}
+
+	return 0UL;
 }
 
 pte_t arch_make_huge_pte(pte_t entry, unsigned int shift, vm_flags_t flags)
@@ -545,4 +557,25 @@ arch_initcall(hugetlbpage_init);
 bool __init arch_hugetlb_valid_size(unsigned long size)
 {
 	return __hugetlb_valid_size(size);
+}
+
+pte_t huge_ptep_modify_prot_start(struct vm_area_struct *vma, unsigned long addr, pte_t *ptep)
+{
+	if (IS_ENABLED(CONFIG_ARM64_ERRATUM_2645198) &&
+	    cpus_have_const_cap(ARM64_WORKAROUND_2645198)) {
+		/*
+		 * Break-before-make (BBM) is required for all user space mappings
+		 * when the permission changes from executable to non-executable
+		 * in cases where cpu is affected with errata #2645198.
+		 */
+		if (pte_user_exec(READ_ONCE(*ptep)))
+			return huge_ptep_clear_flush(vma, addr, ptep);
+	}
+	return huge_ptep_get_and_clear(vma->vm_mm, addr, ptep);
+}
+
+void huge_ptep_modify_prot_commit(struct vm_area_struct *vma, unsigned long addr, pte_t *ptep,
+				  pte_t old_pte, pte_t pte)
+{
+	set_huge_pte_at(vma->vm_mm, addr, ptep, pte);
 }

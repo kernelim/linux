@@ -246,10 +246,8 @@ static struct bio *blk_rq_map_bio_alloc(struct request *rq,
 {
 	struct bio *bio;
 
-	if (rq->cmd_flags & REQ_POLLED) {
-		blk_opf_t opf = rq->cmd_flags | REQ_ALLOC_CACHE;
-
-		bio = bio_alloc_bioset(NULL, nr_vecs, opf, gfp_mask,
+	if (rq->cmd_flags & REQ_ALLOC_CACHE) {
+		bio = bio_alloc_bioset(NULL, nr_vecs, rq->cmd_flags, gfp_mask,
 					&fs_bio_set);
 		if (!bio)
 			return NULL;
@@ -547,7 +545,7 @@ static int blk_rq_map_user_bvec(struct request *rq, const struct iov_iter *iter)
 	size_t nr_iter = iov_iter_count(iter);
 	size_t nr_segs = iter->nr_segs;
 	struct bio_vec *bvecs, *bvprvp = NULL;
-	struct queue_limits *lim = &q->limits;
+	const struct queue_limits *lim = &q->limits;
 	unsigned int nsegs = 0, bytes = 0;
 	struct bio *bio;
 	size_t i;

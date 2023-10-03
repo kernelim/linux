@@ -26,6 +26,8 @@
 #define _CIF_MCCK_GUEST		BIT(CIF_MCCK_GUEST)
 #define _CIF_DEDICATED_CPU	BIT(CIF_DEDICATED_CPU)
 
+#define RESTART_FLAG_CTLREGS	_AC(1 << 0, U)
+
 #ifndef __ASSEMBLY__
 
 #include <linux/cpumask.h>
@@ -308,19 +310,9 @@ static __always_inline void __noreturn disabled_wait(void)
  * Basic Program Check Handler.
  */
 extern void s390_base_pgm_handler(void);
-extern void (*s390_base_pgm_handler_fn)(void);
+extern void (*s390_base_pgm_handler_fn)(struct pt_regs *regs);
 
 #define ARCH_LOW_ADDRESS_LIMIT	0x7fffffffUL
-
-extern int memcpy_real(void *, unsigned long, size_t);
-extern void memcpy_absolute(void *, void *, size_t);
-
-#define mem_assign_absolute(dest, val) do {			\
-	__typeof__(dest) __tmp = (val);				\
-								\
-	BUILD_BUG_ON(sizeof(__tmp) != sizeof(val));		\
-	memcpy_absolute(&(dest), &__tmp, sizeof(__tmp));	\
-} while (0)
 
 extern int s390_isolate_bp(void);
 extern int s390_isolate_bp_guest(void);

@@ -22,6 +22,7 @@
 #include <linux/ppp_defs.h>
 #include <linux/stddef.h>
 #include <linux/if_ether.h>
+#include <linux/if_hsr.h>
 #include <linux/mpls.h>
 #include <linux/tcp.h>
 #include <linux/ptp_classify.h>
@@ -203,6 +204,30 @@ static void __skb_flow_dissect_icmp(const struct sk_buff *skb,
 	skb_flow_get_icmp_tci(skb, key_icmp, data, thoff, hlen);
 }
 
+static void __skb_flow_dissect_l2tpv3(const struct sk_buff *skb,
+				      struct flow_dissector *flow_dissector,
+				      void *target_container, const void *data,
+				      int nhoff, int hlen)
+{
+	struct flow_dissector_key_l2tpv3 *key_l2tpv3;
+	struct {
+		__be32 session_id;
+	} *hdr, _hdr;
+
+	if (!dissector_uses_key(flow_dissector, FLOW_DISSECTOR_KEY_L2TPV3))
+		return;
+
+	hdr = __skb_header_pointer(skb, nhoff, sizeof(_hdr), data, hlen, &_hdr);
+	if (!hdr)
+		return;
+
+	key_l2tpv3 = skb_flow_dissector_target(flow_dissector,
+					       FLOW_DISSECTOR_KEY_L2TPV3,
+					       target_container);
+
+	key_l2tpv3->session_id = hdr->session_id;
+}
+
 void skb_flow_dissect_meta(const struct sk_buff *skb,
 			   struct flow_dissector *flow_dissector,
 			   void *target_container)
@@ -271,7 +296,7 @@ skb_flow_dissect_ct(const struct sk_buff *skb,
 	key->ct_zone = ct->zone.id;
 #endif
 #if IS_ENABLED(CONFIG_NF_CONNTRACK_MARK)
-	key->ct_mark = ct->mark;
+	key->ct_mark = READ_ONCE(ct->mark);
 #endif
 
 	cl = nf_ct_labels_find(ct);
@@ -865,8 +890,8 @@ static void __skb_flow_bpf_to_target(const struct bpf_flow_keys *flow_keys,
 	}
 }
 
-bool bpf_flow_dissect(struct bpf_prog *prog, struct bpf_flow_dissector *ctx,
-		      __be16 proto, int nhoff, int hlen, unsigned int flags)
+u32 bpf_flow_dissect(struct bpf_prog *prog, struct bpf_flow_dissector *ctx,
+		     __be16 proto, int nhoff, int hlen, unsigned int flags)
 {
 	struct bpf_flow_keys *flow_keys = ctx->flow_keys;
 	u32 result;
@@ -891,7 +916,7 @@ bool bpf_flow_dissect(struct bpf_prog *prog, struct bpf_flow_dissector *ctx,
 	flow_keys->thoff = clamp_t(u16, flow_keys->thoff,
 				   flow_keys->nhoff, hlen);
 
-	return result == BPF_OK;
+	return result;
 }
 
 static bool is_pppoe_ses_hdr_valid(struct pppoe_hdr hdr)
@@ -1007,6 +1032,7 @@ bool __skb_flow_dissect(const struct net *net,
 			};
 			__be16 n_proto = proto;
 			struct bpf_prog *prog;
+			u32 result;
 
 			if (skb) {
 				ctx.skb = skb;
@@ -1018,13 +1044,16 @@ bool __skb_flow_dissect(const struct net *net,
 			}
 
 			prog = READ_ONCE(run_array->items[0].prog);
-			ret = bpf_flow_dissect(prog, &ctx, n_proto, nhoff,
-					       hlen, flags);
+			result = bpf_flow_dissect(prog, &ctx, n_proto, nhoff,
+						  hlen, flags);
+			if (result == BPF_FLOW_DISSECTOR_CONTINUE)
+				goto dissect_continue;
 			__skb_flow_bpf_to_target(&flow_keys, flow_dissector,
 						 target_container);
 			rcu_read_unlock();
-			return ret;
+			return result == BPF_OK;
 		}
+dissect_continue:
 		rcu_read_unlock();
 	}
 
@@ -1342,6 +1371,23 @@ proto_again:
 		break;
 	}
 
+	case htons(ETH_P_PRP):
+	case htons(ETH_P_HSR): {
+		struct hsr_tag *hdr, _hdr;
+
+		hdr = __skb_header_pointer(skb, nhoff, sizeof(_hdr), data, hlen,
+					   &_hdr);
+		if (!hdr) {
+			fdret = FLOW_DISSECT_RET_OUT_BAD;
+			break;
+		}
+
+		proto = hdr->encap_proto;
+		nhoff += HSR_HLEN;
+		fdret = FLOW_DISSECT_RET_PROTO_AGAIN;
+		break;
+	}
+
 	default:
 		fdret = FLOW_DISSECT_RET_OUT_BAD;
 		break;
@@ -1478,6 +1524,10 @@ ip_proto_again:
 	case IPPROTO_ICMPV6:
 		__skb_flow_dissect_icmp(skb, flow_dissector, target_container,
 					data, nhoff, hlen);
+		break;
+	case IPPROTO_L2TP:
+		__skb_flow_dissect_l2tpv3(skb, flow_dissector, target_container,
+					  data, nhoff, hlen);
 		break;
 
 	default:

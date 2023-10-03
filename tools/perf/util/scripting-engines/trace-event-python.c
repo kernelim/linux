@@ -30,6 +30,9 @@
 #include <linux/bitmap.h>
 #include <linux/compiler.h>
 #include <linux/time64.h>
+#ifdef HAVE_LIBTRACEEVENT
+#include <traceevent/event-parse.h>
+#endif
 
 #include "../build-id.h"
 #include "../counts.h"
@@ -52,6 +55,7 @@
 #include "print_binary.h"
 #include "stat.h"
 #include "mem-events.h"
+#include "util/perf_regs.h"
 
 #if PY_MAJOR_VERSION < 3
 #define _PyUnicode_FromString(arg) \
@@ -85,18 +89,21 @@ PyMODINIT_FUNC initperf_trace_context(void);
 PyMODINIT_FUNC PyInit_perf_trace_context(void);
 #endif
 
+#ifdef HAVE_LIBTRACEEVENT
 #define TRACE_EVENT_TYPE_MAX				\
 	((1 << (sizeof(unsigned short) * 8)) - 1)
 
 static DECLARE_BITMAP(events_defined, TRACE_EVENT_TYPE_MAX);
 
-#define MAX_FIELDS	64
 #define N_COMMON_FIELDS	7
-
-extern struct scripting_context *scripting_context;
 
 static char *cur_field_name;
 static int zero_flag_atom;
+#endif
+
+#define MAX_FIELDS	64
+
+extern struct scripting_context *scripting_context;
 
 static PyObject *main_module, *main_dict;
 
@@ -151,6 +158,26 @@ static PyObject *get_handler(const char *handler_name)
 	return handler;
 }
 
+static void call_object(PyObject *handler, PyObject *args, const char *die_msg)
+{
+	PyObject *retval;
+
+	retval = PyObject_CallObject(handler, args);
+	if (retval == NULL)
+		handler_call_die(die_msg);
+	Py_DECREF(retval);
+}
+
+static void try_call_object(const char *handler_name, PyObject *args)
+{
+	PyObject *handler;
+
+	handler = get_handler(handler_name);
+	if (handler)
+		call_object(handler, args, handler_name);
+}
+
+#ifdef HAVE_LIBTRACEEVENT
 static int get_argument_count(PyObject *handler)
 {
 	int arg_count = 0;
@@ -177,25 +204,6 @@ static int get_argument_count(PyObject *handler)
 		Py_DECREF(code_obj);
 	}
 	return arg_count;
-}
-
-static void call_object(PyObject *handler, PyObject *args, const char *die_msg)
-{
-	PyObject *retval;
-
-	retval = PyObject_CallObject(handler, args);
-	if (retval == NULL)
-		handler_call_die(die_msg);
-	Py_DECREF(retval);
-}
-
-static void try_call_object(const char *handler_name, PyObject *args)
-{
-	PyObject *handler;
-
-	handler = get_handler(handler_name);
-	if (handler)
-		call_object(handler, args, handler_name);
 }
 
 static void define_value(enum tep_print_arg_type field_type,
@@ -377,6 +385,7 @@ static PyObject *get_field_numeric_entry(struct tep_event *event,
 		obj = list;
 	return obj;
 }
+#endif
 
 static const char *get_dsoname(struct map *map)
 {
@@ -904,6 +913,7 @@ static PyObject *get_perf_sample_dict(struct perf_sample *sample,
 	return dict;
 }
 
+#ifdef HAVE_LIBTRACEEVENT
 static void python_process_tracepoint(struct perf_sample *sample,
 				      struct evsel *evsel,
 				      struct addr_location *al,
@@ -933,7 +943,7 @@ static void python_process_tracepoint(struct perf_sample *sample,
 
 	sprintf(handler_name, "%s__%s", event->system, event->name);
 
-	if (!test_and_set_bit(event->id, events_defined))
+	if (!__test_and_set_bit(event->id, events_defined))
 		define_event_symbols(event, handler_name, event->print_fmt.args);
 
 	handler = get_handler(handler_name);
@@ -992,7 +1002,7 @@ static void python_process_tracepoint(struct perf_sample *sample,
 				offset  = val;
 				len     = offset >> 16;
 				offset &= 0xffff;
-				if (field->flags & TEP_FIELD_IS_RELATIVE)
+				if (tep_field_is_relative(field->flags))
 					offset += field->offset + field->size;
 			}
 			if (field->flags & TEP_FIELD_IS_STRING &&
@@ -1033,6 +1043,16 @@ static void python_process_tracepoint(struct perf_sample *sample,
 
 	Py_DECREF(t);
 }
+#else
+static void python_process_tracepoint(struct perf_sample *sample __maybe_unused,
+				      struct evsel *evsel __maybe_unused,
+				      struct addr_location *al __maybe_unused,
+				      struct addr_location *addr_al __maybe_unused)
+{
+	fprintf(stderr, "Tracepoint events are not supported because "
+			"perf is not linked with libtraceevent.\n");
+}
+#endif
 
 static PyObject *tuple_new(unsigned int sz)
 {
@@ -1653,13 +1673,7 @@ static void python_process_stat(struct perf_stat_config *config,
 	struct perf_cpu_map *cpus = counter->core.cpus;
 	int cpu, thread;
 
-	if (config->aggr_mode == AGGR_GLOBAL) {
-		process_stat(counter, (struct perf_cpu){ .cpu = -1 }, -1, tstamp,
-			     &counter->counts->aggr);
-		return;
-	}
-
-	for (thread = 0; thread < threads->nr; thread++) {
+	for (thread = 0; thread < perf_thread_map__nr(threads); thread++) {
 		for (cpu = 0; cpu < perf_cpu_map__nr(cpus); cpu++) {
 			process_stat(counter, perf_cpu_map__cpu(cpus, cpu),
 				     perf_thread_map__pid(threads, thread), tstamp,
@@ -1969,6 +1983,7 @@ static int python_stop_script(void)
 	return 0;
 }
 
+#ifdef HAVE_LIBTRACEEVENT
 static int python_generate_script(struct tep_handle *pevent, const char *outfile)
 {
 	int i, not_first, count, nr_events;
@@ -2159,6 +2174,18 @@ static int python_generate_script(struct tep_handle *pevent, const char *outfile
 
 	return 0;
 }
+#else
+static int python_generate_script(struct tep_handle *pevent __maybe_unused,
+				  const char *outfile __maybe_unused)
+{
+	fprintf(stderr, "Generating Python perf-script is not supported."
+		"  Install libtraceevent and rebuild perf to enable it.\n"
+		"For example:\n  # apt install libtraceevent-dev (ubuntu)"
+		"\n  # yum install libtraceevent-devel (Fedora)"
+		"\n  etc.\n");
+	return -1;
+}
+#endif
 
 struct scripting_ops python_scripting_ops = {
 	.name			= "Python",

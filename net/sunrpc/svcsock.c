@@ -111,36 +111,27 @@ static void svc_reclassify_socket(struct socket *sock)
 #endif
 
 /**
- * svc_tcp_release_rqst - Release transport-related resources
- * @rqstp: request structure with resources to be released
+ * svc_tcp_release_ctxt - Release transport-related resources
+ * @xprt: the transport which owned the context
+ * @ctxt: the context from rqstp->rq_xprt_ctxt or dr->xprt_ctxt
  *
  */
-static void svc_tcp_release_rqst(struct svc_rqst *rqstp)
+static void svc_tcp_release_ctxt(struct svc_xprt *xprt, void *ctxt)
 {
-	struct sk_buff *skb = rqstp->rq_xprt_ctxt;
-
-	if (skb) {
-		struct svc_sock *svsk =
-			container_of(rqstp->rq_xprt, struct svc_sock, sk_xprt);
-
-		rqstp->rq_xprt_ctxt = NULL;
-		skb_free_datagram_locked(svsk->sk_sk, skb);
-	}
 }
 
 /**
- * svc_udp_release_rqst - Release transport-related resources
- * @rqstp: request structure with resources to be released
+ * svc_udp_release_ctxt - Release transport-related resources
+ * @xprt: the transport which owned the context
+ * @ctxt: the context from rqstp->rq_xprt_ctxt or dr->xprt_ctxt
  *
  */
-static void svc_udp_release_rqst(struct svc_rqst *rqstp)
+static void svc_udp_release_ctxt(struct svc_xprt *xprt, void *ctxt)
 {
-	struct sk_buff *skb = rqstp->rq_xprt_ctxt;
+	struct sk_buff *skb = ctxt;
 
-	if (skb) {
-		rqstp->rq_xprt_ctxt = NULL;
+	if (skb)
 		consume_skb(skb);
-	}
 }
 
 union svc_pktinfo_u {
@@ -258,8 +249,6 @@ static ssize_t svc_tcp_read_msg(struct svc_rqst *rqstp, size_t buflen,
 	unsigned int i;
 	ssize_t len;
 	size_t t;
-
-	rqstp->rq_xprt_hlen = 0;
 
 	clear_bit(XPT_DATA, &svsk->sk_xprt.xpt_flags);
 
@@ -519,6 +508,7 @@ static int svc_udp_recvfrom(struct svc_rqst *rqstp)
 	if (serv->sv_stats)
 		serv->sv_stats->netudpcnt++;
 
+	svc_sock_secure_port(rqstp);
 	svc_xprt_received(rqstp->rq_xprt);
 	return len;
 
@@ -570,7 +560,8 @@ static int svc_udp_sendto(struct svc_rqst *rqstp)
 	unsigned int sent;
 	int err;
 
-	svc_udp_release_rqst(rqstp);
+	svc_udp_release_ctxt(xprt, rqstp->rq_xprt_ctxt);
+	rqstp->rq_xprt_ctxt = NULL;
 
 	svc_set_cmsg_data(rqstp, cmh);
 
@@ -642,12 +633,11 @@ static const struct svc_xprt_ops svc_udp_ops = {
 	.xpo_recvfrom = svc_udp_recvfrom,
 	.xpo_sendto = svc_udp_sendto,
 	.xpo_result_payload = svc_sock_result_payload,
-	.xpo_release_rqst = svc_udp_release_rqst,
+	.xpo_release_ctxt = svc_udp_release_ctxt,
 	.xpo_detach = svc_sock_detach,
 	.xpo_free = svc_sock_free,
 	.xpo_has_wspace = svc_udp_has_wspace,
 	.xpo_accept = svc_udp_accept,
-	.xpo_secure_port = svc_sock_secure_port,
 	.xpo_kill_temp_xprt = svc_udp_kill_temp_xprt,
 };
 
@@ -1039,6 +1029,7 @@ static int svc_tcp_recvfrom(struct svc_rqst *rqstp)
 	if (serv->sv_stats)
 		serv->sv_stats->nettcpcnt++;
 
+	svc_sock_secure_port(rqstp);
 	svc_xprt_received(rqstp->rq_xprt);
 	return rqstp->rq_arg.len;
 
@@ -1170,7 +1161,8 @@ static int svc_tcp_sendto(struct svc_rqst *rqstp)
 	unsigned int sent;
 	int err;
 
-	svc_tcp_release_rqst(rqstp);
+	svc_tcp_release_ctxt(xprt, rqstp->rq_xprt_ctxt);
+	rqstp->rq_xprt_ctxt = NULL;
 
 	atomic_inc(&svsk->sk_sendqlen);
 	mutex_lock(&xprt->xpt_mutex);
@@ -1215,12 +1207,11 @@ static const struct svc_xprt_ops svc_tcp_ops = {
 	.xpo_recvfrom = svc_tcp_recvfrom,
 	.xpo_sendto = svc_tcp_sendto,
 	.xpo_result_payload = svc_sock_result_payload,
-	.xpo_release_rqst = svc_tcp_release_rqst,
+	.xpo_release_ctxt = svc_tcp_release_ctxt,
 	.xpo_detach = svc_tcp_sock_detach,
 	.xpo_free = svc_sock_free,
 	.xpo_has_wspace = svc_tcp_has_wspace,
 	.xpo_accept = svc_tcp_accept,
-	.xpo_secure_port = svc_sock_secure_port,
 	.xpo_kill_temp_xprt = svc_tcp_kill_temp_xprt,
 };
 
@@ -1347,25 +1338,10 @@ static struct svc_sock *svc_setup_socket(struct svc_serv *serv,
 	return svsk;
 }
 
-bool svc_alien_sock(struct net *net, int fd)
-{
-	int err;
-	struct socket *sock = sockfd_lookup(fd, &err);
-	bool ret = false;
-
-	if (!sock)
-		goto out;
-	if (sock_net(sock->sk) != net)
-		ret = true;
-	sockfd_put(sock);
-out:
-	return ret;
-}
-EXPORT_SYMBOL_GPL(svc_alien_sock);
-
 /**
  * svc_addsock - add a listener socket to an RPC service
  * @serv: pointer to RPC service to which to add a new listener
+ * @net: caller's network namespace
  * @fd: file descriptor of the new listener
  * @name_return: pointer to buffer to fill in with name of listener
  * @len: size of the buffer
@@ -1375,8 +1351,8 @@ EXPORT_SYMBOL_GPL(svc_alien_sock);
  * Name is terminated with '\n'.  On error, returns a negative errno
  * value.
  */
-int svc_addsock(struct svc_serv *serv, const int fd, char *name_return,
-		const size_t len, const struct cred *cred)
+int svc_addsock(struct svc_serv *serv, struct net *net, const int fd,
+		char *name_return, const size_t len, const struct cred *cred)
 {
 	int err = 0;
 	struct socket *so = sockfd_lookup(fd, &err);
@@ -1387,6 +1363,9 @@ int svc_addsock(struct svc_serv *serv, const int fd, char *name_return,
 
 	if (!so)
 		return err;
+	err = -EINVAL;
+	if (sock_net(so->sk) != net)
+		goto out;
 	err = -EAFNOSUPPORT;
 	if ((so->sk->sk_family != PF_INET) && (so->sk->sk_family != PF_INET6))
 		goto out;

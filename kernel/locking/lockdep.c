@@ -55,6 +55,7 @@
 #include <linux/rcupdate.h>
 #include <linux/kprobes.h>
 #include <linux/lockdep.h>
+#include <linux/context_tracking.h>
 
 #include <asm/sections.h>
 
@@ -63,18 +64,49 @@
 #include <trace/events/lock.h>
 
 #ifdef CONFIG_PROVE_LOCKING
-int prove_locking = 1;
+static int prove_locking = 1;
 module_param(prove_locking, int, 0644);
 #else
 #define prove_locking 0
 #endif
 
 #ifdef CONFIG_LOCK_STAT
-int lock_stat = 1;
+static int lock_stat = 1;
 module_param(lock_stat, int, 0644);
 #else
 #define lock_stat 0
 #endif
+
+#ifdef CONFIG_SYSCTL
+static struct ctl_table kern_lockdep_table[] = {
+#ifdef CONFIG_PROVE_LOCKING
+	{
+		.procname       = "prove_locking",
+		.data           = &prove_locking,
+		.maxlen         = sizeof(int),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec,
+	},
+#endif /* CONFIG_PROVE_LOCKING */
+#ifdef CONFIG_LOCK_STAT
+	{
+		.procname       = "lock_stat",
+		.data           = &lock_stat,
+		.maxlen         = sizeof(int),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec,
+	},
+#endif /* CONFIG_LOCK_STAT */
+	{ }
+};
+
+static __init int kernel_lockdep_sysctls_init(void)
+{
+	register_sysctl_init("kernel", kern_lockdep_table);
+	return 0;
+}
+late_initcall(kernel_lockdep_sysctls_init);
+#endif /* CONFIG_SYSCTL */
 
 DEFINE_PER_CPU(unsigned int, lockdep_recursion);
 EXPORT_PER_CPU_SYMBOL_GPL(lockdep_recursion);
@@ -903,8 +935,10 @@ look_up_lock_class(const struct lockdep_map *lock, unsigned int subclass)
 			 * Huh! same key, different name? Did someone trample
 			 * on some memory? We're most confused.
 			 */
-			WARN_ON_ONCE(class->name != lock->name &&
-				     lock->key != &__lockdep_no_validate__);
+			WARN_ONCE(class->name != lock->name &&
+				  lock->key != &__lockdep_no_validate__,
+				  "Looking for class \"%s\" with key %ps, but found a different class \"%s\" with the same key\n",
+				  lock->name, lock->key, class->name);
 			return class;
 		}
 	}
@@ -6009,13 +6043,10 @@ static void zap_class(struct pending_free *pf, struct lock_class *class)
 
 static void reinit_class(struct lock_class *class)
 {
-	void *const p = class;
-	const unsigned int offset = offsetof(struct lock_class, key);
-
 	WARN_ON_ONCE(!class->lock_entry.next);
 	WARN_ON_ONCE(!list_empty(&class->locks_after));
 	WARN_ON_ONCE(!list_empty(&class->locks_before));
-	memset(p + offset, 0, sizeof(*class) - offset);
+	memset_startat(class, 0, key);
 	WARN_ON_ONCE(!class->lock_entry.next);
 	WARN_ON_ONCE(!list_empty(&class->locks_after));
 	WARN_ON_ONCE(!list_empty(&class->locks_before));
@@ -6525,6 +6556,7 @@ void lockdep_rcu_suspicious(const char *file, const int line, const char *s)
 {
 	struct task_struct *curr = current;
 	int dl = READ_ONCE(debug_locks);
+	bool rcu = warn_rcu_enter();
 
 	/* Note: the following can be executed concurrently, so be careful. */
 	pr_warn("\n");
@@ -6543,7 +6575,7 @@ void lockdep_rcu_suspicious(const char *file, const int line, const char *s)
 
 	/*
 	 * If a CPU is in the RCU-free window in idle (ie: in the section
-	 * between rcu_idle_enter() and rcu_idle_exit(), then RCU
+	 * between ct_idle_enter() and ct_idle_exit(), then RCU
 	 * considers that CPU to be in an "extended quiescent state",
 	 * which means that RCU will be completely ignoring that CPU.
 	 * Therefore, rcu_read_lock() and friends have absolutely no
@@ -6565,5 +6597,6 @@ void lockdep_rcu_suspicious(const char *file, const int line, const char *s)
 	lockdep_print_held_locks(curr);
 	pr_warn("\nstack backtrace:\n");
 	dump_stack();
+	warn_rcu_exit(rcu);
 }
 EXPORT_SYMBOL_GPL(lockdep_rcu_suspicious);

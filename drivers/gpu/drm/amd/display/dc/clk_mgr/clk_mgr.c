@@ -29,6 +29,7 @@
 #include "dc_types.h"
 #include "dccg.h"
 #include "clk_mgr_internal.h"
+#include "link.h"
 
 #include "dce100/dce_clk_mgr.h"
 #include "dce110/dce110_clk_mgr.h"
@@ -103,7 +104,7 @@ void clk_mgr_exit_optimized_pwr_state(const struct dc *dc, struct clk_mgr *clk_m
 	int edp_num;
 	unsigned int panel_inst;
 
-	get_edp_links(dc, edp_links, &edp_num);
+	dc_get_edp_links(dc, edp_links, &edp_num);
 	if (dc->hwss.exit_optimized_pwr_state)
 		dc->hwss.exit_optimized_pwr_state(dc, dc->current_state);
 
@@ -128,7 +129,7 @@ void clk_mgr_optimize_pwr_state(const struct dc *dc, struct clk_mgr *clk_mgr)
 	int edp_num;
 	unsigned int panel_inst;
 
-	get_edp_links(dc, edp_links, &edp_num);
+	dc_get_edp_links(dc, edp_links, &edp_num);
 	if (edp_num) {
 		for (panel_inst = 0; panel_inst < edp_num; panel_inst++) {
 			edp_link = edp_links[panel_inst];

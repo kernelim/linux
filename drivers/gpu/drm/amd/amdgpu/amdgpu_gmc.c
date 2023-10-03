@@ -35,6 +35,7 @@
 #include "amdgpu_xgmi.h"
 
 #include <drm/drm_drv.h>
+#include <drm/ttm/ttm_tt.h>
 
 /**
  * amdgpu_gmc_pdb0_alloc - allocate vram for pdb0
@@ -201,12 +202,19 @@ uint64_t amdgpu_gmc_agp_addr(struct ttm_buffer_object *bo)
 void amdgpu_gmc_vram_location(struct amdgpu_device *adev, struct amdgpu_gmc *mc,
 			      u64 base)
 {
+	uint64_t vis_limit = (uint64_t)amdgpu_vis_vram_limit << 20;
 	uint64_t limit = (uint64_t)amdgpu_vram_limit << 20;
 
 	mc->vram_start = base;
 	mc->vram_end = mc->vram_start + mc->mc_vram_size - 1;
-	if (limit && limit < mc->real_vram_size)
+	if (limit < mc->real_vram_size)
 		mc->real_vram_size = limit;
+
+	if (vis_limit && vis_limit < mc->visible_vram_size)
+		mc->visible_vram_size = vis_limit;
+
+	if (mc->real_vram_size < mc->visible_vram_size)
+		mc->visible_vram_size = mc->real_vram_size;
 
 	if (mc->xgmi.num_physical_nodes == 0) {
 		mc->fb_start = mc->vram_start;
@@ -526,6 +534,8 @@ void amdgpu_gmc_tmz_set(struct amdgpu_device *adev)
 	case IP_VERSION(9, 3, 0):
 	/* GC 10.3.7 */
 	case IP_VERSION(10, 3, 7):
+	/* GC 11.0.1 */
+	case IP_VERSION(11, 0, 1):
 		if (amdgpu_tmz == 0) {
 			adev->gmc.tmz_enabled = false;
 			dev_info(adev->dev,
@@ -544,10 +554,12 @@ void amdgpu_gmc_tmz_set(struct amdgpu_device *adev)
 	case IP_VERSION(10, 3, 2):
 	case IP_VERSION(10, 3, 4):
 	case IP_VERSION(10, 3, 5):
+	case IP_VERSION(10, 3, 6):
 	/* VANGOGH */
 	case IP_VERSION(10, 3, 1):
 	/* YELLOW_CARP*/
 	case IP_VERSION(10, 3, 3):
+	case IP_VERSION(11, 0, 4):
 		/* Don't enable it by default yet.
 		 */
 		if (amdgpu_tmz < 1) {
@@ -578,45 +590,15 @@ void amdgpu_gmc_tmz_set(struct amdgpu_device *adev)
 void amdgpu_gmc_noretry_set(struct amdgpu_device *adev)
 {
 	struct amdgpu_gmc *gmc = &adev->gmc;
+	uint32_t gc_ver = adev->ip_versions[GC_HWIP][0];
+	bool noretry_default = (gc_ver == IP_VERSION(9, 0, 1) ||
+				gc_ver == IP_VERSION(9, 3, 0) ||
+				gc_ver == IP_VERSION(9, 4, 0) ||
+				gc_ver == IP_VERSION(9, 4, 1) ||
+				gc_ver == IP_VERSION(9, 4, 2) ||
+				gc_ver >= IP_VERSION(10, 3, 0));
 
-	switch (adev->ip_versions[GC_HWIP][0]) {
-	case IP_VERSION(9, 0, 1):
-	case IP_VERSION(9, 3, 0):
-	case IP_VERSION(9, 4, 0):
-	case IP_VERSION(9, 4, 1):
-	case IP_VERSION(9, 4, 2):
-	case IP_VERSION(10, 3, 3):
-	case IP_VERSION(10, 3, 4):
-	case IP_VERSION(10, 3, 5):
-	case IP_VERSION(10, 3, 6):
-	case IP_VERSION(10, 3, 7):
-		/*
-		 * noretry = 0 will cause kfd page fault tests fail
-		 * for some ASICs, so set default to 1 for these ASICs.
-		 */
-		if (amdgpu_noretry == -1)
-			gmc->noretry = 1;
-		else
-			gmc->noretry = amdgpu_noretry;
-		break;
-	default:
-		/* Raven currently has issues with noretry
-		 * regardless of what we decide for other
-		 * asics, we should leave raven with
-		 * noretry = 0 until we root cause the
-		 * issues.
-		 *
-		 * default this to 0 for now, but we may want
-		 * to change this in the future for certain
-		 * GPUs as it can increase performance in
-		 * certain cases.
-		 */
-		if (amdgpu_noretry == -1)
-			gmc->noretry = 0;
-		else
-			gmc->noretry = amdgpu_noretry;
-		break;
-	}
+	gmc->noretry = (amdgpu_noretry == -1) ? noretry_default : amdgpu_noretry;
 }
 
 void amdgpu_gmc_set_vm_fault_masks(struct amdgpu_device *adev, int hub_type,
@@ -692,7 +674,7 @@ void amdgpu_gmc_get_vbios_allocations(struct amdgpu_device *adev)
 	}
 
 	if (amdgpu_sriov_vf(adev) ||
-	    !amdgpu_device_ip_get_ip_block(adev, AMD_IP_BLOCK_TYPE_DCE)) {
+	    !amdgpu_device_has_display_hardware(adev)) {
 		size = 0;
 	} else {
 		size = amdgpu_gmc_get_vbios_fb_size(adev);

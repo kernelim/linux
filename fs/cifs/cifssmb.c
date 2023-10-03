@@ -85,13 +85,11 @@ cifs_reconnect_tcon(struct cifs_tcon *tcon, int smb_command)
 
 	/*
 	 * only tree disconnect, open, and write, (and ulogoff which does not
-	 * have tcon) are allowed as we start force umount
+	 * have tcon) are allowed as we start umount
 	 */
 	spin_lock(&tcon->tc_lock);
 	if (tcon->status == TID_EXITING) {
-		if (smb_command != SMB_COM_WRITE_ANDX &&
-		    smb_command != SMB_COM_OPEN_ANDX &&
-		    smb_command != SMB_COM_TREE_DISCONNECT) {
+		if (smb_command != SMB_COM_TREE_DISCONNECT) {
 			spin_unlock(&tcon->tc_lock);
 			cifs_dbg(FYI, "can not send cmd %d while umounting\n",
 				 smb_command);
@@ -465,7 +463,7 @@ CIFSSMBNegotiate(const unsigned int xid,
 	for (i = 0; i < CIFS_NUM_PROT; i++) {
 		size_t len = strlen(protocols[i].name) + 1;
 
-		memcpy(pSMB->DialectsArray+count, protocols[i].name, len);
+		memcpy(&pSMB->DialectsArray[count], protocols[i].name, len);
 		count += len;
 	}
 	inc_rfc1001_len(pSMB, count);
@@ -591,7 +589,7 @@ cifs_echo_callback(struct mid_q_entry *mid)
 	struct TCP_Server_Info *server = mid->callback_data;
 	struct cifs_credits credits = { .value = 1, .instance = 0 };
 
-	DeleteMidQEntry(mid);
+	release_mid(mid);
 	add_credits(server, &credits, CIFS_ECHO_OP);
 }
 
@@ -1336,7 +1334,7 @@ cifs_readv_callback(struct mid_q_entry *mid)
 	}
 
 	queue_work(cifsiod_wq, &rdata->work);
-	DeleteMidQEntry(mid);
+	release_mid(mid);
 	add_credits(server, &credits, 0);
 }
 
@@ -1684,7 +1682,7 @@ cifs_writev_callback(struct mid_q_entry *mid)
 	}
 
 	queue_work(cifsiod_wq, &wdata->work);
-	DeleteMidQEntry(mid);
+	release_mid(mid);
 	add_credits(tcon->ses->server, &credits, 0);
 }
 
@@ -2305,7 +2303,7 @@ int CIFSSMBRenameOpenFile(const unsigned int xid, struct cifs_tcon *pTcon,
 					remap);
 	}
 	rename_info->target_name_len = cpu_to_le32(2 * len_of_str);
-	count = 12 /* sizeof(struct set_file_rename) */ + (2 * len_of_str);
+	count = sizeof(struct set_file_rename) + (2 * len_of_str);
 	byte_count += count;
 	pSMB->DataCount = cpu_to_le16(count);
 	pSMB->TotalDataCount = pSMB->DataCount;

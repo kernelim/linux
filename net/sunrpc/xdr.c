@@ -775,6 +775,34 @@ static void xdr_buf_pages_shift_left(const struct xdr_buf *buf,
 	xdr_buf_tail_copy_left(buf, 0, len - buf->page_len, shift);
 }
 
+static void xdr_buf_head_shift_left(const struct xdr_buf *buf,
+				    unsigned int base, unsigned int len,
+				    unsigned int shift)
+{
+	const struct kvec *head = buf->head;
+	unsigned int bytes;
+
+	if (!shift || !len)
+		return;
+
+	if (shift > base) {
+		bytes = (shift - base);
+		if (bytes >= len)
+			return;
+		base += bytes;
+		len -= bytes;
+	}
+
+	if (base < head->iov_len) {
+		bytes = min_t(unsigned int, len, head->iov_len - base);
+		memmove(head->iov_base + (base - shift),
+			head->iov_base + base, bytes);
+		base += bytes;
+		len -= bytes;
+	}
+	xdr_buf_pages_shift_left(buf, base - head->iov_len, len, shift);
+}
+
 /**
  * xdr_shrink_bufhead
  * @buf: xdr_buf
@@ -834,13 +862,6 @@ static unsigned int xdr_shrink_pagelen(struct xdr_buf *buf, unsigned int len)
 	buf->buflen -= shift;
 	return shift;
 }
-
-void
-xdr_shift_buf(struct xdr_buf *buf, size_t len)
-{
-	xdr_shrink_bufhead(buf, buf->head->iov_len - len);
-}
-EXPORT_SYMBOL_GPL(xdr_shift_buf);
 
 /**
  * xdr_stream_pos - Return the current offset from the start of the xdr_stream
@@ -919,7 +940,29 @@ void xdr_init_encode(struct xdr_stream *xdr, struct xdr_buf *buf, __be32 *p,
 EXPORT_SYMBOL_GPL(xdr_init_encode);
 
 /**
- * xdr_commit_encode - Ensure all data is written to buffer
+ * xdr_init_encode_pages - Initialize an xdr_stream for encoding into pages
+ * @xdr: pointer to xdr_stream struct
+ * @buf: pointer to XDR buffer into which to encode data
+ * @pages: list of pages to decode into
+ * @rqst: pointer to controlling rpc_rqst, for debugging
+ *
+ */
+void xdr_init_encode_pages(struct xdr_stream *xdr, struct xdr_buf *buf,
+			   struct page **pages, struct rpc_rqst *rqst)
+{
+	xdr_reset_scratch_buffer(xdr);
+
+	xdr->buf = buf;
+	xdr->page_ptr = pages;
+	xdr->iov = NULL;
+	xdr->p = page_address(*pages);
+	xdr->end = (void *)xdr->p + min_t(u32, buf->buflen, PAGE_SIZE);
+	xdr->rqst = rqst;
+}
+EXPORT_SYMBOL_GPL(xdr_init_encode_pages);
+
+/**
+ * __xdr_commit_encode - Ensure all data is written to buffer
  * @xdr: pointer to xdr_stream
  *
  * We handle encoding across page boundaries by giving the caller a
@@ -931,22 +974,25 @@ EXPORT_SYMBOL_GPL(xdr_init_encode);
  * required at the end of encoding, or any other time when the xdr_buf
  * data might be read.
  */
-inline void xdr_commit_encode(struct xdr_stream *xdr)
+void __xdr_commit_encode(struct xdr_stream *xdr)
 {
-	int shift = xdr->scratch.iov_len;
+	size_t shift = xdr->scratch.iov_len;
 	void *page;
 
-	if (shift == 0)
-		return;
 	page = page_address(*xdr->page_ptr);
 	memcpy(xdr->scratch.iov_base, page, shift);
 	memmove(page, page + shift, (void *)xdr->p - page);
 	xdr_reset_scratch_buffer(xdr);
 }
-EXPORT_SYMBOL_GPL(xdr_commit_encode);
+EXPORT_SYMBOL_GPL(__xdr_commit_encode);
 
-static __be32 *xdr_get_next_encode_buffer(struct xdr_stream *xdr,
-		size_t nbytes)
+/*
+ * The buffer space to be reserved crosses the boundary between
+ * xdr->buf->head and xdr->buf->pages, or between two pages
+ * in xdr->buf->pages.
+ */
+static noinline __be32 *xdr_get_next_encode_buffer(struct xdr_stream *xdr,
+						   size_t nbytes)
 {
 	int space_left;
 	int frag1bytes, frag2bytes;
@@ -1140,6 +1186,21 @@ void xdr_truncate_encode(struct xdr_stream *xdr, size_t len)
 EXPORT_SYMBOL(xdr_truncate_encode);
 
 /**
+ * xdr_truncate_decode - Truncate a decoding stream
+ * @xdr: pointer to struct xdr_stream
+ * @len: Number of bytes to remove
+ *
+ */
+void xdr_truncate_decode(struct xdr_stream *xdr, size_t len)
+{
+	unsigned int nbytes = xdr_align_size(len);
+
+	xdr->buf->len -= nbytes;
+	xdr->nwords -= XDR_QUADLEN(nbytes);
+}
+EXPORT_SYMBOL_GPL(xdr_truncate_decode);
+
+/**
  * xdr_restrict_buflen - decrease available buffer space
  * @xdr: pointer to xdr_stream
  * @newbuflen: new maximum number of bytes available
@@ -1171,30 +1232,34 @@ EXPORT_SYMBOL(xdr_restrict_buflen);
 /**
  * xdr_write_pages - Insert a list of pages into an XDR buffer for sending
  * @xdr: pointer to xdr_stream
- * @pages: list of pages
- * @base: offset of first byte
- * @len: length of data in bytes
+ * @pages: array of pages to insert
+ * @base: starting offset of first data byte in @pages
+ * @len: number of data bytes in @pages to insert
  *
+ * After the @pages are added, the tail iovec is instantiated pointing to
+ * end of the head buffer, and the stream is set up to encode subsequent
+ * items into the tail.
  */
 void xdr_write_pages(struct xdr_stream *xdr, struct page **pages, unsigned int base,
 		 unsigned int len)
 {
 	struct xdr_buf *buf = xdr->buf;
-	struct kvec *iov = buf->tail;
+	struct kvec *tail = buf->tail;
+
 	buf->pages = pages;
 	buf->page_base = base;
 	buf->page_len = len;
 
-	iov->iov_base = (char *)xdr->p;
-	iov->iov_len  = 0;
-	xdr->iov = iov;
+	tail->iov_base = xdr->p;
+	tail->iov_len = 0;
+	xdr->iov = tail;
 
 	if (len & 3) {
 		unsigned int pad = 4 - (len & 3);
 
 		BUG_ON(xdr->p >= xdr->end);
-		iov->iov_base = (char *)xdr->p + (len & 3);
-		iov->iov_len  += pad;
+		tail->iov_base = (char *)xdr->p + (len & 3);
+		tail->iov_len += pad;
 		len += pad;
 		*xdr->p++ = 0;
 	}
@@ -1469,71 +1534,35 @@ unsigned int xdr_read_pages(struct xdr_stream *xdr, unsigned int len)
 }
 EXPORT_SYMBOL_GPL(xdr_read_pages);
 
-unsigned int xdr_align_data(struct xdr_stream *xdr, unsigned int offset,
-			    unsigned int length)
+/**
+ * xdr_set_pagelen - Sets the length of the XDR pages
+ * @xdr: pointer to xdr_stream struct
+ * @len: new length of the XDR page data
+ *
+ * Either grows or shrinks the length of the xdr pages by setting pagelen to
+ * @len bytes. When shrinking, any extra data is moved into buf->tail, whereas
+ * when growing any data beyond the current pointer is moved into the tail.
+ *
+ * Returns True if the operation was successful, and False otherwise.
+ */
+void xdr_set_pagelen(struct xdr_stream *xdr, unsigned int len)
 {
 	struct xdr_buf *buf = xdr->buf;
-	unsigned int from, bytes, len;
-	unsigned int shift;
+	size_t remaining = xdr_stream_remaining(xdr);
+	size_t base = 0;
 
-	xdr_realign_pages(xdr);
-	from = xdr_page_pos(xdr);
-
-	if (from >= buf->page_len + buf->tail->iov_len)
-		return 0;
-	if (from + buf->head->iov_len >= buf->len)
-		return 0;
-
-	len = buf->len - buf->head->iov_len;
-
-	/* We only shift data left! */
-	if (WARN_ONCE(from < offset, "SUNRPC: misaligned data src=%u dst=%u\n",
-		      from, offset))
-		return 0;
-	if (WARN_ONCE(offset > buf->page_len,
-		      "SUNRPC: buffer overflow. offset=%u, page_len=%u\n",
-		      offset, buf->page_len))
-		return 0;
-
-	/* Move page data to the left */
-	shift = from - offset;
-	xdr_buf_pages_shift_left(buf, from, len, shift);
-
-	bytes = xdr_stream_remaining(xdr);
-	if (length > bytes)
-		length = bytes;
-	bytes -= length;
-
-	xdr->buf->len -= shift;
-	xdr_set_page(xdr, offset + length, bytes);
-	return length;
+	if (len < buf->page_len) {
+		base = buf->page_len - len;
+		xdr_shrink_pagelen(buf, len);
+	} else {
+		xdr_buf_head_shift_right(buf, xdr_stream_pos(xdr),
+					 buf->page_len, remaining);
+		if (len > buf->page_len)
+			xdr_buf_try_expand(buf, len - buf->page_len);
+	}
+	xdr_set_tail_base(xdr, base, remaining);
 }
-EXPORT_SYMBOL_GPL(xdr_align_data);
-
-unsigned int xdr_expand_hole(struct xdr_stream *xdr, unsigned int offset,
-			     unsigned int length)
-{
-	struct xdr_buf *buf = xdr->buf;
-	unsigned int from, to, shift;
-
-	xdr_realign_pages(xdr);
-	from = xdr_page_pos(xdr);
-	to = xdr_align_size(offset + length);
-
-	/* Could the hole be behind us? */
-	if (to > from) {
-		unsigned int buflen = buf->len - buf->head->iov_len;
-		shift = to - from;
-		xdr_buf_try_expand(buf, shift);
-		xdr_buf_pages_shift_right(buf, from, buflen, shift);
-		xdr_set_page(xdr, to, xdr_stream_remaining(xdr));
-	} else if (to != from)
-		xdr_align_data(xdr, to, 0);
-	xdr_buf_pages_zero(buf, offset, length);
-
-	return length;
-}
-EXPORT_SYMBOL_GPL(xdr_expand_hole);
+EXPORT_SYMBOL_GPL(xdr_set_pagelen);
 
 /**
  * xdr_enter_page - decode data from the XDR page
@@ -1580,7 +1609,7 @@ EXPORT_SYMBOL_GPL(xdr_buf_from_iov);
  *
  * @buf and @subbuf may be pointers to the same struct xdr_buf.
  *
- * Returns -1 if base of length are out of bounds.
+ * Returns -1 if base or length are out of bounds.
  */
 int xdr_buf_subsegment(const struct xdr_buf *buf, struct xdr_buf *subbuf,
 		       unsigned int base, unsigned int len)
@@ -1676,6 +1705,60 @@ bool xdr_stream_subsegment(struct xdr_stream *xdr, struct xdr_buf *subbuf,
 	return true;
 }
 EXPORT_SYMBOL_GPL(xdr_stream_subsegment);
+
+/**
+ * xdr_stream_move_subsegment - Move part of a stream to another position
+ * @xdr: the source xdr_stream
+ * @offset: the source offset of the segment
+ * @target: the target offset of the segment
+ * @length: the number of bytes to move
+ *
+ * Moves @length bytes from @offset to @target in the xdr_stream, overwriting
+ * anything in its space. Returns the number of bytes in the segment.
+ */
+unsigned int xdr_stream_move_subsegment(struct xdr_stream *xdr, unsigned int offset,
+					unsigned int target, unsigned int length)
+{
+	struct xdr_buf buf;
+	unsigned int shift;
+
+	if (offset < target) {
+		shift = target - offset;
+		if (xdr_buf_subsegment(xdr->buf, &buf, offset, shift + length) < 0)
+			return 0;
+		xdr_buf_head_shift_right(&buf, 0, length, shift);
+	} else if (offset > target) {
+		shift = offset - target;
+		if (xdr_buf_subsegment(xdr->buf, &buf, target, shift + length) < 0)
+			return 0;
+		xdr_buf_head_shift_left(&buf, shift, length, shift);
+	}
+	return length;
+}
+EXPORT_SYMBOL_GPL(xdr_stream_move_subsegment);
+
+/**
+ * xdr_stream_zero - zero out a portion of an xdr_stream
+ * @xdr: an xdr_stream to zero out
+ * @offset: the starting point in the stream
+ * @length: the number of bytes to zero
+ */
+unsigned int xdr_stream_zero(struct xdr_stream *xdr, unsigned int offset,
+			     unsigned int length)
+{
+	struct xdr_buf buf;
+
+	if (xdr_buf_subsegment(xdr->buf, &buf, offset, length) < 0)
+		return 0;
+	if (buf.head[0].iov_len)
+		xdr_buf_iov_zero(buf.head, 0, buf.head[0].iov_len);
+	if (buf.page_len > 0)
+		xdr_buf_pages_zero(&buf, 0, buf.page_len);
+	if (buf.tail[0].iov_len)
+		xdr_buf_iov_zero(buf.tail, 0, buf.tail[0].iov_len);
+	return length;
+}
+EXPORT_SYMBOL_GPL(xdr_stream_zero);
 
 /**
  * xdr_buf_trim - lop at most "len" bytes off the end of "buf"
@@ -2199,3 +2282,60 @@ ssize_t xdr_stream_decode_string_dup(struct xdr_stream *xdr, char **str,
 	return ret;
 }
 EXPORT_SYMBOL_GPL(xdr_stream_decode_string_dup);
+
+/**
+ * xdr_stream_decode_opaque_auth - Decode struct opaque_auth (RFC5531 S8.2)
+ * @xdr: pointer to xdr_stream
+ * @flavor: location to store decoded flavor
+ * @body: location to store decode body
+ * @body_len: location to store length of decoded body
+ *
+ * Return values:
+ *   On success, returns the number of buffer bytes consumed
+ *   %-EBADMSG on XDR buffer overflow
+ *   %-EMSGSIZE if the decoded size of the body field exceeds 400 octets
+ */
+ssize_t xdr_stream_decode_opaque_auth(struct xdr_stream *xdr, u32 *flavor,
+				      void **body, unsigned int *body_len)
+{
+	ssize_t ret, len;
+
+	len = xdr_stream_decode_u32(xdr, flavor);
+	if (unlikely(len < 0))
+		return len;
+	ret = xdr_stream_decode_opaque_inline(xdr, body, RPC_MAX_AUTH_SIZE);
+	if (unlikely(ret < 0))
+		return ret;
+	*body_len = ret;
+	return len + ret;
+}
+EXPORT_SYMBOL_GPL(xdr_stream_decode_opaque_auth);
+
+/**
+ * xdr_stream_encode_opaque_auth - Encode struct opaque_auth (RFC5531 S8.2)
+ * @xdr: pointer to xdr_stream
+ * @flavor: verifier flavor to encode
+ * @body: content of body to encode
+ * @body_len: length of body to encode
+ *
+ * Return values:
+ *   On success, returns length in bytes of XDR buffer consumed
+ *   %-EBADMSG on XDR buffer overflow
+ *   %-EMSGSIZE if the size of @body exceeds 400 octets
+ */
+ssize_t xdr_stream_encode_opaque_auth(struct xdr_stream *xdr, u32 flavor,
+				      void *body, unsigned int body_len)
+{
+	ssize_t ret, len;
+
+	if (unlikely(body_len > RPC_MAX_AUTH_SIZE))
+		return -EMSGSIZE;
+	len = xdr_stream_encode_u32(xdr, flavor);
+	if (unlikely(len < 0))
+		return len;
+	ret = xdr_stream_encode_opaque(xdr, body, body_len);
+	if (unlikely(ret < 0))
+		return ret;
+	return len + ret;
+}
+EXPORT_SYMBOL_GPL(xdr_stream_encode_opaque_auth);

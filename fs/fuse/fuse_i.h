@@ -256,8 +256,9 @@ struct fuse_page_desc {
 struct fuse_args {
 	uint64_t nodeid;
 	uint32_t opcode;
-	unsigned short in_numargs;
-	unsigned short out_numargs;
+	uint8_t in_numargs;
+	uint8_t out_numargs;
+	uint8_t ext_idx;
 	bool force:1;
 	bool noreply:1;
 	bool nocreds:1;
@@ -268,6 +269,7 @@ struct fuse_args {
 	bool page_zeroing:1;
 	bool page_replace:1;
 	bool may_block:1;
+	bool is_ext:1;
 	struct fuse_in_arg in_args[3];
 	struct fuse_arg out_args[2];
 	void (*end)(struct fuse_mount *fm, struct fuse_args *args, int error);
@@ -515,6 +517,13 @@ struct fuse_fs_context {
 
 	/* fuse_dev pointer to fill in, should contain NULL on entry */
 	void **fudptr;
+};
+
+struct fuse_sync_bucket {
+	/* count is a possible scalability bottleneck */
+	atomic_t count;
+	wait_queue_head_t waitq;
+	struct rcu_head rcu;
 };
 
 /**
@@ -769,6 +778,9 @@ struct fuse_conn {
 	/* Initialize security xattrs when creating a new inode */
 	unsigned int init_security:1;
 
+	/* Add supplementary group info when creating a new inode */
+	unsigned int create_supp_group:1;
+
 	/** The number of requests waiting for completion */
 	atomic_t num_waiting;
 
@@ -812,6 +824,9 @@ struct fuse_conn {
 
 	/** List of filesystems using this connection */
 	struct list_head mounts;
+
+	/* New writepages go into this bucket */
+	struct fuse_sync_bucket __rcu *curr_bucket;
 };
 
 /*
@@ -913,6 +928,15 @@ static inline void fuse_page_descs_length_init(struct fuse_page_desc *descs,
 
 	for (i = index; i < index + nr_pages; i++)
 		descs[i].length = PAGE_SIZE - descs[i].offset;
+}
+
+static inline void fuse_sync_bucket_dec(struct fuse_sync_bucket *bucket)
+{
+	/* Need RCU protection to prevent use after free after the decrement */
+	rcu_read_lock();
+	if (atomic_dec_and_test(&bucket->count))
+		wake_up(&bucket->waitq);
+	rcu_read_unlock();
 }
 
 /** Device operations */
@@ -1176,7 +1200,7 @@ int fuse_reverse_inval_inode(struct fuse_conn *fc, u64 nodeid,
  * then the dentry is unhashed (d_delete()).
  */
 int fuse_reverse_inval_entry(struct fuse_conn *fc, u64 parent_nodeid,
-			     u64 child_nodeid, struct qstr *name);
+			     u64 child_nodeid, struct qstr *name, u32 flags);
 
 int fuse_do_open(struct fuse_mount *fm, u64 nodeid, struct file *file,
 		 bool isdir);

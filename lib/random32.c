@@ -92,7 +92,7 @@ void prandom_bytes_state(struct rnd_state *state, void *buf, size_t bytes)
 }
 EXPORT_SYMBOL(prandom_bytes_state);
 
-static void prandom_warmup(struct rnd_state *state)
+void prandom_warmup(struct rnd_state *state)
 {
 	/* Calling RNG ten times to satisfy recurrence condition */
 	prandom_u32_state(state);
@@ -106,6 +106,7 @@ static void prandom_warmup(struct rnd_state *state)
 	prandom_u32_state(state);
 	prandom_u32_state(state);
 }
+EXPORT_SYMBOL(prandom_warmup);
 
 void prandom_seed_full_state(struct rnd_state __percpu *pcpu_state)
 {

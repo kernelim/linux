@@ -190,6 +190,7 @@ static inline void print_ipv4_addr(struct audit_buffer *ab, __be32 addr,
 
 /**
  * dump_common_audit_data - helper to dump common audit data
+ * @ab : the audit buffer
  * @a : common audit data
  *
  */
@@ -420,6 +421,9 @@ static void dump_common_audit_data(struct audit_buffer *ab,
 	case LSM_AUDIT_DATA_LOCKDOWN:
 		audit_log_format(ab, " lockdown_reason=\"%s\"",
 				 lockdown_reasons[a->u.reason]);
+		break;
+	case LSM_AUDIT_DATA_ANONINODE:
+		audit_log_format(ab, " anonclass=%s", a->u.anonclass);
 		break;
 	} /* switch (a->type) */
 }

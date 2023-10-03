@@ -49,6 +49,69 @@
 
 #define NFSDDBG_FACILITY		NFSDDBG_FILEOP
 
+/**
+ * nfserrno - Map Linux errnos to NFS errnos
+ * @errno: POSIX(-ish) error code to be mapped
+ *
+ * Returns the appropriate (net-endian) nfserr_* (or nfs_ok if errno is 0). If
+ * it's an error we don't expect, log it once and return nfserr_io.
+ */
+__be32
+nfserrno (int errno)
+{
+	static struct {
+		__be32	nfserr;
+		int	syserr;
+	} nfs_errtbl[] = {
+		{ nfs_ok, 0 },
+		{ nfserr_perm, -EPERM },
+		{ nfserr_noent, -ENOENT },
+		{ nfserr_io, -EIO },
+		{ nfserr_nxio, -ENXIO },
+		{ nfserr_fbig, -E2BIG },
+		{ nfserr_stale, -EBADF },
+		{ nfserr_acces, -EACCES },
+		{ nfserr_exist, -EEXIST },
+		{ nfserr_xdev, -EXDEV },
+		{ nfserr_mlink, -EMLINK },
+		{ nfserr_nodev, -ENODEV },
+		{ nfserr_notdir, -ENOTDIR },
+		{ nfserr_isdir, -EISDIR },
+		{ nfserr_inval, -EINVAL },
+		{ nfserr_fbig, -EFBIG },
+		{ nfserr_nospc, -ENOSPC },
+		{ nfserr_rofs, -EROFS },
+		{ nfserr_mlink, -EMLINK },
+		{ nfserr_nametoolong, -ENAMETOOLONG },
+		{ nfserr_notempty, -ENOTEMPTY },
+		{ nfserr_dquot, -EDQUOT },
+		{ nfserr_stale, -ESTALE },
+		{ nfserr_jukebox, -ETIMEDOUT },
+		{ nfserr_jukebox, -ERESTARTSYS },
+		{ nfserr_jukebox, -EAGAIN },
+		{ nfserr_jukebox, -EWOULDBLOCK },
+		{ nfserr_jukebox, -ENOMEM },
+		{ nfserr_io, -ETXTBSY },
+		{ nfserr_notsupp, -EOPNOTSUPP },
+		{ nfserr_toosmall, -ETOOSMALL },
+		{ nfserr_serverfault, -ESERVERFAULT },
+		{ nfserr_serverfault, -ENFILE },
+		{ nfserr_io, -EREMOTEIO },
+		{ nfserr_stale, -EOPENSTALE },
+		{ nfserr_io, -EUCLEAN },
+		{ nfserr_perm, -ENOKEY },
+		{ nfserr_no_grace, -ENOGRACE},
+	};
+	int	i;
+
+	for (i = 0; i < ARRAY_SIZE(nfs_errtbl); i++) {
+		if (nfs_errtbl[i].syserr == errno)
+			return nfs_errtbl[i].nfserr;
+	}
+	WARN_ONCE(1, "nfsd: non-standard errno: %d\n", errno);
+	return nfserr_io;
+}
+
 /* 
  * Called from nfsd_lookup and encode_dirent. Check if we have crossed 
  * a mount point.
@@ -63,9 +126,13 @@ nfsd_cross_mnt(struct svc_rqst *rqstp, struct dentry **dpp,
 	struct dentry *dentry = *dpp;
 	struct path path = {.mnt = mntget(exp->ex_path.mnt),
 			    .dentry = dget(dentry)};
+	unsigned int follow_flags = 0;
 	int err = 0;
 
-	err = follow_down(&path);
+	if (exp->ex_flags & NFSEXP_CROSSMOUNT)
+		follow_flags = LOOKUP_AUTOMOUNT;
+
+	err = follow_down(&path, follow_flags);
 	if (err < 0)
 		goto out;
 	if (path.mnt == exp->ex_path.mnt && path.dentry == dentry &&
@@ -160,7 +227,7 @@ int nfsd_mountpoint(struct dentry *dentry, struct svc_export *exp)
 		return 1;
 	if (nfsd4_is_junction(dentry))
 		return 1;
-	if (d_mountpoint(dentry))
+	if (d_managed(dentry))
 		/*
 		 * Might only be a mountpoint in a different namespace,
 		 * but we need to check.
@@ -343,8 +410,61 @@ nfsd_get_write_access(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	return nfserrno(get_write_access(inode));
 }
 
-/*
- * Set various file attributes.  After this call fhp needs an fh_put.
+static int __nfsd_setattr(struct dentry *dentry, struct iattr *iap)
+{
+	int host_err;
+
+	if (iap->ia_valid & ATTR_SIZE) {
+		/*
+		 * RFC5661, Section 18.30.4:
+		 *   Changing the size of a file with SETATTR indirectly
+		 *   changes the time_modify and change attributes.
+		 *
+		 * (and similar for the older RFCs)
+		 */
+		struct iattr size_attr = {
+			.ia_valid	= ATTR_SIZE | ATTR_CTIME | ATTR_MTIME,
+			.ia_size	= iap->ia_size,
+		};
+
+		if (iap->ia_size < 0)
+			return -EFBIG;
+
+		host_err = notify_change(&init_user_ns, dentry, &size_attr, NULL);
+		if (host_err)
+			return host_err;
+		iap->ia_valid &= ~ATTR_SIZE;
+
+		/*
+		 * Avoid the additional setattr call below if the only other
+		 * attribute that the client sends is the mtime, as we update
+		 * it as part of the size change above.
+		 */
+		if ((iap->ia_valid & ~ATTR_MTIME) == 0)
+			return 0;
+	}
+
+	if (!iap->ia_valid)
+		return 0;
+
+	iap->ia_valid |= ATTR_CTIME;
+	return notify_change(&init_user_ns, dentry, iap, NULL);
+}
+
+/**
+ * nfsd_setattr - Set various file attributes.
+ * @rqstp: controlling RPC transaction
+ * @fhp: filehandle of target
+ * @attr: attributes to set
+ * @check_guard: set to 1 if guardtime is a valid timestamp
+ * @guardtime: do not act if ctime.tv_sec does not match this timestamp
+ *
+ * This call may adjust the contents of @attr (in particular, this
+ * call may change the bits in the na_iattr.ia_valid field).
+ *
+ * Returns nfs_ok on success, otherwise an NFS status code is
+ * returned. Caller must release @fhp by calling fh_put in either
+ * case.
  */
 __be32
 nfsd_setattr(struct svc_rqst *rqstp, struct svc_fh *fhp,
@@ -357,9 +477,10 @@ nfsd_setattr(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	int		accmode = NFSD_MAY_SATTR;
 	umode_t		ftype = 0;
 	__be32		err;
-	int		host_err = 0;
+	int		host_err;
 	bool		get_write_count;
 	bool		size_change = (iap->ia_valid & ATTR_SIZE);
+	int		retries;
 
 	if (iap->ia_valid & ATTR_SIZE) {
 		accmode |= NFSD_MAY_WRITE|NFSD_MAY_OWNER_OVERRIDE;
@@ -414,43 +535,21 @@ nfsd_setattr(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	}
 
 	inode_lock(inode);
-	if (size_change) {
-		/*
-		 * RFC5661, Section 18.30.4:
-		 *   Changing the size of a file with SETATTR indirectly
-		 *   changes the time_modify and change attributes.
-		 *
-		 * (and similar for the older RFCs)
-		 */
-		struct iattr size_attr = {
-			.ia_valid	= ATTR_SIZE | ATTR_CTIME | ATTR_MTIME,
-			.ia_size	= iap->ia_size,
-		};
-
-		host_err = -EFBIG;
-		if (iap->ia_size < 0)
-			goto out_unlock;
-
-		host_err = notify_change(&init_user_ns, dentry, &size_attr, NULL);
-		if (host_err)
-			goto out_unlock;
-		iap->ia_valid &= ~ATTR_SIZE;
+	for (retries = 1;;) {
+		struct iattr attrs;
 
 		/*
-		 * Avoid the additional setattr call below if the only other
-		 * attribute that the client sends is the mtime, as we update
-		 * it as part of the size change above.
+		 * notify_change() can alter its iattr argument, making
+		 * @iap unsuitable for submission multiple times. Make a
+		 * copy for every loop iteration.
 		 */
-		if ((iap->ia_valid & ~ATTR_MTIME) == 0)
-			goto out_unlock;
+		attrs = *iap;
+		host_err = __nfsd_setattr(dentry, &attrs);
+		if (host_err != -EAGAIN || !retries--)
+			break;
+		if (!nfsd_wait_for_delegreturn(rqstp, inode))
+			break;
 	}
-
-	if (iap->ia_valid) {
-		iap->ia_valid |= ATTR_CTIME;
-		host_err = notify_change(&init_user_ns, dentry, iap, NULL);
-	}
-
-out_unlock:
 	if (attr->na_seclabel && attr->na_seclabel->len)
 		attr->na_labelerr = security_inode_setsecctx(dentry,
 			attr->na_seclabel->data, attr->na_seclabel->len);
@@ -1020,7 +1119,9 @@ nfsd_vfs_write(struct svc_rqst *rqstp, struct svc_fh *fhp, struct nfsd_file *nf,
 	since = READ_ONCE(file->f_wb_err);
 	if (verf)
 		nfsd_copy_write_verifier(verf, nn);
+	file_start_write(file);
 	host_err = vfs_iter_write(file, &iter, &pos, flags);
+	file_end_write(file);
 	if (host_err < 0) {
 		nfsd_reset_write_verifier(nn);
 		trace_nfsd_writeverf_reset(nn, rqstp, host_err);
@@ -1256,7 +1357,7 @@ nfsd_check_ignore_resizing(struct iattr *iap)
 /* The parent directory should already be locked: */
 __be32
 nfsd_create_locked(struct svc_rqst *rqstp, struct svc_fh *fhp,
-		   char *fname, int flen, struct nfsd_attrs *attrs,
+		   struct nfsd_attrs *attrs,
 		   int type, dev_t rdev, struct svc_fh *resfhp)
 {
 	struct dentry	*dentry, *dchild;
@@ -1281,7 +1382,6 @@ nfsd_create_locked(struct svc_rqst *rqstp, struct svc_fh *fhp,
 		iap->ia_mode &= ~current_umask();
 
 	err = 0;
-	host_err = 0;
 	switch (type) {
 	case S_IFREG:
 		host_err = vfs_create(&init_user_ns, dirp, dchild, iap->ia_mode, true);
@@ -1383,8 +1483,7 @@ nfsd_create(struct svc_rqst *rqstp, struct svc_fh *fhp,
 	if (err)
 		goto out_unlock;
 	fh_fill_pre_attrs(fhp);
-	err = nfsd_create_locked(rqstp, fhp, fname, flen, attrs, type,
-				 rdev, resfhp);
+	err = nfsd_create_locked(rqstp, fhp, attrs, type, rdev, resfhp);
 	fh_fill_post_attrs(fhp);
 out_unlock:
 	inode_unlock(dentry->d_inode);
@@ -1674,7 +1773,15 @@ retry:
 			.new_dir	= tdir,
 			.new_dentry	= ndentry,
 		};
-		host_err = vfs_rename(&rd);
+		int retries;
+
+		for (retries = 1;;) {
+			host_err = vfs_rename(&rd);
+			if (host_err != -EAGAIN || !retries--)
+				break;
+			if (!nfsd_wait_for_delegreturn(rqstp, d_inode(odentry)))
+				break;
+		}
 		if (!host_err) {
 			host_err = commit_metadata(tfhp);
 			if (!host_err)
@@ -1758,9 +1865,18 @@ nfsd_unlink(struct svc_rqst *rqstp, struct svc_fh *fhp, int type,
 
 	fh_fill_pre_attrs(fhp);
 	if (type != S_IFDIR) {
+		int retries;
+
 		if (rdentry->d_sb->s_export_op->flags & EXPORT_OP_CLOSE_BEFORE_UNLINK)
 			nfsd_close_cached_files(rdentry);
-		host_err = vfs_unlink(&init_user_ns, dirp, rdentry, NULL);
+
+		for (retries = 1;;) {
+			host_err = vfs_unlink(&init_user_ns, dirp, rdentry, NULL);
+			if (host_err != -EAGAIN || !retries--)
+				break;
+			if (!nfsd_wait_for_delegreturn(rqstp, rinode))
+				break;
+		}
 	} else {
 		host_err = vfs_rmdir(&init_user_ns, dirp, rdentry);
 	}
@@ -2055,7 +2171,7 @@ nfsd_getxattr(struct svc_rqst *rqstp, struct svc_fh *fhp, char *name,
 		goto out;
 	}
 
-	buf = kvmalloc(len, GFP_KERNEL | GFP_NOFS);
+	buf = kvmalloc(len, GFP_KERNEL);
 	if (buf == NULL) {
 		err = nfserr_jukebox;
 		goto out;
@@ -2118,10 +2234,7 @@ nfsd_listxattr(struct svc_rqst *rqstp, struct svc_fh *fhp, char **bufp,
 		goto out;
 	}
 
-	/*
-	 * We're holding i_rwsem - use GFP_NOFS.
-	 */
-	buf = kvmalloc(len, GFP_KERNEL | GFP_NOFS);
+	buf = kvmalloc(len, GFP_KERNEL);
 	if (buf == NULL) {
 		err = nfserr_jukebox;
 		goto out;

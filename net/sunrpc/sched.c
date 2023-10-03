@@ -63,6 +63,14 @@ gfp_t rpc_task_gfp_mask(void)
 		return GFP_KERNEL | __GFP_NORETRY | __GFP_NOWARN;
 	return GFP_KERNEL;
 }
+EXPORT_SYMBOL_GPL(rpc_task_gfp_mask);
+
+bool rpc_task_set_rpc_status(struct rpc_task *task, int rpc_status)
+{
+	if (cmpxchg(&task->tk_rpc_status, 0, rpc_status) == 0)
+		return true;
+	return false;
+}
 
 unsigned long
 rpc_task_timeout(const struct rpc_task *task)
@@ -811,7 +819,6 @@ rpc_init_task_statistics(struct rpc_task *task)
 	/* Initialize retry counters */
 	task->tk_garb_retry = 2;
 	task->tk_cred_retry = 2;
-	task->tk_rebind_retry = 2;
 
 	/* starting timestamp */
 	task->tk_start = ktime_get();
@@ -854,12 +861,25 @@ void rpc_signal_task(struct rpc_task *task)
 	if (!RPC_IS_ACTIVATED(task))
 		return;
 
+	if (!rpc_task_set_rpc_status(task, -ERESTARTSYS))
+		return;
 	trace_rpc_task_signalled(task, task->tk_action);
 	set_bit(RPC_TASK_SIGNALLED, &task->tk_runstate);
 	smp_mb__after_atomic();
 	queue = READ_ONCE(task->tk_waitqueue);
 	if (queue)
-		rpc_wake_up_queued_task_set_status(queue, task, -ERESTARTSYS);
+		rpc_wake_up_queued_task(queue, task);
+}
+
+void rpc_task_try_cancel(struct rpc_task *task, int error)
+{
+	struct rpc_wait_queue *queue;
+
+	if (!rpc_task_set_rpc_status(task, error))
+		return;
+	queue = READ_ONCE(task->tk_waitqueue);
+	if (queue)
+		rpc_wake_up_queued_task(queue, task);
 }
 
 void rpc_exit(struct rpc_task *task, int status)
@@ -906,10 +926,15 @@ static void __rpc_execute(struct rpc_task *task)
 		 * Perform the next FSM step or a pending callback.
 		 *
 		 * tk_action may be NULL if the task has been killed.
-		 * In particular, note that rpc_killall_tasks may
-		 * do this at any time, so beware when dereferencing.
 		 */
 		do_action = task->tk_action;
+		/* Tasks with an RPC error status should exit */
+		if (do_action && do_action != rpc_exit_task &&
+		    (status = READ_ONCE(task->tk_rpc_status)) != 0) {
+			task->tk_status = status;
+			do_action = rpc_exit_task;
+		}
+		/* Callbacks override all actions */
 		if (task->tk_callback) {
 			do_action = task->tk_callback;
 			task->tk_callback = NULL;
@@ -932,14 +957,6 @@ static void __rpc_execute(struct rpc_task *task)
 		}
 
 		/*
-		 * Signalled tasks should exit rather than sleep.
-		 */
-		if (RPC_SIGNALLED(task)) {
-			task->tk_rpc_status = -ERESTARTSYS;
-			rpc_exit(task, -ERESTARTSYS);
-		}
-
-		/*
 		 * The queue->lock protects against races with
 		 * rpc_make_runnable().
 		 *
@@ -951,6 +968,12 @@ static void __rpc_execute(struct rpc_task *task)
 		queue = task->tk_waitqueue;
 		spin_lock(&queue->lock);
 		if (!RPC_IS_QUEUED(task)) {
+			spin_unlock(&queue->lock);
+			continue;
+		}
+		/* Wake up any task that has an exit status */
+		if (READ_ONCE(task->tk_rpc_status) != 0) {
+			rpc_wake_up_task_queue_locked(queue, task);
 			spin_unlock(&queue->lock);
 			continue;
 		}
@@ -971,10 +994,7 @@ static void __rpc_execute(struct rpc_task *task)
 			 * clean up after sleeping on some queue, we don't
 			 * break the loop here, but go around once more.
 			 */
-			trace_rpc_task_signalled(task, task->tk_action);
-			set_bit(RPC_TASK_SIGNALLED, &task->tk_runstate);
-			task->tk_rpc_status = -ERESTARTSYS;
-			rpc_exit(task, -ERESTARTSYS);
+			rpc_signal_task(task);
 		}
 		trace_rpc_task_sync_wake(task, task->tk_action);
 	}

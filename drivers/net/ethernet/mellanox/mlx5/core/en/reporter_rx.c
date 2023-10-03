@@ -134,38 +134,17 @@ out:
 	return err;
 }
 
-static int mlx5e_rq_to_ready(struct mlx5e_rq *rq, int curr_state)
-{
-	struct net_device *dev = rq->netdev;
-	int err;
-
-	err = mlx5e_modify_rq_state(rq, curr_state, MLX5_RQC_STATE_RST);
-	if (err) {
-		netdev_err(dev, "Failed to move rq 0x%x to reset\n", rq->rqn);
-		return err;
-	}
-	err = mlx5e_modify_rq_state(rq, MLX5_RQC_STATE_RST, MLX5_RQC_STATE_RDY);
-	if (err) {
-		netdev_err(dev, "Failed to move rq 0x%x to ready\n", rq->rqn);
-		return err;
-	}
-
-	return 0;
-}
-
 static int mlx5e_rx_reporter_err_rq_cqe_recover(void *ctx)
 {
 	struct mlx5e_rq *rq = ctx;
 	int err;
 
 	mlx5e_deactivate_rq(rq);
-	mlx5e_free_rx_descs(rq);
-
-	err = mlx5e_rq_to_ready(rq, MLX5_RQC_STATE_ERR);
-	if (err)
-		goto out;
-
+	err = mlx5e_flush_rq(rq, MLX5_RQC_STATE_ERR);
 	clear_bit(MLX5E_RQ_STATE_RECOVERING, &rq->state);
+	if (err)
+		return err;
+
 	mlx5e_activate_rq(rq);
 	rq->stats->recover++;
 	if (rq->channel)
@@ -173,9 +152,6 @@ static int mlx5e_rx_reporter_err_rq_cqe_recover(void *ctx)
 	else
 		mlx5e_trigger_napi_sched(rq->cq.napi);
 	return 0;
-out:
-	clear_bit(MLX5E_RQ_STATE_RECOVERING, &rq->state);
-	return err;
 }
 
 static int mlx5e_rx_reporter_timeout_recover(void *ctx)
@@ -483,7 +459,11 @@ static int mlx5e_rx_reporter_diagnose(struct devlink_health_reporter *reporter,
 		goto unlock;
 
 	for (i = 0; i < priv->channels.num; i++) {
-		struct mlx5e_rq *rq = &priv->channels.c[i]->rq;
+		struct mlx5e_channel *c = priv->channels.c[i];
+		struct mlx5e_rq *rq;
+
+		rq = test_bit(MLX5E_CHANNEL_STATE_XSK, c->state) ?
+			&c->xskrq : &c->rq;
 
 		err = mlx5e_rx_reporter_build_diagnose_output(rq, fmsg);
 		if (err)
@@ -756,10 +736,10 @@ static const struct devlink_health_reporter_ops mlx5_rx_reporter_ops = {
 
 void mlx5e_reporter_rx_create(struct mlx5e_priv *priv)
 {
-	struct devlink_port *dl_port = mlx5e_devlink_get_dl_port(priv);
 	struct devlink_health_reporter *reporter;
 
-	reporter = devlink_port_health_reporter_create(dl_port, &mlx5_rx_reporter_ops,
+	reporter = devlink_port_health_reporter_create(priv->netdev->devlink_port,
+						       &mlx5_rx_reporter_ops,
 						       MLX5E_REPORTER_RX_GRACEFUL_PERIOD, priv);
 	if (IS_ERR(reporter)) {
 		netdev_warn(priv->netdev, "Failed to create rx reporter, err = %ld\n",
@@ -774,6 +754,6 @@ void mlx5e_reporter_rx_destroy(struct mlx5e_priv *priv)
 	if (!priv->rx_reporter)
 		return;
 
-	devlink_port_health_reporter_destroy(priv->rx_reporter);
+	devlink_health_reporter_destroy(priv->rx_reporter);
 	priv->rx_reporter = NULL;
 }

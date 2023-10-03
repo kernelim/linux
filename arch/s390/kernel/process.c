@@ -152,7 +152,7 @@ int copy_thread(unsigned long clone_flags, unsigned long new_stackp,
 		frame->childregs.gprs[9] = new_stackp; /* function */
 		frame->childregs.gprs[10] = arg;
 		frame->childregs.orig_gpr2 = -1;
-
+		frame->childregs.last_break = 1;
 		return 0;
 	}
 	frame->childregs = *current_pt_regs();

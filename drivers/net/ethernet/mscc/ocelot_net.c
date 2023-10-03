@@ -178,15 +178,6 @@ void ocelot_port_devlink_teardown(struct ocelot *ocelot, int port)
 	devlink_port_unregister(dlp);
 }
 
-static struct devlink_port *ocelot_get_devlink_port(struct net_device *dev)
-{
-	struct ocelot_port_private *priv = netdev_priv(dev);
-	struct ocelot *ocelot = priv->port.ocelot;
-	int port = priv->chip_port;
-
-	return &ocelot->devlink_ports[port];
-}
-
 int ocelot_setup_tc_cls_flower(struct ocelot_port_private *priv,
 			       struct flow_cls_offload *f,
 			       bool ingress)
@@ -709,7 +700,8 @@ static int ocelot_port_fdb_add(struct ndmsg *ndm, struct nlattr *tb[],
 
 static int ocelot_port_fdb_del(struct ndmsg *ndm, struct nlattr *tb[],
 			       struct net_device *dev,
-			       const unsigned char *addr, u16 vid)
+			       const unsigned char *addr, u16 vid,
+				   struct netlink_ext_ack *extack)
 {
 	struct ocelot_port_private *priv = netdev_priv(dev);
 	struct ocelot *ocelot = priv->port.ocelot;
@@ -824,7 +816,6 @@ static const struct net_device_ops ocelot_port_netdev_ops = {
 	.ndo_set_features		= ocelot_set_features,
 	.ndo_setup_tc			= ocelot_setup_tc,
 	.ndo_eth_ioctl			= ocelot_ioctl,
-	.ndo_get_devlink_port		= ocelot_get_devlink_port,
 };
 
 struct net_device *ocelot_port_to_netdev(struct ocelot *ocelot, int port)
@@ -1563,6 +1554,7 @@ int ocelot_probe_port(struct ocelot *ocelot, int port, struct regmap *target,
 
 	ocelot_init_port(ocelot, port);
 
+	SET_NETDEV_DEVLINK_PORT(dev, &ocelot->devlink_ports[port]);
 	err = register_netdev(dev);
 	if (err) {
 		dev_err(ocelot->dev, "register_netdev failed\n");

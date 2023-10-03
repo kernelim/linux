@@ -91,7 +91,7 @@ static void espintcp_rcv(struct strparser *strp, struct sk_buff *skb)
 	}
 
 	/* remove header, leave non-ESP marker/SPI */
-	if (!__pskb_pull(skb, rxm->offset + 2)) {
+	if (!pskb_pull(skb, rxm->offset + 2)) {
 		XFRM_INC_STATS(sock_net(strp->sk), LINUX_MIB_XFRMINERROR);
 		kfree_skb(skb);
 		return;
@@ -491,6 +491,7 @@ static int espintcp_init_sk(struct sock *sk)
 
 	/* avoid using task_frag */
 	sk->sk_allocation = GFP_ATOMIC;
+	sk->sk_use_task_frag = false;
 
 	return 0;
 

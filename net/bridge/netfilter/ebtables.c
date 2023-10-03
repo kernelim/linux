@@ -1005,8 +1005,10 @@ static int do_replace_finish(struct net *net, struct ebt_replace *repl,
 		goto free_iterate;
 	}
 
-	if (repl->valid_hooks != t->valid_hooks)
+	if (repl->valid_hooks != t->valid_hooks) {
+		ret = -EINVAL;
 		goto free_unlock;
+	}
 
 	if (repl->num_counters && repl->num_counters != t->private->nentries) {
 		ret = -EINVAL;
@@ -1053,7 +1055,7 @@ static int do_replace_finish(struct net *net, struct ebt_replace *repl,
 
 	audit_log_nfcfg(repl->name, AF_BRIDGE, repl->nentries,
 			AUDIT_XT_OP_REPLACE, GFP_KERNEL);
-	return ret;
+	return 0;
 
 free_unlock:
 	mutex_unlock(&ebt_mutex);
@@ -1356,7 +1358,7 @@ static inline int ebt_obj_to_user(char __user *um, const char *_name,
 	/* ebtables expects 31 bytes long names but xt_match names are 29 bytes
 	 * long. Copy 29 bytes and fill remaining bytes with zeroes.
 	 */
-	strlcpy(name, _name, sizeof(name));
+	strscpy(name, _name, sizeof(name));
 	if (copy_to_user(um, name, EBT_EXTENSION_MAXNAMELEN) ||
 	    put_user(revision, (u8 __user *)(um + EBT_EXTENSION_MAXNAMELEN)) ||
 	    put_user(datasize, (int __user *)(um + EBT_EXTENSION_MAXNAMELEN + 1)) ||

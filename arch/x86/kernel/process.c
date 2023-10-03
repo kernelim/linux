@@ -160,6 +160,7 @@ int copy_thread(unsigned long clone_flags, unsigned long sp, unsigned long arg,
 	savesegment(ds, p->thread.ds);
 #else
 	p->thread.sp0 = (unsigned long) (childregs + 1);
+	savesegment(gs, p->thread.gs);
 	/*
 	 * Clear all status flags including IF and set fixed bit. 64bit
 	 * does not have this initialization as the frame does not contain
@@ -190,10 +191,6 @@ int copy_thread(unsigned long clone_flags, unsigned long sp, unsigned long arg,
 	childregs->ax = 0;
 	if (sp)
 		childregs->sp = sp;
-
-#ifdef CONFIG_X86_32
-	task_user_gs(p) = get_user_gs(current_pt_regs());
-#endif
 
 	if (unlikely(p->flags & PF_IO_WORKER)) {
 		/*
@@ -334,7 +331,7 @@ static int get_cpuid_mode(void)
 	return !test_thread_flag(TIF_NOCPUID);
 }
 
-static int set_cpuid_mode(struct task_struct *task, unsigned long cpuid_enabled)
+static int set_cpuid_mode(unsigned long cpuid_enabled)
 {
 	if (!boot_cpu_has(X86_FEATURE_CPUID_FAULT))
 		return -ENODEV;
@@ -600,7 +597,7 @@ static __always_inline void __speculation_ctrl_update(unsigned long tifp,
 	}
 
 	if (updmsr)
-		write_spec_ctrl_current(msr, false);
+		update_spec_ctrl_cond(msr);
 }
 
 static unsigned long speculation_ctrl_update_tif(struct task_struct *tsk)
@@ -724,6 +721,7 @@ void arch_cpu_idle(void)
 {
 	x86_idle();
 }
+EXPORT_SYMBOL_GPL(arch_cpu_idle);
 
 /*
  * We use this if we don't have any better idle routine..
@@ -1003,20 +1001,19 @@ unsigned long __get_wchan(struct task_struct *p)
 	return addr;
 }
 
-long do_arch_prctl_common(struct task_struct *task, int option,
-			  unsigned long arg2)
+long do_arch_prctl_common(int option, unsigned long arg2)
 {
 	switch (option) {
 	case ARCH_GET_CPUID:
 		return get_cpuid_mode();
 	case ARCH_SET_CPUID:
-		return set_cpuid_mode(task, arg2);
+		return set_cpuid_mode(arg2);
 	case ARCH_GET_XCOMP_SUPP:
 	case ARCH_GET_XCOMP_PERM:
 	case ARCH_REQ_XCOMP_PERM:
 	case ARCH_GET_XCOMP_GUEST_PERM:
 	case ARCH_REQ_XCOMP_GUEST_PERM:
-		return fpu_xstate_prctl(task, option, arg2);
+		return fpu_xstate_prctl(option, arg2);
 	}
 
 	return -EINVAL;

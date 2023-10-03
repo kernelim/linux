@@ -19,4 +19,4 @@ endif
 
 kvm-objs		+= vz.o
 obj-$(CONFIG_KVM)	+= kvm.o
-obj-y			+= callback.o tlb.o
+obj-y			+= tlb.o

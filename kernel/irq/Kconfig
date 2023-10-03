@@ -85,15 +85,10 @@ config GENERIC_IRQ_IPI
 	bool
 	select IRQ_DOMAIN_HIERARCHY
 
-# Generic MSI interrupt support
+# Generic MSI hierarchical interrupt domain support
 config GENERIC_MSI_IRQ
 	bool
-
-# Generic MSI hierarchical interrupt domain support
-config GENERIC_MSI_IRQ_DOMAIN
-	bool
 	select IRQ_DOMAIN_HIERARCHY
-	select GENERIC_MSI_IRQ
 
 config IRQ_MSI_IOMMU
 	bool

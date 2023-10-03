@@ -8,7 +8,7 @@ void serial_test_xdp_attach(void)
 {
 	__u32 duration = 0, id1, id2, id0 = 0, len;
 	struct bpf_object *obj1, *obj2, *obj3;
-	const char *file = "./test_xdp.o";
+	const char *file = "./test_xdp.bpf.o";
 	struct bpf_prog_info info = {};
 	int err, fd1, fd2, fd3;
 	LIBBPF_OPTS(bpf_xdp_attach_opts, opts);
@@ -18,7 +18,7 @@ void serial_test_xdp_attach(void)
 	err = bpf_prog_test_load(file, BPF_PROG_TYPE_XDP, &obj1, &fd1);
 	if (CHECK_FAIL(err))
 		return;
-	err = bpf_obj_get_info_by_fd(fd1, &info, &len);
+	err = bpf_prog_get_info_by_fd(fd1, &info, &len);
 	if (CHECK_FAIL(err))
 		goto out_1;
 	id1 = info.id;
@@ -28,7 +28,7 @@ void serial_test_xdp_attach(void)
 		goto out_1;
 
 	memset(&info, 0, sizeof(info));
-	err = bpf_obj_get_info_by_fd(fd2, &info, &len);
+	err = bpf_prog_get_info_by_fd(fd2, &info, &len);
 	if (CHECK_FAIL(err))
 		goto out_2;
 	id2 = info.id;

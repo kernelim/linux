@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2017-2022 Broadcom. All Rights Reserved. The term *
+ * Copyright (C) 2017-2023 Broadcom. All Rights Reserved. The term *
  * “Broadcom” refers to Broadcom Inc. and/or its subsidiaries.     *
  * Copyright (C) 2004-2016 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
@@ -764,6 +764,8 @@ typedef struct _PRLI {		/* Structure is in Big Endian format */
 #define PRLI_PREDEF_CONFIG    0x5
 #define PRLI_PARTIAL_SUCCESS  0x6
 #define PRLI_INVALID_PAGE_CNT 0x7
+#define PRLI_INV_SRV_PARM     0x8
+
 	uint8_t word0Reserved3;	/* FC Parm Word 0, bit 0:7 */
 
 	uint32_t origProcAssoc;	/* FC Parm Word 1, bit 0:31 */
@@ -3735,19 +3737,26 @@ union sli_var {
 };
 
 typedef struct {
+	struct_group_tagged(MAILBOX_word0, bits,
+		union {
+			struct {
 #ifdef __BIG_ENDIAN_BITFIELD
-	uint16_t mbxStatus;
-	uint8_t mbxCommand;
-	uint8_t mbxReserved:6;
-	uint8_t mbxHc:1;
-	uint8_t mbxOwner:1;	/* Low order bit first word */
+				uint16_t mbxStatus;
+				uint8_t mbxCommand;
+				uint8_t mbxReserved:6;
+				uint8_t mbxHc:1;
+				uint8_t mbxOwner:1;	/* Low order bit first word */
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
-	uint8_t mbxOwner:1;	/* Low order bit first word */
-	uint8_t mbxHc:1;
-	uint8_t mbxReserved:6;
-	uint8_t mbxCommand;
-	uint16_t mbxStatus;
+				uint8_t mbxOwner:1;	/* Low order bit first word */
+				uint8_t mbxHc:1;
+				uint8_t mbxReserved:6;
+				uint8_t mbxCommand;
+				uint16_t mbxStatus;
 #endif
+			};
+			u32 word0;
+		};
+	);
 
 	MAILVARIANTS un;
 	union sli_var us;
@@ -4426,18 +4435,6 @@ lpfc_is_LC_HBA(unsigned short device)
 		return 1;
 	else
 		return 0;
-}
-
-/*
- * Determine if failed because of a link event or firmware reset.
- */
-static inline int
-lpfc_error_lost_link(u32 ulp_status, u32 ulp_word4)
-{
-	return (ulp_status == IOSTAT_LOCAL_REJECT &&
-		(ulp_word4 == IOERR_SLI_ABORTED ||
-		 ulp_word4 == IOERR_LINK_DOWN ||
-		 ulp_word4 == IOERR_SLI_DOWN));
 }
 
 #define BPL_ALIGN_SZ 8 /* 8 byte alignment for bpl and mbufs */

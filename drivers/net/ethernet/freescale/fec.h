@@ -18,6 +18,8 @@
 #include <linux/net_tstamp.h>
 #include <linux/ptp_clock_kernel.h>
 #include <linux/timecounter.h>
+#include <dt-bindings/firmware/imx/rsrc.h>
+#include <linux/firmware/imx/sci.h>
 
 #if defined(CONFIG_M523x) || defined(CONFIG_M527x) || defined(CONFIG_M528x) || \
     defined(CONFIG_M520x) || defined(CONFIG_M532x) || defined(CONFIG_ARM) || \
@@ -600,6 +602,15 @@ struct fec_enet_private {
 	int pps_enable;
 	unsigned int next_counter;
 
+	struct {
+		struct timespec64 ts_phc;
+		u64 ns_sys;
+		u32 at_corr;
+		u8 at_inc_corr;
+	} ptp_saved_state;
+
+	struct imx_sc_ipc *ipc_handle;
+
 	u64 ethtool_stats[];
 };
 
@@ -609,6 +620,9 @@ void fec_ptp_start_cyclecounter(struct net_device *ndev);
 void fec_ptp_disable_hwts(struct net_device *ndev);
 int fec_ptp_set(struct net_device *ndev, struct ifreq *ifr);
 int fec_ptp_get(struct net_device *ndev, struct ifreq *ifr);
+
+void fec_ptp_save_state(struct fec_enet_private *fep);
+int fec_ptp_restore_state(struct fec_enet_private *fep);
 
 /****************************************************************************/
 #endif /* FEC_H */

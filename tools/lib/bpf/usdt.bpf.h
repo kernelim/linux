@@ -130,7 +130,10 @@ int bpf_usdt_arg(struct pt_regs *ctx, __u64 arg_num, long *res)
 	if (!spec)
 		return -ESRCH;
 
-	if (arg_num >= BPF_USDT_MAX_ARG_CNT || arg_num >= spec->arg_cnt)
+	if (arg_num >= BPF_USDT_MAX_ARG_CNT)
+		return -ENOENT;
+	barrier_var(arg_num);
+	if (arg_num >= spec->arg_cnt)
 		return -ENOENT;
 
 	arg_spec = &spec->args[arg_num];
@@ -232,7 +235,7 @@ long bpf_usdt_cookie(struct pt_regs *ctx)
  */
 #define BPF_USDT(name, args...)						    \
 name(struct pt_regs *ctx);						    \
-static __attribute__((always_inline)) typeof(name(0))			    \
+static __always_inline typeof(name(0))					    \
 ____##name(struct pt_regs *ctx, ##args);				    \
 typeof(name(0)) name(struct pt_regs *ctx)				    \
 {									    \
@@ -241,7 +244,7 @@ typeof(name(0)) name(struct pt_regs *ctx)				    \
         return ____##name(___bpf_usdt_args(args));			    \
         _Pragma("GCC diagnostic pop")					    \
 }									    \
-static __attribute__((always_inline)) typeof(name(0))			    \
+static __always_inline typeof(name(0))					    \
 ____##name(struct pt_regs *ctx, ##args)
 
 #endif /* __USDT_BPF_H__ */

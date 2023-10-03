@@ -1,2 +1,2 @@
-#2-
-0x6c34c12e	blkdev_get_by_path	vmlinux	EXPORT_SYMBOL	
+#3-
+0xcff15dc1	blkdev_get_by_path	vmlinux	EXPORT_SYMBOL	

@@ -37,6 +37,7 @@
 #include <linux/seq_file.h>
 #include <linux/root_dev.h>
 #include <linux/of.h>
+#include <linux/of_irq.h>
 #include <linux/of_pci.h>
 #include <linux/memblock.h>
 #include <linux/swiotlb.h>
@@ -44,7 +45,6 @@
 #include <asm/mmu.h>
 #include <asm/processor.h>
 #include <asm/io.h>
-#include <asm/prom.h>
 #include <asm/rtas.h>
 #include <asm/pci-bridge.h>
 #include <asm/iommu.h>
@@ -424,16 +424,6 @@ void pseries_disable_reloc_on_exc(void)
 }
 EXPORT_SYMBOL(pseries_disable_reloc_on_exc);
 
-#ifdef CONFIG_KEXEC_CORE
-static void pSeries_machine_kexec(struct kimage *image)
-{
-	if (firmware_has_feature(FW_FEATURE_SET_MODE))
-		pseries_disable_reloc_on_exc();
-
-	default_machine_kexec(image);
-}
-#endif
-
 #ifdef __LITTLE_ENDIAN__
 void pseries_big_endian_exceptions(void)
 {
@@ -499,6 +489,8 @@ static void __init pSeries_discover_phbs(void)
 
 		/* create pci_dn's for DT nodes under this PHB */
 		pci_devs_phb_init_dynamic(phb);
+
+		pseries_msi_allocate_domains(phb);
 	}
 
 	of_node_put(root);
@@ -1096,7 +1088,7 @@ define_machine(pseries) {
 	.machine_check_early	= pseries_machine_check_realmode,
 	.machine_check_exception = pSeries_machine_check_exception,
 #ifdef CONFIG_KEXEC_CORE
-	.machine_kexec          = pSeries_machine_kexec,
+	.machine_kexec          = pseries_machine_kexec,
 	.kexec_cpu_down         = pseries_kexec_cpu_down,
 #endif
 #ifdef CONFIG_MEMORY_HOTPLUG

@@ -149,7 +149,7 @@ int __init register_nfs_fs(void)
 	ret = nfs_register_sysctl();
 	if (ret < 0)
 		goto error_2;
-	ret = register_shrinker(&acl_shrinker);
+	ret = register_shrinker(&acl_shrinker, "nfs-acl");
 	if (ret < 0)
 		goto error_3;
 #ifdef CONFIG_NFS_V4_2
@@ -692,10 +692,6 @@ int nfs_show_stats(struct seq_file *m, struct dentry *root)
 			totals.events[i] += stats->events[i];
 		for (i = 0; i < __NFSIOS_BYTESMAX; i++)
 			totals.bytes[i] += stats->bytes[i];
-#ifdef CONFIG_NFS_FSCACHE
-		for (i = 0; i < __NFSIOS_FSCACHEMAX; i++)
-			totals.fscache[i] += stats->fscache[i];
-#endif
 
 		preempt_enable();
 	}
@@ -706,13 +702,6 @@ int nfs_show_stats(struct seq_file *m, struct dentry *root)
 	seq_puts(m, "\n\tbytes:\t");
 	for (i = 0; i < __NFSIOS_BYTESMAX; i++)
 		seq_printf(m, "%Lu ", totals.bytes[i]);
-#ifdef CONFIG_NFS_FSCACHE
-	if (nfss->options & NFS_OPTION_FSCACHE) {
-		seq_puts(m, "\n\tfsc:\t");
-		for (i = 0; i < __NFSIOS_FSCACHEMAX; i++)
-			seq_printf(m, "%Lu ", totals.fscache[i]);
-	}
-#endif
 	seq_putc(m, '\n');
 
 	rpc_clnt_show_stats(m, nfss->client);
@@ -822,8 +811,7 @@ static int nfs_request_mount(struct fs_context *fc,
 {
 	struct nfs_fs_context *ctx = nfs_fc2context(fc);
 	struct nfs_mount_request request = {
-		.sap		= (struct sockaddr *)
-						&ctx->mount_server.address,
+		.sap		= &ctx->mount_server._address,
 		.dirpath	= ctx->nfs_server.export_path,
 		.protocol	= ctx->mount_server.protocol,
 		.fh		= root_fh,
@@ -854,7 +842,7 @@ static int nfs_request_mount(struct fs_context *fc,
 	 * Construct the mount server's address.
 	 */
 	if (ctx->mount_server.address.sa_family == AF_UNSPEC) {
-		memcpy(request.sap, &ctx->nfs_server.address,
+		memcpy(request.sap, &ctx->nfs_server._address,
 		       ctx->nfs_server.addrlen);
 		ctx->mount_server.addrlen = ctx->nfs_server.addrlen;
 	}

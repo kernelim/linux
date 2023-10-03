@@ -97,8 +97,9 @@ xfs_inode_alloc(
 	ip->i_ino = ino;
 	ip->i_mount = mp;
 	memset(&ip->i_imap, 0, sizeof(struct xfs_imap));
-	ip->i_afp = NULL;
 	ip->i_cowfp = NULL;
+	memset(&ip->i_af, 0, sizeof(ip->i_af));
+	ip->i_af.if_format = XFS_DINODE_FMT_EXTENTS;
 	memset(&ip->i_df, 0, sizeof(ip->i_df));
 	ip->i_flags = 0;
 	ip->i_delayed_blks = 0;
@@ -110,6 +111,8 @@ xfs_inode_alloc(
 	INIT_WORK(&ip->i_ioend_work, xfs_end_io);
 	INIT_LIST_HEAD(&ip->i_ioend_list);
 	spin_lock_init(&ip->i_ioend_lock);
+	ip->i_next_unlinked = NULLAGINO;
+	ip->i_prev_unlinked = NULLAGINO;
 
 	return ip;
 }
@@ -129,10 +132,8 @@ xfs_inode_free_callback(
 		break;
 	}
 
-	if (ip->i_afp) {
-		xfs_idestroy_fork(ip->i_afp);
-		kmem_cache_free(xfs_ifork_cache, ip->i_afp);
-	}
+	xfs_ifork_zap_attr(ip);
+
 	if (ip->i_cowfp) {
 		xfs_idestroy_fork(ip->i_cowfp);
 		kmem_cache_free(xfs_ifork_cache, ip->i_cowfp);
@@ -339,6 +340,9 @@ xfs_iget_recycle(
 
 	trace_xfs_iget_recycle(ip);
 
+	if (!xfs_ilock_nowait(ip, XFS_ILOCK_EXCL))
+		return -EAGAIN;
+
 	/*
 	 * We need to make it look like the inode is being reclaimed to prevent
 	 * the actual reclaim workers from stomping over us while we recycle
@@ -352,6 +356,7 @@ xfs_iget_recycle(
 
 	ASSERT(!rwsem_is_locked(&inode->i_rwsem));
 	error = xfs_reinit_inode(mp, inode);
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	if (error) {
 		/*
 		 * Re-initializing the inode failed, and we are in deep
@@ -515,6 +520,8 @@ xfs_iget_cache_hit(
 	if (ip->i_flags & XFS_IRECLAIMABLE) {
 		/* Drops i_flags_lock and RCU read lock. */
 		error = xfs_iget_recycle(pag, ip);
+		if (error == -EAGAIN)
+			goto out_skip;
 		if (error)
 			return error;
 	} else {
@@ -750,7 +757,8 @@ again:
 
 	/*
 	 * If we have a real type for an on-disk inode, we can setup the inode
-	 * now.	 If it's a new inode being created, xfs_ialloc will handle it.
+	 * now.	 If it's a new inode being created, xfs_init_new_inode will
+	 * handle it.
 	 */
 	if (xfs_iflags_test(ip, XFS_INEW) && VFS_I(ip)->i_mode != 0)
 		xfs_setup_existing_inode(ip);
@@ -880,7 +888,7 @@ xfs_reclaim_inode(
 	 */
 	if (xlog_is_shutdown(ip->i_mount->m_log)) {
 		xfs_iunpin_wait(ip);
-		xfs_iflush_abort(ip);
+		xfs_iflush_shutdown_abort(ip);
 		goto reclaim;
 	}
 	if (xfs_ipincount(ip))
@@ -909,6 +917,7 @@ reclaim:
 	ip->i_checked = 0;
 	spin_unlock(&ip->i_flags_lock);
 
+	ASSERT(!ip->i_itemp || ip->i_itemp->ili_item.li_buf == NULL);
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 
 	XFS_STATS_INC(ip->i_mount, xs_ig_reclaims);
@@ -1771,7 +1780,7 @@ xfs_check_delalloc(
 	struct xfs_inode	*ip,
 	int			whichfork)
 {
-	struct xfs_ifork	*ifp = XFS_IFORK_PTR(ip, whichfork);
+	struct xfs_ifork	*ifp = xfs_ifork_ptr(ip, whichfork);
 	struct xfs_bmbt_irec	got;
 	struct xfs_iext_cursor	icur;
 
@@ -1923,13 +1932,16 @@ xfs_inodegc_want_queue_rt_file(
 	struct xfs_inode	*ip)
 {
 	struct xfs_mount	*mp = ip->i_mount;
-	uint64_t		freertx;
 
 	if (!XFS_IS_REALTIME_INODE(ip))
 		return false;
 
-	freertx = READ_ONCE(mp->m_sb.sb_frextents);
-	return freertx < mp->m_low_rtexts[XFS_LOWSP_5_PCNT];
+	if (__percpu_counter_compare(&mp->m_frextents,
+				mp->m_low_rtexts[XFS_LOWSP_5_PCNT],
+				XFS_FDBLOCKS_BATCH) < 0)
+		return true;
+
+	return false;
 }
 #else
 # define xfs_inodegc_want_queue_rt_file(ip)	(false)
@@ -2213,5 +2225,5 @@ xfs_inodegc_register_shrinker(
 	shrink->flags = SHRINKER_NONSLAB;
 	shrink->batch = XFS_INODEGC_SHRINKER_BATCH;
 
-	return register_shrinker(shrink);
+	return register_shrinker(shrink, "xfs-inodegc:%s", mp->m_super->s_id);
 }

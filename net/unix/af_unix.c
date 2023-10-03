@@ -490,7 +490,7 @@ static int unix_dgram_peer_wake_me(struct sock *sk, struct sock *other)
 	 * -ECONNREFUSED. Otherwise, if we haven't queued any skbs
 	 * to other and its full, we will hang waiting for POLLOUT.
 	 */
-	if (unix_recvq_full(other) && !sock_flag(other, SOCK_DEAD))
+	if (unix_recvq_full_lockless(other) && !sock_flag(other, SOCK_DEAD))
 		return 1;
 
 	if (connected)
@@ -2429,34 +2429,17 @@ static int unix_dgram_recvmsg(struct socket *sock, struct msghdr *msg, size_t si
 
 static int unix_read_skb(struct sock *sk, skb_read_actor_t recv_actor)
 {
-	int copied = 0;
+	struct unix_sock *u = unix_sk(sk);
+	struct sk_buff *skb;
+	int err;
 
-	while (1) {
-		struct unix_sock *u = unix_sk(sk);
-		struct sk_buff *skb;
-		int used, err;
+	mutex_lock(&u->iolock);
+	skb = skb_recv_datagram(sk, MSG_DONTWAIT, &err);
+	mutex_unlock(&u->iolock);
+	if (!skb)
+		return err;
 
-		mutex_lock(&u->iolock);
-		skb = skb_recv_datagram(sk, MSG_DONTWAIT, &err);
-		mutex_unlock(&u->iolock);
-		if (!skb)
-			return err;
-
-		used = recv_actor(sk, skb);
-		if (used <= 0) {
-			if (!copied)
-				copied = used;
-			kfree_skb(skb);
-			break;
-		} else if (used <= skb->len) {
-			copied += used;
-		}
-
-		kfree_skb(skb);
-		break;
-	}
-
-	return copied;
+	return recv_actor(sk, skb);
 }
 
 /*

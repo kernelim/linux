@@ -387,7 +387,7 @@ void workingset_refault(struct folio *folio, void *shadow)
 	if (workingset) {
 		folio_set_workingset(folio);
 		/* XXX: Move to lru_cache_add() when it supports new vs putback */
-		lru_note_cost_folio(folio);
+		lru_note_cost_refault(folio);
 		mod_lruvec_state(lruvec, WORKINGSET_RESTORE_BASE + file, nr);
 	}
 out:
@@ -625,7 +625,7 @@ static int __init workingset_init(void)
 	pr_info("workingset: timestamp_bits=%d max_order=%d bucket_order=%u\n",
 	       timestamp_bits, max_order, bucket_order);
 
-	ret = prealloc_shrinker(&workingset_shadow_shrinker);
+	ret = prealloc_shrinker(&workingset_shadow_shrinker, "mm-shadow");
 	if (ret)
 		goto err;
 	ret = __list_lru_init(&shadow_nodes, true, &shadow_nodes_key,

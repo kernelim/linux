@@ -8,6 +8,7 @@
 #include <linux/kasan.h>
 #include <asm/ptdump.h>
 #include <asm/kasan.h>
+#include <asm/nospec-branch.h>
 #include <asm/sections.h>
 
 static unsigned long max_addr;
@@ -20,6 +21,8 @@ struct addr_marker {
 enum address_markers_idx {
 	IDENTITY_BEFORE_NR = 0,
 	IDENTITY_BEFORE_END_NR,
+	AMODE31_START_NR,
+	AMODE31_END_NR,
 	KERNEL_START_NR,
 	KERNEL_END_NR,
 #ifdef CONFIG_KFENCE
@@ -43,6 +46,8 @@ enum address_markers_idx {
 static struct addr_marker address_markers[] = {
 	[IDENTITY_BEFORE_NR]	= {0, "Identity Mapping Start"},
 	[IDENTITY_BEFORE_END_NR] = {(unsigned long)_stext, "Identity Mapping End"},
+	[AMODE31_START_NR]	= {0, "Amode31 Area Start"},
+	[AMODE31_END_NR]	= {0, "Amode31 Area End"},
 	[KERNEL_START_NR]	= {(unsigned long)_stext, "Kernel Image Start"},
 	[KERNEL_END_NR]		= {(unsigned long)_end, "Kernel Image End"},
 #ifdef CONFIG_KFENCE
@@ -116,8 +121,13 @@ static void note_prot_wx(struct pg_state *st, unsigned long addr)
 		return;
 	if (st->current_prot & _PAGE_NOEXEC)
 		return;
-	/* The first lowcore page is currently still W+X. */
-	if (addr == PAGE_SIZE)
+	/*
+	 * The first lowcore page is W+X if spectre mitigations are using
+	 * trampolines or the BEAR enhancements facility is not installed,
+	 * in which case we have two lpswe instructions in lowcore that need
+	 * to be executable.
+	 */
+	if (addr == PAGE_SIZE && (nospec_uses_trampoline() || !static_key_enabled(&cpu_has_bear)))
 		return;
 	WARN_ONCE(1, "s390/mm: Found insecure W+X mapping at address %pS\n",
 		  (void *)st->start_address);
@@ -203,7 +213,9 @@ void ptdump_check_wx(void)
 	if (st.wx_pages)
 		pr_warn("Checked W+X mappings: FAILED, %lu W+X pages found\n", st.wx_pages);
 	else
-		pr_info("Checked W+X mappings: passed, no unexpected W+X pages found\n");
+		pr_info("Checked W+X mappings: passed, no %sW+X pages found\n",
+			(nospec_uses_trampoline() || !static_key_enabled(&cpu_has_bear)) ?
+			"unexpected " : "");
 }
 #endif /* CONFIG_DEBUG_WX */
 
@@ -268,6 +280,8 @@ static int pt_dump_init(void)
 	max_addr = (S390_lowcore.kernel_asce & _REGION_ENTRY_TYPE_MASK) >> 2;
 	max_addr = 1UL << (max_addr * 11 + 31);
 	address_markers[IDENTITY_AFTER_END_NR].start_address = ident_map_size;
+	address_markers[AMODE31_START_NR].start_address = __samode31;
+	address_markers[AMODE31_END_NR].start_address = __eamode31;
 	address_markers[MODULES_NR].start_address = MODULES_VADDR;
 	address_markers[MODULES_END_NR].start_address = MODULES_END;
 	address_markers[VMEMMAP_NR].start_address = (unsigned long) vmemmap;

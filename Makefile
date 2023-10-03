@@ -8,8 +8,8 @@ NAME = Opossums on Parade
 # DRM backport version
 #
 RHEL_DRM_VERSION = 6
-RHEL_DRM_PATCHLEVEL = 0
-RHEL_DRM_SUBLEVEL = 8
+RHEL_DRM_PATCHLEVEL = 3
+RHEL_DRM_SUBLEVEL = 
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
@@ -201,10 +201,9 @@ endif
 ifneq ($(abs_srctree),$(abs_objtree))
 # Look for make include files relative to root of kernel src
 #
-# This does not become effective immediately because MAKEFLAGS is re-parsed
-# once after the Makefile is read. We need to invoke sub-make.
+# --included-dir is added for backward compatibility, but you should not rely on
+# it. Please add $(srctree)/ prefix to include Makefiles in the source tree.
 MAKEFLAGS += --include-dir=$(abs_srctree)
-need-sub-make := 1
 endif
 
 ifneq ($(filter 3.%,$(MAKE_VERSION)),)
@@ -808,7 +807,11 @@ stackp-flags-$(CONFIG_STACKPROTECTOR_STRONG)      := -fstack-protector-strong
 
 KBUILD_CFLAGS += $(stackp-flags-y)
 
+# don't enforce WERROR for out of tree modules
+ifeq ($(KBUILD_EXTMOD),)
 KBUILD_CFLAGS-$(CONFIG_WERROR) += -Werror
+endif
+
 KBUILD_CFLAGS-$(CONFIG_CC_NO_ARRAY_BOUNDS) += -Wno-array-bounds
 KBUILD_CFLAGS += $(KBUILD_CFLAGS-y) $(CONFIG_CC_IMPLICIT_FALLTHROUGH)
 
@@ -1000,8 +1003,8 @@ KBUILD_CFLAGS	+= $(CC_FLAGS_CFI)
 export CC_FLAGS_CFI
 endif
 
-ifdef CONFIG_DEBUG_FORCE_FUNCTION_ALIGN_64B
-KBUILD_CFLAGS += -falign-functions=64
+ifneq ($(CONFIG_FUNCTION_ALIGNMENT),0)
+KBUILD_CFLAGS += -falign-functions=$(CONFIG_FUNCTION_ALIGNMENT)
 endif
 
 # arch Makefile may override CC so keep this after arch Makefile is included
@@ -1159,6 +1162,7 @@ export MODULES_NSDEPS := $(extmod_prefix)modules.nsdeps
 ifeq ($(KBUILD_EXTMOD),)
 core-y			+= kernel/ certs/ mm/ fs/ ipc/ security/ crypto/
 core-$(CONFIG_BLOCK)	+= block/
+core-$(CONFIG_IO_URING)	+= io_uring/
 
 vmlinux-dirs	:= $(patsubst %/,%,$(filter %/, \
 		     $(core-y) $(core-m) $(drivers-y) $(drivers-m) \
@@ -1570,7 +1574,7 @@ CLEAN_FILES += include/ksym vmlinux.symvers modules-only.symvers \
 
 # Directories & files removed with 'make mrproper'
 MRPROPER_FILES += include/config include/generated          \
-		  arch/$(SRCARCH)/include/generated .tmp_objdiff \
+		  arch/$(SRCARCH)/include/generated .objdiff \
 		  debian snap tar-install \
 		  .config .config.old .version \
 		  Module.symvers \
@@ -1880,7 +1884,8 @@ ifdef single-build
 
 # .ko is special because modpost is needed
 single-ko := $(sort $(filter %.ko, $(MAKECMDGOALS)))
-single-no-ko := $(sort $(patsubst %.ko,%.mod, $(MAKECMDGOALS)))
+single-no-ko := $(filter-out $(single-ko), $(MAKECMDGOALS)) \
+		$(foreach x, o mod, $(patsubst %.ko, %.$x, $(single-ko)))
 
 $(single-ko): single_modpost
 	@:
@@ -1936,12 +1941,12 @@ clean: $(clean-dirs)
 		-o -name '*.ko.*' \
 		-o -name '*.dtb' -o -name '*.dtbo' -o -name '*.dtb.S' -o -name '*.dt.yaml' \
 		-o -name '*.dwo' -o -name '*.lst' \
-		-o -name '*.su' -o -name '*.mod' \
+		-o -name '*.su' -o -name '*.mod' -o -name '*.usyms' \
 		-o -name '.*.d' -o -name '.*.tmp' -o -name '*.mod.c' \
 		-o -name '*.lex.c' -o -name '*.tab.[ch]' \
 		-o -name '*.asn1.[ch]' \
 		-o -name '*.symtypes' -o -name 'modules.order' \
-		-o -name '.tmp_*.o.*' \
+		-o -name '.tmp_*' \
 		-o -name '*.c.[012]*.*' \
 		-o -name '*.ll' \
 		-o -name '*.gcno' \

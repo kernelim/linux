@@ -15,7 +15,6 @@ extern irqreturn_t amd_iommu_int_thread(int irq, void *data);
 extern irqreturn_t amd_iommu_int_handler(int irq, void *data);
 extern void amd_iommu_apply_erratum_63(struct amd_iommu *iommu, u16 devid);
 extern void amd_iommu_restart_event_logging(struct amd_iommu *iommu);
-extern int amd_iommu_init_api(void);
 extern void amd_iommu_set_rlookup_table(struct amd_iommu *iommu, u16 devid);
 
 #ifdef CONFIG_AMD_IOMMU_DEBUGFS
@@ -137,4 +136,6 @@ extern struct dev_table_entry *get_dev_table(struct amd_iommu *iommu);
 
 extern u64 amd_iommu_efr;
 extern u64 amd_iommu_efr2;
+
+extern bool amd_iommu_snp_en;
 #endif

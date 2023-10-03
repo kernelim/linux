@@ -2954,7 +2954,6 @@ static int qedf_alloc_bdq(struct qedf_ctx *qedf)
 	int i;
 	struct scsi_bd *pbl;
 	u64 *list;
-	dma_addr_t page;
 
 	/* Alloc dma memory for BDQ buffers */
 	for (i = 0; i < QEDF_BDQ_SIZE; i++) {
@@ -3015,11 +3014,9 @@ static int qedf_alloc_bdq(struct qedf_ctx *qedf)
 	qedf->bdq_pbl_list_num_entries = qedf->bdq_pbl_mem_size /
 	    QEDF_PAGE_SIZE;
 	list = (u64 *)qedf->bdq_pbl_list;
-	page = qedf->bdq_pbl_list_dma;
 	for (i = 0; i < qedf->bdq_pbl_list_num_entries; i++) {
 		*list = qedf->bdq_pbl_dma;
 		list++;
-		page += QEDF_PAGE_SIZE;
 	}
 
 	return 0;
@@ -3710,11 +3707,6 @@ err2:
 err1:
 	scsi_host_put(lport->host);
 err0:
-	if (qedf) {
-		QEDF_INFO(&qedf->dbg_ctx, QEDF_LOG_DISC, "Probe done.\n");
-
-		clear_bit(QEDF_PROBING, &qedf->flags);
-	}
 	return rc;
 }
 

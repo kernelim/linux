@@ -3891,18 +3891,12 @@ err1:
 
 static void gfx_v10_0_free_microcode(struct amdgpu_device *adev)
 {
-	release_firmware(adev->gfx.pfp_fw);
-	adev->gfx.pfp_fw = NULL;
-	release_firmware(adev->gfx.me_fw);
-	adev->gfx.me_fw = NULL;
-	release_firmware(adev->gfx.ce_fw);
-	adev->gfx.ce_fw = NULL;
-	release_firmware(adev->gfx.rlc_fw);
-	adev->gfx.rlc_fw = NULL;
-	release_firmware(adev->gfx.mec_fw);
-	adev->gfx.mec_fw = NULL;
-	release_firmware(adev->gfx.mec2_fw);
-	adev->gfx.mec2_fw = NULL;
+	amdgpu_ucode_release(&adev->gfx.pfp_fw);
+	amdgpu_ucode_release(&adev->gfx.me_fw);
+	amdgpu_ucode_release(&adev->gfx.ce_fw);
+	amdgpu_ucode_release(&adev->gfx.rlc_fw);
+	amdgpu_ucode_release(&adev->gfx.mec_fw);
+	amdgpu_ucode_release(&adev->gfx.mec2_fw);
 
 	kfree(adev->gfx.rlc.register_list_format);
 }
@@ -3943,56 +3937,6 @@ static void gfx_v10_0_check_fw_write_wait(struct amdgpu_device *adev)
 		DRM_WARN_ONCE("CP firmware version too old, please update!");
 }
 
-
-static void gfx_v10_0_init_rlc_ext_microcode(struct amdgpu_device *adev)
-{
-	const struct rlc_firmware_header_v2_1 *rlc_hdr;
-
-	rlc_hdr = (const struct rlc_firmware_header_v2_1 *)adev->gfx.rlc_fw->data;
-	adev->gfx.rlc_srlc_fw_version = le32_to_cpu(rlc_hdr->save_restore_list_cntl_ucode_ver);
-	adev->gfx.rlc_srlc_feature_version = le32_to_cpu(rlc_hdr->save_restore_list_cntl_feature_ver);
-	adev->gfx.rlc.save_restore_list_cntl_size_bytes = le32_to_cpu(rlc_hdr->save_restore_list_cntl_size_bytes);
-	adev->gfx.rlc.save_restore_list_cntl = (u8 *)rlc_hdr + le32_to_cpu(rlc_hdr->save_restore_list_cntl_offset_bytes);
-	adev->gfx.rlc_srlg_fw_version = le32_to_cpu(rlc_hdr->save_restore_list_gpm_ucode_ver);
-	adev->gfx.rlc_srlg_feature_version = le32_to_cpu(rlc_hdr->save_restore_list_gpm_feature_ver);
-	adev->gfx.rlc.save_restore_list_gpm_size_bytes = le32_to_cpu(rlc_hdr->save_restore_list_gpm_size_bytes);
-	adev->gfx.rlc.save_restore_list_gpm = (u8 *)rlc_hdr + le32_to_cpu(rlc_hdr->save_restore_list_gpm_offset_bytes);
-	adev->gfx.rlc_srls_fw_version = le32_to_cpu(rlc_hdr->save_restore_list_srm_ucode_ver);
-	adev->gfx.rlc_srls_feature_version = le32_to_cpu(rlc_hdr->save_restore_list_srm_feature_ver);
-	adev->gfx.rlc.save_restore_list_srm_size_bytes = le32_to_cpu(rlc_hdr->save_restore_list_srm_size_bytes);
-	adev->gfx.rlc.save_restore_list_srm = (u8 *)rlc_hdr + le32_to_cpu(rlc_hdr->save_restore_list_srm_offset_bytes);
-	adev->gfx.rlc.reg_list_format_direct_reg_list_length =
-			le32_to_cpu(rlc_hdr->reg_list_format_direct_reg_list_length);
-}
-
-static void gfx_v10_0_init_rlc_iram_dram_microcode(struct amdgpu_device *adev)
-{
-	const struct rlc_firmware_header_v2_2 *rlc_hdr;
-
-	rlc_hdr = (const struct rlc_firmware_header_v2_2 *)adev->gfx.rlc_fw->data;
-	adev->gfx.rlc.rlc_iram_ucode_size_bytes = le32_to_cpu(rlc_hdr->rlc_iram_ucode_size_bytes);
-	adev->gfx.rlc.rlc_iram_ucode = (u8 *)rlc_hdr + le32_to_cpu(rlc_hdr->rlc_iram_ucode_offset_bytes);
-	adev->gfx.rlc.rlc_dram_ucode_size_bytes = le32_to_cpu(rlc_hdr->rlc_dram_ucode_size_bytes);
-	adev->gfx.rlc.rlc_dram_ucode = (u8 *)rlc_hdr + le32_to_cpu(rlc_hdr->rlc_dram_ucode_offset_bytes);
-}
-
-static void gfx_v10_0_init_tap_delays_microcode(struct amdgpu_device *adev)
-{
-	const struct rlc_firmware_header_v2_4 *rlc_hdr;
-
-	rlc_hdr = (const struct rlc_firmware_header_v2_4 *)adev->gfx.rlc_fw->data;
-	adev->gfx.rlc.global_tap_delays_ucode_size_bytes = le32_to_cpu(rlc_hdr->global_tap_delays_ucode_size_bytes);
-	adev->gfx.rlc.global_tap_delays_ucode = (u8 *)rlc_hdr + le32_to_cpu(rlc_hdr->global_tap_delays_ucode_offset_bytes);
-	adev->gfx.rlc.se0_tap_delays_ucode_size_bytes = le32_to_cpu(rlc_hdr->se0_tap_delays_ucode_size_bytes);
-	adev->gfx.rlc.se0_tap_delays_ucode = (u8 *)rlc_hdr + le32_to_cpu(rlc_hdr->se0_tap_delays_ucode_offset_bytes);
-	adev->gfx.rlc.se1_tap_delays_ucode_size_bytes = le32_to_cpu(rlc_hdr->se1_tap_delays_ucode_size_bytes);
-	adev->gfx.rlc.se1_tap_delays_ucode = (u8 *)rlc_hdr + le32_to_cpu(rlc_hdr->se1_tap_delays_ucode_offset_bytes);
-	adev->gfx.rlc.se2_tap_delays_ucode_size_bytes = le32_to_cpu(rlc_hdr->se2_tap_delays_ucode_size_bytes);
-	adev->gfx.rlc.se2_tap_delays_ucode = (u8 *)rlc_hdr + le32_to_cpu(rlc_hdr->se2_tap_delays_ucode_offset_bytes);
-	adev->gfx.rlc.se3_tap_delays_ucode_size_bytes = le32_to_cpu(rlc_hdr->se3_tap_delays_ucode_size_bytes);
-	adev->gfx.rlc.se3_tap_delays_ucode = (u8 *)rlc_hdr + le32_to_cpu(rlc_hdr->se3_tap_delays_ucode_offset_bytes);
-}
-
 static bool gfx_v10_0_navi10_gfxoff_should_enable(struct amdgpu_device *adev)
 {
 	bool ret = false;
@@ -4024,348 +3968,87 @@ static void gfx_v10_0_check_gfxoff_flag(struct amdgpu_device *adev)
 
 static int gfx_v10_0_init_microcode(struct amdgpu_device *adev)
 {
-	const char *chip_name;
 	char fw_name[40];
-	char *wks = "";
+	char ucode_prefix[30];
+	const char *wks = "";
 	int err;
-	struct amdgpu_firmware_info *info = NULL;
-	const struct common_firmware_header *header = NULL;
-	const struct gfx_firmware_header_v1_0 *cp_hdr;
 	const struct rlc_firmware_header_v2_0 *rlc_hdr;
-	unsigned int *tmp = NULL;
-	unsigned int i = 0;
 	uint16_t version_major;
 	uint16_t version_minor;
 
 	DRM_DEBUG("\n");
 
-	switch (adev->ip_versions[GC_HWIP][0]) {
-	case IP_VERSION(10, 1, 10):
-		chip_name = "navi10";
-		break;
-	case IP_VERSION(10, 1, 1):
-		chip_name = "navi14";
-		if (!(adev->pdev->device == 0x7340 &&
-		      adev->pdev->revision != 0x00))
-			wks = "_wks";
-		break;
-	case IP_VERSION(10, 1, 2):
-		chip_name = "navi12";
-		break;
-	case IP_VERSION(10, 3, 0):
-		chip_name = "sienna_cichlid";
-		break;
-	case IP_VERSION(10, 3, 2):
-		chip_name = "navy_flounder";
-		break;
-	case IP_VERSION(10, 3, 1):
-		chip_name = "vangogh";
-		break;
-	case IP_VERSION(10, 3, 4):
-		chip_name = "dimgrey_cavefish";
-		break;
-	case IP_VERSION(10, 3, 5):
-		chip_name = "beige_goby";
-		break;
-	case IP_VERSION(10, 3, 3):
-		chip_name = "yellow_carp";
-		break;
-	case IP_VERSION(10, 3, 6):
-		chip_name = "gc_10_3_6";
-		break;
-	case IP_VERSION(10, 1, 3):
-	case IP_VERSION(10, 1, 4):
-		chip_name = "cyan_skillfish2";
-		break;
-	case IP_VERSION(10, 3, 7):
-		chip_name = "gc_10_3_7";
-		break;
-	default:
-		BUG();
-	}
+	if (adev->ip_versions[GC_HWIP][0] == IP_VERSION(10, 1, 1) &&
+	   (!(adev->pdev->device == 0x7340 && adev->pdev->revision != 0x00)))
+		wks = "_wks";
+	amdgpu_ucode_ip_version_decode(adev, GC_HWIP, ucode_prefix, sizeof(ucode_prefix));
 
-	snprintf(fw_name, sizeof(fw_name), "amdgpu/%s_pfp%s.bin", chip_name, wks);
-	err = request_firmware(&adev->gfx.pfp_fw, fw_name, adev->dev);
+	snprintf(fw_name, sizeof(fw_name), "amdgpu/%s_pfp%s.bin", ucode_prefix, wks);
+	err = amdgpu_ucode_request(adev, &adev->gfx.pfp_fw, fw_name);
 	if (err)
 		goto out;
-	err = amdgpu_ucode_validate(adev->gfx.pfp_fw);
-	if (err)
-		goto out;
-	cp_hdr = (const struct gfx_firmware_header_v1_0 *)adev->gfx.pfp_fw->data;
-	adev->gfx.pfp_fw_version = le32_to_cpu(cp_hdr->header.ucode_version);
-	adev->gfx.pfp_feature_version = le32_to_cpu(cp_hdr->ucode_feature_version);
+	amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_PFP);
 
-	snprintf(fw_name, sizeof(fw_name), "amdgpu/%s_me%s.bin", chip_name, wks);
-	err = request_firmware(&adev->gfx.me_fw, fw_name, adev->dev);
+	snprintf(fw_name, sizeof(fw_name), "amdgpu/%s_me%s.bin", ucode_prefix, wks);
+	err = amdgpu_ucode_request(adev, &adev->gfx.me_fw, fw_name);
 	if (err)
 		goto out;
-	err = amdgpu_ucode_validate(adev->gfx.me_fw);
-	if (err)
-		goto out;
-	cp_hdr = (const struct gfx_firmware_header_v1_0 *)adev->gfx.me_fw->data;
-	adev->gfx.me_fw_version = le32_to_cpu(cp_hdr->header.ucode_version);
-	adev->gfx.me_feature_version = le32_to_cpu(cp_hdr->ucode_feature_version);
+	amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_ME);
 
-	snprintf(fw_name, sizeof(fw_name), "amdgpu/%s_ce%s.bin", chip_name, wks);
-	err = request_firmware(&adev->gfx.ce_fw, fw_name, adev->dev);
+	snprintf(fw_name, sizeof(fw_name), "amdgpu/%s_ce%s.bin", ucode_prefix, wks);
+	err = amdgpu_ucode_request(adev, &adev->gfx.ce_fw, fw_name);
 	if (err)
 		goto out;
-	err = amdgpu_ucode_validate(adev->gfx.ce_fw);
-	if (err)
-		goto out;
-	cp_hdr = (const struct gfx_firmware_header_v1_0 *)adev->gfx.ce_fw->data;
-	adev->gfx.ce_fw_version = le32_to_cpu(cp_hdr->header.ucode_version);
-	adev->gfx.ce_feature_version = le32_to_cpu(cp_hdr->ucode_feature_version);
+	amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_CE);
 
 	if (!amdgpu_sriov_vf(adev)) {
-		snprintf(fw_name, sizeof(fw_name), "amdgpu/%s_rlc.bin", chip_name);
-		err = request_firmware(&adev->gfx.rlc_fw, fw_name, adev->dev);
-		if (err)
+		snprintf(fw_name, sizeof(fw_name), "amdgpu/%s_rlc.bin", ucode_prefix);
+		err = amdgpu_ucode_request(adev, &adev->gfx.rlc_fw, fw_name);
+		/* don't check this.  There are apparently firmwares in the wild with
+		 * incorrect size in the header
+		 */
+		if (err == -ENODEV)
 			goto out;
-		err = amdgpu_ucode_validate(adev->gfx.rlc_fw);
+		if (err)
+			dev_dbg(adev->dev,
+				"gfx10: amdgpu_ucode_request() failed \"%s\"\n",
+				fw_name);
 		rlc_hdr = (const struct rlc_firmware_header_v2_0 *)adev->gfx.rlc_fw->data;
 		version_major = le16_to_cpu(rlc_hdr->header.header_version_major);
 		version_minor = le16_to_cpu(rlc_hdr->header.header_version_minor);
-
-		adev->gfx.rlc_fw_version = le32_to_cpu(rlc_hdr->header.ucode_version);
-		adev->gfx.rlc_feature_version = le32_to_cpu(rlc_hdr->ucode_feature_version);
-		adev->gfx.rlc.save_and_restore_offset =
-			le32_to_cpu(rlc_hdr->save_and_restore_offset);
-		adev->gfx.rlc.clear_state_descriptor_offset =
-			le32_to_cpu(rlc_hdr->clear_state_descriptor_offset);
-		adev->gfx.rlc.avail_scratch_ram_locations =
-			le32_to_cpu(rlc_hdr->avail_scratch_ram_locations);
-		adev->gfx.rlc.reg_restore_list_size =
-			le32_to_cpu(rlc_hdr->reg_restore_list_size);
-		adev->gfx.rlc.reg_list_format_start =
-			le32_to_cpu(rlc_hdr->reg_list_format_start);
-		adev->gfx.rlc.reg_list_format_separate_start =
-			le32_to_cpu(rlc_hdr->reg_list_format_separate_start);
-		adev->gfx.rlc.starting_offsets_start =
-			le32_to_cpu(rlc_hdr->starting_offsets_start);
-		adev->gfx.rlc.reg_list_format_size_bytes =
-			le32_to_cpu(rlc_hdr->reg_list_format_size_bytes);
-		adev->gfx.rlc.reg_list_size_bytes =
-			le32_to_cpu(rlc_hdr->reg_list_size_bytes);
-		adev->gfx.rlc.register_list_format =
-			kmalloc(adev->gfx.rlc.reg_list_format_size_bytes +
-					adev->gfx.rlc.reg_list_size_bytes, GFP_KERNEL);
-		if (!adev->gfx.rlc.register_list_format) {
-			err = -ENOMEM;
-			goto out;
-		}
-
-		tmp = (unsigned int *)((uintptr_t)rlc_hdr +
-							   le32_to_cpu(rlc_hdr->reg_list_format_array_offset_bytes));
-		for (i = 0 ; i < (rlc_hdr->reg_list_format_size_bytes >> 2); i++)
-			adev->gfx.rlc.register_list_format[i] =	le32_to_cpu(tmp[i]);
-
-		adev->gfx.rlc.register_restore = adev->gfx.rlc.register_list_format + i;
-
-		tmp = (unsigned int *)((uintptr_t)rlc_hdr +
-							   le32_to_cpu(rlc_hdr->reg_list_array_offset_bytes));
-		for (i = 0 ; i < (rlc_hdr->reg_list_size_bytes >> 2); i++)
-			adev->gfx.rlc.register_restore[i] = le32_to_cpu(tmp[i]);
-
-		if (version_major == 2) {
-			if (version_minor >= 1)
-				gfx_v10_0_init_rlc_ext_microcode(adev);
-			if (version_minor >= 2)
-				gfx_v10_0_init_rlc_iram_dram_microcode(adev);
-			if (version_minor == 4) {
-				gfx_v10_0_init_tap_delays_microcode(adev);
-			}
-		}
-	}
-
-	snprintf(fw_name, sizeof(fw_name), "amdgpu/%s_mec%s.bin", chip_name, wks);
-	err = request_firmware(&adev->gfx.mec_fw, fw_name, adev->dev);
-	if (err)
-		goto out;
-	err = amdgpu_ucode_validate(adev->gfx.mec_fw);
-	if (err)
-		goto out;
-	cp_hdr = (const struct gfx_firmware_header_v1_0 *)adev->gfx.mec_fw->data;
-	adev->gfx.mec_fw_version = le32_to_cpu(cp_hdr->header.ucode_version);
-	adev->gfx.mec_feature_version = le32_to_cpu(cp_hdr->ucode_feature_version);
-
-	snprintf(fw_name, sizeof(fw_name), "amdgpu/%s_mec2%s.bin", chip_name, wks);
-	err = request_firmware(&adev->gfx.mec2_fw, fw_name, adev->dev);
-	if (!err) {
-		err = amdgpu_ucode_validate(adev->gfx.mec2_fw);
+		err = amdgpu_gfx_rlc_init_microcode(adev, version_major, version_minor);
 		if (err)
 			goto out;
-		cp_hdr = (const struct gfx_firmware_header_v1_0 *)
-		adev->gfx.mec2_fw->data;
-		adev->gfx.mec2_fw_version =
-		le32_to_cpu(cp_hdr->header.ucode_version);
-		adev->gfx.mec2_feature_version =
-		le32_to_cpu(cp_hdr->ucode_feature_version);
+	}
+
+	snprintf(fw_name, sizeof(fw_name), "amdgpu/%s_mec%s.bin", ucode_prefix, wks);
+	err = amdgpu_ucode_request(adev, &adev->gfx.mec_fw, fw_name);
+	if (err)
+		goto out;
+	amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_MEC1);
+	amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_MEC1_JT);
+
+	snprintf(fw_name, sizeof(fw_name), "amdgpu/%s_mec2%s.bin", ucode_prefix, wks);
+	err = amdgpu_ucode_request(adev, &adev->gfx.mec2_fw, fw_name);
+	if (!err) {
+		amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_MEC2);
+		amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_MEC2_JT);
 	} else {
 		err = 0;
 		adev->gfx.mec2_fw = NULL;
 	}
-
-	if (adev->firmware.load_type == AMDGPU_FW_LOAD_PSP) {
-		info = &adev->firmware.ucode[AMDGPU_UCODE_ID_CP_PFP];
-		info->ucode_id = AMDGPU_UCODE_ID_CP_PFP;
-		info->fw = adev->gfx.pfp_fw;
-		header = (const struct common_firmware_header *)info->fw->data;
-		adev->firmware.fw_size +=
-			ALIGN(le32_to_cpu(header->ucode_size_bytes), PAGE_SIZE);
-
-		info = &adev->firmware.ucode[AMDGPU_UCODE_ID_CP_ME];
-		info->ucode_id = AMDGPU_UCODE_ID_CP_ME;
-		info->fw = adev->gfx.me_fw;
-		header = (const struct common_firmware_header *)info->fw->data;
-		adev->firmware.fw_size +=
-			ALIGN(le32_to_cpu(header->ucode_size_bytes), PAGE_SIZE);
-
-		info = &adev->firmware.ucode[AMDGPU_UCODE_ID_CP_CE];
-		info->ucode_id = AMDGPU_UCODE_ID_CP_CE;
-		info->fw = adev->gfx.ce_fw;
-		header = (const struct common_firmware_header *)info->fw->data;
-		adev->firmware.fw_size +=
-			ALIGN(le32_to_cpu(header->ucode_size_bytes), PAGE_SIZE);
-
-		info = &adev->firmware.ucode[AMDGPU_UCODE_ID_RLC_G];
-		info->ucode_id = AMDGPU_UCODE_ID_RLC_G;
-		info->fw = adev->gfx.rlc_fw;
-		if (info->fw) {
-			header = (const struct common_firmware_header *)info->fw->data;
-			adev->firmware.fw_size +=
-				ALIGN(le32_to_cpu(header->ucode_size_bytes), PAGE_SIZE);
-		}
-		if (adev->gfx.rlc.save_restore_list_cntl_size_bytes &&
-		    adev->gfx.rlc.save_restore_list_gpm_size_bytes &&
-		    adev->gfx.rlc.save_restore_list_srm_size_bytes) {
-			info = &adev->firmware.ucode[AMDGPU_UCODE_ID_RLC_RESTORE_LIST_CNTL];
-			info->ucode_id = AMDGPU_UCODE_ID_RLC_RESTORE_LIST_CNTL;
-			info->fw = adev->gfx.rlc_fw;
-			adev->firmware.fw_size +=
-				ALIGN(adev->gfx.rlc.save_restore_list_cntl_size_bytes, PAGE_SIZE);
-
-			info = &adev->firmware.ucode[AMDGPU_UCODE_ID_RLC_RESTORE_LIST_GPM_MEM];
-			info->ucode_id = AMDGPU_UCODE_ID_RLC_RESTORE_LIST_GPM_MEM;
-			info->fw = adev->gfx.rlc_fw;
-			adev->firmware.fw_size +=
-				ALIGN(adev->gfx.rlc.save_restore_list_gpm_size_bytes, PAGE_SIZE);
-
-			info = &adev->firmware.ucode[AMDGPU_UCODE_ID_RLC_RESTORE_LIST_SRM_MEM];
-			info->ucode_id = AMDGPU_UCODE_ID_RLC_RESTORE_LIST_SRM_MEM;
-			info->fw = adev->gfx.rlc_fw;
-			adev->firmware.fw_size +=
-				ALIGN(adev->gfx.rlc.save_restore_list_srm_size_bytes, PAGE_SIZE);
-
-			if (adev->gfx.rlc.rlc_iram_ucode_size_bytes &&
-			    adev->gfx.rlc.rlc_dram_ucode_size_bytes) {
-				info = &adev->firmware.ucode[AMDGPU_UCODE_ID_RLC_IRAM];
-				info->ucode_id = AMDGPU_UCODE_ID_RLC_IRAM;
-				info->fw = adev->gfx.rlc_fw;
-				adev->firmware.fw_size +=
-					ALIGN(adev->gfx.rlc.rlc_iram_ucode_size_bytes, PAGE_SIZE);
-
-				info = &adev->firmware.ucode[AMDGPU_UCODE_ID_RLC_DRAM];
-				info->ucode_id = AMDGPU_UCODE_ID_RLC_DRAM;
-				info->fw = adev->gfx.rlc_fw;
-				adev->firmware.fw_size +=
-					ALIGN(adev->gfx.rlc.rlc_dram_ucode_size_bytes, PAGE_SIZE);
-			}
-
-		}
-
-		if (adev->gfx.rlc.global_tap_delays_ucode_size_bytes) {
-			info = &adev->firmware.ucode[AMDGPU_UCODE_ID_GLOBAL_TAP_DELAYS];
-			info->ucode_id = AMDGPU_UCODE_ID_GLOBAL_TAP_DELAYS;
-			info->fw = adev->gfx.rlc_fw;
-			adev->firmware.fw_size +=
-				ALIGN(adev->gfx.rlc.global_tap_delays_ucode_size_bytes, PAGE_SIZE);
-		}
-
-		if (adev->gfx.rlc.se0_tap_delays_ucode_size_bytes) {
-			info = &adev->firmware.ucode[AMDGPU_UCODE_ID_SE0_TAP_DELAYS];
-			info->ucode_id = AMDGPU_UCODE_ID_SE0_TAP_DELAYS;
-			info->fw = adev->gfx.rlc_fw;
-			adev->firmware.fw_size +=
-				ALIGN(adev->gfx.rlc.se0_tap_delays_ucode_size_bytes, PAGE_SIZE);
-		}
-
-		if (adev->gfx.rlc.se1_tap_delays_ucode_size_bytes) {
-			info = &adev->firmware.ucode[AMDGPU_UCODE_ID_SE1_TAP_DELAYS];
-			info->ucode_id = AMDGPU_UCODE_ID_SE1_TAP_DELAYS;
-			info->fw = adev->gfx.rlc_fw;
-			adev->firmware.fw_size +=
-				ALIGN(adev->gfx.rlc.se1_tap_delays_ucode_size_bytes, PAGE_SIZE);
-		}
-
-		if (adev->gfx.rlc.se2_tap_delays_ucode_size_bytes) {
-			info = &adev->firmware.ucode[AMDGPU_UCODE_ID_SE2_TAP_DELAYS];
-			info->ucode_id = AMDGPU_UCODE_ID_SE2_TAP_DELAYS;
-			info->fw = adev->gfx.rlc_fw;
-			adev->firmware.fw_size +=
-				ALIGN(adev->gfx.rlc.se2_tap_delays_ucode_size_bytes, PAGE_SIZE);
-		}
-
-		if (adev->gfx.rlc.se3_tap_delays_ucode_size_bytes) {
-			info = &adev->firmware.ucode[AMDGPU_UCODE_ID_SE3_TAP_DELAYS];
-			info->ucode_id = AMDGPU_UCODE_ID_SE3_TAP_DELAYS;
-			info->fw = adev->gfx.rlc_fw;
-			adev->firmware.fw_size +=
-				ALIGN(adev->gfx.rlc.se3_tap_delays_ucode_size_bytes, PAGE_SIZE);
-		}
-
-		info = &adev->firmware.ucode[AMDGPU_UCODE_ID_CP_MEC1];
-		info->ucode_id = AMDGPU_UCODE_ID_CP_MEC1;
-		info->fw = adev->gfx.mec_fw;
-		header = (const struct common_firmware_header *)info->fw->data;
-		cp_hdr = (const struct gfx_firmware_header_v1_0 *)info->fw->data;
-		adev->firmware.fw_size +=
-			ALIGN(le32_to_cpu(header->ucode_size_bytes) -
-			      le32_to_cpu(cp_hdr->jt_size) * 4, PAGE_SIZE);
-
-		info = &adev->firmware.ucode[AMDGPU_UCODE_ID_CP_MEC1_JT];
-		info->ucode_id = AMDGPU_UCODE_ID_CP_MEC1_JT;
-		info->fw = adev->gfx.mec_fw;
-		adev->firmware.fw_size +=
-			ALIGN(le32_to_cpu(cp_hdr->jt_size) * 4, PAGE_SIZE);
-
-		if (adev->gfx.mec2_fw) {
-			info = &adev->firmware.ucode[AMDGPU_UCODE_ID_CP_MEC2];
-			info->ucode_id = AMDGPU_UCODE_ID_CP_MEC2;
-			info->fw = adev->gfx.mec2_fw;
-			header = (const struct common_firmware_header *)info->fw->data;
-			cp_hdr = (const struct gfx_firmware_header_v1_0 *)info->fw->data;
-			adev->firmware.fw_size +=
-				ALIGN(le32_to_cpu(header->ucode_size_bytes) -
-				      le32_to_cpu(cp_hdr->jt_size) * 4,
-				      PAGE_SIZE);
-			info = &adev->firmware.ucode[AMDGPU_UCODE_ID_CP_MEC2_JT];
-			info->ucode_id = AMDGPU_UCODE_ID_CP_MEC2_JT;
-			info->fw = adev->gfx.mec2_fw;
-			adev->firmware.fw_size +=
-				ALIGN(le32_to_cpu(cp_hdr->jt_size) * 4,
-				      PAGE_SIZE);
-		}
-	}
+	amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_MEC2);
+	amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_MEC2_JT);
 
 	gfx_v10_0_check_fw_write_wait(adev);
 out:
 	if (err) {
-		dev_err(adev->dev,
-			"gfx10: Failed to load firmware \"%s\"\n",
-			fw_name);
-		release_firmware(adev->gfx.pfp_fw);
-		adev->gfx.pfp_fw = NULL;
-		release_firmware(adev->gfx.me_fw);
-		adev->gfx.me_fw = NULL;
-		release_firmware(adev->gfx.ce_fw);
-		adev->gfx.ce_fw = NULL;
-		release_firmware(adev->gfx.rlc_fw);
-		adev->gfx.rlc_fw = NULL;
-		release_firmware(adev->gfx.mec_fw);
-		adev->gfx.mec_fw = NULL;
-		release_firmware(adev->gfx.mec2_fw);
-		adev->gfx.mec2_fw = NULL;
+		amdgpu_ucode_release(&adev->gfx.pfp_fw);
+		amdgpu_ucode_release(&adev->gfx.me_fw);
+		amdgpu_ucode_release(&adev->gfx.ce_fw);
+		amdgpu_ucode_release(&adev->gfx.rlc_fw);
+		amdgpu_ucode_release(&adev->gfx.mec_fw);
+		amdgpu_ucode_release(&adev->gfx.mec2_fw);
 	}
 
 	gfx_v10_0_check_gfxoff_flag(adev);
@@ -4518,19 +4201,11 @@ static void gfx_v10_0_mec_fini(struct amdgpu_device *adev)
 	amdgpu_bo_free_kernel(&adev->gfx.mec.mec_fw_obj, NULL, NULL);
 }
 
-static int gfx_v10_0_me_init(struct amdgpu_device *adev)
+static void gfx_v10_0_me_init(struct amdgpu_device *adev)
 {
-	int r;
-
 	bitmap_zero(adev->gfx.me.queue_bitmap, AMDGPU_MAX_GFX_QUEUES);
 
 	amdgpu_gfx_graphics_queue_acquire(adev);
-
-	r = gfx_v10_0_init_microcode(adev);
-	if (r)
-		DRM_ERROR("Failed to load gfx firmware!\n");
-
-	return r;
 }
 
 static int gfx_v10_0_mec_init(struct amdgpu_device *adev)
@@ -4700,8 +4375,6 @@ static const struct amdgpu_gfx_funcs gfx_v10_0_gfx_funcs = {
 static void gfx_v10_0_gpu_early_init(struct amdgpu_device *adev)
 {
 	u32 gb_addr_config;
-
-	adev->gfx.funcs = &gfx_v10_0_gfx_funcs;
 
 	switch (adev->ip_versions[GC_HWIP][0]) {
 	case IP_VERSION(10, 1, 10):
@@ -4900,9 +4573,7 @@ static int gfx_v10_0_sw_init(void *handle)
 
 	adev->gfx.gfx_current_status = AMDGPU_GFX_NORMAL_MODE;
 
-	r = gfx_v10_0_me_init(adev);
-	if (r)
-		return r;
+	gfx_v10_0_me_init(adev);
 
 	if (adev->gfx.rlc.funcs) {
 		if (adev->gfx.rlc.funcs->init) {
@@ -5980,6 +5651,9 @@ static int gfx_v10_0_cp_gfx_enable(struct amdgpu_device *adev, bool enable)
 	} else {
 		WREG32_SOC15(GC, 0, mmCP_ME_CNTL, tmp);
 	}
+
+	if (adev->job_hang && !enable)
+		return 0;
 
 	for (i = 0; i < adev->usec_timeout; i++) {
 		if (RREG32_SOC15(GC, 0, mmCP_STAT) == 0)
@@ -7156,6 +6830,8 @@ static int gfx_v10_0_kiq_init_queue(struct amdgpu_ring *ring)
 		mutex_unlock(&adev->srbm_mutex);
 	} else {
 		memset((void *)mqd, 0, sizeof(*mqd));
+		if (amdgpu_sriov_vf(adev) && adev->in_suspend)
+			amdgpu_ring_clear_ring(ring);
 		mutex_lock(&adev->srbm_mutex);
 		nv_grbm_select(adev, ring->me, ring->pipe, ring->queue, 0);
 		amdgpu_ring_init_mqd(ring);
@@ -7214,8 +6890,10 @@ static int gfx_v10_0_kiq_resume(struct amdgpu_device *adev)
 		return r;
 
 	r = amdgpu_bo_kmap(ring->mqd_obj, (void **)&ring->mqd_ptr);
-	if (unlikely(r != 0))
+	if (unlikely(r != 0)) {
+		amdgpu_bo_unreserve(ring->mqd_obj);
 		return r;
+	}
 
 	gfx_v10_0_kiq_init_queue(ring);
 	amdgpu_bo_kunmap(ring->mqd_obj);
@@ -7579,8 +7257,10 @@ static int gfx_v10_0_kiq_disable_kgq(struct amdgpu_device *adev)
 	for (i = 0; i < adev->gfx.num_gfx_rings; i++)
 		kiq->pmf->kiq_unmap_queues(kiq_ring, &adev->gfx.gfx_ring[i],
 					   PREEMPT_QUEUES, 0, 0);
-
-	return amdgpu_ring_test_helper(kiq_ring);
+	if (!adev->job_hang)
+		return amdgpu_ring_test_helper(kiq_ring);
+	else
+		return 0;
 }
 #endif
 
@@ -7836,6 +7516,8 @@ static int gfx_v10_0_early_init(void *handle)
 {
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
 
+	adev->gfx.funcs = &gfx_v10_0_gfx_funcs;
+
 	switch (adev->ip_versions[GC_HWIP][0]) {
 	case IP_VERSION(10, 1, 10):
 	case IP_VERSION(10, 1, 1):
@@ -7871,7 +7553,7 @@ static int gfx_v10_0_early_init(void *handle)
 	/* init rlcg reg access ctrl */
 	gfx_v10_0_init_rlcg_reg_access_ctrl(adev);
 
-	return 0;
+	return gfx_v10_0_init_microcode(adev);
 }
 
 static int gfx_v10_0_late_init(void *handle)
@@ -8479,8 +8161,14 @@ static int gfx_v10_0_set_powergating_state(void *handle,
 	case IP_VERSION(10, 3, 3):
 	case IP_VERSION(10, 3, 6):
 	case IP_VERSION(10, 3, 7):
+		if (!enable)
+			amdgpu_gfx_off_ctrl(adev, false);
+
 		gfx_v10_cntl_pg(adev, enable);
-		amdgpu_gfx_off_ctrl(adev, enable);
+
+		if (enable)
+			amdgpu_gfx_off_ctrl(adev, true);
+
 		break;
 	default:
 		break;
@@ -8732,7 +8420,7 @@ static void gfx_v10_0_ring_emit_ib_gfx(struct amdgpu_ring *ring,
 
 	control |= ib->length_dw | (vmid << 24);
 
-	if ((amdgpu_sriov_vf(ring->adev) || amdgpu_mcbp) && (ib->flags & AMDGPU_IB_FLAG_PREEMPT)) {
+	if (amdgpu_mcbp && (ib->flags & AMDGPU_IB_FLAG_PREEMPT)) {
 		control |= INDIRECT_BUFFER_PRE_ENB(1);
 
 		if (flags & AMDGPU_IB_PREEMPTED)
@@ -8907,7 +8595,7 @@ static void gfx_v10_0_ring_emit_cntxcntl(struct amdgpu_ring *ring,
 {
 	uint32_t dw2 = 0;
 
-	if (amdgpu_mcbp || amdgpu_sriov_vf(ring->adev))
+	if (amdgpu_mcbp)
 		gfx_v10_0_ring_emit_ce_meta(ring,
 				    (!amdgpu_sriov_vf(ring->adev) && flags & AMDGPU_IB_PREEMPTED) ? true : false);
 
