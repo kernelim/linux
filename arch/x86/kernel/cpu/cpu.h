@@ -63,6 +63,7 @@ extern int detect_extended_topology_early(struct cpuinfo_x86 *c);
 extern int detect_ht_early(struct cpuinfo_x86 *c);
 
 extern void update_srbds_msr(void);
+extern void update_gds_msr(void);
 
 extern u64 x86_read_arch_cap_msr(void);
 #endif /* ARCH_X86_CPU_H */

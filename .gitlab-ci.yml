@@ -20,7 +20,6 @@ workflow: !reference [.workflow]
     builder_image: quay.io/cki/builder-rhel7
     name: kernel-rhel7
     architectures: 'x86_64 ppc64le ppc64 s390x'
-    kpet_tree_family: rhel7
 
 # Realtime specific configuration
 .realtime_check:
@@ -29,7 +28,6 @@ workflow: !reference [.workflow]
   variables:
     builder_image: quay.io/cki/builder-rhel7
     name: kernel-rt-rhel7
-    kpet_tree_family: rhel7-rt
     srpm_make_target: 'rt-srpm'
 
 # Full RT pipeline for -rt branch
@@ -39,7 +37,6 @@ workflow: !reference [.workflow]
   variables:
     builder_image: quay.io/cki/builder-rhel7
     name: kernel-rt-rhel7
-    kpet_tree_family: rhel7-rt
     srpm_make_target: 'rt-srpm'
     RUN_ONLY_FOR_RT: 'true'
 
