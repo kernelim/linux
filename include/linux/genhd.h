@@ -159,6 +159,13 @@ enum {
 	DISK_EVENT_EJECT_REQUEST		= 1 << 1, /* eject requested */
 };
 
+enum {
+	/* Poll even if events_poll_msecs is unset */
+	DISK_EVENT_FLAG_POLL			= 1 << 0,
+	/* Forward events to udev */
+	DISK_EVENT_FLAG_UEVENT			= 1 << 1,
+};
+
 struct disk_part_tbl {
 	struct rcu_head rcu_head;
 	int len;
@@ -192,8 +199,10 @@ struct gendisk {
 	char disk_name[DISK_NAME_LEN];	/* name of major driver */
 	RH_KABI_DEPRECATE_FN(char *, devnode, struct gendisk *gd, umode_t *mode)
 
-	unsigned int events;		/* supported events */
-	unsigned int async_events;	/* async events, subset of all */
+	RH_KABI_REPLACE_SPLIT(unsigned int events,
+			unsigned short events,
+			unsigned short event_flags)	/* supported events */
+	RH_KABI_DEPRECATE(unsigned int, async_events)	/* async events, subset of all */
 
 	/* Array of pointers to partitions indexed by partno.
 	 * Protected with matching bdev lock but stat and other
