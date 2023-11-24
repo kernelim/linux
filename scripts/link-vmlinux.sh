@@ -184,7 +184,7 @@ objtool_link()
 
 	if is_enabled CONFIG_NOINSTR_VALIDATION; then
 		objtoolopt="${objtoolopt} --noinstr"
-		if is_enabled CONFIG_RETPOLINE; then
+		if is_enabled CONFIG_CPU_UNRET_ENTRY || is_enabled CONFIG_CPU_SRSO; then
 			objtoolopt="${objtoolopt} --unret"
 		fi
 	fi

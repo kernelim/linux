@@ -54,7 +54,7 @@ struct instruction {
 	   restore		: 1,
 	   retpoline_safe	: 1,
 	   noendbr		: 1,
-	   entry		: 1;
+	   unret		: 1;
 		/* 7 bit hole */
 
 	s8 instr;
@@ -62,10 +62,12 @@ struct instruction {
 	/* u8 hole */
 
 	struct alt_group *alt_group;
-	struct symbol *call_dest;
 	struct instruction *jump_dest;
 	struct instruction *first_jump_src;
-	struct reloc *jump_table;
+	union {
+		struct symbol *_call_dest;
+		struct reloc *_jump_table;
+	};
 	struct reloc *reloc;
 	struct list_head alts;
 	struct symbol *sym;
@@ -86,7 +88,7 @@ static inline struct symbol *insn_func(struct instruction *insn)
 #define VISITED_BRANCH		0x01
 #define VISITED_BRANCH_UACCESS	0x02
 #define VISITED_BRANCH_MASK	0x03
-#define VISITED_ENTRY		0x04
+#define VISITED_UNRET		0x04
 
 static inline bool is_static_jump(struct instruction *insn)
 {

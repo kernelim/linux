@@ -24,7 +24,6 @@ workflow: !reference [.workflow]
   variables:
     name: c9s
     builder_image: quay.io/cki/builder-stream9
-    kpet_tree_family: c9s
     kpet_tree_name: c9s
 
 .trigger_rhel9_pipeline:
@@ -32,8 +31,7 @@ workflow: !reference [.workflow]
     branch: rhel9
   variables:
     name: rhel9
-    builder_image: quay.io/cki/builder-rhel9
-    kpet_tree_family: rhel9
+    builder_image: quay.io/cki/builder-rhel9.3
 
 .trigger_rhel9_build:
   extends: .trigger_rhel9_pipeline
@@ -44,8 +42,7 @@ workflow: !reference [.workflow]
 .automotive_full_c9s:
   variables:
     name: kernel-automotive-c9s
-    kpet_tree_family: autosd-rt
-    kpet_tree_name: autosd-rt
+    kpet_tree_name: autosd
     disttag_override: '.el9iv'
     AWS_UPT_IMAGE_NAME_FILTER: 'auto-osbuild-qemu-cs9-cki-ostree-*'
     RUN_ONLY_FOR_AUTOMOTIVE: 'true'
@@ -53,13 +50,11 @@ workflow: !reference [.workflow]
 .rt_full_c9s:
   variables:
     name: kernel-rt-c9s
-    kpet_tree_family: c9s-rt
-    kpet_tree_name: c9s-rt
+    kpet_tree_name: c9s
 
 .rt_full_rhel9:
   variables:
     name: kernel-rt-rhel9
-    kpet_tree_family: rhel9-rt
 
 .64k_full_c9s:
   variables:

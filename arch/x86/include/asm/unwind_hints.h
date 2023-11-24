@@ -12,7 +12,8 @@
 .endm
 
 .macro UNWIND_HINT_ENTRY
-	UNWIND_HINT sp_reg=ORC_REG_UNDEFINED type=UNWIND_HINT_TYPE_ENTRY end=1
+	VALIDATE_UNRET_BEGIN
+	UNWIND_HINT_EMPTY
 .endm
 
 .macro UNWIND_HINT_REGS base=%rsp offset=0 indirect=0 extra=1 partial=0
@@ -50,6 +51,11 @@
 
 .macro UNWIND_HINT_IRET_REGS base=%rsp offset=0
 	UNWIND_HINT_REGS base=\base offset=\offset partial=1
+.endm
+
+.macro UNWIND_HINT_IRET_ENTRY base=%rsp offset=0
+	VALIDATE_UNRET_BEGIN
+	UNWIND_HINT_IRET_REGS base=\base offset=\offset
 .endm
 
 .macro UNWIND_HINT_FUNC
