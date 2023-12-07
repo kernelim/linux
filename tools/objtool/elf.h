@@ -64,6 +64,7 @@ struct symbol {
 	struct symbol *pfunc, *cfunc, *alias;
 	bool uaccess_safe;
 	bool return_thunk;
+	bool embedded_insn;
 };
 
 struct rela {

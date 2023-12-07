@@ -266,6 +266,13 @@ static inline void req_set_nomerge(struct request_queue *q, struct request *req)
 		q->last_merge = NULL;
 }
 
+static inline unsigned int blk_rq_get_max_segments(struct request *rq)
+{
+	if (req_op(rq) == REQ_OP_DISCARD)
+		return queue_max_discard_segments(rq->q);
+	return queue_max_segments(rq->q);
+}
+
 /*
  * The max size one bio can handle is UINT_MAX becasue bvec_iter.bi_size
  * is defined as 'unsigned int', meantime it has to aligned to with logical

@@ -92,5 +92,6 @@ int arch_decode_instruction(struct elf *elf, struct section *sec,
 bool arch_callee_saved_reg(unsigned char reg);
 
 bool arch_is_rethunk(struct symbol *sym);
+bool arch_is_embedded_insn(struct symbol *sym);
 
 #endif /* _ARCH_H */

@@ -221,9 +221,6 @@ int nf_conntrack_gre_packet(struct nf_conn *ct,
 {
 	unsigned long status;
 
-	if (state->pf != NFPROTO_IPV4)
-		return -NF_ACCEPT;
-
 	if (!nf_ct_is_confirmed(ct)) {
 		unsigned int *timeouts = nf_ct_timeout_lookup(ct);
 

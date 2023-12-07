@@ -216,6 +216,7 @@ struct net {
 #endif
 	RH_KABI_EXTEND(u64 nft_table_handle)
 	RH_KABI_EXTEND(int	sysctl_txrehash)
+	RH_KABI_EXTEND(u8	ipv4_sysctl_tcp_shrink_window)
 
 } __randomize_layout;
 

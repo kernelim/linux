@@ -1446,7 +1446,9 @@ static void svm_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 
 	if (sd->current_vmcb != svm->vmcb) {
 		sd->current_vmcb = svm->vmcb;
-		indirect_branch_prediction_barrier();
+
+		if (!cpu_feature_enabled(X86_FEATURE_IBPB_ON_VMEXIT))
+			indirect_branch_prediction_barrier();
 	}
 	if (kvm_vcpu_apicv_active(vcpu))
 		avic_vcpu_load(vcpu, cpu);
@@ -3821,6 +3823,8 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	unsigned long vmcb_pa = svm->current_vmcb->pa;
 
 	kvm_guest_enter_irqoff();
+
+	amd_clear_divider();
 
 	if (sev_es_guest(vcpu->kvm)) {
 		__svm_sev_es_vcpu_run(vmcb_pa);

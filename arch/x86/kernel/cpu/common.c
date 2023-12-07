@@ -1147,8 +1147,10 @@ static const __initconst struct x86_cpu_id_v2 cpu_vuln_whitelist[] = {
 #define MMIO_SBDS	BIT(2)
 /* CPU is affected by RETbleed, speculating where you would not expect it */
 #define RETBLEED	BIT(3)
+/* CPU is affected by SRSO */
+#define SRSO		BIT(5)
 /* CPU is affected by GDS */
-#define GDS		BIT(5)
+#define GDS		BIT(6)
 
 static const struct x86_cpu_id_v2 cpu_vuln_blacklist[] __initconst = {
 	VULNBL_INTEL_STEPPINGS(IVYBRIDGE,	X86_STEPPING_ANY,		SRBDS),
@@ -1182,8 +1184,9 @@ static const struct x86_cpu_id_v2 cpu_vuln_blacklist[] __initconst = {
 
 	VULNBL_AMD(0x15, RETBLEED),
 	VULNBL_AMD(0x16, RETBLEED),
-	VULNBL_AMD(0x17, RETBLEED),
+	VULNBL_AMD(0x17, RETBLEED | SRSO),
 	VULNBL_HYGON(0x18, RETBLEED),
+	VULNBL_AMD(0x19, SRSO),
 	{}
 };
 
@@ -1301,6 +1304,11 @@ static void __init cpu_set_bug_bits(struct cpuinfo_x86 *c)
 		if (cpu_matches(cpu_vuln_blacklist, RETBLEED) ||
 		   ((ia32_cap & ARCH_CAP_RSBA) && !cpu_in_retbleed_whitelist(c)))
 			setup_force_cpu_bug(X86_BUG_RETBLEED);
+	}
+
+	if (!cpu_has(c, X86_FEATURE_SRSO_NO)) {
+		if (cpu_matches(cpu_vuln_blacklist, SRSO))
+			setup_force_cpu_bug(X86_BUG_SRSO);
 	}
 
 	/*

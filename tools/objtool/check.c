@@ -287,6 +287,9 @@ static int decode_instructions(struct objtool_file *file)
 			if (func->type != STT_FUNC)
 				continue;
 
+			if (func->embedded_insn)
+				continue;
+
 			if (!find_insn(file, sec, func->offset)) {
 				WARN("%s(): can't find starting instruction",
 				     func->name);
@@ -617,7 +620,20 @@ static int add_ignore_alternatives(struct objtool_file *file)
 	return 0;
 }
 
+/*
+ * Symbols that replace INSN_RETURN, every (tail) call to such a symbol
+ * will be added to the .return_sites section.
+ */
 __weak bool arch_is_rethunk(struct symbol *sym)
+{
+	return false;
+}
+
+/*
+ * Symbols that are embedded inside other instructions, because sometimes crazy
+ * code exists. These are mostly ignored for validation purposes.
+ */
+__weak bool arch_is_embedded_insn(struct symbol *sym)
 {
 	return false;
 }
@@ -631,7 +647,8 @@ static void add_return_call(struct objtool_file *file, struct instruction *insn,
 	insn->type = INSN_RETURN;
 	insn->retpoline_safe = true;
 
-	if (add)
+	/* Skip the non-text sections, specially .discard ones */
+	if (add && insn->sec->text)
 		list_add_tail(&insn->call_node, &file->return_thunk_list);
 }
 
@@ -690,14 +707,14 @@ static int add_jump_destinations(struct objtool_file *file)
 			struct symbol *sym = find_symbol_by_offset(dest_sec, dest_off);
 
 			/*
-			 * This is a special case for zen_untrain_ret().
+			 * This is a special case for retbleed_untrain_ret().
 			 * It jumps to __x86_return_thunk(), but objtool
 			 * can't find the thunk's starting RET
 			 * instruction, because the RET is also in the
 			 * middle of another instruction.  Objtool only
 			 * knows about the outer instruction.
 			 */
-			if (sym && sym->return_thunk) {
+			if (sym && sym->embedded_insn) {
 				add_return_call(file, insn, false);
 				continue;
 			}
@@ -1474,6 +1491,27 @@ static int read_intra_function_calls(struct objtool_file *file)
 	return 0;
 }
 
+static int classify_symbols(struct objtool_file *file)
+{
+	struct section *sec;
+	struct symbol *func;
+
+	for_each_sec(file, sec) {
+		list_for_each_entry(func, &sec->symbol_list, list) {
+			if (func->bind != STB_GLOBAL)
+				continue;
+
+			if (arch_is_rethunk(func))
+				func->return_thunk = true;
+
+			if (arch_is_embedded_insn(func))
+				func->embedded_insn = true;
+		}
+	}
+
+	return 0;
+}
+
 static void mark_rodata(struct objtool_file *file)
 {
 	struct section *sec;
@@ -1518,6 +1556,13 @@ static int decode_sections(struct objtool_file *file)
 	add_uaccess_safe(file);
 
 	ret = add_ignore_alternatives(file);
+	if (ret)
+		return ret;
+
+	/*
+	 * Must be before add_{jump_call}_destination.
+	 */
+	ret = classify_symbols(file);
 	if (ret)
 		return ret;
 
