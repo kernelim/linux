@@ -1214,6 +1214,20 @@ static void nohz_csd_func(void *info)
 #endif /* CONFIG_NO_HZ_COMMON */
 
 #ifdef CONFIG_NO_HZ_FULL
+static inline bool __need_bw_check(struct rq *rq, struct task_struct *p)
+{
+	if (rq->nr_running != 1)
+		return false;
+
+	if (p->sched_class != &fair_sched_class)
+		return false;
+
+	if (!task_on_rq_queued(p))
+		return false;
+
+	return true;
+}
+
 bool sched_can_stop_tick(struct rq *rq)
 {
 	int fifo_nr_running;
@@ -1248,6 +1262,18 @@ bool sched_can_stop_tick(struct rq *rq)
 	 */
 	if (rq->nr_running > 1)
 		return false;
+
+	/*
+	 * If there is one task and it has CFS runtime bandwidth constraints
+	 * and it's on the cpu now we don't want to stop the tick.
+	 * This check prevents clearing the bit if a newly enqueued task here is
+	 * dequeued by migrating while the constrained task continues to run.
+	 * E.g. going from 2->1 without going through pick_next_task().
+	 */
+	if (sched_feat(HZ_BW) && __need_bw_check(rq, rq->curr)) {
+		if (cfs_task_bw_constrained(rq->curr))
+			return false;
+	}
 
 	return true;
 }
@@ -9929,7 +9955,7 @@ void __init sched_init(void)
 		ptr += nr_cpu_ids * sizeof(void **);
 
 		root_task_group.shares = ROOT_TASK_GROUP_LOAD;
-		init_cfs_bandwidth(&root_task_group.cfs_bandwidth);
+		init_cfs_bandwidth(&root_task_group.cfs_bandwidth, NULL);
 #endif /* CONFIG_FAIR_GROUP_SCHED */
 #ifdef CONFIG_RT_GROUP_SCHED
 		root_task_group.rt_se = (struct sched_rt_entity **)ptr;
@@ -11047,11 +11073,16 @@ static int tg_cfs_schedulable_down(struct task_group *tg, void *data)
 
 		/*
 		 * Ensure max(child_quota) <= parent_quota.  On cgroup2,
-		 * always take the min.  On cgroup1, only inherit when no
-		 * limit is set:
+		 * always take the non-RUNTIME_INF min.  On cgroup1, only
+		 * inherit when no limit is set. In both cases this is used
+		 * by the scheduler to determine if a given CFS task has a
+		 * bandwidth constraint at some higher level.
 		 */
 		if (cgroup_subsys_on_dfl(cpu_cgrp_subsys)) {
-			quota = min(quota, parent_quota);
+			if (quota == RUNTIME_INF)
+				quota = parent_quota;
+			else if (parent_quota != RUNTIME_INF)
+				quota = min(quota, parent_quota);
 		} else {
 			if (quota == RUNTIME_INF)
 				quota = parent_quota;

@@ -241,4 +241,6 @@ source "drivers/most/Kconfig"
 
 source "drivers/hte/Kconfig"
 
+source "drivers/dpll/Kconfig"
+
 endmenu

@@ -551,8 +551,7 @@ static bool raid0_make_request(struct mddev *mddev, struct bio *bio)
 		bio = split;
 	}
 
-	if (bio->bi_pool != &mddev->bio_set)
-		md_account_bio(mddev, &bio);
+	md_account_bio(mddev, &bio);
 
 	orig_sector = sector;
 	zone = find_zone(mddev->private, &sector);

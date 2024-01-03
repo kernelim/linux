@@ -1001,12 +1001,13 @@ int amdgpu_vm_bo_update(struct amdgpu_device *adev, struct amdgpu_bo_va *bo_va,
 			struct drm_gem_object *gobj = dma_buf->priv;
 			struct amdgpu_bo *abo = gem_to_amdgpu_bo(gobj);
 
-			if (abo->tbo.resource->mem_type == TTM_PL_VRAM)
+			if (abo->tbo.resource &&
+			    abo->tbo.resource->mem_type == TTM_PL_VRAM)
 				bo = gem_to_amdgpu_bo(gobj);
 		}
 		mem = bo->tbo.resource;
-		if (mem->mem_type == TTM_PL_TT ||
-		    mem->mem_type == AMDGPU_PL_PREEMPT)
+		if (mem && (mem->mem_type == TTM_PL_TT ||
+			    mem->mem_type == AMDGPU_PL_PREEMPT))
 			pages_addr = bo->tbo.ttm->dma_address;
 	}
 

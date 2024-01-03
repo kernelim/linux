@@ -8708,9 +8708,11 @@ int dev_set_mac_address(struct net_device *dev, struct sockaddr *sa,
 	err = dev_pre_changeaddr_notify(dev, sa->sa_data, extack);
 	if (err)
 		return err;
-	err = ops->ndo_set_mac_address(dev, sa);
-	if (err)
-		return err;
+	if (memcmp(dev->dev_addr, sa->sa_data, dev->addr_len)) {
+		err = ops->ndo_set_mac_address(dev, sa);
+		if (err)
+			return err;
+	}
 	dev->addr_assign_type = NET_ADDR_SET;
 	call_netdevice_notifiers(NETDEV_CHANGEADDR, dev);
 	add_device_randomness(dev->dev_addr, dev->addr_len);
@@ -8880,6 +8882,28 @@ bool netdev_port_same_parent_id(struct net_device *a, struct net_device *b)
 	return netdev_phys_item_id_same(&a_id, &b_id);
 }
 EXPORT_SYMBOL(netdev_port_same_parent_id);
+
+static void netdev_dpll_pin_assign(struct net_device *dev, struct dpll_pin *dpll_pin)
+{
+#if IS_ENABLED(CONFIG_DPLL)
+	rtnl_lock();
+	dev->dpll_pin = dpll_pin;
+	rtnl_unlock();
+#endif
+}
+
+void netdev_dpll_pin_set(struct net_device *dev, struct dpll_pin *dpll_pin)
+{
+	WARN_ON(!dpll_pin);
+	netdev_dpll_pin_assign(dev, dpll_pin);
+}
+EXPORT_SYMBOL(netdev_dpll_pin_set);
+
+void netdev_dpll_pin_clear(struct net_device *dev)
+{
+	netdev_dpll_pin_assign(dev, NULL);
+}
+EXPORT_SYMBOL(netdev_dpll_pin_clear);
 
 /**
  *	dev_change_proto_down - set carrier according to proto_down.

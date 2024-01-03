@@ -1316,6 +1316,8 @@ static struct trace_event trace_osnoise_event = {
 };
 
 /* TRACE_TIMERLAT */
+
+static char *timerlat_lat_context[] = {"irq", "thread", "user-ret"};
 static enum print_line_t
 trace_timerlat_print(struct trace_iterator *iter, int flags,
 		     struct trace_event *event)
@@ -1328,7 +1330,7 @@ trace_timerlat_print(struct trace_iterator *iter, int flags,
 
 	trace_seq_printf(s, "#%-5u context %6s timer_latency %9llu ns\n",
 			 field->seqnum,
-			 field->context ? "thread" : "irq",
+			 timerlat_lat_context[field->context],
 			 field->timer_latency);
 
 	return trace_handle_return(s);
