@@ -63,6 +63,7 @@ enum {
 	Opt_noacl,
 	Opt_quota_off,
 	Opt_quota_account,
+	Opt_quota_quiet,
 	Opt_quota_on,
 	Opt_quota,
 	Opt_noquota,
@@ -104,6 +105,7 @@ static const match_table_t tokens = {
 	{Opt_noacl, "noacl"},
 	{Opt_quota_off, "quota=off"},
 	{Opt_quota_account, "quota=account"},
+	{Opt_quota_quiet, "quota=quiet"},
 	{Opt_quota_on, "quota=on"},
 	{Opt_quota, "quota"},
 	{Opt_noquota, "noquota"},
@@ -205,6 +207,9 @@ int gfs2_mount_args(struct gfs2_args *args, char *options)
 			break;
 		case Opt_quota_account:
 			args->ar_quota = GFS2_QUOTA_ACCOUNT;
+			break;
+		case Opt_quota_quiet:
+			args->ar_quota = GFS2_QUOTA_QUIET;
 			break;
 		case Opt_quota_on:
 		case Opt_quota:
@@ -1364,6 +1369,9 @@ static int gfs2_show_options(struct seq_file *s, struct dentry *root)
 			break;
 		case GFS2_QUOTA_ON:
 			state = "on";
+			break;
+		case GFS2_QUOTA_QUIET:
+			state = "quiet";
 			break;
 		default:
 			state = "unknown";
