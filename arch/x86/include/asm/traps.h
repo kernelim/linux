@@ -122,6 +122,9 @@ static inline int get_si_code(unsigned long condition)
 extern int panic_on_unrecovered_nmi;
 
 void math_emulate(struct math_emu_info *);
+
+bool fault_in_kernel_space(unsigned long address);
+
 #ifndef CONFIG_X86_32
 asmlinkage void smp_thermal_interrupt(struct pt_regs *regs);
 asmlinkage void smp_threshold_interrupt(struct pt_regs *regs);
