@@ -31,6 +31,8 @@
 #endif
 #define MAX_ORDER_NR_PAGES (1 << (MAX_ORDER - 1))
 
+#define IS_MAX_ORDER_ALIGNED(pfn) IS_ALIGNED(pfn, MAX_ORDER_NR_PAGES)
+
 /*
  * PAGE_ALLOC_COSTLY_ORDER is the order at which allocations are deemed
  * costly to service.  That is between allocation orders which should
@@ -152,7 +154,16 @@ enum zone_stat_item {
 	NR_ZSPAGES,		/* allocated in zsmalloc */
 #endif
 	NR_FREE_CMA_PAGES,
-	NR_VM_ZONE_STAT_ITEMS };
+#ifdef __GENKSYMS__
+	NR_VM_ZONE_STAT_ITEMS
+#else
+#ifdef CONFIG_UNACCEPTED_MEMORY
+	NR_UNACCEPTED,
+#endif
+	NR_VM_ZONE_STAT_ITEMS_ACTUAL,
+	NR_VM_ZONE_STAT_ITEMS = NR_FREE_CMA_PAGES + 1,
+#endif
+};
 
 enum node_stat_item {
 	NR_LRU_BASE,
@@ -660,6 +671,13 @@ struct zone {
 	/* Zone statistics */
 	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
 	atomic_long_t		vm_numa_event[NR_VM_NUMA_EVENT_ITEMS];
+
+#ifndef __GENKSYMS__
+	atomic_long_t		nr_unaccepted;
+	/* Pages to be accepted. All pages on the list are MAX_ORDER - 1 */
+	struct list_head	unaccepted_pages;
+#endif
+
 } ____cacheline_internodealigned_in_smp;
 
 enum pgdat_flags {

@@ -23,6 +23,8 @@ source "drivers/platform/x86/intel/int3472/Kconfig"
 source "drivers/platform/x86/intel/pmc/Kconfig"
 source "drivers/platform/x86/intel/pmt/Kconfig"
 source "drivers/platform/x86/intel/speed_select_if/Kconfig"
+source "drivers/platform/x86/intel/uncore-frequency/Kconfig"
+
 
 config INTEL_SDSI
 	tristate "Intel Software Defined Silicon Driver"

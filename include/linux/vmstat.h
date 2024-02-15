@@ -137,7 +137,11 @@ static inline void vm_events_fold_cpu(int cpu)
 /*
  * Zone and node-based page accounting with per cpu differentials.
  */
+#ifdef __GENKSYMS__
 extern atomic_long_t vm_zone_stat[NR_VM_ZONE_STAT_ITEMS];
+#else
+extern atomic_long_t vm_zone_stat[NR_VM_ZONE_STAT_ITEMS_ACTUAL];
+#endif
 extern atomic_long_t vm_node_stat[NR_VM_NODE_STAT_ITEMS];
 extern atomic_long_t vm_numa_event[NR_VM_NUMA_EVENT_ITEMS];
 
@@ -165,7 +169,16 @@ global_numa_event_state(enum numa_stat_item item)
 static inline void zone_page_state_add(long x, struct zone *zone,
 				 enum zone_stat_item item)
 {
+	BUG_ON(item >= NR_VM_ZONE_STAT_ITEMS_ACTUAL);
+#ifdef CONFIG_UNACCEPTED_MEMORY
+	if (item == NR_UNACCEPTED) {
+		atomic_long_add(x, &zone->nr_unaccepted);
+		goto global;
+	}
+#endif
+
 	atomic_long_add(x, &zone->vm_stat[item]);
+global: __attribute__((unused));
 	atomic_long_add(x, &vm_zone_stat[item]);
 }
 
@@ -207,7 +220,15 @@ static inline unsigned long global_node_page_state(enum node_stat_item item)
 static inline unsigned long zone_page_state(struct zone *zone,
 					enum zone_stat_item item)
 {
-	long x = atomic_long_read(&zone->vm_stat[item]);
+	long x;
+
+	BUG_ON(item >= NR_VM_ZONE_STAT_ITEMS_ACTUAL);
+#ifdef CONFIG_UNACCEPTED_MEMORY
+	if (item == NR_UNACCEPTED)
+		return atomic_long_read(&zone->nr_unaccepted);
+#endif
+
+	x = atomic_long_read(&zone->vm_stat[item]);
 #ifdef CONFIG_SMP
 	if (x < 0)
 		x = 0;
@@ -224,10 +245,20 @@ static inline unsigned long zone_page_state(struct zone *zone,
 static inline unsigned long zone_page_state_snapshot(struct zone *zone,
 					enum zone_stat_item item)
 {
-	long x = atomic_long_read(&zone->vm_stat[item]);
+	long x;
+	int cpu;
+
+	BUG_ON(item >= NR_VM_ZONE_STAT_ITEMS_ACTUAL);
+
+	/* For items added after release, no vm_stat_diff element exists.  */
+#ifdef CONFIG_UNACCEPTED_MEMORY
+	if (item == NR_UNACCEPTED)
+		return atomic_long_read(&zone->nr_unaccepted);
+#endif
+
+	x = atomic_long_read(&zone->vm_stat[item]);
 
 #ifdef CONFIG_SMP
-	int cpu;
 	for_each_online_cpu(cpu)
 		x += per_cpu_ptr(zone->per_cpu_zonestats, cpu)->vm_stat_diff[item];
 
@@ -341,7 +372,16 @@ static inline void __mod_node_page_state(struct pglist_data *pgdat,
 
 static inline void __inc_zone_state(struct zone *zone, enum zone_stat_item item)
 {
+	BUG_ON(item >= NR_VM_ZONE_STAT_ITEMS_ACTUAL);
+#ifdef CONFIG_UNACCEPTED_MEMORY
+	if (item == NR_UNACCEPTED) {
+		atomic_long_inc(&zone->nr_unaccepted);
+		goto global;
+	}
+#endif
+
 	atomic_long_inc(&zone->vm_stat[item]);
+global: __attribute__((unused));
 	atomic_long_inc(&vm_zone_stat[item]);
 }
 
@@ -353,7 +393,16 @@ static inline void __inc_node_state(struct pglist_data *pgdat, enum node_stat_it
 
 static inline void __dec_zone_state(struct zone *zone, enum zone_stat_item item)
 {
+	BUG_ON(item >= NR_VM_ZONE_STAT_ITEMS_ACTUAL);
+#ifdef CONFIG_UNACCEPTED_MEMORY
+	if (item == NR_UNACCEPTED) {
+		atomic_long_dec(&zone->nr_unaccepted);
+		goto global;
+	}
+#endif
+
 	atomic_long_dec(&zone->vm_stat[item]);
+global: __attribute__((unused));
 	atomic_long_dec(&vm_zone_stat[item]);
 }
 
@@ -505,14 +554,14 @@ static inline const char *zone_stat_name(enum zone_stat_item item)
 #ifdef CONFIG_NUMA
 static inline const char *numa_stat_name(enum numa_stat_item item)
 {
-	return vmstat_text[NR_VM_ZONE_STAT_ITEMS +
+	return vmstat_text[NR_VM_ZONE_STAT_ITEMS_ACTUAL +
 			   item];
 }
 #endif /* CONFIG_NUMA */
 
 static inline const char *node_stat_name(enum node_stat_item item)
 {
-	return vmstat_text[NR_VM_ZONE_STAT_ITEMS +
+	return vmstat_text[NR_VM_ZONE_STAT_ITEMS_ACTUAL +
 			   NR_VM_NUMA_EVENT_ITEMS +
 			   item];
 }
@@ -524,7 +573,7 @@ static inline const char *lru_list_name(enum lru_list lru)
 
 static inline const char *writeback_stat_name(enum writeback_stat_item item)
 {
-	return vmstat_text[NR_VM_ZONE_STAT_ITEMS +
+	return vmstat_text[NR_VM_ZONE_STAT_ITEMS_ACTUAL +
 			   NR_VM_NUMA_EVENT_ITEMS +
 			   NR_VM_NODE_STAT_ITEMS +
 			   item];
@@ -533,7 +582,7 @@ static inline const char *writeback_stat_name(enum writeback_stat_item item)
 #if defined(CONFIG_VM_EVENT_COUNTERS) || defined(CONFIG_MEMCG)
 static inline const char *vm_event_name(enum vm_event_item item)
 {
-	return vmstat_text[NR_VM_ZONE_STAT_ITEMS +
+	return vmstat_text[NR_VM_ZONE_STAT_ITEMS_ACTUAL +
 			   NR_VM_NUMA_EVENT_ITEMS +
 			   NR_VM_NODE_STAT_ITEMS +
 			   NR_VM_WRITEBACK_STAT_ITEMS +

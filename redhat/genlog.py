@@ -1,143 +1,132 @@
 #!/usr/bin/python3
-#
-# This script parses a git log from stdin, which should be given with:
-# $ git log [<options>] -z --format="- %s (%an)%n%b" [<range>] [[--] <path>...] | ...
-# And then outputs to stdout a trimmed changelog for use with rpm packaging
-#
-# Author: Herton R. Krzesinski <herton@redhat.com>
-# Copyright (C) 2021 Red Hat, Inc.
-#
-# This software may be freely redistributed under the terms of the GNU
-# General Public License (GPL).
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2023 Red Hat, Inc.
 
-"""Parses a git log from stdin, and output a log entry for an rpm."""
+"""Parses git log from stdin, expecting format of:
+$ git log [<options>] -z --format="- %s (%an)%n%N%n^^^NOTES-END^^^%n%b" [<range>] [[--] <path>...] | ...
+and prints changelog output to stdout."""
 
 import re
 import sys
 
-def find_ticket_in_line(line, prefix, tkt_re, tkt_groups):
-    """Return ticket referenced in the given line"""
-    _tkts = set()
-    if not line.startswith(f"{prefix}: "):
-        return _tkts
-    for match in tkt_re.finditer(line[len(f"{prefix}:"):]):
-        for group in tkt_groups:
-            if match.group(group):
-                tid = match.group(group).strip()
-                _tkts.add(tid)
-    return _tkts
 
-def find_bz_in_line(line, prefix):
-    bznum_re = re.compile(r'(?P<bug_ids> \d{4,8})|'
-        r'( http(s)?://bugzilla\.redhat\.com/(show_bug\.cgi\?id=)?(?P<url_bugs>\d{4,8}))')
-    return find_ticket_in_line(line, prefix, bznum_re, [ 'bug_ids', 'url_bugs' ])
+# CommitTags and parse_commit() in kmt and genlog.py should match
+class CommitTags:
+    tag_patterns = {
+        'Bugzilla': [
+            r'(\d{4,8})\s*$',
+            r'https?://bugzilla\.redhat\.com/(?:show_bug\.cgi\?id=)?(\d{4,8})',
+        ],
+        'JIRA': [r'https://issues\.redhat\.com/(?:browse|projects/RHEL/issues)/(RHEL-\d{1,8})'],
+        'CVE': [r'(CVE-\d{4}-\d{4,7})'],
+        'MR': [r'(.*)'],
+        'Y-Commit': [r'([0-9a-fA-F]+)'],
+        'Patchwork-id': [r'(.*)'],
+        'Patchwork-instance': [r'(.*)'],
+    }
+    tag_patterns['Y-Bugzilla'] = tag_patterns['Bugzilla']
+    tag_patterns['Z-Bugzilla'] = tag_patterns['Bugzilla']
+    tag_patterns['Y-JIRA'] = tag_patterns['JIRA']
+    tag_patterns['Z-JIRA'] = tag_patterns['JIRA']
+    tag_patterns['O-JIRA'] = tag_patterns['JIRA']
 
-def find_ji_in_line(line, prefix):
-    ji_re = re.compile(r' https://issues\.redhat\.com/(?:browse|projects/RHEL/issues)/(?P<jira_id>RHEL-\d{1,8})\s*$')
-    return find_ticket_in_line(line, prefix, ji_re, [ 'jira_id' ])
+    compiled_patterns = {}
+    for tag_name, tag_pattern_list in tag_patterns.items():
+        tag_pattern_list.append(r'(N/A)')
+        compiled_patterns[tag_name] = []
+        for tag_pattern in tag_pattern_list:
+            pattern = r'^' + tag_name + ': ' + tag_pattern + r'\s*$'
+            tag_regex = re.compile(pattern, re.MULTILINE)
+            compiled_patterns[tag_name].append(tag_regex)
 
-def find_cve_in_line(line):
-    """Return cve number from properly formated CVE: line."""
-    # CVEs must begin with 'CVE: '
-    cve_set = set()
-    if not line.startswith("CVE: "):
-        return cve_set
-    _cves = line[len("CVE: "):].split()
-    pattern = "(?P<cve>CVE-[0-9]+-[0-9]+)"
-    cve_re = re.compile(pattern)
-    for cve_item in _cves:
-        cve = cve_re.match(cve_item)
-        if cve:
-            cve_set.add(cve.group('cve'))
-    return cve_set
+    def __init__(self, input_str):
+        self.parse_tags(input_str)
+
+    def get_tag_values(self, tag_name):
+        if tag_name not in CommitTags.tag_patterns:
+            raise Exception('Unsupported tag name: ' + tag_name)
+        return self.tag_dict[tag_name]
+
+    def override_by(self, other_commit_tags):
+        for tag_name, tag_set in other_commit_tags.tag_dict.items():
+            if tag_set:
+                if tag_set == set(['N/A']):
+                    self.tag_dict[tag_name] = set()
+                else:
+                    self.tag_dict[tag_name] = set(tag_set)
+
+    def parse_tags(self, input_str):
+        tag_values = {}
+        for tag_name, tag_pattern_list in CommitTags.compiled_patterns.items():
+            tag_values[tag_name] = set()
+            for tag_regex in tag_pattern_list:
+                for value in tag_regex.findall(input_str):
+                    tag_values[tag_name].add(value)
+        self.tag_dict = tag_values
+
+    def convert_to_y_tags(self):
+        if self.tag_dict['Z-Bugzilla'] or self.tag_dict['Z-JIRA']:
+            tmp = self.tag_dict['Bugzilla']
+            self.tag_dict['Bugzilla'] = self.tag_dict['Z-Bugzilla']
+            self.tag_dict['Y-Bugzilla'] = tmp
+            self.tag_dict['Z-Bugzilla'] = set()
+
+            tmp = self.tag_dict['JIRA']
+            self.tag_dict['JIRA'] = self.tag_dict['Z-JIRA']
+            self.tag_dict['Y-JIRA'] = tmp
+            self.tag_dict['Z-JIRA'] = set()
+
+    def get_changelog_str(self):
+        chnglog = []
+        tickets = sorted(self.tag_dict['Bugzilla']) + sorted(self.tag_dict['JIRA'])
+        if self.tag_dict['Y-Bugzilla'] or self.tag_dict['Y-JIRA']:
+            tickets = tickets + sorted(self.tag_dict['Y-Bugzilla']) + sorted(self.tag_dict['Y-JIRA'])
+        if tickets:
+            chnglog.append('[' + ' '.join(tickets) + ']')
+        if self.tag_dict['CVE']:
+            chnglog.append('{' + ' '.join(self.tag_dict['CVE']) + '}')
+        return ' '.join(chnglog)
+
+    def get_resolved_tickets(self):
+        ret = set()
+        for ticket in sorted(self.tag_dict['Bugzilla']) + sorted(self.tag_dict['JIRA']):
+            if ticket.isnumeric():
+                ticket = 'rhbz#' + ticket
+            ret.add(ticket)
+        return ret
 
 
 def parse_commit(commit):
-    """Extract metadata from a commit log message."""
-    lines = commit.split('\n')
+    if '^^^NOTES-END^^^' in commit:
+        input_notes, input_commit = commit.split('^^^NOTES-END^^^')
+    else:
+        input_notes = ''
+        input_commit = commit
 
-    # Escape '%' as it will be used inside the rpm spec changelog
-    log_entry = lines[0].replace("%","%%")
+    tags = CommitTags(input_commit)
+    if input_notes:
+        notes_tags = CommitTags(input_notes)
+        notes_tags.convert_to_y_tags()
+        tags.override_by(notes_tags)
 
-    cve_set = set()
-    bug_set = set()
-    zbug_set = set()
-    jira_set = set()
-    zjira_set = set()
-    for line in lines[1:]:
-        # Metadata in git notes has priority over commit log
-        # If we found any BZ/ZBZ/JIRA/ZJIRA/CVE in git notes,
-        # we ignore the commit log
-        if line == "^^^NOTES-END^^^":
-            if bug_set or zbug_set or jira_set or zjira_set or cve_set:
-                break
-
-        # Process Bugzilla and ZStream Bugzilla entries
-        bug_set.update(find_bz_in_line(line, 'Bugzilla'))
-        zbug_set.update(find_bz_in_line(line, 'Z-Bugzilla'))
-
-        # Grab CVE tags if they are present
-        cve_set.update(find_cve_in_line(line))
-
-        # Process Jira issues
-        jira_set.update(find_ji_in_line(line, 'JIRA'))
-        zjira_set.update(find_ji_in_line(line, 'Z-JIRA'))
-
-    return (log_entry, cve_set, bug_set, zbug_set, jira_set, zjira_set)
+    return tags
 
 
 if __name__ == "__main__":
-    all_bzs = set()
-    all_zbzs = set()
-    all_jiras = set()
-    all_zjiras = set()
+    all_resolved = set()
     commits = sys.stdin.read().split('\0')
     for c in commits:
         if not c:
             continue
-        log_item, cves, bugs, zbugs, jiras, zjiras = parse_commit(c)
-        entry = f"{log_item}"
-        if bugs or zbugs or jiras or zjiras:
-            entry += " ["
-            if zbugs:
-                entry += " ".join(sorted(zbugs))
-                all_zbzs.update(zbugs)
-            if zjiras:
-                entry += " " if zbugs else ""
-                entry += " ".join(sorted(zjiras))
-                all_zjiras.update(zjiras)
-            if bugs:
-                entry += " " if zbugs or zjiras else ""
-                entry += " ".join(sorted(bugs))
-                all_bzs.update(bugs)
-            if jiras:
-                entry += " " if zbugs or bugs or zjiras else ""
-                entry += " ".join(sorted(jiras))
-                all_jiras.update(jiras)
-            entry += "]"
-        if cves:
-            entry += " {" + " ".join(sorted(cves)) + "}"
+        # Escape '%' as it will be used inside the rpm spec changelog
+        entry_pos = c.find('\n')
+        entry = c[:entry_pos].replace("%", "%%")
+
+        tags = parse_commit(c)
+        chnglog = tags.get_changelog_str()
+        if chnglog:
+            entry = entry + ' ' + chnglog
         print(entry)
+        all_resolved = all_resolved.union(tags.get_resolved_tickets())
 
-    # If we are doing Z-Stream work, we are addressing Z-Stream tickets
-    # and not Y-Stream tickets, so we must make sure to list on Resolves
-    # line only the Z-Stream tickets
-    resolved_bzs = set()
-    resolved_jiras = set()
-    if all_zbzs or all_zjiras:
-        resolved_bzs = all_zbzs
-        resolved_jiras = all_zjiras
-    else:
-        resolved_bzs = all_bzs
-        resolved_jiras = all_jiras
-    print("Resolves: ", end="")
-    for i, bzid in enumerate(sorted(resolved_bzs)):
-        if i:
-            print(", ", end="")
-        print(f"rhbz#{bzid}", end="")
-    for j, jid in enumerate(sorted(resolved_jiras)):
-        if j or resolved_bzs:
-           print(", ", end="")
-        print(f"{jid}", end="")
-    print("\n")
-
+    print('Resolves: ' + ', '.join(sorted(all_resolved)) + '\n')

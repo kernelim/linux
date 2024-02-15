@@ -160,7 +160,7 @@ void vm_events_fold_cpu(int cpu)
  *
  * vm_stat contains the global counters
  */
-atomic_long_t vm_zone_stat[NR_VM_ZONE_STAT_ITEMS] __cacheline_aligned_in_smp;
+atomic_long_t vm_zone_stat[NR_VM_ZONE_STAT_ITEMS_ACTUAL] __cacheline_aligned_in_smp;
 atomic_long_t vm_node_stat[NR_VM_NODE_STAT_ITEMS] __cacheline_aligned_in_smp;
 atomic_long_t vm_numa_event[NR_VM_NUMA_EVENT_ITEMS] __cacheline_aligned_in_smp;
 EXPORT_SYMBOL(vm_zone_stat);
@@ -348,6 +348,12 @@ void __mod_zone_page_state(struct zone *zone, enum zone_stat_item item,
 	long x;
 	long t;
 
+	/* For items added after release, no vm_stat_diff element exists.  */
+	if (item >= NR_VM_ZONE_STAT_ITEMS) {
+		zone_page_state_add(delta, zone, item);
+		return;
+	}
+
 	/*
 	 * Accurate vmstat updates require a RMW. On !PREEMPT_RT kernels,
 	 * atomicity is provided by IRQs being disabled -- either explicitly
@@ -433,8 +439,16 @@ EXPORT_SYMBOL(__mod_node_page_state);
 void __inc_zone_state(struct zone *zone, enum zone_stat_item item)
 {
 	struct per_cpu_zonestat __percpu *pcp = zone->per_cpu_zonestats;
-	s8 __percpu *p = pcp->vm_stat_diff + item;
+	s8 __percpu *p;
 	s8 v, t;
+
+	/* For items added after release, no vm_stat_diff element exists.  */
+	if (item >= NR_VM_ZONE_STAT_ITEMS) {
+		zone_page_state_add(1, zone, item);
+		return;
+	}
+
+	p = pcp->vm_stat_diff + item;
 
 	/* See __mod_node_page_state */
 	preempt_disable_nested();
@@ -489,8 +503,16 @@ EXPORT_SYMBOL(__inc_node_page_state);
 void __dec_zone_state(struct zone *zone, enum zone_stat_item item)
 {
 	struct per_cpu_zonestat __percpu *pcp = zone->per_cpu_zonestats;
-	s8 __percpu *p = pcp->vm_stat_diff + item;
+	s8 __percpu *p;
 	s8 v, t;
+
+	/* For items added after release, no vm_stat_diff element exists.  */
+	if (item >= NR_VM_ZONE_STAT_ITEMS) {
+		zone_page_state_add(-1, zone, item);
+		return;
+	}
+
+	p = pcp->vm_stat_diff + item;
 
 	/* See __mod_node_page_state */
 	preempt_disable_nested();
@@ -559,8 +581,16 @@ static inline void mod_zone_state(struct zone *zone,
        enum zone_stat_item item, long delta, int overstep_mode)
 {
 	struct per_cpu_zonestat __percpu *pcp = zone->per_cpu_zonestats;
-	s8 __percpu *p = pcp->vm_stat_diff + item;
+	s8 __percpu *p;
 	long o, n, t, z;
+
+	/* For items added after release, no vm_stat_diff element exists.  */
+	if (item >= NR_VM_ZONE_STAT_ITEMS) {
+		zone_page_state_add(delta, zone, item);
+		return;
+	}
+
+	p = pcp->vm_stat_diff + item;
 
 	do {
 		z = 0;  /* overflow to zone counters */
@@ -774,6 +804,7 @@ static int fold_diff(int *zone_diff, int *node_diff)
 	int i;
 	int changes = 0;
 
+	/* RHEL: not using NR_VM_ZONE_STAT_ITEMS_ACTUAL because unaccepted pages do not have per-CPU counters. */
 	for (i = 0; i < NR_VM_ZONE_STAT_ITEMS; i++)
 		if (zone_diff[i]) {
 			atomic_long_add(zone_diff[i], &vm_zone_stat[i]);
@@ -809,6 +840,7 @@ static int refresh_cpu_vm_stats(bool do_pagesets)
 	struct pglist_data *pgdat;
 	struct zone *zone;
 	int i;
+	/* RHEL: not using NR_VM_ZONE_STAT_ITEMS_ACTUAL because unaccepted pages do not have per-CPU counters. */
 	int global_zone_diff[NR_VM_ZONE_STAT_ITEMS] = { 0, };
 	int global_node_diff[NR_VM_NODE_STAT_ITEMS] = { 0, };
 	int changes = 0;
@@ -895,6 +927,7 @@ void cpu_vm_stats_fold(int cpu)
 	struct pglist_data *pgdat;
 	struct zone *zone;
 	int i;
+	/* RHEL: not using NR_VM_ZONE_STAT_ITEMS_ACTUAL because unaccepted pages do not have per-CPU counters. */
 	int global_zone_diff[NR_VM_ZONE_STAT_ITEMS] = { 0, };
 	int global_node_diff[NR_VM_NODE_STAT_ITEMS] = { 0, };
 
@@ -954,6 +987,7 @@ void drain_zonestat(struct zone *zone, struct per_cpu_zonestat *pzstats)
 	unsigned long v;
 	int i;
 
+	/* RHEL: not using NR_VM_ZONE_STAT_ITEMS_ACTUAL because unaccepted pages do not have per-CPU counters. */
 	for (i = 0; i < NR_VM_ZONE_STAT_ITEMS; i++) {
 		if (pzstats->vm_stat_diff[i]) {
 			v = pzstats->vm_stat_diff[i];
@@ -1176,6 +1210,9 @@ const char * const vmstat_text[] = {
 	"nr_zspages",
 #endif
 	"nr_free_cma",
+#ifdef CONFIG_UNACCEPTED_MEMORY
+	"nr_unaccepted",
+#endif
 
 	/* enum numa_stat_item counters */
 #ifdef CONFIG_NUMA
@@ -1698,7 +1735,7 @@ static void zoneinfo_show_print(struct seq_file *m, pg_data_t *pgdat,
 		return;
 	}
 
-	for (i = 0; i < NR_VM_ZONE_STAT_ITEMS; i++)
+	for (i = 0; i < NR_VM_ZONE_STAT_ITEMS_ACTUAL; i++)
 		seq_printf(m, "\n      %-12s %lu", zone_stat_name(i),
 			   zone_page_state(zone, i));
 
@@ -1758,7 +1795,7 @@ static const struct seq_operations zoneinfo_op = {
 	.show	= zoneinfo_show,
 };
 
-#define NR_VMSTAT_ITEMS (NR_VM_ZONE_STAT_ITEMS + \
+#define NR_VMSTAT_ITEMS (NR_VM_ZONE_STAT_ITEMS_ACTUAL + \
 			 NR_VM_NUMA_EVENT_ITEMS + \
 			 NR_VM_NODE_STAT_ITEMS + \
 			 NR_VM_WRITEBACK_STAT_ITEMS + \
@@ -1779,9 +1816,9 @@ static void *vmstat_start(struct seq_file *m, loff_t *pos)
 	m->private = v;
 	if (!v)
 		return ERR_PTR(-ENOMEM);
-	for (i = 0; i < NR_VM_ZONE_STAT_ITEMS; i++)
+	for (i = 0; i < NR_VM_ZONE_STAT_ITEMS_ACTUAL; i++)
 		v[i] = global_zone_page_state(i);
-	v += NR_VM_ZONE_STAT_ITEMS;
+	v += NR_VM_ZONE_STAT_ITEMS_ACTUAL;
 
 #ifdef CONFIG_NUMA
 	for (i = 0; i < NR_VM_NUMA_EVENT_ITEMS; i++)
@@ -1881,7 +1918,7 @@ int vmstat_refresh(struct ctl_table *table, int write,
 	err = schedule_on_each_cpu(refresh_vm_stats);
 	if (err)
 		return err;
-	for (i = 0; i < NR_VM_ZONE_STAT_ITEMS; i++) {
+	for (i = 0; i < NR_VM_ZONE_STAT_ITEMS_ACTUAL; i++) {
 		/*
 		 * Skip checking stats known to go negative occasionally.
 		 */
