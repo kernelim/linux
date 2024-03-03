@@ -682,9 +682,9 @@ static void l2cap_chan_le_connect_reject(struct l2cap_chan *chan)
 	u16 result;
 
 	if (test_bit(FLAG_DEFER_SETUP, &chan->flags))
-		result = L2CAP_CR_AUTHORIZATION;
+		result = L2CAP_CR_LE_AUTHORIZATION;
 	else
-		result = L2CAP_CR_BAD_PSM;
+		result = L2CAP_CR_LE_BAD_PSM;
 
 	l2cap_state_change(chan, BT_DISCONN);
 
@@ -1792,7 +1792,7 @@ static struct l2cap_chan *l2cap_global_chan_by_psm(int state, __le16 psm,
 		if (link_type == LE_LINK && c->src_type == BDADDR_BREDR)
 			continue;
 
-		if (c->psm == psm) {
+		if (c->chan_type != L2CAP_CHAN_FIXED && c->psm == psm) {
 			int src_match, dst_match;
 			int src_any, dst_any;
 
@@ -3702,7 +3702,7 @@ void __l2cap_le_connect_rsp_defer(struct l2cap_chan *chan)
 	rsp.mtu     = cpu_to_le16(chan->imtu);
 	rsp.mps     = cpu_to_le16(chan->mps);
 	rsp.credits = cpu_to_le16(chan->rx_credits);
-	rsp.result  = cpu_to_le16(L2CAP_CR_SUCCESS);
+	rsp.result  = cpu_to_le16(L2CAP_CR_LE_SUCCESS);
 
 	l2cap_send_cmd(conn, chan->ident, L2CAP_LE_CONN_RSP, sizeof(rsp),
 		       &rsp);
@@ -5318,7 +5318,7 @@ static int l2cap_le_connect_rsp(struct l2cap_conn *conn,
 	credits = __le16_to_cpu(rsp->credits);
 	result  = __le16_to_cpu(rsp->result);
 
-	if (result == L2CAP_CR_SUCCESS && (mtu < 23 || mps < 23 ||
+	if (result == L2CAP_CR_LE_SUCCESS && (mtu < 23 || mps < 23 ||
 					   dcid < L2CAP_CID_DYN_START ||
 					   dcid > L2CAP_CID_LE_DYN_END))
 		return -EPROTO;
@@ -5339,7 +5339,7 @@ static int l2cap_le_connect_rsp(struct l2cap_conn *conn,
 	l2cap_chan_lock(chan);
 
 	switch (result) {
-	case L2CAP_CR_SUCCESS:
+	case L2CAP_CR_LE_SUCCESS:
 		if (__l2cap_get_chan_by_dcid(conn, dcid)) {
 			err = -EBADSLT;
 			break;
@@ -5353,8 +5353,8 @@ static int l2cap_le_connect_rsp(struct l2cap_conn *conn,
 		l2cap_chan_ready(chan);
 		break;
 
-	case L2CAP_CR_AUTHENTICATION:
-	case L2CAP_CR_ENCRYPTION:
+	case L2CAP_CR_LE_AUTHENTICATION:
+	case L2CAP_CR_LE_ENCRYPTION:
 		/* If we already have MITM protection we can't do
 		 * anything.
 		 */
@@ -5493,11 +5493,24 @@ static int l2cap_le_connect_req(struct l2cap_conn *conn,
 	BT_DBG("psm 0x%2.2x scid 0x%4.4x mtu %u mps %u", __le16_to_cpu(psm),
 	       scid, mtu, mps);
 
+	/* BLUETOOTH CORE SPECIFICATION Version 5.3 | Vol 3, Part A
+	 * page 1059:
+	 *
+	 * Valid range: 0x0001-0x00ff
+	 *
+	 * Table 4.15: L2CAP_LE_CREDIT_BASED_CONNECTION_REQ SPSM ranges
+	 */
+	if (!psm || __le16_to_cpu(psm) > L2CAP_PSM_LE_DYN_END) {
+		result = L2CAP_CR_LE_BAD_PSM;
+		chan = NULL;
+		goto response;
+	}
+
 	/* Check if we have socket listening on psm */
 	pchan = l2cap_global_chan_by_psm(BT_LISTEN, psm, &conn->hcon->src,
 					 &conn->hcon->dst, LE_LINK);
 	if (!pchan) {
-		result = L2CAP_CR_BAD_PSM;
+		result = L2CAP_CR_LE_BAD_PSM;
 		chan = NULL;
 		goto response;
 	}
@@ -5507,28 +5520,28 @@ static int l2cap_le_connect_req(struct l2cap_conn *conn,
 
 	if (!smp_sufficient_security(conn->hcon, pchan->sec_level,
 				     SMP_ALLOW_STK)) {
-		result = L2CAP_CR_AUTHENTICATION;
+		result = L2CAP_CR_LE_AUTHENTICATION;
 		chan = NULL;
 		goto response_unlock;
 	}
 
 	/* Check for valid dynamic CID range */
 	if (scid < L2CAP_CID_DYN_START || scid > L2CAP_CID_LE_DYN_END) {
-		result = L2CAP_CR_INVALID_SCID;
+		result = L2CAP_CR_LE_INVALID_SCID;
 		chan = NULL;
 		goto response_unlock;
 	}
 
 	/* Check if we already have channel with that dcid */
 	if (__l2cap_get_chan_by_dcid(conn, scid)) {
-		result = L2CAP_CR_SCID_IN_USE;
+		result = L2CAP_CR_LE_SCID_IN_USE;
 		chan = NULL;
 		goto response_unlock;
 	}
 
 	chan = pchan->ops->new_connection(pchan);
 	if (!chan) {
-		result = L2CAP_CR_NO_MEM;
+		result = L2CAP_CR_LE_NO_MEM;
 		goto response_unlock;
 	}
 
@@ -5563,7 +5576,7 @@ static int l2cap_le_connect_req(struct l2cap_conn *conn,
 		chan->ops->defer(chan);
 	} else {
 		l2cap_chan_ready(chan);
-		result = L2CAP_CR_SUCCESS;
+		result = L2CAP_CR_LE_SUCCESS;
 	}
 
 response_unlock:

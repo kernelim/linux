@@ -876,12 +876,14 @@ int gfs2_make_fs_ro(struct gfs2_sbd *sdp)
 		gfs2_quota_sync(sdp->sd_vfs, 0);
 		gfs2_statfs_sync(sdp->sd_vfs, 0);
 	}
-	error = gfs2_glock_nq_init(sdp->sd_trans_gl, LM_ST_SHARED, GL_NOCACHE,
-				   &t_gh);
-	if (error && !gfs2_withdrawn(sdp)) {
-		if (init_threads(sdp) != 0)
-			gfs2_io_error(sdp);
-		return error;
+	if (!gfs2_glock_is_locked_by_me(sdp->sd_trans_gl)) {
+		error = gfs2_glock_nq_init(sdp->sd_trans_gl, LM_ST_SHARED,
+					   GL_NOCACHE, &t_gh);
+		if (error && !gfs2_withdrawn(sdp)) {
+			if (init_threads(sdp) != 0)
+				gfs2_io_error(sdp);
+			return error;
+		}
 	}
 
 	if (log_write_allowed) {

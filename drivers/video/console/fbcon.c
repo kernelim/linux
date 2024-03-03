@@ -867,7 +867,6 @@ static int set_con2fb_map(int unit, int newidx, int user)
 
 	found = search_fb_in_map(newidx);
 
-	con2fb_map[unit] = newidx;
 	if (!err && !found)
  		err = con2fb_acquire_newinfo(vc, info, unit, oldidx);
 
@@ -883,6 +882,8 @@ static int set_con2fb_map(int unit, int newidx, int user)
  	if (!err) {
  		int show_logo = (fg_console == 0 && !user &&
  				 logo_shown != FBCON_LOGO_DONTSHOW);
+
+		con2fb_map[unit] = newidx;
 
  		if (!found)
  			fbcon_add_cursor_timer(info);
