@@ -47,9 +47,6 @@
 
 #include <linux/delay.h>
 
-
-#define VERSION_STRING DRIVER_DESC " 2.1d"
-
 /* Default debug printout level */
 #define NOZOMI_DEBUG_LEVEL 0x00
 static int debug = NOZOMI_DEBUG_LEVEL;
@@ -89,7 +86,6 @@ do {							\
 /*    Defines */
 #define NOZOMI_NAME		"nozomi"
 #define NOZOMI_NAME_TTY		"nozomi_tty"
-#define DRIVER_DESC		"Nozomi driver"
 
 #define NTTY_TTY_MAXMINORS	256
 #define NTTY_FIFO_BUFFER_SIZE	8192
@@ -1859,18 +1855,16 @@ static __init int nozomi_init(void)
 {
 	int ret;
 
-	printk(KERN_INFO "Initializing %s\n", VERSION_STRING);
-
-	ntty_driver = alloc_tty_driver(NTTY_TTY_MAXMINORS);
-	if (!ntty_driver)
-		return -ENOMEM;
+	ntty_driver = tty_alloc_driver(NTTY_TTY_MAXMINORS, TTY_DRIVER_REAL_RAW |
+			TTY_DRIVER_DYNAMIC_DEV);
+	if (IS_ERR(ntty_driver))
+		return PTR_ERR(ntty_driver);
 
 	ntty_driver->driver_name = NOZOMI_NAME_TTY;
 	ntty_driver->name = "noz";
 	ntty_driver->major = 0;
 	ntty_driver->type = TTY_DRIVER_TYPE_SERIAL;
 	ntty_driver->subtype = SERIAL_TYPE_NORMAL;
-	ntty_driver->flags = TTY_DRIVER_REAL_RAW | TTY_DRIVER_DYNAMIC_DEV;
 	ntty_driver->init_termios = tty_std_termios;
 	ntty_driver->init_termios.c_cflag = B115200 | CS8 | CREAD | \
 						HUPCL | CLOCAL;
@@ -1900,7 +1894,6 @@ free_tty:
 
 static __exit void nozomi_exit(void)
 {
-	printk(KERN_INFO "Unloading %s\n", DRIVER_DESC);
 	pci_unregister_driver(&nozomi_driver);
 	tty_unregister_driver(ntty_driver);
 	put_tty_driver(ntty_driver);
@@ -1910,4 +1903,4 @@ module_init(nozomi_init);
 module_exit(nozomi_exit);
 
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_DESCRIPTION(DRIVER_DESC);
+MODULE_DESCRIPTION("Nozomi driver");

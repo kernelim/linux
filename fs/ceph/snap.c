@@ -641,13 +641,16 @@ int __ceph_finish_cap_snap(struct ceph_inode_info *ci,
 		return 0;
 	}
 
-	/* Fb cap still in use, delay it */
-	if (ci->i_wb_ref) {
+	/*
+	 * Defer flushing the capsnap if the dirty buffer not flushed yet.
+	 * And trigger to flush the buffer immediately.
+	 */
+	if (ci->i_wrbuffer_ref) {
 		dout("finish_cap_snap %p cap_snap %p snapc %p %llu %s s=%llu "
 		     "used WRBUFFER, delaying\n", inode, capsnap,
 		     capsnap->context, capsnap->context->seq,
 		     ceph_cap_string(capsnap->dirty), capsnap->size);
-		capsnap->writing = 1;
+		ceph_queue_writeback(inode);
 		return 0;
 	}
 
@@ -1045,6 +1048,19 @@ skip_inode:
 				continue;
 			adjust_snap_realm_parent(mdsc, child, realm->ino);
 		}
+	} else {
+		/*
+		 * In the non-split case both 'num_split_inos' and
+		 * 'num_split_realms' should be 0, making this a no-op.
+		 * However the MDS happens to populate 'split_realms' list
+		 * in one of the UPDATE op cases by mistake.
+		 *
+		 * Skip both lists just in case to ensure that 'p' is
+		 * positioned at the start of realm info, as expected by
+		 * ceph_update_snap_trace().
+		 */
+		p += sizeof(u64) * num_split_inos;
+		p += sizeof(u64) * num_split_realms;
 	}
 
 	/*

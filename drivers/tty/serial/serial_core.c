@@ -953,7 +953,6 @@ static int uart_set_info(struct tty_struct *tty, struct tty_port *port,
 	port->closing_wait    = closing_wait;
 	if (new_info->xmit_fifo_size)
 		uport->fifosize = new_info->xmit_fifo_size;
-	port->low_latency = (uport->flags & UPF_LOW_LATENCY) ? 1 : 0;
 
  check_and_exit:
 	retval = 0;
@@ -1284,7 +1283,7 @@ static int uart_set_rs485_config(struct uart_port *port,
 	unsigned long flags;
 
 	if (!port->rs485_config)
-		return -ENOIOCTLCMD;
+		return -ENOTTY;
 
 	if (copy_from_user(&rs485, rs485_user, sizeof(*rs485_user)))
 		return -EFAULT;
@@ -1296,6 +1295,58 @@ static int uart_set_rs485_config(struct uart_port *port,
 		return ret;
 
 	if (copy_to_user(rs485_user, &port->rs485, sizeof(port->rs485)))
+		return -EFAULT;
+
+	return 0;
+}
+
+static int uart_get_iso7816_config(struct uart_port *port,
+				   struct serial_iso7816 __user *iso7816)
+{
+	unsigned long flags;
+	struct serial_iso7816 aux;
+
+	if (!port->iso7816_config)
+		return -ENOTTY;
+
+	spin_lock_irqsave(&port->lock, flags);
+	aux = port->iso7816;
+	spin_unlock_irqrestore(&port->lock, flags);
+
+	if (copy_to_user(iso7816, &aux, sizeof(aux)))
+		return -EFAULT;
+
+	return 0;
+}
+
+static int uart_set_iso7816_config(struct uart_port *port,
+				   struct serial_iso7816 __user *iso7816_user)
+{
+	struct serial_iso7816 iso7816;
+	int i, ret;
+	unsigned long flags;
+
+	if (!port->iso7816_config)
+		return -ENOTTY;
+
+	if (copy_from_user(&iso7816, iso7816_user, sizeof(*iso7816_user)))
+		return -EFAULT;
+
+	/*
+	 * There are 5 words reserved for future use. Check that userspace
+	 * doesn't put stuff in there to prevent breakages in the future.
+	 */
+	for (i = 0; i < 5; i++)
+		if (iso7816.reserved[i])
+			return -EINVAL;
+
+	spin_lock_irqsave(&port->lock, flags);
+	ret = port->iso7816_config(port, &iso7816);
+	spin_unlock_irqrestore(&port->lock, flags);
+	if (ret)
+		return ret;
+
+	if (copy_to_user(iso7816_user, &port->iso7816, sizeof(port->iso7816)))
 		return -EFAULT;
 
 	return 0;
@@ -1374,6 +1425,14 @@ uart_ioctl(struct tty_struct *tty, unsigned int cmd, unsigned long arg)
 
 	case TIOCSRS485:
 		ret = uart_set_rs485_config(uport, uarg);
+		break;
+
+	case TIOCSISO7816:
+		ret = uart_set_iso7816_config(state->uart_port, uarg);
+		break;
+
+	case TIOCGISO7816:
+		ret = uart_get_iso7816_config(state->uart_port, uarg);
 		break;
 	default:
 		if (uport->ops->ioctl)
@@ -1705,8 +1764,6 @@ static int uart_port_activate(struct tty_port *port, struct tty_struct *tty)
 	uport = uart_port_check(state);
 	if (!uport || uport->flags & UPF_DEAD)
 		return -ENXIO;
-
-	port->low_latency = (uport->flags & UPF_LOW_LATENCY) ? 1 : 0;
 
 	/*
 	 * Start up the serial port.
@@ -2446,9 +2503,12 @@ int uart_register_driver(struct uart_driver *drv)
 	if (!drv->state)
 		goto out;
 
-	normal = alloc_tty_driver(drv->nr);
-	if (!normal)
+	normal = tty_alloc_driver(drv->nr, TTY_DRIVER_REAL_RAW |
+			TTY_DRIVER_DYNAMIC_DEV);
+	if (IS_ERR(normal)) {
+		retval = PTR_ERR(normal);
 		goto out_kfree;
+	}
 
 	drv->tty_driver = normal;
 
@@ -2461,7 +2521,6 @@ int uart_register_driver(struct uart_driver *drv)
 	normal->init_termios	= tty_std_termios;
 	normal->init_termios.c_cflag = B9600 | CS8 | CREAD | HUPCL | CLOCAL;
 	normal->init_termios.c_ispeed = normal->init_termios.c_ospeed = 9600;
-	normal->flags		= TTY_DRIVER_REAL_RAW | TTY_DRIVER_DYNAMIC_DEV;
 	normal->driver_state    = drv;
 	tty_set_operations(normal, &uart_ops);
 

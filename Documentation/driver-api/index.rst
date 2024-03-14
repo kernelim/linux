@@ -59,6 +59,7 @@ available subsections can be seen below.
    soundwire/index
    fpga/index
    auxiliary_bus
+   serial/index
 
 .. only::  subproject and html
 

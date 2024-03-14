@@ -672,7 +672,6 @@ static int open(struct tty_struct *tty, struct file *filp)
 	DBGINFO(("%s open, old ref count = %d\n", info->device_name, info->port.count));
 
 	mutex_lock(&info->port.mutex);
-	info->port.low_latency = (info->port.flags & ASYNC_LOW_LATENCY) ? 1 : 0;
 
 	spin_lock_irqsave(&info->netlock, flags);
 	if (info->netcount) {
@@ -3713,7 +3712,6 @@ static const struct tty_operations ops = {
 
 static void slgt_cleanup(void)
 {
-	int rc;
 	struct slgt_info *info;
 	struct slgt_info *tmp;
 
@@ -3722,9 +3720,7 @@ static void slgt_cleanup(void)
 	if (serial_driver) {
 		for (info=slgt_device_list ; info != NULL ; info=info->next_device)
 			tty_unregister_device(serial_driver, info->line);
-		rc = tty_unregister_driver(serial_driver);
-		if (rc)
-			DBGERR(("tty_unregister_driver error=%d\n", rc));
+		tty_unregister_driver(serial_driver);
 		put_tty_driver(serial_driver);
 	}
 
@@ -3764,10 +3760,11 @@ static int __init slgt_init(void)
 
 	printk(KERN_INFO "%s\n", driver_name);
 
-	serial_driver = alloc_tty_driver(MAX_DEVICES);
-	if (!serial_driver) {
+	serial_driver = tty_alloc_driver(MAX_DEVICES, TTY_DRIVER_REAL_RAW |
+			TTY_DRIVER_DYNAMIC_DEV);
+	if (IS_ERR(serial_driver)) {
 		printk("%s can't allocate tty driver\n", driver_name);
-		return -ENOMEM;
+		return PTR_ERR(serial_driver);
 	}
 
 	/* Initialize the tty_driver structure */
@@ -3783,7 +3780,6 @@ static int __init slgt_init(void)
 		B9600 | CS8 | CREAD | HUPCL | CLOCAL;
 	serial_driver->init_termios.c_ispeed = 9600;
 	serial_driver->init_termios.c_ospeed = 9600;
-	serial_driver->flags = TTY_DRIVER_REAL_RAW | TTY_DRIVER_DYNAMIC_DEV;
 	tty_set_operations(serial_driver, &ops);
 	if ((rc = tty_register_driver(serial_driver)) < 0) {
 		DBGERR(("%s can't register serial driver\n", driver_name));
