@@ -2327,7 +2327,8 @@ void smb2_reconnect_server(struct work_struct *work)
 		list_del_init(&tcon->rlist);
 		if (tcon->ipc)
 			cifs_put_smb_ses(tcon->ses);
-		cifs_put_tcon(tcon);
+		else
+			cifs_put_tcon(tcon);
 	}
 
 	cifs_dbg(FYI, "Reconnecting tcons finished\n");

@@ -2518,6 +2518,7 @@ static void nfs_get_cache_cookie(struct super_block *sb,
 
 static int nfs_bdi_register(struct nfs_server *server)
 {
+	server->backing_dev_info.capabilities |= BDI_CAP_STABLE_WRITES;
 	return bdi_register_dev(&server->backing_dev_info, server->s_dev);
 }
 

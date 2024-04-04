@@ -74,6 +74,33 @@ static inline int selinux_authorizable_xfrm(struct xfrm_state *x)
 }
 
 /*
+ * Free the xfrm_sec_ctx structure.
+ */
+static void selinux_xfrm_free(struct xfrm_sec_ctx *ctx)
+{
+	if (!ctx)
+		return;
+
+	atomic_dec(&selinux_xfrm_refcount);
+	kfree(ctx);
+}
+
+/*
+ * Authorize the deletion of a labeled SA or policy rule.
+ */
+static int selinux_xfrm_delete(struct xfrm_sec_ctx *ctx)
+{
+	const struct task_security_struct *tsec = current_security();
+
+	if (!ctx)
+		return 0;
+
+	return avc_has_perm(tsec->sid, ctx->ctx_sid,
+			    SECCLASS_ASSOCIATION, ASSOCIATION__SETCONTEXT,
+			    NULL);
+}
+
+/*
  * LSM hook implementation that authorizes that a flow can use
  * a xfrm policy rule.
  */
@@ -339,17 +366,16 @@ int selinux_xfrm_policy_clone(struct xfrm_sec_ctx *old_ctx,
 {
 	struct xfrm_sec_ctx *new_ctx;
 
-	if (old_ctx) {
-		new_ctx = kmalloc(sizeof(*old_ctx) + old_ctx->ctx_len,
-				  GFP_ATOMIC);
-		if (!new_ctx)
-			return -ENOMEM;
+	if (!old_ctx)
+		return 0;
 
-		memcpy(new_ctx, old_ctx, sizeof(*new_ctx));
-		memcpy(new_ctx->ctx_str, old_ctx->ctx_str, new_ctx->ctx_len);
-		atomic_inc(&selinux_xfrm_refcount);
-		*new_ctxp = new_ctx;
-	}
+	new_ctx = kmalloc(sizeof(*old_ctx) + old_ctx->ctx_len, GFP_ATOMIC);
+	if (!new_ctx)
+		return -ENOMEM;
+	memcpy(new_ctx, old_ctx, sizeof(*old_ctx) + old_ctx->ctx_len);
+	atomic_inc(&selinux_xfrm_refcount);
+	*new_ctxp = new_ctx;
+
 	return 0;
 }
 
@@ -358,8 +384,7 @@ int selinux_xfrm_policy_clone(struct xfrm_sec_ctx *old_ctx,
  */
 void selinux_xfrm_policy_free(struct xfrm_sec_ctx *ctx)
 {
-	atomic_dec(&selinux_xfrm_refcount);
-	kfree(ctx);
+	selinux_xfrm_free(ctx);
 }
 
 /*
@@ -367,14 +392,7 @@ void selinux_xfrm_policy_free(struct xfrm_sec_ctx *ctx)
  */
 int selinux_xfrm_policy_delete(struct xfrm_sec_ctx *ctx)
 {
-	const struct task_security_struct *tsec = current_security();
-
-	if (!ctx)
-		return 0;
-
-	return avc_has_perm(tsec->sid, ctx->ctx_sid,
-			    SECCLASS_ASSOCIATION, ASSOCIATION__SETCONTEXT,
-			    NULL);
+	return selinux_xfrm_delete(ctx);
 }
 
 /*
@@ -399,8 +417,7 @@ int selinux_xfrm_state_alloc(struct xfrm_state *x, struct xfrm_user_sec_ctx *uct
  */
 void selinux_xfrm_state_free(struct xfrm_state *x)
 {
-	atomic_dec(&selinux_xfrm_refcount);
-	kfree(x->security);
+	selinux_xfrm_free(x->security);
 }
 
  /*
@@ -408,15 +425,7 @@ void selinux_xfrm_state_free(struct xfrm_state *x)
   */
 int selinux_xfrm_state_delete(struct xfrm_state *x)
 {
-	const struct task_security_struct *tsec = current_security();
-	struct xfrm_sec_ctx *ctx = x->security;
-
-	if (!ctx)
-		return 0;
-
-	return avc_has_perm(tsec->sid, ctx->ctx_sid,
-			    SECCLASS_ASSOCIATION, ASSOCIATION__SETCONTEXT,
-			    NULL);
+	return selinux_xfrm_delete(x->security);
 }
 
 /*
