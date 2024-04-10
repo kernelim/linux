@@ -40,7 +40,7 @@ check-commit:
     - .fdo.ci-fairy
   stage: sanity check
   script:
-    - ci-fairy check-commits --branch $CI_DEFAULT_BRANCH --signed-off-by --junit-xml=results.xml
+    - ci-fairy check-commits --branch $CI_DEFAULT_BRANCH --signed-off-by --junit-xml=results.xml --textwidth=100
   except:
     - main@centos-stream/rhel/src/kernel/documentation
   variables:
@@ -85,7 +85,6 @@ build:
     - make
   artifacts:
     paths:
-      - scripts/RHMAINTAINERS_parser
       - scripts/yaml2CODEOWNERS
       - scripts/yaml2RHMAINTAINERS
 

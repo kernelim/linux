@@ -12,7 +12,15 @@
 #define _LINUX_FSVERITY_H
 
 #include <linux/fs.h>
+#include <crypto/hash_info.h>
+#include <crypto/sha2.h>
 #include <uapi/linux/fsverity.h>
+
+/*
+ * Largest digest size among all hash algorithms supported by fs-verity.
+ * Currently assumed to be <= size of fsverity_descriptor::root_hash.
+ */
+#define FS_VERITY_MAX_DIGEST_SIZE	SHA512_DIGEST_SIZE
 
 /* Verity operations for filesystems */
 struct fsverity_operations {
@@ -131,6 +139,9 @@ int fsverity_ioctl_enable(struct file *filp, const void __user *arg);
 /* measure.c */
 
 int fsverity_ioctl_measure(struct file *filp, void __user *arg);
+int fsverity_get_digest(struct inode *inode,
+			u8 raw_digest[FS_VERITY_MAX_DIGEST_SIZE],
+			u8 *alg, enum hash_algo *halg);
 
 /* open.c */
 
@@ -168,6 +179,17 @@ static inline int fsverity_ioctl_enable(struct file *filp,
 static inline int fsverity_ioctl_measure(struct file *filp, void __user *arg)
 {
 	return -EOPNOTSUPP;
+}
+
+static inline int fsverity_get_digest(struct inode *inode,
+				      u8 raw_digest[FS_VERITY_MAX_DIGEST_SIZE],
+				      u8 *alg, enum hash_algo *halg)
+{
+	/*
+	 * fsverity is not enabled in the kernel configuration, so always report
+	 * that the file doesn't have fsverity enabled (digest size 0).
+	 */
+	return 0;
 }
 
 /* open.c */

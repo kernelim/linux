@@ -88,11 +88,8 @@ except in the case when the removed engineer is no longer with Red Hat.  While r
 do not require the approve of the maintainer, MR authors are encouraged to add the maintainer for
 an approve.
 
-4.  Any MR adding or modifying a devel-sst field requires the approval from
-the subsystem maintainer.
-
-5. Any MR adding a or modifying a qe-sst field requires the approval from a member of
-the QE SST being added.
+4.  Any MR adding or modifying other fields (devel-sst, status, jira, etc.) requires the approval
+from the subsystem maintainer.
 
 MR authors, reviewers, and maintainers should discuss disagreements about ownership or role changes
 with their management.
@@ -105,7 +102,7 @@ These changes include validSSTNames.go changes.  You must ensure the SST names t
 
 The layout is
 
-- docs/ contains the general kernel workflow documentation, links, etc.
+- content/docs/ contains the general kernel workflow documentation, links, etc.
 
 See https://red.ht/kernel_workflow_doc for information on the Red Hat Kernel
 Workflow.

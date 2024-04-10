@@ -8,6 +8,7 @@
  */
 
 #include <linux/linkage.h>
+#include <linux/cleanup.h>
 #include <linux/list.h>
 
 /*
@@ -238,15 +239,21 @@ do { \
 #define preempt_enable() \
 do { \
 	barrier(); \
-	if (unlikely(preempt_count_dec_and_test())) \
+	if (unlikely(preempt_count_dec_and_test())) { \
+		instrumentation_begin(); \
 		__preempt_schedule(); \
+		instrumentation_end(); \
+	} \
 } while (0)
 
 #define preempt_enable_notrace() \
 do { \
 	barrier(); \
-	if (unlikely(__preempt_count_dec_and_test())) \
+	if (unlikely(__preempt_count_dec_and_test())) { \
+		instrumentation_begin(); \
 		__preempt_schedule_notrace(); \
+		instrumentation_end(); \
+	} \
 } while (0)
 
 #define preempt_check_resched() \
@@ -510,5 +517,9 @@ static __always_inline void preempt_enable_nested(void)
 	if (IS_ENABLED(CONFIG_PREEMPT_RT))
 		preempt_enable();
 }
+
+DEFINE_LOCK_GUARD_0(preempt, preempt_disable(), preempt_enable())
+DEFINE_LOCK_GUARD_0(preempt_notrace, preempt_disable_notrace(), preempt_enable_notrace())
+DEFINE_LOCK_GUARD_0(migrate, migrate_disable(), migrate_enable())
 
 #endif /* __LINUX_PREEMPT_H */

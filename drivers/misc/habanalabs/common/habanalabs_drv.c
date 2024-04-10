@@ -11,7 +11,6 @@
 #include "habanalabs.h"
 
 #include <linux/pci.h>
-#include <linux/aer.h>
 #include <linux/module.h>
 
 #define HL_DRIVER_AUTHOR	"HabanaLabs Kernel Driver Team"
@@ -459,8 +458,6 @@ static int hl_pci_probe(struct pci_dev *pdev,
 
 	pci_set_drvdata(pdev, hdev);
 
-	pci_enable_pcie_error_reporting(pdev);
-
 	rc = hl_device_init(hdev, hl_class);
 	if (rc) {
 		dev_err(&pdev->dev, "Fatal error during habanalabs device init\n");
@@ -471,7 +468,6 @@ static int hl_pci_probe(struct pci_dev *pdev,
 	return 0;
 
 disable_device:
-	pci_disable_pcie_error_reporting(pdev);
 	pci_set_drvdata(pdev, NULL);
 	destroy_hdev(hdev);
 
@@ -494,7 +490,6 @@ static void hl_pci_remove(struct pci_dev *pdev)
 		return;
 
 	hl_device_fini(hdev);
-	pci_disable_pcie_error_reporting(pdev);
 	pci_set_drvdata(pdev, NULL);
 	destroy_hdev(hdev);
 }

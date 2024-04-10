@@ -10,8 +10,7 @@
 #error This file should only be included in vmlinux.lds.S
 #endif
 
-PROVIDE(__efistub_kernel_size		= _edata - _text);
-PROVIDE(__efistub_primary_entry_offset	= primary_entry - _text);
+PROVIDE(__efistub_primary_entry		= primary_entry);
 
 /*
  * The EFI stub has its own symbol namespace prefixed by __efistub_, to
@@ -22,33 +21,14 @@ PROVIDE(__efistub_primary_entry_offset	= primary_entry - _text);
  * linked at. The routines below are all implemented in assembler in a
  * position independent manner
  */
-PROVIDE(__efistub_memcmp		= __pi_memcmp);
-PROVIDE(__efistub_memchr		= __pi_memchr);
-PROVIDE(__efistub_memcpy		= __pi_memcpy);
-PROVIDE(__efistub_memmove		= __pi_memmove);
-PROVIDE(__efistub_memset		= __pi_memset);
-PROVIDE(__efistub_strlen		= __pi_strlen);
-PROVIDE(__efistub_strnlen		= __pi_strnlen);
-PROVIDE(__efistub_strcmp		= __pi_strcmp);
-PROVIDE(__efistub_strncmp		= __pi_strncmp);
-PROVIDE(__efistub_strrchr		= __pi_strrchr);
-PROVIDE(__efistub_dcache_clean_poc	= __pi_dcache_clean_poc);
+PROVIDE(__efistub_caches_clean_inval_pou = __pi_caches_clean_inval_pou);
 
 PROVIDE(__efistub__text			= _text);
 PROVIDE(__efistub__end			= _end);
+PROVIDE(__efistub___inittext_end       	= __inittext_end);
 PROVIDE(__efistub__edata		= _edata);
 PROVIDE(__efistub_screen_info		= screen_info);
 PROVIDE(__efistub__ctype		= _ctype);
-
-/*
- * The __ prefixed memcpy/memset/memmove symbols are provided by KASAN, which
- * instruments the conventional ones. Therefore, any references from the EFI
- * stub or other position independent, low level C code should be redirected to
- * the non-instrumented versions as well.
- */
-PROVIDE(__efistub___memcpy		= __pi_memcpy);
-PROVIDE(__efistub___memmove		= __pi_memmove);
-PROVIDE(__efistub___memset		= __pi_memset);
 
 PROVIDE(__pi___memcpy			= __pi_memcpy);
 PROVIDE(__pi___memmove			= __pi_memmove);

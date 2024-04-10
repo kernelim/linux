@@ -233,8 +233,8 @@ config ARCH_SUPPORTS_HUGETLBFS
 
 config HUGETLBFS
 	bool "HugeTLB file system support"
-	depends on X86 || IA64 || SPARC64 || (S390 && 64BIT) || \
-		   ARCH_SUPPORTS_HUGETLBFS || BROKEN
+	depends on X86 || IA64 || SPARC64 || ARCH_SUPPORTS_HUGETLBFS || BROKEN
+	depends on (SYSFS || SYSCTL)
 	help
 	  hugetlbfs is a filesystem backing for HugeTLB pages, based on
 	  ramfs. For architectures that support it, say Y here and read
@@ -363,12 +363,7 @@ config NFS_V4_2_SSC_HELPER
 source "net/sunrpc/Kconfig"
 source "fs/ceph/Kconfig"
 
-source "fs/cifs/Kconfig"
-
-config SMBFS_COMMON
-	tristate
-	default y if CIFS=y
-	default m if CIFS=m
+source "fs/smb/Kconfig"
 
 source "fs/coda/Kconfig"
 source "fs/afs/Kconfig"

@@ -1908,8 +1908,6 @@ static int __init ip6_tables_init(void)
 {
 	int ret;
 
-	mark_driver_deprecated("ip6tables");
-
 	ret = register_pernet_subsys(&ip6_tables_net_ops);
 	if (ret < 0)
 		goto err1;

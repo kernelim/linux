@@ -11,6 +11,7 @@
 #include "gem/i915_gem_lmem.h"
 
 #include "i915_drv.h"
+#include "gt/intel_gt.h"
 
 #include "intel_pxp.h"
 #include "intel_pxp_cmd_interface_42.h"
@@ -158,6 +159,12 @@ static int i915_pxp_tee_component_bind(struct device *i915_kdev,
 	intel_wakeref_t wakeref;
 	int ret = 0;
 
+	if (!HAS_HECI_PXP(i915)) {
+		pxp->dev_link = device_link_add(i915_kdev, tee_kdev, DL_FLAG_STATELESS);
+		if (drm_WARN_ON(&i915->drm, !pxp->dev_link))
+			return -ENODEV;
+	}
+
 	mutex_lock(&pxp->tee_mutex);
 	pxp->pxp_component = data;
 	pxp->pxp_component->tee_dev = tee_kdev;
@@ -200,6 +207,11 @@ static void i915_pxp_tee_component_unbind(struct device *i915_kdev,
 	mutex_lock(&pxp->tee_mutex);
 	pxp->pxp_component = NULL;
 	mutex_unlock(&pxp->tee_mutex);
+
+	if (pxp->dev_link) {
+		device_link_del(pxp->dev_link);
+		pxp->dev_link = NULL;
+	}
 }
 
 static const struct component_ops i915_pxp_tee_component_ops = {
@@ -234,7 +246,9 @@ static int alloc_streaming_command(struct intel_pxp *pxp)
 	}
 
 	/* map the lmem into the virtual memory pointer */
-	cmd = i915_gem_object_pin_map_unlocked(obj, i915_coherent_map_type(i915, obj, true));
+	cmd = i915_gem_object_pin_map_unlocked(obj,
+					       intel_gt_coherent_map_type(pxp->ctrl_gt,
+									  obj, true));
 	if (IS_ERR(cmd)) {
 		drm_err(&i915->drm, "Failed to map gsc message page!\n");
 		err = PTR_ERR(cmd);
@@ -272,8 +286,6 @@ int intel_pxp_tee_component_init(struct intel_pxp *pxp)
 	int ret;
 	struct intel_gt *gt = pxp->ctrl_gt;
 	struct drm_i915_private *i915 = gt->i915;
-
-	mutex_init(&pxp->tee_mutex);
 
 	ret = alloc_streaming_command(pxp);
 	if (ret)

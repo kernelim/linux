@@ -740,14 +740,13 @@ static int fuse_copy_fill(struct fuse_copy_state *cs)
 		}
 	} else {
 		size_t off;
-		err = iov_iter_get_pages(cs->iter, &page, PAGE_SIZE, 1, &off);
+		err = iov_iter_get_pages2(cs->iter, &page, PAGE_SIZE, 1, &off);
 		if (err < 0)
 			return err;
 		BUG_ON(!err);
 		cs->len = err;
 		cs->offset = off;
 		cs->pg = page;
-		iov_iter_advance(cs->iter, err);
 	}
 
 	return lock_request(cs->req);
@@ -775,11 +774,11 @@ static int fuse_copy_do(struct fuse_copy_state *cs, void **val, unsigned *size)
 	return ncpy;
 }
 
-static int fuse_check_page(struct page *page)
+static int fuse_check_folio(struct folio *folio)
 {
-	if (page_mapcount(page) ||
-	    page->mapping != NULL ||
-	    (page->flags & PAGE_FLAGS_CHECK_AT_PREP &
+	if (folio_mapped(folio) ||
+	    folio->mapping != NULL ||
+	    (folio->flags & PAGE_FLAGS_CHECK_AT_PREP &
 	     ~(1 << PG_locked |
 	       1 << PG_referenced |
 	       1 << PG_uptodate |
@@ -787,8 +786,9 @@ static int fuse_check_page(struct page *page)
 	       1 << PG_active |
 	       1 << PG_workingset |
 	       1 << PG_reclaim |
-	       1 << PG_waiters))) {
-		dump_page(page, "fuse: trying to steal weird page");
+	       1 << PG_waiters |
+	       LRU_GEN_MASK | LRU_REFS_MASK))) {
+		dump_page(&folio->page, "fuse: trying to steal weird page");
 		return 1;
 	}
 	return 0;
@@ -797,11 +797,11 @@ static int fuse_check_page(struct page *page)
 static int fuse_try_move_page(struct fuse_copy_state *cs, struct page **pagep)
 {
 	int err;
-	struct page *oldpage = *pagep;
-	struct page *newpage;
+	struct folio *oldfolio = page_folio(*pagep);
+	struct folio *newfolio;
 	struct pipe_buffer *buf = cs->pipebufs;
 
-	get_page(oldpage);
+	folio_get(oldfolio);
 	err = unlock_request(cs->req);
 	if (err)
 		goto out_put_old;
@@ -824,63 +824,64 @@ static int fuse_try_move_page(struct fuse_copy_state *cs, struct page **pagep)
 	if (!pipe_buf_try_steal(cs->pipe, buf))
 		goto out_fallback;
 
-	newpage = buf->page;
+	newfolio = page_folio(buf->page);
 
-	if (!PageUptodate(newpage))
-		SetPageUptodate(newpage);
+	if (!folio_test_uptodate(newfolio))
+		folio_mark_uptodate(newfolio);
 
-	ClearPageMappedToDisk(newpage);
+	folio_clear_mappedtodisk(newfolio);
 
-	if (fuse_check_page(newpage) != 0)
+	if (fuse_check_folio(newfolio) != 0)
 		goto out_fallback_unlock;
 
 	/*
 	 * This is a new and locked page, it shouldn't be mapped or
 	 * have any special flags on it
 	 */
-	if (WARN_ON(page_mapped(oldpage)))
+	if (WARN_ON(folio_mapped(oldfolio)))
 		goto out_fallback_unlock;
-	if (WARN_ON(page_has_private(oldpage)))
+	if (WARN_ON(folio_has_private(oldfolio)))
 		goto out_fallback_unlock;
-	if (WARN_ON(PageDirty(oldpage) || PageWriteback(oldpage)))
+	if (WARN_ON(folio_test_dirty(oldfolio) ||
+				folio_test_writeback(oldfolio)))
 		goto out_fallback_unlock;
-	if (WARN_ON(PageMlocked(oldpage)))
+	if (WARN_ON(folio_test_mlocked(oldfolio)))
 		goto out_fallback_unlock;
 
-	replace_page_cache_page(oldpage, newpage);
+	replace_page_cache_folio(oldfolio, newfolio);
 
-	get_page(newpage);
+	folio_get(newfolio);
 
 	if (!(buf->flags & PIPE_BUF_FLAG_LRU))
-		lru_cache_add(newpage);
+		folio_add_lru(newfolio);
 
 	err = 0;
 	spin_lock(&cs->req->waitq.lock);
 	if (test_bit(FR_ABORTED, &cs->req->flags))
 		err = -ENOENT;
 	else
-		*pagep = newpage;
+		*pagep = &newfolio->page;
 	spin_unlock(&cs->req->waitq.lock);
 
 	if (err) {
-		unlock_page(newpage);
-		put_page(newpage);
+		folio_unlock(newfolio);
+		folio_put(newfolio);
 		goto out_put_old;
 	}
 
-	unlock_page(oldpage);
+	folio_unlock(oldfolio);
 	/* Drop ref for ap->pages[] array */
-	put_page(oldpage);
+	folio_put(oldfolio);
 	cs->len = 0;
 
 	err = 0;
 out_put_old:
 	/* Drop ref obtained in this function */
-	put_page(oldpage);
+	folio_put(oldfolio);
 	return err;
 
 out_fallback_unlock:
-	unlock_page(newpage);
+	folio_unlock(newfolio);
 out_fallback:
 	cs->pg = buf->page;
 	cs->offset = buf->offset;
@@ -1360,7 +1361,7 @@ static ssize_t fuse_dev_read(struct kiocb *iocb, struct iov_iter *to)
 	if (!fud)
 		return -EPERM;
 
-	if (!iter_is_iovec(to))
+	if (!user_backed_iter(to))
 		return -EINVAL;
 
 	fuse_copy_init(&cs, 1, to);
@@ -1953,7 +1954,7 @@ static ssize_t fuse_dev_write(struct kiocb *iocb, struct iov_iter *from)
 	if (!fud)
 		return -EPERM;
 
-	if (!iter_is_iovec(from))
+	if (!user_backed_iter(from))
 		return -EINVAL;
 
 	fuse_copy_init(&cs, 0, from);

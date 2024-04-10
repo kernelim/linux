@@ -89,6 +89,7 @@
 #include <linux/types.h>
 #include <linux/bitops.h>
 #include <linux/cred.h>
+#include <linux/errqueue.h>
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
@@ -110,16 +111,20 @@
 #include <linux/workqueue.h>
 #include <net/sock.h>
 #include <net/af_vsock.h>
+#include <uapi/linux/vm_sockets.h>
 
 static int __vsock_bind(struct sock *sk, struct sockaddr_vm *addr);
 static void vsock_sk_destruct(struct sock *sk);
 static int vsock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb);
 
 /* Protocol family. */
-static struct proto vsock_proto = {
+struct proto vsock_proto = {
 	.name = "AF_VSOCK",
 	.owner = THIS_MODULE,
 	.obj_size = sizeof(struct vsock_sock),
+#ifdef CONFIG_BPF_SYSCALL
+	.psock_update_sk_prot = vsock_bpf_update_proto,
+#endif
 };
 
 /* The default peer timeout indicates how long we will wait for a peer response
@@ -866,7 +871,7 @@ s64 vsock_stream_has_data(struct vsock_sock *vsk)
 }
 EXPORT_SYMBOL_GPL(vsock_stream_has_data);
 
-static s64 vsock_connectible_has_data(struct vsock_sock *vsk)
+s64 vsock_connectible_has_data(struct vsock_sock *vsk)
 {
 	struct sock *sk = sk_vsock(vsk);
 
@@ -875,6 +880,7 @@ static s64 vsock_connectible_has_data(struct vsock_sock *vsk)
 	else
 		return vsock_stream_has_data(vsk);
 }
+EXPORT_SYMBOL_GPL(vsock_connectible_has_data);
 
 s64 vsock_stream_has_space(struct vsock_sock *vsk)
 {
@@ -1027,7 +1033,7 @@ static __poll_t vsock_poll(struct file *file, struct socket *sock,
 	poll_wait(file, sk_sleep(sk), wait);
 	mask = 0;
 
-	if (sk->sk_err)
+	if (sk->sk_err || !skb_queue_empty_lockless(&sk->sk_error_queue))
 		/* Signify that there has been an error on this socket. */
 		mask |= EPOLLERR;
 
@@ -1130,6 +1136,13 @@ static __poll_t vsock_poll(struct file *file, struct socket *sock,
 	}
 
 	return mask;
+}
+
+static int vsock_read_skb(struct sock *sk, skb_read_actor_t read_actor)
+{
+	struct vsock_sock *vsk = vsock_sk(sk);
+
+	return vsk->transport->read_skb(vsk, read_actor);
 }
 
 static int vsock_dgram_sendmsg(struct socket *sock, struct msghdr *msg,
@@ -1243,18 +1256,43 @@ static int vsock_dgram_connect(struct socket *sock,
 	memcpy(&vsk->remote_addr, remote_addr, sizeof(vsk->remote_addr));
 	sock->state = SS_CONNECTED;
 
+	/* sock map disallows redirection of non-TCP sockets with sk_state !=
+	 * TCP_ESTABLISHED (see sock_map_redirect_allowed()), so we set
+	 * TCP_ESTABLISHED here to allow redirection of connected vsock dgrams.
+	 *
+	 * This doesn't seem to be abnormal state for datagram sockets, as the
+	 * same approach can be see in other datagram socket types as well
+	 * (such as unix sockets).
+	 */
+	sk->sk_state = TCP_ESTABLISHED;
+
 out:
 	release_sock(sk);
 	return err;
 }
 
-static int vsock_dgram_recvmsg(struct socket *sock, struct msghdr *msg,
-			       size_t len, int flags)
+int vsock_dgram_recvmsg(struct socket *sock, struct msghdr *msg,
+			size_t len, int flags)
 {
-	struct vsock_sock *vsk = vsock_sk(sock->sk);
+#ifdef CONFIG_BPF_SYSCALL
+	const struct proto *prot;
+#endif
+	struct vsock_sock *vsk;
+	struct sock *sk;
+
+	sk = sock->sk;
+	vsk = vsock_sk(sk);
+
+#ifdef CONFIG_BPF_SYSCALL
+	prot = READ_ONCE(sk->sk_prot);
+	if (prot != &vsock_proto)
+		return prot->recvmsg(sk, msg, len, flags & MSG_DONTWAIT,
+				     flags & ~MSG_DONTWAIT, NULL);
+#endif
 
 	return vsk->transport->dgram_dequeue(vsk, msg, len, flags);
 }
+EXPORT_SYMBOL_GPL(vsock_dgram_recvmsg);
 
 static const struct proto_ops vsock_dgram_ops = {
 	.family = PF_VSOCK,
@@ -1273,6 +1311,7 @@ static const struct proto_ops vsock_dgram_ops = {
 	.recvmsg = vsock_dgram_recvmsg,
 	.mmap = sock_no_mmap,
 	.sendpage = sock_no_sendpage,
+	.read_skb = vsock_read_skb,
 };
 
 static int vsock_transport_cancel_pkt(struct vsock_sock *vsk)
@@ -1367,6 +1406,17 @@ static int vsock_connect(struct socket *sock, struct sockaddr *addr,
 		    !transport->stream_allow(remote_addr->svm_cid,
 					     remote_addr->svm_port)) {
 			err = -ENETUNREACH;
+			goto out;
+		}
+
+		if (vsock_msgzerocopy_allow(transport)) {
+			set_bit(SOCK_SUPPORT_ZC, &sk->sk_socket->flags);
+		} else if (sock_flag(sk, SOCK_ZEROCOPY)) {
+			/* If this option was set before 'connect()',
+			 * when transport was unknown, check that this
+			 * feature is supported here.
+			 */
+			err = -EOPNOTSUPP;
 			goto out;
 		}
 
@@ -1524,6 +1574,9 @@ static int vsock_accept(struct socket *sock, struct socket *newsock, int flags,
 		} else {
 			newsock->state = SS_CONNECTED;
 			sock_graft(connected, newsock);
+			if (vsock_msgzerocopy_allow(vconnected->transport))
+				set_bit(SOCK_SUPPORT_ZC,
+					&connected->sk_socket->flags);
 		}
 
 		release_sock(connected);
@@ -1601,7 +1654,7 @@ static int vsock_connectible_setsockopt(struct socket *sock,
 	const struct vsock_transport *transport;
 	u64 val;
 
-	if (level != AF_VSOCK)
+	if (level != AF_VSOCK && level != SOL_SOCKET)
 		return -ENOPROTOOPT;
 
 #define COPY_IN(_v)                                       \
@@ -1623,6 +1676,33 @@ static int vsock_connectible_setsockopt(struct socket *sock,
 	lock_sock(sk);
 
 	transport = vsk->transport;
+
+	if (level == SOL_SOCKET) {
+		int zerocopy;
+
+		if (optname != SO_ZEROCOPY) {
+			release_sock(sk);
+			return sock_setsockopt(sock, level, optname, optval, optlen);
+		}
+
+		/* Use 'int' type here, because variable to
+		 * set this option usually has this type.
+		 */
+		COPY_IN(zerocopy);
+
+		if (zerocopy < 0 || zerocopy > 1) {
+			err = -EINVAL;
+			goto exit;
+		}
+
+		if (transport && !vsock_msgzerocopy_allow(transport)) {
+			err = -EOPNOTSUPP;
+			goto exit;
+		}
+
+		sock_valbool_flag(sk, SOCK_ZEROCOPY, zerocopy);
+		goto exit;
+	}
 
 	switch (optname) {
 	case SO_VM_SOCKETS_BUFFER_SIZE:
@@ -1788,6 +1868,12 @@ static int vsock_connectible_sendmsg(struct socket *sock, struct msghdr *msg,
 		goto out;
 	}
 
+	if (msg->msg_flags & MSG_ZEROCOPY &&
+	    !vsock_msgzerocopy_allow(transport)) {
+		err = -EOPNOTSUPP;
+		goto out;
+	}
+
 	/* Wait for room in the produce queue to enqueue our user's data. */
 	timeout = sock_sndtimeo(sk, msg->msg_flags & MSG_DONTWAIT);
 
@@ -1887,6 +1973,9 @@ out_err:
 			err = total_written;
 	}
 out:
+	if (sk->sk_type == SOCK_STREAM)
+		err = sk_stream_error(sk, msg->msg_flags, err);
+
 	release_sock(sk);
 	return err;
 }
@@ -2087,16 +2176,23 @@ out:
 	return err;
 }
 
-static int
+int
 vsock_connectible_recvmsg(struct socket *sock, struct msghdr *msg, size_t len,
 			  int flags)
 {
 	struct sock *sk;
 	struct vsock_sock *vsk;
 	const struct vsock_transport *transport;
+#ifdef CONFIG_BPF_SYSCALL
+	const struct proto *prot;
+#endif
 	int err;
 
 	sk = sock->sk;
+
+	if (unlikely(flags & MSG_ERRQUEUE))
+		return sock_recv_errqueue(sk, msg, len, SOL_VSOCK, VSOCK_RECVERR);
+
 	vsk = vsock_sk(sk);
 	err = 0;
 
@@ -2140,6 +2236,15 @@ vsock_connectible_recvmsg(struct socket *sock, struct msghdr *msg, size_t len,
 		goto out;
 	}
 
+#ifdef CONFIG_BPF_SYSCALL
+	prot = READ_ONCE(sk->sk_prot);
+	if (prot != &vsock_proto) {
+		release_sock(sk);
+		return prot->recvmsg(sk, msg, len, flags & MSG_DONTWAIT,
+				     flags & ~MSG_DONTWAIT, NULL);
+	}
+#endif
+
 	if (sk->sk_type == SOCK_STREAM)
 		err = __vsock_stream_recvmsg(sk, msg, len, flags);
 	else
@@ -2149,6 +2254,7 @@ out:
 	release_sock(sk);
 	return err;
 }
+EXPORT_SYMBOL_GPL(vsock_connectible_recvmsg);
 
 static int vsock_set_rcvlowat(struct sock *sk, int val)
 {
@@ -2189,6 +2295,7 @@ static const struct proto_ops vsock_stream_ops = {
 	.mmap = sock_no_mmap,
 	.sendpage = sock_no_sendpage,
 	.set_rcvlowat = vsock_set_rcvlowat,
+	.read_skb = vsock_read_skb,
 };
 
 static const struct proto_ops vsock_seqpacket_ops = {
@@ -2210,6 +2317,7 @@ static const struct proto_ops vsock_seqpacket_ops = {
 	.recvmsg = vsock_connectible_recvmsg,
 	.mmap = sock_no_mmap,
 	.sendpage = sock_no_sendpage,
+	.read_skb = vsock_read_skb,
 };
 
 static int vsock_create(struct net *net, struct socket *sock,
@@ -2254,6 +2362,12 @@ static int vsock_create(struct net *net, struct socket *sock,
 			return ret;
 		}
 	}
+
+	/* SOCK_DGRAM doesn't have 'setsockopt' callback set in its
+	 * proto_ops, so there is no handler for custom logic.
+	 */
+	if (sock_type_connectible(sock->type))
+		set_bit(SOCK_CUSTOM_SOCKOPT, &sk->sk_socket->flags);
 
 	vsock_insert_unbound(vsk);
 
@@ -2348,6 +2462,8 @@ static int __init vsock_init(void)
 		       AF_VSOCK, err);
 		goto err_unregister_proto;
 	}
+
+	vsock_bpf_build_proto();
 
 	return 0;
 

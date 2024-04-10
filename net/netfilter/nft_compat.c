@@ -902,8 +902,6 @@ static int __init nft_compat_module_init(void)
 {
 	int ret;
 
-	mark_driver_deprecated("nft_compat");
-
 	ret = nft_register_expr(&nft_match_type);
 	if (ret < 0)
 		return ret;

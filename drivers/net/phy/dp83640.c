@@ -631,7 +631,6 @@ static void recalibrate(struct dp83640_clock *clock)
 	s64 now, diff;
 	struct phy_txts event_ts;
 	struct timespec64 ts;
-	struct list_head *this;
 	struct dp83640_private *tmp;
 	struct phy_device *master = clock->chosen->phydev;
 	u16 cal_gpio, cfg0, evnt, ptp_trig, trigger, val;
@@ -648,8 +647,7 @@ static void recalibrate(struct dp83640_clock *clock)
 	/*
 	 * enable broadcast, disable status frames, enable ptp clock
 	 */
-	list_for_each(this, &clock->phylist) {
-		tmp = list_entry(this, struct dp83640_private, list);
+	list_for_each_entry(tmp, &clock->phylist, list) {
 		enable_broadcast(tmp->phydev, clock->page, 1);
 		tmp->cfg0 = ext_read(tmp->phydev, PAGE5, PSF_CFG0);
 		ext_write(0, tmp->phydev, PAGE5, PSF_CFG0, 0);
@@ -667,10 +665,8 @@ static void recalibrate(struct dp83640_clock *clock)
 	evnt |= (CAL_EVENT & EVNT_SEL_MASK) << EVNT_SEL_SHIFT;
 	evnt |= (cal_gpio & EVNT_GPIO_MASK) << EVNT_GPIO_SHIFT;
 
-	list_for_each(this, &clock->phylist) {
-		tmp = list_entry(this, struct dp83640_private, list);
+	list_for_each_entry(tmp, &clock->phylist, list)
 		ext_write(0, tmp->phydev, PAGE5, PTP_EVNT, evnt);
-	}
 	ext_write(0, master, PAGE5, PTP_EVNT, evnt);
 
 	/*
@@ -709,8 +705,7 @@ static void recalibrate(struct dp83640_clock *clock)
 	event_ts.sec_hi = ext_read(master, PAGE4, PTP_EDATA);
 	now = phy2txts(&event_ts);
 
-	list_for_each(this, &clock->phylist) {
-		tmp = list_entry(this, struct dp83640_private, list);
+	list_for_each_entry(tmp, &clock->phylist, list) {
 		val = ext_read(tmp->phydev, PAGE4, PTP_STS);
 		phydev_info(tmp->phydev, "slave  PTP_STS  0x%04hx\n", val);
 		val = ext_read(tmp->phydev, PAGE4, PTP_ESTS);
@@ -730,10 +725,8 @@ static void recalibrate(struct dp83640_clock *clock)
 	/*
 	 * restore status frames
 	 */
-	list_for_each(this, &clock->phylist) {
-		tmp = list_entry(this, struct dp83640_private, list);
+	list_for_each_entry(tmp, &clock->phylist, list)
 		ext_write(0, tmp->phydev, PAGE5, PSF_CFG0, tmp->cfg0);
-	}
 	ext_write(0, master, PAGE5, PSF_CFG0, cfg0);
 
 	mutex_unlock(&clock->extreg_lock);
@@ -968,17 +961,6 @@ static void decode_status_frame(struct dp83640_private *dp83640,
 		}
 		ptr += size;
 	}
-}
-
-static int is_sync(struct sk_buff *skb, int type)
-{
-	struct ptp_header *hdr;
-
-	hdr = ptp_parse_header(skb, type);
-	if (!hdr)
-		return 0;
-
-	return ptp_get_msgtype(hdr, type) == PTP_MSGTYPE_SYNC;
 }
 
 static void dp83640_free_clocks(void)
@@ -1396,7 +1378,7 @@ static void dp83640_txtstamp(struct mii_timestamper *mii_ts,
 	switch (dp83640->hwts_tx_en) {
 
 	case HWTSTAMP_TX_ONESTEP_SYNC:
-		if (is_sync(skb, type)) {
+		if (ptp_msg_is_sync(skb, type)) {
 			kfree_skb(skb);
 			return;
 		}

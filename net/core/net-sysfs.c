@@ -675,7 +675,7 @@ static ssize_t netstat_show(const struct device *d,
 	struct net_device *dev = to_net_dev(d);
 	ssize_t ret = -EINVAL;
 
-	WARN_ON(offset > sizeof(struct rtnl_link_stats64) ||
+	WARN_ON(offset > sizeof_rtnl_link_stats64 ||
 		offset % sizeof(u64) != 0);
 
 	read_lock(&dev_base_lock);
@@ -1042,7 +1042,7 @@ static void rx_queue_release(struct kobject *kobj)
 	netdev_put(queue->dev, &queue->dev_tracker);
 }
 
-static const void *rx_queue_namespace(struct kobject *kobj)
+static const void *rx_queue_namespace(const struct kobject *kobj)
 {
 	struct netdev_rx_queue *queue = to_rx_queue(kobj);
 	struct device *dev = &queue->dev->dev;
@@ -1054,7 +1054,7 @@ static const void *rx_queue_namespace(struct kobject *kobj)
 	return ns;
 }
 
-static void rx_queue_get_ownership(struct kobject *kobj,
+static void rx_queue_get_ownership(const struct kobject *kobj,
 				   kuid_t *uid, kgid_t *gid)
 {
 	const struct net *net = rx_queue_namespace(kobj);
@@ -1661,7 +1661,7 @@ static void netdev_queue_release(struct kobject *kobj)
 	netdev_put(queue->dev, &queue->dev_tracker);
 }
 
-static const void *netdev_queue_namespace(struct kobject *kobj)
+static const void *netdev_queue_namespace(const struct kobject *kobj)
 {
 	struct netdev_queue *queue = to_netdev_queue(kobj);
 	struct device *dev = &queue->dev->dev;
@@ -1673,7 +1673,7 @@ static const void *netdev_queue_namespace(struct kobject *kobj)
 	return ns;
 }
 
-static void netdev_queue_get_ownership(struct kobject *kobj,
+static void netdev_queue_get_ownership(const struct kobject *kobj,
 				       kuid_t *uid, kgid_t *gid)
 {
 	const struct net *net = netdev_queue_namespace(kobj);

@@ -26,6 +26,7 @@
 #include <asm/mpspec.h>
 #include <linux/dmi.h>
 #endif
+#include <linux/acpi_agdi.h>
 #include <linux/acpi_apmt.h>
 #include <linux/acpi_iort.h>
 #include <linux/acpi_viot.h>
@@ -807,9 +808,10 @@ static bool acpi_of_modalias(struct acpi_device *adev,
  * @modalias:   Pointer to buffer that modalias value will be copied into
  * @len:	Length of modalias buffer
  *
- * This is a counterpart of of_modalias_node() for struct acpi_device objects.
- * If there is a compatible string for @adev, it will be copied to @modalias
- * with the vendor prefix stripped; otherwise, @default_id will be used.
+ * This is a counterpart of of_alias_from_compatible() for struct acpi_device
+ * objects. If there is a compatible string for @adev, it will be copied to
+ * @modalias with the vendor prefix stripped; otherwise, @default_id will be
+ * used.
  */
 void acpi_set_modalias(struct acpi_device *adev, const char *default_id,
 		       char *modalias, size_t len)
@@ -1004,7 +1006,7 @@ static int acpi_bus_match(struct device *dev, struct device_driver *drv)
 		&& !acpi_match_device_ids(acpi_dev, acpi_drv->ids);
 }
 
-static int acpi_device_uevent(struct device *dev, struct kobj_uevent_env *env)
+static int acpi_device_uevent(const struct device *dev, struct kobj_uevent_env *env)
 {
 	return __acpi_device_uevent_modalias(to_acpi_device(dev), env);
 }
@@ -1403,6 +1405,8 @@ static int __init acpi_init(void)
 	pci_mmcfg_late_init();
 	acpi_iort_init();
 	acpi_viot_early_init();
+	acpi_hest_init();
+	acpi_ghes_init();
 	acpi_scan_init();
 	acpi_ec_init();
 	acpi_debugfs_init();
@@ -1411,6 +1415,7 @@ static int __init acpi_init(void)
 	acpi_debugger_init();
 	acpi_setup_sb_notify_handler();
 	acpi_viot_init();
+	acpi_agdi_init();
 	acpi_apmt_init();
 	return 0;
 }

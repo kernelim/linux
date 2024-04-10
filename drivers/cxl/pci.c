@@ -14,8 +14,6 @@
 #include "cxlmem.h"
 #include "cxlpci.h"
 #include "cxl.h"
-#define CREATE_TRACE_POINTS
-#include <trace/events/cxl.h>
 
 /**
  * DOC: cxl pci
@@ -162,7 +160,7 @@ static int __cxl_pci_mbox_send_cmd(struct cxl_dev_state *cxlds,
 	writeq(cmd_reg, cxlds->regs.mbox + CXLDEV_MBOX_CMD_OFFSET);
 
 	/* #4 */
-	dev_dbg(dev, "Sending command\n");
+	dev_dbg(dev, "Sending command: 0x%04x\n", mbox_cmd->opcode);
 	writel(CXLDEV_MBOX_CTRL_DOORBELL,
 	       cxlds->regs.mbox + CXLDEV_MBOX_CTRL_OFFSET);
 
@@ -277,86 +275,64 @@ static int cxl_pci_setup_mailbox(struct cxl_dev_state *cxlds)
 	return 0;
 }
 
-static int cxl_map_regblock(struct pci_dev *pdev, struct cxl_register_map *map)
+/*
+ * Assume that any RCIEP that emits the CXL memory expander class code
+ * is an RCD
+ */
+static bool is_cxl_restricted(struct pci_dev *pdev)
 {
-	struct device *dev = &pdev->dev;
-
-	map->base = ioremap(map->resource, map->max_size);
-	if (!map->base) {
-		dev_err(dev, "failed to map registers\n");
-		return -ENOMEM;
-	}
-
-	dev_dbg(dev, "Mapped CXL Memory Device resource %pa\n", &map->resource);
-	return 0;
+	return pci_pcie_type(pdev) == PCI_EXP_TYPE_RC_END;
 }
 
-static void cxl_unmap_regblock(struct pci_dev *pdev,
-			       struct cxl_register_map *map)
+static int cxl_rcrb_get_comp_regs(struct pci_dev *pdev,
+				  struct cxl_register_map *map)
 {
-	iounmap(map->base);
-	map->base = NULL;
-}
+	struct cxl_port *port;
+	struct cxl_dport *dport;
+	resource_size_t component_reg_phys;
 
-static int cxl_probe_regs(struct pci_dev *pdev, struct cxl_register_map *map)
-{
-	struct cxl_component_reg_map *comp_map;
-	struct cxl_device_reg_map *dev_map;
-	struct device *dev = &pdev->dev;
-	void __iomem *base = map->base;
+	*map = (struct cxl_register_map) {
+		.host = &pdev->dev,
+		.resource = CXL_RESOURCE_NONE,
+	};
 
-	switch (map->reg_type) {
-	case CXL_REGLOC_RBI_COMPONENT:
-		comp_map = &map->component_map;
-		cxl_probe_component_regs(dev, base, comp_map);
-		if (!comp_map->hdm_decoder.valid) {
-			dev_err(dev, "HDM decoder registers not found\n");
-			return -ENXIO;
-		}
+	port = cxl_pci_find_port(pdev, &dport);
+	if (!port)
+		return -EPROBE_DEFER;
 
-		if (!comp_map->ras.valid)
-			dev_dbg(dev, "RAS registers not found\n");
+	component_reg_phys = cxl_rcd_component_reg_phys(&pdev->dev, dport);
 
-		dev_dbg(dev, "Set up component registers\n");
-		break;
-	case CXL_REGLOC_RBI_MEMDEV:
-		dev_map = &map->device_map;
-		cxl_probe_device_regs(dev, base, dev_map);
-		if (!dev_map->status.valid || !dev_map->mbox.valid ||
-		    !dev_map->memdev.valid) {
-			dev_err(dev, "registers not found: %s%s%s\n",
-				!dev_map->status.valid ? "status " : "",
-				!dev_map->mbox.valid ? "mbox " : "",
-				!dev_map->memdev.valid ? "memdev " : "");
-			return -ENXIO;
-		}
+	put_device(&port->dev);
 
-		dev_dbg(dev, "Probing device registers...\n");
-		break;
-	default:
-		break;
-	}
+	if (component_reg_phys == CXL_RESOURCE_NONE)
+		return -ENXIO;
+
+	map->resource = component_reg_phys;
+	map->reg_type = CXL_REGLOC_RBI_COMPONENT;
+	map->max_size = CXL_COMPONENT_REG_BLOCK_SIZE;
 
 	return 0;
 }
 
-static int cxl_setup_regs(struct pci_dev *pdev, enum cxl_regloc_type type,
-			  struct cxl_register_map *map)
+static int cxl_pci_setup_regs(struct pci_dev *pdev, enum cxl_regloc_type type,
+			      struct cxl_register_map *map)
 {
 	int rc;
 
 	rc = cxl_find_regblock(pdev, type, map);
+
+	/*
+	 * If the Register Locator DVSEC does not exist, check if it
+	 * is an RCH and try to extract the Component Registers from
+	 * an RCRB.
+	 */
+	if (rc && type == CXL_REGLOC_RBI_COMPONENT && is_cxl_restricted(pdev))
+		rc = cxl_rcrb_get_comp_regs(pdev, map);
+
 	if (rc)
 		return rc;
 
-	rc = cxl_map_regblock(pdev, map);
-	if (rc)
-		return rc;
-
-	rc = cxl_probe_regs(pdev, map);
-	cxl_unmap_regblock(pdev, map);
-
-	return rc;
+	return cxl_setup_regs(map);
 }
 
 static void cxl_pci_destroy_doe(void *mbs)
@@ -405,20 +381,6 @@ static void devm_cxl_pci_create_doe(struct cxl_dev_state *cxlds)
 	}
 }
 
-static void disable_aer(void *pdev)
-{
-	pci_disable_pcie_error_reporting(pdev);
-}
-
-/*
- * Assume that any RCIEP that emits the CXL memory expander class code
- * is an RCD
- */
-static bool is_cxl_restricted(struct pci_dev *pdev)
-{
-	return pci_pcie_type(pdev) == PCI_EXP_TYPE_RC_END;
-}
-
 static int cxl_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct cxl_register_map map;
@@ -450,11 +412,11 @@ static int cxl_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_warn(&pdev->dev,
 			 "Device DVSEC not present, skip CXL.mem init\n");
 
-	rc = cxl_setup_regs(pdev, CXL_REGLOC_RBI_MEMDEV, &map);
+	rc = cxl_pci_setup_regs(pdev, CXL_REGLOC_RBI_MEMDEV, &map);
 	if (rc)
 		return rc;
 
-	rc = cxl_map_device_regs(&pdev->dev, &cxlds->regs.device_regs, &map);
+	rc = cxl_map_device_regs(&map, &cxlds->regs.device_regs);
 	if (rc)
 		return rc;
 
@@ -463,16 +425,18 @@ static int cxl_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	 * still be useful for management functions so don't return an error.
 	 */
 	cxlds->component_reg_phys = CXL_RESOURCE_NONE;
-	rc = cxl_setup_regs(pdev, CXL_REGLOC_RBI_COMPONENT, &map);
+	rc = cxl_pci_setup_regs(pdev, CXL_REGLOC_RBI_COMPONENT, &map);
 	if (rc)
 		dev_warn(&pdev->dev, "No component registers (%d)\n", rc);
+	else if (!map.component_map.ras.valid)
+		dev_dbg(&pdev->dev, "RAS registers not found\n");
 
 	cxlds->component_reg_phys = map.resource;
 
 	devm_cxl_pci_create_doe(cxlds);
 
-	rc = cxl_map_component_regs(&pdev->dev, &cxlds->regs.component,
-				    &map, BIT(CXL_CM_CAP_CAP_ID_RAS));
+	rc = cxl_map_component_regs(&map, &cxlds->regs.component,
+				    BIT(CXL_CM_CAP_CAP_ID_RAS));
 	if (rc)
 		dev_dbg(&pdev->dev, "Failed to map RAS capability.\n");
 
@@ -496,12 +460,6 @@ static int cxl_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (IS_ERR(cxlmd))
 		return PTR_ERR(cxlmd);
 
-	if (cxlds->regs.ras) {
-		pci_enable_pcie_error_reporting(pdev);
-		rc = devm_add_action_or_reset(&pdev->dev, disable_aer, pdev);
-		if (rc)
-			return rc;
-	}
 	pci_save_state(pdev);
 
 	return rc;
@@ -513,99 +471,6 @@ static const struct pci_device_id cxl_mem_pci_tbl[] = {
 	{ /* terminate list */ },
 };
 MODULE_DEVICE_TABLE(pci, cxl_mem_pci_tbl);
-
-/* CXL spec rev3.0 8.2.4.16.1 */
-static void header_log_copy(struct cxl_dev_state *cxlds, u32 *log)
-{
-	void __iomem *addr;
-	u32 *log_addr;
-	int i, log_u32_size = CXL_HEADERLOG_SIZE / sizeof(u32);
-
-	addr = cxlds->regs.ras + CXL_RAS_HEADER_LOG_OFFSET;
-	log_addr = log;
-
-	for (i = 0; i < log_u32_size; i++) {
-		*log_addr = readl(addr);
-		log_addr++;
-		addr += sizeof(u32);
-	}
-}
-
-/*
- * Log the state of the RAS status registers and prepare them to log the
- * next error status. Return 1 if reset needed.
- */
-static bool cxl_report_and_clear(struct cxl_dev_state *cxlds)
-{
-	struct cxl_memdev *cxlmd = cxlds->cxlmd;
-	struct device *dev = &cxlmd->dev;
-	u32 hl[CXL_HEADERLOG_SIZE_U32];
-	void __iomem *addr;
-	u32 status;
-	u32 fe;
-
-	if (!cxlds->regs.ras)
-		return false;
-
-	addr = cxlds->regs.ras + CXL_RAS_UNCORRECTABLE_STATUS_OFFSET;
-	status = readl(addr);
-	if (!(status & CXL_RAS_UNCORRECTABLE_STATUS_MASK))
-		return false;
-
-	/* If multiple errors, log header points to first error from ctrl reg */
-	if (hweight32(status) > 1) {
-		void __iomem *rcc_addr =
-			cxlds->regs.ras + CXL_RAS_CAP_CONTROL_OFFSET;
-
-		fe = BIT(FIELD_GET(CXL_RAS_CAP_CONTROL_FE_MASK,
-				   readl(rcc_addr)));
-	} else {
-		fe = status;
-	}
-
-	header_log_copy(cxlds, hl);
-	trace_cxl_aer_uncorrectable_error(dev, status, fe, hl);
-	writel(status & CXL_RAS_UNCORRECTABLE_STATUS_MASK, addr);
-
-	return true;
-}
-
-static pci_ers_result_t cxl_error_detected(struct pci_dev *pdev,
-					   pci_channel_state_t state)
-{
-	struct cxl_dev_state *cxlds = pci_get_drvdata(pdev);
-	struct cxl_memdev *cxlmd = cxlds->cxlmd;
-	struct device *dev = &cxlmd->dev;
-	bool ue;
-
-	/*
-	 * A frozen channel indicates an impending reset which is fatal to
-	 * CXL.mem operation, and will likely crash the system. On the off
-	 * chance the situation is recoverable dump the status of the RAS
-	 * capability registers and bounce the active state of the memdev.
-	 */
-	ue = cxl_report_and_clear(cxlds);
-
-	switch (state) {
-	case pci_channel_io_normal:
-		if (ue) {
-			device_release_driver(dev);
-			return PCI_ERS_RESULT_NEED_RESET;
-		}
-		return PCI_ERS_RESULT_CAN_RECOVER;
-	case pci_channel_io_frozen:
-		dev_warn(&pdev->dev,
-			 "%s: frozen state error detected, disable CXL.mem\n",
-			 dev_name(dev));
-		device_release_driver(dev);
-		return PCI_ERS_RESULT_NEED_RESET;
-	case pci_channel_io_perm_failure:
-		dev_warn(&pdev->dev,
-			 "failure state error detected, request disconnect\n");
-		return PCI_ERS_RESULT_DISCONNECT;
-	}
-	return PCI_ERS_RESULT_NEED_RESET;
-}
 
 static pci_ers_result_t cxl_slot_reset(struct pci_dev *pdev)
 {
@@ -629,25 +494,6 @@ static void cxl_error_resume(struct pci_dev *pdev)
 
 	dev_info(&pdev->dev, "%s: error resume %s\n", dev_name(dev),
 		 dev->driver ? "successful" : "failed");
-}
-
-static void cxl_cor_error_detected(struct pci_dev *pdev)
-{
-	struct cxl_dev_state *cxlds = pci_get_drvdata(pdev);
-	struct cxl_memdev *cxlmd = cxlds->cxlmd;
-	struct device *dev = &cxlmd->dev;
-	void __iomem *addr;
-	u32 status;
-
-	if (!cxlds->regs.ras)
-		return;
-
-	addr = cxlds->regs.ras + CXL_RAS_CORRECTABLE_STATUS_OFFSET;
-	status = readl(addr);
-	if (status & CXL_RAS_CORRECTABLE_STATUS_MASK) {
-		writel(status & CXL_RAS_CORRECTABLE_STATUS_MASK, addr);
-		trace_cxl_aer_correctable_error(dev, status);
-	}
 }
 
 static const struct pci_error_handlers cxl_error_handlers = {

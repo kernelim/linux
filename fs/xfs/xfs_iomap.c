@@ -71,11 +71,19 @@ xfs_iomap_valid(
 	struct inode		*inode,
 	const struct iomap	*iomap)
 {
-	return iomap->validity_cookie ==
-			xfs_iomap_inode_sequence(XFS_I(inode), iomap->flags);
+	struct xfs_inode	*ip = XFS_I(inode);
+
+	if (iomap->validity_cookie !=
+			xfs_iomap_inode_sequence(ip, iomap->flags)) {
+		trace_xfs_iomap_invalid(ip, iomap);
+		return false;
+	}
+
+	XFS_ERRORTAG_DELAY(ip->i_mount, XFS_ERRTAG_WRITE_DELAY_MS);
+	return true;
 }
 
-const struct iomap_page_ops xfs_iomap_page_ops = {
+static const struct iomap_page_ops xfs_iomap_page_ops = {
 	.iomap_valid		= xfs_iomap_valid,
 };
 
@@ -968,6 +976,10 @@ xfs_buffered_write_iomap_begin(
 
 	ASSERT(!XFS_IS_REALTIME_INODE(ip));
 
+	error = xfs_qm_dqattach(ip);
+	if (error)
+		return error;
+
 	error = xfs_ilock_for_iomap(ip, flags, &lockmode);
 	if (error)
 		return error;
@@ -1071,10 +1083,6 @@ xfs_buffered_write_iomap_begin(
 			allocfork = XFS_COW_FORK;
 	}
 
-	error = xfs_qm_dqattach_locked(ip, false);
-	if (error)
-		goto out_unlock;
-
 	if (eof && offset + count > XFS_ISIZE(ip)) {
 		/*
 		 * Determine the initial size of the preallocation.
@@ -1082,9 +1090,12 @@ xfs_buffered_write_iomap_begin(
 		 */
 		if (xfs_has_allocsize(mp))
 			prealloc_blocks = mp->m_allocsize_blocks;
-		else
+		else if (allocfork == XFS_DATA_FORK)
 			prealloc_blocks = xfs_iomap_prealloc_size(ip, allocfork,
 						offset, count, &icur);
+		else
+			prealloc_blocks = xfs_iomap_prealloc_size(ip, allocfork,
+						offset, count, &ccur);
 		if (prealloc_blocks) {
 			xfs_extlen_t	align;
 			xfs_off_t	end_offset;
@@ -1311,7 +1322,7 @@ xfs_seek_iomap_begin(
 	if (cow_fsb != NULLFILEOFF && cow_fsb <= offset_fsb) {
 		if (data_fsb < cow_fsb + cmap.br_blockcount)
 			end_fsb = min(end_fsb, data_fsb);
-		xfs_trim_extent(&cmap, offset_fsb, end_fsb);
+		xfs_trim_extent(&cmap, offset_fsb, end_fsb - offset_fsb);
 		seq = xfs_iomap_inode_sequence(ip, IOMAP_F_SHARED);
 		error = xfs_bmbt_to_iomap(ip, iomap, &cmap, flags,
 					  IOMAP_F_SHARED, seq);
@@ -1336,7 +1347,7 @@ xfs_seek_iomap_begin(
 	imap.br_state = XFS_EXT_NORM;
 done:
 	seq = xfs_iomap_inode_sequence(ip, 0);
-	xfs_trim_extent(&imap, offset_fsb, end_fsb);
+	xfs_trim_extent(&imap, offset_fsb, end_fsb - offset_fsb);
 	error = xfs_bmbt_to_iomap(ip, iomap, &imap, flags, 0, seq);
 out_unlock:
 	xfs_iunlock(ip, lockmode);

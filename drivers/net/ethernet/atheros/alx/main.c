@@ -39,7 +39,6 @@
 #include <linux/ipv6.h>
 #include <linux/if_vlan.h>
 #include <linux/mdio.h>
-#include <linux/aer.h>
 #include <linux/bitops.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -1742,7 +1741,6 @@ static int alx_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto out_pci_disable;
 	}
 
-	pci_enable_pcie_error_reporting(pdev);
 	pci_set_master(pdev);
 
 	if (!pdev->pm_cap) {
@@ -1876,7 +1874,6 @@ out_free_netdev:
 	free_netdev(netdev);
 out_pci_release:
 	pci_release_mem_regions(pdev);
-	pci_disable_pcie_error_reporting(pdev);
 out_pci_disable:
 	pci_disable_device(pdev);
 	return err;
@@ -1894,7 +1891,6 @@ static void alx_remove(struct pci_dev *pdev)
 	iounmap(hw->hw_addr);
 	pci_release_mem_regions(pdev);
 
-	pci_disable_pcie_error_reporting(pdev);
 	pci_disable_device(pdev);
 
 	mutex_destroy(&alx->mtx);

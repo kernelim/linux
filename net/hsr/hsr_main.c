@@ -155,6 +155,10 @@ static int __init hsr_init(void)
 	register_netdevice_notifier(&hsr_nb);
 	res = hsr_netlink_init();
 
+	if (res >= 0) {
+		mark_tech_preview("HSR/PRP", THIS_MODULE);
+	}
+
 	return res;
 }
 

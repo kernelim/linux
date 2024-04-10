@@ -284,35 +284,6 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 }
 #endif
 
-static size_t
-hugetlbfs_read_actor(struct page *page, unsigned long offset,
-			struct iov_iter *to, unsigned long size)
-{
-	size_t copied = 0;
-	int i, chunksize;
-
-	/* Find which 4k chunk and offset with in that chunk */
-	i = offset >> PAGE_SHIFT;
-	offset = offset & ~PAGE_MASK;
-
-	while (size) {
-		size_t n;
-		chunksize = PAGE_SIZE;
-		if (offset)
-			chunksize -= offset;
-		if (chunksize > size)
-			chunksize = size;
-		n = copy_page_to_iter(&page[i], offset, chunksize, to);
-		copied += n;
-		if (n != chunksize)
-			return copied;
-		offset = 0;
-		size -= chunksize;
-		i++;
-	}
-	return copied;
-}
-
 /*
  * Support for read() - Find the page attached to f_mapping and copy out the
  * data. Its *very* similar to generic_file_buffered_read(), we can't use that
@@ -369,7 +340,7 @@ static ssize_t hugetlbfs_read_iter(struct kiocb *iocb, struct iov_iter *to)
 			/*
 			 * We have the page, copy it to user space buffer.
 			 */
-			copied = hugetlbfs_read_actor(page, offset, to, nr);
+			copied = copy_page_to_iter(page, offset, nr, to);
 			put_page(page);
 		}
 		offset += copied;
@@ -402,11 +373,11 @@ static int hugetlbfs_write_end(struct file *file, struct address_space *mapping,
 	return -EINVAL;
 }
 
-static void hugetlb_delete_from_page_cache(struct page *page)
+static void hugetlb_delete_from_page_cache(struct folio *folio)
 {
-	ClearPageDirty(page);
-	ClearPageUptodate(page);
-	delete_from_page_cache(page);
+	folio_clear_dirty(folio);
+	folio_clear_uptodate(folio);
+	filemap_remove_folio(folio);
 }
 
 /*
@@ -420,9 +391,7 @@ static bool hugetlb_vma_maps_page(struct vm_area_struct *vma,
 {
 	pte_t *ptep, pte;
 
-	ptep = huge_pte_offset(vma->vm_mm, addr,
-			huge_page_size(hstate_vma(vma)));
-
+	ptep = hugetlb_walk(vma, addr, huge_page_size(hstate_vma(vma)));
 	if (!ptep)
 		return false;
 
@@ -444,10 +413,12 @@ static bool hugetlb_vma_maps_page(struct vm_area_struct *vma,
  */
 static unsigned long vma_offset_start(struct vm_area_struct *vma, pgoff_t start)
 {
+	unsigned long offset = 0;
+
 	if (vma->vm_pgoff < start)
-		return (start - vma->vm_pgoff) << PAGE_SHIFT;
-	else
-		return 0;
+		offset = (start - vma->vm_pgoff) << PAGE_SHIFT;
+
+	return vma->vm_start + offset;
 }
 
 static unsigned long vma_offset_end(struct vm_area_struct *vma, pgoff_t end)
@@ -489,7 +460,7 @@ retry:
 		v_start = vma_offset_start(vma, start);
 		v_end = vma_offset_end(vma, end);
 
-		if (!hugetlb_vma_maps_page(vma, vma->vm_start + v_start, page))
+		if (!hugetlb_vma_maps_page(vma, v_start, page))
 			continue;
 
 		if (!hugetlb_vma_trylock_write(vma)) {
@@ -505,8 +476,8 @@ retry:
 			break;
 		}
 
-		unmap_hugepage_range(vma, vma->vm_start + v_start, v_end,
-				NULL, ZAP_FLAG_DROP_MARKER);
+		unmap_hugepage_range(vma, v_start, v_end, NULL,
+				     ZAP_FLAG_DROP_MARKER);
 		hugetlb_vma_unlock_write(vma);
 	}
 
@@ -539,10 +510,9 @@ retry:
 		 */
 		v_start = vma_offset_start(vma, start);
 		v_end = vma_offset_end(vma, end);
-		if (hugetlb_vma_maps_page(vma, vma->vm_start + v_start, page))
-			unmap_hugepage_range(vma, vma->vm_start + v_start,
-						v_end, NULL,
-						ZAP_FLAG_DROP_MARKER);
+		if (hugetlb_vma_maps_page(vma, v_start, page))
+			unmap_hugepage_range(vma, v_start, v_end, NULL,
+					     ZAP_FLAG_DROP_MARKER);
 
 		kref_put(&vma_lock->refs, hugetlb_vma_lock_release);
 		hugetlb_vma_unlock_write(vma);
@@ -572,8 +542,7 @@ hugetlb_vmdelete_list(struct rb_root_cached *root, pgoff_t start, pgoff_t end,
 		v_start = vma_offset_start(vma, start);
 		v_end = vma_offset_end(vma, end);
 
-		unmap_hugepage_range(vma, vma->vm_start + v_start, v_end,
-				     NULL, zap_flags);
+		unmap_hugepage_range(vma, v_start, v_end, NULL, zap_flags);
 
 		/*
 		 * Note that vma lock only exists for shared/non-private
@@ -612,8 +581,8 @@ static bool remove_inode_single_folio(struct hstate *h, struct inode *inode,
 	 * map could fail.  Correspondingly, the subpool and global
 	 * reserve usage count can need to be adjusted.
 	 */
-	VM_BUG_ON(HPageRestoreReserve(&folio->page));
-	hugetlb_delete_from_page_cache(&folio->page);
+	VM_BUG_ON_FOLIO(folio_test_hugetlb_restore_reserve(folio), folio);
+	hugetlb_delete_from_page_cache(folio);
 	ret = true;
 	if (!truncate_op) {
 		if (unlikely(hugetlb_unreserve_pages(inode, index,
@@ -1013,33 +982,18 @@ static struct inode *hugetlbfs_get_inode(struct super_block *sb,
 /*
  * File creation. Allocate an inode, and we're done..
  */
-static int do_hugetlbfs_mknod(struct inode *dir,
-			struct dentry *dentry,
-			umode_t mode,
-			dev_t dev,
-			bool tmpfile)
-{
-	struct inode *inode;
-	int error = -ENOSPC;
-
-	inode = hugetlbfs_get_inode(dir->i_sb, dir, mode, dev);
-	if (inode) {
-		dir->i_ctime = dir->i_mtime = current_time(dir);
-		if (tmpfile) {
-			d_tmpfile(dentry, inode);
-		} else {
-			d_instantiate(dentry, inode);
-			dget(dentry);/* Extra count - pin the dentry in core */
-		}
-		error = 0;
-	}
-	return error;
-}
-
 static int hugetlbfs_mknod(struct user_namespace *mnt_userns, struct inode *dir,
 			   struct dentry *dentry, umode_t mode, dev_t dev)
 {
-	return do_hugetlbfs_mknod(dir, dentry, mode, dev, false);
+	struct inode *inode;
+
+	inode = hugetlbfs_get_inode(dir->i_sb, dir, mode, dev);
+	if (!inode)
+		return -ENOSPC;
+	dir->i_ctime = dir->i_mtime = current_time(dir);
+	d_instantiate(dentry, inode);
+	dget(dentry);/* Extra count - pin the dentry in core */
+	return 0;
 }
 
 static int hugetlbfs_mkdir(struct user_namespace *mnt_userns, struct inode *dir,
@@ -1060,10 +1014,17 @@ static int hugetlbfs_create(struct user_namespace *mnt_userns,
 }
 
 static int hugetlbfs_tmpfile(struct user_namespace *mnt_userns,
-			     struct inode *dir, struct dentry *dentry,
+			     struct inode *dir, struct file *file,
 			     umode_t mode)
 {
-	return do_hugetlbfs_mknod(dir, dentry, mode | S_IFREG, 0, true);
+	struct inode *inode;
+
+	inode = hugetlbfs_get_inode(dir->i_sb, dir, mode | S_IFREG, 0);
+	if (!inode)
+		return -ENOSPC;
+	dir->i_ctime = dir->i_mtime = current_time(dir);
+	d_tmpfile(file, inode);
+	return finish_open_simple(file, 0);
 }
 
 static int hugetlbfs_symlink(struct user_namespace *mnt_userns,
@@ -1099,10 +1060,10 @@ static int hugetlbfs_migrate_folio(struct address_space *mapping,
 	if (rc != MIGRATEPAGE_SUCCESS)
 		return rc;
 
-	if (hugetlb_page_subpool(&src->page)) {
-		hugetlb_set_page_subpool(&dst->page,
-					hugetlb_page_subpool(&src->page));
-		hugetlb_set_page_subpool(&src->page, NULL);
+	if (hugetlb_folio_subpool(src)) {
+		hugetlb_set_folio_subpool(dst,
+					hugetlb_folio_subpool(src));
+		hugetlb_set_folio_subpool(src, NULL);
 	}
 
 	if (mode != MIGRATE_SYNC_NO_COPY)
@@ -1352,6 +1313,7 @@ static int hugetlbfs_parse_param(struct fs_context *fc, struct fs_parameter *par
 {
 	struct hugetlbfs_fs_context *ctx = fc->fs_private;
 	struct fs_parse_result result;
+	struct hstate *h;
 	char *rest;
 	unsigned long ps;
 	int opt;
@@ -1396,11 +1358,12 @@ static int hugetlbfs_parse_param(struct fs_context *fc, struct fs_parameter *par
 
 	case Opt_pagesize:
 		ps = memparse(param->string, &rest);
-		ctx->hstate = size_to_hstate(ps);
-		if (!ctx->hstate) {
+		h = size_to_hstate(ps);
+		if (!h) {
 			pr_err("Unsupported page size %lu MB\n", ps >> 20);
 			return -EINVAL;
 		}
+		ctx->hstate = h;
 		return 0;
 
 	case Opt_min_size:

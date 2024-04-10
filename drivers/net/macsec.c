@@ -1021,8 +1021,12 @@ static enum rx_handler_result handle_not_macsec(struct sk_buff *skb)
 		 * the SecTAG, so we have to deduce which port to deliver to.
 		 */
 		if (macsec_is_offloaded(macsec) && netif_running(ndev)) {
-			if (md_dst && md_dst->type == METADATA_MACSEC &&
-			    (!find_rx_sc(&macsec->secy, md_dst->u.macsec_info.sci)))
+			struct macsec_rx_sc *rx_sc = NULL;
+
+			if (md_dst && md_dst->type == METADATA_MACSEC)
+				rx_sc = find_rx_sc(&macsec->secy, md_dst->u.macsec_info.sci);
+
+			if (md_dst && md_dst->type == METADATA_MACSEC && !rx_sc)
 				continue;
 
 			if (ether_addr_equal_64bits(hdr->h_dest,
@@ -1047,7 +1051,13 @@ static enum rx_handler_result handle_not_macsec(struct sk_buff *skb)
 					nskb->pkt_type = PACKET_MULTICAST;
 
 				__netif_rx(nskb);
+			} else if (rx_sc || ndev->flags & IFF_PROMISC) {
+				skb->dev = ndev;
+				skb->pkt_type = PACKET_HOST;
+				ret = RX_HANDLER_ANOTHER;
+				goto out;
 			}
+
 			continue;
 		}
 
@@ -4229,6 +4239,18 @@ static struct net *macsec_get_link_net(const struct net_device *dev)
 {
 	return dev_net(macsec_priv(dev)->real_dev);
 }
+
+struct net_device *macsec_get_real_dev(const struct net_device *dev)
+{
+	return macsec_priv(dev)->real_dev;
+}
+EXPORT_SYMBOL_GPL(macsec_get_real_dev);
+
+bool macsec_netdev_is_offloaded(struct net_device *dev)
+{
+	return macsec_is_offloaded(macsec_priv(dev));
+}
+EXPORT_SYMBOL_GPL(macsec_netdev_is_offloaded);
 
 static size_t macsec_get_size(const struct net_device *dev)
 {

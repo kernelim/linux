@@ -14,4 +14,13 @@ config RHEL_DIFFERENCES
 
 	  Unless you want a restricted kernel, say N here.
 
+config RH_KABI_SIZE_ALIGN_CHECKS
+	bool "Enables more stringent kabi checks in the macros"
+	depends on RHEL_DIFFERENCES
+	default y
+	help
+	  This option enables more stringent kabi checks. Those must
+	  be disabled in case of a debug build, because debug builds
+	  allow to change struct sizes.
+
 endmenu

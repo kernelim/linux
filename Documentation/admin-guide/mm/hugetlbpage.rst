@@ -86,7 +86,7 @@ by increasing or decreasing the value of ``nr_hugepages``.
 
 Note: When the feature of freeing unused vmemmap pages associated with each
 hugetlb page is enabled, we can fail to free the huge pages triggered by
-the user when ths system is under memory pressure.  Please try again later.
+the user when the system is under memory pressure.  Please try again later.
 
 Pages that are used as huge pages are reserved inside the kernel and cannot
 be used for other purposes.  Huge pages cannot be swapped out under
@@ -461,13 +461,13 @@ Examples
 .. _map_hugetlb:
 
 ``map_hugetlb``
-	see tools/testing/selftests/vm/map_hugetlb.c
+	see tools/testing/selftests/mm/map_hugetlb.c
 
 ``hugepage-shm``
-	see tools/testing/selftests/vm/hugepage-shm.c
+	see tools/testing/selftests/mm/hugepage-shm.c
 
 ``hugepage-mmap``
-	see tools/testing/selftests/vm/hugepage-mmap.c
+	see tools/testing/selftests/mm/hugepage-mmap.c
 
 The `libhugetlbfs`_  library provides a wide range of userspace tools
 to help with huge page usability, environment setup, and control.

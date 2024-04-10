@@ -31,9 +31,25 @@ enum hsmp_message_ids {
 	HSMP_GET_CCLK_THROTTLE_LIMIT,	/* 10h Get CCLK frequency limit in socket */
 	HSMP_GET_C0_PERCENT,		/* 11h Get average C0 residency in socket */
 	HSMP_SET_NBIO_DPM_LEVEL,	/* 12h Set max/min LCLK DPM Level for a given NBIO */
-					/* 13h Reserved */
-	HSMP_GET_DDR_BANDWIDTH = 0x14,	/* 14h Get theoretical maximum and current DDR Bandwidth */
-	HSMP_GET_TEMP_MONITOR,		/* 15h Get per-DIMM temperature and refresh rates */
+	HSMP_GET_NBIO_DPM_LEVEL,	/* 13h Get LCLK DPM level min and max for a given NBIO */
+	HSMP_GET_DDR_BANDWIDTH,		/* 14h Get theoretical maximum and current DDR Bandwidth */
+	HSMP_GET_TEMP_MONITOR,		/* 15h Get socket temperature */
+	HSMP_GET_DIMM_TEMP_RANGE,	/* 16h Get per-DIMM temperature range and refresh rate */
+	HSMP_GET_DIMM_POWER,		/* 17h Get per-DIMM power consumption */
+	HSMP_GET_DIMM_THERMAL,		/* 18h Get per-DIMM thermal sensors */
+	HSMP_GET_SOCKET_FREQ_LIMIT,	/* 19h Get current active frequency per socket */
+	HSMP_GET_CCLK_CORE_LIMIT,	/* 1Ah Get CCLK frequency limit per core */
+	HSMP_GET_RAILS_SVI,		/* 1Bh Get SVI-based Telemetry for all rails */
+	HSMP_GET_SOCKET_FMAX_FMIN,	/* 1Ch Get Fmax and Fmin per socket */
+	HSMP_GET_IOLINK_BANDWITH,	/* 1Dh Get current bandwidth on IO Link */
+	HSMP_GET_XGMI_BANDWITH,		/* 1Eh Get current bandwidth on xGMI Link */
+	HSMP_SET_GMI3_WIDTH,		/* 1Fh Set max and min GMI3 Link width */
+	HSMP_SET_PCI_RATE,		/* 20h Control link rate on PCIe devices */
+	HSMP_SET_POWER_MODE,		/* 21h Select power efficiency profile policy */
+	HSMP_SET_PSTATE_MAX_MIN,	/* 22h Set the max and min DF P-State  */
+	HSMP_GET_METRIC_TABLE_VER,	/* 23h Get metrics table version */
+	HSMP_GET_METRIC_TABLE,		/* 24h Get metrics table */
+	HSMP_GET_METRIC_TABLE_DRAM_ADDR,/* 25h Get metrics table dram address */
 	HSMP_MSG_ID_MAX,
 };
 
@@ -49,6 +65,14 @@ enum hsmp_msg_type {
 	HSMP_RSVD = -1,
 	HSMP_SET  = 0,
 	HSMP_GET  = 1,
+};
+
+enum hsmp_proto_versions {
+	HSMP_PROTO_VER2	= 2,
+	HSMP_PROTO_VER3,
+	HSMP_PROTO_VER4,
+	HSMP_PROTO_VER5,
+	HSMP_PROTO_VER6
 };
 
 struct hsmp_msg_desc {
@@ -175,8 +199,12 @@ static const struct hsmp_msg_desc hsmp_msg_desc_table[] = {
 	 */
 	{1, 0, HSMP_SET},
 
-	/* RESERVED message */
-	{0, 0, HSMP_RSVD},
+	/*
+	 * HSMP_GET_NBIO_DPM_LEVEL, num_args = 1, response_sz = 1
+	 * input: args[0] = nbioid[23:16]
+	 * output: args[0] = max dpm level[15:8] + min dpm level[7:0]
+	 */
+	{1, 1, HSMP_GET},
 
 	/*
 	 * HSMP_GET_DDR_BANDWIDTH, num_args = 0, response_sz = 1
@@ -191,6 +219,191 @@ static const struct hsmp_msg_desc hsmp_msg_desc_table[] = {
 	 * [7:5] fractional part
 	 */
 	{0, 1, HSMP_GET},
+
+	/*
+	 * HSMP_GET_DIMM_TEMP_RANGE, num_args = 1, response_sz = 1
+	 * input: args[0] = DIMM address[7:0]
+	 * output: args[0] = refresh rate[3] + temperature range[2:0]
+	 */
+	{1, 1, HSMP_GET},
+
+	/*
+	 * HSMP_GET_DIMM_POWER, num_args = 1, response_sz = 1
+	 * input: args[0] = DIMM address[7:0]
+	 * output: args[0] = DIMM power in mW[31:17] + update rate in ms[16:8] +
+	 * DIMM address[7:0]
+	 */
+	{1, 1, HSMP_GET},
+
+	/*
+	 * HSMP_GET_DIMM_THERMAL, num_args = 1, response_sz = 1
+	 * input: args[0] = DIMM address[7:0]
+	 * output: args[0] = temperature in degree celcius[31:21] + update rate in ms[16:8] +
+	 * DIMM address[7:0]
+	 */
+	{1, 1, HSMP_GET},
+
+	/*
+	 * HSMP_GET_SOCKET_FREQ_LIMIT, num_args = 0, response_sz = 1
+	 * output: args[0] = frequency in MHz[31:16] + frequency source[15:0]
+	 */
+	{0, 1, HSMP_GET},
+
+	/*
+	 * HSMP_GET_CCLK_CORE_LIMIT, num_args = 1, response_sz = 1
+	 * input: args[0] = apic id [31:0]
+	 * output: args[0] = frequency in MHz[31:0]
+	 */
+	{1, 1, HSMP_GET},
+
+	/*
+	 * HSMP_GET_RAILS_SVI, num_args = 0, response_sz = 1
+	 * output: args[0] = power in mW[31:0]
+	 */
+	{0, 1, HSMP_GET},
+
+	/*
+	 * HSMP_GET_SOCKET_FMAX_FMIN, num_args = 0, response_sz = 1
+	 * output: args[0] = fmax in MHz[31:16] + fmin in MHz[15:0]
+	 */
+	{0, 1, HSMP_GET},
+
+	/*
+	 * HSMP_GET_IOLINK_BANDWITH, num_args = 1, response_sz = 1
+	 * input: args[0] = link id[15:8] + bw type[2:0]
+	 * output: args[0] = io bandwidth in Mbps[31:0]
+	 */
+	{1, 1, HSMP_GET},
+
+	/*
+	 * HSMP_GET_XGMI_BANDWITH, num_args = 1, response_sz = 1
+	 * input: args[0] = link id[15:8] + bw type[2:0]
+	 * output: args[0] = xgmi bandwidth in Mbps[31:0]
+	 */
+	{1, 1, HSMP_GET},
+
+	/*
+	 * HSMP_SET_GMI3_WIDTH, num_args = 1, response_sz = 0
+	 * input: args[0] = min link width[15:8] + max link width[7:0]
+	 */
+	{1, 0, HSMP_SET},
+
+	/*
+	 * HSMP_SET_PCI_RATE, num_args = 1, response_sz = 1
+	 * input: args[0] = link rate control value
+	 * output: args[0] = previous link rate control value
+	 */
+	{1, 1, HSMP_SET},
+
+	/*
+	 * HSMP_SET_POWER_MODE, num_args = 1, response_sz = 0
+	 * input: args[0] = power efficiency mode[2:0]
+	 */
+	{1, 0, HSMP_SET},
+
+	/*
+	 * HSMP_SET_PSTATE_MAX_MIN, num_args = 1, response_sz = 0
+	 * input: args[0] = min df pstate[15:8] + max df pstate[7:0]
+	 */
+	{1, 0, HSMP_SET},
+
+	/*
+	 * HSMP_GET_METRIC_TABLE_VER, num_args = 0, response_sz = 1
+	 * output: args[0] = metrics table version
+	 */
+	{0, 1, HSMP_GET},
+
+	/*
+	 * HSMP_GET_METRIC_TABLE, num_args = 0, response_sz = 0
+	 */
+	{0, 0, HSMP_GET},
+
+	/*
+	 * HSMP_GET_METRIC_TABLE_DRAM_ADDR, num_args = 0, response_sz = 2
+	 * output: args[0] = lower 32 bits of the address
+	 * output: args[1] = upper 32 bits of the address
+	 */
+	{0, 2, HSMP_GET},
+};
+
+/* Metrics table (supported only with proto version 6) */
+struct hsmp_metric_table {
+	__u32 accumulation_counter;
+
+	/* TEMPERATURE */
+	__u32 max_socket_temperature;
+	__u32 max_vr_temperature;
+	__u32 max_hbm_temperature;
+	__u64 max_socket_temperature_acc;
+	__u64 max_vr_temperature_acc;
+	__u64 max_hbm_temperature_acc;
+
+	/* POWER */
+	__u32 socket_power_limit;
+	__u32 max_socket_power_limit;
+	__u32 socket_power;
+
+	/* ENERGY */
+	__u64 timestamp;
+	__u64 socket_energy_acc;
+	__u64 ccd_energy_acc;
+	__u64 xcd_energy_acc;
+	__u64 aid_energy_acc;
+	__u64 hbm_energy_acc;
+
+	/* FREQUENCY */
+	__u32 cclk_frequency_limit;
+	__u32 gfxclk_frequency_limit;
+	__u32 fclk_frequency;
+	__u32 uclk_frequency;
+	__u32 socclk_frequency[4];
+	__u32 vclk_frequency[4];
+	__u32 dclk_frequency[4];
+	__u32 lclk_frequency[4];
+	__u64 gfxclk_frequency_acc[8];
+	__u64 cclk_frequency_acc[96];
+
+	/* FREQUENCY RANGE */
+	__u32 max_cclk_frequency;
+	__u32 min_cclk_frequency;
+	__u32 max_gfxclk_frequency;
+	__u32 min_gfxclk_frequency;
+	__u32 fclk_frequency_table[4];
+	__u32 uclk_frequency_table[4];
+	__u32 socclk_frequency_table[4];
+	__u32 vclk_frequency_table[4];
+	__u32 dclk_frequency_table[4];
+	__u32 lclk_frequency_table[4];
+	__u32 max_lclk_dpm_range;
+	__u32 min_lclk_dpm_range;
+
+	/* XGMI */
+	__u32 xgmi_width;
+	__u32 xgmi_bitrate;
+	__u64 xgmi_read_bandwidth_acc[8];
+	__u64 xgmi_write_bandwidth_acc[8];
+
+	/* ACTIVITY */
+	__u32 socket_c0_residency;
+	__u32 socket_gfx_busy;
+	__u32 dram_bandwidth_utilization;
+	__u64 socket_c0_residency_acc;
+	__u64 socket_gfx_busy_acc;
+	__u64 dram_bandwidth_acc;
+	__u32 max_dram_bandwidth;
+	__u64 dram_bandwidth_utilization_acc;
+	__u64 pcie_bandwidth_acc[4];
+
+	/* THROTTLERS */
+	__u32 prochot_residency_acc;
+	__u32 ppt_residency_acc;
+	__u32 socket_thm_residency_acc;
+	__u32 vr_thm_residency_acc;
+	__u32 hbm_thm_residency_acc;
+	__u32 spare;
+
+	/* New items at the end to maintain driver compatibility */
+	__u32 gfxclk_frequency[8];
 };
 
 /* Reset to default packing */

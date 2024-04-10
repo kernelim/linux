@@ -1305,8 +1305,6 @@ static int nic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (!nic->hw)
 		return -ENOMEM;
 
-	pci_hw_unmaintained(ent, pdev);
-
 	pci_set_drvdata(pdev, nic);
 
 	nic->pdev = pdev;

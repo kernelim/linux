@@ -21,6 +21,7 @@
 #include "xfs_quota.h"
 #include "xfs_trace.h"
 #include "xfs_rmap.h"
+#include "xfs_ag.h"
 
 static struct kmem_cache	*xfs_bmbt_cur_cache;
 
@@ -184,11 +185,11 @@ xfs_bmbt_update_cursor(
 	struct xfs_btree_cur	*src,
 	struct xfs_btree_cur	*dst)
 {
-	ASSERT((dst->bc_tp->t_firstblock != NULLFSBLOCK) ||
+	ASSERT((dst->bc_tp->t_highest_agno != NULLAGNUMBER) ||
 	       (dst->bc_ino.ip->i_diflags & XFS_DIFLAG_REALTIME));
 
 	dst->bc_ino.allocated += src->bc_ino.allocated;
-	dst->bc_tp->t_firstblock = src->bc_tp->t_firstblock;
+	dst->bc_tp->t_highest_agno = src->bc_tp->t_highest_agno;
 
 	src->bc_ino.allocated = 0;
 }
@@ -200,44 +201,32 @@ xfs_bmbt_alloc_block(
 	union xfs_btree_ptr		*new,
 	int				*stat)
 {
-	xfs_alloc_arg_t		args;		/* block allocation args */
-	int			error;		/* error return value */
+	struct xfs_alloc_arg	args;
+	int			error;
 
 	memset(&args, 0, sizeof(args));
 	args.tp = cur->bc_tp;
 	args.mp = cur->bc_mp;
-	args.fsbno = cur->bc_tp->t_firstblock;
 	xfs_rmap_ino_bmbt_owner(&args.oinfo, cur->bc_ino.ip->i_ino,
 			cur->bc_ino.whichfork);
-
-	if (args.fsbno == NULLFSBLOCK) {
-		args.fsbno = be64_to_cpu(start->l);
-		args.type = XFS_ALLOCTYPE_START_BNO;
-
-		/*
-		 * If we are coming here from something like unwritten extent
-		 * conversion, there has been no data extent allocation already
-		 * done, so we have to ensure that we attempt to locate the
-		 * entire set of bmbt allocations in the same AG, as
-		 * xfs_bmapi_write() would have reserved.
-		 */
-		args.minleft = xfs_bmapi_minleft(cur->bc_tp, cur->bc_ino.ip,
-						cur->bc_ino.whichfork);
-	} else if (cur->bc_tp->t_flags & XFS_TRANS_LOWMODE) {
-		args.type = XFS_ALLOCTYPE_START_BNO;
-	} else {
-		args.type = XFS_ALLOCTYPE_NEAR_BNO;
-	}
-
 	args.minlen = args.maxlen = args.prod = 1;
 	args.wasdel = cur->bc_ino.flags & XFS_BTCUR_BMBT_WASDEL;
-	if (!args.wasdel && args.tp->t_blk_res == 0) {
-		error = -ENOSPC;
-		goto error0;
-	}
-	error = xfs_alloc_vextent(&args);
+	if (!args.wasdel && args.tp->t_blk_res == 0)
+		return -ENOSPC;
+
+	/*
+	 * If we are coming here from something like unwritten extent
+	 * conversion, there has been no data extent allocation already done, so
+	 * we have to ensure that we attempt to locate the entire set of bmbt
+	 * allocations in the same AG, as xfs_bmapi_write() would have reserved.
+	 */
+	if (cur->bc_tp->t_highest_agno == NULLAGNUMBER)
+		args.minleft = xfs_bmapi_minleft(cur->bc_tp, cur->bc_ino.ip,
+					cur->bc_ino.whichfork);
+
+	error = xfs_alloc_vextent_start_ag(&args, be64_to_cpu(start->l));
 	if (error)
-		goto error0;
+		return error;
 
 	if (args.fsbno == NULLFSBLOCK && args.minleft) {
 		/*
@@ -245,12 +234,10 @@ xfs_bmbt_alloc_block(
 		 * a full btree split.  Try again and if
 		 * successful activate the lowspace algorithm.
 		 */
-		args.fsbno = 0;
 		args.minleft = 0;
-		args.type = XFS_ALLOCTYPE_FIRST_AG;
-		error = xfs_alloc_vextent(&args);
+		error = xfs_alloc_vextent_start_ag(&args, 0);
 		if (error)
-			goto error0;
+			return error;
 		cur->bc_tp->t_flags |= XFS_TRANS_LOWMODE;
 	}
 	if (WARN_ON_ONCE(args.fsbno == NULLFSBLOCK)) {
@@ -259,7 +246,6 @@ xfs_bmbt_alloc_block(
 	}
 
 	ASSERT(args.len == 1);
-	cur->bc_tp->t_firstblock = args.fsbno;
 	cur->bc_ino.allocated++;
 	cur->bc_ino.ip->i_nblocks++;
 	xfs_trans_log_inode(args.tp, cur->bc_ino.ip, XFS_ILOG_CORE);
@@ -270,9 +256,6 @@ xfs_bmbt_alloc_block(
 
 	*stat = 1;
 	return 0;
-
- error0:
-	return error;
 }
 
 STATIC int
@@ -285,11 +268,14 @@ xfs_bmbt_free_block(
 	struct xfs_trans	*tp = cur->bc_tp;
 	xfs_fsblock_t		fsbno = XFS_DADDR_TO_FSB(mp, xfs_buf_daddr(bp));
 	struct xfs_owner_info	oinfo;
+	int			error;
 
 	xfs_rmap_ino_bmbt_owner(&oinfo, ip->i_ino, cur->bc_ino.whichfork);
-	xfs_free_extent_later(cur->bc_tp, fsbno, 1, &oinfo);
-	ip->i_nblocks--;
+	error = xfs_free_extent_later(cur->bc_tp, fsbno, 1, &oinfo);
+	if (error)
+		return error;
 
+	ip->i_nblocks--;
 	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
 	xfs_trans_mod_dquot_byino(tp, ip, XFS_TRANS_DQ_BCOUNT, -1L);
 	return 0;

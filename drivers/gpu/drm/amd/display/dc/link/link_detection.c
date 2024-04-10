@@ -60,6 +60,10 @@
  */
 #define LINK_TRAINING_MAX_VERIFY_RETRY 2
 
+static const u8 DP_SINK_BRANCH_DEV_NAME_7580[] = "7580\x80u";
+
+static const uint8_t dp_hdmi_dongle_signature_str[] = "DP-HDMI ADAPTOR";
+
 static enum ddc_transaction_type get_ddc_transaction_type(enum signal_type sink_signal)
 {
 	enum ddc_transaction_type transaction_type = DDC_TRANSACTION_TYPE_NONE;
@@ -466,7 +470,6 @@ static void link_disconnect_remap(struct dc_sink *prev_sink, struct dc_link *lin
 	link->local_sink = prev_sink;
 }
 
-#if defined(CONFIG_DRM_AMD_DC_HDCP)
 static void query_hdcp_capability(enum signal_type signal, struct dc_link *link)
 {
 	struct hdcp_protection_message msg22;
@@ -495,8 +498,6 @@ static void query_hdcp_capability(enum signal_type signal, struct dc_link *link)
 	dc_process_hdcp_msg(signal, link, &msg22);
 
 	if (signal == SIGNAL_TYPE_DISPLAY_PORT || signal == SIGNAL_TYPE_DISPLAY_PORT_MST) {
-		enum hdcp_message_status status = HDCP_MESSAGE_UNSUPPORTED;
-
 		msg14.data = &link->hdcp_caps.bcaps.raw;
 		msg14.length = sizeof(link->hdcp_caps.bcaps.raw);
 		msg14.msg_id = HDCP_MESSAGE_ID_READ_BCAPS;
@@ -504,11 +505,10 @@ static void query_hdcp_capability(enum signal_type signal, struct dc_link *link)
 		msg14.link = HDCP_LINK_PRIMARY;
 		msg14.max_retries = 5;
 
-		status = dc_process_hdcp_msg(signal, link, &msg14);
+		dc_process_hdcp_msg(signal, link, &msg14);
 	}
 
 }
-#endif // CONFIG_DRM_AMD_DC_HDCP
 static void read_current_link_settings_on_detect(struct dc_link *link)
 {
 	union lane_count_set lane_count_set = {0};
@@ -593,6 +593,10 @@ static bool detect_dp(struct dc_link *link,
 			/* DP SST branch */
 			link->type = dc_connection_sst_branch;
 	} else {
+		if (link->dc->debug.disable_dp_plus_plus_wa &&
+				link->link_enc->features.flags.bits.IS_UHBR20_CAPABLE)
+			return false;
+
 		/* DP passive dongles */
 		sink_caps->signal = dp_passive_dongle_detection(link->ddc,
 								sink_caps,
@@ -832,7 +836,7 @@ static void verify_link_capability(struct dc_link *link, struct dc_sink *sink,
 		verify_link_capability_non_destructive(link);
 }
 
-/**
+/*
  * detect_link_and_local_sink() - Detect if a sink is attached to a given link
  *
  * link->local_sink is created or destroyed as needed.
@@ -873,13 +877,12 @@ static bool detect_link_and_local_sink(struct dc_link *link,
 			dpcd_set_source_specific_data(link);
 			msleep(post_oui_delay);
 			set_default_brightness_aux(link);
-			//TODO: use cached
 		}
 
 		return true;
 	}
 
-	if (!dc_link_detect_connection_type(link, &new_connection_type)) {
+	if (!link_detect_connection_type(link, &new_connection_type)) {
 		BREAK_TO_DEBUGGER();
 		return false;
 	}
@@ -1082,6 +1085,9 @@ static bool detect_link_and_local_sink(struct dc_link *link,
 		if (sink->edid_caps.panel_patch.skip_scdc_overwrite)
 			link->ctx->dc->debug.hdmi20_disable = true;
 
+		if (sink->edid_caps.panel_patch.remove_sink_ext_caps)
+			link->dpcd_sink_ext_caps.raw = 0;
+
 		if (dc_is_hdmi_signal(link->connector_signal))
 			read_scdc_caps(link->ddc, link->local_sink);
 
@@ -1092,9 +1098,7 @@ static bool detect_link_and_local_sink(struct dc_link *link,
 			 * TODO debug why certain monitors don't like
 			 *  two link trainings
 			 */
-#if defined(CONFIG_DRM_AMD_DC_HDCP)
 			query_hdcp_capability(sink->sink_signal, link);
-#endif
 		} else {
 			// If edid is the same, then discard new sink and revert back to original sink
 			if (same_edid) {
@@ -1102,9 +1106,7 @@ static bool detect_link_and_local_sink(struct dc_link *link,
 				sink = prev_sink;
 				prev_sink = NULL;
 			}
-#if defined(CONFIG_DRM_AMD_DC_HDCP)
 			query_hdcp_capability(sink->sink_signal, link);
-#endif
 		}
 
 		/* HDMI-DVI Dongle */
@@ -1164,15 +1166,19 @@ static bool detect_link_and_local_sink(struct dc_link *link,
 			dm_helpers_init_panel_settings(dc_ctx, &link->panel_config, sink);
 			// Override dc_panel_config if system has specific settings
 			dm_helpers_override_panel_settings(dc_ctx, &link->panel_config);
+
+			//sink only can use supported link rate table, we are foreced to enable it
+			if (link->reported_link_cap.link_rate == LINK_RATE_UNKNOWN)
+				link->panel_config.ilr.optimize_edp_link_rate = true;
+			if (edp_is_ilr_optimization_enabled(link))
+				link->reported_link_cap.link_rate = get_max_link_rate_from_ilr_table(link);
 		}
 
 	} else {
 		/* From Connected-to-Disconnected. */
 		link->type = dc_connection_none;
 		sink_caps.signal = SIGNAL_TYPE_NONE;
-#if defined(CONFIG_DRM_AMD_DC_HDCP)
 		memset(&link->hdcp_caps, 0, sizeof(struct hdcp_caps));
-#endif
 		/* When we unplug a passive DP-HDMI dongle connection, dongle_max_pix_clk
 		 *  is not cleared. If we emulate a DP signal on this connection, it thinks
 		 *  the dongle is still there and limits the number of modes we can emulate.
@@ -1196,8 +1202,8 @@ static bool detect_link_and_local_sink(struct dc_link *link,
 	return true;
 }
 
-/**
- * dc_link_detect_connection_type() - Determine if there is a sink connected
+/*
+ * link_detect_connection_type() - Determine if there is a sink connected
  *
  * @type: Returned connection type
  * Does not detect downstream devices, such as MST sinks
@@ -1221,7 +1227,7 @@ bool link_detect_connection_type(struct dc_link *link, enum dc_connection_type *
 
 	/* Link may not have physical HPD pin. */
 	if (link->ep_type != DISPLAY_ENDPOINT_PHY) {
-		if (link->is_hpd_pending || !dc_link_dpia_query_hpd_status(link))
+		if (link->is_hpd_pending || !dpia_query_hpd_status(link))
 			*type = dc_connection_none;
 		else
 			*type = dc_connection_single;
@@ -1238,6 +1244,11 @@ bool link_detect_connection_type(struct dc_link *link, enum dc_connection_type *
 		/* TODO: need to do the actual detection */
 	} else {
 		*type = dc_connection_none;
+		if (link->connector_signal == SIGNAL_TYPE_EDP) {
+			/* eDP is not connected, power down it */
+			if (!link->dc->config.edp_no_power_sequencing)
+				link->dc->hwss.edp_power_control(link, false);
+		}
 	}
 
 	return true;
@@ -1279,7 +1290,6 @@ void link_clear_dprx_states(struct dc_link *link)
 {
 	memset(&link->dprx_states, 0, sizeof(link->dprx_states));
 }
-#if defined(CONFIG_DRM_AMD_DC_HDCP)
 
 bool link_is_hdcp14(struct dc_link *link, enum signal_type signal)
 {
@@ -1327,13 +1337,11 @@ bool link_is_hdcp22(struct dc_link *link, enum signal_type signal)
 
 	return ret;
 }
-#endif // CONFIG_DRM_AMD_DC_HDCP
 
 const struct dc_link_status *link_get_status(const struct dc_link *link)
 {
 	return &link->link_status;
 }
-
 
 static bool link_add_remote_sink_helper(struct dc_link *dc_link, struct dc_sink *sink)
 {
@@ -1350,7 +1358,7 @@ static bool link_add_remote_sink_helper(struct dc_link *dc_link, struct dc_sink 
 	return true;
 }
 
-struct dc_sink *dc_link_add_remote_sink(
+struct dc_sink *link_add_remote_sink(
 		struct dc_link *link,
 		const uint8_t *edid,
 		int len,
@@ -1408,7 +1416,7 @@ fail_add_sink:
 	return NULL;
 }
 
-void dc_link_remove_remote_sink(struct dc_link *link, struct dc_sink *sink)
+void link_remove_remote_sink(struct dc_link *link, struct dc_sink *sink)
 {
 	int i;
 

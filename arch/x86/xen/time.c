@@ -60,9 +60,16 @@ static u64 xen_clocksource_get_cycles(struct clocksource *cs)
 	return xen_clocksource_read();
 }
 
-static u64 xen_sched_clock(void)
+static noinstr u64 xen_sched_clock(void)
 {
-	return xen_clocksource_read() - xen_sched_clock_offset;
+        struct pvclock_vcpu_time_info *src;
+	u64 ret;
+
+	src = &__this_cpu_read(xen_vcpu)->time;
+	ret = pvclock_clocksource_read_nowd(src);
+	ret -= xen_sched_clock_offset;
+
+	return ret;
 }
 
 static void xen_read_wallclock(struct timespec64 *ts)

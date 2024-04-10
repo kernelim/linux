@@ -36,28 +36,20 @@ obj-y			:= debug-monitors.o entry.o irq.o fpsimd.o		\
 			   syscall.o proton-pack.o idreg-override.o idle.o	\
 			   patching.o
 
-targets			+= efi-entry.o
-
-OBJCOPYFLAGS := --prefix-symbols=__efistub_
-$(obj)/%.stub.o: $(obj)/%.o FORCE
-	$(call if_changed,objcopy)
-
 obj-$(CONFIG_COMPAT)			+= sys32.o signal32.o			\
 					   sys_compat.o
 obj-$(CONFIG_COMPAT)			+= sigreturn32.o
 obj-$(CONFIG_COMPAT_ALIGNMENT_FIXUPS)	+= compat_alignment.o
 obj-$(CONFIG_KUSER_HELPERS)		+= kuser32.o
 obj-$(CONFIG_FUNCTION_TRACER)		+= ftrace.o entry-ftrace.o
-obj-$(CONFIG_MODULES)			+= module.o
-obj-$(CONFIG_ARM64_MODULE_PLTS)		+= module-plts.o
+obj-$(CONFIG_MODULES)			+= module.o module-plts.o
 obj-$(CONFIG_PERF_EVENTS)		+= perf_regs.o perf_callchain.o
 obj-$(CONFIG_HAVE_HW_BREAKPOINT)	+= hw_breakpoint.o
 obj-$(CONFIG_CPU_PM)			+= sleep.o suspend.o
 obj-$(CONFIG_CPU_IDLE)			+= cpuidle.o
 obj-$(CONFIG_JUMP_LABEL)		+= jump_label.o
 obj-$(CONFIG_KGDB)			+= kgdb.o
-obj-$(CONFIG_EFI)			+= efi.o efi-entry.stub.o		\
-					   efi-rt-wrapper.o
+obj-$(CONFIG_EFI)			+= efi.o efi-rt-wrapper.o
 obj-$(CONFIG_PCI)			+= pci.o
 obj-$(CONFIG_ARMV8_DEPRECATED)		+= armv8_deprecated.o
 obj-$(CONFIG_ACPI)			+= acpi.o

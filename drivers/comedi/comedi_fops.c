@@ -3381,7 +3381,7 @@ static int __init comedi_init(void)
 	if (retval)
 		goto out_unregister_chrdev_region;
 
-	comedi_class = class_create(THIS_MODULE, "comedi");
+	comedi_class = class_create("comedi");
 	if (IS_ERR(comedi_class)) {
 		retval = PTR_ERR(comedi_class);
 		pr_err("failed to create class\n");

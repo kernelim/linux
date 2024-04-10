@@ -3751,8 +3751,6 @@ static int ql3xxx_probe(struct pci_dev *pdev,
 	static int cards_found;
 	int pci_using_dac, err;
 
-	pci_hw_unmaintained(pci_entry, pdev);
-
 	err = pci_enable_device(pdev);
 	if (err) {
 		pr_err("%s cannot enable PCI device\n", pci_name(pdev));

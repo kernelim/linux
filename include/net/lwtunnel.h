@@ -8,6 +8,8 @@
 #include <linux/types.h>
 #include <net/route.h>
 
+#include <linux/rh_kabi.h>
+
 #define LWTUNNEL_HASH_BITS   7
 #define LWTUNNEL_HASH_SIZE   (1 << LWTUNNEL_HASH_BITS)
 
@@ -16,9 +18,12 @@
 #define LWTUNNEL_STATE_INPUT_REDIRECT	BIT(1)
 #define LWTUNNEL_STATE_XMIT_REDIRECT	BIT(2)
 
+/* LWTUNNEL_XMIT_CONTINUE should be distinguishable from dst_output return
+ * values (NET_XMIT_xxx and NETDEV_TX_xxx in linux/netdevice.h) for safety.
+ */
 enum {
 	LWTUNNEL_XMIT_DONE,
-	LWTUNNEL_XMIT_CONTINUE,
+	LWTUNNEL_XMIT_CONTINUE = 0x100,
 };
 
 
@@ -30,6 +35,12 @@ struct lwtunnel_state {
 	int		(*orig_output)(struct net *net, struct sock *sk, struct sk_buff *skb);
 	int		(*orig_input)(struct sk_buff *);
 	struct		rcu_head rcu;
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
+
 	__u8            data[];
 };
 

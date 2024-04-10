@@ -705,6 +705,7 @@ static const struct acpi_device_id dw8250_acpi_match[] = {
 	{ "INT33C5", 0 },
 	{ "INT3434", 0 },
 	{ "INT3435", 0 },
+	{ "INTC10EE", 0 },
 	{ "80860F0A", 0 },
 	{ "8086228A", 0 },
 	{ "APMC0D08", 0},

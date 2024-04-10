@@ -90,7 +90,7 @@ is 0x15 and the full version number is 0x234, this file will contain
 the value 340 = 0x154.
 
 See the ``type_of_loader`` and ``ext_loader_type`` fields in
-Documentation/x86/boot.rst for additional information.
+Documentation/arch/x86/boot.rst for additional information.
 
 
 bootloader_version (x86 only)
@@ -100,7 +100,7 @@ The complete bootloader version number.  In the example above, this
 file will contain the value 564 = 0x234.
 
 See the ``type_of_loader`` and ``ext_loader_ver`` fields in
-Documentation/x86/boot.rst for additional information.
+Documentation/arch/x86/boot.rst for additional information.
 
 
 bpf_stats_enabled
@@ -448,17 +448,26 @@ io_uring_disabled
 Prevents all processes from creating new io_uring instances. Enabling this
 shrinks the kernel's attack surface.
 
-= ==================================================================
-0 All processes can create io_uring instances as normal. This is the
-  default setting.
-1 io_uring creation is disabled for unprivileged processes.
-  io_uring_setup fails with -EPERM unless the calling process is
-  privileged (CAP_SYS_ADMIN). Existing io_uring instances can
-  still be used.
-2 io_uring creation is disabled for all processes. io_uring_setup
+= ======================================================================
+0 All processes can create io_uring instances as normal.
+1 io_uring creation is disabled (io_uring_setup() will fail with
+  -EPERM) for unprivileged processes not in the io_uring_group group.
+  Existing io_uring instances can still be used.  See the
+  documentation for io_uring_group for more information.
+2 io_uring creation is disabled for all processes. io_uring_setup()
   always fails with -EPERM. Existing io_uring instances can still be
-  used.
-= ==================================================================
+  used.  This is the default setting.
+= ======================================================================
+
+
+io_uring_group
+==============
+
+When io_uring_disabled is set to 1, a process must either be
+privileged (CAP_SYS_ADMIN) or be in the io_uring_group group in order
+to create an io_uring instance.  If io_uring_group is set to -1 (the
+default), only processes with the CAP_SYS_ADMIN capability may create
+io_uring instances.
 
 
 kexec_load_disabled
@@ -696,6 +705,17 @@ rate for each task.
 ``numa_balancing_scan_size_mb`` is how many megabytes worth of pages are
 scanned for a given scan.
 
+
+numa_balancing_promote_rate_limit_MBps
+======================================
+
+Too high promotion/demotion throughput between different memory types
+may hurt application latency.  This can be used to rate limit the
+promotion throughput.  The per-node max promotion throughput in MB/s
+will be limited to be no more than the set value.
+
+A rule of thumb is to set this to less than 1/10 of the PMEM node
+write bandwidth.
 
 oops_all_cpu_backtrace
 ======================
@@ -1073,6 +1093,9 @@ This is a directory, with the following entries:
 * ``boot_id``: a UUID generated the first time this is retrieved, and
   unvarying after that;
 
+* ``uuid``: a UUID generated every time this is retrieved (this can
+  thus be used to generate UUIDs at will);
+
 * ``entropy_avail``: the pool's entropy count, in bits;
 
 * ``poolsize``: the entropy pool size, in bits;
@@ -1080,10 +1103,7 @@ This is a directory, with the following entries:
 * ``urandom_min_reseed_secs``: obsolete (used to determine the minimum
   number of seconds between urandom pool reseeding). This file is
   writable for compatibility purposes, but writing to it has no effect
-  on any RNG behavior.
-
-* ``uuid``: a UUID generated every time this is retrieved (this can
-  thus be used to generate UUIDs at will);
+  on any RNG behavior;
 
 * ``write_wakeup_threshold``: when the entropy count drops below this
   (as a number of bits), processes waiting to write to ``/dev/random``

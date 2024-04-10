@@ -196,7 +196,7 @@ In addition, the following text indicates that the option::
 Parameters denoted with BOOT are actually interpreted by the boot
 loader, and have no meaning to the kernel directly.
 Do not modify the syntax of boot loader parameters without extreme
-need or coordination with <Documentation/x86/boot.rst>.
+need or coordination with <Documentation/arch/x86/boot.rst>.
 
 There are also arch-specific kernel-parameters not documented here.
 See for example <Documentation/x86/x86_64/boot-options.rst>.

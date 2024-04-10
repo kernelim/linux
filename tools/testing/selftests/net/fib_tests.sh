@@ -9,7 +9,7 @@ ret=0
 ksft_skip=4
 
 # all tests in this script. Can be overridden with -t option
-TESTS="unregister down carrier nexthop suppress ipv6_notify ipv4_notify ipv6_rt ipv4_rt ipv6_addr_metric ipv4_addr_metric ipv6_route_metrics ipv4_route_metrics ipv4_route_v6_gw rp_filter ipv4_del_addr ipv4_mangle ipv6_mangle"
+TESTS="unregister down carrier nexthop suppress ipv6_notify ipv4_notify ipv6_rt ipv4_rt ipv6_addr_metric ipv4_addr_metric ipv6_route_metrics ipv4_route_metrics ipv4_route_v6_gw rp_filter ipv4_del_addr ipv6_del_addr ipv4_mangle ipv6_mangle ipv4_bcast_neigh"
 
 VERBOSE=0
 PAUSE_ON_FAIL=no
@@ -1856,6 +1856,155 @@ ipv4_del_addr_test()
 	cleanup
 }
 
+ipv6_del_addr_test()
+{
+	echo
+	echo "IPv6 delete address route tests"
+
+	setup
+
+	set -e
+	for i in $(seq 6); do
+		$IP li add dummy${i} up type dummy
+	done
+
+	$IP li add red up type vrf table 1111
+	$IP ro add vrf red unreachable default
+	for i in $(seq 4 6); do
+		$IP li set dummy${i} vrf red
+	done
+
+	$IP addr add dev dummy1 fe80::1/128
+	$IP addr add dev dummy1 2001:db8:101::1/64
+	$IP addr add dev dummy1 2001:db8:101::10/64
+	$IP addr add dev dummy1 2001:db8:101::11/64
+	$IP addr add dev dummy1 2001:db8:101::12/64
+	$IP addr add dev dummy1 2001:db8:101::13/64
+	$IP addr add dev dummy1 2001:db8:101::14/64
+	$IP addr add dev dummy1 2001:db8:101::15/64
+	$IP addr add dev dummy2 fe80::1/128
+	$IP addr add dev dummy2 2001:db8:101::1/64
+	$IP addr add dev dummy2 2001:db8:101::11/64
+	$IP addr add dev dummy3 fe80::1/128
+
+	$IP addr add dev dummy4 2001:db8:101::1/64
+	$IP addr add dev dummy4 2001:db8:101::10/64
+	$IP addr add dev dummy4 2001:db8:101::11/64
+	$IP addr add dev dummy4 2001:db8:101::12/64
+	$IP addr add dev dummy4 2001:db8:101::13/64
+	$IP addr add dev dummy4 2001:db8:101::14/64
+	$IP addr add dev dummy5 2001:db8:101::1/64
+	$IP addr add dev dummy5 2001:db8:101::11/64
+
+	# Single device using src address
+	$IP route add 2001:db8:110::/64 dev dummy3 src 2001:db8:101::10
+	# Two devices with the same source address
+	$IP route add 2001:db8:111::/64 dev dummy3 src 2001:db8:101::11
+	# VRF with single device using src address
+	$IP route add vrf red 2001:db8:110::/64 dev dummy6 src 2001:db8:101::10
+	# VRF with two devices using src address
+	$IP route add vrf red 2001:db8:111::/64 dev dummy6 src 2001:db8:101::11
+	# src address and nexthop dev in same VRF
+	$IP route add 2001:db8:112::/64 dev dummy3 src 2001:db8:101::12
+	$IP route add vrf red 2001:db8:112::/64 dev dummy6 src 2001:db8:101::12
+	# src address and nexthop device in different VRF
+	$IP route add 2001:db8:113::/64 dev lo src 2001:db8:101::13
+	$IP route add vrf red 2001:db8:113::/64 dev lo src 2001:db8:101::13
+	# table ID 0
+	$IP route add table 0 2001:db8:115::/64 via 2001:db8:101::2 src 2001:db8:101::15
+	# Link local source route
+	$IP route add 2001:db8:116::/64 dev dummy2 src fe80::1
+	$IP route add 2001:db8:117::/64 dev dummy3 src fe80::1
+	set +e
+
+	echo "    Single device using src address"
+
+	$IP addr del dev dummy1 2001:db8:101::10/64
+	$IP -6 route show | grep -q "src 2001:db8:101::10 "
+	log_test $? 1 "Prefsrc removed when src address removed on other device"
+
+	echo "    Two devices with the same source address"
+
+	$IP addr del dev dummy1 2001:db8:101::11/64
+	$IP -6 route show | grep -q "src 2001:db8:101::11 "
+	log_test $? 0 "Prefsrc not removed when src address exist on other device"
+
+	$IP addr del dev dummy2 2001:db8:101::11/64
+	$IP -6 route show | grep -q "src 2001:db8:101::11 "
+	log_test $? 1 "Prefsrc removed when src address removed on all devices"
+
+	echo "    VRF with single device using src address"
+
+	$IP addr del dev dummy4 2001:db8:101::10/64
+	$IP -6 route show vrf red | grep -q "src 2001:db8:101::10 "
+	log_test $? 1 "Prefsrc removed when src address removed on other device"
+
+	echo "    VRF with two devices using src address"
+
+	$IP addr del dev dummy4 2001:db8:101::11/64
+	$IP -6 route show vrf red | grep -q "src 2001:db8:101::11 "
+	log_test $? 0 "Prefsrc not removed when src address exist on other device"
+
+	$IP addr del dev dummy5 2001:db8:101::11/64
+	$IP -6 route show vrf red | grep -q "src 2001:db8:101::11 "
+	log_test $? 1 "Prefsrc removed when src address removed on all devices"
+
+	echo "    src address and nexthop dev in same VRF"
+
+	$IP addr del dev dummy4 2001:db8:101::12/64
+	$IP -6 route show vrf red | grep -q "src 2001:db8:101::12 "
+	log_test $? 1 "Prefsrc removed from VRF when source address deleted"
+	$IP -6 route show | grep -q " src 2001:db8:101::12 "
+	log_test $? 0 "Prefsrc in default VRF not removed"
+
+	$IP addr add dev dummy4 2001:db8:101::12/64
+	$IP route replace vrf red 2001:db8:112::/64 dev dummy6 src 2001:db8:101::12
+	$IP addr del dev dummy1 2001:db8:101::12/64
+	$IP -6 route show vrf red | grep -q "src 2001:db8:101::12 "
+	log_test $? 0 "Prefsrc not removed from VRF when source address exist"
+	$IP -6 route show | grep -q " src 2001:db8:101::12 "
+	log_test $? 1 "Prefsrc in default VRF removed"
+
+	echo "    src address and nexthop device in different VRF"
+
+	$IP addr del dev dummy4 2001:db8:101::13/64
+	$IP -6 route show vrf red | grep -q "src 2001:db8:101::13 "
+	log_test $? 0 "Prefsrc not removed from VRF when nexthop dev in diff VRF"
+	$IP -6 route show | grep -q "src 2001:db8:101::13 "
+	log_test $? 0 "Prefsrc not removed in default VRF"
+
+	$IP addr add dev dummy4 2001:db8:101::13/64
+	$IP addr del dev dummy1 2001:db8:101::13/64
+	$IP -6 route show vrf red | grep -q "src 2001:db8:101::13 "
+	log_test $? 1 "Prefsrc removed from VRF when nexthop dev in diff VRF"
+	$IP -6 route show | grep -q "src 2001:db8:101::13 "
+	log_test $? 1 "Prefsrc removed in default VRF"
+
+	echo "    Table ID 0"
+
+	$IP addr del dev dummy1 2001:db8:101::15/64
+	$IP -6 route show | grep -q "src 2001:db8:101::15"
+	log_test $? 1 "Prefsrc removed from default VRF when source address deleted"
+
+	echo "    Link local source route"
+	$IP addr del dev dummy1 fe80::1/128
+	$IP -6 route show | grep -q "2001:db8:116::/64 dev dummy2 src fe80::1"
+	log_test $? 0 "Prefsrc not removed when delete ll addr from other dev"
+	$IP addr del dev dummy2 fe80::1/128
+	$IP -6 route show | grep -q "2001:db8:116::/64 dev dummy2 src fe80::1"
+	log_test $? 1 "Prefsrc removed when delete ll addr"
+	$IP -6 route show | grep -q "2001:db8:117::/64 dev dummy3 src fe80::1"
+	log_test $? 0 "Prefsrc not removed when delete ll addr from other dev"
+	$IP addr add dev dummy1 fe80::1/128
+	$IP addr del dev dummy3 fe80::1/128
+	$IP -6 route show | grep -q "2001:db8:117::/64 dev dummy3 src fe80::1"
+	log_test $? 1 "Prefsrc removed even ll addr still exist on other dev"
+
+	for i in $(seq 6); do
+		$IP li del dummy${i}
+	done
+	cleanup
+}
 
 ipv4_route_v6_gw_test()
 {
@@ -2070,6 +2219,61 @@ ipv6_mangle_test()
 	route_cleanup
 }
 
+ip_neigh_get_check()
+{
+	ip neigh help 2>&1 | grep -q 'ip neigh get'
+	if [ $? -ne 0 ]; then
+		echo "iproute2 command does not support neigh get. Skipping test"
+		return 1
+	fi
+
+	return 0
+}
+
+ipv4_bcast_neigh_test()
+{
+	local rc
+
+	echo
+	echo "IPv4 broadcast neighbour tests"
+
+	ip_neigh_get_check || return 1
+
+	setup
+
+	set -e
+	run_cmd "$IP neigh add 192.0.2.111 lladdr 00:11:22:33:44:55 nud perm dev dummy0"
+	run_cmd "$IP neigh add 192.0.2.255 lladdr 00:11:22:33:44:55 nud perm dev dummy0"
+
+	run_cmd "$IP neigh get 192.0.2.111 dev dummy0"
+	run_cmd "$IP neigh get 192.0.2.255 dev dummy0"
+
+	run_cmd "$IP address add 192.0.2.1/24 broadcast 192.0.2.111 dev dummy0"
+
+	run_cmd "$IP neigh add 203.0.113.111 nud failed dev dummy0"
+	run_cmd "$IP neigh add 203.0.113.255 nud failed dev dummy0"
+
+	run_cmd "$IP neigh get 203.0.113.111 dev dummy0"
+	run_cmd "$IP neigh get 203.0.113.255 dev dummy0"
+
+	run_cmd "$IP address add 203.0.113.1/24 broadcast 203.0.113.111 dev dummy0"
+	set +e
+
+	run_cmd "$IP neigh get 192.0.2.111 dev dummy0"
+	log_test $? 0 "Resolved neighbour for broadcast address"
+
+	run_cmd "$IP neigh get 192.0.2.255 dev dummy0"
+	log_test $? 0 "Resolved neighbour for network broadcast address"
+
+	run_cmd "$IP neigh get 203.0.113.111 dev dummy0"
+	log_test $? 2 "Unresolved neighbour for broadcast address"
+
+	run_cmd "$IP neigh get 203.0.113.255 dev dummy0"
+	log_test $? 2 "Unresolved neighbour for network broadcast address"
+
+	cleanup
+}
+
 ################################################################################
 # usage
 
@@ -2143,11 +2347,13 @@ do
 	ipv6_addr_metric)		ipv6_addr_metric_test;;
 	ipv4_addr_metric)		ipv4_addr_metric_test;;
 	ipv4_del_addr)			ipv4_del_addr_test;;
+	ipv6_del_addr)			ipv6_del_addr_test;;
 	ipv6_route_metrics)		ipv6_route_metrics_test;;
 	ipv4_route_metrics)		ipv4_route_metrics_test;;
 	ipv4_route_v6_gw)		ipv4_route_v6_gw_test;;
 	ipv4_mangle)			ipv4_mangle_test;;
 	ipv6_mangle)			ipv6_mangle_test;;
+	ipv4_bcast_neigh)		ipv4_bcast_neigh_test;;
 
 	help) echo "Test names: $TESTS"; exit 0;;
 	esac

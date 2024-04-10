@@ -502,7 +502,7 @@ void ndisc_send_skb(struct sk_buff *skb, const struct in6_addr *daddr,
 
 	rcu_read_lock();
 	idev = __in6_dev_get(dst->dev);
-	IP6_UPD_PO_STATS(net, idev, IPSTATS_MIB_OUT, skb->len);
+	IP6_INC_STATS(net, idev, IPSTATS_MIB_OUTREQUESTS);
 
 	err = NF_HOOK(NFPROTO_IPV6, NF_INET_LOCAL_OUT,
 		      net, sk, skb, NULL, dst->dev,
@@ -744,7 +744,7 @@ static void ndisc_solicit(struct neighbour *neigh, struct sk_buff *skb)
 		saddr = &ipv6_hdr(skb)->saddr;
 	probes -= NEIGH_VAR(neigh->parms, UCAST_PROBES);
 	if (probes < 0) {
-		if (!(neigh->nud_state & NUD_VALID)) {
+		if (!(READ_ONCE(neigh->nud_state) & NUD_VALID)) {
 			ND_PRINTK(1, dbg,
 				  "%s: trying to ucast probe in NUD_INVALID: %pI6\n",
 				  __func__, target);
@@ -1044,7 +1044,7 @@ static enum skb_drop_reason ndisc_recv_na(struct sk_buff *skb)
 		u8 old_flags = neigh->flags;
 		struct net *net = dev_net(dev);
 
-		if (neigh->nud_state & NUD_FAILED)
+		if (READ_ONCE(neigh->nud_state) & NUD_FAILED)
 			goto out;
 
 		/*

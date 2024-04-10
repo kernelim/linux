@@ -20,6 +20,7 @@ int ovl_setattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 		struct iattr *attr)
 {
 	int err;
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
 	bool full_copy_up = false;
 	struct dentry *upperdentry;
 	const struct cred *old_cred;
@@ -82,10 +83,10 @@ int ovl_setattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 
 		inode_lock(upperdentry->d_inode);
 		old_cred = ovl_override_creds(dentry->d_sb);
-		err = notify_change(&init_user_ns, upperdentry, attr, NULL);
+		err = ovl_do_notify_change(ofs, upperdentry, attr);
 		revert_creds(old_cred);
 		if (!err)
-			ovl_copyattr(upperdentry->d_inode, dentry->d_inode);
+			ovl_copyattr(dentry->d_inode);
 		inode_unlock(upperdentry->d_inode);
 
 		if (winode)
@@ -162,7 +163,8 @@ int ovl_getattr(struct user_namespace *mnt_userns, const struct path *path,
 	enum ovl_path_type type;
 	struct path realpath;
 	const struct cred *old_cred;
-	bool is_dir = S_ISDIR(dentry->d_inode->i_mode);
+	struct inode *inode = d_inode(dentry);
+	bool is_dir = S_ISDIR(inode->i_mode);
 	int fsid = 0;
 	int err;
 	bool metacopy_blocks = false;
@@ -174,6 +176,9 @@ int ovl_getattr(struct user_namespace *mnt_userns, const struct path *path,
 	err = vfs_getattr(&realpath, stat, request_mask, flags);
 	if (err)
 		goto out;
+
+	/* Report the effective immutable/append-only STATX flags */
+	generic_fill_statx_attr(inode, stat);
 
 	/*
 	 * For non-dir or same fs, we use st_ino of the copy up origin.
@@ -238,15 +243,22 @@ int ovl_getattr(struct user_namespace *mnt_userns, const struct path *path,
 			/*
 			 * If lower is not same as lowerdata or if there was
 			 * no origin on upper, we can end up here.
+			 * With lazy lowerdata lookup, guess lowerdata blocks
+			 * from size to avoid lowerdata lookup on stat(2).
 			 */
 			struct kstat lowerdatastat;
 			u32 lowermask = STATX_BLOCKS;
 
 			ovl_path_lowerdata(dentry, &realpath);
-			err = vfs_getattr(&realpath, &lowerdatastat,
-					  lowermask, flags);
-			if (err)
-				goto out;
+			if (realpath.dentry) {
+				err = vfs_getattr(&realpath, &lowerdatastat,
+						  lowermask, flags);
+				if (err)
+					goto out;
+			} else {
+				lowerdatastat.blocks =
+					round_up(stat->size, stat->blksize) >> 9;
+			}
 			stat->blocks = lowerdatastat.blocks;
 		}
 	}
@@ -327,127 +339,6 @@ static const char *ovl_get_link(struct dentry *dentry,
 	return p;
 }
 
-bool ovl_is_private_xattr(struct super_block *sb, const char *name)
-{
-	struct ovl_fs *ofs = sb->s_fs_info;
-
-	if (ofs->config.userxattr)
-		return strncmp(name, OVL_XATTR_USER_PREFIX,
-			       sizeof(OVL_XATTR_USER_PREFIX) - 1) == 0;
-	else
-		return strncmp(name, OVL_XATTR_TRUSTED_PREFIX,
-			       sizeof(OVL_XATTR_TRUSTED_PREFIX) - 1) == 0;
-}
-
-int ovl_xattr_set(struct dentry *dentry, struct inode *inode, const char *name,
-		  const void *value, size_t size, int flags)
-{
-	int err;
-	struct dentry *upperdentry = ovl_i_dentry_upper(inode);
-	struct dentry *realdentry = upperdentry ?: ovl_dentry_lower(dentry);
-	const struct cred *old_cred;
-
-	err = ovl_want_write(dentry);
-	if (err)
-		goto out;
-
-	if (!value && !upperdentry) {
-		old_cred = ovl_override_creds(dentry->d_sb);
-		err = vfs_getxattr(&init_user_ns, realdentry, name, NULL, 0);
-		revert_creds(old_cred);
-		if (err < 0)
-			goto out_drop_write;
-	}
-
-	if (!upperdentry) {
-		err = ovl_copy_up(dentry);
-		if (err)
-			goto out_drop_write;
-
-		realdentry = ovl_dentry_upper(dentry);
-	}
-
-	old_cred = ovl_override_creds(dentry->d_sb);
-	if (value)
-		err = vfs_setxattr(&init_user_ns, realdentry, name, value, size,
-				   flags);
-	else {
-		WARN_ON(flags != XATTR_REPLACE);
-		err = vfs_removexattr(&init_user_ns, realdentry, name);
-	}
-	revert_creds(old_cred);
-
-	/* copy c/mtime */
-	ovl_copyattr(d_inode(realdentry), inode);
-
-out_drop_write:
-	ovl_drop_write(dentry);
-out:
-	return err;
-}
-
-int ovl_xattr_get(struct dentry *dentry, struct inode *inode, const char *name,
-		  void *value, size_t size)
-{
-	ssize_t res;
-	const struct cred *old_cred;
-	struct dentry *realdentry =
-		ovl_i_dentry_upper(inode) ?: ovl_dentry_lower(dentry);
-
-	old_cred = ovl_override_creds(dentry->d_sb);
-	res = vfs_getxattr(&init_user_ns, realdentry, name, value, size);
-	revert_creds(old_cred);
-	return res;
-}
-
-static bool ovl_can_list(struct super_block *sb, const char *s)
-{
-	/* Never list private (.overlay) */
-	if (ovl_is_private_xattr(sb, s))
-		return false;
-
-	/* List all non-trusted xattrs */
-	if (strncmp(s, XATTR_TRUSTED_PREFIX, XATTR_TRUSTED_PREFIX_LEN) != 0)
-		return true;
-
-	/* list other trusted for superuser only */
-	return ns_capable_noaudit(&init_user_ns, CAP_SYS_ADMIN);
-}
-
-ssize_t ovl_listxattr(struct dentry *dentry, char *list, size_t size)
-{
-	struct dentry *realdentry = ovl_dentry_real(dentry);
-	ssize_t res;
-	size_t len;
-	char *s;
-	const struct cred *old_cred;
-
-	old_cred = ovl_override_creds(dentry->d_sb);
-	res = vfs_listxattr(realdentry, list, size);
-	revert_creds(old_cred);
-	if (res <= 0 || size == 0)
-		return res;
-
-	/* filter out private xattrs */
-	for (s = list, len = res; len;) {
-		size_t slen = strnlen(s, len) + 1;
-
-		/* underlying fs providing us with an broken xattr list? */
-		if (WARN_ON(slen > len))
-			return -EIO;
-
-		len -= slen;
-		if (!ovl_can_list(dentry->d_sb, s)) {
-			res -= slen;
-			memmove(s, s + slen, len);
-		} else {
-			s += slen;
-		}
-	}
-
-	return res;
-}
-
 struct posix_acl *ovl_get_acl(struct inode *inode, int type)
 {
 	struct inode *realinode = ovl_inode_real(inode);
@@ -488,6 +379,9 @@ static int ovl_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 	struct inode *realinode = ovl_inode_realdata(inode);
 	const struct cred *old_cred;
 
+	if (!realinode)
+		return -EIO;
+
 	if (!realinode->i_op->fiemap)
 		return -EOPNOTSUPP;
 
@@ -503,16 +397,14 @@ static int ovl_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
  * Introducing security_inode_fileattr_get/set() hooks would solve this issue
  * properly.
  */
-static int ovl_security_fileattr(struct dentry *dentry, struct fileattr *fa,
+static int ovl_security_fileattr(const struct path *realpath, struct fileattr *fa,
 				 bool set)
 {
-	struct path realpath;
 	struct file *file;
 	unsigned int cmd;
 	int err;
 
-	ovl_path_real(dentry, &realpath);
-	file = dentry_open(&realpath, O_RDONLY, current_cred());
+	file = dentry_open(realpath, O_RDONLY, current_cred());
 	if (IS_ERR(file))
 		return PTR_ERR(file);
 
@@ -527,12 +419,24 @@ static int ovl_security_fileattr(struct dentry *dentry, struct fileattr *fa,
 	return err;
 }
 
+int ovl_real_fileattr_set(const struct path *realpath, struct fileattr *fa)
+{
+	int err;
+
+	err = ovl_security_fileattr(realpath, fa, true);
+	if (err)
+		return err;
+
+	return vfs_fileattr_set(&init_user_ns, realpath->dentry, fa);
+}
+
 int ovl_fileattr_set(struct user_namespace *mnt_userns,
 		     struct dentry *dentry, struct fileattr *fa)
 {
 	struct inode *inode = d_inode(dentry);
-	struct dentry *upperdentry;
+	struct path upperpath;
 	const struct cred *old_cred;
+	unsigned int flags;
 	int err;
 
 	err = ovl_want_write(dentry);
@@ -541,31 +445,81 @@ int ovl_fileattr_set(struct user_namespace *mnt_userns,
 
 	err = ovl_copy_up(dentry);
 	if (!err) {
-		upperdentry = ovl_dentry_upper(dentry);
+		ovl_path_real(dentry, &upperpath);
 
 		old_cred = ovl_override_creds(inode->i_sb);
-		err = ovl_security_fileattr(dentry, fa, true);
+		/*
+		 * Store immutable/append-only flags in xattr and clear them
+		 * in upper fileattr (in case they were set by older kernel)
+		 * so children of "ovl-immutable" directories lower aliases of
+		 * "ovl-immutable" hardlinks could be copied up.
+		 * Clear xattr when flags are cleared.
+		 */
+		err = ovl_set_protattr(inode, upperpath.dentry, fa);
 		if (!err)
-			err = vfs_fileattr_set(&init_user_ns, upperdentry, fa);
+			err = ovl_real_fileattr_set(&upperpath, fa);
 		revert_creds(old_cred);
-		ovl_copyflags(ovl_inode_real(inode), inode);
+
+		/*
+		 * Merge real inode flags with inode flags read from
+		 * overlay.protattr xattr
+		 */
+		flags = ovl_inode_real(inode)->i_flags & OVL_COPY_I_FLAGS_MASK;
+
+		BUILD_BUG_ON(OVL_PROT_I_FLAGS_MASK & ~OVL_COPY_I_FLAGS_MASK);
+		flags |= inode->i_flags & OVL_PROT_I_FLAGS_MASK;
+		inode_set_flags(inode, flags, OVL_COPY_I_FLAGS_MASK);
+
+		/* Update ctime */
+		ovl_copyattr(inode);
 	}
 	ovl_drop_write(dentry);
 out:
 	return err;
 }
 
+/* Convert inode protection flags to fileattr flags */
+static void ovl_fileattr_prot_flags(struct inode *inode, struct fileattr *fa)
+{
+	BUILD_BUG_ON(OVL_PROT_FS_FLAGS_MASK & ~FS_COMMON_FL);
+	BUILD_BUG_ON(OVL_PROT_FSX_FLAGS_MASK & ~FS_XFLAG_COMMON);
+
+	if (inode->i_flags & S_APPEND) {
+		fa->flags |= FS_APPEND_FL;
+		fa->fsx_xflags |= FS_XFLAG_APPEND;
+	}
+	if (inode->i_flags & S_IMMUTABLE) {
+		fa->flags |= FS_IMMUTABLE_FL;
+		fa->fsx_xflags |= FS_XFLAG_IMMUTABLE;
+	}
+}
+
+int ovl_real_fileattr_get(const struct path *realpath, struct fileattr *fa)
+{
+	int err;
+
+	err = ovl_security_fileattr(realpath, fa, false);
+	if (err)
+		return err;
+
+	err = vfs_fileattr_get(realpath->dentry, fa);
+	if (err == -ENOIOCTLCMD)
+		err = -ENOTTY;
+	return err;
+}
+
 int ovl_fileattr_get(struct dentry *dentry, struct fileattr *fa)
 {
 	struct inode *inode = d_inode(dentry);
-	struct dentry *realdentry = ovl_dentry_real(dentry);
+	struct path realpath;
 	const struct cred *old_cred;
 	int err;
 
+	ovl_path_real(dentry, &realpath);
+
 	old_cred = ovl_override_creds(inode->i_sb);
-	err = ovl_security_fileattr(dentry, fa, false);
-	if (!err)
-		err = vfs_fileattr_get(realdentry, fa);
+	err = ovl_real_fileattr_get(&realpath, fa);
+	ovl_fileattr_prot_flags(inode, fa);
 	revert_creds(old_cred);
 
 	return err;
@@ -715,16 +669,15 @@ void ovl_inode_init(struct inode *inode, struct ovl_inode_params *oip,
 		    unsigned long ino, int fsid)
 {
 	struct inode *realinode;
+	struct ovl_inode *oi = OVL_I(inode);
 
-	if (oip->upperdentry)
-		OVL_I(inode)->__upperdentry = oip->upperdentry;
-	if (oip->lowerpath && oip->lowerpath->dentry)
-		OVL_I(inode)->lower = igrab(d_inode(oip->lowerpath->dentry));
-	if (oip->lowerdata)
-		OVL_I(inode)->lowerdata = igrab(d_inode(oip->lowerdata));
+	oi->__upperdentry = oip->upperdentry;
+	oi->oe = oip->oe;
+	oi->redirect = oip->redirect;
+	oi->lowerdata_redirect = oip->lowerdata_redirect;
 
 	realinode = ovl_inode_real(inode);
-	ovl_copyattr(realinode, inode);
+	ovl_copyattr(inode);
 	ovl_copyflags(realinode, inode);
 	ovl_map_ino(inode, ino, fsid);
 }
@@ -809,8 +762,8 @@ static int ovl_set_nlink_common(struct dentry *dentry,
 	if (WARN_ON(len >= sizeof(buf)))
 		return -EIO;
 
-	return ovl_do_setxattr(OVL_FS(inode->i_sb), ovl_dentry_upper(dentry),
-			       OVL_XATTR_NLINK, buf, len);
+	return ovl_setxattr(OVL_FS(inode->i_sb), ovl_dentry_upper(dentry),
+			    OVL_XATTR_NLINK, buf, len);
 }
 
 int ovl_set_nlink_upper(struct dentry *dentry)
@@ -835,8 +788,8 @@ unsigned int ovl_get_nlink(struct ovl_fs *ofs, struct dentry *lowerdentry,
 	if (!lowerdentry || !upperdentry || d_inode(lowerdentry)->i_nlink == 1)
 		return fallback;
 
-	err = ovl_do_getxattr(ofs, upperdentry, OVL_XATTR_NLINK,
-			      &buf, sizeof(buf) - 1);
+	err = ovl_getxattr_upper(ofs, upperdentry, OVL_XATTR_NLINK,
+				 &buf, sizeof(buf) - 1);
 	if (err < 0)
 		goto fail;
 
@@ -1036,10 +989,14 @@ struct inode *ovl_get_inode(struct super_block *sb,
 {
 	struct ovl_fs *ofs = OVL_FS(sb);
 	struct dentry *upperdentry = oip->upperdentry;
-	struct ovl_path *lowerpath = oip->lowerpath;
+	struct ovl_path *lowerpath = ovl_lowerpath(oip->oe);
 	struct inode *realinode = upperdentry ? d_inode(upperdentry) : NULL;
 	struct inode *inode;
 	struct dentry *lowerdentry = lowerpath ? lowerpath->dentry : NULL;
+	struct path realpath = {
+		.dentry = upperdentry ?: lowerdentry,
+		.mnt = upperdentry ? ovl_upper_mnt(ofs) : lowerpath->layer->mnt,
+	};
 	bool bylower = ovl_hash_bylower(sb, upperdentry, lowerdentry,
 					oip->index);
 	int fsid = bylower ? lowerpath->layer->fsid : 0;
@@ -1076,7 +1033,9 @@ struct inode *ovl_get_inode(struct super_block *sb,
 			}
 
 			dput(upperdentry);
+			ovl_free_entry(oip->oe);
 			kfree(oip->redirect);
+			kfree(oip->lowerdata_redirect);
 			goto out;
 		}
 
@@ -1105,18 +1064,20 @@ struct inode *ovl_get_inode(struct super_block *sb,
 	if (oip->index)
 		ovl_set_flag(OVL_INDEX, inode);
 
-	OVL_I(inode)->redirect = oip->redirect;
-
 	if (bylower)
 		ovl_set_flag(OVL_CONST_INO, inode);
 
 	/* Check for non-merge dir that may have whiteouts */
 	if (is_dir) {
-		if (((upperdentry && lowerdentry) || oip->numlower > 1) ||
-		    ovl_check_origin_xattr(ofs, upperdentry ?: lowerdentry)) {
+		if (((upperdentry && lowerdentry) || ovl_numlower(oip->oe) > 1) ||
+		    ovl_path_check_origin_xattr(ofs, &realpath)) {
 			ovl_set_flag(OVL_WHITEOUTS, inode);
 		}
 	}
+
+	/* Check for immutable/append-only inode flags in xattr */
+	if (upperdentry)
+		ovl_check_protattr(inode, upperdentry);
 
 	if (inode->i_state & I_NEW)
 		unlock_new_inode(inode);

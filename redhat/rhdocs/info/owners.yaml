@@ -24,9 +24,9 @@ subsystems:
    # The list of Red Hat Engineering SSTs that are responsible for developing this subsystem.
    devel-sst:
      - rhel-sst-kernel-maintainers
-   # The list of Red Hat Engineering SSTs that are responsible for testing this subsystem.
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   # The Jira component that should be set when filing issues against this subsystem.
+   # A mandatory field.
+   jiraComponent: kernel
    # are acks required from this subsystem when a merge request touches its paths?
    requiredApproval: true
    # M:
@@ -70,8 +70,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-kernel-rts
+   jiraComponent: kernel-rt
    requiredApproval: true
    maintainers:
      - name: Clark Williams
@@ -89,16 +88,15 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel-automotive
    requiredApproval: true
    maintainers:
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
      - name: Julio Faracco
        email: jfaracco@redhat.com
        gluser: jfaracco
-     - name: Scott Weaver
-       email: scweaver@redhat.com
-       gluser: scweaver
    paths:
        # Focus is on main-automotive branch
        includes:
@@ -113,13 +111,12 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
-     - name: Jan Stancek
-       email: jstancek@redhat.com
-       gluser: jstancek
+     - name: Scott Weaver
+       email: scweaver@redhat.com
+       gluser: scweaver
    paths:
        includes:
           - Makefile.rhelver
@@ -130,8 +127,40 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
+   jiraComponent: kernel-rt
+   requiredApproval: true
+   maintainers:
+     - name: Eder Zulian
+       email: ezulian@redhat.com
+       gluser: ezulian
+     - name: Derek Barbosa
+       email: debarbos@redhat.com
+       gluser: debarbos
+   paths:
+       includes:
+          - Makefile.rhelver
+ - subsystem: RHEL 9.3 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   devel-sst:
+     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
+   requiredApproval: true
+   maintainers:
+     - name: Jan Stancek
+       email: jstancek@redhat.com
+       gluser: jstancek
+   paths:
+       includes:
+          - Makefile.rhelver
+ - subsystem: RHEL 9.3 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   devel-sst:
      - rhel-sst-kernel-rts
+   jiraComponent: kernel-rt
    requiredApproval: true
    maintainers:
      - name: Luis Claudio Goncalves
@@ -146,8 +175,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Herton R. Krzesinski
@@ -162,8 +190,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-kernel-rts
+   jiraComponent: kernel-rt
    requiredApproval: true
    maintainers:
      - name: Derek Barbosa
@@ -178,8 +205,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Patrick Talbert
@@ -194,8 +220,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Herton R. Krzesinski
@@ -232,6 +257,9 @@ subsystems:
      - name: Clark Williams
        email: williams@redhat.com
        gluser: clrkwllms
+     - name: Scott Weaver
+       email: scweaver@redhat.com
+       gluser: scweaver
    paths:
        includes:
           - makefile
@@ -246,8 +274,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Julio Faracco
@@ -262,8 +289,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-kernel-rts
+   jiraComponent: kernel-rt
    requiredApproval: true
    maintainers:
      - name: Eder Zulian
@@ -278,8 +304,40 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
+   jiraComponent: kernel-rt
+   requiredApproval: true
+   maintainers:
+     - name: Derek Barbosa
+       email: debarbos@redhat.com
+       gluser: debarbos
+     - name: Eder Zulian
+       email: ezulian@redhat.com
+       gluser: ezulian
+   paths:
+       includes:
+          - Makefile.rhelver
+ - subsystem: RHEL 8.9 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   devel-sst:
+     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
+   requiredApproval: true
+   maintainers:
+     - name: Patrick Talbert
+       email: ptalbert@redhat.com
+       gluser: ptalbert
+   paths:
+       includes:
+          - Makefile.rhelver
+ - subsystem: RHEL 8.9 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   devel-sst:
      - rhel-sst-kernel-rts
+   jiraComponent: kernel-rt
    requiredApproval: true
    maintainers:
      - name: John B. Wyatt IV
@@ -294,8 +352,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Lucas Zampieri
@@ -307,11 +364,10 @@ subsystems:
  - subsystem: RHEL 8.8 Real Time Kernel Maintainer
    labels:
      name: redhat
-   status: Supported
+   status: Unsupported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-kernel-rts
+   jiraComponent: kernel-rt
    requiredApproval: true
    maintainers:
      - name: Tyonnchie Berry
@@ -326,8 +382,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Jarod Wilson
@@ -342,8 +397,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Augusto Caringi
@@ -358,8 +412,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-kernel-rts
+   jiraComponent: kernel-rt
    requiredApproval: true
    maintainers:
      - name: Chris White
@@ -374,8 +427,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Scott Weaver
@@ -390,8 +442,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-kernel-rts
+   jiraComponent: kernel-rt
    requiredApproval: true
    maintainers:
      - name: Derek Barbosa
@@ -406,8 +457,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Julio Faracco
@@ -422,8 +472,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-kernel-rts
+   jiraComponent: kernel-rt
    requiredApproval: true
    maintainers:
      - name: Tyonnchie Berry
@@ -438,8 +487,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Scott Weaver
@@ -454,8 +502,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Rado Vrbovsky
@@ -470,13 +517,13 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-kernel-rts
+   jiraComponent: kernel-rt
    requiredApproval: true
    maintainers:
      - name: Crystal Wood
-       email: swood@redhat.com
-       gluser: swood3
+       email: crwood@redhat.com
+       gluser: crystalwood
+       restricted: true
    paths:
        includes:
           - Makefile
@@ -486,8 +533,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Rado Vrbovsky
@@ -502,8 +548,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Denys Vlasenko
@@ -518,8 +563,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Denys Vlasenko
@@ -534,8 +578,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Denys Vlasenko
@@ -550,8 +593,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Denys Vlasenko
@@ -566,8 +608,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Tomas Henzl
@@ -581,9 +622,8 @@ subsystems:
      name: 8139cp
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Ivan Vecera
@@ -597,14 +637,13 @@ subsystems:
      name: r8169
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
-     - name: José Ignacio Tornos Martínez
-       email: jtornosm@redhat.com
-       gluser: jtornosm
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
    paths:
        includes:
           - drivers/net/ethernet/realtek/r8169*
@@ -614,8 +653,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -632,8 +670,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Mark Langsdorf
@@ -662,8 +699,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems / File Systems - Other
    requiredApproval: false
    maintainers:
      - name: Marc Dionne
@@ -686,8 +722,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-storage-io
+   jiraComponent: kernel / Storage / Other
    requiredApproval: false
    maintainers:
      - name: Jeff Moyer
@@ -703,8 +738,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Desktop / Audio
    requiredApproval: false
    maintainers:
      - name: Jaroslav Kysela
@@ -727,9 +761,8 @@ subsystems:
      name: ena
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Dan Campbell
@@ -760,9 +793,6 @@ subsystems:
      - name: Ivan Vecera
        email: ivecera@redhat.com
        gluser: ivecera
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
      - name: Izabela Bakollari
        email: ibakolla@redhat.com
        gluser: ibakolla
@@ -776,9 +806,8 @@ subsystems:
      name: efa
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / RDMA
    requiredApproval: false
    maintainers:
      - name: Izabela Bakollari
@@ -797,8 +826,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-accelerators
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel
    requiredApproval: false
    maintainers:
      - name: Marco Pagani
@@ -813,8 +841,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / IOMMU
    requiredApproval: true
    maintainers:
      - name: Jerry Snitselaar
@@ -840,8 +867,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / PCI subsystem
    requiredApproval: false
    maintainers:
      - name: John Linville
@@ -859,8 +885,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization
    requiredApproval: false
    maintainers:
      - name: Vitaly Kuznetsov
@@ -881,8 +906,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -898,14 +922,13 @@ subsystems:
      name: aquantia
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
+     - name: Dan Campbell
+       email: dacampbe@redhat.com
+       gluser: dacampbe
    reviewers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -943,8 +966,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Prarit Bhargava
@@ -964,9 +986,8 @@ subsystems:
      name: arcnet
    status: Disabled
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    maintainers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -981,8 +1002,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Tomas Henzl
@@ -997,8 +1017,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / aarch64
    requiredApproval: false
    maintainers:
      - name: Mark Salter
@@ -1021,8 +1040,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / aarch64
    requiredApproval: false
    maintainers:
      - name: Mark Salter
@@ -1042,8 +1060,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / aarch64
    requiredApproval: false
    maintainers:
      - name: Mark Salter
@@ -1070,8 +1087,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / aarch64
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -1095,8 +1111,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / IOMMU
    requiredApproval: true
    maintainers:
      - name: Jerry Snitselaar
@@ -1122,13 +1137,9 @@ subsystems:
    status: Supported
    devel-sst:
      - rhivos-ft-auto-kernel
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / automotive
    requiredApproval: true
    maintainers:
-     - name: Adrien Thierry
-       email: athierry@redhat.com
-       gluser: athierry1
      - name: Andrew Halaney
        email: ahalaney@redhat.com
        gluser: ahalaney
@@ -1183,8 +1194,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / aarch64
    requiredApproval: false
    maintainers:
      - name: Mark Salter
@@ -1207,9 +1217,8 @@ subsystems:
      name: atm_drivers
    status: Disabled
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    maintainers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -1226,9 +1235,8 @@ subsystems:
      name: atheros
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Jarod Wilson
@@ -1243,9 +1251,8 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-security
-   qe-sst:
-     - rhel-sst-kernel-security
      - rhel-sst-security-special-projects
+   jiraComponent: kernel / Security / Audit
    requiredApproval: false
    maintainers:
      - name: Richard Guy Briggs
@@ -1269,19 +1276,15 @@ subsystems:
    status: Supported
    devel-sst:
      - rhivos-ft-auto-kernel
-   qe-sst:
-     - rhivos-ft-auto-kernel
+   jiraComponent: kernel-automotive
    maintainers:
+     - name: Jarod Wilson
+       email: jarod@redhat.com
+       gluser: jwilsonrh
      - name: Julio Faracco
        email: jfaracco@redhat.com
        gluser: jfaracco
-     - name: Scott Weaver
-       email: scweaver@redhat.com
-       gluser: scweaver
    reviewers:
-     - name: Adrien Thierry
-       email: athierry@redhat.com
-       gluser: athierry1
      - name: Alessandro Carminati
        email: acarmina@redhat.com
        gluser: acarmina
@@ -1309,8 +1312,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -1327,10 +1329,12 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-logical-storage
-   qe-sst:
-     - rhel-sst-logical-storage
+   jiraComponent: kernel / Storage / Device Mapper
    requiredApproval: false
    maintainers:
+     - name: Benjamin Marzinski
+       email: bmarzins@redhat.com
+       gluser: bmarzins
      - name: Mike Snitzer
        email: snitzer@redhat.com
        gluser: snitm
@@ -1342,9 +1346,8 @@ subsystems:
      name: be2net
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Petr Oros
@@ -1359,8 +1362,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Lenny Szubowicz
@@ -1376,8 +1378,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Block Layer
    requiredApproval: false
    maintainers:
      - name: Ming Lei
@@ -1399,13 +1400,22 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Networking / Bluetooth
    requiredApproval: false
    maintainers:
      - name: David Marlin
        email: dmarlin@redhat.com
        gluser: dmarlin
+   reviewers:
+     - name: Bastien Nocera
+       email: bnocera@redhat.com
+       gluser: bnocera
+     - name: Desnes Nunes
+       email: desnesn@redhat.com
+       gluser: desnesn
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
    paths:
        includes:
           - drivers/bluetooth/
@@ -1416,9 +1426,8 @@ subsystems:
      name: bonding
    status: Supported
    devel-sst:
-     - rhel-sst-networking
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-networking-core
+   jiraComponent: kernel / Networking / Bonding
    requiredApproval: false
    maintainers:
      - name: Hangbin Liu
@@ -1455,9 +1464,6 @@ subsystems:
      - name: Ivan Vecera
        email: ivecera@redhat.com
        gluser: ivecera
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
      - name: Izabela Bakollari
        email: ibakolla@redhat.com
        gluser: ibakolla
@@ -1477,13 +1483,12 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-tps
-   qe-sst:
-     - rhel-sst-kernel-tps
+   jiraComponent: kernel / BPF
    requiredApproval: false
    maintainers:
-     - name: Yauheni Kaliuta
-       email: ykaliuta@redhat.com
-       gluser: ykaliuta
+     - name: Artem Savkov
+       email: asavkov@redhat.com
+       gluser: artem.savkov
    reviewers:
      - name: Jerome Marchand
        email: jmarchan@redhat.com
@@ -1494,9 +1499,6 @@ subsystems:
      - name: Viktor Malik
        email: vmalik@redhat.com
        gluser: vmalikrh
-     - name: Artem Savkov
-       email: asavkov@redhat.com
-       gluser: artem.savkov
    paths:
        includes:
           - arch/*/net/*
@@ -1519,9 +1521,8 @@ subsystems:
      name: b44
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Jarod Wilson
@@ -1535,9 +1536,8 @@ subsystems:
      name: bnx2
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Ken Cox
@@ -1552,9 +1552,8 @@ subsystems:
      name: bnx2x
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Michal Schmidt
@@ -1569,9 +1568,8 @@ subsystems:
      name: bnxt_en
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Ken Cox
@@ -1586,9 +1584,8 @@ subsystems:
      name: bnxt_re
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / RDMA
    requiredApproval: false
    maintainers:
      - name: Selvin Xavier
@@ -1608,8 +1605,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement / NVMe
    requiredApproval: false
    maintainers:
      - name: Maurizio Lombardi
@@ -1624,8 +1620,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement / NVMe
    requiredApproval: false
    maintainers:
      - name: Maurizio Lombardi
@@ -1643,9 +1638,8 @@ subsystems:
      name: cnic
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Platform Enablement / NVMe
    requiredApproval: false
    maintainers:
      - name: Maurizio Lombardi
@@ -1659,9 +1653,8 @@ subsystems:
      name: bcma
    status: Provided
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    maintainers:
      - name: José Ignacio Tornos Martínez
        email: jtornosm@redhat.com
@@ -1678,9 +1671,8 @@ subsystems:
      name: tg3
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Ken Cox
@@ -1696,8 +1688,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / PCI subsystem
    requiredApproval: false
    maintainers:
      - name: Myron Stowe
@@ -1712,8 +1703,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-edge
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Radu Rendec
@@ -1722,6 +1712,7 @@ subsystems:
    paths:
        includes:
           - Documentation/networking/can.rst
+          - Documentation/networking/can_ucan_protocol.rst
           - include/linux/can/
           - include/uapi/linux/can/
           - include/uapi/linux/can.h
@@ -1732,13 +1723,12 @@ subsystems:
      name: liquidio
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    maintainers:
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
    paths:
        includes:
           - drivers/net/ethernet/cavium/liquidio/
@@ -1747,13 +1737,12 @@ subsystems:
      name: thunderx
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    maintainers:
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
    paths:
        includes:
           - drivers/net/ethernet/cavium/thunder/
@@ -1764,8 +1753,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-rh-ceph-storage
-   qe-sst:
-     - rhel-sst-rh-ceph-storage
+   jiraComponent: kernel / File Systems / CephFS
    requiredApproval: false
    maintainers:
      - name: Ilya Dryomov
@@ -1785,8 +1773,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-rh-ceph-storage
-   qe-sst:
-     - rhel-sst-rh-ceph-storage
+   jiraComponent: kernel / File Systems / CephFS
    requiredApproval: false
    maintainers:
      - name: Xiubo Li
@@ -1802,8 +1789,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-filesystems
+   jiraComponent: kernel
    requiredApproval: false
    maintainers:
      - name: David Howells
@@ -1819,8 +1805,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Doug Ledford
@@ -1840,13 +1825,12 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems / CIFS
    requiredApproval: false
    maintainers:
-     - name: Ronnie Sahlberg
-       email: lsahlber@redhat.com
-       gluser: lsahlber
+     - name: Paulo Alcantara
+       email: paalcant@redhat.com
+       gluser: paalcant
    reviewers:
      - name: Benjamin Coddington
        email: bcodding@redhat.com
@@ -1863,14 +1847,16 @@ subsystems:
    paths:
        includes:
           - fs/cifs/
+          - fs/smb/client/
+          - fs/smb/common/
+          - include/uapi/linux/cifs/
  - subsystem: CISCO FCOE HBA (fnic)
    labels:
      name: fnic
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Chris Leech
@@ -1888,9 +1874,8 @@ subsystems:
      name: enic
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Michal Schmidt
@@ -1905,8 +1890,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Mark Salter
@@ -1925,8 +1909,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -1943,8 +1926,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Mark Salter
@@ -1963,8 +1945,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-accelerators
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Accelerators / GPUs
    requiredApproval: false
    maintainers:
      - name: Tom Rix
@@ -1983,8 +1964,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / PCI subsystem
    required-approval: false
    maintainers:
      - name: Myron Stowe
@@ -2005,13 +1985,12 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems
    requiredApproval: false
    maintainers:
-     - name: Bob Peterson
-       email: rpeterso@redhat.com
-       gluser: rpeterso1
+     - name: Alexander Aring
+       email: aahringo@redhat.com
+       gluser: netcoder
    paths:
        includes:
           - fs/configfs/
@@ -2022,8 +2001,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Doug Ledford
@@ -2042,22 +2020,21 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-cki
-   qe-sst:
-     - rhel-sst-cki
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Tales da Aparecida
        email: tdaapare@redhat.com
        gluser: tales-aparecida
-     - name: Tino Calancha
-       email: tcalanch@redhat.com
-       gluser: calancha
      - name: Michael Hofmann
        email: mhofmann@redhat.com
        gluser: mh21_rh
      - name: Serhii Turivnyi
        email: sturivny@redhat.com
        gluser: sturivny
+     - name: Bohdan Khomutskyi
+       email: bkhomuts@redhat.com
+       gluser: bkhomuts
    paths:
        includes:
           - .gitlab-ci.yml
@@ -2067,8 +2044,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-ft
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Control Groups
    requiredApproval: false
    maintainers:
      - name: Waiman Long
@@ -2107,8 +2083,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Doug Ledford
@@ -2128,8 +2103,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: true
    maintainers:
      - name: Mark Langsdorf
@@ -2156,8 +2130,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: true
    maintainers:
      - name: Mark Langsdorf
@@ -2179,9 +2152,8 @@ subsystems:
    devel-sst:
      - rhel-sst-kernel-security
      - rhel-sst-security-crypto
-   qe-sst:
-     - rhel-sst-kernel-security
      - rhel-sst-security-crypto
+   jiraComponent: kernel / Crypto
    requiredApproval: true
    maintainers:
      - name: Herbert Xu
@@ -2221,9 +2193,8 @@ subsystems:
      name: cxgb3
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Michal Schmidt
@@ -2237,9 +2208,8 @@ subsystems:
      name: cxgb4
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Michal Schmidt
@@ -2253,9 +2223,8 @@ subsystems:
      name: iw_cxgb4
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / RDMA
    requiredApproval: false
    maintainers:
      - name: Rahul Lakkireddy
@@ -2275,8 +2244,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Doug Ledford
@@ -2294,8 +2262,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / IOMMU
    requiredApproval: false
    maintainers:
      - name: Jerry Snitselaar
@@ -2310,8 +2277,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Persistent Memory (NVDIMM)
    requiredApproval: false
    maintainers:
      - name: Jeff Moyer
@@ -2326,8 +2292,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -2344,10 +2309,12 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-logical-storage
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Device Mapper
    requiredApproval: false
    maintainers:
+     - name: Benjamin Marzinski
+       email: bmarzins@redhat.com
+       gluser: bmarzins
      - name: Mike Snitzer
        email: snitzer@redhat.com
        gluser: snitm
@@ -2364,9 +2331,8 @@ subsystems:
      name: devlink
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Petr Oros
@@ -2388,6 +2354,7 @@ subsystems:
           - net/core/devlink.c
           - net/devlink/
           - include/net/devlink.h
+          - include/trace/events/devlink.h
           - include/uapi/linux/devlink.h
  - subsystem: DIRECT IO
    labels:
@@ -2396,9 +2363,8 @@ subsystems:
    devel-sst:
      - rhel-sst-storage-io
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-storage-io
      - rhel-sst-filesystems
+   jiraComponent: kernel / File Systems / VFS
    requiredApproval: false
    maintainers:
      - name: Jeff Moyer
@@ -2413,8 +2379,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Tomas Henzl
@@ -2429,8 +2394,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Networking / DLM
    requiredApproval: false
    maintainers:
      - name: Alexander Aring
@@ -2440,9 +2404,6 @@ subsystems:
      - name: David Teigland
        email: teigland@redhat.com
        gluser: teigland
-     - name: Bob Peterson
-       email: rpeterso@redhat.com
-       gluser: rpeterso1
      - name: Andreas Gruenbacher
        email: agruenba@redhat.com
        gluser: agruenba
@@ -2455,10 +2416,12 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-logical-storage
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Multiple Devices (MD)
    requiredApproval: false
    maintainers:
+     - name: Benjamin Marzinski
+       email: bmarzins@redhat.com
+       gluser: bmarzins
      - name: Mike Snitzer
        email: snitzer@redhat.com
        gluser: snitm
@@ -2475,8 +2438,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-gpu
-   qe-sst:
-     - rhel-sst-gpu
+   jiraComponent: kernel / Desktop / Graphics
    requiredApproval: false
    maintainers:
      - name: Lyude Paul
@@ -2499,17 +2461,12 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-     - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / IOMMU
    requiredApproval: false
    maintainers:
      - name: Jerry Snitselaar
        email: jsnitsel@redhat.com
        gluser: jsnitsel
-     - name: David Arcari
-       email: darcari@redhat.com
-       gluser: darcari
    paths:
        includes:
           - drivers/dma/
@@ -2519,8 +2476,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / IOMMU
    requiredApproval: true
    maintainers:
      - name: Jerry Snitselaar
@@ -2556,8 +2512,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    paths:
        includes:
           - drivers/base/
@@ -2567,8 +2522,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-ft
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Debugging-Tracing / EDAC-HERM
    requiredApproval: false
    maintainers:
      - name: Aristeu Rozanski
@@ -2596,8 +2550,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -2614,8 +2567,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Ewan D. Milne
@@ -2624,14 +2576,45 @@ subsystems:
    paths:
        includes:
           - drivers/scsi/lpfc/
+ - subsystem: EROFS FILE SYSTEM
+   labels:
+     name: erofs
+   status: Internal
+   devel-sst:
+     - rhivos-ft-auto-kernel
+   jiraComponent: kernel / automotive
+   requiredApproval: false
+   maintainers:
+     - name: Andrew Halaney
+       email: ahalaney@redhat.com
+       gluser: ahalaney
+     - name: Lucas Karpinski
+       email: lkarpins@redhat.com
+       gluser: lkarpins-rh
+     - name: Alexander Larsson
+       email: alexl@redhat.com
+       gluser: alexlarsson
+   reviewers:
+     - name: Brian Foster
+       email: bfoster@redhat.com
+       gluser: bfoster2
+     - name: Carlos Maiolino
+       email: cmaiolino@redhat.com
+       gluser: cmaiolino
+     - name: Miklos Szeredi
+       email: mszeredi@redhat.com
+       gluser: mszeredi
+   paths:
+       includes:
+          - Documentation/filesystems/erofs.rst
+          - fs/erofs/
  - subsystem: ETHERNET
    labels:
      name: ethernet
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Michal Schmidt
@@ -2662,9 +2645,6 @@ subsystems:
      - name: Ivan Vecera
        email: ivecera@redhat.com
        gluser: ivecera
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
      - name: Izabela Bakollari
        email: ibakolla@redhat.com
        gluser: ibakolla
@@ -2678,9 +2658,8 @@ subsystems:
      name: if_bridge
    status: Supported
    devel-sst:
-     - rhel-sst-networking
-   qe-sst:
-     - rhel-sst-null
+     - rhel-sst-networking-core
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Ivan Vecera
@@ -2694,6 +2673,7 @@ subsystems:
           - Documentation/networking/bridge.rst
           - net/bridge/
           - include/linux/if_bridge.h
+          - include/trace/events/bridge.h
           - include/uapi/linux/if_bridge.h
           - include/uapi/linux/mrp_bridge.h
  - subsystem: ETHERNET PHY LIBRARY
@@ -2701,14 +2681,13 @@ subsystems:
      name: phylib
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
    reviewers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -2734,9 +2713,6 @@ subsystems:
      - name: Ivan Vecera
        email: ivecera@redhat.com
        gluser: ivecera
-     - name: Izabela Bakollari
-       email: ibakolla@redhat.com
-       gluser: ibakolla
    paths:
        includes:
           - Documentation/networking/phy.rst
@@ -2757,9 +2733,8 @@ subsystems:
      name: pse-pd
    status: Disabled
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Ivan Vecera
@@ -2775,8 +2750,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-filesystems
+   jiraComponent: kernel / File Systems / File Systems - Other
    requiredApproval: false
    maintainers:
      - name: Pavel Reichl
@@ -2791,8 +2765,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems / ext*
    requiredApproval: false
    maintainers:
      - name: Carlos Maiolino
@@ -2808,8 +2781,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -2826,8 +2798,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement / NVMe
    requiredApproval: false
    maintainers:
      - name: John Meneghini
@@ -2853,9 +2824,8 @@ subsystems:
      name: fddi
    status: Disabled
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    maintainers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -2871,8 +2841,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: true
    maintainers:
      - name: Justin Forbes
@@ -2882,14 +2851,14 @@ subsystems:
        includes:
           - redhat/configs/fedora/
           - redhat/fedora_files/
+          - redhat/scripts/fedora/
  - subsystem: FILESYSTEM (GENERAL)
    labels:
      name: fs
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems
    requiredApproval: false
    maintainers:
      - name: Brian Foster
@@ -2929,6 +2898,7 @@ subsystems:
           - fs/overlayfs/
           - fs/proc/vmcore.c
           - fs/pstore/
+          - fs/smb/
           - fs/squashfs/
           - fs/xfs/
           - fs/proc/namespaces.c
@@ -2938,8 +2908,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems
    requiredApproval: false
    maintainers:
      - name: Jeff Moyer
@@ -2959,8 +2928,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -2978,8 +2946,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Lenny Szubowicz
@@ -2999,9 +2966,8 @@ subsystems:
      name: forcedeth
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Ivan Vecera
@@ -3016,8 +2982,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-accelerators
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Accelerators / GPUs
    requiredApproval: false
    maintainers:
      - name: Tom Rix
@@ -3036,8 +3001,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -3054,8 +3018,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-tps
-   qe-sst:
-     - rhel-sst-kernel-tps
+   jiraComponent: kernel / Debugging-Tracing / Ftrace
    requiredApproval: false
    maintainers:
      - name: Jerome Marchand
@@ -3087,8 +3050,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems / File Systems - Other
    requiredApproval: false
    maintainers:
      - name: Miklos Szeredi
@@ -3104,8 +3066,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Tomas Henzl
@@ -3120,8 +3081,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-ft
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel
    requiredApproval: false
    maintainers:
      - name: Waiman Long
@@ -3156,8 +3116,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Doug Ledford
@@ -3175,8 +3134,7 @@ subsystems:
    status: Internal
    devel-sst:
      - rhel-sst-kernel-maintainers
-   qe-sst:
-     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
    requiredApproval: false
    maintainers:
      - name: Jan Stancek
@@ -3190,9 +3148,8 @@ subsystems:
      name: phy
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Petr Oros
@@ -3209,13 +3166,9 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems / GFS-GFS2
    requiredApproval: false
    maintainers:
-     - name: Bob Peterson
-       email: rpeterso@redhat.com
-       gluser: rpeterso1
      - name: Andreas Gruenbacher
        email: agruenba@redhat.com
        gluser: agruenba
@@ -3239,9 +3192,8 @@ subsystems:
      name: gnss
    status: Provided
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    maintainers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -3256,8 +3208,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Brian Masney
@@ -3286,8 +3237,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-gpu
-   qe-sst:
-     - rhel-sst-gpu
+   jiraComponent: kernel / Desktop / Graphics
    requiredApproval: true
    maintainers:
      - name: David Airlie
@@ -3306,9 +3256,6 @@ subsystems:
      - name: Karol Herbst
        email: kherbst@redhat.com
        gluser: karolherbst
-     - name: Ben Skeggs
-       email: bskeggs@redhat.com
-       gluser: bskeggs
      - name: Jocelyn Falempe
        email: jfalempe@redhat.com
        gluser: kdj0c
@@ -3325,8 +3272,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -3343,8 +3289,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -3361,8 +3306,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -3379,8 +3323,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Power Management / Suspend-Resume-Hibernate
    requiredApproval: false
    maintainers:
      - name: Lenny Szubowicz
@@ -3395,8 +3338,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-gpu
-   qe-sst:
-     - rhel-sst-gpu
+   jiraComponent: kernel / Desktop / Desktop Other
    requiredApproval: false
    maintainers:
      - name: Benjamin Tissoires
@@ -3412,9 +3354,8 @@ subsystems:
      name: hippi
    status: Disabled
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    maintainers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -3430,8 +3371,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -3448,13 +3388,9 @@ subsystems:
    status: Supported
    devel-sst:
      - rhivos-ft-auto-kernel
-   qe-sst:
-     - rhivos-ft-auto-kernel
+   jiraComponent: kernel / automotive
    requiredApproval: false
    maintainers:
-     - name: Adrien Thierry
-       email: athierry@redhat.com
-       gluser: athierry1
      - name: Andrew Halaney
        email: ahalaney@redhat.com
        gluser: ahalaney
@@ -3476,13 +3412,12 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
-     - name: Dean Nelson
-       email: dnelson@redhat.com
-       gluser: dnlsn
+     - name: David Arcari
+       email: darcari@redhat.com
+       gluser: darcari
    paths:
        includes:
           - drivers/hwmon/
@@ -3492,13 +3427,12 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
-     - name: Dean Nelson
-       email: dnelson@redhat.com
-       gluser: dnlsn
+     - name: Aristeu Rozanski
+       email: arozansk@redhat.com
+       gluser: arozansk
    paths:
        includes:
           - mm/memory-failure.c
@@ -3509,8 +3443,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-cloud
-   qe-sst:
-     - rhel-sst-virtualization-cloud
+   jiraComponent: kernel / Virtualization / Hyper-V
    requiredApproval: false
    maintainers:
      - name: Cathy Avery
@@ -3557,8 +3490,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: David Arcari
@@ -3583,8 +3515,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: David Arcari
        email: darcari@redhat.com
@@ -3598,8 +3529,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Doug Ledford
@@ -3617,8 +3547,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -3634,9 +3563,8 @@ subsystems:
      name: ib
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / RDMA
    requiredApproval: false
    maintainers:
      - name: Kamal Heib
@@ -3664,9 +3592,6 @@ subsystems:
      - name: Ivan Vecera
        email: ivecera@redhat.com
        gluser: ivecera
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
      - name: Izabela Bakollari
        email: ibakolla@redhat.com
        gluser: ibakolla
@@ -3685,8 +3610,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Prarit Bhargava
@@ -3721,9 +3645,8 @@ subsystems:
    devel-sst:
      - rhel-sst-arch-hw
      - rhel-sst-gpu
-   qe-sst:
-     - rhel-sst-arch-hw
      - rhel-sst-gpu
+   jiraComponent: kernel / Desktop / Desktop Other
    requiredApproval: false
    maintainers:
      - name: Tony Camuso
@@ -3748,8 +3671,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-security
-   qe-sst:
-     - rhel-sst-kernel-security
+   jiraComponent: kernel / Security / IMA
    requiredApproval: false
    maintainers:
      - name: Coiby Xu
@@ -3773,9 +3695,8 @@ subsystems:
      name: e1000
    status: Provided
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    required-approval: false
    maintainers:
      - name: Ken Cox
@@ -3789,9 +3710,8 @@ subsystems:
      name: e1000e
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Ken Cox
@@ -3805,9 +3725,8 @@ subsystems:
      name: ice
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Petr Oros
@@ -3835,9 +3754,6 @@ subsystems:
      - name: Ivan Vecera
        email: ivecera@redhat.com
        gluser: ivecera
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
      - name: Izabela Bakollari
        email: ibakolla@redhat.com
        gluser: ibakolla
@@ -3850,9 +3766,8 @@ subsystems:
      name: irdma
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / RDMA
    requiredApproval: false
    maintainers:
      - name: Kamal Heib
@@ -3867,9 +3782,8 @@ subsystems:
      name: i40e
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Ivan Vecera
@@ -3883,9 +3797,8 @@ subsystems:
      name: i40iw
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / RDMA
    requiredApproval: false
    maintainers:
      - name: Stefan Assmann
@@ -3900,9 +3813,8 @@ subsystems:
      name: iavf
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Petr Oros
@@ -3920,9 +3832,8 @@ subsystems:
      name: igb
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Corinna Vinschen
@@ -3936,9 +3847,8 @@ subsystems:
      name: igbvf
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Corinna Vinschen
@@ -3952,9 +3862,8 @@ subsystems:
      name: igc
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Corinna Vinschen
@@ -3969,8 +3878,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / IOMMU
    requiredApproval: true
    maintainers:
      - name: Jerry Snitselaar
@@ -3996,9 +3904,8 @@ subsystems:
      name: ixgbe
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Ken Cox
@@ -4012,9 +3919,8 @@ subsystems:
      name: ixgbevf
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Ken Cox
@@ -4029,8 +3935,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / x86_64
    requiredApproval: true
    maintainers:
      - name: Prarit Bhargava
@@ -4048,8 +3953,7 @@ subsystems:
    status: Maintained
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / x86_64
    requiredApproval: false
    maintainers:
      - name: Prarit Bhargava
@@ -4067,8 +3971,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-security
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Crypto
    requiredApproval: false
    maintainers:
      - name: Vladis Dronov
@@ -4091,8 +3994,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / x86_64
    requiredApproval: true
    maintainers:
      - name: Prarit Bhargava
@@ -4110,8 +4012,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -4128,8 +4029,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-ft
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel
    requiredApproval: false
    maintainers:
      - name: Aristeu Rozanski
@@ -4161,8 +4061,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Mark Salter
@@ -4182,8 +4081,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / IOMMU
    requiredApproval: true
    maintainers:
      - name: Jerry Snitselaar
@@ -4209,14 +4107,38 @@ subsystems:
           - include/linux/dma-iommu.h
           - include/linux/of_iommu.h
           - include/uapi/linux/iommu.h
+ - subsystem: io_uring
+   labels:
+     name: io_uring
+   status: Maintained
+   devel-sst:
+     - rhel-sst-storage-io
+   jiraComponent: kernel / io_uring
+   requiredApproval: false
+   maintainers:
+     - name: Jeff Moyer
+       email: jmoyer@redhat.com
+       gluser: jmoyer1
+   reviewers:
+     - name: Brian Foster
+       email: bfoster@redhat.com
+       gluser: bfoster2
+     - name: Ming Lei
+       email: ming.lei@redhat.com
+       gluser: minlei
+   paths:
+       includes:
+          - include/uapi/linux/io_uring.h
+          - include/linux/io_uring.h
+          - include/linux/io_uring_types.h
+          - io_uring/
  - subsystem: IPMI SUBSYSTEM
    labels:
      name: ipmi
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Tony Camuso
@@ -4237,8 +4159,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Prarit Bhargava
@@ -4259,8 +4180,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Chris Leech
@@ -4275,9 +4195,8 @@ subsystems:
      name: isdn
    status: Disabled
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    maintainers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -4294,8 +4213,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Doug Ledford
@@ -4314,8 +4232,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems / File Systems - Other
    requiredApproval: false
    maintainers:
      - name: Carlos Maiolino
@@ -4331,8 +4248,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-security
-   qe-sst:
-     - rhel-sst-kernel-security
+   jiraComponent: kernel / Security / KASLR
    requiredApproval: false
    maintainers:
      - name: Julia Denham
@@ -4353,8 +4269,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Prarit Bhargava
@@ -4381,8 +4296,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization / KVM
    requiredApproval: false
    maintainers:
      - name: Paolo Bonzini
@@ -4413,8 +4327,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization / KVM
    requiredApproval: false
    maintainers:
      - name: Paolo Bonzini
@@ -4442,8 +4355,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization / KVM
    requiredApproval: false
    maintainers:
      - name: Eric Auger
@@ -4472,8 +4384,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization / KVM
    requiredApproval: false
    maintainers:
      - name: David Gibson
@@ -4498,8 +4409,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization / KVM
    requiredApproval: false
    maintainers:
      - name: Thomas Huth
@@ -4531,8 +4441,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization / KVM
    requiredApproval: false
    maintainers:
      - name: Paolo Bonzini
@@ -4561,8 +4470,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-debug
-   qe-sst:
-     - rhel-sst-kernel-debug
+   jiraComponent: kernel / Debugging-Tracing / Kexec - kdump
    requiredApproval: true
    maintainers:
      - name: Baoquan He
@@ -4598,6 +4506,7 @@ subsystems:
           - fs/proc/vmcore.c
           - kernel/crash_*.c
           - kernel/kexec*
+          - kernel/Kconfig.kexec
           - arch/x86/kernel/machine_kexec_*.c
           - arch/x86/kernel/crash*.c
           - arch/x86/kernel/kexec-bzimage64.c
@@ -4611,8 +4520,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Tony Camuso
@@ -4627,8 +4535,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Kernel-Core
    requiredApproval: false
    maintainers:
      - name: Prarit Bhargava
@@ -4670,8 +4577,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-security
-   qe-sst:
-     - rhel-sst-kernel-security
+   jiraComponent: kernel / Livepatch
    requiredApproval: false
    maintainers:
      - name: Josh Poimboeuf
@@ -4710,8 +4616,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-ft
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Kernel-Core
    requiredApproval: false
    maintainers:
      - name: Waiman Long
@@ -4747,6 +4652,7 @@ subsystems:
           - include/linux/seqlock.h
           - include/linux/spinlock*.h
           - lib/locking*.[ch]
+          - kernel/Kconfig.locks
           - kernel/locking/
  - subsystem: LSI 3ware SAS/SATA-RAID Linux Drive (3w-sas)
    labels:
@@ -4754,8 +4660,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Tomas Henzl
@@ -4770,8 +4675,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Tomas Henzl
@@ -4786,8 +4690,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Tomas Henzl
@@ -4802,8 +4705,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Tomas Henzl
@@ -4818,8 +4720,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Prarit Bhargava
@@ -4834,8 +4735,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Doug Ledford
@@ -4853,13 +4753,9 @@ subsystems:
    status: Supported
    devel-sst:
      - rhivos-ft-auto-kernel
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / automotive
    requiredApproval: false
    maintainers:
-     - name: Adrien Thierry
-       email: athierry@redhat.com
-       gluser: athierry1
      - name: Andrew Halaney
        email: ahalaney@redhat.com
        gluser: ahalaney
@@ -4878,8 +4774,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Desktop / V4L
    requiredApproval: false
    maintainers:
      - name: Dean Nelson
@@ -4912,9 +4807,8 @@ subsystems:
      name: mlxsw
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Ivan Vecera
@@ -4929,8 +4823,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -4948,8 +4841,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Prarit Bhargava
@@ -4965,8 +4857,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-ft
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Memory Management
    requiredApproval: true
    maintainers:
      - name: Rafael Aquini
@@ -4976,9 +4867,6 @@ subsystems:
      - name: Aristeu Rozanski
        email: arozansk@redhat.com
        gluser: arozansk
-     - name: Artem Savkov
-       email: asavkov@redhat.com
-       gluser: artem.savkov
      - name: Baoquan He
        email: bhe@redhat.com
        gluser: baoquan_he
@@ -5006,6 +4894,9 @@ subsystems:
      - name: Audra Mitchell
        email: aubaker@redhat.com
        gluser: aubaker
+     - name: David Hildenbrand
+       email: david@redhat.com
+       gluser: davidhildenbrand
    paths:
        includes:
           - arch/arm64/mm/
@@ -5047,8 +4938,7 @@ subsystems:
    status: Unassigned
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Doug Ledford
@@ -5066,8 +4956,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Doug Ledford
@@ -5085,8 +4974,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Mark Salter
@@ -5104,8 +4992,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Don Brace
@@ -5128,9 +5015,8 @@ subsystems:
      name: mlx4
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / RDMA
    requiredApproval: false
    maintainers:
      - name: Amir Tzin
@@ -5152,9 +5038,8 @@ subsystems:
      name: mlx4_ib
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / RDMA
    requiredApproval: false
    maintainers:
      - name: Amir Tzin
@@ -5178,9 +5063,8 @@ subsystems:
      name: mlx5
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Amir Tzin
@@ -5203,9 +5087,8 @@ subsystems:
      name: mlx5_ib
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / RDMA
    requiredApproval: false
    maintainers:
      - name: Amir Tzin
@@ -5230,8 +5113,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Mark Salter
@@ -5248,13 +5130,23 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+     - rhel-sst-kernel-ft
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Prarit Bhargava
        email: prarit@redhat.com
        gluser: prarit
+   reviewers:
+     - name: Audra Mitchell
+       email: aubaker@redhat.com
+       gluser: aubaker
+     - name: Donald Dutile
+       email: ddutile@redhat.com
+       gluser: ddutile
+     - name: Rafael Aquini
+       email: aquini@redhat.com
+       gluser: raquini
    paths:
        includes:
           - kernel/module/
@@ -5267,8 +5159,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -5284,9 +5175,8 @@ subsystems:
      name: myri10ge
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel
    requiredApproval: false
    maintainers:
      - name: Jarod Wilson
@@ -5301,13 +5191,15 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-ft
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Namespace
    requiredApproval: true
    maintainers:
      - name: Alex Gladkov
        email: agladkov@redhat.com
        gluser: legionus
+     - name: Joel Savitz
+       email: jsavitz@redhat.com
+       gluser: jsavitz
    reviewers:
      - name: Christoph von Recklinghausen
        email: crecklin@redhat.com
@@ -5326,14 +5218,42 @@ subsystems:
           - kernel/user_namespace.c
           - tools/testing/selftests/pid_namespace/
           - tools/testing/selftests/rlimits/
+ - subsystem: NATIVE LANGUAGE SUPPORT
+   labels:
+     name: nls
+   status: Supported
+   devel-sst:
+     - rhel-sst-filesystems
+   jiraComponent: kernel / File Systems
+   requiredApproval: false
+   maintainers:
+     - name: Paulo Alcantara
+       email: paalcant@redhat.com
+       gluser: paalcant
+   reviewers:
+     - name: Benjamin Coddington
+       email: bcodding@redhat.com
+       gluser: bcodding
+     - name: Jeffrey Layton
+       email: jlayton@redhat.com
+       gluser: jtlayton
+     - name: Steve Dickson
+       email: steved@redhat.com
+       gluser: steved92
+     - name: Scott Mayhew
+       email: smayhew@redhat.com
+       gluser: smayhew
+   paths:
+       includes:
+          - include/linux/nls.h
+          - fs/nls/
  - subsystem: NCSI (Network Controller Sideband Interface)
    labels:
      name: ncsi
    status: Disabled
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    maintainers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -5349,9 +5269,8 @@ subsystems:
        - lnst
    status: Supported
    devel-sst:
-     - rhel-sst-networking
-   qe-sst:
-     - rhel-sst-null
+     - rhel-sst-networking-core
+   jiraComponent: kernel / Networking / Netfilter
    requiredApproval: false
    maintainers:
      - name: Florian Westphal
@@ -5382,8 +5301,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems
    requiredApproval: false
    maintainers:
      - name: Benjamin Coddington
@@ -5406,9 +5324,8 @@ subsystems:
      name: dsa
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-null
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Ivan Vecera
@@ -5436,9 +5353,6 @@ subsystems:
      - name: Corinna Vinschen
        email: vinschen@redhat.com
        gluser: vinschen
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
      - name: Izabela Bakollari
        email: ibakolla@redhat.com
        gluser: ibakolla
@@ -5459,9 +5373,8 @@ subsystems:
      emailLabel: net
    status: Supported
    devel-sst:
-     - rhel-sst-networking
-   qe-sst:
-     - rhel-sst-null
+     - rhel-sst-networking-core
+   jiraComponent: kernel / Networking
    requiredApproval: true
    maintainers:
      - name: Jiri Benc
@@ -5579,6 +5492,17 @@ subsystems:
           - include/linux/tcp.h
           - include/linux/tfrc.h
           - include/linux/udp.h
+          - include/trace/events/fib.h
+          - include/trace/events/fib6.h
+          - include/trace/events/net_probe_common.h
+          - include/trace/events/mptcp.h
+          - include/trace/events/napi.h
+          - include/trace/events/neigh.h
+          - include/trace/events/netlink.h
+          - include/trace/events/skb.h
+          - include/trace/events/sock.h
+          - include/trace/events/tcp.h
+          - include/trace/events/udp.h
           - include/uapi/asm-generic/socket.h
           - include/uapi/linux/*diag.h
           - include/uapi/linux/dcbnl.h
@@ -5636,7 +5560,9 @@ subsystems:
           - tools/testing/selftests/wireguard/
        excludes:
           - Documentation/networking/arcnet*
+          - Documentation/networking/caif/
           - Documentation/networking/can.rst
+          - Documentation/networking/can_ucan_protocol.rst
           - Documentation/networking/device_drivers/
           - Documentation/networking/devlink/
           - Documentation/networking/dsa/
@@ -5707,8 +5633,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-security-selinux
-   qe-sst:
-     - rhel-sst-security-selinux
+   jiraComponent: kernel / Security / SELinux
    requiredApproval: false
    maintainers:
      - name: Ondrej Mosnacek
@@ -5735,9 +5660,8 @@ subsystems:
      emailLabel: net
    status: Supported
    devel-sst:
-     - rhel-sst-networking
-   qe-sst:
-     - rhel-sst-null
+     - rhel-sst-networking-core
+   jiraComponent: kernel / Networking / Team
    requiredApproval: false
    maintainers:
      - name: Hangbin Liu
@@ -5761,8 +5685,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-networking
-   qe-sst:
-     - rhel-sst-virtualization-networking
+   jiraComponent: kernel / Virtualization
    requiredApproval: false
    maintainers:
      - name: Jason Wang
@@ -5770,6 +5693,7 @@ subsystems:
        gluser: jasowang
    paths:
        includes:
+          - Documentation/networking/tuntap.*
           - drivers/net/tap.c
           - drivers/net/tun.c
           - include/linux/if_tap.h
@@ -5780,9 +5704,8 @@ subsystems:
      name: netxen
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Manish Chopra
@@ -5800,9 +5723,8 @@ subsystems:
      name: nfc
    status: Disabled
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    maintainers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -5820,8 +5742,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems / NFS
    requiredApproval: false
    maintainers:
      - name: Benjamin Coddington
@@ -5838,15 +5759,16 @@ subsystems:
        gluser: smayhew
    paths:
        includes:
+          - Documentation/filesystems/nfs/
           - fs/nfs/
+          - include/linux/nfs*.h
  - subsystem: NFS SERVER (nfsd)
    labels:
      name: nfsd
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems / NFS
    requiredApproval: false
    maintainers:
      - name: Benjamin Coddington
@@ -5864,14 +5786,14 @@ subsystems:
    paths:
        includes:
           - fs/nfsd/
+          - include/uapi/linux/nfsd/*
  - subsystem: NITRO ENCLAVES (NE)
    labels:
      name: ne
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-cloud
-   qe-sst:
-     - rhel-sst-virtualization-cloud
+   jiraComponent: kernel / Virtualization
    requiredApproval: false
    maintainers:
      - name: Cathy Avery
@@ -5893,8 +5815,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Myron Stowe
@@ -5916,8 +5837,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Mark Salter
@@ -5934,8 +5854,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Prarit Bhargava
@@ -5958,8 +5877,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Persistent Memory (NVDIMM)
    requiredApproval: false
    maintainers:
      - name: Jeff Moyer
@@ -5978,8 +5896,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-storage-io
+   jiraComponent: kernel / Platform Enablement / NVMe
    requiredApproval: false
    maintainers:
      - name: Maurizio Lombardi
@@ -6006,8 +5923,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-storage-io
+   jiraComponent: kernel / Platform Enablement / NVMe
    requiredApproval: false
    maintainers:
      - name: Ewan D. Milne
@@ -6028,8 +5944,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / NVMe
    requiredApproval: false
    maintainers:
      - name: John Meneghini
@@ -6051,9 +5966,8 @@ subsystems:
      name: nvme-rdma
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / RDMA
    requiredApproval: false
    maintainers:
      - name: Kamal Heib
@@ -6080,8 +5994,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-storage-io
+   jiraComponent: kernel / Platform Enablement / NVMe
    requiredApproval: false
    maintainers:
      - name: Chris Leech
@@ -6101,9 +6014,8 @@ subsystems:
      name: opa
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / RDMA
    requiredApproval: false
    maintainers:
      - name: Izabela Bakollari
@@ -6123,8 +6035,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -6142,9 +6053,8 @@ subsystems:
        - lnst
    status: Supported
    devel-sst:
-     - rhel-sst-networking
-   qe-sst:
-     - rhel-sst-null
+     - rhel-sst-network-fastdatapath
+   jiraComponent: kernel / Networking / OVS
    requiredApproval: false
    maintainers:
      - name: Flavio Leitner
@@ -6166,8 +6076,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems / overlayfs
    requiredApproval: false
    maintainers:
      - name: Miklos Szeredi
@@ -6182,8 +6091,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -6200,8 +6108,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / PCI subsystem
    requiredApproval: false
    maintainers:
      - name: Prarit Bhargava
@@ -6219,8 +6126,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / PCI subsystem
    requiredApproval: false
    maintainers:
      - name: Myron Stowe
@@ -6239,8 +6145,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / PCI subsystem
    requiredApproval: false
    maintainers:
      - name: John Linville
@@ -6266,8 +6171,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -6283,9 +6187,8 @@ subsystems:
      name: pcs
    status: Provided
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Corinna Vinschen
@@ -6300,9 +6203,8 @@ subsystems:
      name: ionic
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Michal Schmidt
@@ -6317,8 +6219,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-tps
-   qe-sst:
-     - rhel-sst-kernel-tps
+   jiraComponent: kernel / Debugging-Tracing / Perf
    requiredApproval: false
    maintainers:
      - name: Michael Petlan
@@ -6334,6 +6235,9 @@ subsystems:
      - name: Cestmir Kalina
        email: ckalina@redhat.com
        gluser: ckalina
+     - name: Artem Savkov
+       email: asavkov@redhat.com
+       gluser: artem.savkov
    paths:
        includes:
           - kernel/events/
@@ -6351,9 +6255,8 @@ subsystems:
      name: phonet
    status: Disabled
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    maintainers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -6371,8 +6274,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Brian Masney
@@ -6391,8 +6293,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Mark Langsdorf
@@ -6411,8 +6312,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Mark Langsdorf
@@ -6427,8 +6327,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / x86_64
    requiredApproval: true
    maintainers:
      - name: David Arcari
@@ -6449,8 +6348,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: David Arcari
@@ -6467,9 +6365,8 @@ subsystems:
      name: plip
    status: Disabled
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    maintainers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -6484,8 +6381,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -6502,8 +6398,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Power Management
    requiredApproval: false
    maintainers:
      - name: Lenny Szubowicz
@@ -6518,8 +6413,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Power Management
    requiredApproval: false
    maintainers:
      - name: Mark Salter
@@ -6542,8 +6436,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Power Management
    requiredApproval: false
    maintainers:
      - name: Mark Langsdorf
@@ -6563,8 +6456,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / ppc64
    requiredApproval: false
    maintainers:
      - name: Steve Best
@@ -6581,8 +6473,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -6599,8 +6490,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel
    requiredApproval: false
    maintainers:
      - name: Lenny Szubowicz
@@ -6615,9 +6505,8 @@ subsystems:
      name: ptp
    status: Supported
    devel-sst:
-     - rhel-sst-networking
-   qe-sst:
-     - rhel-sst-null
+     - rhel-sst-networking-core
+   jiraComponent: kernel / Networking / PTP
    requiredApproval: false
    maintainers:
      - name: Jiri Benc
@@ -6637,8 +6526,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization
    requiredApproval: false
    maintainers:
      - name: Marcelo Tosatti
@@ -6660,8 +6548,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-tps
-   qe-sst:
-     - rhel-sst-kernel-tps
+   jiraComponent: kernel
    requiredApproval: false
    maintainers:
      - name: Oleg Nesterov
@@ -6686,8 +6573,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Doug Ledford
@@ -6704,9 +6590,8 @@ subsystems:
      name: qed
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Manish Chopra
@@ -6724,9 +6609,8 @@ subsystems:
      name: qede
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Manish Chopra
@@ -6744,9 +6628,8 @@ subsystems:
      name: qedr
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / RDMA
    requiredApproval: false
    maintainers:
      - name: Manish Chopra
@@ -6766,8 +6649,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Nilesh Javali
@@ -6794,8 +6676,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Nilesh Javali
@@ -6814,8 +6695,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Nilesh Javali
@@ -6837,9 +6717,8 @@ subsystems:
      name: qla3xxx
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Manish Chopra
@@ -6858,9 +6737,8 @@ subsystems:
      name: qlcnic
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Manish Chopra
@@ -6878,9 +6756,8 @@ subsystems:
      name: qlge
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Manish Chopra
@@ -6898,14 +6775,13 @@ subsystems:
      name: qrtr
    status: Provided
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-null
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / Wifi
    requiredApproval: false
    maintainers:
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
    reviewers:
      - name: Jarod Wilson
        email: jarod@redhat.com
@@ -6924,8 +6800,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-rh-ceph-storage
-   qe-sst:
-     - rhel-sst-rh-ceph-storage
+   jiraComponent: kernel / File Systems / CephFS
    requiredApproval: false
    maintainers:
      - name: Ilya Dryomov
@@ -6941,9 +6816,8 @@ subsystems:
      name: rapidio
    status: Disabled
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    maintainers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -6961,8 +6835,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-kernel-ft
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel
    maintainers:
      - name: Aristeu Rozanski
        email: arozansk@redhat.com
@@ -6976,8 +6849,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-ft
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Locking
    requiredApproval: false
    maintainers:
      - name: Waiman Long
@@ -7007,8 +6879,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Waiman Long
@@ -7027,14 +6898,28 @@ subsystems:
           - include/linux/rtc/
           - include/uapi/linux/rtc.h
           - tools/testing/selftests/rtc/
+ - subsystem: REAL TIME SUBSYSTEM
+   labels:
+     name: rt
+   status: Supported
+   devel-sst:
+     - rhel-sst-kernel-rts
+   jiraComponent: kernel-rt
+   requiredApproval: false
+   maintainers:
+     - name: Clark Williams
+       email: williams@redhat.com
+       gluser: clrkwllms
+   paths:
+       includes:
+          - kernel/Kconfig.preempt
  - subsystem: Reliable Datagram Sockets Protocol
    labels:
      name: rds
    status: Disabled
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    maintainers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -7050,8 +6935,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -7068,8 +6952,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -7085,9 +6968,8 @@ subsystems:
      name: rocker
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Ivan Vecera
@@ -7102,8 +6984,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Doug Ledford
@@ -7121,8 +7002,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / s390x
    requiredApproval: false
    maintainers:
      - name: Steve Best
@@ -7146,8 +7026,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Platform Enablement / s390x
    requiredApproval: false
    maintainers:
      - name: Cornelia Huck
@@ -7168,8 +7047,7 @@ subsystems:
    status: Internal
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel
    requiredApproval: false
    maintainers:
      - name: Alex Williamson
@@ -7190,8 +7068,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   qe-sst:
-     - rhel-sst-kernel-rts
+   jiraComponent: kernel / Scheduler
    requiredApproval: false
    maintainers:
      - name: Phil Auld
@@ -7241,8 +7118,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Ewan D. Milne
@@ -7268,8 +7144,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement / NVMe
    requiredApproval: false
    maintainers:
      - name: Maurizio Lombardi
@@ -7286,9 +7161,8 @@ subsystems:
        - lnst
    status: Supported
    devel-sst:
-     - rhel-sst-networking
-   qe-sst:
-     - rhel-sst-null
+     - rhel-sst-networking-core
+   jiraComponent: kernel / Networking / Protocol / sctp
    requiredApproval: false
    maintainers:
      - name: Marcelo Leitner
@@ -7303,6 +7177,7 @@ subsystems:
           - net/sctp/
           - include/linux/sctp.h
           - include/net/sctp/
+          - include/trace/events/sctp.h
           - include/uapi/linux/sctp.h
  - subsystem: SECURITY SUBSYSTEM
    labels:
@@ -7311,9 +7186,8 @@ subsystems:
    devel-sst:
      - rhel-sst-security-selinux
      - rhel-sst-kernel-security
-   qe-sst:
-     - rhel-sst-security-selinux
      - rhel-sst-kernel-security
+   jiraComponent: kernel / Security
    requiredApproval: false
    maintainers:
      - name: Ondrej Mosnacek
@@ -7360,9 +7234,8 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-security-selinux
-   qe-sst:
-     - rhel-sst-kernel-security
      - rhel-sst-security-selinux
+   jiraComponent: kernel / Security / SELinux
    requiredApproval: false
    maintainers:
      - name: Ondrej Mosnacek
@@ -7387,8 +7260,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: Tomas Henzl
@@ -7405,8 +7277,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -7422,14 +7293,13 @@ subsystems:
      name: sfc
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
+     - name: Izabela Bakollari
+       email: ibakolla@redhat.com
+       gluser: ibakolla
    reviewers:
      - name: Jarod Wilson
        email: jarod@redhat.com
@@ -7443,8 +7313,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Frank Ramsay
@@ -7471,8 +7340,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    required-approval: false
    maintainers:
      - name: Steve Best
@@ -7492,8 +7360,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -7509,9 +7376,8 @@ subsystems:
      name: skge
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Michal Schmidt
@@ -7525,9 +7391,8 @@ subsystems:
      name: sky2
    status: Provided
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Jeremy Linton
@@ -7544,9 +7409,8 @@ subsystems:
      name: slip
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Michal Schmidt
@@ -7560,9 +7424,8 @@ subsystems:
      name: siw
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / RDMA
    requiredApproval: false
    maintainers:
      - name: Kamal Heib
@@ -7577,9 +7440,8 @@ subsystems:
      name: rdma_rxe
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / RDMA
    requiredApproval: false
    maintainers:
      - name: Kamal Heib
@@ -7595,8 +7457,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-logical-storage
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Storage / Multiple Devices (MD)
    requiredApproval: false
    maintainers:
      - name: Nigel Croxon
@@ -7614,8 +7475,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -7632,8 +7492,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -7651,8 +7510,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -7669,13 +7527,9 @@ subsystems:
    status: Supported
    devel-sst:
      - rhivos-ft-auto-kernel
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / automotive
    requiredApproval: false
    maintainers:
-     - name: Adrien Thierry
-       email: athierry@redhat.com
-       gluser: athierry1
      - name: Andrew Halaney
        email: ahalaney@redhat.com
        gluser: ahalaney
@@ -7694,8 +7548,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -7712,8 +7565,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems / File Systems - Other
    requiredApproval: false
    maintainers:
      - name: Abhi Das
@@ -7728,9 +7580,8 @@ subsystems:
      name: staging
    status: Disabled
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel
    maintainers:
      - name: Michal Schmidt
        email: mschmidt@redhat.com
@@ -7743,9 +7594,8 @@ subsystems:
      name: stmicro
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Corinna Vinschen
@@ -7761,8 +7611,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems / NFS
    requiredApproval: false
    maintainers:
      - name: Benjamin Coddington
@@ -7780,14 +7629,16 @@ subsystems:
    paths:
        includes:
           - net/sunrpc/
+          - include/linux/sunrpc/*
+          - include/uapi/linux/sunrpc/*
+          - include/trace/events/sunrpc.h
  - subsystem: SUSPEND/RESUME
    labels:
      name: sus_res
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Power Management / Suspend-Resume-Hibernate
    requiredApproval: false
    maintainers:
      - name: Lenny Szubowicz
@@ -7801,9 +7652,8 @@ subsystems:
        - lnst
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Ivan Vecera
@@ -7820,8 +7670,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Mark Salter
@@ -7838,9 +7687,8 @@ subsystems:
        - lnst
    status: Supported
    devel-sst:
-     - rhel-sst-networking
-   qe-sst:
-     - rhel-sst-null
+     - rhel-sst-networking-core
+   jiraComponent: kernel / Networking
    requiredApproval: false
    maintainers:
      - name: Ivan Vecera
@@ -7872,8 +7720,7 @@ subsystems:
    status: Provided
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -7890,8 +7737,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: David Arcari
@@ -7908,8 +7754,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / Thunderbolt
    requiredApproval: false
    maintainers:
      - name: Desnes Nunes
@@ -7919,6 +7764,12 @@ subsystems:
      - name: Jarod Wilson
        email: jarod@redhat.com
        gluser: jwilsonrh
+     - name: David Marlin
+       email: dmarlin@redhat.com
+       gluser: dmarlin
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
    paths:
        includes:
           - drivers/net/thunderbolt.c
@@ -7932,8 +7783,7 @@ subsystems:
    status: Maintained
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: true
    maintainers:
      - name: Prarit Bhargava
@@ -7978,9 +7828,8 @@ subsystems:
        - lnst
    status: Provided
    devel-sst:
-     - rhel-sst-networking
-   qe-sst:
-     - rhel-sst-null
+     - rhel-sst-networking-core
+   jiraComponent: kernel / Networking
    requiredApproval: false
    maintainers:
      - name: Jon Maloy
@@ -8004,8 +7853,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-security
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Security / TPM
    requiredApproval: false
    maintainers:
      - name: Stepan Horacek
@@ -8028,8 +7876,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: John Linville
@@ -8051,8 +7898,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -8069,8 +7915,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Lenny Szubowicz
@@ -8092,13 +7937,9 @@ subsystems:
    status: Supported
    devel-sst:
      - rhivos-ft-auto-kernel
-   qe-sst:
-     - rhivos-ft-auto-kernel
+   jiraComponent: kernel / automotive
    requiredApproval: false
    maintainers:
-     - name: Adrien Thierry
-       email: athierry@redhat.com
-       gluser: athierry1
      - name: Andrew Halaney
        email: ahalaney@redhat.com
        gluser: ahalaney
@@ -8117,14 +7958,17 @@ subsystems:
      name: usb_net
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: José Ignacio Tornos Martínez
        email: jtornosm@redhat.com
        gluser: jtornosm
+   reviewers:
+     - name: Desnes Nunes
+       email: desnesn@redhat.com
+       gluser: desnesn
    paths:
        includes:
           - drivers/net/usb/
@@ -8134,13 +7978,19 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Desktop / USB
    requiredApproval: false
    maintainers:
      - name: Desnes Nunes
        email: desnesn@redhat.com
        gluser: desnesn
+   reviewers:
+     - name: José Ignacio Tornos Martínez
+       email: jtornosm@redhat.com
+       gluser: jtornosm
+     - name: Bastien Nocera
+       email: bnocera@redhat.com
+       gluser: bnocera
    paths:
        includes:
           - drivers/usb/
@@ -8153,8 +8003,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-ft
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel
    requiredApproval: false
    maintainers:
      - name: Aristeu Rozanski
@@ -8178,8 +8027,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Prarit Bhargava
@@ -8197,8 +8045,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization / KVM
    requiredApproval: false
    maintainers:
      - name: Alex Williamson
@@ -8223,8 +8070,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization
    requiredApproval: false
    maintainers:
      - name: Alex Williamson
@@ -8249,8 +8095,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization
    requiredApproval: false
    maintainers:
      - name: Alex Williamson
@@ -8268,8 +8113,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization
    requiredApproval: false
    maintainers:
      - name: Stefan Hajnoczi
@@ -8281,6 +8125,7 @@ subsystems:
           - include/net/af_vsock.h
           - include/net/vsock_addr.h
           - include/uapi/linux/virtio_vsock.h
+          - include/uapi/linux/vm_sockets_diag.h
           - include/uapi/linux/vsockmon.h
           - net/vmw_vsock/
           - drivers/net/vsockmon.c
@@ -8289,14 +8134,35 @@ subsystems:
        excludes:
           - net/vmw_vsock/hyperv*
    mailingList: rhvirt-patches@redhat.com
+ - subsystem: VIRTIO BALLOON DRIVER
+   labels:
+     name: virtio_balloon
+   status: Supported
+   devel-sst:
+     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization
+   requiredApproval: false
+   maintainers:
+     - name: '"Michael S. Tsirkin"'
+       email: mst@redhat.com
+       gluser: mstredhat
+     - name: David Hildenbrand
+       email: david@redhat.com
+       gluser: davidhildenbrand
+   paths:
+       includes:
+          - drivers/virtio/virtio_balloon.c
+          - include/linux/balloon_compaction.h
+          - include/uapi/linux/virtio_balloon.h
+          - mm/balloon_compaction.c
+   mailingList: rhvirt-patches@redhat.com
  - subsystem: VIRTIO CONSOLE DRIVER
    labels:
      name: virtio_cons
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization
    requiredApproval: false
    maintainers:
      - name: '"Michael S. Tsirkin"'
@@ -8317,8 +8183,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-networking
-   qe-sst:
-     - rhel-sst-virtualization-networking
+   jiraComponent: kernel / Virtualization / KVM
    requiredApproval: false
    maintainers:
      - name: '"Michael S. Tsirkin"'
@@ -8339,7 +8204,6 @@ subsystems:
           - include/linux/vdpa.h
           - include/uapi/linux/virtio_*.h
           - drivers/crypto/virtio/
-          - mm/balloon_compaction.c
    mailingList: rhvirt-patches@redhat.com
  - subsystem: VIRTIO CRYPTO DRIVER
    labels:
@@ -8347,8 +8211,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-networking
-   qe-sst:
-     - rhel-sst-virtualization-networking
+   jiraComponent: kernel / Virtualization
    requiredApproval: false
    maintainers:
      - name: '"Michael S. Tsirkin"'
@@ -8368,8 +8231,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization
    requiredApproval: false
    maintainers:
      - name: Cornelia Huck
@@ -8388,8 +8250,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization
    requiredApproval: false
    maintainers:
      - name: Gerd Hoffmann
@@ -8406,8 +8267,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-networking
-   qe-sst:
-     - rhel-sst-virtualization-networking
+   jiraComponent: kernel / Virtualization
    requiredApproval: false
    maintainers:
      - name: '"Michael S. Tsirkin"'
@@ -8427,8 +8287,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-hwe
-   qe-sst:
-     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization
    requiredApproval: false
    maintainers:
      - name: Gerd Hoffmann
@@ -8440,6 +8299,23 @@ subsystems:
           - include/uapi/linux/virtio_input.h
    mailingList: rhvirt-patches@redhat.com
    mailingList: rhvirt-patches@redhat.com
+ - subsystem: VIRTIO MEM DRIVER
+   labels:
+     name: virtio_mem
+   status: Supported
+   devel-sst:
+     - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization
+   requiredApproval: false
+   maintainers:
+     - name: David Hildenbrand
+       email: david@redhat.com
+       gluser: davidhildenbrand
+   paths:
+       includes:
+          - drivers/virtio/virtio_mem.c
+          - include/uapi/linux/virtio_mem.h
+   mailingList: rhvirt-patches@redhat.com
  - subsystem: VIRTUALIZATION SUPPORT DRIVERS
    labels:
      name: virt_drivers
@@ -8447,9 +8323,8 @@ subsystems:
    devel-sst:
      - rhel-sst-virtualization-hwe
      - rhel-sst-virtualization-cloud
-   qe-sst:
-     - rhel-sst-virtualization-cloud
      - rhel-sst-virtualization-hwe
+   jiraComponent: kernel / Virtualization
    requiredApproval: false
    maintainers:
      - name: Vitaly Kuznetsov
@@ -8467,8 +8342,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Doug Ledford
@@ -8485,9 +8359,8 @@ subsystems:
      name: vmw_pvrdma
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / RDMA
    requiredApproval: false
    maintainers:
      - name: Kamal Heib
@@ -8502,9 +8375,8 @@ subsystems:
      name: vmxnet3
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-null
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Izabela Bakollari
@@ -8522,8 +8394,7 @@ subsystems:
    status: Disabled
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
@@ -8540,8 +8411,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Prarit Bhargava
@@ -8563,9 +8433,8 @@ subsystems:
      name: wan
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
      - name: Michal Schmidt
@@ -8580,17 +8449,13 @@ subsystems:
      name: wireless
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-arch-hw
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / Wifi
    requiredApproval: true
    maintainers:
      - name: José Ignacio Tornos Martínez
        email: jtornosm@redhat.com
        gluser: jtornosm
-     - name: Íñigo Huguet
-       email: ihuguet@redhat.com
-       gluser: ihuguet-rh
    reviewers:
      - name: Jarod Wilson
        email: jarod@redhat.com
@@ -8642,8 +8507,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel
    requiredApproval: false
    maintainers:
      - name: Christoph von Recklinghausen
@@ -8662,9 +8526,8 @@ subsystems:
      name: wwan
    status: Supported
    devel-sst:
-     - rhel-sst-nic-rdma
-   qe-sst:
-     - rhel-sst-nic-rdma
+     - rhel-sst-network-drivers
+   jiraComponent: kernel / Networking / Wifi
    requiredApproval: false
    maintainers:
      - name: José Ignacio Tornos Martínez
@@ -8682,8 +8545,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / x86_64
    requiredApproval: true
    maintainers:
      - name: David Arcari
@@ -8692,10 +8554,10 @@ subsystems:
      - name: Prarit Bhargava
        email: prarit@redhat.com
        gluser: prarit
-     - name: Dean Nelson
-       email: dnelson@redhat.com
-       gluser: dnlsn
    reviewers:
+     - name: Steve Best
+       email: sbest@redhat.com
+       gluser: sfbest
      - name: Lenny Szubowicz
        email: lszubowi@redhat.com
        gluser: lszubowi
@@ -8730,8 +8592,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Power Management
    requiredApproval: true
    maintainers:
      - name: Prarit Bhargava
@@ -8741,9 +8602,9 @@ subsystems:
        email: darcari@redhat.com
        gluser: darcari
    reviewers:
-     - name: Dean Nelson
-       email: dnelson@redhat.com
-       gluser: dnlsn
+     - name: Steve Best
+       email: sbest@redhat.com
+       gluser: sfbest
    paths:
        includes:
           - arch/x86/kernel/cpu/cpufreq/
@@ -8757,13 +8618,12 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   qe-sst:
-     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / x86_64
    requiredApproval: true
    maintainers:
-     - name: Dean Nelson
-       email: dnelson@redhat.com
-       gluser: dnlsn
+     - name: Steve Best
+       email: sbest@redhat.com
+       gluser: sfbest
    reviewers:
      - name: David Arcari
        email: darcari@redhat.com
@@ -8782,14 +8642,10 @@ subsystems:
        - lnst
    status: Supported
    devel-sst:
-     - rhel-sst-networking
-   qe-sst:
-     - rhel-sst-null
+     - rhel-sst-networking-core
+   jiraComponent: kernel / Networking
    requiredApproval: false
    maintainers:
-     - name: Jesper Dangaard Brouer
-       email: brouer@redhat.com
-       gluser: netoptimizer
      - name: Jiri Benc
        email: jbenc@redhat.com
        gluser: jbencrh
@@ -8806,6 +8662,8 @@ subsystems:
           - include/net/page_pool.h
           - include/net/*xdp*
           - include/net/*xsk*
+          - include/trace/events/page_pool.h
+          - include/trace/events/xdp.h
           - include/uapi/linux/*xdp*
           - net/core/page_pool.c
           - net/core/sock_map.c
@@ -8820,8 +8678,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-cloud
-   qe-sst:
-     - rhel-sst-virtualization-cloud
+   jiraComponent: kernel / Virtualization / Xen
    requiredApproval: false
    maintainers:
      - name: Vitaly Kuznetsov
@@ -8850,8 +8707,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-filesystems
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel / File Systems / XFS
    requiredApproval: false
    maintainers:
      - name: Brian Foster
@@ -8882,8 +8738,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-security
-   qe-sst:
-     - rhel-sst-null
+   jiraComponent: kernel
    requiredApproval: false
    maintainers:
      - name: Jerome Marchand

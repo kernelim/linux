@@ -15,6 +15,7 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <net/dst.h>
+#include <net/gso.h>
 #include <net/xfrm.h>
 #include <linux/notifier.h>
 
@@ -300,7 +301,7 @@ int xfrm_dev_state_add(struct net *net, struct xfrm_state *x,
 		return (is_packet_offload) ? -EINVAL : 0;
 	}
 
-	if (x->props.flags & XFRM_STATE_ESN &&
+	if (!is_packet_offload && x->props.flags & XFRM_STATE_ESN &&
 	    !dev->xfrmdev_ops->xdo_dev_state_advance_esn) {
 		NL_SET_ERR_MSG(extack, "Device doesn't support offload with ESN");
 		xso->dev = NULL;

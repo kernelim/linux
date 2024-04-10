@@ -34,6 +34,9 @@ config ARCH_HAS_SUBPAGE_FAULTS
 config HOTPLUG_SMT
 	bool
 
+config SMT_NUM_THREADS_DYNAMIC
+	bool
+
 config GENERIC_ENTRY
        bool
 
@@ -458,6 +461,9 @@ config ARCH_WANT_IRQS_OFF_ACTIVATE_MM
 	  shootdowns should enable this.
 
 config ARCH_HAVE_NMI_SAFE_CMPXCHG
+	bool
+
+config ARCH_HAS_NMI_SAFE_THIS_CPU_OPS
 	bool
 
 config HAVE_ALIGNED_STRUCT_PAGE
@@ -1382,6 +1388,14 @@ config DYNAMIC_SIGFRAME
 # Select, if arch has a named attribute group bound to NUMA device nodes.
 config HAVE_ARCH_NODE_DEV_GROUP
 	bool
+
+config ARCH_HAS_NONLEAF_PMD_YOUNG
+	bool
+	help
+	  Architectures that select this option are capable of setting the
+	  accessed bit in non-leaf PMD entries when using them as part of linear
+	  address translations. Page table walkers that clear the accessed bit
+	  may use this capability to reduce their search space.
 
 source "kernel/gcov/Kconfig"
 

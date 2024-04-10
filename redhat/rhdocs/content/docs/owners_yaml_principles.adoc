@@ -51,5 +51,5 @@ Unlike Development Engineers, members of QE, Docs, Support are often supporting 
 There are multiple ways to find a QE representative.
 
 * Look at the https://rover.redhat.com/groups/search?q=rhel-sst-[Rover groups].
-* Look at the assigned QE person in a bugzilla associated with the technology.
+* Look at the assigned QE person in a Jira associated with the technology.
 * Attend *any* SST meeting.  A QE representative will be able to assist you with finding the representative for a technology.

@@ -288,6 +288,11 @@ static inline pte_t pte_clear_flags(pte_t pte, pteval_t clear)
 	return native_make_pte(v & ~clear);
 }
 
+static inline pte_t pte_wrprotect(pte_t pte)
+{
+	return pte_clear_flags(pte, _PAGE_RW);
+}
+
 #ifdef CONFIG_HAVE_ARCH_USERFAULTFD_WP
 static inline int pte_uffd_wp(pte_t pte)
 {
@@ -296,7 +301,7 @@ static inline int pte_uffd_wp(pte_t pte)
 
 static inline pte_t pte_mkuffd_wp(pte_t pte)
 {
-	return pte_set_flags(pte, _PAGE_UFFD_WP);
+	return pte_wrprotect(pte_set_flags(pte, _PAGE_UFFD_WP));
 }
 
 static inline pte_t pte_clear_uffd_wp(pte_t pte)
@@ -313,11 +318,6 @@ static inline pte_t pte_mkclean(pte_t pte)
 static inline pte_t pte_mkold(pte_t pte)
 {
 	return pte_clear_flags(pte, _PAGE_ACCESSED);
-}
-
-static inline pte_t pte_wrprotect(pte_t pte)
-{
-	return pte_clear_flags(pte, _PAGE_RW);
 }
 
 static inline pte_t pte_mkexec(pte_t pte)
@@ -384,6 +384,11 @@ static inline pmd_t pmd_clear_flags(pmd_t pmd, pmdval_t clear)
 	return native_make_pmd(v & ~clear);
 }
 
+static inline pmd_t pmd_wrprotect(pmd_t pmd)
+{
+	return pmd_clear_flags(pmd, _PAGE_RW);
+}
+
 #ifdef CONFIG_HAVE_ARCH_USERFAULTFD_WP
 static inline int pmd_uffd_wp(pmd_t pmd)
 {
@@ -392,7 +397,7 @@ static inline int pmd_uffd_wp(pmd_t pmd)
 
 static inline pmd_t pmd_mkuffd_wp(pmd_t pmd)
 {
-	return pmd_set_flags(pmd, _PAGE_UFFD_WP);
+	return pmd_wrprotect(pmd_set_flags(pmd, _PAGE_UFFD_WP));
 }
 
 static inline pmd_t pmd_clear_uffd_wp(pmd_t pmd)
@@ -409,11 +414,6 @@ static inline pmd_t pmd_mkold(pmd_t pmd)
 static inline pmd_t pmd_mkclean(pmd_t pmd)
 {
 	return pmd_clear_flags(pmd, _PAGE_DIRTY);
-}
-
-static inline pmd_t pmd_wrprotect(pmd_t pmd)
-{
-	return pmd_clear_flags(pmd, _PAGE_RW);
 }
 
 static inline pmd_t pmd_mkdirty(pmd_t pmd)
@@ -815,7 +815,8 @@ static inline unsigned long pmd_page_vaddr(pmd_t pmd)
 
 static inline int pmd_bad(pmd_t pmd)
 {
-	return (pmd_flags(pmd) & ~_PAGE_USER) != _KERNPG_TABLE;
+	return (pmd_flags(pmd) & ~(_PAGE_USER | _PAGE_ACCESSED)) !=
+	       (_KERNPG_TABLE & ~_PAGE_ACCESSED);
 }
 
 static inline unsigned long pages_to_mb(unsigned long npg)
@@ -1441,11 +1442,19 @@ static inline bool arch_has_pfn_modify_check(void)
 	return boot_cpu_has_bug(X86_BUG_L1TF);
 }
 
-#define arch_faults_on_old_pte arch_faults_on_old_pte
-static inline bool arch_faults_on_old_pte(void)
+#define arch_has_hw_pte_young arch_has_hw_pte_young
+static inline bool arch_has_hw_pte_young(void)
 {
-	return false;
+	return true;
 }
+
+#ifdef CONFIG_XEN_PV
+#define arch_has_hw_nonleaf_pmd_young arch_has_hw_nonleaf_pmd_young
+static inline bool arch_has_hw_nonleaf_pmd_young(void)
+{
+	return !cpu_feature_enabled(X86_FEATURE_XENPV);
+}
+#endif
 
 #ifdef CONFIG_PAGE_TABLE_CHECK
 static inline bool pte_user_accessible_page(pte_t pte)

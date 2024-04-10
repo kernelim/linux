@@ -74,6 +74,7 @@ MODULE_PARM_DESC(disable_tap_to_click,
 #define HIDPP_QUIRK_HIDPP_EXTRA_MOUSE_BTNS	BIT(27)
 #define HIDPP_QUIRK_HIDPP_CONSUMER_VENDOR_KEYS	BIT(28)
 #define HIDPP_QUIRK_HI_RES_SCROLL_1P0		BIT(29)
+#define HIDPP_QUIRK_WIRELESS_STATUS		BIT(30)
 
 /* These are just aliases for now */
 #define HIDPP_QUIRK_KBD_SCROLL_WHEEL HIDPP_QUIRK_HIDPP_WHEELS
@@ -94,6 +95,7 @@ MODULE_PARM_DESC(disable_tap_to_click,
 #define HIDPP_CAPABILITY_HIDPP20_HI_RES_WHEEL	BIT(7)
 #define HIDPP_CAPABILITY_HIDPP20_HI_RES_SCROLL	BIT(8)
 #define HIDPP_CAPABILITY_HIDPP10_FAST_SCROLL	BIT(9)
+#define HIDPP_CAPABILITY_ADC_MEASUREMENT	BIT(10)
 
 #define lg_map_key_clear(c)  hid_map_usage_clear(hi, usage, bit, max, EV_KEY, (c))
 
@@ -145,6 +147,7 @@ struct hidpp_battery {
 	u8 feature_index;
 	u8 solar_feature_index;
 	u8 voltage_feature_index;
+	u8 adc_measurement_feature_index;
 	struct power_supply_desc desc;
 	struct power_supply *ps;
 	char name[64];
@@ -272,21 +275,22 @@ static int __hidpp_send_report(struct hid_device *hdev,
 }
 
 /*
- * hidpp_send_message_sync() returns 0 in case of success, and something else
- * in case of a failure.
- * - If ' something else' is positive, that means that an error has been raised
- *   by the protocol itself.
- * - If ' something else' is negative, that means that we had a classic error
- *   (-ENOMEM, -EPIPE, etc...)
+ * Effectively send the message to the device, waiting for its answer.
+ *
+ * Must be called with hidpp->send_mutex locked
+ *
+ * Same return protocol than hidpp_send_message_sync():
+ * - success on 0
+ * - negative error means transport error
+ * - positive value means protocol error
  */
-static int hidpp_send_message_sync(struct hidpp_device *hidpp,
+static int __do_hidpp_send_message_sync(struct hidpp_device *hidpp,
 	struct hidpp_report *message,
 	struct hidpp_report *response)
 {
-	int ret = -1;
-	int max_retries = 3;
+	int ret;
 
-	mutex_lock(&hidpp->send_mutex);
+	__must_hold(&hidpp->send_mutex);
 
 	hidpp->send_receive_buf = response;
 	hidpp->answer_available = false;
@@ -297,47 +301,74 @@ static int hidpp_send_message_sync(struct hidpp_device *hidpp,
 	 */
 	*response = *message;
 
-	for (; max_retries != 0 && ret; max_retries--) {
-		ret = __hidpp_send_report(hidpp->hid_dev, message);
-
-		if (ret) {
-			dbg_hid("__hidpp_send_report returned err: %d\n", ret);
-			memset(response, 0, sizeof(struct hidpp_report));
-			break;
-		}
-
-		if (!wait_event_timeout(hidpp->wait, hidpp->answer_available,
-					5*HZ)) {
-			dbg_hid("%s:timeout waiting for response\n", __func__);
-			memset(response, 0, sizeof(struct hidpp_report));
-			ret = -ETIMEDOUT;
-			break;
-		}
-
-		if (response->report_id == REPORT_ID_HIDPP_SHORT &&
-		    response->rap.sub_id == HIDPP_ERROR) {
-			ret = response->rap.params[1];
-			dbg_hid("%s:got hidpp error %02X\n", __func__, ret);
-			break;
-		}
-
-		if ((response->report_id == REPORT_ID_HIDPP_LONG ||
-		     response->report_id == REPORT_ID_HIDPP_VERY_LONG) &&
-		    response->fap.feature_index == HIDPP20_ERROR) {
-			ret = response->fap.params[1];
-			if (ret != HIDPP20_ERROR_BUSY) {
-				dbg_hid("%s:got hidpp 2.0 error %02X\n", __func__, ret);
-				break;
-			}
-			dbg_hid("%s:got busy hidpp 2.0 error %02X, retrying\n", __func__, ret);
-		}
+	ret = __hidpp_send_report(hidpp->hid_dev, message);
+	if (ret) {
+		dbg_hid("__hidpp_send_report returned err: %d\n", ret);
+		memset(response, 0, sizeof(struct hidpp_report));
+		return ret;
 	}
+
+	if (!wait_event_timeout(hidpp->wait, hidpp->answer_available,
+				5*HZ)) {
+		dbg_hid("%s:timeout waiting for response\n", __func__);
+		memset(response, 0, sizeof(struct hidpp_report));
+		return -ETIMEDOUT;
+	}
+
+	if (response->report_id == REPORT_ID_HIDPP_SHORT &&
+	    response->rap.sub_id == HIDPP_ERROR) {
+		ret = response->rap.params[1];
+		dbg_hid("%s:got hidpp error %02X\n", __func__, ret);
+		return ret;
+	}
+
+	if ((response->report_id == REPORT_ID_HIDPP_LONG ||
+	     response->report_id == REPORT_ID_HIDPP_VERY_LONG) &&
+	    response->fap.feature_index == HIDPP20_ERROR) {
+		ret = response->fap.params[1];
+		dbg_hid("%s:got hidpp 2.0 error %02X\n", __func__, ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+/*
+ * hidpp_send_message_sync() returns 0 in case of success, and something else
+ * in case of a failure.
+ *
+ * See __do_hidpp_send_message_sync() for a detailed explanation of the returned
+ * value.
+ */
+static int hidpp_send_message_sync(struct hidpp_device *hidpp,
+	struct hidpp_report *message,
+	struct hidpp_report *response)
+{
+	int ret;
+	int max_retries = 3;
+
+	mutex_lock(&hidpp->send_mutex);
+
+	do {
+		ret = __do_hidpp_send_message_sync(hidpp, message, response);
+		if (ret != HIDPP20_ERROR_BUSY)
+			break;
+
+		dbg_hid("%s:got busy hidpp 2.0 error %02X, retrying\n", __func__, ret);
+	} while (--max_retries);
 
 	mutex_unlock(&hidpp->send_mutex);
 	return ret;
 
 }
 
+/*
+ * hidpp_send_fap_command_sync() returns 0 in case of success, and something else
+ * in case of a failure.
+ *
+ * See __do_hidpp_send_message_sync() for a detailed explanation of the returned
+ * value.
+ */
 static int hidpp_send_fap_command_sync(struct hidpp_device *hidpp,
 	u8 feat_index, u8 funcindex_clientid, u8 *params, int param_count,
 	struct hidpp_report *response)
@@ -370,6 +401,13 @@ static int hidpp_send_fap_command_sync(struct hidpp_device *hidpp,
 	return ret;
 }
 
+/*
+ * hidpp_send_rap_command_sync() returns 0 in case of success, and something else
+ * in case of a failure.
+ *
+ * See __do_hidpp_send_message_sync() for a detailed explanation of the returned
+ * value.
+ */
 static int hidpp_send_rap_command_sync(struct hidpp_device *hidpp_dev,
 	u8 report_id, u8 sub_id, u8 reg_address, u8 *params, int param_count,
 	struct hidpp_report *response)
@@ -469,6 +507,26 @@ static void hidpp_prefix_name(char **name, int name_length)
 	kfree(*name);
 
 	*name = new_name;
+}
+
+/*
+ * Updates the USB wireless_status based on whether the headset
+ * is turned on and reachable.
+ */
+static void hidpp_update_usb_wireless_status(struct hidpp_device *hidpp)
+{
+	struct hid_device *hdev = hidpp->hid_dev;
+	struct usb_interface *intf;
+
+	if (!(hidpp->quirks & HIDPP_QUIRK_WIRELESS_STATUS))
+		return;
+	if (!hid_is_usb(hdev))
+		return;
+
+	intf = to_usb_interface(hdev->dev.parent);
+	usb_set_wireless_status(intf, hidpp->battery.online ?
+				USB_WIRELESS_STATUS_CONNECTED :
+				USB_WIRELESS_STATUS_DISCONNECTED);
 }
 
 /**
@@ -853,8 +911,7 @@ static int hidpp_unifying_init(struct hidpp_device *hidpp)
 	if (ret)
 		return ret;
 
-	snprintf(hdev->uniq, sizeof(hdev->uniq), "%04x-%4phD",
-		 hdev->product, &serial);
+	snprintf(hdev->uniq, sizeof(hdev->uniq), "%4phD", &serial);
 	dbg_hid("HID++ Unifying: Got serial: %s\n", hdev->uniq);
 
 	name = hidpp_unifying_get_name(hidpp);
@@ -944,6 +1001,54 @@ static int hidpp_root_get_protocol_version(struct hidpp_device *hidpp)
 print_version:
 	hid_info(hidpp->hid_dev, "HID++ %u.%u device connected.\n",
 		 hidpp->protocol_major, hidpp->protocol_minor);
+	return 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 0x0003: Device Information                                                 */
+/* -------------------------------------------------------------------------- */
+
+#define HIDPP_PAGE_DEVICE_INFORMATION			0x0003
+
+#define CMD_GET_DEVICE_INFO				0x00
+
+static int hidpp_get_serial(struct hidpp_device *hidpp, u32 *serial)
+{
+	struct hidpp_report response;
+	u8 feature_type;
+	u8 feature_index;
+	int ret;
+
+	ret = hidpp_root_get_feature(hidpp, HIDPP_PAGE_DEVICE_INFORMATION,
+				     &feature_index,
+				     &feature_type);
+	if (ret)
+		return ret;
+
+	ret = hidpp_send_fap_command_sync(hidpp, feature_index,
+					  CMD_GET_DEVICE_INFO,
+					  NULL, 0, &response);
+	if (ret)
+		return ret;
+
+	/* See hidpp_unifying_get_serial() */
+	*serial = *((u32 *)&response.rap.params[1]);
+	return 0;
+}
+
+static int hidpp_serial_init(struct hidpp_device *hidpp)
+{
+	struct hid_device *hdev = hidpp->hid_dev;
+	u32 serial;
+	int ret;
+
+	ret = hidpp_get_serial(hidpp, &serial);
+	if (ret)
+		return ret;
+
+	snprintf(hdev->uniq, sizeof(hdev->uniq), "%4phD", &serial);
+	dbg_hid("HID++ DeviceInformation: Got serial: %s\n", hdev->uniq);
+
 	return 0;
 }
 
@@ -1357,7 +1462,7 @@ static int hidpp20_map_battery_capacity(struct hid_device *hid_dev, int voltage)
 	 * there are a few devices that use different battery technology.
 	 */
 
-	static const int voltages[] = {
+	static const int voltages[100] = {
 		4186, 4156, 4143, 4133, 4122, 4113, 4103, 4094, 4086, 4075,
 		4067, 4059, 4051, 4043, 4035, 4027, 4019, 4011, 4003, 3997,
 		3989, 3983, 3976, 3969, 3961, 3955, 3949, 3942, 3935, 3929,
@@ -1371,8 +1476,6 @@ static int hidpp20_map_battery_capacity(struct hid_device *hid_dev, int voltage)
 	};
 
 	int i;
-
-	BUILD_BUG_ON(ARRAY_SIZE(voltages) != 100);
 
 	if (unlikely(voltage < 3500 || voltage >= 5000))
 		hid_warn_once(hid_dev,
@@ -1732,17 +1835,174 @@ static int hidpp_battery_get_property(struct power_supply *psy,
 /* -------------------------------------------------------------------------- */
 #define HIDPP_PAGE_WIRELESS_DEVICE_STATUS			0x1d4b
 
-static int hidpp_set_wireless_feature_index(struct hidpp_device *hidpp)
+static int hidpp_get_wireless_feature_index(struct hidpp_device *hidpp, u8 *feature_index)
 {
 	u8 feature_type;
 	int ret;
 
 	ret = hidpp_root_get_feature(hidpp,
 				     HIDPP_PAGE_WIRELESS_DEVICE_STATUS,
-				     &hidpp->wireless_feature_index,
-				     &feature_type);
+				     feature_index, &feature_type);
 
 	return ret;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 0x1f20: ADC measurement                                                    */
+/* -------------------------------------------------------------------------- */
+
+#define HIDPP_PAGE_ADC_MEASUREMENT 0x1f20
+
+#define CMD_ADC_MEASUREMENT_GET_ADC_MEASUREMENT 0x00
+
+#define EVENT_ADC_MEASUREMENT_STATUS_BROADCAST 0x00
+
+static int hidpp20_map_adc_measurement_1f20_capacity(struct hid_device *hid_dev, int voltage)
+{
+	/* NB: This voltage curve doesn't necessarily map perfectly to all
+	 * devices that implement the ADC_MEASUREMENT feature. This is because
+	 * there are a few devices that use different battery technology.
+	 *
+	 * Adapted from:
+	 * https://github.com/Sapd/HeadsetControl/blob/acd972be0468e039b93aae81221f20a54d2d60f7/src/devices/logitech_g633_g933_935.c#L44-L52
+	 */
+	static const int voltages[100] = {
+		4030, 4024, 4018, 4011, 4003, 3994, 3985, 3975, 3963, 3951,
+		3937, 3922, 3907, 3893, 3880, 3868, 3857, 3846, 3837, 3828,
+		3820, 3812, 3805, 3798, 3791, 3785, 3779, 3773, 3768, 3762,
+		3757, 3752, 3747, 3742, 3738, 3733, 3729, 3724, 3720, 3716,
+		3712, 3708, 3704, 3700, 3696, 3692, 3688, 3685, 3681, 3677,
+		3674, 3670, 3667, 3663, 3660, 3657, 3653, 3650, 3646, 3643,
+		3640, 3637, 3633, 3630, 3627, 3624, 3620, 3617, 3614, 3611,
+		3608, 3604, 3601, 3598, 3595, 3592, 3589, 3585, 3582, 3579,
+		3576, 3573, 3569, 3566, 3563, 3560, 3556, 3553, 3550, 3546,
+		3543, 3539, 3536, 3532, 3529, 3525, 3499, 3466, 3433, 3399,
+	};
+
+	int i;
+
+	if (voltage == 0)
+		return 0;
+
+	if (unlikely(voltage < 3400 || voltage >= 5000))
+		hid_warn_once(hid_dev,
+			      "%s: possibly using the wrong voltage curve\n",
+			      __func__);
+
+	for (i = 0; i < ARRAY_SIZE(voltages); i++) {
+		if (voltage >= voltages[i])
+			return ARRAY_SIZE(voltages) - i;
+	}
+
+	return 0;
+}
+
+static int hidpp20_map_adc_measurement_1f20(u8 data[3], int *voltage)
+{
+	int status;
+	u8 flags;
+
+	flags = data[2];
+
+	switch (flags) {
+	case 0x01:
+		status = POWER_SUPPLY_STATUS_DISCHARGING;
+		break;
+	case 0x03:
+		status = POWER_SUPPLY_STATUS_CHARGING;
+		break;
+	case 0x07:
+		status = POWER_SUPPLY_STATUS_FULL;
+		break;
+	case 0x0F:
+	default:
+		status = POWER_SUPPLY_STATUS_UNKNOWN;
+		break;
+	}
+
+	*voltage = get_unaligned_be16(data);
+
+	dbg_hid("Parsed 1f20 data as flag 0x%02x voltage %dmV\n",
+		flags, *voltage);
+
+	return status;
+}
+
+/* Return value is whether the device is online */
+static bool hidpp20_get_adc_measurement_1f20(struct hidpp_device *hidpp,
+						 u8 feature_index,
+						 int *status, int *voltage)
+{
+	struct hidpp_report response;
+	int ret;
+	u8 *params = (u8 *)response.fap.params;
+
+	*status = POWER_SUPPLY_STATUS_UNKNOWN;
+	*voltage = 0;
+	ret = hidpp_send_fap_command_sync(hidpp, feature_index,
+					  CMD_ADC_MEASUREMENT_GET_ADC_MEASUREMENT,
+					  NULL, 0, &response);
+
+	if (ret > 0) {
+		hid_dbg(hidpp->hid_dev, "%s: received protocol error 0x%02x\n",
+			__func__, ret);
+		return false;
+	}
+
+	*status = hidpp20_map_adc_measurement_1f20(params, voltage);
+	return true;
+}
+
+static int hidpp20_query_adc_measurement_info_1f20(struct hidpp_device *hidpp)
+{
+	u8 feature_type;
+
+	if (hidpp->battery.adc_measurement_feature_index == 0xff) {
+		int ret;
+
+		ret = hidpp_root_get_feature(hidpp, HIDPP_PAGE_ADC_MEASUREMENT,
+					     &hidpp->battery.adc_measurement_feature_index,
+					     &feature_type);
+		if (ret)
+			return ret;
+
+		hidpp->capabilities |= HIDPP_CAPABILITY_ADC_MEASUREMENT;
+	}
+
+	hidpp->battery.online = hidpp20_get_adc_measurement_1f20(hidpp,
+								 hidpp->battery.adc_measurement_feature_index,
+								 &hidpp->battery.status,
+								 &hidpp->battery.voltage);
+	hidpp->battery.capacity = hidpp20_map_adc_measurement_1f20_capacity(hidpp->hid_dev,
+									    hidpp->battery.voltage);
+	hidpp_update_usb_wireless_status(hidpp);
+
+	return 0;
+}
+
+static int hidpp20_adc_measurement_event_1f20(struct hidpp_device *hidpp,
+					    u8 *data, int size)
+{
+	struct hidpp_report *report = (struct hidpp_report *)data;
+	int status, voltage;
+
+	if (report->fap.feature_index != hidpp->battery.adc_measurement_feature_index ||
+		report->fap.funcindex_clientid != EVENT_ADC_MEASUREMENT_STATUS_BROADCAST)
+		return 0;
+
+	status = hidpp20_map_adc_measurement_1f20(report->fap.params, &voltage);
+
+	hidpp->battery.online = status != POWER_SUPPLY_STATUS_UNKNOWN;
+
+	if (voltage != hidpp->battery.voltage || status != hidpp->battery.status) {
+		hidpp->battery.status = status;
+		hidpp->battery.voltage = voltage;
+		hidpp->battery.capacity = hidpp20_map_adc_measurement_1f20_capacity(hidpp->hid_dev, voltage);
+		if (hidpp->battery.ps)
+			power_supply_changed(hidpp->battery.ps);
+		hidpp_update_usb_wireless_status(hidpp);
+	}
+	return 0;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -3663,6 +3923,9 @@ static int hidpp_raw_hidpp_event(struct hidpp_device *hidpp, u8 *data,
 		ret = hidpp20_battery_voltage_event(hidpp, data, size);
 		if (ret != 0)
 			return ret;
+		ret = hidpp20_adc_measurement_event_1f20(hidpp, data, size);
+		if (ret != 0)
+			return ret;
 	}
 
 	if (hidpp->capabilities & HIDPP_CAPABILITY_HIDPP10_BATTERY) {
@@ -3786,6 +4049,7 @@ static int hidpp_initialize_battery(struct hidpp_device *hidpp)
 	hidpp->battery.feature_index = 0xff;
 	hidpp->battery.solar_feature_index = 0xff;
 	hidpp->battery.voltage_feature_index = 0xff;
+	hidpp->battery.adc_measurement_feature_index = 0xff;
 
 	if (hidpp->protocol_major >= 2) {
 		if (hidpp->quirks & HIDPP_QUIRK_CLASS_K750)
@@ -3799,6 +4063,8 @@ static int hidpp_initialize_battery(struct hidpp_device *hidpp)
 				ret = hidpp20_query_battery_info_1004(hidpp);
 			if (ret)
 				ret = hidpp20_query_battery_voltage_info(hidpp);
+			if (ret)
+				ret = hidpp20_query_adc_measurement_info_1f20(hidpp);
 		}
 
 		if (ret)
@@ -3828,7 +4094,8 @@ static int hidpp_initialize_battery(struct hidpp_device *hidpp)
 
 	if (hidpp->capabilities & HIDPP_CAPABILITY_BATTERY_MILEAGE ||
 	    hidpp->capabilities & HIDPP_CAPABILITY_BATTERY_PERCENTAGE ||
-	    hidpp->capabilities & HIDPP_CAPABILITY_BATTERY_VOLTAGE)
+	    hidpp->capabilities & HIDPP_CAPABILITY_BATTERY_VOLTAGE ||
+	    hidpp->capabilities & HIDPP_CAPABILITY_ADC_MEASUREMENT)
 		battery_props[num_battery_props++] =
 				POWER_SUPPLY_PROP_CAPACITY;
 
@@ -3836,7 +4103,8 @@ static int hidpp_initialize_battery(struct hidpp_device *hidpp)
 		battery_props[num_battery_props++] =
 				POWER_SUPPLY_PROP_CAPACITY_LEVEL;
 
-	if (hidpp->capabilities & HIDPP_CAPABILITY_BATTERY_VOLTAGE)
+	if (hidpp->capabilities & HIDPP_CAPABILITY_BATTERY_VOLTAGE ||
+	    hidpp->capabilities & HIDPP_CAPABILITY_ADC_MEASUREMENT)
 		battery_props[num_battery_props++] =
 			POWER_SUPPLY_PROP_VOLTAGE_NOW;
 
@@ -3980,6 +4248,13 @@ static void hidpp_connect_event(struct hidpp_device *hidpp)
 		}
 	}
 
+	if (hidpp->protocol_major >= 2) {
+		u8 feature_index;
+
+		if (!hidpp_get_wireless_feature_index(hidpp, &feature_index))
+			hidpp->wireless_feature_index = feature_index;
+	}
+
 	if (hidpp->name == hdev->name && hidpp->protocol_major >= 2) {
 		name = hidpp_get_device_name(hidpp);
 		if (name) {
@@ -4009,6 +4284,8 @@ static void hidpp_connect_event(struct hidpp_device *hidpp)
 			hidpp20_query_battery_voltage_info(hidpp);
 		else if (hidpp->capabilities & HIDPP_CAPABILITY_UNIFIED_BATTERY)
 			hidpp20_query_battery_info_1004(hidpp);
+		else if (hidpp->capabilities & HIDPP_CAPABILITY_ADC_MEASUREMENT)
+			hidpp20_query_adc_measurement_info_1f20(hidpp);
 		else
 			hidpp20_query_battery_info_1000(hidpp);
 	}
@@ -4123,7 +4400,6 @@ static int hidpp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	bool connected;
 	unsigned int connect_mask = HID_CONNECT_DEFAULT;
 	struct hidpp_ff_private_data data;
-	bool will_restart = false;
 
 	/* report_fixup needs drvdata to be set before we call hid_parse */
 	hidpp = devm_kzalloc(&hdev->dev, sizeof(*hidpp), GFP_KERNEL);
@@ -4174,10 +4450,6 @@ static int hidpp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 			return ret;
 	}
 
-	if (hidpp->quirks & HIDPP_QUIRK_DELAYED_INIT ||
-	    hidpp->quirks & HIDPP_QUIRK_UNIFYING)
-		will_restart = true;
-
 	INIT_WORK(&hidpp->work, delayed_work_cb);
 	mutex_init(&hidpp->send_mutex);
 	init_waitqueue_head(&hidpp->wait);
@@ -4189,10 +4461,12 @@ static int hidpp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 			 hdev->name);
 
 	/*
-	 * Plain USB connections need to actually call start and open
-	 * on the transport driver to allow incoming data.
+	 * First call hid_hw_start(hdev, 0) to allow IO without connecting any
+	 * hid subdrivers (hid-input, hidraw). This allows retrieving the dev's
+	 * name and serial number and store these in hdev->name and hdev->uniq,
+	 * before the hid-input and hidraw drivers expose these to userspace.
 	 */
-	ret = hid_hw_start(hdev, will_restart ? 0 : connect_mask);
+	ret = hid_hw_start(hdev, 0);
 	if (ret) {
 		hid_err(hdev, "hw start failed\n");
 		goto hid_hw_start_fail;
@@ -4210,6 +4484,8 @@ static int hidpp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 
 	if (hidpp->quirks & HIDPP_QUIRK_UNIFYING)
 		hidpp_unifying_init(hidpp);
+	else if (hid_is_usb(hidpp->hid_dev))
+		hidpp_serial_init(hidpp);
 
 	connected = hidpp_root_get_protocol_version(hidpp) == 0;
 	atomic_set(&hidpp->connected, connected);
@@ -4223,15 +4499,6 @@ static int hidpp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		hidpp_overwrite_name(hdev);
 	}
 
-	if (connected && hidpp->protocol_major >= 2) {
-		ret = hidpp_set_wireless_feature_index(hidpp);
-		if (ret == -ENOENT)
-			hidpp->wireless_feature_index = 0;
-		else if (ret)
-			goto hid_hw_init_fail;
-		ret = 0;
-	}
-
 	if (connected && (hidpp->quirks & HIDPP_QUIRK_CLASS_WTP)) {
 		ret = wtp_get_config(hidpp);
 		if (ret)
@@ -4242,23 +4509,17 @@ static int hidpp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 			goto hid_hw_init_fail;
 	}
 
-	hidpp_connect_event(hidpp);
+	schedule_work(&hidpp->work);
+	flush_work(&hidpp->work);
 
-	if (will_restart) {
-		/* Reset the HID node state */
-		hid_device_io_stop(hdev);
-		hid_hw_close(hdev);
-		hid_hw_stop(hdev);
+	if (hidpp->quirks & HIDPP_QUIRK_DELAYED_INIT)
+		connect_mask &= ~HID_CONNECT_HIDINPUT;
 
-		if (hidpp->quirks & HIDPP_QUIRK_DELAYED_INIT)
-			connect_mask &= ~HID_CONNECT_HIDINPUT;
-
-		/* Now export the actual inputs and hidraw nodes to the world */
-		ret = hid_hw_start(hdev, connect_mask);
-		if (ret) {
-			hid_err(hdev, "%s:hid_hw_start returned error\n", __func__);
-			goto hid_hw_start_fail;
-		}
+	/* Now export the actual inputs and hidraw nodes to the world */
+	ret = hid_connect(hdev, connect_mask);
+	if (ret) {
+		hid_err(hdev, "%s:hid_connect returned error %d\n", __func__, ret);
+		goto hid_hw_init_fail;
 	}
 
 	if (hidpp->quirks & HIDPP_QUIRK_CLASS_G920) {
@@ -4269,6 +4530,11 @@ static int hidpp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 				 ret);
 	}
 
+	/*
+	 * This relies on logi_dj_ll_close() being a no-op so that DJ connection
+	 * events will still be received.
+	 */
+	hid_hw_close(hdev);
 	return ret;
 
 hid_hw_init_fail:
@@ -4360,6 +4626,8 @@ static const struct hid_device_id hidpp_devices[] = {
 
 	{ /* Logitech G403 Wireless Gaming Mouse over USB */
 	  HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH, 0xC082) },
+	{ /* Logitech G502 Lightspeed Wireless Gaming Mouse over USB */
+	  HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH, 0xC08D) },
 	{ /* Logitech G703 Gaming Mouse over USB */
 	  HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH, 0xC087) },
 	{ /* Logitech G703 Hero Gaming Mouse over USB */
@@ -4370,6 +4638,8 @@ static const struct hid_device_id hidpp_devices[] = {
 	  HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH, 0xC086) },
 	{ /* Logitech G903 Hero Gaming Mouse over USB */
 	  HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH, 0xC091) },
+	{ /* Logitech G915 TKL Keyboard over USB */
+	  HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH, 0xC343) },
 	{ /* Logitech G920 Wheel over USB */
 	  HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH, USB_DEVICE_ID_LOGITECH_G920_WHEEL),
 		.driver_data = HIDPP_QUIRK_CLASS_G920 | HIDPP_QUIRK_FORCE_OUTPUT_REPORTS},
@@ -4378,6 +4648,10 @@ static const struct hid_device_id hidpp_devices[] = {
 		.driver_data = HIDPP_QUIRK_CLASS_G920 | HIDPP_QUIRK_FORCE_OUTPUT_REPORTS },
 	{ /* Logitech G Pro Gaming Mouse over USB */
 	  HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH, 0xC088) },
+
+	{ /* G935 Gaming Headset */
+	  HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH, 0x0a87),
+		.driver_data = HIDPP_QUIRK_WIRELESS_STATUS },
 
 	{ /* MX5000 keyboard over Bluetooth */
 	  HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_LOGITECH, 0xb305),
@@ -4388,10 +4662,14 @@ static const struct hid_device_id hidpp_devices[] = {
 	{ /* MX5500 keyboard over Bluetooth */
 	  HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_LOGITECH, 0xb30b),
 	  .driver_data = HIDPP_QUIRK_HIDPP_CONSUMER_VENDOR_KEYS },
+	{ /* Logitech G915 TKL keyboard over Bluetooth */
+	  HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_LOGITECH, 0xb35f) },
 	{ /* M-RCQ142 V470 Cordless Laser Mouse over Bluetooth */
 	  HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_LOGITECH, 0xb008) },
 	{ /* MX Master mouse over Bluetooth */
 	  HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_LOGITECH, 0xb012) },
+	{ /* M720 Triathlon mouse over Bluetooth */
+	  HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_LOGITECH, 0xb015) },
 	{ /* MX Ergo trackball over Bluetooth */
 	  HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_LOGITECH, 0xb01d) },
 	{ HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_LOGITECH, 0xb01e) },

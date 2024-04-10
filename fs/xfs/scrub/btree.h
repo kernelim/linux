@@ -29,6 +29,11 @@ typedef int (*xchk_btree_rec_fn)(
 	struct xchk_btree		*bs,
 	const union xfs_btree_rec	*rec);
 
+struct xchk_btree_key {
+	union xfs_btree_key		key;
+	bool				valid;
+};
+
 struct xchk_btree {
 	/* caller-provided scrub state */
 	struct xfs_scrub		*sc;
@@ -38,11 +43,12 @@ struct xchk_btree {
 	void				*private;
 
 	/* internal scrub state */
+	bool				lastrec_valid;
 	union xfs_btree_rec		lastrec;
 	struct list_head		to_check;
 
 	/* this element must come last! */
-	union xfs_btree_key		lastkey[];
+	struct xchk_btree_key		lastkey[];
 };
 
 /*

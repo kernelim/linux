@@ -24,6 +24,8 @@ properties:
       - fsl,imx8mn-rpmsg-audio
       - fsl,imx8mm-rpmsg-audio
       - fsl,imx8mp-rpmsg-audio
+      - fsl,imx8ulp-rpmsg-audio
+      - fsl,imx93-rpmsg-audio
 
   model:
     $ref: /schemas/types.yaml#/definitions/string

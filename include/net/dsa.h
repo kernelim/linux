@@ -592,9 +592,14 @@ struct dsa_switch_ops {
 	/*
 	 * PHYLINK integration
 	 */
+	void	(*phylink_get_caps)(struct dsa_switch *ds, int port,
+				    struct phylink_config *config);
 	void	(*phylink_validate)(struct dsa_switch *ds, int port,
 				    unsigned long *supported,
 				    struct phylink_link_state *state);
+	struct phylink_pcs *(*phylink_mac_select_pcs)(struct dsa_switch *ds,
+						      int port,
+						      phy_interface_t iface);
 	int	(*phylink_mac_link_state)(struct dsa_switch *ds, int port,
 					  struct phylink_link_state *state);
 	void	(*phylink_mac_config)(struct dsa_switch *ds, int port,

@@ -7,6 +7,6 @@ fi
 TARGET="$1"
 
 for i in "$RPM_SOURCE_DIR"/*."$TARGET"; do
-	NEW=${i%.$TARGET}
+	NEW=${i%."$TARGET"}
 	cp "$i" "$(basename "$NEW")"
 done

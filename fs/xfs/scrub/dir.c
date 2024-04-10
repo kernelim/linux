@@ -65,13 +65,15 @@ xchk_dir_check_ftype(
 	 * eofblocks cleanup (which allocates what would be a nested
 	 * transaction), we can't use DONTCACHE here because DONTCACHE
 	 * inodes can trigger immediate inactive cleanup of the inode.
+	 * Use UNTRUSTED here to check the allocation status of the inode in
+	 * the inode btrees.
 	 *
 	 * If _iget returns -EINVAL or -ENOENT then the child inode number is
 	 * garbage and the directory is corrupt.  If the _iget returns
 	 * -EFSCORRUPTED or -EFSBADCRC then the child is corrupt which is a
 	 *  cross referencing error.  Any other error is an operational error.
 	 */
-	error = xfs_iget(mp, sdc->sc->tp, inum, 0, 0, &ip);
+	error = xfs_iget(mp, sdc->sc->tp, inum, XFS_IGET_UNTRUSTED, 0, &ip);
 	if (error == -EINVAL || error == -ENOENT) {
 		error = -EFSCORRUPTED;
 		xchk_fblock_process_error(sdc->sc, XFS_DATA_FORK, 0, &error);
@@ -201,6 +203,7 @@ xchk_dir_rec(
 	struct xchk_da_btree		*ds,
 	int				level)
 {
+	struct xfs_name			dname = { };
 	struct xfs_da_state_blk		*blk = &ds->state->path.blk[level];
 	struct xfs_mount		*mp = ds->state->mp;
 	struct xfs_inode		*dp = ds->dargs.dp;
@@ -297,7 +300,11 @@ xchk_dir_rec(
 		xchk_fblock_set_corrupt(ds->sc, XFS_DATA_FORK, rec_bno);
 		goto out_relse;
 	}
-	calc_hash = xfs_da_hashname(dent->name, dent->namelen);
+
+	/* Does the directory hash match? */
+	dname.name = dent->name;
+	dname.len = dent->namelen;
+	calc_hash = xfs_dir2_hashname(mp, &dname);
 	if (calc_hash != hash)
 		xchk_fblock_set_corrupt(ds->sc, XFS_DATA_FORK, rec_bno);
 
@@ -666,7 +673,12 @@ xchk_directory_blocks(
 	struct xfs_scrub	*sc)
 {
 	struct xfs_bmbt_irec	got;
-	struct xfs_da_args	args;
+	struct xfs_da_args	args = {
+		.dp		= sc ->ip,
+		.whichfork	= XFS_DATA_FORK,
+		.geo		= sc->mp->m_dir_geo,
+		.trans		= sc->tp,
+	};
 	struct xfs_ifork	*ifp = xfs_ifork_ptr(sc->ip, XFS_DATA_FORK);
 	struct xfs_mount	*mp = sc->mp;
 	xfs_fileoff_t		leaf_lblk;
@@ -676,7 +688,7 @@ xchk_directory_blocks(
 	xfs_dablk_t		dabno;
 	xfs_dir2_db_t		last_data_db = 0;
 	bool			found;
-	int			is_block = 0;
+	bool			is_block = false;
 	int			error;
 
 	/* Ignore local format directories. */
@@ -689,9 +701,6 @@ xchk_directory_blocks(
 	free_lblk = XFS_B_TO_FSB(mp, XFS_DIR2_FREE_OFFSET);
 
 	/* Is this a block dir? */
-	args.dp = sc->ip;
-	args.geo = mp->m_dir_geo;
-	args.trans = sc->tp;
 	error = xfs_dir2_isblock(&args, &is_block);
 	if (!xchk_fblock_process_error(sc, XFS_DATA_FORK, lblk, &error))
 		goto out;

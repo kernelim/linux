@@ -40,7 +40,7 @@ https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git[Linus' linux.
 The following is an example of a valid commit title & description.  The first column lists the sections below which describe in detail what is needed:
 
 [link:CommitRules.adoc#user-content-1-title[1]]  subsystem: include missing kernel.h header to fix compile +
-[link:CommitRules.adoc#user-content-2a-bugzilla-reference-required[2a]]  Bugzilla: <bugzilla reference> +
+[link:CommitRules.adoc#user-content-2a-jira-reference-required[2a]]  JIRA: <Jira reference> +
 [link:CommitRules.adoc#user-content-2c-upstream-status-required[2c]]  Upstream Status: <if not linux.git provide upstream tree, or mark as RHEL specific> +
 [link:CommitRules.adoc#user-content-2e-cve-reference-optional[2e]]  CVE: <CVE number if required> +
 [link:CommitRules.adoc#user-content-2f-differences-from-the-upstream-patch-optional[2f]]   Conflicts: <if required> +
@@ -68,10 +68,10 @@ The following is an example of a valid Merge Request title and description.  The
 
 [link:CommitRules.adoc#user-content-1-title[1]]  subsystem: a general explanation of the changeset
 
-[link:CommitRules.adoc#user-content-2a-bugzilla-reference-required[2a]]  Bugzilla: <bugzilla reference> +
+[link:CommitRules.adoc#user-content-2a-jira-reference-required[2a]]  JIRA: <Jira reference> +
 [link:CommitRules.adoc#user-content-2b-testing-details-required[2b]]  Tested: <testing information> +
 [link:CommitRules.adoc#user-content-2c-upstream-status-required[2c]]  Upstream Status: <if not linux.git provide upstream tree, or mark as RHEL specific> +
-[link:CommitRules.adoc#user-content-2d-changeset-dependencies-optional[2d]]  Depends: <bugzilla reference if required> +
+[link:CommitRules.adoc#user-content-2d-changeset-dependencies-optional[2d]]  Depends: <Jira reference if required> +
 [link:CommitRules.adoc#user-content-2e-cve-reference-optional[2e]]  CVE: <CVE number if required> +
 [link:CommitRules.adoc#user-content-2f-differences-from-the-upstream-patch-optional[2f]]   Conflicts: <if required> +
 [link:CommitRules.adoc#user-content-2g-omitted-fixes-optional[2g]]   Omitted-fix: <commit ID if required> +
@@ -100,29 +100,28 @@ In addition to the requirements in link:CommitRules.adoc#user-content-1-title[se
 	A Merge Request Title [rhel-8.2.z]
 	Another Merge Request Title [rhel-8.3.z]
 
-Additional metadata, such as the bugzilla ID or CVE ID, should be included in the Merge Request description and not the title.
+Additional metadata, such as the Jira ID or CVE ID, should be included in the Merge Request description and not the title.
 
 ====  2. Description
-In order to handle and prioritize the large number of MRs submitted to the Red Hat Kernel project, the description must contain metadata necessary to assist in integrating changesets into official kernel releases.  The metadata section contains a required bugzilla reference, testing details, and some additional metadata that may be required depending on the circumstances surrounding the commit or MR.
+In order to handle and prioritize the large number of MRs submitted to the Red Hat Kernel project, the description must contain metadata necessary to assist in integrating changesets into official kernel releases.  The metadata section contains a required Jira reference, testing details, and some additional metadata that may be required depending on the circumstances surrounding the commit or MR.
 
-===== 2a. Bugzilla Reference (required)
-Each commit in a changeset and the MR description must reference at least one Red Hat bugzilla URL on a line beginning with “Bugzilla: https://bugzilla.redhat.com/”.  If the MR resolves multiple bugzillas, the description must include only one bugzilla URL per “Bugzilla:” line.  *Bugzilla IDs (ie, just a number) are not acceptable*.
+===== 2a. Jira Reference (required)
+Each commit in a changeset and the MR description must reference at least one Red Hat Jira URL on a line beginning with “JIRA: https://issues.redhat.com/browse/RHEL-<ID>” (where <ID> is a valid number).  If the MR resolves multiple jiras, the description must include only one jira URL per “JIRA:” line.  *Jira IDs (ie, just a tag & number) are not acceptable*.
 
-Changesets that are lacking a bugzilla number will not be committed and will be immediately flagged by the project’s webhooks.  Every changeset needs to be coordinated with other groups at Red Hat(management, QE, Documentation, etc.) and the coordination is handled through bugzilla flags and state.  If the link:pkgs.devel.redhat.com/rules.html[bugzilla flags] and state are appropriately set on a bugzilla, then and only then, will the associated changeset be considered for inclusion into the project by the maintainers.
+Changesets that are lacking a Jira will not be committed and will be immediately flagged by the project’s webhooks.  Every changeset needs to be coordinated with other groups at Red Hat(management, QE, Documentation, etc.) and the coordination is handled through Jira fields and state.
 
-The INTERNAL keyword can be substituted for a bugzilla URL.  The INTERNAL keyword indicates a change to code that is considered to have minimal customer impact such as changes to files in the redhat directory (excluding CONFIG* files) or the .gitlab-ci.yaml file.
+The INTERNAL keyword can be substituted for a Jira URL.  The INTERNAL keyword indicates a change to code that is considered to have minimal customer impact such as changes to files in the redhat directory (excluding CONFIG* files) or the .gitlab-ci.yaml file.
 
-Good examples for bugzilla URLS in the description:
+Good examples for Jira URLS in the description:
 
-    Bugzilla: https://bugzilla.redhat.com/show_bug.cgi?id=783023
-    Bugzilla: https://bugzilla.redhat.com/783023
-    Bugzilla: INTERNAL
+    JIRA: https://issues.redhat.com/browse/RHEL-1559
+    JIRA: INTERNAL
 
 ===== 2b. Testing Details (required)
-The MR description must include information about how the changeset was tested.  This information can include links to test results in a bugzilla or a text description of the results.
+The MR description must include information about how the changeset was tested.  This information can include links to test results in a Jira or a text description of the results.
 
 ===== 2c. Upstream Status (required for commits not in upstream tree)
-If the upstream source tree is not linux.git, the description must include a URL for the upstream source tree.  Commits with an identified source must also specify a link:CommitRules.adoc#user-content-3a-commit-sha1-format-required[commit sha1] in their description.
+If the upstream source tree is not linux.git, the description must include a URL, a git:// address, or a git+ssh address for the upstream source tree.  Commits with an identified source must also specify a link:CommitRules.adoc#user-content-3a-commit-sha1-format-required[commit sha1] in their description.
 
 If the changeset is not in Linus' linux.git tree, please specify the URL of the source tree, a URL to the patch posting on a mailing list, or explain why the changeset is unique to RHEL.
 
@@ -135,9 +134,13 @@ Critical undisclosed information security issues, or unreleased critical CVEs, m
 Good examples of Upstream Status for changesets that are not in Linus’ linux.git:
 
     Upstream Status: https://git.kernel.org/pub/scm/linux/kernel/git/next/linux-next.git
+    Upstream Status: git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+    Upstream Status: git@gitlab.com:redhat/centos-stream/src/kernel/centos-stream-9.git
     Upstream Status: RHEL only
+    Upstream Status: RHEL-only
     Upstream Status: RHEL Only
-    Upstream Status: RHEL8.1 only (to be removed in BZ 123456)
+    Upstream Status: RHEL-Only
+    Upstream Status: RHEL8.1 only (to be removed in RHEL-1559)
     Upstream Status: Posted https://lore.kernel.org/lkml/87ft4djtyp.fsf@nanos.tec.linutronix.de/
     Upstream-status: RHEL8.6 only
     Upstream Status: RHEL9 only
@@ -155,12 +158,21 @@ Red Hat's automated tooling attempts to do basic validation of upstream git tree
 * https://github.com/
 * https://git.samba.org/
 
+====== Identifying changes to the redhat/ directory
+
+The upstream location for redhat/ changes is the https://gitlab.com/cki-project/kernel-ark[the Fedora/ARK kernel(aka, kernel-ark)] project on the os-build branch.  Changes to the redhat/ directory for downstream Red Hat kernel projects must either be a backport from the kernel-ark project, or must include a detailed explanation of why the change does not apply to kernel-ark.
+
+The Upstream Status policy outlined in the above section also applies to redhat/ changes.  Valid example for a kernel-ark backport are:
+
+    Upstream Status: RHEL only, https://gitlab.com/cki-project/kernel-ark
+    Upstream Status: https://gitlab.com/cki-project/kernel-ark
+
 ===== 2d. Changeset Dependencies (optional)
 If your changeset depends on another changeset being accepted and merged first, then you need to make sure that the description of your MR contains a reference to the dependent change.
 
 For each dependency, your description must contain a unique line starting with `Depends:`.  The content after the keyword should be a specific URL pointing at another MR in the same project.
 
-NOTE: Additional syntax is allowed, such as a Bugzilla link or Jira link, but the functionality may be limited to only a MR URL in the future.
+NOTE: Additional syntax is allowed, such as a Jira link, but the functionality may be limited to only a MR URL in the future.
 
 When assembling the commits on your dependent changeset, you must make sure that the changes for your MR are layered over the dependent changes as displayed in the graphic below.  Dependencies, as the name implies, must precede all changes from the submitted set.  The webhooks rely on ordering to identify the last commit that is part of your changeset and the first commit of a dependency chagneset, and will stop walking the commit list when reaching the first dependency commit.  Dependencies intermingled with your changes will not be properly evaluated by the webhooks.
 
@@ -171,7 +183,7 @@ In the event of a conflicting change from either the parent repository or the up
 IMPORTANT: Careful coordination should be used when working with dependencies.  You shouldn't post a changeset that has a dependency against something that hasn't already been posted itself.  Similarly, a dependent change cannot be merged until the parent itself has been merged *first*.  It is very easy for the various pieces of the chain to become out of sync with each other.
 
 ===== 2e. CVE Reference (optional)
-If the changeset resolves a bugzilla that has an associated CVE number, each commit in the changeset and the MR description must include the CVE reference ID.  Use one “CVE:” line for each CVE that the changeset resolves, and include the number as described in the bugzilla, e.g "CVE-YYYY-XXXXX".
+If the changeset resolves a Jira that has an associated CVE number, each commit in the changeset and the MR description must include the CVE reference ID.  Use one “CVE:” line for each CVE that the changeset resolves, and include the number as described in the Jira, e.g "CVE-YYYY-XXXXX".
 
 Unreleased critical CVEs can use link:CommitRules.adoc#user-content-2c-upstream-status-required["Upstream Status: Embargoed"] in place of referencing an upstream commit ID.
 

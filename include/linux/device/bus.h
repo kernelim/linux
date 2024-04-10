@@ -26,7 +26,6 @@ struct fwnode_handle;
  *
  * @name:	The name of the bus.
  * @dev_name:	Used for subsystems to enumerate devices like ("foo%u", dev->id).
- * @dev_root:	Default device to use as the parent.
  * @bus_groups:	Default attributes of the bus.
  * @dev_groups:	Default attributes of the devices on the bus.
  * @drv_groups: Default attributes of the device drivers on the bus.
@@ -81,13 +80,12 @@ struct fwnode_handle;
 struct bus_type {
 	const char		*name;
 	const char		*dev_name;
-	struct device		*dev_root;
 	const struct attribute_group **bus_groups;
 	const struct attribute_group **dev_groups;
 	const struct attribute_group **drv_groups;
 
 	int (*match)(struct device *dev, struct device_driver *drv);
-	int (*uevent)(struct device *dev, struct kobj_uevent_env *env);
+	int (*uevent)(const struct device *dev, struct kobj_uevent_env *env);
 	int (*probe)(struct device *dev);
 	void (*sync_state)(struct device *dev);
 	void (*remove)(struct device *dev);
@@ -111,16 +109,16 @@ struct bus_type {
 	bool need_parent_lock;
 };
 
-extern int __must_check bus_register(struct bus_type *bus);
+int __must_check bus_register(const struct bus_type *bus);
 
-extern void bus_unregister(const struct bus_type *bus);
+void bus_unregister(const struct bus_type *bus);
 
-extern int __must_check bus_rescan_devices(struct bus_type *bus);
+int __must_check bus_rescan_devices(const struct bus_type *bus);
 
 struct bus_attribute {
 	struct attribute	attr;
-	ssize_t (*show)(struct bus_type *bus, char *buf);
-	ssize_t (*store)(struct bus_type *bus, const char *buf, size_t count);
+	ssize_t (*show)(const struct bus_type *bus, char *buf);
+	ssize_t (*store)(const struct bus_type *bus, const char *buf, size_t count);
 };
 
 #define BUS_ATTR_RW(_name) \
@@ -245,10 +243,8 @@ void bus_sort_breadthfirst(struct bus_type *bus,
  */
 struct notifier_block;
 
-extern int bus_register_notifier(const struct bus_type *bus,
-				 struct notifier_block *nb);
-extern int bus_unregister_notifier(const struct bus_type *bus,
-				   struct notifier_block *nb);
+int bus_register_notifier(const struct bus_type *bus, struct notifier_block *nb);
+int bus_unregister_notifier(const struct bus_type *bus, struct notifier_block *nb);
 
 /**
  * enum bus_notifier_event - Bus Notifier events that have happened
@@ -280,7 +276,7 @@ enum bus_notifier_event {
 	BUS_NOTIFY_DRIVER_NOT_BOUND,
 };
 
-extern struct kset *bus_get_kset(const struct bus_type *bus);
+struct kset *bus_get_kset(const struct bus_type *bus);
 struct device *bus_get_dev_root(const struct bus_type *bus);
 
 #endif

@@ -31,7 +31,7 @@ static void rpc_sysfs_object_release(struct kobject *kobj)
 }
 
 static const struct kobj_ns_type_operations *
-rpc_sysfs_object_child_ns_type(struct kobject *kobj)
+rpc_sysfs_object_child_ns_type(const struct kobject *kobj)
 {
 	return &net_ns_type_operations;
 }
@@ -239,6 +239,7 @@ static ssize_t rpc_sysfs_xprt_dstaddr_store(struct kobject *kobj,
 	if (!xprt)
 		return 0;
 	if (!(xprt->xprt_class->ident == XPRT_TRANSPORT_TCP ||
+	      xprt->xprt_class->ident == XPRT_TRANSPORT_TCP_TLS ||
 	      xprt->xprt_class->ident == XPRT_TRANSPORT_RDMA)) {
 		xprt_put(xprt);
 		return -EOPNOTSUPP;
@@ -381,17 +382,17 @@ static void rpc_sysfs_xprt_release(struct kobject *kobj)
 	kfree(xprt);
 }
 
-static const void *rpc_sysfs_client_namespace(struct kobject *kobj)
+static const void *rpc_sysfs_client_namespace(const struct kobject *kobj)
 {
 	return container_of(kobj, struct rpc_sysfs_client, kobject)->net;
 }
 
-static const void *rpc_sysfs_xprt_switch_namespace(struct kobject *kobj)
+static const void *rpc_sysfs_xprt_switch_namespace(const struct kobject *kobj)
 {
 	return container_of(kobj, struct rpc_sysfs_xprt_switch, kobject)->net;
 }
 
-static const void *rpc_sysfs_xprt_namespace(struct kobject *kobj)
+static const void *rpc_sysfs_xprt_namespace(const struct kobject *kobj)
 {
 	return container_of(kobj, struct rpc_sysfs_xprt,
 			    kobject)->xprt->xprt_net;

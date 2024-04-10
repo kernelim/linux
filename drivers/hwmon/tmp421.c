@@ -93,7 +93,7 @@ struct tmp421_data {
 	struct hwmon_channel_info temp_info;
 	const struct hwmon_channel_info *info[2];
 	struct hwmon_chip_info chip;
-	char valid;
+	bool valid;
 	unsigned long last_updated;
 	unsigned long channels;
 	u8 config;
@@ -139,7 +139,7 @@ static struct tmp421_data *tmp421_update_device(struct device *dev)
 				TMP421_TEMP_LSB[i]);
 		}
 		data->last_updated = jiffies;
-		data->valid = 1;
+		data->valid = true;
 	}
 
 	mutex_unlock(&data->update_lock);

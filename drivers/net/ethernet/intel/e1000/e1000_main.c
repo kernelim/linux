@@ -933,8 +933,6 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	int bars, need_ioport;
 	bool disable_dev = false;
 
-	pci_hw_unmaintained(e1000_pci_tbl, pdev);
-
 	/* do not allocate ioport bars when not needed */
 	need_ioport = e1000_is_need_ioport(pdev);
 	if (need_ioport) {

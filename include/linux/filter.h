@@ -28,6 +28,8 @@
 #include <asm/byteorder.h>
 #include <uapi/linux/filter.h>
 
+#include <linux/rh_kabi.h>
+
 struct sk_buff;
 struct sock;
 struct seccomp_data;
@@ -68,6 +70,9 @@ struct ctl_table_header;
 /* unused opcode to mark special load instruction. Same as BPF_ABS */
 #define BPF_PROBE_MEM	0x20
 
+/* unused opcode to mark special ldsx instruction. Same as BPF_IND */
+#define BPF_PROBE_MEMSX	0x40
+
 /* unused opcode to mark call to interpreter with arguments */
 #define BPF_CALL_ARGS	0xe0
 
@@ -89,21 +94,27 @@ struct ctl_table_header;
 
 /* ALU ops on registers, bpf_add|sub|...: dst_reg += src_reg */
 
-#define BPF_ALU64_REG(OP, DST, SRC)				\
+#define BPF_ALU64_REG_OFF(OP, DST, SRC, OFF)			\
 	((struct bpf_insn) {					\
 		.code  = BPF_ALU64 | BPF_OP(OP) | BPF_X,	\
 		.dst_reg = DST,					\
 		.src_reg = SRC,					\
-		.off   = 0,					\
+		.off   = OFF,					\
 		.imm   = 0 })
 
-#define BPF_ALU32_REG(OP, DST, SRC)				\
+#define BPF_ALU64_REG(OP, DST, SRC)				\
+	BPF_ALU64_REG_OFF(OP, DST, SRC, 0)
+
+#define BPF_ALU32_REG_OFF(OP, DST, SRC, OFF)			\
 	((struct bpf_insn) {					\
 		.code  = BPF_ALU | BPF_OP(OP) | BPF_X,		\
 		.dst_reg = DST,					\
 		.src_reg = SRC,					\
-		.off   = 0,					\
+		.off   = OFF,					\
 		.imm   = 0 })
+
+#define BPF_ALU32_REG(OP, DST, SRC)				\
+	BPF_ALU32_REG_OFF(OP, DST, SRC, 0)
 
 /* ALU ops on immediates, bpf_add|sub|...: dst_reg += imm32 */
 
@@ -562,7 +573,7 @@ struct bpf_prog_stats {
 struct sk_filter {
 	refcount_t	refcnt;
 	struct rcu_head	rcu;
-	struct bpf_prog	*prog;
+	RH_KABI_EXCLUDE(struct bpf_prog	*prog)
 };
 
 DECLARE_STATIC_KEY_FALSE(bpf_stats_enabled_key);
@@ -570,8 +581,7 @@ DECLARE_STATIC_KEY_FALSE(bpf_stats_enabled_key);
 extern struct mutex nf_conn_btf_access_lock;
 extern int (*nfct_btf_struct_access)(struct bpf_verifier_log *log,
 				     const struct bpf_reg_state *reg,
-				     int off, int size, enum bpf_access_type atype,
-				     u32 *next_btf_id, enum bpf_type_flag *flag);
+				     int off, int size);
 
 typedef unsigned int (*bpf_dispatcher_fn)(const void *ctx,
 					  const struct bpf_insn *insnsi,
@@ -875,7 +885,6 @@ void bpf_prog_free(struct bpf_prog *fp);
 
 bool bpf_opcode_in_insntable(u8 code);
 
-void bpf_prog_free_linfo(struct bpf_prog *prog);
 void bpf_prog_fill_jited_linfo(struct bpf_prog *prog,
 			       const u32 *insn_to_jit_off);
 int bpf_prog_alloc_jited_linfo(struct bpf_prog *prog);
@@ -921,6 +930,7 @@ void bpf_jit_compile(struct bpf_prog *prog);
 bool bpf_jit_needs_zext(void);
 bool bpf_jit_supports_subprog_tailcalls(void);
 bool bpf_jit_supports_kfunc_call(void);
+bool bpf_jit_supports_far_kfunc_call(void);
 bool bpf_helper_changes_pkt_data(void *func);
 
 static inline bool bpf_dump_raw_ok(const struct cred *cred)
@@ -1504,9 +1514,9 @@ static inline bool bpf_sk_lookup_run_v6(struct net *net, int protocol,
 }
 #endif /* IS_ENABLED(CONFIG_IPV6) */
 
-static __always_inline int __bpf_xdp_redirect_map(struct bpf_map *map, u64 index,
-						  u64 flags, const u64 flag_mask,
-						  void *lookup_elem(struct bpf_map *map, u32 key))
+static __always_inline long __bpf_xdp_redirect_map(struct bpf_map *map, u64 index,
+						   u64 flags, const u64 flag_mask,
+						   void *lookup_elem(struct bpf_map *map, u32 key))
 {
 	struct bpf_redirect_info *ri = this_cpu_ptr(&bpf_redirect_info);
 	const u64 action_mask = XDP_ABORTED | XDP_DROP | XDP_PASS | XDP_TX;
@@ -1541,5 +1551,50 @@ static __always_inline int __bpf_xdp_redirect_map(struct bpf_map *map, u64 index
 
 	return XDP_REDIRECT;
 }
+
+#ifdef CONFIG_NET
+int __bpf_skb_load_bytes(const struct sk_buff *skb, u32 offset, void *to, u32 len);
+int __bpf_skb_store_bytes(struct sk_buff *skb, u32 offset, const void *from,
+			  u32 len, u64 flags);
+int __bpf_xdp_load_bytes(struct xdp_buff *xdp, u32 offset, void *buf, u32 len);
+int __bpf_xdp_store_bytes(struct xdp_buff *xdp, u32 offset, void *buf, u32 len);
+void *bpf_xdp_pointer(struct xdp_buff *xdp, u32 offset, u32 len);
+void bpf_xdp_copy_buf(struct xdp_buff *xdp, unsigned long off,
+		      void *buf, unsigned long len, bool flush);
+#else /* CONFIG_NET */
+static inline int __bpf_skb_load_bytes(const struct sk_buff *skb, u32 offset,
+				       void *to, u32 len)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int __bpf_skb_store_bytes(struct sk_buff *skb, u32 offset,
+					const void *from, u32 len, u64 flags)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int __bpf_xdp_load_bytes(struct xdp_buff *xdp, u32 offset,
+				       void *buf, u32 len)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int __bpf_xdp_store_bytes(struct xdp_buff *xdp, u32 offset,
+					void *buf, u32 len)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline void *bpf_xdp_pointer(struct xdp_buff *xdp, u32 offset, u32 len)
+{
+	return NULL;
+}
+
+static inline void bpf_xdp_copy_buf(struct xdp_buff *xdp, unsigned long off, void *buf,
+				    unsigned long len, bool flush)
+{
+}
+#endif /* CONFIG_NET */
 
 #endif /* __LINUX_FILTER_H__ */

@@ -19,6 +19,8 @@
 #include <linux/netlink.h>
 #include <uapi/linux/ethtool.h>
 
+#include <linux/rh_kabi.h>
+
 struct compat_ethtool_rx_flow_spec {
 	u32		flow_type;
 	union ethtool_flow_union h_u;
@@ -75,6 +77,8 @@ enum {
  * @tx_push: The flag of tx push mode
  * @rx_push: The flag of rx push mode
  * @cqe_size: Size of TX/RX completion queue event
+ * @tx_push_buf_len: Size of TX push buffer
+ * @tx_push_buf_max_len: Maximum allowed size of TX push buffer
  */
 struct kernel_ethtool_ringparam {
 	u32	rx_buf_len;
@@ -82,6 +86,8 @@ struct kernel_ethtool_ringparam {
 	u8	tx_push;
 	u8	rx_push;
 	u32	cqe_size;
+	u32	tx_push_buf_len;
+	u32	tx_push_buf_max_len;
 };
 
 /**
@@ -90,12 +96,14 @@ struct kernel_ethtool_ringparam {
  * @ETHTOOL_RING_USE_CQE_SIZE: capture for setting cqe_size
  * @ETHTOOL_RING_USE_TX_PUSH: capture for setting tx_push
  * @ETHTOOL_RING_USE_RX_PUSH: capture for setting rx_push
+ * @ETHTOOL_RING_USE_TX_PUSH_BUF_LEN: capture for setting tx_push_buf_len
  */
 enum ethtool_supported_ring_param {
-	ETHTOOL_RING_USE_RX_BUF_LEN = BIT(0),
-	ETHTOOL_RING_USE_CQE_SIZE   = BIT(1),
-	ETHTOOL_RING_USE_TX_PUSH    = BIT(2),
-	ETHTOOL_RING_USE_RX_PUSH    = BIT(3),
+	ETHTOOL_RING_USE_RX_BUF_LEN		= BIT(0),
+	ETHTOOL_RING_USE_CQE_SIZE		= BIT(1),
+	ETHTOOL_RING_USE_TX_PUSH		= BIT(2),
+	ETHTOOL_RING_USE_RX_PUSH		= BIT(3),
+	ETHTOOL_RING_USE_TX_PUSH_BUF_LEN	= BIT(4),
 };
 
 #define __ETH_RSS_HASH_BIT(bit)	((u32)1 << (bit))
@@ -705,6 +713,7 @@ struct ethtool_mm_stats {
  * @get_dump_data: Get dump data.
  * @set_dump: Set dump specific flags to the device.
  * @get_ts_info: Get the time stamping and PTP hardware clock capabilities.
+ *	It may be called with RCU, or rtnl or reference on the device.
  *	Drivers supporting transmit time stamps in software should set this to
  *	ethtool_op_get_ts_info().
  * @get_module_info: Get the size and type of the eeprom contained within
@@ -905,6 +914,23 @@ struct ethtool_ops {
 	int	(*set_mm)(struct net_device *dev, struct ethtool_mm_cfg *cfg,
 			  struct netlink_ext_ack *extack);
 	void	(*get_mm_stats)(struct net_device *dev, struct ethtool_mm_stats *stats);
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
+	RH_KABI_RESERVE(5)
+	RH_KABI_RESERVE(6)
+	RH_KABI_RESERVE(7)
+	RH_KABI_RESERVE(8)
+	RH_KABI_RESERVE(9)
+	RH_KABI_RESERVE(10)
+	RH_KABI_RESERVE(11)
+	RH_KABI_RESERVE(12)
+	RH_KABI_RESERVE(13)
+	RH_KABI_RESERVE(14)
+	RH_KABI_RESERVE(15)
+	RH_KABI_RESERVE(16)
 };
 
 int ethtool_check_ops(const struct ethtool_ops *ops);
@@ -1045,4 +1071,23 @@ static inline int ethtool_mm_frag_size_min_to_add(u32 val_min, u32 *val_add,
  * next string.
  */
 extern __printf(2, 3) void ethtool_sprintf(u8 **data, const char *fmt, ...);
+
+/* Link mode to forced speed capabilities maps */
+struct ethtool_forced_speed_map {
+	u32		speed;
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(caps);
+
+	const u32	*cap_arr;
+	u32		arr_size;
+};
+
+#define ETHTOOL_FORCED_SPEED_MAP(prefix, value)				\
+{									\
+	.speed		= SPEED_##value,				\
+	.cap_arr	= prefix##_##value,				\
+	.arr_size	= ARRAY_SIZE(prefix##_##value),			\
+}
+
+void
+ethtool_forced_speed_maps_init(struct ethtool_forced_speed_map *maps, u32 size);
 #endif /* _LINUX_ETHTOOL_H */

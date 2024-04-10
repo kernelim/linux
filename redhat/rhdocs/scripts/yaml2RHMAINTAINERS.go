@@ -10,9 +10,9 @@ import (
 )
 
 type NameAndEmail struct {
-	Name string
-	Email string
-	Restricted bool
+	Name string `name`
+	Email string `email`
+	Restricted bool `restricted`
 }
 
 type SubSystem struct {
@@ -22,15 +22,15 @@ type SubSystem struct {
 		ReadyForMergeDeps []string `readyForMergeDeps`
 		NewLabels string `newLabels`
 		EmailLabel string `emailLabel`
-	}
+	} `labels`
 	Status string `status`
 	Maintainers []NameAndEmail `maintainers`
 	Reviewers []NameAndEmail `reviewers`
 	Paths struct {
-		Includes []string
-		IncludeRegexes []string
-		Excludes []string
-	}
+		Includes []string `includes`
+		IncludeRegexes []string `includeRegexes`
+		Excludes []string `excludes`
+	} `paths`
 	Scm string `scm`
 	MailingList string `mailingList`
 }

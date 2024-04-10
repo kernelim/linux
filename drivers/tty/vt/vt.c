@@ -3551,7 +3551,7 @@ int __init vty_init(const struct file_operations *console_fops)
 	if (cdev_add(&vc0_cdev, MKDEV(TTY_MAJOR, 0), 1) ||
 	    register_chrdev_region(MKDEV(TTY_MAJOR, 0), 1, "/dev/vc/0") < 0)
 		panic("Couldn't register /dev/tty0 driver\n");
-	tty0dev = device_create_with_groups(tty_class, NULL,
+	tty0dev = device_create_with_groups(&tty_class, NULL,
 					    MKDEV(TTY_MAJOR, 0), NULL,
 					    vt_dev_groups, "tty0");
 	if (IS_ERR(tty0dev))
@@ -3559,8 +3559,9 @@ int __init vty_init(const struct file_operations *console_fops)
 
 	vcs_init();
 
-	console_driver = alloc_tty_driver(MAX_NR_CONSOLES);
-	if (!console_driver)
+	console_driver = tty_alloc_driver(MAX_NR_CONSOLES, TTY_DRIVER_REAL_RAW |
+			TTY_DRIVER_RESET_TERMIOS);
+	if (IS_ERR(console_driver))
 		panic("Couldn't allocate console driver\n");
 
 	console_driver->name = "tty";
@@ -3571,7 +3572,6 @@ int __init vty_init(const struct file_operations *console_fops)
 	console_driver->init_termios = tty_std_termios;
 	if (default_utf8)
 		console_driver->init_termios.c_iflag |= IUTF8;
-	console_driver->flags = TTY_DRIVER_REAL_RAW | TTY_DRIVER_RESET_TERMIOS;
 	tty_set_operations(console_driver, &con_ops);
 	if (tty_register_driver(console_driver))
 		panic("Couldn't register console driver\n");
@@ -4253,7 +4253,7 @@ static int __init vtconsole_class_init(void)
 {
 	int i;
 
-	vtconsole_class = class_create(THIS_MODULE, "vtconsole");
+	vtconsole_class = class_create("vtconsole");
 	if (IS_ERR(vtconsole_class)) {
 		pr_warn("Unable to create vt console class; errno = %ld\n",
 			PTR_ERR(vtconsole_class));

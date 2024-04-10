@@ -745,61 +745,42 @@ static int __init debug_boot_weak_hash_enable(char *str)
 }
 early_param("debug_boot_weak_hash", debug_boot_weak_hash_enable);
 
-static DEFINE_STATIC_KEY_TRUE(not_filled_random_ptr_key);
+static bool filled_random_ptr_key __read_mostly;
 static siphash_key_t ptr_key __read_mostly;
+static void fill_ptr_key_workfn(struct work_struct *work);
+static DECLARE_DELAYED_WORK(fill_ptr_key_work, fill_ptr_key_workfn);
 
-static void enable_ptr_key_workfn(struct work_struct *work)
+static void fill_ptr_key_workfn(struct work_struct *work)
 {
+	if (!rng_is_initialized()) {
+		queue_delayed_work(system_unbound_wq, &fill_ptr_key_work, HZ  * 2);
+		return;
+	}
+
 	get_random_bytes(&ptr_key, sizeof(ptr_key));
-	/* Needs to run from preemptible context */
-	static_branch_disable(&not_filled_random_ptr_key);
+
+	/* Pairs with smp_rmb() before reading ptr_key. */
+	smp_wmb();
+	WRITE_ONCE(filled_random_ptr_key, true);
 }
 
-static DECLARE_WORK(enable_ptr_key_work, enable_ptr_key_workfn);
-
-static int fill_random_ptr_key(struct notifier_block *nb,
-			       unsigned long action, void *data)
+static int __init vsprintf_init_hashval(void)
 {
-	/* This may be in an interrupt handler. */
-	queue_work(system_unbound_wq, &enable_ptr_key_work);
+	fill_ptr_key_workfn(NULL);
 	return 0;
 }
-
-static struct notifier_block random_ready = {
-	.notifier_call = fill_random_ptr_key
-};
-
-static int __init initialize_ptr_random(void)
-{
-	int key_size = sizeof(ptr_key);
-	int ret;
-
-	/* Use hw RNG if available. */
-	if (get_random_bytes_arch(&ptr_key, key_size) == key_size) {
-		static_branch_disable(&not_filled_random_ptr_key);
-		return 0;
-	}
-
-	ret = register_random_ready_notifier(&random_ready);
-	if (!ret) {
-		return 0;
-	} else if (ret == -EALREADY) {
-		/* This is in preemptible context */
-		enable_ptr_key_workfn(&enable_ptr_key_work);
-		return 0;
-	}
-
-	return ret;
-}
-early_initcall(initialize_ptr_random);
+subsys_initcall(vsprintf_init_hashval)
 
 /* Maps a pointer to a 32 bit unique identifier. */
 static inline int __ptr_to_hashval(const void *ptr, unsigned long *hashval_out)
 {
 	unsigned long hashval;
 
-	if (static_branch_unlikely(&not_filled_random_ptr_key))
-		return -EAGAIN;
+	if (!READ_ONCE(filled_random_ptr_key))
+		return -EBUSY;
+
+	/* Pairs with smp_wmb() after writing ptr_key. */
+	smp_rmb();
 
 #ifdef CONFIG_64BIT
 	hashval = (unsigned long)siphash_1u64((u64)ptr, &ptr_key);

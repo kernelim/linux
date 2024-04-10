@@ -13,12 +13,26 @@ The most common questions related to contributing to Red Hat-based kernel projec
 
 {{< toc >}}
 
+== Submission Related Questions
+
+=== I submitted an MR but it was rejected for 'non-technical' issues.  Why did that happen and what does it mean?
+
+CentOS Stream, and by extension Red Hat, welcome all community requests and contributions to the CentOS Stream kernel.  Red Hat applies Development, QE, Documentation, and other resources to every change made to the CentOS Stream kernel to ensure the CentOS Stream and RHEL kernels are secure, highly available, and meet Red Hat's users’ requirements.  The maintainers may reject a change because they are aware of a lack of resources available to provide support for the change.  For example, a community user or SIG may request that a particular driver be enabled and Red Hat may not have access to hardware associated with the driver.  In this case, CentOS Stream and Red Hat cannot provide any guarantee on functionality to users, and as such the request would be rejected.  Please take a moment to understand: We do not like to reject contributions and consider any rejections to be a loss for the overall community behind CentOS Stream and RHEL, but unfortunately, we are also resource constrained.
+
+=== I can support the hardware or software that was rejected for 'non-technical' issues.  Isn't that enough?
+
+Unfortunately, no.  While we appreciate your enthusiasm and help, Red Hat has support requirements it must meet and a lack of ability to reproduce a problem will cause a delay in support for users and customers.
+
+=== Are there any other options to getting my changes into the Centos Stream kernel?
+
+Yes!  You can consider forming a Centos Stream SIG for your changes, or joining a similarly aligned existing SIG.
+
 == Formatting Related Questions
 :sectnums:
 === anchor:badformatting[] The formatting is bad, how do I fix it?
 :sectnums:
 .. Descriptions and comments utilize https://docs.gitlab.com/ee/user/markdown.html[GitLab Flavored Markdown] to handle the formatting of the text.
-.. Consecutive lines separated by single newlines, without a blank line in between, will be treated as a paragraph for purposes of display. The MR tools will still see the newlines and will treat such labeled fields (“bugzilla:”, etc) as intended. If you want a cleaner display, insert a blank line between entries.
+.. Consecutive lines separated by single newlines, without a blank line in between, will be treated as a paragraph for purposes of display. The MR tools will still see the newlines and will treat such labeled fields (“JIRA:”, etc) as intended. If you want a cleaner display, insert a blank line between entries.
 .. Indented blocks of text get a box around them, which can cause unintended consequences on the formatting of the display of your description..
 
 == Label Related Questions
@@ -54,7 +68,7 @@ The most common questions related to contributing to Red Hat-based kernel projec
 :sectnums:
 === How do I make the webhook re-evaluate the readiness of a MR?
 :sectnums:
-.. Remove the label you want re-checked by clicking the 'x' in the Labels area as defined above under step 8.  (i.e. if you have image:images/qsg-label_image_bugzilla_needsreview.png["Red Bugzilla::NeedsReview Label"], remove that label from the MR)
+.. Remove the label you want re-checked by clicking the 'x' in the Labels area as defined above under step 8.  (i.e. if you have image:images/qsg-label_image_jira_needsreview.png["Red Jira::NeedsReview Label"], remove that label from the MR)
 
 === The link I received to create the MR for my change only refers to my fork and not the upstream kernel tree. Why did this happen and how do I resolve it?
 :sectnums:
@@ -81,9 +95,9 @@ image::images/qsg-KWF_Representatives_2022Q2.png["KWF Reps"]
 .. Send an email to mailto:kernel-info@redhat.com[kernel-info@redhat.com].
 .. If there's a GitLab specific issue, you can open an issue at https://gitlab.com/redhat/rhel/src/kernel/bugreports[Red Hat Kernel bug reports].
 
-=== How can I determine the status of any related Bugzillas on my MR?
+=== How can I determine the status of any related Jiras on my MR?
 :sectnums:
-.. The bugzilla webhook will post a comment to the MR with the current status of each referenced BZ.  Each time the webhook is run, that comment will be edited to reflect the current state.
+.. The jira webhook will post a comment to the MR with the current status of each referenced ticket.  Each time the webhook is run, that comment will be edited to reflect the current state.
 
 === Can I edit my comments?
 :sectnums:
@@ -91,7 +105,7 @@ image::images/qsg-KWF_Representatives_2022Q2.png["KWF Reps"]
 .. A minor modiviation can be defined mostly as correcting a typo or adjusting the language of a sentence that is otherwise unclear (i.e. perhaps there's a word missing).
 .. *It is important to keep comments as close to their original intent as possible since they are used for auditing purposes.*
 
-=== anchor:getartifactsdirectly[] How do I get build artifacts without looking at Bugzilla? +
+=== anchor:getartifactsdirectly[] How do I get build artifacts without looking at Jira? +
 :sectnums:
 .. Search by Merge Request ID.
 +

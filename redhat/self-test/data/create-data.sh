@@ -4,12 +4,12 @@
 # using known ark commit IDs.  It uses this information as well as setting
 # different values for DISTRO and DIST.
 #
-# The ark commit IDs are
+# The centos-stream-9 commit IDs are
 #
-#    78e36f3b0dae := 5.17.0 merge window (5.16 + additional changes before -rc1)
-#    2585cf9dfaad := 5.16-rc5
-#    df0cc57e057f := 5.16
-#    fce15c45d3fb := 5.16-rc5 + 2 additional commits
+#    edc9dd1e3c31 := 5.13.0 merge window (5.13 + additional changes before -rc1)
+#    a5e13c6df0e4 := 5.12-rc5
+#    9f4ad9e425a1 := 5.12
+#    6161a435c191 := 5.12-rc5 + 2 additional commits
 #
 
 [ -z "${RHDISTDATADIR}" ] && echo "ERROR: RHDISTDATADIR undefined." && exit 1
@@ -30,12 +30,14 @@ specfile_helper () {
 	cp ./kernel.spec.template "${varfilename}.spec.template"
 	make RHSELFTESTDATA=1 SPECFILE="${specfilename}.spec" DIST="${DIST}" DISTRO="${DISTRO}" HEAD="${commit}" _setup-source
 	grep -Fvx -f "${specfilename}.spec.template" "${sources}/${specfilename}.spec" > "${destdir}"/"${specfilename}".spec
+	# Ignore bpftoolversion definition as it may change.
+	sed -i '/^%define bpftoolversion /d' "${destdir}"/"${specfilename}".spec
 	rm -f "${specfilename}.spec.template"
 }
 
 for DISTRO in fedora rhel centos
 do
-	for commit in 78e36f3b0dae 2585cf9dfaad df0cc57e057f fce15c45d3fb
+	for commit in edc9dd1e3c31 a5e13c6df0e4 9f4ad9e425a1 6161a435c191
 	do
 		for DIST in .fc25 .el7
 		do
@@ -49,6 +51,7 @@ do
 			# the tree is changed.
 			# RHEL_RELEASE can change build-to-build.
 			# SHELL can change depending on user's environment
+			# BPFTOOLVERSION is derived from tools/lib/bpf/Makefile and may change.
 			# RHGITURL may change depending on the user's method of cloning
 			# RHDISTDATADIR will change based on these tests
 			# VARS is a list of variables added for the 'dist-dump-variables' target
@@ -58,16 +61,19 @@ do
 				grep -v -w UPSTREAM |\
 				grep -v -w RHEL_RELEASE |\
 				grep -v -w SHELL |\
+				grep -v -w BPFTOOLVERSION |\
 				grep -v -w RHGITURL |\
 				grep -v -w RHDISTDATADIR |\
 				grep -v -w VARS |\
 				sort -u >& "${destdir}/${varfilename}" &
 
+			# shellcheck disable=SC2004
 			waitpids[${count}]=$!
 			((count++))
 
 			echo "building ${destdir}/${varfilename}.spec"
 			specfile_helper "${varfilename}" &
+			# shellcheck disable=SC2004
 			waitpids[${count}]=$!
 			((count++))
 		done
@@ -75,8 +81,9 @@ do
 		# There isn't an easy way to make sure the parallel execution doesn't go crazy
 		# and hammer a system.  Putting the wait loop here will artificially limit the
 		# number of jobs.
+		# shellcheck disable=SC2048
 		for pid in ${waitpids[*]}; do
-			wait ${pid}
+			wait "${pid}"
 		done
 	done
 done

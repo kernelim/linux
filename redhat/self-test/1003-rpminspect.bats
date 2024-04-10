@@ -10,12 +10,12 @@ load test-lib.bash
 		skip "Skip rpminspect test pending fixes"
 	fi
 
-	numsrpms=$(find "$BATS_TEST_DIRNAME"/.. -name "*.rpm" | wc -l)
+	numsrpms=$(find "$BATS_TEST_DIRNAME"/.. -name "*.src.rpm" | wc -l)
 	if [ "$numsrpms" != "1" ]; then
 		skip "Only one SRPM should be in $BATS_TEST_DIRNAME/redhat/rpms/SRPMS."
 	fi
 
-	srpm=$(find "$BATS_TEST_DIRNAME"/.. -name "*.rpm")
+	srpm=$(find "$BATS_TEST_DIRNAME"/.. -name "*.src.rpm")
 	run rpminspect $srpm
 	check_status
 }

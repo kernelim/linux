@@ -51,7 +51,6 @@
 #include <linux/mutex.h>
 #include <linux/netdevice.h>
 #include <linux/pci.h>
-#include <linux/aer.h>
 #include <linux/rtnetlink.h>
 #include <linux/sched.h>
 #include <linux/seq_file.h>
@@ -1176,7 +1175,7 @@ static u16 cxgb_select_queue(struct net_device *dev, struct sk_buff *skb,
 		txq = netdev_pick_tx(dev, skb, sb_dev);
 		if (xfrm_offload(skb) || is_ptp_enabled(skb, dev) ||
 		    skb->encapsulation ||
-		    cxgb4_is_ktls_skb(skb) ||
+		    tls_is_skb_tx_device_offloaded(skb) ||
 		    (proto != IPPROTO_TCP && proto != IPPROTO_UDP))
 			txq = txq % pi->nqsets;
 
@@ -6688,7 +6687,6 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto out_free_adapter;
 	}
 
-	pci_enable_pcie_error_reporting(pdev);
 	pci_set_master(pdev);
 	pci_save_state(pdev);
 	adap_idx++;
@@ -7093,7 +7091,6 @@ fw_attach_fail:
  out_unmap_bar0:
 	iounmap(regs);
  out_disable_device:
-	pci_disable_pcie_error_reporting(pdev);
 	pci_disable_device(pdev);
  out_release_regions:
 	pci_release_regions(pdev);
@@ -7172,7 +7169,6 @@ static void remove_one(struct pci_dev *pdev)
 	}
 #endif
 	iounmap(adapter->regs);
-	pci_disable_pcie_error_reporting(pdev);
 	if ((adapter->flags & CXGB4_DEV_ENABLED)) {
 		pci_disable_device(pdev);
 		adapter->flags &= ~CXGB4_DEV_ENABLED;

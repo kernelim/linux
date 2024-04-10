@@ -76,6 +76,7 @@ config WIREGUARD
 	tristate "WireGuard secure network tunnel"
 	depends on NET && INET
 	depends on IPV6 || !IPV6
+	depends on !KMSAN # KMSAN doesn't support the crypto configs below
 	select NET_UDP_TUNNEL
 	select DST_CACHE
 	select CRYPTO
@@ -319,7 +320,6 @@ config NETCONSOLE_DYNAMIC
 
 config NETPOLL
 	def_bool NETCONSOLE
-	select SRCU
 
 config NET_POLL_CONTROLLER
 	def_bool NETPOLL
@@ -556,6 +556,7 @@ config VMXNET3
 	depends on !(PAGE_SIZE_64KB || ARM64_64K_PAGES || \
 		     IA64_PAGE_SIZE_64KB || MICROBLAZE_64K_PAGES || \
 		     PARISC_PAGE_SIZE_64KB || PPC_64K_PAGES)
+	select PAGE_POOL
 	help
 	  This driver supports VMware's vmxnet3 virtual ethernet NIC.
 	  To compile this driver as a module, choose M here: the

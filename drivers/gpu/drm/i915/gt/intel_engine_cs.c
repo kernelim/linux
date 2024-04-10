@@ -9,6 +9,7 @@
 
 #include "gem/i915_gem_context.h"
 #include "gem/i915_gem_internal.h"
+#include "gt/intel_gt_print.h"
 #include "gt/intel_gt_regs.h"
 
 #include "i915_cmd_parser.h"
@@ -557,7 +558,6 @@ static int intel_engine_setup(struct intel_gt *gt, enum intel_engine_id id,
 		DRIVER_CAPS(i915)->has_logical_contexts = true;
 
 	ewma__engine_latency_init(&engine->latency);
-	seqcount_init(&engine->stats.execlists.lock);
 
 	ATOMIC_INIT_NOTIFIER_HEAD(&engine->context_status_notifier);
 
@@ -1143,11 +1143,129 @@ err_put:
 	return ret;
 }
 
+static int intel_engine_init_tlb_invalidation(struct intel_engine_cs *engine)
+{
+	static const union intel_engine_tlb_inv_reg gen8_regs[] = {
+		[RENDER_CLASS].reg		= GEN8_RTCR,
+		[VIDEO_DECODE_CLASS].reg	= GEN8_M1TCR, /* , GEN8_M2TCR */
+		[VIDEO_ENHANCEMENT_CLASS].reg	= GEN8_VTCR,
+		[COPY_ENGINE_CLASS].reg		= GEN8_BTCR,
+	};
+	static const union intel_engine_tlb_inv_reg gen12_regs[] = {
+		[RENDER_CLASS].reg		= GEN12_GFX_TLB_INV_CR,
+		[VIDEO_DECODE_CLASS].reg	= GEN12_VD_TLB_INV_CR,
+		[VIDEO_ENHANCEMENT_CLASS].reg	= GEN12_VE_TLB_INV_CR,
+		[COPY_ENGINE_CLASS].reg		= GEN12_BLT_TLB_INV_CR,
+		[COMPUTE_CLASS].reg		= GEN12_COMPCTX_TLB_INV_CR,
+	};
+	static const union intel_engine_tlb_inv_reg xehp_regs[] = {
+		[RENDER_CLASS].mcr_reg		  = XEHP_GFX_TLB_INV_CR,
+		[VIDEO_DECODE_CLASS].mcr_reg	  = XEHP_VD_TLB_INV_CR,
+		[VIDEO_ENHANCEMENT_CLASS].mcr_reg = XEHP_VE_TLB_INV_CR,
+		[COPY_ENGINE_CLASS].mcr_reg	  = XEHP_BLT_TLB_INV_CR,
+		[COMPUTE_CLASS].mcr_reg		  = XEHP_COMPCTX_TLB_INV_CR,
+	};
+	static const union intel_engine_tlb_inv_reg xelpmp_regs[] = {
+		[VIDEO_DECODE_CLASS].reg	  = GEN12_VD_TLB_INV_CR,
+		[VIDEO_ENHANCEMENT_CLASS].reg     = GEN12_VE_TLB_INV_CR,
+		[OTHER_CLASS].reg		  = XELPMP_GSC_TLB_INV_CR,
+	};
+	struct drm_i915_private *i915 = engine->i915;
+	const unsigned int instance = engine->instance;
+	const unsigned int class = engine->class;
+	const union intel_engine_tlb_inv_reg *regs;
+	union intel_engine_tlb_inv_reg reg;
+	unsigned int num = 0;
+	u32 val;
+
+	/*
+	 * New platforms should not be added with catch-all-newer (>=)
+	 * condition so that any later platform added triggers the below warning
+	 * and in turn mandates a human cross-check of whether the invalidation
+	 * flows have compatible semantics.
+	 *
+	 * For instance with the 11.00 -> 12.00 transition three out of five
+	 * respective engine registers were moved to masked type. Then after the
+	 * 12.00 -> 12.50 transition multi cast handling is required too.
+	 */
+
+	if (engine->gt->type == GT_MEDIA) {
+		if (MEDIA_VER_FULL(i915) == IP_VER(13, 0)) {
+			regs = xelpmp_regs;
+			num = ARRAY_SIZE(xelpmp_regs);
+		}
+	} else {
+		if (GRAPHICS_VER_FULL(i915) == IP_VER(12, 71) ||
+		    GRAPHICS_VER_FULL(i915) == IP_VER(12, 70) ||
+		    GRAPHICS_VER_FULL(i915) == IP_VER(12, 50) ||
+		    GRAPHICS_VER_FULL(i915) == IP_VER(12, 55)) {
+			regs = xehp_regs;
+			num = ARRAY_SIZE(xehp_regs);
+		} else if (GRAPHICS_VER_FULL(i915) == IP_VER(12, 0) ||
+			   GRAPHICS_VER_FULL(i915) == IP_VER(12, 10)) {
+			regs = gen12_regs;
+			num = ARRAY_SIZE(gen12_regs);
+		} else if (GRAPHICS_VER(i915) >= 8 && GRAPHICS_VER(i915) <= 11) {
+			regs = gen8_regs;
+			num = ARRAY_SIZE(gen8_regs);
+		} else if (GRAPHICS_VER(i915) < 8) {
+			return 0;
+		}
+	}
+
+	if (gt_WARN_ONCE(engine->gt, !num,
+			 "Platform does not implement TLB invalidation!"))
+		return -ENODEV;
+
+	if (gt_WARN_ON_ONCE(engine->gt,
+			    class >= num ||
+			    (!regs[class].reg.reg &&
+			     !regs[class].mcr_reg.reg)))
+		return -ERANGE;
+
+	reg = regs[class];
+
+	if (regs == xelpmp_regs && class == OTHER_CLASS) {
+		/*
+		 * There's only a single GSC instance, but it uses register bit
+		 * 1 instead of either 0 or OTHER_GSC_INSTANCE.
+		 */
+		GEM_WARN_ON(instance != OTHER_GSC_INSTANCE);
+		val = 1;
+	} else if (regs == gen8_regs && class == VIDEO_DECODE_CLASS && instance == 1) {
+		reg.reg = GEN8_M2TCR;
+		val = 0;
+	} else {
+		val = instance;
+	}
+
+	val = BIT(val);
+
+	engine->tlb_inv.mcr = regs == xehp_regs;
+	engine->tlb_inv.reg = reg;
+	engine->tlb_inv.done = val;
+
+	if (GRAPHICS_VER(i915) >= 12 &&
+	    (engine->class == VIDEO_DECODE_CLASS ||
+	     engine->class == VIDEO_ENHANCEMENT_CLASS ||
+	     engine->class == COMPUTE_CLASS ||
+	     engine->class == OTHER_CLASS))
+		engine->tlb_inv.request = _MASKED_BIT_ENABLE(val);
+	else
+		engine->tlb_inv.request = val;
+
+	return 0;
+}
+
 static int engine_setup_common(struct intel_engine_cs *engine)
 {
 	int err;
 
 	init_llist_head(&engine->barrier_tasks);
+
+	err = intel_engine_init_tlb_invalidation(engine);
+	if (err)
+		return err;
 
 	err = init_status_page(engine);
 	if (err)
@@ -1214,6 +1332,7 @@ static int measure_breadcrumb_dw(struct intel_context *ce)
 	if (!frame)
 		return -ENOMEM;
 
+	frame->rq.i915 = engine->i915;
 	frame->rq.engine = engine;
 	frame->rq.context = ce;
 	rcu_assign_pointer(frame->rq.timeline, ce->timeline);
@@ -1300,6 +1419,20 @@ void intel_engine_destroy_pinned_context(struct intel_context *ce)
 }
 
 static struct intel_context *
+create_ggtt_bind_context(struct intel_engine_cs *engine)
+{
+	static struct lock_class_key kernel;
+
+	/*
+	 * MI_UPDATE_GTT can insert up to 511 PTE entries and there could be multiple
+	 * bind requets at a time so get a bigger ring.
+	 */
+	return intel_engine_create_pinned_context(engine, engine->gt->vm, SZ_512K,
+						  I915_GEM_HWS_GGTT_BIND_ADDR,
+						  &kernel, "ggtt_bind_context");
+}
+
+static struct intel_context *
 create_kernel_context(struct intel_engine_cs *engine)
 {
 	static struct lock_class_key kernel;
@@ -1309,8 +1442,8 @@ create_kernel_context(struct intel_engine_cs *engine)
 						  &kernel, "kernel_context");
 }
 
-/**
- * intel_engines_init_common - initialize cengine state which might require hw access
+/*
+ * engine_init_common - initialize engine state which might require hw access
  * @engine: Engine to initialize.
  *
  * Initializes @engine@ structure members shared between legacy and execlists
@@ -1322,7 +1455,7 @@ create_kernel_context(struct intel_engine_cs *engine)
  */
 static int engine_init_common(struct intel_engine_cs *engine)
 {
-	struct intel_context *ce;
+	struct intel_context *ce, *bce = NULL;
 	int ret;
 
 	engine->set_default_submission(engine);
@@ -1338,17 +1471,34 @@ static int engine_init_common(struct intel_engine_cs *engine)
 	ce = create_kernel_context(engine);
 	if (IS_ERR(ce))
 		return PTR_ERR(ce);
+	/*
+	 * Create a separate pinned context for GGTT update with blitter engine
+	 * if a platform require such service. MI_UPDATE_GTT works on other
+	 * engines as well but BCS should be less busy engine so pick that for
+	 * GGTT updates.
+	 */
+	if (i915_ggtt_require_binder(engine->i915) && engine->id == BCS0) {
+		bce = create_ggtt_bind_context(engine);
+		if (IS_ERR(bce)) {
+			ret = PTR_ERR(bce);
+			goto err_ce_context;
+		}
+	}
 
 	ret = measure_breadcrumb_dw(ce);
 	if (ret < 0)
-		goto err_context;
+		goto err_bce_context;
 
 	engine->emit_fini_breadcrumb_dw = ret;
 	engine->kernel_context = ce;
+	engine->bind_context = bce;
 
 	return 0;
 
-err_context:
+err_bce_context:
+	if (bce)
+		intel_engine_destroy_pinned_context(bce);
+err_ce_context:
 	intel_engine_destroy_pinned_context(ce);
 	return ret;
 }
@@ -1396,7 +1546,7 @@ int intel_engines_init(struct intel_gt *gt)
 }
 
 /**
- * intel_engines_cleanup_common - cleans up the engine state created by
+ * intel_engine_cleanup_common - cleans up the engine state created by
  *                                the common initiailizers.
  * @engine: Engine to cleanup.
  *
@@ -1417,6 +1567,10 @@ void intel_engine_cleanup_common(struct intel_engine_cs *engine)
 
 	if (engine->kernel_context)
 		intel_engine_destroy_pinned_context(engine->kernel_context);
+
+	if (engine->bind_context)
+		intel_engine_destroy_pinned_context(engine->bind_context);
+
 
 	GEM_BUG_ON(!llist_empty(&engine->barrier_tasks));
 	cleanup_status_page(engine);
@@ -1497,9 +1651,7 @@ static int __intel_engine_stop_cs(struct intel_engine_cs *engine,
 	 * Wa_22011802037: Prior to doing a reset, ensure CS is
 	 * stopped, set ring stop bit and prefetch disable bit to halt CS
 	 */
-	if (IS_MTL_GRAPHICS_STEP(engine->i915, M, STEP_A0, STEP_B0) ||
-	    (GRAPHICS_VER(engine->i915) >= 11 &&
-	    GRAPHICS_VER_FULL(engine->i915) < IP_VER(12, 70)))
+	if (intel_engine_reset_needs_wa_22011802037(engine->gt))
 		intel_uncore_write_fw(uncore, RING_MODE_GEN7(engine->mmio_base),
 				      _MASKED_BIT_ENABLE(GEN12_GFX_PREFETCH_DISABLE));
 
@@ -1939,13 +2091,13 @@ static const char *repr_timer(const struct timer_list *t)
 static void intel_engine_print_registers(struct intel_engine_cs *engine,
 					 struct drm_printer *m)
 {
-	struct drm_i915_private *dev_priv = engine->i915;
+	struct drm_i915_private *i915 = engine->i915;
 	struct intel_engine_execlists * const execlists = &engine->execlists;
 	u64 addr;
 
-	if (engine->id == RENDER_CLASS && IS_GRAPHICS_VER(dev_priv, 4, 7))
+	if (engine->id == RENDER_CLASS && IS_GRAPHICS_VER(i915, 4, 7))
 		drm_printf(m, "\tCCID: 0x%08x\n", ENGINE_READ(engine, CCID));
-	if (HAS_EXECLISTS(dev_priv)) {
+	if (HAS_EXECLISTS(i915)) {
 		drm_printf(m, "\tEL_STAT_HI: 0x%08x\n",
 			   ENGINE_READ(engine, RING_EXECLIST_STATUS_HI));
 		drm_printf(m, "\tEL_STAT_LO: 0x%08x\n",
@@ -1966,7 +2118,7 @@ static void intel_engine_print_registers(struct intel_engine_cs *engine,
 			   ENGINE_READ(engine, RING_MI_MODE) & (MODE_IDLE) ? " [idle]" : "");
 	}
 
-	if (GRAPHICS_VER(dev_priv) >= 6) {
+	if (GRAPHICS_VER(i915) >= 6) {
 		drm_printf(m, "\tRING_IMR:   0x%08x\n",
 			   ENGINE_READ(engine, RING_IMR));
 		drm_printf(m, "\tRING_ESR:   0x%08x\n",
@@ -1983,15 +2135,15 @@ static void intel_engine_print_registers(struct intel_engine_cs *engine,
 	addr = intel_engine_get_last_batch_head(engine);
 	drm_printf(m, "\tBBADDR: 0x%08x_%08x\n",
 		   upper_32_bits(addr), lower_32_bits(addr));
-	if (GRAPHICS_VER(dev_priv) >= 8)
+	if (GRAPHICS_VER(i915) >= 8)
 		addr = ENGINE_READ64(engine, RING_DMA_FADD, RING_DMA_FADD_UDW);
-	else if (GRAPHICS_VER(dev_priv) >= 4)
+	else if (GRAPHICS_VER(i915) >= 4)
 		addr = ENGINE_READ(engine, RING_DMA_FADD);
 	else
 		addr = ENGINE_READ(engine, DMA_FADD_I8XX);
 	drm_printf(m, "\tDMA_FADDR: 0x%08x_%08x\n",
 		   upper_32_bits(addr), lower_32_bits(addr));
-	if (GRAPHICS_VER(dev_priv) >= 4) {
+	if (GRAPHICS_VER(i915) >= 4) {
 		drm_printf(m, "\tIPEIR: 0x%08x\n",
 			   ENGINE_READ(engine, RING_IPEIR));
 		drm_printf(m, "\tIPEHR: 0x%08x\n",
@@ -2001,7 +2153,7 @@ static void intel_engine_print_registers(struct intel_engine_cs *engine,
 		drm_printf(m, "\tIPEHR: 0x%08x\n", ENGINE_READ(engine, IPEHR));
 	}
 
-	if (HAS_EXECLISTS(dev_priv) && !intel_engine_uses_guc(engine)) {
+	if (HAS_EXECLISTS(i915) && !intel_engine_uses_guc(engine)) {
 		struct i915_request * const *port, *rq;
 		const u32 *hws =
 			&engine->status_page.addr[I915_HWS_CSB_BUF0_INDEX];
@@ -2067,7 +2219,7 @@ static void intel_engine_print_registers(struct intel_engine_cs *engine,
 		}
 		rcu_read_unlock();
 		i915_sched_engine_active_unlock_bh(engine->sched_engine);
-	} else if (GRAPHICS_VER(dev_priv) > 6) {
+	} else if (GRAPHICS_VER(i915) > 6) {
 		drm_printf(m, "\tPP_DIR_BASE: 0x%08x\n",
 			   ENGINE_READ(engine, RING_PP_DIR_BASE));
 		drm_printf(m, "\tPP_DIR_BASE_READ: 0x%08x\n",

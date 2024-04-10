@@ -39,9 +39,9 @@ struct svc_pool {
 	struct list_head	sp_all_threads;	/* all server threads */
 
 	/* statistics on pool operation */
+	struct percpu_counter	sp_messages_arrived;
 	struct percpu_counter	sp_sockets_queued;
 	struct percpu_counter	sp_threads_woken;
-	struct percpu_counter	sp_threads_timedout;
 
 #define	SP_TASK_PENDING		(0)		/* still work to do even if no
 						 * xprt is queued. */
@@ -118,19 +118,6 @@ void svc_destroy(struct kref *);
 static inline void svc_put(struct svc_serv *serv)
 {
 	kref_put(&serv->sv_refcnt, svc_destroy);
-}
-
-/**
- * svc_put_not_last - decrement non-final reference count on SUNRPC serv
- * @serv:  the svc_serv to have count decremented
- *
- * Returns: %true is refcount was decremented.
- *
- * If the refcount is 1, it is not decremented and instead failure is reported.
- */
-static inline bool svc_put_not_last(struct svc_serv *serv)
-{
-	return refcount_dec_not_one(&serv->sv_refcnt.refcount);
 }
 
 /*
@@ -266,7 +253,6 @@ struct svc_rqst {
 	/* Catering to nfsd */
 	struct auth_domain *	rq_client;	/* RPC peer info */
 	struct auth_domain *	rq_gssclient;	/* "gss/"-style peer info */
-	struct svc_cacherep *	rq_cacherep;	/* cache info */
 	struct task_struct	*rq_task;	/* service thread */
 	struct net		*rq_bc_net;	/* pointer to backchannel's
 						 * net namespace
@@ -309,17 +295,6 @@ static inline struct sockaddr *svc_daddr(const struct svc_rqst *rqst)
 	return (struct sockaddr *) &rqst->rq_daddr;
 }
 
-static inline void svc_free_res_pages(struct svc_rqst *rqstp)
-{
-	while (rqstp->rq_next_page != rqstp->rq_respages) {
-		struct page **pp = --rqstp->rq_next_page;
-		if (*pp) {
-			put_page(*pp);
-			*pp = NULL;
-		}
-	}
-}
-
 struct svc_deferred_req {
 	u32			prot;	/* protocol (UDP or TCP) */
 	struct svc_xprt		*xprt;
@@ -356,7 +331,7 @@ struct svc_program {
 	char *			pg_name;	/* service name */
 	char *			pg_class;	/* class name: services sharing authentication */
 	struct svc_stat *	pg_stats;	/* rpc statistics */
-	int			(*pg_authenticate)(struct svc_rqst *);
+	enum svc_auth_status	(*pg_authenticate)(struct svc_rqst *rqstp);
 	__be32			(*pg_init_request)(struct svc_rqst *,
 						   const struct svc_program *,
 						   struct svc_process_info *);
@@ -422,15 +397,16 @@ struct svc_serv *svc_create(struct svc_program *, unsigned int,
 			    int (*threadfn)(void *data));
 struct svc_rqst *svc_rqst_alloc(struct svc_serv *serv,
 					struct svc_pool *pool, int node);
-void		   svc_rqst_replace_page(struct svc_rqst *rqstp,
+bool		   svc_rqst_replace_page(struct svc_rqst *rqstp,
 					 struct page *page);
+void		   svc_rqst_release_pages(struct svc_rqst *rqstp);
 void		   svc_rqst_free(struct svc_rqst *);
 void		   svc_exit_thread(struct svc_rqst *);
 struct svc_serv *  svc_create_pooled(struct svc_program *, unsigned int,
 				     int (*threadfn)(void *data));
 int		   svc_set_num_threads(struct svc_serv *, struct svc_pool *, int);
 int		   svc_pool_stats_open(struct svc_serv *serv, struct file *file);
-int		   svc_process(struct svc_rqst *);
+void		   svc_process(struct svc_rqst *rqstp);
 int		   bc_svc_process(struct svc_serv *, struct rpc_rqst *,
 			struct svc_rqst *);
 int		   svc_register(const struct svc_serv *, struct net *, const int,
@@ -438,6 +414,7 @@ int		   svc_register(const struct svc_serv *, struct net *, const int,
 
 void		   svc_wake_up(struct svc_serv *);
 void		   svc_reserve(struct svc_rqst *rqstp, int space);
+void		   svc_pool_wake_idle_thread(struct svc_pool *pool);
 struct svc_pool   *svc_pool_for_cpu(struct svc_serv *serv);
 char *		   svc_print_addr(struct svc_rqst *, char *, size_t);
 const char *	   svc_proc_name(const struct svc_rqst *rqstp);
@@ -516,6 +493,27 @@ static inline void svcxdr_init_encode(struct svc_rqst *rqstp)
 	xdr->page_ptr = buf->pages - 1;
 	buf->buflen = PAGE_SIZE * (rqstp->rq_page_end - buf->pages);
 	xdr->rqst = NULL;
+}
+
+/**
+ * svcxdr_encode_opaque_pages - Insert pages into an xdr_stream
+ * @xdr: xdr_stream to be updated
+ * @pages: array of pages to insert
+ * @base: starting offset of first data byte in @pages
+ * @len: number of data bytes in @pages to insert
+ *
+ * After the @pages are added, the tail iovec is instantiated pointing
+ * to end of the head buffer, and the stream is set up to encode
+ * subsequent items into the tail.
+ */
+static inline void svcxdr_encode_opaque_pages(struct svc_rqst *rqstp,
+					      struct xdr_stream *xdr,
+					      struct page **pages,
+					      unsigned int base,
+					      unsigned int len)
+{
+	xdr_write_pages(xdr, pages, base, len);
+	xdr->page_ptr = rqstp->rq_next_page - 1;
 }
 
 /**

@@ -14,11 +14,37 @@
 #include <linux/inet.h>
 #include <linux/llist.h>
 #include <crypto/hash.h>
+#include <trace/events/sock.h>
 
 #include "nvmet.h"
 
 #define NVMET_TCP_DEF_INLINE_DATA_SIZE	(4 * PAGE_SIZE)
 #define NVMET_TCP_MAXH2CDATA		0x400000 /* 16M arbitrary limit */
+
+static int param_store_val(const char *str, int *val, int min, int max)
+{
+	int ret, new_val;
+
+	ret = kstrtoint(str, 10, &new_val);
+	if (ret)
+		return -EINVAL;
+
+	if (new_val < min || new_val > max)
+		return -EINVAL;
+
+	*val = new_val;
+	return 0;
+}
+
+static int set_params(const char *str, const struct kernel_param *kp)
+{
+	return param_store_val(str, kp->arg, 0, INT_MAX);
+}
+
+static const struct kernel_param_ops set_param_ops = {
+	.set	= set_params,
+	.get	= param_get_int,
+};
 
 /* Define the socket priority to use for connections were it is desirable
  * that the NIC consider performing optimized packet processing or filtering.
@@ -27,8 +53,8 @@
  * values that may be unique for some NIC implementations.
  */
 static int so_priority;
-module_param(so_priority, int, 0644);
-MODULE_PARM_DESC(so_priority, "nvmet tcp socket optimize priority");
+device_param_cb(so_priority, &set_param_ops, &so_priority, 0644);
+MODULE_PARM_DESC(so_priority, "nvmet tcp socket optimize priority: Default 0");
 
 /* Define a time period (in usecs) that io_work() shall sample an activated
  * queue before determining it to be idle.  This optional module behavior
@@ -36,9 +62,10 @@ MODULE_PARM_DESC(so_priority, "nvmet tcp socket optimize priority");
  * using advanced interrupt moderation techniques.
  */
 static int idle_poll_period_usecs;
-module_param(idle_poll_period_usecs, int, 0644);
+device_param_cb(idle_poll_period_usecs, &set_param_ops,
+		&idle_poll_period_usecs, 0644);
 MODULE_PARM_DESC(idle_poll_period_usecs,
-		"nvmet tcp io_work poll till idle time period in usecs");
+		"nvmet tcp io_work poll till idle time period in usecs: Default 0");
 
 #define NVMET_TCP_RECV_BUDGET		8
 #define NVMET_TCP_SEND_BUDGET		8
@@ -322,7 +349,7 @@ static void nvmet_tcp_build_pdu_iovec(struct nvmet_tcp_cmd *cmd)
 	while (length) {
 		u32 iov_len = min_t(u32, length, sg->length - sg_offset);
 
-		bvec_set_page(iov, sg_page(sg), sg->length,
+		bvec_set_page(iov, sg_page(sg), iov_len,
 				sg->offset + sg_offset);
 
 		length -= iov_len;
@@ -1480,6 +1507,8 @@ static void nvmet_tcp_data_ready(struct sock *sk)
 {
 	struct nvmet_tcp_queue *queue;
 
+	trace_sk_data_ready(sk);
+
 	read_lock_bh(&sk->sk_callback_lock);
 	queue = sk->sk_user_data;
 	if (likely(queue))
@@ -1677,6 +1706,8 @@ static void nvmet_tcp_listen_data_ready(struct sock *sk)
 {
 	struct nvmet_tcp_port *port;
 
+	trace_sk_data_ready(sk);
+
 	read_lock_bh(&sk->sk_callback_lock);
 	port = sk->sk_user_data;
 	if (!port)
@@ -1864,7 +1895,6 @@ static int __init nvmet_tcp_init(void)
 	if (ret)
 		goto err;
 
-	mark_driver_unmaintained("NVMe/TCP Target");
 	return 0;
 err:
 	destroy_workqueue(nvmet_tcp_wq);

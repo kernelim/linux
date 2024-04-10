@@ -17,7 +17,7 @@ DIST_BRANCH ?= "main"
 
 # This is the dist release suffix used in the package release, eg. .fc34,
 # .el8 etc. In a different branch this may be set to a fixed value.
-DIST ?= .el9_3
+DIST ?= .el9_4
 
 # This is a human readable distribution variable that is used to determine the
 # OS version (fedora, centos, or rhel).

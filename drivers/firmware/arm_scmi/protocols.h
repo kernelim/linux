@@ -115,6 +115,7 @@ struct scmi_msg_hdr {
  *	    - SCMI_XFER_SENT_OK -> SCMI_XFER_RESP_OK [ -> SCMI_XFER_DRESP_OK ]
  *	    - SCMI_XFER_SENT_OK -> SCMI_XFER_DRESP_OK
  *	      (Missing synchronous response is assumed OK and ignored)
+ * @flags: Optional flags associated to this xfer.
  * @lock: A spinlock to protect state and busy fields.
  * @priv: A pointer for transport private usage.
  */
@@ -135,6 +136,12 @@ struct scmi_xfer {
 #define SCMI_XFER_RESP_OK	1
 #define SCMI_XFER_DRESP_OK	2
 	int state;
+#define SCMI_XFER_FLAG_IS_RAW	BIT(0)
+#define SCMI_XFER_IS_RAW(x)	((x)->flags & SCMI_XFER_FLAG_IS_RAW)
+#define SCMI_XFER_FLAG_CHAN_SET	BIT(1)
+#define SCMI_XFER_IS_CHAN_SET(x)	\
+	((x)->flags & SCMI_XFER_FLAG_CHAN_SET)
+	int flags;
 	/* A lock to protect state and busy fields */
 	spinlock_t lock;
 	void *priv;
@@ -215,6 +222,19 @@ struct scmi_iterator_ops {
 				struct scmi_iterator_state *st, void *priv);
 };
 
+struct scmi_fc_db_info {
+	int width;
+	u64 set;
+	u64 mask;
+	void __iomem *addr;
+};
+
+struct scmi_fc_info {
+	void __iomem *set_addr;
+	void __iomem *get_addr;
+	struct scmi_fc_db_info *set_db;
+};
+
 /**
  * struct scmi_proto_helpers_ops  - References to common protocol helpers
  * @extended_name_get: A common helper function to retrieve extended naming
@@ -230,6 +250,9 @@ struct scmi_iterator_ops {
  *			provided in @ops.
  * @iter_response_run: A common helper to trigger the run of a previously
  *		       initialized iterator.
+ * @fastchannel_init: A common helper used to initialize FC descriptors by
+ *		      gathering FC descriptions from the SCMI platform server.
+ * @fastchannel_db_ring: A common helper to ring a FC doorbell.
  */
 struct scmi_proto_helpers_ops {
 	int (*extended_name_get)(const struct scmi_protocol_handle *ph,
@@ -239,6 +262,12 @@ struct scmi_proto_helpers_ops {
 				    unsigned int max_resources, u8 msg_id,
 				    size_t tx_size, void *priv);
 	int (*iter_response_run)(void *iter);
+	void (*fastchannel_init)(const struct scmi_protocol_handle *ph,
+				 u8 describe_id, u32 message_id,
+				 u32 valid_size, u32 domain,
+				 void __iomem **p_addr,
+				 struct scmi_fc_db_info **p_db);
+	void (*fastchannel_db_ring)(struct scmi_fc_db_info *db);
 };
 
 /**
@@ -315,5 +344,6 @@ DECLARE_SCMI_REGISTER_UNREGISTER(reset);
 DECLARE_SCMI_REGISTER_UNREGISTER(sensors);
 DECLARE_SCMI_REGISTER_UNREGISTER(voltage);
 DECLARE_SCMI_REGISTER_UNREGISTER(system);
+DECLARE_SCMI_REGISTER_UNREGISTER(powercap);
 
 #endif /* _SCMI_PROTOCOLS_H */

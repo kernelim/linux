@@ -1370,7 +1370,7 @@ out:
 
 static inline unsigned long fuse_get_user_addr(const struct iov_iter *ii)
 {
-	return (unsigned long)ii->iov->iov_base + ii->iov_offset;
+	return (unsigned long)iter_iov(ii)->iov_base + ii->iov_offset;
 }
 
 static inline size_t fuse_get_frag_size(const struct iov_iter *ii,
@@ -1404,14 +1404,13 @@ static int fuse_get_user_pages(struct fuse_args_pages *ap, struct iov_iter *ii,
 	while (nbytes < *nbytesp && ap->num_pages < max_pages) {
 		unsigned npages;
 		size_t start;
-		ret = iov_iter_get_pages(ii, &ap->pages[ap->num_pages],
+		ret = iov_iter_get_pages2(ii, &ap->pages[ap->num_pages],
 					*nbytesp - nbytes,
 					max_pages - ap->num_pages,
 					&start);
 		if (ret < 0)
 			break;
 
-		iov_iter_advance(ii, ret);
 		nbytes += ret;
 
 		ret += start;
@@ -1469,7 +1468,7 @@ ssize_t fuse_direct_io(struct fuse_io_priv *io, struct iov_iter *iter,
 			inode_unlock(inode);
 	}
 
-	io->should_dirty = !write && iter_is_iovec(iter);
+	io->should_dirty = !write && user_backed_iter(iter);
 	while (count) {
 		ssize_t nres;
 		fl_owner_t owner = current->files;

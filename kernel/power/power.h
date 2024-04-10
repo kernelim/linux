@@ -173,11 +173,11 @@ extern int swsusp_swap_in_use(void);
 #define SF_HW_SIG		8
 
 /* kernel/power/hibernate.c */
-extern int swsusp_check(void);
+int swsusp_check(bool snapshot_test);
 extern void swsusp_free(void);
 extern int swsusp_read(unsigned int *flags_p);
 extern int swsusp_write(unsigned int flags);
-extern void swsusp_close(fmode_t);
+void swsusp_close(bool snapshot_test);
 #ifdef CONFIG_SUSPEND
 extern int swsusp_unmark(void);
 #endif

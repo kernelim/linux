@@ -52,6 +52,7 @@
 #include <asm/mce.h>
 #include <asm/msr.h>
 #include <asm/reboot.h>
+#include <asm/tdx.h>
 
 #include "internal.h"
 
@@ -156,27 +157,6 @@ void mce_unregister_decode_chain(struct notifier_block *nb)
 }
 EXPORT_SYMBOL_GPL(mce_unregister_decode_chain);
 
-u32 mca_msr_reg(int bank, enum mca_msr reg)
-{
-	if (mce_flags.smca) {
-		switch (reg) {
-		case MCA_CTL:	 return MSR_AMD64_SMCA_MCx_CTL(bank);
-		case MCA_ADDR:	 return MSR_AMD64_SMCA_MCx_ADDR(bank);
-		case MCA_MISC:	 return MSR_AMD64_SMCA_MCx_MISC(bank);
-		case MCA_STATUS: return MSR_AMD64_SMCA_MCx_STATUS(bank);
-		}
-	}
-
-	switch (reg) {
-	case MCA_CTL:	 return MSR_IA32_MCx_CTL(bank);
-	case MCA_ADDR:	 return MSR_IA32_MCx_ADDR(bank);
-	case MCA_MISC:	 return MSR_IA32_MCx_MISC(bank);
-	case MCA_STATUS: return MSR_IA32_MCx_STATUS(bank);
-	}
-
-	return 0;
-}
-
 static void __print_mce(struct mce *m)
 {
 	pr_emerg(HW_ERR "CPU %d: Machine Check%s: %Lx Bank %d: %016Lx\n",
@@ -249,11 +229,20 @@ static void wait_for_panic(void)
 	panic("Panicing machine check CPU died");
 }
 
+static const char *mce_dump_aux_info(struct mce *m)
+{
+	if (boot_cpu_has_bug(X86_BUG_TDX_PW_MCE))
+		return tdx_dump_mce_info(m);
+
+	return NULL;
+}
+
 static noinstr void mce_panic(const char *msg, struct mce *final, char *exp)
 {
 	struct llist_node *pending;
 	struct mce_evt_llist *l;
 	int apei_err = 0;
+	const char *memmsg;
 
 	/*
 	 * Allow instrumentation around external facilities usage. Not that it
@@ -304,6 +293,11 @@ static noinstr void mce_panic(const char *msg, struct mce *final, char *exp)
 	}
 	if (exp)
 		pr_emerg(HW_ERR "Machine check: %s\n", exp);
+
+	memmsg = mce_dump_aux_info(final);
+	if (memmsg)
+		pr_emerg(HW_ERR "Machine check: %s\n", memmsg);
+
 	if (!fake_panic) {
 		if (panic_timeout == 0)
 			panic_timeout = mca_cfg.panic_timeout;
@@ -789,7 +783,8 @@ EXPORT_SYMBOL_GPL(machine_check_poll);
  * the severity assessment code. Pretend that EIPV was set, and take the
  * ip/cs values from the pt_regs that mce_gather_info() ignored earlier.
  */
-static void quirk_sandybridge_ifu(int bank, struct mce *m, struct pt_regs *regs)
+static __always_inline void
+quirk_sandybridge_ifu(int bank, struct mce *m, struct pt_regs *regs)
 {
 	if (bank != 0)
 		return;
@@ -813,8 +808,8 @@ static void quirk_sandybridge_ifu(int bank, struct mce *m, struct pt_regs *regs)
  * Do a quick check if any of the events requires a panic.
  * This decides if we keep the events around or clear them.
  */
-static int mce_no_way_out(struct mce *m, char **msg, unsigned long *validp,
-			  struct pt_regs *regs)
+static __always_inline int mce_no_way_out(struct mce *m, char **msg, unsigned long *validp,
+					  struct pt_regs *regs)
 {
 	char *tmp = *msg;
 	int i;
@@ -824,7 +819,7 @@ static int mce_no_way_out(struct mce *m, char **msg, unsigned long *validp,
 		if (!(m->status & MCI_STATUS_VAL))
 			continue;
 
-		__set_bit(i, validp);
+		arch___set_bit(i, validp);
 		if (mce_flags.snb_ifu_quirk)
 			quirk_sandybridge_ifu(i, m, regs);
 
@@ -989,13 +984,13 @@ static noinstr int mce_start(int *no_way_out)
 	if (!timeout)
 		return ret;
 
-	atomic_add(*no_way_out, &global_nwo);
+	arch_atomic_add(*no_way_out, &global_nwo);
 	/*
 	 * Rely on the implied barrier below, such that global_nwo
 	 * is updated before mce_callin.
 	 */
-	order = atomic_inc_return(&mce_callin);
-	cpumask_clear_cpu(smp_processor_id(), &mce_missing_cpus);
+	order = arch_atomic_inc_return(&mce_callin);
+	arch_cpumask_clear_cpu(smp_processor_id(), &mce_missing_cpus);
 
 	/* Enable instrumentation around calls to external facilities */
 	instrumentation_begin();
@@ -1003,10 +998,10 @@ static noinstr int mce_start(int *no_way_out)
 	/*
 	 * Wait for everyone.
 	 */
-	while (atomic_read(&mce_callin) != num_online_cpus()) {
+	while (arch_atomic_read(&mce_callin) != num_online_cpus()) {
 		if (mce_timed_out(&timeout,
 				  "Timeout: Not all CPUs entered broadcast exception handler")) {
-			atomic_set(&global_nwo, 0);
+			arch_atomic_set(&global_nwo, 0);
 			goto out;
 		}
 		ndelay(SPINUNIT);
@@ -1021,7 +1016,7 @@ static noinstr int mce_start(int *no_way_out)
 		/*
 		 * Monarch: Starts executing now, the others wait.
 		 */
-		atomic_set(&mce_executing, 1);
+		arch_atomic_set(&mce_executing, 1);
 	} else {
 		/*
 		 * Subject: Now start the scanning loop one by one in
@@ -1029,10 +1024,10 @@ static noinstr int mce_start(int *no_way_out)
 		 * This way when there are any shared banks it will be
 		 * only seen by one CPU before cleared, avoiding duplicates.
 		 */
-		while (atomic_read(&mce_executing) < order) {
+		while (arch_atomic_read(&mce_executing) < order) {
 			if (mce_timed_out(&timeout,
 					  "Timeout: Subject CPUs unable to finish machine check processing")) {
-				atomic_set(&global_nwo, 0);
+				arch_atomic_set(&global_nwo, 0);
 				goto out;
 			}
 			ndelay(SPINUNIT);
@@ -1042,7 +1037,7 @@ static noinstr int mce_start(int *no_way_out)
 	/*
 	 * Cache the global no_way_out state.
 	 */
-	*no_way_out = atomic_read(&global_nwo);
+	*no_way_out = arch_atomic_read(&global_nwo);
 
 	ret = order;
 
@@ -1127,12 +1122,12 @@ out:
 	return ret;
 }
 
-static void mce_clear_state(unsigned long *toclear)
+static __always_inline void mce_clear_state(unsigned long *toclear)
 {
 	int i;
 
 	for (i = 0; i < this_cpu_read(mce_num_banks); i++) {
-		if (test_bit(i, toclear))
+		if (arch_test_bit(i, toclear))
 			mce_wrmsrl(mca_msr_reg(i, MCA_STATUS), 0);
 	}
 }
@@ -1182,8 +1177,8 @@ __mc_scan_banks(struct mce *m, struct pt_regs *regs, struct mce *final,
 	int severity, i, taint = 0;
 
 	for (i = 0; i < this_cpu_read(mce_num_banks); i++) {
-		__clear_bit(i, toclear);
-		if (!test_bit(i, valid_banks))
+		arch___clear_bit(i, toclear);
+		if (!arch_test_bit(i, valid_banks))
 			continue;
 
 		if (!mce_banks[i].ctl)
@@ -1218,7 +1213,7 @@ __mc_scan_banks(struct mce *m, struct pt_regs *regs, struct mce *final,
 		     severity == MCE_UCNA_SEVERITY) && !no_way_out)
 			continue;
 
-		__set_bit(i, toclear);
+		arch___set_bit(i, toclear);
 
 		/* Machine check event was not enabled. Clear, but ignore. */
 		if (severity == MCE_NO_SEVERITY)
@@ -1567,6 +1562,13 @@ static void __start_timer(struct timer_list *t, unsigned long interval)
 	local_irq_restore(flags);
 }
 
+static void mc_poll_banks_default(void)
+{
+	machine_check_poll(0, this_cpu_ptr(&mce_poll_banks));
+}
+
+void (*mc_poll_banks)(void) = mc_poll_banks_default;
+
 static void mce_timer_fn(struct timer_list *t)
 {
 	struct timer_list *cpu_t = this_cpu_ptr(&mce_timer);
@@ -1577,7 +1579,7 @@ static void mce_timer_fn(struct timer_list *t)
 	iv = __this_cpu_read(mce_next_interval);
 
 	if (mce_available(this_cpu_ptr(&cpu_info))) {
-		machine_check_poll(0, this_cpu_ptr(&mce_poll_banks));
+		mc_poll_banks();
 
 		if (mce_intel_cmci_poll()) {
 			iv = mce_adjust_timer(iv);
@@ -2307,6 +2309,7 @@ static void mce_restart(void)
 {
 	mce_timer_delete_all();
 	on_each_cpu(mce_cpu_restart, NULL, 1);
+	mce_schedule_work();
 }
 
 /* Toggle features for corrected errors */

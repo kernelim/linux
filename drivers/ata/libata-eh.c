@@ -78,12 +78,12 @@ enum {
  * are mostly for error handling, hotplug and those outlier devices that
  * take an exceptionally long time to recover from reset.
  */
-static const unsigned long ata_eh_reset_timeouts[] = {
+static const unsigned int ata_eh_reset_timeouts[] = {
 	10000,	/* most drives spin up by 10sec */
 	10000,	/* > 99% working drives spin up before 20sec */
 	35000,	/* give > 30 secs of idleness for outlier devices */
 	 5000,	/* and sweet one last chance */
-	ULONG_MAX, /* > 1 min has elapsed, give up */
+	UINT_MAX, /* > 1 min has elapsed, give up */
 };
 
 static const unsigned int ata_eh_identify_timeouts[] = {
@@ -1817,9 +1817,7 @@ static unsigned int ata_eh_speed_down(struct ata_device *dev,
 	verdict = ata_eh_speed_down_verdict(dev);
 
 	/* turn off NCQ? */
-	if ((verdict & ATA_EH_SPDN_NCQ_OFF) &&
-	    (dev->flags & (ATA_DFLAG_PIO | ATA_DFLAG_NCQ |
-			   ATA_DFLAG_NCQ_OFF)) == ATA_DFLAG_NCQ) {
+	if ((verdict & ATA_EH_SPDN_NCQ_OFF) && ata_ncq_enabled(dev)) {
 		dev->flags |= ATA_DFLAG_NCQ_OFF;
 		ata_dev_warn(dev, "NCQ disabled due to excessive errors\n");
 		goto done;
@@ -2225,7 +2223,7 @@ static void ata_eh_link_report(struct ata_link *link)
 	struct ata_eh_context *ehc = &link->eh_context;
 	struct ata_queued_cmd *qc;
 	const char *frozen, *desc;
-	char tries_buf[6] = "";
+	char tries_buf[16] = "";
 	int tag, nr_failed = 0;
 
 	if (ehc->i.flags & ATA_EHI_QUIET)
@@ -2469,7 +2467,7 @@ int ata_eh_reset(struct ata_link *link, int classify,
 	/*
 	 * Prepare to reset
 	 */
-	while (ata_eh_reset_timeouts[max_tries] != ULONG_MAX)
+	while (ata_eh_reset_timeouts[max_tries] != UINT_MAX)
 		max_tries++;
 	if (link->flags & ATA_LFLAG_RST_ONCE)
 		max_tries = 1;
@@ -2716,22 +2714,12 @@ int ata_eh_reset(struct ata_link *link, int classify,
 		}
 	}
 
-	/*
-	 * Some controllers can't be frozen very well and may set spurious
-	 * error conditions during reset.  Clear accumulated error
-	 * information and re-thaw the port if frozen.  As reset is the
-	 * final recovery action and we cross check link onlineness against
-	 * device classification later, no hotplug event is lost by this.
-	 */
+	/* clear cached SError */
 	spin_lock_irqsave(link->ap->lock, flags);
-	memset(&link->eh_info, 0, sizeof(link->eh_info));
+	link->eh_info.serror = 0;
 	if (slave)
-		memset(&slave->eh_info, 0, sizeof(link->eh_info));
-	ap->pflags &= ~ATA_PFLAG_EH_PENDING;
+		slave->eh_info.serror = 0;
 	spin_unlock_irqrestore(link->ap->lock, flags);
-
-	if (ata_port_is_frozen(ap))
-		ata_eh_thaw_port(ap);
 
 	/*
 	 * Make sure onlineness and classification result correspond.
@@ -2985,7 +2973,7 @@ static int ata_eh_revalidate_and_attach(struct ata_link *link,
 			ehc->i.flags |= ATA_EHI_SETMODE;
 
 			/* schedule the scsi_rescan_device() here */
-			schedule_work(&(ap->scsi_rescan_task));
+			schedule_delayed_work(&ap->scsi_rescan_task, 0);
 		} else if (dev->class == ATA_DEV_UNKNOWN &&
 			   ehc->tries[dev->devno] &&
 			   ata_class_enabled(ehc->classes[dev->devno])) {
@@ -3814,16 +3802,29 @@ void ata_eh_finish(struct ata_port *ap)
 			 * generate sense data in this function,
 			 * considering both err_mask and tf.
 			 */
-			if (qc->flags & ATA_QCFLAG_RETRY)
+			if (qc->flags & ATA_QCFLAG_RETRY) {
+				/*
+				 * Since qc->err_mask is set, ata_eh_qc_retry()
+				 * will not increment scmd->allowed, so upper
+				 * layer will only retry the command if it has
+				 * not already been retried too many times.
+				 */
 				ata_eh_qc_retry(qc);
-			else
+			} else {
 				ata_eh_qc_complete(qc);
+			}
 		} else {
 			if (qc->flags & ATA_QCFLAG_SENSE_VALID) {
 				ata_eh_qc_complete(qc);
 			} else {
 				/* feed zero TF to sense generation */
 				memset(&qc->result_tf, 0, sizeof(qc->result_tf));
+				/*
+				 * Since qc->err_mask is not set,
+				 * ata_eh_qc_retry() will increment
+				 * scmd->allowed, so upper layer is guaranteed
+				 * to retry the command.
+				 */
 				ata_eh_qc_retry(qc);
 			}
 		}

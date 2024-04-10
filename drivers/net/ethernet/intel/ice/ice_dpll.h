@@ -6,7 +6,6 @@
 
 #include "ice.h"
 
-#define ICE_DPLL_PRIO_MAX	0xF
 #define ICE_DPLL_RCLK_NUM_MAX	4
 
 /** ice_dpll_pin - store info about pins
@@ -103,8 +102,12 @@ struct ice_dplls {
 	s32 output_phase_adj_max;
 };
 
+#if IS_ENABLED(CONFIG_PTP_1588_CLOCK)
 void ice_dpll_init(struct ice_pf *pf);
-
 void ice_dpll_deinit(struct ice_pf *pf);
+#else
+static inline void ice_dpll_init(struct ice_pf *pf) { }
+static inline void ice_dpll_deinit(struct ice_pf *pf) { }
+#endif
 
 #endif

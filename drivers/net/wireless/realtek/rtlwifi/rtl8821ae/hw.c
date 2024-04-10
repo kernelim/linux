@@ -546,14 +546,9 @@ void rtl8821ae_set_hw_reg(struct ieee80211_hw *hw, u8 variable, u8 *val)
 		break;
 	case HW_VAR_AMPDU_MIN_SPACE:{
 		u8 min_spacing_to_set;
-		u8 sec_min_space;
 
 		min_spacing_to_set = *((u8 *)val);
 		if (min_spacing_to_set <= 7) {
-			sec_min_space = 0;
-
-			if (min_spacing_to_set < sec_min_space)
-				min_spacing_to_set = sec_min_space;
 
 			mac->min_space_cfg = ((mac->min_space_cfg &
 					       0xf8) |
@@ -869,7 +864,7 @@ static void _rtl8821ae_gen_refresh_led_state(struct ieee80211_hw *hw)
 {
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 	struct rtl_ps_ctl *ppsc = rtl_psc(rtl_priv(hw));
-	struct rtl_led *pled0 = &rtlpriv->ledctl.sw_led0;
+	enum rtl_led_pin pin0 = rtlpriv->ledctl.sw_led0;
 	struct rtl_hal *rtlhal = rtl_hal(rtl_priv(hw));
 
 	if (rtlpriv->rtlhal.up_first_time)
@@ -877,19 +872,19 @@ static void _rtl8821ae_gen_refresh_led_state(struct ieee80211_hw *hw)
 
 	if (ppsc->rfoff_reason == RF_CHANGE_BY_IPS)
 		if (rtlhal->hw_type == HARDWARE_TYPE_RTL8812AE)
-			rtl8812ae_sw_led_on(hw, pled0);
+			rtl8812ae_sw_led_on(hw, pin0);
 		else
-			rtl8821ae_sw_led_on(hw, pled0);
+			rtl8821ae_sw_led_on(hw, pin0);
 	else if (ppsc->rfoff_reason == RF_CHANGE_BY_INIT)
 		if (rtlhal->hw_type == HARDWARE_TYPE_RTL8812AE)
-			rtl8812ae_sw_led_on(hw, pled0);
+			rtl8812ae_sw_led_on(hw, pin0);
 		else
-			rtl8821ae_sw_led_on(hw, pled0);
+			rtl8821ae_sw_led_on(hw, pin0);
 	else
 		if (rtlhal->hw_type == HARDWARE_TYPE_RTL8812AE)
-			rtl8812ae_sw_led_off(hw, pled0);
+			rtl8812ae_sw_led_off(hw, pin0);
 		else
-			rtl8821ae_sw_led_off(hw, pled0);
+			rtl8821ae_sw_led_off(hw, pin0);
 }
 
 static bool _rtl8821ae_init_mac(struct ieee80211_hw *hw)

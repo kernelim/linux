@@ -1281,8 +1281,6 @@ static int fr_ioctl(struct net_device *dev, struct if_settings *ifs)
 
 static int __init hdlc_fr_init(void)
 {
-	mark_driver_unmaintained(THIS_MODULE->name);
-
 	register_hdlc_protocol(&proto);
 	return 0;
 }

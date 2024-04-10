@@ -53,6 +53,8 @@
 #include <net/sctp/sctp.h>
 #include <net/ipv6.h>
 
+#include <trace/events/sock.h>
+
 #include "dlm_internal.h"
 #include "lowcomms.h"
 #include "midcomms.h"
@@ -468,6 +470,8 @@ static void lowcomms_data_ready(struct sock *sk)
 {
 	struct connection *con;
 
+	trace_sk_data_ready(sk);
+
 	read_lock_bh(&sk->sk_callback_lock);
 	con = sock2con(sk);
 	if (con && !test_and_set_bit(CF_READ_PENDING, &con->flags))
@@ -479,6 +483,8 @@ static void lowcomms_listen_data_ready(struct sock *sk)
 {
 	if (!dlm_allow_conn)
 		return;
+
+	trace_sk_data_ready(sk);
 
 	queue_work(recv_workqueue, &listen_con.rwork);
 }

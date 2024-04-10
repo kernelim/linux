@@ -10,6 +10,7 @@
 #include <linux/math64.h>
 #include <linux/export.h>
 #include <linux/ctype.h>
+#include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/limits.h>
@@ -714,6 +715,21 @@ char *kstrdup_quotable_file(struct file *file, gfp_t gfp)
 }
 EXPORT_SYMBOL_GPL(kstrdup_quotable_file);
 
+/*
+ * Returns duplicate string in which the @old characters are replaced by @new.
+ */
+char *kstrdup_and_replace(const char *src, char old, char new, gfp_t gfp)
+{
+	char *dst;
+
+	dst = kstrdup(src, gfp);
+	if (!dst)
+		return NULL;
+
+	return strreplace(dst, old, new);
+}
+EXPORT_SYMBOL_GPL(kstrdup_and_replace);
+
 /**
  * kasprintf_strarray - allocate and fill array of sequential strings
  * @gfp: flags for the slab allocator
@@ -769,6 +785,39 @@ void kfree_strarray(char **array, size_t n)
 	kfree(array);
 }
 EXPORT_SYMBOL_GPL(kfree_strarray);
+
+struct strarray {
+	char **array;
+	size_t n;
+};
+
+static void devm_kfree_strarray(struct device *dev, void *res)
+{
+	struct strarray *array = res;
+
+	kfree_strarray(array->array, array->n);
+}
+
+char **devm_kasprintf_strarray(struct device *dev, const char *prefix, size_t n)
+{
+	struct strarray *ptr;
+
+	ptr = devres_alloc(devm_kfree_strarray, sizeof(*ptr), GFP_KERNEL);
+	if (!ptr)
+		return ERR_PTR(-ENOMEM);
+
+	ptr->array = kasprintf_strarray(GFP_KERNEL, prefix, n);
+	if (!ptr->array) {
+		devres_free(ptr);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	ptr->n = n;
+	devres_add(dev, ptr);
+
+	return ptr->array;
+}
+EXPORT_SYMBOL_GPL(devm_kasprintf_strarray);
 
 /**
  * strscpy_pad() - Copy a C-string into a sized buffer

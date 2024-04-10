@@ -55,9 +55,9 @@ static int ulpi_match(struct device *dev, struct device_driver *driver)
 	return 0;
 }
 
-static int ulpi_uevent(struct device *dev, struct kobj_uevent_env *env)
+static int ulpi_uevent(const struct device *dev, struct kobj_uevent_env *env)
 {
-	struct ulpi *ulpi = to_ulpi_dev(dev);
+	const struct ulpi *ulpi = to_ulpi_dev(dev);
 	int ret;
 
 	ret = of_device_uevent_modalias(dev, env);
@@ -229,7 +229,7 @@ static int ulpi_read_id(struct ulpi *ulpi)
 	request_module("ulpi:v%04xp%04x", ulpi->id.vendor, ulpi->id.product);
 	return 0;
 err:
-	of_device_request_module(&ulpi->dev);
+	of_request_module(ulpi->dev.of_node);
 	return 0;
 }
 

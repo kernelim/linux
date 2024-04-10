@@ -194,7 +194,7 @@ static ssize_t new_id_store(struct device_driver *driver, const char *buf,
 	u32 vendor, device, subvendor = PCI_ANY_ID,
 		subdevice = PCI_ANY_ID, class = 0, class_mask = 0;
 	unsigned long driver_data = 0;
-	int fields = 0;
+	int fields;
 	int retval = 0;
 
 	fields = sscanf(buf, "%x %x %x %x %x %x %lx",
@@ -261,7 +261,7 @@ static ssize_t remove_id_store(struct device_driver *driver, const char *buf,
 	struct pci_driver *pdrv = to_pci_driver(driver);
 	u32 vendor, device, subvendor = PCI_ANY_ID,
 		subdevice = PCI_ANY_ID, class = 0, class_mask = 0;
-	int fields = 0;
+	int fields;
 	size_t retval = -ENODEV;
 
 	fields = sscanf(buf, "%x %x %x %x %x %x",
@@ -297,84 +297,6 @@ static struct attribute *pci_drv_attrs[] = {
 };
 ATTRIBUTE_GROUPS(pci_drv);
 
-#ifdef CONFIG_RHEL_DIFFERENCES
-/**
- * pci_hw_deprecated - Tell if a PCI device is deprecated
- * @ids: array of PCI device id structures to search in
- * @dev: the PCI device structure to match against
- *
- * Used by a driver to check whether this device is in its list of deprecated
- * devices.  Returns the matching pci_device_id structure or %NULL if there is
- * no match.
- *
- * Reserved for Internal Red Hat use only.
- */
-const struct pci_device_id *pci_hw_deprecated(const struct pci_device_id *ids,
-					      struct pci_dev *dev)
-{
-	const struct pci_device_id *ret = pci_match_id(ids, dev);
-
-	if (!ret)
-		return NULL;
-
-	mark_hardware_deprecated(dev_driver_string(&dev->dev), "%04X:%04X @ %s",
-				 dev->device, dev->vendor, pci_name(dev));
-	return ret;
-}
-EXPORT_SYMBOL(pci_hw_deprecated);
-
-/**
- * pci_hw_unmaintained - Tell if a PCI device is unmaintained
- * @ids: array of PCI device id structures to search in
- * @dev: the PCI device structure to match against
- *
- * Used by a driver to check whether this device is in its list of unmaintained
- * devices.  Returns the matching pci_device_id structure or %NULL if there is
- * no match.
- *
- * Reserved for Internal Red Hat use only.
- */
-const struct pci_device_id *pci_hw_unmaintained(const struct pci_device_id *ids,
-						struct pci_dev *dev)
-{
-	const struct pci_device_id *ret = pci_match_id(ids, dev);
-
-	if (!ret)
-		return NULL;
-
-	mark_hardware_unmaintained(dev_driver_string(&dev->dev), "%04X:%04X @ %s",
-				   dev->device, dev->vendor, pci_name(dev));
-	return ret;
-}
-EXPORT_SYMBOL(pci_hw_unmaintained);
-
-/**
- * pci_hw_disabled - Tell if a PCI device is disabled
- * @ids: array of PCI device id structures to search in
- * @dev: the PCI device structure to match against
- *
- * Used by a driver to check whether this device is in its list of disabled
- * devices.  Returns the matching pci_device_id structure or %NULL if there is
- * no match.
- *
- * Reserved for Internal Red Hat use only.
- */
-const struct pci_device_id *pci_hw_disabled(const struct pci_device_id *ids,
-					    struct pci_dev *dev)
-{
-	const struct pci_device_id *ret = pci_match_id(ids, dev);
-
-	if (!ret)
-		return NULL;
-
-	mark_hardware_disabled(dev_driver_string(&dev->dev), "%04X:%04X @ %s",
-				   dev->device, dev->vendor, pci_name(dev));
-	return ret;
-}
-EXPORT_SYMBOL(pci_hw_disabled);
-
-#endif
-
 struct drv_dev_and_id {
 	struct pci_driver *drv;
 	struct pci_dev *dev;
@@ -400,6 +322,12 @@ static long local_pci_probe(void *_ddi)
 	 */
 	pm_runtime_get_sync(dev);
 	pci_dev->driver = pci_drv;
+
+#ifdef CONFIG_RHEL_DIFFERENCES
+	if (pci_rh_check_status(pci_dev))
+		return -EACCES;
+#endif
+
 	rc = pci_drv->probe(pci_dev, ddi->id);
 	if (!rc)
 		return rc;
@@ -651,7 +579,20 @@ static void pci_pm_default_resume_early(struct pci_dev *pci_dev)
 
 static void pci_pm_bridge_power_up_actions(struct pci_dev *pci_dev)
 {
-	pci_bridge_wait_for_secondary_bus(pci_dev, "resume", PCI_RESET_WAIT);
+	int ret;
+
+	ret = pci_bridge_wait_for_secondary_bus(pci_dev, "resume");
+	if (ret) {
+		/*
+		 * The downstream link failed to come up, so mark the
+		 * devices below as disconnected to make sure we don't
+		 * attempt to resume them.
+		 */
+		pci_walk_bus(pci_dev->subordinate, pci_dev_set_disconnected,
+			     NULL);
+		return;
+	}
+
 	/*
 	 * When powering on a bridge from D3cold, the whole hierarchy may be
 	 * powered on into D0uninitialized state, resume them to give them a
@@ -1552,14 +1493,15 @@ static struct pci_driver pci_compat_driver = {
  */
 struct pci_driver *pci_dev_driver(const struct pci_dev *dev)
 {
+	int i;
+
 	if (dev->driver)
 		return dev->driver;
-	else {
-		int i;
-		for (i = 0; i <= PCI_ROM_RESOURCE; i++)
-			if (dev->resource[i].flags & IORESOURCE_BUSY)
-				return &pci_compat_driver;
-	}
+
+	for (i = 0; i <= PCI_ROM_RESOURCE; i++)
+		if (dev->resource[i].flags & IORESOURCE_BUSY)
+			return &pci_compat_driver;
+
 	return NULL;
 }
 EXPORT_SYMBOL(pci_dev_driver);
@@ -1624,9 +1566,9 @@ void pci_dev_put(struct pci_dev *dev)
 }
 EXPORT_SYMBOL(pci_dev_put);
 
-static int pci_uevent(struct device *dev, struct kobj_uevent_env *env)
+static int pci_uevent(const struct device *dev, struct kobj_uevent_env *env)
 {
-	struct pci_dev *pdev;
+	const struct pci_dev *pdev;
 
 	if (!dev)
 		return -ENODEV;
@@ -1783,7 +1725,6 @@ struct bus_type pcie_port_bus_type = {
 	.name		= "pci_express",
 	.match		= pcie_port_bus_match,
 };
-EXPORT_SYMBOL_GPL(pcie_port_bus_type);
 #endif
 
 static int __init pci_driver_init(void)

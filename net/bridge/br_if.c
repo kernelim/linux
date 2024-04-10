@@ -166,8 +166,9 @@ void br_manage_promisc(struct net_bridge *br)
 			 * This lets us disable promiscuous mode and write
 			 * this config to hw.
 			 */
-			if (br->auto_cnt == 0 ||
-			    (br->auto_cnt == 1 && br_auto_port(p)))
+			if ((p->dev->priv_flags & IFF_UNICAST_FLT) &&
+			    (br->auto_cnt == 0 ||
+			     (br->auto_cnt == 1 && br_auto_port(p))))
 				br_port_clear_promisc(p);
 			else
 				br_port_set_promisc(p);
@@ -262,7 +263,7 @@ static void release_nbp(struct kobject *kobj)
 	kfree(p);
 }
 
-static void brport_get_ownership(struct kobject *kobj, kuid_t *uid, kgid_t *gid)
+static void brport_get_ownership(const struct kobject *kobj, kuid_t *uid, kgid_t *gid)
 {
 	struct net_bridge_port *p = kobj_to_brport(kobj);
 
@@ -759,7 +760,7 @@ void br_port_flags_change(struct net_bridge_port *p, unsigned long mask)
 	if (mask & BR_AUTO_MASK)
 		nbp_update_port_count(br);
 
-	if (mask & BR_NEIGH_SUPPRESS)
+	if (mask & (BR_NEIGH_SUPPRESS | BR_NEIGH_VLAN_SUPPRESS))
 		br_recalculate_neigh_suppress_enabled(br);
 }
 

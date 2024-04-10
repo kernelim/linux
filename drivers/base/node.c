@@ -521,7 +521,7 @@ static ssize_t node_read_vmstat(struct device *dev,
 	int i;
 	int len = 0;
 
-	for (i = 0; i < NR_VM_ZONE_STAT_ITEMS_ACTUAL; i++)
+	for (i = 0; i < NR_VM_ZONE_STAT_ITEMS; i++)
 		len += sysfs_emit_at(buf, len, "%s %lu\n",
 				     zone_stat_name(i),
 				     sum_zone_node_page_state(nid, i));

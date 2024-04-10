@@ -270,13 +270,14 @@ static int ray_probe(struct pcmcia_device *p_dev)
 {
 	ray_dev_t *local;
 	struct net_device *dev;
+	int ret;
 
 	dev_dbg(&p_dev->dev, "ray_attach()\n");
 
 	/* Allocate space for private device-specific data */
 	dev = alloc_etherdev(sizeof(ray_dev_t));
 	if (!dev)
-		goto fail_alloc_dev;
+		return -ENOMEM;
 
 	local = netdev_priv(dev);
 	local->finder = p_dev;
@@ -313,16 +314,20 @@ static int ray_probe(struct pcmcia_device *p_dev)
 	timer_setup(&local->timer, NULL, 0);
 
 	this_device = p_dev;
-	return ray_config(p_dev);
+	ret = ray_config(p_dev);
+	if (ret)
+		goto err_free_dev;
 
-fail_alloc_dev:
-	return -ENOMEM;
-} /* ray_attach */
+	return 0;
+
+err_free_dev:
+	free_netdev(dev);
+	return ret;
+}
 
 static void ray_detach(struct pcmcia_device *link)
 {
 	struct net_device *dev;
-	ray_dev_t *local;
 
 	dev_dbg(&link->dev, "ray_detach\n");
 
@@ -330,9 +335,6 @@ static void ray_detach(struct pcmcia_device *link)
 	dev = link->priv;
 
 	ray_release(link);
-
-	local = netdev_priv(dev);
-	del_timer_sync(&local->timer);
 
 	if (link->priv) {
 		unregister_netdev(dev);
@@ -346,7 +348,7 @@ static int ray_config(struct pcmcia_device *link)
 {
 	int ret = 0;
 	int i;
-	struct net_device *dev = (struct net_device *)link->priv;
+	struct net_device *dev = link->priv;
 	ray_dev_t *local = netdev_priv(dev);
 
 	dev_dbg(&link->dev, "ray_config\n");
@@ -625,7 +627,7 @@ static void init_startup_params(ray_dev_t *local)
 	local->sparm.b4.a_acting_as_ap_status = TYPE_STA;
 
 	if (essid != NULL)
-		strncpy(local->sparm.b4.a_current_ess_id, essid, ESSID_SIZE);
+		strscpy(local->sparm.b4.a_current_ess_id, essid, ESSID_SIZE);
 } /* init_startup_params */
 
 /*===========================================================================*/
@@ -734,11 +736,14 @@ static void ray_release(struct pcmcia_device *link)
 
 	dev_dbg(&link->dev, "ray_release\n");
 
-	del_timer(&local->timer);
+	del_timer_sync(&local->timer);
 
-	iounmap(local->sram);
-	iounmap(local->rmem);
-	iounmap(local->amem);
+	if (local->sram)
+		iounmap(local->sram);
+	if (local->rmem)
+		iounmap(local->rmem);
+	if (local->amem)
+		iounmap(local->amem);
 	pcmcia_disable_device(link);
 
 	dev_dbg(&link->dev, "ray_release ending\n");
@@ -1825,7 +1830,7 @@ static void set_multicast_list(struct net_device *dev)
 =============================================================================*/
 static irqreturn_t ray_interrupt(int irq, void *dev_id)
 {
-	struct net_device *dev = (struct net_device *)dev_id;
+	struct net_device *dev = dev_id;
 	struct pcmcia_device *link;
 	ray_dev_t *local;
 	struct ccs __iomem *pccs;
@@ -2562,7 +2567,7 @@ static int ray_cs_proc_show(struct seq_file *m, void *v)
 	link = this_device;
 	if (!link)
 		return 0;
-	dev = (struct net_device *)link->priv;
+	dev = link->priv;
 	if (!dev)
 		return 0;
 	local = netdev_priv(dev);

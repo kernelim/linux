@@ -2683,7 +2683,7 @@ put_resources:
 	return err;
 }
 
-static int tegra_pcie_remove(struct platform_device *pdev)
+static void tegra_pcie_remove(struct platform_device *pdev)
 {
 	struct tegra_pcie *pcie = platform_get_drvdata(pdev);
 	struct pci_host_bridge *host = pci_host_bridge_from_priv(pcie);
@@ -2704,8 +2704,6 @@ static int tegra_pcie_remove(struct platform_device *pdev)
 
 	list_for_each_entry_safe(port, tmp, &pcie->ports, list)
 		tegra_pcie_port_free(port);
-
-	return 0;
 }
 
 static int tegra_pcie_pm_suspend(struct device *dev)
@@ -2811,6 +2809,6 @@ static struct platform_driver tegra_pcie_driver = {
 		.pm = &tegra_pcie_pm_ops,
 	},
 	.probe = tegra_pcie_probe,
-	.remove = tegra_pcie_remove,
+	.remove_new = tegra_pcie_remove,
 };
 module_platform_driver(tegra_pcie_driver);

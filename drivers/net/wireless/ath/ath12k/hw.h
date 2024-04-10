@@ -184,6 +184,14 @@ struct ath12k_hw_params {
 			 struct ath12k_wmi_resource_config_arg *config);
 
 	const struct hal_ops *hal_ops;
+
+	u64 qmi_cnss_feature_bitmap;
+
+	u32 rfkill_pin;
+	u32 rfkill_cfg;
+	u32 rfkill_on_level;
+
+	u32 rddm_size;
 };
 
 struct ath12k_hw_ops {

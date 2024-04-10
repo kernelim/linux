@@ -40,7 +40,6 @@ TEST_PROGS += stress_reuseport_listen.sh
 TEST_PROGS += l2_tos_ttl_inherit.sh
 TEST_PROGS += rps_default_mask.sh
 TEST_PROGS += big_tcp.sh
-TEST_PROGS_EXTENDED := in_netns.sh setup_loopback.sh setup_veth.sh
 TEST_GEN_FILES =  socket nettest
 TEST_GEN_FILES += psock_fanout psock_tpacket msg_zerocopy reuseport_addr_any
 TEST_GEN_FILES += tcp_mmap tcp_inq psock_snd txring_overwrite
@@ -58,8 +57,10 @@ TEST_GEN_FILES += cmsg_so_mark
 TEST_GEN_FILES += stress_reuseport_listen
 TEST_GEN_FILES += io_uring_zerocopy_tx
 TEST_PROGS += io_uring_zerocopy_tx.sh
+TEST_PROGS += test_bridge_neigh_suppress.sh
 
 TEST_FILES := settings
+TEST_FILES += in_netns.sh net_helper.sh setup_loopback.sh setup_veth.sh
 
 KSFT_KHDR_INSTALL := 1
 include ../lib.mk

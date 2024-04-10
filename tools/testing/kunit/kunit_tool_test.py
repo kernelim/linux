@@ -80,6 +80,13 @@ class KconfigTest(unittest.TestCase):
 		self.assertEqual(actual_kconfig, expected_kconfig)
 
 class KUnitParserTest(unittest.TestCase):
+	def setUp(self):
+		self.print_mock = mock.patch('kunit_printer.Printer.print').start()
+		self.addCleanup(mock.patch.stopall)
+
+	def noPrintCallContains(self, substr: str):
+		for call in self.print_mock.mock_calls:
+			self.assertNotIn(substr, call.args[0])
 
 	def assertContains(self, needle: str, haystack: kunit_parser.LineStream):
 		# Clone the iterator so we can print the contents on failure.
@@ -214,7 +221,7 @@ class KUnitParserTest(unittest.TestCase):
 		with open(crash_log) as file:
 			result = kunit_parser.parse_run_tests(
 				kunit_parser.extract_tap_lines(file.readlines()))
-		print_mock.assert_any_call(StrContains('could not find any KTAP output!'))
+		print_mock.assert_any_call(StrContains('Could not find any KTAP output.'))
 		print_mock.stop()
 		self.assertEqual(0, len(result.subtests))
 
@@ -308,6 +315,55 @@ class KUnitParserTest(unittest.TestCase):
 				kunit_parser.TestStatus.SUCCESS,
 				result.status)
 			self.assertEqual('kunit-resource-test', result.subtests[0].name)
+
+	def test_summarize_failures(self):
+		output = """
+		KTAP version 1
+		1..2
+			# Subtest: all_failed_suite
+			1..2
+			not ok 1 - test1
+			not ok 2 - test2
+		not ok 1 - all_failed_suite
+			# Subtest: some_failed_suite
+			1..2
+			ok 1 - test1
+			not ok 2 - test2
+		not ok 1 - some_failed_suite
+		"""
+		result = kunit_parser.parse_run_tests(output.splitlines())
+		self.assertEqual(kunit_parser.TestStatus.FAILURE, result.status)
+
+		self.assertEqual(kunit_parser._summarize_failed_tests(result),
+			'Failures: all_failed_suite, some_failed_suite.test2')
+
+	def test_ktap_format(self):
+		ktap_log = test_data_path('test_parse_ktap_output.log')
+		with open(ktap_log) as file:
+			result = kunit_parser.parse_run_tests(file.readlines())
+		self.assertEqual(result.counts, kunit_parser.TestCounts(passed=3))
+		self.assertEqual('suite', result.subtests[0].name)
+		self.assertEqual('case_1', result.subtests[0].subtests[0].name)
+		self.assertEqual('case_2', result.subtests[0].subtests[1].name)
+
+	def test_parse_subtest_header(self):
+		ktap_log = test_data_path('test_parse_subtest_header.log')
+		with open(ktap_log) as file:
+			result = kunit_parser.parse_run_tests(file.readlines())
+		self.print_mock.assert_any_call(StrContains('suite (1 subtest)'))
+
+	def test_show_test_output_on_failure(self):
+		output = """
+		KTAP version 1
+		1..1
+		  Test output.
+		not ok 1 test1
+		"""
+		result = kunit_parser.parse_run_tests(output.splitlines())
+		self.assertEqual(kunit_parser.TestStatus.FAILURE, result.status)
+
+		self.print_mock.assert_any_call(StrContains('Test output.'))
+		self.noPrintCallContains('not ok 1 test1')
 
 def line_stream_from_strs(strs: Iterable[str]) -> kunit_parser.LineStream:
 	return kunit_parser.LineStream(enumerate(strs, start=1))
@@ -485,6 +541,9 @@ class LinuxSourceTreeTest(unittest.TestCase):
 
 
 class KUnitJsonTest(unittest.TestCase):
+	def setUp(self):
+		self.print_mock = mock.patch('kunit_printer.Printer.print').start()
+		self.addCleanup(mock.patch.stopall)
 
 	def _json_for(self, log_file):
 		with open(test_data_path(log_file)) as file:
@@ -581,7 +640,7 @@ class KUnitMainTest(unittest.TestCase):
 		self.assertEqual(e.exception.code, 1)
 		self.assertEqual(self.linux_source_mock.build_reconfig.call_count, 1)
 		self.assertEqual(self.linux_source_mock.run_kernel.call_count, 1)
-		self.print_mock.assert_any_call(StrContains('could not find any KTAP output!'))
+		self.print_mock.assert_any_call(StrContains('Could not find any KTAP output.'))
 
 	def test_exec_no_tests(self):
 		self.linux_source_mock.run_kernel = mock.Mock(return_value=['TAP version 14', '1..0'])

@@ -6,6 +6,9 @@ inspections:
     kmidiff: off
     upstream: off
     subpackages: off
+    license: off
+    debuginfo: off
+    removedfiles: off
 
 badfuncs:
     ignore:

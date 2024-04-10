@@ -920,6 +920,7 @@ static int genl_family_rcv_msg_dumpit(const struct genl_family *family,
 			.start = genl_start,
 			.dump = genl_lock_dumpit,
 			.done = genl_lock_done,
+			.extack = extack,
 		};
 
 		genl_unlock();
@@ -932,6 +933,7 @@ static int genl_family_rcv_msg_dumpit(const struct genl_family *family,
 			.start = genl_start,
 			.dump = ops->dumpit,
 			.done = genl_parallel_done,
+			.extack = extack,
 		};
 
 		err = __netlink_dump_start(net->genl_sock, skb, nlh, &c);
@@ -1698,6 +1700,9 @@ static int genl_bind(struct net *net, int group)
 		grp = &family->mcgrps[i];
 		if ((grp->flags & GENL_UNS_ADMIN_PERM) &&
 		    !ns_capable(net->user_ns, CAP_NET_ADMIN))
+			ret = -EPERM;
+		if (grp->cap_sys_admin &&
+		    !ns_capable(net->user_ns, CAP_SYS_ADMIN))
 			ret = -EPERM;
 
 		break;

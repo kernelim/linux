@@ -2224,7 +2224,9 @@ static void wacom_update_name(struct wacom *wacom, const char *suffix)
 		} else if (strstr(product_name, "Wacom") ||
 			   strstr(product_name, "wacom") ||
 			   strstr(product_name, "WACOM")) {
-			strscpy(name, product_name, sizeof(name));
+			if (strscpy(name, product_name, sizeof(name)) < 0) {
+				hid_warn(wacom->hdev, "String overflow while assembling device name");
+			}
 		} else {
 			snprintf(name, sizeof(name), "Wacom %s", product_name);
 		}
@@ -2242,7 +2244,9 @@ static void wacom_update_name(struct wacom *wacom, const char *suffix)
 		if (name[strlen(name)-1] == ' ')
 			name[strlen(name)-1] = '\0';
 	} else {
-		strscpy(name, features->name, sizeof(name));
+		if (strscpy(name, features->name, sizeof(name)) < 0) {
+			hid_warn(wacom->hdev, "String overflow while assembling device name");
+		}
 	}
 
 	snprintf(wacom_wac->name, sizeof(wacom_wac->name), "%s%s",
@@ -2372,13 +2376,6 @@ static int wacom_parse_and_register(struct wacom *wacom, bool wireless)
 	if (error)
 		goto fail;
 
-	if (!(features->device_type & WACOM_DEVICETYPE_WL_MONITOR) &&
-	     (features->quirks & WACOM_QUIRK_BATTERY)) {
-		error = wacom_initialize_battery(wacom);
-		if (error)
-			goto fail;
-	}
-
 	error = wacom_register_inputs(wacom);
 	if (error)
 		goto fail;
@@ -2417,8 +2414,13 @@ static int wacom_parse_and_register(struct wacom *wacom, bool wireless)
 		goto fail_quirks;
 	}
 
-	if (features->device_type & WACOM_DEVICETYPE_WL_MONITOR)
+	if (features->device_type & WACOM_DEVICETYPE_WL_MONITOR) {
 		error = hid_hw_open(hdev);
+		if (error) {
+			hid_err(hdev, "hw open failed\n");
+			goto fail_quirks;
+		}
+	}
 
 	wacom_set_shared_values(wacom_wac);
 	devres_close_group(&hdev->dev, wacom);
@@ -2507,11 +2509,10 @@ static void wacom_wireless_work(struct work_struct *work)
 				goto fail;
 		}
 
-		strscpy(wacom_wac->name, wacom_wac1->name,
-			sizeof(wacom_wac->name));
-		error = wacom_initialize_battery(wacom);
-		if (error)
-			goto fail;
+		if (strscpy(wacom_wac->name, wacom_wac1->name,
+			sizeof(wacom_wac->name)) < 0) {
+			hid_warn(wacom->hdev, "String overflow while assembling device name");
+		}
 	}
 
 	return;
@@ -2520,6 +2521,18 @@ fail:
 	wacom_release_resources(wacom1);
 	wacom_release_resources(wacom2);
 	return;
+}
+
+static void wacom_remote_destroy_battery(struct wacom *wacom, int index)
+{
+	struct wacom_remote *remote = wacom->remote;
+
+	if (remote->remotes[index].battery.battery) {
+		devres_release_group(&wacom->hdev->dev,
+				     &remote->remotes[index].battery.bat_desc);
+		remote->remotes[index].battery.battery = NULL;
+		remote->remotes[index].active_time = 0;
+	}
 }
 
 static void wacom_remote_destroy_one(struct wacom *wacom, unsigned int index)
@@ -2536,9 +2549,7 @@ static void wacom_remote_destroy_one(struct wacom *wacom, unsigned int index)
 			remote->remotes[i].registered = false;
 			spin_unlock_irqrestore(&remote->remote_lock, flags);
 
-			if (remote->remotes[i].battery.battery)
-				devres_release_group(&wacom->hdev->dev,
-						     &remote->remotes[i].battery.bat_desc);
+			wacom_remote_destroy_battery(wacom, i);
 
 			if (remote->remotes[i].group.name)
 				devres_release_group(&wacom->hdev->dev,
@@ -2546,7 +2557,6 @@ static void wacom_remote_destroy_one(struct wacom *wacom, unsigned int index)
 
 			remote->remotes[i].serial = 0;
 			remote->remotes[i].group.name = NULL;
-			remote->remotes[i].battery.battery = NULL;
 			wacom->led.groups[i].select = WACOM_STATUS_UNKNOWN;
 		}
 	}
@@ -2631,6 +2641,9 @@ static int wacom_remote_attach_battery(struct wacom *wacom, int index)
 	if (remote->remotes[index].battery.battery)
 		return 0;
 
+	if (!remote->remotes[index].active_time)
+		return 0;
+
 	if (wacom->led.groups[index].select == WACOM_STATUS_UNKNOWN)
 		return 0;
 
@@ -2646,6 +2659,7 @@ static void wacom_remote_work(struct work_struct *work)
 {
 	struct wacom *wacom = container_of(work, struct wacom, remote_work);
 	struct wacom_remote *remote = wacom->remote;
+	ktime_t kt = ktime_get();
 	struct wacom_remote_data data;
 	unsigned long flags;
 	unsigned int count;
@@ -2671,6 +2685,10 @@ static void wacom_remote_work(struct work_struct *work)
 	for (i = 0; i < WACOM_MAX_REMOTES; i++) {
 		serial = data.remote[i].serial;
 		if (data.remote[i].connected) {
+
+			if (kt - remote->remotes[i].active_time > WACOM_REMOTE_BATTERY_TIMEOUT
+			    && remote->remotes[i].active_time != 0)
+				wacom_remote_destroy_battery(wacom, i);
 
 			if (remote->remotes[i].serial == serial) {
 				wacom_remote_attach_battery(wacom, i);

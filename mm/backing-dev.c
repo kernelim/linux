@@ -220,7 +220,7 @@ ATTRIBUTE_GROUPS(bdi_dev);
 
 static __init int bdi_class_init(void)
 {
-	bdi_class = class_create(THIS_MODULE, "bdi");
+	bdi_class = class_create("bdi");
 	if (IS_ERR(bdi_class))
 		return PTR_ERR(bdi_class);
 
@@ -784,8 +784,6 @@ static void cgwb_remove_from_bdi_list(struct bdi_writeback *wb)
 
 int bdi_init(struct backing_dev_info *bdi)
 {
-	int ret;
-
 	bdi->dev = NULL;
 
 	kref_init(&bdi->refcnt);
@@ -796,9 +794,7 @@ int bdi_init(struct backing_dev_info *bdi)
 	INIT_LIST_HEAD(&bdi->wb_list);
 	init_waitqueue_head(&bdi->wb_waitq);
 
-	ret = cgwb_bdi_init(bdi);
-
-	return ret;
+	return cgwb_bdi_init(bdi);
 }
 
 struct backing_dev_info *bdi_alloc(int node_id)

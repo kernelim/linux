@@ -37,7 +37,7 @@
 #include <net/ip.h>
 #include <net/ipv6.h>
 #include <net/tso.h>
-#include <net/page_pool.h>
+#include <net/page_pool/helpers.h>
 #include <net/pkt_sched.h>
 #include <linux/bpf_trace.h>
 
@@ -2297,9 +2297,8 @@ mvneta_swbm_add_rx_fragment(struct mvneta_port *pp,
 	if (data_len > 0 && xdp_sinfo->nr_frags < MAX_SKB_FRAGS) {
 		skb_frag_t *frag = &xdp_sinfo->frags[xdp_sinfo->nr_frags++];
 
-		skb_frag_off_set(frag, pp->rx_offset_correction);
-		skb_frag_size_set(frag, data_len);
-		__skb_frag_set_page(frag, page);
+		skb_frag_fill_page_desc(frag, page,
+					pp->rx_offset_correction, data_len);
 	} else {
 		page_pool_put_full_page(rxq->page_pool, page, true);
 	}

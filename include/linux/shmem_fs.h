@@ -92,17 +92,13 @@ extern struct page *shmem_read_mapping_page_gfp(struct address_space *mapping,
 extern void shmem_truncate_range(struct inode *inode, loff_t start, loff_t end);
 int shmem_unuse(unsigned int type);
 
-extern bool shmem_is_huge(struct vm_area_struct *vma,
-			  struct inode *inode, pgoff_t index);
-static inline bool shmem_huge_enabled(struct vm_area_struct *vma)
-{
-	return shmem_is_huge(vma, file_inode(vma->vm_file), vma->vm_pgoff);
-}
+extern bool shmem_is_huge(struct inode *inode, pgoff_t index, bool shmem_huge_force,
+			  struct mm_struct *mm, unsigned long vm_flags);
 extern unsigned long shmem_swap_usage(struct vm_area_struct *vma);
 extern unsigned long shmem_partial_swap_usage(struct address_space *mapping,
 						pgoff_t start, pgoff_t end);
 
-/* Flag allocation requirements to shmem_getpage */
+/* Flag allocation requirements to shmem_get_folio */
 enum sgp_type {
 	SGP_READ,	/* don't exceed i_size, don't allocate page */
 	SGP_NOALLOC,	/* similar, but fail on hole or use fallocated page */
@@ -111,8 +107,16 @@ enum sgp_type {
 	SGP_FALLOC,	/* like SGP_WRITE, but make existing page Uptodate */
 };
 
-extern int shmem_getpage(struct inode *inode, pgoff_t index,
-		struct page **pagep, enum sgp_type sgp);
+int shmem_get_folio(struct inode *inode, pgoff_t index, struct folio **foliop,
+		enum sgp_type sgp);
+struct folio *shmem_read_folio_gfp(struct address_space *mapping,
+		pgoff_t index, gfp_t gfp);
+
+static inline struct folio *shmem_read_folio(struct address_space *mapping,
+		pgoff_t index)
+{
+	return shmem_read_folio_gfp(mapping, index, mapping_gfp_mask(mapping));
+}
 
 static inline struct page *shmem_read_mapping_page(
 				struct address_space *mapping, pgoff_t index)

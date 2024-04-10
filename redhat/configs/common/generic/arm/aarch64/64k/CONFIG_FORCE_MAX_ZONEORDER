@@ -1,3 +1,3 @@
 # This relies on an out of tree patch to arch/arm64/Kconfig
-# Otherwise, we would be stuck with a default of 11
-CONFIG_FORCE_MAX_ZONEORDER=14
+# Otherwise, we would be stuck with a default of 10
+CONFIG_ARCH_FORCE_MAX_ORDER=13

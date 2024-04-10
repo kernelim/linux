@@ -8,12 +8,12 @@ _SRPM_unpacks_OK() {
 }
 
 @test "SRPM unpacks OK" {
-	numsrpms=$(find "$BATS_TEST_DIRNAME"/.. -name "*.rpm" | wc -l)
+	numsrpms=$(find "$BATS_TEST_DIRNAME"/.. -name "*.src.rpm" | wc -l)
 	if [ "$numsrpms" != "1" ]; then
 		skip "Only one SRPM should be in $BATS_TEST_DIRNAME/redhat/rpms/SRPMS."
 	fi
 
-	srpm=$(find "$BATS_TEST_DIRNAME"/.. -name "*.rpm")
+	srpm=$(find "$BATS_TEST_DIRNAME"/.. -name "*.src.rpm")
 	pushd "$BATS_TMPDIR"
 	if [ -e SRPMS ]; then
 		rm -fr SRPMS
@@ -26,7 +26,7 @@ _SRPM_unpacks_OK() {
 }
 
 @test "Linux tree unpacks OK" {
-numsrpms=$(find "$BATS_TEST_DIRNAME"/.. -name "*.rpm" | wc -l)
+numsrpms=$(find "$BATS_TEST_DIRNAME"/.. -name "*.src.rpm" | wc -l)
 	if [ "$numsrpms" != "1" ]; then
 		skip "Only one SRPM should be in $BATS_TEST_DIRNAME/redhat/rpms/SRPMS."
 	fi
@@ -40,7 +40,7 @@ numsrpms=$(find "$BATS_TEST_DIRNAME"/.. -name "*.rpm" | wc -l)
 }
 
 @test "Linux top level structural check" {
-	numsrpms=$(find "$BATS_TEST_DIRNAME"/.. -name "*.rpm" | wc -l)
+	numsrpms=$(find "$BATS_TEST_DIRNAME"/.. -name "*.src.rpm" | wc -l)
 	if [ "$numsrpms" != "1" ]; then
 		skip "Only one SRPM should be in $BATS_TEST_DIRNAME/redhat/rpms/SRPMS."
 	fi

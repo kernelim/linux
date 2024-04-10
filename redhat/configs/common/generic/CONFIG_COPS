@@ -1,0 +1,4 @@
+# WARNING: drivers/net/appletalk/cops_ffdrv.h, /drivers/net/appletalk/cops_ltdrv.h
+# files contain firmware under an unknown license.
+#
+# CONFIG_COPS is not set

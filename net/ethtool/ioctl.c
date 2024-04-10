@@ -27,6 +27,7 @@
 #include <linux/net.h>
 #include <linux/pm_runtime.h>
 #include <net/devlink.h>
+#include <net/ipv6.h>
 #include <net/xdp_sock_drv.h>
 #include <net/flow_offload.h>
 #include <linux/ethtool_netlink.h>
@@ -564,6 +565,7 @@ static int ethtool_get_link_ksettings(struct net_device *dev,
 		= __ETHTOOL_LINK_MODE_MASK_NU32;
 	link_ksettings.base.master_slave_cfg = MASTER_SLAVE_CFG_UNSUPPORTED;
 	link_ksettings.base.master_slave_state = MASTER_SLAVE_STATE_UNSUPPORTED;
+	link_ksettings.base.rate_matching = RATE_MATCH_NONE;
 
 	return store_link_ksettings_for_user(useraddr, &link_ksettings);
 }
@@ -572,8 +574,8 @@ static int ethtool_get_link_ksettings(struct net_device *dev,
 static int ethtool_set_link_ksettings(struct net_device *dev,
 				      void __user *useraddr)
 {
+	struct ethtool_link_ksettings link_ksettings = {};
 	int err;
-	struct ethtool_link_ksettings link_ksettings;
 
 	ASSERT_RTNL();
 
@@ -905,6 +907,38 @@ static int ethtool_rxnfc_copy_to_compat(void __user *useraddr,
 	return 0;
 }
 
+static int ethtool_rxnfc_copy_struct(u32 cmd, struct ethtool_rxnfc *info,
+				     size_t *info_size, void __user *useraddr)
+{
+	/* struct ethtool_rxnfc was originally defined for
+	 * ETHTOOL_{G,S}RXFH with only the cmd, flow_type and data
+	 * members.  User-space might still be using that
+	 * definition.
+	 */
+	if (cmd == ETHTOOL_GRXFH || cmd == ETHTOOL_SRXFH)
+		*info_size = (offsetof(struct ethtool_rxnfc, data) +
+			      sizeof(info->data));
+
+	if (ethtool_rxnfc_copy_from_user(info, useraddr, *info_size))
+		return -EFAULT;
+
+	if ((cmd == ETHTOOL_GRXFH || cmd == ETHTOOL_SRXFH) && info->flow_type & FLOW_RSS) {
+		*info_size = sizeof(*info);
+		if (ethtool_rxnfc_copy_from_user(info, useraddr, *info_size))
+			return -EFAULT;
+		/* Since malicious users may modify the original data,
+		 * we need to check whether FLOW_RSS is still requested.
+		 */
+		if (!(info->flow_type & FLOW_RSS))
+			return -EINVAL;
+	}
+
+	if (info->cmd != cmd)
+		return -EINVAL;
+
+	return 0;
+}
+
 static int ethtool_rxnfc_copy_to_user(void __user *useraddr,
 				      const struct ethtool_rxnfc *rxnfc,
 				      size_t size, const u32 *rule_buf)
@@ -942,16 +976,9 @@ static noinline_for_stack int ethtool_set_rxnfc(struct net_device *dev,
 	if (!dev->ethtool_ops->set_rxnfc)
 		return -EOPNOTSUPP;
 
-	/* struct ethtool_rxnfc was originally defined for
-	 * ETHTOOL_{G,S}RXFH with only the cmd, flow_type and data
-	 * members.  User-space might still be using that
-	 * definition. */
-	if (cmd == ETHTOOL_SRXFH)
-		info_size = (offsetof(struct ethtool_rxnfc, data) +
-			     sizeof(info.data));
-
-	if (ethtool_rxnfc_copy_from_user(&info, useraddr, info_size))
-		return -EFAULT;
+	rc = ethtool_rxnfc_copy_struct(cmd, &info, &info_size, useraddr);
+	if (rc)
+		return rc;
 
 	rc = dev->ethtool_ops->set_rxnfc(dev, &info);
 	if (rc)
@@ -976,33 +1003,9 @@ static noinline_for_stack int ethtool_get_rxnfc(struct net_device *dev,
 	if (!ops->get_rxnfc)
 		return -EOPNOTSUPP;
 
-	/* struct ethtool_rxnfc was originally defined for
-	 * ETHTOOL_{G,S}RXFH with only the cmd, flow_type and data
-	 * members.  User-space might still be using that
-	 * definition. */
-	if (cmd == ETHTOOL_GRXFH)
-		info_size = (offsetof(struct ethtool_rxnfc, data) +
-			     sizeof(info.data));
-
-	if (ethtool_rxnfc_copy_from_user(&info, useraddr, info_size))
-		return -EFAULT;
-
-	/* If FLOW_RSS was requested then user-space must be using the
-	 * new definition, as FLOW_RSS is newer.
-	 */
-	if (cmd == ETHTOOL_GRXFH && info.flow_type & FLOW_RSS) {
-		info_size = sizeof(info);
-		if (ethtool_rxnfc_copy_from_user(&info, useraddr, info_size))
-			return -EFAULT;
-		/* Since malicious users may modify the original data,
-		 * we need to check whether FLOW_RSS is still requested.
-		 */
-		if (!(info.flow_type & FLOW_RSS))
-			return -EINVAL;
-	}
-
-	if (info.cmd != cmd)
-		return -EINVAL;
+	ret = ethtool_rxnfc_copy_struct(cmd, &info, &info_size, useraddr);
+	if (ret)
+		return ret;
 
 	if (info.cmd == ETHTOOL_GRXCLSRLALL) {
 		if (info.rule_cnt > 0) {
@@ -1434,14 +1437,25 @@ static int ethtool_get_wol(struct net_device *dev, char __user *useraddr)
 
 static int ethtool_set_wol(struct net_device *dev, char __user *useraddr)
 {
-	struct ethtool_wolinfo wol;
+	struct ethtool_wolinfo wol, cur_wol;
 	int ret;
 
-	if (!dev->ethtool_ops->set_wol)
+	if (!dev->ethtool_ops->get_wol || !dev->ethtool_ops->set_wol)
 		return -EOPNOTSUPP;
+
+	memset(&cur_wol, 0, sizeof(struct ethtool_wolinfo));
+	cur_wol.cmd = ETHTOOL_GWOL;
+	dev->ethtool_ops->get_wol(dev, &cur_wol);
 
 	if (copy_from_user(&wol, useraddr, sizeof(wol)))
 		return -EFAULT;
+
+	if (wol.wolopts & ~cur_wol.supported)
+		return -EINVAL;
+
+	if (wol.wolopts == cur_wol.wolopts &&
+	    !memcmp(wol.sopass, cur_wol.sopass, sizeof(wol.sopass)))
+		return 0;
 
 	ret = dev->ethtool_ops->set_wol(dev, &wol);
 	if (ret)
@@ -3126,7 +3140,6 @@ struct ethtool_rx_flow_rule *
 ethtool_rx_flow_rule_create(const struct ethtool_rx_flow_spec_input *input)
 {
 	const struct ethtool_rx_flow_spec *fs = input->fs;
-	static struct in6_addr zero_addr = {};
 	struct ethtool_rx_flow_match *match;
 	struct ethtool_rx_flow_rule *flow;
 	struct flow_action_entry *act;
@@ -3232,20 +3245,20 @@ ethtool_rx_flow_rule_create(const struct ethtool_rx_flow_spec_input *input)
 
 		v6_spec = &fs->h_u.tcp_ip6_spec;
 		v6_m_spec = &fs->m_u.tcp_ip6_spec;
-		if (memcmp(v6_m_spec->ip6src, &zero_addr, sizeof(zero_addr))) {
+		if (!ipv6_addr_any((struct in6_addr *)v6_m_spec->ip6src)) {
 			memcpy(&match->key.ipv6.src, v6_spec->ip6src,
 			       sizeof(match->key.ipv6.src));
 			memcpy(&match->mask.ipv6.src, v6_m_spec->ip6src,
 			       sizeof(match->mask.ipv6.src));
 		}
-		if (memcmp(v6_m_spec->ip6dst, &zero_addr, sizeof(zero_addr))) {
+		if (!ipv6_addr_any((struct in6_addr *)v6_m_spec->ip6dst)) {
 			memcpy(&match->key.ipv6.dst, v6_spec->ip6dst,
 			       sizeof(match->key.ipv6.dst));
 			memcpy(&match->mask.ipv6.dst, v6_m_spec->ip6dst,
 			       sizeof(match->mask.ipv6.dst));
 		}
-		if (memcmp(v6_m_spec->ip6src, &zero_addr, sizeof(zero_addr)) ||
-		    memcmp(v6_m_spec->ip6dst, &zero_addr, sizeof(zero_addr))) {
+		if (!ipv6_addr_any((struct in6_addr *)v6_m_spec->ip6src) ||
+		    !ipv6_addr_any((struct in6_addr *)v6_m_spec->ip6dst)) {
 			match->dissector.used_keys |=
 				BIT(FLOW_DISSECTOR_KEY_IPV6_ADDRS);
 			match->dissector.offset[FLOW_DISSECTOR_KEY_IPV6_ADDRS] =

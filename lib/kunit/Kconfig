@@ -4,7 +4,7 @@
 
 menuconfig KUNIT
 	tristate "KUnit - Enable support for unit tests"
-	select GLOB if KUNIT=y
+	select GLOB
 	help
 	  Enables support for kernel unit tests (KUnit), a lightweight unit
 	  testing and mocking framework for the Linux kernel. These tests are
@@ -58,5 +58,16 @@ config KUNIT_ALL_TESTS
 	  to the KUnit documentation in Documentation/dev-tools/kunit/.
 
 	  If unsure, say N.
+
+config KUNIT_DEFAULT_ENABLED
+	bool "Default value of kunit.enable"
+	default y
+	help
+	  Sets the default value of kunit.enable. If set to N then KUnit
+	  tests will not execute unless kunit.enable=1 is passed to the
+	  kernel command line.
+
+	  In most cases this should be left as Y. Only if additional opt-in
+	  behavior is needed should this be set to N.
 
 endif # KUNIT

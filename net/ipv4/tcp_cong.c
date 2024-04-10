@@ -16,6 +16,7 @@
 #include <linux/gfp.h>
 #include <linux/jhash.h>
 #include <net/tcp.h>
+#include <trace/events/tcp.h>
 
 static DEFINE_SPINLOCK(tcp_cong_list_lock);
 static LIST_HEAD(tcp_cong_list);
@@ -31,6 +32,17 @@ struct tcp_congestion_ops *tcp_ca_find(const char *name)
 	}
 
 	return NULL;
+}
+
+void tcp_set_ca_state(struct sock *sk, const u8 ca_state)
+{
+	struct inet_connection_sock *icsk = inet_csk(sk);
+
+	trace_tcp_cong_state_set(sk, ca_state);
+
+	if (icsk->icsk_ca_ops->set_state)
+		icsk->icsk_ca_ops->set_state(sk, ca_state);
+	icsk->icsk_ca_state = ca_state;
 }
 
 /* Must be called with rcu lock held */
@@ -63,20 +75,28 @@ struct tcp_congestion_ops *tcp_ca_find_key(u32 key)
 	return NULL;
 }
 
-/*
- * Attach new congestion control algorithm to the list
- * of available options.
- */
-int tcp_register_congestion_control(struct tcp_congestion_ops *ca)
+int tcp_validate_congestion_control(struct tcp_congestion_ops *ca)
 {
-	int ret = 0;
-
 	/* all algorithms must implement these */
 	if (!ca->ssthresh || !ca->undo_cwnd ||
 	    !(ca->cong_avoid || ca->cong_control)) {
 		pr_err("%s does not implement required ops\n", ca->name);
 		return -EINVAL;
 	}
+
+	return 0;
+}
+
+/* Attach new congestion control algorithm to the list
+ * of available options.
+ */
+int tcp_register_congestion_control(struct tcp_congestion_ops *ca)
+{
+	int ret;
+
+	ret = tcp_validate_congestion_control(ca);
+	if (ret)
+		return ret;
 
 	ca->key = jhash(ca->name, sizeof(ca->name), strlen(ca->name));
 
@@ -117,6 +137,50 @@ void tcp_unregister_congestion_control(struct tcp_congestion_ops *ca)
 	synchronize_rcu();
 }
 EXPORT_SYMBOL_GPL(tcp_unregister_congestion_control);
+
+/* Replace a registered old ca with a new one.
+ *
+ * The new ca must have the same name as the old one, that has been
+ * registered.
+ */
+int tcp_update_congestion_control(struct tcp_congestion_ops *ca, struct tcp_congestion_ops *old_ca)
+{
+	struct tcp_congestion_ops *existing;
+	int ret;
+
+	ret = tcp_validate_congestion_control(ca);
+	if (ret)
+		return ret;
+
+	ca->key = jhash(ca->name, sizeof(ca->name), strlen(ca->name));
+
+	spin_lock(&tcp_cong_list_lock);
+	existing = tcp_ca_find_key(old_ca->key);
+	if (ca->key == TCP_CA_UNSPEC || !existing || strcmp(existing->name, ca->name)) {
+		pr_notice("%s not registered or non-unique key\n",
+			  ca->name);
+		ret = -EINVAL;
+	} else if (existing != old_ca) {
+		pr_notice("invalid old congestion control algorithm to replace\n");
+		ret = -EINVAL;
+	} else {
+		/* Add the new one before removing the old one to keep
+		 * one implementation available all the time.
+		 */
+		list_add_tail_rcu(&ca->list, &tcp_cong_list);
+		list_del_rcu(&existing->list);
+		pr_debug("%s updated\n", ca->name);
+	}
+	spin_unlock(&tcp_cong_list_lock);
+
+	/* Wait for outstanding readers to complete before the
+	 * module or struct_ops gets removed entirely.
+	 */
+	if (!ret)
+		synchronize_rcu();
+
+	return ret;
+}
 
 u32 tcp_ca_get_key_by_name(struct net *net, const char *name, bool *ecn_ca)
 {

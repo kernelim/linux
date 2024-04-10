@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause-Clear
 /*
  * Copyright (c) 2018-2019 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/of_device.h>
 #include <linux/of.h>
 #include <linux/dma-mapping.h>
@@ -14,6 +15,7 @@
 #include "ahb.h"
 #include "debug.h"
 #include "hif.h"
+#include "qmi.h"
 #include <linux/remoteproc.h>
 #include "pcic.h"
 #include <linux/soc/qcom/smem.h>
@@ -418,32 +420,6 @@ static void ath11k_ahb_power_down(struct ath11k_base *ab)
 	rproc_shutdown(ab_ahb->tgt_rproc);
 }
 
-static int ath11k_ahb_fwreset_from_cold_boot(struct ath11k_base *ab)
-{
-	int timeout;
-
-	if (ath11k_cold_boot_cal == 0 || ab->qmi.cal_done ||
-	    ab->hw_params.cold_boot_calib == 0 ||
-	    ab->hw_params.cbcal_restart_fw == 0)
-		return 0;
-
-	ath11k_dbg(ab, ATH11K_DBG_AHB, "wait for cold boot done\n");
-	timeout = wait_event_timeout(ab->qmi.cold_boot_waitq,
-				     (ab->qmi.cal_done  == 1),
-				     ATH11K_COLD_BOOT_FW_RESET_DELAY);
-	if (timeout <= 0) {
-		ath11k_cold_boot_cal = 0;
-		ath11k_warn(ab, "Coldboot Calibration failed timed out\n");
-	}
-
-	/* reset the firmware */
-	ath11k_ahb_power_down(ab);
-	ath11k_ahb_power_up(ab);
-
-	ath11k_dbg(ab, ATH11K_DBG_AHB, "exited from cold boot mode\n");
-	return 0;
-}
-
 static void ath11k_ahb_init_qmi_ce_config(struct ath11k_base *ab)
 {
 	struct ath11k_qmi_ce_cfg *cfg = &ab->qmi.ce_cfg;
@@ -733,7 +709,7 @@ static int ath11k_ahb_hif_suspend(struct ath11k_base *ab)
 		return ret;
 	}
 
-	ath11k_dbg(ab, ATH11K_DBG_AHB, "ahb device suspended\n");
+	ath11k_dbg(ab, ATH11K_DBG_AHB, "device suspended\n");
 
 	return ret;
 }
@@ -776,7 +752,7 @@ static int ath11k_ahb_hif_resume(struct ath11k_base *ab)
 		return -ETIMEDOUT;
 	}
 
-	ath11k_dbg(ab, ATH11K_DBG_AHB, "ahb device resumed\n");
+	ath11k_dbg(ab, ATH11K_DBG_AHB, "device resumed\n");
 
 	return 0;
 }
@@ -1109,23 +1085,17 @@ static int ath11k_ahb_fw_resource_deinit(struct ath11k_base *ab)
 static int ath11k_ahb_probe(struct platform_device *pdev)
 {
 	struct ath11k_base *ab;
-	const struct of_device_id *of_id;
 	const struct ath11k_hif_ops *hif_ops;
 	const struct ath11k_pci_ops *pci_ops;
 	enum ath11k_hw_rev hw_rev;
 	int ret;
 
-	of_id = of_match_device(ath11k_ahb_of_match, &pdev->dev);
-	if (!of_id) {
-		dev_err(&pdev->dev, "failed to find matching device tree id\n");
-		return -EINVAL;
-	}
-
-	hw_rev = (enum ath11k_hw_rev)of_id->data;
+	hw_rev = (uintptr_t)device_get_match_data(&pdev->dev);
 
 	switch (hw_rev) {
 	case ATH11K_HW_IPQ8074:
 	case ATH11K_HW_IPQ6018_HW10:
+	case ATH11K_HW_IPQ5018_HW10:
 		hif_ops = &ath11k_ahb_hif_ops_ipq8074;
 		pci_ops = NULL;
 		break;
@@ -1154,6 +1124,7 @@ static int ath11k_ahb_probe(struct platform_device *pdev)
 	ab->hif.ops = hif_ops;
 	ab->pdev = pdev;
 	ab->hw_rev = hw_rev;
+	ab->fw_mode = ATH11K_FIRMWARE_MODE_NORMAL;
 	platform_set_drvdata(pdev, ab);
 
 	ret = ath11k_pcic_register_pci_ops(ab, pci_ops);
@@ -1224,7 +1195,7 @@ static int ath11k_ahb_probe(struct platform_device *pdev)
 		goto err_ce_free;
 	}
 
-	ath11k_ahb_fwreset_from_cold_boot(ab);
+	ath11k_qmi_fwreset_from_cold_boot(ab);
 
 	return 0;
 
@@ -1329,17 +1300,7 @@ static struct platform_driver ath11k_ahb_driver = {
 	.shutdown = ath11k_ahb_shutdown,
 };
 
-static int ath11k_ahb_init(void)
-{
-	return platform_driver_register(&ath11k_ahb_driver);
-}
-module_init(ath11k_ahb_init);
-
-static void ath11k_ahb_exit(void)
-{
-	platform_driver_unregister(&ath11k_ahb_driver);
-}
-module_exit(ath11k_ahb_exit);
+module_platform_driver(ath11k_ahb_driver);
 
 MODULE_DESCRIPTION("Driver support for Qualcomm Technologies 802.11ax WLAN AHB devices");
 MODULE_LICENSE("Dual BSD/GPL");

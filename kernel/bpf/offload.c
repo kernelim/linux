@@ -198,12 +198,14 @@ static int __bpf_prog_dev_bound_init(struct bpf_prog *prog, struct net_device *n
 	offload->netdev = netdev;
 
 	ondev = bpf_offload_find_netdev(offload->netdev);
+	/* When program is offloaded require presence of "true"
+	 * bpf_offload_netdev, avoid the one created for !ondev case below.
+	 */
+	if (bpf_prog_is_offloaded(prog->aux) && (!ondev || !ondev->offdev)) {
+		err = -EINVAL;
+		goto err_free;
+	}
 	if (!ondev) {
-		if (bpf_prog_is_offloaded(prog->aux)) {
-			err = -EINVAL;
-			goto err_free;
-		}
-
 		/* When only binding to the device, explicitly
 		 * create an entry in the hashtable.
 		 */
@@ -561,6 +563,12 @@ void bpf_map_offload_map_free(struct bpf_map *map)
 	rtnl_unlock();
 
 	bpf_map_area_free(offmap);
+}
+
+u64 bpf_map_offload_map_mem_usage(const struct bpf_map *map)
+{
+	/* The memory dynamically allocated in netdev dev_ops is not counted */
+	return sizeof(struct bpf_offloaded_map);
 }
 
 int bpf_map_offload_lookup_elem(struct bpf_map *map, void *key, void *value)

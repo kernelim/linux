@@ -12,6 +12,69 @@
 #include <asm/cpufeatures.h>
 #include <asm/page.h>
 
+#ifdef CONFIG_ADDRESS_MASKING
+/*
+ * Mask out tag bits from the address.
+ */
+static inline unsigned long __untagged_addr(unsigned long addr)
+{
+	/*
+	 * Refer tlbstate_untag_mask directly to avoid RIP-relative relocation
+	 * in alternative instructions. The relocation gets wrong when gets
+	 * copied to the target place.
+	 */
+	asm (ALTERNATIVE("",
+			 "and %%gs:tlbstate_untag_mask, %[addr]\n\t", X86_FEATURE_LAM)
+	     : [addr] "+r" (addr) : "m" (tlbstate_untag_mask));
+
+	return addr;
+}
+
+#define untagged_addr(addr)	({					\
+	unsigned long __addr = (__force unsigned long)(addr);		\
+	(__force __typeof__(addr))__untagged_addr(__addr);		\
+})
+
+static inline unsigned long __untagged_addr_remote(struct mm_struct *mm,
+						   unsigned long addr)
+{
+	mmap_assert_locked(mm);
+	return addr & (mm)->context.untag_mask;
+}
+
+#define untagged_addr_remote(mm, addr)	({				\
+	unsigned long __addr = (__force unsigned long)(addr);		\
+	(__force __typeof__(addr))__untagged_addr_remote(mm, __addr);	\
+})
+
+#endif
+
+/*
+ * On x86-64, we may have tag bits in the user pointer. Rather than
+ * mask them off, just change the rules for __access_ok().
+ *
+ * Make the rule be that 'ptr+size' must not overflow, and must not
+ * have the high bit set. Compilers generally understand about
+ * unsigned overflow and the CF bit and generate reasonable code for
+ * this. Although it looks like the combination confuses at least
+ * clang (and instead of just doing an "add" followed by a test of
+ * SF and CF, you'll see that unnecessary comparison).
+ *
+ * For the common case of small sizes that can be checked at compile
+ * time, don't even bother with the addition, and just check that the
+ * base pointer is ok.
+ */
+static inline bool __access_ok(const void __user *ptr, unsigned long size)
+{
+	if (__builtin_constant_p(size <= PAGE_SIZE) && size <= PAGE_SIZE) {
+		return (long)ptr >= 0;
+	} else {
+		unsigned long sum = size + (unsigned long)ptr;
+		return (long) sum >= 0 && sum >= (unsigned long)ptr;
+	}
+}
+#define __access_ok __access_ok
+
 /*
  * Copy To/From Userspace
  */
@@ -120,7 +183,7 @@ static __always_inline __must_check unsigned long __clear_user(void __user *addr
 
 static __always_inline unsigned long clear_user(void __user *to, unsigned long n)
 {
-	if (access_ok(to, n))
+	if (__access_ok(to, n))
 		return __clear_user(to, n);
 	return n;
 }

@@ -171,4 +171,21 @@
 #define VHOST_VDPA_SET_GROUP_ASID	_IOW(VHOST_VIRTIO, 0x7C, \
 					     struct vhost_vring_state)
 
+/* Suspend a device so it does not process virtqueue requests anymore
+ *
+ * After the return of ioctl the device must preserve all the necessary state
+ * (the virtqueue vring base plus the possible device specific states) that is
+ * required for restoring in the future. The device must not change its
+ * configuration after that point.
+ */
+#define VHOST_VDPA_SUSPEND		_IO(VHOST_VIRTIO, 0x7D)
+
+/* Resume a device so it can resume processing virtqueue requests
+ *
+ * After the return of this ioctl the device will have restored all the
+ * necessary states and it is fully operational to continue processing the
+ * virtqueue descriptors.
+ */
+#define VHOST_VDPA_RESUME		_IO(VHOST_VIRTIO, 0x7E)
+
 #endif

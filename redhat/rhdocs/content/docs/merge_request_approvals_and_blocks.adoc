@@ -51,12 +51,12 @@ This action can also be completed in lab by executing:
 
 `lab mr approve <mr_id>`
 
-== Blocking a Merge Request with a Blocking Thread
+== Blocking a Merge Request with a Blocking Thread (aka "soft block")
 :sectnums:
 
-There are currently two different ways to block an open MR.  The first is to open a blocking thread which needs to be resolved prior to the MR being able to get merged.
+There are currently two different ways to block an open MR.  The first is to open a GitLab blocking thread which needs to be resolved prior to the MR being able to get merged.
 
-IMPORTANT: It is critical that the blocking thread is only resolved by the author of the original comment in a that thread.  Otherwise, an issue can get overlooked inadvertently and allow the MR to progress unblocked.
+IMPORTANT: GitLab blocking threads can be resolved by any user.  GitLab blocking threads have no requirement that the thread be resolved by the thread author or the merge request author.  As such, GitLab blocking threads should be only be used when a response is not considered critical to the resolution of the merge request.
 
 Here are a couple of examples to understand what a blocking thread involved MR looks like:
 
@@ -85,10 +85,12 @@ image::images/approvals-blocking_thread_resolved.png[caption=""]
 
 The above image shows what a blocking thread looks like once it has been blocked.  Note that the list of comments has been collapsed and there is no "Resolve thread" button available.
 
-== Blocking a Merge Request with the /block keyword
+== Blocking a Merge Request with the /block keyword (aka "hard block")
 :sectnums:
 
 The other way to block an open MR is to add a comment with `/block` in its contents (alone on the start of a line).  This is enforced by adding an approval rule (near the Approve button) that must be satisfied before the MR can be merged.
+
+IMPORTANT: Comments created with '/block' can only be resolved by the comment author or a maintainer.  '/block' comments must be used when the commentor wants to prevent the merge request from being merged.  This 'hard block' is much stricter than the 'soft block' GitLab mechanism described above.  In the unusual case that a maintainer has to resolve a '/block' thread, management and senior engineering staff will be consulted on resolving the thread.
 
 === Example using /block keyword
 image::images/approvals-blocked_keyword.png[caption=""]

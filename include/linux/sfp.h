@@ -365,6 +365,12 @@ enum {
 	SFP_CC_EXT			= 0x5f,
 
 	SFP_PHYS_EXT_ID_SFP		= 0x04,
+	SFF_RID_8079			= 0x01,
+	SFF_RID_8431_RX_ONLY		= 0x02,
+	SFF_RID_8431_TX_ONLY		= 0x04,
+	SFF_RID_8431			= 0x06,
+	SFF_RID_10G8G			= 0x0e,
+
 	SFP_OPTIONS_HIGH_POWER_LEVEL	= BIT(13),
 	SFP_OPTIONS_PAGING_A2		= BIT(12),
 	SFP_OPTIONS_RETIMER		= BIT(11),
@@ -458,6 +464,7 @@ enum {
 	SFP_STATUS			= 0x6e,
 	SFP_STATUS_TX_DISABLE		= BIT(7),
 	SFP_STATUS_TX_DISABLE_FORCE	= BIT(6),
+	SFP_STATUS_RS0_SELECT		= BIT(3),
 	SFP_STATUS_TX_FAULT		= BIT(2),
 	SFP_STATUS_RX_LOS		= BIT(1),
 	SFP_ALARM0			= 0x70,
@@ -489,6 +496,9 @@ enum {
 	SFP_WARN1_RXPWR_LOW		= BIT(6),
 
 	SFP_EXT_STATUS			= 0x76,
+	SFP_EXT_STATUS_RS1_SELECT	= BIT(3),
+	SFP_EXT_STATUS_PWRLVL_SELECT	= BIT(0),
+
 	SFP_VSL				= 0x78,
 	SFP_PAGE			= 0x7f,
 };
@@ -535,7 +545,7 @@ int sfp_parse_port(struct sfp_bus *bus, const struct sfp_eeprom_id *id,
 		   unsigned long *support);
 bool sfp_may_have_phy(struct sfp_bus *bus, const struct sfp_eeprom_id *id);
 void sfp_parse_support(struct sfp_bus *bus, const struct sfp_eeprom_id *id,
-		       unsigned long *support);
+		       unsigned long *support, unsigned long *interfaces);
 phy_interface_t sfp_select_interface(struct sfp_bus *bus,
 				     unsigned long *link_modes);
 
@@ -547,8 +557,9 @@ int sfp_get_module_eeprom_by_page(struct sfp_bus *bus,
 				  struct netlink_ext_ack *extack);
 void sfp_upstream_start(struct sfp_bus *bus);
 void sfp_upstream_stop(struct sfp_bus *bus);
+void sfp_upstream_set_signal_rate(struct sfp_bus *bus, unsigned int rate_kbd);
 void sfp_bus_put(struct sfp_bus *bus);
-struct sfp_bus *sfp_bus_find_fwnode(struct fwnode_handle *fwnode);
+struct sfp_bus *sfp_bus_find_fwnode(const struct fwnode_handle *fwnode);
 int sfp_bus_add_upstream(struct sfp_bus *bus, void *upstream,
 			 const struct sfp_upstream_ops *ops);
 void sfp_bus_del_upstream(struct sfp_bus *bus);
@@ -568,7 +579,8 @@ static inline bool sfp_may_have_phy(struct sfp_bus *bus,
 
 static inline void sfp_parse_support(struct sfp_bus *bus,
 				     const struct sfp_eeprom_id *id,
-				     unsigned long *support)
+				     unsigned long *support,
+				     unsigned long *interfaces)
 {
 }
 
@@ -605,11 +617,17 @@ static inline void sfp_upstream_stop(struct sfp_bus *bus)
 {
 }
 
+static inline void sfp_upstream_set_signal_rate(struct sfp_bus *bus,
+						unsigned int rate_kbd)
+{
+}
+
 static inline void sfp_bus_put(struct sfp_bus *bus)
 {
 }
 
-static inline struct sfp_bus *sfp_bus_find_fwnode(struct fwnode_handle *fwnode)
+static inline struct sfp_bus *
+sfp_bus_find_fwnode(const struct fwnode_handle *fwnode)
 {
 	return NULL;
 }

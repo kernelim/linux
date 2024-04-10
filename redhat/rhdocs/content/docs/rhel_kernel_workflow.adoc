@@ -149,7 +149,7 @@ New users should follow the <<Account Setup & Configuration>> and configure link
 
 ==== Developers for RHEL
 
-Red Hat uses its own Bugzilla instance, https://bugzilla.redhat.com[https://bugzilla.redhat.com], to track feature requests and bug reports.  *All contributions must be associated with a bugzilla, so all contributors are required to have a* link:rhel_kernel_workflow.adoc#bugzilla-configuration[*bugzilla account*].
+Red Hat uses its own Jira instance, https://issues.redhat.com[https://issues.redhat.com], to track feature requests and bug reports.  *All contributions must be associated with a Jira, so all contributors are required to have a* link:rhel_kernel_workflow.adoc#jira-configuration[*jira account*].
 
 Contributions to Red Hat kernel projects can be rejected for both formatting, procedural, and technical concerns. Contributions must strictly adhere to the link:CommitRules.adoc[Red Hat Kernel Guidelines for Commits and Merge Requests] (a.k.a CommitRules) to avoid rejections for trivial issues.
 
@@ -173,7 +173,7 @@ Quality Engineering (QE) contributors are responsible for verifying the stabilit
 
 Most MRs are blocked until an assigned QE person verifies the stability and functionality of the changes.  <TBD: Process for QE verification>.
 
-All Red Hat QE Engineers must have a link:rhel_kernel_workflow.adoc#bugzilla-configuration[bugzilla account].  Red Hat uses its own Bugzilla instance, https://bugzilla.redhat.com[https://bugzilla.redhat.com], to track feature requests and bug reports.  All contributions must be associated with a bugzilla so *all contributors must have a Red Hat bugzilla account*.
+All Red Hat QE Engineers must have a link:rhel_kernel_workflow.adoc#jira-configuration[jira account].  Red Hat uses its own Jira instance, https://issues.redhat.com[https://issues.redhat.com], to track feature requests and bug reports.  All contributions must be associated with a Jira so *all contributors must have a Red Hat Jira account*.
 
 ==== CI / Workflow Contributor
 
@@ -183,7 +183,7 @@ CI / Workflow contributors are responsible for the backend automation that imple
 
 New users should follow the <<Account Setup & Configuration>>.
 
-All Red Hat maintainers must have a link:rhel_kernel_workflow.adoc#bugzilla-configuration[bugzilla account].  Red Hat uses its own Bugzilla instance, https://bugzilla.redhat.com[https://bugzilla.redhat.com], to track feature requests and bug reports.  All contributions must be associated with a bugzilla so *all maintainers must have a Red Hat bugzilla account*.
+All Red Hat maintainers must have a link:rhel_kernel_workflow.adoc#jira-configuration[jira account].  Red Hat uses its own Jira instance, https://issues.redhat.com[https://issues.redhat.com], to track feature requests and bug reports.  All contributions must be associated with a Jira so *all maintainers must have a Red Hat Jira account*.
 
 ==== Kernel Maintainer
 
@@ -235,7 +235,7 @@ The Red Hat Kernel Workflow uses email to inform developers about changesets the
 
 == Processes
 
-The Red Hat Kernel Workflow uses link:https://gitlab.com[GitLab] and link:https://bugzilla.redhat.com[Red Hat's Bugzilla instance] as the engines of change for the RHEL kernel.  Contributors, Reviewers, Maintainers, and Managers have processes that interact with these two tools.  Information and instructions for many of these processes are detailed in the subsections below.
+The Red Hat Kernel Workflow uses link:https://gitlab.com[GitLab] and link:https://issues.redhat.com[Red Hat's Jira instance] as the engines of change for the RHEL kernel.  Contributors, Reviewers, Maintainers, and Managers have processes that interact with these two tools.  Information and instructions for many of these processes are detailed in the subsections below.
 
 === Contributor Developer Processes
 
@@ -281,13 +281,13 @@ TBD.
 
 == Account Setup & Configuration
 
-=== Bugzilla Configuration
+=== Jira Configuration
 
-Red Hat uses its own Bugzilla instance, https://bugzilla.redhat.com[https://bugzilla.redhat.com], to track feature requests and bug reports.  Red Hat requires that all contributions must be associated with a bugzilla so *all contributors must have a Red Hat bugzilla account*.  To open a new bugzilla account see https://bugzilla.redhat.com/createaccount.cgi[https://bugzilla.redhat.com/createaccount.cgi].  For additional reference or questions read https://bugzilla.redhat.com/docs/en/html/using/index.html[Red Hat's Bugzilla User Guide].
+Red Hat uses its own Jira instance, https://issues.redhat.com[https://issues.redhat.com], to track feature requests and bug reports.  Red Hat requires that all contributions must be associated with a Jira so *all contributors must have a Red Hat Jira account*.  To open a new Jira account see https://issues.redhat.com[https://issues.redhat.com].
 
-Red Hat employees must associate their redhat.com email address with their bugzilla account, and must be part of the "Redhat: Red Hat Employee (internal)" group.  Red Hat employees can request access to the group https://bugzilla.redhat.com/page.cgi?id=workflows/group_request.html[here].
+Red Hat employees must associate their redhat.com email address with their bugzilla account, and must be part of the "Redhat: Red Hat Employee (internal)" group.  Red Hat employees can request access to the group https://issues.redhat.com/page.cgi?id=workflows/group_request.html[here].
 
-Instructions for https://bugzilla.redhat.com/docs/en/html/using/filing.html#reporting-a-new-bug[creating bugzillas] can also be found in Red Hat's Bugzilla User Guide.  When creating a bugzilla for the kernel, reporters should be sure to clearly explain what the problem they encountered was, how it occurred, and if necessary, what platform (vendor and model) it was seen on.  Reporters are encouraged, but not required, to provide a solution (link to an upstream patch or a suggestion for a fix, etc.).  Reporters and contributors should not reuse bugzillas for multiple issues or problems.
+When creating a Jira for the kernel, reporters should be sure to clearly explain what the problem they encountered was, how it occurred, and if necessary, what platform (vendor and model) it was seen on.  Reporters are encouraged, but not required, to provide a solution (link to an upstream patch or a suggestion for a fix, etc.).  Reporters and contributors should not reuse Jiras for multiple issues or problems.
 
 == GitLab Work Environment
 
@@ -315,7 +315,7 @@ https://gitlab.com/redhat/centos-stream/src/kernel/utils/revumatic/[revumatic] i
 
 === rhstatus
 
-https://gitlab.com/prarit/rhstatus[rhstatus] is a tool that combines information from GitLab and Bugzilla and provides status information in a color coded format.  rhstatus explicitly depends on the operation of the https://gitlab.com/cki-project/kernel-webhooks[kernel-webhooks] ACK/NACK bot in adding users as assignees or reviewers for MRs.
+https://gitlab.com/prarit/rhstatus[rhstatus] is a tool that combines information from GitLab and Jira and provides status information in a color coded format.  rhstatus explicitly depends on the operation of the https://gitlab.com/cki-project/kernel-webhooks[kernel-webhooks] ACK/NACK bot in adding users as assignees or reviewers for MRs.
 
 == Services
 
@@ -330,7 +330,7 @@ Location: http://gitlab.com/redhat/[http://gitlab.com/redhat]
 
 The webhooks services are executed in response to selected gitlab events.  These hooks are generally used to automate routine merge request validation tasks, updating labels and comments in the MR as needed to reflect readiness for merge by the maintainer.
 
-Each of the webhooks has a scoped label that each hook is responsible for managing, and each one typically contains _NeedsReview_ or OK.  Some examples include _Signoff::OK_, _Bugzilla::NeedsReview_, _Acks::NeedsReview_.  [.underline]#You can force a webhook to rerun, and for some webhooks additional detailed information back via a comment, by removing the webhook's Merge Request label.#
+Each of the webhooks has a scoped label that each hook is responsible for managing, and each one typically contains _NeedsReview_ or OK.  Some examples include _Signoff::OK_, _Jira::NeedsReview_, _Acks::NeedsReview_.  [.underline]#You can force a webhook to rerun, and for some webhooks additional detailed information back via a comment, by removing the webhook's Merge Request label.#
 
 *Source Code:* https://gitlab.com/cki-project/kernel-webhooks/[https://gitlab.com/cki-project/kernel-webhooks/]
 
@@ -366,8 +366,8 @@ This will be handled by CKI.
 . Is there a scratch space to work in?  I want to test out my own workflow/patch tools.
 	You can use the https://gitlab.com/redhat/rhel/src/kernel/kernel-test[kernel-test git repository].
 
-. How are Bugzillas and GitLab Merge Requests linked?
-	The <<Kernel-webhooks>> add a link to the MR in the associated Bugzillas' Links section.   If the MR description was written to meet the requirements of link:CommitRules.adoc[CommitRules], then the MR will contain a link to the associated Bugzillas.
+. How are Jiras and GitLab Merge Requests linked?
+	The <<Kernel-webhooks>> add a link to the MR in the associated Jiras' Links section.   If the MR description was written to meet the requirements of link:CommitRules.adoc[CommitRules], then the MR will contain a link to the associated Jiras.
 
 . Can I use my https://gitlab.cee.redhat.com[gitlab.cee.redhat.com] credentials on gitlab.com?
 	No.  gitlab.cee.redhat.com is a completely independent instance of GitLab.  No information is shared between the two instances and we have no plans to do so.  Using a token generated on one instance with the other instance will never work.

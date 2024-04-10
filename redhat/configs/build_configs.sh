@@ -111,7 +111,7 @@ function merge_configs()
 	sort config-merging."$count" >> "$name"
 
 	gcc_version=$(echo __GNUC__ | gcc -E -xc - | grep -v "#")
-	if [ "$arch" == "x86_64" ] && [ $gcc_version -eq 11 ] && [ -n "$ENABLE_WERROR" ]; then
+	if [ "$arch" != "aarch64" ] && [ "$gcc_version" -eq 11 ] && [ -n "$ENABLE_WERROR" ]; then
 		sed -i "s|# CONFIG_WERROR is not set|CONFIG_WERROR=y|g" "$name"
 	fi
 
@@ -160,14 +160,16 @@ function build_flavor()
 			fi
 
 			merge_configs "$arch" "$configs" "$order" "$flavor" "$count" &
+			# shellcheck disable=SC2004
 			waitpids[$count]=$!
 			((count++))
 			while [ "$(jobs | grep -c Running)" -ge "$RHJOBS" ]; do :; done
 		fi
 	done < "$control_file"
 
+	# shellcheck disable=SC2048
 	for pid in ${waitpids[*]}; do
-		wait $pid
+		wait "$pid"
 	done
 }
 

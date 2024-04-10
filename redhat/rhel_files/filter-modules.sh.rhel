@@ -14,7 +14,7 @@
 # listed here.
 
 # Overrides is individual modules which need to remain in kernel-core due to deps.
-overrides="cec"
+overrides="cec isst_if_common isst_tpmi_core isst_tpmi intel_vsec intel_vsec_tpmi"
 
 # Set the default dirs/modules to filter out
 driverdirs="atm auxdisplay bcma bluetooth firewire fmc iio infiniband isdn leds media memstick mfd mmc mtd nfc ntb pcmcia platform power ssb staging tty uio uwb w1"
@@ -33,7 +33,7 @@ scsidrvs="aacraid aic7xxx aic94xx be2iscsi bfa bnx2i bnx2fc csiostor cxgbi esas2
 
 usbdrvs="atm image misc serial wusbcore"
 
-fsdrvs="affs befs cifs coda cramfs ecryptfs hfs hfsplus jfs minix ncpfs nilfs2 ocfs2 reiserfs romfs squashfs sysv ubifs ufs"
+fsdrvs="affs befs smb coda cramfs ecryptfs hfs hfsplus jfs minix ncpfs nilfs2 ocfs2 reiserfs romfs squashfs sysv ubifs ufs"
 
 netprots="6lowpan appletalk atm ax25 batman-adv bluetooth can dccp dsa ieee802154 irda l2tp mac80211 mac802154 mpls netrom nfc rds rfkill rose sctp smc wireless"
 

@@ -29,8 +29,8 @@
  * This file contains setup code for the CRTC.
  */
 
-static void mgag200_crtc_set_gamma_linear(struct mga_device *mdev,
-					  const struct drm_format_info *format)
+void mgag200_crtc_set_gamma_linear(struct mga_device *mdev,
+				   const struct drm_format_info *format)
 {
 	int i;
 
@@ -66,9 +66,9 @@ static void mgag200_crtc_set_gamma_linear(struct mga_device *mdev,
 	}
 }
 
-static void mgag200_crtc_set_gamma(struct mga_device *mdev,
-				   const struct drm_format_info *format,
-				   struct drm_color_lut *lut)
+void mgag200_crtc_set_gamma(struct mga_device *mdev,
+			    const struct drm_format_info *format,
+			    struct drm_color_lut *lut)
 {
 	int i;
 
@@ -509,10 +509,6 @@ void mgag200_primary_plane_helper_atomic_update(struct drm_plane *plane,
 	struct drm_framebuffer *fb = plane_state->fb;
 	struct drm_atomic_helper_damage_iter iter;
 	struct drm_rect damage;
-	u8 seq1;
-
-	if (!fb)
-		return;
 
 	drm_atomic_helper_damage_iter_init(&iter, old_plane_state, plane_state);
 	drm_atomic_for_each_plane_damage(&iter, &damage) {
@@ -522,13 +518,19 @@ void mgag200_primary_plane_helper_atomic_update(struct drm_plane *plane,
 	/* Always scanout image at VRAM offset 0 */
 	mgag200_set_startadd(mdev, (u32)0);
 	mgag200_set_offset(mdev, fb);
+}
 
-	if (!old_plane_state->crtc && plane_state->crtc) { // enabling
-		RREG_SEQ(0x01, seq1);
-		seq1 &= ~MGAREG_SEQ1_SCROFF;
-		WREG_SEQ(0x01, seq1);
-		msleep(20);
-	}
+void mgag200_primary_plane_helper_atomic_enable(struct drm_plane *plane,
+						struct drm_atomic_state *state)
+{
+	struct drm_device *dev = plane->dev;
+	struct mga_device *mdev = to_mga_device(dev);
+	u8 seq1;
+
+	RREG_SEQ(0x01, seq1);
+	seq1 &= ~MGAREG_SEQ1_SCROFF;
+	WREG_SEQ(0x01, seq1);
+	msleep(20);
 }
 
 void mgag200_primary_plane_helper_atomic_disable(struct drm_plane *plane,

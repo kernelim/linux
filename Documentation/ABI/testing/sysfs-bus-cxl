@@ -81,6 +81,22 @@ Description:
 		portX object to the device that published the CXL port
 		capability.
 
+
+What:		/sys/bus/cxl/devices/{port,endpoint}X/parent_dport
+Date:		January, 2023
+KernelVersion:	v6.3
+Contact:	linux-cxl@vger.kernel.org
+Description:
+		(RO) CXL port objects are instantiated for each upstream port in
+		a CXL/PCIe switch, and for each endpoint to map the
+		corresponding memory device into the CXL port hierarchy. When a
+		descendant CXL port (switch or endpoint) is enumerated it is
+		useful to know which 'dport' object in the parent CXL port
+		routes to this descendant. The 'parent_dport' symlink points to
+		the device representing the downstream port of a CXL switch that
+		routes to {port,endpoint}X.
+
+
 What:		/sys/bus/cxl/devices/portX/dportY
 Date:		June, 2021
 KernelVersion:	v5.14
@@ -253,20 +269,20 @@ Description:
 		interleave_granularity).
 
 
-What:		/sys/bus/cxl/devices/decoderX.Y/create_pmem_region
-Date:		May, 2022
-KernelVersion:	v5.20
+What:		/sys/bus/cxl/devices/decoderX.Y/create_{pmem,ram}_region
+Date:		May, 2022, January, 2023
+KernelVersion:	v6.0 (pmem), v6.3 (ram)
 Contact:	linux-cxl@vger.kernel.org
 Description:
 		(RW) Write a string in the form 'regionZ' to start the process
-		of defining a new persistent memory region (interleave-set)
-		within the decode range bounded by root decoder 'decoderX.Y'.
-		The value written must match the current value returned from
-		reading this attribute. An atomic compare exchange operation is
-		done on write to assign the requested id to a region and
-		allocate the region-id for the next creation attempt. EBUSY is
-		returned if the region name written does not match the current
-		cached value.
+		of defining a new persistent, or volatile memory region
+		(interleave-set) within the decode range bounded by root decoder
+		'decoderX.Y'. The value written must match the current value
+		returned from reading this attribute. An atomic compare exchange
+		operation is done on write to assign the requested id to a
+		region and allocate the region-id for the next creation attempt.
+		EBUSY is returned if the region name written does not match the
+		current cached value.
 
 
 What:		/sys/bus/cxl/devices/decoderX.Y/delete_region
@@ -285,7 +301,8 @@ Contact:	linux-cxl@vger.kernel.org
 Description:
 		(RW) Write a unique identifier for the region. This field must
 		be set for persistent regions and it must not conflict with the
-		UUID of another region.
+		UUID of another region. For volatile ram regions this
+		attribute is a read-only empty string.
 
 
 What:		/sys/bus/cxl/devices/regionZ/interleave_granularity
@@ -324,6 +341,17 @@ Description:
 		that data is maintained over an address space freeing event, and
 		there is no guarantee that a free followed by an allocate
 		results in the same address being allocated.
+
+
+What:		/sys/bus/cxl/devices/regionZ/mode
+Date:		January, 2023
+KernelVersion:	v6.3
+Contact:	linux-cxl@vger.kernel.org
+Description:
+		(RO) The mode of a region is established at region creation time
+		and dictates the mode of the endpoint decoder that comprise the
+		region. For more details on the possible modes see
+		/sys/bus/cxl/devices/decoderX.Y/mode
 
 
 What:		/sys/bus/cxl/devices/regionZ/resource

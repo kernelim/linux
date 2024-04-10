@@ -691,6 +691,9 @@
 # define DP_FEC_LANE_2_SELECT		    (2 << 4)
 # define DP_FEC_LANE_3_SELECT		    (3 << 4)
 
+#define DP_SDP_ERROR_DETECTION_CONFIGURATION	0x121	/* DP 2.0 E11 */
+#define DP_SDP_CRC16_128B132B_EN		BIT(0)
+
 #define DP_AUX_FRAME_SYNC_VALUE		    0x15c   /* eDP 1.4 */
 # define DP_AUX_FRAME_SYNC_VALID	    (1 << 0)
 
@@ -979,6 +982,7 @@
 
 #define DP_EDP_GENERAL_CAP_2		    0x703
 # define DP_EDP_OVERDRIVE_ENGINE_ENABLED		(1 << 0)
+# define DP_EDP_PANEL_LUMINANCE_CONTROL_CAPABLE		(1 << 4)
 
 #define DP_EDP_GENERAL_CAP_3		    0x704    /* eDP 1.4 */
 # define DP_EDP_X_REGION_CAP_MASK			(0xf << 0)
@@ -1004,6 +1008,7 @@
 # define DP_EDP_DYNAMIC_BACKLIGHT_ENABLE		(1 << 4)
 # define DP_EDP_REGIONAL_BACKLIGHT_ENABLE		(1 << 5)
 # define DP_EDP_UPDATE_REGION_BRIGHTNESS		(1 << 6) /* eDP 1.4 */
+# define DP_EDP_PANEL_LUMINANCE_CONTROL_ENABLE		(1 << 7)
 
 #define DP_EDP_BACKLIGHT_BRIGHTNESS_MSB     0x722
 #define DP_EDP_BACKLIGHT_BRIGHTNESS_LSB     0x723
@@ -1028,6 +1033,7 @@
 
 #define DP_EDP_DBC_MINIMUM_BRIGHTNESS_SET   0x732
 #define DP_EDP_DBC_MAXIMUM_BRIGHTNESS_SET   0x733
+#define DP_EDP_PANEL_TARGET_LUMINANCE_VALUE 0x734
 
 #define DP_EDP_REGIONAL_BACKLIGHT_BASE      0x740    /* eDP 1.4 */
 #define DP_EDP_REGIONAL_BACKLIGHT_0	    0x741    /* eDP 1.4 */
@@ -1531,7 +1537,7 @@ enum drm_dp_phy {
 
 #define DP_BRANCH_OUI_HEADER_SIZE	0xc
 #define DP_RECEIVER_CAP_SIZE		0xf
-#define DP_DSC_RECEIVER_CAP_SIZE        0xf
+#define DP_DSC_RECEIVER_CAP_SIZE        0x10 /* DSC Capabilities 0x60 through 0x6F */
 #define EDP_PSR_RECEIVER_CAP_SIZE	2
 #define EDP_DISPLAY_CTL_CAP_SIZE	3
 #define DP_LTTPR_COMMON_CAP_SIZE	8
@@ -1629,7 +1635,7 @@ enum dp_pixelformat {
  *
  * This enum is used to indicate DP VSC SDP Colorimetry formats.
  * It is based on DP 1.4 spec [Table 2-117: VSC SDP Payload for DB16 through
- * DB18] and a name of enum member follows DRM_MODE_COLORIMETRY definition.
+ * DB18] and a name of enum member follows enum drm_colorimetry definition.
  *
  * @DP_COLORIMETRY_DEFAULT: sRGB (IEC 61966-2-1) or
  *                          ITU-R BT.601 colorimetry format

@@ -3254,6 +3254,10 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
 	}
 	return new_vma;
 
+	if (new_vma->vm_file)
+		fput(new_vma->vm_file);
+
+	unlink_anon_vmas(new_vma);
 out_free_mempol:
 	mpol_put(vma_policy(new_vma));
 out_free_vma:

@@ -14,6 +14,7 @@
 #include <linux/pid.h>
 #include <linux/sem.h>
 #include <linux/shm.h>
+#include <linux/kmsan_types.h>
 #include <linux/mutex.h>
 #include <linux/plist.h>
 #include <linux/hrtimer.h>
@@ -35,6 +36,7 @@
 #include <linux/seqlock.h>
 #include <linux/kcsan.h>
 #include <linux/rv.h>
+#include <linux/livepatch_sched.h>
 #include <asm/kmap_size.h>
 
 #include <linux/rh_kabi.h>
@@ -83,25 +85,25 @@ struct task_group;
  */
 
 /* Used in tsk->state: */
-#define TASK_RUNNING			0x0000
-#define TASK_INTERRUPTIBLE		0x0001
-#define TASK_UNINTERRUPTIBLE		0x0002
-#define __TASK_STOPPED			0x0004
-#define __TASK_TRACED			0x0008
+#define TASK_RUNNING			0x00000000
+#define TASK_INTERRUPTIBLE		0x00000001
+#define TASK_UNINTERRUPTIBLE		0x00000002
+#define __TASK_STOPPED			0x00000004
+#define __TASK_TRACED			0x00000008
 /* Used in tsk->exit_state: */
-#define EXIT_DEAD			0x0010
-#define EXIT_ZOMBIE			0x0020
+#define EXIT_DEAD			0x00000010
+#define EXIT_ZOMBIE			0x00000020
 #define EXIT_TRACE			(EXIT_ZOMBIE | EXIT_DEAD)
 /* Used in tsk->state again: */
-#define TASK_PARKED			0x0040
-#define TASK_DEAD			0x0080
-#define TASK_WAKEKILL			0x0100
-#define TASK_WAKING			0x0200
-#define TASK_NOLOAD			0x0400
-#define TASK_NEW			0x0800
+#define TASK_PARKED			0x00000040
+#define TASK_DEAD			0x00000080
+#define TASK_WAKEKILL			0x00000100
+#define TASK_WAKING			0x00000200
+#define TASK_NOLOAD			0x00000400
+#define TASK_NEW			0x00000800
 /* RT specific auxilliary flag to mark RT lock waiters */
-#define TASK_RTLOCK_WAIT		0x1000
-#define TASK_STATE_MAX			0x2000
+#define TASK_RTLOCK_WAIT		0x00001000
+#define TASK_STATE_MAX			0x00002000
 
 #define TASK_ANY			(TASK_STATE_MAX-1)
 
@@ -889,9 +891,6 @@ struct task_struct {
 	/* Per-thread vma caching: */
 	struct vmacache			vmacache;
 
-#ifdef SPLIT_RSS_COUNTING
-	struct task_rss_stat		rss_stat;
-#endif
 	int				exit_state;
 	int				exit_code;
 	int				exit_signal;
@@ -936,6 +935,10 @@ struct task_struct {
 #endif
 #ifdef CONFIG_MEMCG
 	unsigned			in_user_fault:1;
+#endif
+#ifdef CONFIG_LRU_GEN
+	/* whether the LRU algorithm may apply to this access */
+	unsigned			in_lru_fault:1;
 #endif
 #ifdef CONFIG_COMPAT_BRK
 	unsigned			brk_randomized:1;
@@ -1374,6 +1377,13 @@ struct task_struct {
 #ifdef CONFIG_TRACE_IRQFLAGS
 	struct irqtrace_events		kcsan_save_irqtrace;
 #endif
+#ifdef CONFIG_KCSAN_WEAK_MEMORY
+	int				kcsan_stack_depth;
+#endif
+#endif
+
+#ifdef CONFIG_KMSAN
+	struct kmsan_ctx		kmsan_ctx;
 #endif
 
 #if IS_ENABLED(CONFIG_KUNIT)
@@ -1485,9 +1495,9 @@ struct task_struct {
 #endif
 #ifdef CONFIG_BPF_SYSCALL
 	/* Used by BPF task local storage */
-	struct bpf_local_storage __rcu	*bpf_storage;
+	RH_KABI_EXCLUDE(struct bpf_local_storage __rcu	*bpf_storage)
 	/* Used for BPF run context */
-	struct bpf_run_ctx		*bpf_ctx;
+	RH_KABI_EXCLUDE(struct bpf_run_ctx		*bpf_ctx)
 #endif
 
 #ifdef CONFIG_GCC_PLUGIN_STACKLEAK
@@ -2014,14 +2024,11 @@ static __always_inline void scheduler_ipi(void)
 	 */
 	preempt_fold_need_resched();
 }
-extern unsigned long wait_task_inactive(struct task_struct *, unsigned int match_state);
 #else
 static inline void scheduler_ipi(void) { }
-static inline unsigned long wait_task_inactive(struct task_struct *p, unsigned int match_state)
-{
-	return 1;
-}
 #endif
+
+extern unsigned long wait_task_inactive(struct task_struct *, unsigned int match_state);
 
 /*
  * Set thread flags in other task's structures.
@@ -2121,6 +2128,9 @@ extern int __cond_resched(void);
 
 #if defined(CONFIG_PREEMPT_DYNAMIC) && defined(CONFIG_HAVE_PREEMPT_DYNAMIC_CALL)
 
+void sched_dynamic_klp_enable(void);
+void sched_dynamic_klp_disable(void);
+
 DECLARE_STATIC_CALL(cond_resched, __cond_resched);
 
 static __always_inline int _cond_resched(void)
@@ -2129,6 +2139,7 @@ static __always_inline int _cond_resched(void)
 }
 
 #elif defined(CONFIG_PREEMPT_DYNAMIC) && defined(CONFIG_HAVE_PREEMPT_DYNAMIC_KEY)
+
 extern int dynamic_cond_resched(void);
 
 static __always_inline int _cond_resched(void)
@@ -2136,20 +2147,25 @@ static __always_inline int _cond_resched(void)
 	return dynamic_cond_resched();
 }
 
-#else
+#else /* !CONFIG_PREEMPTION */
 
 static inline int _cond_resched(void)
 {
+	klp_sched_try_switch();
 	return __cond_resched();
 }
 
-#endif /* CONFIG_PREEMPT_DYNAMIC */
+#endif /* PREEMPT_DYNAMIC && CONFIG_HAVE_PREEMPT_DYNAMIC_CALL */
 
-#else
+#else /* CONFIG_PREEMPTION && !CONFIG_PREEMPT_DYNAMIC */
 
-static inline int _cond_resched(void) { return 0; }
+static inline int _cond_resched(void)
+{
+	klp_sched_try_switch();
+	return 0;
+}
 
-#endif /* !defined(CONFIG_PREEMPTION) || defined(CONFIG_PREEMPT_DYNAMIC) */
+#endif /* !CONFIG_PREEMPTION || CONFIG_PREEMPT_DYNAMIC */
 
 #define cond_resched() ({			\
 	__might_resched(__FILE__, __LINE__, 0);	\

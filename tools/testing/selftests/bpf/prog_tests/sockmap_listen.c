@@ -19,6 +19,11 @@
 #include <sys/select.h>
 #include <unistd.h>
 
+/* workaround for older vm_sockets.h */
+#ifndef VMADDR_CID_LOCAL
+#define VMADDR_CID_LOCAL 1
+#endif
+
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 

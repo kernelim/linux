@@ -375,12 +375,15 @@ int mgag200_primary_plane_helper_atomic_check(struct drm_plane *plane,
 					      struct drm_atomic_state *new_state);
 void mgag200_primary_plane_helper_atomic_update(struct drm_plane *plane,
 						struct drm_atomic_state *old_state);
+void mgag200_primary_plane_helper_atomic_enable(struct drm_plane *plane,
+						struct drm_atomic_state *state);
 void mgag200_primary_plane_helper_atomic_disable(struct drm_plane *plane,
 						 struct drm_atomic_state *old_state);
 #define MGAG200_PRIMARY_PLANE_HELPER_FUNCS \
 	DRM_GEM_SHADOW_PLANE_HELPER_FUNCS, \
 	.atomic_check = mgag200_primary_plane_helper_atomic_check, \
 	.atomic_update = mgag200_primary_plane_helper_atomic_update, \
+	.atomic_enable = mgag200_primary_plane_helper_atomic_enable, \
 	.atomic_disable = mgag200_primary_plane_helper_atomic_disable
 
 #define MGAG200_PRIMARY_PLANE_FUNCS \
@@ -388,6 +391,11 @@ void mgag200_primary_plane_helper_atomic_disable(struct drm_plane *plane,
 	.disable_plane = drm_atomic_helper_disable_plane, \
 	.destroy = drm_plane_cleanup, \
 	DRM_GEM_SHADOW_PLANE_FUNCS
+
+void mgag200_crtc_set_gamma_linear(struct mga_device *mdev, const struct drm_format_info *format);
+void mgag200_crtc_set_gamma(struct mga_device *mdev,
+			    const struct drm_format_info *format,
+			    struct drm_color_lut *lut);
 
 enum drm_mode_status mgag200_crtc_helper_mode_valid(struct drm_crtc *crtc,
 						    const struct drm_display_mode *mode);

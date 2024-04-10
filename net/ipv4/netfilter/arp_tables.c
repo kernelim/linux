@@ -1623,8 +1623,6 @@ static int __init arp_tables_init(void)
 {
 	int ret;
 
-	mark_driver_deprecated("arptables");
-
 	ret = register_pernet_subsys(&arp_tables_net_ops);
 	if (ret < 0)
 		goto err1;

@@ -1,6 +1,7 @@
 /*
    BlueZ - Bluetooth protocol stack for Linux
    Copyright (C) 2000-2001 Qualcomm Incorporated
+   Copyright 2023 NXP
 
    Written 2000,2001 by Maxim Krasnyansky <maxk@qualcomm.com>
 
@@ -171,23 +172,39 @@ struct bt_iso_io_qos {
 	__u8  rtn;
 };
 
-struct bt_iso_qos {
-	union {
-		__u8  cig;
-		__u8  big;
-	};
-	union {
-		__u8  cis;
-		__u8  bis;
-	};
-	union {
-		__u8  sca;
-		__u8  sync_interval;
-	};
+struct bt_iso_ucast_qos {
+	__u8  cig;
+	__u8  cis;
+	__u8  sca;
 	__u8  packing;
 	__u8  framing;
 	struct bt_iso_io_qos in;
 	struct bt_iso_io_qos out;
+};
+
+struct bt_iso_bcast_qos {
+	__u8  big;
+	__u8  bis;
+	__u8  sync_factor;
+	__u8  packing;
+	__u8  framing;
+	struct bt_iso_io_qos in;
+	struct bt_iso_io_qos out;
+	__u8  encryption;
+	__u8  bcode[16];
+	__u8  options;
+	__u16 skip;
+	__u16 sync_timeout;
+	__u8  sync_cte_type;
+	__u8  mse;
+	__u16 timeout;
+};
+
+struct bt_iso_qos {
+	union {
+		struct bt_iso_ucast_qos ucast;
+		struct bt_iso_bcast_qos bcast;
+	};
 };
 
 #define BT_ISO_PHY_1M		0x01
@@ -537,7 +554,7 @@ static inline struct sk_buff *bt_skb_sendmmsg(struct sock *sk,
 	struct sk_buff *skb, **frag;
 
 	skb = bt_skb_sendmsg(sk, msg, len, mtu, headroom, tailroom);
-	if (IS_ERR_OR_NULL(skb))
+	if (IS_ERR(skb))
 		return skb;
 
 	len -= skb->len;
@@ -625,6 +642,7 @@ static inline bool iso_enabled(void)
 
 int mgmt_init(void);
 void mgmt_exit(void);
+void mgmt_cleanup(struct sock *sk);
 
 void bt_sock_reclassify_lock(struct sock *sk, int proto);
 

@@ -432,25 +432,20 @@ submit_and_retry:
 
 int ext4_bio_write_page(struct ext4_io_submit *io,
 			struct page *page,
-			int len,
-			bool keep_towrite)
+			int len)
 {
 	struct page *bounce_page = NULL;
 	struct inode *inode = page->mapping->host;
 	unsigned block_start;
 	struct buffer_head *bh, *head;
 	int ret = 0;
-	int nr_submitted = 0;
 	int nr_to_submit = 0;
 	struct writeback_control *wbc = io->io_wbc;
+	bool keep_towrite = false;
 
 	BUG_ON(!PageLocked(page));
 	BUG_ON(PageWriteback(page));
 
-	if (keep_towrite)
-		set_page_writeback_keepwrite(page);
-	else
-		set_page_writeback(page);
 	ClearPageError(page);
 
 	/*
@@ -484,15 +479,30 @@ int ext4_bio_write_page(struct ext4_io_submit *io,
 			/* A hole? We can safely clear the dirty bit */
 			if (!buffer_mapped(bh))
 				clear_buffer_dirty(bh);
-			if (io->io_bio)
-				ext4_io_submit(io);
+			/*
+			 * Keeping dirty some buffer we cannot write? Make sure
+			 * to redirty the page and keep TOWRITE tag so that
+			 * racing WB_SYNC_ALL writeback does not skip the page.
+			 * This happens e.g. when doing writeout for
+			 * transaction commit.
+			 */
+			if (buffer_dirty(bh)) {
+				if (!PageDirty(page))
+					redirty_page_for_writepage(wbc, page);
+				keep_towrite = true;
+			}
 			continue;
 		}
 		if (buffer_new(bh))
 			clear_buffer_new(bh);
 		set_buffer_async_write(bh);
+		clear_buffer_dirty(bh);
 		nr_to_submit++;
 	} while ((bh = bh->b_this_page) != head);
+
+	/* Nothing to submit? Just unlock the page... */
+	if (!nr_to_submit)
+		return 0;
 
 	bh = head = page_buffers(page);
 
@@ -503,7 +513,7 @@ int ext4_bio_write_page(struct ext4_io_submit *io,
 	 * (e.g. holes) to be unnecessarily encrypted, but this is rare and
 	 * can't happen in the common case of blocksize == PAGE_SIZE.
 	 */
-	if (fscrypt_inode_uses_fs_layer_crypto(inode) && nr_to_submit) {
+	if (fscrypt_inode_uses_fs_layer_crypto(inode)) {
 		gfp_t gfp_flags = GFP_NOFS;
 		unsigned int enc_bytes = round_up(len, i_blocksize(inode));
 
@@ -534,26 +544,28 @@ int ext4_bio_write_page(struct ext4_io_submit *io,
 			printk_ratelimited(KERN_ERR "%s: ret = %d\n", __func__, ret);
 			redirty_page_for_writepage(wbc, page);
 			do {
-				clear_buffer_async_write(bh);
+				if (buffer_async_write(bh)) {
+					clear_buffer_async_write(bh);
+					set_buffer_dirty(bh);
+				}
 				bh = bh->b_this_page;
 			} while (bh != head);
-			goto unlock;
+
+			return ret;
 		}
 	}
+
+	if (keep_towrite)
+		set_page_writeback_keepwrite(page);
+	else
+		set_page_writeback(page);
 
 	/* Now submit buffers to write */
 	do {
 		if (!buffer_async_write(bh))
 			continue;
 		io_submit_add_bh(io, inode, page, bounce_page, bh);
-		nr_submitted++;
-		clear_buffer_dirty(bh);
 	} while ((bh = bh->b_this_page) != head);
 
-unlock:
-	unlock_page(page);
-	/* Nothing submitted - we have to end page writeback */
-	if (!nr_submitted)
-		end_page_writeback(page);
-	return ret;
+	return 0;
 }

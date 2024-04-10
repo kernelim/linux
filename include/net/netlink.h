@@ -7,6 +7,8 @@
 #include <linux/jiffies.h>
 #include <linux/in6.h>
 
+#include <linux/rh_kabi.h>
+
 /* ========================================================================
  *         Netlink Messages and Attributes Interface (As Seen On TV)
  * ------------------------------------------------------------------------
@@ -348,6 +350,11 @@ struct nla_policy {
 		 */
 		u16 strict_start_type;
 	};
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 #define NLA_POLICY_ETH_ADDR		NLA_POLICY_EXACT_LEN(ETH_ALEN)

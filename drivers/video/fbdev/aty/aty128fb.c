@@ -47,6 +47,7 @@
  */
 
 
+#include <linux/aperture.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
@@ -2053,6 +2054,10 @@ static int aty128_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 #ifndef __sparc__
 	void __iomem *bios = NULL;
 #endif
+
+	err = aperture_remove_conflicting_pci_devices(pdev, "aty128fb");
+	if (err)
+		return err;
 
 	/* Enable device in PCI config */
 	if ((err = pci_enable_device(pdev))) {

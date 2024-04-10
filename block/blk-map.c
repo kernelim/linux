@@ -29,9 +29,11 @@ static struct bio_map_data *bio_alloc_map_data(struct iov_iter *data,
 	bmd = kmalloc(struct_size(bmd, iov, data->nr_segs), gfp_mask);
 	if (!bmd)
 		return NULL;
-	memcpy(bmd->iov, data->iov, sizeof(struct iovec) * data->nr_segs);
 	bmd->iter = *data;
-	bmd->iter.iov = bmd->iov;
+	if (iter_is_iovec(data)) {
+		memcpy(bmd->iov, iter_iov(data), sizeof(struct iovec) * data->nr_segs);
+		bmd->iter.__iov = bmd->iov;
+	}
 	return bmd;
 }
 
@@ -246,7 +248,7 @@ static struct bio *blk_rq_map_bio_alloc(struct request *rq,
 {
 	struct bio *bio;
 
-	if (rq->cmd_flags & REQ_ALLOC_CACHE) {
+	if (rq->cmd_flags & REQ_ALLOC_CACHE && (nr_vecs <= BIO_INLINE_VECS)) {
 		bio = bio_alloc_bioset(NULL, nr_vecs, rq->cmd_flags, gfp_mask,
 					&fs_bio_set);
 		if (!bio)
@@ -277,12 +279,19 @@ static int bio_map_user_iov(struct request *rq, struct iov_iter *iter,
 		return -ENOMEM;
 
 	while (iov_iter_count(iter)) {
-		struct page **pages;
+		struct page **pages, *stack_pages[UIO_FASTIOV];
 		ssize_t bytes;
 		size_t offs, added = 0;
 		int npages;
 
-		bytes = iov_iter_get_pages_alloc(iter, &pages, LONG_MAX, &offs);
+		if (nr_vecs <= ARRAY_SIZE(stack_pages)) {
+			pages = stack_pages;
+			bytes = iov_iter_get_pages2(iter, pages, LONG_MAX,
+							nr_vecs, &offs);
+		} else {
+			bytes = iov_iter_get_pages_alloc2(iter, &pages,
+							LONG_MAX, &offs);
+		}
 		if (unlikely(bytes <= 0)) {
 			ret = bytes ? bytes : -EFAULT;
 			goto out_unmap;
@@ -312,17 +321,19 @@ static int bio_map_user_iov(struct request *rq, struct iov_iter *iter,
 				bytes -= n;
 				offs = 0;
 			}
-			iov_iter_advance(iter, added);
 		}
 		/*
 		 * release the pages we didn't map into the bio, if any
 		 */
 		while (j < npages)
 			put_page(pages[j++]);
-		kvfree(pages);
+		if (pages != stack_pages)
+			kvfree(pages);
 		/* couldn't stuff something into bio? */
-		if (bytes)
+		if (bytes) {
+			iov_iter_revert(iter, bytes);
 			break;
+		}
 	}
 
 	ret = blk_rq_append_bio(rq, bio);
@@ -627,7 +638,7 @@ int blk_rq_map_user_iov(struct request_queue *q, struct request *rq,
 		copy = true;
 	else if (iov_iter_is_bvec(iter))
 		map_bvec = true;
-	else if (!iter_is_iovec(iter))
+	else if (!user_backed_iter(iter))
 		copy = true;
 	else if (queue_virt_boundary(q))
 		copy = queue_virt_boundary(q) & iov_iter_gap_alignment(iter);
@@ -668,9 +679,8 @@ int blk_rq_map_user(struct request_queue *q, struct request *rq,
 		    struct rq_map_data *map_data, void __user *ubuf,
 		    unsigned long len, gfp_t gfp_mask)
 {
-	struct iovec iov;
 	struct iov_iter i;
-	int ret = import_single_range(rq_data_dir(rq), ubuf, len, &iov, &i);
+	int ret = import_ubuf(rq_data_dir(rq), ubuf, len, &i);
 
 	if (unlikely(ret < 0))
 		return ret;

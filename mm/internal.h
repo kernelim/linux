@@ -52,6 +52,24 @@ struct folio_batch;
 
 void page_writeback_init(void);
 
+/*
+ * If a 16GB hugetlb folio were mapped by PTEs of all of its 4kB pages,
+ * its nr_pages_mapped would be 0x400000: choose the COMPOUND_MAPPED bit
+ * above that range, instead of 2*(PMD_SIZE/PAGE_SIZE).  Hugetlb currently
+ * leaves nr_pages_mapped at 0, but avoid surprise if it participates later.
+ */
+#define COMPOUND_MAPPED		0x800000
+#define FOLIO_PAGES_MAPPED	(COMPOUND_MAPPED - 1)
+
+/*
+ * How many individual pages have an elevated _mapcount.  Excludes
+ * the folio's entire_mapcount.
+ */
+static inline int folio_nr_pages_mapped(struct folio *folio)
+{
+	return atomic_read(&folio->_nr_pages_mapped) & FOLIO_PAGES_MAPPED;
+}
+
 static inline void *folio_raw_mapping(struct folio *folio)
 {
 	unsigned long mapping = (unsigned long)folio->mapping;
@@ -83,6 +101,7 @@ vm_fault_t do_swap_page(struct vm_fault *vmf);
 void folio_rotate_reclaimable(struct folio *folio);
 bool __folio_end_writeback(struct folio *folio);
 void deactivate_file_folio(struct folio *folio);
+void folio_activate(struct folio *folio);
 
 void free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *start_vma,
 		unsigned long floor, unsigned long ceiling);
@@ -161,6 +180,17 @@ static inline void set_page_refcounted(struct page *page)
 	set_page_count(page, 1);
 }
 
+/*
+ * Return true if a folio needs ->release_folio() calling upon it.
+ */
+static inline bool folio_needs_release(struct folio *folio)
+{
+	struct address_space *mapping = folio_mapping(folio);
+
+	return folio_has_private(folio) ||
+		(mapping && mapping_release_always(mapping));
+}
+
 extern unsigned long highest_memmap_pfn;
 
 /*
@@ -187,7 +217,7 @@ extern void reclaim_throttle(pg_data_t *pgdat, enum vmscan_throttle_state reason
 /*
  * in mm/rmap.c:
  */
-extern pmd_t *mm_find_pmd(struct mm_struct *mm, unsigned long address);
+pmd_t *mm_find_pmd(struct mm_struct *mm, unsigned long address);
 
 /*
  * in mm/page_alloc.c
@@ -375,6 +405,25 @@ extern void *memmap_alloc(phys_addr_t size, phys_addr_t align,
 
 int split_free_page(struct page *free_page,
 			unsigned int order, unsigned long split_pfn_offset);
+
+/*
+ * This will have no effect, other than possibly generating a warning, if the
+ * caller passes in a non-large folio.
+ */
+static inline void folio_set_order(struct folio *folio, unsigned int order)
+{
+	if (WARN_ON_ONCE(!folio_test_large(folio)))
+		return;
+
+	folio->_folio_order = order;
+#ifdef CONFIG_64BIT
+	/*
+	 * When hugetlb dissolves a folio, we need to clear the tail
+	 * page, rather than setting nr_pages to 1.
+	 */
+	folio->_folio_nr_pages = order ? 1U << order : 0;
+#endif
+}
 
 #if defined CONFIG_COMPACTION || defined CONFIG_CMA
 
@@ -713,14 +762,6 @@ extern u64 hwpoison_filter_flags_value;
 extern u64 hwpoison_filter_memcg;
 extern u32 hwpoison_filter_enable;
 
-#ifdef CONFIG_MEMORY_FAILURE
-void clear_hwpoisoned_pages(struct page *memmap, int nr_pages);
-#else
-static inline void clear_hwpoisoned_pages(struct page *memmap, int nr_pages)
-{
-}
-#endif
-
 extern unsigned long  __must_check vm_mmap_pgoff(struct file *, unsigned long,
         unsigned long, unsigned long,
         unsigned long, unsigned long);
@@ -822,12 +863,16 @@ int vmap_pages_range_noflush(unsigned long addr, unsigned long end,
 }
 #endif
 
+int __vmap_pages_range_noflush(unsigned long addr, unsigned long end,
+			       pgprot_t prot, struct page **pages,
+			       unsigned int page_shift);
+
 void vunmap_range_noflush(unsigned long start, unsigned long end);
+
+void __vunmap_range_noflush(unsigned long start, unsigned long end);
 
 int numa_migrate_prep(struct page *page, struct vm_area_struct *vma,
 		      unsigned long addr, int page_nid, int *flags);
-
-DECLARE_PER_CPU(struct per_cpu_nodestat, boot_nodestats);
 
 /*
  * mm/gup.c

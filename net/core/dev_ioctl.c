@@ -7,7 +7,7 @@
 #include <linux/net_tstamp.h>
 #include <linux/wireless.h>
 #include <linux/if_bridge.h>
-#include <net/dsa.h>
+#include <net/dsa_stubs.h>
 #include <net/wext.h>
 
 #include "dev.h"
@@ -183,22 +183,18 @@ static int dev_ifsioc_locked(struct net *net, struct ifreq *ifr, unsigned int cm
 	return err;
 }
 
-static int net_hwtstamp_validate(struct ifreq *ifr)
+static int net_hwtstamp_validate(const struct kernel_hwtstamp_config *cfg)
 {
-	struct hwtstamp_config cfg;
 	enum hwtstamp_tx_types tx_type;
 	enum hwtstamp_rx_filters rx_filter;
 	int tx_type_valid = 0;
 	int rx_filter_valid = 0;
 
-	if (copy_from_user(&cfg, ifr->ifr_data, sizeof(cfg)))
-		return -EFAULT;
-
-	if (cfg.flags & ~HWTSTAMP_FLAG_MASK)
+	if (cfg->flags & ~HWTSTAMP_FLAG_MASK)
 		return -EINVAL;
 
-	tx_type = cfg.tx_type;
-	rx_filter = cfg.rx_filter;
+	tx_type = cfg->tx_type;
+	rx_filter = cfg->rx_filter;
 
 	switch (tx_type) {
 	case HWTSTAMP_TX_OFF:
@@ -246,21 +242,149 @@ static int dev_eth_ioctl(struct net_device *dev,
 			 struct ifreq *ifr, unsigned int cmd)
 {
 	const struct net_device_ops *ops = dev->netdev_ops;
+
+	if (!ops->ndo_eth_ioctl)
+		return -EOPNOTSUPP;
+
+	if (!netif_device_present(dev))
+		return -ENODEV;
+
+	return ops->ndo_eth_ioctl(dev, ifr, cmd);
+}
+
+static int dev_get_hwtstamp(struct net_device *dev, struct ifreq *ifr)
+{
+	const struct net_device_ops *ops = dev->netdev_ops;
+	struct kernel_hwtstamp_config kernel_cfg = {};
+	struct hwtstamp_config cfg;
 	int err;
 
-	err = dsa_ndo_eth_ioctl(dev, ifr, cmd);
-	if (err == 0 || err != -EOPNOTSUPP)
+	if (!ops->ndo_hwtstamp_get)
+		return dev_eth_ioctl(dev, ifr, SIOCGHWTSTAMP); /* legacy */
+
+	if (!netif_device_present(dev))
+		return -ENODEV;
+
+	kernel_cfg.ifr = ifr;
+	err = ops->ndo_hwtstamp_get(dev, &kernel_cfg);
+	if (err)
 		return err;
 
-	if (ops->ndo_eth_ioctl) {
-		if (netif_device_present(dev))
-			err = ops->ndo_eth_ioctl(dev, ifr, cmd);
-		else
-			err = -ENODEV;
+	/* If the request was resolved through an unconverted driver, omit
+	 * the copy_to_user(), since the implementation has already done that
+	 */
+	if (!kernel_cfg.copied_to_user) {
+		hwtstamp_config_from_kernel(&cfg, &kernel_cfg);
+
+		if (copy_to_user(ifr->ifr_data, &cfg, sizeof(cfg)))
+			return -EFAULT;
 	}
 
-	return err;
+	return 0;
 }
+
+static int dev_set_hwtstamp(struct net_device *dev, struct ifreq *ifr)
+{
+	const struct net_device_ops *ops = dev->netdev_ops;
+	struct kernel_hwtstamp_config kernel_cfg = {};
+	struct netlink_ext_ack extack = {};
+	struct hwtstamp_config cfg;
+	int err;
+
+	if (copy_from_user(&cfg, ifr->ifr_data, sizeof(cfg)))
+		return -EFAULT;
+
+	hwtstamp_config_to_kernel(&kernel_cfg, &cfg);
+	kernel_cfg.ifr = ifr;
+
+	err = net_hwtstamp_validate(&kernel_cfg);
+	if (err)
+		return err;
+
+	err = dsa_master_hwtstamp_validate(dev, &kernel_cfg, &extack);
+	if (err) {
+		if (extack._msg)
+			netdev_err(dev, "%s\n", extack._msg);
+		return err;
+	}
+
+	if (!ops->ndo_hwtstamp_set)
+		return dev_eth_ioctl(dev, ifr, SIOCSHWTSTAMP); /* legacy */
+
+	if (!netif_device_present(dev))
+		return -ENODEV;
+
+	err = ops->ndo_hwtstamp_set(dev, &kernel_cfg, &extack);
+	if (err) {
+		if (extack._msg)
+			netdev_err(dev, "%s\n", extack._msg);
+		return err;
+	}
+
+	/* The driver may have modified the configuration, so copy the
+	 * updated version of it back to user space
+	 */
+	if (!kernel_cfg.copied_to_user) {
+		hwtstamp_config_from_kernel(&cfg, &kernel_cfg);
+
+		if (copy_to_user(ifr->ifr_data, &cfg, sizeof(cfg)))
+			return -EFAULT;
+	}
+
+	return 0;
+}
+
+static int generic_hwtstamp_ioctl_lower(struct net_device *dev, int cmd,
+					struct kernel_hwtstamp_config *kernel_cfg)
+{
+	struct ifreq ifrr;
+	int err;
+
+	strscpy_pad(ifrr.ifr_name, dev->name, IFNAMSIZ);
+	ifrr.ifr_ifru = kernel_cfg->ifr->ifr_ifru;
+
+	err = dev_eth_ioctl(dev, &ifrr, cmd);
+	if (err)
+		return err;
+
+	kernel_cfg->ifr->ifr_ifru = ifrr.ifr_ifru;
+	kernel_cfg->copied_to_user = true;
+
+	return 0;
+}
+
+int generic_hwtstamp_get_lower(struct net_device *dev,
+			       struct kernel_hwtstamp_config *kernel_cfg)
+{
+	const struct net_device_ops *ops = dev->netdev_ops;
+
+	if (!netif_device_present(dev))
+		return -ENODEV;
+
+	if (ops->ndo_hwtstamp_get)
+		return ops->ndo_hwtstamp_get(dev, kernel_cfg);
+
+	/* Legacy path: unconverted lower driver */
+	return generic_hwtstamp_ioctl_lower(dev, SIOCGHWTSTAMP, kernel_cfg);
+}
+EXPORT_SYMBOL(generic_hwtstamp_get_lower);
+
+int generic_hwtstamp_set_lower(struct net_device *dev,
+			       struct kernel_hwtstamp_config *kernel_cfg,
+			       struct netlink_ext_ack *extack)
+{
+	const struct net_device_ops *ops = dev->netdev_ops;
+
+	if (!netif_device_present(dev))
+		return -ENODEV;
+
+	if (ops->ndo_hwtstamp_set)
+		return ops->ndo_hwtstamp_set(dev, kernel_cfg, extack);
+
+	/* Legacy path: unconverted lower driver */
+	return generic_hwtstamp_ioctl_lower(dev, SIOCSHWTSTAMP, kernel_cfg);
+}
+EXPORT_SYMBOL(generic_hwtstamp_set_lower);
 
 static int dev_siocbond(struct net_device *dev,
 			struct ifreq *ifr, unsigned int cmd)
@@ -391,36 +515,31 @@ static int dev_ifsioc(struct net *net, struct ifreq *ifr, void __user *data,
 		rtnl_lock();
 		return err;
 
+	case SIOCDEVPRIVATE ... SIOCDEVPRIVATE + 15:
+		return dev_siocdevprivate(dev, ifr, data, cmd);
+
 	case SIOCSHWTSTAMP:
-		err = net_hwtstamp_validate(ifr);
-		if (err)
-			return err;
-		fallthrough;
+		return dev_set_hwtstamp(dev, ifr);
 
-	/*
-	 *	Unknown or private ioctl
-	 */
+	case SIOCGHWTSTAMP:
+		return dev_get_hwtstamp(dev, ifr);
+
+	case SIOCGMIIPHY:
+	case SIOCGMIIREG:
+	case SIOCSMIIREG:
+		return dev_eth_ioctl(dev, ifr, cmd);
+
+	case SIOCBONDENSLAVE:
+	case SIOCBONDRELEASE:
+	case SIOCBONDSETHWADDR:
+	case SIOCBONDSLAVEINFOQUERY:
+	case SIOCBONDINFOQUERY:
+	case SIOCBONDCHANGEACTIVE:
+		return dev_siocbond(dev, ifr, cmd);
+
+	/* Unknown ioctl */
 	default:
-		if (cmd >= SIOCDEVPRIVATE &&
-		    cmd <= SIOCDEVPRIVATE + 15)
-			return dev_siocdevprivate(dev, ifr, data, cmd);
-
-		if (cmd == SIOCGMIIPHY ||
-		    cmd == SIOCGMIIREG ||
-		    cmd == SIOCSMIIREG ||
-		    cmd == SIOCSHWTSTAMP ||
-		    cmd == SIOCGHWTSTAMP) {
-			err = dev_eth_ioctl(dev, ifr, cmd);
-		} else if (cmd == SIOCBONDENSLAVE ||
-		    cmd == SIOCBONDRELEASE ||
-		    cmd == SIOCBONDSETHWADDR ||
-		    cmd == SIOCBONDSLAVEINFOQUERY ||
-		    cmd == SIOCBONDINFOQUERY ||
-		    cmd == SIOCBONDCHANGEACTIVE) {
-			err = dev_siocbond(dev, ifr, cmd);
-		} else
-			err = -EINVAL;
-
+		err = -EINVAL;
 	}
 	return err;
 }

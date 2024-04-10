@@ -17,6 +17,8 @@
 #include <net/ip6_fib.h>
 #include <net/netlink.h>
 
+#include <linux/rh_kabi.h>
+
 #define NEXTHOP_VALID_USER_FLAGS RTNH_F_ONLINK
 
 struct nexthop;
@@ -124,6 +126,9 @@ struct nh_group {
 	bool			resilient;
 	bool			fdb_nh;
 	bool			has_v4;
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 
 	struct nh_res_table __rcu *res_table;
 	struct nh_grp_entry	nh_entries[];

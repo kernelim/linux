@@ -45,6 +45,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <linux/aperture.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/vmalloc.h>
@@ -975,7 +976,7 @@ static phys_addr_t hvfb_get_phymem(struct hv_device *hdev,
 	if (request_size == 0)
 		return -1;
 
-	if (order < MAX_ORDER) {
+	if (order <= MAX_ORDER) {
 		/* Call alloc_pages if the size is less than 2^MAX_ORDER */
 		page = alloc_pages(GFP_KERNEL | __GFP_ZERO, order);
 		if (!page)
@@ -1006,7 +1007,7 @@ static void hvfb_release_phymem(struct hv_device *hdev,
 {
 	unsigned int order = get_order(size);
 
-	if (order < MAX_ORDER)
+	if (order <= MAX_ORDER)
 		__free_pages(pfn_to_page(paddr >> PAGE_SHIFT), order);
 	else
 		dma_free_coherent(&hdev->device,
@@ -1105,8 +1106,9 @@ static int hvfb_getmem(struct hv_device *hdev, struct fb_info *info)
 	info->screen_size = dio_fb_size;
 
 getmem_done:
-	remove_conflicting_framebuffers(info->apertures,
-					KBUILD_MODNAME, false);
+	aperture_remove_conflicting_devices(info->apertures->ranges[0].base,
+					    info->apertures->ranges[0].size,
+					    KBUILD_MODNAME);
 
 	if (gen2vm) {
 		/* framebuffer is reallocated, clear screen_info to avoid misuse from kexec */

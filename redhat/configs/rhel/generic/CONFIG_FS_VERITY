@@ -1,1 +1,1 @@
-# CONFIG_FS_VERITY is not set
+CONFIG_FS_VERITY=y

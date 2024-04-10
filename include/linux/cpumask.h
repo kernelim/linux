@@ -12,6 +12,8 @@
 #include <linux/bitmap.h>
 #include <linux/atomic.h>
 #include <linux/bug.h>
+#include <linux/gfp_types.h>
+#include <linux/numa.h>
 
 /* Don't assign or return these: may not be this big! */
 typedef struct cpumask { DECLARE_BITMAP(bits, NR_CPUS); } cpumask_t;
@@ -102,7 +104,7 @@ extern atomic_t __num_online_cpus;
 
 extern cpumask_t cpus_booted_once_mask;
 
-static inline void cpu_max_bits_warn(unsigned int cpu, unsigned int bits)
+static __always_inline void cpu_max_bits_warn(unsigned int cpu, unsigned int bits)
 {
 #ifdef CONFIG_DEBUG_PER_CPU_MAPS
 	WARN_ON_ONCE(cpu >= bits);
@@ -110,7 +112,7 @@ static inline void cpu_max_bits_warn(unsigned int cpu, unsigned int bits)
 }
 
 /* verify cpu argument to cpumask_* operators */
-static inline unsigned int cpumask_check(unsigned int cpu)
+static __always_inline unsigned int cpumask_check(unsigned int cpu)
 {
 	cpu_max_bits_warn(cpu, nr_cpumask_bits);
 	return cpu;
@@ -825,9 +827,35 @@ typedef struct cpumask *cpumask_var_t;
 #define __cpumask_var_read_mostly	__read_mostly
 
 bool alloc_cpumask_var_node(cpumask_var_t *mask, gfp_t flags, int node);
-bool alloc_cpumask_var(cpumask_var_t *mask, gfp_t flags);
-bool zalloc_cpumask_var_node(cpumask_var_t *mask, gfp_t flags, int node);
-bool zalloc_cpumask_var(cpumask_var_t *mask, gfp_t flags);
+
+static inline
+bool zalloc_cpumask_var_node(cpumask_var_t *mask, gfp_t flags, int node)
+{
+	return alloc_cpumask_var_node(mask, flags | __GFP_ZERO, node);
+}
+
+/**
+ * alloc_cpumask_var - allocate a struct cpumask
+ * @mask: pointer to cpumask_var_t where the cpumask is returned
+ * @flags: GFP_ flags
+ *
+ * Only defined when CONFIG_CPUMASK_OFFSTACK=y, otherwise is
+ * a nop returning a constant 1 (in <linux/cpumask.h>).
+ *
+ * See alloc_cpumask_var_node.
+ */
+static inline
+bool alloc_cpumask_var(cpumask_var_t *mask, gfp_t flags)
+{
+	return alloc_cpumask_var_node(mask, flags, NUMA_NO_NODE);
+}
+
+static inline
+bool zalloc_cpumask_var(cpumask_var_t *mask, gfp_t flags)
+{
+	return alloc_cpumask_var(mask, flags | __GFP_ZERO);
+}
+
 void alloc_bootmem_cpumask_var(cpumask_var_t *mask);
 void free_cpumask_var(cpumask_var_t mask);
 void free_bootmem_cpumask_var(cpumask_var_t mask);

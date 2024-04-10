@@ -129,6 +129,10 @@ xfs_growfs_data_private(
 	if (delta < 0 && nagcount < 2)
 		return -EINVAL;
 
+	/* No work to do */
+	if (delta == 0)
+		return 0;
+
 	oagcount = mp->m_sb.sb_agcount;
 	/* allocate the new per-ag structures */
 	if (nagcount > oagcount) {
@@ -140,9 +144,13 @@ xfs_growfs_data_private(
 		return -EINVAL;
 	}
 
-	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_growdata,
-			(delta > 0 ? XFS_GROWFS_SPACE_RES(mp) : -delta), 0,
-			XFS_TRANS_RESERVE, &tp);
+	if (delta > 0)
+		error = xfs_trans_alloc(mp, &M_RES(mp)->tr_growdata,
+				XFS_GROWFS_SPACE_RES(mp), 0, XFS_TRANS_RESERVE,
+				&tp);
+	else
+		error = xfs_trans_alloc(mp, &M_RES(mp)->tr_growdata, -delta, 0,
+				0, &tp);
 	if (error)
 		return error;
 
@@ -534,6 +542,9 @@ xfs_do_force_shutdown(
 	} else if (flags & SHUTDOWN_CORRUPT_ONDISK) {
 		tag = XFS_PTAG_SHUTDOWN_CORRUPT;
 		why = "Corruption of on-disk metadata";
+	} else if (flags & SHUTDOWN_DEVICE_REMOVED) {
+		tag = XFS_PTAG_SHUTDOWN_IOERROR;
+		why = "Block device removal";
 	} else {
 		tag = XFS_PTAG_SHUTDOWN_IOERROR;
 		why = "Metadata I/O Error";

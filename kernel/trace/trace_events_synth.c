@@ -809,10 +809,9 @@ static int register_synth_event(struct synth_event *event)
 	}
 
 	ret = set_synth_event_print_fmt(call);
-	if (ret < 0) {
+	/* unregister_trace_event() will be called inside */
+	if (ret < 0)
 		trace_remove_event_call(call);
-		goto err;
-	}
  out:
 	return ret;
  err:
@@ -1237,9 +1236,8 @@ static int __create_synth_event(const char *name, const char *raw_fields)
 						  argv + consumed, &consumed,
 						  &field_version);
 			if (IS_ERR(field)) {
-				argv_free(argv);
 				ret = PTR_ERR(field);
-				goto err;
+				goto err_free_arg;
 			}
 
 			/*
@@ -1262,18 +1260,19 @@ static int __create_synth_event(const char *name, const char *raw_fields)
 			if (cmd_version > 1 && n_fields_this_loop >= 1) {
 				synth_err(SYNTH_ERR_INVALID_CMD, errpos(field_str));
 				ret = -EINVAL;
-				goto err;
+				goto err_free_arg;
 			}
 
-			fields[n_fields++] = field;
 			if (n_fields == SYNTH_FIELDS_MAX) {
 				synth_err(SYNTH_ERR_TOO_MANY_FIELDS, 0);
 				ret = -EINVAL;
-				goto err;
+				goto err_free_arg;
 			}
+			fields[n_fields++] = field;
 
 			n_fields_this_loop++;
 		}
+		argv_free(argv);
 
 		if (consumed < argc) {
 			synth_err(SYNTH_ERR_INVALID_CMD, 0);
@@ -1281,7 +1280,6 @@ static int __create_synth_event(const char *name, const char *raw_fields)
 			goto err;
 		}
 
-		argv_free(argv);
 	}
 
 	if (n_fields == 0) {
@@ -1307,6 +1305,8 @@ static int __create_synth_event(const char *name, const char *raw_fields)
 	kfree(saved_fields);
 
 	return ret;
+ err_free_arg:
+	argv_free(argv);
  err:
 	for (i = 0; i < n_fields; i++)
 		free_synth_field(fields[i]);

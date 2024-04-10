@@ -27,8 +27,8 @@ type SubSystem struct {
 		EmailLabel string `emailLabel`
 	}
 	Status string `status`
+	JiraComponent string `jiraComponent`
 	DevelSst []string `devel-sst`
-	QeSst []string `qe-sst`
 	Maintainers []NameAndEmail `maintainers`
 	Reviewers []NameAndEmail `reviewers`
 	Paths struct {
@@ -105,24 +105,18 @@ func main() {
 				       "Kconfig",
 				      }
 	for _, s := range subSystems.SubSys {
+		// check that jiraComponent is set
+		if s.JiraComponent == "" {
+			log.Fatalf("error: '%s' is missing a jiraComponent entry", s.Subsystem)
+		}
 		// check that devel-sst is set
 		if s.DevelSst == nil {
 			log.Fatalf("error: '%s' is missing a devel-sst entry", s.Subsystem)
-		}
-		// check that qe-sst is set
-		if s.QeSst == nil {
-			log.Fatalf("error: '%s' is missing a qe-sst entry", s.Subsystem)
 		}
 		// check that the devel-sst is valid
 		for _, sst := range s.DevelSst {
 			if !contains(validSSTNames, sst) {
 				log.Fatalf("error: '%s' devel-sst entry (%s) is not valid", s.Subsystem, sst)
-			}
-		}
-		// check that the qe-sst is valid
-		for _, sst := range s.QeSst {
-			if !contains(validSSTNames, sst) {
-				log.Fatalf("error: '%s' qe-sst entry (%s) is not valid", s.Subsystem, sst)
 			}
 		}
 

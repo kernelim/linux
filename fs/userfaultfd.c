@@ -108,6 +108,21 @@ static bool userfaultfd_is_initialized(struct userfaultfd_ctx *ctx)
 	return ctx->features & UFFD_FEATURE_INITIALIZED;
 }
 
+/*
+ * Whether WP_UNPOPULATED is enabled on the uffd context.  It is only
+ * meaningful when userfaultfd_wp()==true on the vma and when it's
+ * anonymous.
+ */
+bool userfaultfd_wp_unpopulated(struct vm_area_struct *vma)
+{
+	struct userfaultfd_ctx *ctx = vma->vm_userfaultfd_ctx.ctx;
+
+	if (!ctx)
+		return false;
+
+	return ctx->features & UFFD_FEATURE_WP_UNPOPULATED;
+}
+
 static void userfaultfd_set_vm_flags(struct vm_area_struct *vma,
 				     vm_flags_t flags)
 {
@@ -252,14 +267,12 @@ static inline bool userfaultfd_huge_must_wait(struct userfaultfd_ctx *ctx,
 					 unsigned long flags,
 					 unsigned long reason)
 {
-	struct mm_struct *mm = ctx->mm;
 	pte_t *ptep, pte;
 	bool ret = true;
 
-	mmap_assert_locked(mm);
+	mmap_assert_locked(ctx->mm);
 
-	ptep = huge_pte_offset(mm, address, vma_mmu_pagesize(vma));
-
+	ptep = hugetlb_walk(vma, address, vma_mmu_pagesize(vma));
 	if (!ptep)
 		goto out;
 
@@ -321,20 +334,13 @@ static inline bool userfaultfd_must_wait(struct userfaultfd_ctx *ctx,
 	if (!pud_present(*pud))
 		goto out;
 	pmd = pmd_offset(pud, address);
-	/*
-	 * READ_ONCE must function as a barrier with narrower scope
-	 * and it must be equivalent to:
-	 *	_pmd = *pmd; barrier();
-	 *
-	 * This is to deal with the instability (as in
-	 * pmd_trans_unstable) of the pmd.
-	 */
-	_pmd = READ_ONCE(*pmd);
+again:
+	_pmd = pmdp_get_lockless(pmd);
 	if (pmd_none(_pmd))
 		goto out;
 
 	ret = false;
-	if (!pmd_present(_pmd))
+	if (!pmd_present(_pmd) || pmd_devmap(_pmd))
 		goto out;
 
 	if (pmd_trans_huge(_pmd)) {
@@ -343,11 +349,11 @@ static inline bool userfaultfd_must_wait(struct userfaultfd_ctx *ctx,
 		goto out;
 	}
 
-	/*
-	 * the pmd is stable (as in !pmd_trans_unstable) so we can re-read it
-	 * and use the standard pte_offset_map() instead of parsing _pmd.
-	 */
 	pte = pte_offset_map(pmd, address);
+	if (!pte) {
+		ret = true;
+		goto again;
+	}
 	/*
 	 * Lockless access: we're in a wait_event so it's ok if it
 	 * changes under us.  PTE markers should be handled the same as none
@@ -391,7 +397,8 @@ static inline unsigned int userfaultfd_get_blocking_state(unsigned int flags)
  */
 vm_fault_t handle_userfault(struct vm_fault *vmf, unsigned long reason)
 {
-	struct mm_struct *mm = vmf->vma->vm_mm;
+	struct vm_area_struct *vma = vmf->vma;
+	struct mm_struct *mm = vma->vm_mm;
 	struct userfaultfd_ctx *ctx;
 	struct userfaultfd_wait_queue uwq;
 	vm_fault_t ret = VM_FAULT_SIGBUS;
@@ -418,7 +425,7 @@ vm_fault_t handle_userfault(struct vm_fault *vmf, unsigned long reason)
 	 */
 	mmap_assert_locked(mm);
 
-	ctx = vmf->vma->vm_userfaultfd_ctx.ctx;
+	ctx = vma->vm_userfaultfd_ctx.ctx;
 	if (!ctx)
 		goto out;
 
@@ -508,6 +515,15 @@ vm_fault_t handle_userfault(struct vm_fault *vmf, unsigned long reason)
 
 	blocking_state = userfaultfd_get_blocking_state(vmf->flags);
 
+        /*
+         * Take the vma lock now, in order to safely call
+         * userfaultfd_huge_must_wait() later. Since acquiring the
+         * (sleepable) vma lock can modify the current task state, that
+         * must be before explicitly calling set_current_state().
+         */
+	if (is_vm_hugetlb_page(vma))
+		hugetlb_vma_lock_read(vma);
+
 	spin_lock_irq(&ctx->fault_pending_wqh.lock);
 	/*
 	 * After the __add_wait_queue the uwq is visible to userland
@@ -522,13 +538,15 @@ vm_fault_t handle_userfault(struct vm_fault *vmf, unsigned long reason)
 	set_current_state(blocking_state);
 	spin_unlock_irq(&ctx->fault_pending_wqh.lock);
 
-	if (!is_vm_hugetlb_page(vmf->vma))
+	if (!is_vm_hugetlb_page(vma))
 		must_wait = userfaultfd_must_wait(ctx, vmf->address, vmf->flags,
 						  reason);
 	else
-		must_wait = userfaultfd_huge_must_wait(ctx, vmf->vma,
+		must_wait = userfaultfd_huge_must_wait(ctx, vma,
 						       vmf->address,
 						       vmf->flags, reason);
+	if (is_vm_hugetlb_page(vma))
+		hugetlb_vma_unlock_read(vma);
 	mmap_read_unlock(mm);
 
 	if (likely(must_wait && !READ_ONCE(ctx->released))) {
@@ -1002,7 +1020,7 @@ static int resolve_userfault_fork(struct userfaultfd_ctx *new,
 {
 	int fd;
 
-	fd = anon_inode_getfd_secure("[userfaultfd]", &userfaultfd_fops, new,
+	fd = anon_inode_create_getfd("[userfaultfd]", &userfaultfd_fops, new,
 			O_RDWR | (new->flags & UFFD_SHARED_FCNTL_FLAGS), inode);
 	if (fd < 0)
 		return fd;
@@ -1959,6 +1977,7 @@ static int userfaultfd_api(struct userfaultfd_ctx *ctx,
 #endif
 #ifndef CONFIG_PTE_MARKER_UFFD_WP
 	uffdio_api.features &= ~UFFD_FEATURE_WP_HUGETLBFS_SHMEM;
+	uffdio_api.features &= ~UFFD_FEATURE_WP_UNPOPULATED;
 #endif
 	uffdio_api.ioctls = UFFD_API_IOCTLS;
 	ret = -EFAULT;
@@ -2098,7 +2117,8 @@ static int new_userfaultfd(int flags)
 	/* prevent the mm struct to be freed */
 	mmgrab(ctx->mm);
 
-	fd = anon_inode_getfd_secure("[userfaultfd]", &userfaultfd_fops, ctx,
+	/* Create a new inode so that the LSM can block the creation.  */
+	fd = anon_inode_create_getfd("[userfaultfd]", &userfaultfd_fops, ctx,
 			O_RDWR | (flags & UFFD_SHARED_FCNTL_FLAGS), NULL);
 	if (fd < 0) {
 		mmdrop(ctx->mm);

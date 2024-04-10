@@ -205,7 +205,7 @@ struct w83793_data {
 	struct i2c_client *lm75[2];
 	struct device *hwmon_dev;
 	struct mutex update_lock;
-	char valid;			/* !=0 if following fields are valid */
+	bool valid;			/* true if following fields are valid */
 	unsigned long last_updated;	/* In jiffies */
 	unsigned long last_nonvolatile;	/* In jiffies, last time we update the
 					 * nonvolatile registers
@@ -453,7 +453,7 @@ store_chassis_clear(struct device *dev,
 	mutex_lock(&data->update_lock);
 	reg = w83793_read_value(client, W83793_REG_CLR_CHASSIS);
 	w83793_write_value(client, W83793_REG_CLR_CHASSIS, reg | 0x80);
-	data->valid = 0;		/* Force cache refresh */
+	data->valid = false;		/* Force cache refresh */
 	mutex_unlock(&data->update_lock);
 	return count;
 }
@@ -2081,7 +2081,7 @@ static struct w83793_data *w83793_update_device(struct device *dev)
 		data->vid[1] = w83793_read_value(client, W83793_REG_VID_INB);
 	w83793_update_nonvolatile(dev);
 	data->last_updated = jiffies;
-	data->valid = 1;
+	data->valid = true;
 
 END:
 	mutex_unlock(&data->update_lock);

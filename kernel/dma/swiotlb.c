@@ -71,7 +71,7 @@ struct io_tlb_slot {
 static bool swiotlb_force_bounce;
 static bool swiotlb_force_disable;
 
-struct io_tlb_mem io_tlb_default_mem;
+static struct io_tlb_mem io_tlb_default_mem;
 
 static unsigned long default_nslabs = IO_TLB_DEFAULT_SIZE >> IO_TLB_SHIFT;
 static unsigned long default_nareas;
@@ -115,9 +115,16 @@ static bool round_up_default_nslabs(void)
 	return true;
 }
 
+/**
+ * swiotlb_adjust_nareas() - adjust the number of areas and slots
+ * @nareas:	Desired number of areas. Zero is treated as 1.
+ *
+ * Adjust the default number of areas in a memory pool.
+ * The default size of the memory pool may also change to meet minimum area
+ * size requirements.
+ */
 static void swiotlb_adjust_nareas(unsigned int nareas)
 {
-	/* use a single area when non is specified */
 	if (!nareas)
 		nareas = 1;
 	else if (!is_power_of_2(nareas))
@@ -129,6 +136,23 @@ static void swiotlb_adjust_nareas(unsigned int nareas)
 	if (round_up_default_nslabs())
 		pr_info("SWIOTLB bounce buffer size roundup to %luMB",
 			(default_nslabs << IO_TLB_SHIFT) >> 20);
+}
+
+/**
+ * limit_nareas() - get the maximum number of areas for a given memory pool size
+ * @nareas:	Desired number of areas.
+ * @nslots:	Total number of slots in the memory pool.
+ *
+ * Limit the number of areas to the maximum possible number of areas in
+ * a memory pool of the given size.
+ *
+ * Return: Maximum possible number of areas.
+ */
+static unsigned int limit_nareas(unsigned int nareas, unsigned long nslots)
+{
+	if (nslots < nareas * IO_TLB_SEGSIZE)
+		return nslots / IO_TLB_SEGSIZE;
+	return nareas;
 }
 
 static int __init
@@ -290,6 +314,7 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 {
 	struct io_tlb_mem *mem = &io_tlb_default_mem;
 	unsigned long nslabs;
+	unsigned int nareas;
 	size_t alloc_size;
 	void *tlb;
 
@@ -298,18 +323,16 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	if (swiotlb_force_disable)
 		return;
 
-	/*
-	 * default_nslabs maybe changed when adjust area number.
-	 * So allocate bounce buffer after adjusting area number.
-	 */
 	if (!default_nareas)
 		swiotlb_adjust_nareas(num_possible_cpus());
 
 	nslabs = default_nslabs;
+	nareas = limit_nareas(default_nareas, nslabs);
 	while ((tlb = swiotlb_memblock_alloc(nslabs, flags, remap)) == NULL) {
 		if (nslabs <= IO_TLB_MIN_SLABS)
 			return;
 		nslabs = ALIGN(nslabs >> 1, IO_TLB_SEGSIZE);
+		nareas = limit_nareas(nareas, nslabs);
 	}
 
 	if (default_nslabs != nslabs) {
@@ -327,14 +350,13 @@ void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
 	}
 
 	mem->areas = memblock_alloc(array_size(sizeof(struct io_tlb_area),
-		default_nareas), SMP_CACHE_BYTES);
+		nareas), SMP_CACHE_BYTES);
 	if (!mem->areas) {
 		pr_warn("%s: Failed to allocate mem->areas.\n", __func__);
 		return;
 	}
 
-	swiotlb_init_io_tlb_mem(mem, __pa(tlb), nslabs, flags, false,
-				default_nareas);
+	swiotlb_init_io_tlb_mem(mem, __pa(tlb), nslabs, flags, false, nareas);
 
 	if (flags & SWIOTLB_VERBOSE)
 		swiotlb_print_info();
@@ -355,13 +377,20 @@ int swiotlb_init_late(size_t size, gfp_t gfp_mask,
 {
 	struct io_tlb_mem *mem = &io_tlb_default_mem;
 	unsigned long nslabs = ALIGN(size >> IO_TLB_SHIFT, IO_TLB_SEGSIZE);
+	unsigned int nareas;
 	unsigned char *vstart = NULL;
 	unsigned int order, area_order;
 	bool retried = false;
 	int rc = 0;
 
+	if (io_tlb_default_mem.nslabs)
+		return 0;
+
 	if (swiotlb_force_disable)
 		return 0;
+
+	if (!default_nareas)
+		swiotlb_adjust_nareas(num_possible_cpus());
 
 retry:
 	order = get_order(nslabs << IO_TLB_SHIFT);
@@ -397,11 +426,8 @@ retry:
 			(PAGE_SIZE << order) >> 20);
 	}
 
-	if (!default_nareas)
-		swiotlb_adjust_nareas(num_possible_cpus());
-
-	area_order = get_order(array_size(sizeof(*mem->areas),
-		default_nareas));
+	nareas = limit_nareas(default_nareas, nslabs);
+	area_order = get_order(array_size(sizeof(*mem->areas), nareas));
 	mem->areas = (struct io_tlb_area *)
 		__get_free_pages(GFP_KERNEL | __GFP_ZERO, area_order);
 	if (!mem->areas)
@@ -415,7 +441,7 @@ retry:
 	set_memory_decrypted((unsigned long)vstart,
 			     (nslabs << IO_TLB_SHIFT) >> PAGE_SHIFT);
 	swiotlb_init_io_tlb_mem(mem, virt_to_phys(vstart), nslabs, 0, true,
-				default_nareas);
+				nareas);
 
 	swiotlb_print_info();
 	return 0;
@@ -460,6 +486,15 @@ void __init swiotlb_exit(void)
 	}
 
 	memset(mem, 0, sizeof(*mem));
+}
+
+/**
+ * swiotlb_dev_init() - initialize swiotlb fields in &struct device
+ * @dev:	Device to be initialized.
+ */
+void swiotlb_dev_init(struct device *dev)
+{
+	dev->dma_io_tlb_mem = &io_tlb_default_mem;
 }
 
 /*
@@ -553,9 +588,7 @@ static inline phys_addr_t slot_addr(phys_addr_t start, phys_addr_t idx)
  */
 static inline unsigned long get_max_slots(unsigned long boundary_mask)
 {
-	if (boundary_mask == ~0UL)
-		return 1UL << (BITS_PER_LONG - IO_TLB_SHIFT);
-	return nr_slots(boundary_mask + 1);
+	return (boundary_mask >> IO_TLB_SHIFT) + 1;
 }
 
 static unsigned int wrap_area_index(struct io_tlb_mem *mem, unsigned int index)
@@ -564,6 +597,40 @@ static unsigned int wrap_area_index(struct io_tlb_mem *mem, unsigned int index)
 		return 0;
 	return index;
 }
+
+/*
+ * Track the total used slots with a global atomic value in order to have
+ * correct information to determine the high water mark. The mem_used()
+ * function gives imprecise results because there's no locking across
+ * multiple areas.
+ */
+#ifdef CONFIG_DEBUG_FS
+static void inc_used_and_hiwater(struct io_tlb_mem *mem, unsigned int nslots)
+{
+	unsigned long old_hiwater, new_used;
+
+	new_used = atomic_long_add_return(nslots, &mem->total_used);
+	old_hiwater = atomic_long_read(&mem->used_hiwater);
+	do {
+		if (new_used <= old_hiwater)
+			break;
+	} while (!atomic_long_try_cmpxchg(&mem->used_hiwater,
+					  &old_hiwater, new_used));
+}
+
+static void dec_used(struct io_tlb_mem *mem, unsigned int nslots)
+{
+	atomic_long_sub(nslots, &mem->total_used);
+}
+
+#else /* !CONFIG_DEBUG_FS */
+static void inc_used_and_hiwater(struct io_tlb_mem *mem, unsigned int nslots)
+{
+}
+static void dec_used(struct io_tlb_mem *mem, unsigned int nslots)
+{
+}
+#endif /* CONFIG_DEBUG_FS */
 
 /*
  * Find a suitable number of IO TLB entries size that will fit this request and
@@ -659,6 +726,8 @@ found:
 	area->index = wrap_area_index(mem, index + nslots);
 	area->used += nslots;
 	spin_unlock_irqrestore(&area->lock, flags);
+
+	inc_used_and_hiwater(mem, nslots);
 	return slot_index;
 }
 
@@ -681,6 +750,15 @@ static int swiotlb_find_slots(struct device *dev, phys_addr_t orig_addr,
 	return -1;
 }
 
+#ifdef CONFIG_DEBUG_FS
+
+static unsigned long mem_used(struct io_tlb_mem *mem)
+{
+	return atomic_long_read(&mem->total_used);
+}
+
+#else /* !CONFIG_DEBUG_FS */
+
 static unsigned long mem_used(struct io_tlb_mem *mem)
 {
 	int i;
@@ -690,6 +768,8 @@ static unsigned long mem_used(struct io_tlb_mem *mem)
 		used += mem->areas[i].used;
 	return used;
 }
+
+#endif /* CONFIG_DEBUG_FS */
 
 phys_addr_t swiotlb_tbl_map_single(struct device *dev, phys_addr_t orig_addr,
 		size_t mapping_size, size_t alloc_size,
@@ -791,6 +871,8 @@ static void swiotlb_release_slots(struct device *dev, phys_addr_t tlb_addr)
 		mem->slots[i].list = ++count;
 	area->used -= nslots;
 	spin_unlock_irqrestore(&area->lock, flags);
+
+	dec_used(mem, nslots);
 }
 
 /*
@@ -877,42 +959,108 @@ size_t swiotlb_max_mapping_size(struct device *dev)
 	return ((size_t)IO_TLB_SIZE) * IO_TLB_SEGSIZE - min_align;
 }
 
+/**
+ * is_swiotlb_allocated() - check if the default software IO TLB is initialized
+ */
+bool is_swiotlb_allocated(void)
+{
+	return io_tlb_default_mem.nslabs;
+}
+
 bool is_swiotlb_active(struct device *dev)
 {
 	struct io_tlb_mem *mem = dev->dma_io_tlb_mem;
 
 	return mem && mem->nslabs;
 }
-EXPORT_SYMBOL_GPL(is_swiotlb_active);
+
+/**
+ * default_swiotlb_base() - get the base address of the default SWIOTLB
+ *
+ * Get the lowest physical address used by the default software IO TLB pool.
+ */
+phys_addr_t default_swiotlb_base(void)
+{
+	return io_tlb_default_mem.start;
+}
+
+/**
+ * default_swiotlb_limit() - get the address limit of the default SWIOTLB
+ *
+ * Get the highest physical address used by the default software IO TLB pool.
+ */
+phys_addr_t default_swiotlb_limit(void)
+{
+	return io_tlb_default_mem.end - 1;
+}
+
+#ifdef CONFIG_DEBUG_FS
 
 static int io_tlb_used_get(void *data, u64 *val)
 {
-	*val = mem_used(&io_tlb_default_mem);
+	struct io_tlb_mem *mem = data;
+
+	*val = mem_used(mem);
 	return 0;
 }
+
+static int io_tlb_hiwater_get(void *data, u64 *val)
+{
+	struct io_tlb_mem *mem = data;
+
+	*val = atomic_long_read(&mem->used_hiwater);
+	return 0;
+}
+
+static int io_tlb_hiwater_set(void *data, u64 val)
+{
+	struct io_tlb_mem *mem = data;
+
+	/* Only allow setting to zero */
+	if (val != 0)
+		return -EINVAL;
+
+	atomic_long_set(&mem->used_hiwater, val);
+	return 0;
+}
+
 DEFINE_DEBUGFS_ATTRIBUTE(fops_io_tlb_used, io_tlb_used_get, NULL, "%llu\n");
+DEFINE_DEBUGFS_ATTRIBUTE(fops_io_tlb_hiwater, io_tlb_hiwater_get,
+				io_tlb_hiwater_set, "%llu\n");
 
 static void swiotlb_create_debugfs_files(struct io_tlb_mem *mem,
 					 const char *dirname)
 {
+	atomic_long_set(&mem->total_used, 0);
+	atomic_long_set(&mem->used_hiwater, 0);
+
 	mem->debugfs = debugfs_create_dir(dirname, io_tlb_default_mem.debugfs);
 	if (!mem->nslabs)
 		return;
 
 	debugfs_create_ulong("io_tlb_nslabs", 0400, mem->debugfs, &mem->nslabs);
-	debugfs_create_file("io_tlb_used", 0400, mem->debugfs, NULL,
+	debugfs_create_file("io_tlb_used", 0400, mem->debugfs, mem,
 			&fops_io_tlb_used);
+	debugfs_create_file("io_tlb_used_hiwater", 0600, mem->debugfs, mem,
+			&fops_io_tlb_hiwater);
 }
 
-static int __init __maybe_unused swiotlb_create_default_debugfs(void)
+static int __init swiotlb_create_default_debugfs(void)
 {
 	swiotlb_create_debugfs_files(&io_tlb_default_mem, "swiotlb");
 	return 0;
 }
 
-#ifdef CONFIG_DEBUG_FS
 late_initcall(swiotlb_create_default_debugfs);
-#endif
+
+#else  /* !CONFIG_DEBUG_FS */
+
+static inline void swiotlb_create_debugfs_files(struct io_tlb_mem *mem,
+						const char *dirname)
+{
+}
+
+#endif	/* CONFIG_DEBUG_FS */
 
 #ifdef CONFIG_DMA_RESTRICTED_POOL
 
@@ -954,6 +1102,11 @@ static int rmem_swiotlb_device_init(struct reserved_mem *rmem,
 
 	/* Set Per-device io tlb area to one */
 	unsigned int nareas = 1;
+
+	if (PageHighMem(pfn_to_page(PHYS_PFN(rmem->base)))) {
+		dev_err(dev, "Restricted DMA pool must be accessible within the linear mapping.");
+		return -EINVAL;
+	}
 
 	/*
 	 * Since multiple devices can share the same pool, the private data,
@@ -1015,11 +1168,6 @@ static int __init rmem_swiotlb_setup(struct reserved_mem *rmem)
 	    of_get_flat_dt_prop(node, "linux,dma-default", NULL) ||
 	    of_get_flat_dt_prop(node, "no-map", NULL))
 		return -EINVAL;
-
-	if (PageHighMem(pfn_to_page(PHYS_PFN(rmem->base)))) {
-		pr_err("Restricted DMA pool must be accessible within the linear mapping.");
-		return -EINVAL;
-	}
 
 	rmem->ops = &rmem_swiotlb_ops;
 	pr_info("Reserved memory: created restricted DMA pool at %pa, size %ld MiB\n",

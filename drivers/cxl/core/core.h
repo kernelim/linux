@@ -11,6 +11,7 @@ extern struct attribute_group cxl_base_attribute_group;
 
 #ifdef CONFIG_CXL_REGION
 extern struct device_attribute dev_attr_create_pmem_region;
+extern struct device_attribute dev_attr_create_ram_region;
 extern struct device_attribute dev_attr_delete_region;
 extern struct device_attribute dev_attr_region;
 extern const struct device_type cxl_pmem_region_type;
@@ -54,10 +55,17 @@ int cxl_dpa_alloc(struct cxl_endpoint_decoder *cxled, unsigned long long size);
 int cxl_dpa_free(struct cxl_endpoint_decoder *cxled);
 resource_size_t cxl_dpa_size(struct cxl_endpoint_decoder *cxled);
 resource_size_t cxl_dpa_resource_start(struct cxl_endpoint_decoder *cxled);
-extern struct rw_semaphore cxl_dpa_rwsem;
 
-bool is_switch_decoder(struct device *dev);
-struct cxl_switch_decoder *to_cxl_switch_decoder(struct device *dev);
+enum cxl_rcrb {
+	CXL_RCRB_DOWNSTREAM,
+	CXL_RCRB_UPSTREAM,
+};
+struct cxl_rcrb_info;
+resource_size_t __rcrb_to_component(struct device *dev,
+				    struct cxl_rcrb_info *ri,
+				    enum cxl_rcrb which);
+
+extern struct rw_semaphore cxl_dpa_rwsem;
 
 int cxl_memdev_init(void);
 void cxl_memdev_exit(void);

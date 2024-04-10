@@ -1143,9 +1143,8 @@ static void enetc_add_rx_buff_to_xdp(struct enetc_bdr *rx_ring, int i,
 	/* To be used for XDP_TX */
 	rx_swbd->len = size;
 
-	skb_frag_off_set(frag, rx_swbd->page_offset);
-	skb_frag_size_set(frag, size);
-	__skb_frag_set_page(frag, rx_swbd->page);
+	skb_frag_fill_page_desc(frag, rx_swbd->page, rx_swbd->page_offset,
+				size);
 
 	shinfo->nr_frags++;
 }

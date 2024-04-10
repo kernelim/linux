@@ -21,7 +21,7 @@ static int init_alloc_hint(struct sbitmap *sb, gfp_t flags)
 		int i;
 
 		for_each_possible_cpu(i)
-			*per_cpu_ptr(sb->alloc_hint, i) = prandom_u32() % depth;
+			*per_cpu_ptr(sb->alloc_hint, i) = prandom_u32_max(depth);
 	}
 	return 0;
 }
@@ -550,7 +550,7 @@ EXPORT_SYMBOL_GPL(sbitmap_queue_min_shallow_depth);
 
 static void __sbitmap_queue_wake_up(struct sbitmap_queue *sbq, int nr)
 {
-	int i, wake_index;
+	int i, wake_index, woken;
 
 	if (!atomic_read(&sbq->ws_active))
 		return;
@@ -567,13 +567,12 @@ static void __sbitmap_queue_wake_up(struct sbitmap_queue *sbq, int nr)
 		 */
 		wake_index = sbq_index_inc(wake_index);
 
-		/*
-		 * It is sufficient to wake up at least one waiter to
-		 * guarantee forward progress.
-		 */
-		if (waitqueue_active(&ws->wait) &&
-		    wake_up_nr(&ws->wait, nr))
-			break;
+		if (waitqueue_active(&ws->wait)) {
+			woken = wake_up_nr(&ws->wait, nr);
+			if (woken == nr)
+				break;
+			nr -= woken;
+		}
 	}
 
 	if (wake_index != atomic_read(&sbq->wake_index))

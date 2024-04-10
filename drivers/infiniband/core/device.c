@@ -804,7 +804,7 @@ static int alloc_port_data(struct ib_device *device)
 	 * empty slots at the beginning.
 	 */
 	pdata_rcu = kzalloc(struct_size(pdata_rcu, pdata,
-					rdma_end_port(device) + 1),
+					size_add(rdma_end_port(device), 1)),
 			    GFP_KERNEL);
 	if (!pdata_rcu)
 		return -ENOMEM;
@@ -2159,14 +2159,16 @@ int ib_device_set_netdev(struct ib_device *ib_dev, struct net_device *ndev,
 		return 0;
 	}
 
+	if (old_ndev)
+		netdev_tracker_free(ndev, &pdata->netdev_tracker);
 	if (ndev)
-		dev_hold(ndev);
+		netdev_hold(ndev, &pdata->netdev_tracker, GFP_ATOMIC);
 	rcu_assign_pointer(pdata->netdev, ndev);
 	spin_unlock_irqrestore(&pdata->netdev_lock, flags);
 
 	add_ndev_hash(pdata);
 	if (old_ndev)
-		dev_put(old_ndev);
+		__dev_put(old_ndev);
 
 	return 0;
 }
@@ -2199,7 +2201,7 @@ static void free_netdevs(struct ib_device *ib_dev)
 			 * comparisons after the put
 			 */
 			rcu_assign_pointer(pdata->netdev, NULL);
-			dev_put(ndev);
+			netdev_put(ndev, &pdata->netdev_tracker);
 		}
 		spin_unlock_irqrestore(&pdata->netdev_lock, flags);
 	}

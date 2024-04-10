@@ -17,6 +17,7 @@
 #include <asm/mem_encrypt.h>
 #include <asm/mshyperv.h>
 #include <asm/hypervisor.h>
+#include <asm/mtrr.h>
 #include <asm/coco.h>
 #include <asm/io_apic.h>
 #include <asm/sev.h>
@@ -385,7 +386,7 @@ static inline void hv_ghcb_msr_read(u64 msr, u64 *value) {}
 #ifdef CONFIG_INTEL_TDX_GUEST
 static void hv_tdx_msr_write(u64 msr, u64 val)
 {
-	struct tdx_hypercall_args args = {
+	struct tdx_module_args args = {
 		.r10 = TDX_HYPERCALL_STANDARD,
 		.r11 = EXIT_REASON_MSR_WRITE,
 		.r12 = msr,
@@ -399,13 +400,13 @@ static void hv_tdx_msr_write(u64 msr, u64 val)
 
 static void hv_tdx_msr_read(u64 msr, u64 *val)
 {
-	struct tdx_hypercall_args args = {
+	struct tdx_module_args args = {
 		.r10 = TDX_HYPERCALL_STANDARD,
 		.r11 = EXIT_REASON_MSR_READ,
 		.r12 = msr,
 	};
 
-	u64 ret = __tdx_hypercall_ret(&args);
+	u64 ret = __tdx_hypercall(&args);
 
 	if (WARN_ONCE(ret, "Failed to emulate MSR read: %lld\n", ret))
 		*val = 0;
@@ -415,13 +416,13 @@ static void hv_tdx_msr_read(u64 msr, u64 *val)
 
 u64 hv_tdx_hypercall(u64 control, u64 param1, u64 param2)
 {
-	struct tdx_hypercall_args args = { };
+	struct tdx_module_args args = { };
 
 	args.r10 = control;
 	args.rdx = param1;
 	args.r8  = param2;
 
-	(void)__tdx_hypercall_ret(&args);
+	(void)__tdx_hypercall(&args);
 
 	return args.r11;
 }
@@ -464,7 +465,7 @@ void hv_ivm_msr_read(u64 msr, u64 *value)
 static int hv_mark_gpa_visibility(u16 count, const u64 pfn[],
 			   enum hv_mem_host_visibility visibility)
 {
-	struct hv_gpa_range_for_visibility **input_pcpu, *input;
+	struct hv_gpa_range_for_visibility *input;
 	u16 pages_processed;
 	u64 hv_status;
 	unsigned long flags;
@@ -480,9 +481,8 @@ static int hv_mark_gpa_visibility(u16 count, const u64 pfn[],
 	}
 
 	local_irq_save(flags);
-	input_pcpu = (struct hv_gpa_range_for_visibility **)
-			this_cpu_ptr(hyperv_pcpu_input_arg);
-	input = *input_pcpu;
+	input = *this_cpu_ptr(hyperv_pcpu_input_arg);
+
 	if (unlikely(!input)) {
 		local_irq_restore(flags);
 		return -EINVAL;
@@ -611,6 +611,9 @@ void __init hv_vtom_init(void)
 	x86_platform.guest.enc_cache_flush_required = hv_vtom_cache_flush_required;
 	x86_platform.guest.enc_tlb_flush_required = hv_vtom_tlb_flush_required;
 	x86_platform.guest.enc_status_change_finish = hv_vtom_set_host_visibility;
+
+	/* Set WB as the default cache mode. */
+	mtrr_overwrite_state(NULL, 0, MTRR_TYPE_WRBACK);
 }
 
 #endif /* defined(CONFIG_AMD_MEM_ENCRYPT) || defined(CONFIG_INTEL_TDX_GUEST) */

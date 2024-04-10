@@ -23,8 +23,9 @@ struct srcu_struct;
  */
 struct srcu_data {
 	/* Read-side state. */
-	unsigned long srcu_lock_count[2];	/* Locks per CPU. */
-	unsigned long srcu_unlock_count[2];	/* Unlocks per CPU. */
+	atomic_long_t srcu_lock_count[2];	/* Locks per CPU. */
+	atomic_long_t srcu_unlock_count[2];	/* Unlocks per CPU. */
+	int srcu_nmi_safety;			/* NMI-safe srcu_struct structure? */
 
 	/* Update-side state. */
 	spinlock_t __private lock ____cacheline_internodealigned_in_smp;
@@ -57,9 +58,9 @@ struct srcu_node {
 };
 
 /*
- * Per-SRCU-domain structure, similar in function to rcu_state.
+ * Per-SRCU-domain structure, update-side data linked from srcu_struct.
  */
-struct srcu_struct {
+struct srcu_usage {
 	struct srcu_node *node;			/* Combining tree. */
 	struct srcu_node *level[RCU_NUM_LVLS + 1];
 						/* First node at each level. */
@@ -67,7 +68,6 @@ struct srcu_struct {
 	struct mutex srcu_cb_mutex;		/* Serialize CB preparation. */
 	spinlock_t __private lock;		/* Protect counters and size state. */
 	struct mutex srcu_gp_mutex;		/* Serialize GP work. */
-	unsigned int srcu_idx;			/* Current rdr array element. */
 	unsigned long srcu_gp_seq;		/* Grace-period seq #. */
 	unsigned long srcu_gp_seq_needed;	/* Latest gp_seq needed. */
 	unsigned long srcu_gp_seq_needed_exp;	/* Furthest future exp GP. */
@@ -76,7 +76,6 @@ struct srcu_struct {
 	unsigned long srcu_size_jiffies;	/* Current contention-measurement interval. */
 	unsigned long srcu_n_lock_retries;	/* Contention events in current interval. */
 	unsigned long srcu_n_exp_nodelay;	/* # expedited no-delays in current GP phase. */
-	struct srcu_data __percpu *sda;		/* Per-CPU srcu_data array. */
 	bool sda_is_static;			/* May ->sda be passed to free_percpu()? */
 	unsigned long srcu_barrier_seq;		/* srcu_barrier seq #. */
 	struct mutex srcu_barrier_mutex;	/* Serialize barrier ops. */
@@ -88,7 +87,17 @@ struct srcu_struct {
 	unsigned long reschedule_jiffies;
 	unsigned long reschedule_count;
 	struct delayed_work work;
+	struct srcu_struct *srcu_ssp;
+};
+
+/*
+ * Per-SRCU-domain structure, similar in function to rcu_state.
+ */
+struct srcu_struct {
+	unsigned int srcu_idx;			/* Current rdr array element. */
+	struct srcu_data __percpu *sda;		/* Per-CPU srcu_data array. */
 	struct lockdep_map dep_map;
+	struct srcu_usage *srcu_sup;		/* Update-side data. */
 };
 
 /* Values for size state variable (->srcu_size_state). */
@@ -107,13 +116,26 @@ struct srcu_struct {
 #define SRCU_STATE_SCAN1	1
 #define SRCU_STATE_SCAN2	2
 
-#define __SRCU_STRUCT_INIT(name, pcpu_name)				\
-{									\
-	.sda = &pcpu_name,						\
-	.lock = __SPIN_LOCK_UNLOCKED(name.lock),			\
-	.srcu_gp_seq_needed = -1UL,					\
-	.work = __DELAYED_WORK_INITIALIZER(name.work, NULL, 0),		\
-	__SRCU_DEP_MAP_INIT(name)					\
+#define __SRCU_USAGE_INIT(name)									\
+{												\
+	.lock = __SPIN_LOCK_UNLOCKED(name.lock),						\
+	.srcu_gp_seq_needed = -1UL,								\
+	.work = __DELAYED_WORK_INITIALIZER(name.work, NULL, 0),					\
+}
+
+#define __SRCU_STRUCT_INIT_COMMON(name, usage_name)						\
+	.srcu_sup = &usage_name,								\
+	__SRCU_DEP_MAP_INIT(name)
+
+#define __SRCU_STRUCT_INIT_MODULE(name, usage_name)						\
+{												\
+	__SRCU_STRUCT_INIT_COMMON(name, usage_name)						\
+}
+
+#define __SRCU_STRUCT_INIT(name, usage_name, pcpu_name)						\
+{												\
+	.sda = &pcpu_name,									\
+	__SRCU_STRUCT_INIT_COMMON(name, usage_name)						\
 }
 
 /*
@@ -136,16 +158,18 @@ struct srcu_struct {
  * See include/linux/percpu-defs.h for the rules on per-CPU variables.
  */
 #ifdef MODULE
-# define __DEFINE_SRCU(name, is_static)					\
-	is_static struct srcu_struct name;				\
-	extern struct srcu_struct * const __srcu_struct_##name;		\
-	struct srcu_struct * const __srcu_struct_##name			\
+# define __DEFINE_SRCU(name, is_static)								\
+	static struct srcu_usage name##_srcu_usage = __SRCU_USAGE_INIT(name##_srcu_usage);	\
+	is_static struct srcu_struct name = __SRCU_STRUCT_INIT_MODULE(name, name##_srcu_usage);	\
+	extern struct srcu_struct * const __srcu_struct_##name;					\
+	struct srcu_struct * const __srcu_struct_##name						\
 		__section("___srcu_struct_ptrs") = &name
 #else
-# define __DEFINE_SRCU(name, is_static)					\
-	static DEFINE_PER_CPU(struct srcu_data, name##_srcu_data);	\
-	is_static struct srcu_struct name =				\
-		__SRCU_STRUCT_INIT(name, name##_srcu_data)
+# define __DEFINE_SRCU(name, is_static)								\
+	static DEFINE_PER_CPU(struct srcu_data, name##_srcu_data);				\
+	static struct srcu_usage name##_srcu_usage = __SRCU_USAGE_INIT(name##_srcu_usage);	\
+	is_static struct srcu_struct name =							\
+		__SRCU_STRUCT_INIT(name, name##_srcu_usage, name##_srcu_data)
 #endif
 #define DEFINE_SRCU(name)		__DEFINE_SRCU(name, /* not static */)
 #define DEFINE_STATIC_SRCU(name)	__DEFINE_SRCU(name, static)

@@ -142,6 +142,9 @@ static void __init pte_advanced_tests(struct pgtable_debug_args *args)
 		return;
 
 	pr_debug("Validating PTE advanced\n");
+	if (WARN_ON(!args->ptep))
+		return;
+
 	pte = pfn_pte(args->pte_pfn, args->page_prot);
 	set_pte_at(args->mm, args->vaddr, args->ptep, pte);
 	flush_dcache_page(page);
@@ -623,6 +626,9 @@ static void __init pte_clear_tests(struct pgtable_debug_args *args)
 	 * the unexpected overhead of cache flushing is acceptable.
 	 */
 	pr_debug("Validating PTE clear\n");
+	if (WARN_ON(!args->ptep))
+		return;
+
 #ifndef CONFIG_RISCV
 	pte = __pte(pte_val(pte) | RANDOM_ORVALUE);
 #endif
@@ -1069,7 +1075,7 @@ debug_vm_pgtable_alloc_huge_page(struct pgtable_debug_args *args, int order)
 	struct page *page = NULL;
 
 #ifdef CONFIG_CONTIG_ALLOC
-	if (order >= MAX_ORDER) {
+	if (order > MAX_ORDER) {
 		page = alloc_contig_pages((1 << order), GFP_KERNEL,
 					  first_online_node, NULL);
 		if (page) {
@@ -1079,7 +1085,7 @@ debug_vm_pgtable_alloc_huge_page(struct pgtable_debug_args *args, int order)
 	}
 #endif
 
-	if (order < MAX_ORDER)
+	if (order <= MAX_ORDER)
 		page = alloc_pages(GFP_KERNEL, order);
 
 	return page;
@@ -1360,7 +1366,8 @@ static int __init debug_vm_pgtable(void)
 	args.ptep = pte_offset_map_lock(args.mm, args.pmdp, args.vaddr, &ptl);
 	pte_clear_tests(&args);
 	pte_advanced_tests(&args);
-	pte_unmap_unlock(args.ptep, ptl);
+	if (args.ptep)
+		pte_unmap_unlock(args.ptep, ptl);
 
 	ptl = pmd_lock(args.mm, args.pmdp);
 	pmd_clear_tests(&args);

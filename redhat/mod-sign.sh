@@ -19,7 +19,7 @@ NPROC=$(nproc)
 [ -z "$NPROC" ] && NPROC=1
 
 # NB: this loop runs 2000+ iterations. Try to be fast.
-echo "$modules" | xargs -r -n16 -P $NPROC sh -c "
+echo "$modules" | xargs -r -n16 -P "$NPROC" sh -c "
 for mod; do
     ./scripts/sign-file sha256 $MODSECKEY $MODPUBKEY \$mod
     rm -f \$mod.sig \$mod.dig

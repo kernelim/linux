@@ -49,7 +49,7 @@
 #define MB_DEFAULT_MIN_TO_SCAN		10
 
 /*
- * with 'ext4_mb_stats' allocator will collect stats that will be
+ * with 's_mb_stats' allocator will collect stats that will be
  * shown at umount. The collecting costs though!
  */
 #define MB_DEFAULT_STATS		0
@@ -72,11 +72,6 @@
  * default group prealloc size 512 blocks
  */
 #define MB_DEFAULT_GROUP_PREALLOC	512
-
-/*
- * maximum length of inode prealloc list
- */
-#define MB_DEFAULT_MAX_INODE_PREALLOC	512
 
 /*
  * Number of groups to search linearly before performing group scanning
@@ -114,7 +109,10 @@ struct ext4_free_data {
 };
 
 struct ext4_prealloc_space {
-	struct list_head	pa_inode_list;
+	union {
+		struct rb_node	inode_node;		/* for inode PA rbtree */
+		struct list_head	lg_list;	/* for lg PAs */
+	} pa_node;
 	struct list_head	pa_group_list;
 	union {
 		struct list_head pa_tmp_list;
@@ -128,8 +126,11 @@ struct ext4_prealloc_space {
 	ext4_grpblk_t		pa_len;		/* len of preallocated chunk */
 	ext4_grpblk_t		pa_free;	/* how many blocks are free */
 	unsigned short		pa_type;	/* pa type. inode or group */
-	spinlock_t		*pa_obj_lock;
-	struct inode		*pa_inode;	/* hack, for history only */
+	union {
+		rwlock_t		*inode_lock;	/* locks the rbtree holding this PA */
+		spinlock_t		*lg_lock;	/* locks the lg list holding this PA */
+	} pa_node_lock;
+	struct inode		*pa_inode;	/* used to get the inode during group discard */
 };
 
 enum {
@@ -216,6 +217,20 @@ static inline ext4_fsblk_t ext4_grp_offs_to_block(struct super_block *sb,
 {
 	return ext4_group_first_block_no(sb, fex->fe_group) +
 		(fex->fe_start << EXT4_SB(sb)->s_cluster_bits);
+}
+
+static inline loff_t extent_logical_end(struct ext4_sb_info *sbi,
+					struct ext4_free_extent *fex)
+{
+	/* Use loff_t to avoid end exceeding ext4_lblk_t max. */
+	return (loff_t)fex->fe_logical + EXT4_C2B(sbi, fex->fe_len);
+}
+
+static inline loff_t pa_logical_end(struct ext4_sb_info *sbi,
+				    struct ext4_prealloc_space *pa)
+{
+	/* Use loff_t to avoid end exceeding ext4_lblk_t max. */
+	return (loff_t)pa->pa_lstart + EXT4_C2B(sbi, pa->pa_len);
 }
 
 typedef int (*ext4_mballoc_query_range_fn)(

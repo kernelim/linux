@@ -7,11 +7,6 @@
 
 #define RT_MUTEX_BUILD_MUTEX
 #include "rtmutex.c"
-/*
- * JiraReadiness exercise
- * https://issues.redhat.com/browse/RHELMISC-209
- * jwyatt-rh will remove this comment
- */ 
 
 /*
  * Max number of times we'll walk the boosting chain:
@@ -464,7 +459,7 @@ void __sched rt_mutex_adjust_pi(struct task_struct *task)
 	raw_spin_lock_irqsave(&task->pi_lock, flags);
 
 	waiter = task->pi_blocked_on;
-	if (!waiter || rt_mutex_waiter_equal(waiter, task_to_waiter(task))) {
+	if (!waiter || rt_waiter_node_equal(&waiter->tree, task_to_waiter_node(task))) {
 		raw_spin_unlock_irqrestore(&task->pi_lock, flags);
 		return;
 	}

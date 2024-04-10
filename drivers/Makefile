@@ -40,6 +40,7 @@ obj-$(CONFIG_DMADEVICES)	+= dma/
 
 # SOC specific infrastructure drivers.
 obj-y				+= soc/
+obj-$(CONFIG_PM_GENERIC_DOMAINS)	+= pmdomain/
 
 obj-y				+= virtio/
 obj-$(CONFIG_VDPA)		+= vdpa/
@@ -176,7 +177,7 @@ obj-$(CONFIG_USB4)		+= thunderbolt/
 obj-$(CONFIG_CORESIGHT)		+= hwtracing/coresight/
 obj-y				+= hwtracing/intel_th/
 obj-$(CONFIG_STM)		+= hwtracing/stm/
-obj-$(CONFIG_ANDROID)		+= android/
+obj-y				+= android/
 obj-$(CONFIG_NVMEM)		+= nvmem/
 obj-$(CONFIG_FPGA)		+= fpga/
 obj-$(CONFIG_FSI)		+= fsi/

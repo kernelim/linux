@@ -142,6 +142,7 @@ enum mlx5_semaphore_space_address {
 };
 
 #define MLX5_DEFAULT_PROF       2
+#define MLX5_SF_PROF		3
 
 static inline int mlx5_flexible_inlen(struct mlx5_core_dev *dev, size_t fixed,
 				      size_t item_size, size_t num_items,
@@ -273,18 +274,6 @@ static inline void mlx5e_cleanup(void){}
 static inline bool mlx5_sriov_is_enabled(struct mlx5_core_dev *dev)
 {
 	return pci_num_vf(dev->pdev) ? true : false;
-}
-
-static inline int mlx5_lag_is_lacp_owner(struct mlx5_core_dev *dev)
-{
-	/* LACP owner conditions:
-	 * 1) Function is physical.
-	 * 2) LAG is supported by FW.
-	 * 3) LAG is managed by driver (currently the only option).
-	 */
-	return  MLX5_CAP_GEN(dev, vport_group_manager) &&
-		   (MLX5_CAP_GEN(dev, num_lag_ports) > 1) &&
-		    MLX5_CAP_GEN(dev, lag_master);
 }
 
 int mlx5_rescan_drivers_locked(struct mlx5_core_dev *dev);

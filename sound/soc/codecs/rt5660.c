@@ -11,11 +11,9 @@
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/pm.h>
-#include <linux/gpio.h>
 #include <linux/i2c.h>
 #include <linux/regmap.h>
 #include <linux/of.h>
-#include <linux/of_gpio.h>
 #include <linux/platform_device.h>
 #include <linux/spi/spi.h>
 #include <linux/acpi.h>
@@ -1221,7 +1219,7 @@ static const struct regmap_config rt5660_regmap = {
 	.volatile_reg = rt5660_volatile_register,
 	.readable_reg = rt5660_readable_register,
 
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 	.reg_defaults = rt5660_reg,
 	.num_reg_defaults = ARRAY_SIZE(rt5660_reg),
 	.ranges = rt5660_ranges,

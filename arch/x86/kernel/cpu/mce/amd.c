@@ -87,42 +87,40 @@ struct smca_bank {
 static DEFINE_PER_CPU_READ_MOSTLY(struct smca_bank[MAX_NR_BANKS], smca_banks);
 static DEFINE_PER_CPU_READ_MOSTLY(u8[N_SMCA_BANK_TYPES], smca_bank_counts);
 
-struct smca_bank_name {
-	const char *name;	/* Short name for sysfs */
-	const char *long_name;	/* Long name for pretty-printing */
-};
-
-static struct smca_bank_name smca_names[] = {
-	[SMCA_LS ... SMCA_LS_V2]	= { "load_store",	"Load Store Unit" },
-	[SMCA_IF]			= { "insn_fetch",	"Instruction Fetch Unit" },
-	[SMCA_L2_CACHE]			= { "l2_cache",		"L2 Cache" },
-	[SMCA_DE]			= { "decode_unit",	"Decode Unit" },
-	[SMCA_RESERVED]			= { "reserved",		"Reserved" },
-	[SMCA_EX]			= { "execution_unit",	"Execution Unit" },
-	[SMCA_FP]			= { "floating_point",	"Floating Point Unit" },
-	[SMCA_L3_CACHE]			= { "l3_cache",		"L3 Cache" },
-	[SMCA_CS ... SMCA_CS_V2]	= { "coherent_slave",	"Coherent Slave" },
-	[SMCA_PIE]			= { "pie",		"Power, Interrupts, etc." },
+static const char * const smca_names[] = {
+	[SMCA_LS ... SMCA_LS_V2]	= "load_store",
+	[SMCA_IF]			= "insn_fetch",
+	[SMCA_L2_CACHE]			= "l2_cache",
+	[SMCA_DE]			= "decode_unit",
+	[SMCA_RESERVED]			= "reserved",
+	[SMCA_EX]			= "execution_unit",
+	[SMCA_FP]			= "floating_point",
+	[SMCA_L3_CACHE]			= "l3_cache",
+	[SMCA_CS ... SMCA_CS_V2]	= "coherent_slave",
+	[SMCA_PIE]			= "pie",
 
 	/* UMC v2 is separate because both of them can exist in a single system. */
-	[SMCA_UMC]			= { "umc",		"Unified Memory Controller" },
-	[SMCA_UMC_V2]			= { "umc_v2",		"Unified Memory Controller v2" },
-	[SMCA_PB]			= { "param_block",	"Parameter Block" },
-	[SMCA_PSP ... SMCA_PSP_V2]	= { "psp",		"Platform Security Processor" },
-	[SMCA_SMU ... SMCA_SMU_V2]	= { "smu",		"System Management Unit" },
-	[SMCA_MP5]			= { "mp5",		"Microprocessor 5 Unit" },
-	[SMCA_MPDMA]			= { "mpdma",		"MPDMA Unit" },
-	[SMCA_NBIO]			= { "nbio",		"Northbridge IO Unit" },
-	[SMCA_PCIE ... SMCA_PCIE_V2]	= { "pcie",		"PCI Express Unit" },
-	[SMCA_XGMI_PCS]			= { "xgmi_pcs",		"Ext Global Memory Interconnect PCS Unit" },
-	[SMCA_NBIF]			= { "nbif",		"NBIF Unit" },
-	[SMCA_SHUB]			= { "shub",		"System Hub Unit" },
-	[SMCA_SATA]			= { "sata",		"SATA Unit" },
-	[SMCA_USB]			= { "usb",		"USB Unit" },
-	[SMCA_GMI_PCS]			= { "gmi_pcs",		"Global Memory Interconnect PCS Unit" },
-	[SMCA_XGMI_PHY]			= { "xgmi_phy",		"Ext Global Memory Interconnect PHY Unit" },
-	[SMCA_WAFL_PHY]			= { "wafl_phy",		"WAFL PHY Unit" },
-	[SMCA_GMI_PHY]			= { "gmi_phy",		"Global Memory Interconnect PHY Unit" },
+	[SMCA_UMC]			= "umc",
+	[SMCA_UMC_V2]			= "umc_v2",
+	[SMCA_MA_LLC]			= "ma_llc",
+	[SMCA_PB]			= "param_block",
+	[SMCA_PSP ... SMCA_PSP_V2]	= "psp",
+	[SMCA_SMU ... SMCA_SMU_V2]	= "smu",
+	[SMCA_MP5]			= "mp5",
+	[SMCA_MPDMA]			= "mpdma",
+	[SMCA_NBIO]			= "nbio",
+	[SMCA_PCIE ... SMCA_PCIE_V2]	= "pcie",
+	[SMCA_XGMI_PCS]			= "xgmi_pcs",
+	[SMCA_NBIF]			= "nbif",
+	[SMCA_SHUB]			= "shub",
+	[SMCA_SATA]			= "sata",
+	[SMCA_USB]			= "usb",
+	[SMCA_USR_DP]			= "usr_dp",
+	[SMCA_USR_CP]			= "usr_cp",
+	[SMCA_GMI_PCS]			= "gmi_pcs",
+	[SMCA_XGMI_PHY]			= "xgmi_phy",
+	[SMCA_WAFL_PHY]			= "wafl_phy",
+	[SMCA_GMI_PHY]			= "gmi_phy",
 };
 
 static const char *smca_get_name(enum smca_bank_types t)
@@ -130,17 +128,8 @@ static const char *smca_get_name(enum smca_bank_types t)
 	if (t >= N_SMCA_BANK_TYPES)
 		return NULL;
 
-	return smca_names[t].name;
+	return smca_names[t];
 }
-
-const char *smca_get_long_name(enum smca_bank_types t)
-{
-	if (t >= N_SMCA_BANK_TYPES)
-		return NULL;
-
-	return smca_names[t].long_name;
-}
-EXPORT_SYMBOL_GPL(smca_get_long_name);
 
 enum smca_bank_types smca_get_bank_type(unsigned int cpu, unsigned int bank)
 {
@@ -178,6 +167,7 @@ static const struct smca_hwid smca_hwid_mcatypes[] = {
 	{ SMCA_CS,	 HWID_MCATYPE(0x2E, 0x0)	},
 	{ SMCA_PIE,	 HWID_MCATYPE(0x2E, 0x1)	},
 	{ SMCA_CS_V2,	 HWID_MCATYPE(0x2E, 0x2)	},
+	{ SMCA_MA_LLC,	 HWID_MCATYPE(0x2E, 0x4)	},
 
 	/* Unified Memory Controller MCA type */
 	{ SMCA_UMC,	 HWID_MCATYPE(0x96, 0x0)	},
@@ -212,6 +202,8 @@ static const struct smca_hwid smca_hwid_mcatypes[] = {
 	{ SMCA_SHUB,	 HWID_MCATYPE(0x80, 0x0)	},
 	{ SMCA_SATA,	 HWID_MCATYPE(0xA8, 0x0)	},
 	{ SMCA_USB,	 HWID_MCATYPE(0xAA, 0x0)	},
+	{ SMCA_USR_DP,	 HWID_MCATYPE(0x170, 0x0)	},
+	{ SMCA_USR_CP,	 HWID_MCATYPE(0x180, 0x0)	},
 	{ SMCA_GMI_PCS,  HWID_MCATYPE(0x241, 0x0)	},
 	{ SMCA_XGMI_PHY, HWID_MCATYPE(0x259, 0x0)	},
 	{ SMCA_WAFL_PHY, HWID_MCATYPE(0x267, 0x0)	},
@@ -235,10 +227,10 @@ static DEFINE_PER_CPU(struct threshold_bank **, threshold_banks);
  * A list of the banks enabled on each logical CPU. Controls which respective
  * descriptors to initialize later in mce_threshold_create_device().
  */
-static DEFINE_PER_CPU(unsigned int, bank_map);
+static DEFINE_PER_CPU(u64, bank_map);
 
 /* Map of banks that have more than MCA_MISC0 available. */
-static DEFINE_PER_CPU(u32, smca_misc_banks_map);
+static DEFINE_PER_CPU(u64, smca_misc_banks_map);
 
 static void amd_threshold_interrupt(void);
 static void amd_deferred_error_interrupt(void);
@@ -267,7 +259,7 @@ static void smca_set_misc_banks_map(unsigned int bank, unsigned int cpu)
 		return;
 
 	if (low & MASK_BLKPTR_LO)
-		per_cpu(smca_misc_banks_map, cpu) |= BIT(bank);
+		per_cpu(smca_misc_banks_map, cpu) |= BIT_ULL(bank);
 
 }
 
@@ -530,7 +522,7 @@ static u32 smca_get_block_address(unsigned int bank, unsigned int block,
 	if (!block)
 		return MSR_AMD64_SMCA_MCx_MISC(bank);
 
-	if (!(per_cpu(smca_misc_banks_map, cpu) & BIT(bank)))
+	if (!(per_cpu(smca_misc_banks_map, cpu) & BIT_ULL(bank)))
 		return 0;
 
 	return MSR_AMD64_SMCA_MCx_MISCy(bank, block - 1);
@@ -574,7 +566,7 @@ prepare_threshold_block(unsigned int bank, unsigned int block, u32 addr,
 	int new;
 
 	if (!block)
-		per_cpu(bank_map, cpu) |= (1 << bank);
+		per_cpu(bank_map, cpu) |= BIT_ULL(bank);
 
 	memset(&b, 0, sizeof(b));
 	b.cpu			= cpu;
@@ -715,11 +707,13 @@ void mce_amd_feature_init(struct cpuinfo_x86 *c)
 
 bool amd_mce_is_memory_error(struct mce *m)
 {
+	enum smca_bank_types bank_type;
 	/* ErrCodeExt[20:16] */
 	u8 xec = (m->status >> 16) & 0x1f;
 
+	bank_type = smca_get_bank_type(m->extcpu, m->bank);
 	if (mce_flags.smca)
-		return smca_get_bank_type(m->extcpu, m->bank) == SMCA_UMC && xec == 0x0;
+		return (bank_type == SMCA_UMC || bank_type == SMCA_UMC_V2) && xec == 0x0;
 
 	return m->bank == 4 && xec == 0x8;
 }
@@ -878,7 +872,7 @@ static void amd_threshold_interrupt(void)
 		return;
 
 	for (bank = 0; bank < this_cpu_read(mce_num_banks); ++bank) {
-		if (!(per_cpu(bank_map, cpu) & (1 << bank)))
+		if (!(per_cpu(bank_map, cpu) & BIT_ULL(bank)))
 			continue;
 
 		first_block = bp[bank]->blocks;
@@ -1049,7 +1043,7 @@ static const char *get_name(unsigned int cpu, unsigned int bank, struct threshol
 	if (bank_type >= N_SMCA_BANK_TYPES)
 		return NULL;
 
-	if (b && bank_type == SMCA_UMC) {
+	if (b && (bank_type == SMCA_UMC || bank_type == SMCA_UMC_V2)) {
 		if (b->block < ARRAY_SIZE(smca_umc_block_names))
 			return smca_umc_block_names[b->block];
 		return NULL;
@@ -1348,7 +1342,7 @@ int mce_threshold_create_device(unsigned int cpu)
 		return -ENOMEM;
 
 	for (bank = 0; bank < numbanks; ++bank) {
-		if (!(this_cpu_read(bank_map) & (1 << bank)))
+		if (!(this_cpu_read(bank_map) & BIT_ULL(bank)))
 			continue;
 		err = threshold_create_bank(bp, cpu, bank);
 		if (err)

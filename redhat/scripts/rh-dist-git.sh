@@ -28,7 +28,7 @@ tmpdir="$(mktemp -d --tmpdir="$RHDISTGIT_TMP" RHEL"$RHEL_MAJOR"."$date".XXXXXXXX
 cd "$tmpdir" || die "Unable to create temporary directory";
 test -n "$RHDISTGIT_CACHE" && reference="-- --reference $RHDISTGIT_CACHE"
 echo "Cloning using $RHPKG_BIN" >&2;
-eval $RHPKG_BIN clone "$PACKAGE_NAME" "$reference" >/dev/null || die "Unable to clone using $RHPKG_BIN";
+eval "$RHPKG_BIN" clone "$PACKAGE_NAME" "$reference" >/dev/null || die "Unable to clone using $RHPKG_BIN";
 
 echo "Switching the branch"
 # change in the correct branch

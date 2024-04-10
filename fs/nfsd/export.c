@@ -97,7 +97,7 @@ static int expkey_parse(struct cache_detail *cd, char *mesg, int mlen)
 		goto out;
 
 	err = -EINVAL;
-	if ((len=qword_get(&mesg, buf, PAGE_SIZE)) <= 0)
+	if (qword_get(&mesg, buf, PAGE_SIZE) <= 0)
 		goto out;
 
 	err = -ENOENT;
@@ -107,7 +107,7 @@ static int expkey_parse(struct cache_detail *cd, char *mesg, int mlen)
 	dprintk("found domain %s\n", buf);
 
 	err = -EINVAL;
-	if ((len=qword_get(&mesg, buf, PAGE_SIZE)) <= 0)
+	if (qword_get(&mesg, buf, PAGE_SIZE) <= 0)
 		goto out;
 	fsidtype = simple_strtoul(buf, &ep, 10);
 	if (*ep)
@@ -445,7 +445,6 @@ static int check_export(struct path *path, int *flags, unsigned char *uuid)
 				"configuration in RHEL.  Unexpected client behavior may result.\n");
 
 	return 0;
-
 }
 
 #ifdef CONFIG_NFSD_V4
@@ -552,6 +551,29 @@ static inline int
 secinfo_parse(char **mesg, char *buf, struct svc_export *exp) { return 0; }
 #endif
 
+static int xprtsec_parse(char **mesg, char *buf, struct svc_export *exp)
+{
+	unsigned int i, mode, listsize;
+	int err;
+
+	err = get_uint(mesg, &listsize);
+	if (err)
+		return err;
+	if (listsize > NFSEXP_XPRTSEC_NUM)
+		return -EINVAL;
+
+	exp->ex_xprtsec_modes = 0;
+	for (i = 0; i < listsize; i++) {
+		err = get_uint(mesg, &mode);
+		if (err)
+			return err;
+		if (mode > NFSEXP_XPRTSEC_MTLS)
+			return -EINVAL;
+		exp->ex_xprtsec_modes |= mode;
+	}
+	return 0;
+}
+
 static inline int
 nfsd_uuid_parse(char **mesg, char *buf, unsigned char **puuid)
 {
@@ -577,7 +599,6 @@ static int svc_export_parse(struct cache_detail *cd, char *mesg, int mlen)
 {
 	/* client path expiry [flags anonuid anongid fsid] */
 	char *buf;
-	int len;
 	int err;
 	struct auth_domain *dom = NULL;
 	struct svc_export exp = {}, *expp;
@@ -593,8 +614,7 @@ static int svc_export_parse(struct cache_detail *cd, char *mesg, int mlen)
 
 	/* client */
 	err = -EINVAL;
-	len = qword_get(&mesg, buf, PAGE_SIZE);
-	if (len <= 0)
+	if (qword_get(&mesg, buf, PAGE_SIZE) <= 0)
 		goto out;
 
 	err = -ENOENT;
@@ -604,7 +624,7 @@ static int svc_export_parse(struct cache_detail *cd, char *mesg, int mlen)
 
 	/* path */
 	err = -EINVAL;
-	if ((len = qword_get(&mesg, buf, PAGE_SIZE)) <= 0)
+	if (qword_get(&mesg, buf, PAGE_SIZE) <= 0)
 		goto out1;
 
 	err = kern_path(buf, 0, &exp.ex_path);
@@ -614,6 +634,7 @@ static int svc_export_parse(struct cache_detail *cd, char *mesg, int mlen)
 	exp.ex_client = dom;
 	exp.cd = cd;
 	exp.ex_devid_map = NULL;
+	exp.ex_xprtsec_modes = NFSEXP_XPRTSEC_ALL;
 
 	/* expiry */
 	err = get_expiry(&mesg, &exp.h.expiry_time);
@@ -648,13 +669,15 @@ static int svc_export_parse(struct cache_detail *cd, char *mesg, int mlen)
 			goto out3;
 		exp.ex_fsid = an_int;
 
-		while ((len = qword_get(&mesg, buf, PAGE_SIZE)) > 0) {
+		while (qword_get(&mesg, buf, PAGE_SIZE) > 0) {
 			if (strcmp(buf, "fsloc") == 0)
 				err = fsloc_parse(&mesg, buf, &exp.ex_fslocs);
 			else if (strcmp(buf, "uuid") == 0)
 				err = nfsd_uuid_parse(&mesg, buf, &exp.ex_uuid);
 			else if (strcmp(buf, "secinfo") == 0)
 				err = secinfo_parse(&mesg, buf, &exp);
+			else if (strcmp(buf, "xprtsec") == 0)
+				err = xprtsec_parse(&mesg, buf, &exp);
 			else
 				/* quietly ignore unknown words and anything
 				 * following. Newer user-space can try to set
@@ -668,6 +691,7 @@ static int svc_export_parse(struct cache_detail *cd, char *mesg, int mlen)
 		err = check_export(&exp.ex_path, &exp.ex_flags, exp.ex_uuid);
 		if (err)
 			goto out4;
+
 		/*
 		 * No point caching this if it would immediately expire.
 		 * Also, this protects exportfs's dummy export from the
@@ -829,6 +853,7 @@ static void export_update(struct cache_head *cnew, struct cache_head *citem)
 	for (i = 0; i < MAX_SECINFO_LIST; i++) {
 		new->ex_flavors[i] = item->ex_flavors[i];
 	}
+	new->ex_xprtsec_modes = item->ex_xprtsec_modes;
 }
 
 static struct cache_head *svc_export_alloc(void)
@@ -1040,9 +1065,26 @@ static struct svc_export *exp_find(struct cache_detail *cd,
 
 __be32 check_nfsd_access(struct svc_export *exp, struct svc_rqst *rqstp)
 {
-	struct exp_flavor_info *f;
-	struct exp_flavor_info *end = exp->ex_flavors + exp->ex_nflavors;
+	struct exp_flavor_info *f, *end = exp->ex_flavors + exp->ex_nflavors;
+	struct svc_xprt *xprt = rqstp->rq_xprt;
 
+	if (exp->ex_xprtsec_modes & NFSEXP_XPRTSEC_NONE) {
+		if (!test_bit(XPT_TLS_SESSION, &xprt->xpt_flags))
+			goto ok;
+	}
+	if (exp->ex_xprtsec_modes & NFSEXP_XPRTSEC_TLS) {
+		if (test_bit(XPT_TLS_SESSION, &xprt->xpt_flags) &&
+		    !test_bit(XPT_PEER_AUTH, &xprt->xpt_flags))
+			goto ok;
+	}
+	if (exp->ex_xprtsec_modes & NFSEXP_XPRTSEC_MTLS) {
+		if (test_bit(XPT_TLS_SESSION, &xprt->xpt_flags) &&
+		    test_bit(XPT_PEER_AUTH, &xprt->xpt_flags))
+			goto ok;
+	}
+	goto denied;
+
+ok:
 	/* legacy gss-only clients are always OK: */
 	if (exp->ex_client == rqstp->rq_gssclient)
 		return 0;
@@ -1067,6 +1109,7 @@ __be32 check_nfsd_access(struct svc_export *exp, struct svc_rqst *rqstp)
 	if (nfsd4_spo_must_allow(rqstp))
 		return 0;
 
+denied:
 	return rqstp->rq_vers < 4 ? nfserr_acces : nfserr_wrongsec;
 }
 

@@ -537,6 +537,7 @@ struct gfs2_statfs_change_host {
 #define GFS2_QUOTA_OFF		0
 #define GFS2_QUOTA_ACCOUNT	1
 #define GFS2_QUOTA_ON		2
+#define GFS2_QUOTA_QUIET	3 /* on but not complaining */
 
 #define GFS2_DATA_DEFAULT	GFS2_DATA_ORDERED
 #define GFS2_DATA_WRITEBACK	1
@@ -716,7 +717,7 @@ struct gfs2_sbd {
 	struct gfs2_glock *sd_rename_gl;
 	struct gfs2_glock *sd_freeze_gl;
 	struct work_struct sd_freeze_work;
-	wait_queue_head_t sd_glock_wait;
+	wait_queue_head_t sd_kill_wait;
 	wait_queue_head_t sd_async_glock_wait;
 	atomic_t sd_glock_disposal;
 	struct completion sd_locking_init;

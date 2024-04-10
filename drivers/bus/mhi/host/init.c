@@ -759,7 +759,7 @@ static int parse_ch_cfg(struct mhi_controller *mhi_cntrl,
 	 * so to avoid any memory possible allocation failures, vzalloc is
 	 * used here
 	 */
-	mhi_cntrl->mhi_chan = vzalloc(mhi_cntrl->max_chan *
+	mhi_cntrl->mhi_chan = vcalloc(mhi_cntrl->max_chan,
 				      sizeof(*mhi_cntrl->mhi_chan));
 	if (!mhi_cntrl->mhi_chan)
 		return -ENOMEM;
@@ -1407,9 +1407,9 @@ void mhi_driver_unregister(struct mhi_driver *mhi_drv)
 }
 EXPORT_SYMBOL_GPL(mhi_driver_unregister);
 
-static int mhi_uevent(struct device *dev, struct kobj_uevent_env *env)
+static int mhi_uevent(const struct device *dev, struct kobj_uevent_env *env)
 {
-	struct mhi_device *mhi_dev = to_mhi_device(dev);
+	const struct mhi_device *mhi_dev = to_mhi_device(dev);
 
 	return add_uevent_var(env, "MODALIAS=" MHI_DEVICE_MODALIAS_FMT,
 					mhi_dev->name);

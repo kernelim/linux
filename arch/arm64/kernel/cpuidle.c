@@ -9,40 +9,9 @@
 #include <linux/acpi.h>
 #include <linux/cpuidle.h>
 #include <linux/cpu_pm.h>
-#include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/psci.h>
 
-#include <asm/cpuidle.h>
-#include <asm/cpu_ops.h>
-
-int arm_cpuidle_init(unsigned int cpu)
-{
-	const struct cpu_operations *ops = get_cpu_ops(cpu);
-	int ret = -EOPNOTSUPP;
-
-	if (ops && ops->cpu_suspend && ops->cpu_init_idle)
-		ret = ops->cpu_init_idle(cpu);
-
-	return ret;
-}
-
-/**
- * arm_cpuidle_suspend() - function to enter a low-power idle state
- * @index: argument to pass to CPU suspend operations
- *
- * Return: 0 on success, -EOPNOTSUPP if CPU suspend hook not initialized, CPU
- * operations back-end error code otherwise.
- */
-int arm_cpuidle_suspend(int index)
-{
-	int cpu = smp_processor_id();
-	const struct cpu_operations *ops = get_cpu_ops(cpu);
-
-	return ops->cpu_suspend(index);
-}
-
-#ifdef CONFIG_ACPI
+#ifdef CONFIG_ACPI_PROCESSOR_IDLE
 
 #include <acpi/processor.h>
 

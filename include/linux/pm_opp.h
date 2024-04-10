@@ -57,44 +57,19 @@ struct dev_pm_opp_icc_bw {
 	u32 peak;
 };
 
-/**
- * struct dev_pm_opp_info - OPP freq/voltage/current values
- * @rate:	Target clk rate in hz
- * @supplies:	Array of voltage/current values for all power supplies
- *
- * This structure stores the freq/voltage/current values for a single OPP.
- */
-struct dev_pm_opp_info {
-	unsigned long rate;
-	struct dev_pm_opp_supply *supplies;
-};
+typedef int (*config_regulators_t)(struct device *dev,
+			struct dev_pm_opp *old_opp, struct dev_pm_opp *new_opp,
+			struct regulator **regulators, unsigned int count);
 
-/**
- * struct dev_pm_set_opp_data - Set OPP data
- * @old_opp:	Old OPP info
- * @new_opp:	New OPP info
- * @regulators:	Array of regulator pointers
- * @regulator_count: Number of regulators
- * @clk:	Pointer to clk
- * @dev:	Pointer to the struct device
- *
- * This structure contains all information required for setting an OPP.
- */
-struct dev_pm_set_opp_data {
-	struct dev_pm_opp_info old_opp;
-	struct dev_pm_opp_info new_opp;
-
-	struct regulator **regulators;
-	unsigned int regulator_count;
-	struct clk *clk;
-	struct device *dev;
-};
+typedef int (*config_clks_t)(struct device *dev, struct opp_table *opp_table,
+			struct dev_pm_opp *opp, void *data, bool scaling_down);
 
 /**
  * struct dev_pm_opp_config - Device OPP configuration values
- * @clk_names: Clk names, NULL terminated array, max 1 clock for now.
+ * @clk_names: Clk names, NULL terminated array.
+ * @config_clks: Custom set clk helper.
  * @prop_name: Name to postfix to properties.
- * @set_opp: Custom set OPP helper.
+ * @config_regulators: Custom set regulator helper.
  * @supported_hw: Array of hierarchy of versions to match.
  * @supported_hw_count: Number of elements in the array.
  * @regulator_names: Array of pointers to the names of the regulator, NULL terminated.
@@ -107,13 +82,26 @@ struct dev_pm_set_opp_data {
 struct dev_pm_opp_config {
 	/* NULL terminated */
 	const char * const *clk_names;
+	config_clks_t config_clks;
 	const char *prop_name;
-	int (*set_opp)(struct dev_pm_set_opp_data *data);
+	config_regulators_t config_regulators;
 	const unsigned int *supported_hw;
 	unsigned int supported_hw_count;
 	const char * const *regulator_names;
 	const char * const *genpd_names;
 	struct device ***virt_devs;
+};
+
+/**
+ * struct dev_pm_opp_data - The data to use to initialize an OPP.
+ * @level: The performance level for the OPP.
+ * @freq: The clock rate in Hz for the OPP.
+ * @u_volt: The voltage in uV for the OPP.
+ */
+struct dev_pm_opp_data {
+	unsigned int level;
+	unsigned long freq;
+	unsigned long u_volt;
 };
 
 #if defined(CONFIG_PM_OPP)
@@ -123,9 +111,13 @@ void dev_pm_opp_put_opp_table(struct opp_table *opp_table);
 
 unsigned long dev_pm_opp_get_voltage(struct dev_pm_opp *opp);
 
+int dev_pm_opp_get_supplies(struct dev_pm_opp *opp, struct dev_pm_opp_supply *supplies);
+
 unsigned long dev_pm_opp_get_power(struct dev_pm_opp *opp);
 
 unsigned long dev_pm_opp_get_freq(struct dev_pm_opp *opp);
+
+unsigned long dev_pm_opp_get_freq_indexed(struct dev_pm_opp *opp, u32 index);
 
 unsigned int dev_pm_opp_get_level(struct dev_pm_opp *opp);
 
@@ -143,22 +135,35 @@ unsigned long dev_pm_opp_get_suspend_opp_freq(struct device *dev);
 struct dev_pm_opp *dev_pm_opp_find_freq_exact(struct device *dev,
 					      unsigned long freq,
 					      bool available);
-struct dev_pm_opp *dev_pm_opp_find_level_exact(struct device *dev,
-					       unsigned int level);
-struct dev_pm_opp *dev_pm_opp_find_level_ceil(struct device *dev,
-					      unsigned int *level);
 
 struct dev_pm_opp *dev_pm_opp_find_freq_floor(struct device *dev,
 					      unsigned long *freq);
-struct dev_pm_opp *dev_pm_opp_find_freq_ceil_by_volt(struct device *dev,
-						     unsigned long u_volt);
+
+struct dev_pm_opp *dev_pm_opp_find_freq_floor_indexed(struct device *dev,
+						      unsigned long *freq, u32 index);
 
 struct dev_pm_opp *dev_pm_opp_find_freq_ceil(struct device *dev,
 					     unsigned long *freq);
+
+struct dev_pm_opp *dev_pm_opp_find_freq_ceil_indexed(struct device *dev,
+						     unsigned long *freq, u32 index);
+
+struct dev_pm_opp *dev_pm_opp_find_level_exact(struct device *dev,
+					       unsigned int level);
+
+struct dev_pm_opp *dev_pm_opp_find_level_ceil(struct device *dev,
+					      unsigned int *level);
+
+struct dev_pm_opp *dev_pm_opp_find_bw_ceil(struct device *dev,
+					   unsigned int *bw, int index);
+
+struct dev_pm_opp *dev_pm_opp_find_bw_floor(struct device *dev,
+					   unsigned int *bw, int index);
+
 void dev_pm_opp_put(struct dev_pm_opp *opp);
 
-int dev_pm_opp_add(struct device *dev, unsigned long freq,
-		   unsigned long u_volt);
+int dev_pm_opp_add_dynamic(struct device *dev, struct dev_pm_opp_data *opp);
+
 void dev_pm_opp_remove(struct device *dev, unsigned long freq);
 void dev_pm_opp_remove_all_dynamic(struct device *dev);
 
@@ -176,18 +181,10 @@ int dev_pm_opp_unregister_notifier(struct device *dev, struct notifier_block *nb
 int dev_pm_opp_set_config(struct device *dev, struct dev_pm_opp_config *config);
 int devm_pm_opp_set_config(struct device *dev, struct dev_pm_opp_config *config);
 void dev_pm_opp_clear_config(int token);
+int dev_pm_opp_config_clks_simple(struct device *dev,
+		struct opp_table *opp_table, struct dev_pm_opp *opp, void *data,
+		bool scaling_down);
 
-struct opp_table *dev_pm_opp_set_prop_name(struct device *dev, const char *name);
-void dev_pm_opp_put_prop_name(struct opp_table *opp_table);
-struct opp_table *dev_pm_opp_set_clkname(struct device *dev, const char *name);
-void dev_pm_opp_put_clkname(struct opp_table *opp_table);
-int devm_pm_opp_set_clkname(struct device *dev, const char *name);
-struct opp_table *dev_pm_opp_register_set_opp_helper(struct device *dev, int (*set_opp)(struct dev_pm_set_opp_data *data));
-void dev_pm_opp_unregister_set_opp_helper(struct opp_table *opp_table);
-int devm_pm_opp_register_set_opp_helper(struct device *dev, int (*set_opp)(struct dev_pm_set_opp_data *data));
-struct opp_table *dev_pm_opp_attach_genpd(struct device *dev, const char * const *names, struct device ***virt_devs);
-void dev_pm_opp_detach_genpd(struct opp_table *opp_table);
-int devm_pm_opp_attach_genpd(struct device *dev, const char * const *names, struct device ***virt_devs);
 struct dev_pm_opp *dev_pm_opp_xlate_required_opp(struct opp_table *src_table, struct opp_table *dst_table, struct dev_pm_opp *src_opp);
 int dev_pm_opp_xlate_performance_state(struct opp_table *src_table, struct opp_table *dst_table, unsigned int pstate);
 int dev_pm_opp_set_rate(struct device *dev, unsigned long target_freq);
@@ -215,12 +212,22 @@ static inline unsigned long dev_pm_opp_get_voltage(struct dev_pm_opp *opp)
 	return 0;
 }
 
+static inline int dev_pm_opp_get_supplies(struct dev_pm_opp *opp, struct dev_pm_opp_supply *supplies)
+{
+	return -EOPNOTSUPP;
+}
+
 static inline unsigned long dev_pm_opp_get_power(struct dev_pm_opp *opp)
 {
 	return 0;
 }
 
 static inline unsigned long dev_pm_opp_get_freq(struct dev_pm_opp *opp)
+{
+	return 0;
+}
+
+static inline unsigned long dev_pm_opp_get_freq_indexed(struct dev_pm_opp *opp, u32 index)
 {
 	return 0;
 }
@@ -273,6 +280,30 @@ static inline struct dev_pm_opp *dev_pm_opp_find_freq_exact(struct device *dev,
 	return ERR_PTR(-EOPNOTSUPP);
 }
 
+static inline struct dev_pm_opp *dev_pm_opp_find_freq_floor(struct device *dev,
+					unsigned long *freq)
+{
+	return ERR_PTR(-EOPNOTSUPP);
+}
+
+static inline struct dev_pm_opp *
+dev_pm_opp_find_freq_floor_indexed(struct device *dev, unsigned long *freq, u32 index)
+{
+	return ERR_PTR(-EOPNOTSUPP);
+}
+
+static inline struct dev_pm_opp *dev_pm_opp_find_freq_ceil(struct device *dev,
+					unsigned long *freq)
+{
+	return ERR_PTR(-EOPNOTSUPP);
+}
+
+static inline struct dev_pm_opp *
+dev_pm_opp_find_freq_ceil_indexed(struct device *dev, unsigned long *freq, u32 index)
+{
+	return ERR_PTR(-EOPNOTSUPP);
+}
+
 static inline struct dev_pm_opp *dev_pm_opp_find_level_exact(struct device *dev,
 					unsigned int level)
 {
@@ -285,28 +316,22 @@ static inline struct dev_pm_opp *dev_pm_opp_find_level_ceil(struct device *dev,
 	return ERR_PTR(-EOPNOTSUPP);
 }
 
-static inline struct dev_pm_opp *dev_pm_opp_find_freq_floor(struct device *dev,
-					unsigned long *freq)
+static inline struct dev_pm_opp *dev_pm_opp_find_bw_ceil(struct device *dev,
+					unsigned int *bw, int index)
 {
 	return ERR_PTR(-EOPNOTSUPP);
 }
 
-static inline struct dev_pm_opp *dev_pm_opp_find_freq_ceil_by_volt(struct device *dev,
-					unsigned long u_volt)
-{
-	return ERR_PTR(-EOPNOTSUPP);
-}
-
-static inline struct dev_pm_opp *dev_pm_opp_find_freq_ceil(struct device *dev,
-					unsigned long *freq)
+static inline struct dev_pm_opp *dev_pm_opp_find_bw_floor(struct device *dev,
+					unsigned int *bw, int index)
 {
 	return ERR_PTR(-EOPNOTSUPP);
 }
 
 static inline void dev_pm_opp_put(struct dev_pm_opp *opp) {}
 
-static inline int dev_pm_opp_add(struct device *dev, unsigned long freq,
-					unsigned long u_volt)
+static inline int
+dev_pm_opp_add_dynamic(struct device *dev, struct dev_pm_opp_data *opp)
 {
 	return -EOPNOTSUPP;
 }
@@ -347,53 +372,6 @@ static inline int dev_pm_opp_unregister_notifier(struct device *dev, struct noti
 	return -EOPNOTSUPP;
 }
 
-static inline struct opp_table *dev_pm_opp_register_set_opp_helper(struct device *dev,
-			int (*set_opp)(struct dev_pm_set_opp_data *data))
-{
-	return ERR_PTR(-EOPNOTSUPP);
-}
-
-static inline void dev_pm_opp_unregister_set_opp_helper(struct opp_table *opp_table) {}
-
-static inline int devm_pm_opp_register_set_opp_helper(struct device *dev,
-				    int (*set_opp)(struct dev_pm_set_opp_data *data))
-{
-	return -EOPNOTSUPP;
-}
-
-static inline struct opp_table *dev_pm_opp_set_prop_name(struct device *dev, const char *name)
-{
-	return ERR_PTR(-EOPNOTSUPP);
-}
-
-static inline void dev_pm_opp_put_prop_name(struct opp_table *opp_table) {}
-
-static inline struct opp_table *dev_pm_opp_set_clkname(struct device *dev, const char *name)
-{
-	return ERR_PTR(-EOPNOTSUPP);
-}
-
-static inline void dev_pm_opp_put_clkname(struct opp_table *opp_table) {}
-
-static inline int devm_pm_opp_set_clkname(struct device *dev, const char *name)
-{
-	return -EOPNOTSUPP;
-}
-
-static inline struct opp_table *dev_pm_opp_attach_genpd(struct device *dev, const char * const *names, struct device ***virt_devs)
-{
-	return ERR_PTR(-EOPNOTSUPP);
-}
-
-static inline void dev_pm_opp_detach_genpd(struct opp_table *opp_table) {}
-
-static inline int devm_pm_opp_attach_genpd(struct device *dev,
-					   const char * const *names,
-					   struct device ***virt_devs)
-{
-	return -EOPNOTSUPP;
-}
-
 static inline int dev_pm_opp_set_config(struct device *dev, struct dev_pm_opp_config *config)
 {
 	return -EOPNOTSUPP;
@@ -405,6 +383,13 @@ static inline int devm_pm_opp_set_config(struct device *dev, struct dev_pm_opp_c
 }
 
 static inline void dev_pm_opp_clear_config(int token) {}
+
+static inline int dev_pm_opp_config_clks_simple(struct device *dev,
+		struct opp_table *opp_table, struct dev_pm_opp *opp, void *data,
+		bool scaling_down)
+{
+	return -EOPNOTSUPP;
+}
 
 static inline struct dev_pm_opp *dev_pm_opp_xlate_required_opp(struct opp_table *src_table,
 				struct opp_table *dst_table, struct dev_pm_opp *src_opp)
@@ -456,8 +441,6 @@ static inline int dev_pm_opp_sync_regulators(struct device *dev)
 int dev_pm_opp_of_add_table(struct device *dev);
 int dev_pm_opp_of_add_table_indexed(struct device *dev, int index);
 int devm_pm_opp_of_add_table_indexed(struct device *dev, int index);
-int dev_pm_opp_of_add_table_noclk(struct device *dev, int index);
-int devm_pm_opp_of_add_table_noclk(struct device *dev, int index);
 void dev_pm_opp_of_remove_table(struct device *dev);
 int devm_pm_opp_of_add_table(struct device *dev);
 int dev_pm_opp_of_cpumask_add_table(const struct cpumask *cpumask);
@@ -484,16 +467,6 @@ static inline int dev_pm_opp_of_add_table_indexed(struct device *dev, int index)
 }
 
 static inline int devm_pm_opp_of_add_table_indexed(struct device *dev, int index)
-{
-	return -EOPNOTSUPP;
-}
-
-static inline int dev_pm_opp_of_add_table_noclk(struct device *dev, int index)
-{
-	return -EOPNOTSUPP;
-}
-
-static inline int devm_pm_opp_of_add_table_noclk(struct device *dev, int index)
 {
 	return -EOPNOTSUPP;
 }
@@ -554,6 +527,17 @@ static inline int dev_pm_opp_of_find_icc_paths(struct device *dev, struct opp_ta
 
 /* OPP Configuration helpers */
 
+static inline int dev_pm_opp_add(struct device *dev, unsigned long freq,
+				 unsigned long u_volt)
+{
+	struct dev_pm_opp_data data = {
+		.freq = freq,
+		.u_volt = u_volt,
+	};
+
+	return dev_pm_opp_add_dynamic(dev, &data);
+}
+
 /* Regulators helpers */
 static inline int dev_pm_opp_set_regulators(struct device *dev,
 					    const char * const names[])
@@ -608,6 +592,93 @@ static inline int devm_pm_opp_set_supported_hw(struct device *dev,
 	};
 
 	return devm_pm_opp_set_config(dev, &config);
+}
+
+/* clkname helpers */
+static inline int dev_pm_opp_set_clkname(struct device *dev, const char *name)
+{
+	const char *names[] = { name, NULL };
+	struct dev_pm_opp_config config = {
+		.clk_names = names,
+	};
+
+	return dev_pm_opp_set_config(dev, &config);
+}
+
+static inline void dev_pm_opp_put_clkname(int token)
+{
+	dev_pm_opp_clear_config(token);
+}
+
+static inline int devm_pm_opp_set_clkname(struct device *dev, const char *name)
+{
+	const char *names[] = { name, NULL };
+	struct dev_pm_opp_config config = {
+		.clk_names = names,
+	};
+
+	return devm_pm_opp_set_config(dev, &config);
+}
+
+/* config-regulators helpers */
+static inline int dev_pm_opp_set_config_regulators(struct device *dev,
+						   config_regulators_t helper)
+{
+	struct dev_pm_opp_config config = {
+		.config_regulators = helper,
+	};
+
+	return dev_pm_opp_set_config(dev, &config);
+}
+
+static inline void dev_pm_opp_put_config_regulators(int token)
+{
+	dev_pm_opp_clear_config(token);
+}
+
+/* genpd helpers */
+static inline int dev_pm_opp_attach_genpd(struct device *dev,
+					  const char * const *names,
+					  struct device ***virt_devs)
+{
+	struct dev_pm_opp_config config = {
+		.genpd_names = names,
+		.virt_devs = virt_devs,
+	};
+
+	return dev_pm_opp_set_config(dev, &config);
+}
+
+static inline void dev_pm_opp_detach_genpd(int token)
+{
+	dev_pm_opp_clear_config(token);
+}
+
+static inline int devm_pm_opp_attach_genpd(struct device *dev,
+					   const char * const *names,
+					   struct device ***virt_devs)
+{
+	struct dev_pm_opp_config config = {
+		.genpd_names = names,
+		.virt_devs = virt_devs,
+	};
+
+	return devm_pm_opp_set_config(dev, &config);
+}
+
+/* prop-name helpers */
+static inline int dev_pm_opp_set_prop_name(struct device *dev, const char *name)
+{
+	struct dev_pm_opp_config config = {
+		.prop_name = name,
+	};
+
+	return dev_pm_opp_set_config(dev, &config);
+}
+
+static inline void dev_pm_opp_put_prop_name(int token)
+{
+	dev_pm_opp_clear_config(token);
 }
 
 #endif		/* __LINUX_OPP_H__ */

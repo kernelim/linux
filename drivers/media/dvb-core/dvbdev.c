@@ -697,7 +697,7 @@ int dvb_create_media_graph(struct dvb_adapter *adap,
 						     MEDIA_LNK_FL_ENABLED,
 						     false);
 		} else {
-			pad_sink = media_get_pad_index(tuner, true,
+			pad_sink = media_get_pad_index(tuner, MEDIA_PAD_FL_SINK,
 						       PAD_SIGNAL_ANALOG);
 			if (pad_sink < 0)
 				return -EINVAL;
@@ -715,7 +715,7 @@ int dvb_create_media_graph(struct dvb_adapter *adap,
 
 	if (ntuner && ndemod) {
 		/* NOTE: first found tuner source pad presumed correct */
-		pad_source = media_get_pad_index(tuner, false,
+		pad_source = media_get_pad_index(tuner, MEDIA_PAD_FL_SOURCE,
 						 PAD_SIGNAL_ANALOG);
 		if (pad_source < 0)
 			return -EINVAL;
@@ -1053,7 +1053,7 @@ static int __init init_dvbdev(void)
 		goto error;
 	}
 
-	dvb_class = class_create(THIS_MODULE, "dvb");
+	dvb_class = class_create("dvb");
 	if (IS_ERR(dvb_class)) {
 		retval = PTR_ERR(dvb_class);
 		goto error;

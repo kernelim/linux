@@ -5,6 +5,8 @@
 #ifndef __NETNS_UNIX_H__
 #define __NETNS_UNIX_H__
 
+#include <linux/spinlock.h>
+
 struct ctl_table_header;
 struct netns_unix {
 	int			sysctl_max_dgram_qlen;

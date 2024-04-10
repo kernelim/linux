@@ -80,6 +80,7 @@
 #define CREATE_TRACE_POINTS
 #include <linux/sched/rseq_api.h>
 #include <trace/events/sched.h>
+#include <trace/events/ipi.h>
 #undef CREATE_TRACE_POINTS
 
 #include "sched.h"
@@ -94,6 +95,9 @@
 #include "../workqueue_internal.h"
 #include "../../io_uring/io-wq.h"
 #include "../smpboot.h"
+
+EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_send_cpu);
+EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_send_cpumask);
 
 /*
  * Export tracepoints that act as a bare tracehook (ie: have no trace event
@@ -261,36 +265,51 @@ void sched_core_dequeue(struct rq *rq, struct task_struct *p, int flags)
 		resched_curr(rq);
 }
 
-/*
- * Find left-most (aka, highest priority) task matching @cookie.
- */
-static struct task_struct *sched_core_find(struct rq *rq, unsigned long cookie)
+static int sched_task_is_throttled(struct task_struct *p, int cpu)
 {
-	struct rb_node *node;
+	if (p->sched_class->task_is_throttled)
+		return p->sched_class->task_is_throttled(p, cpu);
 
-	node = rb_find_first((void *)cookie, &rq->core_tree, rb_sched_core_cmp);
-	/*
-	 * The idle task always matches any cookie!
-	 */
-	if (!node)
-		return idle_sched_class.pick_task(rq);
-
-	return __node_2_sc(node);
+	return 0;
 }
 
 static struct task_struct *sched_core_next(struct task_struct *p, unsigned long cookie)
 {
 	struct rb_node *node = &p->core_node;
+	int cpu = task_cpu(p);
 
-	node = rb_next(node);
+	do {
+		node = rb_next(node);
+		if (!node)
+			return NULL;
+
+		p = __node_2_sc(node);
+		if (p->core_cookie != cookie)
+			return NULL;
+
+	} while (sched_task_is_throttled(p, cpu));
+
+	return p;
+}
+
+/*
+ * Find left-most (aka, highest priority) and unthrottled task matching @cookie.
+ * If no suitable task is found, NULL will be returned.
+ */
+static struct task_struct *sched_core_find(struct rq *rq, unsigned long cookie)
+{
+	struct task_struct *p;
+	struct rb_node *node;
+
+	node = rb_find_first((void *)cookie, &rq->core_tree, rb_sched_core_cmp);
 	if (!node)
 		return NULL;
 
-	p = container_of(node, struct task_struct, core_node);
-	if (p->core_cookie != cookie)
-		return NULL;
+	p = __node_2_sc(node);
+	if (!sched_task_is_throttled(p, rq->cpu))
+		return p;
 
-	return p;
+	return sched_core_next(p, cookie);
 }
 
 /*
@@ -2257,6 +2276,154 @@ void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 		rq_clock_skip_update(rq);
 }
 
+static __always_inline
+int __task_state_match(struct task_struct *p, unsigned int state)
+{
+	if (READ_ONCE(p->__state) & state)
+		return 1;
+
+#ifdef CONFIG_PREEMPT_RT
+	if (READ_ONCE(p->saved_state) & state)
+		return -1;
+#endif
+	return 0;
+}
+
+static __always_inline
+int task_state_match(struct task_struct *p, unsigned int state)
+{
+#ifdef CONFIG_PREEMPT_RT
+	int match;
+
+	/*
+	 * Serialize against current_save_and_set_rtlock_wait_state() and
+	 * current_restore_rtlock_saved_state().
+	 */
+	raw_spin_lock_irq(&p->pi_lock);
+	match = __task_state_match(p, state);
+	raw_spin_unlock_irq(&p->pi_lock);
+
+	return match;
+#else
+	return __task_state_match(p, state);
+#endif
+}
+
+/*
+ * wait_task_inactive - wait for a thread to unschedule.
+ *
+ * Wait for the thread to block in any of the states set in @match_state.
+ * If it changes, i.e. @p might have woken up, then return zero.  When we
+ * succeed in waiting for @p to be off its CPU, we return a positive number
+ * (its total switch count).  If a second call a short while later returns the
+ * same number, the caller can be sure that @p has remained unscheduled the
+ * whole time.
+ *
+ * The caller must ensure that the task *will* unschedule sometime soon,
+ * else this function might spin for a *long* time. This function can't
+ * be called with interrupts off, or it may introduce deadlock with
+ * smp_call_function() if an IPI is sent by the same process we are
+ * waiting to become inactive.
+ */
+unsigned long wait_task_inactive(struct task_struct *p, unsigned int match_state)
+{
+	int running, queued, match;
+	struct rq_flags rf;
+	unsigned long ncsw;
+	struct rq *rq;
+
+	for (;;) {
+		/*
+		 * We do the initial early heuristics without holding
+		 * any task-queue locks at all. We'll only try to get
+		 * the runqueue lock when things look like they will
+		 * work out!
+		 */
+		rq = task_rq(p);
+
+		/*
+		 * If the task is actively running on another CPU
+		 * still, just relax and busy-wait without holding
+		 * any locks.
+		 *
+		 * NOTE! Since we don't hold any locks, it's not
+		 * even sure that "rq" stays as the right runqueue!
+		 * But we don't care, since "task_on_cpu()" will
+		 * return false if the runqueue has changed and p
+		 * is actually now running somewhere else!
+		 */
+		while (task_on_cpu(rq, p)) {
+			if (!task_state_match(p, match_state))
+				return 0;
+			cpu_relax();
+		}
+
+		/*
+		 * Ok, time to look more closely! We need the rq
+		 * lock now, to be *sure*. If we're wrong, we'll
+		 * just go back and repeat.
+		 */
+		rq = task_rq_lock(p, &rf);
+		trace_sched_wait_task(p);
+		running = task_on_cpu(rq, p);
+		queued = task_on_rq_queued(p);
+		ncsw = 0;
+		if ((match = __task_state_match(p, match_state))) {
+			/*
+			 * When matching on p->saved_state, consider this task
+			 * still queued so it will wait.
+			 */
+			if (match < 0)
+				queued = 1;
+			ncsw = p->nvcsw | LONG_MIN; /* sets MSB */
+		}
+		task_rq_unlock(rq, p, &rf);
+
+		/*
+		 * If it changed from the expected state, bail out now.
+		 */
+		if (unlikely(!ncsw))
+			break;
+
+		/*
+		 * Was it really running after all now that we
+		 * checked with the proper locks actually held?
+		 *
+		 * Oops. Go back and try again..
+		 */
+		if (unlikely(running)) {
+			cpu_relax();
+			continue;
+		}
+
+		/*
+		 * It's not enough that it's not actively running,
+		 * it must be off the runqueue _entirely_, and not
+		 * preempted!
+		 *
+		 * So if it was still runnable (but just not actively
+		 * running right now), it's preempted, and we should
+		 * yield - it could be a while.
+		 */
+		if (unlikely(queued)) {
+			ktime_t to = NSEC_PER_SEC / HZ;
+
+			set_current_state(TASK_UNINTERRUPTIBLE);
+			schedule_hrtimeout(&to, HRTIMER_MODE_REL_HARD);
+			continue;
+		}
+
+		/*
+		 * Ahh, all good. It wasn't running, and it wasn't
+		 * runnable, which means that it will never become
+		 * running in the future either. We're all done!
+		 */
+		break;
+	}
+
+	return ncsw;
+}
+
 #ifdef CONFIG_SMP
 
 static void
@@ -2444,7 +2611,6 @@ static struct rq *__migrate_task(struct rq *rq, struct rq_flags *rf,
 	if (!is_cpu_allowed(p, dest_cpu))
 		return rq;
 
-	update_rq_clock(rq);
 	rq = move_queued_task(rq, rf, p, dest_cpu);
 
 	return rq;
@@ -2502,10 +2668,12 @@ static int migration_cpu_stop(void *data)
 				goto out;
 		}
 
-		if (task_on_rq_queued(p))
+		if (task_on_rq_queued(p)) {
+			update_rq_clock(rq);
 			rq = __migrate_task(rq, &rf, p, arg->dest_cpu);
-		else
+		} else {
 			p->wake_cpu = arg->dest_cpu;
+		}
 
 		/*
 		 * XXX __migrate_task() can fail, at which point we might end
@@ -3386,180 +3554,6 @@ out:
 }
 #endif /* CONFIG_NUMA_BALANCING */
 
-#ifdef CONFIG_PREEMPT_RT
-
-/*
- * Consider:
- *
- *  set_special_state(X);
- *
- *  do_things()
- *    // Somewhere in there is an rtlock that can be contended:
- *    current_save_and_set_rtlock_wait_state();
- *    [...]
- *    schedule_rtlock(); (A)
- *    [...]
- *    current_restore_rtlock_saved_state();
- *
- *  schedule(); (B)
- *
- * If p->saved_state is anything else than TASK_RUNNING, then p blocked on an
- * rtlock (A) *before* voluntarily calling into schedule() (B) after setting its
- * state to X. For things like ptrace (X=TASK_TRACED), the task could have more
- * work to do upon acquiring the lock in do_things() before whoever called
- * wait_task_inactive() should return. IOW, we have to wait for:
- *
- *   p.saved_state = TASK_RUNNING
- *   p.__state     = X
- *
- * which implies the task isn't blocked on an RT lock and got to schedule() (B).
- *
- * Also see comments in ttwu_state_match().
- */
-
-static __always_inline bool state_mismatch(struct task_struct *p, unsigned int match_state)
-{
-	unsigned long flags;
-	bool mismatch;
-
-	raw_spin_lock_irqsave(&p->pi_lock, flags);
-	mismatch = READ_ONCE(p->__state) != match_state &&
-		READ_ONCE(p->saved_state) != match_state;
-	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
-	return mismatch;
-}
-static __always_inline bool state_match(struct task_struct *p, unsigned int match_state,
-					bool *wait)
-{
-	if (READ_ONCE(p->__state) == match_state)
-		return true;
-	if (READ_ONCE(p->saved_state) != match_state)
-		return false;
-	*wait = true;
-	return true;
-}
-#else
-static __always_inline bool state_mismatch(struct task_struct *p, unsigned int match_state)
-{
-	return READ_ONCE(p->__state) != match_state;
-}
-static __always_inline bool state_match(struct task_struct *p, unsigned int match_state,
-					bool *wait)
-{
-	return READ_ONCE(p->__state) == match_state;
-}
-#endif
-
-/*
- * wait_task_inactive - wait for a thread to unschedule.
- *
- * Wait for the thread to block in any of the states set in @match_state.
- * If it changes, i.e. @p might have woken up, then return zero.  When we
- * succeed in waiting for @p to be off its CPU, we return a positive number
- * (its total switch count).  If a second call a short while later returns the
- * same number, the caller can be sure that @p has remained unscheduled the
- * whole time.
- *
- * The caller must ensure that the task *will* unschedule sometime soon,
- * else this function might spin for a *long* time. This function can't
- * be called with interrupts off, or it may introduce deadlock with
- * smp_call_function() if an IPI is sent by the same process we are
- * waiting to become inactive.
- */
-unsigned long wait_task_inactive(struct task_struct *p, unsigned int match_state)
-{
-	bool running, wait;
-	struct rq_flags rf;
-	unsigned long ncsw;
-	struct rq *rq;
-
-	for (;;) {
-		/*
-		 * We do the initial early heuristics without holding
-		 * any task-queue locks at all. We'll only try to get
-		 * the runqueue lock when things look like they will
-		 * work out!
-		 */
-		rq = task_rq(p);
-
-		/*
-		 * If the task is actively running on another CPU
-		 * still, just relax and busy-wait without holding
-		 * any locks.
-		 *
-		 * NOTE! Since we don't hold any locks, it's not
-		 * even sure that "rq" stays as the right runqueue!
-		 * But we don't care, since "task_on_cpu()" will
-		 * return false if the runqueue has changed and p
-		 * is actually now running somewhere else!
-		 */
-		while (task_on_cpu(rq, p)) {
-			if (state_mismatch(p, match_state))
-				return 0;
-			cpu_relax();
-		}
-
-		/*
-		 * Ok, time to look more closely! We need the rq
-		 * lock now, to be *sure*. If we're wrong, we'll
-		 * just go back and repeat.
-		 */
-		rq = task_rq_lock(p, &rf);
-		trace_sched_wait_task(p);
-		running = task_on_cpu(rq, p);
-		wait = task_on_rq_queued(p);
-		ncsw = 0;
-
-		if (state_match(p, match_state, &wait))
-			ncsw = p->nvcsw | LONG_MIN; /* sets MSB */
-
-		task_rq_unlock(rq, p, &rf);
-
-		/*
-		 * If it changed from the expected state, bail out now.
-		 */
-		if (unlikely(!ncsw))
-			break;
-
-		/*
-		 * Was it really running after all now that we
-		 * checked with the proper locks actually held?
-		 *
-		 * Oops. Go back and try again..
-		 */
-		if (unlikely(running)) {
-			cpu_relax();
-			continue;
-		}
-
-		/*
-		 * It's not enough that it's not actively running,
-		 * it must be off the runqueue _entirely_, and not
-		 * preempted!
-		 *
-		 * So if it was still runnable (but just not actively
-		 * running right now), it's preempted, and we should
-		 * yield - it could be a while.
-		 */
-		if (unlikely(wait)) {
-			ktime_t to = NSEC_PER_SEC / HZ;
-
-			set_current_state(TASK_UNINTERRUPTIBLE);
-			schedule_hrtimeout(&to, HRTIMER_MODE_REL_HARD);
-			continue;
-		}
-
-		/*
-		 * Ahh, all good. It wasn't running, and it wasn't
-		 * runnable, which means that it will never become
-		 * running in the future either. We're all done!
-		 */
-		break;
-	}
-
-	return ncsw;
-}
-
 /***
  * kick_process - kick a running thread to enter/exit the kernel
  * @p: the to-be-kicked thread
@@ -3963,14 +3957,20 @@ void sched_ttwu_pending(void *arg)
 	rq_unlock_irqrestore(rq, &rf);
 }
 
-void send_call_function_single_ipi(int cpu)
+/*
+ * Prepare the scene for sending an IPI for a remote smp_call
+ *
+ * Returns true if the caller can proceed with sending the IPI.
+ * Returns false otherwise.
+ */
+bool call_function_single_prep_ipi(int cpu)
 {
-	struct rq *rq = cpu_rq(cpu);
-
-	if (!set_nr_if_polling(rq->idle))
-		arch_send_call_function_single_ipi(cpu);
-	else
+	if (set_nr_if_polling(cpu_rq(cpu)->idle)) {
 		trace_sched_wake_idle_without_ipi(cpu);
+		return false;
+	}
+
+	return true;
 }
 
 /*
@@ -4108,15 +4108,14 @@ static void ttwu_queue(struct task_struct *p, int cpu, int wake_flags)
 static __always_inline
 bool ttwu_state_match(struct task_struct *p, unsigned int state, int *success)
 {
+	int match;
+
 	if (IS_ENABLED(CONFIG_DEBUG_PREEMPT)) {
 		WARN_ON_ONCE((state & TASK_RTLOCK_WAIT) &&
 			     state != TASK_RTLOCK_WAIT);
 	}
 
-	if (READ_ONCE(p->__state) & state) {
-		*success = 1;
-		return true;
-	}
+	*success = !!(match = __task_state_match(p, state));
 
 #ifdef CONFIG_PREEMPT_RT
 	/*
@@ -4132,12 +4131,10 @@ bool ttwu_state_match(struct task_struct *p, unsigned int state, int *success)
 	 * p::saved_state to TASK_RUNNING so any further tests will
 	 * not result in false positives vs. @success
 	 */
-	if (p->saved_state & state) {
+	if (match < 0)
 		p->saved_state = TASK_RUNNING;
-		*success = 1;
-	}
 #endif
-	return false;
+	return match > 0;
 }
 
 /*
@@ -4610,6 +4607,17 @@ void set_numabalancing_state(bool enabled)
 }
 
 #ifdef CONFIG_PROC_SYSCTL
+static void reset_memory_tiering(void)
+{
+	struct pglist_data *pgdat;
+
+	for_each_online_pgdat(pgdat) {
+		pgdat->nbp_threshold = 0;
+		pgdat->nbp_th_nr_cand = node_page_state(pgdat, PGPROMOTE_CANDIDATE);
+		pgdat->nbp_th_start = jiffies_to_msecs(jiffies);
+	}
+}
+
 int sysctl_numa_balancing(struct ctl_table *table, int write,
 			  void *buffer, size_t *lenp, loff_t *ppos)
 {
@@ -4626,6 +4634,9 @@ int sysctl_numa_balancing(struct ctl_table *table, int write,
 	if (err < 0)
 		return err;
 	if (write) {
+		if (!(sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING) &&
+		    (state & NUMA_BALANCING_MEMORY_TIERING))
+			reset_memory_tiering();
 		sysctl_numa_balancing_mode = state;
 		__set_numabalancing_state(state);
 	}
@@ -5383,6 +5394,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
 		 * finish_task_switch()'s mmdrop().
 		 */
 		switch_mm_irqs_off(prev->active_mm, next->mm, next);
+		lru_gen_use_mm(next->mm);
 
 		if (!prev->mm) {                        // from kernel
 			/* will mmdrop() in finish_task_switch(). */
@@ -5390,8 +5402,6 @@ context_switch(struct rq *rq, struct task_struct *prev,
 			prev->active_mm = NULL;
 		}
 	}
-
-	rq->clock_update_flags &= ~(RQCF_ACT_SKIP|RQCF_REQ_SKIP);
 
 	prepare_lock_switch(rq, next, rf);
 
@@ -5436,6 +5446,11 @@ bool single_task_running(void)
 	return raw_rq()->nr_running == 1;
 }
 EXPORT_SYMBOL(single_task_running);
+
+unsigned long long nr_context_switches_cpu(int cpu)
+{
+	return cpu_rq(cpu)->nr_switches;
+}
 
 unsigned long long nr_context_switches(void)
 {
@@ -6327,7 +6342,7 @@ static bool try_steal_cookie(int this, int that)
 		goto unlock;
 
 	p = sched_core_find(src, cookie);
-	if (p == src->idle)
+	if (!p)
 		goto unlock;
 
 	do {
@@ -6338,6 +6353,13 @@ static bool try_steal_cookie(int this, int that)
 			goto next;
 
 		if (p->core_occupation > dst->idle->core_occupation)
+			goto next;
+		/*
+		 * sched_core_find() and sched_core_next() will ensure that task @p
+		 * is not throttled now, we also need to check whether the runqueue
+		 * of the destination CPU is being throttled.
+		 */
+		if (sched_task_is_throttled(p, this))
 			goto next;
 
 		deactivate_task(src, p, 0);
@@ -6633,6 +6655,7 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 	/* Promote REQ to ACT */
 	rq->clock_update_flags <<= 1;
 	update_rq_clock(rq);
+	rq->clock_update_flags = RQCF_UPDATED;
 
 	switch_count = &prev->nivcsw;
 
@@ -6713,8 +6736,6 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 		/* Also unlocks the rq: */
 		rq = context_switch(rq, prev, next, &rf);
 	} else {
-		rq->clock_update_flags &= ~(RQCF_ACT_SKIP|RQCF_REQ_SKIP);
-
 		rq_unpin_lock(rq, &rf);
 		__balance_callbacks(rq);
 		raw_spin_rq_unlock_irq(rq);
@@ -8408,7 +8429,6 @@ out_free_cpus_allowed:
 
 long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
 {
-	bool reset_cpumasks = cpumask_empty(in_mask);
 	struct affinity_context ac;
 	struct cpumask *user_mask;
 	struct task_struct *p;
@@ -8446,13 +8466,16 @@ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
 		goto out_put_task;
 
 	/*
-	 * If an empty cpumask is passed in and user_cpus_ptr is set,
+	 * If a NULL cpumask is passed in and user_cpus_ptr is set,
 	 * clear user_cpus_ptr and reset the current cpu affinity to the
 	 * default for the current cpuset. If user_cpus_ptr isn't set,
-	 * -EINVAL will be returned as before.
+	 * -EINVAL will be returned.
 	 */
-	if (reset_cpumasks && p->user_cpus_ptr) {
-		in_mask = NULL;	/* To be updated in __sched_setaffinity */
+	if (!in_mask) {
+		if (!p->user_cpus_ptr) {
+			retval = -EINVAL;
+			goto out_put_task;
+		}
 		user_mask = NULL;
 	} else {
 		/*
@@ -8477,27 +8500,46 @@ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
 	retval = __sched_setaffinity(p, &ac);
 	kfree(ac.user_mask);
 
-	/*
-	 * Force an error return (-ENODEV), if no error yet, for the empty
-	 * cpumask case to avoid breaking existing tests.
-	 */
-	if (reset_cpumasks && !retval)
-		retval = -ENODEV;
-
 out_put_task:
 	put_task_struct(p);
 	return retval;
 }
 
 static int get_user_cpu_mask(unsigned long __user *user_mask_ptr, unsigned len,
-			     struct cpumask *new_mask)
+			     struct cpumask *new_mask, bool *empty)
 {
+	/* len in bytes, but offset is in units of unsigned long */
+	unsigned int bytes_left = len, offset = 0;
+
 	if (len < cpumask_size())
 		cpumask_clear(new_mask);
 	else if (len > cpumask_size())
 		len = cpumask_size();
+	/*
+	 * The first copy_from_user() call will copy out the relevant
+	 * portion of the new_mask to be set. However, if it is empty, we
+	 * need to check the full length of the user_mask buffer to verify
+	 * if it is fully empty before we can trigger the resetting of
+	 * user_cpus_ptr.
+	 */
+	for (;;) {
+		if (copy_from_user(new_mask, user_mask_ptr + offset, len))
+			return -EFAULT;
+		*empty = bitmap_empty(cpumask_bits(new_mask),
+				      cpumask_size() * 8);
+		if (offset && !*empty)
+			return -EINVAL;	/* Bit set outside of cpumask_size() */
 
-	return copy_from_user(new_mask, user_mask_ptr, len) ? -EFAULT : 0;
+		if ((bytes_left <= len) || !*empty)
+			return 0;
+		/*
+		 * len = cpumask_size() which is a multiple of sizeof(long)
+		 */
+		offset += len/sizeof(long);
+		bytes_left -= len;
+		if (bytes_left < len)
+			len = bytes_left;
+	}
 }
 
 /**
@@ -8512,14 +8554,28 @@ SYSCALL_DEFINE3(sched_setaffinity, pid_t, pid, unsigned int, len,
 		unsigned long __user *, user_mask_ptr)
 {
 	cpumask_var_t new_mask;
+	bool mask_empty;
 	int retval;
 
 	if (!alloc_cpumask_var(&new_mask, GFP_KERNEL))
 		return -ENOMEM;
 
-	retval = get_user_cpu_mask(user_mask_ptr, len, new_mask);
+	retval = get_user_cpu_mask(user_mask_ptr, len, new_mask, &mask_empty);
 	if (retval == 0)
-		retval = sched_setaffinity(pid, new_mask);
+		retval = sched_setaffinity(pid, mask_empty ? NULL : new_mask);
+	/*
+	 * RHEL Note:
+	 *
+	 * Setting mask_empty to true has the effect of resetting a previously
+	 * set CPU affinity and return a success in this case instead of
+	 * -EINVAL. This, however, can break existing test cases where a
+	 * sched_setaffinity() syscall with empty mask is expected to return
+	 * error. So restore the old behavior by always returning -EINVAL on
+	 * empty mask even if a previous sched_setaffinity() call is reset.
+	 * The only exception if the given len parameter is 0.
+	 */
+	if (len && mask_empty && !retval)
+		retval = -EINVAL;
 	free_cpumask_var(new_mask);
 	return retval;
 }
@@ -8571,14 +8627,14 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
 	if (len & (sizeof(unsigned long)-1))
 		return -EINVAL;
 
-	if (!alloc_cpumask_var(&mask, GFP_KERNEL))
+	if (!zalloc_cpumask_var(&mask, GFP_KERNEL))
 		return -ENOMEM;
 
 	ret = sched_getaffinity(pid, mask);
 	if (ret == 0) {
 		unsigned int retlen = min(len, cpumask_size());
 
-		if (copy_to_user(user_mask_ptr, mask, retlen))
+		if (copy_to_user(user_mask_ptr, cpumask_bits(mask), retlen))
 			ret = -EFAULT;
 		else
 			ret = retlen;
@@ -8660,6 +8716,7 @@ EXPORT_STATIC_CALL_TRAMP(might_resched);
 static DEFINE_STATIC_KEY_FALSE(sk_dynamic_cond_resched);
 int __sched dynamic_cond_resched(void)
 {
+	klp_sched_try_switch();
 	if (!static_branch_unlikely(&sk_dynamic_cond_resched))
 		return 0;
 	return __cond_resched();
@@ -8808,13 +8865,17 @@ int sched_dynamic_mode(const char *str)
 #error "Unsupported PREEMPT_DYNAMIC mechanism"
 #endif
 
-void sched_dynamic_update(int mode)
+static DEFINE_MUTEX(sched_dynamic_mutex);
+static bool klp_override;
+
+static void __sched_dynamic_update(int mode)
 {
 	/*
 	 * Avoid {NONE,VOLUNTARY} -> FULL transitions from ever ending up in
 	 * the ZERO state, which is invalid.
 	 */
-	preempt_dynamic_enable(cond_resched);
+	if (!klp_override)
+		preempt_dynamic_enable(cond_resched);
 	preempt_dynamic_enable(might_resched);
 	preempt_dynamic_enable(preempt_schedule);
 	preempt_dynamic_enable(preempt_schedule_notrace);
@@ -8822,35 +8883,78 @@ void sched_dynamic_update(int mode)
 
 	switch (mode) {
 	case preempt_dynamic_none:
-		preempt_dynamic_enable(cond_resched);
+		if (!klp_override)
+			preempt_dynamic_enable(cond_resched);
 		preempt_dynamic_disable(might_resched);
 		preempt_dynamic_disable(preempt_schedule);
 		preempt_dynamic_disable(preempt_schedule_notrace);
 		preempt_dynamic_disable(irqentry_exit_cond_resched);
-		pr_info("Dynamic Preempt: none\n");
+		if (mode != preempt_dynamic_mode)
+			pr_info("Dynamic Preempt: none\n");
 		break;
 
 	case preempt_dynamic_voluntary:
-		preempt_dynamic_enable(cond_resched);
+		if (!klp_override)
+			preempt_dynamic_enable(cond_resched);
 		preempt_dynamic_enable(might_resched);
 		preempt_dynamic_disable(preempt_schedule);
 		preempt_dynamic_disable(preempt_schedule_notrace);
 		preempt_dynamic_disable(irqentry_exit_cond_resched);
-		pr_info("Dynamic Preempt: voluntary\n");
+		if (mode != preempt_dynamic_mode)
+			pr_info("Dynamic Preempt: voluntary\n");
 		break;
 
 	case preempt_dynamic_full:
-		preempt_dynamic_disable(cond_resched);
+		if (!klp_override)
+			preempt_dynamic_disable(cond_resched);
 		preempt_dynamic_disable(might_resched);
 		preempt_dynamic_enable(preempt_schedule);
 		preempt_dynamic_enable(preempt_schedule_notrace);
 		preempt_dynamic_enable(irqentry_exit_cond_resched);
-		pr_info("Dynamic Preempt: full\n");
+		if (mode != preempt_dynamic_mode)
+			pr_info("Dynamic Preempt: full\n");
 		break;
 	}
 
 	preempt_dynamic_mode = mode;
 }
+
+void sched_dynamic_update(int mode)
+{
+	mutex_lock(&sched_dynamic_mutex);
+	__sched_dynamic_update(mode);
+	mutex_unlock(&sched_dynamic_mutex);
+}
+
+#ifdef CONFIG_HAVE_PREEMPT_DYNAMIC_CALL
+
+static int klp_cond_resched(void)
+{
+	__klp_sched_try_switch();
+	return __cond_resched();
+}
+
+void sched_dynamic_klp_enable(void)
+{
+	mutex_lock(&sched_dynamic_mutex);
+
+	klp_override = true;
+	static_call_update(cond_resched, klp_cond_resched);
+
+	mutex_unlock(&sched_dynamic_mutex);
+}
+
+void sched_dynamic_klp_disable(void)
+{
+	mutex_lock(&sched_dynamic_mutex);
+
+	klp_override = false;
+	__sched_dynamic_update(preempt_dynamic_mode);
+
+	mutex_unlock(&sched_dynamic_mutex);
+}
+
+#endif /* CONFIG_HAVE_PREEMPT_DYNAMIC_CALL */
 
 static int __init setup_preempt_mode(char *str)
 {
@@ -9599,6 +9703,7 @@ void set_rq_offline(struct rq *rq)
 	if (rq->online) {
 		const struct sched_class *class;
 
+		update_rq_clock(rq);
 		for_each_class(class) {
 			if (class->rq_offline)
 				class->rq_offline(rq);
@@ -9740,7 +9845,6 @@ int sched_cpu_deactivate(unsigned int cpu)
 
 	rq_lock_irqsave(rq, &rf);
 	if (rq->rd) {
-		update_rq_clock(rq);
 		BUG_ON(!cpumask_test_cpu(cpu, rq->rd->span));
 		set_rq_offline(rq);
 	}
@@ -10475,7 +10579,7 @@ void sched_release_group(struct task_group *tg)
 	spin_unlock_irqrestore(&task_group_lock, flags);
 }
 
-static void sched_change_group(struct task_struct *tsk)
+static struct task_group *sched_get_task_group(struct task_struct *tsk)
 {
 	struct task_group *tg;
 
@@ -10487,7 +10591,13 @@ static void sched_change_group(struct task_struct *tsk)
 	tg = container_of(task_css_check(tsk, cpu_cgrp_id, true),
 			  struct task_group, css);
 	tg = autogroup_task_group(tsk, tg);
-	tsk->sched_task_group = tg;
+
+	return tg;
+}
+
+static void sched_change_group(struct task_struct *tsk, struct task_group *group)
+{
+	tsk->sched_task_group = group;
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	if (tsk->sched_class->task_change_group)
@@ -10508,10 +10618,19 @@ void sched_move_task(struct task_struct *tsk)
 {
 	int queued, running, queue_flags =
 		DEQUEUE_SAVE | DEQUEUE_MOVE | DEQUEUE_NOCLOCK;
+	struct task_group *group;
 	struct rq_flags rf;
 	struct rq *rq;
 
 	rq = task_rq_lock(tsk, &rf);
+	/*
+	 * Esp. with SCHED_AUTOGROUP enabled it is possible to get superfluous
+	 * group changes.
+	 */
+	group = sched_get_task_group(tsk);
+	if (group == tsk->sched_task_group)
+		goto unlock;
+
 	update_rq_clock(rq);
 
 	running = task_current(rq, tsk);
@@ -10522,7 +10641,7 @@ void sched_move_task(struct task_struct *tsk)
 	if (running)
 		put_prev_task(rq, tsk);
 
-	sched_change_group(tsk);
+	sched_change_group(tsk, group);
 
 	if (queued)
 		enqueue_task(rq, tsk, queue_flags);
@@ -10536,6 +10655,7 @@ void sched_move_task(struct task_struct *tsk)
 		resched_curr(rq);
 	}
 
+unlock:
 	task_rq_unlock(rq, tsk, &rf);
 }
 

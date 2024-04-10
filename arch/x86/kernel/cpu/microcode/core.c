@@ -31,23 +31,20 @@
 #include <linux/fs.h>
 #include <linux/mm.h>
 
-#include <asm/microcode_intel.h>
 #include <asm/cpu_device_id.h>
-#include <asm/microcode_amd.h>
 #include <asm/perf_event.h>
-#include <asm/microcode.h>
 #include <asm/processor.h>
 #include <asm/cmdline.h>
 #include <asm/setup.h>
 
+#include "internal.h"
+
 #define DRIVER_VERSION	"2.2"
 
 static struct microcode_ops	*microcode_ops;
-static bool dis_ucode_ldr = true;
+bool dis_ucode_ldr = true;
 
 bool initrd_gone;
-
-LIST_HEAD(microcode_cache);
 
 /*
  * Synchronization.
@@ -96,10 +93,7 @@ static bool amd_check_current_patch_level(void)
 
 	native_rdmsr(MSR_AMD64_PATCH_LEVEL, lvl, dummy);
 
-	if (IS_ENABLED(CONFIG_X86_32))
-		levels = (u32 *)__pa_nodebug(&final_levels);
-	else
-		levels = final_levels;
+	levels = final_levels;
 
 	for (i = 0; levels[i]; i++) {
 		if (lvl == levels[i])
@@ -111,17 +105,8 @@ static bool amd_check_current_patch_level(void)
 static bool __init check_loader_disabled_bsp(void)
 {
 	static const char *__dis_opt_str = "dis_ucode_ldr";
-
-#ifdef CONFIG_X86_32
-	const char *cmdline = (const char *)__pa_nodebug(boot_command_line);
-	const char *option  = (const char *)__pa_nodebug(__dis_opt_str);
-	bool *res = (bool *)__pa_nodebug(&dis_ucode_ldr);
-
-#else /* CONFIG_X86_64 */
 	const char *cmdline = boot_command_line;
 	const char *option  = __dis_opt_str;
-	bool *res = &dis_ucode_ldr;
-#endif
 
 	/*
 	 * CPUID(1).ECX[31]: reserved for hypervisor use. This is still not
@@ -129,17 +114,17 @@ static bool __init check_loader_disabled_bsp(void)
 	 * that's good enough as they don't land on the BSP path anyway.
 	 */
 	if (native_cpuid_ecx(1) & BIT(31))
-		return *res;
+		return true;
 
 	if (x86_cpuid_vendor() == X86_VENDOR_AMD) {
 		if (amd_check_current_patch_level())
-			return *res;
+			return true;
 	}
 
 	if (cmdline_find_option_bool(cmdline, option) <= 0)
-		*res = false;
+		dis_ucode_ldr = false;
 
-	return *res;
+	return dis_ucode_ldr;
 }
 
 void __init load_ucode_bsp(void)
@@ -177,20 +162,11 @@ void __init load_ucode_bsp(void)
 		load_ucode_amd_early(cpuid_1_eax);
 }
 
-static bool check_loader_disabled_ap(void)
-{
-#ifdef CONFIG_X86_32
-	return *((bool *)__pa_nodebug(&dis_ucode_ldr));
-#else
-	return dis_ucode_ldr;
-#endif
-}
-
 void load_ucode_ap(void)
 {
 	unsigned int cpuid_1_eax;
 
-	if (check_loader_disabled_ap())
+	if (dis_ucode_ldr)
 		return;
 
 	cpuid_1_eax = native_cpuid_eax(1);
@@ -214,16 +190,7 @@ static int __init save_microcode_in_initrd(void)
 	struct cpuinfo_x86 *c = &boot_cpu_data;
 	int ret = -EINVAL;
 
-	if (dis_ucode_ldr) {
-		ret = 0;
-		goto out;
-	}
-
 	switch (c->x86_vendor) {
-	case X86_VENDOR_INTEL:
-		if (c->x86 >= 6)
-			ret = save_microcode_in_initrd_intel();
-		break;
 	case X86_VENDOR_AMD:
 		if (c->x86 >= 0x10)
 			ret = save_microcode_in_initrd_amd(cpuid_eax(1));
@@ -232,46 +199,33 @@ static int __init save_microcode_in_initrd(void)
 		break;
 	}
 
-out:
 	initrd_gone = true;
 
 	return ret;
 }
 
-struct cpio_data find_microcode_in_initrd(const char *path, bool use_pa)
+struct cpio_data find_microcode_in_initrd(const char *path)
 {
 #ifdef CONFIG_BLK_DEV_INITRD
 	unsigned long start = 0;
 	size_t size;
 
 #ifdef CONFIG_X86_32
-	struct boot_params *params;
-
-	if (use_pa)
-		params = (struct boot_params *)__pa_nodebug(&boot_params);
-	else
-		params = &boot_params;
-
-	size = params->hdr.ramdisk_size;
-
-	/*
-	 * Set start only if we have an initrd image. We cannot use initrd_start
-	 * because it is not set that early yet.
-	 */
+	size = boot_params.hdr.ramdisk_size;
+	/* Early load on BSP has a temporary mapping. */
 	if (size)
-		start = params->hdr.ramdisk_image;
+		start = initrd_start_early;
 
-# else /* CONFIG_X86_64 */
+#else /* CONFIG_X86_64 */
 	size  = (unsigned long)boot_params.ext_ramdisk_size << 32;
 	size |= boot_params.hdr.ramdisk_size;
 
 	if (size) {
 		start  = (unsigned long)boot_params.ext_ramdisk_image << 32;
 		start |= boot_params.hdr.ramdisk_image;
-
 		start += PAGE_OFFSET;
 	}
-# endif
+#endif
 
 	/*
 	 * Fixup the start address: after reserve_initrd() runs, initrd_start
@@ -282,23 +236,10 @@ struct cpio_data find_microcode_in_initrd(const char *path, bool use_pa)
 	 * initrd_gone is for the hotplug case where we've thrown out initrd
 	 * already.
 	 */
-	if (!use_pa) {
-		if (initrd_gone)
-			return (struct cpio_data){ NULL, 0, "" };
-		if (initrd_start)
-			start = initrd_start;
-	} else {
-		/*
-		 * The picture with physical addresses is a bit different: we
-		 * need to get the *physical* address to which the ramdisk was
-		 * relocated, i.e., relocated_ramdisk (not initrd_start) and
-		 * since we're running from physical addresses, we need to access
-		 * relocated_ramdisk through its *physical* address too.
-		 */
-		u64 *rr = (u64 *)__pa_nodebug(&relocated_ramdisk);
-		if (*rr)
-			start = *rr;
-	}
+	if (initrd_gone)
+		return (struct cpio_data){ NULL, 0, "" };
+	if (initrd_start)
+		start = initrd_start;
 
 	return find_cpio_data(path, (void *)start, size, NULL);
 #else /* !CONFIG_BLK_DEV_INITRD */
@@ -306,7 +247,7 @@ struct cpio_data find_microcode_in_initrd(const char *path, bool use_pa)
 #endif
 }
 
-void reload_early_microcode(unsigned int cpu)
+static void reload_early_microcode(unsigned int cpu)
 {
 	int vendor, family;
 
@@ -461,6 +402,10 @@ static int microcode_reload_late(void)
 	store_cpu_caps(&prev_info);
 
 	ret = stop_machine_cpuslocked(__reload_late, NULL, cpu_online_mask);
+
+	if (microcode_ops->finalize_late_load)
+		microcode_ops->finalize_late_load(ret);
+
 	if (!ret) {
 		pr_info("Reload succeeded, microcode revision: 0x%x -> 0x%x\n",
 			old, boot_cpu_data.microcode);
@@ -643,6 +588,7 @@ static const struct attribute_group cpu_root_microcode_group = {
 
 static int __init microcode_init(void)
 {
+	struct device *dev_root;
 	struct cpuinfo_x86 *c = &boot_cpu_data;
 	int error;
 
@@ -663,10 +609,14 @@ static int __init microcode_init(void)
 	if (IS_ERR(microcode_pdev))
 		return PTR_ERR(microcode_pdev);
 
-	error = sysfs_create_group(&cpu_subsys.dev_root->kobj, &cpu_root_microcode_group);
-	if (error) {
-		pr_err("Error creating microcode group!\n");
-		goto out_pdev;
+	dev_root = bus_get_dev_root(&cpu_subsys);
+	if (dev_root) {
+		error = sysfs_create_group(&dev_root->kobj, &cpu_root_microcode_group);
+		put_device(dev_root);
+		if (error) {
+			pr_err("Error creating microcode group!\n");
+			goto out_pdev;
+		}
 	}
 
 	/* Do per-CPU setup */

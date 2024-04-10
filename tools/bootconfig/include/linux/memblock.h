@@ -6,6 +6,6 @@
 
 #define SMP_CACHE_BYTES	0
 #define memblock_alloc(size, align)	malloc(size)
-#define memblock_free_ptr(paddr, size)	free(paddr)
+#define memblock_free(paddr, size)	free(paddr)
 
 #endif

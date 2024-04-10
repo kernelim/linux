@@ -16,7 +16,7 @@ workflow: !reference [.workflow]
     srpm_make_target: dist-srpm
     native_tools: 'true'
     architectures: 'x86_64 ppc64le aarch64 s390x'
-    disttag_override: '.el9_3'
+    disttag_override: '.el9_4'
 
 .trigger_c9s_pipeline:
   trigger:
@@ -25,13 +25,15 @@ workflow: !reference [.workflow]
     name: c9s
     builder_image: quay.io/cki/builder-stream9
     kpet_tree_name: c9s
+    run_redhat_self_test: 'true'
 
 .trigger_rhel9_pipeline:
   trigger:
     branch: rhel9
   variables:
     name: rhel9
-    builder_image: quay.io/cki/builder-rhel9.3
+    builder_image: quay.io/cki/builder-rhel9
+    run_redhat_self_test: 'true'
 
 .trigger_rhel9_build:
   extends: .trigger_rhel9_pipeline

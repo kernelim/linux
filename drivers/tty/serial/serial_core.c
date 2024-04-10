@@ -1264,6 +1264,12 @@ static int uart_get_icount(struct tty_struct *tty,
 	return 0;
 }
 
+int uart_rs485_config(struct uart_port *port)
+{
+	return port->rs485_config(port, &port->rs485);
+}
+EXPORT_SYMBOL_GPL(uart_rs485_config);
+
 static int uart_get_rs485_config(struct uart_port *port,
 			 struct serial_rs485 __user *rs485)
 {
@@ -2539,9 +2545,12 @@ int uart_register_driver(struct uart_driver *drv)
 	if (!drv->state)
 		goto out;
 
-	normal = alloc_tty_driver(drv->nr);
-	if (!normal)
+	normal = tty_alloc_driver(drv->nr, TTY_DRIVER_REAL_RAW |
+			TTY_DRIVER_DYNAMIC_DEV);
+	if (IS_ERR(normal)) {
+		retval = PTR_ERR(normal);
 		goto out_kfree;
+	}
 
 	drv->tty_driver = normal;
 
@@ -2554,7 +2563,6 @@ int uart_register_driver(struct uart_driver *drv)
 	normal->init_termios	= tty_std_termios;
 	normal->init_termios.c_cflag = B9600 | CS8 | CREAD | HUPCL | CLOCAL;
 	normal->init_termios.c_ispeed = normal->init_termios.c_ospeed = 9600;
-	normal->flags		= TTY_DRIVER_REAL_RAW | TTY_DRIVER_DYNAMIC_DEV;
 	normal->driver_state    = drv;
 	tty_set_operations(normal, &uart_ops);
 

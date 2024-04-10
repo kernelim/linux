@@ -9,6 +9,7 @@
 #include <linux/uidgid.h>
 #include <net/inet_frag.h>
 #include <linux/rcupdate.h>
+#include <linux/seqlock.h>
 #include <linux/siphash.h>
 
 struct ctl_table_header;
@@ -147,7 +148,7 @@ struct netns_ipv4 {
 	u8 sysctl_tcp_abort_on_overflow;
 	u8 sysctl_tcp_fack; /* obsolete */
 	int sysctl_tcp_max_reordering;
-	int sysctl_tcp_adv_win_scale;
+	int sysctl_tcp_adv_win_scale; /* obsolete */
 	u8 sysctl_tcp_dsack;
 	u8 sysctl_tcp_app_win;
 	u8 sysctl_tcp_frto;

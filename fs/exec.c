@@ -153,8 +153,6 @@ SYSCALL_DEFINE1(uselib, const char __user *, library)
 			 path_noexec(&file->f_path)))
 		goto exit;
 
-	fsnotify_open(file);
-
 	error = -ENOEXEC;
 
 	read_lock(&binfmt_lock);
@@ -939,9 +937,6 @@ static struct file *do_open_execat(int fd, struct filename *name, int flags)
 	if (err)
 		goto exit;
 
-	if (name->name[0] != '\0')
-		fsnotify_open(file);
-
 out:
 	return file;
 
@@ -1032,6 +1027,7 @@ static int exec_mmap(struct mm_struct *mm)
 	tsk->mm->vmacache_seqnum = 0;
 	vmacache_flush(tsk);
 	task_unlock(tsk);
+	lru_gen_use_mm(mm);
 	if (old_mm) {
 		mmap_read_unlock(old_mm);
 		BUG_ON(active_mm != old_mm);

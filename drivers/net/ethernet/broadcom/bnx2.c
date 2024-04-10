@@ -48,7 +48,6 @@
 #include <linux/cache.h>
 #include <linux/firmware.h>
 #include <linux/log2.h>
-#include <linux/aer.h>
 #include <linux/crash_dump.h>
 
 #if IS_ENABLED(CONFIG_CNIC)
@@ -8091,7 +8090,6 @@ bnx2_init_board(struct pci_dev *pdev, struct net_device *dev)
 	int rc, i, j;
 	u32 reg;
 	u64 dma_mask, persist_dma_mask;
-	int err;
 
 	SET_NETDEV_DEV(dev, &pdev->dev);
 	bp = netdev_priv(dev);
@@ -8174,12 +8172,6 @@ bnx2_init_board(struct pci_dev *pdev, struct net_device *dev)
 		bp->flags |= BNX2_FLAG_PCIE;
 		if (BNX2_CHIP_REV(bp) == BNX2_CHIP_REV_Ax)
 			bp->flags |= BNX2_FLAG_JUMBO_BROKEN;
-
-		/* AER (Advanced Error Reporting) hooks */
-		err = pci_enable_pcie_error_reporting(pdev);
-		if (!err)
-			bp->flags |= BNX2_FLAG_AER_ENABLED;
-
 	} else {
 		bp->pcix_cap = pci_find_capability(pdev, PCI_CAP_ID_PCIX);
 		if (bp->pcix_cap == 0) {
@@ -8458,11 +8450,6 @@ bnx2_init_board(struct pci_dev *pdev, struct net_device *dev)
 	return 0;
 
 err_out_unmap:
-	if (bp->flags & BNX2_FLAG_AER_ENABLED) {
-		pci_disable_pcie_error_reporting(pdev);
-		bp->flags &= ~BNX2_FLAG_AER_ENABLED;
-	}
-
 	pci_iounmap(pdev, bp->regview);
 	bp->regview = NULL;
 
@@ -8551,8 +8538,6 @@ bnx2_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	int rc;
 	char str[40];
 
-	pci_hw_unmaintained(ent, pdev);
-
 	/* dev zeroed in init_etherdev */
 	dev = alloc_etherdev_mq(sizeof(*bp), TX_MAX_RINGS);
 	if (!dev)
@@ -8637,11 +8622,6 @@ bnx2_remove_one(struct pci_dev *pdev)
 
 	bnx2_free_stats_blk(dev);
 	kfree(bp->temp_stats_blk);
-
-	if (bp->flags & BNX2_FLAG_AER_ENABLED) {
-		pci_disable_pcie_error_reporting(pdev);
-		bp->flags &= ~BNX2_FLAG_AER_ENABLED;
-	}
 
 	bnx2_release_firmware(bp);
 
@@ -8765,9 +8745,6 @@ static pci_ers_result_t bnx2_io_slot_reset(struct pci_dev *pdev)
 		dev_close(dev);
 	}
 	rtnl_unlock();
-
-	if (!(bp->flags & BNX2_FLAG_AER_ENABLED))
-		return result;
 
 	return result;
 }

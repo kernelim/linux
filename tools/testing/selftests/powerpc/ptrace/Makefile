@@ -10,6 +10,7 @@ include ../../lib.mk
 CFLAGS += -m64 -I../../../../../usr/include -I../tm -mhtm -fno-pie
 
 $(OUTPUT)/ptrace-pkey $(OUTPUT)/core-pkey: child.h
+$(OUTPUT)/ptrace-perf-hwbreak: ptrace-perf-asm.S
 $(OUTPUT)/ptrace-pkey $(OUTPUT)/core-pkey: LDLIBS += -pthread
 
 $(TEST_GEN_PROGS): ../harness.c ../utils.c ../lib/reg.S ptrace.h

@@ -178,6 +178,7 @@ config PPC
 	select GENERIC_SMP_IDLE_THREAD
 	select GENERIC_TIME_VSYSCALL
 	select GENERIC_VDSO_TIME_NS
+	select HAS_IOPORT			if PCI
 	select HAVE_ARCH_AUDITSYSCALL
 	select HAVE_ARCH_HUGE_VMALLOC		if HAVE_ARCH_HUGE_VMAP
 	select HAVE_ARCH_HUGE_VMAP		if PPC_RADIX_MMU || PPC_8xx
@@ -238,6 +239,8 @@ config PPC
 	select HAVE_STACKPROTECTOR		if PPC64 && $(cc-option,-mstack-protector-guard=tls -mstack-protector-guard-reg=r13)
 	select HAVE_SYSCALL_TRACEPOINTS
 	select HAVE_VIRT_CPU_ACCOUNTING
+	select HOTPLUG_SMT			if HOTPLUG_CPU
+	select SMT_NUM_THREADS_DYNAMIC
 	select HUGETLB_PAGE_SIZE_VARIABLE	if PPC_BOOK3S_64 && HUGETLB_PAGE
 	select IOMMU_HELPER			if PPC64
 	select IRQ_DOMAIN
@@ -766,6 +769,7 @@ config THREAD_SHIFT
 	int "Thread shift" if EXPERT
 	range 13 15
 	default "15" if PPC_256K_PAGES
+	default "15" if PPC_PSERIES || PPC_POWERNV
 	default "14" if PPC64
 	default "14" if KASAN
 	default "13"
@@ -808,20 +812,20 @@ config DATA_SHIFT
 	  in that case. If PIN_TLB is selected, it must be aligned to 8M as
 	  8M pages will be pinned.
 
-config FORCE_MAX_ZONEORDER
+config ARCH_FORCE_MAX_ORDER
 	int "Maximum zone order"
-	range 8 9 if PPC64 && PPC_64K_PAGES
-	default "9" if PPC64 && PPC_64K_PAGES
-	range 13 13 if PPC64 && !PPC_64K_PAGES
-	default "13" if PPC64 && !PPC_64K_PAGES
-	range 9 64 if PPC32 && PPC_16K_PAGES
-	default "9" if PPC32 && PPC_16K_PAGES
-	range 7 64 if PPC32 && PPC_64K_PAGES
-	default "7" if PPC32 && PPC_64K_PAGES
-	range 5 64 if PPC32 && PPC_256K_PAGES
-	default "5" if PPC32 && PPC_256K_PAGES
-	range 11 64
-	default "11"
+	range 7 8 if PPC64 && PPC_64K_PAGES
+	default "8" if PPC64 && PPC_64K_PAGES
+	range 12 12 if PPC64 && !PPC_64K_PAGES
+	default "12" if PPC64 && !PPC_64K_PAGES
+	range 8 63 if PPC32 && PPC_16K_PAGES
+	default "8" if PPC32 && PPC_16K_PAGES
+	range 6 63 if PPC32 && PPC_64K_PAGES
+	default "6" if PPC32 && PPC_64K_PAGES
+	range 4 63 if PPC32 && PPC_256K_PAGES
+	default "4" if PPC32 && PPC_256K_PAGES
+	range 10 63
+	default "10"
 	help
 	  The kernel memory allocator divides physically contiguous memory
 	  blocks into "zones", where each zone is a power of two number of
@@ -829,9 +833,6 @@ config FORCE_MAX_ZONEORDER
 	  keeps in the memory allocator.  If you need to allocate very large
 	  blocks of physically contiguous memory, then you may need to
 	  increase this value.
-
-	  This config option is actually maximum order plus one. For example,
-	  a value of 11 means that the largest free memory block is 2^10 pages.
 
 	  The page size is not necessarily 4KB.  For example, on 64-bit
 	  systems, 64KB pages can be enabled via CONFIG_PPC_64K_PAGES.  Keep
@@ -1231,9 +1232,6 @@ config PHYSICAL_START
 	hex
 	default "0x00000000"
 endif
-
-config	ARCH_RANDOM
-	def_bool n
 
 config PPC_LIB_RHEAP
 	bool

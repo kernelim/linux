@@ -7,9 +7,9 @@
 prctl_arch_header=${x86_header_dir}/prctl.h
 
 print_range () {
-	local idx=$1
-	local prefix=$2
-	local first_entry=$3
+	idx=$1
+	prefix=$2
+	first_entry=$3
 
 	printf "#define x86_arch_prctl_codes_%d_offset %s\n" $idx $first_entry
 	printf "static const char *x86_arch_prctl_codes_%d[] = {\n" $idx
@@ -24,3 +24,4 @@ print_range () {
 
 print_range 1 0x1 0x1001
 print_range 2 0x2 0x2001
+print_range 3 0x4 0x4001

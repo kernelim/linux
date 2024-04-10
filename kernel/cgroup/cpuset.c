@@ -25,47 +25,26 @@
 #include <linux/cpu.h>
 #include <linux/cpumask.h>
 #include <linux/cpuset.h>
-#include <linux/err.h>
-#include <linux/errno.h>
-#include <linux/file.h>
-#include <linux/fs.h>
+#include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
-#include <linux/kmod.h>
-#include <linux/kthread.h>
-#include <linux/list.h>
 #include <linux/mempolicy.h>
 #include <linux/mm.h>
 #include <linux/memory.h>
 #include <linux/export.h>
-#include <linux/mount.h>
-#include <linux/fs_context.h>
-#include <linux/namei.h>
-#include <linux/pagemap.h>
-#include <linux/proc_fs.h>
 #include <linux/rcupdate.h>
 #include <linux/sched.h>
 #include <linux/sched/deadline.h>
 #include <linux/sched/mm.h>
 #include <linux/sched/task.h>
-#include <linux/seq_file.h>
 #include <linux/security.h>
-#include <linux/slab.h>
 #include <linux/spinlock.h>
-#include <linux/stat.h>
-#include <linux/string.h>
-#include <linux/time.h>
-#include <linux/time64.h>
-#include <linux/backing-dev.h>
-#include <linux/sort.h>
 #include <linux/oom.h>
 #include <linux/sched/isolation.h>
-#include <linux/uaccess.h>
-#include <linux/atomic.h>
-#include <linux/mutex.h>
 #include <linux/cgroup.h>
 #include <linux/wait.h>
+#include <linux/workqueue.h>
 
 DEFINE_STATIC_KEY_FALSE(cpusets_pre_enable_key);
 DEFINE_STATIC_KEY_FALSE(cpusets_enabled_key);
@@ -226,6 +205,11 @@ struct cpuset {
  * Exclusive CPUs distributed out to sub-partitions of top_cpuset
  */
 static cpumask_var_t	subpartitions_cpus;
+
+/*
+ * Exclusive CPUs in isolated partitions
+ */
+static cpumask_var_t	isolated_cpus;
 
 /* List of remote partition root children */
 static struct list_head remote_children;
@@ -742,18 +726,18 @@ static inline struct cpumask *fetch_xcpus(struct cpuset *cs)
 }
 
 /*
- * cpu_exclusive_check() - check if two cpusets are exclusive
+ * cpusets_are_exclusive() - check if two cpusets are exclusive
  *
- * Return 0 if exclusive, -EINVAL if not
+ * Return true if exclusive, false if not
  */
-static inline bool cpu_exclusive_check(struct cpuset *cs1, struct cpuset *cs2)
+static inline bool cpusets_are_exclusive(struct cpuset *cs1, struct cpuset *cs2)
 {
 	struct cpumask *xcpus1 = fetch_xcpus(cs1);
 	struct cpumask *xcpus2 = fetch_xcpus(cs2);
 
 	if (cpumask_intersects(xcpus1, xcpus2))
-		return -EINVAL;
-	return 0;
+		return false;
+	return true;
 }
 
 /*
@@ -856,7 +840,7 @@ static int validate_change(struct cpuset *cur, struct cpuset *trial)
 	cpuset_for_each_child(c, css, par) {
 		if ((is_cpu_exclusive(trial) || is_cpu_exclusive(c)) &&
 		    c != cur) {
-			if (cpu_exclusive_check(trial, c))
+			if (!cpusets_are_exclusive(trial, c))
 				goto out;
 		}
 		if ((is_mem_exclusive(trial) || is_mem_exclusive(c)) &&
@@ -1340,6 +1324,7 @@ static void compute_effective_cpumask(struct cpumask *new_cpus,
  */
 enum partition_cmd {
 	partcmd_enable,		/* Enable partition root	  */
+	partcmd_enablei,	/* Enable isolated partition root */
 	partcmd_disable,	/* Disable partition root	  */
 	partcmd_update,		/* Update parent's effective_cpus */
 	partcmd_invalidate,	/* Make partition invalid	  */
@@ -1374,13 +1359,23 @@ static int update_partition_exclusive(struct cpuset *cs, int new_prs)
  *
  * Changing load balance flag will automatically call
  * rebuild_sched_domains_locked().
+ * This function is for cgroup v2 only.
  */
 static void update_partition_sd_lb(struct cpuset *cs, int old_prs)
 {
 	int new_prs = cs->partition_root_state;
-	bool new_lb = (new_prs != PRS_ISOLATED);
 	bool rebuild_domains = (new_prs > 0) || (old_prs > 0);
+	bool new_lb;
 
+	/*
+	 * If cs is not a valid partition root, the load balance state
+	 * will follow its parent.
+	 */
+	if (new_prs > 0) {
+		new_lb = (new_prs != PRS_ISOLATED);
+	} else {
+		new_lb = is_sched_load_balance(parent_cs(cs));
+	}
 	if (new_lb != !!is_sched_load_balance(cs)) {
 		rebuild_domains = true;
 		if (new_lb)
@@ -1432,6 +1427,109 @@ static void reset_partition_data(struct cpuset *cs)
 }
 
 /*
+ * partition_xcpus_newstate - Exclusive CPUs state change
+ * @old_prs: old partition_root_state
+ * @new_prs: new partition_root_state
+ * @xcpus: exclusive CPUs with state change
+ */
+static void partition_xcpus_newstate(int old_prs, int new_prs, struct cpumask *xcpus)
+{
+	WARN_ON_ONCE(old_prs == new_prs);
+	if (new_prs == PRS_ISOLATED)
+		cpumask_or(isolated_cpus, isolated_cpus, xcpus);
+	else
+		cpumask_andnot(isolated_cpus, isolated_cpus, xcpus);
+}
+
+/*
+ * partition_xcpus_add - Add new exclusive CPUs to partition
+ * @new_prs: new partition_root_state
+ * @parent: parent cpuset
+ * @xcpus: exclusive CPUs to be added
+ * Return: true if isolated_cpus modified, false otherwise
+ *
+ * Remote partition if parent == NULL
+ */
+static bool partition_xcpus_add(int new_prs, struct cpuset *parent,
+				struct cpumask *xcpus)
+{
+	bool isolcpus_updated;
+
+	WARN_ON_ONCE(new_prs < 0);
+	lockdep_assert_held(&callback_lock);
+	if (!parent)
+		parent = &top_cpuset;
+
+
+	if (parent == &top_cpuset)
+		cpumask_or(subpartitions_cpus, subpartitions_cpus, xcpus);
+
+	isolcpus_updated = (new_prs != parent->partition_root_state);
+	if (isolcpus_updated)
+		partition_xcpus_newstate(parent->partition_root_state, new_prs,
+					 xcpus);
+
+	cpumask_andnot(parent->effective_cpus, parent->effective_cpus, xcpus);
+	return isolcpus_updated;
+}
+
+/*
+ * partition_xcpus_del - Remove exclusive CPUs from partition
+ * @old_prs: old partition_root_state
+ * @parent: parent cpuset
+ * @xcpus: exclusive CPUs to be removed
+ * Return: true if isolated_cpus modified, false otherwise
+ *
+ * Remote partition if parent == NULL
+ */
+static bool partition_xcpus_del(int old_prs, struct cpuset *parent,
+				struct cpumask *xcpus)
+{
+	bool isolcpus_updated;
+
+	WARN_ON_ONCE(old_prs < 0);
+	lockdep_assert_held(&callback_lock);
+	if (!parent)
+		parent = &top_cpuset;
+
+	if (parent == &top_cpuset)
+		cpumask_andnot(subpartitions_cpus, subpartitions_cpus, xcpus);
+
+	isolcpus_updated = (old_prs != parent->partition_root_state);
+	if (isolcpus_updated)
+		partition_xcpus_newstate(old_prs, parent->partition_root_state,
+					 xcpus);
+
+	cpumask_and(xcpus, xcpus, cpu_active_mask);
+	cpumask_or(parent->effective_cpus, parent->effective_cpus, xcpus);
+	return isolcpus_updated;
+}
+
+static void update_unbound_workqueue_cpumask(bool isolcpus_updated)
+{
+	int ret;
+
+	lockdep_assert_cpus_held();
+
+	if (!isolcpus_updated)
+		return;
+
+	ret = workqueue_unbound_exclude_cpumask(isolated_cpus);
+	WARN_ON_ONCE(ret < 0);
+}
+
+/**
+ * cpuset_cpu_is_isolated - Check if the given CPU is isolated
+ * @cpu: the CPU number to be checked
+ * Return: true if CPU is used in an isolated partition, false otherwise
+ */
+bool cpuset_cpu_is_isolated(int cpu)
+{
+	return cpumask_test_cpu(cpu, isolated_cpus);
+}
+EXPORT_SYMBOL_GPL(cpuset_cpu_is_isolated);
+
+/*
  * compute_effective_exclusive_cpumask - compute effective exclusive CPUs
  * @cs: cpuset
  * @xcpus: effective exclusive CPUs value to be set
@@ -1469,14 +1567,18 @@ static inline bool is_local_partition(struct cpuset *cs)
 /*
  * remote_partition_enable - Enable current cpuset as a remote partition root
  * @cs: the cpuset to update
+ * @new_prs: new partition_root_state
  * @tmp: temparary masks
  * Return: 1 if successful, 0 if error
  *
  * Enable the current cpuset to become a remote partition root taking CPUs
  * directly from the top cpuset. cpuset_mutex must be held by the caller.
  */
-static int remote_partition_enable(struct cpuset *cs, struct tmpmasks *tmp)
+static int remote_partition_enable(struct cpuset *cs, int new_prs,
+				   struct tmpmasks *tmp)
 {
+	bool isolcpus_updated;
+
 	/*
 	 * The user must have sysadmin privilege.
 	 */
@@ -1498,26 +1600,22 @@ static int remote_partition_enable(struct cpuset *cs, struct tmpmasks *tmp)
 		return 0;
 
 	spin_lock_irq(&callback_lock);
-	cpumask_andnot(top_cpuset.effective_cpus,
-		       top_cpuset.effective_cpus, tmp->new_cpus);
-	cpumask_or(subpartitions_cpus,
-		   subpartitions_cpus, tmp->new_cpus);
-
+	isolcpus_updated = partition_xcpus_add(new_prs, NULL, tmp->new_cpus);
+	list_add(&cs->remote_sibling, &remote_children);
 	if (cs->use_parent_ecpus) {
 		struct cpuset *parent = parent_cs(cs);
 
 		cs->use_parent_ecpus = false;
 		parent->child_ecpus_count--;
 	}
-	list_add(&cs->remote_sibling, &remote_children);
 	spin_unlock_irq(&callback_lock);
+	update_unbound_workqueue_cpumask(isolcpus_updated);
 
 	/*
 	 * Proprogate changes in top_cpuset's effective_cpus down the hierarchy.
 	 */
 	update_tasks_cpumask(&top_cpuset, tmp->new_cpus);
 	update_sibling_cpumasks(&top_cpuset, NULL, tmp);
-
 	return 1;
 }
 
@@ -1532,23 +1630,22 @@ static int remote_partition_enable(struct cpuset *cs, struct tmpmasks *tmp)
  */
 static void remote_partition_disable(struct cpuset *cs, struct tmpmasks *tmp)
 {
+	bool isolcpus_updated;
+
 	compute_effective_exclusive_cpumask(cs, tmp->new_cpus);
 	WARN_ON_ONCE(!is_remote_partition(cs));
 	WARN_ON_ONCE(!cpumask_subset(tmp->new_cpus, subpartitions_cpus));
 
 	spin_lock_irq(&callback_lock);
-	cpumask_andnot(subpartitions_cpus,
-		       subpartitions_cpus, tmp->new_cpus);
-	cpumask_and(tmp->new_cpus,
-		    tmp->new_cpus, cpu_active_mask);
-	cpumask_or(top_cpuset.effective_cpus,
-		   top_cpuset.effective_cpus, tmp->new_cpus);
 	list_del_init(&cs->remote_sibling);
+	isolcpus_updated = partition_xcpus_del(cs->partition_root_state,
+					       NULL, tmp->new_cpus);
 	cs->partition_root_state = -cs->partition_root_state;
 	if (!cs->prs_err)
 		cs->prs_err = PERR_INVCPUS;
 	reset_partition_data(cs);
 	spin_unlock_irq(&callback_lock);
+	update_unbound_workqueue_cpumask(isolcpus_updated);
 
 	/*
 	 * Proprogate changes in top_cpuset's effective_cpus down the hierarchy.
@@ -1570,6 +1667,8 @@ static void remote_cpus_update(struct cpuset *cs, struct cpumask *newmask,
 			       struct tmpmasks *tmp)
 {
 	bool adding, deleting;
+	int prs = cs->partition_root_state;
+	int isolcpus_updated = 0;
 
 	if (WARN_ON_ONCE(!is_remote_partition(cs)))
 		return;
@@ -1593,21 +1692,12 @@ static void remote_cpus_update(struct cpuset *cs, struct cpumask *newmask,
 		goto invalidate;
 
 	spin_lock_irq(&callback_lock);
-	if (adding) {
-		cpumask_or(subpartitions_cpus,
-			   subpartitions_cpus, tmp->addmask);
-		cpumask_andnot(top_cpuset.effective_cpus,
-			       top_cpuset.effective_cpus, tmp->addmask);
-	}
-	if (deleting) {
-		cpumask_andnot(subpartitions_cpus,
-			       subpartitions_cpus, tmp->delmask);
-		cpumask_and(tmp->delmask,
-			    tmp->delmask, cpu_active_mask);
-		cpumask_or(top_cpuset.effective_cpus,
-			   top_cpuset.effective_cpus, tmp->delmask);
-	}
+	if (adding)
+		isolcpus_updated += partition_xcpus_add(prs, NULL, tmp->addmask);
+	if (deleting)
+		isolcpus_updated += partition_xcpus_del(prs, NULL, tmp->delmask);
 	spin_unlock_irq(&callback_lock);
+	update_unbound_workqueue_cpumask(isolcpus_updated);
 
 	/*
 	 * Proprogate changes in top_cpuset's effective_cpus down the hierarchy.
@@ -1689,11 +1779,11 @@ static bool prstate_housekeeping_conflict(int prstate, struct cpumask *new_cpus)
  * @tmp:     Temporary addmask and delmask
  * Return:   0 or a partition root state error code
  *
- * For partcmd_enable, the cpuset is being transformed from a non-partition
- * root to a partition root. The effective_xcpus (cpus_allowed if effective_xcpus
- * not set) mask of the given cpuset will be taken away from parent's
- * effective_cpus. The function will return 0 if all the CPUs listed in
- * effective_xcpus can be granted or an error code will be returned.
+ * For partcmd_enable*, the cpuset is being transformed from a non-partition
+ * root to a partition root. The effective_xcpus (cpus_allowed if
+ * effective_xcpus not set) mask of the given cpuset will be taken away from
+ * parent's effective_cpus. The function will return 0 if all the CPUs listed
+ * in effective_xcpus can be granted or an error code will be returned.
  *
  * For partcmd_disable, the cpuset is being transformed from a partition
  * root back to a non-partition root. Any CPUs in effective_xcpus will be
@@ -1708,7 +1798,7 @@ static bool prstate_housekeeping_conflict(int prstate, struct cpumask *new_cpus)
  *
  * For partcmd_invalidate, the current partition will be made invalid.
  *
- * The partcmd_enable and partcmd_disable commands are used by
+ * The partcmd_enable* and partcmd_disable commands are used by
  * update_prstate(). An error code may be returned and the caller will check
  * for error.
  *
@@ -1729,6 +1819,7 @@ static int update_parent_effective_cpumask(struct cpuset *cs, int cmd,
 	int part_error = PERR_NONE;	/* Partition error? */
 	int subparts_delta = 0;
 	struct cpumask *xcpus;		/* cs effective_xcpus */
+	int isolcpus_updated = 0;
 	bool nocpu;
 
 	lockdep_assert_held(&cpuset_mutex);
@@ -1739,7 +1830,7 @@ static int update_parent_effective_cpumask(struct cpuset *cs, int cmd,
 	 */
 	adding = deleting = false;
 	old_prs = new_prs = cs->partition_root_state;
-	xcpus = !cpumask_empty(cs->effective_xcpus)
+	xcpus = !cpumask_empty(cs->exclusive_cpus)
 		? cs->effective_xcpus : cs->cpus_allowed;
 
 	if (cmd == partcmd_invalidate) {
@@ -1773,13 +1864,14 @@ static int update_parent_effective_cpumask(struct cpuset *cs, int cmd,
 
 	nocpu = tasks_nocpu_error(parent, cs, xcpus);
 
-	if (cmd == partcmd_enable) {
+	if ((cmd == partcmd_enable) || (cmd == partcmd_enablei)) {
 		/*
 		 * Enabling partition root is not allowed if its
-		 * effective_xcpus doesn't overlap with parent's
-		 * effective_xcpus.
+		 * effective_xcpus is empty or doesn't overlap with
+		 * parent's effective_xcpus.
 		 */
-		if (!cpumask_intersects(xcpus, parent->effective_xcpus))
+		if (cpumask_empty(xcpus) ||
+		    !cpumask_intersects(xcpus, parent->effective_xcpus))
 			return PERR_INVCPUS;
 
 		if (prstate_housekeeping_conflict(new_prs, xcpus))
@@ -1795,6 +1887,7 @@ static int update_parent_effective_cpumask(struct cpuset *cs, int cmd,
 		cpumask_copy(tmp->delmask, xcpus);
 		deleting = true;
 		subparts_delta++;
+		new_prs = (cmd == partcmd_enable) ? PRS_ROOT : PRS_ISOLATED;
 	} else if (cmd == partcmd_disable) {
 		/*
 		 * May need to add cpus to parent's effective_cpus for
@@ -1804,6 +1897,7 @@ static int update_parent_effective_cpumask(struct cpuset *cs, int cmd,
 			  cpumask_and(tmp->addmask, xcpus, parent->effective_xcpus);
 		if (adding)
 			subparts_delta--;
+		new_prs = PRS_MEMBER;
 	} else if (newmask) {
 		/*
 		 * Empty cpumask is not allowed
@@ -1818,17 +1912,28 @@ static int update_parent_effective_cpumask(struct cpuset *cs, int cmd,
 		 *
 		 * Compute add/delete mask to/from effective_cpus
 		 *
-		 * addmask = effective_xcpus & ~newmask & parent->effective_xcpus
-		 * delmask = newmask & ~cs->effective_xcpus
-		 *		     & parent->effective_xcpus
+		 * For valid partition:
+		 *   addmask = exclusive_cpus & ~newmask
+		 *			      & parent->effective_xcpus
+		 *   delmask = newmask & ~exclusive_cpus
+		 *		       & parent->effective_xcpus
+		 *
+		 * For invalid partition:
+		 *   delmask = newmask & parent->effective_xcpus
 		 */
-		cpumask_andnot(tmp->addmask, xcpus, newmask);
-		adding = cpumask_and(tmp->addmask, tmp->addmask,
-				     parent->effective_xcpus);
+		if (is_prs_invalid(old_prs)) {
+			adding = false;
+			deleting = cpumask_and(tmp->delmask,
+					newmask, parent->effective_xcpus);
+		} else {
+			cpumask_andnot(tmp->addmask, xcpus, newmask);
+			adding = cpumask_and(tmp->addmask, tmp->addmask,
+					     parent->effective_xcpus);
 
-		cpumask_andnot(tmp->delmask, newmask, xcpus);
-		deleting = cpumask_and(tmp->delmask, tmp->delmask,
-				       parent->effective_xcpus);
+			cpumask_andnot(tmp->delmask, newmask, xcpus);
+			deleting = cpumask_and(tmp->delmask, tmp->delmask,
+					       parent->effective_xcpus);
+		}
 		/*
 		 * Make partition invalid if parent's effective_cpus could
 		 * become empty and there are tasks in the parent.
@@ -1876,7 +1981,7 @@ static int update_parent_effective_cpumask(struct cpuset *cs, int cmd,
 			cpuset_for_each_child(child, css, parent) {
 				if (child == cs)
 					continue;
-				if (cpu_exclusive_check(cs, child)) {
+				if (!cpusets_are_exclusive(cs, child)) {
 					exclusive = false;
 					break;
 				}
@@ -1922,9 +2027,11 @@ write_error:
 
 	/*
 	 * Transitioning between invalid to valid or vice versa may require
-	 * changing CS_CPU_EXCLUSIVE.
+	 * changing CS_CPU_EXCLUSIVE. In the case of partcmd_update,
+	 * validate_change() has already been successfully called and
+	 * CPU lists in cs haven't been updated yet. So defer it to later.
 	 */
-	if (old_prs != new_prs) {
+	if ((old_prs != new_prs) && (cmd != partcmd_update))  {
 		int err = update_partition_exclusive(cs, new_prs);
 
 		if (err)
@@ -1939,38 +2046,31 @@ write_error:
 	 * newly deleted ones will be added back to effective_cpus.
 	 */
 	spin_lock_irq(&callback_lock);
-	if (adding) {
-		if (parent == &top_cpuset)
-			cpumask_andnot(subpartitions_cpus,
-				       subpartitions_cpus, tmp->addmask);
-		/*
-		 * Some of the CPUs in effective_xcpus might have been offlined.
-		 */
-		cpumask_or(parent->effective_cpus,
-			   parent->effective_cpus, tmp->addmask);
-		cpumask_and(parent->effective_cpus,
-			    parent->effective_cpus, cpu_active_mask);
-	}
-	if (deleting) {
-		if (parent == &top_cpuset)
-			cpumask_or(subpartitions_cpus,
-				   subpartitions_cpus, tmp->delmask);
-		cpumask_andnot(parent->effective_cpus,
-			       parent->effective_cpus, tmp->delmask);
-	}
-
-	if (is_partition_valid(parent)) {
-		parent->nr_subparts += subparts_delta;
-		WARN_ON_ONCE(parent->nr_subparts < 0);
-	}
-
 	if (old_prs != new_prs) {
 		cs->partition_root_state = new_prs;
 		if (new_prs <= 0)
 			cs->nr_subparts = 0;
 	}
+	/*
+	 * Adding to parent's effective_cpus means deletion CPUs from cs
+	 * and vice versa.
+	 */
+	if (adding)
+		isolcpus_updated += partition_xcpus_del(old_prs, parent,
+							tmp->addmask);
+	if (deleting)
+		isolcpus_updated += partition_xcpus_add(new_prs, parent,
+							tmp->delmask);
 
+	if (is_partition_valid(parent)) {
+		parent->nr_subparts += subparts_delta;
+		WARN_ON_ONCE(parent->nr_subparts < 0);
+	}
 	spin_unlock_irq(&callback_lock);
+	update_unbound_workqueue_cpumask(isolcpus_updated);
+
+	if ((old_prs != new_prs) && (cmd == partcmd_update))
+		update_partition_exclusive(cs, new_prs);
 
 	if (adding || deleting) {
 		update_tasks_cpumask(parent, tmp->addmask);
@@ -2368,8 +2468,9 @@ static int update_cpumask(struct cpuset *cs, struct cpuset *trialcs,
 	if (alloc_cpumasks(NULL, &tmp))
 		return -ENOMEM;
 
-	if (is_partition_valid(cs)) {
-		if (cpumask_empty(trialcs->effective_xcpus)) {
+	if (old_prs) {
+		if (is_partition_valid(cs) &&
+		    cpumask_empty(trialcs->effective_xcpus)) {
 			invalidate = true;
 			cs->prs_err = PERR_INVCPUS;
 		} else if (prstate_housekeeping_conflict(old_prs, trialcs->effective_xcpus)) {
@@ -2403,13 +2504,16 @@ static int update_cpumask(struct cpuset *cs, struct cpuset *trialcs,
 		 */
 		invalidate = true;
 		rcu_read_lock();
-		cpuset_for_each_child(cp, css, parent)
+		cpuset_for_each_child(cp, css, parent) {
+			struct cpumask *xcpus = fetch_xcpus(trialcs);
+
 			if (is_partition_valid(cp) &&
-			    cpumask_intersects(trialcs->effective_xcpus, cp->effective_xcpus)) {
+			    cpumask_intersects(xcpus, cp->effective_xcpus)) {
 				rcu_read_unlock();
 				update_parent_effective_cpumask(cp, partcmd_invalidate, NULL, &tmp);
 				rcu_read_lock();
 			}
+		}
 		rcu_read_unlock();
 		retval = 0;
 	}
@@ -2417,18 +2521,24 @@ static int update_cpumask(struct cpuset *cs, struct cpuset *trialcs,
 	if (retval < 0)
 		goto out_free;
 
-	if (is_partition_valid(cs)) {
+	if (is_partition_valid(cs) ||
+	   (is_partition_invalid(cs) && !invalidate)) {
+		struct cpumask *xcpus = trialcs->effective_xcpus;
+
+		if (cpumask_empty(xcpus) && is_partition_invalid(cs))
+			xcpus = trialcs->cpus_allowed;
+
 		/*
 		 * Call remote_cpus_update() to handle valid remote partition
 		 */
 		if (is_remote_partition(cs))
-			remote_cpus_update(cs, trialcs->effective_xcpus, &tmp);
+			remote_cpus_update(cs, xcpus, &tmp);
 		else if (invalidate)
 			update_parent_effective_cpumask(cs, partcmd_invalidate,
 							NULL, &tmp);
 		else
 			update_parent_effective_cpumask(cs, partcmd_update,
-						trialcs->effective_xcpus, &tmp);
+							xcpus, &tmp);
 	} else if (!cpumask_empty(cs->exclusive_cpus)) {
 		/*
 		 * Use trialcs->effective_cpus as a temp cpumask
@@ -2475,6 +2585,7 @@ static int update_exclusive_cpumask(struct cpuset *cs, struct cpuset *trialcs,
 
 	if (!*buf) {
 		cpumask_clear(trialcs->exclusive_cpus);
+		cpumask_clear(trialcs->effective_xcpus);
 	} else {
 		retval = cpulist_parse(buf, trialcs->exclusive_cpus);
 		if (retval < 0)
@@ -2490,7 +2601,8 @@ static int update_exclusive_cpumask(struct cpuset *cs, struct cpuset *trialcs,
 	if (alloc_cpumasks(NULL, &tmp))
 		return -ENOMEM;
 
-	compute_effective_exclusive_cpumask(trialcs, NULL);
+	if (*buf)
+		compute_effective_exclusive_cpumask(trialcs, NULL);
 
 	/*
 	 * Check all the descendants in update_cpumasks_hier() if
@@ -2503,8 +2615,8 @@ static int update_exclusive_cpumask(struct cpuset *cs, struct cpuset *trialcs,
 	if (retval)
 		return retval;
 
-	if (is_partition_valid(cs)) {
-		if (cpumask_empty(trialcs->exclusive_cpus)) {
+	if (old_prs) {
+		if (cpumask_empty(trialcs->effective_xcpus)) {
 			invalidate = true;
 			cs->prs_err = PERR_INVCPUS;
 		} else if (prstate_housekeeping_conflict(old_prs, trialcs->effective_xcpus)) {
@@ -2930,30 +3042,27 @@ out:
 static int update_prstate(struct cpuset *cs, int new_prs)
 {
 	int err = PERR_NONE, old_prs = cs->partition_root_state;
+	struct cpuset *parent = parent_cs(cs);
 	struct tmpmasks tmpmask;
+	bool new_xcpus_state = false;
 
 	if (old_prs == new_prs)
 		return 0;
 
 	/*
-	 * For a previously invalid partition root, leave it at being
-	 * invalid if new_prs is not "member".
+	 * Treat a previously invalid partition root as if it is a "member".
 	 */
-	if (new_prs && is_prs_invalid(old_prs)) {
-		cs->partition_root_state = -new_prs;
-		return 0;
-	}
+	if (new_prs && is_prs_invalid(old_prs))
+		old_prs = PRS_MEMBER;
 
 	if (alloc_cpumasks(NULL, &tmpmask))
 		return -ENOMEM;
 
 	/*
-	 * Setup effective_xcpus if not set yet, it will be cleared later
-	 * if partition becomes invalid.
+	 * Setup effective_xcpus if not properly set yet, it will be cleared
+	 * later if partition becomes invalid.
 	 */
-	if ((new_prs > 0) && cpumask_empty(cs->effective_xcpus)) {
-		struct cpuset *parent = parent_cs(cs);
-
+	if ((new_prs > 0) && cpumask_empty(cs->exclusive_cpus)) {
 		spin_lock_irq(&callback_lock);
 		cpumask_and(cs->effective_xcpus,
 			    cs->cpus_allowed, parent->effective_xcpus);
@@ -2965,6 +3074,9 @@ static int update_prstate(struct cpuset *cs, int new_prs)
 		goto out;
 
 	if (!old_prs) {
+		enum partition_cmd cmd = (new_prs == PRS_ROOT)
+				       ? partcmd_enable : partcmd_enablei;
+
 		/*
 		 * cpus_allowed cannot be empty.
 		 */
@@ -2973,19 +3085,18 @@ static int update_prstate(struct cpuset *cs, int new_prs)
 			goto out;
 		}
 
-		err = update_parent_effective_cpumask(cs, partcmd_enable,
-						      NULL, &tmpmask);
+		err = update_parent_effective_cpumask(cs, cmd, NULL, &tmpmask);
 		/*
 		 * If an attempt to become local partition root fails,
 		 * try to become a remote partition root instead.
 		 */
-		if (err && remote_partition_enable(cs, &tmpmask))
+		if (err && remote_partition_enable(cs, new_prs, &tmpmask))
 			err = 0;
 	} else if (old_prs && new_prs) {
 		/*
 		 * A change in load balance state only, no change in cpumasks.
 		 */
-		;
+		new_xcpus_state = true;
 	} else {
 		/*
 		 * Switching back to member is always allowed even if it
@@ -3017,7 +3128,10 @@ out:
 	WRITE_ONCE(cs->prs_err, err);
 	if (!is_partition_valid(cs))
 		reset_partition_data(cs);
+	else if (new_xcpus_state)
+		partition_xcpus_newstate(old_prs, new_prs, cs->effective_xcpus);
 	spin_unlock_irq(&callback_lock);
+	update_unbound_workqueue_cpumask(new_xcpus_state);
 
 	/* Force update if switching back to member */
 	update_cpumasks_hier(cs, &tmpmask, !new_prs ? HIER_CHECKALL : 0);
@@ -3361,6 +3475,7 @@ typedef enum {
 	FILE_SUBPARTS_CPULIST,
 	FILE_EXCLUSIVE_CPULIST,
 	FILE_EFFECTIVE_XCPULIST,
+	FILE_ISOLATED_CPULIST,
 	FILE_CPU_EXCLUSIVE,
 	FILE_MEM_EXCLUSIVE,
 	FILE_MEM_HARDWALL,
@@ -3556,6 +3671,9 @@ static int cpuset_common_seq_show(struct seq_file *sf, void *v)
 		break;
 	case FILE_SUBPARTS_CPULIST:
 		seq_printf(sf, "%*pbl\n", cpumask_pr_args(subpartitions_cpus));
+		break;
+	case FILE_ISOLATED_CPULIST:
+		seq_printf(sf, "%*pbl\n", cpumask_pr_args(isolated_cpus));
 		break;
 	default:
 		ret = -EINVAL;
@@ -3848,6 +3966,13 @@ static struct cftype dfl_files[] = {
 		.seq_show = cpuset_common_seq_show,
 		.private = FILE_SUBPARTS_CPULIST,
 		.flags = CFTYPE_ONLY_ON_ROOT | CFTYPE_DEBUG,
+	},
+
+	{
+		.name = "cpus.isolated",
+		.seq_show = cpuset_common_seq_show,
+		.private = FILE_ISOLATED_CPULIST,
+		.flags = CFTYPE_ONLY_ON_ROOT,
 	},
 
 	{ }	/* terminate */
@@ -4169,6 +4294,7 @@ int __init cpuset_init(void)
 	BUG_ON(!alloc_cpumask_var(&top_cpuset.effective_xcpus, GFP_KERNEL));
 	BUG_ON(!alloc_cpumask_var(&top_cpuset.exclusive_cpus, GFP_KERNEL));
 	BUG_ON(!zalloc_cpumask_var(&subpartitions_cpus, GFP_KERNEL));
+	BUG_ON(!zalloc_cpumask_var(&isolated_cpus, GFP_KERNEL));
 
 	cpumask_setall(top_cpuset.cpus_allowed);
 	nodes_setall(top_cpuset.mems_allowed);
@@ -4282,6 +4408,30 @@ void cpuset_force_rebuild(void)
 	force_rebuild = true;
 }
 
+/*
+ * Attempt to acquire a cpus_read_lock while a hotplug operation may be in
+ * progress.
+ * Return: true if successful, false otherwise
+ *
+ * To avoid circular lock dependency between cpuset_mutex and cpus_read_lock,
+ * cpus_read_trylock() is used here to acquire the lock.
+ */
+static bool cpuset_hotplug_cpus_read_trylock(void)
+{
+	int retries = 0;
+
+	while (!cpus_read_trylock()) {
+		/*
+		 * CPU hotplug still in progress. Retry 5 times
+		 * with a 10ms wait before bailing out.
+		 */
+		if (++retries > 5)
+			return false;
+		msleep(10);
+	}
+	return true;
+}
+
 /**
  * cpuset_hotplug_update_tasks - update tasks in a cpuset for hotunplug
  * @cs: cpuset in interest
@@ -4298,6 +4448,7 @@ static void cpuset_hotplug_update_tasks(struct cpuset *cs, struct tmpmasks *tmp)
 	bool cpus_updated;
 	bool mems_updated;
 	bool remote;
+	int partcmd = -1;
 	struct cpuset *parent;
 retry:
 	wait_event(cpuset_attach_wq, cs->attach_in_progress == 0);
@@ -4329,11 +4480,13 @@ retry:
 		compute_partition_effective_cpumask(cs, &new_cpus);
 
 	if (remote && cpumask_empty(&new_cpus) &&
-	    partition_is_populated(cs, NULL)) {
+	    partition_is_populated(cs, NULL) &&
+	    cpuset_hotplug_cpus_read_trylock()) {
 		remote_partition_disable(cs, tmp);
 		compute_effective_cpumask(&new_cpus, cs, parent);
 		remote = false;
 		cpuset_force_rebuild();
+		cpus_read_unlock();
 	}
 
 	/*
@@ -4344,18 +4497,28 @@ retry:
 	 *    partitions.
 	 */
 	if (is_local_partition(cs) && (!is_partition_valid(parent) ||
-				tasks_nocpu_error(parent, cs, &new_cpus))) {
-		update_parent_effective_cpumask(cs, partcmd_invalidate, NULL, tmp);
-		compute_effective_cpumask(&new_cpus, cs, parent);
-		cpuset_force_rebuild();
-	}
+				tasks_nocpu_error(parent, cs, &new_cpus)))
+		partcmd = partcmd_invalidate;
 	/*
 	 * On the other hand, an invalid partition root may be transitioned
 	 * back to a regular one.
 	 */
-	else if (is_partition_valid(parent) && is_partition_invalid(cs)) {
-		update_parent_effective_cpumask(cs, partcmd_update, NULL, tmp);
-		if (is_partition_valid(cs)) {
+	else if (is_partition_valid(parent) && is_partition_invalid(cs))
+		partcmd = partcmd_update;
+
+	/*
+	 * cpus_read_lock needs to be held before calling
+	 * update_parent_effective_cpumask(). To avoid circular lock
+	 * dependency between cpuset_mutex and cpus_read_lock,
+	 * cpus_read_trylock() is used here to acquire the lock.
+	 */
+	if (partcmd >= 0) {
+		if (!cpuset_hotplug_cpus_read_trylock())
+			goto update_tasks;
+
+		update_parent_effective_cpumask(cs, partcmd, NULL, tmp);
+		cpus_read_unlock();
+		if ((partcmd == partcmd_invalidate) || is_partition_valid(cs)) {
 			compute_partition_effective_cpumask(cs, &new_cpus);
 			cpuset_force_rebuild();
 		}
@@ -4689,7 +4852,7 @@ static struct cpuset *nearest_hardwall_ancestor(struct cpuset *cs)
 	return cs;
 }
 
-/**
+/*
  * cpuset_node_allowed - Can we allocate on a memory node?
  * @node: is this an allowed node?
  * @gfp_mask: memory allocation flags
@@ -4729,7 +4892,7 @@ static struct cpuset *nearest_hardwall_ancestor(struct cpuset *cs)
  *	GFP_KERNEL   - any node in enclosing hardwalled cpuset ok
  *	GFP_USER     - only nodes in current tasks mems allowed ok.
  */
-bool __cpuset_node_allowed(int node, gfp_t gfp_mask)
+bool cpuset_node_allowed(int node, gfp_t gfp_mask)
 {
 	struct cpuset *cs;		/* current cpuset ancestors */
 	bool allowed;			/* is allocation in zone z allowed? */
@@ -4864,8 +5027,8 @@ void cpuset_print_current_mems_allowed(void)
 
 int cpuset_memory_pressure_enabled __read_mostly;
 
-/**
- * cpuset_memory_pressure_bump - keep stats of per-cpuset reclaims.
+/*
+ * __cpuset_memory_pressure_bump - keep stats of per-cpuset reclaims.
  *
  * Keep a running average of the rate of synchronous (direct)
  * page reclaim efforts initiated by tasks in each cpuset.
@@ -4880,7 +5043,7 @@ int cpuset_memory_pressure_enabled __read_mostly;
  * "memory_pressure".  Value displayed is an integer
  * representing the recent rate of entry into the synchronous
  * (direct) page reclaim by any task attached to the cpuset.
- **/
+ */
 
 void __cpuset_memory_pressure_bump(void)
 {

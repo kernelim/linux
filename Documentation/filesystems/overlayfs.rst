@@ -145,7 +145,9 @@ filesystem, an overlay filesystem needs to record in the upper filesystem
 that files have been removed.  This is done using whiteouts and opaque
 directories (non-directories are always opaque).
 
-A whiteout is created as a character device with 0/0 device number.
+A whiteout is created as a character device with 0/0 device number or
+as a zero-size regular file with the xattr "trusted.overlay.whiteout".
+
 When a whiteout is found in the upper level of a merged directory, any
 matching name in the lower level is ignored, and the whiteout itself
 is also hidden.
@@ -153,6 +155,13 @@ is also hidden.
 A directory is made opaque by setting the xattr "trusted.overlay.opaque"
 to "y".  Where the upper filesystem contains an opaque directory, any
 directory in the lower filesystem with the same name is ignored.
+
+An opaque directory should not conntain any whiteouts, because they do not
+serve any purpose.  A merge directory containing regular files with the xattr
+"trusted.overlay.whiteout", should be additionally marked by setting the xattr
+"trusted.overlay.opaque" to "x" on the merge directory itself.
+This is needed to avoid the overhead of checking the "trusted.overlay.whiteout"
+on all entries during readdir in the common case.
 
 readdir
 -------
@@ -371,6 +380,88 @@ conflict with metacopy=on, and will result in an error.
 [*] redirect_dir=follow only conflicts with metacopy=on if upperdir=... is
 given.
 
+
+Data-only lower layers
+----------------------
+
+With "metacopy" feature enabled, an overlayfs regular file may be a composition
+of information from up to three different layers:
+
+ 1) metadata from a file in the upper layer
+
+ 2) st_ino and st_dev object identifier from a file in a lower layer
+
+ 3) data from a file in another lower layer (further below)
+
+The "lower data" file can be on any lower layer, except from the top most
+lower layer.
+
+Below the top most lower layer, any number of lower most layers may be defined
+as "data-only" lower layers, using double colon ("::") separators.
+A normal lower layer is not allowed to be below a data-only layer, so single
+colon separators are not allowed to the right of double colon ("::") separators.
+
+
+For example:
+
+  mount -t overlay overlay -olowerdir=/l1:/l2:/l3::/do1::/do2 /merged
+
+The paths of files in the "data-only" lower layers are not visible in the
+merged overlayfs directories and the metadata and st_ino/st_dev of files
+in the "data-only" lower layers are not visible in overlayfs inodes.
+
+Only the data of the files in the "data-only" lower layers may be visible
+when a "metacopy" file in one of the lower layers above it, has a "redirect"
+to the absolute path of the "lower data" file in the "data-only" lower layer.
+
+
+fs-verity support
+----------------------
+
+During metadata copy up of a lower file, if the source file has
+fs-verity enabled and overlay verity support is enabled, then the
+digest of the lower file is added to the "trusted.overlay.metacopy"
+xattr. This is then used to verify the content of the lower file
+each the time the metacopy file is opened.
+
+When a layer containing verity xattrs is used, it means that any such
+metacopy file in the upper layer is guaranteed to match the content
+that was in the lower at the time of the copy-up. If at any time
+(during a mount, after a remount, etc) such a file in the lower is
+replaced or modified in any way, access to the corresponding file in
+overlayfs will result in EIO errors (either on open, due to overlayfs
+digest check, or from a later read due to fs-verity) and a detailed
+error is printed to the kernel logs. For more details of how fs-verity
+file access works, see :ref:`Documentation/filesystems/fsverity.rst
+<accessing_verity_files>`.
+
+Verity can be used as a general robustness check to detect accidental
+changes in the overlayfs directories in use. But, with additional care
+it can also give more powerful guarantees. For example, if the upper
+layer is fully trusted (by using dm-verity or something similar), then
+an untrusted lower layer can be used to supply validated file content
+for all metacopy files.  If additionally the untrusted lower
+directories are specified as "Data-only", then they can only supply
+such file content, and the entire mount can be trusted to match the
+upper layer.
+
+This feature is controlled by the "verity" mount option, which
+supports these values:
+
+- "off":
+    The metacopy digest is never generated or used. This is the
+    default if verity option is not specified.
+- "on":
+    Whenever a metacopy files specifies an expected digest, the
+    corresponding data file must match the specified digest. When
+    generating a metacopy file the verity digest will be set in it
+    based on the source file (if it has one).
+- "require":
+    Same as "on", but additionally all metacopy files must specify a
+    digest (or EIO is returned on open). This means metadata copy up
+    will only be used if the data file has fs-verity enabled,
+    otherwise a full copy-up is used.
+
 Sharing and copying layers
 --------------------------
 
@@ -411,6 +502,30 @@ directory tree on the same or different underlying filesystem, and even
 to a different machine.  With the "inodes index" feature, trying to mount
 the copied layers will fail the verification of the lower root file handle.
 
+Nesting overlayfs mounts
+------------------------
+
+It is possible to use a lower directory that is stored on an overlayfs
+mount. For regular files this does not need any special care. However, files
+that have overlayfs attributes, such as whiteouts or "overlay.*" xattrs will be
+interpreted by the underlying overlayfs mount and stripped out. In order to
+allow the second overlayfs mount to see the attributes they must be escaped.
+
+Overlayfs specific xattrs are escaped by using a special prefix of
+"overlay.overlay.". So, a file with a "trusted.overlay.overlay.metacopy" xattr
+in the lower dir will be exposed as a regular file with a
+"trusted.overlay.metacopy" xattr in the overlayfs mount. This can be nested by
+repeating the prefix multiple time, as each instance only removes one prefix.
+
+A lower dir with a regular whiteout will always be handled by the overlayfs
+mount, so to support storing an effective whiteout file in an overlayfs mount an
+alternative form of whiteout is supported. This form is a regular, zero-size
+file with the "overlay.whiteout" xattr set, inside a directory with the
+"overlay.opaque" xattr set to "x" (see `whiteouts and opaque directories`_).
+These alternative whiteouts are never created by overlayfs, but can be used by
+userspace tools (like containers) that generate lower layers.
+These alternative whiteouts can be escaped using the standard xattr escape
+mechanism in order to properly nest to any depth.
 
 Non-standard behavior
 ---------------------

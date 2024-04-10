@@ -715,6 +715,7 @@ enum sync_rst_state_type {
 	MLX5_SYNC_RST_STATE_RESET_REQUEST	= 0x0,
 	MLX5_SYNC_RST_STATE_RESET_NOW		= 0x1,
 	MLX5_SYNC_RST_STATE_RESET_ABORT		= 0x2,
+	MLX5_SYNC_RST_STATE_RESET_UNLOAD	= 0x3,
 };
 
 struct mlx5_eqe_sync_fw_update {
@@ -1358,6 +1359,12 @@ enum mlx5_qcam_feature_groups {
 
 #define MLX5_CAP_ESW_INGRESS_ACL_MAX(mdev, cap) \
 	MLX5_CAP_ESW_FLOWTABLE_MAX(mdev, flow_table_properties_esw_acl_ingress.cap)
+
+#define MLX5_CAP_ESW_FT_FIELD_SUPPORT_2(mdev, cap) \
+	MLX5_CAP_ESW_FLOWTABLE(mdev, ft_field_support_2_esw_fdb.cap)
+
+#define MLX5_CAP_ESW_FT_FIELD_SUPPORT_2_MAX(mdev, cap) \
+	MLX5_CAP_ESW_FLOWTABLE_MAX(mdev, ft_field_support_2_esw_fdb.cap)
 
 #define MLX5_CAP_ESW(mdev, cap) \
 	MLX5_GET(e_switch_cap, \

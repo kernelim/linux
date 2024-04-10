@@ -1,0 +1,166 @@
+---
+draft: false
+weight: 5
+---
+
+
+JiraCLI is an interactive command line tool for Atlassian Jira that will help you avoid Jira UI to some extent. This tool is not yet considered complete but has all the essential features required to improve your workflow with Jira.
+
+Link: https://github.com/ankitpokhrel/jira-cli[https://github.com/ankitpokhrel/jira-cli]
+
+An overview of the jira-cli tool and how to use it to perform basic Jira actions on the command line.
+
+== Download/installation
+
+=== Method 1 - Using go install
+
+----
+$ dnf install golang-bin
+$ go install github.com/ankitpokhrel/jira-cli/cmd/jira@latest
+$ ~/go/bin/jira <commands>
+----
+
+=== Method 2 - Manual
+
+Note: Check the latest release on https://github.com/ankitpokhrel/jira-cli/releases/latest
+
+----
+$ wget https://github.com/ankitpokhrel/jira-cli/releases/latest/download/jira_1.4.0_linux_x86_64.tar.gz
+$ tar xvzf jira_1.4.0_linux_x86_64.tar.gz
+$ ~/jira_1.4.0_linux_x86_64/bin/jira <commands>
+----
+
+Recommendation: Add the jira binary directory to your $PATH environment variable ($ export PATH=$PATH:/home/<user>/go/bin/)
+
+
+== Configuration
+
+=== First step: Creating an access token
+
+1. In Jira (https://issues.redhat.com/), select your profile picture at the top right of the screen, then choose Profile. Once you access your profile, select Personal Access Tokens in the left-hand menu.
+2. Select Create token.
+3. Give your new token a name.
+4. Optionally, for security reasons, you can set your token to automatically expire after a set number of days.
+5. Click Create.
+
+
+=== Second step: Setting the environment variables
+
+. Set the JIRA_API_TOKEN environment variable to your access token:
+
+    $ export JIRA_API_TOKEN=<token>
+
+. In addition to this, set JIRA_AUTH_TYPE env to bearer:
+
+    $ export JIRA_AUTH_TYPE=bearer
+
+. Tip: For using the tool seamlessly without need to define the variable repeatedly, add the variables to a file in your home (e.g. ~/.config/jira with 0600 permissions) and set alias in your .bashrc command that sources the file and then runs the tool: "alias jira='source ~/.config/jira ; $HOME/go/bin/jira'.
+
+=== Third step: Running jira init
+
+. Execute jira init:
+
+    $ jira init
+
+. Select installation type as Local
+. Set the link to Jira server to: https://issues.redhat.com
+. Login username: Provide your Jira login name (user@redhat.com)
+. Default project: RHELPLAN (recommendation)
+. Default board: “All my JIRA tickets [PnT]” (recommendation)
+. Done, the config file required by the tool should have been generated.
+
+
+== Utilization
+
+=== Viewing issues
+
+. View a given issue
+
+    $ jira issue view RHELPLAN-133685
+
+. View a given issue loading N comments
+
+    $ jira issue view RHELPLAN-133685 --comments 100
+
+
+=== Listing issues
+
+Issues are displayed in an interactive table view by default. You can output the results in a plain view using the --plain flag.
+
+Navigation: The lists are displayed in an interactive UI by default.
+
+- Use arrow keys to navigate through the list.
+- Press v to view selected issue details.
+- Hit ENTER to open the selected issue in the browser.
+- In an explorer view, press w or Tab to toggle focus between the sidebar and the contents screen.
+- Press q / ESC / CTRL+C to quit.
+
+. List issues that I'm watching in the current board
+
+    $ jira issue list -w
+
+. List issues assigned to me
+
+    $ jira issue list -a $(jira me)
+
+. List issues accessed recently
+
+    $ jira issue list --history
+
+. What issues did I report this week?
+
+    $ jira issue list -r$(jira me) --created week
+
+. You can execute raw JQL within a given project context using `--jql/-q` option. For instance, the following command will list issues in the current project whose summary has the word ‘kvm’.
+
+    $ jira issue list -q "summary ~ kvm"
+
+. List issues created within 6 hours ago and updated in the last one hour
+
+    $ jira issue list --created -6h --updated -1h
+
+. What was the first bug I ever fixed in the current board?
+
+    $ jira issue list -a$(jira me) -tBug sDone -rFixed --reverse
+
+. List issues assigned to jwilson@redhat.com, is of high priority and is Verified
+
+    $ jira issue list -a jwilson@redhat.com -yHigh -sVerified
+
+. List issues assigned to no one and are created this week
+
+    $ jira issue list -ax --created week
+
+. List issues whose “Pool Team” is “sst_kernel_security” and status is MODIFIED
+
+    $ jira issue list -q "'Pool Team' = sst_kernel_security" -sMODIFIED
+
+. List issues whose “BZ Keywords” has “Triaged”, “Pool Team” is “sst_kernel_maintainers” and status is MODIFIED
+
+    $ jira issue list -q "'BZ Keywords' = 'Triaged' and 'Pool Team' = sst_kernel_maintainers" -sMODIFIED
+
+. List issues whose “ZStream Target Release” is “8.6.0” and “Pool Team” is “sst_kernel_maintainers”
+
+    $ jira issue list -q "'ZStream Target Release' = 8.6.0 and 'Pool Team' = sst_kernel_maintainers"
+
+
+=== Creating issues
+
+. Create an issue using interactive prompt
+
+    $ jira issue create
+
+. Pass required parameters to skip prompt or use --no-input option
+
+    $ jira issue create -tBug -s"New" -yHigh -lbug -lurgent -b"Bug description"
+
+
+=== Editing issues
+
+. Edit an issue using interactive prompt
+
+    $ jira issue edit ISSUE-1
+
+. Edit issue in the configured project
+
+    $ jira issue edit ISSUE-1 -s"New Bug" -yHigh -lbug -lurgent -b"Bug description"

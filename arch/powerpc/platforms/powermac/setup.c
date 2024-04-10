@@ -81,7 +81,8 @@ static int current_root_goodness = -1;
 
 extern struct machdep_calls pmac_md;
 
-#define DEFAULT_ROOT_DEVICE Root_SDA1	/* sda1 - slightly silly choice */
+/* sda1 - slightly silly choice */
+#define DEFAULT_ROOT_DEVICE	MKDEV(SCSI_DISK0_MAJOR, 1)
 
 #ifdef CONFIG_PPC64
 int sccdbg;

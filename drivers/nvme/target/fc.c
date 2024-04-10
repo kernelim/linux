@@ -1340,8 +1340,6 @@ nvmet_fc_portentry_rebind_tgt(struct nvmet_fc_tgtport *tgtport)
 	spin_unlock_irqrestore(&nvmet_fc_tgtlock, flags);
 }
 
-static bool driver_warning_issued;
-
 /**
  * nvmet_fc_register_targetport - transport entry point called by an
  *                              LLDD to register the existence of a local
@@ -1368,11 +1366,6 @@ nvmet_fc_register_targetport(struct nvmet_fc_port_info *pinfo,
 	struct nvmet_fc_tgtport *newrec;
 	unsigned long flags;
 	int ret, idx;
-
-	if (!driver_warning_issued) {
-		mark_driver_unmaintained("NVMe over FC Target");
-		driver_warning_issued = true;
-	}
 
 	if (!template->xmt_ls_rsp || !template->fcp_op ||
 	    !template->fcp_abort ||

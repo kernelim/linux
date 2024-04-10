@@ -15,6 +15,7 @@
 #include <linux/sys_soc.h>
 
 #include "cqhci.h"
+#include "sdhci-cqhci.h"
 #include "sdhci-pltfm.h"
 
 /* CTL_CFG Registers */
@@ -84,6 +85,7 @@
 #define DRIVER_STRENGTH_40_OHM	0x4
 
 #define CLOCK_TOO_SLOW_HZ	50000000
+#define SDHCI_AM654_AUTOSUSPEND_DELAY	-1
 
 /* Command Queue Host Controller Interface Base address */
 #define SDHCI_AM654_CQE_BASE_ADDR 0x200
@@ -139,7 +141,6 @@ static const struct timing_data td[] = {
 
 struct sdhci_am654_data {
 	struct regmap *base;
-	bool legacy_otapdly;
 	int otap_del_sel[ARRAY_SIZE(td)];
 	int itap_del_sel[ARRAY_SIZE(td)];
 	int clkbuf_sel;
@@ -147,6 +148,9 @@ struct sdhci_am654_data {
 	int drv_strength;
 	int strb_sel;
 	u32 flags;
+	u32 quirks;
+
+#define SDHCI_AM654_QUIRK_FORCE_CDTEST BIT(0)
 };
 
 struct sdhci_am654_driver_data {
@@ -267,11 +271,7 @@ static void sdhci_am654_set_clock(struct sdhci_host *host, unsigned int clock)
 	sdhci_set_clock(host, clock);
 
 	/* Setup DLL Output TAP delay */
-	if (sdhci_am654->legacy_otapdly)
-		otap_del_sel = sdhci_am654->otap_del_sel[0];
-	else
-		otap_del_sel = sdhci_am654->otap_del_sel[timing];
-
+	otap_del_sel = sdhci_am654->otap_del_sel[timing];
 	otap_del_ena = (timing > MMC_TIMING_UHS_SDR25) ? 1 : 0;
 
 	mask = OTAPDLYENA_MASK | OTAPDLYSEL_MASK;
@@ -309,10 +309,7 @@ static void sdhci_j721e_4bit_set_clock(struct sdhci_host *host,
 	u32 mask, val;
 
 	/* Setup DLL Output TAP delay */
-	if (sdhci_am654->legacy_otapdly)
-		otap_del_sel = sdhci_am654->otap_del_sel[0];
-	else
-		otap_del_sel = sdhci_am654->otap_del_sel[timing];
+	otap_del_sel = sdhci_am654->otap_del_sel[timing];
 
 	mask = OTAPDLYENA_MASK | OTAPDLYSEL_MASK;
 	val = (0x1 << OTAPDLYENA_SHIFT) |
@@ -347,8 +344,6 @@ static void sdhci_am654_write_b(struct sdhci_host *host, u8 val, int reg)
 		 */
 		case MMC_TIMING_SD_HS:
 		case MMC_TIMING_MMC_HS:
-		case MMC_TIMING_UHS_SDR12:
-		case MMC_TIMING_UHS_SDR25:
 			val &= ~SDHCI_CTRL_HISPD;
 		}
 	}
@@ -365,7 +360,22 @@ static void sdhci_am654_write_b(struct sdhci_host *host, u8 val, int reg)
 					MAX_POWER_ON_TIMEOUT, false, host, val,
 					reg);
 		if (ret)
-			dev_warn(mmc_dev(host->mmc), "Power on failed\n");
+			dev_info(mmc_dev(host->mmc), "Power on failed\n");
+	}
+}
+
+static void sdhci_am654_reset(struct sdhci_host *host, u8 mask)
+{
+	u8 ctrl;
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	struct sdhci_am654_data *sdhci_am654 = sdhci_pltfm_priv(pltfm_host);
+
+	sdhci_and_cqhci_reset(host, mask);
+
+	if (sdhci_am654->quirks & SDHCI_AM654_QUIRK_FORCE_CDTEST) {
+		ctrl = sdhci_readb(host, SDHCI_HOST_CONTROL);
+		ctrl |= SDHCI_CTRL_CDTEST_INS | SDHCI_CTRL_CDTEST_EN;
+		sdhci_writeb(host, ctrl, SDHCI_HOST_CONTROL);
 	}
 }
 
@@ -446,7 +456,7 @@ static struct sdhci_ops sdhci_am654_ops = {
 	.set_clock = sdhci_am654_set_clock,
 	.write_b = sdhci_am654_write_b,
 	.irq = sdhci_am654_cqhci_irq,
-	.reset = sdhci_reset,
+	.reset = sdhci_and_cqhci_reset,
 };
 
 static const struct sdhci_pltfm_data sdhci_am654_pdata = {
@@ -476,7 +486,7 @@ static struct sdhci_ops sdhci_j721e_8bit_ops = {
 	.set_clock = sdhci_am654_set_clock,
 	.write_b = sdhci_am654_write_b,
 	.irq = sdhci_am654_cqhci_irq,
-	.reset = sdhci_reset,
+	.reset = sdhci_and_cqhci_reset,
 };
 
 static const struct sdhci_pltfm_data sdhci_j721e_8bit_pdata = {
@@ -500,7 +510,7 @@ static struct sdhci_ops sdhci_j721e_4bit_ops = {
 	.set_clock = sdhci_j721e_4bit_set_clock,
 	.write_b = sdhci_am654_write_b,
 	.irq = sdhci_am654_cqhci_irq,
-	.reset = sdhci_reset,
+	.reset = sdhci_am654_reset,
 };
 
 static const struct sdhci_pltfm_data sdhci_j721e_4bit_pdata = {
@@ -511,26 +521,6 @@ static const struct sdhci_pltfm_data sdhci_j721e_4bit_pdata = {
 
 static const struct sdhci_am654_driver_data sdhci_j721e_4bit_drvdata = {
 	.pdata = &sdhci_j721e_4bit_pdata,
-	.flags = IOMUX_PRESENT,
-};
-
-static const struct sdhci_pltfm_data sdhci_am64_8bit_pdata = {
-	.ops = &sdhci_j721e_8bit_ops,
-	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN,
-};
-
-static const struct sdhci_am654_driver_data sdhci_am64_8bit_drvdata = {
-	.pdata = &sdhci_am64_8bit_pdata,
-	.flags = DLL_PRESENT | DLL_CALIB,
-};
-
-static const struct sdhci_pltfm_data sdhci_am64_4bit_pdata = {
-	.ops = &sdhci_j721e_4bit_ops,
-	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN,
-};
-
-static const struct sdhci_am654_driver_data sdhci_am64_4bit_drvdata = {
-	.pdata = &sdhci_am64_4bit_pdata,
 	.flags = IOMUX_PRESENT,
 };
 
@@ -556,7 +546,6 @@ static const struct cqhci_host_ops sdhci_am654_cqhci_ops = {
 static int sdhci_am654_cqe_add_host(struct sdhci_host *host)
 {
 	struct cqhci_host *cq_host;
-	int ret;
 
 	cq_host = devm_kzalloc(mmc_dev(host->mmc), sizeof(struct cqhci_host),
 			       GFP_KERNEL);
@@ -570,9 +559,7 @@ static int sdhci_am654_cqe_add_host(struct sdhci_host *host)
 
 	host->mmc->caps2 |= MMC_CAP2_CQE;
 
-	ret = cqhci_init(cq_host, host->mmc, 1);
-
-	return ret;
+	return cqhci_init(cq_host, host->mmc, 1);
 }
 
 static int sdhci_am654_get_otap_delay(struct sdhci_host *host,
@@ -582,32 +569,15 @@ static int sdhci_am654_get_otap_delay(struct sdhci_host *host,
 	int i;
 	int ret;
 
-	ret = device_property_read_u32(dev, td[MMC_TIMING_LEGACY].otap_binding,
-				 &sdhci_am654->otap_del_sel[MMC_TIMING_LEGACY]);
-	if (ret) {
-		/*
-		 * ti,otap-del-sel-legacy is mandatory, look for old binding
-		 * if not found.
-		 */
-		ret = device_property_read_u32(dev, "ti,otap-del-sel",
-					       &sdhci_am654->otap_del_sel[0]);
-		if (ret) {
-			dev_err(dev, "Couldn't find otap-del-sel\n");
-
-			return ret;
-		}
-
-		dev_info(dev, "Using legacy binding ti,otap-del-sel\n");
-		sdhci_am654->legacy_otapdly = true;
-
-		return 0;
-	}
-
-	for (i = MMC_TIMING_MMC_HS; i <= MMC_TIMING_MMC_HS400; i++) {
+	for (i = MMC_TIMING_LEGACY; i <= MMC_TIMING_MMC_HS400; i++) {
 
 		ret = device_property_read_u32(dev, td[i].otap_binding,
 					       &sdhci_am654->otap_del_sel[i]);
 		if (ret) {
+			if (i == MMC_TIMING_LEGACY) {
+				dev_err(dev, "Couldn't find mandatory ti,otap-del-sel-legacy\n");
+				return ret;
+			}
 			dev_dbg(dev, "Couldn't find %s\n",
 				td[i].otap_binding);
 			/*
@@ -739,6 +709,9 @@ static int sdhci_am654_get_of_property(struct platform_device *pdev,
 	device_property_read_u32(dev, "ti,clkbuf-sel",
 				 &sdhci_am654->clkbuf_sel);
 
+	if (device_property_read_bool(dev, "ti,fails-without-test-cd"))
+		sdhci_am654->quirks |= SDHCI_AM654_QUIRK_FORCE_CDTEST;
+
 	sdhci_get_of_property(pdev);
 
 	return 0;
@@ -759,11 +732,15 @@ static const struct of_device_id sdhci_am654_of_match[] = {
 	},
 	{
 		.compatible = "ti,am64-sdhci-8bit",
-		.data = &sdhci_am64_8bit_drvdata,
+		.data = &sdhci_j721e_8bit_drvdata,
 	},
 	{
 		.compatible = "ti,am64-sdhci-4bit",
-		.data = &sdhci_am64_4bit_drvdata,
+		.data = &sdhci_j721e_4bit_drvdata,
+	},
+	{
+		.compatible = "ti,am62-sdhci",
+		.data = &sdhci_j721e_4bit_drvdata,
 	},
 	{ /* sentinel */ }
 };
@@ -807,16 +784,10 @@ static int sdhci_am654_probe(struct platform_device *pdev)
 
 	pltfm_host->clk = clk_xin;
 
-	/* Clocks are enabled using pm_runtime */
-	pm_runtime_enable(dev);
-	ret = pm_runtime_resume_and_get(dev);
-	if (ret)
-		goto pm_runtime_disable;
-
 	base = devm_platform_ioremap_resource(pdev, 1);
 	if (IS_ERR(base)) {
 		ret = PTR_ERR(base);
-		goto pm_runtime_put;
+		goto err_pltfm_free;
 	}
 
 	sdhci_am654->base = devm_regmap_init_mmio(dev, base,
@@ -824,60 +795,180 @@ static int sdhci_am654_probe(struct platform_device *pdev)
 	if (IS_ERR(sdhci_am654->base)) {
 		dev_err(dev, "Failed to initialize regmap\n");
 		ret = PTR_ERR(sdhci_am654->base);
-		goto pm_runtime_put;
+		goto err_pltfm_free;
 	}
 
 	ret = sdhci_am654_get_of_property(pdev, sdhci_am654);
 	if (ret)
-		goto pm_runtime_put;
+		goto err_pltfm_free;
 
 	ret = mmc_of_parse(host->mmc);
 	if (ret) {
-		dev_err(dev, "parsing dt failed (%d)\n", ret);
-		goto pm_runtime_put;
+		dev_err_probe(dev, ret, "parsing dt failed\n");
+		goto err_pltfm_free;
 	}
 
 	host->mmc_host_ops.execute_tuning = sdhci_am654_execute_tuning;
 
+	pm_runtime_get_noresume(dev);
+	ret = pm_runtime_set_active(dev);
+	if (ret)
+		goto pm_put;
+	pm_runtime_enable(dev);
+	ret = clk_prepare_enable(pltfm_host->clk);
+	if (ret)
+		goto pm_disable;
+
 	ret = sdhci_am654_init(host);
 	if (ret)
-		goto pm_runtime_put;
+		goto clk_disable;
 
+	/* Setting up autosuspend */
+	pm_runtime_set_autosuspend_delay(dev, SDHCI_AM654_AUTOSUSPEND_DELAY);
+	pm_runtime_use_autosuspend(dev);
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
 	return 0;
 
-pm_runtime_put:
-	pm_runtime_put_sync(dev);
-pm_runtime_disable:
+clk_disable:
+	clk_disable_unprepare(pltfm_host->clk);
+pm_disable:
 	pm_runtime_disable(dev);
+pm_put:
+	pm_runtime_put_noidle(dev);
 err_pltfm_free:
 	sdhci_pltfm_free(pdev);
 	return ret;
 }
 
-static int sdhci_am654_remove(struct platform_device *pdev)
+static void sdhci_am654_remove(struct platform_device *pdev)
 {
 	struct sdhci_host *host = platform_get_drvdata(pdev);
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	struct device *dev = &pdev->dev;
 	int ret;
 
-	sdhci_remove_host(host, true);
-	ret = pm_runtime_put_sync(&pdev->dev);
+	ret = pm_runtime_get_sync(dev);
 	if (ret < 0)
-		return ret;
+		dev_err(dev, "pm_runtime_get_sync() Failed\n");
 
-	pm_runtime_disable(&pdev->dev);
+	sdhci_remove_host(host, true);
+	clk_disable_unprepare(pltfm_host->clk);
+	pm_runtime_disable(dev);
+	pm_runtime_put_noidle(dev);
 	sdhci_pltfm_free(pdev);
+}
+
+#ifdef CONFIG_PM
+static int sdhci_am654_restore(struct sdhci_host *host)
+{
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	struct sdhci_am654_data *sdhci_am654 = sdhci_pltfm_priv(pltfm_host);
+	u32 ctl_cfg_2 = 0;
+	u32 val;
+	int ret;
+
+	if (sdhci_am654->flags & DLL_CALIB) {
+		regmap_read(sdhci_am654->base, PHY_STAT1, &val);
+		if (~val & CALDONE_MASK) {
+			/* Calibrate IO lines */
+			regmap_update_bits(sdhci_am654->base, PHY_CTRL1,
+					   PDB_MASK, PDB_MASK);
+			ret = regmap_read_poll_timeout(sdhci_am654->base,
+						       PHY_STAT1, val,
+						       val & CALDONE_MASK,
+						       1, 20);
+			if (ret)
+				return ret;
+		}
+	}
+
+	/* Enable pins by setting IO mux to 0 */
+	if (sdhci_am654->flags & IOMUX_PRESENT)
+		regmap_update_bits(sdhci_am654->base, PHY_CTRL1,
+				   IOMUX_ENABLE_MASK, 0);
+
+	/* Set slot type based on SD or eMMC */
+	if (host->mmc->caps & MMC_CAP_NONREMOVABLE)
+		ctl_cfg_2 = SLOTTYPE_EMBEDDED;
+
+	regmap_update_bits(sdhci_am654->base, CTL_CFG_2, SLOTTYPE_MASK,
+			   ctl_cfg_2);
+
+	regmap_read(sdhci_am654->base, CTL_CFG_3, &val);
+	if (~val & TUNINGFORSDR50_MASK)
+		/* Enable tuning for SDR50 */
+		regmap_update_bits(sdhci_am654->base, CTL_CFG_3, TUNINGFORSDR50_MASK,
+				   TUNINGFORSDR50_MASK);
 
 	return 0;
 }
+
+static int sdhci_am654_runtime_suspend(struct device *dev)
+{
+	struct sdhci_host *host = dev_get_drvdata(dev);
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	int ret;
+
+	if (host->tuning_mode != SDHCI_TUNING_MODE_3)
+		mmc_retune_needed(host->mmc);
+
+	ret = cqhci_suspend(host->mmc);
+	if (ret)
+		return ret;
+
+	ret = sdhci_runtime_suspend_host(host);
+	if (ret)
+		return ret;
+
+	/* disable the clock */
+	clk_disable_unprepare(pltfm_host->clk);
+	return 0;
+}
+
+static int sdhci_am654_runtime_resume(struct device *dev)
+{
+	struct sdhci_host *host = dev_get_drvdata(dev);
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	int ret;
+
+	/* Enable the clock */
+	ret = clk_prepare_enable(pltfm_host->clk);
+	if (ret)
+		return ret;
+
+	ret = sdhci_am654_restore(host);
+	if (ret)
+		return ret;
+
+	ret = sdhci_runtime_resume_host(host, 0);
+	if (ret)
+		return ret;
+
+	ret = cqhci_resume(host->mmc);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+#endif
+
+static const struct dev_pm_ops sdhci_am654_dev_pm_ops = {
+	SET_RUNTIME_PM_OPS(sdhci_am654_runtime_suspend,
+			   sdhci_am654_runtime_resume, NULL)
+	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
+				pm_runtime_force_resume)
+};
 
 static struct platform_driver sdhci_am654_driver = {
 	.driver = {
 		.name = "sdhci-am654",
 		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
+		.pm = &sdhci_am654_dev_pm_ops,
 		.of_match_table = sdhci_am654_of_match,
 	},
 	.probe = sdhci_am654_probe,
-	.remove = sdhci_am654_remove,
+	.remove_new = sdhci_am654_remove,
 };
 
 module_platform_driver(sdhci_am654_driver);

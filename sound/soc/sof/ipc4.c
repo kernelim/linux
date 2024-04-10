@@ -17,15 +17,6 @@
 #include "ipc4-priv.h"
 #include "ops.h"
 
-#ifdef DEBUG_VERBOSE
-#define sof_ipc4_dump_payload(sdev, ipc_data, size)			\
-		print_hex_dump_debug("Message payload: ",		\
-				     DUMP_PREFIX_OFFSET,		\
-				     16, 4, ipc_data, size, false)
-#else
-#define sof_ipc4_dump_payload(sdev, ipc_data, size)	do { } while (0)
-#endif
-
 static const struct sof_ipc4_fw_status {
 	int status;
 	char *msg;
@@ -108,6 +99,10 @@ static int sof_ipc4_check_reply_status(struct snd_sof_dev *sdev, u32 status)
 
 to_errno:
 	switch (status) {
+	case 2:
+	case 15:
+		ret = -EOPNOTSUPP;
+		break;
 	case 8:
 	case 11:
 	case 105 ... 109:
@@ -162,6 +157,7 @@ static const char * const ipc4_dbg_glb_msg_type[] = {
 	DBG_IPC4_MSG_TYPE_ENTRY(GLB_SAVE_PIPELINE),
 	DBG_IPC4_MSG_TYPE_ENTRY(GLB_RESTORE_PIPELINE),
 	DBG_IPC4_MSG_TYPE_ENTRY(GLB_LOAD_LIBRARY),
+	DBG_IPC4_MSG_TYPE_ENTRY(GLB_LOAD_LIBRARY_PREPARE),
 	DBG_IPC4_MSG_TYPE_ENTRY(GLB_INTERNAL_MESSAGE),
 	DBG_IPC4_MSG_TYPE_ENTRY(GLB_NOTIFICATION),
 };
@@ -255,6 +251,13 @@ static void sof_ipc4_log_header(struct device *dev, u8 *text, struct sof_ipc4_ms
 		dev_dbg(dev, "%s: %#x|%#x\n", text, msg->primary, msg->extension);
 }
 #endif
+
+static void sof_ipc4_dump_payload(struct snd_sof_dev *sdev,
+				  void *ipc_data, size_t size)
+{
+	print_hex_dump_debug("Message payload: ", DUMP_PREFIX_OFFSET,
+			     16, 4, ipc_data, size, false);
+}
 
 static int sof_ipc4_get_reply(struct snd_sof_dev *sdev)
 {
@@ -362,9 +365,6 @@ static int sof_ipc4_tx_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_
 			   void *reply_data, size_t reply_bytes, bool no_pm)
 {
 	struct snd_sof_ipc *ipc = sdev->ipc;
-#ifdef DEBUG_VERBOSE
-	struct sof_ipc4_msg *msg = NULL;
-#endif
 	int ret;
 
 	if (!msg_data)
@@ -386,18 +386,20 @@ static int sof_ipc4_tx_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_
 
 	ret = ipc4_tx_msg_unlocked(ipc, msg_data, msg_bytes, reply_data, reply_bytes);
 
+	if (sof_debug_check_flag(SOF_DBG_DUMP_IPC_MESSAGE_PAYLOAD)) {
+		struct sof_ipc4_msg *msg = NULL;
+
+		/* payload is indicated by non zero msg/reply_bytes */
+		if (msg_bytes)
+			msg = msg_data;
+		else if (reply_bytes)
+			msg = reply_data;
+
+		if (msg)
+			sof_ipc4_dump_payload(sdev, msg->data_ptr, msg->data_size);
+	}
+
 	mutex_unlock(&ipc->tx_mutex);
-
-#ifdef DEBUG_VERBOSE
-	/* payload is indicated by non zero msg/reply_bytes */
-	if (msg_bytes)
-		msg = msg_data;
-	else if (reply_bytes)
-		msg = reply_data;
-
-	if (msg)
-		sof_ipc4_dump_payload(sdev, msg->data_ptr, msg->data_size);
-#endif
 
 	return ret;
 }
@@ -516,7 +518,8 @@ static int sof_ipc4_set_get_data(struct snd_sof_dev *sdev, void *data,
 	if (!set && payload_bytes != offset)
 		ipc4_msg->data_size = offset;
 
-	sof_ipc4_dump_payload(sdev, ipc4_msg->data_ptr, ipc4_msg->data_size);
+	if (sof_debug_check_flag(SOF_DBG_DUMP_IPC_MESSAGE_PAYLOAD))
+		sof_ipc4_dump_payload(sdev, ipc4_msg->data_ptr, ipc4_msg->data_size);
 
 out:
 	mutex_unlock(&sdev->ipc->tx_mutex);

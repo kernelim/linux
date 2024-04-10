@@ -1,1 +1,1 @@
-# CONFIG_IOMMUFD is not set
+CONFIG_IOMMUFD=m

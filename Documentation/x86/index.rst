@@ -8,7 +8,7 @@ x86-specific Documentation
    :maxdepth: 2
    :numbered:
 
-   boot
+   ../arch/x86/boot
    booting-dt
    cpuinfo
    topology

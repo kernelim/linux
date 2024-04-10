@@ -1007,11 +1007,13 @@ do {									       \
  *			  where the second inode has larger inode number
  *			  than the first
  *  I_DATA_SEM_QUOTA  - Used for quota inodes only
+ *  I_DATA_SEM_EA     - Used for ea_inodes only
  */
 enum {
 	I_DATA_SEM_NORMAL = 0,
 	I_DATA_SEM_OTHER,
 	I_DATA_SEM_QUOTA,
+	I_DATA_SEM_EA
 };
 
 
@@ -1120,8 +1122,8 @@ struct ext4_inode_info {
 
 	/* mballoc */
 	atomic_t i_prealloc_active;
-	struct list_head i_prealloc_list;
-	spinlock_t i_prealloc_lock;
+	struct rb_root i_prealloc_node;
+	rwlock_t i_prealloc_lock;
 
 	/* extents status tree */
 	struct ext4_es_tree i_es_tree;
@@ -1613,7 +1615,6 @@ struct ext4_sb_info {
 	unsigned int s_mb_stats;
 	unsigned int s_mb_order2_reqs;
 	unsigned int s_mb_group_prealloc;
-	unsigned int s_mb_max_inode_prealloc;
 	unsigned int s_max_dir_size_kb;
 	/* where last allocation was done - for stream allocation */
 	unsigned long s_mb_last_group;
@@ -1772,6 +1773,30 @@ static inline struct ext4_sb_info *EXT4_SB(struct super_block *sb)
 static inline struct ext4_inode_info *EXT4_I(struct inode *inode)
 {
 	return container_of(inode, struct ext4_inode_info, vfs_inode);
+}
+
+static inline int ext4_writepages_down_read(struct super_block *sb)
+{
+	percpu_down_read(&EXT4_SB(sb)->s_writepages_rwsem);
+	return memalloc_nofs_save();
+}
+
+static inline void ext4_writepages_up_read(struct super_block *sb, int ctx)
+{
+	memalloc_nofs_restore(ctx);
+	percpu_up_read(&EXT4_SB(sb)->s_writepages_rwsem);
+}
+
+static inline int ext4_writepages_down_write(struct super_block *sb)
+{
+	percpu_down_write(&EXT4_SB(sb)->s_writepages_rwsem);
+	return memalloc_nofs_save();
+}
+
+static inline void ext4_writepages_up_write(struct super_block *sb, int ctx)
+{
+	memalloc_nofs_restore(ctx);
+	percpu_up_write(&EXT4_SB(sb)->s_writepages_rwsem);
 }
 
 static inline int ext4_valid_inum(struct super_block *sb, unsigned long ino)
@@ -2676,16 +2701,16 @@ struct mmpd_data {
 
 /* bitmap.c */
 extern unsigned int ext4_count_free(char *bitmap, unsigned numchars);
-void ext4_inode_bitmap_csum_set(struct super_block *sb, ext4_group_t group,
+void ext4_inode_bitmap_csum_set(struct super_block *sb,
 				struct ext4_group_desc *gdp,
 				struct buffer_head *bh, int sz);
-int ext4_inode_bitmap_csum_verify(struct super_block *sb, ext4_group_t group,
+int ext4_inode_bitmap_csum_verify(struct super_block *sb,
 				  struct ext4_group_desc *gdp,
 				  struct buffer_head *bh, int sz);
-void ext4_block_bitmap_csum_set(struct super_block *sb, ext4_group_t group,
+void ext4_block_bitmap_csum_set(struct super_block *sb,
 				struct ext4_group_desc *gdp,
 				struct buffer_head *bh);
-int ext4_block_bitmap_csum_verify(struct super_block *sb, ext4_group_t group,
+int ext4_block_bitmap_csum_verify(struct super_block *sb,
 				  struct ext4_group_desc *gdp,
 				  struct buffer_head *bh);
 
@@ -2697,10 +2722,6 @@ extern void ext4_get_group_no_and_offset(struct super_block *sb,
 extern ext4_group_t ext4_get_group_number(struct super_block *sb,
 					  ext4_fsblk_t block);
 
-extern unsigned int ext4_block_group(struct super_block *sb,
-			ext4_fsblk_t blocknr);
-extern ext4_grpblk_t ext4_block_group_offset(struct super_block *sb,
-			ext4_fsblk_t blocknr);
 extern int ext4_bg_has_super(struct super_block *sb, ext4_group_t group);
 extern unsigned long ext4_bg_num_gdb(struct super_block *sb,
 			ext4_group_t group);
@@ -2904,8 +2925,6 @@ int ext4_fc_record_regions(struct super_block *sb, int ino,
 /* mballoc.c */
 extern const struct seq_operations ext4_mb_seq_groups_ops;
 extern const struct seq_operations ext4_mb_seq_structs_summary_ops;
-extern long ext4_mb_stats;
-extern long ext4_mb_max_to_scan;
 extern int ext4_seq_mb_stats_show(struct seq_file *seq, void *offset);
 extern int ext4_mb_init(struct super_block *);
 extern int ext4_mb_release(struct super_block *);
@@ -2965,7 +2984,9 @@ int do_journal_get_write_access(handle_t *handle, struct inode *inode,
 typedef enum {
 	EXT4_IGET_NORMAL =	0,
 	EXT4_IGET_SPECIAL =	0x0001, /* OK to iget a system inode */
-	EXT4_IGET_HANDLE = 	0x0002	/* Inode # is from a handle */
+	EXT4_IGET_HANDLE = 	0x0002,	/* Inode # is from a handle */
+	EXT4_IGET_BAD =		0x0004, /* Allow to iget a bad inode */
+	EXT4_IGET_EA_INODE =	0x0008	/* Inode should contain an EA value */
 } ext4_iget_flags;
 
 extern struct inode *__ext4_iget(struct super_block *sb, unsigned long ino,
@@ -3000,6 +3021,7 @@ extern void ext4_set_inode_flags(struct inode *, bool init);
 extern int ext4_alloc_da_blocks(struct inode *inode);
 extern void ext4_set_aops(struct inode *inode);
 extern int ext4_writepage_trans_blocks(struct inode *);
+extern int ext4_normal_submit_inode_data_buffers(struct jbd2_inode *jinode);
 extern int ext4_chunk_trans_blocks(struct inode *, int nrblocks);
 extern int ext4_zero_partial_blocks(handle_t *handle, struct inode *inode,
 			     loff_t lstart, loff_t lend);
@@ -3028,6 +3050,7 @@ int ext4_fileattr_set(struct user_namespace *mnt_userns,
 int ext4_fileattr_get(struct dentry *dentry, struct fileattr *fa);
 extern void ext4_reset_inode_seed(struct inode *inode);
 int ext4_update_overhead(struct super_block *sb, bool force);
+int ext4_force_shutdown(struct super_block *sb, u32 flags);
 
 /* migrate.c */
 extern int ext4_ext_migrate(struct inode *);
@@ -3757,8 +3780,7 @@ extern void ext4_end_io_rsv_work(struct work_struct *work);
 extern void ext4_io_submit(struct ext4_io_submit *io);
 extern int ext4_bio_write_page(struct ext4_io_submit *io,
 			       struct page *page,
-			       int len,
-			       bool keep_towrite);
+			       int len);
 extern struct ext4_io_end_vec *ext4_alloc_io_end_vec(ext4_io_end_t *io_end);
 extern struct ext4_io_end_vec *ext4_last_io_end_vec(ext4_io_end_t *io_end);
 

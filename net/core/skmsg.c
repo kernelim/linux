@@ -8,6 +8,7 @@
 #include <net/sock.h>
 #include <net/tcp.h>
 #include <net/tls.h>
+#include <trace/events/sock.h>
 
 static bool sk_msg_try_coalesce_ok(struct sk_msg *msg, int elem_first_coalesce)
 {
@@ -324,14 +325,13 @@ int sk_msg_zerocopy_from_iter(struct sock *sk, struct iov_iter *from,
 			goto out;
 		}
 
-		copied = iov_iter_get_pages(from, pages, bytes, maxpages,
+		copied = iov_iter_get_pages2(from, pages, bytes, maxpages,
 					    &offset);
 		if (copied <= 0) {
 			ret = -EFAULT;
 			goto out;
 		}
 
-		iov_iter_advance(from, copied);
 		bytes -= copied;
 		msg->sg.size += copied;
 
@@ -1115,6 +1115,8 @@ static void sk_psock_strp_data_ready(struct sock *sk)
 {
 	struct sk_psock *psock;
 
+	trace_sk_data_ready(sk);
+
 	rcu_read_lock();
 	psock = sk_psock(sk);
 	if (likely(psock)) {
@@ -1208,6 +1210,8 @@ out:
 static void sk_psock_verdict_data_ready(struct sock *sk)
 {
 	struct socket *sock = sk->sk_socket;
+
+	trace_sk_data_ready(sk);
 
 	if (unlikely(!sock || !sock->ops || !sock->ops->read_skb))
 		return;

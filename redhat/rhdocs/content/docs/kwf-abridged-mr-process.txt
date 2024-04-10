@@ -7,8 +7,8 @@ MR Submission Prerequisites
 * Establish your gitlab account
   https://red.ht/gitlab-configuration-guide
 
-* You must have a bugzilla number in order to submit an MR.
-  If the bugzilla does not yet exist, create it.
+* You must have a Jira ticket in order to submit an MR.
+  If the Jira does not yet exist, create it.
   https://red.ht/Preparing-for-MR-sumbission
 
 * To correctly merge your changes when you have dependencies, you must
@@ -31,7 +31,7 @@ MR Submission Prerequisites
   <empty line for summary line>
   <empty line>
   ```
-  Bugzilla:
+  JIRA:
   Upstream Status:
   <empty line>
   <Description Text>
@@ -93,7 +93,7 @@ Abridged MR Submission Process
 * Edit a copy of your MR description template file for your merge request.
   See MR Submission Prerequisites above.
   * Enter the summary line.
-  * Add the link to the bugzilla.
+  * Add the link to the Jira.
   * Enter the upstream status, e.g. v5.18 or a link to an upstream repo.
   * Enter links to any brew builds or test results
   * Write the description.

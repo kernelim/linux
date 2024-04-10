@@ -289,6 +289,8 @@ static void early_init_hygon(struct cpuinfo_x86 *c)
 
 static void init_hygon(struct cpuinfo_x86 *c)
 {
+	u64 vm_cr;
+
 	early_init_hygon(c);
 
 	/*
@@ -319,6 +321,14 @@ static void init_hygon(struct cpuinfo_x86 *c)
 
 	init_hygon_cacheinfo(c);
 
+	if (cpu_has(c, X86_FEATURE_SVM)) {
+		rdmsrl(MSR_VM_CR, vm_cr);
+		if (vm_cr & SVM_VM_CR_SVM_DIS_MASK) {
+			pr_notice_once("SVM disabled (by BIOS) in MSR_VM_CR\n");
+			clear_cpu_cap(c, X86_FEATURE_SVM);
+		}
+	}
+
 	if (cpu_has(c, X86_FEATURE_XMM2)) {
 		/*
 		 * Use LFENCE for execution serialization.  On families which
@@ -339,7 +349,7 @@ static void init_hygon(struct cpuinfo_x86 *c)
 	set_cpu_cap(c, X86_FEATURE_ARAT);
 
 	/* Hygon CPUs don't reset SS attributes on SYSRET, Xen does. */
-	if (!cpu_has(c, X86_FEATURE_XENPV))
+	if (!cpu_feature_enabled(X86_FEATURE_XENPV))
 		set_cpu_bug(c, X86_BUG_SYSRET_SS_ATTRS);
 
 	check_null_seg_clears_base(c);

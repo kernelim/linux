@@ -29,8 +29,7 @@ Looking for the xref:faq.adoc[FAQ?]
 === Configuring Bugzilla and GitLab accounts
 
 * Create and configure your https://bugzilla.redhat.com/createaccount.cgi[Red Hat Bugzilla account].
-.. Red Hat Developers must be a member of the `redhat` bugzilla group to properly associate their account with GitLab.
-.. Red Hat Partner Engineers must be a member of `redhat_partner_engineer_staff` to properly associate their account with GitLab.
+.. Red Hat Developers must be a member of the `redhat` bugzilla group to properly associate their account with GitLab.  This group is used for Jira access and CVE access which still occurs in Bugzilla.
 +
 xref:rh_and_gitlab_configuration.adoc#partnerengineer[Required Permissions for Red Hat Partner Engineers] +
 [.small]_Look for "I'm using https://red.ht/GitLabSSO to login to GitLab and can see centos-stream and other public projects but cannot see the RHEL projects."_
@@ -66,28 +65,21 @@ IMPORTANT: We recommend using the `lab` utility to create forks and subsequent M
 ** https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9[Public centos-stream-9 kernel source (You want to contribute here!)]
 ** https://gitlab.com/redhat/rhel/src/kernel/rhel-9[Private rhel-9 z-stream/EUS contribution kernel source]
 
-=== Createing a Bugzilla ticket
+=== Creating a Jira ticket
 
-* Select the appropriate release in the product and version fields. +
-_For example, for RHEL 9:_ +
-*Product*: Red Hat Enterprise Linux 9 +
-*Version*: 9.0 +
-*Component*: kernel +
-*Sub Component*: select the suitable one or select “other” if there is no such one.
-+
-image::images/qsg-bugzilla_image.png[align="center"]
+* Create ticket in RHEL project
+* Use Bug type for defects (that is, you are reporting an issue that exists in a currently supported RHEL release)
+* Use Story type for any new functionality, RFEs (that is, you are requesting functionality in a currently supported RHEL release)
+* Enter Summary, Component, Description
+* Set Affects Version(s).  This is the version that the reported bug was seen in.  Stories do not need to report an Affects Version(s).
+* Set Target Version.  This is the version that bug should be fixed in, or that the feature is targeted for.
 
-=== anchor:getreleaseapproval[] Get release approval
+=== anchor:settingotherrequiredfields[] Setting Other Required Fields
 
 _This does not apply to External Contributors_
 
-.. http://pkgs.devel.redhat.com/rules.html[Requirements for release+ can be found here.] +
-_Example: RHEL8.6 search for rhel-8.6.0_ +
-_Example: c9s (for RHEL9 bugzillas)_
-.. GENERAL GUIDANCE on how to obtain +release++ on a BZ: +
-_(This guidance may vary and/or change down the road)_
 ... Before ITM 26: +
-`ITR, DTM, ITM, devel_ack+, qa_ack+ = release+`
+Set Fix Version/s (aka ITR), Docs Impact, Dev Target Milestone (aka DTM), and Internal Target Milestone (aka ITM or QE ITM)
 ... After ITM 26: +
 Same requirements, but also `exception+` or `blocker+` based on schedule.
 
@@ -95,7 +87,7 @@ Same requirements, but also `exception+` or `blocker+` based on schedule.
 . Clone the project you want to contribute to. +
 `git clone _<project_SSH_URL>_`
 * *RHEL9*:
-According to the https://gitlab.com/redhat/rhel/src/kernel/internal-docs/-/blob/main/CentOS-Stream-9_Workflow.adoc#user-content-red-hat-contributors[CentOS-Stream-9 Workflow document], use https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9[CentOS-Stream 9] like a normal RHEL git tree for all development work per the http://red.ht/kernel_workflow_doc[kernel workflow] document. Working after ITM 26 may require additional considerations as specified for <<getreleaseapproval,obtaining release approval>> as well as working on an https://gitlab.com/redhat/rhel/src/kernel/rhel-9[internal RHEL-9 tree] instead.
+According to the https://gitlab.com/redhat/rhel/src/kernel/internal-docs/-/blob/main/CentOS-Stream-9_Workflow.adoc#user-content-red-hat-contributors[CentOS-Stream-9 Workflow document], use https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9[CentOS-Stream 9] like a normal RHEL git tree for all development work per the http://red.ht/kernel_workflow_doc[kernel workflow] document. Working after ITM 26 may require additional considerations as specified for <<settingotherrequiredfields,obtaining release approval>> as well as working on an https://gitlab.com/redhat/rhel/src/kernel/rhel-9[internal RHEL-9 tree] instead.
 * *RHEL8*:
 Use https://gitlab.com/redhat/rhel/src/kernel/rhel-8[rhel8-tree] like a normal RHEL git tree for all development work per the http://red.ht/kernel_workflow_doc[kernel workflow] document. 
 * Embargoed/NDA related content:
@@ -184,33 +176,16 @@ image::images/qsg-label_image-lightgreen.png[]
 
 The full list of possible labels is https://gitlab.com/cki-project/kernel-webhooks/-/blob/main/utils/labels.yaml[available for reference]. +
 
-As various automated bot jobs run, different labels will be added or removed based on analysis of the MR or BZ or the results of tests performed: +
+As various automated bot jobs run, different labels will be added or removed based on analysis of the MR or Jira or the results of tests performed: +
 
 image::images/qsg-bot_activity.png[align="center"]
 
 _If you don't like the relative timestamps, they can be turned off (changed to date+time) in your GitLab preferences._
 
-=== Bugzilla ticket status
+=== Jira ticket status
 
-.. The CKI KWF Bot updates Bugzillas when applicable. +
-Some examples include:
-... When a BZ is detected in an MR, it automatically adds the link to the BZ.
-+
-image::images/qsg-bot_bz_link.png[]
-... When a BZ is detected in an MR that contains code changes AND that BZ is in state NEW or ASSIGNED, the bot sets the status of that BZ to POST.
-+
-image::images/qsg-bot_bz_status.png[]
-... When the CI pipeline has build products available such as kernel RPMs, the bot records them in the BZ as a private comment. +
-+
-NOTE: Since the comments are private, these links are not easily found for external contributors.  See xref:faq.adoc#getartifactsdirectly[FAQ "How do I get build artifacts without looking at Bugzilla?"]
-+
-image::images/qsg-bot_bz_buildinfo.png[]
-... When a BZ has met (Ready for QA or Ready for Merge) requirements, the bot updates the BZ status to MODIFIED from POST.
-+
-image::images/qsg-bot_bz_modified.png[]
-... etc.
-.. CKI Gating tests run in a pipeline automatically +
-+
+TBD.
+
 NOTE: If a CKI test fails, you should check https://cki-project.org/docs/user_docs/gitlab-mr-testing/faq/#a-test-failed-and-i-dont-understand-why[CKI test debugging FAQ]. If you're new to CKI start at the https://cki-project.org/docs/user_docs/gitlab-mr-testing/faq/#steps-for-developers-to-follow-to-get-a-green-check-mark[generic guide] which has further pointers. +
 _If you encounter a failed test that results in a new purple label “CKI_RT::Failed:merge”, this can be ignored._ +
 
@@ -296,7 +271,6 @@ All approved MR's, assuming they have the +readyForMerge+ label, will normally b
 |===
 | *Acronym* | *Description*
 | ARK  | Always Ready Kernel
-| BZ   | Bugzilla
 | C9S  | CentOS Stream 9 / CentOS 9 Stream
 | CI   | Continuous Integration
 | CKI  | Continuous Kernel Integration

@@ -132,6 +132,7 @@
 #include <trace/events/net.h>
 #include <trace/events/skb.h>
 #include <trace/events/qdisc.h>
+#include <trace/events/xdp.h>
 #include <linux/inetdevice.h>
 #include <linux/cpu_rmap.h>
 #include <linux/static_key.h>
@@ -160,8 +161,6 @@ struct list_head ptype_base[PTYPE_HASH_SIZE] __read_mostly;
 struct list_head ptype_all __read_mostly;	/* Taps */
 
 static int netif_rx_internal(struct sk_buff *skb);
-static int call_netdevice_notifiers_info(unsigned long val,
-					 struct netdev_notifier_info *info);
 static int call_netdevice_notifiers_extack(unsigned long val,
 					   struct net_device *dev,
 					   struct netlink_ext_ack *extack);
@@ -1910,8 +1909,8 @@ static void move_netdevice_notifiers_dev_net(struct net_device *dev,
  *	are as for raw_notifier_call_chain().
  */
 
-static int call_netdevice_notifiers_info(unsigned long val,
-					 struct netdev_notifier_info *info)
+int call_netdevice_notifiers_info(unsigned long val,
+				  struct netdev_notifier_info *info)
 {
 	struct net *net = dev_net(info->dev);
 	int ret;
@@ -3194,7 +3193,7 @@ static u16 skb_tx_hash(const struct net_device *dev,
 	return (u16) reciprocal_scale(skb_get_hash(skb), qcount) + qoffset;
 }
 
-static void skb_warn_bad_offload(const struct sk_buff *skb)
+void skb_warn_bad_offload(const struct sk_buff *skb)
 {
 	static const netdev_features_t null_features;
 	struct net_device *dev = skb->dev;
@@ -3318,74 +3317,6 @@ __be16 skb_network_protocol(struct sk_buff *skb, int *depth)
 	return vlan_get_protocol_and_depth(skb, type, depth);
 }
 
-/* openvswitch calls this on rx path, so we need a different check.
- */
-static inline bool skb_needs_check(struct sk_buff *skb, bool tx_path)
-{
-	if (tx_path)
-		return skb->ip_summed != CHECKSUM_PARTIAL &&
-		       skb->ip_summed != CHECKSUM_UNNECESSARY;
-
-	return skb->ip_summed == CHECKSUM_NONE;
-}
-
-/**
- *	__skb_gso_segment - Perform segmentation on skb.
- *	@skb: buffer to segment
- *	@features: features for the output path (see dev->features)
- *	@tx_path: whether it is called in TX path
- *
- *	This function segments the given skb and returns a list of segments.
- *
- *	It may return NULL if the skb requires no segmentation.  This is
- *	only possible when GSO is used for verifying header integrity.
- *
- *	Segmentation preserves SKB_GSO_CB_OFFSET bytes of previous skb cb.
- */
-struct sk_buff *__skb_gso_segment(struct sk_buff *skb,
-				  netdev_features_t features, bool tx_path)
-{
-	struct sk_buff *segs;
-
-	if (unlikely(skb_needs_check(skb, tx_path))) {
-		int err;
-
-		/* We're going to init ->check field in TCP or UDP header */
-		err = skb_cow_head(skb, 0);
-		if (err < 0)
-			return ERR_PTR(err);
-	}
-
-	/* Only report GSO partial support if it will enable us to
-	 * support segmentation on this frame without needing additional
-	 * work.
-	 */
-	if (features & NETIF_F_GSO_PARTIAL) {
-		netdev_features_t partial_features = NETIF_F_GSO_ROBUST;
-		struct net_device *dev = skb->dev;
-
-		partial_features |= dev->features & dev->gso_partial_features;
-		if (!skb_gso_ok(skb, features | partial_features))
-			features &= ~NETIF_F_GSO_PARTIAL;
-	}
-
-	BUILD_BUG_ON(SKB_GSO_CB_OFFSET +
-		     sizeof(*SKB_GSO_CB(skb)) > sizeof(skb->cb));
-
-	SKB_GSO_CB(skb)->mac_offset = skb_headroom(skb);
-	SKB_GSO_CB(skb)->encap_level = 0;
-
-	skb_reset_mac_header(skb);
-	skb_reset_mac_len(skb);
-
-	segs = skb_mac_gso_segment(skb, features);
-
-	if (segs != skb && unlikely(skb_needs_check(skb, tx_path) && !IS_ERR(segs)))
-		skb_warn_bad_offload(skb);
-
-	return segs;
-}
-EXPORT_SYMBOL(__skb_gso_segment);
 
 /* Take action when hardware reception checksum errors are detected. */
 #ifdef CONFIG_BUG
@@ -3485,6 +3416,9 @@ static netdev_features_t gso_features_check(const struct sk_buff *skb,
 	if (gso_segs > READ_ONCE(dev->gso_max_segs))
 		return features & ~NETIF_F_GSO_MASK;
 
+	if (unlikely(skb->len >= READ_ONCE(dev->gso_max_size)))
+		return features & ~NETIF_F_GSO_MASK;
+
 	if (!skb_shinfo(skb)->gso_type) {
 		skb_warn_bad_offload(skb);
 		return features & ~NETIF_F_GSO_MASK;
@@ -3554,7 +3488,6 @@ static int xmit_one(struct sk_buff *skb, struct net_device *dev,
 		dev_queue_xmit_nit(skb, dev);
 
 	len = skb->len;
-	PRANDOM_ADD_NOISE(skb, dev, txq, len + jiffies);
 	trace_net_dev_start_xmit(skb, dev);
 	rc = netdev_start_xmit(skb, dev, txq, more);
 	trace_net_dev_xmit(skb, rc, dev, len);
@@ -3714,25 +3647,25 @@ static void qdisc_pkt_len_init(struct sk_buff *skb)
 	 * we add to pkt_len the headers size of all segments
 	 */
 	if (shinfo->gso_size && skb_transport_header_was_set(skb)) {
-		unsigned int hdr_len;
 		u16 gso_segs = shinfo->gso_segs;
+		unsigned int hdr_len;
 
 		/* mac layer + network layer */
-		hdr_len = skb_transport_header(skb) - skb_mac_header(skb);
+		hdr_len = skb_transport_offset(skb);
 
 		/* + transport layer */
 		if (likely(shinfo->gso_type & (SKB_GSO_TCPV4 | SKB_GSO_TCPV6))) {
 			const struct tcphdr *th;
 			struct tcphdr _tcphdr;
 
-			th = skb_header_pointer(skb, skb_transport_offset(skb),
+			th = skb_header_pointer(skb, hdr_len,
 						sizeof(_tcphdr), &_tcphdr);
 			if (likely(th))
 				hdr_len += __tcp_hdrlen(th);
 		} else {
 			struct udphdr _udphdr;
 
-			if (skb_header_pointer(skb, skb_transport_offset(skb),
+			if (skb_header_pointer(skb, hdr_len,
 					       sizeof(_udphdr), &_udphdr))
 				hdr_len += sizeof(struct udphdr);
 		}
@@ -4213,7 +4146,6 @@ int __dev_queue_xmit(struct sk_buff *skb, struct net_device *sb_dev)
 			if (!skb)
 				goto out;
 
-			PRANDOM_ADD_NOISE(skb, dev, txq, jiffies);
 			HARD_TX_LOCK(dev, txq, cpu);
 
 			if (!netif_xmit_stopped(txq)) {
@@ -4268,7 +4200,6 @@ int __dev_direct_xmit(struct sk_buff *skb, u16 queue_id)
 
 	skb_set_queue_mapping(skb, queue_id);
 	txq = skb_get_tx_queue(dev, skb);
-	PRANDOM_ADD_NOISE(skb, dev, txq, jiffies);
 
 	local_bh_disable();
 
@@ -4333,6 +4264,7 @@ static inline void ____napi_schedule(struct softnet_data *sd,
 	}
 
 	list_add_tail(&napi->poll_list, &sd->poll_list);
+	WRITE_ONCE(napi->list_owner, smp_processor_id());
 	__raise_softirq_irqoff(NET_RX_SOFTIRQ);
 }
 
@@ -4993,7 +4925,8 @@ static __latent_entropy void net_tx_action(struct softirq_action *h)
 			if (skb->fclone != SKB_FCLONE_UNAVAILABLE)
 				__kfree_skb(skb);
 			else
-				__kfree_skb_defer(skb);
+				__napi_kfree_skb(skb,
+						 get_kfree_skb_cb(skb)->reason);
 		}
 	}
 
@@ -6023,6 +5956,7 @@ bool napi_complete_done(struct napi_struct *n, int work_done)
 		list_del_init(&n->poll_list);
 		local_irq_restore(flags);
 	}
+	WRITE_ONCE(n->list_owner, -1);
 
 	do {
 		val = READ_ONCE(n->state);
@@ -6339,6 +6273,7 @@ void netif_napi_add_weight(struct net_device *dev, struct napi_struct *napi,
 #ifdef CONFIG_NETPOLL
 	napi->poll_owner = -1;
 #endif
+	napi->list_owner = -1;
 	set_bit(NAPI_STATE_SCHED, &napi->state);
 	set_bit(NAPI_STATE_NPSVC, &napi->state);
 	list_add_rcu(&napi->dev_list, &dev->napi_list);
@@ -9362,6 +9297,7 @@ int bpf_xdp_link_attach(const union bpf_attr *attr, struct bpf_prog *prog)
 {
 	struct net *net = current->nsproxy->net_ns;
 	struct bpf_link_primer link_primer;
+	struct netlink_ext_ack extack = {};
 	struct bpf_xdp_link *link;
 	struct net_device *dev;
 	int err, fd;
@@ -9389,12 +9325,13 @@ int bpf_xdp_link_attach(const union bpf_attr *attr, struct bpf_prog *prog)
 		goto unlock;
 	}
 
-	err = dev_xdp_attach_link(dev, NULL, link);
+	err = dev_xdp_attach_link(dev, &extack, link);
 	rtnl_unlock();
 
 	if (err) {
 		link->dev = NULL;
 		bpf_link_cleanup(&link_primer);
+		trace_bpf_xdp_link_attach_failed(extack._msg);
 		goto out_put_dev;
 	}
 
@@ -10332,24 +10269,16 @@ void netdev_run_todo(void)
 void netdev_stats_to_stats64(struct rtnl_link_stats64 *stats64,
 			     const struct net_device_stats *netdev_stats)
 {
-#if BITS_PER_LONG == 64
-	BUILD_BUG_ON(sizeof(*stats64) < sizeof(*netdev_stats));
-	memcpy(stats64, netdev_stats, sizeof(*netdev_stats));
-	/* zero out counters that only exist in rtnl_link_stats64 */
-	memset((char *)stats64 + sizeof(*netdev_stats), 0,
-	       sizeof(*stats64) - sizeof(*netdev_stats));
-#else
-	size_t i, n = sizeof(*netdev_stats) / sizeof(unsigned long);
-	const unsigned long *src = (const unsigned long *)netdev_stats;
+	size_t i, n = sizeof(*netdev_stats) / sizeof(atomic_long_t);
+	const atomic_long_t *src = (atomic_long_t *)netdev_stats;
 	u64 *dst = (u64 *)stats64;
 
-	BUILD_BUG_ON(n > sizeof(*stats64) / sizeof(u64));
+	BUILD_BUG_ON(n > sizeof_rtnl_link_stats64 / sizeof(u64));
 	for (i = 0; i < n; i++)
-		dst[i] = src[i];
+		dst[i] = (unsigned long)atomic_long_read(&src[i]);
 	/* zero out counters that only exist in rtnl_link_stats64 */
 	memset((char *)stats64 + n * sizeof(u64), 0,
-	       sizeof(*stats64) - n * sizeof(u64));
-#endif
+	       sizeof_rtnl_link_stats64 - n * sizeof(u64));
 }
 EXPORT_SYMBOL(netdev_stats_to_stats64);
 
@@ -10471,7 +10400,7 @@ struct netdev_queue *dev_ingress_queue_create(struct net_device *dev)
 		return NULL;
 	netdev_init_one_queue(dev, queue, NULL);
 	RCU_INIT_POINTER(queue->qdisc, &noop_qdisc);
-	queue->qdisc_sleeping = &noop_qdisc;
+	RCU_INIT_POINTER(queue->qdisc_sleeping, &noop_qdisc);
 	rcu_assign_pointer(dev->ingress_queue, queue);
 #endif
 	return queue;
@@ -10579,6 +10508,7 @@ struct net_device *alloc_netdev_mqs(int sizeof_priv, const char *name,
 	dev_net_set(dev, &init_net);
 
 	dev->gso_max_size = GSO_LEGACY_MAX_SIZE;
+	dev->xdp_zc_max_segs = 1;
 	dev->gso_max_segs = GSO_MAX_SEGS;
 	dev->gro_max_size = GRO_LEGACY_MAX_SIZE;
 	dev->gso_ipv4_max_size = GSO_LEGACY_MAX_SIZE;

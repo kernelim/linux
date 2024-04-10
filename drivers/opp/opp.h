@@ -26,7 +26,7 @@ struct regulator;
 /* Lock to allow exclusive modification to the device and opp lists */
 extern struct mutex opp_table_lock;
 
-extern struct list_head opp_tables, lazy_opp_tables;
+extern struct list_head opp_tables;
 
 /* OPP Config flags */
 #define OPP_CONFIG_CLK			BIT(0)
@@ -78,8 +78,7 @@ struct opp_config_data {
  * @turbo:	true if turbo (boost) OPP
  * @suspend:	true if suspend OPP
  * @removed:	flag indicating that OPP's reference is dropped by OPP core.
- * @pstate: Device's power domain's performance state.
- * @rate:	Frequency in hertz
+ * @rates:	Frequencies in hertz
  * @level:	Performance level
  * @supplies:	Power supplies voltage/current values
  * @bandwidth:	Interconnect bandwidth values
@@ -101,8 +100,7 @@ struct dev_pm_opp {
 	bool turbo;
 	bool suspend;
 	bool removed;
-	unsigned int pstate;
-	unsigned long rate;
+	unsigned long *rates;
 	unsigned int level;
 
 	struct dev_pm_opp_supply *supplies;
@@ -159,7 +157,7 @@ enum opp_table_access {
  * @clock_latency_ns_max: Max clock latency in nanoseconds.
  * @parsed_static_opps: Count of devices for which OPPs are initialized from DT.
  * @shared_opp: OPP is shared between multiple devices.
- * @current_rate: Currently configured frequency.
+ * @rate_clk_single: Currently configured frequency for single clk.
  * @current_opp: Currently configured OPP for the table.
  * @suspend_opp: Pointer to OPP to be used during device suspend.
  * @genpd_virt_dev_lock: Mutex protecting the genpd virtual device pointers.
@@ -170,7 +168,11 @@ enum opp_table_access {
  * @supported_hw: Array of version number to support.
  * @supported_hw_count: Number of elements in supported_hw array.
  * @prop_name: A name to postfix to many DT properties, while parsing them.
- * @clk: Device's clock handle
+ * @config_clks: Platform specific config_clks() callback.
+ * @clks: Device's clock handles, for multiple clocks.
+ * @clk: Device's clock handle, for single clock.
+ * @clk_count: Number of clocks.
+ * @config_regulators: Platform specific config_regulators() callback.
  * @regulators: Supply regulators
  * @regulator_count: Number of power supply regulators. Its value can be -1
  * (uninitialized), 0 (no opp-microvolt property) or > 0 (has opp-microvolt
@@ -178,11 +180,8 @@ enum opp_table_access {
  * @paths: Interconnect path handles
  * @path_count: Number of interconnect paths
  * @enabled: Set to true if the device's resources are enabled/configured.
- * @genpd_performance_state: Device's power domain support performance state.
  * @is_genpd: Marks if the OPP table belongs to a genpd.
- * @set_opp: Platform specific set_opp callback
- * @sod_supplies: Set opp data supplies
- * @set_opp_data: Data to be passed to set_opp callback
+ * @set_required_opps: Helper responsible to set required OPPs.
  * @dentry:	debugfs dentry pointer of the real device directory (not links).
  * @dentry_name: Name of the real dentry.
  *
@@ -209,7 +208,7 @@ struct opp_table {
 
 	unsigned int parsed_static_opps;
 	enum opp_table_access shared_opp;
-	unsigned long current_rate;
+	unsigned long rate_clk_single;
 	struct dev_pm_opp *current_opp;
 	struct dev_pm_opp *suspend_opp;
 
@@ -221,18 +220,19 @@ struct opp_table {
 	unsigned int *supported_hw;
 	unsigned int supported_hw_count;
 	const char *prop_name;
+	config_clks_t config_clks;
+	struct clk **clks;
 	struct clk *clk;
+	int clk_count;
+	config_regulators_t config_regulators;
 	struct regulator **regulators;
 	int regulator_count;
 	struct icc_path **paths;
 	unsigned int path_count;
 	bool enabled;
-	bool genpd_performance_state;
 	bool is_genpd;
-
-	int (*set_opp)(struct dev_pm_set_opp_data *data);
-	struct dev_pm_opp_supply *sod_supplies;
-	struct dev_pm_set_opp_data *set_opp_data;
+	int (*set_required_opps)(struct device *dev,
+		struct opp_table *opp_table, struct dev_pm_opp *opp, bool scaling_down);
 
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *dentry;
@@ -249,13 +249,14 @@ struct opp_table *_find_opp_table(struct device *dev);
 struct opp_device *_add_opp_dev(const struct device *dev, struct opp_table *opp_table);
 struct dev_pm_opp *_opp_allocate(struct opp_table *opp_table);
 void _opp_free(struct dev_pm_opp *opp);
-int _opp_compare_key(struct dev_pm_opp *opp1, struct dev_pm_opp *opp2);
-int _opp_add(struct device *dev, struct dev_pm_opp *new_opp, struct opp_table *opp_table, bool rate_not_available);
-int _opp_add_v1(struct opp_table *opp_table, struct device *dev, unsigned long freq, long u_volt, bool dynamic);
+int _opp_compare_key(struct opp_table *opp_table, struct dev_pm_opp *opp1, struct dev_pm_opp *opp2);
+int _opp_add(struct device *dev, struct dev_pm_opp *new_opp, struct opp_table *opp_table);
+int _opp_add_v1(struct opp_table *opp_table, struct device *dev, struct dev_pm_opp_data *data, bool dynamic);
 void _dev_pm_opp_cpumask_remove_table(const struct cpumask *cpumask, int last_cpu);
 struct opp_table *_add_opp_table_indexed(struct device *dev, int index, bool getclk);
 void _put_opp_list_kref(struct opp_table *opp_table);
 void _required_opps_available(struct dev_pm_opp *opp, int count);
+void _update_set_required_opps(struct opp_table *opp_table);
 
 static inline bool lazy_linking_pending(struct opp_table *opp_table)
 {
@@ -266,14 +267,12 @@ static inline bool lazy_linking_pending(struct opp_table *opp_table)
 void _of_init_opp_table(struct opp_table *opp_table, struct device *dev, int index);
 void _of_clear_opp_table(struct opp_table *opp_table);
 struct opp_table *_managed_opp(struct device *dev, int index);
-void _of_opp_free_required_opps(struct opp_table *opp_table,
-				struct dev_pm_opp *opp);
+void _of_clear_opp(struct opp_table *opp_table, struct dev_pm_opp *opp);
 #else
 static inline void _of_init_opp_table(struct opp_table *opp_table, struct device *dev, int index) {}
 static inline void _of_clear_opp_table(struct opp_table *opp_table) {}
 static inline struct opp_table *_managed_opp(struct device *dev, int index) { return NULL; }
-static inline void _of_opp_free_required_opps(struct opp_table *opp_table,
-					      struct dev_pm_opp *opp) {}
+static inline void _of_clear_opp(struct opp_table *opp_table, struct dev_pm_opp *opp) {}
 #endif
 
 #ifdef CONFIG_DEBUG_FS

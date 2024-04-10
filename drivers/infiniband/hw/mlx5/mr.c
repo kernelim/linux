@@ -67,11 +67,14 @@ static void set_mkc_access_pd_addr_fields(void *mkc, int acc, u64 start_addr,
 	MLX5_SET(mkc, mkc, lw, !!(acc & IB_ACCESS_LOCAL_WRITE));
 	MLX5_SET(mkc, mkc, lr, 1);
 
-	if ((acc & IB_ACCESS_RELAXED_ORDERING) &&
-	    pcie_relaxed_ordering_enabled(dev->mdev->pdev)) {
+	if (acc & IB_ACCESS_RELAXED_ORDERING) {
 		if (MLX5_CAP_GEN(dev->mdev, relaxed_ordering_write))
 			MLX5_SET(mkc, mkc, relaxed_ordering_write, 1);
-		if (MLX5_CAP_GEN(dev->mdev, relaxed_ordering_read))
+
+		if (MLX5_CAP_GEN(dev->mdev, relaxed_ordering_read) ||
+		    (MLX5_CAP_GEN(dev->mdev,
+				  relaxed_ordering_read_pci_enabled) &&
+		     pcie_relaxed_ordering_enabled(dev->mdev->pdev)))
 			MLX5_SET(mkc, mkc, relaxed_ordering_read, 1);
 	}
 
@@ -792,7 +795,8 @@ static int get_unchangeable_access_flags(struct mlx5_ib_dev *dev,
 		ret |= IB_ACCESS_RELAXED_ORDERING;
 
 	if ((access_flags & IB_ACCESS_RELAXED_ORDERING) &&
-	    MLX5_CAP_GEN(dev->mdev, relaxed_ordering_read) &&
+	    (MLX5_CAP_GEN(dev->mdev, relaxed_ordering_read) ||
+	     MLX5_CAP_GEN(dev->mdev, relaxed_ordering_read_pci_enabled)) &&
 	    !MLX5_CAP_GEN(dev->mdev, relaxed_ordering_read_umr))
 		ret |= IB_ACCESS_RELAXED_ORDERING;
 
@@ -1021,19 +1025,28 @@ void mlx5_mkey_cache_cleanup(struct mlx5_ib_dev *dev)
 	if (!dev->cache.wq)
 		return;
 
-	cancel_delayed_work_sync(&dev->cache.remove_ent_dwork);
 	mutex_lock(&dev->cache.rb_lock);
+	cancel_delayed_work(&dev->cache.remove_ent_dwork);
 	for (node = rb_first(root); node; node = rb_next(node)) {
 		ent = rb_entry(node, struct mlx5_cache_ent, node);
 		xa_lock_irq(&ent->mkeys);
 		ent->disabled = true;
 		xa_unlock_irq(&ent->mkeys);
-		cancel_delayed_work_sync(&ent->dwork);
+		cancel_delayed_work(&ent->dwork);
 	}
+	mutex_unlock(&dev->cache.rb_lock);
+
+	/*
+	 * After all entries are disabled and will not reschedule on WQ,
+	 * flush it and all async commands.
+	 */
+	flush_workqueue(dev->cache.wq);
 
 	mlx5_mkey_cache_debugfs_cleanup(dev);
 	mlx5_cmd_cleanup_async_ctx(&dev->async_ctx);
 
+	/* At this point all entries are disabled and have no concurrent work. */
+	mutex_lock(&dev->cache.rb_lock);
 	node = rb_first(root);
 	while (node) {
 		ent = rb_entry(node, struct mlx5_cache_ent, node);
@@ -1232,7 +1245,8 @@ static struct mlx5_ib_mr *reg_create(struct ib_pd *pd, struct ib_umem *umem,
 	}
 
 	/* The pg_access bit allows setting the access flags
-	 * in the page list submitted with the command. */
+	 * in the page list submitted with the command.
+	 */
 	MLX5_SET(create_mkey_in, in, pg_access, !!(pg_cap));
 
 	mkc = MLX5_ADDR_OF(create_mkey_in, in, memory_key_mkey_entry);

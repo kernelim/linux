@@ -575,7 +575,7 @@ static void bsp_init_amd(struct cpuinfo_x86 *c)
 		va_align.flags    = ALIGN_VA_32 | ALIGN_VA_64;
 
 		/* A random value per boot for bit slice [12:upper_bit) */
-		va_align.bits = get_random_int() & va_align.mask;
+		va_align.bits = get_random_u32() & va_align.mask;
 	}
 
 	if (cpu_has(c, X86_FEATURE_MWAITX))
@@ -628,6 +628,8 @@ static void early_detect_mem_encrypt(struct cpuinfo_x86 *c)
 	 *	      the SME physical address space reduction value.
 	 *	      If BIOS has not enabled SME then don't advertise the
 	 *	      SME feature (set in scattered.c).
+	 *	      If the kernel has not enabled SME via any means then
+	 *	      don't advertise the SME feature.
 	 *   For SEV: If BIOS has not enabled SEV then don't advertise the
 	 *            SEV and SEV_ES feature (set in scattered.c).
 	 *
@@ -649,6 +651,9 @@ static void early_detect_mem_encrypt(struct cpuinfo_x86 *c)
 
 		if (IS_ENABLED(CONFIG_X86_32))
 			goto clear_all;
+
+		if (!sme_me_mask)
+			setup_clear_cpu_cap(X86_FEATURE_SME);
 
 		rdmsrl(MSR_K7_HWCR, msr);
 		if (!(msr & MSR_K7_HWCR_SMMLOCK))
@@ -1026,6 +1031,8 @@ static void zenbleed_check(struct cpuinfo_x86 *c)
 
 static void init_amd(struct cpuinfo_x86 *c)
 {
+	u64 vm_cr;
+
 	early_init_amd(c);
 
 	/*
@@ -1073,6 +1080,14 @@ static void init_amd(struct cpuinfo_x86 *c)
 
 	init_amd_cacheinfo(c);
 
+	if (cpu_has(c, X86_FEATURE_SVM)) {
+		rdmsrl(MSR_VM_CR, vm_cr);
+		if (vm_cr & SVM_VM_CR_SVM_DIS_MASK) {
+			pr_notice_once("SVM disabled (by BIOS) in MSR_VM_CR\n");
+			clear_cpu_cap(c, X86_FEATURE_SVM);
+		}
+	}
+
 	if (!cpu_has(c, X86_FEATURE_LFENCE_RDTSC) && cpu_has(c, X86_FEATURE_XMM2)) {
 		/*
 		 * Use LFENCE for execution serialization.  On families which
@@ -1100,7 +1115,7 @@ static void init_amd(struct cpuinfo_x86 *c)
 			set_cpu_cap(c, X86_FEATURE_3DNOWPREFETCH);
 
 	/* AMD CPUs don't reset SS attributes on SYSRET, Xen does. */
-	if (!cpu_has(c, X86_FEATURE_XENPV))
+	if (!cpu_feature_enabled(X86_FEATURE_XENPV))
 		set_cpu_bug(c, X86_BUG_SYSRET_SS_ATTRS);
 
 	/*

@@ -1108,8 +1108,10 @@ hfsc_delete_class(struct Qdisc *sch, unsigned long arg,
 	struct hfsc_sched *q = qdisc_priv(sch);
 	struct hfsc_class *cl = (struct hfsc_class *)arg;
 
-	if (cl->level > 0 || cl->filter_cnt > 0 || cl == &q->root)
+	if (cl->level > 0 || cl->filter_cnt > 0 || cl == &q->root) {
+		NL_SET_ERR_MSG(extack, "HFSC class in use");
 		return -EBUSY;
+	}
 
 	sch_tree_lock(sch);
 

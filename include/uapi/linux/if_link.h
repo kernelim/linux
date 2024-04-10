@@ -37,6 +37,20 @@ struct rtnl_link_stats {
 	__u32	tx_compressed;
 
 	__u32	rx_nohandler;
+
+#ifdef __KERNEL__
+#ifndef __GENKSYMS__
+	/*
+	 * RHEL: when used, reserved fields must be moved before __KERNEL__
+	 * and must be under a #ifndef __GENKSYMS__ conditional
+	 */
+	char __rh_tail[0];
+	__u32	__rh_reserved_1;
+	__u32	__rh_reserved_2;
+	__u32	__rh_reserved_3;
+	__u32	__rh_reserved_4;
+#endif
+#endif
 };
 
 /**
@@ -243,6 +257,16 @@ struct rtnl_link_stats64 {
 	__u64	rx_compressed;
 	__u64	tx_compressed;
 	__u64	rx_nohandler;
+
+#ifdef __KERNEL__
+#ifndef __GENKSYMS__
+	char __rh_tail[0];
+	__u64	__rh_reserved_1;
+	__u64	__rh_reserved_2;
+	__u64	__rh_reserved_3;
+	__u64	__rh_reserved_4;
+#endif
+#endif
 };
 
 /* Subset of link stats useful for in-HW collection. Meaning of the fields is as
@@ -259,6 +283,11 @@ struct rtnl_hw_stats64 {
 	__u64	tx_dropped;
 	__u64	multicast;
 };
+
+#ifdef __KERNEL__
+#define sizeof_rtnl_link_stats offsetof(struct rtnl_link_stats, __rh_tail)
+#define sizeof_rtnl_link_stats64 offsetof(struct rtnl_link_stats64, __rh_tail)
+#endif
 
 /* The struct should be in sync with struct ifmap */
 struct rtnl_link_ifmap {
@@ -563,6 +592,7 @@ enum {
 	IFLA_BRPORT_MAB,
 	IFLA_BRPORT_MCAST_N_GROUPS,
 	IFLA_BRPORT_MCAST_MAX_GROUPS,
+	IFLA_BRPORT_NEIGH_VLAN_SUPPRESS,
 	__IFLA_BRPORT_MAX
 };
 #define IFLA_BRPORT_MAX (__IFLA_BRPORT_MAX - 1)

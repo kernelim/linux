@@ -23,7 +23,7 @@ menuconfig SWAP
 	  in your computer.  If unsure say Y.
 
 config ZSWAP
-	bool "Compressed cache for swap pages (EXPERIMENTAL)"
+	bool "Compressed cache for swap pages"
 	depends on SWAP
 	select FRONTSWAP
 	select CRYPTO
@@ -35,12 +35,6 @@ config ZSWAP
 	  This can result in a significant I/O reduction on swap device and,
 	  in the case where decompressing from RAM is faster than swap device
 	  reads, can also improve workload performance.
-
-	  This is marked experimental because it is a new feature (as of
-	  v3.11) that interacts heavily with memory reclaim.  While these
-	  interactions don't cause any known issues on simple memory setups,
-	  they have not be fully explored on the large set of potential
-	  configurations and workloads that exist.
 
 config ZSWAP_DEFAULT_ON
 	bool "Enable the compressed cache for swap pages by default"
@@ -307,9 +301,9 @@ config SHUFFLE_PAGE_ALLOCATOR
 	  the presence of a memory-side-cache. There are also incidental
 	  security benefits as it reduces the predictability of page
 	  allocations to compliment SLAB_FREELIST_RANDOM, but the
-	  default granularity of shuffling on the "MAX_ORDER - 1" i.e,
-	  10th order of pages is selected based on cache utilization
-	  benefits on x86.
+	  default granularity of shuffling on the MAX_ORDER i.e, 10th
+	  order of pages is selected based on cache utilization benefits
+	  on x86.
 
 	  While the randomization improves cache utilization it may
 	  negatively impact workloads on platforms without a cache. For
@@ -633,8 +627,8 @@ config HUGETLB_PAGE_SIZE_VARIABLE
 	  HUGETLB_PAGE_ORDER when there are multiple HugeTLB page sizes available
 	  on a platform.
 
-	  Note that the pageblock_order cannot exceed MAX_ORDER - 1 and will be
-	  clamped down to MAX_ORDER - 1.
+	  Note that the pageblock_order cannot exceed MAX_ORDER and will be
+	  clamped down to MAX_ORDER.
 
 config CONTIG_ALLOC
 	def_bool (MEMORY_ISOLATION && COMPACTION) || CMA
@@ -653,7 +647,6 @@ config BOUNCE
 
 config MMU_NOTIFIER
 	bool
-	select SRCU
 	select INTERVAL_TREE
 
 config KSM
@@ -787,7 +780,7 @@ endchoice
 
 config THP_SWAP
 	def_bool y
-	depends on TRANSPARENT_HUGEPAGE && ARCH_WANTS_THP_SWAP && SWAP
+	depends on TRANSPARENT_HUGEPAGE && ARCH_WANTS_THP_SWAP && SWAP && 64BIT
 	help
 	  Swap transparent huge pages in one piece, without splitting.
 	  XXX: For now, swap cluster backing transparent huge page
@@ -1062,7 +1055,7 @@ config GUP_TEST
 	  pin_user_pages*(), or pinned via get_user_pages*(), as specified
 	  by other command line arguments.
 
-	  See tools/testing/selftests/vm/gup_test.c
+	  See tools/testing/selftests/mm/gup_test.c
 
 comment "GUP_TEST needs to have DEBUG_FS enabled"
 	depends on !GUP_TEST && !DEBUG_FS
@@ -1146,6 +1139,32 @@ config PTE_MARKER_UFFD_WP
 	  Allows to create marker PTEs for userfaultfd write protection
 	  purposes.  It is required to enable userfaultfd write protection on
 	  file-backed memory types like shmem and hugetlbfs.
+
+# multi-gen LRU {
+config LRU_GEN
+	bool "Multi-Gen LRU"
+	depends on MMU
+	# make sure folio->flags has enough spare bits
+	depends on 64BIT || !SPARSEMEM || SPARSEMEM_VMEMMAP
+	help
+	  A high performance LRU implementation to overcommit memory. See
+	  Documentation/admin-guide/mm/multigen_lru.rst for details.
+
+config LRU_GEN_ENABLED
+	bool "Enable by default"
+	depends on LRU_GEN
+	help
+	  This option enables the multi-gen LRU by default.
+
+config LRU_GEN_STATS
+	bool "Full stats for debugging"
+	depends on LRU_GEN
+	help
+	  Do not enable this option unless you plan to look at historical stats
+	  from evicted generations for debugging purpose.
+
+	  This option has a per-memcg and per-node memory overhead.
+# }
 
 source "mm/damon/Kconfig"
 

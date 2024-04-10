@@ -230,9 +230,7 @@ static long linehandle_set_config(struct linehandle_state *lh,
 				return ret;
 		}
 
-		blocking_notifier_call_chain(&desc->gdev->notifier,
-					     GPIO_V2_LINE_CHANGED_CONFIG,
-					     desc);
+		gpiod_line_state_notify(desc, GPIO_V2_LINE_CHANGED_CONFIG);
 	}
 	return 0;
 }
@@ -414,8 +412,7 @@ static int linehandle_create(struct gpio_device *gdev, void __user *ip)
 				goto out_free_lh;
 		}
 
-		blocking_notifier_call_chain(&desc->gdev->notifier,
-					     GPIO_V2_LINE_CHANGED_REQUESTED, desc);
+		gpiod_line_state_notify(desc, GPIO_V2_LINE_CHANGED_REQUESTED);
 
 		dev_dbg(&gdev->dev, "registered chardev handle for line %d\n",
 			offset);
@@ -1407,9 +1404,7 @@ static long linereq_set_config_unlocked(struct linereq *lr,
 
 		WRITE_ONCE(line->edflags, edflags);
 
-		blocking_notifier_call_chain(&desc->gdev->notifier,
-					     GPIO_V2_LINE_CHANGED_CONFIG,
-					     desc);
+		gpiod_line_state_notify(desc, GPIO_V2_LINE_CHANGED_CONFIG);
 	}
 	return 0;
 }
@@ -1720,8 +1715,7 @@ static int linereq_create(struct gpio_device *gdev, void __user *ip)
 
 		lr->lines[i].edflags = edflags;
 
-		blocking_notifier_call_chain(&desc->gdev->notifier,
-					     GPIO_V2_LINE_CHANGED_REQUESTED, desc);
+		gpiod_line_state_notify(desc, GPIO_V2_LINE_CHANGED_REQUESTED);
 
 		dev_dbg(&gdev->dev, "registered chardev handle for line %d\n",
 			offset);
@@ -2117,8 +2111,7 @@ static int lineevent_create(struct gpio_device *gdev, void __user *ip)
 	if (ret)
 		goto out_free_le;
 
-	blocking_notifier_call_chain(&desc->gdev->notifier,
-				     GPIO_V2_LINE_CHANGED_REQUESTED, desc);
+	gpiod_line_state_notify(desc, GPIO_V2_LINE_CHANGED_REQUESTED);
 
 	irq = gpiod_to_irq(desc);
 	if (irq <= 0) {
@@ -2671,7 +2664,7 @@ static int gpio_chrdev_open(struct inode *inode, struct file *file)
 	cdev->gdev = gpio_device_get(gdev);
 
 	cdev->lineinfo_changed_nb.notifier_call = lineinfo_changed_notify;
-	ret = blocking_notifier_chain_register(&gdev->notifier,
+	ret = blocking_notifier_chain_register(&gdev->line_state_notifier,
 					       &cdev->lineinfo_changed_nb);
 	if (ret)
 		goto out_free_bitmap;
@@ -2687,7 +2680,7 @@ static int gpio_chrdev_open(struct inode *inode, struct file *file)
 	return ret;
 
 out_unregister_notifier:
-	blocking_notifier_chain_unregister(&gdev->notifier,
+	blocking_notifier_chain_unregister(&gdev->line_state_notifier,
 					   &cdev->lineinfo_changed_nb);
 out_free_bitmap:
 	gpio_device_put(gdev);
@@ -2711,7 +2704,7 @@ static int gpio_chrdev_release(struct inode *inode, struct file *file)
 	struct gpio_device *gdev = cdev->gdev;
 
 	bitmap_free(cdev->watched_lines);
-	blocking_notifier_chain_unregister(&gdev->notifier,
+	blocking_notifier_chain_unregister(&gdev->line_state_notifier,
 					   &cdev->lineinfo_changed_nb);
 	gpio_device_put(gdev);
 	kfree(cdev);
@@ -2753,4 +2746,5 @@ int gpiolib_cdev_register(struct gpio_device *gdev, dev_t devt)
 void gpiolib_cdev_unregister(struct gpio_device *gdev)
 {
 	cdev_device_del(&gdev->chrdev, &gdev->dev);
+	blocking_notifier_call_chain(&gdev->device_notifier, 0, NULL);
 }

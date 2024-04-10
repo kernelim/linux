@@ -87,7 +87,7 @@ static struct gfs2_sbd *init_sbd(struct super_block *sb)
 	set_bit(SDF_NOJOURNALID, &sdp->sd_flags);
 	gfs2_tune_init(&sdp->sd_tune);
 
-	init_waitqueue_head(&sdp->sd_glock_wait);
+	init_waitqueue_head(&sdp->sd_kill_wait);
 	init_waitqueue_head(&sdp->sd_async_glock_wait);
 	atomic_set(&sdp->sd_glock_disposal, 0);
 	init_completion(&sdp->sd_locking_init);
@@ -253,7 +253,7 @@ static int gfs2_read_super(struct gfs2_sbd *sdp, sector_t sector, int silent)
 
 	bio = bio_alloc(sb->s_bdev, 1, REQ_OP_READ | REQ_META, GFP_NOFS);
 	bio->bi_iter.bi_sector = sector * (sb->s_blocksize >> 9);
-	bio_add_page(bio, page, PAGE_SIZE, 0);
+	__bio_add_page(bio, page, PAGE_SIZE, 0);
 
 	bio->bi_end_io = end_bio_io_page;
 	bio->bi_private = page;
@@ -1264,10 +1264,8 @@ static int gfs2_fill_super(struct super_block *sb, struct fs_context *fc)
 
 	if (!sb_rdonly(sb)) {
 		error = init_threads(sdp);
-		if (error) {
-			gfs2_withdraw_delayed(sdp);
+		if (error)
 			goto fail_per_node;
-		}
 	}
 
 	error = gfs2_freeze_lock_shared(sdp);
@@ -1384,6 +1382,7 @@ static const struct constant_table gfs2_param_quota[] = {
 	{"off",        GFS2_QUOTA_OFF},
 	{"account",    GFS2_QUOTA_ACCOUNT},
 	{"on",         GFS2_QUOTA_ON},
+	{"quiet",      GFS2_QUOTA_QUIET},
 	{}
 };
 

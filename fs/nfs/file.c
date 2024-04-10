@@ -178,7 +178,7 @@ nfs_file_read(struct kiocb *iocb, struct iov_iter *to)
 EXPORT_SYMBOL_GPL(nfs_file_read);
 
 int
-nfs_file_mmap(struct file * file, struct vm_area_struct * vma)
+nfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct inode *inode = file_inode(file);
 	int	status;
@@ -544,7 +544,6 @@ const struct address_space_operations nfs_file_aops = {
 	.read_folio = nfs_read_folio,
 	.readahead = nfs_readahead,
 	.dirty_folio = filemap_dirty_folio,
-	.writepage = nfs_writepage,
 	.writepages = nfs_writepages,
 	.write_begin = nfs_write_begin,
 	.write_end = nfs_write_end,

@@ -24,6 +24,8 @@
 #include <linux/mm.h>
 #include <linux/sockptr.h>
 
+#include <linux/rh_kabi.h>
+
 #include <uapi/linux/net.h>
 
 struct poll_table_struct;
@@ -101,6 +103,11 @@ struct socket_wq {
 	struct fasync_struct	*fasync_list;
 	unsigned long		flags; /* %SOCKWQ_ASYNC_NOSPACE, etc */
 	struct rcu_head		rcu;
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 } ____cacheline_aligned_in_smp;
 
 /**
@@ -206,6 +213,15 @@ struct proto_ops {
 	int		(*sendmsg_locked)(struct sock *sk, struct msghdr *msg,
 					  size_t size);
 	int		(*set_rcvlowat)(struct sock *sk, int val);
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
+	RH_KABI_RESERVE(5)
+	RH_KABI_RESERVE(6)
+	RH_KABI_RESERVE(7)
+	RH_KABI_RESERVE(8)
 };
 
 #define DECLARE_SOCKADDR(type, dst, src)	\

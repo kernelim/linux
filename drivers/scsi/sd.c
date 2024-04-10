@@ -103,19 +103,7 @@ static void sd_config_discard(struct scsi_disk *, unsigned int);
 static void sd_config_write_same(struct scsi_disk *);
 static int  sd_revalidate_disk(struct gendisk *);
 static void sd_unlock_native_capacity(struct gendisk *disk);
-static int  sd_probe(struct device *);
-static int  sd_remove(struct device *);
 static void sd_shutdown(struct device *);
-static int sd_suspend_system(struct device *);
-static int sd_suspend_runtime(struct device *);
-static int sd_resume_system(struct device *);
-static int sd_resume_runtime(struct device *);
-static void sd_rescan(struct device *);
-static blk_status_t sd_init_command(struct scsi_cmnd *SCpnt);
-static void sd_uninit_command(struct scsi_cmnd *SCpnt);
-static int sd_done(struct scsi_cmnd *);
-static void sd_eh_reset(struct scsi_cmnd *);
-static int sd_eh_action(struct scsi_cmnd *, int);
 static void sd_read_capacity(struct scsi_disk *sdkp, unsigned char *buffer);
 static void scsi_disk_release(struct device *cdev);
 
@@ -595,36 +583,8 @@ ATTRIBUTE_GROUPS(sd_disk);
 
 static struct class sd_disk_class = {
 	.name		= "scsi_disk",
-	.owner		= THIS_MODULE,
 	.dev_release	= scsi_disk_release,
 	.dev_groups	= sd_disk_groups,
-};
-
-static const struct dev_pm_ops sd_pm_ops = {
-	.suspend		= sd_suspend_system,
-	.resume			= sd_resume_system,
-	.poweroff		= sd_suspend_system,
-	.restore		= sd_resume_system,
-	.runtime_suspend	= sd_suspend_runtime,
-	.runtime_resume		= sd_resume_runtime,
-};
-
-static struct scsi_driver sd_template = {
-	.gendrv = {
-		.name		= "sd",
-		.owner		= THIS_MODULE,
-		.probe		= sd_probe,
-		.probe_type	= PROBE_PREFER_ASYNCHRONOUS,
-		.remove		= sd_remove,
-		.shutdown	= sd_shutdown,
-		.pm		= &sd_pm_ops,
-	},
-	.rescan			= sd_rescan,
-	.init_command		= sd_init_command,
-	.uninit_command		= sd_uninit_command,
-	.done			= sd_done,
-	.eh_action		= sd_eh_action,
-	.eh_reset		= sd_eh_reset,
 };
 
 /*
@@ -1303,11 +1263,10 @@ static void sd_uninit_command(struct scsi_cmnd *SCpnt)
 	}
 }
 
-static bool sd_need_revalidate(struct block_device *bdev,
-		struct scsi_disk *sdkp)
+static bool sd_need_revalidate(struct gendisk *disk, struct scsi_disk *sdkp)
 {
 	if (sdkp->device->removable || sdkp->write_prot) {
-		if (bdev_check_media_change(bdev))
+		if (disk_check_media_change(disk))
 			return true;
 	}
 
@@ -1316,13 +1275,13 @@ static bool sd_need_revalidate(struct block_device *bdev,
 	 * nothing to do with partitions, BLKRRPART is used to force a full
 	 * revalidate after things like a format for historical reasons.
 	 */
-	return test_bit(GD_NEED_PART_SCAN, &bdev->bd_disk->state);
+	return test_bit(GD_NEED_PART_SCAN, &disk->state);
 }
 
 /**
  *	sd_open - open a scsi disk device
- *	@bdev: Block device of the scsi disk to open
- *	@mode: FMODE_* mask
+ *	@disk: disk to open
+ *	@mode: open mode
  *
  *	Returns 0 if successful. Returns a negated errno value in case 
  *	of error.
@@ -1332,11 +1291,11 @@ static bool sd_need_revalidate(struct block_device *bdev,
  *	In the latter case @inode and @filp carry an abridged amount
  *	of information as noted above.
  *
- *	Locking: called with bdev->bd_disk->open_mutex held.
+ *	Locking: called with disk->open_mutex held.
  **/
-static int sd_open(struct block_device *bdev, fmode_t mode)
+static int sd_open(struct gendisk *disk, blk_mode_t mode)
 {
-	struct scsi_disk *sdkp = scsi_disk(bdev->bd_disk);
+	struct scsi_disk *sdkp = scsi_disk(disk);
 	struct scsi_device *sdev = sdkp->device;
 	int retval;
 
@@ -1353,14 +1312,15 @@ static int sd_open(struct block_device *bdev, fmode_t mode)
 	if (!scsi_block_when_processing_errors(sdev))
 		goto error_out;
 
-	if (sd_need_revalidate(bdev, sdkp))
-		sd_revalidate_disk(bdev->bd_disk);
+	if (sd_need_revalidate(disk, sdkp))
+		sd_revalidate_disk(disk);
 
 	/*
 	 * If the drive is empty, just let the open fail.
 	 */
 	retval = -ENOMEDIUM;
-	if (sdev->removable && !sdkp->media_present && !(mode & FMODE_NDELAY))
+	if (sdev->removable && !sdkp->media_present &&
+	    !(mode & BLK_OPEN_NDELAY))
 		goto error_out;
 
 	/*
@@ -1368,7 +1328,7 @@ static int sd_open(struct block_device *bdev, fmode_t mode)
 	 * if the user expects to be able to write to the thing.
 	 */
 	retval = -EROFS;
-	if (sdkp->write_prot && (mode & FMODE_WRITE))
+	if (sdkp->write_prot && (mode & BLK_OPEN_WRITE))
 		goto error_out;
 
 	/*
@@ -1397,16 +1357,15 @@ error_out:
  *	sd_release - invoked when the (last) close(2) is called on this
  *	scsi disk.
  *	@disk: disk to release
- *	@mode: FMODE_* mask
  *
  *	Returns 0. 
  *
  *	Note: may block (uninterruptible) if error recovery is underway
  *	on this disk.
  *
- *	Locking: called with bdev->bd_disk->open_mutex held.
+ *	Locking: called with disk->open_mutex held.
  **/
-static void sd_release(struct gendisk *disk, fmode_t mode)
+static void sd_release(struct gendisk *disk)
 {
 	struct scsi_disk *sdkp = scsi_disk(disk);
 	struct scsi_device *sdev = sdkp->device;
@@ -1449,7 +1408,7 @@ static int sd_getgeo(struct block_device *bdev, struct hd_geometry *geo)
 /**
  *	sd_ioctl - process an ioctl
  *	@bdev: target block device
- *	@mode: FMODE_* mask
+ *	@mode: open mode
  *	@cmd: ioctl command number
  *	@arg: this is third argument given to ioctl(2) system call.
  *	Often contains a pointer.
@@ -1460,7 +1419,7 @@ static int sd_getgeo(struct block_device *bdev, struct hd_geometry *geo)
  *	Note: most ioctls are forward onto the block subsystem or further
  *	down in the scsi subsystem.
  **/
-static int sd_ioctl(struct block_device *bdev, fmode_t mode,
+static int sd_ioctl(struct block_device *bdev, blk_mode_t mode,
 		    unsigned int cmd, unsigned long arg)
 {
 	struct gendisk *disk = bdev->bd_disk;
@@ -1482,13 +1441,13 @@ static int sd_ioctl(struct block_device *bdev, fmode_t mode,
 	 * access to the device is prohibited.
 	 */
 	error = scsi_ioctl_block_when_processing_errors(sdp, cmd,
-			(mode & FMODE_NDELAY) != 0);
+			(mode & BLK_OPEN_NDELAY));
 	if (error)
 		return error;
 
 	if (is_sed_ioctl(cmd))
 		return sed_ioctl(sdkp->opal_dev, cmd, p);
-	return scsi_ioctl(sdp, mode, cmd, p);
+	return scsi_ioctl(sdp, mode & BLK_OPEN_WRITE, cmd, p);
 }
 
 static void set_media_not_present(struct scsi_disk *sdkp)
@@ -2240,23 +2199,20 @@ static void sd_config_protection(struct scsi_disk *sdkp)
 {
 	struct scsi_device *sdp = sdkp->device;
 
-	if (!sdkp->first_scan)
-		return;
-
 	sd_dif_config_host(sdkp);
 
 	if (!sdkp->protection_type)
 		return;
 
 	if (!scsi_host_dif_capable(sdp->host, sdkp->protection_type)) {
-		sd_printk(KERN_NOTICE, sdkp,
-			  "Disabling DIF Type %u protection\n",
-			  sdkp->protection_type);
+		sd_first_printk(KERN_NOTICE, sdkp,
+				"Disabling DIF Type %u protection\n",
+				sdkp->protection_type);
 		sdkp->protection_type = 0;
 	}
 
-	sd_printk(KERN_NOTICE, sdkp, "Enabling DIF Type %u protection\n",
-		  sdkp->protection_type);
+	sd_first_printk(KERN_NOTICE, sdkp, "Enabling DIF Type %u protection\n",
+			sdkp->protection_type);
 }
 
 static void read_capacity_error(struct scsi_disk *sdkp, struct scsi_device *sdp,
@@ -3829,6 +3785,33 @@ static int sd_resume_runtime(struct device *dev)
 
 	return sd_resume(dev);
 }
+
+static const struct dev_pm_ops sd_pm_ops = {
+	.suspend		= sd_suspend_system,
+	.resume			= sd_resume_system,
+	.poweroff		= sd_suspend_system,
+	.restore		= sd_resume_system,
+	.runtime_suspend	= sd_suspend_runtime,
+	.runtime_resume		= sd_resume_runtime,
+};
+
+static struct scsi_driver sd_template = {
+	.gendrv = {
+		.name		= "sd",
+		.owner		= THIS_MODULE,
+		.probe		= sd_probe,
+		.probe_type	= PROBE_PREFER_ASYNCHRONOUS,
+		.remove		= sd_remove,
+		.shutdown	= sd_shutdown,
+		.pm		= &sd_pm_ops,
+	},
+	.rescan			= sd_rescan,
+	.init_command		= sd_init_command,
+	.uninit_command		= sd_uninit_command,
+	.done			= sd_done,
+	.eh_action		= sd_eh_action,
+	.eh_reset		= sd_eh_reset,
+};
 
 /**
  *	init_sd - entry point for this driver (both when built in or when

@@ -4,7 +4,7 @@
  */
 
 #include "i915_drv.h"
-
+#include "intel_gt.h"
 #include "intel_gt_mcr.h"
 #include "intel_gt_print.h"
 #include "intel_gt_regs.h"
@@ -35,7 +35,7 @@
  * ignored.
  */
 
-#define HAS_MSLICE_STEERING(dev_priv)	(INTEL_INFO(dev_priv)->has_mslice_steering)
+#define HAS_MSLICE_STEERING(i915)	(INTEL_INFO(i915)->has_mslice_steering)
 
 static const char * const intel_steering_types[] = {
 	"L3BANK",
@@ -166,8 +166,8 @@ void intel_gt_mcr_init(struct intel_gt *gt)
 		gt->steering_table[OADDRM] = xelpmp_oaddrm_steering_table;
 	} else if (GRAPHICS_VER_FULL(i915) >= IP_VER(12, 70)) {
 		/* Wa_14016747170 */
-		if (IS_MTL_GRAPHICS_STEP(i915, M, STEP_A0, STEP_B0) ||
-		    IS_MTL_GRAPHICS_STEP(i915, P, STEP_A0, STEP_B0))
+		if (IS_GFX_GT_IP_STEP(gt, IP_VER(12, 70), STEP_A0, STEP_B0) ||
+		    IS_GFX_GT_IP_STEP(gt, IP_VER(12, 71), STEP_A0, STEP_B0))
 			fuse = REG_FIELD_GET(MTL_GT_L3_EXC_MASK,
 					     intel_uncore_read(gt->uncore,
 							       MTL_GT_ACTIVITY_FACTOR));
@@ -364,6 +364,7 @@ static u32 rw_with_mcr_steering(struct intel_gt *gt,
  *          function call.
  */
 void intel_gt_mcr_lock(struct intel_gt *gt, unsigned long *flags)
+	__acquires(&gt->mcr_lock)
 {
 	unsigned long __flags;
 	int err = 0;
@@ -375,9 +376,26 @@ void intel_gt_mcr_lock(struct intel_gt *gt, unsigned long *flags)
 	 * driver threads, but also with hardware/firmware agents.  A dedicated
 	 * locking register is used.
 	 */
-	if (GRAPHICS_VER_FULL(gt->i915) >= IP_VER(12, 70))
+	if (GRAPHICS_VER_FULL(gt->i915) >= IP_VER(12, 70)) {
+		/*
+		 * The steering control and semaphore registers are inside an
+		 * "always on" power domain with respect to RC6.  However there
+		 * are some issues if higher-level platform sleep states are
+		 * entering/exiting at the same time these registers are
+		 * accessed.  Grabbing GT forcewake and holding it over the
+		 * entire lock/steer/unlock cycle ensures that those sleep
+		 * states have been fully exited before we access these
+		 * registers.  This wakeref will be released in the unlock
+		 * routine.
+		 *
+		 * This is expected to become a formally documented/numbered
+		 * workaround soon.
+		 */
+		intel_uncore_forcewake_get(gt->uncore, FORCEWAKE_GT);
+
 		err = wait_for(intel_uncore_read_fw(gt->uncore,
 						    MTL_STEER_SEMAPHORE) == 0x1, 100);
+	}
 
 	/*
 	 * Even on platforms with a hardware lock, we'll continue to grab
@@ -410,11 +428,15 @@ void intel_gt_mcr_lock(struct intel_gt *gt, unsigned long *flags)
  * Context: Releases gt->mcr_lock
  */
 void intel_gt_mcr_unlock(struct intel_gt *gt, unsigned long flags)
+	__releases(&gt->mcr_lock)
 {
 	spin_unlock_irqrestore(&gt->mcr_lock, flags);
 
-	if (GRAPHICS_VER_FULL(gt->i915) >= IP_VER(12, 70))
+	if (GRAPHICS_VER_FULL(gt->i915) >= IP_VER(12, 70)) {
 		intel_uncore_write_fw(gt->uncore, MTL_STEER_SEMAPHORE, 0x1);
+
+		intel_uncore_forcewake_put(gt->uncore, FORCEWAKE_GT);
+	}
 }
 
 /**

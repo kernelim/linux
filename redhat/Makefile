@@ -24,7 +24,7 @@ SPECRELEASED_KERNEL=$(RELEASED_KERNEL)
 SPECINCLUDE_FEDORA_FILES=$(INCLUDE_FEDORA_FILES)
 SPECINCLUDE_RHEL_FILES=$(INCLUDE_RHEL_FILES)
 
-ifneq (,$(findstring n,$(MAKEFLAGS)))
+ifneq (,$(findstring n,$(firstword -$(MAKEFLAGS))))
   # Do not set RHTEST on the command line. Use the make command built-in options
   # -n, --just-print, --dry-run, --recon on the command line.
   RHTEST=1
@@ -628,6 +628,7 @@ sources-rh: $(TARBALL) generate-testpatch-tmp setup-source dist-configs-check
 		rpminspect.yaml > $(SOURCES)/rpminspect.yaml
 	@cp cpupower.* \
 		keys/rhel*.x509 \
+		keys/nvidia*.x509 \
 		kabi/check-kabi \
 		configs/$(PACKAGE_NAME)-*.config \
 		configs/partial*.config \
@@ -648,8 +649,6 @@ sources-rh: $(TARBALL) generate-testpatch-tmp setup-source dist-configs-check
 		README.rst \
 		kernel-local \
 		dracut-virt.conf \
-		uki-sb-cert-x86_64-centos.crt \
-		uki-sb-cert-x86_64-rhel.crt \
 		$(SOURCES)/
 	@for KABIARCH in $(ARCH_LIST); do \
 		cp kabi/Module.kabi_$$KABIARCH $(SOURCES)/; \
@@ -688,7 +687,7 @@ dist-kernel-%: dist-sources
 dist-prep: RPMBUILDOPTS=--nodeps --target noarch -bp
 dist-prep: dist-sources do-rpmbuild
 
-dist-perf: RPMBUILDOPTS=--without up --without smp --without zfcpdump --without debug --without doc --without headers --without  --without doc --without debuginfo --target $(MACH) -bb
+dist-perf: RPMBUILDOPTS=--without up --without smp --without zfcpdump --without debug --without doc --without headers --without doc --without debuginfo --target $(MACH) -bb
 dist-perf: dist-sources do-rpmbuild
 
 dist-rpm-baseonly: RPMBUILDOPTS=--target $(MACH) --without debug --without debuginfo --without vdso_install --without bpftool --without perf --without tools -bb
@@ -801,13 +800,20 @@ dist-dump-variables:
 
 dist-self-test:
 	@if test -x /usr/bin/bats; then \
-		bats $(REDHAT)/self-test/*.bats ; \
+		RHEL_MAJOR=$(RHEL_MAJOR) RHEL_MINOR=$(RHEL_MINOR) bats $(REDHAT)/self-test/*.bats ; \
 	else \
 		echo "dist-self-test: The bats package is not installed" ; \
 	fi
 
 dist-self-test-data:
 	./self-test/data/create-data.sh
+
+dist-check-licenses:
+	@if test -x /usr/bin/bats; then \
+		bats $(REDHAT)/self-test/1007-spdx-licenses.bats ; \
+	else \
+		echo "dist-check-licenses: The bats package is not installed" ; \
+	fi
 
 dist-help:
 	@echo  'Cleaning targets:'
@@ -931,6 +937,9 @@ dist-full-help:
 	@echo  '  dist-os-version - Displays the current Red Hat Enterprise Linux versioni'
 	@echo  '                    target used by the current branch/tree.'
 	@echo  '  dist-self-test  - Runs self-tests from the redhat/self-test directory'
+	@echo  '  dist-check-licenses - Runs license selftest checking SPDX-License-Identifier:'
+	@echo  '                        tags in all source files against `License:` field in the'
+	@echo  '                        specfile template.'
 	@echo  ''
 
 export

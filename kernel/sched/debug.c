@@ -427,6 +427,7 @@ static void register_sd(struct sched_domain *sd, struct dentry *parent)
 #undef SDM
 
 	debugfs_create_file("flags", 0444, parent, &sd->flags, &sd_flags_fops);
+	debugfs_create_file("groups_flags", 0444, parent, &sd->groups->flags, &sd_flags_fops);
 }
 
 void update_sched_domain_debugfs(void)
@@ -777,7 +778,7 @@ static void print_cpu(struct seq_file *m, int cpu)
 #define P(x)								\
 do {									\
 	if (sizeof(rq->x) == 4)						\
-		SEQ_printf(m, "  .%-30s: %ld\n", #x, (long)(rq->x));	\
+		SEQ_printf(m, "  .%-30s: %d\n", #x, (int)(rq->x));	\
 	else								\
 		SEQ_printf(m, "  .%-30s: %Ld\n", #x, (long long)(rq->x));\
 } while (0)

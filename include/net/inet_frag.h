@@ -4,6 +4,9 @@
 
 #include <linux/rhashtable-types.h>
 #include <linux/completion.h>
+#include <linux/in6.h>
+#include <linux/rbtree_types.h>
+#include <linux/refcount.h>
 #include <net/dropreason-core.h>
 
 /* Per netns frag queues directory */

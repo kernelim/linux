@@ -20,7 +20,6 @@
 #include <linux/pci.h>
 #include <linux/workqueue.h>
 #include <linux/wait.h>
-#include <linux/aer.h>
 #include <linux/interrupt.h>
 #include <linux/ethtool.h>
 #include <linux/timer.h>
@@ -33,6 +32,7 @@
 #include <linux/pkt_sched.h>
 #include <linux/if_bridge.h>
 #include <linux/ctype.h>
+#include <linux/linkmode.h>
 #include <linux/bpf.h>
 #include <linux/btf.h>
 #include <linux/auxiliary_bus.h>
@@ -75,6 +75,7 @@
 #include "ice_lag.h"
 #include "ice_vsi_vlan_ops.h"
 #include "ice_gnss.h"
+#include "ice_irq.h"
 #include "ice_dpll.h"
 
 #define ICE_BAR0		0
@@ -105,11 +106,6 @@
 #define ICE_Q_WAIT_RETRY_LIMIT	10
 #define ICE_Q_WAIT_MAX_RETRY	(5 * ICE_Q_WAIT_RETRY_LIMIT)
 #define ICE_MAX_LG_RSS_QS	256
-#define ICE_RES_VALID_BIT	0x8000
-#define ICE_RES_MISC_VEC_ID	(ICE_RES_VALID_BIT - 1)
-#define ICE_RES_RDMA_VEC_ID	(ICE_RES_MISC_VEC_ID - 1)
-/* All VF control VSIs share the same IRQ, so assign a unique ID for them */
-#define ICE_RES_VF_CTRL_VEC_ID	(ICE_RES_RDMA_VEC_ID - 1)
 #define ICE_INVAL_Q_INDEX	0xffff
 
 #define ICE_MAX_RXQS_PER_TC		256	/* Used when setting VSI context per TC Rx queues */
@@ -200,13 +196,16 @@
 
 #define ice_pf_to_dev(pf) (&((pf)->pdev->dev))
 
+#define ice_pf_src_tmr_owned(pf) ((pf)->hw.func_caps.ts_func_info.src_tmr_owned)
+
 enum ice_feature {
 	ICE_F_DSCP,
-	ICE_F_PTP_EXTTS,
 	ICE_F_PHY_RCLK,
 	ICE_F_SMA_CTRL,
 	ICE_F_CGU,
 	ICE_F_GNSS,
+	ICE_F_ROCE_LAG,
+	ICE_F_SRIOV_LAG,
 	ICE_F_MAX
 };
 
@@ -247,12 +246,6 @@ struct ice_tc_cfg {
 	u8 numtc; /* Total number of enabled TCs */
 	u16 ena_tc; /* Tx map */
 	struct ice_tc_info tc_info[ICE_MAX_TRAFFIC_CLASS];
-};
-
-struct ice_res_tracker {
-	u16 num_entries;
-	u16 end;
-	u16 list[];
 };
 
 struct ice_qs_cfg {
@@ -352,7 +345,9 @@ struct ice_vsi {
 	u32 rx_buf_failed;
 	u32 rx_page_failed;
 	u16 num_q_vectors;
-	u16 base_vector;		/* IRQ base for OS reserved vectors */
+	/* tell if only dynamic irq allocation is allowed */
+	bool irq_dyn_alloc;
+
 	enum ice_vsi_type type;
 	u16 vsi_num;			/* HW (absolute) index of this VSI */
 	u16 idx;			/* software index in pf->vsi[] */
@@ -381,6 +376,7 @@ struct ice_vsi {
 	u16 rx_buf_len;
 
 	struct ice_aqc_vsi_props info;	 /* VSI properties */
+	struct ice_vsi_vlan_info vlan_info;	/* vlan config to be restored */
 
 	/* VSI stats */
 	struct rtnl_link_stats64 net_stats;
@@ -483,6 +479,7 @@ struct ice_q_vector {
 	char name[ICE_INT_NAME_STR_LEN];
 
 	u16 total_events;	/* net_dim(): number of interrupts processed */
+	struct msi_map irq;
 } ____cacheline_internodealigned_in_smp;
 
 enum ice_pf_flags {
@@ -528,6 +525,7 @@ enum ice_misc_thread_tasks {
 struct ice_switchdev_info {
 	struct ice_vsi *control_vsi;
 	struct ice_vsi *uplink_vsi;
+	struct ice_esw_br_offloads *br_offloads;
 	bool is_running;
 };
 
@@ -550,12 +548,14 @@ struct ice_pf {
 
 	/* OS reserved IRQ details */
 	struct msix_entry *msix_entries;
-	struct ice_res_tracker *irq_tracker;
+	struct ice_irq_tracker irq_tracker;
 	/* First MSIX vector used by SR-IOV VFs. Calculated by subtracting the
 	 * number of MSIX vectors needed for all SR-IOV VFs from the number of
 	 * MSIX vectors allowed on this PF.
 	 */
 	u16 sriov_base_vector;
+	unsigned long *sriov_irq_bm;	/* bitmap to track irq usage */
+	u16 sriov_irq_size;		/* size of the irq_bm bitmap */
 
 	u16 ctrl_vsi_idx;		/* control VSI index in pf->vsi array */
 
@@ -578,6 +578,7 @@ struct ice_pf {
 	struct mutex sw_mutex;		/* lock for protecting VSI alloc flow */
 	struct mutex tc_mutex;		/* lock to protect TC changes */
 	struct mutex adev_mutex;	/* lock to protect aux device access */
+	struct mutex lag_mutex;		/* protect ice_lag struct in PF */
 	u32 msg_enable;
 	struct ice_ptp ptp;
 	struct gnss_serial *gnss_serial;
@@ -595,8 +596,7 @@ struct ice_pf {
 
 	u32 hw_csum_rx_error;
 	u32 oicr_err_reg;
-	u16 oicr_idx;		/* Other interrupt cause MSIX vector index */
-	u16 num_avail_sw_msix;	/* remaining MSIX SW vectors left unclaimed */
+	struct msi_map oicr_irq;	/* Other interrupt cause MSIX vector */
 	u16 max_pf_txqs;	/* Total Tx queues PF wide */
 	u16 max_pf_rxqs;	/* Total Rx queues PF wide */
 	u16 num_lan_msix;	/* Total MSIX vectors for base driver */
@@ -638,6 +638,7 @@ struct ice_pf {
 	struct ice_lag *lag; /* Link Aggregation information */
 
 	struct ice_switchdev_info switchdev;
+	struct ice_esw_br_port *br_port;
 
 #define ICE_INVALID_AGG_NODE_ID		0
 #define ICE_PF_AGG_NODE_ID_START	1
@@ -648,6 +649,8 @@ struct ice_pf {
 	struct ice_agg_node vf_agg_node[ICE_MAX_VF_AGG_NODES];
 	struct ice_dplls dplls;
 };
+
+extern struct workqueue_struct *ice_lag_wq;
 
 struct ice_netdev_priv {
 	struct ice_vsi *vsi;
@@ -673,6 +676,18 @@ static inline bool ice_vector_ch_enabled(struct ice_q_vector *qv)
 }
 
 /**
+ * ice_ptp_pf_handles_tx_interrupt - Check if PF handles Tx interrupt
+ * @pf: Board private structure
+ *
+ * Return true if this PF should respond to the Tx timestamp interrupt
+ * indication in the miscellaneous OICR interrupt handler.
+ */
+static inline bool ice_ptp_pf_handles_tx_interrupt(struct ice_pf *pf)
+{
+	return pf->ptp.tx_interrupt_mode != ICE_PTP_TX_INTERRUPT_NONE;
+}
+
+/**
  * ice_irq_dynamic_ena - Enable default interrupt generation settings
  * @hw: pointer to HW struct
  * @vsi: pointer to VSI struct, can be NULL
@@ -683,7 +698,7 @@ ice_irq_dynamic_ena(struct ice_hw *hw, struct ice_vsi *vsi,
 		    struct ice_q_vector *q_vector)
 {
 	u32 vector = (vsi && q_vector) ? q_vector->reg_idx :
-				((struct ice_pf *)hw->back)->oicr_idx;
+				((struct ice_pf *)hw->back)->oicr_irq.index;
 	int itr = ICE_ITR_NONE;
 	u32 val;
 
@@ -866,7 +881,7 @@ static inline bool ice_is_adq_active(struct ice_pf *pf)
 	return false;
 }
 
-bool netif_is_ice(struct net_device *dev);
+bool netif_is_ice(const struct net_device *dev);
 int ice_vsi_setup_tx_rings(struct ice_vsi *vsi);
 int ice_vsi_setup_rx_rings(struct ice_vsi *vsi);
 int ice_vsi_open_ctrl(struct ice_vsi *vsi);
@@ -922,14 +937,32 @@ void ice_fdir_release_flows(struct ice_hw *hw);
 void ice_fdir_replay_flows(struct ice_hw *hw);
 void ice_fdir_replay_fltrs(struct ice_pf *pf);
 int ice_fdir_create_dflt_rules(struct ice_pf *pf);
-int ice_aq_wait_for_event(struct ice_pf *pf, u16 opcode, unsigned long timeout,
-			  struct ice_rq_event_info *event);
+
+enum ice_aq_task_state {
+	ICE_AQ_TASK_NOT_PREPARED,
+	ICE_AQ_TASK_WAITING,
+	ICE_AQ_TASK_COMPLETE,
+	ICE_AQ_TASK_CANCELED,
+};
+
+struct ice_aq_task {
+	struct hlist_node entry;
+	struct ice_rq_event_info event;
+	enum ice_aq_task_state state;
+	u16 opcode;
+};
+
+void ice_aq_prep_for_event(struct ice_pf *pf, struct ice_aq_task *task,
+			   u16 opcode);
+int ice_aq_wait_for_event(struct ice_pf *pf, struct ice_aq_task *task,
+			  unsigned long timeout);
 int ice_open(struct net_device *netdev);
 int ice_open_internal(struct net_device *netdev);
 int ice_stop(struct net_device *netdev);
 void ice_service_task_schedule(struct ice_pf *pf);
 int ice_load(struct ice_pf *pf);
 void ice_unload(struct ice_pf *pf);
+void ice_adv_lnk_speed_maps_init(void);
 
 /**
  * ice_set_rdma_cap - enable RDMA support

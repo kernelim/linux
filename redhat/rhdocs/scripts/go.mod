@@ -1,4 +1,4 @@
-module RHMAINTAINERS_parser
+module gitlab.com/redhat/centos-stream/src/kernel/documentation
 
 go 1.14
 

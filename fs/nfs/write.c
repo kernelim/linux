@@ -663,10 +663,6 @@ static int nfs_writepage_locked(struct folio *folio,
 	struct inode *inode = folio_file_mapping(folio)->host;
 	int err;
 
-	if (wbc->sync_mode == WB_SYNC_NONE &&
-	    NFS_SERVER(inode)->write_congested)
-		return AOP_WRITEPAGE_ACTIVATE;
-
 	nfs_inc_stats(inode, NFSIOS_VFSWRITEPAGE);
 	nfs_pageio_init_write(&pgio, inode, 0, false,
 			      &nfs_async_write_completion_ops);
@@ -674,17 +670,6 @@ static int nfs_writepage_locked(struct folio *folio,
 	pgio.pg_error = 0;
 	nfs_pageio_complete(&pgio);
 	return err;
-}
-
-int nfs_writepage(struct page *page, struct writeback_control *wbc)
-{
-	struct folio *folio = page_folio(page);
-	int ret;
-
-	ret = nfs_writepage_locked(folio, wbc);
-	if (ret != AOP_WRITEPAGE_ACTIVATE)
-		unlock_page(page);
-	return ret;
 }
 
 static int nfs_writepages_callback(struct page *page,
@@ -785,6 +770,8 @@ static void nfs_inode_add_request(struct nfs_page *req)
  */
 static void nfs_inode_remove_request(struct nfs_page *req)
 {
+	struct nfs_inode *nfsi = NFS_I(nfs_page_to_inode(req));
+
 	if (nfs_page_group_sync_on_bit(req, PG_REMOVE)) {
 		struct folio *folio = nfs_page_to_folio(req->wb_head);
 		struct address_space *mapping = folio_file_mapping(folio);
@@ -799,8 +786,8 @@ static void nfs_inode_remove_request(struct nfs_page *req)
 	}
 
 	if (test_and_clear_bit(PG_INODE_REF, &req->wb_flags)) {
+		atomic_long_dec(&nfsi->nrequests);
 		nfs_release_request(req);
-		atomic_long_dec(&NFS_I(nfs_page_to_inode(req))->nrequests);
 	}
 }
 

@@ -5,7 +5,7 @@
 #include <linux/types.h>
 #include <linux/nmi.h>
 #include <linux/msi.h>
-#include <asm/io.h>
+#include <linux/io.h>
 #include <asm/hyperv-tlfs.h>
 #include <asm/nospec-branch.h>
 #include <asm/paravirt.h>
@@ -19,6 +19,10 @@
  */
 #define HV_IOAPIC_BASE_ADDRESS 0xfec00000
 
+#define HV_VTL_NORMAL 0x0
+#define HV_VTL_SECURE 0x1
+#define HV_VTL_MGMT   0x2
+
 union hv_ghcb;
 
 DECLARE_STATIC_KEY_FALSE(isolation_type_snp);
@@ -29,6 +33,11 @@ typedef int (*hyperv_fill_flush_list_func)(
 		void *data);
 
 void hyperv_vector_handler(struct pt_regs *regs);
+
+static inline unsigned char hv_get_nmi_reason(void)
+{
+	return 0;
+}
 
 #if IS_ENABLED(CONFIG_HYPERV)
 extern int hyperv_init_cpuhp;
@@ -301,6 +310,11 @@ void hv_set_register(unsigned int reg, u64 value);
 u64 hv_get_non_nested_register(unsigned int reg);
 void hv_set_non_nested_register(unsigned int reg, u64 value);
 
+static __always_inline u64 hv_raw_get_register(unsigned int reg)
+{
+	return __rdmsr(reg);
+}
+
 #else /* CONFIG_HYPERV */
 static inline void hyperv_init(void) {}
 static inline void hyperv_setup_mmu_ops(void) {}
@@ -323,6 +337,14 @@ static inline void hv_set_non_nested_register(unsigned int reg, u64 value) { }
 static inline u64 hv_get_non_nested_register(unsigned int reg) { return 0; }
 #endif /* CONFIG_HYPERV */
 
+
+#ifdef CONFIG_HYPERV_VTL_MODE
+void __init hv_vtl_init_platform(void);
+int __init hv_vtl_early_init(void);
+#else
+static inline void __init hv_vtl_init_platform(void) {}
+static inline int __init hv_vtl_early_init(void) { return 0; }
+#endif
 
 #include <asm-generic/mshyperv.h>
 

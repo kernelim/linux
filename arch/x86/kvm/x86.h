@@ -41,6 +41,14 @@ void kvm_spurious_fault(void);
 	failed;								\
 })
 
+/*
+ * The first...last VMX feature MSRs that are emulated by KVM.  This may or may
+ * not cover all known VMX MSRs, as KVM doesn't emulate an MSR until there's an
+ * associated feature that KVM supports for nested virtualization.
+ */
+#define KVM_FIRST_EMULATED_VMX_MSR	MSR_IA32_VMX_BASIC
+#define KVM_LAST_EMULATED_VMX_MSR	MSR_IA32_VMX_VMFUNC
+
 #define KVM_DEFAULT_PLE_GAP		128
 #define KVM_VMX_DEFAULT_PLE_WINDOW	4096
 #define KVM_DEFAULT_PLE_WINDOW_GROW	2
@@ -83,6 +91,11 @@ static inline unsigned int __shrink_ple_window(unsigned int val,
 
 void kvm_service_local_tlb_flush_requests(struct kvm_vcpu *vcpu);
 int kvm_check_nested_events(struct kvm_vcpu *vcpu);
+
+static inline bool kvm_vcpu_has_run(struct kvm_vcpu *vcpu)
+{
+	return vcpu->arch.last_vmentry_cpu != -1;
+}
 
 static inline bool kvm_is_exception_pending(struct kvm_vcpu *vcpu)
 {
@@ -127,12 +140,12 @@ static inline bool is_protmode(struct kvm_vcpu *vcpu)
 	return kvm_is_cr0_bit_set(vcpu, X86_CR0_PE);
 }
 
-static inline int is_long_mode(struct kvm_vcpu *vcpu)
+static inline bool is_long_mode(struct kvm_vcpu *vcpu)
 {
 #ifdef CONFIG_X86_64
-	return vcpu->arch.efer & EFER_LMA;
+	return !!(vcpu->arch.efer & EFER_LMA);
 #else
-	return 0;
+	return false;
 #endif
 }
 
@@ -280,6 +293,7 @@ static inline bool kvm_check_has_quirk(struct kvm *kvm, u64 quirk)
 void kvm_inject_realmode_interrupt(struct kvm_vcpu *vcpu, int irq, int inc_eip);
 
 u64 get_kvmclock_ns(struct kvm *kvm);
+uint64_t kvm_get_wall_clock_epoch(struct kvm *kvm);
 
 int kvm_read_guest_virt(struct kvm_vcpu *vcpu,
 	gva_t addr, void *val, unsigned int bytes,
@@ -296,7 +310,6 @@ void kvm_deliver_exception_payload(struct kvm_vcpu *vcpu,
 
 void kvm_vcpu_mtrr_init(struct kvm_vcpu *vcpu);
 u8 kvm_mtrr_get_guest_memory_type(struct kvm_vcpu *vcpu, gfn_t gfn);
-bool kvm_mtrr_valid(struct kvm_vcpu *vcpu, u32 msr, u64 data);
 int kvm_mtrr_set_msr(struct kvm_vcpu *vcpu, u32 msr, u64 data);
 int kvm_mtrr_get_msr(struct kvm_vcpu *vcpu, u32 msr, u64 *pdata);
 bool kvm_mtrr_check_gfn_range_consistency(struct kvm_vcpu *vcpu, gfn_t gfn,
@@ -311,6 +324,7 @@ fastpath_t handle_fastpath_set_msr_irqoff(struct kvm_vcpu *vcpu);
 
 extern u64 host_xcr0;
 extern u64 host_xss;
+extern u64 host_arch_capabilities;
 
 extern struct kvm_caps kvm_caps;
 

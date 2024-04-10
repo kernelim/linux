@@ -11,10 +11,8 @@
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/pm.h>
-#include <linux/gpio.h>
 #include <linux/i2c.h>
 #include <linux/regmap.h>
-#include <linux/of_gpio.h>
 #include <linux/acpi.h>
 #include <linux/platform_device.h>
 #include <linux/firmware.h>
@@ -773,7 +771,7 @@ static const struct regmap_config rt1308_regmap = {
 	.max_register = RT1308_MAX_REG,
 	.volatile_reg = rt1308_volatile_register,
 	.readable_reg = rt1308_readable_register,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 	.reg_defaults = rt1308_reg,
 	.num_reg_defaults = ARRAY_SIZE(rt1308_reg),
 	.use_single_read = true,

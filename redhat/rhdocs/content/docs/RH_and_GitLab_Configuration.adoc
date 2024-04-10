@@ -48,11 +48,11 @@ Red Hat contributors can use their email alias as their Commit Email as long as 
 
 GitLab is more convenient to use with configured ssh-keys, as users do not have to provide password verification when interacting with GitLab projects.  Users can opt out of configuring an SSH key, however, all of the configuration examples and tooling examples in this and other documents assume users have configured a SSH key.
 
-To generate a new ssh-key pair on the command line, follow the instructions at https://docs.gitlab.com/ee/ssh/index.html#generate-an-ssh-key-pair[https://docs.gitlab.com/ee/ssh/index.html#generate-an-ssh-key-pair].
+To generate a new ssh-key pair on the command line, follow the instructions at https://docs.gitlab.com/ee/user/ssh.html#generate-an-ssh-key-pair[https://docs.gitlab.com/ee/user/ssh.html#generate-an-ssh-key-pair].
 
-To add the ssh-key to a gitlab account, follow the instructions at https://docs.gitlab.com/ee/ssh/index.html#add-an-ssh-key-to-your-gitlab-account[https://docs.gitlab.com/ee/ssh/index.html#add-an-ssh-key-to-your-gitlab-account] to add an ssh key to your GitLab account.
+To add the ssh-key to a gitlab account, follow the instructions at https://docs.gitlab.com/ee/user/ssh.html#add-an-ssh-key-to-your-gitlab-account[https://docs.gitlab.com/ee/user/ssh.html#add-an-ssh-key-to-your-gitlab-account] to add an ssh key to your GitLab account.
 
-To test that the ssh-key is configured properly, follow the instructions at https://docs.gitlab.com/ee/ssh/index.html#verify-that-you-can-connect[https://docs.gitlab.com/ee/ssh/index.html#verify-that-you-can-connect].
+To test that the ssh-key is configured properly, follow the instructions at https://docs.gitlab.com/ee/user/ssh.html#verify-that-you-can-connect[https://docs.gitlab.com/ee/user/ssh.html#verify-that-you-can-connect].
 
 == anchor:tokens[] GitLab Personal Access Tokens
 

@@ -449,6 +449,9 @@ TRACE_MAKE_SYSTEM_STR();
 		(u32) do_div(____val, NSEC_PER_SEC);	\
 	})
 
+#undef __get_buf
+#define __get_buf(len)		trace_seq_acquire(p, (len))
+
 #undef DECLARE_EVENT_CLASS
 #define DECLARE_EVENT_CLASS(call, proto, args, tstruct, assign, print)	\
 static notrace enum print_line_t					\
@@ -964,6 +967,7 @@ static inline void ftrace_test_probe_##call(void)			\
 #undef __get_rel_sockaddr
 #undef __print_array
 #undef __print_hex_dump
+#undef __get_buf
 
 /*
  * The below is not executed in the kernel. It is only what is

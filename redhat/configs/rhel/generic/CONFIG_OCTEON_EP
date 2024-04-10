@@ -1,1 +1,1 @@
-# CONFIG_OCTEON_EP is not set
+CONFIG_OCTEON_EP=m

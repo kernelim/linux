@@ -71,6 +71,7 @@ config ARM
 	select HANDLE_DOMAIN_IRQ
 	select HANDLE_DOMAIN_IRQ_IRQENTRY
 	select HARDIRQS_SW_RESEND
+	select HAS_IOPORT
 	select HAVE_ARCH_AUDITSYSCALL if AEABI && !OABI_COMPAT
 	select HAVE_ARCH_BITREVERSE if (CPU_32v7M || CPU_32v7) && !CPU_32v6
 	select HAVE_ARCH_JUMP_LABEL if !XIP_KERNEL && !CPU_ENDIAN_BE32 && MMU
@@ -399,21 +400,6 @@ config ARCH_IXP4XX
 	select USB_EHCI_BIG_ENDIAN_MMIO
 	help
 	  Support for Intel's IXP4XX (XScale) family of processors.
-
-config ARCH_DOVE
-	bool "Marvell Dove"
-	select CPU_PJ4
-	select GENERIC_IRQ_MULTI_HANDLER
-	select GPIOLIB
-	select HAVE_PCI
-	select MVEBU_MBUS
-	select PINCTRL
-	select PINCTRL_DOVE
-	select PLAT_ORION_LEGACY
-	select SPARSE_IRQ
-	select PM_GENERIC_DOMAINS if PM
-	help
-	  Support for the Marvell Dove SoC 88AP510
 
 config ARCH_PXA
 	bool "PXA2xx/PXA3xx-based"
@@ -1521,11 +1507,11 @@ config ARM_MODULE_PLTS
 	  Disabling this is usually safe for small single-platform
 	  configurations. If unsure, say y.
 
-config FORCE_MAX_ZONEORDER
+config ARCH_FORCE_MAX_ORDER
 	int "Maximum zone order"
-	default "12" if SOC_AM33XX
-	default "9" if SA1111
-	default "11"
+	default "11" if SOC_AM33XX
+	default "8" if SA1111
+	default "10"
 	help
 	  The kernel memory allocator divides physically contiguous memory
 	  blocks into "zones", where each zone is a power of two number of
@@ -1533,9 +1519,6 @@ config FORCE_MAX_ZONEORDER
 	  keeps in the memory allocator.  If you need to allocate very large
 	  blocks of physically contiguous memory, then you may need to
 	  increase this value.
-
-	  This config option is actually maximum order plus one. For example,
-	  a value of 11 means that the largest free memory block is 2^10 pages.
 
 config ALIGNMENT_TRAP
 	def_bool CPU_CP15_MMU

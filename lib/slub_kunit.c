@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <kunit/test.h>
+#include <kunit/test-bug.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/module.h>
@@ -9,10 +10,25 @@
 static struct kunit_resource resource;
 static int slab_errors;
 
+/*
+ * Wrapper function for kmem_cache_create(), which reduces 2 parameters:
+ * 'align' and 'ctor', and sets SLAB_SKIP_KFENCE flag to avoid getting an
+ * object from kfence pool, where the operation could be caught by both
+ * our test and kfence sanity check.
+ */
+static struct kmem_cache *test_kmem_cache_create(const char *name,
+				unsigned int size, slab_flags_t flags)
+{
+	struct kmem_cache *s = kmem_cache_create(name, size, 0,
+					(flags | SLAB_NO_USER_FLAGS), NULL);
+	s->flags |= SLAB_SKIP_KFENCE;
+	return s;
+}
+
 static void test_clobber_zone(struct kunit *test)
 {
-	struct kmem_cache *s = kmem_cache_create("TestSlub_RZ_alloc", 64, 0,
-				SLAB_RED_ZONE|SLAB_NO_USER_FLAGS, NULL);
+	struct kmem_cache *s = test_kmem_cache_create("TestSlub_RZ_alloc", 64,
+							SLAB_RED_ZONE);
 	u8 *p = kmem_cache_alloc(s, GFP_KERNEL);
 
 	kasan_disable_current();
@@ -29,8 +45,8 @@ static void test_clobber_zone(struct kunit *test)
 #ifndef CONFIG_KASAN
 static void test_next_pointer(struct kunit *test)
 {
-	struct kmem_cache *s = kmem_cache_create("TestSlub_next_ptr_free", 64, 0,
-				SLAB_POISON|SLAB_NO_USER_FLAGS, NULL);
+	struct kmem_cache *s = test_kmem_cache_create("TestSlub_next_ptr_free",
+							64, SLAB_POISON);
 	u8 *p = kmem_cache_alloc(s, GFP_KERNEL);
 	unsigned long tmp;
 	unsigned long *ptr_addr;
@@ -74,8 +90,8 @@ static void test_next_pointer(struct kunit *test)
 
 static void test_first_word(struct kunit *test)
 {
-	struct kmem_cache *s = kmem_cache_create("TestSlub_1th_word_free", 64, 0,
-				SLAB_POISON|SLAB_NO_USER_FLAGS, NULL);
+	struct kmem_cache *s = test_kmem_cache_create("TestSlub_1th_word_free",
+							64, SLAB_POISON);
 	u8 *p = kmem_cache_alloc(s, GFP_KERNEL);
 
 	kmem_cache_free(s, p);
@@ -89,8 +105,8 @@ static void test_first_word(struct kunit *test)
 
 static void test_clobber_50th_byte(struct kunit *test)
 {
-	struct kmem_cache *s = kmem_cache_create("TestSlub_50th_word_free", 64, 0,
-				SLAB_POISON|SLAB_NO_USER_FLAGS, NULL);
+	struct kmem_cache *s = test_kmem_cache_create("TestSlub_50th_word_free",
+							64, SLAB_POISON);
 	u8 *p = kmem_cache_alloc(s, GFP_KERNEL);
 
 	kmem_cache_free(s, p);
@@ -105,8 +121,8 @@ static void test_clobber_50th_byte(struct kunit *test)
 
 static void test_clobber_redzone_free(struct kunit *test)
 {
-	struct kmem_cache *s = kmem_cache_create("TestSlub_RZ_free", 64, 0,
-				SLAB_RED_ZONE|SLAB_NO_USER_FLAGS, NULL);
+	struct kmem_cache *s = test_kmem_cache_create("TestSlub_RZ_free", 64,
+							SLAB_RED_ZONE);
 	u8 *p = kmem_cache_alloc(s, GFP_KERNEL);
 
 	kasan_disable_current();

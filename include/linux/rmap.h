@@ -166,7 +166,7 @@ static inline void anon_vma_merge(struct vm_area_struct *vma,
 	unlink_anon_vmas(next);
 }
 
-struct anon_vma *page_get_anon_vma(struct page *page);
+struct anon_vma *folio_get_anon_vma(struct folio *folio);
 
 /* RMAP flags, currently only relevant for some anon rmap operations. */
 typedef int __bitwise rmap_t;
@@ -193,6 +193,8 @@ void page_move_anon_rmap(struct page *, struct vm_area_struct *);
 void page_add_anon_rmap(struct page *, struct vm_area_struct *,
 		unsigned long address, rmap_t flags);
 void page_add_new_anon_rmap(struct page *, struct vm_area_struct *,
+		unsigned long address);
+void folio_add_new_anon_rmap(struct folio *, struct vm_area_struct *,
 		unsigned long address);
 void page_add_file_rmap(struct page *, struct vm_area_struct *,
 		bool compound);
@@ -461,13 +463,8 @@ struct rmap_walk_control {
 
 void rmap_walk(struct folio *folio, struct rmap_walk_control *rwc);
 void rmap_walk_locked(struct folio *folio, struct rmap_walk_control *rwc);
-
-/*
- * Called by memory-failure.c to kill processes.
- */
 struct anon_vma *folio_lock_anon_vma_read(struct folio *folio,
 					  struct rmap_walk_control *rwc);
-void page_unlock_anon_vma_read(struct anon_vma *anon_vma);
 
 #else	/* !CONFIG_MMU */
 

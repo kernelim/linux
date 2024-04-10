@@ -7,6 +7,7 @@
 #include <linux/ftrace.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/moduleloader.h>
 #include <linux/sort.h>
 
 static struct plt_entry __get_adrp_add_pair(u64 dst, u64 pc,
@@ -171,9 +172,6 @@ static unsigned int count_plts(Elf64_Sym *syms, Elf64_Rela *rela, int num,
 		switch (ELF64_R_TYPE(rela[i].r_info)) {
 		case R_AARCH64_JUMP26:
 		case R_AARCH64_CALL26:
-			if (!IS_ENABLED(CONFIG_RANDOMIZE_BASE))
-				break;
-
 			/*
 			 * We only have to consider branch targets that resolve
 			 * to symbols that are defined in a different section.
@@ -272,9 +270,6 @@ static int partition_branch_plt_relas(Elf64_Sym *syms, Elf64_Rela *rela,
 				      int numrels, Elf64_Word dstidx)
 {
 	int i = 0, j = numrels - 1;
-
-	if (!IS_ENABLED(CONFIG_RANDOMIZE_BASE))
-		return 0;
 
 	while (i < j) {
 		if (branch_rela_needs_plt(syms, &rela[i], dstidx))

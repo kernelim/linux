@@ -38,11 +38,13 @@
 #include <linux/if_packet.h>
 #include <linux/llist.h>
 #include <net/flow.h>
-#include <net/page_pool.h>
+#include <net/page_pool/types.h>
 #if IS_ENABLED(CONFIG_NF_CONNTRACK)
 #include <linux/netfilter/nf_conntrack_common.h>
 #endif
 #include <net/dropreason-core.h>
+
+#include <linux/rh_kabi.h>
 
 /* The interface for checksum offload between the stack and networking drivers
  * is as follows...
@@ -297,6 +299,7 @@ struct tc_skb_ext {
 	u8 post_ct_snat:1;
 	u8 post_ct_dnat:1;
 	u8 act_miss:1; /* Set if act_miss_cookie is used */
+	u8 l2_miss:1; /* Set by bridge upon FDB or MDB miss */
 };
 #endif
 
@@ -631,6 +634,8 @@ typedef unsigned int sk_buff_data_t;
 typedef unsigned char *sk_buff_data_t;
 #endif
 
+#define RH_KABI_SKBUFF_RESERVED		16
+
 /**
  *	struct sk_buff - socket buffer
  *	@next: Next buffer in list
@@ -937,7 +942,28 @@ struct sk_buff {
 	u64			kcov_handle;
 #endif
 
+#ifndef __GENKSYMS__
+	/* RHEL kABI: if a new field needs to be copied by
+	 * __copy_skb_header, append it here (after the existing ones)
+	 * and update the size of the *non-__GENKSYMS__* rh_reserved
+	 * padding. Be mindful of alignments, and use pahole to check.
+	 */
+	char rh_reserved_start[0];
+#endif
 	); /* end headers group */
+
+#ifdef __GENKSYMS__
+	char rh_reserved[RH_KABI_SKBUFF_RESERVED];
+#else
+	char rh_reserved[RH_KABI_SKBUFF_RESERVED];
+
+	/* RHEL kABI: add new fields that don't need to be copied by
+	 * __copy_skb_header here (just above rh_reserved_end), and
+	 * update the size of the rh_reserved array. Be mindful of
+	 * alignments, and use pahole to check.
+	 */
+	char rh_reserved_end[0];
+#endif
 
 	/* These elements must be at the end, see alloc_skb() for details.  */
 	sk_buff_data_t		tail;
@@ -949,7 +975,7 @@ struct sk_buff {
 
 #ifdef CONFIG_SKB_EXTENSIONS
 	/* only useable after checking ->active_extensions != 0 */
-	struct skb_ext		*extensions;
+	RH_KABI_EXCLUDE(struct skb_ext		*extensions)
 #endif
 };
 
@@ -1653,6 +1679,13 @@ static inline void skb_mark_not_on_list(struct sk_buff *skb)
 	skb->next = NULL;
 }
 
+static inline void skb_poison_list(struct sk_buff *skb)
+{
+#ifdef CONFIG_DEBUG_NET
+	skb->next = SKB_LIST_POISON_NEXT;
+#endif
+}
+
 /* Iterate through singly-linked GSO fragments of an skb. */
 #define skb_list_walk_safe(first, skb, next_skb)                               \
 	for ((skb) = (first), (next_skb) = (skb) ? (skb)->next : NULL; (skb);  \
@@ -2294,6 +2327,15 @@ static inline unsigned int skb_pagelen(const struct sk_buff *skb)
 	return skb_headlen(skb) + __skb_pagelen(skb);
 }
 
+static inline void skb_frag_fill_page_desc(skb_frag_t *frag,
+					   struct page *page,
+					   int off, int size)
+{
+	frag->bv_page = page;
+	frag->bv_offset = off;
+	skb_frag_size_set(frag, size);
+}
+
 static inline void __skb_fill_page_desc_noacc(struct skb_shared_info *shinfo,
 					      int i, struct page *page,
 					      int off, int size)
@@ -2305,9 +2347,7 @@ static inline void __skb_fill_page_desc_noacc(struct skb_shared_info *shinfo,
 	 * that not all callers have unique ownership of the page but rely
 	 * on page_is_pfmemalloc doing the right thing(tm).
 	 */
-	frag->bv_page		  = page;
-	frag->bv_offset		  = off;
-	skb_frag_size_set(frag, size);
+	skb_frag_fill_page_desc(frag, page, off, size);
 }
 
 /**
@@ -2987,20 +3027,35 @@ static inline int skb_orphan_frags_rx(struct sk_buff *skb, gfp_t gfp_mask)
 }
 
 /**
- *	__skb_queue_purge - empty a list
+ *	__skb_queue_purge_reason - empty a list
  *	@list: list to empty
+ *	@reason: drop reason
  *
  *	Delete all buffers on an &sk_buff list. Each buffer is removed from
  *	the list and one reference dropped. This function does not take the
  *	list lock and the caller must hold the relevant locks to use it.
  */
-static inline void __skb_queue_purge(struct sk_buff_head *list)
+static inline void __skb_queue_purge_reason(struct sk_buff_head *list,
+					    enum skb_drop_reason reason)
 {
 	struct sk_buff *skb;
+
 	while ((skb = __skb_dequeue(list)) != NULL)
-		kfree_skb(skb);
+		kfree_skb_reason(skb, reason);
 }
-void skb_queue_purge(struct sk_buff_head *list);
+
+static inline void __skb_queue_purge(struct sk_buff_head *list)
+{
+	__skb_queue_purge_reason(list, SKB_DROP_REASON_QUEUE_PURGE);
+}
+
+void skb_queue_purge_reason(struct sk_buff_head *list,
+			    enum skb_drop_reason reason);
+
+static inline void skb_queue_purge(struct sk_buff_head *list)
+{
+	skb_queue_purge_reason(list, SKB_DROP_REASON_QUEUE_PURGE);
+}
 
 unsigned int skb_rbtree_purge(struct rb_root *root);
 
@@ -3106,7 +3161,7 @@ static inline struct sk_buff *napi_alloc_skb(struct napi_struct *napi,
 void napi_consume_skb(struct sk_buff *skb, int budget);
 
 void napi_skb_free_stolen_head(struct sk_buff *skb);
-void __kfree_skb_defer(struct sk_buff *skb);
+void __napi_kfree_skb(struct sk_buff *skb, enum skb_drop_reason reason);
 
 /**
  * __dev_alloc_pages - allocate page for network Rx
@@ -3258,6 +3313,18 @@ static inline void skb_frag_ref(struct sk_buff *skb, int f)
 	__skb_frag_ref(&skb_shinfo(skb)->frags[f]);
 }
 
+static inline void
+napi_frag_unref(skb_frag_t *frag, bool recycle, bool napi_safe)
+{
+	struct page *page = skb_frag_page(frag);
+
+#ifdef CONFIG_PAGE_POOL
+	if (recycle && page_pool_return_skb_page(page, napi_safe))
+		return;
+#endif
+	put_page(page);
+}
+
 /**
  * __skb_frag_unref - release a reference on a paged fragment.
  * @frag: the paged fragment
@@ -3268,13 +3335,7 @@ static inline void skb_frag_ref(struct sk_buff *skb, int f)
  */
 static inline void __skb_frag_unref(skb_frag_t *frag, bool recycle)
 {
-	struct page *page = skb_frag_page(frag);
-
-#ifdef CONFIG_PAGE_POOL
-	if (recycle && page_pool_return_skb_page(page))
-		return;
-#endif
-	put_page(page);
+	napi_frag_unref(frag, recycle, false);
 }
 
 /**
@@ -3341,20 +3402,6 @@ static inline void skb_frag_page_copy(skb_frag_t *fragto,
 static inline void __skb_frag_set_page(skb_frag_t *frag, struct page *page)
 {
 	frag->bv_page = page;
-}
-
-/**
- * skb_frag_set_page - sets the page contained in a paged fragment of an skb
- * @skb: the buffer
- * @f: the fragment offset
- * @page: the page to set
- *
- * Sets the @f'th fragment of @skb to contain @page.
- */
-static inline void skb_frag_set_page(struct sk_buff *skb, int f,
-				     struct page *page)
-{
-	__skb_frag_set_page(&skb_shinfo(skb)->frags[f], page);
 }
 
 bool skb_page_frag_refill(unsigned int sz, struct page_frag *pfrag, gfp_t prio);
@@ -3824,8 +3871,6 @@ int skb_zerocopy(struct sk_buff *to, struct sk_buff *from,
 void skb_split(struct sk_buff *skb, struct sk_buff *skb1, const u32 len);
 int skb_shift(struct sk_buff *tgt, struct sk_buff *skb, int shiftlen);
 void skb_scrub_packet(struct sk_buff *skb, bool xnet);
-bool skb_gso_validate_network_len(const struct sk_buff *skb, unsigned int mtu);
-bool skb_gso_validate_mac_len(const struct sk_buff *skb, unsigned int len);
 struct sk_buff *skb_segment(struct sk_buff *skb, netdev_features_t features);
 struct sk_buff *skb_segment_list(struct sk_buff *skb, netdev_features_t features,
 				 unsigned int offset);
@@ -3875,7 +3920,7 @@ __skb_header_pointer(const struct sk_buff *skb, int offset, int len,
 	if (likely(hlen - offset >= len))
 		return (void *)data + offset;
 
-	if (!skb || unlikely(skb_copy_bits(skb, offset, buffer, len) < 0))
+	if (!skb || !buffer || unlikely(skb_copy_bits(skb, offset, buffer, len) < 0))
 		return NULL;
 
 	return buffer;
@@ -4688,75 +4733,6 @@ static inline struct sec_path *skb_sec_path(const struct sk_buff *skb)
 #endif
 }
 
-/* Keeps track of mac header offset relative to skb->head.
- * It is useful for TSO of Tunneling protocol. e.g. GRE.
- * For non-tunnel skb it points to skb_mac_header() and for
- * tunnel skb it points to outer mac header.
- * Keeps track of level of encapsulation of network headers.
- */
-struct skb_gso_cb {
-	union {
-		int	mac_offset;
-		int	data_offset;
-	};
-	int	encap_level;
-	__wsum	csum;
-	__u16	csum_start;
-};
-#define SKB_GSO_CB_OFFSET	32
-#define SKB_GSO_CB(skb) ((struct skb_gso_cb *)((skb)->cb + SKB_GSO_CB_OFFSET))
-
-static inline int skb_tnl_header_len(const struct sk_buff *inner_skb)
-{
-	return (skb_mac_header(inner_skb) - inner_skb->head) -
-		SKB_GSO_CB(inner_skb)->mac_offset;
-}
-
-static inline int gso_pskb_expand_head(struct sk_buff *skb, int extra)
-{
-	int new_headroom, headroom;
-	int ret;
-
-	headroom = skb_headroom(skb);
-	ret = pskb_expand_head(skb, extra, 0, GFP_ATOMIC);
-	if (ret)
-		return ret;
-
-	new_headroom = skb_headroom(skb);
-	SKB_GSO_CB(skb)->mac_offset += (new_headroom - headroom);
-	return 0;
-}
-
-static inline void gso_reset_checksum(struct sk_buff *skb, __wsum res)
-{
-	/* Do not update partial checksums if remote checksum is enabled. */
-	if (skb->remcsum_offload)
-		return;
-
-	SKB_GSO_CB(skb)->csum = res;
-	SKB_GSO_CB(skb)->csum_start = skb_checksum_start(skb) - skb->head;
-}
-
-/* Compute the checksum for a gso segment. First compute the checksum value
- * from the start of transport header to SKB_GSO_CB(skb)->csum_start, and
- * then add in skb->csum (checksum from csum_start to end of packet).
- * skb->csum and csum_start are then updated to reflect the checksum of the
- * resultant packet starting from the transport header-- the resultant checksum
- * is in the res argument (i.e. normally zero or ~ of checksum of a pseudo
- * header.
- */
-static inline __sum16 gso_make_checksum(struct sk_buff *skb, __wsum res)
-{
-	unsigned char *csum_start = skb_transport_header(skb);
-	int plen = (skb->head + SKB_GSO_CB(skb)->csum_start) - csum_start;
-	__wsum partial = SKB_GSO_CB(skb)->csum;
-
-	SKB_GSO_CB(skb)->csum = res;
-	SKB_GSO_CB(skb)->csum_start = csum_start - skb->head;
-
-	return csum_fold(csum_partial(csum_start, plen, partial));
-}
-
 static inline bool skb_is_gso(const struct sk_buff *skb)
 {
 	return skb_shinfo(skb)->gso_size;
@@ -4907,6 +4883,15 @@ static inline void skb_reset_redirect(struct sk_buff *skb)
 	skb->redirected = 0;
 }
 
+static inline void skb_set_redirected_noclear(struct sk_buff *skb,
+					      bool from_ingress)
+{
+	skb->redirected = 1;
+#ifdef CONFIG_NET_REDIRECT
+	skb->from_ingress = from_ingress;
+#endif
+}
+
 static inline bool skb_csum_is_sctp(struct sk_buff *skb)
 {
 	return skb->csum_not_inet;
@@ -4935,13 +4920,6 @@ static inline void skb_mark_for_recycle(struct sk_buff *skb)
 	skb->pp_recycle = 1;
 }
 #endif
-
-static inline bool skb_pp_recycle(struct sk_buff *skb, void *data)
-{
-	if (!IS_ENABLED(CONFIG_PAGE_POOL) || !skb->pp_recycle)
-		return false;
-	return page_pool_return_skb_page(virt_to_page(data));
-}
 
 #endif	/* __KERNEL__ */
 #endif	/* _LINUX_SKBUFF_H */

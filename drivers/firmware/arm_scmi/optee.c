@@ -106,6 +106,7 @@ enum scmi_optee_pta_cmd {
  * @channel_id: OP-TEE channel ID used for this transport
  * @tee_session: TEE session identifier
  * @caps: OP-TEE SCMI channel capabilities
+ * @rx_len: Response size
  * @mu: Mutex protection on channel access
  * @cinfo: SCMI channel information
  * @shmem: Virtual base address of the shared memory
@@ -117,6 +118,7 @@ struct scmi_optee_channel {
 	u32 channel_id;
 	u32 tee_session;
 	u32 caps;
+	u32 rx_len;
 	struct mutex mu;
 	struct scmi_chan_info *cinfo;
 	union {
@@ -302,6 +304,9 @@ static int invoke_process_msg_channel(struct scmi_optee_channel *channel, size_t
 		return -EIO;
 	}
 
+	/* Save response size */
+	channel->rx_len = param[2].u.memref.size;
+
 	return 0;
 }
 
@@ -323,11 +328,11 @@ static int scmi_optee_link_supplier(struct device *dev)
 	return 0;
 }
 
-static bool scmi_optee_chan_available(struct device *dev, int idx)
+static bool scmi_optee_chan_available(struct device_node *of_node, int idx)
 {
 	u32 channel_id;
 
-	return !of_property_read_u32_index(dev->of_node, "linaro,optee-channel-id",
+	return !of_property_read_u32_index(of_node, "linaro,optee-channel-id",
 					   idx, &channel_id);
 }
 
@@ -353,6 +358,7 @@ static int setup_dynamic_shmem(struct device *dev, struct scmi_optee_channel *ch
 	shbuf = tee_shm_get_va(channel->tee_shm, 0);
 	memset(shbuf, 0, msg_size);
 	channel->req.msg = shbuf;
+	channel->rx_len = msg_size;
 
 	return 0;
 }
@@ -397,7 +403,7 @@ out:
 static int setup_shmem(struct device *dev, struct scmi_chan_info *cinfo,
 		       struct scmi_optee_channel *channel)
 {
-	if (of_find_property(cinfo->dev->of_node, "shmem", NULL))
+	if (of_property_present(cinfo->dev->of_node, "shmem"))
 		return setup_static_shmem(dev, cinfo, channel);
 	else
 		return setup_dynamic_shmem(dev, channel);
@@ -475,8 +481,6 @@ static int scmi_optee_chan_free(int id, void *p, void *data)
 	cinfo->transport_info = NULL;
 	channel->cinfo = NULL;
 
-	scmi_free_channel(cinfo, data, id);
-
 	return 0;
 }
 
@@ -492,7 +496,7 @@ static int scmi_optee_send_message(struct scmi_chan_info *cinfo,
 		msg_tx_prepare(channel->req.msg, xfer);
 		ret = invoke_process_msg_channel(channel, msg_command_size(xfer));
 	} else {
-		shmem_tx_prepare(channel->req.shmem, xfer);
+		shmem_tx_prepare(channel->req.shmem, xfer, cinfo);
 		ret = invoke_process_smt_channel(channel);
 	}
 
@@ -508,7 +512,7 @@ static void scmi_optee_fetch_response(struct scmi_chan_info *cinfo,
 	struct scmi_optee_channel *channel = cinfo->transport_info;
 
 	if (channel->tee_shm)
-		msg_fetch_response(channel->req.msg, SCMI_OPTEE_MAX_MSG_SIZE, xfer);
+		msg_fetch_response(channel->req.msg, channel->rx_len, xfer);
 	else
 		shmem_fetch_response(channel->req.shmem, xfer);
 }

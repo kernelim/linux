@@ -95,17 +95,6 @@ extern int mmap_rnd_compat_bits __read_mostly;
 #include <asm/page.h>
 #include <asm/processor.h>
 
-/*
- * Architectures that support memory tagging (assigning tags to memory regions,
- * embedding these tags into addresses that point to these memory regions, and
- * checking that the memory and the pointer tags match on memory accesses)
- * redefine this macro to strip tags from pointers.
- * It's defined as noop for architectures that don't support memory tagging.
- */
-#ifndef untagged_addr
-#define untagged_addr(addr) (addr)
-#endif
-
 #ifndef __pa_symbol
 #define __pa_symbol(x)  __pa(RELOC_HIDE((unsigned long)(x), 0))
 #endif
@@ -136,7 +125,7 @@ extern int mmap_rnd_compat_bits __read_mostly;
  * define their own version of this macro in <asm/pgtable.h>
  */
 #if BITS_PER_LONG == 64
-/* This function must be updated when the size of struct page grows above 80
+/* This function must be updated when the size of struct page grows above 96
  * or reduces below 56. The idea that compiler optimizes out switch()
  * statement, and only leaves move/store instructions. Also the compiler can
  * combine write statements if they are both assignments and can be reordered,
@@ -147,12 +136,18 @@ static inline void __mm_zero_struct_page(struct page *page)
 {
 	unsigned long *_pp = (void *)page;
 
-	 /* Check that struct page is either 56, 64, 72, or 80 bytes */
+	 /* Check that struct page is either 56, 64, 72, 80, 88 or 96 bytes */
 	BUILD_BUG_ON(sizeof(struct page) & 7);
 	BUILD_BUG_ON(sizeof(struct page) < 56);
-	BUILD_BUG_ON(sizeof(struct page) > 80);
+	BUILD_BUG_ON(sizeof(struct page) > 96);
 
 	switch (sizeof(struct page)) {
+	case 96:
+		_pp[11] = 0;
+		fallthrough;
+	case 88:
+		_pp[10] = 0;
+		fallthrough;
 	case 80:
 		_pp[9] = 0;
 		fallthrough;
@@ -677,8 +672,10 @@ static inline bool vma_is_accessible(struct vm_area_struct *vma)
  * paths in userfault.
  */
 bool vma_is_shmem(struct vm_area_struct *vma);
+bool vma_is_anon_shmem(struct vm_area_struct *vma);
 #else
 static inline bool vma_is_shmem(struct vm_area_struct *vma) { return false; }
+static inline bool vma_is_anon_shmem(struct vm_area_struct *vma) { return false; }
 #endif
 
 int vma_is_stack_for_current(struct vm_area_struct *vma);
@@ -707,7 +704,9 @@ static inline unsigned int compound_order(struct page *page)
  */
 static inline unsigned int folio_order(struct folio *folio)
 {
-	return compound_order(&folio->page);
+	if (!folio_test_large(folio))
+		return 0;
+	return folio->_folio_order;
 }
 
 #include <linux/huge_mm.h>
@@ -793,8 +792,8 @@ static inline int is_vmalloc_or_module_addr(const void *x)
 /*
  * How many times the entire folio is mapped as a single unit (eg by a
  * PMD or PUD entry).  This is probably not what you want, except for
- * debugging purposes; look at folio_mapcount() or page_mapcount()
- * instead.
+ * debugging purposes - it does not include PTE-mapped sub-pages; look
+ * at folio_mapcount() or page_mapcount() or total_mapcount() instead.
  */
 static inline int folio_entire_mapcount(struct folio *folio)
 {
@@ -804,12 +803,11 @@ static inline int folio_entire_mapcount(struct folio *folio)
 
 /*
  * Mapcount of compound page as a whole, does not include mapped sub-pages.
- *
- * Must be called only for compound pages.
+ * Must be called only on head of compound page.
  */
-static inline int compound_mapcount(struct page *page)
+static inline int head_compound_mapcount(struct page *head)
 {
-	return folio_entire_mapcount(page_folio(page));
+	return atomic_read(compound_mapcount_ptr(head)) + 1;
 }
 
 /*
@@ -822,13 +820,11 @@ static inline void page_mapcount_reset(struct page *page)
 	atomic_set(&(page)->_mapcount, -1);
 }
 
-int __page_mapcount(struct page *page);
-
 unsigned long nr_free_buffer_pages(void);
 
 /*
  * Mapcount of 0-order page; when compound sub-page, includes
- * compound_mapcount().
+ * compound_mapcount of compound_head of page.
  *
  * Result is undefined for pages which cannot be mapped into userspace.
  * For example SLAB or special types of pages. See function page_has_type().
@@ -836,25 +832,75 @@ unsigned long nr_free_buffer_pages(void);
  */
 static inline int page_mapcount(struct page *page)
 {
-	if (unlikely(PageCompound(page)))
-		return __page_mapcount(page);
-	return atomic_read(&page->_mapcount) + 1;
+	int mapcount = atomic_read(&page->_mapcount) + 1;
+
+	if (likely(!PageCompound(page)))
+		return mapcount;
+	page = compound_head(page);
+	return head_compound_mapcount(page) + mapcount;
 }
 
-int folio_mapcount(struct folio *folio);
+int folio_total_mapcount(struct folio *folio);
 
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+/**
+ * folio_mapcount() - Calculate the number of mappings of this folio.
+ * @folio: The folio.
+ *
+ * A large folio tracks both how many times the entire folio is mapped,
+ * and how many times each individual page in the folio is mapped.
+ * This function calculates the total number of times the folio is
+ * mapped.
+ *
+ * Return: The number of times this folio is mapped.
+ */
+static inline int folio_mapcount(struct folio *folio)
+{
+	if (likely(!folio_test_large(folio)))
+		return atomic_read(&folio->_mapcount) + 1;
+	return folio_total_mapcount(folio);
+}
+
 static inline int total_mapcount(struct page *page)
 {
-	return folio_mapcount(page_folio(page));
+	if (likely(!PageCompound(page)))
+		return atomic_read(&page->_mapcount) + 1;
+	return folio_total_mapcount(page_folio(page));
 }
 
-#else
-static inline int total_mapcount(struct page *page)
+static inline bool folio_large_is_mapped(struct folio *folio)
 {
-	return page_mapcount(page);
+	/*
+	 * Reading folio_mapcount_ptr() below could be omitted if hugetlb
+	 * participated in incrementing nr_pages_mapped when compound mapped.
+	 */
+	return atomic_read(&folio->_nr_pages_mapped) > 0 ||
+		atomic_read(folio_mapcount_ptr(folio)) >= 0;
 }
-#endif
+
+/**
+ * folio_mapped - Is this folio mapped into userspace?
+ * @folio: The folio.
+ *
+ * Return: True if any page in this folio is referenced by user page tables.
+ */
+static inline bool folio_mapped(struct folio *folio)
+{
+	if (likely(!folio_test_large(folio)))
+		return atomic_read(&folio->_mapcount) >= 0;
+	return folio_large_is_mapped(folio);
+}
+
+/*
+ * Return true if this page is mapped into pagetables.
+ * For compound page it returns true if any sub-page of compound page is mapped,
+ * even if this particular sub-page is not itself mapped by any PTE or PMD.
+ */
+static inline bool page_mapped(struct page *page)
+{
+	if (likely(!PageCompound(page)))
+		return atomic_read(&page->_mapcount) >= 0;
+	return folio_large_is_mapped(page_folio(page));
+}
 
 static inline struct page *virt_to_head_page(const void *x)
 {
@@ -905,12 +951,14 @@ static inline void set_compound_page_dtor(struct page *page,
 	page[1].compound_dtor = compound_dtor;
 }
 
-void destroy_large_folio(struct folio *folio);
-
-static inline int head_compound_pincount(struct page *head)
+static inline void folio_set_compound_dtor(struct folio *folio,
+		enum compound_dtor_id compound_dtor)
 {
-	return atomic_read(compound_pincount_ptr(head));
+	VM_BUG_ON_FOLIO(compound_dtor >= NR_COMPOUND_DTORS, folio);
+	folio->_folio_dtor = compound_dtor;
 }
+
+void destroy_large_folio(struct folio *folio);
 
 static inline void set_compound_order(struct page *page, unsigned int order)
 {
@@ -1231,6 +1279,21 @@ static inline bool is_cow_mapping(vm_flags_t flags)
 	return (flags & (VM_SHARED | VM_MAYWRITE)) == VM_MAYWRITE;
 }
 
+#ifndef CONFIG_MMU
+static inline bool is_nommu_shared_mapping(vm_flags_t flags)
+{
+	/*
+	 * NOMMU shared mappings are ordinary MAP_SHARED mappings and selected
+	 * R/O MAP_PRIVATE file mappings that are an effective R/O overlay of
+	 * a file mapping. R/O MAP_PRIVATE mappings might still modify
+	 * underlying memory if ptrace is active, so this is only possible if
+	 * ptrace does not apply. Note that there is no mprotect() to upgrade
+	 * write permissions later.
+	 */
+	return flags & VM_MAYSHARE;
+}
+#endif
+
 #if defined(CONFIG_SPARSEMEM) && !defined(CONFIG_SPARSEMEM_VMEMMAP)
 #define SECTION_IN_PAGE_FLAGS
 #endif
@@ -1500,9 +1563,9 @@ static inline unsigned long folio_pfn(struct folio *folio)
 	return page_to_pfn(&folio->page);
 }
 
-static inline atomic_t *folio_pincount_ptr(struct folio *folio)
+static inline struct folio *pfn_folio(unsigned long pfn)
 {
-	return &folio_page(folio, 1)->compound_pincount;
+	return page_folio(pfn_to_page(pfn));
 }
 
 /**
@@ -1522,7 +1585,7 @@ static inline atomic_t *folio_pincount_ptr(struct folio *folio)
  * expected to be able to deal gracefully with a false positive.
  *
  * For large folios, the result will be exactly correct. That's because
- * we have more tracking data available: the compound_pincount is used
+ * we have more tracking data available: the _pincount field is used
  * instead of the GUP_PIN_COUNTING_BIAS scheme.
  *
  * For more information, please see Documentation/core-api/pin_user_pages.rst.
@@ -1533,7 +1596,7 @@ static inline atomic_t *folio_pincount_ptr(struct folio *folio)
 static inline bool folio_maybe_dma_pinned(struct folio *folio)
 {
 	if (folio_test_large(folio))
-		return atomic_read(folio_pincount_ptr(folio)) > 0;
+		return atomic_read(&folio->_pincount) > 0;
 
 	/*
 	 * folio_ref_count() is signed. If that refcount overflows, then
@@ -1632,7 +1695,13 @@ static inline void set_page_links(struct page *page, enum zone_type zone,
  */
 static inline long folio_nr_pages(struct folio *folio)
 {
-	return compound_nr(&folio->page);
+	if (!folio_test_large(folio))
+		return 1;
+#ifdef CONFIG_64BIT
+	return folio->_folio_nr_pages;
+#else
+	return 1L << folio->_folio_order;
+#endif
 }
 
 /**
@@ -1682,6 +1751,24 @@ static inline unsigned int folio_shift(struct folio *folio)
 static inline size_t folio_size(struct folio *folio)
 {
 	return PAGE_SIZE << folio_order(folio);
+}
+
+/**
+ * folio_estimated_sharers - Estimate the number of sharers of a folio.
+ * @folio: The folio.
+ *
+ * folio_estimated_sharers() aims to serve as a function to efficiently
+ * estimate the number of processes sharing a folio. This is done by
+ * looking at the precise mapcount of the first subpage in the folio, and
+ * assuming the other subpages are the same. This may not be true for large
+ * folios. If you want exact mapcounts for exact calculations, look at
+ * page_mapcount() or folio_total_mapcount().
+ *
+ * Return: The estimated number of processes sharing a folio.
+ */
+static inline int folio_estimated_sharers(struct folio *folio)
+{
+	return page_mapcount(folio_page(folio, 0));
 }
 
 #ifndef HAVE_ARCH_MAKE_PAGE_ACCESSIBLE
@@ -1764,9 +1851,6 @@ static inline pgoff_t page_index(struct page *page)
 	return page->index;
 }
 
-bool page_mapped(struct page *page);
-bool folio_mapped(struct folio *folio);
-
 /*
  * Return true only if the page has been allocated with
  * ALLOC_NO_WATERMARKS and the low watermark was not
@@ -1813,6 +1897,25 @@ extern void pagefault_out_of_memory(void);
 
 extern void show_free_areas(unsigned int flags, nodemask_t *nodemask);
 
+/*
+ * Parameter block passed down to zap_pte_range in exceptional cases.
+ */
+struct zap_details {
+	struct folio *single_folio;	/* Locked folio to be unmapped */
+	bool even_cows;			/* Zap COWed private pages too? */
+	zap_flags_t zap_flags;		/* Extra flags for zapping */
+};
+
+/*
+ * Whether to drop the pte markers, for example, the uffd-wp information for
+ * file-backed memory.  This should only be specified when we will completely
+ * drop the page in the mm, either by truncation or unmapping of the vma.  By
+ * default, the flag is not set.
+ */
+#define  ZAP_FLAG_DROP_MARKER        ((__force zap_flags_t) BIT(0))
+/* Set in unmap_vmas() to indicate a final unmap call.  Only used by hugetlb */
+#define  ZAP_FLAG_UNMAP              ((__force zap_flags_t) BIT(1))
+
 #ifdef CONFIG_MMU
 extern bool can_do_mlock(void);
 #else
@@ -1821,6 +1924,8 @@ static inline bool can_do_mlock(void) { return false; }
 extern int user_shm_lock(size_t, struct ucounts *);
 extern void user_shm_unlock(size_t, struct ucounts *);
 
+struct folio *vm_normal_folio(struct vm_area_struct *vma, unsigned long addr,
+			     pte_t pte);
 struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
 			     pte_t pte);
 struct page *vm_normal_page_pmd(struct vm_area_struct *vma, unsigned long addr,
@@ -1830,6 +1935,8 @@ void zap_vma_ptes(struct vm_area_struct *vma, unsigned long address,
 		  unsigned long size);
 void zap_page_range(struct vm_area_struct *vma, unsigned long address,
 		    unsigned long size);
+void zap_page_range_single(struct vm_area_struct *vma, unsigned long address,
+			   unsigned long size, struct zap_details *details);
 void unmap_vmas(struct mmu_gather *tlb, struct vm_area_struct *start_vma,
 		unsigned long start, unsigned long end);
 
@@ -2005,40 +2112,30 @@ static inline bool get_user_page_fast_only(unsigned long addr,
  */
 static inline unsigned long get_mm_counter(struct mm_struct *mm, int member)
 {
-	long val = atomic_long_read(&mm->rss_stat.count[member]);
-
-#ifdef SPLIT_RSS_COUNTING
-	/*
-	 * counter is updated in asynchronous manner and may go to minus.
-	 * But it's never be expected number for users.
-	 */
-	if (val < 0)
-		val = 0;
-#endif
-	return (unsigned long)val;
+	return percpu_counter_read_positive(&mm->rss_stat[member]);
 }
 
-void mm_trace_rss_stat(struct mm_struct *mm, int member, long count);
+void mm_trace_rss_stat(struct mm_struct *mm, int member);
 
 static inline void add_mm_counter(struct mm_struct *mm, int member, long value)
 {
-	long count = atomic_long_add_return(value, &mm->rss_stat.count[member]);
+	percpu_counter_add(&mm->rss_stat[member], value);
 
-	mm_trace_rss_stat(mm, member, count);
+	mm_trace_rss_stat(mm, member);
 }
 
 static inline void inc_mm_counter(struct mm_struct *mm, int member)
 {
-	long count = atomic_long_inc_return(&mm->rss_stat.count[member]);
+	percpu_counter_inc(&mm->rss_stat[member]);
 
-	mm_trace_rss_stat(mm, member, count);
+	mm_trace_rss_stat(mm, member);
 }
 
 static inline void dec_mm_counter(struct mm_struct *mm, int member)
 {
-	long count = atomic_long_dec_return(&mm->rss_stat.count[member]);
+	percpu_counter_dec(&mm->rss_stat[member]);
 
-	mm_trace_rss_stat(mm, member, count);
+	mm_trace_rss_stat(mm, member);
 }
 
 /* Optimized variant when page is already known not to be PageAnon */
@@ -2347,14 +2444,25 @@ static inline void pgtable_pte_page_dtor(struct page *page)
 	dec_lruvec_page_state(page, NR_PAGETABLE);
 }
 
-#define pte_offset_map_lock(mm, pmd, address, ptlp)	\
-({							\
-	spinlock_t *__ptl = pte_lockptr(mm, pmd);	\
-	pte_t *__pte = pte_offset_map(pmd, address);	\
-	*(ptlp) = __ptl;				\
-	spin_lock(__ptl);				\
-	__pte;						\
-})
+pte_t *__pte_offset_map(pmd_t *pmd, unsigned long addr, pmd_t *pmdvalp);
+static inline pte_t *pte_offset_map(pmd_t *pmd, unsigned long addr)
+{
+	return __pte_offset_map(pmd, addr, NULL);
+}
+
+pte_t *__pte_offset_map_lock(struct mm_struct *mm, pmd_t *pmd,
+			unsigned long addr, spinlock_t **ptlp);
+static inline pte_t *pte_offset_map_lock(struct mm_struct *mm, pmd_t *pmd,
+			unsigned long addr, spinlock_t **ptlp)
+{
+	pte_t *pte;
+
+	__cond_lock(*ptlp, pte = __pte_offset_map_lock(mm, pmd, addr, ptlp));
+	return pte;
+}
+
+pte_t *pte_offset_map_nolock(struct mm_struct *mm, pmd_t *pmd,
+			unsigned long addr, spinlock_t **ptlp);
 
 #define pte_unmap_unlock(pte, ptl)	do {		\
 	spin_unlock(ptl);				\
@@ -2543,7 +2651,6 @@ extern unsigned long absent_pages_in_range(unsigned long start_pfn,
 						unsigned long end_pfn);
 extern void get_pfn_range_for_nid(unsigned int nid,
 			unsigned long *start_pfn, unsigned long *end_pfn);
-extern unsigned long find_min_pfn_with_active_regions(void);
 
 #ifndef CONFIG_NUMA
 static inline int early_pfn_to_nid(unsigned long pfn)
@@ -2686,6 +2793,7 @@ extern int install_special_mapping(struct mm_struct *mm,
 				   unsigned long flags, struct page **pages);
 
 unsigned long randomize_stack_top(unsigned long stack_top);
+unsigned long randomize_page(unsigned long start, unsigned long range);
 
 extern unsigned long get_unmapped_area(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
 
@@ -3270,7 +3378,6 @@ enum mf_flags {
 int mf_dax_kill_procs(struct address_space *mapping, pgoff_t index,
 		      unsigned long count, int mf_flags);
 extern int memory_failure(unsigned long pfn, int flags);
-extern void memory_failure_queue(unsigned long pfn, int flags);
 extern void memory_failure_queue_kick(int cpu);
 extern int unpoison_memory(unsigned long pfn);
 extern int sysctl_memory_failure_early_kill;
@@ -3279,11 +3386,41 @@ extern void shake_page(struct page *p);
 extern atomic_long_t num_poisoned_pages __read_mostly;
 extern int soft_offline_page(unsigned long pfn, int flags);
 #ifdef CONFIG_MEMORY_FAILURE
-extern int __get_huge_page_for_hwpoison(unsigned long pfn, int flags);
+extern void memory_failure_queue(unsigned long pfn, int flags);
+extern int __get_huge_page_for_hwpoison(unsigned long pfn, int flags,
+					bool *migratable_cleared);
+void num_poisoned_pages_inc(unsigned long pfn);
+void num_poisoned_pages_sub(unsigned long pfn, long i);
 #else
-static inline int __get_huge_page_for_hwpoison(unsigned long pfn, int flags)
+static inline void memory_failure_queue(unsigned long pfn, int flags)
+{
+}
+
+static inline int __get_huge_page_for_hwpoison(unsigned long pfn, int flags,
+					bool *migratable_cleared)
 {
 	return 0;
+}
+
+static inline void num_poisoned_pages_inc(unsigned long pfn)
+{
+}
+
+static inline void num_poisoned_pages_sub(unsigned long pfn, long i)
+{
+}
+#endif
+
+#if defined(CONFIG_MEMORY_FAILURE) && defined(CONFIG_MEMORY_HOTPLUG)
+extern void memblk_nr_poison_inc(unsigned long pfn);
+extern void memblk_nr_poison_sub(unsigned long pfn, long i);
+#else
+static inline void memblk_nr_poison_inc(unsigned long pfn)
+{
+}
+
+static inline void memblk_nr_poison_sub(unsigned long pfn, long i)
+{
 }
 #endif
 
@@ -3468,14 +3605,6 @@ madvise_set_anon_name(struct mm_struct *mm, unsigned long start,
 	return 0;
 }
 #endif
-
-/*
- * Whether to drop the pte markers, for example, the uffd-wp information for
- * file-backed memory.  This should only be specified when we will completely
- * drop the page in the mm, either by truncation or unmapping of the vma.  By
- * default, the flag is not set.
- */
-#define  ZAP_FLAG_DROP_MARKER        ((__force zap_flags_t) BIT(0))
 
 #ifdef CONFIG_UNACCEPTED_MEMORY
 

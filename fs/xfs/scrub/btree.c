@@ -140,11 +140,12 @@ xchk_btree_rec(
 
 	trace_xchk_btree_rec(bs->sc, cur, 0);
 
-	/* If this isn't the first record, are they in order? */
-	if (cur->bc_levels[0].ptr > 1 &&
+	/* Are all records across all record blocks in order? */
+	if (bs->lastrec_valid &&
 	    !cur->bc_ops->recs_inorder(cur, &bs->lastrec, rec))
 		xchk_btree_set_corrupt(bs->sc, cur, 0);
 	memcpy(&bs->lastrec, rec, cur->bc_ops->rec_len);
+	bs->lastrec_valid = true;
 
 	if (cur->bc_nlevels == 1)
 		return;
@@ -187,11 +188,12 @@ xchk_btree_key(
 
 	trace_xchk_btree_key(bs->sc, cur, level);
 
-	/* If this isn't the first key, are they in order? */
-	if (cur->bc_levels[level].ptr > 1 &&
-	    !cur->bc_ops->keys_inorder(cur, &bs->lastkey[level - 1], key))
+	/* Are all low keys across all node blocks in order? */
+	if (bs->lastkey[level - 1].valid &&
+	    !cur->bc_ops->keys_inorder(cur, &bs->lastkey[level - 1].key, key))
 		xchk_btree_set_corrupt(bs->sc, cur, level);
-	memcpy(&bs->lastkey[level - 1], key, cur->bc_ops->key_len);
+	memcpy(&bs->lastkey[level - 1].key, key, cur->bc_ops->key_len);
+	bs->lastkey[level - 1].valid = true;
 
 	if (level + 1 >= cur->bc_nlevels)
 		return;
@@ -432,8 +434,7 @@ xchk_btree_check_owner(
 	if (cur->bc_btnum == XFS_BTNUM_BNO || cur->bc_btnum == XFS_BTNUM_RMAP) {
 		struct check_owner	*co;
 
-		co = kmem_alloc(sizeof(struct check_owner),
-				KM_MAYFAIL);
+		co = kmalloc(sizeof(struct check_owner), XCHK_GFP_FLAGS);
 		if (!co)
 			return -ENOMEM;
 
@@ -652,7 +653,7 @@ xchk_btree(
 		xchk_btree_set_corrupt(sc, cur, 0);
 		return 0;
 	}
-	bs = kmem_zalloc(cur_sz, KM_NOFS | KM_MAYFAIL);
+	bs = kzalloc(cur_sz, XCHK_GFP_FLAGS);
 	if (!bs)
 		return -ENOMEM;
 	bs->cur = cur;
@@ -743,9 +744,9 @@ out:
 			error = xchk_btree_check_block_owner(bs, co->level,
 					co->daddr);
 		list_del(&co->list);
-		kmem_free(co);
+		kfree(co);
 	}
-	kmem_free(bs);
+	kfree(bs);
 
 	return error;
 }

@@ -621,13 +621,11 @@ vhost_scsi_map_to_sgl(struct vhost_scsi_cmd *cmd,
 	size_t offset;
 	unsigned int npages = 0;
 
-	bytes = iov_iter_get_pages(iter, pages, LONG_MAX,
+	bytes = iov_iter_get_pages2(iter, pages, LONG_MAX,
 				VHOST_SCSI_PREALLOC_UPAGES, &offset);
 	/* No pages were pinned */
 	if (bytes <= 0)
 		return bytes < 0 ? bytes : -EFAULT;
-
-	iov_iter_advance(iter, bytes);
 
 	while (bytes) {
 		unsigned n = min_t(unsigned, PAGE_SIZE - offset, bytes);
@@ -643,7 +641,7 @@ vhost_scsi_calc_sgls(struct iov_iter *iter, size_t bytes, int max_sgls)
 {
 	int sgl_count = 0;
 
-	if (!iter || !iter->iov) {
+	if (!iter || !iter_iov(iter)) {
 		pr_err("%s: iter->iov is NULL, but expected bytes: %zu"
 		       " present\n", __func__, bytes);
 		return -EINVAL;

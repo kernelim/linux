@@ -51,7 +51,9 @@
 #include <linux/start_kernel.h>
 #include <linux/security.h>
 #include <linux/hugetlb.h>
+#include <linux/kmemleak.h>
 
+#include <asm/archrandom.h>
 #include <asm/boot_data.h>
 #include <asm/ipl.h>
 #include <asm/facility.h>
@@ -366,9 +368,12 @@ void *restart_stack;
 unsigned long stack_alloc(void)
 {
 #ifdef CONFIG_VMAP_STACK
-	return (unsigned long)__vmalloc_node(THREAD_SIZE, THREAD_SIZE,
-			THREADINFO_GFP, NUMA_NO_NODE,
-			__builtin_return_address(0));
+	void *ret;
+
+	ret = __vmalloc_node(THREAD_SIZE, THREAD_SIZE, THREADINFO_GFP,
+			     NUMA_NO_NODE, __builtin_return_address(0));
+	kmemleak_not_leak(ret);
+	return (unsigned long)ret;
 #else
 	return __get_free_pages(GFP_KERNEL, THREAD_SIZE_ORDER);
 #endif
@@ -1001,6 +1006,10 @@ static int __init setup_hwcaps(void)
 	case 0x8562:
 		strcpy(elf_platform, "z15");
 		break;
+	case 0x3931:
+	case 0x3932:
+		strcpy(elf_platform, "z16");
+		break;
 	}
 
 	/*
@@ -1028,6 +1037,9 @@ static void __init setup_randomness(void)
 	if (stsi(vmms, 3, 2, 2) == 0 && vmms->count)
 		add_device_randomness(&vmms->vm, sizeof(vmms->vm[0]) * vmms->count);
 	memblock_free(vmms, PAGE_SIZE);
+
+	if (cpacf_query_func(CPACF_PRNO, CPACF_PRNO_TRNG))
+		static_branch_enable(&s390_arch_random_available);
 }
 
 /*

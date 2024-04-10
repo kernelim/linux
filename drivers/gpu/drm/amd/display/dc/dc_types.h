@@ -40,9 +40,7 @@
 #include "grph_object_defs.h"
 #include "grph_object_ctrl_defs.h"
 
-#ifdef CONFIG_DRM_AMD_DC_HDCP
 #include "dm_cp_psp.h"
-#endif
 
 /* forward declarations */
 struct dc_plane_state;
@@ -71,13 +69,6 @@ enum dce_environment {
 	DCE_ENV_VIRTUAL_HW
 };
 
-/* Note: use these macro definitions instead of direct comparison! */
-#define IS_FPGA_MAXIMUS_DC(dce_environment) \
-	(dce_environment == DCE_ENV_FPGA_MAXIMUS)
-
-#define IS_DIAG_DC(dce_environment) \
-	(IS_FPGA_MAXIMUS_DC(dce_environment) || (dce_environment == DCE_ENV_DIAG))
-
 struct dc_perf_trace {
 	unsigned long read_count;
 	unsigned long write_count;
@@ -85,7 +76,7 @@ struct dc_perf_trace {
 	unsigned long last_entry_write;
 };
 
-#define MAX_SURFACE_NUM 4
+#define MAX_SURFACE_NUM 6
 #define NUM_PIXEL_FORMATS 10
 
 enum tiling_mode {
@@ -198,6 +189,7 @@ struct dc_panel_patch {
 	unsigned int disable_fams;
 	unsigned int skip_avmute;
 	unsigned int mst_start_top_delay;
+	unsigned int remove_sink_ext_caps;
 };
 
 struct dc_edid_caps {
@@ -605,6 +597,7 @@ enum dc_psr_state {
 	PSR_STATE4b_FULL_FRAME,
 	PSR_STATE4c_FULL_FRAME,
 	PSR_STATE4_FULL_FRAME_POWERUP,
+	PSR_STATE4_FULL_FRAME_HW_LOCK,
 	PSR_STATE5,
 	PSR_STATE5a,
 	PSR_STATE5b,
@@ -813,9 +806,7 @@ struct dc_context {
 	uint32_t dc_edp_id_count;
 	uint64_t fbc_gpu_addr;
 	struct dc_dmub_srv *dmub_srv;
-#ifdef CONFIG_DRM_AMD_DC_HDCP
 	struct cp_psp cp_psp;
-#endif
 	uint32_t *dcn_reg_offsets;
 	uint32_t *nbio_reg_offsets;
 };
@@ -888,7 +879,7 @@ struct dsc_dec_dpcd_caps {
 	uint32_t branch_overall_throughput_0_mps; /* In MPs */
 	uint32_t branch_overall_throughput_1_mps; /* In MPs */
 	uint32_t branch_max_line_width;
-	bool is_dp;
+	bool is_dp; /* Decoded format */
 };
 
 struct dc_golden_table {
@@ -909,6 +900,14 @@ enum dc_gpu_mem_alloc_type {
 	DC_MEM_ALLOC_TYPE_FRAME_BUFFER,
 	DC_MEM_ALLOC_TYPE_INVISIBLE_FRAME_BUFFER,
 	DC_MEM_ALLOC_TYPE_AGP
+};
+
+enum dc_link_encoding_format {
+	DC_LINK_ENCODING_UNSPECIFIED = 0,
+	DC_LINK_ENCODING_DP_8b_10b,
+	DC_LINK_ENCODING_DP_128b_132b,
+	DC_LINK_ENCODING_HDMI_TMDS,
+	DC_LINK_ENCODING_HDMI_FRL
 };
 
 enum dc_psr_version {
@@ -955,7 +954,6 @@ struct dc_link_status {
 	struct dpcd_caps *dpcd_caps;
 };
 
-#if defined(CONFIG_DRM_AMD_DC_HDCP)
 union hdcp_rx_caps {
 	struct {
 		uint8_t version;
@@ -982,7 +980,6 @@ struct hdcp_caps {
 	union hdcp_rx_caps rx_caps;
 	union hdcp_bcaps bcaps;
 };
-#endif
 
 /* DP MST stream allocation (payload bandwidth number) */
 struct link_mst_stream_allocation {
@@ -1025,6 +1022,45 @@ struct psr_settings {
 	unsigned int psr_power_opt;
 };
 
+enum replay_coasting_vtotal_type {
+	PR_COASTING_TYPE_NOM = 0,
+	PR_COASTING_TYPE_STATIC,
+	PR_COASTING_TYPE_FULL_SCREEN_VIDEO,
+	PR_COASTING_TYPE_TEST_HARNESS,
+	PR_COASTING_TYPE_NUM,
+};
+
+union replay_error_status {
+	struct {
+		unsigned char STATE_TRANSITION_ERROR    :1;
+		unsigned char LINK_CRC_ERROR            :1;
+		unsigned char DESYNC_ERROR              :1;
+		unsigned char RESERVED                  :5;
+	} bits;
+	unsigned char raw;
+};
+
+struct replay_config {
+	bool replay_supported;                          // Replay feature is supported
+	unsigned int replay_power_opt_supported;        // Power opt flags that are supported
+	bool replay_smu_opt_supported;                  // SMU optimization is supported
+	unsigned int replay_enable_option;              // Replay enablement option
+	uint32_t debug_flags;                           // Replay debug flags
+	bool replay_timing_sync_supported;             // Replay desync is supported
+	union replay_error_status replay_error_status; // Replay error status
+};
+
+/* Replay feature flags */
+struct replay_settings {
+	struct replay_config config;            // Replay configuration
+	bool replay_feature_enabled;            // Replay feature is ready for activating
+	bool replay_allow_active;               // Replay is currently active
+	unsigned int replay_power_opt_active;   // Power opt flags that are activated currently
+	bool replay_smu_opt_enable;             // SMU optimization is enabled
+	uint16_t coasting_vtotal;               // Current Coasting vtotal
+	uint16_t coasting_vtotal_table[PR_COASTING_TYPE_NUM]; // Coasting vtotal table
+};
+
 /* To split out "global" and "per-panel" config settings.
  * Add a struct dc_panel_config under dc_link
  */
@@ -1051,9 +1087,11 @@ struct dc_panel_config {
 	struct psr {
 		bool disable_psr;
 		bool disallow_psrsu;
+		bool disallow_replay;
 		bool rc_disable;
 		bool rc_allow_static_screen;
 		bool rc_allow_fullscreen_VPB;
+		unsigned int replay_enable_option;
 	} psr;
 	/* ABM */
 	struct varib {

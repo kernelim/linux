@@ -193,6 +193,24 @@ ice_info_pending_netlist_build(struct ice_pf __always_unused *pf,
 		snprintf(ctx->buf, sizeof(ctx->buf), "0x%08x", netlist->hash);
 }
 
+static void ice_info_cgu_fw_build(struct ice_pf *pf, struct ice_info_ctx *ctx)
+{
+	u32 id, cfg_ver, fw_ver;
+
+	if (!ice_is_feature_supported(pf, ICE_F_CGU))
+		return;
+	if (ice_aq_get_cgu_info(&pf->hw, &id, &cfg_ver, &fw_ver))
+		return;
+	snprintf(ctx->buf, sizeof(ctx->buf), "%u.%u.%u", id, cfg_ver, fw_ver);
+}
+
+static void ice_info_cgu_id(struct ice_pf *pf, struct ice_info_ctx *ctx)
+{
+	if (!ice_is_feature_supported(pf, ICE_F_CGU))
+		return;
+	snprintf(ctx->buf, sizeof(ctx->buf), "%u", pf->hw.cgu_part_number);
+}
+
 #define fixed(key, getter) { ICE_VERSION_FIXED, key, getter, NULL }
 #define running(key, getter) { ICE_VERSION_RUNNING, key, getter, NULL }
 #define stored(key, getter, fallback) { ICE_VERSION_STORED, key, getter, fallback }
@@ -235,6 +253,8 @@ static const struct ice_devlink_version {
 	running("fw.app.bundle_id", ice_info_ddp_pkg_bundle_id),
 	combined("fw.netlist", ice_info_netlist_ver, ice_info_pending_netlist_ver),
 	combined("fw.netlist.build", ice_info_netlist_build, ice_info_pending_netlist_build),
+	fixed("cgu.id", ice_info_cgu_id),
+	running("fw.cgu", ice_info_cgu_fw_build),
 };
 
 /**
@@ -1256,8 +1276,6 @@ static const struct devlink_ops ice_devlink_ops = {
 			  BIT(DEVLINK_RELOAD_ACTION_FW_ACTIVATE),
 	.reload_down = ice_devlink_reload_down,
 	.reload_up = ice_devlink_reload_up,
-	.port_split = ice_devlink_port_split,
-	.port_unsplit = ice_devlink_port_unsplit,
 	.eswitch_mode_get = ice_eswitch_mode_get,
 	.eswitch_mode_set = ice_eswitch_mode_set,
 	.info_get = ice_devlink_info_get,
@@ -1512,6 +1530,11 @@ ice_devlink_set_port_split_options(struct ice_pf *pf,
 	ice_active_port_option = active_idx;
 }
 
+static const struct devlink_port_ops ice_devlink_port_ops = {
+	.port_split = ice_devlink_port_split,
+	.port_unsplit = ice_devlink_port_unsplit,
+};
+
 /**
  * ice_devlink_create_pf_port - Create a devlink port for this PF
  * @pf: the PF to create a devlink port for
@@ -1551,7 +1574,8 @@ int ice_devlink_create_pf_port(struct ice_pf *pf)
 	devlink_port_attrs_set(devlink_port, &attrs);
 	devlink = priv_to_devlink(pf);
 
-	err = devlink_port_register(devlink, devlink_port, vsi->idx);
+	err = devlink_port_register_with_ops(devlink, devlink_port, vsi->idx,
+					     &ice_devlink_port_ops);
 	if (err) {
 		dev_err(dev, "Failed to create devlink port for PF %d, error %d\n",
 			pf->hw.pf_id, err);

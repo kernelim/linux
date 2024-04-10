@@ -22,6 +22,7 @@
 #include <linux/mm.h>
 #include <linux/swap.h>
 #include <linux/swapops.h>
+#include <linux/syscalls.h>
 #include <linux/mman.h>
 #include <linux/pagemap.h>
 #include <linux/file.h>
@@ -55,6 +56,8 @@
 #include <linux/buffer_head.h> /* for try_to_free_buffers */
 
 #include <asm/mman.h>
+
+#include "swap.h"
 
 /*
  * Shared mappings implemented 30.11.1994. It's not fully working yet,
@@ -629,22 +632,23 @@ bool filemap_range_has_writeback(struct address_space *mapping,
 {
 	XA_STATE(xas, &mapping->i_pages, start_byte >> PAGE_SHIFT);
 	pgoff_t max = end_byte >> PAGE_SHIFT;
-	struct page *page;
+	struct folio *folio;
 
 	if (end_byte < start_byte)
 		return false;
 
 	rcu_read_lock();
-	xas_for_each(&xas, page, max) {
-		if (xas_retry(&xas, page))
+	xas_for_each(&xas, folio, max) {
+		if (xas_retry(&xas, folio))
 			continue;
-		if (xa_is_value(page))
+		if (xa_is_value(folio))
 			continue;
-		if (PageDirty(page) || PageLocked(page) || PageWriteback(page))
+		if (folio_test_dirty(folio) || folio_test_locked(folio) ||
+				folio_test_writeback(folio))
 			break;
 	}
 	rcu_read_unlock();
-	return page != NULL;
+	return folio != NULL;
 }
 EXPORT_SYMBOL_GPL(filemap_range_has_writeback);
 
@@ -787,56 +791,54 @@ int file_write_and_wait_range(struct file *file, loff_t lstart, loff_t lend)
 EXPORT_SYMBOL(file_write_and_wait_range);
 
 /**
- * replace_page_cache_page - replace a pagecache page with a new one
- * @old:	page to be replaced
- * @new:	page to replace with
+ * replace_page_cache_folio - replace a pagecache folio with a new one
+ * @old:	folio to be replaced
+ * @new:	folio to replace with
  *
- * This function replaces a page in the pagecache with a new one.  On
- * success it acquires the pagecache reference for the new page and
- * drops it for the old page.  Both the old and new pages must be
- * locked.  This function does not add the new page to the LRU, the
+ * This function replaces a folio in the pagecache with a new one.  On
+ * success it acquires the pagecache reference for the new folio and
+ * drops it for the old folio.  Both the old and new folios must be
+ * locked.  This function does not add the new folio to the LRU, the
  * caller must do that.
  *
  * The remove + add is atomic.  This function cannot fail.
  */
-void replace_page_cache_page(struct page *old, struct page *new)
+void replace_page_cache_folio(struct folio *old, struct folio *new)
 {
-	struct folio *fold = page_folio(old);
-	struct folio *fnew = page_folio(new);
 	struct address_space *mapping = old->mapping;
 	void (*free_folio)(struct folio *) = mapping->a_ops->free_folio;
 	pgoff_t offset = old->index;
 	XA_STATE(xas, &mapping->i_pages, offset);
 
-	VM_BUG_ON_PAGE(!PageLocked(old), old);
-	VM_BUG_ON_PAGE(!PageLocked(new), new);
-	VM_BUG_ON_PAGE(new->mapping, new);
+	VM_BUG_ON_FOLIO(!folio_test_locked(old), old);
+	VM_BUG_ON_FOLIO(!folio_test_locked(new), new);
+	VM_BUG_ON_FOLIO(new->mapping, new);
 
-	get_page(new);
+	folio_get(new);
 	new->mapping = mapping;
 	new->index = offset;
 
-	mem_cgroup_migrate(fold, fnew);
+	mem_cgroup_migrate(old, new);
 
 	xas_lock_irq(&xas);
 	xas_store(&xas, new);
 
 	old->mapping = NULL;
 	/* hugetlb pages do not participate in page cache accounting. */
-	if (!PageHuge(old))
-		__dec_lruvec_page_state(old, NR_FILE_PAGES);
-	if (!PageHuge(new))
-		__inc_lruvec_page_state(new, NR_FILE_PAGES);
-	if (PageSwapBacked(old))
-		__dec_lruvec_page_state(old, NR_SHMEM);
-	if (PageSwapBacked(new))
-		__inc_lruvec_page_state(new, NR_SHMEM);
+	if (!folio_test_hugetlb(old))
+		__lruvec_stat_sub_folio(old, NR_FILE_PAGES);
+	if (!folio_test_hugetlb(new))
+		__lruvec_stat_add_folio(new, NR_FILE_PAGES);
+	if (folio_test_swapbacked(old))
+		__lruvec_stat_sub_folio(old, NR_SHMEM);
+	if (folio_test_swapbacked(new))
+		__lruvec_stat_add_folio(new, NR_SHMEM);
 	xas_unlock_irq(&xas);
 	if (free_folio)
-		free_folio(fold);
-	folio_put(fold);
+		free_folio(old);
+	folio_put(old);
 }
-EXPORT_SYMBOL_GPL(replace_page_cache_page);
+EXPORT_SYMBOL_GPL(replace_page_cache_folio);
 
 noinline int __filemap_add_folio(struct address_space *mapping,
 		struct folio *folio, pgoff_t index, gfp_t gfp, void **shadowp)
@@ -1132,32 +1134,13 @@ static void folio_wake_bit(struct folio *folio, int bit_nr)
 	wait_queue_head_t *q = folio_waitqueue(folio);
 	struct wait_page_key key;
 	unsigned long flags;
-	wait_queue_entry_t bookmark;
 
 	key.folio = folio;
 	key.bit_nr = bit_nr;
 	key.page_match = 0;
 
-	bookmark.flags = 0;
-	bookmark.private = NULL;
-	bookmark.func = NULL;
-	INIT_LIST_HEAD(&bookmark.entry);
-
 	spin_lock_irqsave(&q->lock, flags);
-	__wake_up_locked_key_bookmark(q, TASK_NORMAL, &key, &bookmark);
-
-	while (bookmark.flags & WQ_FLAG_BOOKMARK) {
-		/*
-		 * Take a breather from holding the lock,
-		 * allow pages that finish wake up asynchronously
-		 * to acquire the lock and remove themselves
-		 * from wait queue
-		 */
-		spin_unlock_irqrestore(&q->lock, flags);
-		cpu_relax();
-		spin_lock_irqsave(&q->lock, flags);
-		__wake_up_locked_key_bookmark(q, TASK_NORMAL, &key, &bookmark);
-	}
+	__wake_up_locked_key(q, TASK_NORMAL, &key);
 
 	/*
 	 * It's possible to miss clearing waiters here, when we woke our page
@@ -1356,8 +1339,6 @@ repeat:
 /**
  * migration_entry_wait_on_locked - Wait for a migration entry to be removed
  * @entry: migration swap entry.
- * @ptep: mapped pte pointer. Will return with the ptep unmapped. Only required
- *        for pte entries, pass NULL for pmd entries.
  * @ptl: already locked ptl. This function will drop the lock.
  *
  * Wait for a migration entry referencing the given page to be removed. This is
@@ -1366,13 +1347,13 @@ repeat:
  * should be called while holding the ptl for the migration entry referencing
  * the page.
  *
- * Returns after unmapping and unlocking the pte/ptl with pte_unmap_unlock().
+ * Returns after unlocking the ptl.
  *
  * This follows the same logic as folio_wait_bit_common() so see the comments
  * there.
  */
-void migration_entry_wait_on_locked(swp_entry_t entry, pte_t *ptep,
-				spinlock_t *ptl)
+void migration_entry_wait_on_locked(swp_entry_t entry, spinlock_t *ptl)
+	__releases(ptl)
 {
 	struct wait_page_queue wait_page;
 	wait_queue_entry_t *wait = &wait_page.wait;
@@ -1406,10 +1387,7 @@ void migration_entry_wait_on_locked(swp_entry_t entry, pte_t *ptep,
 	 * a valid reference to the page, and it must take the ptl to remove the
 	 * migration entry. So the page is valid until the ptl is dropped.
 	 */
-	if (ptep)
-		pte_unmap_unlock(ptep, ptl);
-	else
-		spin_unlock(ptl);
+	spin_unlock(ptl);
 
 	for (;;) {
 		unsigned int flags;
@@ -1628,24 +1606,26 @@ EXPORT_SYMBOL(folio_end_writeback);
  */
 void page_endio(struct page *page, bool is_write, int err)
 {
+	struct folio *folio = page_folio(page);
+
 	if (!is_write) {
 		if (!err) {
-			SetPageUptodate(page);
+			folio_mark_uptodate(folio);
 		} else {
-			ClearPageUptodate(page);
-			SetPageError(page);
+			folio_clear_uptodate(folio);
+			folio_set_error(folio);
 		}
-		unlock_page(page);
+		folio_unlock(folio);
 	} else {
 		if (err) {
 			struct address_space *mapping;
 
-			SetPageError(page);
-			mapping = page_mapping(page);
+			folio_set_error(folio);
+			mapping = folio_mapping(folio);
 			if (mapping)
 				mapping_set_error(mapping, err);
 		}
-		end_page_writeback(page);
+		folio_end_writeback(folio);
 	}
 }
 EXPORT_SYMBOL_GPL(page_endio);
@@ -2190,30 +2170,31 @@ bool folio_more_pages(struct folio *folio, pgoff_t index, pgoff_t max)
 }
 
 /**
- * find_get_pages_contig - gang contiguous pagecache lookup
+ * filemap_get_folios_contig - Get a batch of contiguous folios
  * @mapping:	The address_space to search
- * @index:	The starting page index
- * @nr_pages:	The maximum number of pages
- * @pages:	Where the resulting pages are placed
+ * @start:	The starting page index
+ * @end:	The final page index (inclusive)
+ * @fbatch:	The batch to fill
  *
- * find_get_pages_contig() works exactly like find_get_pages_range(),
- * except that the returned number of pages are guaranteed to be
- * contiguous.
+ * filemap_get_folios_contig() works exactly like filemap_get_folios(),
+ * except the returned folios are guaranteed to be contiguous. This may
+ * not return all contiguous folios if the batch gets filled up.
  *
- * Return: the number of pages which were found.
+ * Return: The number of folios found.
+ * Also update @start to be positioned for traversal of the next folio.
  */
-unsigned find_get_pages_contig(struct address_space *mapping, pgoff_t index,
-			       unsigned int nr_pages, struct page **pages)
-{
-	XA_STATE(xas, &mapping->i_pages, index);
-	struct folio *folio;
-	unsigned int ret = 0;
 
-	if (unlikely(!nr_pages))
-		return 0;
+unsigned filemap_get_folios_contig(struct address_space *mapping,
+		pgoff_t *start, pgoff_t end, struct folio_batch *fbatch)
+{
+	XA_STATE(xas, &mapping->i_pages, *start);
+	unsigned long nr;
+	struct folio *folio;
 
 	rcu_read_lock();
-	for (folio = xas_load(&xas); folio; folio = xas_next(&xas)) {
+
+	for (folio = xas_load(&xas); folio && xas.xa_index <= end;
+			folio = xas_next(&xas)) {
 		if (xas_retry(&xas, folio))
 			continue;
 		/*
@@ -2221,33 +2202,45 @@ unsigned find_get_pages_contig(struct address_space *mapping, pgoff_t index,
 		 * No current caller is looking for DAX entries.
 		 */
 		if (xa_is_value(folio))
-			break;
+			goto update_start;
 
 		if (!folio_try_get_rcu(folio))
 			goto retry;
 
 		if (unlikely(folio != xas_reload(&xas)))
-			goto put_page;
+			goto put_folio;
 
-again:
-		pages[ret] = folio_file_page(folio, xas.xa_index);
-		if (++ret == nr_pages)
-			break;
-		if (folio_more_pages(folio, xas.xa_index, ULONG_MAX)) {
-			xas.xa_index++;
-			folio_ref_inc(folio);
-			goto again;
+		if (!folio_batch_add(fbatch, folio)) {
+			nr = folio_nr_pages(folio);
+
+			if (folio_test_hugetlb(folio))
+				nr = 1;
+			*start = folio->index + nr;
+			goto out;
 		}
 		continue;
-put_page:
+put_folio:
 		folio_put(folio);
+
 retry:
 		xas_reset(&xas);
 	}
+
+update_start:
+	nr = folio_batch_count(fbatch);
+
+	if (nr) {
+		folio = fbatch->folios[nr - 1];
+		if (folio_test_hugetlb(folio))
+			*start = folio->index + 1;
+		else
+			*start = folio->index + folio_nr_pages(folio);
+	}
+out:
 	rcu_read_unlock();
-	return ret;
+	return folio_batch_count(fbatch);
 }
-EXPORT_SYMBOL(find_get_pages_contig);
+EXPORT_SYMBOL(filemap_get_folios_contig);
 
 /**
  * find_get_pages_range_tag - Find and return head pages matching @tag.
@@ -3234,35 +3227,30 @@ out_retry:
 }
 EXPORT_SYMBOL(filemap_fault);
 
-static bool filemap_map_pmd(struct vm_fault *vmf, struct page *page)
+static bool filemap_map_pmd(struct vm_fault *vmf, struct folio *folio,
+		pgoff_t start)
 {
 	struct mm_struct *mm = vmf->vma->vm_mm;
 
 	/* Huge page is mapped? No need to proceed. */
 	if (pmd_trans_huge(*vmf->pmd)) {
-		unlock_page(page);
-		put_page(page);
+		folio_unlock(folio);
+		folio_put(folio);
 		return true;
 	}
 
-	if (pmd_none(*vmf->pmd) && PageTransHuge(page)) {
+	if (pmd_none(*vmf->pmd) && folio_test_pmd_mappable(folio)) {
+		struct page *page = folio_file_page(folio, start);
 		vm_fault_t ret = do_set_pmd(vmf, page);
 		if (!ret) {
 			/* The page is mapped successfully, reference consumed. */
-			unlock_page(page);
+			folio_unlock(folio);
 			return true;
 		}
 	}
 
 	if (pmd_none(*vmf->pmd))
 		pmd_install(mm, vmf->pmd, &vmf->prealloc_pte);
-
-	/* See comment in handle_pte_fault() */
-	if (pmd_devmap_trans_unstable(vmf->pmd)) {
-		unlock_page(page);
-		put_page(page);
-		return true;
-	}
 
 	return false;
 }
@@ -3343,13 +3331,18 @@ vm_fault_t filemap_map_pages(struct vm_fault *vmf,
 	if (!folio)
 		goto out;
 
-	if (filemap_map_pmd(vmf, &folio->page)) {
+	if (filemap_map_pmd(vmf, folio, start_pgoff)) {
 		ret = VM_FAULT_NOPAGE;
 		goto out;
 	}
 
 	addr = vma->vm_start + ((start_pgoff - vma->vm_pgoff) << PAGE_SHIFT);
 	vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd, addr, &vmf->ptl);
+	if (!vmf->pte) {
+		folio_unlock(folio);
+		folio_put(folio);
+		goto out;
+	}
 	do {
 again:
 		page = folio_file_page(folio, xas.xa_index);
@@ -3931,6 +3924,8 @@ bool filemap_release_folio(struct folio *folio, gfp_t gfp)
 	struct address_space * const mapping = folio->mapping;
 
 	BUG_ON(!folio_test_locked(folio));
+	if (!folio_needs_release(folio))
+		return true;
 	if (folio_test_writeback(folio))
 		return false;
 
@@ -3939,3 +3934,171 @@ bool filemap_release_folio(struct folio *folio, gfp_t gfp)
 	return try_to_free_buffers(folio);
 }
 EXPORT_SYMBOL(filemap_release_folio);
+
+#ifdef CONFIG_CACHESTAT_SYSCALL
+/**
+ * filemap_cachestat() - compute the page cache statistics of a mapping
+ * @mapping:	The mapping to compute the statistics for.
+ * @first_index:	The starting page cache index.
+ * @last_index:	The final page index (inclusive).
+ * @cs:	the cachestat struct to write the result to.
+ *
+ * This will query the page cache statistics of a mapping in the
+ * page range of [first_index, last_index] (inclusive). The statistics
+ * queried include: number of dirty pages, number of pages marked for
+ * writeback, and the number of (recently) evicted pages.
+ */
+static void filemap_cachestat(struct address_space *mapping,
+		pgoff_t first_index, pgoff_t last_index, struct cachestat *cs)
+{
+	XA_STATE(xas, &mapping->i_pages, first_index);
+	struct folio *folio;
+
+	rcu_read_lock();
+	xas_for_each(&xas, folio, last_index) {
+		unsigned long nr_pages;
+		pgoff_t folio_first_index, folio_last_index;
+
+		if (xas_retry(&xas, folio))
+			continue;
+
+		if (xa_is_value(folio)) {
+			/* page is evicted */
+			void *shadow = (void *)folio;
+			bool workingset; /* not used */
+			int order = xa_get_order(xas.xa, xas.xa_index);
+
+			nr_pages = 1 << order;
+			folio_first_index = round_down(xas.xa_index, 1 << order);
+			folio_last_index = folio_first_index + nr_pages - 1;
+
+			/* Folios might straddle the range boundaries, only count covered pages */
+			if (folio_first_index < first_index)
+				nr_pages -= first_index - folio_first_index;
+
+			if (folio_last_index > last_index)
+				nr_pages -= folio_last_index - last_index;
+
+			cs->nr_evicted += nr_pages;
+
+#ifdef CONFIG_SWAP /* implies CONFIG_MMU */
+			if (shmem_mapping(mapping)) {
+				/* shmem file - in swap cache */
+				swp_entry_t swp = radix_to_swp_entry(folio);
+
+				shadow = get_shadow_from_swap_cache(swp);
+			}
+#endif
+			if (workingset_test_recent(shadow, true, &workingset))
+				cs->nr_recently_evicted += nr_pages;
+
+			goto resched;
+		}
+
+		nr_pages = folio_nr_pages(folio);
+		folio_first_index = folio_pgoff(folio);
+		folio_last_index = folio_first_index + nr_pages - 1;
+
+		/* Folios might straddle the range boundaries, only count covered pages */
+		if (folio_first_index < first_index)
+			nr_pages -= first_index - folio_first_index;
+
+		if (folio_last_index > last_index)
+			nr_pages -= folio_last_index - last_index;
+
+		/* page is in cache */
+		cs->nr_cache += nr_pages;
+
+		if (folio_test_dirty(folio))
+			cs->nr_dirty += nr_pages;
+
+		if (folio_test_writeback(folio))
+			cs->nr_writeback += nr_pages;
+
+resched:
+		if (need_resched()) {
+			xas_pause(&xas);
+			cond_resched_rcu();
+		}
+	}
+	rcu_read_unlock();
+}
+
+/*
+ * The cachestat(2) system call.
+ *
+ * cachestat() returns the page cache statistics of a file in the
+ * bytes range specified by `off` and `len`: number of cached pages,
+ * number of dirty pages, number of pages marked for writeback,
+ * number of evicted pages, and number of recently evicted pages.
+ *
+ * An evicted page is a page that is previously in the page cache
+ * but has been evicted since. A page is recently evicted if its last
+ * eviction was recent enough that its reentry to the cache would
+ * indicate that it is actively being used by the system, and that
+ * there is memory pressure on the system.
+ *
+ * `off` and `len` must be non-negative integers. If `len` > 0,
+ * the queried range is [`off`, `off` + `len`]. If `len` == 0,
+ * we will query in the range from `off` to the end of the file.
+ *
+ * The `flags` argument is unused for now, but is included for future
+ * extensibility. User should pass 0 (i.e no flag specified).
+ *
+ * Currently, hugetlbfs is not supported.
+ *
+ * Because the status of a page can change after cachestat() checks it
+ * but before it returns to the application, the returned values may
+ * contain stale information.
+ *
+ * return values:
+ *  zero        - success
+ *  -EFAULT     - cstat or cstat_range points to an illegal address
+ *  -EINVAL     - invalid flags
+ *  -EBADF      - invalid file descriptor
+ *  -EOPNOTSUPP - file descriptor is of a hugetlbfs file
+ */
+SYSCALL_DEFINE4(cachestat, unsigned int, fd,
+		struct cachestat_range __user *, cstat_range,
+		struct cachestat __user *, cstat, unsigned int, flags)
+{
+	struct fd f = fdget(fd);
+	struct address_space *mapping;
+	struct cachestat_range csr;
+	struct cachestat cs;
+	pgoff_t first_index, last_index;
+
+	if (!f.file)
+		return -EBADF;
+
+	if (copy_from_user(&csr, cstat_range,
+			sizeof(struct cachestat_range))) {
+		fdput(f);
+		return -EFAULT;
+	}
+
+	/* hugetlbfs is not supported */
+	if (is_file_hugepages(f.file)) {
+		fdput(f);
+		return -EOPNOTSUPP;
+	}
+
+	if (flags != 0) {
+		fdput(f);
+		return -EINVAL;
+	}
+
+	first_index = csr.off >> PAGE_SHIFT;
+	last_index =
+		csr.len == 0 ? ULONG_MAX : (csr.off + csr.len - 1) >> PAGE_SHIFT;
+	memset(&cs, 0, sizeof(struct cachestat));
+	mapping = f.file->f_mapping;
+	filemap_cachestat(mapping, first_index, last_index, &cs);
+	fdput(f);
+
+	if (copy_to_user(cstat, &cs, sizeof(struct cachestat)))
+		return -EFAULT;
+
+	return 0;
+}
+#endif /* CONFIG_CACHESTAT_SYSCALL */

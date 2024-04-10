@@ -14,7 +14,6 @@
 
 #define pr_fmt(fmt) "fs-verity: " fmt
 
-#include <crypto/sha2.h>
 #include <linux/fsverity.h>
 #include <linux/mempool.h>
 
@@ -26,12 +25,6 @@ struct ahash_request;
  */
 #define FS_VERITY_MAX_LEVELS		8
 
-/*
- * Largest digest size among all hash algorithms supported by fs-verity.
- * Currently assumed to be <= size of fsverity_descriptor::root_hash.
- */
-#define FS_VERITY_MAX_DIGEST_SIZE	SHA512_DIGEST_SIZE
-
 /* A hash algorithm supported by fs-verity */
 struct fsverity_hash_alg {
 	struct crypto_ahash *tfm; /* hash tfm, allocated on demand */
@@ -39,6 +32,11 @@ struct fsverity_hash_alg {
 	unsigned int digest_size; /* digest size in bytes, e.g. 32 for SHA-256 */
 	unsigned int block_size;  /* block size in bytes, e.g. 64 for SHA-256 */
 	mempool_t req_pool;	  /* mempool with a preallocated hash request */
+	/*
+	 * The HASH_ALGO_* constant for this algorithm.  This is different from
+	 * FS_VERITY_HASH_ALG_*, which uses a different numbering scheme.
+	 */
+	enum hash_algo algo_id;
 };
 
 /* Merkle tree parameters: hash algorithm, initial hash state, and topology */

@@ -54,6 +54,7 @@
 #include "lib/vxlan.h"
 #define CREATE_TRACE_POINTS
 #include "diag/en_rep_tracepoint.h"
+#include "diag/reporter_vnic.h"
 #include "en_accel/ipsec.h"
 #include "en/tc/int_port.h"
 #include "en/ptp.h"
@@ -70,13 +71,17 @@ static void mlx5e_rep_get_drvinfo(struct net_device *dev,
 {
 	struct mlx5e_priv *priv = netdev_priv(dev);
 	struct mlx5_core_dev *mdev = priv->mdev;
+	int count;
 
 	strscpy(drvinfo->driver, mlx5e_rep_driver_name,
 		sizeof(drvinfo->driver));
-	snprintf(drvinfo->fw_version, sizeof(drvinfo->fw_version),
-		 "%d.%d.%04d (%.16s)",
-		 fw_rev_maj(mdev), fw_rev_min(mdev),
-		 fw_rev_sub(mdev), mdev->board_id);
+	count = snprintf(drvinfo->fw_version, sizeof(drvinfo->fw_version),
+			 "%d.%d.%04d (%.16s)", fw_rev_maj(mdev),
+			 fw_rev_min(mdev), fw_rev_sub(mdev), mdev->board_id);
+	if (count >= sizeof(drvinfo->fw_version))
+		snprintf(drvinfo->fw_version, sizeof(drvinfo->fw_version),
+			 "%d.%d.%04d", fw_rev_maj(mdev),
+			 fw_rev_min(mdev), fw_rev_sub(mdev));
 }
 
 static const struct counter_desc sw_rep_stats_desc[] = {
@@ -655,7 +660,7 @@ mlx5e_rep_get_stats(struct net_device *dev, struct rtnl_link_stats64 *stats)
 
 	/* update HW stats in background for next time */
 	mlx5e_queue_update_stats(priv);
-	memcpy(stats, &priv->stats.vf_vport, sizeof(*stats));
+	mlx5e_stats_copy_rep_stats(stats, &priv->stats.rep_stats);
 }
 
 static int mlx5e_rep_change_mtu(struct net_device *netdev, int new_mtu)
@@ -723,6 +728,7 @@ static int mlx5e_rep_max_nch_limit(struct mlx5_core_dev *mdev)
 
 static void mlx5e_build_rep_params(struct net_device *netdev)
 {
+	const bool take_rtnl = netdev->reg_state == NETREG_REGISTERED;
 	struct mlx5e_priv *priv = netdev_priv(netdev);
 	struct mlx5e_rep_priv *rpriv = priv->ppriv;
 	struct mlx5_eswitch_rep *rep = rpriv->rep;
@@ -748,8 +754,15 @@ static void mlx5e_build_rep_params(struct net_device *netdev)
 	/* RQ */
 	mlx5e_build_rq_params(mdev, params);
 
+	/* If netdev is already registered (e.g. move from nic profile to uplink,
+	 * RTNL lock must be held before triggering netdev notifiers.
+	 */
+	if (take_rtnl)
+		rtnl_lock();
 	/* update XDP supported features */
 	mlx5e_set_xdp_feature(netdev);
+	if (take_rtnl)
+		rtnl_unlock();
 
 	/* CQ moderation params */
 	params->rx_dim_enabled = MLX5_CAP_GEN(mdev, cq_moderation);
@@ -963,7 +976,7 @@ static int mlx5e_init_rep_rx(struct mlx5e_priv *priv)
 	err = mlx5e_open_drop_rq(priv, &priv->drop_rq);
 	if (err) {
 		mlx5_core_err(mdev, "open drop rq failed, %d\n", err);
-		return err;
+		goto err_rx_res_free;
 	}
 
 	err = mlx5e_rx_res_init(priv->rx_res, priv->mdev, 0,
@@ -997,6 +1010,7 @@ err_destroy_rx_res:
 	mlx5e_rx_res_destroy(priv->rx_res);
 err_close_drop_rq:
 	mlx5e_close_drop_rq(&priv->drop_rq);
+err_rx_res_free:
 	mlx5e_rx_res_free(priv->rx_res);
 	priv->rx_res = NULL;
 err_free_fs:
@@ -1110,6 +1124,10 @@ static int mlx5e_init_rep_tx(struct mlx5e_priv *priv)
 		return err;
 	}
 
+	err = mlx5e_rep_neigh_init(rpriv);
+	if (err)
+		goto err_neigh_init;
+
 	if (rpriv->rep->vport == MLX5_VPORT_UPLINK) {
 		err = mlx5e_init_uplink_rep_tx(rpriv);
 		if (err)
@@ -1126,6 +1144,8 @@ err_ht_init:
 	if (rpriv->rep->vport == MLX5_VPORT_UPLINK)
 		mlx5e_cleanup_uplink_rep_tx(rpriv);
 err_init_tx:
+	mlx5e_rep_neigh_cleanup(rpriv);
+err_neigh_init:
 	mlx5e_destroy_tises(priv);
 	return err;
 }
@@ -1139,22 +1159,17 @@ static void mlx5e_cleanup_rep_tx(struct mlx5e_priv *priv)
 	if (rpriv->rep->vport == MLX5_VPORT_UPLINK)
 		mlx5e_cleanup_uplink_rep_tx(rpriv);
 
+	mlx5e_rep_neigh_cleanup(rpriv);
 	mlx5e_destroy_tises(priv);
 }
 
 static void mlx5e_rep_enable(struct mlx5e_priv *priv)
 {
-	struct mlx5e_rep_priv *rpriv = priv->ppriv;
-
 	mlx5e_set_netdev_mtu_boundaries(priv);
-	mlx5e_rep_neigh_init(rpriv);
 }
 
 static void mlx5e_rep_disable(struct mlx5e_priv *priv)
 {
-	struct mlx5e_rep_priv *rpriv = priv->ppriv;
-
-	mlx5e_rep_neigh_cleanup(rpriv);
 }
 
 static int mlx5e_update_rep_rx(struct mlx5e_priv *priv)
@@ -1204,7 +1219,6 @@ static int uplink_rep_async_event(struct notifier_block *nb, unsigned long event
 
 static void mlx5e_uplink_rep_enable(struct mlx5e_priv *priv)
 {
-	struct mlx5e_rep_priv *rpriv = priv->ppriv;
 	struct net_device *netdev = priv->netdev;
 	struct mlx5_core_dev *mdev = priv->mdev;
 	u16 max_mtu;
@@ -1226,7 +1240,6 @@ static void mlx5e_uplink_rep_enable(struct mlx5e_priv *priv)
 	mlx5_notifier_register(mdev, &priv->events_nb);
 	mlx5e_dcbnl_initialize(priv);
 	mlx5e_dcbnl_init_app(priv);
-	mlx5e_rep_neigh_init(rpriv);
 	mlx5e_rep_bridge_init(priv);
 
 	netdev->wanted_features |= NETIF_F_HW_TC;
@@ -1241,7 +1254,6 @@ static void mlx5e_uplink_rep_enable(struct mlx5e_priv *priv)
 
 static void mlx5e_uplink_rep_disable(struct mlx5e_priv *priv)
 {
-	struct mlx5e_rep_priv *rpriv = priv->ppriv;
 	struct mlx5_core_dev *mdev = priv->mdev;
 
 	rtnl_lock();
@@ -1251,7 +1263,6 @@ static void mlx5e_uplink_rep_disable(struct mlx5e_priv *priv)
 	rtnl_unlock();
 
 	mlx5e_rep_bridge_cleanup(priv);
-	mlx5e_rep_neigh_cleanup(rpriv);
 	mlx5e_dcbnl_delete_app(priv);
 	mlx5_notifier_unregister(mdev, &priv->events_nb);
 	mlx5e_rep_tc_disable(priv);
@@ -1300,6 +1311,50 @@ static mlx5e_stats_grp_t mlx5e_ul_rep_stats_grps[] = {
 static unsigned int mlx5e_ul_rep_stats_grps_num(struct mlx5e_priv *priv)
 {
 	return ARRAY_SIZE(mlx5e_ul_rep_stats_grps);
+}
+
+static int
+mlx5e_rep_vnic_reporter_diagnose(struct devlink_health_reporter *reporter,
+				 struct devlink_fmsg *fmsg,
+				 struct netlink_ext_ack *extack)
+{
+	struct mlx5e_rep_priv *rpriv = devlink_health_reporter_priv(reporter);
+	struct mlx5_eswitch_rep *rep = rpriv->rep;
+
+	return mlx5_reporter_vnic_diagnose_counters(rep->esw->dev, fmsg,
+						    rep->vport, true);
+}
+
+static const struct devlink_health_reporter_ops mlx5_rep_vnic_reporter_ops = {
+	.name = "vnic",
+	.diagnose = mlx5e_rep_vnic_reporter_diagnose,
+};
+
+static void mlx5e_rep_vnic_reporter_create(struct mlx5e_priv *priv,
+					   struct devlink_port *dl_port)
+{
+	struct mlx5e_rep_priv *rpriv = priv->ppriv;
+	struct devlink_health_reporter *reporter;
+
+	reporter = devl_port_health_reporter_create(dl_port,
+						    &mlx5_rep_vnic_reporter_ops,
+						    0, rpriv);
+	if (IS_ERR(reporter)) {
+		mlx5_core_err(priv->mdev,
+			      "Failed to create representor vnic reporter, err = %ld\n",
+			      PTR_ERR(reporter));
+		return;
+	}
+
+	rpriv->rep_vnic_reporter = reporter;
+}
+
+static void mlx5e_rep_vnic_reporter_destroy(struct mlx5e_priv *priv)
+{
+	struct mlx5e_rep_priv *rpriv = priv->ppriv;
+
+	if (!IS_ERR_OR_NULL(rpriv->rep_vnic_reporter))
+		devl_health_reporter_destroy(rpriv->rep_vnic_reporter);
 }
 
 static const struct mlx5e_profile mlx5e_rep_profile = {
@@ -1402,8 +1457,10 @@ mlx5e_vport_vf_rep_load(struct mlx5_core_dev *dev, struct mlx5_eswitch_rep *rep)
 
 	dl_port = mlx5_esw_offloads_devlink_port(dev->priv.eswitch,
 						 rpriv->rep->vport);
-	if (dl_port)
+	if (!IS_ERR(dl_port)) {
 		SET_NETDEV_DEVLINK_PORT(netdev, dl_port);
+		mlx5e_rep_vnic_reporter_create(priv, dl_port);
+	}
 
 	err = register_netdev(netdev);
 	if (err) {
@@ -1416,8 +1473,8 @@ mlx5e_vport_vf_rep_load(struct mlx5_core_dev *dev, struct mlx5_eswitch_rep *rep)
 	return 0;
 
 err_detach_netdev:
+	mlx5e_rep_vnic_reporter_destroy(priv);
 	mlx5e_detach_netdev(netdev_priv(netdev));
-
 err_cleanup_profile:
 	priv->profile->cleanup(priv);
 
@@ -1466,6 +1523,7 @@ mlx5e_vport_rep_unload(struct mlx5_eswitch_rep *rep)
 	}
 
 	unregister_netdev(netdev);
+	mlx5e_rep_vnic_reporter_destroy(priv);
 	mlx5e_detach_netdev(priv);
 	priv->profile->cleanup(priv);
 	mlx5e_destroy_netdev(priv);

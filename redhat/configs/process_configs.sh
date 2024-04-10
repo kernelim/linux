@@ -311,12 +311,14 @@ function process_configs()
 			process_config "$cfg" "$count"
 		fi
 		process_config "$cfg" "$count" &
+		# shellcheck disable=SC2004
 		waitpids[${count}]=$!
 		((count++))
 		while [ "$(jobs | grep -c Running)" -ge "$RHJOBS" ]; do :; done
 	done
+	# shellcheck disable=SC2048
 	for pid in ${waitpids[*]}; do
-		wait ${pid}
+		wait "${pid}"
 	done
 
 	rm "$SCRIPT_DIR"/*.config*.old

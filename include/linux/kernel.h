@@ -289,7 +289,7 @@ bool mac_pton(const char *s, u8 *mac);
  *
  * Use tracing_on/tracing_off when you want to quickly turn on or off
  * tracing. It simply enables or disables the recording of the trace events.
- * This also corresponds to the user space /sys/kernel/debug/tracing/tracing_on
+ * This also corresponds to the user space /sys/kernel/tracing/tracing_on
  * file, which gives a means for the kernel and userspace to interact.
  * Place a tracing_off() in the kernel where you want tracing to end.
  * From user space, examine the trace, and then echo 1 > tracing_on
@@ -505,18 +505,11 @@ struct module;
 
 #ifdef CONFIG_RHEL_DIFFERENCES
 void mark_hardware_unmaintained(const char *driver_name, char *fmt, ...);
-void mark_driver_unmaintained(const char *driver_name);
-void mark_hardware_deprecated(const char *driver_name, char *fmt, ...);
-void mark_driver_deprecated(const char *driver_name);
-void mark_hardware_disabled(const char *driver_name, char *fmt, ...);
 void mark_tech_preview(const char *msg, struct module *mod);
 void mark_partner_supported(const char *msg, struct module *mod);
+void init_rh_check_status(char *fn_name);
 #else
 static inline void mark_hardware_unmaintained(const char *driver_name, char *fmt, ...) { }
-static inline void mark_driver_unmaintained(const char *driver_name) { }
-static inline void mark_hardware_deprecated(const char *driver_name, char *fmt, ...) { }
-static inline void mark_driver_deprecated(const char *driver_name) { }
-static inline void mark_hardware_disabled(const char *driver_name, char *fmt, ...) { }
 static inline void mark_tech_preview(const char *msg, struct module *mod) { }
 static inline void mark_partner_supported(const char *msg, struct module *mod) { }
 #endif

@@ -732,9 +732,9 @@ out:
 
 /* Bcache device */
 
-static int open_dev(struct block_device *b, fmode_t mode)
+static int open_dev(struct gendisk *disk, blk_mode_t mode)
 {
-	struct bcache_device *d = b->bd_disk->private_data;
+	struct bcache_device *d = disk->private_data;
 
 	if (test_bit(BCACHE_DEV_CLOSING, &d->flags))
 		return -ENXIO;
@@ -743,14 +743,14 @@ static int open_dev(struct block_device *b, fmode_t mode)
 	return 0;
 }
 
-static void release_dev(struct gendisk *b, fmode_t mode)
+static void release_dev(struct gendisk *b)
 {
 	struct bcache_device *d = b->private_data;
 
 	closure_put(&d->cl);
 }
 
-static int ioctl_dev(struct block_device *b, fmode_t mode,
+static int ioctl_dev(struct block_device *b, blk_mode_t mode,
 		     unsigned int cmd, unsigned long arg)
 {
 	struct bcache_device *d = b->bd_disk->private_data;
@@ -971,7 +971,6 @@ static int bcache_device_init(struct bcache_device *d, unsigned int block_size,
 	}
 
 	blk_queue_flag_set(QUEUE_FLAG_NONROT, d->disk->queue);
-	blk_queue_flag_clear(QUEUE_FLAG_ADD_RANDOM, d->disk->queue);
 
 	blk_queue_write_cache(q, true, true);
 
@@ -1369,7 +1368,7 @@ static void cached_dev_free(struct closure *cl)
 		put_page(virt_to_page(dc->sb_disk));
 
 	if (!IS_ERR_OR_NULL(dc->bdev))
-		blkdev_put(dc->bdev, FMODE_READ|FMODE_WRITE|FMODE_EXCL);
+		blkdev_put(dc->bdev, bcache_kobj);
 
 	wake_up(&unregister_wait);
 
@@ -2217,7 +2216,7 @@ void bch_cache_release(struct kobject *kobj)
 		put_page(virt_to_page(ca->sb_disk));
 
 	if (!IS_ERR_OR_NULL(ca->bdev))
-		blkdev_put(ca->bdev, FMODE_READ|FMODE_WRITE|FMODE_EXCL);
+		blkdev_put(ca->bdev, bcache_kobj);
 
 	kfree(ca);
 	module_put(THIS_MODULE);
@@ -2358,7 +2357,7 @@ static int register_cache(struct cache_sb *sb, struct cache_sb_disk *sb_disk,
 		 * call blkdev_put() to bdev in bch_cache_release(). So we
 		 * explicitly call blkdev_put() here.
 		 */
-		blkdev_put(bdev, FMODE_READ|FMODE_WRITE|FMODE_EXCL);
+		blkdev_put(bdev, bcache_kobj);
 		if (ret == -ENOMEM)
 			err = "cache_alloc(): -ENOMEM";
 		else if (ret == -EPERM)
@@ -2460,7 +2459,7 @@ static void register_bdev_worker(struct work_struct *work)
 	if (!dc) {
 		fail = true;
 		put_page(virt_to_page(args->sb_disk));
-		blkdev_put(args->bdev, FMODE_READ | FMODE_WRITE | FMODE_EXCL);
+		blkdev_put(args->bdev, bcache_kobj);
 		goto out;
 	}
 
@@ -2490,7 +2489,7 @@ static void register_cache_worker(struct work_struct *work)
 	if (!ca) {
 		fail = true;
 		put_page(virt_to_page(args->sb_disk));
-		blkdev_put(args->bdev, FMODE_READ | FMODE_WRITE | FMODE_EXCL);
+		blkdev_put(args->bdev, bcache_kobj);
 		goto out;
 	}
 
@@ -2557,9 +2556,8 @@ static ssize_t register_bcache(struct kobject *k, struct kobj_attribute *attr,
 
 	ret = -EINVAL;
 	err = "failed to open device";
-	bdev = blkdev_get_by_path(strim(path),
-				  FMODE_READ|FMODE_WRITE|FMODE_EXCL,
-				  sb);
+	bdev = blkdev_get_by_path(strim(path), BLK_OPEN_READ | BLK_OPEN_WRITE,
+				  sb, NULL);
 	if (IS_ERR(bdev)) {
 		if (bdev == ERR_PTR(-EBUSY)) {
 			dev_t dev;
@@ -2647,7 +2645,7 @@ async_done:
 out_put_sb_page:
 	put_page(virt_to_page(sb_disk));
 out_blkdev_put:
-	blkdev_put(bdev, FMODE_READ | FMODE_WRITE | FMODE_EXCL);
+	blkdev_put(bdev, register_bcache);
 out_free_sb:
 	kfree(sb);
 out_free_path:

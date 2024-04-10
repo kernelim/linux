@@ -1901,8 +1901,6 @@ static int __init ip_tables_init(void)
 {
 	int ret;
 
-	mark_driver_deprecated("iptables");
-
 	ret = register_pernet_subsys(&ip_tables_net_ops);
 	if (ret < 0)
 		goto err1;

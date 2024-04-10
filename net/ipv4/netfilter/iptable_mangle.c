@@ -39,12 +39,12 @@ static const struct xt_table packet_mangler = {
 static unsigned int
 ipt_mangle_out(struct sk_buff *skb, const struct nf_hook_state *state, void *priv)
 {
-	unsigned int ret;
+	unsigned int ret, verdict;
 	const struct iphdr *iph;
-	u_int8_t tos;
 	__be32 saddr, daddr;
-	u_int32_t mark;
+	u32 mark;
 	int err;
+	u8 tos;
 
 	/* Save things which could affect route */
 	mark = skb->mark;
@@ -54,8 +54,9 @@ ipt_mangle_out(struct sk_buff *skb, const struct nf_hook_state *state, void *pri
 	tos = iph->tos;
 
 	ret = ipt_do_table(skb, state, priv);
+	verdict = ret & NF_VERDICT_MASK;
 	/* Reroute for ANY change. */
-	if (ret != NF_DROP && ret != NF_STOLEN) {
+	if (verdict != NF_DROP && verdict != NF_STOLEN) {
 		iph = ip_hdr(skb);
 
 		if (iph->saddr != saddr ||

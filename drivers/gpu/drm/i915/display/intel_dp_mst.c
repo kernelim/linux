@@ -45,6 +45,27 @@
 #include "intel_hotplug.h"
 #include "skl_scaler.h"
 
+static int intel_dp_mst_check_constraints(struct drm_i915_private *i915, int bpp,
+					  const struct drm_display_mode *adjusted_mode,
+					  struct intel_crtc_state *crtc_state,
+					  bool dsc)
+{
+	if (intel_dp_is_uhbr(crtc_state) && DISPLAY_VER(i915) <= 13 && dsc) {
+		int output_bpp = bpp;
+		/* DisplayPort 2 128b/132b, bits per lane is always 32 */
+		int symbol_clock = crtc_state->port_clock / 32;
+
+		if (output_bpp * adjusted_mode->crtc_clock >=
+		    symbol_clock * 72) {
+			drm_dbg_kms(&i915->drm, "UHBR check failed(required bw %d available %d)\n",
+				    output_bpp * adjusted_mode->crtc_clock, symbol_clock * 72);
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
 static int intel_dp_mst_find_vcpi_slots_for_bpp(struct intel_encoder *encoder,
 						struct intel_crtc_state *crtc_state,
 						int max_bpp,
@@ -81,11 +102,14 @@ static int intel_dp_mst_find_vcpi_slots_for_bpp(struct intel_encoder *encoder,
 	}
 
 	for (bpp = max_bpp; bpp >= min_bpp; bpp -= step) {
-		crtc_state->pbn = drm_dp_calc_pbn_mode(adjusted_mode->crtc_clock,
-						       dsc ? bpp << 4 : bpp,
-						       dsc);
-
 		drm_dbg_kms(&i915->drm, "Trying bpp %d\n", bpp);
+
+		ret = intel_dp_mst_check_constraints(i915, bpp, adjusted_mode, crtc_state, dsc);
+		if (ret)
+			continue;
+
+		crtc_state->pbn = drm_dp_calc_pbn_mode(adjusted_mode->crtc_clock,
+						       bpp << 4);
 
 		slots = drm_dp_atomic_find_time_slots(state, &intel_dp->mst_mgr,
 						      connector->port,
@@ -104,8 +128,8 @@ static int intel_dp_mst_find_vcpi_slots_for_bpp(struct intel_encoder *encoder,
 		}
 	}
 
-	/* Despite slots are non-zero, we still failed the atomic check */
-	if (ret && slots >= 0)
+	/* We failed to find a proper bpp/timeslots, return error */
+	if (ret)
 		slots = ret;
 
 	if (slots < 0) {
@@ -273,7 +297,7 @@ static bool intel_dp_mst_has_audio(const struct drm_connector_state *conn_state)
 		to_intel_connector(conn_state->connector);
 
 	if (intel_conn_state->force_audio == HDMI_AUDIO_AUTO)
-		return connector->port->has_audio;
+		return connector->base.display_info.has_audio;
 	else
 		return intel_conn_state->force_audio == HDMI_AUDIO_ON;
 }
@@ -293,6 +317,7 @@ static int intel_dp_mst_compute_config(struct intel_encoder *encoder,
 	if (adjusted_mode->flags & DRM_MODE_FLAG_DBLSCAN)
 		return -EINVAL;
 
+	pipe_config->sink_format = INTEL_OUTPUT_FORMAT_RGB;
 	pipe_config->output_format = INTEL_OUTPUT_FORMAT_RGB;
 	pipe_config->has_pch_encoder = false;
 
@@ -611,7 +636,7 @@ static void intel_mst_post_disable_dp(struct intel_atomic_state *state,
 	 * no clock to the transcoder"
 	 */
 	if (DISPLAY_VER(dev_priv) < 12 || !last_mst_stream)
-		intel_ddi_disable_pipe_clock(old_crtc_state);
+		intel_ddi_disable_transcoder_clock(old_crtc_state);
 
 
 	intel_mst->connector = NULL;
@@ -649,6 +674,13 @@ static void intel_mst_pre_pll_enable_dp(struct intel_atomic_state *state,
 	if (intel_dp->active_mst_links == 0)
 		dig_port->base.pre_pll_enable(state, &dig_port->base,
 						    pipe_config, NULL);
+	else
+		/*
+		 * The port PLL state needs to get updated for secondary
+		 * streams as for the primary stream.
+		 */
+		intel_ddi_update_active_dpll(state, &dig_port->base,
+					     to_intel_crtc(pipe_config->uapi.crtc));
 }
 
 static void intel_mst_pre_enable_dp(struct intel_atomic_state *state,
@@ -705,7 +737,7 @@ static void intel_mst_pre_enable_dp(struct intel_atomic_state *state,
 	 * here for the following ones.
 	 */
 	if (DISPLAY_VER(dev_priv) < 12 || !first_mst_stream)
-		intel_ddi_enable_pipe_clock(encoder, pipe_config);
+		intel_ddi_enable_transcoder_clock(encoder, pipe_config);
 
 	intel_ddi_set_dp_msa(pipe_config, conn_state);
 }
@@ -768,9 +800,7 @@ static void intel_mst_enable_dp(struct intel_atomic_state *state,
 	/* Enable hdcp if it's desired */
 	if (conn_state->content_protection ==
 	    DRM_MODE_CONTENT_PROTECTION_DESIRED)
-		intel_hdcp_enable(to_intel_connector(conn_state->connector),
-				  pipe_config,
-				  (u8)conn_state->hdcp_content_type);
+		intel_hdcp_enable(state, encoder, pipe_config, conn_state);
 }
 
 static bool intel_dp_mst_enc_get_hw_state(struct intel_encoder *encoder,
@@ -805,15 +835,17 @@ static int intel_dp_mst_get_ddc_modes(struct drm_connector *connector)
 {
 	struct intel_connector *intel_connector = to_intel_connector(connector);
 	struct intel_dp *intel_dp = intel_connector->mst_port;
-	struct edid *edid;
+	const struct drm_edid *drm_edid;
 	int ret;
 
 	if (drm_connector_is_unregistered(connector))
 		return intel_connector_update_modes(connector, NULL);
 
-	edid = drm_dp_mst_get_edid(connector, &intel_dp->mst_mgr, intel_connector->port);
-	ret = intel_connector_update_modes(connector, edid);
-	kfree(edid);
+	drm_edid = drm_dp_mst_edid_read(connector, &intel_dp->mst_mgr, intel_connector->port);
+
+	ret = intel_connector_update_modes(connector, drm_edid);
+
+	drm_edid_free(drm_edid);
 
 	return ret;
 }
@@ -888,6 +920,10 @@ intel_dp_mst_mode_valid_ctx(struct drm_connector *connector,
 		return 0;
 	}
 
+	*status = intel_cpu_transcoder_mode_valid(dev_priv, mode);
+	if (*status != MODE_OK)
+		return 0;
+
 	if (mode->flags & DRM_MODE_FLAG_DBLSCAN) {
 		*status = MODE_NO_DBLESCAN;
 		return 0;
@@ -904,7 +940,7 @@ intel_dp_mst_mode_valid_ctx(struct drm_connector *connector,
 		return ret;
 
 	if (mode_rate > max_rate || mode->clock > max_dotclk ||
-	    drm_dp_calc_pbn_mode(mode->clock, min_bpp, false) > port->full_pbn) {
+	    drm_dp_calc_pbn_mode(mode->clock, min_bpp << 4) > port->full_pbn) {
 		*status = MODE_CLOCK_HIGH;
 		return 0;
 	}
@@ -922,6 +958,10 @@ intel_dp_mst_mode_valid_ctx(struct drm_connector *connector,
 	if (intel_dp_need_bigjoiner(intel_dp, mode->hdisplay, target_clock)) {
 		bigjoiner = true;
 		max_dotclk *= 2;
+
+		/* TODO: add support for bigjoiner */
+		*status = MODE_CLOCK_HIGH;
+		return 0;
 	}
 
 	if (DISPLAY_VER(dev_priv) >= 10 &&
@@ -955,11 +995,15 @@ intel_dp_mst_mode_valid_ctx(struct drm_connector *connector,
 	 * Big joiner configuration needs DSC for TGL which is not true for
 	 * XE_LPD where uncompressed joiner is supported.
 	 */
-	if (DISPLAY_VER(dev_priv) < 13 && bigjoiner && !dsc)
-		return MODE_CLOCK_HIGH;
+	if (DISPLAY_VER(dev_priv) < 13 && bigjoiner && !dsc) {
+		*status = MODE_CLOCK_HIGH;
+		return 0;
+	}
 
-	if (mode_rate > max_rate && !dsc)
-		return MODE_CLOCK_HIGH;
+	if (mode_rate > max_rate && !dsc) {
+		*status = MODE_CLOCK_HIGH;
+		return 0;
+	}
 
 	*status = intel_mode_valid_max_plane_size(dev_priv, mode, false);
 	return 0;

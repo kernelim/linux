@@ -17,11 +17,11 @@
 #include "libata-transport.h"
 
 /* debounce timing parameters in msecs { interval, duration, timeout } */
-const unsigned long sata_deb_timing_normal[]		= {   5,  100, 2000 };
+const unsigned int sata_deb_timing_normal[]		= {   5,  100, 2000 };
 EXPORT_SYMBOL_GPL(sata_deb_timing_normal);
-const unsigned long sata_deb_timing_hotplug[]		= {  25,  500, 2000 };
+const unsigned int sata_deb_timing_hotplug[]		= {  25,  500, 2000 };
 EXPORT_SYMBOL_GPL(sata_deb_timing_hotplug);
-const unsigned long sata_deb_timing_long[]		= { 100, 2000, 5000 };
+const unsigned int sata_deb_timing_long[]		= { 100, 2000, 5000 };
 EXPORT_SYMBOL_GPL(sata_deb_timing_long);
 
 /**
@@ -230,11 +230,11 @@ EXPORT_SYMBOL_GPL(ata_tf_from_fis);
  *	RETURNS:
  *	0 on success, -errno on failure.
  */
-int sata_link_debounce(struct ata_link *link, const unsigned long *params,
+int sata_link_debounce(struct ata_link *link, const unsigned int *params,
 		       unsigned long deadline)
 {
-	unsigned long interval = params[0];
-	unsigned long duration = params[1];
+	unsigned int interval = params[0];
+	unsigned int duration = params[1];
 	unsigned long last_jiffies, t;
 	u32 last, cur;
 	int rc;
@@ -293,7 +293,7 @@ EXPORT_SYMBOL_GPL(sata_link_debounce);
  *	RETURNS:
  *	0 on success, -errno on failure.
  */
-int sata_link_resume(struct ata_link *link, const unsigned long *params,
+int sata_link_resume(struct ata_link *link, const unsigned int *params,
 		     unsigned long deadline)
 {
 	int tries = ATA_LINK_RESUME_TRIES;
@@ -394,10 +394,23 @@ int sata_link_scr_lpm(struct ata_link *link, enum ata_lpm_policy policy,
 	case ATA_LPM_MED_POWER_WITH_DIPM:
 	case ATA_LPM_MIN_POWER_WITH_PARTIAL:
 	case ATA_LPM_MIN_POWER:
-		if (ata_link_nr_enabled(link) > 0)
-			/* no restrictions on LPM transitions */
+		if (ata_link_nr_enabled(link) > 0) {
+			/* assume no restrictions on LPM transitions */
 			scontrol &= ~(0x7 << 8);
-		else {
+
+			/*
+			 * If the controller does not support partial, slumber,
+			 * or devsleep, then disallow these transitions.
+			 */
+			if (link->ap->host->flags & ATA_HOST_NO_PART)
+				scontrol |= (0x1 << 8);
+
+			if (link->ap->host->flags & ATA_HOST_NO_SSC)
+				scontrol |= (0x2 << 8);
+
+			if (link->ap->host->flags & ATA_HOST_NO_DEVSLP)
+				scontrol |= (0x4 << 8);
+		} else {
 			/* empty port, power off */
 			scontrol &= ~0xf;
 			scontrol |= (0x1 << 2);
@@ -526,7 +539,7 @@ EXPORT_SYMBOL_GPL(sata_set_spd);
  *	RETURNS:
  *	0 on success, -errno otherwise.
  */
-int sata_link_hardreset(struct ata_link *link, const unsigned long *timing,
+int sata_link_hardreset(struct ata_link *link, const unsigned int *timing,
 			unsigned long deadline,
 			bool *online, int (*check_ready)(struct ata_link *))
 {
@@ -1014,7 +1027,6 @@ EXPORT_SYMBOL_GPL(dev_attr_sw_activity);
 /**
  *	ata_change_queue_depth - Set a device maximum queue depth
  *	@ap: ATA port of the target device
- *	@dev: target ATA device
  *	@sdev: SCSI device to configure queue depth for
  *	@queue_depth: new queue depth
  *
@@ -1022,33 +1034,47 @@ EXPORT_SYMBOL_GPL(dev_attr_sw_activity);
  *	and libata.
  *
  */
-int ata_change_queue_depth(struct ata_port *ap, struct ata_device *dev,
-			   struct scsi_device *sdev, int queue_depth)
+int ata_change_queue_depth(struct ata_port *ap, struct scsi_device *sdev,
+			   int queue_depth)
 {
+	struct ata_device *dev;
 	unsigned long flags;
+	int max_queue_depth;
 
-	if (!dev || !ata_dev_enabled(dev))
-		return sdev->queue_depth;
-
-	if (queue_depth < 1 || queue_depth == sdev->queue_depth)
-		return sdev->queue_depth;
-
-	/* NCQ enabled? */
 	spin_lock_irqsave(ap->lock, flags);
-	dev->flags &= ~ATA_DFLAG_NCQ_OFF;
-	if (queue_depth == 1 || !ata_ncq_enabled(dev)) {
+
+	dev = ata_scsi_find_dev(ap, sdev);
+	if (!dev || queue_depth < 1 || queue_depth == sdev->queue_depth) {
+		spin_unlock_irqrestore(ap->lock, flags);
+		return sdev->queue_depth;
+	}
+
+	/*
+	 * Make sure that the queue depth requested does not exceed the device
+	 * capabilities.
+	 */
+	max_queue_depth = min(ATA_MAX_QUEUE, sdev->host->can_queue);
+	max_queue_depth = min(max_queue_depth, ata_id_queue_depth(dev->id));
+	if (queue_depth > max_queue_depth) {
+		spin_unlock_irqrestore(ap->lock, flags);
+		return -EINVAL;
+	}
+
+	/*
+	 * If NCQ is not supported by the device or if the target queue depth
+	 * is 1 (to disable drive side command queueing), turn off NCQ.
+	 */
+	if (queue_depth == 1 || !ata_ncq_supported(dev)) {
 		dev->flags |= ATA_DFLAG_NCQ_OFF;
 		queue_depth = 1;
+	} else {
+		dev->flags &= ~ATA_DFLAG_NCQ_OFF;
 	}
+
 	spin_unlock_irqrestore(ap->lock, flags);
 
-	/* limit and apply queue depth */
-	queue_depth = min(queue_depth, sdev->host->can_queue);
-	queue_depth = min(queue_depth, ata_id_queue_depth(dev->id));
-	queue_depth = min(queue_depth, ATA_MAX_QUEUE);
-
-	if (sdev->queue_depth == queue_depth)
-		return -EINVAL;
+	if (queue_depth == sdev->queue_depth)
+		return sdev->queue_depth;
 
 	return scsi_change_queue_depth(sdev, queue_depth);
 }
@@ -1073,8 +1099,7 @@ int ata_scsi_change_queue_depth(struct scsi_device *sdev, int queue_depth)
 {
 	struct ata_port *ap = ata_shost_to_port(sdev->host);
 
-	return ata_change_queue_depth(ap, ata_scsi_find_dev(ap, sdev),
-				      sdev, queue_depth);
+	return ata_change_queue_depth(ap, sdev, queue_depth);
 }
 EXPORT_SYMBOL_GPL(ata_scsi_change_queue_depth);
 

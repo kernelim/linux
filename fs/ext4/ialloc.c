@@ -98,7 +98,7 @@ static int ext4_validate_inode_bitmap(struct super_block *sb,
 	if (buffer_verified(bh))
 		goto verified;
 	blk = ext4_inode_bitmap(sb, desc);
-	if (!ext4_inode_bitmap_csum_verify(sb, block_group, desc, bh,
+	if (!ext4_inode_bitmap_csum_verify(sb, desc, bh,
 					   EXT4_INODES_PER_GROUP(sb) / 8) ||
 	    ext4_simulate_fail(sb, EXT4_SIM_IBITMAP_CRC)) {
 		ext4_unlock_group(sb, block_group);
@@ -327,7 +327,7 @@ void ext4_free_inode(handle_t *handle, struct inode *inode)
 		if (percpu_counter_initialized(&sbi->s_dirs_counter))
 			percpu_counter_dec(&sbi->s_dirs_counter);
 	}
-	ext4_inode_bitmap_csum_set(sb, block_group, gdp, bitmap_bh,
+	ext4_inode_bitmap_csum_set(sb, gdp, bitmap_bh,
 				   EXT4_INODES_PER_GROUP(sb) / 8);
 	ext4_group_desc_csum_set(sb, block_group, gdp);
 	ext4_unlock_group(sb, block_group);
@@ -463,10 +463,9 @@ static int find_group_orlov(struct super_block *sb, struct inode *parent,
 			hinfo.hash_version = DX_HASH_HALF_MD4;
 			hinfo.seed = sbi->s_hash_seed;
 			ext4fs_dirhash(parent, qstr->name, qstr->len, &hinfo);
-			grp = hinfo.hash;
+			parent_group = hinfo.hash % ngroups;
 		} else
-			grp = prandom_u32();
-		parent_group = (unsigned)grp % ngroups;
+			parent_group = prandom_u32_max(ngroups);
 		for (i = 0; i < ngroups; i++) {
 			g = (parent_group + i) % ngroups;
 			get_orlov_stats(sb, g, flex_size, &stats);
@@ -814,8 +813,7 @@ int ext4_mark_inode_used(struct super_block *sb, int ino)
 			gdp->bg_flags &= cpu_to_le16(~EXT4_BG_BLOCK_UNINIT);
 			ext4_free_group_clusters_set(sb, gdp,
 				ext4_free_clusters_after_init(sb, group, gdp));
-			ext4_block_bitmap_csum_set(sb, group, gdp,
-						   block_bitmap_bh);
+			ext4_block_bitmap_csum_set(sb, gdp, block_bitmap_bh);
 			ext4_group_desc_csum_set(sb, group, gdp);
 		}
 		ext4_unlock_group(sb, group);
@@ -853,7 +851,7 @@ int ext4_mark_inode_used(struct super_block *sb, int ino)
 
 	ext4_free_inodes_set(sb, gdp, ext4_free_inodes_count(sb, gdp) - 1);
 	if (ext4_has_group_desc_csum(sb)) {
-		ext4_inode_bitmap_csum_set(sb, group, gdp, inode_bitmap_bh,
+		ext4_inode_bitmap_csum_set(sb, gdp, inode_bitmap_bh,
 					   EXT4_INODES_PER_GROUP(sb) / 8);
 		ext4_group_desc_csum_set(sb, group, gdp);
 	}
@@ -1077,8 +1075,8 @@ repeat_in_this_group:
 
 		if ((!(sbi->s_mount_state & EXT4_FC_REPLAY)) && !handle) {
 			BUG_ON(nblocks <= 0);
-			handle = __ext4_journal_start_sb(dir->i_sb, line_no,
-				 handle_type, nblocks, 0,
+			handle = __ext4_journal_start_sb(NULL, dir->i_sb,
+				 line_no, handle_type, nblocks, 0,
 				 ext4_trans_default_revoke_credits(sb));
 			if (IS_ERR(handle)) {
 				err = PTR_ERR(handle);
@@ -1166,8 +1164,7 @@ got:
 			gdp->bg_flags &= cpu_to_le16(~EXT4_BG_BLOCK_UNINIT);
 			ext4_free_group_clusters_set(sb, gdp,
 				ext4_free_clusters_after_init(sb, group, gdp));
-			ext4_block_bitmap_csum_set(sb, group, gdp,
-						   block_bitmap_bh);
+			ext4_block_bitmap_csum_set(sb, gdp, block_bitmap_bh);
 			ext4_group_desc_csum_set(sb, group, gdp);
 		}
 		ext4_unlock_group(sb, group);
@@ -1223,7 +1220,7 @@ got:
 		}
 	}
 	if (ext4_has_group_desc_csum(sb)) {
-		ext4_inode_bitmap_csum_set(sb, group, gdp, inode_bitmap_bh,
+		ext4_inode_bitmap_csum_set(sb, gdp, inode_bitmap_bh,
 					   EXT4_INODES_PER_GROUP(sb) / 8);
 		ext4_group_desc_csum_set(sb, group, gdp);
 	}
@@ -1280,7 +1277,7 @@ got:
 					EXT4_GROUP_INFO_IBITMAP_CORRUPT);
 		goto out;
 	}
-	inode->i_generation = prandom_u32();
+	inode->i_generation = get_random_u32();
 
 	/* Precompute checksum seed for inode metadata */
 	if (ext4_has_metadata_csum(sb)) {

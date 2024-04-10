@@ -18,6 +18,8 @@
 #include <linux/usb/usbnet.h>
 #include <linux/slab.h>
 #include <linux/of_net.h>
+#include <linux/irq.h>
+#include <linux/irqdomain.h>
 #include <linux/mdio.h>
 #include <linux/phy.h>
 #include "smsc95xx.h"
@@ -51,6 +53,9 @@
 #define SUSPEND_ALLMODES		(SUSPEND_SUSPEND0 | SUSPEND_SUSPEND1 | \
 					 SUSPEND_SUSPEND2 | SUSPEND_SUSPEND3)
 
+#define SMSC95XX_NR_IRQS		(1) /* raise to 12 for GPIOs */
+#define PHY_HWIRQ			(SMSC95XX_NR_IRQS - 1)
+
 struct smsc95xx_priv {
 	u32 mac_cr;
 	u32 hash_hi;
@@ -59,6 +64,9 @@ struct smsc95xx_priv {
 	spinlock_t mac_cr_lock;
 	u8 features;
 	u8 suspend_flags;
+	struct irq_chip irqchip;
+	struct irq_domain *irqdomain;
+	struct fwnode_handle *irqfwnode;
 	struct mii_bus *mdiobus;
 	struct phy_device *phydev;
 };
@@ -84,9 +92,10 @@ static int __must_check __smsc95xx_read_reg(struct usbnet *dev, u32 index,
 	ret = fn(dev, USB_VENDOR_REQUEST_READ_REGISTER, USB_DIR_IN
 		 | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
 		 0, index, &buf, 4);
-	if (unlikely(ret < 0)) {
-		netdev_warn(dev->net, "Failed to read reg index 0x%08x: %d\n",
-			    index, ret);
+	if (ret < 0) {
+		if (ret != -ENODEV)
+			netdev_warn(dev->net, "Failed to read reg index 0x%08x: %d\n",
+				    index, ret);
 		return ret;
 	}
 
@@ -116,7 +125,7 @@ static int __must_check __smsc95xx_write_reg(struct usbnet *dev, u32 index,
 	ret = fn(dev, USB_VENDOR_REQUEST_WRITE_REGISTER, USB_DIR_OUT
 		 | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
 		 0, index, &buf, 4);
-	if (unlikely(ret < 0))
+	if (ret < 0 && ret != -ENODEV)
 		netdev_warn(dev->net, "Failed to write reg index 0x%08x: %d\n",
 			    index, ret);
 
@@ -159,6 +168,9 @@ static int __must_check __smsc95xx_phy_wait_not_busy(struct usbnet *dev,
 	do {
 		ret = __smsc95xx_read_reg(dev, MII_ADDR, &val, in_pm);
 		if (ret < 0) {
+			/* Ignore -ENODEV error during disconnect() */
+			if (ret == -ENODEV)
+				return 0;
 			netdev_warn(dev->net, "Error reading MII_ACCESS\n");
 			return ret;
 		}
@@ -194,7 +206,8 @@ static int __smsc95xx_mdio_read(struct usbnet *dev, int phy_id, int idx,
 	addr = mii_address_cmd(phy_id, idx, MII_READ_ | MII_BUSY_);
 	ret = __smsc95xx_write_reg(dev, MII_ADDR, addr, in_pm);
 	if (ret < 0) {
-		netdev_warn(dev->net, "Error writing MII_ADDR\n");
+		if (ret != -ENODEV)
+			netdev_warn(dev->net, "Error writing MII_ADDR\n");
 		goto done;
 	}
 
@@ -206,7 +219,8 @@ static int __smsc95xx_mdio_read(struct usbnet *dev, int phy_id, int idx,
 
 	ret = __smsc95xx_read_reg(dev, MII_DATA, &val, in_pm);
 	if (ret < 0) {
-		netdev_warn(dev->net, "Error reading MII_DATA\n");
+		if (ret != -ENODEV)
+			netdev_warn(dev->net, "Error reading MII_DATA\n");
 		goto done;
 	}
 
@@ -214,6 +228,10 @@ static int __smsc95xx_mdio_read(struct usbnet *dev, int phy_id, int idx,
 
 done:
 	mutex_unlock(&dev->phy_mutex);
+
+	/* Ignore -ENODEV error during disconnect() */
+	if (ret == -ENODEV)
+		return 0;
 	return ret;
 }
 
@@ -235,7 +253,8 @@ static void __smsc95xx_mdio_write(struct usbnet *dev, int phy_id,
 	val = regval;
 	ret = __smsc95xx_write_reg(dev, MII_DATA, val, in_pm);
 	if (ret < 0) {
-		netdev_warn(dev->net, "Error writing MII_DATA\n");
+		if (ret != -ENODEV)
+			netdev_warn(dev->net, "Error writing MII_DATA\n");
 		goto done;
 	}
 
@@ -243,7 +262,8 @@ static void __smsc95xx_mdio_write(struct usbnet *dev, int phy_id,
 	addr = mii_address_cmd(phy_id, idx, MII_WRITE_ | MII_BUSY_);
 	ret = __smsc95xx_write_reg(dev, MII_ADDR, addr, in_pm);
 	if (ret < 0) {
-		netdev_warn(dev->net, "Error writing MII_ADDR\n");
+		if (ret != -ENODEV)
+			netdev_warn(dev->net, "Error writing MII_ADDR\n");
 		goto done;
 	}
 
@@ -552,15 +572,11 @@ static int smsc95xx_phy_update_flowcontrol(struct usbnet *dev)
 	return smsc95xx_write_reg(dev, AFC_CFG, afc_cfg);
 }
 
-static int smsc95xx_link_reset(struct usbnet *dev)
+static void smsc95xx_mac_update_fullduplex(struct usbnet *dev)
 {
 	struct smsc95xx_priv *pdata = dev->driver_priv;
 	unsigned long flags;
 	int ret;
-
-	ret = smsc95xx_write_reg(dev, INT_STS, INT_STS_CLEAR_ALL_);
-	if (ret < 0)
-		return ret;
 
 	spin_lock_irqsave(&pdata->mac_cr_lock, flags);
 	if (pdata->phydev->duplex != DUPLEX_FULL) {
@@ -573,18 +589,22 @@ static int smsc95xx_link_reset(struct usbnet *dev)
 	spin_unlock_irqrestore(&pdata->mac_cr_lock, flags);
 
 	ret = smsc95xx_write_reg(dev, MAC_CR, pdata->mac_cr);
-	if (ret < 0)
-		return ret;
+	if (ret < 0) {
+		if (ret != -ENODEV)
+			netdev_warn(dev->net,
+				    "Error updating MAC full duplex mode\n");
+		return;
+	}
 
 	ret = smsc95xx_phy_update_flowcontrol(dev);
 	if (ret < 0)
 		netdev_warn(dev->net, "Error updating PHY flow control\n");
-
-	return ret;
 }
 
 static void smsc95xx_status(struct usbnet *dev, struct urb *urb)
 {
+	struct smsc95xx_priv *pdata = dev->driver_priv;
+	unsigned long flags;
 	u32 intdata;
 
 	if (urb->actual_length != 4) {
@@ -596,11 +616,15 @@ static void smsc95xx_status(struct usbnet *dev, struct urb *urb)
 	intdata = get_unaligned_le32(urb->transfer_buffer);
 	netif_dbg(dev, link, dev->net, "intdata: 0x%08X\n", intdata);
 
+	local_irq_save(flags);
+
 	if (intdata & INT_ENP_PHY_INT_)
-		usbnet_defer_kevent(dev, EVENT_LINK_RESET);
+		generic_handle_domain_irq(pdata->irqdomain, PHY_HWIRQ);
 	else
 		netdev_warn(dev->net, "unexpected interrupt, intdata=0x%08X\n",
 			    intdata);
+
+	local_irq_restore(flags);
 }
 
 /* Enable or disable Tx & Rx checksum offload engines */
@@ -853,24 +877,6 @@ static int smsc95xx_reset(struct usbnet *dev)
 		return ret;
 	}
 
-	ret = smsc95xx_write_reg(dev, PM_CTRL, PM_CTL_PHY_RST_);
-	if (ret < 0)
-		return ret;
-
-	timeout = 0;
-	do {
-		msleep(10);
-		ret = smsc95xx_read_reg(dev, PM_CTRL, &read_buf);
-		if (ret < 0)
-			return ret;
-		timeout++;
-	} while ((read_buf & PM_CTL_PHY_RST_) && (timeout < 100));
-
-	if (timeout >= 100) {
-		netdev_warn(dev->net, "timeout waiting for PHY Reset\n");
-		return ret;
-	}
-
 	ret = smsc95xx_set_mac_address(dev);
 	if (ret < 0)
 		return ret;
@@ -1049,12 +1055,22 @@ static const struct net_device_ops smsc95xx_netdev_ops = {
 	.ndo_set_features	= smsc95xx_set_features,
 };
 
+static void smsc95xx_handle_link_change(struct net_device *net)
+{
+	struct usbnet *dev = netdev_priv(net);
+
+	phy_print_status(net->phydev);
+	smsc95xx_mac_update_fullduplex(dev);
+	usbnet_defer_kevent(dev, EVENT_LINK_CHANGE);
+}
+
 static int smsc95xx_bind(struct usbnet *dev, struct usb_interface *intf)
 {
 	struct smsc95xx_priv *pdata;
 	bool is_internal_phy;
+	char usb_path[64];
+	int ret, phy_irq;
 	u32 val;
-	int ret;
 
 	printk(KERN_INFO SMSC_CHIPNAME " v" SMSC_DRIVER_VERSION "\n");
 
@@ -1094,10 +1110,38 @@ static int smsc95xx_bind(struct usbnet *dev, struct usb_interface *intf)
 	if (ret)
 		goto free_pdata;
 
+	/* create irq domain for use by PHY driver and GPIO consumers */
+	usb_make_path(dev->udev, usb_path, sizeof(usb_path));
+	pdata->irqfwnode = irq_domain_alloc_named_fwnode(usb_path);
+	if (!pdata->irqfwnode) {
+		ret = -ENOMEM;
+		goto free_pdata;
+	}
+
+	pdata->irqdomain = irq_domain_create_linear(pdata->irqfwnode,
+						    SMSC95XX_NR_IRQS,
+						    &irq_domain_simple_ops,
+						    pdata);
+	if (!pdata->irqdomain) {
+		ret = -ENOMEM;
+		goto free_irqfwnode;
+	}
+
+	phy_irq = irq_create_mapping(pdata->irqdomain, PHY_HWIRQ);
+	if (!phy_irq) {
+		ret = -ENOENT;
+		goto remove_irqdomain;
+	}
+
+	pdata->irqchip = dummy_irq_chip;
+	pdata->irqchip.name = SMSC_CHIPNAME;
+	irq_set_chip_and_handler_name(phy_irq, &pdata->irqchip,
+				      handle_simple_irq, "phy");
+
 	pdata->mdiobus = mdiobus_alloc();
 	if (!pdata->mdiobus) {
 		ret = -ENOMEM;
-		goto free_pdata;
+		goto dispose_irq;
 	}
 
 	ret = smsc95xx_read_reg(dev, HW_CFG, &val);
@@ -1130,6 +1174,7 @@ static int smsc95xx_bind(struct usbnet *dev, struct usb_interface *intf)
 		goto unregister_mdio;
 	}
 
+	pdata->phydev->irq = phy_irq;
 	pdata->phydev->is_internal = is_internal_phy;
 
 	/* detect device revision as different features may be available */
@@ -1153,6 +1198,17 @@ static int smsc95xx_bind(struct usbnet *dev, struct usb_interface *intf)
 	dev->net->min_mtu = ETH_MIN_MTU;
 	dev->net->max_mtu = ETH_DATA_LEN;
 	dev->hard_mtu = dev->net->mtu + dev->net->hard_header_len;
+
+	ret = phy_connect_direct(dev->net, pdata->phydev,
+				 &smsc95xx_handle_link_change,
+				 PHY_INTERFACE_MODE_MII);
+	if (ret) {
+		netdev_err(dev->net, "can't attach PHY to %s\n", pdata->mdiobus->id);
+		goto unregister_mdio;
+	}
+
+	phy_attached_info(dev->net->phydev);
+
 	return 0;
 
 unregister_mdio:
@@ -1160,6 +1216,15 @@ unregister_mdio:
 
 free_mdio:
 	mdiobus_free(pdata->mdiobus);
+
+dispose_irq:
+	irq_dispose_mapping(phy_irq);
+
+remove_irqdomain:
+	irq_domain_remove(pdata->irqdomain);
+
+free_irqfwnode:
+	irq_domain_free_fwnode(pdata->irqfwnode);
 
 free_pdata:
 	kfree(pdata);
@@ -1170,44 +1235,28 @@ static void smsc95xx_unbind(struct usbnet *dev, struct usb_interface *intf)
 {
 	struct smsc95xx_priv *pdata = dev->driver_priv;
 
+	phy_disconnect(dev->net->phydev);
 	mdiobus_unregister(pdata->mdiobus);
 	mdiobus_free(pdata->mdiobus);
+	irq_dispose_mapping(irq_find_mapping(pdata->irqdomain, PHY_HWIRQ));
+	irq_domain_remove(pdata->irqdomain);
+	irq_domain_free_fwnode(pdata->irqfwnode);
 	netif_dbg(dev, ifdown, dev->net, "free pdata\n");
 	kfree(pdata);
 }
 
-static void smsc95xx_handle_link_change(struct net_device *net)
-{
-	phy_print_status(net->phydev);
-}
-
 static int smsc95xx_start_phy(struct usbnet *dev)
 {
-	struct smsc95xx_priv *pdata = dev->driver_priv;
-	struct net_device *net = dev->net;
-	int ret;
+	phy_start(dev->net->phydev);
 
-	ret = smsc95xx_reset(dev);
-	if (ret < 0)
-		return ret;
-
-	ret = phy_connect_direct(net, pdata->phydev,
-				 &smsc95xx_handle_link_change,
-				 PHY_INTERFACE_MODE_MII);
-	if (ret) {
-		netdev_err(net, "can't attach PHY to %s\n", pdata->mdiobus->id);
-		return ret;
-	}
-
-	phy_attached_info(net->phydev);
-	phy_start(net->phydev);
 	return 0;
 }
 
-static int smsc95xx_disconnect_phy(struct usbnet *dev)
+static int smsc95xx_stop(struct usbnet *dev)
 {
-	phy_stop(dev->net->phydev);
-	phy_disconnect(dev->net->phydev);
+	if (dev->net->phydev)
+		phy_stop(dev->net->phydev);
+
 	return 0;
 }
 
@@ -1215,29 +1264,6 @@ static u32 smsc_crc(const u8 *buffer, size_t len, int filter)
 {
 	u32 crc = bitrev16(crc16(0xFFFF, buffer, len));
 	return crc << ((filter % 2) * 16);
-}
-
-static int smsc95xx_enable_phy_wakeup_interrupts(struct usbnet *dev, u16 mask)
-{
-	int ret;
-
-	netdev_dbg(dev->net, "enabling PHY wakeup interrupts\n");
-
-	/* read to clear */
-	ret = smsc95xx_mdio_read_nopm(dev, PHY_INT_SRC);
-	if (ret < 0)
-		return ret;
-
-	/* enable interrupt source */
-	ret = smsc95xx_mdio_read_nopm(dev, PHY_INT_MASK);
-	if (ret < 0)
-		return ret;
-
-	ret |= mask;
-
-	smsc95xx_mdio_write_nopm(dev, PHY_INT_MASK, ret);
-
-	return 0;
 }
 
 static int smsc95xx_link_ok_nopm(struct usbnet *dev)
@@ -1406,7 +1432,6 @@ static int smsc95xx_enter_suspend3(struct usbnet *dev)
 static int smsc95xx_autosuspend(struct usbnet *dev, u32 link_up)
 {
 	struct smsc95xx_priv *pdata = dev->driver_priv;
-	int ret;
 
 	if (!netif_running(dev->net)) {
 		/* interface is ifconfig down so fully power down hw */
@@ -1425,25 +1450,8 @@ static int smsc95xx_autosuspend(struct usbnet *dev, u32 link_up)
 		}
 
 		netdev_dbg(dev->net, "autosuspend entering SUSPEND1\n");
-
-		/* enable PHY wakeup events for if cable is attached */
-		ret = smsc95xx_enable_phy_wakeup_interrupts(dev,
-			PHY_INT_MASK_ANEG_COMP_);
-		if (ret < 0) {
-			netdev_warn(dev->net, "error enabling PHY wakeup ints\n");
-			return ret;
-		}
-
 		netdev_info(dev->net, "entering SUSPEND1 mode\n");
 		return smsc95xx_enter_suspend1(dev);
-	}
-
-	/* enable PHY wakeup events so we remote wakeup if cable is pulled */
-	ret = smsc95xx_enable_phy_wakeup_interrupts(dev,
-		PHY_INT_MASK_LINK_DOWN_);
-	if (ret < 0) {
-		netdev_warn(dev->net, "error enabling PHY wakeup ints\n");
-		return ret;
 	}
 
 	netdev_dbg(dev->net, "autosuspend entering SUSPEND3\n");
@@ -1511,13 +1519,6 @@ static int smsc95xx_suspend(struct usb_interface *intf, pm_message_t message)
 	}
 
 	if (pdata->wolopts & WAKE_PHY) {
-		ret = smsc95xx_enable_phy_wakeup_interrupts(dev,
-			(PHY_INT_MASK_ANEG_COMP_ | PHY_INT_MASK_LINK_DOWN_));
-		if (ret < 0) {
-			netdev_warn(dev->net, "error enabling PHY wakeup ints\n");
-			goto done;
-		}
-
 		/* if link is down then configure EDPD and enter SUSPEND1,
 		 * otherwise enter SUSPEND0 below
 		 */
@@ -1751,11 +1752,12 @@ static int smsc95xx_resume(struct usb_interface *intf)
 			return ret;
 	}
 
+	phy_init_hw(pdata->phydev);
+
 	ret = usbnet_resume(intf);
 	if (ret < 0)
 		netdev_warn(dev->net, "usbnet_resume error\n");
 
-	phy_init_hw(pdata->phydev);
 	return ret;
 }
 
@@ -1960,9 +1962,9 @@ static const struct driver_info smsc95xx_info = {
 	.description	= "smsc95xx USB 2.0 Ethernet",
 	.bind		= smsc95xx_bind,
 	.unbind		= smsc95xx_unbind,
-	.link_reset	= smsc95xx_link_reset,
-	.reset		= smsc95xx_start_phy,
-	.stop		= smsc95xx_disconnect_phy,
+	.reset		= smsc95xx_reset,
+	.check_connect	= smsc95xx_start_phy,
+	.stop		= smsc95xx_stop,
 	.rx_fixup	= smsc95xx_rx_fixup,
 	.tx_fixup	= smsc95xx_tx_fixup,
 	.status		= smsc95xx_status,

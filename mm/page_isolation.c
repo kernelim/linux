@@ -37,8 +37,8 @@ static struct page *has_unmovable_pages(unsigned long start_pfn, unsigned long e
 	struct zone *zone = page_zone(page);
 	unsigned long pfn;
 
-	VM_BUG_ON(ALIGN_DOWN(start_pfn, pageblock_nr_pages) !=
-		  ALIGN_DOWN(end_pfn - 1, pageblock_nr_pages));
+	VM_BUG_ON(pageblock_start_pfn(start_pfn) !=
+		  pageblock_start_pfn(end_pfn - 1));
 
 	if (is_migrate_cma_page(page)) {
 		/*
@@ -172,7 +172,7 @@ static int set_migratetype_isolate(struct page *page, int migratetype, int isol_
 	 * to avoid redundant checks.
 	 */
 	check_unmovable_start = max(page_to_pfn(page), start_pfn);
-	check_unmovable_end = min(ALIGN(page_to_pfn(page) + 1, pageblock_nr_pages),
+	check_unmovable_end = min(pageblock_end_pfn(page_to_pfn(page)),
 				  end_pfn);
 
 	unmovable = has_unmovable_pages(check_unmovable_start, check_unmovable_end,
@@ -226,7 +226,7 @@ static void unset_migratetype_isolate(struct page *page, int migratetype)
 	 */
 	if (PageBuddy(page)) {
 		order = buddy_order(page);
-		if (order >= pageblock_order && order < MAX_ORDER - 1) {
+		if (order >= pageblock_order && order < MAX_ORDER) {
 			buddy = find_buddy_page_pfn(page, page_to_pfn(page),
 						    order, NULL);
 			if (buddy && !is_migrate_isolate_page(buddy)) {
@@ -290,11 +290,11 @@ __first_valid_page(unsigned long pfn, unsigned long nr_pages)
  *			isolate_single_pageblock()
  * @migratetype:	migrate type to set in error recovery.
  *
- * Free and in-use pages can be as big as MAX_ORDER-1 and contain more than one
+ * Free and in-use pages can be as big as MAX_ORDER and contain more than one
  * pageblock. When not all pageblocks within a page are isolated at the same
  * time, free page accounting can go wrong. For example, in the case of
- * MAX_ORDER-1 = pageblock_order + 1, a MAX_ORDER-1 page has two pagelbocks.
- * [         MAX_ORDER-1         ]
+ * MAX_ORDER = pageblock_order + 1, a MAX_ORDER page has two pagelbocks.
+ * [         MAX_ORDER           ]
  * [  pageblock0  |  pageblock1  ]
  * When either pageblock is isolated, if it is a free page, the page is not
  * split into separate migratetype lists, which is supposed to; if it is an
@@ -330,7 +330,7 @@ static int isolate_single_pageblock(unsigned long boundary_pfn, int flags,
 				      zone->zone_start_pfn);
 
 	if (skip_isolation) {
-		int mt = get_pageblock_migratetype(pfn_to_page(isolate_pageblock));
+		int mt __maybe_unused = get_pageblock_migratetype(pfn_to_page(isolate_pageblock));
 
 		VM_BUG_ON(!is_migrate_isolate(mt));
 	} else {
@@ -451,7 +451,7 @@ static int isolate_single_pageblock(unsigned long boundary_pfn, int flags,
 				 * the free page to the right migratetype list.
 				 *
 				 * head_pfn is not used here as a hugetlb page order
-				 * can be bigger than MAX_ORDER-1, but after it is
+				 * can be bigger than MAX_ORDER, but after it is
 				 * freed, the free page order is not. Use pfn within
 				 * the range to find the head of the free page.
 				 */
@@ -459,7 +459,7 @@ static int isolate_single_pageblock(unsigned long boundary_pfn, int flags,
 				outer_pfn = pfn;
 				while (!PageBuddy(pfn_to_page(outer_pfn))) {
 					/* stop if we cannot find the free page */
-					if (++order >= MAX_ORDER)
+					if (++order > MAX_ORDER)
 						goto failed;
 					outer_pfn &= ~0UL << order;
 				}
@@ -532,8 +532,8 @@ int start_isolate_page_range(unsigned long start_pfn, unsigned long end_pfn,
 	unsigned long pfn;
 	struct page *page;
 	/* isolation is done at page block granularity */
-	unsigned long isolate_start = ALIGN_DOWN(start_pfn, pageblock_nr_pages);
-	unsigned long isolate_end = ALIGN(end_pfn, pageblock_nr_pages);
+	unsigned long isolate_start = pageblock_start_pfn(start_pfn);
+	unsigned long isolate_end = pageblock_align(end_pfn);
 	int ret;
 	bool skip_isolation = false;
 
@@ -579,9 +579,8 @@ void undo_isolate_page_range(unsigned long start_pfn, unsigned long end_pfn,
 {
 	unsigned long pfn;
 	struct page *page;
-	unsigned long isolate_start = ALIGN_DOWN(start_pfn, pageblock_nr_pages);
-	unsigned long isolate_end = ALIGN(end_pfn, pageblock_nr_pages);
-
+	unsigned long isolate_start = pageblock_start_pfn(start_pfn);
+	unsigned long isolate_end = pageblock_align(end_pfn);
 
 	for (pfn = isolate_start;
 	     pfn < isolate_end;

@@ -136,9 +136,9 @@ static int i2c_device_match(struct device *dev, struct device_driver *drv)
 	return 0;
 }
 
-static int i2c_device_uevent(struct device *dev, struct kobj_uevent_env *env)
+static int i2c_device_uevent(const struct device *dev, struct kobj_uevent_env *env)
 {
-	struct i2c_client *client = to_i2c_client(dev);
+	const struct i2c_client *client = to_i2c_client(dev);
 	int rc;
 
 	rc = of_device_uevent_modalias(dev, env);
@@ -1027,15 +1027,9 @@ static int dummy_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int dummy_remove(struct i2c_client *client)
-{
-	return 0;
-}
-
 static struct i2c_driver dummy_driver = {
 	.driver.name	= "dummy",
 	.probe		= dummy_probe,
-	.remove		= dummy_remove,
 	.id_table	= dummy_id,
 };
 

@@ -6,6 +6,7 @@
 
 struct nft_meta {
 	enum nft_meta_keys	key:8;
+	u8			len;
 	union {
 		u8		dreg;
 		u8		sreg;
@@ -42,5 +43,10 @@ void nft_meta_set_destroy(const struct nft_ctx *ctx,
 int nft_meta_set_validate(const struct nft_ctx *ctx,
 			  const struct nft_expr *expr,
 			  const struct nft_data **data);
+
+struct nft_inner_tun_ctx;
+void nft_meta_inner_eval(const struct nft_expr *expr,
+			 struct nft_regs *regs, const struct nft_pktinfo *pkt,
+			 struct nft_inner_tun_ctx *tun_ctx);
 
 #endif

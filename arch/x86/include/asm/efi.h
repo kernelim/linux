@@ -90,6 +90,8 @@ static inline void efi_fpu_end(void)
 }
 
 #ifdef CONFIG_X86_32
+#define EFI_X86_KERNEL_ALLOC_LIMIT		(SZ_512M - 1)
+
 #define arch_efi_call_virt_setup()					\
 ({									\
 	efi_fpu_begin();						\
@@ -103,8 +105,7 @@ static inline void efi_fpu_end(void)
 })
 
 #else /* !CONFIG_X86_32 */
-
-#define EFI_LOADER_SIGNATURE	"EL64"
+#define EFI_X86_KERNEL_ALLOC_LIMIT		EFI_ALLOC_LIMIT
 
 extern asmlinkage u64 __efi_call(void *fp, ...);
 
@@ -180,7 +181,7 @@ struct efi_setup_data {
 extern u64 efi_setup;
 
 #ifdef CONFIG_EFI
-extern efi_status_t __efi64_thunk(u32, ...);
+extern u64 __efi64_thunk(u32, ...);
 
 #define efi64_thunk(...) ({						\
 	u64 __pad[3]; /* must have space for 3 args on the stack */	\
@@ -216,6 +217,8 @@ efi_status_t efi_set_virtual_address_map(unsigned long memory_map_size,
 
 #ifdef CONFIG_EFI_MIXED
 
+#define EFI_ALLOC_LIMIT		(efi_is_64bit() ? ULONG_MAX : U32_MAX)
+
 #define ARCH_HAS_EFISTUB_WRAPPERS
 
 static inline bool efi_is_64bit(void)
@@ -230,16 +233,15 @@ static inline bool efi_is_native(void)
 	return efi_is_64bit();
 }
 
-#define efi_mixed_mode_cast(attr)					\
-	__builtin_choose_expr(						\
-		__builtin_types_compatible_p(u32, __typeof__(attr)),	\
-			(unsigned long)(attr), (attr))
-
 #define efi_table_attr(inst, attr)					\
-	(efi_is_native()						\
-		? inst->attr						\
-		: (__typeof__(inst->attr))				\
-			efi_mixed_mode_cast(inst->mixed_mode.attr))
+	(efi_is_native() ? (inst)->attr					\
+			 : efi_mixed_table_attr((inst), attr))
+
+#define efi_mixed_table_attr(inst, attr)				\
+	(__typeof__(inst->attr))					\
+		_Generic(inst->mixed_mode.attr,				\
+		u32:		(unsigned long)(inst->mixed_mode.attr),	\
+		default:	(inst->mixed_mode.attr))
 
 /*
  * The following macros allow translating arguments if necessary from native to
@@ -327,6 +329,24 @@ static inline u32 efi64_convert_status(efi_status_t status)
 #define __efi64_argmap_set_memory_space_attributes(phys, size, flags) \
 	(__efi64_split(phys), __efi64_split(size), __efi64_split(flags))
 
+/* file protocol */
+#define __efi64_argmap_open(prot, newh, fname, mode, attr) \
+	((prot), efi64_zero_upper(newh), (fname), __efi64_split(mode), \
+	 __efi64_split(attr))
+
+#define __efi64_argmap_set_position(pos) (__efi64_split(pos))
+
+/* file system protocol */
+#define __efi64_argmap_open_volume(prot, file) \
+	((prot), efi64_zero_upper(file))
+
+/* Memory Attribute Protocol */
+#define __efi64_argmap_set_memory_attributes(protocol, phys, size, flags) \
+	((protocol), __efi64_split(phys), __efi64_split(size), __efi64_split(flags))
+
+#define __efi64_argmap_clear_memory_attributes(protocol, phys, size, flags) \
+	((protocol), __efi64_split(phys), __efi64_split(size), __efi64_split(flags))
+
 /*
  * The macros below handle the plumbing for the argument mapping. To add a
  * mapping for a specific EFI method, simply define a macro
@@ -346,31 +366,27 @@ static inline u32 efi64_convert_status(efi_status_t status)
 #define __efi_eat(...)
 #define __efi_eval(...) __VA_ARGS__
 
-/* The three macros below handle dispatching via the thunk if needed */
+static inline efi_status_t __efi64_widen_efi_status(u64 status)
+{
+	/* use rotate to move the value of bit #31 into position #63 */
+	return ror64(rol32(status, 1), 1);
+}
 
-#define efi_call_proto(inst, func, ...)					\
-	(efi_is_native()						\
-		? inst->func(inst, ##__VA_ARGS__)			\
-		: __efi64_thunk_map(inst, func, inst, ##__VA_ARGS__))
+/* The macro below handles dispatching via the thunk if needed */
 
-#define efi_bs_call(func, ...)						\
-	(efi_is_native()						\
-		? efi_system_table->boottime->func(__VA_ARGS__)		\
-		: __efi64_thunk_map(efi_table_attr(efi_system_table,	\
-						   boottime),		\
-				    func, __VA_ARGS__))
+#define efi_fn_call(inst, func, ...)					\
+	(efi_is_native() ? (inst)->func(__VA_ARGS__)			\
+			 : efi_mixed_call((inst), func, ##__VA_ARGS__))
 
-#define efi_rt_call(func, ...)						\
-	(efi_is_native()						\
-		? efi_system_table->runtime->func(__VA_ARGS__)		\
-		: __efi64_thunk_map(efi_table_attr(efi_system_table,	\
-						   runtime),		\
-				    func, __VA_ARGS__))
-
-#define efi_dxe_call(func, ...)						\
-	(efi_is_native()						\
-		? efi_dxe_table->func(__VA_ARGS__)			\
-		: __efi64_thunk_map(efi_dxe_table, func, __VA_ARGS__))
+#define efi_mixed_call(inst, func, ...)					\
+	_Generic(inst->func(__VA_ARGS__),				\
+	efi_status_t:							\
+		__efi64_widen_efi_status(				\
+			__efi64_thunk_map(inst, func, ##__VA_ARGS__)),	\
+	u64: ({ BUILD_BUG(); ULONG_MAX; }),				\
+	default:							\
+		(__typeof__(inst->func(__VA_ARGS__)))			\
+			__efi64_thunk_map(inst, func, ##__VA_ARGS__))
 
 #else /* CONFIG_EFI_MIXED */
 

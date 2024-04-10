@@ -332,6 +332,9 @@
 			force_enable - Force enable the IOMMU on platforms known
 				       to be buggy with IOMMU enabled. Use this
 				       option with care.
+			pgtbl_v1     - Use v1 page table for DMA-API (Default).
+			pgtbl_v2     - Use v2 page table for DMA-API.
+			irtcachedis  - Disable Interrupt Remapping Table (IRT) caching.
 
 	amd_iommu_dump=	[HW,X86-64]
 			Enable AMD IOMMU driver option to dump the ACPI table
@@ -439,6 +442,9 @@
 
 	arm64.nosme	[ARM64] Unconditionally disable Scalable Matrix
 			Extension support
+
+	arm64.nomops	[ARM64] Unconditionally disable Memory Copy and Memory
+			Set instructions support
 
 	ataflop=	[HW,M68k]
 
@@ -585,6 +591,10 @@
 			named mounts. Specifying both "all" and "named" disables
 			all v1 hierarchies.
 
+	cgroup_favordynmods= [KNL] Enable or Disable favordynmods.
+			Format: { "true" | "false" }
+			Defaults to the value of CONFIG_CGROUP_FAVOR_DYNMODS.
+
 	cgroup.memory=	[KNL] Pass options to the cgroup memory controller.
 			Format: <string>
 			nosocket -- Disable socket memory accounting.
@@ -699,7 +709,7 @@
 			Sets the size of kernel per-numa memory area for
 			contiguous memory allocations. A value of 0 disables
 			per-numa CMA altogether. And If this option is not
-			specificed, the default value is 0.
+			specified, the default value is 0.
 			With per-numa CMA enabled, DMA users on node nid will
 			first try to allocate buffer from the pernuma area
 			which is located in node nid, if the allocation fails,
@@ -937,7 +947,7 @@
 			driver code when a CPU writes to (or reads from) a
 			random memory location. Note that there exists a class
 			of memory corruptions problems caused by buggy H/W or
-			F/W or by drivers badly programing DMA (basically when
+			F/W or by drivers badly programming DMA (basically when
 			memory is written at bus level and the CPU MMU is
 			bypassed) which are not detectable by
 			CONFIG_DEBUG_PAGEALLOC, hence this option will not help
@@ -1455,6 +1465,14 @@
 			Permit 'security.evm' to be updated regardless of
 			current integrity status.
 
+	early_page_ext [KNL] Enforces page_ext initialization to earlier
+			stages so cover more early boot allocations.
+			Please note that as side effect some optimizations
+			might be disabled to achieve that (e.g. parallelized
+			memory initialization is disabled) so the boot process
+			might take longer, especially on systems with a lot of
+			memory. Available with CONFIG_PAGE_EXTENSION=y.
+
 	failslab=
 	fail_usercopy=
 	fail_page_alloc=
@@ -1550,6 +1568,20 @@
 			[KNL] Treat all inferred dependencies as mandatory
 			dependencies. This only applies for fw_devlink=on|rpm.
 			Format: <bool>
+
+	fw_devlink.sync_state =
+			[KNL] When all devices that could probe have finished
+			probing, this parameter controls what to do with
+			devices that haven't yet received their sync_state()
+			calls.
+			Format: { strict | timeout }
+			strict -- Default. Continue waiting on consumers to
+				probe successfully.
+			timeout -- Give up waiting on consumers and call
+				sync_state() on any devices that haven't yet
+				received their sync_state() calls after
+				deferred_probe_timeout has expired or by
+				late_initcall() if !CONFIG_MODULES.
 
 	gamecon.map[2|3]=
 			[HW,JOY] Multisystem joystick and NES/SNES/PSX pad
@@ -1696,7 +1728,7 @@
 			Format: size[KMG]
 
 	hugetlb_free_vmemmap=
-			[KNL] Reguires CONFIG_HUGETLB_PAGE_OPTIMIZE_VMEMMAP
+			[KNL] Requires CONFIG_HUGETLB_PAGE_OPTIMIZE_VMEMMAP
 			enabled.
 			Control if HugeTLB Vmemmap Optimization (HVO) is enabled.
 			Allows heavy hugetlb users to free up some more
@@ -1804,6 +1836,12 @@
 			-1 -- never invert brightness
 			 0 -- machine default
 			 1 -- force brightness inversion
+
+	ia32_emulation=	[X86-64]
+			Format: <bool>
+			When true, allows loading 32-bit programs and executing 32-bit
+			syscalls, essentially overriding IA32_EMULATION_DEFAULT_DISABLED at
+			boot time. When false, unconditionally disables IA32 emulation.
 
 	icn=		[HW,ISDN]
 			Format: <io>[,<membase>[,<icn_id>[,<icn_id2>]]]
@@ -2455,6 +2493,12 @@
 			Default: enabled on cores which need mitigation.
 			0: force disabled
 			1: force enabled
+
+	kunit.enable=	[KUNIT] Enable executing KUnit tests. Requires
+			CONFIG_KUNIT to be set to be fully enabled. The
+			default value can be overridden via
+			KUNIT_DEFAULT_ENABLED.
+			Default is 1 (enabled)
 
 	kvm.ignore_msrs=[KVM] Ignore guest accesses to unhandled MSRs.
 			Default is 0 (don't ignore, but inject #GP)
@@ -3359,6 +3403,10 @@
 			[HW] Make the MicroTouch USB driver use raw coordinates
 			('y', default) or cooked coordinates ('n')
 
+	mtrr=debug	[X86]
+			Enable printing debug information related to MTRR
+			registers at boot time.
+
 	mtrr_chunk_size=nn[KMG] [X86]
 			used for mtrr cleanup. It is largest continuous chunk
 			that could hold holes aka. UC entries.
@@ -3619,10 +3667,10 @@
 
 	nohugevmalloc	[KNL,X86,PPC,ARM64] Disable kernel huge vmalloc mappings.
 
-	nosmt		[KNL,S390] Disable symmetric multithreading (SMT).
+	nosmt		[KNL,PPC,S390] Disable symmetric multithreading (SMT).
 			Equivalent to smt=1.
 
-			[KNL,X86] Disable symmetric multithreading (SMT).
+			[KNL,X86,PPC] Disable symmetric multithreading (SMT).
 			nosmt=force: Force disable SMT, cannot be undone
 				     via the sysfs control file.
 
@@ -3669,7 +3717,7 @@
 			implementation; requires CONFIG_GENERIC_IDLE_POLL_SETUP
 			to be effective. This is useful on platforms where the
 			sleep(SH) or wfi(ARM,ARM64) instructions do not work
-			correctly or when doing power measurements to evalute
+			correctly or when doing power measurements to evaluate
 			the impact of the sleep instructions. This is also
 			useful when using JTAG debugger.
 
@@ -3824,20 +3872,6 @@
 
 	nox2apic	[X86-64,APIC] Do not enable x2APIC mode.
 
-	cpu0_hotplug	[X86] Turn on CPU0 hotplug feature when
-			CONFIG_BOOTPARAM_HOTPLUG_CPU0 is off.
-			Some features depend on CPU0. Known dependencies are:
-			1. Resume from suspend/hibernate depends on CPU0.
-			Suspend/hibernate will fail if CPU0 is offline and you
-			need to online CPU0 before suspend/hibernate.
-			2. PIC interrupts also depend on CPU0. CPU0 can't be
-			removed if a PIC interrupt is detected.
-			It's said poweroff/reboot may depend on CPU0 on some
-			machines although I haven't seen such issues so far
-			after CPU0 is offline on a few tested machines.
-			If the dependencies are under your control, you can
-			turn on cpu0_hotplug.
-
 	nps_mtm_hs_ctr=	[KNL,ARC]
 			This parameter sets the maximum duration, in
 			cycles, each HW thread of the CTOP can run
@@ -3922,7 +3956,7 @@
 			[KNL] Minimal page reporting order
 			Format: <integer>
 			Adjust the minimal page reporting order. The page
-			reporting is disabled when it exceeds (MAX_ORDER-1).
+			reporting is disabled when it exceeds MAX_ORDER.
 
 	panic=		[KNL] Kernel behaviour on panic: delay <timeout>
 			timeout > 0: seconds before rebooting
@@ -5053,6 +5087,17 @@
 			rcupdate.rcu_cpu_stall_timeout to be used (after
 			conversion from seconds to milliseconds).
 
+	rcupdate.rcu_cpu_stall_cputime= [KNL]
+			Provide statistics on the cputime and count of
+			interrupts and tasks during the sampling period. For
+			multiple continuous RCU stalls, all sampling periods
+			begin at half of the first RCU stall timeout.
+
+	rcupdate.rcu_exp_stall_task_details= [KNL]
+			Print stack dumps of any tasks blocking the
+			current expedited RCU grace period during an
+			expedited RCU CPU stall warning.
+
 	rcupdate.rcu_expedited= [KNL]
 			Use expedited grace-period primitives, for
 			example, synchronize_rcu_expedited() instead
@@ -5342,7 +5387,12 @@
 			port and the regular usb controller gets disabled.
 
 	root=		[KNL] Root filesystem
-			See name_to_dev_t comment in init/do_mounts.c.
+			Usually this a a block device specifier of some kind,
+			see the early_lookup_bdev comment in
+			block/early-lookup.c for details.
+			Alternatively this can be "ram" for the legacy initial
+			ramdisk, "nfs" and "cifs" for root on a network file
+			system, or "mtd" and "ubi" for mounting from raw flash.
 
 	rootdelay=	[KNL] Delay (in seconds) to pause before attempting to
 			mount the root filesystem
@@ -6063,15 +6113,6 @@
 			later by a loaded module cannot be set this way.
 			Example: sysctl.vm.swappiness=40
 
-	sysfs.deprecated=0|1 [KNL]
-			Enable/disable old style sysfs layout for old udev
-			on older distributions. When this option is enabled
-			very new udev will not work anymore. When this option
-			is disabled (or CONFIG_SYSFS_DEPRECATED not compiled)
-			in older udev will not work anymore.
-			Default depends on CONFIG_SYSFS_DEPRECATED_V2 set in
-			the kernel configuration.
-
 	sysrq_always_enabled
 			[KNL]
 			Ignore sysrq setting - this boot parameter will
@@ -6305,6 +6346,12 @@
 			(HPET or PM timer) on systems whose TSC frequency was
 			obtained from HW or FW using either an MSR or CPUID(0x15).
 			Warn if the difference is more than 500 ppm.
+			[x86] watchdog: Use TSC as the watchdog clocksource with
+			which to check other HW timers (HPET or PM timer), but
+			only on systems where TSC has been deemed trustworthy.
+			This will be suppressed by an earlier tsc=nowatchdog and
+			can be overridden by a later tsc=nowatchdog.  A console
+			message will flag any such suppression or overriding.
 
 	tsc_early_khz=  [X86] Skip early TSC calibration and use the given
 			value instead. Useful when the early TSC frequency discovery
@@ -6418,7 +6465,7 @@
 
 	usbcore.authorized_default=
 			[USB] Default USB device authorization:
-			(default -1 = authorized except for wireless USB,
+			(default -1 = authorized (same as 1),
 			0 = not authorized, 1 = authorized, 2 = authorized
 			if device connected to internal port)
 
@@ -6656,7 +6703,7 @@
 			Can be used multiple times for multiple devices.
 
 	vga=		[BOOT,X86-32] Select a particular video mode
-			See Documentation/x86/boot.rst and
+			See Documentation/arch/x86/boot.rst and
 			Documentation/admin-guide/svga.rst.
 			Use vga=ask for menu.
 			This is actually a boot loader parameter; the value is
@@ -6774,6 +6821,13 @@
 			threshold is set to twice the value. A value of 0
 			disables both lockup detectors. Default is 10
 			seconds.
+
+	workqueue.unbound_cpus=
+			[KNL,SMP] Specify to constrain one or some CPUs
+			to use in unbound workqueues.
+			Format: <cpu-list>
+			By default, all online CPUs are available for
+			unbound workqueues.
 
 	workqueue.watchdog_thresh=
 			If CONFIG_WQ_WATCHDOG is configured, workqueue can

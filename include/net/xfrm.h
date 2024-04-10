@@ -28,6 +28,8 @@
 
 #include <linux/interrupt.h>
 
+#include <linux/rh_kabi.h>
+
 #ifdef CONFIG_XFRM_STATISTICS
 #include <net/snmp.h>
 #endif
@@ -124,6 +126,8 @@ struct xfrm_state_walk {
 	u8			proto;
 	u32			seq;
 	struct xfrm_address_filter *filter;
+
+	RH_KABI_RESERVE(1)
 };
 
 enum {
@@ -138,6 +142,10 @@ enum {
 	XFRM_DEV_OFFLOAD_PACKET,
 };
 
+enum {
+	XFRM_DEV_OFFLOAD_FLAG_ACQ = 1,
+};
+
 struct xfrm_dev_offload {
 	struct net_device	*dev;
 	netdevice_tracker	dev_tracker;
@@ -145,6 +153,12 @@ struct xfrm_dev_offload {
 	unsigned long		offload_handle;
 	u8			dir : 2;
 	u8			type : 2;
+	u8			flags : 2;
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 struct xfrm_mode {
@@ -1964,6 +1978,7 @@ static inline void xfrm_dev_state_free(struct xfrm_state *x)
 		if (dev->xfrmdev_ops->xdo_dev_state_free)
 			dev->xfrmdev_ops->xdo_dev_state_free(x);
 		xso->dev = NULL;
+		xso->type = XFRM_DEV_OFFLOAD_UNSPECIFIED;
 		netdev_put(dev, &xso->dev_tracker);
 	}
 }

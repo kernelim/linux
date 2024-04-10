@@ -9,6 +9,8 @@
 #include <net/scm.h>
 #include <uapi/linux/netlink.h>
 
+#include <linux/rh_kabi.h>
+
 struct net;
 
 void do_trace_netlink_extack(const char *msg);
@@ -88,6 +90,11 @@ struct netlink_ext_ack {
 	u8 cookie[NETLINK_MAX_COOKIE_LEN];
 	u8 cookie_len;
 	char _msg_buf[NETLINK_MAX_FMTMSG_LEN];
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 /* Always use this macro, this allows later putting the
@@ -162,8 +169,30 @@ struct netlink_ext_ack {
 	}							\
 } while (0)
 
+#define NL_SET_ERR_MSG_ATTR_POL_FMT(extack, attr, pol, fmt, args...) do {	\
+	struct netlink_ext_ack *__extack = (extack);				\
+										\
+	if (!__extack)								\
+		break;								\
+										\
+	if (snprintf(__extack->_msg_buf, NETLINK_MAX_FMTMSG_LEN,		\
+		     "%s" fmt "%s", "", ##args, "") >=				\
+	    NETLINK_MAX_FMTMSG_LEN)						\
+		net_warn_ratelimited("%s" fmt "%s", "truncated extack: ",       \
+				     ##args, "\n");				\
+										\
+	do_trace_netlink_extack(__extack->_msg_buf);				\
+										\
+	__extack->_msg = __extack->_msg_buf;					\
+	__extack->bad_attr = (attr);						\
+	__extack->policy = (pol);						\
+} while (0)
+
 #define NL_SET_ERR_MSG_ATTR(extack, attr, msg)		\
 	NL_SET_ERR_MSG_ATTR_POL(extack, attr, NULL, msg)
+
+#define NL_SET_ERR_MSG_ATTR_FMT(extack, attr, msg, args...) \
+	NL_SET_ERR_MSG_ATTR_POL_FMT(extack, attr, NULL, msg, ##args)
 
 #define NL_SET_ERR_ATTR_MISS(extack, nest, type)  do {	\
 	struct netlink_ext_ack *__extack = (extack);	\
@@ -303,6 +332,7 @@ struct netlink_dump_control {
 	int (*start)(struct netlink_callback *);
 	int (*dump)(struct sk_buff *skb, struct netlink_callback *);
 	int (*done)(struct netlink_callback *);
+	struct netlink_ext_ack *extack;
 	void *data;
 	struct module *module;
 	u32 min_dump_alloc;

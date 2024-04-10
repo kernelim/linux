@@ -276,12 +276,6 @@ static void nvmf_log_connect_error(struct nvme_ctrl *ctrl,
 		return;
 	}
 
-	if (errval < 0) {
-		dev_err(ctrl->device,
-			"Connect command failed, errno: %d\n", errval);
-		return;
-	}
-
 	switch (err_sctype) {
 	case NVME_SC_CONNECT_INVALID_PARAM:
 		if (offset >> 16) {
@@ -355,6 +349,45 @@ static void nvmf_log_connect_error(struct nvme_ctrl *ctrl,
 	}
 }
 
+static struct nvmf_connect_data *nvmf_connect_data_prep(struct nvme_ctrl *ctrl,
+		u16 cntlid)
+{
+	struct nvmf_connect_data *data;
+
+	data = kzalloc(sizeof(*data), GFP_KERNEL);
+	if (!data)
+		return NULL;
+
+	uuid_copy(&data->hostid, &ctrl->opts->host->id);
+	data->cntlid = cpu_to_le16(cntlid);
+	strncpy(data->subsysnqn, ctrl->opts->subsysnqn, NVMF_NQN_SIZE);
+	strncpy(data->hostnqn, ctrl->opts->host->nqn, NVMF_NQN_SIZE);
+
+	return data;
+}
+
+static void nvmf_connect_cmd_prep(struct nvme_ctrl *ctrl, u16 qid,
+		struct nvme_command *cmd)
+{
+	cmd->connect.opcode = nvme_fabrics_command;
+	cmd->connect.fctype = nvme_fabrics_type_connect;
+	cmd->connect.qid = cpu_to_le16(qid);
+
+	if (qid) {
+		cmd->connect.sqsize = cpu_to_le16(ctrl->sqsize);
+	} else {
+		cmd->connect.sqsize = cpu_to_le16(NVME_AQ_DEPTH - 1);
+
+		/*
+		 * set keep-alive timeout in seconds granularity (ms * 1000)
+		 */
+		cmd->connect.kato = cpu_to_le32(ctrl->kato * 1000);
+	}
+
+	if (ctrl->opts->disable_sqflow)
+		cmd->connect.cattr |= NVME_CONNECT_DISABLE_SQFLOW;
+}
+
 /**
  * nvmf_connect_admin_queue() - NVMe Fabrics Admin Queue "Connect"
  *				API function.
@@ -383,27 +416,11 @@ int nvmf_connect_admin_queue(struct nvme_ctrl *ctrl)
 	int ret;
 	u32 result;
 
-	cmd.connect.opcode = nvme_fabrics_command;
-	cmd.connect.fctype = nvme_fabrics_type_connect;
-	cmd.connect.qid = 0;
-	cmd.connect.sqsize = cpu_to_le16(NVME_AQ_DEPTH - 1);
+	nvmf_connect_cmd_prep(ctrl, 0, &cmd);
 
-	/*
-	 * Set keep-alive timeout in seconds granularity (ms * 1000)
-	 */
-	cmd.connect.kato = cpu_to_le32(ctrl->kato * 1000);
-
-	if (ctrl->opts->disable_sqflow)
-		cmd.connect.cattr |= NVME_CONNECT_DISABLE_SQFLOW;
-
-	data = kzalloc(sizeof(*data), GFP_KERNEL);
+	data = nvmf_connect_data_prep(ctrl, 0xffff);
 	if (!data)
 		return -ENOMEM;
-
-	uuid_copy(&data->hostid, &ctrl->opts->host->id);
-	data->cntlid = cpu_to_le16(0xffff);
-	strncpy(data->subsysnqn, ctrl->opts->subsysnqn, NVMF_NQN_SIZE);
-	strncpy(data->hostnqn, ctrl->opts->host->nqn, NVMF_NQN_SIZE);
 
 	ret = __nvme_submit_sync_cmd(ctrl->fabrics_q, &cmd, &res,
 			data, sizeof(*data), NVME_QID_ANY, 1,
@@ -474,22 +491,11 @@ int nvmf_connect_io_queue(struct nvme_ctrl *ctrl, u16 qid)
 	int ret;
 	u32 result;
 
-	cmd.connect.opcode = nvme_fabrics_command;
-	cmd.connect.fctype = nvme_fabrics_type_connect;
-	cmd.connect.qid = cpu_to_le16(qid);
-	cmd.connect.sqsize = cpu_to_le16(ctrl->sqsize);
+	nvmf_connect_cmd_prep(ctrl, qid, &cmd);
 
-	if (ctrl->opts->disable_sqflow)
-		cmd.connect.cattr |= NVME_CONNECT_DISABLE_SQFLOW;
-
-	data = kzalloc(sizeof(*data), GFP_KERNEL);
+	data = nvmf_connect_data_prep(ctrl, ctrl->cntlid);
 	if (!data)
 		return -ENOMEM;
-
-	uuid_copy(&data->hostid, &ctrl->opts->host->id);
-	data->cntlid = cpu_to_le16(ctrl->cntlid);
-	strncpy(data->subsysnqn, ctrl->opts->subsysnqn, NVMF_NQN_SIZE);
-	strncpy(data->hostnqn, ctrl->opts->host->nqn, NVMF_NQN_SIZE);
 
 	ret = __nvme_submit_sync_cmd(ctrl->connect_q, &cmd, &res,
 			data, sizeof(*data), qid, 1,
@@ -963,6 +969,82 @@ out:
 	return ret;
 }
 
+void nvmf_set_io_queues(struct nvmf_ctrl_options *opts, u32 nr_io_queues,
+			u32 io_queues[HCTX_MAX_TYPES])
+{
+	if (opts->nr_write_queues && opts->nr_io_queues < nr_io_queues) {
+		/*
+		 * separate read/write queues
+		 * hand out dedicated default queues only after we have
+		 * sufficient read queues.
+		 */
+		io_queues[HCTX_TYPE_READ] = opts->nr_io_queues;
+		nr_io_queues -= io_queues[HCTX_TYPE_READ];
+		io_queues[HCTX_TYPE_DEFAULT] =
+			min(opts->nr_write_queues, nr_io_queues);
+		nr_io_queues -= io_queues[HCTX_TYPE_DEFAULT];
+	} else {
+		/*
+		 * shared read/write queues
+		 * either no write queues were requested, or we don't have
+		 * sufficient queue count to have dedicated default queues.
+		 */
+		io_queues[HCTX_TYPE_DEFAULT] =
+			min(opts->nr_io_queues, nr_io_queues);
+		nr_io_queues -= io_queues[HCTX_TYPE_DEFAULT];
+	}
+
+	if (opts->nr_poll_queues && nr_io_queues) {
+		/* map dedicated poll queues only if we have queues left */
+		io_queues[HCTX_TYPE_POLL] =
+			min(opts->nr_poll_queues, nr_io_queues);
+	}
+}
+EXPORT_SYMBOL_GPL(nvmf_set_io_queues);
+
+void nvmf_map_queues(struct blk_mq_tag_set *set, struct nvme_ctrl *ctrl,
+		     u32 io_queues[HCTX_MAX_TYPES])
+{
+	struct nvmf_ctrl_options *opts = ctrl->opts;
+
+	if (opts->nr_write_queues && io_queues[HCTX_TYPE_READ]) {
+		/* separate read/write queues */
+		set->map[HCTX_TYPE_DEFAULT].nr_queues =
+			io_queues[HCTX_TYPE_DEFAULT];
+		set->map[HCTX_TYPE_DEFAULT].queue_offset = 0;
+		set->map[HCTX_TYPE_READ].nr_queues =
+			io_queues[HCTX_TYPE_READ];
+		set->map[HCTX_TYPE_READ].queue_offset =
+			io_queues[HCTX_TYPE_DEFAULT];
+	} else {
+		/* shared read/write queues */
+		set->map[HCTX_TYPE_DEFAULT].nr_queues =
+			io_queues[HCTX_TYPE_DEFAULT];
+		set->map[HCTX_TYPE_DEFAULT].queue_offset = 0;
+		set->map[HCTX_TYPE_READ].nr_queues =
+			io_queues[HCTX_TYPE_DEFAULT];
+		set->map[HCTX_TYPE_READ].queue_offset = 0;
+	}
+
+	blk_mq_map_queues(&set->map[HCTX_TYPE_DEFAULT]);
+	blk_mq_map_queues(&set->map[HCTX_TYPE_READ]);
+	if (opts->nr_poll_queues && io_queues[HCTX_TYPE_POLL]) {
+		/* map dedicated poll queues only if we have queues left */
+		set->map[HCTX_TYPE_POLL].nr_queues = io_queues[HCTX_TYPE_POLL];
+		set->map[HCTX_TYPE_POLL].queue_offset =
+			io_queues[HCTX_TYPE_DEFAULT] +
+			io_queues[HCTX_TYPE_READ];
+		blk_mq_map_queues(&set->map[HCTX_TYPE_POLL]);
+	}
+
+	dev_info(ctrl->device,
+		"mapped %d/%d/%d default/read/poll queues.\n",
+		io_queues[HCTX_TYPE_DEFAULT],
+		io_queues[HCTX_TYPE_READ],
+		io_queues[HCTX_TYPE_POLL]);
+}
+EXPORT_SYMBOL_GPL(nvmf_map_queues);
+
 static int nvmf_check_required_opts(struct nvmf_ctrl_options *opts,
 		unsigned int required_opts)
 {
@@ -1260,7 +1342,7 @@ static int __init nvmf_init(void)
 	if (!nvmf_default_host)
 		return -ENOMEM;
 
-	nvmf_class = class_create(THIS_MODULE, "nvme-fabrics");
+	nvmf_class = class_create("nvme-fabrics");
 	if (IS_ERR(nvmf_class)) {
 		pr_err("couldn't register class nvme-fabrics\n");
 		ret = PTR_ERR(nvmf_class);

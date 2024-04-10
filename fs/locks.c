@@ -1300,6 +1300,7 @@ retry:
  out:
 	spin_unlock(&ctx->flc_lock);
 	percpu_up_read(&file_rwsem);
+	trace_posix_lock_inode(inode, request, error);
 	/*
 	 * Free any unused locks.
 	 */
@@ -1308,7 +1309,6 @@ retry:
 	if (new_fl2)
 		locks_free_lock(new_fl2);
 	locks_dispose_list(&dispose);
-	trace_posix_lock_inode(inode, request, error);
 
 	return error;
 }
@@ -1728,13 +1728,6 @@ generic_add_lease(struct file *filp, long arg, struct file_lock **flp, void **pr
 	if (is_deleg && !inode_trylock(inode))
 		return -EAGAIN;
 
-	if (is_deleg && arg == F_WRLCK) {
-		/* Write delegations are not currently supported: */
-		inode_unlock(inode);
-		WARN_ON_ONCE(1);
-		return -EINVAL;
-	}
-
 	percpu_down_read(&file_rwsem);
 	spin_lock(&ctx->flc_lock);
 	time_out_leases(inode, &dispose);
@@ -1890,7 +1883,6 @@ int generic_setlease(struct file *filp, long arg, struct file_lock **flp,
 }
 EXPORT_SYMBOL(generic_setlease);
 
-#if IS_ENABLED(CONFIG_SRCU)
 /*
  * Kernel subsystems can register to be notified on any attempt to set
  * a new lease with the lease_notifier_chain. This is used by (e.g.) nfsd
@@ -1923,30 +1915,6 @@ void lease_unregister_notifier(struct notifier_block *nb)
 	srcu_notifier_chain_unregister(&lease_notifier_chain, nb);
 }
 EXPORT_SYMBOL_GPL(lease_unregister_notifier);
-
-#else /* !IS_ENABLED(CONFIG_SRCU) */
-static inline void
-lease_notifier_chain_init(void)
-{
-}
-
-static inline void
-setlease_notifier(long arg, struct file_lock *lease)
-{
-}
-
-int lease_register_notifier(struct notifier_block *nb)
-{
-	return 0;
-}
-EXPORT_SYMBOL_GPL(lease_register_notifier);
-
-void lease_unregister_notifier(struct notifier_block *nb)
-{
-}
-EXPORT_SYMBOL_GPL(lease_unregister_notifier);
-
-#endif /* IS_ENABLED(CONFIG_SRCU) */
 
 /**
  * vfs_setlease        -       sets a lease on an open file
@@ -2450,7 +2418,6 @@ int fcntl_getlk64(struct file *filp, unsigned int cmd, struct flock64 *flock)
 		if (flock->l_pid != 0)
 			goto out;
 
-		cmd = F_GETLK64;
 		fl->fl_flags |= FL_OFDLCK;
 		fl->fl_owner = filp;
 	}
@@ -2924,10 +2891,12 @@ static int __init filelock_init(void)
 	int i;
 
 	flctx_cache = kmem_cache_create("file_lock_ctx",
-			sizeof(struct file_lock_context), 0, SLAB_PANIC, NULL);
+			sizeof(struct file_lock_context), 0,
+			SLAB_PANIC | SLAB_ACCOUNT, NULL);
 
 	filelock_cache = kmem_cache_create("file_lock_cache",
-			sizeof(struct file_lock), 0, SLAB_PANIC, NULL);
+			sizeof(struct file_lock), 0,
+			SLAB_PANIC | SLAB_ACCOUNT, NULL);
 
 	for_each_possible_cpu(i) {
 		struct file_lock_list_struct *fll = per_cpu_ptr(&file_lock_list, i);

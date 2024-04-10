@@ -4,6 +4,7 @@
 /* ethtool support for ice */
 
 #include "ice.h"
+#include "ice_ethtool.h"
 #include "ice_flow.h"
 #include "ice_fltr.h"
 #include "ice_lib.h"
@@ -343,6 +344,88 @@ static const struct ice_priv_flag ice_gstrings_priv_flags[] = {
 };
 
 #define ICE_PRIV_FLAG_ARRAY_SIZE	ARRAY_SIZE(ice_gstrings_priv_flags)
+
+static const u32 ice_adv_lnk_speed_100[] __initconst = {
+	ETHTOOL_LINK_MODE_100baseT_Full_BIT,
+};
+
+static const u32 ice_adv_lnk_speed_1000[] __initconst = {
+	ETHTOOL_LINK_MODE_1000baseX_Full_BIT,
+	ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
+	ETHTOOL_LINK_MODE_1000baseKX_Full_BIT,
+};
+
+static const u32 ice_adv_lnk_speed_2500[] __initconst = {
+	ETHTOOL_LINK_MODE_2500baseT_Full_BIT,
+	ETHTOOL_LINK_MODE_2500baseX_Full_BIT,
+};
+
+static const u32 ice_adv_lnk_speed_5000[] __initconst = {
+	ETHTOOL_LINK_MODE_5000baseT_Full_BIT,
+};
+
+static const u32 ice_adv_lnk_speed_10000[] __initconst = {
+	ETHTOOL_LINK_MODE_10000baseT_Full_BIT,
+	ETHTOOL_LINK_MODE_10000baseKR_Full_BIT,
+	ETHTOOL_LINK_MODE_10000baseSR_Full_BIT,
+	ETHTOOL_LINK_MODE_10000baseLR_Full_BIT,
+};
+
+static const u32 ice_adv_lnk_speed_25000[] __initconst = {
+	ETHTOOL_LINK_MODE_25000baseCR_Full_BIT,
+	ETHTOOL_LINK_MODE_25000baseSR_Full_BIT,
+	ETHTOOL_LINK_MODE_25000baseKR_Full_BIT,
+};
+
+static const u32 ice_adv_lnk_speed_40000[] __initconst = {
+	ETHTOOL_LINK_MODE_40000baseCR4_Full_BIT,
+	ETHTOOL_LINK_MODE_40000baseSR4_Full_BIT,
+	ETHTOOL_LINK_MODE_40000baseLR4_Full_BIT,
+	ETHTOOL_LINK_MODE_40000baseKR4_Full_BIT,
+};
+
+static const u32 ice_adv_lnk_speed_50000[] __initconst = {
+	ETHTOOL_LINK_MODE_50000baseCR2_Full_BIT,
+	ETHTOOL_LINK_MODE_50000baseKR2_Full_BIT,
+	ETHTOOL_LINK_MODE_50000baseSR2_Full_BIT,
+};
+
+static const u32 ice_adv_lnk_speed_100000[] __initconst = {
+	ETHTOOL_LINK_MODE_100000baseCR4_Full_BIT,
+	ETHTOOL_LINK_MODE_100000baseSR4_Full_BIT,
+	ETHTOOL_LINK_MODE_100000baseLR4_ER4_Full_BIT,
+	ETHTOOL_LINK_MODE_100000baseKR4_Full_BIT,
+	ETHTOOL_LINK_MODE_100000baseCR2_Full_BIT,
+	ETHTOOL_LINK_MODE_100000baseSR2_Full_BIT,
+	ETHTOOL_LINK_MODE_100000baseKR2_Full_BIT,
+};
+
+static const u32 ice_adv_lnk_speed_200000[] __initconst = {
+	ETHTOOL_LINK_MODE_200000baseKR4_Full_BIT,
+	ETHTOOL_LINK_MODE_200000baseSR4_Full_BIT,
+	ETHTOOL_LINK_MODE_200000baseLR4_ER4_FR4_Full_BIT,
+	ETHTOOL_LINK_MODE_200000baseDR4_Full_BIT,
+	ETHTOOL_LINK_MODE_200000baseCR4_Full_BIT,
+};
+
+static struct ethtool_forced_speed_map ice_adv_lnk_speed_maps[] __ro_after_init = {
+	ETHTOOL_FORCED_SPEED_MAP(ice_adv_lnk_speed, 100),
+	ETHTOOL_FORCED_SPEED_MAP(ice_adv_lnk_speed, 1000),
+	ETHTOOL_FORCED_SPEED_MAP(ice_adv_lnk_speed, 2500),
+	ETHTOOL_FORCED_SPEED_MAP(ice_adv_lnk_speed, 5000),
+	ETHTOOL_FORCED_SPEED_MAP(ice_adv_lnk_speed, 10000),
+	ETHTOOL_FORCED_SPEED_MAP(ice_adv_lnk_speed, 25000),
+	ETHTOOL_FORCED_SPEED_MAP(ice_adv_lnk_speed, 40000),
+	ETHTOOL_FORCED_SPEED_MAP(ice_adv_lnk_speed, 50000),
+	ETHTOOL_FORCED_SPEED_MAP(ice_adv_lnk_speed, 100000),
+	ETHTOOL_FORCED_SPEED_MAP(ice_adv_lnk_speed, 200000),
+};
+
+void __init ice_adv_lnk_speed_maps_init(void)
+{
+	ethtool_forced_speed_maps_init(ice_adv_lnk_speed_maps,
+				       ARRAY_SIZE(ice_adv_lnk_speed_maps));
+}
 
 static void
 __ice_get_drvinfo(struct net_device *netdev, struct ethtool_drvinfo *drvinfo,
@@ -956,7 +1039,7 @@ static u64 ice_intr_test(struct net_device *netdev)
 
 	netdev_info(netdev, "interrupt test\n");
 
-	wr32(&pf->hw, GLINT_DYN_CTL(pf->oicr_idx),
+	wr32(&pf->hw, GLINT_DYN_CTL(pf->oicr_irq.index),
 	     GLINT_DYN_CTL_SW_ITR_INDX_M |
 	     GLINT_DYN_CTL_INTENA_MSK_M |
 	     GLINT_DYN_CTL_SWINT_TRIG_M);
@@ -1637,6 +1720,15 @@ ice_get_ethtool_stats(struct net_device *netdev,
 					 ICE_PHY_TYPE_HIGH_100G_AUI2_AOC_ACC | \
 					 ICE_PHY_TYPE_HIGH_100G_AUI2)
 
+#define ICE_PHY_TYPE_HIGH_MASK_200G	(ICE_PHY_TYPE_HIGH_200G_CR4_PAM4 | \
+					 ICE_PHY_TYPE_HIGH_200G_SR4 | \
+					 ICE_PHY_TYPE_HIGH_200G_FR4 | \
+					 ICE_PHY_TYPE_HIGH_200G_LR4 | \
+					 ICE_PHY_TYPE_HIGH_200G_DR4 | \
+					 ICE_PHY_TYPE_HIGH_200G_KR4_PAM4 | \
+					 ICE_PHY_TYPE_HIGH_200G_AUI4_AOC_ACC | \
+					 ICE_PHY_TYPE_HIGH_200G_AUI4)
+
 /**
  * ice_mask_min_supported_speeds
  * @hw: pointer to the HW structure
@@ -1651,22 +1743,34 @@ ice_mask_min_supported_speeds(struct ice_hw *hw,
 			      u64 phy_types_high, u64 *phy_types_low)
 {
 	/* if QSFP connection with 100G speed, minimum supported speed is 25G */
-	if (*phy_types_low & ICE_PHY_TYPE_LOW_MASK_100G ||
-	    phy_types_high & ICE_PHY_TYPE_HIGH_MASK_100G)
+	if ((*phy_types_low & ICE_PHY_TYPE_LOW_MASK_100G) ||
+	    (phy_types_high & ICE_PHY_TYPE_HIGH_MASK_100G) ||
+	    (phy_types_high & ICE_PHY_TYPE_HIGH_MASK_200G))
 		*phy_types_low &= ~ICE_PHY_TYPE_LOW_MASK_MIN_25G;
 	else if (!ice_is_100m_speed_supported(hw))
 		*phy_types_low &= ~ICE_PHY_TYPE_LOW_MASK_MIN_1G;
 }
 
-#define ice_ethtool_advertise_link_mode(aq_link_speed, ethtool_link_mode)    \
-	do {								     \
-		if (req_speeds & (aq_link_speed) ||			     \
-		    (!req_speeds &&					     \
-		     (advert_phy_type_lo & phy_type_mask_lo ||		     \
-		      advert_phy_type_hi & phy_type_mask_hi)))		     \
-			ethtool_link_ksettings_add_link_mode(ks, advertising,\
-							ethtool_link_mode);  \
-	} while (0)
+/**
+ * ice_linkmode_set_bit - set link mode bit
+ * @phy_to_ethtool: PHY type to ethtool link mode struct to set
+ * @ks: ethtool link ksettings struct to fill out
+ * @req_speeds: speed requested by user
+ * @advert_phy_type: advertised PHY type
+ * @phy_type: PHY type
+ */
+static void
+ice_linkmode_set_bit(const struct ice_phy_type_to_ethtool *phy_to_ethtool,
+		     struct ethtool_link_ksettings *ks, u32 req_speeds,
+		     u64 advert_phy_type, u32 phy_type)
+{
+	linkmode_set_bit(phy_to_ethtool->link_mode, ks->link_modes.supported);
+
+	if (req_speeds & phy_to_ethtool->aq_link_speed ||
+	    (!req_speeds && advert_phy_type & BIT(phy_type)))
+		linkmode_set_bit(phy_to_ethtool->link_mode,
+				 ks->link_modes.advertising);
+}
 
 /**
  * ice_phy_type_to_ethtool - convert the phy_types to ethtool link modes
@@ -1682,11 +1786,10 @@ ice_phy_type_to_ethtool(struct net_device *netdev,
 	struct ice_pf *pf = vsi->back;
 	u64 advert_phy_type_lo = 0;
 	u64 advert_phy_type_hi = 0;
-	u64 phy_type_mask_lo = 0;
-	u64 phy_type_mask_hi = 0;
 	u64 phy_types_high = 0;
 	u64 phy_types_low = 0;
-	u16 req_speeds;
+	u32 req_speeds;
+	u32 i;
 
 	req_speeds = vsi->port_info->phy.link_info.req_speeds;
 
@@ -1743,272 +1846,22 @@ ice_phy_type_to_ethtool(struct net_device *netdev,
 		advert_phy_type_hi = vsi->port_info->phy.phy_type_high;
 	}
 
-	ethtool_link_ksettings_zero_link_mode(ks, supported);
-	ethtool_link_ksettings_zero_link_mode(ks, advertising);
+	linkmode_zero(ks->link_modes.supported);
+	linkmode_zero(ks->link_modes.advertising);
 
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_100BASE_TX |
-			   ICE_PHY_TYPE_LOW_100M_SGMII;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     100baseT_Full);
-
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_100MB,
-						100baseT_Full);
+	for (i = 0; i < ARRAY_SIZE(phy_type_low_lkup); i++) {
+		if (phy_types_low & BIT_ULL(i))
+			ice_linkmode_set_bit(&phy_type_low_lkup[i], ks,
+					     req_speeds, advert_phy_type_lo,
+					     i);
 	}
 
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_1000BASE_T |
-			   ICE_PHY_TYPE_LOW_1G_SGMII;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     1000baseT_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_1000MB,
-						1000baseT_Full);
+	for (i = 0; i < ARRAY_SIZE(phy_type_high_lkup); i++) {
+		if (phy_types_high & BIT_ULL(i))
+			ice_linkmode_set_bit(&phy_type_high_lkup[i], ks,
+					     req_speeds, advert_phy_type_hi,
+					     i);
 	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_1000BASE_KX;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     1000baseKX_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_1000MB,
-						1000baseKX_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_1000BASE_SX |
-			   ICE_PHY_TYPE_LOW_1000BASE_LX;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     1000baseX_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_1000MB,
-						1000baseX_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_2500BASE_T;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     2500baseT_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_2500MB,
-						2500baseT_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_2500BASE_X |
-			   ICE_PHY_TYPE_LOW_2500BASE_KX;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     2500baseX_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_2500MB,
-						2500baseX_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_5GBASE_T |
-			   ICE_PHY_TYPE_LOW_5GBASE_KR;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     5000baseT_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_5GB,
-						5000baseT_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_10GBASE_T |
-			   ICE_PHY_TYPE_LOW_10G_SFI_DA |
-			   ICE_PHY_TYPE_LOW_10G_SFI_AOC_ACC |
-			   ICE_PHY_TYPE_LOW_10G_SFI_C2C;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     10000baseT_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_10GB,
-						10000baseT_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_10GBASE_KR_CR1;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     10000baseKR_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_10GB,
-						10000baseKR_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_10GBASE_SR;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     10000baseSR_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_10GB,
-						10000baseSR_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_10GBASE_LR;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     10000baseLR_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_10GB,
-						10000baseLR_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_25GBASE_T |
-			   ICE_PHY_TYPE_LOW_25GBASE_CR |
-			   ICE_PHY_TYPE_LOW_25GBASE_CR_S |
-			   ICE_PHY_TYPE_LOW_25GBASE_CR1 |
-			   ICE_PHY_TYPE_LOW_25G_AUI_AOC_ACC |
-			   ICE_PHY_TYPE_LOW_25G_AUI_C2C;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     25000baseCR_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_25GB,
-						25000baseCR_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_25GBASE_SR |
-			   ICE_PHY_TYPE_LOW_25GBASE_LR;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     25000baseSR_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_25GB,
-						25000baseSR_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_25GBASE_KR |
-			   ICE_PHY_TYPE_LOW_25GBASE_KR_S |
-			   ICE_PHY_TYPE_LOW_25GBASE_KR1;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     25000baseKR_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_25GB,
-						25000baseKR_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_40GBASE_KR4;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     40000baseKR4_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_40GB,
-						40000baseKR4_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_40GBASE_CR4 |
-			   ICE_PHY_TYPE_LOW_40G_XLAUI_AOC_ACC |
-			   ICE_PHY_TYPE_LOW_40G_XLAUI;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     40000baseCR4_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_40GB,
-						40000baseCR4_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_40GBASE_SR4;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     40000baseSR4_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_40GB,
-						40000baseSR4_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_40GBASE_LR4;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     40000baseLR4_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_40GB,
-						40000baseLR4_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_50GBASE_CR2 |
-			   ICE_PHY_TYPE_LOW_50G_LAUI2_AOC_ACC |
-			   ICE_PHY_TYPE_LOW_50G_LAUI2 |
-			   ICE_PHY_TYPE_LOW_50G_AUI2_AOC_ACC |
-			   ICE_PHY_TYPE_LOW_50G_AUI2 |
-			   ICE_PHY_TYPE_LOW_50GBASE_CP |
-			   ICE_PHY_TYPE_LOW_50GBASE_SR |
-			   ICE_PHY_TYPE_LOW_50G_AUI1_AOC_ACC |
-			   ICE_PHY_TYPE_LOW_50G_AUI1;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     50000baseCR2_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_50GB,
-						50000baseCR2_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_50GBASE_KR2 |
-			   ICE_PHY_TYPE_LOW_50GBASE_KR_PAM4;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     50000baseKR2_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_50GB,
-						50000baseKR2_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_50GBASE_SR2 |
-			   ICE_PHY_TYPE_LOW_50GBASE_LR2 |
-			   ICE_PHY_TYPE_LOW_50GBASE_FR |
-			   ICE_PHY_TYPE_LOW_50GBASE_LR;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     50000baseSR2_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_50GB,
-						50000baseSR2_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_100GBASE_CR4 |
-			   ICE_PHY_TYPE_LOW_100G_CAUI4_AOC_ACC |
-			   ICE_PHY_TYPE_LOW_100G_CAUI4 |
-			   ICE_PHY_TYPE_LOW_100G_AUI4_AOC_ACC |
-			   ICE_PHY_TYPE_LOW_100G_AUI4 |
-			   ICE_PHY_TYPE_LOW_100GBASE_CR_PAM4;
-	phy_type_mask_hi = ICE_PHY_TYPE_HIGH_100G_CAUI2_AOC_ACC |
-			   ICE_PHY_TYPE_HIGH_100G_CAUI2 |
-			   ICE_PHY_TYPE_HIGH_100G_AUI2_AOC_ACC |
-			   ICE_PHY_TYPE_HIGH_100G_AUI2;
-	if (phy_types_low & phy_type_mask_lo ||
-	    phy_types_high & phy_type_mask_hi) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     100000baseCR4_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_100GB,
-						100000baseCR4_Full);
-	}
-
-	if (phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_CP2) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     100000baseCR2_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_100GB,
-						100000baseCR2_Full);
-	}
-
-	if (phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_SR4) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     100000baseSR4_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_100GB,
-						100000baseSR4_Full);
-	}
-
-	if (phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_SR2) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     100000baseSR2_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_100GB,
-						100000baseSR2_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_100GBASE_LR4 |
-			   ICE_PHY_TYPE_LOW_100GBASE_DR;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     100000baseLR4_ER4_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_100GB,
-						100000baseLR4_ER4_Full);
-	}
-
-	phy_type_mask_lo = ICE_PHY_TYPE_LOW_100GBASE_KR4 |
-			   ICE_PHY_TYPE_LOW_100GBASE_KR_PAM4;
-	if (phy_types_low & phy_type_mask_lo) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     100000baseKR4_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_100GB,
-						100000baseKR4_Full);
-	}
-
-	if (phy_types_high & ICE_PHY_TYPE_HIGH_100GBASE_KR2_PAM4) {
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     100000baseKR2_Full);
-		ice_ethtool_advertise_link_mode(ICE_AQ_LINK_SPEED_100GB,
-						100000baseKR2_Full);
-	}
-
 }
 
 #define TEST_SET_BITS_TIMEOUT	50
@@ -2035,6 +1888,9 @@ ice_get_settings_link_up(struct ethtool_link_ksettings *ks,
 	ice_phy_type_to_ethtool(netdev, ks);
 
 	switch (link_info->link_speed) {
+	case ICE_AQ_LINK_SPEED_200GB:
+		ks->base.speed = SPEED_200000;
+		break;
 	case ICE_AQ_LINK_SPEED_100GB:
 		ks->base.speed = SPEED_100000;
 		break;
@@ -2247,79 +2103,69 @@ done:
 }
 
 /**
+ * ice_speed_to_aq_link - Get AQ link speed by Ethtool forced speed
+ * @speed: ethtool forced speed
+ */
+static u16 ice_speed_to_aq_link(int speed)
+{
+	int aq_speed;
+
+	switch (speed) {
+	case SPEED_10:
+		aq_speed = ICE_AQ_LINK_SPEED_10MB;
+		break;
+	case SPEED_100:
+		aq_speed = ICE_AQ_LINK_SPEED_100MB;
+		break;
+	case SPEED_1000:
+		aq_speed = ICE_AQ_LINK_SPEED_1000MB;
+		break;
+	case SPEED_2500:
+		aq_speed = ICE_AQ_LINK_SPEED_2500MB;
+		break;
+	case SPEED_5000:
+		aq_speed = ICE_AQ_LINK_SPEED_5GB;
+		break;
+	case SPEED_10000:
+		aq_speed = ICE_AQ_LINK_SPEED_10GB;
+		break;
+	case SPEED_20000:
+		aq_speed = ICE_AQ_LINK_SPEED_20GB;
+		break;
+	case SPEED_25000:
+		aq_speed = ICE_AQ_LINK_SPEED_25GB;
+		break;
+	case SPEED_40000:
+		aq_speed = ICE_AQ_LINK_SPEED_40GB;
+		break;
+	case SPEED_50000:
+		aq_speed = ICE_AQ_LINK_SPEED_50GB;
+		break;
+	case SPEED_100000:
+		aq_speed = ICE_AQ_LINK_SPEED_100GB;
+		break;
+	default:
+		aq_speed = ICE_AQ_LINK_SPEED_UNKNOWN;
+		break;
+	}
+	return aq_speed;
+}
+
+/**
  * ice_ksettings_find_adv_link_speed - Find advertising link speed
  * @ks: ethtool ksettings
  */
 static u16
 ice_ksettings_find_adv_link_speed(const struct ethtool_link_ksettings *ks)
 {
+	const struct ethtool_forced_speed_map *map;
 	u16 adv_link_speed = 0;
 
-	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  100baseT_Full))
-		adv_link_speed |= ICE_AQ_LINK_SPEED_100MB;
-	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  1000baseX_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  1000baseT_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  1000baseKX_Full))
-		adv_link_speed |= ICE_AQ_LINK_SPEED_1000MB;
-	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  2500baseT_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  2500baseX_Full))
-		adv_link_speed |= ICE_AQ_LINK_SPEED_2500MB;
-	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  5000baseT_Full))
-		adv_link_speed |= ICE_AQ_LINK_SPEED_5GB;
-	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  10000baseT_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  10000baseKR_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  10000baseSR_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  10000baseLR_Full))
-		adv_link_speed |= ICE_AQ_LINK_SPEED_10GB;
-	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  25000baseCR_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  25000baseSR_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  25000baseKR_Full))
-		adv_link_speed |= ICE_AQ_LINK_SPEED_25GB;
-	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  40000baseCR4_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  40000baseSR4_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  40000baseLR4_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  40000baseKR4_Full))
-		adv_link_speed |= ICE_AQ_LINK_SPEED_40GB;
-	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  50000baseCR2_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  50000baseKR2_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  50000baseSR2_Full))
-		adv_link_speed |= ICE_AQ_LINK_SPEED_50GB;
-	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  100000baseCR4_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  100000baseSR4_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  100000baseLR4_ER4_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  100000baseKR4_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  100000baseCR2_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  100000baseSR2_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  100000baseKR2_Full))
-		adv_link_speed |= ICE_AQ_LINK_SPEED_100GB;
+	for (u32 i = 0; i < ARRAY_SIZE(ice_adv_lnk_speed_maps); i++) {
+		map = ice_adv_lnk_speed_maps + i;
+		if (linkmode_intersects(ks->link_modes.advertising, map->caps))
+			adv_link_speed |= ice_speed_to_aq_link(map->speed);
+	}
 
 	return adv_link_speed;
 }
@@ -3524,7 +3370,7 @@ ice_get_ts_info(struct net_device *dev, struct ethtool_ts_info *info)
 				SOF_TIMESTAMPING_RX_HARDWARE |
 				SOF_TIMESTAMPING_RAW_HARDWARE;
 
-	info->phc_index = ice_get_ptp_clock_index(pf);
+	info->phc_index = ice_ptp_clock_index(pf);
 
 	info->tx_types = BIT(HWTSTAMP_TX_OFF) | BIT(HWTSTAMP_TX_ON);
 

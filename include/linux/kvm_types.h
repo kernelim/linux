@@ -6,6 +6,7 @@
 struct kvm;
 struct kvm_async_pf;
 struct kvm_device_ops;
+struct kvm_gfn_range;
 struct kvm_interrupt;
 struct kvm_irq_routing_table;
 struct kvm_memory_slot;
@@ -91,11 +92,11 @@ struct gfn_to_pfn_cache {
  * is topped up (__kvm_mmu_topup_memory_cache()).
  */
 struct kvm_mmu_memory_cache {
-	int nobjs;
 	gfp_t gfp_zero;
 	gfp_t gfp_custom;
 	struct kmem_cache *kmem_cache;
 	int capacity;
+	int nobjs;
 	void **objects;
 };
 #endif

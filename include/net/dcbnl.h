@@ -10,6 +10,10 @@
 
 #include <linux/dcbnl.h>
 
+#include <linux/rh_kabi.h>
+
+struct net_device;
+
 struct dcb_app_type {
 	int	ifindex;
 	struct dcb_app	  app;
@@ -107,6 +111,15 @@ struct dcbnl_rtnl_ops {
 	/* buffer settings */
 	int (*dcbnl_getbuffer)(struct net_device *, struct dcbnl_buffer *);
 	int (*dcbnl_setbuffer)(struct net_device *, struct dcbnl_buffer *);
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
+	RH_KABI_RESERVE(5)
+	RH_KABI_RESERVE(6)
+	RH_KABI_RESERVE(7)
+	RH_KABI_RESERVE(8)
 };
 
 #endif /* __NET_DCBNL_H__ */

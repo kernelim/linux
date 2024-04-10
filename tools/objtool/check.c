@@ -181,6 +181,7 @@ static bool __dead_end_function(struct objtool_file *file, struct symbol *func,
 	 */
 	static const char * const global_noreturns[] = {
 		"__invalid_creds",
+		"__kunit_abort",
 		"__module_put_and_kthread_exit",
 		"__reiserfs_panic",
 		"__stack_chk_fail",
@@ -1133,6 +1134,8 @@ static const char *uaccess_safe_builtin[] = {
 	"__tsan_atomic64_compare_exchange_val",
 	"__tsan_atomic_thread_fence",
 	"__tsan_atomic_signal_fence",
+	"__tsan_unaligned_read16",
+	"__tsan_unaligned_write16",
 	/* KCOV */
 	"write_comp_data",
 	"check_kcov_mode",

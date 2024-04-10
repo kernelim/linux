@@ -244,14 +244,13 @@ void crypto_unregister_rngs(struct rng_alg *algs, int count)
 }
 EXPORT_SYMBOL_GPL(crypto_unregister_rngs);
 
-static ssize_t crypto_devrandom_read(void __user *buf, size_t buflen,
-				     bool reseed)
+static ssize_t crypto_devrandom_read_iter(struct iov_iter *iter, bool reseed)
 {
 	struct crypto_rng *rng;
 	u8 tmp[256];
 	ssize_t ret;
 
-	if (!buflen)
+	if (unlikely(!iov_iter_count(iter)))
 		return 0;
 
 	if (reseed) {
@@ -290,26 +289,20 @@ static ssize_t crypto_devrandom_read(void __user *buf, size_t buflen,
 	}
 
 	for (;;) {
+		size_t i, copied;
 		int err;
-		int i;
 
-		i = min_t(int, buflen, sizeof(tmp));
+		i = min_t(size_t, iov_iter_count(iter), sizeof(tmp));
 		err = crypto_rng_get_bytes(rng, tmp, i);
 		if (err) {
 			ret = err;
 			break;
 		}
 
-		if (copy_to_user(buf, tmp, i)) {
-			ret = -EFAULT;
-			break;
-		}
+		copied = copy_to_iter(tmp, i, iter);
+		ret += copied;
 
-		buflen -= i;
-		buf += i;
-		ret += i;
-
-		if (!buflen)
+		if (!iov_iter_count(iter) || copied != sizeof(tmp))
 			break;
 
 		if (need_resched()) {
@@ -329,7 +322,7 @@ static ssize_t crypto_devrandom_read(void __user *buf, size_t buflen,
 }
 
 static const struct random_extrng crypto_devrandom_rng = {
-	.extrng_read = crypto_devrandom_read,
+	.extrng_read_iter = crypto_devrandom_read_iter,
 	.owner = THIS_MODULE,
 };
 

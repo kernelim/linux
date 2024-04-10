@@ -384,7 +384,17 @@
 #define SPRN_HRMOR	0x139	/* Real mode offset register */
 #define SPRN_HSRR0	0x13A	/* Hypervisor Save/Restore 0 */
 #define SPRN_HSRR1	0x13B	/* Hypervisor Save/Restore 1 */
+#define SPRN_HDEXCR_RO	0x1C7	/* Hypervisor DEXCR (non-privileged, readonly) */
+#define SPRN_HASHKEYR	0x1D4	/* Non-privileged hashst/hashchk key register */
+#define SPRN_HDEXCR	0x1D7	/* Hypervisor dynamic execution control register */
+#define SPRN_DEXCR_RO	0x32C	/* DEXCR (non-privileged, readonly) */
 #define SPRN_ASDR	0x330	/* Access segment descriptor register */
+#define SPRN_DEXCR	0x33C	/* Dynamic execution control register */
+#define   DEXCR_PR_SBHE	  0x80000000UL /* 0: Speculative Branch Hint Enable */
+#define   DEXCR_PR_IBRTPD 0x10000000UL /* 3: Indirect Branch Recurrent Target Prediction Disable */
+#define   DEXCR_PR_SRAPD  0x08000000UL /* 4: Subroutine Return Address Prediction Disable */
+#define   DEXCR_PR_NPHIE  0x04000000UL /* 5: Non-Privileged Hash Instruction Enable */
+#define   DEXCR_INIT	DEXCR_PR_NPHIE	/* Fixed DEXCR value to initialise all CPUs with */
 #define SPRN_IC		0x350	/* Virtual Instruction Count */
 #define SPRN_VTB	0x351	/* Virtual Time Base */
 #define SPRN_LDBAR	0x352	/* LD Base Address Register */
@@ -1312,6 +1322,11 @@
 #define PVR_VER_E500MC	0x8023
 #define PVR_VER_E5500	0x8024
 #define PVR_VER_E6500	0x8040
+#define PVR_VER_7450	0x8000
+#define PVR_VER_7455	0x8001
+#define PVR_VER_7447	0x8002
+#define PVR_VER_7447A	0x8003
+#define PVR_VER_7448	0x8004
 
 /*
  * For the 8xx processors, all of them report the same PVR family for

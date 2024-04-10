@@ -18,6 +18,8 @@ enum netns_bpf_attach_type {
 	MAX_NETNS_BPF_ATTACH_TYPE
 };
 
+/* RHEL: The struct netns_bpf can be changed between releases and is not
+ * kABI stable. */
 struct netns_bpf {
 	/* Array of programs to run compiled from progs or links */
 	struct bpf_prog_array __rcu *run_array[MAX_NETNS_BPF_ATTACH_TYPE];

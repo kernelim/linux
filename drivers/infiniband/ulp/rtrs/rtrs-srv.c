@@ -2255,7 +2255,7 @@ static int __init rtrs_server_init(void)
 					      get_order(max_chunk_size));
 	if (!chunk_pool)
 		return -ENOMEM;
-	rtrs_dev_class = class_create(THIS_MODULE, "rtrs-server");
+	rtrs_dev_class = class_create("rtrs-server");
 	if (IS_ERR(rtrs_dev_class)) {
 		err = PTR_ERR(rtrs_dev_class);
 		goto out_chunk_pool;

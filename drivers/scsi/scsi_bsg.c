@@ -10,7 +10,7 @@
 #define uptr64(val) ((void __user *)(uintptr_t)(val))
 
 static int scsi_bsg_sg_io_fn(struct request_queue *q, struct sg_io_v4 *hdr,
-		fmode_t mode, unsigned int timeout)
+		bool open_for_write, unsigned int timeout)
 {
 	struct scsi_request *sreq;
 	struct request *rq;
@@ -44,7 +44,7 @@ static int scsi_bsg_sg_io_fn(struct request_queue *q, struct sg_io_v4 *hdr,
 	if (copy_from_user(sreq->cmd, uptr64(hdr->request), sreq->cmd_len))
 		goto out_free_cmd;
 	ret = -EPERM;
-	if (!scsi_cmd_allowed(sreq->cmd, mode))
+	if (!scsi_cmd_allowed(sreq->cmd, open_for_write))
 		goto out_free_cmd;
 
 	ret = 0;

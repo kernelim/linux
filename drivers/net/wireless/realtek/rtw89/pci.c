@@ -265,7 +265,7 @@ static u32 rtw89_pci_rxbd_deliver_skbs(struct rtw89_dev *rtwdev,
 			goto err_sync_device;
 		}
 
-		rtw89_core_query_rxdesc(rtwdev, desc_info, skb->data, rxinfo_size);
+		rtw89_chip_query_rxdesc(rtwdev, desc_info, skb->data, rxinfo_size);
 
 		new = rtw89_alloc_skb_for_rx(rtwdev, desc_info->pkt_size);
 		if (!new)
@@ -274,9 +274,7 @@ static u32 rtw89_pci_rxbd_deliver_skbs(struct rtw89_dev *rtwdev,
 		rx_ring->diliver_skb = new;
 
 		/* first segment has RX desc */
-		offset = desc_info->offset;
-		offset += desc_info->long_rxdesc ? sizeof(struct rtw89_rxdesc_long) :
-			  sizeof(struct rtw89_rxdesc_short);
+		offset = desc_info->offset + desc_info->rxd_len;
 	} else {
 		offset = sizeof(struct rtw89_pci_rxbd_info);
 		if (!new) {
@@ -546,12 +544,10 @@ static u32 rtw89_pci_release_tx_skbs(struct rtw89_dev *rtwdev,
 		return cnt;
 	}
 
-	rtw89_core_query_rxdesc(rtwdev, &desc_info, skb->data, rxinfo_size);
+	rtw89_chip_query_rxdesc(rtwdev, &desc_info, skb->data, rxinfo_size);
 
 	/* first segment has RX desc */
-	offset = desc_info.offset;
-	offset += desc_info.long_rxdesc ? sizeof(struct rtw89_rxdesc_long) :
-					  sizeof(struct rtw89_rxdesc_short);
+	offset = desc_info.offset + desc_info.rxd_len;
 	for (; offset + rpp_size <= rx_info->len; offset += rpp_size) {
 		rpp = (struct rtw89_pci_rpp_fmt *)(skb->data + offset);
 		rtw89_pci_release_rpp(rtwdev, rpp);
@@ -1003,10 +999,10 @@ static u32 __rtw89_pci_check_and_reclaim_tx_resource(struct rtw89_dev *rtwdev,
 	min_cnt = min(bd_cnt, wd_cnt);
 	if (min_cnt == 0) {
 		/* This message can be frequently shown in low power mode or
-		 * high traffic with 8852B, and we have recognized it as normal
+		 * high traffic with small FIFO chips, and we have recognized it as normal
 		 * behavior, so print with mask RTW89_DBG_TXRX in these situations.
 		 */
-		if (rtwpci->low_power || chip->chip_id == RTL8852B)
+		if (rtwpci->low_power || chip->small_fifo_size)
 			debug_mask = RTW89_DBG_TXRX;
 		else
 			debug_mask = RTW89_DBG_UNEXP;
@@ -1200,7 +1196,6 @@ static int rtw89_pci_txwd_submit(struct rtw89_dev *rtwdev,
 	struct rtw89_pci *rtwpci = (struct rtw89_pci *)rtwdev->priv;
 	const struct rtw89_chip_info *chip = rtwdev->chip;
 	struct rtw89_tx_desc_info *desc_info = &tx_req->desc_info;
-	struct rtw89_txwd_info *txwd_info;
 	struct rtw89_pci_tx_wp_info *txwp_info;
 	void *txaddr_info_addr;
 	struct pci_dev *pdev = rtwpci->pdev;
@@ -1226,7 +1221,7 @@ static int rtw89_pci_txwd_submit(struct rtw89_dev *rtwdev,
 
 	txwp_len = sizeof(*txwp_info);
 	txwd_len = chip->txwd_body_size;
-	txwd_len += en_wd_info ? sizeof(*txwd_info) : 0;
+	txwd_len += en_wd_info ? chip->txwd_info_size : 0;
 
 	txwp_info = txwd->vaddr + txwd_len;
 	txwp_info->seq0 = cpu_to_le16(txwd->seq | RTW89_PCI_TXWP_VALID);
@@ -3943,5 +3938,5 @@ void rtw89_pci_remove(struct pci_dev *pdev)
 EXPORT_SYMBOL(rtw89_pci_remove);
 
 MODULE_AUTHOR("Realtek Corporation");
-MODULE_DESCRIPTION("Realtek 802.11ax wireless PCI driver");
+MODULE_DESCRIPTION("Realtek PCI 802.11ax wireless driver");
 MODULE_LICENSE("Dual BSD/GPL");

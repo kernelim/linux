@@ -69,8 +69,8 @@ struct btrfs_device {
 
 	struct btrfs_zoned_device_info *zone_info;
 
-	/* the mode sent to blkdev_get */
-	fmode_t mode;
+	/* block device holder for blkdev_get/put */
+	void *holder;
 
 	unsigned long dev_state;
 	blk_status_t last_flush_error;

@@ -16,6 +16,7 @@
 #include <linux/slab.h>
 #include <linux/mmzone.h>
 #include <linux/edac.h>
+#include <linux/bitfield.h>
 #include <asm/cpu_device_id.h>
 #include <asm/msr.h>
 #include "edac_module.h"
@@ -273,26 +274,6 @@
 
 #define UMC_SDP_INIT			BIT(31)
 
-enum amd_families {
-	K8_CPUS = 0,
-	F10_CPUS,
-	F15_CPUS,
-	F15_M30H_CPUS,
-	F15_M60H_CPUS,
-	F16_CPUS,
-	F16_M30H_CPUS,
-	F17_CPUS,
-	F17_M10H_CPUS,
-	F17_M30H_CPUS,
-	F17_M60H_CPUS,
-	F17_M70H_CPUS,
-	F19_CPUS,
-	F19_M10H_CPUS,
-	F19_M60H_CPUS,
-	F19_M70H_CPUS,
-	NUM_FAMILIES,
-};
-
 /* Error injection control structure */
 struct error_injection {
 	u32	 section;
@@ -335,6 +316,16 @@ struct amd64_umc {
 	enum mem_type dram_type;
 };
 
+struct amd64_family_flags {
+	/*
+	 * Indicates that the system supports the new register offsets, etc.
+	 * first introduced with Family 19h Model 10h.
+	 */
+	__u64 zn_regs_v2	: 1,
+
+	      __reserved	: 63;
+};
+
 struct amd64_pvt {
 	struct low_ops *ops;
 
@@ -347,7 +338,6 @@ struct amd64_pvt {
 	u8 stepping;		/* ... stepping */
 
 	int ext_model;		/* extended model value of this node */
-	int channel_count;
 
 	/* Raw registers */
 	u32 dclr0;		/* DRAM Configuration Low DCT0 reg */
@@ -373,10 +363,17 @@ struct amd64_pvt {
 	u32 dct_sel_lo;		/* DRAM Controller Select Low */
 	u32 dct_sel_hi;		/* DRAM Controller Select High */
 	u32 online_spare;	/* On-Line spare Reg */
+	u32 gpu_umc_base;	/* Base address used for channel selection on GPUs */
 
 	/* x4, x8, or x16 syndromes in use */
 	u8 ecc_sym_sz;
 
+	const char *ctl_name;
+	u16 f1_id, f2_id;
+	/* Maximum number of memory controllers per die/node. */
+	u8 max_mcs;
+
+	struct amd64_family_flags flags;
 	/* place to store error injection parameters prior to issue */
 	struct error_injection injection;
 
@@ -467,30 +464,15 @@ struct ecc_settings {
  * functions and per device encoding/decoding logic.
  */
 struct low_ops {
-	int (*early_channel_count)	(struct amd64_pvt *pvt);
-	void (*map_sysaddr_to_csrow)	(struct mem_ctl_info *mci, u64 sys_addr,
-					 struct err_info *);
-	int (*dbam_to_cs)		(struct amd64_pvt *pvt, u8 dct,
-					 unsigned cs_mode, int cs_mask_nr);
-};
-
-struct amd64_family_flags {
-	/*
-	 * Indicates that the system supports the new register offsets, etc.
-	 * first introduced with Family 19h Model 10h.
-	 */
-	__u64 zn_regs_v2	: 1,
-
-	      __reserved	: 63;
-};
-
-struct amd64_family_type {
-	const char *ctl_name;
-	u16 f1_id, f2_id;
-	/* Maximum number of memory controllers per die/node. */
-	u8 max_mcs;
-	struct amd64_family_flags flags;
-	struct low_ops ops;
+	void (*map_sysaddr_to_csrow)(struct mem_ctl_info *mci, u64 sys_addr,
+				     struct err_info *err);
+	int  (*dbam_to_cs)(struct amd64_pvt *pvt, u8 dct,
+			   unsigned int cs_mode, int cs_mask_nr);
+	int (*hw_info_get)(struct amd64_pvt *pvt);
+	bool (*ecc_enabled)(struct amd64_pvt *pvt);
+	void (*setup_mci_misc_attrs)(struct mem_ctl_info *mci);
+	void (*dump_misc_regs)(struct amd64_pvt *pvt);
+	void (*get_err_info)(struct mce *m, struct err_info *err);
 };
 
 int __amd64_read_pci_cfg_dword(struct pci_dev *pdev, int offset,

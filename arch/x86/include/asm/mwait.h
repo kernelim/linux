@@ -108,15 +108,32 @@ static inline void __sti_mwait(unsigned long eax, unsigned long ecx)
 static __always_inline void mwait_idle_with_hints(unsigned long eax, unsigned long ecx)
 {
 	if (static_cpu_has_bug(X86_BUG_MONITOR) || !current_set_polling_and_test()) {
+		bool ibrs_disabled = false;
+		u64 spec_ctrl;
+
 		if (static_cpu_has_bug(X86_BUG_CLFLUSH_MONITOR)) {
 			mb();
 			clflush((void *)&current_thread_info()->flags);
 			mb();
 		}
 
+		if (irqs_disabled() &&
+		    cpu_feature_enabled(X86_FEATURE_KERNEL_IBRS)) {
+			/* NMI always enable IBRS on exception entry */
+			ibrs_disabled = true;
+			spec_ctrl = spec_ctrl_current();
+			__this_cpu_write(x86_spec_ctrl_current, 0);
+			native_wrmsrl(MSR_IA32_SPEC_CTRL, 0);
+		}
+
 		__monitor((void *)&current_thread_info()->flags, 0, 0);
 		if (!need_resched())
 			__mwait(eax, ecx);
+
+		if (ibrs_disabled) {
+			native_wrmsrl(MSR_IA32_SPEC_CTRL, spec_ctrl);
+			__this_cpu_write(x86_spec_ctrl_current, spec_ctrl);
+		}
 	}
 	current_clr_polling();
 }

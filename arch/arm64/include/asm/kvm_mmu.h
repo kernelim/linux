@@ -168,10 +168,12 @@ int create_hyp_io_mappings(phys_addr_t phys_addr, size_t size,
 			   void __iomem **haddr);
 int create_hyp_exec_mappings(phys_addr_t phys_addr, size_t size,
 			     void **haddr);
+int create_hyp_stack(phys_addr_t phys_addr, unsigned long *haddr);
 void __init free_hyp_pgds(void);
 
 void stage2_unmap_vm(struct kvm *kvm);
 int kvm_init_stage2_mmu(struct kvm *kvm, struct kvm_s2_mmu *mmu, unsigned long type);
+void kvm_uninit_stage2_mmu(struct kvm *kvm);
 void kvm_free_stage2_pgd(struct kvm_s2_mmu *mmu);
 int kvm_phys_addr_ioremap(struct kvm *kvm, phys_addr_t guest_ipa,
 			  phys_addr_t pa, unsigned long size, bool writable);
@@ -222,15 +224,41 @@ static inline void __clean_dcache_guest_page(void *va, size_t size)
 	kvm_flush_dcache_to_poc(va, size);
 }
 
+static inline size_t __invalidate_icache_max_range(void)
+{
+	u8 iminline;
+	u64 ctr;
+
+	asm volatile(ALTERNATIVE_CB("movz %0, #0\n"
+				    "movk %0, #0, lsl #16\n"
+				    "movk %0, #0, lsl #32\n"
+				    "movk %0, #0, lsl #48\n",
+				    ARM64_ALWAYS_SYSTEM,
+				    kvm_compute_final_ctr_el0)
+		     : "=r" (ctr));
+
+	iminline = SYS_FIELD_GET(CTR_EL0, IminLine, ctr) + 2;
+	return MAX_DVM_OPS << iminline;
+}
+
 static inline void __invalidate_icache_guest_page(void *va, size_t size)
 {
-	if (icache_is_aliasing()) {
-		/* any kind of VIPT cache */
+	/*
+	 * VPIPT I-cache maintenance must be done from EL2. See comment in the
+	 * nVHE flavor of __kvm_tlb_flush_vmid_ipa().
+	 */
+	if (icache_is_vpipt() && read_sysreg(CurrentEL) != CurrentEL_EL2)
+		return;
+
+	/*
+	 * Blow the whole I-cache if it is aliasing (i.e. VIPT) or the
+	 * invalidation range exceeds our arbitrary limit on invadations by
+	 * cache line.
+	 */
+	if (icache_is_aliasing() || size > __invalidate_icache_max_range())
 		icache_inval_all_pou();
-	} else if (is_kernel_in_hyp_mode() || !icache_is_vpipt()) {
-		/* PIPT or VPIPT at EL2 (see comment in __kvm_tlb_flush_vmid_ipa) */
+	else
 		icache_inval_pou((unsigned long)va, (unsigned long)va + size);
-	}
 }
 
 void kvm_set_way_flush(struct kvm_vcpu *vcpu);

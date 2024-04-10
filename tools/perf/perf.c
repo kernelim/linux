@@ -18,7 +18,6 @@
 #include <subcmd/run-command.h>
 #include "util/parse-events.h"
 #include <subcmd/parse-options.h>
-#include "util/bpf-loader.h"
 #include "util/debug.h"
 #include "util/event.h"
 #include "util/util.h" // usage()
@@ -39,14 +38,7 @@
 #include <linux/string.h>
 #include <linux/zalloc.h>
 
-const char perf_usage_string[] =
-	"perf [--version] [--help] [OPTIONS] COMMAND [ARGS]";
-
-const char perf_more_info_string[] =
-	"See 'perf help COMMAND' for more information on a specific command.";
-
 static int use_pager = -1;
-const char *input_name;
 
 struct cmd_struct {
 	const char *cmd;
@@ -218,7 +210,7 @@ static int handle_options(const char ***argv, int *argc, int *envchanged)
 
 		if (!strcmp(cmd, "-vv")) {
 			(*argv)[0] = "version";
-			version_verbose = 1;
+			verbose = 1;
 			break;
 		}
 
@@ -331,7 +323,6 @@ static int run_builtin(struct cmd_struct *p, int argc, const char **argv)
 	perf_config__exit();
 	exit_browser(status);
 	perf_env__exit(&perf_env);
-	bpf__clear();
 
 	if (status)
 		return status & 0xff;
@@ -430,24 +421,6 @@ static int run_argv(int *argcp, const char ***argv)
 	/* .. then try the external ones */
 	execv_dashed_external(*argv);
 	return 0;
-}
-
-static void pthread__block_sigwinch(void)
-{
-	sigset_t set;
-
-	sigemptyset(&set);
-	sigaddset(&set, SIGWINCH);
-	pthread_sigmask(SIG_BLOCK, &set, NULL);
-}
-
-void pthread__unblock_sigwinch(void)
-{
-	sigset_t set;
-
-	sigemptyset(&set);
-	sigaddset(&set, SIGWINCH);
-	pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 }
 
 static int libperf_print(enum libperf_print_level level,

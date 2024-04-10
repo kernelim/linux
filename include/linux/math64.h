@@ -157,7 +157,7 @@ static inline u64 mul_u32_u32(u32 a, u32 b)
 #if defined(CONFIG_ARCH_SUPPORTS_INT128) && defined(__SIZEOF_INT128__)
 
 #ifndef mul_u64_u32_shr
-static inline u64 mul_u64_u32_shr(u64 a, u32 mul, unsigned int shift)
+static __always_inline u64 mul_u64_u32_shr(u64 a, u32 mul, unsigned int shift)
 {
 	return (u64)(((unsigned __int128)a * mul) >> shift);
 }
@@ -173,7 +173,7 @@ static inline u64 mul_u64_u64_shr(u64 a, u64 mul, unsigned int shift)
 #else
 
 #ifndef mul_u64_u32_shr
-static inline u64 mul_u64_u32_shr(u64 a, u32 mul, unsigned int shift)
+static __always_inline u64 mul_u64_u32_shr(u64 a, u32 mul, unsigned int shift)
 {
 	u32 ah, al;
 	u64 ret;
@@ -299,6 +299,19 @@ u64 mul_u64_u64_div_u64(u64 a, u64 mul, u64 div);
  */
 #define DIV64_U64_ROUND_CLOSEST(dividend, divisor)	\
 	({ u64 _tmp = (divisor); div64_u64((dividend) + _tmp / 2, _tmp); })
+
+/*
+ * DIV_U64_ROUND_CLOSEST - unsigned 64bit divide with 32bit divisor rounded to nearest integer
+ * @dividend: unsigned 64bit dividend
+ * @divisor: unsigned 32bit divisor
+ *
+ * Divide unsigned 64bit dividend by unsigned 32bit divisor
+ * and round to closest integer.
+ *
+ * Return: dividend / divisor rounded to nearest integer
+ */
+#define DIV_U64_ROUND_CLOSEST(dividend, divisor)	\
+	({ u32 _tmp = (divisor); div_u64((u64)(dividend) + _tmp / 2, _tmp); })
 
 /*
  * DIV_S64_ROUND_CLOSEST - signed 64bit divide with 32bit divisor rounded to nearest integer

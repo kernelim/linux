@@ -5,6 +5,8 @@
 #include <net/ip_tunnels.h>
 #include <net/udp.h>
 
+#include <linux/rh_kabi.h>
+
 #if IS_ENABLED(CONFIG_IPV6)
 #include <net/ipv6.h>
 #include <net/ipv6_stubs.h>
@@ -116,6 +118,11 @@ struct udp_tunnel_info {
 	sa_family_t sa_family;
 	__be16 port;
 	u8 hw_priv;
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 /* Notify network devices of offloadable types */
@@ -211,6 +218,11 @@ struct udp_tunnel_nic_shared {
 	struct udp_tunnel_nic *udp_tunnel_nic_info;
 
 	struct list_head devices;
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 struct udp_tunnel_nic_shared_node {
@@ -266,7 +278,16 @@ struct udp_tunnel_nic_info {
 	struct udp_tunnel_nic_table_info {
 		unsigned int n_entries;
 		unsigned int tunnel_types;
+
+		RH_KABI_RESERVE(1)
+		RH_KABI_RESERVE(2)
+		RH_KABI_RESERVE(3)
 	} tables[UDP_TUNNEL_NIC_MAX_TABLES];
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 /* UDP tunnel module dependencies

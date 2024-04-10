@@ -379,15 +379,13 @@ static int pwm_imx_tpm_probe(struct platform_device *pdev)
 	return ret;
 }
 
-static int pwm_imx_tpm_remove(struct platform_device *pdev)
+static void pwm_imx_tpm_remove(struct platform_device *pdev)
 {
 	struct imx_tpm_pwm_chip *tpm = platform_get_drvdata(pdev);
 
 	pwmchip_remove(&tpm->chip);
 
 	clk_disable_unprepare(tpm->clk);
-
-	return 0;
 }
 
 static int __maybe_unused pwm_imx_tpm_suspend(struct device *dev)
@@ -396,6 +394,13 @@ static int __maybe_unused pwm_imx_tpm_suspend(struct device *dev)
 
 	if (tpm->enable_count > 0)
 		return -EBUSY;
+
+	/*
+	 * Force 'real_period' to be zero to force period update code
+	 * can be executed after system resume back, since suspend causes
+	 * the period related registers to become their reset values.
+	 */
+	tpm->real_period = 0;
 
 	clk_disable_unprepare(tpm->clk);
 
@@ -430,7 +435,7 @@ static struct platform_driver imx_tpm_pwm_driver = {
 		.pm = &imx_tpm_pwm_pm,
 	},
 	.probe	= pwm_imx_tpm_probe,
-	.remove = pwm_imx_tpm_remove,
+	.remove_new = pwm_imx_tpm_remove,
 };
 module_platform_driver(imx_tpm_pwm_driver);
 

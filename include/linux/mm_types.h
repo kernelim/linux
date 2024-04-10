@@ -17,6 +17,7 @@
 #include <linux/page-flags-layout.h>
 #include <linux/workqueue.h>
 #include <linux/seqlock.h>
+#include <linux/percpu_counter.h>
 
 #include <asm/mmu.h>
 
@@ -145,16 +146,25 @@ struct page {
 			unsigned char compound_dtor;
 			unsigned char compound_order;
 			atomic_t compound_mapcount;
+			atomic_t subpages_mapcount;
 			atomic_t compound_pincount;
 #ifdef CONFIG_64BIT
 			unsigned int compound_nr; /* 1 << compound_order */
 #endif
 		};
-		struct {	/* Second tail page of compound page */
+		struct {	/* Second tail page of transparent huge page */
 			unsigned long _compound_pad_1;	/* compound_head */
 			unsigned long _compound_pad_2;
 			/* For both global and memcg */
 			struct list_head deferred_list;
+		};
+		struct {	/* Second tail page of hugetlb page */
+			unsigned long _hugetlb_pad_1;	/* compound_head */
+			void *hugetlb_subpool;
+			void *hugetlb_cgroup;
+			void *hugetlb_cgroup_rsvd;
+			void *hugetlb_hwpoison;
+			/* No more space on 32-bit: use third tail if more */
 		};
 		struct {	/* Page table pages */
 			unsigned long _pt_pad_1;	/* compound_head */
@@ -228,6 +238,18 @@ struct page {
 					   not kmapped, ie. highmem) */
 #endif /* WANT_PAGE_VIRTUAL */
 
+#ifdef CONFIG_KMSAN
+	/*
+	 * KMSAN metadata for this page:
+	 *  - shadow page: every bit indicates whether the corresponding
+	 *    bit of the original page is initialized (0) or not (1);
+	 *  - origin page: every 4 bytes contain an id of the stack trace
+	 *    where the uninitialized value was created.
+	 */
+	struct page *kmsan_shadow;
+	struct page *kmsan_origin;
+#endif
+
 #ifdef LAST_CPUPID_NOT_IN_PAGE_FLAGS
 	int _last_cpupid;
 #endif
@@ -248,6 +270,20 @@ struct page {
  * @_refcount: Do not access this member directly.  Use folio_ref_count()
  *    to find how many references there are to this folio.
  * @memcg_data: Memory Control Group data.
+ * @_flags_1: For large folios, additional page flags.
+ * @_head_1: Points to the folio.  Do not use.
+ * @_folio_dtor: Which destructor to use for this folio.
+ * @_folio_order: Do not use directly, call folio_order().
+ * @_entire_mapcount: Do not use directly, call folio_entire_mapcount().
+ * @_nr_pages_mapped: Do not use directly, call folio_mapcount().
+ * @_pincount: Do not use directly, call folio_maybe_dma_pinned().
+ * @_folio_nr_pages: Do not use directly, call folio_nr_pages().
+ * @_flags_2: For alignment.  Do not use.
+ * @_head_2: Points to the folio.  Do not use.
+ * @_hugetlb_subpool: Do not use directly, use accessor in hugetlb.h.
+ * @_hugetlb_cgroup: Do not use directly, use accessor in hugetlb_cgroup.h.
+ * @_hugetlb_cgroup_rsvd: Do not use directly, use accessor in hugetlb_cgroup.h.
+ * @_hugetlb_hwpoison: Do not use directly, call raw_hwp_list_head().
  *
  * A folio is a physically, virtually and logically contiguous set
  * of bytes.  It is a power-of-two in size, and it is aligned to that
@@ -282,9 +318,34 @@ struct folio {
 		};
 		struct page page;
 	};
+	union {
+		struct {
+			unsigned long _flags_1;
+			unsigned long _head_1;
+			unsigned char _folio_dtor;
+			unsigned char _folio_order;
+			atomic_t _entire_mapcount;
+			atomic_t _nr_pages_mapped;
+			atomic_t _pincount;
+#ifdef CONFIG_64BIT
+			unsigned int _folio_nr_pages;
+#endif
+		};
+		struct page __page_1;
+	};
+	union {
+		struct {
+			unsigned long _flags_2;
+			unsigned long _head_2;
+			void *_hugetlb_subpool;
+			void *_hugetlb_cgroup;
+			void *_hugetlb_cgroup_rsvd;
+			void *_hugetlb_hwpoison;
+		};
+		struct page __page_2;
+	};
 };
 
-static_assert(sizeof(struct page) == sizeof(struct folio));
 #define FOLIO_MATCH(pg, fl)						\
 	static_assert(offsetof(struct page, pg) == offsetof(struct folio, fl))
 FOLIO_MATCH(flags, flags);
@@ -299,6 +360,30 @@ FOLIO_MATCH(_refcount, _refcount);
 FOLIO_MATCH(memcg_data, memcg_data);
 #endif
 #undef FOLIO_MATCH
+#define FOLIO_MATCH(pg, fl)						\
+	static_assert(offsetof(struct folio, fl) ==			\
+			offsetof(struct page, pg) + sizeof(struct page))
+FOLIO_MATCH(flags, _flags_1);
+FOLIO_MATCH(compound_head, _head_1);
+FOLIO_MATCH(compound_dtor, _folio_dtor);
+FOLIO_MATCH(compound_order, _folio_order);
+FOLIO_MATCH(compound_mapcount, _entire_mapcount);
+FOLIO_MATCH(subpages_mapcount, _nr_pages_mapped);
+FOLIO_MATCH(compound_pincount, _pincount);
+#ifdef CONFIG_64BIT
+FOLIO_MATCH(compound_nr, _folio_nr_pages);
+#endif
+#undef FOLIO_MATCH
+#define FOLIO_MATCH(pg, fl)						\
+	static_assert(offsetof(struct folio, fl) ==			\
+			offsetof(struct page, pg) + 2 * sizeof(struct page))
+FOLIO_MATCH(flags, _flags_2);
+FOLIO_MATCH(compound_head, _head_2);
+FOLIO_MATCH(hugetlb_subpool, _hugetlb_subpool);
+FOLIO_MATCH(hugetlb_cgroup, _hugetlb_cgroup);
+FOLIO_MATCH(hugetlb_cgroup_rsvd, _hugetlb_cgroup_rsvd);
+FOLIO_MATCH(hugetlb_hwpoison, _hugetlb_hwpoison);
+#undef FOLIO_MATCH
 
 static inline atomic_t *folio_mapcount_ptr(struct folio *folio)
 {
@@ -311,9 +396,9 @@ static inline atomic_t *compound_mapcount_ptr(struct page *page)
 	return &page[1].compound_mapcount;
 }
 
-static inline atomic_t *compound_pincount_ptr(struct page *page)
+static inline atomic_t *subpages_mapcount_ptr(struct page *page)
 {
-	return &page[1].compound_pincount;
+	return &page[1].subpages_mapcount;
 }
 
 /*
@@ -435,21 +520,11 @@ struct vm_area_struct {
 	 * For areas with an address space and backing store,
 	 * linkage into the address_space->i_mmap interval tree.
 	 *
-	 * For private anonymous mappings, a pointer to a null terminated string
-	 * containing the name given to the vma, or NULL if unnamed.
 	 */
-
-	union {
-		struct {
-			struct rb_node rb;
-			unsigned long rb_subtree_last;
-		} shared;
-		/*
-		 * Serialized by mmap_sem. Never use directly because it is
-		 * valid only when vm_file is NULL. Use anon_vma_name instead.
-		 */
-		struct anon_vma_name *anon_name;
-	};
+	struct {
+		struct rb_node rb;
+		unsigned long rb_subtree_last;
+	} shared;
 
 	/*
 	 * A file's MAP_PRIVATE vma can be in both i_mmap tree and anon_vma
@@ -470,6 +545,14 @@ struct vm_area_struct {
 	struct file * vm_file;		/* File we map to (can be NULL). */
 	void * vm_private_data;		/* was vm_pte (shared mem) */
 
+#ifdef CONFIG_ANON_VMA_NAME
+	/*
+	 * For private and shared anonymous mappings, a pointer to a null
+	 * terminated string containing the name given to the vma, or NULL if
+	 * unnamed. Serialized by mmap_sem. Use anon_vma_name to access.
+	 */
+	struct anon_vma_name *anon_name;
+#endif
 #ifdef CONFIG_SWAP
 	atomic_long_t swap_readahead_info;
 #endif
@@ -593,11 +676,7 @@ struct mm_struct {
 
 		unsigned long saved_auxv[AT_VECTOR_SIZE]; /* for /proc/PID/auxv */
 
-		/*
-		 * Special counters, in some configurations protected by the
-		 * page_table_lock, in other configurations by being atomic.
-		 */
-		struct mm_rss_stat rss_stat;
+		struct percpu_counter rss_stat[NR_MM_COUNTERS];
 
 		struct linux_binfmt *binfmt;
 
@@ -676,6 +755,22 @@ struct mm_struct {
 		 */
 		unsigned long ksm_merging_pages;
 #endif
+#ifdef CONFIG_LRU_GEN
+		struct {
+			/* this mm_struct is on lru_gen_mm_list */
+			struct list_head list;
+			/*
+			 * Set when switching to this mm_struct, as a hint of
+			 * whether it has been used since the last time per-node
+			 * page table walkers cleared the corresponding bits.
+			 */
+			unsigned long bitmap;
+#ifdef CONFIG_MEMCG
+			/* points to the memcg of "owner" above */
+			struct mem_cgroup *memcg;
+#endif
+		} lru_gen;
+#endif /* CONFIG_LRU_GEN */
 	} __randomize_layout;
 
 	RH_KABI_RESERVE(1)
@@ -706,6 +801,66 @@ static inline cpumask_t *mm_cpumask(struct mm_struct *mm)
 {
 	return (struct cpumask *)&mm->cpu_bitmap;
 }
+
+#ifdef CONFIG_LRU_GEN
+
+struct lru_gen_mm_list {
+	/* mm_struct list for page table walkers */
+	struct list_head fifo;
+	/* protects the list above */
+	spinlock_t lock;
+};
+
+void lru_gen_add_mm(struct mm_struct *mm);
+void lru_gen_del_mm(struct mm_struct *mm);
+#ifdef CONFIG_MEMCG
+void lru_gen_migrate_mm(struct mm_struct *mm);
+#endif
+
+static inline void lru_gen_init_mm(struct mm_struct *mm)
+{
+	INIT_LIST_HEAD(&mm->lru_gen.list);
+	mm->lru_gen.bitmap = 0;
+#ifdef CONFIG_MEMCG
+	mm->lru_gen.memcg = NULL;
+#endif
+}
+
+static inline void lru_gen_use_mm(struct mm_struct *mm)
+{
+	/*
+	 * When the bitmap is set, page reclaim knows this mm_struct has been
+	 * used since the last time it cleared the bitmap. So it might be worth
+	 * walking the page tables of this mm_struct to clear the accessed bit.
+	 */
+	WRITE_ONCE(mm->lru_gen.bitmap, -1);
+}
+
+#else /* !CONFIG_LRU_GEN */
+
+static inline void lru_gen_add_mm(struct mm_struct *mm)
+{
+}
+
+static inline void lru_gen_del_mm(struct mm_struct *mm)
+{
+}
+
+#ifdef CONFIG_MEMCG
+static inline void lru_gen_migrate_mm(struct mm_struct *mm)
+{
+}
+#endif
+
+static inline void lru_gen_init_mm(struct mm_struct *mm)
+{
+}
+
+static inline void lru_gen_use_mm(struct mm_struct *mm)
+{
+}
+
+#endif /* CONFIG_LRU_GEN */
 
 struct mmu_gather;
 extern void tlb_gather_mmu(struct mmu_gather *tlb, struct mm_struct *mm);

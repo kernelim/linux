@@ -563,7 +563,7 @@ static int fib_detect_death(struct fib_info *fi, int order,
 		n = NULL;
 
 	if (n) {
-		state = n->nud_state;
+		state = READ_ONCE(n->nud_state);
 		neigh_release(n);
 	} else {
 		return 0;
@@ -1906,6 +1906,7 @@ int fib_sync_down_addr(struct net_device *dev, __be32 local)
 			continue;
 		if (fi->fib_prefsrc == local) {
 			fi->fib_flags |= RTNH_F_DEAD;
+			fi->pfsrc_removed = true;
 			ret++;
 		}
 	}
@@ -2224,7 +2225,7 @@ static bool fib_good_nh(const struct fib_nh *nh)
 		else
 			n = NULL;
 		if (n)
-			state = n->nud_state;
+			state = READ_ONCE(n->nud_state);
 
 		rcu_read_unlock_bh();
 	}
