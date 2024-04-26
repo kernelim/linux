@@ -14,7 +14,12 @@ if ! git rev-parse --verify main >& /dev/null; then
 	git fetch origin main
 	git branch --track main origin/main
 fi
-IFS=$'\n' names=($(git diff --name-only main))
+base=$(git merge-base main HEAD) || {
+	echo "ERROR: cannot determine merge base for HEAD."
+	echo "This is a BUG in the check script. Please report this."
+	exit 1
+}
+IFS=$'\n' names=($(git diff --name-only $base))
 if in_names info/owners.yaml; then
 	for name in "${names[@]}"; do
 		[[ $name != info/owners.yaml && $name != info/RHMAINTAINERS &&
@@ -60,7 +65,7 @@ if in_names info/owners.yaml && \
 	echo "        git config --add owners.warning false"
 	echo "======================================================="
 fi
-if test -n "$(git diff main | grep "^+" | grep "\s\- rhel-sst-null" )"; then
+if test -n "$(git diff $base | grep "^+" | grep "\s\- rhel-sst-null" )"; then
 	echo "ERROR: New entries cannot set devel-sst to rhel-sst-null."
 	exit 1
 fi

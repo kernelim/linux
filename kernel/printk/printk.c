@@ -3853,9 +3853,35 @@ static int __init printk_late_init(void)
 }
 late_initcall(printk_late_init);
 
+/*
+ * This boot parameter allows one to disable the per-console device printk
+ * kernel threads, which are enabled by default.
+ */
+static bool __read_mostly printk_no_perconsole_kthreads = false;
+
+static int __init disable_printk_pdkth_setup(char *str)
+{
+	if (!IS_ENABLED(CONFIG_PREEMPT_RT)) {
+		printk_no_perconsole_kthreads = true;
+		pr_info("Disabling printk per-console device kthreads.\n");
+	} else {
+		pr_info("Can't disable printk per-console device kthreads on RT.\n");
+	}
+
+	return 0;
+}
+
+early_param("printk_no_perconsole_kthreads", disable_printk_pdkth_setup);
+module_param(printk_no_perconsole_kthreads, bool, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(printk_no_perconsole_kthreads,
+                   "Disable printk per-console device kthreads.");
+
 static int __init printk_activate_kthreads(void)
 {
 	struct console *con;
+
+	if (unlikely(printk_no_perconsole_kthreads))
+		return 0;
 
 	console_lock();
 	printk_kthreads_available = true;

@@ -81,15 +81,33 @@ F:	Makefile.rhelver
 F:	redhat/
 X:	redhat/configs/
 
+CentOS Stream 10 Kernel Maintainer
+M:	Jan Stancek <jstancek@redhat.com>
+M:	Patrick Talbert <ptalbert@redhat.com>
+S:	Supported
+F:	Makefile.rhelver
+T:	git https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-10.git
+
+CentOS Stream 10 Real Time Kernel Maintainer
+M:	Chris White <chwhite@redhat.com>
+M:	John B. Wyatt IV <jwyatt@redhat.com>
+S:	Supported
+F:	Makefile.rhelver
+
 CentOS Stream 9 Kernel Maintainer
-M:	Scott Weaver <scweaver@redhat.com>
+M:	Lucas Zampieri <lzampier@redhat.com>
 S:	Supported
 F:	Makefile.rhelver
 T:	git https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9.git
 
 CentOS Stream 9 Real Time Kernel Maintainer
-M:	Eder Zulian <ezulian@redhat.com>
-M:	Derek Barbosa <debarbos@redhat.com>
+M:	Chris White <chwhite@redhat.com>
+M:	John B. Wyatt IV <jwyatt@redhat.com>
+S:	Supported
+F:	Makefile.rhelver
+
+RHEL 9.4 Kernel Maintainer
+M:	Scott Weaver <scweaver@redhat.com>
 S:	Supported
 F:	Makefile.rhelver
 
@@ -131,6 +149,7 @@ R:	Derek Barbosa <debarbos@redhat.com>
 R:	Eder Zulian <ezulian@redhat.com>
 R:	Clark Williams <williams@redhat.com>
 R:	Scott Weaver <scweaver@redhat.com>
+R:	Patrick Talbert <ptalbert@redhat.com>
 S:	Supported
 F:	makefile
 F:	Makefile
@@ -148,7 +167,12 @@ M:	Eder Zulian <ezulian@redhat.com>
 S:	Supported
 F:	Makefile.rhelver
 
-CentOS Stream 8 Real Time Kernel Maintainer
+RHEL 8.10 Kernel Maintainer
+M:	Denys Vlasenko <dvlasenk@redhat.com>
+S:	Supported
+F:	Makefile.rhelver
+
+RHEL 8.10 Real Time Kernel Maintainer
 M:	Derek Barbosa <debarbos@redhat.com>
 M:	Eder Zulian <ezulian@redhat.com>
 S:	Supported
@@ -165,7 +189,7 @@ S:	Supported
 F:	Makefile.rhelver
 
 RHEL 8.8 Kernel Maintainer
-M:	Lucas Zampieri <lzampier@redhat.com>
+M:	Rado Vrbovsky <rvrbovsk@redhat.com>
 S:	Supported
 F:	Makefile.rhelver
 
@@ -391,6 +415,11 @@ M:	Jeremy Linton <jlinton@redhat.com>
 S:	Supported
 F:	arch/arm64/include/asm/arch_timer.h
 F:	drivers/clocksource/arm_arch_timer.c
+
+ARM CORESIGHT HARDWARE TRACING
+M:	Mark Salter <msalter@redhat.com>
+S:	Provided
+F:	drivers/hwtracing/coresight/
 
 ARM INTERRUPT CONTROLLERS (GIC)
 M:	Mark Salter <msalter@redhat.com>
@@ -714,6 +743,9 @@ X:	drivers/clocksource/timer-qcom.c
 
 COMMON CLK FRAMEWORK
 M:	Mark Salter <msalter@redhat.com>
+M:	Radu Rendec <rrendec@redhat.com>
+M:	Andrew Halaney <ahalaney@redhat.com>
+M:	Eric Chanudet <echanude@redhat.com>
 S:	Supported
 F:	Documentation/devicetree/bindings/clock/
 F:	drivers/clk/
@@ -780,6 +812,7 @@ M:	Mark Langsdorf <mlangsdo@redhat.com>
 M:	Lenny Szubowicz <lszubowi@redhat.com>
 M:	Prarit Bhargava <prarit@redhat.com>
 M:	David Arcari <darcari@redhat.com>
+M:	Alessandro Carminati <acarmina@redhat.com>
 S:	Supported
 F:	drivers/cpufreq/
 X:	drivers/cpufreq/intel_pstate.c
@@ -794,7 +827,7 @@ F:	drivers/cpuidle/
 
 CRYPTO API
 M:	Herbert Xu <herbert.xu@redhat.com>
-M:	"David S. Miller" <davem@redhat.com>
+M:	David S. Miller <davem@redhat.com>
 M:	Vladis Dronov <vdronov@redhat.com>
 M:	Clemens Lang <cllang@redhat.com>
 M:	Simo Sorce <simo@redhat.com>
@@ -802,13 +835,27 @@ R:	Ondrej Mosnacek <omosnace@redhat.com>
 R:	Phil Auld <pauld@redhat.com>
 S:	Supported
 F:	Documentation/crypto/
-F:	Documentation/devicetree/bindings/crypto/
 F:	arch/*/crypto/
 F:	crypto/
-F:	drivers/crypto/
 F:	include/crypto/
 F:	include/linux/crypto*
 F:	lib/crypto/
+
+CRYPTO DEVICE DRIVERS
+M:	Herbert Xu <herbert.xu@redhat.com>
+M:	David S. Miller <davem@redhat.com>
+M:	Vladis Dronov <vdronov@redhat.com>
+R:	Tony Camuso <tcamuso@redhat.com>
+R:	Ondrej Mosnacek <omosnace@redhat.com>
+R:	Phil Auld <pauld@redhat.com>
+R:	Stepan Horacek <shoracek@redhat.com>
+S:	Supported
+F:	Documentation/devicetree/bindings/crypto/
+F:	Documentation/driver-api/crypto/
+F:	drivers/crypto/
+F:	include/linux/ccp*
+F:	include/linux/psp*
+F:	include/uapi/linux/psp*
 
 CXGB3 ETHERNET DRIVER (cxgb3)
 M:	Michal Schmidt <mschmidt@redhat.com>
@@ -843,10 +890,13 @@ M:	Mike Snitzer <snitzer@redhat.com>
 S:	Supported
 F:	Documentation/device-mapper/
 F:	drivers/md/dm*
+F:	drivers/md/dm-vdo/
 F:	drivers/md/persistent-data/
 F:	include/linux/device-mapper.h
 F:	include/linux/dm-*.h
 F:	include/uapi/linux/dm-*.h
+X:	drivers/md/dm-vdo/Kconfig
+X:	drivers/md/dm-vdo/Makefile
 
 DEVLINK
 M:	Petr Oros <poros@redhat.com>
@@ -885,6 +935,8 @@ M:	Nigel Croxon <ncroxon@redhat.com>
 S:	Supported
 F:	drivers/md/Kconfig
 F:	drivers/md/Makefile
+F:	drivers/md/dm-vdo/Kconfig
+F:	drivers/md/dm-vdo/Makefile
 
 DMA BUFFER SHARING FRAMEWORK
 M:	Lyude Paul <lyude@redhat.com>
@@ -1187,6 +1239,7 @@ M:	Doug Ledford <dledford@redhat.com>
 M:	Prarit Bhargava <prarit@redhat.com>
 S:	Provided
 F:	drivers/hwtracing/
+X:	drivers/hwtracing/coresight/
 
 HIBERNATION (aka Software Suspend, aka swsusp)
 M:	Lenny Szubowicz <lszubowi@redhat.com>
@@ -1424,9 +1477,12 @@ INTEL QUICK ASSIST TECHNOLOGY (QAT)
 M:	Vladis Dronov <vdronov@redhat.com>
 M:	Stepan Horacek <shoracek@redhat.com>
 R:	Tony Camuso <tcamuso@redhat.com>
+R:	Herbert Xu <herbert.xu@redhat.com>
+R:	Ondrej Mosnacek <omosnace@redhat.com>
+R:	Phil Auld <pauld@redhat.com>
 S:	Supported
-F:	drivers/crypto/qat/
-F:	Documentation/ABI/testing/sysfs-driver-qat
+F:	Documentation/ABI/testing/*qat*
+F:	drivers/crypto/intel/qat/
 
 INTEL RAPL DRIVER
 M:	Prarit Bhargava <prarit@redhat.com>
@@ -1449,6 +1505,8 @@ F:	ipc/
 
 INTERRUPT CONTROLLERS
 M:	Mark Salter <msalter@redhat.com>
+M:	Radu Rendec <rrendec@redhat.com>
+M:	Eric Chanudet <echanude@redhat.com>
 S:	Supported
 F:	drivers/irqchip/
 F:	include/linux/irqchip/
@@ -1749,7 +1807,7 @@ S:	Supported
 F:	drivers/mailbox/
 
 MEDIA INPUT INFRASTRUCTURE (V4L/DVB)
-M:	Dean Nelson <dnelson@redhat.com>
+M:	Kate Hsuan <hpa@redhat.com>
 R:	Jarod Wilson <jarod@redhat.com>
 S:	Supported
 F:	drivers/media/
@@ -1824,6 +1882,7 @@ F:	include/linux/vmpressure.h
 F:	include/linux/vmstat.h
 F:	include/linux/zbud.h
 F:	mm/
+F:	tools/testing/selftests/mm/
 X:	include/linux/memstick.h
 
 MFD DRIVERS (Multi Function Devices)
@@ -1878,6 +1937,8 @@ F:	include/uapi/rdma/mlx5-abi.h
 
 MMC LAYER
 M:	Mark Salter <msalter@redhat.com>
+M:	Lucas Karpinski <lkarpins@redhat.com>
+M:	Andrew Halaney <ahalaney@redhat.com>
 S:	Supported
 F:	Documentation/mmc/
 F:	include/linux/mmc/
@@ -2261,6 +2322,7 @@ F:	tools/testing/selftests/ntb/
 
 Non Volatile Memory (nvmem)
 M:	Mark Salter <msalter@redhat.com>
+M:	Alessandro Carminati <acarmina@redhat.com>
 S:	Supported
 F:	drivers/nvmem/
 F:	include/linux/nvmem-consumer.h
@@ -2457,6 +2519,12 @@ POWER DRIVERS (Batteries, power supplies, etc.)
 M:	Lenny Szubowicz <lszubowi@redhat.com>
 S:	Supported
 F:	drivers/power/
+
+Power Management Domains (pmdomain)
+M:	Mark Salter <msalter@redhat.com>
+M:	Radu Rendec <rrendec@redhat.com>
+S:	Supported
+F:	drivers/pmdomain/
 
 POWER STATE COORDINATION INTERFACE (PSCI)
 M:	Mark Salter <msalter@redhat.com>
@@ -2887,6 +2955,8 @@ F:	net/switchdev/
 
 SYSTEM ON CHIP (SOC)
 M:	Mark Salter <msalter@redhat.com>
+M:	Lucas Karpinski <lkarpins@redhat.com>
+M:	Andrew Halaney <ahalaney@redhat.com>
 S:	Supported
 F:	drivers/soc/
 F:	include/linux/soc/

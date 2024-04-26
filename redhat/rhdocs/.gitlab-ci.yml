@@ -149,8 +149,7 @@ check:
         echo ' have not been regenerated and checked in this commit.'
         echo ''
         echo ' Please run the following command before committing:'
-        echo '        ./scripts/yaml2CODEOWNERS info/owners.yaml > info/CODEOWNERS'
-        echo '        ./scripts/yaml2RHMAINTAINERS info/owners.yaml > info/RHMAINTAINERS'
+        echo '        make'
         echo ''
         echo '-----------------------------------------------------------------'
         exit 1

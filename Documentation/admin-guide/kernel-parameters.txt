@@ -4520,6 +4520,10 @@
 	printk.time=	Show timing data prefixed to each printk message line
 			Format: <bool>  (1/Y/y=enable, 0/N/n=disable)
 
+	printk_no_perconsole_kthreads
+			[KNL] Disable the printk per-console device kthreads.
+			This option is not available for RT kernels.
+
 	processor.max_cstate=	[HW,ACPI]
 			Limit processor to maximum C-state
 			max_cstate=9 overrides any DMI blacklist limit.

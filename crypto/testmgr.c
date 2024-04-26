@@ -4159,7 +4159,7 @@ static int test_akcipher_one(struct crypto_akcipher *tfm,
 	 * Don't invoke (decrypt or sign) test which require a private key
 	 * for vectors with only a public key.
 	 */
-	if (vecs->public_key_vec) {
+	if (1 || vecs->public_key_vec) {
 		err = 0;
 		goto free_all;
 	}

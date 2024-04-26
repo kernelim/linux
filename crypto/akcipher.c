@@ -124,14 +124,12 @@ int crypto_register_akcipher(struct akcipher_alg *alg)
 {
 	struct crypto_alg *base = &alg->base;
 
-	if (!alg->sign)
-		alg->sign = akcipher_default_op;
+	alg->sign = akcipher_default_op;
 	if (!alg->verify)
 		alg->verify = akcipher_default_op;
 	if (!alg->encrypt)
 		alg->encrypt = akcipher_default_op;
-	if (!alg->decrypt)
-		alg->decrypt = akcipher_default_op;
+	alg->decrypt = akcipher_default_op;
 
 	akcipher_prepare_alg(alg);
 	return crypto_register_alg(base);

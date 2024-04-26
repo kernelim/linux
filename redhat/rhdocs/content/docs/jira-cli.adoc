@@ -1,14 +1,16 @@
 ---
 draft: false
-weight: 5
+weight: 10
 ---
 
 
-JiraCLI is an interactive command line tool for Atlassian Jira that will help you avoid Jira UI to some extent. This tool is not yet considered complete but has all the essential features required to improve your workflow with Jira.
-
-Link: https://github.com/ankitpokhrel/jira-cli[https://github.com/ankitpokhrel/jira-cli]
+https://github.com/ankitpokhrel/jira-cli[JiraCLI]
+is an interactive command line tool for Atlassian Jira that will help you avoid Jira UI to some extent.
+This tool is not yet considered complete but has all the essential features required to improve your workflow with Jira.
 
 An overview of the jira-cli tool and how to use it to perform basic Jira actions on the command line.
+
+{{< toc >}}
 
 == Download/installation
 

@@ -41,12 +41,13 @@ The following is an example of a valid commit title & description.  The first co
 
 [link:CommitRules.adoc#user-content-1-title[1]]  subsystem: include missing kernel.h header to fix compile +
 [link:CommitRules.adoc#user-content-2a-jira-reference-required[2a]]  JIRA: <Jira reference> +
-[link:CommitRules.adoc#user-content-2c-upstream-status-required[2c]]  Upstream Status: <if not linux.git provide upstream tree, or mark as RHEL specific> +
-[link:CommitRules.adoc#user-content-2e-cve-reference-optional[2e]]  CVE: <CVE number if required> +
-[link:CommitRules.adoc#user-content-2f-differences-from-the-upstream-patch-optional[2f]]   Conflicts: <if required> +
-[link:CommitRules.adoc#user-content-2g-omitted-fixes-optional[2g]]   Omitted-fix: <commit ID if required> +
-[link:CommitRules.adoc#user-content-2g-omitted-fixes-optional[2g]]                <omitted-fix explanation required> +
-[link:CommitRules.adoc#user-content-2g-omitted-fixes-optional[2g]] +
+[link:CommitRules.adoc#user-content-2b-upstream-status-required-for-commits-not-in-upstream-tree[2b]]  Upstream Status: <if not linux.git provide upstream tree, or mark as RHEL specific> +
+[link:CommitRules.adoc#user-content-2c-cve-reference-optional[2c]]  CVE: <CVE number if required> +
+
+[link:CommitRules.adoc#user-content-2d-differences-from-the-upstream-patch-optional[2d]]   Conflicts: <if required> +
+[link:CommitRules.adoc#user-content-2f-omitted-fixes-optional[2f]]   Omitted-fix: <commit ID if required> +
+[link:CommitRules.adoc#user-content-2f-omitted-fixes-optional[2f]]                <omitted-fix explanation required> +
+[link:CommitRules.adoc#user-content-2f-omitted-fixes-optional[2f]] +
 [link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]] commit 7fff4beb311dfab4f18ff2cd64f78scd9296a39a +
 [link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]]  Author: John Upstream <john.upstream@someupstreamplace.com> +
 [link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]]  Date:   Mon Mar 28 14:29:19 2011 -0700 +
@@ -69,14 +70,15 @@ The following is an example of a valid Merge Request title and description.  The
 [link:CommitRules.adoc#user-content-1-title[1]]  subsystem: a general explanation of the changeset
 
 [link:CommitRules.adoc#user-content-2a-jira-reference-required[2a]]  JIRA: <Jira reference> +
-[link:CommitRules.adoc#user-content-2b-testing-details-required[2b]]  Tested: <testing information> +
-[link:CommitRules.adoc#user-content-2c-upstream-status-required[2c]]  Upstream Status: <if not linux.git provide upstream tree, or mark as RHEL specific> +
-[link:CommitRules.adoc#user-content-2d-changeset-dependencies-optional[2d]]  Depends: <Jira reference if required> +
-[link:CommitRules.adoc#user-content-2e-cve-reference-optional[2e]]  CVE: <CVE number if required> +
-[link:CommitRules.adoc#user-content-2f-differences-from-the-upstream-patch-optional[2f]]   Conflicts: <if required> +
-[link:CommitRules.adoc#user-content-2g-omitted-fixes-optional[2g]]   Omitted-fix: <commit ID if required> +
-[link:CommitRules.adoc#user-content-2g-omitted-fixes-optional[2g]]                <omitted-fix explanation required> +
-[link:CommitRules.adoc#user-content-2g-omitted-fixes-optional[2g]] +
+[link:CommitRules.adoc#user-content-2b-upstream-status-required-for-commits-not-in-upstream-tree[2b]]  Upstream Status: <if not linux.git provide upstream tree, or mark as RHEL specific> +
+[link:CommitRules.adoc#user-content-2c-cve-reference-optional[2c]]  CVE: <CVE number if required> +
+
+[link:CommitRules.adoc#user-content-2d-differences-from-the-upstream-patch-optional[2d]]   Conflicts: <if required> +
+
+[link:CommitRules.adoc#user-content-2e-changeset-dependencies-optional[2e]]  Depends: <MR reference if required> +
+[link:CommitRules.adoc#user-content-2f-omitted-fixes-optional[2f]]   Omitted-fix: <commit ID if required> +
+[link:CommitRules.adoc#user-content-2f-omitted-fixes-optional[2f]]                <omitted-fix explanation required> +
+[link:CommitRules.adoc#user-content-2f-omitted-fixes-optional[2f]] +
 [link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]]  An explanation of what the problem the changeset resolves, how the changeset +
 [link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]]  resolves the problem, additional testing details, etc.   +
 [link:CommitRules.adoc#user-content-3-commit-specific-description-information[3]] +
@@ -117,10 +119,9 @@ Good examples for Jira URLS in the description:
     JIRA: https://issues.redhat.com/browse/RHEL-1559
     JIRA: INTERNAL
 
-===== 2b. Testing Details (required)
-The MR description must include information about how the changeset was tested.  This information can include links to test results in a Jira or a text description of the results.
+The comments of the Jira *must include details on how the changes were tested*.
 
-===== 2c. Upstream Status (required for commits not in upstream tree)
+===== 2b. Upstream Status (required for commits not in upstream tree)
 If the upstream source tree is not linux.git, the description must include a URL, a git:// address, or a git+ssh address for the upstream source tree.  Commits with an identified source must also specify a link:CommitRules.adoc#user-content-3a-commit-sha1-format-required[commit sha1] in their description.
 
 If the changeset is not in Linus' linux.git tree, please specify the URL of the source tree, a URL to the patch posting on a mailing list, or explain why the changeset is unique to RHEL.
@@ -167,12 +168,20 @@ The Upstream Status policy outlined in the above section also applies to redhat/
     Upstream Status: RHEL only, https://gitlab.com/cki-project/kernel-ark
     Upstream Status: https://gitlab.com/cki-project/kernel-ark
 
-===== 2d. Changeset Dependencies (optional)
+===== 2c. CVE Reference (optional)
+If the changeset resolves a Jira that has an associated CVE number, each commit in the changeset and the MR description must include the CVE reference ID.  Use one “CVE:” line for each CVE that the changeset resolves, and include the number as described in the Jira, e.g "CVE-YYYY-XXXXX".
+
+Unreleased critical CVEs can use link:CommitRules.adoc#user-content-2c-upstream-status-required["Upstream Status: Embargoed"] in place of referencing an upstream commit ID.
+
+===== 2d. Differences from the upstream patch (optional)
+If the commit differs from the original upstream commit, a short description of the differences should be included on a line that begins with “Conflicts:”.  Simple patch conflicts like fuzz do not need to be documented.
+
+===== 2e. Changeset Dependencies (optional)
 If your changeset depends on another changeset being accepted and merged first, then you need to make sure that the description of your MR contains a reference to the dependent change.
 
 For each dependency, your description must contain a unique line starting with `Depends:`.  The content after the keyword should be a specific URL pointing at another MR in the same project.
 
-NOTE: Additional syntax is allowed, such as a Jira link, but the functionality may be limited to only a MR URL in the future.
+NOTE: Referencing a Bugzilla or Jira URL or ID in a `Depends:` tag is not supported.
 
 When assembling the commits on your dependent changeset, you must make sure that the changes for your MR are layered over the dependent changes as displayed in the graphic below.  Dependencies, as the name implies, must precede all changes from the submitted set.  The webhooks rely on ordering to identify the last commit that is part of your changeset and the first commit of a dependency chagneset, and will stop walking the commit list when reaching the first dependency commit.  Dependencies intermingled with your changes will not be properly evaluated by the webhooks.
 
@@ -182,15 +191,7 @@ In the event of a conflicting change from either the parent repository or the up
 
 IMPORTANT: Careful coordination should be used when working with dependencies.  You shouldn't post a changeset that has a dependency against something that hasn't already been posted itself.  Similarly, a dependent change cannot be merged until the parent itself has been merged *first*.  It is very easy for the various pieces of the chain to become out of sync with each other.
 
-===== 2e. CVE Reference (optional)
-If the changeset resolves a Jira that has an associated CVE number, each commit in the changeset and the MR description must include the CVE reference ID.  Use one “CVE:” line for each CVE that the changeset resolves, and include the number as described in the Jira, e.g "CVE-YYYY-XXXXX".
-
-Unreleased critical CVEs can use link:CommitRules.adoc#user-content-2c-upstream-status-required["Upstream Status: Embargoed"] in place of referencing an upstream commit ID.
-
-===== 2f. Differences from the upstream patch (optional)
-If the commit differs from the original upstream commit, a short description of the differences should be included on a line that begins with “Conflicts:”.  Simple patch conflicts like fuzz do not need to be documented.
-
-===== 2g. Omitted Fixes (optional)
+===== 2f. Omitted Fixes (optional)
 If there is a subsequent upstream commit with any reference to the backported commit which is not included in the changeset it should be included on a line that begins with "Omitted-fix:".  The "Omitted-fix:" line should include a minimum 12-character commit ID and the title of the omitted fix.  The following line(s) must include a reason for omitting the fix.
 
 The use of the "Omitted-Fix:" tag does not imply the decision to omit the fix is correct.  The usage of the tag only means the author has chosen to omit that particular fix from their changeset.  Reviewers must take care to confirm the decision to omit these commits is correct.

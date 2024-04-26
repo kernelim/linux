@@ -11,11 +11,20 @@ Makefile.rhelver	jarod@redhat.com jfaracco@redhat.com
 redhat/	jarod@redhat.com jfaracco@redhat.com
 ^redhat/configs/	jarod@redhat.com jfaracco@redhat.com
 
+[CentOS Stream 10 Kernel Maintainer]
+Makefile.rhelver	jstancek@redhat.com ptalbert@redhat.com
+
+[CentOS Stream 10 Real Time Kernel Maintainer]
+Makefile.rhelver	chwhite@redhat.com jwyatt@redhat.com
+
 [CentOS Stream 9 Kernel Maintainer]
-Makefile.rhelver	scweaver@redhat.com
+Makefile.rhelver	lzampier@redhat.com
 
 [CentOS Stream 9 Real Time Kernel Maintainer]
-Makefile.rhelver	ezulian@redhat.com debarbos@redhat.com
+Makefile.rhelver	chwhite@redhat.com jwyatt@redhat.com
+
+[RHEL 9.4 Kernel Maintainer]
+Makefile.rhelver	scweaver@redhat.com
 
 [RHEL 9.3 Kernel Maintainer]
 Makefile.rhelver	jstancek@redhat.com
@@ -45,7 +54,10 @@ Makefile.rhelver	jfaracco@redhat.com
 [RHEL 9.0 Real Time Kernel Maintainer]
 Makefile.rhelver	ezulian@redhat.com
 
-[CentOS Stream 8 Real Time Kernel Maintainer]
+[RHEL 8.10 Kernel Maintainer]
+Makefile.rhelver	dvlasenk@redhat.com
+
+[RHEL 8.10 Real Time Kernel Maintainer]
 Makefile.rhelver	debarbos@redhat.com ezulian@redhat.com
 
 [RHEL 8.9 Kernel Maintainer]
@@ -55,7 +67,7 @@ Makefile.rhelver	ptalbert@redhat.com
 Makefile.rhelver	jwyatt@redhat.com
 
 [RHEL 8.8 Kernel Maintainer]
-Makefile.rhelver	lzampier@redhat.com
+Makefile.rhelver	rvrbovsk@redhat.com
 
 [RHEL 8.8 Real Time Kernel Maintainer]
 Makefile.rhelver	tyberry@redhat.com
@@ -180,6 +192,9 @@ drivers/scsi/arcmsr/	thenzl@redhat.com
 ^[ARM ARCHITECTED TIMER DRIVER]
 arch/arm64/include/asm/arch_timer.h	msalter@redhat.com mlangsdo@redhat.com jlinton@redhat.com
 drivers/clocksource/arm_arch_timer.c	msalter@redhat.com mlangsdo@redhat.com jlinton@redhat.com
+
+^[ARM CORESIGHT HARDWARE TRACING]
+drivers/hwtracing/coresight/	msalter@redhat.com
 
 ^[ARM INTERRUPT CONTROLLERS (GIC)]
 drivers/irqchip/irq-gic*	msalter@redhat.com jlinton@redhat.com
@@ -379,11 +394,11 @@ drivers/clocksource/	msalter@redhat.com
 ^drivers/clocksource/timer-qcom.c	msalter@redhat.com
 
 ^[COMMON CLK FRAMEWORK]
-Documentation/devicetree/bindings/clock/	msalter@redhat.com
-drivers/clk/	msalter@redhat.com
-include/linux/clk-pr*	msalter@redhat.com
-include/linux/clk/	msalter@redhat.com
-include/linux/of_clk.h	msalter@redhat.com
+Documentation/devicetree/bindings/clock/	msalter@redhat.com rrendec@redhat.com ahalaney@redhat.com echanude@redhat.com
+drivers/clk/	msalter@redhat.com rrendec@redhat.com ahalaney@redhat.com echanude@redhat.com
+include/linux/clk-pr*	msalter@redhat.com rrendec@redhat.com ahalaney@redhat.com echanude@redhat.com
+include/linux/clk/	msalter@redhat.com rrendec@redhat.com ahalaney@redhat.com echanude@redhat.com
+include/linux/of_clk.h	msalter@redhat.com rrendec@redhat.com ahalaney@redhat.com echanude@redhat.com
 
 ^[COMPUTE EXPRESS LINK (CXL)]
 drivers/cxl/	mstowe@redhat.com linville@redhat.com
@@ -415,22 +430,28 @@ include/linux/counter.h	dledford@redhat.com prarit@redhat.com
 include/linux/counter_enum.h	dledford@redhat.com prarit@redhat.com
 
 [CPU FREQUENCY DRIVERS]
-drivers/cpufreq/	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com
-^drivers/cpufreq/intel_pstate.c	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com
-^drivers/cpufreq/amd*	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com
+drivers/cpufreq/	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com acarmina@redhat.com
+^drivers/cpufreq/intel_pstate.c	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com acarmina@redhat.com
+^drivers/cpufreq/amd*	mlangsdo@redhat.com lszubowi@redhat.com prarit@redhat.com darcari@redhat.com acarmina@redhat.com
 
 [CPU IDLE DRIVERS]
 drivers/cpuidle/	mlangsdo@redhat.com prarit@redhat.com darcari@redhat.com
 
 [CRYPTO API]
 Documentation/crypto/	herbert.xu@redhat.com davem@redhat.com vdronov@redhat.com cllang@redhat.com simo@redhat.com
-Documentation/devicetree/bindings/crypto/	herbert.xu@redhat.com davem@redhat.com vdronov@redhat.com cllang@redhat.com simo@redhat.com
 arch/*/crypto/	herbert.xu@redhat.com davem@redhat.com vdronov@redhat.com cllang@redhat.com simo@redhat.com
 crypto/	herbert.xu@redhat.com davem@redhat.com vdronov@redhat.com cllang@redhat.com simo@redhat.com
-drivers/crypto/	herbert.xu@redhat.com davem@redhat.com vdronov@redhat.com cllang@redhat.com simo@redhat.com
 include/crypto/	herbert.xu@redhat.com davem@redhat.com vdronov@redhat.com cllang@redhat.com simo@redhat.com
 include/linux/crypto*	herbert.xu@redhat.com davem@redhat.com vdronov@redhat.com cllang@redhat.com simo@redhat.com
 lib/crypto/	herbert.xu@redhat.com davem@redhat.com vdronov@redhat.com cllang@redhat.com simo@redhat.com
+
+[CRYPTO DEVICE DRIVERS]
+Documentation/devicetree/bindings/crypto/	herbert.xu@redhat.com davem@redhat.com vdronov@redhat.com
+Documentation/driver-api/crypto/	herbert.xu@redhat.com davem@redhat.com vdronov@redhat.com
+drivers/crypto/	herbert.xu@redhat.com davem@redhat.com vdronov@redhat.com
+include/linux/ccp*	herbert.xu@redhat.com davem@redhat.com vdronov@redhat.com
+include/linux/psp*	herbert.xu@redhat.com davem@redhat.com vdronov@redhat.com
+include/uapi/linux/psp*	herbert.xu@redhat.com davem@redhat.com vdronov@redhat.com
 
 ^[CXGB3 ETHERNET DRIVER (cxgb3)]
 drivers/net/ethernet/chelsio/cxgb3/	mschmidt@redhat.com
@@ -451,10 +472,13 @@ drivers/dax/	jmoyer@redhat.com
 ^[DEVICE MAPPER SUPPORT]
 Documentation/device-mapper/	bmarzins@redhat.com snitzer@redhat.com
 drivers/md/dm*	bmarzins@redhat.com snitzer@redhat.com
+drivers/md/dm-vdo/	bmarzins@redhat.com snitzer@redhat.com
 drivers/md/persistent-data/	bmarzins@redhat.com snitzer@redhat.com
 include/linux/device-mapper.h	bmarzins@redhat.com snitzer@redhat.com
 include/linux/dm-*.h	bmarzins@redhat.com snitzer@redhat.com
 include/uapi/linux/dm-*.h	bmarzins@redhat.com snitzer@redhat.com
+^drivers/md/dm-vdo/Kconfig	bmarzins@redhat.com snitzer@redhat.com
+^drivers/md/dm-vdo/Makefile	bmarzins@redhat.com snitzer@redhat.com
 
 ^[DEVLINK]
 Documentation/networking/devlink/	poros@redhat.com ivecera@redhat.com
@@ -476,6 +500,8 @@ fs/dlm/	aahringo@redhat.com
 ^[DM and MD build and config files]
 drivers/md/Kconfig	bmarzins@redhat.com snitzer@redhat.com ncroxon@redhat.com
 drivers/md/Makefile	bmarzins@redhat.com snitzer@redhat.com ncroxon@redhat.com
+drivers/md/dm-vdo/Kconfig	bmarzins@redhat.com snitzer@redhat.com ncroxon@redhat.com
+drivers/md/dm-vdo/Makefile	bmarzins@redhat.com snitzer@redhat.com ncroxon@redhat.com
 
 ^[DMA BUFFER SHARING FRAMEWORK]
 drivers/dma-buf/	lyude@redhat.com
@@ -653,6 +679,7 @@ drivers/hwspinlock/	dledford@redhat.com prarit@redhat.com
 
 ^[HARDWARE TRACING FACILITIES]
 drivers/hwtracing/	dledford@redhat.com prarit@redhat.com
+^drivers/hwtracing/coresight/	dledford@redhat.com prarit@redhat.com
 
 ^[HIBERNATION (aka Software Suspend, aka swsusp)]
 kernel/power/	lszubowi@redhat.com
@@ -796,8 +823,8 @@ drivers/thermal/intel_powerclamp.c	prarit@redhat.com darcari@redhat.com
 drivers/counter/intel-qep.c	prarit@redhat.com darcari@redhat.com
 
 ^[INTEL QUICK ASSIST TECHNOLOGY (QAT)]
-drivers/crypto/qat/	vdronov@redhat.com shoracek@redhat.com
-Documentation/ABI/testing/sysfs-driver-qat	vdronov@redhat.com shoracek@redhat.com
+Documentation/ABI/testing/*qat*	vdronov@redhat.com shoracek@redhat.com
+drivers/crypto/intel/qat/	vdronov@redhat.com shoracek@redhat.com
 
 [INTEL RAPL DRIVER]
 drivers/powercap/intel*	prarit@redhat.com darcari@redhat.com
@@ -810,11 +837,11 @@ include/linux/shm.h	arozansk@redhat.com aquini@redhat.com longman@redhat.com
 ipc/	arozansk@redhat.com aquini@redhat.com longman@redhat.com
 
 ^[INTERRUPT CONTROLLERS]
-drivers/irqchip/	msalter@redhat.com
-include/linux/irqchip/	msalter@redhat.com
-include/linux/irqchip.h	msalter@redhat.com
-^drivers/irqchip/irq-gic*	msalter@redhat.com
-^include/linux/irqchip/arm-gic*	msalter@redhat.com
+drivers/irqchip/	msalter@redhat.com rrendec@redhat.com echanude@redhat.com
+include/linux/irqchip/	msalter@redhat.com rrendec@redhat.com echanude@redhat.com
+include/linux/irqchip.h	msalter@redhat.com rrendec@redhat.com echanude@redhat.com
+^drivers/irqchip/irq-gic*	msalter@redhat.com rrendec@redhat.com echanude@redhat.com
+^include/linux/irqchip/arm-gic*	msalter@redhat.com rrendec@redhat.com echanude@redhat.com
 
 [IOMMU DRIVERS]
 drivers/iommu/	jsnitsel@redhat.com
@@ -1002,21 +1029,21 @@ arch/x86/kernel/cpu/mcheck/	prarit@redhat.com
 drivers/mailbox/	ahalaney@redhat.com bmasney@redhat.com echanude@redhat.com
 
 ^[MEDIA INPUT INFRASTRUCTURE (V4L/DVB)]
-drivers/media/	dnelson@redhat.com
-include/media/	dnelson@redhat.com
-include/uapi/linux/dvb/	dnelson@redhat.com
-include/uapi/linux/videodev2.h	dnelson@redhat.com
-include/uapi/linux/media.h	dnelson@redhat.com
-include/uapi/linux/v4l2-*	dnelson@redhat.com
-include/uapi/linux/ivtv*	dnelson@redhat.com
-^drivers/media/pci/saa7134/saa7134-alsa.c	dnelson@redhat.com
-^drivers/media/pci/cx23885/cx23885-alsa.c	dnelson@redhat.com
-^drivers/media/pci/cx25821/cx25821-alsa.c	dnelson@redhat.com
-^drivers/media/pci/cx18/cx18-alsa*	dnelson@redhat.com
-^drivers/media/pci/cx88/cx88-alsa*	dnelson@redhat.com
-^drivers/media/pci/cobalt/cobalt-alsa*	dnelson@redhat.com
-^drivers/media/pci/ivtv/ivtv-alsa*	dnelson@redhat.com
-^drivers/media/usb/	dnelson@redhat.com
+drivers/media/	hpa@redhat.com
+include/media/	hpa@redhat.com
+include/uapi/linux/dvb/	hpa@redhat.com
+include/uapi/linux/videodev2.h	hpa@redhat.com
+include/uapi/linux/media.h	hpa@redhat.com
+include/uapi/linux/v4l2-*	hpa@redhat.com
+include/uapi/linux/ivtv*	hpa@redhat.com
+^drivers/media/pci/saa7134/saa7134-alsa.c	hpa@redhat.com
+^drivers/media/pci/cx23885/cx23885-alsa.c	hpa@redhat.com
+^drivers/media/pci/cx25821/cx25821-alsa.c	hpa@redhat.com
+^drivers/media/pci/cx18/cx18-alsa*	hpa@redhat.com
+^drivers/media/pci/cx88/cx88-alsa*	hpa@redhat.com
+^drivers/media/pci/cobalt/cobalt-alsa*	hpa@redhat.com
+^drivers/media/pci/ivtv/ivtv-alsa*	hpa@redhat.com
+^drivers/media/usb/	hpa@redhat.com
 
 ^[MELLANOX ETHERNET SWITCH DRIVERS]
 drivers/net/ethernet/mellanox/mlxsw/	ivecera@redhat.com
@@ -1057,6 +1084,7 @@ include/linux/vmpressure.h	aquini@redhat.com
 include/linux/vmstat.h	aquini@redhat.com
 include/linux/zbud.h	aquini@redhat.com
 mm/	aquini@redhat.com
+tools/testing/selftests/mm/	aquini@redhat.com
 ^include/linux/memstick.h	aquini@redhat.com
 
 ^[MFD DRIVERS (Multi Function Devices)]
@@ -1088,9 +1116,9 @@ include/linux/mlx5/	atzin@redhat.com mkabat@redhat.com kheib@redhat.com
 include/uapi/rdma/mlx5-abi.h	atzin@redhat.com mkabat@redhat.com kheib@redhat.com
 
 ^[MMC LAYER]
-Documentation/mmc/	msalter@redhat.com
-include/linux/mmc/	msalter@redhat.com
-drivers/mmc/	msalter@redhat.com
+Documentation/mmc/	msalter@redhat.com lkarpins@redhat.com ahalaney@redhat.com
+include/linux/mmc/	msalter@redhat.com lkarpins@redhat.com ahalaney@redhat.com
+drivers/mmc/	msalter@redhat.com lkarpins@redhat.com ahalaney@redhat.com
 
 ^[MODULES]
 kernel/module/	prarit@redhat.com
@@ -1382,9 +1410,9 @@ drivers/ntb/	mstowe@redhat.com prarit@redhat.com darcari@redhat.com
 tools/testing/selftests/ntb/	mstowe@redhat.com prarit@redhat.com darcari@redhat.com
 
 ^[Non Volatile Memory (nvmem)]
-drivers/nvmem/	msalter@redhat.com
-include/linux/nvmem-consumer.h	msalter@redhat.com
-include/linux/nvmem-producer.h	msalter@redhat.com
+drivers/nvmem/	msalter@redhat.com acarmina@redhat.com
+include/linux/nvmem-consumer.h	msalter@redhat.com acarmina@redhat.com
+include/linux/nvmem-producer.h	msalter@redhat.com acarmina@redhat.com
 
 ^[NON-MASKABLE INTERRUPT (NMI)]
 arch/*/include/asm/nmi.h	prarit@redhat.com darcari@redhat.com
@@ -1503,6 +1531,9 @@ drivers/pnp/	dledford@redhat.com prarit@redhat.com
 
 ^[POWER DRIVERS (Batteries, power supplies, etc.)]
 drivers/power/	lszubowi@redhat.com
+
+^[Power Management Domains (pmdomain)]
+drivers/pmdomain/	msalter@redhat.com rrendec@redhat.com
 
 ^[POWER STATE COORDINATION INTERFACE (PSCI)]
 drivers/firmware/psci*.c	msalter@redhat.com mlangsdo@redhat.com jlinton@redhat.com
@@ -1763,8 +1794,8 @@ include/net/switchdev.h	ivecera@redhat.com
 net/switchdev/	ivecera@redhat.com
 
 ^[SYSTEM ON CHIP (SOC)]
-drivers/soc/	msalter@redhat.com
-include/linux/soc/	msalter@redhat.com
+drivers/soc/	msalter@redhat.com lkarpins@redhat.com ahalaney@redhat.com
+include/linux/soc/	msalter@redhat.com lkarpins@redhat.com ahalaney@redhat.com
 
 ^[TC subsystem]
 Documentation/networking/tc-*	ivecera@redhat.com

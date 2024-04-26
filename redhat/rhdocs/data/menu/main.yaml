@@ -39,7 +39,7 @@ main:
       ref: merge_request_approvals_and_blocks
   - name: Utilities
     sub:
-    - name: lab
+    - name: lab - GitLab utility
       ref: lab
     - name: Updating or Fixing a Merge Request
       ref: updating_or_fixing_a_MR
@@ -47,6 +47,8 @@ main:
       ref: go_tools_compile
     - name: Revumatic
       ref: Revumatic
+    - name: Jira CLI
+      ref: jira-cli
   - name: FAQ
     ref: FAQ
   - name: All Pages

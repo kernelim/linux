@@ -105,6 +105,43 @@ subsystems:
           - redhat/
        excludes:
           - redhat/configs/
+ - subsystem: CentOS Stream 10 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   devel-sst:
+     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
+   requiredApproval: true
+   maintainers:
+     - name: Jan Stancek
+       email: jstancek@redhat.com
+       gluser: jstancek
+     - name: Patrick Talbert
+       email: ptalbert@redhat.com
+       gluser: ptalbert
+   paths:
+       includes:
+          - Makefile.rhelver
+   scm: git https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-10.git
+ - subsystem: CentOS Stream 10 Real Time Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   devel-sst:
+     - rhel-sst-kernel-rts
+   jiraComponent: kernel-rt
+   requiredApproval: true
+   maintainers:
+     - name: Chris White
+       email: chwhite@redhat.com
+       gluser: chwhite1
+     - name: John B. Wyatt IV
+       email: jwyatt@redhat.com
+       gluser: jwyatt-rh
+   paths:
+       includes:
+          - Makefile.rhelver
  - subsystem: CentOS Stream 9 Kernel Maintainer
    labels:
      name: redhat
@@ -114,9 +151,9 @@ subsystems:
    jiraComponent: kernel
    requiredApproval: true
    maintainers:
-     - name: Scott Weaver
-       email: scweaver@redhat.com
-       gluser: scweaver
+     - name: Lucas Zampieri
+       email: lzampier@redhat.com
+       gluser: lzampier
    paths:
        includes:
           - Makefile.rhelver
@@ -130,12 +167,27 @@ subsystems:
    jiraComponent: kernel-rt
    requiredApproval: true
    maintainers:
-     - name: Eder Zulian
-       email: ezulian@redhat.com
-       gluser: ezulian
-     - name: Derek Barbosa
-       email: debarbos@redhat.com
-       gluser: debarbos
+     - name: Chris White
+       email: chwhite@redhat.com
+       gluser: chwhite1
+     - name: John B. Wyatt IV
+       email: jwyatt@redhat.com
+       gluser: jwyatt-rh
+   paths:
+       includes:
+          - Makefile.rhelver
+ - subsystem: RHEL 9.4 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   devel-sst:
+     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
+   requiredApproval: true
+   maintainers:
+     - name: Scott Weaver
+       email: scweaver@redhat.com
+       gluser: scweaver
    paths:
        includes:
           - Makefile.rhelver
@@ -260,6 +312,9 @@ subsystems:
      - name: Scott Weaver
        email: scweaver@redhat.com
        gluser: scweaver
+     - name: Patrick Talbert
+       email: ptalbert@redhat.com
+       gluser: ptalbert
    paths:
        includes:
           - makefile
@@ -298,7 +353,22 @@ subsystems:
    paths:
        includes:
           - Makefile.rhelver
- - subsystem: CentOS Stream 8 Real Time Kernel Maintainer
+ - subsystem: RHEL 8.10 Kernel Maintainer
+   labels:
+     name: redhat
+   status: Supported
+   devel-sst:
+     - rhel-sst-kernel-maintainers
+   jiraComponent: kernel
+   requiredApproval: true
+   maintainers:
+     - name: Denys Vlasenko
+       email: dvlasenk@redhat.com
+       gluser: dvlasenk
+   paths:
+       includes:
+          - Makefile.rhelver
+ - subsystem: RHEL 8.10 Real Time Kernel Maintainer
    labels:
      name: redhat
    status: Supported
@@ -355,9 +425,9 @@ subsystems:
    jiraComponent: kernel
    requiredApproval: true
    maintainers:
-     - name: Lucas Zampieri
-       email: lzampier@redhat.com
-       gluser: lzampier
+     - name: Rado Vrbovsky
+       email: rvrbovsk@redhat.com
+       gluser: rvrbovsk
    paths:
        includes:
           - Makefile.rhelver
@@ -1034,6 +1104,20 @@ subsystems:
        includes:
           - arch/arm64/include/asm/arch_timer.h
           - drivers/clocksource/arm_arch_timer.c
+ - subsystem: ARM CORESIGHT HARDWARE TRACING
+   labels:
+     name: coresight
+   status: Provided
+   devel-sst:
+     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement / aarch64
+   maintainers:
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+   paths:
+       includes:
+          - drivers/hwtracing/coresight/
  - subsystem: ARM INTERRUPT CONTROLLERS (GIC)
    labels:
      name: arm_gic
@@ -1932,6 +2016,15 @@ subsystems:
      - name: Mark Salter
        email: msalter@redhat.com
        gluser: msalter
+     - name: Radu Rendec
+       email: rrendec@redhat.com
+       gluser: rh-ee-rrendec
+     - name: Andrew Halaney
+       email: ahalaney@redhat.com
+       gluser: ahalaney
+     - name: Eric Chanudet
+       email: echanude@redhat.com
+       gluser: echanude
    paths:
        includes:
           - Documentation/devicetree/bindings/clock/
@@ -2118,6 +2211,9 @@ subsystems:
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
+     - name: Alessandro Carminati
+       email: acarmina@redhat.com
+       gluser: acarmina
    paths:
        includes:
           - drivers/cpufreq/
@@ -2147,11 +2243,10 @@ subsystems:
           - drivers/cpuidle/
  - subsystem: CRYPTO API
    labels:
-     name: crypto
+     name: crypto-api
    status: Supported
    devel-sst:
      - rhel-sst-kernel-security
-     - rhel-sst-security-crypto
      - rhel-sst-security-crypto
    jiraComponent: kernel / Crypto
    requiredApproval: true
@@ -2159,7 +2254,7 @@ subsystems:
      - name: Herbert Xu
        email: herbert.xu@redhat.com
        gluser: herbert.xu2
-     - name: '"David S. Miller"'
+     - name: David S. Miller
        email: davem@redhat.com
        gluser: davem_dokebi
      - name: Vladis Dronov
@@ -2181,13 +2276,50 @@ subsystems:
    paths:
        includes:
           - Documentation/crypto/
-          - Documentation/devicetree/bindings/crypto/
           - arch/*/crypto/
           - crypto/
-          - drivers/crypto/
           - include/crypto/
           - include/linux/crypto*
           - lib/crypto/
+ - subsystem: CRYPTO DEVICE DRIVERS
+   labels:
+     name: crypto-dev
+   status: Supported
+   devel-sst:
+     - rhel-sst-security-crypto
+   jiraComponent: kernel / Crypto
+   requiredApproval: true
+   maintainers:
+     - name: Herbert Xu
+       email: herbert.xu@redhat.com
+       gluser: herbert.xu2
+     - name: David S. Miller
+       email: davem@redhat.com
+       gluser: davem_dokebi
+     - name: Vladis Dronov
+       email: vdronov@redhat.com
+       gluser: NefigTut
+   reviewers:
+     - name: Tony Camuso
+       email: tcamuso@redhat.com
+       gluser: tcamuso
+     - name: Ondrej Mosnacek
+       email: omosnace@redhat.com
+       gluser: omos
+     - name: Phil Auld
+       email: pauld@redhat.com
+       gluser: prauld
+     - name: Stepan Horacek
+       email: shoracek@redhat.com
+       gluser: shoracek
+   paths:
+       includes:
+          - Documentation/devicetree/bindings/crypto/
+          - Documentation/driver-api/crypto/
+          - drivers/crypto/
+          - include/linux/ccp*
+          - include/linux/psp*
+          - include/uapi/linux/psp*
  - subsystem: CXGB3 ETHERNET DRIVER (cxgb3)
    labels:
      name: cxgb3
@@ -2322,10 +2454,14 @@ subsystems:
        includes:
           - Documentation/device-mapper/
           - drivers/md/dm*
+          - drivers/md/dm-vdo/
           - drivers/md/persistent-data/
           - include/linux/device-mapper.h
           - include/linux/dm-*.h
           - include/uapi/linux/dm-*.h
+       excludes:
+          - drivers/md/dm-vdo/Kconfig
+          - drivers/md/dm-vdo/Makefile
  - subsystem: DEVLINK
    labels:
      name: devlink
@@ -2432,6 +2568,8 @@ subsystems:
        includes:
           - drivers/md/Kconfig
           - drivers/md/Makefile
+          - drivers/md/dm-vdo/Kconfig
+          - drivers/md/dm-vdo/Makefile
  - subsystem: DMA BUFFER SHARING FRAMEWORK
    labels:
      name: dma_buf
@@ -2461,7 +2599,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-kernel-rts
-   jiraComponent: kernel / IOMMU
+   jiraComponent: kernel / DMA Engine
    requiredApproval: false
    maintainers:
      - name: Jerry Snitselaar
@@ -3317,6 +3455,8 @@ subsystems:
    paths:
        includes:
           - drivers/hwtracing/
+       excludes:
+          - drivers/hwtracing/coresight/
  - subsystem: HIBERNATION (aka Software Suspend, aka swsusp)
    labels:
      name: sleep
@@ -3967,7 +4107,7 @@ subsystems:
           - drivers/counter/intel-qep.c
  - subsystem: INTEL QUICK ASSIST TECHNOLOGY (QAT)
    labels:
-     name: intel_qat
+     name: intel-qat
    status: Supported
    devel-sst:
      - rhel-sst-kernel-security
@@ -3984,10 +4124,19 @@ subsystems:
      - name: Tony Camuso
        email: tcamuso@redhat.com
        gluser: tcamuso
+     - name: Herbert Xu
+       email: herbert.xu@redhat.com
+       gluser: herbert.xu2
+     - name: Ondrej Mosnacek
+       email: omosnace@redhat.com
+       gluser: omos
+     - name: Phil Auld
+       email: pauld@redhat.com
+       gluser: prauld
    paths:
        includes:
-          - drivers/crypto/qat/
-          - Documentation/ABI/testing/sysfs-driver-qat
+          - Documentation/ABI/testing/*qat*
+          - drivers/crypto/intel/qat/
  - subsystem: INTEL RAPL DRIVER
    labels:
      name: intel_rapl
@@ -4067,6 +4216,12 @@ subsystems:
      - name: Mark Salter
        email: msalter@redhat.com
        gluser: msalter
+     - name: Radu Rendec
+       email: rrendec@redhat.com
+       gluser: rh-ee-rrendec
+     - name: Eric Chanudet
+       email: echanude@redhat.com
+       gluser: echanude
    paths:
        includes:
          - drivers/irqchip/
@@ -4773,13 +4928,13 @@ subsystems:
      name: media
    status: Supported
    devel-sst:
-     - rhel-sst-arch-hw
+     - rhel-sst-desktop-platform-technologies
    jiraComponent: kernel / Desktop / V4L
    requiredApproval: false
    maintainers:
-     - name: Dean Nelson
-       email: dnelson@redhat.com
-       gluser: dnlsn
+     - name: Kate Hsuan
+       email: hpa@redhat.com
+       gluser: hpa1
    reviewers:
      - name: Jarod Wilson
        email: jarod@redhat.com
@@ -4930,6 +5085,7 @@ subsystems:
           - include/linux/vmstat.h
           - include/linux/zbud.h
           - mm/
+          - tools/testing/selftests/mm/
        excludes:
           - include/linux/memstick.h
  - subsystem: MEMORY TECHNOLOGY DEVICE SUPPORT (MTD)
@@ -5119,6 +5275,12 @@ subsystems:
      - name: Mark Salter
        email: msalter@redhat.com
        gluser: msalter
+     - name: Lucas Karpinski
+       email: lkarpins@redhat.com
+       gluser: lkarpins-rh
+     - name: Andrew Halaney
+       email: ahalaney@redhat.com
+       gluser: ahalaney
    paths:
        includes:
           - Documentation/mmc/
@@ -5843,6 +6005,9 @@ subsystems:
      - name: Mark Salter
        email: msalter@redhat.com
        gluser: msalter
+     - name: Alessandro Carminati
+       email: acarmina@redhat.com
+       gluser: acarmina
    paths:
        includes:
           - drivers/nvmem/
@@ -6407,6 +6572,24 @@ subsystems:
    paths:
        includes:
           - drivers/power/
+ - subsystem: Power Management Domains (pmdomain)
+   labels:
+     name: pmdomain
+   status: Supported
+   devel-sst:
+     - rhel-sst-arch-hw
+   jiraComponent: kernel / Platform Enablement
+   requiredApproval: false
+   maintainers:
+     - name: Mark Salter
+       email: msalter@redhat.com
+       gluser: msalter
+     - name: Radu Rendec
+       email: rrendec@redhat.com
+       gluser: rh-ee-rrendec
+   paths:
+       includes:
+          - drivers/pmdomain/
  - subsystem: POWER STATE COORDINATION INTERFACE (PSCI)
    labels:
      name: psci
@@ -7676,6 +7859,12 @@ subsystems:
      - name: Mark Salter
        email: msalter@redhat.com
        gluser: msalter
+     - name: Lucas Karpinski
+       email: lkarpins@redhat.com
+       gluser: lkarpins-rh
+     - name: Andrew Halaney
+       email: ahalaney@redhat.com
+       gluser: ahalaney
    paths:
        includes:
           - drivers/soc/
