@@ -458,6 +458,7 @@ enum hv_pcibus_state {
 	hv_pcibus_init = 0,
 	hv_pcibus_probed,
 	hv_pcibus_installed,
+	hv_pcibus_removing,
 	hv_pcibus_maximum
 };
 
@@ -2871,6 +2872,7 @@ static int hv_pci_remove(struct hv_device *hdev)
 	hbus = hv_get_drvdata(hdev);
 	if (hbus->state == hv_pcibus_installed) {
 		tasklet_disable(&hdev->channel->callback_event);
+		hbus->state = hv_pcibus_removing;
 		tasklet_enable(&hdev->channel->callback_event);
 		destroy_workqueue(hbus->wq);
 		hbus->wq = NULL;
