@@ -98,16 +98,16 @@ static inline int delayacct_is_task_waiting_on_io(struct task_struct *p)
 		return 0;
 }
 
-static inline void delayacct_set_flag(int flag)
+static inline void delayacct_set_flag(struct task_struct *p, int flag)
 {
-	if (current->delays)
-		current->delays->flags |= flag;
+	if (p->delays)
+		p->delays->flags |= flag;
 }
 
-static inline void delayacct_clear_flag(int flag)
+static inline void delayacct_clear_flag(struct task_struct *p, int flag)
 {
-	if (current->delays)
-		current->delays->flags &= ~flag;
+	if (p->delays)
+		p->delays->flags &= ~flag;
 }
 
 static inline void delayacct_tsk_init(struct task_struct *tsk)
@@ -130,7 +130,7 @@ static inline void delayacct_tsk_free(struct task_struct *tsk)
 
 static inline void delayacct_blkio_start(void)
 {
-	delayacct_set_flag(DELAYACCT_PF_BLKIO);
+	delayacct_set_flag(current, DELAYACCT_PF_BLKIO);
 	if (current->delays)
 		__delayacct_blkio_start();
 }
@@ -139,7 +139,7 @@ static inline void delayacct_blkio_end(struct task_struct *p)
 {
 	if (p->delays)
 		__delayacct_blkio_end(p);
-	delayacct_clear_flag(DELAYACCT_PF_BLKIO);
+	delayacct_clear_flag(p, DELAYACCT_PF_BLKIO);
 }
 
 static inline int delayacct_add_tsk(struct taskstats *d,
@@ -182,9 +182,9 @@ static inline void delayacct_thrashing_end(bool *in_thrashing)
 }
 
 #else
-static inline void delayacct_set_flag(int flag)
+static inline void delayacct_set_flag(struct task_struct *p, int flag)
 {}
-static inline void delayacct_clear_flag(int flag)
+static inline void delayacct_clear_flag(struct task_struct *p, int flag)
 {}
 static inline void delayacct_init(void)
 {}

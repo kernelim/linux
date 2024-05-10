@@ -34,6 +34,7 @@
  * may be shared by multiple devices.
  */
 
+#include <linux/dmi.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -962,13 +963,15 @@ struct acpi_device *acpi_add_power_resource(acpi_handle handle)
 		return NULL;
 
 	device = &resource->device;
-	acpi_init_device_object(device, handle, ACPI_BUS_TYPE_POWER);
+	acpi_init_device_object(device, handle, ACPI_BUS_TYPE_POWER,
+				acpi_release_power_resource);
 	mutex_init(&resource->resource_lock);
 	INIT_LIST_HEAD(&resource->list_node);
 	INIT_LIST_HEAD(&resource->dependents);
 	strcpy(acpi_device_name(device), ACPI_POWER_DEVICE_NAME);
 	strcpy(acpi_device_class(device), ACPI_POWER_CLASS);
 	device->power.state = ACPI_STATE_UNKNOWN;
+	device->flags.match_driver = true;
 
 	/* Evaluate the object to get the system level and resource order. */
 	status = acpi_evaluate_object(handle, NULL, NULL, &buffer);
@@ -986,8 +989,11 @@ struct acpi_device *acpi_add_power_resource(acpi_handle handle)
 	printk(KERN_INFO PREFIX "%s [%s]\n", acpi_device_name(device),
 	       acpi_device_bid(device));
 
-	device->flags.match_driver = true;
-	result = acpi_device_add(device, acpi_release_power_resource);
+	result = acpi_tie_acpi_dev(device);
+	if (result)
+		goto err;
+
+	result = acpi_device_add(device);
 	if (result)
 		goto err;
 
@@ -1036,12 +1042,30 @@ void acpi_resume_power_resources(void)
 }
 #endif
 
+static const struct dmi_system_id dmi_leave_unused_power_resources_on[] = {
+	{
+		/*
+		 * The Toshiba Click Mini has a CPR3 power-resource which must
+		 * be on for the touchscreen to work, but which is not in any
+		 * _PR? lists. The other 2 affected power-resources are no-ops.
+		 */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "TOSHIBA"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "SATELLITE Click Mini L9W-B"),
+		},
+	},
+	{}
+};
+
 /**
  * acpi_turn_off_unused_power_resources - Turn off power resources not in use.
  */
 void acpi_turn_off_unused_power_resources(void)
 {
 	struct acpi_power_resource *resource;
+
+	if (dmi_check_system(dmi_leave_unused_power_resources_on))
+		return;
 
 	mutex_lock(&power_resource_list_lock);
 

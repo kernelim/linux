@@ -3,7 +3,7 @@
  *
  * Name: aclinux.h - OS specific defines, etc. for Linux
  *
- * Copyright (C) 2000 - 2022, Intel Corp.
+ * Copyright (C) 2000 - 2023, Intel Corp.
  *
  *****************************************************************************/
 
@@ -176,7 +176,10 @@
 #define ACPI_USE_STANDARD_HEADERS
 
 #ifdef ACPI_USE_STANDARD_HEADERS
+#include <stddef.h>
 #include <unistd.h>
+
+#define ACPI_OFFSET(d, f)   offsetof(d, f)
 #endif
 
 /* Define/disable kernel-specific declarators */

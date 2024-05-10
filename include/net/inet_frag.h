@@ -3,7 +3,7 @@
 #define __NET_FRAG_H__
 
 #include <linux/rhashtable-types.h>
-#include <net/dropreason.h>
+#include <net/dropreason-core.h>
 
 struct netns_frags {
 	/* sysctls */

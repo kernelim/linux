@@ -398,7 +398,7 @@ fail_put_node:
 	return ret;
 }
 
-static int ti_cpufreq_init(void)
+static int __init ti_cpufreq_init(void)
 {
 	platform_device_register_simple("ti-cpufreq", -1, NULL, 0);
 	return 0;

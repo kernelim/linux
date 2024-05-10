@@ -42,8 +42,6 @@ struct quirk_entry {
 	bool hotplug_wireless;
 	bool scalar_panel_brightness;
 	bool store_backlight_power;
-	bool wmi_backlight_power;
-	bool wmi_backlight_native;
 	bool wmi_force_als_set;
 	int wapf;
 	/*

@@ -324,6 +324,7 @@ extern bool early_boot_irqs_disabled;
 extern enum system_states {
 	SYSTEM_BOOTING,
 	SYSTEM_SCHEDULING,
+	SYSTEM_FREEING_INITMEM,
 	SYSTEM_RUNNING,
 	SYSTEM_HALT,
 	SYSTEM_POWER_OFF,
@@ -350,7 +351,7 @@ extern enum system_states {
 #define TAINT_LIVEPATCH			15
 #define TAINT_AUX			16
 #define TAINT_RANDSTRUCT		17
-#define TAINT_18			18
+#define TAINT_TEST			18
 #define TAINT_19			19
 #define TAINT_20			20
 #define TAINT_21			21
@@ -627,18 +628,11 @@ struct module;
 
 #ifdef CONFIG_RHEL_DIFFERENCES
 void mark_hardware_unmaintained(const char *driver_name, char *fmt, ...);
-void mark_driver_unmaintained(const char *driver_name);
-void mark_hardware_deprecated(const char *driver_name, char *fmt, ...);
-void mark_driver_deprecated(const char *driver_name);
-void mark_hardware_disabled(const char *driver_name, char *fmt, ...);
 void mark_tech_preview(const char *msg, struct module *mod);
+void init_rh_check_status(char *fn_name);
 #else
-static inline void mark_hardware_unsupported(const char *driver_name, char *fmt, ...) { }
 static inline void mark_driver_unmaintained(const char *driver_name) { }
-static inline void mark_hardware_deprecated(const char *driver_name, char *fmt, ...) { }
-static inline void mark_driver_deprecated(const char *driver_name) { }
-static inline void mark_hardware_disabled(const char *driver_name, char *fmt, ...) { }
 static inline void mark_tech_preview(const char *msg, struct module *mod) { }
 #endif
- 
+
 #endif

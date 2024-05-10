@@ -107,7 +107,7 @@
  * firmware.
  */
 struct sdw_intel_stream_params_data {
-	int stream;
+	struct snd_pcm_substream *substream;
 	struct snd_soc_dai *dai;
 	struct snd_pcm_hw_params *hw_params;
 	int link_id;
@@ -120,7 +120,7 @@ struct sdw_intel_stream_params_data {
  * firmware.
  */
 struct sdw_intel_stream_free_data {
-	int stream;
+	struct snd_pcm_substream *substream;
 	struct snd_soc_dai *dai;
 	int link_id;
 };
@@ -134,7 +134,7 @@ struct sdw_intel_ops {
 			     struct sdw_intel_stream_params_data *params_data);
 	int (*free_stream)(struct device *dev,
 			   struct sdw_intel_stream_free_data *free_data);
-	int (*trigger)(struct snd_soc_dai *dai, int cmd, int stream);
+	int (*trigger)(struct snd_pcm_substream *substream, int cmd, struct snd_soc_dai *dai);
 };
 
 /**

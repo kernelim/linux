@@ -30,7 +30,7 @@
  * rax original destination
  */
 SYM_FUNC_START_ALIAS(__memcpy)
-ENTRY(memcpy)
+SYM_FUNC_START_LOCAL(memcpy)
 	ALTERNATIVE_2 "jmp memcpy_orig", "", X86_FEATURE_REP_GOOD, \
 		      "jmp memcpy_erms", X86_FEATURE_ERMS
 
@@ -42,7 +42,7 @@ ENTRY(memcpy)
 	movl %edx, %ecx
 	rep movsb
 	RET
-ENDPROC(memcpy)
+SYM_FUNC_END(memcpy)
 SYM_FUNC_END_ALIAS(__memcpy)
 EXPORT_SYMBOL(memcpy)
 EXPORT_SYMBOL(__memcpy)
@@ -51,14 +51,14 @@ EXPORT_SYMBOL(__memcpy)
  * memcpy_erms() - enhanced fast string memcpy. This is faster and
  * simpler than memcpy. Use memcpy_erms when possible.
  */
-ENTRY(memcpy_erms)
+SYM_FUNC_START_LOCAL(memcpy_erms)
 	movq %rdi, %rax
 	movq %rdx, %rcx
 	rep movsb
 	RET
-ENDPROC(memcpy_erms)
+SYM_FUNC_END(memcpy_erms)
 
-ENTRY(memcpy_orig)
+SYM_FUNC_START_LOCAL(memcpy_orig)
 	movq %rdi, %rax
 
 	cmpq $0x20, %rdx
@@ -183,7 +183,7 @@ ENTRY(memcpy_orig)
 
 .Lend:
 	RET
-ENDPROC(memcpy_orig)
+SYM_FUNC_END(memcpy_orig)
 
 .popsection
 

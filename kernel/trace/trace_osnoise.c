@@ -2456,6 +2456,9 @@ static int timerlat_fd_open(struct inode *inode, struct file *file)
 	tlat = this_cpu_tmr_var();
 	tlat->count = 0;
 
+	hrtimer_init(&tlat->timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS_PINNED_HARD);
+	tlat->timer.function = timerlat_irq;
+
 	migrate_enable();
 	return 0;
 };
@@ -2537,9 +2540,6 @@ timerlat_fd_read(struct file *file, char __user *ubuf, size_t count,
 	} else {
 		tlat->tracing_thread = false;
 		tlat->kthread = current;
-
-		hrtimer_init(&tlat->timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS_PINNED_HARD);
-		tlat->timer.function = timerlat_irq;
 
 		/* Annotate now to drift new period */
 		tlat->abs_period = hrtimer_cb_get_time(&tlat->timer);

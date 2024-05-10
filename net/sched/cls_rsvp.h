@@ -128,10 +128,36 @@ static inline unsigned int hash_src(__be32 *src)
 		return r;				\
 }
 
+bool rsvp_check_linear(struct sk_buff *skb, unsigned int rsvp_len,
+#if RSVP_DST_LEN == 4
+		       struct ipv6hdr **nhptr,
+#else
+		       struct iphdr **nhptr,
+#endif
+		       unsigned int nh_ofs,
+		       __be32 **dst, __be32 **src, u8 **xprt)
+{
+	if (!pskb_network_may_pull(skb, rsvp_len))
+		return false;
+#if RSVP_DST_LEN == 4
+	*nhptr = (struct ipv6hdr *)(skb_network_header(skb) + nh_ofs);
+	*src = &((*nhptr)->saddr.s6_addr32[0]);
+	*dst = &((*nhptr)->daddr.s6_addr32[0]);
+	*xprt = (u8 *)(*nhptr) + sizeof(struct ipv6hdr);
+#else
+	*nhptr = (struct iphdr *)(skb_network_header(skb) + nh_ofs);
+	*src = &((*nhptr)->saddr);
+	*dst = &((*nhptr)->daddr);
+	*xprt = (u8 *)(*nhptr) + (size_t)((*nhptr)->ihl << 2);
+#endif
+	return true;
+}
+
 TC_INDIRECT_SCOPE int RSVP_CLS(struct sk_buff *skb, const struct tcf_proto *tp,
 			       struct tcf_result *res)
 {
 	struct rsvp_head *head = rcu_dereference_bh(tp->root);
+	size_t nh_len, xprt_ofs = 0;
 	struct rsvp_session *s;
 	struct rsvp_filter *f;
 	unsigned int h1, h2;
@@ -158,16 +184,18 @@ restart:
 	src = &nhptr->saddr.s6_addr32[0];
 	dst = &nhptr->daddr.s6_addr32[0];
 	protocol = nhptr->nexthdr;
-	xprt = ((u8 *)nhptr) + sizeof(struct ipv6hdr);
+	nh_len = sizeof(struct ipv6hdr);
 #else
 	src = &nhptr->saddr;
 	dst = &nhptr->daddr;
 	protocol = nhptr->protocol;
-	xprt = ((u8 *)nhptr) + (nhptr->ihl<<2);
+	nh_len = nhptr->ihl << 2;
 	if (ip_is_fragment(nhptr))
 		return -1;
 #endif
 
+	xprt_ofs += nh_len;
+	xprt = (u8 *)nhptr + xprt_ofs;
 	h1 = hash_dst(dst, protocol, tunnelid);
 	h2 = hash_src(src);
 
@@ -175,6 +203,8 @@ restart:
 	     s = rcu_dereference_bh(s->next)) {
 		if (dst[RSVP_DST_LEN-1] == s->dst[RSVP_DST_LEN - 1] &&
 		    protocol == s->protocol &&
+		    rsvp_check_linear(skb, xprt_ofs + s->dpi.offset + sizeof(u32),
+				      &nhptr, xprt_ofs - nh_len, &dst, &src, &xprt) &&
 		    !(s->dpi.mask &
 		      (*(u32 *)(xprt + s->dpi.offset) ^ s->dpi.key)) &&
 #if RSVP_DST_LEN == 4
@@ -187,6 +217,8 @@ restart:
 			for (f = rcu_dereference_bh(s->ht[h2]); f;
 			     f = rcu_dereference_bh(f->next)) {
 				if (src[RSVP_DST_LEN-1] == f->src[RSVP_DST_LEN - 1] &&
+				    rsvp_check_linear(skb, xprt_ofs + f->spi.offset + sizeof(u32),
+						      &nhptr, xprt_ofs - nh_len, &dst, &src, &xprt) &&
 				    !(f->spi.mask & (*(u32 *)(xprt + f->spi.offset) ^ f->spi.key))
 #if RSVP_DST_LEN == 4
 				    &&
@@ -203,7 +235,15 @@ matched:
 						return 0;
 
 					tunnelid = f->res.classid;
-					nhptr = (void *)(xprt + f->tunnelhdr - sizeof(*nhptr));
+					/* cls_rsvp assumes we have a fixed size IP header of the same family
+					 * before xprt + f->tunnelhdr. This is not necessarily true (see
+					 * assignments before restart: label); however, preserve the actual
+					 * semantic and just ensure to have enough bytes in the linear area.
+					 */
+					if (!pskb_network_may_pull(skb, xprt_ofs + f->tunnelhdr))
+						return -1;
+					xprt_ofs += f->tunnelhdr - sizeof(*nhptr);
+					nhptr = (void *)(skb_network_header(skb) + xprt_ofs);
 					goto restart;
 				}
 			}

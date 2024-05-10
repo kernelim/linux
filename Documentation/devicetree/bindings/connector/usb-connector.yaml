@@ -15,10 +15,19 @@ description:
 
 properties:
   compatible:
-    enum:
-      - usb-a-connector
-      - usb-b-connector
-      - usb-c-connector
+    oneOf:
+      - enum:
+          - usb-a-connector
+          - usb-b-connector
+          - usb-c-connector
+
+      - items:
+          - const: gpio-usb-b-connector
+          - const: usb-b-connector
+
+      - items:
+          - const: samsung,usb-connector-11pin
+          - const: usb-b-connector
 
   label:
     description: Symbolic name for the connector.
@@ -142,9 +151,34 @@ properties:
 required:
   - compatible
 
+allOf:
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: gpio-usb-b-connector
+    then:
+      anyOf:
+        - required:
+            - vbus-gpios
+        - required:
+            - id-gpios
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: samsung,usb-connector-11pin
+    then:
+      properties:
+        type:
+          const: micro
+
+additionalProperties: true
+
 examples:
   # Micro-USB connector with HS lines routed via controller (MUIC).
-  - |+
+  - |
     muic-max77843 {
       usb_con1: connector {
         compatible = "usb-b-connector";
@@ -156,7 +190,7 @@ examples:
   # USB-C connector attached to CC controller (s2mm005), HS lines routed
   # to companion PMIC (max77865), SS lines to USB3 PHY and SBU to DisplayPort.
   # DisplayPort video lines are routed to the connector via SS mux in USB3 PHY.
-  - |+
+  - |
     ccic: s2mm005 {
       usb_con2: connector {
         compatible = "usb-c-connector";
@@ -190,7 +224,7 @@ examples:
 
   # USB-C connector attached to a typec port controller(ptn5110), which has
   # power delivery support and enables drp.
-  - |+
+  - |
     #include <dt-bindings/usb/pd.h>
     typec: ptn5110 {
       usb_con3: connector {
@@ -202,5 +236,48 @@ examples:
         sink-pdos = <PDO_FIXED(5000, 2000, PDO_FIXED_USB_COMM)
                      PDO_VAR(5000, 12000, 2000)>;
         op-sink-microwatt = <10000000>;
+      };
+    };
+
+  # USB connector with GPIO control lines
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+
+    usb {
+      connector {
+        compatible = "gpio-usb-b-connector", "usb-b-connector";
+        type = "micro";
+        id-gpios = <&pio 12 GPIO_ACTIVE_HIGH>;
+        vbus-supply = <&usb_p0_vbus>;
+      };
+    };
+
+  # Micro-USB connector with HS lines routed via controller (MUIC) and MHL
+  # lines connected to HDMI-MHL bridge (sii8620) on Samsung Exynos5433-based
+  # mobile phone
+  - |
+    muic-max77843 {
+      usb_con4: connector {
+        compatible = "samsung,usb-connector-11pin", "usb-b-connector";
+        label = "micro-USB";
+        type = "micro";
+
+        ports {
+          #address-cells = <1>;
+          #size-cells = <0>;
+
+          port@0 {
+            reg = <0>;
+            muic_to_usb: endpoint {
+              remote-endpoint = <&usb_to_muic>;
+            };
+          };
+          port@3 {
+            reg = <3>;
+            usb_con_mhl: endpoint {
+              remote-endpoint = <&sii8620_mhl>;
+            };
+          };
+        };
       };
     };

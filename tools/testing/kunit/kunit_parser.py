@@ -13,9 +13,10 @@ from __future__ import annotations
 import re
 import sys
 
-import datetime
 from enum import Enum, auto
 from typing import Iterable, Iterator, List, Optional, Tuple
+
+from kunit_printer import stdout
 
 class Test:
 	"""
@@ -55,7 +56,11 @@ class Test:
 	def add_error(self, error_message: str) -> None:
 		"""Records an error that occurred while parsing this test."""
 		self.counts.errors += 1
-		print_with_timestamp(red('[ERROR]') + f' Test: {self.name}: {error_message}')
+		stdout.print_with_timestamp(stdout.red('[ERROR]') + f' Test: {self.name}: {error_message}')
+
+	def ok_status(self) -> bool:
+		"""Returns true if the status was ok, i.e. passed or skipped."""
+		return self.status in (TestStatus.SUCCESS, TestStatus.SKIPPED)
 
 class TestStatus(Enum):
 	"""An enumeration class to represent the status of a test."""
@@ -217,7 +222,7 @@ TAP_START = re.compile(r'TAP version ([0-9]+)$')
 KTAP_END = re.compile('(List of all partitions:|'
 	'Kernel panic - not syncing: VFS:|reboot: System halted)')
 
-def extract_tap_lines(kernel_output: Iterable[str]) -> LineStream:
+def extract_tap_lines(kernel_output: Iterable[str], lstrip=True) -> LineStream:
 	"""Extracts KTAP lines from the kernel output."""
 	def isolate_ktap_output(kernel_output: Iterable[str]) \
 			-> Iterator[Tuple[int, str]]:
@@ -243,9 +248,11 @@ def extract_tap_lines(kernel_output: Iterable[str]) -> LineStream:
 				# stop extracting KTAP lines
 				break
 			elif started:
-				# remove prefix and any indention and yield
-				# line with line number
-				line = line[prefix_len:].lstrip()
+				# remove the prefix and optionally any leading
+				# whitespace. Our parsing logic relies on this.
+				line = line[prefix_len:]
+				if lstrip:
+					line = line.lstrip()
 				yield line_num, line
 	return LineStream(lines=isolate_ktap_output(kernel_output))
 
@@ -461,32 +468,6 @@ def parse_diagnostic(lines: LineStream) -> List[str]:
 
 DIVIDER = '=' * 60
 
-RESET = '\033[0;0m'
-
-def red(text: str) -> str:
-	"""Returns inputted string with red color code."""
-	if not sys.stdout.isatty():
-		return text
-	return '\033[1;31m' + text + RESET
-
-def yellow(text: str) -> str:
-	"""Returns inputted string with yellow color code."""
-	if not sys.stdout.isatty():
-		return text
-	return '\033[1;33m' + text + RESET
-
-def green(text: str) -> str:
-	"""Returns inputted string with green color code."""
-	if not sys.stdout.isatty():
-		return text
-	return '\033[1;32m' + text + RESET
-
-ANSI_LEN = len(red(''))
-
-def print_with_timestamp(message: str) -> None:
-	"""Prints message with timestamp at beginning."""
-	print('[%s] %s' % (datetime.datetime.now().strftime('%H:%M:%S'), message))
-
 def format_test_divider(message: str, len_message: int) -> str:
 	"""
 	Returns string with message centered in fixed width divider.
@@ -529,12 +510,12 @@ def print_test_header(test: Test) -> None:
 			message += ' (1 subtest)'
 		else:
 			message += f' ({test.expected_count} subtests)'
-	print_with_timestamp(format_test_divider(message, len(message)))
+	stdout.print_with_timestamp(format_test_divider(message, len(message)))
 
 def print_log(log: Iterable[str]) -> None:
 	"""Prints all strings in saved log for test in yellow."""
 	for m in log:
-		print_with_timestamp(yellow(m))
+		stdout.print_with_timestamp(stdout.yellow(m))
 
 def format_test_result(test: Test) -> str:
 	"""
@@ -551,16 +532,16 @@ def format_test_result(test: Test) -> str:
 	String containing formatted test result
 	"""
 	if test.status == TestStatus.SUCCESS:
-		return green('[PASSED] ') + test.name
+		return stdout.green('[PASSED] ') + test.name
 	if test.status == TestStatus.SKIPPED:
-		return yellow('[SKIPPED] ') + test.name
+		return stdout.yellow('[SKIPPED] ') + test.name
 	if test.status == TestStatus.NO_TESTS:
-		return yellow('[NO TESTS RUN] ') + test.name
+		return stdout.yellow('[NO TESTS RUN] ') + test.name
 	if test.status == TestStatus.TEST_CRASHED:
 		print_log(test.log)
-		return red('[CRASHED] ') + test.name
+		return stdout.red('[CRASHED] ') + test.name
 	print_log(test.log)
-	return red('[FAILED] ') + test.name
+	return stdout.red('[FAILED] ') + test.name
 
 def print_test_result(test: Test) -> None:
 	"""
@@ -572,7 +553,7 @@ def print_test_result(test: Test) -> None:
 	Parameters:
 	test - Test object representing current test being printed
 	"""
-	print_with_timestamp(format_test_result(test))
+	stdout.print_with_timestamp(format_test_result(test))
 
 def print_test_footer(test: Test) -> None:
 	"""
@@ -585,8 +566,42 @@ def print_test_footer(test: Test) -> None:
 	test - Test object representing current test being printed
 	"""
 	message = format_test_result(test)
-	print_with_timestamp(format_test_divider(message,
-		len(message) - ANSI_LEN))
+	stdout.print_with_timestamp(format_test_divider(message,
+		len(message) - stdout.color_len()))
+
+
+
+def _summarize_failed_tests(test: Test) -> str:
+	"""Tries to summarize all the failing subtests in `test`."""
+
+	def failed_names(test: Test, parent_name: str) -> List[str]:
+		# Note: we use 'main' internally for the top-level test.
+		if not parent_name or parent_name == 'main':
+			full_name = test.name
+		else:
+			full_name = parent_name + '.' + test.name
+
+		if not test.subtests:  # this is a leaf node
+			return [full_name]
+
+		# If all the children failed, just say this subtest failed.
+		# Don't summarize it down "the top-level test failed", though.
+		failed_subtests = [sub for sub in test.subtests if not sub.ok_status()]
+		if parent_name and len(failed_subtests) ==  len(test.subtests):
+			return [full_name]
+
+		all_failures = []  # type: List[str]
+		for t in failed_subtests:
+			all_failures.extend(failed_names(t, full_name))
+		return all_failures
+
+	failures = failed_names(test, '')
+	# If there are too many failures, printing them out will just be noisy.
+	if len(failures) > 10:  # this is an arbitrary limit
+		return ''
+
+	return 'Failures: ' + ', '.join(failures)
+
 
 def print_summary_line(test: Test) -> None:
 	"""
@@ -603,12 +618,21 @@ def print_summary_line(test: Test) -> None:
 	test - Test object representing current test being printed
 	"""
 	if test.status == TestStatus.SUCCESS:
-		color = green
+		color = stdout.green
 	elif test.status in (TestStatus.SKIPPED, TestStatus.NO_TESTS):
-		color = yellow
+		color = stdout.yellow
 	else:
-		color = red
-	print_with_timestamp(color(f'Testing complete. {test.counts}'))
+		color = stdout.red
+	stdout.print_with_timestamp(color(f'Testing complete. {test.counts}'))
+
+	# Summarize failures that might have gone off-screen since we had a lot
+	# of tests (arbitrarily defined as >=100 for now).
+	if test.ok_status() or test.counts.total() < 100:
+		return
+	summarized = _summarize_failed_tests(test)
+	if not summarized:
+		return
+	stdout.print_with_timestamp(color(summarized))
 
 # Other methods:
 
@@ -762,7 +786,7 @@ def parse_run_tests(kernel_output: Iterable[str]) -> Test:
 	Return:
 	Test - the main test object with all subtests.
 	"""
-	print_with_timestamp(DIVIDER)
+	stdout.print_with_timestamp(DIVIDER)
 	lines = extract_tap_lines(kernel_output)
 	test = Test()
 	if not lines:
@@ -773,6 +797,6 @@ def parse_run_tests(kernel_output: Iterable[str]) -> Test:
 		test = parse_test(lines, 0, [])
 		if test.status != TestStatus.NO_TESTS:
 			test.status = test.counts.get_status()
-	print_with_timestamp(DIVIDER)
+	stdout.print_with_timestamp(DIVIDER)
 	print_summary_line(test)
 	return test

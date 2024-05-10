@@ -269,6 +269,9 @@ static int __iommu_probe_device(struct device *dev, struct list_head *group_list
 
 	iommu_device_link(iommu_dev, dev);
 
+	if (dev_is_pci(dev))
+		iommu_dma_set_pci_32bit_workaround(dev);
+
 	return 0;
 
 out_release:
@@ -678,12 +681,16 @@ struct iommu_group *iommu_group_alloc(void)
 
 	ret = iommu_group_create_file(group,
 				      &iommu_group_attr_reserved_regions);
-	if (ret)
+	if (ret) {
+		kobject_put(group->devices_kobj);
 		return ERR_PTR(ret);
+	}
 
 	ret = iommu_group_create_file(group, &iommu_group_attr_type);
-	if (ret)
+	if (ret) {
+		kobject_put(group->devices_kobj);
 		return ERR_PTR(ret);
+	}
 
 	pr_debug("Allocated group %d\n", group->id);
 

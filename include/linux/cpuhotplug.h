@@ -36,6 +36,7 @@ enum cpuhp_state {
 	CPUHP_X86_APB_DEAD,
 	CPUHP_X86_MCE_DEAD,
 	CPUHP_VIRT_NET_DEAD,
+	/* kABI: CPUHP_IBMVNIC_DEAD, */
 	CPUHP_SLUB_DEAD,
 	CPUHP_MM_WRITEBACK_DEAD,
 	CPUHP_MM_VMSTAT_DEAD,
@@ -150,6 +151,9 @@ enum cpuhp_state {
 	 * the other CPUHP states are not changed or broken.
 	 */
 	RH_KABI_BROKEN_INSERT_ENUM(CPUHP_AP_SCHED_WAIT_EMPTY)
+#if defined(CONFIG_X86) || defined(CONFIG_ARM64)
+	RH_KABI_BROKEN_INSERT_ENUM(CPUHP_AP_HYPERV_ONLINE)
+#endif
 	CPUHP_AP_SMPBOOT_THREADS,
 	RH_KABI_BROKEN_REMOVE_ENUM(CPUHP_AP_X86_VDSO_VMA_ONLINE)
 	CPUHP_AP_IRQ_AFFINITY_ONLINE,
@@ -163,7 +167,12 @@ enum cpuhp_state {
 	CPUHP_AP_PERF_X86_CQM_ONLINE,
 	CPUHP_AP_PERF_X86_CSTATE_ONLINE,
 	/* kABI: CPUHP_AP_PERF_X86_IDXD_ONLINE, */
+#if defined(CONFIG_X86) || defined(CONFIG_ARM64)
+	/* Compensate for the addition of CPUHP_AP_HYPERV_ONLINE */
+	RH_KABI_BROKEN_REMOVE_ENUM(CPUHP_AP_PERF_S390_CF_ONLINE)
+#else
 	CPUHP_AP_PERF_S390_CF_ONLINE,
+#endif
 	/* kABI: CPUHP_AP_PERF_S390_CFD_ONLINE, */
 	CPUHP_AP_PERF_S390_SF_ONLINE,
 	CPUHP_AP_PERF_ARM_CCI_ONLINE,
@@ -224,6 +233,8 @@ enum cpuhp_state {
 
 /* CPUHP_AP_ONLINE_DYN is not an unused entry like the above entries */
 #define CPUHP_AP_X86_INTEL_EPB_ONLINE CPUHP_AP_ONLINE_DYN
+
+#define CPUHP_IBMVNIC_DEAD CPUHP_X86_MCE_DEAD
 
 int __cpuhp_setup_state(enum cpuhp_state state,	const char *name, bool invoke,
 			int (*startup)(unsigned int cpu),

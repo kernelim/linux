@@ -1255,13 +1255,21 @@ xfs_link(
 
 	/*
 	 * Handle initial link state of O_TMPFILE inode
+	 *
+	 * We need to lock the AGI before the AGF, and the AGF before the 
+	 * inode cluster buffer. Hence we have to read the AGI first, then do
+	 * directory name creation, then remove the inode from the unlinked
+	 * list.
+	 *
+	 * Note: the agibp gets linked into the transaction, so we don't ever
+	 * have to explicitly release it after reading it here.
 	 */
 	if (VFS_I(sip)->i_nlink == 0) {
-		struct xfs_perag	*pag;
+		struct xfs_buf *agibp;
 
-		pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, sip->i_ino));
-		error = xfs_iunlink_remove(tp, pag, sip);
-		xfs_perag_put(pag);
+		error = xfs_ialloc_read_agi(mp, tp,
+				XFS_INO_TO_AGNO(mp, sip->i_ino), &agibp);
+
 		if (error)
 			goto error_return;
 	}
@@ -1273,6 +1281,20 @@ xfs_link(
 	xfs_trans_ichgtime(tp, tdp, XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
 	xfs_trans_log_inode(tp, tdp, XFS_ILOG_CORE);
 
+	/*
+	 * Finish O_TMPFILE inode handling by removing it from the unlinked
+	 * list before we bump the link count.
+	 */
+	if (VFS_I(sip)->i_nlink == 0) {
+		struct xfs_perag *pag;
+
+		pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, sip->i_ino));
+		error = xfs_iunlink_remove(tp, pag, sip);
+		xfs_perag_put(pag);
+
+		if (error)
+			goto error_return;
+	}
 	xfs_bumplink(tp, sip);
 
 	/*
@@ -3094,7 +3116,7 @@ retry:
 	 * Lock all the participating inodes. Depending upon whether
 	 * the target_name exists in the target directory, and
 	 * whether the target directory is the same as the source
-	 * directory, we can lock from 2 to 4 inodes.
+	 * directory, we can lock from 2 to 5 inodes.
 	 */
 	xfs_lock_inodes(inodes, num_inodes, XFS_ILOCK_EXCL);
 
@@ -3218,13 +3240,19 @@ retry:
 
 	/*
 	 * Lock the AGI buffers we need to handle bumping the nlink of the
-	 * whiteout inode off the unlinked list and to handle dropping the
-	 * nlink of the target inode.  Per locking order rules, do this in
-	 * increasing AG order and before directory block allocation tries to
-	 * grab AGFs because we grab AGIs before AGFs.
+	 * whiteout inode off the unlinked list and to handle dropping the nlink
+	 * of the target inode.  Per locking order rules, do this in increasing
+	 * AG order and before directory block allocation tries to grab AGFs
+	 * because we grab AGIs before AGFs.
 	 *
 	 * The (vfs) caller must ensure that if src is a directory then
 	 * target_ip is either null or an empty directory.
+	 *
+	 * For the whiteout inode, we need to remove it from the unlinked list
+	 * which means we have to take inode cluster buffer locks. This must be
+	 * done after the directory modifications that require the AGF but we
+	 * still have to lock the AGI here because the lock order is
+	 * AGI->AGF->inode cluster buffer.
 	 */
 	for (i = 0; i < num_inodes && inodes[i] != NULL; i++) {
 		if (inodes[i] == wip ||
@@ -3238,33 +3266,6 @@ retry:
 			if (error)
 				goto out_trans_cancel;
 		}
-	}
-
-	/*
-	 * Directory entry creation below may acquire the AGF. Remove
-	 * the whiteout from the unlinked list first to preserve correct
-	 * AGI/AGF locking order. This dirties the transaction so failures
-	 * after this point will abort and log recovery will clean up the
-	 * mess.
-	 *
-	 * For whiteouts, we need to bump the link count on the whiteout
-	 * inode. After this point, we have a real link, clear the tmpfile
-	 * state flag from the inode so it doesn't accidentally get misused
-	 * in future.
-	 */
-	if (wip) {
-		struct xfs_perag	*pag;
-
-		ASSERT(VFS_I(wip)->i_nlink == 0);
-
-		pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, wip->i_ino));
-		error = xfs_iunlink_remove(tp, pag, wip);
-		xfs_perag_put(pag);
-		if (error)
-			goto out_trans_cancel;
-
-		xfs_bumplink(tp, wip);
-		VFS_I(wip)->i_state &= ~I_LINKABLE;
 	}
 
 	/*
@@ -3368,10 +3369,30 @@ retry:
 	 * For whiteouts, we only need to update the source dirent with the
 	 * inode number of the whiteout inode rather than removing it
 	 * altogether.
+	 *
+	 * We also need to bump the link count on the whiteout inode. After this
+	 * point, we have a real link, clear the tmpfile state flag from the
+	 * inode so it doesn't accidentally get misused in future.
 	 */
 	if (wip) {
+		struct xfs_perag *pag;
+
+		ASSERT(VFS_I(wip)->i_nlink == 0);
+
 		error = xfs_dir_replace(tp, src_dp, src_name, wip->i_ino,
 					spaceres);
+		if (error)
+			goto out_trans_cancel;
+
+		pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, wip->i_ino));
+		error = xfs_iunlink_remove(tp, pag, wip);
+		xfs_perag_put(pag);
+
+		if (error)
+			goto out_trans_cancel;
+
+		xfs_bumplink(tp, wip);
+		VFS_I(wip)->i_state &= ~I_LINKABLE;
 	} else {
 		/*
 		 * NOTE: We don't need to check for extent count overflow here
@@ -3380,10 +3401,9 @@ retry:
 		 */
 		error = xfs_dir_removename(tp, src_dp, src_name, src_ip->i_ino,
 					   spaceres);
+		if (error)
+			goto out_trans_cancel;
 	}
-
-	if (error)
-		goto out_trans_cancel;
 
 	xfs_trans_ichgtime(tp, src_dp, XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
 	xfs_trans_log_inode(tp, src_dp, XFS_ILOG_CORE);
@@ -3578,7 +3598,7 @@ xfs_iflush_cluster(
 
 	/*
 	 * We must use the safe variant here as on shutdown xfs_iflush_abort()
-	 * can remove itself from the list.
+	 * will remove itself from the list.
 	 */
 	list_for_each_entry_safe(lip, n, &bp->b_li_list, li_bio_list) {
 		iip = (struct xfs_inode_log_item *)lip;

@@ -230,7 +230,7 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 		setup_irq(BASE_IPI_IRQ, &ipi_intdesc);
 }
 
-void smp_send_reschedule(int cpu)
+void arch_smp_send_reschedule(int cpu)
 {
 	send_ipi(cpumask_of(cpu), IPI_RESCHEDULE);
 }

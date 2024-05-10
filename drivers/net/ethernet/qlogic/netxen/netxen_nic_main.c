@@ -1594,8 +1594,6 @@ netxen_nic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (err)
 		goto err_out_disable_msi;
 
-	pci_hw_deprecated(ent, pdev);
-
 	pci_set_drvdata(pdev, adapter);
 
 	netxen_schedule_work(adapter, netxen_fw_poll_work, FW_POLL_DELAY);

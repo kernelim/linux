@@ -69,6 +69,7 @@ void __sync_icache_dcache(pte_t pte)
 	if (!test_and_set_bit(PG_dcache_clean, &page->flags))
 		sync_icache_aliases(page_address(page), page_size(page));
 }
+EXPORT_SYMBOL_GPL(__sync_icache_dcache);
 
 /*
  * This function is called when a page has been modified by the kernel. Mark

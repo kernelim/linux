@@ -5135,8 +5135,6 @@ mptsas_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	int			error=0;
 	int			r;
 
-	mark_driver_unmaintained(MYNAM);
-
 	r = mpt_attach(pdev,id);
 	if (r)
 		return r;

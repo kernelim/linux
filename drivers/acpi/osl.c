@@ -23,6 +23,8 @@
  *
  */
 
+#define pr_fmt(fmt) "ACPI: OSL: " fmt
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -47,9 +49,9 @@
 #include <linux/io-64-nonatomic-lo-hi.h>
 
 #include "acpica/accommon.h"
-#include "acpica/acnamesp.h"
 #include "internal.h"
 
+/* Definitions for ACPI_DEBUG_PRINT() */
 #define _COMPONENT		ACPI_OS_SERVICES
 ACPI_MODULE_NAME("osl");
 
@@ -329,7 +331,7 @@ void __iomem __ref
 	acpi_size pg_sz;
 
 	if (phys > ULONG_MAX) {
-		printk(KERN_ERR PREFIX "Cannot map memory that high\n");
+		pr_err("Cannot map memory that high: 0x%llx\n", phys);
 		return NULL;
 	}
 
@@ -530,13 +532,12 @@ acpi_os_predefined_override(const struct acpi_predefined_names *init_val,
 
 	*new_val = NULL;
 	if (!memcmp(init_val->name, "_OS_", 4) && strlen(acpi_os_name)) {
-		printk(KERN_INFO PREFIX "Overriding _OS definition to '%s'\n",
-		       acpi_os_name);
+		pr_info("Overriding _OS definition to '%s'\n", acpi_os_name);
 		*new_val = acpi_os_name;
 	}
 
 	if (!memcmp(init_val->name, "_REV", 4) && acpi_rev_override) {
-		printk(KERN_INFO PREFIX "Overriding _REV return value to 5\n");
+		pr_info("Overriding _REV return value to 5\n");
 		*new_val = (char *)5;
 	}
 
@@ -577,15 +578,14 @@ acpi_os_install_interrupt_handler(u32 gsi, acpi_osd_handler handler,
 		return AE_ALREADY_ACQUIRED;
 
 	if (acpi_gsi_to_irq(gsi, &irq) < 0) {
-		printk(KERN_ERR PREFIX "SCI (ACPI GSI %d) not registered\n",
-		       gsi);
+		pr_err("SCI (ACPI GSI %d) not registered\n", gsi);
 		return AE_OK;
 	}
 
 	acpi_irq_handler = handler;
 	acpi_irq_context = context;
 	if (request_irq(irq, acpi_irq, IRQF_SHARED, "acpi", acpi_irq)) {
-		printk(KERN_ERR PREFIX "SCI (IRQ%d) allocation failed\n", irq);
+		pr_err("SCI (IRQ%d) allocation failed\n", irq);
 		acpi_irq_handler = NULL;
 		return AE_NOT_ACQUIRED;
 	}
@@ -1074,7 +1074,7 @@ acpi_status acpi_os_execute(acpi_execute_type type,
 	if (type == OSL_DEBUGGER_MAIN_THREAD) {
 		ret = acpi_debugger_create_thread(function, context);
 		if (ret) {
-			pr_err("Call to kthread_create() failed.\n");
+			pr_err("Kernel thread creation failed\n");
 			status = AE_ERROR;
 		}
 		goto out_thread;
@@ -1124,8 +1124,7 @@ acpi_status acpi_os_execute(acpi_execute_type type,
 	 */
 	ret = queue_work_on(0, queue, &dpc->work);
 	if (!ret) {
-		printk(KERN_ERR PREFIX
-			  "Call to queue_work() failed.\n");
+		pr_err("Unable to queue work\n");
 		status = AE_ERROR;
 	}
 err_workqueue:
@@ -1168,9 +1167,9 @@ acpi_status acpi_hotplug_schedule(struct acpi_device *adev, u32 src)
 {
 	struct acpi_hp_work *hpw;
 
-	ACPI_DEBUG_PRINT((ACPI_DB_EXEC,
-		  "Scheduling hotplug event (%p, %u) for deferred execution.\n",
-		  adev, src));
+	acpi_handle_debug(adev->handle,
+			  "Scheduling hotplug event %u for deferred handling\n",
+			   src);
 
 	hpw = kmalloc(sizeof(*hpw), GFP_KERNEL);
 	if (!hpw)
@@ -1358,7 +1357,7 @@ acpi_status acpi_os_signal(u32 function, void *info)
 {
 	switch (function) {
 	case ACPI_SIGNAL_FATAL:
-		printk(KERN_ERR PREFIX "Fatal opcode executed\n");
+		pr_err("Fatal opcode executed\n");
 		break;
 	case ACPI_SIGNAL_BREAKPOINT:
 		/*
@@ -1410,7 +1409,7 @@ __setup("acpi_os_name=", acpi_os_name_setup);
 static int __init acpi_no_auto_serialize_setup(char *str)
 {
 	acpi_gbl_auto_serialize_methods = FALSE;
-	pr_info("ACPI: auto-serialization disabled\n");
+	pr_info("Auto-serialization disabled\n");
 
 	return 1;
 }
@@ -1495,91 +1494,6 @@ int acpi_check_region(resource_size_t start, resource_size_t n,
 	return acpi_check_resource_conflict(&res);
 }
 EXPORT_SYMBOL(acpi_check_region);
-
-static acpi_status acpi_deactivate_mem_region(acpi_handle handle, u32 level,
-					      void *_res, void **return_value)
-{
-	struct acpi_mem_space_context **mem_ctx;
-	union acpi_operand_object *handler_obj;
-	union acpi_operand_object *region_obj2;
-	union acpi_operand_object *region_obj;
-	struct resource *res = _res;
-	acpi_status status;
-
-	region_obj = acpi_ns_get_attached_object(handle);
-	if (!region_obj)
-		return AE_OK;
-
-	handler_obj = region_obj->region.handler;
-	if (!handler_obj)
-		return AE_OK;
-
-	if (region_obj->region.space_id != ACPI_ADR_SPACE_SYSTEM_MEMORY)
-		return AE_OK;
-
-	if (!(region_obj->region.flags & AOPOBJ_SETUP_COMPLETE))
-		return AE_OK;
-
-	region_obj2 = acpi_ns_get_secondary_object(region_obj);
-	if (!region_obj2)
-		return AE_OK;
-
-	mem_ctx = (void *)&region_obj2->extra.region_context;
-
-	if (!(mem_ctx[0]->address >= res->start &&
-	      mem_ctx[0]->address < res->end))
-		return AE_OK;
-
-	status = handler_obj->address_space.setup(region_obj,
-						  ACPI_REGION_DEACTIVATE,
-						  NULL, (void **)mem_ctx);
-	if (ACPI_SUCCESS(status))
-		region_obj->region.flags &= ~(AOPOBJ_SETUP_COMPLETE);
-
-	return status;
-}
-
-/**
- * acpi_release_memory - Release any mappings done to a memory region
- * @handle: Handle to namespace node
- * @res: Memory resource
- * @level: A level that terminates the search
- *
- * Walks through @handle and unmaps all SystemMemory Operation Regions that
- * overlap with @res and that have already been activated (mapped).
- *
- * This is a helper that allows drivers to place special requirements on memory
- * region that may overlap with operation regions, primarily allowing them to
- * safely map the region as non-cached memory.
- *
- * The unmapped Operation Regions will be automatically remapped next time they
- * are called, so the drivers do not need to do anything else.
- */
-acpi_status acpi_release_memory(acpi_handle handle, struct resource *res,
-				u32 level)
-{
-	acpi_status status;
-
-	if (!(res->flags & IORESOURCE_MEM))
-		return AE_TYPE;
-
-	status = acpi_walk_namespace(ACPI_TYPE_REGION, handle, level,
-				     acpi_deactivate_mem_region, NULL,
-				     res, NULL);
-	if (ACPI_FAILURE(status))
-		return status;
-
-	/*
-	 * Wait for all of the mappings queued up for removal by
-	 * acpi_deactivate_mem_region() to actually go away.
-	 */
-	synchronize_rcu();
-	rcu_barrier();
-	flush_scheduled_work();
-
-	return AE_OK;
-}
-EXPORT_SYMBOL_GPL(acpi_release_memory);
 
 /*
  * Let drivers know whether the resource checks are effective
@@ -1710,7 +1624,7 @@ acpi_status acpi_os_release_object(acpi_cache_t * cache, void *object)
 static int __init acpi_no_static_ssdt_setup(char *s)
 {
 	acpi_gbl_disable_ssdt_table_install = TRUE;
-	pr_info("ACPI: static SSDT installation disabled\n");
+	pr_info("Static SSDT installation disabled\n");
 
 	return 0;
 }
@@ -1719,8 +1633,7 @@ early_param("acpi_no_static_ssdt", acpi_no_static_ssdt_setup);
 
 static int __init acpi_disable_return_repair(char *s)
 {
-	printk(KERN_NOTICE PREFIX
-	       "ACPI: Predefined validation mechanism disabled\n");
+	pr_notice("Predefined validation mechanism disabled\n");
 	acpi_gbl_disable_auto_repair = TRUE;
 
 	return 1;
@@ -1746,7 +1659,7 @@ acpi_status __init acpi_os_initialize(void)
 		void *rv;
 
 		rv = acpi_os_map_generic_address(&acpi_gbl_FADT.reset_register);
-		pr_debug(PREFIX "%s: map reset_reg %s\n", __func__,
+		pr_debug("%s: Reset register mapping %s\n", __func__,
 			 rv ? "successful" : "failed");
 	}
 	acpi_os_initialized = true;

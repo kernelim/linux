@@ -616,6 +616,13 @@ static int fanotify_remove_vfsmount_mark(struct fsnotify_group *group,
 				    mask, flags);
 }
 
+static int fanotify_remove_sb_mark(struct fsnotify_group *group,
+				      struct super_block *sb, __u32 mask,
+				      unsigned int flags)
+{
+	return fanotify_remove_mark(group, &sb->s_fsnotify_marks, mask, flags);
+}
+
 static int fanotify_remove_inode_mark(struct fsnotify_group *group,
 				      struct inode *inode, __u32 mask,
 				      unsigned int flags)
@@ -700,6 +707,14 @@ static int fanotify_add_vfsmount_mark(struct fsnotify_group *group,
 {
 	return fanotify_add_mark(group, &real_mount(mnt)->mnt_fsnotify_marks,
 				 FSNOTIFY_OBJ_TYPE_VFSMOUNT, mask, flags);
+}
+
+static int fanotify_add_sb_mark(struct fsnotify_group *group,
+				      struct super_block *sb, __u32 mask,
+				      unsigned int flags)
+{
+	return fanotify_add_mark(group, &sb->s_fsnotify_marks,
+				 FSNOTIFY_OBJ_TYPE_SB, mask, flags);
 }
 
 static int fanotify_add_inode_mark(struct fsnotify_group *group,
@@ -866,6 +881,7 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	switch (mark_type) {
 	case FAN_MARK_INODE:
 	case FAN_MARK_MOUNT:
+	case FAN_MARK_FILESYSTEM:
 		break;
 	default:
 		return -EINVAL;
@@ -914,6 +930,8 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 		ret = 0;
 		if (mark_type == FAN_MARK_MOUNT)
 			fsnotify_clear_vfsmount_marks_by_group(group);
+		else if (mark_type == FAN_MARK_FILESYSTEM)
+			fsnotify_clear_sb_marks_by_group(group);
 		else
 			fsnotify_clear_inode_marks_by_group(group);
 		goto fput_and_out;
@@ -934,12 +952,16 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	case FAN_MARK_ADD:
 		if (mark_type == FAN_MARK_MOUNT)
 			ret = fanotify_add_vfsmount_mark(group, mnt, mask, flags);
+		else if (mark_type == FAN_MARK_FILESYSTEM)
+			ret = fanotify_add_sb_mark(group, mnt->mnt_sb, mask, flags);
 		else
 			ret = fanotify_add_inode_mark(group, inode, mask, flags);
 		break;
 	case FAN_MARK_REMOVE:
 		if (mark_type == FAN_MARK_MOUNT)
 			ret = fanotify_remove_vfsmount_mark(group, mnt, mask, flags);
+		else if (mark_type == FAN_MARK_FILESYSTEM)
+			ret = fanotify_remove_sb_mark(group, mnt->mnt_sb, mask, flags);
 		else
 			ret = fanotify_remove_inode_mark(group, inode, mask, flags);
 		break;
@@ -984,7 +1006,7 @@ COMPAT_SYSCALL_DEFINE6(fanotify_mark,
 static int __init fanotify_user_setup(void)
 {
 	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_INIT_FLAGS) != 7);
-	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 8);
+	BUILD_BUG_ON(HWEIGHT32(FANOTIFY_MARK_FLAGS) != 9);
 
 	fanotify_mark_cache = KMEM_CACHE(fsnotify_mark,
 					 SLAB_PANIC|SLAB_ACCOUNT);

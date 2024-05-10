@@ -109,6 +109,16 @@ struct ice_tx_tstamp {
 };
 
 /**
+ * enum ice_tx_tstamp_work - Status of Tx timestamp work function
+ * @ICE_TX_TSTAMP_WORK_DONE: Tx timestamp processing is complete
+ * @ICE_TX_TSTAMP_WORK_PENDING: More Tx timestamps are pending
+ */
+enum ice_tx_tstamp_work {
+	ICE_TX_TSTAMP_WORK_DONE = 0,
+	ICE_TX_TSTAMP_WORK_PENDING,
+};
+
+/**
  * struct ice_ptp_tx - Tracking structure for all Tx timestamp requests on a port
  * @lock: lock to prevent concurrent access to fields of this struct
  * @tstamps: array of len to store outstanding requests
@@ -147,7 +157,9 @@ struct ice_ptp_tx {
  * ready for PTP functionality. It is used to track the port initialization
  * and determine when the port's PHY offset is valid.
  *
+ * @list_member: list member structure of auxiliary device
  * @tx: Tx timestamp tracking for this port
+ * @aux_dev: auxiliary device associated with this port
  * @ov_work: delayed work task for tracking when PHY offset is valid
  * @ps_lock: mutex used to protect the overall PTP PHY start procedure
  * @link_up: indicates whether the link is up
@@ -155,7 +167,9 @@ struct ice_ptp_tx {
  * @port_num: the port number this structure represents
  */
 struct ice_ptp_port {
+	struct list_head list_member;
 	struct ice_ptp_tx tx;
+	struct auxiliary_device aux_dev;
 	struct kthread_delayed_work ov_work;
 	struct mutex ps_lock; /* protects overall PTP PHY start procedure */
 	bool link_up;
@@ -163,13 +177,36 @@ struct ice_ptp_port {
 	u8 port_num;
 };
 
+enum ice_ptp_tx_interrupt {
+	ICE_PTP_TX_INTERRUPT_NONE = 0,
+	ICE_PTP_TX_INTERRUPT_SELF,
+	ICE_PTP_TX_INTERRUPT_ALL,
+};
+
+/**
+ * struct ice_ptp_port_owner - data used to handle the PTP clock owner info
+ *
+ * This structure contains data necessary for the PTP clock owner to correctly
+ * handle the timestamping feature for all attached ports.
+ *
+ * @aux_driver: the structure carring the auxiliary driver information
+ * @ports: list of porst handled by this port owner
+ * @lock: protect access to ports list
+ */
+struct ice_ptp_port_owner {
+	struct auxiliary_driver aux_driver;
+	struct list_head ports;
+	struct mutex lock;
+};
+
 #define GLTSYN_TGT_H_IDX_MAX		4
 
 /**
  * struct ice_ptp - data used for integrating with CONFIG_PTP_1588_CLOCK
+ * @tx_interrupt_mode: the TX interrupt mode for the PTP clock
  * @port: data for the PHY port initialization procedure
+ * @ports_owner: data for the auxiliary driver owner
  * @work: delayed work function for periodic tasks
- * @extts_work: work function for handling external Tx timestamps
  * @cached_phc_time: a cached copy of the PHC time for timestamp extension
  * @cached_phc_jiffies: jiffies when cached_phc_time was last updated
  * @ext_ts_chan: the external timestamp channel in use
@@ -188,9 +225,10 @@ struct ice_ptp_port {
  * @late_cached_phc_updates: number of times cached PHC update is late
  */
 struct ice_ptp {
+	enum ice_ptp_tx_interrupt tx_interrupt_mode;
 	struct ice_ptp_port port;
+	struct ice_ptp_port_owner ports_owner;
 	struct kthread_delayed_work work;
-	struct kthread_work extts_work;
 	u64 cached_phc_time;
 	unsigned long cached_phc_jiffies;
 	u8 ext_ts_chan;
@@ -250,14 +288,15 @@ struct ice_ptp {
 #define ETH_GLTSYN_ENA(_i)		(0x03000348 + ((_i) * 4))
 
 #if IS_ENABLED(CONFIG_PTP_1588_CLOCK)
+int ice_ptp_clock_index(struct ice_pf *pf);
 struct ice_pf;
 int ice_ptp_set_ts_config(struct ice_pf *pf, struct ifreq *ifr);
 int ice_ptp_get_ts_config(struct ice_pf *pf, struct ifreq *ifr);
-void ice_ptp_cfg_timestamp(struct ice_pf *pf, bool ena);
-int ice_get_ptp_clock_index(struct ice_pf *pf);
+void ice_ptp_restore_timestamp_mode(struct ice_pf *pf);
 
+void ice_ptp_extts_event(struct ice_pf *pf);
 s8 ice_ptp_request_ts(struct ice_ptp_tx *tx, struct sk_buff *skb);
-bool ice_ptp_process_ts(struct ice_pf *pf);
+enum ice_tx_tstamp_work ice_ptp_process_ts(struct ice_pf *pf);
 
 void
 ice_ptp_rx_hwtstamp(struct ice_rx_ring *rx_ring,
@@ -278,12 +317,8 @@ static inline int ice_ptp_get_ts_config(struct ice_pf *pf, struct ifreq *ifr)
 	return -EOPNOTSUPP;
 }
 
-static inline void ice_ptp_cfg_timestamp(struct ice_pf *pf, bool ena) { }
-static inline int ice_get_ptp_clock_index(struct ice_pf *pf)
-{
-	return -1;
-}
-
+static inline void ice_ptp_restore_timestamp_mode(struct ice_pf *pf) { }
+static inline void ice_ptp_extts_event(struct ice_pf *pf) { }
 static inline s8
 ice_ptp_request_ts(struct ice_ptp_tx *tx, struct sk_buff *skb)
 {
@@ -303,6 +338,11 @@ static inline void ice_ptp_init(struct ice_pf *pf) { }
 static inline void ice_ptp_release(struct ice_pf *pf) { }
 static inline void ice_ptp_link_change(struct ice_pf *pf, u8 port, bool linkup)
 {
+}
+
+static inline int ice_ptp_clock_index(struct ice_pf *pf)
+{
+	return -1;
 }
 #endif /* IS_ENABLED(CONFIG_PTP_1588_CLOCK) */
 #endif /* _ICE_PTP_H_ */

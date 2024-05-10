@@ -797,6 +797,16 @@ static int fl_set_key_port_range(struct nlattr **tb, struct fl_flow_key *key,
 		       TCA_FLOWER_KEY_PORT_SRC_MAX, &mask->tp_range.tp_max.src,
 		       TCA_FLOWER_UNSPEC, sizeof(key->tp_range.tp_max.src));
 
+	if (mask->tp_range.tp_min.dst != mask->tp_range.tp_max.dst) {
+		NL_SET_ERR_MSG(extack,
+			       "Both min and max destination ports must be specified");
+		return -EINVAL;
+	}
+	if (mask->tp_range.tp_min.src != mask->tp_range.tp_max.src) {
+		NL_SET_ERR_MSG(extack,
+			       "Both min and max source ports must be specified");
+		return -EINVAL;
+	}
 	if (mask->tp_range.tp_min.dst && mask->tp_range.tp_max.dst &&
 	    ntohs(key->tp_range.tp_max.dst) <=
 	    ntohs(key->tp_range.tp_min.dst)) {
@@ -2013,45 +2023,6 @@ errout_cleanup:
 	return ret;
 }
 
-static int fl_set_parms(struct net *net, struct tcf_proto *tp,
-			struct cls_fl_filter *f, struct fl_flow_mask *mask,
-			unsigned long base, struct nlattr **tb,
-			struct nlattr *est,
-			struct fl_flow_tmplt *tmplt,
-			u32 flags, u32 fl_flags,
-			struct netlink_ext_ack *extack)
-{
-	int err;
-
-	err = tcf_exts_validate_ex(net, tp, tb, est, &f->exts, flags,
-				   fl_flags, extack);
-	if (err < 0)
-		return err;
-
-	if (tb[TCA_FLOWER_CLASSID]) {
-		f->res.classid = nla_get_u32(tb[TCA_FLOWER_CLASSID]);
-		if (flags & TCA_ACT_FLAGS_NO_RTNL)
-			rtnl_lock();
-		tcf_bind_filter(tp, &f->res, base);
-		if (flags & TCA_ACT_FLAGS_NO_RTNL)
-			rtnl_unlock();
-	}
-
-	err = fl_set_key(net, tb, &f->key, &mask->key, extack);
-	if (err)
-		return err;
-
-	fl_mask_update_range(mask);
-	fl_set_masked_key(&f->mkey, &f->key, mask);
-
-	if (!fl_mask_fits_tmplt(tmplt, mask)) {
-		NL_SET_ERR_MSG_MOD(extack, "Mask does not fit the template");
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
 static int fl_ht_insert_unique(struct cls_fl_filter *fnew,
 			       struct cls_fl_filter *fold,
 			       bool *in_ht)
@@ -2083,6 +2054,7 @@ static int fl_change(struct net *net, struct sk_buff *in_skb,
 	struct cls_fl_head *head = fl_head_dereference(tp);
 	bool rtnl_held = !(flags & TCA_ACT_FLAGS_NO_RTNL);
 	struct cls_fl_filter *fold = *arg;
+	bool bound_to_filter = false;
 	struct cls_fl_filter *fnew;
 	struct fl_flow_mask *mask;
 	struct nlattr **tb;
@@ -2167,15 +2139,38 @@ static int fl_change(struct net *net, struct sk_buff *in_skb,
 	if (err < 0)
 		goto errout_idr;
 
-	err = fl_set_parms(net, tp, fnew, mask, base, tb, tca[TCA_RATE],
-			   tp->chain->tmplt_priv, flags, fnew->flags,
-			   extack);
-	if (err)
+	err = tcf_exts_validate_ex(net, tp, tb, tca[TCA_RATE],
+				   &fnew->exts, flags, fnew->flags,
+				   extack);
+	if (err < 0)
 		goto errout_idr;
+
+	if (tb[TCA_FLOWER_CLASSID]) {
+		fnew->res.classid = nla_get_u32(tb[TCA_FLOWER_CLASSID]);
+		if (flags & TCA_ACT_FLAGS_NO_RTNL)
+			rtnl_lock();
+		tcf_bind_filter(tp, &fnew->res, base);
+		if (flags & TCA_ACT_FLAGS_NO_RTNL)
+			rtnl_unlock();
+		bound_to_filter = true;
+	}
+
+	err = fl_set_key(net, tb, &fnew->key, &mask->key, extack);
+	if (err)
+		goto unbind_filter;
+
+	fl_mask_update_range(mask);
+	fl_set_masked_key(&fnew->mkey, &fnew->key, mask);
+
+	if (!fl_mask_fits_tmplt(tp->chain->tmplt_priv, mask)) {
+		NL_SET_ERR_MSG_MOD(extack, "Mask does not fit the template");
+		err = -EINVAL;
+		goto unbind_filter;
+	}
 
 	err = fl_check_assign_mask(head, fnew, fold, mask);
 	if (err)
-		goto errout_idr;
+		goto unbind_filter;
 
 	err = fl_ht_insert_unique(fnew, fold, &in_ht);
 	if (err)
@@ -2266,6 +2261,16 @@ errout_hw:
 				       fnew->mask->filter_ht_params);
 errout_mask:
 	fl_mask_put(head, fnew->mask);
+
+unbind_filter:
+	if (bound_to_filter) {
+		if (flags & TCA_ACT_FLAGS_NO_RTNL)
+			rtnl_lock();
+		tcf_unbind_filter(tp, &fnew->res);
+		if (flags & TCA_ACT_FLAGS_NO_RTNL)
+			rtnl_unlock();
+	}
+
 errout_idr:
 	if (!fold)
 		idr_remove(&head->handle_idr, fnew->handle);

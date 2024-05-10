@@ -1173,6 +1173,13 @@ extern int lease_modify(struct file_lock *, int, struct list_head *);
 struct files_struct;
 extern void show_fd_locks(struct seq_file *f,
 			 struct file *filp, struct files_struct *files);
+
+static inline struct file_lock_context *
+locks_inode_context(const struct inode *inode)
+{
+	return smp_load_acquire(&inode->i_flctx);
+}
+
 #else /* !CONFIG_FILE_LOCKING */
 static inline int fcntl_getlk(struct file *file, unsigned int cmd,
 			      struct flock __user *user)
@@ -1308,6 +1315,13 @@ static inline int lease_modify(struct file_lock *fl, int arg,
 struct files_struct;
 static inline void show_fd_locks(struct seq_file *f,
 			struct file *filp, struct files_struct *files) {}
+
+static inline struct file_lock_context *
+locks_inode_context(const struct inode *inode)
+{
+	return NULL;
+}
+
 #endif /* !CONFIG_FILE_LOCKING */
 
 static inline struct inode *file_inode(const struct file *f)
@@ -1459,6 +1473,11 @@ struct super_block {
 	char			s_id[32];	/* Informational name */
 	uuid_t			s_uuid;		/* UUID */
 
+	/*
+	 * Keep s_fs_info, s_time_gran, s_fsnotify_mask, and
+	 * s_fsnotify_marks together for cache efficiency. They are frequently
+	 * accessed and rarely modified.
+	 */
 	void 			*s_fs_info;	/* Filesystem private info */
 	unsigned int		s_max_links;
 	fmode_t			s_mode;
@@ -1467,11 +1486,19 @@ struct super_block {
 	   Cannot be worse than a second */
 	u32		   s_time_gran;
 
+#ifdef CONFIG_FSNOTIFY
+	RH_KABI_REPLACE(struct mutex s_vfs_rename_mutex,
+		struct {
+			__u32 s_fsnotify_mask;
+			struct fsnotify_mark_connector __rcu *s_fsnotify_marks;
+		})
+#else
 	/*
 	 * The next field is for VFS *only*. No filesystems have any business
 	 * even looking at it. You had been warned.
 	 */
 	struct mutex s_vfs_rename_mutex;	/* Kludge */
+#endif
 
 	/*
 	 * Filesystem subtype.  If non-empty the filesystem type field
@@ -1549,6 +1576,9 @@ struct super_block {
 	/* Time limits for c/m/atime in seconds */
 	RH_KABI_EXTEND(time64_t	s_time_min)
 	RH_KABI_EXTEND(time64_t	s_time_max)
+#ifdef CONFIG_FSNOTIFY
+	RH_KABI_EXTEND(struct mutex s_vfs_rename_mutex)
+#endif
 } __randomize_layout;
 
 /* Helper functions so that in most cases filesystems will

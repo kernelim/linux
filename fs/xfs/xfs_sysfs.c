@@ -67,7 +67,7 @@ static struct attribute *xfs_mp_attrs[] = {
 	NULL,
 };
 
-struct kobj_type xfs_mp_ktype = {
+const struct kobj_type xfs_mp_ktype = {
 	.release = xfs_sysfs_release,
 	.sysfs_ops = &xfs_sysfs_ops,
 	.default_attrs = xfs_mp_attrs,
@@ -104,7 +104,7 @@ bug_on_assert_show(
 	struct kobject		*kobject,
 	char			*buf)
 {
-	return snprintf(buf, PAGE_SIZE, "%d\n", xfs_globals.bug_on_assert ? 1 : 0);
+	return sysfs_emit(buf, "%d\n", xfs_globals.bug_on_assert);
 }
 XFS_SYSFS_ATTR_RW(bug_on_assert);
 
@@ -134,7 +134,7 @@ log_recovery_delay_show(
 	struct kobject	*kobject,
 	char		*buf)
 {
-	return snprintf(buf, PAGE_SIZE, "%d\n", xfs_globals.log_recovery_delay);
+	return sysfs_emit(buf, "%d\n", xfs_globals.log_recovery_delay);
 }
 XFS_SYSFS_ATTR_RW(log_recovery_delay);
 
@@ -164,7 +164,7 @@ mount_delay_show(
 	struct kobject	*kobject,
 	char		*buf)
 {
-	return snprintf(buf, PAGE_SIZE, "%d\n", xfs_globals.mount_delay);
+	return sysfs_emit(buf, "%d\n", xfs_globals.mount_delay);
 }
 XFS_SYSFS_ATTR_RW(mount_delay);
 
@@ -187,7 +187,7 @@ always_cow_show(
 	struct kobject	*kobject,
 	char		*buf)
 {
-	return snprintf(buf, PAGE_SIZE, "%d\n", xfs_globals.always_cow);
+	return sysfs_emit(buf, "%d\n", xfs_globals.always_cow);
 }
 XFS_SYSFS_ATTR_RW(always_cow);
 
@@ -223,7 +223,7 @@ pwork_threads_show(
 	struct kobject	*kobject,
 	char		*buf)
 {
-	return snprintf(buf, PAGE_SIZE, "%d\n", xfs_globals.pwork_threads);
+	return sysfs_emit(buf, "%d\n", xfs_globals.pwork_threads);
 }
 XFS_SYSFS_ATTR_RW(pwork_threads);
 #endif /* DEBUG */
@@ -239,7 +239,7 @@ static struct attribute *xfs_dbg_attrs[] = {
 	NULL,
 };
 
-struct kobj_type xfs_dbg_ktype = {
+const struct kobj_type xfs_dbg_ktype = {
 	.release = xfs_sysfs_release,
 	.sysfs_ops = &xfs_sysfs_ops,
 	.default_attrs = xfs_dbg_attrs,
@@ -296,7 +296,7 @@ static struct attribute *xfs_stats_attrs[] = {
 	NULL,
 };
 
-struct kobj_type xfs_stats_ktype = {
+const struct kobj_type xfs_stats_ktype = {
 	.release = xfs_sysfs_release,
 	.sysfs_ops = &xfs_sysfs_ops,
 	.default_attrs = xfs_stats_attrs,
@@ -326,7 +326,7 @@ log_head_lsn_show(
 	block = log->l_curr_block;
 	spin_unlock(&log->l_icloglock);
 
-	return snprintf(buf, PAGE_SIZE, "%d:%d\n", cycle, block);
+	return sysfs_emit(buf, "%d:%d\n", cycle, block);
 }
 XFS_SYSFS_ATTR_RO(log_head_lsn);
 
@@ -340,7 +340,7 @@ log_tail_lsn_show(
 	struct xlog *log = to_xlog(kobject);
 
 	xlog_crack_atomic_lsn(&log->l_tail_lsn, &cycle, &block);
-	return snprintf(buf, PAGE_SIZE, "%d:%d\n", cycle, block);
+	return sysfs_emit(buf, "%d:%d\n", cycle, block);
 }
 XFS_SYSFS_ATTR_RO(log_tail_lsn);
 
@@ -355,7 +355,7 @@ reserve_grant_head_show(
 	struct xlog *log = to_xlog(kobject);
 
 	xlog_crack_grant_head(&log->l_reserve_head.grant, &cycle, &bytes);
-	return snprintf(buf, PAGE_SIZE, "%d:%d\n", cycle, bytes);
+	return sysfs_emit(buf, "%d:%d\n", cycle, bytes);
 }
 XFS_SYSFS_ATTR_RO(reserve_grant_head);
 
@@ -369,7 +369,7 @@ write_grant_head_show(
 	struct xlog *log = to_xlog(kobject);
 
 	xlog_crack_grant_head(&log->l_write_head.grant, &cycle, &bytes);
-	return snprintf(buf, PAGE_SIZE, "%d:%d\n", cycle, bytes);
+	return sysfs_emit(buf, "%d:%d\n", cycle, bytes);
 }
 XFS_SYSFS_ATTR_RO(write_grant_head);
 
@@ -381,7 +381,7 @@ static struct attribute *xfs_log_attrs[] = {
 	NULL,
 };
 
-struct kobj_type xfs_log_ktype = {
+const struct kobj_type xfs_log_ktype = {
 	.release = xfs_sysfs_release,
 	.sysfs_ops = &xfs_sysfs_ops,
 	.default_attrs = xfs_log_attrs,
@@ -424,7 +424,7 @@ max_retries_show(
 	else
 		retries = cfg->max_retries;
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", retries);
+	return sysfs_emit(buf, "%d\n", retries);
 }
 
 static ssize_t
@@ -465,7 +465,7 @@ retry_timeout_seconds_show(
 	else
 		timeout = jiffies_to_msecs(cfg->retry_timeout) / MSEC_PER_SEC;
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", timeout);
+	return sysfs_emit(buf, "%d\n", timeout);
 }
 
 static ssize_t
@@ -503,7 +503,7 @@ fail_at_unmount_show(
 {
 	struct xfs_mount	*mp = err_to_mp(kobject);
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", mp->m_fail_unmount);
+	return sysfs_emit(buf, "%d\n", mp->m_fail_unmount);
 }
 
 static ssize_t
@@ -535,13 +535,13 @@ static struct attribute *xfs_error_attrs[] = {
 };
 
 
-static struct kobj_type xfs_error_cfg_ktype = {
+static const struct kobj_type xfs_error_cfg_ktype = {
 	.release = xfs_sysfs_release,
 	.sysfs_ops = &xfs_sysfs_ops,
 	.default_attrs = xfs_error_attrs,
 };
 
-static struct kobj_type xfs_error_ktype = {
+static const struct kobj_type xfs_error_ktype = {
 	.release = xfs_sysfs_release,
 	.sysfs_ops = &xfs_sysfs_ops,
 };

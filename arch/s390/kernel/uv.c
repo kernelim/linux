@@ -109,7 +109,7 @@ void adjust_to_uv_max(unsigned long *vmax)
  * Requests the Ultravisor to pin the page in the shared state. This will
  * cause an intercept when the guest attempts to unshare the pinned page.
  */
-static int uv_pin_shared(unsigned long paddr)
+int uv_pin_shared(unsigned long paddr)
 {
 	struct uv_cb_cfs uvcb = {
 		.header.cmd = UVC_CMD_PIN_PAGE_SHARED,
@@ -121,6 +121,7 @@ static int uv_pin_shared(unsigned long paddr)
 		return -EINVAL;
 	return 0;
 }
+EXPORT_SYMBOL_GPL(uv_pin_shared);
 
 /*
  * Requests the Ultravisor to destroy a guest page and make it

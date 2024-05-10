@@ -111,6 +111,7 @@ static inline void efifb_setup_from_dmi(struct screen_info *si, const char *opt)
 }
 
 #define EFI_ALLOC_ALIGN		SZ_64K
+#define EFI_ALLOC_LIMIT		((1UL << 48) - 1)
 
 /*
  * On ARM systems, virtually remapped UEFI runtime services are set up in two

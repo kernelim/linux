@@ -59,6 +59,12 @@
 #define FAN_MARK_IGNORED_MASK	0x00000020
 #define FAN_MARK_IGNORED_SURV_MODIFY	0x00000040
 #define FAN_MARK_FLUSH		0x00000080
+/* FAN_MARK_FILESYSTEM is	0x00000100 */
+
+/* These are NOT bitwise flags.  Both bits can be used togther.  */
+#define FAN_MARK_INODE		0x00000000
+#define FAN_MARK_MOUNT		0x00000010
+#define FAN_MARK_FILESYSTEM	0x00000100
 
 /* These are NOT bitwise flags.  Both bits can be used togther.  */
 #define FAN_MARK_INODE		0x00000000
@@ -69,10 +75,10 @@
 				 FAN_MARK_REMOVE |\
 				 FAN_MARK_DONT_FOLLOW |\
 				 FAN_MARK_ONLYDIR |\
-				 FAN_MARK_MOUNT |\
 				 FAN_MARK_IGNORED_MASK |\
 				 FAN_MARK_IGNORED_SURV_MODIFY |\
-				 FAN_MARK_FLUSH)
+				 FAN_MARK_FLUSH|\
+				 FAN_MARK_TYPE_MASK)
 
 /* Deprecated - do not use this in programs and do not add new flags here! */
 #define FAN_ALL_EVENTS (FAN_ACCESS |\

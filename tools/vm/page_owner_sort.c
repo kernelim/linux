@@ -4,8 +4,9 @@
  *
  * Example use:
  * cat /sys/kernel/debug/page_owner > page_owner_full.txt
- * grep -v ^PFN page_owner_full.txt > page_owner.txt
- * ./sort page_owner.txt sorted_page_owner.txt
+ * ./page_owner_sort page_owner_full.txt sorted_page_owner.txt
+ *
+ * See Documentation/vm/page_owner.rst
 */
 
 #include <stdio.h>
@@ -15,6 +16,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
+#include <regex.h>
 
 struct block_list {
 	char *txt;
@@ -23,6 +25,7 @@ struct block_list {
 };
 
 
+static regex_t ts_nsec_pattern;
 static struct block_list *list;
 static int list_size;
 static int max_size;
@@ -36,6 +39,8 @@ int read_block(char *buf, int buf_size, FILE *fin)
 	while (buf_end - curr > 1 && fgets(curr, buf_end - curr, fin)) {
 		if (*curr == '\n') /* empty line */
 			return curr - buf;
+		if (!strncmp(curr, "PFN", 3))
+			continue;
 		curr += strlen(curr);
 	}
 
@@ -56,22 +61,43 @@ static int compare_num(const void *p1, const void *p2)
 	return l2->num - l1->num;
 }
 
+static int remove_pattern(regex_t *pattern, char *buf, int len)
+{
+	regmatch_t pmatch[2];
+	int err;
+
+	err = regexec(pattern, buf, 2, pmatch, REG_NOTBOL);
+	if (err != 0 || pmatch[1].rm_so == -1)
+	return len;
+
+	memcpy(buf + pmatch[1].rm_so,
+		buf + pmatch[1].rm_eo, len - pmatch[1].rm_eo);
+
+	return len - (pmatch[1].rm_eo - pmatch[1].rm_so);
+}
+
+static void check_regcomp(regex_t *pattern, const char *regex)
+{
+	int err;
+
+	err = regcomp(pattern, regex, REG_EXTENDED | REG_NEWLINE);
+	if (err != 0 || pattern->re_nsub != 1) {
+		printf("Invalid pattern %s code %d\n", regex, err);
+		exit(1);
+	}
+}
+
 static void add_list(char *buf, int len)
 {
-	if (list_size != 0 &&
-	    len == list[list_size-1].len &&
-	    memcmp(buf, list[list_size-1].txt, len) == 0) {
-		list[list_size-1].num++;
-		return;
-	}
 	if (list_size == max_size) {
 		printf("max_size too small??\n");
 		exit(1);
 	}
 	list[list_size].txt = malloc(len+1);
-	list[list_size].len = len;
 	list[list_size].num = 1;
 	memcpy(list[list_size].txt, buf, len);
+	len = remove_pattern(&ts_nsec_pattern, list[list_size].txt, len);
+	list[list_size].len = len;
 	list[list_size].txt[len] = 0;
 	list_size++;
 	if (list_size % 1000 == 0) {
@@ -103,6 +129,8 @@ int main(int argc, char **argv)
 		perror("open: ");
 		exit(1);
 	}
+
+	check_regcomp(&ts_nsec_pattern, "ts\\s*([0-9]*)\\s*ns");
 
 	fstat(fileno(fin), &st);
 	max_size = st.st_size / 100; /* hack ... */
@@ -146,5 +174,6 @@ int main(int argc, char **argv)
 	for (i = 0; i < count; i++)
 		fprintf(fout, "%d times:\n%s\n", list2[i].num, list2[i].txt);
 
+	regfree(&ts_nsec_pattern);
 	return 0;
 }

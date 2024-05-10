@@ -472,6 +472,12 @@ efi_status_t efi_parse_options(char const *cmdline)
 	if (str == cmdline || (str && str > cmdline && *(str - 1) == ' '))
 		__quiet = 1;
 
+	if (IS_ENABLED(CONFIG_X86_64)) {
+		str = strstr(cmdline, "no5lvl");
+		if (str == cmdline || (str && str > cmdline && *(str - 1) == ' '))
+			efi_no5lvl = true;
+	}
+
 	/*
 	 * If no EFI parameters were specified on the cmdline we've got
 	 * nothing to do.
@@ -494,7 +500,7 @@ efi_status_t efi_parse_options(char const *cmdline)
 		}
 
 		if (IS_ENABLED(CONFIG_EFI_SOFT_RESERVE) &&
-		    !strncmp(str, "nosoftreserve", 7)) {
+		    !strncmp(str, "nosoftreserve", 13)) {
 			str += strlen("nosoftreserve");
 			efi_nosoftreserve = 1;
 		}

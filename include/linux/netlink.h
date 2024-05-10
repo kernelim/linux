@@ -262,6 +262,7 @@ struct netlink_dump_control {
 	int (*start)(struct netlink_callback *);
 	int (*dump)(struct sk_buff *skb, struct netlink_callback *);
 	int (*done)(struct netlink_callback *);
+	struct netlink_ext_ack *extack;
 	void *data;
 	struct module *module;
 	u16 min_dump_alloc;

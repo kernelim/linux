@@ -79,6 +79,7 @@
 #define MMIO_INTCAPXT_EVT_OFFSET	0x0170
 #define MMIO_INTCAPXT_PPR_OFFSET	0x0178
 #define MMIO_INTCAPXT_GALOG_OFFSET	0x0180
+#define MMIO_EXT_FEATURES2	0x01A0
 #define MMIO_CMD_HEAD_OFFSET	0x2000
 #define MMIO_CMD_TAIL_OFFSET	0x2008
 #define MMIO_EVT_HEAD_OFFSET	0x2010
@@ -153,27 +154,28 @@
 #define EVENT_FLAGS_SHIFT	0x10
 
 /* feature control bits */
-#define CONTROL_IOMMU_EN        0x00ULL
-#define CONTROL_HT_TUN_EN       0x01ULL
-#define CONTROL_EVT_LOG_EN      0x02ULL
-#define CONTROL_EVT_INT_EN      0x03ULL
-#define CONTROL_COMWAIT_EN      0x04ULL
-#define CONTROL_INV_TIMEOUT	0x05ULL
-#define CONTROL_PASSPW_EN       0x08ULL
-#define CONTROL_RESPASSPW_EN    0x09ULL
-#define CONTROL_COHERENT_EN     0x0aULL
-#define CONTROL_ISOC_EN         0x0bULL
-#define CONTROL_CMDBUF_EN       0x0cULL
-#define CONTROL_PPRLOG_EN       0x0dULL
-#define CONTROL_PPRINT_EN       0x0eULL
-#define CONTROL_PPR_EN          0x0fULL
-#define CONTROL_GT_EN           0x10ULL
-#define CONTROL_GA_EN           0x11ULL
-#define CONTROL_GAM_EN          0x19ULL
-#define CONTROL_GALOG_EN        0x1CULL
-#define CONTROL_GAINT_EN        0x1DULL
-#define CONTROL_XT_EN           0x32ULL
-#define CONTROL_INTCAPXT_EN     0x33ULL
+#define CONTROL_IOMMU_EN	0
+#define CONTROL_HT_TUN_EN	1
+#define CONTROL_EVT_LOG_EN	2
+#define CONTROL_EVT_INT_EN	3
+#define CONTROL_COMWAIT_EN	4
+#define CONTROL_INV_TIMEOUT	5
+#define CONTROL_PASSPW_EN	8
+#define CONTROL_RESPASSPW_EN	9
+#define CONTROL_COHERENT_EN	10
+#define CONTROL_ISOC_EN		11
+#define CONTROL_CMDBUF_EN	12
+#define CONTROL_PPRLOG_EN	13
+#define CONTROL_PPRINT_EN	14
+#define CONTROL_PPR_EN		15
+#define CONTROL_GT_EN		16
+#define CONTROL_GA_EN		17
+#define CONTROL_GAM_EN		25
+#define CONTROL_GALOG_EN	28
+#define CONTROL_GAINT_EN	29
+#define CONTROL_XT_EN		50
+#define CONTROL_INTCAPXT_EN	51
+#define CONTROL_IRTCACHEDIS	59
 
 #define CTRL_INV_TO_MASK	(7 << CONTROL_INV_TIMEOUT)
 #define CTRL_INV_TO_NONE	0
@@ -280,7 +282,7 @@
 #define AMD_IOMMU_PGSIZES	((~0xFFFUL) & ~(2ULL << 38))
 
 /* Bit value definition for dte irq remapping fields*/
-#define DTE_IRQ_PHYS_ADDR_MASK	(((1ULL << 45)-1) << 6)
+#define DTE_IRQ_PHYS_ADDR_MASK		GENMASK_ULL(51, 6)
 #define DTE_IRQ_REMAP_INTCTL_MASK	(0x3ULL << 60)
 #define DTE_IRQ_REMAP_INTCTL    (2ULL << 60)
 #define DTE_IRQ_REMAP_ENABLE    1ULL
@@ -543,6 +545,7 @@ struct protection_domain {
 	spinlock_t lock;	/* mostly used to lock the page table*/
 	u16 id;			/* the domain id written to the device table */
 	int glx;		/* Number of levels for GCR3 table */
+	int nid;		/* Node ID */
 	u64 *gcr3_tbl;		/* Guest CR3 table */
 	unsigned long flags;	/* flags to find out type of domain */
 	unsigned dev_cnt;	/* devices assigned to this domain */
@@ -655,6 +658,9 @@ struct amd_iommu {
 	/* Extended features */
 	u64 features;
 
+	/* Extended features 2 */
+	u64 features2;
+
 	/* IOMMUv2 */
 	bool is_iommu_v2;
 
@@ -699,6 +705,9 @@ struct amd_iommu {
 	/* if one, we need to send a completion wait command */
 	bool need_sync;
 
+	/* true if disable irte caching */
+	bool irtcachedis_enabled;
+
 	/* Handle for IOMMU core code */
 	struct iommu_device iommu;
 
@@ -732,7 +741,7 @@ struct amd_iommu {
 
 	u32 flags;
 	volatile u64 *cmd_sem;
-	u64 cmd_sem_val;
+	atomic64_t cmd_sem_val;
 
 #ifdef CONFIG_AMD_IOMMU_DEBUGFS
 	/* DebugFS Info */
@@ -985,7 +994,6 @@ struct amd_ir_data {
 	struct irq_2_irte irq_2_irte;
 	struct msi_msg msi_entry;
 	void *entry;    /* Pointer to union irte or struct irte_ga */
-	void *ref;      /* Pointer to the actual irte */
 
 	/**
 	 * Store information for activate/de-activate
@@ -993,8 +1001,8 @@ struct amd_ir_data {
 	 */
 	struct irq_cfg *cfg;
 	int ga_vector;
-	int ga_root_ptr;
-	int ga_tag;
+	u64 ga_root_ptr;
+	u32 ga_tag;
 };
 
 struct amd_irte_ops {

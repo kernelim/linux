@@ -164,25 +164,20 @@ static ssize_t ioctlmask_show(struct device *dev,
 			      struct device_attribute *attr,
 			      char *buf)
 {
-	int i, rc;
 	struct zcdn_device *zcdndev = to_zcdn_dev(dev);
+	int i, n;
 
 	if (mutex_lock_interruptible(&ap_perms_mutex))
 		return -ERESTARTSYS;
 
-	buf[0] = '0';
-	buf[1] = 'x';
+	n = sysfs_emit(buf, "0x");
 	for (i = 0; i < sizeof(zcdndev->perms.ioctlm) / sizeof(long); i++)
-		snprintf(buf + 2 + 2 * i * sizeof(long),
-			 PAGE_SIZE - 2 - 2 * i * sizeof(long),
-			 "%016lx", zcdndev->perms.ioctlm[i]);
-	buf[2 + 2 * i * sizeof(long)] = '\n';
-	buf[2 + 2 * i * sizeof(long) + 1] = '\0';
-	rc = 2 + 2 * i * sizeof(long) + 1;
+		n += sysfs_emit_at(buf, n, "%016lx", zcdndev->perms.ioctlm[i]);
+	n += sysfs_emit_at(buf, n, "\n");
 
 	mutex_unlock(&ap_perms_mutex);
 
-	return rc;
+	return n;
 }
 
 static ssize_t ioctlmask_store(struct device *dev,
@@ -206,25 +201,20 @@ static ssize_t apmask_show(struct device *dev,
 			   struct device_attribute *attr,
 			   char *buf)
 {
-	int i, rc;
 	struct zcdn_device *zcdndev = to_zcdn_dev(dev);
+	int i, n;
 
 	if (mutex_lock_interruptible(&ap_perms_mutex))
 		return -ERESTARTSYS;
 
-	buf[0] = '0';
-	buf[1] = 'x';
+	n = sysfs_emit(buf, "0x");
 	for (i = 0; i < sizeof(zcdndev->perms.apm) / sizeof(long); i++)
-		snprintf(buf + 2 + 2 * i * sizeof(long),
-			 PAGE_SIZE - 2 - 2 * i * sizeof(long),
-			 "%016lx", zcdndev->perms.apm[i]);
-	buf[2 + 2 * i * sizeof(long)] = '\n';
-	buf[2 + 2 * i * sizeof(long) + 1] = '\0';
-	rc = 2 + 2 * i * sizeof(long) + 1;
+		n += sysfs_emit_at(buf, n, "%016lx", zcdndev->perms.apm[i]);
+	n += sysfs_emit_at(buf, n, "\n");
 
 	mutex_unlock(&ap_perms_mutex);
 
-	return rc;
+	return n;
 }
 
 static ssize_t apmask_store(struct device *dev,
@@ -248,25 +238,20 @@ static ssize_t aqmask_show(struct device *dev,
 			   struct device_attribute *attr,
 			   char *buf)
 {
-	int i, rc;
 	struct zcdn_device *zcdndev = to_zcdn_dev(dev);
+	int i, n;
 
 	if (mutex_lock_interruptible(&ap_perms_mutex))
 		return -ERESTARTSYS;
 
-	buf[0] = '0';
-	buf[1] = 'x';
+	n = sysfs_emit(buf, "0x");
 	for (i = 0; i < sizeof(zcdndev->perms.aqm) / sizeof(long); i++)
-		snprintf(buf + 2 + 2 * i * sizeof(long),
-			 PAGE_SIZE - 2 - 2 * i * sizeof(long),
-			 "%016lx", zcdndev->perms.aqm[i]);
-	buf[2 + 2 * i * sizeof(long)] = '\n';
-	buf[2 + 2 * i * sizeof(long) + 1] = '\0';
-	rc = 2 + 2 * i * sizeof(long) + 1;
+		n += sysfs_emit_at(buf, n, "%016lx", zcdndev->perms.aqm[i]);
+	n += sysfs_emit_at(buf, n, "\n");
 
 	mutex_unlock(&ap_perms_mutex);
 
-	return rc;
+	return n;
 }
 
 static ssize_t aqmask_store(struct device *dev,
@@ -286,10 +271,48 @@ static ssize_t aqmask_store(struct device *dev,
 
 static DEVICE_ATTR_RW(aqmask);
 
+static ssize_t admask_show(struct device *dev,
+			   struct device_attribute *attr,
+			   char *buf)
+{
+	struct zcdn_device *zcdndev = to_zcdn_dev(dev);
+	int i, n;
+
+	if (mutex_lock_interruptible(&ap_perms_mutex))
+		return -ERESTARTSYS;
+
+	n = sysfs_emit(buf, "0x");
+	for (i = 0; i < sizeof(zcdndev->perms.adm) / sizeof(long); i++)
+		n += sysfs_emit_at(buf, n, "%016lx", zcdndev->perms.adm[i]);
+	n += sysfs_emit_at(buf, n, "\n");
+
+	mutex_unlock(&ap_perms_mutex);
+
+	return n;
+}
+
+static ssize_t admask_store(struct device *dev,
+			    struct device_attribute *attr,
+			    const char *buf, size_t count)
+{
+	int rc;
+	struct zcdn_device *zcdndev = to_zcdn_dev(dev);
+
+	rc = ap_parse_mask_str(buf, zcdndev->perms.adm,
+			       AP_DOMAINS, &ap_perms_mutex);
+	if (rc)
+		return rc;
+
+	return count;
+}
+
+static DEVICE_ATTR_RW(admask);
+
 static struct attribute *zcdn_dev_attrs[] = {
 	&dev_attr_ioctlmask.attr,
 	&dev_attr_apmask.attr,
 	&dev_attr_aqmask.attr,
+	&dev_attr_admask.attr,
 	NULL
 };
 
@@ -882,16 +905,26 @@ static long _zcrypt_send_cprb(bool userspace, struct ap_perms *perms,
 	if (rc)
 		goto out;
 
+	tdom = *domain;
+	if (perms != &ap_perms && tdom < AP_DOMAINS) {
+		if (ap_msg.flags & AP_MSG_FLAG_ADMIN) {
+			if (!test_bit_inv(tdom, perms->adm)) {
+				rc = -ENODEV;
+				goto out;
+			}
+		} else if ((ap_msg.flags & AP_MSG_FLAG_USAGE) == 0) {
+			rc = -EOPNOTSUPP;
+			goto out;
+		}
+	}
 	/*
 	 * If a valid target domain is set and this domain is NOT a usage
-	 * domain but a control only domain, use the default domain as target.
+	 * domain but a control only domain, autoselect target domain.
 	 */
-	tdom = *domain;
 	if (tdom < AP_DOMAINS &&
 	    !ap_test_config_usage_domain(tdom) &&
-	    ap_test_config_ctrl_domain(tdom) &&
-	    ap_domain_index >= 0)
-		tdom = ap_domain_index;
+	    ap_test_config_ctrl_domain(tdom))
+		tdom = AUTOSEL_DOM;
 
 	pref_zc = NULL;
 	pref_zq = NULL;
@@ -1064,6 +1097,18 @@ static long _zcrypt_send_ep11_cprb(bool userspace, struct ap_perms *perms,
 	rc = prep_ep11_ap_msg(userspace, xcrb, &ap_msg, &func_code, &domain);
 	if (rc)
 		goto out_free;
+
+	if (perms != &ap_perms && domain < AUTOSEL_DOM) {
+		if (ap_msg.flags & AP_MSG_FLAG_ADMIN) {
+			if (!test_bit_inv(domain, perms->adm)) {
+				rc = -ENODEV;
+				goto out_free;
+			}
+		} else if ((ap_msg.flags & AP_MSG_FLAG_USAGE) == 0) {
+			rc = -EOPNOTSUPP;
+			goto out_free;
+		}
+	}
 
 	pref_zc = NULL;
 	pref_zq = NULL;

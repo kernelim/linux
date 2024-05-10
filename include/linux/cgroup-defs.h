@@ -232,7 +232,7 @@ struct css_set {
 	struct list_head task_iters;
 
 	/*
-	 * On the default hierarhcy, ->subsys[ssid] may point to a css
+	 * On the default hierarchy, ->subsys[ssid] may point to a css
 	 * attached to an ancestor instead of the cgroup this css_set is
 	 * associated with.  The following node is anchored at
 	 * ->subsys[ssid]->cgroup->e_csets[ssid] and provides a way to
@@ -511,6 +511,13 @@ struct cgroup {
 
 	/* used to track pressure stalls */
 	struct psi_group psi;
+
+	/*
+	 * A singly-linked list of cgroup structures to be rstat flushed.
+	 * This is a scratch field to be used exclusively by
+	 * cgroup_rstat_flush_locked() and protected by cgroup_rstat_lock.
+	 */
+	struct cgroup	*rstat_flush_next;
 	) /* RH_KABI_BROKEN_INSERT_BLOCK */
 
 	/*
@@ -724,7 +731,7 @@ struct cgroup_subsys {
 	RH_KABI_DEPRECATE(bool, broken_hierarchy:1)
 	RH_KABI_DEPRECATE(bool, warned_broken_hierarchy:1)
 
-	/* the following two fields are initialized automtically during boot */
+	/* the following two fields are initialized automatically during boot */
 	int id;
 	const char *name;
 

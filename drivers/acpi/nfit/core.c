@@ -851,7 +851,7 @@ static size_t sizeof_idt(struct acpi_nfit_interleave *idt)
 {
 	if (idt->header.length < sizeof(*idt))
 		return 0;
-	return sizeof(*idt) + sizeof(u32) * (idt->line_count - 1);
+	return sizeof(*idt) + sizeof(u32) * idt->line_count;
 }
 
 static bool add_idt(struct acpi_nfit_desc *acpi_desc,
@@ -890,7 +890,7 @@ static size_t sizeof_flush(struct acpi_nfit_flush_address *flush)
 {
 	if (flush->header.length < sizeof(*flush))
 		return 0;
-	return sizeof(*flush) + sizeof(u64) * (flush->hint_count - 1);
+	return struct_size(flush, hint_address, flush->hint_count);
 }
 
 static bool add_flush(struct acpi_nfit_desc *acpi_desc,
@@ -3231,8 +3231,8 @@ void acpi_nfit_shutdown(void *data)
 
 	mutex_lock(&acpi_desc->init_mutex);
 	set_bit(ARS_CANCEL, &acpi_desc->scrub_flags);
-	cancel_delayed_work_sync(&acpi_desc->dwork);
 	mutex_unlock(&acpi_desc->init_mutex);
+	cancel_delayed_work_sync(&acpi_desc->dwork);
 
 	/*
 	 * Bounce the nvdimm bus lock to make sure any in-flight
@@ -3411,8 +3411,8 @@ static __init int nfit_init(void)
 	BUILD_BUG_ON(sizeof(struct acpi_table_nfit) != 40);
 	BUILD_BUG_ON(sizeof(struct acpi_nfit_system_address) != 64);
 	BUILD_BUG_ON(sizeof(struct acpi_nfit_memory_map) != 48);
-	BUILD_BUG_ON(sizeof(struct acpi_nfit_interleave) != 20);
-	BUILD_BUG_ON(sizeof(struct acpi_nfit_smbios) != 9);
+	BUILD_BUG_ON(sizeof(struct acpi_nfit_interleave) != 16);
+	BUILD_BUG_ON(sizeof(struct acpi_nfit_smbios) != 8);
 	BUILD_BUG_ON(sizeof(struct acpi_nfit_control_region) != 80);
 	BUILD_BUG_ON(sizeof(struct acpi_nfit_data_region) != 40);
 	BUILD_BUG_ON(sizeof(struct acpi_nfit_capabilities) != 16);

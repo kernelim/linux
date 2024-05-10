@@ -2,7 +2,7 @@
 /*
  * AMD ALSA SoC PDM Driver
  *
- * Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022, 2023 Advanced Micro Devices, Inc. All rights reserved.
  */
 
 #include <sound/acp63_chip_offset_byte.h>
@@ -29,7 +29,7 @@
 #define ACP_ERROR_STAT	29
 #define PDM_DECIMATION_FACTOR	2
 #define ACP_PDM_CLK_FREQ_MASK	7
-#define ACP_WOV_MISC_CTRL_MASK	0x10
+#define ACP_WOV_GAIN_CONTROL	GENMASK(4, 3)
 #define ACP_PDM_ENABLE		1
 #define ACP_PDM_DISABLE		0
 #define ACP_PDM_DMA_EN_STATUS	2
@@ -57,6 +57,9 @@
 #define ACP63_PDM_MODE_DEVS		3
 #define ACP63_PDM_DEV_MASK		1
 #define ACP_DMIC_DEV	2
+
+/* time in ms for acp timeout */
+#define ACP_TIMEOUT		500
 
 enum acp_config {
 	ACP_CONFIG_0 = 0,
@@ -91,16 +94,6 @@ struct pdm_dev_data {
 	struct mutex *acp_lock;
 	struct snd_pcm_substream *capture_stream;
 };
-
-static inline u32 acp63_readl(void __iomem *base_addr)
-{
-	return readl(base_addr);
-}
-
-static inline void acp63_writel(u32 val, void __iomem *base_addr)
-{
-	writel(val, base_addr);
-}
 
 struct acp63_dev_data {
 	void __iomem *acp63_base;

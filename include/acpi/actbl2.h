@@ -3,7 +3,7 @@
  *
  * Name: actbl2.h - ACPI Table Definitions (tables not in ACPI spec)
  *
- * Copyright (C) 2000 - 2022, Intel Corp.
+ * Copyright (C) 2000 - 2023, Intel Corp.
  *
  *****************************************************************************/
 
@@ -27,6 +27,8 @@
 #define ACPI_SIG_AGDI           "AGDI"	/* Arm Generic Diagnostic Dump and Reset Device Interface */
 #define ACPI_SIG_APMT           "APMT"	/* Arm Performance Monitoring Unit table */
 #define ACPI_SIG_BDAT           "BDAT"	/* BIOS Data ACPI Table */
+#define ACPI_SIG_CDAT		"CDAT"	/* Coherent Device Attribute Table */
+#define ACPI_SIG_CCEL           "CCEL"	/* CC Event Log Table */
 #define ACPI_SIG_IORT           "IORT"	/* IO Remapping Table */
 #define ACPI_SIG_IVRS           "IVRS"	/* I/O Virtualization Reporting Structure */
 #define ACPI_SIG_LPIT           "LPIT"	/* Low Power Idle Table */
@@ -34,7 +36,6 @@
 #define ACPI_SIG_MCFG           "MCFG"	/* PCI Memory Mapped Configuration table */
 #define ACPI_SIG_MCHI           "MCHI"	/* Management Controller Host Interface table */
 #define ACPI_SIG_MPST           "MPST"	/* Memory Power State Table */
-#define ACPI_SIG_MSCT           "MSCT"	/* Maximum System Characteristics Table */
 #define ACPI_SIG_MSDM           "MSDM"	/* Microsoft Data Management Table */
 #define ACPI_SIG_NFIT           "NFIT"	/* NVDIMM Firmware Interface Table */
 #define ACPI_SIG_NHLT           "NHLT"	/* Non HD Audio Link Table */
@@ -354,6 +355,23 @@ struct acpi_table_bdat {
 
 /*******************************************************************************
  *
+ * CCEL - CC-Event Log
+ *        From: "Guest-Host-Communication Interface (GHCI) for Intel
+ *        Trust Domain Extensions (Intel TDX)". Feb 2022
+ *
+ ******************************************************************************/
+
+struct acpi_table_ccel {
+	struct acpi_table_header header;	/* Common ACPI table header */
+	u8 CCtype;
+	u8 Ccsub_type;
+	u16 reserved;
+	u64 log_area_minimum_length;
+	u64 log_area_start_address;
+};
+
+/*******************************************************************************
+ *
  * IORT - IO Remapping Table
  *
  * Conforms to "IO Remapping Table System Software on ARM Platforms",
@@ -378,7 +396,7 @@ struct acpi_iort_node {
 	u32 identifier;
 	u32 mapping_count;
 	u32 mapping_offset;
-	char node_data[1];
+	char node_data[];
 };
 
 /* Values for subtable Type above */
@@ -434,14 +452,14 @@ struct acpi_iort_memory_access {
  */
 struct acpi_iort_its_group {
 	u32 its_count;
-	u32 identifiers[1];	/* GIC ITS identifier array */
+	u32 identifiers[];	/* GIC ITS identifier array */
 };
 
 struct acpi_iort_named_component {
 	u32 node_flags;
 	u64 memory_properties;	/* Memory access properties */
 	u8 memory_address_limit;	/* Memory address size limit */
-	char device_name[1];	/* Path of namespace object */
+	char device_name[];	/* Path of namespace object */
 };
 
 /* Masks for Flags field above */
@@ -455,7 +473,7 @@ struct acpi_iort_root_complex {
 	u32 pci_segment_number;
 	u8 memory_address_limit;	/* Memory address size limit */
 	u16 pasid_capabilities;	/* PASID Capabilities */
-	u8 reserved[1];		/* Reserved, must be zero */
+	u8 reserved[];		/* Reserved, must be zero */
 };
 
 /* Masks for ats_attribute field above */
@@ -477,7 +495,7 @@ struct acpi_iort_smmu {
 	u32 context_interrupt_offset;
 	u32 pmu_interrupt_count;
 	u32 pmu_interrupt_offset;
-	u64 interrupts[1];	/* Interrupt array */
+	u64 interrupts[];	/* Interrupt array */
 };
 
 /* Values for Model field above */
@@ -947,7 +965,7 @@ struct acpi_madt_local_sapic {
 	u8 reserved[3];		/* Reserved, must be zero */
 	u32 lapic_flags;
 	u32 uid;		/* Numeric UID - ACPI 3.0 */
-	char uid_string[1];	/* String UID  - ACPI 3.0 */
+	char uid_string[];	/* String UID  - ACPI 3.0 */
 };
 
 /* 8: Platform Interrupt Source */
@@ -1099,7 +1117,7 @@ struct acpi_madt_multiproc_wakeup_mailbox {
 /* 17: OEM data */
 
 struct acpi_madt_oem_data {
-	u8 oem_data[0];
+	ACPI_FLEX_ARRAY(u8, oem_data);
 };
 
 /*
@@ -1410,7 +1428,7 @@ struct acpi_nfit_interleave {
 	u16 reserved;		/* Reserved, must be zero */
 	u32 line_count;
 	u32 line_size;
-	u32 line_offset[1];	/* Variable length */
+	u32 line_offset[];	/* Variable length */
 };
 
 /* 3: SMBIOS Management Information Structure */
@@ -1418,7 +1436,7 @@ struct acpi_nfit_interleave {
 struct acpi_nfit_smbios {
 	struct acpi_nfit_header header;
 	u32 reserved;		/* Reserved, must be zero */
-	u8 data[1];		/* Variable length */
+	u8 data[];		/* Variable length */
 };
 
 /* 4: NVDIMM Control Region Structure */
@@ -1475,7 +1493,7 @@ struct acpi_nfit_flush_address {
 	u32 device_handle;
 	u16 hint_count;
 	u8 reserved[6];		/* Reserved, must be zero */
-	u64 hint_address[1];	/* Variable length */
+	u64 hint_address[];	/* Variable length */
 };
 
 /* 7: Platform Capabilities Structure */

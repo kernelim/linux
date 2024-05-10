@@ -16,6 +16,7 @@
 #include <linux/prctl.h>
 #include <linux/sched/smt.h>
 #include <linux/bpf.h>
+#include <linux/debugfs.h>
 
 #include <asm/spec-ctrl.h>
 #include <asm/cmdline.h>
@@ -94,7 +95,7 @@ void update_spec_ctrl_cond(u64 val)
 		wrmsrl(MSR_IA32_SPEC_CTRL, val);
 }
 
-u64 spec_ctrl_current(void)
+noinstr u64 spec_ctrl_current(void)
 {
 	return this_cpu_read(x86_spec_ctrl_current);
 }
@@ -1855,6 +1856,84 @@ void cpu_bugs_smt_update(void)
 
 	mutex_unlock(&spec_ctrl_mutex);
 }
+
+#ifdef CONFIG_DEBUG_FS
+/*
+ * Provide a debugfs file to dump SPEC_CTRL MSRs of all the CPUs
+ * Consecutive MSR values are collapsed together if they are the same.
+ */
+static ssize_t spec_ctrl_msrs_read(struct file *file, char __user *user_buf,
+				   size_t count, loff_t *ppos)
+{
+	int bufsiz = min(count, PAGE_SIZE);
+	int cpu, prev_cpu, len, cnt = 0;
+	u64 val, prev_val;
+	char *buf;
+
+	/*
+	 * The MSRs info should be small enough that the whole buffer is
+	 * copied out in one call. However, user space may read it again
+	 * to see if there is any data left. Rereading the cached SPEC_CTRL
+	 * MSR values may produce a different result causing corruption in
+	 * output data. So skipping the call if *ppos is not starting from 0.
+	 */
+	if (*ppos)
+		return 0;
+
+	buf = kmalloc(bufsiz, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	for_each_possible_cpu(cpu) {
+		val = per_cpu(x86_spec_ctrl_current, cpu);
+
+		if (!cpu)
+			goto next;
+
+		if (val == prev_val)
+			continue;
+
+		if (prev_cpu == cpu - 1)
+			len = snprintf(buf + cnt, bufsiz - cnt, "CPU  %d: 0x%llx\n",
+				       prev_cpu, prev_val);
+		else
+			len = snprintf(buf + cnt, bufsiz - cnt, "CPUs %d-%d: 0x%llx\n",
+					prev_cpu, cpu - 1, prev_val);
+
+		cnt += len;
+		if (!len)
+			break;	/* Out of buffer */
+next:
+		prev_cpu = cpu;
+		prev_val = val;
+	}
+
+	if (prev_cpu == cpu - 1)
+		cnt += snprintf(buf + cnt, bufsiz - cnt, "CPU  %d: 0x%llx\n",
+			       prev_cpu, prev_val);
+	else
+		cnt += snprintf(buf + cnt, bufsiz - cnt, "CPUs %d-%d: 0x%llx\n",
+				prev_cpu, cpu - 1, prev_val);
+
+	count = simple_read_from_buffer(user_buf, count, ppos, buf, cnt);
+	kfree(buf);
+	return count;
+}
+
+static const struct file_operations fops_spec_ctrl = {
+	.read = spec_ctrl_msrs_read,
+	.llseek = default_llseek,
+};
+
+static int __init init_spec_ctrl_debugfs(void)
+{
+	if (!debugfs_create_file("spec_ctrl_msrs", 0400, arch_debugfs_dir,
+				 NULL, &fops_spec_ctrl))
+		return -ENOMEM;
+	return 0;
+}
+fs_initcall(init_spec_ctrl_debugfs);
+#endif
 
 #undef pr_fmt
 #define pr_fmt(fmt)	"Speculative Store Bypass: " fmt

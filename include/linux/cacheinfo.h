@@ -77,6 +77,7 @@ struct cpu_cacheinfo {
 	unsigned int num_levels;
 	unsigned int num_leaves;
 	bool cpu_map_populated;
+	bool early_ci_levels;
 };
 
 /*
@@ -98,6 +99,7 @@ int func(unsigned int cpu)					\
 }
 
 struct cpu_cacheinfo *get_cpu_cacheinfo(unsigned int cpu);
+int early_cache_level(unsigned int cpu);
 int init_cache_level(unsigned int cpu);
 int init_of_cache_level(unsigned int cpu);
 int populate_cache_leaves(unsigned int cpu);
@@ -147,5 +149,11 @@ static inline int get_cpu_cacheinfo_id(int cpu, int level)
 
 	return -1;
 }
+
+#ifdef CONFIG_ARM64
+#define use_arch_cache_info()	(true)
+#else
+#define use_arch_cache_info()	(false)
+#endif
 
 #endif /* _LINUX_CACHEINFO_H */

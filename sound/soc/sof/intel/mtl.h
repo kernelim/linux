@@ -62,7 +62,6 @@
 #define MTL_DSP_IRQSTS_IPC		BIT(0)
 #define MTL_DSP_IRQSTS_SDW		BIT(6)
 
-#define MTL_DSP_PURGE_TIMEOUT_US	20000000 /* 20s */
 #define MTL_DSP_REG_POLL_INTERVAL_US	10	/* 10 us */
 
 /* Memory windows */
@@ -82,3 +81,10 @@
 #define MTL_DSP_REG_HfIMRIS1		0x162088
 #define MTL_DSP_REG_HfIMRIS1_IU_MASK	BIT(0)
 
+void mtl_enable_ipc_interrupts(struct snd_sof_dev *sdev);
+void mtl_disable_ipc_interrupts(struct snd_sof_dev *sdev);
+bool mtl_dsp_check_ipc_irq(struct snd_sof_dev *sdev);
+
+int mtl_enable_interrupts(struct snd_sof_dev *sdev, bool enable);
+int mtl_dsp_cl_init(struct snd_sof_dev *sdev, int stream_tag, bool imr_boot);
+int mtl_power_down_dsp(struct snd_sof_dev *sdev);

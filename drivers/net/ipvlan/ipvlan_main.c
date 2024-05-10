@@ -794,6 +794,7 @@ static int ipvlan_device_event(struct notifier_block *unused,
 	port = ipvlan_port_get_rtnl(dev);
 
 	switch (event) {
+	case NETDEV_UP:
 	case NETDEV_CHANGE:
 		list_for_each_entry(ipvlan, &port->ipvlans, pnode)
 			netif_stacked_transfer_operstate(ipvlan->phy_dev,
@@ -810,12 +811,14 @@ static int ipvlan_device_event(struct notifier_block *unused,
 
 		write_pnet(&port->pnet, newnet);
 
-		old_vnet = net_generic(oldnet, ipvlan_netid);
-		if (!old_vnet->ipvl_nf_hook_refcnt)
-			break;
+		if (port->mode == IPVLAN_MODE_L3S) {
+			old_vnet = net_generic(oldnet, ipvlan_netid);
+			if (!old_vnet->ipvl_nf_hook_refcnt)
+				break;
 
-		ipvlan_register_nf_hook(newnet);
-		ipvlan_unregister_nf_hook(oldnet);
+			ipvlan_register_nf_hook(newnet);
+			ipvlan_unregister_nf_hook(oldnet);
+		}
 		break;
 	}
 	case NETDEV_UNREGISTER:

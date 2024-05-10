@@ -1315,8 +1315,6 @@ static int __init fw_core_init(void)
 		return ret;
 	}
 
-	mark_driver_deprecated("firewire");
-
 	fw_cdev_major = register_chrdev(0, "firewire", &fw_device_ops);
 	if (fw_cdev_major < 0) {
 		bus_unregister(&fw_bus_type);

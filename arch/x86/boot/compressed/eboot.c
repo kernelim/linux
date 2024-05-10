@@ -16,11 +16,17 @@
 #include <asm/setup.h>
 #include <asm/desc.h>
 #include <asm/boot.h>
+#include <asm/kaslr.h>
+#include <asm/sev.h>
 
 #include "../string.h"
 #include "eboot.h"
+#include "../../../../drivers/firmware/efi/libstub/efistub.h"
+#include "../../../../drivers/firmware/efi/libstub/x86-stub.h"
 
 static efi_system_table_t *sys_table;
+static const efi_dxe_services_table_t *efi_dxe_table;
+static efi_memory_attribute_protocol_t *memattr;
 
 static struct efi_config *efi_early;
 
@@ -240,17 +246,88 @@ static void retrieve_apple_device_properties(struct boot_params *boot_params)
 	}
 }
 
+efi_status_t efi_adjust_memory_range_protection(unsigned long start,
+						unsigned long size)
+{
+	efi_status_t status;
+	efi_gcd_memory_space_desc_t desc;
+	unsigned long end, next;
+	unsigned long rounded_start, rounded_end;
+	unsigned long unprotect_start, unprotect_size;
+
+	rounded_start = rounddown(start, EFI_PAGE_SIZE);
+	rounded_end = roundup(start + size, EFI_PAGE_SIZE);
+
+	if (memattr != NULL) {
+		status = efi_call_proto(efi_memory_attribute_protocol,
+					clear_memory_attributes, memattr,
+					rounded_start,
+					rounded_end - rounded_start,
+					EFI_MEMORY_XP);
+		if (status != EFI_SUCCESS)
+			efi_printk(sys_table,
+				   "Failed to clear EFI_MEMORY_XP attribute\n");
+		return status;
+	}
+
+	if (efi_dxe_table == NULL)
+		return EFI_SUCCESS;
+
+	/*
+	 * Don't modify memory region attributes, they are
+	 * already suitable, to lower the possibility to
+	 * encounter firmware bugs.
+	 */
+
+	for (end = start + size; start < end; start = next) {
+
+		status = efi_dxe_call(get_memory_space_descriptor, start, &desc);
+
+		if (status != EFI_SUCCESS)
+			break;
+
+		next = desc.base_address + desc.length;
+
+		/*
+		 * Only system memory is suitable for trampoline/kernel image placement,
+		 * so only this type of memory needs its attributes to be modified.
+		 */
+
+		if (desc.gcd_memory_type != EfiGcdMemoryTypeSystemMemory ||
+		    (desc.attributes & (EFI_MEMORY_RO | EFI_MEMORY_XP)) == 0)
+			continue;
+
+		unprotect_start = max(rounded_start, (unsigned long)desc.base_address);
+		unprotect_size = min(rounded_end, next) - unprotect_start;
+
+		status = efi_dxe_call(set_memory_space_attributes,
+				      unprotect_start, unprotect_size,
+				      EFI_MEMORY_WB);
+
+		if (status != EFI_SUCCESS) {
+			efi_printk(sys_table,
+				   "WARNING: Unable to unprotect memory range\n");
+			break;
+		}
+	}
+	return EFI_SUCCESS;
+}
+
+static efi_char16_t *efistub_fw_vendor(void)
+{
+	unsigned long vendor = efi_table_attr(efi_system_table, fw_vendor,
+					      sys_table);
+
+	return (efi_char16_t *)vendor;
+}
+
 static const efi_char16_t apple[] = L"Apple";
 
 static void setup_quirks(struct boot_params *boot_params)
 {
-	efi_char16_t *fw_vendor = (efi_char16_t *)(unsigned long)
-		efi_table_attr(efi_system_table, fw_vendor, sys_table);
-
-	if (!memcmp(fw_vendor, apple, sizeof(apple))) {
-		if (IS_ENABLED(CONFIG_APPLE_PROPERTIES))
-			retrieve_apple_device_properties(boot_params);
-	}
+	if (IS_ENABLED(CONFIG_APPLE_PROPERTIES) &&
+	    !memcmp(efistub_fw_vendor(), apple, sizeof(apple)))
+		retrieve_apple_device_properties(boot_params);
 }
 
 /*
@@ -365,13 +442,19 @@ void setup_graphics(struct boot_params *boot_params)
 	}
 }
 
+
+static void __noreturn efi_exit(efi_handle_t handle, efi_status_t status)
+{
+	efi_call_early(exit, handle, status, 0, NULL);
+	unreachable();
+}
+
 /*
  * Because the x86 boot code expects to be passed a boot_params we
  * need to create one ourselves (usually the bootloader would create
  * one for us).
  *
- * The caller is responsible for filling out ->code32_start in the
- * returned boot_params.
+ * Any error results in a call to the Exit() EFI boot service.
  */
 struct boot_params *make_boot_params(struct efi_config *c)
 {
@@ -396,7 +479,7 @@ struct boot_params *make_boot_params(struct efi_config *c)
 
 	/* Check if we were booted by the EFI firmware */
 	if (sys_table->hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE)
-		return NULL;
+		efi_exit(handle, EFI_INVALID_PARAMETER);
 
 	if (efi_early->is64)
 		setup_boot_services64(efi_early);
@@ -407,14 +490,14 @@ struct boot_params *make_boot_params(struct efi_config *c)
 				&proto, (void *)&image);
 	if (status != EFI_SUCCESS) {
 		efi_printk(sys_table, "Failed to get handle for LOADED_IMAGE_PROTOCOL\n");
-		return NULL;
+		efi_exit(handle, status);
 	}
 
 	status = efi_low_alloc(sys_table, 0x4000, 1,
 			       (unsigned long *)&boot_params);
 	if (status != EFI_SUCCESS) {
 		efi_printk(sys_table, "Failed to allocate lowmem for boot params\n");
-		return NULL;
+		efi_exit(handle, status);
 	}
 
 	memset(boot_params, 0x0, 0x4000);
@@ -437,8 +520,10 @@ struct boot_params *make_boot_params(struct efi_config *c)
 
 	/* Convert unicode cmdline to ascii */
 	cmdline_ptr = efi_convert_cmdline(sys_table, image, &options_size);
-	if (!cmdline_ptr)
+	if (!cmdline_ptr) {
+		status = EFI_INVALID_PARAMETER;
 		goto fail;
+	}
 
 	hdr->cmd_line_ptr = (unsigned long)cmdline_ptr;
 	/* Fill in upper bits of command line address, NOP on 32 bit  */
@@ -446,6 +531,13 @@ struct boot_params *make_boot_params(struct efi_config *c)
 
 	hdr->ramdisk_image = 0;
 	hdr->ramdisk_size = 0;
+
+	/*
+	 * Disregard any setup data that was provided by the bootloader:
+	 * setup_data could be pointing anywhere, and we have no way of
+	 * authenticating or validating the payload.
+	 */
+	hdr->setup_data = 0;
 
 	/* Clear APM BIOS info */
 	memset(bi, 0, sizeof(*bi));
@@ -482,7 +574,7 @@ fail2:
 fail:
 	efi_free(sys_table, 0x4000, (unsigned long)boot_params);
 
-	return NULL;
+	efi_exit(handle, status);
 }
 
 static void add_e820ext(struct boot_params *params,
@@ -740,22 +832,125 @@ static efi_status_t exit_boot(struct boot_params *boot_params,
 	return EFI_SUCCESS;
 }
 
-/*
- * On success we return a pointer to a boot_params structure, and NULL
- * on failure.
- */
-struct boot_params *
-efi_main(struct efi_config *c, struct boot_params *boot_params)
+static bool have_unsupported_snp_features(void)
 {
-	struct desc_ptr *gdt = NULL;
+	u64 unsupported;
+
+	unsupported = snp_get_unsupported_features(sev_get_status());
+	if (unsupported) {
+		efi_printk(sys_table,
+			   "Unsupported SEV-SNP features detected\n");
+		return true;
+	}
+	return false;
+}
+
+static void efi_get_seed(void *seed, int size)
+{
+	efi_get_random_bytes(sys_table, size, seed);
+
+	/*
+	 * This only updates seed[0] when running on 32-bit, but in that case,
+	 * seed[1] is not used anyway, as there is no virtual KASLR on 32-bit.
+	 */
+	*(unsigned long *)seed ^= kaslr_get_random_long("EFI");
+}
+
+static void error(char *str)
+{
+	efi_printk(sys_table, "Decompression failed: ");
+	efi_printk(sys_table, str);
+	efi_printk(sys_table, "\n");
+}
+
+static efi_status_t efi_decompress_kernel(unsigned long *kernel_entry)
+{
+	unsigned long virt_addr = LOAD_PHYSICAL_ADDR;
+	unsigned long addr, alloc_size, entry;
+	efi_status_t status;
+	u32 seed[2] = {};
+
+	/* determine the required size of the allocation */
+	alloc_size = ALIGN(max_t(unsigned long, output_len, kernel_total_size),
+			   MIN_KERNEL_ALIGN);
+
+	if (IS_ENABLED(CONFIG_RANDOMIZE_BASE) && !nokaslr()) {
+		u64 range = KERNEL_IMAGE_SIZE - LOAD_PHYSICAL_ADDR - kernel_total_size;
+		static const efi_char16_t ami[] = L"American Megatrends";
+
+		efi_get_seed(seed, sizeof(seed));
+
+		virt_addr += (range * seed[1]) >> 32;
+		virt_addr &= ~(CONFIG_PHYSICAL_ALIGN - 1);
+
+		/*
+		 * Older Dell systems with AMI UEFI firmware v2.0 may hang
+		 * while decompressing the kernel if physical address
+		 * randomization is enabled.
+		 *
+		 * https://bugzilla.kernel.org/show_bug.cgi?id=218173
+		 */
+		if (sys_table->hdr.revision <= EFI_2_00_SYSTEM_TABLE_REVISION &&
+		    !memcmp(efistub_fw_vendor(), ami, sizeof(ami))) {
+			seed[0] = 0;
+		}
+
+		boot_params_ptr->hdr.loadflags |= KASLR_FLAG;
+	}
+
+	status = efi_random_alloc(sys_table,
+				  alloc_size, CONFIG_PHYSICAL_ALIGN, &addr,
+				  seed[0], EFI_LOADER_CODE,
+				  LOAD_PHYSICAL_ADDR,
+				  EFI_X86_KERNEL_ALLOC_LIMIT);
+	if (status != EFI_SUCCESS)
+		return status;
+
+	entry = decompress_kernel((void *)addr, virt_addr, error);
+	if (entry == ULONG_MAX) {
+		efi_free(sys_table, alloc_size, addr);
+		return EFI_LOAD_ERROR;
+	}
+
+	*kernel_entry = addr + entry;
+
+	return efi_adjust_memory_range_protection(addr, kernel_total_size);
+}
+
+static void __noreturn enter_kernel(unsigned long kernel_addr,
+				    struct boot_params *boot_params)
+{
+	/* enter decompressed kernel with boot_params pointer in RSI/ESI */
+	asm("jmp *%0"::"r"(kernel_addr), "S"(boot_params));
+
+	unreachable();
+}
+
+/*
+ * On success, this routine will jump to the relocated image directly and never
+ * return.  On failure, it will exit to the firmware via efi_exit() instead of
+ * returning.
+ */
+void __noreturn efi_main(struct efi_config *c,
+			 struct boot_params *boot_params)
+{
+	efi_guid_t guid = EFI_MEMORY_ATTRIBUTE_PROTOCOL_GUID;
 	efi_loaded_image_t *image;
 	struct setup_header *hdr = &boot_params->hdr;
+	unsigned long kernel_entry;
 	efi_status_t status;
-	struct desc_struct *desc;
 	void *handle;
 	efi_system_table_t *_table;
 	bool is64;
 	unsigned long cmdline_paddr;
+	extern char _bss[], _ebss[];
+
+	/*
+	 * Clear BSS. It might not have been cleared if we got here via
+	 * the EFI handover protocol. No harm to clear it again if we
+	 * got here via the EFI PE entry.
+	 */
+	memset(_bss, 0, _ebss - _bss);
 
 	efi_early = c;
 
@@ -763,16 +958,39 @@ efi_main(struct efi_config *c, struct boot_params *boot_params)
 	handle = (void *)(unsigned long)efi_early->image_handle;
 	is64 = efi_early->is64;
 
+	boot_params_ptr = boot_params;
+
 	sys_table = _table;
 
 	/* Check if we were booted by the EFI firmware */
 	if (sys_table->hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE)
-		goto fail;
+		efi_exit(handle, EFI_INVALID_PARAMETER);
 
 	if (is64)
 		setup_boot_services64(efi_early);
 	else
 		setup_boot_services32(efi_early);
+
+	if (have_unsupported_snp_features())
+		efi_exit(handle, EFI_UNSUPPORTED);
+
+	if (IS_ENABLED(CONFIG_EFI_DXE_MEM_ATTRIBUTES)) {
+		efi_dxe_table = get_efi_config_table(sys_table, EFI_DXE_SERVICES_TABLE_GUID);
+		if (efi_dxe_table &&
+		    efi_dxe_table->hdr.signature != EFI_DXE_SERVICES_TABLE_SIGNATURE) {
+			efi_printk(sys_table, "Ignoring DXE services table: invalid signature\n");
+			efi_dxe_table = NULL;
+		}
+	}
+
+	/* grab the memory attributes protocol if it exists */
+	efi_call_early(locate_protocol, &guid, NULL, (void **)&memattr);
+
+	status = efi_setup_5level_paging();
+	if (status != EFI_SUCCESS) {
+		efi_printk(sys_table, "efi_setup_5level_paging() failed!\n");
+		goto fail;
+	}
 
 	/*
 	 * make_boot_params() may have been called before efi_main(), in which
@@ -783,6 +1001,12 @@ efi_main(struct efi_config *c, struct boot_params *boot_params)
 			 ((u64)boot_params->ext_cmd_line_ptr << 32));
 	efi_parse_options((char *)cmdline_paddr);
 
+	status = efi_decompress_kernel(&kernel_entry);
+	if (status != EFI_SUCCESS) {
+		efi_printk(sys_table, "Failed to decompress kernel\n");
+		goto fail;
+	}
+
 	/*
 	 * If the boot loader gave us a value for secure_boot then we use that,
 	 * otherwise we ask the BIOS.
@@ -792,6 +1016,9 @@ efi_main(struct efi_config *c, struct boot_params *boot_params)
 
 	/* Ask the firmware to clear memory on unclean shutdown */
 	efi_enable_reset_attack_mitigation(sys_table);
+
+	efi_random_get_seed(sys_table);
+
 	efi_retrieve_tpm2_eventlog(sys_table);
 
 	setup_graphics(boot_params);
@@ -800,137 +1027,23 @@ efi_main(struct efi_config *c, struct boot_params *boot_params)
 
 	setup_quirks(boot_params);
 
-	status = efi_call_early(allocate_pool, EFI_LOADER_DATA,
-				sizeof(*gdt), (void **)&gdt);
-	if (status != EFI_SUCCESS) {
-		efi_printk(sys_table, "Failed to allocate memory for 'gdt' structure\n");
-		goto fail;
-	}
-
-	gdt->size = 0x800;
-	status = efi_low_alloc(sys_table, gdt->size, 8,
-			   (unsigned long *)&gdt->address);
-	if (status != EFI_SUCCESS) {
-		efi_printk(sys_table, "Failed to allocate memory for 'gdt'\n");
-		goto fail;
-	}
-
-	/*
-	 * If the kernel isn't already loaded at the preferred load
-	 * address, relocate it.
-	 */
-	if (hdr->pref_address != hdr->code32_start) {
-		unsigned long bzimage_addr = hdr->code32_start;
-		status = efi_relocate_kernel(sys_table, &bzimage_addr,
-					     hdr->init_size, hdr->init_size,
-					     hdr->pref_address,
-					     hdr->kernel_alignment,
-					     LOAD_PHYSICAL_ADDR);
-		if (status != EFI_SUCCESS) {
-			efi_printk(sys_table, "efi_relocate_kernel() failed!\n");
-			goto fail;
-		}
-
-		hdr->pref_address = hdr->code32_start;
-		hdr->code32_start = bzimage_addr;
-	}
-
 	status = exit_boot(boot_params, handle, is64);
 	if (status != EFI_SUCCESS) {
 		efi_printk(sys_table, "exit_boot() failed!\n");
 		goto fail;
 	}
 
-	memset((char *)gdt->address, 0x0, gdt->size);
-	desc = (struct desc_struct *)gdt->address;
+	/*
+	 * Call the SEV init code while still running with the firmware's
+	 * GDT/IDT, so #VC exceptions will be handled by EFI.
+	 */
+	sev_enable(boot_params);
 
-	/* The first GDT is a dummy. */
-	desc++;
+	efi_5level_switch();
 
-	if (IS_ENABLED(CONFIG_X86_64)) {
-		/* __KERNEL32_CS */
-		desc->limit0	= 0xffff;
-		desc->base0	= 0x0000;
-		desc->base1	= 0x0000;
-		desc->type	= SEG_TYPE_CODE | SEG_TYPE_EXEC_READ;
-		desc->s		= DESC_TYPE_CODE_DATA;
-		desc->dpl	= 0;
-		desc->p		= 1;
-		desc->limit1	= 0xf;
-		desc->avl	= 0;
-		desc->l		= 0;
-		desc->d		= SEG_OP_SIZE_32BIT;
-		desc->g		= SEG_GRANULARITY_4KB;
-		desc->base2	= 0x00;
-
-		desc++;
-	} else {
-		/* Second entry is unused on 32-bit */
-		desc++;
-	}
-
-	/* __KERNEL_CS */
-	desc->limit0	= 0xffff;
-	desc->base0	= 0x0000;
-	desc->base1	= 0x0000;
-	desc->type	= SEG_TYPE_CODE | SEG_TYPE_EXEC_READ;
-	desc->s		= DESC_TYPE_CODE_DATA;
-	desc->dpl	= 0;
-	desc->p		= 1;
-	desc->limit1	= 0xf;
-	desc->avl	= 0;
-
-	if (IS_ENABLED(CONFIG_X86_64)) {
-		desc->l = 1;
-		desc->d = 0;
-	} else {
-		desc->l = 0;
-		desc->d = SEG_OP_SIZE_32BIT;
-	}
-	desc->g		= SEG_GRANULARITY_4KB;
-	desc->base2	= 0x00;
-	desc++;
-
-	/* __KERNEL_DS */
-	desc->limit0	= 0xffff;
-	desc->base0	= 0x0000;
-	desc->base1	= 0x0000;
-	desc->type	= SEG_TYPE_DATA | SEG_TYPE_READ_WRITE;
-	desc->s		= DESC_TYPE_CODE_DATA;
-	desc->dpl	= 0;
-	desc->p		= 1;
-	desc->limit1	= 0xf;
-	desc->avl	= 0;
-	desc->l		= 0;
-	desc->d		= SEG_OP_SIZE_32BIT;
-	desc->g		= SEG_GRANULARITY_4KB;
-	desc->base2	= 0x00;
-	desc++;
-
-	if (IS_ENABLED(CONFIG_X86_64)) {
-		/* Task segment value */
-		desc->limit0	= 0x0000;
-		desc->base0	= 0x0000;
-		desc->base1	= 0x0000;
-		desc->type	= SEG_TYPE_TSS;
-		desc->s		= 0;
-		desc->dpl	= 0;
-		desc->p		= 1;
-		desc->limit1	= 0x0;
-		desc->avl	= 0;
-		desc->l		= 0;
-		desc->d		= 0;
-		desc->g		= SEG_GRANULARITY_4KB;
-		desc->base2	= 0x00;
-		desc++;
-	}
-
-	asm volatile("cli");
-	asm volatile ("lgdt %0" : : "m" (*gdt));
-
-	return boot_params;
+	enter_kernel(kernel_entry, boot_params);
 fail:
 	efi_printk(sys_table, "efi_main() failed!\n");
 
-	return NULL;
+	efi_exit(handle, status);
 }

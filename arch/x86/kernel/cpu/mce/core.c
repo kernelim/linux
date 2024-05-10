@@ -1244,7 +1244,7 @@ static void queue_task_work(struct mce *m, char *msg, int kill_current_task)
 	if (count > 1)
 		return;
 
-	task_work_add(current, &current_rh->mce_kill_me, true);
+	task_work_add(current, &current_rh->mce_kill_me, TWA_RESUME);
 }
 
 /*

@@ -576,14 +576,8 @@ static ssize_t dimmdev_ce_count_show(struct device *dev,
 {
 	struct dimm_info *dimm = to_dimm(dev);
 	u32 count;
-	int off;
 
-	off = EDAC_DIMM_OFF(dimm->mci->layers,
-			    dimm->mci->n_layers,
-			    dimm->location[0],
-			    dimm->location[1],
-			    dimm->location[2]);
-	count = dimm->mci->ce_per_layer[dimm->mci->n_layers-1][off];
+	count = dimm->mci->ce_per_layer[dimm->mci->n_layers-1][dimm->idx];
 	return sprintf(data, "%u\n", count);
 }
 
@@ -593,14 +587,8 @@ static ssize_t dimmdev_ue_count_show(struct device *dev,
 {
 	struct dimm_info *dimm = to_dimm(dev);
 	u32 count;
-	int off;
 
-	off = EDAC_DIMM_OFF(dimm->mci->layers,
-			    dimm->mci->n_layers,
-			    dimm->location[0],
-			    dimm->location[1],
-			    dimm->location[2]);
-	count = dimm->mci->ue_per_layer[dimm->mci->n_layers-1][off];
+	count = dimm->mci->ue_per_layer[dimm->mci->n_layers-1][dimm->idx];
 	return sprintf(data, "%u\n", count);
 }
 
@@ -652,8 +640,7 @@ static const struct device_type dimm_attr_type = {
 
 /* Create a DIMM object under specifed memory controller device */
 static int edac_create_dimm_object(struct mem_ctl_info *mci,
-				   struct dimm_info *dimm,
-				   int index)
+				   struct dimm_info *dimm)
 {
 	int err;
 	dimm->mci = mci;
@@ -663,9 +650,9 @@ static int edac_create_dimm_object(struct mem_ctl_info *mci,
 
 	dimm->dev.parent = &mci->dev;
 	if (mci->csbased)
-		dev_set_name(&dimm->dev, "rank%d", index);
+		dev_set_name(&dimm->dev, "rank%d", dimm->idx);
 	else
-		dev_set_name(&dimm->dev, "dimm%d", index);
+		dev_set_name(&dimm->dev, "dimm%d", dimm->idx);
 	dev_set_drvdata(&dimm->dev, dimm);
 	pm_runtime_forbid(&mci->dev);
 
@@ -936,7 +923,8 @@ static const struct device_type mci_attr_type = {
 int edac_create_sysfs_mci_device(struct mem_ctl_info *mci,
 				 const struct attribute_group **groups)
 {
-	int i, err;
+	struct dimm_info *dimm;
+	int err;
 
 	/* get the /sys/devices/system/edac subsys reference */
 	mci->dev.type = &mci_attr_type;
@@ -958,14 +946,13 @@ int edac_create_sysfs_mci_device(struct mem_ctl_info *mci,
 	/*
 	 * Create the dimm/rank devices
 	 */
-	for (i = 0; i < mci->tot_dimms; i++) {
-		struct dimm_info *dimm = mci->dimms[i];
+	mci_for_each_dimm(mci, dimm) {
 		/* Only expose populated DIMMs */
 		if (!dimm->nr_pages)
 			continue;
 
 #ifdef CONFIG_EDAC_DEBUG
-		edac_dbg(1, "creating dimm%d, located at ", i);
+		edac_dbg(1, "creating dimm%d, located at ", dimm->idx);
 		if (edac_debug_level >= 1) {
 			int lay;
 			for (lay = 0; lay < mci->n_layers; lay++)
@@ -975,9 +962,9 @@ int edac_create_sysfs_mci_device(struct mem_ctl_info *mci,
 			printk(KERN_CONT "\n");
 		}
 #endif
-		err = edac_create_dimm_object(mci, dimm, i);
+		err = edac_create_dimm_object(mci, dimm);
 		if (err) {
-			edac_dbg(1, "failure: create dimm %d obj\n", i);
+			edac_dbg(1, "failure: create dimm %d obj\n", dimm->idx);
 			goto fail_unregister_dimm;
 		}
 	}
@@ -992,12 +979,9 @@ int edac_create_sysfs_mci_device(struct mem_ctl_info *mci,
 	return 0;
 
 fail_unregister_dimm:
-	for (i--; i >= 0; i--) {
-		struct dimm_info *dimm = mci->dimms[i];
-		if (!dimm->nr_pages)
-			continue;
-
-		device_unregister(&dimm->dev);
+	mci_for_each_dimm(mci, dimm) {
+		if (device_is_registered(&dimm->dev))
+			device_unregister(&dimm->dev);
 	}
 	device_unregister(&mci->dev);
 
@@ -1010,7 +994,7 @@ out:
  */
 void edac_remove_sysfs_mci_device(struct mem_ctl_info *mci)
 {
-	int i;
+	struct dimm_info *dimm;
 
 	edac_dbg(0, "\n");
 
@@ -1021,8 +1005,7 @@ void edac_remove_sysfs_mci_device(struct mem_ctl_info *mci)
 	edac_delete_csrow_objects(mci);
 #endif
 
-	for (i = 0; i < mci->tot_dimms; i++) {
-		struct dimm_info *dimm = mci->dimms[i];
+	mci_for_each_dimm(mci, dimm) {
 		if (dimm->nr_pages == 0)
 			continue;
 		edac_dbg(0, "removing device %s\n", dev_name(&dimm->dev));

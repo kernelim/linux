@@ -715,9 +715,9 @@ int
 xfs_log_mount_finish(
 	struct xfs_mount	*mp)
 {
-	int	error = 0;
-	bool	readonly = (mp->m_flags & XFS_MOUNT_RDONLY);
-	bool	recovered = mp->m_log->l_flags & XLOG_RECOVERY_NEEDED;
+	struct xlog		*log = mp->m_log;
+	bool			readonly = (mp->m_flags & XFS_MOUNT_RDONLY);
+	int			error = 0;
 
 	if (mp->m_flags & XFS_MOUNT_NORECOVERY) {
 		ASSERT(mp->m_flags & XFS_MOUNT_RDONLY);
@@ -748,7 +748,8 @@ xfs_log_mount_finish(
 	 * mount failure occurs.
 	 */
 	mp->m_super->s_flags |= SB_ACTIVE;
-	error = xlog_recover_finish(mp->m_log);
+	if (log->l_flags & XLOG_RECOVERY_NEEDED)
+		error = xlog_recover_finish(log);
 	if (!error)
 		xfs_log_work_queue(mp);
 	mp->m_super->s_flags &= ~SB_ACTIVE;
@@ -763,17 +764,24 @@ xfs_log_mount_finish(
 	 * Don't push in the error case because the AIL may have pending intents
 	 * that aren't removed until recovery is cancelled.
 	 */
-	if (!error && recovered) {
-		xfs_log_force(mp, XFS_LOG_SYNC);
-		xfs_ail_push_all_sync(mp->m_ail);
+	if (log->l_flags & XLOG_RECOVERY_NEEDED) {
+		if (!error) {
+			xfs_log_force(mp, XFS_LOG_SYNC);
+			xfs_ail_push_all_sync(mp->m_ail);
+		}
+		xfs_notice(mp, "Ending recovery (logdev: %s)",
+				mp->m_logname ? mp->m_logname : "internal");
+	} else {
+		xfs_info(mp, "Ending clean mount");
 	}
 	xfs_buftarg_drain(mp->m_ddev_targp);
 
+	log->l_flags &= ~XLOG_RECOVERY_NEEDED;
 	if (readonly)
 		mp->m_flags |= XFS_MOUNT_RDONLY;
 
 	/* Make sure the log is dead if we're returning failure. */
-	ASSERT(!error || (mp->m_log->l_flags & XLOG_IO_ERROR));
+	ASSERT(!error || XLOG_FORCED_SHUTDOWN(mp->m_log));
 
 	return error;
 }
@@ -957,6 +965,20 @@ int
 xfs_log_quiesce(
 	struct xfs_mount	*mp)
 {
+	/*
+	 * Clear log incompat features since we're quiescing the log.  Report
+	 * failures, though it's not fatal to have a higher log feature
+	 * protection level than the log contents actually require.
+	 */
+	if (xfs_clear_incompat_log_features(mp)) {
+		int error;
+
+		error = xfs_sync_sb(mp, false);
+		if (error)
+			xfs_warn(mp,
+	"Failed to clear log incompat features on quiesce");
+	}
+
 	cancel_delayed_work_sync(&mp->m_log->l_work);
 	xfs_log_force(mp, XFS_LOG_SYNC);
 
@@ -1334,6 +1356,32 @@ xfs_log_work_queue(
 }
 
 /*
+ * Clear the log incompat flags if we have the opportunity.
+ *
+ * This only happens if we're about to log the second dummy transaction as part
+ * of covering the log and we can get the log incompat feature usage lock.
+ */
+static inline void
+xlog_clear_incompat(
+	struct xlog		*log)
+{
+	struct xfs_mount	*mp = log->l_mp;
+
+	if (!xfs_sb_has_incompat_log_feature(&mp->m_sb,
+				XFS_SB_FEAT_INCOMPAT_LOG_ALL))
+		return;
+
+	if (log->l_covered_state != XLOG_STATE_COVER_DONE2)
+		return;
+
+	if (!down_write_trylock(&log->l_incompat_users))
+		return;
+
+	xfs_clear_incompat_log_features(mp);
+	up_write(&log->l_incompat_users);
+}
+
+/*
  * Every sync period we need to unpin all items in the AIL and push them to
  * disk. If there is nothing dirty, then we might need to cover the log to
  * indicate that the filesystem is idle.
@@ -1359,6 +1407,7 @@ xfs_log_worker(
 		 * synchronously log the superblock instead to ensure the
 		 * superblock is immediately unpinned and can be written back.
 		 */
+		xlog_clear_incompat(log);
 		xfs_sync_sb(mp, true);
 	} else
 		xfs_log_force(mp, 0);
@@ -1446,6 +1495,8 @@ xlog_alloc_log(
 	}
 	log->l_sectBBsize = 1 << log2_size;
 
+	init_rwsem(&log->l_incompat_users);
+
 	xlog_get_iclog_buffer_size(mp, log);
 
 	spin_lock_init(&log->l_icloglock);
@@ -1461,7 +1512,6 @@ xlog_alloc_log(
 	 */
 	ASSERT(log->l_iclog_size >= 4096);
 	for (i = 0; i < log->l_iclog_bufs; i++) {
-		int align_mask = xfs_buftarg_dma_alignment(mp->m_logdev_targp);
 		size_t bvec_size = howmany(log->l_iclog_size, PAGE_SIZE) *
 				sizeof(struct bio_vec);
 
@@ -1473,7 +1523,7 @@ xlog_alloc_log(
 		iclog->ic_prev = prev_iclog;
 		prev_iclog = iclog;
 
-		iclog->ic_data = kmem_alloc_io(log->l_iclog_size, align_mask,
+		iclog->ic_data = kmem_alloc_large(log->l_iclog_size,
 					       KM_MAYFAIL | KM_ZERO);
 		if (!iclog->ic_data)
 			goto out_free_iclog;
@@ -1790,9 +1840,7 @@ xlog_write_iclog(
 		 * the buffer manually, the code needs to be kept in sync
 		 * with the I/O completion path.
 		 */
-		xlog_state_done_syncing(iclog);
-		up(&iclog->ic_sema);
-		return;
+		goto sync;
 	}
 
 	bio_init(&iclog->ic_bio, iclog->ic_bvec, howmany(count, PAGE_SIZE));
@@ -1812,10 +1860,9 @@ xlog_write_iclog(
 	if (need_flush)
 		iclog->ic_bio.bi_opf |= REQ_PREFLUSH;
 
-	if (xlog_map_iclog_data(&iclog->ic_bio, iclog->ic_data, count)) {
-		xfs_force_shutdown(log->l_mp, SHUTDOWN_LOG_IO_ERROR);
-		return;
-	}
+	if (xlog_map_iclog_data(&iclog->ic_bio, iclog->ic_data, count))
+		goto shutdown;
+
 	if (is_vmalloc_addr(iclog->ic_data))
 		flush_kernel_vmap_range(iclog->ic_data, count);
 
@@ -1836,6 +1883,12 @@ xlog_write_iclog(
 	}
 
 	submit_bio(&iclog->ic_bio);
+	return;
+shutdown:
+	xfs_force_shutdown(log->l_mp, SHUTDOWN_LOG_IO_ERROR);
+sync:
+	xlog_state_done_syncing(iclog);
+	up(&iclog->ic_sema);
 }
 
 /*
@@ -3955,4 +4008,24 @@ xfs_log_in_recovery(
 	struct xlog		*log = mp->m_log;
 
 	return log->l_flags & XLOG_ACTIVE_RECOVERY;
+}
+
+/*
+ * Notify the log that we're about to start using a feature that is protected
+ * by a log incompat feature flag.  This will prevent log covering from
+ * clearing those flags.
+ */
+void
+xlog_use_incompat_feat(
+	struct xlog		*log)
+{
+	down_read(&log->l_incompat_users);
+}
+
+/* Notify the log that we've finished using log incompat features. */
+void
+xlog_drop_incompat_feat(
+	struct xlog		*log)
+{
+	up_read(&log->l_incompat_users);
 }

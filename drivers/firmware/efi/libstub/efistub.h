@@ -25,6 +25,11 @@
 #define EFI_ALLOC_ALIGN		EFI_PAGE_SIZE
 #endif
 
+#ifndef EFI_ALLOC_LIMIT
+#define EFI_ALLOC_LIMIT		ULONG_MAX
+#endif
+
+extern bool efi_no5lvl;
 extern int __pure nokaslr(void);
 extern int __pure is_quiet(void);
 
@@ -60,11 +65,11 @@ efi_status_t efi_get_random_bytes(efi_system_table_t *sys_table,
 
 efi_status_t efi_random_alloc(efi_system_table_t *sys_table_arg,
 			      unsigned long size, unsigned long align,
-			      unsigned long *addr, unsigned long random_seed);
+			      unsigned long *addr, unsigned long random_seed,
+			      int memory_type, unsigned long alloc_min,
+			      unsigned long alloc_max);
 
 efi_status_t check_platform_features(efi_system_table_t *sys_table_arg);
-
-efi_status_t efi_random_get_seed(efi_system_table_t *sys_table_arg);
 
 void *get_efi_config_table(efi_system_table_t *sys_table, efi_guid_t guid);
 

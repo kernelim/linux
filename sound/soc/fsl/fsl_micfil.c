@@ -668,7 +668,7 @@ static int fsl_micfil_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	micfil->pdev = pdev;
-	strncpy(micfil->name, np->name, sizeof(micfil->name) - 1);
+	strscpy(micfil->name, np->name, sizeof(micfil->name));
 
 	of_id = of_match_device(fsl_micfil_dt_ids, &pdev->dev);
 	if (!of_id || !of_id->data)

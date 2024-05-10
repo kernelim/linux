@@ -3000,6 +3000,11 @@ static struct module *setup_load_info(struct load_info *info, int flags)
 	info->secstrings = (void *)info->hdr
 		+ info->sechdrs[info->hdr->e_shstrndx].sh_offset;
 
+#ifdef CONFIG_RHEL_DIFFERENCES
+	if (get_modinfo(info, "intree"))
+		module_rh_check_status(info->name);
+#endif
+
 	err = rewrite_section_headers(info, flags);
 	if (err)
 		return ERR_PTR(err);
@@ -3175,6 +3180,12 @@ static int find_module_sections(struct module *mod, struct load_info *info)
 					    sizeof(*mod->ei_funcs),
 					    &mod->num_ei_funcs);
 #endif
+#if IS_ENABLED(CONFIG_KUNIT)
+	mod->kunit_suites = section_objs(info, ".kunit_test_suites",
+					      sizeof(*mod->kunit_suites),
+					      &mod->num_kunit_suites);
+#endif
+
 	mod->extable = section_objs(info, "__ex_table",
 				    sizeof(*mod->extable), &mod->num_exentries);
 

@@ -44,6 +44,8 @@ static inline void efi_fpu_end(void)
 }
 
 #ifdef CONFIG_X86_32
+#define EFI_X86_KERNEL_ALLOC_LIMIT		(SZ_512M - 1)
+
 
 extern asmlinkage unsigned long efi_call_phys(void *, ...);
 
@@ -62,8 +64,7 @@ extern asmlinkage unsigned long efi_call_phys(void *, ...);
 #define efi_ioremap(addr, size, type, attr)	ioremap_cache(addr, size)
 
 #else /* !CONFIG_X86_32 */
-
-#define EFI_LOADER_SIGNATURE	"EL64"
+#define EFI_X86_KERNEL_ALLOC_LIMIT		EFI_ALLOC_LIMIT
 
 extern asmlinkage u64 efi_call(void *fp, ...);
 
@@ -224,6 +225,13 @@ static inline bool efi_is_native(void)
 	__efi_early()->call((unsigned long)				\
 				efi_table_attr(protocol, f, instance),	\
 		instance, ##__VA_ARGS__)
+
+#define efi_dxe_call(f, ...)						\
+	__efi_early()->call((unsigned long)				\
+				efi_table_attr(efi_dxe_services_table,	\
+					       f,			\
+					       efi_dxe_table),		\
+				##__VA_ARGS__)
 
 #define efi_call_early(f, ...)						\
 	__efi_early()->call((unsigned long)				\

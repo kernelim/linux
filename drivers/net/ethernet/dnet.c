@@ -776,8 +776,6 @@ static int dnet_probe(struct platform_device *pdev)
 	int err;
 	unsigned int irq;
 
-	mark_driver_unmaintained(DRV_NAME);
-
 	irq = platform_get_irq(pdev, 0);
 
 	dev = alloc_etherdev(sizeof(*bp));

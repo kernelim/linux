@@ -250,6 +250,9 @@ static int set_scrub_rate(struct mem_ctl_info *mci, u32 bw)
 	struct amd64_pvt *pvt = mci->pvt_info;
 	u32 min_scrubrate = 0x5;
 
+	if (pvt->fam > 0x19)
+		return -EINVAL;
+
 	if (pvt->fam == 0xf)
 		min_scrubrate = 0x0;
 
@@ -269,6 +272,9 @@ static int get_scrub_rate(struct mem_ctl_info *mci)
 	struct amd64_pvt *pvt = mci->pvt_info;
 	int i, retval = -EINVAL;
 	u32 scrubval = 0;
+
+	if (pvt->fam > 0x19)
+		return -EINVAL;
 
 	if (pvt->umc) {
 		amd64_read_pci_cfg(pvt->F6, F17H_SCR_BASE_ADDR, &scrubval);
@@ -944,7 +950,8 @@ static void dump_misc_regs(struct amd64_pvt *pvt)
 	else
 		__dump_misc_regs(pvt);
 
-	edac_dbg(1, "  DramHoleValid: %s\n", dhar_valid(pvt) ? "yes" : "no");
+	if (pvt->fam <= 0x19)
+		edac_dbg(1, "  DramHoleValid: %s\n", dhar_valid(pvt) ? "yes" : "no");
 
 	amd64_info("using x%u syndromes.\n", pvt->ecc_sym_sz);
 }
@@ -2443,6 +2450,23 @@ static struct amd64_family_type family_types[] = {
 			.dbam_to_cs		= f17_addr_mask_to_cs_size,
 		}
 	},
+	[F1A_CPUS] = {
+		.ctl_name = "F1Ah",
+		.max_mcs = 12,
+		.flags.zn_regs_v2 = 1,
+		.ops = {
+			.early_channel_count	= f17_early_channel_count,
+			.dbam_to_cs		= f17_addr_mask_to_cs_size,
+		}
+	},
+	[F1A_M40H_CPUS] = {
+		.ctl_name = "F1Ah_M40h",
+		.flags.zn_regs_v2 = 1,
+		.ops = {
+			.early_channel_count	= f17_early_channel_count,
+			.dbam_to_cs		= f17_addr_mask_to_cs_size,
+		}
+	},
 };
 
 /*
@@ -2817,6 +2841,9 @@ reserve_mc_sibling_devs(struct amd64_pvt *pvt, u16 pci_id1, u16 pci_id2)
 
 static void free_mc_sibling_devs(struct amd64_pvt *pvt)
 {
+	if (pvt->fam > 0x19)
+		return;
+
 	if (pvt->umc) {
 		pci_dev_put(pvt->F0);
 		pci_dev_put(pvt->F6);
@@ -2890,6 +2917,11 @@ static void read_mc_regs(struct amd64_pvt *pvt)
 {
 	unsigned int range;
 	u64 msr_val;
+
+	if (pvt->fam > 0x19) {
+		__read_mc_regs_df(pvt);
+		goto skip;
+	}
 
 	/*
 	 * Retrieve TOP_MEM and TOP_MEM2; no masking off of reserved bits since
@@ -3500,7 +3532,20 @@ static struct amd64_family_type *per_family_init(struct amd64_pvt *pvt)
 		pvt->ops	= &family_types[F19_CPUS].ops;
 		family_types[F19_CPUS].ctl_name = "F19h";
 		break;
-
+	case 0x1A:
+		switch (pvt->model) {
+		case 0x00 ... 0x1f:
+			fam_type = &family_types[F1A_CPUS];
+			pvt->ops = &family_types[F1A_CPUS].ops;
+			fam_type->ctl_name      = "F1Ah";
+			break;
+		case 0x40 ... 0x4f:
+			fam_type = &family_types[F1A_M40H_CPUS];
+			pvt->ops = &family_types[F1A_M40H_CPUS].ops;
+			fam_type->ctl_name           = "F1Ah_M40h";
+			break;
+		}
+		break;
 	default:
 		amd64_err("Unsupported family!\n");
 		return NULL;
@@ -3533,17 +3578,21 @@ static int hw_info_get(struct amd64_pvt *pvt)
 		pvt->umc = kcalloc(fam_type->max_mcs, sizeof(struct amd64_umc), GFP_KERNEL);
 		if (!pvt->umc)
 			return -ENOMEM;
-
-		pci_id1 = fam_type->f0_id;
-		pci_id2 = fam_type->f6_id;
-	} else {
-		pci_id1 = fam_type->f1_id;
-		pci_id2 = fam_type->f2_id;
 	}
 
-	ret = reserve_mc_sibling_devs(pvt, pci_id1, pci_id2);
-	if (ret)
-		return ret;
+	if (pvt->fam <= 0x19) {
+		if (pvt->fam >= 0x17) {
+			pci_id1 = fam_type->f0_id;
+			pci_id2 = fam_type->f6_id;
+		} else {
+			pci_id1 = fam_type->f1_id;
+			pci_id2 = fam_type->f2_id;
+		}
+
+		ret = reserve_mc_sibling_devs(pvt, pci_id1, pci_id2);
+		if (ret)
+			return ret;
+	}
 
 	read_mc_regs(pvt);
 
@@ -3748,6 +3797,7 @@ static const struct x86_cpu_id amd64_cpuids[] = {
 	X86_MATCH_VENDOR_FAM(AMD,	0x16, NULL),
 	X86_MATCH_VENDOR_FAM(AMD,	0x17, NULL),
 	X86_MATCH_VENDOR_FAM(AMD,	0x19, NULL),
+	X86_MATCH_VENDOR_FAM(AMD,	0x1A, NULL),
 	{ }
 };
 MODULE_DEVICE_TABLE(x86cpu, amd64_cpuids);
@@ -3801,7 +3851,8 @@ static int __init amd64_edac_init(void)
 	else
 		amd_register_ecc_decoder(decode_bus_error);
 
-	setup_pci_device();
+	if (boot_cpu_data.x86 <= 0x19)
+		setup_pci_device();
 
 #ifdef CONFIG_X86_32
 	amd64_err("%s on 32-bit is unsupported. USE AT YOUR OWN RISK!\n", EDAC_MOD_STR);

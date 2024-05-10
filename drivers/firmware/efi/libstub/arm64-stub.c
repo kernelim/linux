@@ -111,9 +111,10 @@ efi_status_t handle_kernel_image(efi_system_table_t *sys_table_arg,
 		 * locate the kernel at a randomized offset in physical memory.
 		 */
 		*reserve_size = kernel_memsize + offset;
-		status = efi_random_alloc(sys_table_arg, *reserve_size,
-					  MIN_KIMG_ALIGN, reserve_addr,
-					  (u32)phys_seed);
+		status = efi_random_alloc(sys_table_arg,
+					  *reserve_size, MIN_KIMG_ALIGN,
+					  reserve_addr, (u32)phys_seed,
+					  EFI_LOADER_DATA, 0, EFI_ALLOC_LIMIT);
 
 		*image_addr = *reserve_addr + offset;
 	} else {

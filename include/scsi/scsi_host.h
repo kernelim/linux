@@ -32,6 +32,17 @@ struct scsi_transport_template;
 #define DISABLE_CLUSTERING 0
 #define ENABLE_CLUSTERING 1
 
+/* RHEL only, extend host template */
+struct scsi_host_template_rh_ext {
+	int (*init_cmd_priv)(struct Scsi_Host *shost, struct scsi_cmnd *cmd);
+	int (*exit_cmd_priv)(struct Scsi_Host *shost, struct scsi_cmnd *cmd);
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
+};
+
 struct scsi_host_template {
 	struct module *module;
 	const char *name;
@@ -504,7 +515,7 @@ struct scsi_host_template {
 	 * allow extending the structure while preserving ABI.
 	 */
 
-	RH_KABI_RESERVE(4)
+	RH_KABI_USE(4, const struct scsi_host_template_rh_ext *ext)
 };
 
 /*

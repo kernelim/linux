@@ -797,12 +797,6 @@ static const struct pci_device_id efx_pci_table[] = {
 	{0}			/* end of list */
 };
 
-static const struct pci_device_id efx_deprecated_pci_table[] = {
-	{PCI_DEVICE(PCI_VENDOR_ID_SOLARFLARE, 0x0803)},	/* SFC9020 */
-	{PCI_DEVICE(PCI_VENDOR_ID_SOLARFLARE, 0x0813)},	/* SFL9021 */
-	{0}
-};
-
 /**************************************************************************
  *
  * Data housekeeping
@@ -1057,8 +1051,6 @@ static int efx_pci_probe(struct pci_dev *pci_dev,
 	if (!efx->type->is_vf)
 		efx_probe_vpd_strings(efx);
 
-	pci_hw_deprecated(efx_deprecated_pci_table, pci_dev);
-
 	/* Set up basic I/O (BAR mappings etc) */
 	rc = efx_siena_init_io(efx, efx->type->mem_bar(efx),
 			       efx->type->max_dma_mask,
@@ -1154,6 +1146,17 @@ static int efx_pm_freeze(struct device *dev)
 	rtnl_unlock();
 
 	return 0;
+}
+
+static void efx_pci_shutdown(struct pci_dev *pci_dev)
+{
+	struct efx_nic *efx = pci_get_drvdata(pci_dev);
+
+	if (!efx)
+		return;
+
+	efx_pm_freeze(&pci_dev->dev);
+	pci_disable_device(pci_dev);
 }
 
 static int efx_pm_thaw(struct device *dev)
@@ -1260,6 +1263,7 @@ static struct pci_driver efx_pci_driver = {
 	.probe		= efx_pci_probe,
 	.remove		= efx_pci_remove,
 	.driver.pm	= &efx_pm_ops,
+	.shutdown	= efx_pci_shutdown,
 	.err_handler	= &efx_siena_err_handlers,
 #ifdef CONFIG_SFC_SIENA_SRIOV
 	.sriov_configure = efx_pci_sriov_configure,

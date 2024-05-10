@@ -57,7 +57,7 @@ TARGETS += timers
 endif
 TARGETS += tpm2
 TARGETS += user
-TARGETS += vm
+TARGETS += mm
 TARGETS += x86
 TARGETS += zram
 #Please keep the TARGETS list alphabetically sorted

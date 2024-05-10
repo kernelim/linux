@@ -168,6 +168,8 @@ built as a module).
 
 For more information, see Documentation/dev-tools/kunit/api/test.rst.
 
+.. _kunit-on-non-uml:
+
 Writing Tests For Other Architectures
 -------------------------------------
 
@@ -508,7 +510,7 @@ By reusing the same ``cases`` array from above, we can write the test as a
 		const char *str;
 		const char *sha1;
 	};
-	struct sha1_test_case cases[] = {
+	const struct sha1_test_case cases[] = {
 		{
 			.str = "hello world",
 			.sha1 = "2aae6c35c94fcfb415dbe95f408b9ce91ee846ed",
@@ -546,8 +548,6 @@ By reusing the same ``cases`` array from above, we can write the test as a
 		KUNIT_CASE_PARAM(sha1_test, sha1_gen_params),
 		{}
 	};
-
-.. _kunit-on-non-uml:
 
 Exiting Early on Failed Expectations
 ------------------------------------

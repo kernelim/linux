@@ -265,6 +265,21 @@ static inline void snd_soc_debugfs_exit(void) { }
 
 #endif
 
+static inline int snd_soc_dlc_component_is_empty(struct snd_soc_dai_link_component *dlc)
+{
+	return !(dlc->name || dlc->of_node);
+}
+
+static inline int snd_soc_dlc_component_is_invalid(struct snd_soc_dai_link_component *dlc)
+{
+	return (dlc->name && dlc->of_node);
+}
+
+static inline int snd_soc_dlc_dai_is_empty(struct snd_soc_dai_link_component *dlc)
+{
+	return !dlc->dai_name;
+}
+
 static int snd_soc_rtd_add_component(struct snd_soc_pcm_runtime *rtd,
 				     struct snd_soc_component *component)
 {
@@ -856,102 +871,100 @@ static int soc_dai_link_sanity_check(struct snd_soc_card *card,
 				     struct snd_soc_dai_link *link)
 {
 	int i;
-	struct snd_soc_dai_link_component *cpu, *codec, *platform;
+	struct snd_soc_dai_link_component *dlc;
 
-	for_each_link_codecs(link, i, codec) {
+	/* Codec check */
+	for_each_link_codecs(link, i, dlc) {
 		/*
 		 * Codec must be specified by 1 of name or OF node,
 		 * not both or neither.
 		 */
-		if (!!codec->name == !!codec->of_node) {
-			dev_err(card->dev, "ASoC: Neither/both codec name/of_node are set for %s\n",
-				link->name);
-			return -EINVAL;
-		}
+		if (snd_soc_dlc_component_is_invalid(dlc))
+			goto component_invalid;
+
+		if (snd_soc_dlc_component_is_empty(dlc))
+			goto component_empty;
 
 		/* Codec DAI name must be specified */
-		if (!codec->dai_name) {
-			dev_err(card->dev, "ASoC: codec_dai_name not set for %s\n",
-				link->name);
-			return -EINVAL;
-		}
+		if (snd_soc_dlc_dai_is_empty(dlc))
+			goto dai_empty;
 
 		/*
 		 * Defer card registration if codec component is not added to
 		 * component list.
 		 */
-		if (!soc_find_component(codec)) {
-			dev_dbg(card->dev,
-				"ASoC: codec component %s not found for link %s\n",
-				codec->name, link->name);
-			return -EPROBE_DEFER;
-		}
+		if (!soc_find_component(dlc))
+			goto component_not_found;
 	}
 
-	for_each_link_platforms(link, i, platform) {
+	/* Platform check */
+	for_each_link_platforms(link, i, dlc) {
 		/*
 		 * Platform may be specified by either name or OF node, but it
 		 * can be left unspecified, then no components will be inserted
 		 * in the rtdcom list
 		 */
-		if (!!platform->name == !!platform->of_node) {
-			dev_err(card->dev,
-				"ASoC: Neither/both platform name/of_node are set for %s\n",
-				link->name);
-			return -EINVAL;
-		}
+		if (snd_soc_dlc_component_is_invalid(dlc))
+			goto component_invalid;
+
+		if (snd_soc_dlc_component_is_empty(dlc))
+			goto component_empty;
 
 		/*
 		 * Defer card registration if platform component is not added to
 		 * component list.
 		 */
-		if (!soc_find_component(platform)) {
-			dev_dbg(card->dev,
-				"ASoC: platform component %s not found for link %s\n",
-				platform->name, link->name);
-			return -EPROBE_DEFER;
-		}
+		if (!soc_find_component(dlc))
+			goto component_not_found;
 	}
 
-	for_each_link_cpus(link, i, cpu) {
+	/* CPU check */
+	for_each_link_cpus(link, i, dlc) {
 		/*
 		 * CPU device may be specified by either name or OF node, but
 		 * can be left unspecified, and will be matched based on DAI
 		 * name alone..
 		 */
-		if (cpu->name && cpu->of_node) {
-			dev_err(card->dev,
-				"ASoC: Neither/both cpu name/of_node are set for %s\n",
-				link->name);
-			return -EINVAL;
-		}
+		if (snd_soc_dlc_component_is_invalid(dlc))
+			goto component_invalid;
 
-		/*
-		 * Defer card registration if cpu dai component is not added to
-		 * component list.
-		 */
-		if ((cpu->of_node || cpu->name) &&
-		    !soc_find_component(cpu)) {
-			dev_dbg(card->dev,
-				"ASoC: cpu component %s not found for link %s\n",
-				cpu->name, link->name);
-			return -EPROBE_DEFER;
-		}
 
-		/*
-		 * At least one of CPU DAI name or CPU device name/node must be
-		 * specified
-		 */
-		if (!cpu->dai_name &&
-		    !(cpu->name || cpu->of_node)) {
-			dev_err(card->dev,
-				"ASoC: Neither cpu_dai_name nor cpu_name/of_node are set for %s\n",
-				link->name);
-			return -EINVAL;
+		if (snd_soc_dlc_component_is_empty(dlc)) {
+			/*
+			 * At least one of CPU DAI name or CPU device name/node must be specified
+			 */
+			if (snd_soc_dlc_dai_is_empty(dlc))
+				goto component_dai_empty;
+		} else {
+			/*
+			 * Defer card registration if Component is not added
+			 */
+			if (!soc_find_component(dlc))
+				goto component_not_found;
 		}
 	}
 
 	return 0;
+
+component_invalid:
+	dev_err(card->dev, "ASoC: Both Component name/of_node are set for %s\n", link->name);
+	return -EINVAL;
+
+component_empty:
+	dev_err(card->dev, "ASoC: Neither Component name/of_node are set for %s\n", link->name);
+	return -EINVAL;
+
+component_not_found:
+	dev_dbg(card->dev, "ASoC: Component %s not found for link %s\n", dlc->name, link->name);
+	return -EPROBE_DEFER;
+
+dai_empty:
+	dev_err(card->dev, "ASoC: DAI name is not set for %s\n", link->name);
+	return -EINVAL;
+
+component_dai_empty:
+	dev_err(card->dev, "ASoC: Neither DAI/Component name/of_node are set for %s\n", link->name);
+	return -EINVAL;
 }
 
 /**
@@ -1288,7 +1301,7 @@ static int soc_init_pcm_runtime(struct snd_soc_card *card,
 	snd_soc_runtime_get_dai_fmt(rtd);
 	ret = snd_soc_runtime_set_dai_fmt(rtd, dai_link->dai_fmt);
 	if (ret)
-		return ret;
+		goto err;
 
 	/* add DPCM sysfs entries */
 	soc_dpcm_debugfs_add(rtd);
@@ -1313,17 +1326,26 @@ static int soc_init_pcm_runtime(struct snd_soc_card *card,
 	/* create compress_device if possible */
 	ret = snd_soc_dai_compress_new(cpu_dai, rtd, num);
 	if (ret != -ENOTSUPP)
-		return ret;
+		goto err;
 
 	/* create the pcm */
 	ret = soc_new_pcm(rtd, num);
 	if (ret < 0) {
 		dev_err(card->dev, "ASoC: can't create pcm %s :%d\n",
 			dai_link->stream_name, ret);
-		return ret;
+		goto err;
 	}
 
-	return snd_soc_pcm_dai_new(rtd);
+	ret = snd_soc_pcm_dai_new(rtd);
+	if (ret < 0)
+		goto err;
+
+	rtd->initialized = true;
+
+	return 0;
+err:
+	snd_soc_link_exit(rtd);
+	return ret;
 }
 
 static void soc_set_name_prefix(struct snd_soc_card *card,
@@ -1386,8 +1408,8 @@ static int soc_probe_component(struct snd_soc_card *card,
 	if (component->card) {
 		if (component->card != card) {
 			dev_err(component->dev,
-				"Trying to bind component to card \"%s\" but is already bound to card \"%s\"\n",
-				card->name, component->card->name);
+				"Trying to bind component \"%s\" to card \"%s\" but is already bound to card \"%s\"\n",
+				component->name, card->name, component->card->name);
 			return -ENODEV;
 		}
 		return 0;
@@ -1921,7 +1943,8 @@ static void soc_cleanup_card_resources(struct snd_soc_card *card)
 
 	/* release machine specific resources */
 	for_each_card_rtds(card, rtd)
-		snd_soc_link_exit(rtd);
+		if (rtd->initialized)
+			snd_soc_link_exit(rtd);
 	/* remove and free each DAI */
 	soc_remove_link_dais(card);
 	soc_remove_link_components(card);
@@ -2017,8 +2040,10 @@ static int snd_soc_bind_card(struct snd_soc_card *card)
 	/* probe all components used by DAI links on this card */
 	ret = soc_probe_link_components(card);
 	if (ret < 0) {
-		dev_err(card->dev,
-			"ASoC: failed to instantiate card %d\n", ret);
+		if (ret != -EPROBE_DEFER) {
+			dev_err(card->dev,
+				"ASoC: failed to instantiate card %d\n", ret);
+		}
 		goto probe_end;
 	}
 
@@ -3225,14 +3250,49 @@ unsigned int snd_soc_daifmt_parse_clock_provider_raw(struct device_node *np,
 }
 EXPORT_SYMBOL_GPL(snd_soc_daifmt_parse_clock_provider_raw);
 
+int snd_soc_get_stream_cpu(struct snd_soc_dai_link *dai_link, int stream)
+{
+	/*
+	 * [Normal]
+	 *
+	 * Playback
+	 *	CPU  : SNDRV_PCM_STREAM_PLAYBACK
+	 *	Codec: SNDRV_PCM_STREAM_PLAYBACK
+	 *
+	 * Capture
+	 *	CPU  : SNDRV_PCM_STREAM_CAPTURE
+	 *	Codec: SNDRV_PCM_STREAM_CAPTURE
+	 */
+	if (!dai_link->c2c_params)
+		return stream;
+
+	/*
+	 * [Codec2Codec]
+	 *
+	 * Playback
+	 *	CPU  : SNDRV_PCM_STREAM_CAPTURE
+	 *	Codec: SNDRV_PCM_STREAM_PLAYBACK
+	 *
+	 * Capture
+	 *	CPU  : SNDRV_PCM_STREAM_PLAYBACK
+	 *	Codec: SNDRV_PCM_STREAM_CAPTURE
+	 */
+	if (stream == SNDRV_PCM_STREAM_CAPTURE)
+		return SNDRV_PCM_STREAM_PLAYBACK;
+
+	return SNDRV_PCM_STREAM_CAPTURE;
+}
+EXPORT_SYMBOL_GPL(snd_soc_get_stream_cpu);
+
 int snd_soc_get_dai_id(struct device_node *ep)
 {
 	struct snd_soc_component *component;
-	struct snd_soc_dai_link_component dlc;
+	struct snd_soc_dai_link_component dlc = {
+		.of_node = of_graph_get_port_parent(ep),
+	};
 	int ret;
 
-	dlc.of_node	= of_graph_get_port_parent(ep);
-	dlc.name	= NULL;
+
 	/*
 	 * For example HDMI case, HDMI has video/sound port,
 	 * but ALSA SoC needs sound port number only.
