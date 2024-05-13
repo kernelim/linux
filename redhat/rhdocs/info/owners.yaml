@@ -13,12 +13,10 @@ subsystems:
      # readyForMerge label. This is for the net subsystem's testing
      # efforts. See
      # https://gitlab.com/cki-project/kernel-webhooks/-/issues/56
-     readyForMergeDeps:
+     # readyForMergeDeps:
      # Optional labels that are automatically added to all relevant merge
      # requests.
-     newLabels:
-     # Email Label used on RHKL to distinguish email
-     emailLabel: INTERNAL
+     # newLabels:
    # S:
    status: Supported
    # The list of Red Hat Engineering SSTs that are responsible for developing this subsystem.
@@ -58,12 +56,12 @@ subsystems:
        includes:
           - Makefile.rhelver
        # N:
-       includeRegexes:
+       # includeRegexes:
        # X:
    # T:
    scm: git https://gitlab.com/cki-project/kernel-ark.git
    # L:
-   mailingList:
+   # mailingList:
  - subsystem: ARK Real Time Kernel Maintainer
    labels:
      name: redhat
@@ -76,9 +74,6 @@ subsystems:
      - name: Clark Williams
        email: williams@redhat.com
        gluser: clrkwllms
-     - name: Andrew Halaney
-       email: ahalaney@redhat.com
-       gluser: ahalaney
    paths:
        includes:
           - Makefile.rhelver
@@ -724,13 +719,11 @@ subsystems:
    devel-sst:
      - rhel-sst-arch-hw
    jiraComponent: kernel / Platform Enablement
+   requiredApproval: false
    maintainers:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/accessibility/
@@ -749,12 +742,13 @@ subsystems:
      - name: Lenny Szubowicz
        email: lszubowi@redhat.com
        gluser: lszubowi
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
+   reviewers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - drivers/acpi/
@@ -981,9 +975,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/android/
@@ -1039,15 +1030,16 @@ subsystems:
    jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
      - name: Mark Salter
        email: msalter@redhat.com
        gluser: msalter
+   reviewers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - arch/Kconfig
@@ -1401,9 +1393,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/auxdisplay/
@@ -1452,10 +1441,10 @@ subsystems:
      - name: Lenny Szubowicz
        email: lszubowi@redhat.com
        gluser: lszubowi
+   reviewers:
      - name: Prarit Bhargava
        email: prarit@redhat.com
        gluser: prarit
-   paths:
  - subsystem: BLOCK LAYER
    labels:
      name: block
@@ -1689,12 +1678,20 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   jiraComponent: kernel / Platform Enablement / NVMe
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
-     - name: Maurizio Lombardi
-       email: mlombard@redhat.com
-       gluser: mlombard
+     - name: Nilesh Javali
+       email: njavali@redhat.com
+       gluser: njavali
+       restricted: true
+   reviewers:
+     - name: John Meneghini
+       email: jmeneghi@redhat.com
+       gluser: johnmeneghini
+     - name: Chris Leech
+       email: cleech@redhat.com
+       gluser: cleech
    paths:
        includes:
           - drivers/scsi/bnx2i/
@@ -1704,16 +1701,20 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   jiraComponent: kernel / Platform Enablement / NVMe
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
-     - name: Maurizio Lombardi
-       email: mlombard@redhat.com
-       gluser: mlombard
+     - name: Nilesh Javali
+       email: njavali@redhat.com
+       gluser: njavali
+       restricted: true
    reviewers:
      - name: John Meneghini
        email: jmeneghi@redhat.com
        gluser: johnmeneghini
+     - name: Chris Leech
+       email: cleech@redhat.com
+       gluser: cleech
    paths:
        includes:
           - drivers/scsi/bnx2fc/
@@ -1723,12 +1724,20 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-network-drivers
-   jiraComponent: kernel / Platform Enablement / NVMe
+   jiraComponent: kernel / Networking / NIC Drivers
    requiredApproval: false
    maintainers:
-     - name: Maurizio Lombardi
-       email: mlombard@redhat.com
-       gluser: mlombard
+     - name: Nilesh Javali
+       email: njavali@redhat.com
+       gluser: njavali
+       restricted: true
+   reviewers:
+     - name: John Meneghini
+       email: jmeneghi@redhat.com
+       gluser: johnmeneghini
+     - name: Chris Leech
+       email: cleech@redhat.com
+       gluser: cleech
    paths:
        includes:
           - drivers/net/ethernet/broadcom/cnic*
@@ -1895,9 +1904,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/char/
@@ -1919,9 +1925,6 @@ subsystems:
      - name: Benjamin Coddington
        email: bcodding@redhat.com
        gluser: bcodding
-     - name: Jeffrey Layton
-       email: jlayton@redhat.com
-       gluser: jtlayton
      - name: Steve Dickson
        email: steved@redhat.com
        gluser: steved92
@@ -1943,13 +1946,13 @@ subsystems:
    jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
-     - name: Chris Leech
-       email: cleech@redhat.com
-       gluser: cleech
-   reviewers:
      - name: John Meneghini
        email: jmeneghi@redhat.com
        gluser: johnmeneghini
+   reviewers:
+     - name: Chris Leech
+       email: cleech@redhat.com
+       gluser: cleech
    paths:
        includes:
           - drivers/scsi/fnic/
@@ -1998,9 +2001,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/comedi/
@@ -2058,7 +2058,7 @@ subsystems:
    devel-sst:
      - rhel-sst-arch-hw
    jiraComponent: kernel / Platform Enablement / PCI subsystem
-   required-approval: false
+   requiredApproval: false
    maintainers:
      - name: Myron Stowe
        email: mstowe@redhat.com
@@ -2100,16 +2100,12 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/connector/
  - subsystem: Continuous Integration (CKI)
    labels:
      name: cki
-     emailLabel: INTERNAL
    status: Supported
    devel-sst:
      - rhel-sst-cki
@@ -2182,9 +2178,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/counter/
@@ -2205,15 +2198,16 @@ subsystems:
      - name: Lenny Szubowicz
        email: lszubowi@redhat.com
        gluser: lszubowi
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
      - name: Alessandro Carminati
        email: acarmina@redhat.com
        gluser: acarmina
+   reviewers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - drivers/cpufreq/
@@ -2232,12 +2226,13 @@ subsystems:
      - name: Mark Langsdorf
        email: mlangsdo@redhat.com
        gluser: mlangsdorf
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
+   reviewers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - drivers/cpuidle/
@@ -2276,7 +2271,6 @@ subsystems:
    paths:
        includes:
           - Documentation/crypto/
-          - arch/*/crypto/
           - crypto/
           - include/crypto/
           - include/linux/crypto*
@@ -2316,7 +2310,9 @@ subsystems:
        includes:
           - Documentation/devicetree/bindings/crypto/
           - Documentation/driver-api/crypto/
+          - arch/*/crypto/
           - drivers/crypto/
+          - drivers/s390/crypto/
           - include/linux/ccp*
           - include/linux/psp*
           - include/uapi/linux/psp*
@@ -2382,9 +2378,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/w1/
@@ -2429,9 +2422,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/devfreq/
@@ -2477,13 +2467,6 @@ subsystems:
      - name: Ivan Vecera
        email: ivecera@redhat.com
        gluser: ivecera
-   reviewers:
-     - name: Petr Oros
-       email: poros@redhat.com
-       gluser: poros2
-     - name: Ivan Vecera
-       email: ivecera@redhat.com
-       gluser: ivecera
    paths:
        includes:
           - Documentation/networking/devlink/
@@ -2498,7 +2481,6 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-     - rhel-sst-filesystems
      - rhel-sst-filesystems
    jiraComponent: kernel / File Systems / VFS
    requiredApproval: false
@@ -2693,9 +2675,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/eisa/
@@ -2924,9 +2903,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/extcon/
@@ -2936,7 +2912,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-storage-io
-   jiraComponent: kernel / Platform Enablement / NVMe
+   jiraComponent: kernel / Storage / Storage Drivers
    requiredApproval: false
    maintainers:
      - name: John Meneghini
@@ -3071,9 +3047,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/firewire/
@@ -3144,9 +3117,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/fsi/
@@ -3260,9 +3230,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - scripts/gcc-plugins/
@@ -3415,9 +3382,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/greybus/
@@ -3432,9 +3396,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/hwspinlock/
@@ -3449,9 +3410,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/hwtracing/
@@ -3516,9 +3474,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/hsi/
@@ -3675,9 +3630,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/iio/
@@ -3692,9 +3644,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/ipack/
@@ -3785,7 +3734,6 @@ subsystems:
    devel-sst:
      - rhel-sst-arch-hw
      - rhel-sst-gpu
-     - rhel-sst-gpu
    jiraComponent: kernel / Desktop / Desktop Other
    requiredApproval: false
    maintainers:
@@ -3837,7 +3785,7 @@ subsystems:
    devel-sst:
      - rhel-sst-network-drivers
    jiraComponent: kernel / Networking / NIC Drivers
-   required-approval: false
+   requiredApproval: false
    maintainers:
      - name: Ken Cox
        email: jkc@redhat.com
@@ -4078,12 +4026,13 @@ subsystems:
    jiraComponent: kernel / Platform Enablement / x86_64
    requiredApproval: true
    maintainers:
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
+   reviewers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - drivers/thermal/intel_powerclamp.c
@@ -4096,12 +4045,13 @@ subsystems:
    jiraComponent: kernel / Platform Enablement / x86_64
    requiredApproval: false
    maintainers:
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
+   reviewers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - drivers/counter/intel-qep.c
@@ -4146,12 +4096,13 @@ subsystems:
    jiraComponent: kernel / Platform Enablement / x86_64
    requiredApproval: true
    maintainers:
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
+   reviewers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - drivers/powercap/intel*
@@ -4166,9 +4117,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/interconnect/
@@ -4317,15 +4265,16 @@ subsystems:
    jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
      - name: Mark Salter
        email: msalter@redhat.com
        gluser: msalter
+   reviewers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - kernel/irq/
@@ -4374,9 +4323,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - include/net/iucv/
@@ -4693,9 +4639,6 @@ subsystems:
    jiraComponent: kernel / Kernel-Core
    requiredApproval: false
    maintainers:
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
      - name: Wander Lairson Costa
        email: wander@redhat.com
        gluser: walac
@@ -4721,6 +4664,9 @@ subsystems:
      - name: Rafael Aquini
        email: aquini@redhat.com
        gluser: raquini
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - lib/
@@ -4896,9 +4842,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/macintosh/
@@ -4983,9 +4926,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/memory/
@@ -5100,9 +5040,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/mtd/
@@ -5118,9 +5055,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/mcb/
@@ -5136,6 +5070,7 @@ subsystems:
      - name: Mark Salter
        email: msalter@redhat.com
        gluser: msalter
+   reviewers:
      - name: Prarit Bhargava
        email: prarit@redhat.com
        gluser: prarit
@@ -5326,9 +5261,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/most/
@@ -5354,11 +5286,8 @@ subsystems:
    devel-sst:
      - rhel-sst-kernel-ft
    jiraComponent: kernel / Namespace
-   requiredApproval: true
+   requiredApproval: false
    maintainers:
-     - name: Alex Gladkov
-       email: agladkov@redhat.com
-       gluser: legionus
      - name: Joel Savitz
        email: jsavitz@redhat.com
        gluser: jsavitz
@@ -5396,9 +5325,6 @@ subsystems:
      - name: Benjamin Coddington
        email: bcodding@redhat.com
        gluser: bcodding
-     - name: Jeffrey Layton
-       email: jlayton@redhat.com
-       gluser: jtlayton
      - name: Steve Dickson
        email: steved@redhat.com
        gluser: steved92
@@ -5469,9 +5395,6 @@ subsystems:
      - name: Benjamin Coddington
        email: bcodding@redhat.com
        gluser: bcodding
-     - name: Jeffrey Layton
-       email: jlayton@redhat.com
-       gluser: jtlayton
      - name: Steve Dickson
        email: steved@redhat.com
        gluser: steved92
@@ -5532,7 +5455,6 @@ subsystems:
      name: net
      readyForMergeDeps:
        - lnst
-     emailLabel: net
    status: Supported
    devel-sst:
      - rhel-sst-networking-core
@@ -5582,15 +5504,9 @@ subsystems:
      - name: Jarod Wilson
        email: jarod@redhat.com
        gluser: jwilsonrh
-     - name: Jiri Benc
-       email: jbenc@redhat.com
-       gluser: jbencrh
      - name: Lorenzo Bianconi
        email: lorenzo.bianconi@redhat.com
        gluser: LorenzoBianconi
-     - name: Marcelo Leitner
-       email: mleitner@redhat.com
-       gluser: marcelo.leitner
      - name: Paolo Abeni
        email: pabeni@redhat.com
        gluser: pabeni
@@ -5628,6 +5544,7 @@ subsystems:
           - drivers/net/veth.c
           - drivers/net/vrf.c
           - drivers/net/vxlan.c
+          - drivers/net/vxlan/
           - drivers/net/wireguard/
           - include/net/
           - include/linux/eth*
@@ -5819,7 +5736,6 @@ subsystems:
      name: net_team
      readyForMergeDeps:
        - lnst
-     emailLabel: net
    status: Supported
    devel-sst:
      - rhel-sst-networking-core
@@ -5843,7 +5759,6 @@ subsystems:
      name: tuntap
      readyForMergeDeps:
        - lnst
-     emailLabel: net
    status: Supported
    devel-sst:
      - rhel-sst-virtualization-networking
@@ -5910,9 +5825,6 @@ subsystems:
      - name: Benjamin Coddington
        email: bcodding@redhat.com
        gluser: bcodding
-     - name: Jeffrey Layton
-       email: jlayton@redhat.com
-       gluser: jtlayton
      - name: Steve Dickson
        email: steved@redhat.com
        gluser: steved92
@@ -5936,9 +5848,6 @@ subsystems:
      - name: Benjamin Coddington
        email: bcodding@redhat.com
        gluser: bcodding
-     - name: Jeffrey Layton
-       email: jlayton@redhat.com
-       gluser: jtlayton
      - name: Steve Dickson
        email: steved@redhat.com
        gluser: steved92
@@ -5983,12 +5892,13 @@ subsystems:
      - name: Myron Stowe
        email: mstowe@redhat.com
        gluser: mstowe1
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
+   reviewers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - drivers/ntb/
@@ -6022,12 +5932,13 @@ subsystems:
    jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
+   reviewers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - arch/*/include/asm/nmi.h
@@ -6131,8 +6042,8 @@ subsystems:
      name: nvme-rdma
    status: Supported
    devel-sst:
-     - rhel-sst-network-drivers
-   jiraComponent: kernel / RDMA
+     - rhel-sst-storage-io
+   jiraComponent: kernel / Platform Enablement / NVMe
    requiredApproval: false
    maintainers:
      - name: Kamal Heib
@@ -6205,9 +6116,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/of/
@@ -6261,9 +6169,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/parport/
@@ -6276,12 +6181,13 @@ subsystems:
    jiraComponent: kernel / Platform Enablement / PCI subsystem
    requiredApproval: false
    maintainers:
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
      - name: Myron Stowe
        email: mstowe@redhat.com
        gluser: mstowe1
+   reviewers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - drivers/pci/hotplug/
@@ -6297,6 +6203,7 @@ subsystems:
      - name: Myron Stowe
        email: mstowe@redhat.com
        gluser: mstowe1
+   reviewers:
      - name: Prarit Bhargava
        email: prarit@redhat.com
        gluser: prarit
@@ -6341,9 +6248,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/pcmcia/
@@ -6501,6 +6405,7 @@ subsystems:
      - name: Steve Best
        email: sbest@redhat.com
        gluser: sfbest
+   reviewers:
      - name: Prarit Bhargava
        email: prarit@redhat.com
        gluser: prarit
@@ -6519,6 +6424,7 @@ subsystems:
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
+   reviewers:
      - name: Prarit Bhargava
        email: prarit@redhat.com
        gluser: prarit
@@ -6551,9 +6457,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/pnp/
@@ -6661,9 +6564,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/pps/
@@ -6673,7 +6573,7 @@ subsystems:
    status: Supported
    devel-sst:
      - rhel-sst-arch-hw
-   jiraComponent: kernel
+   jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
      - name: Lenny Szubowicz
@@ -6695,6 +6595,7 @@ subsystems:
      - name: Jiri Benc
        email: jbenc@redhat.com
        gluser: jbencrh
+   reviewers:
      - name: Prarit Bhargava
        email: prarit@redhat.com
        gluser: prarit
@@ -6737,9 +6638,6 @@ subsystems:
      - name: Oleg Nesterov
        email: onestero@redhat.com
        gluser: onestero
-     - name: Alex Gladkov
-       email: agladkov@redhat.com
-       gluser: legionus
    paths:
        includes:
           - arch/*/*/ptrace*.c
@@ -6762,9 +6660,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/pwm/
@@ -6838,10 +6733,6 @@ subsystems:
      - name: Nilesh Javali
        email: njavali@redhat.com
        gluser: njavali
-       restricted: true
-     - name: Arun Easi
-       email: aeasi@redhat.com
-       gluser: aeasi
        restricted: true
    reviewers:
      - name: John Meneghini
@@ -7068,6 +6959,7 @@ subsystems:
      - name: Waiman Long
        email: longman@redhat.com
        gluser: llong1
+   reviewers:
      - name: Prarit Bhargava
        email: prarit@redhat.com
        gluser: prarit
@@ -7123,9 +7015,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/remoteproc/
@@ -7140,9 +7029,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/reset/
@@ -7173,9 +7059,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/rpmsg/
@@ -7258,9 +7141,6 @@ subsystems:
        email: pauld@redhat.com
        gluser: prauld
    reviewers:
-     - name: Andrew Halaney
-       email: ahalaney@redhat.com
-       gluser: ahalaney
      - name: Clark Williams
        email: williams@redhat.com
        gluser: clrkwllms
@@ -7369,7 +7249,6 @@ subsystems:
    devel-sst:
      - rhel-sst-security-selinux
      - rhel-sst-kernel-security
-     - rhel-sst-kernel-security
    jiraComponent: kernel / Security
    requiredApproval: false
    maintainers:
@@ -7416,7 +7295,6 @@ subsystems:
      name: selinux
    status: Supported
    devel-sst:
-     - rhel-sst-security-selinux
      - rhel-sst-security-selinux
    jiraComponent: kernel / Security / SELinux
    requiredApproval: false
@@ -7465,9 +7343,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/slimbus/
@@ -7524,7 +7399,7 @@ subsystems:
    devel-sst:
      - rhel-sst-arch-hw
    jiraComponent: kernel / Platform Enablement
-   required-approval: false
+   requiredApproval: false
    maintainers:
      - name: Steve Best
        email: sbest@redhat.com
@@ -7548,9 +7423,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/siox/
@@ -7663,9 +7535,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/ssb/
@@ -7680,9 +7549,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/memstick/
@@ -7698,9 +7564,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/soundwire/
@@ -7736,9 +7599,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/spmi/
@@ -7800,9 +7660,6 @@ subsystems:
      - name: Benjamin Coddington
        email: bcodding@redhat.com
        gluser: bcodding
-     - name: Jeffrey Layton
-       email: jlayton@redhat.com
-       gluser: jtlayton
      - name: Steve Dickson
        email: steved@redhat.com
        gluser: steved92
@@ -7827,7 +7684,6 @@ subsystems:
      - name: Lenny Szubowicz
        email: lszubowi@redhat.com
        gluser: lszubowi
-   paths:
  - subsystem: SWITCHDEV
    labels:
      name: switchdev
@@ -7914,9 +7770,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/tee/
@@ -8092,9 +7945,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/visorbus/
@@ -8113,6 +7963,7 @@ subsystems:
      - name: Myron Stowe
        email: mstowe@redhat.com
        gluser: mstowe1
+   reviewers:
      - name: Prarit Bhargava
        email: prarit@redhat.com
        gluser: prarit
@@ -8219,12 +8070,13 @@ subsystems:
    jiraComponent: kernel / Platform Enablement
    requiredApproval: false
    maintainers:
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
      - name: Wander Lairson Costa
        email: wander@redhat.com
        gluser: walac
+   reviewers:
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - usr/
@@ -8487,7 +8339,6 @@ subsystems:
           - drivers/virtio/virtio_input.c
           - include/uapi/linux/virtio_input.h
    mailingList: rhvirt-patches@redhat.com
-   mailingList: rhvirt-patches@redhat.com
  - subsystem: VIRTIO MEM DRIVER
    labels:
      name: virtio_mem
@@ -8510,7 +8361,6 @@ subsystems:
      name: virt_drivers
    status: Supported
    devel-sst:
-     - rhel-sst-virtualization-hwe
      - rhel-sst-virtualization-cloud
      - rhel-sst-virtualization-hwe
    jiraComponent: kernel / Virtualization
@@ -8537,9 +8387,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/vme/
@@ -8588,9 +8435,6 @@ subsystems:
      - name: Doug Ledford
        email: dledford@redhat.com
        gluser: dledford
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    paths:
        includes:
           - drivers/regulator/
@@ -8740,9 +8584,6 @@ subsystems:
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
    reviewers:
      - name: Steve Best
        email: sbest@redhat.com
@@ -8750,6 +8591,9 @@ subsystems:
      - name: Lenny Szubowicz
        email: lszubowi@redhat.com
        gluser: lszubowi
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - arch/x86/
@@ -8784,9 +8628,6 @@ subsystems:
    jiraComponent: kernel / Power Management
    requiredApproval: true
    maintainers:
-     - name: Prarit Bhargava
-       email: prarit@redhat.com
-       gluser: prarit
      - name: David Arcari
        email: darcari@redhat.com
        gluser: darcari
@@ -8794,6 +8635,9 @@ subsystems:
      - name: Steve Best
        email: sbest@redhat.com
        gluser: sfbest
+     - name: Prarit Bhargava
+       email: prarit@redhat.com
+       gluser: prarit
    paths:
        includes:
           - arch/x86/kernel/cpu/cpufreq/

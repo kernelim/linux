@@ -35,7 +35,6 @@ type SubSystem struct {
 		Name string `name`
 		ReadyForMergeDeps []string `readyForMergeDeps`
 		NewLabels string `newLabels`
-		EmailLabel string `emailLabel`
 	}
 	Status string `status`
 	Maintainers []NameAndEmail `maintainers`

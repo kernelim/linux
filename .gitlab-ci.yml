@@ -32,7 +32,7 @@ workflow: !reference [.workflow]
     branch: rhel9
   variables:
     name: rhel9
-    builder_image: quay.io/cki/builder-rhel9
+    builder_image: quay.io/cki/builder-rhel9.4
     run_redhat_self_test: 'true'
 
 .trigger_rhel9_build:

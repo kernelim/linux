@@ -21,7 +21,6 @@ type SubSystem struct {
 		Name string `name`
 		ReadyForMergeDeps []string `readyForMergeDeps`
 		NewLabels string `newLabels`
-		EmailLabel string `emailLabel`
 	} `labels`
 	Status string `status`
 	Maintainers []NameAndEmail `maintainers`
@@ -89,7 +88,6 @@ func RHMAINTAINERS_header() {
 	fmt.Printf("%s","	      matches patches or files that contain one or more of the words\n")
 	fmt.Printf("%s","	      printk, pr_info or pr_err\n")
 	fmt.Printf("%s","	   One regex pattern per line.	Multiple K: lines acceptable.\n")
-	fmt.Printf("%s","	I: Additional subject tag for rhkl patch submission.\n")
 	fmt.Printf("%s","	P: Person (obsolete)\n")
 	fmt.Printf("%s","\n")
 	fmt.Printf("%s","Note: For the hard of thinking, this list is meant to remain in alphabetical\n")
@@ -150,9 +148,6 @@ func main() {
 		}
 		for _, file := range entry.Paths.Excludes {
 			fmt.Printf("X:\t%s\n", file)
-		}
-		if entry.Labels.EmailLabel != "" {
-			fmt.Printf("I:\t%s\n", entry.Labels.EmailLabel)
 		}
 		if entry.Scm != "" {
 			fmt.Printf("T:\t%s\n", entry.Scm)
