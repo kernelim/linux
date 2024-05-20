@@ -162,8 +162,15 @@ do {						\
 #define elf_check_arch(x)			\
 	((x)->e_machine == EM_X86_64)
 
+/*
+ * RHEL-only: avoid including '<asm/ia32.h>' here as doing so breaks core dumps,
+ * see https://issues.redhat.com/browse/RHEL-33448. Use __ia32_enabled directly
+ * instead.
+ */
+extern bool __ia32_enabled;
+
 #define compat_elf_check_arch(x)					\
-	(elf_check_arch_ia32(x) ||					\
+	((elf_check_arch_ia32(x) && __ia32_enabled) ||			\
 	 (IS_ENABLED(CONFIG_X86_X32_ABI) && (x)->e_machine == EM_X86_64))
 
 #if __USER32_DS != __USER_DS

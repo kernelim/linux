@@ -1859,11 +1859,11 @@ nmi_restore:
 	iretq
 SYM_CODE_END(nmi)
 
-SYM_CODE_START(ignore_sysret)
+SYM_CODE_START(entry_SYSCALL32_ignore)
 	UNWIND_HINT_EMPTY
 	mov	$-ENOSYS, %eax
 	sysret
-SYM_CODE_END(ignore_sysret)
+SYM_CODE_END(entry_SYSCALL32_ignore)
 
 SYM_CODE_START(rewind_stack_do_exit)
 	UNWIND_HINT_FUNC

@@ -2270,7 +2270,7 @@ static void ceph_cap_unlink_work(struct work_struct *work)
 		container_of(work, struct ceph_mds_client, cap_unlink_work);
 
 	dout("begin\n");
-	spin_lock(&mdsc->cap_unlink_delay_lock);
+	spin_lock(&mdsc->cap_delay_lock);
 	while (!list_empty(&mdsc->cap_unlink_delay_list)) {
 		struct ceph_inode_info *ci;
 		struct inode *inode;
@@ -2282,14 +2282,14 @@ static void ceph_cap_unlink_work(struct work_struct *work)
 
 		inode = igrab(&ci->vfs_inode);
 		if (inode) {
-			spin_unlock(&mdsc->cap_unlink_delay_lock);
+			spin_unlock(&mdsc->cap_delay_lock);
 			dout("on %p %llx.%llx\n", inode, ceph_vinop(inode));
 			ceph_check_caps(ci, CHECK_CAPS_FLUSH, NULL);
 			iput(inode);
-			spin_lock(&mdsc->cap_unlink_delay_lock);
+			spin_lock(&mdsc->cap_delay_lock);
 		}
 	}
-	spin_unlock(&mdsc->cap_unlink_delay_lock);
+	spin_unlock(&mdsc->cap_delay_lock);
 	dout("done\n");
 }
 
@@ -2584,6 +2584,7 @@ static struct ceph_msg *create_request_message(struct ceph_mds_session *session,
 	u64 ino1 = 0, ino2 = 0;
 	int pathlen1 = 0, pathlen2 = 0;
 	bool freepath1 = false, freepath2 = false;
+	struct dentry *old_dentry = NULL;
 	int len;
 	u16 releases;
 	void *p, *end;
@@ -2601,7 +2602,10 @@ static struct ceph_msg *create_request_message(struct ceph_mds_session *session,
 	}
 
 	/* If r_old_dentry is set, then assume that its parent is locked */
-	ret = set_request_path_attr(NULL, req->r_old_dentry,
+	if (req->r_old_dentry &&
+	    !(req->r_old_dentry->d_flags & DCACHE_DISCONNECTED))
+		old_dentry = req->r_old_dentry;
+	ret = set_request_path_attr(NULL, old_dentry,
 			      req->r_old_dentry_dir,
 			      req->r_path2, req->r_ino2.ino,
 			      &path2, &pathlen2, &ino2, &freepath2, true);
@@ -4831,7 +4835,6 @@ int ceph_mdsc_init(struct ceph_fs_client *fsc)
 	INIT_LIST_HEAD(&mdsc->cap_wait_list);
 	spin_lock_init(&mdsc->cap_delay_lock);
 	INIT_LIST_HEAD(&mdsc->cap_unlink_delay_list);
-	spin_lock_init(&mdsc->cap_unlink_delay_lock);
 	INIT_LIST_HEAD(&mdsc->snap_flush_list);
 	spin_lock_init(&mdsc->snap_flush_lock);
 	mdsc->last_cap_flush_tid = 1;

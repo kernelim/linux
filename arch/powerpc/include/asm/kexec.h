@@ -94,6 +94,11 @@ static inline bool kdump_in_progress(void)
 	return crashing_cpu >= 0;
 }
 
+#if defined(CONFIG_CRASH_DUMP)
+bool is_kdump_kernel(void);
+#define is_kdump_kernel			is_kdump_kernel
+#endif /* CONFIG_CRASH_DUMP */
+
 #ifdef CONFIG_KEXEC_FILE
 extern const struct kexec_file_ops kexec_elf64_ops;
 

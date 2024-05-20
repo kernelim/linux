@@ -12,7 +12,7 @@ RHEL_MINOR = 10
 #
 # Use this spot to avoid future merge conflicts.
 # Do not trim this comment.
-RHEL_RELEASE = 553
+RHEL_RELEASE = 553.5.1
 
 #
 # ZSTREAM
@@ -34,7 +34,7 @@ RHEL_RELEASE = 553
 #  (when you give RHDISTGIT_BRANCH on the command line, in which case the Z
 #  number will be incremented instead of the Y).
 #
-ZSTREAM = no
+ZSTREAM = yes
 
 #
 # Early y+1 numbering

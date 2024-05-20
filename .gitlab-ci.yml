@@ -22,6 +22,7 @@ workflow: !reference [.workflow]
     architectures: 'x86_64 ppc64le aarch64 s390x'
     debug_architectures: 'x86_64 ppc64le aarch64 s390x'
     native_tools: 'true'
+    disttag_override: '.el8_10'
 
 # Realtime specific configuration
 .realtime_check:
@@ -32,6 +33,7 @@ workflow: !reference [.workflow]
     builder_image: quay.io/cki/builder-rhel8
     name: kernel-rt-rhel8
     pipeline_name_suffix: ''
+    disttag_override: '.el8_10'
 
 # Full RT pipeline for -rt branch
 .realtime_full:
@@ -40,6 +42,7 @@ workflow: !reference [.workflow]
   variables:
     builder_image: quay.io/cki/builder-rhel8
     name: kernel-rt-rhel8
+    disttag_override: '.el8_10'
     RUN_ONLY_FOR_RT: 'true'
 
 # regular pipelines

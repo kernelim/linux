@@ -30,6 +30,7 @@ extern void evm_inode_post_setxattr(struct dentry *dentry,
 				    const void *xattr_value,
 				    size_t xattr_value_len);
 extern int evm_inode_removexattr(struct dentry *dentry, const char *xattr_name);
+extern int evm_inode_copy_up_xattr(const char *name);
 extern void evm_inode_post_removexattr(struct dentry *dentry,
 				       const char *xattr_name);
 extern int evm_inode_init_security(struct inode *inode,
@@ -88,6 +89,11 @@ static inline void evm_inode_post_setxattr(struct dentry *dentry,
 
 static inline int evm_inode_removexattr(struct dentry *dentry,
 					const char *xattr_name)
+{
+	return 0;
+}
+
+static inline int  evm_inode_copy_up_xattr(const char *name)
 {
 	return 0;
 }

@@ -357,7 +357,7 @@ static int construct_alloc_key(struct keyring_search_context *ctx,
 			       struct key_user *user,
 			       struct key **_key)
 {
-	struct assoc_array_edit *edit;
+	struct assoc_array_edit *edit = NULL;
 	struct key *key;
 	key_perm_t perm;
 	key_ref_t key_ref;
@@ -386,26 +386,37 @@ static int construct_alloc_key(struct keyring_search_context *ctx,
 	set_bit(KEY_FLAG_USER_CONSTRUCT, &key->flags);
 
 	if (dest_keyring) {
-		ret = __key_link_begin(dest_keyring, &ctx->index_key, &edit);
+		ret = __key_link_lock(dest_keyring, &key->index_key);
 		if (ret < 0)
-			goto link_prealloc_failed;
+			goto link_lock_failed;
 	}
 
-	/* attach the key to the destination keyring under lock, but we do need
+	/*
+	 * Attach the key to the destination keyring under lock, but we do need
 	 * to do another check just in case someone beat us to it whilst we
-	 * waited for locks */
+	 * waited for locks.
+	 *
+	 * The caller might specify a comparison function which looks for keys
+	 * that do not exactly match but are still equivalent from the caller's
+	 * perspective. The __key_link_begin() operation must be done only after
+	 * an actual key is determined.
+	 */
 	mutex_lock(&key_construction_mutex);
 
 	key_ref = search_process_keyrings(ctx);
 	if (!IS_ERR(key_ref))
 		goto key_already_present;
 
-	if (dest_keyring)
+	if (dest_keyring) {
+		ret = __key_link_begin(dest_keyring, &key->index_key, &edit);
+		if (ret < 0)
+			goto link_alloc_failed;
 		__key_link(key, &edit);
+	}
 
 	mutex_unlock(&key_construction_mutex);
 	if (dest_keyring)
-		__key_link_end(dest_keyring, &ctx->index_key, edit);
+		__key_link_end(dest_keyring, &key->index_key, edit);
 	mutex_unlock(&user->cons_lock);
 	*_key = key;
 	kleave(" = 0 [%d]", key_serial(key));
@@ -418,10 +429,13 @@ key_already_present:
 	mutex_unlock(&key_construction_mutex);
 	key = key_ref_to_ptr(key_ref);
 	if (dest_keyring) {
+		ret = __key_link_begin(dest_keyring, &key->index_key, &edit);
+		if (ret < 0)
+			goto link_alloc_failed_unlocked;
 		ret = __key_link_check_live_key(dest_keyring, key);
 		if (ret == 0)
 			__key_link(key, &edit);
-		__key_link_end(dest_keyring, &ctx->index_key, edit);
+		__key_link_end(dest_keyring, &key->index_key, edit);
 		if (ret < 0)
 			goto link_check_failed;
 	}
@@ -436,7 +450,11 @@ link_check_failed:
 	kleave(" = %d [linkcheck]", ret);
 	return ret;
 
-link_prealloc_failed:
+link_alloc_failed:
+	mutex_unlock(&key_construction_mutex);
+link_alloc_failed_unlocked:
+	__key_link_end(dest_keyring, &key->index_key, edit);
+link_lock_failed:
 	mutex_unlock(&user->cons_lock);
 	key_put(key);
 	kleave(" = %d [prelink]", ret);
