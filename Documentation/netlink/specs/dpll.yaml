@@ -274,6 +274,7 @@ attribute-sets:
       -
         name: capabilities
         type: u32
+        enum: pin-capabilities
       -
         name: parent-device
         type: nest
@@ -296,6 +297,16 @@ attribute-sets:
       -
         name: phase-offset
         type: s64
+      -
+        name: fractional-frequency-offset
+        type: sint
+        doc: |
+          The FFO (Fractional Frequency Offset) between the RX and TX
+          symbol rate on the media associated with the pin:
+          (rx_frequency-tx_frequency)/rx_frequency
+          Value is in PPM (parts per million).
+          This may be implemented for example for pin of type
+          PIN_TYPE_SYNCE_ETH_PORT.
   -
     name: pin-parent-device
     subset-of: pin
@@ -374,8 +385,6 @@ operations:
             - type
 
       dump:
-        pre: dpll-lock-dumpit
-        post: dpll-unlock-dumpit
         reply: *dev-attrs
 
     -
@@ -460,10 +469,9 @@ operations:
             - phase-adjust-min
             - phase-adjust-max
             - phase-adjust
+            - fractional-frequency-offset
 
       dump:
-        pre: dpll-lock-dumpit
-        post: dpll-unlock-dumpit
         request:
           attributes:
             - id
