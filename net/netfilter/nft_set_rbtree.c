@@ -229,6 +229,7 @@ static int __nft_rbtree_insert(const struct net *net, const struct nft_set *set,
 {
 	struct nft_rbtree *priv = nft_set_priv(set);
 	u8 genmask = nft_genmask_next(net);
+	u64 tstamp = nft_net_tstamp(net);
 	struct nft_rbtree_elem *rbe;
 	struct rb_node *parent, **p;
 	bool overlap = false;
@@ -286,13 +287,13 @@ static int __nft_rbtree_insert(const struct net *net, const struct nft_set *set,
 			if (nft_rbtree_interval_start(new)) {
 				if (nft_rbtree_interval_end(rbe) &&
 				    nft_set_elem_active(&rbe->ext, genmask) &&
-				    !nft_set_elem_expired(&rbe->ext) && !*p)
+				    !__nft_set_elem_expired(&rbe->ext, tstamp) && !*p)
 					overlap = false;
 			} else {
 				overlap = nft_rbtree_interval_end(rbe) &&
 					  nft_set_elem_active(&rbe->ext,
 							      genmask) &&
-					  !nft_set_elem_expired(&rbe->ext);
+					  !__nft_set_elem_expired(&rbe->ext, tstamp);
 			}
 		} else if (d > 0) {
 			p = &parent->rb_right;
@@ -301,9 +302,9 @@ static int __nft_rbtree_insert(const struct net *net, const struct nft_set *set,
 				overlap = nft_rbtree_interval_end(rbe) &&
 					  nft_set_elem_active(&rbe->ext,
 							      genmask) &&
-					  !nft_set_elem_expired(&rbe->ext);
+					  !__nft_set_elem_expired(&rbe->ext, tstamp);
 			} else if (nft_set_elem_active(&rbe->ext, genmask) &&
-				   !nft_set_elem_expired(&rbe->ext)) {
+				   !__nft_set_elem_expired(&rbe->ext, tstamp)) {
 				overlap = nft_rbtree_interval_end(rbe);
 			}
 		} else {
@@ -312,17 +313,17 @@ static int __nft_rbtree_insert(const struct net *net, const struct nft_set *set,
 				p = &parent->rb_left;
 
 				if (nft_set_elem_active(&rbe->ext, genmask) &&
-				    !nft_set_elem_expired(&rbe->ext))
+				    !__nft_set_elem_expired(&rbe->ext, tstamp))
 					overlap = false;
 			} else if (nft_rbtree_interval_start(rbe) &&
 				   nft_rbtree_interval_end(new)) {
 				p = &parent->rb_right;
 
 				if (nft_set_elem_active(&rbe->ext, genmask) &&
-				    !nft_set_elem_expired(&rbe->ext))
+				    !__nft_set_elem_expired(&rbe->ext, tstamp))
 					overlap = false;
 			} else if (nft_set_elem_active(&rbe->ext, genmask) &&
-				   !nft_set_elem_expired(&rbe->ext)) {
+				   !__nft_set_elem_expired(&rbe->ext, tstamp)) {
 				*ext = &rbe->ext;
 				return -EEXIST;
 			} else {
@@ -399,6 +400,7 @@ static void *nft_rbtree_deactivate(const struct net *net,
 	const struct rb_node *parent = priv->root.rb_node;
 	struct nft_rbtree_elem *rbe, *this = elem->priv;
 	u8 genmask = nft_genmask_next(net);
+	u64 tstamp = nft_net_tstamp(net);
 	int d;
 
 	while (parent != NULL) {
@@ -419,6 +421,8 @@ static void *nft_rbtree_deactivate(const struct net *net,
 				   nft_rbtree_interval_end(this)) {
 				parent = parent->rb_right;
 				continue;
+			} else if (__nft_set_elem_expired(&rbe->ext, tstamp)) {
+				break;
 			} else if (!nft_set_elem_active(&rbe->ext, genmask)) {
 				parent = parent->rb_left;
 				continue;
@@ -471,10 +475,12 @@ static void nft_rbtree_gc(struct work_struct *work)
 	struct nft_set *set;
 	unsigned int gc_seq;
 	struct net *net;
+	u64 tstamp;
 
 	priv = container_of(work, struct nft_rbtree, gc_work.work);
 	set  = nft_set_container_of(priv);
 	net  = read_pnet(&set->net);
+	tstamp  = nft_net_tstamp(net);
 	nft_net = nft_pernet(net);
 	gc_seq  = READ_ONCE(nft_net->gc_seq);
 
@@ -509,7 +515,7 @@ static void nft_rbtree_gc(struct work_struct *work)
 			rbe_end = rbe;
 			continue;
 		}
-		if (!nft_set_elem_expired(&rbe->ext))
+		if (!__nft_set_elem_expired(&rbe->ext, tstamp))
 			continue;
 
 		nft_set_elem_dead(&rbe->ext);

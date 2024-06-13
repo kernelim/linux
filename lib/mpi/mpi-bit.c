@@ -54,3 +54,40 @@ unsigned mpi_get_nbits(MPI a)
 	return n;
 }
 EXPORT_SYMBOL_GPL(mpi_get_nbits);
+
+/****************
+ * Test whether bit N is set.
+ */
+int mpi_test_bit(MPI a, unsigned int n)
+{
+	unsigned int limbno, bitno;
+	mpi_limb_t limb;
+
+	limbno = n / BITS_PER_MPI_LIMB;
+	bitno  = n % BITS_PER_MPI_LIMB;
+
+	if (limbno >= a->nlimbs)
+		return 0; /* too far left: this is a 0 */
+	limb = a->d[limbno];
+	return (limb & (A_LIMB_1 << bitno)) ? 1 : 0;
+}
+EXPORT_SYMBOL_GPL(mpi_test_bit);
+
+/****************
+ * Set bit N of A.
+ */
+void mpi_set_bit(MPI a, unsigned int n)
+{
+	unsigned int i, limbno, bitno;
+
+	limbno = n / BITS_PER_MPI_LIMB;
+	bitno  = n % BITS_PER_MPI_LIMB;
+
+	if (limbno >= a->nlimbs) {
+		for (i = a->nlimbs; i < a->alloced; i++)
+			a->d[i] = 0;
+		mpi_resize(a, limbno+1);
+		a->nlimbs = limbno+1;
+	}
+	a->d[limbno] |= (A_LIMB_1<<bitno);
+}

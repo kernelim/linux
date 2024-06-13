@@ -82,6 +82,8 @@ int mpi_sub_ui(MPI w, MPI u, unsigned long vval);
 /*-- mpi-bit.c --*/
 void mpi_normalize(MPI a);
 unsigned mpi_get_nbits(MPI a);
+int mpi_test_bit(MPI a, unsigned int n);
+void mpi_set_bit(MPI a, unsigned int n);
 
 /* inline functions */
 

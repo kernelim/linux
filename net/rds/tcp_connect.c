@@ -116,7 +116,7 @@ int rds_tcp_conn_path_connect(struct rds_conn_path *cp)
 	src.sin_addr.s_addr = (__force u32)conn->c_laddr;
 	src.sin_port = (__force u16)htons(0);
 
-	ret = sock->ops->bind(sock, (struct sockaddr *)&src, sizeof(src));
+	ret = kernel_bind(sock, (struct sockaddr *)&src, sizeof(src));
 	if (ret) {
 		rdsdebug("bind failed with %d at address %pI4\n",
 			 ret, &conn->c_laddr);
@@ -132,8 +132,8 @@ int rds_tcp_conn_path_connect(struct rds_conn_path *cp)
 	 * own the socket
 	 */
 	rds_tcp_set_callbacks(sock, cp);
-	ret = sock->ops->connect(sock, (struct sockaddr *)&dest, sizeof(dest),
-				 O_NONBLOCK);
+	ret = kernel_connect(sock, (struct sockaddr *)&dest, sizeof(dest),
+			     O_NONBLOCK);
 
 	rdsdebug("connect to address %pI4 returned %d\n", &conn->c_faddr, ret);
 	if (ret == -EINPROGRESS)

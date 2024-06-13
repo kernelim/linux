@@ -244,6 +244,12 @@ static int tls_do_decryption(struct sock *sk,
 			       data_len + prot->tag_size,
 			       (u8 *)iv_recv);
 
+	/* RHEL-only: allow async algorithm implementations such as
+	 * AESNI, but disable the async TLS path to prevent race
+	 * conditions
+	 */
+	async = false;
+
 	if (async) {
 		/* Using skb->sk to push sk through to crypto async callback
 		 * handler. This allows propagating errors up to the socket
@@ -263,7 +269,7 @@ static int tls_do_decryption(struct sock *sk,
 	}
 
 	ret = crypto_aead_decrypt(aead_req);
-	if (ret == -EINPROGRESS) {
+	if (ret == -EINPROGRESS || ret == -EBUSY) {
 		if (async)
 			return ret;
 
@@ -433,6 +439,7 @@ tx_err:
 	return rc;
 }
 
+#if 0
 static void tls_encrypt_done(struct crypto_async_request *req, int err)
 {
 	struct aead_request *aead_req = (struct aead_request *)req;
@@ -493,6 +500,7 @@ static void tls_encrypt_done(struct crypto_async_request *req, int err)
 	if (!test_and_set_bit(BIT_TX_SCHEDULED, &ctx->tx_bitmask))
 		schedule_delayed_work(&ctx->tx_work.work, 1);
 }
+#endif
 
 static int tls_do_encryption(struct sock *sk,
 			     struct tls_context *tls_ctx,
@@ -529,13 +537,18 @@ static int tls_do_encryption(struct sock *sk,
 			       data_len, rec->iv_data);
 
 	aead_request_set_callback(aead_req, CRYPTO_TFM_REQ_MAY_BACKLOG,
-				  tls_encrypt_done, sk);
+				  crypto_req_done, &ctx->async_wait);
 
 	/* Add the record in tx_list */
 	list_add_tail((struct list_head *)&rec->list, &ctx->tx_list);
 	atomic_inc(&ctx->encrypt_pending);
 
 	rc = crypto_aead_encrypt(aead_req);
+	/* RHEL-only: wait here for async completions and drop back
+	 * into the synchronous path
+	 */
+	if (rc == -EINPROGRESS || rc == -EBUSY)
+		rc = crypto_wait_req(rc, &ctx->async_wait);
 	if (!rc || rc != -EINPROGRESS) {
 		atomic_dec(&ctx->encrypt_pending);
 		sge->offset -= prot->prepend_size;
@@ -2486,12 +2499,10 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx, int tx)
 	if (sw_ctx_rx) {
 		tfm = crypto_aead_tfm(sw_ctx_rx->aead_recv);
 
-		if (crypto_info->version == TLS_1_3_VERSION)
-			sw_ctx_rx->async_capable = 0;
-		else
-			sw_ctx_rx->async_capable =
-				!!(tfm->__crt_alg->cra_flags &
-				   CRYPTO_ALG_ASYNC);
+		/* RHEL-only: disable the async TLS send/recv paths to
+		 * prevent race conditions
+		 */
+		sw_ctx_rx->async_capable = 0;
 
 		/* Set up strparser */
 		memset(&cb, 0, sizeof(cb));

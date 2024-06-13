@@ -269,6 +269,11 @@ static int erspan_rcv(struct sk_buff *skb, struct tnl_ptk_info *tpi,
 	int len;
 
 	itn = net_generic(net, erspan_net_id);
+	len = gre_hdr_len + sizeof(*ershdr);
+
+	/* Check based hdr len */
+	if (unlikely(!pskb_may_pull(skb, len)))
+		return PACKET_REJECT;
 
 	iph = ip_hdr(skb);
 	ershdr = (struct erspan_base_hdr *)(skb->data + gre_hdr_len);

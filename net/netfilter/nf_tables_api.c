@@ -8639,9 +8639,11 @@ static int nf_tables_abort(struct net *net, struct sk_buff *skb,
 
 static bool nf_tables_valid_genid(struct net *net, u32 genid)
 {
+	struct nftables_pernet *nft_net = nft_pernet(net);
 	bool genid_ok;
 
 	mutex_lock(&net->nft_commit_mutex);
+	nft_net->tstamp = get_jiffies_64();
 
 	genid_ok = genid == 0 || net->nft.base_seq == genid;
 	if (!genid_ok)

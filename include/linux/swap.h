@@ -175,7 +175,6 @@ enum {
 	SWP_PAGE_DISCARD = (1 << 9),	/* freed swap page-cluster discards */
 	SWP_STABLE_WRITES = (1 << 10),	/* no overwrite PG_writeback pages */
 	SWP_SYNCHRONOUS_IO = (1 << 11),	/* synchronous IO is efficient */
-	SWP_VALID       = (1 << 13),    /* swap is valid to be operated on? */
 					/* add others here before... */
 	SWP_SCANNING	= (1 << 14),	/* refcount in scan_swap_map */
 };
@@ -281,6 +280,8 @@ struct swap_info_struct {
 	RH_KABI_USE(1, unsigned int __percpu *cluster_next_cpu)  /*percpu 
 						index for next allocation */
 	RH_KABI_RESERVE(2)
+	RH_KABI_BROKEN_INSERT(struct percpu_ref users)	/* indicate and keep swap device valid. */
+	RH_KABI_BROKEN_INSERT(struct completion comp)	/* seldom referenced */
 };
 
 #ifdef CONFIG_64BIT
@@ -416,6 +417,7 @@ extern void __delete_from_swap_cache(struct page *page,
 extern void delete_from_swap_cache(struct page *);
 extern void clear_shadow_from_swap_cache(int type, unsigned long begin,
 				unsigned long end);
+extern void swapcache_clear(struct swap_info_struct *si, swp_entry_t entry);
 extern void free_page_and_swap_cache(struct page *);
 extern void free_pages_and_swap_cache(struct page **, int);
 extern struct page *lookup_swap_cache(swp_entry_t entry,
@@ -481,7 +483,7 @@ extern struct swap_info_struct *get_swap_device(swp_entry_t entry);
 
 static inline void put_swap_device(struct swap_info_struct *si)
 {
-	rcu_read_unlock();
+	percpu_ref_put(&si->users);
 }
 
 #else /* CONFIG_SWAP */
@@ -494,6 +496,15 @@ static inline int swap_readpage(struct page *page, bool do_poll)
 static inline struct swap_info_struct *swp_swap_info(swp_entry_t entry)
 {
 	return NULL;
+}
+
+static inline struct swap_info_struct *get_swap_device(swp_entry_t entry)
+{
+	return NULL;
+}
+
+static inline void put_swap_device(struct swap_info_struct *si)
+{
 }
 
 #define swap_address_space(entry)		(NULL)
@@ -532,6 +543,11 @@ static inline int swap_duplicate(swp_entry_t swp)
 	return 0;
 }
 
+static inline int swapcache_prepare(swp_entry_t swp)
+{
+	return 0;
+}
+
 static inline void swap_free(swp_entry_t swp)
 {
 }
@@ -555,6 +571,10 @@ static inline struct page *swapin_readahead(swp_entry_t swp, gfp_t gfp_mask,
 static inline int swap_writepage(struct page *p, struct writeback_control *wbc)
 {
 	return 0;
+}
+
+static inline void swapcache_clear(struct swap_info_struct *si, swp_entry_t entry)
+{
 }
 
 static inline struct page *lookup_swap_cache(swp_entry_t swp,

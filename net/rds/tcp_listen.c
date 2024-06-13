@@ -258,7 +258,7 @@ struct socket *rds_tcp_listen_init(struct net *net)
 	sin.sin_addr.s_addr = (__force u32)htonl(INADDR_ANY);
 	sin.sin_port = (__force u16)htons(RDS_TCP_PORT);
 
-	ret = sock->ops->bind(sock, (struct sockaddr *)&sin, sizeof(sin));
+	ret = kernel_bind(sock, (struct sockaddr *)&sin, sizeof(sin));
 	if (ret < 0)
 		goto out;
 
