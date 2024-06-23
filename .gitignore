@@ -162,6 +162,8 @@ x509.genkey
 #
 configs/*.config
 localversion
+redhat/rhdocs/
+.get_maintainer.conf
 
 # GitLab CI configuration
 !.gitlab-ci.yml
