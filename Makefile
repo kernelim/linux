@@ -1839,8 +1839,10 @@ scripts_build:
 prepare_after_cross:
 	# disable STACK_VALIDATION to avoid building objtool
 	sed -i '/^CONFIG_STACK_VALIDATION/d' ./include/config/auto.conf || true
-	# build minimum set of scripts to allow building external modules
+	# build minimum set of scripts and resolve_btfids to allow building
+	# external modules
 	$(MAKE) KBUILD_EXTMOD="" M="" scripts_build V=1
+	$(MAKE) -C tools/bpf/resolve_btfids
 
 PHONY += prepare_after_cross scripts_build
 

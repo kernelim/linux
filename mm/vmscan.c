@@ -4460,8 +4460,10 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
 			walk_mm(lruvec, mm, walk);
 	} while (mm);
 done:
-	if (success)
+	if (success) {
 		inc_max_seq(lruvec, can_swap, force_scan);
+		wakeup_flusher_threads(WB_REASON_VMSCAN);
+	}
 
 	return success;
 }

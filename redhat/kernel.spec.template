@@ -2197,12 +2197,12 @@ BuildKernel() {
     cp --parents tools/build/Build $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
     cp --parents tools/build/fixdep.c $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
     cp --parents tools/objtool/sync-check.sh $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
-    cp -a --parents tools/bpf/resolve_btfids/main.c $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
-    cp -a --parents tools/bpf/resolve_btfids/Build $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
+    cp -a --parents tools/bpf/resolve_btfids $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
 
     cp --parents security/selinux/include/policycap_names.h $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
     cp --parents security/selinux/include/policycap.h $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
 
+    cp -a --parents tools/include/asm $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
     cp -a --parents tools/include/asm-generic $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
     cp -a --parents tools/include/linux $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
     cp -a --parents tools/include/uapi/asm $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
@@ -2239,6 +2239,9 @@ BuildKernel() {
 %endif
     if [ -d arch/%{asmarch}/include ]; then
       cp -a --parents arch/%{asmarch}/include $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/
+    fi
+    if [ -d tools/arch/%{asmarch}/include ]; then
+      cp -a --parents tools/arch/%{asmarch}/include $RPM_BUILD_ROOT/lib/modules/$KernelVer/build
     fi
 %ifarch aarch64
     # arch/arm64/include/asm/xen references arch/arm
@@ -2527,6 +2530,7 @@ BuildKernel() {
 
 %if %{with_cross}
     make -C $RPM_BUILD_ROOT/lib/modules/$KernelVer/build M=scripts clean
+    make -C $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/tools/bpf/resolve_btfids clean
     sed -i 's/REBUILD_SCRIPTS_FOR_CROSS:=0/REBUILD_SCRIPTS_FOR_CROSS:=1/' $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/Makefile
 %endif
 
@@ -3180,7 +3184,7 @@ then\
     )\
 fi\
 %if %{with_cross}\
-    echo "Building scripts"\
+    echo "Building scripts and resolve_btfids"\
     env --unset=ARCH make -C /usr/src/kernels/%{KVERREL}%{?1:+%{1}} prepare_after_cross\
 %endif\
 %{nil}

@@ -2233,8 +2233,12 @@ Cpuset Interface Files
 	is always a subset of it.
 
 	Users can manually set it to a value that is different from
-	"cpuset.cpus".	The only constraint in setting it is that the
-	list of CPUs must be exclusive with respect to its sibling.
+	"cpuset.cpus".	One constraint in setting it is that the list of
+	CPUs must be exclusive with respect to "cpuset.cpus.exclusive"
+	of its sibling.  If "cpuset.cpus.exclusive" of a sibling cgroup
+	isn't set, its "cpuset.cpus" value, if set, cannot be a subset
+	of it to leave at least one CPU available when the exclusive
+	CPUs are taken away.
 
 	For a parent cgroup, any one of its exclusive CPUs can only
 	be distributed to at most one of its child cgroups.  Having an
@@ -2250,8 +2254,8 @@ Cpuset Interface Files
 	cpuset-enabled cgroups.
 
 	This file shows the effective set of exclusive CPUs that
-	can be used to create a partition root.  The content of this
-	file will always be a subset of "cpuset.cpus" and its parent's
+	can be used to create a partition root.  The content
+	of this file will always be a subset of its parent's
 	"cpuset.cpus.exclusive.effective" if its parent is not the root
 	cgroup.  It will also be a subset of "cpuset.cpus.exclusive"
 	if it is set.  If "cpuset.cpus.exclusive" is not set, it is
