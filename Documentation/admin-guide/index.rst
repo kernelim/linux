@@ -108,7 +108,7 @@ configure specific aspects of kernel behavior to your liking.
    pm/index
    pnp
    rapidio
-   ras
+   RAS/index
    rtc
    serial-console
    svga
