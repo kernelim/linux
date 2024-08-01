@@ -7675,8 +7675,12 @@ perf_iterate_sb(perf_iterate_f output, void *data,
 
 	for_each_task_context_nr(ctxn) {
 		ctx = rcu_dereference(current->perf_event_ctxp[ctxn]);
-		if (ctx)
+		if (ctx) {
+			unsigned long flags;
+			raw_spin_lock_irqsave(&ctx->lock, flags);
 			perf_iterate_ctx(ctx, output, data, false);
+			raw_spin_unlock_irqrestore(&ctx->lock, flags);
+		}
 	}
 done:
 	preempt_enable();

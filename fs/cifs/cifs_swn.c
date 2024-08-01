@@ -259,24 +259,24 @@ static struct cifs_swn_reg *cifs_find_swn_reg(struct cifs_tcon *tcon)
 	const char *net_name;
 
 	net_name = extract_hostname(tcon->treeName);
-	if (IS_ERR_OR_NULL(net_name)) {
+	if (IS_ERR(net_name)) {
 		int ret;
 
 		ret = PTR_ERR(net_name);
 		cifs_dbg(VFS, "%s: failed to extract host name from target '%s': %d\n",
 				__func__, tcon->treeName, ret);
-		return NULL;
+		return ERR_PTR(-EINVAL);
 	}
 
 	share_name = extract_sharename(tcon->treeName);
-	if (IS_ERR_OR_NULL(share_name)) {
+	if (IS_ERR(share_name)) {
 		int ret;
 
 		ret = PTR_ERR(net_name);
 		cifs_dbg(VFS, "%s: failed to extract share name from target '%s': %d\n",
 				__func__, tcon->treeName, ret);
 		kfree(net_name);
-		return NULL;
+		return ERR_PTR(-EINVAL);
 	}
 
 	idr_for_each_entry(&cifs_swnreg_idr, swnreg, id) {
@@ -284,8 +284,6 @@ static struct cifs_swn_reg *cifs_find_swn_reg(struct cifs_tcon *tcon)
 		    || strcasecmp(swnreg->share_name, share_name) != 0) {
 			continue;
 		}
-
-		mutex_unlock(&cifs_swnreg_idr_mutex);
 
 		cifs_dbg(FYI, "Existing swn registration for %s:%s found\n", swnreg->net_name,
 				swnreg->share_name);
@@ -299,7 +297,7 @@ static struct cifs_swn_reg *cifs_find_swn_reg(struct cifs_tcon *tcon)
 	kfree(net_name);
 	kfree(share_name);
 
-	return NULL;
+	return ERR_PTR(-EEXIST);
 }
 
 /*
@@ -315,10 +313,11 @@ static struct cifs_swn_reg *cifs_get_swn_reg(struct cifs_tcon *tcon)
 
 	/* Check if we are already registered for this network and share names */
 	reg = cifs_find_swn_reg(tcon);
-	if (IS_ERR(reg)) {
-		return reg;
-	} else if (reg != NULL) {
+	if (!IS_ERR(reg)) {
 		kref_get(&reg->ref_count);
+		mutex_unlock(&cifs_swnreg_idr_mutex);
+		return reg;
+	} else if (PTR_ERR(reg) != -EEXIST) {
 		mutex_unlock(&cifs_swnreg_idr_mutex);
 		return reg;
 	}
@@ -396,26 +395,14 @@ static void cifs_put_swn_reg(struct cifs_swn_reg *swnreg)
 
 static int cifs_swn_resource_state_changed(struct cifs_swn_reg *swnreg, const char *name, int state)
 {
-	int i;
-
 	switch (state) {
 	case CIFS_SWN_RESOURCE_STATE_UNAVAILABLE:
 		cifs_dbg(FYI, "%s: resource name '%s' become unavailable\n", __func__, name);
-		for (i = 0; i < swnreg->tcon->ses->chan_count; i++) {
-			spin_lock(&GlobalMid_Lock);
-			if (swnreg->tcon->ses->chans[i].server->tcpStatus != CifsExiting)
-				swnreg->tcon->ses->chans[i].server->tcpStatus = CifsNeedReconnect;
-			spin_unlock(&GlobalMid_Lock);
-		}
+		cifs_ses_mark_for_reconnect(swnreg->tcon->ses);
 		break;
 	case CIFS_SWN_RESOURCE_STATE_AVAILABLE:
 		cifs_dbg(FYI, "%s: resource name '%s' become available\n", __func__, name);
-		for (i = 0; i < swnreg->tcon->ses->chan_count; i++) {
-			spin_lock(&GlobalMid_Lock);
-			if (swnreg->tcon->ses->chans[i].server->tcpStatus != CifsExiting)
-				swnreg->tcon->ses->chans[i].server->tcpStatus = CifsNeedReconnect;
-			spin_unlock(&GlobalMid_Lock);
-		}
+		cifs_ses_mark_for_reconnect(swnreg->tcon->ses);
 		break;
 	case CIFS_SWN_RESOURCE_STATE_UNKNOWN:
 		cifs_dbg(FYI, "%s: resource name '%s' changed to unknown state\n", __func__, name);
@@ -448,15 +435,13 @@ static int cifs_swn_store_swn_addr(const struct sockaddr_storage *new,
 				   const struct sockaddr_storage *old,
 				   struct sockaddr_storage *dst)
 {
-	__be16 port;
+	__be16 port = cpu_to_be16(CIFS_PORT);
 
 	if (old->ss_family == AF_INET) {
 		struct sockaddr_in *ipv4 = (struct sockaddr_in *)old;
 
 		port = ipv4->sin_port;
-	}
-
-	if (old->ss_family == AF_INET6) {
+	} else if (old->ss_family == AF_INET6) {
 		struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)old;
 
 		port = ipv6->sin6_port;
@@ -466,9 +451,7 @@ static int cifs_swn_store_swn_addr(const struct sockaddr_storage *new,
 		struct sockaddr_in *ipv4 = (struct sockaddr_in *)new;
 
 		ipv4->sin_port = port;
-	}
-
-	if (new->ss_family == AF_INET6) {
+	} else if (new->ss_family == AF_INET6) {
 		struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)new;
 
 		ipv6->sin6_port = port;
@@ -481,48 +464,51 @@ static int cifs_swn_store_swn_addr(const struct sockaddr_storage *new,
 
 static int cifs_swn_reconnect(struct cifs_tcon *tcon, struct sockaddr_storage *addr)
 {
+	int ret = 0;
+
 	/* Store the reconnect address */
 	mutex_lock(&tcon->ses->server->srv_mutex);
-	if (!cifs_sockaddr_equal(&tcon->ses->server->dstaddr, addr)) {
-		int ret;
+	if (cifs_sockaddr_equal(&tcon->ses->server->dstaddr, addr))
+		goto unlock;
 
-		ret = cifs_swn_store_swn_addr(addr, &tcon->ses->server->dstaddr,
-				&tcon->ses->server->swn_dstaddr);
-		if (ret < 0) {
-			cifs_dbg(VFS, "%s: failed to store address: %d\n", __func__, ret);
-			return ret;
-		}
-		tcon->ses->server->use_swn_dstaddr = true;
-
-		/*
-		 * Unregister to stop receiving notifications for the old IP address.
-		 */
-		ret = cifs_swn_unregister(tcon);
-		if (ret < 0) {
-			cifs_dbg(VFS, "%s: Failed to unregister for witness notifications: %d\n",
-					__func__, ret);
-			return ret;
-		}
-
-		/*
-		 * And register to receive notifications for the new IP address now that we have
-		 * stored the new address.
-		 */
-		ret = cifs_swn_register(tcon);
-		if (ret < 0) {
-			cifs_dbg(VFS, "%s: Failed to register for witness notifications: %d\n",
-					__func__, ret);
-			return ret;
-		}
-
-		spin_lock(&GlobalMid_Lock);
-		if (tcon->ses->server->tcpStatus != CifsExiting)
-			tcon->ses->server->tcpStatus = CifsNeedReconnect;
-		spin_unlock(&GlobalMid_Lock);
+	ret = cifs_swn_store_swn_addr(addr, &tcon->ses->server->dstaddr,
+				      &tcon->ses->server->swn_dstaddr);
+	if (ret < 0) {
+		cifs_dbg(VFS, "%s: failed to store address: %d\n", __func__, ret);
+		goto unlock;
 	}
+	tcon->ses->server->use_swn_dstaddr = true;
+
+	/*
+	 * Unregister to stop receiving notifications for the old IP address.
+	 */
+	ret = cifs_swn_unregister(tcon);
+	if (ret < 0) {
+		cifs_dbg(VFS, "%s: Failed to unregister for witness notifications: %d\n",
+			 __func__, ret);
+		goto unlock;
+	}
+
+	/*
+	 * And register to receive notifications for the new IP address now that we have
+	 * stored the new address.
+	 */
+	ret = cifs_swn_register(tcon);
+	if (ret < 0) {
+		cifs_dbg(VFS, "%s: Failed to register for witness notifications: %d\n",
+			 __func__, ret);
+		goto unlock;
+	}
+
+	spin_lock(&GlobalMid_Lock);
+	if (tcon->ses->server->tcpStatus != CifsExiting)
+		tcon->ses->server->tcpStatus = CifsNeedReconnect;
+	spin_unlock(&GlobalMid_Lock);
+
+unlock:
 	mutex_unlock(&tcon->ses->server->srv_mutex);
 
-	return 0;
+	return ret;
 }
 
 static int cifs_swn_client_move(struct cifs_swn_reg *swnreg, struct sockaddr_storage *addr)
@@ -630,9 +616,9 @@ int cifs_swn_unregister(struct cifs_tcon *tcon)
 	mutex_lock(&cifs_swnreg_idr_mutex);
 
 	swnreg = cifs_find_swn_reg(tcon);
-	if (swnreg == NULL) {
+	if (IS_ERR(swnreg)) {
 		mutex_unlock(&cifs_swnreg_idr_mutex);
-		return -EEXIST;
+		return PTR_ERR(swnreg);
 	}
 
 	mutex_unlock(&cifs_swnreg_idr_mutex);

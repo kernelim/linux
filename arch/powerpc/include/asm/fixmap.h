@@ -23,7 +23,11 @@
 #include <asm/kmap_size.h>
 #endif
 
+#ifdef CONFIG_PPC64
+#define FIXADDR_TOP    (IOREMAP_END + FIXADDR_SIZE)
+#else
 #define FIXADDR_TOP	((unsigned long)(-PAGE_SIZE))
+#endif
 
 /*
  * Here we define all the compile-time 'special' virtual
@@ -45,6 +49,7 @@
  */
 enum fixed_addresses {
 	FIX_HOLE,
+#ifdef CONFIG_PPC32
 	/* reserve the top 128K for early debugging purposes */
 	FIX_EARLY_DEBUG_TOP = FIX_HOLE,
 	FIX_EARLY_DEBUG_BASE = FIX_EARLY_DEBUG_TOP+((128*1024)/PAGE_SIZE)-1,
@@ -60,6 +65,7 @@ enum fixed_addresses {
 		       FIX_IMMR_SIZE,
 #endif
 	/* FIX_PCIE_MCFG, */
+#endif /* CONFIG_PPC32 */
 	__end_of_fixed_addresses
 };
 
@@ -73,6 +79,8 @@ enum fixed_addresses {
 static inline void __set_fixmap(enum fixed_addresses idx,
 				phys_addr_t phys, pgprot_t flags)
 {
+	BUILD_BUG_ON(IS_ENABLED(CONFIG_PPC64) && __FIXADDR_SIZE > FIXADDR_SIZE);
+
 	map_kernel_page(fix_to_virt(idx), phys, flags);
 }
 

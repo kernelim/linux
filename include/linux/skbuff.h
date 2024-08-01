@@ -741,7 +741,7 @@ struct sk_buff {
 
 	union {
 		struct sock		*sk;
-		int			ip_defrag_offset;
+		RH_KABI_DEPRECATE(int, ip_defrag_offset)
 	};
 
 	union {

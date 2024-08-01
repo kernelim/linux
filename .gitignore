@@ -139,5 +139,8 @@ all.config
 #
 # Red Hat
 #
+redhat/rhdocs/*
+redhat/rhdocs
+.get_maintainer.conf
 configs/*.config
 localversion

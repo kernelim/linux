@@ -1,5 +1,4 @@
 /*
- *   fs/cifs/netmisc.c
  *
  *   Copyright (c) International Business Machines  Corp., 2002,2008
  *   Author(s): Steve French (sfrench@us.ibm.com)

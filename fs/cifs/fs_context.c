@@ -150,7 +150,7 @@ const struct fs_parameter_spec smb3_fs_parameters[] = {
 	fsparam_u32("echo_interval", Opt_echo_interval),
 	fsparam_u32("max_credits", Opt_max_credits),
 	fsparam_u32("handletimeout", Opt_handletimeout),
-	fsparam_u32("snapshot", Opt_snapshot),
+	fsparam_u64("snapshot", Opt_snapshot),
 	fsparam_u32("max_channels", Opt_max_channels),
 
 	/* Mount options which take string value */
@@ -208,7 +208,7 @@ cifs_parse_security_flavors(struct fs_context *fc, char *value, struct smb3_fs_c
 
 	switch (match_token(value, cifs_secflavor_tokens, args)) {
 	case Opt_sec_krb5p:
-		cifs_dbg(VFS, "sec=krb5p is not supported!\n");
+		cifs_errorf(fc, "sec=krb5p is not supported!\n");
 		return 1;
 	case Opt_sec_krb5i:
 		ctx->sign = true;
@@ -243,7 +243,7 @@ cifs_parse_security_flavors(struct fs_context *fc, char *value, struct smb3_fs_c
 		ctx->nullauth = 1;
 		break;
 	default:
-		cifs_dbg(VFS, "bad security option: %s\n", value);
+		cifs_errorf(fc, "bad security option: %s\n", value);
 		return 1;
 	}
 
@@ -296,7 +296,7 @@ cifs_parse_cache_flavor(struct fs_context *fc, char *value, struct smb3_fs_conte
 		ctx->cache_rw = true;
 		break;
 	default:
-		cifs_dbg(VFS, "bad cache= option: %s\n", value);
+		cifs_errorf(fc, "bad cache= option: %s\n", value);
 		return 1;
 	}
 	return 0;
@@ -353,24 +353,24 @@ cifs_parse_smb_version(struct fs_context *fc, char *value, struct smb3_fs_contex
 #ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	case Smb_1:
 		if (disable_legacy_dialects) {
-			cifs_dbg(VFS, "mount with legacy dialect disabled\n");
+			cifs_errorf(fc, "mount with legacy dialect disabled\n");
 			return 1;
 		}
 		if (is_smb3) {
-			cifs_dbg(VFS, "vers=1.0 (cifs) not permitted when mounting with smb3\n");
+			cifs_errorf(fc, "vers=1.0 (cifs) not permitted when mounting with smb3\n");
 			return 1;
 		}
-		cifs_dbg(VFS, "Use of the less secure dialect vers=1.0 is not recommended unless required for access to very old servers\n");
+		cifs_errorf(fc, "Use of the less secure dialect vers=1.0 is not recommended unless required for access to very old servers\n");
 		ctx->ops = &smb1_operations;
 		ctx->vals = &smb1_values;
 		break;
 	case Smb_20:
 		if (disable_legacy_dialects) {
-			cifs_dbg(VFS, "mount with legacy dialect disabled\n");
+			cifs_errorf(fc, "mount with legacy dialect disabled\n");
 			return 1;
 		}
 		if (is_smb3) {
-			cifs_dbg(VFS, "vers=2.0 not permitted when mounting with smb3\n");
+			cifs_errorf(fc, "vers=2.0 not permitted when mounting with smb3\n");
 			return 1;
 		}
 		ctx->ops = &smb20_operations;
@@ -378,10 +378,10 @@ cifs_parse_smb_version(struct fs_context *fc, char *value, struct smb3_fs_contex
 		break;
 #else
 	case Smb_1:
-		cifs_dbg(VFS, "vers=1.0 (cifs) mount not permitted when legacy dialects disabled\n");
+		cifs_errorf(fc, "vers=1.0 (cifs) mount not permitted when legacy dialects disabled\n");
 		return 1;
 	case Smb_20:
-		cifs_dbg(VFS, "vers=2.0 mount not permitted when legacy dialects disabled\n");
+		cifs_errorf(fc, "vers=2.0 mount not permitted when legacy dialects disabled\n");
 		return 1;
 #endif /* CIFS_ALLOW_INSECURE_LEGACY */
 	case Smb_21:
@@ -405,11 +405,11 @@ cifs_parse_smb_version(struct fs_context *fc, char *value, struct smb3_fs_contex
 		ctx->vals = &smb3any_values;
 		break;
 	case Smb_default:
-		ctx->ops = &smb30_operations; /* currently identical with 3.0 */
+		ctx->ops = &smb30_operations;
 		ctx->vals = &smbdefault_values;
 		break;
 	default:
-		cifs_dbg(VFS, "Unknown vers= option specified: %s\n", value);
+		cifs_errorf(fc, "Unknown vers= option specified: %s\n", value);
 		return 1;
 	}
 	return 0;
@@ -646,14 +646,14 @@ static int smb3_fs_context_validate(struct fs_context *fc)
 	struct smb3_fs_context *ctx = smb3_fc2context(fc);
 
 	if (ctx->rdma && ctx->vals->protocol_id < SMB30_PROT_ID) {
-		cifs_dbg(VFS, "SMB Direct requires Version >=3.0\n");
+		cifs_errorf(fc, "SMB Direct requires Version >=3.0\n");
 		return -EOPNOTSUPP;
 	}
 
 #ifndef CONFIG_KEYS
 	/* Muliuser mounts require CONFIG_KEYS support */
 	if (ctx->multiuser) {
-		cifs_dbg(VFS, "Multiuser mounts require kernels with CONFIG_KEYS enabled\n");
+		cifs_errorf(fc, "Multiuser mounts require kernels with CONFIG_KEYS enabled\n");
 		return -1;
 	}
 #endif
@@ -663,13 +663,13 @@ static int smb3_fs_context_validate(struct fs_context *fc)
 
 
 	if (!ctx->UNC) {
-		cifs_dbg(VFS, "CIFS mount error: No usable UNC path provided in device string!\n");
+		cifs_errorf(fc, "CIFS mount error: No usable UNC path provided in device string!\n");
 		return -1;
 	}
 
 	/* make sure UNC has a share name */
 	if (strlen(ctx->UNC) < 3 || !strchr(ctx->UNC + 3, '\\')) {
-		cifs_dbg(VFS, "Malformed UNC. Unable to find share name.\n");
+		cifs_errorf(fc, "Malformed UNC. Unable to find share name.\n");
 		return -ENOENT;
 	}
 
@@ -751,45 +751,49 @@ static int smb3_verify_reconfigure_ctx(struct fs_context *fc,
 				       struct smb3_fs_context *old_ctx)
 {
 	if (new_ctx->posix_paths != old_ctx->posix_paths) {
-		cifs_dbg(VFS, "can not change posixpaths during remount\n");
+		cifs_errorf(fc, "can not change posixpaths during remount\n");
 		return -EINVAL;
 	}
 	if (new_ctx->sectype != old_ctx->sectype) {
-		cifs_dbg(VFS, "can not change sec during remount\n");
+		cifs_errorf(fc, "can not change sec during remount\n");
 		return -EINVAL;
 	}
 	if (new_ctx->multiuser != old_ctx->multiuser) {
-		cifs_dbg(VFS, "can not change multiuser during remount\n");
+		cifs_errorf(fc, "can not change multiuser during remount\n");
 		return -EINVAL;
 	}
 	if (new_ctx->UNC &&
 	    (!old_ctx->UNC || strcmp(new_ctx->UNC, old_ctx->UNC))) {
-		cifs_dbg(VFS, "can not change UNC during remount\n");
+		cifs_errorf(fc, "can not change UNC during remount\n");
 		return -EINVAL;
 	}
 	if (new_ctx->username &&
 	    (!old_ctx->username || strcmp(new_ctx->username, old_ctx->username))) {
-		cifs_dbg(VFS, "can not change username during remount\n");
+		cifs_errorf(fc, "can not change username during remount\n");
 		return -EINVAL;
 	}
 	if (new_ctx->password &&
 	    (!old_ctx->password || strcmp(new_ctx->password, old_ctx->password))) {
-		cifs_dbg(VFS, "can not change password during remount\n");
+		cifs_errorf(fc, "can not change password during remount\n");
 		return -EINVAL;
 	}
 	if (new_ctx->domainname &&
 	    (!old_ctx->domainname || strcmp(new_ctx->domainname, old_ctx->domainname))) {
-		cifs_dbg(VFS, "can not change domainname during remount\n");
+		cifs_errorf(fc, "can not change domainname during remount\n");
+		return -EINVAL;
+	}
+	if (strcmp(new_ctx->workstation_name, old_ctx->workstation_name)) {
+		cifs_errorf(fc, "can not change workstation_name during remount\n");
 		return -EINVAL;
 	}
 	if (new_ctx->nodename &&
 	    (!old_ctx->nodename || strcmp(new_ctx->nodename, old_ctx->nodename))) {
-		cifs_dbg(VFS, "can not change nodename during remount\n");
+		cifs_errorf(fc, "can not change nodename during remount\n");
 		return -EINVAL;
 	}
 	if (new_ctx->iocharset &&
 	    (!old_ctx->iocharset || strcmp(new_ctx->iocharset, old_ctx->iocharset))) {
-		cifs_dbg(VFS, "can not change iocharset during remount\n");
+		cifs_errorf(fc, "can not change iocharset during remount\n");
 		return -EINVAL;
 	}
 
@@ -815,7 +819,8 @@ static int smb3_reconfigure(struct fs_context *fc)
 		return rc;
 
 	/*
-	 * We can not change UNC/username/password/domainname/nodename/iocharset
+	 * We can not change UNC/username/password/domainname/
+	 * workstation_name/nodename/iocharset
 	 * during reconnect so ignore what we have in the new context and
 	 * just use what we already have in cifs_sb->ctx.
 	 */
@@ -1022,7 +1027,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		 */
 		if ((result.uint_32 < CIFS_MAX_MSGSIZE) ||
 		   (result.uint_32 > (4 * SMB3_DEFAULT_IOSIZE))) {
-			cifs_dbg(VFS, "%s: Invalid blocksize\n",
+			cifs_errorf(fc, "%s: Invalid blocksize\n",
 				__func__);
 			goto cifs_parse_mount_err;
 		}
@@ -1040,25 +1045,25 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 	case Opt_acregmax:
 		ctx->acregmax = HZ * result.uint_32;
 		if (ctx->acregmax > CIFS_MAX_ACTIMEO) {
-			cifs_dbg(VFS, "acregmax too large\n");
+			cifs_errorf(fc, "acregmax too large\n");
 			goto cifs_parse_mount_err;
 		}
 		break;
 	case Opt_acdirmax:
 		ctx->acdirmax = HZ * result.uint_32;
 		if (ctx->acdirmax > CIFS_MAX_ACTIMEO) {
-			cifs_dbg(VFS, "acdirmax too large\n");
+			cifs_errorf(fc, "acdirmax too large\n");
 			goto cifs_parse_mount_err;
 		}
 		break;
 	case Opt_actimeo:
 		if (HZ * result.uint_32 > CIFS_MAX_ACTIMEO) {
-			cifs_dbg(VFS, "timeout too large\n");
+			cifs_errorf(fc, "timeout too large\n");
 			goto cifs_parse_mount_err;
 		}
 		if ((ctx->acdirmax != CIFS_DEF_ACTIMEO) ||
 		    (ctx->acregmax != CIFS_DEF_ACTIMEO)) {
-			cifs_dbg(VFS, "actimeo ignored since acregmax or acdirmax specified\n");
+			cifs_errorf(fc, "actimeo ignored since acregmax or acdirmax specified\n");
 			break;
 		}
 		ctx->acdirmax = ctx->acregmax = HZ * result.uint_32;
@@ -1067,11 +1072,11 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		ctx->echo_interval = result.uint_32;
 		break;
 	case Opt_snapshot:
-		ctx->snapshot_time = result.uint_32;
+		ctx->snapshot_time = result.uint_64;
 		break;
 	case Opt_max_credits:
 		if (result.uint_32 < 20 || result.uint_32 > 60000) {
-			cifs_dbg(VFS, "%s: Invalid max_credits value\n",
+			cifs_errorf(fc, "%s: Invalid max_credits value\n",
 				 __func__);
 			goto cifs_parse_mount_err;
 		}
@@ -1079,16 +1084,19 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		break;
 	case Opt_max_channels:
 		if (result.uint_32 < 1 || result.uint_32 > CIFS_MAX_CHANNELS) {
-			cifs_dbg(VFS, "%s: Invalid max_channels value, needs to be 1-%d\n",
+			cifs_errorf(fc, "%s: Invalid max_channels value, needs to be 1-%d\n",
 				 __func__, CIFS_MAX_CHANNELS);
 			goto cifs_parse_mount_err;
 		}
 		ctx->max_channels = result.uint_32;
+		/* If more than one channel requested ... they want multichan */
+		if (result.uint_32 > 1)
+			ctx->multichannel = true;
 		break;
 	case Opt_handletimeout:
 		ctx->handle_timeout = result.uint_32;
 		if (ctx->handle_timeout > SMB3_MAX_HANDLE_TIMEOUT) {
-			cifs_dbg(VFS, "Invalid handle cache timeout, longer than 16 minutes\n");
+			cifs_errorf(fc, "Invalid handle cache timeout, longer than 16 minutes\n");
 			goto cifs_parse_mount_err;
 		}
 		break;
@@ -1099,23 +1107,23 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		case 0:
 			break;
 		case -ENOMEM:
-			cifs_dbg(VFS, "Unable to allocate memory for devname\n");
+			cifs_errorf(fc, "Unable to allocate memory for devname\n");
 			goto cifs_parse_mount_err;
 		case -EINVAL:
-			cifs_dbg(VFS, "Malformed UNC in devname\n");
+			cifs_errorf(fc, "Malformed UNC in devname\n");
 			goto cifs_parse_mount_err;
 		default:
-			cifs_dbg(VFS, "Unknown error parsing devname\n");
+			cifs_errorf(fc, "Unknown error parsing devname\n");
 			goto cifs_parse_mount_err;
 		}
 		ctx->source = kstrdup(param->string, GFP_KERNEL);
 		if (ctx->source == NULL) {
-			cifs_dbg(VFS, "OOM when copying UNC string\n");
+			cifs_errorf(fc, "OOM when copying UNC string\n");
 			goto cifs_parse_mount_err;
 		}
 		fc->source = kstrdup(param->string, GFP_KERNEL);
 		if (fc->source == NULL) {
-			cifs_dbg(VFS, "OOM when copying UNC string\n");
+			cifs_errorf(fc, "OOM when copying UNC string\n");
 			goto cifs_parse_mount_err;
 		}
 		break;
@@ -1135,7 +1143,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		}
 		ctx->username = kstrdup(param->string, GFP_KERNEL);
 		if (ctx->username == NULL) {
-			cifs_dbg(VFS, "OOM when copying username string\n");
+			cifs_errorf(fc, "OOM when copying username string\n");
 			goto cifs_parse_mount_err;
 		}
 		break;
@@ -1147,7 +1155,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 
 		ctx->password = kstrdup(param->string, GFP_KERNEL);
 		if (ctx->password == NULL) {
-			cifs_dbg(VFS, "OOM when copying password string\n");
+			cifs_errorf(fc, "OOM when copying password string\n");
 			goto cifs_parse_mount_err;
 		}
 		break;
@@ -1174,7 +1182,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		kfree(ctx->domainname);
 		ctx->domainname = kstrdup(param->string, GFP_KERNEL);
 		if (ctx->domainname == NULL) {
-			cifs_dbg(VFS, "OOM when copying domainname string\n");
+			cifs_errorf(fc, "OOM when copying domainname string\n");
 			goto cifs_parse_mount_err;
 		}
 		cifs_dbg(FYI, "Domain name set\n");
@@ -1198,7 +1206,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 			kfree(ctx->iocharset);
 			ctx->iocharset = kstrdup(param->string, GFP_KERNEL);
 			if (ctx->iocharset == NULL) {
-				cifs_dbg(VFS, "OOM when copying iocharset string\n");
+				cifs_errorf(fc, "OOM when copying iocharset string\n");
 				goto cifs_parse_mount_err;
 			}
 		}
@@ -1278,10 +1286,11 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		break;
 	case Opt_witness:
 #ifndef CONFIG_CIFS_SWN_UPCALL
-		cifs_dbg(VFS, "Witness support needs CONFIG_CIFS_SWN_UPCALL config option\n");
+		cifs_errorf(fc, "Witness support needs CONFIG_CIFS_SWN_UPCALL config option\n");
 			goto cifs_parse_mount_err;
 #endif
 		ctx->witness = true;
+		pr_warn_once("Witness protocol support is experimental\n");
 		break;
 	case Opt_rootfs:
 #ifndef CONFIG_CIFS_ROOT
@@ -1297,10 +1306,17 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 			ctx->posix_paths = 1;
 		break;
 	case Opt_unix:
-		if (result.negated)
+		if (result.negated) {
+			if (ctx->linux_ext == 1)
+				pr_warn_once("conflicting posix mount options specified\n");
 			ctx->linux_ext = 0;
-		else
 			ctx->no_linux_ext = 1;
+		} else {
+			if (ctx->no_linux_ext == 1)
+				pr_warn_once("conflicting posix mount options specified\n");
+			ctx->linux_ext = 1;
+			ctx->no_linux_ext = 0;
+		}
 		break;
 	case Opt_nocase:
 		ctx->nocase = 1;
@@ -1378,7 +1394,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		break;
 	case Opt_fsc:
 #ifndef CONFIG_CIFS_FSCACHE
-		cifs_dbg(VFS, "FS-Cache support needs CONFIG_CIFS_FSCACHE kernel config option set\n");
+		cifs_errorf(fc, "FS-Cache support needs CONFIG_CIFS_FSCACHE kernel config option set\n");
 		goto cifs_parse_mount_err;
 #endif
 		ctx->fsc = true;
@@ -1399,15 +1415,13 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		if (result.negated) {
 			ctx->nopersistent = true;
 			if (ctx->persistent) {
-				cifs_dbg(VFS,
-				  "persistenthandles mount options conflict\n");
+				cifs_errorf(fc, "persistenthandles mount options conflict\n");
 				goto cifs_parse_mount_err;
 			}
 		} else {
 			ctx->persistent = true;
 			if ((ctx->nopersistent) || (ctx->resilient)) {
-				cifs_dbg(VFS,
-				  "persistenthandles mount options conflict\n");
+				cifs_errorf(fc, "persistenthandles mount options conflict\n");
 				goto cifs_parse_mount_err;
 			}
 		}
@@ -1418,8 +1432,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		} else {
 			ctx->resilient = true;
 			if (ctx->persistent) {
-				cifs_dbg(VFS,
-				  "persistenthandles mount options conflict\n");
+				cifs_errorf(fc, "persistenthandles mount options conflict\n");
 				goto cifs_parse_mount_err;
 			}
 		}
@@ -1448,6 +1461,8 @@ int smb3_init_fs_context(struct fs_context *fc)
 	ctx = kzalloc(sizeof(struct smb3_fs_context), GFP_KERNEL);
 	if (unlikely(!ctx))
 		return -ENOMEM;
+
+	strscpy(ctx->workstation_name, nodename, sizeof(ctx->workstation_name));
 
 	/*
 	 * does not have to be perfect mapping since field is

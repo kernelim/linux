@@ -107,7 +107,7 @@ static int gfs2_write_jdata_page(struct page *page,
 	 * the  page size, the remaining memory is zeroed when mapped, and
 	 * writes to that region are not written out to the file."
 	 */
-	offset = i_size & (PAGE_SIZE-1);
+	offset = i_size & (PAGE_SIZE - 1);
 	if (page->index == end_index && offset)
 		zero_user_segment(page, offset, PAGE_SIZE);
 

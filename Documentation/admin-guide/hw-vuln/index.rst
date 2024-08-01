@@ -13,8 +13,9 @@ are configurable at compile, boot or run time.
    l1tf
    mds
    tsx_async_abort
-   multihit.rst
-   special-register-buffer-data-sampling.rst
-   processor_mmio_stale_data.rst
+   multihit
+   special-register-buffer-data-sampling
+   processor_mmio_stale_data
    srso
-   gather_data_sampling.rst
+   gather_data_sampling
+   reg-file-data-sampling

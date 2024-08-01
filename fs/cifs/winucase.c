@@ -1,5 +1,4 @@
 /*
- * fs/cifs/winucase.c
  *
  * Copyright (c) Jeffrey Layton <jlayton@redhat.com>, 2013
  *

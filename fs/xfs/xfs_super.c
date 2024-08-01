@@ -1891,17 +1891,17 @@ xfs_init_zones(void)
 	if (!xfs_log_ticket_zone)
 		goto out;
 
-	xfs_bmap_free_item_zone = kmem_cache_create("xfs_bmap_free_item",
+	xfs_extfree_item_zone = kmem_cache_create("xfs_extfree_intent",
 					sizeof(struct xfs_extent_free_item),
 					0, 0, NULL);
-	if (!xfs_bmap_free_item_zone)
+	if (!xfs_extfree_item_zone)
 		goto out_destroy_log_ticket_zone;
 
 	xfs_btree_cur_zone = kmem_cache_create("xfs_btree_cur",
 					       sizeof(struct xfs_btree_cur),
 					       0, 0, NULL);
 	if (!xfs_btree_cur_zone)
-		goto out_destroy_bmap_free_item_zone;
+		goto out_destroy_extfree_item_zone;
 
 	xfs_da_state_zone = kmem_cache_create("xfs_da_state",
 					      sizeof(struct xfs_da_state),
@@ -2039,8 +2039,8 @@ xfs_init_zones(void)
 	kmem_cache_destroy(xfs_da_state_zone);
  out_destroy_btree_cur_zone:
 	kmem_cache_destroy(xfs_btree_cur_zone);
- out_destroy_bmap_free_item_zone:
-	kmem_cache_destroy(xfs_bmap_free_item_zone);
+ out_destroy_extfree_item_zone:
+	kmem_cache_destroy(xfs_extfree_item_zone);
  out_destroy_log_ticket_zone:
 	kmem_cache_destroy(xfs_log_ticket_zone);
  out:
@@ -2071,7 +2071,7 @@ xfs_destroy_zones(void)
 	kmem_cache_destroy(xfs_ifork_zone);
 	kmem_cache_destroy(xfs_da_state_zone);
 	kmem_cache_destroy(xfs_btree_cur_zone);
-	kmem_cache_destroy(xfs_bmap_free_item_zone);
+	kmem_cache_destroy(xfs_extfree_item_zone);
 	kmem_cache_destroy(xfs_log_ticket_zone);
 }
 
