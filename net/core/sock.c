@@ -592,7 +592,7 @@ struct dst_entry *__sk_dst_check(struct sock *sk, u32 cookie)
 	    INDIRECT_CALL_INET(dst->ops->check, ip6_dst_check, ipv4_dst_check,
 			       dst, cookie) == NULL) {
 		sk_tx_queue_clear(sk);
-		sk->sk_dst_pending_confirm = 0;
+		WRITE_ONCE(sk->sk_dst_pending_confirm, 0);
 		RCU_INIT_POINTER(sk->sk_dst_cache, NULL);
 		dst_release(dst);
 		return NULL;
@@ -3612,6 +3612,9 @@ void sk_common_release(struct sock *sk)
 	 */
 
 	sk->sk_prot->unhash(sk);
+
+	if (sk->sk_socket)
+		sk->sk_socket->sk = NULL;
 
 	/*
 	 * In this point socket cannot receive new packets, but it is possible
