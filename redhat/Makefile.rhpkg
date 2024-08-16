@@ -19,7 +19,7 @@ endif
 #RHDISTGIT_CACHE:=
 # Temporary directory to clone the dist-git repo to. Change this if you
 # have a faster storage
-RHDISTGIT_TMP:=/tmp
+RHDISTGIT_TMP?=/tmp
 
 # load configuration, starting with home directory then local
 ifeq ("$(RHDISTGIT_CACHE)", "")
