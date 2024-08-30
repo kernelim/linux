@@ -1902,6 +1902,8 @@ bool __ceph_should_report_size(struct ceph_inode_info *ci)
  *  CHECK_CAPS_AUTHONLY - we should only check the auth cap
  *  CHECK_CAPS_FLUSH - we should flush any dirty caps immediately, without
  *    further delay.
+ *  CHECK_CAPS_FLUSH_FORCE - we should flush any caps immediately, without
+ *    further delay.
  */
 void ceph_check_caps(struct ceph_inode_info *ci, int flags)
 {
@@ -1980,7 +1982,7 @@ retry:
 	}
 
 	dout("check_caps %llx.%llx file_want %s used %s dirty %s flushing %s"
-	     " issued %s revoking %s retain %s %s%s%s\n", ceph_vinop(inode),
+	     " issued %s revoking %s retain %s %s%s%s%s\n", ceph_vinop(inode),
 	     ceph_cap_string(file_wanted),
 	     ceph_cap_string(used), ceph_cap_string(ci->i_dirty_caps),
 	     ceph_cap_string(ci->i_flushing_caps),
@@ -1988,7 +1990,8 @@ retry:
 	     ceph_cap_string(retain),
 	     (flags & CHECK_CAPS_AUTHONLY) ? " AUTHONLY" : "",
 	     (flags & CHECK_CAPS_FLUSH) ? " FLUSH" : "",
-	     (flags & CHECK_CAPS_NOINVAL) ? " NOINVAL" : "");
+	     (flags & CHECK_CAPS_NOINVAL) ? " NOINVAL" : "",
+	     (flags & CHECK_CAPS_FLUSH_FORCE) ? " FLUSH_FORCE" : "");
 
 	/*
 	 * If we no longer need to hold onto old our caps, and we may
@@ -2061,6 +2064,11 @@ retry:
 			if (S_ISREG(inode->i_mode) && ci->i_wrbuffer_ref &&
 			    (revoking & CEPH_CAP_FILE_BUFFER))
 				queue_writeback = true;
+		}
+
+		if (flags & CHECK_CAPS_FLUSH_FORCE) {
+			dout("force to flush caps\n");
+			goto ack;
 		}
 
 		if (cap == ci->i_auth_cap &&
@@ -3364,6 +3372,8 @@ static void handle_cap_grant(struct inode *inode,
 	bool queue_invalidate = false;
 	bool deleted_inode = false;
 	bool fill_inline = false;
+	bool revoke_wait = false;
+	int flags = 0;
 
 	dout("handle_cap_grant inode %p cap %p mds%d seq %d %s\n",
 	     inode, cap, session->s_mds, seq, ceph_cap_string(newcaps));
@@ -3542,16 +3552,18 @@ static void handle_cap_grant(struct inode *inode,
 		     ceph_cap_string(newcaps),
 		     ceph_cap_string(revoking));
 		if (S_ISREG(inode->i_mode) &&
-		    (revoking & used & CEPH_CAP_FILE_BUFFER))
+		    (revoking & used & CEPH_CAP_FILE_BUFFER)) {
 			writeback = true;  /* initiate writeback; will delay ack */
-		else if (queue_invalidate &&
+			revoke_wait = true;
+		} else if (queue_invalidate &&
 			 revoking == CEPH_CAP_FILE_CACHE &&
-			 (newcaps & CEPH_CAP_FILE_LAZYIO) == 0)
-			; /* do nothing yet, invalidation will be queued */
-		else if (cap == ci->i_auth_cap)
+			 (newcaps & CEPH_CAP_FILE_LAZYIO) == 0) {
+			revoke_wait = true; /* do nothing yet, invalidation will be queued */
+		} else if (cap == ci->i_auth_cap) {
 			check_caps = 1; /* check auth cap only */
-		else
+		} else {
 			check_caps = 2; /* check all caps */
+		}
 		cap->issued = newcaps;
 		cap->implemented |= newcaps;
 	} else if (cap->issued == newcaps) {
@@ -3574,8 +3586,9 @@ static void handle_cap_grant(struct inode *inode,
 	BUG_ON(cap->issued & ~cap->implemented);
 
 	/* don't let check_caps skip sending a response to MDS for revoke msgs */
-	if (le32_to_cpu(grant->op) == CEPH_CAP_OP_REVOKE) {
+	if (!revoke_wait && le32_to_cpu(grant->op) == CEPH_CAP_OP_REVOKE) {
 		cap->mds_wanted = 0;
+		flags |= CHECK_CAPS_FLUSH_FORCE;
 		if (cap == ci->i_auth_cap)
 			check_caps = 1; /* check auth cap only */
 		else
@@ -3631,9 +3644,9 @@ static void handle_cap_grant(struct inode *inode,
 
 	mutex_unlock(&session->s_mutex);
 	if (check_caps == 1)
-		ceph_check_caps(ci, CHECK_CAPS_AUTHONLY | CHECK_CAPS_NOINVAL);
+		ceph_check_caps(ci, flags | CHECK_CAPS_AUTHONLY | CHECK_CAPS_NOINVAL);
 	else if (check_caps == 2)
-		ceph_check_caps(ci, CHECK_CAPS_NOINVAL);
+		ceph_check_caps(ci, flags | CHECK_CAPS_NOINVAL);
 }
 
 /*
