@@ -733,7 +733,7 @@ static int coda_s_fmt(struct coda_ctx *ctx, struct v4l2_format *f,
 			ctx->tiled_map_type = GDI_TILED_FRAME_MB_RASTER_MAP;
 			break;
 		}
-		/* else fall through */
+		fallthrough;
 	case V4L2_PIX_FMT_YUV420:
 	case V4L2_PIX_FMT_YVU420:
 		ctx->tiled_map_type = GDI_LINEAR_FRAME_MAP;
@@ -912,7 +912,7 @@ static int coda_g_selection(struct file *file, void *fh,
 	case V4L2_SEL_TGT_CROP_DEFAULT:
 	case V4L2_SEL_TGT_CROP_BOUNDS:
 		rsel = &r;
-		/* fallthrough */
+		fallthrough;
 	case V4L2_SEL_TGT_CROP:
 		if (s->type != V4L2_BUF_TYPE_VIDEO_OUTPUT)
 			return -EINVAL;
@@ -920,7 +920,7 @@ static int coda_g_selection(struct file *file, void *fh,
 	case V4L2_SEL_TGT_COMPOSE_BOUNDS:
 	case V4L2_SEL_TGT_COMPOSE_PADDED:
 		rsel = &r;
-		/* fallthrough */
+		fallthrough;
 	case V4L2_SEL_TGT_COMPOSE:
 	case V4L2_SEL_TGT_COMPOSE_DEFAULT:
 		if (s->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
@@ -2037,7 +2037,7 @@ static int coda_open(struct file *file)
 		 */
 		if (enable_bwb || ctx->inst_type == CODA_INST_ENCODER)
 			ctx->frame_mem_ctrl = CODA9_FRAME_ENABLE_BWB;
-		/* fallthrough */
+		fallthrough;
 	case CODA_HX4:
 	case CODA_7541:
 		ctx->reg_idx = 0;

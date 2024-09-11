@@ -544,6 +544,11 @@ int elv_register(struct elevator_type *e)
 {
 	char *def = "";
 
+	if (e->ops.bio_merge && !e->ops.bio_merge2)
+		pr_warn("%s: please implement elevator(%s)'s bio_merge2() "
+				"instead of bio_merge()\n",
+				__func__, e->elevator_name);
+
 	/* insert_requests and dispatch_request are mandatory */
 	if (WARN_ON_ONCE(!e->ops.insert_requests || !e->ops.dispatch_request))
 		return -EINVAL;

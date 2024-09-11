@@ -209,6 +209,11 @@ int main(void)
 	vm_vaddr_t tsc_page_gva;
 	int stage;
 
+	if (!sys_clocksource_is_based_on_tsc()) {
+		print_skip("TSC based clocksource is required");
+                exit(KSFT_SKIP);
+        }
+
 	vm = vm_create_default(VCPU_ID, 0, guest_main);
 	run = vcpu_state(vm, VCPU_ID);
 

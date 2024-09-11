@@ -635,9 +635,8 @@ static int dd_request_merge(struct request_queue *q, struct request **rq,
  * Attempt to merge a bio into an existing request. This function is called
  * before @bio is associated with a request.
  */
-static bool dd_bio_merge(struct blk_mq_hw_ctx *hctx, struct bio *bio)
+static bool dd_bio_merge(struct request_queue *q, struct bio *bio)
 {
-	struct request_queue *q = hctx->queue;
 	struct deadline_data *dd = q->elevator->elevator_data;
 	struct request *free = NULL;
 	bool ret;
@@ -1069,7 +1068,7 @@ static struct elevator_type mq_deadline = {
 		.finish_request		= dd_finish_request,
 		.next_request		= elv_rb_latter_request,
 		.former_request		= elv_rb_former_request,
-		.bio_merge		= dd_bio_merge,
+		.bio_merge2		= dd_bio_merge,
 		.request_merge		= dd_request_merge,
 		.requests_merged	= dd_merged_requests,
 		.request_merged		= dd_request_merged,

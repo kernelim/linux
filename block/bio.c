@@ -1912,11 +1912,11 @@ void update_io_ticks(struct hd_struct *part, unsigned long now, bool end)
 	unsigned long stamp;
 again:
 	stamp = READ_ONCE(part->stamp);
-	if (unlikely(time_after(now, stamp))) {
-		if (likely(cmpxchg(&part->stamp, stamp, now) == stamp)) {
-			__part_stat_add(part, io_ticks, end ? now - stamp : 1);
-		}
-	}
+	if (unlikely(time_after(now, stamp)) &&
+	    likely(cmpxchg(&part->stamp, stamp, now) == stamp) &&
+	    (end || part_in_flight(part)))
+		__part_stat_add(part, io_ticks, now - stamp);
+
 	if (part->partno) {
 		part = &part_to_disk(part)->part0;
 		goto again;
@@ -2002,7 +2002,7 @@ again:
 	if (!bio_integrity_endio(bio))
 		return;
 
-	if (bio->bi_disk)
+	if (bio->bi_disk && bio_flagged(bio, BIO_TRACKED))
 		rq_qos_done_bio(bio->bi_disk->queue, bio);
 
 	if (bio->bi_disk && bio_flagged(bio, BIO_TRACE_COMPLETION)) {

@@ -7113,12 +7113,14 @@ int lpfc_get_sfp_info_wait(struct lpfc_hba *phba,
 	mbox->vport = phba->pport;
 	mbox->ctx_ndlp = (struct lpfc_rdp_context *)rdp_context;
 
-	rc = lpfc_sli_issue_mbox_wait(phba, mbox, 30);
+	rc = lpfc_sli_issue_mbox_wait(phba, mbox, LPFC_MBOX_SLI4_CONFIG_TMO);
 	if (rc == MBX_NOT_FINISHED) {
 		rc = 1;
 		goto error;
 	}
 
+	if (rc == MBX_TIMEOUT)
+		goto error;
 	if (phba->sli_rev == LPFC_SLI_REV4)
 		mp = (struct lpfc_dmabuf *)(mbox->ctx_buf);
 	else
@@ -7172,7 +7174,10 @@ int lpfc_get_sfp_info_wait(struct lpfc_hba *phba,
 	}
 
 	mbox->ctx_ndlp = (struct lpfc_rdp_context *)rdp_context;
-	rc = lpfc_sli_issue_mbox_wait(phba, mbox, 30);
+	rc = lpfc_sli_issue_mbox_wait(phba, mbox, LPFC_MBOX_SLI4_CONFIG_TMO);
+
+	if (rc == MBX_TIMEOUT)
+		goto error;
 	if (bf_get(lpfc_mqe_status, &mbox->u.mqe)) {
 		rc = 1;
 		goto error;
@@ -7186,12 +7191,14 @@ error:
 	mp = mpsave;
        	mbox->ctx_buf = NULL;
 
-	if (mp) {
-		lpfc_mbuf_free(phba, mp->virt, mp->phys);
-		kfree(mp);
-	}
+	if (mbox->mbox_flag & LPFC_MBX_WAKE) {
+		if (mp) {
+			lpfc_mbuf_free(phba, mp->virt, mp->phys);
+			kfree(mp);
+		}
 
-	mempool_free(mbox, phba->mbox_mem_pool);
+		mempool_free(mbox, phba->mbox_mem_pool);
+	}
 
 	return rc;
 

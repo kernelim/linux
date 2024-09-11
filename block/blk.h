@@ -366,6 +366,7 @@ static inline struct request_aux *rq_aux(const struct request *rq)
 }
 
 void update_io_ticks(struct hd_struct *part, unsigned long now, bool end);
+unsigned int part_in_flight(struct hd_struct *part);
 struct hd_struct *disk_map_sector_rcu(struct gendisk *disk, sector_t sector);
 
 int blk_alloc_devt(struct hd_struct *part, dev_t *devt);

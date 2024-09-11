@@ -1726,7 +1726,7 @@ static void smiapp_propagate(struct v4l2_subdev *subdev,
 				sensor->binning_vertical = 1;
 			}
 		}
-		/* Fall through */
+		fallthrough;
 	case V4L2_SEL_TGT_COMPOSE:
 		*crops[SMIAPP_PAD_SRC] = *comp;
 		break;
@@ -2125,7 +2125,7 @@ static int __smiapp_sel_supported(struct v4l2_subdev *subdev,
 		    && sensor->limits[SMIAPP_LIMIT_SCALING_CAPABILITY]
 		    != SMIAPP_SCALING_CAPABILITY_NONE)
 			return 0;
-		/* Fall through */
+		fallthrough;
 	default:
 		return -EINVAL;
 	}

@@ -182,6 +182,7 @@ static irqreturn_t pulse8_interrupt(struct serio *serio, unsigned char data,
 			msg->len = 1;
 			msg->msg[0] = pulse8->buf[1];
 			break;
+			fallthrough;
 		case MSGCODE_FRAME_DATA:
 			if (msg->len == CEC_MAX_MSG_SIZE)
 				break;

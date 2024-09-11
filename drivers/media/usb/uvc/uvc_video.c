@@ -1596,11 +1596,11 @@ static void uvc_video_complete(struct urb *urb)
 		dev_warn(&stream->intf->dev,
 			"Non-zero status (%d) in video completion handler.\n",
 			urb->status);
-		/* fall through */
+		fallthrough;
 	case -ENOENT:		/* usb_poison_urb() called. */
 		if (stream->frozen)
 			return;
-		/* fall through */
+		fallthrough;
 	case -ECONNRESET:	/* usb_unlink_urb() called. */
 	case -ESHUTDOWN:	/* The endpoint is being disabled. */
 		uvc_queue_cancel(queue, urb->status == -ESHUTDOWN);

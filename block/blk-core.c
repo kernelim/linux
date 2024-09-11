@@ -1290,6 +1290,8 @@ void blk_account_io_done(struct request *req, u64 now)
 		update_io_ticks(part, jiffies, true);
 		part_stat_inc(part, ios[sgrp]);
 		part_stat_add(part, nsecs[sgrp], now - req->start_time_ns);
+		part_stat_local_dec(part,
+				    in_flight[op_is_write(req_op(req))]);
 		part_stat_unlock();
 
 		hd_struct_put(part);
@@ -1305,6 +1307,8 @@ void blk_account_io_start(struct request *rq)
 
 	part_stat_lock();
 	update_io_ticks(rq->part, jiffies, false);
+	part_stat_local_inc(rq->part,
+			    in_flight[op_is_write(req_op(rq))]);
 	part_stat_unlock();
 }
 

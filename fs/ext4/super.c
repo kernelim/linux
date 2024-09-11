@@ -4668,16 +4668,12 @@ no_journal:
 	if (err)
 		goto failed_mount6;
 
-	err = ext4_register_sysfs(sb);
-	if (err)
-		goto failed_mount7;
-
 #ifdef CONFIG_QUOTA
 	/* Enable quota usage during mount. */
 	if (ext4_has_feature_quota(sb) && !sb_rdonly(sb)) {
 		err = ext4_enable_quotas(sb);
 		if (err)
-			goto failed_mount8;
+			goto failed_mount7;
 	}
 #endif  /* CONFIG_QUOTA */
 
@@ -4730,6 +4726,11 @@ no_journal:
 	ratelimit_state_init(&sbi->s_msg_ratelimit_state, 5 * HZ, 10);
 
 	kfree(orig_data);
+
+	err = ext4_register_sysfs(sb);
+	if (err)
+		goto failed_mount8;
+
 	return 0;
 
 cantfind_ext4:
@@ -4737,13 +4738,12 @@ cantfind_ext4:
 		ext4_msg(sb, KERN_ERR, "VFS: Can't find ext4 filesystem");
 	goto failed_mount;
 
-#ifdef CONFIG_QUOTA
 failed_mount8:
-	ext4_unregister_sysfs(sb);
-	kobject_put(&sbi->s_kobj);
-#endif
-failed_mount7:
+	ext4_quota_off_umount(sb);
+
+failed_mount7: __maybe_unused
 	ext4_unregister_li_request(sb);
+
 failed_mount6:
 	ext4_mb_release(sb);
 	rcu_read_lock();

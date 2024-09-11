@@ -233,6 +233,31 @@ static unsigned dm_crypt_clients_n = 0;
 static volatile unsigned long dm_crypt_pages_per_client;
 #define DM_CRYPT_MEMORY_PERCENT			2
 #define DM_CRYPT_MIN_PAGES_PER_CLIENT		(BIO_MAX_PAGES * 16)
+#define DM_CRYPT_DEFAULT_MAX_READ_SIZE		131072
+#define DM_CRYPT_DEFAULT_MAX_WRITE_SIZE		131072
+
+static unsigned int max_read_size = 0;
+module_param(max_read_size, uint, 0644);
+MODULE_PARM_DESC(max_read_size, "Maximum size of a read request");
+static unsigned int max_write_size = 0;
+module_param(max_write_size, uint, 0644);
+MODULE_PARM_DESC(max_write_size, "Maximum size of a write request");
+static unsigned get_max_request_size(struct crypt_config *cc, bool wrt)
+{
+	unsigned val, sector_align;
+	val = !wrt ? READ_ONCE(max_read_size) : READ_ONCE(max_write_size);
+	if (likely(!val))
+		val = !wrt ? DM_CRYPT_DEFAULT_MAX_READ_SIZE : DM_CRYPT_DEFAULT_MAX_WRITE_SIZE;
+	if (wrt || cc->on_disk_tag_size) {
+		if (unlikely(val > BIO_MAX_PAGES << PAGE_SHIFT))
+			val = BIO_MAX_PAGES << PAGE_SHIFT;
+	}
+	sector_align = max(bdev_logical_block_size(cc->dev->bdev), cc->sector_size);
+	val = round_down(val, sector_align);
+	if (unlikely(!val))
+		val = sector_align;
+	return val >> SECTOR_SHIFT;
+}
 
 static void clone_init(struct dm_crypt_io *, struct bio *);
 static void kcryptd_queue_crypt(struct dm_crypt_io *io);
@@ -3327,6 +3352,7 @@ static int crypt_map(struct dm_target *ti, struct bio *bio)
 {
 	struct dm_crypt_io *io;
 	struct crypt_config *cc = ti->private;
+	unsigned max_sectors;
 
 	/*
 	 * If bio is REQ_PREFLUSH or REQ_OP_DISCARD, just bypass crypt queues.
@@ -3345,9 +3371,9 @@ static int crypt_map(struct dm_target *ti, struct bio *bio)
 	/*
 	 * Check if bio is too large, split as needed.
 	 */
-	if (unlikely(bio->bi_iter.bi_size > (BIO_MAX_PAGES << PAGE_SHIFT)) &&
-	    (bio_data_dir(bio) == WRITE || cc->on_disk_tag_size))
-		dm_accept_partial_bio(bio, ((BIO_MAX_PAGES << PAGE_SHIFT) >> SECTOR_SHIFT));
+	max_sectors = get_max_request_size(cc, bio_data_dir(bio) == WRITE);
+	if (unlikely(bio_sectors(bio) > max_sectors))
+		dm_accept_partial_bio(bio, max_sectors);
 
 	/*
 	 * Ensure that bio is a multiple of internal sector encryption size

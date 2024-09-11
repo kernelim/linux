@@ -127,27 +127,6 @@ static void tsc_scaling_check_supported(void)
 	}
 }
 
-static void stable_tsc_check_supported(void)
-{
-	FILE *fp;
-	char buf[4];
-
-	fp = fopen("/sys/devices/system/clocksource/clocksource0/current_clocksource", "r");
-	if (fp == NULL)
-		goto skip_test;
-
-	if (fgets(buf, sizeof(buf), fp) == NULL)
-		goto skip_test;
-
-	if (strncmp(buf, "tsc", sizeof(buf)))
-		goto skip_test;
-
-	return;
-skip_test:
-	print_skip("Kernel does not use TSC clocksource - assuming that host TSC is not stable");
-	exit(KSFT_SKIP);
-}
-
 int main(int argc, char *argv[])
 {
 	struct kvm_vm *vm;
@@ -162,7 +141,10 @@ int main(int argc, char *argv[])
 
 	nested_vmx_check_supported();
 	tsc_scaling_check_supported();
-	stable_tsc_check_supported();
+        if (!sys_clocksource_is_based_on_tsc()) {
+                print_skip("TSC based clocksource is required");
+                exit(KSFT_SKIP);
+        }
 
 	/*
 	 * We set L1's scale factor to be a random number from 2 to 10.

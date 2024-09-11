@@ -2329,9 +2329,8 @@ static void bfq_remove_request(struct request_queue *q,
 
 }
 
-static bool bfq_bio_merge(struct blk_mq_hw_ctx *hctx, struct bio *bio)
+static bool bfq_bio_merge(struct request_queue *q, struct bio *bio)
 {
-	struct request_queue *q = hctx->queue;
 	struct bfq_data *bfqd = q->elevator->elevator_data;
 	struct request *free = NULL;
 	/*
@@ -7292,7 +7291,7 @@ static struct elevator_type iosched_bfq_mq = {
 		.next_request		= elv_rb_latter_request,
 		.former_request		= elv_rb_former_request,
 		.allow_merge		= bfq_allow_bio_merge,
-		.bio_merge		= bfq_bio_merge,
+		.bio_merge2		= bfq_bio_merge,
 		.request_merge		= bfq_request_merge,
 		.requests_merged	= bfq_requests_merged,
 		.request_merged		= bfq_request_merged,

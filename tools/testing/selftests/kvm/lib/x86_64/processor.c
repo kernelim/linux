@@ -1543,3 +1543,14 @@ unsigned long vm_compute_max_gfn(struct kvm_vm *vm)
 done:
 	return min(max_gfn, ht_gfn - 1);
 }
+
+bool sys_clocksource_is_based_on_tsc(void)
+{
+	char *clk_name = sys_get_cur_clocksource();
+	bool ret = !strcmp(clk_name, "tsc\n") ||
+		   !strcmp(clk_name, "hyperv_clocksource_tsc_page\n");
+
+	free(clk_name);
+
+	return ret;
+}

@@ -515,4 +515,7 @@ void __virt_pg_map(struct kvm_vm *vm, uint64_t vaddr, uint64_t paddr,
 #define XSTATE_XTILE_DATA_MASK		(1ULL << XSTATE_XTILE_DATA_BIT)
 #define XFEATURE_XTILE_MASK		(XSTATE_XTILE_CFG_MASK | \
 					XSTATE_XTILE_DATA_MASK)
+
+bool sys_clocksource_is_based_on_tsc(void);
+
 #endif /* SELFTEST_KVM_PROCESSOR_H */

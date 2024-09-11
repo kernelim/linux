@@ -114,7 +114,7 @@ static void part_stat_read_all(struct hd_struct *part, struct disk_stats *stat)
 }
 #endif /* CONFIG_SMP */
 
-static unsigned int part_in_flight(struct hd_struct *part)
+unsigned int part_in_flight(struct hd_struct *part)
 {
 	unsigned int inflight = 0;
 	int cpu;
@@ -1305,14 +1305,10 @@ ssize_t part_stat_show(struct device *dev,
 		       struct device_attribute *attr, char *buf)
 {
 	struct hd_struct *p = dev_to_part(dev);
-	struct request_queue *q = part_to_disk(p)->queue;
 	struct disk_stats stat;
 	unsigned int inflight;
 
-	if (queue_is_mq(q))
-		inflight = blk_mq_in_flight(q, p);
-	else
-		inflight = part_in_flight(p);
+	inflight = part_in_flight(p);
 
 	if (inflight) {
 		part_stat_lock();
@@ -1635,10 +1631,7 @@ static int diskstats_show(struct seq_file *seqf, void *v)
 
 	disk_part_iter_init(&piter, gp, DISK_PITER_INCL_EMPTY_PART0);
 	while ((hd = disk_part_iter_next(&piter))) {
-		if (queue_is_mq(gp->queue))
-			inflight = blk_mq_in_flight(gp->queue, hd);
-		else
-			inflight = part_in_flight(hd);
+		inflight = part_in_flight(hd);
 
 		if (inflight) {
 			part_stat_lock();

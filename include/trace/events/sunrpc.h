@@ -1962,8 +1962,7 @@ DECLARE_EVENT_CLASS(svc_deferred_event,
 
 	TP_fast_assign(
 		__entry->dr = dr;
-		__entry->xid = be32_to_cpu(*(__be32 *)(dr->args +
-						       (dr->xprt_hlen>>2)));
+		__entry->xid = be32_to_cpu(*(__be32 *)dr->args);
 		snprintf(__entry->addr, sizeof(__entry->addr) - 1,
 			 "%pISpc", (struct sockaddr *)&dr->addr);
 	),

@@ -541,6 +541,8 @@ static void rt6_probe(struct fib6_info *rt)
 	dev = rt->fib6_nh.nh_dev;
 	rcu_read_lock_bh();
 	idev = __in6_dev_get(dev);
+	if (!idev)
+		goto out;
 	neigh = __ipv6_neigh_lookup_noref(dev, nh_gw);
 	if (neigh) {
 		if (neigh->nud_state & NUD_VALID)

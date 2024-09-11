@@ -104,6 +104,15 @@ void __init setup_cpu_local_masks(void)
 static const bool cpu_in_retbleed_whitelist(struct cpuinfo_x86 *c)
 {
 	static const bool retbleed_whitelist[] = {
+		[INTEL_FAM6_CORE_YONAH]		= true,
+		[INTEL_FAM6_CORE2_MEROM]	= true,
+		[INTEL_FAM6_CORE2_MEROM_L]	= true,
+		[INTEL_FAM6_CORE2_PENRYN]	= true,
+		[INTEL_FAM6_CORE2_DUNNINGTON]	= true,
+		[INTEL_FAM6_NEHALEM]		= true,
+		[INTEL_FAM6_NEHALEM_G]		= true,
+		[INTEL_FAM6_NEHALEM_EP]		= true,
+		[INTEL_FAM6_NEHALEM_EX]		= true,
 		[INTEL_FAM6_WESTMERE]		= true,
 		[INTEL_FAM6_WESTMERE_EP]	= true,
 		[INTEL_FAM6_WESTMERE_EX]	= true,

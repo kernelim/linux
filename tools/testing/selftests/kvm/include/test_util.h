@@ -143,4 +143,6 @@ static inline bool backing_src_is_shared(enum vm_mem_backing_src_type t)
 	return vm_mem_backing_src_alias(t)->flag & MAP_SHARED;
 }
 
+char *sys_get_cur_clocksource(void);
+
 #endif /* SELFTEST_KVM_TEST_UTIL_H */

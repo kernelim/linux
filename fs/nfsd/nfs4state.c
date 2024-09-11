@@ -6785,7 +6785,9 @@ static __be32 nfsd_test_lock(struct svc_rqst *rqstp, struct svc_fh *fhp, struct 
 							NFSD_MAY_READ));
 	if (err)
 		goto out;
+	lock->fl_file = file;
 	err = nfserrno(vfs_test_lock(file, lock));
+	lock->fl_file = NULL;
 out:
 	fh_unlock(fhp);
 	fput(file);

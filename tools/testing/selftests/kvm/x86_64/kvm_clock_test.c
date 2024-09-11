@@ -140,42 +140,6 @@ static void enter_guest(struct kvm_vm *vm)
 	}
 }
 
-#define CLOCKSOURCE_PATH "/sys/devices/system/clocksource/clocksource0/current_clocksource"
-
-static void check_clocksource(void)
-{
-	char *clk_name;
-	struct stat st;
-	FILE *fp;
-
-	fp = fopen(CLOCKSOURCE_PATH, "r");
-	if (!fp) {
-		pr_info("failed to open clocksource file: %d; assuming TSC.\n",
-			errno);
-		return;
-	}
-
-	if (fstat(fileno(fp), &st)) {
-		pr_info("failed to stat clocksource file: %d; assuming TSC.\n",
-			errno);
-		goto out;
-	}
-
-	clk_name = malloc(st.st_size);
-	TEST_ASSERT(clk_name, "failed to allocate buffer to read file\n");
-
-	if (!fgets(clk_name, st.st_size, fp)) {
-		pr_info("failed to read clocksource file: %d; assuming TSC.\n",
-			ferror(fp));
-		goto out;
-	}
-
-	TEST_ASSERT(!strncmp(clk_name, "tsc\n", st.st_size),
-		    "clocksource not supported: %s", clk_name);
-out:
-	fclose(fp);
-}
-
 int main(void)
 {
 	vm_vaddr_t pvti_gva;
@@ -190,7 +154,10 @@ int main(void)
 		exit(KSFT_SKIP);
 	}
 
-	check_clocksource();
+	if (!sys_clocksource_is_based_on_tsc()) {
+		print_skip("TSC based clocksource is required");
+		exit(KSFT_SKIP);
+	}
 
 	vm = vm_create_default(VCPU_ID, 0, guest_main);
 
