@@ -2,6 +2,15 @@
 #ifndef __LINUX_COMPILER_TYPES_H
 #define __LINUX_COMPILER_TYPES_H
 
+/*
+ * __has_builtin is supported on gcc >= 10, clang >= 3 and icc >= 21.
+ * In the meantime, to support gcc < 10, we implement __has_builtin
+ * by hand.
+ */
+#ifndef __has_builtin
+#define __has_builtin(x) (0)
+#endif
+
 #ifndef __ASSEMBLY__
 
 #if defined(CONFIG_DEBUG_INFO_BTF) && defined(CONFIG_PAHOLE_HAS_BTF_TAG) && \
@@ -71,17 +80,6 @@ static inline void __chk_io_ptr(const volatile void __iomem *ptr) { }
 
 /* Attributes */
 #include <linux/compiler_attributes.h>
-
-/* Builtins */
-
-/*
- * __has_builtin is supported on gcc >= 10, clang >= 3 and icc >= 21.
- * In the meantime, to support gcc < 10, we implement __has_builtin
- * by hand.
- */
-#ifndef __has_builtin
-#define __has_builtin(x) (0)
-#endif
 
 /* Compiler specific macros. */
 #ifdef __clang__
@@ -296,6 +294,18 @@ __no_sanitize_memory
 #else
 # define __alloc_size(x, ...)	__malloc
 # define __realloc_size(x, ...)
+#endif
+
+/*
+ * When the size of an allocated object is needed, use the best available
+ * mechanism to find it. (For cases where sizeof() cannot be used.)
+ */
+#if __has_builtin(__builtin_dynamic_object_size)
+#define __struct_size(p)       __builtin_dynamic_object_size(p, 0)
+#define __member_size(p)       __builtin_dynamic_object_size(p, 1)
+#else
+#define __struct_size(p)       __builtin_object_size(p, 0)
+#define __member_size(p)       __builtin_object_size(p, 1)
 #endif
 
 #ifndef asm_volatile_goto
