@@ -1,2 +1,3 @@
-#4-
-0xcefb0c9f	__mutex_init	vmlinux	EXPORT_SYMBOL	
+#5-
+0x03fc7048	__mutex_init	vmlinux	EXPORT_SYMBOL	
+

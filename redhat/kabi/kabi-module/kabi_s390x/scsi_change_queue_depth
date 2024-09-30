@@ -1,2 +1,3 @@
-#4-
-0x0af1ce1b	scsi_change_queue_depth	vmlinux	EXPORT_SYMBOL	
+#5-
+0x1cb4667f	scsi_change_queue_depth	vmlinux	EXPORT_SYMBOL	
+

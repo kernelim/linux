@@ -115,9 +115,9 @@ static void sa1100_timeout(struct timer_list *t)
 	unsigned long flags;
 
 	if (sport->port.state) {
-		spin_lock_irqsave(&sport->port.lock, flags);
+		uart_port_lock_irqsave(&sport->port, &flags);
 		sa1100_mctrl_check(sport);
-		spin_unlock_irqrestore(&sport->port.lock, flags);
+		uart_port_unlock_irqrestore(&sport->port, flags);
 
 		mod_timer(&sport->timer, jiffies + MCTRL_TIMEOUT);
 	}
@@ -180,7 +180,8 @@ static void sa1100_enable_ms(struct uart_port *port)
 static void
 sa1100_rx_chars(struct sa1100_port *sport)
 {
-	unsigned int status, ch, flg;
+	unsigned int status;
+	u8 ch, flg;
 
 	status = UTSR1_TO_SM(UART_GET_UTSR1(sport)) |
 		 UTSR0_TO_SM(UART_GET_UTSR0(sport));
@@ -228,14 +229,7 @@ sa1100_rx_chars(struct sa1100_port *sport)
 
 static void sa1100_tx_chars(struct sa1100_port *sport)
 {
-	struct circ_buf *xmit = &sport->port.state->xmit;
-
-	if (sport->port.x_char) {
-		UART_PUT_CHAR(sport, sport->port.x_char);
-		sport->port.icount.tx++;
-		sport->port.x_char = 0;
-		return;
-	}
+	u8 ch;
 
 	/*
 	 * Check the modem control lines before
@@ -243,28 +237,9 @@ static void sa1100_tx_chars(struct sa1100_port *sport)
 	 */
 	sa1100_mctrl_check(sport);
 
-	if (uart_circ_empty(xmit) || uart_tx_stopped(&sport->port)) {
-		sa1100_stop_tx(&sport->port);
-		return;
-	}
-
-	/*
-	 * Tried using FIFO (not checking TNF) for fifo fill:
-	 * still had the '4 bytes repeated' problem.
-	 */
-	while (UART_GET_UTSR1(sport) & UTSR1_TNF) {
-		UART_PUT_CHAR(sport, xmit->buf[xmit->tail]);
-		xmit->tail = (xmit->tail + 1) & (UART_XMIT_SIZE - 1);
-		sport->port.icount.tx++;
-		if (uart_circ_empty(xmit))
-			break;
-	}
-
-	if (uart_circ_chars_pending(xmit) < WAKEUP_CHARS)
-		uart_write_wakeup(&sport->port);
-
-	if (uart_circ_empty(xmit))
-		sa1100_stop_tx(&sport->port);
+	uart_port_tx(&sport->port, ch,
+			UART_GET_UTSR1(sport) & UTSR1_TNF,
+			UART_PUT_CHAR(sport, ch));
 }
 
 static irqreturn_t sa1100_int(int irq, void *dev_id)
@@ -272,7 +247,7 @@ static irqreturn_t sa1100_int(int irq, void *dev_id)
 	struct sa1100_port *sport = dev_id;
 	unsigned int status, pass_counter = 0;
 
-	spin_lock(&sport->port.lock);
+	uart_port_lock(&sport->port);
 	status = UART_GET_UTSR0(sport);
 	status &= SM_TO_UTSR0(sport->port.read_status_mask) | ~UTSR0_TFS;
 	do {
@@ -301,7 +276,7 @@ static irqreturn_t sa1100_int(int irq, void *dev_id)
 		status &= SM_TO_UTSR0(sport->port.read_status_mask) |
 			  ~UTSR0_TFS;
 	} while (status & (UTSR0_TFS | UTSR0_RFS | UTSR0_RID));
-	spin_unlock(&sport->port.lock);
+	uart_port_unlock(&sport->port);
 
 	return IRQ_HANDLED;
 }
@@ -346,14 +321,14 @@ static void sa1100_break_ctl(struct uart_port *port, int break_state)
 	unsigned long flags;
 	unsigned int utcr3;
 
-	spin_lock_irqsave(&sport->port.lock, flags);
+	uart_port_lock_irqsave(&sport->port, &flags);
 	utcr3 = UART_GET_UTCR3(sport);
 	if (break_state == -1)
 		utcr3 |= UTCR3_BRK;
 	else
 		utcr3 &= ~UTCR3_BRK;
 	UART_PUT_UTCR3(sport, utcr3);
-	spin_unlock_irqrestore(&sport->port.lock, flags);
+	uart_port_unlock_irqrestore(&sport->port, flags);
 }
 
 static int sa1100_startup(struct uart_port *port)
@@ -379,9 +354,9 @@ static int sa1100_startup(struct uart_port *port)
 	/*
 	 * Enable modem status interrupts
 	 */
-	spin_lock_irq(&sport->port.lock);
+	uart_port_lock_irq(&sport->port);
 	sa1100_enable_ms(&sport->port);
-	spin_unlock_irq(&sport->port.lock);
+	uart_port_unlock_irq(&sport->port);
 
 	return 0;
 }
@@ -446,7 +421,9 @@ sa1100_set_termios(struct uart_port *port, struct ktermios *termios,
 	baud = uart_get_baud_rate(port, termios, old, 0, port->uartclk/16); 
 	quot = uart_get_divisor(port, baud);
 
-	spin_lock_irqsave(&sport->port.lock, flags);
+	del_timer_sync(&sport->timer);
+
+	uart_port_lock_irqsave(&sport->port, &flags);
 
 	sport->port.read_status_mask &= UTSR0_TO_SM(UTSR0_TFS);
 	sport->port.read_status_mask |= UTSR1_TO_SM(UTSR1_ROR);
@@ -475,8 +452,6 @@ sa1100_set_termios(struct uart_port *port, struct ktermios *termios,
 			sport->port.ignore_status_mask |=
 				UTSR1_TO_SM(UTSR1_ROR);
 	}
-
-	del_timer_sync(&sport->timer);
 
 	/*
 	 * Update the per-port timeout.
@@ -510,7 +485,7 @@ sa1100_set_termios(struct uart_port *port, struct ktermios *termios,
 	if (UART_ENABLE_MS(&sport->port, termios->c_cflag))
 		sa1100_enable_ms(&sport->port);
 
-	spin_unlock_irqrestore(&sport->port.lock, flags);
+	uart_port_unlock_irqrestore(&sport->port, flags);
 }
 
 static const char *sa1100_type(struct uart_port *port)

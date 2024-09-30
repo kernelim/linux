@@ -95,8 +95,8 @@ static void check_hung_task(struct task_struct *t, unsigned long timeout)
 	 * Ensure the task is not frozen.
 	 * Also, skip vfork and any other user process that freezer should skip.
 	 */
-	if (unlikely(t->flags & (PF_FROZEN | PF_FREEZER_SKIP)))
-	    return;
+	if (unlikely(READ_ONCE(t->__state) & TASK_FROZEN))
+		return;
 
 	/*
 	 * When a freshly created task is scheduled once, changes its state to
@@ -127,8 +127,6 @@ static void check_hung_task(struct task_struct *t, unsigned long timeout)
 	 * complain:
 	 */
 	if (sysctl_hung_task_warnings) {
-		printk_prefer_direct_enter();
-
 		if (sysctl_hung_task_warnings > 0)
 			sysctl_hung_task_warnings--;
 		pr_err("INFO: task %s:%d blocked for more than %ld seconds.\n",
@@ -144,8 +142,6 @@ static void check_hung_task(struct task_struct *t, unsigned long timeout)
 
 		if (sysctl_hung_task_all_cpu_backtrace)
 			hung_task_show_all_bt = true;
-
-		printk_prefer_direct_exit();
 	}
 
 	touch_nmi_watchdog();
@@ -195,6 +191,8 @@ static void check_hung_uninterruptible_tasks(unsigned long timeout)
 	hung_task_show_lock = false;
 	rcu_read_lock();
 	for_each_process_thread(g, t) {
+		unsigned int state;
+
 		if (!max_count--)
 			goto unlock;
 		if (time_after(jiffies, last_break + HUNG_TASK_LOCK_BREAK)) {
@@ -202,23 +200,24 @@ static void check_hung_uninterruptible_tasks(unsigned long timeout)
 				goto unlock;
 			last_break = jiffies;
 		}
-		/* use "==" to skip the TASK_KILLABLE tasks waiting on NFS */
-		if (READ_ONCE(t->__state) == TASK_UNINTERRUPTIBLE)
+		/*
+		 * skip the TASK_KILLABLE tasks -- these can be killed
+		 * skip the TASK_IDLE tasks -- those are genuinely idle
+		 */
+		state = READ_ONCE(t->__state);
+		if ((state & TASK_UNINTERRUPTIBLE) &&
+		    !(state & TASK_WAKEKILL) &&
+		    !(state & TASK_NOLOAD))
 			check_hung_task(t, timeout);
 	}
  unlock:
 	rcu_read_unlock();
-	if (hung_task_show_lock) {
-		printk_prefer_direct_enter();
+	if (hung_task_show_lock)
 		debug_show_all_locks();
-		printk_prefer_direct_exit();
-	}
 
 	if (hung_task_show_all_bt) {
 		hung_task_show_all_bt = false;
-		printk_prefer_direct_enter();
 		trigger_all_cpu_backtrace();
-		printk_prefer_direct_exit();
 	}
 
 	if (hung_task_call_panic)

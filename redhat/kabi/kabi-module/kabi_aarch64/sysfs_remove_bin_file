@@ -1,2 +1,3 @@
-#4-
-0x57b149d3	sysfs_remove_bin_file	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0x8faa8f2d	sysfs_remove_bin_file	vmlinux	EXPORT_SYMBOL_GPL	
+

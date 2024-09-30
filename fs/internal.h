@@ -23,15 +23,9 @@ struct iov_iter;
  */
 #ifdef CONFIG_BLOCK
 extern void __init bdev_cache_init(void);
-
-void emergency_thaw_bdev(struct super_block *sb);
 #else
 static inline void bdev_cache_init(void)
 {
-}
-static inline int emergency_thaw_bdev(struct super_block *sb)
-{
-	return 0;
 }
 #endif /* CONFIG_BLOCK */
 
@@ -105,10 +99,11 @@ extern struct file *alloc_empty_file_noaccount(int, const struct cred *);
  * super.c
  */
 extern int reconfigure_super(struct fs_context *);
-extern bool trylock_super(struct super_block *sb);
+extern bool super_trylock_shared(struct super_block *sb);
 struct super_block *user_get_super(dev_t, bool excl);
 void put_super(struct super_block *sb);
 extern bool mount_capable(struct fs_context *);
+int sb_init_dio_done_wq(struct super_block *sb);
 
 /*
  * open.c
@@ -126,7 +121,7 @@ extern struct file *do_file_open_root(const struct path *,
 		const char *, const struct open_flags *);
 extern struct open_how build_open_how(int flags, umode_t mode);
 extern int build_open_flags(const struct open_how *how, struct open_flags *op);
-extern struct file *__close_fd_get_file(unsigned int fd);
+struct file *file_close_fd_locked(struct files_struct *files, unsigned fd);
 
 long do_sys_ftruncate(unsigned int fd, loff_t length, int small);
 int chmod_common(const struct path *path, umode_t mode);
@@ -145,7 +140,7 @@ extern int dentry_needs_remove_privs(struct dentry *dentry);
  * fs-writeback.c
  */
 extern long get_nr_dirty_inodes(void);
-extern int invalidate_inodes(struct super_block *, bool);
+void invalidate_inodes(struct super_block *sb);
 
 /*
  * dcache.c
@@ -157,6 +152,10 @@ extern struct dentry * d_alloc_pseudo(struct super_block *, const struct qstr *)
 extern char *simple_dname(struct dentry *, char *, int);
 extern void dput_to_list(struct dentry *, struct list_head *);
 extern void shrink_dentry_list(struct list_head *);
+extern void shrink_dcache_for_umount(struct super_block *);
+extern struct dentry *__d_lookup(const struct dentry *, const struct qstr *);
+extern struct dentry *__d_lookup_rcu(const struct dentry *parent,
+				const struct qstr *name, unsigned *seq);
 
 /*
  * pipe.c
@@ -173,9 +172,6 @@ extern void mnt_pin_kill(struct mount *m);
  * fs/nsfs.c
  */
 extern const struct dentry_operations ns_dentry_operations;
-
-/* direct-io.c: */
-int sb_init_dio_done_wq(struct super_block *sb);
 
 /*
  * fs/stat.c:

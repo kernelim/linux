@@ -35,7 +35,7 @@
 	(typeof(ptr)) (__ptr + (off));					\
 })
 
-#ifdef CONFIG_RETPOLINE
+#ifdef CONFIG_MITIGATION_RETPOLINE
 #define __noretpoline __attribute__((__indirect_branch__("keep")))
 #endif
 
@@ -70,14 +70,6 @@
 		barrier_before_unreachable();	\
 		__builtin_unreachable();	\
 	} while (0)
-
-#if defined(RANDSTRUCT_PLUGIN) && !defined(__CHECKER__)
-#define __randomize_layout __attribute__((randomize_layout))
-#define __no_randomize_layout __attribute__((no_randomize_layout))
-/* This anon struct can add padding, so only enable it under randstruct. */
-#define randomized_struct_fields_start	struct {
-#define randomized_struct_fields_end	} __randomize_layout;
-#endif
 
 /*
  * GCC 'asm goto' miscompiles certain code sequences:
@@ -126,10 +118,6 @@
 #define __no_sanitize_coverage __attribute__((no_sanitize_coverage))
 #else
 #define __no_sanitize_coverage
-#endif
-
-#if GCC_VERSION >= 50100
-#define COMPILER_HAS_GENERIC_BUILTIN_OVERFLOW 1
 #endif
 
 /*

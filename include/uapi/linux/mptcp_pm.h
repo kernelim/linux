@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: ((GPL-2.0 WITH Linux-syscall-note) OR BSD-3-Clause) */
 /* Do not edit directly, auto-generated from: */
-/*	Documentation/netlink/specs/mptcp.yaml */
+/*	Documentation/netlink/specs/mptcp_pm.yaml */
 /* YNL-GEN uapi header */
 
 #ifndef _UAPI_LINUX_MPTCP_PM_H
@@ -100,9 +100,9 @@ enum {
 	MPTCP_PM_ATTR_LOC_ID,
 	MPTCP_PM_ATTR_ADDR_REMOTE,
 
-	__MPTCP_PM_ATTR_MAX
+	__MPTCP_ATTR_AFTER_LAST
 };
-#define MPTCP_PM_ATTR_MAX (__MPTCP_PM_ATTR_MAX - 1)
+#define MPTCP_PM_ATTR_MAX (__MPTCP_ATTR_AFTER_LAST - 1)
 
 enum mptcp_event_attr {
 	MPTCP_ATTR_UNSPEC,
@@ -143,8 +143,8 @@ enum {
 	MPTCP_PM_CMD_SUBFLOW_CREATE,
 	MPTCP_PM_CMD_SUBFLOW_DESTROY,
 
-	__MPTCP_PM_CMD_MAX
+	__MPTCP_PM_CMD_AFTER_LAST
 };
-#define MPTCP_PM_CMD_MAX (__MPTCP_PM_CMD_MAX - 1)
+#define MPTCP_PM_CMD_MAX (__MPTCP_PM_CMD_AFTER_LAST - 1)
 
 #endif /* _UAPI_LINUX_MPTCP_PM_H */

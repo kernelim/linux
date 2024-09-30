@@ -93,11 +93,6 @@ EXPORT_SYMBOL(console_devno);
 unsigned int console_irq = -1;
 EXPORT_SYMBOL(console_irq);
 
-unsigned long elf_hwcap __read_mostly = 0;
-char elf_platform[ELF_PLATFORM_SIZE];
-
-unsigned long int_hwcap = 0;
-
 /*
  * Some code and data needs to stay below 2 GB, even when the kernel would be
  * relocated above 2 GB, because it has to use 31 bit addresses.
@@ -151,7 +146,6 @@ static u32 __amode31_ref *__ctl_duald = __ctl_duald_amode31;
 static u32 __amode31_ref *__ctl_linkage_stack = __ctl_linkage_stack_amode31;
 static u32 __amode31_ref *__ctl_duct = __ctl_duct_amode31;
 
-int __bootdata(noexec_disabled);
 unsigned long __bootdata(ident_map_size);
 struct mem_detect_info __bootdata(mem_detect);
 struct initrd_data __bootdata(initrd_data);
@@ -312,7 +306,7 @@ static void __init setup_zfcpdump(void)
 		return;
 	if (oldmem_data.start)
 		return;
-	strcat(boot_command_line, " cio_ignore=all,!ipldev,!condev");
+	strlcat(boot_command_line, " cio_ignore=all,!ipldev,!condev", COMMAND_LINE_SIZE);
 	console_loglevel = 2;
 }
 #else
@@ -399,7 +393,7 @@ int __init arch_early_irq_init(void)
 	return 0;
 }
 
-void __init arch_call_rest_init(void)
+void __init __noreturn arch_call_rest_init(void)
 {
 	unsigned long stack;
 
@@ -444,13 +438,12 @@ static void __init setup_lowcore_dat_off(void)
 	lc->svc_new_psw.addr = (unsigned long) system_call;
 	lc->program_new_psw.mask = int_psw_mask | PSW_MASK_MCHECK;
 	lc->program_new_psw.addr = (unsigned long) pgm_check_handler;
-	lc->mcck_new_psw.mask = PSW_KERNEL_BITS;
+	lc->mcck_new_psw.mask = int_psw_mask;
 	lc->mcck_new_psw.addr = (unsigned long) mcck_int_handler;
 	lc->io_new_psw.mask = int_psw_mask | PSW_MASK_MCHECK;
 	lc->io_new_psw.addr = (unsigned long) io_int_handler;
 	lc->clock_comparator = clock_comparator_max;
-	lc->nodat_stack = ((unsigned long) &init_thread_union)
-		+ THREAD_SIZE - STACK_FRAME_OVERHEAD - sizeof(struct pt_regs);
+	lc->nodat_stack = ((unsigned long)&init_thread_union) + STACK_INIT_OFFSET;
 	lc->current_task = (unsigned long)&init_task;
 	lc->lpp = LPP_MAGIC;
 	lc->machine_flags = S390_lowcore.machine_flags;
@@ -519,6 +512,7 @@ static void __init setup_lowcore_dat_on(void)
 	S390_lowcore.external_new_psw.mask |= PSW_MASK_DAT;
 	S390_lowcore.svc_new_psw.mask |= PSW_MASK_DAT;
 	S390_lowcore.program_new_psw.mask |= PSW_MASK_DAT;
+	S390_lowcore.mcck_new_psw.mask |= PSW_MASK_DAT;
 	S390_lowcore.io_new_psw.mask |= PSW_MASK_DAT;
 	__ctl_set_bit(0, 28);
 	__ctl_store(S390_lowcore.cregs_save_area, 0, 15);
@@ -579,7 +573,7 @@ static void __init setup_resources(void)
 		res->start = start;
 		/*
 		 * In memblock, end points to the first byte after the
-		 * range while in resourses, end points to the last byte in
+		 * range while in resources, end points to the last byte in
 		 * the range.
 		 */
 		res->end = end - 1;
@@ -880,149 +874,6 @@ static void __init setup_cr(void)
 }
 
 /*
- * Setup hardware capabilities.
- */
-static int __init setup_hwcaps(void)
-{
-	static const int stfl_bits[6] = { 0, 2, 7, 17, 19, 21 };
-	struct cpuid cpu_id;
-	int i;
-
-	/*
-	 * The store facility list bits numbers as found in the principles
-	 * of operation are numbered with bit 1UL<<31 as number 0 to
-	 * bit 1UL<<0 as number 31.
-	 *   Bit 0: instructions named N3, "backported" to esa-mode
-	 *   Bit 2: z/Architecture mode is active
-	 *   Bit 7: the store-facility-list-extended facility is installed
-	 *   Bit 17: the message-security assist is installed
-	 *   Bit 19: the long-displacement facility is installed
-	 *   Bit 21: the extended-immediate facility is installed
-	 *   Bit 22: extended-translation facility 3 is installed
-	 *   Bit 30: extended-translation facility 3 enhancement facility
-	 * These get translated to:
-	 *   HWCAP_S390_ESAN3 bit 0, HWCAP_S390_ZARCH bit 1,
-	 *   HWCAP_S390_STFLE bit 2, HWCAP_S390_MSA bit 3,
-	 *   HWCAP_S390_LDISP bit 4, HWCAP_S390_EIMM bit 5 and
-	 *   HWCAP_S390_ETF3EH bit 8 (22 && 30).
-	 */
-	for (i = 0; i < 6; i++)
-		if (test_facility(stfl_bits[i]))
-			elf_hwcap |= 1UL << i;
-
-	if (test_facility(22) && test_facility(30))
-		elf_hwcap |= HWCAP_S390_ETF3EH;
-
-	/*
-	 * Check for additional facilities with store-facility-list-extended.
-	 * stfle stores doublewords (8 byte) with bit 1ULL<<63 as bit 0
-	 * and 1ULL<<0 as bit 63. Bits 0-31 contain the same information
-	 * as stored by stfl, bits 32-xxx contain additional facilities.
-	 * How many facility words are stored depends on the number of
-	 * doublewords passed to the instruction. The additional facilities
-	 * are:
-	 *   Bit 42: decimal floating point facility is installed
-	 *   Bit 44: perform floating point operation facility is installed
-	 * translated to:
-	 *   HWCAP_S390_DFP bit 6 (42 && 44).
-	 */
-	if ((elf_hwcap & (1UL << 2)) && test_facility(42) && test_facility(44))
-		elf_hwcap |= HWCAP_S390_DFP;
-
-	/*
-	 * Huge page support HWCAP_S390_HPAGE is bit 7.
-	 */
-	if (MACHINE_HAS_EDAT1)
-		elf_hwcap |= HWCAP_S390_HPAGE;
-
-	/*
-	 * 64-bit register support for 31-bit processes
-	 * HWCAP_S390_HIGH_GPRS is bit 9.
-	 */
-	elf_hwcap |= HWCAP_S390_HIGH_GPRS;
-
-	/*
-	 * Transactional execution support HWCAP_S390_TE is bit 10.
-	 */
-	if (MACHINE_HAS_TE)
-		elf_hwcap |= HWCAP_S390_TE;
-
-	/*
-	 * Vector extension HWCAP_S390_VXRS is bit 11. The Vector extension
-	 * can be disabled with the "novx" parameter. Use MACHINE_HAS_VX
-	 * instead of facility bit 129.
-	 */
-	if (MACHINE_HAS_VX) {
-		elf_hwcap |= HWCAP_S390_VXRS;
-		if (test_facility(134))
-			elf_hwcap |= HWCAP_S390_VXRS_BCD;
-		if (test_facility(135))
-			elf_hwcap |= HWCAP_S390_VXRS_EXT;
-		if (test_facility(148))
-			elf_hwcap |= HWCAP_S390_VXRS_EXT2;
-		if (test_facility(152))
-			elf_hwcap |= HWCAP_S390_VXRS_PDE;
-		if (test_facility(192))
-			elf_hwcap |= HWCAP_S390_VXRS_PDE2;
-	}
-	if (test_facility(150))
-		elf_hwcap |= HWCAP_S390_SORT;
-	if (test_facility(151))
-		elf_hwcap |= HWCAP_S390_DFLT;
-	if (test_facility(165))
-		elf_hwcap |= HWCAP_S390_NNPA;
-
-	/*
-	 * Guarded storage support HWCAP_S390_GS is bit 12.
-	 */
-	if (MACHINE_HAS_GS)
-		elf_hwcap |= HWCAP_S390_GS;
-	if (MACHINE_HAS_PCI_MIO)
-		elf_hwcap |= HWCAP_S390_PCI_MIO;
-
-	get_cpu_id(&cpu_id);
-	add_device_randomness(&cpu_id, sizeof(cpu_id));
-	switch (cpu_id.machine) {
-	default:        /* Use "z10" as default. */
-		strcpy(elf_platform, "z10");
-		break;
-	case 0x2817:
-	case 0x2818:
-		strcpy(elf_platform, "z196");
-		break;
-	case 0x2827:
-	case 0x2828:
-		strcpy(elf_platform, "zEC12");
-		break;
-	case 0x2964:
-	case 0x2965:
-		strcpy(elf_platform, "z13");
-		break;
-	case 0x3906:
-	case 0x3907:
-		strcpy(elf_platform, "z14");
-		break;
-	case 0x8561:
-	case 0x8562:
-		strcpy(elf_platform, "z15");
-		break;
-	case 0x3931:
-	case 0x3932:
-		strcpy(elf_platform, "z16");
-		break;
-	}
-
-	/*
-	 * Virtualization support HWCAP_INT_SIE is bit 0.
-	 */
-	if (sclp.has_sief2)
-		int_hwcap |= HWCAP_INT_SIE;
-
-	return 0;
-}
-arch_initcall(setup_hwcaps);
-
-/*
  * Add system information as device randomness
  */
 static void __init setup_randomness(void)
@@ -1040,22 +891,6 @@ static void __init setup_randomness(void)
 
 	if (cpacf_query_func(CPACF_PRNO, CPACF_PRNO_TRNG))
 		static_branch_enable(&s390_arch_random_available);
-}
-
-/*
- * Find the correct size for the task_struct. This depends on
- * the size of the struct fpu at the end of the thread_struct
- * which is embedded in the task_struct.
- */
-static void __init setup_task_size(void)
-{
-	int task_size = sizeof(struct task_struct);
-
-	if (!MACHINE_HAS_VX) {
-		task_size -= sizeof(__vector128) * __NUM_VXRS;
-		task_size += sizeof(freg_t) * __NUM_FPRS;
-	}
-	arch_task_struct_size = task_size;
 }
 
 /*
@@ -1153,7 +988,6 @@ void __init setup_arch(char **cmdline_p)
 
 	os_info_init();
 	setup_ipl();
-	setup_task_size();
 	setup_control_program_code();
 
 	/* Do some memory reservations *before* memory is added to memblock */

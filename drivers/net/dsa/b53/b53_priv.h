@@ -91,7 +91,7 @@ enum {
 
 struct b53_port {
 	u16		vlan_ctl_mask;
-	struct ethtool_eee eee;
+	struct ethtool_keee eee;
 };
 
 struct b53_vlan {
@@ -378,7 +378,7 @@ void b53_disable_port(struct dsa_switch *ds, int port);
 void b53_brcm_hdr_setup(struct dsa_switch *ds, int port);
 void b53_eee_enable_set(struct dsa_switch *ds, int port, bool enable);
 int b53_eee_init(struct dsa_switch *ds, int port, struct phy_device *phy);
-int b53_get_mac_eee(struct dsa_switch *ds, int port, struct ethtool_eee *e);
-int b53_set_mac_eee(struct dsa_switch *ds, int port, struct ethtool_eee *e);
+int b53_get_mac_eee(struct dsa_switch *ds, int port, struct ethtool_keee *e);
+int b53_set_mac_eee(struct dsa_switch *ds, int port, struct ethtool_keee *e);
 
 #endif

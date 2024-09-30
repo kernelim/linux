@@ -47,6 +47,7 @@ extern int		dev_weight_rx_bias;
 extern int		dev_weight_tx_bias;
 
 /* rtnl helpers */
+extern struct list_head net_todo_list;
 void netdev_run_todo(void);
 
 /* netdev management, shared between various uAPI entry points */
@@ -86,6 +87,13 @@ void dev_set_group(struct net_device *dev, int new_group);
 int dev_change_carrier(struct net_device *dev, bool new_carrier);
 
 void __dev_set_rx_mode(struct net_device *dev);
+
+void __dev_notify_flags(struct net_device *dev, unsigned int old_flags,
+			unsigned int gchanges, u32 portid,
+			const struct nlmsghdr *nlh);
+
+void unregister_netdevice_many_notify(struct list_head *head,
+				      u32 portid, const struct nlmsghdr *nlh);
 
 static inline void netif_set_gso_max_size(struct net_device *dev,
 					  unsigned int size)
@@ -127,4 +135,6 @@ static inline void netif_set_gro_ipv4_max_size(struct net_device *dev,
 }
 
 int rps_cpumask_housekeeping(struct cpumask *mask);
+
+struct napi_struct *napi_by_id(unsigned int napi_id);
 #endif

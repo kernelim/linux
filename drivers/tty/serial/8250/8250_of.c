@@ -33,7 +33,8 @@ static int of_platform_serial_setup(struct platform_device *ofdev,
 			struct of_serial_info *info)
 {
 	struct resource resource;
-	struct device_node *np = ofdev->dev.of_node;
+	struct device *dev = &ofdev->dev;
+	struct device_node *np = dev->of_node;
 	struct uart_port *port = &up->port;
 	u32 clk, spd, prop;
 	int ret, irq;
@@ -46,18 +47,11 @@ static int of_platform_serial_setup(struct platform_device *ofdev,
 	if (of_property_read_u32(np, "clock-frequency", &clk)) {
 
 		/* Get clk rate through clk driver if present */
-		info->clk = devm_clk_get(&ofdev->dev, NULL);
+		info->clk = devm_clk_get_enabled(dev, NULL);
 		if (IS_ERR(info->clk)) {
-			ret = PTR_ERR(info->clk);
-			if (ret != -EPROBE_DEFER)
-				dev_warn(&ofdev->dev,
-					 "failed to get clock: %d\n", ret);
+			ret = dev_err_probe(dev, PTR_ERR(info->clk), "failed to get clock\n");
 			goto err_pmruntime;
 		}
-
-		ret = clk_prepare_enable(info->clk);
-		if (ret < 0)
-			goto err_pmruntime;
 
 		clk = clk_get_rate(info->clk);
 	}
@@ -67,8 +61,8 @@ static int of_platform_serial_setup(struct platform_device *ofdev,
 
 	ret = of_address_to_resource(np, 0, &resource);
 	if (ret) {
-		dev_warn(&ofdev->dev, "invalid address\n");
-		goto err_unprepare;
+		dev_err_probe(dev, ret, "invalid address\n");
+		goto err_pmruntime;
 	}
 
 	port->flags = UPF_SHARE_IRQ | UPF_BOOT_AUTOCONF | UPF_FIXED_PORT |
@@ -83,8 +77,16 @@ static int of_platform_serial_setup(struct platform_device *ofdev,
 		port->mapsize = resource_size(&resource);
 
 		/* Check for shifted address mapping */
-		if (of_property_read_u32(np, "reg-offset", &prop) == 0)
+		if (of_property_read_u32(np, "reg-offset", &prop) == 0) {
+			if (prop >= port->mapsize) {
+				ret = dev_err_probe(dev, -EINVAL, "reg-offset %u exceeds region size %pa\n",
+						    prop, &port->mapsize);
+				goto err_pmruntime;
+			}
+
 			port->mapbase += prop;
+			port->mapsize -= prop;
+		}
 
 		port->iotype = UPIO_MEM;
 		if (of_property_read_u32(np, "reg-io-width", &prop) == 0) {
@@ -100,10 +102,9 @@ static int of_platform_serial_setup(struct platform_device *ofdev,
 					       UPIO_MEM32BE : UPIO_MEM32;
 				break;
 			default:
-				dev_warn(&ofdev->dev, "unsupported reg-io-width (%d)\n",
-					 prop);
-				ret = -EINVAL;
-				goto err_unprepare;
+				ret = dev_err_probe(dev, -EINVAL, "unsupported reg-io-width (%u)\n",
+						    prop);
+				goto err_pmruntime;
 			}
 		}
 		port->flags |= UPF_IOREMAP;
@@ -130,7 +131,7 @@ static int of_platform_serial_setup(struct platform_device *ofdev,
 	if (irq < 0) {
 		if (irq == -EPROBE_DEFER) {
 			ret = -EPROBE_DEFER;
-			goto err_unprepare;
+			goto err_pmruntime;
 		}
 		/* IRQ support not mandatory */
 		irq = 0;
@@ -141,12 +142,12 @@ static int of_platform_serial_setup(struct platform_device *ofdev,
 	info->rst = devm_reset_control_get_optional_shared(&ofdev->dev, NULL);
 	if (IS_ERR(info->rst)) {
 		ret = PTR_ERR(info->rst);
-		goto err_unprepare;
+		goto err_pmruntime;
 	}
 
 	ret = reset_control_deassert(info->rst);
 	if (ret)
-		goto err_unprepare;
+		goto err_pmruntime;
 
 	port->type = type;
 	port->uartclk = clk;
@@ -156,16 +157,19 @@ static int of_platform_serial_setup(struct platform_device *ofdev,
 
 	port->dev = &ofdev->dev;
 	port->rs485_config = serial8250_em485_config;
+	port->rs485_supported = serial8250_em485_supported;
 	up->rs485_start_tx = serial8250_em485_start_tx;
 	up->rs485_stop_tx = serial8250_em485_stop_tx;
 
 	switch (type) {
 	case PORT_RT2880:
-		port->iotype = UPIO_AU;
+		ret = rt288x_setup(port);
+		if (ret)
+			goto err_pmruntime;
 		break;
 	}
 
-	if (IS_ENABLED(CONFIG_SERIAL_8250_FSL) &&
+	if (IS_REACHABLE(CONFIG_SERIAL_8250_FSL) &&
 	    (of_device_is_compatible(np, "fsl,ns16550") ||
 	     of_device_is_compatible(np, "fsl,16550-FIFO64"))) {
 		port->handle_irq = fsl8250_handle_irq;
@@ -173,8 +177,6 @@ static int of_platform_serial_setup(struct platform_device *ofdev,
 	}
 
 	return 0;
-err_unprepare:
-	clk_disable_unprepare(info->clk);
 err_pmruntime:
 	pm_runtime_put_sync(&ofdev->dev);
 	pm_runtime_disable(&ofdev->dev);
@@ -241,7 +243,6 @@ err_dispose:
 	irq_dispose_mapping(port8250.port.irq);
 	pm_runtime_put_sync(&ofdev->dev);
 	pm_runtime_disable(&ofdev->dev);
-	clk_disable_unprepare(info->clk);
 err_free:
 	kfree(info);
 	return ret;
@@ -259,7 +260,6 @@ static int of_platform_serial_remove(struct platform_device *ofdev)
 	reset_control_assert(info->rst);
 	pm_runtime_put_sync(&ofdev->dev);
 	pm_runtime_disable(&ofdev->dev);
-	clk_disable_unprepare(info->clk);
 	kfree(info);
 	return 0;
 }
@@ -317,6 +317,8 @@ static const struct of_device_id of_platform_serial_table[] = {
 		.data = (void *)PORT_ALTR_16550_F64, },
 	{ .compatible = "altr,16550-FIFO128",
 		.data = (void *)PORT_ALTR_16550_F128, },
+	{ .compatible = "fsl,16550-FIFO64",
+		.data = (void *)PORT_16550A_FSL64, },
 	{ .compatible = "mediatek,mtk-btif",
 		.data = (void *)PORT_MTK_BTIF, },
 	{ .compatible = "mrvl,mmp-uart",

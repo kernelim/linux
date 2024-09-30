@@ -201,10 +201,18 @@ static void byt_i2c_setup(struct lpss_private_data *pdata)
 	writel(0, pdata->mmio_base + LPSS_I2C_ENABLE);
 }
 
-/* BSW PWM used for backlight control by the i915 driver */
+/*
+ * BSW PWM1 is used for backlight control by the i915 driver
+ * BSW PWM2 is used for backlight control for fixed (etched into the glass)
+ * touch controls on some models. These touch-controls have specialized
+ * drivers which know they need the "pwm_soc_lpss_2" con-id.
+ */
 static struct pwm_lookup bsw_pwm_lookup[] = {
 	PWM_LOOKUP_WITH_MODULE("80862288:00", 0, "0000:00:02.0",
 			       "pwm_soc_backlight", 0, PWM_POLARITY_NORMAL,
+			       "pwm-lpss-platform"),
+	PWM_LOOKUP_WITH_MODULE("80862289:00", 0, NULL,
+			       "pwm_soc_lpss_2", 0, PWM_POLARITY_NORMAL,
 			       "pwm-lpss-platform"),
 };
 
@@ -268,6 +276,12 @@ static const struct lpss_device_desc bsw_pwm_dev_desc = {
 	.flags = LPSS_SAVE_CTX_ONCE | LPSS_NO_D3_DELAY,
 	.prv_offset = 0x800,
 	.setup = bsw_pwm_setup,
+	.resume_from_noirq = true,
+};
+
+static const struct lpss_device_desc bsw_pwm2_dev_desc = {
+	.flags = LPSS_SAVE_CTX_ONCE | LPSS_NO_D3_DELAY,
+	.prv_offset = 0x800,
 	.resume_from_noirq = true,
 };
 
@@ -354,7 +368,6 @@ static const struct acpi_device_id acpi_lpss_device_ids[] = {
 	{ "INT33C4", LPSS_ADDR(lpt_uart_dev_desc) },
 	{ "INT33C5", LPSS_ADDR(lpt_uart_dev_desc) },
 	{ "INT33C6", LPSS_ADDR(lpt_sdio_dev_desc) },
-	{ "INT33C7", },
 
 	/* BayTrail LPSS devices */
 	{ "80860F09", LPSS_ADDR(byt_pwm_dev_desc) },
@@ -362,12 +375,11 @@ static const struct acpi_device_id acpi_lpss_device_ids[] = {
 	{ "80860F0E", LPSS_ADDR(byt_spi_dev_desc) },
 	{ "80860F14", LPSS_ADDR(byt_sdio_dev_desc) },
 	{ "80860F41", LPSS_ADDR(byt_i2c_dev_desc) },
-	{ "INT33B2", },
-	{ "INT33FC", },
 
 	/* Braswell LPSS devices */
 	{ "80862286", LPSS_ADDR(lpss_dma_desc) },
 	{ "80862288", LPSS_ADDR(bsw_pwm_dev_desc) },
+	{ "80862289", LPSS_ADDR(bsw_pwm2_dev_desc) },
 	{ "8086228A", LPSS_ADDR(bsw_uart_dev_desc) },
 	{ "8086228E", LPSS_ADDR(bsw_spi_dev_desc) },
 	{ "808622C0", LPSS_ADDR(lpss_dma_desc) },
@@ -381,7 +393,6 @@ static const struct acpi_device_id acpi_lpss_device_ids[] = {
 	{ "INT3434", LPSS_ADDR(lpt_uart_dev_desc) },
 	{ "INT3435", LPSS_ADDR(lpt_uart_dev_desc) },
 	{ "INT3436", LPSS_ADDR(lpt_sdio_dev_desc) },
-	{ "INT3437", },
 
 	/* Wildcat Point LPSS devices */
 	{ "INT3438", LPSS_ADDR(lpt_spi_dev_desc) },
@@ -562,25 +573,26 @@ static struct device *acpi_lpss_find_device(const char *hid, const char *uid)
 static bool acpi_lpss_dep(struct acpi_device *adev, acpi_handle handle)
 {
 	struct acpi_handle_list dep_devices;
-	acpi_status status;
+	bool ret = false;
 	int i;
 
 	if (!acpi_has_method(adev->handle, "_DEP"))
 		return false;
 
-	status = acpi_evaluate_reference(adev->handle, "_DEP", NULL,
-					 &dep_devices);
-	if (ACPI_FAILURE(status)) {
+	if (!acpi_evaluate_reference(adev->handle, "_DEP", NULL, &dep_devices)) {
 		dev_dbg(&adev->dev, "Failed to evaluate _DEP.\n");
 		return false;
 	}
 
 	for (i = 0; i < dep_devices.count; i++) {
-		if (dep_devices.handles[i] == handle)
-			return true;
+		if (dep_devices.handles[i] == handle) {
+			ret = true;
+			break;
+		}
 	}
 
-	return false;
+	acpi_handle_list_free(&dep_devices);
+	return ret;
 }
 
 static void acpi_lpss_link_consumer(struct device *dev1,
@@ -642,10 +654,9 @@ static int acpi_lpss_create_device(struct acpi_device *adev,
 	int ret;
 
 	dev_desc = (const struct lpss_device_desc *)id->driver_data;
-	if (!dev_desc) {
-		pdev = acpi_create_platform_device(adev, NULL);
-		return IS_ERR_OR_NULL(pdev) ? PTR_ERR(pdev) : 1;
-	}
+	if (!dev_desc)
+		return -EINVAL;
+
 	pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
 	if (!pdata)
 		return -ENOMEM;

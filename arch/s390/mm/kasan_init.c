@@ -243,7 +243,7 @@ static void __init kasan_early_detect_facilities(void)
 		has_edat = true;
 		__ctl_set_bit(0, 23);
 	}
-	if (!noexec_disabled && test_facility(130)) {
+	if (test_facility(130)) {
 		has_nx = true;
 		__ctl_set_bit(0, 20);
 	}

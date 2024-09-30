@@ -20,6 +20,8 @@
 #include <linux/pci-doe.h>
 #include <linux/workqueue.h>
 
+#include "pci.h"
+
 #define PCI_DOE_PROTOCOL_DISCOVERY 0
 
 /* Timeout of 1 second from 6.30.2 Operation, PCI Spec r6.0 */
@@ -37,7 +39,7 @@
  *
  * This state is used to manage a single DOE mailbox capability.  All fields
  * should be considered opaque to the consumers and the structure passed into
- * the helpers below after being created by devm_pci_doe_create()
+ * the helpers below after being created by pci_doe_create_mb().
  *
  * @pdev: PCI device this mailbox belongs to
  * @cap_offset: Capability offset
@@ -54,6 +56,47 @@ struct pci_doe_mb {
 	wait_queue_head_t wq;
 	struct workqueue_struct *work_queue;
 	unsigned long flags;
+};
+
+struct pci_doe_protocol {
+	u16 vid;
+	u8 type;
+};
+
+/**
+ * struct pci_doe_task - represents a single query/response
+ *
+ * @prot: DOE Protocol
+ * @request_pl: The request payload
+ * @request_pl_sz: Size of the request payload (bytes)
+ * @response_pl: The response payload
+ * @response_pl_sz: Size of the response payload (bytes)
+ * @rv: Return value.  Length of received response or error (bytes)
+ * @complete: Called when task is complete
+ * @private: Private data for the consumer
+ * @work: Used internally by the mailbox
+ * @doe_mb: Used internally by the mailbox
+ *
+ * The payload sizes and rv are specified in bytes with the following
+ * restrictions concerning the protocol.
+ *
+ *	1) The request_pl_sz must be a multiple of double words (4 bytes)
+ *	2) The response_pl_sz must be >= a single double word (4 bytes)
+ *	3) rv is returned as bytes but it will be a multiple of double words
+ */
+struct pci_doe_task {
+	struct pci_doe_protocol prot;
+	const __le32 *request_pl;
+	size_t request_pl_sz;
+	__le32 *response_pl;
+	size_t response_pl_sz;
+	int rv;
+	void (*complete)(struct pci_doe_task *task);
+	void *private;
+
+	/* initialized by pci_doe_submit_task() */
+	struct work_struct work;
+	struct pci_doe_mb *doe_mb;
 };
 
 static int pci_doe_wait(struct pci_doe_mb *doe_mb, unsigned long timeout)
@@ -321,26 +364,15 @@ static int pci_doe_discovery(struct pci_doe_mb *doe_mb, u8 *index, u16 *vid,
 	__le32 request_pl_le = cpu_to_le32(request_pl);
 	__le32 response_pl_le;
 	u32 response_pl;
-	DECLARE_COMPLETION_ONSTACK(c);
-	struct pci_doe_task task = {
-		.prot.vid = PCI_VENDOR_ID_PCI_SIG,
-		.prot.type = PCI_DOE_PROTOCOL_DISCOVERY,
-		.request_pl = &request_pl_le,
-		.request_pl_sz = sizeof(request_pl),
-		.response_pl = &response_pl_le,
-		.response_pl_sz = sizeof(response_pl),
-		.complete = pci_doe_task_complete,
-		.private = &c,
-	};
 	int rc;
 
-	rc = pci_doe_submit_task(doe_mb, &task);
+	rc = pci_doe(doe_mb, PCI_VENDOR_ID_PCI_SIG, PCI_DOE_PROTOCOL_DISCOVERY,
+		     &request_pl_le, sizeof(request_pl_le),
+		     &response_pl_le, sizeof(response_pl_le));
 	if (rc < 0)
 		return rc;
 
-	wait_for_completion(&c);
-
-	if (task.rv != sizeof(response_pl))
+	if (rc != sizeof(response_pl_le))
 		return -EIO;
 
 	response_pl = le32_to_cpu(response_pl_le);
@@ -385,37 +417,18 @@ static int pci_doe_cache_protocols(struct pci_doe_mb *doe_mb)
 	return 0;
 }
 
-static void pci_doe_xa_destroy(void *mb)
+static void pci_doe_cancel_tasks(struct pci_doe_mb *doe_mb)
 {
-	struct pci_doe_mb *doe_mb = mb;
-
-	xa_destroy(&doe_mb->prots);
-}
-
-static void pci_doe_destroy_workqueue(void *mb)
-{
-	struct pci_doe_mb *doe_mb = mb;
-
-	destroy_workqueue(doe_mb->work_queue);
-}
-
-static void pci_doe_flush_mb(void *mb)
-{
-	struct pci_doe_mb *doe_mb = mb;
-
 	/* Stop all pending work items from starting */
 	set_bit(PCI_DOE_FLAG_DEAD, &doe_mb->flags);
 
 	/* Cancel an in progress work item, if necessary */
 	set_bit(PCI_DOE_FLAG_CANCEL, &doe_mb->flags);
 	wake_up(&doe_mb->wq);
-
-	/* Flush all work items */
-	flush_workqueue(doe_mb->work_queue);
 }
 
 /**
- * pcim_doe_create_mb() - Create a DOE mailbox object
+ * pci_doe_create_mb() - Create a DOE mailbox object
  *
  * @pdev: PCI device to create the DOE mailbox for
  * @cap_offset: Offset of the DOE mailbox
@@ -426,24 +439,20 @@ static void pci_doe_flush_mb(void *mb)
  * RETURNS: created mailbox object on success
  *	    ERR_PTR(-errno) on failure
  */
-struct pci_doe_mb *pcim_doe_create_mb(struct pci_dev *pdev, u16 cap_offset)
+static struct pci_doe_mb *pci_doe_create_mb(struct pci_dev *pdev,
+					    u16 cap_offset)
 {
 	struct pci_doe_mb *doe_mb;
-	struct device *dev = &pdev->dev;
 	int rc;
 
-	doe_mb = devm_kzalloc(dev, sizeof(*doe_mb), GFP_KERNEL);
+	doe_mb = kzalloc(sizeof(*doe_mb), GFP_KERNEL);
 	if (!doe_mb)
 		return ERR_PTR(-ENOMEM);
 
 	doe_mb->pdev = pdev;
 	doe_mb->cap_offset = cap_offset;
 	init_waitqueue_head(&doe_mb->wq);
-
 	xa_init(&doe_mb->prots);
-	rc = devm_add_action(dev, pci_doe_xa_destroy, doe_mb);
-	if (rc)
-		return ERR_PTR(rc);
 
 	doe_mb->work_queue = alloc_ordered_workqueue("%s %s DOE [%x]", 0,
 						dev_driver_string(&pdev->dev),
@@ -452,34 +461,83 @@ struct pci_doe_mb *pcim_doe_create_mb(struct pci_dev *pdev, u16 cap_offset)
 	if (!doe_mb->work_queue) {
 		pci_err(pdev, "[%x] failed to allocate work queue\n",
 			doe_mb->cap_offset);
-		return ERR_PTR(-ENOMEM);
+		rc = -ENOMEM;
+		goto err_free;
 	}
-	rc = devm_add_action_or_reset(dev, pci_doe_destroy_workqueue, doe_mb);
-	if (rc)
-		return ERR_PTR(rc);
 
 	/* Reset the mailbox by issuing an abort */
 	rc = pci_doe_abort(doe_mb);
 	if (rc) {
 		pci_err(pdev, "[%x] failed to reset mailbox with abort command : %d\n",
 			doe_mb->cap_offset, rc);
-		return ERR_PTR(rc);
+		goto err_destroy_wq;
 	}
 
 	/*
 	 * The state machine and the mailbox should be in sync now;
-	 * Set up mailbox flush prior to using the mailbox to query protocols.
+	 * Use the mailbox to query protocols.
 	 */
-	rc = devm_add_action_or_reset(dev, pci_doe_flush_mb, doe_mb);
-	if (rc)
-		return ERR_PTR(rc);
-
 	rc = pci_doe_cache_protocols(doe_mb);
 	if (rc) {
 		pci_err(pdev, "[%x] failed to cache protocols : %d\n",
 			doe_mb->cap_offset, rc);
-		return ERR_PTR(rc);
+		goto err_cancel;
 	}
+
+	return doe_mb;
+
+err_cancel:
+	pci_doe_cancel_tasks(doe_mb);
+	xa_destroy(&doe_mb->prots);
+err_destroy_wq:
+	destroy_workqueue(doe_mb->work_queue);
+err_free:
+	kfree(doe_mb);
+	return ERR_PTR(rc);
+}
+
+/**
+ * pci_doe_destroy_mb() - Destroy a DOE mailbox object
+ *
+ * @ptr: Pointer to DOE mailbox
+ *
+ * Destroy all internal data structures created for the DOE mailbox.
+ */
+static void pci_doe_destroy_mb(void *ptr)
+{
+	struct pci_doe_mb *doe_mb = ptr;
+
+	pci_doe_cancel_tasks(doe_mb);
+	xa_destroy(&doe_mb->prots);
+	destroy_workqueue(doe_mb->work_queue);
+	kfree(doe_mb);
+}
+
+/**
+ * pcim_doe_create_mb() - Create a DOE mailbox object
+ *
+ * @pdev: PCI device to create the DOE mailbox for
+ * @cap_offset: Offset of the DOE mailbox
+ *
+ * Create a single mailbox object to manage the mailbox protocol at the
+ * cap_offset specified.  The mailbox will automatically be destroyed on
+ * driver unbinding from @pdev.
+ *
+ * RETURNS: created mailbox object on success
+ *	    ERR_PTR(-errno) on failure
+ */
+struct pci_doe_mb *pcim_doe_create_mb(struct pci_dev *pdev, u16 cap_offset)
+{
+	struct pci_doe_mb *doe_mb;
+	int rc;
+
+	doe_mb = pci_doe_create_mb(pdev, cap_offset);
+	if (IS_ERR(doe_mb))
+		return doe_mb;
+
+	rc = devm_add_action_or_reset(&pdev->dev, pci_doe_destroy_mb, doe_mb);
+	if (rc)
+		return ERR_PTR(rc);
 
 	return doe_mb;
 }
@@ -530,7 +588,8 @@ EXPORT_SYMBOL_GPL(pci_doe_supports_prot);
  *
  * RETURNS: 0 when task has been successfully queued, -ERRNO on error
  */
-int pci_doe_submit_task(struct pci_doe_mb *doe_mb, struct pci_doe_task *task)
+static int pci_doe_submit_task(struct pci_doe_mb *doe_mb,
+			       struct pci_doe_task *task)
 {
 	if (!pci_doe_supports_prot(doe_mb, task->prot.vid, task->prot.type))
 		return -EINVAL;
@@ -551,4 +610,124 @@ int pci_doe_submit_task(struct pci_doe_mb *doe_mb, struct pci_doe_task *task)
 	queue_work(doe_mb->work_queue, &task->work);
 	return 0;
 }
-EXPORT_SYMBOL_GPL(pci_doe_submit_task);
+
+/**
+ * pci_doe() - Perform Data Object Exchange
+ *
+ * @doe_mb: DOE Mailbox
+ * @vendor: Vendor ID
+ * @type: Data Object Type
+ * @request: Request payload
+ * @request_sz: Size of request payload (bytes)
+ * @response: Response payload
+ * @response_sz: Size of response payload (bytes)
+ *
+ * Submit @request to @doe_mb and store the @response.
+ * The DOE exchange is performed synchronously and may therefore sleep.
+ *
+ * Payloads are treated as opaque byte streams which are transmitted verbatim,
+ * without byte-swapping.  If payloads contain little-endian register values,
+ * the caller is responsible for conversion with cpu_to_le32() / le32_to_cpu().
+ *
+ * RETURNS: Length of received response or negative errno.
+ * Received data in excess of @response_sz is discarded.
+ * The length may be smaller than @response_sz and the caller
+ * is responsible for checking that.
+ */
+int pci_doe(struct pci_doe_mb *doe_mb, u16 vendor, u8 type,
+	    const void *request, size_t request_sz,
+	    void *response, size_t response_sz)
+{
+	DECLARE_COMPLETION_ONSTACK(c);
+	struct pci_doe_task task = {
+		.prot.vid = vendor,
+		.prot.type = type,
+		.request_pl = request,
+		.request_pl_sz = request_sz,
+		.response_pl = response,
+		.response_pl_sz = response_sz,
+		.complete = pci_doe_task_complete,
+		.private = &c,
+	};
+	int rc;
+
+	rc = pci_doe_submit_task(doe_mb, &task);
+	if (rc)
+		return rc;
+
+	wait_for_completion(&c);
+
+	return task.rv;
+}
+EXPORT_SYMBOL_GPL(pci_doe);
+
+/**
+ * pci_find_doe_mailbox() - Find Data Object Exchange mailbox
+ *
+ * @pdev: PCI device
+ * @vendor: Vendor ID
+ * @type: Data Object Type
+ *
+ * Find first DOE mailbox of a PCI device which supports the given protocol.
+ *
+ * RETURNS: Pointer to the DOE mailbox or NULL if none was found.
+ */
+struct pci_doe_mb *pci_find_doe_mailbox(struct pci_dev *pdev, u16 vendor,
+					u8 type)
+{
+	struct pci_doe_mb *doe_mb;
+	unsigned long index;
+
+	xa_for_each(&pdev->doe_mbs, index, doe_mb)
+		if (pci_doe_supports_prot(doe_mb, vendor, type))
+			return doe_mb;
+
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(pci_find_doe_mailbox);
+
+void pci_doe_init(struct pci_dev *pdev)
+{
+	struct pci_doe_mb *doe_mb;
+	u16 offset = 0;
+	int rc;
+
+	xa_init(&pdev->doe_mbs);
+
+	while ((offset = pci_find_next_ext_capability(pdev, offset,
+						      PCI_EXT_CAP_ID_DOE))) {
+		doe_mb = pci_doe_create_mb(pdev, offset);
+		if (IS_ERR(doe_mb)) {
+			pci_err(pdev, "[%x] failed to create mailbox: %ld\n",
+				offset, PTR_ERR(doe_mb));
+			continue;
+		}
+
+		rc = xa_insert(&pdev->doe_mbs, offset, doe_mb, GFP_KERNEL);
+		if (rc) {
+			pci_err(pdev, "[%x] failed to insert mailbox: %d\n",
+				offset, rc);
+			pci_doe_destroy_mb(doe_mb);
+		}
+	}
+}
+
+void pci_doe_destroy(struct pci_dev *pdev)
+{
+	struct pci_doe_mb *doe_mb;
+	unsigned long index;
+
+	xa_for_each(&pdev->doe_mbs, index, doe_mb)
+		pci_doe_destroy_mb(doe_mb);
+
+	xa_destroy(&pdev->doe_mbs);
+}
+
+void pci_doe_disconnected(struct pci_dev *pdev)
+{
+	struct pci_doe_mb *doe_mb;
+	unsigned long index;
+
+	xa_for_each(&pdev->doe_mbs, index, doe_mb)
+		pci_doe_cancel_tasks(doe_mb);
+}

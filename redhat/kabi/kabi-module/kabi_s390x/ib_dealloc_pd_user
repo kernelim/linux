@@ -1,2 +1,3 @@
-#4-
-0xfab781e0	ib_dealloc_pd_user	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
+#5-
+0xd8a77486	ib_dealloc_pd_user	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
+

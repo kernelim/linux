@@ -16,7 +16,8 @@ workflow: !reference [.workflow]
     srpm_make_target: dist-srpm
     native_tools: 'true'
     architectures: 'x86_64 ppc64le aarch64 s390x'
-    disttag_override: '.el9_4'
+    debug_architectures: 'x86_64 ppc64le aarch64 s390x'
+    disttag_override: '.el9_5'
 
 .trigger_c9s_pipeline:
   trigger:
@@ -32,7 +33,7 @@ workflow: !reference [.workflow]
     branch: rhel9
   variables:
     name: rhel9
-    builder_image: quay.io/cki/builder-rhel9.4
+    builder_image: quay.io/cki/builder-rhel9
     run_redhat_self_test: 'true'
 
 .trigger_rhel9_build:
@@ -97,8 +98,8 @@ c9s_automotive_check_merge_request:
             .automotive_check_common]
 
 c9s_baseline_coverage_build:
-  extends: [.trusted, .baseline, .rhel_common, .only_build_and_publish, .coverage,
-            .9-common, .trigger_c9s_pipeline]
+  extends: [.trusted, .baseline, .rhel_common, .only_build_and_publish,
+            .9-common, .coverage, .trigger_c9s_pipeline]
 
 c9s_rhel9_compat_merge_request:
   extends: [.centos_stream_rhel_internal, .merge_request, .rhel_common, .with_notifications,
@@ -137,8 +138,8 @@ rhel9_64k_merge_request:
             .64k_full_rhel9]
 
 rhel9_baseline_coverage_build:
-  extends: [.internal, .baseline, .rhel_common, .only_build_and_publish, .coverage,
-            .9-common, .trigger_rhel9_pipeline]
+  extends: [.internal, .baseline, .rhel_common, .only_build_and_publish,
+            .9-common, .coverage, .trigger_rhel9_pipeline]
 
 # RHEL9 private CI (including RT branches)
 rhel9_merge_request_private:

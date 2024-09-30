@@ -52,6 +52,7 @@ enum amdgpu_mes_priority_level {
 
 #define AMDGPU_MES_PROC_CTX_SIZE 0x1000 /* one page area */
 #define AMDGPU_MES_GANG_CTX_SIZE 0x1000 /* one page area */
+#define AMDGPU_MES_LOG_BUFFER_SIZE 0x4000 /* Maximu log buffer size for MES */
 
 struct amdgpu_mes_funcs;
 
@@ -132,6 +133,11 @@ struct amdgpu_mes {
 	uint32_t			db_start_dw_offset;
 	uint32_t			num_mes_dbs;
 	unsigned long			*doorbell_bitmap;
+
+	/* MES event log buffer */
+	struct amdgpu_bo		*event_log_gpu_obj;
+	uint64_t                        event_log_gpu_addr;
+	void				*event_log_cpu_addr;
 
 	/* ip specific functions */
 	const struct amdgpu_mes_funcs   *funcs;
@@ -291,9 +297,10 @@ struct mes_misc_op_input {
 			uint64_t process_context_addr;
 			union {
 				struct {
-					uint64_t single_memop : 1;
-					uint64_t single_alu_op : 1;
-					uint64_t reserved: 30;
+					uint32_t single_memop : 1;
+					uint32_t single_alu_op : 1;
+					uint32_t reserved: 29;
+					uint32_t process_ctx_flush: 1;
 				};
 				uint32_t u32all;
 			} flags;
@@ -369,7 +376,8 @@ int amdgpu_mes_set_shader_debugger(struct amdgpu_device *adev,
 				const uint32_t *tcp_watch_cntl,
 				uint32_t flags,
 				bool trap_en);
-
+int amdgpu_mes_flush_shader_debugger(struct amdgpu_device *adev,
+				uint64_t process_context_addr);
 int amdgpu_mes_add_ring(struct amdgpu_device *adev, int gang_id,
 			int queue_type, int idx,
 			struct amdgpu_mes_ctx_data *ctx_data,

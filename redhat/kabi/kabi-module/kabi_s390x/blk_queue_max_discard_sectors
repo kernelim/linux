@@ -1,2 +1,3 @@
-#4-
-0x78a773e5	blk_queue_max_discard_sectors	vmlinux	EXPORT_SYMBOL	
+#5-
+0x176ab2fe	blk_queue_max_discard_sectors	vmlinux	EXPORT_SYMBOL	
+

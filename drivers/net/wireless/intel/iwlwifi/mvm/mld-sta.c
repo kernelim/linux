@@ -9,7 +9,9 @@
 u32 iwl_mvm_sta_fw_id_mask(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
 			   int filter_link_id)
 {
+	struct ieee80211_link_sta *link_sta;
 	struct iwl_mvm_sta *mvmsta;
+	struct ieee80211_vif *vif;
 	unsigned int link_id;
 	u32 result = 0;
 
@@ -17,26 +19,27 @@ u32 iwl_mvm_sta_fw_id_mask(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
 		return 0;
 
 	mvmsta = iwl_mvm_sta_from_mac80211(sta);
+	vif = mvmsta->vif;
 
 	/* it's easy when the STA is not an MLD */
 	if (!sta->valid_links)
 		return BIT(mvmsta->deflink.sta_id);
 
 	/* but if it is an MLD, get the mask of all the FW STAs it has ... */
-	for (link_id = 0; link_id < ARRAY_SIZE(mvmsta->link); link_id++) {
-		struct iwl_mvm_link_sta *link_sta;
+	for_each_sta_active_link(vif, sta, link_sta, link_id) {
+		struct iwl_mvm_link_sta *mvm_link_sta;
 
 		/* unless we have a specific link in mind */
 		if (filter_link_id >= 0 && link_id != filter_link_id)
 			continue;
 
-		link_sta =
+		mvm_link_sta =
 			rcu_dereference_check(mvmsta->link[link_id],
 					      lockdep_is_held(&mvm->mutex));
-		if (!link_sta)
+		if (!mvm_link_sta)
 			continue;
 
-		result |= BIT(link_sta->sta_id);
+		result |= BIT(mvm_link_sta->sta_id);
 	}
 
 	return result;
@@ -879,6 +882,9 @@ void iwl_mvm_mld_sta_modify_disable_tx(struct iwl_mvm *mvm,
 	cmd.sta_id = cpu_to_le32(mvmsta->deflink.sta_id);
 	cmd.disable = cpu_to_le32(disable);
 
+	if (WARN_ON(iwl_mvm_has_no_host_disable_tx(mvm)))
+		return;
+
 	ret = iwl_mvm_send_cmd_pdu(mvm,
 				   WIDE_ID(MAC_CONF_GROUP, STA_DISABLE_TX_CMD),
 				   CMD_ASYNC, sizeof(cmd), &cmd);
@@ -985,6 +991,10 @@ static int iwl_mvm_mld_update_sta_baids(struct iwl_mvm *mvm,
 	};
 	u32 cmd_id = WIDE_ID(DATA_PATH_GROUP, RX_BAID_ALLOCATION_CONFIG_CMD);
 	int baid;
+
+	/* mac80211 will remove sessions later, but we ignore all that */
+	if (test_bit(IWL_MVM_STATUS_IN_HW_RESTART, &mvm->status))
+		return 0;
 
 	BUILD_BUG_ON(sizeof(struct iwl_rx_baid_cfg_resp) != sizeof(baid));
 
@@ -1119,10 +1129,21 @@ int iwl_mvm_mld_update_sta_links(struct iwl_mvm *mvm,
 		}
 
 		if (test_bit(IWL_MVM_STATUS_IN_HW_RESTART, &mvm->status)) {
-			if (WARN_ON(!mvm_sta->link[link_id])) {
+			struct iwl_mvm_link_sta *mvm_link_sta =
+				rcu_dereference_protected(mvm_sta->link[link_id],
+							  lockdep_is_held(&mvm->mutex));
+			u32 sta_id;
+
+			if (WARN_ON(!mvm_link_sta)) {
 				ret = -EINVAL;
 				goto err;
 			}
+
+			sta_id = mvm_link_sta->sta_id;
+
+			rcu_assign_pointer(mvm->fw_id_to_mac_id[sta_id], sta);
+			rcu_assign_pointer(mvm->fw_id_to_link_sta[sta_id],
+					   link_sta);
 		} else {
 			if (WARN_ON(mvm_sta->link[link_id])) {
 				ret = -EINVAL;

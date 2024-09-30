@@ -110,7 +110,7 @@ static long ppb_to_scaled_ppm(int ppb)
 
 static int64_t pctns(struct ptp_clock_time *t)
 {
-	return t->sec * 1000000000LL + t->nsec;
+	return t->sec * NSEC_PER_SEC + t->nsec;
 }
 
 static void usage(char *progname)
@@ -133,6 +133,8 @@ static void usage(char *progname)
 		"            0 - none\n"
 		"            1 - external time stamp\n"
 		"            2 - periodic output\n"
+		" -n val     shift the ptp clock time by 'val' nanoseconds\n"
+		" -o val     phase offset (in nanoseconds) to be provided to the PHC servo\n"
 		" -p val     enable output with a period of 'val' nanoseconds\n"
 		" -H val     set output phase to 'val' nanoseconds (requires -p)\n"
 		" -w val     set output pulse width to 'val' nanoseconds (requires -p)\n"
@@ -165,6 +167,8 @@ int main(int argc, char *argv[])
 	clockid_t clkid;
 	int adjfreq = 0x7fffffff;
 	int adjtime = 0;
+	int adjns = 0;
+	int adjphase = 0;
 	int capabilities = 0;
 	int extts = 0;
 	int flagtest = 0;
@@ -186,7 +190,7 @@ int main(int argc, char *argv[])
 
 	progname = strrchr(argv[0], '/');
 	progname = progname ? 1+progname : argv[0];
-	while (EOF != (c = getopt(argc, argv, "cd:e:f:ghH:i:k:lL:p:P:sSt:T:w:z"))) {
+	while (EOF != (c = getopt(argc, argv, "cd:e:f:ghH:i:k:lL:n:o:p:P:sSt:T:w:z"))) {
 		switch (c) {
 		case 'c':
 			capabilities = 1;
@@ -222,6 +226,12 @@ int main(int argc, char *argv[])
 				usage(progname);
 				return -1;
 			}
+			break;
+		case 'n':
+			adjns = atoi(optarg);
+			break;
+		case 'o':
+			adjphase = atoi(optarg);
 			break;
 		case 'p':
 			perout = atoll(optarg);
@@ -282,7 +292,8 @@ int main(int argc, char *argv[])
 			       "  %d pulse per second\n"
 			       "  %d programmable pins\n"
 			       "  %d cross timestamping\n"
-			       "  %d adjust_phase\n",
+			       "  %d adjust_phase\n"
+			       "  %d maximum phase adjustment (ns)\n",
 			       caps.max_adj,
 			       caps.n_alarm,
 			       caps.n_ext_ts,
@@ -290,7 +301,8 @@ int main(int argc, char *argv[])
 			       caps.pps,
 			       caps.n_pins,
 			       caps.cross_timestamping,
-			       caps.adjust_phase);
+			       caps.adjust_phase,
+			       caps.max_phase_adj);
 		}
 	}
 
@@ -305,15 +317,32 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (adjtime) {
+	if (adjtime || adjns) {
 		memset(&tx, 0, sizeof(tx));
-		tx.modes = ADJ_SETOFFSET;
+		tx.modes = ADJ_SETOFFSET | ADJ_NANO;
 		tx.time.tv_sec = adjtime;
-		tx.time.tv_usec = 0;
+		tx.time.tv_usec = adjns;
+		while (tx.time.tv_usec < 0) {
+			tx.time.tv_sec  -= 1;
+			tx.time.tv_usec += NSEC_PER_SEC;
+		}
+
 		if (clock_adjtime(clkid, &tx) < 0) {
 			perror("clock_adjtime");
 		} else {
 			puts("time shift okay");
+		}
+	}
+
+	if (adjphase) {
+		memset(&tx, 0, sizeof(tx));
+		tx.modes = ADJ_OFFSET | ADJ_NANO;
+		tx.offset = adjphase;
+
+		if (clock_adjtime(clkid, &tx) < 0) {
+			perror("clock_adjtime");
+		} else {
+			puts("phase adjustment okay");
 		}
 	}
 
@@ -351,6 +380,18 @@ int main(int argc, char *argv[])
 			perror("clock_settime");
 		} else {
 			puts("set time okay");
+		}
+	}
+
+	if (pin_index >= 0) {
+		memset(&desc, 0, sizeof(desc));
+		desc.index = pin_index;
+		desc.func = pin_func;
+		desc.chan = index;
+		if (ioctl(fd, PTP_PIN_SETFUNC, &desc)) {
+			perror("PTP_PIN_SETFUNC");
+		} else {
+			puts("set pin function okay");
 		}
 	}
 
@@ -444,18 +485,6 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (pin_index >= 0) {
-		memset(&desc, 0, sizeof(desc));
-		desc.index = pin_index;
-		desc.func = pin_func;
-		desc.chan = index;
-		if (ioctl(fd, PTP_PIN_SETFUNC, &desc)) {
-			perror("PTP_PIN_SETFUNC");
-		} else {
-			puts("set pin function okay");
-		}
-	}
-
 	if (pps != -1) {
 		int enable = pps ? 1 : 0;
 		if (ioctl(fd, PTP_ENABLE_PPS, enable)) {
@@ -492,11 +521,11 @@ int main(int argc, char *argv[])
 			interval = t2 - t1;
 			offset = (t2 + t1) / 2 - tp;
 
-			printf("system time: %lld.%u\n",
+			printf("system time: %lld.%09u\n",
 				(pct+2*i)->sec, (pct+2*i)->nsec);
-			printf("phc    time: %lld.%u\n",
+			printf("phc    time: %lld.%09u\n",
 				(pct+2*i+1)->sec, (pct+2*i+1)->nsec);
-			printf("system time: %lld.%u\n",
+			printf("system time: %lld.%09u\n",
 				(pct+2*i+2)->sec, (pct+2*i+2)->nsec);
 			printf("system/phc clock time offset is %" PRId64 " ns\n"
 			       "system     clock time delay  is %" PRId64 " ns\n",

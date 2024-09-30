@@ -1,2 +1,3 @@
-#4-
-0x41920496	rdma_resolve_addr	drivers/infiniband/core/rdma_cm	EXPORT_SYMBOL	
+#5-
+0xaddcd06d	rdma_resolve_addr	drivers/infiniband/core/rdma_cm	EXPORT_SYMBOL	
+

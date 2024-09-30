@@ -14,10 +14,12 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/of_device.h>
 #include <linux/of_irq.h>
+#include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/property.h>
 #include <linux/slab.h>
 #include <linux/soc/ti/knav_qmss.h>
 
@@ -67,7 +69,7 @@ static DEFINE_MUTEX(knav_dev_lock);
  * Newest followed by older ones. Search is done from start of the array
  * until a firmware file is found.
  */
-const char *knav_acc_firmwares[] = {"ks2_qmss_pdsp_acc48.bin"};
+static const char * const knav_acc_firmwares[] = {"ks2_qmss_pdsp_acc48.bin"};
 
 static bool device_ready;
 bool knav_qmss_device_ready(void)
@@ -758,10 +760,9 @@ void *knav_pool_create(const char *name,
 					int num_desc, int region_id)
 {
 	struct knav_region *reg_itr, *region = NULL;
-	struct knav_pool *pool, *pi;
+	struct knav_pool *pool, *pi = NULL, *iter;
 	struct list_head *node;
 	unsigned last_offset;
-	bool slot_found;
 	int ret;
 
 	if (!kdev)
@@ -790,7 +791,7 @@ void *knav_pool_create(const char *name,
 	}
 
 	pool->queue = knav_queue_open(name, KNAV_QUEUE_GP, 0);
-	if (IS_ERR_OR_NULL(pool->queue)) {
+	if (IS_ERR(pool->queue)) {
 		dev_err(kdev->dev,
 			"failed to open queue for pool(%s), error %ld\n",
 			name, PTR_ERR(pool->queue));
@@ -816,18 +817,17 @@ void *knav_pool_create(const char *name,
 	 * the request
 	 */
 	last_offset = 0;
-	slot_found = false;
 	node = &region->pools;
-	list_for_each_entry(pi, &region->pools, region_inst) {
-		if ((pi->region_offset - last_offset) >= num_desc) {
-			slot_found = true;
+	list_for_each_entry(iter, &region->pools, region_inst) {
+		if ((iter->region_offset - last_offset) >= num_desc) {
+			pi = iter;
 			break;
 		}
-		last_offset = pi->region_offset + pi->num_desc;
+		last_offset = iter->region_offset + iter->num_desc;
 	}
-	node = &pi->region_inst;
 
-	if (slot_found) {
+	if (pi) {
+		node = &pi->region_inst;
 		pool->region = region;
 		pool->num_desc = num_desc;
 		pool->region_offset = last_offset;
@@ -1756,7 +1756,6 @@ static int knav_queue_probe(struct platform_device *pdev)
 {
 	struct device_node *node = pdev->dev.of_node;
 	struct device_node *qmgrs, *queue_pools, *regions, *pdsps;
-	const struct of_device_id *match;
 	struct device *dev = &pdev->dev;
 	u32 temp[2];
 	int ret;
@@ -1772,8 +1771,7 @@ static int knav_queue_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	match = of_match_device(of_match_ptr(keystone_qmss_of_match), dev);
-	if (match && match->data)
+	if (device_get_match_data(dev))
 		kdev->version = QMSS_66AK2G;
 
 	platform_set_drvdata(pdev, kdev);
@@ -1785,9 +1783,9 @@ static int knav_queue_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&kdev->pdsps);
 
 	pm_runtime_enable(&pdev->dev);
-	ret = pm_runtime_get_sync(&pdev->dev);
+	ret = pm_runtime_resume_and_get(&pdev->dev);
 	if (ret < 0) {
-		pm_runtime_put_noidle(&pdev->dev);
+		pm_runtime_disable(&pdev->dev);
 		dev_err(dev, "Failed to enable QMSS\n");
 		return ret;
 	}
@@ -1886,17 +1884,16 @@ err:
 	return ret;
 }
 
-static int knav_queue_remove(struct platform_device *pdev)
+static void knav_queue_remove(struct platform_device *pdev)
 {
 	/* TODO: Free resources */
 	pm_runtime_put_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
-	return 0;
 }
 
 static struct platform_driver keystone_qmss_driver = {
 	.probe		= knav_queue_probe,
-	.remove		= knav_queue_remove,
+	.remove_new	= knav_queue_remove,
 	.driver		= {
 		.name	= "keystone-navigator-qmss",
 		.of_match_table = keystone_qmss_of_match,

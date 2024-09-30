@@ -1,2 +1,3 @@
-#4-
-0x316f7e6a	bio_add_page	vmlinux	EXPORT_SYMBOL	
+#5-
+0xd0484688	bio_add_page	vmlinux	EXPORT_SYMBOL	
+

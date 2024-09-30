@@ -16,7 +16,7 @@
 	UNWIND_HINT_EMPTY
 .endm
 
-.macro UNWIND_HINT_REGS base=%rsp offset=0 indirect=0 extra=1 partial=0
+.macro UNWIND_HINT_REGS base=%rsp offset=0 indirect=0 extra=1 partial=0 signal=1
 	.if \base == %rsp
 		.if \indirect
 			.set sp_reg, ORC_REG_SP_INDIRECT
@@ -46,11 +46,11 @@
 		.set type, UNWIND_HINT_TYPE_REGS
 	.endif
 
-	UNWIND_HINT sp_reg=sp_reg sp_offset=sp_offset type=type
+	UNWIND_HINT sp_reg=sp_reg sp_offset=sp_offset type=type signal=\signal
 .endm
 
-.macro UNWIND_HINT_IRET_REGS base=%rsp offset=0
-	UNWIND_HINT_REGS base=\base offset=\offset partial=1
+.macro UNWIND_HINT_IRET_REGS base=%rsp offset=0 signal=1
+	UNWIND_HINT_REGS base=\base offset=\offset partial=1 signal=\signal
 .endm
 
 .macro UNWIND_HINT_IRET_ENTRY base=%rsp offset=0
@@ -73,7 +73,7 @@
 #else
 
 #define UNWIND_HINT_FUNC \
-	UNWIND_HINT(ORC_REG_SP, 8, UNWIND_HINT_TYPE_FUNC, 0)
+	UNWIND_HINT(UNWIND_HINT_TYPE_FUNC, ORC_REG_SP, 8, 0, 0)
 
 #endif /* __ASSEMBLY__ */
 

@@ -49,10 +49,13 @@ struct task_delay_info {
 	u64 wpcopy_start;
 	u64 wpcopy_delay;	/* wait for write-protect copy */
 
+	u64 irq_delay;	/* wait for IRQ/SOFTIRQ */
+
 	u32 freepages_count;	/* total count of memory reclaim */
 	u32 thrashing_count;	/* total count of thrash waits */
 	u32 compact_count;	/* total count of memory compact */
 	u32 wpcopy_count;	/* total count of write-protect copy */
+	u32 irq_count;	/* total count of IRQ/SOFTIRQ */
 };
 #endif
 
@@ -85,6 +88,7 @@ extern void __delayacct_compact_start(void);
 extern void __delayacct_compact_end(void);
 extern void __delayacct_wpcopy_start(void);
 extern void __delayacct_wpcopy_end(void);
+extern void __delayacct_irq(struct task_struct *task, u32 delta);
 
 static inline void delayacct_set_flag(struct task_struct *p, int flag)
 {
@@ -213,6 +217,15 @@ static inline void delayacct_wpcopy_end(void)
 		__delayacct_wpcopy_end();
 }
 
+static inline void delayacct_irq(struct task_struct *task, u32 delta)
+{
+	if (!static_branch_unlikely(&delayacct_key))
+		return;
+
+	if (task->delays)
+		__delayacct_irq(task, delta);
+}
+
 #else
 static inline void delayacct_set_flag(struct task_struct *p, int flag)
 {}
@@ -254,6 +267,8 @@ static inline void delayacct_compact_end(void)
 static inline void delayacct_wpcopy_start(void)
 {}
 static inline void delayacct_wpcopy_end(void)
+{}
+static inline void delayacct_irq(struct task_struct *task, u32 delta)
 {}
 
 #endif /* CONFIG_TASK_DELAY_ACCT */

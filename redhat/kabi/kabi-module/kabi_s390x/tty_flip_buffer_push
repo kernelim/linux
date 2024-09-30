@@ -1,2 +1,3 @@
-#4-
-0xd106b968	tty_flip_buffer_push	vmlinux	EXPORT_SYMBOL	
+#5-
+0x024e5c1f	tty_flip_buffer_push	vmlinux	EXPORT_SYMBOL	
+

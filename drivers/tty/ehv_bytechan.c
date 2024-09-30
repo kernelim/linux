@@ -118,7 +118,7 @@ static int find_console_handle(void)
 		return 0;
 
 	stdout_irq = irq_of_parse_and_map(np, 0);
-	if (stdout_irq == NO_IRQ) {
+	if (!stdout_irq) {
 		pr_err("ehv-bc: no 'interrupts' property in %pOF node\n", np);
 		return 0;
 	}
@@ -466,8 +466,8 @@ static irqreturn_t ehv_bc_tty_tx_isr(int irq, void *data)
  * ehv_bc_tty_write_room() will never lie, so the tty layer will never send us
  * too much data.
  */
-static int ehv_bc_tty_write(struct tty_struct *ttys, const unsigned char *s,
-			    int count)
+static ssize_t ehv_bc_tty_write(struct tty_struct *ttys, const u8 *s,
+				size_t count)
 {
 	struct ehv_bc_data *bc = ttys->driver_data;
 	unsigned long flags;
@@ -696,7 +696,7 @@ static int ehv_bc_tty_probe(struct platform_device *pdev)
 
 	bc->rx_irq = irq_of_parse_and_map(np, 0);
 	bc->tx_irq = irq_of_parse_and_map(np, 1);
-	if ((bc->rx_irq == NO_IRQ) || (bc->tx_irq == NO_IRQ)) {
+	if (!bc->rx_irq || !bc->tx_irq) {
 		dev_err(&pdev->dev, "no 'interrupts' property in %pOFn node\n",
 			np);
 		ret = -ENODEV;
@@ -791,7 +791,7 @@ static int __init ehv_bc_init(void)
 	ret = tty_register_driver(driver);
 	if (ret) {
 		pr_err("ehv-bc: could not register tty driver (ret=%i)\n", ret);
-		goto err_put_tty_driver;
+		goto err_tty_driver_kref_put;
 	}
 
 	ehv_bc_driver = driver;
@@ -808,8 +808,8 @@ static int __init ehv_bc_init(void)
 err_deregister_tty_driver:
 	ehv_bc_driver = NULL;
 	tty_unregister_driver(driver);
-err_put_tty_driver:
-	put_tty_driver(driver);
+err_tty_driver_kref_put:
+	tty_driver_kref_put(driver);
 err_free_bcs:
 	kfree(bcs);
 

@@ -265,7 +265,7 @@ static inline pte_t pte_mkold(pte_t pte)
 	return pte;
 }
 
-static inline pte_t pte_mkwrite(pte_t pte)
+static inline pte_t pte_mkwrite_novma(pte_t pte)
 {
 	pte_val(pte) |= _PAGE_WRITE;
 	return pte;
@@ -411,8 +411,6 @@ static inline void update_mmu_cache(struct vm_area_struct *vma,
 	((swp_entry_t) { ((type) << 5) | ((offset) << 12) })
 #define __pte_to_swp_entry(pte)		((swp_entry_t) { pte_val(pte) })
 #define __swp_entry_to_pte(x)		((pte_t) { (x).val })
-
-#define kern_addr_valid(addr)           (1)
 
 typedef pte_t *pte_addr_t;
 

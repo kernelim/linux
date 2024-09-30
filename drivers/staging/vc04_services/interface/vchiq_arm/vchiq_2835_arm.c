@@ -66,7 +66,7 @@ static char *g_free_fragments;
 static struct semaphore g_free_fragments_sema;
 static struct device *g_dev;
 
-static DEFINE_SEMAPHORE(g_free_fragments_mutex);
+static DEFINE_SEMAPHORE(g_free_fragments_mutex, 1);
 
 static irqreturn_t
 vchiq_doorbell_irq(int irq, void *dev_id);

@@ -1,2 +1,3 @@
-#4-
-0x12011200	dca_remove_requester	drivers/dca/dca	EXPORT_SYMBOL_GPL	
+#5-
+0xc7d26477	dca_remove_requester	drivers/dca/dca	EXPORT_SYMBOL_GPL	
+

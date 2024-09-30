@@ -73,7 +73,6 @@ SRPMS:=$(RPM)/SRPMS
 SOURCES:=$(RPM)/SOURCES
 TESTPATCH:=$(REDHAT)/linux-kernel-test.patch
 SPECCHANGELOG:=$(PACKAGE_NAME).changelog-$(RHEL_MAJOR).$(RHEL_MINOR)
-CHANGELOG_PREV:=$(PACKAGE_NAME).changelog-$(RHEL_MAJOR).$(shell expr $(RHEL_MINOR) - 1)
 ARCH_LIST=aarch64 ppc64le s390x x86_64
 
 ifndef DISTRO
@@ -590,8 +589,8 @@ dist-get-buildreqs: setup-source
 _setup-source: dist-git-version-check
 	@cp $(REDHAT)/$(SPECFILE).template $(SOURCES)/$(SPECFILE)
 	@if [ ! -e  $(REDHAT)/$(SPECCHANGELOG) ]; then \
-		echo "Creating $(SPECCHANGELOG) as copy of $(CHANGELOG_PREV)"; \
-		cp $(REDHAT)/$(CHANGELOG_PREV) $(REDHAT)/$(SPECCHANGELOG); \
+		echo "Creating an empty $(SPECCHANGELOG) since it does not exist yet"; \
+		touch $(REDHAT)/$(SPECCHANGELOG); \
 	fi
 	@if [ -z "$(RHSELFTESTDATA)" ]; then \
 		cp $(REDHAT)/$(SPECCHANGELOG) $(SOURCES)/$(SPECCHANGELOG); \
@@ -626,6 +625,7 @@ sources-rh: $(TARBALL) generate-testpatch-tmp setup-source dist-configs-check
 	@sed -e "s/%%SPECKVERSION%%/$(SPECKVERSION)/" \
 		-e "s/%%SPECKPATCHLEVEL%%/$(SPECKPATCHLEVEL)/" \
 		rpminspect.yaml > $(SOURCES)/rpminspect.yaml
+	@$(REDHAT)/scripts/uki_addons/uki_create_json.py $(REDHAT)/scripts/uki_addons/uki_addons.json
 	@cp cpupower.* \
 		keys/rhel*.x509 \
 		keys/nvidia*.x509 \
@@ -640,6 +640,8 @@ sources-rh: $(TARBALL) generate-testpatch-tmp setup-source dist-configs-check
 		mod-partner.list \
 		mod-kvm.list \
 		mod-sign.sh \
+		scripts/uki_addons/uki_create_addons.py \
+		scripts/uki_addons/uki_addons.json \
 		configs/flavors \
 		configs/generate_all_configs.sh \
 		configs/merge.pl \
@@ -650,6 +652,8 @@ sources-rh: $(TARBALL) generate-testpatch-tmp setup-source dist-configs-check
 		kernel-local \
 		dracut-virt.conf \
 		$(SOURCES)/
+	@cat $$(ls -1 $(PACKAGE_NAME).changelog-* | sort -t '.' -k 3 -n -r) \
+		> $(SOURCES)/kernel.changelog
 	@for KABIARCH in $(ARCH_LIST); do \
 		cp kabi/Module.kabi_$$KABIARCH $(SOURCES)/; \
 		cp kabi/Module.kabi_dup_$$KABIARCH $(SOURCES)/; \
@@ -940,6 +944,7 @@ dist-full-help:
 	@echo  '  dist-check-licenses - Runs license selftest checking SPDX-License-Identifier:'
 	@echo  '                        tags in all source files against `License:` field in the'
 	@echo  '                        specfile template.'
+	@echo  '  dist-maint-update - Runs merge-subtrees.sh from the redhat/scripts/ directory'
 	@echo  ''
 
 export

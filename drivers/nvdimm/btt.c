@@ -16,6 +16,7 @@
 #include <linux/fs.h>
 #include <linux/nd.h>
 #include <linux/backing-dev.h>
+#include <linux/cleanup.h>
 #include "btt.h"
 #include "nd.h"
 
@@ -847,23 +848,20 @@ static int discover_arenas(struct btt *btt)
 {
 	int ret = 0;
 	struct arena_info *arena;
-	struct btt_sb *super;
 	size_t remaining = btt->rawsize;
 	u64 cur_nlba = 0;
 	size_t cur_off = 0;
 	int num_arenas = 0;
 
-	super = kzalloc(sizeof(*super), GFP_KERNEL);
+	struct btt_sb *super __free(kfree) = kzalloc(sizeof(*super), GFP_KERNEL);
 	if (!super)
 		return -ENOMEM;
 
 	while (remaining) {
 		/* Alloc memory for arena */
 		arena = alloc_arena(btt, 0, 0, 0);
-		if (!arena) {
-			ret = -ENOMEM;
-			goto out_super;
-		}
+		if (!arena)
+			return -ENOMEM;
 
 		arena->infooff = cur_off;
 		ret = btt_info_read(arena, super);
@@ -919,14 +917,11 @@ static int discover_arenas(struct btt *btt)
 	btt->nlba = cur_nlba;
 	btt->init_state = INIT_READY;
 
-	kfree(super);
 	return ret;
 
  out:
 	kfree(arena);
 	free_arenas(btt);
- out_super:
-	kfree(super);
 	return ret;
 }
 
@@ -986,7 +981,7 @@ static int btt_arena_write_layout(struct arena_info *arena)
 	if (!super)
 		return -ENOMEM;
 
-	strncpy(super->signature, BTT_SIG, BTT_SIG_LEN);
+	strscpy(super->signature, BTT_SIG, sizeof(super->signature));
 	export_uuid(super->uuid, nd_btt->uuid);
 	export_uuid(super->parent_uuid, parent_uuid);
 	super->flags = cpu_to_le32(arena->flags);
@@ -1482,20 +1477,6 @@ static void btt_submit_bio(struct bio *bio)
 	bio_endio(bio);
 }
 
-static int btt_rw_page(struct block_device *bdev, sector_t sector,
-		struct page *page, enum req_op op)
-{
-	struct btt *btt = bdev->bd_disk->private_data;
-	int rc;
-
-	rc = btt_do_bvec(btt, NULL, page, thp_size(page), 0, op, sector);
-	if (rc == 0)
-		page_endio(page, op_is_write(op), 0);
-
-	return rc;
-}
-
-
 static int btt_getgeo(struct block_device *bd, struct hd_geometry *geo)
 {
 	/* some standard values */
@@ -1508,7 +1489,6 @@ static int btt_getgeo(struct block_device *bd, struct hd_geometry *geo)
 static const struct block_device_operations btt_fops = {
 	.owner =		THIS_MODULE,
 	.submit_bio =		btt_submit_bio,
-	.rw_page =		btt_rw_page,
 	.getgeo =		btt_getgeo,
 };
 
@@ -1530,6 +1510,7 @@ static int btt_blk_init(struct btt *btt)
 	blk_queue_logical_block_size(btt->btt_disk->queue, btt->sector_size);
 	blk_queue_max_hw_sectors(btt->btt_disk->queue, UINT_MAX);
 	blk_queue_flag_set(QUEUE_FLAG_NONROT, btt->btt_disk->queue);
+	blk_queue_flag_set(QUEUE_FLAG_SYNCHRONOUS, btt->btt_disk->queue);
 
 	if (btt_meta_size(btt)) {
 		rc = nd_integrity_init(btt->btt_disk, btt_meta_size(btt));
@@ -1564,7 +1545,7 @@ static void btt_blk_cleanup(struct btt *btt)
  * @rawsize:	raw size in bytes of the backing device
  * @lbasize:	lba size of the backing device
  * @uuid:	A uuid for the backing device - this is stored on media
- * @maxlane:	maximum number of parallel requests the device can handle
+ * @nd_region:	&struct nd_region for the REGION device
  *
  * Initialize a Block Translation Table on a backing device to provide
  * single sector power fail atomicity.

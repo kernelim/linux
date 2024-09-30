@@ -260,7 +260,7 @@ static inline pte_t pte_mkold(pte_t pte)
 	return __pte(pte_val(pte) & ~SRMMU_REF);
 }
 
-static inline pte_t pte_mkwrite(pte_t pte)
+static inline pte_t pte_mkwrite_novma(pte_t pte)
 {
 	return __pte(pte_val(pte) | SRMMU_WRITE);
 }
@@ -386,12 +386,6 @@ __get_iospace (unsigned long addr)
 		return -1;
 	}
 }
-
-extern unsigned long *sparc_valid_addr_bitmap;
-
-/* Needs to be defined here and not in linux/mm.h, as it is arch dependent */
-#define kern_addr_valid(addr) \
-	(test_bit(__pa((unsigned long)(addr))>>20, sparc_valid_addr_bitmap))
 
 /*
  * For sparc32&64, the pfn in io_remap_pfn_range() carries <iospace> in

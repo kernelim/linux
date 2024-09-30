@@ -1,2 +1,3 @@
-#4-
-0xca258b73	ib_dereg_mr_user	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
+#5-
+0xb7829ca0	ib_dereg_mr_user	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
+

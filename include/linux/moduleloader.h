@@ -13,6 +13,9 @@
  * must be implemented by each architecture.
  */
 
+/* arch may override to do additional checking of ELF header architecture */
+bool module_elf_check_arch(Elf_Ehdr *hdr);
+
 /* Adjust arch-specific sections.  Return 0 on success.  */
 int module_frob_arch_sections(Elf_Ehdr *hdr,
 			      Elf_Shdr *sechdrs,
@@ -38,6 +41,11 @@ bool module_init_section(const char *name);
  * module unloading)
  */
 bool module_exit_section(const char *name);
+
+/* Describes whether within_module_init() will consider this an init section
+ * or not. This behaviour changes with CONFIG_MODULE_UNLOAD.
+ */
+bool module_init_layout_section(const char *sname);
 
 /*
  * Apply the given relocation to the (simplified) ELF.  Return -error
@@ -106,6 +114,14 @@ static inline int apply_relocate_add(Elf_Shdr *sechdrs,
 int module_finalize(const Elf_Ehdr *hdr,
 		    const Elf_Shdr *sechdrs,
 		    struct module *mod);
+
+#ifdef CONFIG_MODULES
+void flush_module_init_free_work(void);
+#else
+static inline void flush_module_init_free_work(void)
+{
+}
+#endif
 
 /* Any cleanup needed when module leaves. */
 void module_arch_cleanup(struct module *mod);

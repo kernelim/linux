@@ -1,2 +1,3 @@
-#4-
-0xe01102e3	register_netdevice_notifier_dev_net	vmlinux	EXPORT_SYMBOL	
+#5-
+0x69a65874	register_netdevice_notifier_dev_net	vmlinux	EXPORT_SYMBOL	
+

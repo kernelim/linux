@@ -9,6 +9,8 @@
 #include <linux/ratelimit_types.h>
 #include <linux/once_lite.h>
 
+struct uart_port;
+
 extern const char linux_banner[];
 extern const char linux_proc_banner[];
 
@@ -44,8 +46,6 @@ static inline const char *printk_skip_headers(const char *buffer)
 	return buffer;
 }
 
-#define CONSOLE_EXT_LOG_MAX	8192
-
 /* printk's without a loglevel use this.. */
 #define MESSAGE_LOGLEVEL_DEFAULT CONFIG_MESSAGE_LOGLEVEL_DEFAULT
 
@@ -68,11 +68,6 @@ extern int console_printk[];
 #define default_message_loglevel (console_printk[1])
 #define minimum_console_loglevel (console_printk[2])
 #define default_console_loglevel (console_printk[3])
-
-static inline void console_silent(void)
-{
-	console_loglevel = CONSOLE_LOGLEVEL_SILENT;
-}
 
 extern void console_verbose(void);
 
@@ -166,19 +161,16 @@ __printf(1, 2) __cold int _printk_deferred(const char *fmt, ...);
 
 extern void __printk_safe_enter(void);
 extern void __printk_safe_exit(void);
+extern void __printk_deferred_enter(void);
+extern void __printk_deferred_exit(void);
+
 /*
  * The printk_deferred_enter/exit macros are available only as a hack for
  * some code paths that need to defer all printk console printing. Interrupts
  * must be disabled for the deferred duration.
  */
-#define printk_deferred_enter __printk_safe_enter
-#define printk_deferred_exit __printk_safe_exit
-
-extern void printk_prefer_direct_enter(void);
-extern void printk_prefer_direct_exit(void);
-
-extern bool pr_flush(int timeout_ms, bool reset_on_progress);
-extern void try_block_console_kthreads(int timeout_ms);
+#define printk_deferred_enter() __printk_deferred_enter()
+#define printk_deferred_exit() __printk_deferred_exit()
 
 /*
  * Please don't use printk_ratelimit(), because it shares ratelimiting state
@@ -205,6 +197,10 @@ void show_regs_print_info(const char *log_lvl);
 extern asmlinkage void dump_stack_lvl(const char *log_lvl) __cold;
 extern asmlinkage void dump_stack(void) __cold;
 void printk_trigger_flush(void);
+void printk_legacy_allow_panic_sync(void);
+extern void nbcon_acquire(struct uart_port *up);
+extern void nbcon_release(struct uart_port *up);
+void nbcon_atomic_flush_unsafe(void);
 #else
 static inline __printf(1, 0)
 int vprintk(const char *s, va_list args)
@@ -227,23 +223,6 @@ static inline void printk_deferred_enter(void)
 }
 
 static inline void printk_deferred_exit(void)
-{
-}
-
-static inline void printk_prefer_direct_enter(void)
-{
-}
-
-static inline void printk_prefer_direct_exit(void)
-{
-}
-
-static inline bool pr_flush(int timeout_ms, bool reset_on_progress)
-{
-	return true;
-}
-
-static inline void try_block_console_kthreads(int timeout_ms)
 {
 }
 
@@ -301,6 +280,23 @@ static inline void dump_stack(void)
 static inline void printk_trigger_flush(void)
 {
 }
+
+static inline void printk_legacy_allow_panic_sync(void)
+{
+}
+
+static inline void nbcon_acquire(struct uart_port *up)
+{
+}
+
+static inline void nbcon_release(struct uart_port *up)
+{
+}
+
+static inline void nbcon_atomic_flush_unsafe(void)
+{
+}
+
 #endif
 
 #ifdef CONFIG_SMP
@@ -308,9 +304,16 @@ extern int __printk_cpu_sync_try_get(void);
 extern void __printk_cpu_sync_wait(void);
 extern void __printk_cpu_sync_put(void);
 
+#else
+
+#define __printk_cpu_sync_try_get() true
+#define __printk_cpu_sync_wait()
+#define __printk_cpu_sync_put()
+#endif /* CONFIG_SMP */
+
 /**
- * printk_cpu_sync_get_irqsave() - Acquire the printk cpu-reentrant spinning
- *                                 lock and disable interrupts.
+ * printk_cpu_sync_get_irqsave() - Disable interrupts and acquire the printk
+ *                                 cpu-reentrant spinning lock.
  * @flags: Stack-allocated storage for saving local interrupt state,
  *         to be passed to printk_cpu_sync_put_irqrestore().
  *
@@ -348,13 +351,6 @@ extern void __printk_cpu_sync_put(void);
 		__printk_cpu_sync_put();	\
 		local_irq_restore(flags);	\
 	} while (0)
-
-#else
-
-#define printk_cpu_sync_get_irqsave(flags) ((void)flags)
-#define printk_cpu_sync_put_irqrestore(flags) ((void)flags)
-
-#endif /* CONFIG_SMP */
 
 extern int kptr_restrict;
 

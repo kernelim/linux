@@ -38,7 +38,9 @@
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/of.h>
-#include <linux/of_platform.h>
+#include <linux/of_address.h>
+#include <linux/of_irq.h>
+#include <linux/platform_device.h>
 #include <linux/clk.h>
 
 #include <asm/mpc52xx.h>
@@ -83,11 +85,11 @@ static irqreturn_t mpc5xxx_uart_process_int(struct uart_port *port);
 
 struct psc_ops {
 	void		(*fifo_init)(struct uart_port *port);
-	int		(*raw_rx_rdy)(struct uart_port *port);
-	int		(*raw_tx_rdy)(struct uart_port *port);
-	int		(*rx_rdy)(struct uart_port *port);
-	int		(*tx_rdy)(struct uart_port *port);
-	int		(*tx_empty)(struct uart_port *port);
+	unsigned int	(*raw_rx_rdy)(struct uart_port *port);
+	unsigned int	(*raw_tx_rdy)(struct uart_port *port);
+	unsigned int	(*rx_rdy)(struct uart_port *port);
+	unsigned int	(*tx_rdy)(struct uart_port *port);
+	unsigned int	(*tx_empty)(struct uart_port *port);
 	void		(*stop_rx)(struct uart_port *port);
 	void		(*start_tx)(struct uart_port *port);
 	void		(*stop_tx)(struct uart_port *port);
@@ -203,34 +205,34 @@ static void mpc52xx_psc_fifo_init(struct uart_port *port)
 	out_be16(&psc->mpc52xx_psc_imr, port->read_status_mask);
 }
 
-static int mpc52xx_psc_raw_rx_rdy(struct uart_port *port)
+static unsigned int mpc52xx_psc_raw_rx_rdy(struct uart_port *port)
 {
 	return in_be16(&PSC(port)->mpc52xx_psc_status)
 	    & MPC52xx_PSC_SR_RXRDY;
 }
 
-static int mpc52xx_psc_raw_tx_rdy(struct uart_port *port)
+static unsigned int mpc52xx_psc_raw_tx_rdy(struct uart_port *port)
 {
 	return in_be16(&PSC(port)->mpc52xx_psc_status)
 	    & MPC52xx_PSC_SR_TXRDY;
 }
 
 
-static int mpc52xx_psc_rx_rdy(struct uart_port *port)
+static unsigned int mpc52xx_psc_rx_rdy(struct uart_port *port)
 {
 	return in_be16(&PSC(port)->mpc52xx_psc_isr)
 	    & port->read_status_mask
 	    & MPC52xx_PSC_IMR_RXRDY;
 }
 
-static int mpc52xx_psc_tx_rdy(struct uart_port *port)
+static unsigned int mpc52xx_psc_tx_rdy(struct uart_port *port)
 {
 	return in_be16(&PSC(port)->mpc52xx_psc_isr)
 	    & port->read_status_mask
 	    & MPC52xx_PSC_IMR_TXRDY;
 }
 
-static int mpc52xx_psc_tx_empty(struct uart_port *port)
+static unsigned int mpc52xx_psc_tx_empty(struct uart_port *port)
 {
 	u16 sts = in_be16(&PSC(port)->mpc52xx_psc_status);
 
@@ -436,31 +438,31 @@ static void mpc512x_psc_fifo_init(struct uart_port *port)
 	out_be32(&FIFO_512x(port)->rximr, MPC512x_PSC_FIFO_ALARM);
 }
 
-static int mpc512x_psc_raw_rx_rdy(struct uart_port *port)
+static unsigned int mpc512x_psc_raw_rx_rdy(struct uart_port *port)
 {
 	return !(in_be32(&FIFO_512x(port)->rxsr) & MPC512x_PSC_FIFO_EMPTY);
 }
 
-static int mpc512x_psc_raw_tx_rdy(struct uart_port *port)
+static unsigned int mpc512x_psc_raw_tx_rdy(struct uart_port *port)
 {
 	return !(in_be32(&FIFO_512x(port)->txsr) & MPC512x_PSC_FIFO_FULL);
 }
 
-static int mpc512x_psc_rx_rdy(struct uart_port *port)
+static unsigned int mpc512x_psc_rx_rdy(struct uart_port *port)
 {
 	return in_be32(&FIFO_512x(port)->rxsr)
 	    & in_be32(&FIFO_512x(port)->rximr)
 	    & MPC512x_PSC_FIFO_ALARM;
 }
 
-static int mpc512x_psc_tx_rdy(struct uart_port *port)
+static unsigned int mpc512x_psc_tx_rdy(struct uart_port *port)
 {
 	return in_be32(&FIFO_512x(port)->txsr)
 	    & in_be32(&FIFO_512x(port)->tximr)
 	    & MPC512x_PSC_FIFO_ALARM;
 }
 
-static int mpc512x_psc_tx_empty(struct uart_port *port)
+static unsigned int mpc512x_psc_tx_empty(struct uart_port *port)
 {
 	return in_be32(&FIFO_512x(port)->txsr)
 	    & MPC512x_PSC_FIFO_EMPTY;
@@ -754,9 +756,6 @@ static void mpc512x_psc_get_irq(struct uart_port *port, struct device_node *np)
 	port->irqflags = IRQF_SHARED;
 	port->irq = psc_fifoc_irq;
 }
-#endif
-
-#ifdef CONFIG_PPC_MPC512x
 
 #define PSC_5125(port) ((struct mpc5125_psc __iomem *)((port)->membase))
 #define FIFO_5125(port) ((struct mpc512x_psc_fifo __iomem *)(PSC_5125(port)+1))
@@ -780,29 +779,29 @@ static void mpc5125_psc_fifo_init(struct uart_port *port)
 	out_be32(&FIFO_5125(port)->rximr, MPC512x_PSC_FIFO_ALARM);
 }
 
-static int mpc5125_psc_raw_rx_rdy(struct uart_port *port)
+static unsigned int mpc5125_psc_raw_rx_rdy(struct uart_port *port)
 {
 	return !(in_be32(&FIFO_5125(port)->rxsr) & MPC512x_PSC_FIFO_EMPTY);
 }
 
-static int mpc5125_psc_raw_tx_rdy(struct uart_port *port)
+static unsigned int mpc5125_psc_raw_tx_rdy(struct uart_port *port)
 {
 	return !(in_be32(&FIFO_5125(port)->txsr) & MPC512x_PSC_FIFO_FULL);
 }
 
-static int mpc5125_psc_rx_rdy(struct uart_port *port)
+static unsigned int mpc5125_psc_rx_rdy(struct uart_port *port)
 {
 	return in_be32(&FIFO_5125(port)->rxsr) &
 	       in_be32(&FIFO_5125(port)->rximr) & MPC512x_PSC_FIFO_ALARM;
 }
 
-static int mpc5125_psc_tx_rdy(struct uart_port *port)
+static unsigned int mpc5125_psc_tx_rdy(struct uart_port *port)
 {
 	return in_be32(&FIFO_5125(port)->txsr) &
 	       in_be32(&FIFO_5125(port)->tximr) & MPC512x_PSC_FIFO_ALARM;
 }
 
-static int mpc5125_psc_tx_empty(struct uart_port *port)
+static unsigned int mpc5125_psc_tx_empty(struct uart_port *port)
 {
 	return in_be32(&FIFO_5125(port)->txsr) & MPC512x_PSC_FIFO_EMPTY;
 }
@@ -1097,14 +1096,14 @@ static void
 mpc52xx_uart_break_ctl(struct uart_port *port, int ctl)
 {
 	unsigned long flags;
-	spin_lock_irqsave(&port->lock, flags);
+	uart_port_lock_irqsave(port, &flags);
 
 	if (ctl == -1)
 		psc_ops->command(port, MPC52xx_PSC_START_BRK);
 	else
 		psc_ops->command(port, MPC52xx_PSC_STOP_BRK);
 
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 }
 
 static int
@@ -1215,7 +1214,7 @@ mpc52xx_uart_set_termios(struct uart_port *port, struct ktermios *new,
 	}
 
 	/* Get the lock */
-	spin_lock_irqsave(&port->lock, flags);
+	uart_port_lock_irqsave(port, &flags);
 
 	/* Do our best to flush TX & RX, so we don't lose anything */
 	/* But we don't wait indefinitely ! */
@@ -1251,7 +1250,7 @@ mpc52xx_uart_set_termios(struct uart_port *port, struct ktermios *new,
 	psc_ops->command(port, MPC52xx_PSC_RX_ENABLE);
 
 	/* We're all set, release the lock */
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 }
 
 static const char *
@@ -1365,7 +1364,7 @@ static const struct uart_ops mpc52xx_uart_ops = {
 /* Interrupt handling                                                       */
 /* ======================================================================== */
 
-static inline int
+static inline bool
 mpc52xx_uart_int_rx_chars(struct uart_port *port)
 {
 	struct tty_port *tport = &port->state->port;
@@ -1426,58 +1425,27 @@ mpc52xx_uart_int_rx_chars(struct uart_port *port)
 	return psc_ops->raw_rx_rdy(port);
 }
 
-static inline int
+static inline bool
 mpc52xx_uart_int_tx_chars(struct uart_port *port)
 {
-	struct circ_buf *xmit = &port->state->xmit;
+	u8 ch;
 
-	/* Process out of band chars */
-	if (port->x_char) {
-		psc_ops->write_char(port, port->x_char);
-		port->icount.tx++;
-		port->x_char = 0;
-		return 1;
-	}
-
-	/* Nothing to do ? */
-	if (uart_circ_empty(xmit) || uart_tx_stopped(port)) {
-		mpc52xx_uart_stop_tx(port);
-		return 0;
-	}
-
-	/* Send chars */
-	while (psc_ops->raw_tx_rdy(port)) {
-		psc_ops->write_char(port, xmit->buf[xmit->tail]);
-		xmit->tail = (xmit->tail + 1) & (UART_XMIT_SIZE - 1);
-		port->icount.tx++;
-		if (uart_circ_empty(xmit))
-			break;
-	}
-
-	/* Wake up */
-	if (uart_circ_chars_pending(xmit) < WAKEUP_CHARS)
-		uart_write_wakeup(port);
-
-	/* Maybe we're done after all */
-	if (uart_circ_empty(xmit)) {
-		mpc52xx_uart_stop_tx(port);
-		return 0;
-	}
-
-	return 1;
+	return uart_port_tx(port, ch,
+		psc_ops->raw_tx_rdy(port),
+		psc_ops->write_char(port, ch));
 }
 
 static irqreturn_t
 mpc5xxx_uart_process_int(struct uart_port *port)
 {
 	unsigned long pass = ISR_PASS_LIMIT;
-	unsigned int keepgoing;
+	bool keepgoing;
 	u8 status;
 
 	/* While we have stuff to do, we continue */
 	do {
 		/* If we don't find anything to do, we stop */
-		keepgoing = 0;
+		keepgoing = false;
 
 		psc_ops->rx_clr_irq(port);
 		if (psc_ops->rx_rdy(port))
@@ -1496,7 +1464,7 @@ mpc5xxx_uart_process_int(struct uart_port *port)
 
 		/* Limit number of iteration */
 		if (!(--pass))
-			keepgoing = 0;
+			keepgoing = false;
 
 	} while (keepgoing);
 
@@ -1509,11 +1477,11 @@ mpc52xx_uart_int(int irq, void *dev_id)
 	struct uart_port *port = dev_id;
 	irqreturn_t ret;
 
-	spin_lock(&port->lock);
+	uart_port_lock(port);
 
 	ret = psc_ops->handle_irq(port);
 
-	spin_unlock(&port->lock);
+	uart_port_unlock(port);
 
 	return ret;
 }

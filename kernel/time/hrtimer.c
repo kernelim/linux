@@ -2038,11 +2038,11 @@ static int __sched do_nanosleep(struct hrtimer_sleeper *t)
 	struct restart_block *restart;
 
 	do {
-		set_current_state(TASK_INTERRUPTIBLE);
+		set_current_state(TASK_INTERRUPTIBLE|TASK_FREEZABLE);
 		hrtimer_sleeper_start_expires(t, t->mode);
 
 		if (likely(t->task))
-			freezable_schedule();
+			schedule();
 
 		hrtimer_cancel(&t->timer);
 		t->mode = HRTIMER_MODE_ABS;

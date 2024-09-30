@@ -958,6 +958,31 @@ posix_acl_xattr_set(const struct xattr_handler *handler,
 	return ret;
 }
 
+int posix_acl_listxattr(struct inode *inode, char **buffer,
+			ssize_t *remaining_size)
+{
+	int err;
+
+	if (!IS_POSIXACL(inode))
+		return 0;
+
+	if (inode->i_acl) {
+		err = xattr_list_one(buffer, remaining_size,
+				     XATTR_NAME_POSIX_ACL_ACCESS);
+		if (err)
+			return err;
+	}
+
+	if (inode->i_default_acl) {
+		err = xattr_list_one(buffer, remaining_size,
+				     XATTR_NAME_POSIX_ACL_DEFAULT);
+		if (err)
+			return err;
+	}
+
+	return 0;
+}
+
 static bool
 posix_acl_xattr_list(struct dentry *dentry)
 {

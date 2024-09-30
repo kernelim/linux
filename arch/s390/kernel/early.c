@@ -18,8 +18,10 @@
 #include <linux/uaccess.h>
 #include <linux/kernel.h>
 #include <asm/asm-extable.h>
+#include <asm/access-regs.h>
 #include <asm/diag.h>
 #include <asm/ebcdic.h>
+#include <asm/fpu.h>
 #include <asm/ipl.h>
 #include <asm/lowcore.h>
 #include <asm/processor.h>
@@ -30,7 +32,6 @@
 #include <asm/sclp.h>
 #include <asm/facility.h>
 #include <asm/boot_data.h>
-#include <asm/switch_to.h>
 #include "entry.h"
 
 int __bootdata(is_full_image);
@@ -149,7 +150,7 @@ static __init void setup_topology(void)
 	topology_max_mnest = max_mnest;
 }
 
-static void early_pgm_check_handler(struct pt_regs *regs)
+void __do_early_pgm_check(struct pt_regs *regs)
 {
 	if (!fixup_exception(regs))
 		disabled_wait();
@@ -159,12 +160,11 @@ static noinline __init void setup_lowcore_early(void)
 {
 	psw_t psw;
 
-	psw.addr = (unsigned long)s390_base_pgm_handler;
+	psw.addr = (unsigned long)early_pgm_check_handler;
 	psw.mask = PSW_MASK_BASE | PSW_DEFAULT_KEY | PSW_MASK_EA | PSW_MASK_BA;
 	if (IS_ENABLED(CONFIG_KASAN))
 		psw.mask |= PSW_MASK_DAT;
 	S390_lowcore.program_new_psw = psw;
-	s390_base_pgm_handler_fn = early_pgm_check_handler;
 	S390_lowcore.preempt_count = INIT_PREEMPT_COUNT;
 }
 
@@ -208,11 +208,9 @@ static __init void detect_machine_facilities(void)
 	}
 	if (test_facility(51))
 		S390_lowcore.machine_flags |= MACHINE_FLAG_TLB_LC;
-	if (test_facility(129)) {
-		S390_lowcore.machine_flags |= MACHINE_FLAG_VX;
+	if (test_facility(129))
 		__ctl_set_bit(0, 17);
-	}
-	if (test_facility(130) && !noexec_disabled) {
+	if (test_facility(130)) {
 		S390_lowcore.machine_flags |= MACHINE_FLAG_NX;
 		__ctl_set_bit(0, 20);
 	}
@@ -257,14 +255,6 @@ static inline void setup_access_registers(void)
 
 	restore_access_regs(acrs);
 }
-
-static int __init disable_vector_extension(char *str)
-{
-	S390_lowcore.machine_flags &= ~MACHINE_FLAG_VX;
-	__ctl_clear_bit(0, 17);
-	return 0;
-}
-early_param("novx", disable_vector_extension);
 
 char __bootdata(early_command_line)[COMMAND_LINE_SIZE];
 static void __init setup_boot_command_line(void)

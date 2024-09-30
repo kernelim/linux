@@ -108,7 +108,7 @@ The tracer has a set of options inside the osnoise directory, they are:
    option.
  - tracing_threshold: the minimum delta between two time() reads to be
    considered as noise, in us. When set to 0, the default value will
-   will be used, which is currently 5 us.
+   be used, which is currently 1 us.
 
 Additional Tracing
 ------------------

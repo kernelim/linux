@@ -4,22 +4,8 @@
 Page Pool API
 =============
 
-The page_pool allocator is optimized for the XDP mode that uses one frame
-per-page, but it can fallback on the regular page allocator APIs.
-
-Basic use involves replacing alloc_pages() calls with the
-page_pool_alloc_pages() call.  Drivers should use page_pool_dev_alloc_pages()
-replacing dev_alloc_pages().
-
-API keeps track of inflight pages, in order to let API user know
-when it is safe to free a page_pool object.  Thus, API users
-must run page_pool_release_page() when a page is leaving the page_pool or
-call page_pool_put_page() where appropriate in order to maintain correct
-accounting.
-
-API user must call page_pool_put_page() once on a page, as it
-will either recycle the page, or in case of refcnt > 1, it will
-release the DMA mapping and inflight state accounting.
+.. kernel-doc:: include/net/page_pool/helpers.h
+   :doc: page_pool allocator
 
 Architecture overview
 =====================
@@ -55,6 +41,11 @@ Architecture overview
                           |   Fast cache    |     |  ptr-ring cache  |
                           +-----------------+     +------------------+
 
+Monitoring
+==========
+Information about page pools on the system can be accessed via the netdev
+genetlink family (see Documentation/netlink/specs/netdev.yaml).
+
 API interface
 =============
 The number of pools created **must** match the number of hardware queues
@@ -72,7 +63,9 @@ a page will cause no race conditions is enough.
 
 .. kernel-doc:: include/net/page_pool/helpers.h
    :identifiers: page_pool_put_page page_pool_put_full_page
-		 page_pool_recycle_direct page_pool_dev_alloc_pages
+		 page_pool_recycle_direct page_pool_free_va
+		 page_pool_dev_alloc_pages page_pool_dev_alloc_frag
+		 page_pool_dev_alloc page_pool_dev_alloc_va
 		 page_pool_get_dma_addr page_pool_get_dma_dir
 
 .. kernel-doc:: net/core/page_pool.c
@@ -119,8 +112,9 @@ page_pool_get_stats() and structures described below are available.
 It takes a  pointer to a ``struct page_pool`` and a pointer to a struct
 page_pool_stats allocated by the caller.
 
-The API will fill in the provided struct page_pool_stats with
-statistics about the page_pool.
+Older drivers expose page pool statistics via ethtool or debugfs.
+The same statistics are accessible via the netlink netdev family
+in a driver-independent fashion.
 
 .. kernel-doc:: include/net/page_pool/types.h
    :identifiers: struct page_pool_recycle_stats
@@ -175,7 +169,7 @@ NAPI poller
             if XDP_DROP:
                 page_pool_recycle_direct(page_pool, page);
         } else (packet_is_skb) {
-            page_pool_release_page(page_pool, page);
+            skb_mark_for_recycle(skb);
             new_page = page_pool_dev_alloc_pages(page_pool);
         }
     }

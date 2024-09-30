@@ -1,2 +1,3 @@
-#4-
-0x84c1eb74	generic_pipe_buf_get	vmlinux	EXPORT_SYMBOL	
+#5-
+0x2fcad565	generic_pipe_buf_get	vmlinux	EXPORT_SYMBOL	
+

@@ -27,7 +27,6 @@ TODO:待引用文档集被翻译完毕后请及时修改此处）
    free_page_reporting
    highmem
    ksm
-   frontswap
    hmm
    hwpoison
    hugetlbfs_reserv

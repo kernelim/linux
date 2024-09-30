@@ -36,10 +36,12 @@
 #include <linux/sched/task_stack.h>
 #include <linux/crash_dump.h>
 #include <linux/kprobes.h>
+#include <asm/access-regs.h>
 #include <asm/asm-offsets.h>
+#include <asm/pfault.h>
 #include <asm/diag.h>
-#include <asm/switch_to.h>
 #include <asm/facility.h>
+#include <asm/fpu.h>
 #include <asm/ipl.h>
 #include <asm/setup.h>
 #include <asm/irq.h>
@@ -113,7 +115,7 @@ early_param("smt", early_smt);
 
 /*
  * The smp_cpu_state_mutex must be held when changing the state or polarization
- * member of a pcpu data structure within the pcpu_devices arreay.
+ * member of a pcpu data structure within the pcpu_devices array.
  */
 DEFINE_MUTEX(smp_cpu_state_mutex);
 
@@ -280,9 +282,8 @@ static void pcpu_attach_task(struct pcpu *pcpu, struct task_struct *tsk)
 
 	cpu = pcpu - pcpu_devices;
 	lc = lowcore_ptr[cpu];
-	lc->kernel_stack = (unsigned long) task_stack_page(tsk)
-		+ THREAD_SIZE - STACK_FRAME_OVERHEAD - sizeof(struct pt_regs);
-	lc->current_task = (unsigned long) tsk;
+	lc->kernel_stack = (unsigned long)task_stack_page(tsk) + STACK_INIT_OFFSET;
+	lc->current_task = (unsigned long)tsk;
 	lc->lpp = LPP_MAGIC;
 	lc->current_pid = tsk->pid;
 	lc->user_timer = tsk->thread.user_timer;
@@ -348,7 +349,6 @@ static void pcpu_delegate(struct pcpu *pcpu,
 		abs_lc->restart_source = source_cpu;
 		put_abs_lowcore(abs_lc, flags);
 	}
-	__bpon();
 	asm volatile(
 		"0:	sigp	0,%0,%2	# sigp restart to target cpu\n"
 		"	brc	2,0b	# busy, try again\n"
@@ -523,7 +523,7 @@ static void smp_handle_ext_call(void)
 	if (test_bit(ec_call_function_single, &bits))
 		generic_smp_call_function_single_interrupt();
 	if (test_bit(ec_mcck_pending, &bits))
-		__s390_handle_mcck();
+		s390_handle_mcck();
 	if (test_bit(ec_irq_work, &bits))
 		irq_work_run();
 }
@@ -628,7 +628,7 @@ int smp_store_status(int cpu)
 	if (__pcpu_sigp_relax(pcpu->address, SIGP_STORE_STATUS_AT_ADDRESS,
 			      pa) != SIGP_CC_ORDER_CODE_ACCEPTED)
 		return -EIO;
-	if (!MACHINE_HAS_VX && !MACHINE_HAS_GS)
+	if (!cpu_has_vx() && !MACHINE_HAS_GS)
 		return 0;
 	pa = lc->mcesad & MCESA_ORIGIN_MASK;
 	if (MACHINE_HAS_GS)
@@ -684,7 +684,7 @@ void __init smp_save_dump_ipl_cpu(void)
 	copy_oldmem_kernel(regs, __LC_FPREGS_SAVE_AREA, 512);
 	save_area_add_regs(sa, regs);
 	memblock_free(regs, 512);
-	if (MACHINE_HAS_VX)
+	if (cpu_has_vx())
 		save_area_add_vxrs(sa, boot_cpu_vector_save_area);
 }
 
@@ -717,7 +717,7 @@ void __init smp_save_dump_secondary_cpus(void)
 			panic("could not allocate memory for save area\n");
 		__pcpu_sigp_relax(addr, SIGP_STORE_STATUS_AT_ADDRESS, __pa(page));
 		save_area_add_regs(sa, page);
-		if (MACHINE_HAS_VX) {
+		if (cpu_has_vx()) {
 			__pcpu_sigp_relax(addr, SIGP_STORE_ADDITIONAL_STATUS, __pa(page));
 			save_area_add_vxrs(sa, page);
 		}
@@ -987,7 +987,6 @@ void __cpu_die(unsigned int cpu)
 void __noreturn cpu_die(void)
 {
 	idle_task_exit();
-	__bpon();
 	pcpu_sigp_retry(pcpu_devices + smp_processor_id(), SIGP_STOP, 0);
 	for (;;) ;
 }

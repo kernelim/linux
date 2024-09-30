@@ -738,24 +738,26 @@ static bool is_san_consumer(struct platform_device *pdev, acpi_handle handle)
 {
 	struct acpi_handle_list dep_devices;
 	acpi_handle supplier = ACPI_HANDLE(&pdev->dev);
-	acpi_status status;
+	bool ret = false;
 	int i;
 
 	if (!acpi_has_method(handle, "_DEP"))
 		return false;
 
-	status = acpi_evaluate_reference(handle, "_DEP", NULL, &dep_devices);
-	if (ACPI_FAILURE(status)) {
+	if (!acpi_evaluate_reference(handle, "_DEP", NULL, &dep_devices)) {
 		san_consumer_dbg(&pdev->dev, handle, "failed to evaluate _DEP\n");
 		return false;
 	}
 
 	for (i = 0; i < dep_devices.count; i++) {
-		if (dep_devices.handles[i] == supplier)
-			return true;
+		if (dep_devices.handles[i] == supplier) {
+			ret = true;
+			break;
+		}
 	}
 
-	return false;
+	acpi_handle_list_free(&dep_devices);
+	return ret;
 }
 
 static acpi_status san_consumer_setup(acpi_handle handle, u32 lvl,

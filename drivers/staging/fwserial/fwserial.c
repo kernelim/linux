@@ -1267,7 +1267,8 @@ static int fwtty_ioctl(struct tty_struct *tty, unsigned int cmd,
 	return err;
 }
 
-static void fwtty_set_termios(struct tty_struct *tty, struct ktermios *old)
+static void fwtty_set_termios(struct tty_struct *tty,
+			      const struct ktermios *old)
 {
 	struct fwtty_port *port = tty->driver_data;
 	unsigned int baud;
@@ -2852,11 +2853,11 @@ unregister_loop:
 		tty_unregister_driver(fwloop_driver);
 put_loop:
 	if (create_loop_dev)
-		put_tty_driver(fwloop_driver);
+		tty_driver_kref_put(fwloop_driver);
 unregister_driver:
 	tty_unregister_driver(fwtty_driver);
 put_tty:
-	put_tty_driver(fwtty_driver);
+	tty_driver_kref_put(fwtty_driver);
 remove_debugfs:
 	debugfs_remove_recursive(fwserial_debugfs);
 
@@ -2871,10 +2872,10 @@ static void __exit fwserial_exit(void)
 	kmem_cache_destroy(fwtty_txn_cache);
 	if (create_loop_dev) {
 		tty_unregister_driver(fwloop_driver);
-		put_tty_driver(fwloop_driver);
+		tty_driver_kref_put(fwloop_driver);
 	}
 	tty_unregister_driver(fwtty_driver);
-	put_tty_driver(fwtty_driver);
+	tty_driver_kref_put(fwtty_driver);
 	debugfs_remove_recursive(fwserial_debugfs);
 }
 

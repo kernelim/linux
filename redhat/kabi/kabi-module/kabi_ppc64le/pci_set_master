@@ -1,2 +1,3 @@
-#4-
-0x6b40d5b8	pci_set_master	vmlinux	EXPORT_SYMBOL	
+#5-
+0xeed32bbd	pci_set_master	vmlinux	EXPORT_SYMBOL	
+

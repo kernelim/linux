@@ -16,45 +16,11 @@
 #include <asm/extable.h>
 #include <asm/tlbflush.h>
 
-#ifdef CONFIG_DEBUG_ATOMIC_SLEEP
-static inline bool pagefault_disabled(void);
-# define WARN_ON_IN_IRQ()	\
-	WARN_ON_ONCE(!in_task() && !pagefault_disabled())
-#else
-# define WARN_ON_IN_IRQ()
-#endif
-
 #ifdef CONFIG_X86_32
 # include <asm/uaccess_32.h>
 #else
 # include <asm/uaccess_64.h>
 #endif
-
-/**
- * access_ok - Checks if a user space pointer is valid
- * @addr: User space pointer to start of block to check
- * @size: Size of block to check
- *
- * Context: User context only. This function may sleep if pagefaults are
- *          enabled.
- *
- * Checks if a pointer to a block of memory in user space is valid.
- *
- * Note that, depending on architecture, this function probably just
- * checks that the pointer is in the user space range - after calling
- * this function, memory access functions may still return -EFAULT.
- *
- * Return: true (nonzero) if the memory block may be valid, false (zero)
- * if it is definitely invalid.
- *
- * This should not be x86-specific. The only odd things out here is
- * the WARN_ON_IN_IRQ(), which doesn't exist in the generic version.
- */
-#define access_ok(addr, size)			\
-({						\
-	WARN_ON_IN_IRQ();			\
-	likely(__access_ok(addr, size));	\
-})
 
 #include <asm-generic/access_ok.h>
 
@@ -469,7 +435,7 @@ do {									\
 
 #ifdef CONFIG_X86_32
 /*
- * Unlike the normal CMPXCHG, hardcode ECX for both success/fail and error.
+ * Unlike the normal CMPXCHG, use output GPR for both success/fail and error.
  * There are only six GPRs available and four (EAX, EBX, ECX, and EDX) are
  * hardcoded by CMPXCHG8B, leaving only ESI and EDI.  If the compiler uses
  * both ESI and EDI for the memory operand, compilation will fail if the error
@@ -482,11 +448,12 @@ do {									\
 	__typeof__(*(_ptr)) __new = (_new);				\
 	asm volatile("\n"						\
 		     "1: " LOCK_PREFIX "cmpxchg8b %[ptr]\n"		\
-		     "mov $0, %%ecx\n\t"				\
-		     "setz %%cl\n"					\
+		     "mov $0, %[result]\n\t"				\
+		     "setz %b[result]\n"				\
 		     "2:\n"						\
-		     _ASM_EXTABLE_TYPE_REG(1b, 2b, EX_TYPE_EFAULT_REG, %%ecx) \
-		     : [result]"=c" (__result),				\
+		     _ASM_EXTABLE_TYPE_REG(1b, 2b, EX_TYPE_EFAULT_REG,	\
+					   %[result])			\
+		     : [result] "=q" (__result),			\
 		       "+A" (__old),					\
 		       [ptr] "+m" (*_ptr)				\
 		     : "b" ((u32)__new),				\
@@ -529,7 +496,7 @@ copy_mc_to_kernel(void *to, const void *from, unsigned len);
 #define copy_mc_to_kernel copy_mc_to_kernel
 
 unsigned long __must_check
-copy_mc_to_user(void *to, const void *from, unsigned len);
+copy_mc_to_user(void __user *to, const void *from, unsigned len);
 #endif
 
 /*

@@ -29,8 +29,17 @@ extern bool xen_pvh;
 
 extern uint32_t xen_start_flags;
 
+#ifdef CONFIG_XEN_PV
+extern bool xen_pv_pci_possible;
+#else
+#define xen_pv_pci_possible	0
+#endif
+
 #include <xen/interface/hvm/start_info.h>
 extern struct hvm_start_info pvh_start_info;
+void xen_prepare_pvh(void);
+struct pt_regs;
+void xen_pv_evtchn_do_upcall(struct pt_regs *regs);
 
 #ifdef CONFIG_XEN_DOM0
 #include <xen/interface/xen.h>
@@ -59,6 +68,17 @@ void xen_free_unpopulated_pages(unsigned int nr_pages, struct page **pages);
 #define xen_alloc_unpopulated_pages alloc_xenballooned_pages
 #define xen_free_unpopulated_pages free_xenballooned_pages
 #include <xen/balloon.h>
+#endif
+
+#if defined(CONFIG_XEN_DOM0) && defined(CONFIG_ACPI) && defined(CONFIG_X86)
+bool __init xen_processor_present(uint32_t acpi_id);
+#else
+#include <linux/bug.h>
+static inline bool xen_processor_present(uint32_t acpi_id)
+{
+	BUG();
+	return false;
+}
 #endif
 
 #endif	/* _XEN_XEN_H */

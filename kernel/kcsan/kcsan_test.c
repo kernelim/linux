@@ -1565,53 +1565,40 @@ static void test_exit(struct kunit *test)
 	torture_cleanup_end();
 }
 
+__no_kcsan
+static void register_tracepoints(void)
+{
+	register_trace_console(probe_console, NULL);
+}
+
+__no_kcsan
+static void unregister_tracepoints(void)
+{
+	unregister_trace_console(probe_console, NULL);
+}
+
+static int kcsan_suite_init(struct kunit_suite *suite)
+{
+	register_tracepoints();
+	return 0;
+}
+
+static void kcsan_suite_exit(struct kunit_suite *suite)
+{
+	unregister_tracepoints();
+	tracepoint_synchronize_unregister();
+}
+
 static struct kunit_suite kcsan_test_suite = {
 	.name = "kcsan",
 	.test_cases = kcsan_test_cases,
 	.init = test_init,
 	.exit = test_exit,
+	.suite_init = kcsan_suite_init,
+	.suite_exit = kcsan_suite_exit,
 };
-static struct kunit_suite *kcsan_test_suites[] = { &kcsan_test_suite, NULL };
 
-__no_kcsan
-static void register_tracepoints(struct tracepoint *tp, void *ignore)
-{
-	check_trace_callback_type_console(probe_console);
-	if (!strcmp(tp->name, "console"))
-		WARN_ON(tracepoint_probe_register(tp, probe_console, NULL));
-}
-
-__no_kcsan
-static void unregister_tracepoints(struct tracepoint *tp, void *ignore)
-{
-	if (!strcmp(tp->name, "console"))
-		tracepoint_probe_unregister(tp, probe_console, NULL);
-}
-
-/*
- * We only want to do tracepoints setup and teardown once, therefore we have to
- * customize the init and exit functions and cannot rely on kunit_test_suite().
- */
-static int __init kcsan_test_init(void)
-{
-	/*
-	 * Because we want to be able to build the test as a module, we need to
-	 * iterate through all known tracepoints, since the static registration
-	 * won't work here.
-	 */
-	for_each_kernel_tracepoint(register_tracepoints, NULL);
-	return __kunit_test_suites_init(kcsan_test_suites);
-}
-
-static void kcsan_test_exit(void)
-{
-	__kunit_test_suites_exit(kcsan_test_suites);
-	for_each_kernel_tracepoint(unregister_tracepoints, NULL);
-	tracepoint_synchronize_unregister();
-}
-
-late_initcall_sync(kcsan_test_init);
-module_exit(kcsan_test_exit);
+kunit_test_suites(&kcsan_test_suite);
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Marco Elver <elver@google.com>");

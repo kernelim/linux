@@ -5,11 +5,11 @@
 ccflags-$(CONFIG_ARCH_MULTIPLATFORM) += -I$(srctree)/$(src)/include
 
 ifdef CONFIG_ARCH_S3C24XX
-include $(src)/Makefile.s3c24xx
+include $(srctree)/$(src)/Makefile.s3c24xx
 endif
 
 ifdef CONFIG_ARCH_S3C64XX
-include $(src)/Makefile.s3c64xx
+include $(srctree)/$(src)/Makefile.s3c64xx
 endif
 
 # Objects we always build independent of SoC choice

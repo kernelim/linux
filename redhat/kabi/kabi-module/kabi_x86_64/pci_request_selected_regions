@@ -1,2 +1,3 @@
-#4-
-0xfd49ca21	pci_request_selected_regions	vmlinux	EXPORT_SYMBOL	
+#5-
+0xa20436dc	pci_request_selected_regions	vmlinux	EXPORT_SYMBOL	
+

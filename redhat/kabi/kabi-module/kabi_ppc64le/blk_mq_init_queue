@@ -1,2 +1,3 @@
-#4-
-0x386f0c4a	blk_mq_init_queue	vmlinux	EXPORT_SYMBOL	
+#5-
+0xb8755dd7	blk_mq_init_queue	vmlinux	EXPORT_SYMBOL	
+

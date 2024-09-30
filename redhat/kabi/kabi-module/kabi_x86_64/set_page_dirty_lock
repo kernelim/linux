@@ -1,2 +1,3 @@
-#4-
-0x06e6a08a	set_page_dirty_lock	vmlinux	EXPORT_SYMBOL	
+#5-
+0x5bfae6d3	set_page_dirty_lock	vmlinux	EXPORT_SYMBOL	
+

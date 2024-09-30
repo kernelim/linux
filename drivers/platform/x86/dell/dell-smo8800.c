@@ -189,14 +189,13 @@ error:
 	return err;
 }
 
-static int smo8800_remove(struct acpi_device *device)
+static void smo8800_remove(struct acpi_device *device)
 {
 	struct smo8800_device *smo8800 = device->driver_data;
 
 	free_irq(smo8800->irq, smo8800);
 	misc_deregister(&smo8800->miscdev);
 	dev_dbg(&device->dev, "device /dev/freefall unregistered\n");
-	return 0;
 }
 
 /* NOTE: Keep this list in sync with drivers/i2c/busses/i2c-i801.c */

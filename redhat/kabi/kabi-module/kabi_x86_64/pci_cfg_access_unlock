@@ -1,2 +1,3 @@
-#4-
-0xeeb46a73	pci_cfg_access_unlock	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0xc7d23f9c	pci_cfg_access_unlock	vmlinux	EXPORT_SYMBOL_GPL	
+

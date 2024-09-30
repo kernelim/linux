@@ -1,2 +1,3 @@
-#4-
-0x6f64c430	kmem_cache_create_usercopy	vmlinux	EXPORT_SYMBOL	
+#5-
+0x7e88cefa	kmem_cache_create_usercopy	vmlinux	EXPORT_SYMBOL	
+

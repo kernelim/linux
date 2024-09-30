@@ -1,2 +1,3 @@
-#4-
-0x5b9fcf24	netdev_set_num_tc	vmlinux	EXPORT_SYMBOL	
+#5-
+0x5b72e143	netdev_set_num_tc	vmlinux	EXPORT_SYMBOL	
+

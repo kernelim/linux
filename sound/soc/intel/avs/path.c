@@ -87,7 +87,7 @@ static bool avs_test_hw_params(struct snd_pcm_hw_params *params,
 	return (params_rate(params) == fmt->sampling_freq &&
 		params_channels(params) == fmt->num_channels &&
 		params_physical_width(params) == fmt->bit_depth &&
-		params_width(params) == fmt->valid_bit_depth);
+		snd_pcm_hw_params_bits(params) == fmt->valid_bit_depth);
 }
 
 static struct avs_tplg_path *
@@ -148,11 +148,12 @@ static int avs_copier_create(struct avs_dev *adev, struct avs_path_module *mod)
 	struct avs_copier_cfg *cfg;
 	struct nhlt_specific_cfg *ep_blob;
 	union avs_connector_node_id node_id = {0};
-	size_t cfg_size, data_size = 0;
+	size_t cfg_size, data_size;
 	void *data = NULL;
 	u32 dma_type;
 	int ret;
 
+	data_size = sizeof(cfg->gtw_cfg.config);
 	dma_type = t->cfg_ext->copier.dma_type;
 	node_id.dma_type = dma_type;
 
@@ -233,15 +234,12 @@ static int avs_copier_create(struct avs_dev *adev, struct avs_path_module *mod)
 		break;
 	}
 
-	cfg_size = sizeof(*cfg) + data_size;
-	/* Every config-BLOB contains gateway attributes. */
-	if (data_size)
-		cfg_size -= sizeof(cfg->gtw_cfg.config.attrs);
+	cfg_size = offsetof(struct avs_copier_cfg, gtw_cfg.config) + data_size;
+	if (cfg_size > AVS_MAILBOX_SIZE)
+		return -EINVAL;
 
-	cfg = kzalloc(cfg_size, GFP_KERNEL);
-	if (!cfg)
-		return -ENOMEM;
-
+	cfg = adev->modcfg_buf;
+	memset(cfg, 0, cfg_size);
 	cfg->base.cpc = t->cfg_base->cpc;
 	cfg->base.ibs = t->cfg_base->ibs;
 	cfg->base.obs = t->cfg_base->obs;
@@ -254,14 +252,13 @@ static int avs_copier_create(struct avs_dev *adev, struct avs_path_module *mod)
 	/* config_length in DWORDs */
 	cfg->gtw_cfg.config_length = DIV_ROUND_UP(data_size, 4);
 	if (data)
-		memcpy(&cfg->gtw_cfg.config, data, data_size);
+		memcpy(&cfg->gtw_cfg.config.blob, data, data_size);
 
 	mod->gtw_attrs = cfg->gtw_cfg.config.attrs;
 
 	ret = avs_dsp_init_module(adev, mod->module_id, mod->owner->instance_id,
 				  t->core_id, t->domain, cfg, cfg_size,
 				  &mod->instance_id);
-	kfree(cfg);
 	return ret;
 }
 
@@ -294,7 +291,7 @@ static int avs_peakvol_create(struct avs_dev *adev, struct avs_path_module *mod)
 	struct avs_control_data *ctl_data;
 	struct avs_peakvol_cfg *cfg;
 	int volume = S32_MAX;
-	size_t size;
+	size_t cfg_size;
 	int ret;
 
 	ctl_data = avs_get_module_control(mod);
@@ -302,11 +299,12 @@ static int avs_peakvol_create(struct avs_dev *adev, struct avs_path_module *mod)
 		volume = ctl_data->volume;
 
 	/* As 2+ channels controls are unsupported, have a single block for all channels. */
-	size = struct_size(cfg, vols, 1);
-	cfg = kzalloc(size, GFP_KERNEL);
-	if (!cfg)
-		return -ENOMEM;
+	cfg_size = struct_size(cfg, vols, 1);
+	if (cfg_size > AVS_MAILBOX_SIZE)
+		return -EINVAL;
 
+	cfg = adev->modcfg_buf;
+	memset(cfg, 0, cfg_size);
 	cfg->base.cpc = t->cfg_base->cpc;
 	cfg->base.ibs = t->cfg_base->ibs;
 	cfg->base.obs = t->cfg_base->obs;
@@ -318,9 +316,8 @@ static int avs_peakvol_create(struct avs_dev *adev, struct avs_path_module *mod)
 	cfg->vols[0].curve_duration = 0;
 
 	ret = avs_dsp_init_module(adev, mod->module_id, mod->owner->instance_id, t->core_id,
-				  t->domain, cfg, size, &mod->instance_id);
+				  t->domain, cfg, cfg_size, &mod->instance_id);
 
-	kfree(cfg);
 	return ret;
 }
 
@@ -368,6 +365,7 @@ static int avs_asrc_create(struct avs_dev *adev, struct avs_path_module *mod)
 	struct avs_tplg_module *t = mod->template;
 	struct avs_asrc_cfg cfg;
 
+	memset(&cfg, 0, sizeof(cfg));
 	cfg.base.cpc = t->cfg_base->cpc;
 	cfg.base.ibs = t->cfg_base->ibs;
 	cfg.base.obs = t->cfg_base->obs;
@@ -480,10 +478,11 @@ static int avs_modext_create(struct avs_dev *adev, struct avs_path_module *mod)
 	num_pins = tcfg->generic.num_input_pins + tcfg->generic.num_output_pins;
 	cfg_size = struct_size(cfg, pin_fmts, num_pins);
 
-	cfg = kzalloc(cfg_size, GFP_KERNEL);
-	if (!cfg)
-		return -ENOMEM;
+	if (cfg_size > AVS_MAILBOX_SIZE)
+		return -EINVAL;
 
+	cfg = adev->modcfg_buf;
+	memset(cfg, 0, cfg_size);
 	cfg->base.cpc = t->cfg_base->cpc;
 	cfg->base.ibs = t->cfg_base->ibs;
 	cfg->base.obs = t->cfg_base->obs;
@@ -505,7 +504,6 @@ static int avs_modext_create(struct avs_dev *adev, struct avs_path_module *mod)
 	ret = avs_dsp_init_module(adev, mod->module_id, mod->owner->instance_id,
 				  t->core_id, t->domain, cfg, cfg_size,
 				  &mod->instance_id);
-	kfree(cfg);
 	return ret;
 }
 
@@ -548,6 +546,33 @@ static int avs_path_module_type_create(struct avs_dev *adev, struct avs_path_mod
 	return avs_modext_create(adev, mod);
 }
 
+static int avs_path_module_send_init_configs(struct avs_dev *adev, struct avs_path_module *mod)
+{
+	struct avs_soc_component *acomp;
+
+	acomp = to_avs_soc_component(mod->template->owner->owner->owner->owner->comp);
+
+	u32 num_ids = mod->template->num_config_ids;
+	u32 *ids = mod->template->config_ids;
+
+	for (int i = 0; i < num_ids; i++) {
+		struct avs_tplg_init_config *config = &acomp->tplg->init_configs[ids[i]];
+		size_t len = config->length;
+		void *data = config->data;
+		u32 param = config->param;
+		int ret;
+
+		ret = avs_ipc_set_large_config(adev, mod->module_id, mod->instance_id,
+					       param, data, len);
+		if (ret) {
+			dev_err(adev->dev, "send initial module config failed: %d\n", ret);
+			return AVS_IPC_RET(ret);
+		}
+	}
+
+	return 0;
+}
+
 static void avs_path_module_free(struct avs_dev *adev, struct avs_path_module *mod)
 {
 	kfree(mod);
@@ -577,6 +602,12 @@ avs_path_module_create(struct avs_dev *adev,
 	ret = avs_path_module_type_create(adev, mod);
 	if (ret) {
 		dev_err(adev->dev, "module-type create failed: %d\n", ret);
+		kfree(mod);
+		return ERR_PTR(ret);
+	}
+
+	ret = avs_path_module_send_init_configs(adev, mod);
+	if (ret) {
 		kfree(mod);
 		return ERR_PTR(ret);
 	}
@@ -678,8 +709,6 @@ static int avs_path_pipeline_arm(struct avs_dev *adev,
 		/* bind current module to next module on list */
 		source = mod;
 		sink = list_next_entry(mod, node);
-		if (!source || !sink)
-			return -EINVAL;
 
 		ret = avs_ipc_bind(adev, source->module_id, source->instance_id,
 				   sink->module_id, sink->instance_id, 0, 0);

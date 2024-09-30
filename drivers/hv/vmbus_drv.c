@@ -2094,7 +2094,7 @@ static acpi_status vmbus_walk_resources(struct acpi_resource *res, void *ctx)
 }
 #endif
 
-static int vmbus_mmio_remove(void)
+static void vmbus_mmio_remove(void)
 {
 	struct resource *cur_res;
 	struct resource *next_res;
@@ -2111,8 +2111,6 @@ static int vmbus_mmio_remove(void)
 			kfree(cur_res);
 		}
 	}
-
-	return 0;
 }
 
 static void __maybe_unused vmbus_reserve_fb(void)

@@ -122,8 +122,6 @@ struct tty_operations;
 /**
  * struct tty_struct - state associated with a tty while open
  *
- * @magic: magic value set early in @alloc_tty_struct to %TTY_MAGIC, for
- *	   debugging purposes
  * @kref: reference counting by tty_kref_get() and tty_kref_put(), reaching zero
  *	  frees the structure
  * @dev: class device or %NULL (e.g. ptys, serdev)
@@ -193,15 +191,15 @@ struct tty_operations;
  * &struct tty_port.
  */
 struct tty_struct {
-	int	magic;
 	struct kref kref;
+	int index;
 	struct device *dev;
 	struct tty_driver *driver;
+	struct tty_port *port;
 	const struct tty_operations *ops;
-	int index;
 
-	struct ld_semaphore ldisc_sem;
 	struct tty_ldisc *ldisc;
+	struct ld_semaphore ldisc_sem;
 
 	struct mutex atomic_write_lock;
 	struct mutex legacy_mutex;
@@ -212,6 +210,7 @@ struct tty_struct {
 	char name[64];
 	unsigned long flags;
 	int count;
+	unsigned int receive_room;
 	struct winsize winsize;
 
 	struct {
@@ -222,16 +221,16 @@ struct tty_struct {
 	} __aligned(sizeof(unsigned long)) flow;
 
 	struct {
-		spinlock_t lock;
 		struct pid *pgrp;
 		struct pid *session;
+		spinlock_t lock;
 		unsigned char pktstatus;
 		bool packet;
 		unsigned long unused[0];
 	} __aligned(sizeof(unsigned long)) ctrl;
 
-	int hw_stopped;
-	unsigned int receive_room;
+	bool hw_stopped;
+	bool closing;
 	int flow_change;
 
 	struct tty_struct *link;
@@ -242,15 +241,13 @@ struct tty_struct {
 	void *disc_data;
 	void *driver_data;
 	spinlock_t files_lock;
+	int write_cnt;
+	unsigned char *write_buf;
+
 	struct list_head tty_files;
 
 #define N_TTY_BUF_SIZE 4096
-
-	int closing;
-	unsigned char *write_buf;
-	int write_cnt;
 	struct work_struct SAK_work;
-	struct tty_port *port;
 } __randomize_layout;
 
 /* Each of a tty's open files has private_data pointing to tty_file_private */
@@ -259,9 +256,6 @@ struct tty_file_private {
 	struct file *file;
 	struct list_head list;
 };
-
-/* tty magic number */
-#define TTY_MAGIC		0x5401
 
 /**
  * DOC: TTY Struct Flags
@@ -422,8 +416,8 @@ unsigned int tty_chars_in_buffer(struct tty_struct *tty);
 unsigned int tty_write_room(struct tty_struct *tty);
 void tty_driver_flush_buffer(struct tty_struct *tty);
 void tty_unthrottle(struct tty_struct *tty);
-int tty_throttle_safe(struct tty_struct *tty);
-int tty_unthrottle_safe(struct tty_struct *tty);
+bool tty_throttle_safe(struct tty_struct *tty);
+bool tty_unthrottle_safe(struct tty_struct *tty);
 int tty_do_resize(struct tty_struct *tty, struct winsize *ws);
 int tty_get_icount(struct tty_struct *tty,
 		struct serial_icounter_struct *icount);
@@ -459,7 +453,7 @@ unsigned char tty_get_char_size(unsigned int cflag);
 unsigned char tty_get_frame_size(unsigned int cflag);
 
 void tty_termios_copy_hw(struct ktermios *new, const struct ktermios *old);
-int tty_termios_hw_change(const struct ktermios *a, const struct ktermios *b);
+bool tty_termios_hw_change(const struct ktermios *a, const struct ktermios *b);
 int tty_set_termios(struct tty_struct *tty, struct ktermios *kt);
 
 void tty_wakeup(struct tty_struct *tty);

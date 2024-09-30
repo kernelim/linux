@@ -1,2 +1,3 @@
-#4-
-0x692d17d5	ndo_dflt_bridge_getlink	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0x26274a5e	ndo_dflt_bridge_getlink	vmlinux	EXPORT_SYMBOL_GPL	
+

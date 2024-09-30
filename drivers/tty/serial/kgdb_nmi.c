@@ -304,7 +304,8 @@ static unsigned int kgdb_nmi_tty_write_room(struct tty_struct *tty)
 	return 2048;
 }
 
-static int kgdb_nmi_tty_write(struct tty_struct *tty, const unchar *buf, int c)
+static ssize_t kgdb_nmi_tty_write(struct tty_struct *tty, const u8 *buf,
+				  size_t c)
 {
 	int i;
 
@@ -355,7 +356,7 @@ int kgdb_register_nmi_console(void)
 
 	return 0;
 err_drv_reg:
-	put_tty_driver(kgdb_nmi_tty_driver);
+	tty_driver_kref_put(kgdb_nmi_tty_driver);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(kgdb_register_nmi_console);
@@ -373,7 +374,7 @@ int kgdb_unregister_nmi_console(void)
 		return ret;
 
 	tty_unregister_driver(kgdb_nmi_tty_driver);
-	put_tty_driver(kgdb_nmi_tty_driver);
+	tty_driver_kref_put(kgdb_nmi_tty_driver);
 
 	return 0;
 }

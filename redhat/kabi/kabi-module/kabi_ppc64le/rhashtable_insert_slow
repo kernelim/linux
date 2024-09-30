@@ -1,2 +1,3 @@
-#4-
-0xe2b3ef7e	rhashtable_insert_slow	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0x1f438d28	rhashtable_insert_slow	vmlinux	EXPORT_SYMBOL_GPL	
+

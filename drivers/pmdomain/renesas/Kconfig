@@ -4,6 +4,9 @@ if SOC_RENESAS
 config SYSC_RCAR
 	bool "System Controller support for R-Car" if COMPILE_TEST
 
+config SYSC_RCAR_GEN4
+	bool "System Controller support for R-Car Gen4" if COMPILE_TEST
+
 config SYSC_R8A77995
 	bool "System Controller support for R-Car D3" if COMPILE_TEST
 	select SYSC_RCAR
@@ -44,6 +47,10 @@ config SYSC_R8A77961
 	bool "System Controller support for R-Car M3-W+" if COMPILE_TEST
 	select SYSC_RCAR
 
+config SYSC_R8A779F0
+	bool "System Controller support for R-Car S4-8" if COMPILE_TEST
+	select SYSC_RCAR_GEN4
+
 config SYSC_R8A7792
 	bool "System Controller support for R-Car V2H" if COMPILE_TEST
 	select SYSC_RCAR
@@ -58,6 +65,7 @@ config SYSC_R8A77970
 
 config SYSC_R8A779A0
 	bool "System Controller support for R-Car V3U" if COMPILE_TEST
+	select SYSC_RCAR_GEN4
 
 config SYSC_RMOBILE
 	bool "System Controller support for R-Mobile" if COMPILE_TEST

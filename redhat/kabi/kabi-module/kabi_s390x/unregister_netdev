@@ -1,2 +1,3 @@
-#4-
-0xc6045d2c	unregister_netdev	vmlinux	EXPORT_SYMBOL	
+#5-
+0x80a5b0b2	unregister_netdev	vmlinux	EXPORT_SYMBOL	
+

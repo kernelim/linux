@@ -11,7 +11,7 @@
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
+#include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/thermal.h>
 #include <linux/nvmem-consumer.h>
@@ -354,6 +354,7 @@ static int imx_set_trip_temp(struct thermal_zone_device *tz, int trip_id,
 		return -EINVAL;
 
 	imx_set_alarm_temp(data, temp);
+	trips[IMX_TRIP_PASSIVE].temperature = temp;
 
 	pm_runtime_put(data->dev);
 

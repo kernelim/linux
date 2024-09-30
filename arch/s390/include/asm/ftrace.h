@@ -17,7 +17,6 @@
 
 void ftrace_caller(void);
 
-extern char ftrace_graph_caller_end;
 extern void *ftrace_func;
 
 struct dyn_arch_ftrace { };
@@ -40,6 +39,37 @@ int ftrace_init_nop(struct module *mod, struct dyn_ftrace *rec);
 static inline unsigned long ftrace_call_adjust(unsigned long addr)
 {
 	return addr;
+}
+
+struct ftrace_regs {
+	struct pt_regs regs;
+};
+
+static __always_inline struct pt_regs *arch_ftrace_get_regs(struct ftrace_regs *fregs)
+{
+	struct pt_regs *regs = &fregs->regs;
+
+	if (test_pt_regs_flag(regs, PIF_FTRACE_FULL_REGS))
+		return regs;
+	return NULL;
+}
+
+static __always_inline void ftrace_instruction_pointer_set(struct ftrace_regs *fregs,
+							   unsigned long ip)
+{
+	fregs->regs.psw.addr = ip;
+}
+
+/*
+ * When an ftrace registered caller is tracing a function that is
+ * also set by a register_ftrace_direct() call, it needs to be
+ * differentiated in the ftrace_caller trampoline. To do this,
+ * place the direct caller in the ORIG_GPR2 part of pt_regs. This
+ * tells the ftrace_caller that there's a direct caller.
+ */
+static inline void arch_ftrace_set_direct_caller(struct pt_regs *regs, unsigned long addr)
+{
+	regs->orig_gpr2 = addr;
 }
 
 /*

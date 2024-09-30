@@ -1,2 +1,3 @@
-#4-
-0x2b05635c	truncate_pagecache	vmlinux	EXPORT_SYMBOL	
+#5-
+0x2ccdc047	truncate_pagecache	vmlinux	EXPORT_SYMBOL	
+

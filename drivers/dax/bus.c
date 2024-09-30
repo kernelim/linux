@@ -14,6 +14,18 @@ static struct class *dax_class;
 
 static DEFINE_MUTEX(dax_bus_lock);
 
+/*
+ * All changes to the dax region configuration occur with this lock held
+ * for write.
+ */
+DECLARE_RWSEM(dax_region_rwsem);
+
+/*
+ * All changes to the dax device configuration occur with this lock held
+ * for write.
+ */
+DECLARE_RWSEM(dax_dev_rwsem);
+
 #define DAX_NAME_LEN 30
 struct dax_id {
 	struct list_head list;
@@ -105,7 +117,7 @@ static ssize_t do_id_store(struct device_driver *drv, const char *buf,
 		if (action == ID_ADD) {
 			dax_id = kzalloc(sizeof(*dax_id), GFP_KERNEL);
 			if (dax_id) {
-				strncpy(dax_id->dev_name, buf, DAX_NAME_LEN);
+				strscpy(dax_id->dev_name, buf, DAX_NAME_LEN);
 				list_add(&dax_id->list, &dax_drv->ids);
 			} else
 				rc = -ENOMEM;
@@ -182,7 +194,7 @@ static u64 dev_dax_size(struct dev_dax *dev_dax)
 	u64 size = 0;
 	int i;
 
-	device_lock_assert(&dev_dax->dev);
+	lockdep_assert_held(&dax_dev_rwsem);
 
 	for (i = 0; i < dev_dax->nr_range; i++)
 		size += range_len(&dev_dax->ranges[i].range);
@@ -196,8 +208,15 @@ static int dax_bus_probe(struct device *dev)
 	struct dev_dax *dev_dax = to_dev_dax(dev);
 	struct dax_region *dax_region = dev_dax->region;
 	int rc;
+	u64 size;
 
-	if (dev_dax_size(dev_dax) == 0 || dev_dax->id < 0)
+	rc = down_read_interruptible(&dax_dev_rwsem);
+	if (rc)
+		return rc;
+	size = dev_dax_size(dev_dax);
+	up_read(&dax_dev_rwsem);
+
+	if (size == 0 || dev_dax->id < 0)
 		return -ENXIO;
 
 	rc = dax_drv->probe(dev_dax);
@@ -224,7 +243,7 @@ static void dax_bus_remove(struct device *dev)
 		dax_drv->remove(dev_dax);
 }
 
-static struct bus_type dax_bus_type = {
+static const struct bus_type dax_bus_type = {
 	.name = "dax",
 	.uevent = dax_bus_uevent,
 	.match = dax_bus_match,
@@ -252,7 +271,7 @@ static ssize_t id_show(struct device *dev,
 {
 	struct dax_region *dax_region = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%d\n", dax_region->id);
+	return sysfs_emit(buf, "%d\n", dax_region->id);
 }
 static DEVICE_ATTR_RO(id);
 
@@ -261,8 +280,8 @@ static ssize_t region_size_show(struct device *dev,
 {
 	struct dax_region *dax_region = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%llu\n", (unsigned long long)
-			resource_size(&dax_region->res));
+	return sysfs_emit(buf, "%llu\n",
+			  (unsigned long long)resource_size(&dax_region->res));
 }
 static struct device_attribute dev_attr_region_size = __ATTR(size, 0444,
 		region_size_show, NULL);
@@ -272,7 +291,7 @@ static ssize_t region_align_show(struct device *dev,
 {
 	struct dax_region *dax_region = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%u\n", dax_region->align);
+	return sysfs_emit(buf, "%u\n", dax_region->align);
 }
 static struct device_attribute dev_attr_region_align =
 		__ATTR(align, 0400, region_align_show, NULL);
@@ -285,7 +304,7 @@ static unsigned long long dax_region_avail_size(struct dax_region *dax_region)
 	resource_size_t size = resource_size(&dax_region->res);
 	struct resource *res;
 
-	device_lock_assert(dax_region->dev);
+	lockdep_assert_held(&dax_region_rwsem);
 
 	for_each_dax_region_resource(dax_region, res)
 		size -= resource_size(res);
@@ -297,12 +316,15 @@ static ssize_t available_size_show(struct device *dev,
 {
 	struct dax_region *dax_region = dev_get_drvdata(dev);
 	unsigned long long size;
+	int rc;
 
-	device_lock(dev);
+	rc = down_read_interruptible(&dax_region_rwsem);
+	if (rc)
+		return rc;
 	size = dax_region_avail_size(dax_region);
-	device_unlock(dev);
+	up_read(&dax_region_rwsem);
 
-	return sprintf(buf, "%llu\n", size);
+	return sysfs_emit(buf, "%llu\n", size);
 }
 static DEVICE_ATTR_RO(available_size);
 
@@ -316,10 +338,12 @@ static ssize_t seed_show(struct device *dev,
 	if (is_static(dax_region))
 		return -EINVAL;
 
-	device_lock(dev);
+	rc = down_read_interruptible(&dax_region_rwsem);
+	if (rc)
+		return rc;
 	seed = dax_region->seed;
-	rc = sprintf(buf, "%s\n", seed ? dev_name(seed) : "");
-	device_unlock(dev);
+	rc = sysfs_emit(buf, "%s\n", seed ? dev_name(seed) : "");
+	up_read(&dax_region_rwsem);
 
 	return rc;
 }
@@ -335,13 +359,17 @@ static ssize_t create_show(struct device *dev,
 	if (is_static(dax_region))
 		return -EINVAL;
 
-	device_lock(dev);
+	rc = down_read_interruptible(&dax_region_rwsem);
+	if (rc)
+		return rc;
 	youngest = dax_region->youngest;
-	rc = sprintf(buf, "%s\n", youngest ? dev_name(youngest) : "");
-	device_unlock(dev);
+	rc = sysfs_emit(buf, "%s\n", youngest ? dev_name(youngest) : "");
+	up_read(&dax_region_rwsem);
 
 	return rc;
 }
+
+static struct dev_dax *__devm_create_dev_dax(struct dev_dax_data *data);
 
 static ssize_t create_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t len)
@@ -360,7 +388,9 @@ static ssize_t create_store(struct device *dev, struct device_attribute *attr,
 	if (val != 1)
 		return -EINVAL;
 
-	device_lock(dev);
+	rc = down_write_killable(&dax_region_rwsem);
+	if (rc)
+		return rc;
 	avail = dax_region_avail_size(dax_region);
 	if (avail == 0)
 		rc = -ENOSPC;
@@ -369,8 +399,9 @@ static ssize_t create_store(struct device *dev, struct device_attribute *attr,
 			.dax_region = dax_region,
 			.size = 0,
 			.id = -1,
+			.memmap_on_memory = false,
 		};
-		struct dev_dax *dev_dax = devm_create_dev_dax(&data);
+		struct dev_dax *dev_dax = __devm_create_dev_dax(&data);
 
 		if (IS_ERR(dev_dax))
 			rc = PTR_ERR(dev_dax);
@@ -388,7 +419,7 @@ static ssize_t create_store(struct device *dev, struct device_attribute *attr,
 			rc = len;
 		}
 	}
-	device_unlock(dev);
+	up_write(&dax_region_rwsem);
 
 	return rc;
 }
@@ -418,7 +449,7 @@ static void trim_dev_dax_range(struct dev_dax *dev_dax)
 	struct range *range = &dev_dax->ranges[i].range;
 	struct dax_region *dax_region = dev_dax->region;
 
-	device_lock_assert(dax_region->dev);
+	lockdep_assert_held_write(&dax_region_rwsem);
 	dev_dbg(&dev_dax->dev, "delete range[%d]: %#llx:%#llx\n", i,
 		(unsigned long long)range->start,
 		(unsigned long long)range->end);
@@ -442,37 +473,68 @@ static void unregister_dev_dax(void *dev)
 
 	dev_dbg(dev, "%s\n", __func__);
 
+	down_write(&dax_region_rwsem);
 	kill_dev_dax(dev_dax);
-	free_dev_dax_ranges(dev_dax);
 	device_del(dev);
+	free_dev_dax_ranges(dev_dax);
 	put_device(dev);
+	up_write(&dax_region_rwsem);
+}
+
+static void dax_region_free(struct kref *kref)
+{
+	struct dax_region *dax_region;
+
+	dax_region = container_of(kref, struct dax_region, kref);
+	kfree(dax_region);
+}
+
+static void dax_region_put(struct dax_region *dax_region)
+{
+	kref_put(&dax_region->kref, dax_region_free);
 }
 
 /* a return value >= 0 indicates this invocation invalidated the id */
 static int __free_dev_dax_id(struct dev_dax *dev_dax)
 {
-	struct dax_region *dax_region = dev_dax->region;
-	struct device *dev = &dev_dax->dev;
+	struct dax_region *dax_region;
 	int rc = dev_dax->id;
 
-	device_lock_assert(dev);
+	lockdep_assert_held_write(&dax_dev_rwsem);
 
-	if (is_static(dax_region) || dev_dax->id < 0)
+	if (!dev_dax->dyn_id || dev_dax->id < 0)
 		return -1;
+	dax_region = dev_dax->region;
 	ida_free(&dax_region->ida, dev_dax->id);
+	dax_region_put(dax_region);
 	dev_dax->id = -1;
 	return rc;
 }
 
 static int free_dev_dax_id(struct dev_dax *dev_dax)
 {
-	struct device *dev = &dev_dax->dev;
 	int rc;
 
-	device_lock(dev);
+	rc = down_write_killable(&dax_dev_rwsem);
+	if (rc)
+		return rc;
 	rc = __free_dev_dax_id(dev_dax);
-	device_unlock(dev);
+	up_write(&dax_dev_rwsem);
 	return rc;
+}
+
+static int alloc_dev_dax_id(struct dev_dax *dev_dax)
+{
+	struct dax_region *dax_region = dev_dax->region;
+	int id;
+
+	id = ida_alloc(&dax_region->ida, GFP_KERNEL);
+	if (id < 0)
+		return id;
+	kref_get(&dax_region->kref);
+	dev_dax->dyn_id = true;
+	dev_dax->id = id;
+	return id;
 }
 
 static ssize_t delete_store(struct device *dev, struct device_attribute *attr,
@@ -494,6 +556,7 @@ static ssize_t delete_store(struct device *dev, struct device_attribute *attr,
 	device_lock(dev);
 	device_lock(victim);
 	dev_dax = to_dev_dax(victim);
+	down_write(&dax_dev_rwsem);
 	if (victim->driver || dev_dax_size(dev_dax))
 		rc = -EBUSY;
 	else {
@@ -513,6 +576,7 @@ static ssize_t delete_store(struct device *dev, struct device_attribute *attr,
 		} else
 			rc = -EBUSY;
 	}
+	up_write(&dax_dev_rwsem);
 	device_unlock(victim);
 
 	/* won the race to invalidate the device, clean it up */
@@ -561,20 +625,6 @@ static const struct attribute_group *dax_region_attribute_groups[] = {
 	&dax_region_attribute_group,
 	NULL,
 };
-
-static void dax_region_free(struct kref *kref)
-{
-	struct dax_region *dax_region;
-
-	dax_region = container_of(kref, struct dax_region, kref);
-	kfree(dax_region);
-}
-
-void dax_region_put(struct dax_region *dax_region)
-{
-	kref_put(&dax_region->kref, dax_region_free);
-}
-EXPORT_SYMBOL_GPL(dax_region_put);
 
 static void dax_region_unregister(void *region)
 {
@@ -627,7 +677,6 @@ struct dax_region *alloc_dax_region(struct device *parent, int region_id,
 		return NULL;
 	}
 
-	kref_get(&dax_region->kref);
 	if (devm_add_action_or_reset(parent, dax_region_unregister, dax_region))
 		return NULL;
 	return dax_region;
@@ -637,10 +686,12 @@ EXPORT_SYMBOL_GPL(alloc_dax_region);
 static void dax_mapping_release(struct device *dev)
 {
 	struct dax_mapping *mapping = to_dax_mapping(dev);
-	struct dev_dax *dev_dax = to_dev_dax(dev->parent);
+	struct device *parent = dev->parent;
+	struct dev_dax *dev_dax = to_dev_dax(parent);
 
 	ida_free(&dev_dax->ida, mapping->id);
 	kfree(mapping);
+	put_device(parent);
 }
 
 static void unregister_dax_mapping(void *data)
@@ -648,41 +699,35 @@ static void unregister_dax_mapping(void *data)
 	struct device *dev = data;
 	struct dax_mapping *mapping = to_dax_mapping(dev);
 	struct dev_dax *dev_dax = to_dev_dax(dev->parent);
-	struct dax_region *dax_region = dev_dax->region;
 
 	dev_dbg(dev, "%s\n", __func__);
-
-	device_lock_assert(dax_region->dev);
 
 	dev_dax->ranges[mapping->range_id].mapping = NULL;
 	mapping->range_id = -1;
 
-	device_del(dev);
-	put_device(dev);
+	device_unregister(dev);
 }
 
 static struct dev_dax_range *get_dax_range(struct device *dev)
 {
 	struct dax_mapping *mapping = to_dax_mapping(dev);
 	struct dev_dax *dev_dax = to_dev_dax(dev->parent);
-	struct dax_region *dax_region = dev_dax->region;
+	int rc;
 
-	device_lock(dax_region->dev);
+	rc = down_write_killable(&dax_region_rwsem);
+	if (rc)
+		return NULL;
 	if (mapping->range_id < 0) {
-		device_unlock(dax_region->dev);
+		up_write(&dax_region_rwsem);
 		return NULL;
 	}
 
 	return &dev_dax->ranges[mapping->range_id];
 }
 
-static void put_dax_range(struct dev_dax_range *dax_range)
+static void put_dax_range(void)
 {
-	struct dax_mapping *mapping = dax_range->mapping;
-	struct dev_dax *dev_dax = to_dev_dax(mapping->dev.parent);
-	struct dax_region *dax_region = dev_dax->region;
-
-	device_unlock(dax_region->dev);
+	up_write(&dax_region_rwsem);
 }
 
 static ssize_t start_show(struct device *dev,
@@ -694,8 +739,8 @@ static ssize_t start_show(struct device *dev,
 	dax_range = get_dax_range(dev);
 	if (!dax_range)
 		return -ENXIO;
-	rc = sprintf(buf, "%#llx\n", dax_range->range.start);
-	put_dax_range(dax_range);
+	rc = sysfs_emit(buf, "%#llx\n", dax_range->range.start);
+	put_dax_range();
 
 	return rc;
 }
@@ -710,8 +755,8 @@ static ssize_t end_show(struct device *dev,
 	dax_range = get_dax_range(dev);
 	if (!dax_range)
 		return -ENXIO;
-	rc = sprintf(buf, "%#llx\n", dax_range->range.end);
-	put_dax_range(dax_range);
+	rc = sysfs_emit(buf, "%#llx\n", dax_range->range.end);
+	put_dax_range();
 
 	return rc;
 }
@@ -726,8 +771,8 @@ static ssize_t pgoff_show(struct device *dev,
 	dax_range = get_dax_range(dev);
 	if (!dax_range)
 		return -ENXIO;
-	rc = sprintf(buf, "%#lx\n", dax_range->pgoff);
-	put_dax_range(dax_range);
+	rc = sysfs_emit(buf, "%#lx\n", dax_range->pgoff);
+	put_dax_range();
 
 	return rc;
 }
@@ -761,7 +806,7 @@ static int devm_register_dax_mapping(struct dev_dax *dev_dax, int range_id)
 	struct device *dev;
 	int rc;
 
-	device_lock_assert(dax_region->dev);
+	lockdep_assert_held_write(&dax_region_rwsem);
 
 	if (dev_WARN_ONCE(&dev_dax->dev, !dax_region->dev->driver,
 				"region disabled\n"))
@@ -780,6 +825,7 @@ static int devm_register_dax_mapping(struct dev_dax *dev_dax, int range_id)
 	dev = &mapping->dev;
 	device_initialize(dev);
 	dev->parent = &dev_dax->dev;
+	get_device(dev->parent);
 	dev->type = &dax_mapping_type;
 	dev_set_name(dev, "mapping%d", mapping->id);
 	rc = device_add(dev);
@@ -806,7 +852,7 @@ static int alloc_dev_dax_range(struct dev_dax *dev_dax, u64 start,
 	struct resource *alloc;
 	int i, rc;
 
-	device_lock_assert(dax_region->dev);
+	lockdep_assert_held_write(&dax_region_rwsem);
 
 	/* handle the seed alloc special case */
 	if (!size) {
@@ -860,13 +906,12 @@ static int adjust_dev_dax_range(struct dev_dax *dev_dax, struct resource *res, r
 {
 	int last_range = dev_dax->nr_range - 1;
 	struct dev_dax_range *dax_range = &dev_dax->ranges[last_range];
-	struct dax_region *dax_region = dev_dax->region;
 	bool is_shrink = resource_size(res) > size;
 	struct range *range = &dax_range->range;
 	struct device *dev = &dev_dax->dev;
 	int rc;
 
-	device_lock_assert(dax_region->dev);
+	lockdep_assert_held_write(&dax_region_rwsem);
 
 	if (dev_WARN_ONCE(dev, !size, "deletion is handled by dev_dax_shrink\n"))
 		return -EINVAL;
@@ -892,12 +937,15 @@ static ssize_t size_show(struct device *dev,
 {
 	struct dev_dax *dev_dax = to_dev_dax(dev);
 	unsigned long long size;
+	int rc;
 
-	device_lock(dev);
+	rc = down_read_interruptible(&dax_dev_rwsem);
+	if (rc)
+		return rc;
 	size = dev_dax_size(dev_dax);
-	device_unlock(dev);
+	up_read(&dax_dev_rwsem);
 
-	return sprintf(buf, "%llu\n", size);
+	return sysfs_emit(buf, "%llu\n", size);
 }
 
 static bool alloc_is_aligned(struct dev_dax *dev_dax, resource_size_t size)
@@ -1065,17 +1113,27 @@ static ssize_t size_store(struct device *dev, struct device_attribute *attr,
 		return -EINVAL;
 	}
 
-	device_lock(dax_region->dev);
+	rc = down_write_killable(&dax_region_rwsem);
+	if (rc)
+		return rc;
 	if (!dax_region->dev->driver) {
-		device_unlock(dax_region->dev);
-		return -ENXIO;
+		rc = -ENXIO;
+		goto err_region;
 	}
-	device_lock(dev);
-	rc = dev_dax_resize(dax_region, dev_dax, val);
-	device_unlock(dev);
-	device_unlock(dax_region->dev);
+	rc = down_write_killable(&dax_dev_rwsem);
+	if (rc)
+		goto err_dev;
 
-	return rc == 0 ? len : rc;
+	rc = dev_dax_resize(dax_region, dev_dax, val);
+
+err_dev:
+	up_write(&dax_dev_rwsem);
+err_region:
+	up_write(&dax_region_rwsem);
+
+	if (rc == 0)
+		return len;
+	return rc;
 }
 static DEVICE_ATTR_RW(size);
 
@@ -1123,18 +1181,24 @@ static ssize_t mapping_store(struct device *dev, struct device_attribute *attr,
 		return rc;
 
 	rc = -ENXIO;
-	device_lock(dax_region->dev);
+	rc = down_write_killable(&dax_region_rwsem);
+	if (rc)
+		return rc;
 	if (!dax_region->dev->driver) {
-		device_unlock(dax_region->dev);
+		up_write(&dax_region_rwsem);
 		return rc;
 	}
-	device_lock(dev);
+	rc = down_write_killable(&dax_dev_rwsem);
+	if (rc) {
+		up_write(&dax_region_rwsem);
+		return rc;
+	}
 
 	to_alloc = range_len(&r);
 	if (alloc_is_aligned(dev_dax, to_alloc))
 		rc = alloc_dev_dax_range(dev_dax, r.start, to_alloc);
-	device_unlock(dev);
-	device_unlock(dax_region->dev);
+	up_write(&dax_dev_rwsem);
+	up_write(&dax_region_rwsem);
 
 	return rc == 0 ? len : rc;
 }
@@ -1145,7 +1209,7 @@ static ssize_t align_show(struct device *dev,
 {
 	struct dev_dax *dev_dax = to_dev_dax(dev);
 
-	return sprintf(buf, "%d\n", dev_dax->align);
+	return sysfs_emit(buf, "%d\n", dev_dax->align);
 }
 
 static ssize_t dev_dax_validate_align(struct dev_dax *dev_dax)
@@ -1181,13 +1245,19 @@ static ssize_t align_store(struct device *dev, struct device_attribute *attr,
 	if (!dax_align_valid(val))
 		return -EINVAL;
 
-	device_lock(dax_region->dev);
+	rc = down_write_killable(&dax_region_rwsem);
+	if (rc)
+		return rc;
 	if (!dax_region->dev->driver) {
-		device_unlock(dax_region->dev);
+		up_write(&dax_region_rwsem);
 		return -ENXIO;
 	}
 
-	device_lock(dev);
+	rc = down_write_killable(&dax_dev_rwsem);
+	if (rc) {
+		up_write(&dax_region_rwsem);
+		return rc;
+	}
 	if (dev->driver) {
 		rc = -EBUSY;
 		goto out_unlock;
@@ -1199,8 +1269,8 @@ static ssize_t align_store(struct device *dev, struct device_attribute *attr,
 	if (rc)
 		dev_dax->align = align_save;
 out_unlock:
-	device_unlock(dev);
-	device_unlock(dax_region->dev);
+	up_write(&dax_dev_rwsem);
+	up_write(&dax_region_rwsem);
 	return rc == 0 ? len : rc;
 }
 static DEVICE_ATTR_RW(align);
@@ -1217,7 +1287,7 @@ static ssize_t target_node_show(struct device *dev,
 {
 	struct dev_dax *dev_dax = to_dev_dax(dev);
 
-	return sprintf(buf, "%d\n", dev_dax_target_node(dev_dax));
+	return sysfs_emit(buf, "%d\n", dev_dax_target_node(dev_dax));
 }
 static DEVICE_ATTR_RO(target_node);
 
@@ -1233,7 +1303,7 @@ static ssize_t resource_show(struct device *dev,
 	else
 		start = dev_dax->ranges[0].range.start;
 
-	return sprintf(buf, "%#llx\n", start);
+	return sysfs_emit(buf, "%#llx\n", start);
 }
 static DEVICE_ATTR(resource, 0400, resource_show, NULL);
 
@@ -1244,16 +1314,58 @@ static ssize_t modalias_show(struct device *dev, struct device_attribute *attr,
 	 * We only ever expect to handle device-dax instances, i.e. the
 	 * @type argument to MODULE_ALIAS_DAX_DEVICE() is always zero
 	 */
-	return sprintf(buf, DAX_DEVICE_MODALIAS_FMT "\n", 0);
+	return sysfs_emit(buf, DAX_DEVICE_MODALIAS_FMT "\n", 0);
 }
 static DEVICE_ATTR_RO(modalias);
 
 static ssize_t numa_node_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", dev_to_node(dev));
+	return sysfs_emit(buf, "%d\n", dev_to_node(dev));
 }
 static DEVICE_ATTR_RO(numa_node);
+
+static ssize_t memmap_on_memory_show(struct device *dev,
+				     struct device_attribute *attr, char *buf)
+{
+	struct dev_dax *dev_dax = to_dev_dax(dev);
+
+	return sysfs_emit(buf, "%d\n", dev_dax->memmap_on_memory);
+}
+
+static ssize_t memmap_on_memory_store(struct device *dev,
+				      struct device_attribute *attr,
+				      const char *buf, size_t len)
+{
+	struct dev_dax *dev_dax = to_dev_dax(dev);
+	bool val;
+	int rc;
+
+	rc = kstrtobool(buf, &val);
+	if (rc)
+		return rc;
+
+	if (val == true && !mhp_supports_memmap_on_memory()) {
+		dev_dbg(dev, "memmap_on_memory is not available\n");
+		return -EOPNOTSUPP;
+	}
+
+	rc = down_write_killable(&dax_dev_rwsem);
+	if (rc)
+		return rc;
+
+	if (dev_dax->memmap_on_memory != val && dev->driver &&
+	    to_dax_drv(dev->driver)->type == DAXDRV_KMEM_TYPE) {
+		up_write(&dax_dev_rwsem);
+		return -EBUSY;
+	}
+
+	dev_dax->memmap_on_memory = val;
+	up_write(&dax_dev_rwsem);
+
+	return len;
+}
+static DEVICE_ATTR_RW(memmap_on_memory);
 
 static umode_t dev_dax_visible(struct kobject *kobj, struct attribute *a, int n)
 {
@@ -1281,6 +1393,7 @@ static struct attribute *dev_dax_attributes[] = {
 	&dev_attr_align.attr,
 	&dev_attr_resource.attr,
 	&dev_attr_numa_node.attr,
+	&dev_attr_memmap_on_memory.attr,
 	NULL,
 };
 
@@ -1297,12 +1410,10 @@ static const struct attribute_group *dax_attribute_groups[] = {
 static void dev_dax_release(struct device *dev)
 {
 	struct dev_dax *dev_dax = to_dev_dax(dev);
-	struct dax_region *dax_region = dev_dax->region;
 	struct dax_device *dax_dev = dev_dax->dax_dev;
 
 	put_dax(dax_dev);
 	free_dev_dax_id(dev_dax);
-	dax_region_put(dax_region);
 	kfree(dev_dax->pgmap);
 	kfree(dev_dax);
 }
@@ -1312,7 +1423,7 @@ static const struct device_type dev_dax_type = {
 	.groups = dax_attribute_groups,
 };
 
-struct dev_dax *devm_create_dev_dax(struct dev_dax_data *data)
+static struct dev_dax *__devm_create_dev_dax(struct dev_dax_data *data)
 {
 	struct dax_region *dax_region = data->dax_region;
 	struct device *parent = dax_region->dev;
@@ -1326,6 +1437,7 @@ struct dev_dax *devm_create_dev_dax(struct dev_dax_data *data)
 	if (!dev_dax)
 		return ERR_PTR(-ENOMEM);
 
+	dev_dax->region = dax_region;
 	if (is_static(dax_region)) {
 		if (dev_WARN_ONCE(parent, data->id < 0,
 				"dynamic id specified to static region\n")) {
@@ -1341,13 +1453,11 @@ struct dev_dax *devm_create_dev_dax(struct dev_dax_data *data)
 			goto err_id;
 		}
 
-		rc = ida_alloc(&dax_region->ida, GFP_KERNEL);
+		rc = alloc_dev_dax_id(dev_dax);
 		if (rc < 0)
 			goto err_id;
-		dev_dax->id = rc;
 	}
 
-	dev_dax->region = dax_region;
 	dev = &dev_dax->dev;
 	device_initialize(dev);
 	dev_set_name(dev, "dax%d.%d", dax_region->id, dev_dax->id);
@@ -1388,7 +1498,8 @@ struct dev_dax *devm_create_dev_dax(struct dev_dax_data *data)
 	dev_dax->target_node = dax_region->target_node;
 	dev_dax->align = dax_region->align;
 	ida_init(&dev_dax->ida);
-	kref_get(&dax_region->kref);
+
+	dev_dax->memmap_on_memory = data->memmap_on_memory;
 
 	inode = dax_inode(dax_dev);
 	dev->devt = inode->i_rdev;
@@ -1429,6 +1540,17 @@ err_id:
 	kfree(dev_dax);
 
 	return ERR_PTR(rc);
+}
+
+struct dev_dax *devm_create_dev_dax(struct dev_dax_data *data)
+{
+	struct dev_dax *dev_dax;
+
+	down_write(&dax_region_rwsem);
+	dev_dax = __devm_create_dev_dax(data);
+	up_write(&dax_region_rwsem);
+
+	return dev_dax;
 }
 EXPORT_SYMBOL_GPL(devm_create_dev_dax);
 

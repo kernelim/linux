@@ -941,6 +941,12 @@ static void do_output(struct datapath *dp, struct sk_buff *skb, int out_port,
 				pskb_trim(skb, ovs_mac_header_len(key));
 		}
 
+		/* Need to set the pkt_type to involve the routing layer.  The
+		 * packet movement through the OVS datapath doesn't generally
+		 * use routing, but this is needed for tunnel cases.
+		 */
+		skb->pkt_type = PACKET_OUTGOING;
+
 		if (likely(!mru ||
 		           (skb->len <= mru + vport->dev->hard_header_len))) {
 			ovs_vport_send(vport, skb, ovs_key_mac_proto(key));
@@ -1313,7 +1319,7 @@ static void execute_psample(struct datapath *dp, struct sk_buff *skb,
 			    const struct nlattr *attr)
 {
 	struct psample_group psample_group = {};
-	struct rh_psample_metadata md = {};
+	struct psample_metadata md = {};
 	const struct nlattr *a;
 	u32 rate;
 	int rem;
@@ -1338,7 +1344,7 @@ static void execute_psample(struct datapath *dp, struct sk_buff *skb,
 
 	rate = OVS_CB(skb)->probability ? OVS_CB(skb)->probability : U32_MAX;
 
-	rh_psample_sample_packet(&psample_group, skb, rate, &md);
+	psample_sample_packet(&psample_group, skb, rate, &md);
 }
 #else
 static void execute_psample(struct datapath *dp, struct sk_buff *skb,

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 
+#include <asm/ctl_reg.h>
 #include <linux/pgtable.h>
 #include <asm/abs_lowcore.h>
 

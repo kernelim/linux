@@ -1,2 +1,3 @@
-#4-
-0x80c52ea5	seq_puts	vmlinux	EXPORT_SYMBOL	
+#5-
+0x7ca82fd5	seq_puts	vmlinux	EXPORT_SYMBOL	
+

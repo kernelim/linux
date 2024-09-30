@@ -10,17 +10,23 @@
 #include <linux/acpi.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/pm.h>
 
 #include <linux/pinctrl/pinctrl.h>
 
 #include "pinctrl-intel.h"
 
-#define ICL_PAD_OWN	0x020
-#define ICL_PADCFGLOCK	0x080
-#define ICL_HOSTSW_OWN	0x0b0
-#define ICL_GPI_IS	0x100
-#define ICL_LP_GPI_IE	0x110
-#define ICL_N_GPI_IE	0x120
+#define ICL_LP_PAD_OWN		0x020
+#define ICL_LP_PADCFGLOCK	0x080
+#define ICL_LP_HOSTSW_OWN	0x0b0
+#define ICL_LP_GPI_IS		0x100
+#define ICL_LP_GPI_IE		0x110
+
+#define ICL_N_PAD_OWN		0x020
+#define ICL_N_PADCFGLOCK	0x080
+#define ICL_N_HOSTSW_OWN	0x0b0
+#define ICL_N_GPI_IS		0x100
+#define ICL_N_GPI_IE		0x120
 
 #define ICL_GPP(r, s, e, g)				\
 	{						\
@@ -30,25 +36,11 @@
 		.gpio_base = (g),			\
 	}
 
-#define ICL_COMMUNITY(b, s, e, ie, g)			\
-	{						\
-		.barno = (b),				\
-		.padown_offset = ICL_PAD_OWN,		\
-		.padcfglock_offset = ICL_PADCFGLOCK,	\
-		.hostown_offset = ICL_HOSTSW_OWN,	\
-		.is_offset = ICL_GPI_IS,		\
-		.ie_offset = (ie),			\
-		.pin_base = (s),			\
-		.npins = ((e) - (s) + 1),		\
-		.gpps = (g),				\
-		.ngpps = ARRAY_SIZE(g),			\
-	}
-
 #define ICL_LP_COMMUNITY(b, s, e, g)			\
-	ICL_COMMUNITY(b, s, e, ICL_LP_GPI_IE, g)
+	INTEL_COMMUNITY_GPPS(b, s, e, g, ICL_LP)
 
 #define ICL_N_COMMUNITY(b, s, e, g)			\
-	ICL_COMMUNITY(b, s, e, ICL_N_GPI_IE, g)
+	INTEL_COMMUNITY_GPPS(b, s, e, g, ICL_N)
 
 /* Ice Lake-LP */
 static const struct pinctrl_pin_desc icllp_pins[] = {
@@ -677,8 +669,6 @@ static const struct intel_pinctrl_soc_data icln_soc_data = {
 	.ncommunities = ARRAY_SIZE(icln_communities),
 };
 
-static INTEL_PINCTRL_PM_OPS(icl_pinctrl_pm_ops);
-
 static const struct acpi_device_id icl_pinctrl_acpi_match[] = {
 	{ "INT3455", (kernel_ulong_t)&icllp_soc_data },
 	{ "INT34C3", (kernel_ulong_t)&icln_soc_data },
@@ -691,7 +681,7 @@ static struct platform_driver icl_pinctrl_driver = {
 	.driver = {
 		.name = "icelake-pinctrl",
 		.acpi_match_table = icl_pinctrl_acpi_match,
-		.pm = &icl_pinctrl_pm_ops,
+		.pm = pm_sleep_ptr(&intel_pinctrl_pm_ops),
 	},
 };
 module_platform_driver(icl_pinctrl_driver);

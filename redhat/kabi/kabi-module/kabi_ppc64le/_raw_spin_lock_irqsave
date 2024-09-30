@@ -1,2 +1,3 @@
-#4-
-0x34db050b	_raw_spin_lock_irqsave	vmlinux	EXPORT_SYMBOL	
+#5-
+0xefeb37ff	_raw_spin_lock_irqsave	vmlinux	EXPORT_SYMBOL	
+

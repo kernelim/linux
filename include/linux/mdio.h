@@ -115,6 +115,16 @@ int mdio_driver_register(struct mdio_driver *drv);
 void mdio_driver_unregister(struct mdio_driver *drv);
 int mdio_device_bus_match(struct device *dev, struct device_driver *drv);
 
+static inline void mdio_device_get(struct mdio_device *mdiodev)
+{
+	get_device(&mdiodev->dev);
+}
+
+static inline void mdio_device_put(struct mdio_device *mdiodev)
+{
+	mdio_device_free(mdiodev);
+}
+
 static inline bool mdio_phy_id_is_c45(int phy_id)
 {
 	return (phy_id & MDIO_PHY_ID_C45) && !(phy_id & ~MDIO_PHY_ID_C45_MASK);
@@ -419,7 +429,7 @@ static inline u32 linkmode_adv_to_mii_t1_adv_m_t(unsigned long *advertising)
  * A function that translates value of following registers to the linkmode:
  * IEEE 802.3-2018 45.2.3.10 "EEE control and capability 1" register (3.20)
  * IEEE 802.3-2018 45.2.7.13 "EEE advertisement 1" register (7.60)
- * IEEE 802.3-2018 45.2.7.14 "EEE "link partner ability 1 register (7.61)
+ * IEEE 802.3-2018 45.2.7.14 "EEE link partner ability 1" register (7.61)
  */
 static inline void mii_eee_cap1_mod_linkmode_t(unsigned long *adv, u32 val)
 {
@@ -493,6 +503,45 @@ static inline u32 linkmode_adv_to_mii_10base_t1_t(unsigned long *adv)
 		result |= MDIO_AN_10BT1_AN_CTRL_ADV_EEE_T1L;
 
 	return result;
+}
+
+/**
+ * mii_c73_mod_linkmode - convert a Clause 73 advertisement to linkmodes
+ * @adv: linkmode advertisement setting
+ * @lpa: array of three u16s containing the advertisement
+ *
+ * Convert an IEEE 802.3 Clause 73 advertisement to ethtool link modes.
+ */
+static inline void mii_c73_mod_linkmode(unsigned long *adv, u16 *lpa)
+{
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_Pause_BIT,
+			 adv, lpa[0] & MDIO_AN_C73_0_PAUSE);
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_Asym_Pause_BIT,
+			 adv, lpa[0] & MDIO_AN_C73_0_ASM_DIR);
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_1000baseKX_Full_BIT,
+			 adv, lpa[1] & MDIO_AN_C73_1_1000BASE_KX);
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_10000baseKX4_Full_BIT,
+			 adv, lpa[1] & MDIO_AN_C73_1_10GBASE_KX4);
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_40000baseKR4_Full_BIT,
+			 adv, lpa[1] & MDIO_AN_C73_1_40GBASE_KR4);
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_40000baseCR4_Full_BIT,
+			 adv, lpa[1] & MDIO_AN_C73_1_40GBASE_CR4);
+	/* 100GBASE_CR10 and 100GBASE_KP4 not implemented */
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_100000baseKR4_Full_BIT,
+			 adv, lpa[1] & MDIO_AN_C73_1_100GBASE_KR4);
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_100000baseCR4_Full_BIT,
+			 adv, lpa[1] & MDIO_AN_C73_1_100GBASE_CR4);
+	/* 25GBASE_R_S not implemented */
+	/* The 25GBASE_R bit can be used for 25Gbase KR or CR modes */
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_25000baseKR_Full_BIT,
+			 adv, lpa[1] & MDIO_AN_C73_1_25GBASE_R);
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_25000baseCR_Full_BIT,
+			 adv, lpa[1] & MDIO_AN_C73_1_25GBASE_R);
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_10000baseKR_Full_BIT,
+			 adv, lpa[1] & MDIO_AN_C73_1_10GBASE_KR);
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_2500baseX_Full_BIT,
+			 adv, lpa[2] & MDIO_AN_C73_2_2500BASE_KX);
+	/* 5GBASE_KR not implemented */
 }
 
 int __mdiobus_read(struct mii_bus *bus, int addr, u32 regnum);
@@ -597,6 +646,19 @@ static inline int mdiodev_c45_modify_changed(struct mdio_device *mdiodev,
 {
 	return mdiobus_c45_modify_changed(mdiodev->bus, mdiodev->addr, devad,
 					  regnum, mask, set);
+}
+
+static inline int mdiodev_c45_read(struct mdio_device *mdiodev, int devad,
+				   u16 regnum)
+{
+	return mdiobus_c45_read(mdiodev->bus, mdiodev->addr, devad, regnum);
+}
+
+static inline int mdiodev_c45_write(struct mdio_device *mdiodev, u32 devad,
+				    u16 regnum, u16 val)
+{
+	return mdiobus_c45_write(mdiodev->bus, mdiodev->addr, devad, regnum,
+				 val);
 }
 
 int mdiobus_register_device(struct mdio_device *mdiodev);

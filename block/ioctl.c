@@ -89,7 +89,7 @@ static int blk_ioctl_discard(struct block_device *bdev, blk_mode_t mode,
 		unsigned long arg)
 {
 	uint64_t range[2];
-	uint64_t start, len;
+	uint64_t start, len, end;
 	struct inode *inode = bdev->bd_inode;
 	int err;
 
@@ -110,7 +110,8 @@ static int blk_ioctl_discard(struct block_device *bdev, blk_mode_t mode,
 	if (len & 511)
 		return -EINVAL;
 
-	if (start + len > bdev_nr_bytes(bdev))
+	if (check_add_overflow(start, len, &end) ||
+	    end > bdev_nr_bytes(bdev))
 		return -EINVAL;
 
 	filemap_invalidate_lock(inode->i_mapping);
@@ -367,7 +368,15 @@ static int blkdev_flushbuf(struct block_device *bdev, unsigned cmd,
 {
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
-	fsync_bdev(bdev);
+
+	mutex_lock(&bdev->bd_holder_lock);
+	if (bdev->bd_holder_ops && bdev->bd_holder_ops->sync)
+		bdev->bd_holder_ops->sync(bdev);
+	else {
+		mutex_unlock(&bdev->bd_holder_lock);
+		sync_blockdev(bdev);
+	}
+
 	invalidate_bdev(bdev);
 	return 0;
 }
@@ -461,6 +470,7 @@ static int blkdev_bszset(struct block_device *bdev, blk_mode_t mode,
 		int __user *argp)
 {
 	int ret, n;
+	struct file *file;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
@@ -472,11 +482,11 @@ static int blkdev_bszset(struct block_device *bdev, blk_mode_t mode,
 	if (mode & BLK_OPEN_EXCL)
 		return set_blocksize(bdev, n);
 
-	if (IS_ERR(blkdev_get_by_dev(bdev->bd_dev, mode, &bdev, NULL)))
+	file = bdev_file_open_by_dev(bdev->bd_dev, mode, &bdev, NULL);
+	if (IS_ERR(file))
 		return -EBUSY;
 	ret = set_blocksize(bdev, n);
-	blkdev_put(bdev, &bdev);
-
+	fput(file);
 	return ret;
 }
 

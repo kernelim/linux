@@ -179,7 +179,7 @@ static void expr_call_ops_eval(const struct nft_expr *expr,
 			       struct nft_regs *regs,
 			       struct nft_pktinfo *pkt)
 {
-#ifdef CONFIG_RETPOLINE
+#ifdef CONFIG_MITIGATION_RETPOLINE
 	unsigned long e = (unsigned long)expr->ops->eval;
 #define X(e, fun) \
 	do { if ((e) == (unsigned long)(fun)) \
@@ -196,7 +196,7 @@ static void expr_call_ops_eval(const struct nft_expr *expr,
 	X(e, nft_rt_get_eval);
 	X(e, nft_bitwise_eval);
 #undef  X
-#endif /* CONFIG_RETPOLINE */
+#endif /* CONFIG_MITIGATION_RETPOLINE */
 	expr->ops->eval(expr, regs, pkt);
 }
 

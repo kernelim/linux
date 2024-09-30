@@ -1,2 +1,3 @@
-#4-
-0x2d660fa2	set_cpus_allowed_ptr	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0x40e69669	set_cpus_allowed_ptr	vmlinux	EXPORT_SYMBOL_GPL	
+

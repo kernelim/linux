@@ -1,2 +1,3 @@
-#4-
-0xf8014b08	gnss_put_device	drivers/gnss/gnss	EXPORT_SYMBOL_GPL	
+#5-
+0xd8bb02e0	gnss_put_device	drivers/gnss/gnss	EXPORT_SYMBOL_GPL	
+

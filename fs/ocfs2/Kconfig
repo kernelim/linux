@@ -2,11 +2,13 @@
 config OCFS2_FS
 	tristate "OCFS2 file system support"
 	depends on INET && SYSFS && CONFIGFS_FS
+	select BUFFER_HEAD
 	select JBD2
 	select CRC32
 	select QUOTA
 	select QUOTA_TREE
 	select FS_POSIX_ACL
+	select LEGACY_DIRECT_IO
 	help
 	  OCFS2 is a general purpose extent based shared disk cluster file
 	  system with many similarities to ext3. It supports 64 bit inode

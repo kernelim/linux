@@ -1079,8 +1079,7 @@ static void hso_init_termios(struct ktermios *termios)
 	tty_termios_encode_baud_rate(termios, 115200, 115200);
 }
 
-static void _hso_serial_set_termios(struct tty_struct *tty,
-				    struct ktermios *old)
+static void _hso_serial_set_termios(struct tty_struct *tty)
 {
 	struct hso_serial *serial = tty->driver_data;
 
@@ -1262,7 +1261,7 @@ static int hso_serial_open(struct tty_struct *tty, struct file *filp)
 	if (serial->port.count == 1) {
 		serial->rx_state = RX_IDLE;
 		/* Force default termio settings */
-		_hso_serial_set_termios(tty, NULL);
+		_hso_serial_set_termios(tty);
 		tasklet_setup(&serial->unthrottle_tasklet,
 			      hso_unthrottle_tasklet);
 		result = hso_start_serial_device(serial->parent, GFP_KERNEL);
@@ -1323,11 +1322,10 @@ static void hso_serial_close(struct tty_struct *tty, struct file *filp)
 }
 
 /* close the requested serial port */
-static int hso_serial_write(struct tty_struct *tty, const unsigned char *buf,
-			    int count)
+static ssize_t hso_serial_write(struct tty_struct *tty, const u8 *buf,
+				size_t count)
 {
 	struct hso_serial *serial = tty->driver_data;
-	int space, tx_bytes;
 	unsigned long flags;
 
 	/* sanity check */
@@ -1338,21 +1336,16 @@ static int hso_serial_write(struct tty_struct *tty, const unsigned char *buf,
 
 	spin_lock_irqsave(&serial->serial_lock, flags);
 
-	space = serial->tx_data_length - serial->tx_buffer_count;
-	tx_bytes = (count < space) ? count : space;
+	count = min_t(size_t, serial->tx_data_length - serial->tx_buffer_count,
+		      count);
+	memcpy(serial->tx_buffer + serial->tx_buffer_count, buf, count);
+	serial->tx_buffer_count += count;
 
-	if (!tx_bytes)
-		goto out;
-
-	memcpy(serial->tx_buffer + serial->tx_buffer_count, buf, tx_bytes);
-	serial->tx_buffer_count += tx_bytes;
-
-out:
 	spin_unlock_irqrestore(&serial->serial_lock, flags);
 
 	hso_kick_transmit(serial);
 	/* done */
-	return tx_bytes;
+	return count;
 }
 
 /* how much room is there for writing */
@@ -1381,7 +1374,8 @@ static void hso_serial_cleanup(struct tty_struct *tty)
 }
 
 /* setup the term */
-static void hso_serial_set_termios(struct tty_struct *tty, struct ktermios *old)
+static void hso_serial_set_termios(struct tty_struct *tty,
+				   const struct ktermios *old)
 {
 	struct hso_serial *serial = tty->driver_data;
 	unsigned long flags;
@@ -1394,7 +1388,7 @@ static void hso_serial_set_termios(struct tty_struct *tty, struct ktermios *old)
 	/* the actual setup */
 	spin_lock_irqsave(&serial->serial_lock, flags);
 	if (serial->port.count)
-		_hso_serial_set_termios(tty, old);
+		_hso_serial_set_termios(tty);
 	else
 		tty->termios = *old;
 	spin_unlock_irqrestore(&serial->serial_lock, flags);
@@ -3282,7 +3276,7 @@ static int __init hso_init(void)
 err_unreg_tty:
 	tty_unregister_driver(tty_drv);
 err_free_tty:
-	put_tty_driver(tty_drv);
+	tty_driver_kref_put(tty_drv);
 	return result;
 }
 
@@ -3293,7 +3287,7 @@ static void __exit hso_exit(void)
 	tty_unregister_driver(tty_drv);
 	/* deregister the usb driver */
 	usb_deregister(&hso_driver);
-	put_tty_driver(tty_drv);
+	tty_driver_kref_put(tty_drv);
 }
 
 /* Module definitions */

@@ -1,2 +1,3 @@
-#4-
-0xafcbe231	eth_platform_get_mac_address	vmlinux	EXPORT_SYMBOL	
+#5-
+0xe15c5677	eth_platform_get_mac_address	vmlinux	EXPORT_SYMBOL	
+

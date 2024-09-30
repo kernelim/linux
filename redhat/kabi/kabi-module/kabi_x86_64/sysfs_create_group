@@ -1,2 +1,3 @@
-#4-
-0xc65b05a6	sysfs_create_group	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0x00a7e832	sysfs_create_group	vmlinux	EXPORT_SYMBOL_GPL	
+

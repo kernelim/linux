@@ -1,2 +1,3 @@
-#4-
-0x12d7a33f	gnss_deregister_device	drivers/gnss/gnss	EXPORT_SYMBOL_GPL	
+#5-
+0x2e3de85c	gnss_deregister_device	drivers/gnss/gnss	EXPORT_SYMBOL_GPL	
+

@@ -415,32 +415,32 @@ static struct cpumask nmi_ipi_pending_mask;
 static bool nmi_ipi_busy = false;
 static void (*nmi_ipi_function)(struct pt_regs *) = NULL;
 
-static void nmi_ipi_lock_start(unsigned long *flags)
+noinstr static void nmi_ipi_lock_start(unsigned long *flags)
 {
 	raw_local_irq_save(*flags);
 	hard_irq_disable();
-	while (atomic_cmpxchg(&__nmi_ipi_lock, 0, 1) == 1) {
+	while (arch_atomic_cmpxchg(&__nmi_ipi_lock, 0, 1) == 1) {
 		raw_local_irq_restore(*flags);
-		spin_until_cond(atomic_read(&__nmi_ipi_lock) == 0);
+		spin_until_cond(arch_atomic_read(&__nmi_ipi_lock) == 0);
 		raw_local_irq_save(*flags);
 		hard_irq_disable();
 	}
 }
 
-static void nmi_ipi_lock(void)
+noinstr static void nmi_ipi_lock(void)
 {
-	while (atomic_cmpxchg(&__nmi_ipi_lock, 0, 1) == 1)
-		spin_until_cond(atomic_read(&__nmi_ipi_lock) == 0);
+	while (arch_atomic_cmpxchg(&__nmi_ipi_lock, 0, 1) == 1)
+		spin_until_cond(arch_atomic_read(&__nmi_ipi_lock) == 0);
 }
 
-static void nmi_ipi_unlock(void)
+noinstr static void nmi_ipi_unlock(void)
 {
 	smp_mb();
-	WARN_ON(atomic_read(&__nmi_ipi_lock) != 1);
-	atomic_set(&__nmi_ipi_lock, 0);
+	WARN_ON(arch_atomic_read(&__nmi_ipi_lock) != 1);
+	arch_atomic_set(&__nmi_ipi_lock, 0);
 }
 
-static void nmi_ipi_unlock_end(unsigned long *flags)
+noinstr static void nmi_ipi_unlock_end(unsigned long *flags)
 {
 	nmi_ipi_unlock();
 	raw_local_irq_restore(*flags);
@@ -449,7 +449,7 @@ static void nmi_ipi_unlock_end(unsigned long *flags)
 /*
  * Platform NMI handler calls this to ack
  */
-int smp_handle_nmi_ipi(struct pt_regs *regs)
+noinstr int smp_handle_nmi_ipi(struct pt_regs *regs)
 {
 	void (*fn)(struct pt_regs *) = NULL;
 	unsigned long flags;
@@ -1063,7 +1063,7 @@ static struct sched_domain_topology_level powerpc_topology[] = {
 #endif
 	{ shared_cache_mask, powerpc_shared_cache_flags, SD_INIT_NAME(CACHE) },
 	{ cpu_mc_mask, SD_INIT_NAME(MC) },
-	{ cpu_cpu_mask, SD_INIT_NAME(DIE) },
+	{ cpu_cpu_mask, SD_INIT_NAME(PKG) },
 	{ NULL, },
 };
 
@@ -1606,7 +1606,7 @@ static void add_cpu_to_masks(int cpu)
 	/* Skip all CPUs already part of current CPU core mask */
 	cpumask_andnot(mask, cpu_online_mask, cpu_core_mask(cpu));
 
-	/* If chip_id is -1; limit the cpu_core_mask to within DIE*/
+	/* If chip_id is -1; limit the cpu_core_mask to within PKG */
 	if (chip_id == -1)
 		cpumask_and(mask, mask, cpu_cpu_mask(cpu));
 
@@ -1779,8 +1779,6 @@ void __cpu_die(unsigned int cpu)
 
 void arch_cpu_idle_dead(void)
 {
-	sched_preempt_enable_no_resched();
-
 	/*
 	 * Disable on the down path. This will be re-enabled by
 	 * start_secondary() via start_secondary_resume() below

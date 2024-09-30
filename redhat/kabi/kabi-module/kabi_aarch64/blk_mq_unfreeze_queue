@@ -1,2 +1,3 @@
-#4-
-0x08514b95	blk_mq_unfreeze_queue	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0x0f2a9563	blk_mq_unfreeze_queue	vmlinux	EXPORT_SYMBOL_GPL	
+

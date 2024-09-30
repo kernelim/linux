@@ -25,6 +25,8 @@ struct inode;
 struct path;
 extern struct file *alloc_file_pseudo(struct inode *, struct vfsmount *,
 	const char *, int flags, const struct file_operations *);
+extern struct file *alloc_file_pseudo_noaccount(struct inode *, struct vfsmount *,
+	const char *, int flags, const struct file_operations *);
 extern struct file *alloc_file_clone(struct file *, int flags,
 	const struct file_operations *);
 
@@ -100,16 +102,15 @@ extern void fd_install(unsigned int fd, struct file *file);
 
 extern int __receive_fd(struct file *file, int __user *ufd,
 			unsigned int o_flags);
+
+extern int receive_fd(struct file *file, unsigned int o_flags);
+
 static inline int receive_fd_user(struct file *file, int __user *ufd,
 				  unsigned int o_flags)
 {
 	if (ufd == NULL)
 		return -EFAULT;
 	return __receive_fd(file, ufd, o_flags);
-}
-static inline int receive_fd(struct file *file, unsigned int o_flags)
-{
-	return __receive_fd(file, NULL, o_flags);
 }
 int receive_fd_replace(int new_fd, struct file *file, unsigned int o_flags);
 

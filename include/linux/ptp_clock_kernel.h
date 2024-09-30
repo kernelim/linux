@@ -77,14 +77,14 @@ struct ptp_system_timestamp {
  *            nominal frequency in parts per million, but with a
  *            16 bit binary fractional field.
  *
- * @adjfreq:  Adjusts the frequency of the hardware clock.
- *            This method is deprecated.  New drivers should implement
- *            the @adjfine method instead.
- *            parameter delta: Desired frequency offset from nominal frequency
- *            in parts per billion
+ * @adjphase:  Indicates that the PHC should use an internal servo
+ *             algorithm to correct the provided phase offset.
+ *             parameter delta: PHC servo phase adjustment target
+ *                              in nanoseconds.
  *
- * @adjphase:  Adjusts the phase offset of the hardware clock.
- *             parameter delta: Desired change in nanoseconds.
+ * @getmaxphase:  Advertises maximum offset that can be provided
+ *                to the hardware clock's phase control functionality
+ *                through adjphase.
  *
  * @adjtime:  Shifts the time of the hardware clock.
  *            parameter delta: Desired change in nanoseconds.
@@ -109,6 +109,32 @@ struct ptp_system_timestamp {
  *
  * @settime64:  Set the current time on the hardware clock.
  *              parameter ts: Time value to set.
+ *
+ * @getcycles64:  Reads the current free running cycle counter from the hardware
+ *                clock.
+ *                If @getcycles64 and @getcyclesx64 are not supported, then
+ *                @gettime64 or @gettimex64 will be used as default
+ *                implementation.
+ *                parameter ts: Holds the result.
+ *
+ * @getcyclesx64:  Reads the current free running cycle counter from the
+ *                 hardware clock and optionally also the system clock.
+ *                 If @getcycles64 and @getcyclesx64 are not supported, then
+ *                 @gettimex64 will be used as default implementation if
+ *                 available.
+ *                 parameter ts: Holds the PHC timestamp.
+ *                 parameter sts: If not NULL, it holds a pair of timestamps
+ *                 from the system clock. The first reading is made right before
+ *                 reading the lowest bits of the PHC timestamp and the second
+ *                 reading immediately follows that.
+ *
+ * @getcrosscycles:  Reads the current free running cycle counter from the
+ *                   hardware clock and system clock simultaneously.
+ *                   If @getcycles64 and @getcyclesx64 are not supported, then
+ *                   @getcrosststamp will be used as default implementation if
+ *                   available.
+ *                   parameter cts: Contains timestamp (device,system) pair,
+ *                   where system time is realtime and monotonic.
  *
  * @enable:   Request driver to enable or disable an ancillary feature.
  *            parameter request: Desired resource to enable or disable.
@@ -148,8 +174,8 @@ struct ptp_clock_info {
 	int pps;
 	struct ptp_pin_desc *pin_config;
 	int (*adjfine)(struct ptp_clock_info *ptp, long scaled_ppm);
-	int (*adjfreq)(struct ptp_clock_info *ptp, s32 delta);
 	int (*adjphase)(struct ptp_clock_info *ptp, s32 phase);
+	s32 (*getmaxphase)(struct ptp_clock_info *ptp);
 	int (*adjtime)(struct ptp_clock_info *ptp, s64 delta);
 	int (*gettime64)(struct ptp_clock_info *ptp, struct timespec64 *ts);
 	int (*gettimex64)(struct ptp_clock_info *ptp, struct timespec64 *ts,
@@ -157,6 +183,11 @@ struct ptp_clock_info {
 	int (*getcrosststamp)(struct ptp_clock_info *ptp,
 			      struct system_device_crosststamp *cts);
 	int (*settime64)(struct ptp_clock_info *p, const struct timespec64 *ts);
+	int (*getcycles64)(struct ptp_clock_info *ptp, struct timespec64 *ts);
+	int (*getcyclesx64)(struct ptp_clock_info *ptp, struct timespec64 *ts,
+			    struct ptp_system_timestamp *sts);
+	int (*getcrosscycles)(struct ptp_clock_info *ptp,
+			      struct system_device_crosststamp *cts);
 	int (*enable)(struct ptp_clock_info *ptp,
 		      struct ptp_clock_request *request, int on);
 	int (*verify)(struct ptp_clock_info *ptp, unsigned int pin,
@@ -402,17 +433,16 @@ int ptp_get_vclocks_index(int pclock_index, int **vclock_index);
 /**
  * ptp_convert_timestamp() - convert timestamp to a ptp vclock time
  *
- * @hwtstamps:    skb_shared_hwtstamps structure pointer
+ * @hwtstamp:     timestamp
  * @vclock_index: phc index of ptp vclock.
  *
  * Returns converted timestamp, or 0 on error.
  */
-ktime_t ptp_convert_timestamp(const struct skb_shared_hwtstamps *hwtstamps,
-			      int vclock_index);
+ktime_t ptp_convert_timestamp(const ktime_t *hwtstamp, int vclock_index);
 #else
 static inline int ptp_get_vclocks_index(int pclock_index, int **vclock_index)
 { return 0; }
-static inline ktime_t ptp_convert_timestamp(const struct skb_shared_hwtstamps *hwtstamps,
+static inline ktime_t ptp_convert_timestamp(const ktime_t *hwtstamp,
 					    int vclock_index)
 { return 0; }
 

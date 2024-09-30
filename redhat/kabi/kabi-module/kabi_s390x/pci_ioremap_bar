@@ -1,2 +1,3 @@
-#4-
-0x24160278	pci_ioremap_bar	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0x1c3552fd	pci_ioremap_bar	vmlinux	EXPORT_SYMBOL_GPL	
+

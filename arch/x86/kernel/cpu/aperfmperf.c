@@ -24,146 +24,17 @@
 #include "cpu.h"
 
 struct aperfmperf {
+	seqcount_t	seq;
+	unsigned long	last_update;
+	u64		acnt;
+	u64		mcnt;
 	u64		aperf;
 	u64		mperf;
 };
 
-static DEFINE_PER_CPU_SHARED_ALIGNED(struct aperfmperf, cpu_samples);
-
-struct aperfmperf_sample {
-	unsigned int	khz;
-	atomic_t	scfpending;
-	ktime_t	time;
-	u64	aperf;
-	u64	mperf;
+static DEFINE_PER_CPU_SHARED_ALIGNED(struct aperfmperf, cpu_samples) = {
+	.seq = SEQCNT_ZERO(cpu_samples.seq)
 };
-
-static DEFINE_PER_CPU(struct aperfmperf_sample, samples);
-
-#define APERFMPERF_CACHE_THRESHOLD_MS	10
-#define APERFMPERF_REFRESH_DELAY_MS	10
-#define APERFMPERF_STALE_THRESHOLD_MS	1000
-
-/*
- * aperfmperf_snapshot_khz()
- * On the current CPU, snapshot APERF, MPERF, and jiffies
- * unless we already did it within 10ms
- * calculate kHz, save snapshot
- */
-static void aperfmperf_snapshot_khz(void *dummy)
-{
-	u64 aperf, aperf_delta;
-	u64 mperf, mperf_delta;
-	struct aperfmperf_sample *s = this_cpu_ptr(&samples);
-	unsigned long flags;
-
-	local_irq_save(flags);
-	rdmsrl(MSR_IA32_APERF, aperf);
-	rdmsrl(MSR_IA32_MPERF, mperf);
-	local_irq_restore(flags);
-
-	aperf_delta = aperf - s->aperf;
-	mperf_delta = mperf - s->mperf;
-
-	/*
-	 * There is no architectural guarantee that MPERF
-	 * increments faster than we can read it.
-	 */
-	if (mperf_delta == 0)
-		return;
-
-	s->time = ktime_get();
-	s->aperf = aperf;
-	s->mperf = mperf;
-	s->khz = div64_u64((cpu_khz * aperf_delta), mperf_delta);
-	atomic_set_release(&s->scfpending, 0);
-}
-
-static bool aperfmperf_snapshot_cpu(int cpu, ktime_t now, bool wait)
-{
-	s64 time_delta = ktime_ms_delta(now, per_cpu(samples.time, cpu));
-	struct aperfmperf_sample *s = per_cpu_ptr(&samples, cpu);
-
-	/* Don't bother re-computing within the cache threshold time. */
-	if (time_delta < APERFMPERF_CACHE_THRESHOLD_MS)
-		return true;
-
-	if (!atomic_xchg(&s->scfpending, 1) || wait)
-		smp_call_function_single(cpu, aperfmperf_snapshot_khz, NULL, wait);
-
-	/* Return false if the previous iteration was too long ago. */
-	return time_delta <= APERFMPERF_STALE_THRESHOLD_MS;
-}
-
-unsigned int aperfmperf_get_khz(int cpu)
-{
-	if (!cpu_khz)
-		return 0;
-
-	if (!boot_cpu_has(X86_FEATURE_APERFMPERF))
-		return 0;
-
-	if (!housekeeping_cpu(cpu, HK_TYPE_MISC))
-		return 0;
-
-	if (rcu_is_idle_cpu(cpu))
-		return 0; /* Idle CPUs are completely uninteresting. */
-
-	aperfmperf_snapshot_cpu(cpu, ktime_get(), true);
-	return per_cpu(samples.khz, cpu);
-}
-
-void arch_freq_prepare_all(void)
-{
-	ktime_t now = ktime_get();
-	bool wait = false;
-	int cpu;
-
-	if (!cpu_khz)
-		return;
-
-	if (!boot_cpu_has(X86_FEATURE_APERFMPERF))
-		return;
-
-	for_each_online_cpu(cpu) {
-		if (!housekeeping_cpu(cpu, HK_TYPE_MISC))
-			continue;
-		if (rcu_is_idle_cpu(cpu))
-			continue; /* Idle CPUs are completely uninteresting. */
-		if (!aperfmperf_snapshot_cpu(cpu, now, false))
-			wait = true;
-	}
-
-	if (wait)
-		msleep(APERFMPERF_REFRESH_DELAY_MS);
-}
-
-unsigned int arch_freq_get_on_cpu(int cpu)
-{
-	struct aperfmperf_sample *s = per_cpu_ptr(&samples, cpu);
-
-	if (!cpu_khz)
-		return 0;
-
-	if (!boot_cpu_has(X86_FEATURE_APERFMPERF))
-		return 0;
-
-	if (!housekeeping_cpu(cpu, HK_TYPE_MISC))
-		return 0;
-
-	if (rcu_is_idle_cpu(cpu))
-		return 0;
-
-	if (aperfmperf_snapshot_cpu(cpu, ktime_get(), true))
-		return per_cpu(samples.khz, cpu);
-
-	msleep(APERFMPERF_REFRESH_DELAY_MS);
-	atomic_set(&s->scfpending, 1);
-	smp_mb(); /* ->scfpending before smp_call_function_single(). */
-	smp_call_function_single(cpu, aperfmperf_snapshot_khz, NULL, 1);
-
-	return per_cpu(samples.khz, cpu);
-}
 
 static void init_counter_refs(void)
 {
@@ -459,13 +330,23 @@ static void __init bp_init_freq_invariance(void)
 
 static void disable_freq_invariance_workfn(struct work_struct *work)
 {
+	int cpu;
+
 	static_branch_disable(&arch_scale_freq_key);
+
+	/*
+	 * Set arch_freq_scale to a default value on all cpus
+	 * This negates the effect of scaling
+	 */
+	for_each_possible_cpu(cpu)
+		per_cpu(arch_freq_scale, cpu) = SCHED_CAPACITY_SCALE;
 }
 
 static DECLARE_WORK(disable_freq_invariance_work,
 		    disable_freq_invariance_workfn);
 
 DEFINE_PER_CPU(unsigned long, arch_freq_scale) = SCHED_CAPACITY_SCALE;
+EXPORT_PER_CPU_SYMBOL_GPL(arch_freq_scale);
 
 static void scale_freq_tick(u64 acnt, u64 mcnt)
 {
@@ -515,7 +396,51 @@ void arch_scale_freq_tick(void)
 	s->aperf = aperf;
 	s->mperf = mperf;
 
+	raw_write_seqcount_begin(&s->seq);
+	s->last_update = jiffies;
+	s->acnt = acnt;
+	s->mcnt = mcnt;
+	raw_write_seqcount_end(&s->seq);
+
 	scale_freq_tick(acnt, mcnt);
+}
+
+/*
+ * Discard samples older than the define maximum sample age of 20ms. There
+ * is no point in sending IPIs in such a case. If the scheduler tick was
+ * not running then the CPU is either idle or isolated.
+ */
+#define MAX_SAMPLE_AGE	((unsigned long)HZ / 50)
+
+unsigned int arch_freq_get_on_cpu(int cpu)
+{
+	struct aperfmperf *s = per_cpu_ptr(&cpu_samples, cpu);
+	unsigned int seq, freq;
+	unsigned long last;
+	u64 acnt, mcnt;
+
+	if (!cpu_feature_enabled(X86_FEATURE_APERFMPERF))
+		goto fallback;
+
+	do {
+		seq = raw_read_seqcount_begin(&s->seq);
+		last = s->last_update;
+		acnt = s->acnt;
+		mcnt = s->mcnt;
+	} while (read_seqcount_retry(&s->seq, seq));
+
+	/*
+	 * Bail on invalid count and when the last update was too long ago,
+	 * which covers idle and NOHZ full CPUs.
+	 */
+	if (!mcnt || (jiffies - last) > MAX_SAMPLE_AGE)
+		goto fallback;
+
+	return div64_u64((cpu_khz * acnt), mcnt);
+
+fallback:
+	freq = cpufreq_quick_get(cpu);
+	return freq ? freq : cpu_khz;
 }
 
 static int __init bp_init_aperfmperf(void)

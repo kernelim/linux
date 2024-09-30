@@ -49,7 +49,7 @@ static void nfcon_write(struct console *con, const char *str,
 static struct tty_driver *nfcon_device(struct console *con, int *index)
 {
 	*index = 0;
-	return (con->flags & CON_ENABLED) ? nfcon_tty_driver : NULL;
+	return console_is_registered(con) ? nfcon_tty_driver : NULL;
 }
 
 static struct console nf_console = {
@@ -70,16 +70,16 @@ static void nfcon_tty_close(struct tty_struct *tty, struct file *filp)
 {
 }
 
-static int nfcon_tty_write(struct tty_struct *tty, const unsigned char *buf,
-			   int count)
+static ssize_t nfcon_tty_write(struct tty_struct *tty, const u8 *buf,
+			       size_t count)
 {
 	nfputs(buf, count);
 	return count;
 }
 
-static int nfcon_tty_put_char(struct tty_struct *tty, unsigned char ch)
+static int nfcon_tty_put_char(struct tty_struct *tty, u8 ch)
 {
-	char temp[2] = { ch, 0 };
+	u8 temp[2] = { ch, 0 };
 
 	nf_call(stderr_id, virt_to_phys(temp));
 	return 1;
@@ -107,6 +107,11 @@ static int __init nf_debug_setup(char *arg)
 
 	stderr_id = nf_get_id("NF_STDERR");
 	if (stderr_id) {
+		/*
+		 * The console will be enabled when debug=nfcon is specified
+		 * as a kernel parameter. Since this is a non-standard way
+		 * of enabling consoles, it must be explicitly enabled.
+		 */
 		nf_console.flags |= CON_ENABLED;
 		register_console(&nf_console);
 	}
@@ -144,14 +149,14 @@ static int __init nfcon_init(void)
 	res = tty_register_driver(driver);
 	if (res) {
 		pr_err("failed to register nfcon tty driver\n");
-		put_tty_driver(driver);
+		tty_driver_kref_put(driver);
 		tty_port_destroy(&nfcon_tty_port);
 		return res;
 	}
 
 	nfcon_tty_driver = driver;
 
-	if (!(nf_console.flags & CON_ENABLED))
+	if (!console_is_registered(&nf_console))
 		register_console(&nf_console);
 
 	return 0;
@@ -161,7 +166,7 @@ static void __exit nfcon_exit(void)
 {
 	unregister_console(&nf_console);
 	tty_unregister_driver(nfcon_tty_driver);
-	put_tty_driver(nfcon_tty_driver);
+	tty_driver_kref_put(nfcon_tty_driver);
 	tty_port_destroy(&nfcon_tty_port);
 }
 

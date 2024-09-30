@@ -1,2 +1,3 @@
-#4-
-0x636e3874	misc_deregister	vmlinux	EXPORT_SYMBOL	
+#5-
+0x1d93733c	misc_deregister	vmlinux	EXPORT_SYMBOL	
+

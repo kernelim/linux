@@ -125,12 +125,12 @@ static unsigned int owl_uart_tx_empty(struct uart_port *port)
 	u32 val;
 	unsigned int ret;
 
-	spin_lock_irqsave(&port->lock, flags);
+	uart_port_lock_irqsave(port, &flags);
 
 	val = owl_uart_read(port, OWL_UART_STAT);
 	ret = (val & OWL_UART_STAT_TFES) ? TIOCSER_TEMT : 0;
 
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 
 	return ret;
 }
@@ -181,35 +181,11 @@ static void owl_uart_start_tx(struct uart_port *port)
 
 static void owl_uart_send_chars(struct uart_port *port)
 {
-	struct circ_buf *xmit = &port->state->xmit;
-	unsigned int ch;
+	u8 ch;
 
-	if (uart_tx_stopped(port))
-		return;
-
-	if (port->x_char) {
-		while (!(owl_uart_read(port, OWL_UART_STAT) & OWL_UART_STAT_TFFU))
-			cpu_relax();
-		owl_uart_write(port, port->x_char, OWL_UART_TXDAT);
-		port->icount.tx++;
-		port->x_char = 0;
-	}
-
-	while (!(owl_uart_read(port, OWL_UART_STAT) & OWL_UART_STAT_TFFU)) {
-		if (uart_circ_empty(xmit))
-			break;
-
-		ch = xmit->buf[xmit->tail];
-		owl_uart_write(port, ch, OWL_UART_TXDAT);
-		xmit->tail = (xmit->tail + 1) & (SERIAL_XMIT_SIZE - 1);
-		port->icount.tx++;
-	}
-
-	if (uart_circ_chars_pending(xmit) < WAKEUP_CHARS)
-		uart_write_wakeup(port);
-
-	if (uart_circ_empty(xmit))
-		owl_uart_stop_tx(port);
+	uart_port_tx(port, ch,
+		!(owl_uart_read(port, OWL_UART_STAT) & OWL_UART_STAT_TFFU),
+		owl_uart_write(port, ch, OWL_UART_TXDAT));
 }
 
 static void owl_uart_receive_chars(struct uart_port *port)
@@ -256,7 +232,7 @@ static irqreturn_t owl_uart_irq(int irq, void *dev_id)
 	unsigned long flags;
 	u32 stat;
 
-	spin_lock_irqsave(&port->lock, flags);
+	uart_port_lock_irqsave(port, &flags);
 
 	stat = owl_uart_read(port, OWL_UART_STAT);
 
@@ -270,7 +246,7 @@ static irqreturn_t owl_uart_irq(int irq, void *dev_id)
 	stat |= OWL_UART_STAT_RIP | OWL_UART_STAT_TIP;
 	owl_uart_write(port, stat, OWL_UART_STAT);
 
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 
 	return IRQ_HANDLED;
 }
@@ -280,14 +256,14 @@ static void owl_uart_shutdown(struct uart_port *port)
 	u32 val;
 	unsigned long flags;
 
-	spin_lock_irqsave(&port->lock, flags);
+	uart_port_lock_irqsave(port, &flags);
 
 	val = owl_uart_read(port, OWL_UART_CTL);
 	val &= ~(OWL_UART_CTL_TXIE | OWL_UART_CTL_RXIE
 		| OWL_UART_CTL_TXDE | OWL_UART_CTL_RXDE | OWL_UART_CTL_EN);
 	owl_uart_write(port, val, OWL_UART_CTL);
 
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 
 	free_irq(port->irq, port);
 }
@@ -303,7 +279,7 @@ static int owl_uart_startup(struct uart_port *port)
 	if (ret)
 		return ret;
 
-	spin_lock_irqsave(&port->lock, flags);
+	uart_port_lock_irqsave(port, &flags);
 
 	val = owl_uart_read(port, OWL_UART_STAT);
 	val |= OWL_UART_STAT_RIP | OWL_UART_STAT_TIP
@@ -315,7 +291,7 @@ static int owl_uart_startup(struct uart_port *port)
 	val |= OWL_UART_CTL_EN;
 	owl_uart_write(port, val, OWL_UART_CTL);
 
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 
 	return 0;
 }
@@ -335,7 +311,7 @@ static void owl_uart_set_termios(struct uart_port *port,
 	u32 ctl;
 	unsigned long flags;
 
-	spin_lock_irqsave(&port->lock, flags);
+	uart_port_lock_irqsave(port, &flags);
 
 	ctl = owl_uart_read(port, OWL_UART_CTL);
 
@@ -395,7 +371,7 @@ static void owl_uart_set_termios(struct uart_port *port,
 
 	uart_update_timeout(port, termios->c_cflag, baud);
 
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 }
 
 static void owl_uart_release_port(struct uart_port *port)
@@ -539,9 +515,9 @@ static void owl_uart_port_write(struct uart_port *port, const char *s,
 	if (port->sysrq)
 		locked = 0;
 	else if (oops_in_progress)
-		locked = spin_trylock(&port->lock);
+		locked = uart_port_trylock(port);
 	else {
-		spin_lock(&port->lock);
+		uart_port_lock(port);
 		locked = 1;
 	}
 
@@ -565,7 +541,7 @@ static void owl_uart_port_write(struct uart_port *port, const char *s,
 	owl_uart_write(port, old_ctl, OWL_UART_CTL);
 
 	if (locked)
-		spin_unlock(&port->lock);
+		uart_port_unlock(port);
 
 	local_irq_restore(flags);
 }
@@ -731,6 +707,7 @@ static int owl_uart_probe(struct platform_device *pdev)
 	owl_port->port.uartclk = clk_get_rate(owl_port->clk);
 	if (owl_port->port.uartclk == 0) {
 		dev_err(&pdev->dev, "clock rate is zero\n");
+		clk_disable_unprepare(owl_port->clk);
 		return -EINVAL;
 	}
 	owl_port->port.flags = UPF_BOOT_AUTOCONF | UPF_IOREMAP | UPF_LOW_LATENCY;

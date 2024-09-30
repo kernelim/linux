@@ -1,2 +1,3 @@
-#4-
-0x61112f40	blk_rq_map_user	vmlinux	EXPORT_SYMBOL	
+#5-
+0xf7750c7a	blk_rq_map_user	vmlinux	EXPORT_SYMBOL	
+

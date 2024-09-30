@@ -508,53 +508,7 @@ void do_el1_fpac(struct pt_regs *regs, unsigned long esr)
 
 void do_el0_mops(struct pt_regs *regs, unsigned long esr)
 {
-	bool wrong_option = esr & ESR_ELx_MOPS_ISS_WRONG_OPTION;
-	bool option_a = esr & ESR_ELx_MOPS_ISS_OPTION_A;
-	int dstreg = ESR_ELx_MOPS_ISS_DESTREG(esr);
-	int srcreg = ESR_ELx_MOPS_ISS_SRCREG(esr);
-	int sizereg = ESR_ELx_MOPS_ISS_SIZEREG(esr);
-	unsigned long dst, src, size;
-
-	dst = pt_regs_read_reg(regs, dstreg);
-	src = pt_regs_read_reg(regs, srcreg);
-	size = pt_regs_read_reg(regs, sizereg);
-
-	/*
-	 * Put the registers back in the original format suitable for a
-	 * prologue instruction, using the generic return routine from the
-	 * Arm ARM (DDI 0487I.a) rules CNTMJ and MWFQH.
-	 */
-	if (esr & ESR_ELx_MOPS_ISS_MEM_INST) {
-		/* SET* instruction */
-		if (option_a ^ wrong_option) {
-			/* Format is from Option A; forward set */
-			pt_regs_write_reg(regs, dstreg, dst + size);
-			pt_regs_write_reg(regs, sizereg, -size);
-		}
-	} else {
-		/* CPY* instruction */
-		if (!(option_a ^ wrong_option)) {
-			/* Format is from Option B */
-			if (regs->pstate & PSR_N_BIT) {
-				/* Backward copy */
-				pt_regs_write_reg(regs, dstreg, dst - size);
-				pt_regs_write_reg(regs, srcreg, src - size);
-			}
-		} else {
-			/* Format is from Option A */
-			if (size & BIT(63)) {
-				/* Forward copy */
-				pt_regs_write_reg(regs, dstreg, dst + size);
-				pt_regs_write_reg(regs, srcreg, src + size);
-				pt_regs_write_reg(regs, sizereg, -size);
-			}
-		}
-	}
-
-	if (esr & ESR_ELx_MOPS_ISS_FROM_EPILOGUE)
-		regs->pc -= 8;
-	else
-		regs->pc -= 4;
+	arm64_mops_reset_regs(&regs->user_regs, esr);
 
 	/*
 	 * If single stepping then finish the step before executing the
@@ -913,7 +867,7 @@ void bad_el0_sync(struct pt_regs *regs, int reason, unsigned long esr)
 DEFINE_PER_CPU(unsigned long [OVERFLOW_STACK_SIZE/sizeof(long)], overflow_stack)
 	__aligned(16);
 
-void panic_bad_stack(struct pt_regs *regs, unsigned long esr, unsigned long far)
+void __noreturn panic_bad_stack(struct pt_regs *regs, unsigned long esr, unsigned long far)
 {
 	unsigned long tsk_stk = (unsigned long)current->stack;
 	unsigned long irq_stk = (unsigned long)this_cpu_read(irq_stack_ptr);
@@ -955,7 +909,6 @@ void __noreturn arm64_serror_panic(struct pt_regs *regs, unsigned long esr)
 	nmi_panic(regs, "Asynchronous SError Interrupt");
 
 	cpu_park_loop();
-	unreachable();
 }
 
 bool arm64_is_fatal_ras_serror(struct pt_regs *regs, unsigned long esr)
@@ -1064,7 +1017,7 @@ static int kasan_handler(struct pt_regs *regs, unsigned long esr)
 	bool recover = esr & KASAN_ESR_RECOVER;
 	bool write = esr & KASAN_ESR_WRITE;
 	size_t size = KASAN_ESR_SIZE(esr);
-	u64 addr = regs->regs[0];
+	void *addr = (void *)regs->regs[0];
 	u64 pc = regs->pc;
 
 	kasan_report(addr, size, write, pc);

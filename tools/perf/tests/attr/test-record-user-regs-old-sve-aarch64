@@ -7,4 +7,4 @@ args    = --no-bpf-event --user-regs=vg kill >/dev/null 2>&1
 ret     = 129
 test_ret = true
 arch    = aarch64
-kernel_until = 6.1
+kernel_until = 5.14

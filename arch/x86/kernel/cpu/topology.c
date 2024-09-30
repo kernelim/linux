@@ -9,6 +9,7 @@
 #include <asm/apic.h>
 #include <asm/memtype.h>
 #include <asm/processor.h>
+#include <asm/intel-family.h>
 
 #include "cpu.h"
 
@@ -24,6 +25,34 @@
 #define LEAFB_SUBTYPE(ecx)		(((ecx) >> 8) & 0xff)
 #define BITS_SHIFT_NEXT_LEVEL(eax)	((eax) & 0x1f)
 #define LEVEL_MAX_SIBLINGS(ebx)		((ebx) & 0xffff)
+
+/*
+ * Use EAX bit_shift to calculate the maximum number of addressable logical
+ * processors sharing the current level - on some of the hybrid processors
+ */
+#define EAX_LEVEL_MAX_SIBLINGS(eax)	(1 << BITS_SHIFT_NEXT_LEVEL(eax))
+
+static bool use_intel_workaround(int vendor, int model)
+{
+	if (vendor != X86_VENDOR_INTEL)
+	    return false;
+
+	switch(model) {
+	case INTEL_FAM6_LUNARLAKE_M:
+		fallthrough;
+	case INTEL_FAM6_ARROWLAKE:
+		fallthrough;
+	case INTEL_FAM6_ARROWLAKE_H:
+		fallthrough;
+	case INTEL_FAM6_ARROWLAKE_U:
+		return true;
+
+	default:
+		break;
+	}
+
+	return false;
+}
 
 unsigned int __max_die_per_package __read_mostly = 1;
 EXPORT_SYMBOL(__max_die_per_package);
@@ -78,8 +107,11 @@ int detect_extended_topology_early(struct cpuinfo_x86 *c)
 	/*
 	 * initial apic id, which also represents 32-bit extended x2apic id.
 	 */
-	c->initial_apicid = edx;
-	smp_num_siblings = max_t(int, smp_num_siblings, LEVEL_MAX_SIBLINGS(ebx));
+	c->topo.initial_apicid = edx;
+	if (use_intel_workaround (c->x86_vendor, c->x86_model))
+		smp_num_siblings = max_t(int, smp_num_siblings, EAX_LEVEL_MAX_SIBLINGS(eax));
+	else
+		smp_num_siblings = max_t(int, smp_num_siblings, LEVEL_MAX_SIBLINGS(ebx));
 #endif
 	return 0;
 }
@@ -99,20 +131,29 @@ int detect_extended_topology(struct cpuinfo_x86 *c)
 	unsigned int pkg_mask_width;
 	bool die_level_present = false;
 	int leaf;
+	bool workaround;
 
 	leaf = detect_extended_topology_leaf(c);
 	if (leaf < 0)
 		return -1;
 
+	workaround = use_intel_workaround (c->x86_vendor, c->x86_model);
+
 	/*
 	 * Populate HT related information from sub-leaf level 0.
 	 */
 	cpuid_count(leaf, SMT_LEVEL, &eax, &ebx, &ecx, &edx);
-	c->initial_apicid = edx;
-	core_level_siblings = LEVEL_MAX_SIBLINGS(ebx);
+	c->topo.initial_apicid = edx;
+	if (workaround)
+		core_level_siblings = EAX_LEVEL_MAX_SIBLINGS(eax);
+	else
+		core_level_siblings = LEVEL_MAX_SIBLINGS(ebx);
 	smp_num_siblings = max_t(int, smp_num_siblings, LEVEL_MAX_SIBLINGS(ebx));
 	core_plus_mask_width = ht_mask_width = BITS_SHIFT_NEXT_LEVEL(eax);
-	die_level_siblings = LEVEL_MAX_SIBLINGS(ebx);
+	if (workaround)
+		die_level_siblings = EAX_LEVEL_MAX_SIBLINGS(eax);
+	else
+		die_level_siblings = LEVEL_MAX_SIBLINGS(ebx);
 	pkg_mask_width = die_plus_mask_width = BITS_SHIFT_NEXT_LEVEL(eax);
 
 	sub_index = 1;
@@ -123,14 +164,20 @@ int detect_extended_topology(struct cpuinfo_x86 *c)
 		 * Check for the Core type in the implemented sub leaves.
 		 */
 		if (LEAFB_SUBTYPE(ecx) == CORE_TYPE) {
-			core_level_siblings = LEVEL_MAX_SIBLINGS(ebx);
+			if (workaround)
+				core_level_siblings = EAX_LEVEL_MAX_SIBLINGS(eax);
+			else
+				core_level_siblings = LEVEL_MAX_SIBLINGS(ebx);
 			core_plus_mask_width = BITS_SHIFT_NEXT_LEVEL(eax);
 			die_level_siblings = core_level_siblings;
 			die_plus_mask_width = BITS_SHIFT_NEXT_LEVEL(eax);
 		}
 		if (LEAFB_SUBTYPE(ecx) == DIE_TYPE) {
 			die_level_present = true;
-			die_level_siblings = LEVEL_MAX_SIBLINGS(ebx);
+			if (workaround)
+				die_level_siblings = EAX_LEVEL_MAX_SIBLINGS(eax);
+			else
+				die_level_siblings = LEVEL_MAX_SIBLINGS(ebx);
 			die_plus_mask_width = BITS_SHIFT_NEXT_LEVEL(eax);
 		}
 
@@ -146,20 +193,19 @@ int detect_extended_topology(struct cpuinfo_x86 *c)
 	die_select_mask = (~(-1 << die_plus_mask_width)) >>
 				core_plus_mask_width;
 
-	c->cpu_core_id = apic->phys_pkg_id(c->initial_apicid,
+	c->topo.core_id = apic->phys_pkg_id(c->topo.initial_apicid,
 				ht_mask_width) & core_select_mask;
 
 	if (die_level_present) {
-		c->cpu_die_id = apic->phys_pkg_id(c->initial_apicid,
+		c->topo.die_id = apic->phys_pkg_id(c->topo.initial_apicid,
 					core_plus_mask_width) & die_select_mask;
 	}
 
-	c->phys_proc_id = apic->phys_pkg_id(c->initial_apicid,
-				pkg_mask_width);
+	c->topo.pkg_id = apic->phys_pkg_id(c->topo.initial_apicid, pkg_mask_width);
 	/*
 	 * Reinit the apicid, now that we have extended initial_apicid.
 	 */
-	c->apicid = apic->phys_pkg_id(c->initial_apicid, 0);
+	c->topo.apicid = apic->phys_pkg_id(c->topo.initial_apicid, 0);
 
 	c->x86_max_cores = (core_level_siblings / smp_num_siblings);
 	__max_die_per_package = (die_level_siblings / core_level_siblings);

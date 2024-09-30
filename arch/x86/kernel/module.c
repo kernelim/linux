@@ -275,15 +275,13 @@ int module_finalize(const Elf_Ehdr *hdr,
 		    const Elf_Shdr *sechdrs,
 		    struct module *me)
 {
-	const Elf_Shdr *s, *text = NULL, *alt = NULL, *locks = NULL,
+	const Elf_Shdr *s, *alt = NULL, *locks = NULL,
 		*para = NULL, *orc = NULL, *orc_ip = NULL,
 		*retpolines = NULL, *returns = NULL, *ibt_endbr = NULL,
-		*calls = NULL;
+		*calls = NULL, *cfi = NULL;
 	char *secstrings = (void *)hdr + sechdrs[hdr->e_shstrndx].sh_offset;
 
 	for (s = sechdrs; s < sechdrs + hdr->e_shnum; s++) {
-		if (!strcmp(".text", secstrings + s->sh_name))
-			text = s;
 		if (!strcmp(".altinstructions", secstrings + s->sh_name))
 			alt = s;
 		if (!strcmp(".smp_locks", secstrings + s->sh_name))
@@ -300,6 +298,8 @@ int module_finalize(const Elf_Ehdr *hdr,
 			returns = s;
 		if (!strcmp(".call_sites", secstrings + s->sh_name))
 			calls = s;
+		if (!strcmp(".cfi_sites", secstrings + s->sh_name))
+			cfi = s;
 		if (!strcmp(".ibt_endbr_seal", secstrings + s->sh_name))
 			ibt_endbr = s;
 	}
@@ -311,6 +311,22 @@ int module_finalize(const Elf_Ehdr *hdr,
 	if (para) {
 		void *pseg = (void *)para->sh_addr;
 		apply_paravirt(pseg, pseg + para->sh_size);
+	}
+	if (retpolines || cfi) {
+		void *rseg = NULL, *cseg = NULL;
+		unsigned int rsize = 0, csize = 0;
+
+		if (retpolines) {
+			rseg = (void *)retpolines->sh_addr;
+			rsize = retpolines->sh_size;
+		}
+
+		if (cfi) {
+			cseg = (void *)cfi->sh_addr;
+			csize = cfi->sh_size;
+		}
+
+		apply_fineibt(rseg, rseg + rsize, cseg, cseg + csize);
 	}
 	if (retpolines) {
 		void *rseg = (void *)retpolines->sh_addr;
@@ -342,18 +358,16 @@ int module_finalize(const Elf_Ehdr *hdr,
 	}
 	if (ibt_endbr) {
 		void *iseg = (void *)ibt_endbr->sh_addr;
-		apply_ibt_endbr(iseg, iseg + ibt_endbr->sh_size);
+		apply_seal_endbr(iseg, iseg + ibt_endbr->sh_size);
 	}
-	if (locks && text) {
+	if (locks) {
 		void *lseg = (void *)locks->sh_addr;
-		void *tseg = (void *)text->sh_addr;
+		void *text = me->mem[MOD_TEXT].base;
+		void *text_end = text + me->mem[MOD_TEXT].size;
 		alternatives_smp_module_add(me, me->name,
 					    lseg, lseg + locks->sh_size,
-					    tseg, tseg + text->sh_size);
+					    text, text_end);
 	}
-
-	/* make jump label nops */
-	jump_label_apply_nops(me);
 
 	if (orc && orc_ip)
 		unwind_module_init(me, (void *)orc_ip->sh_addr, orc_ip->sh_size,

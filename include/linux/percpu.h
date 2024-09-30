@@ -38,11 +38,10 @@
 /*
  * Percpu allocator can serve percpu allocations before slab is
  * initialized which allows slab to depend on the percpu allocator.
- * The following two parameters decide how much resource to
- * preallocate for this.  Keep PERCPU_DYNAMIC_RESERVE equal to or
- * larger than PERCPU_DYNAMIC_EARLY_SIZE.
+ * The following parameter decide how much resource to preallocate
+ * for this.  Keep PERCPU_DYNAMIC_RESERVE equal to or larger than
+ * PERCPU_DYNAMIC_EARLY_SIZE.
  */
-#define PERCPU_DYNAMIC_EARLY_SLOTS	128
 #define PERCPU_DYNAMIC_EARLY_SIZE	(12 << 10)
 
 /*
@@ -129,6 +128,7 @@ extern void __init setup_per_cpu_areas(void);
 extern void __percpu *__alloc_percpu_gfp(size_t size, size_t align, gfp_t gfp) __alloc_size(1);
 extern void __percpu *__alloc_percpu(size_t size, size_t align) __alloc_size(1);
 extern void free_percpu(void __percpu *__pdata);
+extern size_t pcpu_alloc_size(void __percpu *__pdata);
 
 DEFINE_FREE(free_percpu, void __percpu *, free_percpu(_T))
 

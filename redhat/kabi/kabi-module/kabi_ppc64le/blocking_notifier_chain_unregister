@@ -1,2 +1,3 @@
-#4-
-0x4ece3615	blocking_notifier_chain_unregister	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0xaac048e3	blocking_notifier_chain_unregister	vmlinux	EXPORT_SYMBOL_GPL	
+

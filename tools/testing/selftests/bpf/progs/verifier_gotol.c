@@ -4,7 +4,8 @@
 #include <bpf/bpf_helpers.h>
 #include "bpf_misc.h"
 
-#if (defined(__TARGET_ARCH_arm64) || defined(__TARGET_ARCH_x86)) && __clang_major__ >= 18
+#if (defined(__TARGET_ARCH_arm64) || defined(__TARGET_ARCH_x86) || \
+     defined(__TARGET_ARCH_s390)) && __clang_major__ >= 18
 
 SEC("socket")
 __description("gotol, small_imm")
@@ -26,6 +27,25 @@ l3_%=:							\
 	exit;						\
 "	:
 	: __imm(bpf_ktime_get_ns)
+	: __clobber_all);
+}
+
+SEC("socket")
+__description("gotol, large_imm")
+__success __failure_unpriv __retval(40000)
+__naked void gotol_large_imm(void)
+{
+	asm volatile ("					\
+	gotol 1f;					\
+0:							\
+	r0 = 0;						\
+	.rept 40000;					\
+	r0 += 1;					\
+	.endr;						\
+	exit;						\
+1:	gotol 0b;					\
+"	:
+	:
 	: __clobber_all);
 }
 

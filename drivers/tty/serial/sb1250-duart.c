@@ -41,7 +41,7 @@
 #include <asm/sibyte/swarm.h>
 
 
-#if defined(CONFIG_SIBYTE_BCM1x55) || defined(CONFIG_SIBYTE_BCM1x80)
+#if defined(CONFIG_SIBYTE_BCM1x80)
 #include <asm/sibyte/bcm1480_regs.h>
 #include <asm/sibyte/bcm1480_int.h>
 
@@ -331,8 +331,9 @@ static void sbd_receive_chars(struct sbd_port *sport)
 {
 	struct uart_port *uport = &sport->port;
 	struct uart_icount *icount;
-	unsigned int status, ch, flag;
+	unsigned int status;
 	int count;
+	u8 ch, flag;
 
 	for (count = 16; count; count--) {
 		status = read_sbdchn(sport, R_DUART_STATUS);
@@ -399,8 +400,7 @@ static void sbd_transmit_chars(struct sbd_port *sport)
 	/* Send char.  */
 	if (!stop_tx) {
 		write_sbdchn(sport, R_DUART_TX_HOLD, xmit->buf[xmit->tail]);
-		xmit->tail = (xmit->tail + 1) & (UART_XMIT_SIZE - 1);
-		sport->port.icount.tx++;
+		uart_xmit_advance(&sport->port, 1);
 
 		if (uart_circ_chars_pending(xmit) < WAKEUP_CHARS)
 			uart_write_wakeup(&sport->port);
@@ -610,7 +610,7 @@ static void sbd_set_termios(struct uart_port *uport, struct ktermios *termios,
 	else
 		aux &= ~M_DUART_CTS_CHNG_ENA;
 
-	spin_lock(&uport->lock);
+	uart_port_lock(uport);
 
 	if (sport->tx_stopped)
 		command |= M_DUART_TX_DIS;
@@ -632,7 +632,7 @@ static void sbd_set_termios(struct uart_port *uport, struct ktermios *termios,
 
 	write_sbdchn(sport, R_DUART_CMD, command);
 
-	spin_unlock(&uport->lock);
+	uart_port_unlock(uport);
 }
 
 
@@ -839,22 +839,22 @@ static void sbd_console_write(struct console *co, const char *s,
 	unsigned int mask;
 
 	/* Disable transmit interrupts and enable the transmitter. */
-	spin_lock_irqsave(&uport->lock, flags);
+	uart_port_lock_irqsave(uport, &flags);
 	mask = read_sbdshr(sport, R_DUART_IMRREG((uport->line) % 2));
 	write_sbdshr(sport, R_DUART_IMRREG((uport->line) % 2),
 		     mask & ~M_DUART_IMR_TX);
 	write_sbdchn(sport, R_DUART_CMD, M_DUART_TX_EN);
-	spin_unlock_irqrestore(&uport->lock, flags);
+	uart_port_unlock_irqrestore(uport, flags);
 
 	uart_console_write(&sport->port, s, count, sbd_console_putchar);
 
 	/* Restore transmit interrupts and the transmitter enable. */
-	spin_lock_irqsave(&uport->lock, flags);
+	uart_port_lock_irqsave(uport, &flags);
 	sbd_line_drain(sport);
 	if (sport->tx_stopped)
 		write_sbdchn(sport, R_DUART_CMD, M_DUART_TX_DIS);
 	write_sbdshr(sport, R_DUART_IMRREG((uport->line) % 2), mask);
-	spin_unlock_irqrestore(&uport->lock, flags);
+	uart_port_unlock_irqrestore(uport, flags);
 }
 
 static int __init sbd_console_setup(struct console *co, char *options)

@@ -33,7 +33,8 @@
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/init.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
 
 #include <linux/io.h>
 #include <asm/irq.h>
@@ -266,8 +267,7 @@ static void transmit_chars(struct uart_sunsab_port *up,
 	for (i = 0; i < up->port.fifosize; i++) {
 		writeb(xmit->buf[xmit->tail],
 		       &up->regs->w.xfifo[i]);
-		xmit->tail = (xmit->tail + 1) & (UART_XMIT_SIZE - 1);
-		up->port.icount.tx++;
+		uart_xmit_advance(&up->port, 1);
 		if (uart_circ_empty(xmit))
 			break;
 	}
@@ -310,7 +310,7 @@ static irqreturn_t sunsab_interrupt(int irq, void *dev_id)
 	unsigned long flags;
 	unsigned char gis;
 
-	spin_lock_irqsave(&up->port.lock, flags);
+	uart_port_lock_irqsave(&up->port, &flags);
 
 	status.stat = 0;
 	gis = readb(&up->regs->r.gis) >> up->gis_shift;
@@ -331,7 +331,7 @@ static irqreturn_t sunsab_interrupt(int irq, void *dev_id)
 			transmit_chars(up, &status);
 	}
 
-	spin_unlock_irqrestore(&up->port.lock, flags);
+	uart_port_unlock_irqrestore(&up->port, flags);
 
 	if (port)
 		tty_flip_buffer_push(port);
@@ -453,8 +453,7 @@ static void sunsab_start_tx(struct uart_port *port)
 	for (i = 0; i < up->port.fifosize; i++) {
 		writeb(xmit->buf[xmit->tail],
 		       &up->regs->w.xfifo[i]);
-		xmit->tail = (xmit->tail + 1) & (UART_XMIT_SIZE - 1);
-		up->port.icount.tx++;
+		uart_xmit_advance(&up->port, 1);
 		if (uart_circ_empty(xmit))
 			break;
 	}
@@ -474,12 +473,12 @@ static void sunsab_send_xchar(struct uart_port *port, char ch)
 	if (ch == __DISABLED_CHAR)
 		return;
 
-	spin_lock_irqsave(&up->port.lock, flags);
+	uart_port_lock_irqsave(&up->port, &flags);
 
 	sunsab_tec_wait(up);
 	writeb(ch, &up->regs->w.tic);
 
-	spin_unlock_irqrestore(&up->port.lock, flags);
+	uart_port_unlock_irqrestore(&up->port, flags);
 }
 
 /* port->lock held by caller.  */
@@ -500,7 +499,7 @@ static void sunsab_break_ctl(struct uart_port *port, int break_state)
 	unsigned long flags;
 	unsigned char val;
 
-	spin_lock_irqsave(&up->port.lock, flags);
+	uart_port_lock_irqsave(&up->port, &flags);
 
 	val = up->cached_dafo;
 	if (break_state)
@@ -513,7 +512,7 @@ static void sunsab_break_ctl(struct uart_port *port, int break_state)
 	if (test_bit(SAB82532_XPR, &up->irqflags))
 		sunsab_tx_idle(up);
 
-	spin_unlock_irqrestore(&up->port.lock, flags);
+	uart_port_unlock_irqrestore(&up->port, flags);
 }
 
 /* port->lock is not held.  */
@@ -528,7 +527,7 @@ static int sunsab_startup(struct uart_port *port)
 	if (err)
 		return err;
 
-	spin_lock_irqsave(&up->port.lock, flags);
+	uart_port_lock_irqsave(&up->port, &flags);
 
 	/*
 	 * Wait for any commands or immediate characters
@@ -583,7 +582,7 @@ static int sunsab_startup(struct uart_port *port)
 	set_bit(SAB82532_ALLS, &up->irqflags);
 	set_bit(SAB82532_XPR, &up->irqflags);
 
-	spin_unlock_irqrestore(&up->port.lock, flags);
+	uart_port_unlock_irqrestore(&up->port, flags);
 
 	return 0;
 }
@@ -595,7 +594,7 @@ static void sunsab_shutdown(struct uart_port *port)
 		container_of(port, struct uart_sunsab_port, port);
 	unsigned long flags;
 
-	spin_lock_irqsave(&up->port.lock, flags);
+	uart_port_lock_irqsave(&up->port, &flags);
 
 	/* Disable Interrupts */
 	up->interrupt_mask0 = 0xff;
@@ -629,7 +628,7 @@ static void sunsab_shutdown(struct uart_port *port)
 	writeb(tmp, &up->regs->rw.ccr0);
 #endif
 
-	spin_unlock_irqrestore(&up->port.lock, flags);
+	uart_port_unlock_irqrestore(&up->port, flags);
 	free_irq(up->port.irq, up);
 }
 
@@ -681,27 +680,23 @@ static void sunsab_convert_to_sab(struct uart_sunsab_port *up, unsigned int cfla
 				  unsigned int quot)
 {
 	unsigned char dafo;
-	int bits, n, m;
+	int n, m;
 
 	/* Byte size and parity */
 	switch (cflag & CSIZE) {
-	      case CS5: dafo = SAB82532_DAFO_CHL5; bits = 7; break;
-	      case CS6: dafo = SAB82532_DAFO_CHL6; bits = 8; break;
-	      case CS7: dafo = SAB82532_DAFO_CHL7; bits = 9; break;
-	      case CS8: dafo = SAB82532_DAFO_CHL8; bits = 10; break;
+	      case CS5: dafo = SAB82532_DAFO_CHL5; break;
+	      case CS6: dafo = SAB82532_DAFO_CHL6; break;
+	      case CS7: dafo = SAB82532_DAFO_CHL7; break;
+	      case CS8: dafo = SAB82532_DAFO_CHL8; break;
 	      /* Never happens, but GCC is too dumb to figure it out */
-	      default:  dafo = SAB82532_DAFO_CHL5; bits = 7; break;
+	      default:  dafo = SAB82532_DAFO_CHL5; break;
 	}
 
-	if (cflag & CSTOPB) {
+	if (cflag & CSTOPB)
 		dafo |= SAB82532_DAFO_STOP;
-		bits++;
-	}
 
-	if (cflag & PARENB) {
+	if (cflag & PARENB)
 		dafo |= SAB82532_DAFO_PARE;
-		bits++;
-	}
 
 	if (cflag & PARODD) {
 		dafo |= SAB82532_DAFO_PAR_ODD;
@@ -784,9 +779,9 @@ static void sunsab_set_termios(struct uart_port *port, struct ktermios *termios,
 	unsigned int baud = uart_get_baud_rate(port, termios, old, 0, 4000000);
 	unsigned int quot = uart_get_divisor(port, baud);
 
-	spin_lock_irqsave(&up->port.lock, flags);
+	uart_port_lock_irqsave(&up->port, &flags);
 	sunsab_convert_to_sab(up, termios->c_cflag, termios->c_iflag, baud, quot);
-	spin_unlock_irqrestore(&up->port.lock, flags);
+	uart_port_unlock_irqrestore(&up->port, flags);
 }
 
 static const char *sunsab_type(struct uart_port *port)
@@ -862,15 +857,15 @@ static void sunsab_console_write(struct console *con, const char *s, unsigned n)
 	int locked = 1;
 
 	if (up->port.sysrq || oops_in_progress)
-		locked = spin_trylock_irqsave(&up->port.lock, flags);
+		locked = uart_port_trylock_irqsave(&up->port, &flags);
 	else
-		spin_lock_irqsave(&up->port.lock, flags);
+		uart_port_lock_irqsave(&up->port, &flags);
 
 	uart_console_write(&up->port, s, n, sunsab_console_putchar);
 	sunsab_tec_wait(up);
 
 	if (locked)
-		spin_unlock_irqrestore(&up->port.lock, flags);
+		uart_port_unlock_irqrestore(&up->port, flags);
 }
 
 static int sunsab_console_setup(struct console *con, char *options)
@@ -919,7 +914,7 @@ static int sunsab_console_setup(struct console *con, char *options)
 	 */
 	sunsab_startup(&up->port);
 
-	spin_lock_irqsave(&up->port.lock, flags);
+	uart_port_lock_irqsave(&up->port, &flags);
 
 	/*
 	 * Finally, enable interrupts
@@ -937,7 +932,7 @@ static int sunsab_console_setup(struct console *con, char *options)
 	sunsab_convert_to_sab(up, con->cflag, 0, baud, quot);
 	sunsab_set_mctrl(&up->port, TIOCM_DTR | TIOCM_RTS);
 
-	spin_unlock_irqrestore(&up->port.lock, flags);
+	uart_port_unlock_irqrestore(&up->port, flags);
 	
 	return 0;
 }
@@ -1137,7 +1132,13 @@ static int __init sunsab_init(void)
 		}
 	}
 
-	return platform_driver_register(&sab_driver);
+	err = platform_driver_register(&sab_driver);
+	if (err) {
+		kfree(sunsab_ports);
+		sunsab_ports = NULL;
+	}
+
+	return err;
 }
 
 static void __exit sunsab_exit(void)

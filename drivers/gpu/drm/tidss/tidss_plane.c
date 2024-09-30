@@ -6,10 +6,10 @@
 
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
+#include <drm/drm_blend.h>
 #include <drm/drm_crtc.h>
-#include <drm/drm_crtc_helper.h>
 #include <drm/drm_fourcc.h>
-#include <drm/drm_fb_cma_helper.h>
+#include <drm/drm_framebuffer.h>
 #include <drm/drm_gem_atomic_helper.h>
 
 #include "tidss_crtc.h"
@@ -113,7 +113,6 @@ static void tidss_plane_atomic_update(struct drm_plane *plane,
 	struct drm_plane_state *new_state = drm_atomic_get_new_plane_state(state,
 									   plane);
 	u32 hw_videoport;
-	int ret;
 
 	dev_dbg(ddev->dev, "%s\n", __func__);
 
@@ -124,15 +123,17 @@ static void tidss_plane_atomic_update(struct drm_plane *plane,
 
 	hw_videoport = to_tidss_crtc(new_state->crtc)->hw_videoport;
 
-	ret = dispc_plane_setup(tidss->dispc, tplane->hw_plane_id,
-				new_state, hw_videoport);
+	dispc_plane_setup(tidss->dispc, tplane->hw_plane_id, new_state, hw_videoport);
+}
 
-	if (ret) {
-		dev_err(plane->dev->dev, "%s: Failed to setup plane %d\n",
-			__func__, tplane->hw_plane_id);
-		dispc_plane_enable(tidss->dispc, tplane->hw_plane_id, false);
-		return;
-	}
+static void tidss_plane_atomic_enable(struct drm_plane *plane,
+				      struct drm_atomic_state *state)
+{
+	struct drm_device *ddev = plane->dev;
+	struct tidss_device *tidss = to_tidss(ddev);
+	struct tidss_plane *tplane = to_tidss_plane(plane);
+
+	dev_dbg(ddev->dev, "%s\n", __func__);
 
 	dispc_plane_enable(tidss->dispc, tplane->hw_plane_id, true);
 }
@@ -158,9 +159,9 @@ static void drm_plane_destroy(struct drm_plane *plane)
 }
 
 static const struct drm_plane_helper_funcs tidss_plane_helper_funcs = {
-	.prepare_fb = drm_gem_plane_helper_prepare_fb,
 	.atomic_check = tidss_plane_atomic_check,
 	.atomic_update = tidss_plane_atomic_update,
+	.atomic_enable = tidss_plane_atomic_enable,
 	.atomic_disable = tidss_plane_atomic_disable,
 };
 
@@ -211,7 +212,7 @@ struct tidss_plane *tidss_plane_create(struct tidss_device *tidss,
 
 	drm_plane_helper_add(&tplane->plane, &tidss_plane_helper_funcs);
 
-	drm_plane_create_zpos_property(&tplane->plane, hw_plane_id, 0,
+	drm_plane_create_zpos_property(&tplane->plane, tidss->num_planes, 0,
 				       num_planes - 1);
 
 	ret = drm_plane_create_color_properties(&tplane->plane,

@@ -1,2 +1,3 @@
-#4-
-0xb6940b78	pci_enable_atomic_ops_to_root	vmlinux	EXPORT_SYMBOL	
+#5-
+0x7e8b78e9	pci_enable_atomic_ops_to_root	vmlinux	EXPORT_SYMBOL	
+

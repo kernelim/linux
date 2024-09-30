@@ -1076,6 +1076,7 @@
 #define PCR_SETTING_REG4		0x818
 #define PCR_SETTING_REG5		0x81C
 
+
 #define rtsx_pci_init_cmd(pcr)		((pcr)->ci = 0)
 
 #define RTS5227_DEVICE_ID		0x5227

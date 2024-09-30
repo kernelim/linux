@@ -1,2 +1,3 @@
-#4-
-0x8aa40cbb	pci_disable_link_state	vmlinux	EXPORT_SYMBOL	
+#5-
+0x10f15a0a	pci_disable_link_state	vmlinux	EXPORT_SYMBOL	
+

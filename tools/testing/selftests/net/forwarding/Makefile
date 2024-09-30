@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0+ OR MIT
 
-TEST_PROGS = bridge_igmp.sh \
+TEST_PROGS = bridge_fdb_learning_limit.sh \
+	bridge_igmp.sh \
 	bridge_locked_port.sh \
 	bridge_mdb.sh \
 	bridge_mdb_host.sh \
@@ -90,6 +91,7 @@ TEST_PROGS = bridge_igmp.sh \
 	tc_flower.sh \
 	tc_flower_l2_miss.sh \
 	tc_flower_cfm.sh \
+	tc_flower_port_range.sh \
 	tc_mpls_l2vpn.sh \
 	tc_police.sh \
 	tc_shblocks.sh \
@@ -108,7 +110,7 @@ TEST_PROGS = bridge_igmp.sh \
 	vxlan_symmetric_ipv6.sh \
 	vxlan_symmetric.sh
 
-TEST_PROGS_EXTENDED := devlink_lib.sh \
+TEST_FILES := devlink_lib.sh \
 	ethtool_lib.sh \
 	fib_offload_lib.sh \
 	forwarding.config.sample \

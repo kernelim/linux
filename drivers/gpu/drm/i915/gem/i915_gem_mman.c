@@ -951,7 +951,7 @@ i915_gem_object_mmap(struct drm_i915_gem_object *obj,
 			i915_gem_object_put(obj);
 			return -EINVAL;
 		}
-		vma->vm_flags &= ~VM_MAYWRITE;
+		vm_flags_clear(vma, VM_MAYWRITE);
 	}
 
 	anon = mmap_singleton(to_i915(dev));
@@ -960,7 +960,7 @@ i915_gem_object_mmap(struct drm_i915_gem_object *obj,
 		return PTR_ERR(anon);
 	}
 
-	vma->vm_flags |= VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP | VM_IO;
+	vm_flags_set(vma, VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP | VM_IO);
 
 	/*
 	 * We keep the ref on mmo->obj, not vm_file, but we require

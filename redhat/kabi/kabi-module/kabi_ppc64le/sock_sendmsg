@@ -1,2 +1,3 @@
-#4-
-0xdf1956e1	sock_sendmsg	vmlinux	EXPORT_SYMBOL	
+#5-
+0x87d69c66	sock_sendmsg	vmlinux	EXPORT_SYMBOL	
+

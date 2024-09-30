@@ -68,6 +68,7 @@ drm_dp_mst_helper_test
 drm_format_helper_test
 drm_format_test
 drm_framebuffer_test
+drm_gem_shmem_test
 drm_kunit_helpers
 drm_mm_test
 drm_plane_helper_test
@@ -89,3 +90,8 @@ regmap-kunit
 cfg80211-tests
 mac80211-tests
 wwan_hwsim
+checksum_kunit
+arm-smmu-v3-test
+iwlwifi-tests
+sound_kunit
+amd-pstate-ut

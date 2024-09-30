@@ -47,9 +47,6 @@
 #include <linux/nvram.h>
 #include <linux/adb.h>
 #include <linux/cuda.h>
-#ifdef CONFIG_PPC_PMAC
-#include <asm/prom.h>
-#endif
 #ifdef CONFIG_BOOTX_TEXT
 #include <asm/btext.h>
 #endif
@@ -763,15 +760,14 @@ static int controlfb_mmap(struct fb_info *info,
 
 static const struct fb_ops controlfb_ops = {
 	.owner		= THIS_MODULE,
+	__FB_DEFAULT_IOMEM_OPS_RDWR,
 	.fb_check_var	= controlfb_check_var,
 	.fb_set_par	= controlfb_set_par,
 	.fb_setcolreg	= controlfb_setcolreg,
 	.fb_pan_display = controlfb_pan_display,
 	.fb_blank	= controlfb_blank,
+	__FB_DEFAULT_IOMEM_OPS_DRAW,
 	.fb_mmap	= controlfb_mmap,
-	.fb_fillrect	= cfb_fillrect,
-	.fb_copyarea	= cfb_copyarea,
-	.fb_imageblit	= cfb_imageblit,
 };
 
 /*

@@ -755,6 +755,24 @@ static void tlmi_release_attr(void)
 	kset_unregister(tlmi_priv.authentication_kset);
 }
 
+static int tlmi_validate_setting_name(struct kset *attribute_kset, char *name)
+{
+	struct kobject *duplicate;
+
+	if (!strcmp(name, "Reserved"))
+		return -EINVAL;
+
+	duplicate = kset_find_obj(attribute_kset, name);
+	if (duplicate) {
+		pr_debug("Duplicate attribute name found - %s\n", name);
+		/* kset_find_obj() returns a reference */
+		kobject_put(duplicate);
+		return -EBUSY;
+	}
+
+	return 0;
+}
+
 static int tlmi_sysfs_init(void)
 {
 	int i, ret;
@@ -781,6 +799,15 @@ static int tlmi_sysfs_init(void)
 		/* Check if index is a valid setting - skip if it isn't */
 		if (!tlmi_priv.setting[i])
 			continue;
+
+		/* check for duplicate or reserved values */
+		if (tlmi_validate_setting_name(tlmi_priv.attribute_kset,
+					       tlmi_priv.setting[i]->display_name) < 0) {
+			kfree(tlmi_priv.setting[i]->possible_values);
+			kfree(tlmi_priv.setting[i]);
+			tlmi_priv.setting[i] = NULL;
+			continue;
+		}
 
 		/* check for duplicate or reserved values */
 		if (kset_find_obj(tlmi_priv.attribute_kset, tlmi_priv.setting[i]->display_name) ||

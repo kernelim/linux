@@ -25,7 +25,7 @@
 #include <linux/slab.h>
 #include <asm/ccwdev.h>
 #include <asm/cio.h>
-#include <asm/io.h>
+#include <linux/io.h>
 #include <asm/ebcdic.h>
 #include <linux/uaccess.h>
 #include <asm/delay.h>
@@ -575,7 +575,7 @@ static int raw3215_startup(struct raw3215_info *raw)
 	if (tty_port_initialized(&raw->port))
 		return 0;
 	raw->line_pos = 0;
-	tty_port_set_initialized(&raw->port, 1);
+	tty_port_set_initialized(&raw->port, true);
 	spin_lock_irqsave(get_ccwdev_lock(raw->cdev), flags);
 	raw3215_try_io(raw);
 	spin_unlock_irqrestore(get_ccwdev_lock(raw->cdev), flags);
@@ -605,7 +605,7 @@ static void raw3215_shutdown(struct raw3215_info *raw)
 		spin_lock_irqsave(get_ccwdev_lock(raw->cdev), flags);
 		remove_wait_queue(&raw->empty_wait, &wait);
 		set_current_state(TASK_RUNNING);
-		tty_port_set_initialized(&raw->port, 1);
+		tty_port_set_initialized(&raw->port, true);
 	}
 	spin_unlock_irqrestore(get_ccwdev_lock(raw->cdev), flags);
 }
@@ -939,8 +939,8 @@ static unsigned int tty3215_write_room(struct tty_struct *tty)
 /*
  * String write routine for 3215 ttys
  */
-static int tty3215_write(struct tty_struct * tty,
-			 const unsigned char *buf, int count)
+static ssize_t tty3215_write(struct tty_struct *tty, const u8 *buf,
+			     size_t count)
 {
 	struct raw3215_info *raw = tty->driver_data;
 	int i, written;
@@ -965,7 +965,7 @@ static int tty3215_write(struct tty_struct * tty,
 /*
  * Put character routine for 3215 ttys
  */
-static int tty3215_put_char(struct tty_struct *tty, unsigned char ch)
+static int tty3215_put_char(struct tty_struct *tty, u8 ch)
 {
 	struct raw3215_info *raw = tty->driver_data;
 
@@ -1082,7 +1082,7 @@ static int __init tty3215_init(void)
 
 	ret = ccw_driver_register(&raw3215_ccw_driver);
 	if (ret) {
-		put_tty_driver(driver);
+		tty_driver_kref_put(driver);
 		return ret;
 	}
 	/*
@@ -1104,7 +1104,7 @@ static int __init tty3215_init(void)
 	tty_set_operations(driver, &tty3215_ops);
 	ret = tty_register_driver(driver);
 	if (ret) {
-		put_tty_driver(driver);
+		tty_driver_kref_put(driver);
 		return ret;
 	}
 	tty3215_driver = driver;

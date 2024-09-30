@@ -18,12 +18,11 @@
  * the same memory tier.
  */
 #define MEMTIER_ADISTANCE_DRAM	((4 * MEMTIER_CHUNK_SIZE) + (MEMTIER_CHUNK_SIZE >> 1))
-#define MEMTIER_HOTPLUG_PRIO	100
 
 struct memory_tier;
 struct memory_dev_type {
 	/* list of memory types that are part of same tier as this type */
-	struct list_head tier_sibiling;
+	struct list_head tier_sibling;
 	/* abstract distance for this specific memory type */
 	int adistance;
 	/* Nodes of same abstract distance */

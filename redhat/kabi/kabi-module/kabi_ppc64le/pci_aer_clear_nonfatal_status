@@ -1,2 +1,3 @@
-#4-
-0x1f106eae	pci_aer_clear_nonfatal_status	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0x66a6c16f	pci_aer_clear_nonfatal_status	vmlinux	EXPORT_SYMBOL_GPL	
+

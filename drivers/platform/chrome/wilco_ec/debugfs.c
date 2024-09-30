@@ -251,8 +251,6 @@ static int wilco_ec_debugfs_probe(struct platform_device *pdev)
 		return 0;
 	debug_info->ec = ec;
 	debug_info->dir = debugfs_create_dir("wilco_ec", NULL);
-	if (!debug_info->dir)
-		return 0;
 	debugfs_create_file("raw", 0644, debug_info->dir, NULL, &fops_raw);
 	debugfs_create_file("h1_gpio", 0444, debug_info->dir, ec,
 			    &fops_h1_gpio);
@@ -262,11 +260,9 @@ static int wilco_ec_debugfs_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int wilco_ec_debugfs_remove(struct platform_device *pdev)
+static void wilco_ec_debugfs_remove(struct platform_device *pdev)
 {
 	debugfs_remove_recursive(debug_info->dir);
-
-	return 0;
 }
 
 static struct platform_driver wilco_ec_debugfs_driver = {
@@ -274,7 +270,7 @@ static struct platform_driver wilco_ec_debugfs_driver = {
 		.name = DRV_NAME,
 	},
 	.probe = wilco_ec_debugfs_probe,
-	.remove = wilco_ec_debugfs_remove,
+	.remove_new = wilco_ec_debugfs_remove,
 };
 
 module_platform_driver(wilco_ec_debugfs_driver);

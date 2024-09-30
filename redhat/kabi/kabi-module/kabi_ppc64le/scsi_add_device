@@ -1,2 +1,3 @@
-#4-
-0x12c9fcfa	scsi_add_device	vmlinux	EXPORT_SYMBOL	
+#5-
+0x42f767a9	scsi_add_device	vmlinux	EXPORT_SYMBOL	
+

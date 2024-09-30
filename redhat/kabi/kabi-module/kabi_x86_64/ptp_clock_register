@@ -1,2 +1,3 @@
-#4-
-0x0482037e	ptp_clock_register	vmlinux	EXPORT_SYMBOL	
+#5-
+0xf32c430b	ptp_clock_register	vmlinux	EXPORT_SYMBOL	
+

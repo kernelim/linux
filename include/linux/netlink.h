@@ -52,7 +52,7 @@ struct netlink_kernel_cfg {
 	struct mutex	*cb_mutex;
 	int		(*bind)(struct net *net, int group);
 	void		(*unbind)(struct net *net, int group);
-	bool		(*compare)(struct net *net, struct sock *sk);
+	void            (*release) (struct sock *sk, unsigned long *groups);
 };
 
 struct sock *__netlink_kernel_create(struct net *net, int unit,
@@ -223,15 +223,6 @@ static inline void nl_set_extack_cookie_u64(struct netlink_ext_ack *extack,
 	extack->cookie_len = sizeof(cookie);
 }
 
-static inline void nl_set_extack_cookie_u32(struct netlink_ext_ack *extack,
-					    u32 cookie)
-{
-	if (!extack)
-		return;
-	memcpy(extack->cookie, &cookie, sizeof(cookie));
-	extack->cookie_len = sizeof(cookie);
-}
-
 void netlink_kernel_release(struct sock *sk);
 int __netlink_change_ngroups(struct sock *sk, unsigned int groups);
 int netlink_change_ngroups(struct sock *sk, unsigned int groups);
@@ -244,9 +235,12 @@ bool netlink_strict_get_check(struct sk_buff *skb);
 int netlink_unicast(struct sock *ssk, struct sk_buff *skb, __u32 portid, int nonblock);
 int netlink_broadcast(struct sock *ssk, struct sk_buff *skb, __u32 portid,
 		      __u32 group, gfp_t allocation);
+
+typedef int (*netlink_filter_fn)(struct sock *dsk, struct sk_buff *skb, void *data);
+
 int netlink_broadcast_filtered(struct sock *ssk, struct sk_buff *skb,
 			       __u32 portid, __u32 group, gfp_t allocation,
-			       int (*filter)(struct sock *dsk, struct sk_buff *skb, void *data),
+			       netlink_filter_fn filter,
 			       void *filter_data);
 int netlink_set_err(struct sock *ssk, __u32 portid, __u32 group, int code);
 int netlink_register_notifier(struct notifier_block *nb);
@@ -366,5 +360,6 @@ bool netlink_ns_capable(const struct sk_buff *skb,
 			struct user_namespace *ns, int cap);
 bool netlink_capable(const struct sk_buff *skb, int cap);
 bool netlink_net_capable(const struct sk_buff *skb, int cap);
+struct sk_buff *netlink_alloc_large_skb(unsigned int size, int broadcast);
 
 #endif	/* __LINUX_NETLINK_H */

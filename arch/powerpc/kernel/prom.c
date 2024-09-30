@@ -366,12 +366,30 @@ static int __init early_init_dt_scan_cpus(unsigned long node,
 	if (found < 0)
 		return 0;
 
-	DBG("boot cpu: logical %d physical %d\n", found,
-	    be32_to_cpu(intserv[found_thread]));
 	boot_cpuid = found;
 
 	// Pass the boot CPU's hard CPU id back to our caller
 	*((u32 *)data) = be32_to_cpu(intserv[found_thread]);
+
+	if (nr_cpu_ids % nthreads != 0) {
+		set_nr_cpu_ids(ALIGN(nr_cpu_ids, nthreads));
+		pr_warn("nr_cpu_ids was not a multiple of threads_per_core, adjusted to %d\n",
+			nr_cpu_ids);
+	}
+
+	if (boot_cpuid >= nr_cpu_ids) {
+		// Remember boot core for smp_setup_cpu_maps()
+		boot_core_hwid = be32_to_cpu(intserv[0]);
+
+		pr_warn("Boot CPU %d (core hwid %d) >= nr_cpu_ids, adjusted boot CPU to %d\n",
+			boot_cpuid, boot_core_hwid, found_thread);
+
+		// Adjust boot CPU to appear on logical core 0
+		boot_cpuid = found_thread;
+	}
+
+	DBG("boot cpu: logical %d physical %d\n", boot_cpuid,
+	    be32_to_cpu(intserv[found_thread]));
 
 	/*
 	 * PAPR defines "logical" PVR values for cpus that
@@ -794,8 +812,11 @@ void __init early_init_devtree(void *params)
 		reserve_crashkernel();
 	early_reserve_mem();
 
-	/* Ensure that total memory size is page-aligned. */
-	limit = ALIGN(memory_limit ?: memblock_phys_mem_size(), PAGE_SIZE);
+	if (memory_limit > memblock_phys_mem_size())
+		memory_limit = 0;
+
+	/* Align down to 16 MB which is large page size with hash page translation */
+	limit = ALIGN_DOWN(memory_limit ?: memblock_phys_mem_size(), SZ_16M);
 	memblock_enforce_memory_limit(limit);
 
 #if defined(CONFIG_PPC_BOOK3S_64) && defined(CONFIG_PPC_4K_PAGES)

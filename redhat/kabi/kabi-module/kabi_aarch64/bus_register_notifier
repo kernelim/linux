@@ -1,2 +1,3 @@
-#4-
-0x520adfe0	bus_register_notifier	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0xb22c6b88	bus_register_notifier	vmlinux	EXPORT_SYMBOL_GPL	
+

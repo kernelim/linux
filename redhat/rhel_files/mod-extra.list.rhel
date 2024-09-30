@@ -158,6 +158,7 @@ tcp_veno.ko
 tcp_westwood.ko
 tcp_yeah.ko
 tekram-sir.ko
+test_lockup.ko
 tmdc.ko
 toim3232-sir.ko
 trancevibrator.ko

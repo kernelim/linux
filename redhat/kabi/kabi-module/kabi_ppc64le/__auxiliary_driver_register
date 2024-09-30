@@ -1,2 +1,3 @@
-#4-
-0x62fda3b4	__auxiliary_driver_register	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0x2fd16200	__auxiliary_driver_register	vmlinux	EXPORT_SYMBOL_GPL	
+

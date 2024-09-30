@@ -439,6 +439,8 @@ patternProperties:
     description: GE Fanuc Intelligent Platforms Embedded Systems, Inc.
   "^gemei,.*":
     description: Gemei Digital Technology Co., Ltd.
+  "^genesys,.*":
+    description: Genesys Logic, Inc.
   "^geniatech,.*":
     description: Geniatech, Inc.
   "^giantec,.*":
@@ -1230,6 +1232,8 @@ patternProperties:
     description: Van der Laan b.v.
   "^via,.*":
     description: VIA Technologies, Inc.
+  "^vialab,.*":
+    description: VIA Labs, Inc.
   "^videostrong,.*":
     description: Videostrong Technology Co., Ltd.
   "^virtio,.*":

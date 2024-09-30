@@ -30,6 +30,9 @@
 #include "../fs/internal.h"
 #include "blk.h"
 
+/* Should we allow writing to mounted block devices? */
+static bool bdev_allow_write_mounted = IS_ENABLED(CONFIG_BLK_DEV_WRITE_MOUNTED);
+
 struct bdev_inode {
 	struct block_device bdev;
 	struct inode vfs_inode;
@@ -45,6 +48,12 @@ struct block_device *I_BDEV(struct inode *inode)
 	return &BDEV_I(inode)->bdev;
 }
 EXPORT_SYMBOL(I_BDEV);
+
+struct block_device *file_bdev(struct file *bdev_file)
+{
+	return I_BDEV(bdev_file->f_mapping->host);
+}
+EXPORT_SYMBOL(file_bdev);
 
 static void bdev_write_inode(struct block_device *bdev)
 {
@@ -206,23 +215,6 @@ int sync_blockdev_range(struct block_device *bdev, loff_t lstart, loff_t lend)
 }
 EXPORT_SYMBOL(sync_blockdev_range);
 
-/*
- * Write out and wait upon all dirty data associated with this
- * device.   Filesystem data as well as the underlying block
- * device.  Takes the superblock lock.
- */
-int fsync_bdev(struct block_device *bdev)
-{
-	struct super_block *sb = get_super(bdev);
-	if (sb) {
-		int res = sync_filesystem(sb);
-		drop_super(sb);
-		return res;
-	}
-	return sync_blockdev(bdev);
-}
-EXPORT_SYMBOL(fsync_bdev);
-
 /**
  * freeze_bdev - lock a filesystem and force it into a consistent state
  * @bdev:	blockdevice to lock
@@ -248,9 +240,9 @@ int freeze_bdev(struct block_device *bdev)
 	if (!sb)
 		goto sync;
 	if (sb->s_op->freeze_super)
-		error = sb->s_op->freeze_super(sb);
+		error = sb->s_op->freeze_super(sb, FREEZE_HOLDER_USERSPACE);
 	else
-		error = freeze_super(sb);
+		error = freeze_super(sb, FREEZE_HOLDER_USERSPACE);
 	deactivate_super(sb);
 
 	if (error) {
@@ -291,9 +283,9 @@ int thaw_bdev(struct block_device *bdev)
 		goto out;
 
 	if (sb->s_op->thaw_super)
-		error = sb->s_op->thaw_super(sb);
+		error = sb->s_op->thaw_super(sb, FREEZE_HOLDER_USERSPACE);
 	else
-		error = thaw_super(sb);
+		error = thaw_super(sb, FREEZE_HOLDER_USERSPACE);
 	if (error)
 		bdev->bd_fsfreeze_count++;
 	else
@@ -303,84 +295,6 @@ out:
 	return error;
 }
 EXPORT_SYMBOL(thaw_bdev);
-
-/**
- * bdev_read_page() - Start reading a page from a block device
- * @bdev: The device to read the page from
- * @sector: The offset on the device to read the page to (need not be aligned)
- * @page: The page to read
- *
- * On entry, the page should be locked.  It will be unlocked when the page
- * has been read.  If the block driver implements rw_page synchronously,
- * that will be true on exit from this function, but it need not be.
- *
- * Errors returned by this function are usually "soft", eg out of memory, or
- * queue full; callers should try a different route to read this page rather
- * than propagate an error back up the stack.
- *
- * Return: negative errno if an error occurs, 0 if submission was successful.
- */
-int bdev_read_page(struct block_device *bdev, sector_t sector,
-			struct page *page)
-{
-	const struct block_device_operations *ops = bdev->bd_disk->fops;
-	int result = -EOPNOTSUPP;
-
-	if (!ops->rw_page || bdev_get_integrity(bdev))
-		return result;
-
-	result = blk_queue_enter(bdev_get_queue(bdev), 0);
-	if (result)
-		return result;
-	result = ops->rw_page(bdev, sector + get_start_sect(bdev), page,
-			      REQ_OP_READ);
-	blk_queue_exit(bdev_get_queue(bdev));
-	return result;
-}
-
-/**
- * bdev_write_page() - Start writing a page to a block device
- * @bdev: The device to write the page to
- * @sector: The offset on the device to write the page to (need not be aligned)
- * @page: The page to write
- * @wbc: The writeback_control for the write
- *
- * On entry, the page should be locked and not currently under writeback.
- * On exit, if the write started successfully, the page will be unlocked and
- * under writeback.  If the write failed already (eg the driver failed to
- * queue the page to the device), the page will still be locked.  If the
- * caller is a ->writepage implementation, it will need to unlock the page.
- *
- * Errors returned by this function are usually "soft", eg out of memory, or
- * queue full; callers should try a different route to write this page rather
- * than propagate an error back up the stack.
- *
- * Return: negative errno if an error occurs, 0 if submission was successful.
- */
-int bdev_write_page(struct block_device *bdev, sector_t sector,
-			struct page *page, struct writeback_control *wbc)
-{
-	int result;
-	const struct block_device_operations *ops = bdev->bd_disk->fops;
-
-	if (!ops->rw_page || bdev_get_integrity(bdev))
-		return -EOPNOTSUPP;
-	result = blk_queue_enter(bdev_get_queue(bdev), 0);
-	if (result)
-		return result;
-
-	set_page_writeback(page);
-	result = ops->rw_page(bdev, sector + get_start_sect(bdev), page,
-			      REQ_OP_WRITE);
-	if (result) {
-		end_page_writeback(page);
-	} else {
-		clean_page_buffers(page);
-		unlock_page(page);
-	}
-	blk_queue_exit(bdev_get_queue(bdev));
-	return result;
-}
 
 /*
  * pseudo-fs
@@ -457,12 +371,12 @@ static struct file_system_type bd_type = {
 };
 
 struct super_block *blockdev_superblock __read_mostly;
+struct vfsmount *blockdev_mnt __ro_after_init;
 EXPORT_SYMBOL_GPL(blockdev_superblock);
 
 void __init bdev_cache_init(void)
 {
 	int err;
-	static struct vfsmount *bd_mnt;
 
 	bdev_cachep = kmem_cache_create("bdev_cache", sizeof(struct bdev_inode),
 			0, (SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT|
@@ -471,10 +385,10 @@ void __init bdev_cache_init(void)
 	err = register_filesystem(&bd_type);
 	if (err)
 		panic("Cannot register bdev pseudo-fs");
-	bd_mnt = kern_mount(&bd_type);
-	if (IS_ERR(bd_mnt))
+	blockdev_mnt = kern_mount(&bd_type);
+	if (IS_ERR(blockdev_mnt))
 		panic("Cannot create bdev pseudo-fs");
-	blockdev_superblock = bd_mnt->mnt_sb;   /* For writeback */
+	blockdev_superblock = blockdev_mnt->mnt_sb;   /* For writeback */
 }
 
 struct block_device *bdev_alloc(struct gendisk *disk, u8 partno)
@@ -783,6 +697,31 @@ out_blkdev_put:
 	return ret;
 }
 
+int bdev_permission(dev_t dev, blk_mode_t mode, void *holder)
+{
+	int ret;
+
+	ret = devcgroup_check_permission(DEVCG_DEV_BLOCK,
+			MAJOR(dev), MINOR(dev),
+			((mode & BLK_OPEN_READ) ? DEVCG_ACC_READ : 0) |
+			((mode & BLK_OPEN_WRITE) ? DEVCG_ACC_WRITE : 0));
+	if (ret)
+		return ret;
+
+	/* Blocking writes requires exclusive opener */
+	if (mode & BLK_OPEN_RESTRICT_WRITES && !holder)
+		return -EINVAL;
+
+	/*
+	 * We're using error pointers to indicate to ->release() when we
+	 * failed to open that block device. Also this doesn't make sense.
+	 */
+	if (WARN_ON_ONCE(IS_ERR(holder)))
+		return -EINVAL;
+
+	return 0;
+}
+
 static void blkdev_put_part(struct block_device *part)
 {
 	struct block_device *whole = bdev_whole(part);
@@ -822,58 +761,101 @@ void blkdev_put_no_open(struct block_device *bdev)
 {
 	put_device(&bdev->bd_device);
 }
-	
+
+static bool bdev_writes_blocked(struct block_device *bdev)
+{
+	return bdev->bd_writers < 0;
+}
+
+static void bdev_block_writes(struct block_device *bdev)
+{
+	bdev->bd_writers--;
+}
+
+static void bdev_unblock_writes(struct block_device *bdev)
+{
+	bdev->bd_writers++;
+}
+
+static bool bdev_may_open(struct block_device *bdev, blk_mode_t mode)
+{
+	if (bdev_allow_write_mounted)
+		return true;
+	/* Writes blocked? */
+	if (mode & BLK_OPEN_WRITE && bdev_writes_blocked(bdev))
+		return false;
+	if (mode & BLK_OPEN_RESTRICT_WRITES && bdev->bd_writers > 0)
+		return false;
+	return true;
+}
+
+static void bdev_claim_write_access(struct block_device *bdev, blk_mode_t mode)
+{
+	if (bdev_allow_write_mounted)
+		return;
+
+	/* Claim exclusive or shared write access. */
+	if (mode & BLK_OPEN_RESTRICT_WRITES)
+		bdev_block_writes(bdev);
+	else if (mode & BLK_OPEN_WRITE)
+		bdev->bd_writers++;
+}
+
+static inline bool bdev_unclaimed(const struct file *bdev_file)
+{
+	return bdev_file->private_data == BDEV_I(bdev_file->f_mapping->host);
+}
+
+static void bdev_yield_write_access(struct file *bdev_file)
+{
+	struct block_device *bdev;
+
+	if (bdev_allow_write_mounted)
+		return;
+
+	if (bdev_unclaimed(bdev_file))
+		return;
+
+	bdev = file_bdev(bdev_file);
+
+	if (bdev_file->f_mode & FMODE_WRITE_RESTRICTED)
+		bdev_unblock_writes(bdev);
+	else if (bdev_file->f_mode & FMODE_WRITE)
+		bdev->bd_writers--;
+}
+
 /**
- * blkdev_get_by_dev - open a block device by device number
- * @dev: device number of block device to open
+ * bdev_open - open a block device
+ * @bdev: block device to open
  * @mode: open mode (BLK_OPEN_*)
  * @holder: exclusive holder identifier
  * @hops: holder operations
+ * @bdev_file: file for the block device
  *
- * Open the block device described by device number @dev. If @holder is not
- * %NULL, the block device is opened with exclusive access.  Exclusive opens may
- * nest for the same @holder.
- *
- * Use this interface ONLY if you really do not have anything better - i.e. when
- * you are behind a truly sucky interface and all you are given is a device
- * number.  Everything else should use blkdev_get_by_path().
+ * Open the block device. If @holder is not %NULL, the block device is opened
+ * with exclusive access.  Exclusive opens may nest for the same @holder.
  *
  * CONTEXT:
  * Might sleep.
  *
  * RETURNS:
- * Reference to the block_device on success, ERR_PTR(-errno) on failure.
+ * zero on success, -errno on failure.
  */
-struct block_device *blkdev_get_by_dev(dev_t dev, blk_mode_t mode, void *holder,
-		const struct blk_holder_ops *hops)
+int bdev_open(struct block_device *bdev, blk_mode_t mode, void *holder,
+	      const struct blk_holder_ops *hops, struct file *bdev_file)
 {
 	bool unblock_events = true;
-	struct block_device *bdev;
-	struct gendisk *disk;
+	struct gendisk *disk = bdev->bd_disk;
 	int ret;
-
-	ret = devcgroup_check_permission(DEVCG_DEV_BLOCK,
-			MAJOR(dev), MINOR(dev),
-			((mode & BLK_OPEN_READ) ? DEVCG_ACC_READ : 0) |
-			((mode & BLK_OPEN_WRITE) ? DEVCG_ACC_WRITE : 0));
-	if (ret)
-		return ERR_PTR(ret);
-
-	bdev = blkdev_get_no_open(dev);
-	if (!bdev)
-		return ERR_PTR(-ENXIO);
-	disk = bdev->bd_disk;
 
 	if (holder) {
 		mode |= BLK_OPEN_EXCL;
 		ret = bd_prepare_to_claim(bdev, holder, hops);
 		if (ret)
-			goto put_blkdev;
+			return ret;
 	} else {
-		if (WARN_ON_ONCE(mode & BLK_OPEN_EXCL)) {
-			ret = -EIO;
-			goto put_blkdev;
-		}
+		if (WARN_ON_ONCE(mode & BLK_OPEN_EXCL))
+			return -EIO;
 	}
 
 	disk_block_events(disk);
@@ -884,12 +866,16 @@ struct block_device *blkdev_get_by_dev(dev_t dev, blk_mode_t mode, void *holder,
 		goto abort_claiming;
 	if (!try_module_get(disk->fops->owner))
 		goto abort_claiming;
+	ret = -EBUSY;
+	if (!bdev_may_open(bdev, mode))
+		goto put_module;
 	if (bdev_is_partition(bdev))
 		ret = blkdev_get_part(bdev, mode);
 	else
 		ret = blkdev_get_whole(bdev, mode);
 	if (ret)
 		goto put_module;
+	bdev_claim_write_access(bdev, mode);
 	if (holder) {
 		bd_finish_claiming(bdev, holder, hops);
 
@@ -910,7 +896,18 @@ struct block_device *blkdev_get_by_dev(dev_t dev, blk_mode_t mode, void *holder,
 
 	if (unblock_events)
 		disk_unblock_events(disk);
-	return bdev;
+
+	bdev_file->f_flags |= O_LARGEFILE;
+	bdev_file->f_mode |= FMODE_BUF_RASYNC | FMODE_CAN_ODIRECT;
+	if (bdev_nowait(bdev))
+		bdev_file->f_mode |= FMODE_NOWAIT;
+	if (mode & BLK_OPEN_RESTRICT_WRITES)
+		bdev_file->f_mode |= FMODE_WRITE_RESTRICTED;
+	bdev_file->f_mapping = bdev->bd_inode->i_mapping;
+	bdev_file->f_wb_err = filemap_sample_wb_err(bdev_file->f_mapping);
+	bdev_file->private_data = holder;
+
+	return 0;
 put_module:
 	module_put(disk->fops->owner);
 abort_claiming:
@@ -918,53 +915,32 @@ abort_claiming:
 		bd_abort_claiming(bdev, holder);
 	mutex_unlock(&disk->open_mutex);
 	disk_unblock_events(disk);
-put_blkdev:
-	blkdev_put_no_open(bdev);
-	return ERR_PTR(ret);
+	return ret;
 }
-EXPORT_SYMBOL(blkdev_get_by_dev);
 
-/**
- * blkdev_get_by_path - open a block device by name
- * @path: path to the block device to open
- * @mode: open mode (BLK_OPEN_*)
- * @holder: exclusive holder identifier
- * @hops: holder operations
- *
- * Open the block device described by the device file at @path.  If @holder is
- * not %NULL, the block device is opened with exclusive access.  Exclusive opens
- * may nest for the same @holder.
- *
- * CONTEXT:
- * Might sleep.
- *
- * RETURNS:
- * Reference to the block_device on success, ERR_PTR(-errno) on failure.
- */
-struct block_device *blkdev_get_by_path(const char *path, blk_mode_t mode,
-		void *holder, const struct blk_holder_ops *hops)
+static inline void bd_yield_claim(struct file *bdev_file)
 {
-	struct block_device *bdev;
-	dev_t dev;
-	int error;
+	struct block_device *bdev = file_bdev(bdev_file);
+	void *holder = bdev_file->private_data;
 
-	error = lookup_bdev(path, &dev);
-	if (error)
-		return ERR_PTR(error);
+	lockdep_assert_held(&bdev->bd_disk->open_mutex);
 
-	bdev = blkdev_get_by_dev(dev, mode, holder, hops);
-	if (!IS_ERR(bdev) && (mode & BLK_OPEN_WRITE) && bdev_read_only(bdev)) {
-		blkdev_put(bdev, holder);
-		return ERR_PTR(-EACCES);
-	}
+	if (WARN_ON_ONCE(IS_ERR_OR_NULL(holder)))
+		return;
 
-	return bdev;
+	if (!bdev_unclaimed(bdev_file))
+		bd_end_claim(bdev, holder);
 }
-EXPORT_SYMBOL(blkdev_get_by_path);
 
-void blkdev_put(struct block_device *bdev, void *holder)
+void bdev_release(struct file *bdev_file)
 {
+	struct block_device *bdev = file_bdev(bdev_file);
+	void *holder = bdev_file->private_data;
 	struct gendisk *disk = bdev->bd_disk;
+
+	/* We failed to open that block device. */
+	if (IS_ERR(holder))
+		goto put_no_open;
 
 	/*
 	 * Sync early if it looks like we're the last one.  If someone else
@@ -977,8 +953,10 @@ void blkdev_put(struct block_device *bdev, void *holder)
 		sync_blockdev(bdev);
 
 	mutex_lock(&disk->open_mutex);
+	bdev_yield_write_access(bdev_file);
+
 	if (holder)
-		bd_end_claim(bdev, holder);
+		bd_yield_claim(bdev_file);
 
 	/*
 	 * Trigger event checking and tell drivers to flush MEDIA_CHANGE
@@ -994,9 +972,132 @@ void blkdev_put(struct block_device *bdev, void *holder)
 	mutex_unlock(&disk->open_mutex);
 
 	module_put(disk->fops->owner);
+put_no_open:
 	blkdev_put_no_open(bdev);
 }
-EXPORT_SYMBOL(blkdev_put);
+
+/*
+ * If BLK_OPEN_WRITE_IOCTL is set then this is a historical quirk
+ * associated with the floppy driver where it has allowed ioctls if the
+ * file was opened for writing, but does not allow reads or writes.
+ * Make sure that this quirk is reflected in @f_flags.
+ *
+ * It can also happen if a block device is opened as O_RDWR | O_WRONLY.
+ */
+static unsigned blk_to_file_flags(blk_mode_t mode)
+{
+	unsigned int flags = 0;
+
+	if ((mode & (BLK_OPEN_READ | BLK_OPEN_WRITE)) ==
+	    (BLK_OPEN_READ | BLK_OPEN_WRITE))
+		flags |= O_RDWR;
+	else if (mode & BLK_OPEN_WRITE_IOCTL)
+		flags |= O_RDWR | O_WRONLY;
+	else if (mode & BLK_OPEN_WRITE)
+		flags |= O_WRONLY;
+	else if (mode & BLK_OPEN_READ)
+		flags |= O_RDONLY; /* homeopathic, because O_RDONLY is 0 */
+	else
+		WARN_ON_ONCE(true);
+
+	if (mode & BLK_OPEN_NDELAY)
+		flags |= O_NDELAY;
+
+	return flags;
+}
+
+struct file *bdev_file_open_by_dev(dev_t dev, blk_mode_t mode, void *holder,
+				   const struct blk_holder_ops *hops)
+{
+	struct file *bdev_file;
+	struct block_device *bdev;
+	unsigned int flags;
+	int ret;
+
+	ret = bdev_permission(dev, mode, holder);
+	if (ret)
+		return ERR_PTR(ret);
+
+	bdev = blkdev_get_no_open(dev);
+	if (!bdev)
+		return ERR_PTR(-ENXIO);
+
+	flags = blk_to_file_flags(mode);
+	bdev_file = alloc_file_pseudo_noaccount(bdev->bd_inode,
+			blockdev_mnt, "", flags | O_LARGEFILE, &def_blk_fops);
+	if (IS_ERR(bdev_file)) {
+		blkdev_put_no_open(bdev);
+		return bdev_file;
+	}
+	ihold(bdev->bd_inode);
+
+	ret = bdev_open(bdev, mode, holder, hops, bdev_file);
+	if (ret) {
+		/* We failed to open the block device. Let ->release() know. */
+		bdev_file->private_data = ERR_PTR(ret);
+		fput(bdev_file);
+		return ERR_PTR(ret);
+	}
+	return bdev_file;
+}
+EXPORT_SYMBOL(bdev_file_open_by_dev);
+
+struct file *bdev_file_open_by_path(const char *path, blk_mode_t mode,
+				    void *holder,
+				    const struct blk_holder_ops *hops)
+{
+	struct file *file;
+	dev_t dev;
+	int error;
+
+	error = lookup_bdev(path, &dev);
+	if (error)
+		return ERR_PTR(error);
+
+	file = bdev_file_open_by_dev(dev, mode, holder, hops);
+	if (!IS_ERR(file) && (mode & BLK_OPEN_WRITE)) {
+		if (bdev_read_only(file_bdev(file))) {
+			fput(file);
+			file = ERR_PTR(-EACCES);
+		}
+	}
+
+	return file;
+}
+EXPORT_SYMBOL(bdev_file_open_by_path);
+
+/**
+ * bdev_fput - yield claim to the block device and put the file
+ * @bdev_file: open block device
+ *
+ * Yield claim on the block device and put the file. Ensure that the
+ * block device can be reclaimed before the file is closed which is a
+ * deferred operation.
+ */
+void bdev_fput(struct file *bdev_file)
+{
+	if (WARN_ON_ONCE(bdev_file->f_op != &def_blk_fops))
+		return;
+
+	if (bdev_file->private_data) {
+		struct block_device *bdev = file_bdev(bdev_file);
+		struct gendisk *disk = bdev->bd_disk;
+
+		mutex_lock(&disk->open_mutex);
+		bdev_yield_write_access(bdev_file);
+		bd_yield_claim(bdev_file);
+		/*
+		 * Tell release we already gave up our hold on the
+		 * device and if write restrictions are available that
+		 * we already gave up write access to the device.
+		 */
+		bdev_file->private_data = BDEV_I(bdev_file->f_mapping->host);
+		mutex_unlock(&disk->open_mutex);
+	}
+
+	fput(bdev_file);
+}
+EXPORT_SYMBOL(bdev_fput);
 
 /**
  * lookup_bdev() - Look up a struct block_device by name.
@@ -1038,26 +1139,39 @@ out_path_put:
 }
 EXPORT_SYMBOL(lookup_bdev);
 
-int __invalidate_device(struct block_device *bdev, bool kill_dirty)
+/**
+ * bdev_mark_dead - mark a block device as dead
+ * @bdev: block device to operate on
+ * @surprise: indicate a surprise removal
+ *
+ * Tell the file system that this devices or media is dead.  If @surprise is set
+ * to %true the device or media is already gone, if not we are preparing for an
+ * orderly removal.
+ *
+ * This calls into the file system, which then typicall syncs out all dirty data
+ * and writes back inodes and then invalidates any cached data in the inodes on
+ * the file system.  In addition we also invalidate the block device mapping.
+ */
+void bdev_mark_dead(struct block_device *bdev, bool surprise)
 {
-	struct super_block *sb = get_super(bdev);
-	int res = 0;
-
-	if (sb) {
-		/*
-		 * no need to lock the super, get_super holds the
-		 * read mutex so the filesystem cannot go away
-		 * under us (->put_super runs with the write lock
-		 * hold).
-		 */
-		shrink_dcache_sb(sb);
-		res = invalidate_inodes(sb, kill_dirty);
-		drop_super(sb);
+	mutex_lock(&bdev->bd_holder_lock);
+	if (bdev->bd_holder_ops && bdev->bd_holder_ops->mark_dead)
+		bdev->bd_holder_ops->mark_dead(bdev, surprise);
+	else {
+		mutex_unlock(&bdev->bd_holder_lock);
+		sync_blockdev(bdev);
 	}
+
 	invalidate_bdev(bdev);
-	return res;
 }
-EXPORT_SYMBOL(__invalidate_device);
+#ifdef CONFIG_DASD_MODULE
+/*
+ * Drivers should not use this directly, but the DASD driver has historically
+ * had a shutdown to offline mode that doesn't actually remove the gendisk
+ * that otherwise looks a lot like a safe device removal.
+ */
+EXPORT_SYMBOL_GPL(bdev_mark_dead);
+#endif
 
 void sync_bdevs(bool wait)
 {
@@ -1132,3 +1246,12 @@ void bdev_statx_dioalign(struct inode *inode, struct kstat *stat)
 
 	blkdev_put_no_open(bdev);
 }
+
+static int __init setup_bdev_allow_write_mounted(char *str)
+{
+	if (kstrtobool(str, &bdev_allow_write_mounted))
+		pr_warn("Invalid option string for bdev_allow_write_mounted:"
+			" '%s'\n", str);
+	return 1;
+}
+__setup("bdev_allow_write_mounted=", setup_bdev_allow_write_mounted);

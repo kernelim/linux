@@ -148,15 +148,6 @@ Rebooting
      Don't stop other CPUs on reboot. This can make reboot more reliable
      in some cases.
 
-Non Executable Mappings
-=======================
-
-  noexec=on|off
-    on
-      Enable(default)
-    off
-      Disable
-
 NUMA
 ====
 

@@ -1,2 +1,3 @@
-#4-
-0xd8de7026	dmam_free_coherent	vmlinux	EXPORT_SYMBOL	
+#5-
+0x22718201	dmam_free_coherent	vmlinux	EXPORT_SYMBOL	
+

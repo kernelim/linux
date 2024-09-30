@@ -1,2 +1,3 @@
-#4-
-0x231556bf	vfs_fsync_range	vmlinux	EXPORT_SYMBOL	
+#5-
+0x193a688e	vfs_fsync_range	vmlinux	EXPORT_SYMBOL	
+

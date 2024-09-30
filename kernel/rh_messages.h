@@ -49,6 +49,10 @@
 static const char *rh_deprecated_drivers[] = {
 	"aacraid",
 	"af_key",
+	"bnx2fc",
+	"bnx2i",
+	"bnx2x",
+	"cnic",
 	"firewire-core",
 	"qla4xxx",
 	"team",
@@ -61,6 +65,10 @@ static const char *rh_deprecated_init_fns[] = {
 	"fw_core_init",
 	"ipsec_pfkey_init",
 	"aac_init",
+	"cnic_init",
+	"bnx2x_init",
+	"bnx2fc_mod_init",
+	"bnx2i_mod_init",
 	0     /* Terminating entry */
 };
 
@@ -71,6 +79,7 @@ static const char *rh_unmaintained_drivers[] = {
 	"e1000",
 	"ebtables",
 	"hdlc_fr",
+	"hfi1",
 	"hpsa",
 	"ip6_tables",
 	"ip_set",
@@ -81,12 +90,17 @@ static const char *rh_unmaintained_drivers[] = {
 	"mptspi",
 	"myri10ge",
 	"netxen_nic",
+	"nfp",
 	"nft_compat",
 	"nicpf",
 	"nicvf",
 	"nvmet-fc",
 	"nvmet-tcp",
 	"qla3xxx",
+	"rdma_rxe",
+	"siw",
+	"usnic_verbs",
+	"vmw_pvrdma",
 	0     /* Terminating entry */
 };
 
@@ -111,8 +125,14 @@ static const char *rh_unmaintained_init_fns[] = {
 	"ip6_tables_init",
 	"ip_set_init",
 	"nft_compat_module_init",
+	"rxe_module_init",
 	"nicvf_init_module",
 	"nic_init_module",
+	"siw_init_module",
+	"usnic_ib_init",
+	"pvrdma_init",
+	"hfi1_mod_init",
+	"nfp_main_init",
 	0     /* Terminating entry */
 };
 
@@ -285,6 +305,20 @@ static const struct pci_device_id rh_unmaintained_pci_devices[] = {
 	{ 0x1000, 0x0071, PCI_ANY_ID, PCI_ANY_ID },
 	{ 0x1000, 0x0073, PCI_ANY_ID, PCI_ANY_ID },
 	{ 0x1000, 0x0079, PCI_ANY_ID, PCI_ANY_ID },
+	{ 0x15B3, 0x1003, PCI_ANY_ID, PCI_ANY_ID },
+	{ 0x15B3, 0x1004, PCI_ANY_ID, PCI_ANY_ID },
+	{ 0x15B3, 0x1005, PCI_ANY_ID, PCI_ANY_ID },
+	{ 0x15B3, 0x1006, PCI_ANY_ID, PCI_ANY_ID },
+	{ 0x15B3, 0x1007, PCI_ANY_ID, PCI_ANY_ID },
+	{ 0x15B3, 0x1008, PCI_ANY_ID, PCI_ANY_ID },
+	{ 0x15B3, 0x1009, PCI_ANY_ID, PCI_ANY_ID },
+	{ 0x15B3, 0x100a, PCI_ANY_ID, PCI_ANY_ID },
+	{ 0x15B3, 0x100b, PCI_ANY_ID, PCI_ANY_ID },
+	{ 0x15B3, 0x100c, PCI_ANY_ID, PCI_ANY_ID },
+	{ 0x15B3, 0x100d, PCI_ANY_ID, PCI_ANY_ID },
+	{ 0x15B3, 0x100e, PCI_ANY_ID, PCI_ANY_ID },
+	{ 0x15B3, 0x100f, PCI_ANY_ID, PCI_ANY_ID },
+	{ 0x15B3, 0x1010, PCI_ANY_ID, PCI_ANY_ID },
 	{ 0x15B3, 0xA2DC, PCI_ANY_ID, PCI_ANY_ID },
 	{ 0x1000, 0x006E, PCI_ANY_ID, PCI_ANY_ID },
 	{ 0x1000, 0x0080, PCI_ANY_ID, PCI_ANY_ID },

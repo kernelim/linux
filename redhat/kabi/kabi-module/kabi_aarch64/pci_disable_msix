@@ -1,2 +1,3 @@
-#4-
-0x2b97a11b	pci_disable_msix	vmlinux	EXPORT_SYMBOL	
+#5-
+0xd7af68f2	pci_disable_msix	vmlinux	EXPORT_SYMBOL	
+

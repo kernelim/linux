@@ -87,7 +87,7 @@ enum {
 	SSTATUS	= 36, /* 0x90 */
 	PRC	= 37, /* 0x94 */
 
-#if 0	
+#if 0
 	/* PCI Registers */
 	DVID	= 0x00000000L,
 	SC	= 0x00000004L,
@@ -104,8 +104,8 @@ enum {
 	PDATA	= 0x04,
 	PPMASK	= 0x08,
 	PADDRR	= 0x0c,
-	PIDXLO	= 0x10,	
-	PIDXHI	= 0x14,	
+	PIDXLO	= 0x10,
+	PIDXHI	= 0x14,
 	PIDXDATA= 0x18,
 	PIDXCTL	= 0x1c
 };
@@ -132,7 +132,7 @@ enum {
 	SYSCLKC		= 0x18,	/* () System Clock C */
 	/*
 	 * Dot clock rate is 20MHz * (m + 1) / ((n + 1) * (p ? 2 * p : 1)
-	 * c is charge pump bias which depends on the VCO frequency  
+	 * c is charge pump bias which depends on the VCO frequency
 	 */
 	PIXM0		= 0x20,	/* () Pixel M 0 */
 	PIXN0		= 0x21,	/* () Pixel N 0 */
@@ -321,7 +321,7 @@ struct imstt_par {
 	__u32 ramdac;
 	__u32 palette[16];
 };
- 
+
 enum {
 	IBM = 0,
 	TVP = 1
@@ -374,7 +374,7 @@ static struct imstt_regvals tvp_reg_init_17 = {
 
 static struct imstt_regvals tvp_reg_init_18 = {
 	1152,
-  	0x0009, 0x0011, 0x059, 0x5b, 0x0003, 0x0031, 0x0397, 0x039a, 0x0000, 
+  	0x0009, 0x0011, 0x059, 0x5b, 0x0003, 0x0031, 0x0397, 0x039a, 0x0000,
 	0xfd, 0x3a, 0xf1,
 	{ 0x39, 0x38, 0x38 }, { 0xf3, 0xf3, 0xf2 }
 };
@@ -857,10 +857,10 @@ imsttfb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 }
 
 static int
-imsttfb_set_par(struct fb_info *info) 
+imsttfb_set_par(struct fb_info *info)
 {
 	struct imstt_par *par = info->par;
-		
+
 	if (!compute_imstt_regvals(par, info->var.xres, info->var.yres))
 		return -EINVAL;
 
@@ -931,7 +931,7 @@ imsttfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
 	return 0;
 }
 
-static int 
+static int
 imsttfb_blank(int blank, struct fb_info *info)
 {
 	struct imstt_par *par = info->par;
@@ -987,7 +987,7 @@ imsttfb_blank(int blank, struct fb_info *info)
 
 static void
 imsttfb_fillrect(struct fb_info *info, const struct fb_fillrect *rect)
-{ 
+{
 	struct imstt_par *par = info->par;
 	__u32 Bpp, line_pitch, bgc, dx, dy, width, height;
 
@@ -1193,7 +1193,7 @@ imstt_set_cursor(struct imstt_par *par, struct fb_image *d, int on)
 	}
 }
 
-static int 
+static int
 imsttfb_cursor(struct fb_info *info, struct fb_cursor *cursor)
 {
 	struct imstt_par *par = info->par;
@@ -1201,7 +1201,7 @@ imsttfb_cursor(struct fb_info *info, struct fb_cursor *cursor)
 
 	if (cursor->dest == NULL && cursor->rop == ROP_XOR)
 		return 1;
-	
+
 	imstt_set_cursor(info, cursor, 0);
 
 	if (flags & FB_CUR_SETPOS) {
@@ -1336,6 +1336,7 @@ static struct pci_driver imsttfb_pci_driver = {
 
 static const struct fb_ops imsttfb_ops = {
 	.owner 		= THIS_MODULE,
+	__FB_DEFAULT_IOMEM_OPS_RDWR,
 	.fb_check_var	= imsttfb_check_var,
 	.fb_set_par 	= imsttfb_set_par,
 	.fb_setcolreg 	= imsttfb_setcolreg,
@@ -1345,6 +1346,7 @@ static const struct fb_ops imsttfb_ops = {
 	.fb_copyarea	= imsttfb_copyarea,
 	.fb_imageblit	= cfb_imageblit,
 	.fb_ioctl 	= imsttfb_ioctl,
+	__FB_DEFAULT_IOMEM_OPS_MMAP,
 };
 
 static void init_imstt(struct fb_info *info)
@@ -1447,8 +1449,7 @@ static void init_imstt(struct fb_info *info)
 	info->var.pixclock = 1000000 / getclkMHz(par);
 
 	info->fbops = &imsttfb_ops;
-	info->flags = FBINFO_DEFAULT |
-                      FBINFO_HWACCEL_COPYAREA |
+	info->flags = FBINFO_HWACCEL_COPYAREA |
 	              FBINFO_HWACCEL_FILLRECT |
 	              FBINFO_HWACCEL_YPAN;
 
@@ -1617,7 +1618,12 @@ static int __init imsttfb_init(void)
 {
 #ifndef MODULE
 	char *option = NULL;
+#endif
 
+	if (fb_modesetting_disabled("imsttfb"))
+		return -ENODEV;
+
+#ifndef MODULE
 	if (fb_get_options("imsttfb", &option))
 		return -ENODEV;
 
@@ -1625,7 +1631,7 @@ static int __init imsttfb_init(void)
 #endif
 	return pci_register_driver(&imsttfb_pci_driver);
 }
- 
+
 static void __exit imsttfb_exit(void)
 {
 	pci_unregister_driver(&imsttfb_pci_driver);

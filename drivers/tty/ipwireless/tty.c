@@ -186,8 +186,8 @@ static void ipw_write_packet_sent_callback(void *callback_data,
 	tty->tx_bytes_queued -= packet_length;
 }
 
-static int ipw_write(struct tty_struct *linux_tty,
-		     const unsigned char *buf, int count)
+static ssize_t ipw_write(struct tty_struct *linux_tty, const u8 *buf,
+			 size_t count)
 {
 	struct ipw_tty *tty = linux_tty->driver_data;
 	int room, ret;
@@ -585,7 +585,7 @@ int ipwireless_tty_init(void)
 	if (result) {
 		printk(KERN_ERR IPWIRELESS_PCCARD_NAME
 		       ": failed to register tty driver\n");
-		put_tty_driver(ipw_tty_driver);
+		tty_driver_kref_put(ipw_tty_driver);
 		return result;
 	}
 
@@ -595,7 +595,7 @@ int ipwireless_tty_init(void)
 void ipwireless_tty_release(void)
 {
 	tty_unregister_driver(ipw_tty_driver);
-	put_tty_driver(ipw_tty_driver);
+	tty_driver_kref_put(ipw_tty_driver);
 }
 
 int ipwireless_tty_is_modem(struct ipw_tty *tty)

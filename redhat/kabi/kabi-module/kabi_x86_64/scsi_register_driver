@@ -1,2 +1,3 @@
-#4-
-0x40e2ad8d	scsi_register_driver	vmlinux	EXPORT_SYMBOL	
+#5-
+0x3044f455	scsi_register_driver	vmlinux	EXPORT_SYMBOL	
+

@@ -384,7 +384,7 @@ static void corrupt_bio_random(struct bio *bio)
 		return;
 
 	corrupt_byte = get_random_u32() % bio->bi_iter.bi_size;
-	corrupt_value = get_random_u32() & 0xff;
+	corrupt_value = get_random_u8();
 
 	corrupt_bio_common(bio, corrupt_byte, corrupt_value);
 }
@@ -434,7 +434,7 @@ static struct bio *clone_bio(struct dm_target *ti, struct flakey_c *fc, struct b
 
 	remaining_size = size;
 
-	order = MAX_ORDER - 1;
+	order = MAX_ORDER;
 	while (remaining_size) {
 		struct page *pages;
 		unsigned size_to_add, to_copy;

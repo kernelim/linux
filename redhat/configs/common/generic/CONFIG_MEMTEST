@@ -1,1 +1,1 @@
-# CONFIG_MEMTEST is not set
+CONFIG_MEMTEST=y

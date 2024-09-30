@@ -1,2 +1,3 @@
-#4-
-0xe04c2430	sysfs_remove_file_ns	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0xd2399e79	sysfs_remove_file_ns	vmlinux	EXPORT_SYMBOL_GPL	
+

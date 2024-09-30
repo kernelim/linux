@@ -20,14 +20,6 @@ EXPORT_SYMBOL_GPL(imx_ccm_lock);
 bool mcore_booted;
 EXPORT_SYMBOL_GPL(mcore_booted);
 
-void imx_unregister_clocks(struct clk *clks[], unsigned int count)
-{
-	unsigned int i;
-
-	for (i = 0; i < count; i++)
-		clk_unregister(clks[i]);
-}
-
 void imx_unregister_hw_clocks(struct clk_hw *hws[], unsigned int count)
 {
 	unsigned int i;
@@ -108,6 +100,20 @@ struct clk_hw *imx_obtain_fixed_clock_hw(
 	if (IS_ERR(clk))
 		clk = imx_clk_fixed(name, rate);
 	return __clk_get_hw(clk);
+}
+
+struct clk_hw *imx_obtain_fixed_of_clock(struct device_node *np,
+					 const char *name, unsigned long rate)
+{
+	struct clk *clk = of_clk_get_by_name(np, name);
+	struct clk_hw *hw;
+
+	if (IS_ERR(clk))
+		hw = imx_obtain_fixed_clock_hw(name, rate);
+	else
+		hw = __clk_get_hw(clk);
+
+	return hw;
 }
 
 struct clk_hw *imx_get_clk_hw_by_name(struct device_node *np, const char *name)

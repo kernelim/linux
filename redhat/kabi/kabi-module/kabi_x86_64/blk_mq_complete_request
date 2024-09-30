@@ -1,2 +1,3 @@
-#4-
-0xd92a57f8	blk_mq_complete_request	vmlinux	EXPORT_SYMBOL	
+#5-
+0xe3503def	blk_mq_complete_request	vmlinux	EXPORT_SYMBOL	
+

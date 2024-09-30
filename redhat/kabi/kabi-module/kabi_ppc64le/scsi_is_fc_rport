@@ -1,2 +1,3 @@
-#4-
-0xf9f58d87	scsi_is_fc_rport	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
+#5-
+0xd6d67e72	scsi_is_fc_rport	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
+

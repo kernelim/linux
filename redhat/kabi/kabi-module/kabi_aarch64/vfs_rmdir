@@ -1,2 +1,3 @@
-#4-
-0x36836d11	vfs_rmdir	vmlinux	EXPORT_SYMBOL	
+#5-
+0xd97350bf	vfs_rmdir	vmlinux	EXPORT_SYMBOL	
+

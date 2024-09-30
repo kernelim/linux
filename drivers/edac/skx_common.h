@@ -10,6 +10,7 @@
 #define _SKX_COMM_EDAC_H
 
 #include <linux/bits.h>
+#include <asm/mce.h>
 
 #define MSG_SIZE		1024
 
@@ -51,6 +52,9 @@
 
 #define IS_DIMM_PRESENT(r)		GET_BITFIELD(r, 15, 15)
 #define IS_NVDIMM_PRESENT(r, i)		GET_BITFIELD(r, i, i)
+
+#define MCI_MISC_ECC_MODE(m)	(((m) >> 59) & 15)
+#define MCI_MISC_ECC_DDRT	8	/* read from DDRT */
 
 /*
  * According to Intel Architecture spec vol 3B,
@@ -149,6 +153,7 @@ enum {
 #define BIT_NM_CS	BIT_ULL(INDEX_NM_CS)
 
 struct decoded_addr {
+	struct mce *mce;
 	struct skx_dev *dev;
 	u64	addr;
 	int	socket;

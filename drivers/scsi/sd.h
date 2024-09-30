@@ -160,6 +160,8 @@ struct scsi_disk {
 	unsigned	security : 1;
 	unsigned	ignore_medium_access_errors : 1;
 
+	RH_KABI_FILL_HOLE(bool suspended)	/* Disk is suspended (stopped) */
+
 	/* FOR RH USE ONLY
 	 *
 	 * The following padding has been inserted before ABI freeze to

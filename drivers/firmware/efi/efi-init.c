@@ -95,7 +95,7 @@ static int __init uefi_init(u64 efi_system_table)
 	if (IS_ENABLED(CONFIG_64BIT))
 		set_bit(EFI_64BIT, &efi.flags);
 
-	retval = efi_systab_check_header(&systab->hdr, 2);
+	retval = efi_systab_check_header(&systab->hdr);
 	if (retval)
 		goto out;
 
@@ -233,6 +233,7 @@ void __init efi_init(void)
 	 * And now, memblock is fully populated, it is time to do capping.
 	 */
 	early_init_dt_check_for_usable_mem_range();
+	efi_find_mirror();
 	efi_esrt_init();
 	efi_mokvar_table_init();
 

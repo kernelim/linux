@@ -108,7 +108,7 @@ static void pty_unthrottle(struct tty_struct *tty)
  *	the other side of the pty/tty pair.
  */
 
-static int pty_write(struct tty_struct *tty, const unsigned char *buf, int c)
+static ssize_t pty_write(struct tty_struct *tty, const u8 *buf, size_t c)
 {
 	struct tty_struct *to = tty->link;
 
@@ -240,7 +240,7 @@ out:
 }
 
 static void pty_set_termios(struct tty_struct *tty,
-					struct ktermios *old_termios)
+			    const struct ktermios *old_termios)
 {
 	/* See if packet mode change of state. */
 	if (tty->link && tty->link->ctrl.packet) {

@@ -29,8 +29,9 @@ This document describes the Linux kernel Makefiles.
 	   --- 4.1 Simple Host Program
 	   --- 4.2 Composite Host Programs
 	   --- 4.3 Using C++ for host programs
-	   --- 4.4 Controlling compiler options for host programs
-	   --- 4.5 When host programs are actually built
+	   --- 4.4 Using Rust for host programs
+	   --- 4.5 Controlling compiler options for host programs
+	   --- 4.6 When host programs are actually built
 
 	=== 5 Userspace Program support
 	   --- 5.1 Simple Userspace Program
@@ -682,22 +683,27 @@ more details, with real examples.
 	In the above example, -Wno-unused-but-set-variable will be added to
 	KBUILD_CFLAGS only if gcc really accepts it.
 
-    cc-ifversion
-	cc-ifversion tests the version of $(CC) and equals the fourth parameter
-	if version expression is true, or the fifth (if given) if the version
-	expression is false.
+    gcc-min-version
+	gcc-min-version tests if the value of $(CONFIG_GCC_VERSION) is greater than
+	or equal to the provided value and evaluates to y if so.
 
 	Example::
 
-		#fs/reiserfs/Makefile
-		ccflags-y := $(call cc-ifversion, -lt, 0402, -O1)
+		cflags-$(call gcc-min-version, 70100) := -foo
 
-	In this example, ccflags-y will be assigned the value -O1 if the
-	$(CC) version is less than 4.2.
-	cc-ifversion takes all the shell operators:
-	-eq, -ne, -lt, -le, -gt, and -ge
-	The third parameter may be a text as in this example, but it may also
-	be an expanded variable or a macro.
+	In this example, cflags-y will be assigned the value -foo if $(CC) is gcc and
+	$(CONFIG_GCC_VERSION) is >= 7.1.
+
+    clang-min-version
+	clang-min-version tests if the value of $(CONFIG_CLANG_VERSION) is greater
+	than or equal to the provided value and evaluates to y if so.
+
+	Example::
+
+		cflags-$(call clang-min-version, 110000) := -foo
+
+	In this example, cflags-y will be assigned the value -foo if $(CC) is clang
+	and $(CONFIG_CLANG_VERSION) is >= 11.0.0.
 
     cc-cross-prefix
 	cc-cross-prefix is used to check if there exists a $(CC) in path with
@@ -835,7 +841,24 @@ Both possibilities are described in the following.
 		qconf-cxxobjs := qconf.o
 		qconf-objs    := check.o
 
-4.4 Controlling compiler options for host programs
+4.4 Using Rust for host programs
+--------------------------------
+
+	Kbuild offers support for host programs written in Rust. However,
+	since a Rust toolchain is not mandatory for kernel compilation,
+	it may only be used in scenarios where Rust is required to be
+	available (e.g. when  ``CONFIG_RUST`` is enabled).
+
+	Example::
+
+		hostprogs     := target
+		target-rust   := y
+
+	Kbuild will compile ``target`` using ``target.rs`` as the crate root,
+	located in the same directory as the ``Makefile``. The crate may
+	consist of several source files (see ``samples/rust/hostprogs``).
+
+4.5 Controlling compiler options for host programs
 --------------------------------------------------
 
 	When compiling host programs, it is possible to set specific flags.
@@ -867,7 +890,7 @@ Both possibilities are described in the following.
 	When linking qconf, it will be passed the extra option
 	"-L$(QTDIR)/lib".
 
-4.5 When host programs are actually built
+4.6 When host programs are actually built
 -----------------------------------------
 
 	Kbuild will only build host-programs when they are referenced
@@ -1181,6 +1204,17 @@ When kbuild executes, the following steps are followed (roughly):
 	The first example utilises the trick that a config option expands
 	to 'y' when selected.
 
+    KBUILD_RUSTFLAGS
+	$(RUSTC) compiler flags
+
+	Default value - see top level Makefile
+	Append or modify as required per architecture.
+
+	Often, the KBUILD_RUSTFLAGS variable depends on the configuration.
+
+	Note that target specification file generation (for ``--target``)
+	is handled in ``scripts/generate_rust_target.rs``.
+
     KBUILD_AFLAGS_KERNEL
 	Assembler options specific for built-in
 
@@ -1207,6 +1241,19 @@ When kbuild executes, the following steps are followed (roughly):
 	$(KBUILD_CFLAGS_MODULE) is used to add arch-specific options that
 	are used for $(CC).
 	From commandline CFLAGS_MODULE shall be used (see kbuild.rst).
+
+    KBUILD_RUSTFLAGS_KERNEL
+	$(RUSTC) options specific for built-in
+
+	$(KBUILD_RUSTFLAGS_KERNEL) contains extra Rust compiler flags used to
+	compile resident kernel code.
+
+    KBUILD_RUSTFLAGS_MODULE
+	Options for $(RUSTC) when building modules
+
+	$(KBUILD_RUSTFLAGS_MODULE) is used to add arch-specific options that
+	are used for $(RUSTC).
+	From commandline RUSTFLAGS_MODULE shall be used (see kbuild.rst).
 
     KBUILD_LDFLAGS_MODULE
 	Options for $(LD) when linking modules

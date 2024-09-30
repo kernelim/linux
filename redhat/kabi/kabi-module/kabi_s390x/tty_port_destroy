@@ -1,2 +1,3 @@
-#4-
-0x05b504a5	tty_port_destroy	vmlinux	EXPORT_SYMBOL	
+#5-
+0x2ebbc846	tty_port_destroy	vmlinux	EXPORT_SYMBOL	
+

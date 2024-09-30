@@ -1,2 +1,3 @@
-#4-
-0x99ebcc3e	tls_get_record	net/tls/tls	EXPORT_SYMBOL	
+#5-
+0xcc782ea0	tls_get_record	net/tls/tls	EXPORT_SYMBOL	
+

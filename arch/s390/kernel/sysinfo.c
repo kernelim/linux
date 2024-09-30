@@ -20,7 +20,7 @@
 #include <asm/sysinfo.h>
 #include <asm/cpcmd.h>
 #include <asm/topology.h>
-#include <asm/fpu/api.h>
+#include <asm/fpu.h>
 
 int topology_max_mnest;
 
@@ -416,9 +416,9 @@ subsys_initcall(create_proc_service_level);
  */
 void s390_adjust_jiffies(void)
 {
+	DECLARE_KERNEL_FPU_ONSTACK16(fpu);
 	struct sysinfo_1_2_2 *info;
 	unsigned long capability;
-	struct kernel_fpu fpu;
 
 	info = (void *) get_zeroed_page(GFP_KERNEL);
 	if (!info)

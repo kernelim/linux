@@ -1,2 +1,3 @@
-#4-
-0x3dd7e8cc	pci_dev_put	vmlinux	EXPORT_SYMBOL	
+#5-
+0x440c0410	pci_dev_put	vmlinux	EXPORT_SYMBOL	
+

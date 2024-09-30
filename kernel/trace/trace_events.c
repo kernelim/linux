@@ -979,7 +979,7 @@ static void remove_event_file_dir(struct trace_event_file *file)
 
 	if (dir) {
 		spin_lock(&dir->d_lock);	/* probably unneeded */
-		list_for_each_entry(child, &dir->d_subdirs, d_child) {
+		hlist_for_each_entry(child, &dir->d_children, d_sib) {
 			if (d_really_is_positive(child))	/* probably unneeded */
 				d_inode(child)->i_private = NULL;
 		}

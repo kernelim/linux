@@ -727,12 +727,12 @@ exit:
 	spin_unlock_irq(&port->port_lock);
 }
 
-static int gs_write(struct tty_struct *tty, const unsigned char *buf, int count)
+static ssize_t gs_write(struct tty_struct *tty, const u8 *buf, size_t count)
 {
 	struct gs_port	*port = tty->driver_data;
 	unsigned long	flags;
 
-	pr_vdebug("gs_write: ttyGS%d (%p) writing %d bytes\n",
+	pr_vdebug("gs_write: ttyGS%d (%p) writing %zu bytes\n",
 			port->port_num, tty, count);
 
 	spin_lock_irqsave(&port->port_lock, flags);
@@ -746,7 +746,7 @@ static int gs_write(struct tty_struct *tty, const unsigned char *buf, int count)
 	return count;
 }
 
-static int gs_put_char(struct tty_struct *tty, unsigned char ch)
+static int gs_put_char(struct tty_struct *tty, u8 ch)
 {
 	struct gs_port	*port = tty->driver_data;
 	unsigned long	flags;
@@ -1492,7 +1492,7 @@ static int userial_init(void)
 
 	return status;
 fail:
-	put_tty_driver(driver);
+	tty_driver_kref_put(driver);
 	return status;
 }
 module_init(userial_init);
@@ -1500,7 +1500,7 @@ module_init(userial_init);
 static void userial_cleanup(void)
 {
 	tty_unregister_driver(gs_tty_driver);
-	put_tty_driver(gs_tty_driver);
+	tty_driver_kref_put(gs_tty_driver);
 	gs_tty_driver = NULL;
 }
 module_exit(userial_cleanup);

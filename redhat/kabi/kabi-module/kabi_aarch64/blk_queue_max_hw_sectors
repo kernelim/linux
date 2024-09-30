@@ -1,2 +1,3 @@
-#4-
-0xe1507fbd	blk_queue_max_hw_sectors	vmlinux	EXPORT_SYMBOL	
+#5-
+0x72f0951b	blk_queue_max_hw_sectors	vmlinux	EXPORT_SYMBOL	
+

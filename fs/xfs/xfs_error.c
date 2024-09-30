@@ -311,7 +311,7 @@ xfs_errortag_test(
 		return false;
 
 	randfactor = mp->m_errortag[error_tag];
-	if (!randfactor || prandom_u32() % randfactor)
+	if (!randfactor || get_random_u32_below(randfactor))
 		return false;
 
 	xfs_warn_ratelimited(mp,

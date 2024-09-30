@@ -144,7 +144,7 @@ struct dev_pagemap {
 	RH_KABI_RESERVE(5)
 	union {
 		struct range range;
-		struct range ranges[0];
+		DECLARE_FLEX_ARRAY(struct range, ranges);
 	};
 };
 

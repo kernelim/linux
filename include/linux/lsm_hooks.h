@@ -1501,39 +1501,6 @@
  *	from a key or keyring.
  *	@key: The key to watch.
  *
- * Security hooks for using the eBPF maps and programs functionalities through
- * eBPF syscalls.
- *
- * @bpf:
- *	Do a initial check for all bpf syscalls after the attribute is copied
- *	into the kernel. The actual security module can implement their own
- *	rules to check the specific cmd they need.
- *
- * @bpf_map:
- *	Do a check when the kernel generate and return a file descriptor for
- *	eBPF maps.
- *
- *	@map: bpf map that we want to access
- *	@mask: the access flags
- *
- * @bpf_prog:
- *	Do a check when the kernel generate and return a file descriptor for
- *	eBPF programs.
- *
- *	@prog: bpf prog that userspace want to use.
- *
- * @bpf_map_alloc_security:
- *	Initialize the security field inside bpf map.
- *
- * @bpf_map_free_security:
- *	Clean up the security information stored inside bpf map.
- *
- * @bpf_prog_alloc_security:
- *	Initialize the security field inside bpf program.
- *
- * @bpf_prog_free_security:
- *	Clean up the security information stored inside bpf prog.
- *
  * @locked_down:
  *     Determine whether a kernel feature that potentially enables arbitrary
  *     code execution in kernel space should be permitted.

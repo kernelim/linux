@@ -138,6 +138,8 @@
 #define MDIO_PMA_SPEED_1000		0x0010	/* 1000M capable */
 #define MDIO_PMA_SPEED_100		0x0020	/* 100M capable */
 #define MDIO_PMA_SPEED_10		0x0040	/* 10M capable */
+#define MDIO_PMA_SPEED_2_5G		0x2000	/* 2.5G capable */
+#define MDIO_PMA_SPEED_5G		0x4000	/* 5G capable */
 #define MDIO_PCS_SPEED_10P2B		0x0002	/* 10PASS-TS/2BASE-TL capable */
 #define MDIO_PCS_SPEED_2_5G		0x0040	/* 2.5G capable */
 #define MDIO_PCS_SPEED_5G		0x0080	/* 5G capable */
@@ -232,6 +234,30 @@
 #define MDIO_PMA_EXTABLE_10BT		0x0100	/* 10BASE-T ability */
 #define MDIO_PMA_EXTABLE_BT1		0x0800	/* BASE-T1 ability */
 #define MDIO_PMA_EXTABLE_NBT		0x4000  /* 2.5/5GBASE-T ability */
+
+/* AN Clause 73 linkword */
+#define MDIO_AN_C73_0_S_MASK		GENMASK(4, 0)
+#define MDIO_AN_C73_0_E_MASK		GENMASK(9, 5)
+#define MDIO_AN_C73_0_PAUSE		BIT(10)
+#define MDIO_AN_C73_0_ASM_DIR		BIT(11)
+#define MDIO_AN_C73_0_C2		BIT(12)
+#define MDIO_AN_C73_0_RF		BIT(13)
+#define MDIO_AN_C73_0_ACK		BIT(14)
+#define MDIO_AN_C73_0_NP		BIT(15)
+#define MDIO_AN_C73_1_T_MASK		GENMASK(4, 0)
+#define MDIO_AN_C73_1_1000BASE_KX	BIT(5)
+#define MDIO_AN_C73_1_10GBASE_KX4	BIT(6)
+#define MDIO_AN_C73_1_10GBASE_KR	BIT(7)
+#define MDIO_AN_C73_1_40GBASE_KR4	BIT(8)
+#define MDIO_AN_C73_1_40GBASE_CR4	BIT(9)
+#define MDIO_AN_C73_1_100GBASE_CR10	BIT(10)
+#define MDIO_AN_C73_1_100GBASE_KP4	BIT(11)
+#define MDIO_AN_C73_1_100GBASE_KR4	BIT(12)
+#define MDIO_AN_C73_1_100GBASE_CR4	BIT(13)
+#define MDIO_AN_C73_1_25GBASE_R_S	BIT(14)
+#define MDIO_AN_C73_1_25GBASE_R		BIT(15)
+#define MDIO_AN_C73_2_2500BASE_KX	BIT(0)
+#define MDIO_AN_C73_2_5GBASE_KR		BIT(1)
 
 /* PHY XGXS lane state register. */
 #define MDIO_PHYXS_LNSTAT_SYNC0		0x0001

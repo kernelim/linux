@@ -1,2 +1,3 @@
-#4-
-0x06170a33	blk_queue_logical_block_size	vmlinux	EXPORT_SYMBOL	
+#5-
+0x5049ffe2	blk_queue_logical_block_size	vmlinux	EXPORT_SYMBOL	
+

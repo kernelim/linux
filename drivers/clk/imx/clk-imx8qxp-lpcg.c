@@ -183,7 +183,6 @@ static int imx_lpcg_parse_clks_from_dt(struct platform_device *pdev,
 	unsigned int bit_offset[IMX_LPCG_MAX_CLKS];
 	struct clk_hw_onecell_data *clk_data;
 	struct clk_hw **clk_hws;
-	struct resource *res;
 	void __iomem *base;
 	int count;
 	int idx;
@@ -193,8 +192,7 @@ static int imx_lpcg_parse_clks_from_dt(struct platform_device *pdev,
 	if (!of_device_is_compatible(np, "fsl,imx8qxp-lpcg"))
 		return -EINVAL;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	base = devm_ioremap_resource(&pdev->dev, res);
+	base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
@@ -248,7 +246,7 @@ static int imx_lpcg_parse_clks_from_dt(struct platform_device *pdev,
 
 	for (i = 0; i < count; i++) {
 		idx = bit_offset[i] / 4;
-		if (idx > IMX_LPCG_MAX_CLKS) {
+		if (idx >= IMX_LPCG_MAX_CLKS) {
 			dev_warn(&pdev->dev, "invalid bit offset of clock %d\n",
 				 i);
 			ret = -EINVAL;
@@ -370,7 +368,7 @@ static struct platform_driver imx8qxp_lpcg_clk_driver = {
 	.probe = imx8qxp_lpcg_clk_probe,
 };
 
-builtin_platform_driver(imx8qxp_lpcg_clk_driver);
+module_platform_driver(imx8qxp_lpcg_clk_driver);
 
 MODULE_AUTHOR("Aisheng Dong <aisheng.dong@nxp.com>");
 MODULE_DESCRIPTION("NXP i.MX8QXP LPCG clock driver");

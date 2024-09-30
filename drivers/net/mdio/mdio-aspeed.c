@@ -155,3 +155,4 @@ module_platform_driver(aspeed_mdio_driver);
 
 MODULE_AUTHOR("Andrew Jeffery <andrew@aj.id.au>");
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("ASPEED MDIO bus controller");

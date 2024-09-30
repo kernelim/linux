@@ -1,2 +1,3 @@
-#4-
-0x4db4cd56	security_sb_set_mnt_opts	vmlinux	EXPORT_SYMBOL	
+#5-
+0x31f87e51	security_sb_set_mnt_opts	vmlinux	EXPORT_SYMBOL	
+

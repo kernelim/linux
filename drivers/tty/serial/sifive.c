@@ -4,16 +4,6 @@
  * Copyright (C) 2018 Paul Walmsley <paul@pwsan.com>
  * Copyright (C) 2018-2019 SiFive
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  * Based partially on:
  * - drivers/tty/serial/pxa.c
  * - drivers/tty/serial/amba-pl011.c
@@ -148,7 +138,6 @@
  * @port: struct uart_port embedded in this struct
  * @dev: struct device *
  * @ier: shadowed copy of the interrupt enable register
- * @clkin_rate: input clock to the UART IP block.
  * @baud_rate: UART serial line rate (e.g., 115200 baud)
  * @clk: reference to this device's clock
  * @clk_notifier: clock rate change notifier for upstream clock changes
@@ -159,7 +148,6 @@ struct sifive_serial_port {
 	struct uart_port	port;
 	struct device		*dev;
 	unsigned char		ier;
-	unsigned long		clkin_rate;
 	unsigned long		baud_rate;
 	struct clk		*clk;
 	struct notifier_block	clk_notifier;
@@ -300,33 +288,12 @@ static void __ssp_transmit_char(struct sifive_serial_port *ssp, int ch)
  */
 static void __ssp_transmit_chars(struct sifive_serial_port *ssp)
 {
-	struct circ_buf *xmit = &ssp->port.state->xmit;
-	int count;
+	u8 ch;
 
-	if (ssp->port.x_char) {
-		__ssp_transmit_char(ssp, ssp->port.x_char);
-		ssp->port.icount.tx++;
-		ssp->port.x_char = 0;
-		return;
-	}
-	if (uart_circ_empty(xmit) || uart_tx_stopped(&ssp->port)) {
-		sifive_serial_stop_tx(&ssp->port);
-		return;
-	}
-	count = SIFIVE_TX_FIFO_DEPTH;
-	do {
-		__ssp_transmit_char(ssp, xmit->buf[xmit->tail]);
-		xmit->tail = (xmit->tail + 1) & (UART_XMIT_SIZE - 1);
-		ssp->port.icount.tx++;
-		if (uart_circ_empty(xmit))
-			break;
-	} while (--count > 0);
-
-	if (uart_circ_chars_pending(xmit) < WAKEUP_CHARS)
-		uart_write_wakeup(&ssp->port);
-
-	if (uart_circ_empty(xmit))
-		sifive_serial_stop_tx(&ssp->port);
+	uart_port_tx_limited(&ssp->port, ch, SIFIVE_TX_FIFO_DEPTH,
+		true,
+		__ssp_transmit_char(ssp, ch),
+		({}));
 }
 
 /**
@@ -435,9 +402,9 @@ static char __ssp_receive_char(struct sifive_serial_port *ssp, char *is_empty)
  */
 static void __ssp_receive_chars(struct sifive_serial_port *ssp)
 {
-	unsigned char ch;
 	char is_empty;
 	int c;
+	u8 ch;
 
 	for (c = SIFIVE_RX_FIFO_DEPTH; c > 0; --c) {
 		ch = __ssp_receive_char(ssp, &is_empty);
@@ -463,7 +430,7 @@ static void __ssp_update_div(struct sifive_serial_port *ssp)
 {
 	u16 div;
 
-	div = DIV_ROUND_UP(ssp->clkin_rate, ssp->baud_rate) - 1;
+	div = DIV_ROUND_UP(ssp->port.uartclk, ssp->baud_rate) - 1;
 
 	__ssp_writel(div, SIFIVE_SERIAL_DIV_OFFS, ssp);
 }
@@ -554,11 +521,11 @@ static irqreturn_t sifive_serial_irq(int irq, void *dev_id)
 	struct sifive_serial_port *ssp = dev_id;
 	u32 ip;
 
-	spin_lock(&ssp->port.lock);
+	uart_port_lock(&ssp->port);
 
 	ip = __ssp_readl(ssp, SIFIVE_SERIAL_IP_OFFS);
 	if (!ip) {
-		spin_unlock(&ssp->port.lock);
+		uart_port_unlock(&ssp->port);
 		return IRQ_NONE;
 	}
 
@@ -567,7 +534,7 @@ static irqreturn_t sifive_serial_irq(int irq, void *dev_id)
 	if (ip & SIFIVE_SERIAL_IP_TXWM_MASK)
 		__ssp_transmit_chars(ssp);
 
-	spin_unlock(&ssp->port.lock);
+	uart_port_unlock(&ssp->port);
 
 	return IRQ_HANDLED;
 }
@@ -648,8 +615,8 @@ static int sifive_serial_clk_notifier(struct notifier_block *nb,
 		udelay(DIV_ROUND_UP(12 * 1000 * 1000, ssp->baud_rate));
 	}
 
-	if (event == POST_RATE_CHANGE && ssp->clkin_rate != cnd->new_rate) {
-		ssp->clkin_rate = cnd->new_rate;
+	if (event == POST_RATE_CHANGE && ssp->port.uartclk != cnd->new_rate) {
+		ssp->port.uartclk = cnd->new_rate;
 		__ssp_update_div(ssp);
 	}
 
@@ -666,22 +633,27 @@ static void sifive_serial_set_termios(struct uart_port *port,
 	int rate;
 	char nstop;
 
-	if ((termios->c_cflag & CSIZE) != CS8)
+	if ((termios->c_cflag & CSIZE) != CS8) {
 		dev_err_once(ssp->port.dev, "only 8-bit words supported\n");
+		termios->c_cflag &= ~CSIZE;
+		termios->c_cflag |= CS8;
+	}
 	if (termios->c_iflag & (INPCK | PARMRK))
 		dev_err_once(ssp->port.dev, "parity checking not supported\n");
 	if (termios->c_iflag & BRKINT)
 		dev_err_once(ssp->port.dev, "BREAK detection not supported\n");
+	termios->c_iflag &= ~(INPCK|PARMRK|BRKINT);
 
 	/* Set number of stop bits */
 	nstop = (termios->c_cflag & CSTOPB) ? 2 : 1;
 	__ssp_set_stop_bits(ssp, nstop);
 
 	/* Set line rate */
-	rate = uart_get_baud_rate(port, termios, old, 0, ssp->clkin_rate / 16);
+	rate = uart_get_baud_rate(port, termios, old, 0,
+				  ssp->port.uartclk / 16);
 	__ssp_update_baud_rate(ssp, rate);
 
-	spin_lock_irqsave(&ssp->port.lock, flags);
+	uart_port_lock_irqsave(&ssp->port, &flags);
 
 	/* Update the per-port timeout */
 	uart_update_timeout(port, termios->c_cflag, rate);
@@ -698,7 +670,7 @@ static void sifive_serial_set_termios(struct uart_port *port,
 	if (v != old_v)
 		__ssp_writel(v, SIFIVE_SERIAL_RXCTRL_OFFS, ssp);
 
-	spin_unlock_irqrestore(&ssp->port.lock, flags);
+	uart_port_unlock_irqrestore(&ssp->port, flags);
 }
 
 static void sifive_serial_release_port(struct uart_port *port)
@@ -823,9 +795,9 @@ static void sifive_serial_console_write(struct console *co, const char *s,
 	if (ssp->port.sysrq)
 		locked = 0;
 	else if (oops_in_progress)
-		locked = spin_trylock(&ssp->port.lock);
+		locked = uart_port_trylock(&ssp->port);
 	else
-		spin_lock(&ssp->port.lock);
+		uart_port_lock(&ssp->port);
 
 	ier = __ssp_readl(ssp, SIFIVE_SERIAL_IE_OFFS);
 	__ssp_writel(0, SIFIVE_SERIAL_IE_OFFS, ssp);
@@ -835,11 +807,11 @@ static void sifive_serial_console_write(struct console *co, const char *s,
 	__ssp_writel(ier, SIFIVE_SERIAL_IE_OFFS, ssp);
 
 	if (locked)
-		spin_unlock(&ssp->port.lock);
+		uart_port_unlock(&ssp->port);
 	local_irq_restore(flags);
 }
 
-static int __init sifive_serial_console_setup(struct console *co, char *options)
+static int sifive_serial_console_setup(struct console *co, char *options)
 {
 	struct sifive_serial_port *ssp;
 	int baud = SIFIVE_DEFAULT_BAUD_RATE;
@@ -887,7 +859,7 @@ static void __ssp_add_console_port(struct sifive_serial_port *ssp)
 
 static void __ssp_remove_console_port(struct sifive_serial_port *ssp)
 {
-	sifive_serial_console_ports[ssp->port.line] = 0;
+	sifive_serial_console_ports[ssp->port.line] = NULL;
 }
 
 #define SIFIVE_SERIAL_CONSOLE	(&sifive_serial_console)
@@ -945,14 +917,11 @@ static int sifive_serial_probe(struct platform_device *pdev)
 	if (irq < 0)
 		return -EPROBE_DEFER;
 
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	base = devm_ioremap_resource(&pdev->dev, mem);
-	if (IS_ERR(base)) {
-		dev_err(&pdev->dev, "could not acquire device memory\n");
+	base = devm_platform_get_and_ioremap_resource(pdev, 0, &mem);
+	if (IS_ERR(base))
 		return PTR_ERR(base);
-	}
 
-	clk = devm_clk_get(&pdev->dev, NULL);
+	clk = devm_clk_get_enabled(&pdev->dev, NULL);
 	if (IS_ERR(clk)) {
 		dev_err(&pdev->dev, "unable to find controller clock\n");
 		return PTR_ERR(clk);
@@ -996,9 +965,8 @@ static int sifive_serial_probe(struct platform_device *pdev)
 	}
 
 	/* Set up clock divider */
-	ssp->clkin_rate = clk_get_rate(ssp->clk);
+	ssp->port.uartclk = clk_get_rate(ssp->clk);
 	ssp->baud_rate = SIFIVE_DEFAULT_BAUD_RATE;
-	ssp->port.uartclk = ssp->baud_rate * 16;
 	__ssp_update_div(ssp);
 
 	platform_set_drvdata(pdev, ssp);
@@ -1051,6 +1019,23 @@ static int sifive_serial_remove(struct platform_device *dev)
 	return 0;
 }
 
+static int sifive_serial_suspend(struct device *dev)
+{
+	struct sifive_serial_port *ssp = dev_get_drvdata(dev);
+
+	return uart_suspend_port(&sifive_serial_uart_driver, &ssp->port);
+}
+
+static int sifive_serial_resume(struct device *dev)
+{
+	struct sifive_serial_port *ssp = dev_get_drvdata(dev);
+
+	return uart_resume_port(&sifive_serial_uart_driver, &ssp->port);
+}
+
+DEFINE_SIMPLE_DEV_PM_OPS(sifive_uart_pm_ops, sifive_serial_suspend,
+			 sifive_serial_resume);
+
 static const struct of_device_id sifive_serial_of_match[] = {
 	{ .compatible = "sifive,fu540-c000-uart0" },
 	{ .compatible = "sifive,uart0" },
@@ -1063,7 +1048,8 @@ static struct platform_driver sifive_serial_platform_driver = {
 	.remove		= sifive_serial_remove,
 	.driver		= {
 		.name	= SIFIVE_SERIAL_NAME,
-		.of_match_table = of_match_ptr(sifive_serial_of_match),
+		.pm = pm_sleep_ptr(&sifive_uart_pm_ops),
+		.of_match_table = sifive_serial_of_match,
 	},
 };
 

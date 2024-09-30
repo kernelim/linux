@@ -352,11 +352,8 @@ static void men_z135_handle_tx(struct men_z135_port *uart)
 	n = min(n, s);
 
 	memcpy_toio(port->membase + MEN_Z135_TX_RAM, &xmit->buf[xmit->tail], n);
-	xmit->tail = (xmit->tail + n) & (UART_XMIT_SIZE - 1);
-
 	iowrite32(n & 0x3ff, port->membase + MEN_Z135_TX_CTRL);
-
-	port->icount.tx += n;
+	uart_xmit_advance(port, n);
 
 	if (uart_circ_chars_pending(xmit) < WAKEUP_CHARS)
 		uart_write_wakeup(port);
@@ -395,7 +392,7 @@ static irqreturn_t men_z135_intr(int irq, void *data)
 	if (!irq_id)
 		goto out;
 
-	spin_lock(&port->lock);
+	uart_port_lock(port);
 	/* It's save to write to IIR[7:6] RXC[9:8] */
 	iowrite8(irq_id, port->membase + MEN_Z135_STAT_REG);
 
@@ -421,7 +418,7 @@ static irqreturn_t men_z135_intr(int irq, void *data)
 		handled = true;
 	}
 
-	spin_unlock(&port->lock);
+	uart_port_unlock(port);
 out:
 	return IRQ_RETVAL(handled);
 }
@@ -711,7 +708,7 @@ static void men_z135_set_termios(struct uart_port *port,
 
 	baud = uart_get_baud_rate(port, termios, old, 0, uart_freq / 16);
 
-	spin_lock_irq(&port->lock);
+	uart_port_lock_irq(port);
 	if (tty_termios_baud_rate(termios))
 		tty_termios_encode_baud_rate(termios, baud, baud);
 
@@ -719,7 +716,7 @@ static void men_z135_set_termios(struct uart_port *port,
 	iowrite32(bd_reg, port->membase + MEN_Z135_BAUD_REG);
 
 	uart_update_timeout(port, termios->c_cflag, baud);
-	spin_unlock_irq(&port->lock);
+	uart_port_unlock_irq(port);
 }
 
 static const char *men_z135_type(struct uart_port *port)
@@ -833,7 +830,6 @@ static int men_z135_probe(struct mcb_device *mdev,
 	uart->port.iotype = UPIO_MEM;
 	uart->port.ops = &men_z135_ops;
 	uart->port.irq = mcb_get_irq(mdev);
-	uart->port.iotype = UPIO_MEM;
 	uart->port.flags = UPF_BOOT_AUTOCONF | UPF_IOREMAP;
 	uart->port.line = line++;
 	uart->port.dev = dev;

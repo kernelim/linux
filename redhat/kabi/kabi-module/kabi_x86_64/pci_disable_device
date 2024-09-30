@@ -1,2 +1,3 @@
-#4-
-0x0f49db96	pci_disable_device	vmlinux	EXPORT_SYMBOL	
+#5-
+0x4886e3a2	pci_disable_device	vmlinux	EXPORT_SYMBOL	
+

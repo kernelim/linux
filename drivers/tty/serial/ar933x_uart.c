@@ -133,9 +133,9 @@ static unsigned int ar933x_uart_tx_empty(struct uart_port *port)
 	unsigned long flags;
 	unsigned int rdata;
 
-	spin_lock_irqsave(&up->port.lock, flags);
+	uart_port_lock_irqsave(&up->port, &flags);
 	rdata = ar933x_uart_read(up, AR933X_UART_DATA_REG);
-	spin_unlock_irqrestore(&up->port.lock, flags);
+	uart_port_unlock_irqrestore(&up->port, flags);
 
 	return (rdata & AR933X_UART_DATA_TX_CSR) ? 0 : TIOCSER_TEMT;
 }
@@ -220,14 +220,14 @@ static void ar933x_uart_break_ctl(struct uart_port *port, int break_state)
 		container_of(port, struct ar933x_uart_port, port);
 	unsigned long flags;
 
-	spin_lock_irqsave(&up->port.lock, flags);
+	uart_port_lock_irqsave(&up->port, &flags);
 	if (break_state == -1)
 		ar933x_uart_rmw_set(up, AR933X_UART_CS_REG,
 				    AR933X_UART_CS_TX_BREAK);
 	else
 		ar933x_uart_rmw_clear(up, AR933X_UART_CS_REG,
 				      AR933X_UART_CS_TX_BREAK);
-	spin_unlock_irqrestore(&up->port.lock, flags);
+	uart_port_unlock_irqrestore(&up->port, flags);
 }
 
 /*
@@ -318,7 +318,7 @@ static void ar933x_uart_set_termios(struct uart_port *port,
 	 * Ok, we're now changing the port state. Do it with
 	 * interrupts disabled.
 	 */
-	spin_lock_irqsave(&up->port.lock, flags);
+	uart_port_lock_irqsave(&up->port, &flags);
 
 	/* disable the UART */
 	ar933x_uart_rmw_clear(up, AR933X_UART_CS_REG,
@@ -352,7 +352,7 @@ static void ar933x_uart_set_termios(struct uart_port *port,
 			AR933X_UART_CS_IF_MODE_M << AR933X_UART_CS_IF_MODE_S,
 			AR933X_UART_CS_IF_MODE_DCE << AR933X_UART_CS_IF_MODE_S);
 
-	spin_unlock_irqrestore(&up->port.lock, flags);
+	uart_port_unlock_irqrestore(&up->port, flags);
 
 	if (tty_termios_baud_rate(new))
 		tty_termios_encode_baud_rate(new, baud, baud);
@@ -425,8 +425,7 @@ static void ar933x_uart_tx_chars(struct ar933x_uart_port *up)
 
 		ar933x_uart_putc(up, xmit->buf[xmit->tail]);
 
-		xmit->tail = (xmit->tail + 1) & (UART_XMIT_SIZE - 1);
-		up->port.icount.tx++;
+		uart_xmit_advance(&up->port, 1);
 	} while (--count > 0);
 
 	if (uart_circ_chars_pending(xmit) < WAKEUP_CHARS)
@@ -451,7 +450,7 @@ static irqreturn_t ar933x_uart_interrupt(int irq, void *dev_id)
 	if ((status & AR933X_UART_CS_HOST_INT) == 0)
 		return IRQ_NONE;
 
-	spin_lock(&up->port.lock);
+	uart_port_lock(&up->port);
 
 	status = ar933x_uart_read(up, AR933X_UART_INT_REG);
 	status &= ar933x_uart_read(up, AR933X_UART_INT_EN_REG);
@@ -469,7 +468,7 @@ static irqreturn_t ar933x_uart_interrupt(int irq, void *dev_id)
 		ar933x_uart_tx_chars(up);
 	}
 
-	spin_unlock(&up->port.lock);
+	uart_port_unlock(&up->port);
 
 	return IRQ_HANDLED;
 }
@@ -486,7 +485,7 @@ static int ar933x_uart_startup(struct uart_port *port)
 	if (ret)
 		return ret;
 
-	spin_lock_irqsave(&up->port.lock, flags);
+	uart_port_lock_irqsave(&up->port, &flags);
 
 	/* Enable HOST interrupts */
 	ar933x_uart_rmw_set(up, AR933X_UART_CS_REG,
@@ -499,7 +498,7 @@ static int ar933x_uart_startup(struct uart_port *port)
 	/* Enable RX interrupts */
 	ar933x_uart_start_rx_interrupt(up);
 
-	spin_unlock_irqrestore(&up->port.lock, flags);
+	uart_port_unlock_irqrestore(&up->port, flags);
 
 	return 0;
 }
@@ -580,18 +579,16 @@ static const struct uart_ops ar933x_uart_ops = {
 	.verify_port	= ar933x_uart_verify_port,
 };
 
-static int ar933x_config_rs485(struct uart_port *port,
+static int ar933x_config_rs485(struct uart_port *port, struct ktermios *termios,
 				struct serial_rs485 *rs485conf)
 {
 	struct ar933x_uart_port *up =
-		container_of(port, struct ar933x_uart_port, port);
+			container_of(port, struct ar933x_uart_port, port);
 
-	if ((rs485conf->flags & SER_RS485_ENABLED) &&
-	    !up->rts_gpiod) {
-		dev_err(port->dev, "RS485 needs rts-gpio\n");
-		return 1;
-	}
-	port->rs485 = *rs485conf;
+	if (port->rs485.flags & SER_RS485_ENABLED)
+		gpiod_set_value(up->rts_gpiod,
+			!!(rs485conf->flags & SER_RS485_RTS_AFTER_SEND));
+
 	return 0;
 }
 
@@ -635,9 +632,9 @@ static void ar933x_uart_console_write(struct console *co, const char *s,
 	if (up->port.sysrq)
 		locked = 0;
 	else if (oops_in_progress)
-		locked = spin_trylock(&up->port.lock);
+		locked = uart_port_trylock(&up->port);
 	else
-		spin_lock(&up->port.lock);
+		uart_port_lock(&up->port);
 
 	/*
 	 * First save the IER then disable the interrupts
@@ -657,7 +654,7 @@ static void ar933x_uart_console_write(struct console *co, const char *s,
 	ar933x_uart_write(up, AR933X_UART_INT_REG, AR933X_UART_INT_ALLINTS);
 
 	if (locked)
-		spin_unlock(&up->port.lock);
+		uart_port_unlock(&up->port);
 
 	local_irq_restore(flags);
 }
@@ -702,16 +699,21 @@ static struct uart_driver ar933x_uart_driver = {
 	.cons		= NULL, /* filled in runtime */
 };
 
+static const struct serial_rs485 ar933x_no_rs485 = {};
+static const struct serial_rs485 ar933x_rs485_supported = {
+	.flags = SER_RS485_ENABLED | SER_RS485_RTS_ON_SEND | SER_RS485_RTS_AFTER_SEND,
+};
+
 static int ar933x_uart_probe(struct platform_device *pdev)
 {
 	struct ar933x_uart_port *up;
 	struct uart_port *port;
 	struct resource *mem_res;
-	struct resource *irq_res;
 	struct device_node *np;
 	unsigned int baud;
 	int id;
 	int ret;
+	int irq;
 
 	np = pdev->dev.of_node;
 	if (IS_ENABLED(CONFIG_OF) && np) {
@@ -730,11 +732,9 @@ static int ar933x_uart_probe(struct platform_device *pdev)
 	if (id >= CONFIG_SERIAL_AR933X_NR_UARTS)
 		return -EINVAL;
 
-	irq_res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
-	if (!irq_res) {
-		dev_err(&pdev->dev, "no IRQ resource\n");
-		return -EINVAL;
-	}
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0)
+		return irq;
 
 	up = devm_kzalloc(&pdev->dev, sizeof(struct ar933x_uart_port),
 			  GFP_KERNEL);
@@ -749,8 +749,7 @@ static int ar933x_uart_probe(struct platform_device *pdev)
 
 	port = &up->port;
 
-	mem_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	port->membase = devm_ioremap_resource(&pdev->dev, mem_res);
+	port->membase = devm_platform_get_and_ioremap_resource(pdev, 0, &mem_res);
 	if (IS_ERR(port->membase))
 		return PTR_ERR(port->membase);
 
@@ -766,7 +765,7 @@ static int ar933x_uart_probe(struct platform_device *pdev)
 
 	port->mapbase = mem_res->start;
 	port->line = id;
-	port->irq = irq_res->start;
+	port->irq = irq;
 	port->dev = &pdev->dev;
 	port->type = PORT_AR933X;
 	port->iotype = UPIO_MEM32;
@@ -775,6 +774,7 @@ static int ar933x_uart_probe(struct platform_device *pdev)
 	port->fifosize = AR933X_UART_FIFO_SIZE;
 	port->ops = &ar933x_uart_ops;
 	port->rs485_config = ar933x_config_rs485;
+	port->rs485_supported = ar933x_rs485_supported;
 
 	baud = ar933x_uart_get_baud(port->uartclk, AR933X_UART_MAX_SCALE, 1);
 	up->min_baud = max_t(unsigned int, baud, AR933X_UART_MIN_BAUD);
@@ -794,10 +794,12 @@ static int ar933x_uart_probe(struct platform_device *pdev)
 
 	up->rts_gpiod = mctrl_gpio_to_gpiod(up->gpios, UART_GPIO_RTS);
 
-	if ((port->rs485.flags & SER_RS485_ENABLED) &&
-	    !up->rts_gpiod) {
-		dev_err(&pdev->dev, "lacking rts-gpio, disabling RS485\n");
-		port->rs485.flags &= ~SER_RS485_ENABLED;
+	if (!up->rts_gpiod) {
+		port->rs485_supported = ar933x_no_rs485;
+		if (port->rs485.flags & SER_RS485_ENABLED) {
+			dev_err(&pdev->dev, "lacking rts-gpio, disabling RS485\n");
+			port->rs485.flags &= ~SER_RS485_ENABLED;
+		}
 	}
 
 #ifdef CONFIG_SERIAL_AR933X_CONSOLE

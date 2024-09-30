@@ -1,2 +1,3 @@
-#4-
-0x63888c82	scsi_remove_device	vmlinux	EXPORT_SYMBOL	
+#5-
+0x623b5f4b	scsi_remove_device	vmlinux	EXPORT_SYMBOL	
+

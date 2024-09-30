@@ -1,2 +1,3 @@
-#4-
-0xe582e98f	rhashtable_free_and_destroy	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0x53855654	rhashtable_free_and_destroy	vmlinux	EXPORT_SYMBOL_GPL	
+

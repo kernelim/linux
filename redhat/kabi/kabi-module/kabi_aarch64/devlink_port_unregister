@@ -1,2 +1,3 @@
-#4-
-0x5c64de67	devlink_port_unregister	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0xb8098f93	devlink_port_unregister	vmlinux	EXPORT_SYMBOL_GPL	
+

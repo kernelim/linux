@@ -1,2 +1,3 @@
-#4-
-0xda2c9218	unregister_fib_notifier	vmlinux	EXPORT_SYMBOL	
+#5-
+0xc8a0b622	unregister_fib_notifier	vmlinux	EXPORT_SYMBOL	
+

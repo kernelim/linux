@@ -1,2 +1,3 @@
-#4-
-0x3f0b016c	write_inode_now	vmlinux	EXPORT_SYMBOL	
+#5-
+0x85867a61	write_inode_now	vmlinux	EXPORT_SYMBOL	
+

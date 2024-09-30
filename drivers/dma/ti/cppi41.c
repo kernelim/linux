@@ -315,7 +315,7 @@ static irqreturn_t cppi41_irq(int irq, void *data)
 		val = cppi_readl(cdd->qmgr_mem + QMGR_PEND(i));
 		if (i == QMGR_PENDING_SLOT_Q(first_completion_queue) && val) {
 			u32 mask;
-			/* set corresponding bit for completetion Q 93 */
+			/* set corresponding bit for completion Q 93 */
 			mask = 1 << QMGR_PENDING_BIT_Q(first_completion_queue);
 			/* not set all bits for queues less than Q 93 */
 			mask--;
@@ -703,7 +703,7 @@ static int cppi41_tear_down_chan(struct cppi41_channel *c)
 	 * transfer descriptor followed by TD descriptor. Waiting seems not to
 	 * cause any difference.
 	 * RX seems to be thrown out right away. However once the TearDown
-	 * descriptor gets through we are done. If we have seens the transfer
+	 * descriptor gets through we are done. If we have seen the transfer
 	 * descriptor before the TD we fetch it from enqueue, it has to be
 	 * there waiting for us.
 	 */
@@ -747,7 +747,7 @@ static int cppi41_stop_chan(struct dma_chan *chan)
 		struct cppi41_channel *cc, *_ct;
 
 		/*
-		 * channels might still be in the pendling list if
+		 * channels might still be in the pending list if
 		 * cppi41_dma_issue_pending() is called after
 		 * cppi41_runtime_suspend() is called
 		 */
@@ -1101,8 +1101,12 @@ static int cppi41_dma_probe(struct platform_device *pdev)
 	cdd->qmgr_num_pend = glue_info->qmgr_num_pend;
 	cdd->first_completion_queue = glue_info->first_completion_queue;
 
+	/* Parse new and deprecated dma-channels properties */
 	ret = of_property_read_u32(dev->of_node,
-				   "#dma-channels", &cdd->n_chans);
+				   "dma-channels", &cdd->n_chans);
+	if (ret)
+		ret = of_property_read_u32(dev->of_node,
+					   "#dma-channels", &cdd->n_chans);
 	if (ret)
 		goto err_get_n_chans;
 
@@ -1152,7 +1156,7 @@ err_get_sync:
 	return ret;
 }
 
-static int cppi41_dma_remove(struct platform_device *pdev)
+static void cppi41_dma_remove(struct platform_device *pdev)
 {
 	struct cppi41_dd *cdd = platform_get_drvdata(pdev);
 	int error;
@@ -1169,7 +1173,6 @@ static int cppi41_dma_remove(struct platform_device *pdev)
 	pm_runtime_dont_use_autosuspend(&pdev->dev);
 	pm_runtime_put_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
-	return 0;
 }
 
 static int __maybe_unused cppi41_suspend(struct device *dev)
@@ -1240,7 +1243,7 @@ static const struct dev_pm_ops cppi41_pm_ops = {
 
 static struct platform_driver cpp41_dma_driver = {
 	.probe  = cppi41_dma_probe,
-	.remove = cppi41_dma_remove,
+	.remove_new = cppi41_dma_remove,
 	.driver = {
 		.name = "cppi41-dma-engine",
 		.pm = &cppi41_pm_ops,

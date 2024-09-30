@@ -1,2 +1,3 @@
-#4-
-0x46239581	pci_unregister_driver	vmlinux	EXPORT_SYMBOL	
+#5-
+0xa6ec3bd1	pci_unregister_driver	vmlinux	EXPORT_SYMBOL	
+

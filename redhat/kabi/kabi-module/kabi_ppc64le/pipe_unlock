@@ -1,2 +1,3 @@
-#4-
-0x7da2bb75	pipe_unlock	vmlinux	EXPORT_SYMBOL	
+#5-
+0xa79b8681	pipe_unlock	vmlinux	EXPORT_SYMBOL	
+

@@ -98,6 +98,9 @@ static int nft_limit_init(struct nft_limit *limit,
 	if (tb[NFTA_LIMIT_FLAGS]) {
 		u32 flags = ntohl(nla_get_be32(tb[NFTA_LIMIT_FLAGS]));
 
+		if (flags & ~NFT_LIMIT_F_INV)
+			return -EOPNOTSUPP;
+
 		if (flags & NFT_LIMIT_F_INV)
 			limit->invert = true;
 	}

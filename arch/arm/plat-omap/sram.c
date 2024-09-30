@@ -76,8 +76,7 @@ void *omap_sram_push(void *funcp, unsigned long size)
 
 	dst = fncpy(sram, funcp, size);
 
-	set_memory_ro(base, pages);
-	set_memory_x(base, pages);
+	set_memory_rox(base, pages);
 
 	return dst;
 }
@@ -124,6 +123,5 @@ void __init omap_map_sram(unsigned long start, unsigned long size,
 	base = (unsigned long)omap_sram_base;
 	pages = PAGE_ALIGN(omap_sram_size) / PAGE_SIZE;
 
-	set_memory_ro(base, pages);
-	set_memory_x(base, pages);
+	set_memory_rox(base, pages);
 }

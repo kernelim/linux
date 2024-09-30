@@ -146,10 +146,11 @@ static int afs_find_cm_server_by_peer(struct afs_call *call)
 {
 	struct sockaddr_rxrpc srx;
 	struct afs_server *server;
+	struct rxrpc_peer *peer;
 
-	rxrpc_kernel_get_peer(call->net->socket, call->rxcall, &srx);
+	peer = rxrpc_kernel_get_call_peer(call->net->socket, call->rxcall);
 
-	server = afs_find_server(call->net, &srx);
+	server = afs_find_server(call->net, peer);
 	if (!server) {
 		trace_afs_cm_no_server(call, &srx);
 		return 0;
@@ -300,7 +301,7 @@ static int afs_deliver_cb_callback(struct afs_call *call)
 		if (call->count2 != call->count && call->count2 != 0)
 			return afs_protocol_error(call, afs_eproto_cb_count);
 		call->iter = &call->def_iter;
-		iov_iter_discard(&call->def_iter, READ, call->count2 * 3 * 4);
+		iov_iter_discard(&call->def_iter, ITER_DEST, call->count2 * 3 * 4);
 		call->unmarshall++;
 
 		fallthrough;

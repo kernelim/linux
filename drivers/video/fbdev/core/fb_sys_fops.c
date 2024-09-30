@@ -22,8 +22,11 @@ ssize_t fb_sys_read(struct fb_info *info, char __user *buf, size_t count,
 	unsigned long total_size, c;
 	ssize_t ret;
 
-	if (info->state != FBINFO_STATE_RUNNING)
-		return -EPERM;
+	if (!(info->flags & FBINFO_VIRTFB))
+		fb_warn_once(info, "Framebuffer is not in virtual address space.");
+
+	if (!info->screen_buffer)
+		return -ENODEV;
 
 	total_size = info->screen_size;
 
@@ -39,7 +42,7 @@ ssize_t fb_sys_read(struct fb_info *info, char __user *buf, size_t count,
 	if (count + p > total_size)
 		count = total_size - p;
 
-	src = (void __force *)(info->screen_base + p);
+	src = info->screen_buffer + p;
 
 	if (info->fbops->fb_sync)
 		info->fbops->fb_sync(info);
@@ -64,8 +67,11 @@ ssize_t fb_sys_write(struct fb_info *info, const char __user *buf,
 	unsigned long total_size, c;
 	size_t ret;
 
-	if (info->state != FBINFO_STATE_RUNNING)
-		return -EPERM;
+	if (!(info->flags & FBINFO_VIRTFB))
+		fb_warn_once(info, "Framebuffer is not in virtual address space.");
+
+	if (!info->screen_buffer)
+		return -ENODEV;
 
 	total_size = info->screen_size;
 
@@ -87,7 +93,7 @@ ssize_t fb_sys_write(struct fb_info *info, const char __user *buf,
 		count = total_size - p;
 	}
 
-	dst = (void __force *) (info->screen_base + p);
+	dst = info->screen_buffer + p;
 
 	if (info->fbops->fb_sync)
 		info->fbops->fb_sync(info);

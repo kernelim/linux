@@ -294,7 +294,6 @@ static struct fb_info *gx1fb_init_fbinfo(struct device *dev)
 	info->var.vmode	= FB_VMODE_NONINTERLACED;
 
 	info->fbops		= &gx1fb_ops;
-	info->flags		= FBINFO_DEFAULT;
 	info->node		= -1;
 
 	info->pseudo_palette	= (void *)par + sizeof(struct geodefb_par);
@@ -415,13 +414,13 @@ static void __init gx1fb_setup(char *options)
 			continue;
 
 		if (!strncmp(this_opt, "mode:", 5))
-			strlcpy(mode_option, this_opt + 5, sizeof(mode_option));
+			strscpy(mode_option, this_opt + 5, sizeof(mode_option));
 		else if (!strncmp(this_opt, "crt:", 4))
 			crt_option = !!simple_strtoul(this_opt + 4, NULL, 0);
 		else if (!strncmp(this_opt, "panel:", 6))
-			strlcpy(panel_option, this_opt + 6, sizeof(panel_option));
+			strscpy(panel_option, this_opt + 6, sizeof(panel_option));
 		else
-			strlcpy(mode_option, this_opt, sizeof(mode_option));
+			strscpy(mode_option, this_opt, sizeof(mode_option));
 	}
 }
 #endif
@@ -446,7 +445,12 @@ static int __init gx1fb_init(void)
 {
 #ifndef MODULE
 	char *option = NULL;
+#endif
 
+	if (fb_modesetting_disabled("gx1fb"))
+		return -ENODEV;
+
+#ifndef MODULE
 	if (fb_get_options("gx1fb", &option))
 		return -ENODEV;
 	gx1fb_setup(option);

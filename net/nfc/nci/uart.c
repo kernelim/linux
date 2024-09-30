@@ -308,7 +308,7 @@ static int nci_uart_default_recv_buf(struct nci_uart *nu, const u8 *data,
  * Return Value:    None
  */
 static void nci_uart_tty_receive(struct tty_struct *tty, const u8 *data,
-				 const char *flags, int count)
+				 const u8 *flags, size_t count)
 {
 	struct nci_uart *nu = (void *)tty->disc_data;
 
@@ -357,20 +357,14 @@ static int nci_uart_tty_ioctl(struct tty_struct *tty, unsigned int cmd,
 
 /* We don't provide read/write/poll interface for user space. */
 static ssize_t nci_uart_tty_read(struct tty_struct *tty, struct file *file,
-				 unsigned char *buf, size_t nr,
-				 void **cookie, unsigned long offset)
+				 u8 *buf, size_t nr, void **cookie,
+				 unsigned long offset)
 {
 	return 0;
 }
 
 static ssize_t nci_uart_tty_write(struct tty_struct *tty, struct file *file,
-				  const unsigned char *data, size_t count)
-{
-	return 0;
-}
-
-static __poll_t nci_uart_tty_poll(struct tty_struct *tty,
-				      struct file *filp, poll_table *wait)
+				  const u8 *data, size_t count)
 {
 	return 0;
 }
@@ -447,7 +441,6 @@ static struct tty_ldisc_ops nci_uart_ldisc = {
 	.close		= nci_uart_tty_close,
 	.read		= nci_uart_tty_read,
 	.write		= nci_uart_tty_write,
-	.poll		= nci_uart_tty_poll,
 	.receive_buf	= nci_uart_tty_receive,
 	.write_wakeup	= nci_uart_tty_wakeup,
 	.ioctl		= nci_uart_tty_ioctl,

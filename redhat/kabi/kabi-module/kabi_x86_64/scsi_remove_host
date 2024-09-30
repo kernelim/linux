@@ -1,2 +1,3 @@
-#4-
-0xe458d081	scsi_remove_host	vmlinux	EXPORT_SYMBOL	
+#5-
+0x6c0e4232	scsi_remove_host	vmlinux	EXPORT_SYMBOL	
+

@@ -1,2 +1,3 @@
-#4-
-0x1d1160fd	pci_enable_sriov	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0xd40eba7c	pci_enable_sriov	vmlinux	EXPORT_SYMBOL_GPL	
+

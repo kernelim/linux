@@ -3,7 +3,7 @@
  *
  * Name: actbl2.h - ACPI Table Definitions (tables not in ACPI spec)
  *
- * Copyright (C) 2000 - 2022, Intel Corp.
+ * Copyright (C) 2000 - 2023, Intel Corp.
  *
  *****************************************************************************/
 
@@ -396,7 +396,7 @@ struct acpi_iort_node {
 	u32 identifier;
 	u32 mapping_count;
 	u32 mapping_offset;
-	char node_data[1];
+	char node_data[];
 };
 
 /* Values for subtable Type above */
@@ -452,14 +452,14 @@ struct acpi_iort_memory_access {
  */
 struct acpi_iort_its_group {
 	u32 its_count;
-	u32 identifiers[1];	/* GIC ITS identifier array */
+	u32 identifiers[];	/* GIC ITS identifier array */
 };
 
 struct acpi_iort_named_component {
 	u32 node_flags;
 	u64 memory_properties;	/* Memory access properties */
 	u8 memory_address_limit;	/* Memory address size limit */
-	char device_name[1];	/* Path of namespace object */
+	char device_name[];	/* Path of namespace object */
 };
 
 /* Masks for Flags field above */
@@ -473,7 +473,7 @@ struct acpi_iort_root_complex {
 	u32 pci_segment_number;
 	u8 memory_address_limit;	/* Memory address size limit */
 	u16 pasid_capabilities;	/* PASID Capabilities */
-	u8 reserved[1];		/* Reserved, must be zero */
+	u8 reserved[];		/* Reserved, must be zero */
 };
 
 /* Masks for ats_attribute field above */
@@ -495,7 +495,7 @@ struct acpi_iort_smmu {
 	u32 context_interrupt_offset;
 	u32 pmu_interrupt_count;
 	u32 pmu_interrupt_offset;
-	u64 interrupts[1];	/* Interrupt array */
+	u64 interrupts[];	/* Interrupt array */
 };
 
 /* Values for Model field above */
@@ -966,7 +966,7 @@ struct acpi_madt_local_sapic {
 	u8 reserved[3];		/* Reserved, must be zero */
 	u32 lapic_flags;
 	u32 uid;		/* Numeric UID - ACPI 3.0 */
-	char uid_string[1];	/* String UID  - ACPI 3.0 */
+	char uid_string[];	/* String UID  - ACPI 3.0 */
 };
 
 /* 8: Platform Interrupt Source */
@@ -1006,7 +1006,7 @@ struct acpi_madt_local_x2apic_nmi {
 	u8 reserved[3];		/* reserved - must be zero */
 };
 
-/* 11: Generic interrupt - GICC (ACPI 5.0 + ACPI 6.0 + ACPI 6.3 changes) */
+/* 11: Generic interrupt - GICC (ACPI 5.0 + ACPI 6.0 + ACPI 6.3 + ACPI 6.5 changes) */
 
 struct acpi_madt_generic_interrupt {
 	struct acpi_subtable_header header;
@@ -1026,6 +1026,7 @@ struct acpi_madt_generic_interrupt {
 	u8 efficiency_class;
 	u8 reserved2[1];
 	u16 spe_interrupt;	/* ACPI 6.3 */
+	u16 trbe_interrupt;	/* ACPI 6.5 */
 };
 
 /* Masks for Flags field above */
@@ -1118,7 +1119,7 @@ struct acpi_madt_multiproc_wakeup_mailbox {
 /* 17: OEM data */
 
 struct acpi_madt_oem_data {
-	u8 oem_data[0];
+	ACPI_FLEX_ARRAY(u8, oem_data);
 };
 
 /*
@@ -1429,7 +1430,7 @@ struct acpi_nfit_interleave {
 	u16 reserved;		/* Reserved, must be zero */
 	u32 line_count;
 	u32 line_size;
-	u32 line_offset[1];	/* Variable length */
+	u32 line_offset[];	/* Variable length */
 };
 
 /* 3: SMBIOS Management Information Structure */
@@ -1437,7 +1438,7 @@ struct acpi_nfit_interleave {
 struct acpi_nfit_smbios {
 	struct acpi_nfit_header header;
 	u32 reserved;		/* Reserved, must be zero */
-	u8 data[1];		/* Variable length */
+	u8 data[];		/* Variable length */
 };
 
 /* 4: NVDIMM Control Region Structure */
@@ -1494,7 +1495,7 @@ struct acpi_nfit_flush_address {
 	u32 device_handle;
 	u16 hint_count;
 	u8 reserved[6];		/* Reserved, must be zero */
-	u64 hint_address[1];	/* Variable length */
+	u64 hint_address[];	/* Variable length */
 };
 
 /* 7: Platform Capabilities Structure */

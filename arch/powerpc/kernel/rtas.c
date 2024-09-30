@@ -7,42 +7,35 @@
  * Copyright (C) 2001 IBM.
  */
 
-#include <linux/stdarg.h>
-#include <linux/kernel.h>
-#include <linux/types.h>
-#include <linux/spinlock.h>
-#include <linux/export.h>
-#include <linux/init.h>
 #include <linux/capability.h>
 #include <linux/delay.h>
-#include <linux/cpu.h>
-#include <linux/sched.h>
-#include <linux/smp.h>
-#include <linux/completion.h>
-#include <linux/cpumask.h>
+#include <linux/export.h>
+#include <linux/init.h>
+#include <linux/kernel.h>
 #include <linux/memblock.h>
-#include <linux/slab.h>
-#include <linux/reboot.h>
-#include <linux/syscalls.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/of_fdt.h>
-
-#include <asm/interrupt.h>
-#include <asm/rtas.h>
-#include <asm/hvcall.h>
-#include <asm/machdep.h>
-#include <asm/firmware.h>
-#include <asm/page.h>
-#include <asm/param.h>
-#include <asm/delay.h>
+#include <linux/reboot.h>
+#include <linux/sched.h>
+#include <linux/security.h>
+#include <linux/slab.h>
+#include <linux/spinlock.h>
+#include <linux/stdarg.h>
+#include <linux/syscalls.h>
+#include <linux/types.h>
 #include <linux/uaccess.h>
-#include <asm/udbg.h>
-#include <asm/syscalls.h>
-#include <asm/smp.h>
-#include <linux/atomic.h>
-#include <asm/time.h>
+
+#include <asm/delay.h>
+#include <asm/firmware.h>
+#include <asm/interrupt.h>
+#include <asm/machdep.h>
 #include <asm/mmu.h>
-#include <asm/topology.h>
+#include <asm/page.h>
+#include <asm/rtas-work-area.h>
+#include <asm/rtas.h>
+#include <asm/time.h>
+#include <asm/udbg.h>
 
 /* This is here deliberately so it's only used in this file */
 void enter_rtas(unsigned long);
@@ -82,6 +75,8 @@ unsigned long rtas_rmo_buf;
  */
 void (*rtas_flash_term_hook)(int);
 EXPORT_SYMBOL(rtas_flash_term_hook);
+
+DEFINE_MUTEX(rtas_ibm_get_vpd_lock);
 
 /* RTAS use home made raw locking instead of spin_lock_irqsave
  * because those can be called from within really nasty contexts
@@ -1115,6 +1110,7 @@ SYSCALL_DEFINE1(rtas, struct rtas_args __user *, uargs)
 	unsigned long flags;
 	char *buff_copy, *errbuf = NULL;
 	int nargs, nret, token;
+	bool is_get_vpd;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
@@ -1170,6 +1166,10 @@ SYSCALL_DEFINE1(rtas, struct rtas_args __user *, uargs)
 
 	buff_copy = get_errorlog_buffer();
 
+	is_get_vpd = (token == rtas_token("ibm,get-vpd"));
+	if (is_get_vpd)
+		mutex_lock(&rtas_ibm_get_vpd_lock);
+
 	flags = lock_rtas();
 
 	rtas.args = args;
@@ -1182,6 +1182,9 @@ SYSCALL_DEFINE1(rtas, struct rtas_args __user *, uargs)
 		errbuf = __fetch_rtas_last_error(buff_copy);
 
 	unlock_rtas(flags);
+
+	if (is_get_vpd)
+		mutex_unlock(&rtas_ibm_get_vpd_lock);
 
 	if (buff_copy) {
 		if (errbuf)
@@ -1248,6 +1251,8 @@ void __init rtas_initialize(void)
 #endif
 
 	rtas_syscall_filter_init();
+
+	rtas_work_area_reserve_arena(rtas_region);
 }
 
 int __init early_init_dt_scan_rtas(unsigned long node,

@@ -1,2 +1,3 @@
-#4-
-0x353fd944	debugfs_create_u8	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0x3fff94f1	debugfs_create_u8	vmlinux	EXPORT_SYMBOL_GPL	
+

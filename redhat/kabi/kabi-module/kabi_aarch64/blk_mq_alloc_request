@@ -1,2 +1,3 @@
-#4-
-0xc4aea7c7	blk_mq_alloc_request	vmlinux	EXPORT_SYMBOL	
+#5-
+0xb0111118	blk_mq_alloc_request	vmlinux	EXPORT_SYMBOL	
+

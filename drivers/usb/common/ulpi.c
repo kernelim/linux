@@ -90,7 +90,7 @@ static void ulpi_remove(struct device *dev)
 		drv->remove(to_ulpi_dev(dev));
 }
 
-static struct bus_type ulpi_bus = {
+static const struct bus_type ulpi_bus = {
 	.name = "ulpi",
 	.match = ulpi_match,
 	.uevent = ulpi_uevent,
@@ -301,7 +301,7 @@ static int ulpi_register(struct device *dev, struct ulpi *ulpi)
 		return ret;
 	}
 
-	root = debugfs_create_dir(dev_name(dev), ulpi_root);
+	root = debugfs_create_dir(dev_name(&ulpi->dev), ulpi_root);
 	debugfs_create_file("regs", 0444, root, ulpi, &ulpi_regs_fops);
 
 	dev_dbg(&ulpi->dev, "registered ULPI PHY: vendor %04x, product %04x\n",

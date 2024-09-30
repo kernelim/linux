@@ -1,2 +1,3 @@
-#4-
-0x1fe1f6eb	pci_set_power_state	vmlinux	EXPORT_SYMBOL	
+#5-
+0x9f5358a0	pci_set_power_state	vmlinux	EXPORT_SYMBOL	
+

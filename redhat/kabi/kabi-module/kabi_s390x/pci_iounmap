@@ -1,2 +1,3 @@
-#4-
-0x5fa77ec1	pci_iounmap	vmlinux	EXPORT_SYMBOL	
+#5-
+0xb38431dc	pci_iounmap	vmlinux	EXPORT_SYMBOL	
+

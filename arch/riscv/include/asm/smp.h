@@ -62,7 +62,7 @@ asmlinkage void smp_callin(void);
 
 #if defined CONFIG_HOTPLUG_CPU
 int __cpu_disable(void);
-void __cpu_die(unsigned int cpu);
+static inline void __cpu_die(unsigned int cpu) { }
 void cpu_stop(void);
 #else
 #endif /* CONFIG_HOTPLUG_CPU */

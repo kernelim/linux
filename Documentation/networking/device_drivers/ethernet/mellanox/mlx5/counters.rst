@@ -346,6 +346,24 @@ the software port.
      - The number of receive packets with CQE compression on ring i [#accel]_.
      - Acceleration
 
+   * - `rx[i]_arfs_add`
+     - The number of aRFS flow rules added to the device for direct RQ steering
+       on ring i [#accel]_.
+     - Acceleration
+
+   * - `rx[i]_arfs_request_in`
+     - Number of flow rules that have been requested to move into ring i for
+       direct RQ steering [#accel]_.
+     - Acceleration
+
+   * - `rx[i]_arfs_request_out`
+     - Number of flow rules that have been requested to move out of ring i [#accel]_.
+     - Acceleration
+
+   * - `rx[i]_arfs_expired`
+     - Number of flow rules that have been expired and removed [#accel]_.
+     - Acceleration
+
    * - `rx[i]_arfs_err`
      - Number of flow rules that failed to be added to the flow table.
      - Error
@@ -443,11 +461,6 @@ the software port.
    * - `rx[i]_xsk_buff_alloc_err`
      - The number of times allocating an skb or XSK buffer failed in the XSK RQ
        context.
-     - Error
-
-   * - `rx[i]_xsk_arfs_err`
-     - aRFS (accelerated Receive Flow Steering) does not occur in the XSK RQ
-       context, so this counter should never increment.
      - Error
 
    * - `rx[i]_xdp_tx_xmit`
@@ -801,6 +814,16 @@ Counters on the NIC port that is connected to a eSwitch.
    * - `tx_vport_rdma_multicast_bytes`
      - RDMA multicast bytes transmitted, steered from a port (counters counts
        RoCE/UD/RC traffic) [#accel]_.
+     - Acceleration
+
+   * - `vport_loopback_packets`
+     - Unicast, multicast and broadcast packets that were loop-back (received
+       and transmitted), IB/Eth  [#accel]_.
+     - Acceleration
+
+   * - `vport_loopback_bytes`
+     - Unicast, multicast and broadcast bytes that were loop-back (received
+       and transmitted), IB/Eth  [#accel]_.
      - Acceleration
 
    * - `rx_steer_missed_packets`

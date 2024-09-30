@@ -37,7 +37,6 @@ struct sony_td4353_jdi {
 	struct regulator_bulk_data supplies[3];
 	struct gpio_desc *panel_reset_gpio;
 	struct gpio_desc *touch_reset_gpio;
-	bool prepared;
 	int type;
 };
 
@@ -151,9 +150,6 @@ static int sony_td4353_jdi_prepare(struct drm_panel *panel)
 	struct device *dev = &ctx->dsi->dev;
 	int ret;
 
-	if (ctx->prepared)
-		return 0;
-
 	ret = regulator_bulk_enable(ARRAY_SIZE(ctx->supplies), ctx->supplies);
 	if (ret < 0) {
 		dev_err(dev, "Failed to enable regulators: %d\n", ret);
@@ -172,7 +168,6 @@ static int sony_td4353_jdi_prepare(struct drm_panel *panel)
 		return ret;
 	}
 
-	ctx->prepared = true;
 	return 0;
 }
 
@@ -182,9 +177,6 @@ static int sony_td4353_jdi_unprepare(struct drm_panel *panel)
 	struct device *dev = &ctx->dsi->dev;
 	int ret;
 
-	if (!ctx->prepared)
-		return 0;
-
 	ret = sony_td4353_jdi_off(ctx);
 	if (ret < 0)
 		dev_err(dev, "Failed to power off panel: %d\n", ret);
@@ -192,7 +184,6 @@ static int sony_td4353_jdi_unprepare(struct drm_panel *panel)
 	sony_td4353_assert_reset_gpios(ctx, 0);
 	regulator_bulk_disable(ARRAY_SIZE(ctx->supplies), ctx->supplies);
 
-	ctx->prepared = false;
 	return 0;
 }
 

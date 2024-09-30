@@ -48,11 +48,6 @@ EXPORT_SYMBOL_GPL(__x86_call_count);
 
 extern s32 __call_sites[], __call_sites_end[];
 
-struct thunk_desc {
-	void		*template;
-	unsigned int	template_size;
-};
-
 struct core_text {
 	unsigned long	base;
 	unsigned long	end;
@@ -245,7 +240,7 @@ patch_paravirt_call_sites(struct paravirt_patch_site *start,
 	struct paravirt_patch_site *p;
 
 	for (p = start; p < end; p++)
-		patch_call(p->instr, ct);
+		patch_call((void *)&p->instr_offset + p->instr_offset, ct);
 }
 
 static __init_or_module void
@@ -292,6 +287,7 @@ void *callthunks_translate_call_dest(void *dest)
 	return target ? : dest;
 }
 
+#ifdef CONFIG_BPF_JIT
 bool is_callthunk(void *addr)
 {
 	unsigned int tmpl_size = SKL_TMPL_SIZE;
@@ -305,7 +301,6 @@ bool is_callthunk(void *addr)
 	return !bcmp((void *)(dest - tmpl_size), tmpl, tmpl_size);
 }
 
-#ifdef CONFIG_BPF_JIT
 int x86_call_depth_emit_accounting(u8 **pprog, void *func)
 {
 	unsigned int tmpl_size = SKL_TMPL_SIZE;
@@ -329,8 +324,8 @@ void noinline callthunks_patch_module_calls(struct callthunk_sites *cs,
 					    struct module *mod)
 {
 	struct core_text ct = {
-		.base = (unsigned long)mod->core_layout.base,
-		.end  = (unsigned long)mod->core_layout.base + mod->core_layout.size,
+		.base = (unsigned long)mod->mem[MOD_TEXT].base,
+		.end  = (unsigned long)mod->mem[MOD_TEXT].base + mod->mem[MOD_TEXT].size,
 		.name = mod->name,
 	};
 

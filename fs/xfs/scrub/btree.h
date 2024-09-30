@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0+
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (C) 2017 Oracle.  All Rights Reserved.
- * Author: Darrick J. Wong <darrick.wong@oracle.com>
+ * Copyright (C) 2017-2023 Oracle.  All Rights Reserved.
+ * Author: Darrick J. Wong <djwong@kernel.org>
  */
 #ifndef __XFS_SCRUB_BTREE_H__
 #define __XFS_SCRUB_BTREE_H__
@@ -19,6 +19,8 @@ bool xchk_btree_xref_process_error(struct xfs_scrub *sc,
 /* Check for btree corruption. */
 void xchk_btree_set_corrupt(struct xfs_scrub *sc,
 		struct xfs_btree_cur *cur, int level);
+void xchk_btree_set_preen(struct xfs_scrub *sc, struct xfs_btree_cur *cur,
+		int level);
 
 /* Check for btree xref discrepancies. */
 void xchk_btree_xref_set_corrupt(struct xfs_scrub *sc,

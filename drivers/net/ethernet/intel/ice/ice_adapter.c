@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // SPDX-FileCopyrightText: Copyright Red Hat
 
+#include <linux/bitfield.h>
 #include <linux/cleanup.h>
 #include <linux/mutex.h>
 #include <linux/pci.h>
@@ -11,14 +12,20 @@
 
 static DEFINE_XARRAY(ice_adapters);
 
+/* PCI bus number is 8 bits. Slot is 5 bits. Domain can have the rest. */
+#define INDEX_FIELD_DOMAIN GENMASK(BITS_PER_LONG - 1, 13)
+#define INDEX_FIELD_BUS    GENMASK(12, 5)
+#define INDEX_FIELD_SLOT   GENMASK(4, 0)
+
 static unsigned long ice_adapter_index(const struct pci_dev *pdev)
 {
 	unsigned int domain = pci_domain_nr(pdev->bus);
 
-	WARN_ON((unsigned long)domain >> (BITS_PER_LONG - 13));
-	return ((unsigned long)domain << 13) |
-	       ((unsigned long)pdev->bus->number << 5) |
-	       PCI_SLOT(pdev->devfn);
+	WARN_ON(domain > FIELD_MAX(INDEX_FIELD_DOMAIN));
+
+	return FIELD_PREP(INDEX_FIELD_DOMAIN, domain) |
+	       FIELD_PREP(INDEX_FIELD_BUS,    pdev->bus->number) |
+	       FIELD_PREP(INDEX_FIELD_SLOT,   PCI_SLOT(pdev->devfn));
 }
 
 static struct ice_adapter *ice_adapter_new(void)

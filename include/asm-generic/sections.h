@@ -129,6 +129,28 @@ static inline bool init_section_intersects(void *virt, size_t size)
 }
 
 /**
+ * is_kernel_core_data - checks if the pointer address is located in the
+ *			 .data or .bss section
+ *
+ * @addr: address to check
+ *
+ * Returns: true if the address is located in .data or .bss, false otherwise.
+ * Note: On some archs it may return true for core RODATA, and false
+ *       for others. But will always be true for core RW data.
+ */
+static inline bool is_kernel_core_data(unsigned long addr)
+{
+	if (addr >= (unsigned long)_sdata && addr < (unsigned long)_edata)
+		return true;
+
+	if (addr >= (unsigned long)__bss_start &&
+	    addr < (unsigned long)__bss_stop)
+		return true;
+
+	return false;
+}
+
+/**
  * is_kernel_rodata - checks if the pointer address is located in the
  *                    .rodata section
  *
@@ -154,6 +176,35 @@ static inline bool is_kernel_inittext(unsigned long addr)
 {
 	return addr >= (unsigned long)_sinittext &&
 	       addr < (unsigned long)_einittext;
+}
+
+/**
+ * __is_kernel_text - checks if the pointer address is located in the
+ *                    .text section
+ *
+ * @addr: address to check
+ *
+ * Returns: true if the address is located in .text, false otherwise.
+ * Note: an internal helper, only check the range of _stext to _etext.
+ */
+static inline bool __is_kernel_text(unsigned long addr)
+{
+	return addr >= (unsigned long)_stext &&
+	       addr < (unsigned long)_etext;
+}
+
+/**
+ * __is_kernel - checks if the pointer address is located in the kernel range
+ *
+ * @addr: address to check
+ *
+ * Returns: true if the address is located in the kernel range, false otherwise.
+ * Note: an internal helper, only check the range of _stext to _end.
+ */
+static inline bool __is_kernel(unsigned long addr)
+{
+	return addr >= (unsigned long)_stext &&
+	       addr < (unsigned long)_end;
 }
 
 #endif /* _ASM_GENERIC_SECTIONS_H_ */

@@ -21,6 +21,7 @@ void lkdtm_VMALLOC_LINEAR_OVERFLOW(void)
 	char *one, *two;
 
 	one = vzalloc(PAGE_SIZE);
+	OPTIMIZER_HIDE_VAR(one);
 	two = vzalloc(PAGE_SIZE);
 
 	pr_info("Attempting vmalloc linear overflow ...\n");

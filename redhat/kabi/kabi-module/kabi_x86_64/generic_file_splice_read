@@ -1,2 +1,3 @@
-#4-
-0xf21966b8	generic_file_splice_read	vmlinux	EXPORT_SYMBOL	
+#5-
+0x569cd19e	generic_file_splice_read	vmlinux	EXPORT_SYMBOL	
+

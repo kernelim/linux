@@ -2,6 +2,7 @@
 /* Copyright (C) 2023 Intel Corporation */
 
 #include "idpf.h"
+#include "idpf_virtchnl.h"
 
 /**
  * idpf_buf_lifo_push - push a buffer pointer onto stack
@@ -594,9 +595,6 @@ static struct page_pool *idpf_rx_create_page_pool(struct idpf_queue *rxbufq)
 		.dma_dir	= DMA_FROM_DEVICE,
 		.offset		= 0,
 	};
-
-	if (rxbufq->rx_buf_size == IDPF_RX_BUF_2048)
-		pp.flags |= PP_FLAG_PAGE_FRAG;
 
 	return page_pool_create(&pp);
 }
@@ -1243,11 +1241,14 @@ static int idpf_rxq_group_alloc(struct idpf_vport *vport, u16 num_rxq)
 	struct idpf_adapter *adapter = vport->adapter;
 	struct idpf_queue *q;
 	int i, k, err = 0;
+	bool hs;
 
 	vport->rxq_grps = kcalloc(vport->num_rxq_grp,
 				  sizeof(struct idpf_rxq_group), GFP_KERNEL);
 	if (!vport->rxq_grps)
 		return -ENOMEM;
+
+	hs = idpf_vport_get_hsplit(vport) == ETHTOOL_TCP_DATA_SPLIT_ENABLED;
 
 	for (i = 0; i < vport->num_rxq_grp; i++) {
 		struct idpf_rxq_group *rx_qgrp = &vport->rxq_grps[i];
@@ -1301,9 +1302,8 @@ static int idpf_rxq_group_alloc(struct idpf_vport *vport, u16 num_rxq)
 			q->rx_buf_size = vport->bufq_size[j];
 			q->rx_buffer_low_watermark = IDPF_LOW_WATERMARK;
 			q->rx_buf_stride = IDPF_RX_BUF_STRIDE;
-			if (idpf_is_cap_ena_all(adapter, IDPF_HSPLIT_CAPS,
-						IDPF_CAP_HSPLIT) &&
-			    idpf_is_queue_model_split(vport->rxq_model)) {
+
+			if (hs) {
 				q->rx_hsplit_en = true;
 				q->rx_hbuf_size = IDPF_HDR_BUF_SIZE;
 			}
@@ -1347,9 +1347,7 @@ skip_splitq_rx_init:
 				rx_qgrp->splitq.rxq_sets[j]->refillq1 =
 				      &rx_qgrp->splitq.bufq_sets[1].refillqs[j];
 
-			if (idpf_is_cap_ena_all(adapter, IDPF_HSPLIT_CAPS,
-						IDPF_CAP_HSPLIT) &&
-			    idpf_is_queue_model_split(vport->rxq_model)) {
+			if (hs) {
 				q->rx_hsplit_en = true;
 				q->rx_hbuf_size = IDPF_HDR_BUF_SIZE;
 			}
@@ -3007,8 +3005,7 @@ struct sk_buff *idpf_rx_construct_skb(struct idpf_queue *rxq,
 	/* prefetch first cache line of first page */
 	net_prefetch(va);
 	/* allocate a skb to store the frags */
-	skb = __napi_alloc_skb(&rxq->q_vector->napi, IDPF_RX_HDR_SIZE,
-			       GFP_ATOMIC);
+	skb = napi_alloc_skb(&rxq->q_vector->napi, IDPF_RX_HDR_SIZE);
 	if (unlikely(!skb)) {
 		idpf_rx_put_page(rx_buf);
 
@@ -3062,7 +3059,7 @@ static struct sk_buff *idpf_rx_hdr_construct_skb(struct idpf_queue *rxq,
 	struct sk_buff *skb;
 
 	/* allocate a skb to store the frags */
-	skb = __napi_alloc_skb(&rxq->q_vector->napi, size, GFP_ATOMIC);
+	skb = napi_alloc_skb(&rxq->q_vector->napi, size);
 	if (unlikely(!skb))
 		return NULL;
 

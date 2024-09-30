@@ -7,7 +7,7 @@ ret     = 1
 test_ret = true
 arch    = aarch64
 auxv    = auxv["AT_HWCAP"] & 0x400000 == 0x400000
-kernel_since = 6.1
+kernel_since = 5.14
 
 [event:base-record]
 sample_type=4359

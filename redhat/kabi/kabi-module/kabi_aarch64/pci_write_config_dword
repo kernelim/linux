@@ -1,2 +1,3 @@
-#4-
-0xc3ea8066	pci_write_config_dword	vmlinux	EXPORT_SYMBOL	
+#5-
+0xa39d4c10	pci_write_config_dword	vmlinux	EXPORT_SYMBOL	
+

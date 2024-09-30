@@ -1,2 +1,3 @@
-#4-
-0x22e84830	netdev_set_tc_queue	vmlinux	EXPORT_SYMBOL	
+#5-
+0x6756258a	netdev_set_tc_queue	vmlinux	EXPORT_SYMBOL	
+

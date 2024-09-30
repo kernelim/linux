@@ -9,7 +9,6 @@ struct dev_dax;
 struct resource;
 struct dax_device;
 struct dax_region;
-void dax_region_put(struct dax_region *dax_region);
 
 /* dax bus specific ioresource flags */
 #define IORESOURCE_DAX_STATIC BIT(0)
@@ -30,6 +29,7 @@ struct dev_dax_data {
 	enum dev_dax_subsys subsys;
 	resource_size_t size;
 	int id;
+	bool memmap_on_memory;
 };
 
 struct dev_dax *devm_create_dev_dax(struct dev_dax_data *data);

@@ -67,9 +67,9 @@ static void ccw_timeout_log(struct ccw_device *cdev)
 			       sizeof(struct tcw), 0);
 	} else {
 		printk(KERN_WARNING "cio: orb indicates command mode\n");
-		if ((void *)(addr_t)orb->cmd.cpa ==
+		if (phys_to_virt(orb->cmd.cpa) ==
 		    &private->dma_area->sense_ccw ||
-		    (void *)(addr_t)orb->cmd.cpa ==
+		    phys_to_virt(orb->cmd.cpa) ==
 		    cdev->private->dma_area->iccws)
 			printk(KERN_WARNING "cio: last channel program "
 			       "(intern):\n");
@@ -315,7 +315,7 @@ static void ccw_device_oper_notify(struct ccw_device *cdev)
 	struct subchannel *sch = to_subchannel(cdev->dev.parent);
 
 	if (ccw_device_notify(cdev, CIO_OPER) == NOTIFY_OK) {
-		/* Reenable channel measurements, if needed. */
+		/* Re-enable channel measurements, if needed. */
 		ccw_device_sched_todo(cdev, CDEV_TODO_ENABLE_CMF);
 		/* Save indication for new paths. */
 		cdev->private->path_new_mask = sch->vpm;
@@ -952,7 +952,7 @@ void ccw_device_trigger_reprobe(struct ccw_device *cdev)
 	 */
 	sch->lpm = sch->schib.pmcw.pam & sch->opm;
 	/*
-	 * Use the initial configuration since we can't be shure that the old
+	 * Use the initial configuration since we can't be sure that the old
 	 * paths are valid.
 	 */
 	io_subchannel_init_config(sch);

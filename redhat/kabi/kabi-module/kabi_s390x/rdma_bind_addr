@@ -1,2 +1,3 @@
-#4-
-0xd680dd4c	rdma_bind_addr	drivers/infiniband/core/rdma_cm	EXPORT_SYMBOL	
+#5-
+0xa17e3020	rdma_bind_addr	drivers/infiniband/core/rdma_cm	EXPORT_SYMBOL	
+

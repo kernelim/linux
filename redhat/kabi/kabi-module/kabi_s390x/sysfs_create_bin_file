@@ -1,2 +1,3 @@
-#4-
-0x65ac0c91	sysfs_create_bin_file	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0x1e0f012a	sysfs_create_bin_file	vmlinux	EXPORT_SYMBOL_GPL	
+

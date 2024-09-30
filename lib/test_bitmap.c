@@ -473,6 +473,42 @@ static void __init test_bitmap_parselist(void)
 	}
 }
 
+static void __init test_bitmap_printlist(void)
+{
+	unsigned long *bmap = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	char *buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	char expected[256];
+	int ret, slen;
+	ktime_t time;
+
+	if (!buf || !bmap)
+		goto out;
+
+	memset(bmap, -1, PAGE_SIZE);
+	slen = snprintf(expected, 256, "0-%ld", PAGE_SIZE * 8 - 1);
+	if (slen < 0)
+		goto out;
+
+	time = ktime_get();
+	ret = bitmap_print_to_pagebuf(true, buf, bmap, PAGE_SIZE * 8);
+	time = ktime_get() - time;
+
+	if (ret != slen + 1) {
+		pr_err("bitmap_print_to_pagebuf: result is %d, expected %d\n", ret, slen);
+		goto out;
+	}
+
+	if (strncmp(buf, expected, slen)) {
+		pr_err("bitmap_print_to_pagebuf: result is %s, expected %s\n", buf, expected);
+		goto out;
+	}
+
+	pr_err("bitmap_print_to_pagebuf: input is '%s', Time: %llu\n", buf, time);
+out:
+	kfree(buf);
+	kfree(bmap);
+}
+
 static const unsigned long parse_test[] __initconst = {
 	BITMAP_FROM_U64(0),
 	BITMAP_FROM_U64(1),
@@ -571,6 +607,36 @@ static void __init test_bitmap_arr32(void)
 		if (nbits < EXP1_IN_BITS - 32)
 			expect_eq_uint(arr[DIV_ROUND_UP(nbits, 32)],
 								0xa5a5a5a5);
+	}
+}
+
+static void __init test_bitmap_arr64(void)
+{
+	unsigned int nbits, next_bit;
+	u64 arr[EXP1_IN_BITS / 64];
+	DECLARE_BITMAP(bmap2, EXP1_IN_BITS);
+
+	memset(arr, 0xa5, sizeof(arr));
+
+	for (nbits = 0; nbits < EXP1_IN_BITS; ++nbits) {
+		memset(bmap2, 0xff, sizeof(arr));
+		bitmap_to_arr64(arr, exp1, nbits);
+		bitmap_from_arr64(bmap2, arr, nbits);
+		expect_eq_bitmap(bmap2, exp1, nbits);
+
+		next_bit = find_next_bit(bmap2, round_up(nbits, BITS_PER_LONG), nbits);
+		if (next_bit < round_up(nbits, BITS_PER_LONG))
+			pr_err("bitmap_copy_arr64(nbits == %d:"
+				" tail is not safely cleared: %d\n", nbits, next_bit);
+
+		if ((nbits % 64) &&
+		    (arr[(nbits - 1) / 64] & ~GENMASK_ULL((nbits - 1) % 64, 0)))
+			pr_err("bitmap_to_arr64(nbits == %d): tail is not safely cleared: 0x%016llx (must be 0x%016llx)\n",
+			       nbits, arr[(nbits - 1) / 64],
+			       GENMASK_ULL((nbits - 1) % 64, 0));
+
+		if (nbits < EXP1_IN_BITS - 64)
+			expect_eq_uint(arr[DIV_ROUND_UP(nbits, 64)], 0xa5a5a5a5);
 	}
 }
 
@@ -708,8 +774,10 @@ static void __init selftest(void)
 	test_copy();
 	test_replace();
 	test_bitmap_arr32();
+	test_bitmap_arr64();
 	test_bitmap_parse();
 	test_bitmap_parselist();
+	test_bitmap_printlist();
 	test_mem_optimisations();
 	test_for_each_set_clump8();
 	test_bitmap_cut();

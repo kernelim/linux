@@ -1,2 +1,3 @@
-#4-
-0x68546555	debugfs_create_u32	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0xd896c56b	debugfs_create_u32	vmlinux	EXPORT_SYMBOL_GPL	
+

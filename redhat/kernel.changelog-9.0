@@ -7553,5 +7553,3 @@ Resolves: rhbz#2042559, rhbz#2060869, rhbz#2062199, rhbz#2050813, rhbz#2057238, 
 - [initial commit] Add configs (Laura Abbott)
 - [initial commit] Add Makefiles (Laura Abbott)
 
-# The following bit is important for automation so please do not remove
-# END OF CHANGELOG

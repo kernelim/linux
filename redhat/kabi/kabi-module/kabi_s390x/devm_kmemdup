@@ -1,2 +1,3 @@
-#4-
-0x28e722f5	devm_kmemdup	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0x3f0da576	devm_kmemdup	vmlinux	EXPORT_SYMBOL_GPL	
+

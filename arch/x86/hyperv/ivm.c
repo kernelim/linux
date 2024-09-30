@@ -290,7 +290,7 @@ static void snp_cleanup_vmsa(struct sev_es_save_area *vmsa)
 		free_page((unsigned long)vmsa);
 }
 
-int hv_snp_boot_ap(int cpu, unsigned long start_ip)
+int hv_snp_boot_ap(u32 cpu, unsigned long start_ip)
 {
 	struct sev_es_save_area *vmsa = (struct sev_es_save_area *)
 		__get_free_page(GFP_KERNEL | __GFP_ZERO);
@@ -592,12 +592,12 @@ void __init hv_vtom_init(void)
 #ifdef CONFIG_AMD_MEM_ENCRYPT
 	case HV_ISOLATION_TYPE_SNP:
 		sev_status = MSR_AMD64_SNP_VTOM;
-		cc_set_vendor(CC_VENDOR_AMD);
+		cc_vendor = CC_VENDOR_AMD;
 		break;
 #endif
 
 	case HV_ISOLATION_TYPE_TDX:
-		cc_set_vendor(CC_VENDOR_INTEL);
+		cc_vendor = CC_VENDOR_INTEL;
 		break;
 
 	default:

@@ -58,7 +58,7 @@ void hmem_register_device(int target_nid, struct resource *res)
 	rc = platform_device_add_data(pdev, &info, sizeof(info));
 	if (rc < 0) {
 		pr_err("hmem memregion_info allocation failure for %pr\n", &res);
-		goto out_pdev;
+		goto out_resource;
 	}
 
 	rc = platform_device_add_resources(pdev, res, 1);
@@ -78,7 +78,7 @@ void hmem_register_device(int target_nid, struct resource *res)
 out_resource:
 	__release_region(&hmem_active, res->start, resource_size(res));
 out_active:
-	put_device(&pdev->dev);
+	platform_device_put(pdev);
 out_pdev:
 	memregion_free(id);
 }

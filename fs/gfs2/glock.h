@@ -195,7 +195,7 @@ extern int gfs2_glock_get(struct gfs2_sbd *sdp, u64 number,
 			  int create, struct gfs2_glock **glp);
 extern struct gfs2_glock *gfs2_glock_hold(struct gfs2_glock *gl);
 extern void gfs2_glock_put(struct gfs2_glock *gl);
-extern void gfs2_glock_queue_put(struct gfs2_glock *gl);
+extern void gfs2_glock_put_async(struct gfs2_glock *gl);
 
 extern void __gfs2_holder_init(struct gfs2_glock *gl, unsigned int state,
 			       u16 flags, struct gfs2_holder *gh,

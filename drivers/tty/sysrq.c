@@ -100,12 +100,11 @@ __setup("sysrq_always_enabled", sysrq_always_enabled_setup);
 
 static void sysrq_handle_loglevel(int key)
 {
-	int i;
+	u8 loglevel = key - '0';
 
-	i = key - '0';
 	console_loglevel = CONSOLE_LOGLEVEL_DEFAULT;
-	pr_info("Loglevel set to %d\n", i);
-	console_loglevel = i;
+	pr_info("Loglevel set to %u\n", loglevel);
+	console_loglevel = loglevel;
 }
 static const struct sysrq_key_op sysrq_loglevel_op = {
 	.handler	= sysrq_handle_loglevel,
@@ -232,8 +231,10 @@ static void showacpu(void *dummy)
 	unsigned long flags;
 
 	/* Idle CPUs have no interesting backtrace. */
-	if (idle_cpu(smp_processor_id()))
+	if (idle_cpu(smp_processor_id())) {
+		pr_info("CPU%d: backtrace skipped as idling\n", smp_processor_id());
 		return;
+	}
 
 	raw_spin_lock_irqsave(&show_lock, flags);
 	pr_info("CPU%d:\n", smp_processor_id());
@@ -258,13 +259,17 @@ static void sysrq_handle_showallcpus(int key)
 	if (!trigger_all_cpu_backtrace()) {
 		struct pt_regs *regs = NULL;
 
-		if (in_irq())
+		if (in_hardirq())
 			regs = get_irq_regs();
-		if (regs) {
-			pr_info("CPU%d:\n", smp_processor_id());
+
+		pr_info("CPU%d:\n", get_cpu());
+		if (regs)
 			show_regs(regs);
-		}
+		else
+			show_stack(NULL, NULL, KERN_INFO);
+
 		schedule_work(&sysrq_showallcpus);
+		put_cpu();
 	}
 }
 
@@ -274,13 +279,15 @@ static const struct sysrq_key_op sysrq_showallcpus_op = {
 	.action_msg	= "Show backtrace of all active CPUs",
 	.enable_mask	= SYSRQ_ENABLE_DUMP,
 };
+#else
+#define sysrq_showallcpus_op (*(const struct sysrq_key_op *)NULL)
 #endif
 
 static void sysrq_handle_showregs(int key)
 {
 	struct pt_regs *regs = NULL;
 
-	if (in_irq())
+	if (in_hardirq())
 		regs = get_irq_regs();
 	if (regs)
 		show_regs(regs);
@@ -405,6 +412,7 @@ static const struct sysrq_key_op sysrq_moom_op = {
 	.enable_mask	= SYSRQ_ENABLE_SIGNAL,
 };
 
+#ifdef CONFIG_BLOCK
 static void sysrq_handle_thaw(int key)
 {
 	emergency_thaw_all();
@@ -415,6 +423,9 @@ static const struct sysrq_key_op sysrq_thaw_op = {
 	.action_msg	= "Emergency Thaw of all frozen filesystems",
 	.enable_mask	= SYSRQ_ENABLE_SIGNAL,
 };
+#else
+#define sysrq_thaw_op (*(const struct sysrq_key_op *)NULL)
+#endif
 
 static void sysrq_handle_kill(int key)
 {
@@ -468,17 +479,9 @@ static const struct sysrq_key_op *sysrq_key_table[62] = {
 	NULL,				/* g */
 	NULL,				/* h - reserved for help */
 	&sysrq_kill_op,			/* i */
-#ifdef CONFIG_BLOCK
 	&sysrq_thaw_op,			/* j */
-#else
-	NULL,				/* j */
-#endif
 	&sysrq_SAK_op,			/* k */
-#ifdef CONFIG_SMP
 	&sysrq_showallcpus_op,		/* l */
-#else
-	NULL,				/* l */
-#endif
 	&sysrq_showmem_op,		/* m */
 	&sysrq_unrt_op,			/* n */
 	/* o: This will often be registered as 'Off' at init time */
@@ -528,25 +531,24 @@ static const struct sysrq_key_op *sysrq_key_table[62] = {
 };
 
 /* key2index calculation, -1 on invalid index */
-static int sysrq_key_table_key2index(int key)
+static int sysrq_key_table_key2index(u8 key)
 {
-	int retval;
-
-	if ((key >= '0') && (key <= '9'))
-		retval = key - '0';
-	else if ((key >= 'a') && (key <= 'z'))
-		retval = key + 10 - 'a';
-	else if ((key >= 'A') && (key <= 'Z'))
-		retval = key + 36 - 'A';
-	else
-		retval = -1;
-	return retval;
+	switch (key) {
+	case '0' ... '9':
+		return key - '0';
+	case 'a' ... 'z':
+		return key - 'a' + 10;
+	case 'A' ... 'Z':
+		return key - 'A' + 10 + 26;
+	default:
+		return -1;
+	}
 }
 
 /*
  * get and put functions for the table, exposed to modules.
  */
-static const struct sysrq_key_op *__sysrq_get_key_op(int key)
+static const struct sysrq_key_op *__sysrq_get_key_op(u8 key)
 {
 	const struct sysrq_key_op *op_p = NULL;
 	int i;
@@ -558,7 +560,7 @@ static const struct sysrq_key_op *__sysrq_get_key_op(int key)
 	return op_p;
 }
 
-static void __sysrq_put_key_op(int key, const struct sysrq_key_op *op_p)
+static void __sysrq_put_key_op(u8 key, const struct sysrq_key_op *op_p)
 {
 	int i = sysrq_key_table_key2index(key);
 
@@ -566,7 +568,7 @@ static void __sysrq_put_key_op(int key, const struct sysrq_key_op *op_p)
 		sysrq_key_table[i] = op_p;
 }
 
-void __handle_sysrq(int key, bool check_mask)
+void __handle_sysrq(u8 key, bool check_mask)
 {
 	const struct sysrq_key_op *op_p;
 	int orig_log_level;
@@ -578,7 +580,6 @@ void __handle_sysrq(int key, bool check_mask)
 
 	rcu_sysrq_start();
 	rcu_read_lock();
-	printk_prefer_direct_enter();
 	/*
 	 * Raise the apparent loglevel to maximum so that the sysrq header
 	 * is shown to provide the user with positive feedback.  We do not
@@ -620,14 +621,13 @@ void __handle_sysrq(int key, bool check_mask)
 		pr_cont("\n");
 		console_loglevel = orig_log_level;
 	}
-	printk_prefer_direct_exit();
 	rcu_read_unlock();
 	rcu_sysrq_end();
 
 	suppress_printk = orig_suppress_printk;
 }
 
-void handle_sysrq(int key)
+void handle_sysrq(u8 key)
 {
 	if (sysrq_on())
 		__handle_sysrq(key, true);
@@ -845,6 +845,8 @@ static bool sysrq_handle_keypress(struct sysrq_state *sysrq,
 			sysrq->shift = KEY_RESERVED;
 		else if (value != 2)
 			sysrq->shift = code;
+		if (sysrq->active)
+			sysrq->shift_use = sysrq->shift;
 		break;
 
 	case KEY_SYSRQ:
@@ -1109,7 +1111,7 @@ int sysrq_toggle_support(int enable_mask)
 }
 EXPORT_SYMBOL_GPL(sysrq_toggle_support);
 
-static int __sysrq_swap_key_ops(int key, const struct sysrq_key_op *insert_op_p,
+static int __sysrq_swap_key_ops(u8 key, const struct sysrq_key_op *insert_op_p,
 				const struct sysrq_key_op *remove_op_p)
 {
 	int retval;
@@ -1133,13 +1135,13 @@ static int __sysrq_swap_key_ops(int key, const struct sysrq_key_op *insert_op_p,
 	return retval;
 }
 
-int register_sysrq_key(int key, const struct sysrq_key_op *op_p)
+int register_sysrq_key(u8 key, const struct sysrq_key_op *op_p)
 {
 	return __sysrq_swap_key_ops(key, op_p, NULL);
 }
 EXPORT_SYMBOL(register_sysrq_key);
 
-int unregister_sysrq_key(int key, const struct sysrq_key_op *op_p)
+int unregister_sysrq_key(u8 key, const struct sysrq_key_op *op_p)
 {
 	return __sysrq_swap_key_ops(key, NULL, op_p);
 }

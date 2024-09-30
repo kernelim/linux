@@ -1,2 +1,3 @@
-#4-
-0xd00b1879	pci_iov_virtfn_devfn	vmlinux	EXPORT_SYMBOL_GPL	
+#5-
+0x55310db4	pci_iov_virtfn_devfn	vmlinux	EXPORT_SYMBOL_GPL	
+

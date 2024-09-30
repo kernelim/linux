@@ -12,8 +12,28 @@ space_escape := _-_SPACE_-_
 pound := \#
 
 ###
+# Comparison macros.
+# Usage: $(call test-lt, $(CONFIG_LLD_VERSION), 150000)
+#
+# Use $(intcmp ...) if supported. (Make >= 4.4)
+# Otherwise, fall back to the 'test' shell command.
+ifeq ($(intcmp 1,0,,,y),y)
+test-ge = $(intcmp $(strip $1)0, $(strip $2)0,,y,y)
+test-gt = $(intcmp $(strip $1)0, $(strip $2)0,,,y)
+else
+test-ge = $(shell test $(strip $1)0 -ge $(strip $2)0 && echo y)
+test-gt = $(shell test $(strip $1)0 -gt $(strip $2)0 && echo y)
+endif
+test-le = $(call test-ge, $2, $1)
+test-lt = $(call test-gt, $2, $1)
+
+###
 # Name of target with a '.' as filename prefix. foo/bar.o => foo/.bar.o
 dot-target = $(dir $@).$(notdir $@)
+
+###
+# Name of target with a '.tmp_' as filename prefix. foo/bar.o => foo/.tmp_bar.o
+tmp-target = $(dir $@).tmp_$(notdir $@)
 
 ###
 # The temporary file to save gcc -MMD generated dependencies must not
@@ -37,6 +57,11 @@ escsq = $(subst $(squote),'\$(squote)',$1)
 stringify = $(squote)$(quote)$1$(quote)$(squote)
 
 ###
+# The path to Kbuild or Makefile. Kbuild has precedence over Makefile.
+kbuild-dir = $(if $(filter /%,$(src)),$(src),$(srctree)/$(src))
+kbuild-file = $(or $(wildcard $(kbuild-dir)/Kbuild),$(kbuild-dir)/Makefile)
+
+###
 # Easy method for doing a status message
        kecho := :
  quiet_kecho := echo
@@ -57,6 +82,7 @@ kecho := $($(quiet)kecho)
 # - If the content differ the new file is used
 # - If they are equal no change, and no timestamp update
 define filechk
+	$(check-FORCE)
 	$(Q)set -e;						\
 	mkdir -p $(dir $@);					\
 	trap "rm -f $(dot-target).tmp" EXIT;			\
@@ -130,13 +156,21 @@ make-cmd = $(call escsq,$(subst $(pound),$$(pound),$(subst $$,$$$$,$(cmd_$(1))))
 # PHONY targets skipped in both cases.
 newer-prereqs = $(filter-out $(PHONY),$?)
 
+# It is a typical mistake to forget the FORCE prerequisite. Check it here so
+# no more breakage will slip in.
+check-FORCE = $(if $(filter FORCE, $^),,$(warning FORCE prerequisite is missing))
+
+if-changed-cond = $(newer-prereqs)$(cmd-check)$(check-FORCE)
+
 # Execute command if command has changed or prerequisite(s) are updated.
-if_changed = $(if $(newer-prereqs)$(cmd-check),                              \
+if_changed = $(if $(if-changed-cond),$(cmd_and_savecmd),@:)
+
+cmd_and_savecmd =                                                            \
 	$(cmd);                                                              \
-	printf '%s\n' 'cmd_$@ := $(make-cmd)' > $(dot-target).cmd, @:)
+	printf '%s\n' 'cmd_$@ := $(make-cmd)' > $(dot-target).cmd
 
 # Execute the command and also postprocess generated .d dependencies file.
-if_changed_dep = $(if $(newer-prereqs)$(cmd-check),$(cmd_and_fixdep),@:)
+if_changed_dep = $(if $(if-changed-cond),$(cmd_and_fixdep),@:)
 
 cmd_and_fixdep =                                                             \
 	$(cmd);                                                              \
@@ -146,7 +180,7 @@ cmd_and_fixdep =                                                             \
 # Usage: $(call if_changed_rule,foo)
 # Will check if $(cmd_foo) or any of the prerequisites changed,
 # and if so will execute $(rule_foo).
-if_changed_rule = $(if $(newer-prereqs)$(cmd-check),$(rule_$(1)),@:)
+if_changed_rule = $(if $(if-changed-cond),$(rule_$(1)),@:)
 
 ###
 # why - tell why a target got built
@@ -167,7 +201,7 @@ if_changed_rule = $(if $(newer-prereqs)$(cmd-check),$(rule_$(1)),@:)
 # (5) No dir/.target.cmd file (used to store command line)
 # (6) No dir/.target.cmd file and target not listed in $(targets)
 #     This is a good hint that there is a bug in the kbuild file
-ifeq ($(KBUILD_VERBOSE),2)
+ifneq ($(findstring 2, $(KBUILD_VERBOSE)),)
 why =                                                                        \
     $(if $(filter $@, $(PHONY)),- due to target is PHONY,                    \
         $(if $(wildcard $@),                                                 \

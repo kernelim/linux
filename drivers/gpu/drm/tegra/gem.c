@@ -177,18 +177,27 @@ static void tegra_bo_unpin(struct host1x_bo_mapping *map)
 static void *tegra_bo_mmap(struct host1x_bo *bo)
 {
 	struct tegra_bo *obj = host1x_to_tegra_bo(bo);
-	struct iosys_map map;
+	struct iosys_map map = { 0 };
+	void *vaddr;
 	int ret;
 
-	if (obj->vaddr) {
+	if (obj->vaddr)
 		return obj->vaddr;
-	} else if (obj->gem.import_attach) {
+
+	if (obj->gem.import_attach) {
 		ret = dma_buf_vmap_unlocked(obj->gem.import_attach->dmabuf, &map);
-		return ret ? NULL : map.vaddr;
-	} else {
-		return vmap(obj->pages, obj->num_pages, VM_MAP,
-			    pgprot_writecombine(PAGE_KERNEL));
+		if (ret < 0)
+			return ERR_PTR(ret);
+
+		return map.vaddr;
 	}
+
+	vaddr = vmap(obj->pages, obj->num_pages, VM_MAP,
+		     pgprot_writecombine(PAGE_KERNEL));
+	if (!vaddr)
+		return ERR_PTR(-ENOMEM);
+
+	return vaddr;
 }
 
 static void tegra_bo_munmap(struct host1x_bo *bo, void *addr)
@@ -198,10 +207,11 @@ static void tegra_bo_munmap(struct host1x_bo *bo, void *addr)
 
 	if (obj->vaddr)
 		return;
-	else if (obj->gem.import_attach)
-		dma_buf_vunmap_unlocked(obj->gem.import_attach->dmabuf, &map);
-	else
-		vunmap(addr);
+
+	if (obj->gem.import_attach)
+		return dma_buf_vunmap_unlocked(obj->gem.import_attach->dmabuf, &map);
+
+	vunmap(addr);
 }
 
 static struct host1x_bo *tegra_bo_get(struct host1x_bo *bo)
@@ -575,7 +585,7 @@ int __tegra_gem_mmap(struct drm_gem_object *gem, struct vm_area_struct *vma)
 		 * and set the vm_pgoff (used as a fake buffer offset by DRM)
 		 * to 0 as we want to map the whole buffer.
 		 */
-		vma->vm_flags &= ~VM_PFNMAP;
+		vm_flags_clear(vma, VM_PFNMAP);
 		vma->vm_pgoff = 0;
 
 		err = dma_mmap_wc(gem->dev->dev, vma, bo->vaddr, bo->iova,
@@ -589,8 +599,7 @@ int __tegra_gem_mmap(struct drm_gem_object *gem, struct vm_area_struct *vma)
 	} else {
 		pgprot_t prot = vm_get_page_prot(vma->vm_flags);
 
-		vma->vm_flags |= VM_MIXEDMAP;
-		vma->vm_flags &= ~VM_PFNMAP;
+		vm_flags_mod(vma, VM_MIXEDMAP, VM_PFNMAP);
 
 		vma->vm_page_prot = pgprot_writecombine(prot);
 	}

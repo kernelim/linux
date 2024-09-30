@@ -446,6 +446,8 @@ static bool stackleak_gate(void)
 			return false;
 		if (!strncmp(TREE_STRING_POINTER(section), ".meminit.text", 13))
 			return false;
+		if (STRING_EQUAL(section, ".head.text"))
+			return false;
 	}
 
 	return track_frame_size >= 0;

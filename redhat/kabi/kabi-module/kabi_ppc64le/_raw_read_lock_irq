@@ -1,2 +1,3 @@
-#4-
-0x48112d76	_raw_read_lock_irq	vmlinux	EXPORT_SYMBOL	
+#5-
+0x00b48610	_raw_read_lock_irq	vmlinux	EXPORT_SYMBOL	
+

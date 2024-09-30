@@ -495,6 +495,21 @@ config SENSORS_DELL_SMM
 	  When option I8K is also enabled this driver provides legacy /proc/i8k
 	  userspace interface for i8kutils package.
 
+config I8K
+	bool "Legacy /proc/i8k interface of Dell laptop SMM BIOS hwmon driver"
+	depends on SENSORS_DELL_SMM
+	depends on PROC_FS
+	help
+	  This option enables the legacy /proc/i8k userspace interface of the
+	  dell-smm-hwmon driver. The character file /proc/i8k exposes the BIOS
+	  version, temperatures and allows control of fan speeds of some Dell
+	  laptops. Sometimes it also reports power and hotkey status.
+
+	  This interface is required to run programs from the i8kutils package.
+
+	  Say Y if you intend to run userspace programs that use this interface.
+	  Say N otherwise.
+
 config SENSORS_DA9052_ADC
 	tristate "Dialog DA9052/DA9053 ADC"
 	depends on PMIC_DA9052

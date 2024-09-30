@@ -15,8 +15,11 @@
 #define _LINUX_CONSOLE_H_ 1
 
 #include <linux/atomic.h>
+#include <linux/bits.h>
+#include <linux/irq_work.h>
+#include <linux/rculist.h>
+#include <linux/rcuwait.h>
 #include <linux/types.h>
-#include <linux/mutex.h>
 
 struct vc_data;
 struct console_font_op;
@@ -59,8 +62,9 @@ struct consw {
 	int	(*con_switch)(struct vc_data *vc);
 	int	(*con_blank)(struct vc_data *vc, int blank, int mode_switch);
 	int	(*con_font_set)(struct vc_data *vc, struct console_font *font,
-			unsigned int flags);
-	int	(*con_font_get)(struct vc_data *vc, struct console_font *font);
+			unsigned int vpitch, unsigned int flags);
+	int	(*con_font_get)(struct vc_data *vc, struct console_font *font,
+			unsigned int vpitch);
 	int	(*con_font_default)(struct vc_data *vc,
 			struct console_font *font, char *name);
 	int     (*con_resize)(struct vc_data *vc, unsigned int width,
@@ -99,6 +103,13 @@ extern const struct consw dummy_con;	/* dummy console buffer */
 extern const struct consw vga_con;	/* VGA text console */
 extern const struct consw newport_con;	/* SGI Newport console  */
 
+struct screen_info;
+#ifdef CONFIG_VGA_CONSOLE
+void vgacon_register_screen(struct screen_info *si);
+#else
+static inline void vgacon_register_screen(struct screen_info *si) { }
+#endif
+
 int con_is_bound(const struct consw *csw);
 int do_unregister_con_driver(const struct consw *csw);
 int do_take_over_console(const struct consw *sw, int first, int last, int deflt);
@@ -125,87 +136,371 @@ static inline int con_debug_leave(void)
 /*
  * The interface for a console, or any other device that wants to capture
  * console messages (printer driver?)
- *
- * If a console driver is marked CON_BOOT then it will be auto-unregistered
- * when the first real console is registered.  This is for early-printk drivers.
  */
 
-#define CON_PRINTBUFFER	(1)
-#define CON_CONSDEV	(2) /* Preferred console, /dev/console */
-#define CON_ENABLED	(4)
-#define CON_BOOT	(8)
-#define CON_ANYTIME	(16) /* Safe to call when cpu is offline */
-#define CON_BRL		(32) /* Used for a braille device */
-#define CON_EXTENDED	(64) /* Use the extended output format a la /dev/kmsg */
-
-#ifdef CONFIG_HAVE_ATOMIC_CONSOLE
-struct console_atomic_data {
-	u64	seq;
-	char	*text;
-	char	*ext_text;
-	char	*dropped_text;
+/**
+ * cons_flags - General console flags
+ * @CON_PRINTBUFFER:	Used by newly registered consoles to avoid duplicate
+ *			output of messages that were already shown by boot
+ *			consoles or read by userspace via syslog() syscall.
+ * @CON_CONSDEV:	Indicates that the console driver is backing
+ *			/dev/console.
+ * @CON_ENABLED:	Indicates if a console is allowed to print records. If
+ *			false, the console also will not advance to later
+ *			records.
+ * @CON_BOOT:		Marks the console driver as early console driver which
+ *			is used during boot before the real driver becomes
+ *			available. It will be automatically unregistered
+ *			when the real console driver is registered unless
+ *			"keep_bootcon" parameter is used.
+ * @CON_ANYTIME:	A misnomed historical flag which tells the core code
+ *			that the legacy @console::write callback can be invoked
+ *			on a CPU which is marked OFFLINE. That is misleading as
+ *			it suggests that there is no contextual limit for
+ *			invoking the callback. The original motivation was
+ *			readiness of the per-CPU areas.
+ * @CON_BRL:		Indicates a braille device which is exempt from
+ *			receiving the printk spam for obvious reasons.
+ * @CON_EXTENDED:	The console supports the extended output format of
+ *			/dev/kmesg which requires a larger output buffer.
+ * @CON_SUSPENDED:	Indicates if a console is suspended. If true, the
+ *			printing callbacks must not be called.
+ * @CON_NBCON:		Console can operate outside of the legacy style console_lock
+ *			constraints.
+ */
+enum cons_flags {
+	CON_PRINTBUFFER		= BIT(0),
+	CON_CONSDEV		= BIT(1),
+	CON_ENABLED		= BIT(2),
+	CON_BOOT		= BIT(3),
+	CON_ANYTIME		= BIT(4),
+	CON_BRL			= BIT(5),
+	CON_EXTENDED		= BIT(6),
+	CON_SUSPENDED		= BIT(7),
+	CON_NBCON		= BIT(8),
 };
-#endif
 
-struct console {
-	char	name[16];
-	void	(*write)(struct console *, const char *, unsigned);
-	void	(*write_atomic)(struct console *, const char *, unsigned);
-	int	(*read)(struct console *, char *, unsigned);
-	struct tty_driver *(*device)(struct console *, int *);
-	void	(*unblank)(void);
-	int	(*setup)(struct console *, char *);
-	int	(*exit)(struct console *);
-	int	(*match)(struct console *, char *name, int idx, char *options);
-	short	flags;
-	short	index;
-	int	cflag;
-	uint	ispeed;
-	uint	ospeed;
-	u64	seq;
-	atomic_long_t dropped;
-#ifdef CONFIG_HAVE_ATOMIC_CONSOLE
-	struct console_atomic_data *atomic_data;
-#endif
-	struct task_struct *thread;
-	bool	blocked;
-
-	/*
-	 * The per-console lock is used by printing kthreads to synchronize
-	 * this console with callers of console_lock(). This is necessary in
-	 * order to allow printing kthreads to run in parallel to each other,
-	 * while each safely accessing the @blocked field and synchronizing
-	 * against direct printing via console_lock/console_unlock.
-	 *
-	 * Note: For synchronizing against direct printing via
-	 *       console_trylock/console_unlock, see the static global
-	 *       variable @console_kthreads_active.
-	 */
-	struct mutex lock;
-
-	void	*data;
-	struct	 console *next;
+/**
+ * struct nbcon_state - console state for nbcon consoles
+ * @atom:	Compound of the state fields for atomic operations
+ *
+ * @req_prio:		The priority of a handover request
+ * @prio:		The priority of the current owner
+ * @unsafe:		Console is busy in a non takeover region
+ * @unsafe_takeover:	A hostile takeover in an unsafe state happened in the
+ *			past. The console cannot be safe until re-initialized.
+ * @cpu:		The CPU on which the owner runs
+ *
+ * To be used for reading and preparing of the value stored in the nbcon
+ * state variable @console::nbcon_state.
+ *
+ * The @prio and @req_prio fields are particularly important to allow
+ * spin-waiting to timeout and give up without the risk of a waiter being
+ * assigned the lock after giving up.
+ */
+struct nbcon_state {
+	union {
+		unsigned int	atom;
+		struct {
+			unsigned int prio		:  2;
+			unsigned int req_prio		:  2;
+			unsigned int unsafe		:  1;
+			unsigned int unsafe_takeover	:  1;
+			unsigned int cpu		: 24;
+		};
+	};
 };
 
 /*
- * for_each_console() allows you to iterate on each console
+ * The nbcon_state struct is used to easily create and interpret values that
+ * are stored in the @console::nbcon_state variable. Ensure this struct stays
+ * within the size boundaries of the atomic variable's underlying type in
+ * order to avoid any accidental truncation.
  */
-#define for_each_console(con) \
-	for (con = console_drivers; con != NULL; con = con->next)
+static_assert(sizeof(struct nbcon_state) <= sizeof(int));
+
+/**
+ * nbcon_prio - console owner priority for nbcon consoles
+ * @NBCON_PRIO_NONE:		Unused
+ * @NBCON_PRIO_NORMAL:		Normal (non-emergency) usage
+ * @NBCON_PRIO_EMERGENCY:	Emergency output (WARN/OOPS...)
+ * @NBCON_PRIO_PANIC:		Panic output
+ * @NBCON_PRIO_MAX:		The number of priority levels
+ *
+ * A higher priority context can takeover the console when it is
+ * in the safe state. The final attempt to flush consoles in panic()
+ * can be allowed to do so even in an unsafe state (Hope and pray).
+ */
+enum nbcon_prio {
+	NBCON_PRIO_NONE = 0,
+	NBCON_PRIO_NORMAL,
+	NBCON_PRIO_EMERGENCY,
+	NBCON_PRIO_PANIC,
+	NBCON_PRIO_MAX,
+};
+
+struct console;
+struct printk_buffers;
+
+/**
+ * struct nbcon_context - Context for console acquire/release
+ * @console:			The associated console
+ * @spinwait_max_us:		Limit for spin-wait acquire
+ * @prio:			Priority of the context
+ * @allow_unsafe_takeover:	Allow performing takeover even if unsafe. Can
+ *				be used only with NBCON_PRIO_PANIC @prio. It
+ *				might cause a system freeze when the console
+ *				is used later.
+ * @backlog:			Ringbuffer has pending records
+ * @pbufs:			Pointer to the text buffer for this context
+ * @seq:			The sequence number to print for this context
+ */
+struct nbcon_context {
+	/* members set by caller */
+	struct console		*console;
+	unsigned int		spinwait_max_us;
+	enum nbcon_prio		prio;
+	unsigned int		allow_unsafe_takeover	: 1;
+
+	/* members set by emit */
+	unsigned int		backlog			: 1;
+
+	/* members set by acquire */
+	struct printk_buffers	*pbufs;
+	u64			seq;
+};
+
+/**
+ * struct nbcon_write_context - Context handed to the nbcon write callbacks
+ * @ctxt:		The core console context
+ * @outbuf:		Pointer to the text buffer for output
+ * @len:		Length to write
+ * @unsafe_takeover:	If a hostile takeover in an unsafe state has occurred
+ */
+struct nbcon_write_context {
+	struct nbcon_context	__private ctxt;
+	char			*outbuf;
+	unsigned int		len;
+	bool			unsafe_takeover;
+};
+
+/**
+ * struct console - The console descriptor structure
+ * @name:		The name of the console driver
+ * @write:		Write callback to output messages (Optional)
+ * @read:		Read callback for console input (Optional)
+ * @device:		The underlying TTY device driver (Optional)
+ * @unblank:		Callback to unblank the console (Optional)
+ * @setup:		Callback for initializing the console (Optional)
+ * @exit:		Callback for teardown of the console (Optional)
+ * @match:		Callback for matching a console (Optional)
+ * @flags:		Console flags. See enum cons_flags
+ * @index:		Console index, e.g. port number
+ * @cflag:		TTY control mode flags
+ * @ispeed:		TTY input speed
+ * @ospeed:		TTY output speed
+ * @seq:		Sequence number of the next ringbuffer record to print
+ * @dropped:		Number of unreported dropped ringbuffer records
+ * @data:		Driver private data
+ * @node:		hlist node for the console list
+ *
+ * @write_atomic:	Write callback for atomic context
+ * @write_thread:	Write callback for non-atomic context
+ * @driver_enter:	Callback to begin synchronization with driver code
+ * @driver_exit:	Callback to finish synchronization with driver code
+ * @nbcon_state:	State for nbcon consoles
+ * @nbcon_seq:		Sequence number of the next record for nbcon to print
+ * @pbufs:		Pointer to nbcon private buffer
+ * @kthread:		Printer kthread for this console
+ * @rcuwait:		RCU-safe wait object for @kthread waking
+ * @irq_work:		Defer @kthread waking to IRQ work context
+ */
+struct console {
+	char			name[16];
+	void			(*write)(struct console *co, const char *s, unsigned int count);
+	int			(*read)(struct console *co, char *s, unsigned int count);
+	struct tty_driver	*(*device)(struct console *co, int *index);
+	void			(*unblank)(void);
+	int			(*setup)(struct console *co, char *options);
+	int			(*exit)(struct console *co);
+	int			(*match)(struct console *co, char *name, int idx, char *options);
+	short			flags;
+	short			index;
+	int			cflag;
+	uint			ispeed;
+	uint			ospeed;
+	u64			seq;
+	unsigned long		dropped;
+	void			*data;
+	struct hlist_node	node;
+
+	/* nbcon console specific members */
+	bool			(*write_atomic)(struct console *con,
+						struct nbcon_write_context *wctxt);
+	bool			(*write_thread)(struct console *con,
+						struct nbcon_write_context *wctxt);
+	void			(*driver_enter)(struct console *con, unsigned long *flags);
+	void			(*driver_exit)(struct console *con, unsigned long flags);
+	atomic_t		__private nbcon_state;
+	atomic_long_t		__private nbcon_seq;
+	struct printk_buffers	*pbufs;
+	struct task_struct	*kthread;
+	struct rcuwait		rcuwait;
+	struct irq_work		irq_work;
+};
+
+#ifdef CONFIG_LOCKDEP
+extern void lockdep_assert_console_list_lock_held(void);
+#else
+static inline void lockdep_assert_console_list_lock_held(void)
+{
+}
+#endif
+
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+extern bool console_srcu_read_lock_is_held(void);
+#else
+static inline bool console_srcu_read_lock_is_held(void)
+{
+	return 1;
+}
+#endif
+
+extern int console_srcu_read_lock(void);
+extern void console_srcu_read_unlock(int cookie);
+
+extern void console_list_lock(void) __acquires(console_mutex);
+extern void console_list_unlock(void) __releases(console_mutex);
+
+extern struct hlist_head console_list;
+
+/**
+ * console_srcu_read_flags - Locklessly read the console flags
+ * @con:	struct console pointer of console to read flags from
+ *
+ * This function provides the necessary READ_ONCE() and data_race()
+ * notation for locklessly reading the console flags. The READ_ONCE()
+ * in this function matches the WRITE_ONCE() when @flags are modified
+ * for registered consoles with console_srcu_write_flags().
+ *
+ * Only use this function to read console flags when locklessly
+ * iterating the console list via srcu.
+ *
+ * Context: Any context.
+ */
+static inline short console_srcu_read_flags(const struct console *con)
+{
+	WARN_ON_ONCE(!console_srcu_read_lock_is_held());
+
+	/*
+	 * Locklessly reading console->flags provides a consistent
+	 * read value because there is at most one CPU modifying
+	 * console->flags and that CPU is using only read-modify-write
+	 * operations to do so.
+	 */
+	return data_race(READ_ONCE(con->flags));
+}
+
+/**
+ * console_srcu_write_flags - Write flags for a registered console
+ * @con:	struct console pointer of console to write flags to
+ * @flags:	new flags value to write
+ *
+ * Only use this function to write flags for registered consoles. It
+ * requires holding the console_list_lock.
+ *
+ * Context: Any context.
+ */
+static inline void console_srcu_write_flags(struct console *con, short flags)
+{
+	lockdep_assert_console_list_lock_held();
+
+	/* This matches the READ_ONCE() in console_srcu_read_flags(). */
+	WRITE_ONCE(con->flags, flags);
+}
+
+/* Variant of console_is_registered() when the console_list_lock is held. */
+static inline bool console_is_registered_locked(const struct console *con)
+{
+	lockdep_assert_console_list_lock_held();
+	return !hlist_unhashed(&con->node);
+}
+
+/*
+ * console_is_registered - Check if the console is registered
+ * @con:	struct console pointer of console to check
+ *
+ * Context: Process context. May sleep while acquiring console list lock.
+ * Return: true if the console is in the console list, otherwise false.
+ *
+ * If false is returned for a console that was previously registered, it
+ * can be assumed that the console's unregistration is fully completed,
+ * including the exit() callback after console list removal.
+ */
+static inline bool console_is_registered(const struct console *con)
+{
+	bool ret;
+
+	console_list_lock();
+	ret = console_is_registered_locked(con);
+	console_list_unlock();
+	return ret;
+}
+
+/**
+ * for_each_console_srcu() - Iterator over registered consoles
+ * @con:	struct console pointer used as loop cursor
+ *
+ * Although SRCU guarantees the console list will be consistent, the
+ * struct console fields may be updated by other CPUs while iterating.
+ *
+ * Requires console_srcu_read_lock to be held. Can be invoked from
+ * any context.
+ */
+#define for_each_console_srcu(con)					\
+	hlist_for_each_entry_srcu(con, &console_list, node,		\
+				  console_srcu_read_lock_is_held())
+
+/**
+ * for_each_console() - Iterator over registered consoles
+ * @con:	struct console pointer used as loop cursor
+ *
+ * The console list and the console->flags are immutable while iterating.
+ *
+ * Requires console_list_lock to be held.
+ */
+#define for_each_console(con)						\
+	lockdep_assert_console_list_lock_held();			\
+	hlist_for_each_entry(con, &console_list, node)
+
+#ifdef CONFIG_PRINTK
+extern void nbcon_cpu_emergency_enter(void);
+extern void nbcon_cpu_emergency_exit(void);
+extern bool nbcon_can_proceed(struct nbcon_write_context *wctxt);
+extern bool nbcon_enter_unsafe(struct nbcon_write_context *wctxt);
+extern bool nbcon_exit_unsafe(struct nbcon_write_context *wctxt);
+extern void nbcon_reacquire(struct nbcon_write_context *wctxt);
+#else
+static inline void nbcon_cpu_emergency_enter(void) { }
+static inline void nbcon_cpu_emergency_exit(void) { }
+static inline bool nbcon_can_proceed(struct nbcon_write_context *wctxt) { return false; }
+static inline bool nbcon_enter_unsafe(struct nbcon_write_context *wctxt) { return false; }
+static inline bool nbcon_exit_unsafe(struct nbcon_write_context *wctxt) { return false; }
+static inline void nbcon_reacquire(struct nbcon_write_context *wctxt) { }
+#endif
 
 extern int console_set_on_cmdline;
 extern struct console *early_console;
 
 enum con_flush_mode {
-	CONSOLE_ATOMIC_FLUSH_PENDING,
 	CONSOLE_FLUSH_PENDING,
 	CONSOLE_REPLAY_ALL,
 };
 
 extern int add_preferred_console(char *name, int idx, char *options);
+extern void console_force_preferred_locked(struct console *con);
 extern void register_console(struct console *);
 extern int unregister_console(struct console *);
-extern struct console *console_drivers;
 extern void console_lock(void);
 extern int console_trylock(void);
 extern void console_unlock(void);

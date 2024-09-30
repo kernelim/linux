@@ -1,2 +1,3 @@
-#4-
-0x3890e5a3	pci_clear_master	vmlinux	EXPORT_SYMBOL	
+#5-
+0x637b17a0	pci_clear_master	vmlinux	EXPORT_SYMBOL	
+

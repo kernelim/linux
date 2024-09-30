@@ -114,6 +114,22 @@ static const struct pci_epf_mhi_ep_info sm8450_info = {
 	.flags = MHI_EPF_USE_DMA,
 };
 
+static struct pci_epf_header sa8775p_header = {
+	.vendorid = PCI_VENDOR_ID_QCOM,
+	.deviceid = 0x0306,               /* FIXME: Update deviceid for sa8775p EP */
+	.baseclass_code = PCI_CLASS_OTHERS,
+	.interrupt_pin = PCI_INTERRUPT_INTA,
+};
+
+static const struct pci_epf_mhi_ep_info sa8775p_info = {
+	.config = &mhi_v1_config,
+	.epf_header = &sa8775p_header,
+	.bar_num = BAR_0,
+	.epf_flags = PCI_BASE_ADDRESS_MEM_TYPE_32,
+	.msi_count = 32,
+	.mru = 0x8000,
+};
+
 struct pci_epf_mhi {
 	const struct pci_epc_features *epc_features;
 	const struct pci_epf_mhi_ep_info *info;
@@ -205,32 +221,32 @@ static void pci_epf_mhi_raise_irq(struct mhi_ep_cntrl *mhi_cntrl, u32 vector)
 	 * MHI supplies 0 based MSI vectors but the API expects the vector
 	 * number to start from 1, so we need to increment the vector by 1.
 	 */
-	pci_epc_raise_irq(epc, epf->func_no, epf->vfunc_no, PCI_EPC_IRQ_MSI,
+	pci_epc_raise_irq(epc, epf->func_no, epf->vfunc_no, PCI_IRQ_MSI,
 			  vector + 1);
 }
 
-static int pci_epf_mhi_iatu_read(struct mhi_ep_cntrl *mhi_cntrl, u64 from,
-				 void *to, size_t size)
+static int pci_epf_mhi_iatu_read(struct mhi_ep_cntrl *mhi_cntrl,
+				 struct mhi_ep_buf_info *buf_info)
 {
 	struct pci_epf_mhi *epf_mhi = to_epf_mhi(mhi_cntrl);
-	size_t offset = get_align_offset(epf_mhi, from);
+	size_t offset = get_align_offset(epf_mhi, buf_info->host_addr);
 	void __iomem *tre_buf;
 	phys_addr_t tre_phys;
 	int ret;
 
 	mutex_lock(&epf_mhi->lock);
 
-	ret = __pci_epf_mhi_alloc_map(mhi_cntrl, from, &tre_phys, &tre_buf,
-				      offset, size);
+	ret = __pci_epf_mhi_alloc_map(mhi_cntrl, buf_info->host_addr, &tre_phys,
+				      &tre_buf, offset, buf_info->size);
 	if (ret) {
 		mutex_unlock(&epf_mhi->lock);
 		return ret;
 	}
 
-	memcpy_fromio(to, tre_buf, size);
+	memcpy_fromio(buf_info->dev_addr, tre_buf, buf_info->size);
 
-	__pci_epf_mhi_unmap_free(mhi_cntrl, from, tre_phys, tre_buf, offset,
-				 size);
+	__pci_epf_mhi_unmap_free(mhi_cntrl, buf_info->host_addr, tre_phys,
+				 tre_buf, offset, buf_info->size);
 
 	mutex_unlock(&epf_mhi->lock);
 
@@ -238,27 +254,27 @@ static int pci_epf_mhi_iatu_read(struct mhi_ep_cntrl *mhi_cntrl, u64 from,
 }
 
 static int pci_epf_mhi_iatu_write(struct mhi_ep_cntrl *mhi_cntrl,
-				  void *from, u64 to, size_t size)
+				  struct mhi_ep_buf_info *buf_info)
 {
 	struct pci_epf_mhi *epf_mhi = to_epf_mhi(mhi_cntrl);
-	size_t offset = get_align_offset(epf_mhi, to);
+	size_t offset = get_align_offset(epf_mhi, buf_info->host_addr);
 	void __iomem *tre_buf;
 	phys_addr_t tre_phys;
 	int ret;
 
 	mutex_lock(&epf_mhi->lock);
 
-	ret = __pci_epf_mhi_alloc_map(mhi_cntrl, to, &tre_phys, &tre_buf,
-				      offset, size);
+	ret = __pci_epf_mhi_alloc_map(mhi_cntrl, buf_info->host_addr, &tre_phys,
+				      &tre_buf, offset, buf_info->size);
 	if (ret) {
 		mutex_unlock(&epf_mhi->lock);
 		return ret;
 	}
 
-	memcpy_toio(tre_buf, from, size);
+	memcpy_toio(tre_buf, buf_info->dev_addr, buf_info->size);
 
-	__pci_epf_mhi_unmap_free(mhi_cntrl, to, tre_phys, tre_buf, offset,
-				 size);
+	__pci_epf_mhi_unmap_free(mhi_cntrl, buf_info->host_addr, tre_phys,
+				 tre_buf, offset, buf_info->size);
 
 	mutex_unlock(&epf_mhi->lock);
 
@@ -270,8 +286,8 @@ static void pci_epf_mhi_dma_callback(void *param)
 	complete(param);
 }
 
-static int pci_epf_mhi_edma_read(struct mhi_ep_cntrl *mhi_cntrl, u64 from,
-				 void *to, size_t size)
+static int pci_epf_mhi_edma_read(struct mhi_ep_cntrl *mhi_cntrl,
+				 struct mhi_ep_buf_info *buf_info)
 {
 	struct pci_epf_mhi *epf_mhi = to_epf_mhi(mhi_cntrl);
 	struct device *dma_dev = epf_mhi->epf->epc->dev.parent;
@@ -284,13 +300,13 @@ static int pci_epf_mhi_edma_read(struct mhi_ep_cntrl *mhi_cntrl, u64 from,
 	dma_addr_t dst_addr;
 	int ret;
 
-	if (size < SZ_4K)
-		return pci_epf_mhi_iatu_read(mhi_cntrl, from, to, size);
+	if (buf_info->size < SZ_4K)
+		return pci_epf_mhi_iatu_read(mhi_cntrl, buf_info);
 
 	mutex_lock(&epf_mhi->lock);
 
 	config.direction = DMA_DEV_TO_MEM;
-	config.src_addr = from;
+	config.src_addr = buf_info->host_addr;
 
 	ret = dmaengine_slave_config(chan, &config);
 	if (ret) {
@@ -298,14 +314,16 @@ static int pci_epf_mhi_edma_read(struct mhi_ep_cntrl *mhi_cntrl, u64 from,
 		goto err_unlock;
 	}
 
-	dst_addr = dma_map_single(dma_dev, to, size, DMA_FROM_DEVICE);
+	dst_addr = dma_map_single(dma_dev, buf_info->dev_addr, buf_info->size,
+				  DMA_FROM_DEVICE);
 	ret = dma_mapping_error(dma_dev, dst_addr);
 	if (ret) {
 		dev_err(dev, "Failed to map remote memory\n");
 		goto err_unlock;
 	}
 
-	desc = dmaengine_prep_slave_single(chan, dst_addr, size, DMA_DEV_TO_MEM,
+	desc = dmaengine_prep_slave_single(chan, dst_addr, buf_info->size,
+					   DMA_DEV_TO_MEM,
 					   DMA_CTRL_ACK | DMA_PREP_INTERRUPT);
 	if (!desc) {
 		dev_err(dev, "Failed to prepare DMA\n");
@@ -332,15 +350,15 @@ static int pci_epf_mhi_edma_read(struct mhi_ep_cntrl *mhi_cntrl, u64 from,
 	}
 
 err_unmap:
-	dma_unmap_single(dma_dev, dst_addr, size, DMA_FROM_DEVICE);
+	dma_unmap_single(dma_dev, dst_addr, buf_info->size, DMA_FROM_DEVICE);
 err_unlock:
 	mutex_unlock(&epf_mhi->lock);
 
 	return ret;
 }
 
-static int pci_epf_mhi_edma_write(struct mhi_ep_cntrl *mhi_cntrl, void *from,
-				  u64 to, size_t size)
+static int pci_epf_mhi_edma_write(struct mhi_ep_cntrl *mhi_cntrl,
+				  struct mhi_ep_buf_info *buf_info)
 {
 	struct pci_epf_mhi *epf_mhi = to_epf_mhi(mhi_cntrl);
 	struct device *dma_dev = epf_mhi->epf->epc->dev.parent;
@@ -353,13 +371,13 @@ static int pci_epf_mhi_edma_write(struct mhi_ep_cntrl *mhi_cntrl, void *from,
 	dma_addr_t src_addr;
 	int ret;
 
-	if (size < SZ_4K)
-		return pci_epf_mhi_iatu_write(mhi_cntrl, from, to, size);
+	if (buf_info->size < SZ_4K)
+		return pci_epf_mhi_iatu_write(mhi_cntrl, buf_info);
 
 	mutex_lock(&epf_mhi->lock);
 
 	config.direction = DMA_MEM_TO_DEV;
-	config.dst_addr = to;
+	config.dst_addr = buf_info->host_addr;
 
 	ret = dmaengine_slave_config(chan, &config);
 	if (ret) {
@@ -367,14 +385,16 @@ static int pci_epf_mhi_edma_write(struct mhi_ep_cntrl *mhi_cntrl, void *from,
 		goto err_unlock;
 	}
 
-	src_addr = dma_map_single(dma_dev, from, size, DMA_TO_DEVICE);
+	src_addr = dma_map_single(dma_dev, buf_info->dev_addr, buf_info->size,
+				  DMA_TO_DEVICE);
 	ret = dma_mapping_error(dma_dev, src_addr);
 	if (ret) {
 		dev_err(dev, "Failed to map remote memory\n");
 		goto err_unlock;
 	}
 
-	desc = dmaengine_prep_slave_single(chan, src_addr, size, DMA_MEM_TO_DEV,
+	desc = dmaengine_prep_slave_single(chan, src_addr, buf_info->size,
+					   DMA_MEM_TO_DEV,
 					   DMA_CTRL_ACK | DMA_PREP_INTERRUPT);
 	if (!desc) {
 		dev_err(dev, "Failed to prepare DMA\n");
@@ -401,7 +421,7 @@ static int pci_epf_mhi_edma_write(struct mhi_ep_cntrl *mhi_cntrl, void *from,
 	}
 
 err_unmap:
-	dma_unmap_single(dma_dev, src_addr, size, DMA_FROM_DEVICE);
+	dma_unmap_single(dma_dev, src_addr, buf_info->size, DMA_FROM_DEVICE);
 err_unlock:
 	mutex_unlock(&epf_mhi->lock);
 
@@ -532,11 +552,11 @@ static int pci_epf_mhi_link_up(struct pci_epf *epf)
 	mhi_cntrl->alloc_map = pci_epf_mhi_alloc_map;
 	mhi_cntrl->unmap_free = pci_epf_mhi_unmap_free;
 	if (info->flags & MHI_EPF_USE_DMA) {
-		mhi_cntrl->read_from_host = pci_epf_mhi_edma_read;
-		mhi_cntrl->write_to_host = pci_epf_mhi_edma_write;
+		mhi_cntrl->read_sync = pci_epf_mhi_edma_read;
+		mhi_cntrl->write_sync = pci_epf_mhi_edma_write;
 	} else {
-		mhi_cntrl->read_from_host = pci_epf_mhi_iatu_read;
-		mhi_cntrl->write_to_host = pci_epf_mhi_iatu_write;
+		mhi_cntrl->read_sync = pci_epf_mhi_iatu_read;
+		mhi_cntrl->write_sync = pci_epf_mhi_iatu_write;
 	}
 
 	/* Register the MHI EP controller */
@@ -644,7 +664,7 @@ static void pci_epf_mhi_unbind(struct pci_epf *epf)
 	pci_epc_clear_bar(epc, epf->func_no, epf->vfunc_no, epf_bar);
 }
 
-static struct pci_epc_event_ops pci_epf_mhi_event_ops = {
+static const struct pci_epc_event_ops pci_epf_mhi_event_ops = {
 	.core_init = pci_epf_mhi_core_init,
 	.link_up = pci_epf_mhi_link_up,
 	.link_down = pci_epf_mhi_link_down,
@@ -677,12 +697,13 @@ static int pci_epf_mhi_probe(struct pci_epf *epf,
 }
 
 static const struct pci_epf_device_id pci_epf_mhi_ids[] = {
-	{ .name = "sdx55", .driver_data = (kernel_ulong_t)&sdx55_info },
-	{ .name = "sm8450", .driver_data = (kernel_ulong_t)&sm8450_info },
+	{ .name = "pci_epf_mhi_sa8775p", .driver_data = (kernel_ulong_t)&sa8775p_info },
+	{ .name = "pci_epf_mhi_sdx55", .driver_data = (kernel_ulong_t)&sdx55_info },
+	{ .name = "pci_epf_mhi_sm8450", .driver_data = (kernel_ulong_t)&sm8450_info },
 	{},
 };
 
-static struct pci_epf_ops pci_epf_mhi_ops = {
+static const struct pci_epf_ops pci_epf_mhi_ops = {
 	.unbind	= pci_epf_mhi_unbind,
 	.bind	= pci_epf_mhi_bind,
 };

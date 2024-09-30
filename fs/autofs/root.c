@@ -441,7 +441,7 @@ static int autofs_d_manage(const struct path *path, bool rcu_walk)
 		inode = d_inode_rcu(dentry);
 		if (inode && S_ISLNK(inode->i_mode))
 			return -EISDIR;
-		if (list_empty(&dentry->d_subdirs))
+		if (hlist_empty(&dentry->d_children))
 			return 0;
 		if (!simple_empty(dentry))
 			return -EISDIR;

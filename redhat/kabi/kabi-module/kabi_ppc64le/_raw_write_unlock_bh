@@ -1,2 +1,3 @@
-#4-
-0xe7ab1ecc	_raw_write_unlock_bh	vmlinux	EXPORT_SYMBOL	
+#5-
+0x46226c2e	_raw_write_unlock_bh	vmlinux	EXPORT_SYMBOL	
+

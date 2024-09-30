@@ -25,7 +25,7 @@
 #include "error.h"
 #include "../msr.h"
 
-struct ghcb boot_ghcb_page __aligned(PAGE_SIZE);
+static struct ghcb boot_ghcb_page __aligned(PAGE_SIZE);
 struct ghcb *boot_ghcb;
 
 /*
@@ -115,6 +115,9 @@ static bool fault_in_kernel_space(unsigned long address)
 
 #undef __init
 #define __init
+
+#undef __head
+#define __head
 
 #define __BOOT_COMPRESSED
 
@@ -369,7 +372,7 @@ static void enforce_vmpl0(void)
 				 MSR_AMD64_SNP_VMPL_SSS |		\
 				 MSR_AMD64_SNP_SECURE_TSC |		\
 				 MSR_AMD64_SNP_VMGEXIT_PARAM |		\
-				 MSR_AMD64_SNP_VMSA_REG_PROTECTION |	\
+				 MSR_AMD64_SNP_VMSA_REG_PROT |		\
 				 MSR_AMD64_SNP_RESERVED_BIT13 |		\
 				 MSR_AMD64_SNP_RESERVED_BIT15 |		\
 				 MSR_AMD64_SNP_RESERVED_MASK)

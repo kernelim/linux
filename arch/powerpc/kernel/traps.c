@@ -393,7 +393,7 @@ void _exception(int signr, struct pt_regs *regs, int code, unsigned long addr)
  * Builds that do not support KVM could take this second option to increase
  * the recoverability of NMIs.
  */
-void hv_nmi_check_nonrecoverable(struct pt_regs *regs)
+noinstr void hv_nmi_check_nonrecoverable(struct pt_regs *regs)
 {
 #ifdef CONFIG_PPC_POWERNV
 	unsigned long kbase = (unsigned long)_stext;
@@ -433,7 +433,9 @@ void hv_nmi_check_nonrecoverable(struct pt_regs *regs)
 	return;
 
 nonrecoverable:
-	regs_set_unrecoverable(regs);
+	regs->msr &= ~MSR_RI;
+	local_paca->hsrr_valid = 0;
+	local_paca->srr_valid = 0;
 #endif
 }
 DEFINE_INTERRUPT_HANDLER_NMI(system_reset_exception)
@@ -796,24 +798,23 @@ void die_mce(const char *str, struct pt_regs *regs, long err)
 	 * but make_task_dead() checks for in_interrupt() and panics
 	 * in that case, so exit the irq/nmi before calling die.
 	 */
-	if (IS_ENABLED(CONFIG_PPC_BOOK3S_64))
-		irq_exit();
-	else
+	if (in_nmi())
 		nmi_exit();
+	else
+		irq_exit();
 	die(str, regs, err);
 }
 
 /*
  * BOOK3S_64 does not call this handler as a non-maskable interrupt
+ * BOOK3S_64 does not usually call this handler as a non-maskable interrupt
  * (it uses its own early real-mode handler to handle the MCE proper
  * and then raises irq_work to call this handler when interrupts are
- * enabled).
+ * enabled). The only time when this is not true is if the early handler
+ * is unrecoverable, then it does call this directly to try to get a
+ * message out.
  */
-#ifdef CONFIG_PPC_BOOK3S_64
-DEFINE_INTERRUPT_HANDLER_ASYNC(machine_check_exception)
-#else
-DEFINE_INTERRUPT_HANDLER_NMI(machine_check_exception)
-#endif
+static void __machine_check_exception(struct pt_regs *regs)
 {
 	int recover = 0;
 
@@ -847,12 +848,19 @@ bail:
 	/* Must die if the interrupt is not recoverable */
 	if (regs_is_unrecoverable(regs))
 		die_mce("Unrecoverable Machine check", regs, SIGBUS);
+}
 
 #ifdef CONFIG_PPC_BOOK3S_64
-	return;
-#else
-	return 0;
+DEFINE_INTERRUPT_HANDLER_ASYNC(machine_check_exception_async)
+{
+	__machine_check_exception(regs);
+}
 #endif
+DEFINE_INTERRUPT_HANDLER_NMI(machine_check_exception)
+{
+	__machine_check_exception(regs);
+
+	return 0;
 }
 
 DEFINE_INTERRUPT_HANDLER(SMIException) /* async? */

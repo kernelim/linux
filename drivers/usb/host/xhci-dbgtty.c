@@ -208,9 +208,8 @@ static void dbc_tty_close(struct tty_struct *tty, struct file *file)
 	tty_port_close(&port->port, tty, file);
 }
 
-static int dbc_tty_write(struct tty_struct *tty,
-			 const unsigned char *buf,
-			 int count)
+static ssize_t dbc_tty_write(struct tty_struct *tty, const u8 *buf,
+			     size_t count)
 {
 	struct dbc_port		*port = tty->driver_data;
 	unsigned long		flags;
@@ -224,7 +223,7 @@ static int dbc_tty_write(struct tty_struct *tty,
 	return count;
 }
 
-static int dbc_tty_put_char(struct tty_struct *tty, unsigned char ch)
+static int dbc_tty_put_char(struct tty_struct *tty, u8 ch)
 {
 	struct dbc_port		*port = tty->driver_data;
 	unsigned long		flags;
@@ -563,7 +562,7 @@ int dbc_tty_init(void)
 	ret = tty_register_driver(dbc_tty_driver);
 	if (ret) {
 		pr_err("Can't register dbc tty driver\n");
-		put_tty_driver(dbc_tty_driver);
+		tty_driver_kref_put(dbc_tty_driver);
 		idr_destroy(&dbc_tty_minors);
 	}
 
@@ -574,7 +573,7 @@ void dbc_tty_exit(void)
 {
 	if (dbc_tty_driver) {
 		tty_unregister_driver(dbc_tty_driver);
-		put_tty_driver(dbc_tty_driver);
+		tty_driver_kref_put(dbc_tty_driver);
 		dbc_tty_driver = NULL;
 	}
 

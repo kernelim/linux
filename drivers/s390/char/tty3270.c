@@ -1707,9 +1707,9 @@ tty3270_do_write(struct tty3270 *tp, struct tty_struct *tty,
 /*
  * String write routine for 3270 ttys
  */
-static int
+static ssize_t
 tty3270_write(struct tty_struct * tty,
-	      const unsigned char *buf, int count)
+	      const u8 *buf, size_t count)
 {
 	struct tty3270 *tp;
 
@@ -1727,7 +1727,7 @@ tty3270_write(struct tty_struct * tty,
 /*
  * Put single characters to the ttys character buffer
  */
-static int tty3270_put_char(struct tty_struct *tty, unsigned char ch)
+static int tty3270_put_char(struct tty_struct *tty, u8 ch)
 {
 	struct tty3270 *tp;
 
@@ -1760,7 +1760,7 @@ tty3270_flush_chars(struct tty_struct *tty)
  * Check for visible/invisible input switches
  */
 static void
-tty3270_set_termios(struct tty_struct *tty, struct ktermios *old)
+tty3270_set_termios(struct tty_struct *tty, const struct ktermios *old)
 {
 	struct tty3270 *tp;
 	int new;
@@ -1935,7 +1935,7 @@ static int __init tty3270_init(void)
 	tty_set_operations(driver, &tty3270_ops);
 	ret = tty_register_driver(driver);
 	if (ret) {
-		put_tty_driver(driver);
+		tty_driver_kref_put(driver);
 		return ret;
 	}
 	tty3270_driver = driver;
@@ -1952,7 +1952,7 @@ tty3270_exit(void)
 	driver = tty3270_driver;
 	tty3270_driver = NULL;
 	tty_unregister_driver(driver);
-	put_tty_driver(driver);
+	tty_driver_kref_put(driver);
 	tty3270_del_views();
 }
 

@@ -33,7 +33,6 @@
 #include "link_dpms.h"
 #include "accessories/link_dp_cts.h"
 #include "accessories/link_dp_trace.h"
-#include "accessories/link_fpga.h"
 #include "protocols/link_ddc.h"
 #include "protocols/link_dp_capability.h"
 #include "protocols/link_dp_dpia_bw.h"
@@ -46,6 +45,8 @@
 #include "gpio_service_interface.h"
 #include "atomfirmware.h"
 
+#define DC_LOGGER \
+	dc_ctx->logger
 #define DC_LOGGER_INIT(logger)
 
 #define LINK_INFO(...) \
@@ -212,8 +213,10 @@ static void construct_link_service_edp_panel_control(struct link_service *link_s
 	link_srv->edp_get_replay_state = edp_get_replay_state;
 	link_srv->edp_set_replay_allow_active = edp_set_replay_allow_active;
 	link_srv->edp_setup_replay = edp_setup_replay;
+	link_srv->edp_send_replay_cmd = edp_send_replay_cmd;
 	link_srv->edp_set_coasting_vtotal = edp_set_coasting_vtotal;
 	link_srv->edp_replay_residency = edp_replay_residency;
+	link_srv->edp_set_replay_power_opt_and_coasting_vtotal = edp_set_replay_power_opt_and_coasting_vtotal;
 
 	link_srv->edp_wait_for_t12 = edp_wait_for_t12;
 	link_srv->edp_is_ilr_optimization_required =
@@ -366,27 +369,6 @@ static enum transmitter translate_encoder_to_transmitter(
 		return TRANSMITTER_UNKNOWN;
 	}
 }
-
-static uint8_t translate_dig_inst_to_pwrseq_inst(struct dc_link *link)
-{
-	uint8_t pwrseq_inst = 0xF;
-
-	switch (link->eng_id) {
-	case ENGINE_ID_DIGA:
-		pwrseq_inst = 0;
-		break;
-	case ENGINE_ID_DIGB:
-		pwrseq_inst = 1;
-		break;
-	default:
-		DC_LOG_WARNING("Unsupported pwrseq engine id: %d!\n", link->eng_id);
-		ASSERT(false);
-		break;
-	}
-
-	return pwrseq_inst;
-}
-
 
 static void link_destruct(struct dc_link *link)
 {
@@ -651,7 +633,7 @@ static bool construct_phy(struct dc_link *link,
 			link->link_id.id == CONNECTOR_ID_LVDS)) {
 		panel_cntl_init_data.ctx = dc_ctx;
 		panel_cntl_init_data.inst = panel_cntl_init_data.ctx->dc_edp_id_count;
-		panel_cntl_init_data.pwrseq_inst = translate_dig_inst_to_pwrseq_inst(link);
+		panel_cntl_init_data.eng_id = link->eng_id;
 		link->panel_cntl =
 			link->dc->res_pool->funcs->panel_cntl_create(
 								&panel_cntl_init_data);

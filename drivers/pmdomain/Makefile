@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 obj-y					+= actions/
 obj-y					+= amlogic/
+obj-y					+= arm/
 obj-y					+= bcm/
 obj-y					+= imx/
 obj-y					+= mediatek/

@@ -54,27 +54,6 @@
 #include <asm/alternative.h>
 
 /*
- * Convert a kernel VA into a HYP VA.
- * reg: VA to be converted.
- *
- * The actual code generation takes place in kvm_update_va_mask, and
- * the instructions below are only there to reserve the space and
- * perform the register allocation (kvm_update_va_mask uses the
- * specific registers encoded in the instructions).
- */
-.macro kern_hyp_va	reg
-#ifndef __KVM_VHE_HYPERVISOR__
-alternative_cb ARM64_ALWAYS_SYSTEM, kvm_update_va_mask
-	and     \reg, \reg, #1		/* mask with va_mask */
-	ror	\reg, \reg, #1		/* rotate to the first tag bit */
-	add	\reg, \reg, #0		/* insert the low 12 bits of the tag */
-	add	\reg, \reg, #0, lsl 12	/* insert the top 12 bits of the tag */
-	ror	\reg, \reg, #63		/* rotate back */
-alternative_cb_end
-#endif
-.endm
-
-/*
  * Convert a hypervisor VA to a PA
  * reg: hypervisor address to be converted in place
  * tmp: temporary register
@@ -127,14 +106,29 @@ void kvm_apply_hyp_relocations(void);
 
 #define __hyp_pa(x) (((phys_addr_t)(x)) + hyp_physvirt_offset)
 
+/*
+ * Convert a kernel VA into a HYP VA.
+ *
+ * Can be called from hyp or non-hyp context.
+ *
+ * The actual code generation takes place in kvm_update_va_mask(), and
+ * the instructions below are only there to reserve the space and
+ * perform the register allocation (kvm_update_va_mask() uses the
+ * specific registers encoded in the instructions).
+ */
 static __always_inline unsigned long __kern_hyp_va(unsigned long v)
 {
+/*
+ * This #ifndef is an optimisation for when this is called from VHE hyp
+ * context.  When called from a VHE non-hyp context, kvm_update_va_mask() will
+ * replace the instructions with `nop`s.
+ */
 #ifndef __KVM_VHE_HYPERVISOR__
-	asm volatile(ALTERNATIVE_CB("and %0, %0, #1\n"
-				    "ror %0, %0, #1\n"
-				    "add %0, %0, #0\n"
-				    "add %0, %0, #0, lsl 12\n"
-				    "ror %0, %0, #63\n",
+	asm volatile(ALTERNATIVE_CB("and %0, %0, #1\n"         /* mask with va_mask */
+				    "ror %0, %0, #1\n"         /* rotate to the first tag bit */
+				    "add %0, %0, #0\n"         /* insert the low 12 bits of the tag */
+				    "add %0, %0, #0, lsl 12\n" /* insert the top 12 bits of the tag */
+				    "ror %0, %0, #63\n",       /* rotate back */
 				    ARM64_ALWAYS_SYSTEM,
 				    kvm_update_va_mask)
 		     : "+r" (v));
@@ -150,9 +144,9 @@ static __always_inline unsigned long __kern_hyp_va(unsigned long v)
  */
 #define KVM_PHYS_SHIFT	(40)
 
-#define kvm_phys_shift(kvm)		VTCR_EL2_IPA(kvm->arch.vtcr)
-#define kvm_phys_size(kvm)		(_AC(1, ULL) << kvm_phys_shift(kvm))
-#define kvm_phys_mask(kvm)		(kvm_phys_size(kvm) - _AC(1, ULL))
+#define kvm_phys_shift(mmu)		VTCR_EL2_IPA((mmu)->vtcr)
+#define kvm_phys_size(mmu)		(_AC(1, ULL) << kvm_phys_shift(mmu))
+#define kvm_phys_mask(mmu)		(kvm_phys_size(mmu) - _AC(1, ULL))
 
 #include <asm/kvm_pgtable.h>
 #include <asm/stage2_pgtable.h>
@@ -218,7 +212,7 @@ static inline void __clean_dcache_guest_page(void *va, size_t size)
 	 * faulting in pages. Furthermore, FWB implies IDC, so cleaning to
 	 * PoU is not required either in this case.
 	 */
-	if (cpus_have_const_cap(ARM64_HAS_STAGE2_FWB))
+	if (cpus_have_final_cap(ARM64_HAS_STAGE2_FWB))
 		return;
 
 	kvm_flush_dcache_to_poc(va, size);
@@ -243,13 +237,6 @@ static inline size_t __invalidate_icache_max_range(void)
 
 static inline void __invalidate_icache_guest_page(void *va, size_t size)
 {
-	/*
-	 * VPIPT I-cache maintenance must be done from EL2. See comment in the
-	 * nVHE flavor of __kvm_tlb_flush_vmid_ipa().
-	 */
-	if (icache_is_vpipt() && read_sysreg(CurrentEL) != CurrentEL_EL2)
-		return;
-
 	/*
 	 * Blow the whole I-cache if it is aliasing (i.e. VIPT) or the
 	 * invalidation range exceeds our arbitrary limit on invadations by
@@ -324,7 +311,7 @@ static __always_inline u64 kvm_get_vttbr(struct kvm_s2_mmu *mmu)
 static __always_inline void __load_stage2(struct kvm_s2_mmu *mmu,
 					  struct kvm_arch *arch)
 {
-	write_sysreg(arch->vtcr, vtcr_el2);
+	write_sysreg(mmu->vtcr, vtcr_el2);
 	write_sysreg(kvm_get_vttbr(mmu), vttbr_el2);
 
 	/*

@@ -1,2 +1,3 @@
-#4-
-0xbc0a34cd	pci_find_capability	vmlinux	EXPORT_SYMBOL	
+#5-
+0x638fe88a	pci_find_capability	vmlinux	EXPORT_SYMBOL	
+
