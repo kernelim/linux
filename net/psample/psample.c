@@ -516,7 +516,7 @@ EXPORT_SYMBOL_GPL(rh_psample_sample_packet);
 void psample_sample_packet(struct psample_group *group, struct sk_buff *skb,
 			   u32 sample_rate, const struct psample_metadata *md)
 {
-    struct rh_psample_metadata rh_md;
+	struct rh_psample_metadata rh_md = {};
 	rh_md.trunc_size = md->trunc_size;
 	rh_md.in_ifindex = md->in_ifindex;
 	rh_md.out_ifindex = md->out_ifindex;
