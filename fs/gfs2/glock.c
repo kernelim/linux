@@ -36,6 +36,7 @@
 #include <linux/list_sort.h>
 #include <linux/lockref.h>
 #include <linux/rhashtable.h>
+#include <linux/random.h>
 
 #include "gfs2.h"
 #include "incore.h"
@@ -568,11 +569,11 @@ static void state_change(struct gfs2_glock *gl, unsigned int new_state)
 	gl->gl_tchange = jiffies;
 }
 
-static void gfs2_set_demote(struct gfs2_glock *gl)
+static void gfs2_set_demote(int nr, struct gfs2_glock *gl)
 {
 	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
 
-	set_bit(GLF_DEMOTE, &gl->gl_flags);
+	set_bit(nr, &gl->gl_flags);
 	smp_mb();
 	wake_up(&sdp->sd_async_glock_wait);
 }
@@ -924,20 +925,22 @@ static void gfs2_glock_poke(struct gfs2_glock *gl)
 	gfs2_holder_uninit(&gh);
 }
 
-static bool gfs2_try_evict(struct gfs2_glock *gl)
+static void gfs2_try_evict(struct gfs2_glock *gl)
 {
 	struct gfs2_inode *ip;
-	bool evicted = false;
 
 	/*
 	 * If there is contention on the iopen glock and we have an inode, try
-	 * to grab and release the inode so that it can be evicted.  This will
-	 * allow the remote node to go ahead and delete the inode without us
-	 * having to do it, which will avoid rgrp glock thrashing.
+	 * to grab and release the inode so that it can be evicted.  The
+	 * GIF_DEFER_DELETE flag indicates to gfs2_evict_inode() that the inode
+	 * should not be deleted locally.  This will allow the remote node to
+	 * go ahead and delete the inode without us having to do it, which will
+	 * avoid rgrp glock thrashing.
 	 *
 	 * The remote node is likely still holding the corresponding inode
 	 * glock, so it will run before we get to verify that the delete has
-	 * happened below.
+	 * happened below.  (Verification is triggered by the call to
+	 * gfs2_queue_verify_delete() in gfs2_evict_inode().)
 	 */
 	spin_lock(&gl->gl_lockref.lock);
 	ip = gl->gl_object;
@@ -945,8 +948,7 @@ static bool gfs2_try_evict(struct gfs2_glock *gl)
 		ip = NULL;
 	spin_unlock(&gl->gl_lockref.lock);
 	if (ip) {
-		gl->gl_no_formal_ino = ip->i_no_formal_ino;
-		set_bit(GIF_DEFERRED_DELETE, &ip->i_flags);
+		set_bit(GIF_DEFER_DELETE, &ip->i_flags);
 		d_prune_aliases(&ip->i_inode);
 		iput(&ip->i_inode);
 
@@ -954,7 +956,7 @@ static bool gfs2_try_evict(struct gfs2_glock *gl)
 		spin_lock(&gl->gl_lockref.lock);
 		ip = gl->gl_object;
 		if (ip) {
-			clear_bit(GIF_DEFERRED_DELETE, &ip->i_flags);
+			clear_bit(GIF_DEFER_DELETE, &ip->i_flags);
 			if (!igrab(&ip->i_inode))
 				ip = NULL;
 		}
@@ -963,9 +965,7 @@ static bool gfs2_try_evict(struct gfs2_glock *gl)
 			gfs2_glock_poke(ip->i_gl);
 			iput(&ip->i_inode);
 		}
-		evicted = !ip;
 	}
-	return evicted;
 }
 
 bool gfs2_queue_try_to_evict(struct gfs2_glock *gl)
@@ -974,18 +974,18 @@ bool gfs2_queue_try_to_evict(struct gfs2_glock *gl)
 
 	if (test_and_set_bit(GLF_TRY_TO_EVICT, &gl->gl_flags))
 		return false;
-	return queue_delayed_work(sdp->sd_delete_wq,
-				  &gl->gl_delete, 0);
+	return !mod_delayed_work(sdp->sd_delete_wq, &gl->gl_delete, 0);
 }
 
-static bool gfs2_queue_verify_evict(struct gfs2_glock *gl)
+bool gfs2_queue_verify_delete(struct gfs2_glock *gl)
 {
 	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
+	unsigned long delay;
 
-	if (test_and_set_bit(GLF_VERIFY_EVICT, &gl->gl_flags))
+	if (test_and_set_bit(GLF_VERIFY_DELETE, &gl->gl_flags))
 		return false;
-	return queue_delayed_work(sdp->sd_delete_wq,
-				  &gl->gl_delete, 5 * HZ);
+	delay = HZ + get_random_long() % (HZ * 9);
+	return queue_delayed_work(sdp->sd_delete_wq, &gl->gl_delete, delay);
 }
 
 static void delete_work_func(struct work_struct *work)
@@ -993,40 +993,21 @@ static void delete_work_func(struct work_struct *work)
 	struct delayed_work *dwork = to_delayed_work(work);
 	struct gfs2_glock *gl = container_of(dwork, struct gfs2_glock, gl_delete);
 	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
-	struct inode *inode;
-	u64 no_addr = gl->gl_name.ln_number;
+	bool verify_delete = test_and_clear_bit(GLF_VERIFY_DELETE, &gl->gl_flags);
 
-	if (test_and_clear_bit(GLF_TRY_TO_EVICT, &gl->gl_flags)) {
-		/*
-		 * If we can evict the inode, give the remote node trying to
-		 * delete the inode some time before verifying that the delete
-		 * has happened.  Otherwise, if we cause contention on the inode glock
-		 * immediately, the remote node will think that we still have
-		 * the inode in use, and so it will give up waiting.
-		 *
-		 * If we can't evict the inode, signal to the remote node that
-		 * the inode is still in use.  We'll later try to delete the
-		 * inode locally in gfs2_evict_inode.
-		 *
-		 * FIXME: We only need to verify that the remote node has
-		 * deleted the inode because nodes before this remote delete
-		 * rework won't cooperate.  At a later time, when we no longer
-		 * care about compatibility with such nodes, we can skip this
-		 * step entirely.
-		 */
-		if (gfs2_try_evict(gl)) {
-			if (gfs2_queue_verify_evict(gl))
-				return;
-		}
-		goto out;
-	}
+	if (test_and_clear_bit(GLF_TRY_TO_EVICT, &gl->gl_flags))
+		gfs2_try_evict(gl);
 
-	if (test_and_clear_bit(GLF_VERIFY_EVICT, &gl->gl_flags)) {
+	if (verify_delete) {
+		u64 no_addr = gl->gl_name.ln_number;
+		struct inode *inode;
+
 		inode = gfs2_lookup_by_inum(sdp, no_addr, gl->gl_no_formal_ino,
 					    GFS2_BLKST_UNLINKED);
 		if (IS_ERR(inode)) {
 			if (PTR_ERR(inode) == -EAGAIN &&
-			    gfs2_queue_verify_evict(gl))
+			    !test_bit(SDF_KILL, &sdp->sd_flags) &&
+			    gfs2_queue_verify_delete(gl))
 				return;
 		} else {
 			d_prune_aliases(inode);
@@ -1034,7 +1015,6 @@ static void delete_work_func(struct work_struct *work)
 		}
 	}
 
-out:
 	gfs2_glock_put(gl);
 }
 
@@ -1060,7 +1040,7 @@ static void glock_work_func(struct work_struct *work)
 
 		if (!delay) {
 			clear_bit(GLF_PENDING_DEMOTE, &gl->gl_flags);
-			gfs2_set_demote(gl);
+			gfs2_set_demote(GLF_DEMOTE, gl);
 		}
 	}
 	run_queue(gl, 0);
@@ -1406,10 +1386,7 @@ out:
 static void handle_callback(struct gfs2_glock *gl, unsigned int state,
 			    unsigned long delay, bool remote)
 {
-	if (delay)
-		set_bit(GLF_PENDING_DEMOTE, &gl->gl_flags);
-	else
-		gfs2_set_demote(gl);
+	gfs2_set_demote(delay ? GLF_PENDING_DEMOTE : GLF_DEMOTE, gl);
 	if (gl->gl_demote_state == LM_ST_EXCLUSIVE) {
 		gl->gl_demote_state = state;
 		gl->gl_demote_time = jiffies;
@@ -1590,12 +1567,6 @@ int gfs2_glock_poll(struct gfs2_holder *gh)
 	return test_bit(HIF_WAIT, &gh->gh_iflags) ? 0 : 1;
 }
 
-static inline bool needs_demote(struct gfs2_glock *gl)
-{
-	return (test_bit(GLF_DEMOTE, &gl->gl_flags) ||
-		test_bit(GLF_PENDING_DEMOTE, &gl->gl_flags));
-}
-
 static void __gfs2_glock_dq(struct gfs2_holder *gh)
 {
 	struct gfs2_glock *gl = gh->gh_gl;
@@ -1604,8 +1575,8 @@ static void __gfs2_glock_dq(struct gfs2_holder *gh)
 
 	/*
 	 * This holder should not be cached, so mark it for demote.
-	 * Note: this should be done before the check for needs_demote
-	 * below.
+	 * Note: this should be done before the glock_needs_demote
+	 * check below.
 	 */
 	if (gh->gh_flags & GL_NOCACHE)
 		handle_callback(gl, LM_ST_UNLOCKED, 0, false);
@@ -1618,7 +1589,7 @@ static void __gfs2_glock_dq(struct gfs2_holder *gh)
 	 * If there hasn't been a demote request we are done.
 	 * (Let the remaining holders, if any, keep holding it.)
 	 */
-	if (!needs_demote(gl)) {
+	if (!glock_needs_demote(gl)) {
 		if (list_empty(&gl->gl_holders))
 			fast_path = 1;
 	}
@@ -2077,7 +2048,7 @@ static void glock_hash_walk(glock_examiner examiner, const struct gfs2_sbd *sdp)
 void gfs2_cancel_delete_work(struct gfs2_glock *gl)
 {
 	clear_bit(GLF_TRY_TO_EVICT, &gl->gl_flags);
-	clear_bit(GLF_VERIFY_EVICT, &gl->gl_flags);
+	clear_bit(GLF_VERIFY_DELETE, &gl->gl_flags);
 	if (cancel_delayed_work(&gl->gl_delete))
 		gfs2_glock_put(gl);
 }
@@ -2314,7 +2285,7 @@ static const char *gflags2str(char *buf, const struct gfs2_glock *gl)
 		*p++ = 'N';
 	if (test_bit(GLF_TRY_TO_EVICT, gflags))
 		*p++ = 'e';
-	if (test_bit(GLF_VERIFY_EVICT, gflags))
+	if (test_bit(GLF_VERIFY_DELETE, gflags))
 		*p++ = 'E';
 	*p = 0;
 	return buf;

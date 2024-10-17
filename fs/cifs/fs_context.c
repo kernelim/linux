@@ -1462,8 +1462,6 @@ int smb3_init_fs_context(struct fs_context *fc)
 	if (unlikely(!ctx))
 		return -ENOMEM;
 
-	strscpy(ctx->workstation_name, nodename, sizeof(ctx->workstation_name));
-
 	/*
 	 * does not have to be perfect mapping since field is
 	 * informational, only used for servers that do not support

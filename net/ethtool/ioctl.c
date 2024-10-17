@@ -463,6 +463,9 @@ int __ethtool_get_link_ksettings(struct net_device *dev,
 {
 	ASSERT_RTNL();
 
+	if (!netif_device_present(dev))
+		return -ENODEV;
+
 	if (!__rh_has_get_link_ksettings(dev)) {
 		struct ethtool_cmd cmd;
 		int err;

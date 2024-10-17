@@ -183,7 +183,7 @@ static void rt6_uncached_list_flush_dev(struct net *net, struct net_device *dev)
 			}
 
 			if (rt_dev == dev) {
-				rt->dst.dev = loopback_dev;
+				rt->dst.dev = blackhole_netdev;
 				dev_hold(rt->dst.dev);
 				dev_put(rt_dev);
 			}
@@ -3017,7 +3017,8 @@ static int ip6_route_check_nh(struct net *net,
 		*_dev = dev = grt->dst.dev;
 		*idev = grt->rt6i_idev;
 		dev_hold(dev);
-		in6_dev_hold(grt->rt6i_idev);
+		if (grt->rt6i_idev)
+			in6_dev_hold(grt->rt6i_idev);
 	}
 
 	if (!(grt->rt6i_flags & RTF_GATEWAY))
@@ -3278,7 +3279,7 @@ static struct fib6_info *ip6_route_info_create(struct fib6_config *cfg,
 	if (!dev)
 		goto out;
 
-	if (idev->cnf.disable_ipv6) {
+	if (!idev || idev->cnf.disable_ipv6) {
 		NL_SET_ERR_MSG(extack, "IPv6 is disabled on nexthop device");
 		err = -EACCES;
 		goto out;

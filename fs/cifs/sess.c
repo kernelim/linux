@@ -791,7 +791,7 @@ int build_ntlmssp_auth_blob(unsigned char **pbuffer,
 		NTLMSSP_REQUEST_TARGET | NTLMSSP_NEGOTIATE_TARGET_INFO |
 		NTLMSSP_NEGOTIATE_128 | NTLMSSP_NEGOTIATE_UNICODE |
 		NTLMSSP_NEGOTIATE_NTLM | NTLMSSP_NEGOTIATE_EXTENDED_SEC |
-		NTLMSSP_NEGOTIATE_SEAL | NTLMSSP_NEGOTIATE_WORKSTATION_SUPPLIED;
+		NTLMSSP_NEGOTIATE_SEAL;
 	if (ses->server->sign)
 		flags |= NTLMSSP_NEGOTIATE_SIGN;
 	if (!ses->server->session_estab || ses->ntlmssp->sesskey_per_smbsess)
@@ -837,7 +837,7 @@ int build_ntlmssp_auth_blob(unsigned char **pbuffer,
 				      nls_cp);
 
 	cifs_security_buffer_from_str(&sec_blob->WorkstationName,
-				      ses->workstation_name,
+				      NULL,
 				      ntlmssp_workstation_name_size(ses),
 				      *pbuffer, &tmp,
 				      nls_cp);
