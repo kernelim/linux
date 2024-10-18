@@ -7,6 +7,8 @@
 #include <linux/irq.h>
 #include <linux/pci.h>
 #include <linux/irqdomain.h>
+/* RHEL-55507 needs cpuhotplug */
+#include <linux/cpuhotplug.h>
 
 #include <asm/hw_irq.h>
 #include <asm/irq_remapping.h>
@@ -150,7 +152,10 @@ int __init irq_remap_enable_fault_handling(void)
 	if (!remap_ops->enable_faulting)
 		return -ENODEV;
 
-	return remap_ops->enable_faulting();
+	cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "dmar:enable_fault_handling",
+			  remap_ops->enable_faulting, NULL);
+
+	return remap_ops->enable_faulting(smp_processor_id());
 }
 
 void panic_if_irq_remap(const char *msg)

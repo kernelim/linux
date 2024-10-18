@@ -41,6 +41,7 @@ Contents:
    intel/ice
    marvell/octeontx2
    marvell/octeon_ep
+   marvell/octeon_ep_vf
    mellanox/mlx5/index
    microsoft/netvsc
    neterion/s2io
