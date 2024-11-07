@@ -23,7 +23,7 @@ workflow: !reference [.workflow]
   trigger:
     branch: c9s
   variables:
-    name: c9s
+    kcidb_tree_name: c9s
     builder_image: quay.io/cki/builder-stream9
     kpet_tree_name: c9s
     run_redhat_self_test: 'true'
@@ -32,7 +32,7 @@ workflow: !reference [.workflow]
   trigger:
     branch: rhel9
   variables:
-    name: rhel9
+    kcidb_tree_name: rhel-9.5
     builder_image: quay.io/cki/builder-rhel9
     run_redhat_self_test: 'true'
 
@@ -44,7 +44,6 @@ workflow: !reference [.workflow]
 
 .automotive_full_c9s:
   variables:
-    name: kernel-automotive-c9s
     kpet_tree_name: autosd
     disttag_override: '.el9iv'
     AWS_UPT_IMAGE_NAME_FILTER: 'auto-osbuild-qemu-cs9-cki-ostree-*'
@@ -52,20 +51,7 @@ workflow: !reference [.workflow]
 
 .rt_full_c9s:
   variables:
-    name: kernel-rt-c9s
     kpet_tree_name: c9s
-
-.rt_full_rhel9:
-  variables:
-    name: kernel-rt-rhel9
-
-.64k_full_c9s:
-  variables:
-    name: kernel-64k-c9s
-
-.64k_full_rhel9:
-  variables:
-    name: kernel-64k-rhel9
 
 .automotive_check_c9s_overrides:
   trigger:
@@ -89,8 +75,7 @@ c9s_64k_merge_request:
   # Don't add .rhel_common as we overwrite those configs
   extends: [.trusted, .merge_request,
             .9-common, .trigger_c9s_pipeline,
-            .64k_common,
-            .64k_full_c9s]
+            .64k_common]
 
 c9s_automotive_check_merge_request:
   extends: [.trusted, .merge_request,
@@ -127,15 +112,13 @@ rhel9_rt_merge_request:
   # Don't add .rhel_common as we overwrite those configs
   extends: [.internal, .merge_request, .with_notifications,
             .9-common, .trigger_rhel9_pipeline,
-            .rt_common,
-            .rt_full_rhel9]
+            .rt_common]
 
 rhel9_64k_merge_request:
   # Don't add .rhel_common as we overwrite those configs
   extends: [.internal, .merge_request, .with_notifications,
             .9-common, .trigger_rhel9_pipeline,
-            .64k_common,
-            .64k_full_rhel9]
+            .64k_common]
 
 rhel9_baseline_coverage_build:
   extends: [.internal, .baseline, .rhel_common, .only_build_and_publish,
@@ -150,12 +133,10 @@ rhel9_rt_merge_request_private:
   # Don't add .rhel_common as we overwrite those configs
   extends: [.scratch, .merge_request,
             .9-common, .trigger_rhel9_pipeline,
-            .rt_common,
-            .rt_full_rhel9]
+            .rt_common]
 
 rhel9_64k_merge_request_private:
   # Don't add .rhel_common as we overwrite those configs
   extends: [.scratch, .merge_request,
             .9-common, .trigger_rhel9_pipeline,
-            .64k_common,
-            .64k_full_rhel9]
+            .64k_common]

@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 503.11.1
+%define pkgrelease 503.14.1
 %define kversion 5
-%define tarfile_release 5.14.0-503.11.1.el9_5
+%define tarfile_release 5.14.0-503.14.1.el9_5
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 503.11.1%{?buildid}%{?dist}
+%define specrelease 503.14.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-503.11.1.el9_5
+%define kabiversion 5.14.0-503.14.1.el9_5
 
 #
 # End of genspec.sh variables
@@ -3794,9 +3794,40 @@ fi
 #
 #
 %changelog
-* Tue Nov 12 2024 Release Engineering <releng@rockylinux.org> - 5.14.0-503.11.1
+* Thu Nov 14 2024 Release Engineering <releng@rockylinux.org> - 5.14.0-503.14.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Thu Nov 07 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.14.1.el9_5]
+- ext4: fix off by one issue in alloc_flex_gd() (Pavel Reichl) [RHEL-65318]
+- ping: fix address binding wrt vrf (Antoine Tenart) [RHEL-57564 RHEL-50920]
+- smb: client: stop flooding dmesg in smb2_calc_signature() (Paulo Alcantara) [RHEL-36346 RHEL-61193]
+- smb: client: print failed session logoffs with FYI (Paulo Alcantara) [RHEL-36346 RHEL-61193]
+- smb: client: propagate error from cifs_construct_tcon() (Paulo Alcantara) [RHEL-36346 RHEL-61193]
+- smb: client: fix DFS failover in multiuser mounts (Paulo Alcantara) [RHEL-36346 RHEL-61193]
+- smb: client: fix DFS interlink failover (Paulo Alcantara) [RHEL-36346 RHEL-61193]
+- smb: client: improve purging of cached referrals (Paulo Alcantara) [RHEL-36346 RHEL-61193]
+- smb: client: avoid unnecessary reconnects when refreshing referrals (Paulo Alcantara) [RHEL-36346 RHEL-61193]
+- smb: client: handle lack of FSCTL_GET_REPARSE_POINT support (Paulo Alcantara) [RHEL-36346 RHEL-57983]
+- smb: client: fix deadlock in smb2_find_smb_tcon() (Paulo Alcantara) [RHEL-36346 RHEL-57983]
+- cifs: Fix reacquisition of volume cookie on still-live connection (Paulo Alcantara) [RHEL-36346 RHEL-57983]
+
+* Fri Nov 01 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.13.1.el9_5]
+- efi: libstub: Move screen_info handling to common code (Maxim Levitsky) [RHEL-65344]
+- mpls: Reduce skb re-allocations due to skb_cow() (Guillaume Nault) [RHEL-61697]
+- mptcp: pm: Fix uaf in __timer_delete_sync (CKI Backport Bot) [RHEL-64678 RHEL-60737] {CVE-2024-46858}
+- ceph: fix cap ref leak via netfs init_request (Patrick Donnelly) [RHEL-62667 RHEL-61459]
+- gitlab-ci: provide consistent kcidb_tree_name (Michael Hofmann)
+
+* Thu Oct 24 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.12.1.el9_5]
+- net: nexthop: Initialize all fields in dumped nexthops (Antoine Tenart) [RHEL-55080] {CVE-2024-42283}
+- tracing/osnoise: Fix build when timerlat is not enabled (Tomas Glozar) [RHEL-61870 RHEL-39968]
+- tracing/timerlat: Add interface_lock around clearing of kthread in stop_kthread() (Tomas Glozar) [RHEL-61870 RHEL-39968]
+- tracing/timerlat: Only clear timer if a kthread exists (Tomas Glozar) [RHEL-61870 RHEL-39968]
+- tracing/osnoise: Use a cpumask to know what threads are kthreads (Tomas Glozar) [RHEL-61870 RHEL-39968]
+- iommufd: Require drivers to supply the cache_invalidate_user ops (CKI Backport Bot) [RHEL-60681 RHEL-60761] {CVE-2024-46824}
+- Revert "fw loader: Remove the now superfluous sentinel element from ctl_table array" (Eric Chanudet) [RHEL-62925 RHEL-50129]
+- smb: client: fix hang in wait_for_response() for negproto (Jay Shin) [RHEL-61607 RHEL-57983]
 
 * Mon Sep 30 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.11.1.el9_5]
 - memcg: protect concurrent access to mem_cgroup_idr (Rafael Aquini) [RHEL-56254] {CVE-2024-43892}
