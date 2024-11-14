@@ -802,12 +802,13 @@ int open_shroot(unsigned int xid, struct cifs_tcon *tcon,
 	rqst[0].rq_iov = open_iov;
 	rqst[0].rq_nvec = SMB2_CREATE_IOV_SIZE;
 
-	oparms.tcon = tcon;
-	oparms.create_options = cifs_create_options(cifs_sb, 0);
-	oparms.desired_access = FILE_READ_ATTRIBUTES;
-	oparms.disposition = FILE_OPEN;
-	oparms.fid = pfid;
-	oparms.reconnect = false;
+	oparms = (struct cifs_open_parms) {
+		.tcon = tcon,
+		.create_options = cifs_create_options(cifs_sb, 0),
+		.desired_access = FILE_READ_ATTRIBUTES,
+		.disposition = FILE_OPEN,
+		.fid = pfid,
+	};
 
 	rc = SMB2_open_init(tcon, server,
 			    &rqst[0], &oplock, &oparms, &utf16_path);
@@ -983,12 +984,13 @@ smb2_qfs_tcon(const unsigned int xid, struct cifs_tcon *tcon,
 	struct cifs_open_parms oparms;
 	struct cifs_fid fid;
 
-	oparms.tcon = tcon;
-	oparms.desired_access = FILE_READ_ATTRIBUTES;
-	oparms.disposition = FILE_OPEN;
-	oparms.create_options = cifs_create_options(cifs_sb, 0);
-	oparms.fid = &fid;
-	oparms.reconnect = false;
+	oparms = (struct cifs_open_parms) {
+		.tcon = tcon,
+		.desired_access = FILE_READ_ATTRIBUTES,
+		.disposition = FILE_OPEN,
+		.create_options = cifs_create_options(cifs_sb, 0),
+		.fid = &fid,
+	};
 
 	rc = SMB2_open(xid, &oparms, &srch_path, &oplock, NULL, NULL,
 		       NULL, NULL);
@@ -1019,12 +1021,13 @@ smb2_is_path_accessible(const unsigned int xid, struct cifs_tcon *tcon,
 	if (!utf16_path)
 		return -ENOMEM;
 
-	oparms.tcon = tcon;
-	oparms.desired_access = FILE_READ_ATTRIBUTES;
-	oparms.disposition = FILE_OPEN;
-	oparms.create_options = cifs_create_options(cifs_sb, 0);
-	oparms.fid = &fid;
-	oparms.reconnect = false;
+	oparms = (struct cifs_open_parms) {
+		.tcon = tcon,
+		.desired_access = FILE_READ_ATTRIBUTES,
+		.disposition = FILE_OPEN,
+		.create_options = cifs_create_options(cifs_sb, 0),
+		.fid = &fid,
+	};
 
 	rc = SMB2_open(xid, &oparms, utf16_path, &oplock, NULL, NULL, NULL,
 		       NULL);
@@ -1158,17 +1161,12 @@ smb2_query_eas(const unsigned int xid, struct cifs_tcon *tcon,
 	       struct cifs_sb_info *cifs_sb)
 {
 	int rc;
-	__le16 *utf16_path;
 	struct kvec rsp_iov = {NULL, 0};
 	int buftype = CIFS_NO_BUFFER;
 	struct smb2_query_info_rsp *rsp;
 	struct smb2_file_full_ea_info *info = NULL;
 
-	utf16_path = cifs_convert_path_to_utf16(path, cifs_sb);
-	if (!utf16_path)
-		return -ENOMEM;
-
-	rc = smb2_query_info_compound(xid, tcon, utf16_path,
+	rc = smb2_query_info_compound(xid, tcon, path,
 				      FILE_READ_EA,
 				      FILE_FULL_EA_INFORMATION,
 				      SMB2_O_INFO_FILE,
@@ -1201,7 +1199,6 @@ smb2_query_eas(const unsigned int xid, struct cifs_tcon *tcon,
 			le32_to_cpu(rsp->OutputBufferLength), ea_name);
 
  qeas_exit:
-	kfree(utf16_path);
 	free_rsp_buf(buftype, rsp_iov.iov_base);
 	return rc;
 }
@@ -1261,7 +1258,7 @@ smb2_set_ea(const unsigned int xid, struct cifs_tcon *tcon,
 			 * the new EA. If not we should not add it since we
 			 * would not be able to even read the EAs back.
 			 */
-			rc = smb2_query_info_compound(xid, tcon, utf16_path,
+			rc = smb2_query_info_compound(xid, tcon, path,
 				      FILE_READ_EA,
 				      FILE_FULL_EA_INFORMATION,
 				      SMB2_O_INFO_FILE,
@@ -1295,13 +1292,13 @@ smb2_set_ea(const unsigned int xid, struct cifs_tcon *tcon,
 	rqst[0].rq_iov = open_iov;
 	rqst[0].rq_nvec = SMB2_CREATE_IOV_SIZE;
 
-	memset(&oparms, 0, sizeof(oparms));
-	oparms.tcon = tcon;
-	oparms.desired_access = FILE_WRITE_EA;
-	oparms.disposition = FILE_OPEN;
-	oparms.create_options = cifs_create_options(cifs_sb, 0);
-	oparms.fid = &fid;
-	oparms.reconnect = false;
+	oparms = (struct cifs_open_parms) {
+		.tcon = tcon,
+		.desired_access = FILE_WRITE_EA,
+		.disposition = FILE_OPEN,
+		.create_options = cifs_create_options(cifs_sb, 0),
+		.fid = &fid,
+	};
 
 	rc = SMB2_open_init(tcon, server,
 			    &rqst[0], &oplock, &oparms, utf16_path);
@@ -1645,12 +1642,12 @@ smb2_ioctl_query_info(const unsigned int xid,
 	rqst[0].rq_iov = &vars->open_iov[0];
 	rqst[0].rq_nvec = SMB2_CREATE_IOV_SIZE;
 
-	memset(&oparms, 0, sizeof(oparms));
-	oparms.tcon = tcon;
-	oparms.disposition = FILE_OPEN;
-	oparms.create_options = cifs_create_options(cifs_sb, create_options);
-	oparms.fid = &fid;
-	oparms.reconnect = false;
+	oparms = (struct cifs_open_parms) {
+		.tcon = tcon,
+		.disposition = FILE_OPEN,
+		.create_options = cifs_create_options(cifs_sb, create_options),
+		.fid = &fid,
+	};
 
 	if (qi.flags & PASSTHRU_FSCTL) {
 		switch (qi.info_type & FSCTL_DEVICE_ACCESS_MASK) {
@@ -2271,12 +2268,13 @@ smb3_notify(const unsigned int xid, struct file *pfile,
 	}
 
 	tcon = cifs_sb_master_tcon(cifs_sb);
-	oparms.tcon = tcon;
-	oparms.desired_access = FILE_READ_ATTRIBUTES | FILE_READ_DATA;
-	oparms.disposition = FILE_OPEN;
-	oparms.create_options = cifs_create_options(cifs_sb, 0);
-	oparms.fid = &fid;
-	oparms.reconnect = false;
+	oparms = (struct cifs_open_parms) {
+		.tcon = tcon,
+		.desired_access = FILE_READ_ATTRIBUTES | FILE_READ_DATA,
+		.disposition = FILE_OPEN,
+		.create_options = cifs_create_options(cifs_sb, 0),
+		.fid = &fid,
+	};
 
 	rc = SMB2_open(xid, &oparms, utf16_path, &oplock, NULL, NULL, NULL,
 		       NULL);
@@ -2332,12 +2330,13 @@ smb2_query_dir_first(const unsigned int xid, struct cifs_tcon *tcon,
 	rqst[0].rq_iov = open_iov;
 	rqst[0].rq_nvec = SMB2_CREATE_IOV_SIZE;
 
-	oparms.tcon = tcon;
-	oparms.desired_access = FILE_READ_ATTRIBUTES | FILE_READ_DATA;
-	oparms.disposition = FILE_OPEN;
-	oparms.create_options = cifs_create_options(cifs_sb, 0);
-	oparms.fid = fid;
-	oparms.reconnect = false;
+	oparms = (struct cifs_open_parms) {
+		.tcon = tcon,
+		.desired_access = FILE_READ_ATTRIBUTES | FILE_READ_DATA,
+		.disposition = FILE_OPEN,
+		.create_options = cifs_create_options(cifs_sb, 0),
+		.fid = fid,
+	};
 
 	rc = SMB2_open_init(tcon, server,
 			    &rqst[0], &oplock, &oparms, utf16_path);
@@ -2616,7 +2615,7 @@ smb2_set_next_command(struct cifs_tcon *tcon, struct smb_rqst *rqst)
  */
 int
 smb2_query_info_compound(const unsigned int xid, struct cifs_tcon *tcon,
-			 __le16 *utf16_path, u32 desired_access,
+			 const char *path, u32 desired_access,
 			 u32 class, u32 type, u32 output_len,
 			 struct kvec *rsp, int *buftype,
 			 struct cifs_sb_info *cifs_sb)
@@ -2634,6 +2633,13 @@ smb2_query_info_compound(const unsigned int xid, struct cifs_tcon *tcon,
 	struct cifs_open_parms oparms;
 	struct cifs_fid fid;
 	int rc;
+	__le16 *utf16_path;
+
+	if (!path)
+		path = "";
+	utf16_path = cifs_convert_path_to_utf16(path, cifs_sb);
+	if (!utf16_path)
+		return -ENOMEM;
 
 	if (smb3_encryption_required(tcon))
 		flags |= CIFS_TRANSFORM_REQ;
@@ -2646,12 +2652,13 @@ smb2_query_info_compound(const unsigned int xid, struct cifs_tcon *tcon,
 	rqst[0].rq_iov = open_iov;
 	rqst[0].rq_nvec = SMB2_CREATE_IOV_SIZE;
 
-	oparms.tcon = tcon;
-	oparms.desired_access = desired_access;
-	oparms.disposition = FILE_OPEN;
-	oparms.create_options = cifs_create_options(cifs_sb, 0);
-	oparms.fid = &fid;
-	oparms.reconnect = false;
+	oparms = (struct cifs_open_parms) {
+		.tcon = tcon,
+		.desired_access = desired_access,
+		.disposition = FILE_OPEN,
+		.create_options = cifs_create_options(cifs_sb, 0),
+		.fid = &fid,
+	};
 
 	rc = SMB2_open_init(tcon, server,
 			    &rqst[0], &oplock, &oparms, utf16_path);
@@ -2699,6 +2706,7 @@ smb2_query_info_compound(const unsigned int xid, struct cifs_tcon *tcon,
 	*buftype = resp_buftype[1];
 
  qic_exit:
+	kfree(utf16_path);
 	SMB2_open_free(&rqst[0]);
 	SMB2_query_info_free(&rqst[1]);
 	SMB2_close_free(&rqst[2]);
@@ -2709,17 +2717,16 @@ smb2_query_info_compound(const unsigned int xid, struct cifs_tcon *tcon,
 
 static int
 smb2_queryfs(const unsigned int xid, struct cifs_tcon *tcon,
-	     struct cifs_sb_info *cifs_sb, struct kstatfs *buf)
+	     const char *path, struct cifs_sb_info *cifs_sb, struct kstatfs *buf)
 {
 	struct smb2_query_info_rsp *rsp;
 	struct smb2_fs_full_size_info *info = NULL;
-	__le16 utf16_path = 0; /* Null - open root of share */
 	struct kvec rsp_iov = {NULL, 0};
 	int buftype = CIFS_NO_BUFFER;
 	int rc;
 
 
-	rc = smb2_query_info_compound(xid, tcon, &utf16_path,
+	rc = smb2_query_info_compound(xid, tcon, path,
 				      FILE_READ_ATTRIBUTES,
 				      FS_FULL_SIZE_INFORMATION,
 				      SMB2_O_INFO_FILESYSTEM,
@@ -2746,26 +2753,33 @@ qfs_exit:
 
 static int
 smb311_queryfs(const unsigned int xid, struct cifs_tcon *tcon,
-	       struct cifs_sb_info *cifs_sb, struct kstatfs *buf)
+	       const char *path, struct cifs_sb_info *cifs_sb, struct kstatfs *buf)
 {
 	int rc;
-	__le16 srch_path = 0; /* Null - open root of share */
+	__le16 *utf16_path = NULL;
 	u8 oplock = SMB2_OPLOCK_LEVEL_NONE;
 	struct cifs_open_parms oparms;
 	struct cifs_fid fid;
 
 	if (!tcon->posix_extensions)
-		return smb2_queryfs(xid, tcon, cifs_sb, buf);
+		return smb2_queryfs(xid, tcon, path, cifs_sb, buf);
 
-	oparms.tcon = tcon;
-	oparms.desired_access = FILE_READ_ATTRIBUTES;
-	oparms.disposition = FILE_OPEN;
-	oparms.create_options = cifs_create_options(cifs_sb, 0);
-	oparms.fid = &fid;
-	oparms.reconnect = false;
+	oparms = (struct cifs_open_parms) {
+		.tcon = tcon,
+		.path = path,
+		.desired_access = FILE_READ_ATTRIBUTES,
+		.disposition = FILE_OPEN,
+		.create_options = cifs_create_options(cifs_sb, 0),
+		.fid = &fid,
+	};
 
-	rc = SMB2_open(xid, &oparms, &srch_path, &oplock, NULL, NULL,
+	utf16_path = cifs_convert_path_to_utf16(path, cifs_sb);
+	if (utf16_path == NULL)
+		return -ENOMEM;
+
+	rc = SMB2_open(xid, &oparms, utf16_path, &oplock, NULL, NULL,
 		       NULL, NULL);
+	kfree(utf16_path);
 	if (rc)
 		return rc;
 
@@ -3060,13 +3074,13 @@ smb2_query_symlink(const unsigned int xid, struct cifs_tcon *tcon,
 	rqst[0].rq_iov = open_iov;
 	rqst[0].rq_nvec = SMB2_CREATE_IOV_SIZE;
 
-	memset(&oparms, 0, sizeof(oparms));
-	oparms.tcon = tcon;
-	oparms.desired_access = FILE_READ_ATTRIBUTES;
-	oparms.disposition = FILE_OPEN;
-	oparms.create_options = cifs_create_options(cifs_sb, create_options);
-	oparms.fid = &fid;
-	oparms.reconnect = false;
+	oparms = (struct cifs_open_parms) {
+		.tcon = tcon,
+		.desired_access = FILE_READ_ATTRIBUTES,
+		.disposition = FILE_OPEN,
+		.create_options = cifs_create_options(cifs_sb, create_options),
+		.fid = &fid,
+	};
 
 	rc = SMB2_open_init(tcon, server,
 			    &rqst[0], &oplock, &oparms, utf16_path);
@@ -3241,13 +3255,13 @@ smb2_query_reparse_tag(const unsigned int xid, struct cifs_tcon *tcon,
 	rqst[0].rq_iov = open_iov;
 	rqst[0].rq_nvec = SMB2_CREATE_IOV_SIZE;
 
-	memset(&oparms, 0, sizeof(oparms));
-	oparms.tcon = tcon;
-	oparms.desired_access = FILE_READ_ATTRIBUTES;
-	oparms.disposition = FILE_OPEN;
-	oparms.create_options = cifs_create_options(cifs_sb, OPEN_REPARSE_POINT);
-	oparms.fid = &fid;
-	oparms.reconnect = false;
+	oparms = (struct cifs_open_parms) {
+		.tcon = tcon,
+		.desired_access = FILE_READ_ATTRIBUTES,
+		.disposition = FILE_OPEN,
+		.create_options = cifs_create_options(cifs_sb, OPEN_REPARSE_POINT),
+		.fid = &fid,
+	};
 
 	rc = SMB2_open_init(tcon, server,
 			    &rqst[0], &oplock, &oparms, utf16_path);
@@ -3382,17 +3396,20 @@ get_smb2_acl_by_path(struct cifs_sb_info *cifs_sb,
 		return ERR_PTR(rc);
 	}
 
-	oparms.tcon = tcon;
-	oparms.desired_access = READ_CONTROL;
-	oparms.disposition = FILE_OPEN;
-	/*
-	 * When querying an ACL, even if the file is a symlink we want to open
-	 * the source not the target, and so the protocol requires that the
-	 * client specify this flag when opening a reparse point
-	 */
-	oparms.create_options = cifs_create_options(cifs_sb, 0) | OPEN_REPARSE_POINT;
-	oparms.fid = &fid;
-	oparms.reconnect = false;
+	oparms = (struct cifs_open_parms) {
+		.tcon = tcon,
+		.desired_access = READ_CONTROL,
+		.disposition = FILE_OPEN,
+		/*
+		 * When querying an ACL, even if the file is a symlink
+		 * we want to open the source not the target, and so
+		 * the protocol requires that the client specify this
+		 * flag when opening a reparse point
+		 */
+		.create_options = cifs_create_options(cifs_sb, 0) |
+				  OPEN_REPARSE_POINT,
+		.fid = &fid,
+	};
 
 	if (info & SACL_SECINFO)
 		oparms.desired_access |= SYSTEM_SECURITY;
@@ -3451,13 +3468,14 @@ set_smb2_acl(struct cifs_ntsd *pnntsd, __u32 acllen,
 		return rc;
 	}
 
-	oparms.tcon = tcon;
-	oparms.desired_access = access_flags;
-	oparms.create_options = cifs_create_options(cifs_sb, 0);
-	oparms.disposition = FILE_OPEN;
-	oparms.path = path;
-	oparms.fid = &fid;
-	oparms.reconnect = false;
+	oparms = (struct cifs_open_parms) {
+		.tcon = tcon,
+		.desired_access = access_flags,
+		.create_options = cifs_create_options(cifs_sb, 0),
+		.disposition = FILE_OPEN,
+		.path = path,
+		.fid = &fid,
+	};
 
 	rc = SMB2_open(xid, &oparms, utf16_path, &oplock, NULL, NULL,
 		       NULL, NULL);
@@ -4891,7 +4909,7 @@ static void smb2_decrypt_offload(struct work_struct *work)
 				spin_unlock(&GlobalMid_Lock);
 			}
 		}
-		cifs_mid_q_entry_release(mid);
+		release_mid(mid);
 	}
 
 free_pages:
@@ -5202,15 +5220,16 @@ smb2_make_node(unsigned int xid, struct inode *inode,
 		goto out;
 	}
 
-	oparms.tcon = tcon;
-	oparms.cifs_sb = cifs_sb;
-	oparms.desired_access = GENERIC_WRITE;
-	oparms.create_options = cifs_create_options(cifs_sb, CREATE_NOT_DIR |
-						    CREATE_OPTION_SPECIAL);
-	oparms.disposition = FILE_CREATE;
-	oparms.path = full_path;
-	oparms.fid = &fid;
-	oparms.reconnect = false;
+	oparms = (struct cifs_open_parms) {
+		.tcon = tcon,
+		.cifs_sb = cifs_sb,
+		.desired_access = GENERIC_WRITE,
+		.create_options = cifs_create_options(cifs_sb, CREATE_NOT_DIR |
+						      CREATE_OPTION_SPECIAL),
+		.disposition = FILE_CREATE,
+		.path = full_path,
+		.fid = &fid,
+	};
 
 	if (tcon->ses->server->oplocks)
 		oplock = REQ_OPLOCK;

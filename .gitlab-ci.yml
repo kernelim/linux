@@ -18,7 +18,7 @@ workflow: !reference [.workflow]
     branch: rhel8
   variables:
     builder_image: quay.io/cki/builder-rhel8
-    name: kernel-rhel8
+    kcidb_tree_name: rhel-8.10
     architectures: 'x86_64 ppc64le aarch64 s390x'
     debug_architectures: 'x86_64 ppc64le aarch64 s390x'
     native_tools: 'true'
@@ -31,7 +31,7 @@ workflow: !reference [.workflow]
     branch: rhel8-rt
   variables:
     builder_image: quay.io/cki/builder-rhel8
-    name: kernel-rt-rhel8
+    kcidb_tree_name: rhel-8.10
     pipeline_name_suffix: ''
     disttag_override: '.el8_10'
 
@@ -41,7 +41,7 @@ workflow: !reference [.workflow]
     branch: rhel8
   variables:
     builder_image: quay.io/cki/builder-rhel8
-    name: kernel-rt-rhel8
+    kcidb_tree_name: rhel-8.10
     disttag_override: '.el8_10'
     RUN_ONLY_FOR_RT: 'true'
 
