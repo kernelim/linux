@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 503.14.1
+%define pkgrelease 503.15.1
 %define kversion 5
-%define tarfile_release 5.14.0-503.14.1.el9_5
+%define tarfile_release 5.14.0-503.15.1.el9_5
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 503.14.1%{?buildid}%{?dist}
+%define specrelease 503.15.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-503.14.1.el9_5
+%define kabiversion 5.14.0-503.15.1.el9_5
 
 #
 # End of genspec.sh variables
@@ -1715,6 +1715,7 @@ ApplyOptionalPatch patch-%{patchversion}-redhat.patch
 %endif
 
 ApplyOptionalPatch linux-kernel-test.patch
+ApplyOptionalPatch 1000-debrand-some-messages.patch
 
 # END OF PATCH APPLICATIONS
 
@@ -3794,9 +3795,33 @@ fi
 #
 #
 %changelog
-* Thu Nov 14 2024 Release Engineering <releng@rockylinux.org> - 5.14.0-503.14.1
+* Tue Nov 26 2024 Release Engineering <releng@rockylinux.org> - 5.14.0-503.15.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Thu Nov 14 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.15.1.el9_5]
+- USB: serial: mos7840: fix crash on resume (Desnes Nunes) [RHEL-65484 RHEL-59050] {CVE-2024-42244}
+- attr: block mode changes of symlinks (CKI Backport Bot) [RHEL-61231 RHEL-60822]
+- ice: Adjust PTP init for 2x50G E825C devices (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Add NAC Topology device capability parser (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Add support for E825-C TS PLL handling (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Change CGU regs struct to anonymous (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Introduce ETH56G PHY model for E825C products (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Introduce ice_get_base_incval() helper (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Move CGU block (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Add PHY OFFSET_READY register clearing (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Implement Tx interrupt enablement functions (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Introduce helper to get tmr_cmd_reg values (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Introduce ice_ptp_hw struct (Petr Oros) [RHEL-64017 RHEL-29210]
+- wifi: rtw89: limit the PPDU length for VHT rate to 0x40000 (Narpat Mali) [RHEL-61753 RHEL-35542]
+- wifi: rtw89: 885xbx: apply common settings to 8851B, 8852B and 8852BT (Narpat Mali) [RHEL-61753 RHEL-35542]
+- wifi: rtw89: 8852b: fix definition of KIP register number (Narpat Mali) [RHEL-61753 RHEL-35542]
+- wifi: rtw89: 8852b: set AMSDU limit to 5000 (Narpat Mali) [RHEL-61753 RHEL-35542]
+- bpf: Fix overrunning reservations in ringbuf (CKI Backport Bot) [RHEL-62940] {CVE-2024-41009}
+- net: tcp: accept old ack during closing (Jamie Bainbridge) [RHEL-61424 RHEL-60572]
+- cxl/port: Fix use-after-free, permit out-of-order decoder shutdown (CKI Backport Bot) [RHEL-66837] {CVE-2024-50226}
+- ethtool: check device is present when getting link settings (Michal Schmidt) [RHEL-60581 RHEL-57750]
+- iommu/amd: Fix argument order in amd_iommu_dev_flush_pasid_all() (CKI Backport Bot) [RHEL-59982 RHEL-59981]
 
 * Thu Nov 07 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.14.1.el9_5]
 - ext4: fix off by one issue in alloc_flex_gd() (Pavel Reichl) [RHEL-65318]
