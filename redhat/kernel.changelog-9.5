@@ -1,3 +1,27 @@
+* Thu Nov 21 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.16.1.el9_5]
+- s390/dasd: fix error recovery leading to data corruption on ESE devices (Mete Durlu) [RHEL-64902 RHEL-55873]
+- net/smc: fix illegal rmb_desc access in SMC-D connection dump (Steve Best) [RHEL-65436 RHEL-27748] {CVE-2024-26615}
+- gitlab-ci: use zstream builder container image (Michael Hofmann)
+- netfilter: nft_payload: sanitize offset and length before calling skb_checksum() (CKI Backport Bot) [RHEL-66856] {CVE-2024-50251}
+- net: avoid potential underflow in qdisc_pkt_len_init() with UFO (CKI Backport Bot) [RHEL-65401] {CVE-2024-49949}
+- block: initialize integrity buffer to zero before writing it to media (Ming Lei) [RHEL-58761 RHEL-54768] {CVE-2024-43854}
+- proc: fix dentry/inode overinstantiating under /proc/${pid}/net (Joel Savitz) [RHEL-62824 RHEL-57703]
+- iommu: Restore lost return in iommu_report_device_fault() (CKI Backport Bot) [RHEL-67364] {CVE-2024-44994}
+- net: ena: Extend customer metrics reporting support (Kamal Heib) [RHEL-66933 RHEL-59968]
+- net: ena: Add ENA Express metrics support (Kamal Heib) [RHEL-66933 RHEL-59968]
+- xsk: fix batch alloc API on non-coherent systems (Felix Maurer) [RHEL-59884 RHEL-58954]
+- selinux,smack: don't bypass permissions check in inode_setsecctx hook (Ondrej Mosnacek) [RHEL-66106] {CVE-2024-46695}
+- PCI/AER: Disable AER service on suspend (Lenny Szubowicz) [RHEL-67037 RHEL-22265]
+- ACPI: PM: s2idle: Evaluate all Low-Power S0 Idle _DSM functions (Mark Langsdorf) [RHEL-67037 RHEL-54149]
+- mptcp: fallback when MPTCP opts are dropped after 1st data (CKI Backport Bot) [RHEL-62216 RHEL-62218]
+- cpufreq: amd-pstate: add check for cpufreq_cpu_get's return value (David Arcari) [RHEL-61469 RHEL-45016]
+- cpufreq/amd-pstate: Add the missing cpufreq_cpu_put() (David Arcari) [RHEL-61469 RHEL-45016]
+- cpufreq/amd-pstate: Fix the scaling_max_freq setting on shared memory CPPC systems (David Arcari) [RHEL-61469 RHEL-45016]
+- cpufreq/amd-pstate-ut: Convert nominal_freq to khz during comparisons (David Arcari) [RHEL-61469 RHEL-45016]
+- cpufreq/amd-pstate: fix setting policy current frequency value (David Arcari) [RHEL-61469 RHEL-45016]
+- netfilter: flowtable: initialise extack before use (CKI Backport Bot) [RHEL-58545] {CVE-2024-45018}
+Resolves: RHEL-58545, RHEL-58761, RHEL-59884, RHEL-61469, RHEL-62216, RHEL-62824, RHEL-64902, RHEL-65401, RHEL-65436, RHEL-66106, RHEL-66856, RHEL-66933, RHEL-67037, RHEL-67364
+
 * Thu Nov 14 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.15.1.el9_5]
 - USB: serial: mos7840: fix crash on resume (Desnes Nunes) [RHEL-65484 RHEL-59050] {CVE-2024-42244}
 - attr: block mode changes of symlinks (CKI Backport Bot) [RHEL-61231 RHEL-60822]
