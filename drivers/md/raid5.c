@@ -77,6 +77,8 @@ MODULE_PARM_DESC(devices_handle_discard_safely,
 		 "Set to Y if all devices in each array reliably return zeroes on reads from discarded regions");
 static struct workqueue_struct *raid5_wq;
 
+static void raid5_quiesce(struct mddev *mddev, int quiesce);
+
 static inline struct hlist_head *stripe_hash(struct r5conf *conf, sector_t sect)
 {
 	int hash = (sect >> RAID5_STRIPE_SHIFT(conf)) & HASH_MASK;
@@ -7286,6 +7288,8 @@ raid5_store_group_thread_cnt(struct mddev *mddev, const char *page, size_t len)
 	err = mddev_lock(mddev);
 	if (err)
 		return err;
+	raid5_quiesce(mddev, true);
+
 	conf = mddev->private;
 	if (!conf)
 		err = -ENODEV;
@@ -7310,6 +7314,8 @@ raid5_store_group_thread_cnt(struct mddev *mddev, const char *page, size_t len)
 		}
 		mddev_resume(mddev);
 	}
+
+	raid5_quiesce(mddev, false);
 	mddev_unlock(mddev);
 
 	return err ?: len;

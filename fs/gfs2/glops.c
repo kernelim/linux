@@ -647,21 +647,21 @@ static void iopen_go_callback(struct gfs2_glock *gl, bool remote)
 }
 
 /**
- * inode_go_free - wake up anyone waiting for dlm's unlock ast to free it
- * @gl: glock being freed
+ * inode_go_unlocked - wake up anyone waiting for dlm's unlock ast
+ * @gl: glock being unlocked
  *
  * For now, this is only used for the journal inode glock. In withdraw
- * situations, we need to wait for the glock to be freed so that we know
+ * situations, we need to wait for the glock to be unlocked so that we know
  * other nodes may proceed with recovery / journal replay.
  */
-static void inode_go_free(struct gfs2_glock *gl)
+static void inode_go_unlocked(struct gfs2_glock *gl)
 {
 	/* Note that we cannot reference gl_object because it's already set
 	 * to NULL by this point in its lifecycle. */
-	if (!test_bit(GLF_FREEING, &gl->gl_flags))
+	if (!test_bit(GLF_UNLOCKED, &gl->gl_flags))
 		return;
-	clear_bit_unlock(GLF_FREEING, &gl->gl_flags);
-	wake_up_bit(&gl->gl_flags, GLF_FREEING);
+	clear_bit_unlock(GLF_UNLOCKED, &gl->gl_flags);
+	wake_up_bit(&gl->gl_flags, GLF_UNLOCKED);
 }
 
 /**
@@ -726,8 +726,8 @@ const struct gfs2_glock_operations gfs2_inode_glops = {
 	.go_held = inode_go_held,
 	.go_dump = inode_go_dump,
 	.go_type = LM_TYPE_INODE,
-	.go_flags = GLOF_ASPACE | GLOF_LRU | GLOF_LVB,
-	.go_free = inode_go_free,
+	.go_flags = GLOF_ASPACE | GLOF_LVB,
+	.go_unlocked = inode_go_unlocked,
 };
 
 const struct gfs2_glock_operations gfs2_rgrp_glops = {
@@ -751,13 +751,13 @@ const struct gfs2_glock_operations gfs2_iopen_glops = {
 	.go_type = LM_TYPE_IOPEN,
 	.go_callback = iopen_go_callback,
 	.go_dump = inode_go_dump,
-	.go_flags = GLOF_LRU | GLOF_NONDISK,
+	.go_flags = GLOF_NONDISK,
 	.go_subclass = 1,
 };
 
 const struct gfs2_glock_operations gfs2_flock_glops = {
 	.go_type = LM_TYPE_FLOCK,
-	.go_flags = GLOF_LRU | GLOF_NONDISK,
+	.go_flags = GLOF_NONDISK,
 };
 
 const struct gfs2_glock_operations gfs2_nondisk_glops = {
@@ -768,7 +768,7 @@ const struct gfs2_glock_operations gfs2_nondisk_glops = {
 
 const struct gfs2_glock_operations gfs2_quota_glops = {
 	.go_type = LM_TYPE_QUOTA,
-	.go_flags = GLOF_LVB | GLOF_LRU | GLOF_NONDISK,
+	.go_flags = GLOF_LVB | GLOF_NONDISK,
 };
 
 const struct gfs2_glock_operations gfs2_journal_glops = {

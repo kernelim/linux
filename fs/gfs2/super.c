@@ -1071,7 +1071,7 @@ static int gfs2_drop_inode(struct inode *inode)
 
 		gfs2_glock_hold(gl);
 		if (!gfs2_queue_verify_delete(gl))
-			gfs2_glock_queue_put(gl);
+			gfs2_glock_put_async(gl);
 		return 0;
 	}
 
@@ -1285,7 +1285,7 @@ out_qs:
 static void gfs2_glock_put_eventually(struct gfs2_glock *gl)
 {
 	if (current->flags & PF_MEMALLOC)
-		gfs2_glock_queue_put(gl);
+		gfs2_glock_put_async(gl);
 	else
 		gfs2_glock_put(gl);
 }
@@ -1536,10 +1536,13 @@ static void gfs2_evict_inode(struct inode *inode)
 	if (behavior == EVICT_SHOULD_DEFER_DELETE) {
 		struct gfs2_glock *io_gl = ip->i_iopen_gh.gh_gl;
 
-		gfs2_glock_hold(io_gl);
-		if (!gfs2_queue_verify_delete(io_gl))
-			gfs2_glock_put(io_gl);
-		goto out;
+		if (io_gl) {
+			gfs2_glock_hold(io_gl);
+			if (!gfs2_queue_verify_delete(io_gl))
+				gfs2_glock_put(io_gl);
+			goto out;
+		}
+		behavior = EVICT_SHOULD_DELETE;
 	}
 	if (behavior == EVICT_SHOULD_DELETE)
 		ret = evict_unlinked_inode(inode);
@@ -1574,7 +1577,6 @@ out:
 	if (ip->i_gl) {
 		glock_clear_object(ip->i_gl, ip);
 		wait_on_bit_io(&ip->i_flags, GIF_GLOP_PENDING, TASK_UNINTERRUPTIBLE);
-		gfs2_glock_add_to_lru(ip->i_gl);
 		gfs2_glock_put_eventually(ip->i_gl);
 		ip->i_gl = NULL;
 	}
