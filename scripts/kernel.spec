@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 503.16.1
+%define pkgrelease 503.19.1
 %define kversion 5
-%define tarfile_release 5.14.0-503.16.1.el9_5
+%define tarfile_release 5.14.0-503.19.1.el9_5
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 503.16.1%{?buildid}%{?dist}
+%define specrelease 503.19.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-503.16.1.el9_5
+%define kabiversion 5.14.0-503.19.1.el9_5
 
 #
 # End of genspec.sh variables
@@ -3795,9 +3795,55 @@ fi
 #
 #
 %changelog
-* Wed Dec 11 2024 Release Engineering <releng@rockylinux.org> - 5.14.0-503.16.1
+* Thu Dec 19 2024 Release Engineering <releng@rockylinux.org> - 5.14.0-503.19.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Fri Dec 06 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.19.1.el9_5]
+- xfrm: validate new SA's prefixlen using SA family when sel.family is unset (Sabrina Dubroca) [RHEL-66462 RHEL-66461] {CVE-2024-50142}
+- xfrm: fix one more kernel-infoleak in algo dumping (CKI Backport Bot) [RHEL-65960] {CVE-2024-50110}
+- Revert "Merge: [qed] softlockup triggered by ethtool -d  [rhel-9.5.z]" (Lucas Zampieri) [RHEL-61705]
+- tracing/hwlat: Fix a race during cpuhp processing (Tomas Glozar) [RHEL-69468]
+- tracing/timerlat: Fix a race during cpuhp processing (Tomas Glozar) [RHEL-69468] {CVE-2024-49866}
+- tracing/timerlat: Drop interface_lock in stop_kthread() (Tomas Glozar) [RHEL-69468]
+- tracing/timerlat: Fix duplicated kthread creation due to CPU online/offline (Tomas Glozar) [RHEL-69468]
+- ceph: remove the incorrect Fw reference check when dirtying pages (Xiubo Li) [RHEL-61416 RHEL-60255]
+
+* Tue Dec 03 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.18.1.el9_5]
+- bpf: Fix a kernel verifier crash in stacksafe() (CKI Backport Bot) [RHEL-66097 RHEL-66098] {CVE-2024-45020}
+- bpf: Fix a sdiv overflow issue (CKI Backport Bot) [RHEL-64598 RHEL-64597] {CVE-2024-49888}
+- bpf: Fix out-of-bounds write in trie_get_next_key() (CKI Backport Bot) [RHEL-66877] {CVE-2024-50262}
+- bpf: Fix use-after-free in bpf_uprobe_multi_link_attach() (CKI Backport Bot) [RHEL-63331] {CVE-2024-47675}
+- nfsd: ensure that nfsd4_fattr_args.context is zeroed out (Jay Shin) [RHEL-58884 RHEL-58883] {CVE-2024-46697}
+- KVM: nSVM: Ignore nCR3[4:0] when loading PDPTEs from memory (Jon Maloy) [RHEL-65872] {CVE-2024-50115}
+- net: tighten bad gso csum offset check in virtio_net_hdr (Guillaume Nault) [RHEL-67683]
+- udp: fix receiving fraglist GSO packets (Guillaume Nault) [RHEL-67683]
+- Bluetooth: hci: fix null-ptr-deref in hci_read_supported_codecs (CKI Backport Bot) [RHEL-66804] {CVE-2024-50255}
+- Bluetooth: ISO: Fix UAF on iso_sock_timeout (Bastien Nocera) [RHEL-66321] {CVE-2024-50124}
+- Bluetooth: SCO: Fix UAF on sco_sock_timeout (Bastien Nocera) [RHEL-65928] {CVE-2024-50125}
+- Bluetooth: Fix use-after-free bugs caused by sco_sock_timeout (Bastien Nocera) [RHEL-65928] {CVE-2024-27398}
+- bpf: Add BPF_PROG_TYPE_CGROUP_SKB attach type enforcement in BPF_LINK_CREATE (CKI Backport Bot) [RHEL-44173] {CVE-2024-38564}
+- Bluetooth: bnep: fix wild-memory-access in proto_unregister (CKI Backport Bot) [RHEL-66365] {CVE-2024-50148}
+- Bluetooth: l2cap: fix null-ptr-deref in l2cap_chan_timeout (CKI Backport Bot) [RHEL-57716 RHEL-36374] {CVE-2024-27399}
+
+* Thu Nov 28 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.17.1.el9_5]
+- arm64: probes: Remove broken LDR (literal) uprobe support (CKI Backport Bot) [RHEL-66046] {CVE-2024-50099}
+- qed: put cond_resched() in qed_dmae_operation_wait() (Michal Schmidt) [RHEL-61705 RHEL-6372]
+- qed: allow the callee of qed_mcp_nvm_read() to sleep (Michal Schmidt) [RHEL-61705 RHEL-6372]
+- qed: put cond_resched() in qed_grc_dump_ctx_data() (Michal Schmidt) [RHEL-61705 RHEL-6372]
+- qed: make 'ethtool -d' 10 times faster (Michal Schmidt) [RHEL-61705 RHEL-6372]
+- qed: allow sleep in qed_mcp_trace_dump() (Michal Schmidt) [RHEL-61705 RHEL-6372]
+- sched/numa: Fix the potential null pointer dereference in task_numa_work() (CKI Backport Bot) [RHEL-66810] {CVE-2024-50223}
+- irqchip/gic-v4: Correctly deal with set_affinity on lazily-mapped VPEs (Charles Mirabile) [RHEL-66969] {CVE-2024-50192}
+- irqchip/gic-v4: Don't allow a VMOVP on a dying VPE (Charles Mirabile) [RHEL-66969] {CVE-2024-50192}
+- perf/x86/intel/uncore: Support HBM and CXL PMON counters (Michael Petlan) [RHEL-65856]
+- perf/x86/uncore: Cleanup unused unit structure (Michael Petlan) [RHEL-65856]
+- perf/x86/uncore: Apply the unit control RB tree to PCI uncore units (Michael Petlan) [RHEL-65856]
+- perf/x86/uncore: Apply the unit control RB tree to MSR uncore units (Michael Petlan) [RHEL-65856]
+- perf/x86/uncore: Apply the unit control RB tree to MMIO uncore units (Michael Petlan) [RHEL-65856]
+- perf/x86/uncore: Retrieve the unit ID from the unit control RB tree (Michael Petlan) [RHEL-65856]
+- perf/x86/uncore: Support per PMU cpumask (Michael Petlan) [RHEL-65856]
+- perf/x86/uncore: Save the unit control address of all units (Michael Petlan) [RHEL-65856]
 
 * Thu Nov 21 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.16.1.el9_5]
 - s390/dasd: fix error recovery leading to data corruption on ESE devices (Mete Durlu) [RHEL-64902 RHEL-55873]
