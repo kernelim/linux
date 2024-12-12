@@ -767,6 +767,20 @@ void __init mtrr_bp_init(void)
 			if (mtrr_enabled())
 				mtrr_bp_pat_init();
 
+			/*
+			 * RHEL-only: Intel systems with TME feature enabled reduce
+			 * phys_addr by keyid_bits (see detect_tme_early()) but this does
+			 * not affect mtrr_cleanup() as phys_addr is calculated independently
+			 * here (see f6b980646b93 upstream). To make TME enabled systems boot
+			 * and to minimize the change for other environments, use
+			 * boot_cpu_data.x86_phys_bits here instead.
+			 */
+			if (boot_cpu_has(X86_FEATURE_TME)) {
+				phys_addr = boot_cpu_data.x86_phys_bits;
+				size_or_mask = SIZE_OR_MASK_BITS(phys_addr);
+				size_and_mask = ~size_or_mask & 0xfffff00000ULL;
+			}
+
 			if (mtrr_cleanup(phys_addr)) {
 				changed_by_mtrr_cleanup = 1;
 				mtrr_if->set_all();
