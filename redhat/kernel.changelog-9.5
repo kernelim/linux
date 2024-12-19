@@ -1,3 +1,52 @@
+* Thu Dec 19 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.21.1.el9_5]
+- mlxsw: spectrum_ipip: Fix memory leak when changing remote IPv6 address (CKI Backport Bot) [RHEL-66899] {CVE-2024-50252}
+- CVE-2024-53122 mptcp: cope racing subflow creation in mptcp_rcv_space_adjust (Patrick Talbert) [RHEL-70083 RHEL-69670] {CVE-2024-53122}
+- mm: make show_free_areas() static (Aristeu Rozanski) [RHEL-66998 RHEL-27743]
+- mm: remove arguments of show_mem() (Aristeu Rozanski) [RHEL-66998 RHEL-27743]
+- KVM: s390: Change virtual to physical address access in diag 0x258 handler (Thomas Huth) [RHEL-67922 RHEL-65229]
+- KVM: s390: gaccess: Check if guest address is in memslot (Thomas Huth) [RHEL-67922 RHEL-65229]
+- KVM: s390: Fix SORTL and DFLTCC instruction format error in __insn32_query (Thomas Huth) [RHEL-67922 RHEL-65229]
+- s390/uv: Panic for set and remove shared access UVC errors (Thomas Huth) [RHEL-67922 RHEL-65229]
+- KVM: s390: remove useless include (Thomas Huth) [RHEL-67922 RHEL-65229]
+- s390/mm: Re-enable the shared zeropage for !PV and !skeys KVM guests (Thomas Huth) [RHEL-67922 RHEL-65229]
+- mm/userfaultfd: Do not place zeropages when zeropages are disallowed (Thomas Huth) [RHEL-67922 RHEL-65229]
+- s390: allow pte_offset_map_lock() to fail (Thomas Huth) [RHEL-67922 RHEL-54248]
+- KVM: s390: vsie: Use virt_to_phys for crypto control block (Thomas Huth) [RHEL-67922 RHEL-65229]
+- KVM: s390: vsie: Use virt_to_phys for facility control block (Thomas Huth) [RHEL-67922 RHEL-65229]
+- gfs2: Prevent inode creation race (Andreas Gruenbacher) [RHEL-68137 RHEL-68102]
+- gfs2: Only defer deletes when we have an iopen glock (Andreas Gruenbacher) [RHEL-68137 RHEL-68102]
+- gfs2: Randomize GLF_VERIFY_DELETE work delay (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Use mod_delayed_work in gfs2_queue_try_to_evict (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Update to the evict / remote delete documentation (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Call gfs2_queue_verify_delete from gfs2_evict_inode (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Clean up delete work processing (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Minor delete_work_func cleanup (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Return enum evict_behavior from gfs2_upgrade_iopen_glock (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Rename dinode_demise to evict_behavior (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Rename GIF_{DEFERRED -> DEFER}_DELETE (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Faster gfs2_upgrade_iopen_glock wakeups (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Fix unlinked inode cleanup (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Allow immediate GLF_VERIFY_DELETE work (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Initialize gl_no_formal_ino earlier (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Rename GLF_VERIFY_EVICT to GLF_VERIFY_DELETE (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: make timeout values more explicit (Wolfram Sang) [RHEL-62105 RHEL-60945]
+- gfs2: Simplify function gfs2_upgrade_iopen_glock (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Rename SDF_DEACTIVATING to SDF_KILL (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- smb: client: fix use-after-free of signing key (Jay Shin) [RHEL-69306 RHEL-66206]
+- net/iucv: fix use after free in iucv_sock_close() (Mete Durlu) [RHEL-60300 RHEL-53992]
+- KVM: arm64: Ensure vgic_ready() is ordered against MMIO registration (CKI Backport Bot) [RHEL-70294]
+Resolves: RHEL-60300, RHEL-62105, RHEL-66899, RHEL-66998, RHEL-67922, RHEL-68137, RHEL-69306, RHEL-70083, RHEL-70294
+
+* Thu Dec 12 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.20.1.el9_5]
+- bnxt_en: Add support for user configured RSS key (Michal Schmidt) [RHEL-68699 RHEL-54645]
+- bnxt_en: Add function to calculate Toeplitz hash (Michal Schmidt) [RHEL-68699 RHEL-54645]
+- kvm: Note an RCU quiescent state on guest exit (Leonardo Bras) [RHEL-65734 RHEL-20288]
+- rcu: Add rcutree.nohz_full_patience_delay to reduce nohz_full OS jitter (Leonardo Bras) [RHEL-65734 RHEL-20288]
+- context_tracking: Fix KCSAN noinstr violation (Leonardo Bras) [RHEL-65734 RHEL-20288]
+- perf/aux: Fix AUX buffer serialization (Michael Petlan) [RHEL-67495] {CVE-2024-46713}
+- RDMA/bnxt_re: Fix a bug while setting up Level-2 PBL pages (Mohammad Heib) [RHEL-66669 RHEL-52759] {CVE-2024-50208}
+Resolves: RHEL-65734, RHEL-66669, RHEL-67495, RHEL-68699
+
 * Fri Dec 06 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.19.1.el9_5]
 - xfrm: validate new SA's prefixlen using SA family when sel.family is unset (Sabrina Dubroca) [RHEL-66462 RHEL-66461] {CVE-2024-50142}
 - xfrm: fix one more kernel-infoleak in algo dumping (CKI Backport Bot) [RHEL-65960] {CVE-2024-50110}
