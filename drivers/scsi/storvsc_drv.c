@@ -149,6 +149,8 @@ struct hv_fc_wwn_packet {
 */
 static int vmstor_proto_version;
 
+static bool hv_dev_is_fc(struct hv_device *hv_dev);
+
 #define STORVSC_LOGGING_NONE	0
 #define STORVSC_LOGGING_ERROR	1
 #define STORVSC_LOGGING_WARN	2
@@ -316,6 +318,9 @@ enum storvsc_request_type {
 #define SRB_STATUS_ABORTED		0x02
 #define SRB_STATUS_ERROR		0x04
 #define SRB_STATUS_INVALID_REQUEST	0x06
+#define SRB_STATUS_TIMEOUT		0x09
+#define SRB_STATUS_SELECTION_TIMEOUT	0x0A
+#define SRB_STATUS_BUS_RESET		0x0E
 #define SRB_STATUS_DATA_OVERRUN		0x12
 #define SRB_STATUS_INVALID_LUN		0x20
 #define SRB_STATUS_INTERNAL_ERROR	0x30
@@ -981,6 +986,10 @@ static void storvsc_handle_error(struct vmscsi_request *vm_srb,
 	case SRB_STATUS_ABORTED:
 	case SRB_STATUS_INVALID_REQUEST:
 	case SRB_STATUS_INTERNAL_ERROR:
+	case SRB_STATUS_TIMEOUT:
+	case SRB_STATUS_SELECTION_TIMEOUT:
+	case SRB_STATUS_BUS_RESET:
+	case SRB_STATUS_DATA_OVERRUN:
 		if (vm_srb->srb_status & SRB_STATUS_AUTOSENSE_VALID) {
 			/* Check for capacity change */
 			if ((asc == 0x2a) && (ascq == 0x9)) {
@@ -1130,6 +1139,7 @@ static void storvsc_on_io_completion(struct storvsc_device *stor_device,
 	 * not correctly handle:
 	 * INQUIRY command with page code parameter set to 0x80
 	 * MODE_SENSE command with cmd[2] == 0x1c
+	 * MAINTENANCE_IN is not supported by HyperV FC passthrough
 	 *
 	 * Setup srb and scsi status so this won't be fatal.
 	 * We do this so we can distinguish truly fatal failues
@@ -1137,7 +1147,9 @@ static void storvsc_on_io_completion(struct storvsc_device *stor_device,
 	 */
 
 	if ((stor_pkt->vm_srb.cdb[0] == INQUIRY) ||
-	   (stor_pkt->vm_srb.cdb[0] == MODE_SENSE)) {
+	   (stor_pkt->vm_srb.cdb[0] == MODE_SENSE) ||
+	   (stor_pkt->vm_srb.cdb[0] == MAINTENANCE_IN &&
+	   hv_dev_is_fc(device))) {
 		vstor_packet->vm_srb.scsi_status = 0;
 		vstor_packet->vm_srb.srb_status = SRB_STATUS_SUCCESS;
 	}
