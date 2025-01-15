@@ -79,7 +79,6 @@ static const char *rh_unmaintained_drivers[] = {
 	"e1000",
 	"ebtables",
 	"hdlc_fr",
-	"hfi1",
 	"hpsa",
 	"ip6_tables",
 	"ip_set",
@@ -131,7 +130,6 @@ static const char *rh_unmaintained_init_fns[] = {
 	"siw_init_module",
 	"usnic_ib_init",
 	"pvrdma_init",
-	"hfi1_mod_init",
 	"nfp_main_init",
 	0     /* Terminating entry */
 };
