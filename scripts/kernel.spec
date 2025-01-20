@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 503.22.1
+%define pkgrelease 503.23.1
 %define kversion 5
-%define tarfile_release 5.14.0-503.22.1.el9_5
+%define tarfile_release 5.14.0-503.23.1.el9_5
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 503.22.1%{?buildid}%{?dist}
+%define specrelease 503.23.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-503.22.1.el9_5
+%define kabiversion 5.14.0-503.23.1.el9_5
 
 #
 # End of genspec.sh variables
@@ -3794,9 +3794,12 @@ fi
 #
 #
 %changelog
-* Wed Jan 22 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.22.1
+* Wed Feb 05 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.23.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Mon Jan 20 2025 Chao YE <cye@redhat.com> [5.14.0-503.23.1.el9_5]
+- printk: nbcon: Fix illegal RCU usage on thread wakeup (Derek Barbosa) [RHEL-73036]
 
 * Wed Jan 15 2025 Chao YE <cye@redhat.com> [5.14.0-503.22.1.el9_5]
 - [s390] zcore: WRITE is "data source", not destination... (CKI Backport Bot) [RHEL-63078]
