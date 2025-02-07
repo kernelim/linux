@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 503.23.1
+%define pkgrelease 503.23.2
 %define kversion 5
-%define tarfile_release 5.14.0-503.23.1.el9_5
+%define tarfile_release 5.14.0-503.23.2.el9_5
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 503.23.1%{?buildid}%{?dist}
+%define specrelease 503.23.2%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-503.23.1.el9_5
+%define kabiversion 5.14.0-503.23.2.el9_5
 
 #
 # End of genspec.sh variables
@@ -3794,9 +3794,12 @@ fi
 #
 #
 %changelog
-* Wed Feb 05 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.23.1
+* Tue Feb 11 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.23.2
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Fri Feb 07 2025 Scott Weaver <scweaver@redhat.com> [5.14.0-503.23.2.el9_5]
+- media: uvcvideo: Skip parsing frames of type UVC_VS_UNDEFINED in uvc_parse_format (CKI Backport Bot) [RHEL-78075 RHEL-69574] {CVE-2024-53104}
 
 * Mon Jan 20 2025 Chao YE <cye@redhat.com> [5.14.0-503.23.1.el9_5]
 - printk: nbcon: Fix illegal RCU usage on thread wakeup (Derek Barbosa) [RHEL-73036]
