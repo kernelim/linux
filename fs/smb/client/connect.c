@@ -2186,6 +2186,7 @@ cifs_set_cifscreds(struct smb3_fs_context *ctx, struct cifs_ses *ses)
 	}
 
 	++delim;
+	/* BB consider adding support for password2 (Key Rotation) for multiuser in future */
 	ctx->password = kstrndup(delim, len, GFP_KERNEL);
 	if (!ctx->password) {
 		cifs_dbg(FYI, "Unable to allocate %zd bytes for password\n",
@@ -2209,6 +2210,7 @@ cifs_set_cifscreds(struct smb3_fs_context *ctx, struct cifs_ses *ses)
 			kfree(ctx->username);
 			ctx->username = NULL;
 			kfree_sensitive(ctx->password);
+			/* no need to free ctx->password2 since not allocated in this path */
 			ctx->password = NULL;
 			goto out_key_put;
 		}
@@ -2318,6 +2320,12 @@ cifs_get_smb_ses(struct TCP_Server_Info *server, struct smb3_fs_context *ctx)
 	if (ctx->password) {
 		ses->password = kstrdup(ctx->password, GFP_KERNEL);
 		if (!ses->password)
+			goto get_ses_fail;
+	}
+	/* ctx->password freed at unmount */
+	if (ctx->password2) {
+		ses->password2 = kstrdup(ctx->password2, GFP_KERNEL);
+		if (!ses->password2)
 			goto get_ses_fail;
 	}
 	if (ctx->domainname) {
@@ -2462,9 +2470,6 @@ cifs_put_tcon(struct cifs_tcon *tcon)
 
 	list_del_init(&tcon->tcon_list);
 	tcon->status = TID_EXITING;
-#ifdef CONFIG_CIFS_DFS_UPCALL
-	list_replace_init(&tcon->dfs_ses_list, &ses_list);
-#endif
 	spin_unlock(&tcon->tc_lock);
 	spin_unlock(&cifs_tcp_ses_lock);
 
@@ -2472,6 +2477,7 @@ cifs_put_tcon(struct cifs_tcon *tcon)
 	cancel_delayed_work_sync(&tcon->query_interfaces);
 #ifdef CONFIG_CIFS_DFS_UPCALL
 	cancel_delayed_work_sync(&tcon->dfs_cache_work);
+	list_replace_init(&tcon->dfs_ses_list, &ses_list);
 #endif
 
 	if (tcon->use_witness) {
@@ -4283,10 +4289,10 @@ cifs_prune_tlinks(struct work_struct *work)
 }
 
 #ifndef CONFIG_CIFS_DFS_UPCALL
-int cifs_tree_connect(const unsigned int xid, struct cifs_tcon *tcon, const struct nls_table *nlsc)
+int cifs_tree_connect(const unsigned int xid, struct cifs_tcon *tcon)
 {
-	int rc;
 	const struct smb_version_operations *ops = tcon->ses->server->ops;
+	int rc;
 
 	/* only send once per connect */
 	spin_lock(&tcon->tc_lock);
@@ -4309,7 +4315,8 @@ int cifs_tree_connect(const unsigned int xid, struct cifs_tcon *tcon, const stru
 	tcon->status = TID_IN_TCON;
 	spin_unlock(&tcon->tc_lock);
 
-	rc = ops->tree_connect(xid, tcon->ses, tcon->tree_name, tcon, nlsc);
+	rc = ops->tree_connect(xid, tcon->ses, tcon->tree_name,
+			       tcon, tcon->ses->local_nls);
 	if (rc) {
 		spin_lock(&tcon->tc_lock);
 		if (tcon->status == TID_IN_TCON)

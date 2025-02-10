@@ -79,8 +79,8 @@ class CommitTags:
     def get_changelog_str(self):
         chnglog = []
         tickets = sorted(self.tag_dict['Bugzilla']) + sorted(self.tag_dict['JIRA'])
-        if self.tag_dict['Y-Bugzilla'] or self.tag_dict['Y-JIRA']:
-            tickets = tickets + sorted(self.tag_dict['Y-Bugzilla']) + sorted(self.tag_dict['Y-JIRA'])
+        #if self.tag_dict['Y-Bugzilla'] or self.tag_dict['Y-JIRA']:
+        #    tickets = tickets + sorted(self.tag_dict['Y-Bugzilla']) + sorted(self.tag_dict['Y-JIRA'])
         if tickets:
             chnglog.append('[' + ' '.join(tickets) + ']')
         if self.tag_dict['CVE']:
