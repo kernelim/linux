@@ -631,8 +631,10 @@ struct sk_buff *__napi_alloc_skb(struct napi_struct *napi, unsigned int len,
 	 * we use kmalloc() for skb->head allocation.
 	 * When the small frag allocator is available, prefer it over kmalloc
 	 * for small fragments
+	 * RHEL only: exclude too small heads
 	 */
 	if ((!NAPI_HAS_SMALL_PAGE_FRAG && len <= SKB_WITH_OVERHEAD(1024)) ||
+	    (NAPI_HAS_SMALL_PAGE_FRAG && len <= SKB_WITH_OVERHEAD(512)) ||
 	    len > SKB_WITH_OVERHEAD(PAGE_SIZE) ||
 	    (gfp_mask & (__GFP_DIRECT_RECLAIM | GFP_DMA))) {
 		skb = __alloc_skb(len, gfp_mask, SKB_ALLOC_RX | SKB_ALLOC_NAPI,
