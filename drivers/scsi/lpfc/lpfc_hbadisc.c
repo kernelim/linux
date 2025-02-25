@@ -194,7 +194,7 @@ lpfc_dev_loss_tmo_callbk(struct fc_rport *rport)
 				ndlp->fc4_xpt_flags &= ~NLP_XPT_REGD;
 			spin_unlock_irqrestore(&ndlp->lock, iflags);
 			lpfc_nlp_put(ndlp);
-			return;
+			spin_lock_irqsave(&ndlp->lock, iflags);
 		}
 
 		/* Only 1 thread can drop the initial node reference.  If

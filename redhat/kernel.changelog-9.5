@@ -1,3 +1,71 @@
+* Tue Feb 25 2025 Chao YE <cye@redhat.com> [5.14.0-503.29.1.el9_5]
+- rhel-9.5: gate on kernel-qe tests results not cki ones (Bruno Goncalves)
+- ice: implement low latency PHY timer updates (Petr Oros) [RHEL-75466]
+- ice: check low latency PHY timer update firmware capability (Petr Oros) [RHEL-75466]
+- ice: add lock to protect low latency interface (Petr Oros) [RHEL-75466]
+- ice: rename TS_LL_READ* macros to REG_LL_PROXY_H_* (Petr Oros) [RHEL-75466]
+- ice: use read_poll_timeout_atomic in ice_read_phy_tstamp_ll_e810 (Petr Oros) [RHEL-75466]
+- smb: client: get rid of kstrdup() in get_ses_refpath() (Paulo Alcantara) [RHEL-72875]
+- smb: client: fix noisy when tree connecting to DFS interlink targets (Paulo Alcantara) [RHEL-72875]
+- smb: client: don't trust DFSREF_STORAGE_SERVER bit (Paulo Alcantara) [RHEL-72875]
+- smb: client: don't check for @leaf_fullpath in match_server() (Paulo Alcantara) [RHEL-72875]
+- smb: client: get rid of TCP_Server_Info::refpath_lock (Paulo Alcantara) [RHEL-72875]
+- smb: client: don't retry DFS targets on server shutdown (Paulo Alcantara) [RHEL-72875]
+- smb: client: fix return value of parse_dfs_referrals() (Paulo Alcantara) [RHEL-72875]
+- smb: client: optimize referral walk on failed link targets (Paulo Alcantara) [RHEL-72875]
+- smb: client: provide dns_resolve_{unc,name} helpers (Paulo Alcantara) [RHEL-72875]
+- smb: client: parse DNS domain name from domain= option (Paulo Alcantara) [RHEL-72875]
+- smb: client: fix DFS mount against old servers with NTLMSSP (Paulo Alcantara) [RHEL-72875]
+- smb: client: parse av pair type 4 in CHALLENGE_MESSAGE (Paulo Alcantara) [RHEL-72875]
+- smb: client: introduce av_for_each_entry() helper (Paulo Alcantara) [RHEL-72875]
+- smb: client: fix double free of TCP_Server_Info::hostname (Paulo Alcantara) [RHEL-72875]
+- cifs: support mounting with alternate password to allow password rotation (Paulo Alcantara) [RHEL-72875]
+- cifs: support reconnect with alternate password for SMB1 (Paulo Alcantara) [RHEL-72875]
+- smb: client: sync the root session and superblock context passwords before automounting (Paulo Alcantara) [RHEL-72875]
+- cifs: unlock on error in smb3_reconfigure() (Paulo Alcantara) [RHEL-72875]
+- cifs: during remount, make sure passwords are in sync (Paulo Alcantara) [RHEL-72875]
+- smb: client: Handle kstrdup failures for passwords (Paulo Alcantara) [RHEL-72875] {CVE-2024-50120}
+- smb: client: fix TCP timers deadlock after rmmod (Paulo Alcantara) [RHEL-72875] {CVE-2024-54680}
+- smb: client: Fix use-after-free of network namespace. (Paulo Alcantara) [RHEL-72875] {CVE-2024-53095}
+- Fix spelling errors in Server Message Block (Paulo Alcantara) [RHEL-72875]
+- af_packet: do not call packet_read_pending() from tpacket_destruct_skb() (CKI Backport Bot) [RHEL-78423]
+Resolves: RHEL-72875, RHEL-75466, RHEL-78423
+
+* Wed Feb 19 2025 Chao YE <cye@redhat.com> [5.14.0-503.28.1.el9_5]
+- bnxt_en: Fix GSO type for HW GRO packets on 5750X chips (CKI Backport Bot) [RHEL-73726]
+- intel_idle: Disable promotion to C1E on Jasper Lake and Elkhart Lake (David Arcari) [RHEL-62985]
+- intel_idle: add Granite Rapids Xeon support (David Arcari) [RHEL-62985]
+- intel_idle: Switch to new Intel CPU model defines (David Arcari) [RHEL-62985]
+- x86/resctrl: Remove redundant variable in mbm_config_write_domain() (David Arcari) [RHEL-59001]
+- x86/resctrl: Read supported bandwidth sources from CPUID (David Arcari) [RHEL-59001]
+- x86/resctrl: Remove hard-coded memory bandwidth limit (David Arcari) [RHEL-59001]
+- mei: me: disable RPL-S on SPS and IGN firmwares (CKI Backport Bot) [RHEL-60895]
+- smb: client: change return value in open_cached_dir_by_dentry() if !cfids (Jay Shin) [RHEL-75935]
+- smb: client: disable directory caching when dir_cache_timeout is zero (Jay Shin) [RHEL-75935]
+- smb: client: remove unnecessary checks in open_cached_dir() (Jay Shin) [RHEL-75935]
+- smb: prevent use-after-free due to open_cached_dir error paths (Jay Shin) [RHEL-75935] {CVE-2024-53177}
+- smb: Don't leak cfid when reconnect races with open_cached_dir (Jay Shin) [RHEL-75935] {CVE-2024-53178}
+- smb3: request handle caching when caching directories (Jay Shin) [RHEL-75935]
+- bnxt_en: Unregister PTP during PCI shutdown and suspend (Michal Schmidt) [RHEL-69514]
+- bnxt_en: Refactor bnxt_ptp_init() (Michal Schmidt) [RHEL-69514]
+- smb: client: ignore unhandled reparse tags (Jay Shin) [RHEL-77743]
+- smb: client: fix oops due to unset link speed (Jay Shin) [RHEL-77359]
+Resolves: RHEL-59001, RHEL-60895, RHEL-62985, RHEL-69514, RHEL-73726, RHEL-75935, RHEL-77359, RHEL-77743
+
+* Wed Feb 12 2025 Chao YE <cye@redhat.com> [5.14.0-503.27.1.el9_5]
+- NFS: enable nconnect for RDMA (Benjamin Coddington) [RHEL-77179]
+- Revert "scsi: lpfc: Early return after marking final NLP_DROPPED flag in dev_loss_tmo" (Dick Kennedy) [RHEL-70933]
+- idpf: fix idpf_vc_core_init error path (CKI Backport Bot) [RHEL-70191]
+- idpf: avoid vport access in idpf_get_link_ksettings (CKI Backport Bot) [RHEL-70191]
+- ip6mr: fix tables suspicious RCU usage (Andrea Claudi) [RHEL-71730]
+- ipmr: tune the ipmr_can_free_table() checks. (Andrea Claudi) [RHEL-71730]
+- ipmr: add debug check for mr table cleanup (Andrea Claudi) [RHEL-71730]
+- net: ip6mr: add RTM_GETROUTE netlink op (Andrea Claudi) [RHEL-71730]
+- i40e: add ability to reset VF for Tx and Rx MDD events (Michal Schmidt) [RHEL-75972]
+- tcp: fix mptcp DSS corruption due to large pmtu xmit (Paolo Abeni) [RHEL-62215]
+- mptcp: handle consistently DSS corruption (Paolo Abeni) [RHEL-62215]
+Resolves: RHEL-62215, RHEL-70191, RHEL-70933, RHEL-71730, RHEL-75972, RHEL-77179
+
 * Mon Feb 10 2025 Chao YE <cye@redhat.com> [5.14.0-503.26.1.el9_5]
 - redhat: drop Y issues from changelog (Jan Stancek)
 - media: uvcvideo: Skip parsing frames of type UVC_VS_UNDEFINED in uvc_parse_format (CKI Backport Bot) [RHEL-78075] {CVE-2024-53104}

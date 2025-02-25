@@ -3,10 +3,14 @@ product_versions:
   - rhel-9
 decision_context: osci_compose_gate
 rules:
-  - !PassingTestCaseRule {test_case_name: cki.tier1-aarch64.functional}
-  - !PassingTestCaseRule {test_case_name: cki.tier1-ppc64le.functional}
-  - !PassingTestCaseRule {test_case_name: cki.tier1-s390x.functional}
-  - !PassingTestCaseRule {test_case_name: cki.tier1-x86_64.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-64k-aarch64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-aarch64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-debug-x86_64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-ppc64le.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-rt-debug-x86_64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-rt-x86_64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-s390x.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-x86_64.tier1.functional}
   - !PassingTestCaseRule {test_case_name: s1-aws-ci_x86_64.brew-build.tier1.functional}
   - !PassingTestCaseRule {test_case_name: s1-aws-ci_aarch64.brew-build.tier1.functional}
   - !PassingTestCaseRule {test_case_name: s1-azure-ci_x86_64.brew-build.tier1.functional}
