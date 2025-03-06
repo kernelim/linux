@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 503.29.1
+%define pkgrelease 503.31.1
 %define kversion 5
-%define tarfile_release 5.14.0-503.29.1.el9_5
+%define tarfile_release 5.14.0-503.31.1.el9_5
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 503.29.1%{?buildid}%{?dist}
+%define specrelease 503.31.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-503.29.1.el9_5
+%define kabiversion 5.14.0-503.31.1.el9_5
 
 #
 # End of genspec.sh variables
@@ -3794,9 +3794,55 @@ fi
 #
 #
 %changelog
-* Wed Mar 05 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.29.1
+* Tue Mar 11 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.31.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Thu Mar 06 2025 Chao YE <cye@redhat.com> [5.14.0-503.31.1.el9_5]
+- HID: core: zero-initialize the report buffer (Benjamin Tissoires) [RHEL-81838] {CVE-2024-50302}
+- x86/kaslr: Expose and use the end of the physical memory address space (Waiman Long) [RHEL-70002]
+- ALSA: usb-audio: Fix a DMA to stack memory bug (Jaroslav Kysela) [RHEL-81799]
+- ALSA: usb-audio: Fix for sampling rates support for Mbox3 (Jaroslav Kysela) [RHEL-81799]
+- ALSA: usb-audio: Fix potential out-of-bound accesses for Extigy and Mbox devices (Jaroslav Kysela) [RHEL-81799] {CVE-2024-53197}
+- ALSA: usb-audio: Add sampling rates support for Mbox3 (Jaroslav Kysela) [RHEL-81799]
+- x86/kexec: Add EFI config table identity mapping for kexec kernel (Jay Shin) [RHEL-74170]
+- mm: fix NULL pointer dereference in alloc_pages_bulk_noprof (Jay Shin) [RHEL-73210] {CVE-2024-53113}
+- can: bcm: Fix UAF in bcm_proc_show() (CKI KWF BOT) [RHEL-80746] {CVE-2023-52922}
+- smb: client: fix chmod(2) regression with ATTR_READONLY (Jay Shin) [RHEL-80526]
+- hugetlb: prioritize surplus allocation from current node (Aristeu Rozanski) [RHEL-77488]
+- dev: Acquire netdev_rename_lock before restoring dev->name in dev_change_name(). (Antoine Tenart) [RHEL-77338]
+- net: add softirq safety to netdev_rename_lock (Antoine Tenart) [RHEL-77343]
+- arp: Convert ioctl(SIOCGARP) to RCU. (Antoine Tenart) [RHEL-77343]
+- net: Protect dev->name by seqlock. (Antoine Tenart) [RHEL-77343]
+- net: Remove unused declaration dev_restart() (Antoine Tenart) [RHEL-77343]
+- arp: Get dev after calling arp_req_(delete|set|get)(). (Antoine Tenart) [RHEL-77343]
+- arp: Remove a nest in arp_req_get(). (Antoine Tenart) [RHEL-77343]
+- arp: Factorise ip_route_output() call in arp_req_set() and arp_req_delete(). (Antoine Tenart) [RHEL-77343]
+- arp: Validate netmask earlier for SIOCDARP and SIOCSARP in arp_ioctl(). (Antoine Tenart) [RHEL-77343]
+- arp: Move ATF_COM setting in arp_req_set(). (Antoine Tenart) [RHEL-77343]
+- ACPI: extlog: fix NULL pointer dereference check (Mark Langsdorf) [RHEL-75250] {CVE-2023-52605}
+- vsock/virtio: Initialization of the dangling pointer occurring in vsk->trans (Jon Maloy) [RHEL-75461] {CVE-2024-50264}
+- x86/pci: Skip early E820 check for ECAM region (CKI Backport Bot) [RHEL-67065]
+- cpufreq: intel_pstate: Update Balance performance EPP for Emerald Rapids (Steve Best) [RHEL-64291]
+
+* Sun Mar 02 2025 Patrick Talbert <ptalbert@redhat.com> [5.14.0-503.30.1.el9_5]
+- can: bcm: Fix UAF in bcm_proc_show() (CKI KWF BOT) [RHEL-80746] {CVE-2023-52922}
+- smb: client: fix chmod(2) regression with ATTR_READONLY (Jay Shin) [RHEL-80526]
+- hugetlb: prioritize surplus allocation from current node (Aristeu Rozanski) [RHEL-77488]
+- dev: Acquire netdev_rename_lock before restoring dev->name in dev_change_name(). (Antoine Tenart) [RHEL-77338]
+- net: add softirq safety to netdev_rename_lock (Antoine Tenart) [RHEL-77343]
+- arp: Convert ioctl(SIOCGARP) to RCU. (Antoine Tenart) [RHEL-77343]
+- net: Protect dev->name by seqlock. (Antoine Tenart) [RHEL-77343]
+- net: Remove unused declaration dev_restart() (Antoine Tenart) [RHEL-77343]
+- arp: Get dev after calling arp_req_(delete|set|get)(). (Antoine Tenart) [RHEL-77343]
+- arp: Remove a nest in arp_req_get(). (Antoine Tenart) [RHEL-77343]
+- arp: Factorise ip_route_output() call in arp_req_set() and arp_req_delete(). (Antoine Tenart) [RHEL-77343]
+- arp: Validate netmask earlier for SIOCDARP and SIOCSARP in arp_ioctl(). (Antoine Tenart) [RHEL-77343]
+- arp: Move ATF_COM setting in arp_req_set(). (Antoine Tenart) [RHEL-77343]
+- ACPI: extlog: fix NULL pointer dereference check (Mark Langsdorf) [RHEL-75250] {CVE-2023-52605}
+- vsock/virtio: Initialization of the dangling pointer occurring in vsk->trans (Jon Maloy) [RHEL-75461] {CVE-2024-50264}
+- x86/pci: Skip early E820 check for ECAM region (CKI Backport Bot) [RHEL-67065]
+- cpufreq: intel_pstate: Update Balance performance EPP for Emerald Rapids (Steve Best) [RHEL-64291]
 
 * Tue Feb 25 2025 Chao YE <cye@redhat.com> [5.14.0-503.29.1.el9_5]
 - rhel-9.5: gate on kernel-qe tests results not cki ones (Bruno Goncalves)
