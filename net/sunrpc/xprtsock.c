@@ -1276,6 +1276,7 @@ static void xs_reset_transport(struct sock_xprt *transport)
 	transport->file = NULL;
 
 	sk->sk_user_data = NULL;
+	sk->sk_sndtimeo = 0;
 
 	xs_restore_old_callbacks(transport, sk);
 	xprt_clear_connected(xprt);
@@ -2562,7 +2563,15 @@ static void xs_tls_handshake_done(void *data, int status, key_serial_t peerid)
 	struct sock_xprt *lower_transport =
 				container_of(lower_xprt, struct sock_xprt, xprt);
 
-	lower_transport->xprt_err = status ? -EACCES : 0;
+	switch (status) {
+	case 0:
+	case -EACCES:
+	case -ETIMEDOUT:
+		lower_transport->xprt_err = status;
+		break;
+	default:
+		lower_transport->xprt_err = -EACCES;
+	}
 	complete(&lower_transport->handshake_done);
 	xprt_put(lower_xprt);
 }
@@ -2604,11 +2613,10 @@ static int xs_tls_handshake_sync(struct rpc_xprt *lower_xprt, struct xprtsec_par
 	rc = wait_for_completion_interruptible_timeout(&lower_transport->handshake_done,
 						       XS_TLS_HANDSHAKE_TO);
 	if (rc <= 0) {
-		if (!tls_handshake_cancel(sk)) {
-			if (rc == 0)
-				rc = -ETIMEDOUT;
-			goto out_put_xprt;
-		}
+		tls_handshake_cancel(sk);
+		if (rc == 0)
+			rc = -ETIMEDOUT;
+		goto out_put_xprt;
 	}
 
 	rc = lower_transport->xprt_err;

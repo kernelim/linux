@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 503.31.1
+%define pkgrelease 503.33.1
 %define kversion 5
-%define tarfile_release 5.14.0-503.31.1.el9_5
+%define tarfile_release 5.14.0-503.33.1.el9_5
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 503.31.1%{?buildid}%{?dist}
+%define specrelease 503.33.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-503.31.1.el9_5
+%define kabiversion 5.14.0-503.33.1.el9_5
 
 #
 # End of genspec.sh variables
@@ -3794,9 +3794,21 @@ fi
 #
 #
 %changelog
-* Tue Mar 11 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.31.1
+* Wed Mar 19 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.33.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Wed Mar 12 2025 Chao YE <cye@redhat.com> [5.14.0-503.33.1.el9_5]
+- scsi: st: New session only when Unit Attention for new tape (John Meneghini) [RHEL-62266]
+- scsi: st: Add MTIOCGET and MTLOAD to ioctls allowed after device reset (John Meneghini) [RHEL-62266]
+- scsi: st: Don't modify unknown block number in MTIOCGET (John Meneghini) [RHEL-62266]
+- x86/mm/ident_map: Use gbpages only where full GB page should be mapped. (Chris von Recklinghausen) [RHEL-62210]
+
+* Sun Mar 09 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-503.32.1.el9_5]
+- SUNRPC: Handle -ETIMEDOUT return from tlshd (Benjamin Coddington) [RHEL-79870]
+- SUNRPC: timeout and cancel TLS handshake with -ETIMEDOUT (Benjamin Coddington) [RHEL-79870]
+- tls: Fix tls_sw_sendmsg error handling (Benjamin Coddington) [RHEL-79870]
+- SUNRPC: Fix a hang in TLS sock_close if sk_write_pending (Benjamin Coddington) [RHEL-79870]
 
 * Thu Mar 06 2025 Chao YE <cye@redhat.com> [5.14.0-503.31.1.el9_5]
 - HID: core: zero-initialize the report buffer (Benjamin Tissoires) [RHEL-81838] {CVE-2024-50302}

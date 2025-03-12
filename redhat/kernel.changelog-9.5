@@ -1,3 +1,21 @@
+* Wed Mar 12 2025 Chao YE <cye@redhat.com> [5.14.0-503.33.1.el9_5]
+- scsi: st: New session only when Unit Attention for new tape (John Meneghini) [RHEL-62266]
+- scsi: st: Add MTIOCGET and MTLOAD to ioctls allowed after device reset (John Meneghini) [RHEL-62266]
+- scsi: st: Don't modify unknown block number in MTIOCGET (John Meneghini) [RHEL-62266]
+- x86/mm/ident_map: Use gbpages only where full GB page should be mapped. (Chris von Recklinghausen) [RHEL-62210]
+- SUNRPC: Handle -ETIMEDOUT return from tlshd (Benjamin Coddington) [RHEL-79870]
+- SUNRPC: timeout and cancel TLS handshake with -ETIMEDOUT (Benjamin Coddington) [RHEL-79870]
+- tls: Fix tls_sw_sendmsg error handling (Benjamin Coddington) [RHEL-79870]
+- SUNRPC: Fix a hang in TLS sock_close if sk_write_pending (Benjamin Coddington) [RHEL-79870]
+Resolves: RHEL-62210, RHEL-62266, RHEL-79870
+
+* Sun Mar 09 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-503.32.1.el9_5]
+- SUNRPC: Handle -ETIMEDOUT return from tlshd (Benjamin Coddington) [RHEL-79870]
+- SUNRPC: timeout and cancel TLS handshake with -ETIMEDOUT (Benjamin Coddington) [RHEL-79870]
+- tls: Fix tls_sw_sendmsg error handling (Benjamin Coddington) [RHEL-79870]
+- SUNRPC: Fix a hang in TLS sock_close if sk_write_pending (Benjamin Coddington) [RHEL-79870]
+Resolves: RHEL-79870
+
 * Thu Mar 06 2025 Chao YE <cye@redhat.com> [5.14.0-503.31.1.el9_5]
 - HID: core: zero-initialize the report buffer (Benjamin Tissoires) [RHEL-81838] {CVE-2024-50302}
 - x86/kaslr: Expose and use the end of the physical memory address space (Waiman Long) [RHEL-70002]
