@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 503.33.1
+%define pkgrelease 503.34.1
 %define kversion 5
-%define tarfile_release 5.14.0-503.33.1.el9_5
+%define tarfile_release 5.14.0-503.34.1.el9_5
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 503.33.1%{?buildid}%{?dist}
+%define specrelease 503.34.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-503.33.1.el9_5
+%define kabiversion 5.14.0-503.34.1.el9_5
 
 #
 # End of genspec.sh variables
@@ -3794,9 +3794,13 @@ fi
 #
 #
 %changelog
-* Wed Mar 19 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.33.1
+* Wed Mar 26 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.34.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Mon Mar 17 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-503.34.1.el9_5]
+- arm64: cacheinfo: Avoid out-of-bounds write to cacheinfo array (CKI Backport Bot) [RHEL-82734] {CVE-2025-21785}
+- crypto: rng - Fix extrng EFAULT handling (Herbert Xu) [RHEL-70643]
 
 * Wed Mar 12 2025 Chao YE <cye@redhat.com> [5.14.0-503.33.1.el9_5]
 - scsi: st: New session only when Unit Attention for new tape (John Meneghini) [RHEL-62266]
