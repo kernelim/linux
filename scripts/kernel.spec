@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 503.34.1
+%define pkgrelease 503.35.1
 %define kversion 5
-%define tarfile_release 5.14.0-503.34.1.el9_5
+%define tarfile_release 5.14.0-503.35.1.el9_5
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 503.34.1%{?buildid}%{?dist}
+%define specrelease 503.35.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-503.34.1.el9_5
+%define kabiversion 5.14.0-503.35.1.el9_5
 
 #
 # End of genspec.sh variables
@@ -3794,9 +3794,20 @@ fi
 #
 #
 %changelog
-* Wed Mar 26 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.34.1
+* Wed Apr 02 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.35.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Sun Mar 23 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-503.35.1.el9_5]
+- cppc_cpufreq: Use desired perf if feedback ctrs are 0 or unchanged (Mark Langsdorf) [RHEL-78643]
+- coresight: etm4x: Add ACPI support in platform driver (Mark Salter) [RHEL-80223]
+- block: Fix lockdep warning in blk_mq_mark_tag_wait (Ming Lei) [RHEL-73024]
+- md: fix deadlock between mddev_suspend and flush bio (Nigel Croxon) [RHEL-76058] {CVE-2024-43855}
+- redhat/configs: replace IOMMU_DEFAULT_DMA_STRICT with IOMMU_DEFAULT_DMA_LAZY (Jerry Snitselaar) [RHEL-76412]
+- ibmvnic: Only record tx completed bytes once per handler (Mamatha Inamdar) [RHEL-71289]
+- ibmvnic: Only replenish rx pool when resources are getting low (Mamatha Inamdar) [RHEL-71289]
+- ibmvnic: Return error code on TX scrq flush fail (Mamatha Inamdar) [RHEL-71289]
+- intel_idle: fix ACPI _CST matching for newer Xeon platforms (David Arcari) [RHEL-62987]
 
 * Mon Mar 17 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-503.34.1.el9_5]
 - arm64: cacheinfo: Avoid out-of-bounds write to cacheinfo array (CKI Backport Bot) [RHEL-82734] {CVE-2025-21785}
@@ -3807,6 +3818,10 @@ fi
 - scsi: st: Add MTIOCGET and MTLOAD to ioctls allowed after device reset (John Meneghini) [RHEL-62266]
 - scsi: st: Don't modify unknown block number in MTIOCGET (John Meneghini) [RHEL-62266]
 - x86/mm/ident_map: Use gbpages only where full GB page should be mapped. (Chris von Recklinghausen) [RHEL-62210]
+- SUNRPC: Handle -ETIMEDOUT return from tlshd (Benjamin Coddington) [RHEL-79870]
+- SUNRPC: timeout and cancel TLS handshake with -ETIMEDOUT (Benjamin Coddington) [RHEL-79870]
+- tls: Fix tls_sw_sendmsg error handling (Benjamin Coddington) [RHEL-79870]
+- SUNRPC: Fix a hang in TLS sock_close if sk_write_pending (Benjamin Coddington) [RHEL-79870]
 
 * Sun Mar 09 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-503.32.1.el9_5]
 - SUNRPC: Handle -ETIMEDOUT return from tlshd (Benjamin Coddington) [RHEL-79870]

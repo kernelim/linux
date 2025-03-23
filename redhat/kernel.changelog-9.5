@@ -1,3 +1,15 @@
+* Sun Mar 23 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-503.35.1.el9_5]
+- cppc_cpufreq: Use desired perf if feedback ctrs are 0 or unchanged (Mark Langsdorf) [RHEL-78643]
+- coresight: etm4x: Add ACPI support in platform driver (Mark Salter) [RHEL-80223]
+- block: Fix lockdep warning in blk_mq_mark_tag_wait (Ming Lei) [RHEL-73024]
+- md: fix deadlock between mddev_suspend and flush bio (Nigel Croxon) [RHEL-76058] {CVE-2024-43855}
+- redhat/configs: replace IOMMU_DEFAULT_DMA_STRICT with IOMMU_DEFAULT_DMA_LAZY (Jerry Snitselaar) [RHEL-76412]
+- ibmvnic: Only record tx completed bytes once per handler (Mamatha Inamdar) [RHEL-71289]
+- ibmvnic: Only replenish rx pool when resources are getting low (Mamatha Inamdar) [RHEL-71289]
+- ibmvnic: Return error code on TX scrq flush fail (Mamatha Inamdar) [RHEL-71289]
+- intel_idle: fix ACPI _CST matching for newer Xeon platforms (David Arcari) [RHEL-62987]
+Resolves: RHEL-62987, RHEL-71289, RHEL-73024, RHEL-76058, RHEL-76412, RHEL-78643, RHEL-80223
+
 * Mon Mar 17 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-503.34.1.el9_5]
 - arm64: cacheinfo: Avoid out-of-bounds write to cacheinfo array (CKI Backport Bot) [RHEL-82734] {CVE-2025-21785}
 - crypto: rng - Fix extrng EFAULT handling (Herbert Xu) [RHEL-70643]
