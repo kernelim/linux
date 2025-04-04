@@ -293,10 +293,24 @@ static sector_t faulty_size(struct mddev *mddev, sector_t sectors, int raid_disk
 	return sectors;
 }
 
+static int faulty_set_limits(struct mddev *mddev)
+{
+	struct queue_limits lim;
+	int err;
+
+	md_init_stacking_limits(&lim);
+	err = mddev_stack_rdev_limits(mddev, &lim, 0);
+	if (err) {
+		queue_limits_cancel_update(mddev->gendisk->queue);
+		return err;
+	}
+	return queue_limits_set(mddev->gendisk->queue, &lim);
+}
+
 static int faulty_run(struct mddev *mddev)
 {
 	struct md_rdev *rdev;
-	int i;
+	int i, err;
 	struct faulty_conf *conf;
 
 	if (md_check_no_bitmap(mddev))
@@ -312,11 +326,12 @@ static int faulty_run(struct mddev *mddev)
 	}
 	conf->nfaults = 0;
 
-	rdev_for_each(rdev, mddev) {
+	rdev_for_each(rdev, mddev)
 		conf->rdev = rdev;
-		disk_stack_limits(mddev->gendisk, rdev->bdev,
-				  rdev->data_offset << 9);
-	}
+
+	err = faulty_set_limits(mddev);
+	if (err)
+		return err;
 
 	md_set_array_sectors(mddev, faulty_size(mddev, 0, 0));
 	mddev->private = conf;

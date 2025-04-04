@@ -15,7 +15,7 @@
 #include <linux/interrupt.h>
 
 /*
- * Maxium size for a single dma descriptor
+ * Maximum size for a single dma descriptor
  * Size is limited to 16 bits.
  * Size is in the units of addr-widths (1,2,4,8 bytes)
  * Larger transfers will be split up to multiple linked desc

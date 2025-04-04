@@ -1,1 +1,1 @@
-CONFIG_DVB_NET=y
+# CONFIG_DVB_NET is not set

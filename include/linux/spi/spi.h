@@ -865,6 +865,8 @@ extern struct spi_device *acpi_spi_device_alloc(struct spi_controller *ctlr,
 						struct acpi_device *adev,
 						int index);
 int acpi_spi_count_resources(struct acpi_device *adev);
+#else
+static inline int acpi_spi_count_resources(struct acpi_device *adev) { return 0; }
 #endif
 
 /*

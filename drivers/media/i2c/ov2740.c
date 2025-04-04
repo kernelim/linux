@@ -926,6 +926,10 @@ static const struct v4l2_subdev_ops ov2740_subdev_ops = {
 	.pad = &ov2740_pad_ops,
 };
 
+static const struct v4l2_subdev_internal_ops ov2740_internal_ops = {
+	.init_state = ov2740_init_state,
+};
+
 static const struct media_entity_operations ov2740_subdev_entity_ops = {
 	.link_validate = v4l2_subdev_link_validate,
 };

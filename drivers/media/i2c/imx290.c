@@ -888,7 +888,6 @@ static const struct v4l2_subdev_video_ops imx290_video_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops imx290_pad_ops = {
-	.init_cfg = imx290_entity_init_cfg,
 	.enum_mbus_code = imx290_enum_mbus_code,
 	.enum_frame_size = imx290_enum_frame_size,
 	.get_fmt = imx290_get_fmt,
@@ -900,10 +899,188 @@ static const struct v4l2_subdev_ops imx290_subdev_ops = {
 	.pad = &imx290_pad_ops,
 };
 
+static const struct v4l2_subdev_internal_ops imx290_internal_ops = {
+	.init_state = imx290_entity_init_state,
+};
+
 static const struct media_entity_operations imx290_subdev_entity_ops = {
 	.link_validate = v4l2_subdev_link_validate,
 };
 
+<<<<<<< HEAD
+=======
+static int imx290_subdev_init(struct imx290 *imx290)
+{
+	struct i2c_client *client = to_i2c_client(imx290->dev);
+	struct v4l2_subdev_state *state;
+	int ret;
+
+	imx290->current_mode = &imx290_modes_ptr(imx290)[0];
+
+	v4l2_i2c_subdev_init(&imx290->sd, client, &imx290_subdev_ops);
+	imx290->sd.internal_ops = &imx290_internal_ops;
+	imx290->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
+			    V4L2_SUBDEV_FL_HAS_EVENTS;
+	imx290->sd.dev = imx290->dev;
+	imx290->sd.entity.ops = &imx290_subdev_entity_ops;
+	imx290->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
+
+	imx290->pad.flags = MEDIA_PAD_FL_SOURCE;
+	ret = media_entity_pads_init(&imx290->sd.entity, 1, &imx290->pad);
+	if (ret < 0) {
+		dev_err(imx290->dev, "Could not register media entity\n");
+		return ret;
+	}
+
+	ret = imx290_ctrl_init(imx290);
+	if (ret < 0) {
+		dev_err(imx290->dev, "Control initialization error %d\n", ret);
+		goto err_media;
+	}
+
+	imx290->sd.state_lock = imx290->ctrls.lock;
+
+	ret = v4l2_subdev_init_finalize(&imx290->sd);
+	if (ret < 0) {
+		dev_err(imx290->dev, "subdev initialization error %d\n", ret);
+		goto err_ctrls;
+	}
+
+	state = v4l2_subdev_lock_and_get_active_state(&imx290->sd);
+	imx290_ctrl_update(imx290, imx290->current_mode);
+	v4l2_subdev_unlock_state(state);
+
+	return 0;
+
+err_ctrls:
+	v4l2_ctrl_handler_free(&imx290->ctrls);
+err_media:
+	media_entity_cleanup(&imx290->sd.entity);
+	return ret;
+}
+
+static void imx290_subdev_cleanup(struct imx290 *imx290)
+{
+	v4l2_subdev_cleanup(&imx290->sd);
+	media_entity_cleanup(&imx290->sd.entity);
+	v4l2_ctrl_handler_free(&imx290->ctrls);
+}
+
+/* ----------------------------------------------------------------------------
+ * Power management
+ */
+
+static int imx290_power_on(struct imx290 *imx290)
+{
+	int ret;
+
+	ret = clk_prepare_enable(imx290->xclk);
+	if (ret) {
+		dev_err(imx290->dev, "Failed to enable clock\n");
+		return ret;
+	}
+
+	ret = regulator_bulk_enable(ARRAY_SIZE(imx290->supplies),
+				    imx290->supplies);
+	if (ret) {
+		dev_err(imx290->dev, "Failed to enable regulators\n");
+		clk_disable_unprepare(imx290->xclk);
+		return ret;
+	}
+
+	usleep_range(1, 2);
+	gpiod_set_value_cansleep(imx290->rst_gpio, 0);
+	usleep_range(30000, 31000);
+
+	return 0;
+}
+
+static void imx290_power_off(struct imx290 *imx290)
+{
+	clk_disable_unprepare(imx290->xclk);
+	gpiod_set_value_cansleep(imx290->rst_gpio, 1);
+	regulator_bulk_disable(ARRAY_SIZE(imx290->supplies), imx290->supplies);
+}
+
+static int imx290_runtime_resume(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct imx290 *imx290 = to_imx290(sd);
+
+	return imx290_power_on(imx290);
+}
+
+static int imx290_runtime_suspend(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct imx290 *imx290 = to_imx290(sd);
+
+	imx290_power_off(imx290);
+
+	return 0;
+}
+
+static const struct dev_pm_ops imx290_pm_ops = {
+	RUNTIME_PM_OPS(imx290_runtime_suspend, imx290_runtime_resume, NULL)
+};
+
+/* ----------------------------------------------------------------------------
+ * Probe & remove
+ */
+
+static const char * const imx290_supply_name[IMX290_NUM_SUPPLIES] = {
+	"vdda",
+	"vddd",
+	"vdddo",
+};
+
+static int imx290_get_regulators(struct device *dev, struct imx290 *imx290)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(imx290->supplies); i++)
+		imx290->supplies[i].supply = imx290_supply_name[i];
+
+	return devm_regulator_bulk_get(dev, ARRAY_SIZE(imx290->supplies),
+				       imx290->supplies);
+}
+
+static int imx290_init_clk(struct imx290 *imx290)
+{
+	u32 xclk_freq;
+	int ret;
+
+	ret = device_property_read_u32(imx290->dev, "clock-frequency",
+				       &xclk_freq);
+	if (ret) {
+		dev_err(imx290->dev, "Could not get xclk frequency\n");
+		return ret;
+	}
+
+	/* external clock must be 37.125 MHz or 74.25MHz */
+	switch (xclk_freq) {
+	case 37125000:
+		imx290->xclk_idx = IMX290_CLK_37_125;
+		break;
+	case 74250000:
+		imx290->xclk_idx = IMX290_CLK_74_25;
+		break;
+	default:
+		dev_err(imx290->dev, "External clock frequency %u is not supported\n",
+			xclk_freq);
+		return -EINVAL;
+	}
+
+	ret = clk_set_rate(imx290->xclk, xclk_freq);
+	if (ret) {
+		dev_err(imx290->dev, "Could not set xclk frequency\n");
+		return ret;
+	}
+
+	return 0;
+}
+
+>>>>>>> 5755be5f15d9 (media: v4l2-subdev: Rename .init_cfg() operation to .init_state())
 /*
  * Returns 0 if all link frequencies used by the driver for the given number
  * of MIPI data lanes are mentioned in the device tree, or the value of the

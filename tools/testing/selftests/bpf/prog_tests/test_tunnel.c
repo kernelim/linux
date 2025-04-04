@@ -109,9 +109,9 @@ fail:
 static void cleanup(void)
 {
 	SYS_NOFAIL("test -f /var/run/netns/at_ns0 && ip netns delete at_ns0");
-	SYS_NOFAIL("ip link del veth1 2> /dev/null");
-	SYS_NOFAIL("ip link del %s 2> /dev/null", VXLAN_TUNL_DEV1);
-	SYS_NOFAIL("ip link del %s 2> /dev/null", IP6VXLAN_TUNL_DEV1);
+	SYS_NOFAIL("ip link del veth1");
+	SYS_NOFAIL("ip link del %s", VXLAN_TUNL_DEV1);
+	SYS_NOFAIL("ip link del %s", IP6VXLAN_TUNL_DEV1);
 }
 
 static int add_vxlan_tunnel(void)

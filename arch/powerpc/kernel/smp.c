@@ -47,6 +47,7 @@
 #include <asm/smp.h>
 #include <asm/time.h>
 #include <asm/machdep.h>
+#include <asm/mmu_context.h>
 #include <asm/cputhreads.h>
 #include <asm/cputable.h>
 #include <asm/mpic.h>
@@ -598,7 +599,7 @@ void smp_send_debugger_break(void)
 }
 #endif
 
-#ifdef CONFIG_KEXEC_CORE
+#ifdef CONFIG_CRASH_DUMP
 void crash_send_ipi(void (*crash_ipi_callback)(struct pt_regs *))
 {
 	int cpu;
@@ -1005,7 +1006,7 @@ static bool shared_caches;
 /* cpumask of CPUs with asymmetric SMT dependency */
 static int powerpc_smt_flags(void)
 {
-	int flags = SD_SHARE_CPUCAPACITY | SD_SHARE_PKG_RESOURCES;
+	int flags = SD_SHARE_CPUCAPACITY | SD_SHARE_LLC;
 
 	if (cpu_has_feature(CPU_FTR_ASYM_SMT)) {
 		printk_once(KERN_INFO "Enabling Asymmetric SMT scheduling\n");
@@ -1023,7 +1024,7 @@ static int powerpc_smt_flags(void)
  */
 static int powerpc_shared_cache_flags(void)
 {
-	return SD_SHARE_PKG_RESOURCES;
+	return SD_SHARE_LLC;
 }
 
 /*
@@ -1631,8 +1632,11 @@ void start_secondary(void *unused)
 	if (IS_ENABLED(CONFIG_PPC32))
 		setup_kup();
 
-	mmgrab(&init_mm);
+	mmgrab_lazy_tlb(&init_mm);
 	current->active_mm = &init_mm;
+	VM_WARN_ON(cpumask_test_cpu(smp_processor_id(), mm_cpumask(&init_mm)));
+	cpumask_set_cpu(cpu, mm_cpumask(&init_mm));
+	inc_mm_active_cpus(&init_mm);
 
 	smp_store_cpu_info(cpu);
 	set_dec(tb_ticks_per_jiffy);
@@ -1773,6 +1777,14 @@ int __cpu_disable(void)
 
 void __cpu_die(unsigned int cpu)
 {
+	/*
+	 * This could perhaps be a generic call in idlea_task_dead(), but
+	 * that requires testing from all archs, so first put it here to
+	 */
+	VM_WARN_ON_ONCE(!cpumask_test_cpu(cpu, mm_cpumask(&init_mm)));
+	dec_mm_active_cpus(&init_mm);
+	cpumask_clear_cpu(cpu, mm_cpumask(&init_mm));
+
 	if (smp_ops->cpu_die)
 		smp_ops->cpu_die(cpu);
 }

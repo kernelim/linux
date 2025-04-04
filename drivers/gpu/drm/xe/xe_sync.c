@@ -12,7 +12,7 @@
 
 #include <drm/drm_print.h>
 #include <drm/drm_syncobj.h>
-#include <drm/xe_drm.h>
+#include <uapi/drm/xe_drm.h>
 
 #include "xe_device_types.h"
 #include "xe_exec_queue.h"
@@ -53,14 +53,19 @@ static struct xe_user_fence *user_fence_create(struct xe_device *xe, u64 addr,
 					       u64 value)
 {
 	struct xe_user_fence *ufence;
+	u64 __user *ptr = u64_to_user_ptr(addr);
+	u64 __maybe_unused prefetch_val;
 
-	ufence = kmalloc(sizeof(*ufence), GFP_KERNEL);
+	if (get_user(prefetch_val, ptr))
+		return ERR_PTR(-EFAULT);
+
+	ufence = kzalloc(sizeof(*ufence), GFP_KERNEL);
 	if (!ufence)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	ufence->xe = xe;
 	kref_init(&ufence->refcount);
-	ufence->addr = u64_to_user_ptr(addr);
+	ufence->addr = ptr;
 	ufence->value = value;
 	ufence->mm = current->mm;
 	mmgrab(ufence->mm);
@@ -80,8 +85,12 @@ static void user_fence_worker(struct work_struct *w)
 		mmput(ufence->mm);
 	}
 
-	wake_up_all(&ufence->xe->ufence_wq);
+	/*
+	 * Wake up waiters only after updating the ufence state, allowing the UMD
+	 * to safely reuse the same ufence without encountering -EBUSY errors.
+	 */
 	WRITE_ONCE(ufence->signalled, 1);
+	wake_up_all(&ufence->xe->ufence_wq);
 	user_fence_put(ufence);
 }
 
@@ -183,8 +192,8 @@ int xe_sync_entry_parse(struct xe_device *xe, struct xe_file *xef,
 		} else {
 			sync->ufence = user_fence_create(xe, sync_in.addr,
 							 sync_in.timeline_value);
-			if (XE_IOCTL_DBG(xe, !sync->ufence))
-				return -ENOMEM;
+			if (XE_IOCTL_DBG(xe, IS_ERR(sync->ufence)))
+				return PTR_ERR(sync->ufence);
 		}
 
 		break;
@@ -200,32 +209,16 @@ int xe_sync_entry_parse(struct xe_device *xe, struct xe_file *xef,
 	return 0;
 }
 
-int xe_sync_entry_wait(struct xe_sync_entry *sync)
-{
-	if (sync->fence)
-		dma_fence_wait(sync->fence, true);
-
-	return 0;
-}
-
 int xe_sync_entry_add_deps(struct xe_sync_entry *sync, struct xe_sched_job *job)
 {
-	int err;
-
-	if (sync->fence) {
-		err = drm_sched_job_add_dependency(&job->drm,
-						   dma_fence_get(sync->fence));
-		if (err) {
-			dma_fence_put(sync->fence);
-			return err;
-		}
-	}
+	if (sync->fence)
+		return  drm_sched_job_add_dependency(&job->drm,
+						     dma_fence_get(sync->fence));
 
 	return 0;
 }
 
-void xe_sync_entry_signal(struct xe_sync_entry *sync, struct xe_sched_job *job,
-			  struct dma_fence *fence)
+void xe_sync_entry_signal(struct xe_sync_entry *sync, struct dma_fence *fence)
 {
 	if (!(sync->flags & DRM_XE_SYNC_FLAG_SIGNAL))
 		return;
@@ -254,10 +247,6 @@ void xe_sync_entry_signal(struct xe_sync_entry *sync, struct xe_sched_job *job,
 			user_fence_put(sync->ufence);
 			dma_fence_put(fence);
 		}
-	} else if (sync->type == DRM_XE_SYNC_TYPE_USER_FENCE) {
-		job->user_fence.used = true;
-		job->user_fence.addr = sync->addr;
-		job->user_fence.value = sync->timeline_value;
 	}
 }
 
@@ -265,10 +254,8 @@ void xe_sync_entry_cleanup(struct xe_sync_entry *sync)
 {
 	if (sync->syncobj)
 		drm_syncobj_put(sync->syncobj);
-	if (sync->fence)
-		dma_fence_put(sync->fence);
-	if (sync->chain_fence)
-		dma_fence_put(&sync->chain_fence->base);
+	dma_fence_put(sync->fence);
+	dma_fence_chain_free(sync->chain_fence);
 	if (sync->ufence)
 		user_fence_put(sync->ufence);
 }
@@ -341,6 +328,21 @@ err_out:
 	kfree(cf);
 
 	return ERR_PTR(-ENOMEM);
+}
+
+/**
+ * __xe_sync_ufence_get() - Get user fence from user fence
+ * @ufence: input user fence
+ *
+ * Get a user fence reference from user fence
+ *
+ * Return: xe_user_fence pointer with reference
+ */
+struct xe_user_fence *__xe_sync_ufence_get(struct xe_user_fence *ufence)
+{
+	user_fence_get(ufence);
+
+	return ufence;
 }
 
 /**

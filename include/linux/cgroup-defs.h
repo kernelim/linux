@@ -22,8 +22,6 @@
 #include <linux/bpf-cgroup-defs.h>
 #include <linux/psi_types.h>
 
-#include <linux/rh_kabi.h>
-
 #ifdef CONFIG_CGROUPS
 
 struct cgroup;
@@ -117,6 +115,16 @@ enum {
 	 * Enable recursive subtree protection
 	 */
 	CGRP_ROOT_MEMORY_RECURSIVE_PROT = (1 << 18),
+
+	/*
+	 * Enable hugetlb accounting for the memory controller.
+	 */
+	CGRP_ROOT_MEMORY_HUGETLB_ACCOUNTING = (1 << 19),
+
+	/*
+	 * Enable legacy local pids.events.
+	 */
+	CGRP_ROOT_PIDS_LOCAL_EVENTS = (1 << 20),
 };
 
 /* cftype->flags */
@@ -202,6 +210,14 @@ struct cgroup_subsys_state {
 	 * fields of the containing structure.
 	 */
 	struct cgroup_subsys_state *parent;
+
+	/*
+	 * Keep track of total numbers of visible descendant CSSes.
+	 * The total number of dying CSSes is tracked in
+	 * css->cgroup->nr_dying_subsys[ssid].
+	 * Protected by cgroup_mutex.
+	 */
+	int nr_descendants;
 };
 
 /*
@@ -240,7 +256,7 @@ struct css_set {
 	 * Lists running through all tasks using this cgroup group.
 	 * mg_tasks lists tasks which belong to this cset but are in the
 	 * process of being migrated out or in.  Protected by
-	 * css_set_rwsem, but, during migration, once tasks are moved to
+	 * css_set_lock, but, during migration, once tasks are moved to
 	 * mg_tasks, it can be read safely while holding cgroup_mutex.
 	 */
 	struct list_head tasks;
@@ -462,6 +478,12 @@ struct cgroup {
 	/* Private pointers for each registered subsystem */
 	struct cgroup_subsys_state __rcu *subsys[CGROUP_SUBSYS_COUNT];
 
+	/*
+	 * Keep track of total number of dying CSSes at and below this cgroup.
+	 * Protected by cgroup_mutex.
+	 */
+	int nr_dying_subsys[CGROUP_SUBSYS_COUNT];
+
 	struct cgroup_root *root;
 
 	/*
@@ -529,16 +551,13 @@ struct cgroup {
 	struct psi_group *psi;
 
 	/* used to store eBPF programs */
-	RH_KABI_EXCLUDE_WITH_SIZE(struct cgroup_bpf bpf, 256)
-
-	/* If there is block congestion on this cgroup. */
-	atomic_t congestion_count;
+	struct cgroup_bpf bpf;
 
 	/* Used to store internal freezer state */
 	struct cgroup_freezer_state freezer;
 
 #ifdef CONFIG_BPF_SYSCALL
-	RH_KABI_EXCLUDE(struct bpf_local_storage __rcu  *bpf_cgrp_storage)
+	struct bpf_local_storage __rcu  *bpf_cgrp_storage;
 #endif
 
 	/* All ancestors including self */

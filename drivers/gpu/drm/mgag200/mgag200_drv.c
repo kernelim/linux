@@ -12,7 +12,7 @@
 #include <drm/drm_aperture.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_drv.h>
-#include <drm/drm_fbdev_generic.h>
+#include <drm/drm_fbdev_shmem.h>
 #include <drm/drm_file.h>
 #include <drm/drm_ioctl.h>
 #include <drm/drm_managed.h>
@@ -192,6 +192,8 @@ int mgag200_device_init(struct mga_device *mdev,
 
 	mutex_unlock(&mdev->rmmio_lock);
 
+	WREG32(MGAREG_IEN, 0);
+
 	return 0;
 }
 
@@ -274,7 +276,7 @@ mgag200_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	 * FIXME: A 24-bit color depth does not work with 24 bpp on
 	 * G200ER. Force 32 bpp.
 	 */
-	drm_fbdev_generic_setup(dev, 32);
+	drm_fbdev_shmem_setup(dev, 32);
 
 	return 0;
 }

@@ -23,6 +23,9 @@ obj-$(CONFIG_INTEL_SDSI)		+= intel_sdsi.o
 intel_vsec-y				:= vsec.o
 obj-$(CONFIG_INTEL_VSEC)		+= intel_vsec.o
 
+intel_tpmi_power_domains-y		:= tpmi_power_domains.o
+obj-$(CONFIG_INTEL_TPMI_POWER_DOMAINS)	+= intel_tpmi_power_domains.o
+
 # Intel Uncore drivers
 intel-rst-y				:= rst.o
 obj-$(CONFIG_INTEL_RST)			+= intel-rst.o
@@ -34,6 +37,7 @@ obj-$(CONFIG_INTEL_TURBO_MAX_3)		+= intel_turbo_max_3.o
 # TPMI drivers
 intel_vsec_tpmi-y			:= tpmi.o
 obj-$(CONFIG_INTEL_TPMI)		+= intel_vsec_tpmi.o
+obj-$(CONFIG_INTEL_PLR_TPMI)		+= intel_plr_tpmi.o
 
 # Intel input drivers
 intel-hid-y				:= hid.o

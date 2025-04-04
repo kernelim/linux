@@ -113,10 +113,6 @@ void dcn32_calculate_wm_and_dlg(
 		int pipe_cnt,
 		int vlevel);
 
-uint32_t dcn32_helper_mall_bytes_to_ways(
-		struct dc *dc,
-		uint32_t total_size_in_mall_bytes);
-
 uint32_t dcn32_helper_calculate_mall_bytes_for_cursor(
 		struct dc *dc,
 		struct pipe_ctx *pipe_ctx,
@@ -140,6 +136,12 @@ bool dcn32_mpo_in_use(struct dc_state *context);
 bool dcn32_any_surfaces_rotated(struct dc *dc, struct dc_state *context);
 bool dcn32_is_center_timing(struct pipe_ctx *pipe);
 bool dcn32_is_psr_capable(struct pipe_ctx *pipe);
+
+int dcn32_find_optimal_free_pipe_as_secondary_dpp_pipe(
+		const struct resource_context *cur_res_ctx,
+		struct resource_context *new_res_ctx,
+		const struct resource_pool *pool,
+		const struct pipe_ctx *new_opp_head);
 
 struct pipe_ctx *dcn32_acquire_free_pipe_as_secondary_dpp_pipe(
 		const struct dc_state *cur_ctx,
@@ -183,6 +185,8 @@ bool dcn32_subvp_vblank_admissable(struct dc *dc, struct dc_state *context, int 
 void dcn32_update_dml_pipes_odm_policy_based_on_context(struct dc *dc, struct dc_state *context, display_e2e_pipe_params_st *pipes);
 
 void dcn32_override_min_req_dcfclk(struct dc *dc, struct dc_state *context);
+
+unsigned int dcn32_calculate_mall_ways_from_bytes(const struct dc *dc, unsigned int total_size_in_mall_bytes);
 
 /* definitions for run time init of reg offsets */
 
@@ -501,6 +505,8 @@ void dcn32_override_min_req_dcfclk(struct dc *dc, struct dc_state *context);
       SRI_ARR(CM_POST_CSC_B_C11_C12, CM, id),                                  \
       SRI_ARR(CM_POST_CSC_B_C33_C34, CM, id),                                  \
       SRI_ARR(CM_MEM_PWR_CTRL, CM, id), SRI_ARR(CM_CONTROL, CM, id),           \
+      SRI_ARR(CM_TEST_DEBUG_INDEX, CM, id),                                    \
+      SRI_ARR(CM_TEST_DEBUG_DATA, CM, id),                                     \
       SRI_ARR(FORMAT_CONTROL, CNVC_CFG, id),                                   \
       SRI_ARR(CNVC_SURFACE_PIXEL_FORMAT, CNVC_CFG, id),                        \
       SRI_ARR(CURSOR0_CONTROL, CNVC_CUR, id),                                  \
@@ -757,6 +763,7 @@ void dcn32_override_min_req_dcfclk(struct dc *dc, struct dc_state *context);
       SRI_ARR(DSCC_RATE_CONTROL_BUFFER1_MAX_FULLNESS_LEVEL, DSCC, id),         \
       SRI_ARR(DSCC_RATE_CONTROL_BUFFER2_MAX_FULLNESS_LEVEL, DSCC, id),         \
       SRI_ARR(DSCC_RATE_CONTROL_BUFFER3_MAX_FULLNESS_LEVEL, DSCC, id),         \
+      SRI_ARR(DSCC_TEST_DEBUG_BUS_ROTATE, DSCC, id),                           \
       SRI_ARR(DSCCIF_CONFIG0, DSCCIF, id),                                     \
       SRI_ARR(DSCCIF_CONFIG1, DSCCIF, id),                                     \
       SRI_ARR(DSCRM_DSC_FORWARD_CONFIG, DSCRM, id)
@@ -1181,6 +1188,8 @@ void dcn32_override_min_req_dcfclk(struct dc *dc, struct dc_state *context);
       SR(DCHUBBUB_ARB_WATERMARK_CHANGE_CNTL),                                  \
       SR(DCHUBBUB_ARB_DRAM_STATE_CNTL), SR(DCHUBBUB_ARB_SAT_LEVEL),            \
       SR(DCHUBBUB_ARB_DF_REQ_OUTSTAND), SR(DCHUBBUB_GLOBAL_TIMER_CNTL),        \
+      SR(DCHUBBUB_TEST_DEBUG_INDEX),                                           \
+      SR(DCHUBBUB_TEST_DEBUG_DATA),                                            \
       SR(DCHUBBUB_SOFT_RESET), SR(DCHUBBUB_CRC_CTRL),                          \
       SR(DCN_VM_FB_LOCATION_BASE), SR(DCN_VM_FB_LOCATION_TOP),                 \
       SR(DCN_VM_FB_OFFSET), SR(DCN_VM_AGP_BOT), SR(DCN_VM_AGP_TOP),            \

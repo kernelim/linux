@@ -7,6 +7,7 @@ TEST_FILES := settings
 
 top_srcdir = ../../../../..
 include ../../lib.mk
+include ../flags.mk
 
 $(OUTPUT)/dscr_default_test: LDLIBS += -lpthread
 

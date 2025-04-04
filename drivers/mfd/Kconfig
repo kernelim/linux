@@ -1634,19 +1634,37 @@ config MFD_TPS65912_SPI
 	  If you say yes here you get support for the TPS65912 series of
 	  PM chips with SPI interface.
 
-config MFD_TPS80031
-	bool "TI TPS80031/TPS80032 Power Management chips"
-	depends on I2C=y
+config MFD_TPS6594
+	tristate
 	select MFD_CORE
-	select REGMAP_I2C
+	select REGMAP
 	select REGMAP_IRQ
+
+config MFD_TPS6594_I2C
+	tristate "TI TPS6594 Power Management chip with I2C"
+	select MFD_TPS6594
+	select REGMAP_I2C
+	select CRC8
+	depends on I2C
 	help
-	  If you say yes here you get support for the Texas Instruments
-	  TPS80031/ TPS80032 Fully Integrated Power Management with Power
-	  Path and Battery Charger. The device provides five configurable
-	  step-down converters, 11 general purpose LDOs, USB OTG Module,
-	  ADC, RTC, 2 PWM, System Voltage Regulator/Battery Charger with
-	  Power Path from USB, 32K clock generator.
+	  If you say yes here you get support for the TPS6594 series of
+	  PM chips with I2C interface.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called tps6594-i2c.
+
+config MFD_TPS6594_SPI
+	tristate "TI TPS6594 Power Management chip with SPI"
+	select MFD_TPS6594
+	select REGMAP_SPI
+	select CRC8
+	depends on SPI_MASTER
+	help
+	  If you say yes here you get support for the TPS6594 series of
+	  PM chips with SPI interface.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called tps6594-spi.
 
 config TWL4030_CORE
 	bool "TI TWL4030/TWL5030/TWL6030/TPS659x0 Support"

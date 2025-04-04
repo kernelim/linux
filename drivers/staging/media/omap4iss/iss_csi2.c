@@ -538,7 +538,7 @@ static int csi2_configure(struct iss_csi2_device *csi2)
 	if (csi2->contexts[0].enabled || csi2->ctrl.if_enable)
 		return -EBUSY;
 
-	pad = media_entity_remote_pad(&csi2->pads[CSI2_PAD_SINK]);
+	pad = media_pad_remote_pad_first(&csi2->pads[CSI2_PAD_SINK]);
 	sensor = media_entity_to_v4l2_subdev(pad->entity);
 	pdata = sensor->host_priv;
 
@@ -1260,7 +1260,7 @@ static int csi2_init_entities(struct iss_csi2_device *csi2, const char *subname)
 	struct media_pad *pads = csi2->pads;
 	struct media_entity *me = &sd->entity;
 	int ret;
-	char name[V4L2_SUBDEV_NAME_SIZE];
+	char name[32];
 
 	v4l2_subdev_init(sd, &csi2_ops);
 	sd->internal_ops = &csi2_internal_ops;

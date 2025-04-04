@@ -33,6 +33,7 @@ static unsigned long nr_cfi, nr_cfi_reused, nr_cfi_cache;
 static struct cfi_init_state initial_func_cfi;
 static struct cfi_state init_cfi;
 static struct cfi_state func_cfi;
+static struct cfi_state force_undefined_cfi;
 
 struct instruction *find_insn(struct objtool_file *file,
 			      struct section *sec, unsigned long offset)
@@ -1193,9 +1194,9 @@ static const char *uaccess_safe_builtin[] = {
 	"copy_mc_fragile_handle_tail",
 	"copy_mc_enhanced_fast_string",
 	"ftrace_likely_update", /* CONFIG_TRACE_BRANCH_PROFILING */
-	"clear_user_erms",
-	"clear_user_rep_good",
-	"clear_user_original",
+	"rep_stos_alternative",
+	"rep_movs_alternative",
+	"__copy_user_nocache",
 	NULL
 };
 
@@ -1457,8 +1458,7 @@ static void add_return_call(struct objtool_file *file, struct instruction *insn,
 	insn->type = INSN_RETURN;
 	insn->retpoline_safe = true;
 
-	/* Skip the non-text sections, specially .discard ones */
-	if (add && insn->sec->text)
+	if (add)
 		list_add_tail(&insn->call_node, &file->return_thunk_list);
 }
 
@@ -2173,6 +2173,7 @@ static void set_func_state(struct cfi_state *state)
 	memcpy(&state->regs, &initial_func_cfi.regs,
 	       CFI_NUM_REGS * sizeof(struct cfi_reg));
 	state->stack_size = initial_func_cfi.cfa.offset;
+	state->type = UNWIND_HINT_TYPE_CALL;
 }
 
 static int read_unwind_hints(struct objtool_file *file)
@@ -2218,6 +2219,11 @@ static int read_unwind_hints(struct objtool_file *file)
 
 		insn->hint = true;
 
+		if (hint->type == UNWIND_HINT_TYPE_UNDEFINED) {
+			insn->cfi = &force_undefined_cfi;
+			continue;
+		}
+
 		if (hint->type == UNWIND_HINT_TYPE_SAVE) {
 			insn->hint = false;
 			insn->save = true;
@@ -2257,7 +2263,6 @@ static int read_unwind_hints(struct objtool_file *file)
 		cfi.cfa.offset = bswap_if_needed(hint->sp_offset);
 		cfi.type = hint->type;
 		cfi.signal = hint->signal;
-		cfi.end = hint->end;
 
 		insn->cfi = cfi_hash_find_or_add(&cfi);
 	}
@@ -2785,6 +2790,10 @@ static int update_cfi_state(struct instruction *insn,
 {
 	struct cfi_reg *cfa = &cfi->cfa;
 	struct cfi_reg *regs = cfi->regs;
+
+	/* ignore UNWIND_HINT_UNDEFINED regions */
+	if (cfi->force_undefined)
+		return 0;
 
 	/* stack operations don't make sense with an undefined CFA */
 	if (cfa->base == CFI_UNDEFINED) {
@@ -4491,6 +4500,8 @@ int check(struct objtool_file *file)
 	init_cfi_state(&init_cfi);
 	init_cfi_state(&func_cfi);
 	set_func_state(&func_cfi);
+	init_cfi_state(&force_undefined_cfi);
+	force_undefined_cfi.force_undefined = true;
 
 	if (!cfi_hash_alloc(1UL << (file->elf->symbol_bits - 3)))
 		goto out;

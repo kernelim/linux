@@ -89,9 +89,6 @@ struct selinux_avc;
 struct selinux_policy;
 
 struct selinux_state {
-#ifdef CONFIG_SECURITY_SELINUX_DISABLE
-	bool disabled;
-#endif
 #ifdef CONFIG_SECURITY_SELINUX_DEVELOP
 	bool enforcing;
 #endif
@@ -153,23 +150,6 @@ static inline void checkreqprot_set(struct selinux_state *state, bool value)
 {
 	WRITE_ONCE(state->checkreqprot, value);
 }
-
-#ifdef CONFIG_SECURITY_SELINUX_DISABLE
-static inline bool selinux_disabled(struct selinux_state *state)
-{
-	return READ_ONCE(state->disabled);
-}
-
-static inline void selinux_mark_disabled(struct selinux_state *state)
-{
-	WRITE_ONCE(state->disabled, true);
-}
-#else
-static inline bool selinux_disabled(struct selinux_state *state)
-{
-	return false;
-}
-#endif
 
 static inline bool selinux_policycap_netpeer(void)
 {
@@ -442,8 +422,6 @@ extern void selinux_status_update_setenforce(struct selinux_state *state,
 extern void selinux_status_update_policyload(struct selinux_state *state,
 					     int seqno);
 extern void selinux_complete_init(void);
-extern int selinux_disable(struct selinux_state *state);
-extern void exit_sel_fs(void);
 extern struct path selinux_null;
 extern void selnl_notify_setenforce(int val);
 extern void selnl_notify_policyload(u32 seqno);

@@ -290,6 +290,9 @@ static int gpr_set(struct task_struct *target, const struct user_regset *regset,
 static int ppr_get(struct task_struct *target, const struct user_regset *regset,
 		   struct membuf to)
 {
+	if (target->thread.regs == NULL)
+		return -ENODEV;
+
 	return membuf_write(&to, &target->thread.regs->ppr, sizeof(u64));
 }
 
@@ -304,6 +307,9 @@ static int ppr_set(struct task_struct *target, const struct user_regset *regset,
 static int dscr_get(struct task_struct *target, const struct user_regset *regset,
 		    struct membuf to)
 {
+	if (target->thread.regs == NULL)
+		return -ENODEV;
+
 	return membuf_write(&to, &target->thread.dscr, sizeof(u64));
 }
 static int dscr_set(struct task_struct *target, const struct user_regset *regset,
@@ -318,6 +324,9 @@ static int dscr_set(struct task_struct *target, const struct user_regset *regset
 static int tar_get(struct task_struct *target, const struct user_regset *regset,
 		   struct membuf to)
 {
+	if (target->thread.regs == NULL)
+		return -ENODEV;
+
 	return membuf_write(&to, &target->thread.tar, sizeof(u64));
 }
 static int tar_set(struct task_struct *target, const struct user_regset *regset,
@@ -331,6 +340,9 @@ static int tar_set(struct task_struct *target, const struct user_regset *regset,
 static int ebb_active(struct task_struct *target, const struct user_regset *regset)
 {
 	if (!cpu_has_feature(CPU_FTR_ARCH_207S))
+		return -ENODEV;
+
+	if (target->thread.regs == NULL)
 		return -ENODEV;
 
 	if (target->thread.used_ebb)
@@ -391,6 +403,9 @@ static int pmu_active(struct task_struct *target, const struct user_regset *regs
 	if (!cpu_has_feature(CPU_FTR_ARCH_207S))
 		return -ENODEV;
 
+	if (target->thread.regs == NULL)
+		return -ENODEV;
+
 	return regset->n;
 }
 
@@ -448,12 +463,39 @@ static int pmu_set(struct task_struct *target, const struct user_regset *regset,
 					 5 * sizeof(unsigned long));
 	return ret;
 }
-#endif
+
+static int dexcr_active(struct task_struct *target, const struct user_regset *regset)
+{
+	if (!cpu_has_feature(CPU_FTR_ARCH_31))
+		return -ENODEV;
+
+	return regset->n;
+}
+
+static int dexcr_get(struct task_struct *target, const struct user_regset *regset,
+		     struct membuf to)
+{
+	if (!cpu_has_feature(CPU_FTR_ARCH_31))
+		return -ENODEV;
+
+	membuf_store(&to, (u64)lower_32_bits(target->thread.dexcr));
+
+	/*
+	 * Technically the HDEXCR is per-cpu, but a hypervisor can't reasonably
+	 * change it between CPUs of the same guest.
+	 */
+	return membuf_store(&to, (u64)lower_32_bits(mfspr(SPRN_HDEXCR_RO)));
+}
+
+#endif /* CONFIG_PPC_BOOK3S_64 */
 
 #ifdef CONFIG_PPC_MEM_KEYS
 static int pkey_active(struct task_struct *target, const struct user_regset *regset)
 {
 	if (!arch_pkeys_enabled())
+		return -ENODEV;
+
+	if (target->thread.regs == NULL)
 		return -ENODEV;
 
 	return regset->n;
@@ -608,6 +650,11 @@ static const struct user_regset native_regsets[] = {
 		.core_note_type = NT_PPC_PMU, .n = ELF_NPMU,
 		.size = sizeof(u64), .align = sizeof(u64),
 		.active = pmu_active, .regset_get = pmu_get, .set = pmu_set
+	},
+	[REGSET_DEXCR] = {
+		.core_note_type = NT_PPC_DEXCR, .n = ELF_NDEXCR,
+		.size = sizeof(u64), .align = sizeof(u64),
+		.active = dexcr_active, .regset_get = dexcr_get
 	},
 #endif
 #ifdef CONFIG_PPC_MEM_KEYS

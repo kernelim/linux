@@ -160,6 +160,12 @@ void setup_mm_for_reboot(void)
 {
 }
 
+void flush_dcache_folio(struct folio *folio)
+{
+	__cpuc_flush_dcache_area(folio_address(folio), folio_size(folio));
+}
+EXPORT_SYMBOL(flush_dcache_folio);
+
 void flush_dcache_page(struct page *page)
 {
 	__cpuc_flush_dcache_area(page_address(page), PAGE_SIZE);
@@ -230,14 +236,7 @@ void *arch_memremap_wb(phys_addr_t phys_addr, size_t size)
 	return (void *)phys_addr;
 }
 
-void __iounmap(volatile void __iomem *addr)
-{
-}
-EXPORT_SYMBOL(__iounmap);
-
-void (*arch_iounmap)(volatile void __iomem *);
-
-void iounmap(volatile void __iomem *addr)
+void iounmap(volatile void __iomem *io_addr)
 {
 }
 EXPORT_SYMBOL(iounmap);

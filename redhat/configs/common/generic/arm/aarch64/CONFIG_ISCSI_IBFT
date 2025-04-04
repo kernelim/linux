@@ -1,1 +1,1 @@
-# CONFIG_ISCSI_IBFT is not set
+CONFIG_ISCSI_IBFT=m

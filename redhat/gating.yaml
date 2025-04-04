@@ -7,6 +7,8 @@ rules:
   - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-aarch64.tier1.functional}
   - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-debug-x86_64.tier1.functional}
   - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-ppc64le.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-rt-64k-aarch64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-rt-aarch64.tier1.functional}
   - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-rt-debug-x86_64.tier1.functional}
   - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-rt-x86_64.tier1.functional}
   - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-s390x.tier1.functional}

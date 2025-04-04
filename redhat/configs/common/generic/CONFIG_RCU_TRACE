@@ -1,1 +1,1 @@
-# CONFIG_RCU_TRACE is not set
+CONFIG_RCU_TRACE=y

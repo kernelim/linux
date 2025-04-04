@@ -29,9 +29,6 @@
 #include "dc.h"
 #include "dm_pp_smu.h"
 
-#define DCN_MINIMUM_DISPCLK_Khz 100000
-#define DCN_MINIMUM_DPPCLK_Khz 100000
-
 /* Constants */
 #define DDR4_DRAM_WIDTH   64
 #define WM_A 0
@@ -39,6 +36,8 @@
 #define WM_C 2
 #define WM_D 3
 #define WM_SET_COUNT 4
+#define WM_1A 2
+#define WM_1B 3
 
 #define DCN_MINIMUM_DISPCLK_Khz 100000
 #define DCN_MINIMUM_DPPCLK_Khz 100000
@@ -178,6 +177,7 @@ struct clk_state_registers_and_bypass {
 	uint32_t dispclk;
 	uint32_t dppclk;
 	uint32_t dtbclk;
+	uint32_t fclk;
 
 	uint32_t dppclk_bypass;
 	uint32_t dcfclk_bypass;
@@ -242,14 +242,14 @@ struct wm_table {
 
 struct dummy_pstate_entry {
 	unsigned int dram_speed_mts;
-	double dummy_pstate_latency_us;
+	unsigned int dummy_pstate_latency_us;
 };
 
 struct clk_bw_params {
 	unsigned int vram_type;
 	unsigned int num_channels;
 	unsigned int dram_channel_width_bytes;
- 	unsigned int dispclk_vco_khz;
+	unsigned int dispclk_vco_khz;
 	unsigned int dc_mode_softmax_memclk;
 	unsigned int max_memclk_mhz;
 	struct clk_limit_table clk_table;
@@ -281,8 +281,6 @@ struct clk_mgr_funcs {
 	void (*set_low_power_state)(struct clk_mgr *clk_mgr);
 	void (*exit_low_power_state)(struct clk_mgr *clk_mgr);
 	bool (*is_ips_supported)(struct clk_mgr *clk_mgr);
-	void (*set_idle_state)(struct clk_mgr *clk_mgr, bool allow_idle);
-	uint32_t (*get_idle_state)(struct clk_mgr *clk_mgr);
 
 	void (*init_clocks)(struct clk_mgr *clk_mgr);
 

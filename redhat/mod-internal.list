@@ -13,6 +13,7 @@ qos-test
 resource_kunit
 soc-topology-test
 soc-utils-test
+soc-card-test
 string-stream-test
 test_linear_ranges
 test_bits
@@ -39,6 +40,7 @@ test_klp_callbacks_busy
 test_klp_callbacks_mod
 test_klp_livepatch
 test_klp_shadow_vars
+test_klp_syscall
 test_klp_state
 test_klp_state2
 test_klp_state3
@@ -69,6 +71,7 @@ drm_format_helper_test
 drm_format_test
 drm_framebuffer_test
 drm_gem_shmem_test
+drm_hdmi_state_helper_test
 drm_kunit_helpers
 drm_mm_test
 drm_plane_helper_test
@@ -93,5 +96,10 @@ wwan_hwsim
 checksum_kunit
 arm-smmu-v3-test
 iwlwifi-tests
+iwlmvm-tests
 sound_kunit
 amd-pstate-ut
+ptp_mock
+usbip-core
+usbip-host
+vhci-hcd

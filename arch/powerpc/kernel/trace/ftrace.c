@@ -135,7 +135,7 @@ __ftrace_make_nop(struct module *mod,
 		return -EFAULT;
 	}
 
-	/* Make sure that that this is still a 24bit jump */
+	/* Make sure that this is still a 24bit jump */
 	if (!is_bl_op(op)) {
 		pr_err("Not expected bl: opcode is %s\n", ppc_inst_as_str(op));
 		return -EINVAL;
@@ -402,7 +402,7 @@ static int __ftrace_make_nop_kernel(struct dyn_ftrace *rec, unsigned long addr)
 		return -EFAULT;
 	}
 
-	/* Make sure that that this is still a 24bit jump */
+	/* Make sure that this is still a 24bit jump */
 	if (!is_bl_op(op)) {
 		pr_err("Not expected bl: opcode is %s\n", ppc_inst_as_str(op));
 		return -EINVAL;
@@ -728,7 +728,7 @@ __ftrace_modify_call(struct dyn_ftrace *rec, unsigned long old_addr,
 		return -EFAULT;
 	}
 
-	/* Make sure that that this is still a 24bit jump */
+	/* Make sure that this is still a 24bit jump */
 	if (!is_bl_op(op)) {
 		pr_err("Not expected bl: opcode is %s\n", ppc_inst_as_str(op));
 		return -EINVAL;

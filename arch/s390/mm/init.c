@@ -35,6 +35,7 @@
 #include <asm/processor.h>
 #include <linux/uaccess.h>
 #include <asm/pgalloc.h>
+#include <asm/ctlreg.h>
 #include <asm/kfence.h>
 #include <asm/ptdump.h>
 #include <asm/dma.h>
@@ -42,7 +43,6 @@
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
 #include <asm/sections.h>
-#include <asm/ctl_reg.h>
 #include <asm/sclp.h>
 #include <asm/set_memory.h>
 #include <asm/kasan.h>
@@ -54,7 +54,7 @@
 pgd_t swapper_pg_dir[PTRS_PER_PGD] __section(".bss..swapper_pg_dir");
 pgd_t invalid_pg_dir[PTRS_PER_PGD] __section(".bss..invalid_pg_dir");
 
-unsigned long s390_invalid_asce;
+struct ctlreg __bootdata_preserved(s390_invalid_asce);
 
 unsigned long empty_zero_page, zero_page_mask;
 EXPORT_SYMBOL(empty_zero_page);
@@ -93,41 +93,12 @@ static void __init setup_zero_pages(void)
 void __init paging_init(void)
 {
 	unsigned long max_zone_pfns[MAX_NR_ZONES];
-	unsigned long pgd_type, asce_bits;
-	psw_t psw;
 
-	s390_invalid_asce  = (unsigned long)invalid_pg_dir;
-	s390_invalid_asce |= _ASCE_TYPE_REGION3 | _ASCE_TABLE_LENGTH;
-	crst_table_init((unsigned long *)invalid_pg_dir, _REGION3_ENTRY_EMPTY);
-	init_mm.pgd = swapper_pg_dir;
-	if (VMALLOC_END > _REGION2_SIZE) {
-		asce_bits = _ASCE_TYPE_REGION2 | _ASCE_TABLE_LENGTH;
-		pgd_type = _REGION2_ENTRY_EMPTY;
-	} else {
-		asce_bits = _ASCE_TYPE_REGION3 | _ASCE_TABLE_LENGTH;
-		pgd_type = _REGION3_ENTRY_EMPTY;
-	}
-	init_mm.context.asce = (__pa(init_mm.pgd) & PAGE_MASK) | asce_bits;
-	S390_lowcore.kernel_asce = init_mm.context.asce;
-	S390_lowcore.user_asce = s390_invalid_asce;
-	crst_table_init((unsigned long *) init_mm.pgd, pgd_type);
 	vmem_map_init();
-	kasan_copy_shadow_mapping();
-
-	/* enable virtual mapping in kernel mode */
-	__ctl_load(S390_lowcore.kernel_asce, 1, 1);
-	__ctl_load(S390_lowcore.user_asce, 7, 7);
-	__ctl_load(S390_lowcore.kernel_asce, 13, 13);
-	psw.mask = __extract_psw();
-	psw_bits(psw).dat = 1;
-	psw_bits(psw).as = PSW_BITS_AS_HOME;
-	__load_psw_mask(psw.mask);
-	kasan_free_early_identity();
-
 	sparse_init();
-	zone_dma_bits = 31;
+	zone_dma_limit = DMA_BIT_MASK(31);
 	memset(max_zone_pfns, 0, sizeof(max_zone_pfns));
-	max_zone_pfns[ZONE_DMA] = PFN_DOWN(MAX_DMA_ADDRESS);
+	max_zone_pfns[ZONE_DMA] = virt_to_pfn(MAX_DMA_ADDRESS);
 	max_zone_pfns[ZONE_NORMAL] = max_low_pfn;
 	free_area_init(max_zone_pfns);
 }
@@ -136,7 +107,7 @@ void mark_rodata_ro(void)
 {
 	unsigned long size = __end_ro_after_init - __start_ro_after_init;
 
-	set_memory_ro((unsigned long)__start_ro_after_init, size >> PAGE_SHIFT);
+	__set_memory_ro(__start_ro_after_init, __end_ro_after_init);
 	pr_info("Write protected read-only-after-init data: %luk\n", size >> 10);
 	debug_checkwx();
 }
@@ -193,8 +164,6 @@ void __init mem_init(void)
 
 	pv_init();
 	kfence_split_mapping();
-	/* Setup guest page hinting */
-	cmma_init();
 
 	/* this will put all low memory onto the freelists */
 	memblock_free_all();
@@ -205,9 +174,8 @@ void __init mem_init(void)
 
 void free_initmem(void)
 {
-	__set_memory((unsigned long)_sinittext,
-		     (unsigned long)(_einittext - _sinittext) >> PAGE_SHIFT,
-		     SET_MEMORY_RW | SET_MEMORY_NX);
+	set_memory_rwnx((unsigned long)_sinittext,
+			(unsigned long)(_einittext - _sinittext) >> PAGE_SHIFT);
 	free_initmem_default(POISON_FREE_INITMEM);
 }
 

@@ -435,7 +435,8 @@ static int arp_filter(__be32 sip, __be32 tip, struct net_device *dev)
 	/*unsigned long now; */
 	struct net *net = dev_net(dev);
 
-	rt = ip_route_output(net, sip, tip, 0, l3mdev_master_ifindex_rcu(dev));
+	rt = ip_route_output(net, sip, tip, 0, l3mdev_master_ifindex_rcu(dev),
+			     RT_SCOPE_UNIVERSE);
 	if (IS_ERR(rt))
 		return 1;
 	if (rt->dst.dev != dev) {
@@ -1017,7 +1018,7 @@ static struct net_device *arp_req_dev(struct net *net, struct arpreq *r)
 
 	ip = ((struct sockaddr_in *)&r->arp_pa)->sin_addr.s_addr;
 
-	rt = ip_route_output(net, ip, 0, RTO_ONLINK, 0);
+	rt = ip_route_output(net, ip, 0, 0, 0, RT_SCOPE_LINK);
 	if (IS_ERR(rt))
 		return ERR_CAST(rt);
 
@@ -1163,7 +1164,7 @@ static int arp_req_get(struct net *net, struct arpreq *r)
 
 	read_lock_bh(&neigh->lock);
 	memcpy(r->arp_ha.sa_data, neigh->ha,
-	       min((size_t)dev->addr_len, sizeof(r->arp_ha.sa_data)));
+	       min(dev->addr_len, sizeof(r->arp_ha.sa_data)));
 	r->arp_flags = arp_state_to_flags(neigh);
 	read_unlock_bh(&neigh->lock);
 

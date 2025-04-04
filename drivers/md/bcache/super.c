@@ -897,7 +897,6 @@ static int bcache_device_init(struct bcache_device *d, unsigned int block_size,
 		sector_t sectors, struct block_device *cached_bdev,
 		const struct block_device_operations *ops)
 {
-	struct request_queue *q;
 	const size_t max_stripes = min_t(size_t, INT_MAX,
 					 SIZE_MAX / sizeof(atomic_t));
 	uint64_t n;
@@ -933,8 +932,8 @@ static int bcache_device_init(struct bcache_device *d, unsigned int block_size,
 			BIOSET_NEED_BVECS|BIOSET_NEED_RESCUER))
 		goto out_ida_remove;
 
-	d->disk = blk_alloc_disk(NUMA_NO_NODE);
-	if (!d->disk)
+	d->disk = blk_alloc_disk(NULL, NUMA_NO_NODE);
+	if (IS_ERR(d->disk))
 		goto out_bioset_exit;
 
 	set_capacity(d->disk, sectors);
@@ -1417,8 +1416,8 @@ static int cached_dev_init(struct cached_dev *dc, unsigned int block_size)
 	dc->disk.stripe_size = q->limits.io_opt >> 9;
 
 	if (dc->disk.stripe_size)
-		dc->partial_stripes_expensive =
-			q->limits.raid_partial_stripes_expensive;
+		dc->partial_stripes_expensive = q->limits.features &
+			BLK_FEAT_RAID_PARTIAL_STRIPES_EXPENSIVE;
 
 	ret = bcache_device_init(&dc->disk, block_size,
 			 bdev_nr_sectors(dc->bdev) - dc->sb.data_offset,

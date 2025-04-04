@@ -75,6 +75,7 @@ static const struct irq_class irqclass_sub_desc[] = {
 	{.irq = IRQEXT_CMS, .name = "CMS", .desc = "[EXT] CPU-Measurement: Sampling"},
 	{.irq = IRQEXT_CMC, .name = "CMC", .desc = "[EXT] CPU-Measurement: Counter"},
 	{.irq = IRQEXT_FTP, .name = "FTP", .desc = "[EXT] HMC FTP Service"},
+	{.irq = IRQEXT_WTI, .name = "WTI", .desc = "[EXT] Warning Track"},
 	{.irq = IRQIO_CIO,  .name = "CIO", .desc = "[I/O] Common I/O Layer Interrupt"},
 	{.irq = IRQIO_DAS,  .name = "DAS", .desc = "[I/O] DASD"},
 	{.irq = IRQIO_C15,  .name = "C15", .desc = "[I/O] 3215"},
@@ -136,9 +137,9 @@ void noinstr do_io_irq(struct pt_regs *regs)
 {
 	irqentry_state_t state = irqentry_enter(regs);
 	struct pt_regs *old_regs = set_irq_regs(regs);
-	int from_idle;
+	bool from_idle;
 
-	irq_enter();
+	irq_enter_rcu();
 
 	if (user_mode(regs)) {
 		update_timer_sys();
@@ -146,7 +147,7 @@ void noinstr do_io_irq(struct pt_regs *regs)
 			current->thread.last_break = regs->last_break;
 	}
 
-	from_idle = !user_mode(regs) && regs->psw.addr == (unsigned long)psw_idle_exit;
+	from_idle = test_and_clear_cpu_flag(CIF_ENABLED_WAIT);
 	if (from_idle)
 		account_idle_time_irq();
 
@@ -158,7 +159,8 @@ void noinstr do_io_irq(struct pt_regs *regs)
 			do_irq_async(regs, IO_INTERRUPT);
 	} while (MACHINE_IS_LPAR && irq_pending(regs));
 
-	irq_exit();
+	irq_exit_rcu();
+
 	set_irq_regs(old_regs);
 	irqentry_exit(regs, state);
 
@@ -170,9 +172,9 @@ void noinstr do_ext_irq(struct pt_regs *regs)
 {
 	irqentry_state_t state = irqentry_enter(regs);
 	struct pt_regs *old_regs = set_irq_regs(regs);
-	int from_idle;
+	bool from_idle;
 
-	irq_enter();
+	irq_enter_rcu();
 
 	if (user_mode(regs)) {
 		update_timer_sys();
@@ -184,13 +186,13 @@ void noinstr do_ext_irq(struct pt_regs *regs)
 	regs->int_parm = S390_lowcore.ext_params;
 	regs->int_parm_long = S390_lowcore.ext_params2;
 
-	from_idle = !user_mode(regs) && regs->psw.addr == (unsigned long)psw_idle_exit;
+	from_idle = test_and_clear_cpu_flag(CIF_ENABLED_WAIT);
 	if (from_idle)
 		account_idle_time_irq();
 
 	do_irq_async(regs, EXT_INTERRUPT);
 
-	irq_exit();
+	irq_exit_rcu();
 	set_irq_regs(old_regs);
 	irqentry_exit(regs, state);
 
@@ -204,7 +206,7 @@ static void show_msi_interrupt(struct seq_file *p, int irq)
 	unsigned long flags;
 	int cpu;
 
-	irq_lock_sparse();
+	rcu_read_lock();
 	desc = irq_to_desc(irq);
 	if (!desc)
 		goto out;
@@ -223,7 +225,7 @@ static void show_msi_interrupt(struct seq_file *p, int irq)
 	seq_putc(p, '\n');
 	raw_spin_unlock_irqrestore(&desc->lock, flags);
 out:
-	irq_unlock_sparse();
+	rcu_read_unlock();
 }
 
 /*
@@ -341,7 +343,7 @@ static irqreturn_t do_ext_interrupt(int irq, void *dummy)
 	struct ext_int_info *p;
 	int index;
 
-	ext_code = *(struct ext_code *) &regs->int_code;
+	ext_code.int_code = regs->int_code;
 	if (ext_code.code != EXT_IRQ_CLK_COMP)
 		set_cpu_flag(CIF_NOHZ_DELAY);
 
@@ -384,7 +386,7 @@ void irq_subclass_register(enum irq_subclass subclass)
 {
 	spin_lock(&irq_subclass_lock);
 	if (!irq_subclass_refcount[subclass])
-		ctl_set_bit(0, subclass);
+		system_ctl_set_bit(0, subclass);
 	irq_subclass_refcount[subclass]++;
 	spin_unlock(&irq_subclass_lock);
 }
@@ -395,7 +397,7 @@ void irq_subclass_unregister(enum irq_subclass subclass)
 	spin_lock(&irq_subclass_lock);
 	irq_subclass_refcount[subclass]--;
 	if (!irq_subclass_refcount[subclass])
-		ctl_clear_bit(0, subclass);
+		system_ctl_clear_bit(0, subclass);
 	spin_unlock(&irq_subclass_lock);
 }
 EXPORT_SYMBOL(irq_subclass_unregister);

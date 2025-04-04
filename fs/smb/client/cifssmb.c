@@ -110,23 +110,19 @@ again:
 
 	mutex_lock(&ses->session_mutex);
 	/*
-	 * Handle the case where a concurrent thread failed to negotiate or
-	 * killed a channel.
+	 * Recheck after acquire mutex. If another thread is negotiating
+	 * and the server never sends an answer the socket will be closed
+	 * and tcpStatus set to reconnect.
 	 */
 	spin_lock(&server->srv_lock);
-	switch (server->tcpStatus) {
-	case CifsExiting:
+	if (server->tcpStatus == CifsNeedReconnect) {
 		spin_unlock(&server->srv_lock);
 		mutex_unlock(&ses->session_mutex);
-		return -EHOSTDOWN;
-	case CifsNeedReconnect:
-		spin_unlock(&server->srv_lock);
-		mutex_unlock(&ses->session_mutex);
-		if (!tcon->retry)
-			return -EHOSTDOWN;
-		goto again;
-	default:
-		break;
+
+		if (tcon->retry)
+			goto again;
+		rc = -EHOSTDOWN;
+		goto out;
 	}
 	spin_unlock(&server->srv_lock);
 
@@ -152,20 +148,16 @@ again:
 	spin_unlock(&ses->ses_lock);
 
 	rc = cifs_negotiate_protocol(0, ses, server);
-	if (rc) {
-		mutex_unlock(&ses->session_mutex);
-		if (!tcon->retry)
-			return -EHOSTDOWN;
-		goto again;
-	}
-	rc = cifs_setup_session(0, ses, server, ses->local_nls);
-	if ((rc == -EACCES) || (rc == -EHOSTDOWN) || (rc == -EKEYREVOKED)) {
-		/*
-		 * Try alternate password for next reconnect if an alternate
-		 * password is available.
-		 */
-		if (ses->password2)
-			swap(ses->password2, ses->password);
+	if (!rc) {
+		rc = cifs_setup_session(0, ses, server, ses->local_nls);
+		if ((rc == -EACCES) || (rc == -EHOSTDOWN) || (rc == -EKEYREVOKED)) {
+			/*
+			 * Try alternate password for next reconnect if an alternate
+			 * password is available.
+			 */
+			if (ses->password2)
+				swap(ses->password2, ses->password);
+		}
 	}
 
 	/* do we need to reconnect tcon? */
@@ -1086,8 +1078,8 @@ OldOpenRetry:
 	pSMB->OpenFlags |= cpu_to_le16(REQ_MORE_INFO);
 	pSMB->Mode = cpu_to_le16(access_flags_to_smbopen_mode(access_flags));
 	pSMB->Mode |= cpu_to_le16(0x40); /* deny none */
-	/* set file as system file if special file such
-	   as fifo and server expecting SFU style and
+	/* set file as system file if special file such as fifo,
+	 * socket, char or block and server expecting SFU style and
 	   no Unix extensions */
 
 	if (create_options & CREATE_OPTION_SPECIAL)
@@ -1203,8 +1195,8 @@ openRetry:
 	req->AllocationSize = 0;
 
 	/*
-	 * Set file as system file if special file such as fifo and server
-	 * expecting SFU style and no Unix extensions.
+	 * Set file as system file if special file such as fifo, socket, char
+	 * or block and server expecting SFU style and no Unix extensions.
 	 */
 	if (create_options & CREATE_OPTION_SPECIAL)
 		req->FileAttributes = cpu_to_le32(ATTR_SYSTEM);
@@ -1225,7 +1217,7 @@ openRetry:
 	req->CreateDisposition = cpu_to_le32(disposition);
 	req->CreateOptions = cpu_to_le32(create_options & CREATE_OPTIONS_MASK);
 
-	/* BB Expirement with various impersonation levels and verify */
+	/* BB Experiment with various impersonation levels and verify */
 	req->ImpersonationLevel = cpu_to_le32(SECURITY_IMPERSONATION);
 	req->SecurityFlags = SECURITY_CONTEXT_TRACKING|SECURITY_EFFECTIVE_ONLY;
 
@@ -2316,69 +2308,6 @@ int CIFSSMBRenameOpenFile(const unsigned int xid, struct cifs_tcon *pTcon,
 }
 
 int
-CIFSSMBCopy(const unsigned int xid, struct cifs_tcon *tcon,
-	    const char *fromName, const __u16 target_tid, const char *toName,
-	    const int flags, const struct nls_table *nls_codepage, int remap)
-{
-	int rc = 0;
-	COPY_REQ *pSMB = NULL;
-	COPY_RSP *pSMBr = NULL;
-	int bytes_returned;
-	int name_len, name_len2;
-	__u16 count;
-
-	cifs_dbg(FYI, "In CIFSSMBCopy\n");
-copyRetry:
-	rc = smb_init(SMB_COM_COPY, 1, tcon, (void **) &pSMB,
-			(void **) &pSMBr);
-	if (rc)
-		return rc;
-
-	pSMB->BufferFormat = 0x04;
-	pSMB->Tid2 = target_tid;
-
-	pSMB->Flags = cpu_to_le16(flags & COPY_TREE);
-
-	if (pSMB->hdr.Flags2 & SMBFLG2_UNICODE) {
-		name_len = cifsConvertToUTF16((__le16 *) pSMB->OldFileName,
-					      fromName, PATH_MAX, nls_codepage,
-					      remap);
-		name_len++;     /* trailing null */
-		name_len *= 2;
-		pSMB->OldFileName[name_len] = 0x04;     /* pad */
-		/* protocol requires ASCII signature byte on Unicode string */
-		pSMB->OldFileName[name_len + 1] = 0x00;
-		name_len2 =
-		    cifsConvertToUTF16((__le16 *)&pSMB->OldFileName[name_len+2],
-				       toName, PATH_MAX, nls_codepage, remap);
-		name_len2 += 1 /* trailing null */  + 1 /* Signature word */ ;
-		name_len2 *= 2; /* convert to bytes */
-	} else {
-		name_len = copy_path_name(pSMB->OldFileName, fromName);
-		pSMB->OldFileName[name_len] = 0x04;  /* 2nd buffer format */
-		name_len2 = copy_path_name(pSMB->OldFileName+name_len+1, toName);
-		name_len2++;    /* signature byte */
-	}
-
-	count = 1 /* 1st signature byte */  + name_len + name_len2;
-	inc_rfc1001_len(pSMB, count);
-	pSMB->ByteCount = cpu_to_le16(count);
-
-	rc = SendReceive(xid, tcon->ses, (struct smb_hdr *) pSMB,
-		(struct smb_hdr *) pSMBr, &bytes_returned, 0);
-	if (rc) {
-		cifs_dbg(FYI, "Send error in copy = %d with %d files copied\n",
-			 rc, le16_to_cpu(pSMBr->CopyCount));
-	}
-	cifs_buf_release(pSMB);
-
-	if (rc == -EAGAIN)
-		goto copyRetry;
-
-	return rc;
-}
-
-int
 CIFSUnixCreateSymLink(const unsigned int xid, struct cifs_tcon *tcon,
 		      const char *fromName, const char *toName,
 		      const struct nls_table *nls_codepage, int remap)
@@ -2871,32 +2800,57 @@ CIFSSMB_set_compression(const unsigned int xid, struct cifs_tcon *tcon,
 
 #ifdef CONFIG_CIFS_POSIX
 
-/*Convert an Access Control Entry from wire format to local POSIX xattr format*/
-static void cifs_convert_ace(struct posix_acl_xattr_entry *ace,
-			     struct cifs_posix_ace *cifs_ace)
+#ifdef CONFIG_FS_POSIX_ACL
+/**
+ * cifs_init_posix_acl - convert ACL from cifs to POSIX ACL format
+ * @ace: POSIX ACL entry to store converted ACL into
+ * @cifs_ace: ACL in cifs format
+ *
+ * Convert an Access Control Entry from wire format to local POSIX xattr
+ * format.
+ *
+ * Note that the @cifs_uid member is used to store both {g,u}id_t.
+ */
+static void cifs_init_posix_acl(struct posix_acl_entry *ace,
+				struct cifs_posix_ace *cifs_ace)
 {
 	/* u8 cifs fields do not need le conversion */
-	ace->e_perm = cpu_to_le16(cifs_ace->cifs_e_perm);
-	ace->e_tag  = cpu_to_le16(cifs_ace->cifs_e_tag);
-	ace->e_id   = cpu_to_le32(le64_to_cpu(cifs_ace->cifs_uid));
-/*
-	cifs_dbg(FYI, "perm %d tag %d id %d\n",
-		 ace->e_perm, ace->e_tag, ace->e_id);
-*/
+	ace->e_perm = cifs_ace->cifs_e_perm;
+	ace->e_tag = cifs_ace->cifs_e_tag;
 
+	switch (ace->e_tag) {
+	case ACL_USER:
+		ace->e_uid = make_kuid(&init_user_ns,
+				       le64_to_cpu(cifs_ace->cifs_uid));
+		break;
+	case ACL_GROUP:
+		ace->e_gid = make_kgid(&init_user_ns,
+				       le64_to_cpu(cifs_ace->cifs_uid));
+		break;
+	}
 	return;
 }
 
-/* Convert ACL from CIFS POSIX wire format to local Linux POSIX ACL xattr */
-static int cifs_copy_posix_acl(char *trgt, char *src, const int buflen,
-			       const int acl_type, const int size_of_data_area)
+/**
+ * cifs_to_posix_acl - copy cifs ACL format to POSIX ACL format
+ * @acl: ACLs returned in POSIX ACL format
+ * @src: ACLs in cifs format
+ * @acl_type: type of POSIX ACL requested
+ * @size_of_data_area: size of SMB we got
+ *
+ * This function converts ACLs from cifs format to POSIX ACL format.
+ * If @acl is NULL then the size of the buffer required to store POSIX ACLs in
+ * their uapi format is returned.
+ */
+static int cifs_to_posix_acl(struct posix_acl **acl, char *src,
+			     const int acl_type, const int size_of_data_area)
 {
 	int size =  0;
-	int i;
 	__u16 count;
 	struct cifs_posix_ace *pACE;
 	struct cifs_posix_acl *cifs_acl = (struct cifs_posix_acl *)src;
-	struct posix_acl_xattr_header *local_acl = (void *)trgt;
+	struct posix_acl *kacl = NULL;
+	struct posix_acl_entry *pa, *pe;
 
 	if (le16_to_cpu(cifs_acl->version) != CIFS_ACL_VERSION)
 		return -EOPNOTSUPP;
@@ -2916,7 +2870,7 @@ static int cifs_copy_posix_acl(char *trgt, char *src, const int buflen,
 		count = le16_to_cpu(cifs_acl->access_entry_count);
 		size = sizeof(struct cifs_posix_acl);
 		size += sizeof(struct cifs_posix_ace) * count;
-/* skip past access ACEs to get to default ACEs */
+		/* skip past access ACEs to get to default ACEs */
 		pACE = &cifs_acl->ace_array[count];
 		count = le16_to_cpu(cifs_acl->default_entry_count);
 		size += sizeof(struct cifs_posix_ace) * count;
@@ -2928,62 +2882,75 @@ static int cifs_copy_posix_acl(char *trgt, char *src, const int buflen,
 		return -EINVAL;
 	}
 
-	size = posix_acl_xattr_size(count);
-	if ((buflen == 0) || (local_acl == NULL)) {
-		/* used to query ACL EA size */
-	} else if (size > buflen) {
-		return -ERANGE;
-	} else /* buffer big enough */ {
-		struct posix_acl_xattr_entry *ace = (void *)(local_acl + 1);
+	/* Allocate number of POSIX ACLs to store in VFS format. */
+	kacl = posix_acl_alloc(count, GFP_NOFS);
+	if (!kacl)
+		return -ENOMEM;
 
-		local_acl->a_version = cpu_to_le32(POSIX_ACL_XATTR_VERSION);
-		for (i = 0; i < count ; i++) {
-			cifs_convert_ace(&ace[i], pACE);
-			pACE++;
-		}
+	FOREACH_ACL_ENTRY(pa, kacl, pe) {
+		cifs_init_posix_acl(pa, pACE);
+		pACE++;
 	}
-	return size;
+
+	*acl = kacl;
+	return 0;
 }
 
-static void convert_ace_to_cifs_ace(struct cifs_posix_ace *cifs_ace,
-				     const struct posix_acl_xattr_entry *local_ace)
+/**
+ * cifs_init_ace - convert ACL entry from POSIX ACL to cifs format
+ * @cifs_ace: the cifs ACL entry to store into
+ * @local_ace: the POSIX ACL entry to convert
+ */
+static void cifs_init_ace(struct cifs_posix_ace *cifs_ace,
+			  const struct posix_acl_entry *local_ace)
 {
-	cifs_ace->cifs_e_perm = le16_to_cpu(local_ace->e_perm);
-	cifs_ace->cifs_e_tag =  le16_to_cpu(local_ace->e_tag);
-	/* BB is there a better way to handle the large uid? */
-	if (local_ace->e_id == cpu_to_le32(-1)) {
-	/* Probably no need to le convert -1 on any arch but can not hurt */
+	cifs_ace->cifs_e_perm = local_ace->e_perm;
+	cifs_ace->cifs_e_tag =  local_ace->e_tag;
+
+	switch (local_ace->e_tag) {
+	case ACL_USER:
+		cifs_ace->cifs_uid =
+			cpu_to_le64(from_kuid(&init_user_ns, local_ace->e_uid));
+		break;
+	case ACL_GROUP:
+		cifs_ace->cifs_uid =
+			cpu_to_le64(from_kgid(&init_user_ns, local_ace->e_gid));
+		break;
+	default:
 		cifs_ace->cifs_uid = cpu_to_le64(-1);
-	} else
-		cifs_ace->cifs_uid = cpu_to_le64(le32_to_cpu(local_ace->e_id));
-/*
-	cifs_dbg(FYI, "perm %d tag %d id %d\n",
-		 ace->e_perm, ace->e_tag, ace->e_id);
-*/
+	}
 }
 
-/* Convert ACL from local Linux POSIX xattr to CIFS POSIX ACL wire format */
-static __u16 ACL_to_cifs_posix(char *parm_data, const char *pACL,
-			       const int buflen, const int acl_type)
+/**
+ * posix_acl_to_cifs - convert ACLs from POSIX ACL to cifs format
+ * @parm_data: ACLs in cifs format to convert to
+ * @acl: ACLs in POSIX ACL format to convert from
+ * @acl_type: the type of POSIX ACLs stored in @acl
+ *
+ * Return: the number cifs ACL entries after conversion
+ */
+static __u16 posix_acl_to_cifs(char *parm_data, const struct posix_acl *acl,
+			       const int acl_type)
 {
 	__u16 rc = 0;
 	struct cifs_posix_acl *cifs_acl = (struct cifs_posix_acl *)parm_data;
-	struct posix_acl_xattr_header *local_acl = (void *)pACL;
-	struct posix_acl_xattr_entry *ace = (void *)(local_acl + 1);
+	const struct posix_acl_entry *pa, *pe;
 	int count;
-	int i;
+	int i = 0;
 
-	if ((buflen == 0) || (pACL == NULL) || (cifs_acl == NULL))
+	if ((acl == NULL) || (cifs_acl == NULL))
 		return 0;
 
-	count = posix_acl_xattr_count((size_t)buflen);
-	cifs_dbg(FYI, "setting acl with %d entries from buf of length %d and version of %d\n",
-		 count, buflen, le32_to_cpu(local_acl->a_version));
-	if (le32_to_cpu(local_acl->a_version) != 2) {
-		cifs_dbg(FYI, "unknown POSIX ACL version %d\n",
-			 le32_to_cpu(local_acl->a_version));
-		return 0;
-	}
+	count = acl->a_count;
+	cifs_dbg(FYI, "setting acl with %d entries\n", count);
+
+	/*
+	 * Note that the uapi POSIX ACL version is verified by the VFS and is
+	 * independent of the cifs ACL version. Changing the POSIX ACL version
+	 * is a uapi change and if it's changed we will pass down the POSIX ACL
+	 * version in struct posix_acl from the VFS. For now there's really
+	 * only one that all filesystems know how to deal with.
+	 */
 	cifs_acl->version = cpu_to_le16(1);
 	if (acl_type == ACL_TYPE_ACCESS) {
 		cifs_acl->access_entry_count = cpu_to_le16(count);
@@ -2995,8 +2962,9 @@ static __u16 ACL_to_cifs_posix(char *parm_data, const char *pACL,
 		cifs_dbg(FYI, "unknown ACL type %d\n", acl_type);
 		return 0;
 	}
-	for (i = 0; i < count; i++)
-		convert_ace_to_cifs_ace(&cifs_acl->ace_array[i], &ace[i]);
+	FOREACH_ACL_ENTRY(pa, acl, pe) {
+		cifs_init_ace(&cifs_acl->ace_array[i++], pa);
+	}
 	if (rc == 0) {
 		rc = (__u16)(count * sizeof(struct cifs_posix_ace));
 		rc += sizeof(struct cifs_posix_acl);
@@ -3005,11 +2973,10 @@ static __u16 ACL_to_cifs_posix(char *parm_data, const char *pACL,
 	return rc;
 }
 
-int
-CIFSSMBGetPosixACL(const unsigned int xid, struct cifs_tcon *tcon,
-		   const unsigned char *searchName,
-		   char *acl_inf, const int buflen, const int acl_type,
-		   const struct nls_table *nls_codepage, int remap)
+int cifs_do_get_acl(const unsigned int xid, struct cifs_tcon *tcon,
+		    const unsigned char *searchName, struct posix_acl **acl,
+		    const int acl_type, const struct nls_table *nls_codepage,
+		    int remap)
 {
 /* SMB_QUERY_POSIX_ACL */
 	TRANSACTION2_QPI_REQ *pSMB = NULL;
@@ -3081,23 +3048,26 @@ queryAclRetry:
 		else {
 			__u16 data_offset = le16_to_cpu(pSMBr->t2.DataOffset);
 			__u16 count = le16_to_cpu(pSMBr->t2.DataCount);
-			rc = cifs_copy_posix_acl(acl_inf,
+			rc = cifs_to_posix_acl(acl,
 				(char *)&pSMBr->hdr.Protocol+data_offset,
-				buflen, acl_type, count);
+				acl_type, count);
 		}
 	}
 	cifs_buf_release(pSMB);
+	/*
+	 * The else branch after SendReceive() doesn't return EAGAIN so if we
+	 * allocated @acl in cifs_to_posix_acl() we are guaranteed to return
+	 * here and don't leak POSIX ACLs.
+	 */
 	if (rc == -EAGAIN)
 		goto queryAclRetry;
 	return rc;
 }
 
-int
-CIFSSMBSetPosixACL(const unsigned int xid, struct cifs_tcon *tcon,
-		   const unsigned char *fileName,
-		   const char *local_acl, const int buflen,
-		   const int acl_type,
-		   const struct nls_table *nls_codepage, int remap)
+int cifs_do_set_acl(const unsigned int xid, struct cifs_tcon *tcon,
+		    const unsigned char *fileName, const struct posix_acl *acl,
+		    const int acl_type, const struct nls_table *nls_codepage,
+		    int remap)
 {
 	struct smb_com_transaction2_spi_req *pSMB = NULL;
 	struct smb_com_transaction2_spi_rsp *pSMBr = NULL;
@@ -3134,11 +3104,11 @@ setAclRetry:
 	param_offset = offsetof(struct smb_com_transaction2_spi_req,
 				InformationLevel) - 4;
 	offset = param_offset + params;
-	parm_data = ((char *) &pSMB->hdr.Protocol) + offset;
+	parm_data = ((char *)pSMB) + sizeof(pSMB->hdr.smb_buf_length) + offset;
 	pSMB->ParameterOffset = cpu_to_le16(param_offset);
 
 	/* convert to on the wire format for POSIX ACL */
-	data_count = ACL_to_cifs_posix(parm_data, local_acl, buflen, acl_type);
+	data_count = posix_acl_to_cifs(parm_data, acl, acl_type);
 
 	if (data_count == 0) {
 		rc = -EOPNOTSUPP;
@@ -3168,6 +3138,23 @@ setACLerrorExit:
 		goto setAclRetry;
 	return rc;
 }
+#else
+int cifs_do_get_acl(const unsigned int xid, struct cifs_tcon *tcon,
+		    const unsigned char *searchName, struct posix_acl **acl,
+		    const int acl_type, const struct nls_table *nls_codepage,
+		    int remap)
+{
+	return -EOPNOTSUPP;
+}
+
+int cifs_do_set_acl(const unsigned int xid, struct cifs_tcon *tcon,
+		    const unsigned char *fileName, const struct posix_acl *acl,
+		    const int acl_type, const struct nls_table *nls_codepage,
+		    int remap)
+{
+	return -EOPNOTSUPP;
+}
+#endif /* CONFIG_FS_POSIX_ACL */
 
 int
 CIFSGetExtAttr(const unsigned int xid, struct cifs_tcon *tcon,
@@ -3345,7 +3332,7 @@ validate_ntransact(char *buf, char **ppparm, char **ppdata,
 /* Get Security Descriptor (by handle) from remote server for a file or dir */
 int
 CIFSSMBGetCIFSACL(const unsigned int xid, struct cifs_tcon *tcon, __u16 fid,
-		  struct cifs_ntsd **acl_inf, __u32 *pbuflen)
+		  struct smb_ntsd **acl_inf, __u32 *pbuflen, __u32 info)
 {
 	int rc = 0;
 	int buf_type = 0;
@@ -3368,7 +3355,7 @@ CIFSSMBGetCIFSACL(const unsigned int xid, struct cifs_tcon *tcon, __u16 fid,
 	pSMB->MaxSetupCount = 0;
 	pSMB->Fid = fid; /* file handle always le */
 	pSMB->AclFlags = cpu_to_le32(CIFS_ACL_OWNER | CIFS_ACL_GROUP |
-				     CIFS_ACL_DACL);
+				     CIFS_ACL_DACL | info);
 	pSMB->ByteCount = cpu_to_le16(11); /* 3 bytes pad + 8 bytes parm */
 	inc_rfc1001_len(pSMB, 11);
 	iov[0].iov_base = (char *)pSMB;
@@ -3415,7 +3402,7 @@ CIFSSMBGetCIFSACL(const unsigned int xid, struct cifs_tcon *tcon, __u16 fid,
 
 		/* check if buffer is big enough for the acl
 		   header followed by the smallest SID */
-		if ((*pbuflen < sizeof(struct cifs_ntsd) + 8) ||
+		if ((*pbuflen < sizeof(struct smb_ntsd) + 8) ||
 		    (*pbuflen >= 64 * 1024)) {
 			cifs_dbg(VFS, "bad acl length %d\n", *pbuflen);
 			rc = -EINVAL;
@@ -3435,7 +3422,7 @@ qsec_out:
 
 int
 CIFSSMBSetCIFSACL(const unsigned int xid, struct cifs_tcon *tcon, __u16 fid,
-			struct cifs_ntsd *pntsd, __u32 acllen, int aclflag)
+			struct smb_ntsd *pntsd, __u32 acllen, int aclflag)
 {
 	__u16 byte_count, param_count, data_count, param_offset, data_offset;
 	int rc = 0;
@@ -3913,7 +3900,7 @@ findFirstRetry:
 		name_len =
 		    cifsConvertToUTF16((__le16 *) pSMB->FileName, searchName,
 				       PATH_MAX, nls_codepage, remap);
-		/* We can not add the asterik earlier in case
+		/* We can not add the asterisk earlier in case
 		it got remapped to 0xF03A as if it were part of the
 		directory name instead of a wildcard */
 		name_len *= 2;
@@ -5324,7 +5311,7 @@ SetTimesRetry:
 	param_offset = offsetof(struct smb_com_transaction2_spi_req,
 				InformationLevel) - 4;
 	offset = param_offset + params;
-	data_offset = (char *) (&pSMB->hdr.Protocol) + offset;
+	data_offset = (char *)pSMB + offsetof(typeof(*pSMB), hdr.Protocol) + offset;
 	pSMB->ParameterOffset = cpu_to_le16(param_offset);
 	pSMB->DataOffset = cpu_to_le16(offset);
 	pSMB->SetupCount = 1;

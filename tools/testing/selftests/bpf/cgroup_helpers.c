@@ -424,7 +424,7 @@ int create_and_get_cgroup(const char *relative_path)
  * which is an invalid cgroup id.
  * If there is a failure, it prints the error to stderr.
  */
-unsigned long long get_cgroup_id_from_path(const char *cgroup_workdir)
+static unsigned long long get_cgroup_id_from_path(const char *cgroup_workdir)
 {
 	int dirfd, err, flags, mount_id, fhsize;
 	union {
@@ -639,7 +639,7 @@ unsigned long long get_classid_cgroup_id(void)
 /**
  * get_cgroup1_hierarchy_id - Retrieves the ID of a cgroup1 hierarchy from the cgroup1 subsys name.
  * @subsys_name: The cgroup1 subsys name, which can be retrieved from /proc/self/cgroup. It can be
- * a named cgroup like "name=systemd", a controller name like "net_cls", or multi-contollers like
+ * a named cgroup like "name=systemd", a controller name like "net_cls", or multi-controllers like
  * "net_cls,net_prio".
  */
 int get_cgroup1_hierarchy_id(const char *subsys_name)

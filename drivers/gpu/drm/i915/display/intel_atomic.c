@@ -35,7 +35,6 @@
 #include <drm/drm_fourcc.h>
 
 #include "i915_drv.h"
-#include "i915_reg.h"
 #include "intel_atomic.h"
 #include "intel_cdclk.h"
 #include "intel_display_types.h"
@@ -62,7 +61,7 @@ int intel_digital_connector_atomic_get_property(struct drm_connector *connector,
 {
 	struct drm_device *dev = connector->dev;
 	struct drm_i915_private *dev_priv = to_i915(dev);
-	struct intel_digital_connector_state *intel_conn_state =
+	const struct intel_digital_connector_state *intel_conn_state =
 		to_intel_digital_connector_state(state);
 
 	if (property == dev_priv->display.properties.force_audio)
@@ -277,7 +276,8 @@ intel_crtc_duplicate_state(struct drm_crtc *crtc)
 	crtc_state->do_async_flip = false;
 	crtc_state->fb_bits = 0;
 	crtc_state->update_planes = 0;
-	crtc_state->dsb = NULL;
+	crtc_state->dsb_color_vblank = NULL;
+	crtc_state->dsb_color_commit = NULL;
 
 	return &crtc_state->uapi;
 }
@@ -311,7 +311,8 @@ intel_crtc_destroy_state(struct drm_crtc *crtc,
 {
 	struct intel_crtc_state *crtc_state = to_intel_crtc_state(state);
 
-	drm_WARN_ON(crtc->dev, crtc_state->dsb);
+	drm_WARN_ON(crtc->dev, crtc_state->dsb_color_vblank);
+	drm_WARN_ON(crtc->dev, crtc_state->dsb_color_commit);
 
 	__drm_atomic_helper_crtc_destroy_state(&crtc_state->uapi);
 	intel_crtc_free_hw_state(crtc_state);

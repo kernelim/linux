@@ -55,7 +55,6 @@ struct seq_oss_chinfo {
 struct seq_oss_synthinfo {
 	struct snd_seq_oss_arg arg;
 	struct seq_oss_chinfo *ch;
-	struct seq_oss_synth_sysex *sysex;
 	int nr_voices;
 	int opened;
 	int is_midi;
@@ -115,10 +114,6 @@ int snd_seq_oss_write(struct seq_oss_devinfo *dp, const char __user *buf, int co
 __poll_t snd_seq_oss_poll(struct seq_oss_devinfo *dp, struct file *file, poll_table * wait);
 
 void snd_seq_oss_reset(struct seq_oss_devinfo *dp);
-
-/* */
-void snd_seq_oss_process_queue(struct seq_oss_devinfo *dp, abstime_t time);
-
 
 /* proc interface */
 void snd_seq_oss_system_info_read(struct snd_info_buffer *buf);

@@ -1,3 +1,3 @@
-#5-
-0xa9f94e86	iscsi_boot_create_host_kset	drivers/scsi/iscsi_boot_sysfs	EXPORT_SYMBOL_GPL	
+#6-
+0xf0135636	iscsi_boot_create_host_kset	drivers/scsi/iscsi_boot_sysfs	EXPORT_SYMBOL_GPL	
 

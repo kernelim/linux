@@ -179,8 +179,9 @@ is required and the graph structure can be freed normally.
 
 Helper functions can be used to find a link between two given pads, or a pad
 connected to another pad through an enabled link
-:c:func:`media_entity_find_link()` and
-:c:func:`media_entity_remote_pad()`.
+(:c:func:`media_entity_find_link()`, :c:func:`media_pad_remote_pad_first()`,
+:c:func:`media_entity_remote_source_pad_unique()` and
+:c:func:`media_pad_remote_pad_unique()`).
 
 Use count and power handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -210,15 +211,12 @@ When starting streaming, drivers must notify all entities in the pipeline to
 prevent link states from being modified during streaming by calling
 :c:func:`media_pipeline_start()`.
 
-The function will mark all entities connected to the given entity through
-enabled links, either directly or indirectly, as streaming.
+The function will mark all the pads which are part of the pipeline as streaming.
 
-The struct media_pipeline instance pointed to by
-the pipe argument will be stored in every entity in the pipeline.
-Drivers should embed the struct media_pipeline
-in higher-level pipeline structures and can then access the
-pipeline through the struct media_entity
-pipe field.
+The struct media_pipeline instance pointed to by the pipe argument will be
+stored in every pad in the pipeline. Drivers should embed the struct
+media_pipeline in higher-level pipeline structures and can then access the
+pipeline through the struct media_pad pipe field.
 
 Calls to :c:func:`media_pipeline_start()` can be nested.
 The pipeline pointer must be identical for all nested calls to the function.

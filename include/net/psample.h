@@ -5,6 +5,8 @@
 #include <uapi/linux/psample.h>
 #include <linux/list.h>
 
+#include <linux/rh_kabi.h>
+
 struct psample_group {
 	struct list_head list;
 	struct net *net;
@@ -28,6 +30,8 @@ struct psample_metadata {
 	   unused:4;
 	const u8 *user_cookie;
 	u32 user_cookie_len;
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 };
 
 struct psample_group *psample_group_get(struct net *net, u32 group_num);

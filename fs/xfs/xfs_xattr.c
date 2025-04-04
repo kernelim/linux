@@ -32,6 +32,7 @@ xfs_attr_grab_log_assist(
 	struct xfs_mount	*mp)
 {
 	int			error = 0;
+	static bool		printed = false;
 
 	/*
 	 * Protect ourselves from an idle log clearing the logged xattrs log
@@ -46,6 +47,17 @@ xfs_attr_grab_log_assist(
 	if (xfs_sb_version_haslogxattrs(&mp->m_sb))
 		return 0;
 
+	/*
+	 * Check if the filesystem featureset is new enough to set this log
+	 * incompat feature bit.  Strictly speaking, the minimum requirement is
+	 * a V5 filesystem for the superblock field, but we'll require rmap
+	 * or reflink to avoid having to deal with really old kernels.
+	 */
+	if (!xfs_has_reflink(mp) && !xfs_has_rmapbt(mp)) {
+		error = -EOPNOTSUPP;
+		goto drop_incompat;
+	}
+
 	/* Enable log-assisted xattrs. */
 	error = xfs_add_incompat_log_feature(mp,
 			XFS_SB_FEAT_INCOMPAT_LOG_XATTRS);
@@ -54,6 +66,11 @@ xfs_attr_grab_log_assist(
 
 	xfs_warn_mount(mp, XFS_OPSTATE_WARNED_LARP,
  "EXPERIMENTAL logged extended attributes feature in use. Use at your own risk!");
+	if (!printed) {
+		mark_tech_preview("Logged extended attributes feature",
+				  THIS_MODULE);
+		printed = true;
+	}
 
 	return 0;
 drop_incompat:
@@ -125,6 +142,9 @@ xfs_xattr_get(const struct xattr_handler *handler, struct dentry *unused,
 	};
 	int			error;
 
+	if (xfs_ifork_zapped(XFS_I(inode), XFS_ATTR_FORK))
+		return -EIO;
+
 	error = xfs_attr_get(&args);
 	if (error)
 		return error;
@@ -133,7 +153,7 @@ xfs_xattr_get(const struct xattr_handler *handler, struct dentry *unused,
 
 static int
 xfs_xattr_set(const struct xattr_handler *handler,
-	      struct user_namespace *mnt_userns, struct dentry *unused,
+	      struct mnt_idmap *idmap, struct dentry *unused,
 	      struct inode *inode, const char *name, const void *value,
 	      size_t size, int flags)
 {
@@ -175,7 +195,7 @@ static const struct xattr_handler xfs_xattr_security_handler = {
 	.set	= xfs_xattr_set,
 };
 
-const struct xattr_handler *xfs_xattr_handlers[] = {
+const struct xattr_handler * const xfs_xattr_handlers[] = {
 	&xfs_xattr_user_handler,
 	&xfs_xattr_trusted_handler,
 	&xfs_xattr_security_handler,
@@ -286,6 +306,9 @@ xfs_vn_listxattr(
 	struct xfs_attr_list_context context;
 	struct inode	*inode = d_inode(dentry);
 	int		error;
+
+	if (xfs_ifork_zapped(XFS_I(inode), XFS_ATTR_FORK))
+		return -EIO;
 
 	/*
 	 * First read the regular on-disk attributes.

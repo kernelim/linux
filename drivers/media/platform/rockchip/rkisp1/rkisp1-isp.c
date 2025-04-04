@@ -198,7 +198,7 @@ static struct v4l2_subdev *rkisp1_get_remote_sensor(struct v4l2_subdev *sd)
 	struct media_entity *sensor_me;
 
 	local = &sd->entity.pads[RKISP1_ISP_PAD_SINK_VIDEO];
-	remote = media_entity_remote_pad(local);
+	remote = media_pad_remote_pad_first(local);
 	if (!remote)
 		return NULL;
 
@@ -639,8 +639,8 @@ static int rkisp1_isp_enum_frame_size(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int rkisp1_isp_init_config(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_state *sd_state)
+static int rkisp1_isp_init_state(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *sd_state)
 {
 	struct v4l2_mbus_framefmt *sink_fmt, *src_fmt;
 	struct v4l2_rect *sink_crop, *src_crop;
@@ -1048,6 +1048,10 @@ static const struct v4l2_subdev_ops rkisp1_isp_ops = {
 	.pad = &rkisp1_isp_pad_ops,
 };
 
+static const struct v4l2_subdev_internal_ops rkisp1_isp_internal_ops = {
+	.init_state = rkisp1_isp_init_state,
+};
+
 int rkisp1_isp_register(struct rkisp1_device *rkisp1)
 {
 	struct v4l2_subdev_state state = {
@@ -1059,6 +1063,7 @@ int rkisp1_isp_register(struct rkisp1_device *rkisp1)
 	int ret;
 
 	v4l2_subdev_init(sd, &rkisp1_isp_ops);
+	sd->internal_ops = &rkisp1_isp_internal_ops;
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_HAS_EVENTS;
 	sd->entity.ops = &rkisp1_isp_media_ops;
 	sd->entity.function = MEDIA_ENT_F_PROC_VIDEO_PIXEL_FORMATTER;

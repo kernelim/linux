@@ -49,7 +49,7 @@
 /* ENA adaptive interrupt moderation settings */
 
 #define ENA_INTR_INITIAL_TX_INTERVAL_USECS 64
-#define ENA_INTR_INITIAL_RX_INTERVAL_USECS 0
+#define ENA_INTR_INITIAL_RX_INTERVAL_USECS 20
 #define ENA_DEFAULT_INTR_DELAY_RESOLUTION 1
 
 #define ENA_HASH_KEY_SIZE 40
@@ -317,6 +317,8 @@ struct ena_com_dev {
 	u16 stats_func; /* Selected function for extended statistic dump */
 	u16 stats_queue; /* Selected queue for extended statistic dump */
 
+	u32 ena_min_poll_delay_us;
+
 	struct ena_com_mmio_read mmio_read;
 
 	struct ena_rss rss;
@@ -339,8 +341,6 @@ struct ena_com_dev {
 	struct ena_com_llq_info llq_info;
 
 	struct ena_customer_metrics customer_metrics;
-
-	u32 ena_min_poll_delay_us;
 };
 
 struct ena_com_dev_get_features_ctx {

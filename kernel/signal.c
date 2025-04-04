@@ -426,7 +426,8 @@ __sigqueue_alloc(int sig, struct task_struct *t, gfp_t gfp_flags,
 	 */
 	rcu_read_lock();
 	ucounts = task_ucounts(t);
-	sigpending = inc_rlimit_get_ucounts(ucounts, UCOUNT_RLIMIT_SIGPENDING);
+	sigpending = inc_rlimit_get_ucounts(ucounts, UCOUNT_RLIMIT_SIGPENDING,
+					    override_rlimit);
 	rcu_read_unlock();
 	if (!sigpending)
 		return NULL;
@@ -559,6 +560,10 @@ bool unhandled_signal(struct task_struct *tsk, int sig)
 		return true;
 
 	if (handler != SIG_IGN && handler != SIG_DFL)
+		return false;
+
+	/* If dying, we handle all new signals by ignoring them */
+	if (fatal_signal_pending(tsk))
 		return false;
 
 	/* if ptraced, let the tracer determine */

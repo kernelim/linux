@@ -1,19 +1,5 @@
-/*
- * Copyright 2014 Cisco Systems, Inc.  All rights reserved.
- *
- * This program is free software; you may redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright 2014 Cisco Systems, Inc.  All rights reserved.
 
 #include <linux/module.h>
 #include <linux/mempool.h>
@@ -314,9 +300,8 @@ snic_add_host(struct Scsi_Host *shost, struct pci_dev *pdev)
 	}
 
 	SNIC_BUG_ON(shost->work_q != NULL);
-	snprintf(shost->work_q_name, sizeof(shost->work_q_name), "scsi_wq_%d",
-		 shost->host_no);
-	shost->work_q = create_singlethread_workqueue(shost->work_q_name);
+	shost->work_q = alloc_ordered_workqueue("scsi_wq_%d", WQ_MEM_RECLAIM,
+						shost->host_no);
 	if (!shost->work_q) {
 		SNIC_HOST_ERR(shost, "Failed to Create ScsiHost wq.\n");
 
@@ -898,7 +883,8 @@ snic_global_data_init(void)
 	snic_glob->req_cache[SNIC_REQ_TM_CACHE] = cachep;
 
 	/* snic_event queue */
-	snic_glob->event_q = create_singlethread_workqueue("snic_event_wq");
+	snic_glob->event_q =
+		alloc_ordered_workqueue("%s", WQ_MEM_RECLAIM, "snic_event_wq");
 	if (!snic_glob->event_q) {
 		SNIC_ERR("snic event queue create failed\n");
 		ret = -ENOMEM;

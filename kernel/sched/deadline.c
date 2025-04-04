@@ -709,7 +709,7 @@ static struct rq *dl_task_offline_migration(struct rq *rq, struct task_struct *p
 	}
 
 	/*
-	 * And we finally need to fixup root_domain(s) bandwidth accounting,
+	 * And we finally need to fix up root_domain(s) bandwidth accounting,
 	 * since p is still hanging out in the old (now moved to default) root
 	 * domain.
 	 */
@@ -993,7 +993,7 @@ static inline bool dl_is_implicit(struct sched_dl_entity *dl_se)
  * is detected, the runtime and deadline need to be updated.
  *
  * If the task has an implicit deadline, i.e., deadline == period, the Original
- * CBS is applied. the runtime is replenished and a new absolute deadline is
+ * CBS is applied. The runtime is replenished and a new absolute deadline is
  * set, as in the previous cases.
  *
  * However, the Original CBS does not work properly for tasks with
@@ -1295,7 +1295,7 @@ int dl_runtime_exceeded(struct sched_dl_entity *dl_se)
  * Since rq->dl.running_bw and rq->dl.this_bw contain utilizations multiplied
  * by 2^BW_SHIFT, the result has to be shifted right by BW_SHIFT.
  * Since rq->dl.bw_ratio contains 1 / Umax multiplied by 2^RATIO_SHIFT, dl_bw
- * is multiped by rq->dl.bw_ratio and shifted right by RATIO_SHIFT.
+ * is multiplied by rq->dl.bw_ratio and shifted right by RATIO_SHIFT.
  * Since delta is a 64 bit variable, to have an overflow its value should be
  * larger than 2^(64 - 20 - 8), which is more than 64 seconds. So, overflow is
  * not an issue here.
@@ -1754,6 +1754,7 @@ enqueue_dl_entity(struct sched_dl_entity *dl_se, int flags)
 	} else if (flags & ENQUEUE_REPLENISH) {
 		replenish_dl_entity(dl_se);
 	} else if ((flags & ENQUEUE_RESTORE) &&
+		   !is_dl_boosted(dl_se) &&
 		   dl_time_before(dl_se->deadline, rq_clock(rq_of_dl_se(dl_se)))) {
 		setup_new_dl_entity(dl_se);
 	}
@@ -2127,7 +2128,7 @@ static struct task_struct *pick_next_task_dl(struct rq *rq)
 	if (!p->dl_server)
 		set_next_task_dl(rq, p, true);
 
-	if (hrtick_enabled(rq))
+	if (hrtick_enabled_dl(rq))
 		start_hrtick_dl(rq, &p->dl);
 
 	return p;
@@ -2494,7 +2495,7 @@ static void pull_dl_task(struct rq *this_rq)
 		src_rq = cpu_rq(cpu);
 
 		/*
-		 * It looks racy, abd it is! However, as in sched_rt.c,
+		 * It looks racy, and it is! However, as in sched_rt.c,
 		 * we are fine with this.
 		 */
 		if (this_rq->dl.dl_nr_running &&

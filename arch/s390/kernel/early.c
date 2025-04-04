@@ -18,6 +18,7 @@
 #include <linux/uaccess.h>
 #include <linux/kernel.h>
 #include <asm/asm-extable.h>
+#include <linux/memblock.h>
 #include <asm/access-regs.h>
 #include <asm/diag.h>
 #include <asm/ebcdic.h>
@@ -34,7 +35,31 @@
 #include <asm/boot_data.h>
 #include "entry.h"
 
-int __bootdata(is_full_image);
+#define decompressor_handled_param(param)			\
+static int __init ignore_decompressor_param_##param(char *s)	\
+{								\
+	return 0;						\
+}								\
+early_param(#param, ignore_decompressor_param_##param)
+
+decompressor_handled_param(mem);
+decompressor_handled_param(vmalloc);
+decompressor_handled_param(dfltcc);
+decompressor_handled_param(noexec);
+decompressor_handled_param(facilities);
+decompressor_handled_param(nokaslr);
+decompressor_handled_param(cmma);
+#if IS_ENABLED(CONFIG_KVM)
+decompressor_handled_param(prot_virt);
+#endif
+
+static void __init kasan_early_init(void)
+{
+#ifdef CONFIG_KASAN
+	init_task.kasan_depth = 0;
+	sclp_early_printk("KernelAddressSanitizer initialized\n");
+#endif
+}
 
 static void __init reset_tod_clock(void)
 {
@@ -161,9 +186,7 @@ static noinline __init void setup_lowcore_early(void)
 	psw_t psw;
 
 	psw.addr = (unsigned long)early_pgm_check_handler;
-	psw.mask = PSW_MASK_BASE | PSW_DEFAULT_KEY | PSW_MASK_EA | PSW_MASK_BA;
-	if (IS_ENABLED(CONFIG_KASAN))
-		psw.mask |= PSW_MASK_DAT;
+	psw.mask = PSW_KERNEL_BITS;
 	S390_lowcore.program_new_psw = psw;
 	S390_lowcore.preempt_count = INIT_PREEMPT_COUNT;
 }
@@ -196,7 +219,7 @@ static __init void detect_machine_facilities(void)
 {
 	if (test_facility(8)) {
 		S390_lowcore.machine_flags |= MACHINE_FLAG_EDAT1;
-		__ctl_set_bit(0, 23);
+		system_ctl_set_bit(0, CR0_EDAT_BIT);
 	}
 	if (test_facility(78))
 		S390_lowcore.machine_flags |= MACHINE_FLAG_EDAT2;
@@ -204,23 +227,21 @@ static __init void detect_machine_facilities(void)
 		S390_lowcore.machine_flags |= MACHINE_FLAG_IDTE;
 	if (test_facility(50) && test_facility(73)) {
 		S390_lowcore.machine_flags |= MACHINE_FLAG_TE;
-		__ctl_set_bit(0, 55);
+		system_ctl_set_bit(0, CR0_TRANSACTIONAL_EXECUTION_BIT);
 	}
 	if (test_facility(51))
 		S390_lowcore.machine_flags |= MACHINE_FLAG_TLB_LC;
 	if (test_facility(129))
-		__ctl_set_bit(0, 17);
-	if (test_facility(130)) {
+		system_ctl_set_bit(0, CR0_VECTOR_BIT);
+	if (test_facility(130))
 		S390_lowcore.machine_flags |= MACHINE_FLAG_NX;
-		__ctl_set_bit(0, 20);
-	}
 	if (test_facility(133))
 		S390_lowcore.machine_flags |= MACHINE_FLAG_GS;
 	if (test_facility(139) && (tod_clock_base.tod >> 63)) {
 		/* Enabled signed clock comparator comparisons */
 		S390_lowcore.machine_flags |= MACHINE_FLAG_SCC;
 		clock_comparator_max = -1ULL >> 1;
-		__ctl_set_bit(0, 53);
+		system_ctl_set_bit(0, CR0_CLOCK_COMPARATOR_SIGN_BIT);
 	}
 	if (IS_ENABLED(CONFIG_PCI) && test_facility(153)) {
 		S390_lowcore.machine_flags |= MACHINE_FLAG_PCI_MIO;
@@ -228,6 +249,8 @@ static __init void detect_machine_facilities(void)
 	}
 	if (test_facility(194))
 		S390_lowcore.machine_flags |= MACHINE_FLAG_RDP;
+	if (test_facility(85))
+		S390_lowcore.machine_flags |= MACHINE_FLAG_SEQ_INSN;
 }
 
 static inline void save_vector_registers(void)
@@ -238,15 +261,9 @@ static inline void save_vector_registers(void)
 #endif
 }
 
-static inline void setup_control_registers(void)
+static inline void setup_low_address_protection(void)
 {
-	unsigned long reg;
-
-	__ctl_store(reg, 0, 0);
-	reg |= CR0_LOW_ADDRESS_PROTECTION;
-	reg |= CR0_EMERGENCY_SIGNAL_SUBMASK;
-	reg |= CR0_EXTERNAL_CALL_SUBMASK;
-	__ctl_load(reg, 0, 0);
+	system_ctl_set_bit(0, CR0_LOW_ADDRESS_PROTECTION_BIT);
 }
 
 static inline void setup_access_registers(void)
@@ -260,27 +277,22 @@ char __bootdata(early_command_line)[COMMAND_LINE_SIZE];
 static void __init setup_boot_command_line(void)
 {
 	/* copy arch command line */
-	strlcpy(boot_command_line, early_command_line, COMMAND_LINE_SIZE);
+	strscpy(boot_command_line, early_command_line, COMMAND_LINE_SIZE);
 }
 
-static void __init check_image_bootable(void)
+static void __init sort_amode31_extable(void)
 {
-	if (is_full_image)
-		return;
-
-	sclp_early_printk("Linux kernel boot failure: An attempt to boot a vmlinux ELF image failed.\n");
-	sclp_early_printk("This image does not contain all parts necessary for starting up. Use\n");
-	sclp_early_printk("bzImage or arch/s390/boot/compressed/vmlinux instead.\n");
-	disabled_wait();
+	sort_extable(__start_amode31_ex_table, __stop_amode31_ex_table);
 }
 
 void __init startup_init(void)
 {
+	kasan_early_init();
 	reset_tod_clock();
-	check_image_bootable();
 	time_early_init();
 	init_kernel_storage_key();
 	lockdep_off();
+	sort_amode31_extable();
 	setup_lowcore_early();
 	setup_facility_list();
 	detect_machine_type();
@@ -291,7 +303,7 @@ void __init startup_init(void)
 	save_vector_registers();
 	setup_topology();
 	sclp_early_detect();
-	setup_control_registers();
+	setup_low_address_protection();
 	setup_access_registers();
 	lockdep_on();
 }

@@ -60,6 +60,9 @@ int tm_cgpr_active(struct task_struct *target, const struct user_regset *regset)
 	if (!cpu_has_feature(CPU_FTR_TM))
 		return -ENODEV;
 
+	if (target->thread.regs == NULL)
+		return -ENODEV;
+
 	if (!MSR_TM_ACTIVE(target->thread.regs->msr))
 		return 0;
 
@@ -202,6 +205,9 @@ int tm_cfpr_active(struct task_struct *target, const struct user_regset *regset)
 	if (!cpu_has_feature(CPU_FTR_TM))
 		return -ENODEV;
 
+	if (target->thread.regs == NULL)
+		return -ENODEV;
+
 	if (!MSR_TM_ACTIVE(target->thread.regs->msr))
 		return 0;
 
@@ -312,6 +318,9 @@ int tm_cfpr_set(struct task_struct *target, const struct user_regset *regset,
 int tm_cvmx_active(struct task_struct *target, const struct user_regset *regset)
 {
 	if (!cpu_has_feature(CPU_FTR_TM))
+		return -ENODEV;
+
+	if (target->thread.regs == NULL)
 		return -ENODEV;
 
 	if (!MSR_TM_ACTIVE(target->thread.regs->msr))
@@ -442,6 +451,9 @@ int tm_cvsx_active(struct task_struct *target, const struct user_regset *regset)
 	if (!cpu_has_feature(CPU_FTR_TM))
 		return -ENODEV;
 
+	if (target->thread.regs == NULL)
+		return -ENODEV;
+
 	if (!MSR_TM_ACTIVE(target->thread.regs->msr))
 		return 0;
 
@@ -553,6 +565,9 @@ int tm_spr_active(struct task_struct *target, const struct user_regset *regset)
 	if (!cpu_has_feature(CPU_FTR_TM))
 		return -ENODEV;
 
+	if (target->thread.regs == NULL)
+		return -ENODEV;
+
 	return regset->n;
 }
 
@@ -655,6 +670,9 @@ int tm_tar_active(struct task_struct *target, const struct user_regset *regset)
 	if (!cpu_has_feature(CPU_FTR_TM))
 		return -ENODEV;
 
+	if (target->thread.regs == NULL)
+		return -ENODEV;
+
 	if (MSR_TM_ACTIVE(target->thread.regs->msr))
 		return regset->n;
 
@@ -693,6 +711,9 @@ int tm_tar_set(struct task_struct *target, const struct user_regset *regset,
 int tm_ppr_active(struct task_struct *target, const struct user_regset *regset)
 {
 	if (!cpu_has_feature(CPU_FTR_TM))
+		return -ENODEV;
+
+	if (target->thread.regs == NULL)
 		return -ENODEV;
 
 	if (MSR_TM_ACTIVE(target->thread.regs->msr))
@@ -734,6 +755,9 @@ int tm_ppr_set(struct task_struct *target, const struct user_regset *regset,
 int tm_dscr_active(struct task_struct *target, const struct user_regset *regset)
 {
 	if (!cpu_has_feature(CPU_FTR_TM))
+		return -ENODEV;
+
+	if (target->thread.regs == NULL)
 		return -ENODEV;
 
 	if (MSR_TM_ACTIVE(target->thread.regs->msr))

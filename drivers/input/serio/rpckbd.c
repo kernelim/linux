@@ -111,7 +111,7 @@ static int rpckbd_probe(struct platform_device *dev)
 	if (tx_irq <= 0)
 		return tx_irq < 0 ? tx_irq : -ENXIO;
 
-	serio = kzalloc(sizeof(struct serio), GFP_KERNEL);
+	serio = kzalloc(sizeof(*serio), GFP_KERNEL);
 	rpckbd = kzalloc(sizeof(*rpckbd), GFP_KERNEL);
 	if (!serio || !rpckbd) {
 		kfree(rpckbd);

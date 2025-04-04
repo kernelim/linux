@@ -1988,9 +1988,12 @@ static const struct blk_mq_ops ataflop_mq_ops = {
 
 static int ataflop_alloc_disk(unsigned int drive, unsigned int type)
 {
+	struct queue_limits lim = {
+		.features		= BLK_FEAT_ROTATIONAL,
+	};
 	struct gendisk *disk;
 
-	disk = blk_mq_alloc_disk(&unit[drive].tag_set, NULL);
+	disk = blk_mq_alloc_disk(&unit[drive].tag_set, &lim, NULL);
 	if (IS_ERR(disk))
 		return PTR_ERR(disk);
 
@@ -2193,4 +2196,5 @@ static void __exit atari_floppy_exit(void)
 module_init(atari_floppy_init)
 module_exit(atari_floppy_exit)
 
+MODULE_DESCRIPTION("Atari floppy driver");
 MODULE_LICENSE("GPL");

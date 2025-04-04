@@ -352,7 +352,7 @@ static const char *mdacon_startup(void)
 	return "MDA-2";
 }
 
-static void mdacon_init(struct vc_data *c, int init)
+static void mdacon_init(struct vc_data *c, bool init)
 {
 	c->vc_complement_mask = 0x0800;	 /* reverse video */
 	c->vc_display_fg = &mda_display_fg;
@@ -427,13 +427,8 @@ static inline u16 *mda_addr(unsigned int x, unsigned int y)
 	return mda_vram_base + y * mda_num_columns + x;
 }
 
-static void mdacon_putc(struct vc_data *c, int ch, int y, int x)
-{
-	scr_writew(mda_convert_attr(ch), mda_addr(x, y));
-}
-
-static void mdacon_putcs(struct vc_data *c, const unsigned short *s,
-		         int count, int y, int x)
+static void mdacon_putcs(struct vc_data *c, const u16 *s, unsigned int count,
+			 unsigned int y, unsigned int x)
 {
 	u16 *dest = mda_addr(x, y);
 
@@ -442,26 +437,18 @@ static void mdacon_putcs(struct vc_data *c, const unsigned short *s,
 	}
 }
 
-static void mdacon_clear(struct vc_data *c, int y, int x, 
-			  int height, int width)
+static void mdacon_clear(struct vc_data *c, unsigned int y, unsigned int x,
+			 unsigned int width)
 {
 	u16 *dest = mda_addr(x, y);
 	u16 eattr = mda_convert_attr(c->vc_video_erase_char);
 
-	if (width <= 0 || height <= 0)
-		return;
-
-	if (x==0 && width==mda_num_columns) {
-		scr_memsetw(dest, eattr, height*width*2);
-	} else {
-		for (; height > 0; height--, dest+=mda_num_columns)
-			scr_memsetw(dest, eattr, width*2);
-	}
+	scr_memsetw(dest, eattr, width * 2);
 }
-                        
-static int mdacon_switch(struct vc_data *c)
+
+static bool mdacon_switch(struct vc_data *c)
 {
-	return 1;	/* redrawing needed */
+	return true;	/* redrawing needed */
 }
 
 static int mdacon_blank(struct vc_data *c, int blank, int mode_switch)
@@ -483,9 +470,9 @@ static int mdacon_blank(struct vc_data *c, int blank, int mode_switch)
 	}
 }
 
-static void mdacon_cursor(struct vc_data *c, int mode)
+static void mdacon_cursor(struct vc_data *c, bool enable)
 {
-	if (mode == CM_ERASE) {
+	if (!enable) {
 		mda_set_cursor(mda_vram_len - 1);
 		return;
 	}
@@ -544,7 +531,6 @@ static const struct consw mda_con = {
 	.con_init =		mdacon_init,
 	.con_deinit =		mdacon_deinit,
 	.con_clear =		mdacon_clear,
-	.con_putc =		mdacon_putc,
 	.con_putcs =		mdacon_putcs,
 	.con_cursor =		mdacon_cursor,
 	.con_scroll =		mdacon_scroll,
@@ -574,5 +560,6 @@ static void __exit mda_console_exit(void)
 module_init(mda_console_init);
 module_exit(mda_console_exit);
 
+MODULE_DESCRIPTION("MDA based console driver");
 MODULE_LICENSE("GPL");
 

@@ -673,7 +673,7 @@ static struct scsi_host_template mv6_sht = {
 	.sdev_attrs             = ata_ncq_sdev_attrs,
 	.change_queue_depth	= ata_scsi_change_queue_depth,
 	.tag_alloc_policy	= BLK_TAG_ALLOC_RR,
-	.slave_configure	= ata_scsi_slave_config
+	.device_configure	= ata_scsi_device_configure
 };
 
 static struct ata_port_operations mv5_ops = {

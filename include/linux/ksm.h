@@ -26,19 +26,45 @@ int ksm_disable(struct mm_struct *mm);
 
 int __ksm_enter(struct mm_struct *mm);
 void __ksm_exit(struct mm_struct *mm);
+/*
+ * To identify zeropages that were mapped by KSM, we reuse the dirty bit
+ * in the PTE. If the PTE is dirty, the zeropage was mapped by KSM when
+ * deduplicating memory.
+ */
+#define is_ksm_zero_pte(pte)	(is_zero_pfn(pte_pfn(pte)) && pte_dirty(pte))
 
-static inline int ksm_fork(struct mm_struct *mm, struct mm_struct *oldmm)
+extern atomic_long_t ksm_zero_pages;
+
+static inline void ksm_map_zero_page(struct mm_struct *mm)
 {
-	int ret;
+	atomic_long_inc(&ksm_zero_pages);
+	atomic_long_inc(&mm->ksm_zero_pages);
+}
 
-	if (test_bit(MMF_VM_MERGEABLE, &oldmm->flags)) {
-		ret = __ksm_enter(mm);
-		if (ret)
-			return ret;
+static inline void ksm_might_unmap_zero_page(struct mm_struct *mm, pte_t pte)
+{
+	if (is_ksm_zero_pte(pte)) {
+		atomic_long_dec(&ksm_zero_pages);
+		atomic_long_dec(&mm->ksm_zero_pages);
 	}
+}
 
-	if (test_bit(MMF_VM_MERGE_ANY, &oldmm->flags))
-		set_bit(MMF_VM_MERGE_ANY, &mm->flags);
+static inline long mm_ksm_zero_pages(struct mm_struct *mm)
+{
+	return atomic_long_read(&mm->ksm_zero_pages);
+}
+
+static inline void ksm_fork(struct mm_struct *mm, struct mm_struct *oldmm)
+{
+	/* Adding mm to ksm is best effort on fork. */
+	if (test_bit(MMF_VM_MERGEABLE, &oldmm->flags))
+		__ksm_enter(mm);
+}
+
+static inline int ksm_execve(struct mm_struct *mm)
+{
+	if (test_bit(MMF_VM_MERGE_ANY, &mm->flags))
+		return __ksm_enter(mm);
 
 	return 0;
 }
@@ -86,12 +112,20 @@ static inline int ksm_disable(struct mm_struct *mm)
 	return 0;
 }
 
-static inline int ksm_fork(struct mm_struct *mm, struct mm_struct *oldmm)
+static inline void ksm_fork(struct mm_struct *mm, struct mm_struct *oldmm)
+{
+}
+
+static inline int ksm_execve(struct mm_struct *mm)
 {
 	return 0;
 }
 
 static inline void ksm_exit(struct mm_struct *mm)
+{
+}
+
+static inline void ksm_might_unmap_zero_page(struct mm_struct *mm, pte_t pte)
 {
 }
 

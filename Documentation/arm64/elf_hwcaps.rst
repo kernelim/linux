@@ -171,96 +171,73 @@ HWCAP_PACG
     Documentation/arm64/pointer-authentication.rst.
 
 HWCAP2_DCPODP
-
     Functionality implied by ID_AA64ISAR1_EL1.DPB == 0b0010.
 
 HWCAP2_SVE2
-
-    Functionality implied by ID_AA64ZFR0_EL1.SVEVer == 0b0001.
+    Functionality implied by ID_AA64ZFR0_EL1.SVEver == 0b0001.
 
 HWCAP2_SVEAES
-
     Functionality implied by ID_AA64ZFR0_EL1.AES == 0b0001.
 
 HWCAP2_SVEPMULL
-
     Functionality implied by ID_AA64ZFR0_EL1.AES == 0b0010.
 
 HWCAP2_SVEBITPERM
-
     Functionality implied by ID_AA64ZFR0_EL1.BitPerm == 0b0001.
 
 HWCAP2_SVESHA3
-
     Functionality implied by ID_AA64ZFR0_EL1.SHA3 == 0b0001.
 
 HWCAP2_SVESM4
-
     Functionality implied by ID_AA64ZFR0_EL1.SM4 == 0b0001.
 
 HWCAP2_FLAGM2
-
     Functionality implied by ID_AA64ISAR0_EL1.TS == 0b0010.
 
 HWCAP2_FRINT
-
     Functionality implied by ID_AA64ISAR1_EL1.FRINTTS == 0b0001.
 
 HWCAP2_SVEI8MM
-
     Functionality implied by ID_AA64ZFR0_EL1.I8MM == 0b0001.
 
 HWCAP2_SVEF32MM
-
     Functionality implied by ID_AA64ZFR0_EL1.F32MM == 0b0001.
 
 HWCAP2_SVEF64MM
-
     Functionality implied by ID_AA64ZFR0_EL1.F64MM == 0b0001.
 
 HWCAP2_SVEBF16
-
     Functionality implied by ID_AA64ZFR0_EL1.BF16 == 0b0001.
 
 HWCAP2_I8MM
-
     Functionality implied by ID_AA64ISAR1_EL1.I8MM == 0b0001.
 
 HWCAP2_BF16
-
     Functionality implied by ID_AA64ISAR1_EL1.BF16 == 0b0001.
 
 HWCAP2_DGH
-
     Functionality implied by ID_AA64ISAR1_EL1.DGH == 0b0001.
 
 HWCAP2_RNG
-
     Functionality implied by ID_AA64ISAR0_EL1.RNDR == 0b0001.
 
 HWCAP2_BTI
-
-    Functionality implied by ID_AA64PFR0_EL1.BT == 0b0001.
+    Functionality implied by ID_AA64PFR1_EL1.BT == 0b0001.
 
 HWCAP2_MTE
-
     Functionality implied by ID_AA64PFR1_EL1.MTE == 0b0010, as described
     by Documentation/arm64/memory-tagging-extension.rst.
 
 HWCAP2_ECV
-
     Functionality implied by ID_AA64MMFR0_EL1.ECV == 0b0001.
 
 HWCAP2_AFP
-
-    Functionality implied by ID_AA64MFR1_EL1.AFP == 0b0001.
+    Functionality implied by ID_AA64MMFR1_EL1.AFP == 0b0001.
 
 HWCAP2_RPRES
-
     Functionality implied by ID_AA64ISAR2_EL1.RPRES == 0b0001.
 
 HWCAP2_MTE3
-
     Functionality implied by ID_AA64PFR1_EL1.MTE == 0b0011, as described
     by Documentation/arm64/memory-tagging-extension.rst.
 
@@ -330,6 +307,64 @@ HWCAP2_MOPS
 
 HWCAP2_HBC
     Functionality implied by ID_AA64ISAR2_EL1.BC == 0b0001.
+
+HWCAP2_SVE_B16B16
+    Functionality implied by ID_AA64ZFR0_EL1.B16B16 == 0b0001.
+
+HWCAP2_LRCPC3
+    Functionality implied by ID_AA64ISAR1_EL1.LRCPC == 0b0011.
+
+HWCAP2_LSE128
+    Functionality implied by ID_AA64ISAR0_EL1.Atomic == 0b0011.
+
+HWCAP2_FPMR
+    Functionality implied by ID_AA64PFR2_EL1.FMR == 0b0001.
+
+HWCAP2_LUT
+    Functionality implied by ID_AA64ISAR2_EL1.LUT == 0b0001.
+
+HWCAP2_FAMINMAX
+    Functionality implied by ID_AA64ISAR3_EL1.FAMINMAX == 0b0001.
+
+HWCAP2_F8CVT
+    Functionality implied by ID_AA64FPFR0_EL1.F8CVT == 0b1.
+
+HWCAP2_F8FMA
+    Functionality implied by ID_AA64FPFR0_EL1.F8FMA == 0b1.
+
+HWCAP2_F8DP4
+    Functionality implied by ID_AA64FPFR0_EL1.F8DP4 == 0b1.
+
+HWCAP2_F8DP2
+    Functionality implied by ID_AA64FPFR0_EL1.F8DP2 == 0b1.
+
+HWCAP2_F8E4M3
+    Functionality implied by ID_AA64FPFR0_EL1.F8E4M3 == 0b1.
+
+HWCAP2_F8E5M2
+    Functionality implied by ID_AA64FPFR0_EL1.F8E5M2 == 0b1.
+
+HWCAP2_SME_LUTV2
+    Functionality implied by ID_AA64SMFR0_EL1.LUTv2 == 0b1.
+
+HWCAP2_SME_F8F16
+    Functionality implied by ID_AA64SMFR0_EL1.F8F16 == 0b1.
+
+HWCAP2_SME_F8F32
+    Functionality implied by ID_AA64SMFR0_EL1.F8F32 == 0b1.
+
+HWCAP2_SME_SF8FMA
+    Functionality implied by ID_AA64SMFR0_EL1.SF8FMA == 0b1.
+
+HWCAP2_SME_SF8DP4
+    Functionality implied by ID_AA64SMFR0_EL1.SF8DP4 == 0b1.
+
+HWCAP2_SME_SF8DP2
+    Functionality implied by ID_AA64SMFR0_EL1.SF8DP2 == 0b1.
+
+HWCAP2_SME_SF8DP4
+    Functionality implied by ID_AA64SMFR0_EL1.SF8DP4 == 0b1.
+
 
 4. Unused AT_HWCAP bits
 -----------------------

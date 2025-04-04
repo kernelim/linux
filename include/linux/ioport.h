@@ -173,6 +173,11 @@ enum {
 #define DEFINE_RES_MEM(_start, _size)					\
 	DEFINE_RES_MEM_NAMED((_start), (_size), NULL)
 
+#define DEFINE_RES_REG_NAMED(_start, _size, _name)			\
+	DEFINE_RES_NAMED((_start), (_size), (_name), IORESOURCE_REG)
+#define DEFINE_RES_REG(_start, _size)					\
+	DEFINE_RES_REG_NAMED((_start), (_size), NULL)
+
 #define DEFINE_RES_IRQ_NAMED(_irq, _name)				\
 	DEFINE_RES_NAMED((_irq), 1, (_name), IORESOURCE_IRQ)
 #define DEFINE_RES_IRQ(_irq)						\
@@ -182,6 +187,42 @@ enum {
 	DEFINE_RES_NAMED((_dma), 1, (_name), IORESOURCE_DMA)
 #define DEFINE_RES_DMA(_dma)						\
 	DEFINE_RES_DMA_NAMED((_dma), NULL)
+
+/**
+ * typedef resource_alignf - Resource alignment callback
+ * @data:	Private data used by the callback
+ * @res:	Resource candidate range (an empty resource space)
+ * @size:	The minimum size of the empty space
+ * @align:	Alignment from the constraints
+ *
+ * Callback allows calculating resource placement and alignment beyond min,
+ * max, and align fields in the struct resource_constraint.
+ *
+ * Return: Start address for the resource.
+ */
+typedef resource_size_t (*resource_alignf)(void *data,
+					   const struct resource *res,
+					   resource_size_t size,
+					   resource_size_t align);
+
+/**
+ * struct resource_constraint - constraints to be met while searching empty
+ *				resource space
+ * @min:		The minimum address for the memory range
+ * @max:		The maximum address for the memory range
+ * @align:		Alignment for the start address of the empty space
+ * @alignf:		Additional alignment constraints callback
+ * @alignf_data:	Data provided for @alignf callback
+ *
+ * Contains the range and alignment constraints that have to be met during
+ * find_resource_space(). @alignf can be NULL indicating no alignment beyond
+ * @align is necessary.
+ */
+struct resource_constraint {
+	resource_size_t min, max, align;
+	resource_alignf alignf;
+	void *alignf_data;
+};
 
 /* PC/ISA/whatever - the normal PC address spaces: IO and memory */
 extern struct resource ioport_resource;
@@ -202,10 +243,7 @@ extern void arch_remove_reservations(struct resource *avail);
 extern int allocate_resource(struct resource *root, struct resource *new,
 			     resource_size_t size, resource_size_t min,
 			     resource_size_t max, resource_size_t align,
-			     resource_size_t (*alignf)(void *,
-						       const struct resource *,
-						       resource_size_t,
-						       resource_size_t),
+			     resource_alignf alignf,
 			     void *alignf_data);
 struct resource *lookup_resource(struct resource *root, resource_size_t start);
 int adjust_resource(struct resource *res, resource_size_t start,
@@ -258,6 +296,9 @@ resource_union(struct resource *r1, struct resource *r2, struct resource *r)
 	r->end = max(r1->end, r2->end);
 	return true;
 }
+
+int find_resource_space(struct resource *root, struct resource *new,
+			resource_size_t size, struct resource_constraint *constraint);
 
 /* Convenience shorthand with allocation */
 #define request_region(start,n,name)		__request_region(&ioport_resource, (start), (n), (name), 0)
@@ -325,6 +366,9 @@ walk_mem_res(u64 start, u64 end, void *arg,
 extern int
 walk_system_ram_res(u64 start, u64 end, void *arg,
 		    int (*func)(struct resource *, void *));
+extern int
+walk_system_ram_res_rev(u64 start, u64 end, void *arg,
+			int (*func)(struct resource *, void *));
 extern int
 walk_iomem_res_desc(unsigned long desc, unsigned long flags, u64 start, u64 end,
 		    void *arg, int (*func)(struct resource *, void *));

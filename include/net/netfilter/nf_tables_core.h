@@ -66,16 +66,6 @@ struct nft_payload {
 	u8			dreg;
 };
 
-struct nft_payload_set {
-	enum nft_payload_bases	base:8;
-	u8			offset;
-	u8			len;
-	u8			sreg;
-	u8			csum_type;
-	u8			csum_offset;
-	u8			csum_flags;
-};
-
 extern const struct nft_expr_ops nft_payload_fast_ops;
 
 extern const struct nft_expr_ops nft_bitwise_fast_ops;
@@ -153,6 +143,7 @@ enum {
 };
 
 struct nft_inner_tun_ctx {
+	unsigned long cookie;
 	u16	type;
 	u16	inner_tunoff;
 	u16	inner_lloff;

@@ -1,1 +1,1 @@
-# CONFIG_USBIP_CORE is not set
+CONFIG_USBIP_CORE=m

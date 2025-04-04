@@ -51,8 +51,6 @@ extern struct file_system_type autofs_fs_type;
  */
 struct autofs_info {
 	struct dentry	*dentry;
-	struct inode	*inode;
-
 	int		flags;
 
 	struct completion expire_complete;
@@ -62,6 +60,7 @@ struct autofs_info {
 	struct list_head expiring;
 
 	struct autofs_sb_info *sbi;
+	unsigned long exp_timeout;
 	unsigned long last_used;
 	int count;
 
@@ -81,6 +80,9 @@ struct autofs_info {
 					*/
 #define AUTOFS_INF_PENDING	(1<<2) /* dentry pending mount */
 
+#define AUTOFS_INF_EXPIRE_SET	(1<<3) /* per-dentry expire timeout set for
+					  this mount point.
+					*/
 struct autofs_wait_queue {
 	wait_queue_head_t queue;
 	struct autofs_wait_queue *next;
@@ -146,6 +148,11 @@ static inline int autofs_oz_mode(struct autofs_sb_info *sbi)
 {
 	return ((sbi->flags & AUTOFS_SBI_CATATONIC) ||
 		 task_pgrp(current) == sbi->oz_pgrp);
+}
+
+static inline bool autofs_empty(struct autofs_info *ino)
+{
+	return ino->count < 2;
 }
 
 struct inode *autofs_get_inode(struct super_block *, umode_t);

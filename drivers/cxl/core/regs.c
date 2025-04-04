@@ -295,7 +295,7 @@ static bool cxl_decode_regblock(struct pci_dev *pdev, u32 reg_lo, u32 reg_hi,
  * @type: Register Block Indicator id
  * @map: Enumeration output, clobbered on error
  * @index: Index into which particular instance of a regblock wanted in the
- *        order found in register locator DVSEC.
+ *	   order found in register locator DVSEC.
  *
  * Return: 0 if register block enumerated, negative error code otherwise
  *
@@ -314,7 +314,7 @@ int cxl_find_regblock_instance(struct pci_dev *pdev, enum cxl_regloc_type type,
 		.resource = CXL_RESOURCE_NONE,
 	};
 
-	regloc = pci_find_dvsec_capability(pdev, PCI_DVSEC_VENDOR_ID_CXL,
+	regloc = pci_find_dvsec_capability(pdev, PCI_VENDOR_ID_CXL,
 					   CXL_DVSEC_REG_LOCATOR);
 	if (!regloc)
 		return -ENXIO;

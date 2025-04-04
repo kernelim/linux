@@ -76,13 +76,6 @@ struct pci_doe_protocol {
  * @private: Private data for the consumer
  * @work: Used internally by the mailbox
  * @doe_mb: Used internally by the mailbox
- *
- * The payload sizes and rv are specified in bytes with the following
- * restrictions concerning the protocol.
- *
- *	1) The request_pl_sz must be a multiple of double words (4 bytes)
- *	2) The response_pl_sz must be >= a single double word (4 bytes)
- *	3) rv is returned as bytes but it will be a multiple of double words
  */
 struct pci_doe_task {
 	struct pci_doe_protocol prot;
@@ -153,7 +146,7 @@ static int pci_doe_send_req(struct pci_doe_mb *doe_mb,
 {
 	struct pci_dev *pdev = doe_mb->pdev;
 	int offset = doe_mb->cap_offset;
-	size_t length;
+	size_t length, remainder;
 	u32 val;
 	int i;
 
@@ -171,7 +164,7 @@ static int pci_doe_send_req(struct pci_doe_mb *doe_mb,
 		return -EIO;
 
 	/* Length is 2 DW of header + length of payload in DW */
-	length = 2 + task->request_pl_sz / sizeof(__le32);
+	length = 2 + DIV_ROUND_UP(task->request_pl_sz, sizeof(__le32));
 	if (length > PCI_DOE_MAX_LENGTH)
 		return -EIO;
 	if (length == PCI_DOE_MAX_LENGTH)
@@ -184,9 +177,20 @@ static int pci_doe_send_req(struct pci_doe_mb *doe_mb,
 	pci_write_config_dword(pdev, offset + PCI_DOE_WRITE,
 			       FIELD_PREP(PCI_DOE_DATA_OBJECT_HEADER_2_LENGTH,
 					  length));
+
+	/* Write payload */
 	for (i = 0; i < task->request_pl_sz / sizeof(__le32); i++)
 		pci_write_config_dword(pdev, offset + PCI_DOE_WRITE,
 				       le32_to_cpu(task->request_pl[i]));
+
+	/* Write last payload dword */
+	remainder = task->request_pl_sz % sizeof(__le32);
+	if (remainder) {
+		val = 0;
+		memcpy(&val, &task->request_pl[i], remainder);
+		le32_to_cpus(&val);
+		pci_write_config_dword(pdev, offset + PCI_DOE_WRITE, val);
+	}
 
 	pci_doe_write_ctrl(doe_mb, PCI_DOE_CTRL_GO);
 
@@ -207,11 +211,11 @@ static bool pci_doe_data_obj_ready(struct pci_doe_mb *doe_mb)
 
 static int pci_doe_recv_resp(struct pci_doe_mb *doe_mb, struct pci_doe_task *task)
 {
+	size_t length, payload_length, remainder, received;
 	struct pci_dev *pdev = doe_mb->pdev;
 	int offset = doe_mb->cap_offset;
-	size_t length, payload_length;
+	int i = 0;
 	u32 val;
-	int i;
 
 	/* Read the first dword to get the protocol */
 	pci_read_config_dword(pdev, offset + PCI_DOE_READ, &val);
@@ -238,15 +242,38 @@ static int pci_doe_recv_resp(struct pci_doe_mb *doe_mb, struct pci_doe_task *tas
 
 	/* First 2 dwords have already been read */
 	length -= 2;
-	payload_length = min(length, task->response_pl_sz / sizeof(__le32));
-	/* Read the rest of the response payload */
-	for (i = 0; i < payload_length; i++) {
+	received = task->response_pl_sz;
+	payload_length = DIV_ROUND_UP(task->response_pl_sz, sizeof(__le32));
+	remainder = task->response_pl_sz % sizeof(__le32);
+
+	/* remainder signifies number of data bytes in last payload dword */
+	if (!remainder)
+		remainder = sizeof(__le32);
+
+	if (length < payload_length) {
+		received = length * sizeof(__le32);
+		payload_length = length;
+		remainder = sizeof(__le32);
+	}
+
+	if (payload_length) {
+		/* Read all payload dwords except the last */
+		for (; i < payload_length - 1; i++) {
+			pci_read_config_dword(pdev, offset + PCI_DOE_READ,
+					      &val);
+			task->response_pl[i] = cpu_to_le32(val);
+			pci_write_config_dword(pdev, offset + PCI_DOE_READ, 0);
+		}
+
+		/* Read last payload dword */
 		pci_read_config_dword(pdev, offset + PCI_DOE_READ, &val);
-		task->response_pl[i] = cpu_to_le32(val);
+		cpu_to_le32s(&val);
+		memcpy(&task->response_pl[i], &val, remainder);
 		/* Prior to the last ack, ensure Data Object Ready */
-		if (i == (payload_length - 1) && !pci_doe_data_obj_ready(doe_mb))
+		if (!pci_doe_data_obj_ready(doe_mb))
 			return -EIO;
 		pci_write_config_dword(pdev, offset + PCI_DOE_READ, 0);
+		i++;
 	}
 
 	/* Flush excess length */
@@ -260,7 +287,7 @@ static int pci_doe_recv_resp(struct pci_doe_mb *doe_mb, struct pci_doe_task *tas
 	if (FIELD_GET(PCI_DOE_STATUS_ERROR, val))
 		return -EIO;
 
-	return min(length, task->response_pl_sz / sizeof(__le32)) * sizeof(__le32);
+	return received;
 }
 
 static void signal_task_complete(struct pci_doe_task *task, int rv)
@@ -356,11 +383,13 @@ static void pci_doe_task_complete(struct pci_doe_task *task)
 	complete(task->private);
 }
 
-static int pci_doe_discovery(struct pci_doe_mb *doe_mb, u8 *index, u16 *vid,
+static int pci_doe_discovery(struct pci_doe_mb *doe_mb, u8 capver, u8 *index, u16 *vid,
 			     u8 *protocol)
 {
 	u32 request_pl = FIELD_PREP(PCI_DOE_DATA_OBJECT_DISC_REQ_3_INDEX,
-				    *index);
+				    *index) |
+			 FIELD_PREP(PCI_DOE_DATA_OBJECT_DISC_REQ_3_VER,
+				    (capver >= 2) ? 2 : 0);
 	__le32 request_pl_le = cpu_to_le32(request_pl);
 	__le32 response_pl_le;
 	u32 response_pl;
@@ -394,13 +423,17 @@ static int pci_doe_cache_protocols(struct pci_doe_mb *doe_mb)
 {
 	u8 index = 0;
 	u8 xa_idx = 0;
+	u32 hdr = 0;
+
+	pci_read_config_dword(doe_mb->pdev, doe_mb->cap_offset, &hdr);
 
 	do {
 		int rc;
 		u16 vid;
 		u8 prot;
 
-		rc = pci_doe_discovery(doe_mb, &index, &vid, &prot);
+		rc = pci_doe_discovery(doe_mb, PCI_EXT_CAP_VER(hdr), &index,
+				       &vid, &prot);
 		if (rc)
 			return rc;
 
@@ -455,7 +488,7 @@ static struct pci_doe_mb *pci_doe_create_mb(struct pci_dev *pdev,
 	xa_init(&doe_mb->prots);
 
 	doe_mb->work_queue = alloc_ordered_workqueue("%s %s DOE [%x]", 0,
-						dev_driver_string(&pdev->dev),
+						dev_bus_name(&pdev->dev),
 						pci_name(pdev),
 						doe_mb->cap_offset);
 	if (!doe_mb->work_queue) {
@@ -499,49 +532,17 @@ err_free:
 /**
  * pci_doe_destroy_mb() - Destroy a DOE mailbox object
  *
- * @ptr: Pointer to DOE mailbox
+ * @doe_mb: DOE mailbox
  *
  * Destroy all internal data structures created for the DOE mailbox.
  */
-static void pci_doe_destroy_mb(void *ptr)
+static void pci_doe_destroy_mb(struct pci_doe_mb *doe_mb)
 {
-	struct pci_doe_mb *doe_mb = ptr;
-
 	pci_doe_cancel_tasks(doe_mb);
 	xa_destroy(&doe_mb->prots);
 	destroy_workqueue(doe_mb->work_queue);
 	kfree(doe_mb);
 }
-
-/**
- * pcim_doe_create_mb() - Create a DOE mailbox object
- *
- * @pdev: PCI device to create the DOE mailbox for
- * @cap_offset: Offset of the DOE mailbox
- *
- * Create a single mailbox object to manage the mailbox protocol at the
- * cap_offset specified.  The mailbox will automatically be destroyed on
- * driver unbinding from @pdev.
- *
- * RETURNS: created mailbox object on success
- *	    ERR_PTR(-errno) on failure
- */
-struct pci_doe_mb *pcim_doe_create_mb(struct pci_dev *pdev, u16 cap_offset)
-{
-	struct pci_doe_mb *doe_mb;
-	int rc;
-
-	doe_mb = pci_doe_create_mb(pdev, cap_offset);
-	if (IS_ERR(doe_mb))
-		return doe_mb;
-
-	rc = devm_add_action_or_reset(&pdev->dev, pci_doe_destroy_mb, doe_mb);
-	if (rc)
-		return ERR_PTR(rc);
-
-	return doe_mb;
-}
-EXPORT_SYMBOL_GPL(pcim_doe_create_mb);
 
 /**
  * pci_doe_supports_prot() - Return if the DOE instance supports the given
@@ -552,7 +553,7 @@ EXPORT_SYMBOL_GPL(pcim_doe_create_mb);
  *
  * RETURNS: True if the DOE mailbox supports the protocol specified
  */
-bool pci_doe_supports_prot(struct pci_doe_mb *doe_mb, u16 vid, u8 type)
+static bool pci_doe_supports_prot(struct pci_doe_mb *doe_mb, u16 vid, u8 type)
 {
 	unsigned long index;
 	void *entry;
@@ -567,7 +568,6 @@ bool pci_doe_supports_prot(struct pci_doe_mb *doe_mb, u16 vid, u8 type)
 
 	return false;
 }
-EXPORT_SYMBOL_GPL(pci_doe_supports_prot);
 
 /**
  * pci_doe_submit_task() - Submit a task to be processed by the state machine
@@ -592,14 +592,6 @@ static int pci_doe_submit_task(struct pci_doe_mb *doe_mb,
 			       struct pci_doe_task *task)
 {
 	if (!pci_doe_supports_prot(doe_mb, task->prot.vid, task->prot.type))
-		return -EINVAL;
-
-	/*
-	 * DOE requests must be a whole number of DW and the response needs to
-	 * be big enough for at least 1 DW
-	 */
-	if (task->request_pl_sz % sizeof(__le32) ||
-	    task->response_pl_sz < sizeof(__le32))
 		return -EINVAL;
 
 	if (test_bit(PCI_DOE_FLAG_DEAD, &doe_mb->flags))
@@ -628,6 +620,11 @@ static int pci_doe_submit_task(struct pci_doe_mb *doe_mb,
  * Payloads are treated as opaque byte streams which are transmitted verbatim,
  * without byte-swapping.  If payloads contain little-endian register values,
  * the caller is responsible for conversion with cpu_to_le32() / le32_to_cpu().
+ *
+ * For convenience, arbitrary payload sizes are allowed even though PCIe r6.0
+ * sec 6.30.1 specifies the Data Object Header 2 "Length" in dwords.  The last
+ * (partial) dword is copied with byte granularity and padded with zeroes if
+ * necessary.  Callers are thus relieved of using dword-sized bounce buffers.
  *
  * RETURNS: Length of received response or negative errno.
  * Received data in excess of @response_sz is discarded.

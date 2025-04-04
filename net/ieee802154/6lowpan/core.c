@@ -92,7 +92,7 @@ static int lowpan_neigh_construct(struct net_device *dev, struct neighbour *n)
 
 static int lowpan_get_iflink(const struct net_device *dev)
 {
-	return lowpan_802154_dev(dev)->wdev->ifindex;
+	return READ_ONCE(lowpan_802154_dev(dev)->wdev->ifindex);
 }
 
 static const struct net_device_ops lowpan_netdev_ops = {
@@ -115,7 +115,7 @@ static void lowpan_setup(struct net_device *ldev)
 	ldev->netdev_ops	= &lowpan_netdev_ops;
 	ldev->header_ops	= &lowpan_header_ops;
 	ldev->needs_free_netdev	= true;
-	ldev->features		|= NETIF_F_NETNS_LOCAL;
+	ldev->netns_local	= true;
 }
 
 static int lowpan_validate(struct nlattr *tb[], struct nlattr *data[],

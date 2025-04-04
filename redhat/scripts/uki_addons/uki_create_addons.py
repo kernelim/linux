@@ -126,10 +126,10 @@ def create_addons(out_dir):
         out_path = os.path.join(out_dir, uki_addon.name)
         cmd = [
             f'{UKIFY_PATH}', 'build',
-            f'--cmdline="{uki_addon.cmdline}"',
-            f'--output={out_path}']
+            '--cmdline', uki_addon.cmdline,
+            '--output', out_path]
         if addon_sbat_string:
-            cmd.append('--sbat="' + addon_sbat_string.rstrip() +'"')
+            cmd.extend(['--sbat', addon_sbat_string.rstrip()])
 
         subprocess.check_call(cmd, text=True)
 

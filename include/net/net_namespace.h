@@ -44,8 +44,6 @@
 #include <linux/notifier.h>
 #include <linux/xarray.h>
 
-#include <linux/rh_kabi.h>
-
 struct user_namespace;
 struct proc_dir_entry;
 struct net_device;
@@ -69,8 +67,6 @@ struct net {
 						 */
 	spinlock_t		rules_mod_lock;
 
-	atomic_t		dev_unreg_count;
-
 	unsigned int		dev_base_seq;	/* protected by rtnl_mutex */
 	u32			ifindex;
 
@@ -84,6 +80,7 @@ struct net {
 						 * or to unregister pernet ops
 						 * (pernet_ops_rwsem write locked).
 						 */
+	struct llist_node	defer_free_list;
 	struct llist_node	cleanup_list;	/* namespaces on death row */
 
 #ifdef CONFIG_KEYS
@@ -95,7 +92,9 @@ struct net {
 
 	struct ns_common	ns;
 	struct ref_tracker_dir  refcnt_tracker;
-
+	struct ref_tracker_dir  notrefcnt_tracker; /* tracker for objects not
+						    * refcounted against netns
+						    */
 	struct list_head 	dev_base_head;
 	struct proc_dir_entry 	*proc_net;
 	struct proc_dir_entry 	*proc_net_stat;
@@ -158,7 +157,7 @@ struct net {
 	struct net_generic __rcu	*gen;
 
 	/* Used to store attached BPF programs */
-	RH_KABI_EXCLUDE_WITH_SIZE(struct netns_bpf	bpf, 128)
+	struct netns_bpf	bpf;
 
 	/* Note : following structs are cache line aligned */
 #ifdef CONFIG_XFRM
@@ -177,7 +176,7 @@ struct net {
 	struct netns_can	can;
 #endif
 #ifdef CONFIG_XDP_SOCKETS
-	RH_KABI_EXCLUDE_WITH_SIZE(struct netns_xdp	xdp, 32)
+	struct netns_xdp	xdp;
 #endif
 #if IS_ENABLED(CONFIG_CRYPTO_USER)
 	struct sock		*crypto_nlsk;
@@ -319,25 +318,32 @@ static inline int check_net(const struct net *net)
 #define net_drop_ns NULL
 #endif
 
-/* Returns true if the netns initialization is completed successfully */
-static inline bool net_initialized(const struct net *net)
-{
-	return READ_ONCE(net->list.next);
-}
 
-static inline void netns_tracker_alloc(struct net *net,
-				       netns_tracker *tracker, gfp_t gfp)
+static inline void __netns_tracker_alloc(struct net *net,
+					 netns_tracker *tracker,
+					 bool refcounted,
+					 gfp_t gfp)
 {
 #ifdef CONFIG_NET_NS_REFCNT_TRACKER
-	ref_tracker_alloc(&net->refcnt_tracker, tracker, gfp);
+	ref_tracker_alloc(refcounted ? &net->refcnt_tracker :
+				       &net->notrefcnt_tracker,
+			  tracker, gfp);
 #endif
 }
 
-static inline void netns_tracker_free(struct net *net,
-				      netns_tracker *tracker)
+static inline void netns_tracker_alloc(struct net *net, netns_tracker *tracker,
+				       gfp_t gfp)
+{
+	__netns_tracker_alloc(net, tracker, true, gfp);
+}
+
+static inline void __netns_tracker_free(struct net *net,
+					netns_tracker *tracker,
+					bool refcounted)
 {
 #ifdef CONFIG_NET_NS_REFCNT_TRACKER
-       ref_tracker_free(&net->refcnt_tracker, tracker);
+       ref_tracker_free(refcounted ? &net->refcnt_tracker :
+				     &net->notrefcnt_tracker, tracker);
 #endif
 }
 
@@ -351,7 +357,7 @@ static inline struct net *get_net_track(struct net *net,
 
 static inline void put_net_track(struct net *net, netns_tracker *tracker)
 {
-	netns_tracker_free(net, tracker);
+	__netns_tracker_free(net, tracker, true);
 	put_net(net);
 }
 

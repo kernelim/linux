@@ -60,7 +60,7 @@ void dsa_slave_mii_bus_init(struct dsa_switch *ds)
 /* slave device handling ****************************************************/
 static int dsa_slave_get_iflink(const struct net_device *dev)
 {
-	return dsa_slave_to_master(dev)->ifindex;
+	return READ_ONCE(dsa_slave_to_master(dev)->ifindex);
 }
 
 static int dsa_slave_open(struct net_device *dev)

@@ -103,11 +103,6 @@ static void ipmr_expire_process(struct timer_list *t);
 				lockdep_rtnl_is_held() || \
 				list_empty(&net->ipv6.mr6_tables))
 
-static bool ip6mr_can_free_table(struct net *net)
-{
-	return !check_net(net) || !net_initialized(net);
-}
-
 static struct mr_table *ip6mr_mr_table_iter(struct net *net,
 					    struct mr_table *mrt)
 {
@@ -125,7 +120,7 @@ static struct mr_table *ip6mr_mr_table_iter(struct net *net,
 	return ret;
 }
 
-static struct mr_table *__ip6mr_get_table(struct net *net, u32 id)
+static struct mr_table *ip6mr_get_table(struct net *net, u32 id)
 {
 	struct mr_table *mrt;
 
@@ -134,16 +129,6 @@ static struct mr_table *__ip6mr_get_table(struct net *net, u32 id)
 			return mrt;
 	}
 	return NULL;
-}
-
-static struct mr_table *ip6mr_get_table(struct net *net, u32 id)
-{
-	struct mr_table *mrt;
-
-	read_lock(&mrt_lock);
-	mrt = __ip6mr_get_table(net, id);
-	read_unlock(&mrt_lock);
-	return mrt;
 }
 
 static int ip6mr_fib_lookup(struct net *net, struct flowi6 *flp6,
@@ -187,7 +172,7 @@ static int ip6mr_rule_action(struct fib_rule *rule, struct flowi *flp,
 
 	arg->table = fib_rule_get_table(rule, arg);
 
-	mrt = __ip6mr_get_table(rule->fr_net, arg->table);
+	mrt = ip6mr_get_table(rule->fr_net, arg->table);
 	if (!mrt)
 		return -EAGAIN;
 	res->mrt = mrt;
@@ -306,11 +291,6 @@ EXPORT_SYMBOL(ip6mr_rule_default);
 #define ip6mr_for_each_table(mrt, net) \
 	for (mrt = net->ipv6.mrt6; mrt; mrt = NULL)
 
-static bool ip6mr_can_free_table(struct net *net)
-{
-	return !check_net(net);
-}
-
 static struct mr_table *ip6mr_mr_table_iter(struct net *net,
 					    struct mr_table *mrt)
 {
@@ -323,8 +303,6 @@ static struct mr_table *ip6mr_get_table(struct net *net, u32 id)
 {
 	return net->ipv6.mrt6;
 }
-
-#define __ip6mr_get_table ip6mr_get_table
 
 static int ip6mr_fib_lookup(struct net *net, struct flowi6 *flp6,
 			    struct mr_table **mrt)
@@ -404,7 +382,7 @@ static struct mr_table *ip6mr_new_table(struct net *net, u32 id)
 {
 	struct mr_table *mrt;
 
-	mrt = __ip6mr_get_table(net, id);
+	mrt = ip6mr_get_table(net, id);
 	if (mrt)
 		return mrt;
 
@@ -414,10 +392,6 @@ static struct mr_table *ip6mr_new_table(struct net *net, u32 id)
 
 static void ip6mr_free_table(struct mr_table *mrt)
 {
-	struct net *net = read_pnet(&mrt->net);
-
-	DEBUG_NET_WARN_ON_ONCE(!ip6mr_can_free_table(net));
-
 	timer_shutdown_sync(&mrt->ipmr_expire_timer);
 	mroute_clean_tables(mrt, MRT6_FLUSH_MIFS | MRT6_FLUSH_MIFS_STATIC |
 				 MRT6_FLUSH_MFC | MRT6_FLUSH_MFC_STATIC);
@@ -437,15 +411,13 @@ static void *ip6mr_vif_seq_start(struct seq_file *seq, loff_t *pos)
 	struct net *net = seq_file_net(seq);
 	struct mr_table *mrt;
 
-	read_lock(&mrt_lock);
-	mrt = __ip6mr_get_table(net, RT6_TABLE_DFLT);
-	if (!mrt) {
-		read_unlock(&mrt_lock);
+	mrt = ip6mr_get_table(net, RT6_TABLE_DFLT);
+	if (!mrt)
 		return ERR_PTR(-ENOENT);
-	}
 
 	iter->mrt = mrt;
 
+	read_lock(&mrt_lock);
 	return mr_vif_seq_start(seq, pos);
 }
 
@@ -666,7 +638,7 @@ static void reg_vif_setup(struct net_device *dev)
 	dev->flags		= IFF_NOARP;
 	dev->netdev_ops		= &reg_vif_netdev_ops;
 	dev->needs_free_netdev	= true;
-	dev->features		|= NETIF_F_NETNS_LOCAL;
+	dev->netns_local	= true;
 }
 
 static struct net_device *ip6mr_reg_vif(struct net *net, struct mr_table *mrt)
@@ -767,7 +739,7 @@ static int mif6_delete(struct mr_table *mrt, int vifi, int notify,
 
 	in6_dev = __in6_dev_get(dev);
 	if (in6_dev) {
-		in6_dev->cnf.mc_forwarding--;
+		atomic_dec(&in6_dev->cnf.mc_forwarding);
 		inet6_netconf_notify_devconf(dev_net(dev), RTM_NEWNETCONF,
 					     NETCONFA_MC_FORWARDING,
 					     dev->ifindex, &in6_dev->cnf);
@@ -935,7 +907,7 @@ static int mif6_add(struct net *net, struct mr_table *mrt,
 
 	in6_dev = __in6_dev_get(dev);
 	if (in6_dev) {
-		in6_dev->cnf.mc_forwarding++;
+		atomic_inc(&in6_dev->cnf.mc_forwarding);
 		inet6_netconf_notify_devconf(dev_net(dev), RTM_NEWNETCONF,
 					     NETCONFA_MC_FORWARDING,
 					     dev->ifindex, &in6_dev->cnf);
@@ -1598,7 +1570,7 @@ static int ip6mr_sk_init(struct mr_table *mrt, struct sock *sk)
 	} else {
 		rcu_assign_pointer(mrt->mroute_sk, sk);
 		sock_set_flag(sk, SOCK_RCU_FREE);
-		net->ipv6.devconf_all->mc_forwarding++;
+		atomic_inc(&net->ipv6.devconf_all->mc_forwarding);
 	}
 	write_unlock_bh(&mrt_lock);
 
@@ -1631,7 +1603,7 @@ int ip6mr_sk_done(struct sock *sk)
 			 * so the RCU grace period before sk freeing
 			 * is guaranteed by sk_destruct()
 			 */
-			net->ipv6.devconf_all->mc_forwarding--;
+			atomic_dec(&net->ipv6.devconf_all->mc_forwarding);
 			write_unlock_bh(&mrt_lock);
 			inet6_netconf_notify_devconf(net, RTM_NEWNETCONF,
 						     NETCONFA_MC_FORWARDING,
@@ -2293,13 +2265,11 @@ int ip6mr_get_route(struct net *net, struct sk_buff *skb, struct rtmsg *rtm,
 	struct mfc6_cache *cache;
 	struct rt6_info *rt = (struct rt6_info *)skb_dst(skb);
 
-	read_lock(&mrt_lock);
-	mrt = __ip6mr_get_table(net, RT6_TABLE_DFLT);
-	if (!mrt) {
-		read_unlock(&mrt_lock);
+	mrt = ip6mr_get_table(net, RT6_TABLE_DFLT);
+	if (!mrt)
 		return -ENOENT;
-	}
 
+	read_lock(&mrt_lock);
 	cache = ip6mr_cache_find(mrt, &rt->rt6i_src.addr, &rt->rt6i_dst.addr);
 	if (!cache && skb->dev) {
 		int vif = ip6mr_find_vif(mrt, skb->dev);
@@ -2580,7 +2550,7 @@ static int ip6mr_rtm_getroute(struct sk_buff *in_skb, struct nlmsghdr *nlh,
 		grp = nla_get_in6_addr(tb[RTA_DST]);
 	tableid = tb[RTA_TABLE] ? nla_get_u32(tb[RTA_TABLE]) : 0;
 
-	mrt = __ip6mr_get_table(net, tableid ?: RT_TABLE_DEFAULT);
+	mrt = ip6mr_get_table(net, tableid ?: RT_TABLE_DEFAULT);
 	if (!mrt) {
 		NL_SET_ERR_MSG_MOD(extack, "MR table does not exist");
 		return -ENOENT;
@@ -2612,7 +2582,9 @@ static int ip6mr_rtm_getroute(struct sk_buff *in_skb, struct nlmsghdr *nlh,
 static int ip6mr_rtm_dumproute(struct sk_buff *skb, struct netlink_callback *cb)
 {
 	const struct nlmsghdr *nlh = cb->nlh;
-	struct fib_dump_filter filter = {};
+	struct fib_dump_filter filter = {
+		.rtnl_held = true,
+	};
 	int err;
 
 	if (cb->strict_check) {
@@ -2625,7 +2597,7 @@ static int ip6mr_rtm_dumproute(struct sk_buff *skb, struct netlink_callback *cb)
 	if (filter.table_id) {
 		struct mr_table *mrt;
 
-		mrt = __ip6mr_get_table(sock_net(skb->sk), filter.table_id);
+		mrt = ip6mr_get_table(sock_net(skb->sk), filter.table_id);
 		if (!mrt) {
 			if (rtnl_msg_family(cb->nlh) != RTNL_FAMILY_IP6MR)
 				return skb->len;

@@ -405,7 +405,7 @@ repeat:
 					       ssize);
 		if (ret == -1) {
 			/*
-			 * Try to to keep bolted entries in primary.
+			 * Try to keep bolted entries in primary.
 			 * Remove non bolted entries and try insert again
 			 */
 			ret = mmu_hash_ops.hpte_remove(hpteg);
@@ -424,7 +424,7 @@ repeat:
 			break;
 
 		cond_resched();
-		if (debug_pagealloc_enabled() &&
+		if (debug_pagealloc_enabled_or_kfence() &&
 			(paddr >> PAGE_SHIFT) < linear_map_hash_count)
 			linear_map_hash_slots[paddr >> PAGE_SHIFT] = ret | 0x80;
 	}
@@ -471,7 +471,7 @@ int htab_remove_mapping(unsigned long vstart, unsigned long vend,
 	return ret;
 }
 
-static bool disable_1tb_segments = false;
+static bool disable_1tb_segments __ro_after_init;
 
 static int __init parse_disable_1tb_segments(char *p)
 {
@@ -479,6 +479,40 @@ static int __init parse_disable_1tb_segments(char *p)
 	return 0;
 }
 early_param("disable_1tb_segments", parse_disable_1tb_segments);
+
+bool stress_hpt_enabled __initdata;
+
+static int __init parse_stress_hpt(char *p)
+{
+	stress_hpt_enabled = true;
+	return 0;
+}
+early_param("stress_hpt", parse_stress_hpt);
+
+__ro_after_init DEFINE_STATIC_KEY_FALSE(stress_hpt_key);
+
+/*
+ * per-CPU array allocated if we enable stress_hpt.
+ */
+#define STRESS_MAX_GROUPS 16
+struct stress_hpt_struct {
+	unsigned long last_group[STRESS_MAX_GROUPS];
+};
+
+static inline int stress_nr_groups(void)
+{
+	/*
+	 * LPAR H_REMOVE flushes TLB, so need some number > 1 of entries
+	 * to allow practical forward progress. Bare metal returns 1, which
+	 * seems to help uncover more bugs.
+	 */
+	if (firmware_has_feature(FW_FEATURE_LPAR))
+		return STRESS_MAX_GROUPS;
+	else
+		return 1;
+}
+
+static struct stress_hpt_struct *stress_hpt_struct;
 
 static int __init htab_dt_scan_seg_sizes(unsigned long node,
 					 const char *uname, int depth,
@@ -773,7 +807,7 @@ static void __init htab_init_page_sizes(void)
 	bool aligned = true;
 	init_hpte_page_sizes();
 
-	if (!debug_pagealloc_enabled()) {
+	if (!debug_pagealloc_enabled_or_kfence()) {
 		/*
 		 * Pick a size for the linear mapping. Currently, we only
 		 * support 16M, 1M and 4K which is the default
@@ -976,6 +1010,23 @@ static void __init hash_init_partition_table(phys_addr_t hash_table,
 	pr_info("Partition table %p\n", partition_tb);
 }
 
+void hpt_clear_stress(void);
+static struct timer_list stress_hpt_timer;
+static void stress_hpt_timer_fn(struct timer_list *timer)
+{
+	int next_cpu;
+
+	hpt_clear_stress();
+	if (!firmware_has_feature(FW_FEATURE_LPAR))
+		tlbiel_all();
+
+	next_cpu = cpumask_next(raw_smp_processor_id(), cpu_online_mask);
+	if (next_cpu >= nr_cpu_ids)
+		next_cpu = cpumask_first(cpu_online_mask);
+	stress_hpt_timer.expires = jiffies + msecs_to_jiffies(10);
+	add_timer_on(&stress_hpt_timer, next_cpu);
+}
+
 static void __init htab_initialize(void)
 {
 	unsigned long table;
@@ -994,6 +1045,21 @@ static void __init htab_initialize(void)
 
 	if (stress_slb_enabled)
 		static_branch_enable(&stress_slb_key);
+
+	if (stress_hpt_enabled) {
+		unsigned long tmp;
+		static_branch_enable(&stress_hpt_key);
+		// Too early to use nr_cpu_ids, so use NR_CPUS
+		tmp = memblock_phys_alloc_range(sizeof(struct stress_hpt_struct) * NR_CPUS,
+						__alignof__(struct stress_hpt_struct),
+						0, MEMBLOCK_ALLOC_ANYWHERE);
+		memset((void *)tmp, 0xff, sizeof(struct stress_hpt_struct) * NR_CPUS);
+		stress_hpt_struct = __va(tmp);
+
+		timer_setup(&stress_hpt_timer, stress_hpt_timer_fn, 0);
+		stress_hpt_timer.expires = jiffies + msecs_to_jiffies(10);
+		add_timer(&stress_hpt_timer);
+	}
 
 	/*
 	 * Calculate the required size of the htab.  We want the number of
@@ -1061,7 +1127,7 @@ static void __init htab_initialize(void)
 
 	prot = pgprot_val(PAGE_KERNEL);
 
-	if (debug_pagealloc_enabled()) {
+	if (debug_pagealloc_enabled_or_kfence()) {
 		linear_map_hash_count = memblock_end_of_DRAM() >> PAGE_SHIFT;
 		linear_map_hash_slots = memblock_alloc_try_nid(
 				linear_map_hash_count, 1, MEMBLOCK_LOW_LIMIT,
@@ -1241,18 +1307,19 @@ void hash__early_init_mmu_secondary(void)
  */
 unsigned int hash_page_do_lazy_icache(unsigned int pp, pte_t pte, int trap)
 {
-	struct page *page;
+	struct folio *folio;
 
 	if (!pfn_valid(pte_pfn(pte)))
 		return pp;
 
-	page = pte_page(pte);
+	folio = page_folio(pte_page(pte));
 
 	/* page is dirty */
-	if (!test_bit(PG_dcache_clean, &page->flags) && !PageReserved(page)) {
+	if (!test_bit(PG_dcache_clean, &folio->flags) &&
+	    !folio_test_reserved(folio)) {
 		if (trap == INTERRUPT_INST_STORAGE) {
-			flush_dcache_icache_page(page);
-			set_bit(PG_dcache_clean, &page->flags);
+			flush_dcache_icache_folio(folio);
+			set_bit(PG_dcache_clean, &folio->flags);
 		} else
 			pp |= HPTE_R_N;
 	}
@@ -1774,7 +1841,7 @@ static void hash_preload(struct mm_struct *mm, pte_t *ptep, unsigned long ea,
  *
  * This must always be called with the pte lock held.
  */
-void update_mmu_cache(struct vm_area_struct *vma, unsigned long address,
+void __update_mmu_cache(struct vm_area_struct *vma, unsigned long address,
 		      pte_t *ptep)
 {
 	/*
@@ -1783,9 +1850,6 @@ void update_mmu_cache(struct vm_area_struct *vma, unsigned long address,
 	 */
 	unsigned long trap;
 	bool is_exec;
-
-	if (radix_enabled())
-		return;
 
 	/* We only want HPTEs for linux PTEs that have _PAGE_ACCESSED set */
 	if (!pte_young(*ptep) || address >= TASK_SIZE)
@@ -1983,8 +2047,71 @@ repeat:
 	return slot;
 }
 
-#ifdef CONFIG_DEBUG_PAGEALLOC
-static DEFINE_SPINLOCK(linear_map_hash_lock);
+void hpt_clear_stress(void)
+{
+	int cpu = raw_smp_processor_id();
+	int g;
+
+	for (g = 0; g < stress_nr_groups(); g++) {
+		unsigned long last_group;
+		last_group = stress_hpt_struct[cpu].last_group[g];
+
+		if (last_group != -1UL) {
+			int i;
+			for (i = 0; i < HPTES_PER_GROUP; i++) {
+				if (mmu_hash_ops.hpte_remove(last_group) == -1)
+					break;
+			}
+			stress_hpt_struct[cpu].last_group[g] = -1;
+		}
+	}
+}
+
+void hpt_do_stress(unsigned long ea, unsigned long hpte_group)
+{
+	unsigned long last_group;
+	int cpu = raw_smp_processor_id();
+
+	last_group = stress_hpt_struct[cpu].last_group[stress_nr_groups() - 1];
+	if (hpte_group == last_group)
+		return;
+
+	if (last_group != -1UL) {
+		int i;
+		/*
+		 * Concurrent CPUs might be inserting into this group, so
+		 * give up after a number of iterations, to prevent a live
+		 * lock.
+		 */
+		for (i = 0; i < HPTES_PER_GROUP; i++) {
+			if (mmu_hash_ops.hpte_remove(last_group) == -1)
+				break;
+		}
+		stress_hpt_struct[cpu].last_group[stress_nr_groups() - 1] = -1;
+	}
+
+	if (ea >= PAGE_OFFSET) {
+		/*
+		 * We would really like to prefetch to get the TLB loaded, then
+		 * remove the PTE before returning from fault interrupt, to
+		 * increase the hash fault rate.
+		 *
+		 * Unfortunately QEMU TCG does not model the TLB in a way that
+		 * makes this possible, and systemsim (mambo) emulator does not
+		 * bring in TLBs with prefetches (although loads/stores do
+		 * work for non-CI PTEs).
+		 *
+		 * So remember this PTE and clear it on the next hash fault.
+		 */
+		memmove(&stress_hpt_struct[cpu].last_group[1],
+			&stress_hpt_struct[cpu].last_group[0],
+			(stress_nr_groups() - 1) * sizeof(unsigned long));
+		stress_hpt_struct[cpu].last_group[0] = hpte_group;
+	}
+}
+
+#if defined(CONFIG_DEBUG_PAGEALLOC) || defined(CONFIG_KFENCE)
+static DEFINE_RAW_SPINLOCK(linear_map_hash_lock);
 
 static void kernel_map_linear_page(unsigned long vaddr, unsigned long lmi)
 {
@@ -2008,10 +2135,10 @@ static void kernel_map_linear_page(unsigned long vaddr, unsigned long lmi)
 				    mmu_linear_psize, mmu_kernel_ssize);
 
 	BUG_ON (ret < 0);
-	spin_lock(&linear_map_hash_lock);
+	raw_spin_lock(&linear_map_hash_lock);
 	BUG_ON(linear_map_hash_slots[lmi] & 0x80);
 	linear_map_hash_slots[lmi] = ret | 0x80;
-	spin_unlock(&linear_map_hash_lock);
+	raw_spin_unlock(&linear_map_hash_lock);
 }
 
 static void kernel_unmap_linear_page(unsigned long vaddr, unsigned long lmi)
@@ -2021,14 +2148,14 @@ static void kernel_unmap_linear_page(unsigned long vaddr, unsigned long lmi)
 	unsigned long vpn = hpt_vpn(vaddr, vsid, mmu_kernel_ssize);
 
 	hash = hpt_hash(vpn, PAGE_SHIFT, mmu_kernel_ssize);
-	spin_lock(&linear_map_hash_lock);
+	raw_spin_lock(&linear_map_hash_lock);
 	if (!(linear_map_hash_slots[lmi] & 0x80)) {
-		spin_unlock(&linear_map_hash_lock);
+		raw_spin_unlock(&linear_map_hash_lock);
 		return;
 	}
 	hidx = linear_map_hash_slots[lmi] & 0x7f;
 	linear_map_hash_slots[lmi] = 0;
-	spin_unlock(&linear_map_hash_lock);
+	raw_spin_unlock(&linear_map_hash_lock);
 	if (hidx & _PTEIDX_SECONDARY)
 		hash = ~hash;
 	slot = (hash & htab_hash_mask) * HPTES_PER_GROUP;
@@ -2056,7 +2183,7 @@ void hash__kernel_map_pages(struct page *page, int numpages, int enable)
 	}
 	local_irq_restore(flags);
 }
-#endif /* CONFIG_DEBUG_PAGEALLOC */
+#endif /* CONFIG_DEBUG_PAGEALLOC || CONFIG_KFENCE */
 
 void hash__setup_initial_memory_limit(phys_addr_t first_memblock_base,
 				phys_addr_t first_memblock_size)

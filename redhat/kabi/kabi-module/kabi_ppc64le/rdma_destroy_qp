@@ -1,3 +1,3 @@
-#5-
-0x671689fe	rdma_destroy_qp	drivers/infiniband/core/rdma_cm	EXPORT_SYMBOL	
+#6-
+0x86a5223e	rdma_destroy_qp	drivers/infiniband/core/rdma_cm	EXPORT_SYMBOL	
 

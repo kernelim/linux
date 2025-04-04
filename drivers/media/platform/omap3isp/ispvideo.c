@@ -206,7 +206,7 @@ isp_video_remote_subdev(struct isp_video *video, u32 *pad)
 {
 	struct media_pad *remote;
 
-	remote = media_entity_remote_pad(&video->pad);
+	remote = media_pad_remote_pad_first(&video->pad);
 
 	if (!remote || !is_media_entity_v4l2_subdev(remote->entity))
 		return NULL;
@@ -981,7 +981,7 @@ static int isp_video_check_external_subdevs(struct isp_video *video,
 			continue;
 
 		/* ISP entities have always sink pad == 0. Find source. */
-		source_pad = media_entity_remote_pad(&ents[i]->pads[0]);
+		source_pad = media_pad_remote_pad_first(&ents[i]->pads[0]);
 		if (source_pad == NULL)
 			continue;
 
@@ -1093,8 +1093,7 @@ isp_video_streamon(struct file *file, void *fh, enum v4l2_buf_type type)
 	/* Start streaming on the pipeline. No link touching an entity in the
 	 * pipeline can be activated or deactivated once streaming is started.
 	 */
-	pipe = video->video.entity.pipe
-	     ? to_isp_pipeline(&video->video.entity) : &video->pipe;
+	pipe = to_isp_pipeline(&video->video.entity) ? : &video->pipe;
 
 	ret = media_entity_enum_init(&pipe->ent_enum, &video->isp->media_dev);
 	if (ret)

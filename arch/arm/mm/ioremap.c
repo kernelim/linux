@@ -36,6 +36,7 @@
 #include <asm/mmu_context.h>
 #include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
+#include <asm/set_memory.h>
 #include <asm/system_info.h>
 
 #include <asm/mach/map.h>
@@ -109,8 +110,8 @@ void __init add_static_vm_early(struct static_vm *svm)
 int ioremap_page(unsigned long virt, unsigned long phys,
 		 const struct mem_type *mtype)
 {
-	return ioremap_page_range(virt, virt + PAGE_SIZE, phys,
-				  __pgprot(mtype->prot_pte));
+	return vmap_page_range(virt, virt + PAGE_SIZE, phys,
+			       __pgprot(mtype->prot_pte));
 }
 EXPORT_SYMBOL(ioremap_page);
 
@@ -401,6 +402,11 @@ __arm_ioremap_exec(phys_addr_t phys_addr, size_t size, bool cached)
 			__builtin_return_address(0));
 }
 
+void __arm_iomem_set_ro(void __iomem *ptr, size_t size)
+{
+	set_memory_ro((unsigned long)ptr, PAGE_ALIGN(size) / PAGE_SIZE);
+}
+
 void *arch_memremap_wb(phys_addr_t phys_addr, size_t size)
 {
 	return (__force void *)arch_ioremap_caller(phys_addr, size,
@@ -408,7 +414,7 @@ void *arch_memremap_wb(phys_addr_t phys_addr, size_t size)
 						   __builtin_return_address(0));
 }
 
-void __iounmap(volatile void __iomem *io_addr)
+void iounmap(volatile void __iomem *io_addr)
 {
 	void *addr = (void *)(PAGE_MASK & (unsigned long)io_addr);
 	struct static_vm *svm;
@@ -437,12 +443,6 @@ void __iounmap(volatile void __iomem *io_addr)
 	vunmap(addr);
 }
 
-void (*arch_iounmap)(volatile void __iomem *) = __iounmap;
-
-void iounmap(volatile void __iomem *cookie)
-{
-	arch_iounmap(cookie);
-}
 EXPORT_SYMBOL(iounmap);
 
 #ifdef CONFIG_PCI
@@ -463,8 +463,8 @@ int pci_remap_iospace(const struct resource *res, phys_addr_t phys_addr)
 	if (res->end > IO_SPACE_LIMIT)
 		return -EINVAL;
 
-	return ioremap_page_range(vaddr, vaddr + resource_size(res), phys_addr,
-				  __pgprot(get_mem_type(pci_ioremap_mem_type)->prot_pte));
+	return vmap_page_range(vaddr, vaddr + resource_size(res), phys_addr,
+			       __pgprot(get_mem_type(pci_ioremap_mem_type)->prot_pte));
 }
 EXPORT_SYMBOL(pci_remap_iospace);
 

@@ -173,7 +173,7 @@ struct cec_adap_ops {
  *			case the transmit will finish, but will not retransmit
  *			and be marked as ABORTED.
  * @xfer_timeout_ms:	the transfer timeout in ms.
- *			If 0, then timeout after 2.1 ms.
+ *			If 0, then timeout after 2100 ms.
  * @kthread_config:	kthread used to configure a CEC adapter
  * @config_completion:	used to signal completion of the config kthread
  * @kthread:		main CEC processing thread
@@ -224,8 +224,6 @@ struct cec_adap_ops {
  * @notifier:		CEC notifier
  * @pin:		CEC pin status struct
  * @cec_dir:		debugfs cec directory
- * @status_file:	debugfs cec status file
- * @error_inj_file:	debugfs cec error injection file
  * @sequence:		transmit sequence counter
  * @input_phys:		remote control input_phys name
  *
@@ -294,8 +292,39 @@ struct cec_adapter {
 
 	u32 sequence;
 
-	char input_phys[32];
+	char input_phys[40];
 };
+
+static inline int cec_get_device(struct cec_adapter *adap)
+{
+	struct cec_devnode *devnode = &adap->devnode;
+
+	/*
+	 * Check if the cec device is available. This needs to be done with
+	 * the devnode->lock held to prevent an open/unregister race:
+	 * without the lock, the device could be unregistered and freed between
+	 * the devnode->registered check and get_device() calls, leading to
+	 * a crash.
+	 */
+	mutex_lock(&devnode->lock);
+	/*
+	 * return ENODEV if the cec device has been removed
+	 * already or if it is not registered anymore.
+	 */
+	if (!devnode->registered) {
+		mutex_unlock(&devnode->lock);
+		return -ENODEV;
+	}
+	/* and increase the device refcount */
+	get_device(&devnode->dev);
+	mutex_unlock(&devnode->lock);
+	return 0;
+}
+
+static inline void cec_put_device(struct cec_adapter *adap)
+{
+	put_device(&adap->devnode.dev);
+}
 
 static inline void *cec_get_drvdata(const struct cec_adapter *adap)
 {

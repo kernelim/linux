@@ -45,16 +45,16 @@
  * last_iova + 1 can overflow. An iopt_pages index will always be much less than
  * ULONG_MAX so last_index + 1 cannot overflow.
  */
+#include <linux/highmem.h>
+#include <linux/iommu.h>
+#include <linux/iommufd.h>
+#include <linux/kthread.h>
 #include <linux/overflow.h>
 #include <linux/slab.h>
-#include <linux/iommu.h>
 #include <linux/sched/mm.h>
-#include <linux/highmem.h>
-#include <linux/kthread.h>
-#include <linux/iommufd.h>
 
-#include "io_pagetable.h"
 #include "double_span.h"
+#include "io_pagetable.h"
 
 #ifndef CONFIG_IOMMUFD_TEST
 #define TEMP_MEMORY_LIMIT 65536
@@ -713,12 +713,9 @@ static void pfn_reader_user_init(struct pfn_reader_user *user,
 	user->upages_end = 0;
 	user->locked = -1;
 
-	if (pages->writable) {
-		user->gup_flags = FOLL_LONGTERM | FOLL_WRITE;
-	} else {
-		/* Still need to break COWs on read */
-		user->gup_flags = FOLL_LONGTERM | FOLL_FORCE | FOLL_WRITE;
-	}
+	user->gup_flags = FOLL_LONGTERM;
+	if (pages->writable)
+		user->gup_flags |= FOLL_WRITE;
 }
 
 static void pfn_reader_user_destroy(struct pfn_reader_user *user,
@@ -788,10 +785,6 @@ static int pfn_reader_user_pin(struct pfn_reader_user *user,
 			mmap_read_lock(pages->source_mm);
 			user->locked = 1;
 		}
-		/*
-		 * FIXME: last NULL can be &pfns->locked once the GUP patch
-		 * is merged.
-		 */
 		rc = pin_user_pages_remote(pages->source_mm, uptr, npages,
 					   user->gup_flags, user->upages,
 					   &user->locked);
@@ -816,13 +809,14 @@ static int incr_user_locked_vm(struct iopt_pages *pages, unsigned long npages)
 
 	lock_limit = task_rlimit(pages->source_task, RLIMIT_MEMLOCK) >>
 		     PAGE_SHIFT;
+
+	cur_pages = atomic_long_read(&pages->source_user->locked_vm);
 	do {
-		cur_pages = atomic_long_read(&pages->source_user->locked_vm);
 		new_pages = cur_pages + npages;
 		if (new_pages > lock_limit)
 			return -ENOMEM;
-	} while (atomic_long_cmpxchg(&pages->source_user->locked_vm, cur_pages,
-				     new_pages) != cur_pages);
+	} while (!atomic_long_try_cmpxchg(&pages->source_user->locked_vm,
+					  &cur_pages, new_pages));
 	return 0;
 }
 

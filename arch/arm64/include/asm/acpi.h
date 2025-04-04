@@ -43,6 +43,9 @@
 #define ACPI_MADT_GICC_SPE  (offsetof(struct acpi_madt_generic_interrupt, \
 	spe_interrupt) + sizeof(u16))
 
+#define ACPI_MADT_GICC_TRBE  (offsetof(struct acpi_madt_generic_interrupt, \
+	trbe_interrupt) + sizeof(u16))
+
 /*
  * Arm® Functional Fixed Hardware Specification Version 1.2.
  * Table 2: Arm Architecture context loss flags
@@ -115,6 +118,18 @@ struct acpi_madt_generic_interrupt *acpi_cpu_get_madt_gicc(int cpu);
 static inline u32 get_acpi_id_for_cpu(unsigned int cpu)
 {
 	return	acpi_cpu_get_madt_gicc(cpu)->uid;
+}
+
+static inline int get_cpu_for_acpi_id(u32 uid)
+{
+	int cpu;
+
+	for (cpu = 0; cpu < nr_cpu_ids; cpu++)
+		if (acpi_cpu_get_madt_gicc(cpu) &&
+		    uid == get_acpi_id_for_cpu(cpu))
+			return cpu;
+
+	return -EINVAL;
 }
 
 static inline void arch_fix_phys_package_id(int num, u32 slot) { }

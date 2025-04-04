@@ -243,8 +243,12 @@ done:
 	return ret;
 }
 
+<<<<<<< HEAD:drivers/media/platform/vsp1/vsp1_rwpf.c
 const struct v4l2_subdev_pad_ops vsp1_rwpf_pad_ops = {
 	.init_cfg = vsp1_entity_init_cfg,
+=======
+static const struct v4l2_subdev_pad_ops vsp1_rwpf_pad_ops = {
+>>>>>>> 5755be5f15d9 (media: v4l2-subdev: Rename .init_cfg() operation to .init_state()):drivers/media/platform/renesas/vsp1/vsp1_rwpf.c
 	.enum_mbus_code = vsp1_rwpf_enum_mbus_code,
 	.enum_frame_size = vsp1_rwpf_enum_frame_size,
 	.get_fmt = vsp1_subdev_get_pad_format,

@@ -48,6 +48,13 @@ config ARM_CMN
 	  Support for PMU events monitoring on the Arm CMN-600 Coherent Mesh
 	  Network interconnect.
 
+config ARM_NI
+	tristate "Arm NI-700 PMU support"
+	depends on ARM64 || COMPILE_TEST
+	help
+	  Support for PMU events monitoring on the Arm NI-700 Network-on-Chip
+	  interconnect and family.
+
 config ARM_PMU
 	depends on ARM || ARM64
 	bool "ARM PMU framework"
@@ -56,13 +63,25 @@ config ARM_PMU
 	  Say y if you want to use CPU performance monitors on ARM-based
 	  systems.
 
+config ARM_V6_PMU
+	depends on ARM_PMU && (CPU_V6 || CPU_V6K)
+	def_bool y
+
+config ARM_V7_PMU
+	depends on ARM_PMU && CPU_V7
+	def_bool y
+
+config ARM_XSCALE_PMU
+	depends on ARM_PMU && CPU_XSCALE
+	def_bool y
+
 config ARM_PMU_ACPI
 	depends on ARM_PMU && ACPI
 	def_bool y
 
 config ARM_SMMU_V3_PMU
 	 tristate "ARM SMMUv3 Performance Monitors Extension"
-	 depends on ARM64 && ACPI
+	 depends on ARM64
 	 depends on GENERIC_MSI_IRQ
 	   help
 	   Provides support for the ARM SMMUv3 Performance Monitor Counter
@@ -96,6 +115,14 @@ config FSL_IMX8_DDR_PMU
 	  Provides support for the DDR performance monitor in i.MX8, which
 	  can give information about memory throughput and other related
 	  events.
+
+config FSL_IMX9_DDR_PMU
+	tristate "Freescale i.MX9 DDR perf monitor"
+	depends on ARCH_MXC
+	 help
+	 Provides support for the DDR performance monitor in i.MX9, which
+	 can give information about memory throughput and other related
+	 events.
 
 config QCOM_L2_PMU
 	bool "Qualcomm Technologies L2-cache PMU"
@@ -177,6 +204,13 @@ config MARVELL_CN10K_DDR_PMU
 	help
 	  Enable perf support for Marvell DDR Performance monitoring
 	  event on CN10K platform.
+
+config DWC_PCIE_PMU
+	tristate "Synopsys DesignWare PCIe PMU"
+	depends on PCI
+	help
+	  Enable perf support for Synopsys DesignWare PCIe PMU Performance
+	  monitoring event on platform including the Alibaba Yitian 710.
 
 source "drivers/perf/arm_cspmu/Kconfig"
 

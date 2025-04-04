@@ -12,6 +12,7 @@
 #include <linux/swap.h>
 #include <linux/ctype.h>
 #include <linux/sched.h>
+#include <linux/iversion.h>
 #include <linux/task_io_accounting_ops.h>
 #include "internal.h"
 #include "afs_fs.h"
@@ -28,17 +29,17 @@ static int afs_lookup_one_filldir(struct dir_context *ctx, const char *name, int
 				  loff_t fpos, u64 ino, unsigned dtype);
 static int afs_lookup_filldir(struct dir_context *ctx, const char *name, int nlen,
 			      loff_t fpos, u64 ino, unsigned dtype);
-static int afs_create(struct user_namespace *mnt_userns, struct inode *dir,
+static int afs_create(struct mnt_idmap *idmap, struct inode *dir,
 		      struct dentry *dentry, umode_t mode, bool excl);
-static int afs_mkdir(struct user_namespace *mnt_userns, struct inode *dir,
+static int afs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 		     struct dentry *dentry, umode_t mode);
 static int afs_rmdir(struct inode *dir, struct dentry *dentry);
 static int afs_unlink(struct inode *dir, struct dentry *dentry);
 static int afs_link(struct dentry *from, struct inode *dir,
 		    struct dentry *dentry);
-static int afs_symlink(struct user_namespace *mnt_userns, struct inode *dir,
+static int afs_symlink(struct mnt_idmap *idmap, struct inode *dir,
 		       struct dentry *dentry, const char *content);
-static int afs_rename(struct user_namespace *mnt_userns, struct inode *old_dir,
+static int afs_rename(struct mnt_idmap *idmap, struct inode *old_dir,
 		      struct dentry *old_dentry, struct inode *new_dir,
 		      struct dentry *new_dentry, unsigned int flags);
 static bool afs_dir_release_folio(struct folio *folio, gfp_t gfp_flags);
@@ -323,8 +324,7 @@ expand:
 
 		folio = filemap_get_folio(mapping, i);
 		if (IS_ERR(folio)) {
-			if (test_and_clear_bit(AFS_VNODE_DIR_VALID, &dvnode->flags))
-				afs_stat_v(dvnode, n_inval);
+			afs_invalidate_dir(dvnode, afs_dir_invalid_reclaimed_folio);
 			folio = __filemap_get_folio(mapping,
 						    i, FGP_LOCK | FGP_CREAT,
 						    mapping->gfp_mask);
@@ -533,14 +533,14 @@ static int afs_dir_iterate(struct inode *dir, struct dir_context *ctx,
 			break;
 		}
 
-		offset = round_down(ctx->pos, sizeof(*dblock)) - folio_file_pos(folio);
+		offset = round_down(ctx->pos, sizeof(*dblock)) - folio_pos(folio);
 		size = min_t(loff_t, folio_size(folio),
-			     req->actual_len - folio_file_pos(folio));
+			     req->actual_len - folio_pos(folio));
 
 		do {
 			dblock = kmap_local_folio(folio, offset);
 			ret = afs_dir_iterate_block(dvnode, ctx, dblock,
-						    folio_file_pos(folio) + offset);
+						    folio_pos(folio) + offset);
 			kunmap_local(dblock);
 			if (ret != 1)
 				goto out;
@@ -1353,7 +1353,7 @@ static const struct afs_operation_ops afs_mkdir_operation = {
 /*
  * create a directory on an AFS filesystem
  */
-static int afs_mkdir(struct user_namespace *mnt_userns, struct inode *dir,
+static int afs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 		     struct dentry *dentry, umode_t mode)
 {
 	struct afs_operation *op;
@@ -1390,8 +1390,8 @@ static void afs_dir_remove_subdir(struct dentry *dentry)
 
 		clear_nlink(&vnode->netfs.inode);
 		set_bit(AFS_VNODE_DELETED, &vnode->flags);
-		atomic64_set(&vnode->cb_expires_at, AFS_NO_CB_PROMISE);
-		clear_bit(AFS_VNODE_DIR_VALID, &vnode->flags);
+		afs_clear_cb_promise(vnode, afs_cb_promise_clear_rmdir);
+		afs_invalidate_dir(vnode, afs_dir_invalid_subdir_removed);
 	}
 }
 
@@ -1474,7 +1474,12 @@ static int afs_rmdir(struct inode *dir, struct dentry *dentry)
 		op->file[1].vnode = vnode;
 	}
 
-	return afs_do_sync_operation(op);
+	ret = afs_do_sync_operation(op);
+
+	/* Not all systems that can host afs servers have ENOTEMPTY. */
+	if (ret == -EEXIST)
+		ret = -ENOTEMPTY;
+	return ret;
 
 error:
 	return afs_put_operation(op);
@@ -1652,7 +1657,7 @@ static const struct afs_operation_ops afs_create_operation = {
 /*
  * create a regular file on an AFS filesystem
  */
-static int afs_create(struct user_namespace *mnt_userns, struct inode *dir,
+static int afs_create(struct mnt_idmap *idmap, struct inode *dir,
 		      struct dentry *dentry, umode_t mode, bool excl)
 {
 	struct afs_operation *op;
@@ -1783,7 +1788,7 @@ static const struct afs_operation_ops afs_symlink_operation = {
 /*
  * create a symlink in an AFS filesystem
  */
-static int afs_symlink(struct user_namespace *mnt_userns, struct inode *dir,
+static int afs_symlink(struct mnt_idmap *idmap, struct inode *dir,
 		       struct dentry *dentry, const char *content)
 {
 	struct afs_operation *op;
@@ -1826,6 +1831,8 @@ error:
 
 static void afs_rename_success(struct afs_operation *op)
 {
+	struct afs_vnode *vnode = AFS_FS_I(d_inode(op->dentry));
+
 	_enter("op=%08x", op->debug_id);
 
 	op->ctime = op->file[0].scb.status.mtime_client;
@@ -1834,6 +1841,23 @@ static void afs_rename_success(struct afs_operation *op)
 	if (op->file[1].vnode != op->file[0].vnode) {
 		op->ctime = op->file[1].scb.status.mtime_client;
 		afs_vnode_commit_status(op, &op->file[1]);
+	}
+
+	/* If we're moving a subdir between dirs, we need to update
+	 * its DV counter too as the ".." will be altered.
+	 */
+	if (S_ISDIR(vnode->netfs.inode.i_mode) &&
+	    op->file[0].vnode != op->file[1].vnode) {
+		u64 new_dv;
+
+		write_seqlock(&vnode->cb_lock);
+
+		new_dv = vnode->status.data_version + 1;
+		trace_afs_set_dv(vnode, new_dv);
+		vnode->status.data_version = new_dv;
+		inode_set_iversion_raw(&vnode->netfs.inode, new_dv);
+
+		write_sequnlock(&vnode->cb_lock);
 	}
 }
 
@@ -1875,6 +1899,12 @@ static void afs_rename_edit_dir(struct afs_operation *op)
 		afs_edit_dir_add(new_dvnode, &new_dentry->d_name,
 				 &vnode->fid, afs_edit_dir_for_rename_2);
 	}
+
+	if (S_ISDIR(vnode->netfs.inode.i_mode) &&
+	    new_dvnode != orig_dvnode &&
+	    test_bit(AFS_VNODE_DIR_VALID, &vnode->flags))
+		afs_edit_dir_update_dotdot(vnode, new_dvnode,
+					   afs_edit_dir_for_rename_sub);
 
 	new_inode = d_inode(new_dentry);
 	if (new_inode) {
@@ -1921,7 +1951,7 @@ static const struct afs_operation_ops afs_rename_operation = {
 /*
  * rename a file in an AFS filesystem and/or move it between directories
  */
-static int afs_rename(struct user_namespace *mnt_userns, struct inode *old_dir,
+static int afs_rename(struct mnt_idmap *idmap, struct inode *old_dir,
 		      struct dentry *old_dentry, struct inode *new_dir,
 		      struct dentry *new_dentry, unsigned int flags)
 {
@@ -2036,8 +2066,7 @@ static bool afs_dir_release_folio(struct folio *folio, gfp_t gfp_flags)
 	folio_detach_private(folio);
 
 	/* The directory will need reloading. */
-	if (test_and_clear_bit(AFS_VNODE_DIR_VALID, &dvnode->flags))
-		afs_stat_v(dvnode, n_relpg);
+	afs_invalidate_dir(dvnode, afs_dir_invalid_release_folio);
 	return true;
 }
 
@@ -2054,8 +2083,7 @@ static void afs_dir_invalidate_folio(struct folio *folio, size_t offset,
 	BUG_ON(!folio_test_locked(folio));
 
 	/* The directory will need reloading. */
-	if (test_and_clear_bit(AFS_VNODE_DIR_VALID, &dvnode->flags))
-		afs_stat_v(dvnode, n_inval);
+	afs_invalidate_dir(dvnode, afs_dir_invalid_inval_folio);
 
 	/* we clean up only if the entire folio is being invalidated */
 	if (offset == 0 && length == folio_size(folio))

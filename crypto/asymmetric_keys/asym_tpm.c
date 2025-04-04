@@ -72,7 +72,7 @@ static int tpm_loadkey2(struct tpm_buf *tb,
 	tpm_buf_append_u8(tb, cont);
 	tpm_buf_append(tb, authdata, SHA1_DIGEST_SIZE);
 
-	ret = trusted_tpm_send(tb->data, MAX_BUF_SIZE);
+	ret = trusted_tpm_send(tb->data, tb->length);
 	if (ret < 0) {
 		pr_info("authhmac failed (%d)\n", ret);
 		return ret;
@@ -98,7 +98,7 @@ static int tpm_flushspecific(struct tpm_buf *tb, uint32_t handle)
 	tpm_buf_append_u32(tb, handle);
 	tpm_buf_append_u32(tb, TPM_RT_KEY);
 
-	return trusted_tpm_send(tb->data, MAX_BUF_SIZE);
+	return trusted_tpm_send(tb->data, tb->length);
 }
 
 /*
@@ -154,7 +154,7 @@ static int tpm_unbind(struct tpm_buf *tb,
 	tpm_buf_append_u8(tb, cont);
 	tpm_buf_append(tb, authdata, SHA1_DIGEST_SIZE);
 
-	ret = trusted_tpm_send(tb->data, MAX_BUF_SIZE);
+	ret = trusted_tpm_send(tb->data, tb->length);
 	if (ret < 0) {
 		pr_info("authhmac failed (%d)\n", ret);
 		return ret;
@@ -237,7 +237,7 @@ static int tpm_sign(struct tpm_buf *tb,
 	tpm_buf_append_u8(tb, cont);
 	tpm_buf_append(tb, authdata, SHA1_DIGEST_SIZE);
 
-	ret = trusted_tpm_send(tb->data, MAX_BUF_SIZE);
+	ret = trusted_tpm_send(tb->data, tb->length);
 	if (ret < 0) {
 		pr_info("authhmac failed (%d)\n", ret);
 		return ret;

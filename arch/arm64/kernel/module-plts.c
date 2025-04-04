@@ -200,8 +200,7 @@ static unsigned int count_plts(Elf64_Sym *syms, Elf64_Rela *rela, int num,
 			break;
 		case R_AARCH64_ADR_PREL_PG_HI21_NC:
 		case R_AARCH64_ADR_PREL_PG_HI21:
-			if (!IS_ENABLED(CONFIG_ARM64_ERRATUM_843419) ||
-			    !cpus_have_const_cap(ARM64_WORKAROUND_843419))
+			if (!cpus_have_final_cap(ARM64_WORKAROUND_843419))
 				break;
 
 			/*
@@ -236,13 +235,13 @@ static unsigned int count_plts(Elf64_Sym *syms, Elf64_Rela *rela, int num,
 		}
 	}
 
-	if (IS_ENABLED(CONFIG_ARM64_ERRATUM_843419) &&
-	    cpus_have_const_cap(ARM64_WORKAROUND_843419))
+	if (cpus_have_final_cap(ARM64_WORKAROUND_843419)) {
 		/*
 		 * Add some slack so we can skip PLT slots that may trigger
 		 * the erratum due to the placement of the ADRP instruction.
 		 */
 		ret += DIV_ROUND_UP(ret, (SZ_4K / sizeof(struct plt_entry)));
+	}
 
 	return ret;
 }
@@ -333,7 +332,7 @@ int module_frob_arch_sections(Elf_Ehdr *ehdr, Elf_Shdr *sechdrs,
 		if (nents)
 			sort(rels, nents, sizeof(Elf64_Rela), cmp_rela, NULL);
 
-		if (!str_has_prefix(secstrings + dstsec->sh_name, ".init"))
+		if (!module_init_layout_section(secstrings + dstsec->sh_name))
 			core_plts += count_plts(syms, rels, numrels,
 						sechdrs[i].sh_info, dstsec);
 		else

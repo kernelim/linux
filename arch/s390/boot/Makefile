@@ -7,6 +7,7 @@ KCOV_INSTRUMENT := n
 GCOV_PROFILE := n
 UBSAN_SANITIZE := n
 KASAN_SANITIZE := n
+KCSAN_SANITIZE := n
 
 KBUILD_AFLAGS := $(KBUILD_AFLAGS_DECOMPRESSOR)
 KBUILD_CFLAGS := $(KBUILD_CFLAGS_DECOMPRESSOR)
@@ -34,11 +35,9 @@ endif
 
 CFLAGS_sclp_early_core.o += -I$(srctree)/drivers/s390/char
 
-obj-y	:= head.o als.o startup.o mem_detect.o ipl_parm.o ipl_report.o
+obj-y	:= head.o als.o startup.o physmem_info.o ipl_parm.o ipl_report.o vmem.o
 obj-y	+= string.o ebcdic.o sclp_early_core.o mem.o ipl_vmparm.o cmdline.o
-obj-y	+= version.o pgm_check_info.o ctype.o ipl_data.o
-obj-$(findstring y, $(CONFIG_PROTECTED_VIRTUALIZATION_GUEST) $(CONFIG_PGSTE))	+= uv.o
-obj-$(CONFIG_RELOCATABLE)	+= machine_kexec_reloc.o
+obj-y	+= version.o pgm_check_info.o ctype.o ipl_data.o machine_kexec_reloc.o uv.o
 obj-$(CONFIG_RANDOMIZE_BASE)	+= kaslr.o
 obj-y	+= $(if $(CONFIG_KERNEL_UNCOMPRESSED),,decompressor.o) info.o
 obj-$(CONFIG_KERNEL_ZSTD) += clz_ctz.o
@@ -51,6 +50,8 @@ targets += vmlinux.bin.zst info.bin syms.bin vmlinux.syms $(obj-all)
 
 OBJECTS := $(addprefix $(obj)/,$(obj-y))
 OBJECTS_ALL := $(addprefix $(obj)/,$(obj-all))
+
+clean-files += vmlinux.map
 
 quiet_cmd_section_cmp = SECTCMP $*
 define cmd_section_cmp
@@ -71,7 +72,7 @@ $(obj)/bzImage: $(obj)/vmlinux $(obj)/section_cmp.boot.data $(obj)/section_cmp.b
 $(obj)/section_cmp%: vmlinux $(obj)/vmlinux FORCE
 	$(call if_changed,section_cmp)
 
-LDFLAGS_vmlinux := --oformat $(LD_BFD) -e startup --build-id=sha1 -T
+LDFLAGS_vmlinux := --oformat $(LD_BFD) -e startup $(if $(CONFIG_VMLINUX_MAP),-Map=$(obj)/vmlinux.map) --build-id=sha1 -T
 $(obj)/vmlinux: $(obj)/vmlinux.lds $(OBJECTS_ALL) FORCE
 	$(call if_changed,ld)
 

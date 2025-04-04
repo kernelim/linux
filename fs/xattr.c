@@ -80,28 +80,45 @@ xattr_resolve_name(struct inode *inode, const char **name)
 	return ERR_PTR(-EOPNOTSUPP);
 }
 
+/**
+ * may_write_xattr - check whether inode allows writing xattr
+ * @idmap: idmap of the mount the inode was found from
+ * @inode: the inode on which to set an xattr
+ *
+ * Check whether the inode allows writing xattrs. Specifically, we can never
+ * set or remove an extended attribute on a read-only filesystem  or on an
+ * immutable / append-only inode.
+ *
+ * We also need to ensure that the inode has a mapping in the mount to
+ * not risk writing back invalid i_{g,u}id values.
+ *
+ * Return: On success zero is returned. On error a negative errno is returned.
+ */
+int may_write_xattr(struct mnt_idmap *idmap, struct inode *inode)
+{
+	if (IS_IMMUTABLE(inode))
+		return -EPERM;
+	if (IS_APPEND(inode))
+		return -EPERM;
+	if (HAS_UNMAPPED_ID(idmap, inode))
+		return -EPERM;
+	return 0;
+}
+
 /*
  * Check permissions for extended attribute access.  This is a bit complicated
  * because different namespaces have very different rules.
  */
 static int
-xattr_permission(struct user_namespace *mnt_userns, struct inode *inode,
+xattr_permission(struct mnt_idmap *idmap, struct inode *inode,
 		 const char *name, int mask)
 {
-	/*
-	 * We can never set or remove an extended attribute on a read-only
-	 * filesystem  or on an immutable / append-only inode.
-	 */
 	if (mask & MAY_WRITE) {
-		if (IS_IMMUTABLE(inode) || IS_APPEND(inode))
-			return -EPERM;
-		/*
-		 * Updating an xattr will likely cause i_uid and i_gid
-		 * to be writen back improperly if their true value is
-		 * unknown to the vfs.
-		 */
-		if (HAS_UNMAPPED_ID(mnt_userns, inode))
-			return -EPERM;
+		int ret;
+
+		ret = may_write_xattr(idmap, inode);
+		if (ret)
+			return ret;
 	}
 
 	/*
@@ -131,11 +148,11 @@ xattr_permission(struct user_namespace *mnt_userns, struct inode *inode,
 			return (mask & MAY_WRITE) ? -EPERM : -ENODATA;
 		if (S_ISDIR(inode->i_mode) && (inode->i_mode & S_ISVTX) &&
 		    (mask & MAY_WRITE) &&
-		    !inode_owner_or_capable(mnt_userns, inode))
+		    !inode_owner_or_capable(idmap, inode))
 			return -EPERM;
 	}
 
-	return inode_permission(mnt_userns, inode, mask);
+	return inode_permission(idmap, inode, mask);
 }
 
 /*
@@ -164,11 +181,14 @@ xattr_supports_user_prefix(struct inode *inode)
 EXPORT_SYMBOL(xattr_supports_user_prefix);
 
 int
-__vfs_setxattr(struct user_namespace *mnt_userns, struct dentry *dentry,
+__vfs_setxattr(struct mnt_idmap *idmap, struct dentry *dentry,
 	       struct inode *inode, const char *name, const void *value,
 	       size_t size, int flags)
 {
 	const struct xattr_handler *handler;
+
+	if (is_posix_acl_xattr(name))
+		return -EOPNOTSUPP;
 
 	handler = xattr_resolve_name(inode, &name);
 	if (IS_ERR(handler))
@@ -177,7 +197,7 @@ __vfs_setxattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 		return -EOPNOTSUPP;
 	if (size == 0)
 		value = "";  /* empty EA, do not remove */
-	return handler->set(handler, mnt_userns, dentry, inode, name, value,
+	return handler->set(handler, idmap, dentry, inode, name, value,
 			    size, flags);
 }
 EXPORT_SYMBOL(__vfs_setxattr);
@@ -186,7 +206,7 @@ EXPORT_SYMBOL(__vfs_setxattr);
  *  __vfs_setxattr_noperm - perform setxattr operation without performing
  *  permission checks.
  *
- *  @mnt_userns: user namespace of the mount the inode was found from
+ *  @idmap: idmap of the mount the inode was found from
  *  @dentry: object to perform setxattr on
  *  @name: xattr name to set
  *  @value: value to set @name to
@@ -199,7 +219,7 @@ EXPORT_SYMBOL(__vfs_setxattr);
  *  is executed. It also assumes that the caller will make the appropriate
  *  permission checks.
  */
-int __vfs_setxattr_noperm(struct user_namespace *mnt_userns,
+int __vfs_setxattr_noperm(struct mnt_idmap *idmap,
 			  struct dentry *dentry, const char *name,
 			  const void *value, size_t size, int flags)
 {
@@ -211,7 +231,7 @@ int __vfs_setxattr_noperm(struct user_namespace *mnt_userns,
 	if (issec)
 		inode->i_flags &= ~S_NOSEC;
 	if (inode->i_opflags & IOP_XATTR) {
-		error = __vfs_setxattr(mnt_userns, dentry, inode, name, value,
+		error = __vfs_setxattr(idmap, dentry, inode, name, value,
 				       size, flags);
 		if (!error) {
 			fsnotify_xattr(dentry);
@@ -242,7 +262,7 @@ int __vfs_setxattr_noperm(struct user_namespace *mnt_userns,
  * __vfs_setxattr_locked - set an extended attribute while holding the inode
  * lock
  *
- *  @mnt_userns: user namespace of the mount of the target inode
+ *  @idmap: idmap of the mount of the target inode
  *  @dentry: object to perform setxattr on
  *  @name: xattr name to set
  *  @value: value to set @name to
@@ -252,18 +272,18 @@ int __vfs_setxattr_noperm(struct user_namespace *mnt_userns,
  *  a delegation was broken on, NULL if none.
  */
 int
-__vfs_setxattr_locked(struct user_namespace *mnt_userns, struct dentry *dentry,
+__vfs_setxattr_locked(struct mnt_idmap *idmap, struct dentry *dentry,
 		      const char *name, const void *value, size_t size,
 		      int flags, struct inode **delegated_inode)
 {
 	struct inode *inode = dentry->d_inode;
 	int error;
 
-	error = xattr_permission(mnt_userns, inode, name, MAY_WRITE);
+	error = xattr_permission(idmap, inode, name, MAY_WRITE);
 	if (error)
 		return error;
 
-	error = security_inode_setxattr(mnt_userns, dentry, name, value, size,
+	error = security_inode_setxattr(idmap, dentry, name, value, size,
 					flags);
 	if (error)
 		goto out;
@@ -272,7 +292,7 @@ __vfs_setxattr_locked(struct user_namespace *mnt_userns, struct dentry *dentry,
 	if (error)
 		goto out;
 
-	error = __vfs_setxattr_noperm(mnt_userns, dentry, name, value,
+	error = __vfs_setxattr_noperm(idmap, dentry, name, value,
 				      size, flags);
 
 out:
@@ -281,7 +301,7 @@ out:
 EXPORT_SYMBOL_GPL(__vfs_setxattr_locked);
 
 int
-vfs_setxattr(struct user_namespace *mnt_userns, struct dentry *dentry,
+vfs_setxattr(struct mnt_idmap *idmap, struct dentry *dentry,
 	     const char *name, const void *value, size_t size, int flags)
 {
 	struct inode *inode = dentry->d_inode;
@@ -290,7 +310,7 @@ vfs_setxattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 	int error;
 
 	if (size && strcmp(name, XATTR_NAME_CAPS) == 0) {
-		error = cap_convert_nscap(mnt_userns, dentry, &value, size);
+		error = cap_convert_nscap(idmap, dentry, &value, size);
 		if (error < 0)
 			return error;
 		size = error;
@@ -298,7 +318,7 @@ vfs_setxattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 
 retry_deleg:
 	inode_lock(inode);
-	error = __vfs_setxattr_locked(mnt_userns, dentry, name, value, size,
+	error = __vfs_setxattr_locked(idmap, dentry, name, value, size,
 				      flags, &delegated_inode);
 	inode_unlock(inode);
 
@@ -315,19 +335,19 @@ retry_deleg:
 EXPORT_SYMBOL_GPL(vfs_setxattr);
 
 static ssize_t
-xattr_getsecurity(struct user_namespace *mnt_userns, struct inode *inode,
+xattr_getsecurity(struct mnt_idmap *idmap, struct inode *inode,
 		  const char *name, void *value, size_t size)
 {
 	void *buffer = NULL;
 	ssize_t len;
 
 	if (!value || !size) {
-		len = security_inode_getsecurity(mnt_userns, inode, name,
+		len = security_inode_getsecurity(idmap, inode, name,
 						 &buffer, false);
 		goto out_noalloc;
 	}
 
-	len = security_inode_getsecurity(mnt_userns, inode, name, &buffer,
+	len = security_inode_getsecurity(idmap, inode, name, &buffer,
 					 true);
 	if (len < 0)
 		return len;
@@ -352,7 +372,7 @@ out_noalloc:
  * Returns the result of alloc, if failed, or the getxattr operation.
  */
 int
-vfs_getxattr_alloc(struct user_namespace *mnt_userns, struct dentry *dentry,
+vfs_getxattr_alloc(struct mnt_idmap *idmap, struct dentry *dentry,
 		   const char *name, char **xattr_value, size_t xattr_size,
 		   gfp_t flags)
 {
@@ -361,7 +381,7 @@ vfs_getxattr_alloc(struct user_namespace *mnt_userns, struct dentry *dentry,
 	char *value = *xattr_value;
 	int error;
 
-	error = xattr_permission(mnt_userns, inode, name, MAY_READ);
+	error = xattr_permission(idmap, inode, name, MAY_READ);
 	if (error)
 		return error;
 
@@ -392,6 +412,9 @@ __vfs_getxattr(struct dentry *dentry, struct inode *inode, const char *name,
 {
 	const struct xattr_handler *handler;
 
+	if (is_posix_acl_xattr(name))
+		return -EOPNOTSUPP;
+
 	handler = xattr_resolve_name(inode, &name);
 	if (IS_ERR(handler))
 		return PTR_ERR(handler);
@@ -402,13 +425,13 @@ __vfs_getxattr(struct dentry *dentry, struct inode *inode, const char *name,
 EXPORT_SYMBOL(__vfs_getxattr);
 
 ssize_t
-vfs_getxattr(struct user_namespace *mnt_userns, struct dentry *dentry,
+vfs_getxattr(struct mnt_idmap *idmap, struct dentry *dentry,
 	     const char *name, void *value, size_t size)
 {
 	struct inode *inode = dentry->d_inode;
 	int error;
 
-	error = xattr_permission(mnt_userns, inode, name, MAY_READ);
+	error = xattr_permission(idmap, inode, name, MAY_READ);
 	if (error)
 		return error;
 
@@ -419,7 +442,7 @@ vfs_getxattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 	if (!strncmp(name, XATTR_SECURITY_PREFIX,
 				XATTR_SECURITY_PREFIX_LEN)) {
 		const char *suffix = name + XATTR_SECURITY_PREFIX_LEN;
-		int ret = xattr_getsecurity(mnt_userns, inode, suffix, value,
+		int ret = xattr_getsecurity(idmap, inode, suffix, value,
 					    size);
 		/*
 		 * Only overwrite the return value if a security module
@@ -455,18 +478,21 @@ vfs_listxattr(struct dentry *dentry, char *list, size_t size)
 EXPORT_SYMBOL_GPL(vfs_listxattr);
 
 int
-__vfs_removexattr(struct user_namespace *mnt_userns, struct dentry *dentry,
+__vfs_removexattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		  const char *name)
 {
 	struct inode *inode = d_inode(dentry);
 	const struct xattr_handler *handler;
+
+	if (is_posix_acl_xattr(name))
+		return -EOPNOTSUPP;
 
 	handler = xattr_resolve_name(inode, &name);
 	if (IS_ERR(handler))
 		return PTR_ERR(handler);
 	if (!handler->set)
 		return -EOPNOTSUPP;
-	return handler->set(handler, mnt_userns, dentry, inode, name, NULL, 0,
+	return handler->set(handler, idmap, dentry, inode, name, NULL, 0,
 			    XATTR_REPLACE);
 }
 EXPORT_SYMBOL(__vfs_removexattr);
@@ -475,25 +501,25 @@ EXPORT_SYMBOL(__vfs_removexattr);
  * __vfs_removexattr_locked - set an extended attribute while holding the inode
  * lock
  *
- *  @mnt_userns: user namespace of the mount of the target inode
+ *  @idmap: idmap of the mount of the target inode
  *  @dentry: object to perform setxattr on
  *  @name: name of xattr to remove
  *  @delegated_inode: on return, will contain an inode pointer that
  *  a delegation was broken on, NULL if none.
  */
 int
-__vfs_removexattr_locked(struct user_namespace *mnt_userns,
+__vfs_removexattr_locked(struct mnt_idmap *idmap,
 			 struct dentry *dentry, const char *name,
 			 struct inode **delegated_inode)
 {
 	struct inode *inode = dentry->d_inode;
 	int error;
 
-	error = xattr_permission(mnt_userns, inode, name, MAY_WRITE);
+	error = xattr_permission(idmap, inode, name, MAY_WRITE);
 	if (error)
 		return error;
 
-	error = security_inode_removexattr(mnt_userns, dentry, name);
+	error = security_inode_removexattr(idmap, dentry, name);
 	if (error)
 		goto out;
 
@@ -501,7 +527,7 @@ __vfs_removexattr_locked(struct user_namespace *mnt_userns,
 	if (error)
 		goto out;
 
-	error = __vfs_removexattr(mnt_userns, dentry, name);
+	error = __vfs_removexattr(idmap, dentry, name);
 
 	if (!error) {
 		fsnotify_xattr(dentry);
@@ -514,7 +540,7 @@ out:
 EXPORT_SYMBOL_GPL(__vfs_removexattr_locked);
 
 int
-vfs_removexattr(struct user_namespace *mnt_userns, struct dentry *dentry,
+vfs_removexattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		const char *name)
 {
 	struct inode *inode = dentry->d_inode;
@@ -523,7 +549,7 @@ vfs_removexattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 
 retry_deleg:
 	inode_lock(inode);
-	error = __vfs_removexattr_locked(mnt_userns, dentry,
+	error = __vfs_removexattr_locked(idmap, dentry,
 					 name, &delegated_inode);
 	inode_unlock(inode);
 
@@ -570,26 +596,19 @@ int setxattr_copy(const char __user *name, struct xattr_ctx *ctx)
 	return error;
 }
 
-static void setxattr_convert(struct user_namespace *mnt_userns,
-			     struct dentry *d, struct xattr_ctx *ctx)
-{
-	if (ctx->size &&
-		((strcmp(ctx->kname->name, XATTR_NAME_POSIX_ACL_ACCESS) == 0) ||
-		(strcmp(ctx->kname->name, XATTR_NAME_POSIX_ACL_DEFAULT) == 0)))
-		posix_acl_fix_xattr_from_user(mnt_userns, d_inode(d),
-				ctx->kvalue, ctx->size);
-}
-
-int do_setxattr(struct user_namespace *mnt_userns, struct dentry *dentry,
+int do_setxattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		struct xattr_ctx *ctx)
 {
-	setxattr_convert(mnt_userns, dentry, ctx);
-	return vfs_setxattr(mnt_userns, dentry, ctx->kname->name,
+	if (is_posix_acl_xattr(ctx->kname->name))
+		return do_set_acl(idmap, dentry, ctx->kname->name,
+				  ctx->kvalue, ctx->size);
+
+	return vfs_setxattr(idmap, dentry, ctx->kname->name,
 			ctx->kvalue, ctx->size, ctx->flags);
 }
 
 static long
-setxattr(struct user_namespace *mnt_userns, struct dentry *d,
+setxattr(struct mnt_idmap *idmap, struct dentry *d,
 	const char __user *name, const void __user *value, size_t size,
 	int flags)
 {
@@ -607,7 +626,7 @@ setxattr(struct user_namespace *mnt_userns, struct dentry *d,
 	if (error)
 		return error;
 
-	error = do_setxattr(mnt_userns, d, &ctx);
+	error = do_setxattr(idmap, d, &ctx);
 
 	kvfree(ctx.kvalue);
 	return error;
@@ -626,7 +645,7 @@ retry:
 		return error;
 	error = mnt_want_write(path.mnt);
 	if (!error) {
-		error = setxattr(mnt_user_ns(path.mnt), path.dentry, name,
+		error = setxattr(mnt_idmap(path.mnt), path.dentry, name,
 				 value, size, flags);
 		mnt_drop_write(path.mnt);
 	}
@@ -663,7 +682,7 @@ SYSCALL_DEFINE5(fsetxattr, int, fd, const char __user *, name,
 	audit_file(f.file);
 	error = mnt_want_write_file(f.file);
 	if (!error) {
-		error = setxattr(file_mnt_user_ns(f.file),
+		error = setxattr(file_mnt_idmap(f.file),
 				 f.file->f_path.dentry, name,
 				 value, size, flags);
 		mnt_drop_write_file(f.file);
@@ -676,7 +695,7 @@ SYSCALL_DEFINE5(fsetxattr, int, fd, const char __user *, name,
  * Extended attribute GET operations
  */
 ssize_t
-do_getxattr(struct user_namespace *mnt_userns, struct dentry *d,
+do_getxattr(struct mnt_idmap *idmap, struct dentry *d,
 	struct xattr_ctx *ctx)
 {
 	ssize_t error;
@@ -690,12 +709,11 @@ do_getxattr(struct user_namespace *mnt_userns, struct dentry *d,
 			return -ENOMEM;
 	}
 
-	error = vfs_getxattr(mnt_userns, d, kname, ctx->kvalue, ctx->size);
+	if (is_posix_acl_xattr(ctx->kname->name))
+		error = do_get_acl(idmap, d, kname, ctx->kvalue, ctx->size);
+	else
+		error = vfs_getxattr(idmap, d, kname, ctx->kvalue, ctx->size);
 	if (error > 0) {
-		if ((strcmp(kname, XATTR_NAME_POSIX_ACL_ACCESS) == 0) ||
-		    (strcmp(kname, XATTR_NAME_POSIX_ACL_DEFAULT) == 0))
-			posix_acl_fix_xattr_to_user(mnt_userns, d_inode(d),
-					ctx->kvalue, error);
 		if (ctx->size && copy_to_user(ctx->value, ctx->kvalue, error))
 			error = -EFAULT;
 	} else if (error == -ERANGE && ctx->size >= XATTR_SIZE_MAX) {
@@ -708,7 +726,7 @@ do_getxattr(struct user_namespace *mnt_userns, struct dentry *d,
 }
 
 static ssize_t
-getxattr(struct user_namespace *mnt_userns, struct dentry *d,
+getxattr(struct mnt_idmap *idmap, struct dentry *d,
 	 const char __user *name, void __user *value, size_t size)
 {
 	ssize_t error;
@@ -727,7 +745,7 @@ getxattr(struct user_namespace *mnt_userns, struct dentry *d,
 	if (error < 0)
 		return error;
 
-	error =  do_getxattr(mnt_userns, d, &ctx);
+	error =  do_getxattr(idmap, d, &ctx);
 
 	kvfree(ctx.kvalue);
 	return error;
@@ -743,7 +761,7 @@ retry:
 	error = user_path_at(AT_FDCWD, pathname, lookup_flags, &path);
 	if (error)
 		return error;
-	error = getxattr(mnt_user_ns(path.mnt), path.dentry, name, value, size);
+	error = getxattr(mnt_idmap(path.mnt), path.dentry, name, value, size);
 	path_put(&path);
 	if (retry_estale(error, lookup_flags)) {
 		lookup_flags |= LOOKUP_REVAL;
@@ -773,7 +791,7 @@ SYSCALL_DEFINE4(fgetxattr, int, fd, const char __user *, name,
 	if (!f.file)
 		return error;
 	audit_file(f.file);
-	error = getxattr(file_mnt_user_ns(f.file), f.file->f_path.dentry,
+	error = getxattr(file_mnt_idmap(f.file), f.file->f_path.dentry,
 			 name, value, size);
 	fdput(f);
 	return error;
@@ -858,7 +876,7 @@ SYSCALL_DEFINE3(flistxattr, int, fd, char __user *, list, size_t, size)
  * Extended attribute REMOVE operations
  */
 static long
-removexattr(struct user_namespace *mnt_userns, struct dentry *d,
+removexattr(struct mnt_idmap *idmap, struct dentry *d,
 	    const char __user *name)
 {
 	int error;
@@ -870,7 +888,10 @@ removexattr(struct user_namespace *mnt_userns, struct dentry *d,
 	if (error < 0)
 		return error;
 
-	return vfs_removexattr(mnt_userns, d, kname);
+	if (is_posix_acl_xattr(kname))
+		return vfs_remove_acl(idmap, d, kname);
+
+	return vfs_removexattr(idmap, d, kname);
 }
 
 static int path_removexattr(const char __user *pathname,
@@ -884,7 +905,7 @@ retry:
 		return error;
 	error = mnt_want_write(path.mnt);
 	if (!error) {
-		error = removexattr(mnt_user_ns(path.mnt), path.dentry, name);
+		error = removexattr(mnt_idmap(path.mnt), path.dentry, name);
 		mnt_drop_write(path.mnt);
 	}
 	path_put(&path);
@@ -917,7 +938,7 @@ SYSCALL_DEFINE2(fremovexattr, int, fd, const char __user *, name)
 	audit_file(f.file);
 	error = mnt_want_write_file(f.file);
 	if (!error) {
-		error = removexattr(file_mnt_user_ns(f.file),
+		error = removexattr(file_mnt_idmap(f.file),
 				    f.file->f_path.dentry, name);
 		mnt_drop_write_file(f.file);
 	}
@@ -995,12 +1016,12 @@ const char *xattr_full_name(const struct xattr_handler *handler,
 EXPORT_SYMBOL(xattr_full_name);
 
 /**
- * free_simple_xattr - free an xattr object
+ * simple_xattr_free - free an xattr object
  * @xattr: the xattr object
  *
  * Free the xattr object. Can handle @xattr being NULL.
  */
-static inline void free_simple_xattr(struct simple_xattr *xattr)
+void simple_xattr_free(struct simple_xattr *xattr)
 {
 	if (xattr)
 		kfree(xattr->name);
@@ -1119,7 +1140,6 @@ int simple_xattr_get(struct simple_xattrs *xattrs, const char *name,
  * @value: the value to store along the xattr
  * @size: the size of @value
  * @flags: the flags determining how to set the xattr
- * @removed_size: the size of the removed xattr
  *
  * Set a new xattr object.
  * If @value is passed a new xattr object will be allocated. If XATTR_REPLACE
@@ -1136,29 +1156,27 @@ int simple_xattr_get(struct simple_xattrs *xattrs, const char *name,
  * nothing if XATTR_CREATE is specified in @flags or @flags is zero. For
  * XATTR_REPLACE we fail as mentioned above.
  *
- * Return: On success zero and on error a negative error code is returned.
+ * Return: On success, the removed or replaced xattr is returned, to be freed
+ * by the caller; or NULL if none. On failure a negative error code is returned.
  */
-int simple_xattr_set(struct simple_xattrs *xattrs, const char *name,
-		     const void *value, size_t size, int flags,
-		     ssize_t *removed_size)
+struct simple_xattr *simple_xattr_set(struct simple_xattrs *xattrs,
+				      const char *name, const void *value,
+				      size_t size, int flags)
 {
-	struct simple_xattr *xattr = NULL, *new_xattr = NULL;
+	struct simple_xattr *old_xattr = NULL, *new_xattr = NULL;
 	struct rb_node *parent = NULL, **rbp;
 	int err = 0, ret;
-
-	if (removed_size)
-		*removed_size = -1;
 
 	/* value == NULL means remove */
 	if (value) {
 		new_xattr = simple_xattr_alloc(value, size);
 		if (!new_xattr)
-			return -ENOMEM;
+			return ERR_PTR(-ENOMEM);
 
 		new_xattr->name = kstrdup(name, GFP_KERNEL);
 		if (!new_xattr->name) {
-			free_simple_xattr(new_xattr);
-			return -ENOMEM;
+			simple_xattr_free(new_xattr);
+			return ERR_PTR(-ENOMEM);
 		}
 	}
 
@@ -1172,12 +1190,12 @@ int simple_xattr_set(struct simple_xattrs *xattrs, const char *name,
 		else if (ret > 0)
 			rbp = &(*rbp)->rb_right;
 		else
-			xattr = rb_entry(*rbp, struct simple_xattr, rb_node);
-		if (xattr)
+			old_xattr = rb_entry(*rbp, struct simple_xattr, rb_node);
+		if (old_xattr)
 			break;
 	}
 
-	if (xattr) {
+	if (old_xattr) {
 		/* Fail if XATTR_CREATE is requested and the xattr exists. */
 		if (flags & XATTR_CREATE) {
 			err = -EEXIST;
@@ -1185,12 +1203,10 @@ int simple_xattr_set(struct simple_xattrs *xattrs, const char *name,
 		}
 
 		if (new_xattr)
-			rb_replace_node(&xattr->rb_node, &new_xattr->rb_node,
-					&xattrs->rb_root);
+			rb_replace_node(&old_xattr->rb_node,
+					&new_xattr->rb_node, &xattrs->rb_root);
 		else
-			rb_erase(&xattr->rb_node, &xattrs->rb_root);
-		if (!err && removed_size)
-			*removed_size = xattr->size;
+			rb_erase(&old_xattr->rb_node, &xattrs->rb_root);
 	} else {
 		/* Fail if XATTR_REPLACE is requested but no xattr is found. */
 		if (flags & XATTR_REPLACE) {
@@ -1215,12 +1231,10 @@ int simple_xattr_set(struct simple_xattrs *xattrs, const char *name,
 
 out_unlock:
 	write_unlock(&xattrs->lock);
-	if (err)
-		free_simple_xattr(new_xattr);
-	else
-		free_simple_xattr(xattr);
-	return err;
-
+	if (!err)
+		return old_xattr;
+	simple_xattr_free(new_xattr);
+	return ERR_PTR(err);
 }
 
 static bool xattr_is_trusted(const char *name)
@@ -1341,7 +1355,7 @@ void simple_xattrs_free(struct simple_xattrs *xattrs)
 		rbp_next = rb_next(rbp);
 		xattr = rb_entry(rbp, struct simple_xattr, rb_node);
 		rb_erase(&xattr->rb_node, &xattrs->rb_root);
-		free_simple_xattr(xattr);
+		simple_xattr_free(xattr);
 		rbp = rbp_next;
 	}
 }

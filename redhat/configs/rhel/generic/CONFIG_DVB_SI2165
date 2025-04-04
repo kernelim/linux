@@ -1,1 +1,1 @@
-CONFIG_DVB_SI2165=m
+# CONFIG_DVB_SI2165 is not set

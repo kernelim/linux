@@ -12,6 +12,7 @@
 #include <linux/init.h>
 #include <linux/device.h>
 #include <linux/delay.h>
+#include <linux/kstrtox.h>
 #include <linux/panic_notifier.h>
 #include <linux/reboot.h>
 #include <linux/ctype.h>
@@ -175,11 +176,13 @@ static bool reipl_fcp_clear;
 static bool reipl_ccw_clear;
 static bool reipl_eckd_clear;
 
-static inline int __diag308(unsigned long subcode, void *addr)
+static unsigned long os_info_flags;
+
+static inline int __diag308(unsigned long subcode, unsigned long addr)
 {
 	union register_pair r1;
 
-	r1.even = (unsigned long) addr;
+	r1.even = addr;
 	r1.odd	= 0;
 	asm volatile(
 		"	diag	%[r1],%[subcode],0x308\n"
@@ -194,7 +197,7 @@ static inline int __diag308(unsigned long subcode, void *addr)
 int diag308(unsigned long subcode, void *addr)
 {
 	diag_stat_inc(DIAG_STAT_X308);
-	return __diag308(subcode, addr);
+	return __diag308(subcode, addr ? virt_to_phys(addr) : 0);
 }
 EXPORT_SYMBOL_GPL(diag308);
 
@@ -263,7 +266,7 @@ static ssize_t sys_##_prefix##_##_name##_store(struct kobject *kobj,	\
 		struct kobj_attribute *attr,				\
 		const char *buf, size_t len)				\
 {									\
-	strncpy(_value, buf, sizeof(_value) - 1);			\
+	strscpy(_value, buf, sizeof(_value));				\
 	strim(_value);							\
 	return len;							\
 }									\
@@ -554,15 +557,12 @@ static struct kobj_attribute sys_ipl_ccw_loadparm_attr =
 	__ATTR(loadparm, 0444, ipl_ccw_loadparm_show, NULL);
 
 static struct attribute *ipl_fcp_attrs[] = {
-	&sys_ipl_type_attr.attr,
 	&sys_ipl_device_attr.attr,
 	&sys_ipl_fcp_wwpn_attr.attr,
 	&sys_ipl_fcp_lun_attr.attr,
 	&sys_ipl_fcp_bootprog_attr.attr,
 	&sys_ipl_fcp_br_lba_attr.attr,
 	&sys_ipl_ccw_loadparm_attr.attr,
-	&sys_ipl_secure_attr.attr,
-	&sys_ipl_has_secure_attr.attr,
 	NULL,
 };
 
@@ -572,14 +572,11 @@ static struct attribute_group ipl_fcp_attr_group = {
 };
 
 static struct attribute *ipl_nvme_attrs[] = {
-	&sys_ipl_type_attr.attr,
 	&sys_ipl_nvme_fid_attr.attr,
 	&sys_ipl_nvme_nsid_attr.attr,
 	&sys_ipl_nvme_bootprog_attr.attr,
 	&sys_ipl_nvme_br_lba_attr.attr,
 	&sys_ipl_ccw_loadparm_attr.attr,
-	&sys_ipl_secure_attr.attr,
-	&sys_ipl_has_secure_attr.attr,
 	NULL,
 };
 
@@ -589,13 +586,10 @@ static struct attribute_group ipl_nvme_attr_group = {
 };
 
 static struct attribute *ipl_eckd_attrs[] = {
-	&sys_ipl_type_attr.attr,
 	&sys_ipl_eckd_bootprog_attr.attr,
 	&sys_ipl_eckd_br_chr_attr.attr,
 	&sys_ipl_ccw_loadparm_attr.attr,
 	&sys_ipl_device_attr.attr,
-	&sys_ipl_secure_attr.attr,
-	&sys_ipl_has_secure_attr.attr,
 	NULL,
 };
 
@@ -607,21 +601,15 @@ static struct attribute_group ipl_eckd_attr_group = {
 /* CCW ipl device attributes */
 
 static struct attribute *ipl_ccw_attrs_vm[] = {
-	&sys_ipl_type_attr.attr,
 	&sys_ipl_device_attr.attr,
 	&sys_ipl_ccw_loadparm_attr.attr,
 	&sys_ipl_vm_parm_attr.attr,
-	&sys_ipl_secure_attr.attr,
-	&sys_ipl_has_secure_attr.attr,
 	NULL,
 };
 
 static struct attribute *ipl_ccw_attrs_lpar[] = {
-	&sys_ipl_type_attr.attr,
 	&sys_ipl_device_attr.attr,
 	&sys_ipl_ccw_loadparm_attr.attr,
-	&sys_ipl_secure_attr.attr,
-	&sys_ipl_has_secure_attr.attr,
 	NULL,
 };
 
@@ -633,17 +621,15 @@ static struct attribute_group ipl_ccw_attr_group_lpar = {
 	.attrs = ipl_ccw_attrs_lpar
 };
 
-/* UNKNOWN ipl device attributes */
-
-static struct attribute *ipl_unknown_attrs[] = {
+static struct attribute *ipl_common_attrs[] = {
 	&sys_ipl_type_attr.attr,
 	&sys_ipl_secure_attr.attr,
 	&sys_ipl_has_secure_attr.attr,
 	NULL,
 };
 
-static struct attribute_group ipl_unknown_attr_group = {
-	.attrs = ipl_unknown_attrs,
+static struct attribute_group ipl_common_attr_group = {
+	.attrs = ipl_common_attrs,
 };
 
 static struct kset *ipl_kset;
@@ -667,6 +653,9 @@ static int __init ipl_init(void)
 		rc = -ENOMEM;
 		goto out;
 	}
+	rc = sysfs_create_group(&ipl_kset->kobj, &ipl_common_attr_group);
+	if (rc)
+		goto out;
 	switch (ipl_info.type) {
 	case IPL_TYPE_CCW:
 		if (MACHINE_IS_VM)
@@ -677,6 +666,7 @@ static int __init ipl_init(void)
 						&ipl_ccw_attr_group_lpar);
 		break;
 	case IPL_TYPE_ECKD:
+	case IPL_TYPE_ECKD_DUMP:
 		rc = sysfs_create_group(&ipl_kset->kobj, &ipl_eckd_attr_group);
 		break;
 	case IPL_TYPE_FCP:
@@ -688,8 +678,6 @@ static int __init ipl_init(void)
 		rc = sysfs_create_group(&ipl_kset->kobj, &ipl_nvme_attr_group);
 		break;
 	default:
-		rc = sysfs_create_group(&ipl_kset->kobj,
-					&ipl_unknown_attr_group);
 		break;
 	}
 out:
@@ -921,7 +909,7 @@ static ssize_t reipl_fcp_clear_store(struct kobject *kobj,
 				     struct kobj_attribute *attr,
 				     const char *buf, size_t len)
 {
-	if (strtobool(buf, &reipl_fcp_clear) < 0)
+	if (kstrtobool(buf, &reipl_fcp_clear) < 0)
 		return -EINVAL;
 	return len;
 }
@@ -1023,7 +1011,7 @@ static ssize_t reipl_nvme_clear_store(struct kobject *kobj,
 				      struct kobj_attribute *attr,
 				      const char *buf, size_t len)
 {
-	if (strtobool(buf, &reipl_nvme_clear) < 0)
+	if (kstrtobool(buf, &reipl_nvme_clear) < 0)
 		return -EINVAL;
 	return len;
 }
@@ -1044,7 +1032,7 @@ static ssize_t reipl_ccw_clear_store(struct kobject *kobj,
 				     struct kobj_attribute *attr,
 				     const char *buf, size_t len)
 {
-	if (strtobool(buf, &reipl_ccw_clear) < 0)
+	if (kstrtobool(buf, &reipl_ccw_clear) < 0)
 		return -EINVAL;
 	return len;
 }
@@ -1150,7 +1138,7 @@ static ssize_t reipl_eckd_clear_store(struct kobject *kobj,
 				      struct kobj_attribute *attr,
 				      const char *buf, size_t len)
 {
-	if (strtobool(buf, &reipl_eckd_clear) < 0)
+	if (kstrtobool(buf, &reipl_eckd_clear) < 0)
 		return -EINVAL;
 	return len;
 }
@@ -1938,17 +1926,29 @@ static struct shutdown_action __refdata dump_action = {
 
 static void dump_reipl_run(struct shutdown_trigger *trigger)
 {
-	unsigned long ipib = (unsigned long) reipl_block_actual;
 	struct lowcore *abs_lc;
-	unsigned long flags;
 	unsigned int csum;
 
+	/*
+	 * Set REIPL_CLEAR flag in os_info flags entry indicating
+	 * 'clear' sysfs attribute has been set on the panicked system
+	 * for specified reipl type.
+	 * Always set for IPL_TYPE_NSS and IPL_TYPE_UNKNOWN.
+	 */
+	if ((reipl_type == IPL_TYPE_CCW && reipl_ccw_clear) ||
+	    (reipl_type == IPL_TYPE_ECKD && reipl_eckd_clear) ||
+	    (reipl_type == IPL_TYPE_FCP && reipl_fcp_clear) ||
+	    (reipl_type == IPL_TYPE_NVME && reipl_nvme_clear) ||
+	    reipl_type == IPL_TYPE_NSS ||
+	    reipl_type == IPL_TYPE_UNKNOWN)
+		os_info_flags |= OS_INFO_FLAG_REIPL_CLEAR;
+	os_info_entry_add(OS_INFO_FLAGS_ENTRY, &os_info_flags, sizeof(os_info_flags));
 	csum = (__force unsigned int)
 	       csum_partial(reipl_block_actual, reipl_block_actual->hdr.len, 0);
-	abs_lc = get_abs_lowcore(&flags);
-	abs_lc->ipib = ipib;
+	abs_lc = get_abs_lowcore();
+	abs_lc->ipib = __pa(reipl_block_actual);
 	abs_lc->ipib_checksum = csum;
-	put_abs_lowcore(abs_lc, flags);
+	put_abs_lowcore(abs_lc);
 	dump_run(trigger);
 }
 
@@ -2384,7 +2384,7 @@ void s390_reset_system(void)
 	set_prefix(0);
 
 	/* Disable lowcore protection */
-	__ctl_clear_bit(0, 28);
+	local_ctl_clear_bit(0, CR0_LOW_ADDRESS_PROTECTION_BIT);
 	diag_amode31_ops.diag308_reset();
 }
 

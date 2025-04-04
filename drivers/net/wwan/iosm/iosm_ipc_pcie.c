@@ -267,8 +267,6 @@ static int ipc_pcie_probe(struct pci_dev *pci,
 	if (!ipc_pcie)
 		goto ret_fail;
 
-	mark_tech_preview("Intel IOSM (WWAN) driver", THIS_MODULE);
-
 	/* Initialize ipc dbg component for the PCIe device */
 	ipc_pcie->dev = &pci->dev;
 

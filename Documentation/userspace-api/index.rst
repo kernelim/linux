@@ -31,6 +31,7 @@ place where this information is gathered.
    sysfs-platform_profile
    futex2
    vduse
+   lsm
 
 .. only::  subproject and html
 

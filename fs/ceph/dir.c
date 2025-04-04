@@ -881,7 +881,7 @@ int ceph_handle_notrace_create(struct inode *dir, struct dentry *dentry)
 	return PTR_ERR(result);
 }
 
-static int ceph_mknod(struct user_namespace *mnt_userns, struct inode *dir,
+static int ceph_mknod(struct mnt_idmap *idmap, struct inode *dir,
 		      struct dentry *dentry, umode_t mode, dev_t rdev)
 {
 	struct ceph_mds_client *mdsc = ceph_sb_to_mdsc(dir->i_sb);
@@ -946,10 +946,10 @@ out:
 	return err;
 }
 
-static int ceph_create(struct user_namespace *mnt_userns, struct inode *dir,
+static int ceph_create(struct mnt_idmap *idmap, struct inode *dir,
 		       struct dentry *dentry, umode_t mode, bool excl)
 {
-	return ceph_mknod(mnt_userns, dir, dentry, mode, 0);
+	return ceph_mknod(idmap, dir, dentry, mode, 0);
 }
 
 #if IS_ENABLED(CONFIG_FS_ENCRYPTION)
@@ -989,7 +989,7 @@ static int prep_encrypted_symlink_target(struct ceph_mds_request *req,
 }
 #endif
 
-static int ceph_symlink(struct user_namespace *mnt_userns, struct inode *dir,
+static int ceph_symlink(struct mnt_idmap *idmap, struct inode *dir,
 			struct dentry *dentry, const char *dest)
 {
 	struct ceph_mds_client *mdsc = ceph_sb_to_mdsc(dir->i_sb);
@@ -1060,7 +1060,7 @@ out:
 	return err;
 }
 
-static int ceph_mkdir(struct user_namespace *mnt_userns, struct inode *dir,
+static int ceph_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 		      struct dentry *dentry, umode_t mode)
 {
 	struct ceph_mds_client *mdsc = ceph_sb_to_mdsc(dir->i_sb);
@@ -1379,7 +1379,7 @@ out:
 	return err;
 }
 
-static int ceph_rename(struct user_namespace *mnt_userns, struct inode *old_dir,
+static int ceph_rename(struct mnt_idmap *idmap, struct inode *old_dir,
 		       struct dentry *old_dentry, struct inode *new_dir,
 		       struct dentry *new_dentry, unsigned int flags)
 {
@@ -2153,7 +2153,7 @@ const struct inode_operations ceph_dir_iops = {
 	.getattr = ceph_getattr,
 	.setattr = ceph_setattr,
 	.listxattr = ceph_listxattr,
-	.get_acl = ceph_get_acl,
+	.get_inode_acl = ceph_get_acl,
 	.set_acl = ceph_set_acl,
 	.mknod = ceph_mknod,
 	.symlink = ceph_symlink,

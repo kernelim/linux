@@ -15,15 +15,12 @@
  * How to use the V4L2_MBUS_* flags:
  * Flags are defined for each of the possible states and values of a media
  * bus configuration parameter. One and only one bit of each group of flags
- * shall be set by the users of the v4l2_subdev_pad_ops.get_mbus_config and
- * v4l2_subdev_pad_ops.set_mbus_config operations to ensure that no
- * conflicting settings are specified when reporting and setting the media bus
- * configuration with the two operations respectively. For example, it is
- * invalid to set or clear both the V4L2_MBUS_HSYNC_ACTIVE_HIGH and the
+ * shall be set by the users of the v4l2_subdev_pad_ops.get_mbus_config
+ * operation to ensure that no conflicting settings are specified when
+ * reporting the media bus configuration. For example, it is invalid to set or
+ * clear both the V4L2_MBUS_HSYNC_ACTIVE_HIGH and the
  * V4L2_MBUS_HSYNC_ACTIVE_LOW flag at the same time. Instead either flag
- * V4L2_MBUS_HSYNC_ACTIVE_HIGH or flag V4L2_MBUS_HSYNC_ACTIVE_LOW shall be
- * set. The same is true for the V4L2_MBUS_CSI2_1/2/3/4_LANE flags group: only
- * one of these four bits shall be set.
+ * V4L2_MBUS_HSYNC_ACTIVE_HIGH or flag V4L2_MBUS_HSYNC_ACTIVE_LOW shall be set.
  *
  * TODO: replace the existing V4L2_MBUS_* flags with structures of fields
  * to avoid conflicting settings.
@@ -70,11 +67,6 @@
 #define V4L2_MBUS_DATA_ENABLE_LOW		BIT(15)
 
 /* Serial flags */
-/* CSI-2 D-PHY number of data lanes. */
-#define V4L2_MBUS_CSI2_1_LANE			BIT(0)
-#define V4L2_MBUS_CSI2_2_LANE			BIT(1)
-#define V4L2_MBUS_CSI2_3_LANE			BIT(2)
-#define V4L2_MBUS_CSI2_4_LANE			BIT(3)
 /* CSI-2 Virtual Channel identifiers. */
 #define V4L2_MBUS_CSI2_CHANNEL_0		BIT(4)
 #define V4L2_MBUS_CSI2_CHANNEL_1		BIT(5)
@@ -84,10 +76,6 @@
 #define V4L2_MBUS_CSI2_CONTINUOUS_CLOCK		BIT(8)
 #define V4L2_MBUS_CSI2_NONCONTINUOUS_CLOCK	BIT(9)
 
-#define V4L2_MBUS_CSI2_LANES		(V4L2_MBUS_CSI2_1_LANE | \
-					 V4L2_MBUS_CSI2_2_LANE | \
-					 V4L2_MBUS_CSI2_3_LANE | \
-					 V4L2_MBUS_CSI2_4_LANE)
 #define V4L2_MBUS_CSI2_CHANNELS		(V4L2_MBUS_CSI2_CHANNEL_0 | \
 					 V4L2_MBUS_CSI2_CHANNEL_1 | \
 					 V4L2_MBUS_CSI2_CHANNEL_2 | \

@@ -1,3 +1,3 @@
-#5-
-0xd15400f3	rdma_bind_addr	drivers/infiniband/core/rdma_cm	EXPORT_SYMBOL	
+#6-
+0x7d614350	rdma_bind_addr	drivers/infiniband/core/rdma_cm	EXPORT_SYMBOL	
 

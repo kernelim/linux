@@ -1325,7 +1325,7 @@ static void ctcmpc_chx_txdone(fsm_instance *fi, int event, void *arg)
 	clear_normalized_cda(&ch->ccw[1]);
 
 	CTCM_PR_DBGDATA("ccwcda=0x%p data=0x%p\n",
-			(void *)(unsigned long)ch->ccw[1].cda,
+			(void *)(u64)dma32_to_u32(ch->ccw[1].cda),
 			ch->trans_skb->data);
 	ch->ccw[1].count = ch->max_bufsize;
 
@@ -1340,7 +1340,7 @@ static void ctcmpc_chx_txdone(fsm_instance *fi, int event, void *arg)
 	}
 
 	CTCM_PR_DBGDATA("ccwcda=0x%p data=0x%p\n",
-			(void *)(unsigned long)ch->ccw[1].cda,
+			(void *)(u64)dma32_to_u32(ch->ccw[1].cda),
 			ch->trans_skb->data);
 
 	ch->ccw[1].count = ch->trans_skb->len;
@@ -1394,7 +1394,7 @@ static void ctcmpc_chx_rx(fsm_instance *fi, int event, void *arg)
 
 	if (len < TH_HEADER_LENGTH) {
 		CTCM_DBF_TEXT_(MPC_ERROR, CTC_DBF_ERROR,
-				"%s(%s): packet length %d to short",
+				"%s(%s): packet length %d too short",
 					CTCM_FUNTAIL, dev->name, len);
 		priv->stats.rx_dropped++;
 		priv->stats.rx_length_errors++;
@@ -1444,7 +1444,7 @@ again:
 		if (do_debug_ccw)
 			ctcmpc_dumpit((char *)&ch->ccw[0],
 				      sizeof(struct ccw1) * 3);
-		dolock = !in_irq();
+		dolock = !in_hardirq();
 		if (dolock)
 			spin_lock_irqsave(
 				get_ccwdev_lock(ch->cdev), saveflags);

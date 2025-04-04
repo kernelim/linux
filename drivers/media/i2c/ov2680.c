@@ -879,7 +879,6 @@ static const struct v4l2_subdev_video_ops ov2680_video_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops ov2680_pad_ops = {
-	.init_cfg		= ov2680_init_cfg,
 	.enum_mbus_code		= ov2680_enum_mbus_code,
 	.get_fmt		= ov2680_get_fmt,
 	.set_fmt		= ov2680_set_fmt,
@@ -891,6 +890,10 @@ static const struct v4l2_subdev_ops ov2680_subdev_ops = {
 	.core	= &ov2680_core_ops,
 	.video	= &ov2680_video_ops,
 	.pad	= &ov2680_pad_ops,
+};
+
+static const struct v4l2_subdev_internal_ops ov2680_internal_ops = {
+	.init_state		= ov2680_init_state,
 };
 
 static int ov2680_mode_init(struct ov2680_dev *sensor)

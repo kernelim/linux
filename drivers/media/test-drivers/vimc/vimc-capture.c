@@ -429,7 +429,7 @@ static struct vimc_ent_device *vimc_cap_add(struct vimc_device *vimc,
 	q->ops = &vimc_cap_qops;
 	q->mem_ops = &vb2_vmalloc_memops;
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
-	q->min_buffers_needed = 2;
+	q->min_queued_buffers = 2;
 	q->lock = &vcap->lock;
 
 	ret = vb2_queue_init(q);

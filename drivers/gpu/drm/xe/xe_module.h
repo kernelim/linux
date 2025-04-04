@@ -11,13 +11,17 @@
 /* Module modprobe variables */
 struct xe_modparam {
 	bool force_execlist;
-	bool enable_display;
+	bool probe_display;
 	u32 force_vram_bar_size;
 	int guc_log_level;
 	char *guc_firmware_path;
 	char *huc_firmware_path;
 	char *gsc_firmware_path;
 	char *force_probe;
+#ifdef CONFIG_PCI_IOV
+	unsigned int max_vfs;
+#endif
+	int wedged_mode;
 };
 
 extern struct xe_modparam xe_modparam;

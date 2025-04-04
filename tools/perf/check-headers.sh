@@ -9,23 +9,15 @@ FILES=(
   "include/uapi/linux/const.h"
   "include/uapi/drm/drm.h"
   "include/uapi/drm/i915_drm.h"
+  "include/uapi/linux/bits.h"
   "include/uapi/linux/fadvise.h"
-  "include/uapi/linux/fcntl.h"
-  "include/uapi/linux/fs.h"
   "include/uapi/linux/fscrypt.h"
   "include/uapi/linux/kcmp.h"
   "include/uapi/linux/kvm.h"
   "include/uapi/linux/in.h"
-  "include/uapi/linux/mount.h"
-  "include/uapi/linux/openat2.h"
   "include/uapi/linux/perf_event.h"
-  "include/uapi/linux/prctl.h"
-  "include/uapi/linux/sched.h"
   "include/uapi/linux/seccomp.h"
   "include/uapi/linux/stat.h"
-  "include/uapi/linux/usbdevice_fs.h"
-  "include/uapi/linux/vhost.h"
-  "include/uapi/sound/asound.h"
   "include/linux/bits.h"
   "include/vdso/bits.h"
   "include/linux/const.h"
@@ -38,9 +30,7 @@ FILES=(
   "arch/x86/include/asm/cpufeatures.h"
   "arch/x86/include/asm/inat_types.h"
   "arch/x86/include/asm/emulate_prefix.h"
-  "arch/x86/include/asm/irq_vectors.h"
   "arch/x86/include/asm/msr-index.h"
-  "arch/x86/include/uapi/asm/prctl.h"
   "arch/x86/lib/x86-opcode-map.txt"
   "arch/x86/tools/gen-insn-attr-x86.awk"
   "arch/arm/include/uapi/asm/perf_regs.h"
@@ -97,7 +87,18 @@ SYNC_CHECK_FILES=(
 
 declare -a BEAUTY_FILES
 BEAUTY_FILES=(
+  "arch/x86/include/asm/irq_vectors.h"
+  "arch/x86/include/uapi/asm/prctl.h"
   "include/linux/socket.h"
+  "include/uapi/linux/fcntl.h"
+  "include/uapi/linux/fs.h"
+  "include/uapi/linux/mount.h"
+  "include/uapi/linux/prctl.h"
+  "include/uapi/linux/sched.h"
+  "include/uapi/linux/stat.h"
+  "include/uapi/linux/usbdevice_fs.h"
+  "include/uapi/linux/vhost.h"
+  "include/uapi/sound/asound.h"
 )
 
 declare -a FAILURES
@@ -135,6 +136,30 @@ beauty_check () {
   check_2 "tools/perf/trace/beauty/$file" "$file" "$@"
 }
 
+check_ignore_some_hunks () {
+  orig_file="$1"
+  tools_file="tools/$orig_file"
+  hunks_to_ignore="tools/perf/check-header_ignore_hunks/$orig_file"
+
+  if [ ! -f "$hunks_to_ignore" ]; then
+    echo "$hunks_to_ignore not found. Skipping $orig_file check."
+    FAILURES+=(
+      "$tools_file $orig_file"
+    )
+    return
+  fi
+
+  cmd="diff -u \"$tools_file\" \"$orig_file\" | grep -vf \"$hunks_to_ignore\" | wc -l | grep -qw 0"
+
+  if [ -f "$orig_file" ] && ! eval "$cmd"
+  then
+    FAILURES+=(
+      "$tools_file $orig_file"
+    )
+  fi
+}
+
+
 # Check if we have the kernel headers (tools/perf/../../include), else
 # we're probably on a detached tarball, so no point in trying to check
 # differences.
@@ -168,9 +193,9 @@ check include/uapi/linux/mman.h       '-I "^#include <\(uapi/\)*asm/mman.h>"'
 check include/linux/build_bug.h       '-I "^#\(ifndef\|endif\)\( \/\/\)* static_assert$"'
 check include/linux/ctype.h	      '-I "isdigit("'
 check lib/ctype.c		      '-I "^EXPORT_SYMBOL" -I "^#include <linux/export.h>" -B'
-check lib/list_sort.c		      '-I "^#include <linux/bug.h>"'
 
 # diff non-symmetric files
+check_2 tools/perf/arch/x86/entry/syscalls/syscall_32.tbl arch/x86/entry/syscalls/syscall_32.tbl
 check_2 tools/perf/arch/x86/entry/syscalls/syscall_64.tbl arch/x86/entry/syscalls/syscall_64.tbl
 check_2 tools/perf/arch/powerpc/entry/syscalls/syscall.tbl arch/powerpc/kernel/syscalls/syscall.tbl
 check_2 tools/perf/arch/s390/entry/syscalls/syscall.tbl arch/s390/kernel/syscalls/syscall.tbl
@@ -184,6 +209,10 @@ done
 # check duplicated library files
 check_2 tools/perf/util/hashmap.h tools/lib/bpf/hashmap.h
 check_2 tools/perf/util/hashmap.c tools/lib/bpf/hashmap.c
+
+# Files with larger differences
+
+check_ignore_some_hunks lib/list_sort.c
 
 cd tools/perf || exit
 

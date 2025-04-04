@@ -19,6 +19,7 @@
 #include <linux/kthread.h>
 #include <linux/blk-mq.h>
 #include <linux/llist.h>
+#include "blk.h"
 
 struct blkcg_gq;
 struct blkg_policy_data;
@@ -72,9 +73,10 @@ struct blkcg_gq {
 	struct blkg_iostat_set		iostat;
 
 	struct blkg_policy_data		*pd[BLKCG_MAX_POLS];
-
+#ifdef CONFIG_BLK_CGROUP_PUNT_BIO
 	spinlock_t			async_bio_lock;
 	struct bio_list			async_bios;
+#endif
 	union {
 		struct work_struct	async_bio_work;
 		struct work_struct	free_work;
@@ -93,6 +95,8 @@ struct blkcg {
 	struct cgroup_subsys_state	css;
 	spinlock_t			lock;
 	refcount_t			online_pin;
+	/* If there is block congestion on this cgroup. */
+	atomic_t			congestion_count;
 
 	struct radix_tree_root		blkg_tree;
 	struct blkcg_gq	__rcu		*blkg_hint;
@@ -299,19 +303,6 @@ static inline struct blkcg *cpd_to_blkcg(struct blkcg_policy_data *cpd)
 }
 
 /**
- * blkg_path - format cgroup path of blkg
- * @blkg: blkg of interest
- * @buf: target buffer
- * @buflen: target buffer length
- *
- * Format the path of the cgroup of @blkg into @buf.
- */
-static inline int blkg_path(struct blkcg_gq *blkg, char *buf, int buflen)
-{
-	return cgroup_path(blkg->blkcg->css.cgroup, buf, buflen);
-}
-
-/**
  * blkg_get - get a blkg reference
  * @blkg: blkg to get
  *
@@ -375,16 +366,6 @@ static inline void blkg_put(struct blkcg_gq *blkg)
 		if (((d_blkg) = blkg_lookup(css_to_blkcg(pos_css),	\
 					    (p_blkg)->q)))
 
-bool __blkcg_punt_bio_submit(struct bio *bio);
-
-static inline bool blkcg_punt_bio_submit(struct bio *bio)
-{
-	if (bio->bi_opf & REQ_CGROUP_PUNT)
-		return __blkcg_punt_bio_submit(bio);
-	else
-		return false;
-}
-
 static inline void blkcg_bio_issue_init(struct bio *bio)
 {
 	bio_issue_init(&bio->bi_issue, bio_sectors(bio));
@@ -395,7 +376,7 @@ static inline void blkcg_use_delay(struct blkcg_gq *blkg)
 	if (WARN_ON_ONCE(atomic_read(&blkg->use_delay) < 0))
 		return;
 	if (atomic_add_return(1, &blkg->use_delay) == 1)
-		atomic_inc(&blkg->blkcg->css.cgroup->congestion_count);
+		atomic_inc(&blkg->blkcg->congestion_count);
 }
 
 static inline int blkcg_unuse_delay(struct blkcg_gq *blkg)
@@ -420,7 +401,7 @@ static inline int blkcg_unuse_delay(struct blkcg_gq *blkg)
 	if (old == 0)
 		return 0;
 	if (old == 1)
-		atomic_dec(&blkg->blkcg->css.cgroup->congestion_count);
+		atomic_dec(&blkg->blkcg->congestion_count);
 	return 1;
 }
 
@@ -439,7 +420,7 @@ static inline void blkcg_set_delay(struct blkcg_gq *blkg, u64 delay)
 
 	/* We only want 1 person setting the congestion count for this blkg. */
 	if (!old && atomic_try_cmpxchg(&blkg->use_delay, &old, -1))
-		atomic_inc(&blkg->blkcg->css.cgroup->congestion_count);
+		atomic_inc(&blkg->blkcg->congestion_count);
 
 	atomic64_set(&blkg->delay_nsec, delay);
 }
@@ -456,7 +437,7 @@ static inline void blkcg_clear_delay(struct blkcg_gq *blkg)
 
 	/* We only want 1 person clearing the congestion count for this blkg. */
 	if (old && atomic_try_cmpxchg(&blkg->use_delay, &old, 0))
-		atomic_dec(&blkg->blkcg->css.cgroup->congestion_count);
+		atomic_dec(&blkg->blkcg->congestion_count);
 }
 
 /**
@@ -504,11 +485,8 @@ static inline void blkcg_deactivate_policy(struct gendisk *disk,
 static inline struct blkg_policy_data *blkg_to_pd(struct blkcg_gq *blkg,
 						  struct blkcg_policy *pol) { return NULL; }
 static inline struct blkcg_gq *pd_to_blkg(struct blkg_policy_data *pd) { return NULL; }
-static inline char *blkg_path(struct blkcg_gq *blkg) { return NULL; }
 static inline void blkg_get(struct blkcg_gq *blkg) { }
 static inline void blkg_put(struct blkcg_gq *blkg) { }
-
-static inline bool blkcg_punt_bio_submit(struct bio *bio) { return false; }
 static inline void blkcg_bio_issue_init(struct bio *bio) { }
 static inline void blk_cgroup_bio_start(struct bio *bio) { }
 static inline bool blk_cgroup_mergeable(struct request *rq, struct bio *bio) { return true; }

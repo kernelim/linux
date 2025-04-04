@@ -44,6 +44,7 @@ config KVM
 	select KVM_VFIO
 	select HAVE_KVM_PM_NOTIFIER if PM
 	select KVM_GENERIC_HARDWARE_ENABLING
+	select KVM_GENERIC_PRE_FAULT_MEMORY
 	help
 	  Support hosting fully virtualized guest machines using hardware
 	  virtualization extensions.  You will need a fairly recent
@@ -142,8 +143,10 @@ config KVM_AMD_SEV
 	select HAVE_KVM_ARCH_GMEM_PREPARE
 	select HAVE_KVM_ARCH_GMEM_INVALIDATE
 	help
-	  Provides support for launching Encrypted VMs (SEV) and Encrypted VMs
-	  with Encrypted State (SEV-ES) on AMD processors.
+	  Provides support for launching encrypted VMs which use Secure
+	  Encrypted Virtualization (SEV), Secure Encrypted Virtualization with
+	  Encrypted State (SEV-ES), and Secure Encrypted Virtualization with
+	  Secure Nested Paging (SEV-SNP) technologies on AMD processors.
 
 config KVM_SMM
 	bool "System Management Mode emulation"

@@ -1100,8 +1100,8 @@ exit:
 	return ret;
 }
 
-static int ov7251_entity_init_cfg(struct v4l2_subdev *subdev,
-				  struct v4l2_subdev_state *sd_state)
+static int ov7251_init_state(struct v4l2_subdev *subdev,
+			     struct v4l2_subdev_state *sd_state)
 {
 	struct v4l2_subdev_format fmt = {
 		.which = sd_state ? V4L2_SUBDEV_FORMAT_TRY
@@ -1239,7 +1239,6 @@ static const struct v4l2_subdev_video_ops ov7251_video_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops ov7251_subdev_pad_ops = {
-	.init_cfg = ov7251_entity_init_cfg,
 	.enum_mbus_code = ov7251_enum_mbus_code,
 	.enum_frame_size = ov7251_enum_frame_size,
 	.enum_frame_interval = ov7251_enum_frame_ival,
@@ -1378,6 +1377,7 @@ static int ov7251_probe(struct i2c_client *client)
 	}
 
 	v4l2_i2c_subdev_init(&ov7251->sd, client, &ov7251_subdev_ops);
+	ov7251->sd.internal_ops = &ov7251_internal_ops;
 	ov7251->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	ov7251->pad.flags = MEDIA_PAD_FL_SOURCE;
 	ov7251->sd.dev = &client->dev;
@@ -1456,7 +1456,7 @@ static int ov7251_probe(struct i2c_client *client)
 		goto free_entity;
 	}
 
-	ov7251_entity_init_cfg(&ov7251->sd, NULL);
+	ov7251_init_state(&ov7251->sd, NULL);
 
 	return 0;
 

@@ -459,6 +459,10 @@ void dmub_dcn32_get_diagnostic_data(struct dmub_srv *dmub, struct dmub_diagnosti
 	diag_data->inbox0_wptr = REG_READ(DMCUB_INBOX0_WPTR);
 	diag_data->inbox0_size = REG_READ(DMCUB_INBOX0_SIZE);
 
+	diag_data->outbox1_rptr = REG_READ(DMCUB_OUTBOX1_RPTR);
+	diag_data->outbox1_wptr = REG_READ(DMCUB_OUTBOX1_WPTR);
+	diag_data->outbox1_size = REG_READ(DMCUB_OUTBOX1_SIZE);
+
 	REG_GET(DMCUB_CNTL, DMCUB_ENABLE, &is_dmub_enabled);
 	diag_data->is_dmcub_enabled = is_dmub_enabled;
 
@@ -478,6 +482,8 @@ void dmub_dcn32_get_diagnostic_data(struct dmub_srv *dmub, struct dmub_diagnosti
 	diag_data->is_cw6_enabled = is_cw6_enabled;
 
 	diag_data->gpint_datain0 = REG_READ(DMCUB_GPINT_DATAIN0);
+
+	diag_data->timeout_info = dmub->debug;
 }
 void dmub_dcn32_configure_dmub_in_system_memory(struct dmub_srv *dmub)
 {

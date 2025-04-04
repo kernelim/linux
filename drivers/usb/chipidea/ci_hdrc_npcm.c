@@ -18,7 +18,7 @@ struct npcm_udc_data {
 	struct ci_hdrc_platform_data pdata;
 };
 
-static int npcm_udc_notify_event(struct ci_hdrc *ci, unsigned event)
+static int npcm_udc_notify_event(struct ci_hdrc *ci, unsigned int event)
 {
 	struct device *dev = ci->dev->parent;
 
@@ -28,7 +28,7 @@ static int npcm_udc_notify_event(struct ci_hdrc *ci, unsigned event)
 		hw_write(ci, OP_USBMODE, 0xffffffff, 0x0);
 		break;
 	default:
-		dev_dbg(dev, "unknown ci_hdrc event (%d)\n",event);
+		dev_dbg(dev, "unknown ci_hdrc event (%d)\n", event);
 		break;
 	}
 
@@ -80,15 +80,13 @@ clk_err:
 	return ret;
 }
 
-static int npcm_udc_remove(struct platform_device *pdev)
+static void npcm_udc_remove(struct platform_device *pdev)
 {
 	struct npcm_udc_data *ci = platform_get_drvdata(pdev);
 
 	pm_runtime_disable(&pdev->dev);
 	ci_hdrc_remove_device(ci->ci);
 	clk_disable_unprepare(ci->core_clk);
-
-	return 0;
 }
 
 static const struct of_device_id npcm_udc_dt_match[] = {
@@ -100,7 +98,7 @@ MODULE_DEVICE_TABLE(of, npcm_udc_dt_match);
 
 static struct platform_driver npcm_udc_driver = {
 	.probe = npcm_udc_probe,
-	.remove = npcm_udc_remove,
+	.remove_new = npcm_udc_remove,
 	.driver = {
 		.name = "npcm_udc",
 		.of_match_table = npcm_udc_dt_match,

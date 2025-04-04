@@ -1,3 +1,3 @@
-#5-
-0xbef482ff	__rdma_create_kernel_id	drivers/infiniband/core/rdma_cm	EXPORT_SYMBOL	
+#6-
+0xfe510816	__rdma_create_kernel_id	drivers/infiniband/core/rdma_cm	EXPORT_SYMBOL	
 

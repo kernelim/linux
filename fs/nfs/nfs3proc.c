@@ -979,8 +979,15 @@ nfs3_proc_lock(struct file *filp, int cmd, struct file_lock *fl)
 	return status;
 }
 
-static int nfs3_have_delegation(struct inode *inode, fmode_t flags)
+static int nfs3_have_delegation(struct inode *inode, fmode_t type, int flags)
 {
+	return 0;
+}
+
+static int nfs3_return_delegation(struct inode *inode)
+{
+	if (S_ISREG(inode->i_mode))
+		nfs_wb_all(inode);
 	return 0;
 }
 
@@ -999,7 +1006,7 @@ static const struct inode_operations nfs3_dir_inode_operations = {
 	.setattr	= nfs_setattr,
 #ifdef CONFIG_NFS_V3_ACL
 	.listxattr	= nfs3_listxattr,
-	.get_acl	= nfs3_get_acl,
+	.get_inode_acl	= nfs3_get_acl,
 	.set_acl	= nfs3_set_acl,
 #endif
 };
@@ -1010,7 +1017,7 @@ static const struct inode_operations nfs3_file_inode_operations = {
 	.setattr	= nfs_setattr,
 #ifdef CONFIG_NFS_V3_ACL
 	.listxattr	= nfs3_listxattr,
-	.get_acl	= nfs3_get_acl,
+	.get_inode_acl	= nfs3_get_acl,
 	.set_acl	= nfs3_set_acl,
 #endif
 };
@@ -1061,6 +1068,7 @@ const struct nfs_rpc_ops nfs_v3_clientops = {
 	.clear_acl_cache = forget_all_cached_acls,
 	.close_context	= nfs_close_context,
 	.have_delegation = nfs3_have_delegation,
+	.return_delegation = nfs3_return_delegation,
 	.alloc_client	= nfs_alloc_client,
 	.init_client	= nfs_init_client,
 	.free_client	= nfs_free_client,

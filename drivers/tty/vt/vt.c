@@ -300,6 +300,14 @@ static inline unsigned short *screenpos(const struct vc_data *vc, int offset,
 	return p;
 }
 
+static void con_putc(struct vc_data *vc, u16 ca, unsigned int y, unsigned int x)
+{
+	if (vc->vc_sw->con_putc)
+		vc->vc_sw->con_putc(vc, ca, y, x);
+	else
+		vc->vc_sw->con_putcs(vc, &ca, 1, y, x);
+}
+
 /* Called  from the keyboard irq path.. */
 static inline void scrolldelta(int lines)
 {
@@ -762,7 +770,7 @@ void complement_pos(struct vc_data *vc, int offset)
 	    old_offset < vc->vc_screenbuf_size) {
 		scr_writew(old, screenpos(vc, old_offset, true));
 		if (con_should_update(vc))
-			vc->vc_sw->con_putc(vc, old, oldy, oldx);
+			con_putc(vc, old, oldy, oldx);
 		notify_update(vc);
 	}
 
@@ -779,7 +787,7 @@ void complement_pos(struct vc_data *vc, int offset)
 		if (con_should_update(vc)) {
 			oldx = (offset >> 1) % vc->vc_cols;
 			oldy = (offset >> 1) / vc->vc_cols;
-			vc->vc_sw->con_putc(vc, new, oldy, oldx);
+			con_putc(vc, new, oldy, oldx);
 		}
 		notify_update(vc);
 	}
@@ -833,7 +841,7 @@ static void add_softcursor(struct vc_data *vc)
 		i ^= CUR_FG;
 	scr_writew(i, (u16 *)vc->vc_pos);
 	if (con_should_update(vc))
-		vc->vc_sw->con_putc(vc, i, vc->state.y, vc->state.x);
+		con_putc(vc, i, vc->state.y, vc->state.x);
 }
 
 static void hide_softcursor(struct vc_data *vc)
@@ -841,8 +849,8 @@ static void hide_softcursor(struct vc_data *vc)
 	if (softcursor_original != -1) {
 		scr_writew(softcursor_original, (u16 *)vc->vc_pos);
 		if (con_should_update(vc))
-			vc->vc_sw->con_putc(vc, softcursor_original,
-					vc->state.y, vc->state.x);
+			con_putc(vc, softcursor_original, vc->state.y,
+				 vc->state.x);
 		softcursor_original = -1;
 	}
 }
@@ -852,7 +860,7 @@ static void hide_cursor(struct vc_data *vc)
 	if (vc_is_sel(vc))
 		clear_selection();
 
-	vc->vc_sw->con_cursor(vc, CM_ERASE);
+	vc->vc_sw->con_cursor(vc, false);
 	hide_softcursor(vc);
 }
 
@@ -865,7 +873,7 @@ static void set_cursor(struct vc_data *vc)
 			clear_selection();
 		add_softcursor(vc);
 		if (CUR_SIZE(vc->vc_cursor_type) != CUR_NONE)
-			vc->vc_sw->con_cursor(vc, CM_DRAW);
+			vc->vc_sw->con_cursor(vc, true);
 	} else
 		hide_cursor(vc);
 }
@@ -962,7 +970,7 @@ void redraw_screen(struct vc_data *vc, int is_switch)
 	}
 
 	if (redraw) {
-		int update;
+		bool update;
 		int old_was_color = vc->vc_can_do_color;
 
 		set_origin(vc);
@@ -999,7 +1007,7 @@ int vc_cons_allocated(unsigned int i)
 	return (i < MAX_NR_CONSOLES && vc_cons[i].d);
 }
 
-static void visual_init(struct vc_data *vc, int num, int init)
+static void visual_init(struct vc_data *vc, int num, bool init)
 {
 	/* ++Geert: vc->vc_sw->con_init determines console size */
 	if (vc->vc_sw)
@@ -1083,7 +1091,7 @@ int vc_allocate(unsigned int currcons)	/* return 0 on success */
 	vc->port.ops = &vc_port_ops;
 	INIT_WORK(&vc_cons[currcons].SAK_work, vc_SAK);
 
-	visual_init(vc, currcons, 1);
+	visual_init(vc, currcons, true);
 
 	if (!*vc->uni_pagedict_loc)
 		con_set_default_unimap(vc);
@@ -1115,13 +1123,13 @@ err_free:
 }
 
 static inline int resize_screen(struct vc_data *vc, int width, int height,
-				int user)
+				bool from_user)
 {
 	/* Resizes the resolution of the display adapater */
 	int err = 0;
 
 	if (vc->vc_sw->con_resize)
-		err = vc->vc_sw->con_resize(vc, width, height, user);
+		err = vc->vc_sw->con_resize(vc, width, height, from_user);
 
 	return err;
 }
@@ -1132,6 +1140,7 @@ static inline int resize_screen(struct vc_data *vc, int width, int height,
  *	@vc: virtual console private data
  *	@cols: columns
  *	@lines: lines
+ *	@from_user: invoked by a user?
  *
  *	Resize a virtual console, clipping according to the actual constraints.
  *	If the caller passes a tty structure then update the termios winsize
@@ -1142,13 +1151,12 @@ static inline int resize_screen(struct vc_data *vc, int width, int height,
  */
 
 static int vc_do_resize(struct tty_struct *tty, struct vc_data *vc,
-				unsigned int cols, unsigned int lines)
+			unsigned int cols, unsigned int lines, bool from_user)
 {
 	unsigned long old_origin, new_origin, new_scr_end, rlth, rrem, err = 0;
 	unsigned long end;
 	unsigned int old_rows, old_row_size, first_copied_row;
 	unsigned int new_cols, new_rows, new_row_size, new_screen_size;
-	unsigned int user;
 	unsigned short *oldscreen, *newscreen;
 	u32 **new_uniscr = NULL;
 
@@ -1156,9 +1164,6 @@ static int vc_do_resize(struct tty_struct *tty, struct vc_data *vc,
 
 	if (!vc)
 		return -ENXIO;
-
-	user = vc->vc_resize_user;
-	vc->vc_resize_user = 0;
 
 	if (cols > VC_MAXCOL || lines > VC_MAXROW)
 		return -EINVAL;
@@ -1185,7 +1190,7 @@ static int vc_do_resize(struct tty_struct *tty, struct vc_data *vc,
 		 * to deal with possible errors from the code below, we call
 		 * the resize_screen here as well.
 		 */
-		return resize_screen(vc, new_cols, new_rows, user);
+		return resize_screen(vc, new_cols, new_rows, from_user);
 	}
 
 	if (new_screen_size > KMALLOC_MAX_SIZE || !new_screen_size)
@@ -1208,7 +1213,7 @@ static int vc_do_resize(struct tty_struct *tty, struct vc_data *vc,
 	old_rows = vc->vc_rows;
 	old_row_size = vc->vc_size_row;
 
-	err = resize_screen(vc, new_cols, new_rows, user);
+	err = resize_screen(vc, new_cols, new_rows, from_user);
 	if (err) {
 		kfree(newscreen);
 		vc_uniscr_free(new_uniscr);
@@ -1295,22 +1300,23 @@ static int vc_do_resize(struct tty_struct *tty, struct vc_data *vc,
 }
 
 /**
- *	vc_resize		-	resize a VT
+ *	__vc_resize		-	resize a VT
  *	@vc: virtual console
  *	@cols: columns
  *	@rows: rows
+ *	@from_user: invoked by a user?
  *
  *	Resize a virtual console as seen from the console end of things. We
  *	use the common vc_do_resize methods to update the structures. The
  *	caller must hold the console sem to protect console internals and
  *	vc->port.tty
  */
-
-int vc_resize(struct vc_data *vc, unsigned int cols, unsigned int rows)
+int __vc_resize(struct vc_data *vc, unsigned int cols, unsigned int rows,
+		bool from_user)
 {
-	return vc_do_resize(vc->port.tty, vc, cols, rows);
+	return vc_do_resize(vc->port.tty, vc, cols, rows, from_user);
 }
-EXPORT_SYMBOL(vc_resize);
+EXPORT_SYMBOL(__vc_resize);
 
 /**
  *	vt_resize		-	resize a VT
@@ -1330,7 +1336,7 @@ static int vt_resize(struct tty_struct *tty, struct winsize *ws)
 	int ret;
 
 	console_lock();
-	ret = vc_do_resize(tty, vc, ws->ws_col, ws->ws_row);
+	ret = vc_do_resize(tty, vc, ws->ws_col, ws->ws_row, false);
 	console_unlock();
 	return ret;
 }
@@ -1582,7 +1588,7 @@ static void csi_X(struct vc_data *vc, unsigned int vpar)
 	vc_uniscr_clear_line(vc, vc->state.x, count);
 	scr_memsetw((unsigned short *)vc->vc_pos, vc->vc_video_erase_char, 2 * count);
 	if (con_should_update(vc))
-		vc->vc_sw->con_clear(vc, vc->state.y, vc->state.x, 1, count);
+		vc->vc_sw->con_clear(vc, vc->state.y, vc->state.x, count);
 	vc->vc_need_wrap = 0;
 }
 
@@ -3480,7 +3486,7 @@ static int __init con_init(void)
 		vc_cons[currcons].d = vc = kzalloc(sizeof(struct vc_data), GFP_NOWAIT);
 		INIT_WORK(&vc_cons[currcons].SAK_work, vc_SAK);
 		tty_port_init(&vc->port);
-		visual_init(vc, currcons, 1);
+		visual_init(vc, currcons, true);
 		/* Assuming vc->vc_{cols,rows,screenbuf_size} are sane here. */
 		vc->vc_screenbuf = kzalloc(vc->vc_screenbuf_size, GFP_NOWAIT);
 		vc_init(vc, currcons || !vc->vc_sw->con_save_screen);
@@ -3650,7 +3656,7 @@ static int do_bind_con_driver(const struct consw *csw, int first, int last,
 		old_was_color = vc->vc_can_do_color;
 		vc->vc_sw->con_deinit(vc);
 		vc->vc_origin = (unsigned long)vc->vc_screenbuf;
-		visual_init(vc, i, 0);
+		visual_init(vc, i, false);
 		set_origin(vc);
 		update_attr(vc);
 
@@ -3980,15 +3986,9 @@ EXPORT_SYMBOL(con_is_visible);
  * Called when the console is taken over by the kernel debugger, this
  * function needs to save the current console state, then put the console
  * into a state suitable for the kernel debugger.
- *
- * RETURNS:
- * Zero on success, nonzero if a failure occurred when trying to prepare
- * the console for the debugger.
  */
-int con_debug_enter(struct vc_data *vc)
+void con_debug_enter(struct vc_data *vc)
 {
-	int ret = 0;
-
 	saved_fg_console = fg_console;
 	saved_last_console = last_console;
 	saved_want_console = want_console;
@@ -3997,7 +3997,7 @@ int con_debug_enter(struct vc_data *vc)
 	vc->vc_mode = KD_TEXT;
 	console_blanked = 0;
 	if (vc->vc_sw->con_debug_enter)
-		ret = vc->vc_sw->con_debug_enter(vc);
+		vc->vc_sw->con_debug_enter(vc);
 #ifdef CONFIG_KGDB_KDB
 	/* Set the initial LINES variable if it is not already set */
 	if (vc->vc_rows < 999) {
@@ -4027,7 +4027,6 @@ int con_debug_enter(struct vc_data *vc)
 		}
 	}
 #endif /* CONFIG_KGDB_KDB */
-	return ret;
 }
 EXPORT_SYMBOL_GPL(con_debug_enter);
 
@@ -4036,15 +4035,10 @@ EXPORT_SYMBOL_GPL(con_debug_enter);
  *
  * Restore the console state to what it was before the kernel debugger
  * was invoked.
- *
- * RETURNS:
- * Zero on success, nonzero if a failure occurred when trying to restore
- * the console.
  */
-int con_debug_leave(void)
+void con_debug_leave(void)
 {
 	struct vc_data *vc;
-	int ret = 0;
 
 	fg_console = saved_fg_console;
 	last_console = saved_last_console;
@@ -4054,8 +4048,7 @@ int con_debug_leave(void)
 
 	vc = vc_cons[fg_console].d;
 	if (vc->vc_sw->con_debug_leave)
-		ret = vc->vc_sw->con_debug_leave(vc);
-	return ret;
+		vc->vc_sw->con_debug_leave(vc);
 }
 EXPORT_SYMBOL_GPL(con_debug_leave);
 
@@ -4317,7 +4310,7 @@ void do_blank_screen(int entering_gfx)
 	if (entering_gfx) {
 		hide_cursor(vc);
 		save_screen(vc);
-		vc->vc_sw->con_blank(vc, -1, 1);
+		vc->vc_sw->con_blank(vc, 1, 1);
 		console_blanked = fg_console + 1;
 		blank_state = blank_off;
 		set_origin(vc);
@@ -4594,7 +4587,7 @@ out:
 	return rc;
 }
 
-static int con_font_set(struct vc_data *vc, struct console_font_op *op)
+static int con_font_set(struct vc_data *vc, const struct console_font_op *op)
 {
 	struct console_font font;
 	int rc = -EINVAL;
@@ -4758,43 +4751,3 @@ void vcs_scr_updated(struct vc_data *vc)
 {
 	notify_update(vc);
 }
-
-void vc_scrolldelta_helper(struct vc_data *c, int lines,
-		unsigned int rolled_over, void *base, unsigned int size)
-{
-	unsigned long ubase = (unsigned long)base;
-	ptrdiff_t scr_end = (void *)c->vc_scr_end - base;
-	ptrdiff_t vorigin = (void *)c->vc_visible_origin - base;
-	ptrdiff_t origin = (void *)c->vc_origin - base;
-	int margin = c->vc_size_row * 4;
-	int from, wrap, from_off, avail;
-
-	/* Turn scrollback off */
-	if (!lines) {
-		c->vc_visible_origin = c->vc_origin;
-		return;
-	}
-
-	/* Do we have already enough to allow jumping from 0 to the end? */
-	if (rolled_over > scr_end + margin) {
-		from = scr_end;
-		wrap = rolled_over + c->vc_size_row;
-	} else {
-		from = 0;
-		wrap = size;
-	}
-
-	from_off = (vorigin - from + wrap) % wrap + lines * c->vc_size_row;
-	avail = (origin - from + wrap) % wrap;
-
-	/* Only a little piece would be left? Show all incl. the piece! */
-	if (avail < 2 * margin)
-		margin = 0;
-	if (from_off < margin)
-		from_off = 0;
-	if (from_off > avail - margin)
-		from_off = avail;
-
-	c->vc_visible_origin = ubase + (from + from_off) % wrap;
-}
-EXPORT_SYMBOL_GPL(vc_scrolldelta_helper);

@@ -264,11 +264,7 @@ static int mtk_drm_kms_init(struct drm_device *drm)
 	 * Configure the DMA segment size to make sure we get contiguous IOVA
 	 * when importing PRIME buffers.
 	 */
-	ret = dma_set_max_seg_size(dma_dev, UINT_MAX);
-	if (ret) {
-		dev_err(dma_dev, "Failed to set DMA segment size\n");
-		goto err_component_unbind;
-	}
+	dma_set_max_seg_size(dma_dev, UINT_MAX);
 
 	/*
 	 * We don't use the drm_irq_install() helpers provided by the DRM

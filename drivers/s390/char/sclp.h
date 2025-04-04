@@ -84,13 +84,6 @@ typedef unsigned int sclp_cmdw_t;
 
 typedef u64 sccb_mask_t;
 
-struct sccb_header {
-	u16	length;
-	u8	function_code;
-	u8	control_mask[3];
-	u16	response_code;
-} __attribute__((packed));
-
 struct init_sccb {
 	struct sccb_header header;
 	u16 _reserved;
@@ -204,7 +197,7 @@ struct read_storage_sccb {
 	u16 assigned;
 	u16 standby;
 	u16 :16;
-	u32 entries[0];
+	u32 entries[];
 } __packed;
 
 static inline void sclp_fill_core_info(struct sclp_core_info *info,
@@ -235,13 +228,6 @@ struct gds_subvector {
 struct gds_vector {
 	u16	length;
 	u16	gds_id;
-} __attribute__((packed));
-
-struct evbuf_header {
-	u16	length;
-	u8	type;
-	u8	flags;
-	u16	_reserved;
 } __attribute__((packed));
 
 struct sclp_req {
@@ -307,7 +293,7 @@ enum {
 
 extern int sclp_init_state;
 extern int sclp_console_pages;
-extern int sclp_console_drop;
+extern bool sclp_console_drop;
 extern unsigned long sclp_console_full;
 extern bool sclp_mask_compat_mode;
 

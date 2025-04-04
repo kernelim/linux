@@ -21,6 +21,7 @@ static unsigned int nf_hook_run_bpf(void *bpf_prog, struct sk_buff *skb,
 struct bpf_nf_link {
 	struct bpf_link link;
 	struct nf_hook_ops hook_ops;
+	netns_tracker ns_tracker;
 	struct net *net;
 	u32 dead;
 };
@@ -35,8 +36,10 @@ static void bpf_nf_link_release(struct bpf_link *link)
 	/* prevent hook-not-found warning splat from netfilter core when
 	 * .detach was already called
 	 */
-	if (!cmpxchg(&nf_link->dead, 0, 1))
+	if (!cmpxchg(&nf_link->dead, 0, 1)) {
 		nf_unregister_net_hook(nf_link->net, &nf_link->hook_ops);
+		put_net_track(nf_link->net, &nf_link->ns_tracker);
+	}
 }
 
 static void bpf_nf_link_dealloc(struct bpf_link *link)
@@ -162,6 +165,8 @@ int bpf_nf_link_attach(const union bpf_attr *attr, struct bpf_prog *prog)
 		return err;
 	}
 
+	get_net_track(net, &link->ns_tracker, GFP_KERNEL);
+
 	return bpf_link_settle(&link_primer);
 }
 
@@ -219,7 +224,7 @@ static bool nf_is_valid_access(int off, int size, enum bpf_access_type type,
 static const struct bpf_func_proto *
 bpf_nf_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
-	return bpf_base_func_proto(func_id);
+	return bpf_base_func_proto(func_id, prog);
 }
 
 const struct bpf_verifier_ops netfilter_verifier_ops = {

@@ -154,7 +154,7 @@ Architecture-specific documentation
 .. toctree::
    :maxdepth: 2
 
-   arch
+   arch/index
 
 
 Other documentation

@@ -330,8 +330,8 @@ static int imx_change_mode(struct thermal_zone_device *tz,
 	return 0;
 }
 
-static int imx_set_trip_temp(struct thermal_zone_device *tz, int trip_id,
-			     int temp)
+static int imx_set_trip_temp(struct thermal_zone_device *tz,
+			     const struct thermal_trip *trip, int temp)
 {
 	struct imx_thermal_data *data = tz->devdata;
 	struct thermal_trip trip;

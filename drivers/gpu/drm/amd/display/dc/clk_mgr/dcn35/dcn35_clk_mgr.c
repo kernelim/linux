@@ -120,22 +120,44 @@ static int dcn35_get_active_display_cnt_wa(
 
 	return display_count;
 }
-
 static void dcn35_disable_otg_wa(struct clk_mgr *clk_mgr_base, struct dc_state *context,
 		bool safe_to_lower, bool disable)
 {
 	struct dc *dc = clk_mgr_base->ctx->dc;
 	int i;
 
+	if (dc->ctx->dce_environment == DCE_ENV_DIAG)
+		return;
+
 	for (i = 0; i < dc->res_pool->pipe_count; ++i) {
+		struct pipe_ctx *old_pipe = &dc->current_state->res_ctx.pipe_ctx[i];
+		struct pipe_ctx *new_pipe = &context->res_ctx.pipe_ctx[i];
+		struct clk_mgr_internal *clk_mgr_internal = TO_CLK_MGR_INTERNAL(clk_mgr_base);
+		struct dccg *dccg = clk_mgr_internal->dccg;
 		struct pipe_ctx *pipe = safe_to_lower
 			? &context->res_ctx.pipe_ctx[i]
 			: &dc->current_state->res_ctx.pipe_ctx[i];
-
+		bool stream_changed_otg_dig_on = false;
 		if (pipe->top_pipe || pipe->prev_odm_pipe)
 			continue;
-		if (pipe->stream && (pipe->stream->dpms_off || dc_is_virtual_signal(pipe->stream->signal) ||
-				     !pipe->stream->link_enc)) {
+		stream_changed_otg_dig_on = old_pipe->stream && new_pipe->stream &&
+		old_pipe->stream != new_pipe->stream &&
+		old_pipe->stream_res.tg == new_pipe->stream_res.tg &&
+		new_pipe->stream->link_enc && !new_pipe->stream->dpms_off &&
+		new_pipe->stream->link_enc->funcs->is_dig_enabled &&
+		new_pipe->stream->link_enc->funcs->is_dig_enabled(
+		new_pipe->stream->link_enc) &&
+		new_pipe->stream_res.stream_enc &&
+		new_pipe->stream_res.stream_enc->funcs->is_fifo_enabled &&
+		new_pipe->stream_res.stream_enc->funcs->is_fifo_enabled(new_pipe->stream_res.stream_enc);
+		bool has_active_hpo = dccg->ctx->dc->link_srv->dp_is_128b_132b_signal(old_pipe) && dccg->ctx->dc->link_srv->dp_is_128b_132b_signal(new_pipe);
+
+		if (!has_active_hpo && !dccg->ctx->dc->link_srv->dp_is_128b_132b_signal(pipe) &&
+					(pipe->stream && (pipe->stream->dpms_off || dc_is_virtual_signal(pipe->stream->signal) ||
+					!pipe->stream->link_enc) && !stream_changed_otg_dig_on)) {
+
+
+			/* This w/a should not trigger when we have a dig active */
 			if (disable) {
 				if (pipe->stream_res.tg && pipe->stream_res.tg->funcs->immediate_disable_crtc)
 					pipe->stream_res.tg->funcs->immediate_disable_crtc(pipe->stream_res.tg);
@@ -218,6 +240,59 @@ static void dcn35_update_clocks_update_dpp_dto(struct clk_mgr_internal *clk_mgr,
 		}
 }
 
+static uint8_t get_lowest_dpia_index(const struct dc_link *link)
+{
+	const struct dc *dc_struct = link->dc;
+	uint8_t idx = 0xFF;
+	int i;
+
+	for (i = 0; i < MAX_PIPES * 2; ++i) {
+		if (!dc_struct->links[i] || dc_struct->links[i]->ep_type != DISPLAY_ENDPOINT_USB4_DPIA)
+			continue;
+
+		if (idx > dc_struct->links[i]->link_index)
+			idx = dc_struct->links[i]->link_index;
+	}
+
+	return idx;
+}
+
+static void dcn35_notify_host_router_bw(struct clk_mgr *clk_mgr_base, struct dc_state *context,
+					bool safe_to_lower)
+{
+	struct dc_clocks *new_clocks = &context->bw_ctx.bw.dcn.clk;
+	struct clk_mgr_internal *clk_mgr = TO_CLK_MGR_INTERNAL(clk_mgr_base);
+	uint32_t host_router_bw_kbps[MAX_HOST_ROUTERS_NUM] = { 0 };
+	int i;
+	for (i = 0; i < context->stream_count; ++i) {
+		const struct dc_stream_state *stream = context->streams[i];
+		const struct dc_link *link = stream->link;
+		uint8_t lowest_dpia_index = 0;
+		unsigned int hr_index = 0;
+
+		if (!link)
+			continue;
+
+		lowest_dpia_index = get_lowest_dpia_index(link);
+		if (link->link_index < lowest_dpia_index)
+			continue;
+
+		hr_index = (link->link_index - lowest_dpia_index) / 2;
+		if (hr_index >= MAX_HOST_ROUTERS_NUM)
+			continue;
+		host_router_bw_kbps[hr_index] += dc_bandwidth_in_kbps_from_timing(
+			&stream->timing, dc_link_get_highest_encoding_format(link));
+	}
+
+	for (i = 0; i < MAX_HOST_ROUTERS_NUM; ++i) {
+		new_clocks->host_router_bw_kbps[i] = host_router_bw_kbps[i];
+		if (should_set_clock(safe_to_lower, new_clocks->host_router_bw_kbps[i], clk_mgr_base->clks.host_router_bw_kbps[i])) {
+			clk_mgr_base->clks.host_router_bw_kbps[i] = new_clocks->host_router_bw_kbps[i];
+			dcn35_smu_notify_host_router_bw(clk_mgr, i, new_clocks->host_router_bw_kbps[i]);
+		}
+	}
+}
+
 void dcn35_update_clocks(struct clk_mgr *clk_mgr_base,
 			struct dc_state *context,
 			bool safe_to_lower)
@@ -252,7 +327,8 @@ void dcn35_update_clocks(struct clk_mgr *clk_mgr_base,
 		}
 
 		if (clk_mgr_base->clks.dtbclk_en && !new_clocks->dtbclk_en) {
-			dcn35_smu_set_dtbclk(clk_mgr, false);
+			if (clk_mgr->base.ctx->dc->config.allow_0_dtb_clk)
+				dcn35_smu_set_dtbclk(clk_mgr, false);
 			clk_mgr_base->clks.dtbclk_en = new_clocks->dtbclk_en;
 		}
 		/* check that we're not already in lower */
@@ -315,6 +391,9 @@ void dcn35_update_clocks(struct clk_mgr *clk_mgr_base,
 	if (should_set_clock(safe_to_lower, new_clocks->dispclk_khz, clk_mgr_base->clks.dispclk_khz)) {
 		dcn35_disable_otg_wa(clk_mgr_base, context, safe_to_lower, true);
 
+		if (dc->debug.min_disp_clk_khz > 0 && new_clocks->dispclk_khz < dc->debug.min_disp_clk_khz)
+			new_clocks->dispclk_khz = dc->debug.min_disp_clk_khz;
+
 		clk_mgr_base->clks.dispclk_khz = new_clocks->dispclk_khz;
 		dcn35_smu_set_dispclk(clk_mgr, clk_mgr_base->clks.dispclk_khz);
 		dcn35_disable_otg_wa(clk_mgr_base, context, safe_to_lower, false);
@@ -340,6 +419,10 @@ void dcn35_update_clocks(struct clk_mgr *clk_mgr_base,
 			dcn35_smu_set_dppclk(clk_mgr, clk_mgr_base->clks.dppclk_khz);
 		dcn35_update_clocks_update_dpp_dto(clk_mgr, context, safe_to_lower);
 	}
+
+	// notify PMFW of bandwidth per DPIA tunnel
+	if (dc->debug.notify_dpia_hr_bw)
+		dcn35_notify_host_router_bw(clk_mgr_base, context, safe_to_lower);
 
 	// notify DMCUB of latest clocks
 	memset(&cmd, 0, sizeof(cmd));
@@ -889,35 +972,6 @@ static void dcn35_set_low_power_state(struct clk_mgr *clk_mgr_base)
 	}
 }
 
-static void dcn35_set_ips_idle_state(struct clk_mgr *clk_mgr_base, bool allow_idle)
-{
-	struct clk_mgr_internal *clk_mgr = TO_CLK_MGR_INTERNAL(clk_mgr_base);
-	struct dc *dc = clk_mgr_base->ctx->dc;
-	uint32_t val = dcn35_smu_read_ips_scratch(clk_mgr);
-
-	if (dc->config.disable_ips == DMUB_IPS_ENABLE ||
-		dc->config.disable_ips == DMUB_IPS_DISABLE_DYNAMIC) {
-		val = val & ~DMUB_IPS1_ALLOW_MASK;
-		val = val & ~DMUB_IPS2_ALLOW_MASK;
-	} else if (dc->config.disable_ips == DMUB_IPS_DISABLE_IPS1) {
-		val |= DMUB_IPS1_ALLOW_MASK;
-		val |= DMUB_IPS2_ALLOW_MASK;
-	} else if (dc->config.disable_ips == DMUB_IPS_DISABLE_IPS2) {
-		val = val & ~DMUB_IPS1_ALLOW_MASK;
-		val |= DMUB_IPS2_ALLOW_MASK;
-	} else if (dc->config.disable_ips == DMUB_IPS_DISABLE_IPS2_Z10) {
-		val = val & ~DMUB_IPS1_ALLOW_MASK;
-		val = val & ~DMUB_IPS2_ALLOW_MASK;
-	}
-
-	if (!allow_idle) {
-		val |= DMUB_IPS1_ALLOW_MASK;
-		val |= DMUB_IPS2_ALLOW_MASK;
-	}
-
-	dcn35_smu_write_ips_scratch(clk_mgr, val);
-}
-
 static void dcn35_exit_low_power_state(struct clk_mgr *clk_mgr_base)
 {
 	struct clk_mgr_internal *clk_mgr = TO_CLK_MGR_INTERNAL(clk_mgr_base);
@@ -935,13 +989,6 @@ static bool dcn35_is_ips_supported(struct clk_mgr *clk_mgr_base)
 	ips_supported = dcn35_smu_get_ips_supported(clk_mgr) ? true : false;
 
 	return ips_supported;
-}
-
-static uint32_t dcn35_get_ips_idle_state(struct clk_mgr *clk_mgr_base)
-{
-	struct clk_mgr_internal *clk_mgr = TO_CLK_MGR_INTERNAL(clk_mgr_base);
-
-	return dcn35_smu_read_ips_scratch(clk_mgr);
 }
 
 static void dcn35_init_clocks_fpga(struct clk_mgr *clk_mgr)
@@ -1031,8 +1078,6 @@ static struct clk_mgr_funcs dcn35_funcs = {
 	.set_low_power_state = dcn35_set_low_power_state,
 	.exit_low_power_state = dcn35_exit_low_power_state,
 	.is_ips_supported = dcn35_is_ips_supported,
-	.set_idle_state = dcn35_set_ips_idle_state,
-	.get_idle_state = dcn35_get_ips_idle_state
 };
 
 struct clk_mgr_funcs dcn35_fpga_funcs = {
@@ -1064,7 +1109,7 @@ void dcn35_clk_mgr_construct(
 
 	clk_mgr->smu_wm_set.wm_set = (struct dcn35_watermarks *)dm_helpers_allocate_gpu_mem(
 				clk_mgr->base.base.ctx,
-				DC_MEM_ALLOC_TYPE_FRAME_BUFFER,
+				DC_MEM_ALLOC_TYPE_GART,
 				sizeof(struct dcn35_watermarks),
 				&clk_mgr->smu_wm_set.mc_address.quad_part);
 
@@ -1076,7 +1121,7 @@ void dcn35_clk_mgr_construct(
 
 	smu_dpm_clks.dpm_clks = (DpmClocks_t_dcn35 *)dm_helpers_allocate_gpu_mem(
 				clk_mgr->base.base.ctx,
-				DC_MEM_ALLOC_TYPE_FRAME_BUFFER,
+				DC_MEM_ALLOC_TYPE_GART,
 				sizeof(DpmClocks_t_dcn35),
 				&smu_dpm_clks.mc_address.quad_part);
 
@@ -1164,7 +1209,7 @@ void dcn35_clk_mgr_construct(
 					   i, smu_dpm_clks.dpm_clks->MemPstateTable[i].Voltage);
 		}
 
-		if (ctx->dc_bios && ctx->dc_bios->integrated_info && ctx->dc->config.use_default_clock_table == false) {
+		if (ctx->dc_bios->integrated_info && ctx->dc->config.use_default_clock_table == false) {
 			dcn35_clk_mgr_helper_populate_bw_params(
 					&clk_mgr->base,
 					ctx->dc_bios->integrated_info,
@@ -1173,7 +1218,7 @@ void dcn35_clk_mgr_construct(
 	}
 
 	if (smu_dpm_clks.dpm_clks && smu_dpm_clks.mc_address.quad_part != 0)
-		dm_helpers_free_gpu_mem(clk_mgr->base.base.ctx, DC_MEM_ALLOC_TYPE_FRAME_BUFFER,
+		dm_helpers_free_gpu_mem(clk_mgr->base.base.ctx, DC_MEM_ALLOC_TYPE_GART,
 				smu_dpm_clks.dpm_clks);
 
 	if (ctx->dc->config.disable_ips != DMUB_IPS_DISABLE_ALL) {
@@ -1186,6 +1231,12 @@ void dcn35_clk_mgr_construct(
 			ctx->dc->debug.disable_dpp_power_gate = false;
 			ctx->dc->debug.disable_hubp_power_gate = false;
 			ctx->dc->debug.disable_dsc_power_gate = false;
+
+			/* Disable dynamic IPS2 in older PMFW (93.12) for Z8 interop. */
+			if (ctx->dc->config.disable_ips == DMUB_IPS_ENABLE &&
+			    ctx->dce_version == DCN_VERSION_3_5 &&
+			    ((clk_mgr->base.smu_ver & 0x00FFFFFF) <= 0x005d0c00))
+				ctx->dc->config.disable_ips = DMUB_IPS_RCG_IN_ACTIVE_IPS2_IN_OFF;
 		} else {
 			/*let's reset the config control flag*/
 			ctx->dc->config.disable_ips = DMUB_IPS_DISABLE_ALL; /*pmfw not support it, disable it all*/

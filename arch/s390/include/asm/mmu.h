@@ -33,13 +33,13 @@ typedef struct {
 	unsigned int uses_skeys:1;
 	/* The mmu context uses CMM. */
 	unsigned int uses_cmm:1;
-	/* The gmaps associated with this context are allowed to use huge pages. */
-	unsigned int allow_gmap_hpage_1m:1;
 	/*
 	 * The mmu context allows COW-sharing of memory pages (KSM, zeropage).
 	 * Note that COW-sharing during fork() is currently always allowed.
 	 */
-	RH_KABI_EXTEND(unsigned int allow_cow_sharing:1)
+	unsigned int allow_cow_sharing:1;
+	/* The gmaps associated with this context are allowed to use huge pages. */
+	unsigned int allow_gmap_hpage_1m:1;
 } mm_context_t;
 
 #define INIT_MM_CONTEXT(name)						   \

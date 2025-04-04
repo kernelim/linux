@@ -25,7 +25,21 @@ void cxl_decoder_kill_region(struct cxl_endpoint_decoder *cxled);
 int cxl_region_init(void);
 void cxl_region_exit(void);
 int cxl_get_poison_by_endpoint(struct cxl_port *port);
+struct cxl_region *cxl_dpa_to_region(const struct cxl_memdev *cxlmd, u64 dpa);
+u64 cxl_trace_hpa(struct cxl_region *cxlr, const struct cxl_memdev *cxlmd,
+		  u64 dpa);
+
 #else
+static inline u64
+cxl_trace_hpa(struct cxl_region *cxlr, const struct cxl_memdev *cxlmd, u64 dpa)
+{
+	return ULLONG_MAX;
+}
+static inline
+struct cxl_region *cxl_dpa_to_region(const struct cxl_memdev *cxlmd, u64 dpa)
+{
+	return NULL;
+}
 static inline int cxl_get_poison_by_endpoint(struct cxl_port *port)
 {
 	return 0;
@@ -84,5 +98,13 @@ enum cxl_poison_trace_type {
 	CXL_POISON_TRACE_INJECT,
 	CXL_POISON_TRACE_CLEAR,
 };
+
+long cxl_pci_get_latency(struct pci_dev *pdev);
+int cxl_pci_get_bandwidth(struct pci_dev *pdev, struct access_coordinate *c);
+int cxl_update_hmat_access_coordinates(int nid, struct cxl_region *cxlr,
+				       enum access_coordinate_class access);
+bool cxl_need_node_perf_attrs_update(int nid);
+int cxl_port_get_switch_dport_bandwidth(struct cxl_port *port,
+					struct access_coordinate *c);
 
 #endif /* __CXL_CORE_H__ */

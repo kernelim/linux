@@ -74,8 +74,10 @@ typedef int (*config_clks_t)(struct device *dev, struct opp_table *opp_table,
  * @supported_hw_count: Number of elements in the array.
  * @regulator_names: Array of pointers to the names of the regulator, NULL terminated.
  * @genpd_names: Null terminated array of pointers containing names of genpd to
- *		 attach.
- * @virt_devs: Pointer to return the array of virtual devices.
+ *		attach. Mutually exclusive with required_devs.
+ * @virt_devs: Pointer to return the array of genpd virtual devices. Mutually
+ *		exclusive with required_devs.
+ * @required_devs: Required OPP devices. Mutually exclusive with genpd_names/virt_devs.
  *
  * This structure contains platform specific OPP configurations for the device.
  */
@@ -90,15 +92,21 @@ struct dev_pm_opp_config {
 	const char * const *regulator_names;
 	const char * const *genpd_names;
 	struct device ***virt_devs;
+	struct device **required_devs;
 };
+
+#define OPP_LEVEL_UNSET			U32_MAX
 
 /**
  * struct dev_pm_opp_data - The data to use to initialize an OPP.
- * @level: The performance level for the OPP.
+ * @turbo: Flag to indicate whether the OPP is to be marked turbo or not.
+ * @level: The performance level for the OPP. Set level to OPP_LEVEL_UNSET if
+ * level field isn't used.
  * @freq: The clock rate in Hz for the OPP.
  * @u_volt: The voltage in uV for the OPP.
  */
 struct dev_pm_opp_data {
+	bool turbo;
 	unsigned int level;
 	unsigned long freq;
 	unsigned long u_volt;
@@ -114,8 +122,6 @@ unsigned long dev_pm_opp_get_voltage(struct dev_pm_opp *opp);
 int dev_pm_opp_get_supplies(struct dev_pm_opp *opp, struct dev_pm_opp_supply *supplies);
 
 unsigned long dev_pm_opp_get_power(struct dev_pm_opp *opp);
-
-unsigned long dev_pm_opp_get_freq(struct dev_pm_opp *opp);
 
 unsigned long dev_pm_opp_get_freq_indexed(struct dev_pm_opp *opp, u32 index);
 
@@ -153,6 +159,9 @@ struct dev_pm_opp *dev_pm_opp_find_level_exact(struct device *dev,
 
 struct dev_pm_opp *dev_pm_opp_find_level_ceil(struct device *dev,
 					      unsigned int *level);
+
+struct dev_pm_opp *dev_pm_opp_find_level_floor(struct device *dev,
+					       unsigned int *level);
 
 struct dev_pm_opp *dev_pm_opp_find_bw_ceil(struct device *dev,
 					   unsigned int *bw, int index);
@@ -218,11 +227,6 @@ static inline int dev_pm_opp_get_supplies(struct dev_pm_opp *opp, struct dev_pm_
 }
 
 static inline unsigned long dev_pm_opp_get_power(struct dev_pm_opp *opp)
-{
-	return 0;
-}
-
-static inline unsigned long dev_pm_opp_get_freq(struct dev_pm_opp *opp)
 {
 	return 0;
 }
@@ -312,6 +316,12 @@ static inline struct dev_pm_opp *dev_pm_opp_find_level_exact(struct device *dev,
 
 static inline struct dev_pm_opp *dev_pm_opp_find_level_ceil(struct device *dev,
 					unsigned int *level)
+{
+	return ERR_PTR(-EOPNOTSUPP);
+}
+
+static inline struct dev_pm_opp *dev_pm_opp_find_level_floor(struct device *dev,
+							     unsigned int *level)
 {
 	return ERR_PTR(-EOPNOTSUPP);
 }
@@ -679,6 +689,11 @@ static inline int dev_pm_opp_set_prop_name(struct device *dev, const char *name)
 static inline void dev_pm_opp_put_prop_name(int token)
 {
 	dev_pm_opp_clear_config(token);
+}
+
+static inline unsigned long dev_pm_opp_get_freq(struct dev_pm_opp *opp)
+{
+	return dev_pm_opp_get_freq_indexed(opp, 0);
 }
 
 #endif		/* __LINUX_OPP_H__ */

@@ -3102,3 +3102,8 @@ ssize_t cpu_show_reg_file_data_sampling(struct device *dev, struct device_attrib
 	return cpu_show_common(dev, attr, buf, X86_BUG_RFDS);
 }
 #endif
+
+void __warn_thunk(void)
+{
+	WARN_ONCE(1, "Unpatched return thunk in use. This should not happen!\n");
+}

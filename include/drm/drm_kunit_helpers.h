@@ -75,7 +75,7 @@ __drm_kunit_helper_alloc_drm_device(struct kunit *test,
  * @_dev: The parent device object
  * @_type: the type of the struct which contains struct &drm_device
  * @_member: the name of the &drm_device within @_type.
- * @_features: Mocked DRM device driver features
+ * @_feat: Mocked DRM device driver features
  *
  * This function creates a struct &drm_driver and will create a struct
  * &drm_device from @_dev and that driver.
@@ -119,5 +119,9 @@ drm_kunit_helper_create_crtc(struct kunit *test,
 			     struct drm_plane *cursor,
 			     const struct drm_crtc_funcs *funcs,
 			     const struct drm_crtc_helper_funcs *helper_funcs);
+
+struct drm_display_mode *
+drm_kunit_display_mode_from_cea_vic(struct kunit *test, struct drm_device *dev,
+				    u8 video_code);
 
 #endif // DRM_KUNIT_HELPERS_H_

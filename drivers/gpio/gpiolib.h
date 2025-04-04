@@ -87,7 +87,8 @@ static inline struct gpio_device *to_gpio_device(struct device *dev)
 }
 
 /* gpio suffixes used for ACPI and device tree lookup */
-static __maybe_unused const char * const gpio_suffixes[] = { "gpios", "gpio" };
+extern const char *const gpio_suffixes[];
+extern const size_t gpio_suffix_count;
 
 /**
  * struct gpio_array - Opaque descriptor for a structure of GPIO array attributes
@@ -112,8 +113,6 @@ struct gpio_array {
 	unsigned long		invert_mask[];
 };
 
-struct gpio_desc *gpiochip_get_desc(struct gpio_chip *gc, unsigned int hwnum);
-
 #define for_each_gpio_desc(gc, desc)					\
 	for (unsigned int __i = 0;					\
 	     __i < gc->ngpio && (desc = gpiochip_get_desc(gc, __i));	\
@@ -133,6 +132,8 @@ int gpiod_set_array_value_complex(bool raw, bool can_sleep,
 				  struct gpio_desc **desc_array,
 				  struct gpio_array *array_info,
 				  unsigned long *value_bitmap);
+
+int gpiod_set_transitory(struct gpio_desc *desc, bool transitory);
 
 extern spinlock_t gpio_lock;
 extern struct list_head gpio_devices;
@@ -206,6 +207,14 @@ static inline int gpiod_request_user(struct gpio_desc *desc, const char *label)
 
 	return ret;
 }
+
+struct gpio_desc *gpiod_find_and_request(struct device *consumer,
+					 struct fwnode_handle *fwnode,
+					 const char *con_id,
+					 unsigned int idx,
+					 enum gpiod_flags flags,
+					 const char *label,
+					 bool platform_lookup_allowed);
 
 int gpiod_configure_flags(struct gpio_desc *desc, const char *con_id,
 		unsigned long lflags, enum gpiod_flags dflags);

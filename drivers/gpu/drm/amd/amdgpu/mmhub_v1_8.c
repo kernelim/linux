@@ -653,8 +653,8 @@ static void mmhub_v1_8_inst_query_ras_error_count(struct amdgpu_device *adev,
 					AMDGPU_RAS_ERROR__MULTI_UNCORRECTABLE,
 					&ue_count);
 
-	amdgpu_ras_error_statistic_ce_count(err_data, &mcm_info, NULL, ce_count);
-	amdgpu_ras_error_statistic_ue_count(err_data, &mcm_info, NULL, ue_count);
+	amdgpu_ras_error_statistic_ce_count(err_data, &mcm_info, ce_count);
+	amdgpu_ras_error_statistic_ue_count(err_data, &mcm_info, ue_count);
 }
 
 static void mmhub_v1_8_query_ras_error_count(struct amdgpu_device *adev,
@@ -706,28 +706,32 @@ static const struct amdgpu_ras_block_hw_ops mmhub_v1_8_ras_hw_ops = {
 	.reset_ras_error_count = mmhub_v1_8_reset_ras_error_count,
 };
 
-static int mmhub_v1_8_aca_bank_generate_report(struct aca_handle *handle,
-					       struct aca_bank *bank, enum aca_error_type type,
-					       struct aca_bank_report *report, void *data)
+static int mmhub_v1_8_aca_bank_parser(struct aca_handle *handle, struct aca_bank *bank,
+				      enum aca_smu_type type, void *data)
 {
-	u64 status, misc0;
+	struct aca_bank_info info;
+	u64 misc0;
 	int ret;
 
-	status = bank->regs[ACA_REG_IDX_STATUS];
-	if ((type == ACA_ERROR_TYPE_UE &&
-	     ACA_REG__STATUS__ERRORCODEEXT(status) == ACA_EXTERROR_CODE_FAULT) ||
-	    (type == ACA_ERROR_TYPE_CE &&
-	     ACA_REG__STATUS__ERRORCODEEXT(status) == ACA_EXTERROR_CODE_CE)) {
+	ret = aca_bank_info_decode(bank, &info);
+	if (ret)
+		return ret;
 
-		ret = aca_bank_info_decode(bank, &report->info);
-		if (ret)
-			return ret;
-
-		misc0 = bank->regs[ACA_REG_IDX_MISC0];
-		report->count[type] = ACA_REG__MISC0__ERRCNT(misc0);
+	misc0 = bank->regs[ACA_REG_IDX_MISC0];
+	switch (type) {
+	case ACA_SMU_TYPE_UE:
+		ret = aca_error_cache_log_bank_error(handle, &info, ACA_ERROR_TYPE_UE,
+						     1ULL);
+		break;
+	case ACA_SMU_TYPE_CE:
+		ret = aca_error_cache_log_bank_error(handle, &info, ACA_ERROR_TYPE_CE,
+						     ACA_REG__MISC0__ERRCNT(misc0));
+		break;
+	default:
+		return -EINVAL;
 	}
 
-	return 0;
+	return ret;
 }
 
 /* reference to smu driver if header file */
@@ -741,7 +745,7 @@ static int mmhub_v1_8_err_codes[] = {
 };
 
 static bool mmhub_v1_8_aca_bank_is_valid(struct aca_handle *handle, struct aca_bank *bank,
-					 enum aca_error_type type, void *data)
+					 enum aca_smu_type type, void *data)
 {
 	u32 instlo;
 
@@ -760,7 +764,7 @@ static bool mmhub_v1_8_aca_bank_is_valid(struct aca_handle *handle, struct aca_b
 }
 
 static const struct aca_bank_ops mmhub_v1_8_aca_bank_ops = {
-	.aca_bank_generate_report = mmhub_v1_8_aca_bank_generate_report,
+	.aca_bank_parser = mmhub_v1_8_aca_bank_parser,
 	.aca_bank_is_valid = mmhub_v1_8_aca_bank_is_valid,
 };
 

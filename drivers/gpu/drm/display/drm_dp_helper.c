@@ -35,6 +35,7 @@
 #include <drm/display/drm_dp_helper.h>
 #include <drm/display/drm_dp_mst_helper.h>
 #include <drm/drm_edid.h>
+#include <drm/drm_fixed.h>
 #include <drm/drm_print.h>
 #include <drm/drm_vblank.h>
 #include <drm/drm_panel.h>
@@ -2113,7 +2114,7 @@ EXPORT_SYMBOL(drm_dp_aux_init);
  * drm_dp_aux_register() in &drm_connector_funcs.late_register, and likewise to
  * call drm_dp_aux_unregister() in &drm_connector_funcs.early_unregister.
  * Functions which don't follow this will likely Oops when
- * %CONFIG_DRM_DP_AUX_CHARDEV is enabled.
+ * %CONFIG_DRM_DISPLAY_DP_AUX_CHARDEV is enabled.
  *
  * For devices where the AUX channel is a device that exists independently of
  * the &drm_device that uses it, such as SoCs and bridge devices, it is
@@ -2281,6 +2282,8 @@ static const struct dpcd_quirk dpcd_quirk_list[] = {
 	{ OUI(0x90, 0xCC, 0x24), DEVICE_ID_ANY, true, BIT(DP_DPCD_QUIRK_DSC_WITHOUT_VIRTUAL_DPCD) },
 	/* Synaptics DP1.4 MST hubs require DSC for some modes on which it applies HBLANK expansion. */
 	{ OUI(0x90, 0xCC, 0x24), DEVICE_ID_ANY, true, BIT(DP_DPCD_QUIRK_HBLANK_EXPANSION_REQUIRES_DSC) },
+	/* MediaTek panels (at least in U3224KBA) require DSC for modes with a short HBLANK on UHBR links. */
+	{ OUI(0x00, 0x0C, 0xE7), DEVICE_ID_ANY, false, BIT(DP_DPCD_QUIRK_HBLANK_EXPANSION_REQUIRES_DSC) },
 	/* Apple MacBookPro 2017 15 inch eDP Retina panel reports too low DP_MAX_LINK_RATE */
 	{ OUI(0x00, 0x10, 0xfa), DEVICE_ID(101, 68, 21, 101, 98, 97), false, BIT(DP_DPCD_QUIRK_CAN_DO_MAX_LINK_RATE_3_24_GBPS) },
 };
@@ -2325,6 +2328,31 @@ drm_dp_get_quirks(const struct drm_dp_dpcd_ident *ident, bool is_branch)
 #undef DEVICE_ID_ANY
 #undef DEVICE_ID
 
+static int drm_dp_read_ident(struct drm_dp_aux *aux, unsigned int offset,
+			     struct drm_dp_dpcd_ident *ident)
+{
+	int ret;
+
+	ret = drm_dp_dpcd_read(aux, offset, ident, sizeof(*ident));
+
+	return ret < 0 ? ret : 0;
+}
+
+static void drm_dp_dump_desc(struct drm_dp_aux *aux,
+			     const char *device_name, const struct drm_dp_desc *desc)
+{
+	const struct drm_dp_dpcd_ident *ident = &desc->ident;
+
+	drm_dbg_kms(aux->drm_dev,
+		    "%s: %s: OUI %*phD dev-ID %*pE HW-rev %d.%d SW-rev %d.%d quirks 0x%04x\n",
+		    aux->name, device_name,
+		    (int)sizeof(ident->oui), ident->oui,
+		    (int)strnlen(ident->device_id, sizeof(ident->device_id)), ident->device_id,
+		    ident->hw_rev >> 4, ident->hw_rev & 0xf,
+		    ident->sw_major_rev, ident->sw_minor_rev,
+		    desc->quirks);
+}
+
 /**
  * drm_dp_read_desc - read sink/branch descriptor from DPCD
  * @aux: DisplayPort AUX channel
@@ -2341,26 +2369,47 @@ int drm_dp_read_desc(struct drm_dp_aux *aux, struct drm_dp_desc *desc,
 {
 	struct drm_dp_dpcd_ident *ident = &desc->ident;
 	unsigned int offset = is_branch ? DP_BRANCH_OUI : DP_SINK_OUI;
-	int ret, dev_id_len;
+	int ret;
 
-	ret = drm_dp_dpcd_read(aux, offset, ident, sizeof(*ident));
+	ret = drm_dp_read_ident(aux, offset, ident);
 	if (ret < 0)
 		return ret;
 
 	desc->quirks = drm_dp_get_quirks(ident, is_branch);
 
-	dev_id_len = strnlen(ident->device_id, sizeof(ident->device_id));
-
-	drm_dbg_kms(aux->drm_dev,
-		    "%s: DP %s: OUI %*phD dev-ID %*pE HW-rev %d.%d SW-rev %d.%d quirks 0x%04x\n",
-		    aux->name, is_branch ? "branch" : "sink",
-		    (int)sizeof(ident->oui), ident->oui, dev_id_len,
-		    ident->device_id, ident->hw_rev >> 4, ident->hw_rev & 0xf,
-		    ident->sw_major_rev, ident->sw_minor_rev, desc->quirks);
+	drm_dp_dump_desc(aux, is_branch ? "DP branch" : "DP sink", desc);
 
 	return 0;
 }
 EXPORT_SYMBOL(drm_dp_read_desc);
+
+/**
+ * drm_dp_dump_lttpr_desc - read and dump the DPCD descriptor for an LTTPR PHY
+ * @aux: DisplayPort AUX channel
+ * @dp_phy: LTTPR PHY instance
+ *
+ * Read the DPCD LTTPR PHY descriptor for @dp_phy and print a debug message
+ * with its details to dmesg.
+ *
+ * Returns 0 on success or a negative error code on failure.
+ */
+int drm_dp_dump_lttpr_desc(struct drm_dp_aux *aux, enum drm_dp_phy dp_phy)
+{
+	struct drm_dp_desc desc = {};
+	int ret;
+
+	if (drm_WARN_ON(aux->drm_dev, dp_phy < DP_PHY_LTTPR1 || dp_phy > DP_MAX_LTTPR_COUNT))
+		return -EINVAL;
+
+	ret = drm_dp_read_ident(aux, DP_OUI_PHY_REPEATER(dp_phy), &desc.ident);
+	if (ret < 0)
+		return ret;
+
+	drm_dp_dump_desc(aux, drm_dp_phy_name(dp_phy), &desc);
+
+	return 0;
+}
+EXPORT_SYMBOL(drm_dp_dump_lttpr_desc);
 
 /**
  * drm_dp_dsc_sink_bpp_incr() - Get bits per pixel increment
@@ -2947,6 +2996,43 @@ void drm_dp_vsc_sdp_log(struct drm_printer *p, const struct drm_dp_vsc_sdp *vsc)
 		   dp_content_type_get_name(vsc->content_type));
 }
 EXPORT_SYMBOL(drm_dp_vsc_sdp_log);
+
+void drm_dp_as_sdp_log(struct drm_printer *p, const struct drm_dp_as_sdp *as_sdp)
+{
+	drm_printf(p, "DP SDP: AS_SDP, revision %u, length %u\n",
+		   as_sdp->revision, as_sdp->length);
+	drm_printf(p, "    vtotal: %d\n", as_sdp->vtotal);
+	drm_printf(p, "    target_rr: %d\n", as_sdp->target_rr);
+	drm_printf(p, "    duration_incr_ms: %d\n", as_sdp->duration_incr_ms);
+	drm_printf(p, "    duration_decr_ms: %d\n", as_sdp->duration_decr_ms);
+	drm_printf(p, "    operation_mode: %d\n", as_sdp->mode);
+}
+EXPORT_SYMBOL(drm_dp_as_sdp_log);
+
+/**
+ * drm_dp_as_sdp_supported() - check if adaptive sync sdp is supported
+ * @aux: DisplayPort AUX channel
+ * @dpcd: DisplayPort configuration data
+ *
+ * Returns true if adaptive sync sdp is supported, else returns false
+ */
+bool drm_dp_as_sdp_supported(struct drm_dp_aux *aux, const u8 dpcd[DP_RECEIVER_CAP_SIZE])
+{
+	u8 rx_feature;
+
+	if (dpcd[DP_DPCD_REV] < DP_DPCD_REV_13)
+		return false;
+
+	if (drm_dp_dpcd_readb(aux, DP_DPRX_FEATURE_ENUMERATION_LIST_CONT_1,
+			      &rx_feature) != 1) {
+		drm_dbg_dp(aux->drm_dev,
+			   "Failed to read DP_DPRX_FEATURE_ENUMERATION_LIST_CONT_1\n");
+		return false;
+	}
+
+	return (rx_feature & DP_ADAPTIVE_SYNC_SDP_SUPPORTED);
+}
+EXPORT_SYMBOL(drm_dp_as_sdp_supported);
 
 /**
  * drm_dp_vsc_sdp_supported() - check if vsc sdp is supported
@@ -4112,9 +4198,9 @@ int drm_dp_bw_overhead(int lane_count, int hactive,
 	int symbol_cycles;
 
 	if (lane_count == 0 || hactive == 0 || bpp_x16 == 0) {
-		DRM_DEBUG_KMS("Invalid BW overhead params: lane_count %d, hactive %d, bpp_x16 %d.%04d\n",
+		DRM_DEBUG_KMS("Invalid BW overhead params: lane_count %d, hactive %d, bpp_x16 " FXP_Q4_FMT "\n",
 			      lane_count, hactive,
-			      bpp_x16 >> 4, (bpp_x16 & 0xf) * 625);
+			      FXP_Q4_ARGS(bpp_x16));
 		return 0;
 	}
 

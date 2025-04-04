@@ -174,6 +174,7 @@ vsp1_entity_get_pad_selection(struct vsp1_entity *entity,
 }
 
 /*
+<<<<<<< HEAD:drivers/media/platform/vsp1/vsp1_entity.c
  * vsp1_entity_init_cfg - Initialize formats on all pads
  * @subdev: V4L2 subdevice
  * @cfg: V4L2 subdev pad configuration
@@ -201,6 +202,8 @@ int vsp1_entity_init_cfg(struct v4l2_subdev *subdev,
 }
 
 /*
+=======
+>>>>>>> 5755be5f15d9 (media: v4l2-subdev: Rename .init_cfg() operation to .init_state()):drivers/media/platform/renesas/vsp1/vsp1_entity.c
  * vsp1_subdev_get_pad_format - Subdev pad get_fmt handler
  * @subdev: V4L2 subdevice
  * @cfg: V4L2 subdev pad configuration
@@ -428,6 +431,29 @@ done:
 	return ret;
 }
 
+static int vsp1_entity_init_state(struct v4l2_subdev *subdev,
+				  struct v4l2_subdev_state *sd_state)
+{
+	unsigned int pad;
+
+	/* Initialize all pad formats with default values. */
+	for (pad = 0; pad < subdev->entity.num_pads - 1; ++pad) {
+		struct v4l2_subdev_format format = {
+			.pad = pad,
+			.which = sd_state ? V4L2_SUBDEV_FORMAT_TRY
+			       : V4L2_SUBDEV_FORMAT_ACTIVE,
+		};
+
+		v4l2_subdev_call(subdev, pad, set_fmt, sd_state, &format);
+	}
+
+	return 0;
+}
+
+static const struct v4l2_subdev_internal_ops vsp1_entity_internal_ops = {
+	.init_state = vsp1_entity_init_state,
+};
+
 /* -----------------------------------------------------------------------------
  * Media Operations
  */
@@ -516,8 +542,8 @@ int vsp1_entity_link_setup(struct media_entity *entity,
  * higher than one for the data pipelines, except for the links to the HGO and
  * HGT that can be enabled in addition to a regular data link. When traversing
  * outgoing links this function ignores HGO and HGT entities and should thus be
- * used in place of the generic media_entity_remote_pad() function to traverse
- * data pipelines.
+ * used in place of the generic media_pad_remote_pad_first() function to
+ * traverse data pipelines.
  *
  * Return a pointer to the pad at the remote end of the first found enabled
  * link, or NULL if no enabled link has been found.
@@ -613,6 +639,7 @@ int vsp1_entity_init(struct vsp1_device *vsp1, struct vsp1_entity *entity,
 		     const char *name, unsigned int num_pads,
 		     const struct v4l2_subdev_ops *ops, u32 function)
 {
+	static struct lock_class_key key;
 	struct v4l2_subdev *subdev;
 	unsigned int i;
 	int ret;
@@ -661,6 +688,7 @@ int vsp1_entity_init(struct vsp1_device *vsp1, struct vsp1_entity *entity,
 	/* Initialize the V4L2 subdev. */
 	subdev = &entity->subdev;
 	v4l2_subdev_init(subdev, ops);
+	subdev->internal_ops = &vsp1_entity_internal_ops;
 
 	subdev->entity.function = function;
 	subdev->entity.ops = &vsp1->media_ops;
@@ -669,7 +697,7 @@ int vsp1_entity_init(struct vsp1_device *vsp1, struct vsp1_entity *entity,
 	snprintf(subdev->name, sizeof(subdev->name), "%s %s",
 		 dev_name(vsp1->dev), name);
 
-	vsp1_entity_init_cfg(subdev, NULL);
+	vsp1_entity_init_state(subdev, NULL);
 
 	/*
 	 * Allocate the pad configuration to store formats and selection
@@ -690,6 +718,6 @@ void vsp1_entity_destroy(struct vsp1_entity *entity)
 		entity->ops->destroy(entity);
 	if (entity->subdev.ctrl_handler)
 		v4l2_ctrl_handler_free(entity->subdev.ctrl_handler);
-	v4l2_subdev_free_state(entity->config);
+	__v4l2_subdev_state_free(entity->config);
 	media_entity_cleanup(&entity->subdev.entity);
 }

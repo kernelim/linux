@@ -21,6 +21,7 @@
 #include <linux/slab.h>
 #include <linux/hardirq.h>
 #include <linux/ftrace.h>
+#include <asm/text-patching.h>
 #include <asm/set_memory.h>
 #include <asm/sections.h>
 #include <asm/dis.h>
@@ -41,7 +42,7 @@ void *alloc_insn_page(void)
 	page = module_alloc(PAGE_SIZE);
 	if (!page)
 		return NULL;
-	__set_memory((unsigned long) page, 1, SET_MEMORY_RO | SET_MEMORY_X);
+	set_memory_rox((unsigned long)page, 1);
 	return page;
 }
 
@@ -121,9 +122,55 @@ static void s390_free_insn_slot(struct kprobe *p)
 }
 NOKPROBE_SYMBOL(s390_free_insn_slot);
 
+/* Check if paddr is at an instruction boundary */
+static bool can_probe(unsigned long paddr)
+{
+	unsigned long addr, offset = 0;
+	kprobe_opcode_t insn;
+	struct kprobe *kp;
+
+	if (paddr & 0x01)
+		return false;
+
+	if (!kallsyms_lookup_size_offset(paddr, NULL, &offset))
+		return false;
+
+	/* Decode instructions */
+	addr = paddr - offset;
+	while (addr < paddr) {
+		if (copy_from_kernel_nofault(&insn, (void *)addr, sizeof(insn)))
+			return false;
+
+		if (insn >> 8 == 0) {
+			if (insn != BREAKPOINT_INSTRUCTION) {
+				/*
+				 * Note that QEMU inserts opcode 0x0000 to implement
+				 * software breakpoints for guests. Since the size of
+				 * the original instruction is unknown, stop following
+				 * instructions and prevent setting a kprobe.
+				 */
+				return false;
+			}
+			/*
+			 * Check if the instruction has been modified by another
+			 * kprobe, in which case the original instruction is
+			 * decoded.
+			 */
+			kp = get_kprobe((void *)addr);
+			if (!kp) {
+				/* not a kprobe */
+				return false;
+			}
+			insn = kp->opcode;
+		}
+		addr += insn_length(insn >> 8);
+	}
+	return addr == paddr;
+}
+
 int arch_prepare_kprobe(struct kprobe *p)
 {
-	if ((unsigned long) p->addr & 0x01)
+	if (!can_probe((unsigned long)p->addr))
 		return -EINVAL;
 	/* Make sure the probe isn't going on a difficult instruction */
 	if (probe_is_prohibited_opcode(p->addr))
@@ -156,7 +203,12 @@ void arch_arm_kprobe(struct kprobe *p)
 {
 	struct swap_insn_args args = {.p = p, .arm_kprobe = 1};
 
-	stop_machine_cpuslocked(swap_instruction, &args, NULL);
+	if (MACHINE_HAS_SEQ_INSN) {
+		swap_instruction(&args);
+		text_poke_sync();
+	} else {
+		stop_machine_cpuslocked(swap_instruction, &args, NULL);
+	}
 }
 NOKPROBE_SYMBOL(arch_arm_kprobe);
 
@@ -164,7 +216,12 @@ void arch_disarm_kprobe(struct kprobe *p)
 {
 	struct swap_insn_args args = {.p = p, .arm_kprobe = 0};
 
-	stop_machine_cpuslocked(swap_instruction, &args, NULL);
+	if (MACHINE_HAS_SEQ_INSN) {
+		swap_instruction(&args);
+		text_poke_sync();
+	} else {
+		stop_machine_cpuslocked(swap_instruction, &args, NULL);
+	}
 }
 NOKPROBE_SYMBOL(arch_disarm_kprobe);
 
@@ -178,20 +235,27 @@ static void enable_singlestep(struct kprobe_ctlblk *kcb,
 			      struct pt_regs *regs,
 			      unsigned long ip)
 {
-	struct per_regs per_kprobe;
+	union {
+		struct ctlreg regs[3];
+		struct {
+			struct ctlreg control;
+			struct ctlreg start;
+			struct ctlreg end;
+		};
+	} per_kprobe;
 
 	/* Set up the PER control registers %cr9-%cr11 */
-	per_kprobe.control = PER_EVENT_IFETCH;
-	per_kprobe.start = ip;
-	per_kprobe.end = ip;
+	per_kprobe.control.val = PER_EVENT_IFETCH;
+	per_kprobe.start.val = ip;
+	per_kprobe.end.val = ip;
 
 	/* Save control regs and psw mask */
-	__ctl_store(kcb->kprobe_saved_ctl, 9, 11);
+	__local_ctl_store(9, 11, kcb->kprobe_saved_ctl);
 	kcb->kprobe_saved_imask = regs->psw.mask &
 		(PSW_MASK_PER | PSW_MASK_IO | PSW_MASK_EXT);
 
 	/* Set PER control regs, turns on single step for the given address */
-	__ctl_load(per_kprobe, 9, 11);
+	__local_ctl_load(9, 11, per_kprobe.regs);
 	regs->psw.mask |= PSW_MASK_PER;
 	regs->psw.mask &= ~(PSW_MASK_IO | PSW_MASK_EXT);
 	regs->psw.addr = ip;
@@ -203,7 +267,7 @@ static void disable_singlestep(struct kprobe_ctlblk *kcb,
 			       unsigned long ip)
 {
 	/* Restore control regs and psw mask, set new psw address */
-	__ctl_load(kcb->kprobe_saved_ctl, 9, 11);
+	__local_ctl_load(9, 11, kcb->kprobe_saved_ctl);
 	regs->psw.mask &= ~PSW_MASK_PER;
 	regs->psw.mask |= kcb->kprobe_saved_imask;
 	regs->psw.addr = ip;
@@ -235,16 +299,6 @@ static void pop_kprobe(struct kprobe_ctlblk *kcb)
 	kcb->prev_kprobe.kp = NULL;
 }
 NOKPROBE_SYMBOL(pop_kprobe);
-
-void arch_prepare_kretprobe(struct kretprobe_instance *ri, struct pt_regs *regs)
-{
-	ri->ret_addr = (kprobe_opcode_t *) regs->gprs[14];
-	ri->fp = NULL;
-
-	/* Replace the return addr with trampoline addr */
-	regs->gprs[14] = (unsigned long) &__kretprobe_trampoline;
-}
-NOKPROBE_SYMBOL(arch_prepare_kretprobe);
 
 static void kprobe_reenter_check(struct kprobe_ctlblk *kcb, struct kprobe *p)
 {
@@ -325,33 +379,6 @@ static int kprobe_handler(struct pt_regs *regs)
 	return 0;
 }
 NOKPROBE_SYMBOL(kprobe_handler);
-
-/*
- * Function return probe trampoline:
- *	- init_kprobes() establishes a probepoint here
- *	- When the probed function returns, this probe
- *		causes the handlers to fire
- */
-static void __used kretprobe_trampoline_holder(void)
-{
-	asm volatile(".global __kretprobe_trampoline\n"
-		     "__kretprobe_trampoline: bcr 0,0\n");
-}
-
-/*
- * Called when the probe at kretprobe trampoline is hit
- */
-static int trampoline_probe_handler(struct kprobe *p, struct pt_regs *regs)
-{
-	regs->psw.addr = __kretprobe_trampoline_handler(regs, NULL);
-	/*
-	 * By returning a non-zero value, we are telling
-	 * kprobe_handler() that we don't want the post_handler
-	 * to run (and have re-enabled preemption)
-	 */
-	return 1;
-}
-NOKPROBE_SYMBOL(trampoline_probe_handler);
 
 /*
  * Called after single-stepping.  p->addr is the address of the
@@ -504,18 +531,19 @@ int kprobe_exceptions_notify(struct notifier_block *self,
 }
 NOKPROBE_SYMBOL(kprobe_exceptions_notify);
 
-static struct kprobe trampoline = {
-	.addr = (kprobe_opcode_t *) &__kretprobe_trampoline,
-	.pre_handler = trampoline_probe_handler
-};
-
 int __init arch_init_kprobes(void)
 {
-	return register_kprobe(&trampoline);
+	return 0;
+}
+
+int __init arch_populate_kprobe_blacklist(void)
+{
+	return kprobe_add_area_blacklist((unsigned long)__irqentry_text_start,
+					 (unsigned long)__irqentry_text_end);
 }
 
 int arch_trampoline_kprobe(struct kprobe *p)
 {
-	return p->addr == (kprobe_opcode_t *) &__kretprobe_trampoline;
+	return 0;
 }
 NOKPROBE_SYMBOL(arch_trampoline_kprobe);

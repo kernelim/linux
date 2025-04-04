@@ -124,6 +124,11 @@ static inline struct drm_i915_private *guc_to_i915(struct intel_guc *guc)
 	return guc_to_gt(guc)->i915;
 }
 
+static inline struct intel_guc *gt_to_guc(struct intel_gt *gt)
+{
+	return &gt->uc.guc;
+}
+
 void intel_gt_common_init_early(struct intel_gt *gt);
 int intel_root_gt_init_early(struct drm_i915_private *i915);
 int intel_gt_assign_ggtt(struct intel_gt *gt);
@@ -169,7 +174,6 @@ static inline bool intel_gt_is_wedged(const struct intel_gt *gt)
 
 int intel_gt_probe_all(struct drm_i915_private *i915);
 int intel_gt_tiles_init(struct drm_i915_private *i915);
-void intel_gt_release_all(struct drm_i915_private *i915);
 
 #define for_each_gt(gt__, i915__, id__) \
 	for ((id__) = 0; \
@@ -203,4 +207,10 @@ enum i915_map_type intel_gt_coherent_map_type(struct intel_gt *gt,
 void intel_gt_bind_context_set_ready(struct intel_gt *gt);
 void intel_gt_bind_context_set_unready(struct intel_gt *gt);
 bool intel_gt_is_bind_context_ready(struct intel_gt *gt);
+
+static inline void intel_gt_set_wedged_async(struct intel_gt *gt)
+{
+	queue_work(system_highpri_wq, &gt->wedge);
+}
+
 #endif /* __INTEL_GT_H__ */

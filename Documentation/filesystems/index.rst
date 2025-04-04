@@ -33,6 +33,7 @@ algorithms work.
    quota
    seq_file
    sharedsubtree
+   idmappings
 
    automount-support
 

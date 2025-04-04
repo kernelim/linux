@@ -1,3 +1,3 @@
-#5-
-0xbcbd7b79	ib_destroy_cq_user	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
+#6-
+0x98d1d181	ib_destroy_cq_user	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
 

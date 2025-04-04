@@ -989,7 +989,7 @@ int ixp46x_phc_index = -1;
 EXPORT_SYMBOL_GPL(ixp46x_phc_index);
 
 static int ixp4xx_get_ts_info(struct net_device *dev,
-			      struct ethtool_ts_info *info)
+			      struct kernel_ethtool_ts_info *info)
 {
 	if (!cpu_is_ixp46x()) {
 		info->so_timestamping =

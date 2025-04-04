@@ -59,6 +59,20 @@ static sector_t linear_size(struct mddev *mddev, sector_t sectors, int raid_disk
 	return array_sectors;
 }
 
+static int linear_set_limits(struct mddev *mddev)
+{
+	struct queue_limits lim;
+	int err;
+
+	md_init_stacking_limits(&lim);
+	err = mddev_stack_rdev_limits(mddev, &lim, MDDEV_STACK_INTEGRITY);
+	if (err) {
+		queue_limits_cancel_update(mddev->gendisk->queue);
+		return err;
+	}
+	return queue_limits_set(mddev->gendisk->queue, &lim);
+}
+
 static struct linear_conf *linear_conf(struct mddev *mddev, int raid_disks)
 {
 	struct linear_conf *conf;
@@ -90,14 +104,17 @@ static struct linear_conf *linear_conf(struct mddev *mddev, int raid_disks)
 			rdev->sectors = sectors * mddev->chunk_sectors;
 		}
 
-		disk_stack_limits(mddev->gendisk, rdev->bdev,
-				  rdev->data_offset << 9);
-
 		conf->array_sectors += rdev->sectors;
 		cnt++;
 	}
 	if (cnt != raid_disks) {
 		pr_warn("md/linear:%s: not enough drives present. Aborting!\n",
+			mdname(mddev));
+		goto out;
+	}
+
+	if (linear_set_limits(mddev)) {
+		pr_warn("md/linear:%s: set limits failed. Aborting!\n",
 			mdname(mddev));
 		goto out;
 	}

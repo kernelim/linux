@@ -877,7 +877,7 @@ static int max98927_i2c_remove(struct i2c_client *i2c)
 }
 
 static const struct i2c_device_id max98927_i2c_id[] = {
-	{ "max98927", 0},
+	{ "max98927"},
 	{ },
 };
 

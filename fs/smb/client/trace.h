@@ -3,6 +3,9 @@
  *   Copyright (C) 2018, Microsoft Corporation.
  *
  *   Author(s): Steve French <stfrench@microsoft.com>
+ *
+ * Please use this 3-part article as a reference for writing new tracepoints:
+ * https://lwn.net/Articles/379903/
  */
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM cifs
@@ -15,9 +18,73 @@
 #include <linux/inet.h>
 
 /*
- * Please use this 3-part article as a reference for writing new tracepoints:
- * https://lwn.net/Articles/379903/
+ * Specify enums for tracing information.
  */
+#define smb3_tcon_ref_traces					      \
+	EM(netfs_trace_tcon_ref_dec_dfs_refer,		"DEC DfsRef") \
+	EM(netfs_trace_tcon_ref_free,			"FRE       ") \
+	EM(netfs_trace_tcon_ref_free_fail,		"FRE Fail  ") \
+	EM(netfs_trace_tcon_ref_free_ipc,		"FRE Ipc   ") \
+	EM(netfs_trace_tcon_ref_free_ipc_fail,		"FRE Ipc-F ") \
+	EM(netfs_trace_tcon_ref_free_reconnect_server,	"FRE Reconn") \
+	EM(netfs_trace_tcon_ref_get_cached_laundromat,	"GET Ch-Lau") \
+	EM(netfs_trace_tcon_ref_get_cached_lease_break,	"GET Ch-Lea") \
+	EM(netfs_trace_tcon_ref_get_cancelled_close,	"GET Cn-Cls") \
+	EM(netfs_trace_tcon_ref_get_dfs_refer,		"GET DfsRef") \
+	EM(netfs_trace_tcon_ref_get_find,		"GET Find  ") \
+	EM(netfs_trace_tcon_ref_get_find_sess_tcon,	"GET FndSes") \
+	EM(netfs_trace_tcon_ref_get_reconnect_server,	"GET Reconn") \
+	EM(netfs_trace_tcon_ref_new,			"NEW       ") \
+	EM(netfs_trace_tcon_ref_new_ipc,		"NEW Ipc   ") \
+	EM(netfs_trace_tcon_ref_new_reconnect_server,	"NEW Reconn") \
+	EM(netfs_trace_tcon_ref_put_cached_close,	"PUT Ch-Cls") \
+	EM(netfs_trace_tcon_ref_put_cancelled_close,	"PUT Cn-Cls") \
+	EM(netfs_trace_tcon_ref_put_cancelled_close_fid, "PUT Cn-Fid") \
+	EM(netfs_trace_tcon_ref_put_cancelled_mid,	"PUT Cn-Mid") \
+	EM(netfs_trace_tcon_ref_put_mnt_ctx,		"PUT MntCtx") \
+	EM(netfs_trace_tcon_ref_put_reconnect_server,	"PUT Reconn") \
+	EM(netfs_trace_tcon_ref_put_tlink,		"PUT Tlink ") \
+	EM(netfs_trace_tcon_ref_see_cancelled_close,	"SEE Cn-Cls") \
+	EM(netfs_trace_tcon_ref_see_fscache_collision,	"SEE FV-CO!") \
+	EM(netfs_trace_tcon_ref_see_fscache_okay,	"SEE FV-Ok ") \
+	EM(netfs_trace_tcon_ref_see_fscache_relinq,	"SEE FV-Rlq") \
+	E_(netfs_trace_tcon_ref_see_umount,		"SEE Umount")
+
+#undef EM
+#undef E_
+
+/*
+ * Define those tracing enums.
+ */
+#ifndef __SMB3_DECLARE_TRACE_ENUMS_ONCE_ONLY
+#define __SMB3_DECLARE_TRACE_ENUMS_ONCE_ONLY
+
+#define EM(a, b) a,
+#define E_(a, b) a
+
+enum smb3_tcon_ref_trace { smb3_tcon_ref_traces } __mode(byte);
+
+#undef EM
+#undef E_
+#endif
+
+/*
+ * Export enum symbols via userspace.
+ */
+#define EM(a, b) TRACE_DEFINE_ENUM(a);
+#define E_(a, b) TRACE_DEFINE_ENUM(a);
+
+smb3_tcon_ref_traces;
+
+#undef EM
+#undef E_
+
+/*
+ * Now redefine the EM() and E_() macros to map the enums to the strings that
+ * will be printed in the output.
+ */
+#define EM(a, b)	{ a, b },
+#define E_(a, b)	{ a, b }
 
 /* For logging errors in read or write */
 DECLARE_EVENT_CLASS(smb3_rw_err_class,
@@ -68,6 +135,116 @@ DEFINE_SMB3_RW_ERR_EVENT(read_err);
 DEFINE_SMB3_RW_ERR_EVENT(query_dir_err);
 DEFINE_SMB3_RW_ERR_EVENT(zero_err);
 DEFINE_SMB3_RW_ERR_EVENT(falloc_err);
+
+/*
+ * For logging errors in reflink and copy_range ops e.g. smb2_copychunk_range
+ * and smb2_duplicate_extents
+ */
+DECLARE_EVENT_CLASS(smb3_copy_range_err_class,
+	TP_PROTO(unsigned int xid,
+		__u64	src_fid,
+		__u64   target_fid,
+		__u32	tid,
+		__u64	sesid,
+		__u64	src_offset,
+		__u64   target_offset,
+		__u32	len,
+		int	rc),
+	TP_ARGS(xid, src_fid, target_fid, tid, sesid, src_offset, target_offset, len, rc),
+	TP_STRUCT__entry(
+		__field(unsigned int, xid)
+		__field(__u64, src_fid)
+		__field(__u64, target_fid)
+		__field(__u32, tid)
+		__field(__u64, sesid)
+		__field(__u64, src_offset)
+		__field(__u64, target_offset)
+		__field(__u32, len)
+		__field(int, rc)
+	),
+	TP_fast_assign(
+		__entry->xid = xid;
+		__entry->src_fid = src_fid;
+		__entry->target_fid = target_fid;
+		__entry->tid = tid;
+		__entry->sesid = sesid;
+		__entry->src_offset = src_offset;
+		__entry->target_offset = target_offset;
+		__entry->len = len;
+		__entry->rc = rc;
+	),
+	TP_printk("\txid=%u sid=0x%llx tid=0x%x source fid=0x%llx source offset=0x%llx target fid=0x%llx target offset=0x%llx len=0x%x rc=%d",
+		__entry->xid, __entry->sesid, __entry->tid, __entry->target_fid,
+		__entry->src_offset, __entry->target_fid, __entry->target_offset, __entry->len, __entry->rc)
+)
+
+#define DEFINE_SMB3_COPY_RANGE_ERR_EVENT(name)	\
+DEFINE_EVENT(smb3_copy_range_err_class, smb3_##name, \
+	TP_PROTO(unsigned int xid,		\
+		__u64	src_fid,		\
+		__u64   target_fid,		\
+		__u32	tid,			\
+		__u64	sesid,			\
+		__u64	src_offset,		\
+		__u64	target_offset,		\
+		__u32	len,			\
+		int	rc),			\
+	TP_ARGS(xid, src_fid, target_fid, tid, sesid, src_offset, target_offset, len, rc))
+
+DEFINE_SMB3_COPY_RANGE_ERR_EVENT(clone_err);
+/* TODO: Add SMB3_COPY_RANGE_ERR_EVENT(copychunk_err) */
+
+DECLARE_EVENT_CLASS(smb3_copy_range_done_class,
+	TP_PROTO(unsigned int xid,
+		__u64	src_fid,
+		__u64   target_fid,
+		__u32	tid,
+		__u64	sesid,
+		__u64	src_offset,
+		__u64   target_offset,
+		__u32	len),
+	TP_ARGS(xid, src_fid, target_fid, tid, sesid, src_offset, target_offset, len),
+	TP_STRUCT__entry(
+		__field(unsigned int, xid)
+		__field(__u64, src_fid)
+		__field(__u64, target_fid)
+		__field(__u32, tid)
+		__field(__u64, sesid)
+		__field(__u64, src_offset)
+		__field(__u64, target_offset)
+		__field(__u32, len)
+	),
+	TP_fast_assign(
+		__entry->xid = xid;
+		__entry->src_fid = src_fid;
+		__entry->target_fid = target_fid;
+		__entry->tid = tid;
+		__entry->sesid = sesid;
+		__entry->src_offset = src_offset;
+		__entry->target_offset = target_offset;
+		__entry->len = len;
+	),
+	TP_printk("\txid=%u sid=0x%llx tid=0x%x source fid=0x%llx source offset=0x%llx target fid=0x%llx target offset=0x%llx len=0x%x",
+		__entry->xid, __entry->sesid, __entry->tid, __entry->target_fid,
+		__entry->src_offset, __entry->target_fid, __entry->target_offset, __entry->len)
+)
+
+#define DEFINE_SMB3_COPY_RANGE_DONE_EVENT(name)	\
+DEFINE_EVENT(smb3_copy_range_done_class, smb3_##name, \
+	TP_PROTO(unsigned int xid,		\
+		__u64	src_fid,		\
+		__u64   target_fid,		\
+		__u32	tid,			\
+		__u64	sesid,			\
+		__u64	src_offset,		\
+		__u64	target_offset,		\
+		__u32	len),			\
+	TP_ARGS(xid, src_fid, target_fid, tid, sesid, src_offset, target_offset, len))
+
+DEFINE_SMB3_COPY_RANGE_DONE_EVENT(copychunk_enter);
+DEFINE_SMB3_COPY_RANGE_DONE_EVENT(clone_enter);
+DEFINE_SMB3_COPY_RANGE_DONE_EVENT(copychunk_done);
+DEFINE_SMB3_COPY_RANGE_DONE_EVENT(clone_done);
 
 
 /* For logging successful read or write */
@@ -372,6 +549,7 @@ DEFINE_SMB3_INF_COMPOUND_ENTER_EVENT(set_eof_enter);
 DEFINE_SMB3_INF_COMPOUND_ENTER_EVENT(set_info_compound_enter);
 DEFINE_SMB3_INF_COMPOUND_ENTER_EVENT(set_reparse_compound_enter);
 DEFINE_SMB3_INF_COMPOUND_ENTER_EVENT(get_reparse_compound_enter);
+DEFINE_SMB3_INF_COMPOUND_ENTER_EVENT(query_wsl_ea_compound_enter);
 DEFINE_SMB3_INF_COMPOUND_ENTER_EVENT(delete_enter);
 DEFINE_SMB3_INF_COMPOUND_ENTER_EVENT(mkdir_enter);
 DEFINE_SMB3_INF_COMPOUND_ENTER_EVENT(tdis_enter);
@@ -983,6 +1161,46 @@ DEFINE_EVENT(smb3_connect_err_class, smb3_##name,  \
 
 DEFINE_SMB3_CONNECT_ERR_EVENT(connect_err);
 
+DECLARE_EVENT_CLASS(smb3_sess_setup_err_class,
+	TP_PROTO(char *hostname, char *username, __u64 conn_id,
+		const struct __kernel_sockaddr_storage *dst_addr, int rc),
+	TP_ARGS(hostname, username, conn_id, dst_addr, rc),
+	TP_STRUCT__entry(
+		__string(hostname, hostname)
+		__string(username, username)
+		__field(__u64, conn_id)
+		__array(__u8, dst_addr, sizeof(struct sockaddr_storage))
+		__field(int, rc)
+	),
+	TP_fast_assign(
+		struct sockaddr_storage *pss = NULL;
+
+		__entry->conn_id = conn_id;
+		__entry->rc = rc;
+		pss = (struct sockaddr_storage *)__entry->dst_addr;
+		*pss = *dst_addr;
+		__assign_str(hostname, hostname);
+		__assign_str(username, username);
+	),
+	TP_printk("rc=%d user=%s conn_id=0x%llx server=%s addr=%pISpsfc",
+		__entry->rc,
+		__get_str(username),
+		__entry->conn_id,
+		__get_str(hostname),
+		__entry->dst_addr)
+)
+
+#define DEFINE_SMB3_SES_SETUP_ERR_EVENT(name)        \
+DEFINE_EVENT(smb3_sess_setup_err_class, smb3_##name,  \
+	TP_PROTO(char *hostname,		\
+		char *username,			\
+		__u64 conn_id,			\
+		const struct __kernel_sockaddr_storage *addr,	\
+		int rc),			\
+	TP_ARGS(hostname, username, conn_id, addr, rc))
+
+DEFINE_SMB3_SES_SETUP_ERR_EVENT(key_expired);
+
 DECLARE_EVENT_CLASS(smb3_reconnect_class,
 	TP_PROTO(__u64	currmid,
 		__u64 conn_id,
@@ -1050,7 +1268,7 @@ DECLARE_EVENT_CLASS(smb3_ioctl_class,
 		__entry->command = command;
 	),
 	TP_printk("xid=%u fid=0x%llx ioctl cmd=0x%x",
-		__entry->xid, __entry->fid, __entry->command)
+		  __entry->xid, __entry->fid, __entry->command)
 )
 
 #define DEFINE_SMB3_IOCTL_EVENT(name)        \
@@ -1062,9 +1280,58 @@ DEFINE_EVENT(smb3_ioctl_class, smb3_##name,  \
 
 DEFINE_SMB3_IOCTL_EVENT(ioctl);
 
+DECLARE_EVENT_CLASS(smb3_shutdown_class,
+	TP_PROTO(__u32 flags,
+		__u32 tid),
+	TP_ARGS(flags, tid),
+	TP_STRUCT__entry(
+		__field(__u32, flags)
+		__field(__u32, tid)
+	),
+	TP_fast_assign(
+		__entry->flags = flags;
+		__entry->tid = tid;
+	),
+	TP_printk("flags=0x%x tid=0x%x",
+		  __entry->flags, __entry->tid)
+)
 
+#define DEFINE_SMB3_SHUTDOWN_EVENT(name)        \
+DEFINE_EVENT(smb3_shutdown_class, smb3_##name,  \
+	TP_PROTO(__u32 flags,		     \
+		__u32 tid),		     \
+	TP_ARGS(flags, tid))
 
+DEFINE_SMB3_SHUTDOWN_EVENT(shutdown_enter);
+DEFINE_SMB3_SHUTDOWN_EVENT(shutdown_done);
 
+DECLARE_EVENT_CLASS(smb3_shutdown_err_class,
+	TP_PROTO(int rc,
+		__u32 flags,
+		__u32 tid),
+	TP_ARGS(rc, flags, tid),
+	TP_STRUCT__entry(
+		__field(int, rc)
+		__field(__u32, flags)
+		__field(__u32, tid)
+	),
+	TP_fast_assign(
+		__entry->rc = rc;
+		__entry->flags = flags;
+		__entry->tid = tid;
+	),
+	TP_printk("rc=%d flags=0x%x tid=0x%x",
+		__entry->rc, __entry->flags, __entry->tid)
+)
+
+#define DEFINE_SMB3_SHUTDOWN_ERR_EVENT(name)        \
+DEFINE_EVENT(smb3_shutdown_err_class, smb3_##name,  \
+	TP_PROTO(int rc,		     \
+		__u32 flags,		     \
+		__u32 tid),		     \
+	TP_ARGS(rc, flags, tid))
+
+DEFINE_SMB3_SHUTDOWN_ERR_EVENT(shutdown_err);
 
 DECLARE_EVENT_CLASS(smb3_credit_class,
 	TP_PROTO(__u64	currmid,
@@ -1125,6 +1392,30 @@ DEFINE_SMB3_CREDIT_EVENT(waitff_credits);
 DEFINE_SMB3_CREDIT_EVENT(overflow_credits);
 DEFINE_SMB3_CREDIT_EVENT(set_credits);
 
+
+TRACE_EVENT(smb3_tcon_ref,
+	    TP_PROTO(unsigned int tcon_debug_id, int ref,
+		     enum smb3_tcon_ref_trace trace),
+	    TP_ARGS(tcon_debug_id, ref, trace),
+	    TP_STRUCT__entry(
+		    __field(unsigned int,		tcon)
+		    __field(int,			ref)
+		    __field(enum smb3_tcon_ref_trace,	trace)
+			     ),
+	    TP_fast_assign(
+		    __entry->tcon	= tcon_debug_id;
+		    __entry->ref	= ref;
+		    __entry->trace	= trace;
+			   ),
+	    TP_printk("TC=%08x %s r=%u",
+		      __entry->tcon,
+		      __print_symbolic(__entry->trace, smb3_tcon_ref_traces),
+		      __entry->ref)
+	    );
+
+
+#undef EM
+#undef E_
 #endif /* _CIFS_TRACE_H */
 
 #undef TRACE_INCLUDE_PATH

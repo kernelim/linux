@@ -58,12 +58,6 @@ struct xdp_mem_info {
 
 struct page_pool;
 
-#if IS_ENABLED(CONFIG_S390)
-#define RH_KABI_XDP_RXQ_MAX_LONGS 32
-#else
-#define RH_KABI_XDP_RXQ_MAX_LONGS 16
-#endif
-
 struct xdp_rxq_info {
 	struct net_device *dev;
 	u32 queue_index;

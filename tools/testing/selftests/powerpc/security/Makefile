@@ -5,9 +5,11 @@ TEST_PROGS := mitigation-patching.sh
 
 top_srcdir = ../../../../..
 
-CFLAGS += -I../../../../../usr/include
 
 include ../../lib.mk
+include ../flags.mk
+
+CFLAGS += -I../../../../../usr/include
 
 $(TEST_GEN_PROGS): ../harness.c ../utils.c
 

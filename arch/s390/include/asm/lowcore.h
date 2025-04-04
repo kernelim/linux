@@ -11,6 +11,7 @@
 
 #include <linux/types.h>
 #include <asm/ptrace.h>
+#include <asm/ctlreg.h>
 #include <asm/cpu.h>
 #include <asm/types.h>
 
@@ -34,12 +35,22 @@ struct lowcore {
 		__u32 ext_int_code_addr;
 	};
 	__u32	svc_int_code;			/* 0x0088 */
-	__u16	pgm_ilc;			/* 0x008c */
-	__u16	pgm_code;			/* 0x008e */
+	union {
+		struct {
+			__u16	pgm_ilc;	/* 0x008c */
+			__u16	pgm_code;	/* 0x008e */
+		};
+		__u32 pgm_int_code;
+	};
 	__u32	data_exc_code;			/* 0x0090 */
 	__u16	mon_class_num;			/* 0x0094 */
-	__u8	per_code;			/* 0x0096 */
-	__u8	per_atmid;			/* 0x0097 */
+	union {
+		struct {
+			__u8	per_code;	/* 0x0096 */
+			__u8	per_atmid;	/* 0x0097 */
+		};
+		__u16 per_code_combined;
+	};
 	__u64	per_address;			/* 0x0098 */
 	__u8	exc_access_id;			/* 0x00a0 */
 	__u8	per_access_id;			/* 0x00a1 */
@@ -108,8 +119,8 @@ struct lowcore {
 	__u64	avg_steal_timer;		/* 0x0300 */
 	__u64	last_update_timer;		/* 0x0308 */
 	__u64	last_update_clock;		/* 0x0310 */
-	__u64	int_clock;			/* 0x0318*/
-	__u64	mcck_clock;			/* 0x0320 */
+	__u64	int_clock;			/* 0x0318 */
+	__u8	pad_0x0320[0x0328-0x0320];	/* 0x0320 */
 	__u64	clock_comparator;		/* 0x0328 */
 	__u64	boot_clock[2];			/* 0x0330 */
 
@@ -129,8 +140,8 @@ struct lowcore {
 	__u32	restart_flags;			/* 0x0384 */
 
 	/* Address space pointer. */
-	__u64	kernel_asce;			/* 0x0388 */
-	__u64	user_asce;			/* 0x0390 */
+	struct ctlreg kernel_asce;		/* 0x0388 */
+	struct ctlreg user_asce;		/* 0x0390 */
 
 	/*
 	 * The lpp and current_pid fields form a
@@ -189,7 +200,7 @@ struct lowcore {
 	__u32	clock_comp_save_area[2];	/* 0x1330 */
 	__u64	last_break_save_area;		/* 0x1338 */
 	__u32	access_regs_save_area[16];	/* 0x1340 */
-	__u64	cregs_save_area[16];		/* 0x1380 */
+	struct ctlreg cregs_save_area[16];	/* 0x1380 */
 	__u8	pad_0x1400[0x1500-0x1400];	/* 0x1400 */
 	/* Cryptography-counter designation */
 	__u64	ccd;				/* 0x1500 */
@@ -209,14 +220,6 @@ extern struct lowcore *lowcore_ptr[];
 static inline void set_prefix(__u32 address)
 {
 	asm volatile("spx %0" : : "Q" (address) : "memory");
-}
-
-static inline __u32 store_prefix(void)
-{
-	__u32 address;
-
-	asm volatile("stpx %0" : "=Q" (address));
-	return address;
 }
 
 #endif /* _ASM_S390_LOWCORE_H */

@@ -188,6 +188,7 @@
 	firmware {
 		scm {
 			compatible = "qcom,scm-sa8775p", "qcom,scm";
+			memory-region = <&tz_ffi_mem>;
 		};
 	};
 
@@ -395,6 +396,12 @@
 
 		cdt_data_backup_mem: cdt-data-backup@91ba0000 {
 			reg = <0x0 0x91ba0000 0x0 0x1000>;
+			no-map;
+		};
+
+		tz_ffi_mem: tz-ffi@91c00000 {
+			compatible = "shared-dma-pool";
+			reg = <0x0 0x91c00000 0x0 0x1400000>;
 			no-map;
 		};
 
@@ -2472,6 +2479,12 @@
 				      "ptp_ref",
 				      "phyaux";
 
+			interconnects = <&aggre1_noc MASTER_EMAC_1 QCOM_ICC_TAG_ALWAYS
+					 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>,
+					<&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ALWAYS
+					 &config_noc SLAVE_EMAC1_CFG QCOM_ICC_TAG_ALWAYS>;
+			interconnect-names = "mac-mem", "cpu-mac";
+
 			power-domains = <&gcc EMAC1_GDSC>;
 
 			phys = <&serdes1>;
@@ -2505,6 +2518,12 @@
 				      "pclk",
 				      "ptp_ref",
 				      "phyaux";
+
+			interconnects = <&aggre1_noc MASTER_EMAC QCOM_ICC_TAG_ALWAYS
+					 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>,
+					<&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ALWAYS
+					 &config_noc SLAVE_EMAC_CFG QCOM_ICC_TAG_ALWAYS>;
+			interconnect-names = "mac-mem", "cpu-mac";
 
 			power-domains = <&gcc EMAC0_GDSC>;
 

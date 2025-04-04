@@ -512,13 +512,9 @@ struct hv_proximity_domain_flags {
 	u32 proximity_info_valid : 1;
 } __packed;
 
-/* Not a union in windows but useful for zeroing */
-union hv_proximity_domain_info {
-	struct {
-		u32 domain_id;
-		struct hv_proximity_domain_flags flags;
-	};
-	u64 as_uint64;
+struct hv_proximity_domain_info {
+	u32 domain_id;
+	struct hv_proximity_domain_flags flags;
 } __packed;
 
 struct hv_lp_startup_status {
@@ -532,14 +528,13 @@ struct hv_lp_startup_status {
 } __packed;
 
 /* HvAddLogicalProcessor hypercall */
-struct hv_add_logical_processor_in {
+struct hv_input_add_logical_processor {
 	u32 lp_index;
 	u32 apic_id;
-	union hv_proximity_domain_info proximity_domain_info;
-	u64 flags;
+	struct hv_proximity_domain_info proximity_domain_info;
 } __packed;
 
-struct hv_add_logical_processor_out {
+struct hv_output_add_logical_processor {
 	struct hv_lp_startup_status startup_status;
 } __packed;
 
@@ -560,7 +555,7 @@ struct hv_create_vp {
 	u8 padding[3];
 	u8 subnode_type;
 	u64 subnode_id;
-	union hv_proximity_domain_info proximity_domain_info;
+	struct hv_proximity_domain_info proximity_domain_info;
 	u64 flags;
 } __packed;
 
@@ -636,14 +631,14 @@ struct hv_retarget_device_interrupt {
 /*
  * Synthetic register definitions equivalent to MSRs on x86/x64
  */
-#define HV_REGISTER_CRASH_P0		0x00000210
-#define HV_REGISTER_CRASH_P1		0x00000211
-#define HV_REGISTER_CRASH_P2		0x00000212
-#define HV_REGISTER_CRASH_P3		0x00000213
-#define HV_REGISTER_CRASH_P4		0x00000214
-#define HV_REGISTER_CRASH_CTL		0x00000215
+#define HV_REGISTER_GUEST_CRASH_P0	0x00000210
+#define HV_REGISTER_GUEST_CRASH_P1	0x00000211
+#define HV_REGISTER_GUEST_CRASH_P2	0x00000212
+#define HV_REGISTER_GUEST_CRASH_P3	0x00000213
+#define HV_REGISTER_GUEST_CRASH_P4	0x00000214
+#define HV_REGISTER_GUEST_CRASH_CTL	0x00000215
 
-#define HV_REGISTER_GUEST_OSID		0x00090002
+#define HV_REGISTER_GUEST_OS_ID		0x00090002
 #define HV_REGISTER_VP_INDEX		0x00090003
 #define HV_REGISTER_TIME_REF_COUNT	0x00090004
 #define HV_REGISTER_REFERENCE_TSC	0x00090017
@@ -816,6 +811,29 @@ struct hv_input_unmap_device_interrupt {
 
 #define HV_SOURCE_SHADOW_NONE               0x0
 #define HV_SOURCE_SHADOW_BRIDGE_BUS_RANGE   0x1
+
+/*
+ * Version info reported by hypervisor
+ */
+union hv_hypervisor_version_info {
+	struct {
+		u32 build_number;
+
+		u32 minor_version : 16;
+		u32 major_version : 16;
+
+		u32 service_pack;
+
+		u32 service_number : 24;
+		u32 service_branch : 8;
+	};
+	struct {
+		u32 eax;
+		u32 ebx;
+		u32 ecx;
+		u32 edx;
+	};
+};
 
 /*
  * The whole argument should fit in a page to be able to pass to the hypervisor

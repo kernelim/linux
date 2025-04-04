@@ -51,7 +51,6 @@ do
 			# the tree is changed.
 			# RHEL_RELEASE can change build-to-build.
 			# SHELL can change depending on user's environment
-			# BPFTOOLVERSION is derived from tools/lib/bpf/Makefile and may change.
 			# RHGITURL may change depending on the user's method of cloning
 			# RHDISTDATADIR will change based on these tests
 			# VARS is a list of variables added for the 'dist-dump-variables' target
@@ -61,7 +60,6 @@ do
 				grep -v -w UPSTREAM |\
 				grep -v -w RHEL_RELEASE |\
 				grep -v -w SHELL |\
-				grep -v -w BPFTOOLVERSION |\
 				grep -v -w RHGITURL |\
 				grep -v -w RHDISTDATADIR |\
 				grep -v -w VARS |\

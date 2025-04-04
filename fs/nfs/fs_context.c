@@ -600,9 +600,11 @@ static int nfs_fs_context_parse_param(struct fs_context *fc,
 		break;
 	case Opt_lock:
 		if (result.negated) {
+			ctx->lock_status = NFS_LOCK_NOLOCK;
 			ctx->flags |= NFS_MOUNT_NONLM;
 			ctx->flags |= (NFS_MOUNT_LOCAL_FLOCK | NFS_MOUNT_LOCAL_FCNTL);
 		} else {
+			ctx->lock_status = NFS_LOCK_LOCK;
 			ctx->flags &= ~NFS_MOUNT_NONLM;
 			ctx->flags &= ~(NFS_MOUNT_LOCAL_FLOCK | NFS_MOUNT_LOCAL_FCNTL);
 		}
@@ -652,6 +654,7 @@ static int nfs_fs_context_parse_param(struct fs_context *fc,
 		ctx->fscache_uniq = NULL;
 		break;
 	case Opt_fscache:
+		trace_nfs_mount_assign(param->key, param->string);
 		ctx->options |= NFS_OPTION_FSCACHE;
 		kfree(ctx->fscache_uniq);
 		ctx->fscache_uniq = param->string;

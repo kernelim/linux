@@ -13,7 +13,12 @@
 #define  NR_IRQS  (1 << 19)
 #endif
 
+#include <linux/cpumask.h>
+
 #include <asm-generic/irq.h>
+
+void arch_trigger_cpumask_backtrace(const cpumask_t *mask, int exclude_cpu);
+#define arch_trigger_cpumask_backtrace arch_trigger_cpumask_backtrace
 
 struct pt_regs;
 

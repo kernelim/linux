@@ -274,9 +274,9 @@ static void xgbe_i2c_clear_isr_interrupts(struct xgbe_prv_data *pdata,
 		XI2C_IOREAD(pdata, IC_CLR_STOP_DET);
 }
 
-static void xgbe_i2c_isr_task(struct tasklet_struct *t)
+static void xgbe_i2c_isr_bh_work(struct work_struct *work)
 {
-	struct xgbe_prv_data *pdata = from_tasklet(pdata, t, tasklet_i2c);
+	struct xgbe_prv_data *pdata = from_work(pdata, work, i2c_bh_work);
 	struct xgbe_i2c_op_state *state = &pdata->i2c.op_state;
 	unsigned int isr;
 
@@ -321,10 +321,10 @@ static irqreturn_t xgbe_i2c_isr(int irq, void *data)
 {
 	struct xgbe_prv_data *pdata = (struct xgbe_prv_data *)data;
 
-	if (pdata->isr_as_tasklet)
-		tasklet_schedule(&pdata->tasklet_i2c);
+	if (pdata->isr_as_bh_work)
+		queue_work(system_bh_wq, &pdata->i2c_bh_work);
 	else
-		xgbe_i2c_isr_task(&pdata->tasklet_i2c);
+		xgbe_i2c_isr_bh_work(&pdata->i2c_bh_work);
 
 	return IRQ_HANDLED;
 }
@@ -369,7 +369,7 @@ static void xgbe_i2c_set_target(struct xgbe_prv_data *pdata, unsigned int addr)
 
 static irqreturn_t xgbe_i2c_combined_isr(struct xgbe_prv_data *pdata)
 {
-	xgbe_i2c_isr_task(&pdata->tasklet_i2c);
+	xgbe_i2c_isr_bh_work(&pdata->i2c_bh_work);
 
 	return IRQ_HANDLED;
 }
@@ -447,8 +447,10 @@ static void xgbe_i2c_stop(struct xgbe_prv_data *pdata)
 	xgbe_i2c_disable(pdata);
 	xgbe_i2c_clear_all_interrupts(pdata);
 
-	if (pdata->dev_irq != pdata->i2c_irq)
+	if (pdata->dev_irq != pdata->i2c_irq) {
 		devm_free_irq(pdata->dev, pdata->i2c_irq, pdata);
+		cancel_work_sync(&pdata->i2c_bh_work);
+	}
 }
 
 static int xgbe_i2c_start(struct xgbe_prv_data *pdata)
@@ -462,7 +464,7 @@ static int xgbe_i2c_start(struct xgbe_prv_data *pdata)
 
 	/* If we have a separate I2C irq, enable it */
 	if (pdata->dev_irq != pdata->i2c_irq) {
-		tasklet_setup(&pdata->tasklet_i2c, xgbe_i2c_isr_task);
+		INIT_WORK(&pdata->i2c_bh_work, xgbe_i2c_isr_bh_work);
 
 		ret = devm_request_irq(pdata->dev, pdata->i2c_irq,
 				       xgbe_i2c_isr, 0, pdata->i2c_name,

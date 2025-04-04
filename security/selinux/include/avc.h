@@ -177,9 +177,6 @@ unsigned int avc_get_cache_threshold(struct selinux_avc *avc);
 void avc_set_cache_threshold(struct selinux_avc *avc,
 			     unsigned int cache_threshold);
 
-/* Attempt to free avc node cache */
-void avc_disable(void);
-
 #ifdef CONFIG_SECURITY_SELINUX_AVC_STATS
 DECLARE_PER_CPU(struct avc_cache_stats, avc_cache_stats);
 #endif

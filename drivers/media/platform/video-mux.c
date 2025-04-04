@@ -118,7 +118,7 @@ static int video_mux_s_stream(struct v4l2_subdev *sd, int enable)
 		return -EINVAL;
 	}
 
-	pad = media_entity_remote_pad(&sd->entity.pads[vmux->active]);
+	pad = media_pad_remote_pad_first(&sd->entity.pads[vmux->active]);
 	if (!pad) {
 		dev_err(sd->dev, "Failed to find remote source pad\n");
 		return -ENOLINK;
@@ -311,8 +311,8 @@ static int video_mux_set_format(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int video_mux_init_cfg(struct v4l2_subdev *sd,
-			      struct v4l2_subdev_state *sd_state)
+static int video_mux_init_state(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *sd_state)
 {
 	struct video_mux *vmux = v4l2_subdev_to_video_mux(sd);
 	struct v4l2_mbus_framefmt *mbusformat;
@@ -339,6 +339,10 @@ static const struct v4l2_subdev_pad_ops video_mux_pad_ops = {
 static const struct v4l2_subdev_ops video_mux_subdev_ops = {
 	.pad = &video_mux_pad_ops,
 	.video = &video_mux_subdev_video_ops,
+};
+
+static const struct v4l2_subdev_internal_ops video_mux_internal_ops = {
+	.init_state = video_mux_init_state,
 };
 
 static int video_mux_notify_bound(struct v4l2_async_notifier *notifier,
@@ -420,6 +424,7 @@ static int video_mux_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, vmux);
 
 	v4l2_subdev_init(&vmux->subdev, &video_mux_subdev_ops);
+	vmux->subdev.internal_ops = &video_mux_internal_ops;
 	snprintf(vmux->subdev.name, sizeof(vmux->subdev.name), "%pOFn", np);
 	vmux->subdev.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	vmux->subdev.dev = dev;

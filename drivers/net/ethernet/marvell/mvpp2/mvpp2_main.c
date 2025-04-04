@@ -1947,45 +1947,32 @@ static void mvpp2_ethtool_get_strings(struct net_device *netdev, u32 sset,
 				      u8 *data)
 {
 	struct mvpp2_port *port = netdev_priv(netdev);
+	const char *str;
 	int i, q;
 
 	if (sset != ETH_SS_STATS)
 		return;
 
-	for (i = 0; i < ARRAY_SIZE(mvpp2_ethtool_mib_regs); i++) {
-		strscpy(data, mvpp2_ethtool_mib_regs[i].string,
-			ETH_GSTRING_LEN);
-		data += ETH_GSTRING_LEN;
-	}
+	for (i = 0; i < ARRAY_SIZE(mvpp2_ethtool_mib_regs); i++)
+		ethtool_puts(&data, mvpp2_ethtool_mib_regs[i].string);
 
-	for (i = 0; i < ARRAY_SIZE(mvpp2_ethtool_port_regs); i++) {
-		strscpy(data, mvpp2_ethtool_port_regs[i].string,
-			ETH_GSTRING_LEN);
-		data += ETH_GSTRING_LEN;
-	}
+	for (i = 0; i < ARRAY_SIZE(mvpp2_ethtool_port_regs); i++)
+		ethtool_puts(&data, mvpp2_ethtool_port_regs[i].string);
 
-	for (q = 0; q < port->ntxqs; q++) {
+	for (q = 0; q < port->ntxqs; q++)
 		for (i = 0; i < ARRAY_SIZE(mvpp2_ethtool_txq_regs); i++) {
-			snprintf(data, ETH_GSTRING_LEN,
-				 mvpp2_ethtool_txq_regs[i].string, q);
-			data += ETH_GSTRING_LEN;
+			str = mvpp2_ethtool_txq_regs[i].string;
+			ethtool_sprintf(&data, str, q);
 		}
-	}
 
-	for (q = 0; q < port->nrxqs; q++) {
+	for (q = 0; q < port->nrxqs; q++)
 		for (i = 0; i < ARRAY_SIZE(mvpp2_ethtool_rxq_regs); i++) {
-			snprintf(data, ETH_GSTRING_LEN,
-				 mvpp2_ethtool_rxq_regs[i].string,
-				 q);
-			data += ETH_GSTRING_LEN;
+			str = mvpp2_ethtool_rxq_regs[i].string;
+			ethtool_sprintf(&data, str, q);
 		}
-	}
 
-	for (i = 0; i < ARRAY_SIZE(mvpp2_ethtool_xdp); i++) {
-		strscpy(data, mvpp2_ethtool_xdp[i].string,
-			ETH_GSTRING_LEN);
-		data += ETH_GSTRING_LEN;
-	}
+	for (i = 0; i < ARRAY_SIZE(mvpp2_ethtool_xdp); i++)
+		ethtool_puts(&data, mvpp2_ethtool_xdp[i].string);
 }
 
 static void
@@ -5204,7 +5191,7 @@ static int mvpp2_get_ts_config(struct mvpp2_port *port, struct ifreq *ifr)
 }
 
 static int mvpp2_ethtool_get_ts_info(struct net_device *dev,
-				     struct ethtool_ts_info *info)
+				     struct kernel_ethtool_ts_info *info)
 {
 	struct mvpp2_port *port = netdev_priv(dev);
 
@@ -5213,8 +5200,6 @@ static int mvpp2_ethtool_get_ts_info(struct net_device *dev,
 
 	info->phc_index = mvpp22_tai_ptp_clock_index(port->priv->tai);
 	info->so_timestamping = SOF_TIMESTAMPING_TX_SOFTWARE |
-				SOF_TIMESTAMPING_RX_SOFTWARE |
-				SOF_TIMESTAMPING_SOFTWARE |
 				SOF_TIMESTAMPING_TX_HARDWARE |
 				SOF_TIMESTAMPING_RX_HARDWARE |
 				SOF_TIMESTAMPING_RAW_HARDWARE;

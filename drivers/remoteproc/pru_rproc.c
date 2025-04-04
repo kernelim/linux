@@ -14,8 +14,9 @@
 #include <linux/debugfs.h>
 #include <linux/irqdomain.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/of_irq.h>
+#include <linux/platform_device.h>
 #include <linux/pruss_driver.h>
 #include <linux/remoteproc.h>
 

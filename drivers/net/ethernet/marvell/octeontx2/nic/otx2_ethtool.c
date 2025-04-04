@@ -85,20 +85,22 @@ static void otx2_get_qset_strings(struct otx2_nic *pfvf, u8 **data, int qset)
 	int start_qidx = qset * pfvf->hw.rx_queues;
 	int qidx, stats;
 
-	for (qidx = 0; qidx < pfvf->hw.rx_queues; qidx++) {
-		for (stats = 0; stats < otx2_n_queue_stats; stats++) {
-			sprintf(*data, "rxq%d: %s", qidx + start_qidx,
-				otx2_queue_stats[stats].name);
-			*data += ETH_GSTRING_LEN;
-		}
-	}
-	for (qidx = 0; qidx < pfvf->hw.tx_queues; qidx++) {
-		for (stats = 0; stats < otx2_n_queue_stats; stats++) {
-			sprintf(*data, "txq%d: %s", qidx + start_qidx,
-				otx2_queue_stats[stats].name);
-			*data += ETH_GSTRING_LEN;
-		}
-	}
+	for (qidx = 0; qidx < pfvf->hw.rx_queues; qidx++)
+		for (stats = 0; stats < otx2_n_queue_stats; stats++)
+			ethtool_sprintf(data, "rxq%d: %s", qidx + start_qidx,
+					otx2_queue_stats[stats].name);
+
+	for (qidx = 0; qidx < otx2_get_total_tx_queues(pfvf); qidx++)
+		for (stats = 0; stats < otx2_n_queue_stats; stats++)
+			if (qidx >= pfvf->hw.non_qos_queues)
+				ethtool_sprintf(data, "txq_qos%d: %s",
+						qidx + start_qidx -
+							pfvf->hw.non_qos_queues,
+						otx2_queue_stats[stats].name);
+			else
+				ethtool_sprintf(data, "txq%d: %s",
+						qidx + start_qidx,
+						otx2_queue_stats[stats].name);
 }
 
 static void otx2_get_strings(struct net_device *netdev, u32 sset, u8 *data)
@@ -109,36 +111,25 @@ static void otx2_get_strings(struct net_device *netdev, u32 sset, u8 *data)
 	if (sset != ETH_SS_STATS)
 		return;
 
-	for (stats = 0; stats < otx2_n_dev_stats; stats++) {
-		memcpy(data, otx2_dev_stats[stats].name, ETH_GSTRING_LEN);
-		data += ETH_GSTRING_LEN;
-	}
+	for (stats = 0; stats < otx2_n_dev_stats; stats++)
+		ethtool_puts(&data, otx2_dev_stats[stats].name);
 
-	for (stats = 0; stats < otx2_n_drv_stats; stats++) {
-		memcpy(data, otx2_drv_stats[stats].name, ETH_GSTRING_LEN);
-		data += ETH_GSTRING_LEN;
-	}
+	for (stats = 0; stats < otx2_n_drv_stats; stats++)
+		ethtool_puts(&data, otx2_drv_stats[stats].name);
 
 	otx2_get_qset_strings(pfvf, &data, 0);
 
 	if (!test_bit(CN10K_RPM, &pfvf->hw.cap_flag)) {
-		for (stats = 0; stats < CGX_RX_STATS_COUNT; stats++) {
-			sprintf(data, "cgx_rxstat%d: ", stats);
-			data += ETH_GSTRING_LEN;
-		}
+		for (stats = 0; stats < CGX_RX_STATS_COUNT; stats++)
+			ethtool_sprintf(&data, "cgx_rxstat%d: ", stats);
 
-		for (stats = 0; stats < CGX_TX_STATS_COUNT; stats++) {
-			sprintf(data, "cgx_txstat%d: ", stats);
-			data += ETH_GSTRING_LEN;
-		}
+		for (stats = 0; stats < CGX_TX_STATS_COUNT; stats++)
+			ethtool_sprintf(&data, "cgx_txstat%d: ", stats);
 	}
 
-	strcpy(data, "reset_count");
-	data += ETH_GSTRING_LEN;
-	sprintf(data, "Fec Corrected Errors: ");
-	data += ETH_GSTRING_LEN;
-	sprintf(data, "Fec Uncorrected Errors: ");
-	data += ETH_GSTRING_LEN;
+	ethtool_puts(&data, "reset_count");
+	ethtool_puts(&data, "Fec Corrected Errors: ");
+	ethtool_puts(&data, "Fec Uncorrected Errors: ");
 }
 
 static void otx2_get_qset_stats(struct otx2_nic *pfvf,
@@ -159,7 +150,7 @@ static void otx2_get_qset_stats(struct otx2_nic *pfvf,
 				[otx2_queue_stats[stat].index];
 	}
 
-	for (qidx = 0; qidx < pfvf->hw.tx_queues; qidx++) {
+	for (qidx = 0; qidx < otx2_get_total_tx_queues(pfvf); qidx++) {
 		if (!otx2_update_sq_stats(pfvf, qidx)) {
 			for (stat = 0; stat < otx2_n_queue_stats; stat++)
 				*((*data)++) = 0;
@@ -254,7 +245,7 @@ static int otx2_get_sset_count(struct net_device *netdev, int sset)
 		return -EINVAL;
 
 	qstats_count = otx2_n_queue_stats *
-		       (pfvf->hw.rx_queues + pfvf->hw.tx_queues);
+		       (pfvf->hw.rx_queues + otx2_get_total_tx_queues(pfvf));
 	if (!test_bit(CN10K_RPM, &pfvf->hw.cap_flag))
 		mac_stats = CGX_RX_STATS_COUNT + CGX_TX_STATS_COUNT;
 	otx2_update_lmac_fec_stats(pfvf);
@@ -282,7 +273,7 @@ static int otx2_set_channels(struct net_device *dev,
 {
 	struct otx2_nic *pfvf = netdev_priv(dev);
 	bool if_up = netif_running(dev);
-	int err = 0;
+	int err, qos_txqs;
 
 	if (!channel->rx_count || !channel->tx_count)
 		return -EINVAL;
@@ -296,14 +287,18 @@ static int otx2_set_channels(struct net_device *dev,
 	if (if_up)
 		dev->netdev_ops->ndo_stop(dev);
 
-	err = otx2_set_real_num_queues(dev, channel->tx_count,
+	qos_txqs = bitmap_weight(pfvf->qos.qos_sq_bmap,
+				 OTX2_QOS_MAX_LEAF_NODES);
+
+	err = otx2_set_real_num_queues(dev, channel->tx_count + qos_txqs,
 				       channel->rx_count);
 	if (err)
 		return err;
 
 	pfvf->hw.rx_queues = channel->rx_count;
 	pfvf->hw.tx_queues = channel->tx_count;
-	pfvf->qset.cq_cnt = pfvf->hw.tx_queues +  pfvf->hw.rx_queues;
+	if (pfvf->xdp_prog)
+		pfvf->hw.xdp_queues = channel->rx_count;
 
 	if (if_up)
 		err = dev->netdev_ops->ndo_open(dev);
@@ -323,16 +318,25 @@ static void otx2_get_pauseparam(struct net_device *netdev,
 	if (is_otx2_lbkvf(pfvf->pdev))
 		return;
 
+	mutex_lock(&pfvf->mbox.lock);
 	req = otx2_mbox_alloc_msg_cgx_cfg_pause_frm(&pfvf->mbox);
-	if (!req)
+	if (!req) {
+		mutex_unlock(&pfvf->mbox.lock);
 		return;
+	}
 
 	if (!otx2_sync_mbox_msg(&pfvf->mbox)) {
 		rsp = (struct cgx_pause_frm_cfg *)
 		       otx2_mbox_get_rsp(&pfvf->mbox.mbox, 0, &req->hdr);
+		if (IS_ERR(rsp)) {
+			mutex_unlock(&pfvf->mbox.lock);
+			return;
+		}
+
 		pause->rx_pause = rsp->rx_pause;
 		pause->tx_pause = rsp->tx_pause;
 	}
+	mutex_unlock(&pfvf->mbox.lock);
 }
 
 static int otx2_set_pauseparam(struct net_device *netdev,
@@ -372,6 +376,7 @@ static void otx2_get_ringparam(struct net_device *netdev,
 	ring->tx_max_pending = Q_COUNT(Q_SIZE_MAX);
 	ring->tx_pending = qs->sqe_cnt ? qs->sqe_cnt : Q_COUNT(Q_SIZE_4K);
 	kernel_ring->rx_buf_len = pfvf->hw.rbuf_len;
+	kernel_ring->cqe_size = pfvf->hw.xqe_size;
 }
 
 static int otx2_set_ringparam(struct net_device *netdev,
@@ -382,6 +387,7 @@ static int otx2_set_ringparam(struct net_device *netdev,
 	struct otx2_nic *pfvf = netdev_priv(netdev);
 	u32 rx_buf_len = kernel_ring->rx_buf_len;
 	u32 old_rx_buf_len = pfvf->hw.rbuf_len;
+	u32 xqe_size = kernel_ring->cqe_size;
 	bool if_up = netif_running(netdev);
 	struct otx2_qset *qs = &pfvf->qset;
 	u32 rx_count, tx_count;
@@ -395,6 +401,12 @@ static int otx2_set_ringparam(struct net_device *netdev,
 	if (rx_buf_len && (rx_buf_len < 1536 || rx_buf_len > 32768)) {
 		netdev_err(netdev,
 			   "Receive buffer range is 1536 - 32768");
+		return -EINVAL;
+	}
+
+	if (xqe_size != 128 && xqe_size != 512) {
+		netdev_err(netdev,
+			   "Completion event size must be 128 or 512");
 		return -EINVAL;
 	}
 
@@ -416,7 +428,7 @@ static int otx2_set_ringparam(struct net_device *netdev,
 	tx_count = Q_COUNT(Q_SIZE(tx_count, 3));
 
 	if (tx_count == qs->sqe_cnt && rx_count == qs->rqe_cnt &&
-	    rx_buf_len == old_rx_buf_len)
+	    rx_buf_len == old_rx_buf_len && xqe_size == pfvf->hw.xqe_size)
 		return 0;
 
 	if (if_up)
@@ -427,6 +439,7 @@ static int otx2_set_ringparam(struct net_device *netdev,
 	qs->rqe_cnt = rx_count;
 
 	pfvf->hw.rbuf_len = rx_buf_len;
+	pfvf->hw.xqe_size = xqe_size;
 
 	if (if_up)
 		return netdev->netdev_ops->ndo_open(netdev);
@@ -744,6 +757,7 @@ static int otx2_set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *nfc)
 	struct otx2_nic *pfvf = netdev_priv(dev);
 	int ret = -EOPNOTSUPP;
 
+	pfvf->flow_cfg->ntuple = ntuple;
 	switch (nfc->cmd) {
 	case ETHTOOL_SRXFH:
 		ret = otx2_set_rss_hash_opts(pfvf, nfc);
@@ -930,7 +944,7 @@ static u32 otx2_get_link(struct net_device *netdev)
 }
 
 static int otx2_get_ts_info(struct net_device *netdev,
-			    struct ethtool_ts_info *info)
+			    struct kernel_ethtool_ts_info *info)
 {
 	struct otx2_nic *pfvf = netdev_priv(netdev);
 
@@ -938,8 +952,6 @@ static int otx2_get_ts_info(struct net_device *netdev,
 		return ethtool_op_get_ts_info(netdev, info);
 
 	info->so_timestamping = SOF_TIMESTAMPING_TX_SOFTWARE |
-				SOF_TIMESTAMPING_RX_SOFTWARE |
-				SOF_TIMESTAMPING_SOFTWARE |
 				SOF_TIMESTAMPING_TX_HARDWARE |
 				SOF_TIMESTAMPING_RX_HARDWARE |
 				SOF_TIMESTAMPING_RAW_HARDWARE;
@@ -1050,6 +1062,11 @@ static int otx2_set_fecparam(struct net_device *netdev,
 
 	rsp = (struct fec_mode *)otx2_mbox_get_rsp(&pfvf->mbox.mbox,
 						   0, &req->hdr);
+	if (IS_ERR(rsp)) {
+		err = PTR_ERR(rsp);
+		goto end;
+	}
+
 	if (rsp->fec >= 0)
 		pfvf->linfo.fec = rsp->fec;
 	else
@@ -1289,7 +1306,8 @@ static const struct ethtool_ops otx2_ethtool_ops = {
 	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
 				     ETHTOOL_COALESCE_MAX_FRAMES |
 				     ETHTOOL_COALESCE_USE_ADAPTIVE,
-	.supported_ring_params  = ETHTOOL_RING_USE_RX_BUF_LEN,
+	.supported_ring_params  = ETHTOOL_RING_USE_RX_BUF_LEN |
+				  ETHTOOL_RING_USE_CQE_SIZE,
 	.get_link		= otx2_get_link,
 	.get_drvinfo		= otx2_get_drvinfo,
 	.get_strings		= otx2_get_strings,
@@ -1342,20 +1360,15 @@ static void otx2vf_get_strings(struct net_device *netdev, u32 sset, u8 *data)
 	if (sset != ETH_SS_STATS)
 		return;
 
-	for (stats = 0; stats < otx2_n_dev_stats; stats++) {
-		memcpy(data, otx2_dev_stats[stats].name, ETH_GSTRING_LEN);
-		data += ETH_GSTRING_LEN;
-	}
+	for (stats = 0; stats < otx2_n_dev_stats; stats++)
+		ethtool_puts(&data, otx2_dev_stats[stats].name);
 
-	for (stats = 0; stats < otx2_n_drv_stats; stats++) {
-		memcpy(data, otx2_drv_stats[stats].name, ETH_GSTRING_LEN);
-		data += ETH_GSTRING_LEN;
-	}
+	for (stats = 0; stats < otx2_n_drv_stats; stats++)
+		ethtool_puts(&data, otx2_drv_stats[stats].name);
 
 	otx2_get_qset_strings(vf, &data, 0);
 
-	strcpy(data, "reset_count");
-	data += ETH_GSTRING_LEN;
+	ethtool_puts(&data, "reset_count");
 }
 
 static void otx2vf_get_ethtool_stats(struct net_device *netdev,
@@ -1386,7 +1399,7 @@ static int otx2vf_get_sset_count(struct net_device *netdev, int sset)
 		return -EINVAL;
 
 	qstats_count = otx2_n_queue_stats *
-		       (vf->hw.rx_queues + vf->hw.tx_queues);
+		       (vf->hw.rx_queues + otx2_get_total_tx_queues(vf));
 
 	return otx2_n_dev_stats + otx2_n_drv_stats + qstats_count + 1;
 }
@@ -1410,7 +1423,8 @@ static const struct ethtool_ops otx2vf_ethtool_ops = {
 	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
 				     ETHTOOL_COALESCE_MAX_FRAMES |
 				     ETHTOOL_COALESCE_USE_ADAPTIVE,
-	.supported_ring_params  = ETHTOOL_RING_USE_RX_BUF_LEN,
+	.supported_ring_params  = ETHTOOL_RING_USE_RX_BUF_LEN |
+				  ETHTOOL_RING_USE_CQE_SIZE,
 	.get_link		= otx2_get_link,
 	.get_drvinfo		= otx2vf_get_drvinfo,
 	.get_strings		= otx2vf_get_strings,

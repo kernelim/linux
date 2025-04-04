@@ -43,6 +43,7 @@ struct osnoise_hist_params {
 	int			bucket_size;
 	int			entries;
 	int			warmup;
+	int			buffer_size;
 };
 
 struct osnoise_hist_cpu {
@@ -439,6 +440,7 @@ osnoise_print_stats(struct osnoise_hist_params *params, struct osnoise_tool *too
 	trace_seq_reset(trace->seq);
 
 	osnoise_print_summary(params, trace, data);
+	osnoise_report_missed_events(tool);
 }
 
 /*
@@ -484,6 +486,7 @@ static void osnoise_hist_usage(char *usage)
 		"		d:runtime[us|ms|s]:period[us|ms|s] - use SCHED_DEADLINE with runtime and period",
 		"						       in nanoseconds",
 		"	     --warm-up: let the workload run for s seconds before collecting data",
+		"	     --trace-buffer-size kB: set the per-cpu trace buffer size in kB",
 		NULL,
 	};
 
@@ -548,13 +551,14 @@ static struct osnoise_hist_params
 			{"trigger",		required_argument,	0, '4'},
 			{"filter",		required_argument,	0, '5'},
 			{"warm-up",		required_argument,	0, '6'},
+			{"trace-buffer-size",	required_argument,	0, '7'},
 			{0, 0, 0, 0}
 		};
 
 		/* getopt_long stores the option index here. */
 		int option_index = 0;
 
-		c = getopt_long(argc, argv, "a:c:C::b:d:e:E:DhH:p:P:r:s:S:t::T:01234:5:6:",
+		c = getopt_long(argc, argv, "a:c:C::b:d:e:E:DhH:p:P:r:s:S:t::T:01234:5:6:7:",
 				 long_options, &option_index);
 
 		/* detect the end of the options. */
@@ -703,6 +707,9 @@ static struct osnoise_hist_params
 			break;
 		case '6':
 			params->warmup = get_llong_from_str(optarg);
+			break;
+		case '7':
+			params->buffer_size = get_llong_from_str(optarg);
 			break;
 		default:
 			osnoise_hist_usage("Invalid option");
@@ -910,6 +917,11 @@ int osnoise_hist_main(int argc, char *argv[])
 				goto out_hist;
 		}
 
+		if (params->buffer_size > 0) {
+			retval = trace_set_buffer_size(&record->trace, params->buffer_size);
+			if (retval)
+				goto out_hist;
+		}
 	}
 
 	/*
@@ -959,7 +971,7 @@ int osnoise_hist_main(int argc, char *argv[])
 			goto out_hist;
 		}
 
-		if (trace_is_off(&tool->trace, &record->trace))
+		if (osnoise_trace_is_off(tool, record))
 			break;
 	}
 
@@ -969,7 +981,7 @@ int osnoise_hist_main(int argc, char *argv[])
 
 	return_value = 0;
 
-	if (trace_is_off(&tool->trace, &record->trace)) {
+	if (osnoise_trace_is_off(tool, record)) {
 		printf("rtla osnoise hit stop tracing\n");
 		if (params->trace_output) {
 			printf("  Saving trace to %s\n", params->trace_output);

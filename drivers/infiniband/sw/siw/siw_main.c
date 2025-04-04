@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0 or BSD-3-Clause
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 
 /* Authors: Bernard Metzler <bmt@zurich.ibm.com> */
 /* Copyright (c) 2008-2019, IBM Corporation */
@@ -510,6 +510,7 @@ static int siw_newlink(const char *basedev_name, struct net_device *netdev)
 		else
 			sdev->state = IB_PORT_DOWN;
 
+		ib_mark_name_assigned_by_user(&sdev->base_dev);
 		rv = siw_device_register(sdev, basedev_name);
 		if (rv)
 			ib_dealloc_device(&sdev->base_dev);

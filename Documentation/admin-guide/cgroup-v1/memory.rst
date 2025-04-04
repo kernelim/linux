@@ -298,7 +298,7 @@ Lock order is as follows:
 
   Page lock (PG_locked bit of page->flags)
     mm->page_table_lock or split pte_lock
-      lock_page_memcg (memcg->move_lock)
+      folio_memcg_lock (memcg->move_lock)
         mapping->i_pages lock
           lruvec->lru_lock.
 
@@ -543,6 +543,7 @@ pgpgin		# of charging events to the memory cgroup. The charging
 pgpgout		# of uncharging events to the memory cgroup. The uncharging
 		event happens each time a page is unaccounted from the cgroup.
 swap		# of bytes of swap usage
+swapcached      # of bytes of swap cached in memory
 dirty		# of bytes that are waiting to get written back to the disk.
 writeback	# of bytes of file/anon cache that are queued for syncing to
 		disk.

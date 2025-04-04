@@ -28,6 +28,11 @@ static inline bool folio_is_secretmem(struct folio *folio)
 	return mapping->a_ops == &secretmem_aops;
 }
 
+static inline bool secretmem_mapping(struct address_space *mapping)
+{
+	return mapping->a_ops == &secretmem_aops;
+}
+
 bool vma_is_secretmem(struct vm_area_struct *vma);
 bool secretmem_active(void);
 
@@ -39,6 +44,11 @@ static inline bool vma_is_secretmem(struct vm_area_struct *vma)
 }
 
 static inline bool folio_is_secretmem(struct folio *folio)
+{
+	return false;
+}
+
+static inline bool secretmem_mapping(struct address_space *mapping)
 {
 	return false;
 }

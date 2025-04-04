@@ -117,15 +117,9 @@
 #define ESR_ELx_FSC_ACCESS	(0x08)
 #define ESR_ELx_FSC_FAULT	(0x04)
 #define ESR_ELx_FSC_PERM	(0x0C)
-#define ESR_ELx_FSC_SEA_TTW0	(0x14)
-#define ESR_ELx_FSC_SEA_TTW1	(0x15)
-#define ESR_ELx_FSC_SEA_TTW2	(0x16)
-#define ESR_ELx_FSC_SEA_TTW3	(0x17)
+#define ESR_ELx_FSC_SEA_TTW(n)	(0x14 + (n))
 #define ESR_ELx_FSC_SECC	(0x18)
-#define ESR_ELx_FSC_SECC_TTW0	(0x1c)
-#define ESR_ELx_FSC_SECC_TTW1	(0x1d)
-#define ESR_ELx_FSC_SECC_TTW2	(0x1e)
-#define ESR_ELx_FSC_SECC_TTW3	(0x1f)
+#define ESR_ELx_FSC_SECC_TTW(n)	(0x1c + (n))
 
 /* ISS field definitions for Data Aborts */
 #define ESR_ELx_ISV_SHIFT	(24)
@@ -158,6 +152,7 @@
 #define ESR_ELx_Xs_MASK		(GENMASK_ULL(4, 0))
 
 /* ISS field definitions for exceptions taken in to Hyp */
+#define ESR_ELx_FSC_ADDRSZ	(0x00)
 #define ESR_ELx_CV		(UL(1) << 24)
 #define ESR_ELx_COND_SHIFT	(20)
 #define ESR_ELx_COND_MASK	(UL(0xF) << ESR_ELx_COND_SHIFT)
@@ -385,6 +380,11 @@
 #ifndef __ASSEMBLY__
 #include <asm/types.h>
 
+static inline unsigned long esr_brk_comment(unsigned long esr)
+{
+	return esr & ESR_ELx_BRK64_ISS_COMMENT_MASK;
+}
+
 static inline bool esr_is_data_abort(unsigned long esr)
 {
 	const unsigned long ec = ESR_ELx_EC(esr);
@@ -392,8 +392,17 @@ static inline bool esr_is_data_abort(unsigned long esr)
 	return ec == ESR_ELx_EC_DABT_LOW || ec == ESR_ELx_EC_DABT_CUR;
 }
 
+static inline bool esr_is_cfi_brk(unsigned long esr)
+{
+	return ESR_ELx_EC(esr) == ESR_ELx_EC_BRK64 &&
+	       (esr_brk_comment(esr) & ~CFI_BRK_IMM_MASK) == CFI_BRK_IMM_BASE;
+}
+
 static inline bool esr_fsc_is_translation_fault(unsigned long esr)
 {
+	/* Translation fault, level -1 */
+	if ((esr & ESR_ELx_FSC) == 0b101011)
+		return true;
 	return (esr & ESR_ELx_FSC_TYPE) == ESR_ELx_FSC_FAULT;
 }
 

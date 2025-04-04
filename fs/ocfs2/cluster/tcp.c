@@ -1783,6 +1783,9 @@ static int o2net_accept_one(struct socket *sock, int *more)
 	struct o2nm_node *node = NULL;
 	struct o2nm_node *local_node = NULL;
 	struct o2net_sock_container *sc = NULL;
+	struct proto_accept_arg arg = {
+		.flags = O_NONBLOCK,
+	};
 	struct o2net_node *nn;
 	unsigned int nofs_flag;
 
@@ -1801,7 +1804,7 @@ static int o2net_accept_one(struct socket *sock, int *more)
 
 	new_sock->type = sock->type;
 	new_sock->ops = sock->ops;
-	ret = sock->ops->accept(sock, new_sock, O_NONBLOCK, false);
+	ret = sock->ops->accept(sock, new_sock, &arg);
 	if (ret < 0)
 		goto out;
 

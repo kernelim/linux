@@ -27,12 +27,24 @@
         *cyclictest* sets this value to *0* by default, use **--dma-latency** *0* to have
         similar results.
 
+**--deepest-idle-state** *n*
+        Disable idle states higher than *n* for cpus that are running timerlat threads to
+        reduce exit from idle latencies. If *n* is -1, all idle states are disabled.
+        On exit from timerlat, the idle state setting is restored to its original state
+        before running timerlat.
+
+        Requires rtla to be built with libcpupower.
+
+**-k**, **--kernel-threads**
+
+        Use timerlat kernel-space threads, in contrast of **-u**.
+
 **-u**, **--user-threads**
 
         Set timerlat to run without a workload, and then dispatches user-space workloads
         to wait on the timerlat_fd. Once the workload is awakes, it goes to sleep again
         adding so the measurement for the kernel-to-user and user-to-kernel to the tracer
-        output.
+        output. **--user-threads** will be used unless the user specify **-k**.
 
 **-U**, **--user-load**
 

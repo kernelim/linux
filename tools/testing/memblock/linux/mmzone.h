@@ -17,10 +17,10 @@ enum zone_type {
 };
 
 #define MAX_NR_ZONES __MAX_NR_ZONES
-#define MAX_ORDER 10
-#define MAX_ORDER_NR_PAGES (1 << MAX_ORDER)
+#define MAX_PAGE_ORDER 10
+#define MAX_ORDER_NR_PAGES (1 << MAX_PAGE_ORDER)
 
-#define pageblock_order		MAX_ORDER
+#define pageblock_order		MAX_PAGE_ORDER
 #define pageblock_nr_pages	BIT(pageblock_order)
 
 struct zone {

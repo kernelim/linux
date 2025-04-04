@@ -9,7 +9,7 @@
 
 /* This structure contains an instance of an RX queue. */
 struct netdev_rx_queue {
-	RH_KABI_EXCLUDE_WITH_SIZE(struct xdp_rxq_info xdp_rxq, RH_KABI_XDP_RXQ_MAX_LONGS)
+	struct xdp_rxq_info xdp_rxq, RH_KABI_XDP_RXQ_MAX_LONGS;
 #ifdef CONFIG_RPS
 	struct rps_map __rcu		*rps_map;
 	struct rps_dev_flow_table __rcu	*rps_flow_table;
@@ -19,7 +19,7 @@ struct netdev_rx_queue {
 	netdevice_tracker		dev_tracker;
 
 #ifdef CONFIG_XDP_SOCKETS
-	RH_KABI_EXCLUDE(struct xsk_buff_pool            *pool)
+	struct xsk_buff_pool            *pool;
 #endif
 	/* NAPI instance for the queue
 	 * Readers and writers must hold RTNL

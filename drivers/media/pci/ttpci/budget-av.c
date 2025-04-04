@@ -31,11 +31,13 @@
 #include "dvb-pll.h"
 #include <media/drv-intf/saa7146_vv.h>
 #include <linux/module.h>
+#include <linux/etherdevice.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
 #include <linux/input.h>
 #include <linux/spinlock.h>
+#include <linux/workqueue.h>
 
 #include <media/dvb_ca_en50221.h>
 
@@ -54,7 +56,7 @@ struct budget_av {
 	struct video_device vd;
 	int cur_input;
 	int has_saa7113;
-	struct tasklet_struct ciintf_irq_tasklet;
+	struct work_struct ciintf_irq_bh_work;
 	int slot_status;
 	struct dvb_ca_en50221 ca;
 	u8 reinitialise_demod:1;

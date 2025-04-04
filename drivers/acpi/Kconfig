@@ -314,7 +314,6 @@ config ACPI_HOTPLUG_CPU
 	bool
 	depends on ACPI_PROCESSOR && HOTPLUG_CPU
 	select ACPI_CONTAINER
-	default y
 
 config ACPI_PROCESSOR_AGGREGATOR
 	tristate "Processor Aggregator"
@@ -484,6 +483,9 @@ config ACPI_REDUCED_HARDWARE_ONLY
 	  running in ACPI reduced hardware mode ONLY.
 
 	  If you are unsure what to do, do not enable this option.
+
+config ACPI_NHLT
+	bool
 
 source "drivers/acpi/nfit/Kconfig"
 source "drivers/acpi/numa/Kconfig"

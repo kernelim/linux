@@ -375,12 +375,11 @@ Types and flags used to represent the media graph elements
 	  are origins of links.
 
     *  -  ``MEDIA_PAD_FL_MUST_CONNECT``
-       -  If this flag is set and the pad is linked to any other pad, then
-	  at least one of those links must be enabled for the entity to be
-	  able to stream. There could be temporary reasons (e.g. device
-	  configuration dependent) for the pad to need enabled links even
-	  when this flag isn't set; the absence of the flag doesn't imply
-	  there is none.
+       -  If this flag is set, then for this pad to be able to stream, it must
+	  be connected by at least one enabled link. There could be temporary
+	  reasons (e.g. device configuration dependent) for the pad to need
+	  enabled links even when this flag isn't set; the absence of the flag
+	  doesn't imply there is none.
 
 
 One and only one of ``MEDIA_PAD_FL_SINK`` and ``MEDIA_PAD_FL_SOURCE``
@@ -412,14 +411,21 @@ must be set for every pad.
 	  is set by drivers and is read-only for applications.
 
     *  -  ``MEDIA_LNK_FL_LINK_TYPE``
-       -  This is a bitmask that defines the type of the link. Currently,
-	  two types of links are supported:
+       -  This is a bitmask that defines the type of the link. The following
+	  link types are currently supported:
 
 	  .. _MEDIA-LNK-FL-DATA-LINK:
 
-	  ``MEDIA_LNK_FL_DATA_LINK`` if the link is between two pads
+	  ``MEDIA_LNK_FL_DATA_LINK`` for links that represent a data connection
+	  between two pads.
 
 	  .. _MEDIA-LNK-FL-INTERFACE-LINK:
 
-	  ``MEDIA_LNK_FL_INTERFACE_LINK`` if the link is between an
-	  interface and an entity
+	  ``MEDIA_LNK_FL_INTERFACE_LINK`` for links that associate an entity to its
+	  interface.
+
+	  .. _MEDIA-LNK-FL-ANCILLARY-LINK:
+
+	  ``MEDIA_LNK_FL_ANCILLARY_LINK`` for links that represent a physical
+	  relationship between two entities. The link may or may not be
+	  immutable, so applications must not assume either case.

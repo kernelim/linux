@@ -999,6 +999,7 @@ static const struct v4l2_subdev_ops mt9p031_subdev_ops = {
 };
 
 static const struct v4l2_subdev_internal_ops mt9p031_subdev_internal_ops = {
+	.init_state = mt9p031_init_state,
 	.registered = mt9p031_registered,
 	.open = mt9p031_open,
 	.close = mt9p031_close,
@@ -1122,6 +1123,7 @@ static int mt9p031_probe(struct i2c_client *client,
 
 	mt9p031->subdev.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 
+<<<<<<< HEAD
 	mt9p031->crop.width = MT9P031_WINDOW_WIDTH_DEF;
 	mt9p031->crop.height = MT9P031_WINDOW_HEIGHT_DEF;
 	mt9p031->crop.left = MT9P031_COLUMN_START_DEF;
@@ -1136,6 +1138,11 @@ static int mt9p031_probe(struct i2c_client *client,
 	mt9p031->format.height = MT9P031_WINDOW_HEIGHT_DEF;
 	mt9p031->format.field = V4L2_FIELD_NONE;
 	mt9p031->format.colorspace = V4L2_COLORSPACE_SRGB;
+=======
+	ret = mt9p031_init_state(&mt9p031->subdev, NULL);
+	if (ret)
+		goto done;
+>>>>>>> 5755be5f15d9 (media: v4l2-subdev: Rename .init_cfg() operation to .init_state())
 
 	mt9p031->reset = devm_gpiod_get_optional(&client->dev, "reset",
 						 GPIOD_OUT_HIGH);

@@ -1628,14 +1628,12 @@ static bool pcpu_memcg_pre_alloc_hook(size_t size, gfp_t gfp,
 	if (!memcg_kmem_online() || !(gfp & __GFP_ACCOUNT))
 		return true;
 
-	objcg = get_obj_cgroup_from_current();
+	objcg = current_obj_cgroup();
 	if (!objcg)
 		return true;
 
-	if (obj_cgroup_charge(objcg, gfp, pcpu_obj_full_size(size))) {
-		obj_cgroup_put(objcg);
+	if (obj_cgroup_charge(objcg, gfp, pcpu_obj_full_size(size)))
 		return false;
-	}
 
 	*objcgp = objcg;
 	return true;
@@ -1649,6 +1647,7 @@ static void pcpu_memcg_post_alloc_hook(struct obj_cgroup *objcg,
 		return;
 
 	if (likely(chunk && chunk->obj_cgroups)) {
+		obj_cgroup_get(objcg);
 		chunk->obj_cgroups[off >> PCPU_MIN_ALLOC_SHIFT] = objcg;
 
 		rcu_read_lock();
@@ -1657,7 +1656,6 @@ static void pcpu_memcg_post_alloc_hook(struct obj_cgroup *objcg,
 		rcu_read_unlock();
 	} else {
 		obj_cgroup_uncharge(objcg, pcpu_obj_full_size(size));
-		obj_cgroup_put(objcg);
 	}
 }
 
@@ -1890,13 +1888,15 @@ fail_unlock:
 fail:
 	trace_percpu_alloc_percpu_fail(reserved, is_atomic, size, align);
 
-	if (!is_atomic && do_warn && warn_limit) {
+	if (do_warn && warn_limit) {
 		pr_warn("allocation failed, size=%zu align=%zu atomic=%d, %s\n",
 			size, align, is_atomic, err);
-		dump_stack();
+		if (!is_atomic)
+			dump_stack();
 		if (!--warn_limit)
 			pr_info("limit reached, disable warning\n");
 	}
+
 	if (is_atomic) {
 		/* see the flag handling in pcpu_balance_workfn() */
 		pcpu_atomic_alloc_failed = true;
@@ -2610,14 +2610,12 @@ void __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
 {
 	size_t size_sum = ai->static_size + ai->reserved_size + ai->dyn_size;
 	size_t static_size, dyn_size;
-	struct pcpu_chunk *chunk;
 	unsigned long *group_offsets;
 	size_t *group_sizes;
 	unsigned long *unit_off;
 	unsigned int cpu;
 	int *unit_map;
 	int group, unit, i;
-	int map_size;
 	unsigned long tmp_addr;
 	size_t alloc_size;
 
@@ -2644,7 +2642,6 @@ void __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
 	PCPU_SETUP_BUG_ON(ai->unit_size < PCPU_MIN_UNIT_SIZE);
 	PCPU_SETUP_BUG_ON(!IS_ALIGNED(ai->unit_size, PCPU_BITMAP_BLOCK_SIZE));
 	PCPU_SETUP_BUG_ON(ai->dyn_size < PERCPU_DYNAMIC_EARLY_SIZE);
-	PCPU_SETUP_BUG_ON(!ai->dyn_size);
 	PCPU_SETUP_BUG_ON(!IS_ALIGNED(ai->reserved_size, PCPU_MIN_ALLOC_SIZE));
 	PCPU_SETUP_BUG_ON(!(IS_ALIGNED(PCPU_BITMAP_BLOCK_SIZE, PAGE_SIZE) ||
 			    IS_ALIGNED(PAGE_SIZE, PCPU_BITMAP_BLOCK_SIZE)));
@@ -2727,7 +2724,7 @@ void __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
 	pcpu_unit_pages = ai->unit_size >> PAGE_SHIFT;
 	pcpu_unit_size = pcpu_unit_pages << PAGE_SHIFT;
 	pcpu_atom_size = ai->atom_size;
-	pcpu_chunk_struct_size = struct_size(chunk, populated,
+	pcpu_chunk_struct_size = struct_size((struct pcpu_chunk *)0, populated,
 					     BITS_TO_LONGS(pcpu_unit_pages));
 
 	pcpu_stats_save_ai(ai);
@@ -2764,29 +2761,23 @@ void __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
 	dyn_size = ai->dyn_size - (static_size - ai->static_size);
 
 	/*
-	 * Initialize first chunk.
-	 * If the reserved_size is non-zero, this initializes the reserved
-	 * chunk.  If the reserved_size is zero, the reserved chunk is NULL
-	 * and the dynamic region is initialized here.  The first chunk,
-	 * pcpu_first_chunk, will always point to the chunk that serves
-	 * the dynamic region.
+	 * Initialize first chunk:
+	 * This chunk is broken up into 3 parts:
+	 *		< static | [reserved] | dynamic >
+	 * - static - there is no backing chunk because these allocations can
+	 *   never be freed.
+	 * - reserved (pcpu_reserved_chunk) - exists primarily to serve
+	 *   allocations from module load.
+	 * - dynamic (pcpu_first_chunk) - serves the dynamic part of the first
+	 *   chunk.
 	 */
 	tmp_addr = (unsigned long)base_addr + static_size;
-	map_size = ai->reserved_size ?: dyn_size;
-	chunk = pcpu_alloc_first_chunk(tmp_addr, map_size);
+	if (ai->reserved_size)
+		pcpu_reserved_chunk = pcpu_alloc_first_chunk(tmp_addr,
+						ai->reserved_size);
+	tmp_addr = (unsigned long)base_addr + static_size + ai->reserved_size;
+	pcpu_first_chunk = pcpu_alloc_first_chunk(tmp_addr, dyn_size);
 
-	/* init dynamic chunk if necessary */
-	if (ai->reserved_size) {
-		pcpu_reserved_chunk = chunk;
-
-		tmp_addr = (unsigned long)base_addr + static_size +
-			   ai->reserved_size;
-		map_size = dyn_size;
-		chunk = pcpu_alloc_first_chunk(tmp_addr, map_size);
-	}
-
-	/* link the first chunk in */
-	pcpu_first_chunk = chunk;
 	pcpu_nr_empty_pop_pages = pcpu_first_chunk->nr_empty_pop_pages;
 	pcpu_chunk_relocate(pcpu_first_chunk, -1);
 
@@ -3218,32 +3209,26 @@ void __init __weak pcpu_populate_pte(unsigned long addr)
 	pmd_t *pmd;
 
 	if (pgd_none(*pgd)) {
-		p4d_t *new;
-
-		new = memblock_alloc(P4D_TABLE_SIZE, P4D_TABLE_SIZE);
-		if (!new)
+		p4d = memblock_alloc(P4D_TABLE_SIZE, P4D_TABLE_SIZE);
+		if (!p4d)
 			goto err_alloc;
-		pgd_populate(&init_mm, pgd, new);
+		pgd_populate(&init_mm, pgd, p4d);
 	}
 
 	p4d = p4d_offset(pgd, addr);
 	if (p4d_none(*p4d)) {
-		pud_t *new;
-
-		new = memblock_alloc(PUD_TABLE_SIZE, PUD_TABLE_SIZE);
-		if (!new)
+		pud = memblock_alloc(PUD_TABLE_SIZE, PUD_TABLE_SIZE);
+		if (!pud)
 			goto err_alloc;
-		p4d_populate(&init_mm, p4d, new);
+		p4d_populate(&init_mm, p4d, pud);
 	}
 
 	pud = pud_offset(p4d, addr);
 	if (pud_none(*pud)) {
-		pmd_t *new;
-
-		new = memblock_alloc(PMD_TABLE_SIZE, PMD_TABLE_SIZE);
-		if (!new)
+		pmd = memblock_alloc(PMD_TABLE_SIZE, PMD_TABLE_SIZE);
+		if (!pmd)
 			goto err_alloc;
-		pud_populate(&init_mm, pud, new);
+		pud_populate(&init_mm, pud, pmd);
 	}
 
 	pmd = pmd_offset(pud, addr);

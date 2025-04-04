@@ -75,6 +75,8 @@ static void aqua_vanjaram_set_xcp_id(struct amdgpu_device *adev,
 	uint32_t inst_mask;
 
 	ring->xcp_id = AMDGPU_XCP_NO_PARTITION;
+	if (ring->funcs->type == AMDGPU_RING_TYPE_COMPUTE)
+		adev->gfx.enforce_isolation[0].xcp_id = ring->xcp_id;
 	if (adev->xcp_mgr->mode == AMDGPU_XCP_MODE_NONE)
 		return;
 
@@ -92,8 +94,6 @@ static void aqua_vanjaram_set_xcp_id(struct amdgpu_device *adev,
 	case AMDGPU_RING_TYPE_VCN_ENC:
 	case AMDGPU_RING_TYPE_VCN_JPEG:
 		ip_blk = AMDGPU_XCP_VCN;
-		if (aqua_vanjaram_xcp_vcn_shared(adev))
-			inst_mask = 1 << (inst_idx * 2);
 		break;
 	default:
 		DRM_ERROR("Not support ring type %d!", ring->funcs->type);
@@ -103,6 +103,10 @@ static void aqua_vanjaram_set_xcp_id(struct amdgpu_device *adev,
 	for (xcp_id = 0; xcp_id < adev->xcp_mgr->num_xcps; xcp_id++) {
 		if (adev->xcp_mgr->xcp[xcp_id].ip[ip_blk].inst_mask & inst_mask) {
 			ring->xcp_id = xcp_id;
+			dev_dbg(adev->dev, "ring:%s xcp_id :%u", ring->name,
+				ring->xcp_id);
+			if (ring->funcs->type == AMDGPU_RING_TYPE_COMPUTE)
+				adev->gfx.enforce_isolation[xcp_id].xcp_id = xcp_id;
 			break;
 		}
 	}
@@ -304,13 +308,56 @@ u64 aqua_vanjaram_encode_ext_smn_addressing(int ext_id)
 	return ext_offset;
 }
 
+static enum amdgpu_gfx_partition
+__aqua_vanjaram_calc_xcp_mode(struct amdgpu_xcp_mgr *xcp_mgr)
+{
+	struct amdgpu_device *adev = xcp_mgr->adev;
+	int num_xcc, num_xcc_per_xcp = 0, mode = 0;
+
+	num_xcc = NUM_XCC(xcp_mgr->adev->gfx.xcc_mask);
+	if (adev->gfx.funcs->get_xccs_per_xcp)
+		num_xcc_per_xcp = adev->gfx.funcs->get_xccs_per_xcp(adev);
+	if ((num_xcc_per_xcp) && (num_xcc % num_xcc_per_xcp == 0))
+		mode = num_xcc / num_xcc_per_xcp;
+
+	if (num_xcc_per_xcp == 1)
+		return AMDGPU_CPX_PARTITION_MODE;
+
+	switch (mode) {
+	case 1:
+		return AMDGPU_SPX_PARTITION_MODE;
+	case 2:
+		return AMDGPU_DPX_PARTITION_MODE;
+	case 3:
+		return AMDGPU_TPX_PARTITION_MODE;
+	case 4:
+		return AMDGPU_QPX_PARTITION_MODE;
+	default:
+		return AMDGPU_UNKNOWN_COMPUTE_PARTITION_MODE;
+	}
+
+	return AMDGPU_UNKNOWN_COMPUTE_PARTITION_MODE;
+}
+
 static int aqua_vanjaram_query_partition_mode(struct amdgpu_xcp_mgr *xcp_mgr)
 {
-	enum amdgpu_gfx_partition mode = AMDGPU_UNKNOWN_COMPUTE_PARTITION_MODE;
+	enum amdgpu_gfx_partition derv_mode,
+		mode = AMDGPU_UNKNOWN_COMPUTE_PARTITION_MODE;
 	struct amdgpu_device *adev = xcp_mgr->adev;
 
-	if (adev->nbio.funcs->get_compute_partition_mode)
+	derv_mode = __aqua_vanjaram_calc_xcp_mode(xcp_mgr);
+
+	if (amdgpu_sriov_vf(adev))
+		return derv_mode;
+
+	if (adev->nbio.funcs->get_compute_partition_mode) {
 		mode = adev->nbio.funcs->get_compute_partition_mode(adev);
+		if (mode != derv_mode)
+			dev_warn(
+				adev->dev,
+				"Mismatch in compute partition mode - reported : %d derived : %d",
+				mode, derv_mode);
+	}
 
 	return mode;
 }
@@ -347,38 +394,31 @@ static int __aqua_vanjaram_get_xcp_ip_info(struct amdgpu_xcp_mgr *xcp_mgr, int x
 				    struct amdgpu_xcp_ip *ip)
 {
 	struct amdgpu_device *adev = xcp_mgr->adev;
+	int num_sdma, num_vcn, num_shared_vcn, num_xcp;
 	int num_xcc_xcp, num_sdma_xcp, num_vcn_xcp;
-	int num_sdma, num_vcn;
 
 	num_sdma = adev->sdma.num_instances;
 	num_vcn = adev->vcn.num_vcn_inst;
+	num_shared_vcn = 1;
+
+	num_xcc_xcp = adev->gfx.num_xcc_per_xcp;
+	num_xcp = NUM_XCC(adev->gfx.xcc_mask) / num_xcc_xcp;
 
 	switch (xcp_mgr->mode) {
 	case AMDGPU_SPX_PARTITION_MODE:
-		num_sdma_xcp = num_sdma;
-		num_vcn_xcp = num_vcn;
-		break;
 	case AMDGPU_DPX_PARTITION_MODE:
-		num_sdma_xcp = num_sdma / 2;
-		num_vcn_xcp = num_vcn / 2;
-		break;
 	case AMDGPU_TPX_PARTITION_MODE:
-		num_sdma_xcp = num_sdma / 3;
-		num_vcn_xcp = num_vcn / 3;
-		break;
 	case AMDGPU_QPX_PARTITION_MODE:
-		num_sdma_xcp = num_sdma / 4;
-		num_vcn_xcp = num_vcn / 4;
-		break;
 	case AMDGPU_CPX_PARTITION_MODE:
-		num_sdma_xcp = 2;
-		num_vcn_xcp = num_vcn ? 1 : 0;
+		num_sdma_xcp = DIV_ROUND_UP(num_sdma, num_xcp);
+		num_vcn_xcp = DIV_ROUND_UP(num_vcn, num_xcp);
 		break;
 	default:
 		return -EINVAL;
 	}
 
-	num_xcc_xcp = adev->gfx.num_xcc_per_xcp;
+	if (num_vcn && num_xcp > num_vcn)
+		num_shared_vcn = num_xcp / num_vcn;
 
 	switch (ip_id) {
 	case AMDGPU_XCP_GFXHUB:
@@ -394,7 +434,8 @@ static int __aqua_vanjaram_get_xcp_ip_info(struct amdgpu_xcp_mgr *xcp_mgr, int x
 		ip->ip_funcs = &sdma_v4_4_2_xcp_funcs;
 		break;
 	case AMDGPU_XCP_VCN:
-		ip->inst_mask = XCP_INST_MASK(num_vcn_xcp, xcp_id);
+		ip->inst_mask =
+			XCP_INST_MASK(num_vcn_xcp, xcp_id / num_shared_vcn);
 		/* TODO : Assign IP funcs */
 		break;
 	default:
@@ -422,7 +463,7 @@ __aqua_vanjaram_get_auto_mode(struct amdgpu_xcp_mgr *xcp_mgr)
 
 	if (adev->gmc.num_mem_partitions == num_xcc / 2)
 		return (adev->flags & AMD_IS_APU) ? AMDGPU_TPX_PARTITION_MODE :
-						    AMDGPU_QPX_PARTITION_MODE;
+						    AMDGPU_CPX_PARTITION_MODE;
 
 	if (adev->gmc.num_mem_partitions == 2 && !(adev->flags & AMD_IS_APU))
 		return AMDGPU_DPX_PARTITION_MODE;
@@ -441,7 +482,7 @@ static bool __aqua_vanjaram_is_valid_mode(struct amdgpu_xcp_mgr *xcp_mgr,
 	case AMDGPU_SPX_PARTITION_MODE:
 		return adev->gmc.num_mem_partitions == 1 && num_xcc > 0;
 	case AMDGPU_DPX_PARTITION_MODE:
-		return adev->gmc.num_mem_partitions != 8 && (num_xcc % 4) == 0;
+		return adev->gmc.num_mem_partitions <= 2 && (num_xcc % 4) == 0;
 	case AMDGPU_TPX_PARTITION_MODE:
 		return (adev->gmc.num_mem_partitions == 1 ||
 			adev->gmc.num_mem_partitions == 3) &&
@@ -501,6 +542,12 @@ static int aqua_vanjaram_switch_partition_mode(struct amdgpu_xcp_mgr *xcp_mgr,
 
 	if (mode == AMDGPU_AUTO_COMPUTE_PARTITION_MODE) {
 		mode = __aqua_vanjaram_get_auto_mode(xcp_mgr);
+		if (mode == AMDGPU_UNKNOWN_COMPUTE_PARTITION_MODE) {
+			dev_err(adev->dev,
+				"Invalid config, no compatible compute partition mode found, available memory partitions: %d",
+				adev->gmc.num_mem_partitions);
+			return -EINVAL;
+		}
 	} else if (!__aqua_vanjaram_is_valid_mode(xcp_mgr, mode)) {
 		dev_err(adev->dev,
 			"Invalid compute partition mode requested, requested: %s, available memory partitions: %d",
@@ -618,6 +665,9 @@ static int aqua_vanjaram_xcp_mgr_init(struct amdgpu_device *adev)
 {
 	int ret;
 
+	if (amdgpu_sriov_vf(adev))
+		aqua_vanjaram_xcp_funcs.switch_partition_mode = NULL;
+
 	ret = amdgpu_xcp_mgr_init(adev, AMDGPU_UNKNOWN_COMPUTE_PARTITION_MODE, 1,
 				  &aqua_vanjaram_xcp_funcs);
 	if (ret)
@@ -630,7 +680,7 @@ static int aqua_vanjaram_xcp_mgr_init(struct amdgpu_device *adev)
 
 int aqua_vanjaram_init_soc_config(struct amdgpu_device *adev)
 {
-	u32 mask, inst_mask = adev->sdma.sdma_mask;
+	u32 mask, avail_inst, inst_mask = adev->sdma.sdma_mask;
 	int ret, i;
 
 	/* generally 1 AID supports 4 instances */
@@ -642,7 +692,9 @@ int aqua_vanjaram_init_soc_config(struct amdgpu_device *adev)
 
 	for (mask = (1 << adev->sdma.num_inst_per_aid) - 1; inst_mask;
 	     inst_mask >>= adev->sdma.num_inst_per_aid, ++i) {
-		if ((inst_mask & mask) == mask)
+		avail_inst = inst_mask & mask;
+		if (avail_inst == mask || avail_inst == 0x3 ||
+		    avail_inst == 0xc)
 			adev->aid_mask |= (1 << i);
 	}
 

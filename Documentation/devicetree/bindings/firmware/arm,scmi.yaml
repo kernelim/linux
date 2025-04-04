@@ -80,7 +80,9 @@ properties:
       SMC id required when using smc or hvc transports
 
   protocol@11:
-    type: object
+    $ref: '#/$defs/protocol-node'
+    unevaluatedProperties: false
+
     properties:
       reg:
         const: 0x11
@@ -92,7 +94,9 @@ properties:
       - '#power-domain-cells'
 
   protocol@13:
-    type: object
+    $ref: '#/$defs/protocol-node'
+    unevaluatedProperties: false
+
     properties:
       reg:
         const: 0x13
@@ -111,7 +115,9 @@ properties:
           - '#power-domain-cells'
 
   protocol@14:
-    type: object
+    $ref: '#/$defs/protocol-node'
+    unevaluatedProperties: false
+
     properties:
       reg:
         const: 0x14
@@ -123,7 +129,9 @@ properties:
       - '#clock-cells'
 
   protocol@15:
-    type: object
+    $ref: '#/$defs/protocol-node'
+    unevaluatedProperties: false
+
     properties:
       reg:
         const: 0x15
@@ -135,7 +143,9 @@ properties:
       - '#thermal-sensor-cells'
 
   protocol@16:
-    type: object
+    $ref: '#/$defs/protocol-node'
+    unevaluatedProperties: false
+
     properties:
       reg:
         const: 0x16
@@ -147,20 +157,31 @@ properties:
       - '#reset-cells'
 
   protocol@17:
-    type: object
+    $ref: '#/$defs/protocol-node'
+    unevaluatedProperties: false
+
     properties:
       reg:
         const: 0x17
 
       regulators:
         type: object
+        additionalProperties: false
         description:
           The list of all regulators provided by this SCMI controller.
 
+        properties:
+          '#address-cells':
+            const: 1
+
+          '#size-cells':
+            const: 0
+
         patternProperties:
-          '^regulators@[0-9a-f]+$':
+          '^regulator@[0-9a-f]+$':
             type: object
             $ref: "../regulator/regulator.yaml#"
+            unevaluatedProperties: false
 
             properties:
               reg:
@@ -170,10 +191,49 @@ properties:
             required:
               - reg
 
+  protocol@18:
+    $ref: '#/$defs/protocol-node'
+    unevaluatedProperties: false
+
+    properties:
+      reg:
+        const: 0x18
+
+  protocol@19:
+    type: object
+    allOf:
+      - $ref: '#/$defs/protocol-node'
+      - $ref: /schemas/pinctrl/pinctrl.yaml
+
+    unevaluatedProperties: false
+
+    properties:
+      reg:
+        const: 0x19
+
+    patternProperties:
+      '-pins$':
+        type: object
+        allOf:
+          - $ref: /schemas/pinctrl/pincfg-node.yaml#
+          - $ref: /schemas/pinctrl/pinmux-node.yaml#
+        unevaluatedProperties: false
+
+        description:
+          A pin multiplexing sub-node describes how to configure a
+          set of pins in some desired function.
+          A single sub-node may define several pin configurations.
+          This sub-node is using the default pinctrl bindings to configure
+          pin multiplexing and using SCMI protocol to apply a specified
+          configuration.
+
+    required:
+      - reg
+
 additionalProperties: false
 
-patternProperties:
-  '^protocol@[0-9a-f]+$':
+$defs:
+  protocol-node:
     type: object
     description:
       Each sub-node represents a protocol supported. If the platform
@@ -288,6 +348,29 @@ examples:
                         regulator-min-microvolt = <500000>;
                         regulator-max-microvolt = <4200000>;
                     };
+                };
+            };
+
+            scmi_powercap: protocol@18 {
+                reg = <0x18>;
+            };
+
+            scmi_pinctrl: protocol@19 {
+                reg = <0x19>;
+
+                i2c2-pins {
+                    groups = "g_i2c2_a", "g_i2c2_b";
+                    function = "f_i2c2";
+                };
+
+                mdio-pins {
+                    groups = "g_avb_mdio";
+                    drive-strength = <24>;
+                };
+
+                keys_pins: keys-pins {
+                    pins = "gpio_5_17", "gpio_5_20", "gpio_5_22", "gpio_2_1";
+                    bias-pull-up;
                 };
             };
         };

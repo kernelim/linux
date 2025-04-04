@@ -1043,12 +1043,8 @@ static const struct vb2_ops cio2_vb2_ops = {
 static int cio2_v4l2_querycap(struct file *file, void *fh,
 			      struct v4l2_capability *cap)
 {
-	struct cio2_device *cio2 = video_drvdata(file);
-
 	strscpy(cap->driver, CIO2_NAME, sizeof(cap->driver));
 	strscpy(cap->card, CIO2_DEVICE_NAME, sizeof(cap->card));
-	snprintf(cap->bus_info, sizeof(cap->bus_info),
-		 "PCI:%s", pci_name(cio2->pci_dev));
 
 	return 0;
 }
@@ -1318,7 +1314,7 @@ static int cio2_video_link_validate(struct media_link *link)
 	struct v4l2_subdev_format source_fmt;
 	int ret;
 
-	if (!media_entity_remote_pad(link->sink->entity->pads)) {
+	if (!media_pad_remote_pad_first(link->sink->entity->pads)) {
 		dev_info(&cio2->pci_dev->dev,
 			 "video node %s pad not connected\n", vd->name);
 		return -ENOTCONN;
@@ -1602,7 +1598,7 @@ static int cio2_queue_init(struct cio2_device *cio2, struct cio2_queue *q)
 	vbq->mem_ops = &vb2_dma_sg_memops;
 	vbq->buf_struct_size = sizeof(struct cio2_buffer);
 	vbq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
-	vbq->min_buffers_needed = 1;
+	vbq->min_queued_buffers = 1;
 	vbq->drv_priv = cio2;
 	vbq->lock = &q->lock;
 	r = vb2_queue_init(vbq);
@@ -1783,8 +1779,6 @@ static int cio2_pci_probe(struct pci_dev *pci_dev,
 	cio2->media_dev.dev = &cio2->pci_dev->dev;
 	strscpy(cio2->media_dev.model, CIO2_DEVICE_NAME,
 		sizeof(cio2->media_dev.model));
-	snprintf(cio2->media_dev.bus_info, sizeof(cio2->media_dev.bus_info),
-		 "PCI:%s", pci_name(cio2->pci_dev));
 	cio2->media_dev.hw_revision = 0;
 
 	media_device_init(&cio2->media_dev);

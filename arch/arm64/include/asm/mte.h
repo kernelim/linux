@@ -90,7 +90,7 @@ static inline bool try_page_mte_tagging(struct page *page)
 }
 
 void mte_zero_clear_page_tags(void *addr);
-void mte_sync_tags(pte_t pte);
+void mte_sync_tags(pte_t pte, unsigned int nr_pages);
 void mte_copy_page_tags(void *kto, const void *kfrom);
 void mte_thread_init_user(void);
 void mte_thread_switch(struct task_struct *next);
@@ -101,6 +101,7 @@ long set_mte_ctrl(struct task_struct *task, unsigned long arg);
 long get_mte_ctrl(struct task_struct *task);
 int mte_ptrace_copy_tags(struct task_struct *child, long request,
 			 unsigned long addr, unsigned long data);
+size_t mte_probe_user_range(const char __user *uaddr, size_t size);
 
 #else /* CONFIG_ARM64_MTE */
 
@@ -121,7 +122,7 @@ static inline bool try_page_mte_tagging(struct page *page)
 static inline void mte_zero_clear_page_tags(void *addr)
 {
 }
-static inline void mte_sync_tags(pte_t pte)
+static inline void mte_sync_tags(pte_t pte, unsigned int nr_pages)
 {
 }
 static inline void mte_copy_page_tags(void *kto, const void *kfrom)
@@ -181,7 +182,7 @@ void mte_check_tfsr_el1(void);
 
 static inline void mte_check_tfsr_entry(void)
 {
-	if (!system_supports_mte())
+	if (!kasan_hw_tags_enabled())
 		return;
 
 	mte_check_tfsr_el1();
@@ -189,7 +190,7 @@ static inline void mte_check_tfsr_entry(void)
 
 static inline void mte_check_tfsr_exit(void)
 {
-	if (!system_supports_mte())
+	if (!kasan_hw_tags_enabled())
 		return;
 
 	/*

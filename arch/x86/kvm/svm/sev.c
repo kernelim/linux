@@ -2215,10 +2215,6 @@ static int snp_launch_start(struct kvm *kvm, struct kvm_sev_cmd *argp)
 	if (sev->snp_context)
 		return -EINVAL;
 
-	sev->snp_context = snp_context_create(kvm, argp);
-	if (!sev->snp_context)
-		return -ENOTTY;
-
 	if (params.flags)
 		return -EINVAL;
 
@@ -2232,6 +2228,10 @@ static int snp_launch_start(struct kvm *kvm, struct kvm_sev_cmd *argp)
 
 	if (params.policy & SNP_POLICY_MASK_SINGLE_SOCKET)
 		return -EINVAL;
+
+	sev->snp_context = snp_context_create(kvm, argp);
+	if (!sev->snp_context)
+		return -ENOTTY;
 
 	start.gctx_paddr = __psp_pa(sev->snp_context);
 	start.policy = params.policy;
@@ -2279,7 +2279,7 @@ static int sev_gmem_post_populate(struct kvm *kvm, gfn_t gfn_start, kvm_pfn_t pf
 
 	for (gfn = gfn_start, i = 0; gfn < gfn_start + npages; gfn++, i++) {
 		struct sev_data_snp_launch_update fw_args = {0};
-		bool assigned;
+		bool assigned = false;
 		int level;
 
 		ret = snp_lookup_rmpentry((u64)pfn + i, &assigned, &level);
@@ -2293,9 +2293,10 @@ static int sev_gmem_post_populate(struct kvm *kvm, gfn_t gfn_start, kvm_pfn_t pf
 		if (src) {
 			void *vaddr = kmap_local_pfn(pfn + i);
 
-			ret = copy_from_user(vaddr, src + i * PAGE_SIZE, PAGE_SIZE);
-			if (ret)
+			if (copy_from_user(vaddr, src + i * PAGE_SIZE, PAGE_SIZE)) {
+				ret = -EFAULT;
 				goto err;
+			}
 			kunmap_local(vaddr);
 		}
 
@@ -2544,6 +2545,14 @@ static int snp_launch_finish(struct kvm *kvm, struct kvm_sev_cmd *argp)
 	memcpy(data->host_data, params.host_data, KVM_SEV_SNP_FINISH_DATA_SIZE);
 	data->gctx_paddr = __psp_pa(sev->snp_context);
 	ret = sev_issue_cmd(kvm, SEV_CMD_SNP_LAUNCH_FINISH, data, &argp->error);
+
+	/*
+	 * Now that there will be no more SNP_LAUNCH_UPDATE ioctls, private pages
+	 * can be given to the guest simply by marking the RMP entry as private.
+	 * This can happen on first access and also with KVM_PRE_FAULT_MEMORY.
+	 */
+	if (!ret)
+		kvm->arch.pre_fault_allowed = true;
 
 	kfree(id_auth);
 
@@ -4589,7 +4598,7 @@ void sev_es_prepare_switch_to_guest(struct vcpu_svm *svm, struct sev_es_save_are
 	 */
 	hostsa->xcr0 = xgetbv(XCR_XFEATURE_ENABLED_MASK);
 	hostsa->pkru = read_pkru();
-	hostsa->xss = host_xss;
+	hostsa->xss = kvm_host.xss;
 
 	/*
 	 * If DebugSwap is enabled, debug registers are loaded but NOT saved by

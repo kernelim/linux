@@ -1430,4 +1430,5 @@ int arizona_dev_exit(struct arizona *arizona)
 }
 EXPORT_SYMBOL_GPL(arizona_dev_exit);
 
+MODULE_DESCRIPTION("Wolfson Arizona core driver");
 MODULE_LICENSE("GPL v2");

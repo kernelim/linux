@@ -3,7 +3,7 @@
  *  S390 version
  *    Copyright IBM Corp. 1999, 2000
  *    Author(s): Hartmut Penner (hp@de.ibm.com),
- *               Martin Schwidefsky (schwidefsky@de.ibm.com)
+ *		 Martin Schwidefsky (schwidefsky@de.ibm.com)
  *
  *  Derived from "include/asm-i386/uaccess.h"
  */
@@ -15,7 +15,6 @@
  */
 #include <asm/asm-extable.h>
 #include <asm/processor.h>
-#include <asm/ctl_reg.h>
 #include <asm/extable.h>
 #include <asm/facility.h>
 #include <asm-generic/access_ok.h>
@@ -55,9 +54,6 @@ copy_to_user_key(void __user *to, const void *from, unsigned long n, unsigned lo
 	return n;
 }
 
-int __put_user_bad(void) __attribute__((noreturn));
-int __get_user_bad(void) __attribute__((noreturn));
-
 union oac {
 	unsigned int val;
 	struct {
@@ -79,6 +75,8 @@ union oac {
 		} oac2;
 	};
 };
+
+int __noreturn __put_user_bad(void);
 
 #define __put_user_asm(to, from, size)					\
 ({									\
@@ -133,6 +131,8 @@ static __always_inline int __put_user_fn(void *x, void __user *ptr, unsigned lon
 	}
 	return rc;
 }
+
+int __noreturn __get_user_bad(void);
 
 #define __get_user_asm(to, from, size)					\
 ({									\
@@ -193,77 +193,77 @@ static __always_inline int __get_user_fn(void *x, const void __user *ptr, unsign
  * These are the main single-value transfer routines.  They automatically
  * use the right size if we just have the right pointer type.
  */
-#define __put_user(x, ptr) \
-({								\
-	__typeof__(*(ptr)) __x = (x);				\
-	int __pu_err = -EFAULT;					\
-        __chk_user_ptr(ptr);                                    \
-	switch (sizeof (*(ptr))) {				\
-	case 1:							\
-	case 2:							\
-	case 4:							\
-	case 8:							\
-		__pu_err = __put_user_fn(&__x, ptr,		\
-					 sizeof(*(ptr)));	\
-		break;						\
-	default:						\
-		__put_user_bad();				\
-		break;						\
-	}							\
-	__builtin_expect(__pu_err, 0);				\
+#define __put_user(x, ptr)						\
+({									\
+	__typeof__(*(ptr)) __x = (x);					\
+	int __pu_err = -EFAULT;						\
+									\
+	__chk_user_ptr(ptr);						\
+	switch (sizeof(*(ptr))) {					\
+	case 1:								\
+	case 2:								\
+	case 4:								\
+	case 8:								\
+		__pu_err = __put_user_fn(&__x, ptr, sizeof(*(ptr)));	\
+		break;							\
+	default:							\
+		__put_user_bad();					\
+		break;							\
+	}								\
+	__builtin_expect(__pu_err, 0);					\
 })
 
-#define put_user(x, ptr)					\
-({								\
-	might_fault();						\
-	__put_user(x, ptr);					\
+#define put_user(x, ptr)						\
+({									\
+	might_fault();							\
+	__put_user(x, ptr);						\
 })
 
-
-#define __get_user(x, ptr)					\
-({								\
-	int __gu_err = -EFAULT;					\
-	__chk_user_ptr(ptr);					\
-	switch (sizeof(*(ptr))) {				\
-	case 1: {						\
-		unsigned char __x;				\
-		__gu_err = __get_user_fn(&__x, ptr,		\
-					 sizeof(*(ptr)));	\
-		(x) = *(__force __typeof__(*(ptr)) *) &__x;	\
-		break;						\
-	};							\
-	case 2: {						\
-		unsigned short __x;				\
-		__gu_err = __get_user_fn(&__x, ptr,		\
-					 sizeof(*(ptr)));	\
-		(x) = *(__force __typeof__(*(ptr)) *) &__x;	\
-		break;						\
-	};							\
-	case 4: {						\
-		unsigned int __x;				\
-		__gu_err = __get_user_fn(&__x, ptr,		\
-					 sizeof(*(ptr)));	\
-		(x) = *(__force __typeof__(*(ptr)) *) &__x;	\
-		break;						\
-	};							\
-	case 8: {						\
-		unsigned long __x;				\
-		__gu_err = __get_user_fn(&__x, ptr,		\
-					 sizeof(*(ptr)));	\
-		(x) = *(__force __typeof__(*(ptr)) *) &__x;	\
-		break;						\
-	};							\
-	default:						\
-		__get_user_bad();				\
-		break;						\
-	}							\
-	__builtin_expect(__gu_err, 0);				\
+#define __get_user(x, ptr)						\
+({									\
+	int __gu_err = -EFAULT;						\
+									\
+	__chk_user_ptr(ptr);						\
+	switch (sizeof(*(ptr))) {					\
+	case 1: {							\
+		unsigned char __x;					\
+									\
+		__gu_err = __get_user_fn(&__x, ptr, sizeof(*(ptr)));	\
+		(x) = *(__force __typeof__(*(ptr)) *)&__x;		\
+		break;							\
+	};								\
+	case 2: {							\
+		unsigned short __x;					\
+									\
+		__gu_err = __get_user_fn(&__x, ptr, sizeof(*(ptr)));	\
+		(x) = *(__force __typeof__(*(ptr)) *)&__x;		\
+		break;							\
+	};								\
+	case 4: {							\
+		unsigned int __x;					\
+									\
+		__gu_err = __get_user_fn(&__x, ptr, sizeof(*(ptr)));	\
+		(x) = *(__force __typeof__(*(ptr)) *)&__x;		\
+		break;							\
+	};								\
+	case 8: {							\
+		unsigned long __x;					\
+									\
+		__gu_err = __get_user_fn(&__x, ptr, sizeof(*(ptr)));	\
+		(x) = *(__force __typeof__(*(ptr)) *)&__x;		\
+		break;							\
+	};								\
+	default:							\
+		__get_user_bad();					\
+		break;							\
+	}								\
+	__builtin_expect(__gu_err, 0);					\
 })
 
-#define get_user(x, ptr)					\
-({								\
-	might_fault();						\
-	__get_user(x, ptr);					\
+#define get_user(x, ptr)						\
+({									\
+	might_fault();							\
+	__get_user(x, ptr);						\
 })
 
 /*

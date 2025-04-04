@@ -1,3 +1,3 @@
-#5-
-0xfeb3d56d	hwmon_device_unregister	vmlinux	EXPORT_SYMBOL_GPL	
+#6-
+0x42aafe40	hwmon_device_unregister	vmlinux	EXPORT_SYMBOL_GPL	
 

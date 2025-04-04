@@ -1674,7 +1674,7 @@ static int hns3_set_tunable(struct net_device *netdev,
 				 ETHTOOL_COALESCE_MAX_FRAMES)
 
 static int hns3_get_ts_info(struct net_device *netdev,
-			    struct ethtool_ts_info *info)
+			    struct kernel_ethtool_ts_info *info)
 {
 	struct hnae3_handle *handle = hns3_get_handle(netdev);
 

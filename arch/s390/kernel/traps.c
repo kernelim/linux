@@ -286,7 +286,6 @@ static void __init test_monitor_call(void)
 
 void __init trap_init(void)
 {
-	sort_extable(__start_amode31_ex_table, __stop_amode31_ex_table);
 	local_mcck_enable();
 	test_monitor_call();
 }
@@ -298,7 +297,7 @@ void noinstr __do_pgm_check(struct pt_regs *regs)
 	unsigned int trapnr;
 	irqentry_state_t state;
 
-	regs->int_code = *(u32 *)&S390_lowcore.pgm_ilc;
+	regs->int_code = S390_lowcore.pgm_int_code;
 	regs->int_parm_long = S390_lowcore.trans_exc_code;
 
 	state = irqentry_enter(regs);
@@ -323,7 +322,7 @@ void noinstr __do_pgm_check(struct pt_regs *regs)
 
 			set_thread_flag(TIF_PER_TRAP);
 			ev->address = S390_lowcore.per_address;
-			ev->cause = *(u16 *)&S390_lowcore.per_code;
+			ev->cause = S390_lowcore.per_code_combined;
 			ev->paid = S390_lowcore.per_access_id;
 		} else {
 			/* PER event in kernel is kprobes */

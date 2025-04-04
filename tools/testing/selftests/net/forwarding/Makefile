@@ -15,16 +15,12 @@ TEST_PROGS = bridge_fdb_learning_limit.sh \
 	bridge_vlan_unaware.sh \
 	custom_multipath_hash.sh \
 	dual_vxlan_bridge.sh \
-	ethtool_extended_state.sh \
-	ethtool.sh \
 	gre_custom_multipath_hash.sh \
 	gre_inner_v4_multipath.sh \
 	gre_inner_v6_multipath.sh \
 	gre_multipath_nh_res.sh \
 	gre_multipath_nh.sh \
 	gre_multipath.sh \
-	hw_stats_l3.sh \
-	hw_stats_l3_gre.sh \
 	ip6_forward_instats_vrf.sh \
 	ip6gre_custom_multipath_hash.sh \
 	ip6gre_flat_key.sh \
@@ -41,8 +37,9 @@ TEST_PROGS = bridge_fdb_learning_limit.sh \
 	ipip_hier_gre_key.sh \
 	ipip_hier_gre_keys.sh \
 	ipip_hier_gre.sh \
+	lib_sh_test.sh \
 	local_termination.sh \
-	loopback.sh \
+	min_max_mtu.sh \
 	mirror_gre_bound.sh \
 	mirror_gre_bridge_1d.sh \
 	mirror_gre_bridge_1d_vlan.sh \
@@ -74,6 +71,7 @@ TEST_PROGS = bridge_fdb_learning_limit.sh \
 	router_broadcast.sh \
 	router_mpath_nh_res.sh \
 	router_mpath_nh.sh \
+	router_mpath_seed.sh \
 	router_multicast.sh \
 	router_multipath.sh \
 	router_nh.sh \
@@ -111,7 +109,6 @@ TEST_PROGS = bridge_fdb_learning_limit.sh \
 	vxlan_symmetric.sh
 
 TEST_FILES := devlink_lib.sh \
-	ethtool_lib.sh \
 	fib_offload_lib.sh \
 	forwarding.config.sample \
 	ip6gre_lib.sh \
@@ -121,10 +118,14 @@ TEST_FILES := devlink_lib.sh \
 	mirror_gre_topo_lib.sh \
 	mirror_lib.sh \
 	mirror_topo_lib.sh \
+	router_mpath_nh_lib.sh \
 	sch_ets_core.sh \
 	sch_ets_tests.sh \
 	sch_tbf_core.sh \
 	sch_tbf_etsprio.sh \
 	tc_common.sh
+
+TEST_INCLUDES := \
+	../lib.sh
 
 include ../../lib.mk

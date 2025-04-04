@@ -31,6 +31,8 @@
 #include <linux/uaccess.h>
 #include <linux/units.h>
 
+#include "internal.h"
+
 #define ACPI_THERMAL_CLASS		"thermal_zone"
 #define ACPI_THERMAL_DEVICE_NAME	"Thermal Zone"
 #define ACPI_THERMAL_NOTIFY_TEMPERATURE	0x80
@@ -188,24 +190,19 @@ static int active_trip_index(struct acpi_thermal *tz,
 
 static long get_passive_temp(struct acpi_thermal *tz)
 {
-	unsigned long long tmp;
-	acpi_status status;
+	int temp;
 
-	status = acpi_evaluate_integer(tz->device->handle, "_PSV", NULL, &tmp);
-	if (ACPI_FAILURE(status))
+	if (acpi_passive_trip_temp(tz->device, &temp))
 		return THERMAL_TEMP_INVALID;
 
-	return tmp;
+	return temp;
 }
 
 static long get_active_temp(struct acpi_thermal *tz, int index)
 {
-	char method[] = { '_', 'A', 'C', '0' + index, '\0' };
-	unsigned long long tmp;
-	acpi_status status;
+	int temp;
 
-	status = acpi_evaluate_integer(tz->device->handle, method, NULL, &tmp);
-	if (ACPI_FAILURE(status))
+	if (acpi_active_trip_temp(tz->device, index, &temp))
 		return THERMAL_TEMP_INVALID;
 
 	/*
@@ -215,10 +212,10 @@ static long get_active_temp(struct acpi_thermal *tz, int index)
 	if (act > 0) {
 		unsigned long long override = celsius_to_deci_kelvin(act);
 
-		if (tmp > override)
-			tmp = override;
+		if (temp > override)
+			return override;
 	}
-	return tmp;
+	return temp;
 }
 
 static void acpi_thermal_update_trip(struct acpi_thermal *tz,
@@ -340,13 +337,12 @@ static void acpi_thermal_trips_update(struct acpi_thermal *tz, u32 event)
 					dev_name(&adev->dev), event, 0);
 }
 
-static long acpi_thermal_get_critical_trip(struct acpi_thermal *tz)
+static int acpi_thermal_get_critical_trip(struct acpi_thermal *tz)
 {
-	unsigned long long tmp;
-	acpi_status status;
+	int temp;
 
 	if (crt > 0) {
-		tmp = celsius_to_deci_kelvin(crt);
+		temp = celsius_to_deci_kelvin(crt);
 		goto set;
 	}
 	if (crt == -1) {
@@ -354,38 +350,34 @@ static long acpi_thermal_get_critical_trip(struct acpi_thermal *tz)
 		return THERMAL_TEMP_INVALID;
 	}
 
-	status = acpi_evaluate_integer(tz->device->handle, "_CRT", NULL, &tmp);
-	if (ACPI_FAILURE(status)) {
-		acpi_handle_debug(tz->device->handle, "No critical threshold\n");
+	if (acpi_critical_trip_temp(tz->device, &temp))
 		return THERMAL_TEMP_INVALID;
-	}
-	if (tmp <= 2732) {
+
+	if (temp <= 2732) {
 		/*
 		 * Below zero (Celsius) values clearly aren't right for sure,
 		 * so discard them as invalid.
 		 */
-		pr_info(FW_BUG "Invalid critical threshold (%llu)\n", tmp);
+		pr_info(FW_BUG "Invalid critical threshold (%d)\n", temp);
 		return THERMAL_TEMP_INVALID;
 	}
 
 set:
-	acpi_handle_debug(tz->device->handle, "Critical threshold [%llu]\n", tmp);
-	return tmp;
+	acpi_handle_debug(tz->device->handle, "Critical threshold [%d]\n", temp);
+	return temp;
 }
 
-static long acpi_thermal_get_hot_trip(struct acpi_thermal *tz)
+static int acpi_thermal_get_hot_trip(struct acpi_thermal *tz)
 {
-	unsigned long long tmp;
-	acpi_status status;
+	int temp;
 
-	status = acpi_evaluate_integer(tz->device->handle, "_HOT", NULL, &tmp);
-	if (ACPI_FAILURE(status)) {
+	if (acpi_hot_trip_temp(tz->device, &temp) || temp == THERMAL_TEMP_INVALID) {
 		acpi_handle_debug(tz->device->handle, "No hot threshold\n");
 		return THERMAL_TEMP_INVALID;
 	}
 
-	acpi_handle_debug(tz->device->handle, "Hot threshold [%llu]\n", tmp);
-	return tmp;
+	acpi_handle_debug(tz->device->handle, "Hot threshold [%d]\n", temp);
+	return temp;
 }
 
 static bool passive_trip_params_init(struct acpi_thermal *tz)
@@ -675,14 +667,15 @@ static int acpi_thermal_register_thermal_zone(struct acpi_thermal *tz,
 {
 	int result;
 
-	tz->thermal_zone = thermal_zone_device_register_with_trips("acpitz",
-								   tz->trip_table,
-								   trip_count,
-								   0, tz,
-								   &acpi_thermal_zone_ops,
-								   NULL,
-								   passive_delay,
-								   tz->polling_frequency * 100);
+	if (trip_count)
+		tz->thermal_zone = thermal_zone_device_register_with_trips(
+					"acpitz", tz->trip_table, trip_count, 0, tz,
+					&acpi_thermal_zone_ops, NULL, passive_delay,
+					tz->polling_frequency * 100);
+	else
+		tz->thermal_zone = thermal_tripless_zone_device_register(
+					"acpitz", tz, &acpi_thermal_zone_ops, NULL);
+
 	if (IS_ERR(tz->thermal_zone))
 		return PTR_ERR(tz->thermal_zone);
 
@@ -931,6 +924,9 @@ static int acpi_thermal_add(struct acpi_device *device)
 		trip++;
 	}
 
+	if (trip == tz->trip_table)
+		pr_warn(FW_BUG "No valid trip points!\n");
+
 	result = acpi_thermal_register_thermal_zone(tz, trip_count, passive_delay);
 	if (result)
 		goto free_trips;
@@ -1149,6 +1145,7 @@ static void __exit acpi_thermal_exit(void)
 module_init(acpi_thermal_init);
 module_exit(acpi_thermal_exit);
 
+MODULE_IMPORT_NS(ACPI_THERMAL);
 MODULE_AUTHOR("Paul Diefenbaugh");
 MODULE_DESCRIPTION("ACPI Thermal Zone Driver");
 MODULE_LICENSE("GPL");

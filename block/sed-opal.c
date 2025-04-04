@@ -314,7 +314,7 @@ static int read_sed_opal_key(const char *key_name, u_char *buffer, int buflen)
 			      &key_type_user, key_name, true);
 
 	if (IS_ERR(kref))
-		ret = PTR_ERR(kref);
+		return PTR_ERR(kref);
 
 	key = key_ref_to_ptr(kref);
 	down_read(&key->sem);
@@ -1212,7 +1212,7 @@ static int cmd_start(struct opal_dev *dev, const u8 *uid, const u8 *method)
 static int start_opal_session_cont(struct opal_dev *dev)
 {
 	u32 hsn, tsn;
-	int error = 0;
+	int error;
 
 	error = parse_and_check_status(dev);
 	if (error)
@@ -1354,7 +1354,7 @@ static int get_active_key_cont(struct opal_dev *dev)
 {
 	const char *activekey;
 	size_t keylen;
-	int error = 0;
+	int error;
 
 	error = parse_and_check_status(dev);
 	if (error)
@@ -2157,7 +2157,7 @@ static int lock_unlock_locking_range(struct opal_dev *dev, void *data)
 	u8 lr_buffer[OPAL_UID_LENGTH];
 	struct opal_lock_unlock *lkul = data;
 	u8 read_locked = 1, write_locked = 1;
-	int err = 0;
+	int err;
 
 	if (build_locking_range(lr_buffer, sizeof(lr_buffer),
 				lkul->session.opal_key.lr) < 0)
@@ -2580,7 +2580,7 @@ static int opal_get_discv(struct opal_dev *dev, struct opal_discovery *discv)
 	const struct opal_step discovery0_step = {
 		opal_discovery0, discv
 	};
-	int ret = 0;
+	int ret;
 
 	mutex_lock(&dev->dev_lock);
 	setup_opal_dev(dev);
@@ -3037,6 +3037,29 @@ static int opal_set_new_pw(struct opal_dev *dev, struct opal_new_pw *opal_pw)
 	return ret;
 }
 
+static int opal_set_new_sid_pw(struct opal_dev *dev, struct opal_new_pw *opal_pw)
+{
+	int ret;
+	struct opal_key *newkey = &opal_pw->new_user_pw.opal_key;
+	struct opal_key *oldkey = &opal_pw->session.opal_key;
+
+	const struct opal_step pw_steps[] = {
+		{ start_SIDASP_opal_session, oldkey },
+		{ set_sid_cpin_pin, newkey },
+		{ end_opal_session, }
+	};
+
+	if (!dev)
+		return -ENODEV;
+
+	mutex_lock(&dev->dev_lock);
+	setup_opal_dev(dev);
+	ret = execute_steps(dev, pw_steps, ARRAY_SIZE(pw_steps));
+	mutex_unlock(&dev->dev_lock);
+
+	return ret;
+}
+
 static int opal_activate_user(struct opal_dev *dev,
 			      struct opal_session_info *opal_session)
 {
@@ -3069,7 +3092,7 @@ bool opal_unlock_from_suspend(struct opal_dev *dev)
 {
 	struct opal_suspend_data *suspend;
 	bool was_failure = false;
-	int ret = 0;
+	int ret;
 
 	if (!dev)
 		return false;
@@ -3112,10 +3135,9 @@ static int opal_read_table(struct opal_dev *dev,
 		{ read_table_data, rw_tbl },
 		{ end_opal_session, }
 	};
-	int ret = 0;
 
 	if (!rw_tbl->size)
-		return ret;
+		return 0;
 
 	return execute_steps(dev, read_table_steps,
 			     ARRAY_SIZE(read_table_steps));
@@ -3129,10 +3151,9 @@ static int opal_write_table(struct opal_dev *dev,
 		{ write_table_data, rw_tbl },
 		{ end_opal_session, }
 	};
-	int ret = 0;
 
 	if (!rw_tbl->size)
-		return ret;
+		return 0;
 
 	return execute_steps(dev, write_table_steps,
 			     ARRAY_SIZE(write_table_steps));
@@ -3287,6 +3308,9 @@ int sed_ioctl(struct opal_dev *dev, unsigned int cmd, void __user *arg)
 		break;
 	case IOC_OPAL_DISCOVERY:
 		ret = opal_get_discv(dev, p);
+		break;
+	case IOC_OPAL_SET_SID_PW:
+		ret = opal_set_new_sid_pw(dev, p);
 		break;
 
 	default:

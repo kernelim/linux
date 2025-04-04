@@ -5,8 +5,7 @@
 #include <linux/bpf.h>
 #include <bpf/bpf_helpers.h>
 #include "bpf_misc.h"
-
-#define ARRAY_SIZE(x) (int)(sizeof(x) / sizeof((x)[0]))
+#include "bpf_compiler.h"
 
 static volatile int zero = 0;
 
@@ -78,8 +77,8 @@ int iter_err_unsafe_asm_loop(const void *ctx)
 		"*(u32 *)(r1 + 0) = r6;" /* invalid */
 		:
 		: [it]"r"(&it),
-		  [small_arr]"p"(small_arr),
-		  [zero]"p"(zero),
+		  [small_arr]"r"(small_arr),
+		  [zero]"r"(zero),
 		  __imm(bpf_iter_num_new),
 		  __imm(bpf_iter_num_next),
 		  __imm(bpf_iter_num_destroy)
@@ -183,7 +182,7 @@ int iter_pragma_unroll_loop(const void *ctx)
 	MY_PID_GUARD();
 
 	bpf_iter_num_new(&it, 0, 2);
-#pragma nounroll
+	__pragma_loop_no_unroll
 	for (i = 0; i < 3; i++) {
 		v = bpf_iter_num_next(&it);
 		bpf_printk("ITER_BASIC: E3 VAL: i=%d v=%d", i, v ? *v : -1);
@@ -238,7 +237,7 @@ int iter_multiple_sequential_loops(const void *ctx)
 	bpf_iter_num_destroy(&it);
 
 	bpf_iter_num_new(&it, 0, 2);
-#pragma nounroll
+	__pragma_loop_no_unroll
 	for (i = 0; i < 3; i++) {
 		v = bpf_iter_num_next(&it);
 		bpf_printk("ITER_BASIC: E3 VAL: i=%d v=%d", i, v ? *v : -1);
@@ -672,7 +671,7 @@ static __noinline void fill(struct bpf_iter_num *it, int *arr, __u32 n, int mul)
 
 static __noinline int sum(struct bpf_iter_num *it, int *arr, __u32 n)
 {
-	int *t, i, sum = 0;;
+	int *t, i, sum = 0;
 
 	while ((t = bpf_iter_num_next(it))) {
 		i = *t;
@@ -1431,6 +1430,60 @@ int iter_arr_with_actual_elem_count(const void *ctx)
 	}
 
 	return sum;
+}
+
+__u32 upper, select_n, result;
+__u64 global;
+
+static __noinline bool nest_2(char *str)
+{
+	/* some insns (including branch insns) to ensure stacksafe() is triggered
+	 * in nest_2(). This way, stacksafe() can compare frame associated with nest_1().
+	 */
+	if (str[0] == 't')
+		return true;
+	if (str[1] == 'e')
+		return true;
+	if (str[2] == 's')
+		return true;
+	if (str[3] == 't')
+		return true;
+	return false;
+}
+
+static __noinline bool nest_1(int n)
+{
+	/* case 0: allocate stack, case 1: no allocate stack */
+	switch (n) {
+	case 0: {
+		char comm[16];
+
+		if (bpf_get_current_comm(comm, 16))
+			return false;
+		return nest_2(comm);
+	}
+	case 1:
+		return nest_2((char *)&global);
+	default:
+		return false;
+	}
+}
+
+SEC("raw_tp")
+__success
+int iter_subprog_check_stacksafe(const void *ctx)
+{
+	long i;
+
+	bpf_for(i, 0, upper) {
+		if (!nest_1(select_n)) {
+			result = 1;
+			return 0;
+		}
+	}
+
+	result = 2;
+	return 0;
 }
 
 char _license[] SEC("license") = "GPL";

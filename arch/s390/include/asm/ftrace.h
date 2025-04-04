@@ -54,6 +54,23 @@ static __always_inline struct pt_regs *arch_ftrace_get_regs(struct ftrace_regs *
 	return NULL;
 }
 
+#ifdef CONFIG_FUNCTION_GRAPH_TRACER
+struct fgraph_ret_regs {
+	unsigned long gpr2;
+	unsigned long fp;
+};
+
+static __always_inline unsigned long fgraph_ret_regs_return_value(struct fgraph_ret_regs *ret_regs)
+{
+	return ret_regs->gpr2;
+}
+
+static __always_inline unsigned long fgraph_ret_regs_frame_pointer(struct fgraph_ret_regs *ret_regs)
+{
+	return ret_regs->fp;
+}
+#endif /* CONFIG_FUNCTION_GRAPH_TRACER */
+
 static __always_inline void ftrace_instruction_pointer_set(struct ftrace_regs *fregs,
 							   unsigned long ip)
 {
@@ -98,4 +115,32 @@ static inline bool arch_syscall_match_sym_name(const char *sym,
 }
 
 #endif /* __ASSEMBLY__ */
+
+#ifdef CONFIG_FUNCTION_TRACER
+
+#define FTRACE_NOP_INSN .word 0xc004, 0x0000, 0x0000 /* brcl 0,0 */
+
+#ifndef CC_USING_HOTPATCH
+
+#define FTRACE_GEN_MCOUNT_RECORD(name)		\
+	.section __mcount_loc, "a", @progbits;	\
+	.quad name;				\
+	.previous;
+
+#else /* !CC_USING_HOTPATCH */
+
+#define FTRACE_GEN_MCOUNT_RECORD(name)
+
+#endif /* !CC_USING_HOTPATCH */
+
+#define FTRACE_GEN_NOP_ASM(name)		\
+	FTRACE_GEN_MCOUNT_RECORD(name)		\
+	FTRACE_NOP_INSN
+
+#else /* CONFIG_FUNCTION_TRACER */
+
+#define FTRACE_GEN_NOP_ASM(name)
+
+#endif /* CONFIG_FUNCTION_TRACER */
+
 #endif /* _ASM_S390_FTRACE_H */

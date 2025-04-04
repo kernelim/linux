@@ -222,8 +222,9 @@ static inline void __sync_icache_dcache(pte_t pteval)
 extern void __sync_icache_dcache(pte_t pteval);
 #endif
 
-void set_pte_at(struct mm_struct *mm, unsigned long addr,
-		      pte_t *ptep, pte_t pteval);
+void set_ptes(struct mm_struct *mm, unsigned long addr,
+		      pte_t *ptep, pte_t pteval, unsigned int nr);
+#define set_ptes set_ptes
 
 static inline pte_t clear_pte_bit(pte_t pte, pgprot_t prot)
 {
@@ -307,7 +308,7 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 
 #define __swp_type(x)		(((x).val >> __SWP_TYPE_SHIFT) & __SWP_TYPE_MASK)
 #define __swp_offset(x)		((x).val >> __SWP_OFFSET_SHIFT)
-#define __swp_entry(type, offset) ((swp_entry_t) { (((type) & __SWP_TYPE_BITS) << __SWP_TYPE_SHIFT) | \
+#define __swp_entry(type, offset) ((swp_entry_t) { (((type) & __SWP_TYPE_MASK) << __SWP_TYPE_SHIFT) | \
 						   ((offset) << __SWP_OFFSET_SHIFT) })
 
 #define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })

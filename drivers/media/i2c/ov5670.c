@@ -2441,6 +2441,10 @@ static const struct v4l2_subdev_ops ov5670_subdev_ops = {
 	.sensor = &ov5670_sensor_ops,
 };
 
+static const struct v4l2_subdev_internal_ops ov5670_internal_ops = {
+	.init_state = ov5670_init_state,
+};
+
 static const struct media_entity_operations ov5670_subdev_entity_ops = {
 	.link_validate = v4l2_subdev_link_validate,
 };
@@ -2469,6 +2473,7 @@ static int ov5670_probe(struct i2c_client *client)
 
 	/* Initialize subdev */
 	v4l2_i2c_subdev_init(&ov5670->sd, client, &ov5670_subdev_ops);
+	ov5670->sd.internal_ops = &ov5670_internal_ops;
 
 	/* Check module identity */
 	ret = ov5670_identify_module(ov5670);

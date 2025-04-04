@@ -112,7 +112,7 @@ struct device_private {
 	struct klist_node knode_bus;
 	struct klist_node knode_class;
 	struct list_head deferred_probe;
-	struct device_driver *async_driver;
+	const struct device_driver *async_driver;
 	char *deferred_probe_reason;
 	struct device *device;
 	u8 dead:1;
@@ -155,10 +155,10 @@ bool bus_is_registered(const struct bus_type *bus);
 
 int bus_add_driver(struct device_driver *drv);
 void bus_remove_driver(struct device_driver *drv);
-void device_release_driver_internal(struct device *dev, struct device_driver *drv,
+void device_release_driver_internal(struct device *dev, const struct device_driver *drv,
 				    struct device *parent);
 
-void driver_detach(struct device_driver *drv);
+void driver_detach(const struct device_driver *drv);
 void driver_deferred_probe_del(struct device *dev);
 void device_set_deferred_probe_reason(const struct device *dev, struct va_format *vaf);
 static inline int driver_match_device(struct device_driver *drv,
@@ -175,8 +175,8 @@ static inline void dev_sync_state(struct device *dev)
 		dev->driver->sync_state(dev);
 }
 
-int driver_add_groups(struct device_driver *drv, const struct attribute_group **groups);
-void driver_remove_groups(struct device_driver *drv, const struct attribute_group **groups);
+int driver_add_groups(const struct device_driver *drv, const struct attribute_group **groups);
+void driver_remove_groups(const struct device_driver *drv, const struct attribute_group **groups);
 void device_driver_detach(struct device *dev);
 
 int devres_release_all(struct device *dev);
@@ -207,7 +207,7 @@ static inline int devtmpfs_init(void) { return 0; }
 #endif
 
 #ifdef CONFIG_BLOCK
-extern struct class block_class;
+extern const struct class block_class;
 static inline bool is_blockdev(struct device *dev)
 {
 	return dev->class == &block_class;

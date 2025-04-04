@@ -117,6 +117,7 @@
 #define rxrpc_call_poke_traces \
 	EM(rxrpc_call_poke_abort,		"Abort")	\
 	EM(rxrpc_call_poke_complete,		"Compl")	\
+	EM(rxrpc_call_poke_conn_abort,		"Conn-abort")	\
 	EM(rxrpc_call_poke_error,		"Error")	\
 	EM(rxrpc_call_poke_idle,		"Idle")		\
 	EM(rxrpc_call_poke_set_timeout,		"Set-timo")	\
@@ -282,6 +283,7 @@
 	EM(rxrpc_call_see_activate_client,	"SEE act-clnt") \
 	EM(rxrpc_call_see_connect_failed,	"SEE con-fail") \
 	EM(rxrpc_call_see_connected,		"SEE connect ") \
+	EM(rxrpc_call_see_conn_abort,		"SEE conn-abt") \
 	EM(rxrpc_call_see_disconnected,		"SEE disconn ") \
 	EM(rxrpc_call_see_distribute_error,	"SEE dist-err") \
 	EM(rxrpc_call_see_input,		"SEE input   ") \
@@ -449,7 +451,7 @@
 
 #define rxrpc_req_ack_traces \
 	EM(rxrpc_reqack_ack_lost,		"ACK-LOST  ")	\
-	EM(rxrpc_reqack_already_on,		"ALREADY-ON")	\
+	EM(rxrpc_reqack_app_stall,		"APP-STALL ")	\
 	EM(rxrpc_reqack_more_rtt,		"MORE-RTT  ")	\
 	EM(rxrpc_reqack_no_srv_last,		"NO-SRVLAST")	\
 	EM(rxrpc_reqack_old_rtt,		"OLD-RTT   ")	\
@@ -773,6 +775,31 @@ TRACE_EVENT(rxrpc_rx_done,
 	    TP_printk("r=%d a=%d", __entry->result, __entry->abort_code)
 	    );
 
+TRACE_EVENT(rxrpc_abort_call,
+	    TP_PROTO(const struct rxrpc_call *call, int abort_code),
+
+	    TP_ARGS(call, abort_code),
+
+	    TP_STRUCT__entry(
+		    __field(unsigned int,		call_nr)
+		    __field(enum rxrpc_abort_reason,	why)
+		    __field(int,			abort_code)
+		    __field(int,			error)
+			     ),
+
+	    TP_fast_assign(
+		    __entry->call_nr	= call->debug_id;
+		    __entry->why	= call->send_abort_why;
+		    __entry->abort_code	= abort_code;
+		    __entry->error	= call->send_abort_err;
+			   ),
+
+	    TP_printk("c=%08x a=%d e=%d %s",
+		      __entry->call_nr,
+		      __entry->abort_code, __entry->error,
+		      __print_symbolic(__entry->why, rxrpc_abort_reasons))
+	    );
+
 TRACE_EVENT(rxrpc_abort,
 	    TP_PROTO(unsigned int call_nr, enum rxrpc_abort_reason why,
 		     u32 cid, u32 call_id, rxrpc_seq_t seq, int abort_code, int error),
@@ -952,6 +979,29 @@ TRACE_EVENT(rxrpc_rx_abort,
 
 	    TP_printk("c=%08x ABORT %08x ac=%d",
 		      __entry->call,
+		      __entry->serial,
+		      __entry->abort_code)
+	    );
+
+TRACE_EVENT(rxrpc_rx_conn_abort,
+	    TP_PROTO(const struct rxrpc_connection *conn, const struct sk_buff *skb),
+
+	    TP_ARGS(conn, skb),
+
+	    TP_STRUCT__entry(
+		    __field(unsigned int,	conn)
+		    __field(rxrpc_serial_t,	serial)
+		    __field(u32,		abort_code)
+			     ),
+
+	    TP_fast_assign(
+		    __entry->conn = conn->debug_id;
+		    __entry->serial = rxrpc_skb(skb)->hdr.serial;
+		    __entry->abort_code = skb->priority;
+			   ),
+
+	    TP_printk("C=%08x ABORT %08x ac=%d",
+		      __entry->conn,
 		      __entry->serial,
 		      __entry->abort_code)
 	    );

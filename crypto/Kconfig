@@ -597,6 +597,16 @@ config CRYPTO_HMAC
 	  HMAC: Keyed-Hashing for Message Authentication (RFC2104).
 	  This is required for IPSec.
 
+config CRYPTO_HMAC_S390
+	tristate "Keyed-hash message authentication code: HMAC"
+	depends on S390
+	select CRYPTO_HASH
+	help
+	  s390 specific HMAC hardware support for SHA224, SHA256, SHA384 and
+	  SHA512.
+
+	  Architecture: s390
+
 config CRYPTO_XCBC
 	tristate "XCBC support"
 	select CRYPTO_HASH
@@ -775,6 +785,14 @@ config CRYPTO_CRCT10DIF_PCLMUL
 	  'crct10dif-pclmul' module, which is faster when computing the
 	  crct10dif checksum as compared with the generic table implementation.
 
+config CRYPTO_CURVE25519_PPC64
+	tristate "Public key crypto: Curve25519 (PowerPC64)"
+	depends on PPC64 && CPU_LITTLE_ENDIAN
+	select CRYPTO_LIB_CURVE25519_GENERIC
+	select CRYPTO_ARCH_HAVE_LIB_CURVE25519
+	help
+	  Support curve25519 algorithm for PowerPC64 in little-endian mode.
+
 config CRYPTO_CRCT10DIF_VPMSUM
 	tristate "CRC32T10DIF powerpc64 hardware acceleration"
 	depends on PPC64 && ALTIVEC && CRC_T10DIF
@@ -791,6 +809,7 @@ config CRYPTO_AES_GCM_P10
 	select CRYPTO_ALGAPI
 	select CRYPTO_AEAD
 	select CRYPTO_SKCIPHER
+	select CRYPTO_SIMD
 	default m
 	help
 	  Support for cryptographic acceleration instructions on Power10 or later

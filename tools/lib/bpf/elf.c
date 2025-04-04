@@ -11,8 +11,6 @@
 #include "libbpf_internal.h"
 #include "str_error.h"
 
-#define STRERR_BUFSIZE  128
-
 /* A SHT_GNU_versym section holds 16-bit words. This bit is set if
  * the symbol is hidden and can only be seen when referenced using an
  * explicit version number. This is a GNU extension.
@@ -29,6 +27,9 @@ int elf_open(const char *binary_path, struct elf_fd *elf_fd)
 	char errmsg[STRERR_BUFSIZE];
 	int fd, ret;
 	Elf *elf;
+
+	elf_fd->elf = NULL;
+	elf_fd->fd = -1;
 
 	if (elf_version(EV_CURRENT) == EV_NONE) {
 		pr_warn("elf: failed to init libelf for %s\n", binary_path);

@@ -14,7 +14,7 @@
 # listed here.
 
 # Overrides is individual modules which need to remain in kernel-core due to deps.
-overrides="cec isst_if_common isst_tpmi_core isst_tpmi intel_vsec intel_vsec_tpmi"
+overrides="cec isst_if_common isst_tpmi_core isst_tpmi intel_vsec intel_vsec_tpmi wmi"
 
 # Set the default dirs/modules to filter out
 driverdirs="atm auxdisplay bcma bluetooth firewire fmc iio infiniband isdn leds media memstick mfd mmc mtd nfc ntb pcmcia platform power ssb staging tty uio uwb w1"
@@ -33,13 +33,13 @@ scsidrvs="aacraid aic7xxx aic94xx be2iscsi bfa bnx2i bnx2fc csiostor cxgbi esas2
 
 usbdrvs="atm image misc serial wusbcore"
 
-fsdrvs="affs befs smb coda cramfs ecryptfs hfs hfsplus jfs minix ncpfs nilfs2 ocfs2 reiserfs romfs squashfs sysv ubifs ufs"
+fsdrvs="affs befs smb coda cramfs ecryptfs hfs hfsplus jfs minix ncpfs nilfs2 ocfs2 reiserfs romfs sysv ubifs ufs"
 
 netprots="6lowpan appletalk atm ax25 batman-adv bluetooth can dccp dsa ieee802154 irda l2tp mac80211 mac802154 mpls netrom nfc rds rfkill rose sctp smc wireless"
 
-drmdrvs="amd ast gma500 i2c i915 mgag200 nouveau radeon via "
+drmdrvs="amd ast gma500 i2c i915 mgag200 nouveau radeon via xe"
 
-singlemods="ntb_netdev iscsi_ibft iscsi_boot_sysfs megaraid pmcraid qedi qla1280 9pnet_rdma rpcrdma nvmet-rdma nvme-rdma hid-picolcd hid-prodikeys hwa-hc hwpoison-inject hid-sensor-hub target_core_user sbp_target cxgbit iw_cxgb3 iw_cxgb4 cxgb3i cxgb3i cxgb3i_ddp cxgb4i chcr chtls parport_serial ism regmap-sdw regmap-sdw-mbq arizona-micsupp hid-asus nct6775 ntc_thermistor video"
+singlemods="ntb_netdev iscsi_ibft iscsi_boot_sysfs megaraid pmcraid qedi qla1280 9pnet_rdma rpcrdma nvmet-rdma nvme-rdma hid-picolcd hid-prodikeys hwa-hc hwpoison-inject hid-sensor-hub target_core_user sbp_target cxgbit iw_cxgb3 iw_cxgb4 cxgb3i cxgb3i cxgb3i_ddp cxgb4i chcr chtls parport_serial ism regmap-sdw regmap-sdw-mbq arizona-micsupp hid-asus nct6775 ntc_thermistor"
 
 # Grab the arch-specific filter list overrides
 source ./filter-$2.sh
@@ -57,7 +57,7 @@ filter_dir() {
 		grep -e "${dir}/" ${filelist} >> k-d.list
 		mv ${filelist}.tmp $filelist
 	fi
-	
+
 	return 0
 }
 
@@ -74,7 +74,7 @@ filter_ko() {
 		grep -e "${mod}.ko" ${filelist} >> k-d.list
 		mv ${filelist}.tmp $filelist
 	fi
-	
+
 	return 0
 }
 

@@ -194,4 +194,7 @@ obj-$(CONFIG_INTERCONNECT)	+= interconnect/
 obj-$(CONFIG_COUNTER)		+= counter/
 obj-$(CONFIG_MOST)		+= most/
 obj-$(CONFIG_HTE)		+= hte/
+obj-$(CONFIG_DRM_ACCEL)		+= accel/
 obj-$(CONFIG_DPLL)		+= dpll/
+
+obj-$(CONFIG_S390)		+= s390/

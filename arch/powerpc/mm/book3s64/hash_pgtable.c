@@ -213,7 +213,7 @@ unsigned long hash__pmd_hugepage_update(struct mm_struct *mm, unsigned long addr
 
 	old = be64_to_cpu(old_be);
 
-	trace_hugepage_update(addr, old, clr, set);
+	trace_hugepage_update_pmd(addr, old, clr, set);
 	if (old & H_PAGE_HASHPTE)
 		hpte_do_hugepage_flush(mm, addr, pmdp, old);
 	return old;
@@ -255,7 +255,7 @@ pmd_t hash__pmdp_collapse_flush(struct vm_area_struct *vma, unsigned long addres
 	 * the __collapse_huge_page_copy can result in copying
 	 * the old content.
 	 */
-	flush_tlb_pmd_range(vma->vm_mm, &pmd, address);
+	flush_hash_table_pmd_range(vma->vm_mm, &pmd, address);
 	return pmd;
 }
 
@@ -403,7 +403,8 @@ EXPORT_SYMBOL_GPL(hash__has_transparent_hugepage);
 
 struct change_memory_parms {
 	unsigned long start, end, newpp;
-	unsigned int step, nr_cpus, master_cpu;
+	unsigned int step, nr_cpus;
+	atomic_t master_cpu;
 	atomic_t cpu_counter;
 };
 
@@ -477,7 +478,8 @@ static int change_memory_range_fn(void *data)
 {
 	struct change_memory_parms *parms = data;
 
-	if (parms->master_cpu != smp_processor_id())
+	// First CPU goes through, all others wait.
+	if (atomic_xchg(&parms->master_cpu, 1) == 1)
 		return chmem_secondary_loop(parms);
 
 	// Wait for all but one CPU (this one) to call-in
@@ -515,7 +517,7 @@ static bool hash__change_memory_range(unsigned long start, unsigned long end,
 		chmem_parms.end = end;
 		chmem_parms.step = step;
 		chmem_parms.newpp = newpp;
-		chmem_parms.master_cpu = smp_processor_id();
+		atomic_set(&chmem_parms.master_cpu, 0);
 
 		cpus_read_lock();
 

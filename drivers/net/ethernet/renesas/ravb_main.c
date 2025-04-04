@@ -1251,7 +1251,7 @@ static int ravb_set_ringparam(struct net_device *ndev,
 }
 
 static int ravb_get_ts_info(struct net_device *ndev,
-			    struct ethtool_ts_info *info)
+			    struct kernel_ethtool_ts_info *info)
 {
 	struct ravb_private *priv = netdev_priv(ndev);
 

@@ -107,7 +107,7 @@ int ppc_do_canonicalize_irqs;
 EXPORT_SYMBOL(ppc_do_canonicalize_irqs);
 #endif
 
-#ifdef CONFIG_CRASH_CORE
+#ifdef CONFIG_CRASH_DUMP
 /* This keeps a track of which one is the crashing cpu. */
 int crashing_cpu = -1;
 #endif
@@ -275,9 +275,6 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	if (proc_freq)
 		seq_printf(m, "clock\t\t: %lu.%06luMHz\n",
 			   proc_freq / 1000000, proc_freq % 1000000);
-
-	if (ppc_md.show_percpuinfo != NULL)
-		ppc_md.show_percpuinfo(m, cpu_id);
 
 	/* If we are a Freescale core do a simple check so
 	 * we dont have to keep adding cases in the future */
@@ -873,6 +870,11 @@ void __init setup_arch(char **cmdline_p)
 	 */
 	initialize_cache_info();
 
+	/* Initialize the lockdown LSM */
+	jump_label_init();
+	static_call_init();
+	early_security_init();
+
 	/*
 	 * Lock down the kernel if booted in secure mode. This is required to
 	 * maintain kernel integrity.
@@ -915,6 +917,8 @@ void __init setup_arch(char **cmdline_p)
 
 	/* Parse memory topology */
 	mem_topology_setup();
+	/* Set max_mapnr before paging_init() */
+	set_max_mapnr(max_pfn);
 
 	/*
 	 * Release secondary cpus out of their spinloops at 0x60 now that
@@ -936,8 +940,12 @@ void __init setup_arch(char **cmdline_p)
 	klp_init_thread_info(&init_task);
 
 	setup_initial_init_mm(_stext, _etext, _edata, _end);
-
+	/* sched_init() does the mmgrab(&init_mm) for the primary CPU */
+	VM_WARN_ON(cpumask_test_cpu(smp_processor_id(), mm_cpumask(&init_mm)));
+	cpumask_set_cpu(smp_processor_id(), mm_cpumask(&init_mm));
+	inc_mm_active_cpus(&init_mm);
 	mm_iommu_init(&init_mm);
+
 	irqstack_early_init();
 	exc_lvl_early_init();
 	emergency_stack_init();
@@ -948,9 +956,11 @@ void __init setup_arch(char **cmdline_p)
 	initmem_init();
 
 	/*
-	 * Reserve large chunks of memory for use by CMA for KVM and hugetlb. These must
-	 * be called after initmem_init(), so that pageblock_order is initialised.
+	 * Reserve large chunks of memory for use by CMA for fadump, KVM and
+	 * hugetlb. These must be called after initmem_init(), so that
+	 * pageblock_order is initialised.
 	 */
+	fadump_cma_init();
 	kvm_cma_reserve();
 	gigantic_hugetlb_cma_reserve();
 

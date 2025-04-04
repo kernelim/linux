@@ -43,7 +43,8 @@
  *   nlmsg_get_pos()			return current position in message
  *   nlmsg_trim()			trim part of message
  *   nlmsg_cancel()			cancel message construction
- *   nlmsg_free()			free a netlink message
+ *   nlmsg_consume()			free a netlink message (expected)
+ *   nlmsg_free()			free a netlink message (drop)
  *
  * Message Sending:
  *   nlmsg_multicast()			multicast message to several groups
@@ -159,7 +160,11 @@
  *   nla_parse()			parse and validate stream of attrs
  *   nla_parse_nested()			parse nested attributes
  *   nla_for_each_attr()		loop over all attributes
+ *   nla_for_each_attr_type()		loop over all attributes with the
+ *					given type
  *   nla_for_each_nested()		loop over the nested attributes
+ *   nla_for_each_nested_type()		loop over the nested attributes with
+ *					the given type
  *=========================================================================
  */
 
@@ -1085,12 +1090,21 @@ static inline void nlmsg_cancel(struct sk_buff *skb, struct nlmsghdr *nlh)
 }
 
 /**
- * nlmsg_free - free a netlink message
+ * nlmsg_free - drop a netlink message
  * @skb: socket buffer of netlink message
  */
 static inline void nlmsg_free(struct sk_buff *skb)
 {
 	kfree_skb(skb);
+}
+
+/**
+ * nlmsg_consume - free a netlink message
+ * @skb: socket buffer of netlink message
+ */
+static inline void nlmsg_consume(struct sk_buff *skb)
+{
+	consume_skb(skb);
 }
 
 /**
@@ -1244,7 +1258,7 @@ static inline void *nla_data(const struct nlattr *nla)
  * nla_len - length of payload
  * @nla: netlink attribute
  */
-static inline int nla_len(const struct nlattr *nla)
+static inline u16 nla_len(const struct nlattr *nla)
 {
 	return nla->nla_len - NLA_HDRLEN;
 }
@@ -2078,6 +2092,18 @@ static inline int nla_total_size_64bit(int payload)
 	     pos = nla_next(pos, &(rem)))
 
 /**
+ * nla_for_each_attr_type - iterate over a stream of attributes
+ * @pos: loop counter, set to current attribute
+ * @type: required attribute type for @pos
+ * @head: head of attribute stream
+ * @len: length of attribute stream
+ * @rem: initialized to len, holds bytes currently remaining in stream
+ */
+#define nla_for_each_attr_type(pos, type, head, len, rem) \
+	nla_for_each_attr(pos, head, len, rem) \
+		if (nla_type(pos) == type)
+
+/**
  * nla_for_each_nested - iterate over nested attributes
  * @pos: loop counter, set to current attribute
  * @nla: attribute containing the nested attributes
@@ -2085,6 +2111,17 @@ static inline int nla_total_size_64bit(int payload)
  */
 #define nla_for_each_nested(pos, nla, rem) \
 	nla_for_each_attr(pos, nla_data(nla), nla_len(nla), rem)
+
+/**
+ * nla_for_each_nested_type - iterate over nested attributes
+ * @pos: loop counter, set to current attribute
+ * @type: required attribute type for @pos
+ * @nla: attribute containing the nested attributes
+ * @rem: initialized to len, holds bytes currently remaining in stream
+ */
+#define nla_for_each_nested_type(pos, type, nla, rem) \
+	nla_for_each_nested(pos, nla, rem) \
+		if (nla_type(pos) == type)
 
 /**
  * nla_is_last - Test if attribute is last in stream

@@ -37,3 +37,5 @@ else:
     import linux.clk
     import linux.genpd
     import linux.device
+    import linux.pgtable
+    import linux.mm

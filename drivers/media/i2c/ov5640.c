@@ -2997,6 +2997,10 @@ static const struct v4l2_subdev_ops ov5640_subdev_ops = {
 	.pad = &ov5640_pad_ops,
 };
 
+static const struct v4l2_subdev_internal_ops ov5640_internal_ops = {
+	.init_state = ov5640_init_state,
+};
+
 static int ov5640_get_regulators(struct ov5640_dev *sensor)
 {
 	int i;
@@ -3139,6 +3143,7 @@ static int ov5640_probe(struct i2c_client *client)
 		return PTR_ERR(sensor->reset_gpio);
 
 	v4l2_i2c_subdev_init(&sensor->sd, client, &ov5640_subdev_ops);
+	sensor->sd.internal_ops = &ov5640_internal_ops;
 
 	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
 			    V4L2_SUBDEV_FL_HAS_EVENTS;

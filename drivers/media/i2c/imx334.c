@@ -862,6 +862,10 @@ static const struct v4l2_subdev_ops imx334_subdev_ops = {
 	.pad = &imx334_pad_ops,
 };
 
+static const struct v4l2_subdev_internal_ops imx334_internal_ops = {
+	.init_state = imx334_init_state,
+};
+
 /**
  * imx334_power_on() - Sensor power on sequence
  * @dev: pointer to i2c device
@@ -1014,6 +1018,7 @@ static int imx334_probe(struct i2c_client *client)
 
 	/* Initialize subdev */
 	v4l2_i2c_subdev_init(&imx334->sd, client, &imx334_subdev_ops);
+	imx334->sd.internal_ops = &imx334_internal_ops;
 
 	ret = imx334_parse_hw_config(imx334);
 	if (ret) {

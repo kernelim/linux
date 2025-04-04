@@ -352,8 +352,8 @@ static int ipmb_remove(struct i2c_client *client)
 }
 
 static const struct i2c_device_id ipmb_id[] = {
-	{ "ipmb-dev", 0 },
-	{},
+	{ "ipmb-dev" },
+	{}
 };
 MODULE_DEVICE_TABLE(i2c, ipmb_id);
 

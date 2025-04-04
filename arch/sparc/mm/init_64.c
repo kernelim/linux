@@ -1650,14 +1650,14 @@ bool kern_addr_valid(unsigned long addr)
 	if (pud_none(*pud))
 		return false;
 
-	if (pud_large(*pud))
+	if (pud_leaf(*pud))
 		return pfn_valid(pud_pfn(*pud));
 
 	pmd = pmd_offset(pud, addr);
 	if (pmd_none(*pmd))
 		return false;
 
-	if (pmd_large(*pmd))
+	if (pmd_leaf(*pmd))
 		return pfn_valid(pmd_pfn(*pmd));
 
 	pte = pte_offset_kernel(pmd, addr);
@@ -2926,6 +2926,22 @@ void pgtable_free(void *table, bool is_page)
 }
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+static void pte_free_now(struct rcu_head *head)
+{
+	struct page *page;
+
+	page = container_of(head, struct page, rcu_head);
+	__pte_free((pgtable_t)page_address(page));
+}
+
+void pte_free_defer(struct mm_struct *mm, pgtable_t pgtable)
+{
+	struct page *page;
+
+	page = virt_to_page(pgtable);
+	call_rcu(&page->rcu_head, pte_free_now);
+}
+
 void update_mmu_cache_pmd(struct vm_area_struct *vma, unsigned long addr,
 			  pmd_t *pmd)
 {
@@ -2933,7 +2949,7 @@ void update_mmu_cache_pmd(struct vm_area_struct *vma, unsigned long addr,
 	struct mm_struct *mm;
 	pmd_t entry = *pmd;
 
-	if (!pmd_large(entry) || !pmd_young(entry))
+	if (!pmd_leaf(entry) || !pmd_young(entry))
 		return;
 
 	pte = pmd_val(entry);

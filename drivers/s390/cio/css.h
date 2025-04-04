@@ -34,6 +34,23 @@
 #define SNID_STATE3_MULTI_PATH	   1
 #define SNID_STATE3_SINGLE_PATH	   0
 
+/*
+ * Miscellaneous constants
+ */
+
+#define CSS_NUM_CUB_PAGES		2
+#define CSS_CUES_PER_PAGE		128
+#define CSS_NUM_ECUB_PAGES		4
+#define CSS_ECUES_PER_PAGE		64
+
+/*
+ * Conditions used to specify which subchannels need evaluation
+ */
+enum css_eval_cond {
+	CSS_EVAL_NO_PATH,		/* Subchannels with no operational paths */
+	CSS_EVAL_NOT_ONLINE	/* sch without an online-device */
+};
+
 struct path_state {
 	__u8  state1 : 2;	/* path state value 1 */
 	__u8  state2 : 2;	/* path state value 2 */
@@ -114,8 +131,8 @@ struct channel_subsystem {
 	struct mutex mutex;
 	/* channel measurement related */
 	int cm_enabled;
-	void *cub_addr1;
-	void *cub_addr2;
+	void *cub[CSS_NUM_CUB_PAGES];
+	void *ecub[CSS_NUM_ECUB_PAGES];
 	/* for orphaned ccw devices */
 	struct subchannel *pseudo_subchannel;
 };
@@ -136,7 +153,7 @@ static inline struct channel_subsystem *css_by_id(u8 cssid)
 /* Helper functions to build lists for the slow path. */
 void css_schedule_eval(struct subchannel_id schid);
 void css_schedule_eval_all(void);
-void css_schedule_eval_all_unreg(unsigned long delay);
+void css_schedule_eval_cond(enum css_eval_cond, unsigned long delay);
 int css_complete_work(void);
 
 int sch_is_pseudo_sch(struct subchannel *);

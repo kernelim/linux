@@ -27,9 +27,6 @@ SYM_CODE_START(startup_continue)
 	larl	%r15,init_thread_union+STACK_INIT_OFFSET
 	stg	%r15,__LC_KERNEL_STACK
 	brasl	%r14,sclp_early_adjust_va	# allow sclp_early_printk
-#ifdef CONFIG_KASAN
-	brasl	%r14,kasan_early_init
-#endif
 	brasl	%r14,startup_init		# s390 specific early init
 	brasl	%r14,start_kernel		# common init code
 #
@@ -39,5 +36,5 @@ SYM_CODE_START(startup_continue)
 	lpswe	dw_psw-.(%r13)		# load disabled wait psw
 SYM_CODE_END(startup_continue)
 
-	.align	16
+	.balign	16
 SYM_DATA_LOCAL(dw_psw,	.quad 0x0002000180000000,0x0000000000000000)

@@ -188,9 +188,9 @@ static void qeth_get_drvinfo(struct net_device *dev,
 {
 	struct qeth_card *card = dev->ml_priv;
 
-	strlcpy(info->driver, IS_LAYER2(card) ? "qeth_l2" : "qeth_l3",
+	strscpy(info->driver, IS_LAYER2(card) ? "qeth_l2" : "qeth_l3",
 		sizeof(info->driver));
-	strlcpy(info->fw_version, card->info.mcl_level,
+	strscpy(info->fw_version, card->info.mcl_level,
 		sizeof(info->fw_version));
 	scnprintf(info->bus_info, sizeof(info->bus_info), "%s/%s/%s",
 		  CARD_RDEV_ID(card), CARD_WDEV_ID(card), CARD_DDEV_ID(card));
@@ -247,7 +247,7 @@ static int qeth_set_channels(struct net_device *dev,
 }
 
 static int qeth_get_ts_info(struct net_device *dev,
-			    struct ethtool_ts_info *info)
+			    struct kernel_ethtool_ts_info *info)
 {
 	struct qeth_card *card = dev->ml_priv;
 

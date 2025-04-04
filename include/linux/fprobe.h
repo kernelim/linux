@@ -7,12 +7,24 @@
 #include <linux/ftrace.h>
 #include <linux/rethook.h>
 
+struct fprobe;
+
+typedef int (*fprobe_entry_cb)(struct fprobe *fp, unsigned long entry_ip,
+			       unsigned long ret_ip, struct pt_regs *regs,
+			       void *entry_data);
+
+typedef void (*fprobe_exit_cb)(struct fprobe *fp, unsigned long entry_ip,
+			       unsigned long ret_ip, struct pt_regs *regs,
+			       void *entry_data);
+
 /**
  * struct fprobe - ftrace based probe.
  * @ops: The ftrace_ops.
  * @nmissed: The counter for missing events.
  * @flags: The status flag.
  * @rethook: The rethook data structure. (internal data)
+ * @entry_data_size: The private data storage size.
+ * @nr_maxactive: The max number of active functions.
  * @entry_handler: The callback function for function entry.
  * @exit_handler: The callback function for function exit.
  */
@@ -29,9 +41,11 @@ struct fprobe {
 	unsigned long		nmissed;
 	unsigned int		flags;
 	struct rethook		*rethook;
+	size_t			entry_data_size;
+	int			nr_maxactive;
 
-	void (*entry_handler)(struct fprobe *fp, unsigned long entry_ip, struct pt_regs *regs);
-	void (*exit_handler)(struct fprobe *fp, unsigned long entry_ip, struct pt_regs *regs);
+	fprobe_entry_cb entry_handler;
+	fprobe_exit_cb  exit_handler;
 };
 
 /* This fprobe is soft-disabled. */

@@ -4,6 +4,7 @@
 #define __DRIVER_USB_TYPEC_UCSI_H
 
 #include <linux/bitops.h>
+#include <linux/completion.h>
 #include <linux/device.h>
 #include <linux/power_supply.h>
 #include <linux/types.h>
@@ -16,6 +17,7 @@
 
 struct ucsi;
 struct ucsi_altmode;
+struct ucsi_connector;
 struct dentry;
 
 /* UCSI offsets (Bytes) */
@@ -27,6 +29,7 @@ struct dentry;
 #define UCSIv2_MESSAGE_OUT		272
 
 /* UCSI versions */
+#define UCSI_VERSION_1_1	0x0110
 #define UCSI_VERSION_1_2	0x0120
 #define UCSI_VERSION_2_0	0x0200
 #define UCSI_VERSION_2_1	0x0210
@@ -55,24 +58,29 @@ struct dentry;
 
 /**
  * struct ucsi_operations - UCSI I/O operations
- * @read: Read operation
- * @sync_write: Blocking write operation
- * @async_write: Non-blocking write operation
+ * @read_version: Read implemented UCSI version
+ * @read_cci: Read CCI register
+ * @read_message_in: Read message data from UCSI
+ * @sync_control: Blocking control operation
+ * @async_control: Non-blocking control operation
  * @update_altmodes: Squashes duplicate DP altmodes
+ * @update_connector: Update connector capabilities before registering
+ * @connector_status: Updates connector status, called holding connector lock
  *
  * Read and write routines for UCSI interface. @sync_write must wait for the
  * Command Completion Event from the PPM before returning, and @async_write must
  * return immediately after sending the data to the PPM.
  */
 struct ucsi_operations {
-	int (*read)(struct ucsi *ucsi, unsigned int offset,
-		    void *val, size_t val_len);
-	int (*sync_write)(struct ucsi *ucsi, unsigned int offset,
-			  const void *val, size_t val_len);
-	int (*async_write)(struct ucsi *ucsi, unsigned int offset,
-			   const void *val, size_t val_len);
+	int (*read_version)(struct ucsi *ucsi, u16 *version);
+	int (*read_cci)(struct ucsi *ucsi, u32 *cci);
+	int (*read_message_in)(struct ucsi *ucsi, void *val, size_t val_len);
+	int (*sync_control)(struct ucsi *ucsi, u64 command);
+	int (*async_control)(struct ucsi *ucsi, u64 command);
 	bool (*update_altmodes)(struct ucsi *ucsi, struct ucsi_altmode *orig,
 				struct ucsi_altmode *updated);
+	void (*update_connector)(struct ucsi_connector *con);
+	void (*connector_status)(struct ucsi_connector *con);
 };
 
 struct ucsi *ucsi_create(struct device *dev, const struct ucsi_operations *ops);
@@ -111,26 +119,36 @@ void ucsi_connector_change(struct ucsi *ucsi, u8 num);
 #define UCSI_CONNECTOR_NUMBER(_num_)		((u64)(_num_) << 16)
 #define UCSI_COMMAND(_cmd_)			((_cmd_) & 0xff)
 
+#define UCSI_GET_ALTMODE_GET_CONNECTOR_NUMBER(_cmd_)	(((_cmd_) >> 24) & GENMASK(6, 0))
+#define UCSI_DEFAULT_GET_CONNECTOR_NUMBER(_cmd_)	(((_cmd_) >> 16) & GENMASK(6, 0))
+
 /* CONNECTOR_RESET command bits */
-#define UCSI_CONNECTOR_RESET_HARD		BIT(23) /* Deprecated in v1.1 */
+#define UCSI_CONNECTOR_RESET_HARD_VER_1_0	BIT(23) /* Deprecated in v1.1 */
+#define UCSI_CONNECTOR_RESET_DATA_VER_2_0	BIT(23) /* Redefined in v2.0 */
+
 
 /* ACK_CC_CI bits */
 #define UCSI_ACK_CONNECTOR_CHANGE		BIT(16)
 #define UCSI_ACK_COMMAND_COMPLETE		BIT(17)
 
 /* SET_NOTIFICATION_ENABLE command bits */
-#define UCSI_ENABLE_NTFY_CMD_COMPLETE		BIT(16)
-#define UCSI_ENABLE_NTFY_EXT_PWR_SRC_CHANGE	BIT(17)
-#define UCSI_ENABLE_NTFY_PWR_OPMODE_CHANGE	BIT(18)
-#define UCSI_ENABLE_NTFY_CAP_CHANGE		BIT(21)
-#define UCSI_ENABLE_NTFY_PWR_LEVEL_CHANGE	BIT(22)
-#define UCSI_ENABLE_NTFY_PD_RESET_COMPLETE	BIT(23)
-#define UCSI_ENABLE_NTFY_CAM_CHANGE		BIT(24)
-#define UCSI_ENABLE_NTFY_BAT_STATUS_CHANGE	BIT(25)
-#define UCSI_ENABLE_NTFY_PARTNER_CHANGE		BIT(27)
-#define UCSI_ENABLE_NTFY_PWR_DIR_CHANGE		BIT(28)
-#define UCSI_ENABLE_NTFY_CONNECTOR_CHANGE	BIT(30)
-#define UCSI_ENABLE_NTFY_ERROR			BIT(31)
+#define UCSI_ENABLE_NTFY_CMD_COMPLETE		BIT_ULL(16)
+#define UCSI_ENABLE_NTFY_EXT_PWR_SRC_CHANGE	BIT_ULL(17)
+#define UCSI_ENABLE_NTFY_PWR_OPMODE_CHANGE	BIT_ULL(18)
+#define UCSI_ENABLE_NTFY_ATTENTION		BIT_ULL(19)
+#define UCSI_ENABLE_NTFY_LPM_FW_UPDATE_REQ	BIT_ULL(20)
+#define UCSI_ENABLE_NTFY_CAP_CHANGE		BIT_ULL(21)
+#define UCSI_ENABLE_NTFY_PWR_LEVEL_CHANGE	BIT_ULL(22)
+#define UCSI_ENABLE_NTFY_PD_RESET_COMPLETE	BIT_ULL(23)
+#define UCSI_ENABLE_NTFY_CAM_CHANGE		BIT_ULL(24)
+#define UCSI_ENABLE_NTFY_BAT_STATUS_CHANGE	BIT_ULL(25)
+#define UCSI_ENABLE_NTFY_SECURITY_REQ_PARTNER	BIT_ULL(26)
+#define UCSI_ENABLE_NTFY_PARTNER_CHANGE		BIT_ULL(27)
+#define UCSI_ENABLE_NTFY_PWR_DIR_CHANGE		BIT_ULL(28)
+#define UCSI_ENABLE_NTFY_SET_RETIMER_MODE	BIT_ULL(29)
+#define UCSI_ENABLE_NTFY_CONNECTOR_CHANGE	BIT_ULL(30)
+#define UCSI_ENABLE_NTFY_ERROR			BIT_ULL(31)
+#define UCSI_ENABLE_NTFY_SINK_PATH_STS_CHANGE	BIT_ULL(32)
 #define UCSI_ENABLE_NTFY_ALL			0xdbe70000
 
 /* SET_UOR command bits */
@@ -188,6 +206,8 @@ void ucsi_connector_change(struct ucsi *ucsi, u8 num);
 #define UCSI_ERROR_HARD_RESET			BIT(10)
 #define UCSI_ERROR_PPM_POLICY_CONFLICT		BIT(11)
 #define UCSI_ERROR_SWAP_REJECTED		BIT(12)
+#define UCSI_ERROR_REVERSE_CURRENT_PROTECTION	BIT(13)
+#define UCSI_ERROR_SET_SINK_PATH_REJECTED	BIT(14)
 
 #define UCSI_SET_NEW_CAM_ENTER(x)		(((x) >> 23) & 0x1)
 #define UCSI_SET_NEW_CAM_GET_AM(x)		(((x) >> 24) & 0xff)
@@ -215,7 +235,13 @@ struct ucsi_capability {
 #define UCSI_CAP_CABLE_DETAILS			BIT(5)
 #define UCSI_CAP_EXT_SUPPLY_NOTIFICATIONS	BIT(6)
 #define UCSI_CAP_PD_RESET			BIT(7)
-#define UCSI_CAP_GET_PD_MESSAGE		BIT(8)
+#define UCSI_CAP_GET_PD_MESSAGE			BIT(8)
+#define UCSI_CAP_GET_ATTENTION_VDO		BIT(9)
+#define UCSI_CAP_FW_UPDATE_REQUEST		BIT(10)
+#define UCSI_CAP_NEGOTIATED_PWR_LEVEL_CHANGE	BIT(11)
+#define UCSI_CAP_SECURITY_REQUEST		BIT(12)
+#define UCSI_CAP_SET_RETIMER_MODE		BIT(13)
+#define UCSI_CAP_CHUNKING_SUPPORT		BIT(14)
 	u8 reserved_1;
 	u8 num_alt_modes;
 	u8 reserved_2;
@@ -321,47 +347,12 @@ struct ucsi_connector_status {
 #define   UCSI_CONSTAT_PARTNER_TYPE_AUDIO	6
 	u32 request_data_obj;
 
-	u8 pwr_status[3];
-#define UCSI_CONSTAT_BC_STATUS(_p_)		((_p_[0]) & GENMASK(1, 0))
+	u8 pwr_status;
+#define UCSI_CONSTAT_BC_STATUS(_p_)		((_p_) & GENMASK(1, 0))
 #define   UCSI_CONSTAT_BC_NOT_CHARGING		0
 #define   UCSI_CONSTAT_BC_NOMINAL_CHARGING	1
 #define   UCSI_CONSTAT_BC_SLOW_CHARGING		2
 #define   UCSI_CONSTAT_BC_TRICKLE_CHARGING	3
-#define UCSI_CONSTAT_PROVIDER_CAP_LIMIT(_p_)	(((_p_[0]) & GENMASK(5, 2)) >> 2)
-#define   UCSI_CONSTAT_CAP_PWR_LOWERED		0
-#define   UCSI_CONSTAT_CAP_PWR_BUDGET_LIMIT	1
-#define UCSI_CONSTAT_PROVIDER_PD_VERSION_OPER_MODE(_p_)	\
-	((get_unaligned_le32(_p_) & GENMASK(21, 6)) >> 6)
-#define UCSI_CONSTAT_ORIENTATION(_p_)		(((_p_[2]) & GENMASK(6, 6)) >> 6)
-#define   UCSI_CONSTAT_ORIENTATION_DIRECT	0
-#define   UCSI_CONSTAT_ORIENTATION_FLIPPED	1
-#define UCSI_CONSTAT_SINK_PATH_STATUS(_p_)	(((_p_[2]) & GENMASK(7, 7)) >> 7)
-#define   UCSI_CONSTAT_SINK_PATH_DISABLED	0
-#define   UCSI_CONSTAT_SINK_PATH_ENABLED	1
-	u8 pwr_readings[9];
-#define UCSI_CONSTAT_REV_CURR_PROT_STATUS(_p_)	((_p_[0]) & 0x1)
-#define UCSI_CONSTAT_PWR_READING_VALID(_p_)	(((_p_[0]) & GENMASK(1, 1)) >> 1)
-#define UCSI_CONSTAT_CURRENT_SCALE(_p_)		(((_p_[0]) & GENMASK(4, 2)) >> 2)
-#define UCSI_CONSTAT_PEAK_CURRENT(_p_) \
-	((get_unaligned_le32(_p_) & GENMASK(20, 5)) >> 5)
-#define UCSI_CONSTAT_AVG_CURRENT(_p_) \
-	((get_unaligned_le32(&(_p_)[2]) & GENMASK(20, 5)) >> 5)
-#define UCSI_CONSTAT_VOLTAGE_SCALE(_p_) \
-	((get_unaligned_le16(&(_p_)[4]) & GENMASK(8, 5)) >> 5)
-#define UCSI_CONSTAT_VOLTAGE_READING(_p_) \
-	((get_unaligned_le32(&(_p_)[5]) & GENMASK(16, 1)) >> 1)
-} __packed;
-
-/*
- * Data structure filled by PPM in response to GET_PD_MESSAGE command with the
- * Response Message Type set to Discover Identity Response.
- */
-struct ucsi_pd_message_disc_id {
-	u32 vdm_header;
-	u32 id_header;
-	u32 cert_stat;
-	u32 product;
-	u32 vdo[3];
 } __packed;
 
 /* -------------------------------------------------------------------------- */
@@ -379,7 +370,7 @@ struct ucsi_debugfs_entry {
 struct ucsi {
 	u16 version;
 	struct device *dev;
-	struct driver_data *driver_data;
+	void *driver_data;
 
 	const struct ucsi_operations *ops;
 
@@ -405,10 +396,14 @@ struct ucsi {
 #define EVENT_PENDING	0
 #define COMMAND_PENDING	1
 #define ACK_PENDING	2
+	struct completion complete;
 
 	unsigned long quirks;
 #define UCSI_NO_PARTNER_PDOS	BIT(0)	/* Don't read partner's PDOs */
+#define UCSI_DELAY_DEVICE_PDOS	BIT(1)	/* Reading PDOs fails until the parter is in PD mode */
 };
+
+#define UCSI_MAX_DATA_LENGTH(u) (((u)->version < UCSI_VERSION_2_0) ? 0x10 : 0xff)
 
 #define UCSI_MAX_SVID		5
 #define UCSI_MAX_ALTMODES	(UCSI_MAX_SVID * 6)
@@ -440,7 +435,6 @@ struct ucsi_connector {
 
 	struct ucsi_connector_status status;
 	struct ucsi_connector_capability cap;
-	struct ucsi_cable_property cable_prop;
 	struct power_supply *psy;
 	struct power_supply_desc psy_desc;
 	u32 rdo;
@@ -468,6 +462,9 @@ int ucsi_send_command(struct ucsi *ucsi, u64 command,
 void ucsi_altmode_update_active(struct ucsi_connector *con);
 int ucsi_resume(struct ucsi *ucsi);
 
+void ucsi_notify_common(struct ucsi *ucsi, u32 cci);
+int ucsi_sync_control_common(struct ucsi *ucsi, u64 command);
+
 #if IS_ENABLED(CONFIG_POWER_SUPPLY)
 int ucsi_register_port_psy(struct ucsi_connector *con);
 void ucsi_unregister_port_psy(struct ucsi_connector *con);
@@ -492,7 +489,7 @@ ucsi_register_displayport(struct ucsi_connector *con,
 			  bool override, int offset,
 			  struct typec_altmode_desc *desc)
 {
-	return NULL;
+	return typec_port_register_altmode(con->port, desc);
 }
 
 static inline void

@@ -45,6 +45,7 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_AK4535
 	imply SND_SOC_AK4554
 	imply SND_SOC_AK4613
+	imply SND_SOC_AK4619
 	imply SND_SOC_AK4641
 	imply SND_SOC_AK4642
 	imply SND_SOC_AK4671
@@ -218,7 +219,9 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_RT722_SDCA_SDW
 	imply SND_SOC_RT1308_SDW
 	imply SND_SOC_RT1316_SDW
+	imply SND_SOC_RT1318
 	imply SND_SOC_RT1318_SDW
+	imply SND_SOC_RT1320_SDW
 	imply SND_SOC_RT9120
 	imply SND_SOC_RTQ9128
 	imply SND_SOC_SDW_MOCKUP
@@ -275,6 +278,7 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_UDA1380
 	imply SND_SOC_WCD9335
 	imply SND_SOC_WCD934X
+	imply SND_SOC_WCD937X_SDW
 	imply SND_SOC_WCD938X_SDW
 	imply SND_SOC_WCD939X_SDW
 	imply SND_SOC_LPASS_MACRO_COMMON
@@ -592,6 +596,10 @@ config SND_SOC_AK4554
 config SND_SOC_AK4613
 	tristate "AKM AK4613 CODEC"
 	depends on I2C
+
+config SND_SOC_AK4619
+        tristate "AKM AK4619 CODEC"
+        depends on I2C
 
 config SND_SOC_AK4641
 	tristate
@@ -1530,10 +1538,20 @@ config SND_SOC_RT1316_SDW
 	depends on SOUNDWIRE
 	select REGMAP_SOUNDWIRE
 
+config SND_SOC_RT1318
+	tristate
+	depends on I2C
+
 config SND_SOC_RT1318_SDW
 	tristate "Realtek RT1318 Codec - SDW"
 	depends on SOUNDWIRE
 	select REGMAP_SOUNDWIRE
+
+config SND_SOC_RT1320_SDW
+	tristate "Realtek RT1320 Codec - SDW"
+	depends on SOUNDWIRE
+	select REGMAP_SOUNDWIRE
+	select REGMAP_SOUNDWIRE_MBQ
 
 config SND_SOC_RT5514
 	tristate
@@ -2060,6 +2078,25 @@ config SND_SOC_WCD934X
 	  The WCD9340/9341 is a audio codec IC Integrated in
 	  Qualcomm SoCs like SDM845.
 
+config SND_SOC_WCD937X
+	depends on SND_SOC_WCD937X_SDW
+	tristate
+	depends on SOUNDWIRE || !SOUNDWIRE
+	select SND_SOC_WCD_CLASSH
+
+config SND_SOC_WCD937X_SDW
+	tristate "WCD9370/WCD9375 Codec - SDW"
+	select SND_SOC_WCD937X
+	select SND_SOC_WCD_MBHC
+	select REGMAP_IRQ
+	depends on SOUNDWIRE
+	select REGMAP_SOUNDWIRE
+	help
+	  The WCD9370/9375 is an audio codec IC used with SoCs
+	  like SC7280 or QCM6490 chipsets, and it connected
+	  via soundwire.
+	  To compile this codec driver say Y or m.
+
 config SND_SOC_WCD938X
 	depends on SND_SOC_WCD938X_SDW
 	tristate
@@ -2465,6 +2502,7 @@ config SND_SOC_LPASS_MACRO_COMMON
 config SND_SOC_LPASS_WSA_MACRO
 	depends on COMMON_CLK
 	select REGMAP_MMIO
+	select SND_SOC_LPASS_MACRO_COMMON
 	tristate "Qualcomm WSA Macro in LPASS(Low Power Audio SubSystem)"
 
 config SND_SOC_LPASS_VA_MACRO

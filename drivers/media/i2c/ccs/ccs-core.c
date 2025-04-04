@@ -670,7 +670,7 @@ static int ccs_set_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	}
 
-	pm_status = pm_runtime_get_if_active(&client->dev, true);
+	pm_status = pm_runtime_get_if_active(&client->dev);
 	if (!pm_status)
 		return 0;
 
@@ -3084,6 +3084,7 @@ static const struct media_entity_operations ccs_entity_ops = {
 };
 
 static const struct v4l2_subdev_internal_ops ccs_internal_src_ops = {
+	.init_state = ccs_init_state,
 	.registered = ccs_registered,
 	.unregistered = ccs_unregistered,
 	.open = ccs_open,

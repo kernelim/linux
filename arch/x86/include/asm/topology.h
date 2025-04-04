@@ -102,6 +102,30 @@ static inline void setup_node_to_cpumask_map(void) { }
 
 #include <asm-generic/topology.h>
 
+/* Topology information */
+enum x86_topology_domains {
+	TOPO_SMT_DOMAIN,
+	TOPO_CORE_DOMAIN,
+	TOPO_MODULE_DOMAIN,
+	TOPO_TILE_DOMAIN,
+	TOPO_DIE_DOMAIN,
+	TOPO_DIEGRP_DOMAIN,
+	TOPO_PKG_DOMAIN,
+	TOPO_MAX_DOMAIN,
+};
+
+struct x86_topology_system {
+	unsigned int	dom_shifts[TOPO_MAX_DOMAIN];
+	unsigned int	dom_size[TOPO_MAX_DOMAIN];
+};
+
+extern struct x86_topology_system x86_topo_system;
+
+static inline unsigned int topology_get_domain_size(enum x86_topology_domains dom)
+{
+	return x86_topo_system.dom_size[dom];
+}
+
 extern const struct cpumask *cpu_coregroup_mask(int cpu);
 extern const struct cpumask *cpu_clustergroup_mask(int cpu);
 
@@ -112,9 +136,47 @@ extern const struct cpumask *cpu_clustergroup_mask(int cpu);
 #define topology_core_id(cpu)			(cpu_data(cpu).topo.core_id)
 #define topology_ppin(cpu)			(cpu_data(cpu).ppin)
 
-#define topology_amd_node_id(cpu)		(cpu_data(cpu).topo.die_id)
+#define topology_amd_node_id(cpu)		(cpu_data(cpu).topo.amd_node_id)
 
-extern unsigned int __max_die_per_package;
+extern unsigned int __max_dies_per_package;
+extern unsigned int __max_logical_packages;
+extern unsigned int __max_threads_per_core;
+extern unsigned int __num_threads_per_package;
+extern unsigned int __num_cores_per_package;
+
+static inline unsigned int topology_max_packages(void)
+{
+	return __max_logical_packages;
+}
+
+static inline unsigned int topology_max_die_per_package(void)
+{
+	return __max_dies_per_package;
+}
+
+static inline unsigned int topology_max_dies_per_package(void)
+{
+	return __max_dies_per_package;
+}
+
+static inline unsigned int topology_num_cores_per_package(void)
+{
+	return __num_cores_per_package;
+}
+
+static inline unsigned int topology_num_threads_per_package(void)
+{
+	return __num_threads_per_package;
+}
+
+#ifdef CONFIG_X86_LOCAL_APIC
+int topology_get_logical_id(u32 apicid, enum x86_topology_domains at_level);
+#else
+static inline int topology_get_logical_id(u32 apicid, enum x86_topology_domains at_level)
+{
+	return 0;
+}
+#endif
 
 #ifdef CONFIG_SMP
 #define topology_cluster_id(cpu)		(cpu_data(cpu).topo.l2c_id)
@@ -123,17 +185,11 @@ extern unsigned int __max_die_per_package;
 #define topology_core_cpumask(cpu)		(per_cpu(cpu_core_map, cpu))
 #define topology_sibling_cpumask(cpu)		(per_cpu(cpu_sibling_map, cpu))
 
-extern unsigned int __max_logical_packages;
-#define topology_max_packages()			(__max_logical_packages)
 
-static inline int topology_max_die_per_package(void)
+static inline int topology_phys_to_logical_pkg(unsigned int pkg)
 {
-	return __max_die_per_package;
-}
-
-static inline int topology_max_dies_per_package(void)
-{
-	return __max_die_per_package;
+	return topology_get_logical_id(pkg << x86_topo_system.dom_shifts[TOPO_PKG_DOMAIN],
+				       TOPO_PKG_DOMAIN);
 }
 
 extern int __max_smt_threads;
@@ -145,13 +201,11 @@ static inline int topology_max_smt_threads(void)
 
 #include <linux/cpu_smt.h>
 
-int topology_update_package_map(unsigned int apicid, unsigned int cpu);
-int topology_update_die_map(unsigned int dieid, unsigned int cpu);
-int topology_phys_to_logical_pkg(unsigned int pkg);
+extern unsigned int __amd_nodes_per_pkg;
 
 static inline unsigned int topology_amd_nodes_per_pkg(void)
 {
-	return __max_die_per_package;
+	return __amd_nodes_per_pkg;
 }
 
 extern struct cpumask __cpu_primary_thread_mask;
@@ -165,6 +219,7 @@ static inline bool topology_is_primary_thread(unsigned int cpu)
 {
 	return cpumask_test_cpu(cpu, cpu_primary_thread_mask);
 }
+
 #else /* CONFIG_SMP */
 static inline int topology_phys_to_logical_pkg(unsigned int pkg) { return 0; }
 static inline int topology_max_smt_threads(void) { return 1; }
@@ -227,9 +282,22 @@ static inline long arch_scale_freq_capacity(int cpu)
 }
 #define arch_scale_freq_capacity arch_scale_freq_capacity
 
+bool arch_enable_hybrid_capacity_scale(void);
+void arch_set_cpu_capacity(int cpu, unsigned long cap, unsigned long max_cap,
+			   unsigned long cap_freq, unsigned long base_freq);
+
+unsigned long arch_scale_cpu_capacity(int cpu);
+#define arch_scale_cpu_capacity arch_scale_cpu_capacity
+
 extern void arch_set_max_freq_ratio(bool turbo_disabled);
 extern void freq_invariance_set_perf_ratio(u64 ratio, bool turbo_disabled);
 #else
+static inline bool arch_enable_hybrid_capacity_scale(void) { return false; }
+static inline void arch_set_cpu_capacity(int cpu, unsigned long cap,
+					 unsigned long max_cap,
+					 unsigned long cap_freq,
+					 unsigned long base_freq) { }
+
 static inline void arch_set_max_freq_ratio(bool turbo_disabled) { }
 static inline void freq_invariance_set_perf_ratio(u64 ratio, bool turbo_disabled) { }
 #endif

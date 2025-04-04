@@ -21,6 +21,10 @@ static struct kunit *current_test;
 
 #define BT_BUF_SIZE (PAGE_SIZE * 4)
 
+static bool force_bt;
+module_param_named(backtrace, force_bt, bool, 0444);
+MODULE_PARM_DESC(backtrace, "print backtraces for all tests");
+
 /*
  * To avoid printk line limit split backtrace by lines
  */
@@ -43,7 +47,7 @@ static void print_backtrace(char *bt)
 static noinline int test_unwind(struct task_struct *task, struct pt_regs *regs,
 				unsigned long sp)
 {
-	int frame_count, prev_is_func2, seen_func2_func1;
+	int frame_count, prev_is_func2, seen_func2_func1, seen_arch_rethook_trampoline;
 	const int max_frames = 128;
 	struct unwind_state state;
 	size_t bt_pos = 0;
@@ -59,6 +63,7 @@ static noinline int test_unwind(struct task_struct *task, struct pt_regs *regs,
 	frame_count = 0;
 	prev_is_func2 = 0;
 	seen_func2_func1 = 0;
+	seen_arch_rethook_trampoline = 0;
 	unwind_for_each_frame(&state, task, regs, sp) {
 		unsigned long addr = unwind_get_return_address(&state);
 		char sym[KSYM_SYMBOL_LEN];
@@ -84,6 +89,8 @@ static noinline int test_unwind(struct task_struct *task, struct pt_regs *regs,
 		if (prev_is_func2 && str_has_prefix(sym, "unwindme_func1"))
 			seen_func2_func1 = 1;
 		prev_is_func2 = str_has_prefix(sym, "unwindme_func2");
+		if (str_has_prefix(sym, "arch_rethook_trampoline+0x0/"))
+			seen_arch_rethook_trampoline = 1;
 	}
 
 	/* Check the results. */
@@ -99,7 +106,11 @@ static noinline int test_unwind(struct task_struct *task, struct pt_regs *regs,
 		kunit_err(current_test, "Maximum number of frames exceeded\n");
 		ret = -EINVAL;
 	}
-	if (ret)
+	if (seen_arch_rethook_trampoline) {
+		kunit_err(current_test, "arch_rethook_trampoline+0x0 in unwinding results\n");
+		ret = -EINVAL;
+	}
+	if (ret || force_bt)
 		print_backtrace(bt);
 	kfree(bt);
 	return ret;
@@ -272,19 +283,18 @@ static noinline int test_unwind_ftraced_func(struct unwindme *u)
 
 static int test_unwind_ftrace(struct unwindme *u)
 {
-	struct ftrace_ops *fops;
 	int ret;
+#ifdef CONFIG_DYNAMIC_FTRACE
+	struct ftrace_ops *fops;
 
-#ifndef CONFIG_DYNAMIC_FTRACE
-	kunit_skip(current_test, "requires CONFIG_DYNAMIC_FTRACE");
-	fops = NULL; /* used */
-#else
 	fops = kunit_kzalloc(current_test, sizeof(*fops), GFP_KERNEL);
 	fops->func = test_unwind_ftrace_handler;
 	fops->flags = FTRACE_OPS_FL_DYNAMIC |
 		     FTRACE_OPS_FL_RECURSION |
 		     FTRACE_OPS_FL_SAVE_REGS |
 		     FTRACE_OPS_FL_PERMANENT;
+#else
+	kunit_skip(current_test, "requires CONFIG_DYNAMIC_FTRACE");
 #endif
 
 	ret = ftrace_set_filter_ip(fops, (unsigned long)test_unwind_ftraced_func, 0, 0);

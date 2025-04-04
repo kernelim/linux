@@ -41,29 +41,46 @@
 
 typedef long (*sys_call_ptr_t)(struct pt_regs *regs);
 
-static inline void set_cpu_flag(int flag)
+static __always_inline void set_cpu_flag(int flag)
 {
 	S390_lowcore.cpu_flags |= (1UL << flag);
 }
 
-static inline void clear_cpu_flag(int flag)
+static __always_inline void clear_cpu_flag(int flag)
 {
 	S390_lowcore.cpu_flags &= ~(1UL << flag);
 }
 
-static inline int test_cpu_flag(int flag)
+static __always_inline bool test_cpu_flag(int flag)
 {
-	return !!(S390_lowcore.cpu_flags & (1UL << flag));
+	return S390_lowcore.cpu_flags & (1UL << flag);
+}
+
+static __always_inline bool test_and_set_cpu_flag(int flag)
+{
+	if (test_cpu_flag(flag))
+		return true;
+	set_cpu_flag(flag);
+	return false;
+}
+
+static __always_inline bool test_and_clear_cpu_flag(int flag)
+{
+	if (!test_cpu_flag(flag))
+		return false;
+	clear_cpu_flag(flag);
+	return true;
 }
 
 /*
  * Test CIF flag of another CPU. The caller needs to ensure that
  * CPU hotplug can not happen, e.g. by disabling preemption.
  */
-static inline int test_cpu_flag_of(int flag, int cpu)
+static __always_inline bool test_cpu_flag_of(int flag, int cpu)
 {
 	struct lowcore *lc = lowcore_ptr[cpu];
-	return !!(lc->cpu_flags & (1UL << flag));
+
+	return lc->cpu_flags & (1UL << flag);
 }
 
 #define arch_needs_cpu() test_cpu_flag(CIF_NOHZ_DELAY)
@@ -85,11 +102,10 @@ unsigned long vdso_size(void);
  * User space process size: 2GB for 31 bit, 4TB or 8PT for 64 bit.
  */
 
-#define TASK_SIZE_OF(tsk)	(test_tsk_thread_flag(tsk, TIF_31BIT) ? \
+#define TASK_SIZE		(test_thread_flag(TIF_31BIT) ? \
 					_REGION3_SIZE : TASK_SIZE_MAX)
 #define TASK_UNMAPPED_BASE	(test_thread_flag(TIF_31BIT) ? \
 					(_REGION3_SIZE >> 1) : (_REGION2_SIZE >> 1))
-#define TASK_SIZE		TASK_SIZE_OF(current)
 #define TASK_SIZE_MAX		(-PAGE_SIZE)
 
 #define VDSO_BASE		(STACK_TOP + PAGE_SIZE)
@@ -98,6 +114,41 @@ unsigned long vdso_size(void);
 #define STACK_TOP_MAX		(_REGION2_SIZE - vdso_size() - PAGE_SIZE)
 
 #define HAVE_ARCH_PICK_MMAP_LAYOUT
+
+#define __stackleak_poison __stackleak_poison
+static __always_inline void __stackleak_poison(unsigned long erase_low,
+					       unsigned long erase_high,
+					       unsigned long poison)
+{
+	unsigned long tmp, count;
+
+	count = erase_high - erase_low;
+	if (!count)
+		return;
+	asm volatile(
+		"	cghi	%[count],8\n"
+		"	je	2f\n"
+		"	aghi	%[count],-(8+1)\n"
+		"	srlg	%[tmp],%[count],8\n"
+		"	ltgr	%[tmp],%[tmp]\n"
+		"	jz	1f\n"
+		"0:	stg	%[poison],0(%[addr])\n"
+		"	mvc	8(256-8,%[addr]),0(%[addr])\n"
+		"	la	%[addr],256(%[addr])\n"
+		"	brctg	%[tmp],0b\n"
+		"1:	stg	%[poison],0(%[addr])\n"
+		"	larl	%[tmp],3f\n"
+		"	ex	%[count],0(%[tmp])\n"
+		"	j	4f\n"
+		"2:	stg	%[poison],0(%[addr])\n"
+		"	j	4f\n"
+		"3:	mvc	8(1,%[addr]),0(%[addr])\n"
+		"4:\n"
+		: [addr] "+&a" (erase_low), [count] "+&d" (count), [tmp] "=&a" (tmp)
+		: [poison] "d" (poison)
+		: "memory", "cc"
+		);
+}
 
 /*
  * Thread structure
@@ -172,7 +223,6 @@ typedef struct thread_struct thread_struct;
 	execve_tail();							\
 } while (0)
 
-/* Forward declaration, a strange C thing */
 struct task_struct;
 struct mm_struct;
 struct seq_file;
@@ -194,7 +244,23 @@ unsigned long __get_wchan(struct task_struct *p);
 /* Has task runtime instrumentation enabled ? */
 #define is_ri_task(tsk) (!!(tsk)->thread.ri_cb)
 
-register unsigned long current_stack_pointer asm("r15");
+/* avoid using global register due to gcc bug in versions < 8.4 */
+#define current_stack_pointer (__current_stack_pointer())
+
+static __always_inline unsigned long __current_stack_pointer(void)
+{
+	unsigned long sp;
+
+	asm volatile("lgr %0,15" : "=d" (sp));
+	return sp;
+}
+
+static __always_inline bool on_thread_stack(void)
+{
+	unsigned long ksp = S390_lowcore.kernel_stack;
+
+	return !((ksp ^ current_stack_pointer) & ~(THREAD_SIZE - 1));
+}
 
 static __always_inline unsigned short stap(void)
 {

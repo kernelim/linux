@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
-// Copyright(c) 2021-2024 Intel Corporation. All rights reserved.
+// Copyright(c) 2021-2024 Intel Corporation
 //
 // Authors: Cezary Rojewski <cezary.rojewski@intel.com>
 //          Amadeusz Slawinski <amadeuszx.slawinski@linux.intel.com>
@@ -52,12 +52,14 @@ union avs_icl_memwnd2_slot_type {
 		u32 type:24;
 	};
 } __packed;
+static_assert(sizeof(union avs_icl_memwnd2_slot_type) == 4);
 
 struct avs_icl_memwnd2_desc {
 	u32 resource_id;
 	union avs_icl_memwnd2_slot_type slot_id;
 	u32 vma;
 } __packed;
+static_assert(sizeof(struct avs_icl_memwnd2_desc) == 12);
 
 #define AVS_ICL_MEMWND2_SLOTS_COUNT	15
 
@@ -68,6 +70,7 @@ struct avs_icl_memwnd2 {
 	};
 	u8 slot_array[AVS_ICL_MEMWND2_SLOTS_COUNT][SZ_4K];
 } __packed;
+static_assert(sizeof(struct avs_icl_memwnd2) == 65536);
 
 #define AVS_ICL_SLOT_UNUSED \
 	((union avs_icl_memwnd2_slot_type) { 0x00000000U })
@@ -185,8 +188,7 @@ const struct avs_dsp_ops avs_icl_dsp_ops = {
 	.power = avs_dsp_core_power,
 	.reset = avs_dsp_core_reset,
 	.stall = avs_dsp_core_stall,
-	.irq_handler = avs_irq_handler,
-	.irq_thread = avs_cnl_irq_thread,
+	.dsp_interrupt = avs_cnl_dsp_interrupt,
 	.int_control = avs_dsp_interrupt_control,
 	.load_basefw = avs_icl_load_basefw,
 	.load_lib = avs_hda_load_library,

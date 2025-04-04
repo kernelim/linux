@@ -5,6 +5,8 @@ config DRM_OMAP
 	depends on ARCH_OMAP2PLUS || ARCH_MULTIPLATFORM
 	select OMAP2_DSS
 	select DRM_KMS_HELPER
+	select DRM_DISPLAY_HELPER
+	select DRM_BRIDGE_CONNECTOR
 	select VIDEOMODE_HELPERS
 	select HDMI
 	default n

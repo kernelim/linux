@@ -114,12 +114,12 @@ struct scsi_disk {
 	u32		zones_optimal_open;
 	u32		zones_optimal_nonseq;
 	u32		zones_max_open;
-	u32		*zones_wp_offset;
-	spinlock_t	zones_wp_offset_lock;
-	u32		*rev_wp_offset;
-	struct mutex	rev_mutex;
-	struct work_struct zone_wp_offset_work;
-	char		*zone_wp_update_buf;
+	RH_KABI_DEPRECATE(u32 *,		zones_wp_offset)
+	RH_KABI_DEPRECATE(spinlock_t,		zones_wp_offset_lock)
+	RH_KABI_DEPRECATE(u32 *,		rev_wp_offset)
+	RH_KABI_DEPRECATE(struct mutex,		rev_mutex)
+	RH_KABI_DEPRECATE(struct work_struct,	zone_wp_offset_work)
+	RH_KABI_DEPRECATE(char *,		zone_wp_update_buf)
 #endif
 	atomic_t	openers;
 	sector_t	capacity;	/* size in logical blocks */
@@ -159,6 +159,7 @@ struct scsi_disk {
 	unsigned	urswrz : 1;
 	unsigned	security : 1;
 	unsigned	ignore_medium_access_errors : 1;
+	RH_KABI_FILL_HOLE(unsigned use_atomic_write_boundary:1)
 
 	RH_KABI_FILL_HOLE(bool suspended)	/* Disk is suspended (stopped) */
 
@@ -172,9 +173,9 @@ struct scsi_disk {
 	 * between zone starting LBAs is constant.
 	 */
 	RH_KABI_USE(1, u32 zone_starting_lba_gran)
-	RH_KABI_USE(2, u32 min_xfer_blocks)
-	RH_KABI_RESERVE(3)
-	RH_KABI_RESERVE(4)
+	RH_KABI_USE_SPLIT(2, u32 min_xfer_blocks, u32 max_atomic)
+	RH_KABI_USE_SPLIT(3, u32 atomic_alignment, u32 atomic_granularity)
+	RH_KABI_USE_SPLIT(4, u32 max_atomic_with_boundary, u32 max_atomic_boundary)
 };
 #define to_scsi_disk(obj) container_of(obj, struct scsi_disk, disk_dev)
 
@@ -247,27 +248,12 @@ static inline sector_t sectors_to_logical(struct scsi_device *sdev, sector_t sec
 	return sector >> (ilog2(sdev->sector_size) - 9);
 }
 
-#ifdef CONFIG_BLK_DEV_INTEGRITY
-
-extern void sd_dif_config_host(struct scsi_disk *);
-
-#else /* CONFIG_BLK_DEV_INTEGRITY */
-
-static inline void sd_dif_config_host(struct scsi_disk *disk)
-{
-}
-
-#endif /* CONFIG_BLK_DEV_INTEGRITY */
-
-static inline int sd_is_zoned(struct scsi_disk *sdkp)
-{
-	return sdkp->zoned == 1 || sdkp->device->type == TYPE_ZBC;
-}
+void sd_dif_config_host(struct scsi_disk *sdkp, struct queue_limits *lim);
 
 #ifdef CONFIG_BLK_DEV_ZONED
 
-void sd_zbc_free_zone_info(struct scsi_disk *sdkp);
-int sd_zbc_read_zones(struct scsi_disk *sdkp, u8 buf[SD_BUF_SIZE]);
+int sd_zbc_read_zones(struct scsi_disk *sdkp, struct queue_limits *lim,
+		u8 buf[SD_BUF_SIZE]);
 int sd_zbc_revalidate_zones(struct scsi_disk *sdkp);
 blk_status_t sd_zbc_setup_zone_mgmt_cmnd(struct scsi_cmnd *cmd,
 					 unsigned char op, bool all);
@@ -276,14 +262,10 @@ unsigned int sd_zbc_complete(struct scsi_cmnd *cmd, unsigned int good_bytes,
 int sd_zbc_report_zones(struct gendisk *disk, sector_t sector,
 		unsigned int nr_zones, report_zones_cb cb, void *data);
 
-blk_status_t sd_zbc_prepare_zone_append(struct scsi_cmnd *cmd, sector_t *lba,
-				        unsigned int nr_blocks);
-
 #else /* CONFIG_BLK_DEV_ZONED */
 
-static inline void sd_zbc_free_zone_info(struct scsi_disk *sdkp) {}
-
-static inline int sd_zbc_read_zones(struct scsi_disk *sdkp, u8 buf[SD_BUF_SIZE])
+static inline int sd_zbc_read_zones(struct scsi_disk *sdkp,
+		struct queue_limits *lim, u8 buf[SD_BUF_SIZE])
 {
 	return 0;
 }
@@ -304,13 +286,6 @@ static inline unsigned int sd_zbc_complete(struct scsi_cmnd *cmd,
 			unsigned int good_bytes, struct scsi_sense_hdr *sshdr)
 {
 	return good_bytes;
-}
-
-static inline blk_status_t sd_zbc_prepare_zone_append(struct scsi_cmnd *cmd,
-						      sector_t *lba,
-						      unsigned int nr_blocks)
-{
-	return BLK_STS_TARGET;
 }
 
 #define sd_zbc_report_zones NULL

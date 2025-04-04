@@ -35,7 +35,7 @@ static int wp_pte(pte_t *pte, unsigned long addr, unsigned long end,
 		  struct mm_walk *walk)
 {
 	struct wp_walk *wpwalk = walk->private;
-	pte_t ptent = *pte;
+	pte_t ptent = ptep_get(pte);
 
 	if (pte_write(ptent)) {
 		pte_t old_pte = ptep_modify_prot_start(walk->vma, addr, pte);
@@ -91,7 +91,7 @@ static int clean_record_pte(pte_t *pte, unsigned long addr,
 {
 	struct wp_walk *wpwalk = walk->private;
 	struct clean_walk *cwalk = to_clean_walk(wpwalk);
-	pte_t ptent = *pte;
+	pte_t ptent = ptep_get(pte);
 
 	if (pte_dirty(ptent)) {
 		pgoff_t pgoff = ((addr - walk->vma->vm_start) >> PAGE_SHIFT) +
@@ -288,13 +288,14 @@ EXPORT_SYMBOL_GPL(wp_shared_mapping_range);
  * @end: Pointer to the number of the last set bit in @bitmap.
  * none set. The value is modified as new bits are set by the function.
  *
- * Note: When this function returns there is no guarantee that a CPU has
+ * When this function returns there is no guarantee that a CPU has
  * not already dirtied new ptes. However it will not clean any ptes not
  * reported in the bitmap. The guarantees are as follows:
- * a) All ptes dirty when the function starts executing will end up recorded
- *    in the bitmap.
- * b) All ptes dirtied after that will either remain dirty, be recorded in the
- *    bitmap or both.
+ *
+ * * All ptes dirty when the function starts executing will end up recorded
+ *   in the bitmap.
+ * * All ptes dirtied after that will either remain dirty, be recorded in the
+ *   bitmap or both.
  *
  * If a caller needs to make sure all dirty ptes are picked up and none
  * additional are added, it first needs to write-protect the address-space

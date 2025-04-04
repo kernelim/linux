@@ -1,3 +1,3 @@
-#5-
-0x375422dc	__ib_create_cq	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
+#6-
+0xfca47518	__ib_create_cq	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
 

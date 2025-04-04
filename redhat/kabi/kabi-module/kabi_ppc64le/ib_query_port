@@ -1,3 +1,3 @@
-#5-
-0x9f33f821	ib_query_port	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
+#6-
+0xb404d914	ib_query_port	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
 

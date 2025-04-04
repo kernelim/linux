@@ -45,3 +45,5 @@ aarch64-64k=generic:generic-arm:generic-arm-aarch64:generic-arm-aarch64-64k
 aarch64-64k-debug=generic:generic-arm:generic-arm-aarch64:generic-arm-aarch64-64k:debug:debug-arm-aarch64:debug-arm-aarch64-64k
 aarch64-rt=generic:generic-arm:generic-arm-aarch64:rt:rt-arm-aarch64
 aarch64-rt-debug=generic:generic-arm:generic-arm-aarch64:rt:rt-arm-aarch64:debug:debug-arm-aarch64:rt-debug
+aarch64-rt-64k=generic:generic-arm:generic-arm-aarch64:rt:rt-arm-aarch64:rt-arm-aarch64-64k
+aarch64-rt-64k-debug=generic:generic-arm:generic-arm-aarch64:rt:rt-arm-aarch64:rt-arm-aarch64-64k:debug:debug-arm-aarch64:rt-debug

@@ -1343,7 +1343,8 @@ static enum evict_behavior evict_should_delete(struct inode *inode,
 	if (unlikely(test_bit(GIF_ALLOC_FAILED, &ip->i_flags)))
 		goto should_delete;
 
-	if (test_bit(GIF_DEFER_DELETE, &ip->i_flags))
+	if (gfs2_holder_initialized(&ip->i_iopen_gh) &&
+	    test_bit(GLF_DEFER_DELETE, &ip->i_iopen_gh.gh_gl->gl_flags))
 		return EVICT_SHOULD_DEFER_DELETE;
 
 	/* Deletes should never happen under memory pressure anymore.  */
@@ -1352,12 +1353,8 @@ static enum evict_behavior evict_should_delete(struct inode *inode,
 
 	/* Must not read inode block until block type has been verified */
 	ret = gfs2_glock_nq_init(ip->i_gl, LM_ST_EXCLUSIVE, GL_SKIP, gh);
-	if (unlikely(ret)) {
-		glock_clear_object(ip->i_iopen_gh.gh_gl, ip);
-		ip->i_iopen_gh.gh_flags |= GL_NOCACHE;
-		gfs2_glock_dq_uninit(&ip->i_iopen_gh);
-		return EVICT_SHOULD_DEFER_DELETE;
-	}
+	if (unlikely(ret))
+		return EVICT_SHOULD_SKIP_DELETE;
 
 	if (gfs2_inode_already_deleted(ip->i_gl, ip->i_no_formal_ino))
 		return EVICT_SHOULD_SKIP_DELETE;
@@ -1379,15 +1376,8 @@ static enum evict_behavior evict_should_delete(struct inode *inode,
 
 should_delete:
 	if (gfs2_holder_initialized(&ip->i_iopen_gh) &&
-	    test_bit(HIF_HOLDER, &ip->i_iopen_gh.gh_iflags)) {
-		enum evict_behavior behavior =
-			gfs2_upgrade_iopen_glock(inode);
-
-		if (behavior != EVICT_SHOULD_DELETE) {
-			gfs2_holder_uninit(&ip->i_iopen_gh);
-			return behavior;
-		}
-	}
+	    test_bit(HIF_HOLDER, &ip->i_iopen_gh.gh_iflags))
+		return gfs2_upgrade_iopen_glock(inode);
 	return EVICT_SHOULD_DELETE;
 }
 
@@ -1502,6 +1492,7 @@ static void gfs2_evict_inode(struct inode *inode)
 	enum evict_behavior behavior;
 	int ret;
 
+	gfs2_holder_mark_uninitialized(&gh);
 	if (inode->i_nlink || sb_rdonly(sb) || !ip->i_no_addr)
 		goto out;
 
@@ -1513,7 +1504,6 @@ static void gfs2_evict_inode(struct inode *inode)
 	if (!sdp->sd_jdesc)
 		goto out;
 
-	gfs2_holder_mark_uninitialized(&gh);
 	behavior = evict_should_delete(inode, &gh);
 	if (behavior == EVICT_SHOULD_DEFER_DELETE &&
 	    !test_bit(SDF_KILL, &sdp->sd_flags)) {
@@ -1525,7 +1515,7 @@ static void gfs2_evict_inode(struct inode *inode)
 				gfs2_glock_put(io_gl);
 			goto out;
 		}
-		behavior = EVICT_SHOULD_DELETE;
+		behavior = EVICT_SHOULD_SKIP_DELETE;
 	}
 	if (behavior == EVICT_SHOULD_DELETE)
 		ret = evict_unlinked_inode(inode);
@@ -1535,11 +1525,11 @@ static void gfs2_evict_inode(struct inode *inode)
 	if (gfs2_rs_active(&ip->i_res))
 		gfs2_rs_deltree(&ip->i_res);
 
-	if (gfs2_holder_initialized(&gh))
-		gfs2_glock_dq_uninit(&gh);
 	if (ret && ret != GLR_TRYFAILED && ret != -EROFS)
 		fs_warn(sdp, "gfs2_evict_inode: %d\n", ret);
 out:
+	if (gfs2_holder_initialized(&gh))
+		gfs2_glock_dq_uninit(&gh);
 	truncate_inode_pages_final(&inode->i_data);
 	if (ip->i_qadata)
 		gfs2_assert_warn(sdp, ip->i_qadata->qa_ref == 0);
@@ -1559,7 +1549,6 @@ out:
 	if (ip->i_gl) {
 		glock_clear_object(ip->i_gl, ip);
 		wait_on_bit_io(&ip->i_flags, GIF_GLOP_PENDING, TASK_UNINTERRUPTIBLE);
-		gfs2_glock_add_to_lru(ip->i_gl);
 		gfs2_glock_put_eventually(ip->i_gl);
 		ip->i_gl = NULL;
 	}

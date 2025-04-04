@@ -49,7 +49,6 @@ static void print_mem_encrypt_feature_info(void)
 	switch (cc_vendor) {
 	case CC_VENDOR_INTEL:
 		pr_cont("Intel TDX\n");
-		mark_tech_preview("Intel Trusted Domain Extensions (TDX)", NULL);
 		break;
 	case CC_VENDOR_AMD:
 		pr_cont("AMD");

@@ -1,0 +1,3 @@
+#6-
+0x070c49fe	i2c_smbus_write_byte_data	drivers/i2c/i2c-core	EXPORT_SYMBOL	
+

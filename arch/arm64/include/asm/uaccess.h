@@ -65,7 +65,6 @@ static inline void __uaccess_ttbr0_disable(void)
 	ttbr &= ~TTBR_ASID_MASK;
 	/* reserved_pg_dir placed before swapper_pg_dir */
 	write_sysreg(ttbr - RESERVED_SWAPPER_OFFSET, ttbr0_el1);
-	isb();
 	/* Set reserved ASID */
 	write_sysreg(ttbr, ttbr1_el1);
 	isb();
@@ -89,7 +88,6 @@ static inline void __uaccess_ttbr0_enable(void)
 	ttbr1 &= ~TTBR_ASID_MASK;		/* safety measure */
 	ttbr1 |= ttbr0 & TTBR_ASID_MASK;
 	write_sysreg(ttbr1, ttbr1_el1);
-	isb();
 
 	/* Restore user page table */
 	write_sysreg(ttbr0, ttbr0_el1);
@@ -403,8 +401,6 @@ extern long strncpy_from_user(char *dest, const char __user *src, long count);
 extern __must_check long strnlen_user(const char __user *str, long n);
 
 #ifdef CONFIG_ARCH_HAS_UACCESS_FLUSHCACHE
-struct page;
-void memcpy_page_flushcache(char *to, struct page *page, size_t offset, size_t len);
 extern unsigned long __must_check __copy_user_flushcache(void *to, const void __user *from, unsigned long n);
 
 static inline int __copy_from_user_flushcache(void *dst, const void __user *src, unsigned size)
@@ -413,5 +409,20 @@ static inline int __copy_from_user_flushcache(void *dst, const void __user *src,
 	return __copy_user_flushcache(dst, __uaccess_mask_ptr(src), size);
 }
 #endif
+
+#ifdef CONFIG_ARCH_HAS_SUBPAGE_FAULTS
+
+/*
+ * Return 0 on success, the number of bytes not probed otherwise.
+ */
+static inline size_t probe_subpage_writeable(const char __user *uaddr,
+					     size_t size)
+{
+	if (!system_supports_mte())
+		return 0;
+	return mte_probe_user_range(uaddr, size);
+}
+
+#endif /* CONFIG_ARCH_HAS_SUBPAGE_FAULTS */
 
 #endif /* __ASM_UACCESS_H */

@@ -6,6 +6,7 @@ TEST_GEN_PROGS := ptrace-gpr ptrace-tm-gpr ptrace-tm-spd-gpr \
 
 top_srcdir = ../../../../..
 include ../../lib.mk
+include ../flags.mk
 
 CFLAGS += -m64 -I../../../../../usr/include -I../tm -mhtm -fno-pie
 

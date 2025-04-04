@@ -175,7 +175,8 @@ struct v4l2_subdev *v4l2_i2c_new_subdev_board(struct v4l2_device *v4l2_dev,
  *
  * @sd: pointer to &struct v4l2_subdev
  * @client: pointer to struct i2c_client
- * @devname: the name of the device; if NULL, the I²C device's name will be used
+ * @devname: the name of the device; if NULL, the I²C device drivers's name
+ *           will be used
  * @postfix: sub-device specific string to put right after the I²C device name;
  *	     may be NULL
  */
@@ -277,13 +278,13 @@ static inline void v4l2_i2c_subdev_unregister(struct v4l2_subdev *sd)
  *
  *
  * @v4l2_dev: pointer to &struct v4l2_device.
- * @master: pointer to struct spi_master.
+ * @ctlr: pointer to struct spi_controller.
  * @info: pointer to struct spi_board_info.
  *
  * returns a &struct v4l2_subdev pointer.
  */
 struct v4l2_subdev *v4l2_spi_new_subdev(struct v4l2_device *v4l2_dev,
-		struct spi_master *master, struct spi_board_info *info);
+		struct spi_controller *ctlr, struct spi_board_info *info);
 
 /**
  * v4l2_spi_subdev_init - Initialize a v4l2_subdev with data from an
@@ -307,7 +308,7 @@ void v4l2_spi_subdev_unregister(struct v4l2_subdev *sd);
 
 static inline struct v4l2_subdev *
 v4l2_spi_new_subdev(struct v4l2_device *v4l2_dev,
-		    struct spi_master *master, struct spi_board_info *info)
+		    struct spi_controller *ctlr, struct spi_board_info *info)
 {
 	return NULL;
 }
@@ -479,6 +480,7 @@ enum v4l2_pixel_encoding {
  * @mem_planes: Number of memory planes, which includes the alpha plane (1 to 4).
  * @comp_planes: Number of component planes, which includes the alpha plane (1 to 4).
  * @bpp: Array of per-plane bytes per pixel
+ * @bpp_div: Array of per-plane bytes per pixel divisors to support fractional pixel sizes.
  * @hdiv: Horizontal chroma subsampling factor
  * @vdiv: Vertical chroma subsampling factor
  * @block_w: Per-plane macroblock pixel width (optional)
@@ -490,6 +492,7 @@ struct v4l2_format_info {
 	u8 mem_planes;
 	u8 comp_planes;
 	u8 bpp[4];
+	u8 bpp_div[4];
 	u8 hdiv;
 	u8 vdiv;
 	u8 block_w[4];
@@ -533,9 +536,10 @@ int v4l2_fill_pixfmt_mp(struct v4l2_pix_format_mplane *pixfmt, u32 pixelformat,
  * V4L2_CID_LINK_FREQ control implemented by the transmitter, or value
  * calculated based on the V4L2_CID_PIXEL_RATE implemented by the transmitter.
  *
- * Returns link frequency on success, otherwise a negative error code:
- *	-ENOENT: Link frequency or pixel rate control not found
- *	-EINVAL: Invalid link frequency value
+ * Return:
+ * * >0: Link frequency
+ * * %-ENOENT: Link frequency or pixel rate control not found
+ * * %-EINVAL: Invalid link frequency value
  */
 s64 v4l2_get_link_freq(struct v4l2_ctrl_handler *handler, unsigned int mul,
 		       unsigned int div);
@@ -543,6 +547,31 @@ s64 v4l2_get_link_freq(struct v4l2_ctrl_handler *handler, unsigned int mul,
 void v4l2_simplify_fraction(u32 *numerator, u32 *denominator,
 		unsigned int n_terms, unsigned int threshold);
 u32 v4l2_fraction_to_interval(u32 numerator, u32 denominator);
+
+/**
+ * v4l2_link_freq_to_bitmap - Figure out platform-supported link frequencies
+ * @dev: The struct device
+ * @fw_link_freqs: Array of link frequencies from firmware
+ * @num_of_fw_link_freqs: Number of entries in @fw_link_freqs
+ * @driver_link_freqs: Array of link frequencies supported by the driver
+ * @num_of_driver_link_freqs: Number of entries in @driver_link_freqs
+ * @bitmap: Bitmap of driver-supported link frequencies found in @fw_link_freqs
+ *
+ * This function checks which driver-supported link frequencies are enabled in
+ * system firmware and sets the corresponding bits in @bitmap (after first
+ * zeroing it).
+ *
+ * Return:
+ * * %0: Success
+ * * %-ENOENT: No match found between driver-supported link frequencies and
+ *   those available in firmware.
+ * * %-ENODATA: No link frequencies were specified in firmware.
+ */
+int v4l2_link_freq_to_bitmap(struct device *dev, const u64 *fw_link_freqs,
+			     unsigned int num_of_fw_link_freqs,
+			     const s64 *driver_link_freqs,
+			     unsigned int num_of_driver_link_freqs,
+			     unsigned long *bitmap);
 
 static inline u64 v4l2_buffer_get_timestamp(const struct v4l2_buffer *buf)
 {
@@ -567,19 +596,19 @@ static inline void v4l2_buffer_set_timestamp(struct v4l2_buffer *buf,
 static inline bool v4l2_is_colorspace_valid(__u32 colorspace)
 {
 	return colorspace > V4L2_COLORSPACE_DEFAULT &&
-	       colorspace <= V4L2_COLORSPACE_DCI_P3;
+	       colorspace < V4L2_COLORSPACE_LAST;
 }
 
 static inline bool v4l2_is_xfer_func_valid(__u32 xfer_func)
 {
 	return xfer_func > V4L2_XFER_FUNC_DEFAULT &&
-	       xfer_func <= V4L2_XFER_FUNC_SMPTE2084;
+	       xfer_func < V4L2_XFER_FUNC_LAST;
 }
 
 static inline bool v4l2_is_ycbcr_enc_valid(__u8 ycbcr_enc)
 {
 	return ycbcr_enc > V4L2_YCBCR_ENC_DEFAULT &&
-	       ycbcr_enc <= V4L2_YCBCR_ENC_SMPTE240M;
+	       ycbcr_enc < V4L2_YCBCR_ENC_LAST;
 }
 
 static inline bool v4l2_is_hsv_enc_valid(__u8 hsv_enc)

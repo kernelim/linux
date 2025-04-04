@@ -14,8 +14,12 @@
 #define BSS_FIRST_SECTIONS *(.bss..swapper_pg_dir) \
 			   *(.bss..invalid_pg_dir)
 
+#define RO_EXCEPTION_TABLE_ALIGN	16
+
 /* Handle ro_after_init data on our own. */
 #define RO_AFTER_INIT_DATA
+
+#define RUNTIME_DISCARD_EXIT
 
 #define EMITS_PT_NOTE
 
@@ -65,7 +69,6 @@ SECTIONS
 		 *(.data..ro_after_init)
 		JUMP_TABLE_DATA
 	} :data
-	EXCEPTION_TABLE(16)
 	. = ALIGN(PAGE_SIZE);
 	__end_ro_after_init = .;
 
@@ -79,6 +82,7 @@ SECTIONS
 		_end_amode31_refs = .;
 	}
 
+	. = ALIGN(PAGE_SIZE);
 	_edata = .;		/* End of data section */
 
 	/* will be freed after init */
@@ -131,6 +135,7 @@ SECTIONS
 	/*
 	 * Table with the patch locations to undo expolines
 	*/
+	. = ALIGN(4);
 	.nospec_call_table : {
 		__nospec_call_start = . ;
 		*(.s390_indirect*)
@@ -174,6 +179,8 @@ SECTIONS
 	. = ALIGN(PAGE_SIZE);
 	INIT_DATA_SECTION(0x100)
 
+	RUNTIME_CONST_VARIABLES
+
 	PERCPU_SECTION(0x100)
 
 	.dynsym ALIGN(8) : {
@@ -192,6 +199,7 @@ SECTIONS
 
 	BSS_SECTION(PAGE_SIZE, 4 * PAGE_SIZE, PAGE_SIZE)
 
+	. = ALIGN(PAGE_SIZE);
 	_end = . ;
 
 	/*
@@ -212,6 +220,16 @@ SECTIONS
 		QUAD(__rela_dyn_start)				/* rela_dyn_start */
 		QUAD(__rela_dyn_end)				/* rela_dyn_end */
 		QUAD(_eamode31 - _samode31)			/* amode31_size */
+		QUAD(init_mm)
+		QUAD(swapper_pg_dir)
+		QUAD(invalid_pg_dir)
+#ifdef CONFIG_KASAN
+		QUAD(kasan_early_shadow_page)
+		QUAD(kasan_early_shadow_pte)
+		QUAD(kasan_early_shadow_pmd)
+		QUAD(kasan_early_shadow_pud)
+		QUAD(kasan_early_shadow_p4d)
+#endif
 	} :NONE
 
 	/* Debugging sections.	*/
@@ -223,5 +241,6 @@ SECTIONS
 	DISCARDS
 	/DISCARD/ : {
 		*(.eh_frame)
+		*(.interp)
 	}
 }

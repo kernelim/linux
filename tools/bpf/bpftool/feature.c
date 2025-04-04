@@ -196,7 +196,7 @@ static void probe_unprivileged_disabled(void)
 {
 	long res;
 
-	/* No support for C-style ouptut */
+	/* No support for C-style output */
 
 	res = read_procfs("/proc/sys/kernel/unprivileged_bpf_disabled");
 	if (json_output) {
@@ -225,7 +225,7 @@ static void probe_jit_enable(void)
 {
 	long res;
 
-	/* No support for C-style ouptut */
+	/* No support for C-style output */
 
 	res = read_procfs("/proc/sys/net/core/bpf_jit_enable");
 	if (json_output) {
@@ -255,7 +255,7 @@ static void probe_jit_harden(void)
 {
 	long res;
 
-	/* No support for C-style ouptut */
+	/* No support for C-style output */
 
 	res = read_procfs("/proc/sys/net/core/bpf_jit_harden");
 	if (json_output) {
@@ -285,7 +285,7 @@ static void probe_jit_kallsyms(void)
 {
 	long res;
 
-	/* No support for C-style ouptut */
+	/* No support for C-style output */
 
 	res = read_procfs("/proc/sys/net/core/bpf_jit_kallsyms");
 	if (json_output) {
@@ -311,7 +311,7 @@ static void probe_jit_limit(void)
 {
 	long res;
 
-	/* No support for C-style ouptut */
+	/* No support for C-style output */
 
 	res = read_procfs("/proc/sys/net/core/bpf_jit_limit");
 	if (json_output) {
@@ -668,7 +668,8 @@ probe_helper_ifindex(enum bpf_func_id id, enum bpf_prog_type prog_type,
 
 	probe_prog_load_ifindex(prog_type, insns, ARRAY_SIZE(insns), buf,
 				sizeof(buf), ifindex);
-	res = !grep(buf, "invalid func ") && !grep(buf, "unknown func ");
+	res = !grep(buf, "invalid func ") && !grep(buf, "unknown func ") &&
+		!grep(buf, "program of this type cannot use helper ");
 
 	switch (get_vendor_id(ifindex)) {
 	case 0x19ee: /* Netronome specific */

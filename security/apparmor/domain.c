@@ -325,7 +325,7 @@ static int aa_xattrs_match(const struct linux_binprm *bprm,
 	d = bprm->file->f_path.dentry;
 
 	for (i = 0; i < profile->xattr_count; i++) {
-		size = vfs_getxattr_alloc(&init_user_ns, d, profile->xattrs[i],
+		size = vfs_getxattr_alloc(&nop_mnt_idmap, d, profile->xattrs[i],
 					  &value, value_size, GFP_KERNEL);
 		if (size >= 0) {
 			u32 perm;
@@ -859,10 +859,10 @@ int apparmor_bprm_creds_for_exec(struct linux_binprm *bprm)
 	const char *info = NULL;
 	int error = 0;
 	bool unsafe = false;
-	kuid_t i_uid = i_uid_into_mnt(file_mnt_user_ns(bprm->file),
-				      file_inode(bprm->file));
+	vfsuid_t vfsuid = i_uid_into_vfsuid(file_mnt_idmap(bprm->file),
+					    file_inode(bprm->file));
 	struct path_cond cond = {
-		i_uid,
+		vfsuid_into_kuid(vfsuid),
 		file_inode(bprm->file)->i_mode
 	};
 
@@ -970,7 +970,7 @@ audit:
 	error = fn_for_each(label, profile,
 			aa_audit_file(profile, &nullperms, OP_EXEC, MAY_EXEC,
 				      bprm->filename, NULL, new,
-				      i_uid, info, error));
+				      vfsuid_into_kuid(vfsuid), info, error));
 	aa_put_label(new);
 	goto done;
 }

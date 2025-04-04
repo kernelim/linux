@@ -912,10 +912,19 @@ static void __arch_timer_setup(unsigned type,
 	clockevents_config_and_register(clk, arch_timer_rate, 0xf, max_delta);
 }
 
-static void arch_timer_evtstrm_enable(int divider)
+static void arch_timer_evtstrm_enable(unsigned int divider)
 {
 	u32 cntkctl = arch_timer_get_cntkctl();
 
+#ifdef CONFIG_ARM64
+	/* ECV is likely to require a large divider. Use the EVNTIS flag. */
+	if (cpus_have_final_cap(ARM64_HAS_ECV) && divider > 15) {
+		cntkctl |= ARCH_TIMER_EVT_INTERVAL_SCALE;
+		divider -= 8;
+	}
+#endif
+
+	divider = min(divider, 15U);
 	cntkctl &= ~ARCH_TIMER_EVT_TRIGGER_MASK;
 	/* Set the divider and enable virtual event stream */
 	cntkctl |= (divider << ARCH_TIMER_EVT_TRIGGER_SHIFT)
@@ -944,8 +953,32 @@ static void arch_timer_configure_evtstream(void)
 		lsb++;
 
 	/* enable event stream */
-	arch_timer_evtstrm_enable(max(0, min(lsb, 15)));
+	arch_timer_evtstrm_enable(max(0, lsb));
 }
+
+static int arch_timer_evtstrm_starting_cpu(unsigned int cpu)
+{
+	arch_timer_configure_evtstream();
+	return 0;
+}
+
+static int arch_timer_evtstrm_dying_cpu(unsigned int cpu)
+{
+	cpumask_clear_cpu(smp_processor_id(), &evtstrm_available);
+	return 0;
+}
+
+static int __init arch_timer_evtstrm_register(void)
+{
+	if (!arch_timer_evt || !evtstrm_enable)
+		return 0;
+
+	return cpuhp_setup_state(CPUHP_AP_ARM_ARCH_TIMER_EVTSTRM_STARTING,
+				 "clockevents/arm/arch_timer_evtstrm:starting",
+				 arch_timer_evtstrm_starting_cpu,
+				 arch_timer_evtstrm_dying_cpu);
+}
+core_initcall(arch_timer_evtstrm_register);
 
 static void arch_counter_set_user_access(void)
 {
@@ -1008,8 +1041,6 @@ static int arch_timer_starting_cpu(unsigned int cpu)
 	}
 
 	arch_counter_set_user_access();
-	if (evtstrm_enable)
-		arch_timer_configure_evtstream();
 
 	return 0;
 }
@@ -1156,8 +1187,6 @@ static int arch_timer_dying_cpu(unsigned int cpu)
 {
 	struct clock_event_device *clk = this_cpu_ptr(arch_timer_evt);
 
-	cpumask_clear_cpu(smp_processor_id(), &evtstrm_available);
-
 	arch_timer_stop(clk);
 	return 0;
 }
@@ -1271,6 +1300,7 @@ out_unreg_notify:
 
 out_free:
 	free_percpu(arch_timer_evt);
+	arch_timer_evt = NULL;
 out:
 	return err;
 }
@@ -1777,7 +1807,7 @@ TIMER_ACPI_DECLARE(arch_timer, ACPI_SIG_GTDT, arch_timer_acpi_init);
 #endif
 
 int kvm_arch_ptp_get_crosststamp(u64 *cycle, struct timespec64 *ts,
-				 struct clocksource **cs)
+				 enum clocksource_ids *cs_id)
 {
 	struct arm_smccc_res hvc_res;
 	u32 ptp_counter;
@@ -1801,8 +1831,8 @@ int kvm_arch_ptp_get_crosststamp(u64 *cycle, struct timespec64 *ts,
 	*ts = ktime_to_timespec64(ktime);
 	if (cycle)
 		*cycle = (u64)hvc_res.a2 << 32 | hvc_res.a3;
-	if (cs)
-		*cs = &clocksource_counter;
+	if (cs_id)
+		*cs_id = CSID_ARM_ARCH_COUNTER;
 
 	return 0;
 }

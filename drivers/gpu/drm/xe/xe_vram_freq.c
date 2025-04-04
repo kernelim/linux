@@ -34,7 +34,6 @@ static ssize_t max_freq_show(struct device *dev, struct device_attribute *attr,
 			     char *buf)
 {
 	struct xe_tile *tile = dev_to_tile(dev);
-	struct xe_gt *gt = tile->primary_gt;
 	u32 val, mbox;
 	int err;
 
@@ -42,7 +41,7 @@ static ssize_t max_freq_show(struct device *dev, struct device_attribute *attr,
 		| REG_FIELD_PREP(PCODE_MB_PARAM1, PCODE_MBOX_FC_SC_READ_FUSED_P0)
 		| REG_FIELD_PREP(PCODE_MB_PARAM2, PCODE_MBOX_DOMAIN_HBM);
 
-	err = xe_pcode_read(gt, mbox, &val, NULL);
+	err = xe_pcode_read(tile, mbox, &val, NULL);
 	if (err)
 		return err;
 
@@ -57,7 +56,6 @@ static ssize_t min_freq_show(struct device *dev, struct device_attribute *attr,
 			     char *buf)
 {
 	struct xe_tile *tile = dev_to_tile(dev);
-	struct xe_gt *gt = tile->primary_gt;
 	u32 val, mbox;
 	int err;
 
@@ -65,7 +63,7 @@ static ssize_t min_freq_show(struct device *dev, struct device_attribute *attr,
 		| REG_FIELD_PREP(PCODE_MB_PARAM1, PCODE_MBOX_FC_SC_READ_FUSED_PN)
 		| REG_FIELD_PREP(PCODE_MB_PARAM2, PCODE_MBOX_DOMAIN_HBM);
 
-	err = xe_pcode_read(gt, mbox, &val, NULL);
+	err = xe_pcode_read(tile, mbox, &val, NULL);
 	if (err)
 		return err;
 
@@ -87,7 +85,7 @@ static const struct attribute_group freq_group_attrs = {
 	.attrs = freq_attrs,
 };
 
-static void vram_freq_sysfs_fini(struct drm_device *drm, void *arg)
+static void vram_freq_sysfs_fini(void *arg)
 {
 	struct kobject *kobj = arg;
 
@@ -100,31 +98,27 @@ static void vram_freq_sysfs_fini(struct drm_device *drm, void *arg)
  * @tile: Xe Tile object
  *
  * It needs to be initialized after the main tile component is ready
+ *
+ * Returns: 0 on success, negative error code on error.
  */
-void xe_vram_freq_sysfs_init(struct xe_tile *tile)
+int xe_vram_freq_sysfs_init(struct xe_tile *tile)
 {
 	struct xe_device *xe = tile_to_xe(tile);
 	struct kobject *kobj;
 	int err;
 
 	if (xe->info.platform != XE_PVC)
-		return;
+		return 0;
 
 	kobj = kobject_create_and_add("memory", tile->sysfs);
-	if (!kobj) {
-		drm_warn(&xe->drm, "failed to add memory directory, err: %d\n", -ENOMEM);
-		return;
-	}
+	if (!kobj)
+		return -ENOMEM;
 
 	err = sysfs_create_group(kobj, &freq_group_attrs);
 	if (err) {
 		kobject_put(kobj);
-		drm_warn(&xe->drm, "failed to register vram freq sysfs, err: %d\n", err);
-		return;
+		return err;
 	}
 
-	err = drmm_add_action_or_reset(&xe->drm, vram_freq_sysfs_fini, kobj);
-	if (err)
-		drm_warn(&xe->drm, "%s: drmm_add_action_or_reset failed, err: %d\n",
-			 __func__, err);
+	return devm_add_action_or_reset(xe->drm.dev, vram_freq_sysfs_fini, kobj);
 }

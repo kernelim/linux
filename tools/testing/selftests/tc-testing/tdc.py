@@ -143,7 +143,6 @@ class PluginMgr:
             except Exception as ee:
                 print('exception {} in call to pre_case for {} plugin'.
                       format(ee, pgn_inst.__class__))
-                print('test_ordinal is {}'.format(test_ordinal))
                 print('testid is {}'.format(caseinfo['id']))
                 raise
 
@@ -541,7 +540,7 @@ def test_runner(pm, args, filtered_tests):
             message = pmtf.message
             output = pmtf.output
             res = TestResult(tidx['id'], tidx['name'])
-            res.set_result(ResultState.skip)
+            res.set_result(ResultState.fail)
             res.set_errormsg(pmtf.message)
             res.set_failmsg(pmtf.output)
             tsr.add_resultdata(res)

@@ -212,7 +212,7 @@ static int __init mark_nonram_nosave(void)
  * everything else. GFP_DMA32 page allocations automatically fall back to
  * ZONE_DMA.
  *
- * By using 31-bit unconditionally, we can exploit zone_dma_bits to inform the
+ * By using 31-bit unconditionally, we can exploit zone_dma_limit to inform the
  * generic DMA mapping code.  32-bit only devices (if not handled by an IOMMU
  * anyway) will take a first dip into ZONE_NORMAL and get otherwise served by
  * ZONE_DMA.
@@ -226,6 +226,7 @@ void __init paging_init(void)
 {
 	unsigned long long total_ram = memblock_phys_mem_size();
 	phys_addr_t top_of_ram = memblock_end_of_DRAM();
+	int zone_dma_bits;
 
 #ifdef CONFIG_HIGHMEM
 	unsigned long v = __fix_to_virt(FIX_KMAP_END);
@@ -251,6 +252,8 @@ void __init paging_init(void)
 		zone_dma_bits = 30;
 	else
 		zone_dma_bits = 31;
+
+	zone_dma_limit = DMA_BIT_MASK(zone_dma_bits);
 
 #ifdef CONFIG_ZONE_DMA
 	max_zone_pfns[ZONE_DMA]	= min(max_low_pfn,
@@ -287,7 +290,6 @@ void __init mem_init(void)
 #endif
 
 	high_memory = (void *) __va(max_low_pfn * PAGE_SIZE);
-	set_max_mapnr(max_pfn);
 
 	kasan_late_init();
 
@@ -301,7 +303,7 @@ void __init mem_init(void)
 		for (pfn = highmem_mapnr; pfn < max_mapnr; ++pfn) {
 			phys_addr_t paddr = (phys_addr_t)pfn << PAGE_SHIFT;
 			struct page *page = pfn_to_page(pfn);
-			if (!memblock_is_reserved(paddr))
+			if (memblock_is_memory(paddr) && !memblock_is_reserved(paddr))
 				free_highmem_page(page);
 		}
 	}

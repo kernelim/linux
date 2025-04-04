@@ -250,7 +250,7 @@ static int snd_ctl_led_set_id(int card_number, struct snd_ctl_elem_id *id,
 	if (!card)
 		return -ENXIO;
 	guard(rwsem_write)(&card->controls_rwsem);
-	kctl = snd_ctl_find_id_locked(card, id);
+	kctl = snd_ctl_find_id(card, id);
 	if (!kctl)
 		return -ENOENT;
 	ioff = snd_ctl_get_ioff(kctl, id);
@@ -285,25 +285,22 @@ static void snd_ctl_led_ctl_destroy(struct snd_ctl_led_ctl *lctl)
 static void snd_ctl_led_clean(struct snd_card *card)
 {
 	unsigned int group;
+	struct snd_ctl_led_ctl *lctl, *_lctl;
 	struct snd_ctl_led *led;
-	struct snd_ctl_led_ctl *lctl;
 
 	for (group = 0; group < MAX_LED; group++) {
 		led = &snd_ctl_leds[group];
-repeat:
-		list_for_each_entry(lctl, &led->controls, list)
-			if (!card || lctl->card == card) {
+		list_for_each_entry_safe(lctl, _lctl, &led->controls, list)
+			if (!card || lctl->card == card)
 				snd_ctl_led_ctl_destroy(lctl);
-				goto repeat;
-			}
 	}
 }
 
 static int snd_ctl_led_reset(int card_number, unsigned int group)
 {
 	struct snd_card *card __free(snd_card_unref) = NULL;
+	struct snd_ctl_led_ctl *lctl, *_lctl;
 	struct snd_ctl_led *led;
-	struct snd_ctl_led_ctl *lctl;
 	struct snd_kcontrol_volatile *vd;
 	bool change = false;
 
@@ -315,14 +312,12 @@ static int snd_ctl_led_reset(int card_number, unsigned int group)
 		if (!snd_ctl_led_card_valid[card_number])
 			return -ENXIO;
 		led = &snd_ctl_leds[group];
-repeat:
-		list_for_each_entry(lctl, &led->controls, list)
+		list_for_each_entry_safe(lctl, _lctl, &led->controls, list)
 			if (lctl->card == card) {
 				vd = &lctl->kctl->vd[lctl->index_offset];
 				vd->access &= ~group_to_access(group);
 				snd_ctl_led_ctl_destroy(lctl);
 				change = true;
-				goto repeat;
 			}
 	}
 	if (change)
@@ -668,16 +663,22 @@ static void snd_ctl_led_sysfs_add(struct snd_card *card)
 			goto cerr;
 		led->cards[card->number] = led_card;
 		snprintf(link_name, sizeof(link_name), "led-%s", led->name);
-		WARN(sysfs_create_link(&card->ctl_dev->kobj, &led_card->dev.kobj, link_name),
-			"can't create symlink to controlC%i device\n", card->number);
-		WARN(sysfs_create_link(&led_card->dev.kobj, &card->card_dev.kobj, "card"),
-			"can't create symlink to card%i\n", card->number);
+		if (sysfs_create_link(&card->ctl_dev->kobj, &led_card->dev.kobj,
+				      link_name))
+			dev_err(card->dev,
+				"%s: can't create symlink to controlC%i device\n",
+				 __func__, card->number);
+		if (sysfs_create_link(&led_card->dev.kobj, &card->card_dev.kobj,
+				      "card"))
+			dev_err(card->dev,
+				"%s: can't create symlink to card%i\n",
+				__func__, card->number);
 
 		continue;
 cerr:
 		put_device(&led_card->dev);
 cerr2:
-		printk(KERN_ERR "snd_ctl_led: unable to add card%d", card->number);
+		dev_err(card->dev, "snd_ctl_led: unable to add card%d", card->number);
 	}
 }
 

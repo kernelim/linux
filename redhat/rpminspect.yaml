@@ -36,6 +36,7 @@ runpath:
     ignore:
         - /usr/libexec/kselftests/bpf/urandom_read
         - /usr/libexec/kselftests/bpf/no_alu32/urandom_read
+        - /usr/libexec/kselftests/bpf/cpuv4/urandom_read
 
 debuginfo:
     ignore:

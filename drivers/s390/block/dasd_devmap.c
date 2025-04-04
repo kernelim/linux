@@ -427,7 +427,7 @@ dasd_add_busid(const char *bus_id, int features)
 	if (!devmap) {
 		/* This bus_id is new. */
 		new->devindex = dasd_max_devindex++;
-		strlcpy(new->bus_id, bus_id, DASD_BUS_ID_SIZE);
+		strscpy(new->bus_id, bus_id, DASD_BUS_ID_SIZE);
 		new->features = features;
 		new->device = NULL;
 		list_add(&new->list, &dasd_hashlists[hash]);
@@ -976,7 +976,7 @@ static ssize_t dasd_ff_show(struct device *dev, struct device_attribute *attr,
 		ff_flag = (devmap->features & DASD_FEATURE_FAILFAST) != 0;
 	else
 		ff_flag = (DASD_FEATURE_DEFAULT & DASD_FEATURE_FAILFAST) != 0;
-	return snprintf(buf, PAGE_SIZE, ff_flag ? "1\n" : "0\n");
+	return sysfs_emit(buf, ff_flag ? "1\n" : "0\n");
 }
 
 static ssize_t dasd_ff_store(struct device *dev, struct device_attribute *attr,
@@ -1018,7 +1018,7 @@ dasd_ro_show(struct device *dev, struct device_attribute *attr, char *buf)
 	spin_unlock(&dasd_devmap_lock);
 
 out:
-	return snprintf(buf, PAGE_SIZE, ro_flag ? "1\n" : "0\n");
+	return sysfs_emit(buf, ro_flag ? "1\n" : "0\n");
 }
 
 static ssize_t
@@ -1079,7 +1079,7 @@ dasd_erplog_show(struct device *dev, struct device_attribute *attr, char *buf)
 		erplog = (devmap->features & DASD_FEATURE_ERPLOG) != 0;
 	else
 		erplog = (DASD_FEATURE_DEFAULT & DASD_FEATURE_ERPLOG) != 0;
-	return snprintf(buf, PAGE_SIZE, erplog ? "1\n" : "0\n");
+	return sysfs_emit(buf, erplog ? "1\n" : "0\n");
 }
 
 static ssize_t
@@ -1278,13 +1278,13 @@ dasd_discipline_show(struct device *dev, struct device_attribute *attr,
 		dasd_put_device(device);
 		goto out;
 	} else {
-		len = snprintf(buf, PAGE_SIZE, "%s\n",
-			       device->discipline->name);
+		len = sysfs_emit(buf, "%s\n",
+				 device->discipline->name);
 		dasd_put_device(device);
 		return len;
 	}
 out:
-	len = snprintf(buf, PAGE_SIZE, "none\n");
+	len = sysfs_emit(buf, "none\n");
 	return len;
 }
 
@@ -1301,30 +1301,30 @@ dasd_device_status_show(struct device *dev, struct device_attribute *attr,
 	if (!IS_ERR(device)) {
 		switch (device->state) {
 		case DASD_STATE_NEW:
-			len = snprintf(buf, PAGE_SIZE, "new\n");
+			len = sysfs_emit(buf, "new\n");
 			break;
 		case DASD_STATE_KNOWN:
-			len = snprintf(buf, PAGE_SIZE, "detected\n");
+			len = sysfs_emit(buf, "detected\n");
 			break;
 		case DASD_STATE_BASIC:
-			len = snprintf(buf, PAGE_SIZE, "basic\n");
+			len = sysfs_emit(buf, "basic\n");
 			break;
 		case DASD_STATE_UNFMT:
-			len = snprintf(buf, PAGE_SIZE, "unformatted\n");
+			len = sysfs_emit(buf, "unformatted\n");
 			break;
 		case DASD_STATE_READY:
-			len = snprintf(buf, PAGE_SIZE, "ready\n");
+			len = sysfs_emit(buf, "ready\n");
 			break;
 		case DASD_STATE_ONLINE:
-			len = snprintf(buf, PAGE_SIZE, "online\n");
+			len = sysfs_emit(buf, "online\n");
 			break;
 		default:
-			len = snprintf(buf, PAGE_SIZE, "no stat\n");
+			len = sysfs_emit(buf, "no stat\n");
 			break;
 		}
 		dasd_put_device(device);
 	} else
-		len = snprintf(buf, PAGE_SIZE, "unknown\n");
+		len = sysfs_emit(buf, "unknown\n");
 	return len;
 }
 
@@ -1365,7 +1365,7 @@ static ssize_t dasd_vendor_show(struct device *dev,
 	device = dasd_device_from_cdev(to_ccwdev(dev));
 	vendor = "";
 	if (IS_ERR(device))
-		return snprintf(buf, PAGE_SIZE, "%s\n", vendor);
+		return sysfs_emit(buf, "%s\n", vendor);
 
 	if (device->discipline && device->discipline->get_uid &&
 	    !device->discipline->get_uid(device, &uid))
@@ -1373,7 +1373,7 @@ static ssize_t dasd_vendor_show(struct device *dev,
 
 	dasd_put_device(device);
 
-	return snprintf(buf, PAGE_SIZE, "%s\n", vendor);
+	return sysfs_emit(buf, "%s\n", vendor);
 }
 
 static DEVICE_ATTR(vendor, 0444, dasd_vendor_show, NULL);
@@ -1389,7 +1389,7 @@ dasd_uid_show(struct device *dev, struct device_attribute *attr, char *buf)
 	device = dasd_device_from_cdev(to_ccwdev(dev));
 	uid_string[0] = 0;
 	if (IS_ERR(device))
-		return snprintf(buf, PAGE_SIZE, "%s\n", uid_string);
+		return sysfs_emit(buf, "%s\n", uid_string);
 
 	if (device->discipline && device->discipline->get_uid &&
 	    !device->discipline->get_uid(device, &uid)) {
@@ -1424,7 +1424,7 @@ dasd_uid_show(struct device *dev, struct device_attribute *attr, char *buf)
 	}
 	dasd_put_device(device);
 
-	return snprintf(buf, PAGE_SIZE, "%s\n", uid_string);
+	return sysfs_emit(buf, "%s\n", uid_string);
 }
 static DEVICE_ATTR(uid, 0444, dasd_uid_show, NULL);
 
@@ -1442,7 +1442,7 @@ dasd_eer_show(struct device *dev, struct device_attribute *attr, char *buf)
 		eer_flag = dasd_eer_enabled(devmap->device);
 	else
 		eer_flag = 0;
-	return snprintf(buf, PAGE_SIZE, eer_flag ? "1\n" : "0\n");
+	return sysfs_emit(buf, eer_flag ? "1\n" : "0\n");
 }
 
 static ssize_t
@@ -1606,7 +1606,7 @@ dasd_expires_show(struct device *dev, struct device_attribute *attr, char *buf)
 	device = dasd_device_from_cdev(to_ccwdev(dev));
 	if (IS_ERR(device))
 		return -ENODEV;
-	len = snprintf(buf, PAGE_SIZE, "%lu\n", device->default_expires);
+	len = sysfs_emit(buf, "%lu\n", device->default_expires);
 	dasd_put_device(device);
 	return len;
 }
@@ -1646,7 +1646,7 @@ dasd_retries_show(struct device *dev, struct device_attribute *attr, char *buf)
 	device = dasd_device_from_cdev(to_ccwdev(dev));
 	if (IS_ERR(device))
 		return -ENODEV;
-	len = snprintf(buf, PAGE_SIZE, "%lu\n", device->default_retries);
+	len = sysfs_emit(buf, "%lu\n", device->default_retries);
 	dasd_put_device(device);
 	return len;
 }
@@ -1687,7 +1687,7 @@ dasd_timeout_show(struct device *dev, struct device_attribute *attr,
 	device = dasd_device_from_cdev(to_ccwdev(dev));
 	if (IS_ERR(device))
 		return -ENODEV;
-	len = snprintf(buf, PAGE_SIZE, "%lu\n", device->blk_timeout);
+	len = sysfs_emit(buf, "%lu\n", device->blk_timeout);
 	dasd_put_device(device);
 	return len;
 }
@@ -1697,7 +1697,6 @@ dasd_timeout_store(struct device *dev, struct device_attribute *attr,
 		   const char *buf, size_t count)
 {
 	struct dasd_device *device;
-	struct request_queue *q;
 	unsigned long val;
 
 	device = dasd_device_from_cdev(to_ccwdev(dev));
@@ -1709,15 +1708,13 @@ dasd_timeout_store(struct device *dev, struct device_attribute *attr,
 		dasd_put_device(device);
 		return -EINVAL;
 	}
-	q = device->block->request_queue;
-	if (!q) {
+	if (!device->block->gdp) {
 		dasd_put_device(device);
 		return -ENODEV;
 	}
 
 	device->blk_timeout = val;
-
-	blk_queue_rq_timeout(q, device->blk_timeout * HZ);
+	blk_queue_rq_timeout(device->block->gdp->queue, val * HZ);
 
 	dasd_put_device(device);
 	return count;
@@ -1761,11 +1758,11 @@ static ssize_t dasd_hpf_show(struct device *dev, struct device_attribute *attr,
 		return -ENODEV;
 	if (!device->discipline || !device->discipline->hpf_enabled) {
 		dasd_put_device(device);
-		return snprintf(buf, PAGE_SIZE, "%d\n", dasd_nofcx);
+		return sysfs_emit(buf, "%d\n", dasd_nofcx);
 	}
 	hpf = device->discipline->hpf_enabled(device);
 	dasd_put_device(device);
-	return snprintf(buf, PAGE_SIZE, "%d\n", hpf);
+	return sysfs_emit(buf, "%d\n", hpf);
 }
 
 static DEVICE_ATTR(hpf, 0444, dasd_hpf_show, NULL);
@@ -1779,13 +1776,13 @@ static ssize_t dasd_reservation_policy_show(struct device *dev,
 
 	devmap = dasd_find_busid(dev_name(dev));
 	if (IS_ERR(devmap)) {
-		rc = snprintf(buf, PAGE_SIZE, "ignore\n");
+		rc = sysfs_emit(buf, "ignore\n");
 	} else {
 		spin_lock(&dasd_devmap_lock);
 		if (devmap->features & DASD_FEATURE_FAILONSLCK)
-			rc = snprintf(buf, PAGE_SIZE, "fail\n");
+			rc = sysfs_emit(buf, "fail\n");
 		else
-			rc = snprintf(buf, PAGE_SIZE, "ignore\n");
+			rc = sysfs_emit(buf, "ignore\n");
 		spin_unlock(&dasd_devmap_lock);
 	}
 	return rc;
@@ -1820,14 +1817,14 @@ static ssize_t dasd_reservation_state_show(struct device *dev,
 
 	device = dasd_device_from_cdev(to_ccwdev(dev));
 	if (IS_ERR(device))
-		return snprintf(buf, PAGE_SIZE, "none\n");
+		return sysfs_emit(buf, "none\n");
 
 	if (test_bit(DASD_FLAG_IS_RESERVED, &device->flags))
-		rc = snprintf(buf, PAGE_SIZE, "reserved\n");
+		rc = sysfs_emit(buf, "reserved\n");
 	else if (test_bit(DASD_FLAG_LOCK_STOLEN, &device->flags))
-		rc = snprintf(buf, PAGE_SIZE, "lost\n");
+		rc = sysfs_emit(buf, "lost\n");
 	else
-		rc = snprintf(buf, PAGE_SIZE, "none\n");
+		rc = sysfs_emit(buf, "none\n");
 	dasd_put_device(device);
 	return rc;
 }
@@ -1894,7 +1891,7 @@ dasd_path_threshold_show(struct device *dev,
 	device = dasd_device_from_cdev(to_ccwdev(dev));
 	if (IS_ERR(device))
 		return -ENODEV;
-	len = snprintf(buf, PAGE_SIZE, "%lu\n", device->path_thrhld);
+	len = sysfs_emit(buf, "%lu\n", device->path_thrhld);
 	dasd_put_device(device);
 	return len;
 }
@@ -1941,7 +1938,7 @@ dasd_path_autodisable_show(struct device *dev,
 	else
 		flag = (DASD_FEATURE_DEFAULT &
 			DASD_FEATURE_PATH_AUTODISABLE) != 0;
-	return snprintf(buf, PAGE_SIZE, flag ? "1\n" : "0\n");
+	return sysfs_emit(buf, flag ? "1\n" : "0\n");
 }
 
 static ssize_t
@@ -1979,7 +1976,7 @@ dasd_path_interval_show(struct device *dev,
 	device = dasd_device_from_cdev(to_ccwdev(dev));
 	if (IS_ERR(device))
 		return -ENODEV;
-	len = snprintf(buf, PAGE_SIZE, "%lu\n", device->path_interval);
+	len = sysfs_emit(buf, "%lu\n", device->path_interval);
 	dasd_put_device(device);
 	return len;
 }
@@ -2025,9 +2022,9 @@ dasd_device_fcs_show(struct device *dev, struct device_attribute *attr,
 		return -ENODEV;
 	fc_sec = dasd_path_get_fcs_device(device);
 	if (fc_sec == -EINVAL)
-		rc = snprintf(buf, PAGE_SIZE, "Inconsistent\n");
+		rc = sysfs_emit(buf, "Inconsistent\n");
 	else
-		rc = snprintf(buf, PAGE_SIZE, "%s\n", dasd_path_get_fcs_str(fc_sec));
+		rc = sysfs_emit(buf, "%s\n", dasd_path_get_fcs_str(fc_sec));
 	dasd_put_device(device);
 
 	return rc;
@@ -2040,7 +2037,7 @@ dasd_path_fcs_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 	struct dasd_path *path = to_dasd_path(kobj);
 	unsigned int fc_sec = path->fc_security;
 
-	return snprintf(buf, PAGE_SIZE, "%s\n", dasd_path_get_fcs_str(fc_sec));
+	return sysfs_emit(buf, "%s\n", dasd_path_get_fcs_str(fc_sec));
 }
 
 static struct kobj_attribute path_fcs_attribute =
@@ -2076,7 +2073,7 @@ dasd_copy_pair_show(struct device *dev,
 			break;
 		}
 	}
-	if (!copy->entry[i].primary)
+	if (i == DASD_CP_ENTRIES)
 		goto out;
 
 	/* print all secondary */
@@ -2402,7 +2399,7 @@ static ssize_t dasd_##_name##_show(struct device *dev,			\
 		val = _func(device);					\
 	dasd_put_device(device);					\
 									\
-	return snprintf(buf, PAGE_SIZE, "%d\n", val);			\
+	return sysfs_emit(buf, "%d\n", val);			\
 }									\
 static DEVICE_ATTR(_name, 0444, dasd_##_name##_show, NULL);		\
 
@@ -2534,10 +2531,11 @@ static struct attribute *paths_info_attrs[] = {
 	&path_fcs_attribute.attr,
 	NULL,
 };
+ATTRIBUTE_GROUPS(paths_info);
 
 static struct kobj_type path_attr_type = {
 	.release	= dasd_path_release,
-	.default_attrs	= paths_info_attrs,
+	.default_groups	= paths_info_groups,
 	.sysfs_ops	= &kobj_sysfs_ops,
 };
 

@@ -165,6 +165,7 @@ static inline __maybe_unused phys_addr_t cma_early_percent_memory(void)
 static void __init dma_numa_cma_reserve(void)
 {
 	int nid;
+	unsigned int tech_preview = 0;
 
 	for_each_node(nid) {
 		int ret;
@@ -186,6 +187,7 @@ static void __init dma_numa_cma_reserve(void)
 			if (ret)
 				pr_warn("%s: reservation failed: err %d, node %d", __func__,
 					ret, nid);
+			tech_preview += 1;
 		}
 
 		if (numa_cma_size[nid]) {
@@ -197,8 +199,11 @@ static void __init dma_numa_cma_reserve(void)
 			if (ret)
 				pr_warn("%s: reservation failed: err %d, node %d", __func__,
 					ret, nid);
+			tech_preview += 1;
 		}
 	}
+	if (tech_preview)
+		mark_tech_preview("dma-numa-cma-reserve", NULL);
 }
 #else
 static inline void __init dma_numa_cma_reserve(void)

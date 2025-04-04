@@ -17,10 +17,15 @@
 #include "xe_gt_types.h"
 #include "xe_lmtt_types.h"
 #include "xe_memirq_types.h"
+#include "xe_oa.h"
 #include "xe_platform_types.h"
 #include "xe_pt_types.h"
 #include "xe_sriov_types.h"
 #include "xe_step_types.h"
+
+#if IS_ENABLED(CONFIG_DRM_XE_DEBUG)
+#define TEST_VM_OPS_ERROR
+#endif
 
 #if IS_ENABLED(CONFIG_DRM_XE_DISPLAY)
 #include "soc/intel_pch.h"
@@ -39,6 +44,7 @@ struct xe_pat_ops;
 #define MEDIA_VERx100(xe) ((xe)->info.media_verx100)
 #define IS_DGFX(xe) ((xe)->info.is_dgfx)
 #define HAS_HECI_GSCFI(xe) ((xe)->info.has_heci_gscfi)
+#define HAS_HECI_CSCFI(xe) ((xe)->info.has_heci_cscfi)
 
 #define XE_VRAM_FLAGS_NEED64K		BIT(0)
 
@@ -196,8 +202,17 @@ struct xe_tile {
 		struct {
 			/** @sriov.vf.memirq: Memory Based Interrupts. */
 			struct xe_memirq memirq;
+
+			/** @sriov.vf.ggtt_balloon: GGTT regions excluded from use. */
+			struct xe_ggtt_node *ggtt_balloon[2];
 		} vf;
 	} sriov;
+
+	/** @pcode: tile's PCODE */
+	struct {
+		/** @pcode.lock: protecting tile's PCODE mailbox data */
+		struct mutex lock;
+	} pcode;
 
 	/** @migrate: Migration helper for vram blits and clearing */
 	struct xe_migrate *migrate;
@@ -218,6 +233,8 @@ struct xe_device {
 
 	/** @info: device info */
 	struct intel_device_info {
+		/** @info.platform_name: platform name */
+		const char *platform_name;
 		/** @info.graphics_name: graphics IP name */
 		const char *graphics_name;
 		/** @info.media_name: media IP name */
@@ -271,22 +288,29 @@ struct xe_device {
 		u8 has_sriov:1;
 		/** @info.has_usm: Device has unified shared memory support */
 		u8 has_usm:1;
-		/** @info.enable_display: display enabled */
-		u8 enable_display:1;
+		/**
+		 * @info.probe_display: Probe display hardware.  If set to
+		 * false, the driver will behave as if there is no display
+		 * hardware present and will not try to read/write to it in any
+		 * way.  The display hardware, if it exists, will not be
+		 * exposed to userspace and will be left untouched in whatever
+		 * state the firmware or bootloader left it in.
+		 */
+		u8 probe_display:1;
 		/** @info.skip_mtcfg: skip Multi-Tile configuration from MTCFG register */
 		u8 skip_mtcfg:1;
 		/** @info.skip_pcode: skip access to PCODE uC */
 		u8 skip_pcode:1;
 		/** @info.has_heci_gscfi: device has heci gscfi */
 		u8 has_heci_gscfi:1;
+		/** @info.has_heci_cscfi: device has heci cscfi */
+		u8 has_heci_cscfi:1;
 		/** @info.skip_guc_pc: Skip GuC based PM feature init */
 		u8 skip_guc_pc:1;
-
-#if IS_ENABLED(CONFIG_DRM_XE_DISPLAY)
-		struct {
-			u32 rawclk_freq;
-		} i915_runtime;
-#endif
+		/** @info.has_atomic_enable_pte_bit: Device has atomic enable PTE bit */
+		u8 has_atomic_enable_pte_bit:1;
+		/** @info.has_device_atomics_on_smem: Supports device atomics on SMEM */
+		u8 has_device_atomics_on_smem:1;
 	} info;
 
 	/** @irq: device interrupt state */
@@ -321,18 +345,13 @@ struct xe_device {
 	struct {
 		/** @sriov.__mode: SR-IOV mode (Don't access directly!) */
 		enum xe_sriov_mode __mode;
+
+		/** @sriov.pf: PF specific data */
+		struct xe_device_pf pf;
+
 		/** @sriov.wq: workqueue used by the virtualization workers */
 		struct workqueue_struct *wq;
 	} sriov;
-
-	/** @clients: drm clients info */
-	struct {
-		/** @clients.lock: Protects drm clients info */
-		spinlock_t lock;
-
-		/** @clients.count: number of drm clients */
-		u64 count;
-	} clients;
 
 	/** @usm: unified memory state */
 	struct {
@@ -340,12 +359,8 @@ struct xe_device {
 		struct xarray asid_to_vm;
 		/** @usm.next_asid: next ASID, used to cyclical alloc asids */
 		u32 next_asid;
-		/** @usm.num_vm_in_fault_mode: number of VM in fault mode */
-		u32 num_vm_in_fault_mode;
-		/** @usm.num_vm_in_non_fault_mode: number of VM in non-fault mode */
-		u32 num_vm_in_non_fault_mode;
 		/** @usm.lock: protects UM state */
-		struct mutex lock;
+		struct rw_semaphore lock;
 	} usm;
 
 	/** @pinned: pinned BO state */
@@ -372,6 +387,9 @@ struct xe_device {
 	/** @unordered_wq: used to serialize unordered work, mostly display */
 	struct workqueue_struct *unordered_wq;
 
+	/** @destroy_wq: used to serialize user destroy work, like queue */
+	struct workqueue_struct *destroy_wq;
+
 	/** @tiles: device tiles */
 	struct xe_tile tiles[XE_MAX_TILES_PER_DEVICE];
 
@@ -380,9 +398,6 @@ struct xe_device {
 	 * triggering additional actions when they occur.
 	 */
 	struct {
-		/** @mem_access.ref: ref count of memory accesses */
-		atomic_t ref;
-
 		/**
 		 * @mem_access.vram_userfault: Encapsulate vram_userfault
 		 * related stuff
@@ -426,9 +441,6 @@ struct xe_device {
 		/** @d3cold.allowed: Indicates if d3cold is a valid device state */
 		bool allowed;
 
-		/** @d3cold.power_lost: Indicates if card has really lost power. */
-		bool power_lost;
-
 		/**
 		 * @d3cold.vram_threshold:
 		 *
@@ -455,8 +467,27 @@ struct xe_device {
 	/** @heci_gsc: graphics security controller */
 	struct xe_heci_gsc heci_gsc;
 
+	/** @oa: oa observation subsystem */
+	struct xe_oa oa;
+
 	/** @needs_flr_on_fini: requests function-reset on fini */
 	bool needs_flr_on_fini;
+
+	/** @wedged: Struct to control Wedged States and mode */
+	struct {
+		/** @wedged.flag: Xe device faced a critical error and is now blocked. */
+		atomic_t flag;
+		/** @wedged.mode: Mode controlled by kernel parameter and debugfs */
+		int mode;
+	} wedged;
+
+#ifdef TEST_VM_OPS_ERROR
+	/**
+	 * @vm_inject_error_position: inject errors at different places in VM
+	 * bind IOCTL based on this value
+	 */
+	u8 vm_inject_error_position;
+#endif
 
 	/* private: */
 
@@ -483,6 +514,7 @@ struct xe_device {
 			INTEL_DRAM_LPDDR4,
 			INTEL_DRAM_DDR5,
 			INTEL_DRAM_LPDDR5,
+			INTEL_DRAM_GDDR,
 		} type;
 		u8 num_qgv_points;
 		u8 num_psf_gv_points;
@@ -497,24 +529,8 @@ struct xe_device {
 	/* To shut up runtime pm macros.. */
 	struct xe_runtime_pm {} runtime_pm;
 
-	/* For pcode */
-	struct mutex sb_lock;
-
-	/* Should be in struct intel_display */
-	u32 skl_preferred_vco_freq, max_dotclk_freq, hti_state;
-	u8 snps_phy_failed_calibration;
-	struct drm_atomic_state *modeset_restore_state;
-	struct list_head global_obj_list;
-
-	union {
-		/* only to allow build, not used functionally */
-		u32 irq_mask;
-		u32 de_irq_mask[I915_MAX_PIPES];
-	};
-	u32 pipestat_irq_mask[I915_MAX_PIPES];
-
-	bool display_irqs_enabled;
-	u32 enabled_irq_mask;
+	/* only to allow build, not used functionally */
+	u32 irq_mask;
 
 	struct intel_uncore {
 		spinlock_t lock;
@@ -525,11 +541,7 @@ struct xe_device {
 		unsigned int hpll_freq;
 		unsigned int czclk_freq;
 		unsigned int fsb_freq, mem_freq, is_ddr3;
-		u8 vblank_enabled;
 	};
-	struct {
-		const char *dmc_firmware_path;
-	} params;
 
 	void *pxp;
 #endif
@@ -549,20 +561,46 @@ struct xe_file {
 	struct {
 		/** @vm.xe: xarray to store VMs */
 		struct xarray xa;
-		/** @vm.lock: protects file VM state */
+		/**
+		 * @vm.lock: Protects VM lookup + reference and removal a from
+		 * file xarray. Not an intended to be an outer lock which does
+		 * thing while being held.
+		 */
 		struct mutex lock;
 	} vm;
 
 	/** @exec_queue: Submission exec queue state for file */
 	struct {
-		/** @exec_queue.xe: xarray to store engines */
+		/** @exec_queue.xa: xarray to store exece queues */
 		struct xarray xa;
-		/** @exec_queue.lock: protects file engine state */
+		/**
+		 * @exec_queue.lock: Protects exec queue lookup + reference and
+		 * removal a frommfile xarray. Not an intended to be an outer
+		 * lock which does thing while being held.
+		 */
 		struct mutex lock;
 	} exec_queue;
 
+	/** @run_ticks: hw engine class run time in ticks for this drm client */
+	u64 run_ticks[XE_ENGINE_CLASS_MAX];
+
 	/** @client: drm client */
 	struct xe_drm_client *client;
+
+	/**
+	 * @process_name: process name for file handle, used to safely output
+	 * during error situations where xe file can outlive process
+	 */
+	char *process_name;
+
+	/**
+	 * @pid: pid for file handle, used to safely output uring error
+	 * situations where xe file can outlive process
+	 */
+	pid_t pid;
+
+	/** @refcount: ref count of this xe file */
+	struct kref refcount;
 };
 
 #endif

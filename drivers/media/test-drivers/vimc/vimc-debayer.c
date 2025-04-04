@@ -149,8 +149,13 @@ static bool vimc_deb_src_code_is_valid(u32 code)
 	return false;
 }
 
+<<<<<<< HEAD
 static int vimc_deb_init_cfg(struct v4l2_subdev *sd,
 			     struct v4l2_subdev_state *sd_state)
+=======
+static int vimc_debayer_init_state(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_state *sd_state)
+>>>>>>> 5755be5f15d9 (media: v4l2-subdev: Rename .init_cfg() operation to .init_state())
 {
 	struct vimc_deb_device *vdeb = v4l2_get_subdevdata(sd);
 	struct v4l2_mbus_framefmt *mf;

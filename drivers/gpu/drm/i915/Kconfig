@@ -28,7 +28,6 @@ config DRM_I915
 	select X86_PLATFORM_DEVICES if ACPI
 	select ACPI_WMI if ACPI
 	select ACPI_VIDEO if ACPI
-	select ACPI_BUTTON if ACPI
 	select SYNC_FILE
 	select IOSF_MBI if X86
 	select CRC32
@@ -123,9 +122,8 @@ config DRM_I915_USERPTR
 config DRM_I915_GVT_KVMGT
 	tristate "Enable KVM host support Intel GVT-g graphics virtualization"
 	depends on DRM_I915
-	depends on X86
+	depends on KVM_X86
 	depends on 64BIT
-	depends on KVM
 	depends on VFIO
 	select DRM_I915_GVT
 	select KVM_EXTERNAL_WRITE_TRACKING

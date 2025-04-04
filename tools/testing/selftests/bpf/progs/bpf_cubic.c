@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-/* WARNING: This implemenation is not necessarily the same
+/* WARNING: This implementation is not necessarily the same
  * as the tcp_cubic.c.  The purpose is mainly for testing
  * the kernel BPF logic.
  *
@@ -309,7 +309,7 @@ static __always_inline void bictcp_update(struct bictcp *ca, __u32 cwnd,
 	 * (so time^3 is done by using 64 bit)
 	 * and without the support of division of 64bit numbers
 	 * (so all divisions are done by using 32 bit)
-	 *  also NOTE the unit of those veriables
+	 *  also NOTE the unit of those variables
 	 *	  time  = (t - K) / 2^bictcp_HZ
 	 *	  c = bic_scale >> 10
 	 * rtt  = (srtt >> 3) / HZ
@@ -500,7 +500,7 @@ void BPF_STRUCT_OPS(bpf_cubic_acked, struct sock *sk,
 	__u32 delay;
 
 	bpf_cubic_acked_called = 1;
-	/* Some calls are for duplicates without timetamps */
+	/* Some calls are for duplicates without timestamps */
 	if (sample->rtt_us < 0)
 		return;
 

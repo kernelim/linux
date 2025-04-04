@@ -17,7 +17,7 @@ workflow: !reference [.workflow]
     native_tools: 'true'
     architectures: 'x86_64 ppc64le aarch64 s390x'
     debug_architectures: 'x86_64 ppc64le aarch64 s390x'
-    disttag_override: '.el9_5'
+    disttag_override: '.el9_6'
 
 .trigger_c9s_pipeline:
   trigger:
@@ -32,8 +32,8 @@ workflow: !reference [.workflow]
   trigger:
     branch: rhel9
   variables:
-    kcidb_tree_name: rhel-9.5
-    builder_image: quay.io/cki/builder-rhel9.5
+    kcidb_tree_name: rhel-9.6
+    builder_image: quay.io/cki/builder-rhel9
     run_redhat_self_test: 'true'
 
 .trigger_rhel9_build:
@@ -42,22 +42,33 @@ workflow: !reference [.workflow]
     skip_test: 'true'
     skip_results: 'true'
 
-.automotive_full_c9s:
+.automotive_disttag:
   variables:
-    kpet_tree_name: autosd
-    disttag_override: '.el9iv'
-    AWS_UPT_IMAGE_NAME_FILTER: 'auto-osbuild-qemu-cs9-cki-ostree-*'
+    disttag_override: '.el9_6iv'
+
+.automotive_branch:
+  variables:
     RUN_ONLY_FOR_AUTOMOTIVE: 'true'
 
-.rt_full_c9s:
+.automotive_autosd:
   variables:
-    kpet_tree_name: c9s
+    kpet_tree_name: autosd
 
-.automotive_check_c9s_overrides:
-  trigger:
-    branch: c9s-automotive
+.automotive_rhivos:
   variables:
-    RUN_ONLY_FOR_AUTOMOTIVE: 'false'
+    kpet_tree_name: rhivos
+
+.automotive_pipeline_c9s:
+  extends: [.automotive_disttag, .automotive_autosd, .automotive_branch]
+
+.automotive_check_c9s:
+  extends: [.automotive_disttag, .automotive_autosd]
+
+.automotive_pipeline_rhel9:
+  extends: [.automotive_disttag, .automotive_rhivos, .automotive_branch]
+
+.automotive_check_rhel9:
+  extends: [.automotive_disttag, .automotive_rhivos]
 
 # c9s CI
 c9s_merge_request:
@@ -68,8 +79,13 @@ c9s_rt_merge_request:
   # Don't add .rhel_common as we overwrite those configs
   extends: [.trusted, .merge_request,
             .9-common, .trigger_c9s_pipeline,
-            .rt_common,
-            .rt_full_c9s]
+            .rt_gte_96_common]
+
+c9s_rt_64k_merge_request:
+  # Don't add .rhel_common as we overwrite those configs
+  extends: [.trusted, .merge_request,
+            .9-common, .trigger_c9s_pipeline,
+            .rt_64k_common]
 
 c9s_64k_merge_request:
   # Don't add .rhel_common as we overwrite those configs
@@ -79,12 +95,13 @@ c9s_64k_merge_request:
 
 c9s_automotive_check_merge_request:
   extends: [.trusted, .merge_request,
-            .9-common, .trigger_c9s_pipeline, .automotive_full_c9s, .automotive_check_c9s_overrides,
-            .automotive_check_common]
+            .9-common, .trigger_c9s_pipeline,
+            .automotive_check_common, .automotive_check_c9s]
 
 c9s_baseline_coverage_build:
   extends: [.trusted, .baseline, .rhel_common, .only_build_and_publish,
-            .9-common, .coverage, .trigger_c9s_pipeline]
+            .9-common, .trigger_c9s_pipeline,
+            .coverage]
 
 c9s_rhel9_compat_merge_request:
   extends: [.centos_stream_rhel_internal, .merge_request, .rhel_common, .with_notifications,
@@ -93,15 +110,14 @@ c9s_rhel9_compat_merge_request:
 # c9s automotive branch CI
 c9s_automotive_merge_request:
   extends: [.trusted, .merge_request,
-            .9-common,
-            .automotive_pipeline_common,
-            .trigger_c9s_pipeline, .automotive_full_c9s]
+            .9-common, .trigger_c9s_pipeline,
+            .automotive_pipeline_common, .automotive_pipeline_c9s]
 
 c9s_automotive_baseline_coverage:
-  extends: [.trusted, .baseline, .9-common,
-            .automotive_pipeline_common,
-            .coverage,
-            .trigger_c9s_pipeline, .automotive_full_c9s]
+  extends: [.trusted, .baseline,
+            .9-common, .trigger_c9s_pipeline,
+            .automotive_pipeline_common, .automotive_pipeline_c9s,
+            .coverage]
 
 # RHEL9 CI
 rhel9_merge_request:
@@ -112,7 +128,13 @@ rhel9_rt_merge_request:
   # Don't add .rhel_common as we overwrite those configs
   extends: [.internal, .merge_request, .with_notifications,
             .9-common, .trigger_rhel9_pipeline,
-            .rt_common]
+            .rt_gte_96_common]
+
+rhel9_rt_64k_merge_request:
+  # Don't add .rhel_common as we overwrite those configs
+  extends: [.internal, .merge_request, .with_notifications,
+            .9-common, .trigger_rhel9_pipeline,
+            .rt_64k_common]
 
 rhel9_64k_merge_request:
   # Don't add .rhel_common as we overwrite those configs
@@ -120,9 +142,22 @@ rhel9_64k_merge_request:
             .9-common, .trigger_rhel9_pipeline,
             .64k_common]
 
+rhel9_automotive_check_merge_request:
+  # Don't add .rhel_common as we overwrite those configs
+  extends: [.internal, .merge_request, .with_notifications,
+            .9-common, .trigger_rhel9_pipeline,
+            .automotive_check_common, .automotive_check_rhel9]
+
 rhel9_baseline_coverage_build:
   extends: [.internal, .baseline, .rhel_common, .only_build_and_publish,
-            .9-common, .coverage, .trigger_rhel9_pipeline]
+            .9-common, .trigger_rhel9_pipeline,
+            .coverage]
+
+# RHEL9 automotive branch CI
+rhel9_automotive_merge_request:
+  extends: [.internal, .merge_request,
+            .9-common, .trigger_rhel9_pipeline,
+            .automotive_pipeline_common, .automotive_pipeline_rhel9]
 
 # RHEL9 private CI (including RT branches)
 rhel9_merge_request_private:
@@ -133,10 +168,22 @@ rhel9_rt_merge_request_private:
   # Don't add .rhel_common as we overwrite those configs
   extends: [.scratch, .merge_request,
             .9-common, .trigger_rhel9_pipeline,
-            .rt_common]
+            .rt_gte_96_common]
+
+rhel9_rt_64k_merge_request_private:
+  # Don't add .rhel_common as we overwrite those configs
+  extends: [.scratch, .merge_request,
+            .9-common, .trigger_rhel9_pipeline,
+            .rt_64k_common]
 
 rhel9_64k_merge_request_private:
   # Don't add .rhel_common as we overwrite those configs
   extends: [.scratch, .merge_request,
             .9-common, .trigger_rhel9_pipeline,
             .64k_common]
+
+rhel9_automotive_check_merge_request_private:
+  # Don't add .rhel_common as we overwrite those configs
+  extends: [.scratch, .merge_request,
+            .9-common, .trigger_rhel9_pipeline,
+            .automotive_check_common, .automotive_check_rhel9]

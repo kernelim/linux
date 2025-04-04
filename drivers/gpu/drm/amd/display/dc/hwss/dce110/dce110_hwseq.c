@@ -57,6 +57,7 @@
 #include "panel_cntl.h"
 #include "dc_state_priv.h"
 #include "dpcd_defs.h"
+#include "dsc.h"
 /* include DCE11 register header files */
 #include "dce/dce_11_0_d.h"
 #include "dce/dce_11_0_sh_mask.h"
@@ -249,7 +250,7 @@ static bool dce110_enable_display_power_gating(
 		return false;
 }
 
-static void build_prescale_params(struct ipp_prescale_params *prescale_params,
+static void dce110_prescale_params(struct ipp_prescale_params *prescale_params,
 		const struct dc_plane_state *plane_state)
 {
 	prescale_params->mode = IPP_PRESCALE_MODE_FIXED_UNSIGNED;
@@ -289,21 +290,16 @@ dce110_set_input_transfer_func(struct dc *dc, struct pipe_ctx *pipe_ctx,
 	if (ipp == NULL)
 		return false;
 
-	if (plane_state->in_transfer_func)
-		tf = plane_state->in_transfer_func;
+	tf = &plane_state->in_transfer_func;
 
-	build_prescale_params(&prescale_params, plane_state);
+	dce110_prescale_params(&prescale_params, plane_state);
 	ipp->funcs->ipp_program_prescale(ipp, &prescale_params);
 
-	if (plane_state->gamma_correction &&
-			!plane_state->gamma_correction->is_identity &&
+	if (!plane_state->gamma_correction.is_identity &&
 			dce_use_lut(plane_state->format))
-		ipp->funcs->ipp_program_input_lut(ipp, plane_state->gamma_correction);
+		ipp->funcs->ipp_program_input_lut(ipp, &plane_state->gamma_correction);
 
-	if (tf == NULL) {
-		/* Default case if no input transfer function specified */
-		ipp->funcs->ipp_set_degamma(ipp, IPP_DEGAMMA_MODE_HW_sRGB);
-	} else if (tf->type == TF_TYPE_PREDEFINED) {
+	if (tf->type == TF_TYPE_PREDEFINED) {
 		switch (tf->tf) {
 		case TRANSFER_FUNCTION_SRGB:
 			ipp->funcs->ipp_set_degamma(ipp, IPP_DEGAMMA_MODE_HW_sRGB);
@@ -614,11 +610,10 @@ dce110_set_output_transfer_func(struct dc *dc, struct pipe_ctx *pipe_ctx,
 	xfm->funcs->opp_power_on_regamma_lut(xfm, true);
 	xfm->regamma_params.hw_points_num = GAMMA_HW_POINTS_NUM;
 
-	if (stream->out_transfer_func &&
-	    stream->out_transfer_func->type == TF_TYPE_PREDEFINED &&
-	    stream->out_transfer_func->tf == TRANSFER_FUNCTION_SRGB) {
+	if (stream->out_transfer_func.type == TF_TYPE_PREDEFINED &&
+	    stream->out_transfer_func.tf == TRANSFER_FUNCTION_SRGB) {
 		xfm->funcs->opp_set_regamma_mode(xfm, OPP_REGAMMA_SRGB);
-	} else if (dce110_translate_regamma_to_hw_format(stream->out_transfer_func,
+	} else if (dce110_translate_regamma_to_hw_format(&stream->out_transfer_func,
 							 &xfm->regamma_params)) {
 		xfm->funcs->opp_program_regamma_pwl(xfm, &xfm->regamma_params);
 		xfm->funcs->opp_set_regamma_mode(xfm, OPP_REGAMMA_USER);
@@ -748,12 +743,10 @@ void dce110_edp_wait_for_hpd_ready(
 		return;
 	}
 
-	if (link != NULL) {
-		if (link->panel_config.pps.extra_t3_ms > 0) {
-			int extra_t3_in_ms = link->panel_config.pps.extra_t3_ms;
+	if (link->panel_config.pps.extra_t3_ms > 0) {
+		int extra_t3_in_ms = link->panel_config.pps.extra_t3_ms;
 
-			msleep(extra_t3_in_ms);
-		}
+		msleep(extra_t3_in_ms);
 	}
 
 	dal_gpio_open(hpd, GPIO_MODE_INTERRUPT);
@@ -957,7 +950,7 @@ void dce110_edp_backlight_control(
 {
 	struct dc_context *ctx = link->ctx;
 	struct bp_transmitter_control cntl = { 0 };
-	uint8_t pwrseq_instance;
+	uint8_t pwrseq_instance = 0;
 	unsigned int pre_T11_delay = OLED_PRE_T11_DELAY;
 	unsigned int post_T7_delay = OLED_POST_T7_DELAY;
 
@@ -1010,7 +1003,8 @@ void dce110_edp_backlight_control(
 	 */
 	/* dc_service_sleep_in_milliseconds(50); */
 		/*edp 1.2*/
-	pwrseq_instance = link->panel_cntl->pwrseq_inst;
+	if (link->panel_cntl)
+		pwrseq_instance = link->panel_cntl->pwrseq_inst;
 
 	if (cntl.action == TRANSMITTER_CONTROL_BACKLIGHT_ON) {
 		if (!link->dc->config.edp_no_power_sequencing)
@@ -1192,16 +1186,6 @@ void dce110_disable_stream(struct pipe_ctx *pipe_ctx)
 		dccg->funcs->disable_symclk_se(dccg, stream_enc->stream_enc_inst,
 					       link_enc->transmitter - TRANSMITTER_UNIPHY_A);
 	}
-
-	if (dc->link_srv->dp_is_128b_132b_signal(pipe_ctx)) {
-		/* TODO: This looks like a bug to me as we are disabling HPO IO when
-		 * we are just disabling a single HPO stream. Shouldn't we disable HPO
-		 * HW control only when HPOs for all streams are disabled?
-		 */
-		if (pipe_ctx->stream->ctx->dc->hwseq->funcs.setup_hpo_hw_control)
-			pipe_ctx->stream->ctx->dc->hwseq->funcs.setup_hpo_hw_control(
-					pipe_ctx->stream->ctx->dc->hwseq, false);
-	}
 }
 
 void dce110_unblank_stream(struct pipe_ctx *pipe_ctx,
@@ -1249,18 +1233,19 @@ void dce110_blank_stream(struct pipe_ctx *pipe_ctx)
 			 * has changed or they enter protection state and hang.
 			 */
 			msleep(60);
-		} else if (pipe_ctx->stream->signal == SIGNAL_TYPE_EDP) {
-			if (!link->dc->config.edp_no_power_sequencing) {
-				/*
-				 * Sometimes, DP receiver chip power-controlled externally by an
-				 * Embedded Controller could be treated and used as eDP,
-				 * if it drives mobile display. In this case,
-				 * we shouldn't be doing power-sequencing, hence we can skip
-				 * waiting for T9-ready.
-				 */
-				link->dc->link_srv->edp_receiver_ready_T9(link);
-			}
 		}
+	}
+
+	if (pipe_ctx->stream->signal == SIGNAL_TYPE_EDP &&
+	    !link->dc->config.edp_no_power_sequencing) {
+			/*
+			 * Sometimes, DP receiver chip power-controlled externally by an
+			 * Embedded Controller could be treated and used as eDP,
+			 * if it drives mobile display. In this case,
+			 * we shouldn't be doing power-sequencing, hence we can skip
+			 * waiting for T9-ready.
+			 */
+		link->dc->link_srv->edp_receiver_ready_T9(link);
 	}
 
 }
@@ -1323,13 +1308,65 @@ static void populate_audio_dp_link_info(
 
 	dp_link_info->link_bandwidth_kbps = dc_fixpt_floor(link_bw_kbps);
 
-	/* HW minimum for 128b/132b HBlank is 4 frame symbols.
-	 * TODO: Plumb the actual programmed HBlank min symbol width to here.
+	/* Calculates hblank_min_symbol_width for 128b/132b
+	 * Corresponding HBLANK_MIN_SYMBOL_WIDTH register is calculated as:
+	 *   floor(h_blank * bits_per_pixel / 128)
 	 */
-	if (dp_link_info->encoding == DP_128b_132b_ENCODING)
-		dp_link_info->hblank_min_symbol_width = 4;
-	else
+	if (dp_link_info->encoding == DP_128b_132b_ENCODING) {
+		struct dc_crtc_timing *crtc_timing = &pipe_ctx->stream->timing;
+
+		uint32_t h_active = crtc_timing->h_addressable + crtc_timing->h_border_left
+				+ crtc_timing->h_border_right;
+		uint32_t h_blank = crtc_timing->h_total - h_active;
+
+		uint32_t bpp;
+
+		if (crtc_timing->flags.DSC) {
+			bpp = crtc_timing->dsc_cfg.bits_per_pixel;
+		} else {
+			/* When the timing is using DSC, dsc_cfg.bits_per_pixel is in 16th bits.
+			 * The bpp in this path is scaled to 16th bits so the final calculation
+			 * is correct for both cases.
+			 */
+			bpp = 16;
+			switch (crtc_timing->display_color_depth) {
+			case COLOR_DEPTH_666:
+				bpp *= 18;
+				break;
+			case COLOR_DEPTH_888:
+				bpp *= 24;
+				break;
+			case COLOR_DEPTH_101010:
+				bpp *= 30;
+				break;
+			case COLOR_DEPTH_121212:
+				bpp *= 36;
+				break;
+			default:
+				bpp = 0;
+				break;
+			}
+
+			switch (crtc_timing->pixel_encoding) {
+			case PIXEL_ENCODING_YCBCR422:
+				bpp = bpp * 2 / 3;
+				break;
+			case PIXEL_ENCODING_YCBCR420:
+				bpp /= 2;
+				break;
+			default:
+				break;
+			}
+		}
+
+		/* Min symbol width = floor(h_blank * (bpp/16) / 128) */
+		dp_link_info->hblank_min_symbol_width = dc_fixpt_floor(
+				dc_fixpt_div(dc_fixpt_from_int(h_blank * bpp),
+						dc_fixpt_from_int(128 / 16)));
+
+	} else {
 		dp_link_info->hblank_min_symbol_width = 0;
+	}
 }
 
 static void build_audio_output(
@@ -1515,6 +1552,7 @@ static enum dc_status dce110_enable_stream_timing(
 				0,
 				0,
 				0,
+				0,
 				pipe_ctx->stream->signal,
 				true);
 	}
@@ -1550,7 +1588,7 @@ enum dc_status dce110_apply_single_controller_ctx_to_hw(
 	}
 
 	if (pipe_ctx->stream_res.audio != NULL) {
-		struct audio_output audio_output;
+		struct audio_output audio_output = {0};
 
 		build_audio_output(context, pipe_ctx, &audio_output);
 
@@ -1563,6 +1601,11 @@ enum dc_status dce110_apply_single_controller_ctx_to_hw(
 				&audio_output.crtc_info,
 				&pipe_ctx->stream->audio_info,
 				&audio_output.dp_link_info);
+
+		if (dc->config.disable_hbr_audio_dp2)
+			if (pipe_ctx->stream_res.audio->funcs->az_disable_hbr_audio &&
+					dc->link_srv->dp_is_128b_132b_signal(pipe_ctx))
+				pipe_ctx->stream_res.audio->funcs->az_disable_hbr_audio(pipe_ctx->stream_res.audio);
 	}
 
 	/* make sure no pipes syncd to the pipe being enabled */
@@ -1781,6 +1824,48 @@ static void get_edp_links_with_sink(
 	}
 }
 
+static void clean_up_dsc_blocks(struct dc *dc)
+{
+	struct display_stream_compressor *dsc = NULL;
+	struct timing_generator *tg = NULL;
+	struct stream_encoder *se = NULL;
+	struct dccg *dccg = dc->res_pool->dccg;
+	struct pg_cntl *pg_cntl = dc->res_pool->pg_cntl;
+	int i;
+
+	if (dc->ctx->dce_version != DCN_VERSION_3_5 &&
+		dc->ctx->dce_version != DCN_VERSION_3_51)
+		return;
+
+	for (i = 0; i < dc->res_pool->res_cap->num_dsc; i++) {
+		struct dcn_dsc_state s  = {0};
+
+		dsc = dc->res_pool->dscs[i];
+		dsc->funcs->dsc_read_state(dsc, &s);
+		if (s.dsc_fw_en) {
+			/* disable DSC in OPTC */
+			if (i < dc->res_pool->timing_generator_count) {
+				tg = dc->res_pool->timing_generators[i];
+				tg->funcs->set_dsc_config(tg, OPTC_DSC_DISABLED, 0, 0);
+			}
+			/* disable DSC in stream encoder */
+			if (i < dc->res_pool->stream_enc_count) {
+				se = dc->res_pool->stream_enc[i];
+				se->funcs->dp_set_dsc_config(se, OPTC_DSC_DISABLED, 0, 0);
+				se->funcs->dp_set_dsc_pps_info_packet(se, false, NULL, true);
+			}
+			/* disable DSC block */
+			if (dccg->funcs->set_ref_dscclk)
+				dccg->funcs->set_ref_dscclk(dccg, dsc->inst);
+			dsc->funcs->dsc_disable(dsc);
+
+			/* power down DSC */
+			if (pg_cntl != NULL)
+				pg_cntl->funcs->dsc_pg_control(pg_cntl, dsc->inst, false);
+		}
+	}
+}
+
 /*
  * When ASIC goes from VBIOS/VGA mode to driver/accelerated mode we need:
  *  1. Power down all DC HW blocks
@@ -1795,6 +1880,7 @@ void dce110_enable_accelerated_mode(struct dc *dc, struct dc_state *context)
 	struct dc_stream_state *edp_streams[MAX_NUM_EDP];
 	struct dc_link *edp_link_with_sink = NULL;
 	struct dc_link *edp_link = NULL;
+	struct pipe_ctx *pipe_ctx = NULL;
 	struct dce_hwseq *hws = dc->hwseq;
 	int edp_with_sink_num;
 	int edp_num;
@@ -1803,6 +1889,7 @@ void dce110_enable_accelerated_mode(struct dc *dc, struct dc_state *context)
 	bool can_apply_edp_fast_boot = false;
 	bool can_apply_seamless_boot = false;
 	bool keep_edp_vdd_on = false;
+	struct dc_bios *dcb = dc->ctx->dc_bios;
 	DC_LOGGER_INIT();
 
 
@@ -1831,9 +1918,26 @@ void dce110_enable_accelerated_mode(struct dc *dc, struct dc_state *context)
 				can_apply_edp_fast_boot = dc_validate_boot_timing(dc,
 					edp_stream->sink, &edp_stream->timing);
 				edp_stream->apply_edp_fast_boot_optimization = can_apply_edp_fast_boot;
-				if (can_apply_edp_fast_boot)
-					DC_LOG_EVENT_LINK_TRAINING("eDP fast boot disabled to optimize link rate\n");
+				if (can_apply_edp_fast_boot) {
+					DC_LOG_EVENT_LINK_TRAINING("eDP fast boot Enable\n");
 
+					// Vbios & Driver support different pixel rate div policy.
+					pipe_ctx = resource_get_otg_master_for_stream(&context->res_ctx, edp_stream);
+					if (pipe_ctx &&
+						hws->funcs.is_dp_dig_pixel_rate_div_policy &&
+						hws->funcs.is_dp_dig_pixel_rate_div_policy(pipe_ctx)) {
+						// Get Vbios div factor from register
+						dc->res_pool->dccg->funcs->get_pixel_rate_div(
+							dc->res_pool->dccg,
+							pipe_ctx->stream_res.tg->inst,
+							&pipe_ctx->pixel_rate_divider.div_factor1,
+							&pipe_ctx->pixel_rate_divider.div_factor2);
+
+						// VBios doesn't support pixel rate div, so force it.
+						// If VBios supports it, we check it from reigster or other flags.
+						pipe_ctx->stream_res.pix_clk_params.dio_se_pix_per_cycle = 1;
+					}
+				}
 				break;
 			}
 		}
@@ -1862,13 +1966,22 @@ void dce110_enable_accelerated_mode(struct dc *dc, struct dc_state *context)
 			hws->funcs.edp_backlight_control(edp_link_with_sink, false);
 		}
 		/*resume from S3, no vbios posting, no need to power down again*/
-		clk_mgr_exit_optimized_pwr_state(dc, dc->clk_mgr);
+		if (dcb && dcb->funcs && !dcb->funcs->is_accelerated_mode(dcb))
+			clk_mgr_exit_optimized_pwr_state(dc, dc->clk_mgr);
 
 		power_down_all_hw_blocks(dc);
+
+		/* DSC could be enabled on eDP during VBIOS post.
+		 * To clean up dsc blocks if eDP is in link but not active.
+		 */
+		if (edp_link_with_sink && (edp_stream_num == 0))
+			clean_up_dsc_blocks(dc);
+
 		disable_vga_and_power_gate_all_controllers(dc);
 		if (edp_link_with_sink && !keep_edp_vdd_on)
 			dc->hwss.edp_power_control(edp_link_with_sink, false);
-		clk_mgr_optimize_pwr_state(dc, dc->clk_mgr);
+		if (dcb && dcb->funcs && !dcb->funcs->is_accelerated_mode(dcb))
+			clk_mgr_optimize_pwr_state(dc, dc->clk_mgr);
 	}
 	bios_set_scratch_acc_mode_change(dc->ctx->dc_bios, 1);
 }
@@ -1983,13 +2096,20 @@ static void set_drr(struct pipe_ctx **pipe_ctx,
 	 * as well.
 	 */
 	for (i = 0; i < num_pipes; i++) {
-		pipe_ctx[i]->stream_res.tg->funcs->set_drr(
-			pipe_ctx[i]->stream_res.tg, &params);
+		/* dc_state_destruct() might null the stream resources, so fetch tg
+		 * here first to avoid a race condition. The lifetime of the pointee
+		 * itself (the timing_generator object) is not a problem here.
+		 */
+		struct timing_generator *tg = pipe_ctx[i]->stream_res.tg;
 
-		if (adjust.v_total_max != 0 && adjust.v_total_min != 0)
-			pipe_ctx[i]->stream_res.tg->funcs->set_static_screen_control(
-					pipe_ctx[i]->stream_res.tg,
-					event_triggers, num_frames);
+		if ((tg != NULL) && tg->funcs) {
+			if (tg->funcs->set_drr)
+				tg->funcs->set_drr(tg, &params);
+			if (adjust.v_total_max != 0 && adjust.v_total_min != 0)
+				if (tg->funcs->set_static_screen_control)
+					tg->funcs->set_static_screen_control(
+						tg, event_triggers, num_frames);
+		}
 	}
 }
 
@@ -2201,7 +2321,7 @@ static void dce110_setup_audio_dto(
 		struct dc *dc,
 		struct dc_state *context)
 {
-	int i;
+	unsigned int i;
 
 	/* program audio wall clock. use HDMI as clock source if HDMI
 	 * audio active. Otherwise, use DP as clock source
@@ -2273,7 +2393,7 @@ static void dce110_setup_audio_dto(
 				continue;
 
 			if (pipe_ctx->stream_res.audio != NULL) {
-				struct audio_output audio_output;
+				struct audio_output audio_output = {0};
 
 				build_audio_output(context, pipe_ctx, &audio_output);
 
@@ -2296,6 +2416,8 @@ enum dc_status dce110_apply_ctx_to_hw(
 	struct dc_bios *dcb = dc->ctx->dc_bios;
 	enum dc_status status;
 	int i;
+	bool was_hpo_acquired = resource_is_hpo_acquired(dc->current_state);
+	bool is_hpo_acquired = resource_is_hpo_acquired(context);
 
 	/* reset syncd pipes from disabled pipes */
 	if (dc->config.use_pipe_ctx_sync_logic)
@@ -2338,6 +2460,10 @@ enum dc_status dce110_apply_ctx_to_hw(
 
 	dce110_setup_audio_dto(dc, context);
 
+	if (dc->hwseq->funcs.setup_hpo_hw_control && was_hpo_acquired != is_hpo_acquired) {
+		dc->hwseq->funcs.setup_hpo_hw_control(dc->hwseq, is_hpo_acquired);
+	}
+
 	for (i = 0; i < dc->res_pool->pipe_count; i++) {
 		struct pipe_ctx *pipe_ctx_old =
 					&dc->current_state->res_ctx.pipe_ctx[i];
@@ -2367,7 +2493,7 @@ enum dc_status dce110_apply_ctx_to_hw(
 
 #ifdef CONFIG_DRM_AMD_DC_FP
 		if (hws->funcs.resync_fifo_dccg_dio)
-			hws->funcs.resync_fifo_dccg_dio(hws, dc, context);
+			hws->funcs.resync_fifo_dccg_dio(hws, dc, context, i);
 #endif
 	}
 
@@ -3241,7 +3367,6 @@ static const struct hw_sequencer_funcs dce110_funcs = {
 
 static const struct hwseq_private_funcs dce110_private_funcs = {
 	.init_pipes = init_pipes,
-	.update_plane_addr = update_plane_addr,
 	.set_input_transfer_func = dce110_set_input_transfer_func,
 	.set_output_transfer_func = dce110_set_output_transfer_func,
 	.power_down = dce110_power_down,
