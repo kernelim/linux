@@ -41,10 +41,12 @@
 
 #include <trace/events/xen.h>
 
+#include <asm/alternative.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/smap.h>
 #include <asm/nospec-branch.h>
+#include <asm/processor.h>
 
 #include <xen/interface/xen.h>
 #include <xen/interface/sched.h>
@@ -86,11 +88,19 @@ struct xen_dm_op_buf;
  * there aren't more than 5 arguments...)
  */
 
-extern struct { char _entry[32]; } hypercall_page[];
+/* RHEL-only: x86_64 Xen HVM only implementation! */
+#define __XEN_STR(x) #x
+#define __XEN_XSTR(s) __XEN_STR(s)
 
-#define __HYPERCALL		"call hypercall_page+%c[offset]"
-#define __HYPERCALL_ENTRY(x)						\
-	[offset] "i" (__HYPERVISOR_##x * sizeof(hypercall_page[0]))
+#define __HYPERCALL                                     \
+	"cmpq $"__XEN_XSTR(X86_VENDOR_INTEL)", %%rcx \n"\
+	"jne 1f \n"					\
+	"vmcall \n"					\
+	"jmp 2f \n"					\
+	"1: vmmcall \n"					\
+	"2: \n"
+
+#define __HYPERCALL_ENTRY(x)	"a" (x), "c" (boot_cpu_data.x86_vendor)
 
 #ifdef CONFIG_X86_32
 #define __HYPERCALL_RETREG	"eax"
@@ -148,7 +158,7 @@ extern struct { char _entry[32]; } hypercall_page[];
 	__HYPERCALL_0ARG();						\
 	asm volatile (__HYPERCALL					\
 		      : __HYPERCALL_0PARAM				\
-		      : __HYPERCALL_ENTRY(name)				\
+		      : __HYPERCALL_ENTRY(__HYPERVISOR_ ## name)	\
 		      : __HYPERCALL_CLOBBER0);				\
 	(type)__res;							\
 })
@@ -159,7 +169,7 @@ extern struct { char _entry[32]; } hypercall_page[];
 	__HYPERCALL_1ARG(a1);						\
 	asm volatile (__HYPERCALL					\
 		      : __HYPERCALL_1PARAM				\
-		      : __HYPERCALL_ENTRY(name)				\
+		      : __HYPERCALL_ENTRY(__HYPERVISOR_ ## name)	\
 		      : __HYPERCALL_CLOBBER1);				\
 	(type)__res;							\
 })
@@ -170,7 +180,7 @@ extern struct { char _entry[32]; } hypercall_page[];
 	__HYPERCALL_2ARG(a1, a2);					\
 	asm volatile (__HYPERCALL					\
 		      : __HYPERCALL_2PARAM				\
-		      : __HYPERCALL_ENTRY(name)				\
+		      : __HYPERCALL_ENTRY(__HYPERVISOR_ ## name)	\
 		      : __HYPERCALL_CLOBBER2);				\
 	(type)__res;							\
 })
@@ -181,7 +191,7 @@ extern struct { char _entry[32]; } hypercall_page[];
 	__HYPERCALL_3ARG(a1, a2, a3);					\
 	asm volatile (__HYPERCALL					\
 		      : __HYPERCALL_3PARAM				\
-		      : __HYPERCALL_ENTRY(name)				\
+		      : __HYPERCALL_ENTRY(__HYPERVISOR_ ## name)	\
 		      : __HYPERCALL_CLOBBER3);				\
 	(type)__res;							\
 })
@@ -192,7 +202,7 @@ extern struct { char _entry[32]; } hypercall_page[];
 	__HYPERCALL_4ARG(a1, a2, a3, a4);				\
 	asm volatile (__HYPERCALL					\
 		      : __HYPERCALL_4PARAM				\
-		      : __HYPERCALL_ENTRY(name)				\
+		      : __HYPERCALL_ENTRY(__HYPERVISOR_ ## name)	\
 		      : __HYPERCALL_CLOBBER4);				\
 	(type)__res;							\
 })
@@ -203,7 +213,7 @@ extern struct { char _entry[32]; } hypercall_page[];
 	__HYPERCALL_5ARG(a1, a2, a3, a4, a5);				\
 	asm volatile (__HYPERCALL					\
 		      : __HYPERCALL_5PARAM				\
-		      : __HYPERCALL_ENTRY(name)				\
+		      : __HYPERCALL_ENTRY(__HYPERVISOR_ ## name)	\
 		      : __HYPERCALL_CLOBBER5);				\
 	(type)__res;							\
 })
@@ -218,9 +228,9 @@ privcmd_call(unsigned call,
 	__HYPERCALL_5ARG(a1, a2, a3, a4, a5);
 
 	stac();
-	asm volatile(CALL_NOSPEC
+	asm volatile(__HYPERCALL
 		     : __HYPERCALL_5PARAM
-		     : [thunk_target] "a" (&hypercall_page[call])
+		     : __HYPERCALL_ENTRY(call)
 		     : __HYPERCALL_CLOBBER5);
 	clac();
 

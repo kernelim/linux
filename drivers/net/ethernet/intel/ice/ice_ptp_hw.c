@@ -6,6 +6,7 @@
 #include "ice_ptp_hw.h"
 #include "ice_ptp_consts.h"
 #include "ice_cgu_regs.h"
+#include "ice.h"
 
 /* Low level functions for interacting with and managing the device clock used
  * for the Precision Time Protocol.
@@ -148,8 +149,12 @@ void ice_ptp_src_cmd(struct ice_hw *hw, enum ice_ptp_tmr_cmd cmd)
  */
 static void ice_ptp_exec_tmr_cmd(struct ice_hw *hw)
 {
+	struct ice_pf *pf = container_of(hw, struct ice_pf, hw);
+
+	spin_lock(&pf->adapter->ptp_gltsyn_time_lock);
 	wr32(hw, GLTSYN_CMD_SYNC, SYNC_EXEC_CMD);
 	ice_flush(hw);
+	spin_unlock(&pf->adapter->ptp_gltsyn_time_lock);
 }
 
 /* E822 family functions

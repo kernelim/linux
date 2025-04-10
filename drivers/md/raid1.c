@@ -1818,6 +1818,7 @@ static int raid1_add_disk(struct mddev *mddev, struct md_rdev *rdev)
 	struct raid1_info *p;
 	int first = 0;
 	int last = conf->raid_disks - 1;
+	struct request_queue *rdev_queue = bdev_get_queue(rdev->bdev);
 
 	if (mddev->recovery_disabled == conf->recovery_disabled)
 		return -EBUSY;
@@ -1868,8 +1869,11 @@ static int raid1_add_disk(struct mddev *mddev, struct md_rdev *rdev)
 			break;
 		}
 	}
-	if (mddev->queue && blk_queue_discard(bdev_get_queue(rdev->bdev)))
+	if (mddev->queue && blk_queue_discard(rdev_queue)) {
 		blk_queue_flag_set(QUEUE_FLAG_DISCARD, mddev->queue);
+		mddev->queue->limits.discard_granularity =
+						rdev_queue->limits.discard_granularity;
+	}
 	print_conf(conf);
 	return err;
 }

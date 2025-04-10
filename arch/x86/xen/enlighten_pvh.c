@@ -88,9 +88,6 @@ static void __init init_pvh_bootparams(void)
  */
 void __init xen_prepare_pvh(void)
 {
-	u32 msr;
-	u64 pfn;
-
 	if (pvh_start_info.magic != XEN_HVM_START_MAGIC_VALUE) {
 		xen_raw_printk("Error: Unexpected magic value (0x%08x)\n",
 				pvh_start_info.magic);
@@ -99,10 +96,6 @@ void __init xen_prepare_pvh(void)
 
 	xen_pvh = 1;
 	xen_start_flags = pvh_start_info.flags;
-
-	msr = cpuid_ebx(xen_cpuid_base() + 2);
-	pfn = __pa(hypercall_page);
-	wrmsr_safe(msr, (u32)pfn, (u32)(pfn >> 32));
 
 	init_pvh_bootparams();
 }
