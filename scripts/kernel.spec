@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 503.35.1
+%define pkgrelease 503.38.1
 %define kversion 5
-%define tarfile_release 5.14.0-503.35.1.el9_5
+%define tarfile_release 5.14.0-503.38.1.el9_5
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 503.35.1%{?buildid}%{?dist}
+%define specrelease 503.38.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-503.35.1.el9_5
+%define kabiversion 5.14.0-503.38.1.el9_5
 
 #
 # End of genspec.sh variables
@@ -3794,9 +3794,30 @@ fi
 #
 #
 %changelog
-* Wed Apr 02 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.35.1
+* Wed Apr 16 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.38.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Mon Apr 14 2025 Chao YE <cye@redhat.com> [5.14.0-503.38.1.el9_5]
+- ALSA: usb-audio: Fix out of bounds reads when finding clock sources (CKI Backport Bot) [RHEL-86726] {CVE-2024-53150}
+
+* Sun Apr 06 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-503.37.1.el9_5]
+- scsi: core: Fix command pass through retry regression (Ewan D. Milne) [RHEL-77123]
+
+* Sun Mar 30 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-503.36.1.el9_5]
+- cpufreq: intel_pstate: Support Emerald Rapids OOB mode (Steve Best) [RHEL-67636]
+- cxgb4: use port number to set mac addr (Michal Schmidt) [RHEL-79672]
+- ice: stop storing XDP verdict within ice_rx_buf (Petr Oros) [RHEL-76141]
+- ice: gather page_count()'s of each frag right before XDP prog call (Petr Oros) [RHEL-76141]
+- ice: put Rx buffers after being done with current frame (Petr Oros) [RHEL-76141]
+- gve: trigger RX NAPI instead of TX NAPI in gve_xsk_wakeup (Joshua Washington) [RHEL-74413]
+- gve: process XSK TX descriptors as part of RX NAPI (Joshua Washington) [RHEL-74413]
+- gve: guard XSK operations on the existence of queues (Joshua Washington) [RHEL-74413] {CVE-2024-57933}
+- gve: guard XDP xmit NDO on existence of xdp queues (Joshua Washington) [RHEL-74413] {CVE-2024-57932}
+- gve: Fix an edge case for TSO skb validity check (Joshua Washington) [RHEL-74413]
+- gve: Fix XDP TX completion handling when counters overflow (Joshua Washington) [RHEL-74413]
+- gve: Clear napi->skb before dev_kfree_skb_any() (Joshua Washington) [RHEL-74413] {CVE-2024-40937}
+- gve: ignore nonrelevant GSO type bits when processing TSO headers (Joshua Washington) [RHEL-74413]
 
 * Sun Mar 23 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-503.35.1.el9_5]
 - cppc_cpufreq: Use desired perf if feedback ctrs are 0 or unchanged (Mark Langsdorf) [RHEL-78643]
