@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 503.38.1
+%define pkgrelease 503.40.1
 %define kversion 5
-%define tarfile_release 5.14.0-503.38.1.el9_5
+%define tarfile_release 5.14.0-503.40.1.el9_5
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 503.38.1%{?buildid}%{?dist}
+%define specrelease 503.40.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-503.38.1.el9_5
+%define kabiversion 5.14.0-503.40.1.el9_5
 
 #
 # End of genspec.sh variables
@@ -3794,9 +3794,37 @@ fi
 #
 #
 %changelog
-* Wed Apr 16 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.38.1
+* Wed Apr 30 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.40.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Wed Apr 23 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-503.40.1.el9_5]
+- nvme-tcp: fix potential memory corruption in nvme_tcp_recv_pdu() (Chris Leech) [RHEL-87479] {CVE-2025-21927}
+- ipvs: properly dereference pe in ip_vs_add_service (Phil Sutter) [RHEL-75438] {CVE-2024-42322}
+- bonding: fix null pointer deref in bond_ipsec_offload_ok (CKI Backport Bot) [RHEL-75453] {CVE-2024-44990}
+- smb: client: don't retry IO on failed negprotos with soft mounts (Jay Shin) [RHEL-85523]
+- bonding: Correctly support GSO ESP offload (CKI Backport Bot) [RHEL-73403]
+- team: prevent adding a device which is already a team device lower (Hangbin Liu) [RHEL-73403]
+- team: Fix feature exposure when no ports are present (Hangbin Liu) [RHEL-73403]
+- team: Fix feature propagation of NETIF_F_GSO_ENCAP_ALL (Hangbin Liu) [RHEL-73403]
+- team: Fix initial vlan_feature set in __team_compute_features (Hangbin Liu) [RHEL-73403]
+- bonding: Fix feature propagation of NETIF_F_GSO_ENCAP_ALL (Hangbin Liu) [RHEL-73403]
+- bonding: Fix initial {vlan,mpls}_feature set in bond_compute_features (Hangbin Liu) [RHEL-73403]
+- net, team, bonding: Add netdev_base_features helper (Hangbin Liu) [RHEL-73403]
+- bonding: add ESP offload features when slaves support (Hangbin Liu) [RHEL-73403]
+- net: team: rename team to team_core for linking (Hangbin Liu) [RHEL-73403]
+- netfilter: br_netfilter: fix panic with metadata_dst skb (Ivan Vecera) [RHEL-71956]
+- bridge: mcast: Fail MDB get request on empty entry (Ivan Vecera) [RHEL-71956]
+- net: stmmac: dwmac-tegra: Fix link bring-up sequence (Jose Ignacio Tornos Martinez) [RHEL-73478]
+- kobject_uevent: Fix OOB access within zap_modalias_env() (CKI KWF BOT) [RHEL-75435] {CVE-2024-42292}
+
+* Mon Apr 14 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-503.39.1.el9_5]
+- igb: cope with large MAX_SKB_FRAGS (Corinna Vinschen) [RHEL-75552]
+- x86/sev: Ensure that RMP table fixups are reserved (Bandan Das) [RHEL-84716]
+- ELF: fix kernel.randomize_va_space double read (Rafael Aquini) [RHEL-75456] {CVE-2024-46826}
+- smb: client: fix double put of @cfile in smb2_set_path_size() (Paulo Alcantara) [RHEL-79342] {CVE-2024-46796}
+- smb: client: fix double put of @cfile in smb2_rename_path() (Paulo Alcantara) [RHEL-79342] {CVE-2024-46736}
+- smb: client: fix FSCTL_GET_REPARSE_POINT against NetApp (Paulo Alcantara) [RHEL-79342]
 
 * Mon Apr 14 2025 Chao YE <cye@redhat.com> [5.14.0-503.38.1.el9_5]
 - ALSA: usb-audio: Fix out of bounds reads when finding clock sources (CKI Backport Bot) [RHEL-86726] {CVE-2024-53150}
