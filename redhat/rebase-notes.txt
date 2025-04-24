@@ -1,0 +1,7 @@
+Rebase notes for Fedora kernel rebases:
+
+6.x: Apply both patches for the simple drm nvidia work-around. From 6.1:
+    e020208cd83e397e47cf2b54c4471847ff09e2ee enable efifb for Nvidia
+    811fe0e4dcfd86a0db5135d3bfef4936794efdb6 drivers/firmware: skip simpledrm if nvidia-drm.modeset=1 is set
+
+Fedora 37: 'systemd-boot-unsigned' build dependency needs to be dropped.

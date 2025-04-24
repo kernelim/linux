@@ -1,0 +1,263 @@
+= filtermods.py(1)
+:ext: adoc
+:doctype: manpage
+
+== NAME
+filtermods.py - filter kernel modules
+
+== DESCRIPTION
+Filter/sort/allocate kmods into groups for packaging. Main use case for
+the script is to run as part of kernel packaging scripts (e.g. kernel.spec)
+to decide where each kmod should go (modules, modules-extra, etc.)
+
+While the tool gives a user flexibility in how yaml config is organized,
+there are some best practices for configs used in kernel builds:
+
+* Make modules package the default
+* Write as few rules for modules package as possible
+* Keep the rule list alphabetical where possible
+
+*usage:* filtermods.py [-h] [-v] [-q] [-l LOG_FILENAME] {sort,rulemap,selftest,cmp2rpm} ...
+
+== Common command line options
+These options apply to all subcommands.
+
+* -h / --help : display help
+* -v / --verbose : increases stdout verbosity
+* -q / --quiet : lowers stdout verbosity
+* -l / --log-filename : name of the logfile which captures detailed logs (filtermods.log by default)
+
+== SUBCOMMANDS
+=== sort
+$ filtermods.py sort [-h] -c CONFIG -d DEPMOD [-o OUTPUT] [-r VARIANTS] [-g]
+
+Using modules.dep and yaml config as input, sort kmods into groups,
+satisfy all rules and assign each kmod to a package, respect kmod
+dependency relations, respect module dependency relations.
+
+This means, that if you install any combination of module packages,
+all kmods dependencies have to be available as well - either directly
+come from the package of one of packages it depends on.
+
+==== yaml config (-c option)
+The yaml config describes module packages, their dependencies and rules
+(or constraints) for kmods.
+
+* There are two main rule types:
+** "wants"   - rule is satisfied if kmod ends up in listed package
+              (or any package it depends on - meaning it can move
+              down in package hierarchy)
+** "default" - specifies that all kmods which were not covered
+              by other rules (implicitly or explicitely) become
+              "wants" for listed package
+* Rules are evaluated in order they appear in yaml config.
+* Rules can be regexes to match multiple kmods.
+* If multiple rules apply to a kmod, first one wins.
+* It is not required to explicitely list all kmods or their dependencies.
+* Rules can propagate transitively to children or parents of a kmod.
+  For example "kmod A" dependencies have to end up in a package, which is
+  in dependency chain of "kmod A"'s package (see example below).
+* General rule format is: "kmod_regex: module_name"
+* Packages and rules can be conditional (see 'if_variant_in' attribute below)
+
+Rule examples:
+
+----
+- drivers/base/.*(kunit|test).*: modules-internal
+- drivers/net/amt.ko: modules-core
+- fs/.*test.*: modules-internal
+- net/appletalk/appletalk.*: modules-extra
+- default: modules
+----
+
+==== depmod file (-d option)
+This is file that describes kmod dependencies. It follows the format
+of modules.dep (created by depmod), which you can find in
+/lib/modules/$(uname -r)/ directory.
+
+==== output directory (-o option)
+Directory where filtermods.py should store resulting package lists.
+Filenames are derived from package names defined in yaml config.
+
+==== variants (-r option)
+This option conditionally enables parts of config which are specific
+to provided variants. A good example is -rt variant, which is 99% identical
+to base kernel, with the exception of kvm subpackage. It's an alternative
+to creating entirely new yaml config that would be 99% identical with base one.
+Sample usage can be seen in `filtermods-testdata/test1.yaml`.
+
+==== graphviz (-g option)
+For experiments and debugging it's handy to vizualize what's going on.
+If you have graphviz installed, -g option will generate svg files
+for initial and final states. These contain graphs representing
+kmod and package relations.
+
+==== Example 1
+Let's take a look at first example with just 3 kmods.
+
+.example1.dep
+[source,txt]
+----
+kernel/drivers/input/joystick/iforce/iforce.ko.xz:
+kernel/drivers/input/joystick/iforce/iforce-serio.ko.xz: kernel/drivers/input/joystick/iforce/iforce.ko.xz
+kernel/drivers/input/joystick/iforce/iforce-usb.ko.xz: kernel/drivers/input/joystick/iforce/iforce.ko.xz
+----
+
+.example1.yaml
+[source,yaml]
+----
+packages:
+  - name: modules-core
+    depends-on: []
+  - name: modules
+    depends-on:
+    - modules-core
+  - name: modules-extra
+    depends-on:
+    - modules-core
+    - modules
+
+rules:
+  - drivers/input/joystick/iforce/iforce.ko: modules-extra
+  - default: modules
+----
+
+In yaml config above we are saying 2 things:
+ 1. we want iforce.ko to be in modules-extra
+ 2. and any unassigned kmods to go to modules package (default bucket)
+
+----
+$ ./redhat/scripts/filtermods.py sort -c example1.yaml -d example1.dep -o .
+...
+06:10:44    INFO  write_modules_lists: 772 Module list ./modules-core.list created with 0 kmods
+06:10:44    INFO  write_modules_lists: 772 Module list ./modules.list created with 0 kmods
+06:10:44    INFO  write_modules_lists: 772 Module list ./modules-extra.list created with 3 kmods
+----
+Not surprisingly all kmods ended up in modules-extra package. That's because
+iforce-serio.ko and iforce-usb.ko depend on iforce.ko. If they were in
+modules-core or modules package, and modules-extra were not installed they
+would be missing a dependency (iforce.ko).
+
+Now consider, we modify rules to:
+
+.example1.yaml
+[source,yaml]
+----
+...
+rules:
+  - drivers/input/joystick/iforce/iforce.ko: modules-extra
+  - drivers/input/joystick/iforce/iforce-usb.ko: modules
+  - default: modules
+----
+
+This seems impossible at first look, but remember that these are
+"soft rules". That means that kmod can end up in specified package
+*or* any package it depends on. In other words, if those packages
+are installed and kmod is available, that is considered as satisfying
+rules as well.
+
+----
+$ ./redhat/scripts/filtermods.py sort -c example1.yaml -d example1.dep -o .
+...
+06:14:18    INFO         print_report: 709 ************************** REPORT **************************
+06:14:18    INFO         print_report: 745 iforce.ko: wanted by ['modules-extra'] but ended up in ['modules']
+06:14:18    INFO         print_report: 747      has conflicting parent: iforce-serio.ko(modules), iforce-usb.ko(modules)
+06:14:18    INFO         print_report: 753 No. of kmod(s) assigned to preferred package: 2
+06:14:18    INFO         print_report: 754 No. of kmod(s) moved to a related package: 1
+06:14:18    INFO         print_report: 755 No. of kmod(s) which could not be assigned: 0
+06:14:18    INFO         print_report: 756 ************************************************************
+06:14:18    INFO  write_modules_lists: 772 Module list ./modules-core.list created with 0 kmods
+06:14:18    INFO  write_modules_lists: 772 Module list ./modules.list created with 3 kmods
+06:14:18    INFO  write_modules_lists: 772 Module list ./modules-extra.list created with 0 kmods
+----
+What happened? We asked iforce-usb.ko to be in modules, but that would lead
+to broken dependency with iforce.ko (in modules-extra). So the tool does the
+next best thing, it moves iforce.ko to modules, and all kmods end up in modules
+package. This move, to a "related" package is allowed for "soft rules".
+
+==== More examples
+Have a look at filtermods-testdata directory for more examples.
+
+You can also run all self tests with -g option:
+----
+$ filtermods.py selftest -g
+----
+and then inspect generated test*_f.svg files to easily see what was input
+and what the tool decided to do.
+
+=== rulemap
+$ filtermods.py rulemap [-h] -c CONFIG -d DEPMOD [-r VARIANTS]
+
+Expand all rules and for each kmod print its desired module package name.
+With complex yaml config rules it may be handy to double check that a specific
+kmod is covered by correct rule. This doesn't do any sorting, it only prints
+yaml config rules in expanded form. Since a kmod can be covered by multiple
+rules and packages, this output is "what rule/package won for each kmod".
+
+----
+$ ./redhat/scripts/filtermods.py rulemap -c redhat/fedora_files/def_variants.yaml.fedora -d ~/tmp/modules.dep | grep 'kernel/drivers/block/'
+modules-core         kernel/drivers/block/aoe/aoe.ko.xz
+modules-core         kernel/drivers/block/brd.ko.xz
+modules-core         kernel/drivers/block/drbd/drbd.ko.xz
+modules-extra        kernel/drivers/block/floppy.ko.xz
+modules-core         kernel/drivers/block/loop.ko.xz
+modules-core         kernel/drivers/block/mtip32xx/mtip32xx.ko.xz
+modules-core         kernel/drivers/block/nbd.ko.xz
+modules-core         kernel/drivers/block/null_blk/null_blk.ko.xz
+modules-core         kernel/drivers/block/pktcdvd.ko.xz
+modules-core         kernel/drivers/block/rbd.ko.xz
+modules              kernel/drivers/block/rnbd/rnbd-client.ko.xz
+modules              kernel/drivers/block/rnbd/rnbd-server.ko.xz
+modules-core         kernel/drivers/block/ublk_drv.ko.xz
+modules-core         kernel/drivers/block/virtio_blk.ko.xz
+modules-core         kernel/drivers/block/xen-blkback/xen-blkback.ko.xz
+modules-core         kernel/drivers/block/xen-blkfront.ko.xz
+modules-core         kernel/drivers/block/zram/zram.ko.xz
+----
+
+
+=== cmp2rpm
+$ filtermods.py cmp2rpm [-h] -c CONFIG -k KMOD_RPMS
+
+Compare yaml config rules with kmod RPMs. This is a check that helps to review how
+yaml config rules deviate from existing RPMs. It unpacks supplied RPMs and for
+each kmod it compares where config would like this kmod to end up, with the
+package name where it's present in existing RPMs. This is useful when creating
+a new config from scratch and you want to see how is the config different from
+existing RPMs. The alternative is to go through the build, and then compare old
+and new RPMs.
+
+----
+$ mkdir ~/tmp/kernel-6.8.0-0.rc6.20240227git45ec2f5f6ed3.50.eln136
+$ cd ~/tmp/kernel-6.8.0-0.rc6.20240227git45ec2f5f6ed3.50.eln136
+$ koji download-build kernel-6.8.0-0.rc6.20240227git45ec2f5f6ed3.50.eln136
+$ cd -
+$ ./redhat/scripts/filtermods.py cmp2rpm -c redhat/rhel_files/def_variants.yaml.rhel -k "$(ls -1 ~/tmp/kernel-6.8.0-0.rc6.20240227git45ec2f5f6ed3.50.eln136/*modules*.rpm)"
+...
+09:34:06  WARNIN  do_rpm_mapping_test: 914 kmod kernel/lib/percpu_test.ko.xz wanted by config in ['modules-internal'], in tree it is: ['modules-core']
+...
+----
+
+=== selftest
+$ filtermods.py selftest [-h] [-g]
+
+Run selftests using data from filtermods-testdata directory. 
+
+== How does it work?
+It is inspired by "label propagation algorithm". Each kmod keeps a
+track of plausible packages that won't break the rules. Initially
+only kmods mentioned in yaml config have these set. Then it
+iterates over all kmods and traverses kmod's children and parents
+and tries to refine set of plausible packages by removing ones
+that would break any of the rules.
+
+.There are 3 phases:
+1. Apply initial labels based on yaml config.
+2. If some kmods satisfy rules for more than one package,
+   pick the preferred one specified by config "wants" rules.
+3. If some kmods still satisfy rules for more than one package,
+   prefer one from default rule.
+   For all remaining (not yet assigned) kmods, try to use default rule.
+
+== AUTHOR
+Jan Stancek <jstancek@redhat.com>

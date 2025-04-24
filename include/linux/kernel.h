@@ -402,4 +402,20 @@ static inline void ftrace_dump(enum ftrace_dump_mode oops_dump_mode) { }
 	 /* OTHER_WRITABLE?  Generally considered a bad idea. */		\
 	 BUILD_BUG_ON_ZERO((perms) & 2) +					\
 	 (perms))
+
+struct module;
+
+#ifdef CONFIG_RHEL_DIFFERENCES
+void mark_hardware_unmaintained(const char *driver_name, char *fmt, ...);
+void mark_hardware_deprecated(const char *driver_name, char *fmt, ...);
+void mark_tech_preview(const char *msg, struct module *mod);
+void mark_partner_supported(const char *msg, struct module *mod);
+void init_rh_check_status(char *fn_name);
+#else
+static inline void mark_hardware_unmaintained(const char *driver_name, char *fmt, ...) { }
+static inline void mark_hardware_deprecated(const char *driver_name, char *fmt, ...) { }
+static inline void mark_tech_preview(const char *msg, struct module *mod) { }
+static inline void mark_partner_supported(const char *msg, struct module *mod) { }
+#endif
+
 #endif

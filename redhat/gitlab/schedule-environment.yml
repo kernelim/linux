@@ -1,0 +1,3 @@
+---
+.maintenance:
+  environment: maintenance/$CI_JOB_NAME

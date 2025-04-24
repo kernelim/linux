@@ -1,0 +1,1 @@
+CONFIG_LSM="lockdown,yama,integrity,selinux,bpf,landlock"

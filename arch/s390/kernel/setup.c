@@ -49,6 +49,7 @@
 #include <linux/memory.h>
 #include <linux/compat.h>
 #include <linux/start_kernel.h>
+#include <linux/security.h>
 #include <linux/hugetlb.h>
 #include <linux/kmemleak.h>
 
@@ -910,6 +911,14 @@ void __init setup_arch(char **cmdline_p)
 
 	log_component_list();
 
+	/* Initialize the lockdown LSM */
+	jump_label_init();
+	static_call_init();
+	early_security_init();
+
+	if (ipl_get_secureboot())
+		security_lock_kernel_down("Secure IPL mode", LOCKDOWN_INTEGRITY_MAX);
+
 	/* Have one command line that is parsed and saved in /proc/cmdline */
 	/* boot_command_line has been already set up in early.c */
 	*cmdline_p = boot_command_line;
@@ -921,7 +930,6 @@ void __init setup_arch(char **cmdline_p)
 	if (IS_ENABLED(CONFIG_EXPOLINE_AUTO))
 		nospec_auto_detect();
 
-	jump_label_init();
 	parse_early_param();
 #ifdef CONFIG_CRASH_DUMP
 	/* Deactivate elfcorehdr= kernel parameter */

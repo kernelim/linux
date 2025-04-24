@@ -33,6 +33,7 @@
 #include <asm/fadump-internal.h>
 #include <asm/setup.h>
 #include <asm/interrupt.h>
+#include <asm/prom.h>
 
 /*
  * The CPU who acquired the lock to trigger the fadump crash should
@@ -143,7 +144,7 @@ void __init fadump_append_bootargs(void)
 	if (!fw_dump.dump_active || !fw_dump.param_area_supported || !fw_dump.param_area)
 		return;
 
-	if (fw_dump.param_area >= fw_dump.boot_mem_top) {
+	if (fw_dump.param_area < fw_dump.boot_mem_top) {
 		if (memblock_reserve(fw_dump.param_area, COMMAND_LINE_SIZE)) {
 			pr_warn("WARNING: Can't use additional parameters area!\n");
 			fw_dump.param_area = 0;
@@ -1586,6 +1587,12 @@ static void __init fadump_init_files(void)
 		return;
 	}
 
+	if (fw_dump.param_area) {
+		rc = sysfs_create_file(fadump_kobj, &bootargs_append_attr.attr);
+		if (rc)
+			pr_err("unable to create bootargs_append sysfs file (%d)\n", rc);
+	}
+
 	debugfs_create_file("fadump_region", 0444, arch_debugfs_dir, NULL,
 			    &fadump_region_fops);
 
@@ -1740,7 +1747,7 @@ err_out:
  * Reserve memory to store additional parameters to be passed
  * for fadump/capture kernel.
  */
-static void __init fadump_setup_param_area(void)
+void __init fadump_setup_param_area(void)
 {
 	phys_addr_t range_start, range_end;
 
@@ -1748,7 +1755,7 @@ static void __init fadump_setup_param_area(void)
 		return;
 
 	/* This memory can't be used by PFW or bootloader as it is shared across kernels */
-	if (radix_enabled()) {
+	if (early_radix_enabled()) {
 		/*
 		 * Anywhere in the upper half should be good enough as all memory
 		 * is accessible in real mode.
@@ -1757,31 +1764,31 @@ static void __init fadump_setup_param_area(void)
 		range_end = memblock_end_of_DRAM();
 	} else {
 		/*
-		 * Passing additional parameters is supported for hash MMU only
-		 * if the first memory block size is 768MB or higher.
+		 * Memory range for passing additional parameters for HASH MMU
+		 * must meet the following conditions:
+		 * 1. The first memory block size must be higher than the
+		 *    minimum RMA (MIN_RMA) size. Bootloader can use memory
+		 *    upto RMA size. So it should be avoided.
+		 * 2. The range should be between MIN_RMA and RMA size (ppc64_rma_size)
+		 * 3. It must not overlap with the fadump reserved area.
 		 */
-		if (ppc64_rma_size < 0x30000000)
+		if (ppc64_rma_size < MIN_RMA*1024*1024)
 			return;
 
-		/*
-		 * 640 MB to 768 MB is not used by PFW/bootloader. So, try reserving
-		 * memory for passing additional parameters in this range to avoid
-		 * being stomped on by PFW/bootloader.
-		 */
-		range_start = 0x2A000000;
-		range_end = range_start + 0x4000000;
+		range_start = MIN_RMA * 1024 * 1024;
+		range_end = min(ppc64_rma_size, fw_dump.boot_mem_top);
 	}
 
 	fw_dump.param_area = memblock_phys_alloc_range(COMMAND_LINE_SIZE,
 						       COMMAND_LINE_SIZE,
 						       range_start,
 						       range_end);
-	if (!fw_dump.param_area || sysfs_create_file(fadump_kobj, &bootargs_append_attr.attr)) {
+	if (!fw_dump.param_area) {
 		pr_warn("WARNING: Could not setup area to pass additional parameters!\n");
 		return;
 	}
 
-	memset(phys_to_virt(fw_dump.param_area), 0, COMMAND_LINE_SIZE);
+	memset((void *)fw_dump.param_area, 0, COMMAND_LINE_SIZE);
 }
 
 /*
@@ -1807,7 +1814,6 @@ int __init setup_fadump(void)
 	}
 	/* Initialize the kernel dump memory structure and register with f/w */
 	else if (fw_dump.reserve_dump_area_size) {
-		fadump_setup_param_area();
 		fw_dump.ops->fadump_init_mem_struct(&fw_dump);
 		register_fadump();
 	}

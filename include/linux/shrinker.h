@@ -6,6 +6,7 @@
 #include <linux/types.h>
 #include <linux/refcount.h>
 #include <linux/completion.h>
+#include <linux/rh_kabi.h>
 
 #define SHRINKER_UNIT_BITS	BITS_PER_LONG
 
@@ -52,7 +53,11 @@ struct shrink_control {
 	unsigned long nr_scanned;
 
 	/* current memcg being shrunk (for memcg aware shrinkers) */
-	struct mem_cgroup *memcg;
+	RH_KABI_EXCLUDE(struct mem_cgroup *memcg)
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 #define SHRINK_STOP (~0UL)
@@ -115,6 +120,11 @@ struct shrinker {
 #endif
 	/* objs pending delete, per node */
 	atomic_long_t *nr_deferred;
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 #define DEFAULT_SEEKS 2 /* A good number if you don't know better. */
 

@@ -231,6 +231,7 @@ struct mmu_notifier {
 	struct mm_struct *mm;
 	struct rcu_head rcu;
 	unsigned int users;
+	RH_KABI_RESERVE(1)
 };
 
 /**
@@ -243,6 +244,9 @@ struct mmu_interval_notifier_ops {
 	bool (*invalidate)(struct mmu_interval_notifier *interval_sub,
 			   const struct mmu_notifier_range *range,
 			   unsigned long cur_seq);
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
 };
 
 struct mmu_interval_notifier {
@@ -251,6 +255,7 @@ struct mmu_interval_notifier {
 	struct mm_struct *mm;
 	struct hlist_node deferred_item;
 	unsigned long invalidate_seq;
+	RH_KABI_RESERVE(1)
 };
 
 #ifdef CONFIG_MMU_NOTIFIER
@@ -266,6 +271,9 @@ struct mmu_notifier_range {
 	unsigned flags;
 	enum mmu_notifier_event event;
 	void *owner;
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
 };
 
 static inline int mm_has_notifiers(struct mm_struct *mm)

@@ -31,6 +31,8 @@ struct access_coordinate {
 	unsigned int write_bandwidth;
 	unsigned int read_latency;
 	unsigned int write_latency;
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 };
 
 /*

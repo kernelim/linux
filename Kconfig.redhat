@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Red Hat specific options
+#
+
+menu "Red Hat options"
+
+config RHEL_DIFFERENCES
+	bool "Enable RHEL-only code"
+	help
+	  This option controls whether rhel-only changes are enabled during
+	  the build. Unless you want to enable rhel-only changes, say N here.
+
+config RH_KABI_SIZE_ALIGN_CHECKS
+	bool "Enables more stringent kabi checks in the macros"
+	depends on RHEL_DIFFERENCES
+	default y
+	help
+	  This option enables more stringent kabi checks. Those must
+	  be disabled in case of a debug build, because debug builds
+	  allow to change struct sizes.
+
+endmenu

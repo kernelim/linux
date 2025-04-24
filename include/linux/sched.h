@@ -14,6 +14,7 @@
 #include <linux/thread_info.h>
 #include <linux/preempt.h>
 #include <linux/cpumask_types.h>
+#include <linux/rh_kabi.h>
 
 #include <linux/cache.h>
 #include <linux/irqflags_types.h>
@@ -656,6 +657,12 @@ struct sched_dl_entity {
 	 * @dl_defer_armed tells if the deferrable server is waiting
 	 * for the replenishment timer to activate it.
 	 *
+	 * @dl_server_active tells if the dlserver is active(started).
+	 * dlserver is started on first cfs enqueue on an idle runqueue
+	 * and is stopped when a dequeue results in 0 cfs tasks on the
+	 * runqueue. In other words, dlserver is active only when cpu's
+	 * runqueue has atleast one cfs task.
+	 *
 	 * @dl_defer_running tells if the deferrable server is actually
 	 * running, skipping the defer phase.
 	 */
@@ -664,6 +671,7 @@ struct sched_dl_entity {
 	unsigned int			dl_non_contending : 1;
 	unsigned int			dl_overrun	  : 1;
 	unsigned int			dl_server         : 1;
+	unsigned int			dl_server_active  : 1;
 	unsigned int			dl_defer	  : 1;
 	unsigned int			dl_defer_armed	  : 1;
 	unsigned int			dl_defer_running  : 1;
@@ -1243,7 +1251,7 @@ struct task_struct {
 	struct io_context		*io_context;
 
 #ifdef CONFIG_COMPACTION
-	struct capture_control		*capture_control;
+	RH_KABI_EXCLUDE(struct capture_control *capture_control)
 #endif
 	/* Ptrace state: */
 	unsigned long			ptrace_message;
@@ -1483,7 +1491,7 @@ struct task_struct {
 #endif
 
 #ifdef CONFIG_MEMCG_V1
-	struct mem_cgroup		*memcg_in_oom;
+	RH_KABI_EXCLUDE(struct mem_cgroup *memcg_in_oom)
 #endif
 
 #ifdef CONFIG_MEMCG
@@ -1491,10 +1499,10 @@ struct task_struct {
 	unsigned int			memcg_nr_pages_over_high;
 
 	/* Used by memcontrol for targeted memcg charge: */
-	struct mem_cgroup		*active_memcg;
+	RH_KABI_EXCLUDE(struct mem_cgroup *active_memcg)
 
 	/* Cache for current->cgroups->memcg->objcg lookups: */
-	struct obj_cgroup		*objcg;
+	RH_KABI_EXCLUDE(struct obj_cgroup *objcg)
 #endif
 
 #ifdef CONFIG_BLK_CGROUP
@@ -2002,7 +2010,8 @@ static inline void set_tsk_need_resched(struct task_struct *tsk)
 
 static inline void clear_tsk_need_resched(struct task_struct *tsk)
 {
-	clear_tsk_thread_flag(tsk,TIF_NEED_RESCHED);
+	atomic_long_andnot(_TIF_NEED_RESCHED | _TIF_NEED_RESCHED_LAZY,
+			   (atomic_long_t *)&task_thread_info(tsk)->flags);
 }
 
 static inline int test_tsk_need_resched(struct task_struct *tsk)

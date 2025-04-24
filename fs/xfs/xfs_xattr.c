@@ -30,6 +30,7 @@ xfs_attr_grab_log_assist(
 	struct xfs_mount	*mp)
 {
 	int			error = 0;
+	static bool		printed = false;
 
 	/* xattr update log intent items are already enabled */
 	if (xfs_is_using_logged_xattrs(mp))
@@ -53,6 +54,11 @@ xfs_attr_grab_log_assist(
 
 	xfs_warn_mount(mp, XFS_OPSTATE_WARNED_LARP,
  "EXPERIMENTAL logged extended attributes feature in use. Use at your own risk!");
+	if (!printed) {
+		mark_tech_preview("Logged extended attributes feature",
+				  THIS_MODULE);
+		printed = true;
+	}
 
 	return 0;
 }

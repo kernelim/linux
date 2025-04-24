@@ -162,6 +162,7 @@ static int __init hsr_init(void)
 		return err;
 	}
 
+	mark_tech_preview("HSR/PRP", THIS_MODULE);
 	return 0;
 }
 

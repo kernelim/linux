@@ -1769,6 +1769,7 @@ static bool acpi_device_enumeration_by_parent(struct acpi_device *device)
 		{"CSC3557", },
 		{"INT33FE", },
 		{"INT3515", },
+		{"TXNW2781", },
 		/* Non-conforming _HID for Cirrus Logic already released */
 		{"CLSA0100", },
 		{"CLSA0101", },
@@ -1800,6 +1801,15 @@ static bool acpi_device_enumeration_by_parent(struct acpi_device *device)
 		return true;
 
 	if (!acpi_match_device_ids(device, ignore_serial_bus_ids))
+		return false;
+
+	/*
+	 * Firmware on some arm64 X-Gene platforms will make the UART
+	 * device appear as both a UART and a slave of that UART. Just
+	 * bail out here for X-Gene UARTs.
+	 */
+	if (IS_ENABLED(CONFIG_ARM64) &&
+	    !strcmp(acpi_device_hid(device), "APMC0D08"))
 		return false;
 
 	INIT_LIST_HEAD(&resource_list);

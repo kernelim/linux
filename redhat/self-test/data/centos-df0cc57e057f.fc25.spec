@@ -1,0 +1,21 @@
+%global package_name kernel
+%global gemini 0
+%global include_fedora 0
+%global include_rhel 1
+%global include_rt 1
+%global include_automotive 1
+%global patchlist_changelog 0
+%global released_kernel 0
+%define buildid .test
+%define specrpmversion 5.16.0
+%define specversion 5.16.0
+%define patchversion 5.16
+%define pkgrelease 6.test
+%define kversion 5
+%define tarfile_release 5.16.0-6.test.fc25
+%define patchlevel 16
+%define specrelease 6%{?buildid}%{?dist}
+%define kabiversion 5.16.0-6.test.fc25
+%define selftests_must_build 0
+%define _with_kabidupchk 1
+Mon Mar 28 2022 Fedora Kernel Team <kernel-team@fedoraproject.org> [5.16.0-6.test]

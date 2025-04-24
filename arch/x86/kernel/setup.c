@@ -21,6 +21,7 @@
 #include <linux/root_dev.h>
 #include <linux/hugetlb.h>
 #include <linux/tboot.h>
+#include <linux/security.h>
 #include <linux/usb/xhci-dbgp.h>
 #include <linux/static_call.h>
 #include <linux/swiotlb.h>
@@ -56,6 +57,7 @@
 #include <asm/unwind.h>
 #include <asm/vsyscall.h>
 #include <linux/vmalloc.h>
+#include <asm/intel-family.h>
 
 /*
  * max_low_pfn_mapped: highest directly mapped pfn < 4 GB
@@ -670,6 +672,79 @@ static void __init early_reserve_memory(void)
 	trim_snb_memory();
 }
 
+#ifdef CONFIG_RHEL_DIFFERENCES
+
+static void rh_check_supported(void)
+{
+	bool guest;
+
+	guest = (x86_hyper_type != X86_HYPER_NATIVE || boot_cpu_has(X86_FEATURE_HYPERVISOR));
+
+	/* RHEL supports single cpu on guests only */
+	if (((topology_num_threads_per_package() * __max_threads_per_core) == 1) &&
+	    !guest && is_kdump_kernel()) {
+		pr_crit("Detected single cpu native boot.\n");
+		pr_crit("Important:  In this kernel, single threaded, single CPU 64-bit physical systems are unsupported.");
+	}
+
+	/*
+	 * If the RHEL kernel does not support this hardware, the kernel will
+	 * attempt to boot, but no support is provided for this hardware
+	 */
+	switch (boot_cpu_data.x86_vendor) {
+	case X86_VENDOR_AMD:
+	case X86_VENDOR_INTEL:
+		break;
+	default:
+		pr_crit("Detected processor %s %s\n",
+			boot_cpu_data.x86_vendor_id,
+			boot_cpu_data.x86_model_id);
+		break;
+	}
+
+	/*
+	 * Due to the complexity of x86 lapic & ioapic enumeration, and PCI IRQ
+	 * routing, ACPI is required for x86.  acpi=off is a valid debug kernel
+	 * parameter, so just print out a loud warning in case something
+	 * goes wrong (which is most of the time).
+	 */
+	if (acpi_disabled && !guest)
+		pr_crit("ACPI has been disabled or is not available on this hardware.  This may result in a single cpu boot, incorrect PCI IRQ routing, or boot failure.\n");
+
+	/*
+	 * x86_64 microarchitecture levels:
+	 * 	https://en.wikipedia.org/wiki/X86-64#Microarchitecture_levels
+	 *
+	 * RHEL9 has a minimum of the x86_64-v2 microarchitecture
+	 * RHEL10 has a minimum of the x86_64-v3 microarchitecture
+	 */
+
+	if (!boot_cpu_has(X86_FEATURE_CX16) || /* CMPXCHG16B */
+	    !boot_cpu_has(X86_FEATURE_LAHF_LM) || /* LAHF-SAHF */
+	    !boot_cpu_has(X86_FEATURE_POPCNT) ||
+	    !boot_cpu_has(X86_FEATURE_XMM3) || /* SSE-3 */
+	    !boot_cpu_has(X86_FEATURE_XMM4_1) || /* SSE4_1 */
+	    !boot_cpu_has(X86_FEATURE_XMM4_2) || /* SSE4_2 */
+	    !boot_cpu_has(X86_FEATURE_SSSE3)) {
+		mark_hardware_deprecated("x86_64-v1", "%s:%s",
+					 boot_cpu_data.x86_vendor_id, boot_cpu_data.x86_model_id);
+	} else if (!boot_cpu_has(X86_FEATURE_AVX) ||
+		   !boot_cpu_has(X86_FEATURE_AVX2) ||
+		   !boot_cpu_has(X86_FEATURE_BMI1) ||
+		   !boot_cpu_has(X86_FEATURE_BMI2) ||
+		   !boot_cpu_has(X86_FEATURE_F16C) ||
+		   !boot_cpu_has(X86_FEATURE_FMA) ||
+		   /* LZCNT is not explicitly listed, but appears to be paired with BMI2 */
+		   !boot_cpu_has(X86_FEATURE_MOVBE) ||
+		   !boot_cpu_has(X86_FEATURE_XSAVE)) {
+		mark_hardware_deprecated("x86_64-v2", "%s:%s",
+					 boot_cpu_data.x86_vendor_id, boot_cpu_data.x86_model_id);
+	}
+}
+#else
+#define rh_check_supported()
+#endif
+
 /*
  * Dump out kernel offset information on panic.
  */
@@ -780,8 +855,12 @@ void __init setup_arch(char **cmdline_p)
 
 	idt_setup_early_traps();
 	early_cpu_init();
+
+	/* Initialize the lockdown LSM */
 	jump_label_init();
 	static_call_init();
+	early_security_init();
+
 	early_ioremap_init();
 
 	setup_olpc_ofw_pgd();
@@ -903,6 +982,13 @@ void __init setup_arch(char **cmdline_p)
 
 	if (efi_enabled(EFI_BOOT))
 		efi_init();
+
+	efi_set_secure_boot(boot_params.secure_boot);
+
+#ifdef CONFIG_LOCK_DOWN_IN_EFI_SECURE_BOOT
+	if (efi_enabled(EFI_SECURE_BOOT))
+		security_lock_kernel_down("EFI Secure Boot mode", LOCKDOWN_INTEGRITY_MAX);
+#endif
 
 	reserve_ibft_region();
 	x86_init.resources.dmi_setup();
@@ -1070,19 +1156,7 @@ void __init setup_arch(char **cmdline_p)
 	/* Allocate bigger log buffer */
 	setup_log_buf(1);
 
-	if (efi_enabled(EFI_BOOT)) {
-		switch (boot_params.secure_boot) {
-		case efi_secureboot_mode_disabled:
-			pr_info("Secure boot disabled\n");
-			break;
-		case efi_secureboot_mode_enabled:
-			pr_info("Secure boot enabled\n");
-			break;
-		default:
-			pr_info("Secure boot could not be determined\n");
-			break;
-		}
-	}
+	efi_set_secure_boot(boot_params.secure_boot);
 
 	reserve_initrd();
 
@@ -1191,6 +1265,8 @@ void __init setup_arch(char **cmdline_p)
 	if (efi_enabled(EFI_BOOT))
 		efi_apply_memmap_quirks();
 #endif
+
+	rh_check_supported();
 
 	unwind_init();
 }

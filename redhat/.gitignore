@@ -1,0 +1,11 @@
+*.bz2
+configs/kernel*.config
+configs/*-merged
+
+kabi/Module.kabi_*
+kabi/kabi-current
+kabi/kabi-rhel*
+kabi/kabi-rhel*/*
+scripts/uki_addons/uki_addons.json
+
+!.gitkeep

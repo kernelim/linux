@@ -2996,6 +2996,8 @@ static int __init ublk_init(void)
 {
 	int ret;
 
+	mark_tech_preview("ublk", NULL);
+
 	BUILD_BUG_ON((u64)UBLKSRV_IO_BUF_OFFSET +
 			UBLKSRV_IO_BUF_TOTAL_SIZE < UBLKSRV_IO_BUF_OFFSET);
 

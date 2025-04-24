@@ -1,0 +1,5 @@
+# This config option was named CONFIG_MFD_RTSX_PCI. It was renamed in Linux 4.16 
+# to CONFIG_MISC_RTSX_PCI. It was disabled in RHELSA 7 configs for aarch64, and
+# we inherited the same setting in kernel-alt.
+# (https://bugzilla.redhat.com/show_bug.cgi?id=1560106)
+# CONFIG_MISC_RTSX_USB is not set

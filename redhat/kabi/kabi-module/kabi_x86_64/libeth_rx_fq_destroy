@@ -1,0 +1,3 @@
+#0-
+0x221f7087	libeth_rx_fq_destroy	drivers/net/ethernet/intel/libeth/libeth	EXPORT_SYMBOL_GPL	LIBETH
+

@@ -503,6 +503,10 @@ static void __init ordered_lsm_init(void)
 int __init early_security_init(void)
 {
 	struct lsm_info *lsm;
+	static bool early_security_initialized;
+
+	if (early_security_initialized)
+		return 0;
 
 	for (lsm = __start_early_lsm_info; lsm < __end_early_lsm_info; lsm++) {
 		if (!lsm->enabled)
@@ -511,6 +515,7 @@ int __init early_security_init(void)
 		initialize_lsm(lsm);
 	}
 
+	early_security_initialized = true;
 	return 0;
 }
 
@@ -5768,6 +5773,18 @@ int security_locked_down(enum lockdown_reason what)
 	return call_int_hook(locked_down, what);
 }
 EXPORT_SYMBOL(security_locked_down);
+
+/**
+ * security_lock_kernel_down() - Put the kernel into lock-down mode.
+ *
+ * @where: Where the lock-down is originating from (e.g. command line option)
+ * @level: The lock-down level (can only increase)
+ */
+int security_lock_kernel_down(const char *where, enum lockdown_reason level)
+{
+	return call_int_hook(lock_kernel_down, where, level);
+}
+EXPORT_SYMBOL(security_lock_kernel_down);
 
 /**
  * security_bdev_alloc() - Allocate a block device LSM blob

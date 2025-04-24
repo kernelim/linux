@@ -3,6 +3,7 @@
 #define _NF_CONNTRACK_COMMON_H
 
 #include <linux/refcount.h>
+#include <linux/rh_kabi.h>
 #include <uapi/linux/netfilter/nf_conntrack_common.h>
 
 struct ip_conntrack_stat {
@@ -19,6 +20,7 @@ struct ip_conntrack_stat {
 	unsigned int expect_delete;
 	unsigned int search_restart;
 	unsigned int chaintoolong;
+	RH_KABI_RESERVE(1);
 };
 
 #define NFCT_INFOMASK	7UL

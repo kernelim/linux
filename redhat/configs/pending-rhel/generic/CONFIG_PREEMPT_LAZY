@@ -1,0 +1,15 @@
+# Symbol: PREEMPT_LAZY [=n]
+# Type  : bool
+# Defined at kernel/Kconfig.preempt:75
+#   Prompt: Scheduler controlled preemption model
+#   Depends on: !ARCH_NO_PREEMPT [=n] && ARCH_HAS_PREEMPT_LAZY [=y]
+#   Location:
+#     -> General setup
+#       -> Preemption Model (<choice> [=n])
+#         -> Scheduler controlled preemption model (PREEMPT_LAZY [=n])
+# Selects: PREEMPT_BUILD [=y]
+# 
+# 
+# 
+# Commit: 4a83b6ee4651 (sched: Replace PREEMPT_AUTO with LAZY_PREEMPT.)
+# CONFIG_PREEMPT_LAZY is not set

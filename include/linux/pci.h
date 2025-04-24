@@ -1618,6 +1618,7 @@ int pci_add_dynid(struct pci_driver *drv,
 		  unsigned long driver_data);
 const struct pci_device_id *pci_match_id(const struct pci_device_id *ids,
 					 struct pci_dev *dev);
+
 int pci_scan_bridge(struct pci_bus *bus, struct pci_dev *dev, int max,
 		    int pass);
 
@@ -2668,6 +2669,10 @@ static inline bool pci_is_thunderbolt_attached(struct pci_dev *pdev)
 
 	return false;
 }
+
+#ifdef CONFIG_RHEL_DIFFERENCES
+bool pci_rh_check_status(struct pci_dev *pci_dev);
+#endif
 
 #if defined(CONFIG_PCIEPORTBUS) || defined(CONFIG_EEH)
 void pci_uevent_ers(struct pci_dev *pdev, enum  pci_ers_result err_type);

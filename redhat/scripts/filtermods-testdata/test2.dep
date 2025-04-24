@@ -1,0 +1,8 @@
+kernel/kmod1: kernel/kmod3 kernel/kmod4
+kernel/kmod2: kernel/kmod3 kernel/kmod4
+kernel/kmod3:
+kernel/kmod4: kernel/kmod5
+kernel/kmod5:
+kernel/kmod6: kernel/kmod1
+kernel/kmod7: kernel/kmod6
+kernel/kmod8: kernel/kmod2

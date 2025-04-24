@@ -95,6 +95,14 @@ static bool cgroup_memory_nobpf __ro_after_init;
 static DECLARE_WAIT_QUEUE_HEAD(memcg_cgwb_frn_waitq);
 #endif
 
+enum percpu_stats_state {
+	PERCPU_STATS_ACTIVE = 0,
+	PERCPU_STATS_DISABLED,
+	PERCPU_STATS_FLUSHING,
+	PERCPU_STATS_FLUSHED,
+	PERCPU_STATS_FREED
+};
+
 static inline bool task_is_dying(void)
 {
 	return tsk_is_oom_victim(current) || fatal_signal_pending(current) ||
@@ -666,6 +674,30 @@ static int memcg_state_val_in_pages(int idx, int val)
 		return max(val * unit / PAGE_SIZE, 1UL);
 }
 
+/*
+ * Return the active percpu stats memcg and optionally mem_cgroup_per_node.
+ *
+ * When percpu_stats_disabled, the percpu stats update is transferred to
+ * its parent.
+ */
+static __always_inline struct mem_cgroup *
+percpu_stats_memcg(struct mem_cgroup *memcg, struct mem_cgroup_per_node **pn)
+{
+	if (likely(!memcg->percpu_stats_disabled))
+		return memcg;
+
+	do {
+		memcg = parent_mem_cgroup(memcg);
+	} while (memcg->percpu_stats_disabled);
+
+	if (pn) {
+		unsigned int nid = (*pn)->nid;
+
+		*pn = memcg->nodeinfo[nid];
+	}
+	return memcg;
+}
+
 /**
  * __mod_memcg_state - update cgroup memory statistics
  * @memcg: the memory cgroup
@@ -683,6 +715,7 @@ void __mod_memcg_state(struct mem_cgroup *memcg, enum memcg_stat_item idx,
 	if (WARN_ONCE(BAD_STAT_IDX(i), "%s: missing stat item %d\n", __func__, idx))
 		return;
 
+	memcg = percpu_stats_memcg(memcg, NULL);
 	__this_cpu_add(memcg->vmstats_percpu->state[i], val);
 	memcg_rstat_updated(memcg, memcg_state_val_in_pages(idx, val));
 }
@@ -716,7 +749,7 @@ static void __mod_memcg_lruvec_state(struct lruvec *lruvec,
 		return;
 
 	pn = container_of(lruvec, struct mem_cgroup_per_node, lruvec);
-	memcg = pn->memcg;
+	memcg = percpu_stats_memcg(pn->memcg, &pn);
 
 	/*
 	 * The caller from rmap relies on disabled preemption because they never
@@ -831,6 +864,7 @@ void __count_memcg_events(struct mem_cgroup *memcg, enum vm_event_item idx,
 	if (WARN_ONCE(BAD_STAT_IDX(i), "%s: missing stat item %d\n", __func__, idx))
 		return;
 
+	memcg = percpu_stats_memcg(memcg, NULL);
 	memcg_stats_lock();
 	__this_cpu_add(memcg->vmstats_percpu->events[i], count);
 	memcg_rstat_updated(memcg, count);
@@ -3437,6 +3471,7 @@ static bool alloc_mem_cgroup_per_node_info(struct mem_cgroup *memcg, int node)
 
 	lruvec_init(&pn->lruvec);
 	pn->memcg = memcg;
+	pn->nid = node;
 
 	memcg->nodeinfo[node] = pn;
 	return true;
@@ -3453,7 +3488,7 @@ static void free_mem_cgroup_per_node_info(struct mem_cgroup *memcg, int node)
 	if (!pn)
 		return;
 
-	free_percpu(pn->lruvec_stats_percpu);
+	//free_percpu(pn->lruvec_stats_percpu);
 	kfree(pn->lruvec_stats);
 	kfree(pn);
 }
@@ -3468,7 +3503,7 @@ static void __mem_cgroup_free(struct mem_cgroup *memcg)
 		free_mem_cgroup_per_node_info(memcg, node);
 	memcg1_free_events(memcg);
 	kfree(memcg->vmstats);
-	free_percpu(memcg->vmstats_percpu);
+	//free_percpu(memcg->vmstats_percpu);
 	kfree(memcg);
 }
 
@@ -3551,6 +3586,61 @@ fail:
 	mem_cgroup_id_remove(memcg);
 	__mem_cgroup_free(memcg);
 	return ERR_PTR(error);
+}
+
+/*
+ * Flush and free the percpu stats
+ */
+static void percpu_stats_free_rwork_fn(struct work_struct *work)
+{
+	struct mem_cgroup *memcg = container_of(to_rcu_work(work),
+						struct mem_cgroup,
+						percpu_stats_rwork);
+	int node;
+
+	if (cmpxchg(&memcg->percpu_stats_disabled, PERCPU_STATS_DISABLED,
+		    PERCPU_STATS_FLUSHING) != PERCPU_STATS_DISABLED) {
+		static DEFINE_RATELIMIT_STATE(_rs,
+					      DEFAULT_RATELIMIT_INTERVAL,
+					      DEFAULT_RATELIMIT_BURST);
+
+		if (__ratelimit(&_rs))
+			WARN(1, "%s called more than once!\n", __func__);
+		return;
+	}
+
+	cgroup_rstat_flush_hold(memcg->css.cgroup);
+	WRITE_ONCE(memcg->percpu_stats_disabled, PERCPU_STATS_FLUSHED);
+	cgroup_rstat_flush_release(memcg->css.cgroup);
+
+	for_each_node(node) {
+		struct mem_cgroup_per_node *pn = memcg->nodeinfo[node];
+
+		if (pn)
+			free_percpu(pn->lruvec_stats_percpu);
+	}
+	free_percpu(memcg->vmstats_percpu);
+	WRITE_ONCE(memcg->percpu_stats_disabled, PERCPU_STATS_FREED);
+	css_put(&memcg->css);
+}
+
+static void memcg_percpu_stats_disable(struct mem_cgroup *memcg)
+{
+	/*
+	 * Block memcg from being freed before percpu_stats_free_rwork_fn()
+	 * is called. css_get() will succeed before a potential final
+	 * css_put() in mem_cgroup_id_put().
+	 */
+	css_get(&memcg->css);
+	mem_cgroup_id_put(memcg);
+	memcg->percpu_stats_disabled = PERCPU_STATS_DISABLED;
+	INIT_RCU_WORK(&memcg->percpu_stats_rwork, percpu_stats_free_rwork_fn);
+	queue_rcu_work(system_wq, &memcg->percpu_stats_rwork);
+}
+
+static inline bool memcg_percpu_stats_flushed(struct mem_cgroup *memcg)
+{
+	return memcg->percpu_stats_disabled >= PERCPU_STATS_FLUSHED;
 }
 
 static struct cgroup_subsys_state * __ref
@@ -3666,7 +3756,7 @@ static void mem_cgroup_css_offline(struct cgroup_subsys_state *css)
 
 	drain_all_stock(memcg);
 
-	mem_cgroup_id_put(memcg);
+	memcg_percpu_stats_disable(memcg);
 }
 
 static void mem_cgroup_css_released(struct cgroup_subsys_state *css)
@@ -3740,6 +3830,9 @@ static void mem_cgroup_css_rstat_flush(struct cgroup_subsys_state *css, int cpu)
 	struct memcg_vmstats_percpu *statc;
 	long delta, delta_cpu, v;
 	int i, nid;
+
+	if (memcg_percpu_stats_flushed(memcg))
+		return;
 
 	statc = per_cpu_ptr(memcg->vmstats_percpu, cpu);
 

@@ -1184,6 +1184,9 @@ static bool __init_or_module initcall_blacklisted(initcall_t fn)
 	 */
 	strreplace(fn_name, ' ', '\0');
 
+#ifdef CONFIG_RHEL_DIFFERENCES
+	init_rh_check_status(fn_name);
+#endif
 	list_for_each_entry(entry, &blacklisted_initcalls, next) {
 		if (!strcmp(fn_name, entry->buf)) {
 			pr_debug("initcall %s blacklisted\n", fn_name);

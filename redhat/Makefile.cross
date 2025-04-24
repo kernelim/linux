@@ -1,0 +1,95 @@
+CROSS_RPMFLAGS = $(RPMBUILD) --define "_sourcedir $(SOURCES)" --define "_builddir $(RPM)/BUILD" --define "_srcrpmdir $(RPM)/SRPMS" --define "_rpmdir $(RPM)/RPMS" --define "_specdir $(RPM)/SPECS" --define "dist $(DIST)"
+
+ifndef CROSS_BASEONLY
+CROSS_DISABLED_SUBPACKAGES=--without bpftool --without perf --without tools --without libperf
+else
+CROSS_DISABLED_SUBPACKAGES=--without bpftool --without perf --without tools --without libperf --without debug --without debuginfo --without vdso_install
+endif
+
+CROSS_PACKAGE_LIST = \
+   cross-binutils-common cross-gcc-common diffstat \
+   glibc-static ncurses-devel numactl-devel rng-tools
+
+# aarch64 packages
+CROSS_PACKAGE_LIST += binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu
+# ppc64le packages
+CROSS_PACKAGE_LIST += binutils-ppc64le-linux-gnu gcc-ppc64le-linux-gnu
+# s390x packages
+CROSS_PACKAGE_LIST += binutils-s390x-linux-gnu gcc-s390x-linux-gnu
+# riscv64 packages
+CROSS_PACKAGE_LIST += binutils-riscv64-linux-gnu gcc-riscv64-linux-gnu
+
+dist-cross-setup:
+	@if [ "$(ARCHCONFIG)" != "X86_64" ]; then \
+		echo "$(ARCHCONFIG) ERROR: cross compile only enabled for x86_64"; \
+		exit 1; \
+	fi;
+	@ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) \
+		$(REDHAT)/scripts/cross-compile/download_cross.sh $(CROSS_PACKAGE_LIST)
+	@echo "INFO: Adding $(CROSS_DISABLED_SUBPACKAGES) to cross compile targets.  These subpackages cannot be built with the existing cross toolchains."
+
+dist-cross-aarch64-rpms: dist-cross-setup dist-sources
+	$(REDHAT)/scripts/cross-compile/x86_rngd.sh
+	$(CROSS_RPMFLAGS) --target aarch64 --with cross $(CROSS_DISABLED_SUBPACKAGES) -ba $(RPM)/SOURCES/$(SPECFILE)
+	$(REDHAT)/scripts/cross-compile/generate-cross-report.sh "aarch64"
+
+dist-cross-ppc64le-rpms: dist-cross-setup dist-sources
+	$(REDHAT)/scripts/cross-compile/x86_rngd.sh
+	$(CROSS_RPMFLAGS) --target ppc64le --with cross $(CROSS_DISABLED_SUBPACKAGES) -ba $(RPM)/SOURCES/$(SPECFILE)
+	$(REDHAT)/scripts/cross-compile/generate-cross-report.sh "ppc64"
+
+dist-cross-s390x-rpms: dist-cross-setup dist-sources
+	$(REDHAT)/scripts/cross-compile/x86_rngd.sh
+	$(CROSS_RPMFLAGS) --target s390x --with cross $(CROSS_DISABLED_SUBPACKAGES) -ba $(RPM)/SOURCES/$(SPECFILE)
+	$(REDHAT)/scripts/cross-compile/generate-cross-report.sh "s390x"
+
+dist-cross-riscv64-rpms: dist-cross-setup dist-sources
+	@if [ "$(DISTRO)" = "fedora" ]; then \
+		$(REDHAT)/scripts/cross-compile/x86_rngd.sh; \
+		$(CROSS_RPMFLAGS) --target riscv64 --with cross $(CROSS_DISABLED_SUBPACKAGES) -ba $(RPM)/SOURCES/$(SPECFILE); \
+		$(REDHAT)/scripts/cross-compile/generate-cross-report.sh "riscv64" ; \
+	else \
+		echo "INFO: RISC-V builds are only supported on Fedora."; \
+	fi;
+
+dist-cross-all-rpms: dist-cross-setup dist-sources
+	$(REDHAT)/scripts/cross-compile/x86_rngd.sh
+	$(CROSS_RPMFLAGS) --target aarch64 --with cross $(CROSS_DISABLED_SUBPACKAGES) -ba $(RPM)/SOURCES/$(SPECFILE)
+	$(CROSS_RPMFLAGS) --target ppc64le --with cross $(CROSS_DISABLED_SUBPACKAGES) -ba $(RPM)/SOURCES/$(SPECFILE)
+	$(CROSS_RPMFLAGS) --target s390x --with cross $(CROSS_DISABLED_SUBPACKAGES) -ba $(RPM)/SOURCES/$(SPECFILE)
+	@if [ "$(DISTRO)" = "fedora" ]; then \
+		$(CROSS_RPMFLAGS) --target riscv64 --with cross $(CROSS_DISABLED_SUBPACKAGES) -ba $(RPM)/SOURCES/$(SPECFILE); \
+	else \
+		echo "INFO: RISC-V builds are only supported on Fedora."; \
+	fi;
+	$(CROSS_RPMFLAGS) -ba $(RPM)/SOURCES/$(SPECFILE)
+	$(REDHAT)/scripts/cross-compile/generate-cross-report.sh "aarch64 ppc64 s390x x86_64 riscv64"
+
+dist-cross-aarch64-build: dist-cross-setup dist-sources
+	$(REDHAT)/scripts/cross-compile/x86_rngd.sh
+	$(CROSS_RPMFLAGS) --target aarch64 --with cross --without debuginfo $(CROSS_DISABLED_SUBPACKAGES) -bc $(RPM)/SOURCES/$(SPECFILE)
+	$(REDHAT)/scripts/cross-compile/generate-cross-report.sh "aarch64"
+
+dist-cross-ppc64le-build: dist-cross-setup dist-sources
+	$(REDHAT)/scripts/cross-compile/x86_rngd.sh
+	$(CROSS_RPMFLAGS) --target ppc64le --with cross --without debuginfo $(CROSS_DISABLED_SUBPACKAGES) -bc $(RPM)/SOURCES/$(SPECFILE)
+	$(REDHAT)/scripts/cross-compile/generate-cross-report.sh "ppc64le"
+
+dist-cross-s390x-build: dist-cross-setup dist-sources
+	$(REDHAT)/scripts/cross-compile/x86_rngd.sh
+	$(CROSS_RPMFLAGS) --target s390x --with cross --without debuginfo $(CROSS_DISABLED_SUBPACKAGES) -bc $(RPM)/SOURCES/$(SPECFILE)
+	$(REDHAT)/scripts/cross-compile/generate-cross-report.sh "s390x"
+
+dist-cross-riscv64-build: dist-cross-setup dist-sources
+	$(REDHAT)/scripts/cross-compile/x86_rngd.sh
+	$(CROSS_RPMFLAGS) --target riscv64 --with cross --without debuginfo $(CROSS_DISABLED_SUBPACKAGES) -bc $(RPM)/SOURCES/$(SPECFILE)
+	$(REDHAT)/scripts/cross-compile/generate-cross-report.sh "riscv64"
+
+dist-cross-all-builds: dist-cross-setup dist-sources
+	$(REDHAT)/scripts/cross-compile/x86_rngd.sh
+	$(CROSS_RPMFLAGS) --target aarch64 --with cross --without debuginfo $(CROSS_DISABLED_SUBPACKAGES) -bc $(RPM)/SOURCES/$(SPECFILE)
+	$(CROSS_RPMFLAGS) --target ppc64le --with cross --without debuginfo $(CROSS_DISABLED_SUBPACKAGES) -bc $(RPM)/SOURCES/$(SPECFILE)
+	$(CROSS_RPMFLAGS) --target s390x --with cross --without debuginfo $(CROSS_DISABLED_SUBPACKAGES) -bc $(RPM)/SOURCES/$(SPECFILE)
+	$(CROSS_RPMFLAGS) --target riscv64 --with cross --without debuginfo $(CROSS_DISABLED_SUBPACKAGES) -bc $(RPM)/SOURCES/$(SPECFILE)
+	$(CROSS_RPMFLAGS) --without debuginfo -bc $(RPM)/SOURCES/$(SPECFILE)
+	$(REDHAT)/scripts/cross-compile/generate-cross-report.sh "aarch64 ppc64le s390x x86_64 riscv64"

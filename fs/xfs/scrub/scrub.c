@@ -587,6 +587,7 @@ xfs_scrub_metadata(
 	struct xfs_mount		*mp = XFS_I(file_inode(file))->i_mount;
 	u64				check_start;
 	int				error = 0;
+	static bool			printed = false;
 
 	BUILD_BUG_ON(sizeof(meta_scrub_ops) !=
 		(sizeof(struct xchk_meta_ops) * XFS_SCRUB_TYPE_NR));
@@ -607,6 +608,10 @@ xfs_scrub_metadata(
 
 	xfs_warn_mount(mp, XFS_OPSTATE_WARNED_SCRUB,
  "EXPERIMENTAL online scrub feature in use. Use at your own risk!");
+	if (!printed) {
+		mark_tech_preview("Online scrub feature", THIS_MODULE);
+		printed = true;
+	}
 
 	sc = kzalloc(sizeof(struct xfs_scrub), XCHK_GFP_FLAGS);
 	if (!sc) {

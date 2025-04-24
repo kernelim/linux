@@ -1,0 +1,21 @@
+# Individual entries must be ordered as
+# config-variant=config-1:config-2:config-3 in a descending order through
+# the hierarchy
+
+# kernel.config files are build on the fly based on this config,
+# the first arg is arch and variant, the second is a hierarchy of
+# config options, lowest priority to highest
+ORDER=common
+EMPTY=
+
+# gcov options
+kgcov=kgcov
+kgcov-debug=kgcov
+
+# clang options
+clang=clang-generic
+clang-debug=clang-debug
+clang_lto-x86_64=clang-generic:clang_lto-generic:clang_lto-generic-x86
+clang_lto-x86_64-debug=clang-debug:clang_lto-debug
+clang_lto-aarch64=clang-generic:clang_lto-generic:clang_lto-generic-arm
+clang_lto-aarch64-debug=clang-debug:clang_lto-debug

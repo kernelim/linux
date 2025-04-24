@@ -1,0 +1,48 @@
+# Entries must be ordered as base and debug (if the debug variant exists)
+# ie) config-variant-arch
+#     config-variant-arch-debug (if the -debug variant exists)
+
+# Individual entries must be ordered as
+# config-variant=config-1:config-2:config-3 in a descending order through
+# the hierarchy
+
+# -debug variants must include the entirety of the base variant
+# For example,
+#
+# config-foo: generic:generic-foo:generic-foo-bar
+# config-foo-debug: generic:generic-foo:debug:debug-foo
+# is not a valid -debug variant
+
+# kernel.config files are build on the fly based on this config,
+# the first arg is arch and variant, the second is a hierarchy of
+# config options, lowest priority to highest
+ORDER=common rhel pending-rhel custom-overrides
+
+# x86_64
+x86_64=generic:generic-x86
+x86_64-debug=generic:generic-x86:debug:debug-x86
+x86_64-rt=generic:generic-x86:rt-generic:rt-generic-x86
+x86_64-rt-debug=generic:generic-x86:debug:debug-x86:rt-generic:rt-generic-x86:rt-debug:rt-debug-x86
+x86_64-automotive=generic:generic-x86:rt-generic:rt-generic-x86:automotive-generic:automotive-generic-x86
+x86_64-automotive-debug=generic:generic-x86:debug:debug-x86:rt-generic:rt-generic-x86:rt-debug:rt-debug-x86:automotive-generic:automotive-generic-x86:automotive-debug:automotive-debug-x86
+
+# ppc64le
+ppc64le=generic:generic-powerpc
+ppc64le-debug=generic:generic-powerpc:debug:debug-powerpc
+
+# s390x
+s390x=generic:generic-s390x
+s390x-debug=generic:generic-s390x:debug:debug-s390x
+s390x-zfcpdump=generic:generic-s390x:generic-s390x-zfcpdump
+
+# aarch64
+aarch64=generic:generic-arm:generic-arm-aarch64
+aarch64-debug=generic:generic-arm:generic-arm-aarch64:debug:debug-arm:debug-arm-aarch64
+aarch64-64k=generic:generic-arm:generic-arm-aarch64:generic-arm-aarch64-64k
+aarch64-64k-debug=generic:generic-arm:generic-arm-aarch64:generic-arm-aarch64-64k:debug:debug-arm-aarch64:debug-arm-aarch64-64k
+aarch64-rt=generic:generic-arm:generic-arm-aarch64:rt-generic:rt-generic-arm:rt-generic-arm-aarch64
+aarch64-rt-debug=generic:generic-arm:generic-arm-aarch64:debug:debug-arm:debug-arm-aarch64:rt-generic:rt-generic-arm:rt-generic-arm-aarch64:rt-debug:rt-debug-arm:rt-debug-arm-aarch64
+aarch64-rt-64k=generic:generic-arm:generic-arm-aarch64:rt-generic:rt-generic-arm:rt-generic-arm-aarch64:rt-generic-arm-aarch64-64k
+aarch64-rt-64k-debug=generic:generic-arm:generic-arm-aarch64:debug:debug-arm:debug-arm-aarch64:rt-generic:rt-generic-arm:rt-generic-arm-aarch64:rt-generic-arm-aarch64-64k:rt-debug:rt-debug-arm:rt-debug-arm-aarch64:rt-debug-arm-aarch64-64k
+aarch64-automotive=generic:generic-arm:generic-arm-aarch64:rt-generic:rt-generic-arm:rt-generic-arm-aarch64:automotive-generic:automotive-generic-arm:automotive-generic-arm-aarch64
+aarch64-automotive-debug=generic:generic-arm:generic-arm-aarch64:debug:debug-arm:debug-arm-aarch64:rt-generic:rt-generic-arm:rt-generic-arm-aarch64:rt-debug:rt-debug-arm:rt-debug-arm-aarch64:automotive-generic:automotive-generic-arm:automotive-generic-arm-aarch64:automotive-debug:automotive-debug-arm:automotive-debug-arm-aarch64

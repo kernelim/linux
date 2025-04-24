@@ -230,6 +230,16 @@ struct sk_buff *validate_xmit_xfrm(struct sk_buff *skb, netdev_features_t featur
 }
 EXPORT_SYMBOL_GPL(validate_xmit_xfrm);
 
+static noinline void xfrm_packet_offload_tech_preview(void)
+{
+	static bool warned = false;
+
+	if (!warned) {
+		mark_tech_preview("IPsec packet offload", NULL);
+		warned = true;
+	}
+}
+
 int xfrm_dev_state_add(struct net *net, struct xfrm_state *x,
 		       struct xfrm_user_offload *xuo,
 		       struct netlink_ext_ack *extack)
@@ -260,6 +270,8 @@ int xfrm_dev_state_add(struct net *net, struct xfrm_state *x,
 	}
 
 	is_packet_offload = xuo->flags & XFRM_OFFLOAD_PACKET;
+	if (is_packet_offload)
+		xfrm_packet_offload_tech_preview();
 
 	/* We don't yet support TFC padding. */
 	if (x->tfcpad) {
@@ -363,6 +375,8 @@ int xfrm_dev_policy_add(struct net *net, struct xfrm_policy *xp,
 	dev = dev_get_by_index(net, xuo->ifindex);
 	if (!dev)
 		return -EINVAL;
+
+	xfrm_packet_offload_tech_preview();
 
 	if (!dev->xfrmdev_ops || !dev->xfrmdev_ops->xdo_dev_policy_add) {
 		xdo->dev = NULL;

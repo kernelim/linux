@@ -9,7 +9,7 @@
  */
 
 #include <linux/types.h>
-
+#include <linux/rh_kabi.h>
 #include <asm/page.h>
 
 #ifdef CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH
@@ -65,6 +65,9 @@ struct tlbflush_unmap_batch {
 	 */
 	bool writable;
 #endif
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
 };
 
 #endif /* _LINUX_MM_TYPES_TASK_H */

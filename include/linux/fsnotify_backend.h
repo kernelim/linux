@@ -232,7 +232,7 @@ struct fsnotify_group {
 						 * notification list is too
 						 * full */
 
-	struct mem_cgroup *memcg;	/* memcg to charge allocations */
+	RH_KABI_EXCLUDE(struct mem_cgroup *memcg) /* memcg to charge allocations */
 
 	/* groups can define private fields here or use the void *private */
 	union {

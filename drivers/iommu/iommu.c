@@ -8,6 +8,7 @@
 
 #include <linux/amba/bus.h>
 #include <linux/device.h>
+#include <linux/dmi.h>
 #include <linux/kernel.h>
 #include <linux/bits.h>
 #include <linux/bug.h>
@@ -2931,6 +2932,27 @@ int iommu_dev_disable_feature(struct device *dev, enum iommu_dev_features feat)
 	return -EBUSY;
 }
 EXPORT_SYMBOL_GPL(iommu_dev_disable_feature);
+
+#ifdef CONFIG_ARM64
+static int __init iommu_quirks(void)
+{
+	const char *vendor, *name;
+
+	vendor = dmi_get_system_info(DMI_SYS_VENDOR);
+	name = dmi_get_system_info(DMI_PRODUCT_NAME);
+
+	if (vendor &&
+	    (strncmp(vendor, "GIGABYTE", 8) == 0 && name &&
+	     (strncmp(name, "R120", 4) == 0 ||
+	      strncmp(name, "R270", 4) == 0))) {
+		pr_warn("Gigabyte %s detected, force iommu passthrough mode", name);
+		iommu_def_domain_type = IOMMU_DOMAIN_IDENTITY;
+	}
+
+	return 0;
+}
+arch_initcall(iommu_quirks);
+#endif
 
 /**
  * iommu_setup_default_domain - Set the default_domain for the group

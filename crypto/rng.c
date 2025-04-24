@@ -12,10 +12,13 @@
 #include <linux/atomic.h>
 #include <linux/cryptouser.h>
 #include <linux/err.h>
+#include <linux/fips.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/random.h>
+#include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/string.h>
@@ -23,7 +26,9 @@
 
 #include "internal.h"
 
-static DEFINE_MUTEX(crypto_default_rng_lock);
+static ____cacheline_aligned_in_smp DEFINE_MUTEX(crypto_reseed_rng_lock);
+static struct crypto_rng *crypto_reseed_rng;
+static ____cacheline_aligned_in_smp DEFINE_MUTEX(crypto_default_rng_lock);
 struct crypto_rng *crypto_default_rng;
 EXPORT_SYMBOL_GPL(crypto_default_rng);
 static int crypto_default_rng_refcnt;
@@ -106,31 +111,37 @@ struct crypto_rng *crypto_alloc_rng(const char *alg_name, u32 type, u32 mask)
 }
 EXPORT_SYMBOL_GPL(crypto_alloc_rng);
 
-int crypto_get_default_rng(void)
+static int crypto_get_rng(struct crypto_rng **rngp)
 {
 	struct crypto_rng *rng;
 	int err;
 
-	mutex_lock(&crypto_default_rng_lock);
-	if (!crypto_default_rng) {
+	if (!*rngp) {
 		rng = crypto_alloc_rng("stdrng", 0, 0);
 		err = PTR_ERR(rng);
 		if (IS_ERR(rng))
-			goto unlock;
+			return err;
 
 		err = crypto_rng_reset(rng, NULL, crypto_rng_seedsize(rng));
 		if (err) {
 			crypto_free_rng(rng);
-			goto unlock;
+			return err;
 		}
 
-		crypto_default_rng = rng;
+		*rngp = rng;
 	}
 
-	crypto_default_rng_refcnt++;
-	err = 0;
+	return 0;
+}
 
-unlock:
+int crypto_get_default_rng(void)
+{
+	int err;
+
+	mutex_lock(&crypto_default_rng_lock);
+	err = crypto_get_rng(&crypto_default_rng);
+	if (!err)
+		crypto_default_rng_refcnt++;
 	mutex_unlock(&crypto_default_rng_lock);
 
 	return err;
@@ -146,23 +157,32 @@ void crypto_put_default_rng(void)
 EXPORT_SYMBOL_GPL(crypto_put_default_rng);
 
 #if defined(CONFIG_CRYPTO_RNG) || defined(CONFIG_CRYPTO_RNG_MODULE)
-int crypto_del_default_rng(void)
+static int crypto_del_rng(struct crypto_rng **rngp, int *refcntp,
+		      struct mutex *lock)
 {
 	int err = -EBUSY;
 
-	mutex_lock(&crypto_default_rng_lock);
-	if (crypto_default_rng_refcnt)
+	mutex_lock(lock);
+	if (refcntp && *refcntp)
 		goto out;
 
-	crypto_free_rng(crypto_default_rng);
-	crypto_default_rng = NULL;
+	crypto_free_rng(*rngp);
+	*rngp = NULL;
 
 	err = 0;
 
 out:
-	mutex_unlock(&crypto_default_rng_lock);
+	mutex_unlock(lock);
 
 	return err;
+}
+
+int crypto_del_default_rng(void)
+{
+	return crypto_del_rng(&crypto_default_rng, &crypto_default_rng_refcnt,
+			      &crypto_default_rng_lock) ?:
+	       crypto_del_rng(&crypto_reseed_rng, NULL,
+			      &crypto_reseed_rng_lock);
 }
 EXPORT_SYMBOL_GPL(crypto_del_default_rng);
 #endif
@@ -216,6 +236,110 @@ void crypto_unregister_rngs(struct rng_alg *algs, int count)
 		crypto_unregister_rng(algs + i);
 }
 EXPORT_SYMBOL_GPL(crypto_unregister_rngs);
+
+static ssize_t crypto_devrandom_read_iter(struct iov_iter *iter, bool reseed)
+{
+	struct crypto_rng *rng;
+	u8 tmp[256];
+	ssize_t ret;
+
+	if (unlikely(!iov_iter_count(iter)))
+		return 0;
+
+	if (reseed) {
+		u32 flags = 0;
+
+		/* If reseeding is requested, acquire a lock on
+		 * crypto_reseed_rng so it is not swapped out until
+		 * the initial random bytes are generated.
+		 *
+		 * The algorithm implementation is also protected with
+		 * a separate mutex (drbg->drbg_mutex) around the
+		 * reseed-and-generate operation.
+		 */
+		mutex_lock(&crypto_reseed_rng_lock);
+
+		/* If crypto_default_rng is not set, it will be seeded
+		 * at creation in __crypto_get_default_rng and thus no
+		 * reseeding is needed.
+		 */
+		if (crypto_reseed_rng)
+			flags |= CRYPTO_TFM_REQ_NEED_RESEED;
+
+		ret = crypto_get_rng(&crypto_reseed_rng);
+		if (ret) {
+			mutex_unlock(&crypto_reseed_rng_lock);
+			return ret;
+		}
+
+		rng = crypto_reseed_rng;
+		crypto_tfm_set_flags(crypto_rng_tfm(rng), flags);
+	} else {
+		ret = crypto_get_default_rng();
+		if (ret)
+			return ret;
+		rng = crypto_default_rng;
+	}
+
+	for (;;) {
+		size_t i, copied;
+		int err;
+
+		i = min_t(size_t, iov_iter_count(iter), sizeof(tmp));
+		err = crypto_rng_get_bytes(rng, tmp, i);
+		if (err) {
+			ret = ret ?: err;
+			break;
+		}
+
+		copied = copy_to_iter(tmp, i, iter);
+		ret += copied;
+
+		if (!iov_iter_count(iter) || copied != i)
+			break;
+
+		BUILD_BUG_ON(PAGE_SIZE % sizeof(tmp) != 0);
+		if (ret % PAGE_SIZE == 0) {
+			if (signal_pending(current))
+				break;
+			cond_resched();
+		}
+	}
+
+	if (reseed)
+		mutex_unlock(&crypto_reseed_rng_lock);
+	else
+		crypto_put_default_rng();
+	memzero_explicit(tmp, sizeof(tmp));
+	return ret ? ret : -EFAULT;
+}
+
+static const struct random_extrng crypto_devrandom_rng = {
+	.extrng_read_iter = crypto_devrandom_read_iter,
+	.owner = THIS_MODULE,
+};
+
+static int __init crypto_rng_init(void)
+{
+	int err;
+
+	if (fips_enabled) {
+		err = crypto_get_default_rng();
+		if (err)
+			return err;
+		crypto_put_default_rng();
+		random_register_extrng(&crypto_devrandom_rng);
+	}
+	return 0;
+}
+
+static void __exit crypto_rng_exit(void)
+{
+	random_unregister_extrng();
+}
+
+late_initcall(crypto_rng_init);
+module_exit(crypto_rng_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Random Number Generator");

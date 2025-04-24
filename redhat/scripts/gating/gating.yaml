@@ -1,0 +1,26 @@
+--- !Policy
+product_versions:
+  - rhel-10
+decision_context: osci_compose_gate
+rules:
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-64k-aarch64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-64k-debug-aarch64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-aarch64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-debug-aarch64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-debug-ppc64le.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-debug-s390x.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-debug-x86_64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-ppc64le.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-rt-64k-aarch64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-rt-64k-debug-aarch64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-rt-aarch64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-rt-debug-aarch64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-rt-debug-x86_64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-rt-x86_64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-s390x.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: kernel-qe.kernel-ci.kernel-x86_64.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: s1-aws-ci_x86_64.brew-build.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: s1-aws-ci_aarch64.brew-build.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: s1-azure-ci_x86_64.brew-build.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: s1-azure-ci_aarch64.brew-build.tier1.functional}
+  - !PassingTestCaseRule {test_case_name: s1-gcp-ci.brew-build.tier1.functional}

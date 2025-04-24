@@ -1383,7 +1383,7 @@ endchoice
 
 config ARM64_FORCE_52BIT
 	bool "Force 52-bit virtual addresses for userspace"
-	depends on ARM64_VA_BITS_52 && EXPERT
+	depends on ARM64_VA_BITS_52
 	help
 	  For systems with 52-bit userspace VAs enabled, the kernel will attempt
 	  to maintain compatibility with older software by providing 48-bit VAs
@@ -1606,14 +1606,14 @@ config XEN
 #
 #     | SECTION_SIZE_BITS |  PAGE_SHIFT  |  max MAX_PAGE_ORDER  |  default MAX_PAGE_ORDER |
 # ----+-------------------+--------------+----------------------+-------------------------+
-# 4K  |       27          |      12      |       15             |         10              |
+# 4K  |       27          |      12      |       15             |         12              |
 # 16K |       27          |      14      |       13             |         11              |
 # 64K |       29          |      16      |       13             |         13              |
 config ARCH_FORCE_MAX_ORDER
 	int
 	default "13" if ARM64_64K_PAGES
 	default "11" if ARM64_16K_PAGES
-	default "10"
+	default "12"
 	help
 	  The kernel page allocator limits the size of maximal physically
 	  contiguous allocations. The limit is called MAX_PAGE_ORDER and it

@@ -22,6 +22,18 @@ $(if $(filter __%, $(MAKECMDGOALS)), \
 PHONY := __all
 __all:
 
+# Set RHEL variables
+# Note that this ifdef'ery is required to handle when building with
+# the O= mechanism (relocate the object file results) due to upstream
+# commit 67d7c302 which broke our RHEL include file
+ifneq ($(realpath source),)
+include $(realpath source)/Makefile.rhelver
+else
+ifneq ($(realpath Makefile.rhelver),)
+include Makefile.rhelver
+endif
+endif
+
 # We are using a recursive build, so we need to do a little thinking
 # to get the ordering right.
 #
@@ -331,6 +343,17 @@ ifneq ($(filter install,$(MAKECMDGOALS)),)
     ifneq ($(filter modules_install,$(MAKECMDGOALS)),)
         mixed-build := 1
     endif
+endif
+
+# CKI/cross compilation hack
+# Do we need to rebuild scripts after cross compilation?
+# If kernel was cross-compiled, these scripts have arch of build host.
+REBUILD_SCRIPTS_FOR_CROSS:=0
+
+# Regenerating config with incomplete source tree will produce different
+# config options. Disable it.
+ifeq ($(REBUILD_SCRIPTS_FOR_CROSS),1)
+may-sync-config:=
 endif
 
 ifdef mixed-build
@@ -1251,7 +1274,13 @@ define filechk_version.h
 	((c) > 255 ? 255 : (c)))';                                       \
 	echo \#define LINUX_VERSION_MAJOR $(VERSION);                    \
 	echo \#define LINUX_VERSION_PATCHLEVEL $(PATCHLEVEL);            \
-	echo \#define LINUX_VERSION_SUBLEVEL $(SUBLEVEL)
+	echo \#define LINUX_VERSION_SUBLEVEL $(SUBLEVEL);                \
+	echo '#define RHEL_MAJOR $(RHEL_MAJOR)'; \
+	echo '#define RHEL_MINOR $(RHEL_MINOR)'; \
+	echo '#define RHEL_RELEASE_VERSION(a,b) (((a) << 8) + (b))'; \
+	echo '#define RHEL_RELEASE_CODE \
+		$(shell expr $(RHEL_MAJOR) \* 256 + $(RHEL_MINOR))'; \
+	echo '#define RHEL_RELEASE "$(RHEL_RELEASE)"'
 endef
 
 $(version_h): private PATCHLEVEL := $(or $(PATCHLEVEL), 0)
@@ -1858,6 +1887,23 @@ modules_sign:
 endif
 
 ifdef CONFIG_MODULES
+
+scripts_build:
+	$(MAKE) $(build)=scripts/basic
+	$(MAKE) $(build)=scripts/mod
+	$(MAKE) $(build)=scripts scripts/module.lds
+	$(MAKE) $(build)=scripts scripts/unifdef
+	$(MAKE) $(build)=scripts
+
+prepare_after_cross:
+	# disable STACK_VALIDATION to avoid building objtool
+	sed -i '/^CONFIG_STACK_VALIDATION/d' ./include/config/auto.conf || true
+	# build minimum set of scripts and resolve_btfids to allow building
+	# external modules
+	$(MAKE) KBUILD_EXTMOD="" M="" scripts_build V=1
+	$(MAKE) -C tools/bpf/resolve_btfids
+
+PHONY += prepare_after_cross scripts_build
 
 $(MODORDER): $(build-dir)
 	@:

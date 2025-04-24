@@ -276,7 +276,7 @@ struct bpf_map {
 	u32 btf_vmlinux_value_type_id;
 	struct btf *btf;
 #ifdef CONFIG_MEMCG
-	struct obj_cgroup *objcg;
+	RH_KABI_EXCLUDE(struct obj_cgroup *objcg)
 #endif
 	char name[BPF_OBJ_NAME_LEN];
 	struct mutex freeze_mutex;

@@ -1502,6 +1502,7 @@ xfs_fs_fill_super(
 	struct xfs_mount	*mp = sb->s_fs_info;
 	struct inode		*root;
 	int			flags = 0, error;
+	static bool		printed = false;
 
 	mp->m_super = sb;
 
@@ -1660,6 +1661,11 @@ xfs_fs_fill_super(
 		xfs_warn(mp,
 "EXPERIMENTAL: V5 Filesystem with Large Block Size (%d bytes) enabled.",
 			mp->m_sb.sb_blocksize);
+		if (!printed) {
+			mark_tech_preview("V5 Filesystem with Large Block Size",
+					  THIS_MODULE);
+			printed = true;
+		}
 	}
 
 	/* Ensure this filesystem fits in the page cache limits */
@@ -1754,13 +1760,25 @@ xfs_fs_fill_super(
 		goto out_filestream_unmount;
 	}
 
-	if (xfs_has_exchange_range(mp))
+	if (xfs_has_exchange_range(mp)) {
 		xfs_warn(mp,
 	"EXPERIMENTAL exchange-range feature enabled. Use at your own risk!");
+		if (!printed) {
+			mark_tech_preview("Exchange-range feature",
+					  THIS_MODULE);
+			printed = true;
+		}
+	}
 
-	if (xfs_has_parent(mp))
+	if (xfs_has_parent(mp)) {
 		xfs_warn(mp,
 	"EXPERIMENTAL parent pointer feature enabled. Use at your own risk!");
+		if (!printed) {
+			mark_tech_preview("Parent pointer feature",
+					  THIS_MODULE);
+			printed = true;
+		}
+	}
 
 	error = xfs_mountfs(mp);
 	if (error)

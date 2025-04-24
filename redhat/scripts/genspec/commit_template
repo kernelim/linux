@@ -1,0 +1,14 @@
+Hi,
+
+As part of the ongoing rebase effort, the following configuration
+options need to be reviewed.
+
+As a reminder, the ARK configuration flow involves moving unreviewed
+configuration options from the pending directory to the ark directory.
+In the diff below, options are removed from the pending directory and
+added to the ark hierarchy. The final options that need to be ACKed
+are the files that are being added to the ark hierarchy.
+
+If the value for a file that is added should be changed, please reply
+with a better option.
+

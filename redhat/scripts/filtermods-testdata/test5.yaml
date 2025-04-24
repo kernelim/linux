@@ -1,0 +1,18 @@
+packages:
+  - name: modules-core
+    depends-on: []
+  - name: modules
+    depends-on:
+    - modules-core
+  - name: modules-extra
+    depends-on:
+    - modules-core
+  - name: modules-partner
+    depends-on:
+    - modules-core
+
+rules:
+  - kmod1: modules-extra
+  - kmod[12]: modules
+  - kmod[234]: modules-partner
+  - default: modules

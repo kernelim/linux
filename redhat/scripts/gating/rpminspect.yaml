@@ -1,0 +1,54 @@
+# additional rpminspect configuration for this branch
+
+---
+inspections:
+    abidiff: off
+    kmidiff: off
+    upstream: off
+    subpackages: off
+    license: off
+    debuginfo: off
+    removedfiles: off
+
+badfuncs:
+    ignore:
+        - /usr/libexec/ksamples/*
+        - /usr/libexec/kselftests/*
+
+emptyrpm:
+    expected_empty:
+        - kernel
+        - kernel-debug
+        - kernel-debug-devel-matched
+        - kernel-devel-matched
+        - kernel-lpae
+        - kernel-zfcpdump
+        - kernel-zfcpdump-devel-matched
+        - kernel-zfcpdump-modules
+
+patches:
+    ignore_list:
+        - linux-kernel-test.patch
+        - patch-%%SPECKVERSION%%.%%SPECKPATCHLEVEL%%-redhat.patch
+        - patch-%{patchversion}-redhat.patch
+
+runpath:
+    ignore:
+        - /usr/libexec/kselftests/bpf/urandom_read
+        - /usr/libexec/kselftests/bpf/no_alu32/urandom_read
+        - /usr/libexec/kselftests/bpf/cpuv4/urandom_read
+
+debuginfo:
+    ignore:
+        - /usr/libexec/kselftests/bpf/*
+        - /usr/lib/debug/usr/libexec/perf-core/tests/shell/coresight/*
+
+elf:
+    ignore:
+        - /usr/libexec/kselftests/*
+        - /usr/libexec/perf-core/tests/shell/coresight/*
+        - /usr/lib/debug/usr/libexec/perf-core/tests/shell/coresight/*
+
+annocheck:
+    ignore:
+        - /usr/libexec/kselftests/*

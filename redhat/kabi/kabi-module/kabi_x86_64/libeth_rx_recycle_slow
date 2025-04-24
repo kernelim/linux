@@ -1,0 +1,3 @@
+#0-
+0xb40f1238	libeth_rx_recycle_slow	drivers/net/ethernet/intel/libeth/libeth	EXPORT_SYMBOL_GPL	LIBETH
+

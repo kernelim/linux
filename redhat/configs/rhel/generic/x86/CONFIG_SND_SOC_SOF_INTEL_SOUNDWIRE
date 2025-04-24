@@ -1,0 +1,24 @@
+# CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE:
+# 
+# This adds support for SoundWire with Sound Open Firmware
+# for Intel(R) platforms.
+# Say Y if you want to enable SoundWire links with SOF.
+# If unsure select "N".
+# 
+# Symbol: SND_SOC_SOF_INTEL_SOUNDWIRE [=m]
+# Type  : tristate
+# Defined at sound/soc/sof/intel/Kconfig:282
+#   Prompt: SOF support for SoundWire
+#   Depends on: SOUND [=m] && !UML && SND [=m] && SND_SOC [=m] && SND_SOC_SOF_TOPLEVEL [=y] && SND_SOC_SOF_INTEL_TOPLEVEL [=y] && SND_SOC_SOF_PCI [=m] && SND_SOC_SOF_INTEL_SOUNDWIRE_LINK_BASELINE [=m] && ACPI [=y] && SOUNDWIRE [=y] && (SOUNDWIRE [=y]!=m || SND_SOC_SOF_INTEL_SOUNDWIRE_LINK_BASELINE [=m]!=y)
+#   Location:
+#     -> Device Drivers
+#       -> Sound card support (SOUND [=m])
+#         -> Advanced Linux Sound Architecture (SND [=m])
+#           -> ALSA for SoC audio support (SND_SOC [=m])
+#             -> Sound Open Firmware Support (SND_SOC_SOF_TOPLEVEL [=y])
+#               -> SOF support for Intel audio DSPs (SND_SOC_SOF_INTEL_TOPLEVEL [=y])
+# Selects: SOUNDWIRE_INTEL [=m] && SND_INTEL_SOUNDWIRE_ACPI [=m]
+# 
+# 
+# 
+CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE=m

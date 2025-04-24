@@ -256,6 +256,8 @@ struct swap_cluster_info {
 	u8 flags;
 	u8 order;
 	struct list_head list;
+	
+	RH_KABI_RESERVE(1)
 };
 #define CLUSTER_FLAG_FREE 1 /* This cluster is free */
 #define CLUSTER_FLAG_NONFULL 2 /* This cluster is on nonfull list */
@@ -283,6 +285,9 @@ struct swap_cluster_info {
  */
 struct percpu_cluster {
 	unsigned int next[SWAP_NR_ORDERS]; /* Likely next allocation offset */
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
 };
 
 /*

@@ -121,6 +121,14 @@ static const char *sd_cache_types[] = {
 	"write back, no read (daft)"
 };
 
+#ifdef CONFIG_RHEL_DIFFERENCES
+static char sd_probe_type[6] = "async";
+module_param_string(probe, sd_probe_type, sizeof(sd_probe_type),
+		    S_IRUGO|S_IWUSR);
+MODULE_PARM_DESC(probe, "async or sync. Setting to 'sync' disables asynchronous "
+		 "device number assignments (sda, sdb, ...).");
+#endif
+
 static void sd_set_flush_flag(struct scsi_disk *sdkp,
 		struct queue_limits *lim)
 {
@@ -4376,6 +4384,11 @@ static int __init init_sd(void)
 		err = -ENOMEM;
 		goto err_out_class;
 	}
+
+#ifdef CONFIG_RHEL_DIFFERENCES
+	if (!strcmp(sd_probe_type, "sync"))
+		sd_template.gendrv.probe_type = PROBE_FORCE_SYNCHRONOUS;
+#endif
 
 	err = scsi_register_driver(&sd_template.gendrv);
 	if (err)

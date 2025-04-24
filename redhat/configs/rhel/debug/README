@@ -1,0 +1,3 @@
+Place config options in this directory that you want applied to all -debug
+kernel variants. These options are overlayed atop the generic/ configs and
+all other configs in directories below generic/.

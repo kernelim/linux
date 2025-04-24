@@ -1,0 +1,12 @@
+# Symbol: QCOM_SCM_DOWNLOAD_MODE_DEFAULT [=n]
+# Type  : bool
+# Defined at drivers/firmware/Kconfig:208
+#   Prompt: Qualcomm download mode enabled by default
+#   Depends on: QCOM_SCM [=y]
+#   Location:
+#     -> Device Drivers
+#       -> Firmware Drivers
+# 
+# 
+# 
+# CONFIG_QCOM_SCM_DOWNLOAD_MODE_DEFAULT is not set

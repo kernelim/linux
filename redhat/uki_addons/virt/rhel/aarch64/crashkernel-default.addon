@@ -1,0 +1,1 @@
+crashkernel=1G-4G:256M,4G-64G:320M,64G-:576M

@@ -1,0 +1,2 @@
+# RHEL: We have a customer who requires 64 UARTS since RHEL6.
+CONFIG_SERIAL_8250_NR_UARTS=64

@@ -566,7 +566,12 @@ void bpf_prog_kallsyms_del_all(struct bpf_prog *fp)
 /* All BPF JIT sysctl knobs here. */
 int bpf_jit_enable   __read_mostly = IS_BUILTIN(CONFIG_BPF_JIT_DEFAULT_ON);
 int bpf_jit_kallsyms __read_mostly = IS_BUILTIN(CONFIG_BPF_JIT_DEFAULT_ON);
+#ifdef CONFIG_RHEL_DIFFERENCES
+/* RHEL-only: set it to 1 by default */
+int bpf_jit_harden   __read_mostly = 1;
+#else
 int bpf_jit_harden   __read_mostly;
+#endif /* CONFIG_RHEL_DIFFERENCES */
 long bpf_jit_limit   __read_mostly;
 long bpf_jit_limit_max __read_mostly;
 

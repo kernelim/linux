@@ -971,7 +971,6 @@ static inline void nvme_trace_bio_complete(struct request *req)
 		trace_block_bio_complete(ns->head->disk->queue, req->bio);
 }
 
-extern bool multipath;
 extern struct device_attribute dev_attr_ana_grpid;
 extern struct device_attribute dev_attr_ana_state;
 extern struct device_attribute subsys_attr_iopolicy;
@@ -981,7 +980,6 @@ static inline bool nvme_disk_is_ns_head(struct gendisk *disk)
 	return disk->fops == &nvme_ns_head_ops;
 }
 #else
-#define multipath false
 static inline bool nvme_ctrl_use_ana(struct nvme_ctrl *ctrl)
 {
 	return false;

@@ -1,0 +1,4 @@
+kernel/kmod1:
+kernel/kmod2: kernel/kmod1
+kernel/kmod3: kernel/kmod2
+kernel/kmod4:

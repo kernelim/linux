@@ -98,6 +98,7 @@ xfs_growfs_data_private(
 	struct xfs_trans	*tp;
 	struct aghdr_init_data	id = {};
 	struct xfs_perag	*last_pag;
+	static bool printed = false;
 
 	nb = in->newblocks;
 	error = xfs_sb_validate_fsb_count(&mp->m_sb, nb);
@@ -165,6 +166,11 @@ xfs_growfs_data_private(
 		xfs_warn_mount(mp, XFS_OPSTATE_WARNED_SHRINK,
 	"EXPERIMENTAL online shrink feature in use. Use at your own risk!");
 
+		if (!printed) {
+			mark_tech_preview("Online shrink feature",
+					  THIS_MODULE);
+			printed = true;
+		}
 		error = xfs_ag_shrink_space(last_pag, &tp, -delta);
 	}
 	xfs_perag_put(last_pag);

@@ -1,0 +1,4 @@
+Place config options in this directory that you want applied to powerpc64
+kernel variants. These options are overlayed atop the generic/ kernel
+options, but can also be overridden config option files places in the
+debug/ and/or debug/powerpc64 directories.

@@ -44,6 +44,31 @@ static const struct snd_soc_acpi_endpoint spk_3_endpoint = {
 	.group_id = 1,
 };
 
+/*
+ * RT722 is a multi-function codec, three endpoints are created for
+ * its headset, amp and dmic functions.
+ */
+static const struct snd_soc_acpi_endpoint rt722_endpoints[] = {
+	{
+		.num = 0,
+		.aggregated = 0,
+		.group_position = 0,
+		.group_id = 0,
+	},
+	{
+		.num = 1,
+		.aggregated = 0,
+		.group_position = 0,
+		.group_id = 0,
+	},
+	{
+		.num = 2,
+		.aggregated = 0,
+		.group_position = 0,
+		.group_id = 0,
+	},
+};
+
 static const struct snd_soc_acpi_adr_device cs35l56_2_lr_adr[] = {
 	{
 		.adr = 0x00023001FA355601ull,
@@ -113,9 +138,27 @@ static const struct snd_soc_acpi_adr_device cs35l56_2_r1_adr[] = {
 	},
 };
 
-static const struct snd_soc_acpi_adr_device cs35l56_3_l1_adr[] = {
+static const struct snd_soc_acpi_adr_device cs35l56_3_l3_adr[] = {
 	{
 		.adr = 0x00033301fa355601ull,
+		.num_endpoints = 1,
+		.endpoints = &spk_l_endpoint,
+		.name_prefix = "AMP1"
+	},
+};
+
+static const struct snd_soc_acpi_adr_device cs35l56_2_r3_adr[] = {
+	{
+		.adr = 0x00023301fa355601ull,
+		.num_endpoints = 1,
+		.endpoints = &spk_r_endpoint,
+		.name_prefix = "AMP2"
+	},
+};
+
+static const struct snd_soc_acpi_adr_device cs35l56_3_l1_adr[] = {
+	{
+		.adr = 0x00033101fa355601ull,
 		.num_endpoints = 1,
 		.endpoints = &spk_l_endpoint,
 		.name_prefix = "AMP1"
@@ -182,6 +225,24 @@ static const struct snd_soc_acpi_adr_device rt711_sdca_0_adr[] = {
 		.num_endpoints = 1,
 		.endpoints = &single_endpoint,
 		.name_prefix = "rt711"
+	}
+};
+
+static const struct snd_soc_acpi_adr_device rt722_0_single_adr[] = {
+	{
+		.adr = 0x000030025D072201ull,
+		.num_endpoints = ARRAY_SIZE(rt722_endpoints),
+		.endpoints = rt722_endpoints,
+		.name_prefix = "rt722"
+	}
+};
+
+static const struct snd_soc_acpi_adr_device rt1320_2_single_adr[] = {
+	{
+		.adr = 0x000230025D132001ull,
+		.num_endpoints = 1,
+		.endpoints = &single_endpoint,
+		.name_prefix = "rt1320-1"
 	}
 };
 
@@ -263,6 +324,25 @@ static const struct snd_soc_acpi_link_adr arl_cs42l43_l0_cs35l56_2_l23[] = {
 	},
 	{
 		.mask = BIT(3),
+		.num_adr = ARRAY_SIZE(cs35l56_3_l3_adr),
+		.adr_d = cs35l56_3_l3_adr,
+	},
+	{}
+};
+
+static const struct snd_soc_acpi_link_adr arl_cs42l43_l0_cs35l56_3_l23[] = {
+	{
+		.mask = BIT(0),
+		.num_adr = ARRAY_SIZE(cs42l43_0_adr),
+		.adr_d = cs42l43_0_adr,
+	},
+	{
+		.mask = BIT(2),
+		.num_adr = ARRAY_SIZE(cs35l56_2_r3_adr),
+		.adr_d = cs35l56_2_r3_adr,
+	},
+	{
+		.mask = BIT(3),
 		.num_adr = ARRAY_SIZE(cs35l56_3_l1_adr),
 		.adr_d = cs35l56_3_l1_adr,
 	},
@@ -283,6 +363,20 @@ static const struct snd_soc_acpi_link_adr arl_sdca_rvp[] = {
 		.mask = BIT(0),
 		.num_adr = ARRAY_SIZE(rt711_sdca_0_adr),
 		.adr_d = rt711_sdca_0_adr,
+	},
+	{}
+};
+
+static const struct snd_soc_acpi_link_adr arl_rt722_l0_rt1320_l2[] = {
+	{
+		.mask = BIT(0),
+		.num_adr = ARRAY_SIZE(rt722_0_single_adr),
+		.adr_d = rt722_0_single_adr,
+	},
+	{
+		.mask = BIT(2),
+		.num_adr = ARRAY_SIZE(rt1320_2_single_adr),
+		.adr_d = rt1320_2_single_adr,
 	},
 	{}
 };
@@ -350,6 +444,12 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_arl_sdw_machines[] = {
 		.sof_tplg_filename = "sof-arl-cs42l43-l0-cs35l56-l23.tplg",
 	},
 	{
+		.link_mask = BIT(0) | BIT(2) | BIT(3),
+		.links = arl_cs42l43_l0_cs35l56_3_l23,
+		.drv_name = "sof_sdw",
+		.sof_tplg_filename = "sof-arl-cs42l43-l0-cs35l56-l23.tplg",
+	},
+	{
 		.link_mask = BIT(0) | BIT(2),
 		.links = arl_cs42l43_l0_cs35l56_l2,
 		.drv_name = "sof_sdw",
@@ -384,6 +484,12 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_arl_sdw_machines[] = {
 		.links = arl_sdca_rvp,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-arl-rt711-l0.tplg",
+	},
+	{
+		.link_mask = BIT(0) | BIT(2),
+		.links = arl_rt722_l0_rt1320_l2,
+		.drv_name = "sof_sdw",
+		.sof_tplg_filename = "sof-arl-rt722-l0_rt1320-l2.tplg",
 	},
 	{},
 };

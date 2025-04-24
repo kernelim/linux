@@ -26,6 +26,7 @@ struct vmem_altmap {
 	unsigned long align;
 	unsigned long alloc;
 	bool inaccessible;
+	RH_KABI_RESERVE(1)
 };
 
 /*

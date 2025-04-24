@@ -1,0 +1,6 @@
+*merged
+config-*
+kernel*config
+partial*config
+*.old
+*.tmp

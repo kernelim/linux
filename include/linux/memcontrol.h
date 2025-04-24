@@ -23,6 +23,7 @@
 #include <linux/writeback.h>
 #include <linux/page-flags.h>
 #include <linux/shrinker.h>
+#include <linux/rh_kabi.h>
 
 struct mem_cgroup;
 struct obj_cgroup;
@@ -104,6 +105,7 @@ struct mem_cgroup_per_node {
 	unsigned long		usage_in_excess;/* Set to the value by which */
 						/* the soft limit is exceeded*/
 	bool			on_tree;
+	RH_KABI_FILL_HOLE(unsigned short nid)
 #else
 	CACHELINE_PADDING(_pad1_);
 #endif
@@ -322,6 +324,12 @@ struct mem_cgroup {
 	struct list_head event_list;
 	spinlock_t event_list_lock;
 #endif /* CONFIG_MEMCG_V1 */
+	/*
+	 * Disable percpu stats when offline, flush and free them after one
+	 * grace period.
+	 */
+	RH_KABI_EXTEND(int		percpu_stats_disabled)
+	RH_KABI_EXTEND(struct rcu_work	percpu_stats_rwork)
 
 	struct mem_cgroup_per_node *nodeinfo[];
 };

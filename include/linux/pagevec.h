@@ -10,6 +10,7 @@
 #define _LINUX_PAGEVEC_H
 
 #include <linux/types.h>
+#include <linux/rh_kabi.h>
 
 /* 31 pointers + header align the folio_batch structure to a power of two */
 #define PAGEVEC_SIZE	31
@@ -29,6 +30,8 @@ struct folio_batch {
 	unsigned char nr;
 	unsigned char i;
 	bool percpu_pvec_drained;
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 	struct folio *folios[PAGEVEC_SIZE];
 };
 

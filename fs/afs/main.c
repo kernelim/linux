@@ -199,6 +199,9 @@ static int __init afs_init(void)
 		goto error_proc;
 	}
 
+#ifdef CONFIG_RHEL_DIFFERENCES
+	mark_partner_supported(KBUILD_MODNAME, THIS_MODULE);
+#endif
 	return ret;
 
 error_proc:

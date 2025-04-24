@@ -1,0 +1,15 @@
+# Symbol: PHY_QCOM_QMP_COMBO [=m]
+# Type  : tristate
+# Defined at drivers/phy/qualcomm/Kconfig:59
+#   Prompt: Qualcomm QMP Combo PHY Driver
+#   Depends on: PHY_QCOM_QMP [=m]
+#   Location:
+#     -> Device Drivers
+#       -> PHY Subsystem
+#         -> Qualcomm QMP PHY Drivers (PHY_QCOM_QMP [=m])
+#           -> Qualcomm QMP Combo PHY Driver (PHY_QCOM_QMP_COMBO [=m])
+# Selects: GENERIC_PHY [=y] && MFD_SYSCON [=y]
+# 
+# 
+# 
+CONFIG_PHY_QCOM_QMP_COMBO=m

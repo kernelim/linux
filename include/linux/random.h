@@ -9,6 +9,13 @@
 
 #include <uapi/linux/random.h>
 
+struct iov_iter;
+
+struct random_extrng {
+	ssize_t (*extrng_read_iter)(struct iov_iter *iter, bool reseed);
+	struct module *owner;
+};
+
 struct notifier_block;
 
 void add_device_randomness(const void *buf, size_t len);
@@ -156,6 +163,9 @@ declare_get_random_var_wait(long, unsigned long)
 int random_prepare_cpu(unsigned int cpu);
 int random_online_cpu(unsigned int cpu);
 #endif
+
+void random_register_extrng(const struct random_extrng *rng);
+void random_unregister_extrng(void);
 
 #ifndef MODULE
 extern const struct file_operations random_fops, urandom_fops;
