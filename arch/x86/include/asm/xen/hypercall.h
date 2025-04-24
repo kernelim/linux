@@ -100,7 +100,7 @@ struct xen_dm_op_buf;
 	"1: vmmcall \n"					\
 	"2: \n"
 
-#define __HYPERCALL_ENTRY(x)	"a" (x), "c" (boot_cpu_data.x86_vendor)
+#define __HYPERCALL_ENTRY(x)	"a" (x), "c" ((u64)boot_cpu_data.x86_vendor)
 
 #ifdef CONFIG_X86_32
 #define __HYPERCALL_RETREG	"eax"
