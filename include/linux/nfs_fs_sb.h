@@ -158,6 +158,7 @@ struct nfs_server {
 #define NFS_MOUNT_WRITE_EAGER		0x01000000
 #define NFS_MOUNT_WRITE_WAIT		0x02000000
 #define NFS_MOUNT_TRUNK_DISCOVERY	0x04000000
+#define NFS_MOUNT_FORCE_RDIRPLUS	0x20000000
 
 	unsigned int		caps;		/* server capabilities */
 	unsigned int		rsize;		/* read size */

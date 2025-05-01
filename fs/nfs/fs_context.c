@@ -65,6 +65,8 @@ enum nfs_param {
 	Opt_posix,
 	Opt_proto,
 	Opt_rdirplus,
+	Opt_rdirplus_none,
+	Opt_rdirplus_force,
 	Opt_rdma,
 	Opt_resvport,
 	Opt_retrans,
@@ -151,7 +153,8 @@ static const struct fs_parameter_spec nfs_fs_parameters[] = {
 	fsparam_u32   ("port",		Opt_port),
 	fsparam_flag_no("posix",	Opt_posix),
 	fsparam_string("proto",		Opt_proto),
-	fsparam_flag_no("rdirplus",	Opt_rdirplus),
+	fsparam_flag_no("rdirplus", Opt_rdirplus), // rdirplus|nordirplus
+	fsparam_string("rdirplus",  Opt_rdirplus), // rdirplus=...
 	fsparam_flag  ("rdma",		Opt_rdma),
 	fsparam_flag_no("resvport",	Opt_resvport),
 	fsparam_u32   ("retrans",	Opt_retrans),
@@ -246,6 +249,12 @@ static const struct constant_table nfs_secflavor_tokens[] = {
 	{ "spkm3i",	Opt_sec_spkmi },
 	{ "spkm3p",	Opt_sec_spkmp },
 	{ "sys",	Opt_sec_sys },
+	{}
+};
+
+static const struct constant_table nfs_rdirplus_tokens[] = {
+	{ "none",	Opt_rdirplus_none },
+	{ "force",	Opt_rdirplus_force },
 	{}
 };
 
@@ -537,10 +546,25 @@ static int nfs_fs_context_parse_param(struct fs_context *fc,
 			ctx->flags &= ~NFS_MOUNT_NOACL;
 		break;
 	case Opt_rdirplus:
-		if (result.negated)
+		if (result.negated) {
+			ctx->flags &= ~NFS_MOUNT_FORCE_RDIRPLUS;
 			ctx->flags |= NFS_MOUNT_NORDIRPLUS;
-		else
-			ctx->flags &= ~NFS_MOUNT_NORDIRPLUS;
+		} else if (!param->string) {
+			ctx->flags &= ~(NFS_MOUNT_NORDIRPLUS | NFS_MOUNT_FORCE_RDIRPLUS);
+		} else {
+			switch (lookup_constant(nfs_rdirplus_tokens, param->string, -1)) {
+			case Opt_rdirplus_none:
+				ctx->flags &= ~NFS_MOUNT_FORCE_RDIRPLUS;
+				ctx->flags |= NFS_MOUNT_NORDIRPLUS;
+				break;
+			case Opt_rdirplus_force:
+				ctx->flags &= ~NFS_MOUNT_NORDIRPLUS;
+				ctx->flags |= NFS_MOUNT_FORCE_RDIRPLUS;
+				break;
+			default:
+				goto out_invalid_value;
+			}
+		}
 		break;
 	case Opt_sharecache:
 		if (result.negated)

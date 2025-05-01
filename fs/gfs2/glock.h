@@ -184,34 +184,34 @@ static inline struct address_space *gfs2_glock2aspace(struct gfs2_glock *gl)
 	return NULL;
 }
 
-extern int gfs2_glock_get(struct gfs2_sbd *sdp, u64 number,
-			  const struct gfs2_glock_operations *glops,
-			  int create, struct gfs2_glock **glp);
-extern void gfs2_glock_hold(struct gfs2_glock *gl);
-extern void gfs2_glock_put(struct gfs2_glock *gl);
-extern void gfs2_glock_put_async(struct gfs2_glock *gl);
-extern void gfs2_holder_init(struct gfs2_glock *gl, unsigned int state,
-			     u16 flags, struct gfs2_holder *gh);
-extern void gfs2_holder_reinit(unsigned int state, u16 flags,
-			       struct gfs2_holder *gh);
-extern void gfs2_holder_uninit(struct gfs2_holder *gh);
-extern int gfs2_glock_nq(struct gfs2_holder *gh);
-extern int gfs2_glock_poll(struct gfs2_holder *gh);
-extern int gfs2_instantiate(struct gfs2_holder *gh);
-extern int gfs2_glock_holder_ready(struct gfs2_holder *gh);
-extern int gfs2_glock_wait(struct gfs2_holder *gh);
-extern int gfs2_glock_async_wait(unsigned int num_gh, struct gfs2_holder *ghs);
-extern void gfs2_glock_dq(struct gfs2_holder *gh);
-extern void gfs2_glock_dq_wait(struct gfs2_holder *gh);
-extern void gfs2_glock_dq_uninit(struct gfs2_holder *gh);
-extern int gfs2_glock_nq_num(struct gfs2_sbd *sdp, u64 number,
-			     const struct gfs2_glock_operations *glops,
-			     unsigned int state, u16 flags,
-			     struct gfs2_holder *gh);
-extern int gfs2_glock_nq_m(unsigned int num_gh, struct gfs2_holder *ghs);
-extern void gfs2_glock_dq_m(unsigned int num_gh, struct gfs2_holder *ghs);
-extern void gfs2_dump_glock(struct seq_file *seq, struct gfs2_glock *gl,
-			    bool fsid);
+int gfs2_glock_get(struct gfs2_sbd *sdp, u64 number,
+		   const struct gfs2_glock_operations *glops,
+		   int create, struct gfs2_glock **glp);
+void gfs2_glock_hold(struct gfs2_glock *gl);
+void gfs2_glock_put(struct gfs2_glock *gl);
+void gfs2_glock_put_async(struct gfs2_glock *gl);
+void gfs2_holder_init(struct gfs2_glock *gl, unsigned int state,
+		      u16 flags, struct gfs2_holder *gh);
+void gfs2_holder_reinit(unsigned int state, u16 flags,
+		        struct gfs2_holder *gh);
+void gfs2_holder_uninit(struct gfs2_holder *gh);
+int gfs2_glock_nq(struct gfs2_holder *gh);
+int gfs2_glock_poll(struct gfs2_holder *gh);
+int gfs2_instantiate(struct gfs2_holder *gh);
+int gfs2_glock_holder_ready(struct gfs2_holder *gh);
+int gfs2_glock_wait(struct gfs2_holder *gh);
+int gfs2_glock_async_wait(unsigned int num_gh, struct gfs2_holder *ghs);
+void gfs2_glock_dq(struct gfs2_holder *gh);
+void gfs2_glock_dq_wait(struct gfs2_holder *gh);
+void gfs2_glock_dq_uninit(struct gfs2_holder *gh);
+int gfs2_glock_nq_num(struct gfs2_sbd *sdp, u64 number,
+		      const struct gfs2_glock_operations *glops,
+		      unsigned int state, u16 flags,
+		      struct gfs2_holder *gh);
+int gfs2_glock_nq_m(unsigned int num_gh, struct gfs2_holder *ghs);
+void gfs2_glock_dq_m(unsigned int num_gh, struct gfs2_holder *ghs);
+void gfs2_dump_glock(struct seq_file *seq, struct gfs2_glock *gl,
+		     bool fsid);
 #define GLOCK_BUG_ON(gl,x) do { if (unlikely(x)) {		\
 			gfs2_dump_glock(NULL, gl, true);	\
 			BUG(); } } while(0)
@@ -243,28 +243,28 @@ static inline int gfs2_glock_nq_init(struct gfs2_glock *gl,
 	return error;
 }
 
-extern void gfs2_glock_cb(struct gfs2_glock *gl, unsigned int state);
-extern void gfs2_glock_complete(struct gfs2_glock *gl, int ret);
-extern bool gfs2_queue_try_to_evict(struct gfs2_glock *gl);
-extern bool gfs2_queue_verify_delete(struct gfs2_glock *gl);
-extern void gfs2_cancel_delete_work(struct gfs2_glock *gl);
-extern void gfs2_flush_delete_work(struct gfs2_sbd *sdp);
-extern void gfs2_gl_hash_clear(struct gfs2_sbd *sdp);
-extern void gfs2_gl_dq_holders(struct gfs2_sbd *sdp);
-extern void gfs2_glock_thaw(struct gfs2_sbd *sdp);
-extern void gfs2_glock_free(struct gfs2_glock *gl);
-extern void gfs2_glock_free_later(struct gfs2_glock *gl);
+void gfs2_glock_cb(struct gfs2_glock *gl, unsigned int state);
+void gfs2_glock_complete(struct gfs2_glock *gl, int ret);
+bool gfs2_queue_try_to_evict(struct gfs2_glock *gl);
+bool gfs2_queue_verify_delete(struct gfs2_glock *gl);
+void gfs2_cancel_delete_work(struct gfs2_glock *gl);
+void gfs2_flush_delete_work(struct gfs2_sbd *sdp);
+void gfs2_gl_hash_clear(struct gfs2_sbd *sdp);
+void gfs2_gl_dq_holders(struct gfs2_sbd *sdp);
+void gfs2_glock_thaw(struct gfs2_sbd *sdp);
+void gfs2_glock_free(struct gfs2_glock *gl);
+void gfs2_glock_free_later(struct gfs2_glock *gl);
 
-extern int __init gfs2_glock_init(void);
-extern void gfs2_glock_exit(void);
+int __init gfs2_glock_init(void);
+void gfs2_glock_exit(void);
 
-extern void gfs2_create_debugfs_file(struct gfs2_sbd *sdp);
-extern void gfs2_delete_debugfs_file(struct gfs2_sbd *sdp);
-extern void gfs2_register_debugfs(void);
-extern void gfs2_unregister_debugfs(void);
+void gfs2_create_debugfs_file(struct gfs2_sbd *sdp);
+void gfs2_delete_debugfs_file(struct gfs2_sbd *sdp);
+void gfs2_register_debugfs(void);
+void gfs2_unregister_debugfs(void);
 
-extern void glock_set_object(struct gfs2_glock *gl, void *object);
-extern void glock_clear_object(struct gfs2_glock *gl, void *object);
+void glock_set_object(struct gfs2_glock *gl, void *object);
+void glock_clear_object(struct gfs2_glock *gl, void *object);
 
 extern const struct lm_lockops gfs2_dlm_ops;
 
@@ -283,8 +283,8 @@ static inline bool gfs2_holder_queued(struct gfs2_holder *gh)
 	return !list_empty(&gh->gh_list);
 }
 
-extern void gfs2_inode_remember_delete(struct gfs2_glock *gl, u64 generation);
-extern bool gfs2_inode_already_deleted(struct gfs2_glock *gl, u64 generation);
+void gfs2_inode_remember_delete(struct gfs2_glock *gl, u64 generation);
+bool gfs2_inode_already_deleted(struct gfs2_glock *gl, u64 generation);
 
 static inline bool glock_needs_demote(struct gfs2_glock *gl)
 {
