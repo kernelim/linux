@@ -12,7 +12,7 @@ RHEL_MINOR = 0
 #
 # Use this spot to avoid future merge conflicts.
 # Do not trim this comment.
-RHEL_RELEASE = 55.11.1
+RHEL_RELEASE = 55.12.1
 
 #
 # RHEL_REBASE_NUM

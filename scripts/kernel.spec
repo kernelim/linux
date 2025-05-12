@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.11.1
+%define pkgrelease 55.12.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.11.1.el10_0
+%define tarfile_release 6.12.0-55.12.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.11.1%{?buildid}%{?dist}
+%define specrelease 55.12.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.11.1.el10_0
+%define kabiversion 6.12.0-55.12.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4313,10 +4313,18 @@ fi\
 #
 #
 %changelog
-* Sun May 18 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.11.1
+* Mon May 19 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.12.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Mon May 12 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.12.1.el10_0]
+- scsi: core: Fix command pass through retry regression (Ewan D. Milne) [RHEL-77121]
+- dm-flakey: Fix memory corruption in optional corrupt_bio_byte feature (CKI Backport Bot) [RHEL-86903] {CVE-2025-21966}
+- ice: stop storing XDP verdict within ice_rx_buf (Petr Oros) [RHEL-86860]
+- ice: gather page_count()'s of each frag right before XDP prog call (Petr Oros) [RHEL-86860]
+- ice: put Rx buffers after being done with current frame (Petr Oros) [RHEL-86860]
+- iscsi_ibft: Fix UBSAN shift-out-of-bounds warning in ibft_attr_show_nic() (CKI Backport Bot) [RHEL-86847] {CVE-2025-21993}
 
 * Thu Apr 24 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.11.1.el10_0]
 - smb: client: fix regression with guest option (Jay Shin) [RHEL-83861]

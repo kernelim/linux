@@ -1,3 +1,12 @@
+* Mon May 12 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.12.1.el10_0]
+- scsi: core: Fix command pass through retry regression (Ewan D. Milne) [RHEL-77121]
+- dm-flakey: Fix memory corruption in optional corrupt_bio_byte feature (CKI Backport Bot) [RHEL-86903] {CVE-2025-21966}
+- ice: stop storing XDP verdict within ice_rx_buf (Petr Oros) [RHEL-86860]
+- ice: gather page_count()'s of each frag right before XDP prog call (Petr Oros) [RHEL-86860]
+- ice: put Rx buffers after being done with current frame (Petr Oros) [RHEL-86860]
+- iscsi_ibft: Fix UBSAN shift-out-of-bounds warning in ibft_attr_show_nic() (CKI Backport Bot) [RHEL-86847] {CVE-2025-21993}
+Resolves: RHEL-77121, RHEL-86847, RHEL-86860, RHEL-86903
+
 * Thu Apr 24 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.11.1.el10_0]
 - smb: client: fix regression with guest option (Jay Shin) [RHEL-83861]
 - pnfs/flexfiles: retry getting layout segment for reads (Benjamin Coddington) [RHEL-87770]
