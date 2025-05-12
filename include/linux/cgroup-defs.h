@@ -787,6 +787,16 @@ struct cgroup_subsys {
 	 * specifies the mask of subsystems that this one depends on.
 	 */
 	unsigned int depends_on;
+
+	/*
+	 * RH Notes:
+	 * There is only one cgroup_subsys per controller and it is not
+	 * embedded in other structures. Also 3rd party kernel modules are
+	 * not allowed to add new cgroup_subsys structure. So we can insert
+	 * new field at the end without any undesriable effect.
+	 */
+	RH_KABI_BROKEN_INSERT(
+		void (*css_killed)(struct cgroup_subsys_state *css))
 };
 
 extern struct percpu_rw_semaphore cgroup_threadgroup_rwsem;
