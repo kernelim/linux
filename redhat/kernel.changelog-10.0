@@ -1,3 +1,30 @@
+* Sun May 18 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.13.1.el10_0]
+- gitlab-ci: use rhel10.0 builder image (Michael Hofmann)
+- vsock: Orphan socket after transport release (Jay Shin) [RHEL-89161] {CVE-2025-21756}
+- vsock: Keep the binding until socket destruction (Jay Shin) [RHEL-89161] {CVE-2025-21756}
+- bpf, vsock: Invoke proto::close on close() (Jay Shin) [RHEL-89161] {CVE-2025-21756}
+- idpf: call set_real_num_queues in idpf_open (CKI Backport Bot) [RHEL-79479]
+- media: uvcvideo: Skip parsing frames of type UVC_VS_UNDEFINED in uvc_parse_format (CKI Backport Bot) [RHEL-89591] {CVE-2024-53104}
+- redhat: enable CONFIG_WERROR=y (Jan Stancek) [RHEL-89564]
+- redhat: don't enforce WERROR for 3rd-party OOT kmods (Jan Stancek) [RHEL-89564]
+- redhat: make ENABLE_WERROR enable also KVM_WERROR (Jan Stancek) [RHEL-89564]
+- fortify: Hide run-time copy size from value range tracking (Jan Stancek) [RHEL-89564]
+- resolve_btfids: Fix compiler warnings (Jan Stancek) [RHEL-89564]
+- ixgbe: fix media type detection for E610 device (Corinna Vinschen) [RHEL-85810]
+- ixgbevf: Add support for Intel(R) E610 device (Corinna Vinschen) [RHEL-85810]
+- PCI: Add PCI_VDEVICE_SUB helper macro (Corinna Vinschen) [RHEL-85810]
+- ixgbe: fix media cage present detection for E610 device (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Enable link management in E610 device (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Clean up the E610 link management related code (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Add ixgbe_x540 multiple header inclusion protection (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Add support for EEPROM dump in E610 device (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Add support for NVM handling in E610 device (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Add link management support for E610 device (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Add support for E610 device capabilities detection (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Add support for E610 FW Admin Command Interface (Corinna Vinschen) [RHEL-85810]
+- smb: client: don't retry IO on failed negprotos with soft mounts (Jay Shin) [RHEL-85525]
+Resolves: RHEL-79479, RHEL-85525, RHEL-85810, RHEL-89161, RHEL-89564, RHEL-89591
+
 * Mon May 12 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.12.1.el10_0]
 - scsi: core: Fix command pass through retry regression (Ewan D. Milne) [RHEL-77121]
 - dm-flakey: Fix memory corruption in optional corrupt_bio_byte feature (CKI Backport Bot) [RHEL-86903] {CVE-2025-21966}

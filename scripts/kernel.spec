@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.12.1
+%define pkgrelease 55.13.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.12.1.el10_0
+%define tarfile_release 6.12.0-55.13.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.12.1%{?buildid}%{?dist}
+%define specrelease 55.13.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.12.1.el10_0
+%define kabiversion 6.12.0-55.13.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4313,10 +4313,36 @@ fi\
 #
 #
 %changelog
-* Mon May 19 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.12.1
+* Fri May 30 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.13.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Sun May 18 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.13.1.el10_0]
+- gitlab-ci: use rhel10.0 builder image (Michael Hofmann)
+- vsock: Orphan socket after transport release (Jay Shin) [RHEL-89161] {CVE-2025-21756}
+- vsock: Keep the binding until socket destruction (Jay Shin) [RHEL-89161] {CVE-2025-21756}
+- bpf, vsock: Invoke proto::close on close() (Jay Shin) [RHEL-89161] {CVE-2025-21756}
+- idpf: call set_real_num_queues in idpf_open (CKI Backport Bot) [RHEL-79479]
+- media: uvcvideo: Skip parsing frames of type UVC_VS_UNDEFINED in uvc_parse_format (CKI Backport Bot) [RHEL-89591] {CVE-2024-53104}
+- redhat: enable CONFIG_WERROR=y (Jan Stancek) [RHEL-89564]
+- redhat: don't enforce WERROR for 3rd-party OOT kmods (Jan Stancek) [RHEL-89564]
+- redhat: make ENABLE_WERROR enable also KVM_WERROR (Jan Stancek) [RHEL-89564]
+- fortify: Hide run-time copy size from value range tracking (Jan Stancek) [RHEL-89564]
+- resolve_btfids: Fix compiler warnings (Jan Stancek) [RHEL-89564]
+- ixgbe: fix media type detection for E610 device (Corinna Vinschen) [RHEL-85810]
+- ixgbevf: Add support for Intel(R) E610 device (Corinna Vinschen) [RHEL-85810]
+- PCI: Add PCI_VDEVICE_SUB helper macro (Corinna Vinschen) [RHEL-85810]
+- ixgbe: fix media cage present detection for E610 device (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Enable link management in E610 device (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Clean up the E610 link management related code (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Add ixgbe_x540 multiple header inclusion protection (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Add support for EEPROM dump in E610 device (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Add support for NVM handling in E610 device (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Add link management support for E610 device (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Add support for E610 device capabilities detection (Corinna Vinschen) [RHEL-85810]
+- ixgbe: Add support for E610 FW Admin Command Interface (Corinna Vinschen) [RHEL-85810]
+- smb: client: don't retry IO on failed negprotos with soft mounts (Jay Shin) [RHEL-85525]
 
 * Mon May 12 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.12.1.el10_0]
 - scsi: core: Fix command pass through retry regression (Ewan D. Milne) [RHEL-77121]

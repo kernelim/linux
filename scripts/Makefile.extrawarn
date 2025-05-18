@@ -24,7 +24,12 @@ ifneq ($(CONFIG_FRAME_WARN),0)
 KBUILD_CFLAGS += -Wframe-larger-than=$(CONFIG_FRAME_WARN)
 endif
 
+# don't enforce WERROR for 3rd party OOT kmods
+ENABLE_WERROR_FOR_RHEL := $(or $(if $(KBUILD_EXTMOD),,1),$(RHEL_EXTMOD))
+ifneq ($(ENABLE_WERROR_FOR_RHEL),)
 KBUILD_CPPFLAGS-$(CONFIG_WERROR) += -Werror
+endif
+
 KBUILD_CPPFLAGS += $(KBUILD_CPPFLAGS-y)
 KBUILD_CFLAGS-$(CONFIG_CC_NO_ARRAY_BOUNDS) += -Wno-array-bounds
 

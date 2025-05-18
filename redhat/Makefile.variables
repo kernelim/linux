@@ -47,7 +47,7 @@ DIST ?= .el10_0
 DISTRO ?=
 
 # This overrides CONFIG_WERROR to 'y' for all arches.  RHEL requires this variable to be set.
-ENABLE_WERROR ?=
+ENABLE_WERROR ?= 1
 
 # This is the executable for 'git' commands.  It is used by the redhat/self-test
 # tests to provide testing information on git hashes (see redhat/self-test/egit.sh)

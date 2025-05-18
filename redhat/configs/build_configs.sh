@@ -115,6 +115,7 @@ function merge_configs()
 
 	if [ -n "$ENABLE_WERROR" ]; then
 		sed -i "s|# CONFIG_WERROR is not set|CONFIG_WERROR=y|g" "$name"
+		sed -i "s|# CONFIG_KVM_WERROR is not set|CONFIG_KVM_WERROR=y|g" "$name"
 	fi
 
 	rm -f config-merged."$count" config-merging."$count"
