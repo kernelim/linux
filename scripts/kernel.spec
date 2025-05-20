@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 570.17.1
+%define pkgrelease 570.18.1
 %define kversion 5
-%define tarfile_release 5.14.0-570.17.1.el9_6
+%define tarfile_release 5.14.0-570.18.1.el9_6
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 570.17.1%{?buildid}%{?dist}
+%define specrelease 570.18.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-570.17.1.el9_6
+%define kabiversion 5.14.0-570.18.1.el9_6
 
 #
 # End of genspec.sh variables
@@ -3787,9 +3787,23 @@ fi
 #
 #
 %changelog
-* Mon May 19 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.17.1
+* Fri May 30 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.18.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Tue May 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.18.1.el9_6]
+- gitlab-ci: use rhel9.6 builder image (Michael Hofmann)
+- cifs: Fix integer overflow while processing acregmax mount option (CKI Backport Bot) [RHEL-87921] {CVE-2025-21964}
+- Bluetooth: btusb: Add one more ID 0x0489:0xe0f3 for Qualcomm WCN785x (David Marlin) [RHEL-85647]
+- drm/i915/dp_mst: Don't require DSC hblank quirk for a non-DSC compatible mode (Jocelyn Falempe) [RHEL-85393]
+- drm/i915/dp_mst: Handle error during DSC BW overhead/slice calculation (Jocelyn Falempe) [RHEL-85393]
+- drm/i915/display: Use joined pipes in dsc helpers for slices, bpp (Jocelyn Falempe) [RHEL-85393]
+- drm/i915/display: Use joined pipes in intel_mode_valid_max_plane_size (Jocelyn Falempe) [RHEL-85393]
+- drm/i915/display: Use joined pipes in intel_dp_joiner_needs_dsc (Jocelyn Falempe) [RHEL-85393]
+- drm/i915/display: Simplify intel_joiner_num_pipes and its usage (Jocelyn Falempe) [RHEL-85393]
+- drm/i915/display: Check whether platform supports joiner (Jocelyn Falempe) [RHEL-85393]
+- Revert "drm/i915/dp_mst: Handle error during DSC BW overhead/slice calculation" (Jocelyn Falempe) [RHEL-85393]
+- Revert "drm/i915/dp_mst: Don't require DSC hblank quirk for a non-DSC compatible mode" (Jocelyn Falempe) [RHEL-85393]
 
 * Mon May 12 2025 Patrick Talbert <ptalbert@redhat.com> [5.14.0-570.17.1.el9_6]
 - vsock: Orphan socket after transport release (Jay Shin) [RHEL-89113] {CVE-2025-21756}
