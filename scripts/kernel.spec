@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 570.18.1
+%define pkgrelease 570.19.1
 %define kversion 5
-%define tarfile_release 5.14.0-570.18.1.el9_6
+%define tarfile_release 5.14.0-570.19.1.el9_6
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 570.18.1%{?buildid}%{?dist}
+%define specrelease 570.19.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-570.18.1.el9_6
+%define kabiversion 5.14.0-570.19.1.el9_6
 
 #
 # End of genspec.sh variables
@@ -3787,9 +3787,19 @@ fi
 #
 #
 %changelog
-* Fri May 30 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.18.1
+* Tue Jun 03 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.19.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Sat May 24 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.19.1.el9_6]
+- misc: sgi-gru: fix use-after-free error in gru_set_context_option, gru_fault and gru_handle_user_call_os (David Arcari) [RHEL-87254] {CVE-2022-3424}
+- ndisc: use RCU protection in ndisc_alloc_skb() (Xin Long) [RHEL-89546] {CVE-2025-21764}
+- ipv6: use RCU protection in ip6_default_advmss() (Xin Long) [RHEL-89546] {CVE-2025-21765}
+- net: add dev_net_rcu() helper (Xin Long) [RHEL-89546] {CVE-2025-21765}
+- page_pool: Track DMA-mapped pages and unmap them when destroying the pool (Toke Høiland-Jørgensen) [RHEL-84151]
+- page_pool: Move pp_magic check into helper functions (Toke Høiland-Jørgensen) [RHEL-84151]
+- ext4: fallback to complex scan if aligned scan doesn't work (Jay Shin) [RHEL-85984]
+- drm/mgag200: Added support for the new device G200eH5 (Jocelyn Falempe) [RHEL-88907]
 
 * Tue May 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.18.1.el9_6]
 - gitlab-ci: use rhel9.6 builder image (Michael Hofmann)

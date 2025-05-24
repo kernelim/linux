@@ -1,3 +1,14 @@
+* Sat May 24 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.19.1.el9_6]
+- misc: sgi-gru: fix use-after-free error in gru_set_context_option, gru_fault and gru_handle_user_call_os (David Arcari) [RHEL-87254] {CVE-2022-3424}
+- ndisc: use RCU protection in ndisc_alloc_skb() (Xin Long) [RHEL-89546] {CVE-2025-21764}
+- ipv6: use RCU protection in ip6_default_advmss() (Xin Long) [RHEL-89546] {CVE-2025-21765}
+- net: add dev_net_rcu() helper (Xin Long) [RHEL-89546] {CVE-2025-21765}
+- page_pool: Track DMA-mapped pages and unmap them when destroying the pool (Toke Høiland-Jørgensen) [RHEL-84151]
+- page_pool: Move pp_magic check into helper functions (Toke Høiland-Jørgensen) [RHEL-84151]
+- ext4: fallback to complex scan if aligned scan doesn't work (Jay Shin) [RHEL-85984]
+- drm/mgag200: Added support for the new device G200eH5 (Jocelyn Falempe) [RHEL-88907]
+Resolves: RHEL-84151, RHEL-85984, RHEL-87254, RHEL-88907, RHEL-89546
+
 * Tue May 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.18.1.el9_6]
 - gitlab-ci: use rhel9.6 builder image (Michael Hofmann)
 - cifs: Fix integer overflow while processing acregmax mount option (CKI Backport Bot) [RHEL-87921] {CVE-2025-21964}

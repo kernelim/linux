@@ -392,6 +392,20 @@ static inline bool page_pool_set_dma_addr(struct page *page, dma_addr_t addr)
 	return false;
 }
 
+static inline unsigned long page_pool_get_dma_index(struct page *page)
+{
+	return (page->pp_magic & PP_DMA_INDEX_MASK) >> PP_DMA_INDEX_SHIFT;
+}
+
+static inline void page_pool_set_dma_index(struct page *page,
+					   unsigned long id)
+{
+	unsigned long magic;
+
+	magic = (page->pp_magic & ~PP_DMA_INDEX_MASK) | (id << PP_DMA_INDEX_SHIFT);
+	page->pp_magic = magic;
+}
+
 /**
  * page_pool_dma_sync_for_cpu - sync Rx page for CPU after it's written by HW
  * @pool: &page_pool the @page belongs to

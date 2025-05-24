@@ -860,14 +860,7 @@ bool napi_pp_put_page(struct page *page)
 {
 	page = compound_head(page);
 
-	/* page->pp_magic is OR'ed with PP_SIGNATURE after the allocation
-	 * in order to preserve any existing bits, such as bit 0 for the
-	 * head page of compound page and bit 1 for pfmemalloc page, so
-	 * mask those bits for freeing side when doing below checking,
-	 * and page_is_pfmemalloc() is checked in __page_pool_put_page()
-	 * to avoid recycling the pfmemalloc page.
-	 */
-	if (unlikely((page->pp_magic & ~0x3UL) != PP_SIGNATURE))
+	if (unlikely(!page_pool_page_is_pp(page)))
 		return false;
 
 	page_pool_put_full_page(page->pp, page, false);
