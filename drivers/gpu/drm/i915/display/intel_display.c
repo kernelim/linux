@@ -277,9 +277,9 @@ bool intel_crtc_is_joiner_primary(const struct intel_crtc_state *crtc_state)
 		crtc->pipe == joiner_primary_pipe(crtc_state);
 }
 
-static int intel_joiner_num_pipes(const struct intel_crtc_state *crtc_state)
+int intel_crtc_num_joined_pipes(const struct intel_crtc_state *crtc_state)
 {
-	return hweight8(crtc_state->joiner_pipes);
+	return hweight8(intel_crtc_joined_pipe_mask(crtc_state));
 }
 
 u8 intel_crtc_joined_pipe_mask(const struct intel_crtc_state *crtc_state)
@@ -1710,7 +1710,7 @@ static void hsw_crtc_enable(struct intel_atomic_state *state,
 
 		intel_dsc_enable(pipe_crtc_state);
 
-		if (DISPLAY_VER(dev_priv) >= 13)
+		if (HAS_UNCOMPRESSED_JOINER(dev_priv))
 			intel_uncompressed_joiner_enable(pipe_crtc_state);
 
 		intel_set_pipe_src_size(pipe_crtc_state);
@@ -2343,9 +2343,9 @@ static void intel_crtc_compute_pixel_rate(struct intel_crtc_state *crtc_state)
 static void intel_joiner_adjust_timings(const struct intel_crtc_state *crtc_state,
 					struct drm_display_mode *mode)
 {
-	int num_pipes = intel_joiner_num_pipes(crtc_state);
+	int num_pipes = intel_crtc_num_joined_pipes(crtc_state);
 
-	if (num_pipes < 2)
+	if (num_pipes == 1)
 		return;
 
 	mode->crtc_clock /= num_pipes;
@@ -2407,7 +2407,7 @@ static void intel_crtc_readout_derived_state(struct intel_crtc_state *crtc_state
 	drm_mode_copy(mode, pipe_mode);
 	intel_mode_from_crtc_timings(mode, mode);
 	mode->hdisplay = drm_rect_width(&crtc_state->pipe_src) *
-		(intel_joiner_num_pipes(crtc_state) ?: 1);
+		intel_crtc_num_joined_pipes(crtc_state);
 	mode->vdisplay = drm_rect_height(&crtc_state->pipe_src);
 
 	/* Derive per-pipe timings in case joiner is used */
@@ -2427,10 +2427,10 @@ void intel_encoder_get_config(struct intel_encoder *encoder,
 
 static void intel_joiner_compute_pipe_src(struct intel_crtc_state *crtc_state)
 {
-	int num_pipes = intel_joiner_num_pipes(crtc_state);
+	int num_pipes = intel_crtc_num_joined_pipes(crtc_state);
 	int width, height;
 
-	if (num_pipes < 2)
+	if (num_pipes == 1)
 		return;
 
 	width = drm_rect_width(&crtc_state->pipe_src);
@@ -2887,11 +2887,11 @@ static void intel_get_transcoder_timings(struct intel_crtc *crtc,
 static void intel_joiner_adjust_pipe_src(struct intel_crtc_state *crtc_state)
 {
 	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
-	int num_pipes = intel_joiner_num_pipes(crtc_state);
+	int num_pipes = intel_crtc_num_joined_pipes(crtc_state);
 	enum pipe primary_pipe, pipe = crtc->pipe;
 	int width;
 
-	if (num_pipes < 2)
+	if (num_pipes == 1)
 		return;
 
 	primary_pipe = joiner_primary_pipe(crtc_state);
@@ -3542,6 +3542,9 @@ static void enabled_joiner_pipes(struct drm_i915_private *dev_priv,
 	*primary_pipes = 0;
 	*secondary_pipes = 0;
 
+	if (!HAS_BIGJOINER(dev_priv))
+		return;
+
 	for_each_intel_crtc_in_pipe_mask(&dev_priv->drm, crtc,
 					 joiner_pipes(dev_priv)) {
 		enum intel_display_power_domain power_domain;
@@ -3561,7 +3564,7 @@ static void enabled_joiner_pipes(struct drm_i915_private *dev_priv,
 				*secondary_pipes |= BIT(pipe);
 		}
 
-		if (DISPLAY_VER(dev_priv) < 13)
+		if (!HAS_UNCOMPRESSED_JOINER(dev_priv))
 			continue;
 
 		power_domain = POWER_DOMAIN_PIPE(pipe);
@@ -7962,7 +7965,7 @@ static int max_dotclock(struct drm_i915_private *i915)
 	int max_dotclock = i915->display.cdclk.max_dotclk_freq;
 
 	/* icl+ might use joiner */
-	if (DISPLAY_VER(i915) >= 11)
+	if (HAS_BIGJOINER(i915))
 		max_dotclock *= 2;
 
 	return max_dotclock;
@@ -8086,7 +8089,7 @@ enum drm_mode_status intel_cpu_transcoder_mode_valid(struct drm_i915_private *de
 enum drm_mode_status
 intel_mode_valid_max_plane_size(struct drm_i915_private *dev_priv,
 				const struct drm_display_mode *mode,
-				bool joiner)
+				int num_joined_pipes)
 {
 	int plane_width_max, plane_height_max;
 
@@ -8103,7 +8106,7 @@ intel_mode_valid_max_plane_size(struct drm_i915_private *dev_priv,
 	 * too big for that.
 	 */
 	if (DISPLAY_VER(dev_priv) >= 11) {
-		plane_width_max = 5120 << joiner;
+		plane_width_max = 5120 * num_joined_pipes;
 		plane_height_max = 4320;
 	} else {
 		plane_width_max = 5120;

@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.13.1
+%define pkgrelease 55.14.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.13.1.el10_0
+%define tarfile_release 6.12.0-55.14.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.13.1%{?buildid}%{?dist}
+%define specrelease 55.14.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.13.1.el10_0
+%define kabiversion 6.12.0-55.14.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4313,10 +4313,25 @@ fi\
 #
 #
 %changelog
-* Fri May 30 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.13.1
+* Tue Jun 03 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.14.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Mon May 26 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.14.1.el10_0]
+- sched/fair: Fix potential memory corruption in child_cfs_rq_on_list (CKI Backport Bot) [RHEL-88323] {CVE-2025-21919}
+- drm/i915/dp_mst: Don't require DSC hblank quirk for a non-DSC compatible mode (Jocelyn Falempe) [RHEL-88536]
+- drm/i915/dp_mst: Handle error during DSC BW overhead/slice calculation (Jocelyn Falempe) [RHEL-88536]
+- drm/i915/display: Use joined pipes in dsc helpers for slices, bpp (Jocelyn Falempe) [RHEL-88536]
+- drm/i915/display: Use joined pipes in intel_mode_valid_max_plane_size (Jocelyn Falempe) [RHEL-88536]
+- drm/i915/display: Use joined pipes in intel_dp_joiner_needs_dsc (Jocelyn Falempe) [RHEL-88536]
+- drm/i915/display: Simplify intel_joiner_num_pipes and its usage (Jocelyn Falempe) [RHEL-88536]
+- drm/i915/display: Check whether platform supports joiner (Jocelyn Falempe) [RHEL-88536]
+- Revert "drm/i915/dp_mst: Handle error during DSC BW overhead/slice calculation" (Jocelyn Falempe) [RHEL-88536]
+- Revert "drm/i915/dp_mst: Don't require DSC hblank quirk for a non-DSC compatible mode" (Jocelyn Falempe) [RHEL-88536]
+- drm/mgag200: Added support for the new device G200eH5 (Jocelyn Falempe) [RHEL-88909]
+- cifs: Fix integer overflow while processing acregmax mount option (CKI Backport Bot) [RHEL-87925] {CVE-2025-21964}
+- ext4: fix OOB read when checking dotdot dir (CKI Backport Bot) [RHEL-87991] {CVE-2025-37785}
 
 * Sun May 18 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.13.1.el10_0]
 - gitlab-ci: use rhel10.0 builder image (Michael Hofmann)

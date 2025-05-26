@@ -1,3 +1,19 @@
+* Mon May 26 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.14.1.el10_0]
+- sched/fair: Fix potential memory corruption in child_cfs_rq_on_list (CKI Backport Bot) [RHEL-88323] {CVE-2025-21919}
+- drm/i915/dp_mst: Don't require DSC hblank quirk for a non-DSC compatible mode (Jocelyn Falempe) [RHEL-88536]
+- drm/i915/dp_mst: Handle error during DSC BW overhead/slice calculation (Jocelyn Falempe) [RHEL-88536]
+- drm/i915/display: Use joined pipes in dsc helpers for slices, bpp (Jocelyn Falempe) [RHEL-88536]
+- drm/i915/display: Use joined pipes in intel_mode_valid_max_plane_size (Jocelyn Falempe) [RHEL-88536]
+- drm/i915/display: Use joined pipes in intel_dp_joiner_needs_dsc (Jocelyn Falempe) [RHEL-88536]
+- drm/i915/display: Simplify intel_joiner_num_pipes and its usage (Jocelyn Falempe) [RHEL-88536]
+- drm/i915/display: Check whether platform supports joiner (Jocelyn Falempe) [RHEL-88536]
+- Revert "drm/i915/dp_mst: Handle error during DSC BW overhead/slice calculation" (Jocelyn Falempe) [RHEL-88536]
+- Revert "drm/i915/dp_mst: Don't require DSC hblank quirk for a non-DSC compatible mode" (Jocelyn Falempe) [RHEL-88536]
+- drm/mgag200: Added support for the new device G200eH5 (Jocelyn Falempe) [RHEL-88909]
+- cifs: Fix integer overflow while processing acregmax mount option (CKI Backport Bot) [RHEL-87925] {CVE-2025-21964}
+- ext4: fix OOB read when checking dotdot dir (CKI Backport Bot) [RHEL-87991] {CVE-2025-37785}
+Resolves: RHEL-87925, RHEL-87991, RHEL-88323, RHEL-88536, RHEL-88909
+
 * Sun May 18 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.13.1.el10_0]
 - gitlab-ci: use rhel10.0 builder image (Michael Hofmann)
 - vsock: Orphan socket after transport release (Jay Shin) [RHEL-89161] {CVE-2025-21756}
