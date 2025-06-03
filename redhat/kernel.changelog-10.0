@@ -1,3 +1,14 @@
+* Tue Jun 03 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.16.1.el10_0]
+- net: fix geneve_opt length integer overflow (Guillaume Nault) [RHEL-87980] {CVE-2025-22055}
+- vsock/virtio: discard packets if the transport changes (Jon Maloy) [RHEL-86874] {CVE-2025-21669}
+Resolves: RHEL-86874, RHEL-87980
+
+* Fri May 30 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.15.1.el10_0]
+- net: gso: fix ownership in __udp_gso_segment (CKI Backport Bot) [RHEL-88518] {CVE-2025-21926}
+- xsk: fix an integer overflow in xp_create_and_assign_umem() (CKI Backport Bot) [RHEL-87915] {CVE-2025-21997}
+- wifi: ath12k: Fix invalid data access in ath12k_dp_rx_h_undecap_nwifi (CKI Backport Bot) [RHEL-93269] {CVE-2025-37943}
+Resolves: RHEL-87915, RHEL-88518, RHEL-93269
+
 * Mon May 26 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.14.1.el10_0]
 - sched/fair: Fix potential memory corruption in child_cfs_rq_on_list (CKI Backport Bot) [RHEL-88323] {CVE-2025-21919}
 - drm/i915/dp_mst: Don't require DSC hblank quirk for a non-DSC compatible mode (Jocelyn Falempe) [RHEL-88536]

@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.14.1
+%define pkgrelease 55.16.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.14.1.el10_0
+%define tarfile_release 6.12.0-55.16.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.14.1%{?buildid}%{?dist}
+%define specrelease 55.16.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.14.1.el10_0
+%define kabiversion 6.12.0-55.16.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4313,10 +4313,19 @@ fi\
 #
 #
 %changelog
-* Tue Jun 03 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.14.1
+* Mon Jun 09 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.16.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Tue Jun 03 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.16.1.el10_0]
+- net: fix geneve_opt length integer overflow (Guillaume Nault) [RHEL-87980] {CVE-2025-22055}
+- vsock/virtio: discard packets if the transport changes (Jon Maloy) [RHEL-86874] {CVE-2025-21669}
+
+* Fri May 30 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.15.1.el10_0]
+- net: gso: fix ownership in __udp_gso_segment (CKI Backport Bot) [RHEL-88518] {CVE-2025-21926}
+- xsk: fix an integer overflow in xp_create_and_assign_umem() (CKI Backport Bot) [RHEL-87915] {CVE-2025-21997}
+- wifi: ath12k: Fix invalid data access in ath12k_dp_rx_h_undecap_nwifi (CKI Backport Bot) [RHEL-93269] {CVE-2025-37943}
 
 * Mon May 26 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.14.1.el10_0]
 - sched/fair: Fix potential memory corruption in child_cfs_rq_on_list (CKI Backport Bot) [RHEL-88323] {CVE-2025-21919}
