@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 570.19.1
+%define pkgrelease 570.21.1
 %define kversion 5
-%define tarfile_release 5.14.0-570.19.1.el9_6
+%define tarfile_release 5.14.0-570.21.1.el9_6
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 570.19.1%{?buildid}%{?dist}
+%define specrelease 570.21.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-570.19.1.el9_6
+%define kabiversion 5.14.0-570.21.1.el9_6
 
 #
 # End of genspec.sh variables
@@ -3787,9 +3787,19 @@ fi
 #
 #
 %changelog
-* Tue Jun 03 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.19.1
+* Mon Jun 09 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.21.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Tue Jun 03 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.21.1.el9_6]
+- xsk: fix an integer overflow in xp_create_and_assign_umem() (CKI Backport Bot) [RHEL-87911] {CVE-2025-21997}
+- vlan: enforce underlying device type (Guillaume Nault) [RHEL-87884] {CVE-2025-21920}
+- net: fix geneve_opt length integer overflow (Guillaume Nault) [RHEL-87974] {CVE-2025-22055}
+- net: gso: fix ownership in __udp_gso_segment (CKI Backport Bot) [RHEL-88333] {CVE-2025-21926}
+
+* Sun Jun 01 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.20.1.el9_6]
+- wifi: ath12k: Fix invalid data access in ath12k_dp_rx_h_undecap_nwifi (CKI Backport Bot) [RHEL-93253] {CVE-2025-37943}
+- ext4: fix OOB read when checking dotdot dir (CKI Backport Bot) [RHEL-87985] {CVE-2025-37785}
 
 * Sat May 24 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.19.1.el9_6]
 - misc: sgi-gru: fix use-after-free error in gru_set_context_option, gru_fault and gru_handle_user_call_os (David Arcari) [RHEL-87254] {CVE-2022-3424}
