@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 570.21.1
+%define pkgrelease 570.22.1
 %define kversion 5
-%define tarfile_release 5.14.0-570.21.1.el9_6
+%define tarfile_release 5.14.0-570.22.1.el9_6
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 570.21.1%{?buildid}%{?dist}
+%define specrelease 570.22.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-570.21.1.el9_6
+%define kabiversion 5.14.0-570.22.1.el9_6
 
 #
 # End of genspec.sh variables
@@ -3787,9 +3787,32 @@ fi
 #
 #
 %changelog
-* Mon Jun 09 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.21.1
+* Tue Jun 17 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.22.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Sat Jun 07 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.22.1.el9_6]
+- Bluetooth: L2CAP: Fix corrupted list in hci_chan_del (David Marlin) [RHEL-87890] {CVE-2025-21969}
+- Bluetooth: L2CAP: Fix slab-use-after-free Read in l2cap_send_cmd (David Marlin) [RHEL-87890] {CVE-2025-21969}
+- Revert "SUNRPC: Revert e0a912e8ddba" (Benjamin Coddington) [RHEL-94811]
+- mm/hugetlb: fix kernel NULL pointer dereference when migrating hugetlb folio (Jay Shin) [RHEL-92291]
+- mm: fix crashes from deferred split racing folio migration (Jay Shin) [RHEL-92291] {CVE-2024-42234}
+- mm: memcg: fix split queue list crash when large folio migration (Jay Shin) [RHEL-92291]
+- proc: fix UAF in proc_get_inode() (Ian Kent) [RHEL-86808] {CVE-2025-21999}
+- cifs: Fix integer overflow while processing acdirmax mount option (Paulo Alcantara) [RHEL-87941] {CVE-2025-21963}
+- wifi: cfg80211: init wiphy_work before allocating rfkill fails (CKI Backport Bot) [RHEL-87931] {CVE-2025-21979}
+- wifi: cfg80211: cancel wiphy_work before freeing wiphy (CKI Backport Bot) [RHEL-87931] {CVE-2025-21979}
+- eth: bnxt: fix truesize for mb-xdp-pass case (CKI Backport Bot) [RHEL-88328] {CVE-2025-21961}
+- vmxnet3: unregister xdp rxq info in the reset path (CKI Backport Bot) [RHEL-92471]
+- md: fix mddev uaf while iterating all_mddevs list (CKI Backport Bot) [RHEL-89062] {CVE-2025-22126}
+- nvme: print firmware bug note for non-unique identifiers (Bryan Gurney) [RHEL-91163]
+- nvme-pci: add BOGUS_NID quirk for Samsung PM1733 (Bryan Gurney) [RHEL-91163]
+- media: v4l2-mediabus: Drop V4L2_MBUS_CSI2_CONTINUOUS_CLOCK flag (Kate Hsuan) [RHEL-90323]
+- media: v4l2-mediabus: Drop legacy V4L2_MBUS_CSI2_CHANNEL_* flags (Kate Hsuan) [RHEL-90323]
+- media: v4l2-mediabus: Use structures to describe bus configuration (Kate Hsuan) [RHEL-90323]
+- media: v4l2-fwnode: Move bus config structure to v4l2_mediabus.h (Kate Hsuan) [RHEL-90323]
+- sched/fair: Fix CPU bandwidth limit bypass during CPU hotplug (Phil Auld) [RHEL-86302]
+- smb: client: fix UAF in decryption with multichannel (CKI Backport Bot) [RHEL-94460] {CVE-2025-37750}
 
 * Tue Jun 03 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.21.1.el9_6]
 - xsk: fix an integer overflow in xp_create_and_assign_umem() (CKI Backport Bot) [RHEL-87911] {CVE-2025-21997}

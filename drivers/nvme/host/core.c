@@ -3522,14 +3522,26 @@ static int nvme_subsys_check_duplicate_ids(struct nvme_subsystem *subsys,
 	lockdep_assert_held(&subsys->lock);
 
 	list_for_each_entry(h, &subsys->nsheads, entry) {
-		if (has_uuid && uuid_equal(&ids->uuid, &h->ids.uuid))
+		if (has_uuid && uuid_equal(&ids->uuid, &h->ids.uuid)) {
+			dev_warn(&subsys->dev,
+				 "%s: firmware bug: non-unique uuid found\n",
+				 __func__);
 			return -EINVAL;
+		}
 		if (has_nguid &&
-		    memcmp(&ids->nguid, &h->ids.nguid, sizeof(ids->nguid)) == 0)
+		    memcmp(&ids->nguid, &h->ids.nguid, sizeof(ids->nguid)) == 0) {
+			dev_warn(&subsys->dev,
+				 "%s: firmware bug: non-unique nguid found\n",
+				 __func__);
 			return -EINVAL;
+		}
 		if (has_eui64 &&
-		    memcmp(&ids->eui64, &h->ids.eui64, sizeof(ids->eui64)) == 0)
+		    memcmp(&ids->eui64, &h->ids.eui64, sizeof(ids->eui64)) == 0) {
+			dev_warn(&subsys->dev,
+				 "%s: firmware bug: non-unique eui64 found\n",
+				 __func__);
 			return -EINVAL;
+		}
 	}
 
 	return 0;
