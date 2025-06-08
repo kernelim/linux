@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.16.1
+%define pkgrelease 55.17.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.16.1.el10_0
+%define tarfile_release 6.12.0-55.17.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.16.1%{?buildid}%{?dist}
+%define specrelease 55.17.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.16.1.el10_0
+%define kabiversion 6.12.0-55.17.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4313,10 +4313,33 @@ fi\
 #
 #
 %changelog
-* Mon Jun 09 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.16.1
+* Mon Jun 16 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.17.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Sun Jun 08 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.17.1.el10_0]
+- vmxnet3: unregister xdp rxq info in the reset path (CKI Backport Bot) [RHEL-92473]
+- block: fix 'kmem_cache of name 'bio-108' already exists' (Ming Lei) [RHEL-89955]
+- ice: implement low latency PHY timer updates (Petr Oros) [RHEL-89810]
+- ice: check low latency PHY timer update firmware capability (Petr Oros) [RHEL-89810]
+- ice: add lock to protect low latency interface (Petr Oros) [RHEL-89810]
+- ice: rename TS_LL_READ* macros to REG_LL_PROXY_H_* (Petr Oros) [RHEL-89810]
+- ice: use read_poll_timeout_atomic in ice_read_phy_tstamp_ll_e810 (Petr Oros) [RHEL-89810]
+- cifs: Fix integer overflow while processing acdirmax mount option (Paulo Alcantara) [RHEL-87945] {CVE-2025-21963}
+- smb: client: fix UAF in decryption with multichannel (CKI Backport Bot) [RHEL-94463] {CVE-2025-37750}
+- sched/fair: Fix CPU bandwidth limit bypass during CPU hotplug (Phil Auld) [RHEL-86346]
+- keys: Fix UAF in key_put() (CKI Backport Bot) [RHEL-86853] {CVE-2025-21893}
+- ndisc: use RCU protection in ndisc_alloc_skb() (Xin Long) [RHEL-89556] {CVE-2025-21764}
+- ipv6: use RCU protection in ip6_default_advmss() (Xin Long) [RHEL-89556] {CVE-2025-21765}
+- net: add dev_net_rcu() helper (Xin Long) [RHEL-89556] {CVE-2025-21765}
+- vfio/pci: Align huge faults to order (Alex Williamson) [RHEL-93762]
+- Bluetooth: L2CAP: Fix corrupted list in hci_chan_del (David Marlin) [RHEL-87894] {CVE-2025-21969}
+- Bluetooth: L2CAP: Fix slab-use-after-free Read in l2cap_send_cmd (CKI Backport Bot) [RHEL-87894] {CVE-2025-21969}
+- cifs: Fix integer overflow while processing closetimeo mount option (CKI Backport Bot) [RHEL-87904] {CVE-2025-21962}
+- ovl: fix UAF in ovl_dentry_update_reval by moving dput() in ovl_link_up (CKI Backport Bot) [RHEL-93459] {CVE-2025-21887}
+- wifi: cfg80211: init wiphy_work before allocating rfkill fails (CKI Backport Bot) [RHEL-87935] {CVE-2025-21979}
+- wifi: cfg80211: cancel wiphy_work before freeing wiphy (CKI Backport Bot) [RHEL-87935] {CVE-2025-21979}
 
 * Tue Jun 03 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.16.1.el10_0]
 - net: fix geneve_opt length integer overflow (Guillaume Nault) [RHEL-87980] {CVE-2025-22055}
