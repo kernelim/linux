@@ -150,7 +150,7 @@ static void idpf_handle_event_link(struct idpf_adapter *adapter,
 	}
 	np = netdev_priv(vport->netdev);
 
-	vport->link_speed_mbps = le32_to_cpu(v2e->link_speed);
+	np->link_speed_mbps = le32_to_cpu(v2e->link_speed);
 
 	if (vport->link_up == v2e->link_status)
 		return;
@@ -385,7 +385,7 @@ static void idpf_vc_xn_init(struct idpf_vc_xn_manager *vcxn_mngr)
  * All waiting threads will be woken-up and their transaction aborted. Further
  * operations on that object will fail.
  */
-static void idpf_vc_xn_shutdown(struct idpf_vc_xn_manager *vcxn_mngr)
+void idpf_vc_xn_shutdown(struct idpf_vc_xn_manager *vcxn_mngr)
 {
 	int i;
 
@@ -526,8 +526,10 @@ static ssize_t idpf_vc_xn_exec(struct idpf_adapter *adapter,
 		retval = -ENXIO;
 		goto only_unlock;
 	case IDPF_VC_XN_WAITING:
-		dev_notice_ratelimited(&adapter->pdev->dev, "Transaction timed-out (op %d, %dms)\n",
-				       params->vc_op, params->timeout_ms);
+		dev_notice_ratelimited(&adapter->pdev->dev,
+				       "Transaction timed-out (op:%d cookie:%04x vc_op:%d salt:%02x timeout:%dms)\n",
+				       params->vc_op, cookie, xn->vc_op,
+				       xn->salt, params->timeout_ms);
 		retval = -ETIME;
 		break;
 	case IDPF_VC_XN_COMPLETED_SUCCESS:
@@ -621,14 +623,16 @@ idpf_vc_xn_forward_reply(struct idpf_adapter *adapter,
 		return -EINVAL;
 	}
 	xn = &adapter->vcxn_mngr->ring[xn_idx];
+	idpf_vc_xn_lock(xn);
 	salt = FIELD_GET(IDPF_VC_XN_SALT_M, msg_info);
 	if (xn->salt != salt) {
-		dev_err_ratelimited(&adapter->pdev->dev, "Transaction salt does not match (%02x != %02x)\n",
-				    xn->salt, salt);
+		dev_err_ratelimited(&adapter->pdev->dev, "Transaction salt does not match (exp:%d@%02x(%d) != got:%d@%02x)\n",
+				    xn->vc_op, xn->salt, xn->state,
+				    ctlq_msg->cookie.mbx.chnl_opcode, salt);
+		idpf_vc_xn_unlock(xn);
 		return -EINVAL;
 	}
 
-	idpf_vc_xn_lock(xn);
 	switch (xn->state) {
 	case IDPF_VC_XN_WAITING:
 		/* success */
@@ -675,7 +679,7 @@ idpf_vc_xn_forward_reply(struct idpf_adapter *adapter,
 
 	if (ctlq_msg->data_len) {
 		payload = ctlq_msg->ctx.indirect.payload->va;
-		payload_size = ctlq_msg->ctx.indirect.payload->size;
+		payload_size = ctlq_msg->data_len;
 	}
 
 	xn->reply_sz = payload_size;
@@ -761,7 +765,7 @@ static int idpf_wait_for_marker_event(struct idpf_vport *vport)
 	int i;
 
 	for (i = 0; i < vport->num_txq; i++)
-		set_bit(__IDPF_Q_SW_MARKER, vport->txqs[i]->flags);
+		idpf_queue_set(SW_MARKER, vport->txqs[i]);
 
 	event = wait_event_timeout(vport->sw_marker_wq,
 				   test_and_clear_bit(IDPF_VPORT_SW_MARKER,
@@ -769,7 +773,7 @@ static int idpf_wait_for_marker_event(struct idpf_vport *vport)
 				   msecs_to_jiffies(500));
 
 	for (i = 0; i < vport->num_txq; i++)
-		clear_bit(__IDPF_Q_POLL_MODE, vport->txqs[i]->flags);
+		idpf_queue_clear(POLL_MODE, vport->txqs[i]);
 
 	if (event)
 		return 0;
@@ -1103,7 +1107,6 @@ static int __idpf_queue_reg_init(struct idpf_vport *vport, u32 *reg_vals,
 				 int num_regs, u32 q_type)
 {
 	struct idpf_adapter *adapter = vport->adapter;
-	struct idpf_queue *q;
 	int i, j, k = 0;
 
 	switch (q_type) {
@@ -1122,6 +1125,8 @@ static int __idpf_queue_reg_init(struct idpf_vport *vport, u32 *reg_vals,
 			u16 num_rxq = rx_qgrp->singleq.num_rxq;
 
 			for (j = 0; j < num_rxq && k < num_regs; j++, k++) {
+				struct idpf_rx_queue *q;
+
 				q = rx_qgrp->singleq.rxqs[j];
 				q->tail = idpf_get_reg_addr(adapter,
 							    reg_vals[k]);
@@ -1134,6 +1139,8 @@ static int __idpf_queue_reg_init(struct idpf_vport *vport, u32 *reg_vals,
 			u8 num_bufqs = vport->num_bufqs_per_qgrp;
 
 			for (j = 0; j < num_bufqs && k < num_regs; j++, k++) {
+				struct idpf_buf_queue *q;
+
 				q = &rx_qgrp->splitq.bufq_sets[j].bufq;
 				q->tail = idpf_get_reg_addr(adapter,
 							    reg_vals[k]);
@@ -1264,12 +1271,12 @@ int idpf_send_create_vport_msg(struct idpf_adapter *adapter,
 	vport_msg->vport_type = cpu_to_le16(VIRTCHNL2_VPORT_TYPE_DEFAULT);
 	vport_msg->vport_index = cpu_to_le16(idx);
 
-	if (adapter->req_tx_splitq)
+	if (adapter->req_tx_splitq || !IS_ENABLED(CONFIG_IDPF_SINGLEQ))
 		vport_msg->txq_model = cpu_to_le16(VIRTCHNL2_QUEUE_MODEL_SPLIT);
 	else
 		vport_msg->txq_model = cpu_to_le16(VIRTCHNL2_QUEUE_MODEL_SINGLE);
 
-	if (adapter->req_rx_splitq)
+	if (adapter->req_rx_splitq || !IS_ENABLED(CONFIG_IDPF_SINGLEQ))
 		vport_msg->rxq_model = cpu_to_le16(VIRTCHNL2_QUEUE_MODEL_SPLIT);
 	else
 		vport_msg->rxq_model = cpu_to_le16(VIRTCHNL2_QUEUE_MODEL_SINGLE);
@@ -1301,10 +1308,6 @@ int idpf_send_create_vport_msg(struct idpf_adapter *adapter,
 		err = reply_sz;
 		goto free_vport_params;
 	}
-	if (reply_sz < IDPF_CTLQ_MAX_BUF_LEN) {
-		err = -EIO;
-		goto free_vport_params;
-	}
 
 	return 0;
 
@@ -1331,10 +1334,17 @@ int idpf_check_supported_desc_ids(struct idpf_vport *vport)
 
 	vport_msg = adapter->vport_params_recvd[vport->idx];
 
+	if (!IS_ENABLED(CONFIG_IDPF_SINGLEQ) &&
+	    (vport_msg->rxq_model == VIRTCHNL2_QUEUE_MODEL_SINGLE ||
+	     vport_msg->txq_model == VIRTCHNL2_QUEUE_MODEL_SINGLE)) {
+		pci_err(adapter->pdev, "singleq mode requested, but not compiled-in\n");
+		return -EOPNOTSUPP;
+	}
+
 	rx_desc_ids = le64_to_cpu(vport_msg->rx_desc_ids);
 	tx_desc_ids = le64_to_cpu(vport_msg->tx_desc_ids);
 
-	if (vport->rxq_model == VIRTCHNL2_QUEUE_MODEL_SPLIT) {
+	if (idpf_is_queue_model_split(vport->rxq_model)) {
 		if (!(rx_desc_ids & VIRTCHNL2_RXDID_2_FLEX_SPLITQ_M)) {
 			dev_info(&adapter->pdev->dev, "Minimum RX descriptor support not provided, using the default\n");
 			vport_msg->rx_desc_ids = cpu_to_le64(VIRTCHNL2_RXDID_2_FLEX_SPLITQ_M);
@@ -1344,7 +1354,7 @@ int idpf_check_supported_desc_ids(struct idpf_vport *vport)
 			vport->base_rxd = true;
 	}
 
-	if (vport->txq_model != VIRTCHNL2_QUEUE_MODEL_SPLIT)
+	if (!idpf_is_queue_model_split(vport->txq_model))
 		return 0;
 
 	if ((tx_desc_ids & MIN_SUPPORT_TXDID) != MIN_SUPPORT_TXDID) {
@@ -1460,19 +1470,19 @@ static int idpf_send_config_tx_queues_msg(struct idpf_vport *vport)
 			qi[k].model =
 				cpu_to_le16(vport->txq_model);
 			qi[k].type =
-				cpu_to_le32(tx_qgrp->txqs[j]->q_type);
+				cpu_to_le32(VIRTCHNL2_QUEUE_TYPE_TX);
 			qi[k].ring_len =
 				cpu_to_le16(tx_qgrp->txqs[j]->desc_count);
 			qi[k].dma_ring_addr =
 				cpu_to_le64(tx_qgrp->txqs[j]->dma);
 			if (idpf_is_queue_model_split(vport->txq_model)) {
-				struct idpf_queue *q = tx_qgrp->txqs[j];
+				struct idpf_tx_queue *q = tx_qgrp->txqs[j];
 
 				qi[k].tx_compl_queue_id =
 					cpu_to_le16(tx_qgrp->complq->q_id);
 				qi[k].relative_queue_id = cpu_to_le16(j);
 
-				if (test_bit(__IDPF_Q_FLOW_SCH_EN, q->flags))
+				if (idpf_queue_has(FLOW_SCH_EN, q))
 					qi[k].sched_mode =
 					cpu_to_le16(VIRTCHNL2_TXQ_SCHED_MODE_FLOW);
 				else
@@ -1489,11 +1499,11 @@ static int idpf_send_config_tx_queues_msg(struct idpf_vport *vport)
 
 		qi[k].queue_id = cpu_to_le32(tx_qgrp->complq->q_id);
 		qi[k].model = cpu_to_le16(vport->txq_model);
-		qi[k].type = cpu_to_le32(tx_qgrp->complq->q_type);
+		qi[k].type = cpu_to_le32(VIRTCHNL2_QUEUE_TYPE_TX_COMPLETION);
 		qi[k].ring_len = cpu_to_le16(tx_qgrp->complq->desc_count);
 		qi[k].dma_ring_addr = cpu_to_le64(tx_qgrp->complq->dma);
 
-		if (test_bit(__IDPF_Q_FLOW_SCH_EN, tx_qgrp->complq->flags))
+		if (idpf_queue_has(FLOW_SCH_EN, tx_qgrp->complq))
 			sched_mode = VIRTCHNL2_TXQ_SCHED_MODE_FLOW;
 		else
 			sched_mode = VIRTCHNL2_TXQ_SCHED_MODE_QUEUE;
@@ -1578,17 +1588,18 @@ static int idpf_send_config_rx_queues_msg(struct idpf_vport *vport)
 			goto setup_rxqs;
 
 		for (j = 0; j < vport->num_bufqs_per_qgrp; j++, k++) {
-			struct idpf_queue *bufq =
+			struct idpf_buf_queue *bufq =
 				&rx_qgrp->splitq.bufq_sets[j].bufq;
 
 			qi[k].queue_id = cpu_to_le32(bufq->q_id);
 			qi[k].model = cpu_to_le16(vport->rxq_model);
-			qi[k].type = cpu_to_le32(bufq->q_type);
+			qi[k].type =
+				cpu_to_le32(VIRTCHNL2_QUEUE_TYPE_RX_BUFFER);
 			qi[k].desc_ids = cpu_to_le64(VIRTCHNL2_RXDID_2_FLEX_SPLITQ_M);
 			qi[k].ring_len = cpu_to_le16(bufq->desc_count);
 			qi[k].dma_ring_addr = cpu_to_le64(bufq->dma);
 			qi[k].data_buffer_size = cpu_to_le32(bufq->rx_buf_size);
-			qi[k].buffer_notif_stride = bufq->rx_buf_stride;
+			qi[k].buffer_notif_stride = IDPF_RX_BUF_STRIDE;
 			qi[k].rx_buffer_low_watermark =
 				cpu_to_le16(bufq->rx_buffer_low_watermark);
 			if (idpf_is_feature_ena(vport, NETIF_F_GRO_HW))
@@ -1602,7 +1613,7 @@ setup_rxqs:
 			num_rxq = rx_qgrp->singleq.num_rxq;
 
 		for (j = 0; j < num_rxq; j++, k++) {
-			struct idpf_queue *rxq;
+			struct idpf_rx_queue *rxq;
 
 			if (!idpf_is_queue_model_split(vport->rxq_model)) {
 				rxq = rx_qgrp->singleq.rxqs[j];
@@ -1610,11 +1621,11 @@ setup_rxqs:
 			}
 			rxq = &rx_qgrp->splitq.rxq_sets[j]->rxq;
 			qi[k].rx_bufq1_id =
-			  cpu_to_le16(rxq->rxq_grp->splitq.bufq_sets[0].bufq.q_id);
+			  cpu_to_le16(rxq->bufq_sets[0].bufq.q_id);
 			if (vport->num_bufqs_per_qgrp > IDPF_SINGLE_BUFQ_PER_RXQ_GRP) {
 				qi[k].bufq2_ena = IDPF_BUFQ2_ENA;
 				qi[k].rx_bufq2_id =
-				  cpu_to_le16(rxq->rxq_grp->splitq.bufq_sets[1].bufq.q_id);
+				  cpu_to_le16(rxq->bufq_sets[1].bufq.q_id);
 			}
 			qi[k].rx_buffer_low_watermark =
 				cpu_to_le16(rxq->rx_buffer_low_watermark);
@@ -1622,7 +1633,7 @@ setup_rxqs:
 				qi[k].qflags |= cpu_to_le16(VIRTCHNL2_RXQ_RSC);
 
 common_qi_fields:
-			if (rxq->rx_hsplit_en) {
+			if (idpf_queue_has(HSPLIT_EN, rxq)) {
 				qi[k].qflags |=
 					cpu_to_le16(VIRTCHNL2_RXQ_HDR_SPLIT);
 				qi[k].hdr_buffer_size =
@@ -1630,7 +1641,7 @@ common_qi_fields:
 			}
 			qi[k].queue_id = cpu_to_le32(rxq->q_id);
 			qi[k].model = cpu_to_le16(vport->rxq_model);
-			qi[k].type = cpu_to_le32(rxq->q_type);
+			qi[k].type = cpu_to_le32(VIRTCHNL2_QUEUE_TYPE_RX);
 			qi[k].ring_len = cpu_to_le16(rxq->desc_count);
 			qi[k].dma_ring_addr = cpu_to_le64(rxq->dma);
 			qi[k].max_pkt_size = cpu_to_le32(rxq->rx_max_pkt_size);
@@ -1717,7 +1728,7 @@ static int idpf_send_ena_dis_queues_msg(struct idpf_vport *vport, bool ena)
 		struct idpf_txq_group *tx_qgrp = &vport->txq_grps[i];
 
 		for (j = 0; j < tx_qgrp->num_txq; j++, k++) {
-			qc[k].type = cpu_to_le32(tx_qgrp->txqs[j]->q_type);
+			qc[k].type = cpu_to_le32(VIRTCHNL2_QUEUE_TYPE_TX);
 			qc[k].start_queue_id = cpu_to_le32(tx_qgrp->txqs[j]->q_id);
 			qc[k].num_queues = cpu_to_le32(IDPF_NUMQ_PER_CHUNK);
 		}
@@ -1731,7 +1742,7 @@ static int idpf_send_ena_dis_queues_msg(struct idpf_vport *vport, bool ena)
 	for (i = 0; i < vport->num_txq_grp; i++, k++) {
 		struct idpf_txq_group *tx_qgrp = &vport->txq_grps[i];
 
-		qc[k].type = cpu_to_le32(tx_qgrp->complq->q_type);
+		qc[k].type = cpu_to_le32(VIRTCHNL2_QUEUE_TYPE_TX_COMPLETION);
 		qc[k].start_queue_id = cpu_to_le32(tx_qgrp->complq->q_id);
 		qc[k].num_queues = cpu_to_le32(IDPF_NUMQ_PER_CHUNK);
 	}
@@ -1752,12 +1763,12 @@ setup_rx:
 				qc[k].start_queue_id =
 				cpu_to_le32(rx_qgrp->splitq.rxq_sets[j]->rxq.q_id);
 				qc[k].type =
-				cpu_to_le32(rx_qgrp->splitq.rxq_sets[j]->rxq.q_type);
+				cpu_to_le32(VIRTCHNL2_QUEUE_TYPE_RX);
 			} else {
 				qc[k].start_queue_id =
 				cpu_to_le32(rx_qgrp->singleq.rxqs[j]->q_id);
 				qc[k].type =
-				cpu_to_le32(rx_qgrp->singleq.rxqs[j]->q_type);
+				cpu_to_le32(VIRTCHNL2_QUEUE_TYPE_RX);
 			}
 			qc[k].num_queues = cpu_to_le32(IDPF_NUMQ_PER_CHUNK);
 		}
@@ -1772,10 +1783,11 @@ setup_rx:
 		struct idpf_rxq_group *rx_qgrp = &vport->rxq_grps[i];
 
 		for (j = 0; j < vport->num_bufqs_per_qgrp; j++, k++) {
-			struct idpf_queue *q;
+			const struct idpf_buf_queue *q;
 
 			q = &rx_qgrp->splitq.bufq_sets[j].bufq;
-			qc[k].type = cpu_to_le32(q->q_type);
+			qc[k].type =
+				cpu_to_le32(VIRTCHNL2_QUEUE_TYPE_RX_BUFFER);
 			qc[k].start_queue_id = cpu_to_le32(q->q_id);
 			qc[k].num_queues = cpu_to_le32(IDPF_NUMQ_PER_CHUNK);
 		}
@@ -1860,7 +1872,8 @@ int idpf_send_map_unmap_queue_vector_msg(struct idpf_vport *vport, bool map)
 		struct idpf_txq_group *tx_qgrp = &vport->txq_grps[i];
 
 		for (j = 0; j < tx_qgrp->num_txq; j++, k++) {
-			vqv[k].queue_type = cpu_to_le32(tx_qgrp->txqs[j]->q_type);
+			vqv[k].queue_type =
+				cpu_to_le32(VIRTCHNL2_QUEUE_TYPE_TX);
 			vqv[k].queue_id = cpu_to_le32(tx_qgrp->txqs[j]->q_id);
 
 			if (idpf_is_queue_model_split(vport->txq_model)) {
@@ -1890,14 +1903,15 @@ int idpf_send_map_unmap_queue_vector_msg(struct idpf_vport *vport, bool map)
 			num_rxq = rx_qgrp->singleq.num_rxq;
 
 		for (j = 0; j < num_rxq; j++, k++) {
-			struct idpf_queue *rxq;
+			struct idpf_rx_queue *rxq;
 
 			if (idpf_is_queue_model_split(vport->rxq_model))
 				rxq = &rx_qgrp->splitq.rxq_sets[j]->rxq;
 			else
 				rxq = rx_qgrp->singleq.rxqs[j];
 
-			vqv[k].queue_type = cpu_to_le32(rxq->q_type);
+			vqv[k].queue_type =
+				cpu_to_le32(VIRTCHNL2_QUEUE_TYPE_RX);
 			vqv[k].queue_id = cpu_to_le32(rxq->q_id);
 			vqv[k].vector_id = cpu_to_le16(rxq->q_vector->v_idx);
 			vqv[k].itr_idx = cpu_to_le32(rxq->q_vector->rx_itr_idx);
@@ -1986,7 +2000,7 @@ int idpf_send_disable_queues_msg(struct idpf_vport *vport)
 	 * queues virtchnl message is sent
 	 */
 	for (i = 0; i < vport->num_txq; i++)
-		set_bit(__IDPF_Q_POLL_MODE, vport->txqs[i]->flags);
+		idpf_queue_set(POLL_MODE, vport->txqs[i]);
 
 	/* schedule the napi to receive all the marker packets */
 	local_bh_disable();
@@ -2567,9 +2581,6 @@ int idpf_send_get_rx_ptype_msg(struct idpf_vport *vport)
 		if (reply_sz < 0)
 			return reply_sz;
 
-		if (reply_sz < IDPF_CTLQ_MAX_BUF_LEN)
-			return -EIO;
-
 		ptypes_recvd += le16_to_cpu(ptype_info->num_ptypes);
 		if (ptypes_recvd > max_ptype)
 			return -EINVAL;
@@ -3033,7 +3044,6 @@ init_failed:
 	adapter->state = __IDPF_VER_CHECK;
 	if (adapter->vcxn_mngr)
 		idpf_vc_xn_shutdown(adapter->vcxn_mngr);
-	idpf_deinit_dflt_mbx(adapter);
 	set_bit(IDPF_HR_DRV_LOAD, adapter->flags);
 	queue_delayed_work(adapter->vc_event_wq, &adapter->vc_event_task,
 			   msecs_to_jiffies(task_delay));
@@ -3048,12 +3058,21 @@ init_failed:
  */
 void idpf_vc_core_deinit(struct idpf_adapter *adapter)
 {
+	bool remove_in_prog;
+
 	if (!test_bit(IDPF_VC_CORE_INIT, adapter->flags))
 		return;
 
-	idpf_vc_xn_shutdown(adapter->vcxn_mngr);
+	/* Avoid transaction timeouts when called during reset */
+	remove_in_prog = test_bit(IDPF_REMOVE_IN_PROG, adapter->flags);
+	if (!remove_in_prog)
+		idpf_vc_xn_shutdown(adapter->vcxn_mngr);
+
 	idpf_deinit_task(adapter);
 	idpf_intr_rel(adapter);
+
+	if (remove_in_prog)
+		idpf_vc_xn_shutdown(adapter->vcxn_mngr);
 
 	cancel_delayed_work_sync(&adapter->serv_task);
 	cancel_delayed_work_sync(&adapter->mbx_task);
@@ -3253,7 +3272,6 @@ static int __idpf_vport_queue_ids_init(struct idpf_vport *vport,
 				       int num_qids,
 				       u32 q_type)
 {
-	struct idpf_queue *q;
 	int i, j, k = 0;
 
 	switch (q_type) {
@@ -3261,11 +3279,8 @@ static int __idpf_vport_queue_ids_init(struct idpf_vport *vport,
 		for (i = 0; i < vport->num_txq_grp; i++) {
 			struct idpf_txq_group *tx_qgrp = &vport->txq_grps[i];
 
-			for (j = 0; j < tx_qgrp->num_txq && k < num_qids; j++, k++) {
+			for (j = 0; j < tx_qgrp->num_txq && k < num_qids; j++, k++)
 				tx_qgrp->txqs[j]->q_id = qids[k];
-				tx_qgrp->txqs[j]->q_type =
-					VIRTCHNL2_QUEUE_TYPE_TX;
-			}
 		}
 		break;
 	case VIRTCHNL2_QUEUE_TYPE_RX:
@@ -3279,12 +3294,13 @@ static int __idpf_vport_queue_ids_init(struct idpf_vport *vport,
 				num_rxq = rx_qgrp->singleq.num_rxq;
 
 			for (j = 0; j < num_rxq && k < num_qids; j++, k++) {
+				struct idpf_rx_queue *q;
+
 				if (idpf_is_queue_model_split(vport->rxq_model))
 					q = &rx_qgrp->splitq.rxq_sets[j]->rxq;
 				else
 					q = rx_qgrp->singleq.rxqs[j];
 				q->q_id = qids[k];
-				q->q_type = VIRTCHNL2_QUEUE_TYPE_RX;
 			}
 		}
 		break;
@@ -3293,8 +3309,6 @@ static int __idpf_vport_queue_ids_init(struct idpf_vport *vport,
 			struct idpf_txq_group *tx_qgrp = &vport->txq_grps[i];
 
 			tx_qgrp->complq->q_id = qids[k];
-			tx_qgrp->complq->q_type =
-				VIRTCHNL2_QUEUE_TYPE_TX_COMPLETION;
 		}
 		break;
 	case VIRTCHNL2_QUEUE_TYPE_RX_BUFFER:
@@ -3303,9 +3317,10 @@ static int __idpf_vport_queue_ids_init(struct idpf_vport *vport,
 			u8 num_bufqs = vport->num_bufqs_per_qgrp;
 
 			for (j = 0; j < num_bufqs && k < num_qids; j++, k++) {
+				struct idpf_buf_queue *q;
+
 				q = &rx_qgrp->splitq.bufq_sets[j].bufq;
 				q->q_id = qids[k];
-				q->q_type = VIRTCHNL2_QUEUE_TYPE_RX_BUFFER;
 			}
 		}
 		break;
