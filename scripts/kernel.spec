@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 570.22.1
+%define pkgrelease 570.23.1
 %define kversion 5
-%define tarfile_release 5.14.0-570.22.1.el9_6
+%define tarfile_release 5.14.0-570.23.1.el9_6
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 570.22.1%{?buildid}%{?dist}
+%define specrelease 570.23.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-570.22.1.el9_6
+%define kabiversion 5.14.0-570.23.1.el9_6
 
 #
 # End of genspec.sh variables
@@ -3787,9 +3787,22 @@ fi
 #
 #
 %changelog
-* Tue Jun 17 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.22.1
+* Thu Jun 26 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.23.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Sat Jun 14 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.23.1.el9_6]
+- ext4: ignore xattrs past end (CKI Backport Bot) [RHEL-94248] {CVE-2025-37738}
+- ibmvnic: Use kernel helpers for hex dumps (CKI Backport Bot) [RHEL-89019] {CVE-2025-22104}
+- ice: Avoid setting default Rx VSI twice in switchdev setup (Petr Oros) [RHEL-88310] {CVE-2025-21883}
+- ice: Fix deinitializing VF in error path (CKI Backport Bot) [RHEL-88310] {CVE-2025-21883}
+- ice: add E830 HW VF mailbox message limit support (CKI Backport Bot) [RHEL-88310] {CVE-2025-21883}
+- sched/fair: Fix potential memory corruption in child_cfs_rq_on_list (CKI Backport Bot) [RHEL-88322] {CVE-2025-21919}
+- redhat: configs: Enable CX231XX driver (Kate Hsuan) [RHEL-89730]
+- media: usb: usbtv: Stop direct calls to queue num_buffers field (Kate Hsuan) [RHEL-89730]
+- media: saa6752hs: Don't set format in sub-device state (Kate Hsuan) [RHEL-89730]
+- media: i2c: Use accessors for pad config 'try_*' fields (Kate Hsuan) [RHEL-89730]
+- ext4: fix off-by-one error in do_split (CKI Backport Bot) [RHEL-93629] {CVE-2025-23150}
 
 * Sat Jun 07 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.22.1.el9_6]
 - Bluetooth: L2CAP: Fix corrupted list in hci_chan_del (David Marlin) [RHEL-87890] {CVE-2025-21969}
