@@ -1,3 +1,15 @@
+* Mon Jun 16 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.18.1.el10_0]
+- sched/rt: Fix race in push_rt_task (Phil Auld) [RHEL-91792]
+- mm/vmalloc: combine all TLB flush operations of KASAN shadow virtual address into one operation (Luiz Capitulino) [RHEL-86954] {CVE-2024-56559}
+- block: make sure ->nr_integrity_segments is cloned in blk_rq_prep_clone (Ming Lei) [RHEL-92013]
+- proc: fix UAF in proc_get_inode() (CKI Backport Bot) [RHEL-86810] {CVE-2025-21999}
+- ext4: ignore xattrs past end (CKI Backport Bot) [RHEL-94260] {CVE-2025-37738}
+- nvme-fabrics: handle zero MAXCMD without closing the connection (Maurizio Lombardi) [RHEL-94205]
+- ext4: fix off-by-one error in do_split (CKI Backport Bot) [RHEL-93645] {CVE-2025-23150}
+- r8169: disable RTL8126 ZRX-DC timeout (CKI Backport Bot) [RHEL-93482]
+- r8169: enable RTL8168H/RTL8168EP/RTL8168FP ASPM support (CKI Backport Bot) [RHEL-93482]
+Resolves: RHEL-86810, RHEL-86954, RHEL-91792, RHEL-92013, RHEL-93482, RHEL-93645, RHEL-94205, RHEL-94260
+
 * Sun Jun 08 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.17.1.el10_0]
 - vmxnet3: unregister xdp rxq info in the reset path (CKI Backport Bot) [RHEL-92473]
 - block: fix 'kmem_cache of name 'bio-108' already exists' (Ming Lei) [RHEL-89955]

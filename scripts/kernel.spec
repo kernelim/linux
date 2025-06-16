@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.17.1
+%define pkgrelease 55.18.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.17.1.el10_0
+%define tarfile_release 6.12.0-55.18.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.17.1%{?buildid}%{?dist}
+%define specrelease 55.18.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.17.1.el10_0
+%define kabiversion 6.12.0-55.18.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4313,10 +4313,21 @@ fi\
 #
 #
 %changelog
-* Mon Jun 16 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.17.1
+* Wed Jun 25 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.18.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Mon Jun 16 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.18.1.el10_0]
+- sched/rt: Fix race in push_rt_task (Phil Auld) [RHEL-91792]
+- mm/vmalloc: combine all TLB flush operations of KASAN shadow virtual address into one operation (Luiz Capitulino) [RHEL-86954] {CVE-2024-56559}
+- block: make sure ->nr_integrity_segments is cloned in blk_rq_prep_clone (Ming Lei) [RHEL-92013]
+- proc: fix UAF in proc_get_inode() (CKI Backport Bot) [RHEL-86810] {CVE-2025-21999}
+- ext4: ignore xattrs past end (CKI Backport Bot) [RHEL-94260] {CVE-2025-37738}
+- nvme-fabrics: handle zero MAXCMD without closing the connection (Maurizio Lombardi) [RHEL-94205]
+- ext4: fix off-by-one error in do_split (CKI Backport Bot) [RHEL-93645] {CVE-2025-23150}
+- r8169: disable RTL8126 ZRX-DC timeout (CKI Backport Bot) [RHEL-93482]
+- r8169: enable RTL8168H/RTL8168EP/RTL8168FP ASPM support (CKI Backport Bot) [RHEL-93482]
 
 * Sun Jun 08 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.17.1.el10_0]
 - vmxnet3: unregister xdp rxq info in the reset path (CKI Backport Bot) [RHEL-92473]
