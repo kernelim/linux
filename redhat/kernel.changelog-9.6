@@ -1,3 +1,17 @@
+* Sat Jun 21 2025 Patrick Talbert <ptalbert@redhat.com> [5.14.0-570.24.1.el9_6]
+- Squashfs: fix handling and sanity checking of xattr_ids count (CKI Backport Bot) [RHEL-93465] {CVE-2023-52933}
+- net/mlx5: Fill out devlink dev info only for PFs (CKI Backport Bot) [RHEL-93770]
+- dm mpath: replace spin_lock_irqsave with spin_lock_irq (Benjamin Marzinski) [RHEL-89487]
+- dm-mpath: Don't grab work_mutex while probing paths (Benjamin Marzinski) [RHEL-89487]
+- dm mpath: Interface for explicit probing of active paths (Benjamin Marzinski) [RHEL-89487]
+- dm: Allow .prepare_ioctl to handle ioctls directly (Benjamin Marzinski) [RHEL-89487]
+- NFS: O_DIRECT writes must check and adjust the file length (Benjamin Coddington) [RHEL-96060]
+- pnfs/flexfiles: retry getting layout segment for reads (Benjamin Coddington) [RHEL-96060]
+- NFS/pnfs: Fix a live lock between recalled layouts and layoutget (Benjamin Coddington) [RHEL-96060]
+- x86/tsc: Use topology_max_packages() to get package number (David Arcari) [RHEL-96886]
+- scsi: storvsc: Explicitly set max_segment_size to UINT_MAX (Ewan D. Milne) [RHEL-97519]
+Resolves: RHEL-89487, RHEL-93465, RHEL-93770, RHEL-96060, RHEL-96886, RHEL-97519
+
 * Sat Jun 14 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.23.1.el9_6]
 - ext4: ignore xattrs past end (CKI Backport Bot) [RHEL-94248] {CVE-2025-37738}
 - ibmvnic: Use kernel helpers for hex dumps (CKI Backport Bot) [RHEL-89019] {CVE-2025-22104}
