@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.18.1
+%define pkgrelease 55.19.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.18.1.el10_0
+%define tarfile_release 6.12.0-55.19.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.18.1%{?buildid}%{?dist}
+%define specrelease 55.19.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.18.1.el10_0
+%define kabiversion 6.12.0-55.19.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4313,10 +4313,18 @@ fi\
 #
 #
 %changelog
-* Wed Jun 25 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.18.1
+* Tue Jul 01 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.19.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Sun Jun 22 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.19.1.el10_0]
+- ibmvnic: Use kernel helpers for hex dumps (CKI Backport Bot) [RHEL-89031] {CVE-2025-22104}
+- eth: bnxt: fix truesize for mb-xdp-pass case (CKI Backport Bot) [RHEL-88329] {CVE-2025-21961}
+- ice: Avoid setting default Rx VSI twice in switchdev setup (Petr Oros) [RHEL-88309]
+- ice: Fix deinitializing VF in error path (Petr Oros) [RHEL-88309] {CVE-2025-21883}
+- ice: add E830 HW VF mailbox message limit support (Petr Oros) [RHEL-88309]
+- block/Kconfig: Allow selecting BLK_CGROUP_PUNT_BIO (Ming Lei) [RHEL-87376]
 
 * Mon Jun 16 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.18.1.el10_0]
 - sched/rt: Fix race in push_rt_task (Phil Auld) [RHEL-91792]

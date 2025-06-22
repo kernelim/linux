@@ -73,10 +73,6 @@ struct blkcg_gq {
 	struct blkg_iostat_set		iostat;
 
 	struct blkg_policy_data		*pd[BLKCG_MAX_POLS];
-#ifdef CONFIG_BLK_CGROUP_PUNT_BIO
-	spinlock_t			async_bio_lock;
-	struct bio_list			async_bios;
-#endif
 	union {
 		struct work_struct	async_bio_work;
 		struct work_struct	free_work;
@@ -89,6 +85,10 @@ struct blkcg_gq {
 	int				last_use;
 
 	struct rcu_head			rcu_head;
+#ifdef CONFIG_BLK_CGROUP_PUNT_BIO
+	RH_KABI_EXTEND(spinlock_t	async_bio_lock)
+	RH_KABI_EXTEND(struct bio_list	async_bios)
+#endif
 };
 
 struct blkcg {

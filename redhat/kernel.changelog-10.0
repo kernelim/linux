@@ -1,3 +1,12 @@
+* Sun Jun 22 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.19.1.el10_0]
+- ibmvnic: Use kernel helpers for hex dumps (CKI Backport Bot) [RHEL-89031] {CVE-2025-22104}
+- eth: bnxt: fix truesize for mb-xdp-pass case (CKI Backport Bot) [RHEL-88329] {CVE-2025-21961}
+- ice: Avoid setting default Rx VSI twice in switchdev setup (Petr Oros) [RHEL-88309]
+- ice: Fix deinitializing VF in error path (Petr Oros) [RHEL-88309] {CVE-2025-21883}
+- ice: add E830 HW VF mailbox message limit support (Petr Oros) [RHEL-88309]
+- block/Kconfig: Allow selecting BLK_CGROUP_PUNT_BIO (Ming Lei) [RHEL-87376]
+Resolves: RHEL-87376, RHEL-88309, RHEL-88329, RHEL-89031
+
 * Mon Jun 16 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.18.1.el10_0]
 - sched/rt: Fix race in push_rt_task (Phil Auld) [RHEL-91792]
 - mm/vmalloc: combine all TLB flush operations of KASAN shadow virtual address into one operation (Luiz Capitulino) [RHEL-86954] {CVE-2024-56559}

@@ -44,6 +44,7 @@ config BLK_CGROUP_RWSTAT
 
 config BLK_CGROUP_PUNT_BIO
 	bool
+	default y
 
 config BLK_DEV_BSG_COMMON
 	tristate
