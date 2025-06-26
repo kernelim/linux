@@ -548,4 +548,6 @@ int tcp_sock_set_keepidle(struct sock *sk, int val);
 void tcp_sock_set_nodelay(struct sock *sk);
 int tcp_sock_set_syncnt(struct sock *sk, int val);
 
+void tcp_sock_set_cork(struct sock *sk, bool on);
+
 #endif	/* _LINUX_TCP_H */
