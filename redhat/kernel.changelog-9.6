@@ -1,3 +1,13 @@
+* Sat Jun 28 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.25.1.el9_6]
+- udf: Fix a slab-out-of-bounds write bug in udf_find_entry() (CKI Backport Bot) [RHEL-99124] {CVE-2022-49846}
+- vmxnet3: Fix malformed packet sizing in vmxnet3_process_xdp (CKI Backport Bot) [RHEL-97110] {CVE-2025-37799}
+- NFSv4: Don't check for OPEN feature support in v4.1 (Scott Mayhew) [RHEL-95252]
+- ipv6: mcast: extend RCU protection in igmp6_send() (CKI Backport Bot) [RHEL-94673] {CVE-2025-21759}
+- ovl: fix UAF in ovl_dentry_update_reval by moving dput() in ovl_link_up (CKI Backport Bot) [RHEL-93445] {CVE-2025-21887}
+- net: atm: fix use after free in lec_send() (CKI Backport Bot) [RHEL-93132] {CVE-2025-22004}
+- block: make sure ->nr_integrity_segments is cloned in blk_rq_prep_clone (Ming Lei) [RHEL-92268]
+Resolves: RHEL-92268, RHEL-93132, RHEL-93445, RHEL-94673, RHEL-95252, RHEL-97110, RHEL-99124
+
 * Sat Jun 21 2025 Patrick Talbert <ptalbert@redhat.com> [5.14.0-570.24.1.el9_6]
 - Squashfs: fix handling and sanity checking of xattr_ids count (CKI Backport Bot) [RHEL-93465] {CVE-2023-52933}
 - net/mlx5: Fill out devlink dev info only for PFs (CKI Backport Bot) [RHEL-93770]
