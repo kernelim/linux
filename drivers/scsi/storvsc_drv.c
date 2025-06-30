@@ -1890,6 +1890,7 @@ static struct scsi_host_template scsi_driver = {
 	.no_write_same =	1,
 	.track_queue_depth =	1,
 	.change_queue_depth =	storvsc_change_queue_depth,
+	.max_segment_size =	0xffffffff,
 };
 
 enum {

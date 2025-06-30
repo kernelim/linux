@@ -1,3 +1,17 @@
+* Mon Jun 30 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.20.1.el10_0]
+- x86/microcode/AMD: Fix out-of-bounds on systems with CPU-less NUMA nodes (CKI Backport Bot) [RHEL-99007] {CVE-2025-21991}
+- page_pool: Track DMA-mapped pages and unmap them when destroying the pool (Toke Høiland-Jørgensen) [RHEL-84148]
+- page_pool: Move pp_magic check into helper functions (Toke Høiland-Jørgensen) [RHEL-84148]
+- scsi: storvsc: Explicitly set max_segment_size to UINT_MAX (Ewan D. Milne) [RHEL-97172]
+- vmxnet3: Fix malformed packet sizing in vmxnet3_process_xdp (CKI Backport Bot) [RHEL-97116] {CVE-2025-37799}
+- dm mpath: replace spin_lock_irqsave with spin_lock_irq (Benjamin Marzinski) [RHEL-89484]
+- dm-mpath: Don't grab work_mutex while probing paths (Benjamin Marzinski) [RHEL-89484]
+- dm mpath: Interface for explicit probing of active paths (Benjamin Marzinski) [RHEL-89484]
+- dm: Allow .prepare_ioctl to handle ioctls directly (Benjamin Marzinski) [RHEL-89484]
+- ipv6: mcast: extend RCU protection in igmp6_send() (CKI Backport Bot) [RHEL-94685] {CVE-2025-21759}
+- net: add dev_net_rcu() helper (Hangbin Liu) [RHEL-94685]
+Resolves: RHEL-84148, RHEL-89484, RHEL-94685, RHEL-97116, RHEL-97172, RHEL-99007
+
 * Sun Jun 22 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.19.1.el10_0]
 - ibmvnic: Use kernel helpers for hex dumps (CKI Backport Bot) [RHEL-89031] {CVE-2025-22104}
 - eth: bnxt: fix truesize for mb-xdp-pass case (CKI Backport Bot) [RHEL-88329] {CVE-2025-21961}
