@@ -39,6 +39,7 @@
 #include <linux/pfn_t.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
+#include <linux/highmem.h>
 #include <linux/fs.h>
 #include <linux/rbtree.h>
 
@@ -947,6 +948,26 @@ static void free_pfn_range(u64 paddr, unsigned long size)
 		memtype_free(paddr, paddr + size);
 }
 
+static int follow_phys(struct vm_area_struct *vma, unsigned long *prot,
+		resource_size_t *phys)
+{
+	struct follow_pfnmap_args args = { .vma = vma, .address = vma->vm_start };
+
+	if (follow_pfnmap_start(&args))
+		return -EINVAL;
+
+	/* Never return PFNs of anon folios in COW mappings. */
+	if (!args.special) {
+		follow_pfnmap_end(&args);
+		return -EINVAL;
+	}
+
+	*prot = pgprot_val(args.pgprot);
+	*phys = (resource_size_t)args.pfn << PAGE_SHIFT;
+	follow_pfnmap_end(&args);
+	return 0;
+}
+
 static int get_pat_info(struct vm_area_struct *vma, resource_size_t *paddr,
 		pgprot_t *pgprot)
 {
@@ -964,7 +985,7 @@ static int get_pat_info(struct vm_area_struct *vma, resource_size_t *paddr,
 	 * detect the PFN. If we need the cachemode as well, we're out of luck
 	 * for now and have to fail fork().
 	 */
-	if (!follow_phys(vma, vma->vm_start, 0, &prot, paddr)) {
+	if (!follow_phys(vma, &prot, paddr)) {
 		if (pgprot)
 			*pgprot = __pgprot(prot);
 		return 0;

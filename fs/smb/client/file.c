@@ -685,15 +685,23 @@ int cifs_open(struct inode *inode, struct file *file)
 		rc = cifs_get_readable_path(tcon, full_path, &cfile);
 	}
 	if (rc == 0) {
-		if (file->f_flags == cfile->f_flags) {
+		unsigned int oflags = file->f_flags & ~(O_CREAT|O_EXCL|O_TRUNC);
+		unsigned int cflags = cfile->f_flags & ~(O_CREAT|O_EXCL|O_TRUNC);
+
+		if (cifs_convert_flags(oflags, 0) == cifs_convert_flags(cflags, 0) &&
+		    (oflags & (O_SYNC|O_DIRECT)) == (cflags & (O_SYNC|O_DIRECT))) {
 			file->private_data = cfile;
 			spin_lock(&CIFS_I(inode)->deferred_lock);
 			cifs_del_deferred_close(cfile);
 			spin_unlock(&CIFS_I(inode)->deferred_lock);
 			goto use_cache;
-		} else {
-			_cifsFileInfo_put(cfile, true, false);
 		}
+		_cifsFileInfo_put(cfile, true, false);
+	} else {
+		/* hard link on the defeered close file */
+		rc = cifs_get_hardlink_path(tcon, inode, file);
+		if (rc)
+			cifs_close_deferred_file(CIFS_I(inode));
 	}
 
 	if (server->oplocks)
@@ -1752,6 +1760,29 @@ cifs_move_llist(struct list_head *source, struct list_head *dest)
 	struct list_head *li, *tmp;
 	list_for_each_safe(li, tmp, source)
 		list_move(li, dest);
+}
+
+int
+cifs_get_hardlink_path(struct cifs_tcon *tcon, struct inode *inode,
+				struct file *file)
+{
+	struct cifsFileInfo *open_file = NULL;
+	struct cifsInodeInfo *cinode = CIFS_I(inode);
+	int rc = 0;
+
+	spin_lock(&tcon->open_file_lock);
+	spin_lock(&cinode->open_file_lock);
+
+	list_for_each_entry(open_file, &cinode->openFileList, flist) {
+		if (file->f_flags == open_file->f_flags) {
+			rc = -EINVAL;
+			break;
+		}
+	}
+
+	spin_unlock(&cinode->open_file_lock);
+	spin_unlock(&tcon->open_file_lock);
+	return rc;
 }
 
 void
