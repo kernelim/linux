@@ -1,3 +1,22 @@
+* Sun Jul 06 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.21.1.el10_0]
+- ice, irdma: fix an off by one in error handling code (Petr Oros) [RHEL-80558]
+- irdma: free iwdev->rf after removing MSI-X (Petr Oros) [RHEL-80558]
+- ice: Fix signedness bug in ice_init_interrupt_scheme() (Petr Oros) [RHEL-80558]
+- ice: init flow director before RDMA (Petr Oros) [RHEL-80558]
+- ice: simplify VF MSI-X managing (Petr Oros) [RHEL-80558]
+- ice: enable_rdma devlink param (Petr Oros) [RHEL-80558]
+- ice: treat dyn_allowed only as suggestion (Petr Oros) [RHEL-80558]
+- ice, irdma: move interrupts code to irdma (Petr Oros) [RHEL-80558]
+- ice: get rid of num_lan_msix field (Petr Oros) [RHEL-80558]
+- ice: remove splitting MSI-X between features (Petr Oros) [RHEL-80558]
+- ice: devlink PF MSI-X max and min parameter (Petr Oros) [RHEL-80558]
+- ice: ice_probe: init ice_adapter after HW init (Petr Oros) [RHEL-80558]
+- ice: minor: rename goto labels from err to unroll (Petr Oros) [RHEL-80558]
+- ice: split ice_init_hw() out from ice_init_dev() (Petr Oros) [RHEL-80558]
+- ice: c827: move wait for FW to ice_init_hw() (Petr Oros) [RHEL-80558]
+- exfat: fix random stack corruption after get_block (CKI Backport Bot) [RHEL-99441] {CVE-2025-22036}
+Resolves: RHEL-80558, RHEL-99441
+
 * Mon Jun 30 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.20.1.el10_0]
 - x86/microcode/AMD: Fix out-of-bounds on systems with CPU-less NUMA nodes (CKI Backport Bot) [RHEL-99007] {CVE-2025-21991}
 - page_pool: Track DMA-mapped pages and unmap them when destroying the pool (Toke Høiland-Jørgensen) [RHEL-84148]

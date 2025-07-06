@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.20.1
+%define pkgrelease 55.21.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.20.1.el10_0
+%define tarfile_release 6.12.0-55.21.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.20.1%{?buildid}%{?dist}
+%define specrelease 55.21.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.20.1.el10_0
+%define kabiversion 6.12.0-55.21.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4313,10 +4313,28 @@ fi\
 #
 #
 %changelog
-* Mon Jul 07 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.20.1
+* Mon Jul 14 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.21.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Sun Jul 06 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.21.1.el10_0]
+- ice, irdma: fix an off by one in error handling code (Petr Oros) [RHEL-80558]
+- irdma: free iwdev->rf after removing MSI-X (Petr Oros) [RHEL-80558]
+- ice: Fix signedness bug in ice_init_interrupt_scheme() (Petr Oros) [RHEL-80558]
+- ice: init flow director before RDMA (Petr Oros) [RHEL-80558]
+- ice: simplify VF MSI-X managing (Petr Oros) [RHEL-80558]
+- ice: enable_rdma devlink param (Petr Oros) [RHEL-80558]
+- ice: treat dyn_allowed only as suggestion (Petr Oros) [RHEL-80558]
+- ice, irdma: move interrupts code to irdma (Petr Oros) [RHEL-80558]
+- ice: get rid of num_lan_msix field (Petr Oros) [RHEL-80558]
+- ice: remove splitting MSI-X between features (Petr Oros) [RHEL-80558]
+- ice: devlink PF MSI-X max and min parameter (Petr Oros) [RHEL-80558]
+- ice: ice_probe: init ice_adapter after HW init (Petr Oros) [RHEL-80558]
+- ice: minor: rename goto labels from err to unroll (Petr Oros) [RHEL-80558]
+- ice: split ice_init_hw() out from ice_init_dev() (Petr Oros) [RHEL-80558]
+- ice: c827: move wait for FW to ice_init_hw() (Petr Oros) [RHEL-80558]
+- exfat: fix random stack corruption after get_block (CKI Backport Bot) [RHEL-99441] {CVE-2025-22036}
 
 * Mon Jun 30 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.20.1.el10_0]
 - x86/microcode/AMD: Fix out-of-bounds on systems with CPU-less NUMA nodes (CKI Backport Bot) [RHEL-99007] {CVE-2025-21991}
