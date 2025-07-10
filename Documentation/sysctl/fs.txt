@@ -21,6 +21,7 @@ before actually making adjustments.
 Currently, these files are in /proc/sys/fs:
 - aio-max-nr
 - aio-nr
+- dentry-fs-klimit
 - dentry-state
 - dquot-max
 - dquot-nr
@@ -51,6 +52,33 @@ io_setup system call for all currently active aio contexts.  If aio-nr
 reaches aio-max-nr then io_setup will fail with EAGAIN.  Note that
 raising aio-max-nr does not result in the pre-allocation or re-sizing
 of any kernel data structures.
+
+==============================================================
+
+dentry-fs-klimit:
+
+The number of positive dentries for a filesystem is limited by the
+total number of files in that filesystem. However, there is no limit
+on negative dentries which can grow to an exceedingly large number.
+
+This integer value specifies a soft limit on the maximum number of
+dentries (in thousands) that are allowed in any one of the mounted
+filesystems. It has a default value of 0 which means no limit. A value
+of 10, for example, means that the limit will be 10,000.
+
+If the limit is exceeded, the system will attempt to reclaim currently
+unused dentries from the LRU lists of the filesystem to reduce its total
+number. Enabling this limit does impose a performance cost, especially
+when the limit is low. So it should only be enabled if excessive number
+of negative dentries is becoming a problem in a particular workload
+environment.
+
+With dentry-fs-klimit properly set, dentries reclaim should only be
+invoked infrequently if at all. If this happens frequently, it is
+either the value is set too low for the current workload or there are
+misbehaving applications generating too many negative dentries. The
+dentry-state sysctl file described below can be used to view the current
+mix of positive and negative dentries in the system.
 
 ==============================================================
 

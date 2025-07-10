@@ -27,6 +27,7 @@
 #include <linux/gfp.h>
 #include <linux/overflow.h>
 #include <linux/rh_kabi.h>
+#include <linux/cleanup.h>
 #include <asm/device.h>
 
 struct device;
@@ -1688,6 +1689,8 @@ extern int device_move(struct device *dev, struct device *new_parent,
 extern int device_change_owner(struct device *dev, kuid_t kuid, kgid_t kgid);
 extern int device_is_dependent(struct device *dev, void *target);
 
+DEFINE_FREE(device_del, struct device *, if (_T) device_del(_T))
+
 static inline bool device_supports_offline(struct device *dev)
 {
 	return dev->bus && dev->bus->offline && dev->bus->online;
@@ -1799,6 +1802,9 @@ extern int (*platform_notify_remove)(struct device *dev);
  */
 extern struct device *get_device(struct device *dev);
 extern void put_device(struct device *dev);
+
+DEFINE_FREE(put_device, struct device *, if (_T) put_device(_T))
+
 extern bool kill_device(struct device *dev);
 
 #ifdef CONFIG_DEVTMPFS

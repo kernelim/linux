@@ -12,6 +12,25 @@ Core utilities
    :maxdepth: 1
 
    kernel-api
+   workqueue
+   watch_queue
+   printk-basics
+   printk-formats
+   printk-index
+   symbol-namespaces
+   asm-annotations
+
+Data structures and low-level utilities
+=======================================
+
+Library functionality that is used throughout the kernel.
+
+.. toctree::
+   :maxdepth: 1
+
+   kobject
+   kref
+   cleanup
    assoc_array
    atomic_ops
    cachetlb

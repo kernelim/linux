@@ -117,6 +117,20 @@ struct dentry_stat_t dentry_stat = {
 	.age_limit = 45,
 };
 
+/*
+ * dentry_fs_klimit_sysctl:
+ * This is sysctl parameter "dentry-fs-klimit" which specifies a soft limit
+ * for the maximum number of dentries (in thousands) allowed in any one of
+ * the mounted filesystems. The default is 0 which means no limit.
+ */
+int dentry_fs_klimit_sysctl __read_mostly;
+EXPORT_SYMBOL_GPL(dentry_fs_klimit_sysctl);
+static long dentry_nlru_limit __read_mostly;	/* Limit per list_lru_node */
+static struct dentry *dentry_nlru_shrink_anchor;
+static DEFINE_STATIC_KEY_FALSE(dentry_fs_klimit_on);
+static void dentry_nlru_shrink_wfunc(struct work_struct *work);
+static DECLARE_WORK(dentry_nlru_shrink_work, dentry_nlru_shrink_wfunc);
+
 static DEFINE_PER_CPU(long, nr_dentry);
 static DEFINE_PER_CPU(long, nr_dentry_unused);
 static DEFINE_PER_CPU(long, nr_dentry_negative);
@@ -171,7 +185,72 @@ int proc_nr_dentry(struct ctl_table *table, int write, void __user *buffer,
 	dentry_stat.nr_negative = get_nr_dentry_negative();
 	return proc_doulongvec_minmax(table, write, buffer, lenp, ppos);
 }
+
+/*
+ * Sysctl proc handler for dentry_fs_klimit_sysctl.
+ */
+int proc_dentry_fs_klimit(struct ctl_table *ctl, int write,
+			    void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	int ret, old = dentry_fs_klimit_sysctl;
+
+	ret = proc_dointvec(ctl, write, buffer, lenp, ppos);
+
+	if (!write || ret || (dentry_fs_klimit_sysctl == old))
+		return ret;
+
+	if (!dentry_fs_klimit_sysctl && old) {
+		static_branch_disable(&dentry_fs_klimit_on);
+
+		/* Wait for any existing shrinking work to finish */
+		if (READ_ONCE(dentry_nlru_shrink_anchor))
+			flush_work(&dentry_nlru_shrink_work);
+		dentry_nlru_limit = 0;
+		return 0;
+	}
+
+	/*
+	 * Assuming even node distribution of dentries in multi-node system,
+	 * compute the per node limit with a little bit of margin for some
+	 * unevenness.
+	 */
+	if (nr_online_nodes > 1)
+		dentry_nlru_limit = (dentry_fs_klimit_sysctl * 1000L + 500)/nr_online_nodes;
+	else
+		dentry_nlru_limit = dentry_fs_klimit_sysctl * 1000L;
+
+	if (dentry_fs_klimit_sysctl && !old)
+		static_branch_enable(&dentry_fs_klimit_on);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(proc_dentry_fs_klimit);
 #endif
+
+/*
+ * Initialize a work item to shrink the list_lru_node containing the given
+ * dentry if that dentry can be saved into dentry_nlru_shrink_anchor.
+ */
+static void dentry_nlru_shrink(struct dentry *dentry)
+{
+	bool queued;
+
+	lockdep_assert_held(&dentry->d_lock);
+
+	if (cmpxchg(&dentry_nlru_shrink_anchor, NULL, dentry) != NULL)
+		return;
+	queued = queue_work(system_long_wq, &dentry_nlru_shrink_work);
+
+	/*
+	 * With the unlikely event that anchor is cleared but the work isn't
+	 * totally finished, queue_work() will fail and we have to revert
+	 * the change.
+	 */
+	if (unlikely(!queued))
+		WRITE_ONCE(dentry_nlru_shrink_anchor, NULL);
+	else
+		dentry->d_lockref.count++;
+}
 
 /*
  * Compare 2 name strings, return 0 if they match, otherwise non-zero.
@@ -398,12 +477,24 @@ static void dentry_unlink_inode(struct dentry * dentry)
 #define D_FLAG_VERIFY(dentry,x) WARN_ON_ONCE(((dentry)->d_flags & (DCACHE_LRU_LIST | DCACHE_SHRINK_LIST)) != (x))
 static void d_lru_add(struct dentry *dentry)
 {
+	long nitems;
+	bool negative = d_is_negative(dentry);
+
 	D_FLAG_VERIFY(dentry, 0);
 	dentry->d_flags |= DCACHE_LRU_LIST;
 	this_cpu_inc(nr_dentry_unused);
-	if (d_is_negative(dentry))
+	if (negative)
 		this_cpu_inc(nr_dentry_negative);
-	WARN_ON_ONCE(!list_lru_add(&dentry->d_sb->s_dentry_lru, &dentry->d_lru));
+	nitems = list_lru_add(&dentry->d_sb->s_dentry_lru, &dentry->d_lru);
+	WARN_ON_ONCE(!nitems);
+	/*
+	 * If negative dentry is present and the dentry_nlru_limit is exceeded,
+	 * call dentry_nlru_shrink() to attempt to shrink the corresponding
+	 * list_lru_node.
+	 */
+	if (static_branch_unlikely(&dentry_fs_klimit_on) && negative &&
+	    (nitems > dentry_nlru_limit) && !dentry_nlru_shrink_anchor)
+		dentry_nlru_shrink(dentry);
 }
 
 static void d_lru_del(struct dentry *dentry)
@@ -1215,6 +1306,77 @@ static enum lru_status dentry_lru_isolate(struct list_head *item,
 	spin_unlock(&dentry->d_lock);
 
 	return LRU_REMOVED;
+}
+
+/*
+ * Actual work function to shrink dentries in the list_lru_node structure that
+ * has exceeded the limit imposed by dentry-fs-klimit sysctl parameter.
+ * The same dentry_lru_isolate() callback function used by memory reclaim is
+ * called to shrink the LRU list.
+ */
+static void dentry_nlru_shrink_wfunc(struct work_struct *work __maybe_unused)
+{
+	struct dentry *dentry = READ_ONCE(dentry_nlru_shrink_anchor);
+	int nid = page_to_nid(virt_to_page(dentry));
+	unsigned long start = jiffies;
+	struct super_block *sb = NULL;
+	long total_freed = 0;
+	long target_dcnt;
+	LIST_HEAD(dispose);
+	char *fsname;
+
+	/* Set target dentry count to 3/4 of dentry_nlru_limit */
+	target_dcnt = dentry_nlru_limit - dentry_nlru_limit/4;
+
+	/* Acquire a read lock on sb->s_umount before reclaiming */
+	spin_lock(&dentry->d_lock);
+	if (((dentry->d_flags &
+	    (DCACHE_LRU_LIST|DCACHE_SHRINK_LIST)) == DCACHE_LRU_LIST) &&
+	    down_read_trylock(&dentry->d_sb->s_umount)) {
+		sb = dentry->d_sb;
+		fsname = sb->s_id;
+	}
+	spin_unlock(&dentry->d_lock);
+
+	/*
+	 * For simplicity, only one list_lru_node is reclaimed. If other
+	 * nodes of the same filesystem have exceeded the limit, new
+	 * works will be initiated to reclaim them sooner or later.
+	 */
+	while (sb) {
+		struct list_lru *lru = &sb->s_dentry_lru;
+		unsigned long node_cnt = list_lru_count_node(lru, nid);
+		unsigned long nr_to_walk;
+		long freed;
+
+		/*
+		 * If current node count is less than or just a bit more
+		 * than the target dentry count, consider it done.
+		 */
+		if (node_cnt <= target_dcnt + 16)
+			break;
+
+		/*
+		 * To avoid holding nlru->lock for too long, we have to limit
+		 * nr_to_walk to no more than 4k per shrink operation.
+		 */
+		nr_to_walk = min(node_cnt - target_dcnt, 1L << 12);
+		freed = list_lru_walk_node(lru, nid, dentry_lru_isolate,
+					   &dispose, &nr_to_walk);
+		total_freed += freed;
+		shrink_dentry_list(&dispose);
+		cond_resched();
+		if (!freed || (node_cnt - freed <= target_dcnt))
+			break;	/* Done */
+	}
+	WRITE_ONCE(dentry_nlru_shrink_anchor, NULL);
+	dput(dentry);
+
+	if (total_freed)
+		pr_info("dentry-fs-klimit: %ld dentries freed from node %d of %s in %u ms\n",
+			total_freed, nid, fsname, jiffies_to_msecs(jiffies - start));
+	if (sb)
+		up_read(&sb->s_umount);
 }
 
 /**

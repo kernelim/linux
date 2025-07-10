@@ -111,12 +111,13 @@ list_lru_from_kmem(struct list_lru_node *nlru, void *ptr,
 }
 #endif /* CONFIG_MEMCG_KMEM */
 
-bool list_lru_add(struct list_lru *lru, struct list_head *item)
+long list_lru_add(struct list_lru *lru, struct list_head *item)
 {
 	int nid = page_to_nid(virt_to_page(item));
 	struct list_lru_node *nlru = &lru->node[nid];
 	struct mem_cgroup *memcg;
 	struct list_lru_one *l;
+	long ret;
 
 	spin_lock(&nlru->lock);
 	if (list_empty(item)) {
@@ -126,9 +127,9 @@ bool list_lru_add(struct list_lru *lru, struct list_head *item)
 		if (!l->nr_items++)
 			set_shrinker_bit(memcg, nid,
 					 lru_shrinker_id(lru));
-		nlru->nr_items++;
+		ret = ++nlru->nr_items;
 		spin_unlock(&nlru->lock);
-		return true;
+		return ret;
 	}
 	spin_unlock(&nlru->lock);
 	return false;

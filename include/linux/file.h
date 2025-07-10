@@ -9,6 +9,7 @@
 #include <linux/compiler.h>
 #include <linux/types.h>
 #include <linux/posix_types.h>
+#include <linux/cleanup.h>
 
 struct file;
 
@@ -81,6 +82,8 @@ static inline void fdput_pos(struct fd f)
 	fdput(f);
 }
 
+DEFINE_CLASS(fd, struct fd, fdput(_T), fdget(fd), int fd)
+
 extern int f_dupfd(unsigned int from, struct file *file, unsigned flags);
 extern int replace_fd(unsigned fd, struct file *file, unsigned flags);
 extern void set_close_on_exec(unsigned int fd, int flag);
@@ -88,6 +91,29 @@ extern bool get_close_on_exec(unsigned int fd);
 extern int __get_unused_fd_flags(unsigned flags, unsigned long nofile);
 extern int get_unused_fd_flags(unsigned flags);
 extern void put_unused_fd(unsigned int fd);
+
+DEFINE_CLASS(get_unused_fd, int, if (_T >= 0) put_unused_fd(_T),
+	     get_unused_fd_flags(flags), unsigned flags)
+
+/*
+ * take_fd() will take care to set @fd to -EBADF ensuring that
+ * CLASS(get_unused_fd) won't call put_unused_fd(). This makes it
+ * easier to rely on CLASS(get_unused_fd):
+ *
+ * struct file *f;
+ *
+ * CLASS(get_unused_fd, fd)(O_CLOEXEC);
+ * if (fd < 0)
+ *         return fd;
+ *
+ * f = dentry_open(&path, O_RDONLY, current_cred());
+ * if (IS_ERR(f))
+ *         return PTR_ERR(fd);
+ *
+ * fd_install(fd, f);
+ * return take_fd(fd);
+ */
+#define take_fd(fd) __get_and_null(fd, -EBADF)
 
 extern void fd_install(unsigned int fd, struct file *file);
 

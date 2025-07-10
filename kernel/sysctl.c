@@ -117,6 +117,9 @@ extern unsigned int sysctl_nr_open_min, sysctl_nr_open_max;
 extern int sysctl_nr_trim_pages;
 #endif
 
+extern int dentry_fs_klimit_sysctl;
+extern proc_handler proc_dentry_fs_klimit;
+
 /* Constants used for minimum and  maximum */
 #ifdef CONFIG_LOCKUP_DETECTOR
 static int sixty = 60;
@@ -1973,6 +1976,13 @@ static struct ctl_table fs_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= SYSCTL_ONE,
+	},
+	{
+		.procname	= "dentry-fs-klimit",
+		.data		= &dentry_fs_klimit_sysctl,
+		.maxlen		= sizeof(dentry_fs_klimit_sysctl),
+		.mode		= 0644,
+		.proc_handler	= proc_dentry_fs_klimit
 	},
 	{ }
 };
