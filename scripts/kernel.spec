@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.21.1
+%define pkgrelease 55.22.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.21.1.el10_0
+%define tarfile_release 6.12.0-55.22.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.21.1%{?buildid}%{?dist}
+%define specrelease 55.22.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.21.1.el10_0
+%define kabiversion 6.12.0-55.22.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4313,10 +4313,27 @@ fi\
 #
 #
 %changelog
-* Mon Jul 14 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.21.1
+* Tue Jul 22 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.22.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Sun Jul 13 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.22.1.el10_0]
+- mm/huge_memory: fix dereferencing invalid pmd migration entry (Luiz Capitulino) [RHEL-96384] {CVE-2025-37958}
+- i2c: tegra: check msg length in SMBUS block read (Steve Dunnagan) [RHEL-99824]
+- s390/virtio_ccw: Don't allocate/assign airqs for non-existing queues (CKI Backport Bot) [RHEL-87558]
+- sunrpc: handle SVC_GARBAGE during svc auth processing as auth error (CKI Backport Bot) [RHEL-101331] {CVE-2025-38089}
+- media: uvcvideo: Announce the user our deprecation intentions (Desnes Nunes) [RHEL-98779]
+- media: uvcvideo: Allow changing noparam on the fly (Desnes Nunes) [RHEL-98779]
+- media: uvcvideo: Invert default value for nodrop module param (Desnes Nunes) [RHEL-98779]
+- media: uvcvideo: Propagate buf->error to userspace (Desnes Nunes) [RHEL-98779]
+- media: uvcvideo: Flush the control cache when we get an event (Desnes Nunes) [RHEL-98779]
+- media: uvcvideo: Annotate lock requirements for uvc_ctrl_set (Desnes Nunes) [RHEL-98779]
+- media: uvcvideo: Remove dangling pointers (Desnes Nunes) [RHEL-98779] {CVE-2024-58002}
+- media: uvcvideo: Remove redundant NULL assignment (Desnes Nunes) [RHEL-98779]
+- media: uvcvideo: Only save async fh if success (Desnes Nunes) [RHEL-98779]
+- media: uvcvideo: Fix double free in error path (CKI Backport Bot) [RHEL-98805] {CVE-2024-57980}
+- wifi: iwlwifi: limit printed string from FW file (CKI Backport Bot) [RHEL-99396] {CVE-2025-21905}
 
 * Sun Jul 06 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.21.1.el10_0]
 - ice, irdma: fix an off by one in error handling code (Petr Oros) [RHEL-80558]
