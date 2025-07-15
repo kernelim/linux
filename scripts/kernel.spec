@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 570.26.1
+%define pkgrelease 570.28.1
 %define kversion 5
-%define tarfile_release 5.14.0-570.26.1.el9_6
+%define tarfile_release 5.14.0-570.28.1.el9_6
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 570.26.1%{?buildid}%{?dist}
+%define specrelease 570.28.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-570.26.1.el9_6
+%define kabiversion 5.14.0-570.28.1.el9_6
 
 #
 # End of genspec.sh variables
@@ -3787,9 +3787,36 @@ fi
 #
 #
 %changelog
-* Mon Jul 14 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.26.1
+* Mon Jul 21 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.28.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Tue Jul 15 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.28.1.el9_6]
+- sunrpc: handle SVC_GARBAGE during svc auth processing as auth error (CKI Backport Bot) [RHEL-101327] {CVE-2025-38089}
+
+* Sat Jul 12 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.27.1.el9_6]
+- i2c: tegra: check msg length in SMBUS block read (Steve Dunnagan) [RHEL-100516]
+- net/mlx5: Generate PPS IN event on new function for shared clock (Benjamin Poirier) [RHEL-87775]
+- net/mlx5: Support one PTP device per hardware clock (Benjamin Poirier) [RHEL-87775]
+- net/mlx5: Move PPS notifier and out_work to clock_state (Benjamin Poirier) [RHEL-87775]
+- net/mlx5: Add devcom component for the clock shared by functions (Michal Schmidt) [RHEL-87775]
+- net/mlx5: Change clock in mlx5_core_dev to mlx5_clock pointer (Michal Schmidt) [RHEL-87775]
+- net/mlx5: Add API to get mlx5_core_dev from mlx5_clock (Benjamin Poirier) [RHEL-87775]
+- net/mlx5: Add init and destruction functions for a single HW clock (Benjamin Poirier) [RHEL-87775]
+- net/mlx5: Change parameters for PTP internal functions (Benjamin Poirier) [RHEL-87775]
+- net/mlx5: Add helper functions for PTP callbacks (Benjamin Poirier) [RHEL-87775]
+- net/mlx5: Add support for MRTCQ register (Benjamin Poirier) [RHEL-87775]
+- net/mlx5: use do_aux_work for PHC overflow checks (Michal Schmidt) [RHEL-87775]
+- mlx5_en: use read sequence for gettimex64 (Benjamin Poirier) [RHEL-87775]
+- media: uvcvideo: Announce the user our deprecation intentions (Desnes Nunes) [RHEL-98772]
+- media: uvcvideo: Allow changing noparam on the fly (Desnes Nunes) [RHEL-98772]
+- media: uvcvideo: Invert default value for nodrop module param (Desnes Nunes) [RHEL-98772]
+- media: uvcvideo: Propagate buf->error to userspace (Desnes Nunes) [RHEL-98772]
+- media: uvcvideo: Flush the control cache when we get an event (Desnes Nunes) [RHEL-98772]
+- media: uvcvideo: Annotate lock requirements for uvc_ctrl_set (Desnes Nunes) [RHEL-98772]
+- media: uvcvideo: Remove dangling pointers (Desnes Nunes) [RHEL-98772] {CVE-2024-58002}
+- media: uvcvideo: Remove redundant NULL assignment (Desnes Nunes) [RHEL-98772]
+- media: uvcvideo: Only save async fh if success (Desnes Nunes) [RHEL-98772]
 
 * Sat Jul 05 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.26.1.el9_6]
 - x86/microcode/AMD: Fix out-of-bounds on systems with CPU-less NUMA nodes (CKI Backport Bot) [RHEL-98996] {CVE-2025-21991}
