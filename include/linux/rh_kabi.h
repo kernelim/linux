@@ -348,6 +348,11 @@
  *   Adds a new field to an enumeration type.  This must always be added to
  *   the end of the enum.  Before using this macro, make sure this is actually
  *   safe to do.
+ *
+ * RH_KABI_ASSERT_EQ_CONST
+ * RH_KABI_ASSERT_EQ_CONSTEXPR
+ *   Static assertion equality check against a C preprocessor (or a C constant
+ *   expression).
  */
 
 #undef linux
@@ -511,5 +516,23 @@
 	size_t __off = offsetof(struct _struct##_rh, _field);		\
 	(_ptr)->_struct##_size_rh > __off ? true : false;		\
 })
+
+#if IS_BUILTIN(CONFIG_RH_KABI_STABLE_ASM_OFFSETS)
+# define RH_KABI_ASSERT_EQ_CONSTEXPR(kind, sym, expval, val) {                \
+	typedef char kind;                                                    \
+	kind (*expected)[expval];                                             \
+	kind (*actual)[val];                                                  \
+	_Static_assert((expval) == (val), "unexpected value of " sym);        \
+	expected = actual = NULL;                                             \
+}
+# define RH_KABI_ASSERT_EQ_CONST(expval, val)                                 \
+	_Static_assert((expval) == (val),                                     \
+		       "unexpected value of " #val " ("                       \
+		       "actual: " __stringify(val) ", "                       \
+		       "expected: " __stringify(expval) ")")
+#else
+# define RH_KABI_ASSERT_EQ_CONSTEXPR(kind, sym, expval, val)
+# define RH_KABI_ASSERT_EQ_CONST(expval, val)
+#endif
 
 #endif /* _LINUX_RH_KABI_H */

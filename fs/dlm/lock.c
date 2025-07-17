@@ -2923,11 +2923,23 @@ static int validate_lock_args(struct dlm_ls *ls, struct dlm_lkb *lkb,
 	lkb->lkb_timeout_cs = args->timeout;
 	rv = 0;
  out:
-	if (rv)
-		log_debug(ls, "validate_lock_args %d %x %x %x %d %d %s",
+	switch (rv) {
+	case 0:
+		break;
+	case -EINVAL:
+		/* annoy the user because dlm usage is wrong */
+		WARN_ON(1);
+		log_error(ls, "%s %d %x %x %x %d %d", __func__,
 			  rv, lkb->lkb_id, lkb->lkb_flags, args->flags,
-			  lkb->lkb_status, lkb->lkb_wait_type,
-			  lkb->lkb_resource->res_name);
+			  lkb->lkb_status, lkb->lkb_wait_type);
+		break;
+	default:
+		log_debug(ls, "%s %d %x %x %x %d %d", __func__,
+			  rv, lkb->lkb_id, lkb->lkb_flags, args->flags,
+			  lkb->lkb_status, lkb->lkb_wait_type);
+		break;
+	}
+
 	return rv;
 }
 
@@ -3060,11 +3072,25 @@ static int validate_unlock_args(struct dlm_lkb *lkb, struct dlm_args *args)
 	lkb->lkb_astparam = args->astparam;
 	rv = 0;
  out:
-	if (rv)
-		log_debug(ls, "validate_unlock_args %d %x %x %x %x %d %s", rv,
+	switch (rv) {
+	case 0:
+		break;
+	case -EINVAL:
+		/* annoy the user because dlm usage is wrong */
+		WARN_ON(1);
+		log_error(ls, "%s %d %x %x %x %x %d %s", __func__, rv,
 			  lkb->lkb_id, lkb->lkb_flags, lkb->lkb_exflags,
 			  args->flags, lkb->lkb_wait_type,
 			  lkb->lkb_resource->res_name);
+		break;
+	default:
+		log_debug(ls, "%s %d %x %x %x %x %d %s", __func__, rv,
+			  lkb->lkb_id, lkb->lkb_flags, lkb->lkb_exflags,
+			  args->flags, lkb->lkb_wait_type,
+			  lkb->lkb_resource->res_name);
+		break;
+	}
+
 	return rv;
 }
 
