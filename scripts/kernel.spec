@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.22.1
+%define pkgrelease 55.24.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.22.1.el10_0
+%define tarfile_release 6.12.0-55.24.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.22.1%{?buildid}%{?dist}
+%define specrelease 55.24.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.22.1.el10_0
+%define kabiversion 6.12.0-55.24.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4313,10 +4313,23 @@ fi\
 #
 #
 %changelog
-* Tue Jul 22 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.22.1
+* Mon Jul 28 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.24.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Wed Jul 23 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.24.1.el10_0]
+- net_sched: hfsc: Fix a UAF vulnerability in class handling (CKI Backport Bot) [RHEL-95867] {CVE-2025-37797}
+
+* Sun Jul 20 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.23.1.el10_0]
+- ext4: fix out-of-bound read in ext4_xattr_inode_dec_ref_all() (CKI Backport Bot) [RHEL-93570] {CVE-2025-22121}
+- ext4: introduce ITAIL helper (CKI Backport Bot) [RHEL-93570] {CVE-2025-22121}
+- net/mdiobus: Fix potential out-of-bounds clause 45 read/write access (CKI Backport Bot) [RHEL-102097] {CVE-2025-38110}
+- powerpc/vas: Return -EINVAL if the offset is non-zero in mmap() (Mamatha Inamdar) [RHEL-101307] {CVE-2025-38088}
+- powerpc/powernv/memtrace: Fix out of bounds issue in memtrace mmap (Mamatha Inamdar) [RHEL-101307] {CVE-2025-38088}
+- net/mlx5: Fill out devlink dev info only for PFs (CKI Backport Bot) [RHEL-93772]
+- RDMA/mlx5: Fix page_size variable overflow (CKI Backport Bot) [RHEL-99325] {CVE-2025-22091}
+- ACPI: CPPC: Fix _CPC register setting issue (Mark Langsdorf) [RHEL-85317]
 
 * Sun Jul 13 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.22.1.el10_0]
 - mm/huge_memory: fix dereferencing invalid pmd migration entry (Luiz Capitulino) [RHEL-96384] {CVE-2025-37958}

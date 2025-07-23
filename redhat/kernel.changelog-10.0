@@ -1,3 +1,18 @@
+* Wed Jul 23 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.24.1.el10_0]
+- net_sched: hfsc: Fix a UAF vulnerability in class handling (CKI Backport Bot) [RHEL-95867] {CVE-2025-37797}
+Resolves: RHEL-95867
+
+* Sun Jul 20 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.23.1.el10_0]
+- ext4: fix out-of-bound read in ext4_xattr_inode_dec_ref_all() (CKI Backport Bot) [RHEL-93570] {CVE-2025-22121}
+- ext4: introduce ITAIL helper (CKI Backport Bot) [RHEL-93570] {CVE-2025-22121}
+- net/mdiobus: Fix potential out-of-bounds clause 45 read/write access (CKI Backport Bot) [RHEL-102097] {CVE-2025-38110}
+- powerpc/vas: Return -EINVAL if the offset is non-zero in mmap() (Mamatha Inamdar) [RHEL-101307] {CVE-2025-38088}
+- powerpc/powernv/memtrace: Fix out of bounds issue in memtrace mmap (Mamatha Inamdar) [RHEL-101307] {CVE-2025-38088}
+- net/mlx5: Fill out devlink dev info only for PFs (CKI Backport Bot) [RHEL-93772]
+- RDMA/mlx5: Fix page_size variable overflow (CKI Backport Bot) [RHEL-99325] {CVE-2025-22091}
+- ACPI: CPPC: Fix _CPC register setting issue (Mark Langsdorf) [RHEL-85317]
+Resolves: RHEL-101307, RHEL-102097, RHEL-85317, RHEL-93570, RHEL-93772, RHEL-99325
+
 * Sun Jul 13 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.22.1.el10_0]
 - mm/huge_memory: fix dereferencing invalid pmd migration entry (Luiz Capitulino) [RHEL-96384] {CVE-2025-37958}
 - i2c: tegra: check msg length in SMBUS block read (Steve Dunnagan) [RHEL-99824]
