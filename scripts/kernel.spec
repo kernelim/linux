@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 570.28.1
+%define pkgrelease 570.30.1
 %define kversion 5
-%define tarfile_release 5.14.0-570.28.1.el9_6
+%define tarfile_release 5.14.0-570.30.1.el9_6
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 570.28.1%{?buildid}%{?dist}
+%define specrelease 570.30.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-570.28.1.el9_6
+%define kabiversion 5.14.0-570.30.1.el9_6
 
 #
 # End of genspec.sh variables
@@ -3787,9 +3787,33 @@ fi
 #
 #
 %changelog
-* Mon Jul 21 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.28.1
+* Mon Jul 28 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.30.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Thu Jul 24 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.30.1.el9_6]
+- net_sched: hfsc: Fix a UAF vulnerability in class handling (Davide Caratti) [RHEL-95853] {CVE-2025-37797}
+
+* Sat Jul 19 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.29.1.el9_6]
+- tcp: adjust rcvq_space after updating scaling ratio (Guillaume Nault) [RHEL-99145]
+- ext4: fix out-of-bound read in ext4_xattr_inode_dec_ref_all() (CKI Backport Bot) [RHEL-93555] {CVE-2025-22121}
+- ext4: introduce ITAIL helper (CKI Backport Bot) [RHEL-93555] {CVE-2025-22121}
+- ext4: avoid journaling sb update on error if journal is destroying (Brian Foster) [RHEL-93591] {CVE-2025-22113}
+- ext4: define ext4_journal_destroy wrapper (Brian Foster) [RHEL-93591]
+- net/mdiobus: Fix potential out-of-bounds clause 45 read/write access (CKI Backport Bot) [RHEL-102093] {CVE-2025-38110}
+- smb: client: fix regression with native SMB symlinks (Paulo Alcantara) [RHEL-101953]
+- redhat/configs: remove automotive directory (Eric Chanudet) [RHEL-96365]
+- r8169: enable RTL8168H/RTL8168EP/RTL8168FP ASPM support (CKI Backport Bot) [RHEL-96715]
+- r8169: disable RTL8126 ZRX-DC timeout (CKI Backport Bot) [RHEL-96715]
+- net: ch9200: fix uninitialised access during mii_nway_restart (CKI Backport Bot) [RHEL-101212] {CVE-2025-38086}
+- media: uvcvideo: Fix double free in error path (CKI Backport Bot) [RHEL-98795] {CVE-2024-57980}
+- RDMA/mlx5: Fix page_size variable overflow (CKI Backport Bot) [RHEL-99320] {CVE-2025-22091}
+- wifi: iwlwifi: limit printed string from FW file (CKI Backport Bot) [RHEL-99384] {CVE-2025-21905}
+- RDMA/core: Fix use-after-free when rename device name (CKI Backport Bot) [RHEL-99048] {CVE-2025-22085}
+- octeon_ep: Fix host hang issue during device reboot (CKI Backport Bot) [RHEL-93251]
+- mm/huge_memory: fix dereferencing invalid pmd migration entry (Rafael Aquini) [RHEL-96368] {CVE-2025-37958}
+- octeon_ep_vf: Resolve netdevice usage count issue (CKI Backport Bot) [RHEL-93252]
+- s390/virtio_ccw: Don't allocate/assign airqs for non-existing queues (CKI Backport Bot) [RHEL-87555]
 
 * Tue Jul 15 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.28.1.el9_6]
 - sunrpc: handle SVC_GARBAGE during svc auth processing as auth error (CKI Backport Bot) [RHEL-101327] {CVE-2025-38089}
