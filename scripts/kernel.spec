@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 570.30.1
+%define pkgrelease 570.32.1
 %define kversion 5
-%define tarfile_release 5.14.0-570.30.1.el9_6
+%define tarfile_release 5.14.0-570.32.1.el9_6
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 570.30.1%{?buildid}%{?dist}
+%define specrelease 570.32.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-570.30.1.el9_6
+%define kabiversion 5.14.0-570.32.1.el9_6
 
 #
 # End of genspec.sh variables
@@ -3787,9 +3787,33 @@ fi
 #
 #
 %changelog
-* Mon Jul 28 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.30.1
+* Thu Aug 07 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.32.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Mon Jul 28 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.32.1.el9_6]
+- net_sched: hfsc: Address reentrant enqueue adding class to eltree twice (Davide Caratti) [RHEL-97522] {CVE-2025-38001 CVE-2025-37890}
+- sch_hfsc: Fix qlen accounting bug when using peek in hfsc_enqueue() (Davide Caratti) [RHEL-97522] {CVE-2025-38000}
+- net_sched: hfsc: Fix a UAF vulnerability in class with netem as child qdisc (Davide Caratti) [RHEL-97522] {CVE-2025-37890}
+- sch_hfsc: make hfsc_qlen_notify() idempotent (Ivan Vecera) [RHEL-97522]
+- HID: intel-ish-hid: Fix use-after-free issue in ishtp_hid_remove() (CKI Backport Bot) [RHEL-98847] {CVE-2025-21928}
+- HID: intel-ish-hid: Fix use-after-free issue in hid_ishtp_cl_remove() (CKI Backport Bot) [RHEL-98871] {CVE-2025-21929}
+
+* Sat Jul 26 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.31.1.el9_6]
+- Bluetooth: btusb: avoid NULL pointer dereference in skb_dequeue() (David Marlin) [RHEL-95324] {CVE-2025-37918}
+- memstick: rtsx_usb_ms: Fix slab-use-after-free in rtsx_usb_ms_drv_remove (Desnes Nunes) [RHEL-99029] {CVE-2025-22020}
+- misc/vmw_vmci: fix an infoleak in vmci_host_do_receive_datagram() (John W. Linville) [RHEL-97499] {CVE-2022-49788}
+- net: tipc: fix refcount warning in tipc_aead_encrypt (Xin Long) [RHEL-103087]
+- net/tipc: fix slab-use-after-free Read in tipc_aead_encrypt_done (CKI Backport Bot) [RHEL-103087] {CVE-2025-38052}
+- md/raid1: Add check for missing source disk in process_checks() (CKI Backport Bot) [RHEL-97439]
+- net/sched: fix use-after-free in taprio_dev_notifier (CKI Backport Bot) [RHEL-101317] {CVE-2025-38087}
+- padata: avoid UAF for reorder_work (Rafael Aquini) [RHEL-97031] {CVE-2025-21727 CVE-2025-21726}
+- padata: fix UAF in padata_reorder (Rafael Aquini) [RHEL-97031] {CVE-2025-21727}
+- padata: add pd get/put refcnt helper (Rafael Aquini) [RHEL-97031] {CVE-2025-21727}
+- padata: fix sysfs store callback check (Rafael Aquini) [RHEL-97031] {CVE-2025-21727}
+- padata: Clean up in padata_do_multithreaded() (Rafael Aquini) [RHEL-97031] {CVE-2025-21727}
+- platform/x86: dell_rbu: Fix list usage (David Arcari) [RHEL-100908]
+- cifs: Fix integer overflow while processing closetimeo mount option (CKI Backport Bot) [RHEL-87900] {CVE-2025-21962}
 
 * Thu Jul 24 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.30.1.el9_6]
 - net_sched: hfsc: Fix a UAF vulnerability in class handling (Davide Caratti) [RHEL-95853] {CVE-2025-37797}
