@@ -801,9 +801,10 @@ __ro_after_init unsigned long poking_addr;
 
 static void *__text_poke(void *addr, const void *opcode, size_t len)
 {
+	bool cross_page_boundary = offset_in_page(addr) + len > PAGE_SIZE;
+	struct page *pages[2] = {NULL, NULL};
 	unsigned long flags;
 	char *vaddr;
-	struct page *pages[2];
 	int i;
 
 	/*
@@ -814,21 +815,28 @@ static void *__text_poke(void *addr, const void *opcode, size_t len)
 
 	if (!core_kernel_text((unsigned long)addr)) {
 		pages[0] = vmalloc_to_page(addr);
-		pages[1] = vmalloc_to_page(addr + PAGE_SIZE);
+		if (cross_page_boundary)
+			pages[1] = vmalloc_to_page(addr + PAGE_SIZE);
 	} else {
 		pages[0] = virt_to_page(addr);
 		WARN_ON(!PageReserved(pages[0]));
-		pages[1] = virt_to_page(addr + PAGE_SIZE);
+		if (cross_page_boundary)
+			pages[1] = virt_to_page(addr + PAGE_SIZE);
 	}
-	BUG_ON(!pages[0]);
+	/*
+	 * If something went wrong, crash and burn since recovery paths are not
+	 * implemented.
+	 */
+	BUG_ON(!pages[0] || (cross_page_boundary && !pages[1]));
+
 	local_irq_save(flags);
 	set_fixmap(FIX_TEXT_POKE0, page_to_phys(pages[0]));
-	if (pages[1])
+	if (cross_page_boundary)
 		set_fixmap(FIX_TEXT_POKE1, page_to_phys(pages[1]));
 	vaddr = (char *)fix_to_virt(FIX_TEXT_POKE0);
 	memcpy(&vaddr[(unsigned long)addr & ~PAGE_MASK], opcode, len);
 	clear_fixmap(FIX_TEXT_POKE0);
-	if (pages[1])
+	if (cross_page_boundary)
 		clear_fixmap(FIX_TEXT_POKE1);
 	local_flush_tlb();
 	sync_core();
