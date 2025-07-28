@@ -1357,9 +1357,14 @@ static void ib_device_notify_register(struct ib_device *device)
 	u32 port;
 	int ret;
 
+	down_read(&devices_rwsem);
+
+	/* Mark for userspace that device is ready */
+	kobject_uevent(&device->dev.kobj, KOBJ_ADD);
+
 	ret = rdma_nl_notify_event(device, 0, RDMA_REGISTER_EVENT);
 	if (ret)
-		return;
+		goto out;
 
 	rdma_for_each_port(device, port) {
 		netdev = ib_device_get_netdev(device, port);
@@ -1370,8 +1375,11 @@ static void ib_device_notify_register(struct ib_device *device)
 					   RDMA_NETDEV_ATTACH_EVENT);
 		dev_put(netdev);
 		if (ret)
-			return;
+			goto out;
 	}
+
+out:
+	up_read(&devices_rwsem);
 }
 
 /**
@@ -1470,10 +1478,9 @@ int ib_register_device(struct ib_device *device, const char *name,
 		return ret;
 	}
 	dev_set_uevent_suppress(&device->dev, false);
-	/* Mark for userspace that device is ready */
-	kobject_uevent(&device->dev.kobj, KOBJ_ADD);
 
 	ib_device_notify_register(device);
+
 	ib_device_put(device);
 
 	return 0;
