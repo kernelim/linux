@@ -1213,12 +1213,16 @@ EXPORT_SYMBOL(padata_alloc_shell);
  */
 void padata_free_shell(struct padata_shell *ps)
 {
-	struct padata_instance *pinst = ps->pinst;
+	/*
+	 * Wait for all _do_serial calls to finish to avoid touching
+	 * freed pd's and ps's.
+	 */
+	synchronize_rcu();
 
-	mutex_lock(&pinst->lock);
+	mutex_lock(&ps->pinst->lock);
 	list_del(&ps->list);
 	padata_free_pd(rcu_dereference_protected(ps->pd, 1));
-	mutex_unlock(&pinst->lock);
+	mutex_unlock(&ps->pinst->lock);
 
 	kfree(ps);
 }

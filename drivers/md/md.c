@@ -2367,7 +2367,7 @@ int md_integrity_register(struct mddev *mddev)
 	pr_debug("md: data integrity enabled on %s\n", mdname(mddev));
 	if (bioset_integrity_create(&mddev->bio_set, BIO_POOL_SIZE) ||
 	    (mddev->level != 1 && mddev->level != 10 &&
-	     bioset_integrity_create(&mddev->io_acct_set, BIO_POOL_SIZE))) {
+	     bioset_integrity_create(&mddev->io_clone_set, BIO_POOL_SIZE))) {
 		/*
 		 * No need to handle the failure of bioset_integrity_create,
 		 * because the function is called by md_run() -> pers->run(),
@@ -5984,9 +5984,9 @@ int md_run(struct mddev *mddev)
 			goto exit_bio_set;
 	}
 
-	if (!bioset_initialized(&mddev->io_acct_set)) {
-		err = bioset_init(&mddev->io_acct_set, BIO_POOL_SIZE,
-				  offsetof(struct md_io_acct, bio_clone), 0);
+	if (!bioset_initialized(&mddev->io_clone_set)) {
+		err = bioset_init(&mddev->io_clone_set, BIO_POOL_SIZE,
+				  offsetof(struct md_io_clone, bio_clone), 0);
 		if (err)
 			goto exit_sync_set;
 	}
@@ -6172,7 +6172,7 @@ bitmap_abort:
 	module_put(pers->owner);
 	md_bitmap_destroy(mddev);
 abort:
-	bioset_exit(&mddev->io_acct_set);
+	bioset_exit(&mddev->io_clone_set);
 exit_sync_set:
 	bioset_exit(&mddev->sync_set);
 exit_bio_set:
@@ -6398,7 +6398,7 @@ static void __md_stop(struct mddev *mddev)
 	percpu_ref_exit(&mddev->active_io);
 	bioset_exit(&mddev->bio_set);
 	bioset_exit(&mddev->sync_set);
-	bioset_exit(&mddev->io_acct_set);
+	bioset_exit(&mddev->io_clone_set);
 }
 
 void md_stop(struct mddev *mddev)
@@ -8768,44 +8768,69 @@ void md_submit_discard_bio(struct mddev *mddev, struct md_rdev *rdev,
 }
 EXPORT_SYMBOL_GPL(md_submit_discard_bio);
 
-static void md_end_io_acct(struct bio *bio)
+static void md_bitmap_start(struct mddev *mddev,
+			    struct md_io_clone *md_io_clone)
 {
-	struct md_io_acct *md_io_acct = bio->bi_private;
-	struct bio *orig_bio = md_io_acct->orig_bio;
-	struct mddev *mddev = md_io_acct->mddev;
+	if (mddev->pers->bitmap_sector)
+		mddev->pers->bitmap_sector(mddev, &md_io_clone->offset,
+					   &md_io_clone->sectors);
+
+	md_bitmap_startwrite(mddev->bitmap, md_io_clone->offset,
+				      md_io_clone->sectors);
+}
+
+static void md_bitmap_end(struct mddev *mddev, struct md_io_clone *md_io_clone)
+{
+	md_bitmap_endwrite(mddev->bitmap, md_io_clone->offset,
+				    md_io_clone->sectors);
+}
+
+static void md_end_clone_io(struct bio *bio)
+{
+	struct md_io_clone *md_io_clone = bio->bi_private;
+	struct bio *orig_bio = md_io_clone->orig_bio;
+	struct mddev *mddev = md_io_clone->mddev;
+
+	if (bio_data_dir(orig_bio) == WRITE && mddev->bitmap)
+		md_bitmap_end(mddev, md_io_clone);
 
 	orig_bio->bi_status = bio->bi_status;
 
-	bio_end_io_acct(orig_bio, md_io_acct->start_time);
+	if (md_io_clone->start_time)
+		bio_end_io_acct(orig_bio, md_io_clone->start_time);
+
 	bio_put(bio);
 	bio_endio(orig_bio);
-
 	percpu_ref_put(&mddev->active_io);
 }
 
-/*
- * Used by personalities that don't already clone the bio and thus can't
- * easily add the timestamp to their extended bio structure.
- */
+static void md_clone_bio(struct mddev *mddev, struct bio **bio)
+{
+	struct md_io_clone *md_io_clone;
+	struct bio *clone =
+		bio_clone_fast(*bio, GFP_NOIO, &mddev->io_clone_set);
+
+	md_io_clone = container_of(clone, struct md_io_clone, bio_clone);
+	md_io_clone->orig_bio = *bio;
+	md_io_clone->mddev = mddev;
+	if (blk_queue_io_stat((*bio)->bi_disk->queue))
+		md_io_clone->start_time = bio_start_io_acct(*bio);
+
+	if (bio_data_dir(*bio) == WRITE && mddev->bitmap) {
+		md_io_clone->offset = (*bio)->bi_iter.bi_sector;
+		md_io_clone->sectors = bio_sectors(*bio);
+		md_bitmap_start(mddev, md_io_clone);
+	}
+
+	clone->bi_end_io = md_end_clone_io;
+	clone->bi_private = md_io_clone;
+	*bio = clone;
+}
+
 void md_account_bio(struct mddev *mddev, struct bio **bio)
 {
-	struct md_io_acct *md_io_acct;
-	struct bio *clone;
-
-	if (!blk_queue_io_stat((*bio)->bi_disk->queue))
-		return;
-
 	percpu_ref_get(&mddev->active_io);
-
-	clone = bio_clone_fast(*bio, GFP_NOIO, &mddev->io_acct_set);
-	md_io_acct = container_of(clone, struct md_io_acct, bio_clone);
-	md_io_acct->orig_bio = *bio;
-	md_io_acct->start_time = bio_start_io_acct(*bio);
-	md_io_acct->mddev = mddev;
-
-	clone->bi_end_io = md_end_io_acct;
-	clone->bi_private = md_io_acct;
-	*bio = clone;
+	md_clone_bio(mddev, bio);
 }
 EXPORT_SYMBOL_GPL(md_account_bio);
 
