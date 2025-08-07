@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 570.32.1
+%define pkgrelease 570.33.2
 %define kversion 5
-%define tarfile_release 5.14.0-570.32.1.el9_6
+%define tarfile_release 5.14.0-570.33.2.el9_6
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 570.32.1%{?buildid}%{?dist}
+%define specrelease 570.33.2%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-570.32.1.el9_6
+%define kabiversion 5.14.0-570.33.2.el9_6
 
 #
 # End of genspec.sh variables
@@ -3787,9 +3787,35 @@ fi
 #
 #
 %changelog
-* Thu Aug 07 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.32.1
+* Thu Aug 14 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.33.2
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Thu Aug 07 2025 Patrick Talbert <ptalbert@redhat.com> [5.14.0-570.33.2.el9_6]
+- Revert "sch_htb: make htb_qlen_notify() idempotent" (Patrick Talbert) [RHEL-108138]
+- Revert "sch_drr: make drr_qlen_notify() idempotent" (Patrick Talbert) [RHEL-108138]
+- Revert "sch_qfq: make qfq_qlen_notify() idempotent" (Patrick Talbert) [RHEL-108138]
+- Revert "codel: remove sch->q.qlen check before qdisc_tree_reduce_backlog()" (Patrick Talbert) [RHEL-108138]
+- Revert "sch_htb: make htb_deactivate() idempotent" (Patrick Talbert) [RHEL-108138]
+- Revert "net/sched: Always pass notifications when child class becomes empty" (Patrick Talbert) [RHEL-108138]
+
+* Sat Aug 02 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.33.1.el9_6]
+- net/sched: Always pass notifications when child class becomes empty (CKI Backport Bot) [RHEL-93387] {CVE-2025-38350}
+- sch_htb: make htb_deactivate() idempotent (CKI Backport Bot) [RHEL-93387] {CVE-2025-38350}
+- codel: remove sch->q.qlen check before qdisc_tree_reduce_backlog() (CKI Backport Bot) [RHEL-93387] {CVE-2025-38350}
+- sch_qfq: make qfq_qlen_notify() idempotent (CKI Backport Bot) [RHEL-93387] {CVE-2025-38350}
+- sch_drr: make drr_qlen_notify() idempotent (CKI Backport Bot) [RHEL-93387] {CVE-2025-38350}
+- sch_htb: make htb_qlen_notify() idempotent (CKI Backport Bot) [RHEL-93387] {CVE-2025-38350}
+- redhat: update BUILD_TARGET to rhel-9.6.0-z-test-pesign (Jan Stancek)
+- PCI: Use downstream bridges for distributing resources (Jennifer Berringer) [RHEL-102666]
+- PCI/ACS: Fix 'pci=config_acs=' parameter (Charles Mirabile) [RHEL-102652]
+- PCI: Fix pci_enable_acs() support for the ACS quirks (Charles Mirabile) [RHEL-102652]
+- Documentation: Fix pci=config_acs= example (Charles Mirabile) [RHEL-102652]
+- Revert "PCI: Wait for device readiness with Configuration RRS" (John W. Linville) [RHEL-94414]
+- bnxt_en: Skip MAC loopback selftest if it is unsupported by FW (CKI Backport Bot) [RHEL-82564]
+- bnxt_en: Skip PHY loopback ethtool selftest if unsupported by FW (CKI Backport Bot) [RHEL-82564]
+- wifi: ath12k: fix invalid access to memory (CKI Backport Bot) [RHEL-103219] {CVE-2025-38292}
+- crypto: algif_hash - fix double free in hash_accept (CKI Backport Bot) [RHEL-102235] {CVE-2025-38079}
 
 * Mon Jul 28 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.32.1.el9_6]
 - net_sched: hfsc: Address reentrant enqueue adding class to eltree twice (Davide Caratti) [RHEL-97522] {CVE-2025-38001 CVE-2025-37890}

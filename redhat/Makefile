@@ -270,7 +270,7 @@ else
     else
       # This value is used by the dist[g]-targets.  Changing this value has significant
       # consequences for all of RHEL kernel engineering.
-      BUILD_TARGET:=rhel-$(RHEL_MAJOR).$(RHEL_MINOR).0-test-pesign
+      BUILD_TARGET:=rhel-$(RHEL_MAJOR).$(RHEL_MINOR).0-z-test-pesign
     endif
   endif
   ifeq ("$(DIST)", ".eln)
