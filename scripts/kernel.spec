@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.25.1
+%define pkgrelease 55.27.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.25.1.el10_0
+%define tarfile_release 6.12.0-55.27.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.25.1%{?buildid}%{?dist}
+%define specrelease 55.27.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.25.1.el10_0
+%define kabiversion 6.12.0-55.27.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4313,10 +4313,44 @@ fi\
 #
 #
 %changelog
-* Thu Aug 07 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.25.1
+* Thu Aug 14 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.27.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Fri Aug 08 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.27.1.el10_0]
+- Revert "sch_htb: make htb_qlen_notify() idempotent" (Jan Stancek) [RHEL-108141]
+- Revert "sch_drr: make drr_qlen_notify() idempotent" (Jan Stancek) [RHEL-108141]
+- Revert "sch_qfq: make qfq_qlen_notify() idempotent" (Jan Stancek) [RHEL-108141]
+- Revert "codel: remove sch->q.qlen check before qdisc_tree_reduce_backlog()" (Jan Stancek) [RHEL-108141]
+- Revert "sch_htb: make htb_deactivate() idempotent" (Jan Stancek) [RHEL-108141]
+- Revert "net/sched: Always pass notifications when child class becomes empty" (Jan Stancek) [RHEL-108141]
+
+* Sun Aug 03 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.26.1.el10_0]
+- wifi: rtw88: fix the 'para' buffer size to avoid reading out of bounds (CKI Backport Bot) [RHEL-103169] {CVE-2025-38159}
+- Documentation: Fix pci=config_acs= example (Steve Dunnagan) [RHEL-102663]
+- PCI/ACS: Fix 'pci=config_acs=' parameter (Steve Dunnagan) [RHEL-102663]
+- Revert "smb: client: fix TCP timers deadlock after rmmod" (Paulo Alcantara) [RHEL-106417] {CVE-2025-22077}
+- Revert "smb: client: Fix netns refcount imbalance causing leaks and use-after-free" (Paulo Alcantara) [RHEL-106417]
+- smb: client: Fix netns refcount imbalance causing leaks and use-after-free (Paulo Alcantara) [RHEL-106417]
+- wifi: ath12k: fix invalid access to memory (CKI Backport Bot) [RHEL-103228] {CVE-2025-38292}
+- x86/CPU/AMD: Terminate the erratum_1386_microcode array (CKI Backport Bot) [RHEL-104884] {CVE-2024-56721}
+- crypto: algif_hash - fix double free in hash_accept (CKI Backport Bot) [RHEL-102247] {CVE-2025-38079}
+- net/sched: Always pass notifications when child class becomes empty (CKI Backport Bot) [RHEL-93365] {CVE-2025-38350}
+- sch_htb: make htb_deactivate() idempotent (CKI Backport Bot) [RHEL-93365] {CVE-2025-38350}
+- codel: remove sch->q.qlen check before qdisc_tree_reduce_backlog() (CKI Backport Bot) [RHEL-93365] {CVE-2025-38350}
+- sch_qfq: make qfq_qlen_notify() idempotent (CKI Backport Bot) [RHEL-93365] {CVE-2025-38350}
+- sch_drr: make drr_qlen_notify() idempotent (CKI Backport Bot) [RHEL-93365] {CVE-2025-38350}
+- sch_htb: make htb_qlen_notify() idempotent (CKI Backport Bot) [RHEL-93365] {CVE-2025-38350}
+- redhat: update BUILD_TARGET to use rhel-10.0-z-test-pesign (Jan Stancek)
+- mm/hugetlb: fix huge_pmd_unshare() vs GUP-fast race (Rafael Aquini) [RHEL-101263] {CVE-2025-38085}
+- mm/hugetlb: unshare page tables during VMA split, not before (Rafael Aquini) [RHEL-101298] {CVE-2025-38084}
+- tools/testing/vma: add missing function stub (Rafael Aquini) [RHEL-101298]
+- mm: fix copy_vma() error handling for hugetlb mappings (Rafael Aquini) [RHEL-101298]
+- PCI: Use downstream bridges for distributing resources (Jennifer Berringer) [RHEL-102664]
+- PCI/pwrctrl: Cancel outstanding rescan work when unregistering (Myron Stowe) [RHEL-103212] {CVE-2025-38137}
+- bnxt_en: Skip MAC loopback selftest if it is unsupported by FW (CKI Backport Bot) [RHEL-82538]
+- bnxt_en: Skip PHY loopback ethtool selftest if unsupported by FW (CKI Backport Bot) [RHEL-82538]
 
 * Mon Jul 28 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.25.1.el10_0]
 - net_sched: hfsc: Address reentrant enqueue adding class to eltree twice (Ivan Vecera) [RHEL-97533] {CVE-2025-38001}

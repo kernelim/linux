@@ -735,6 +735,8 @@ static inline void vma_adjust_trans_huge(struct vm_area_struct *vma,
 	(void)adjust_next;
 }
 
+static inline void hugetlb_split(struct vm_area_struct *, unsigned long) {}
+
 static inline void vma_iter_free(struct vma_iterator *vmi)
 {
 	mas_destroy(&vmi->mas);
@@ -918,6 +920,11 @@ static inline bool mutex_is_locked(struct mutex *)
 static inline bool signal_pending(void *)
 {
 	return false;
+}
+
+static inline void fixup_hugetlb_reservations(struct vm_area_struct *vma)
+{
+	(void)vma;
 }
 
 #endif	/* __MM_VMA_INTERNAL_H */
