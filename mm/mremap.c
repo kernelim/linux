@@ -676,9 +676,7 @@ static unsigned long move_vma(struct vm_area_struct *vma,
 		mremap_userfaultfd_prep(new_vma, uf);
 	}
 
-	if (is_vm_hugetlb_page(vma)) {
-		clear_vma_resv_huge_pages(vma);
-	}
+	fixup_hugetlb_reservations(vma);
 
 	/* Conceal VM_ACCOUNT so old reservation is not undone */
 	if (vm_flags & VM_ACCOUNT && !(flags & MREMAP_DONTUNMAP)) {

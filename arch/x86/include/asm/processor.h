@@ -113,6 +113,26 @@ struct cpuinfo_topology {
 	u32			l2c_id;
 };
 
+struct cpuinfo_topology_rh {
+	// Hardware defined CPU-type
+	union {
+		u32		cpu_type;
+		struct {
+			// CPUID.1A.EAX[23-0]
+			u32	intel_native_model_id	:24;
+			// CPUID.1A.EAX[31-24]
+			u32	intel_type		:8;
+		};
+		struct {
+			// CPUID 0x80000026.EBX
+			u32	amd_num_processors	:16,
+				amd_power_eff_ranking	:8,
+				amd_native_model_id	:4,
+				amd_type		:4;
+		};
+	};
+};
+
 struct cpuinfo_x86 {
 	union {
 		/*
@@ -179,7 +199,8 @@ struct cpuinfo_x86 {
 	/* Address space bits used by the cache internally */
 	u8			x86_cache_bits;
 	unsigned		initialized : 1;
-	RH_KABI_RESERVE(1)
+
+	RH_KABI_USE(1, struct cpuinfo_topology_rh topo_rh)
 	RH_KABI_RESERVE(2)
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)

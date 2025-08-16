@@ -6,7 +6,35 @@
 #include <linux/slab.h>
 
 /**
- * x86_match_cpu - match current CPU again an array of x86_cpu_ids
+ * x86_match_vendor_cpu_type - helper function to match the hardware defined
+ *                             cpu-type for a single entry in the x86_cpu_id
+ *                             table. Note, this function does not match the
+ *                             generic cpu-types TOPO_CPU_TYPE_EFFICIENCY and
+ *                             TOPO_CPU_TYPE_PERFORMANCE.
+ * @c: Pointer to the cpuinfo_x86 structure of the CPU to match.
+ * @m: Pointer to the x86_cpu_id entry to match against.
+ *
+ * Return: true if the cpu-type matches, false otherwise.
+ */
+static bool x86_match_vendor_cpu_type(struct cpuinfo_x86 *c, const struct x86_cpu_id *m)
+{
+	if (m->type == X86_CPU_TYPE_ANY)
+		return true;
+
+	/* Hybrid CPUs are special, they are assumed to match all cpu-types */
+	if (cpu_feature_enabled(X86_FEATURE_HYBRID_CPU))
+		return true;
+
+	if (c->x86_vendor == X86_VENDOR_INTEL)
+		return m->type == c->topo_rh.intel_type;
+	if (c->x86_vendor == X86_VENDOR_AMD)
+		return m->type == c->topo_rh.amd_type;
+
+	return false;
+}
+
+/**
+ * x86_match_cpu - match current CPU against an array of x86_cpu_ids
  * @match: Pointer to array of x86_cpu_ids. Last entry terminated with
  *         {}.
  *
@@ -38,9 +66,7 @@ const struct x86_cpu_id *x86_match_cpu(const struct x86_cpu_id *match)
 	const struct x86_cpu_id *m;
 	struct cpuinfo_x86 *c = &boot_cpu_data;
 
-	for (m = match;
-	     m->vendor | m->family | m->model | m->steppings | m->feature;
-	     m++) {
+	for (m = match; m->flags & X86_CPU_ID_FLAG_ENTRY_VALID; m++) {
 		if (m->vendor != X86_VENDOR_ANY && c->x86_vendor != m->vendor)
 			continue;
 		if (m->family != X86_FAMILY_ANY && c->x86 != m->family)
@@ -51,6 +77,8 @@ const struct x86_cpu_id *x86_match_cpu(const struct x86_cpu_id *match)
 		    !(BIT(c->x86_stepping) & m->steppings))
 			continue;
 		if (m->feature != X86_FEATURE_ANY && !cpu_has(c, m->feature))
+			continue;
+		if (!x86_match_vendor_cpu_type(c, m))
 			continue;
 		return m;
 	}

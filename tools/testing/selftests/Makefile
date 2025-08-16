@@ -86,6 +86,7 @@ TARGETS += user
 TARGETS += vDSO
 TARGETS += mm
 TARGETS += x86
+TARGETS += x86/bugs
 TARGETS += zram
 #Please keep the TARGETS list alphabetically sorted
 # Run "make quicktest=1 run_tests" or
@@ -227,6 +228,7 @@ ifdef INSTALL_PATH
 	install -m 744 kselftest/runner.sh $(INSTALL_PATH)/kselftest/
 	install -m 744 kselftest/prefix.pl $(INSTALL_PATH)/kselftest/
 	install -m 744 kselftest/ktap_helpers.sh $(INSTALL_PATH)/kselftest/
+	install -m 744 kselftest/ksft.py $(INSTALL_PATH)/kselftest/
 	install -m 744 run_kselftest.sh $(INSTALL_PATH)/
 	install -m 744 prepare_system.sh $(INSTALL_PATH)/
 	rm -f $(TEST_LIST)

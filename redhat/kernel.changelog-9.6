@@ -1,11 +1,90 @@
-* Thu Aug 07 2025 Patrick Talbert <ptalbert@redhat.com> [5.14.0-570.33.2.el9_6]
+* Sat Aug 16 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.37.1.el9_6]
+- ice: fix eswitch code memory leak in reset scenario (CKI Backport Bot) [RHEL-108152] {CVE-2025-38417}
+- ftrace: Clean up hash direct_functions on register failures (Gregory Bell) [RHEL-105151]
+- ethtool: Fix set RXNFC command with symmetric RSS hash (Mohammad Heib) [RHEL-103526]
+- drm/i915: Give i915 and xe each their own display tracepoints (Jocelyn Falempe) [RHEL-94419]
+Resolves: RHEL-103526, RHEL-105151, RHEL-108152, RHEL-94419
+
+* Wed Aug 13 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.36.1.el9_6]
+- udp: Fix memory accounting leak. (Xin Long) [RHEL-104091] {CVE-2025-22058}
+- net_sched: ets: Fix double list add in class with netem as child qdisc (CKI Backport Bot) [RHEL-104719] {CVE-2025-37914}
+- sch_ets: make est_qlen_notify() idempotent (Ivan Vecera) [RHEL-104719]
+Resolves: RHEL-104091, RHEL-104719
+
+* Sat Aug 09 2025 Patrick Talbert <ptalbert@redhat.com> [5.14.0-570.35.1.el9_6]
+- s390/dasd: Remove DMA alignment (CKI Backport Bot) [RHEL-91593]
+- s390/cpumf: Update CPU Measurement facility extended counter set support (CKI Backport Bot) [RHEL-103066]
+- s390/topology: Improve topology detection (CKI Backport Bot) [RHEL-92100]
+- s390/pai: export number of sysfs attribute files (CKI Backport Bot) [RHEL-87178]
+- s390/pai: fix attr_event_free upper limit for pai device drivers (CKI Backport Bot) [RHEL-87178]
+- powerpc/64s/radix/kfence: map __kfence_pool at page granularity (Mamatha Inamdar) [RHEL-92081]
+- wifi: rtw88: fix the 'para' buffer size to avoid reading out of bounds (CKI Backport Bot) [RHEL-103151] {CVE-2025-38159}
+- redhat: Mark kernel incompatible with xdp-tools<1.5.4 (Felix Maurer) [RHEL-101008]
+- bpf, test_run: Fix use-after-free issue in eth_skb_pkt_type() (CKI Backport Bot) [RHEL-101008] {CVE-2025-21867}
+- arm64: proton-pack: Add new CPUs 'k' values for branch mitigation (Waiman Long) [RHEL-100603]
+- arm64: bpf: Only mitigate cBPF programs loaded by unprivileged users (Waiman Long) [RHEL-100603] {CVE-2025-37963}
+- arm64: bpf: Add BHB mitigation to the epilogue for cBPF programs (Waiman Long) [RHEL-100603] {CVE-2025-37948}
+- arm64: proton-pack: Expose whether the branchy loop k value (Waiman Long) [RHEL-100603]
+- arm64: proton-pack: Expose whether the platform is mitigated by firmware (Waiman Long) [RHEL-100603]
+- arm64: insn: Add support for encoding DSB (Waiman Long) [RHEL-100603]
+- redhat/configs: Enable CONFIG_MITIGATION_ITS for x86 (Waiman Long) [RHEL-100603]
+- selftest/x86/bugs: Add selftests for ITS (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/ibt: Keep IBT disabled during alternative patching (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/its: Align RETs in BHB clear sequence to avoid thunking (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/its: Add support for RSB stuffing mitigation (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/its: Add "vmexit" option to skip mitigation on some CPUs (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/its: Enable Indirect Target Selection mitigation (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/its: Add support for ITS-safe return thunk (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/its: Add support for ITS-safe indirect thunk (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/its: Enumerate Indirect Target Selection (ITS) bug (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- Documentation: x86/bugs/its: Add ITS documentation (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/bhi: Do not set BHI_DIS_S in 32-bit mode (Waiman Long) [RHEL-100603]
+- x86/bpf: Add IBHF call at end of classic BPF (Waiman Long) [RHEL-100603]
+- x86/bpf: Call branch history clearing sequence on exit (Waiman Long) [RHEL-100603]
+- arm64: errata: Assume that unknown CPUs _are_ vulnerable to Spectre BHB (Waiman Long) [RHEL-100603]
+- arm64: errata: Add QCOM_KRYO_4XX_GOLD to the spectre_bhb_k24_list (Waiman Long) [RHEL-100603]
+- x86/rfds: Exclude P-only parts from the RFDS affected list (Waiman Long) [RHEL-100603]
+- x86/cpu: Update x86_match_cpu() to also use cpu-type (Waiman Long) [RHEL-100603]
+- x86/cpu: Add cpu_type to struct x86_cpu_id (Waiman Long) [RHEL-100603]
+- x86/cpu: Shorten CPU matching macro (Waiman Long) [RHEL-100603]
+- x86/cpu: Fix the description of X86_MATCH_VFM_STEPS() (Waiman Long) [RHEL-100603]
+- selftests: Warn about skipped tests in result summary (Waiman Long) [RHEL-100603]
+- x86/cpu: Fix typo in x86_match_cpu()'s doc (Waiman Long) [RHEL-100603]
+- x86/cpu: Expose only stepping min/max interface (Waiman Long) [RHEL-100603]
+- x86/cpu: Add CPU type to struct cpuinfo_topology (Waiman Long) [RHEL-100603]
+- x86/cpufeatures: Add X86_FEATURE_AMD_HETEROGENEOUS_CORES (Waiman Long) [RHEL-100603]
+- x86/cpufeatures: Rename X86_FEATURE_FAST_CPPC to have AMD prefix (Waiman Long) [RHEL-100603]
+- tools/include: Sync x86 headers with the kernel sources (Waiman Long) [RHEL-100603]
+- selftests: ksft: Fix finished() helper exit code on skipped tests (Waiman Long) [RHEL-100603]
+- kselftest: Move ksft helper module to common directory (Waiman Long) [RHEL-100603]
+- platform/x86/intel/ifs: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- x86/platform/atom: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- cpufreq: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- x86/bugs: Add 'spectre_bhi=vmexit' cmdline option (Waiman Long) [RHEL-100603]
+- EDAC/skx: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- EDAC/i10nm: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- x86/cpu: Fix x86_match_cpu() to match just X86_VENDOR_INTEL (Waiman Long) [RHEL-100603]
+- x86/aperfmperf: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- x86/apic: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- x86/bugs: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- EDAC/i10nm: Add Intel Grand Ridge micro-server support (Waiman Long) [RHEL-100603]
 - Revert "sch_htb: make htb_qlen_notify() idempotent" (Patrick Talbert) [RHEL-108138]
 - Revert "sch_drr: make drr_qlen_notify() idempotent" (Patrick Talbert) [RHEL-108138]
 - Revert "sch_qfq: make qfq_qlen_notify() idempotent" (Patrick Talbert) [RHEL-108138]
 - Revert "codel: remove sch->q.qlen check before qdisc_tree_reduce_backlog()" (Patrick Talbert) [RHEL-108138]
 - Revert "sch_htb: make htb_deactivate() idempotent" (Patrick Talbert) [RHEL-108138]
 - Revert "net/sched: Always pass notifications when child class becomes empty" (Patrick Talbert) [RHEL-108138]
-Resolves: RHEL-108138
+Resolves: RHEL-100603, RHEL-101008, RHEL-103066, RHEL-103151, RHEL-108138, RHEL-87178, RHEL-91593, RHEL-92081, RHEL-92100, RHEL-92182
+
+* Wed Aug 06 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.34.1.el9_6]
+- i2c/designware: Fix an initialization issue (CKI Backport Bot) [RHEL-106625] {CVE-2025-38380}
+- tls: always refresh the queue when reading sock (CKI Backport Bot) [RHEL-106081] {CVE-2025-38471}
+- net: fix udp gso skb_segment after pull from frag_list (Guillaume Nault) [RHEL-103028] {CVE-2025-38124}
+- mm/hugetlb: fix huge_pmd_unshare() vs GUP-fast race (Rafael Aquini) [RHEL-101246] {CVE-2025-38085}
+- mm/hugetlb: unshare page tables during VMA split, not before (Rafael Aquini) [RHEL-101282] {CVE-2025-38084}
+- mm: fix copy_vma() error handling for hugetlb mappings (Rafael Aquini) [RHEL-101282]
+- Bluetooth: hci_core: Fix use-after-free in vhci_flush() (CKI Backport Bot) [RHEL-103256] {CVE-2025-38250}
+Resolves: RHEL-101246, RHEL-101282, RHEL-103028, RHEL-103256, RHEL-106081, RHEL-106625
 
 * Sat Aug 02 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.33.1.el9_6]
 - net/sched: Always pass notifications when child class becomes empty (CKI Backport Bot) [RHEL-93387] {CVE-2025-38350}
