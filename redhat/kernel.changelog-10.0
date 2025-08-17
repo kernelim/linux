@@ -1,3 +1,34 @@
+* Sun Aug 17 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.29.1.el10_0]
+- ice: fix eswitch code memory leak in reset scenario (CKI Backport Bot) [RHEL-108153] {CVE-2025-38417}
+- net/sched: Abort __tc_modify_qdisc if parent class does not exist (CKI Backport Bot) [RHEL-107896]
+- net_sched: ets: Fix double list add in class with netem as child qdisc (CKI Backport Bot) [RHEL-104727] {CVE-2025-37914}
+- sch_ets: make est_qlen_notify() idempotent (Ivan Vecera) [RHEL-104727]
+- i40e: fix MMIO write access to an invalid page in i40e_clear_hw (Dennis Chen) [RHEL-106047] {CVE-2025-38200}
+- cxgb4: use port number to set mac addr (CKI Backport Bot) [RHEL-79668]
+Resolves: RHEL-104727, RHEL-106047, RHEL-107896, RHEL-108153, RHEL-79668
+
+* Mon Aug 11 2025 Julio Faracco <jfaracco@redhat.com> [6.12.0-55.28.1.el10_0]
+- tls: always refresh the queue when reading sock (CKI Backport Bot) [RHEL-106091] {CVE-2025-38471}
+- selftests: net: bpf_offload: add 'libbpf_global' to ignored maps (Hangbin Liu) [RHEL-105901]
+- selftests: net: fix error message in bpf_offload (Hangbin Liu) [RHEL-105901]
+- selftests: net: add more info to error in bpf_offload (Hangbin Liu) [RHEL-105901]
+- net: fix udp gso skb_segment after pull from frag_list (Guillaume Nault) [RHEL-103035] {CVE-2025-38124}
+- powerpc/pseries/vas: Add close() callback in vas_vm_ops struct (Mamatha Inamdar) [RHEL-87181]
+- s390/pci: Serialize device addition and removal (CKI Backport Bot) [RHEL-100158]
+- s390/pci: Allow re-add of a reserved but not yet removed device (CKI Backport Bot) [RHEL-100158]
+- s390/pci: Prevent self deletion in disable_slot() (CKI Backport Bot) [RHEL-100158]
+- s390/pci: Remove redundant bus removal and disable from zpci_release_device() (CKI Backport Bot) [RHEL-100158]
+- s390/pci: Fix duplicate pci_dev_put() in disable_slot() when PF has child VFs (CKI Backport Bot) [RHEL-100158]
+- s390/pci: Fix missing check for zpci_create_device() error return (CKI Backport Bot) [RHEL-100158]
+- s390/pci: Fix potential double remove of hotplug slot (CKI Backport Bot) [RHEL-100158]
+- s390/topology: Improve topology detection (CKI Backport Bot) [RHEL-92096]
+- Bluetooth: hci_core: Fix use-after-free in vhci_flush() (CKI Backport Bot) [RHEL-103270] {CVE-2025-38250}
+- redhat: Mark kernel incompatible with xdp-tools<1.5.4 (Felix Maurer) [RHEL-100447]
+- selftests/bpf: Adjust data size to have ETH_HLEN (Felix Maurer) [RHEL-100447] {CVE-2025-21867}
+- bpf, test_run: Fix use-after-free issue in eth_skb_pkt_type() (Felix Maurer) [RHEL-100447] {CVE-2025-21867}
+- i2c/designware: Fix an initialization issue (CKI Backport Bot) [RHEL-106626] {CVE-2025-38380}
+Resolves: RHEL-100158, RHEL-100447, RHEL-103035, RHEL-103270, RHEL-105901, RHEL-106091, RHEL-106626, RHEL-87181, RHEL-92096
+
 * Fri Aug 08 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.27.1.el10_0]
 - Revert "sch_htb: make htb_qlen_notify() idempotent" (Jan Stancek) [RHEL-108141]
 - Revert "sch_drr: make drr_qlen_notify() idempotent" (Jan Stancek) [RHEL-108141]
