@@ -29,10 +29,7 @@ struct seq_file;
  * struct sbitmap_word - Word in a &struct sbitmap.
  */
 struct sbitmap_word {
-	/**
-	 * @depth: Number of bits being used in @word/@cleared
-	 */
-	unsigned long depth;
+	RH_KABI_DEPRECATE(unsigned long, depth)
 
 	/**
 	 * @word: word holding free bits
@@ -47,7 +44,11 @@ struct sbitmap_word {
 	/**
 	 * @swap_lock: Held while swapping word <-> cleared
 	 */
-	RH_KABI_DEPRECATE(spinlock_t, swap_lock)
+#ifdef __GENKSYMS__
+	spinlock_t swap_lock;
+#else
+	raw_spinlock_t swap_lock;
+#endif
 } ____cacheline_aligned_in_smp;
 
 /**
@@ -96,7 +97,7 @@ struct sbq_wait_state {
 	/**
 	 * @wait_cnt: Number of frees remaining before we wake up.
 	 */
-	atomic_t wait_cnt;
+	RH_KABI_DEPRECATE(atomic_t, wait_cnt)
 
 	/**
 	 * @wait: Wait queue.
@@ -125,7 +126,16 @@ struct sbitmap_queue {
 	 * This is per-cpu, which allows multiple users to stick to different
 	 * cachelines until the map is exhausted.
 	 */
-	RH_KABI_DEPRECATE(unsigned int __percpu *, alloc_hint)
+	RH_KABI_REPLACE_SPLIT(unsigned int __percpu * alloc_hint,
+		/**
+		 * @completion_cnt: Number of bits cleared passed to the
+		 * wakeup function.
+		 */
+		atomic_t completion_cnt,
+		/**
+		 * @wakeup_cnt: Number of thread wake ups issued.
+		 */
+		atomic_t wakeup_cnt)
 
 	/**
 	 * @wake_batch: Number of bits which must be freed before we wake up any
@@ -178,6 +188,14 @@ struct sbitmap_queue {
  */
 int sbitmap_init_node(struct sbitmap *sb, unsigned int depth, int shift,
 		      gfp_t flags, int node, bool round_robin, bool alloc_hint);
+
+/* sbitmap internal helper */
+static inline unsigned int __map_depth(const struct sbitmap *sb, int index)
+{
+	if (index == sb->map_nr - 1)
+		return sb->depth - (index << sb->shift);
+	return 1U << sb->shift;
+}
 
 /**
  * sbitmap_free() - Free memory used by a &struct sbitmap.
@@ -276,7 +294,7 @@ static inline void __sbitmap_for_each_set(struct sbitmap *sb,
 	while (scanned < sb->depth) {
 		unsigned long word;
 		unsigned int depth = min_t(unsigned int,
-					   sb->map[index].depth - nr,
+					   __map_depth(sb, index) - nr,
 					   sb->depth - scanned);
 
 		scanned += depth;
@@ -443,6 +461,17 @@ static inline void sbitmap_queue_free(struct sbitmap_queue *sbq)
 }
 
 /**
+ * sbitmap_queue_recalculate_wake_batch() - Recalculate wake batch
+ * @sbq: Bitmap queue to recalculate wake batch.
+ * @users: Number of shares.
+ *
+ * Like sbitmap_queue_update_wake_batch(), this will calculate wake batch
+ * by depth. This interface is for HCTX shared tags or queue shared tags.
+ */
+void sbitmap_queue_recalculate_wake_batch(struct sbitmap_queue *sbq,
+					    unsigned int users);
+
+/**
  * sbitmap_queue_resize() - Resize a &struct sbitmap_queue.
  * @sbq: Bitmap queue to resize.
  * @depth: New number of bits to resize to.
@@ -461,6 +490,19 @@ void sbitmap_queue_resize(struct sbitmap_queue *sbq, unsigned int depth);
  * Return: Non-negative allocated bit number if successful, -1 otherwise.
  */
 int __sbitmap_queue_get(struct sbitmap_queue *sbq);
+
+/**
+ * __sbitmap_queue_get_batch() - Try to allocate a batch of free bits
+ * @sbq: Bitmap queue to allocate from.
+ * @nr_tags: number of tags requested
+ * @offset: offset to add to returned bits
+ *
+ * Return: Mask of allocated tags, 0 if none are found. Each tag allocated is
+ * a bit in the mask returned, and the caller must add @offset to the value to
+ * get the absolute tag value.
+ */
+unsigned long __sbitmap_queue_get_batch(struct sbitmap_queue *sbq, int nr_tags,
+					unsigned int *offset);
 
 /**
  * __sbitmap_queue_get_shallow() - Try to allocate a free bit from a &struct

@@ -9,7 +9,11 @@ struct blk_mq_tags {
 	unsigned int nr_tags;
 	unsigned int nr_reserved_tags;
 
+#ifdef __GENKSYMS__
 	atomic_t active_queues;
+#else
+	unsigned int active_queues;
+#endif
 
 	struct sbitmap_queue RH_KABI_RENAME(bitmap_tags, __bitmap_tags);
 	struct sbitmap_queue RH_KABI_RENAME(breserved_tags, __breserved_tags);

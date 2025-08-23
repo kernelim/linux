@@ -167,9 +167,9 @@ struct blk_mq_tag_set {
 	struct list_head	tag_list;
 
 	RH_KABI_USE(1, struct blk_mq_tag_set_aux * aux)
-	RH_KABI_USE(2, atomic_t		active_queues_shared_sbitmap)
+	RH_KABI_USE(2, unsigned int		active_queues_shared_sbitmap)
+	RH_KABI_USE(3, spinlock_t active_queues_lock)
 
-	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)

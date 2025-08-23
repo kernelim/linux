@@ -10,6 +10,7 @@
 
 #include <linux/efi.h>
 #include <linux/pci.h>
+#include <linux/ctype.h>
 
 #include <asm/efi.h>
 #include <asm/e820/types.h>
@@ -863,6 +864,26 @@ static void error(char *str)
 	efi_printk(sys_table, "\n");
 }
 
+static const char *cmdline_memmap_override;
+
+static efi_status_t parse_options(const char *cmdline)
+{
+	static const char opts[][14] = {
+		"mem=", "memmap=", "efi_fake_mem=", "hugepages="
+	};
+
+	for (int i = 0; i < ARRAY_SIZE(opts); i++) {
+		const char *p = strstr(cmdline, opts[i]);
+
+		if (p == cmdline || (p > cmdline && isspace(p[-1]))) {
+			cmdline_memmap_override = opts[i];
+			break;
+		}
+	}
+
+	return efi_parse_options(cmdline);
+}
+
 static efi_status_t efi_decompress_kernel(unsigned long *kernel_entry)
 {
 	unsigned long virt_addr = LOAD_PHYSICAL_ADDR;
@@ -892,6 +913,10 @@ static efi_status_t efi_decompress_kernel(unsigned long *kernel_entry)
 		 */
 		if (sys_table->hdr.revision <= EFI_2_00_SYSTEM_TABLE_REVISION &&
 		    !memcmp(efistub_fw_vendor(), ami, sizeof(ami))) {
+			seed[0] = 0;
+		} else if (cmdline_memmap_override) {
+			efi_printk(sys_table,
+				"cmdline memmap override detected on the kernel command line - disabling physical KASLR\n");
 			seed[0] = 0;
 		}
 
@@ -942,7 +967,6 @@ void __noreturn efi_main(struct efi_config *c,
 	void *handle;
 	efi_system_table_t *_table;
 	bool is64;
-	unsigned long cmdline_paddr;
 	extern char _bss[], _ebss[];
 
 	/*
@@ -997,9 +1021,22 @@ void __noreturn efi_main(struct efi_config *c,
 	 * case this is the second time we parse the cmdline. This is ok,
 	 * parsing the cmdline multiple times does not have side-effects.
 	 */
-	cmdline_paddr = ((u64)hdr->cmd_line_ptr |
-			 ((u64)boot_params->ext_cmd_line_ptr << 32));
-	efi_parse_options((char *)cmdline_paddr);
+#ifdef CONFIG_CMDLINE_BOOL
+	status = parse_options(CONFIG_CMDLINE);
+	if (status != EFI_SUCCESS) {
+		efi_printk(sys_table, "Failed to parse options\n");
+		goto fail;
+	}
+#endif
+	if (!IS_ENABLED(CONFIG_CMDLINE_OVERRIDE)) {
+		unsigned long cmdline_paddr = ((u64)hdr->cmd_line_ptr |
+					       ((u64)boot_params->ext_cmd_line_ptr << 32));
+		status = parse_options((char *)cmdline_paddr);
+		if (status != EFI_SUCCESS) {
+			efi_printk(sys_table, "Failed to parse options\n");
+			goto fail;
+		}
+	}
 
 	status = efi_decompress_kernel(&kernel_entry);
 	if (status != EFI_SUCCESS) {

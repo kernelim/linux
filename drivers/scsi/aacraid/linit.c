@@ -1879,7 +1879,7 @@ static int aac_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	pci_set_drvdata(pdev, shost);
 	shost->nr_hw_queues = aac->max_msix;
-	shost->can_queue    = aac->vector_cap;
+	shost->can_queue = min((int)aac->vector_cap, shost->can_queue);
 	shost->host_tagset = 1;
 
 	error = scsi_add_host(shost, &pdev->dev);

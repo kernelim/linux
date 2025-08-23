@@ -209,6 +209,7 @@ __remove_wait_queue(struct wait_queue_head *wq_head, struct wait_queue_entry *wq
 	list_del(&wq_entry->entry);
 }
 
+int __wake_up_rh(struct wait_queue_head *wq_head, unsigned int mode, int nr, void *key);
 void __wake_up(struct wait_queue_head *wq_head, unsigned int mode, int nr, void *key);
 void __wake_up_locked_key(struct wait_queue_head *wq_head, unsigned int mode, void *key);
 void __wake_up_locked_key_bookmark(struct wait_queue_head *wq_head,
@@ -219,6 +220,7 @@ void __wake_up_locked(struct wait_queue_head *wq_head, unsigned int mode, int nr
 void __wake_up_sync(struct wait_queue_head *wq_head, unsigned int mode);
 void __wake_up_pollfree(struct wait_queue_head *wq_head);
 
+#define wake_up_nr_rh(x, nr)		__wake_up_rh(x, TASK_NORMAL, nr, NULL)
 #define wake_up(x)			__wake_up(x, TASK_NORMAL, 1, NULL)
 #define wake_up_nr(x, nr)		__wake_up(x, TASK_NORMAL, nr, NULL)
 #define wake_up_all(x)			__wake_up(x, TASK_NORMAL, 0, NULL)
