@@ -1,3 +1,44 @@
+* Sat Aug 23 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.39.1.el9_6]
+- xfrm: interface: fix use-after-free after changing collect_md xfrm interface (CKI Backport Bot) [RHEL-109529] {CVE-2025-38500}
+- Merge: net: mana: Fix race of mana_hwc_post_rx_wqe and new hwc response [rhel-9.6.z] (Maxim Levitsky) [RHEL-58904]
+- s390/pci: Serialize device addition and removal (Mete Durlu) [RHEL-102036]
+- s390/pci: Allow re-add of a reserved but not yet removed device (Mete Durlu) [RHEL-102036]
+- s390/pci: Prevent self deletion in disable_slot() (Mete Durlu) [RHEL-102036]
+- s390/pci: Remove redundant bus removal and disable from zpci_release_device() (Mete Durlu) [RHEL-102036]
+- s390/pci: Fix duplicate pci_dev_put() in disable_slot() when PF has child VFs (Thomas Huth) [RHEL-102036] {CVE-2025-37946}
+- s390/pci: Fix missing check for zpci_create_device() error return (Mete Durlu) [RHEL-102036] {CVE-2025-37974}
+- s390/pci: Fix potential double remove of hotplug slot (Thomas Huth) [RHEL-102036] {CVE-2024-56699}
+- s390/pci: remove hotplug slot when releasing the device (Thomas Huth) [RHEL-102036]
+- s390/pci: introduce lock to synchronize state of zpci_dev's (Thomas Huth) [RHEL-102036]
+- s390/pci: rename lock member in struct zpci_dev (Thomas Huth) [RHEL-102036]
+- net/sched: Abort __tc_modify_qdisc if parent class does not exist (CKI Backport Bot) [RHEL-107895]
+- i40e: report VF tx_dropped with tx_errors instead of tx_discards (Dennis Chen) [RHEL-105137]
+- s390/pci: Fix zpci_bus_is_isolated_vf() for non-VFs (Mete Durlu) [RHEL-94815]
+- s390/pci: Fix handling of isolated VFs (CKI Backport Bot) [RHEL-85387]
+- s390/pci: Pull search for parent PF out of zpci_iov_setup_virtfn() (CKI Backport Bot) [RHEL-85387]
+- s390/pci: Fix SR-IOV for PFs initially in standby (CKI Backport Bot) [RHEL-85387]
+- tipc: Fix use-after-free in tipc_conn_close(). (CKI Backport Bot) [RHEL-106651] {CVE-2025-38464}
+- Revert "smb: client: fix TCP timers deadlock after rmmod" (Paulo Alcantara) [RHEL-106415] {CVE-2025-22077}
+- Revert "smb: client: Fix netns refcount imbalance causing leaks and use-after-free" (Paulo Alcantara) [RHEL-106415]
+- smb: client: Fix netns refcount imbalance causing leaks and use-after-free (Paulo Alcantara) [RHEL-106415]
+- watchdog/perf: properly initialize the turbo mode timestamp and rearm counter (David Arcari) [RHEL-103555]
+Resolves: RHEL-102036, RHEL-103555, RHEL-105137, RHEL-106415, RHEL-106651, RHEL-107895, RHEL-109529, RHEL-58904, RHEL-85387, RHEL-94815
+
+* Wed Aug 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.38.1.el9_6]
+- net/sched: ets: use old 'nbands' while purging unused classes (CKI Backport Bot) [RHEL-107537] {CVE-2025-38350}
+- net/sched: Always pass notifications when child class becomes empty (Ivan Vecera) [RHEL-93387] {CVE-2025-38350}
+- net_sched: ets: fix a race in ets_qdisc_change() (Ivan Vecera) [RHEL-107537] {CVE-2025-38107}
+- sch_htb: make htb_deactivate() idempotent (Ivan Vecera) [RHEL-93387] {CVE-2025-37953}
+- codel: remove sch->q.qlen check before qdisc_tree_reduce_backlog() (Ivan Vecera) [RHEL-93387] {CVE-2025-37798}
+- sch_qfq: make qfq_qlen_notify() idempotent (Ivan Vecera) [RHEL-93387] {CVE-2025-38350}
+- sch_drr: make drr_qlen_notify() idempotent (Ivan Vecera) [RHEL-93387] {CVE-2025-38350}
+- sch_htb: make htb_qlen_notify() idempotent (Ivan Vecera) [RHEL-93387] {CVE-2025-37932}
+- net_sched: hfsc: Fix a potential UAF in hfsc_dequeue() too (CKI Backport Bot) [RHEL-107630] {CVE-2025-37823}
+- i40e: fix MMIO write access to an invalid page in i40e_clear_hw (CKI Backport Bot) [RHEL-106046] {CVE-2025-38200}
+- vsock: Fix transport_* TOCTOU (CKI Backport Bot) [RHEL-106003] {CVE-2025-38461}
+- RDMA/iwcm: Fix use-after-free of work objects after cm_id destruction (CKI Backport Bot) [RHEL-104273] {CVE-2025-38211}
+Resolves: RHEL-104273, RHEL-106003, RHEL-106046, RHEL-107537, RHEL-107630, RHEL-93387
+
 * Sat Aug 16 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.37.1.el9_6]
 - ice: fix eswitch code memory leak in reset scenario (CKI Backport Bot) [RHEL-108152] {CVE-2025-38417}
 - ftrace: Clean up hash direct_functions on register failures (Gregory Bell) [RHEL-105151]
