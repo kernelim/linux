@@ -1,3 +1,18 @@
+* Sun Aug 24 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.30.1.el10_0]
+- net_sched: hfsc: Fix a potential UAF in hfsc_dequeue() too (CKI Backport Bot) [RHEL-107641] {CVE-2025-37823}
+- s390/pci: Fix zpci_bus_is_isolated_vf() for non-VFs (Mete Durlu) [RHEL-95537]
+- s390/pci: Fix handling of isolated VFs (CKI Backport Bot) [RHEL-84462]
+- s390/pci: Pull search for parent PF out of zpci_iov_setup_virtfn() (CKI Backport Bot) [RHEL-84462]
+- s390/pci: Fix SR-IOV for PFs initially in standby (CKI Backport Bot) [RHEL-84462]
+- RDMA/iwcm: Fix use-after-free of work objects after cm_id destruction (CKI Backport Bot) [RHEL-104285] {CVE-2025-38211}
+- udp: Fix memory accounting leak. (CKI Backport Bot) [RHEL-104102] {CVE-2025-22058}
+- udp: Fix multiple wraparounds of sk->sk_rmem_alloc. (Xin Long) [RHEL-104102]
+- ext4: only dirty folios when data journaling regular files (CKI Backport Bot) [RHEL-106815] {CVE-2025-38220}
+- tipc: Fix use-after-free in tipc_conn_close(). (CKI Backport Bot) [RHEL-106660] {CVE-2025-38464}
+- vsock: Fix transport_* TOCTOU (CKI Backport Bot) [RHEL-106015] {CVE-2025-38461}
+- netfilter: nf_conntrack: fix crash due to removal of uninitialised entry (CKI Backport Bot) [RHEL-106442] {CVE-2025-38472}
+Resolves: RHEL-104102, RHEL-104285, RHEL-106015, RHEL-106442, RHEL-106660, RHEL-106815, RHEL-107641, RHEL-84462, RHEL-95537
+
 * Sun Aug 17 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.29.1.el10_0]
 - ice: fix eswitch code memory leak in reset scenario (CKI Backport Bot) [RHEL-108153] {CVE-2025-38417}
 - net/sched: Abort __tc_modify_qdisc if parent class does not exist (CKI Backport Bot) [RHEL-107896]

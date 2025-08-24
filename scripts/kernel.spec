@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.29.1
+%define pkgrelease 55.30.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.29.1.el10_0
+%define tarfile_release 6.12.0-55.30.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.29.1%{?buildid}%{?dist}
+%define specrelease 55.30.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.29.1.el10_0
+%define kabiversion 6.12.0-55.30.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4314,10 +4314,24 @@ fi\
 #
 #
 %changelog
-* Wed Aug 27 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.29.1
+* Tue Sep 02 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.30.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Sun Aug 24 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.30.1.el10_0]
+- net_sched: hfsc: Fix a potential UAF in hfsc_dequeue() too (CKI Backport Bot) [RHEL-107641] {CVE-2025-37823}
+- s390/pci: Fix zpci_bus_is_isolated_vf() for non-VFs (Mete Durlu) [RHEL-95537]
+- s390/pci: Fix handling of isolated VFs (CKI Backport Bot) [RHEL-84462]
+- s390/pci: Pull search for parent PF out of zpci_iov_setup_virtfn() (CKI Backport Bot) [RHEL-84462]
+- s390/pci: Fix SR-IOV for PFs initially in standby (CKI Backport Bot) [RHEL-84462]
+- RDMA/iwcm: Fix use-after-free of work objects after cm_id destruction (CKI Backport Bot) [RHEL-104285] {CVE-2025-38211}
+- udp: Fix memory accounting leak. (CKI Backport Bot) [RHEL-104102] {CVE-2025-22058}
+- udp: Fix multiple wraparounds of sk->sk_rmem_alloc. (Xin Long) [RHEL-104102]
+- ext4: only dirty folios when data journaling regular files (CKI Backport Bot) [RHEL-106815] {CVE-2025-38220}
+- tipc: Fix use-after-free in tipc_conn_close(). (CKI Backport Bot) [RHEL-106660] {CVE-2025-38464}
+- vsock: Fix transport_* TOCTOU (CKI Backport Bot) [RHEL-106015] {CVE-2025-38461}
+- netfilter: nf_conntrack: fix crash due to removal of uninitialised entry (CKI Backport Bot) [RHEL-106442] {CVE-2025-38472}
 
 * Sun Aug 17 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.29.1.el10_0]
 - ice: fix eswitch code memory leak in reset scenario (CKI Backport Bot) [RHEL-108153] {CVE-2025-38417}
