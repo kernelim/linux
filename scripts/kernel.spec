@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 570.39.1
+%define pkgrelease 570.41.1
 %define kversion 5
-%define tarfile_release 5.14.0-570.39.1.el9_6
+%define tarfile_release 5.14.0-570.41.1.el9_6
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 570.39.1%{?buildid}%{?dist}
+%define specrelease 570.41.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-570.39.1.el9_6
+%define kabiversion 5.14.0-570.41.1.el9_6
 
 #
 # End of genspec.sh variables
@@ -3788,9 +3788,37 @@ fi
 #
 #
 %changelog
-* Wed Sep 03 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.39.1
+* Wed Sep 10 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.41.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Thu Aug 28 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.41.1.el9_6]
+- powerpc/pseries/iommu: Fix kmemleak in TCE table userspace view (Mamatha Inamdar) [RHEL-107002]
+- net: ibmveth: make veth_pool_store stop hanging (Mamatha Inamdar) [RHEL-109494]
+- ibmveth: Always stop tx queues during close (Mamatha Inamdar) [RHEL-109494]
+- smb: client: fix race with concurrent opens in rename(2) (Paulo Alcantara) [RHEL-109723]
+- smb: client: fix race with concurrent opens in unlink(2) (Paulo Alcantara) [RHEL-109723]
+- smb: convert to ctime accessor functions (Paulo Alcantara) [RHEL-109723]
+- crypto: tegra - Fix IV usage for AES ECB (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Fix format specifier in tegra_sha_prep_cmd() (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Use HMAC fallback when keyslots are full (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Reserve keyslots to allocate dynamically (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Set IV to NULL explicitly for AES ECB (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Fix CMAC intermediate result handling (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Fix HASH intermediate result handling (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Transfer HASH init function to crypto engine (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - check return value for hash do_one_req (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - finalize crypto req on error (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Do not use fixed size buffers (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Use separate buffer for setkey (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - remove unneeded crypto_engine_stop() call (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - remove redundant error check on ret (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - do not transfer req when tegra init fails (Nirmala Dalvi) [RHEL-107286]
+- crypto: engine - Remove prepare/unprepare request (Nirmala Dalvi) [RHEL-107286]
+- udmabuf: fix a buf size overflow issue during udmabuf creation (CKI Backport Bot) [RHEL-99746] {CVE-2025-37803}
+
+* Wed Aug 27 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.40.1.el9_6]
+- idpf: convert control queue mutex to a spinlock (CKI Backport Bot) [RHEL-106054] {CVE-2025-38392}
 
 * Sat Aug 23 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.39.1.el9_6]
 - xfrm: interface: fix use-after-free after changing collect_md xfrm interface (CKI Backport Bot) [RHEL-109529] {CVE-2025-38500}

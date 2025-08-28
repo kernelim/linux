@@ -41,9 +41,6 @@ static void crypto_finalize_request(struct crypto_engine *engine,
 				    struct crypto_async_request *req, int err)
 {
 	unsigned long flags;
-	bool finalize_req = false;
-	int ret;
-	struct crypto_engine_ctx *enginectx;
 
 	/*
 	 * If hardware cannot enqueue more requests
@@ -53,21 +50,11 @@ static void crypto_finalize_request(struct crypto_engine *engine,
 	if (!engine->retry_support) {
 		spin_lock_irqsave(&engine->queue_lock, flags);
 		if (engine->cur_req == req) {
-			finalize_req = true;
 			engine->cur_req = NULL;
 		}
 		spin_unlock_irqrestore(&engine->queue_lock, flags);
 	}
 
-	if (finalize_req || engine->retry_support) {
-		enginectx = crypto_tfm_ctx(req->tfm);
-		if (enginectx->op.prepare_request &&
-		    enginectx->op.unprepare_request) {
-			ret = enginectx->op.unprepare_request(engine, req);
-			if (ret)
-				dev_err(engine->dev, "failed to unprepare request\n");
-		}
-	}
 	req->complete(req, err);
 
 	kthread_queue_work(engine->kworker, &engine->pump_requests);
@@ -160,7 +147,7 @@ start_request:
 		ret = engine->prepare_crypt_hardware(engine);
 		if (ret) {
 			dev_err(engine->dev, "failed to prepare crypt hardware\n");
-			goto req_err_2;
+			goto req_err_1;
 		}
 	}
 
@@ -170,16 +157,7 @@ start_request:
 		op = &alg->op;
 	} else {
 		enginectx = crypto_tfm_ctx(async_req->tfm);
-		op = &enginectx->op;
 
-		if (op->prepare_request) {
-			ret = op->prepare_request(engine, async_req);
-			if (ret) {
-				dev_err(engine->dev, "failed to prepare request: %d\n",
-					ret);
-				goto req_err_2;
-			}
-		}
 		if (!op->do_one_request) {
 			dev_err(engine->dev, "failed to do request\n");
 			ret = -EINVAL;
@@ -203,18 +181,6 @@ start_request:
 				ret);
 			goto req_err_1;
 		}
-		/*
-		 * If retry mechanism is supported,
-		 * unprepare current request and
-		 * enqueue it back into crypto-engine queue.
-		 */
-		if (enginectx->op.unprepare_request) {
-			ret = enginectx->op.unprepare_request(engine,
-							      async_req);
-			if (ret)
-				dev_err(engine->dev,
-					"failed to unprepare request\n");
-		}
 		spin_lock_irqsave(&engine->queue_lock, flags);
 		/*
 		 * If hardware was unable to execute request, enqueue it
@@ -230,13 +196,6 @@ start_request:
 	goto retry;
 
 req_err_1:
-	if (enginectx->op.unprepare_request) {
-		ret = enginectx->op.unprepare_request(engine, async_req);
-		if (ret)
-			dev_err(engine->dev, "failed to unprepare request\n");
-	}
-
-req_err_2:
 	async_req->complete(async_req, ret);
 
 retry:
