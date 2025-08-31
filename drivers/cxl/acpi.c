@@ -340,20 +340,24 @@ static int add_or_reset_cxl_resource(struct resource *parent, struct resource *r
 DEFINE_FREE(put_cxlrd, struct cxl_root_decoder *,
 	    if (!IS_ERR_OR_NULL(_T)) put_device(&_T->cxlsd.cxld.dev))
 DEFINE_FREE(del_cxl_resource, struct resource *, if (_T) del_cxl_resource(_T))
-static int __cxl_parse_cfmws(struct acpi_cedt_cfmws *cfmws,
-			     struct cxl_cfmws_context *ctx)
+static int cxl_parse_cfmws(union acpi_subtable_headers *header, void *arg,
+			   const unsigned long end)
 {
 	int target_map[CXL_DECODER_MAX_INTERLEAVE];
+	struct cxl_cfmws_context *ctx = arg;
 	struct cxl_port *root_port = ctx->root_port;
 	struct cxl_cxims_context cxims_ctx;
 	struct device *dev = ctx->dev;
+	struct acpi_cedt_cfmws *cfmws;
 	struct cxl_decoder *cxld;
 	unsigned int ways, i, ig;
 	int rc;
 
+	cfmws = (struct acpi_cedt_cfmws *) header;
+
 	rc = cxl_acpi_cfmws_verify(dev, cfmws);
 	if (rc)
-		return rc;
+		return 0;
 
 	rc = eiw_to_ways(cfmws->interleave_ways, &ways);
 	if (rc)
@@ -378,7 +382,7 @@ static int __cxl_parse_cfmws(struct acpi_cedt_cfmws *cfmws,
 		cxl_root_decoder_alloc(root_port, ways);
 
 	if (IS_ERR(cxlrd))
-		return PTR_ERR(cxlrd);
+		return 0;
 
 	cxld = &cxlrd->cxlsd.cxld;
 	cxld->flags = cfmws_to_decoder_flags(cfmws->restrictions);
@@ -421,29 +425,16 @@ static int __cxl_parse_cfmws(struct acpi_cedt_cfmws *cfmws,
 	rc = cxl_decoder_add(cxld, target_map);
 	if (rc)
 		return rc;
-	return cxl_root_decoder_autoremove(dev, no_free_ptr(cxlrd));
-}
+	rc = cxl_root_decoder_autoremove(dev, no_free_ptr(cxlrd));
+	if (rc) {
+		dev_err(dev, "Failed to add decode range: %pr", res);
+		return rc;
+	}
+	dev_dbg(dev, "add: %s node: %d range [%#llx - %#llx]\n",
+		dev_name(&cxld->dev),
+		phys_to_target_node(cxld->hpa_range.start),
+		cxld->hpa_range.start, cxld->hpa_range.end);
 
-static int cxl_parse_cfmws(union acpi_subtable_headers *header, void *arg,
-			   const unsigned long end)
-{
-	struct acpi_cedt_cfmws *cfmws = (struct acpi_cedt_cfmws *)header;
-	struct cxl_cfmws_context *ctx = arg;
-	struct device *dev = ctx->dev;
-	int rc;
-
-	rc = __cxl_parse_cfmws(cfmws, ctx);
-	if (rc)
-		dev_err(dev,
-			"Failed to add decode range: [%#llx - %#llx] (%d)\n",
-			cfmws->base_hpa,
-			cfmws->base_hpa + cfmws->window_size - 1, rc);
-	else
-		dev_dbg(dev, "decode range: node: %d range [%#llx - %#llx]\n",
-			phys_to_target_node(cfmws->base_hpa), cfmws->base_hpa,
-			cfmws->base_hpa + cfmws->window_size - 1);
-
-	/* never fail cxl_acpi load for a single window failure */
 	return 0;
 }
 

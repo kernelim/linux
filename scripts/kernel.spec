@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.30.1
+%define pkgrelease 55.31.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.30.1.el10_0
+%define tarfile_release 6.12.0-55.31.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.30.1%{?buildid}%{?dist}
+%define specrelease 55.31.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.30.1.el10_0
+%define kabiversion 6.12.0-55.31.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4314,10 +4314,31 @@ fi\
 #
 #
 %changelog
-* Tue Sep 02 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.30.1
+* Wed Sep 10 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.31.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Sun Aug 31 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.31.1.el10_0]
+- sched/fair: Adhere to place_entity() constraints (Phil Auld) [RHEL-91404]
+- sched/fair: Fix update_cfs_group() vs DELAY_DEQUEUE (Phil Auld) [RHEL-91404]
+- sched/fair: Fix EEVDF entity placement bug causing scheduling lag (Phil Auld) [RHEL-91404]
+- sched/fair: optimize the PLACE_LAG when se->vlag is zero (Phil Auld) [RHEL-91404]
+- net/sched: ets: use old 'nbands' while purging unused classes (Ivan Vecera) [RHEL-107544] {CVE-2025-38350}
+- net/sched: Always pass notifications when child class becomes empty (Ivan Vecera) [RHEL-93365] {CVE-2025-38350}
+- net_sched: ets: fix a race in ets_qdisc_change() (Ivan Vecera) [RHEL-107544] {CVE-2025-38107}
+- sch_htb: make htb_deactivate() idempotent (Ivan Vecera) [RHEL-93365] {CVE-2025-37953}
+- codel: remove sch->q.qlen check before qdisc_tree_reduce_backlog() (Ivan Vecera) [RHEL-93365] {CVE-2025-37798}
+- sch_qfq: make qfq_qlen_notify() idempotent (Ivan Vecera) [RHEL-93365] {CVE-2025-38350}
+- sch_drr: make drr_qlen_notify() idempotent (Ivan Vecera) [RHEL-93365] {CVE-2025-38350}
+- sch_htb: make htb_qlen_notify() idempotent (Ivan Vecera) [RHEL-93365] {CVE-2025-37932}
+- drm/vkms: Fix use after free and double free on init error (Jocelyn Falempe) [RHEL-99432] {CVE-2025-22097}
+- Revert "cxl/acpi: Fix load failures due to single window creation failure" (John W. Linville) [RHEL-85055]
+- udmabuf: fix a buf size overflow issue during udmabuf creation (Lyude Paul) [RHEL-99760] {CVE-2025-37803}
+- drm/framebuffer: Acquire internal references on GEM handles (Mika Penttilä) [RHEL-106710] {CVE-2025-38449}
+- drm/gem: Acquire references on GEM handles for framebuffers (Mika Penttilä) [RHEL-106710] {CVE-2025-38449}
+- nvme/ioctl: don't warn on vectorized uring_cmd with fixed buffer (Maurizio Lombardi) [RHEL-109753]
+- nvme-ioctl: fix leaked requests on mapping error (Maurizio Lombardi) [RHEL-109753]
 
 * Sun Aug 24 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.30.1.el10_0]
 - net_sched: hfsc: Fix a potential UAF in hfsc_dequeue() too (CKI Backport Bot) [RHEL-107641] {CVE-2025-37823}

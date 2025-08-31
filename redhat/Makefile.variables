@@ -142,7 +142,7 @@ SPECPACKAGE_NAME ?= kernel
 # should be tracked in a local branch. This would be "master" for the
 # Linus master branch or linux-5.x.y for a stable branch. It can also be
 # any other upstream you have added as a branch locally.
-UPSTREAM_BRANCH ?= v6.10
+UPSTREAM_BRANCH ?= v6.12
 
 # If VERSION_ON_UPSTREAM is set, the versioning of the rpm package is based
 # on a branch tracking upstream. This allows for generating rpms
