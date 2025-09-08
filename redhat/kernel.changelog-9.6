@@ -1,3 +1,16 @@
+* Mon Sep 08 2025 Patrick Talbert <ptalbert@redhat.com> [5.14.0-570.42.2.el9_6]
+- posix-cpu-timers: fix race between handle_posix_cpu_timers() and posix_cpu_timer_del() (CKI Backport Bot) [RHEL-112780] {CVE-2025-38352}
+- powerpc/pseries/iommu: create DDW for devices with DMA mask less than 64-bits (CKI Backport Bot) [RHEL-113173]
+Resolves: RHEL-112780, RHEL-113173
+
+* Sat Aug 30 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.42.1.el9_6]
+- powerpc/pseries/iommu: memory notifier incorrectly adds TCEs for pmemory (Mamatha Inamdar) [RHEL-103015]
+- drm/framebuffer: Acquire internal references on GEM handles (José Expósito) [RHEL-106699] {CVE-2025-38449}
+- drm/gem: Acquire references on GEM handles for framebuffers (José Expósito) [RHEL-106699] {CVE-2025-38449}
+- drm/vkms: Fix use after free and double free on init error (CKI KWF BOT) [RHEL-99420] {CVE-2025-22097}
+- scsi: lpfc: Use memcpy() for BIOS version (Ewan D. Milne) [RHEL-105933] {CVE-2025-38332}
+Resolves: RHEL-103015, RHEL-105933, RHEL-106699, RHEL-99420
+
 * Thu Aug 28 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.41.1.el9_6]
 - powerpc/pseries/iommu: Fix kmemleak in TCE table userspace view (Mamatha Inamdar) [RHEL-107002]
 - net: ibmveth: make veth_pool_store stop hanging (Mamatha Inamdar) [RHEL-109494]
