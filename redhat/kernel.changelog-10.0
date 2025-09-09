@@ -1,3 +1,7 @@
+* Tue Sep 09 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.32.1.el10_0]
+- posix-cpu-timers: fix race between handle_posix_cpu_timers() and posix_cpu_timer_del() (CKI Backport Bot) [RHEL-112784] {CVE-2025-38352}
+Resolves: RHEL-112784
+
 * Sun Aug 31 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.31.1.el10_0]
 - sched/fair: Adhere to place_entity() constraints (Phil Auld) [RHEL-91404]
 - sched/fair: Fix update_cfs_group() vs DELAY_DEQUEUE (Phil Auld) [RHEL-91404]

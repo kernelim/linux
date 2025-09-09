@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.31.1
+%define pkgrelease 55.32.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.31.1.el10_0
+%define tarfile_release 6.12.0-55.32.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.31.1%{?buildid}%{?dist}
+%define specrelease 55.32.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.31.1.el10_0
+%define kabiversion 6.12.0-55.32.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4314,10 +4314,13 @@ fi\
 #
 #
 %changelog
-* Wed Sep 10 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.31.1
+* Thu Sep 11 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.32.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Tue Sep 09 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.32.1.el10_0]
+- posix-cpu-timers: fix race between handle_posix_cpu_timers() and posix_cpu_timer_del() (CKI Backport Bot) [RHEL-112784] {CVE-2025-38352}
 
 * Sun Aug 31 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.31.1.el10_0]
 - sched/fair: Adhere to place_entity() constraints (Phil Auld) [RHEL-91404]
