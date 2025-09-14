@@ -1385,9 +1385,21 @@ static void free_pcppages_bulk(struct zone *zone, int count,
 	/*
 	 * Ensure proper count is passed which otherwise would stuck in the
 	 * below while (list_empty(list)) loop.
+	 *
+	 * RHEL-85453: count should never be negative, but if it is, we will
+	 * risk getting ourselves in the same predicament described above,
+	 * and the clamping below will not be of any use to us, unfortunately.
+	 * Upstream has indirectly addressed this condition when commit
+	 * 44042b449872 ("mm/page_alloc: allow high-order pages to be stored
+	 * on the per-cpu lists") changed the invariant for the outer while
+	 * loop, preventing it from being executed when count <= 0.
+	 * We do the same here, but we also include a warn_on assertion for
+	 * allowing us to capture a coredump on the rare occasions where
+	 * count would become less than zero.
 	 */
 	count = min(pcp->count, count);
-	while (count) {
+	WARN_ON_ONCE(unlikely(count < 0));
+	while (count > 0) {
 		struct list_head *list;
 
 		/*
