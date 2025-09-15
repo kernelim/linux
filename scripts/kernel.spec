@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.32.1
+%define pkgrelease 55.34.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.32.1.el10_0
+%define tarfile_release 6.12.0-55.34.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.32.1%{?buildid}%{?dist}
+%define specrelease 55.34.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.32.1.el10_0
+%define kabiversion 6.12.0-55.34.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -3264,7 +3264,7 @@ export CFLAGS="%{build_cflags}"
 # 'make install' for bpf is broken and upstream refuses to fix it.
 # Install the needed files manually.
 %{log_msg "install selftests"}
-for dir in bpf bpf/no_alu32 bpf/progs; do
+for dir in bpf bpf/no_alu32 bpf/cpuv4 bpf/progs; do
 	# In ARK, the rpm build continues even if some of the selftests
 	# cannot be built. It's not always possible to build selftests,
 	# as upstream sometimes dependens on too new llvm version or has
@@ -3280,14 +3280,17 @@ done
 
 %buildroot_save_unstripped "usr/libexec/kselftests/bpf/test_progs"
 %buildroot_save_unstripped "usr/libexec/kselftests/bpf/test_progs-no_alu32"
+%buildroot_save_unstripped "usr/libexec/kselftests/bpf/test_progs-cpuv4"
 
 # The urandom_read binary doesn't pass the check-rpaths check and upstream
 # refuses to fix it. So, we save it to buildroot_unstripped and delete it so it
 # will be hidden from check-rpaths and will automatically get restored later.
 %buildroot_save_unstripped "usr/libexec/kselftests/bpf/urandom_read"
 %buildroot_save_unstripped "usr/libexec/kselftests/bpf/no_alu32/urandom_read"
+%buildroot_save_unstripped "usr/libexec/kselftests/bpf/cpuv4/urandom_read"
 rm -f %{buildroot}/usr/libexec/kselftests/bpf/urandom_read
 rm -f %{buildroot}/usr/libexec/kselftests/bpf/no_alu32/urandom_read
+rm -f %{buildroot}/usr/libexec/kselftests/bpf/cpuv4/urandom_read
 
 popd
 %{log_msg "end build selftests"}
@@ -4314,10 +4317,30 @@ fi\
 #
 #
 %changelog
-* Thu Sep 11 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.32.1
+* Thu Sep 25 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.34.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Mon Sep 15 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-55.34.1.el10_0]
+- sunrpc: fix handling of server side tls alerts (Olga Kornievskaia) [RHEL-111073] {CVE-2025-38566}
+- i40e: When removing VF MAC filters, only check PF-set MAC (CKI Backport Bot) [RHEL-109771]
+- usb: dwc3: gadget: check that event count does not exceed event buffer length (CKI Backport Bot) [RHEL-107659] {CVE-2025-37810}
+
+* Tue Sep 09 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.33.1.el10_0]
+- xfrm: interface: fix use-after-free after changing collect_md xfrm interface (CKI Backport Bot) [RHEL-109530] {CVE-2025-38500}
+- idpf: convert control queue mutex to a spinlock (CKI Backport Bot) [RHEL-106061] {CVE-2025-38392}
+- eth: bnxt: fix missing ring index trim on error path (CKI Backport Bot) [RHEL-104564] {CVE-2025-37873}
+- tcp: Correct signedness in skb remaining space calculation (CKI Backport Bot) [RHEL-107844] {CVE-2025-38463}
+- ipv6: mcast: Delay put pmc->idev in mld_del_delrec() (CKI Backport Bot) [RHEL-111154] {CVE-2025-38550}
+- redhat: selftests/bpf: Add cpuv4 variant (Viktor Malik) [RHEL-109928]
+- i40e: report VF tx_dropped with tx_errors instead of tx_discards (Dennis Chen) [RHEL-105138] {CVE-2025-38200}
+- use uniform permission checks for all mount propagation changes (Ian Kent) [RHEL-107306] {CVE-2025-38498}
+- do_change_type(): refuse to operate on unmounted/not ours mounts (Ian Kent) [RHEL-107306] {CVE-2025-38498}
+- ublk: make sure ubq->canceling is set when queue is frozen (Ming Lei) [RHEL-99437] {CVE-2025-22068}
+- net: gso: Forbid IPv6 TSO with extensions on devices with only IPV6_CSUM JIRA: https://issues.redhat.com/browse/RHEL-109821 Y-JIRA: https://issues.redhat.com/browse/RHEL-79173 (Jakub Ramaseuski)
+- scsi: lpfc: Use memcpy() for BIOS version (Ewan D. Milne) [RHEL-105936] {CVE-2025-38332}
+- net: introduce per netns packet chains (Paolo Abeni) [RHEL-88923]
 
 * Tue Sep 09 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.32.1.el10_0]
 - posix-cpu-timers: fix race between handle_posix_cpu_timers() and posix_cpu_timer_del() (CKI Backport Bot) [RHEL-112784] {CVE-2025-38352}

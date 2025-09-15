@@ -189,6 +189,9 @@ struct net {
 #if IS_ENABLED(CONFIG_SMC)
 	struct netns_smc	smc;
 #endif
+
+	RH_KABI_EXTEND(struct list_head ptype_all)
+	RH_KABI_EXTEND(struct list_head ptype_specific)
 } __randomize_layout;
 
 #include <linux/seq_file_net.h>
