@@ -311,6 +311,9 @@ EXPORT_SYMBOL_GPL(get_net_ns_by_id);
 static __net_init void preinit_net(struct net *net)
 {
 	ref_tracker_dir_init(&net->notrefcnt_tracker, 128, "net notrefcnt");
+
+	INIT_LIST_HEAD(&net->ptype_all);
+	INIT_LIST_HEAD(&net->ptype_specific);
 }
 
 /*

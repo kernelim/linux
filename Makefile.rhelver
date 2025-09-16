@@ -12,7 +12,7 @@ RHEL_MINOR = 6
 #
 # Use this spot to avoid future merge conflicts.
 # Do not trim this comment.
-RHEL_RELEASE = 570.42.2
+RHEL_RELEASE = 570.46.1
 
 #
 # ZSTREAM
