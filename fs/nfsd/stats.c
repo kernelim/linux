@@ -91,10 +91,11 @@ static const struct file_operations nfsd_proc_fops = {
 	.release = single_release,
 };
 
-void
-nfsd_stat_init(void)
+int nfsd_stat_init(void)
 {
-	svc_proc_register(&init_net, &nfsd_svcstats, &nfsd_proc_fops);
+	if (svc_proc_register(&init_net, &nfsd_svcstats, &nfsd_proc_fops) == NULL)
+		return -ENOMEM;
+	return 0;
 }
 
 void
