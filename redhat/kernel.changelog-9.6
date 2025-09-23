@@ -1,3 +1,43 @@
+* Tue Sep 23 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.49.1.el9_6]
+- io_uring/futex: ensure io_futex_wait() cleans up properly on failure (CKI Backport Bot) [RHEL-114335] {CVE-2025-39698}
+- selftests: tls: add tests for zero-length records (Sabrina Dubroca) [RHEL-114326] {CVE-2025-39682}
+- tls: fix handling of zero-length records on the rx_list (Sabrina Dubroca) [RHEL-114326] {CVE-2025-39682}
+Resolves: RHEL-114326, RHEL-114335
+
+* Sat Sep 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.48.1.el9_6]
+- perf trace: Add missing perf_tool__init() (Michael Petlan) [RHEL-105393]
+- ceph: fix client race condition where r_parent becomes stale before sending message (Alex Markuze) [RHEL-114962]
+- ceph: fix client race condition validating r_parent before applying state (Alex Markuze) [RHEL-114962]
+Resolves: RHEL-105393, RHEL-114962
+
+* Thu Sep 18 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.47.1.el9_6]
+- tunnels: reset the GSO metadata before reusing the skb (Antoine Tenart) [RHEL-113916]
+- sctp: linearize cloned gso packets in sctp_rcv (CKI Backport Bot) [RHEL-113333] {CVE-2025-38718}
+- ice: fix max values for dpll pin phase adjust (Petr Oros) [RHEL-113039]
+- ice/ptp: fix crosstimestamp reporting (Petr Oros) [RHEL-112558]
+- ice: fix NULL access of tx->in_use in ice_ll_ts_intr (Petr Oros) [RHEL-112873]
+- ice: fix NULL access of tx->in_use in ice_ptp_ts_irq (Petr Oros) [RHEL-112873]
+- ice: Implement PTP support for E830 devices (Petr Oros) [RHEL-112558]
+- ice: Refactor ice_ptp_init_tx_* (Petr Oros) [RHEL-112558]
+- ice: Add unified ice_capture_crosststamp (Petr Oros) [RHEL-112558]
+- ice: Process TSYN IRQ in a separate function (Petr Oros) [RHEL-112558]
+- ice: Use FIELD_PREP for timestamp values (Petr Oros) [RHEL-112558]
+- ice: Remove unnecessary ice_is_e8xx() functions (Petr Oros) [RHEL-112558]
+- ice: Don't check device type when checking GNSS presence (Petr Oros) [RHEL-112558]
+- ice: Add in/out PTP pin delays (Petr Oros) [RHEL-112558]
+- ice: fix PHY timestamp extraction for ETH56G (Petr Oros) [RHEL-112558]
+- ice: Add correct PHY lane assignment (Petr Oros) [RHEL-112683]
+- ice: Fix ETH56G FC-FEC Rx offset value (Petr Oros) [RHEL-112683]
+- ice: Fix quad registers read on E825 (Petr Oros) [RHEL-112683]
+- ice: Fix E825 initialization (Petr Oros) [RHEL-112683]
+- tcp: drop secpath at the same time as we currently drop dst (Sabrina Dubroca) [RHEL-82136]
+- smb: client: fix use-after-free in cifs_oplock_break (CKI Backport Bot) [RHEL-111196] {CVE-2025-38527}
+- i40e: When removing VF MAC filters, only check PF-set MAC (CKI Backport Bot) [RHEL-109571]
+- cpufreq/cppc: Don't compare desired_perf in target() (Mark Langsdorf) [RHEL-109525]
+- netfilter: nf_conntrack: fix crash due to removal of uninitialised entry (CKI Backport Bot) [RHEL-106432] {CVE-2025-38472}
+- sched/rt: Fix race in push_rt_task (Phil Auld) [RHEL-91800]
+Resolves: RHEL-106432, RHEL-109525, RHEL-109571, RHEL-111196, RHEL-112558, RHEL-112683, RHEL-112873, RHEL-113039, RHEL-113333, RHEL-113916, RHEL-82136, RHEL-91800
+
 * Tue Sep 16 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.46.1.el9_6]
 - net: usb: smsc75xx: Move packet length check to prevent kernel panic in skb_pull (CKI Backport Bot) [RHEL-112246] {CVE-2023-53125}
 - net: usb: smsc75xx: Limit packet length to skb->len (CKI Backport Bot) [RHEL-112246] {CVE-2023-53125}

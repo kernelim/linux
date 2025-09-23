@@ -861,7 +861,6 @@ struct ice_e810_params {
 
 struct ice_eth56g_params {
 	u8 num_phys;
-	u8 phy_addr[2];
 	bool onestep_ena;
 	bool sfd_ena;
 	u32 peer_delay;
@@ -870,14 +869,6 @@ struct ice_eth56g_params {
 union ice_phy_params {
 	struct ice_e810_params e810;
 	struct ice_eth56g_params eth56g;
-};
-
-/* PHY model */
-enum ice_phy_model {
-	ICE_PHY_UNSUP = -1,
-	ICE_PHY_E810 = 1,
-	ICE_PHY_E82X,
-	ICE_PHY_ETH56G,
 };
 
 /* Global Link Topology */
@@ -889,11 +880,9 @@ enum ice_global_link_topo {
 };
 
 struct ice_ptp_hw {
-	enum ice_phy_model phy_model;
 	union ice_phy_params phy;
 	u8 num_lports;
 	u8 ports_per_phy;
-	bool is_2x50g_muxed_topo;
 };
 
 /* Port hardware description */
