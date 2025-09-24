@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.34.1
+%define pkgrelease 55.37.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.34.1.el10_0
+%define tarfile_release 6.12.0-55.37.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.34.1%{?buildid}%{?dist}
+%define specrelease 55.37.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.34.1.el10_0
+%define kabiversion 6.12.0-55.37.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4317,10 +4317,38 @@ fi\
 #
 #
 %changelog
-* Thu Sep 25 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.34.1
+* Wed Oct 01 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.37.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Wed Sep 24 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-55.37.1.el10_0]
+- selftests: tls: add tests for zero-length records (Sabrina Dubroca) [RHEL-114331] {CVE-2025-39682}
+- tls: fix handling of zero-length records on the rx_list (Sabrina Dubroca) [RHEL-114331] {CVE-2025-39682}
+- fs: export anon_inode_make_secure_inode() and fix secretmem LSM bypass (Audra Mitchell) [RHEL-110313] {CVE-2025-38396}
+
+* Mon Sep 22 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-55.36.1.el10_0]
+- io_uring/futex: ensure io_futex_wait() cleans up properly on failure (CKI Backport Bot) [RHEL-114341] {CVE-2025-39698}
+- ice: use fixed adapter index for E825C embedded devices (CKI Backport Bot) [RHEL-111792]
+- ice: use DSN instead of PCI BDF for ice_adapter index (CKI Backport Bot) [RHEL-111792]
+- tcp: drop secpath at the same time as we currently drop dst (Sabrina Dubroca) [RHEL-82133]
+
+* Fri Sep 19 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-55.35.1.el10_0]
+- cifs: Fix reading into an ITER_FOLIOQ from the smbdirect code (Paulo Alcantara) [RHEL-111177]
+- cifs: Fix the smbd_response slab to allow usercopy (Paulo Alcantara) [RHEL-111177] {CVE-2025-38523}
+- smb: client: let smbd_post_send_iter() respect the peers max_send_size and transmit all data (Paulo Alcantara) [RHEL-111177]
+- smb: client: fix max_sge overflow in smb_extract_folioq_to_rdma() (Paulo Alcantara) [RHEL-111177]
+- smb: client: make use of common smbdirect_socket_parameters (Paulo Alcantara) [RHEL-111177]
+- smb: smbdirect: introduce smbdirect_socket_parameters (Paulo Alcantara) [RHEL-111177]
+- smb: client: make use of common smbdirect_socket (Paulo Alcantara) [RHEL-111177]
+- smb: smbdirect: add smbdirect_socket.h (Paulo Alcantara) [RHEL-111177]
+- smb: client: make use of common smbdirect.h (Paulo Alcantara) [RHEL-111177]
+- smb: smbdirect: add smbdirect.h with public structures (Paulo Alcantara) [RHEL-111177]
+- smb: client: make use of common smbdirect_pdu.h (Paulo Alcantara) [RHEL-111177]
+- smb: smbdirect: add smbdirect_pdu.h with protocol definitions (Paulo Alcantara) [RHEL-111177]
+- s390/sclp: Fix SCCB present check (CKI Backport Bot) [RHEL-113561] {CVE-2025-39694}
+- net: stmmac: fix TSO DMA API usage causing oops (Izabela Bakollari) [RHEL-105352]
+- smb: client: fix use-after-free in cifs_oplock_break (CKI Backport Bot) [RHEL-111198] {CVE-2025-38527}
 
 * Mon Sep 15 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-55.34.1.el10_0]
 - sunrpc: fix handling of server side tls alerts (Olga Kornievskaia) [RHEL-111073] {CVE-2025-38566}
