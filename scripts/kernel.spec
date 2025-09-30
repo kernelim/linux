@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.37.1
+%define pkgrelease 55.38.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.37.1.el10_0
+%define tarfile_release 6.12.0-55.38.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.37.1%{?buildid}%{?dist}
+%define specrelease 55.38.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.37.1.el10_0
+%define kabiversion 6.12.0-55.38.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4317,10 +4317,40 @@ fi\
 #
 #
 %changelog
-* Wed Oct 01 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.37.1
+* Fri Oct 10 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.38.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Tue Sep 30 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-55.38.1.el10_0]
+- hv_netvsc: Fix panic during namespace deletion with VF (Maxim Levitsky) [RHEL-114930]
+- RDMA/mana_ib: Fix DSCP value in modify QP (Maxim Levitsky) [RHEL-114930]
+- net: mana: Handle Reset Request from MANA NIC (Maxim Levitsky) [RHEL-114930]
+- net: mana: Set tx_packets to post gso processing packet count (Maxim Levitsky) [RHEL-114930]
+- net: mana: Handle unsupported HWC commands (Maxim Levitsky) [RHEL-114930]
+- net: mana: Add handler for hardware servicing events (Maxim Levitsky) [RHEL-114930]
+- net: mana: Expose additional hardware counters for drop and TC via ethtool. (Maxim Levitsky) [RHEL-114930]
+- hv_netvsc: Set VF priv_flags to IFF_NO_ADDRCONF before open to prevent IPv6 addrconf (Maxim Levitsky) [RHEL-114930]
+- net: mana: Record doorbell physical address in PF mode (Maxim Levitsky) [RHEL-114930]
+- net: mana: Add support for Multi Vports on Bare metal (Maxim Levitsky) [RHEL-114930]
+- net: mana: Switch to page pool for jumbo frames (Maxim Levitsky) [RHEL-114930]
+- net: mana: Add metadata support for xdp mode (Maxim Levitsky) [RHEL-114930]
+- RDMA/mana_ib: Handle net event for pointing to the current netdev (Maxim Levitsky) [RHEL-114930]
+- net: mana: Change the function signature of mana_get_primary_netdev_rcu (Maxim Levitsky) [RHEL-114930]
+- RDMA/mana_ib: Ensure variable err is initialized (Maxim Levitsky) [RHEL-114930]
+- net: mana: Add debug logs in MANA network driver (Maxim Levitsky) [RHEL-114930]
+- hv_netvsc: Use VF's tso_max_size value when data path is VF (Maxim Levitsky) [RHEL-114930]
+- net: mana: Allow tso_max_size to go up-to GSO_MAX_SIZE (Maxim Levitsky) [RHEL-114930]
+- RDMA/mana_ib: request error CQEs when supported (Maxim Levitsky) [RHEL-114930]
+- RDMA/mana_ib: Query feature_flags bitmask from FW (Maxim Levitsky) [RHEL-114930]
+- net: mana: Support holes in device list reply msg (Maxim Levitsky) [RHEL-114930]
+- RDMA/mana_ib: Allocate PAGE aligned doorbell index (Maxim Levitsky) [RHEL-114930]
+- hv_netvsc: Link queues to NAPIs (Maxim Levitsky) [RHEL-114930]
+- sctp: linearize cloned gso packets in sctp_rcv (CKI Backport Bot) [RHEL-113339] {CVE-2025-38718}
+- nfsd: don't ignore the return code of svc_proc_register() (Olga Kornievskaia) [RHEL-93626] {CVE-2025-22026}
+- smb: client: fix session setup against servers that require SPN (Paulo Alcantara) [RHEL-107110]
+- smb: client: allow parsing zero-length AV pairs (Paulo Alcantara) [RHEL-107110]
+- RDMA/cxgb4: Notify rdma stack for IB_EVENT_QP_LAST_WQE_REACHED event (CKI Backport Bot) [RHEL-100817]
 
 * Wed Sep 24 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-55.37.1.el10_0]
 - selftests: tls: add tests for zero-length records (Sabrina Dubroca) [RHEL-114331] {CVE-2025-39682}

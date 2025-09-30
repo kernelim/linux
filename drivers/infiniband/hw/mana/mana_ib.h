@@ -48,6 +48,7 @@ struct mana_ib_adapter_caps {
 	u32 max_send_sge_count;
 	u32 max_recv_sge_count;
 	u32 max_inline_data_size;
+	u64 feature_flags;
 };
 
 struct mana_ib_queue {
@@ -64,6 +65,8 @@ struct mana_ib_dev {
 	struct gdma_queue **eqs;
 	struct xarray qp_table_wq;
 	struct mana_ib_adapter_caps adapter_caps;
+	netdevice_tracker dev_tracker;
+	struct notifier_block nb;
 };
 
 struct mana_ib_wq {
@@ -156,6 +159,10 @@ struct mana_ib_query_adapter_caps_req {
 	struct gdma_req_hdr hdr;
 }; /*HW Data */
 
+enum mana_ib_adapter_features {
+	MANA_IB_FEATURE_CLIENT_ERROR_CQE_SUPPORT = BIT(4),
+};
+
 struct mana_ib_query_adapter_caps_resp {
 	struct gdma_resp_hdr hdr;
 	u32 max_sq_id;
@@ -176,7 +183,12 @@ struct mana_ib_query_adapter_caps_resp {
 	u32 max_send_sge_count;
 	u32 max_recv_sge_count;
 	u32 max_inline_data_size;
+	u64 feature_flags;
 }; /* HW Data */
+
+enum mana_ib_adapter_features_request {
+	MANA_IB_FEATURE_CLIENT_ERROR_CQE_REQUEST = BIT(1),
+}; /*HW Data */
 
 struct mana_rnic_create_adapter_req {
 	struct gdma_req_hdr hdr;

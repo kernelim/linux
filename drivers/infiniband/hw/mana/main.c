@@ -174,7 +174,7 @@ static int mana_gd_allocate_doorbell_page(struct gdma_context *gc,
 
 	req.resource_type = GDMA_RESOURCE_DOORBELL_PAGE;
 	req.num_resources = 1;
-	req.alignment = 1;
+	req.alignment = PAGE_SIZE / MANA_PAGE_SIZE;
 
 	/* Have GDMA start searching from 0 */
 	req.allocated_resources = 0;
@@ -358,7 +358,7 @@ static int mana_ib_gd_create_dma_region(struct mana_ib_dev *dev, struct ib_umem 
 	unsigned int tail = 0;
 	u64 *page_addr_list;
 	void *request_buf;
-	int err;
+	int err = 0;
 
 	gc = mdev_to_gc(dev);
 	hwc = gc->hwc.driver_data;
@@ -634,7 +634,7 @@ int mana_ib_gd_query_adapter_caps(struct mana_ib_dev *dev)
 
 	mana_gd_init_req_hdr(&req.hdr, MANA_IB_GET_ADAPTER_CAP, sizeof(req),
 			     sizeof(resp));
-	req.hdr.resp.msg_version = GDMA_MESSAGE_V3;
+	req.hdr.resp.msg_version = GDMA_MESSAGE_V4;
 	req.hdr.dev_id = dev->gdma_dev->dev_id;
 
 	err = mana_gd_send_request(mdev_to_gc(dev), sizeof(req),
@@ -663,6 +663,7 @@ int mana_ib_gd_query_adapter_caps(struct mana_ib_dev *dev)
 	caps->max_inline_data_size = resp.max_inline_data_size;
 	caps->max_send_sge_count = resp.max_send_sge_count;
 	caps->max_recv_sge_count = resp.max_recv_sge_count;
+	caps->feature_flags = resp.feature_flags;
 
 	return 0;
 }
@@ -761,6 +762,9 @@ int mana_ib_gd_create_rnic_adapter(struct mana_ib_dev *mdev)
 	req.hdr.req.msg_version = GDMA_MESSAGE_V2;
 	req.hdr.dev_id = gc->mana_ib.dev_id;
 	req.notify_eq_id = mdev->fatal_err_eq->id;
+
+	if (mdev->adapter_caps.feature_flags & MANA_IB_FEATURE_CLIENT_ERROR_CQE_SUPPORT)
+		req.feature_flags |= MANA_IB_FEATURE_CLIENT_ERROR_CQE_REQUEST;
 
 	err = mana_gd_send_request(gc, sizeof(req), &req, sizeof(resp), &resp);
 	if (err) {
