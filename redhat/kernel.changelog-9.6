@@ -1,3 +1,44 @@
+* Sat Oct 04 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.52.1.el9_6]
+- crypto: seqiv - Handle EBUSY correctly (CKI Backport Bot) [RHEL-117232] {CVE-2023-53373}
+- ibmvnic: Increase max subcrq indirect entries with fallback (Mamatha Inamdar) [RHEL-116186]
+- hv_netvsc: Fix panic during namespace deletion with VF (Maxim Levitsky) [RHEL-115069]
+- RDMA/mana_ib: Fix DSCP value in modify QP (Maxim Levitsky) [RHEL-115069]
+- net: mana: Handle Reset Request from MANA NIC (Maxim Levitsky) [RHEL-115069]
+- net: mana: Set tx_packets to post gso processing packet count (Maxim Levitsky) [RHEL-115069]
+- net: mana: Handle unsupported HWC commands (Maxim Levitsky) [RHEL-115069]
+- net: mana: Add handler for hardware servicing events (Maxim Levitsky) [RHEL-115069]
+- net: mana: Expose additional hardware counters for drop and TC via ethtool. (Maxim Levitsky) [RHEL-115069]
+- hv_netvsc: Set VF priv_flags to IFF_NO_ADDRCONF before open to prevent IPv6 addrconf (Maxim Levitsky) [RHEL-115069]
+- net: mana: Record doorbell physical address in PF mode (Maxim Levitsky) [RHEL-115069]
+- net: mana: Add support for Multi Vports on Bare metal (Maxim Levitsky) [RHEL-115069]
+- net: mana: Switch to page pool for jumbo frames (Maxim Levitsky) [RHEL-115069]
+- net: mana: Add metadata support for xdp mode (Maxim Levitsky) [RHEL-115069]
+- RDMA/mana_ib: Handle net event for pointing to the current netdev (Maxim Levitsky) [RHEL-115069]
+- net: mana: Change the function signature of mana_get_primary_netdev_rcu (Maxim Levitsky) [RHEL-115069]
+- RDMA/mana_ib: Ensure variable err is initialized (Maxim Levitsky) [RHEL-115069]
+- net: mana: Add debug logs in MANA network driver (Maxim Levitsky) [RHEL-115069]
+- hv_netvsc: Use VF's tso_max_size value when data path is VF (Maxim Levitsky) [RHEL-115069]
+- net: mana: Allow tso_max_size to go up-to GSO_MAX_SIZE (Maxim Levitsky) [RHEL-115069]
+- RDMA/mana_ib: request error CQEs when supported (Maxim Levitsky) [RHEL-115069]
+- RDMA/mana_ib: Query feature_flags bitmask from FW (Maxim Levitsky) [RHEL-115069]
+- net: mana: Support holes in device list reply msg (Maxim Levitsky) [RHEL-115069]
+- RDMA/mana_ib: Allocate PAGE aligned doorbell index (Maxim Levitsky) [RHEL-115069]
+- hv_netvsc: Link queues to NAPIs (Maxim Levitsky) [RHEL-115069]
+- RDMA/mana_ib: use the correct page size for mapping user-mode doorbell page (Maxim Levitsky) [RHEL-115069]
+- RDMA/mana_ib: use the correct page table index based on hardware page size (Maxim Levitsky) [RHEL-115069]
+- net: mana: Fix doorbell out of order violation and avoid unnecessary doorbell rings (Maxim Levitsky) [RHEL-115069]
+- net: mana: Fix RX buf alloc_size alignment and atomic op panic (Maxim Levitsky) [RHEL-115069]
+- ALSA: usb-audio: Validate UAC3 power domain descriptors, too (CKI Backport Bot) [RHEL-114688] {CVE-2025-38729}
+- ALSA: usb-audio: Fix size validation in convert_chmap_v3() (CKI Backport Bot) [RHEL-114688]
+- ALSA: usb-audio: Validate UAC3 cluster segment descriptors (CKI Backport Bot) [RHEL-114688] {CVE-2025-39757}
+- HID: core: Harden s32ton() against conversion to 0 bits (CKI Backport Bot) [RHEL-111036] {CVE-2025-38556}
+- HID: stop exporting hid_snto32() (CKI Backport Bot) [RHEL-111036] {CVE-2025-38556}
+- HID: simplify snto32() (CKI Backport Bot) [RHEL-111036] {CVE-2025-38556}
+- eventpoll: Fix semi-unbounded recursion (CKI Backport Bot) [RHEL-111052] {CVE-2025-38614}
+- smb: client: fix session setup against servers that require SPN (Paulo Alcantara) [RHEL-107109]
+- smb: client: allow parsing zero-length AV pairs (Paulo Alcantara) [RHEL-107109]
+Resolves: RHEL-107109, RHEL-111036, RHEL-111052, RHEL-114688, RHEL-115069, RHEL-116186, RHEL-117232
+
 * Sat Sep 27 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.51.1.el9_6]
 - wifi: ath12k: Decrement TID on RX peer frag setup error handling (CKI Backport Bot) [RHEL-114705] {CVE-2025-39761}
 - RDMA/cxgb4: Notify rdma stack for IB_EVENT_QP_LAST_WQE_REACHED event (CKI Backport Bot) [RHEL-100798]
