@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.38.1
+%define pkgrelease 55.39.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.38.1.el10_0
+%define tarfile_release 6.12.0-55.39.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.38.1%{?buildid}%{?dist}
+%define specrelease 55.39.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.38.1.el10_0
+%define kabiversion 6.12.0-55.39.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4317,10 +4317,20 @@ fi\
 #
 #
 %changelog
-* Fri Oct 10 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.38.1
+* Mon Oct 13 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.39.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Sat Oct 04 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-55.39.1.el10_0]
+- wifi: ath12k: Decrement TID on RX peer frag setup error handling (CKI Backport Bot) [RHEL-114712] {CVE-2025-39761}
+- ALSA: usb-audio: Validate UAC3 power domain descriptors, too (CKI Backport Bot) [RHEL-114695] {CVE-2025-38729}
+- ALSA: usb-audio: Fix size validation in convert_chmap_v3() (CKI Backport Bot) [RHEL-114695]
+- ALSA: usb-audio: Validate UAC3 cluster segment descriptors (CKI Backport Bot) [RHEL-114695] {CVE-2025-39757}
+- HID: core: Harden s32ton() against conversion to 0 bits (CKI Backport Bot) [RHEL-111037] {CVE-2025-38556}
+- HID: stop exporting hid_snto32() (CKI Backport Bot) [RHEL-111037] {CVE-2025-38556}
+- HID: simplify snto32() (CKI Backport Bot) [RHEL-111037] {CVE-2025-38556}
+- cxl: core/region - ignore interleave granularity when ways=1 (John W. Linville) [RHEL-107595]
 
 * Tue Sep 30 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-55.38.1.el10_0]
 - hv_netvsc: Fix panic during namespace deletion with VF (Maxim Levitsky) [RHEL-114930]

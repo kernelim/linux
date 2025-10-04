@@ -1,3 +1,14 @@
+* Sat Oct 04 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-55.39.1.el10_0]
+- wifi: ath12k: Decrement TID on RX peer frag setup error handling (CKI Backport Bot) [RHEL-114712] {CVE-2025-39761}
+- ALSA: usb-audio: Validate UAC3 power domain descriptors, too (CKI Backport Bot) [RHEL-114695] {CVE-2025-38729}
+- ALSA: usb-audio: Fix size validation in convert_chmap_v3() (CKI Backport Bot) [RHEL-114695]
+- ALSA: usb-audio: Validate UAC3 cluster segment descriptors (CKI Backport Bot) [RHEL-114695] {CVE-2025-39757}
+- HID: core: Harden s32ton() against conversion to 0 bits (CKI Backport Bot) [RHEL-111037] {CVE-2025-38556}
+- HID: stop exporting hid_snto32() (CKI Backport Bot) [RHEL-111037] {CVE-2025-38556}
+- HID: simplify snto32() (CKI Backport Bot) [RHEL-111037] {CVE-2025-38556}
+- cxl: core/region - ignore interleave granularity when ways=1 (John W. Linville) [RHEL-107595]
+Resolves: RHEL-107595, RHEL-111037, RHEL-114695, RHEL-114712
+
 * Tue Sep 30 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-55.38.1.el10_0]
 - hv_netvsc: Fix panic during namespace deletion with VF (Maxim Levitsky) [RHEL-114930]
 - RDMA/mana_ib: Fix DSCP value in modify QP (Maxim Levitsky) [RHEL-114930]
