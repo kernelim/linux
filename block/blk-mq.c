@@ -353,7 +353,6 @@ static struct request *blk_mq_rq_ctx_init(struct blk_mq_alloc_data *data,
 	rq->end_io = NULL;
 	rq->end_io_data = NULL;
 
-	data->ctx->rq_dispatched[op_is_sync(data->cmd_flags)]++;
 	refcount_set(&rq->ref, 1);
 
 	if (!op_is_flush(data->cmd_flags)) {
@@ -369,7 +368,6 @@ static struct request *blk_mq_rq_ctx_init(struct blk_mq_alloc_data *data,
 		}
 	}
 
-	data->hctx->queued++;
 	return rq;
 }
 
@@ -537,7 +535,6 @@ void blk_mq_free_request(struct request *rq)
 {
 	struct request_queue *q = rq->q;
 	struct elevator_queue *e = q->elevator;
-	struct blk_mq_ctx *ctx = rq->mq_ctx;
 	struct blk_mq_hw_ctx *hctx = rq->mq_hctx;
 
 	if (rq->rq_flags & RQF_ELVPRIV) {
@@ -549,7 +546,6 @@ void blk_mq_free_request(struct request *rq)
 		}
 	}
 
-	ctx->rq_completed[rq_is_sync(rq)]++;
 	if (rq->rq_flags & RQF_MQ_INFLIGHT)
 		__blk_mq_dec_active_requests(hctx);
 
@@ -1164,14 +1160,6 @@ struct request *blk_mq_dequeue_from_ctx(struct blk_mq_hw_ctx *hctx,
 	return data.rq;
 }
 
-static inline unsigned int queued_to_index(unsigned int queued)
-{
-	if (!queued)
-		return 0;
-
-	return min(BLK_MQ_MAX_DISPATCH_ORDER - 1, ilog2(queued) + 1);
-}
-
 static bool __blk_mq_get_driver_tag(struct request *rq)
 {
 	struct sbitmap_queue *bt = rq->mq_hctx->tags->bitmap_tags;
@@ -1514,8 +1502,6 @@ bool blk_mq_dispatch_rq_list(struct blk_mq_hw_ctx *hctx, struct list_head *list,
 out:
 	if (!list_empty(&zone_list))
 		list_splice_tail_init(&zone_list, list);
-
-	hctx->dispatched[queued_to_index(queued)]++;
 
 	/* If we didn't flush the entire list, we could have told the driver
 	 * there was more coming, but that turned out to be a lie.
@@ -4112,17 +4098,12 @@ int blk_poll(struct request_queue *q, blk_qc_t cookie, bool spin)
 	if (spin && blk_mq_poll_hybrid(q, hctx, cookie))
 		return 1;
 
-	hctx->poll_considered++;
-
 	state = get_current_state();
 	do {
 		int ret;
 
-		hctx->poll_invoked++;
-
 		ret = q->mq_ops->poll(hctx);
 		if (ret > 0) {
-			hctx->poll_success++;
 			__set_current_state(TASK_RUNNING);
 			return ret;
 		}

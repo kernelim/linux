@@ -28,11 +28,11 @@ struct blk_mq_ctx {
 	RH_KABI_BROKEN_INSERT(struct blk_mq_hw_ctx	*hctxs[HCTX_MAX_TYPES])
 
 	/* incremented at dispatch time */
-	unsigned long		rq_dispatched[2];
-	unsigned long		rq_merged;
+	RH_KABI_DEPRECATE(unsigned long, rq_dispatched[2])
+	RH_KABI_DEPRECATE(unsigned long, rq_merged)
 
 	/* incremented at completion time */
-	unsigned long		____cacheline_aligned_in_smp rq_completed[2];
+	RH_KABI_DEPRECATE(unsigned long ____cacheline_aligned_in_smp, rq_completed[2])
 
 	struct request_queue	*queue;
 	struct blk_mq_ctxs      *ctxs;

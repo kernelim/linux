@@ -358,8 +358,6 @@ void blk_mq_sched_dispatch_requests(struct blk_mq_hw_ctx *hctx)
 	if (unlikely(blk_mq_hctx_stopped(hctx) || blk_queue_quiesced(q)))
 		return;
 
-	hctx->run++;
-
 	/*
 	 * A return of -EAGAIN is an indication that hctx->dispatch is not
 	 * empty and we must run again in order to avoid starving flushes.
@@ -415,10 +413,8 @@ static bool blk_mq_attempt_merge(struct request_queue *q,
 
 	lockdep_assert_held(&ctx->lock);
 
-	if (blk_bio_list_merge(q, &ctx->rq_lists[type], bio)) {
-		ctx->rq_merged++;
+	if (blk_bio_list_merge(q, &ctx->rq_lists[type], bio))
 		return true;
-	}
 
 	return false;
 }

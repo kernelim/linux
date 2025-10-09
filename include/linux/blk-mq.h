@@ -50,9 +50,9 @@ struct blk_mq_hw_ctx {
 	struct blk_mq_tags	*sched_tags;
 
 	unsigned long		queued;
-	unsigned long		run;
+	RH_KABI_DEPRECATE(unsigned long, run)
 #define BLK_MQ_MAX_DISPATCH_ORDER	7
-	unsigned long		dispatched[BLK_MQ_MAX_DISPATCH_ORDER];
+	RH_KABI_DEPRECATE(unsigned long, dispatched[BLK_MQ_MAX_DISPATCH_ORDER])
 
 	unsigned int		numa_node;
 	unsigned int		queue_num;
@@ -63,9 +63,9 @@ struct blk_mq_hw_ctx {
 	struct hlist_node	cpuhp_dead;
 	struct kobject		kobj;
 
-	unsigned long		poll_considered;
-	unsigned long		poll_invoked;
-	unsigned long		poll_success;
+	RH_KABI_DEPRECATE(unsigned long, poll_considered)
+	RH_KABI_DEPRECATE(unsigned long, poll_invoked)
+	RH_KABI_DEPRECATE(unsigned long, poll_success)
 
 #ifdef CONFIG_BLK_DEBUG_FS
 	struct dentry		*debugfs_dir;
