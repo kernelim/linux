@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 570.52.1
+%define pkgrelease 570.55.1
 %define kversion 5
-%define tarfile_release 5.14.0-570.52.1.el9_6
+%define tarfile_release 5.14.0-570.55.1.el9_6
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 570.52.1%{?buildid}%{?dist}
+%define specrelease 570.55.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-570.52.1.el9_6
+%define kabiversion 5.14.0-570.55.1.el9_6
 
 #
 # End of genspec.sh variables
@@ -3788,9 +3788,28 @@ fi
 #
 #
 %changelog
-* Mon Oct 13 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.52.1
+* Wed Oct 22 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.55.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Tue Oct 14 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.55.1.el9_6]
+- scsi: lpfc: Fix buffer free/clear order in deferred receive path (CKI Backport Bot) [RHEL-119115] {CVE-2025-39841}
+
+* Sat Oct 11 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.54.1.el9_6]
+- firmware: arm_scpi: Ensure scpi_info is not assigned if the probe fails (Charles Mirabile) [RHEL-113836] {CVE-2022-50087}
+- SUNRPC: call xs_sock_process_cmsg for all cmsg (Olga Kornievskaia) [RHEL-110811]
+- sunrpc: fix client side handling of tls alerts (Olga Kornievskaia) [RHEL-110811] {CVE-2025-38571}
+- efivarfs: Fix slab-out-of-bounds in efivarfs_d_compare (CKI Backport Bot) [RHEL-118256] {CVE-2025-39817}
+- sunrpc: fix handling of server side tls alerts (Steve Dickson) [RHEL-111070] {CVE-2025-38566}
+- platform/x86/intel: power-domains: Use topology_logical_package_id() for package ID (Jay Shin) [RHEL-116679]
+
+* Thu Oct 09 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.53.1.el9_6]
+- wifi: cfg80211: sme: cap SSID length in __cfg80211_connect_result() (CKI Backport Bot) [RHEL-117578] {CVE-2025-39849}
+- ibmvnic: Use ndo_get_stats64 to fix inaccurate SAR reporting (Mamatha Inamdar) [RHEL-114436]
+- ibmvnic: Fix hardcoded NUM_RX_STATS/NUM_TX_STATS with dynamic sizeof (Mamatha Inamdar) [RHEL-114436]
+- ibmvnic: Add stat for tx direct vs tx batched (Mamatha Inamdar) [RHEL-114436]
+- nfsd: don't ignore the return code of svc_proc_register() (Olga Kornievskaia) [RHEL-93610] {CVE-2025-22026}
+- irdma: free iwdev->rf after removing MSI-X (CKI Backport Bot) [RHEL-111485]
 
 * Sat Oct 04 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.52.1.el9_6]
 - crypto: seqiv - Handle EBUSY correctly (CKI Backport Bot) [RHEL-117232] {CVE-2023-53373}
