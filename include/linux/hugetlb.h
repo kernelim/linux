@@ -15,6 +15,7 @@
 struct ctl_table;
 struct user_struct;
 struct mmu_gather;
+struct node;
 
 #ifndef is_hugepd
 typedef struct { unsigned long pd; } hugepd_t;
@@ -584,6 +585,7 @@ struct huge_bootmem_page {
 	struct hstate *hstate;
 };
 
+void wait_for_freed_hugetlb_pages(void);
 struct page *alloc_huge_page(struct vm_area_struct *vma,
 				unsigned long addr, int avoid_reserve);
 struct page *alloc_huge_page_nodemask(struct hstate *h, int preferred_nid,
@@ -843,12 +845,21 @@ static inline void huge_ptep_modify_prot_commit(struct vm_area_struct *vma,
 }
 #endif
 
+#ifdef CONFIG_NUMA
+void hugetlb_register_node(struct node *node);
+void hugetlb_unregister_node(struct node *node);
+#endif
+
 #else	/* CONFIG_HUGETLB_PAGE */
 struct hstate {};
 
 static inline struct hugepage_subpool *hugetlb_page_subpool(struct page *hpage)
 {
 	return NULL;
+}
+
+static inline void wait_for_freed_hugetlb_pages(void)
+{
 }
 
 static inline struct page *alloc_huge_page(struct vm_area_struct *vma,
@@ -998,6 +1009,14 @@ static inline void hugetlb_count_sub(long l, struct mm_struct *mm)
 
 static inline void set_huge_swap_pte_at(struct mm_struct *mm, unsigned long addr,
 					pte_t *ptep, pte_t pte, unsigned long sz)
+{
+}
+
+static inline void hugetlb_register_node(struct node *node)
+{
+}
+
+static inline void hugetlb_unregister_node(struct node *node)
 {
 }
 #endif	/* CONFIG_HUGETLB_PAGE */
