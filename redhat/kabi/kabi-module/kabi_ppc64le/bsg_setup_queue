@@ -1,3 +1,3 @@
-#0-
-0x06f5bbe4	bsg_setup_queue	vmlinux	EXPORT_SYMBOL_GPL	
+#1-
+0x222b3ea8	bsg_setup_queue	vmlinux	EXPORT_SYMBOL_GPL	
 

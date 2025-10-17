@@ -21,7 +21,7 @@
 # The name of the end resulting addon is taken from the folder hierarchy, but this
 # is handled by uki_create_addons.py when building the rpm. This script only
 # prepares the json file to be added in the srpm. For more information about
-# the folder hierarchy, what the 'common' and 'sbat' folder are, look at
+# the folder hierarchy and what the 'common' folder is, look at
 # uki_create_addons.py.
 #
 # The common folder, present in any folder under redhat/uki_addons
@@ -51,7 +51,7 @@ def usage(err):
     sys.exit(1)
 
 def find_addons():
-    cmd = ['/usr/bin/find', 'uki_addons', "(", '-name', '*.addon', '-o', '-name', 'sbat.conf', ")"]
+    cmd = ['/usr/bin/find', 'uki_addons', '-name', '*.addon']
     proc_out = subprocess.run(cmd, check=True, capture_output=True, text=True)
     if proc_out.returncode == 0:
         return proc_out.stdout
@@ -86,7 +86,7 @@ def create_json(addons):
 
 def write_json(obj, dest_file):
     with open(dest_file, 'w') as f:
-        json.dump(obj , f, indent=4)
+        json.dump(obj , f, indent=4, sort_keys=True)
     print(f'Processed addons files are in {dest_file}')
 
 if __name__ == "__main__":

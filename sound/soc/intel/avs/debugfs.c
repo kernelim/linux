@@ -10,6 +10,7 @@
 #include <linux/kfifo.h>
 #include <linux/wait.h>
 #include <linux/sched/signal.h>
+#include <linux/string_helpers.h>
 #include <sound/soc.h>
 #include "avs.h"
 #include "messages.h"
@@ -372,7 +373,10 @@ static ssize_t trace_control_write(struct file *file, const char __user *from, s
 		return ret;
 
 	num_elems = *array;
-	resource_mask = array[1];
+	if (!num_elems) {
+		ret = -EINVAL;
+		goto free_array;
+	}
 
 	/*
 	 * Disable if just resource mask is provided - no log priority flags.
@@ -380,6 +384,7 @@ static ssize_t trace_control_write(struct file *file, const char __user *from, s
 	 * Enable input format:   mask, prio1, .., prioN
 	 * Where 'N' equals number of bits set in the 'mask'.
 	 */
+	resource_mask = array[1];
 	if (num_elems == 1) {
 		ret = disable_logs(adev, resource_mask);
 	} else {

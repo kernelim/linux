@@ -522,7 +522,8 @@ static void lt9611uxc_audio_shutdown(struct device *dev, void *data)
 }
 
 static int lt9611uxc_hdmi_i2s_get_dai_id(struct snd_soc_component *component,
-					 struct device_node *endpoint)
+					 struct device_node *endpoint,
+					 void *data)
 {
 	struct of_endpoint of_ep;
 	int ret;
@@ -879,7 +880,11 @@ retry:
 		}
 	}
 
-	return lt9611uxc_audio_init(dev, lt9611uxc);
+	ret = lt9611uxc_audio_init(dev, lt9611uxc);
+	if (ret)
+		goto err_remove_bridge;
+
+	return 0;
 
 err_remove_bridge:
 	free_irq(client->irq, lt9611uxc);
@@ -913,8 +918,8 @@ static void lt9611uxc_remove(struct i2c_client *client)
 	of_node_put(lt9611uxc->dsi0_node);
 }
 
-static struct i2c_device_id lt9611uxc_id[] = {
-	{ "lontium,lt9611uxc", 0 },
+static const struct i2c_device_id lt9611uxc_id[] = {
+	{ "lontium,lt9611uxc" },
 	{ /* sentinel */ }
 };
 

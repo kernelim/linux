@@ -28,10 +28,12 @@
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 
+#include "i915_drv.h"
 #include "i915_irq.h"
 #include "i915_reg.h"
 #include "intel_atomic.h"
 #include "intel_de.h"
+#include "intel_display_irq.h"
 #include "intel_display_types.h"
 #include "intel_pipe_crc.h"
 #include "intel_pipe_crc_regs.h"
@@ -284,6 +286,9 @@ intel_crtc_crc_setup_workarounds(struct intel_crtc *crtc, bool enable)
 	struct drm_atomic_state *state;
 	struct drm_modeset_acquire_ctx ctx;
 	int ret;
+
+	if (IS_I945GM(dev_priv) || IS_I915GM(dev_priv))
+		i915gm_irq_cstate_wa(dev_priv, enable);
 
 	drm_modeset_acquire_init(&ctx, 0);
 
@@ -577,6 +582,7 @@ int intel_crtc_verify_crc_source(struct drm_crtc *crtc, const char *source_name,
 int intel_crtc_set_crc_source(struct drm_crtc *_crtc, const char *source_name)
 {
 	struct intel_crtc *crtc = to_intel_crtc(_crtc);
+	struct intel_display *display = to_intel_display(crtc);
 	struct drm_i915_private *dev_priv = to_i915(crtc->base.dev);
 	struct intel_pipe_crc *pipe_crc = &crtc->pipe_crc;
 	enum intel_display_power_domain power_domain;
@@ -593,7 +599,7 @@ int intel_crtc_set_crc_source(struct drm_crtc *_crtc, const char *source_name)
 	}
 
 	power_domain = POWER_DOMAIN_PIPE(pipe);
-	wakeref = intel_display_power_get_if_enabled(dev_priv, power_domain);
+	wakeref = intel_display_power_get_if_enabled(display, power_domain);
 	if (!wakeref) {
 		drm_dbg_kms(&dev_priv->drm,
 			    "Trying to capture CRC while pipe is off\n");
@@ -623,7 +629,7 @@ out:
 	if (!enable)
 		intel_crtc_crc_setup_workarounds(crtc, false);
 
-	intel_display_power_put(dev_priv, power_domain, wakeref);
+	intel_display_power_put(display, power_domain, wakeref);
 
 	return ret;
 }

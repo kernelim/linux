@@ -203,9 +203,8 @@ imx8qxp_ldb_bridge_mode_set(struct drm_bridge *bridge,
 		companion->funcs->mode_set(companion, mode, adjusted_mode);
 }
 
-static void
-imx8qxp_ldb_bridge_atomic_pre_enable(struct drm_bridge *bridge,
-				     struct drm_bridge_state *old_bridge_state)
+static void imx8qxp_ldb_bridge_atomic_pre_enable(struct drm_bridge *bridge,
+						 struct drm_atomic_state *state)
 {
 	struct ldb_channel *ldb_ch = bridge->driver_private;
 	struct ldb *ldb = ldb_ch->ldb;
@@ -217,12 +216,11 @@ imx8qxp_ldb_bridge_atomic_pre_enable(struct drm_bridge *bridge,
 	clk_prepare_enable(imx8qxp_ldb->clk_bypass);
 
 	if (is_split && companion)
-		companion->funcs->atomic_pre_enable(companion, old_bridge_state);
+		companion->funcs->atomic_pre_enable(companion, state);
 }
 
-static void
-imx8qxp_ldb_bridge_atomic_enable(struct drm_bridge *bridge,
-				 struct drm_bridge_state *old_bridge_state)
+static void imx8qxp_ldb_bridge_atomic_enable(struct drm_bridge *bridge,
+					     struct drm_atomic_state *state)
 {
 	struct ldb_channel *ldb_ch = bridge->driver_private;
 	struct ldb *ldb = ldb_ch->ldb;
@@ -252,12 +250,11 @@ imx8qxp_ldb_bridge_atomic_enable(struct drm_bridge *bridge,
 		DRM_DEV_ERROR(dev, "failed to power on PHY: %d\n", ret);
 
 	if (is_split && companion)
-		companion->funcs->atomic_enable(companion, old_bridge_state);
+		companion->funcs->atomic_enable(companion, state);
 }
 
-static void
-imx8qxp_ldb_bridge_atomic_disable(struct drm_bridge *bridge,
-				  struct drm_bridge_state *old_bridge_state)
+static void imx8qxp_ldb_bridge_atomic_disable(struct drm_bridge *bridge,
+					      struct drm_atomic_state *state)
 {
 	struct ldb_channel *ldb_ch = bridge->driver_private;
 	struct ldb *ldb = ldb_ch->ldb;
@@ -283,7 +280,7 @@ imx8qxp_ldb_bridge_atomic_disable(struct drm_bridge *bridge,
 	clk_disable_unprepare(imx8qxp_ldb->clk_pixel);
 
 	if (is_split && companion)
-		companion->funcs->atomic_disable(companion, old_bridge_state);
+		companion->funcs->atomic_disable(companion, state);
 
 	ret = pm_runtime_put(dev);
 	if (ret < 0)
@@ -678,12 +675,12 @@ static void imx8qxp_ldb_remove(struct platform_device *pdev)
 	pm_runtime_disable(&pdev->dev);
 }
 
-static int __maybe_unused imx8qxp_ldb_runtime_suspend(struct device *dev)
+static int imx8qxp_ldb_runtime_suspend(struct device *dev)
 {
 	return 0;
 }
 
-static int __maybe_unused imx8qxp_ldb_runtime_resume(struct device *dev)
+static int imx8qxp_ldb_runtime_resume(struct device *dev)
 {
 	struct imx8qxp_ldb *imx8qxp_ldb = dev_get_drvdata(dev);
 	struct ldb *ldb = &imx8qxp_ldb->base;
@@ -695,8 +692,7 @@ static int __maybe_unused imx8qxp_ldb_runtime_resume(struct device *dev)
 }
 
 static const struct dev_pm_ops imx8qxp_ldb_pm_ops = {
-	SET_RUNTIME_PM_OPS(imx8qxp_ldb_runtime_suspend,
-			   imx8qxp_ldb_runtime_resume, NULL)
+	RUNTIME_PM_OPS(imx8qxp_ldb_runtime_suspend, imx8qxp_ldb_runtime_resume, NULL)
 };
 
 static const struct of_device_id imx8qxp_ldb_dt_ids[] = {
@@ -707,9 +703,9 @@ MODULE_DEVICE_TABLE(of, imx8qxp_ldb_dt_ids);
 
 static struct platform_driver imx8qxp_ldb_driver = {
 	.probe	= imx8qxp_ldb_probe,
-	.remove_new = imx8qxp_ldb_remove,
+	.remove = imx8qxp_ldb_remove,
 	.driver	= {
-		.pm = &imx8qxp_ldb_pm_ops,
+		.pm = pm_ptr(&imx8qxp_ldb_pm_ops),
 		.name = DRIVER_NAME,
 		.of_match_table = imx8qxp_ldb_dt_ids,
 	},

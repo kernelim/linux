@@ -627,7 +627,9 @@ static void unix_write_space(struct sock *sk)
 static void unix_dgram_disconnected(struct sock *sk, struct sock *other)
 {
 	if (!skb_queue_empty(&sk->sk_receive_queue)) {
-		skb_queue_purge(&sk->sk_receive_queue);
+		skb_queue_purge_reason(&sk->sk_receive_queue,
+				       SKB_DROP_REASON_UNIX_DISCONNECT);
+
 		wake_up_interruptible_all(&unix_sk(sk)->peer_wait);
 
 		/* If one link of bidirectional dgram pipe is disconnected,
@@ -645,7 +647,7 @@ static void unix_sock_destructor(struct sock *sk)
 {
 	struct unix_sock *u = unix_sk(sk);
 
-	skb_queue_purge(&sk->sk_receive_queue);
+	skb_queue_purge_reason(&sk->sk_receive_queue, SKB_DROP_REASON_SOCKET_CLOSE);
 
 	DEBUG_NET_WARN_ON_ONCE(refcount_read(&sk->sk_wmem_alloc));
 	DEBUG_NET_WARN_ON_ONCE(!sk_unhashed(sk));
@@ -720,8 +722,8 @@ static void unix_release_sock(struct sock *sk, int embrion)
 		if (state == TCP_LISTEN)
 			unix_release_sock(skb->sk, 1);
 
-		/* passed fds are erased in the kfree_skb hook	      */
-		kfree_skb(skb);
+		/* passed fds are erased in the kfree_skb hook */
+		kfree_skb_reason(skb, SKB_DROP_REASON_SOCKET_CLOSE);
 	}
 
 	if (path.dentry)
@@ -1563,32 +1565,30 @@ static int unix_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 	timeo = sock_sndtimeo(sk, flags & O_NONBLOCK);
 
 	/* First of all allocate resources.
-	   If we will make it after state is locked,
-	   we will have to recheck all again in any case.
+	 * If we will make it after state is locked,
+	 * we will have to recheck all again in any case.
 	 */
 
 	/* create new sock for complete connection */
 	newsk = unix_create1(net, NULL, 0, sock->type);
 	if (IS_ERR(newsk)) {
 		err = PTR_ERR(newsk);
-		newsk = NULL;
 		goto out;
 	}
 
-	err = -ENOMEM;
-
 	/* Allocate skb for sending to listening sock */
 	skb = sock_wmalloc(newsk, 1, 0, GFP_KERNEL);
-	if (skb == NULL)
-		goto out;
+	if (!skb) {
+		err = -ENOMEM;
+		goto out_free_sk;
+	}
 
 restart:
 	/*  Find listening sock. */
 	other = unix_find_other(net, sunaddr, addr_len, sk->sk_type);
 	if (IS_ERR(other)) {
 		err = PTR_ERR(other);
-		other = NULL;
-		goto out;
+		goto out_free_skb;
 	}
 
 	unix_state_lock(other);
@@ -1600,23 +1600,25 @@ restart:
 		goto restart;
 	}
 
-	err = -ECONNREFUSED;
-	if (other->sk_state != TCP_LISTEN)
+	if (other->sk_state != TCP_LISTEN ||
+	    other->sk_shutdown & RCV_SHUTDOWN) {
+		err = -ECONNREFUSED;
 		goto out_unlock;
-	if (other->sk_shutdown & RCV_SHUTDOWN)
-		goto out_unlock;
+	}
 
 	if (unix_recvq_full_lockless(other)) {
-		err = -EAGAIN;
-		if (!timeo)
+		if (!timeo) {
+			err = -EAGAIN;
 			goto out_unlock;
+		}
 
 		timeo = unix_wait_for_peer(other, timeo);
+		sock_put(other);
 
 		err = sock_intr_errno(timeo);
 		if (signal_pending(current))
-			goto out;
-		sock_put(other);
+			goto out_free_skb;
+
 		goto restart;
 	}
 
@@ -1701,15 +1703,13 @@ restart:
 	return 0;
 
 out_unlock:
-	if (other)
-		unix_state_unlock(other);
-
+	unix_state_unlock(other);
+	sock_put(other);
+out_free_skb:
+	consume_skb(skb);
+out_free_sk:
+	unix_release_sock(newsk, 0);
 out:
-	kfree_skb(skb);
-	if (newsk)
-		unix_release_sock(newsk, 0);
-	if (other)
-		sock_put(other);
 	return err;
 }
 
@@ -2174,7 +2174,7 @@ out_unlock:
 		unix_state_unlock(sk);
 	unix_state_unlock(other);
 out_free:
-	kfree_skb(skb);
+	consume_skb(skb);
 out:
 	if (other)
 		sock_put(other);
@@ -2193,7 +2193,7 @@ static int queue_oob(struct socket *sock, struct msghdr *msg, struct sock *other
 {
 	struct unix_sock *ousk = unix_sk(other);
 	struct sk_buff *skb;
-	int err = 0;
+	int err;
 
 	skb = sock_alloc_send_skb(sock->sk, 1, msg->msg_flags & MSG_DONTWAIT, &err);
 
@@ -2201,25 +2201,22 @@ static int queue_oob(struct socket *sock, struct msghdr *msg, struct sock *other
 		return err;
 
 	err = unix_scm_to_skb(scm, skb, !fds_sent);
-	if (err < 0) {
-		kfree_skb(skb);
-		return err;
-	}
+	if (err < 0)
+		goto out;
+
 	skb_put(skb, 1);
 	err = skb_copy_datagram_from_iter(skb, 0, &msg->msg_iter, 1);
 
-	if (err) {
-		kfree_skb(skb);
-		return err;
-	}
+	if (err)
+		goto out;
 
 	unix_state_lock(other);
 
 	if (sock_flag(other, SOCK_DEAD) ||
 	    (other->sk_shutdown & RCV_SHUTDOWN)) {
 		unix_state_unlock(other);
-		kfree_skb(skb);
-		return -EPIPE;
+		err = -EPIPE;
+		goto out;
 	}
 
 	maybe_add_creds(skb, sock, other);
@@ -2234,6 +2231,9 @@ static int queue_oob(struct socket *sock, struct msghdr *msg, struct sock *other
 	unix_state_unlock(other);
 	other->sk_data_ready(other);
 
+	return 0;
+out:
+	consume_skb(skb);
 	return err;
 }
 #endif
@@ -2242,13 +2242,11 @@ static int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg,
 			       size_t len)
 {
 	struct sock *sk = sock->sk;
+	struct sk_buff *skb = NULL;
 	struct sock *other = NULL;
-	int err, size;
-	struct sk_buff *skb;
-	int sent = 0;
 	struct scm_cookie scm;
 	bool fds_sent = false;
-	int data_len;
+	int err, sent = 0;
 
 	err = scm_send(sock, msg, &scm, false);
 	if (err < 0)
@@ -2256,8 +2254,8 @@ static int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg,
 
 	wait_for_unix_gc(scm.fp);
 
-	err = -EOPNOTSUPP;
 	if (msg->msg_flags & MSG_OOB) {
+		err = -EOPNOTSUPP;
 #if IS_ENABLED(CONFIG_AF_UNIX_OOB)
 		if (len)
 			len--;
@@ -2270,17 +2268,19 @@ static int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg,
 		err = READ_ONCE(sk->sk_state) == TCP_ESTABLISHED ? -EISCONN : -EOPNOTSUPP;
 		goto out_err;
 	} else {
-		err = -ENOTCONN;
 		other = unix_peer(sk);
-		if (!other)
+		if (!other) {
+			err = -ENOTCONN;
 			goto out_err;
+		}
 	}
 
 	if (READ_ONCE(sk->sk_shutdown) & SEND_SHUTDOWN)
-		goto pipe_err;
+		goto out_pipe;
 
 	while (sent < len) {
-		size = len - sent;
+		int size = len - sent;
+		int data_len;
 
 		if (unlikely(msg->msg_flags & MSG_SPLICE_PAGES)) {
 			skb = sock_alloc_send_pskb(sk, 0, 0,
@@ -2306,19 +2306,18 @@ static int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg,
 
 		/* Only send the fds in the first buffer */
 		err = unix_scm_to_skb(&scm, skb, !fds_sent);
-		if (err < 0) {
-			kfree_skb(skb);
-			goto out_err;
-		}
+		if (err < 0)
+			goto out_free;
+
 		fds_sent = true;
 
 		if (unlikely(msg->msg_flags & MSG_SPLICE_PAGES)) {
+			skb->ip_summed = CHECKSUM_UNNECESSARY;
 			err = skb_splice_from_iter(skb, &msg->msg_iter, size,
 						   sk->sk_allocation);
-			if (err < 0) {
-				kfree_skb(skb);
-				goto out_err;
-			}
+			if (err < 0)
+				goto out_free;
+
 			size = err;
 			refcount_add(size, &sk->sk_wmem_alloc);
 		} else {
@@ -2326,17 +2325,15 @@ static int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg,
 			skb->data_len = data_len;
 			skb->len = size;
 			err = skb_copy_datagram_from_iter(skb, 0, &msg->msg_iter, size);
-			if (err) {
-				kfree_skb(skb);
-				goto out_err;
-			}
+			if (err)
+				goto out_free;
 		}
 
 		unix_state_lock(other);
 
 		if (sock_flag(other, SOCK_DEAD) ||
 		    (other->sk_shutdown & RCV_SHUTDOWN))
-			goto pipe_err_free;
+			goto out_pipe_unlock;
 
 		maybe_add_creds(skb, sock, other);
 		scm_stat_add(other, skb);
@@ -2359,13 +2356,14 @@ static int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg,
 
 	return sent;
 
-pipe_err_free:
+out_pipe_unlock:
 	unix_state_unlock(other);
-	kfree_skb(skb);
-pipe_err:
-	if (sent == 0 && !(msg->msg_flags&MSG_NOSIGNAL))
+out_pipe:
+	if (!sent && !(msg->msg_flags & MSG_NOSIGNAL))
 		send_sig(SIGPIPE, current, 0);
 	err = -EPIPE;
+out_free:
+	consume_skb(skb);
 out_err:
 	scm_destroy(&scm);
 	return sent ? : err;
@@ -2698,7 +2696,7 @@ unlock:
 	spin_unlock(&sk->sk_receive_queue.lock);
 
 	consume_skb(read_skb);
-	kfree_skb(unread_skb);
+	kfree_skb_reason(unread_skb, SKB_DROP_REASON_UNIX_SKIP_OOB);
 
 	return skb;
 }
@@ -2727,7 +2725,7 @@ static int unix_stream_read_skb(struct sock *sk, skb_read_actor_t recv_actor)
 
 		if (sock_flag(sk, SOCK_DEAD)) {
 			unix_state_unlock(sk);
-			kfree_skb(skb);
+			kfree_skb_reason(skb, SKB_DROP_REASON_SOCKET_CLOSE);
 			return -ECONNRESET;
 		}
 
@@ -2741,7 +2739,7 @@ static int unix_stream_read_skb(struct sock *sk, skb_read_actor_t recv_actor)
 		unix_state_unlock(sk);
 
 		if (drop) {
-			kfree_skb(skb);
+			kfree_skb_reason(skb, SKB_DROP_REASON_UNIX_SKIP_OOB);
 			return -EAGAIN;
 		}
 	}

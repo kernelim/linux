@@ -122,10 +122,9 @@ static int fsl_ldb_attach(struct drm_bridge *bridge,
 }
 
 static void fsl_ldb_atomic_enable(struct drm_bridge *bridge,
-				  struct drm_bridge_state *old_bridge_state)
+				  struct drm_atomic_state *state)
 {
 	struct fsl_ldb *fsl_ldb = to_fsl_ldb(bridge);
-	struct drm_atomic_state *state = old_bridge_state->base.state;
 	const struct drm_bridge_state *bridge_state;
 	const struct drm_crtc_state *crtc_state;
 	const struct drm_display_mode *mode;
@@ -224,7 +223,7 @@ static void fsl_ldb_atomic_enable(struct drm_bridge *bridge,
 }
 
 static void fsl_ldb_atomic_disable(struct drm_bridge *bridge,
-				   struct drm_bridge_state *old_bridge_state)
+				   struct drm_atomic_state *state)
 {
 	struct fsl_ldb *fsl_ldb = to_fsl_ldb(bridge);
 
@@ -393,7 +392,7 @@ MODULE_DEVICE_TABLE(of, fsl_ldb_match);
 
 static struct platform_driver fsl_ldb_driver = {
 	.probe	= fsl_ldb_probe,
-	.remove_new = fsl_ldb_remove,
+	.remove = fsl_ldb_remove,
 	.driver		= {
 		.name		= "fsl-ldb",
 		.of_match_table	= fsl_ldb_match,

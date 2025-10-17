@@ -12,7 +12,7 @@
 #include <asm/hwcap.h>
 #include <asm/sysreg.h>
 
-#define MAX_CPU_FEATURES	128
+#define MAX_CPU_FEATURES	192
 #define cpu_feature(x)		KERNEL_HWCAP_ ## x
 
 #define ARM64_SW_FEATURE_OVERRIDE_NOKASLR	0
@@ -438,6 +438,7 @@ void cpu_set_feature(unsigned int num);
 bool cpu_have_feature(unsigned int num);
 unsigned long cpu_get_elf_hwcap(void);
 unsigned long cpu_get_elf_hwcap2(void);
+unsigned long cpu_get_elf_hwcap3(void);
 
 #define cpu_set_named_feature(name) cpu_set_feature(cpu_feature(name))
 #define cpu_have_named_feature(name) cpu_have_feature(cpu_feature(name))
@@ -524,29 +525,6 @@ cpuid_feature_extract_unsigned_field(u64 features, int field)
 	return cpuid_feature_extract_unsigned_field_width(features, field, 4);
 }
 
-/*
- * Fields that identify the version of the Performance Monitors Extension do
- * not follow the standard ID scheme. See ARM DDI 0487E.a page D13-2825,
- * "Alternative ID scheme used for the Performance Monitors Extension version".
- */
-static inline u64 __attribute_const__
-cpuid_feature_cap_perfmon_field(u64 features, int field, u64 cap)
-{
-	u64 val = cpuid_feature_extract_unsigned_field(features, field);
-	u64 mask = GENMASK_ULL(field + 3, field);
-
-	/* Treat IMPLEMENTATION DEFINED functionality as unimplemented */
-	if (val == ID_AA64DFR0_EL1_PMUVer_IMP_DEF)
-		val = 0;
-
-	if (val > cap) {
-		features &= ~mask;
-		features |= (cap << field) & mask;
-	}
-
-	return features;
-}
-
 static inline u64 arm64_ftr_mask(const struct arm64_ftr_bits *ftrp)
 {
 	return (u64)GENMASK(ftrp->shift + ftrp->width - 1, ftrp->shift);
@@ -612,6 +590,13 @@ static inline bool id_aa64pfr1_sme(u64 pfr1)
 	return val > 0;
 }
 
+static inline bool id_aa64pfr0_mpam(u64 pfr0)
+{
+	u32 val = cpuid_feature_extract_unsigned_field(pfr0, ID_AA64PFR0_EL1_MPAM_SHIFT);
+
+	return val > 0;
+}
+
 static inline bool id_aa64pfr1_mte(u64 pfr1)
 {
 	u32 val = cpuid_feature_extract_unsigned_field(pfr1, ID_AA64PFR1_EL1_MTE_SHIFT);
@@ -663,6 +648,7 @@ static inline bool supports_clearbhb(int scope)
 }
 
 const struct cpumask *system_32bit_el0_cpumask(void);
+const struct cpumask *fallback_32bit_el0_cpumask(void);
 DECLARE_STATIC_KEY_FALSE(arm64_mismatched_32bit_el0);
 
 static inline bool system_supports_32bit_el0(void)
@@ -834,8 +820,32 @@ static inline bool system_supports_lpa2(void)
 
 static inline bool system_supports_poe(void)
 {
-	return IS_ENABLED(CONFIG_ARM64_POE) &&
-		alternative_has_cap_unlikely(ARM64_HAS_S1POE);
+	return alternative_has_cap_unlikely(ARM64_HAS_S1POE);
+}
+
+static inline bool system_supports_gcs(void)
+{
+	return alternative_has_cap_unlikely(ARM64_HAS_GCS);
+}
+
+static inline bool system_supports_haft(void)
+{
+	return cpus_have_final_cap(ARM64_HAFT);
+}
+
+static __always_inline bool system_supports_mpam(void)
+{
+	return alternative_has_cap_unlikely(ARM64_MPAM);
+}
+
+static __always_inline bool system_supports_mpam_hcr(void)
+{
+	return alternative_has_cap_unlikely(ARM64_MPAM_HCR);
+}
+
+static inline bool system_supports_pmuv3(void)
+{
+	return cpus_have_final_cap(ARM64_HAS_PMUV3);
 }
 
 int do_emulate_mrs(struct pt_regs *regs, u32 sys_reg, u32 rt);

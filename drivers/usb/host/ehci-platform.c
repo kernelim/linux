@@ -224,7 +224,7 @@ static void quirk_poll_init(struct ehci_platform_priv *priv)
 
 static void quirk_poll_end(struct ehci_platform_priv *priv)
 {
-	del_timer_sync(&priv->poll_timer);
+	timer_delete_sync(&priv->poll_timer);
 	cancel_delayed_work(&priv->poll_work);
 }
 
@@ -508,7 +508,7 @@ static SIMPLE_DEV_PM_OPS(ehci_platform_pm_ops, ehci_platform_suspend,
 static struct platform_driver ehci_platform_driver = {
 	.id_table	= ehci_platform_table,
 	.probe		= ehci_platform_probe,
-	.remove_new	= ehci_platform_remove,
+	.remove		= ehci_platform_remove,
 	.shutdown	= usb_hcd_platform_shutdown,
 	.driver		= {
 		.name	= "ehci-platform",

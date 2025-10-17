@@ -620,7 +620,7 @@ static int hsmp_get_tbl_dram_base(u16 sock_ind)
 }
 
 static umode_t hsmp_is_sock_attr_visible(struct kobject *kobj,
-					 struct bin_attribute *battr, int id)
+					 const struct bin_attribute *battr, int id)
 {
 	if (plat_dev.proto_ver == HSMP_PROTO_VER6)
 		return battr->attr.mode;
@@ -883,7 +883,7 @@ static void hsmp_pltdrv_remove(struct platform_device *pdev)
 
 static struct platform_driver amd_hsmp_driver = {
 	.probe		= hsmp_pltdrv_probe,
-	.remove_new	= hsmp_pltdrv_remove,
+	.remove		= hsmp_pltdrv_remove,
 	.driver		= {
 		.name	= DRIVER_NAME,
 		.acpi_match_table = amd_hsmp_acpi_ids,

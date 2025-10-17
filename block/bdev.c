@@ -155,8 +155,7 @@ int set_blocksize(struct file *file, int size)
 	struct inode *inode = file->f_mapping->host;
 	struct block_device *bdev = I_BDEV(inode);
 
-	/* Size must be a power of two, and between 512 and PAGE_SIZE */
-	if (size > PAGE_SIZE || size < 512 || !is_power_of_2(size))
+	if (blk_validate_block_size(size))
 		return -EINVAL;
 
 	/* Size cannot be smaller than the size supported by the device */
@@ -1269,14 +1268,10 @@ void sync_bdevs(bool wait)
 /*
  * Handle STATX_{DIOALIGN, WRITE_ATOMIC} for block devices.
  */
-void bdev_statx(struct path *path, struct kstat *stat,
-		u32 request_mask)
+void bdev_statx(const struct path *path, struct kstat *stat, u32 request_mask)
 {
 	struct inode *backing_inode;
 	struct block_device *bdev;
-
-	if (!(request_mask & (STATX_DIOALIGN | STATX_WRITE_ATOMIC)))
-		return;
 
 	backing_inode = d_backing_inode(path->dentry);
 
@@ -1303,6 +1298,8 @@ void bdev_statx(struct path *path, struct kstat *stat,
 			queue_atomic_write_unit_min_bytes(bd_queue),
 			queue_atomic_write_unit_max_bytes(bd_queue));
 	}
+
+	stat->blksize = bdev_io_min(bdev);
 
 	blkdev_put_no_open(bdev);
 }

@@ -22,6 +22,7 @@
 #include "linux/magic.h"
 
 #include "vm_util.h"
+#include "../kselftest.h"
 #include "thp_settings.h"
 
 #define BASE_ADDR ((void *)(1UL << 30))
@@ -1189,6 +1190,11 @@ int main(int argc, char **argv)
 		 */
 		.read_ahead_kb = 0,
 	};
+
+	if (!thp_is_enabled()) {
+		printf("Transparent Hugepages not available\n");
+		return KSFT_SKIP;
+	}
 
 	parse_test_type(argc, argv);
 

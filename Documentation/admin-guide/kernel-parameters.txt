@@ -446,8 +446,14 @@
 	arm64.nobti	[ARM64] Unconditionally disable Branch Target
 			Identification support
 
+	arm64.nogcs	[ARM64] Unconditionally disable Guarded Control Stack
+			support
+
 	arm64.nomops	[ARM64] Unconditionally disable Memory Copy and Memory
 			Set instructions support
+
+	arm64.nompam	[ARM64] Unconditionally disable Memory Partitioning And
+			Monitoring support
 
 	arm64.nomte	[ARM64] Unconditionally disable Memory Tagging Extension
 			support
@@ -2304,6 +2310,9 @@
 			per_cpu_perf_limits
 			  Allow per-logical-CPU P-State performance control limits using
 			  cpufreq sysfs interface
+			no_cas
+			  Do not enable capacity-aware scheduling (CAS) on
+			  hybrid systems
 
 	intremap=	[X86-64,Intel-IOMMU,EARLY]
 			on	enable Interrupt Remapping (default)
@@ -2441,7 +2450,9 @@
 			specified in the flag list (default: domain):
 
 			nohz
-			  Disable the tick when a single task runs.
+			  Disable the tick when a single task runs as well as
+			  disabling other kernel noises like having RCU callbacks
+			  offloaded. This is equivalent to the nohz_full parameter.
 
 			  A residual 1Hz tick is offloaded to workqueues, which you
 			  need to affine to housekeeping through the global
@@ -2757,17 +2768,21 @@
 			nvhe: Standard nVHE-based mode, without support for
 			      protected guests.
 
-			protected: nVHE-based mode with support for guests whose
-				   state is kept private from the host.
+			protected: Mode with support for guests whose state is
+				   kept private from the host, using VHE or
+				   nVHE depending on HW support.
 
 			nested: VHE-based mode with support for nested
-				virtualization. Requires at least ARMv8.3
-				hardware.
+				virtualization. Requires at least ARMv8.4
+				hardware (with FEAT_NV2).
 
 			Defaults to VHE/nVHE based on hardware support. Setting
 			mode to "protected" will disable kexec and hibernation
-			for the host. "nested" is experimental and should be
-			used with extreme caution.
+			for the host. To force nVHE on VHE hardware, add
+			"arm64_sw.hvhe=0 id_aa64mmfr1.vh=0" to the
+			command-line.
+			"nested" is experimental and should be used with
+			extreme caution.
 
 	kvm-arm.vgic_v3_group0_trap=
 			[KVM,ARM,EARLY] Trap guest accesses to GICv3 group-0
@@ -3044,6 +3059,8 @@
 
 			* max_sec_lba48: Set or clear transfer size limit to
 			  65535 sectors.
+
+			* external: Mark port as external (hotplug-capable).
 
 			* [no]lpm: Enable or disable link power management.
 
@@ -4696,6 +4713,10 @@
 		nomio		[S390] Do not use MIO instructions.
 		norid		[S390] ignore the RID field and force use of
 				one PCI domain per PCI function
+		notph		[PCIE] If the PCIE_TPH kernel config parameter
+				is enabled, this kernel boot option can be used
+				to disable PCIe TLP Processing Hints support
+				system-wide.
 
 	pcie_aspm=	[PCIE] Forcibly enable or ignore PCIe Active State Power
 			Management.
@@ -4828,6 +4849,11 @@
 			       can be preempted anytime.  Tasks will also yield
 			       contended spinlocks (if the critical section isn't
 			       explicitly preempt disabled beyond the lock itself).
+			lazy - Scheduler controlled. Similar to full but instead
+			       of preempting the task immediately, the task gets
+			       one HZ tick time to yield itself before the
+			       preemption will be forced. One preemption is when the
+			       task returns to user space.
 
 	print-fatal-signals=
 			[KNL] debug: print fatal signals
@@ -6089,6 +6115,10 @@
 			non-zero "wait" parameter.  See weight_single
 			and weight_many.
 
+	sdw_mclk_divider=[SDW]
+			Specify the MCLK divider for Intel SoundWire buses in
+			case the BIOS does not provide the clock rate properly.
+
 	skew_tick=	[KNL,EARLY] Offset the periodic timer tick per cpu to mitigate
 			xtime_lock contention on larger systems, and/or RCU lock
 			contention on all systems with CONFIG_MAXSMP set.
@@ -6175,6 +6205,16 @@
 			own.
 			For more information see Documentation/mm/slub.rst.
 			(slub_nomerge legacy name also accepted for now)
+
+	slab_strict_numa	[MM]
+			Support memory policies on a per object level
+			in the slab allocator. The default is for memory
+			policies to be applied at the folio level when
+			a new folio is needed or a partial folio is
+			retrieved from the lists. Increases overhead
+			in the slab fastpaths but gains more accurate
+			NUMA kernel object placement which helps with slow
+			interconnects in NUMA systems.
 
 	slram=		[HW,MTD]
 
@@ -6731,6 +6771,16 @@
 			Force threading of all interrupt handlers except those
 			marked explicitly IRQF_NO_THREAD.
 
+	thp_shmem=	[KNL]
+			Format: <size>[KMG],<size>[KMG]:<policy>;<size>[KMG]-<size>[KMG]:<policy>
+			Control the default policy of each hugepage size for the
+			internal shmem mount. <policy> is one of policies available
+			for the shmem mount ("always", "inherit", "never", "within_size",
+			and "advise").
+			It can be used multiple times for multiple shmem THP sizes.
+			See Documentation/admin-guide/mm/transhuge.rst for more
+			details.
+
 	topology=	[S390,EARLY]
 			Format: {off | on}
 			Specify if the kernel should make use of the cpu
@@ -6966,6 +7016,13 @@
 			See Documentation/admin-guide/mm/transhuge.rst
 			for more details.
 
+	transparent_hugepage_shmem= [KNL]
+			Format: [always|within_size|advise|never|deny|force]
+			Can be used to control the hugepage allocation policy for
+			the internal shmem mount.
+			See Documentation/admin-guide/mm/transhuge.rst
+			for more details.
+
 	trusted.source=	[KEYS]
 			Format: <string>
 			This parameter identifies the trust source as a backend
@@ -7001,6 +7058,19 @@
 			blob key is all zeros. This is helpful for situations where
 			having this key zero'ed is acceptable. E.g. in testing
 			scenarios.
+
+	tsa=		[X86] Control mitigation for Transient Scheduler
+			Attacks on AMD CPUs. Search the following in your
+			favourite search engine for more details:
+
+			"Technical guidance for mitigating transient scheduler
+			attacks".
+
+			off		- disable the mitigation
+			on		- enable the mitigation (default)
+			user		- mitigate only user/kernel transitions
+			vm		- mitigate only guest/host transitions
+
 
 	tsc=		Disable clocksource stability checks for TSC.
 			Format: <string>

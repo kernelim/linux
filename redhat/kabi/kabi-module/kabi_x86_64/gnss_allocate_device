@@ -1,3 +1,3 @@
-#0-
-0xd08c8fbd	gnss_allocate_device	drivers/gnss/gnss	EXPORT_SYMBOL_GPL	
+#1-
+0xdcff467f	gnss_allocate_device	drivers/gnss/gnss	EXPORT_SYMBOL_GPL	
 

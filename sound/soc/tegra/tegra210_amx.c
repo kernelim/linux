@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
 //
 // tegra210_amx.c - Tegra210 AMX driver
-//
-// Copyright (c) 2021-2023 NVIDIA CORPORATION.  All rights reserved.
 
 #include <linux/clk.h>
 #include <linux/device.h>
@@ -98,7 +98,7 @@ static int tegra210_amx_startup(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int __maybe_unused tegra210_amx_runtime_suspend(struct device *dev)
+static int tegra210_amx_runtime_suspend(struct device *dev)
 {
 	struct tegra210_amx *amx = dev_get_drvdata(dev);
 
@@ -108,7 +108,7 @@ static int __maybe_unused tegra210_amx_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused tegra210_amx_runtime_resume(struct device *dev)
+static int tegra210_amx_runtime_resume(struct device *dev)
 {
 	struct tegra210_amx *amx = dev_get_drvdata(dev);
 
@@ -144,6 +144,7 @@ static int tegra210_amx_set_audio_cif(struct snd_soc_dai *dai,
 	case SNDRV_PCM_FORMAT_S16_LE:
 		audio_bits = TEGRA_ACIF_BITS_16;
 		break;
+	case SNDRV_PCM_FORMAT_S24_LE:
 	case SNDRV_PCM_FORMAT_S32_LE:
 		audio_bits = TEGRA_ACIF_BITS_32;
 		break;
@@ -266,6 +267,7 @@ static const struct snd_soc_dai_ops tegra210_amx_in_dai_ops = {
 			.rates = SNDRV_PCM_RATE_8000_192000,	\
 			.formats = SNDRV_PCM_FMTBIT_S8 |	\
 				   SNDRV_PCM_FMTBIT_S16_LE |	\
+				   SNDRV_PCM_FMTBIT_S24_LE |	\
 				   SNDRV_PCM_FMTBIT_S32_LE,	\
 		},						\
 		.capture = {					\
@@ -275,6 +277,7 @@ static const struct snd_soc_dai_ops tegra210_amx_in_dai_ops = {
 			.rates = SNDRV_PCM_RATE_8000_192000,	\
 			.formats = SNDRV_PCM_FMTBIT_S8 |	\
 				   SNDRV_PCM_FMTBIT_S16_LE |	\
+				   SNDRV_PCM_FMTBIT_S24_LE |	\
 				   SNDRV_PCM_FMTBIT_S32_LE,	\
 		},						\
 		.ops = &tegra210_amx_in_dai_ops,		\
@@ -290,6 +293,7 @@ static const struct snd_soc_dai_ops tegra210_amx_in_dai_ops = {
 			.rates = SNDRV_PCM_RATE_8000_192000,	\
 			.formats = SNDRV_PCM_FMTBIT_S8 |	\
 				   SNDRV_PCM_FMTBIT_S16_LE |	\
+				   SNDRV_PCM_FMTBIT_S24_LE |	\
 				   SNDRV_PCM_FMTBIT_S32_LE,	\
 		},						\
 		.capture = {					\
@@ -299,6 +303,7 @@ static const struct snd_soc_dai_ops tegra210_amx_in_dai_ops = {
 			.rates = SNDRV_PCM_RATE_8000_192000,	\
 			.formats = SNDRV_PCM_FMTBIT_S8 |	\
 				   SNDRV_PCM_FMTBIT_S16_LE |	\
+				   SNDRV_PCM_FMTBIT_S24_LE |	\
 				   SNDRV_PCM_FMTBIT_S32_LE,	\
 		},						\
 		.ops = &tegra210_amx_out_dai_ops,		\
@@ -576,17 +581,16 @@ static void tegra210_amx_platform_remove(struct platform_device *pdev)
 }
 
 static const struct dev_pm_ops tegra210_amx_pm_ops = {
-	SET_RUNTIME_PM_OPS(tegra210_amx_runtime_suspend,
-			   tegra210_amx_runtime_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
-				pm_runtime_force_resume)
+	RUNTIME_PM_OPS(tegra210_amx_runtime_suspend,
+		       tegra210_amx_runtime_resume, NULL)
+	SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
 };
 
 static struct platform_driver tegra210_amx_driver = {
 	.driver = {
 		.name = "tegra210-amx",
 		.of_match_table = tegra210_amx_of_match,
-		.pm = &tegra210_amx_pm_ops,
+		.pm = pm_ptr(&tegra210_amx_pm_ops),
 	},
 	.probe = tegra210_amx_platform_probe,
 	.remove = tegra210_amx_platform_remove,

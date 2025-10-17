@@ -36,7 +36,6 @@ struct vm86;
 #include <linux/err.h>
 #include <linux/irqflags.h>
 #include <linux/mem_encrypt.h>
-#include <linux/rh_kabi.h>
 
 /*
  * We handle most unaligned accesses in hardware.  On the other hand
@@ -99,6 +98,7 @@ struct cpuinfo_topology {
 	// Logical ID mappings
 	u32			logical_pkg_id;
 	u32			logical_die_id;
+	u32			logical_core_id;
 
 	// AMD Node ID and Nodes per Package info
 	u32			amd_node_id;
@@ -106,6 +106,24 @@ struct cpuinfo_topology {
 	// Cache level topology IDs
 	u32			llc_id;
 	u32			l2c_id;
+
+	// Hardware defined CPU-type
+	union {
+		u32		cpu_type;
+		struct {
+			// CPUID.1A.EAX[23-0]
+			u32	intel_native_model_id	:24;
+			// CPUID.1A.EAX[31-24]
+			u32	intel_type		:8;
+		};
+		struct {
+			// CPUID 0x80000026.EBX
+			u32	amd_num_processors	:16,
+				amd_power_eff_ranking	:8,
+				amd_native_model_id	:4,
+				amd_type		:4;
+		};
+	};
 };
 
 struct cpuinfo_x86 {
@@ -140,31 +158,6 @@ struct cpuinfo_x86 {
 	__u32			extended_cpuid_level;
 	/* Maximum supported CPUID level, -1=no CPUID: */
 	int			cpuid_level;
-
-	/*
-	 * Insert the 4-byte cpu_type into a 4-byte hole in the cpuinfo_x86
-	 * structure to avoid breaking kABI.
-	 */
-	RH_KABI_FILL_HOLE(
-		// Hardware defined CPU-type
-		union {
-			u32		topo_cpu_type;
-			struct {
-				// CPUID.1A.EAX[23-0]
-				u32	intel_native_model_id	:24;
-				// CPUID.1A.EAX[31-24]
-				u32	topo_intel_type		:8;
-			};
-			struct {
-				// CPUID 0x80000026.EBX
-				u32	amd_num_processors	:16;
-				u32	amd_power_eff_ranking	:8;
-				u32	amd_native_model_id	:4;
-				u32	topo_amd_type		:4;
-			};
-		};
-	)
-
 	/*
 	 * Align to size of unsigned long because the x86_capability array
 	 * is passed to bitops which require the alignment. Use unnamed
@@ -238,6 +231,8 @@ static inline unsigned long long l1tf_pfn_limit(void)
 	return BIT_ULL(boot_cpu_data.x86_cache_bits - 1 - PAGE_SHIFT);
 }
 
+void init_cpu_devs(void);
+void get_cpu_vendor(struct cpuinfo_x86 *c);
 extern void early_cpu_init(void);
 extern void identify_secondary_cpu(struct cpuinfo_x86 *);
 extern void print_cpu_info(struct cpuinfo_x86 *);
@@ -751,6 +746,7 @@ void store_cpu_caps(struct cpuinfo_x86 *info);
 
 enum l1tf_mitigations {
 	L1TF_MITIGATION_OFF,
+	L1TF_MITIGATION_AUTO,
 	L1TF_MITIGATION_FLUSH_NOWARN,
 	L1TF_MITIGATION_FLUSH,
 	L1TF_MITIGATION_FLUSH_NOSMT,

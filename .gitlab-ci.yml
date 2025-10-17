@@ -10,7 +10,7 @@ workflow: !reference [.workflow]
   variables:
     srpm_make_target: dist-srpm
     native_tools: 'true'
-    disttag_override: '.el10_0'
+    disttag_override: '.el10_1'
 
 .trigger_trusted_pipeline:
   extends: [.trusted, .10_common]
@@ -26,8 +26,8 @@ workflow: !reference [.workflow]
   trigger:
     branch: rhel10
   variables:
-    kcidb_tree_name: rhel-10.0
-    builder_image: quay.io/cki/builder-rhel10.0
+    kcidb_tree_name: rhel-10.1
+    builder_image: quay.io/cki/builder-rhel10
 
 .trigger_internal_compat_build_pipeline:
   extends: [.trigger_internal_pipeline, .centos_stream_rhel_internal]
@@ -61,10 +61,10 @@ c10s_rt_64k_debug_merge_request:
   extends: [.trigger_trusted_pipeline, .merge_request, .variant_rt_64k_debug]
 
 c10s_automotive_merge_request:
-  extends: [.trigger_trusted_pipeline, .merge_request, .variant_automotive]
+  extends: [.trigger_trusted_pipeline, .merge_request, .standard_automotive, .rhel10_automotive_build]
 
 c10s_automotive_debug_merge_request:
-  extends: [.trigger_trusted_pipeline, .merge_request, .variant_automotive_debug]
+  extends: [.trigger_trusted_pipeline, .merge_request, .standard_automotive_debug, .rhel10_automotive_build]
 
 c10s_64k_merge_request:
   extends: [.trigger_trusted_pipeline, .merge_request, .variant_64k]
@@ -98,10 +98,10 @@ rhel10_rt_64k_debug_merge_request:
   extends: [.trigger_internal_pipeline, .merge_request, .variant_rt_64k_debug]
 
 rhel10_automotive_merge_request:
-  extends: [.trigger_internal_pipeline, .merge_request, .variant_automotive]
+  extends: [.trigger_internal_pipeline, .merge_request, .standard_automotive, .rhel10_automotive_build]
 
 rhel10_automotive_debug_merge_request:
-  extends: [.trigger_internal_pipeline, .merge_request, .variant_automotive_debug]
+  extends: [.trigger_internal_pipeline, .merge_request, .standard_automotive_debug, .rhel10_automotive_build]
 
 rhel10_64k_merge_request:
   extends: [.trigger_internal_pipeline, .merge_request, .variant_64k]
@@ -132,10 +132,10 @@ rhel10_rt_64k_debug_merge_request_private:
   extends: [.trigger_scratch_pipeline, .merge_request, .variant_rt_64k_debug]
 
 rhel10_automotive_merge_request_private:
-  extends: [.trigger_scratch_pipeline, .merge_request, .variant_automotive]
+  extends: [.trigger_scratch_pipeline, .merge_request, .standard_automotive, .rhel10_automotive_build]
 
 rhel10_automotive_debug_merge_request_private:
-  extends: [.trigger_scratch_pipeline, .merge_request, .variant_automotive_debug]
+  extends: [.trigger_scratch_pipeline, .merge_request, .standard_automotive_debug, .rhel10_automotive_build]
 
 rhel10_64k_merge_request_private:
   extends: [.trigger_scratch_pipeline, .merge_request, .variant_64k]

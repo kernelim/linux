@@ -46,15 +46,6 @@ static const struct file_operations mana_dbg_q_fops = {
 	.read   = mana_dbg_q_read,
 };
 
-static bool mana_en_need_log(struct mana_port_context *apc, int err)
-{
-	if (apc && apc->ac && apc->ac->gdma_dev &&
-	    apc->ac->gdma_dev->gdma_context)
-		return mana_need_log(apc->ac->gdma_dev->gdma_context, err);
-	else
-		return true;
-}
-
 /* Microsoft Azure Network Adapter (MANA) functions */
 
 static int mana_open(struct net_device *ndev)
@@ -259,10 +250,10 @@ netdev_tx_t mana_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	struct netdev_queue *net_txq;
 	struct mana_stats_tx *tx_stats;
 	struct gdma_queue *gdma_sq;
-	int err, len, num_gso_seg;
 	unsigned int csum_type;
 	struct mana_txq *txq;
 	struct mana_cq *cq;
+	int err, len;
 
 	if (unlikely(!apc->port_is_up))
 		goto tx_drop;
@@ -415,7 +406,6 @@ netdev_tx_t mana_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	skb_queue_tail(&txq->pending_skbs, skb);
 
 	len = skb->len;
-	num_gso_seg = skb_is_gso(skb) ? skb_shinfo(skb)->gso_segs : 1;
 	net_txq = netdev_get_tx_queue(ndev, txq_idx);
 
 	err = mana_gd_post_work_request(gdma_sq, &pkg.wqe_req,
@@ -440,13 +430,10 @@ netdev_tx_t mana_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	/* skb may be freed after mana_gd_post_work_request. Do not use it. */
 	skb = NULL;
 
-	/* Populated the packet and bytes counters based on post GSO packet
-	 * calculations
-	 */
 	tx_stats = &txq->stats;
 	u64_stats_update_begin(&tx_stats->syncp);
-	tx_stats->packets += num_gso_seg;
-	tx_stats->bytes += len + ((num_gso_seg - 1) * gso_hs);
+	tx_stats->packets++;
+	tx_stats->bytes += len;
 	u64_stats_update_end(&tx_stats->syncp);
 
 tx_busy:
@@ -786,13 +773,8 @@ static int mana_send_request(struct mana_context *ac, void *in_buf,
 	err = mana_gd_send_request(gc, in_len, in_buf, out_len,
 				   out_buf);
 	if (err || resp->status) {
-		if (err == -EOPNOTSUPP)
-			return err;
-
-		if (req->req.msg_type != MANA_QUERY_PHY_STAT &&
-		    mana_need_log(gc, err))
-			dev_err(dev, "Failed to send mana message: %d, 0x%x\n",
-				err, resp->status);
+		dev_err(dev, "Failed to send mana message: %d, 0x%x\n",
+			err, resp->status);
 		return err ? err : -EPROTO;
 	}
 
@@ -867,10 +849,8 @@ static void mana_pf_deregister_hw_vport(struct mana_port_context *apc)
 	err = mana_send_request(apc->ac, &req, sizeof(req), &resp,
 				sizeof(resp));
 	if (err) {
-		if (mana_en_need_log(apc, err))
-			netdev_err(apc->ndev, "Failed to unregister hw vPort: %d\n",
-				   err);
-
+		netdev_err(apc->ndev, "Failed to unregister hw vPort: %d\n",
+			   err);
 		return;
 	}
 
@@ -925,10 +905,8 @@ static void mana_pf_deregister_filter(struct mana_port_context *apc)
 	err = mana_send_request(apc->ac, &req, sizeof(req), &resp,
 				sizeof(resp));
 	if (err) {
-		if (mana_en_need_log(apc, err))
-			netdev_err(apc->ndev, "Failed to unregister filter: %d\n",
-				   err);
-
+		netdev_err(apc->ndev, "Failed to unregister filter: %d\n",
+			   err);
 		return;
 	}
 
@@ -1043,7 +1021,7 @@ void mana_uncfg_vport(struct mana_port_context *apc)
 	WARN_ON(apc->vport_use_count < 0);
 	mutex_unlock(&apc->vport_mutex);
 }
-EXPORT_SYMBOL_NS(mana_uncfg_vport, NET_MANA);
+EXPORT_SYMBOL_NS(mana_uncfg_vport, "NET_MANA");
 
 int mana_cfg_vport(struct mana_port_context *apc, u32 protection_dom_id,
 		   u32 doorbell_pg_id)
@@ -1113,7 +1091,7 @@ out:
 
 	return err;
 }
-EXPORT_SYMBOL_NS(mana_cfg_vport, NET_MANA);
+EXPORT_SYMBOL_NS(mana_cfg_vport, "NET_MANA");
 
 static int mana_cfg_vport_steering(struct mana_port_context *apc,
 				   enum TRI_STATE rx,
@@ -1158,9 +1136,7 @@ static int mana_cfg_vport_steering(struct mana_port_context *apc,
 	err = mana_send_request(apc->ac, req, req_buf_size, &resp,
 				sizeof(resp));
 	if (err) {
-		if (mana_en_need_log(apc, err))
-			netdev_err(ndev, "Failed to configure vPort RX: %d\n", err);
-
+		netdev_err(ndev, "Failed to configure vPort RX: %d\n", err);
 		goto out;
 	}
 
@@ -1237,7 +1213,7 @@ int mana_create_wq_obj(struct mana_port_context *apc,
 out:
 	return err;
 }
-EXPORT_SYMBOL_NS(mana_create_wq_obj, NET_MANA);
+EXPORT_SYMBOL_NS(mana_create_wq_obj, "NET_MANA");
 
 void mana_destroy_wq_obj(struct mana_port_context *apc, u32 wq_type,
 			 mana_handle_t wq_obj)
@@ -1255,9 +1231,7 @@ void mana_destroy_wq_obj(struct mana_port_context *apc, u32 wq_type,
 	err = mana_send_request(apc->ac, &req, sizeof(req), &resp,
 				sizeof(resp));
 	if (err) {
-		if (mana_en_need_log(apc, err))
-			netdev_err(ndev, "Failed to destroy WQ object: %d\n", err);
-
+		netdev_err(ndev, "Failed to destroy WQ object: %d\n", err);
 		return;
 	}
 
@@ -1267,7 +1241,7 @@ void mana_destroy_wq_obj(struct mana_port_context *apc, u32 wq_type,
 		netdev_err(ndev, "Failed to destroy WQ object: %d, 0x%x\n", err,
 			   resp.hdr.status);
 }
-EXPORT_SYMBOL_NS(mana_destroy_wq_obj, NET_MANA);
+EXPORT_SYMBOL_NS(mana_destroy_wq_obj, "NET_MANA");
 
 static void mana_destroy_eq(struct mana_context *ac)
 {
@@ -2636,88 +2610,6 @@ void mana_query_gf_stats(struct mana_port_context *apc)
 	apc->eth_stats.hc_tx_err_gdma = resp.tx_err_gdma;
 }
 
-void mana_query_phy_stats(struct mana_port_context *apc)
-{
-	struct mana_query_phy_stat_resp resp = {};
-	struct mana_query_phy_stat_req req = {};
-	struct net_device *ndev = apc->ndev;
-	int err;
-
-	mana_gd_init_req_hdr(&req.hdr, MANA_QUERY_PHY_STAT,
-			     sizeof(req), sizeof(resp));
-	err = mana_send_request(apc->ac, &req, sizeof(req), &resp,
-				sizeof(resp));
-	if (err)
-		return;
-
-	err = mana_verify_resp_hdr(&resp.hdr, MANA_QUERY_PHY_STAT,
-				   sizeof(resp));
-	if (err || resp.hdr.status) {
-		netdev_err(ndev,
-			   "Failed to query PHY stats: %d, resp:0x%x\n",
-				err, resp.hdr.status);
-		return;
-	}
-
-	/* Aggregate drop counters */
-	apc->phy_stats.rx_pkt_drop_phy = resp.rx_pkt_drop_phy;
-	apc->phy_stats.tx_pkt_drop_phy = resp.tx_pkt_drop_phy;
-
-	/* Per TC traffic Counters */
-	apc->phy_stats.rx_pkt_tc0_phy = resp.rx_pkt_tc0_phy;
-	apc->phy_stats.tx_pkt_tc0_phy = resp.tx_pkt_tc0_phy;
-	apc->phy_stats.rx_pkt_tc1_phy = resp.rx_pkt_tc1_phy;
-	apc->phy_stats.tx_pkt_tc1_phy = resp.tx_pkt_tc1_phy;
-	apc->phy_stats.rx_pkt_tc2_phy = resp.rx_pkt_tc2_phy;
-	apc->phy_stats.tx_pkt_tc2_phy = resp.tx_pkt_tc2_phy;
-	apc->phy_stats.rx_pkt_tc3_phy = resp.rx_pkt_tc3_phy;
-	apc->phy_stats.tx_pkt_tc3_phy = resp.tx_pkt_tc3_phy;
-	apc->phy_stats.rx_pkt_tc4_phy = resp.rx_pkt_tc4_phy;
-	apc->phy_stats.tx_pkt_tc4_phy = resp.tx_pkt_tc4_phy;
-	apc->phy_stats.rx_pkt_tc5_phy = resp.rx_pkt_tc5_phy;
-	apc->phy_stats.tx_pkt_tc5_phy = resp.tx_pkt_tc5_phy;
-	apc->phy_stats.rx_pkt_tc6_phy = resp.rx_pkt_tc6_phy;
-	apc->phy_stats.tx_pkt_tc6_phy = resp.tx_pkt_tc6_phy;
-	apc->phy_stats.rx_pkt_tc7_phy = resp.rx_pkt_tc7_phy;
-	apc->phy_stats.tx_pkt_tc7_phy = resp.tx_pkt_tc7_phy;
-
-	/* Per TC byte Counters */
-	apc->phy_stats.rx_byte_tc0_phy = resp.rx_byte_tc0_phy;
-	apc->phy_stats.tx_byte_tc0_phy = resp.tx_byte_tc0_phy;
-	apc->phy_stats.rx_byte_tc1_phy = resp.rx_byte_tc1_phy;
-	apc->phy_stats.tx_byte_tc1_phy = resp.tx_byte_tc1_phy;
-	apc->phy_stats.rx_byte_tc2_phy = resp.rx_byte_tc2_phy;
-	apc->phy_stats.tx_byte_tc2_phy = resp.tx_byte_tc2_phy;
-	apc->phy_stats.rx_byte_tc3_phy = resp.rx_byte_tc3_phy;
-	apc->phy_stats.tx_byte_tc3_phy = resp.tx_byte_tc3_phy;
-	apc->phy_stats.rx_byte_tc4_phy = resp.rx_byte_tc4_phy;
-	apc->phy_stats.tx_byte_tc4_phy = resp.tx_byte_tc4_phy;
-	apc->phy_stats.rx_byte_tc5_phy = resp.rx_byte_tc5_phy;
-	apc->phy_stats.tx_byte_tc5_phy = resp.tx_byte_tc5_phy;
-	apc->phy_stats.rx_byte_tc6_phy = resp.rx_byte_tc6_phy;
-	apc->phy_stats.tx_byte_tc6_phy = resp.tx_byte_tc6_phy;
-	apc->phy_stats.rx_byte_tc7_phy = resp.rx_byte_tc7_phy;
-	apc->phy_stats.tx_byte_tc7_phy = resp.tx_byte_tc7_phy;
-
-	/* Per TC pause Counters */
-	apc->phy_stats.rx_pause_tc0_phy = resp.rx_pause_tc0_phy;
-	apc->phy_stats.tx_pause_tc0_phy = resp.tx_pause_tc0_phy;
-	apc->phy_stats.rx_pause_tc1_phy = resp.rx_pause_tc1_phy;
-	apc->phy_stats.tx_pause_tc1_phy = resp.tx_pause_tc1_phy;
-	apc->phy_stats.rx_pause_tc2_phy = resp.rx_pause_tc2_phy;
-	apc->phy_stats.tx_pause_tc2_phy = resp.tx_pause_tc2_phy;
-	apc->phy_stats.rx_pause_tc3_phy = resp.rx_pause_tc3_phy;
-	apc->phy_stats.tx_pause_tc3_phy = resp.tx_pause_tc3_phy;
-	apc->phy_stats.rx_pause_tc4_phy = resp.rx_pause_tc4_phy;
-	apc->phy_stats.tx_pause_tc4_phy = resp.tx_pause_tc4_phy;
-	apc->phy_stats.rx_pause_tc5_phy = resp.rx_pause_tc5_phy;
-	apc->phy_stats.tx_pause_tc5_phy = resp.tx_pause_tc5_phy;
-	apc->phy_stats.rx_pause_tc6_phy = resp.rx_pause_tc6_phy;
-	apc->phy_stats.tx_pause_tc6_phy = resp.tx_pause_tc6_phy;
-	apc->phy_stats.rx_pause_tc7_phy = resp.rx_pause_tc7_phy;
-	apc->phy_stats.tx_pause_tc7_phy = resp.tx_pause_tc7_phy;
-}
-
 static int mana_init_port(struct net_device *ndev)
 {
 	struct mana_port_context *apc = netdev_priv(ndev);
@@ -2912,10 +2804,11 @@ static int mana_dealloc_queues(struct net_device *ndev)
 
 	apc->rss_state = TRI_STATE_FALSE;
 	err = mana_config_rss(apc, TRI_STATE_FALSE, false, false);
-	if (err && mana_en_need_log(apc, err))
+	if (err) {
 		netdev_err(ndev, "Failed to disable vPort: %d\n", err);
+		return err;
+	}
 
-	/* Even in err case, still need to cleanup the vPort */
 	mana_destroy_vport(apc);
 
 	return 0;
@@ -3056,7 +2949,7 @@ static void remove_adev(struct gdma_dev *gd)
 	gd->adev = NULL;
 }
 
-static int add_adev(struct gdma_dev *gd)
+static int add_adev(struct gdma_dev *gd, const char *name)
 {
 	struct auxiliary_device *adev;
 	struct mana_adev *madev;
@@ -3072,7 +2965,7 @@ static int add_adev(struct gdma_dev *gd)
 		goto idx_fail;
 	adev->id = ret;
 
-	adev->name = "rdma";
+	adev->name = name;
 	adev->dev.parent = gd->gdma_context->dev;
 	adev->dev.release = adev_release;
 	madev->mdev = gd;
@@ -3102,6 +2995,70 @@ idx_fail:
 	kfree(madev);
 
 	return ret;
+}
+
+static void mana_rdma_service_handle(struct work_struct *work)
+{
+	struct mana_service_work *serv_work =
+		container_of(work, struct mana_service_work, work);
+	struct gdma_dev *gd = serv_work->gdma_dev;
+	struct device *dev = gd->gdma_context->dev;
+	int ret;
+
+	if (READ_ONCE(gd->rdma_teardown))
+		goto out;
+
+	switch (serv_work->event) {
+	case GDMA_SERVICE_TYPE_RDMA_SUSPEND:
+		if (!gd->adev || gd->is_suspended)
+			break;
+
+		remove_adev(gd);
+		gd->is_suspended = true;
+		break;
+
+	case GDMA_SERVICE_TYPE_RDMA_RESUME:
+		if (!gd->is_suspended)
+			break;
+
+		ret = add_adev(gd, "rdma");
+		if (ret)
+			dev_err(dev, "Failed to add adev on resume: %d\n", ret);
+		else
+			gd->is_suspended = false;
+		break;
+
+	default:
+		dev_warn(dev, "unknown adev service event %u\n",
+			 serv_work->event);
+		break;
+	}
+
+out:
+	kfree(serv_work);
+}
+
+int mana_rdma_service_event(struct gdma_context *gc, enum gdma_service_type event)
+{
+	struct gdma_dev *gd = &gc->mana_ib;
+	struct mana_service_work *serv_work;
+
+	if (gd->dev_id.type != GDMA_DEVICE_MANA_IB) {
+		/* RDMA device is not detected on pci */
+		return 0;
+	}
+
+	serv_work = kzalloc(sizeof(*serv_work), GFP_ATOMIC);
+	if (!serv_work)
+		return -ENOMEM;
+
+	serv_work->event = event;
+	serv_work->gdma_dev = gd;
+
+	INIT_WORK(&serv_work->work, mana_rdma_service_handle);
+	queue_work(gc->service_wq, &serv_work->work);
+
+	return 0;
 }
 
 int mana_probe(struct gdma_dev *gd, bool resuming)
@@ -3191,7 +3148,7 @@ int mana_probe(struct gdma_dev *gd, bool resuming)
 		}
 	}
 
-	err = add_adev(gd);
+	err = add_adev(gd, "eth");
 out:
 	if (err) {
 		mana_remove(gd, false);
@@ -3265,6 +3222,44 @@ out:
 	dev_dbg(dev, "%s succeeded\n", __func__);
 }
 
+int mana_rdma_probe(struct gdma_dev *gd)
+{
+	int err = 0;
+
+	if (gd->dev_id.type != GDMA_DEVICE_MANA_IB) {
+		/* RDMA device is not detected on pci */
+		return err;
+	}
+
+	err = mana_gd_register_device(gd);
+	if (err)
+		return err;
+
+	err = add_adev(gd, "rdma");
+	if (err)
+		mana_gd_deregister_device(gd);
+
+	return err;
+}
+
+void mana_rdma_remove(struct gdma_dev *gd)
+{
+	struct gdma_context *gc = gd->gdma_context;
+
+	if (gd->dev_id.type != GDMA_DEVICE_MANA_IB) {
+		/* RDMA device is not detected on pci */
+		return;
+	}
+
+	WRITE_ONCE(gd->rdma_teardown, true);
+	flush_workqueue(gc->service_wq);
+
+	if (gd->adev)
+		remove_adev(gd);
+
+	mana_gd_deregister_device(gd);
+}
+
 struct net_device *mana_get_primary_netdev(struct mana_context *ac,
 					   u32 port_index,
 					   netdevice_tracker *tracker)
@@ -3288,5 +3283,4 @@ struct net_device *mana_get_primary_netdev(struct mana_context *ac,
 
 	return ndev;
 }
-EXPORT_SYMBOL_NS(mana_get_primary_netdev, NET_MANA);
-
+EXPORT_SYMBOL_NS(mana_get_primary_netdev, "NET_MANA");

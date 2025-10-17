@@ -19,7 +19,6 @@
 #include <linux/if_arp.h>
 #include <linux/etherdevice.h>
 #include <net/sock.h>
-#include <net/lib80211.h>
 #include <linux/vmalloc.h>
 #include <linux/firmware.h>
 #include <linux/ctype.h>
@@ -574,7 +573,6 @@ struct mwifiex_private {
 	u16 listen_interval;
 	u16 atim_window;
 	u8 adhoc_channel;
-	u8 adhoc_is_link_sensed;
 	u8 adhoc_state;
 	struct mwifiex_802_11_security sec_info;
 	struct mwifiex_wep_key wep_key[NUM_WEP_KEYS];
@@ -683,7 +681,6 @@ struct mwifiex_private {
 	struct mwifiex_ds_mem_rw mem_rw;
 	struct sk_buff_head bypass_txq;
 	struct mwifiex_user_scan_chan hidden_chan[MWIFIEX_USER_SCAN_CHAN_MAX];
-	u8 assoc_resp_ht_param;
 	bool ht_param_present;
 };
 
@@ -802,7 +799,6 @@ struct mwifiex_auto_tdls_peer {
 	unsigned long rssi_jiffies;
 	u8 failure_count;
 	u8 do_discover;
-	u8 do_setup;
 };
 
 #define MWIFIEX_TYPE_AGGR_DATA_V2 11
@@ -1474,7 +1470,7 @@ int mwifiex_init_shutdown_fw(struct mwifiex_private *priv,
 			     u32 func_init_shutdown);
 
 int mwifiex_add_card(void *card, struct completion *fw_done,
-		     struct mwifiex_if_ops *if_ops, u8 iface_type,
+		     const struct mwifiex_if_ops *if_ops, u8 iface_type,
 		     struct device *dev);
 int mwifiex_remove_card(struct mwifiex_adapter *adapter);
 
@@ -1575,8 +1571,6 @@ void mwifiex_uap_set_channel(struct mwifiex_private *priv,
 			     struct cfg80211_chan_def chandef);
 int mwifiex_config_start_uap(struct mwifiex_private *priv,
 			     struct mwifiex_uap_bss_param *bss_cfg);
-void mwifiex_uap_del_sta_data(struct mwifiex_private *priv,
-			      struct mwifiex_sta_node *node);
 
 void mwifiex_config_uap_11d(struct mwifiex_private *priv,
 			    struct cfg80211_beacon_data *beacon_data);

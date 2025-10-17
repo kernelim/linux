@@ -39,14 +39,11 @@
 #include "panel_cntl.h"
 #include "dmub/inc/dmub_cmd.h"
 #include "pg_cntl.h"
-#include "spl/dc_spl.h"
+#include "sspl/dc_spl.h"
 
 #define MAX_CLOCK_SOURCES 7
 #define MAX_SVP_PHANTOM_STREAMS 2
 #define MAX_SVP_PHANTOM_PLANES 2
-
-void enable_surface_flip_reporting(struct dc_plane_state *plane_state,
-		uint32_t controller_id);
 
 #include "grph_object_id.h"
 #include "link_encoder.h"
@@ -215,7 +212,12 @@ struct resource_funcs {
 
 	void (*get_panel_config_defaults)(struct dc_panel_config *panel_config);
 	void (*build_pipe_pix_clk_params)(struct pipe_ctx *pipe_ctx);
+	/*
+	 * Get indicator of power from a context that went through full validation
+	 */
+	int (*get_power_profile)(const struct dc_state *context);
 	unsigned int (*get_det_buffer_size)(const struct dc_state *context);
+	unsigned int (*get_vstartup_for_pipe)(struct pipe_ctx *pipe_ctx);
 };
 
 struct audio_support{
@@ -374,6 +376,7 @@ struct plane_resource {
 
 /* all mappable hardware resources used to enable a link */
 struct link_resource {
+	struct link_encoder *dio_link_enc;
 	struct hpo_dp_link_encoder *hpo_dp_link_enc;
 };
 
@@ -464,6 +467,7 @@ struct pipe_ctx {
 	unsigned int surface_size_in_mall_bytes;
 	struct dml2_dchub_per_pipe_register_set hubp_regs;
 	struct dml2_hubp_pipe_mcache_regs mcache_regs;
+	union dml2_global_sync_programming global_sync;
 
 	struct dwbc *dwbc;
 	struct mcif_wb *mcif_wb;
@@ -474,6 +478,8 @@ struct pipe_ctx {
 	/* subvp_index: only valid if the pipe is a SUBVP_MAIN*/
 	uint8_t subvp_index;
 	struct pixel_rate_divider pixel_rate_divider;
+	/* pixels borrowed from hblank to hactive */
+	uint8_t hblank_borrow;
 };
 
 /* Data used for dynamic link encoder assignment.
@@ -495,6 +501,8 @@ struct resource_context {
 	uint8_t dp_clock_source_ref_count;
 	bool is_dsc_acquired[MAX_PIPES];
 	struct link_enc_cfg_context link_enc_cfg_ctx;
+	unsigned int dio_link_enc_to_link_idx[MAX_DIG_LINK_ENCODERS];
+	int dio_link_enc_ref_cnts[MAX_DIG_LINK_ENCODERS];
 	bool is_hpo_dp_stream_enc_acquired[MAX_HPO_DP2_ENCODERS];
 	unsigned int hpo_dp_link_enc_to_link_idx[MAX_HPO_DP2_LINK_ENCODERS];
 	int hpo_dp_link_enc_ref_cnts[MAX_HPO_DP2_LINK_ENCODERS];
@@ -536,7 +544,8 @@ struct dcn_bw_output {
 	bool legacy_svp_drr_stream_index_valid;
 	struct dml2_mcache_surface_allocation mcache_allocations[DML2_MAX_PLANES];
 	struct dmub_cmd_fams2_global_config fams2_global_config;
-	struct dmub_fams2_stream_static_state fams2_stream_params[DML2_MAX_PLANES];
+	union dmub_cmd_fams2_config fams2_stream_base_params[DML2_MAX_PLANES];
+	union dmub_cmd_fams2_config fams2_stream_sub_params[DML2_MAX_PLANES];
 	struct dml2_display_arb_regs arb_regs;
 };
 
@@ -621,7 +630,7 @@ struct dc_state {
 	 */
 	struct bw_context bw_ctx;
 
-	struct block_sequence block_sequence[50];
+	struct block_sequence block_sequence[100];
 	unsigned int block_sequence_steps;
 	struct dc_dmub_cmd dc_dmub_cmd[10];
 	unsigned int dmub_cmd_count;

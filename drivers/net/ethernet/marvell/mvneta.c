@@ -3976,7 +3976,7 @@ static int mvneta_pcs_validate(struct phylink_pcs *pcs,
 	return 0;
 }
 
-static void mvneta_pcs_get_state(struct phylink_pcs *pcs,
+static void mvneta_pcs_get_state(struct phylink_pcs *pcs, unsigned int neg_mode,
 				 struct phylink_link_state *state)
 {
 	struct mvneta_port *pp = mvneta_pcs_to_port(pcs);

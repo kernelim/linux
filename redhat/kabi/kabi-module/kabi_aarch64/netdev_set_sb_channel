@@ -1,3 +1,3 @@
-#0-
-0x3c392132	netdev_set_sb_channel	vmlinux	EXPORT_SYMBOL	
+#1-
+0x018593a8	netdev_set_sb_channel	vmlinux	EXPORT_SYMBOL	
 

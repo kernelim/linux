@@ -1,3 +1,3 @@
-#0-
-0x74cf48d1	xsk_tx_peek_desc	vmlinux	EXPORT_SYMBOL	
+#1-
+0xd7d7b36a	xsk_tx_peek_desc	vmlinux	EXPORT_SYMBOL	
 

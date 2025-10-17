@@ -8,12 +8,14 @@
 
 #include <drm/drm_atomic_uapi.h>
 #include <drm/drm_atomic_state_helper.h>
+#include <drm/drm_vblank.h>
 
 #include "i915_drv.h"
 #include "i915_reg.h"
 #include "i9xx_wm.h"
 #include "intel_atomic.h"
 #include "intel_bw.h"
+#include "intel_cmtg.h"
 #include "intel_color.h"
 #include "intel_crtc.h"
 #include "intel_crtc_state_dump.h"
@@ -115,6 +117,7 @@ static void set_encoder_for_connector(struct intel_connector *connector,
 
 static void reset_encoder_connector_state(struct intel_encoder *encoder)
 {
+	struct intel_display *display = to_intel_display(encoder);
 	struct drm_i915_private *i915 = to_i915(encoder->base.dev);
 	struct intel_pmdemand_state *pmdemand_state =
 		to_intel_pmdemand_state(i915->display.pmdemand.obj.state);
@@ -127,7 +130,7 @@ static void reset_encoder_connector_state(struct intel_encoder *encoder)
 			continue;
 
 		/* Clear the corresponding bit in pmdemand active phys mask */
-		intel_pmdemand_update_phys_mask(i915, encoder,
+		intel_pmdemand_update_phys_mask(display, encoder,
 						pmdemand_state, false);
 
 		set_encoder_for_connector(connector, NULL);
@@ -151,13 +154,8 @@ static void reset_crtc_encoder_state(struct intel_crtc *crtc)
 
 static void intel_crtc_disable_noatomic_complete(struct intel_crtc *crtc)
 {
+	struct intel_display *display = to_intel_display(crtc);
 	struct drm_i915_private *i915 = to_i915(crtc->base.dev);
-	struct intel_bw_state *bw_state =
-		to_intel_bw_state(i915->display.bw.obj.state);
-	struct intel_cdclk_state *cdclk_state =
-		to_intel_cdclk_state(i915->display.cdclk.obj.state);
-	struct intel_dbuf_state *dbuf_state =
-		to_intel_dbuf_state(i915->display.dbuf.obj.state);
 	struct intel_pmdemand_state *pmdemand_state =
 		to_intel_pmdemand_state(i915->display.pmdemand.obj.state);
 	struct intel_crtc_state *crtc_state =
@@ -173,18 +171,13 @@ static void intel_crtc_disable_noatomic_complete(struct intel_crtc *crtc)
 	intel_fbc_disable(crtc);
 	intel_update_watermarks(i915);
 
-	intel_display_power_put_all_in_set(i915, &crtc->enabled_power_domains);
+	intel_display_power_put_all_in_set(display, &crtc->enabled_power_domains);
 
-	cdclk_state->min_cdclk[pipe] = 0;
-	cdclk_state->min_voltage_level[pipe] = 0;
-	cdclk_state->active_pipes &= ~BIT(pipe);
+	intel_cdclk_crtc_disable_noatomic(crtc);
+	skl_wm_crtc_disable_noatomic(crtc);
+	intel_bw_crtc_disable_noatomic(crtc);
 
-	dbuf_state->active_pipes &= ~BIT(pipe);
-
-	bw_state->data_rate[pipe] = 0;
-	bw_state->num_active_planes[pipe] = 0;
-
-	intel_pmdemand_update_port_clock(i915, pmdemand_state, pipe, 0);
+	intel_pmdemand_update_port_clock(display, pmdemand_state, pipe, 0);
 }
 
 /*
@@ -221,6 +214,7 @@ static u8 get_transcoder_pipes(struct drm_i915_private *i915,
 static void get_portsync_pipes(struct intel_crtc *crtc,
 			       u8 *master_pipe_mask, u8 *slave_pipes_mask)
 {
+	struct intel_display *display = to_intel_display(crtc);
 	struct drm_i915_private *i915 = to_i915(crtc->base.dev);
 	struct intel_crtc_state *crtc_state =
 		to_intel_crtc_state(crtc->base.state);
@@ -243,7 +237,7 @@ static void get_portsync_pipes(struct intel_crtc *crtc,
 	*master_pipe_mask = get_transcoder_pipes(i915, BIT(master_transcoder));
 	drm_WARN_ON(&i915->drm, !is_power_of_2(*master_pipe_mask));
 
-	master_crtc = intel_crtc_for_pipe(i915, ffs(*master_pipe_mask) - 1);
+	master_crtc = intel_crtc_for_pipe(display, ffs(*master_pipe_mask) - 1);
 	master_crtc_state = to_intel_crtc_state(master_crtc->base.state);
 	*slave_pipes_mask = get_transcoder_pipes(i915, master_crtc_state->sync_mode_slaves_mask);
 }
@@ -375,6 +369,7 @@ static void intel_crtc_copy_hw_to_uapi_state(struct intel_crtc_state *crtc_state
 static void
 intel_sanitize_plane_mapping(struct drm_i915_private *i915)
 {
+	struct intel_display *display = &i915->display;
 	struct intel_crtc *crtc;
 
 	if (DISPLAY_VER(i915) >= 4)
@@ -396,7 +391,7 @@ intel_sanitize_plane_mapping(struct drm_i915_private *i915)
 			    "[PLANE:%d:%s] attached to the wrong pipe, disabling plane\n",
 			    plane->base.base.id, plane->base.name);
 
-		plane_crtc = intel_crtc_for_pipe(i915, pipe);
+		plane_crtc = intel_crtc_for_pipe(display, pipe);
 		intel_plane_disable_noatomic(plane_crtc, plane);
 	}
 }
@@ -448,8 +443,8 @@ static struct intel_connector *intel_encoder_find_connector(struct intel_encoder
 
 static void intel_sanitize_fifo_underrun_reporting(const struct intel_crtc_state *crtc_state)
 {
+	struct intel_display *display = to_intel_display(crtc_state);
 	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
-	struct drm_i915_private *i915 = to_i915(crtc->base.dev);
 
 	/*
 	 * We start out with underrun reporting disabled on active
@@ -464,9 +459,9 @@ static void intel_sanitize_fifo_underrun_reporting(const struct intel_crtc_state
 	 * No protection against concurrent access is required - at
 	 * worst a fifo underrun happens which also sets this to false.
 	 */
-	intel_init_fifo_underrun_reporting(i915, crtc,
+	intel_init_fifo_underrun_reporting(display, crtc,
 					   !crtc_state->hw.active &&
-					   !HAS_GMCH(i915));
+					   !HAS_GMCH(display));
 }
 
 static bool intel_sanitize_crtc(struct intel_crtc *crtc,
@@ -490,8 +485,8 @@ static bool intel_sanitize_crtc(struct intel_crtc *crtc,
 		}
 
 		/* Disable any background color/etc. set by the BIOS */
-		intel_color_commit_noarm(crtc_state);
-		intel_color_commit_arm(crtc_state);
+		intel_color_commit_noarm(NULL, crtc_state);
+		intel_color_commit_arm(NULL, crtc_state);
 	}
 
 	if (!crtc_state->hw.active ||
@@ -579,6 +574,7 @@ static bool has_bogus_dpll_config(const struct intel_crtc_state *crtc_state)
 
 static void intel_sanitize_encoder(struct intel_encoder *encoder)
 {
+	struct intel_display *display = to_intel_display(encoder);
 	struct drm_i915_private *i915 = to_i915(encoder->base.dev);
 	struct intel_connector *connector;
 	struct intel_crtc *crtc = to_intel_crtc(encoder->base.crtc);
@@ -610,7 +606,7 @@ static void intel_sanitize_encoder(struct intel_encoder *encoder)
 			    encoder->base.name);
 
 		/* Clear the corresponding bit in pmdemand active phys mask */
-		intel_pmdemand_update_phys_mask(i915, encoder,
+		intel_pmdemand_update_phys_mask(display, encoder,
 						pmdemand_state, false);
 
 		/*
@@ -662,6 +658,7 @@ static void intel_sanitize_encoder(struct intel_encoder *encoder)
 /* FIXME read out full plane state for all planes */
 static void readout_plane_state(struct drm_i915_private *i915)
 {
+	struct intel_display *display = &i915->display;
 	struct intel_plane *plane;
 	struct intel_crtc *crtc;
 
@@ -674,7 +671,7 @@ static void readout_plane_state(struct drm_i915_private *i915)
 
 		visible = plane->get_hw_state(plane, &pipe);
 
-		crtc = intel_crtc_for_pipe(i915, pipe);
+		crtc = intel_crtc_for_pipe(display, pipe);
 		crtc_state = to_intel_crtc_state(crtc->base.state);
 
 		intel_set_plane_visible(crtc_state, plane_state, visible);
@@ -695,10 +692,7 @@ static void readout_plane_state(struct drm_i915_private *i915)
 
 static void intel_modeset_readout_hw_state(struct drm_i915_private *i915)
 {
-	struct intel_cdclk_state *cdclk_state =
-		to_intel_cdclk_state(i915->display.cdclk.obj.state);
-	struct intel_dbuf_state *dbuf_state =
-		to_intel_dbuf_state(i915->display.dbuf.obj.state);
+	struct intel_display *display = &i915->display;
 	struct intel_pmdemand_state *pmdemand_state =
 		to_intel_pmdemand_state(i915->display.pmdemand.obj.state);
 	enum pipe pipe;
@@ -706,7 +700,6 @@ static void intel_modeset_readout_hw_state(struct drm_i915_private *i915)
 	struct intel_encoder *encoder;
 	struct intel_connector *connector;
 	struct drm_connector_list_iter conn_iter;
-	u8 active_pipes = 0;
 
 	for_each_intel_crtc(&i915->drm, crtc) {
 		struct intel_crtc_state *crtc_state =
@@ -723,17 +716,11 @@ static void intel_modeset_readout_hw_state(struct drm_i915_private *i915)
 		crtc->base.enabled = crtc_state->hw.enable;
 		crtc->active = crtc_state->hw.active;
 
-		if (crtc_state->hw.active)
-			active_pipes |= BIT(crtc->pipe);
-
 		drm_dbg_kms(&i915->drm,
 			    "[CRTC:%d:%s] hw state readout: %s\n",
 			    crtc->base.base.id, crtc->base.name,
 			    str_enabled_disabled(crtc_state->hw.active));
 	}
-
-	cdclk_state->active_pipes = active_pipes;
-	dbuf_state->active_pipes = active_pipes;
 
 	readout_plane_state(i915);
 
@@ -743,7 +730,7 @@ static void intel_modeset_readout_hw_state(struct drm_i915_private *i915)
 		pipe = 0;
 
 		if (encoder->get_hw_state(encoder, &pipe)) {
-			crtc = intel_crtc_for_pipe(i915, pipe);
+			crtc = intel_crtc_for_pipe(display, pipe);
 			crtc_state = to_intel_crtc_state(crtc->base.state);
 
 			encoder->base.crtc = &crtc->base;
@@ -765,11 +752,11 @@ static void intel_modeset_readout_hw_state(struct drm_i915_private *i915)
 				}
 			}
 
-			intel_pmdemand_update_phys_mask(i915, encoder,
+			intel_pmdemand_update_phys_mask(display, encoder,
 							pmdemand_state,
 							true);
 		} else {
-			intel_pmdemand_update_phys_mask(i915, encoder,
+			intel_pmdemand_update_phys_mask(display, encoder,
 							pmdemand_state,
 							false);
 
@@ -786,7 +773,7 @@ static void intel_modeset_readout_hw_state(struct drm_i915_private *i915)
 			    pipe_name(pipe));
 	}
 
-	intel_dpll_readout_hw_state(i915);
+	intel_dpll_readout_hw_state(display);
 
 	drm_connector_list_iter_begin(&i915->drm, &conn_iter);
 	for_each_intel_connector_iter(connector, &conn_iter) {
@@ -830,12 +817,9 @@ static void intel_modeset_readout_hw_state(struct drm_i915_private *i915)
 	drm_connector_list_iter_end(&conn_iter);
 
 	for_each_intel_crtc(&i915->drm, crtc) {
-		struct intel_bw_state *bw_state =
-			to_intel_bw_state(i915->display.bw.obj.state);
 		struct intel_crtc_state *crtc_state =
 			to_intel_crtc_state(crtc->base.state);
 		struct intel_plane *plane;
-		int min_cdclk = 0;
 
 		if (crtc_state->hw.active) {
 			/*
@@ -884,23 +868,18 @@ static void intel_modeset_readout_hw_state(struct drm_i915_private *i915)
 				    crtc_state->min_cdclk[plane->id]);
 		}
 
-		if (crtc_state->hw.active) {
-			min_cdclk = intel_crtc_compute_min_cdclk(crtc_state);
-			if (drm_WARN_ON(&i915->drm, min_cdclk < 0))
-				min_cdclk = 0;
-		}
-
-		cdclk_state->min_cdclk[crtc->pipe] = min_cdclk;
-		cdclk_state->min_voltage_level[crtc->pipe] =
-			crtc_state->min_voltage_level;
-
-		intel_pmdemand_update_port_clock(i915, pmdemand_state, pipe,
+		intel_pmdemand_update_port_clock(display, pmdemand_state, pipe,
 						 crtc_state->port_clock);
-
-		intel_bw_crtc_update(bw_state, crtc_state);
 	}
 
-	intel_pmdemand_init_pmdemand_params(i915, pmdemand_state);
+	/* TODO move here (or even earlier?) on all platforms */
+	if (DISPLAY_VER(display) >= 9)
+		intel_wm_get_hw_state(i915);
+
+	intel_bw_update_hw_state(display);
+	intel_cdclk_update_hw_state(display);
+
+	intel_pmdemand_init_pmdemand_params(display, pmdemand_state);
 }
 
 static void
@@ -955,11 +934,12 @@ static void intel_early_display_was(struct drm_i915_private *i915)
 void intel_modeset_setup_hw_state(struct drm_i915_private *i915,
 				  struct drm_modeset_acquire_ctx *ctx)
 {
+	struct intel_display *display = &i915->display;
 	struct intel_encoder *encoder;
 	struct intel_crtc *crtc;
 	intel_wakeref_t wakeref;
 
-	wakeref = intel_display_power_get(i915, POWER_DOMAIN_INIT);
+	wakeref = intel_display_power_get(display, POWER_DOMAIN_INIT);
 
 	intel_early_display_was(i915);
 	intel_modeset_readout_hw_state(i915);
@@ -968,6 +948,8 @@ void intel_modeset_setup_hw_state(struct drm_i915_private *i915,
 	get_encoder_power_domains(i915);
 
 	intel_pch_sanitize(i915);
+
+	intel_cmtg_sanitize(display);
 
 	/*
 	 * intel_sanitize_plane_mapping() may need to do vblank
@@ -982,7 +964,7 @@ void intel_modeset_setup_hw_state(struct drm_i915_private *i915,
 		drm_crtc_vblank_reset(&crtc->base);
 
 		if (crtc_state->hw.active) {
-			intel_dmc_enable_pipe(i915, crtc->pipe);
+			intel_dmc_enable_pipe(display, crtc->pipe);
 			intel_crtc_vblank_on(crtc_state);
 		}
 	}
@@ -1002,9 +984,12 @@ void intel_modeset_setup_hw_state(struct drm_i915_private *i915,
 
 	intel_sanitize_all_crtcs(i915, ctx);
 
-	intel_dpll_sanitize_state(i915);
+	intel_dpll_sanitize_state(display);
 
-	intel_wm_get_hw_state(i915);
+	/* TODO move earlier on all platforms */
+	if (DISPLAY_VER(display) < 9)
+		intel_wm_get_hw_state(i915);
+	intel_wm_sanitize(i915);
 
 	for_each_intel_crtc(&i915->drm, crtc) {
 		struct intel_crtc_state *crtc_state =
@@ -1016,7 +1001,7 @@ void intel_modeset_setup_hw_state(struct drm_i915_private *i915,
 			intel_modeset_put_crtc_power_domains(crtc, &put_domains);
 	}
 
-	intel_display_power_put(i915, POWER_DOMAIN_INIT, wakeref);
+	intel_display_power_put(display, POWER_DOMAIN_INIT, wakeref);
 
-	intel_power_domains_sanitize_state(i915);
+	intel_power_domains_sanitize_state(display);
 }

@@ -4,6 +4,7 @@
 
 #include <linux/types.h>
 #include <linux/stringify.h>
+#include <linux/objtool.h>
 #include <asm/asm.h>
 
 #define ALT_FLAGS_SHIFT		16
@@ -55,16 +56,6 @@
 #endif
 
 /*
- * objtool annotation to ignore the alternatives and only consider the original
- * instruction(s).
- */
-#define ANNOTATE_IGNORE_ALTERNATIVE				\
-	"999:\n\t"						\
-	".pushsection .discard.ignore_alts\n\t"			\
-	".long 999b\n\t"					\
-	".popsection\n\t"
-
-/*
  * The patching flags are part of the upper bits of the @ft_flags parameter when
  * specifying them. The split is currently like this:
  *
@@ -109,7 +100,6 @@ struct module;
 
 struct callthunk_sites {
 	s32				*call_start, *call_end;
-	struct alt_instr		*alt_start, *alt_end;
 };
 
 #ifdef CONFIG_CALL_THUNKS
@@ -132,6 +122,16 @@ static __always_inline int x86_call_depth_emit_accounting(u8 **pprog,
 {
 	return 0;
 }
+#endif
+
+#ifdef CONFIG_MITIGATION_ITS
+extern void its_init_mod(struct module *mod);
+extern void its_fini_mod(struct module *mod);
+extern void its_free_mod(struct module *mod);
+#else /* CONFIG_MITIGATION_ITS */
+static inline void its_init_mod(struct module *mod) { }
+static inline void its_fini_mod(struct module *mod) { }
+static inline void its_free_mod(struct module *mod) { }
 #endif
 
 #if defined(CONFIG_MITIGATION_RETHUNK) && defined(CONFIG_OBJTOOL)
@@ -323,17 +323,6 @@ void nop_func(void);
 	.macro LOCK_PREFIX
 	.endm
 #endif
-
-/*
- * objtool annotation to ignore the alternatives and only consider the original
- * instruction(s).
- */
-.macro ANNOTATE_IGNORE_ALTERNATIVE
-	.Lannotate_\@:
-	.pushsection .discard.ignore_alts
-	.long .Lannotate_\@
-	.popsection
-.endm
 
 /*
  * Issue one struct alt_instr descriptor entry (need to put it into

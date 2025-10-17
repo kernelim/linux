@@ -1,3 +1,3 @@
-#0-
-0x2b153d03	fc_vport_create	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
+#1-
+0xc140539c	fc_vport_create	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
 

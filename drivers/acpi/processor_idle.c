@@ -578,7 +578,7 @@ static void __cpuidle acpi_idle_do_entry(struct acpi_processor_cx *cx)
  * @dev: the target CPU
  * @index: the index of suggested state
  */
-static int acpi_idle_play_dead(struct cpuidle_device *dev, int index)
+static void acpi_idle_play_dead(struct cpuidle_device *dev, int index)
 {
 	struct acpi_processor_cx *cx = per_cpu(acpi_cstate[index], dev->cpu);
 
@@ -590,12 +590,11 @@ static int acpi_idle_play_dead(struct cpuidle_device *dev, int index)
 			raw_safe_halt();
 		else if (cx->entry_method == ACPI_CSTATE_SYSTEMIO) {
 			io_idle(cx->address);
+		} else if (cx->entry_method == ACPI_CSTATE_FFH) {
+			acpi_processor_ffh_play_dead(cx);
 		} else
-			return -ENODEV;
+			return;
 	}
-
-	/* Never reached */
-	return 0;
 }
 
 static __always_inline bool acpi_idle_fallback_to_c1(struct acpi_processor *pr)

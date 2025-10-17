@@ -223,7 +223,7 @@ static int tsnep_phy_loopback(struct tsnep_adapter *adapter, bool enable)
 {
 	int retval;
 
-	retval = phy_loopback(adapter->phydev, enable);
+	retval = phy_loopback(adapter->phydev, enable, 0);
 
 	/* PHY link state change is not signaled if loopback is enabled, it
 	 * would delay a working loopback anyway, let's ensure that loopback
@@ -852,8 +852,8 @@ static bool tsnep_tx_poll(struct tsnep_tx *tx, int napi_budget)
 			struct skb_shared_hwtstamps hwtstamps;
 			u64 timestamp;
 
-			if (skb_shinfo(entry->skb)->tx_flags &
-			    SKBTX_HW_TSTAMP_USE_CYCLES)
+			if (entry->skb->sk &&
+			    READ_ONCE(entry->skb->sk->sk_tsflags) & SOF_TIMESTAMPING_BIND_PHC)
 				timestamp =
 					__le64_to_cpu(entry->desc_wb->counter);
 			else

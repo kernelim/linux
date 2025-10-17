@@ -54,7 +54,7 @@ int hda_dai_config(struct snd_soc_dapm_widget *w, unsigned int flags,
 
 	return 0;
 }
-EXPORT_SYMBOL_NS(hda_dai_config, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_dai_config, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_LINK)
 
@@ -318,7 +318,7 @@ static int __maybe_unused hda_dai_trigger(struct snd_pcm_substream *substream, i
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 		ret = hda_link_dma_cleanup(substream, hext_stream, dai,
-					   cmd == SNDRV_PCM_TRIGGER_STOP ? false : true);
+					   cmd != SNDRV_PCM_TRIGGER_STOP);
 		if (ret < 0) {
 			dev_err(sdev->dev, "%s: failed to clean up link DMA\n", __func__);
 			return ret;
@@ -503,6 +503,12 @@ int sdw_hda_dai_hw_params(struct snd_pcm_substream *substream,
 	int ret;
 	int i;
 
+	if (!w) {
+		dev_err(cpu_dai->dev, "%s widget not found, check amp link num in the topology\n",
+			cpu_dai->name);
+		return -EINVAL;
+	}
+
 	ops = hda_dai_get_ops(substream, cpu_dai);
 	if (!ops) {
 		dev_err(cpu_dai->dev, "DAI widget ops not set\n");
@@ -582,13 +588,19 @@ int sdw_hda_dai_hw_params(struct snd_pcm_substream *substream,
 	 */
 	for_each_rtd_cpu_dais(rtd, i, dai) {
 		w = snd_soc_dai_get_widget(dai, substream->stream);
+		if (!w) {
+			dev_err(cpu_dai->dev,
+				"%s widget not found, check amp link num in the topology\n",
+				dai->name);
+			return -EINVAL;
+		}
 		ipc4_copier = widget_to_copier(w);
 		memcpy(&ipc4_copier->dma_config_tlv[cpu_dai_id], dma_config_tlv,
 		       sizeof(*dma_config_tlv));
 	}
 	return 0;
 }
-EXPORT_SYMBOL_NS(sdw_hda_dai_hw_params, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(sdw_hda_dai_hw_params, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 int sdw_hda_dai_hw_free(struct snd_pcm_substream *substream,
 			struct snd_soc_dai *cpu_dai,
@@ -617,14 +629,14 @@ int sdw_hda_dai_hw_free(struct snd_pcm_substream *substream,
 
 	return 0;
 }
-EXPORT_SYMBOL_NS(sdw_hda_dai_hw_free, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(sdw_hda_dai_hw_free, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 int sdw_hda_dai_trigger(struct snd_pcm_substream *substream, int cmd,
 			struct snd_soc_dai *cpu_dai)
 {
 	return hda_dai_trigger(substream, cmd, cpu_dai);
 }
-EXPORT_SYMBOL_NS(sdw_hda_dai_trigger, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(sdw_hda_dai_trigger, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 static int hda_dai_suspend(struct hdac_bus *bus)
 {
@@ -659,6 +671,10 @@ static int hda_dai_suspend(struct hdac_bus *bus)
 			sdev = widget_to_sdev(w);
 			sdai = swidget->private;
 			ops = sdai->platform_private;
+
+			if (rtd->dpcm[hext_stream->link_substream->stream].state !=
+			    SND_SOC_DPCM_STATE_PAUSED)
+				continue;
 
 			/* for consistency with TRIGGER_SUSPEND  */
 			if (ops->post_trigger) {
@@ -738,7 +754,7 @@ void hda_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops)
 		ipc4_data->nhlt = intel_nhlt_init(sdev->dev);
 	}
 }
-EXPORT_SYMBOL_NS(hda_set_dai_drv_ops, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_set_dai_drv_ops, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 void hda_ops_free(struct snd_sof_dev *sdev)
 {
@@ -752,7 +768,7 @@ void hda_ops_free(struct snd_sof_dev *sdev)
 		sdev->private = NULL;
 	}
 }
-EXPORT_SYMBOL_NS(hda_ops_free, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_ops_free, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 /*
  * common dai driver for skl+ platforms.
@@ -904,7 +920,7 @@ struct snd_soc_dai_driver skl_dai[] = {
 },
 #endif
 };
-EXPORT_SYMBOL_NS(skl_dai, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(skl_dai, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 int hda_dsp_dais_suspend(struct snd_sof_dev *sdev)
 {

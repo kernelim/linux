@@ -1,3 +1,3 @@
-#0-
-0xdae2ed48	scsi_device_set_state	vmlinux	EXPORT_SYMBOL	
+#1-
+0x86532f2c	scsi_device_set_state	vmlinux	EXPORT_SYMBOL	
 

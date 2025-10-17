@@ -19,6 +19,7 @@
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
  */
+#include <rm/rpc.h>
 #include "priv.h"
 
 #include <core/pci.h>
@@ -26,6 +27,7 @@
 #include <subdev/vfn.h>
 #include <engine/fifo/chan.h>
 #include <engine/sec2.h>
+#include <nvif/log.h>
 
 #include <nvfw/fw.h>
 
@@ -57,344 +59,7 @@
 #include <linux/ctype.h>
 #include <linux/parser.h>
 
-#define GSP_MSG_MIN_SIZE GSP_PAGE_SIZE
-#define GSP_MSG_MAX_SIZE GSP_PAGE_MIN_SIZE * 16
-
-struct r535_gsp_msg {
-	u8 auth_tag_buffer[16];
-	u8 aad_buffer[16];
-	u32 checksum;
-	u32 sequence;
-	u32 elem_count;
-	u32 pad;
-	u8  data[];
-};
-
-#define GSP_MSG_HDR_SIZE offsetof(struct r535_gsp_msg, data)
-
-static int
-r535_rpc_status_to_errno(uint32_t rpc_status)
-{
-	switch (rpc_status) {
-	case 0x55: /* NV_ERR_NOT_READY */
-	case 0x66: /* NV_ERR_TIMEOUT_RETRY */
-		return -EBUSY;
-	case 0x51: /* NV_ERR_NO_MEMORY */
-		return -ENOMEM;
-	default:
-		return -EINVAL;
-	}
-}
-
-static void *
-r535_gsp_msgq_wait(struct nvkm_gsp *gsp, u32 repc, u32 *prepc, int *ptime)
-{
-	struct r535_gsp_msg *mqe;
-	u32 size, rptr = *gsp->msgq.rptr;
-	int used;
-	u8 *msg;
-	u32 len;
-
-	size = DIV_ROUND_UP(GSP_MSG_HDR_SIZE + repc, GSP_PAGE_SIZE);
-	if (WARN_ON(!size || size >= gsp->msgq.cnt))
-		return ERR_PTR(-EINVAL);
-
-	do {
-		u32 wptr = *gsp->msgq.wptr;
-
-		used = wptr + gsp->msgq.cnt - rptr;
-		if (used >= gsp->msgq.cnt)
-			used -= gsp->msgq.cnt;
-		if (used >= size)
-			break;
-
-		usleep_range(1, 2);
-	} while (--(*ptime));
-
-	if (WARN_ON(!*ptime))
-		return ERR_PTR(-ETIMEDOUT);
-
-	mqe = (void *)((u8 *)gsp->shm.msgq.ptr + 0x1000 + rptr * 0x1000);
-
-	if (prepc) {
-		*prepc = (used * GSP_PAGE_SIZE) - sizeof(*mqe);
-		return mqe->data;
-	}
-
-	msg = kvmalloc(repc, GFP_KERNEL);
-	if (!msg)
-		return ERR_PTR(-ENOMEM);
-
-	len = ((gsp->msgq.cnt - rptr) * GSP_PAGE_SIZE) - sizeof(*mqe);
-	len = min_t(u32, repc, len);
-	memcpy(msg, mqe->data, len);
-
-	rptr += DIV_ROUND_UP(len, GSP_PAGE_SIZE);
-	if (rptr == gsp->msgq.cnt)
-		rptr = 0;
-
-	repc -= len;
-
-	if (repc) {
-		mqe = (void *)((u8 *)gsp->shm.msgq.ptr + 0x1000 + 0 * 0x1000);
-		memcpy(msg + len, mqe, repc);
-
-		rptr += DIV_ROUND_UP(repc, GSP_PAGE_SIZE);
-	}
-
-	mb();
-	(*gsp->msgq.rptr) = rptr;
-	return msg;
-}
-
-static void *
-r535_gsp_msgq_recv(struct nvkm_gsp *gsp, u32 repc, int *ptime)
-{
-	return r535_gsp_msgq_wait(gsp, repc, NULL, ptime);
-}
-
-static int
-r535_gsp_cmdq_push(struct nvkm_gsp *gsp, void *argv)
-{
-	struct r535_gsp_msg *cmd = container_of(argv, typeof(*cmd), data);
-	struct r535_gsp_msg *cqe;
-	u32 argc = cmd->checksum;
-	u64 *ptr = (void *)cmd;
-	u64 *end;
-	u64 csum = 0;
-	int free, time = 1000000;
-	u32 wptr, size;
-	u32 off = 0;
-
-	argc = ALIGN(GSP_MSG_HDR_SIZE + argc, GSP_PAGE_SIZE);
-
-	end = (u64 *)((char *)ptr + argc);
-	cmd->pad = 0;
-	cmd->checksum = 0;
-	cmd->sequence = gsp->cmdq.seq++;
-	cmd->elem_count = DIV_ROUND_UP(argc, 0x1000);
-
-	while (ptr < end)
-		csum ^= *ptr++;
-
-	cmd->checksum = upper_32_bits(csum) ^ lower_32_bits(csum);
-
-	wptr = *gsp->cmdq.wptr;
-	do {
-		do {
-			free = *gsp->cmdq.rptr + gsp->cmdq.cnt - wptr - 1;
-			if (free >= gsp->cmdq.cnt)
-				free -= gsp->cmdq.cnt;
-			if (free >= 1)
-				break;
-
-			usleep_range(1, 2);
-		} while(--time);
-
-		if (WARN_ON(!time)) {
-			kvfree(cmd);
-			return -ETIMEDOUT;
-		}
-
-		cqe = (void *)((u8 *)gsp->shm.cmdq.ptr + 0x1000 + wptr * 0x1000);
-		size = min_t(u32, argc, (gsp->cmdq.cnt - wptr) * GSP_PAGE_SIZE);
-		memcpy(cqe, (u8 *)cmd + off, size);
-
-		wptr += DIV_ROUND_UP(size, 0x1000);
-		if (wptr == gsp->cmdq.cnt)
-			wptr = 0;
-
-		off  += size;
-		argc -= size;
-	} while(argc);
-
-	nvkm_trace(&gsp->subdev, "cmdq: wptr %d\n", wptr);
-	wmb();
-	(*gsp->cmdq.wptr) = wptr;
-	mb();
-
-	nvkm_falcon_wr32(&gsp->falcon, 0xc00, 0x00000000);
-
-	kvfree(cmd);
-	return 0;
-}
-
-static void *
-r535_gsp_cmdq_get(struct nvkm_gsp *gsp, u32 argc)
-{
-	struct r535_gsp_msg *cmd;
-	u32 size = GSP_MSG_HDR_SIZE + argc;
-
-	size = ALIGN(size, GSP_MSG_MIN_SIZE);
-	cmd = kvzalloc(size, GFP_KERNEL);
-	if (!cmd)
-		return ERR_PTR(-ENOMEM);
-
-	cmd->checksum = argc;
-	return cmd->data;
-}
-
-struct nvfw_gsp_rpc {
-	u32 header_version;
-	u32 signature;
-	u32 length;
-	u32 function;
-	u32 rpc_result;
-	u32 rpc_result_private;
-	u32 sequence;
-	union {
-		u32 spare;
-		u32 cpuRmGfid;
-	};
-	u8  data[];
-};
-
-static void
-r535_gsp_msg_done(struct nvkm_gsp *gsp, struct nvfw_gsp_rpc *msg)
-{
-	kvfree(msg);
-}
-
-static void
-r535_gsp_msg_dump(struct nvkm_gsp *gsp, struct nvfw_gsp_rpc *msg, int lvl)
-{
-	if (gsp->subdev.debug >= lvl) {
-		nvkm_printk__(&gsp->subdev, lvl, info,
-			      "msg fn:%d len:0x%x/0x%zx res:0x%x resp:0x%x\n",
-			      msg->function, msg->length, msg->length - sizeof(*msg),
-			      msg->rpc_result, msg->rpc_result_private);
-		print_hex_dump(KERN_INFO, "msg: ", DUMP_PREFIX_OFFSET, 16, 1,
-			       msg->data, msg->length - sizeof(*msg), true);
-	}
-}
-
-static struct nvfw_gsp_rpc *
-r535_gsp_msg_recv(struct nvkm_gsp *gsp, int fn, u32 repc)
-{
-	struct nvkm_subdev *subdev = &gsp->subdev;
-	struct nvfw_gsp_rpc *msg;
-	int time = 4000000, i;
-	u32 size;
-
-retry:
-	msg = r535_gsp_msgq_wait(gsp, sizeof(*msg), &size, &time);
-	if (IS_ERR_OR_NULL(msg))
-		return msg;
-
-	msg = r535_gsp_msgq_recv(gsp, msg->length, &time);
-	if (IS_ERR_OR_NULL(msg))
-		return msg;
-
-	if (msg->rpc_result) {
-		r535_gsp_msg_dump(gsp, msg, NV_DBG_ERROR);
-		r535_gsp_msg_done(gsp, msg);
-		return ERR_PTR(-EINVAL);
-	}
-
-	r535_gsp_msg_dump(gsp, msg, NV_DBG_TRACE);
-
-	if (fn && msg->function == fn) {
-		if (repc) {
-			if (msg->length < sizeof(*msg) + repc) {
-				nvkm_error(subdev, "msg len %d < %zd\n",
-					   msg->length, sizeof(*msg) + repc);
-				r535_gsp_msg_dump(gsp, msg, NV_DBG_ERROR);
-				r535_gsp_msg_done(gsp, msg);
-				return ERR_PTR(-EIO);
-			}
-
-			return msg;
-		}
-
-		r535_gsp_msg_done(gsp, msg);
-		return NULL;
-	}
-
-	for (i = 0; i < gsp->msgq.ntfy_nr; i++) {
-		struct nvkm_gsp_msgq_ntfy *ntfy = &gsp->msgq.ntfy[i];
-
-		if (ntfy->fn == msg->function) {
-			if (ntfy->func)
-				ntfy->func(ntfy->priv, ntfy->fn, msg->data, msg->length - sizeof(*msg));
-			break;
-		}
-	}
-
-	if (i == gsp->msgq.ntfy_nr)
-		r535_gsp_msg_dump(gsp, msg, NV_DBG_WARN);
-
-	r535_gsp_msg_done(gsp, msg);
-	if (fn)
-		goto retry;
-
-	if (*gsp->msgq.rptr != *gsp->msgq.wptr)
-		goto retry;
-
-	return NULL;
-}
-
-static int
-r535_gsp_msg_ntfy_add(struct nvkm_gsp *gsp, u32 fn, nvkm_gsp_msg_ntfy_func func, void *priv)
-{
-	int ret = 0;
-
-	mutex_lock(&gsp->msgq.mutex);
-	if (WARN_ON(gsp->msgq.ntfy_nr >= ARRAY_SIZE(gsp->msgq.ntfy))) {
-		ret = -ENOSPC;
-	} else {
-		gsp->msgq.ntfy[gsp->msgq.ntfy_nr].fn = fn;
-		gsp->msgq.ntfy[gsp->msgq.ntfy_nr].func = func;
-		gsp->msgq.ntfy[gsp->msgq.ntfy_nr].priv = priv;
-		gsp->msgq.ntfy_nr++;
-	}
-	mutex_unlock(&gsp->msgq.mutex);
-	return ret;
-}
-
-static int
-r535_gsp_rpc_poll(struct nvkm_gsp *gsp, u32 fn)
-{
-	void *repv;
-
-	mutex_lock(&gsp->cmdq.mutex);
-	repv = r535_gsp_msg_recv(gsp, fn, 0);
-	mutex_unlock(&gsp->cmdq.mutex);
-	if (IS_ERR(repv))
-		return PTR_ERR(repv);
-
-	return 0;
-}
-
-static void *
-r535_gsp_rpc_send(struct nvkm_gsp *gsp, void *argv, bool wait, u32 repc)
-{
-	struct nvfw_gsp_rpc *rpc = container_of(argv, typeof(*rpc), data);
-	struct nvfw_gsp_rpc *msg;
-	u32 fn = rpc->function;
-	void *repv = NULL;
-	int ret;
-
-	if (gsp->subdev.debug >= NV_DBG_TRACE) {
-		nvkm_trace(&gsp->subdev, "rpc fn:%d len:0x%x/0x%zx\n", rpc->function,
-			   rpc->length, rpc->length - sizeof(*rpc));
-		print_hex_dump(KERN_INFO, "rpc: ", DUMP_PREFIX_OFFSET, 16, 1,
-			       rpc->data, rpc->length - sizeof(*rpc), true);
-	}
-
-	ret = r535_gsp_cmdq_push(gsp, rpc);
-	if (ret)
-		return ERR_PTR(ret);
-
-	if (wait) {
-		msg = r535_gsp_msg_recv(gsp, fn, repc);
-		if (!IS_ERR_OR_NULL(msg))
-			repv = msg->data;
-		else
-			repv = msg;
-	}
-
-	return repv;
-}
+extern struct dentry *nouveau_debugfs_root;
 
 static void
 r535_gsp_event_dtor(struct nvkm_gsp_event *event)
@@ -577,25 +242,25 @@ r535_gsp_rpc_rm_free(struct nvkm_gsp_object *object)
 	rpc->params.hRoot = client->object.handle;
 	rpc->params.hObjectParent = 0;
 	rpc->params.hObjectOld = object->handle;
-	return nvkm_gsp_rpc_wr(gsp, rpc, true);
+	return nvkm_gsp_rpc_wr(gsp, rpc, NVKM_GSP_RPC_REPLY_RECV);
 }
 
 static void
-r535_gsp_rpc_rm_alloc_done(struct nvkm_gsp_object *object, void *repv)
+r535_gsp_rpc_rm_alloc_done(struct nvkm_gsp_object *object, void *params)
 {
-	rpc_gsp_rm_alloc_v03_00 *rpc = container_of(repv, typeof(*rpc), params);
+	rpc_gsp_rm_alloc_v03_00 *rpc = to_payload_hdr(params, rpc);
 
 	nvkm_gsp_rpc_done(object->client->gsp, rpc);
 }
 
 static void *
-r535_gsp_rpc_rm_alloc_push(struct nvkm_gsp_object *object, void *argv, u32 repc)
+r535_gsp_rpc_rm_alloc_push(struct nvkm_gsp_object *object, void *params)
 {
-	rpc_gsp_rm_alloc_v03_00 *rpc = container_of(argv, typeof(*rpc), params);
+	rpc_gsp_rm_alloc_v03_00 *rpc = to_payload_hdr(params, rpc);
 	struct nvkm_gsp *gsp = object->client->gsp;
-	void *ret;
+	void *ret = NULL;
 
-	rpc = nvkm_gsp_rpc_push(gsp, rpc, true, sizeof(*rpc) + repc);
+	rpc = nvkm_gsp_rpc_push(gsp, rpc, NVKM_GSP_RPC_REPLY_RECV, sizeof(*rpc));
 	if (IS_ERR_OR_NULL(rpc))
 		return rpc;
 
@@ -603,8 +268,6 @@ r535_gsp_rpc_rm_alloc_push(struct nvkm_gsp_object *object, void *argv, u32 repc)
 		ret = ERR_PTR(r535_rpc_status_to_errno(rpc->status));
 		if (PTR_ERR(ret) != -EAGAIN && PTR_ERR(ret) != -EBUSY)
 			nvkm_error(&gsp->subdev, "RM_ALLOC: 0x%x\n", rpc->status);
-	} else {
-		ret = repc ? rpc->params : NULL;
 	}
 
 	nvkm_gsp_rpc_done(gsp, rpc);
@@ -613,16 +276,22 @@ r535_gsp_rpc_rm_alloc_push(struct nvkm_gsp_object *object, void *argv, u32 repc)
 }
 
 static void *
-r535_gsp_rpc_rm_alloc_get(struct nvkm_gsp_object *object, u32 oclass, u32 argc)
+r535_gsp_rpc_rm_alloc_get(struct nvkm_gsp_object *object, u32 oclass,
+			  u32 params_size)
 {
 	struct nvkm_gsp_client *client = object->client;
 	struct nvkm_gsp *gsp = client->gsp;
 	rpc_gsp_rm_alloc_v03_00 *rpc;
 
-	nvkm_debug(&gsp->subdev, "cli:0x%08x obj:0x%08x new obj:0x%08x cls:0x%08x argc:%d\n",
-		   client->object.handle, object->parent->handle, object->handle, oclass, argc);
+	nvkm_debug(&gsp->subdev, "cli:0x%08x obj:0x%08x new obj:0x%08x\n",
+		   client->object.handle, object->parent->handle,
+		   object->handle);
 
-	rpc = nvkm_gsp_rpc_get(gsp, NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC, sizeof(*rpc) + argc);
+	nvkm_debug(&gsp->subdev, "cls:0x%08x params_size:%d\n", oclass,
+		   params_size);
+
+	rpc = nvkm_gsp_rpc_get(gsp, NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC,
+			       sizeof(*rpc) + params_size);
 	if (IS_ERR(rpc))
 		return rpc;
 
@@ -631,30 +300,30 @@ r535_gsp_rpc_rm_alloc_get(struct nvkm_gsp_object *object, u32 oclass, u32 argc)
 	rpc->hObject = object->handle;
 	rpc->hClass = oclass;
 	rpc->status = 0;
-	rpc->paramsSize = argc;
+	rpc->paramsSize = params_size;
 	return rpc->params;
 }
 
 static void
-r535_gsp_rpc_rm_ctrl_done(struct nvkm_gsp_object *object, void *repv)
+r535_gsp_rpc_rm_ctrl_done(struct nvkm_gsp_object *object, void *params)
 {
-	rpc_gsp_rm_control_v03_00 *rpc = container_of(repv, typeof(*rpc), params);
+	rpc_gsp_rm_control_v03_00 *rpc = to_payload_hdr(params, rpc);
 
-	if (!repv)
+	if (!params)
 		return;
 	nvkm_gsp_rpc_done(object->client->gsp, rpc);
 }
 
 static int
-r535_gsp_rpc_rm_ctrl_push(struct nvkm_gsp_object *object, void **argv, u32 repc)
+r535_gsp_rpc_rm_ctrl_push(struct nvkm_gsp_object *object, void **params, u32 repc)
 {
-	rpc_gsp_rm_control_v03_00 *rpc = container_of((*argv), typeof(*rpc), params);
+	rpc_gsp_rm_control_v03_00 *rpc = to_payload_hdr((*params), rpc);
 	struct nvkm_gsp *gsp = object->client->gsp;
 	int ret = 0;
 
-	rpc = nvkm_gsp_rpc_push(gsp, rpc, true, repc);
+	rpc = nvkm_gsp_rpc_push(gsp, rpc, NVKM_GSP_RPC_REPLY_RECV, repc);
 	if (IS_ERR_OR_NULL(rpc)) {
-		*argv = NULL;
+		*params = NULL;
 		return PTR_ERR(rpc);
 	}
 
@@ -666,7 +335,7 @@ r535_gsp_rpc_rm_ctrl_push(struct nvkm_gsp_object *object, void **argv, u32 repc)
 	}
 
 	if (repc)
-		*argv = rpc->params;
+		*params = rpc->params;
 	else
 		nvkm_gsp_rpc_done(gsp, rpc);
 
@@ -674,16 +343,17 @@ r535_gsp_rpc_rm_ctrl_push(struct nvkm_gsp_object *object, void **argv, u32 repc)
 }
 
 static void *
-r535_gsp_rpc_rm_ctrl_get(struct nvkm_gsp_object *object, u32 cmd, u32 argc)
+r535_gsp_rpc_rm_ctrl_get(struct nvkm_gsp_object *object, u32 cmd, u32 params_size)
 {
 	struct nvkm_gsp_client *client = object->client;
 	struct nvkm_gsp *gsp = client->gsp;
 	rpc_gsp_rm_control_v03_00 *rpc;
 
-	nvkm_debug(&gsp->subdev, "cli:0x%08x obj:0x%08x ctrl cmd:0x%08x argc:%d\n",
-		   client->object.handle, object->handle, cmd, argc);
+	nvkm_debug(&gsp->subdev, "cli:0x%08x obj:0x%08x ctrl cmd:0x%08x params_size:%d\n",
+		   client->object.handle, object->handle, cmd, params_size);
 
-	rpc = nvkm_gsp_rpc_get(gsp, NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL, sizeof(*rpc) + argc);
+	rpc = nvkm_gsp_rpc_get(gsp, NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL,
+			       sizeof(*rpc) + params_size);
 	if (IS_ERR(rpc))
 		return rpc;
 
@@ -691,106 +361,13 @@ r535_gsp_rpc_rm_ctrl_get(struct nvkm_gsp_object *object, u32 cmd, u32 argc)
 	rpc->hObject    = object->handle;
 	rpc->cmd	= cmd;
 	rpc->status     = 0;
-	rpc->paramsSize = argc;
+	rpc->paramsSize = params_size;
 	return rpc->params;
-}
-
-static void
-r535_gsp_rpc_done(struct nvkm_gsp *gsp, void *repv)
-{
-	struct nvfw_gsp_rpc *rpc = container_of(repv, typeof(*rpc), data);
-
-	r535_gsp_msg_done(gsp, rpc);
-}
-
-static void *
-r535_gsp_rpc_get(struct nvkm_gsp *gsp, u32 fn, u32 argc)
-{
-	struct nvfw_gsp_rpc *rpc;
-
-	rpc = r535_gsp_cmdq_get(gsp, ALIGN(sizeof(*rpc) + argc, sizeof(u64)));
-	if (IS_ERR(rpc))
-		return ERR_CAST(rpc);
-
-	rpc->header_version = 0x03000000;
-	rpc->signature = ('C' << 24) | ('P' << 16) | ('R' << 8) | 'V';
-	rpc->function = fn;
-	rpc->rpc_result = 0xffffffff;
-	rpc->rpc_result_private = 0xffffffff;
-	rpc->length = sizeof(*rpc) + argc;
-	return rpc->data;
-}
-
-static void *
-r535_gsp_rpc_push(struct nvkm_gsp *gsp, void *argv, bool wait, u32 repc)
-{
-	struct nvfw_gsp_rpc *rpc = container_of(argv, typeof(*rpc), data);
-	struct r535_gsp_msg *cmd = container_of((void *)rpc, typeof(*cmd), data);
-	const u32 max_msg_size = (16 * 0x1000) - sizeof(struct r535_gsp_msg);
-	const u32 max_rpc_size = max_msg_size - sizeof(*rpc);
-	u32 rpc_size = rpc->length - sizeof(*rpc);
-	void *repv;
-
-	mutex_lock(&gsp->cmdq.mutex);
-	if (rpc_size > max_rpc_size) {
-		const u32 fn = rpc->function;
-
-		/* Adjust length, and send initial RPC. */
-		rpc->length = sizeof(*rpc) + max_rpc_size;
-		cmd->checksum = rpc->length;
-
-		repv = r535_gsp_rpc_send(gsp, argv, false, 0);
-		if (IS_ERR(repv))
-			goto done;
-
-		argv += max_rpc_size;
-		rpc_size -= max_rpc_size;
-
-		/* Remaining chunks sent as CONTINUATION_RECORD RPCs. */
-		while (rpc_size) {
-			u32 size = min(rpc_size, max_rpc_size);
-			void *next;
-
-			next = r535_gsp_rpc_get(gsp, NV_VGPU_MSG_FUNCTION_CONTINUATION_RECORD, size);
-			if (IS_ERR(next)) {
-				repv = next;
-				goto done;
-			}
-
-			memcpy(next, argv, size);
-
-			repv = r535_gsp_rpc_send(gsp, next, false, 0);
-			if (IS_ERR(repv))
-				goto done;
-
-			argv += size;
-			rpc_size -= size;
-		}
-
-		/* Wait for reply. */
-		if (wait) {
-			rpc = r535_gsp_msg_recv(gsp, fn, repc);
-			if (!IS_ERR_OR_NULL(rpc))
-				repv = rpc->data;
-			else
-				repv = rpc;
-		} else {
-			repv = NULL;
-		}
-	} else {
-		repv = r535_gsp_rpc_send(gsp, argv, wait, repc);
-	}
-
-done:
-	mutex_unlock(&gsp->cmdq.mutex);
-	return repv;
 }
 
 const struct nvkm_gsp_rm
 r535_gsp_rm = {
-	.rpc_get = r535_gsp_rpc_get,
-	.rpc_push = r535_gsp_rpc_push,
-	.rpc_done = r535_gsp_rpc_done,
+	.api = &r535_rm,
 
 	.rm_ctrl_get = r535_gsp_rpc_rm_ctrl_get,
 	.rm_ctrl_push = r535_gsp_rpc_rm_ctrl_push,
@@ -1000,7 +577,7 @@ r535_gsp_rpc_get_gsp_static_info(struct nvkm_gsp *gsp)
 }
 
 static void
-nvkm_gsp_mem_dtor(struct nvkm_gsp *gsp, struct nvkm_gsp_mem *mem)
+nvkm_gsp_mem_dtor(struct nvkm_gsp_mem *mem)
 {
 	if (mem->data) {
 		/*
@@ -1009,18 +586,34 @@ nvkm_gsp_mem_dtor(struct nvkm_gsp *gsp, struct nvkm_gsp_mem *mem)
 		 */
 		memset(mem->data, 0xFF, mem->size);
 
-		dma_free_coherent(gsp->subdev.device->dev, mem->size, mem->data, mem->addr);
+		dma_free_coherent(mem->dev, mem->size, mem->data, mem->addr);
+		put_device(mem->dev);
+
 		memset(mem, 0, sizeof(*mem));
 	}
 }
 
+/**
+ * nvkm_gsp_mem_ctor - constructor for nvkm_gsp_mem objects
+ * @gsp: gsp pointer
+ * @size: number of bytes to allocate
+ * @mem: nvkm_gsp_mem object to initialize
+ *
+ * Allocates a block of memory for use with GSP.
+ *
+ * This memory block can potentially out-live the driver's remove() callback,
+ * so we take a device reference to ensure its lifetime. The reference is
+ * dropped in the destructor.
+ */
 static int
 nvkm_gsp_mem_ctor(struct nvkm_gsp *gsp, size_t size, struct nvkm_gsp_mem *mem)
 {
-	mem->size = size;
 	mem->data = dma_alloc_coherent(gsp->subdev.device->dev, size, &mem->addr, GFP_KERNEL);
 	if (WARN_ON(!mem->data))
 		return -ENOMEM;
+
+	mem->size = size;
+	mem->dev = get_device(gsp->subdev.device->dev);
 
 	return 0;
 }
@@ -1054,8 +647,8 @@ r535_gsp_postinit(struct nvkm_gsp *gsp)
 	nvkm_wr32(device, 0x110004, 0x00000040);
 
 	/* Release the DMA buffers that were needed only for boot and init */
-	nvkm_gsp_mem_dtor(gsp, &gsp->boot.fw);
-	nvkm_gsp_mem_dtor(gsp, &gsp->libos);
+	nvkm_gsp_mem_dtor(&gsp->boot.fw);
+	nvkm_gsp_mem_dtor(&gsp->libos);
 
 	return ret;
 }
@@ -1079,7 +672,7 @@ r535_gsp_rpc_unloading_guest_driver(struct nvkm_gsp *gsp, bool suspend)
 		rpc->newLevel = NV2080_CTRL_GPU_SET_POWER_STATE_GPU_LEVEL_0;
 	}
 
-	return nvkm_gsp_rpc_wr(gsp, rpc, true);
+	return nvkm_gsp_rpc_wr(gsp, rpc, NVKM_GSP_RPC_REPLY_RECV);
 }
 
 enum registry_type {
@@ -1092,7 +685,7 @@ enum registry_type {
 #define REGISTRY_MAX_KEY_LENGTH		64
 
 /**
- * registry_list_entry - linked list member for a registry key/value
+ * struct registry_list_entry - linked list member for a registry key/value
  * @head: list_head struct
  * @type: dword, binary, or string
  * @klen: the length of name of the key
@@ -1308,7 +901,7 @@ struct nv_gsp_registry_entries {
 	u32 value;
 };
 
-/**
+/*
  * r535_registry_entries - required registry entries for GSP-RM
  *
  * This array lists registry entries that are required for GSP-RM to
@@ -1436,7 +1029,7 @@ r535_gsp_rpc_set_registry(struct nvkm_gsp *gsp)
 
 	build_registry(gsp, rpc);
 
-	return nvkm_gsp_rpc_wr(gsp, rpc, false);
+	return nvkm_gsp_rpc_wr(gsp, rpc, NVKM_GSP_RPC_REPLY_NOWAIT);
 
 fail:
 	clean_registry(gsp);
@@ -1645,7 +1238,7 @@ r535_gsp_rpc_set_system_info(struct nvkm_gsp *gsp)
 	info->pciConfigMirrorSize = 0x001000;
 	r535_gsp_acpi_info(gsp, &info->acpiMethodData);
 
-	return nvkm_gsp_rpc_wr(gsp, info, false);
+	return nvkm_gsp_rpc_wr(gsp, info, NVKM_GSP_RPC_REPLY_NOWAIT);
 }
 
 static int
@@ -2060,6 +1653,215 @@ r535_gsp_rmargs_init(struct nvkm_gsp *gsp, bool resume)
 	return 0;
 }
 
+#ifdef CONFIG_DEBUG_FS
+
+/*
+ * If GSP-RM load fails, then the GSP nvkm object will be deleted, the logging
+ * debugfs entries will be deleted, and it will not be possible to debug the
+ * load failure. The keep_gsp_logging parameter tells Nouveau to copy the
+ * logging buffers to new debugfs entries, and these entries are retained
+ * until the driver unloads.
+ */
+static bool keep_gsp_logging;
+module_param(keep_gsp_logging, bool, 0444);
+MODULE_PARM_DESC(keep_gsp_logging,
+		 "Migrate the GSP-RM logging debugfs entries upon exit");
+
+/*
+ * GSP-RM uses a pseudo-class mechanism to define of a variety of per-"engine"
+ * data structures, and each engine has a "class ID" genererated by a
+ * pre-processor. This is the class ID for the PMU.
+ */
+#define NV_GSP_MSG_EVENT_UCODE_LIBOS_CLASS_PMU		0xf3d722
+
+/**
+ * struct rpc_ucode_libos_print_v1e_08 - RPC payload for libos print buffers
+ * @ucode_eng_desc: the engine descriptor
+ * @libos_print_buf_size: the size of the libos_print_buf[]
+ * @libos_print_buf: the actual buffer
+ *
+ * The engine descriptor is divided into 31:8 "class ID" and 7:0 "instance
+ * ID". We only care about messages from PMU.
+ */
+struct rpc_ucode_libos_print_v1e_08 {
+	u32 ucode_eng_desc;
+	u32 libos_print_buf_size;
+	u8 libos_print_buf[];
+};
+
+/**
+ * r535_gsp_msg_libos_print - capture log message from the PMU
+ * @priv: gsp pointer
+ * @fn: function number (ignored)
+ * @repv: pointer to libos print RPC
+ * @repc: message size
+ *
+ * Called when we receive a UCODE_LIBOS_PRINT event RPC from GSP-RM. This RPC
+ * contains the contents of the libos print buffer from PMU. It is typically
+ * only written to when PMU encounters an error.
+ *
+ * Technically this RPC can be used to pass print buffers from any number of
+ * GSP-RM engines, but we only expect to receive them for the PMU.
+ *
+ * For the PMU, the buffer is 4K in size and the RPC always contains the full
+ * contents.
+ */
+static int
+r535_gsp_msg_libos_print(void *priv, u32 fn, void *repv, u32 repc)
+{
+	struct nvkm_gsp *gsp = priv;
+	struct nvkm_subdev *subdev = &gsp->subdev;
+	struct rpc_ucode_libos_print_v1e_08 *rpc = repv;
+	unsigned int class = rpc->ucode_eng_desc >> 8;
+
+	nvkm_debug(subdev, "received libos print from class 0x%x for %u bytes\n",
+		   class, rpc->libos_print_buf_size);
+
+	if (class != NV_GSP_MSG_EVENT_UCODE_LIBOS_CLASS_PMU) {
+		nvkm_warn(subdev,
+			  "received libos print from unknown class 0x%x\n",
+			  class);
+		return -ENOMSG;
+	}
+
+	if (rpc->libos_print_buf_size > GSP_PAGE_SIZE) {
+		nvkm_error(subdev, "libos print is too large (%u bytes)\n",
+			   rpc->libos_print_buf_size);
+		return -E2BIG;
+	}
+
+	memcpy(gsp->blob_pmu.data, rpc->libos_print_buf, rpc->libos_print_buf_size);
+
+	return 0;
+}
+
+/**
+ * create_debugfs - create a blob debugfs entry
+ * @gsp: gsp pointer
+ * @name: name of this dentry
+ * @blob: blob wrapper
+ *
+ * Creates a debugfs entry for a logging buffer with the name 'name'.
+ */
+static struct dentry *create_debugfs(struct nvkm_gsp *gsp, const char *name,
+				     struct debugfs_blob_wrapper *blob)
+{
+	struct dentry *dent;
+
+	dent = debugfs_create_blob(name, 0444, gsp->debugfs.parent, blob);
+	if (IS_ERR(dent)) {
+		nvkm_error(&gsp->subdev,
+			   "failed to create %s debugfs entry\n", name);
+		return NULL;
+	}
+
+	/*
+	 * For some reason, debugfs_create_blob doesn't set the size of the
+	 * dentry, so do that here.  See [1]
+	 *
+	 * [1] https://lore.kernel.org/r/linux-fsdevel/20240207200619.3354549-1-ttabi@nvidia.com/
+	 */
+	i_size_write(d_inode(dent), blob->size);
+
+	return dent;
+}
+
+/**
+ * r535_gsp_libos_debugfs_init - create logging debugfs entries
+ * @gsp: gsp pointer
+ *
+ * Create the debugfs entries. This exposes the log buffers to userspace so
+ * that an external tool can parse it.
+ *
+ * The 'logpmu' contains exception dumps from the PMU. It is written via an
+ * RPC sent from GSP-RM and must be only 4KB. We create it here because it's
+ * only useful if there is a debugfs entry to expose it. If we get the PMU
+ * logging RPC and there is no debugfs entry, the RPC is just ignored.
+ *
+ * The blob_init, blob_rm, and blob_pmu objects can't be transient
+ * because debugfs_create_blob doesn't copy them.
+ *
+ * NOTE: OpenRM loads the logging elf image and prints the log messages
+ * in real-time. We may add that capability in the future, but that
+ * requires loading ELF images that are not distributed with the driver and
+ * adding the parsing code to Nouveau.
+ *
+ * Ideally, this should be part of nouveau_debugfs_init(), but that function
+ * is called too late. We really want to create these debugfs entries before
+ * r535_gsp_booter_load() is called, so that if GSP-RM fails to initialize,
+ * there could still be a log to capture.
+ */
+static void
+r535_gsp_libos_debugfs_init(struct nvkm_gsp *gsp)
+{
+	struct device *dev = gsp->subdev.device->dev;
+
+	/* Create a new debugfs directory with a name unique to this GPU. */
+	gsp->debugfs.parent = debugfs_create_dir(dev_name(dev), nouveau_debugfs_root);
+	if (IS_ERR(gsp->debugfs.parent)) {
+		nvkm_error(&gsp->subdev,
+			   "failed to create %s debugfs root\n", dev_name(dev));
+		return;
+	}
+
+	gsp->blob_init.data = gsp->loginit.data;
+	gsp->blob_init.size = gsp->loginit.size;
+	gsp->blob_intr.data = gsp->logintr.data;
+	gsp->blob_intr.size = gsp->logintr.size;
+	gsp->blob_rm.data = gsp->logrm.data;
+	gsp->blob_rm.size = gsp->logrm.size;
+
+	gsp->debugfs.init = create_debugfs(gsp, "loginit", &gsp->blob_init);
+	if (!gsp->debugfs.init)
+		goto error;
+
+	gsp->debugfs.intr = create_debugfs(gsp, "logintr", &gsp->blob_intr);
+	if (!gsp->debugfs.intr)
+		goto error;
+
+	gsp->debugfs.rm = create_debugfs(gsp, "logrm", &gsp->blob_rm);
+	if (!gsp->debugfs.rm)
+		goto error;
+
+	/*
+	 * Since the PMU buffer is copied from an RPC, it doesn't need to be
+	 * a DMA buffer.
+	 */
+	gsp->blob_pmu.size = GSP_PAGE_SIZE;
+	gsp->blob_pmu.data = kzalloc(gsp->blob_pmu.size, GFP_KERNEL);
+	if (!gsp->blob_pmu.data)
+		goto error;
+
+	gsp->debugfs.pmu = create_debugfs(gsp, "logpmu", &gsp->blob_pmu);
+	if (!gsp->debugfs.pmu) {
+		kfree(gsp->blob_pmu.data);
+		goto error;
+	}
+
+	i_size_write(d_inode(gsp->debugfs.init), gsp->blob_init.size);
+	i_size_write(d_inode(gsp->debugfs.intr), gsp->blob_intr.size);
+	i_size_write(d_inode(gsp->debugfs.rm), gsp->blob_rm.size);
+	i_size_write(d_inode(gsp->debugfs.pmu), gsp->blob_pmu.size);
+
+	r535_gsp_msg_ntfy_add(gsp, NV_VGPU_MSG_EVENT_UCODE_LIBOS_PRINT,
+			      r535_gsp_msg_libos_print, gsp);
+
+	nvkm_debug(&gsp->subdev, "created debugfs GSP-RM logging entries\n");
+
+	if (keep_gsp_logging) {
+		nvkm_info(&gsp->subdev,
+			  "logging buffers will be retained on failure\n");
+	}
+
+	return;
+
+error:
+	debugfs_remove(gsp->debugfs.parent);
+	gsp->debugfs.parent = NULL;
+}
+
+#endif
+
 static inline u64
 r535_gsp_libos_id8(const char *name)
 {
@@ -2110,7 +1912,11 @@ static void create_pte_array(u64 *ptes, dma_addr_t addr, size_t size)
  * written to directly by GSP-RM and can be any multiple of GSP_PAGE_SIZE.
  *
  * The physical address map for the log buffer is stored in the buffer
- * itself, starting with offset 1. Offset 0 contains the "put" pointer.
+ * itself, starting with offset 1. Offset 0 contains the "put" pointer (pp).
+ * Initially, pp is equal to 0. If the buffer has valid logging data in it,
+ * then pp points to index into the buffer where the next logging entry will
+ * be written. Therefore, the logging data is valid if:
+ *   1 <= pp < sizeof(buffer)/sizeof(u64)
  *
  * The GSP only understands 4K pages (GSP_PAGE_SIZE), so even if the kernel is
  * configured for a larger page size (e.g. 64K pages), we need to give
@@ -2181,6 +1987,11 @@ r535_gsp_libos_init(struct nvkm_gsp *gsp)
 	args[3].size = gsp->rmargs.size;
 	args[3].kind = LIBOS_MEMORY_REGION_CONTIGUOUS;
 	args[3].loc  = LIBOS_MEMORY_REGION_LOC_SYSMEM;
+
+#ifdef CONFIG_DEBUG_FS
+	r535_gsp_libos_debugfs_init(gsp);
+#endif
+
 	return 0;
 }
 
@@ -2234,8 +2045,8 @@ static void
 nvkm_gsp_radix3_dtor(struct nvkm_gsp *gsp, struct nvkm_gsp_radix3 *rx3)
 {
 	nvkm_gsp_sg_free(gsp->subdev.device, &rx3->lvl2);
-	nvkm_gsp_mem_dtor(gsp, &rx3->lvl1);
-	nvkm_gsp_mem_dtor(gsp, &rx3->lvl0);
+	nvkm_gsp_mem_dtor(&rx3->lvl1);
+	nvkm_gsp_mem_dtor(&rx3->lvl0);
 }
 
 /**
@@ -2323,9 +2134,9 @@ nvkm_gsp_radix3_sg(struct nvkm_gsp *gsp, struct sg_table *sgt, u64 size,
 
 	if (ret) {
 lvl2_fail:
-		nvkm_gsp_mem_dtor(gsp, &rx3->lvl1);
+		nvkm_gsp_mem_dtor(&rx3->lvl1);
 lvl1_fail:
-		nvkm_gsp_mem_dtor(gsp, &rx3->lvl0);
+		nvkm_gsp_mem_dtor(&rx3->lvl0);
 	}
 
 	return ret;
@@ -2372,7 +2183,7 @@ r535_gsp_fini(struct nvkm_gsp *gsp, bool suspend)
 		return ret;
 
 	nvkm_msec(gsp->subdev.device, 2000,
-		if (nvkm_falcon_rd32(&gsp->falcon, 0x040) & 0x80000000)
+		if (nvkm_falcon_rd32(&gsp->falcon, 0x040) == 0x80000000)
 			break;
 	);
 
@@ -2417,7 +2228,7 @@ r535_gsp_init(struct nvkm_gsp *gsp)
 
 done:
 	if (gsp->sr.meta.data) {
-		nvkm_gsp_mem_dtor(gsp, &gsp->sr.meta);
+		nvkm_gsp_mem_dtor(&gsp->sr.meta);
 		nvkm_gsp_radix3_dtor(gsp, &gsp->sr.radix3);
 		nvkm_gsp_sg_free(gsp->subdev.device, &gsp->sr.sgt);
 		return ret;
@@ -2491,6 +2302,226 @@ r535_gsp_dtor_fws(struct nvkm_gsp *gsp)
 	gsp->fws.rm = NULL;
 }
 
+#ifdef CONFIG_DEBUG_FS
+
+struct r535_gsp_log {
+	struct nvif_log log;
+
+	/*
+	 * Logging buffers in debugfs. The wrapper objects need to remain
+	 * in memory until the dentry is deleted.
+	 */
+	struct dentry *debugfs_logging_dir;
+	struct debugfs_blob_wrapper blob_init;
+	struct debugfs_blob_wrapper blob_intr;
+	struct debugfs_blob_wrapper blob_rm;
+	struct debugfs_blob_wrapper blob_pmu;
+};
+
+/**
+ * r535_debugfs_shutdown - delete GSP-RM logging buffers for one GPU
+ * @_log: nvif_log struct for this GPU
+ *
+ * Called when the driver is shutting down, to clean up the retained GSP-RM
+ * logging buffers.
+ */
+static void r535_debugfs_shutdown(struct nvif_log *_log)
+{
+	struct r535_gsp_log *log = container_of(_log, struct r535_gsp_log, log);
+
+	debugfs_remove(log->debugfs_logging_dir);
+
+	kfree(log->blob_init.data);
+	kfree(log->blob_intr.data);
+	kfree(log->blob_rm.data);
+	kfree(log->blob_pmu.data);
+
+	/* We also need to delete the list object */
+	kfree(log);
+}
+
+/**
+ * is_empty - return true if the logging buffer was never written to
+ * @b: blob wrapper with ->data field pointing to logging buffer
+ *
+ * The first 64-bit field of loginit, and logintr, and logrm is the 'put'
+ * pointer, and it is initialized to 0. It's a dword-based index into the
+ * circular buffer, indicating where the next printf write will be made.
+ *
+ * If the pointer is still 0 when GSP-RM is shut down, that means that the
+ * buffer was never written to, so it can be ignored.
+ *
+ * This test also works for logpmu, even though it doesn't have a put pointer.
+ */
+static bool is_empty(const struct debugfs_blob_wrapper *b)
+{
+	u64 *put = b->data;
+
+	return put ? (*put == 0) : true;
+}
+
+/**
+ * r535_gsp_copy_log - preserve the logging buffers in a blob
+ * @parent: the top-level dentry for this GPU
+ * @name: name of debugfs entry to create
+ * @s: original wrapper object to copy from
+ * @t: new wrapper object to copy to
+ *
+ * When GSP shuts down, the nvkm_gsp object and all its memory is deleted.
+ * To preserve the logging buffers, the buffers need to be copied, but only
+ * if they actually have data.
+ */
+static int r535_gsp_copy_log(struct dentry *parent,
+			     const char *name,
+			     const struct debugfs_blob_wrapper *s,
+			     struct debugfs_blob_wrapper *t)
+{
+	struct dentry *dent;
+	void *p;
+
+	if (is_empty(s))
+		return 0;
+
+	/* The original buffers will be deleted */
+	p = kmemdup(s->data, s->size, GFP_KERNEL);
+	if (!p)
+		return -ENOMEM;
+
+	t->data = p;
+	t->size = s->size;
+
+	dent = debugfs_create_blob(name, 0444, parent, t);
+	if (IS_ERR(dent)) {
+		kfree(p);
+		memset(t, 0, sizeof(*t));
+		return PTR_ERR(dent);
+	}
+
+	i_size_write(d_inode(dent), t->size);
+
+	return 0;
+}
+
+/**
+ * r535_gsp_retain_logging - copy logging buffers to new debugfs root
+ * @gsp: gsp pointer
+ *
+ * If keep_gsp_logging is enabled, then we want to preserve the GSP-RM logging
+ * buffers and their debugfs entries, but all those objects would normally
+ * deleted if GSP-RM fails to load.
+ *
+ * To preserve the logging buffers, we need to:
+ *
+ * 1) Allocate new buffers and copy the logs into them, so that the original
+ * DMA buffers can be released.
+ *
+ * 2) Preserve the directories.  We don't need to save single dentries because
+ * we're going to delete the parent when the
+ *
+ * If anything fails in this process, then all the dentries need to be
+ * deleted.  We don't need to deallocate the original logging buffers because
+ * the caller will do that regardless.
+ */
+static void r535_gsp_retain_logging(struct nvkm_gsp *gsp)
+{
+	struct device *dev = gsp->subdev.device->dev;
+	struct r535_gsp_log *log = NULL;
+	int ret;
+
+	if (!keep_gsp_logging || !gsp->debugfs.parent) {
+		/* Nothing to do */
+		goto exit;
+	}
+
+	/* Check to make sure at least one buffer has data. */
+	if (is_empty(&gsp->blob_init) && is_empty(&gsp->blob_intr) &&
+	    is_empty(&gsp->blob_rm) && is_empty(&gsp->blob_rm)) {
+		nvkm_warn(&gsp->subdev, "all logging buffers are empty\n");
+		goto exit;
+	}
+
+	log = kzalloc(sizeof(*log), GFP_KERNEL);
+	if (!log)
+		goto error;
+
+	/*
+	 * Since the nvkm_gsp object is going away, the debugfs_blob_wrapper
+	 * objects are also being deleted, which means the dentries will no
+	 * longer be valid.  Delete the existing entries so that we can create
+	 * new ones with the same name.
+	 */
+	debugfs_remove(gsp->debugfs.init);
+	debugfs_remove(gsp->debugfs.intr);
+	debugfs_remove(gsp->debugfs.rm);
+	debugfs_remove(gsp->debugfs.pmu);
+
+	ret = r535_gsp_copy_log(gsp->debugfs.parent, "loginit", &gsp->blob_init, &log->blob_init);
+	if (ret)
+		goto error;
+
+	ret = r535_gsp_copy_log(gsp->debugfs.parent, "logintr", &gsp->blob_intr, &log->blob_intr);
+	if (ret)
+		goto error;
+
+	ret = r535_gsp_copy_log(gsp->debugfs.parent, "logrm", &gsp->blob_rm, &log->blob_rm);
+	if (ret)
+		goto error;
+
+	ret = r535_gsp_copy_log(gsp->debugfs.parent, "logpmu", &gsp->blob_pmu, &log->blob_pmu);
+	if (ret)
+		goto error;
+
+	/* The nvkm_gsp object is going away, so save the dentry */
+	log->debugfs_logging_dir = gsp->debugfs.parent;
+
+	log->log.shutdown = r535_debugfs_shutdown;
+	list_add(&log->log.entry, &gsp_logs.head);
+
+	nvkm_warn(&gsp->subdev,
+		  "logging buffers migrated to /sys/kernel/debug/nouveau/%s\n",
+		  dev_name(dev));
+
+	return;
+
+error:
+	nvkm_warn(&gsp->subdev, "failed to migrate logging buffers\n");
+
+exit:
+	debugfs_remove(gsp->debugfs.parent);
+
+	if (log) {
+		kfree(log->blob_init.data);
+		kfree(log->blob_intr.data);
+		kfree(log->blob_rm.data);
+		kfree(log->blob_pmu.data);
+		kfree(log);
+	}
+}
+
+#endif
+
+/**
+ * r535_gsp_libos_debugfs_fini - cleanup/retain log buffers on shutdown
+ * @gsp: gsp pointer
+ *
+ * If the log buffers are exposed via debugfs, the data for those entries
+ * needs to be cleaned up when the GSP device shuts down.
+ */
+static void
+r535_gsp_libos_debugfs_fini(struct nvkm_gsp __maybe_unused *gsp)
+{
+#ifdef CONFIG_DEBUG_FS
+	r535_gsp_retain_logging(gsp);
+
+	/*
+	 * Unlike the other buffers, the PMU blob is a kmalloc'd buffer that
+	 * exists only if the debugfs entries were created.
+	 */
+	kfree(gsp->blob_pmu.data);
+	gsp->blob_pmu.data = NULL;
+#endif
+}
+
 void
 r535_gsp_dtor(struct nvkm_gsp *gsp)
 {
@@ -2498,7 +2529,7 @@ r535_gsp_dtor(struct nvkm_gsp *gsp)
 	mutex_destroy(&gsp->client_id.mutex);
 
 	nvkm_gsp_radix3_dtor(gsp, &gsp->radix3);
-	nvkm_gsp_mem_dtor(gsp, &gsp->sig);
+	nvkm_gsp_mem_dtor(&gsp->sig);
 	nvkm_firmware_dtor(&gsp->fw);
 
 	nvkm_falcon_fw_dtor(&gsp->booter.unload);
@@ -2509,12 +2540,15 @@ r535_gsp_dtor(struct nvkm_gsp *gsp)
 
 	r535_gsp_dtor_fws(gsp);
 
-	nvkm_gsp_mem_dtor(gsp, &gsp->rmargs);
-	nvkm_gsp_mem_dtor(gsp, &gsp->wpr_meta);
-	nvkm_gsp_mem_dtor(gsp, &gsp->shm.mem);
-	nvkm_gsp_mem_dtor(gsp, &gsp->loginit);
-	nvkm_gsp_mem_dtor(gsp, &gsp->logintr);
-	nvkm_gsp_mem_dtor(gsp, &gsp->logrm);
+	nvkm_gsp_mem_dtor(&gsp->rmargs);
+	nvkm_gsp_mem_dtor(&gsp->wpr_meta);
+	nvkm_gsp_mem_dtor(&gsp->shm.mem);
+
+	r535_gsp_libos_debugfs_fini(gsp);
+
+	nvkm_gsp_mem_dtor(&gsp->loginit);
+	nvkm_gsp_mem_dtor(&gsp->logintr);
+	nvkm_gsp_mem_dtor(&gsp->logrm);
 }
 
 int

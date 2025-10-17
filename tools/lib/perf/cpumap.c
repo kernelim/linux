@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include <errno.h>
 #include <perf/cpumap.h>
 #include <stdlib.h>
 #include <linux/refcount.h>
@@ -184,7 +185,7 @@ struct perf_cpu_map *perf_cpu_map__new(const char *cpu_list)
 	while (isdigit(*cpu_list)) {
 		p = NULL;
 		start_cpu = strtoul(cpu_list, &p, 0);
-		if (start_cpu >= INT_MAX
+		if (start_cpu >= INT16_MAX
 		    || (*p != '\0' && *p != ',' && *p != '-' && *p != '\n'))
 			goto invalid;
 
@@ -193,7 +194,7 @@ struct perf_cpu_map *perf_cpu_map__new(const char *cpu_list)
 			p = NULL;
 			end_cpu = strtoul(cpu_list, &p, 0);
 
-			if (end_cpu >= INT_MAX || (*p != '\0' && *p != ',' && *p != '\n'))
+			if (end_cpu >= INT16_MAX || (*p != '\0' && *p != ',' && *p != '\n'))
 				goto invalid;
 
 			if (end_cpu < start_cpu)
@@ -208,7 +209,7 @@ struct perf_cpu_map *perf_cpu_map__new(const char *cpu_list)
 		for (; start_cpu <= end_cpu; start_cpu++) {
 			/* check for duplicates */
 			for (i = 0; i < nr_cpus; i++)
-				if (tmp_cpus[i].cpu == (int)start_cpu)
+				if (tmp_cpus[i].cpu == (int16_t)start_cpu)
 					goto invalid;
 
 			if (nr_cpus == max_entries) {
@@ -218,7 +219,7 @@ struct perf_cpu_map *perf_cpu_map__new(const char *cpu_list)
 					goto invalid;
 				tmp_cpus = tmp;
 			}
-			tmp_cpus[nr_cpus++].cpu = (int)start_cpu;
+			tmp_cpus[nr_cpus++].cpu = (int16_t)start_cpu;
 		}
 		if (*p)
 			++p;
@@ -384,46 +385,49 @@ bool perf_cpu_map__is_subset(const struct perf_cpu_map *a, const struct perf_cpu
 }
 
 /*
- * Merge two cpumaps
+ * Merge two cpumaps.
  *
- * orig either gets freed and replaced with a new map, or reused
- * with no reference count change (similar to "realloc")
- * other has its reference count increased.
+ * If 'other' is subset of '*orig', '*orig' keeps itself with no reference count
+ * change (similar to "realloc").
+ *
+ * If '*orig' is subset of 'other', '*orig' reuses 'other' with its reference
+ * count increased.
+ *
+ * Otherwise, '*orig' gets freed and replaced with a new map.
  */
-
-struct perf_cpu_map *perf_cpu_map__merge(struct perf_cpu_map *orig,
-					 struct perf_cpu_map *other)
+int perf_cpu_map__merge(struct perf_cpu_map **orig, struct perf_cpu_map *other)
 {
 	struct perf_cpu *tmp_cpus;
 	int tmp_len;
 	int i, j, k;
 	struct perf_cpu_map *merged;
 
-	if (perf_cpu_map__is_subset(orig, other))
-		return orig;
-	if (perf_cpu_map__is_subset(other, orig)) {
-		perf_cpu_map__put(orig);
-		return perf_cpu_map__get(other);
+	if (perf_cpu_map__is_subset(*orig, other))
+		return 0;
+	if (perf_cpu_map__is_subset(other, *orig)) {
+		perf_cpu_map__put(*orig);
+		*orig = perf_cpu_map__get(other);
+		return 0;
 	}
 
-	tmp_len = __perf_cpu_map__nr(orig) + __perf_cpu_map__nr(other);
+	tmp_len = __perf_cpu_map__nr(*orig) + __perf_cpu_map__nr(other);
 	tmp_cpus = malloc(tmp_len * sizeof(struct perf_cpu));
 	if (!tmp_cpus)
-		return NULL;
+		return -ENOMEM;
 
 	/* Standard merge algorithm from wikipedia */
 	i = j = k = 0;
-	while (i < __perf_cpu_map__nr(orig) && j < __perf_cpu_map__nr(other)) {
-		if (__perf_cpu_map__cpu(orig, i).cpu <= __perf_cpu_map__cpu(other, j).cpu) {
-			if (__perf_cpu_map__cpu(orig, i).cpu == __perf_cpu_map__cpu(other, j).cpu)
+	while (i < __perf_cpu_map__nr(*orig) && j < __perf_cpu_map__nr(other)) {
+		if (__perf_cpu_map__cpu(*orig, i).cpu <= __perf_cpu_map__cpu(other, j).cpu) {
+			if (__perf_cpu_map__cpu(*orig, i).cpu == __perf_cpu_map__cpu(other, j).cpu)
 				j++;
-			tmp_cpus[k++] = __perf_cpu_map__cpu(orig, i++);
+			tmp_cpus[k++] = __perf_cpu_map__cpu(*orig, i++);
 		} else
 			tmp_cpus[k++] = __perf_cpu_map__cpu(other, j++);
 	}
 
-	while (i < __perf_cpu_map__nr(orig))
-		tmp_cpus[k++] = __perf_cpu_map__cpu(orig, i++);
+	while (i < __perf_cpu_map__nr(*orig))
+		tmp_cpus[k++] = __perf_cpu_map__cpu(*orig, i++);
 
 	while (j < __perf_cpu_map__nr(other))
 		tmp_cpus[k++] = __perf_cpu_map__cpu(other, j++);
@@ -431,8 +435,9 @@ struct perf_cpu_map *perf_cpu_map__merge(struct perf_cpu_map *orig,
 
 	merged = cpu_map__trim_new(k, tmp_cpus);
 	free(tmp_cpus);
-	perf_cpu_map__put(orig);
-	return merged;
+	perf_cpu_map__put(*orig);
+	*orig = merged;
+	return 0;
 }
 
 struct perf_cpu_map *perf_cpu_map__intersect(struct perf_cpu_map *orig,

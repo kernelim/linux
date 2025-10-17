@@ -1,3 +1,3 @@
-#0-
-0xa1d9ecc7	bdev_file_open_by_path	vmlinux	EXPORT_SYMBOL	
+#1-
+0x4872672e	bdev_file_open_by_path	vmlinux	EXPORT_SYMBOL	
 

@@ -59,15 +59,6 @@ static inline void xsk_pool_fill_cb(struct xsk_buff_pool *pool,
 	xp_fill_cb(pool, desc);
 }
 
-static inline unsigned int xsk_pool_get_napi_id(struct xsk_buff_pool *pool)
-{
-#ifdef CONFIG_NET_RX_BUSY_POLL
-	return pool->heads[0].xdp.rxq->napi_id;
-#else
-	return 0;
-#endif
-}
-
 static inline void xsk_pool_dma_unmap(struct xsk_buff_pool *pool,
 				      unsigned long attrs)
 {
@@ -198,6 +189,7 @@ static inline void *xsk_buff_raw_get_data(struct xsk_buff_pool *pool, u64 addr)
 #define XDP_TXMD_FLAGS_VALID ( \
 		XDP_TXMD_FLAGS_TIMESTAMP | \
 		XDP_TXMD_FLAGS_CHECKSUM | \
+		XDP_TXMD_FLAGS_LAUNCH_TIME | \
 	0)
 
 static inline bool xsk_buff_valid_tx_metadata(struct xsk_tx_metadata *meta)
@@ -304,11 +296,6 @@ static inline void xsk_pool_set_rxq_info(struct xsk_buff_pool *pool,
 static inline void xsk_pool_fill_cb(struct xsk_buff_pool *pool,
 				    struct xsk_cb_desc *desc)
 {
-}
-
-static inline unsigned int xsk_pool_get_napi_id(struct xsk_buff_pool *pool)
-{
-	return 0;
 }
 
 static inline void xsk_pool_dma_unmap(struct xsk_buff_pool *pool,

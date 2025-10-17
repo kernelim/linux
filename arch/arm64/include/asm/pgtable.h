@@ -265,8 +265,7 @@ static inline pte_t pte_mkspecial(pte_t pte)
 
 static inline pte_t pte_mkcont(pte_t pte)
 {
-	pte = set_pte_bit(pte, __pgprot(PTE_CONT));
-	return set_pte_bit(pte, __pgprot(PTE_TYPE_PAGE));
+	return set_pte_bit(pte, __pgprot(PTE_CONT));
 }
 
 static inline pte_t pte_mknoncont(pte_t pte)
@@ -274,7 +273,7 @@ static inline pte_t pte_mknoncont(pte_t pte)
 	return clear_pte_bit(pte, __pgprot(PTE_CONT));
 }
 
-static inline pte_t pte_mkpresent(pte_t pte)
+static inline pte_t pte_mkvalid(pte_t pte)
 {
 	return set_pte_bit(pte, __pgprot(PTE_VALID));
 }
@@ -338,7 +337,7 @@ static inline pte_t __ptep_get(pte_t *ptep)
 }
 
 extern void __sync_icache_dcache(pte_t pteval);
-bool pgattr_change_is_safe(u64 old, u64 new);
+bool pgattr_change_is_safe(pteval_t old, pteval_t new);
 
 /*
  * PTE bits configuration in the presence of hardware Dirty Bit Management
@@ -437,11 +436,6 @@ static inline void __set_ptes(struct mm_struct *mm,
 		pte = pte_advance_pfn(pte, 1);
 	}
 }
-
-/*
- * Huge pte definitions.
- */
-#define pte_mkhuge(pte)		(__pte(pte_val(pte) & ~PTE_TABLE_BIT))
 
 /*
  * Hugetlb definitions.
@@ -684,6 +678,11 @@ static inline void set_pud_at(struct mm_struct *mm, unsigned long addr,
 #define pgprot_nx(prot) \
 	__pgprot_modify(prot, PTE_MAYBE_GP, PTE_PXN)
 
+#define pgprot_decrypted(prot) \
+	__pgprot_modify(prot, PROT_NS_SHARED, PROT_NS_SHARED)
+#define pgprot_encrypted(prot) \
+	__pgprot_modify(prot, PROT_NS_SHARED, 0)
+
 /*
  * Mark the prot value as uncacheable and unbufferable.
  */
@@ -897,7 +896,7 @@ static inline bool mm_pud_folded(const struct mm_struct *mm)
 	pr_err("%s:%d: bad pud %016llx.\n", __FILE__, __LINE__, pud_val(e))
 
 #define p4d_none(p4d)		(pgtable_l4_enabled() && !p4d_val(p4d))
-#define p4d_bad(p4d)		(pgtable_l4_enabled() && !(p4d_val(p4d) & 2))
+#define p4d_bad(p4d)		(pgtable_l4_enabled() && !(p4d_val(p4d) & P4D_TABLE_BIT))
 #define p4d_present(p4d)	(!p4d_none(p4d))
 
 static inline void set_p4d(p4d_t *p4dp, p4d_t p4d)
@@ -927,6 +926,9 @@ static inline phys_addr_t p4d_page_paddr(p4d_t p4d)
 
 static inline pud_t *p4d_to_folded_pud(p4d_t *p4dp, unsigned long addr)
 {
+	/* Ensure that 'p4dp' indexes a page table according to 'addr' */
+	VM_BUG_ON(((addr >> P4D_SHIFT) ^ ((u64)p4dp >> 3)) % PTRS_PER_P4D);
+
 	return (pud_t *)PTR_ALIGN_DOWN(p4dp, PAGE_SIZE) + pud_index(addr);
 }
 
@@ -1021,7 +1023,7 @@ static inline bool mm_p4d_folded(const struct mm_struct *mm)
 	pr_err("%s:%d: bad p4d %016llx.\n", __FILE__, __LINE__, p4d_val(e))
 
 #define pgd_none(pgd)		(pgtable_l5_enabled() && !pgd_val(pgd))
-#define pgd_bad(pgd)		(pgtable_l5_enabled() && !(pgd_val(pgd) & 2))
+#define pgd_bad(pgd)		(pgtable_l5_enabled() && !(pgd_val(pgd) & PGD_TABLE_BIT))
 #define pgd_present(pgd)	(!pgd_none(pgd))
 
 static inline void set_pgd(pgd_t *pgdp, pgd_t pgd)
@@ -1051,6 +1053,9 @@ static inline phys_addr_t pgd_page_paddr(pgd_t pgd)
 
 static inline p4d_t *pgd_to_folded_p4d(pgd_t *pgdp, unsigned long addr)
 {
+	/* Ensure that 'pgdp' indexes a page table according to 'addr' */
+	VM_BUG_ON(((addr >> PGDIR_SHIFT) ^ ((u64)pgdp >> 3)) % PTRS_PER_PGD);
+
 	return (p4d_t *)PTR_ALIGN_DOWN(pgdp, PAGE_SIZE) + p4d_index(addr);
 }
 
@@ -1259,15 +1264,17 @@ static inline int __ptep_clear_flush_young(struct vm_area_struct *vma,
 	return young;
 }
 
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+#if defined(CONFIG_TRANSPARENT_HUGEPAGE) || defined(CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG)
 #define __HAVE_ARCH_PMDP_TEST_AND_CLEAR_YOUNG
 static inline int pmdp_test_and_clear_young(struct vm_area_struct *vma,
 					    unsigned long address,
 					    pmd_t *pmdp)
 {
+	/* Operation applies to PMD table entry only if FEAT_HAFT is enabled */
+	VM_WARN_ON(pmd_table(READ_ONCE(*pmdp)) && !system_supports_haft());
 	return __ptep_test_and_clear_young(vma, address, (pte_t *)pmdp);
 }
-#endif /* CONFIG_TRANSPARENT_HUGEPAGE */
+#endif /* CONFIG_TRANSPARENT_HUGEPAGE || CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG */
 
 static inline pte_t __ptep_get_and_clear(struct mm_struct *mm,
 				       unsigned long address, pte_t *ptep)
@@ -1338,7 +1345,7 @@ static inline void ___ptep_set_wrprotect(struct mm_struct *mm,
 }
 
 /*
- * __ptep_set_wrprotect - mark read-only while trasferring potential hardware
+ * __ptep_set_wrprotect - mark read-only while transferring potential hardware
  * dirty status (PTE_DBM && !PTE_RDONLY) to the software PTE_DIRTY bit.
  */
 static inline void __ptep_set_wrprotect(struct mm_struct *mm,
@@ -1501,6 +1508,10 @@ static inline void update_mmu_cache_range(struct vm_fault *vmf,
  * hardware-managed access flag on arm64.
  */
 #define arch_has_hw_pte_young		cpu_has_hw_af
+
+#ifdef CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG
+#define arch_has_hw_nonleaf_pmd_young	system_supports_haft
+#endif
 
 /*
  * Experimentally, it's cheap to set the access flag in hardware and we

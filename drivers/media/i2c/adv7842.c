@@ -38,7 +38,7 @@ module_param(debug, int, 0644);
 MODULE_PARM_DESC(debug, "debug level (0-2)");
 
 MODULE_DESCRIPTION("Analog Devices ADV7842 video decoder driver");
-MODULE_AUTHOR("Hans Verkuil <hans.verkuil@cisco.com>");
+MODULE_AUTHOR("Hans Verkuil <hansverk@cisco.com>");
 MODULE_AUTHOR("Martin Bugge <marbugge@cisco.com>");
 MODULE_LICENSE("GPL");
 
@@ -1431,14 +1431,15 @@ static int stdi2dv_timings(struct v4l2_subdev *sd,
 	}
 
 	if (v4l2_detect_cvt(stdi->lcf + 1, hfreq, stdi->lcvs, 0,
-			(stdi->hs_pol == '+' ? V4L2_DV_HSYNC_POS_POL : 0) |
-			(stdi->vs_pol == '+' ? V4L2_DV_VSYNC_POS_POL : 0),
-			false, timings))
+			    (stdi->hs_pol == '+' ? V4L2_DV_HSYNC_POS_POL : 0) |
+			    (stdi->vs_pol == '+' ? V4L2_DV_VSYNC_POS_POL : 0),
+			    false, adv7842_get_dv_timings_cap(sd), timings))
 		return 0;
 	if (v4l2_detect_gtf(stdi->lcf + 1, hfreq, stdi->lcvs,
-			(stdi->hs_pol == '+' ? V4L2_DV_HSYNC_POS_POL : 0) |
-			(stdi->vs_pol == '+' ? V4L2_DV_VSYNC_POS_POL : 0),
-			false, state->aspect_ratio, timings))
+			    (stdi->hs_pol == '+' ? V4L2_DV_HSYNC_POS_POL : 0) |
+			    (stdi->vs_pol == '+' ? V4L2_DV_VSYNC_POS_POL : 0),
+			    false, state->aspect_ratio,
+			    adv7842_get_dv_timings_cap(sd), timings))
 		return 0;
 
 	v4l2_dbg(2, debug, sd,

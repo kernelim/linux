@@ -35,6 +35,7 @@
 #include <linux/hid-debug.h>
 #include <linux/hidraw.h>
 #include "usbhid.h"
+#include "hid-pidff.h"
 
 /*
  * Version Information
@@ -1100,7 +1101,7 @@ static int usbhid_start(struct hid_device *hid)
 
 		interval = endpoint->bInterval;
 
-		/* Some vendors give fullspeed interval on highspeed devides */
+		/* Some vendors give fullspeed interval on highspeed devices */
 		if (hid->quirks & HID_QUIRK_FULLSPEED_INTERVAL &&
 		    dev->speed == USB_SPEED_HIGH) {
 			interval = fls(endpoint->bInterval*8);
@@ -1461,13 +1462,13 @@ static void usbhid_disconnect(struct usb_interface *intf)
 
 static void hid_cancel_delayed_stuff(struct usbhid_device *usbhid)
 {
-	del_timer_sync(&usbhid->io_retry);
+	timer_delete_sync(&usbhid->io_retry);
 	cancel_work_sync(&usbhid->reset_work);
 }
 
 static void hid_cease_io(struct usbhid_device *usbhid)
 {
-	del_timer_sync(&usbhid->io_retry);
+	timer_delete_sync(&usbhid->io_retry);
 	usb_kill_urb(usbhid->urbin);
 	usb_kill_urb(usbhid->urbctrl);
 	usb_kill_urb(usbhid->urbout);

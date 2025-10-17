@@ -1,3 +1,3 @@
-#0-
-0x17b7d078	pci_restore_state	vmlinux	EXPORT_SYMBOL	
+#1-
+0x13f9cdde	pci_restore_state	vmlinux	EXPORT_SYMBOL	
 

@@ -33,9 +33,10 @@ xe-y += xe_bb.o \
 	xe_device_sysfs.o \
 	xe_dma_buf.o \
 	xe_drm_client.o \
+	xe_eu_stall.o \
 	xe_exec.o \
-	xe_execlist.o \
 	xe_exec_queue.o \
+	xe_execlist.o \
 	xe_force_wake.o \
 	xe_ggtt.o \
 	xe_gpu_scheduler.o \
@@ -56,8 +57,11 @@ xe-y += xe_bb.o \
 	xe_gt_topology.o \
 	xe_guc.o \
 	xe_guc_ads.o \
+	xe_guc_buf.o \
+	xe_guc_capture.o \
 	xe_guc_ct.o \
 	xe_guc_db_mgr.o \
+	xe_guc_engine_activity.o \
 	xe_guc_hwconfig.o \
 	xe_guc_id_mgr.o \
 	xe_guc_klv_helpers.o \
@@ -65,11 +69,11 @@ xe-y += xe_bb.o \
 	xe_guc_pc.o \
 	xe_guc_submit.o \
 	xe_heci_gsc.o \
+	xe_huc.o \
 	xe_hw_engine.o \
 	xe_hw_engine_class_sysfs.o \
 	xe_hw_engine_group.o \
 	xe_hw_fence.o \
-	xe_huc.o \
 	xe_irq.o \
 	xe_lrc.o \
 	xe_migrate.o \
@@ -85,23 +89,29 @@ xe-y += xe_bb.o \
 	xe_preempt_fence.o \
 	xe_pt.o \
 	xe_pt_walk.o \
+	xe_pxp.o \
+	xe_pxp_debugfs.o \
+	xe_pxp_submit.o \
 	xe_query.o \
 	xe_range_fence.o \
 	xe_reg_sr.o \
 	xe_reg_whitelist.o \
-	xe_rtp.o \
 	xe_ring_ops.o \
+	xe_rtp.o \
 	xe_sa.o \
 	xe_sched_job.o \
+	xe_shrinker.o \
 	xe_step.o \
+	xe_survivability_mode.o \
 	xe_sync.o \
 	xe_tile.o \
 	xe_tile_sysfs.o \
 	xe_trace.o \
 	xe_trace_bo.o \
 	xe_trace_guc.o \
-	xe_ttm_sys_mgr.o \
+	xe_trace_lrc.o \
 	xe_ttm_stolen_mgr.o \
+	xe_ttm_sys_mgr.o \
 	xe_ttm_vram_mgr.o \
 	xe_tuning.o \
 	xe_uc.o \
@@ -109,26 +119,32 @@ xe-y += xe_bb.o \
 	xe_vm.o \
 	xe_vram.o \
 	xe_vram_freq.o \
-	xe_wait_user_fence.o \
+	xe_vsec.o \
 	xe_wa.o \
+	xe_wait_user_fence.o \
 	xe_wopcm.o
 
 xe-$(CONFIG_HMM_MIRROR) += xe_hmm.o
+xe-$(CONFIG_DRM_GPUSVM) += xe_svm.o
 
 # graphics hardware monitoring (HWMON) support
 xe-$(CONFIG_HWMON) += xe_hwmon.o
+
+xe-$(CONFIG_PERF_EVENTS) += xe_pmu.o
 
 # graphics virtualization (SR-IOV) support
 xe-y += \
 	xe_gt_sriov_vf.o \
 	xe_guc_relay.o \
 	xe_memirq.o \
-	xe_sriov.o
+	xe_sriov.o \
+	xe_sriov_vf.o
 
 xe-$(CONFIG_PCI_IOV) += \
 	xe_gt_sriov_pf.o \
 	xe_gt_sriov_pf_config.o \
 	xe_gt_sriov_pf_control.o \
+	xe_gt_sriov_pf_migration.o \
 	xe_gt_sriov_pf_monitor.o \
 	xe_gt_sriov_pf_policy.o \
 	xe_gt_sriov_pf_service.o \
@@ -148,7 +164,6 @@ subdir-ccflags-$(CONFIG_DRM_XE_DISPLAY) += \
 	-I$(src)/display/ext \
 	-I$(src)/compat-i915-headers \
 	-I$(srctree)/drivers/gpu/drm/i915/display/ \
-	-Ddrm_i915_gem_object=xe_bo \
 	-Ddrm_i915_private=xe_device
 
 # Rule to build SOC code shared with i915
@@ -165,6 +180,7 @@ $(obj)/i915-display/%.o: $(srctree)/drivers/gpu/drm/i915/display/%.c FORCE
 xe-$(CONFIG_DRM_XE_DISPLAY) += \
 	display/ext/i915_irq.o \
 	display/ext/i915_utils.o \
+	display/intel_bo.o \
 	display/intel_fb_bo.o \
 	display/intel_fbdev_fb.o \
 	display/xe_display.o \
@@ -180,7 +196,8 @@ xe-$(CONFIG_DRM_XE_DISPLAY) += \
 # SOC code shared with i915
 xe-$(CONFIG_DRM_XE_DISPLAY) += \
 	i915-soc/intel_dram.o \
-	i915-soc/intel_pch.o
+	i915-soc/intel_pch.o \
+	i915-soc/intel_rom.o
 
 # Display code shared with i915
 xe-$(CONFIG_DRM_XE_DISPLAY) += \
@@ -193,6 +210,7 @@ xe-$(CONFIG_DRM_XE_DISPLAY) += \
 	i915-display/intel_bios.o \
 	i915-display/intel_bw.o \
 	i915-display/intel_cdclk.o \
+	i915-display/intel_cmtg.o \
 	i915-display/intel_color.o \
 	i915-display/intel_combo_phy.o \
 	i915-display/intel_connector.o \
@@ -203,6 +221,7 @@ xe-$(CONFIG_DRM_XE_DISPLAY) += \
 	i915-display/intel_ddi.o \
 	i915-display/intel_ddi_buf_trans.o \
 	i915-display/intel_display.o \
+	i915-display/intel_display_conversion.o \
 	i915-display/intel_display_device.o \
 	i915-display/intel_display_driver.o \
 	i915-display/intel_display_irq.o \
@@ -214,12 +233,14 @@ xe-$(CONFIG_DRM_XE_DISPLAY) += \
 	i915-display/intel_display_wa.o \
 	i915-display/intel_dkl_phy.o \
 	i915-display/intel_dmc.o \
+	i915-display/intel_dmc_wl.o \
 	i915-display/intel_dp.o \
 	i915-display/intel_dp_aux.o \
 	i915-display/intel_dp_aux_backlight.o \
 	i915-display/intel_dp_hdcp.o \
 	i915-display/intel_dp_link_training.o \
 	i915-display/intel_dp_mst.o \
+	i915-display/intel_dp_test.o \
 	i915-display/intel_dpll.o \
 	i915-display/intel_dpll_mgr.o \
 	i915-display/intel_dpt_common.o \
@@ -248,18 +269,19 @@ xe-$(CONFIG_DRM_XE_DISPLAY) += \
 	i915-display/intel_modeset_setup.o \
 	i915-display/intel_modeset_verify.o \
 	i915-display/intel_panel.o \
+	i915-display/intel_pfit.o \
 	i915-display/intel_pmdemand.o \
 	i915-display/intel_pps.o \
 	i915-display/intel_psr.o \
 	i915-display/intel_qp_tables.o \
 	i915-display/intel_quirks.o \
+	i915-display/intel_snps_hdmi_pll.o \
 	i915-display/intel_snps_phy.o \
 	i915-display/intel_tc.o \
 	i915-display/intel_vblank.o \
 	i915-display/intel_vdsc.o \
 	i915-display/intel_vga.o \
 	i915-display/intel_vrr.o \
-	i915-display/intel_dmc_wl.o \
 	i915-display/intel_wm.o \
 	i915-display/skl_scaler.o \
 	i915-display/skl_universal_plane.o \
@@ -291,6 +313,9 @@ ifeq ($(CONFIG_DEBUG_FS),y)
 		i915-display/intel_display_debugfs_params.o \
 		i915-display/intel_pipe_crc.o
 endif
+
+xe-$(CONFIG_DRM_XE_DP_TUNNEL) += \
+	i915-display/intel_dp_tunnel.o
 
 obj-$(CONFIG_DRM_XE) += xe.o
 obj-$(CONFIG_DRM_XE_KUNIT_TEST) += tests/

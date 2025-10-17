@@ -37,8 +37,8 @@ static const struct fib_kuid_range fib_kuid_range_unset = {
 
 bool fib_rule_matchall(const struct fib_rule *rule)
 {
-	if (rule->iifindex || rule->oifindex || rule->mark || rule->tun_id ||
-	    rule->flags)
+	if (READ_ONCE(rule->iifindex) || READ_ONCE(rule->oifindex) ||
+	    rule->mark || rule->tun_id || rule->flags)
 		return false;
 	if (rule->suppress_ifgroup != -1 || rule->suppress_prefixlen != -1)
 		return false;
@@ -256,16 +256,36 @@ static int nla_put_port_range(struct sk_buff *skb, int attrtype,
 	return nla_put(skb, attrtype, sizeof(*range), range);
 }
 
+static bool fib_rule_iif_match(const struct fib_rule *rule, int iifindex,
+			       const struct flowi *fl)
+{
+	u8 iif_is_l3_master = READ_ONCE(rule->iif_is_l3_master);
+
+	return iif_is_l3_master ? l3mdev_fib_rule_iif_match(fl, iifindex) :
+				  fl->flowi_iif == iifindex;
+}
+
+static bool fib_rule_oif_match(const struct fib_rule *rule, int oifindex,
+			       const struct flowi *fl)
+{
+	u8 oif_is_l3_master = READ_ONCE(rule->oif_is_l3_master);
+
+	return oif_is_l3_master ? l3mdev_fib_rule_oif_match(fl, oifindex) :
+				  fl->flowi_oif == oifindex;
+}
+
 static int fib_rule_match(struct fib_rule *rule, struct fib_rules_ops *ops,
 			  struct flowi *fl, int flags,
 			  struct fib_lookup_arg *arg)
 {
-	int ret = 0;
+	int iifindex, oifindex, ret = 0;
 
-	if (rule->iifindex && (rule->iifindex != fl->flowi_iif))
+	iifindex = READ_ONCE(rule->iifindex);
+	if (iifindex && !fib_rule_iif_match(rule, iifindex, fl))
 		goto out;
 
-	if (rule->oifindex && (rule->oifindex != fl->flowi_oif))
+	oifindex = READ_ONCE(rule->oifindex);
+	if (oifindex && !fib_rule_oif_match(rule, oifindex, fl))
 		goto out;
 
 	if ((rule->mark ^ fl->flowi_mark) & rule->mark_mask)
@@ -565,8 +585,10 @@ static int fib_nl2rule(struct sk_buff *skb, struct nlmsghdr *nlh,
 		nlrule->iifindex = -1;
 		nla_strscpy(nlrule->iifname, tb[FRA_IIFNAME], IFNAMSIZ);
 		dev = __dev_get_by_name(net, nlrule->iifname);
-		if (dev)
+		if (dev) {
 			nlrule->iifindex = dev->ifindex;
+			nlrule->iif_is_l3_master = netif_is_l3_master(dev);
+		}
 	}
 
 	if (tb[FRA_OIFNAME]) {
@@ -575,8 +597,10 @@ static int fib_nl2rule(struct sk_buff *skb, struct nlmsghdr *nlh,
 		nlrule->oifindex = -1;
 		nla_strscpy(nlrule->oifname, tb[FRA_OIFNAME], IFNAMSIZ);
 		dev = __dev_get_by_name(net, nlrule->oifname);
-		if (dev)
+		if (dev) {
 			nlrule->oifindex = dev->ifindex;
+			nlrule->oif_is_l3_master = netif_is_l3_master(dev);
+		}
 	}
 
 	if (tb[FRA_FWMARK]) {
@@ -1038,14 +1062,14 @@ static int fib_nl_fill_rule(struct sk_buff *skb, struct fib_rule *rule,
 	if (rule->iifname[0]) {
 		if (nla_put_string(skb, FRA_IIFNAME, rule->iifname))
 			goto nla_put_failure;
-		if (rule->iifindex == -1)
+		if (READ_ONCE(rule->iifindex) == -1)
 			frh->flags |= FIB_RULE_IIF_DETACHED;
 	}
 
 	if (rule->oifname[0]) {
 		if (nla_put_string(skb, FRA_OIFNAME, rule->oifname))
 			goto nla_put_failure;
-		if (rule->oifindex == -1)
+		if (READ_ONCE(rule->oifindex) == -1)
 			frh->flags |= FIB_RULE_OIF_DETACHED;
 	}
 
@@ -1216,11 +1240,17 @@ static void attach_rules(struct list_head *rules, struct net_device *dev)
 
 	list_for_each_entry(rule, rules, list) {
 		if (rule->iifindex == -1 &&
-		    strcmp(dev->name, rule->iifname) == 0)
-			rule->iifindex = dev->ifindex;
+		    strcmp(dev->name, rule->iifname) == 0) {
+			WRITE_ONCE(rule->iifindex, dev->ifindex);
+			WRITE_ONCE(rule->iif_is_l3_master,
+				   netif_is_l3_master(dev));
+		}
 		if (rule->oifindex == -1 &&
-		    strcmp(dev->name, rule->oifname) == 0)
-			rule->oifindex = dev->ifindex;
+		    strcmp(dev->name, rule->oifname) == 0) {
+			WRITE_ONCE(rule->oifindex, dev->ifindex);
+			WRITE_ONCE(rule->oif_is_l3_master,
+				   netif_is_l3_master(dev));
+		}
 	}
 }
 
@@ -1229,10 +1259,14 @@ static void detach_rules(struct list_head *rules, struct net_device *dev)
 	struct fib_rule *rule;
 
 	list_for_each_entry(rule, rules, list) {
-		if (rule->iifindex == dev->ifindex)
-			rule->iifindex = -1;
-		if (rule->oifindex == dev->ifindex)
-			rule->oifindex = -1;
+		if (rule->iifindex == dev->ifindex) {
+			WRITE_ONCE(rule->iifindex, -1);
+			WRITE_ONCE(rule->iif_is_l3_master, false);
+		}
+		if (rule->oifindex == dev->ifindex) {
+			WRITE_ONCE(rule->oifindex, -1);
+			WRITE_ONCE(rule->oif_is_l3_master, false);
+		}
 	}
 }
 

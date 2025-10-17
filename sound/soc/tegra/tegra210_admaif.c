@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2020-2025 NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
 //
 // tegra210_admaif.c - Tegra ADMAIF driver
-//
-// Copyright (c) 2020 NVIDIA CORPORATION.  All rights reserved.
 
 #include <linux/clk.h>
 #include <linux/device.h>
@@ -13,6 +13,7 @@
 #include <linux/regmap.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
+#include "tegra_isomgr_bw.h"
 #include "tegra210_admaif.h"
 #include "tegra_cif.h"
 #include "tegra_pcm.h"
@@ -219,7 +220,7 @@ static const struct regmap_config tegra186_admaif_regmap_config = {
 	.cache_type		= REGCACHE_FLAT,
 };
 
-static int __maybe_unused tegra_admaif_runtime_suspend(struct device *dev)
+static int tegra_admaif_runtime_suspend(struct device *dev)
 {
 	struct tegra_admaif *admaif = dev_get_drvdata(dev);
 
@@ -229,7 +230,7 @@ static int __maybe_unused tegra_admaif_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused tegra_admaif_runtime_resume(struct device *dev)
+static int tegra_admaif_runtime_resume(struct device *dev)
 {
 	struct tegra_admaif *admaif = dev_get_drvdata(dev);
 
@@ -262,6 +263,18 @@ static int tegra_admaif_set_pack_mode(struct regmap *map, unsigned int reg,
 	return 0;
 }
 
+static int tegra_admaif_prepare(struct snd_pcm_substream *substream,
+				struct snd_soc_dai *dai)
+{
+	return tegra_isomgr_adma_setbw(substream, dai, true);
+}
+
+static void tegra_admaif_shutdown(struct snd_pcm_substream *substream,
+				  struct snd_soc_dai *dai)
+{
+	tegra_isomgr_adma_setbw(substream, dai, false);
+}
+
 static int tegra_admaif_hw_params(struct snd_pcm_substream *substream,
 				  struct snd_pcm_hw_params *params,
 				  struct snd_soc_dai *dai)
@@ -284,6 +297,11 @@ static int tegra_admaif_hw_params(struct snd_pcm_substream *substream,
 		cif_conf.audio_bits = TEGRA_ACIF_BITS_16;
 		cif_conf.client_bits = TEGRA_ACIF_BITS_16;
 		valid_bit = DATA_16BIT;
+		break;
+	case SNDRV_PCM_FORMAT_S24_LE:
+		cif_conf.audio_bits = TEGRA_ACIF_BITS_32;
+		cif_conf.client_bits = TEGRA_ACIF_BITS_24;
+		valid_bit = DATA_32BIT;
 		break;
 	case SNDRV_PCM_FORMAT_S32_LE:
 		cif_conf.audio_bits = TEGRA_ACIF_BITS_32;
@@ -549,6 +567,8 @@ static const struct snd_soc_dai_ops tegra_admaif_dai_ops = {
 	.probe		= tegra_admaif_dai_probe,
 	.hw_params	= tegra_admaif_hw_params,
 	.trigger	= tegra_admaif_trigger,
+	.shutdown	= tegra_admaif_shutdown,
+	.prepare	= tegra_admaif_prepare,
 };
 
 #define DAI(dai_name)					\
@@ -561,6 +581,7 @@ static const struct snd_soc_dai_ops tegra_admaif_dai_ops = {
 			.rates = SNDRV_PCM_RATE_8000_192000,	\
 			.formats = SNDRV_PCM_FMTBIT_S8 |	\
 				SNDRV_PCM_FMTBIT_S16_LE |	\
+				SNDRV_PCM_FMTBIT_S24_LE |	\
 				SNDRV_PCM_FMTBIT_S32_LE,	\
 		},						\
 		.capture = {					\
@@ -570,6 +591,7 @@ static const struct snd_soc_dai_ops tegra_admaif_dai_ops = {
 			.rates = SNDRV_PCM_RATE_8000_192000,	\
 			.formats = SNDRV_PCM_FMTBIT_S8 |	\
 				SNDRV_PCM_FMTBIT_S16_LE |	\
+				SNDRV_PCM_FMTBIT_S24_LE |	\
 				SNDRV_PCM_FMTBIT_S32_LE,	\
 		},						\
 		.ops = &tegra_admaif_dai_ops,			\
@@ -793,6 +815,12 @@ static int tegra_admaif_probe(struct platform_device *pdev)
 
 	regcache_cache_only(admaif->regmap, true);
 
+	err = tegra_isomgr_adma_register(&pdev->dev);
+	if (err) {
+		dev_err(&pdev->dev, "Failed to add interconnect path\n");
+		return err;
+	}
+
 	regmap_update_bits(admaif->regmap, admaif->soc_data->global_base +
 			   TEGRA_ADMAIF_GLOBAL_ENABLE, 1, 1);
 
@@ -844,14 +872,14 @@ static int tegra_admaif_probe(struct platform_device *pdev)
 
 static void tegra_admaif_remove(struct platform_device *pdev)
 {
+	tegra_isomgr_adma_unregister(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
 }
 
 static const struct dev_pm_ops tegra_admaif_pm_ops = {
-	SET_RUNTIME_PM_OPS(tegra_admaif_runtime_suspend,
-			   tegra_admaif_runtime_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
-				pm_runtime_force_resume)
+	RUNTIME_PM_OPS(tegra_admaif_runtime_suspend,
+		       tegra_admaif_runtime_resume, NULL)
+	SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
 };
 
 static struct platform_driver tegra_admaif_driver = {
@@ -860,7 +888,7 @@ static struct platform_driver tegra_admaif_driver = {
 	.driver = {
 		.name = "tegra210-admaif",
 		.of_match_table = tegra_admaif_of_match,
-		.pm = &tegra_admaif_pm_ops,
+		.pm = pm_ptr(&tegra_admaif_pm_ops),
 	},
 };
 module_platform_driver(tegra_admaif_driver);

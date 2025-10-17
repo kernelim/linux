@@ -1,3 +1,3 @@
-#0-
-0x7419cc07	xsk_tx_peek_release_desc_batch	vmlinux	EXPORT_SYMBOL	
+#1-
+0xbb138e39	xsk_tx_peek_release_desc_batch	vmlinux	EXPORT_SYMBOL	
 

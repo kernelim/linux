@@ -1,3 +1,3 @@
-#0-
-0x72d4b12f	page_pool_put_unrefed_netmem	vmlinux	EXPORT_SYMBOL	
+#1-
+0x158c74a2	page_pool_put_unrefed_netmem	vmlinux	EXPORT_SYMBOL	
 

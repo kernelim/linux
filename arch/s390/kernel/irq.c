@@ -30,6 +30,7 @@
 #include <asm/stacktrace.h>
 #include <asm/softirq_stack.h>
 #include <asm/vtime.h>
+#include <asm/asm.h>
 #include "entry.h"
 
 DEFINE_PER_CPU_SHARED_ALIGNED(struct irq_stat, irq_stat);
@@ -83,7 +84,6 @@ static const struct irq_class irqclass_sub_desc[] = {
 	{.irq = IRQIO_C70,  .name = "C70", .desc = "[I/O] 3270"},
 	{.irq = IRQIO_TAP,  .name = "TAP", .desc = "[I/O] Tape"},
 	{.irq = IRQIO_VMR,  .name = "VMR", .desc = "[I/O] Unit Record Devices"},
-	{.irq = IRQIO_LCS,  .name = "LCS", .desc = "[I/O] LCS"},
 	{.irq = IRQIO_CTC,  .name = "CTC", .desc = "[I/O] CTC"},
 	{.irq = IRQIO_ADM,  .name = "ADM", .desc = "[I/O] EADM Subchannel"},
 	{.irq = IRQIO_CSC,  .name = "CSC", .desc = "[I/O] CHSC Subchannel"},
@@ -129,9 +129,13 @@ static int irq_pending(struct pt_regs *regs)
 {
 	int cc;
 
-	asm volatile("tpi 0\n"
-		     "ipm %0" : "=d" (cc) : : "cc");
-	return cc >> 28;
+	asm volatile(
+		"	tpi	 0\n"
+		CC_IPM(cc)
+		: CC_OUT(cc, cc)
+		:
+		: CC_CLOBBER);
+	return CC_TRANSFORM(cc);
 }
 
 void noinstr do_io_irq(struct pt_regs *regs)
@@ -253,7 +257,7 @@ int show_interrupts(struct seq_file *p, void *v)
 		seq_putc(p, '\n');
 		goto out;
 	}
-	if (index < nr_irqs) {
+	if (index < irq_get_nr_irqs()) {
 		show_msi_interrupt(p, index);
 		goto out;
 	}

@@ -1,3 +1,3 @@
-#0-
-0xe4a8d519	skb_add_rx_frag_netmem	vmlinux	EXPORT_SYMBOL	
+#1-
+0xe789d8ac	skb_add_rx_frag_netmem	vmlinux	EXPORT_SYMBOL	
 

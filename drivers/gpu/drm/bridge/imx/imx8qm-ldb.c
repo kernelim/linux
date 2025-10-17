@@ -200,9 +200,8 @@ imx8qm_ldb_bridge_mode_set(struct drm_bridge *bridge,
 				   CH_HSYNC_M(chno), CH_PHSYNC(chno));
 }
 
-static void
-imx8qm_ldb_bridge_atomic_enable(struct drm_bridge *bridge,
-				struct drm_bridge_state *old_bridge_state)
+static void imx8qm_ldb_bridge_atomic_enable(struct drm_bridge *bridge,
+					    struct drm_atomic_state *state)
 {
 	struct ldb_channel *ldb_ch = bridge->driver_private;
 	struct ldb *ldb = ldb_ch->ldb;
@@ -247,9 +246,8 @@ imx8qm_ldb_bridge_atomic_enable(struct drm_bridge *bridge,
 	ldb_bridge_enable_helper(bridge);
 }
 
-static void
-imx8qm_ldb_bridge_atomic_disable(struct drm_bridge *bridge,
-				 struct drm_bridge_state *old_bridge_state)
+static void imx8qm_ldb_bridge_atomic_disable(struct drm_bridge *bridge,
+					     struct drm_atomic_state *state)
 {
 	struct ldb_channel *ldb_ch = bridge->driver_private;
 	struct ldb *ldb = ldb_ch->ldb;
@@ -542,12 +540,12 @@ static void imx8qm_ldb_remove(struct platform_device *pdev)
 	pm_runtime_disable(&pdev->dev);
 }
 
-static int __maybe_unused imx8qm_ldb_runtime_suspend(struct device *dev)
+static int imx8qm_ldb_runtime_suspend(struct device *dev)
 {
 	return 0;
 }
 
-static int __maybe_unused imx8qm_ldb_runtime_resume(struct device *dev)
+static int imx8qm_ldb_runtime_resume(struct device *dev)
 {
 	struct imx8qm_ldb *imx8qm_ldb = dev_get_drvdata(dev);
 	struct ldb *ldb = &imx8qm_ldb->base;
@@ -559,8 +557,7 @@ static int __maybe_unused imx8qm_ldb_runtime_resume(struct device *dev)
 }
 
 static const struct dev_pm_ops imx8qm_ldb_pm_ops = {
-	SET_RUNTIME_PM_OPS(imx8qm_ldb_runtime_suspend,
-			   imx8qm_ldb_runtime_resume, NULL)
+	RUNTIME_PM_OPS(imx8qm_ldb_runtime_suspend, imx8qm_ldb_runtime_resume, NULL)
 };
 
 static const struct of_device_id imx8qm_ldb_dt_ids[] = {
@@ -571,9 +568,9 @@ MODULE_DEVICE_TABLE(of, imx8qm_ldb_dt_ids);
 
 static struct platform_driver imx8qm_ldb_driver = {
 	.probe	= imx8qm_ldb_probe,
-	.remove_new = imx8qm_ldb_remove,
+	.remove = imx8qm_ldb_remove,
 	.driver	= {
-		.pm = &imx8qm_ldb_pm_ops,
+		.pm = pm_ptr(&imx8qm_ldb_pm_ops),
 		.name = DRIVER_NAME,
 		.of_match_table = imx8qm_ldb_dt_ids,
 	},

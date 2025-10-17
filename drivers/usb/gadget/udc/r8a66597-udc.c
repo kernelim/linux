@@ -1810,7 +1810,7 @@ static void r8a66597_remove(struct platform_device *pdev)
 	struct r8a66597		*r8a66597 = platform_get_drvdata(pdev);
 
 	usb_del_gadget_udc(&r8a66597->gadget);
-	del_timer_sync(&r8a66597->timer);
+	timer_delete_sync(&r8a66597->timer);
 	r8a66597_free_request(&r8a66597->ep[0].ep, r8a66597->ep0_req);
 
 	if (r8a66597->pdata->on_chip) {
@@ -1965,7 +1965,7 @@ clean_up2:
 /*-------------------------------------------------------------------------*/
 static struct platform_driver r8a66597_driver = {
 	.probe =	r8a66597_probe,
-	.remove_new =	r8a66597_remove,
+	.remove =	r8a66597_remove,
 	.driver		= {
 		.name =	udc_name,
 	},

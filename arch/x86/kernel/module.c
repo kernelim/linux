@@ -251,6 +251,8 @@ int module_finalize(const Elf_Ehdr *hdr,
 			ibt_endbr = s;
 	}
 
+	its_init_mod(me);
+
 	if (retpolines || cfi) {
 		void *rseg = NULL, *cseg = NULL;
 		unsigned int rsize = 0, csize = 0;
@@ -271,29 +273,25 @@ int module_finalize(const Elf_Ehdr *hdr,
 		void *rseg = (void *)retpolines->sh_addr;
 		apply_retpolines(rseg, rseg + retpolines->sh_size);
 	}
+
+	its_fini_mod(me);
+
 	if (returns) {
 		void *rseg = (void *)returns->sh_addr;
 		apply_returns(rseg, rseg + returns->sh_size);
+	}
+	if (calls) {
+		struct callthunk_sites cs = {};
+
+		cs.call_start = (void *)calls->sh_addr;
+		cs.call_end = (void *)calls->sh_addr + calls->sh_size;
+
+		callthunks_patch_module_calls(&cs, me);
 	}
 	if (alt) {
 		/* patch .altinstructions */
 		void *aseg = (void *)alt->sh_addr;
 		apply_alternatives(aseg, aseg + alt->sh_size);
-	}
-	if (calls || alt) {
-		struct callthunk_sites cs = {};
-
-		if (calls) {
-			cs.call_start = (void *)calls->sh_addr;
-			cs.call_end = (void *)calls->sh_addr + calls->sh_size;
-		}
-
-		if (alt) {
-			cs.alt_start = (void *)alt->sh_addr;
-			cs.alt_end = (void *)alt->sh_addr + alt->sh_size;
-		}
-
-		callthunks_patch_module_calls(&cs, me);
 	}
 	if (ibt_endbr) {
 		void *iseg = (void *)ibt_endbr->sh_addr;
@@ -318,4 +316,5 @@ int module_finalize(const Elf_Ehdr *hdr,
 void module_arch_cleanup(struct module *mod)
 {
 	alternatives_smp_module_del(mod);
+	its_free_mod(mod);
 }

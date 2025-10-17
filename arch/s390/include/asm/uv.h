@@ -17,6 +17,7 @@
 #include <linux/sched.h>
 #include <asm/page.h>
 #include <asm/gmap.h>
+#include <asm/asm.h>
 
 #define UVC_CC_OK	0
 #define UVC_CC_ERROR	1
@@ -436,13 +437,12 @@ static inline int __uv_call(unsigned long r1, unsigned long r2)
 	int cc;
 
 	asm volatile(
-		"	.insn rrf,0xB9A40000,%[r1],%[r2],0,0\n"
-		"	ipm	%[cc]\n"
-		"	srl	%[cc],28\n"
-		: [cc] "=d" (cc)
+		"	.insn	 rrf,0xb9a40000,%[r1],%[r2],0,0\n"
+		CC_IPM(cc)
+		: CC_OUT(cc, cc)
 		: [r1] "a" (r1), [r2] "a" (r2)
-		: "memory", "cc");
-	return cc;
+		: CC_CLOBBER_LIST("memory"));
+	return CC_TRANSFORM(cc);
 }
 
 static inline int uv_call(unsigned long r1, unsigned long r2)
@@ -628,12 +628,12 @@ static inline int is_prot_virt_host(void)
 }
 
 int uv_pin_shared(unsigned long paddr);
-int gmap_make_secure(struct gmap *gmap, unsigned long gaddr, void *uvcb);
-int gmap_destroy_page(struct gmap *gmap, unsigned long gaddr);
 int uv_destroy_folio(struct folio *folio);
 int uv_destroy_pte(pte_t pte);
 int uv_convert_from_secure_pte(pte_t pte);
-int gmap_convert_to_secure(struct gmap *gmap, unsigned long gaddr);
+int make_hva_secure(struct mm_struct *mm, unsigned long hva, struct uv_cb_header *uvcb);
+int uv_convert_from_secure(unsigned long paddr);
+int uv_convert_from_secure_folio(struct folio *folio);
 
 void setup_uv(void);
 

@@ -361,14 +361,25 @@ pte_t arch_make_huge_pte(pte_t entry, unsigned int shift, vm_flags_t flags)
 {
 	size_t pagesize = 1UL << shift;
 
-	entry = pte_mkhuge(entry);
-	if (pagesize == CONT_PTE_SIZE) {
-		entry = pte_mkcont(entry);
-	} else if (pagesize == CONT_PMD_SIZE) {
+	switch (pagesize) {
+#ifndef __PAGETABLE_PMD_FOLDED
+	case PUD_SIZE:
+		entry = pud_pte(pud_mkhuge(pte_pud(entry)));
+		break;
+#endif
+	case CONT_PMD_SIZE:
 		entry = pmd_pte(pmd_mkcont(pte_pmd(entry)));
-	} else if (pagesize != PUD_SIZE && pagesize != PMD_SIZE) {
+		fallthrough;
+	case PMD_SIZE:
+		entry = pmd_pte(pmd_mkhuge(pte_pmd(entry)));
+		break;
+	case CONT_PTE_SIZE:
+		entry = pte_mkcont(entry);
+		break;
+	default:
 		pr_warn("%s: unrecognized huge page size 0x%lx\n",
 			__func__, pagesize);
+		break;
 	}
 	return entry;
 }
@@ -508,6 +519,18 @@ pte_t huge_ptep_clear_flush(struct vm_area_struct *vma,
 
 static int __init hugetlbpage_init(void)
 {
+	/*
+	 * HugeTLB pages are supported on maximum four page table
+	 * levels (PUD, CONT PMD, PMD, CONT PTE) for a given base
+	 * page size, corresponding to hugetlb_add_hstate() calls
+	 * here.
+	 *
+	 * HUGE_MAX_HSTATE should at least match maximum supported
+	 * HugeTLB page sizes on the platform. Any new addition to
+	 * supported HugeTLB page sizes will also require changing
+	 * HUGE_MAX_HSTATE as well.
+	 */
+	BUILD_BUG_ON(HUGE_MAX_HSTATE < 4);
 	if (pud_sect_supported())
 		hugetlb_add_hstate(PUD_SHIFT - PAGE_SHIFT);
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2020-2024 NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
 //
 // tegra210_i2s.c - Tegra210 I2S driver
-//
-// Copyright (c) 2020 NVIDIA CORPORATION.  All rights reserved.
 
 #include <linux/clk.h>
 #include <linux/device.h>
@@ -166,7 +166,7 @@ static int tegra210_i2s_init(struct snd_soc_dapm_widget *w,
 	return tegra210_i2s_sw_reset(compnt, stream);
 }
 
-static int __maybe_unused tegra210_i2s_runtime_suspend(struct device *dev)
+static int tegra210_i2s_runtime_suspend(struct device *dev)
 {
 	struct tegra210_i2s *i2s = dev_get_drvdata(dev);
 
@@ -178,7 +178,7 @@ static int __maybe_unused tegra210_i2s_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused tegra210_i2s_runtime_resume(struct device *dev)
+static int tegra210_i2s_runtime_resume(struct device *dev)
 {
 	struct tegra210_i2s *i2s = dev_get_drvdata(dev);
 	int err;
@@ -629,6 +629,7 @@ static int tegra210_i2s_hw_params(struct snd_pcm_substream *substream,
 	case SNDRV_PCM_FORMAT_S16_LE:
 		cif_conf.audio_bits = TEGRA_ACIF_BITS_16;
 		break;
+	case SNDRV_PCM_FORMAT_S24_LE:
 	case SNDRV_PCM_FORMAT_S32_LE:
 		cif_conf.audio_bits = TEGRA_ACIF_BITS_32;
 		break;
@@ -655,6 +656,11 @@ static int tegra210_i2s_hw_params(struct snd_pcm_substream *substream,
 		val = I2S_BITS_16;
 		sample_size = 16;
 		cif_conf.client_bits = TEGRA_ACIF_BITS_16;
+		break;
+	case SNDRV_PCM_FORMAT_S24_LE:
+		val = I2S_BITS_24;
+		sample_size = 32;
+		cif_conf.client_bits = TEGRA_ACIF_BITS_24;
 		break;
 	case SNDRV_PCM_FORMAT_S32_LE:
 		val = I2S_BITS_32;
@@ -720,6 +726,7 @@ static struct snd_soc_dai_driver tegra210_i2s_dais[] = {
 			.rates = SNDRV_PCM_RATE_8000_192000,
 			.formats = SNDRV_PCM_FMTBIT_S8 |
 				SNDRV_PCM_FMTBIT_S16_LE |
+				SNDRV_PCM_FMTBIT_S24_LE |
 				SNDRV_PCM_FMTBIT_S32_LE,
 		},
 		.capture = {
@@ -729,6 +736,7 @@ static struct snd_soc_dai_driver tegra210_i2s_dais[] = {
 			.rates = SNDRV_PCM_RATE_8000_192000,
 			.formats = SNDRV_PCM_FMTBIT_S8 |
 				SNDRV_PCM_FMTBIT_S16_LE |
+				SNDRV_PCM_FMTBIT_S24_LE |
 				SNDRV_PCM_FMTBIT_S32_LE,
 		},
 	},
@@ -741,6 +749,7 @@ static struct snd_soc_dai_driver tegra210_i2s_dais[] = {
 			.rates = SNDRV_PCM_RATE_8000_192000,
 			.formats = SNDRV_PCM_FMTBIT_S8 |
 				SNDRV_PCM_FMTBIT_S16_LE |
+				SNDRV_PCM_FMTBIT_S24_LE |
 				SNDRV_PCM_FMTBIT_S32_LE,
 		},
 		.capture = {
@@ -750,6 +759,7 @@ static struct snd_soc_dai_driver tegra210_i2s_dais[] = {
 			.rates = SNDRV_PCM_RATE_8000_192000,
 			.formats = SNDRV_PCM_FMTBIT_S8 |
 				SNDRV_PCM_FMTBIT_S16_LE |
+				SNDRV_PCM_FMTBIT_S24_LE |
 				SNDRV_PCM_FMTBIT_S32_LE,
 		},
 		.ops = &tegra210_i2s_dai_ops,
@@ -1000,10 +1010,9 @@ static void tegra210_i2s_remove(struct platform_device *pdev)
 }
 
 static const struct dev_pm_ops tegra210_i2s_pm_ops = {
-	SET_RUNTIME_PM_OPS(tegra210_i2s_runtime_suspend,
-			   tegra210_i2s_runtime_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
-				pm_runtime_force_resume)
+	RUNTIME_PM_OPS(tegra210_i2s_runtime_suspend,
+		       tegra210_i2s_runtime_resume, NULL)
+	SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
 };
 
 static const struct of_device_id tegra210_i2s_of_match[] = {
@@ -1016,7 +1025,7 @@ static struct platform_driver tegra210_i2s_driver = {
 	.driver = {
 		.name = "tegra210-i2s",
 		.of_match_table = tegra210_i2s_of_match,
-		.pm = &tegra210_i2s_pm_ops,
+		.pm = pm_ptr(&tegra210_i2s_pm_ops),
 	},
 	.probe = tegra210_i2s_probe,
 	.remove = tegra210_i2s_remove,

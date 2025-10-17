@@ -296,7 +296,7 @@ extern typeof(name) __mod_##type##__##name##_device_table		\
  * files require multiple MODULE_FIRMWARE() specifiers */
 #define MODULE_FIRMWARE(_firmware) MODULE_INFO(firmware, _firmware)
 
-#define MODULE_IMPORT_NS(ns)	MODULE_INFO(import_ns, __stringify(ns))
+#define MODULE_IMPORT_NS(ns)	MODULE_INFO(import_ns, ns)
 
 struct notifier_block;
 
@@ -367,8 +367,8 @@ enum mod_mem_type {
 
 struct module_memory {
 	void *base;
+	bool is_rox;
 	unsigned int size;
-	RH_KABI_FILL_HOLE(bool is_rox)
 
 #ifdef CONFIG_MODULES_TREE_LOOKUP
 	struct mod_tree_node mtn;

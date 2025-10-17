@@ -20,11 +20,11 @@ MODULE_PARM_DESC(polling_pipe, "polling pipe (0: ctl, 1: bulk)");
 
 static const struct mfd_cell rtsx_usb_cells[] = {
 	[RTSX_USB_SD_CARD] = {
-		.name = "rtsx_usb_sdmmc",
+		.name = DRV_NAME_RTSX_USB_SDMMC,
 		.pdata_size = 0,
 	},
 	[RTSX_USB_MS_CARD] = {
-		.name = "rtsx_usb_ms",
+		.name = DRV_NAME_RTSX_USB_MS,
 		.pdata_size = 0,
 	},
 };
@@ -53,7 +53,7 @@ static int rtsx_usb_bulk_transfer_sglist(struct rtsx_ucr *ucr,
 	ucr->sg_timer.expires = jiffies + msecs_to_jiffies(timeout);
 	add_timer(&ucr->sg_timer);
 	usb_sg_wait(&ucr->current_sg);
-	if (!del_timer_sync(&ucr->sg_timer))
+	if (!timer_delete_sync(&ucr->sg_timer))
 		ret = -ETIMEDOUT;
 	else
 		ret = ucr->current_sg.status;
@@ -780,7 +780,7 @@ static const struct usb_device_id rtsx_usb_usb_ids[] = {
 MODULE_DEVICE_TABLE(usb, rtsx_usb_usb_ids);
 
 static struct usb_driver rtsx_usb_driver = {
-	.name			= "rtsx_usb",
+	.name			= DRV_NAME_RTSX_USB,
 	.probe			= rtsx_usb_probe,
 	.disconnect		= rtsx_usb_disconnect,
 	.suspend		= rtsx_usb_suspend,

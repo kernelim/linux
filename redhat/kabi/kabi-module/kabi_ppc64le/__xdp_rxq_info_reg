@@ -1,3 +1,3 @@
-#0-
-0x696b43ed	__xdp_rxq_info_reg	vmlinux	EXPORT_SYMBOL_GPL	
+#1-
+0xc00cbebe	__xdp_rxq_info_reg	vmlinux	EXPORT_SYMBOL_GPL	
 

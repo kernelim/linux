@@ -5723,7 +5723,7 @@ static unsigned int selinux_ip_output(void *priv, struct sk_buff *skb,
 	/* we do this in the LOCAL_OUT path and not the POST_ROUTING path
 	 * because we want to make sure we apply the necessary labeling
 	 * before IPsec is applied so we can leverage AH protection */
-	sk = skb->sk;
+	sk = sk_to_full_sk(skb->sk);
 	if (sk) {
 		struct sk_security_struct *sksec;
 
@@ -6974,7 +6974,7 @@ struct lsm_blob_sizes selinux_blob_sizes __ro_after_init = {
 };
 
 #ifdef CONFIG_PERF_EVENTS
-static int selinux_perf_event_open(struct perf_event_attr *attr, int type)
+static int selinux_perf_event_open(int type)
 {
 	u32 requested, sid = current_sid();
 

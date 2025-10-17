@@ -68,8 +68,11 @@ enum mac_version {
 	/* support for RTL_GIGA_MAC_VER_60 has been removed */
 	RTL_GIGA_MAC_VER_61,
 	RTL_GIGA_MAC_VER_63,
+	RTL_GIGA_MAC_VER_64,
 	RTL_GIGA_MAC_VER_65,
 	RTL_GIGA_MAC_VER_66,
+	RTL_GIGA_MAC_VER_70,
+	RTL_GIGA_MAC_VER_71,
 	RTL_GIGA_MAC_NONE
 };
 

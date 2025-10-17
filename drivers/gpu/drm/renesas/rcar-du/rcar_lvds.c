@@ -582,9 +582,8 @@ EXPORT_SYMBOL_GPL(rcar_lvds_pclk_disable);
  */
 
 static void rcar_lvds_atomic_enable(struct drm_bridge *bridge,
-				    struct drm_bridge_state *old_bridge_state)
+				    struct drm_atomic_state *state)
 {
-	struct drm_atomic_state *state = old_bridge_state->base.state;
 	struct drm_connector *connector;
 	struct drm_crtc *crtc;
 
@@ -596,7 +595,7 @@ static void rcar_lvds_atomic_enable(struct drm_bridge *bridge,
 }
 
 static void rcar_lvds_atomic_disable(struct drm_bridge *bridge,
-				     struct drm_bridge_state *old_bridge_state)
+				     struct drm_atomic_state *state)
 {
 	struct rcar_lvds *lvds = bridge_to_rcar_lvds(bridge);
 
@@ -1018,7 +1017,7 @@ static const struct dev_pm_ops rcar_lvds_pm_ops = {
 
 static struct platform_driver rcar_lvds_platform_driver = {
 	.probe		= rcar_lvds_probe,
-	.remove_new	= rcar_lvds_remove,
+	.remove		= rcar_lvds_remove,
 	.driver		= {
 		.name	= "rcar-lvds",
 		.pm	= &rcar_lvds_pm_ops,

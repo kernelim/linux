@@ -1,1 +1,1 @@
-CONFIG_COMPAT=y
+# CONFIG_COMPAT is not set

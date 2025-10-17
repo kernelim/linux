@@ -1,3 +1,3 @@
-#0-
-0x46622afe	remove_proc_entry	vmlinux	EXPORT_SYMBOL	
+#1-
+0x2d03cf12	remove_proc_entry	vmlinux	EXPORT_SYMBOL	
 

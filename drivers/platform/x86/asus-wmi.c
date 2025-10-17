@@ -313,7 +313,7 @@ struct asus_wmi {
 	bool mid_fan_curve_available;
 	struct fan_curve_data custom_fan_curves[3];
 
-	struct platform_profile_handler platform_profile_handler;
+	struct device *ppdev;
 	bool platform_profile_support;
 
 	// The RSOC controls the maximum charging percentage.
@@ -3696,9 +3696,27 @@ static int asus_wmi_custom_fan_curve_init(struct asus_wmi *asus)
 /* Throttle thermal policy ****************************************************/
 static int throttle_thermal_policy_write(struct asus_wmi *asus)
 {
-	u8 value = asus->throttle_thermal_policy_mode;
 	u32 retval;
+	u8 value;
 	int err;
+
+	if (asus->throttle_thermal_policy_dev == ASUS_WMI_DEVID_THROTTLE_THERMAL_POLICY_VIVO) {
+		switch (asus->throttle_thermal_policy_mode) {
+		case ASUS_THROTTLE_THERMAL_POLICY_DEFAULT:
+			value = ASUS_THROTTLE_THERMAL_POLICY_DEFAULT_VIVO;
+			break;
+		case ASUS_THROTTLE_THERMAL_POLICY_OVERBOOST:
+			value = ASUS_THROTTLE_THERMAL_POLICY_OVERBOOST_VIVO;
+			break;
+		case ASUS_THROTTLE_THERMAL_POLICY_SILENT:
+			value = ASUS_THROTTLE_THERMAL_POLICY_SILENT_VIVO;
+			break;
+		default:
+			return -EINVAL;
+		}
+	} else {
+		value = asus->throttle_thermal_policy_mode;
+	}
 
 	err = asus_wmi_set_devstate(asus->throttle_thermal_policy_dev,
 				    value, &retval);
@@ -3737,28 +3755,6 @@ static int throttle_thermal_policy_set_default(struct asus_wmi *asus)
 	return throttle_thermal_policy_write(asus);
 }
 
-static int throttle_thermal_policy_switch_next(struct asus_wmi *asus)
-{
-	u8 new_mode = asus->throttle_thermal_policy_mode + 1;
-	int err;
-
-	if (new_mode > PLATFORM_PROFILE_MAX)
-		new_mode = ASUS_THROTTLE_THERMAL_POLICY_DEFAULT;
-
-	asus->throttle_thermal_policy_mode = new_mode;
-	err = throttle_thermal_policy_write(asus);
-	if (err)
-		return err;
-
-	/*
-	 * Ensure that platform_profile updates userspace with the change to ensure
-	 * that platform_profile and throttle_thermal_policy_mode are in sync.
-	 */
-	platform_profile_notify();
-
-	return 0;
-}
-
 static ssize_t throttle_thermal_policy_show(struct device *dev,
 				   struct device_attribute *attr, char *buf)
 {
@@ -3793,7 +3789,7 @@ static ssize_t throttle_thermal_policy_store(struct device *dev,
 	 * Ensure that platform_profile updates userspace with the change to ensure
 	 * that platform_profile and throttle_thermal_policy_mode are in sync.
 	 */
-	platform_profile_notify();
+	platform_profile_notify(asus->ppdev);
 
 	return count;
 }
@@ -3804,56 +3800,16 @@ static ssize_t throttle_thermal_policy_store(struct device *dev,
 static DEVICE_ATTR_RW(throttle_thermal_policy);
 
 /* Platform profile ***********************************************************/
-static int asus_wmi_platform_profile_to_vivo(struct asus_wmi *asus, int mode)
-{
-	bool vivo;
-
-	vivo = asus->throttle_thermal_policy_dev == ASUS_WMI_DEVID_THROTTLE_THERMAL_POLICY_VIVO;
-
-	if (vivo) {
-		switch (mode) {
-		case ASUS_THROTTLE_THERMAL_POLICY_DEFAULT:
-			return ASUS_THROTTLE_THERMAL_POLICY_DEFAULT_VIVO;
-		case ASUS_THROTTLE_THERMAL_POLICY_OVERBOOST:
-			return ASUS_THROTTLE_THERMAL_POLICY_OVERBOOST_VIVO;
-		case ASUS_THROTTLE_THERMAL_POLICY_SILENT:
-			return ASUS_THROTTLE_THERMAL_POLICY_SILENT_VIVO;
-		}
-	}
-
-	return mode;
-}
-
-static int asus_wmi_platform_profile_mode_from_vivo(struct asus_wmi *asus, int mode)
-{
-	bool vivo;
-
-	vivo = asus->throttle_thermal_policy_dev == ASUS_WMI_DEVID_THROTTLE_THERMAL_POLICY_VIVO;
-
-	if (vivo) {
-		switch (mode) {
-		case ASUS_THROTTLE_THERMAL_POLICY_DEFAULT_VIVO:
-			return ASUS_THROTTLE_THERMAL_POLICY_DEFAULT;
-		case ASUS_THROTTLE_THERMAL_POLICY_OVERBOOST_VIVO:
-			return ASUS_THROTTLE_THERMAL_POLICY_OVERBOOST;
-		case ASUS_THROTTLE_THERMAL_POLICY_SILENT_VIVO:
-			return ASUS_THROTTLE_THERMAL_POLICY_SILENT;
-		}
-	}
-
-	return mode;
-}
-
-static int asus_wmi_platform_profile_get(struct platform_profile_handler *pprof,
+static int asus_wmi_platform_profile_get(struct device *dev,
 					enum platform_profile_option *profile)
 {
 	struct asus_wmi *asus;
 	int tp;
 
-	asus = container_of(pprof, struct asus_wmi, platform_profile_handler);
+	asus = dev_get_drvdata(dev);
 	tp = asus->throttle_thermal_policy_mode;
 
-	switch (asus_wmi_platform_profile_mode_from_vivo(asus, tp)) {
+	switch (tp) {
 	case ASUS_THROTTLE_THERMAL_POLICY_DEFAULT:
 		*profile = PLATFORM_PROFILE_BALANCED;
 		break;
@@ -3870,13 +3826,13 @@ static int asus_wmi_platform_profile_get(struct platform_profile_handler *pprof,
 	return 0;
 }
 
-static int asus_wmi_platform_profile_set(struct platform_profile_handler *pprof,
+static int asus_wmi_platform_profile_set(struct device *dev,
 					enum platform_profile_option profile)
 {
 	struct asus_wmi *asus;
 	int tp;
 
-	asus = container_of(pprof, struct asus_wmi, platform_profile_handler);
+	asus = dev_get_drvdata(dev);
 
 	switch (profile) {
 	case PLATFORM_PROFILE_PERFORMANCE:
@@ -3892,9 +3848,24 @@ static int asus_wmi_platform_profile_set(struct platform_profile_handler *pprof,
 		return -EOPNOTSUPP;
 	}
 
-	asus->throttle_thermal_policy_mode = asus_wmi_platform_profile_to_vivo(asus, tp);
+	asus->throttle_thermal_policy_mode = tp;
 	return throttle_thermal_policy_write(asus);
 }
+
+static int asus_wmi_platform_profile_probe(void *drvdata, unsigned long *choices)
+{
+	set_bit(PLATFORM_PROFILE_QUIET, choices);
+	set_bit(PLATFORM_PROFILE_BALANCED, choices);
+	set_bit(PLATFORM_PROFILE_PERFORMANCE, choices);
+
+	return 0;
+}
+
+static const struct platform_profile_ops asus_wmi_platform_profile_ops = {
+	.probe = asus_wmi_platform_profile_probe,
+	.profile_get = asus_wmi_platform_profile_get,
+	.profile_set = asus_wmi_platform_profile_set,
+};
 
 static int platform_profile_setup(struct asus_wmi *asus)
 {
@@ -3920,22 +3891,11 @@ static int platform_profile_setup(struct asus_wmi *asus)
 
 	dev_info(dev, "Using throttle_thermal_policy for platform_profile support\n");
 
-	asus->platform_profile_handler.profile_get = asus_wmi_platform_profile_get;
-	asus->platform_profile_handler.profile_set = asus_wmi_platform_profile_set;
-
-	set_bit(PLATFORM_PROFILE_QUIET, asus->platform_profile_handler.choices);
-	set_bit(PLATFORM_PROFILE_BALANCED,
-		asus->platform_profile_handler.choices);
-	set_bit(PLATFORM_PROFILE_PERFORMANCE,
-		asus->platform_profile_handler.choices);
-
-	err = platform_profile_register(&asus->platform_profile_handler);
-	if (err == -EEXIST) {
-		pr_warn("%s, a platform_profile handler is already registered\n", __func__);
-		return 0;
-	} else if (err) {
-		pr_err("%s, failed at platform_profile_register: %d\n", __func__, err);
-		return err;
+	asus->ppdev = devm_platform_profile_register(dev, "asus-wmi", asus,
+						     &asus_wmi_platform_profile_ops);
+	if (IS_ERR(asus->ppdev)) {
+		dev_err(dev, "Failed to register a platform_profile class device\n");
+		return PTR_ERR(asus->ppdev);
 	}
 
 	asus->platform_profile_support = true;
@@ -4323,7 +4283,7 @@ static void asus_wmi_handle_event_code(int code, struct asus_wmi *asus)
 		if (asus->fan_boost_mode_available)
 			fan_boost_mode_switch_next(asus);
 		if (asus->throttle_thermal_policy_dev)
-			throttle_thermal_policy_switch_next(asus);
+			platform_profile_cycle();
 		return;
 
 	}
@@ -4866,7 +4826,7 @@ static int asus_wmi_add(struct platform_device *pdev)
 	}
 
 	if (asus->driver->i8042_filter) {
-		err = i8042_install_filter(asus->driver->i8042_filter);
+		err = i8042_install_filter(asus->driver->i8042_filter, NULL);
 		if (err)
 			pr_warn("Unable to install key filter - %d\n", err);
 	}
@@ -4893,8 +4853,6 @@ fail_input:
 fail_sysfs:
 fail_custom_fan_curve:
 fail_platform_profile_setup:
-	if (asus->platform_profile_support)
-		platform_profile_remove();
 fail_fan_boost_mode:
 fail_platform:
 	kfree(asus);
@@ -4919,9 +4877,6 @@ static void asus_wmi_remove(struct platform_device *device)
 	asus_fan_set_auto(asus);
 	throttle_thermal_policy_set_default(asus);
 	asus_wmi_battery_exit(asus);
-
-	if (asus->platform_profile_support)
-		platform_profile_remove();
 
 	kfree(asus);
 }
@@ -5076,7 +5031,7 @@ int __init_or_module asus_wmi_register_driver(struct asus_wmi_driver *driver)
 		return -EBUSY;
 
 	platform_driver = &driver->platform_driver;
-	platform_driver->remove_new = asus_wmi_remove;
+	platform_driver->remove = asus_wmi_remove;
 	platform_driver->driver.owner = driver->owner;
 	platform_driver->driver.name = driver->name;
 	platform_driver->driver.pm = &asus_pm_ops;

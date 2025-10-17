@@ -88,9 +88,15 @@ static bool encl_ioc_create(struct encl *encl)
 	memset(secs, 0, sizeof(*secs));
 	secs->ssa_frame_size = 1;
 	secs->attributes = SGX_ATTR_MODE64BIT;
-	secs->xfrm = 3;
 	secs->base = encl->encl_base;
 	secs->size = encl->encl_size;
+
+	/*
+	 * Setting xfrm to 3 disables extended CPU states and instruction sets
+	 * like AVX2 inside the enclave. Thus the enclave code has to be built
+	 * without instructions from extended instruction sets (-mno-avx).
+	 */
+	secs->xfrm = 3;
 
 	ioc.src = (unsigned long)secs;
 	rc = ioctl(encl->fd, SGX_IOC_ENCLAVE_CREATE, &ioc);

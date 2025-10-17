@@ -2601,7 +2601,15 @@ static void xs_tls_handshake_done(void *data, int status, key_serial_t peerid)
 	struct sock_xprt *lower_transport =
 				container_of(lower_xprt, struct sock_xprt, xprt);
 
-	lower_transport->xprt_err = status ? -EACCES : 0;
+	switch (status) {
+	case 0:
+	case -EACCES:
+	case -ETIMEDOUT:
+		lower_transport->xprt_err = status;
+		break;
+	default:
+		lower_transport->xprt_err = -EACCES;
+	}
 	complete(&lower_transport->handshake_done);
 	xprt_put(lower_xprt);
 }
@@ -2742,19 +2750,13 @@ static void xs_tcp_tls_setup_socket(struct work_struct *work)
 	if (status)
 		goto out_close;
 	xprt_release_write(lower_xprt, NULL);
-
 	trace_rpc_socket_connect(upper_xprt, upper_transport->sock, 0);
-	if (!xprt_test_and_set_connected(upper_xprt)) {
-		upper_xprt->connect_cookie++;
-		clear_bit(XPRT_SOCK_CONNECTING, &upper_transport->sock_state);
-		xprt_clear_connecting(upper_xprt);
-
-		upper_xprt->stat.connect_count++;
-		upper_xprt->stat.connect_time += (long)jiffies -
-					   upper_xprt->stat.connect_start;
-		xs_run_error_worker(upper_transport, XPRT_SOCK_WAKE_PENDING);
-	}
 	rpc_shutdown_client(lower_clnt);
+
+	/* Check for ingress data that arrived before the socket's
+	 * ->data_ready callback was set up.
+	 */
+	xs_poll_check_readable(upper_transport);
 
 out_unlock:
 	current_restore_flags(pflags, PF_MEMALLOC);

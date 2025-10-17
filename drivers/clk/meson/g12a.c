@@ -5616,4 +5616,4 @@ module_platform_driver(g12a_driver);
 
 MODULE_DESCRIPTION("Amlogic G12/SM1 Main Clock Controller driver");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(CLK_MESON);
+MODULE_IMPORT_NS("CLK_MESON");

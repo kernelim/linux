@@ -1,3 +1,3 @@
-#0-
-0x727ba69a	__dma_sync_single_for_cpu	vmlinux	EXPORT_SYMBOL	
+#1-
+0x4c1990a1	__dma_sync_single_for_cpu	vmlinux	EXPORT_SYMBOL	
 

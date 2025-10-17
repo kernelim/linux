@@ -18,7 +18,7 @@
 
 #include "drm_internal.h"
 
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");
 
 #define AFBC_HEADER_SIZE		16
 #define AFBC_TH_LAYOUT_ALIGNMENT	8
@@ -429,7 +429,7 @@ static void __drm_gem_fb_end_cpu_access(struct drm_framebuffer *fb, enum dma_dat
 		if (!obj)
 			continue;
 		import_attach = obj->import_attach;
-		if (!import_attach)
+		if (!drm_gem_is_imported(obj))
 			continue;
 		ret = dma_buf_end_cpu_access(import_attach->dmabuf, dir);
 		if (ret)
@@ -466,7 +466,7 @@ int drm_gem_fb_begin_cpu_access(struct drm_framebuffer *fb, enum dma_data_direct
 			goto err___drm_gem_fb_end_cpu_access;
 		}
 		import_attach = obj->import_attach;
-		if (!import_attach)
+		if (!drm_gem_is_imported(obj))
 			continue;
 		ret = dma_buf_begin_cpu_access(import_attach->dmabuf, dir);
 		if (ret)

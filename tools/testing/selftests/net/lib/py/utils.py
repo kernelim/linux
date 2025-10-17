@@ -2,16 +2,26 @@
 
 import errno
 import json as _json
+import os
 import random
 import re
+import select
 import socket
 import subprocess
 import time
 
 
 class CmdExitFailure(Exception):
-    pass
+    def __init__(self, msg, cmd_obj):
+        super().__init__(msg)
+        self.cmd = cmd_obj
 
+def fd_read_timeout(fd, timeout):
+    rlist, _, _ = select.select([fd], [], [], timeout)
+    if rlist:
+        return os.read(fd, 1024)
+    else:
+        raise TimeoutError("Timeout waiting for fd read")
 
 class cmd:
     def __init__(self, comm, shell=True, fail=True, ns=None, background=False, host=None, timeout=5):
@@ -48,7 +58,7 @@ class cmd:
             if len(stderr) > 0 and stderr[-1] == "\n":
                 stderr = stderr[:-1]
             raise CmdExitFailure("Command failed: %s\nSTDOUT: %s\nSTDERR: %s" %
-                                 (self.proc.args, stdout, stderr))
+                                 (self.proc.args, stdout, stderr), self)
 
 
 class bkg(cmd):
@@ -121,20 +131,13 @@ def ethtool(args, json=None, ns=None, host=None):
     return tool('ethtool', args, json=json, ns=ns, host=host)
 
 
-def rand_port():
+def rand_port(type=socket.SOCK_STREAM):
     """
-    Get a random unprivileged port, try to make sure it's not already used.
+    Get a random unprivileged port.
     """
-    for _ in range(1000):
-        port = random.randint(10000, 65535)
-        try:
-            with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
-                s.bind(("", port))
-            return port
-        except OSError as e:
-            if e.errno != errno.EADDRINUSE:
-                raise
-    raise Exception("Can't find any free unprivileged port")
+    with socket.socket(socket.AF_INET6, type) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
 
 
 def wait_port_listen(port, proto="tcp", ns=None, host=None, sleep=0.005, deadline=5):

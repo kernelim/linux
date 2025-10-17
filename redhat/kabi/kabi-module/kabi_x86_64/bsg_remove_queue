@@ -1,3 +1,3 @@
-#0-
-0x99e17e19	bsg_remove_queue	vmlinux	EXPORT_SYMBOL_GPL	
+#1-
+0x89b4cbc7	bsg_remove_queue	vmlinux	EXPORT_SYMBOL_GPL	
 

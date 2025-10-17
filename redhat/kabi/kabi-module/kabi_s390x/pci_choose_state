@@ -1,3 +1,3 @@
-#0-
-0x1cd5381a	pci_choose_state	vmlinux	EXPORT_SYMBOL	
+#1-
+0x56fd72d4	pci_choose_state	vmlinux	EXPORT_SYMBOL	
 

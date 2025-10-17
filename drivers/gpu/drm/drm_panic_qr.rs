@@ -13,12 +13,13 @@
 //! The binary data must be a valid URL parameter, so the easiest way is
 //! to use base64 encoding. But this wastes 25% of data space, so the
 //! whole stack trace won't fit in the QR code. So instead it encodes
-//! every 13bits of input into 4 decimal digits, and then uses the
+//! every 7 bytes of input into 17 decimal digits, and then uses the
 //! efficient numeric encoding, that encode 3 decimal digits into
-//! 10bits. This makes 39bits of compressed data into 12 decimal digits,
-//! into 40bits in the QR code, so wasting only 2.5%. And the numbers are
+//! 10bits. This makes 168bits of compressed data into 51 decimal digits,
+//! into 170bits in the QR code, so wasting only 1.17%. And the numbers are
 //! valid URL parameter, so the website can do the reverse, to get the
-//! binary data.
+//! binary data. This is the same algorithm used by Fido v2.2 QR-initiated
+//! authentication specification.
 //!
 //! Inspired by these 3 projects, all under MIT license:
 //!
@@ -26,8 +27,7 @@
 //! * <https://github.com/erwanvivien/fast_qr>
 //! * <https://github.com/bjguillot/qr>
 
-use core::cmp;
-use kernel::str::CStr;
+use kernel::{prelude::*, str::CStr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd)]
 struct Version(usize);
@@ -209,12 +209,9 @@ const FORMAT_INFOS_QR_L: [u16; 8] = [
 impl Version {
     /// Returns the smallest QR version than can hold these segments.
     fn from_segments(segments: &[&Segment<'_>]) -> Option<Version> {
-        for v in (1..=40).map(|k| Version(k)) {
-            if v.max_data() * 8 >= segments.iter().map(|s| s.total_size_bits(v)).sum() {
-                return Some(v);
-            }
-        }
-        None
+        (1..=40)
+            .map(Version)
+            .find(|&v| v.max_data() * 8 >= segments.iter().map(|s| s.total_size_bits(v)).sum())
     }
 
     fn width(&self) -> u8 {
@@ -242,7 +239,7 @@ impl Version {
     }
 
     fn alignment_pattern(&self) -> &'static [u8] {
-        &ALIGNMENT_PATTERNS[self.0 - 1]
+        ALIGNMENT_PATTERNS[self.0 - 1]
     }
 
     fn poly(&self) -> &'static [u8] {
@@ -299,35 +296,11 @@ const MODE_BINARY: u16 = 4;
 /// Padding bytes.
 const PADDING: [u8; 2] = [236, 17];
 
-/// Get the next 13 bits of data, starting at specified offset (in bits).
-fn get_next_13b(data: &[u8], offset: usize) -> Option<(u16, usize)> {
-    if offset < data.len() * 8 {
-        let size = cmp::min(13, data.len() * 8 - offset);
-        let byte_off = offset / 8;
-        let bit_off = offset % 8;
-        // `b` is 20 at max (`bit_off` <= 7 and `size` <= 13).
-        let b = (bit_off + size) as u16;
-
-        let first_byte = (data[byte_off] << bit_off >> bit_off) as u16;
-
-        let number = match b {
-            0..=8 => first_byte >> (8 - b),
-            9..=16 => (first_byte << (b - 8)) + (data[byte_off + 1] >> (16 - b)) as u16,
-            _ => {
-                (first_byte << (b - 8))
-                    + ((data[byte_off + 1] as u16) << (b - 16))
-                    + (data[byte_off + 2] >> (24 - b)) as u16
-            }
-        };
-        Some((number, size))
-    } else {
-        None
-    }
-}
-
 /// Number of bits to encode characters in numeric mode.
 const NUM_CHARS_BITS: [usize; 4] = [0, 4, 7, 10];
-const POW10: [u16; 4] = [1, 10, 100, 1000];
+/// Number of decimal digits required to encode n bytes of binary data.
+/// eg: you need 15 decimal digits to fit 6 bytes of binary data.
+const BYTES_TO_DIGITS: [usize; 8] = [0, 3, 5, 8, 10, 13, 15, 17];
 
 enum Segment<'a> {
     Numeric(&'a [u8]),
@@ -363,13 +336,9 @@ impl Segment<'_> {
         match self {
             Segment::Binary(data) => data.len(),
             Segment::Numeric(data) => {
-                let data_bits = data.len() * 8;
-                let last_chars = match data_bits % 13 {
-                    1 => 1,
-                    k => (k + 1) / 3,
-                };
-                // 4 decimal numbers per 13bits + remainder.
-                4 * (data_bits / 13) + last_chars
+                let last_chars = BYTES_TO_DIGITS[data.len() % 7];
+                // 17 decimal numbers per 7bytes + remainder.
+                17 * (data.len() / 7) + last_chars
             }
         }
     }
@@ -397,8 +366,48 @@ impl Segment<'_> {
         SegmentIterator {
             segment: self,
             offset: 0,
-            carry: 0,
-            carry_len: 0,
+            decfifo: Default::default(),
+        }
+    }
+}
+
+/// Max fifo size is 17 (max push) + 2 (max remaining)
+const MAX_FIFO_SIZE: usize = 19;
+
+/// A simple Decimal digit FIFO
+#[derive(Default)]
+struct DecFifo {
+    decimals: [u8; MAX_FIFO_SIZE],
+    len: usize,
+}
+
+impl DecFifo {
+    fn push(&mut self, data: u64, len: usize) {
+        let mut chunk = data;
+        for i in (0..self.len).rev() {
+            self.decimals[i + len] = self.decimals[i];
+        }
+        for i in 0..len {
+            self.decimals[i] = (chunk % 10) as u8;
+            chunk /= 10;
+        }
+        self.len += len;
+    }
+
+    /// Pop 3 decimal digits from the FIFO
+    fn pop3(&mut self) -> Option<(u16, usize)> {
+        if self.len == 0 {
+            None
+        } else {
+            let poplen = 3.min(self.len);
+            self.len -= poplen;
+            let mut out = 0;
+            let mut exp = 1;
+            for i in 0..poplen {
+                out += self.decimals[self.len + i] as u16 * exp;
+                exp *= 10;
+            }
+            Some((out, NUM_CHARS_BITS[poplen]))
         }
     }
 }
@@ -406,8 +415,7 @@ impl Segment<'_> {
 struct SegmentIterator<'a> {
     segment: &'a Segment<'a>,
     offset: usize,
-    carry: u16,
-    carry_len: usize,
+    decfifo: DecFifo,
 }
 
 impl Iterator for SegmentIterator<'_> {
@@ -425,41 +433,17 @@ impl Iterator for SegmentIterator<'_> {
                 }
             }
             Segment::Numeric(data) => {
-                if self.carry_len == 3 {
-                    let out = (self.carry, NUM_CHARS_BITS[self.carry_len]);
-                    self.carry_len = 0;
-                    self.carry = 0;
-                    Some(out)
-                } else if let Some((bits, size)) = get_next_13b(data, self.offset) {
-                    self.offset += size;
-                    let new_chars = match size {
-                        1 => 1,
-                        k => (k + 1) / 3,
-                    };
-                    if self.carry_len + new_chars > 3 {
-                        self.carry_len = new_chars + self.carry_len - 3;
-                        let out = (
-                            self.carry * POW10[new_chars - self.carry_len]
-                                + bits / POW10[self.carry_len],
-                            NUM_CHARS_BITS[3],
-                        );
-                        self.carry = bits % POW10[self.carry_len];
-                        Some(out)
-                    } else {
-                        let out = (
-                            self.carry * POW10[new_chars] + bits,
-                            NUM_CHARS_BITS[self.carry_len + new_chars],
-                        );
-                        self.carry_len = 0;
-                        Some(out)
-                    }
-                } else if self.carry_len > 0 {
-                    let out = (self.carry, NUM_CHARS_BITS[self.carry_len]);
-                    self.carry_len = 0;
-                    Some(out)
-                } else {
-                    None
+                if self.decfifo.len < 3 && self.offset < data.len() {
+                    // If there are less than 3 decimal digits in the fifo,
+                    // take the next 7 bytes of input, and push them to the fifo.
+                    let mut buf = [0u8; 8];
+                    let len = 7.min(data.len() - self.offset);
+                    buf[..len].copy_from_slice(&data[self.offset..self.offset + len]);
+                    let chunk = u64::from_le_bytes(buf);
+                    self.decfifo.push(chunk, BYTES_TO_DIGITS[len]);
+                    self.offset += len;
                 }
+                self.decfifo.pop3()
             }
         }
     }
@@ -479,7 +463,7 @@ struct EncodedMsg<'a> {
 /// Data to be put in the QR code, with correct segment encoding, padding, and
 /// Error Code Correction.
 impl EncodedMsg<'_> {
-    fn new<'a, 'b>(segments: &[&Segment<'b>], data: &'a mut [u8]) -> Option<EncodedMsg<'a>> {
+    fn new<'a>(segments: &[&Segment<'_>], data: &'a mut [u8]) -> Option<EncodedMsg<'a>> {
         let version = Version::from_segments(segments)?;
         let ec_size = version.ec_size();
         let g1_blocks = version.g1_blocks();
@@ -492,7 +476,7 @@ impl EncodedMsg<'_> {
         data.fill(0);
 
         let mut em = EncodedMsg {
-            data: data,
+            data,
             ec_size,
             g1_blocks,
             g2_blocks,
@@ -548,7 +532,7 @@ impl EncodedMsg<'_> {
         }
         self.push(&mut offset, (MODE_STOP, 4));
 
-        let pad_offset = (offset + 7) / 8;
+        let pad_offset = offset.div_ceil(8);
         for i in pad_offset..self.version.max_data() {
             self.data[i] = PADDING[(i & 1) ^ (pad_offset & 1)];
         }
@@ -662,7 +646,7 @@ struct QrImage<'a> {
 impl QrImage<'_> {
     fn new<'a, 'b>(em: &'b EncodedMsg<'b>, qrdata: &'a mut [u8]) -> QrImage<'a> {
         let width = em.version.width();
-        let stride = (width + 7) / 8;
+        let stride = width.div_ceil(8);
         let data = qrdata;
 
         let mut qr_image = QrImage {
@@ -722,7 +706,10 @@ impl QrImage<'_> {
 
     fn is_finder(&self, x: u8, y: u8) -> bool {
         let end = self.width - 8;
-        (x < 8 && y < 8) || (x < 8 && y >= end) || (x >= end && y < 8)
+        #[expect(clippy::nonminimal_bool)]
+        {
+            (x < 8 && y < 8) || (x < 8 && y >= end) || (x >= end && y < 8)
+        }
     }
 
     // Alignment pattern: 5x5 squares in a grid.
@@ -911,16 +898,16 @@ impl QrImage<'_> {
 ///
 /// * `url`: The base URL of the QR code. It will be encoded as Binary segment.
 /// * `data`: A pointer to the binary data, to be encoded. if URL is NULL, it
-///    will be encoded as binary segment, otherwise it will be encoded
-///    efficiently as a numeric segment, and appended to the URL.
+///   will be encoded as binary segment, otherwise it will be encoded
+///   efficiently as a numeric segment, and appended to the URL.
 /// * `data_len`: Length of the data, that needs to be encoded, must be less
-///    than data_size.
+///   than data_size.
 /// * `data_size`: Size of data buffer, it should be at least 4071 bytes to hold
-///    a V40 QR code. It will then be overwritten with the QR code image.
+///   a V40 QR code. It will then be overwritten with the QR code image.
 /// * `tmp`: A temporary buffer that the QR code encoder will use, to write the
-///    segments and ECC.
+///   segments and ECC.
 /// * `tmp_size`: Size of the temporary buffer, it must be at least 3706 bytes
-///    long for V40.
+///   long for V40.
 ///
 /// # Safety
 ///
@@ -929,9 +916,9 @@ impl QrImage<'_> {
 /// * `tmp` must be valid for reading and writing for `tmp_size` bytes.
 ///
 /// They must remain valid for the duration of the function call.
-#[no_mangle]
+#[export]
 pub unsafe extern "C" fn drm_panic_qr_generate(
-    url: *const i8,
+    url: *const kernel::ffi::c_char,
     data: *mut u8,
     data_len: usize,
     data_size: usize,
@@ -978,10 +965,16 @@ pub unsafe extern "C" fn drm_panic_qr_generate(
 /// * `url_len`: Length of the URL.
 ///
 /// * If `url_len` > 0, remove the 2 segments header/length and also count the
-/// conversion to numeric segments.
+///   conversion to numeric segments.
 /// * If `url_len` = 0, only removes 3 bytes for 1 binary segment.
-#[no_mangle]
-pub extern "C" fn drm_panic_qr_max_data_size(version: u8, url_len: usize) -> usize {
+///
+/// # Safety
+///
+/// Always safe to call.
+// Required to be unsafe due to the `#[export]` annotation.
+#[export]
+pub unsafe extern "C" fn drm_panic_qr_max_data_size(version: u8, url_len: usize) -> usize {
+    #[expect(clippy::manual_range_contains)]
     if version < 1 || version > 40 {
         return 0;
     }

@@ -98,12 +98,12 @@ static struct pci_driver snd_sof_pci_amd_rn_driver = {
 	.probe = acp_pci_rn_probe,
 	.remove = acp_pci_rn_remove,
 	.driver = {
-		.pm = &sof_pci_pm,
+		.pm = pm_ptr(&sof_pci_pm),
 	},
 };
 module_pci_driver(snd_sof_pci_amd_rn_driver);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("RENOIR SOF Driver");
-MODULE_IMPORT_NS(SND_SOC_SOF_AMD_COMMON);
-MODULE_IMPORT_NS(SND_SOC_SOF_PCI_DEV);
+MODULE_IMPORT_NS("SND_SOC_SOF_AMD_COMMON");
+MODULE_IMPORT_NS("SND_SOC_SOF_PCI_DEV");

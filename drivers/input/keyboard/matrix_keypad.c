@@ -17,7 +17,6 @@
 #include <linux/jiffies.h>
 #include <linux/module.h>
 #include <linux/gpio.h>
-#include <linux/gpio/consumer.h>
 #include <linux/input/matrix_keypad.h>
 #include <linux/slab.h>
 #include <linux/of.h>
@@ -27,6 +26,7 @@ struct matrix_keypad {
 	unsigned int row_shift;
 
 	unsigned int col_scan_delay_us;
+	unsigned int all_cols_on_delay_us;
 	/* key debounce interval in milli-second */
 	unsigned int debounce_ms;
 	bool drive_inactive_cols;
@@ -69,7 +69,7 @@ static void activate_col(struct matrix_keypad *keypad, int col, bool on)
 	__activate_col(keypad, col, on);
 
 	if (on && keypad->col_scan_delay_us)
-		udelay(keypad->col_scan_delay_us);
+		fsleep(keypad->col_scan_delay_us);
 }
 
 static void activate_all_cols(struct matrix_keypad *keypad, bool on)
@@ -78,6 +78,9 @@ static void activate_all_cols(struct matrix_keypad *keypad, bool on)
 
 	for (col = 0; col < keypad->num_col_gpios; col++)
 		__activate_col(keypad, col, on);
+
+	if (on && keypad->all_cols_on_delay_us)
+		fsleep(keypad->all_cols_on_delay_us);
 }
 
 static bool row_asserted(struct matrix_keypad *keypad, int row)
@@ -158,18 +161,17 @@ static void matrix_keypad_scan(struct work_struct *work)
 	activate_all_cols(keypad, true);
 
 	/* Enable IRQs again */
-	spin_lock_irq(&keypad->lock);
-	keypad->scan_pending = false;
-	enable_row_irqs(keypad);
-	spin_unlock_irq(&keypad->lock);
+	scoped_guard(spinlock_irq, &keypad->lock) {
+		keypad->scan_pending = false;
+		enable_row_irqs(keypad);
+	}
 }
 
 static irqreturn_t matrix_keypad_interrupt(int irq, void *id)
 {
 	struct matrix_keypad *keypad = id;
-	unsigned long flags;
 
-	spin_lock_irqsave(&keypad->lock, flags);
+	guard(spinlock_irqsave)(&keypad->lock);
 
 	/*
 	 * See if another IRQ beaten us to it and scheduled the
@@ -185,7 +187,6 @@ static irqreturn_t matrix_keypad_interrupt(int irq, void *id)
 			      msecs_to_jiffies(keypad->debounce_ms));
 
 out:
-	spin_unlock_irqrestore(&keypad->lock, flags);
 	return IRQ_HANDLED;
 }
 
@@ -209,9 +210,9 @@ static void matrix_keypad_stop(struct input_dev *dev)
 {
 	struct matrix_keypad *keypad = input_get_drvdata(dev);
 
-	spin_lock_irq(&keypad->lock);
-	keypad->stopped = true;
-	spin_unlock_irq(&keypad->lock);
+	scoped_guard(spinlock_irq, &keypad->lock) {
+		keypad->stopped = true;
+	}
 
 	flush_delayed_work(&keypad->work);
 	/*
@@ -395,6 +396,8 @@ static int matrix_keypad_probe(struct platform_device *pdev)
 				 &keypad->debounce_ms);
 	device_property_read_u32(&pdev->dev, "col-scan-delay-us",
 				 &keypad->col_scan_delay_us);
+	device_property_read_u32(&pdev->dev, "all-cols-on-delay-us",
+				 &keypad->all_cols_on_delay_us);
 
 	err = matrix_keypad_init_gpio(pdev, keypad);
 	if (err)

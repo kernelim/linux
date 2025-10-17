@@ -46,7 +46,7 @@ struct nfs_local_fsync_ctx {
 	struct completion	*done;
 };
 
-static bool localio_enabled __read_mostly = true;
+static bool localio_enabled __read_mostly = false;
 module_param(localio_enabled, bool, 0644);
 
 static bool localio_O_DIRECT_semantics __read_mostly = false;
@@ -171,7 +171,7 @@ static bool nfs_server_uuid_is_local(struct nfs_client *clp)
  * - called after alloc_client and init_client (so cl_rpcclient exists)
  * - this function is idempotent, it can be called for old or new clients
  */
-void nfs_local_probe(struct nfs_client *clp)
+static void nfs_local_probe(struct nfs_client *clp)
 {
 	/* Disallow localio if disabled via sysfs or AUTH_SYS isn't used */
 	if (!localio_enabled ||
@@ -191,14 +191,16 @@ void nfs_local_probe(struct nfs_client *clp)
 		nfs_localio_enable_client(clp);
 	nfs_uuid_end(&clp->cl_uuid);
 }
-EXPORT_SYMBOL_GPL(nfs_local_probe);
 
 void nfs_local_probe_async_work(struct work_struct *work)
 {
 	struct nfs_client *clp =
 		container_of(work, struct nfs_client, cl_local_probe_work);
 
+	if (!refcount_inc_not_zero(&clp->cl_count))
+		return;
 	nfs_local_probe(clp);
+	nfs_put_client(clp);
 }
 
 void nfs_local_probe_async(struct nfs_client *clp)
@@ -278,6 +280,7 @@ nfs_local_open_fh(struct nfs_client *clp, const struct cred *cred,
 		new = __nfs_local_open_fh(clp, cred, fh, nfl, mode);
 		if (IS_ERR(new))
 			return NULL;
+		rcu_read_lock();
 		/* try to swap in the pointer */
 		spin_lock(&clp->cl_uuid.lock);
 		nf = rcu_dereference_protected(*pnf, 1);
@@ -287,7 +290,6 @@ nfs_local_open_fh(struct nfs_client *clp, const struct cred *cred,
 			rcu_assign_pointer(*pnf, nf);
 		}
 		spin_unlock(&clp->cl_uuid.lock);
-		rcu_read_lock();
 	}
 	nf = nfs_local_file_get(nf);
 	rcu_read_unlock();

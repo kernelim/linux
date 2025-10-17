@@ -1,5 +1,5 @@
 RHEL_MAJOR = 10
-RHEL_MINOR = 0
+RHEL_MINOR = 1
 
 #
 # RHEL_RELEASE
@@ -12,7 +12,7 @@ RHEL_MINOR = 0
 #
 # Use this spot to avoid future merge conflicts.
 # Do not trim this comment.
-RHEL_RELEASE = 55.43.1
+RHEL_RELEASE = 124.8.1
 
 #
 # RHEL_REBASE_NUM
@@ -78,3 +78,13 @@ ifneq ("$(ZSTREAM)", "yes")
     RHEL_RELEASE:=$(RHEL_RELEASE).$(EARLY_YRELEASE)
   endif
 endif
+
+#
+# Automotive
+# ----------
+#
+# Represents the major and minor release used by automotive.
+# Primarily this is used to to identify the build target when
+# building the kernel-automotive packages.
+AUTOMOTIVE_MAJOR = 2
+AUTOMOTIVE_MINOR = 0

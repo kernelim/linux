@@ -265,7 +265,9 @@ void ovs_dp_process_packet(struct sk_buff *skb, struct sw_flow_key *key)
 		memset(&upcall, 0, sizeof(upcall));
 		upcall.cmd = OVS_PACKET_CMD_MISS;
 
-		if (dp->user_features & OVS_DP_F_DISPATCH_UPCALL_PER_CPU)
+		if (OVS_CB(skb)->upcall_pid)
+			upcall.portid = OVS_CB(skb)->upcall_pid;
+		else if (dp->user_features & OVS_DP_F_DISPATCH_UPCALL_PER_CPU)
 			upcall.portid =
 			    ovs_dp_get_upcall_portid(dp, smp_processor_id());
 		else
@@ -633,6 +635,9 @@ static int ovs_packet_cmd_execute(struct sk_buff *skb, struct genl_info *info)
 			       !!(hash & OVS_PACKET_HASH_L4_BIT));
 	}
 
+	OVS_CB(packet)->upcall_pid =
+		nla_get_u32_default(a[OVS_PACKET_ATTR_UPCALL_PID], 0);
+
 	/* Build an sw_flow for sending this packet. */
 	flow = ovs_flow_alloc();
 	err = PTR_ERR(flow);
@@ -695,6 +700,7 @@ static const struct nla_policy packet_policy[OVS_PACKET_ATTR_MAX + 1] = {
 	[OVS_PACKET_ATTR_PROBE] = { .type = NLA_FLAG },
 	[OVS_PACKET_ATTR_MRU] = { .type = NLA_U16 },
 	[OVS_PACKET_ATTR_HASH] = { .type = NLA_U64 },
+	[OVS_PACKET_ATTR_UPCALL_PID] = { .type = NLA_U32 },
 };
 
 static const struct genl_small_ops dp_packet_genl_ops[] = {
@@ -2102,6 +2108,7 @@ static int ovs_vport_cmd_fill_info(struct vport *vport, struct sk_buff *skb,
 {
 	struct ovs_header *ovs_header;
 	struct ovs_vport_stats vport_stats;
+	struct net *net_vport;
 	int err;
 
 	ovs_header = genlmsg_put(skb, portid, seq, &dp_vport_genl_family,
@@ -2118,12 +2125,15 @@ static int ovs_vport_cmd_fill_info(struct vport *vport, struct sk_buff *skb,
 	    nla_put_u32(skb, OVS_VPORT_ATTR_IFINDEX, vport->dev->ifindex))
 		goto nla_put_failure;
 
-	if (!net_eq(net, dev_net(vport->dev))) {
-		int id = peernet2id_alloc(net, dev_net(vport->dev), gfp);
+	rcu_read_lock();
+	net_vport = dev_net_rcu(vport->dev);
+	if (!net_eq(net, net_vport)) {
+		int id = peernet2id_alloc(net, net_vport, GFP_ATOMIC);
 
 		if (nla_put_s32(skb, OVS_VPORT_ATTR_NETNSID, id))
-			goto nla_put_failure;
+			goto nla_put_failure_unlock;
 	}
+	rcu_read_unlock();
 
 	ovs_vport_get_stats(vport, &vport_stats);
 	if (nla_put_64bit(skb, OVS_VPORT_ATTR_STATS,
@@ -2144,6 +2154,8 @@ static int ovs_vport_cmd_fill_info(struct vport *vport, struct sk_buff *skb,
 	genlmsg_end(skb, ovs_header);
 	return 0;
 
+nla_put_failure_unlock:
+	rcu_read_unlock();
 nla_put_failure:
 	err = -EMSGSIZE;
 error:

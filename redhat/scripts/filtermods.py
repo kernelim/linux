@@ -823,11 +823,11 @@ class FiltermodTests(unittest.TestCase):
                                                    do_pictures=FiltermodTests.do_pictures,
                                                    variants=['rt'])
 
-        self.assertIsNotNone(self.pkg_list.get('rt-kvm'))
+        self.assertIsNotNone(self.pkg_list.get('modules-other'))
         self._is_kmod_pkg('kmod1', 'modules-core')
         self._is_kmod_pkg('kmod2', 'modules-core')
         self._is_kmod_pkg('kmod3', 'modules')
-        self._is_kmod_pkg('kmod4', 'rt-kvm')
+        self._is_kmod_pkg('kmod4', 'modules-other')
 
     def test2(self):
         self.pkg_list, self.kmod_list = sort_kmods(get_td('test2.dep'), get_td('test2.yaml'),

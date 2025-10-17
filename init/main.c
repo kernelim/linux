@@ -1172,8 +1172,10 @@ static bool __init_or_module initcall_blacklisted(initcall_t fn)
 	char fn_name[KSYM_SYMBOL_LEN];
 	unsigned long addr;
 
+#ifndef CONFIG_RHEL_DIFFERENCES
 	if (list_empty(&blacklisted_initcalls))
 		return false;
+#endif
 
 	addr = (unsigned long) dereference_function_descriptor(fn);
 	sprint_symbol_no_offset(fn_name, addr);

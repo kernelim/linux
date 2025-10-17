@@ -919,7 +919,7 @@ static int uart_set_info(struct tty_struct *tty, struct tty_port *port,
 	if (uport->ops->verify_port)
 		retval = uport->ops->verify_port(uport, new_info);
 
-	if ((new_info->irq >= nr_irqs) || (new_info->irq < 0) ||
+	if ((new_info->irq >= irq_get_nr_irqs()) || (new_info->irq < 0) ||
 	    (new_info->baud_base < 9600))
 		retval = -EINVAL;
 
@@ -2365,9 +2365,9 @@ struct uart_match {
 	struct uart_driver *driver;
 };
 
-static int serial_match_port(struct device *dev, void *data)
+static int serial_match_port(struct device *dev, const void *data)
 {
-	struct uart_match *match = data;
+	const struct uart_match *match = data;
 	struct tty_driver *tty_drv = match->driver->tty_driver;
 	dev_t devt = MKDEV(tty_drv->major, tty_drv->minor_start) +
 		match->port->line;

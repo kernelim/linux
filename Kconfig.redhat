@@ -20,4 +20,12 @@ config RH_KABI_SIZE_ALIGN_CHECKS
 	  be disabled in case of a debug build, because debug builds
 	  allow to change struct sizes.
 
+config RH_AUTOMOTIVE
+	bool "Enable automotive only code"
+	depends on RHEL_DIFFERENCES
+	default n
+	help
+	  This option controls whether code is included in the automotive
+	  kernel build. If you are building an automotive kernel, say Y.
+
 endmenu

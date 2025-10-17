@@ -1,3 +1,3 @@
-#0-
-0x81372b5c	pci_alloc_irq_vectors_affinity	vmlinux	EXPORT_SYMBOL	
+#1-
+0x974899ad	pci_alloc_irq_vectors_affinity	vmlinux	EXPORT_SYMBOL	
 

@@ -105,12 +105,12 @@ static struct pci_driver snd_sof_pci_amd_acp63_driver = {
 	.probe = acp63_pci_probe,
 	.remove = acp63_pci_remove,
 	.driver = {
-		.pm = &sof_pci_pm,
+		.pm = pm_ptr(&sof_pci_pm),
 	},
 };
 module_pci_driver(snd_sof_pci_amd_acp63_driver);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("ACP63 SOF Driver");
-MODULE_IMPORT_NS(SND_SOC_SOF_AMD_COMMON);
-MODULE_IMPORT_NS(SND_SOC_SOF_PCI_DEV);
+MODULE_IMPORT_NS("SND_SOC_SOF_AMD_COMMON");
+MODULE_IMPORT_NS("SND_SOC_SOF_PCI_DEV");

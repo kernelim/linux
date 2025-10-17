@@ -1,3 +1,3 @@
-#0-
-0x0cb8672f	pci_get_device	vmlinux	EXPORT_SYMBOL	
+#1-
+0x6aac44e1	pci_get_device	vmlinux	EXPORT_SYMBOL	
 

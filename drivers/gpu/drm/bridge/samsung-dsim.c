@@ -1457,7 +1457,7 @@ static int samsung_dsim_init(struct samsung_dsim *dsi)
 }
 
 static void samsung_dsim_atomic_pre_enable(struct drm_bridge *bridge,
-					   struct drm_bridge_state *old_bridge_state)
+					   struct drm_atomic_state *state)
 {
 	struct samsung_dsim *dsi = bridge_to_dsi(bridge);
 	int ret;
@@ -1485,7 +1485,7 @@ static void samsung_dsim_atomic_pre_enable(struct drm_bridge *bridge,
 }
 
 static void samsung_dsim_atomic_enable(struct drm_bridge *bridge,
-				       struct drm_bridge_state *old_bridge_state)
+				       struct drm_atomic_state *state)
 {
 	struct samsung_dsim *dsi = bridge_to_dsi(bridge);
 
@@ -1496,7 +1496,7 @@ static void samsung_dsim_atomic_enable(struct drm_bridge *bridge,
 }
 
 static void samsung_dsim_atomic_disable(struct drm_bridge *bridge,
-					struct drm_bridge_state *old_bridge_state)
+					struct drm_atomic_state *state)
 {
 	struct samsung_dsim *dsi = bridge_to_dsi(bridge);
 
@@ -1508,7 +1508,7 @@ static void samsung_dsim_atomic_disable(struct drm_bridge *bridge,
 }
 
 static void samsung_dsim_atomic_post_disable(struct drm_bridge *bridge,
-					     struct drm_bridge_state *old_bridge_state)
+					     struct drm_atomic_state *state)
 {
 	struct samsung_dsim *dsi = bridge_to_dsi(bridge);
 
@@ -2043,7 +2043,7 @@ void samsung_dsim_remove(struct platform_device *pdev)
 }
 EXPORT_SYMBOL_GPL(samsung_dsim_remove);
 
-static int __maybe_unused samsung_dsim_suspend(struct device *dev)
+static int samsung_dsim_suspend(struct device *dev)
 {
 	struct samsung_dsim *dsi = dev_get_drvdata(dev);
 	const struct samsung_dsim_driver_data *driver_data = dsi->driver_data;
@@ -2073,7 +2073,7 @@ static int __maybe_unused samsung_dsim_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused samsung_dsim_resume(struct device *dev)
+static int samsung_dsim_resume(struct device *dev)
 {
 	struct samsung_dsim *dsi = dev_get_drvdata(dev);
 	const struct samsung_dsim_driver_data *driver_data = dsi->driver_data;
@@ -2108,7 +2108,7 @@ err_clk:
 }
 
 const struct dev_pm_ops samsung_dsim_pm_ops = {
-	SET_RUNTIME_PM_OPS(samsung_dsim_suspend, samsung_dsim_resume, NULL)
+	RUNTIME_PM_OPS(samsung_dsim_suspend, samsung_dsim_resume, NULL)
 	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
 				pm_runtime_force_resume)
 };
@@ -2139,10 +2139,10 @@ MODULE_DEVICE_TABLE(of, samsung_dsim_of_match);
 
 static struct platform_driver samsung_dsim_driver = {
 	.probe = samsung_dsim_probe,
-	.remove_new = samsung_dsim_remove,
+	.remove = samsung_dsim_remove,
 	.driver = {
 		   .name = "samsung-dsim",
-		   .pm = &samsung_dsim_pm_ops,
+		   .pm = pm_ptr(&samsung_dsim_pm_ops),
 		   .of_match_table = samsung_dsim_of_match,
 	},
 };

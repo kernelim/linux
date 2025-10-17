@@ -1379,7 +1379,8 @@ static int sony_leds_init(struct sony_sc *sc)
 	u8 max_brightness[MAX_LEDS] = { [0 ... (MAX_LEDS - 1)] = 1 };
 	u8 use_hw_blink[MAX_LEDS] = { 0 };
 
-	BUG_ON(!(sc->quirks & SONY_LED_SUPPORT));
+	if (WARN_ON(!(sc->quirks & SONY_LED_SUPPORT)))
+		return -EINVAL;
 
 	if (sc->quirks & BUZZ_CONTROLLER) {
 		sc->led_count = 4;
@@ -2163,7 +2164,7 @@ static void sony_remove(struct hid_device *hdev)
 	struct sony_sc *sc = hid_get_drvdata(hdev);
 
 	if (sc->quirks & (GHL_GUITAR_PS3WIIU | GHL_GUITAR_PS4)) {
-		del_timer_sync(&sc->ghl_poke_timer);
+		timer_delete_sync(&sc->ghl_poke_timer);
 		usb_free_urb(sc->ghl_urb);
 	}
 

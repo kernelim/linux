@@ -1,1 +1,1 @@
-# CONFIG_TEST_KMOD is not set
+CONFIG_TEST_KMOD=m

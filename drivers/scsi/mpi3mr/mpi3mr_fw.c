@@ -23,17 +23,22 @@ module_param(poll_queues, int, 0444);
 MODULE_PARM_DESC(poll_queues, "Number of queues for io_uring poll mode. (Range 1 - 126)");
 
 #if defined(writeq) && defined(CONFIG_64BIT)
-static inline void mpi3mr_writeq(__u64 b, volatile void __iomem *addr)
+static inline void mpi3mr_writeq(__u64 b, volatile void __iomem *addr,
+	spinlock_t *write_queue_lock)
 {
 	writeq(b, addr);
 }
 #else
-static inline void mpi3mr_writeq(__u64 b, volatile void __iomem *addr)
+static inline void mpi3mr_writeq(__u64 b, volatile void __iomem *addr,
+	spinlock_t *write_queue_lock)
 {
 	__u64 data_out = b;
+	unsigned long flags;
 
+	spin_lock_irqsave(write_queue_lock, flags);
 	writel((u32)(data_out), addr);
 	writel((u32)(data_out >> 32), (addr + 4));
+	spin_unlock_irqrestore(write_queue_lock, flags);
 }
 #endif
 
@@ -173,6 +178,9 @@ static void mpi3mr_print_event_data(struct mpi3mr_ioc *mrioc,
 {
 	char *desc = NULL;
 	u16 event;
+
+	if (!(mrioc->logging_level & MPI3_DEBUG_EVENT))
+		return;
 
 	event = event_reply->event;
 
@@ -425,8 +433,8 @@ static void mpi3mr_process_admin_reply_desc(struct mpi3mr_ioc *mrioc,
 				       MPI3MR_SENSE_BUF_SZ);
 			}
 			if (cmdptr->is_waiting) {
-				complete(&cmdptr->done);
 				cmdptr->is_waiting = 0;
+				complete(&cmdptr->done);
 			} else if (cmdptr->callback)
 				cmdptr->callback(mrioc, cmdptr);
 		}
@@ -446,9 +454,12 @@ int mpi3mr_process_admin_reply_q(struct mpi3mr_ioc *mrioc)
 	u16 threshold_comps = 0;
 	struct mpi3_default_reply_descriptor *reply_desc;
 
-	if (!atomic_add_unless(&mrioc->admin_reply_q_in_use, 1, 1))
+	if (!atomic_add_unless(&mrioc->admin_reply_q_in_use, 1, 1)) {
+		atomic_inc(&mrioc->admin_pend_isr);
 		return 0;
+	}
 
+	atomic_set(&mrioc->admin_pend_isr, 0);
 	reply_desc = (struct mpi3_default_reply_descriptor *)mrioc->admin_reply_base +
 	    admin_reply_ci;
 
@@ -563,7 +574,7 @@ int mpi3mr_process_op_reply_q(struct mpi3mr_ioc *mrioc,
 		WRITE_ONCE(op_req_q->ci, le16_to_cpu(reply_desc->request_queue_ci));
 		mpi3mr_process_op_reply_desc(mrioc, reply_desc, &reply_dma,
 		    reply_qidx);
-		atomic_dec(&op_reply_q->pend_ios);
+
 		if (reply_dma)
 			mpi3mr_repost_reply_buf(mrioc, reply_dma);
 		num_op_reply++;
@@ -1302,7 +1313,7 @@ static int mpi3mr_issue_and_process_mur(struct mpi3mr_ioc *mrioc,
 	      (ioc_config & MPI3_SYSIF_IOC_CONFIG_ENABLE_IOC)))
 		retval = 0;
 
-	ioc_info(mrioc, "Base IOC Sts/Config after %s MUR is (0x%x)/(0x%x)\n",
+	ioc_info(mrioc, "Base IOC Sts/Config after %s MUR is (0x%08x)/(0x%08x)\n",
 	    (!retval) ? "successful" : "failed", ioc_status, ioc_config);
 	return retval;
 }
@@ -1354,6 +1365,19 @@ mpi3mr_revalidate_factsdata(struct mpi3mr_ioc *mrioc)
 		    "critical error: multipath capability is enabled at the\n"
 		    "\tcontroller while sas transport support is enabled at the\n"
 		    "\tdriver, please reboot the system or reload the driver\n");
+
+	if (mrioc->seg_tb_support) {
+		if (!(mrioc->facts.ioc_capabilities &
+		     MPI3_IOCFACTS_CAPABILITY_SEG_DIAG_TRACE_SUPPORTED)) {
+			ioc_err(mrioc,
+			    "critical error: previously enabled segmented trace\n"
+			    " buffer capability is disabled after reset. Please\n"
+			    " update the firmware or reboot the system or\n"
+			    " reload the driver to enable trace diag buffer\n");
+			mrioc->diag_buffers[0].disabled_after_reset = true;
+		} else
+			mrioc->diag_buffers[0].disabled_after_reset = false;
+	}
 
 	if (mrioc->facts.max_devhandle > mrioc->dev_handle_bitmap_bits) {
 		removepend_bitmap = bitmap_zalloc(mrioc->facts.max_devhandle,
@@ -1717,7 +1741,7 @@ static int mpi3mr_issue_reset(struct mpi3mr_ioc *mrioc, u16 reset_type,
 	ioc_config = readl(&mrioc->sysif_regs->ioc_configuration);
 	ioc_status = readl(&mrioc->sysif_regs->ioc_status);
 	ioc_info(mrioc,
-	    "ioc_status/ioc_onfig after %s reset is (0x%x)/(0x%x)\n",
+	    "ioc_status/ioc_config after %s reset is (0x%08x)/(0x%08x)\n",
 	    (!retval)?"successful":"failed", ioc_status,
 	    ioc_config);
 	if (retval)
@@ -2329,6 +2353,8 @@ static int mpi3mr_create_op_queues(struct mpi3mr_ioc *mrioc)
 {
 	int retval = 0;
 	u16 num_queues = 0, i = 0, msix_count_op_q = 1;
+	u32 ioc_status;
+	enum mpi3mr_iocstate ioc_state;
 
 	num_queues = min_t(int, mrioc->facts.max_op_reply_q,
 	    mrioc->facts.max_op_req_q);
@@ -2381,6 +2407,14 @@ static int mpi3mr_create_op_queues(struct mpi3mr_ioc *mrioc)
 
 	if (i == 0) {
 		/* Not even one queue is created successfully*/
+		retval = -1;
+		goto out_failed;
+	}
+	ioc_status = readl(&mrioc->sysif_regs->ioc_status);
+	ioc_state = mpi3mr_get_iocstate(mrioc);
+	if ((ioc_status & MPI3_SYSIF_IOC_STATUS_RESET_HISTORY) ||
+	    ioc_state != MRIOC_STATE_READY) {
+		mpi3mr_print_fault_info(mrioc);
 		retval = -1;
 		goto out_failed;
 	}
@@ -2744,7 +2778,16 @@ static void mpi3mr_watchdog_work(struct work_struct *work)
 		return;
 	}
 
-	if (mrioc->ts_update_counter++ >= mrioc->ts_update_interval) {
+	if (atomic_read(&mrioc->admin_pend_isr)) {
+		ioc_err(mrioc, "Unprocessed admin ISR instance found\n"
+				"flush admin replies\n");
+		mpi3mr_process_admin_reply_q(mrioc);
+	}
+
+	if (!(mrioc->facts.ioc_capabilities &
+		MPI3_IOCFACTS_CAPABILITY_NON_SUPERVISOR_IOC) &&
+		(mrioc->ts_update_counter++ >= mrioc->ts_update_interval)) {
+
 		mrioc->ts_update_counter = 0;
 		mpi3mr_sync_timestamp(mrioc);
 	}
@@ -2901,6 +2944,7 @@ static int mpi3mr_setup_admin_qpair(struct mpi3mr_ioc *mrioc)
 	mrioc->admin_reply_ci = 0;
 	mrioc->admin_reply_ephase = 1;
 	atomic_set(&mrioc->admin_reply_q_in_use, 0);
+	atomic_set(&mrioc->admin_pend_isr, 0);
 
 	if (!mrioc->admin_req_base) {
 		mrioc->admin_req_base = dma_alloc_coherent(&mrioc->pdev->dev,
@@ -2925,9 +2969,11 @@ static int mpi3mr_setup_admin_qpair(struct mpi3mr_ioc *mrioc)
 	    (mrioc->num_admin_req);
 	writel(num_admin_entries, &mrioc->sysif_regs->admin_queue_num_entries);
 	mpi3mr_writeq(mrioc->admin_req_dma,
-	    &mrioc->sysif_regs->admin_request_queue_address);
+		&mrioc->sysif_regs->admin_request_queue_address,
+		&mrioc->adm_req_q_bar_writeq_lock);
 	mpi3mr_writeq(mrioc->admin_reply_dma,
-	    &mrioc->sysif_regs->admin_reply_queue_address);
+		&mrioc->sysif_regs->admin_reply_queue_address,
+		&mrioc->adm_reply_q_bar_writeq_lock);
 	writel(mrioc->admin_req_pi, &mrioc->sysif_regs->admin_request_queue_pi);
 	writel(mrioc->admin_reply_ci, &mrioc->sysif_regs->admin_reply_queue_ci);
 	return retval;
@@ -4238,6 +4284,10 @@ retry_init:
 	if (mrioc->facts.max_req_limit)
 		mrioc->prevent_reply_qfull = true;
 
+	if (mrioc->facts.ioc_capabilities &
+		MPI3_IOCFACTS_CAPABILITY_SEG_DIAG_TRACE_SUPPORTED)
+		mrioc->seg_tb_support = true;
+
 	mrioc->reply_sz = mrioc->facts.reply_sz;
 
 	retval = mpi3mr_check_reset_dma_mask(mrioc);
@@ -4625,6 +4675,7 @@ void mpi3mr_memset_buffers(struct mpi3mr_ioc *mrioc)
 	if (mrioc->admin_reply_base)
 		memset(mrioc->admin_reply_base, 0, mrioc->admin_reply_q_sz);
 	atomic_set(&mrioc->admin_reply_q_in_use, 0);
+	atomic_set(&mrioc->admin_pend_isr, 0);
 
 	if (mrioc->init_cmds.reply) {
 		memset(mrioc->init_cmds.reply, 0, sizeof(*mrioc->init_cmds.reply));
@@ -4696,7 +4747,7 @@ void mpi3mr_memset_buffers(struct mpi3mr_ioc *mrioc)
  */
 void mpi3mr_free_mem(struct mpi3mr_ioc *mrioc)
 {
-	u16 i;
+	u16 i, j;
 	struct mpi3mr_intr_info *intr_info;
 	struct diag_buffer_desc *diag_buffer;
 
@@ -4831,6 +4882,26 @@ void mpi3mr_free_mem(struct mpi3mr_ioc *mrioc)
 
 	for (i = 0; i < MPI3MR_MAX_NUM_HDB; i++) {
 		diag_buffer = &mrioc->diag_buffers[i];
+		if ((i == 0) && mrioc->seg_tb_support) {
+			if (mrioc->trace_buf_pool) {
+				for (j = 0; j < mrioc->num_tb_segs; j++) {
+					if (mrioc->trace_buf[j].segment) {
+						dma_pool_free(mrioc->trace_buf_pool,
+						    mrioc->trace_buf[j].segment,
+						    mrioc->trace_buf[j].segment_dma);
+						mrioc->trace_buf[j].segment = NULL;
+					}
+
+					mrioc->trace_buf[j].segment = NULL;
+				}
+				dma_pool_destroy(mrioc->trace_buf_pool);
+				mrioc->trace_buf_pool = NULL;
+			}
+
+			kfree(mrioc->trace_buf);
+			mrioc->trace_buf = NULL;
+			diag_buffer->size = sizeof(u64) * mrioc->num_tb_segs;
+		}
 		if (diag_buffer->addr) {
 			dma_free_coherent(&mrioc->pdev->dev,
 			    diag_buffer->size, diag_buffer->addr,
@@ -4908,7 +4979,7 @@ static void mpi3mr_issue_ioc_shutdown(struct mpi3mr_ioc *mrioc)
 	}
 
 	ioc_info(mrioc,
-	    "Base IOC Sts/Config after %s shutdown is (0x%x)/(0x%x)\n",
+	    "Base IOC Sts/Config after %s shutdown is (0x%08x)/(0x%08x)\n",
 	    (!retval) ? "successful" : "failed", ioc_status,
 	    ioc_config);
 }
@@ -5359,6 +5430,7 @@ int mpi3mr_soft_reset_handler(struct mpi3mr_ioc *mrioc,
 	    mpi3mr_reset_rc_name(reset_reason));
 
 	mrioc->device_refresh_on = 0;
+	scsi_block_requests(mrioc->shost);
 	mrioc->reset_in_progress = 1;
 	mrioc->stop_bsgs = 1;
 	mrioc->prev_reset_result = -1;
@@ -5467,6 +5539,7 @@ out:
 	if (!retval) {
 		mrioc->diagsave_timeout = 0;
 		mrioc->reset_in_progress = 0;
+		scsi_unblock_requests(mrioc->shost);
 		mrioc->pel_abort_requested = 0;
 		if (mrioc->pel_enabled) {
 			mrioc->pel_cmds.retry_count = 0;
@@ -5491,6 +5564,7 @@ out:
 		mrioc->device_refresh_on = 0;
 		mrioc->unrecoverable = 1;
 		mrioc->reset_in_progress = 0;
+		scsi_unblock_requests(mrioc->shost);
 		mrioc->stop_bsgs = 0;
 		retval = -1;
 		mpi3mr_flush_cmds_for_unrecovered_controller(mrioc);

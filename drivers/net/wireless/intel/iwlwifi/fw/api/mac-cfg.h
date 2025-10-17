@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
- * Copyright (C) 2012-2014, 2018-2019, 2021-2024 Intel Corporation
+ * Copyright (C) 2012-2014, 2018-2019, 2021-2025 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2016-2017 Intel Deutschland GmbH
  */
@@ -46,7 +46,7 @@ enum iwl_mac_conf_subcmd_ids {
 	 */
 	STA_CONFIG_CMD = 0xA,
 	/**
-	 * @AUX_STA_CMD: &struct iwl_mvm_aux_sta_cmd
+	 * @AUX_STA_CMD: &struct iwl_aux_sta_cmd
 	 */
 	AUX_STA_CMD = 0xB,
 	/**
@@ -62,6 +62,10 @@ enum iwl_mac_conf_subcmd_ids {
 	 */
 	ROC_CMD = 0xE,
 	/**
+	 * @TWT_OPERATION_CMD: &struct iwl_twt_operation_cmd
+	 */
+	TWT_OPERATION_CMD = 0x10,
+	/**
 	 * @MISSED_BEACONS_NOTIF: &struct iwl_missed_beacons_notif
 	 */
 	MISSED_BEACONS_NOTIF = 0xF6,
@@ -74,7 +78,7 @@ enum iwl_mac_conf_subcmd_ids {
 	 */
 	ROC_NOTIF = 0xF8,
 	/**
-	 * @SESSION_PROTECTION_NOTIF: &struct iwl_mvm_session_prot_notif
+	 * @SESSION_PROTECTION_NOTIF: &struct iwl_session_prot_notif
 	 */
 	SESSION_PROTECTION_NOTIF = 0xFB,
 
@@ -382,6 +386,8 @@ struct iwl_mac_config_cmd {
  * @LINK_CONTEXT_MODIFY_EHT_PARAMS: covers iwl_link_ctx_cfg_cmd::puncture_mask.
  *	This flag can be set only if the MAC that this link relates to has
  *	eht_support set to true. No longer used since _VER_3 of this command.
+ * @LINK_CONTEXT_MODIFY_BANDWIDTH: Covers iwl_link_ctx_cfg_cmd::modify_bandwidth.
+ *	Request RX OMI to the AP to modify bandwidth of this link.
  * @LINK_CONTEXT_MODIFY_ALL: set all above flags
  */
 enum iwl_link_ctx_modify_flags {
@@ -393,6 +399,7 @@ enum iwl_link_ctx_modify_flags {
 	LINK_CONTEXT_MODIFY_HE_PARAMS		= BIT(5),
 	LINK_CONTEXT_MODIFY_BSS_COLOR_DISABLE	= BIT(6),
 	LINK_CONTEXT_MODIFY_EHT_PARAMS		= BIT(7),
+	LINK_CONTEXT_MODIFY_BANDWIDTH		= BIT(8),
 	LINK_CONTEXT_MODIFY_ALL			= 0xff,
 }; /* LINK_CONTEXT_MODIFY_MASK_E_VER_1 */
 
@@ -434,6 +441,22 @@ enum iwl_link_ctx_flags {
 }; /* LINK_CONTEXT_FLAG_E_VER_1 */
 
 /**
+ * enum iwl_link_modify_bandwidth - link modify (RX OMI) bandwidth
+ * @IWL_LINK_MODIFY_BW_20: request 20 MHz
+ * @IWL_LINK_MODIFY_BW_40: request 40 MHz
+ * @IWL_LINK_MODIFY_BW_80: request 80 MHz
+ * @IWL_LINK_MODIFY_BW_160: request 160 MHz
+ * @IWL_LINK_MODIFY_BW_320: request 320 MHz
+ */
+enum iwl_link_modify_bandwidth {
+	IWL_LINK_MODIFY_BW_20,
+	IWL_LINK_MODIFY_BW_40,
+	IWL_LINK_MODIFY_BW_80,
+	IWL_LINK_MODIFY_BW_160,
+	IWL_LINK_MODIFY_BW_320,
+};
+
+/**
  * struct iwl_link_config_cmd - command structure to configure the LINK context
  *	in MLD API
  * ( LINK_CONFIG_CMD =0x9 )
@@ -457,6 +480,8 @@ enum iwl_link_ctx_flags {
  * @block_tx: tell the firmware that this link can't Tx. This should be used
  *	only when a link is de-activated because of CSA with mode = 1.
  *	Available since version 5.
+ * @modify_bandwidth: bandwidth request value for RX OMI (see also
+ *	%LINK_CONTEXT_MODIFY_BANDWIDTH), from &enum iwl_link_modify_bandwidth.
  * @reserved1: in version 2, listen_lmac became reserved
  * @cck_rates: basic rates available for CCK
  * @ofdm_rates: basic rates available for OFDM
@@ -500,10 +525,11 @@ struct iwl_link_config_cmd {
 	__le32 modify_mask;
 	__le32 active;
 	union {
-		__le32 listen_lmac;
+		__le32 listen_lmac; /* only _VER_1 */
 		struct {
-			u8 block_tx;
-			u8 reserved1[3];
+			u8 block_tx; /* since _VER_5 */
+			u8 modify_bandwidth; /* since _VER_6 */
+			u8 reserved1[2];
 		};
 	};
 	__le32 cck_rates;
@@ -524,7 +550,7 @@ struct iwl_link_config_cmd {
 	__le16 puncture_mask; /* removed in _VER_3 */
 	__le16 frame_time_rts_th;
 	__le32 flags;
-	__le32 flags_mask;
+	__le32 flags_mask; /* removed in _VER_6 */
 	/* The below fields are for multi-bssid */
 	u8 ref_bssid_addr[6];
 	__le16 reserved_for_ref_bssid_addr;
@@ -535,7 +561,7 @@ struct iwl_link_config_cmd {
 	u8 ibss_bssid_addr[6];
 	__le16 reserved_for_ibss_bssid_addr;
 	__le32 reserved3[8];
-} __packed; /* LINK_CONTEXT_CONFIG_CMD_API_S_VER_1, _VER_2, _VER_3, _VER_4, _VER_5 */
+} __packed; /* LINK_CONTEXT_CONFIG_CMD_API_S_VER_1, _VER_2, _VER_3, _VER_4, _VER_5, _VER_6 */
 
 /* Currently FW supports link ids in the range 0-3 and can have
  * at most two active links for each vif.
@@ -619,7 +645,7 @@ struct iwl_sta_cfg_cmd {
 } __packed; /* STA_CMD_API_S_VER_1 */
 
 /**
- * struct iwl_mvm_aux_sta_cmd - command for AUX STA configuration
+ * struct iwl_aux_sta_cmd - command for AUX STA configuration
  * ( AUX_STA_CMD = 0xB )
  *
  * @sta_id: index of aux sta to configure
@@ -627,7 +653,7 @@ struct iwl_sta_cfg_cmd {
  * @mac_addr: mac addr of the auxilary sta
  * @reserved_for_mac_addr: reserved
  */
-struct iwl_mvm_aux_sta_cmd {
+struct iwl_aux_sta_cmd {
 	__le32 sta_id;
 	__le32 lmac_id;
 	u8 mac_addr[ETH_ALEN];
@@ -671,11 +697,11 @@ enum iwl_mvm_fw_esr_recommendation {
 }; /* ESR_MODE_RECOMMENDATION_CODE_API_E_VER_1 */
 
 /**
- * struct iwl_mvm_esr_mode_notif - FWs recommendation/force for esr mode
+ * struct iwl_esr_mode_notif - FWs recommendation/force for esr mode
  *
  * @action: the action to apply on esr state. See &iwl_mvm_fw_esr_recommendation
  */
-struct iwl_mvm_esr_mode_notif {
+struct iwl_esr_mode_notif {
 	__le32 action;
 } __packed; /* ESR_MODE_RECOMMENDATION_NTFY_API_S_VER_1 */
 
@@ -725,5 +751,84 @@ struct iwl_esr_trans_fail_notif {
 	__le32 activation;
 	__le32 err_code;
 } __packed; /* ESR_TRANSITION_FAILED_NTFY_API_S_VER_1 */
+
+/*
+ * enum iwl_twt_operation_type: TWT operation in a TWT action frame
+ *
+ * @TWT_OPERATION_REQUEST: TWT Request
+ * @TWT_OPERATION_SUGGEST: TWT Suggest
+ * @TWT_OPERATION_DEMAND: TWT Demand
+ * @TWT_OPERATION_GROUPING: TWT Grouping
+ * @TWT_OPERATION_ACCEPT: TWT Accept
+ * @TWT_OPERATION_ALTERNATE: TWT Alternate
+ * @TWT_OPERATION_DICTATE: TWT Dictate
+ * @TWT_OPERATION_REJECT: TWT Reject
+ * @TWT_OPERATION_TEARDOWN: TWT Teardown
+ * @TWT_OPERATION_UNAVAILABILITY: TWT Unavailability
+ */
+enum iwl_twt_operation_type {
+	TWT_OPERATION_REQUEST,
+	TWT_OPERATION_SUGGEST,
+	TWT_OPERATION_DEMAND,
+	TWT_OPERATION_GROUPING,
+	TWT_OPERATION_ACCEPT,
+	TWT_OPERATION_ALTERNATE,
+	TWT_OPERATION_DICTATE,
+	TWT_OPERATION_REJECT,
+	TWT_OPERATION_TEARDOWN,
+	TWT_OPERATION_UNAVAILABILITY,
+	TWT_OPERATION_MAX,
+}; /* TWT_OPERATION_TYPE_E_VER_1 */
+
+/**
+ * struct iwl_twt_operation_cmd - initiate a TWT session from driver
+ *
+ * @link_id: FW link id to initiate the TWT
+ * @twt_operation: &enum iwl_twt_operation_type
+ * @target_wake_time: TSF time to start the TWT
+ * @interval_exponent: the exponent for the interval
+ * @interval_mantissa: the mantissa for the interval
+ * @minimum_wake_duration: the minimum duration for the wake period
+ * @trigger: is the TWT triggered or not
+ * @flow_type: is the TWT announced (0) or not (1)
+ * @flow_id: the TWT flow identifier 0 - 7
+ * @twt_protection: is the TWT protected
+ * @ndp_paging_indicator: is ndp paging indicator set
+ * @responder_pm_mode: is responder pm mode set
+ * @negotiation_type: if the responder wants to doze outside the TWT SP
+ * @twt_request: 1 for TWT request (STA), 0 for TWT response (AP)
+ * @implicit: is TWT implicit
+ * @twt_group_assignment: the TWT group assignment
+ * @twt_channel: the TWT channel
+ * @restricted_info_present: is this a restricted TWT
+ * @dl_bitmap_valid: is DL (download) bitmap valid (restricted TWT)
+ * @ul_bitmap_valid: is UL (upload) bitmap valid (restricted TWT)
+ * @dl_tid_bitmap: DL TID bitmap (restricted TWT)
+ * @ul_tid_bitmap: UL TID bitmap (restricted TWT)
+ */
+struct iwl_twt_operation_cmd {
+	__le32 link_id;
+	__le32 twt_operation;
+	__le64 target_wake_time;
+	__le32 interval_exponent;
+	__le32 interval_mantissa;
+	__le32 minimum_wake_duration;
+	u8 trigger;
+	u8 flow_type;
+	u8 flow_id;
+	u8 twt_protection;
+	u8 ndp_paging_indicator;
+	u8 responder_pm_mode;
+	u8 negotiation_type;
+	u8 twt_request;
+	u8 implicit;
+	u8 twt_group_assignment;
+	u8 twt_channel;
+	u8 restricted_info_present;
+	u8 dl_bitmap_valid;
+	u8 ul_bitmap_valid;
+	u8 dl_tid_bitmap;
+	u8 ul_tid_bitmap;
+} __packed; /* TWT_OPERATION_API_S_VER_1 */
 
 #endif /* __iwl_fw_api_mac_cfg_h__ */

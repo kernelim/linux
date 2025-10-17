@@ -1,3 +1,3 @@
-#0-
-0x62e35bdf	gnss_register_device	drivers/gnss/gnss	EXPORT_SYMBOL_GPL	
+#1-
+0xed8934b6	gnss_register_device	drivers/gnss/gnss	EXPORT_SYMBOL_GPL	
 

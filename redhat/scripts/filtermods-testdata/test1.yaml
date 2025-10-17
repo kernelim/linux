@@ -7,14 +7,14 @@ packages:
   - name: modules-extra
     depends-on:
     - modules-core
-  - name: rt-kvm
+  - name: modules-other
     if_variant_in: ["rt"]
     depends-on:
     - modules-core
 
 rules:
   - kmod[2]: modules-core
-  - kmod4: rt-kvm
+  - kmod4: modules-other
     if_variant_in: ["rt"]
   - default: modules
 

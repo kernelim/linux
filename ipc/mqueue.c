@@ -1347,32 +1347,24 @@ static int do_mq_notify(mqd_t mqdes, const struct sigevent *notification)
 			if (copy_from_user(nc->data,
 					notification->sigev_value.sival_ptr,
 					NOTIFY_COOKIE_LEN)) {
-				ret = -EFAULT;
-				goto free_skb;
+				kfree_skb(nc);
+				return -EFAULT;
 			}
 
 			/* TODO: add a header? */
 			skb_put(nc, NOTIFY_COOKIE_LEN);
 			/* and attach it to the socket */
 retry:
-			f = fdget(notification->sigev_signo);
-			if (!fd_file(f)) {
-				ret = -EBADF;
-				goto out;
-			}
-			sock = netlink_getsockbyfilp(fd_file(f));
-			fdput(f);
+			sock = netlink_getsockbyfd(notification->sigev_signo);
 			if (IS_ERR(sock)) {
-				ret = PTR_ERR(sock);
-				goto free_skb;
+				kfree_skb(nc);
+				return PTR_ERR(sock);
 			}
 
 			timeo = MAX_SCHEDULE_TIMEOUT;
 			ret = netlink_attachskb(sock, nc, &timeo, NULL);
-			if (ret == 1) {
-				sock = NULL;
+			if (ret == 1)
 				goto retry;
-			}
 			if (ret)
 				return ret;
 		}
@@ -1431,10 +1423,6 @@ out_fput:
 out:
 	if (sock)
 		netlink_detachskb(sock, nc);
-	else
-free_skb:
-		dev_kfree_skb(nc);
-
 	return ret;
 }
 

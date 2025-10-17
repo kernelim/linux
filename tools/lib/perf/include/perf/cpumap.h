@@ -4,10 +4,11 @@
 
 #include <perf/core.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 /** A wrapper around a CPU to avoid confusion with the perf_cpu_map's map's indices. */
 struct perf_cpu {
-	int cpu;
+	int16_t cpu;
 };
 
 struct perf_cache {
@@ -37,8 +38,8 @@ LIBPERF_API struct perf_cpu_map *perf_cpu_map__new_online_cpus(void);
  */
 LIBPERF_API struct perf_cpu_map *perf_cpu_map__new(const char *cpu_list);
 LIBPERF_API struct perf_cpu_map *perf_cpu_map__get(struct perf_cpu_map *map);
-LIBPERF_API struct perf_cpu_map *perf_cpu_map__merge(struct perf_cpu_map *orig,
-						     struct perf_cpu_map *other);
+LIBPERF_API int perf_cpu_map__merge(struct perf_cpu_map **orig,
+				    struct perf_cpu_map *other);
 LIBPERF_API struct perf_cpu_map *perf_cpu_map__intersect(struct perf_cpu_map *orig,
 							 struct perf_cpu_map *other);
 LIBPERF_API void perf_cpu_map__put(struct perf_cpu_map *map);

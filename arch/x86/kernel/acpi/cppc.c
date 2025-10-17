@@ -4,6 +4,8 @@
  * Copyright (c) 2016, Intel Corporation.
  */
 
+#include <linux/bitfield.h>
+
 #include <acpi/cppc_acpi.h>
 #include <asm/msr.h>
 #include <asm/processor.h>
@@ -149,7 +151,7 @@ int amd_get_highest_perf(unsigned int cpu, u32 *highest_perf)
 		if (ret)
 			goto out;
 
-		val = AMD_CPPC_HIGHEST_PERF(val);
+		val = FIELD_GET(AMD_CPPC_HIGHEST_PERF_MASK, val);
 	} else {
 		ret = cppc_get_highest_perf(cpu, &val);
 		if (ret)
@@ -239,8 +241,10 @@ EXPORT_SYMBOL_GPL(amd_detect_prefcore);
  */
 int amd_get_boost_ratio_numerator(unsigned int cpu, u64 *numerator)
 {
+	enum x86_topology_cpu_type core_type = get_topology_cpu_type(&cpu_data(cpu));
 	bool prefcore;
 	int ret;
+	u32 tmp;
 
 	ret = amd_detect_prefcore(&prefcore);
 	if (ret)
@@ -266,6 +270,27 @@ int amd_get_boost_ratio_numerator(unsigned int cpu, u64 *numerator)
 			break;
 		}
 	}
+
+	/* detect if running on heterogeneous design */
+	if (cpu_feature_enabled(X86_FEATURE_AMD_HTR_CORES)) {
+		switch (core_type) {
+		case TOPO_CPU_TYPE_UNKNOWN:
+			pr_warn("Undefined core type found for cpu %d\n", cpu);
+			break;
+		case TOPO_CPU_TYPE_PERFORMANCE:
+			/* use the max scale for performance cores */
+			*numerator = CPPC_HIGHEST_PERF_PERFORMANCE;
+			return 0;
+		case TOPO_CPU_TYPE_EFFICIENCY:
+			/* use the highest perf value for efficiency cores */
+			ret = amd_get_highest_perf(cpu, &tmp);
+			if (ret)
+				return ret;
+			*numerator = tmp;
+			return 0;
+		}
+	}
+
 	*numerator = CPPC_HIGHEST_PERF_PREFCORE;
 
 	return 0;

@@ -874,7 +874,7 @@ static int ctr_paes_crypt(struct skcipher_request *req)
 		}
 		memcpy(walk.dst.virt.addr, buf, nbytes);
 		crypto_inc(walk.iv, AES_BLOCK_SIZE);
-		rc = skcipher_walk_done(&walk, nbytes);
+		rc = skcipher_walk_done(&walk, 0);
 	}
 
 	return rc;

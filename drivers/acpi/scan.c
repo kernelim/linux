@@ -723,10 +723,8 @@ int acpi_tie_acpi_dev(struct acpi_device *adev)
 static void acpi_store_pld_crc(struct acpi_device *adev)
 {
 	struct acpi_pld_info *pld;
-	acpi_status status;
 
-	status = acpi_get_physical_device_location(adev->handle, &pld);
-	if (ACPI_FAILURE(status))
+	if (!acpi_get_physical_device_location(adev->handle, &pld))
 		return;
 
 	adev->pld_crc = crc32(~0, pld, sizeof(*pld));
@@ -1179,19 +1177,19 @@ static void acpi_device_get_busid(struct acpi_device *device)
 	 * TBD: Shouldn't this value be unique (within the ACPI namespace)?
 	 */
 	if (!acpi_dev_parent(device)) {
-		strcpy(device->pnp.bus_id, "ACPI");
+		strscpy(device->pnp.bus_id, "ACPI");
 		return;
 	}
 
 	switch (device->device_type) {
 	case ACPI_BUS_TYPE_POWER_BUTTON:
-		strcpy(device->pnp.bus_id, "PWRF");
+		strscpy(device->pnp.bus_id, "PWRF");
 		break;
 	case ACPI_BUS_TYPE_SLEEP_BUTTON:
-		strcpy(device->pnp.bus_id, "SLPF");
+		strscpy(device->pnp.bus_id, "SLPF");
 		break;
 	case ACPI_BUS_TYPE_ECDT_EC:
-		strcpy(device->pnp.bus_id, "ECDT");
+		strscpy(device->pnp.bus_id, "ECDT");
 		break;
 	default:
 		acpi_get_name(device->handle, ACPI_SINGLE_NAME, &buffer);
@@ -1202,7 +1200,7 @@ static void acpi_device_get_busid(struct acpi_device *device)
 			else
 				break;
 		}
-		strcpy(device->pnp.bus_id, bus_id);
+		strscpy(device->pnp.bus_id, bus_id);
 		break;
 	}
 }
@@ -1453,8 +1451,8 @@ static void acpi_set_pnp_ids(acpi_handle handle, struct acpi_device_pnp *pnp,
 			 acpi_object_is_system_bus(handle)) {
 			/* \_SB, \_TZ, LNXSYBUS */
 			acpi_add_id(pnp, ACPI_BUS_HID);
-			strcpy(pnp->device_name, ACPI_BUS_DEVICE_NAME);
-			strcpy(pnp->device_class, ACPI_BUS_CLASS);
+			strscpy(pnp->device_name, ACPI_BUS_DEVICE_NAME);
+			strscpy(pnp->device_class, ACPI_BUS_CLASS);
 		}
 
 		break;
@@ -1633,13 +1631,6 @@ static int acpi_iommu_configure_id(struct device *dev, const u32 *id_in)
 	if (err && err != -EPROBE_DEFER)
 		err = viot_iommu_configure(dev);
 	mutex_unlock(&iommu_probe_device_lock);
-
-	/*
-	 * If we have reason to believe the IOMMU driver missed the initial
-	 * iommu_probe_device() call for dev, replay it to get things in order.
-	 */
-	if (!err && dev->bus)
-		err = iommu_probe_device(dev);
 
 	return err;
 }

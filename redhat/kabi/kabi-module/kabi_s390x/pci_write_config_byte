@@ -1,3 +1,3 @@
-#0-
-0x39dd9f99	pci_write_config_byte	vmlinux	EXPORT_SYMBOL	
+#1-
+0x268571ec	pci_write_config_byte	vmlinux	EXPORT_SYMBOL	
 

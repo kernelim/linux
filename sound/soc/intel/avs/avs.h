@@ -51,6 +51,7 @@ struct avs_dsp_ops {
 	int (* const load_basefw)(struct avs_dev *, struct firmware *);
 	int (* const load_lib)(struct avs_dev *, struct firmware *, u32);
 	int (* const transfer_mods)(struct avs_dev *, bool, struct avs_module_entry *, u32);
+	int (* const config_basefw)(struct avs_dev *);
 	int (* const enable_logs)(struct avs_dev *, enum avs_log_enable, u32, u32, unsigned long,
 				  u32 *);
 	int (* const log_buffer_offset)(struct avs_dev *, u32);
@@ -71,6 +72,8 @@ extern const struct avs_dsp_ops avs_tgl_dsp_ops;
 
 #define AVS_PLATATTR_CLDMA		BIT_ULL(0)
 #define AVS_PLATATTR_IMR		BIT_ULL(1)
+#define AVS_PLATATTR_ACE		BIT_ULL(2)
+#define AVS_PLATATTR_ALTHDA		BIT_ULL(3)
 
 #define avs_platattr_test(adev, attr) \
 	((adev)->spec->attributes & AVS_PLATATTR_##attr)
@@ -78,7 +81,6 @@ extern const struct avs_dsp_ops avs_tgl_dsp_ops;
 struct avs_sram_spec {
 	const u32 base_offset;
 	const u32 window_size;
-	const u32 rom_status_offset;
 };
 
 struct avs_hipc_spec {
@@ -90,6 +92,7 @@ struct avs_hipc_spec {
 	const u32 rsp_offset;
 	const u32 rsp_busy_mask;
 	const u32 ctl_offset;
+	const u32 sts_offset;
 };
 
 /* Platform specific descriptor */

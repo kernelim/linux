@@ -1,3 +1,3 @@
-#0-
-0x769ed165	i2c_smbus_write_byte_data	vmlinux	EXPORT_SYMBOL	
+#1-
+0x6455b50e	i2c_smbus_write_byte_data	vmlinux	EXPORT_SYMBOL	
 

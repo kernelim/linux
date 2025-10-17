@@ -177,6 +177,9 @@ redhat/rhdocs/*
 redhat/rhdocs
 localversion
 .get_maintainer.conf
+kernel-automotive*
+kernel-redhat.spec.template
+filtermods.log
 
 # GitLab CI configuration
 !.gitlab-ci.yml

@@ -16,7 +16,6 @@
 #include <linux/spinlock.h>
 #include <linux/workqueue.h>
 #include <linux/if_ether.h>
-#include <linux/blk-mq-pci.h>
 #include <scsi/fc/fc_fip.h>
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_transport.h>
@@ -50,7 +49,7 @@ LIST_HEAD(reset_fnic_list);
 DEFINE_SPINLOCK(reset_fnic_list_lock);
 
 /* Supported devices by fnic module */
-static struct pci_device_id fnic_id_table[] = {
+static const struct pci_device_id fnic_id_table[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_CISCO, PCI_DEVICE_ID_CISCO_FNIC) },
 	{ 0, }
 };
@@ -101,7 +100,7 @@ MODULE_PARM_DESC(pc_rscn_handling_feature_flag,
 struct workqueue_struct *reset_fnic_work_queue;
 struct workqueue_struct *fnic_fip_queue;
 
-static int fnic_slave_alloc(struct scsi_device *sdev)
+static int fnic_sdev_init(struct scsi_device *sdev)
 {
 	struct fc_rport *rport = starget_to_rport(scsi_target(sdev));
 
@@ -120,7 +119,7 @@ static const struct scsi_host_template fnic_host_template = {
 	.eh_abort_handler = fnic_abort_cmd,
 	.eh_device_reset_handler = fnic_device_reset,
 	.eh_host_reset_handler = fnic_eh_host_reset_handler,
-	.slave_alloc = fnic_slave_alloc,
+	.sdev_init = fnic_sdev_init,
 	.change_queue_depth = scsi_change_queue_depth,
 	.this_id = -1,
 	.cmd_per_lun = 3,
@@ -697,7 +696,7 @@ void fnic_mq_map_queues_cpus(struct Scsi_Host *host)
 		return;
 	}
 
-	blk_mq_pci_map_queues(qmap, l_pdev, FNIC_PCI_OFFSET);
+	blk_mq_map_hw_queues(qmap, &l_pdev->dev, FNIC_PCI_OFFSET);
 }
 
 static int fnic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)

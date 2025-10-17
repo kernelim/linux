@@ -998,7 +998,7 @@ pm_disable:
 
 	return ret;
 }
-EXPORT_SYMBOL_NS_GPL(fxas21002c_core_probe, IIO_FXAS21002C);
+EXPORT_SYMBOL_NS_GPL(fxas21002c_core_probe, "IIO_FXAS21002C");
 
 void fxas21002c_core_remove(struct device *dev)
 {
@@ -1009,7 +1009,7 @@ void fxas21002c_core_remove(struct device *dev)
 	pm_runtime_disable(dev);
 	pm_runtime_set_suspended(dev);
 }
-EXPORT_SYMBOL_NS_GPL(fxas21002c_core_remove, IIO_FXAS21002C);
+EXPORT_SYMBOL_NS_GPL(fxas21002c_core_remove, "IIO_FXAS21002C");
 
 static int fxas21002c_suspend(struct device *dev)
 {

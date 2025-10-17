@@ -526,6 +526,7 @@ void lockdep_assert_cpus_held(void)
 
 	percpu_rwsem_assert_held(&cpu_hotplug_lock);
 }
+EXPORT_SYMBOL_GPL(lockdep_assert_cpus_held);
 
 #ifdef CONFIG_LOCKDEP
 int lockdep_is_cpus_held(void)
@@ -2867,7 +2868,6 @@ static struct attribute *cpuhp_cpu_attrs[] = {
 static const struct attribute_group cpuhp_cpu_attr_group = {
 	.attrs = cpuhp_cpu_attrs,
 	.name = "hotplug",
-	NULL
 };
 
 static ssize_t states_show(struct device *dev,
@@ -2899,7 +2899,6 @@ static struct attribute *cpuhp_cpu_root_attrs[] = {
 static const struct attribute_group cpuhp_cpu_root_attr_group = {
 	.attrs = cpuhp_cpu_root_attrs,
 	.name = "hotplug",
-	NULL
 };
 
 #ifdef CONFIG_HOTPLUG_SMT
@@ -3021,7 +3020,6 @@ static struct attribute *cpuhp_smt_attrs[] = {
 static const struct attribute_group cpuhp_smt_attr_group = {
 	.attrs = cpuhp_smt_attrs,
 	.name = "smt",
-	NULL
 };
 
 static int __init cpu_smt_sysfs_init(void)

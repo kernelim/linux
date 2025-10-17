@@ -26,7 +26,7 @@
 #include "codec-v4l2-fwht.h"
 
 MODULE_DESCRIPTION("Virtual codec device");
-MODULE_AUTHOR("Hans Verkuil <hans.verkuil@cisco.com>");
+MODULE_AUTHOR("Hans Verkuil <hansverk@cisco.com>");
 MODULE_LICENSE("GPL v2");
 
 static bool multiplanar;
@@ -2207,7 +2207,7 @@ static void vicodec_remove(struct platform_device *pdev)
 
 static struct platform_driver vicodec_pdrv = {
 	.probe		= vicodec_probe,
-	.remove_new	= vicodec_remove,
+	.remove		= vicodec_remove,
 	.driver		= {
 		.name	= VICODEC_NAME,
 	},

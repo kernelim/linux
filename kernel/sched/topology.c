@@ -6,6 +6,14 @@
 #include <linux/bsearch.h>
 
 DEFINE_MUTEX(sched_domains_mutex);
+void sched_domains_mutex_lock(void)
+{
+	mutex_lock(&sched_domains_mutex);
+}
+void sched_domains_mutex_unlock(void)
+{
+	mutex_unlock(&sched_domains_mutex);
+}
 
 /* Protected by sched_domains_mutex: */
 static cpumask_var_t sched_domains_tmpmask;
@@ -560,7 +568,7 @@ static int init_rootdomain(struct root_domain *rd)
 	rd->rto_push_work = IRQ_WORK_INIT_HARD(rto_push_irq_work_func);
 #endif
 
-	rd->visit_gen = 0;
+	rd->visit_cookie = 0;
 	init_dl_bw(&rd->dl_bw);
 	if (cpudl_init(&rd->cpudl) != 0)
 		goto free_rto_mask;
@@ -1336,6 +1344,64 @@ next:
 	update_group_capacity(sd, cpu);
 }
 
+#ifdef CONFIG_SMP
+
+/* Update the "asym_prefer_cpu" when arch_asym_cpu_priority() changes. */
+void sched_update_asym_prefer_cpu(int cpu, int old_prio, int new_prio)
+{
+	int asym_prefer_cpu = cpu;
+	struct sched_domain *sd;
+
+	guard(rcu)();
+
+	for_each_domain(cpu, sd) {
+		struct sched_group *sg;
+		int group_cpu;
+
+		if (!(sd->flags & SD_ASYM_PACKING))
+			continue;
+
+		/*
+		 * Groups of overlapping domain are replicated per NUMA
+		 * node and will require updating "asym_prefer_cpu" on
+		 * each local copy.
+		 *
+		 * If you are hitting this warning, consider moving
+		 * "sg->asym_prefer_cpu" to "sg->sgc->asym_prefer_cpu"
+		 * which is shared by all the overlapping groups.
+		 */
+		WARN_ON_ONCE(sd->flags & SD_OVERLAP);
+
+		sg = sd->groups;
+		if (cpu != sg->asym_prefer_cpu) {
+			/*
+			 * Since the parent is a superset of the current group,
+			 * if the cpu is not the "asym_prefer_cpu" at the
+			 * current level, it cannot be the preferred CPU at a
+			 * higher levels either.
+			 */
+			if (!sched_asym_prefer(cpu, sg->asym_prefer_cpu))
+				return;
+
+			WRITE_ONCE(sg->asym_prefer_cpu, cpu);
+			continue;
+		}
+
+		/* Ranking has improved; CPU is still the preferred one. */
+		if (new_prio >= old_prio)
+			continue;
+
+		for_each_cpu(group_cpu, sched_group_span(sg)) {
+			if (sched_asym_prefer(group_cpu, asym_prefer_cpu))
+				asym_prefer_cpu = group_cpu;
+		}
+
+		WRITE_ONCE(sg->asym_prefer_cpu, asym_prefer_cpu);
+	}
+}
+
+#endif /* CONFIG_SMP */
+
 /*
  * Set of available CPUs grouped by their corresponding capacities
  * Each list entry contains a CPU mask reflecting CPUs that share the same
@@ -1635,9 +1701,7 @@ sd_init(struct sched_domain_topology_level *tl,
 		.max_newidle_lb_cost	= 0,
 		.last_decay_max_lb_cost	= jiffies,
 		.child			= child,
-#ifdef CONFIG_SCHED_DEBUG
 		.name			= tl->name,
-#endif
 	};
 
 	sd_span = sched_domain_span(sd);
@@ -2103,7 +2167,7 @@ int sched_numa_find_closest(const struct cpumask *cpus, int cpu)
 	for (i = 0; i < sched_domains_numa_levels; i++) {
 		if (!masks[i][j])
 			break;
-		cpu = cpumask_any_and(cpus, masks[i][j]);
+		cpu = cpumask_any_and_distribute(cpus, masks[i][j]);
 		if (cpu < nr_cpu_ids) {
 			found = cpu;
 			break;
@@ -2338,10 +2402,8 @@ static struct sched_domain *build_sched_domain(struct sched_domain_topology_leve
 		if (!cpumask_subset(sched_domain_span(child),
 				    sched_domain_span(sd))) {
 			pr_err("BUG: arch topology borken\n");
-#ifdef CONFIG_SCHED_DEBUG
 			pr_err("     the %s domain not a subset of the %s domain\n",
 					child->name, sd->name);
-#endif
 			/* Fixup, ensure @sd has at least @child CPUs. */
 			cpumask_or(sched_domain_span(sd),
 				   sched_domain_span(sd),
@@ -2684,7 +2746,7 @@ static int dattrs_equal(struct sched_domain_attr *cur, int idx_cur,
  *
  * Call with hotplug lock and sched_domains_mutex held
  */
-void partition_sched_domains_locked(int ndoms_new, cpumask_var_t doms_new[],
+static void partition_sched_domains_locked(int ndoms_new, cpumask_var_t doms_new[],
 				    struct sched_domain_attr *dattr_new)
 {
 	bool __maybe_unused has_eas = false;
@@ -2716,19 +2778,8 @@ void partition_sched_domains_locked(int ndoms_new, cpumask_var_t doms_new[],
 	for (i = 0; i < ndoms_cur; i++) {
 		for (j = 0; j < n && !new_topology; j++) {
 			if (cpumask_equal(doms_cur[i], doms_new[j]) &&
-			    dattrs_equal(dattr_cur, i, dattr_new, j)) {
-				struct root_domain *rd;
-
-				/*
-				 * This domain won't be destroyed and as such
-				 * its dl_bw->total_bw needs to be cleared.  It
-				 * will be recomputed in function
-				 * update_tasks_root_domain().
-				 */
-				rd = cpu_rq(cpumask_any(doms_cur[i]))->rd;
-				dl_clear_root_domain(rd);
+			    dattrs_equal(dattr_cur, i, dattr_new, j))
 				goto match1;
-			}
 		}
 		/* No match - a current sched domain not in new doms_new[] */
 		detach_destroy_domains(doms_cur[i]);
@@ -2785,6 +2836,7 @@ match3:
 	ndoms_cur = ndoms_new;
 
 	update_sched_domain_debugfs();
+	dl_rebuild_rd_accounting();
 }
 
 /*
@@ -2793,7 +2845,7 @@ match3:
 void partition_sched_domains(int ndoms_new, cpumask_var_t doms_new[],
 			     struct sched_domain_attr *dattr_new)
 {
-	mutex_lock(&sched_domains_mutex);
+	sched_domains_mutex_lock();
 	partition_sched_domains_locked(ndoms_new, doms_new, dattr_new);
-	mutex_unlock(&sched_domains_mutex);
+	sched_domains_mutex_unlock();
 }

@@ -487,6 +487,11 @@ enum sof_hda_D0_substate {
 	SOF_HDA_DSP_PM_D0I3,	/* low power D0 substate */
 };
 
+struct sof_ace3_mic_privacy {
+	bool active;
+	struct work_struct work;
+};
+
 /* represents DSP HDA controller frontend - i.e. host facing control */
 struct sof_intel_hda_dev {
 	bool imrboot_supported;
@@ -494,6 +499,15 @@ struct sof_intel_hda_dev {
 	bool booted_from_imr;
 
 	int boot_iteration;
+
+	/*
+	 * DMA buffers for base firmware download. By default the buffers are
+	 * allocated once and kept through the lifetime of the driver.
+	 * See module parameter: persistent_cl_buffer
+	 */
+	struct snd_dma_buffer cl_dmab;
+	bool cl_dmab_contains_basefw;
+	struct snd_dma_buffer iccmax_dmab;
 
 	struct hda_bus hbus;
 
@@ -532,6 +546,9 @@ struct sof_intel_hda_dev {
 
 	/* Intel NHLT information */
 	struct nhlt_acpi_table *nhlt;
+
+	/* work queue for mic privacy state change notification sending */
+	struct sof_ace3_mic_privacy mic_privacy;
 
 	/*
 	 * Pointing to the IPC message if immediate sending was not possible
@@ -714,11 +731,12 @@ int hda_cl_copy_fw(struct snd_sof_dev *sdev, struct hdac_ext_stream *hext_stream
 
 struct hdac_ext_stream *hda_cl_prepare(struct device *dev, unsigned int format,
 				       unsigned int size, struct snd_dma_buffer *dmab,
-				       int direction, bool is_iccmax);
+				       bool persistent_buffer, int direction,
+				       bool is_iccmax);
 int hda_cl_trigger(struct device *dev, struct hdac_ext_stream *hext_stream, int cmd);
 
 int hda_cl_cleanup(struct device *dev, struct snd_dma_buffer *dmab,
-		   struct hdac_ext_stream *hext_stream);
+		   bool persistent_buffer, struct hdac_ext_stream *hext_stream);
 int cl_dsp_init(struct snd_sof_dev *sdev, int stream_tag, bool imr_boot);
 #define HDA_CL_STREAM_FORMAT 0x40
 
@@ -903,10 +921,6 @@ extern struct snd_sof_dsp_ops sof_tgl_ops;
 int sof_tgl_ops_init(struct snd_sof_dev *sdev);
 extern struct snd_sof_dsp_ops sof_icl_ops;
 int sof_icl_ops_init(struct snd_sof_dev *sdev);
-extern struct snd_sof_dsp_ops sof_mtl_ops;
-int sof_mtl_ops_init(struct snd_sof_dev *sdev);
-extern struct snd_sof_dsp_ops sof_lnl_ops;
-int sof_lnl_ops_init(struct snd_sof_dev *sdev);
 
 extern const struct sof_intel_dsp_desc skl_chip_info;
 extern const struct sof_intel_dsp_desc apl_chip_info;

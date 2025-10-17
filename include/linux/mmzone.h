@@ -223,6 +223,10 @@ enum node_stat_item {
 	PGDEMOTE_KSWAPD,
 	PGDEMOTE_DIRECT,
 	PGDEMOTE_KHUGEPAGED,
+#ifdef CONFIG_HUGETLB_PAGE
+	NR_HUGETLB,
+#endif
+	NR_BALLOON_PAGES,
 	NR_VM_NODE_STAT_ITEMS
 };
 
@@ -405,6 +409,8 @@ enum {
 	LRU_GEN_NONLEAF_YOUNG,
 	NR_LRU_GEN_CAPS
 };
+
+#define LRU_REFS_FLAGS		(BIT(PG_referenced) | BIT(PG_workingset))
 
 #define MIN_LRU_BATCH		BITS_PER_LONG
 #define MAX_LRU_BATCH		(MIN_LRU_BATCH * 64)
@@ -965,6 +971,9 @@ struct zone {
 #ifdef CONFIG_UNACCEPTED_MEMORY
 	/* Pages to be accepted. All pages on the list are MAX_PAGE_ORDER */
 	struct list_head	unaccepted_pages;
+
+	/* To be called once the last page in the zone is accepted */
+	struct work_struct	unaccepted_cleanup;
 #endif
 
 	/* zone flags, see below */
@@ -1164,6 +1173,12 @@ static inline bool is_zone_device_page(const struct page *page)
 	return page_zonenum(page) == ZONE_DEVICE;
 }
 
+static inline struct dev_pagemap *page_pgmap(const struct page *page)
+{
+	VM_WARN_ON_ONCE_PAGE(!is_zone_device_page(page), page);
+	return page_folio(page)->pgmap;
+}
+
 /*
  * Consecutive zone device pages should not be merged into the same sgl
  * or bvec segment with other types of pages or if they belong to different
@@ -1179,7 +1194,7 @@ static inline bool zone_device_pages_have_same_pgmap(const struct page *a,
 		return false;
 	if (!is_zone_device_page(a))
 		return true;
-	return a->pgmap == b->pgmap;
+	return page_pgmap(a) == page_pgmap(b);
 }
 
 extern void memmap_init_zone_device(struct zone *, unsigned long,
@@ -1193,6 +1208,10 @@ static inline bool zone_device_pages_have_same_pgmap(const struct page *a,
 						     const struct page *b)
 {
 	return true;
+}
+static inline struct dev_pagemap *page_pgmap(const struct page *page)
+{
+	return NULL;
 }
 #endif
 
@@ -2114,6 +2133,11 @@ static inline unsigned long next_present_section_nr(unsigned long section_nr)
 
 	return -1;
 }
+
+#define for_each_present_section_nr(start, section_nr)		\
+	for (section_nr = next_present_section_nr(start - 1);	\
+	     section_nr != -1;					\
+	     section_nr = next_present_section_nr(section_nr))
 
 /*
  * These are _only_ used during initialisation, therefore they

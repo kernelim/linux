@@ -842,7 +842,7 @@ static u64 __arch_timer_check_delta(void)
 		{},
 	};
 
-	if (is_midr_in_range_list(read_cpuid_id(), broken_cval_midrs)) {
+	if (is_midr_in_range_list(broken_cval_midrs)) {
 		pr_warn_once("Broken CNTx_CVAL_EL1, using 31 bit TVAL instead.\n");
 		return CLOCKSOURCE_MASK(31);
 	}
@@ -1430,7 +1430,7 @@ static int __init arch_timer_of_init(struct device_node *np)
 
 	arch_timers_present |= ARCH_TIMER_TYPE_CP15;
 
-	has_names = of_property_read_bool(np, "interrupt-names");
+	has_names = of_property_present(np, "interrupt-names");
 
 	for (i = ARCH_TIMER_PHYS_SECURE_PPI; i < ARCH_TIMER_MAX_TIMER_PPI; i++) {
 		if (has_names)

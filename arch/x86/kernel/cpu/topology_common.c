@@ -31,13 +31,13 @@ void topology_set_dom(struct topo_scan *tscan, enum x86_topology_domains dom,
 enum x86_topology_cpu_type get_topology_cpu_type(struct cpuinfo_x86 *c)
 {
 	if (c->x86_vendor == X86_VENDOR_INTEL) {
-		switch (c->topo_intel_type) {
+		switch (c->topo.intel_type) {
 		case INTEL_CPU_TYPE_ATOM: return TOPO_CPU_TYPE_EFFICIENCY;
 		case INTEL_CPU_TYPE_CORE: return TOPO_CPU_TYPE_PERFORMANCE;
 		}
 	}
 	if (c->x86_vendor == X86_VENDOR_AMD) {
-		switch (c->topo_amd_type) {
+		switch (c->topo.amd_type) {
 		case 0:	return TOPO_CPU_TYPE_PERFORMANCE;
 		case 1:	return TOPO_CPU_TYPE_EFFICIENCY;
 		}
@@ -118,6 +118,7 @@ static void parse_topology(struct topo_scan *tscan, bool early)
 		.cu_id			= 0xff,
 		.llc_id			= BAD_APICID,
 		.l2c_id			= BAD_APICID,
+		.cpu_type		= TOPO_CPU_TYPE_UNKNOWN,
 	};
 	struct cpuinfo_x86 *c = tscan->c;
 	struct {
@@ -127,7 +128,6 @@ static void parse_topology(struct topo_scan *tscan, bool early)
 	} ebx;
 
 	c->topo = topo_defaults;
-	c->topo_cpu_type = TOPO_CPU_TYPE_UNKNOWN;
 
 	if (fake_topology(tscan))
 		return;
@@ -165,7 +165,7 @@ static void parse_topology(struct topo_scan *tscan, bool early)
 		if (!IS_ENABLED(CONFIG_CPU_SUP_INTEL) || !cpu_parse_topology_ext(tscan))
 			parse_legacy(tscan);
 		if (c->cpuid_level >= 0x1a)
-			c->topo_cpu_type = cpuid_eax(0x1a);
+			c->topo.cpu_type = cpuid_eax(0x1a);
 		break;
 	case X86_VENDOR_HYGON:
 		if (IS_ENABLED(CONFIG_CPU_SUP_HYGON))
@@ -185,6 +185,7 @@ static void topo_set_ids(struct topo_scan *tscan, bool early)
 	if (!early) {
 		c->topo.logical_pkg_id = topology_get_logical_id(apicid, TOPO_PKG_DOMAIN);
 		c->topo.logical_die_id = topology_get_logical_id(apicid, TOPO_DIE_DOMAIN);
+		c->topo.logical_core_id = topology_get_logical_id(apicid, TOPO_CORE_DOMAIN);
 	}
 
 	/* Package relative core ID */

@@ -46,6 +46,7 @@ struct dce_hwseq;
 struct link_resource;
 struct dc_dmub_cmd;
 struct pg_block_update;
+struct drr_params;
 
 struct subvp_pipe_control_lock_fast_params {
 	struct dc *dc;
@@ -194,7 +195,6 @@ enum block_sequence_func {
 	DMUB_SUBVP_SAVE_SURF_ADDR,
 	HUBP_WAIT_FOR_DCC_META_PROP,
 	DMUB_FAMS2_GLOBAL_CONTROL_LOCK_FAST,
-
 };
 
 struct block_sequence {
@@ -241,6 +241,7 @@ struct hw_sequencer_funcs {
 		struct pipe_ctx *pipe_ctx, bool enableTripleBuffer);
 	void (*update_pending_status)(struct pipe_ctx *pipe_ctx);
 	void (*update_dsc_pg)(struct dc *dc, struct dc_state *context, bool safe_to_disable);
+	void (*clear_surface_dcc_and_tiling)(struct pipe_ctx *pipe_ctx, struct dc_plane_state *plane_state, bool clear_tiling);
 
 	/* Pipe Lock Related */
 	void (*pipe_control_lock)(struct dc *dc,
@@ -331,10 +332,6 @@ struct hw_sequencer_funcs {
 	void (*disable_writeback)(struct dc *dc,
 			unsigned int dwb_pipe_inst);
 
-	bool (*mmhubbub_warmup)(struct dc *dc,
-			unsigned int num_dwb,
-			struct dc_writeback_info *wb_info);
-
 	/* Clock Related */
 	enum dc_status (*set_clock)(struct dc *dc,
 			enum dc_clock_type clock_type,
@@ -365,8 +362,7 @@ struct hw_sequencer_funcs {
 	void (*clear_status_bits)(struct dc *dc, unsigned int mask);
 
 	bool (*set_backlight_level)(struct pipe_ctx *pipe_ctx,
-			uint32_t backlight_pwm_u16_16,
-			uint32_t frame_ramp);
+		struct set_backlight_level_params *params);
 
 	void (*set_abm_immediate_disable)(struct pipe_ctx *pipe_ctx);
 
@@ -462,6 +458,19 @@ struct hw_sequencer_funcs {
 	void (*program_outstanding_updates)(struct dc *dc,
 			struct dc_state *context);
 	void (*setup_hpo_hw_control)(const struct dce_hwseq *hws, bool enable);
+	void (*wait_for_all_pending_updates)(const struct pipe_ctx *pipe_ctx);
+	void (*detect_pipe_changes)(struct dc_state *old_state,
+			struct dc_state *new_state,
+			struct pipe_ctx *old_pipe,
+			struct pipe_ctx *new_pipe);
+	void (*enable_plane)(struct dc *dc,
+			struct pipe_ctx *pipe_ctx,
+			struct dc_state *context);
+	void (*update_dchubp_dpp)(struct dc *dc,
+			struct pipe_ctx *pipe_ctx,
+			struct dc_state *context);
+	void (*post_unlock_reset_opp)(struct dc *dc,
+			struct pipe_ctx *opp_head);
 };
 
 void color_space_to_black_color(
@@ -489,11 +498,12 @@ void get_hdr_visual_confirm_color(
 void get_mpctree_visual_confirm_color(
 		struct pipe_ctx *pipe_ctx,
 		struct tg_color *color);
-
+void get_vabc_visual_confirm_color(
+	struct pipe_ctx *pipe_ctx,
+	struct tg_color *color);
 void get_subvp_visual_confirm_color(
 	struct pipe_ctx *pipe_ctx,
 	struct tg_color *color);
-
 void get_fams2_visual_confirm_color(
 	struct dc *dc,
 	struct dc_state *context,
@@ -504,10 +514,24 @@ void get_mclk_switch_visual_confirm_color(
 		struct pipe_ctx *pipe_ctx,
 		struct tg_color *color);
 
+void get_cursor_visual_confirm_color(
+		struct pipe_ctx *pipe_ctx,
+		struct tg_color *color);
+
+void get_dcc_visual_confirm_color(
+	struct dc *dc,
+	struct pipe_ctx *pipe_ctx,
+	struct tg_color *color);
+
 void set_p_state_switch_method(
 		struct dc *dc,
 		struct dc_state *context,
 		struct pipe_ctx *pipe_ctx);
+
+void set_drr_and_clear_adjust_pending(
+		struct pipe_ctx *pipe_ctx,
+		struct dc_stream_state *stream,
+		struct drr_params *params);
 
 void hwss_execute_sequence(struct dc *dc,
 		struct block_sequence block_sequence[],

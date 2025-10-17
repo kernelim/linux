@@ -114,6 +114,42 @@ drm_gem_init(struct drm_device *dev)
 }
 
 /**
+ * drm_gem_object_init_with_mnt - initialize an allocated shmem-backed GEM
+ * object in a given shmfs mountpoint
+ *
+ * @dev: drm_device the object should be initialized for
+ * @obj: drm_gem_object to initialize
+ * @size: object size
+ * @gemfs: tmpfs mount where the GEM object will be created. If NULL, use
+ * the usual tmpfs mountpoint (`shm_mnt`).
+ *
+ * Initialize an already allocated GEM object of the specified size with
+ * shmfs backing store.
+ */
+int drm_gem_object_init_with_mnt(struct drm_device *dev,
+				 struct drm_gem_object *obj, size_t size,
+				 struct vfsmount *gemfs)
+{
+	struct file *filp;
+
+	drm_gem_private_object_init(dev, obj, size);
+
+	if (gemfs)
+		filp = shmem_file_setup_with_mnt(gemfs, "drm mm object", size,
+						 VM_NORESERVE);
+	else
+		filp = shmem_file_setup("drm mm object", size, VM_NORESERVE);
+
+	if (IS_ERR(filp))
+		return PTR_ERR(filp);
+
+	obj->filp = filp;
+
+	return 0;
+}
+EXPORT_SYMBOL(drm_gem_object_init_with_mnt);
+
+/**
  * drm_gem_object_init - initialize an allocated shmem-backed GEM object
  * @dev: drm_device the object should be initialized for
  * @obj: drm_gem_object to initialize
@@ -122,20 +158,10 @@ drm_gem_init(struct drm_device *dev)
  * Initialize an already allocated GEM object of the specified size with
  * shmfs backing store.
  */
-int drm_gem_object_init(struct drm_device *dev,
-			struct drm_gem_object *obj, size_t size)
+int drm_gem_object_init(struct drm_device *dev, struct drm_gem_object *obj,
+			size_t size)
 {
-	struct file *filp;
-
-	drm_gem_private_object_init(dev, obj, size);
-
-	filp = shmem_file_setup("drm mm object", size, VM_NORESERVE);
-	if (IS_ERR(filp))
-		return PTR_ERR(filp);
-
-	obj->filp = filp;
-
-	return 0;
+	return drm_gem_object_init_with_mnt(dev, obj, size, NULL);
 }
 EXPORT_SYMBOL(drm_gem_object_init);
 
@@ -368,7 +394,7 @@ int drm_gem_dumb_map_offset(struct drm_file *file, struct drm_device *dev,
 		return -ENOENT;
 
 	/* Don't allow imported objects to be mapped */
-	if (obj->import_attach) {
+	if (drm_gem_is_imported(obj)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -1198,7 +1224,7 @@ void drm_gem_print_info(struct drm_printer *p, unsigned int indent,
 			  drm_vma_node_start(&obj->vma_node));
 	drm_printf_indent(p, indent, "size=%zu\n", obj->size);
 	drm_printf_indent(p, indent, "imported=%s\n",
-			  str_yes_no(obj->import_attach));
+			  str_yes_no(drm_gem_is_imported(obj)));
 
 	if (obj->funcs->print_info)
 		obj->funcs->print_info(p, indent, obj);

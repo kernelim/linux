@@ -331,6 +331,12 @@ bool encl_measure(struct encl *encl)
 	sigstruct->header.header2[1] = header2[1];
 	sigstruct->exponent = 3;
 	sigstruct->body.attributes = SGX_ATTR_MODE64BIT;
+
+	/*
+	 * Setting xfrm to 3 disables extended CPU states and instruction sets
+	 * like AVX2 inside the enclave. Thus the enclave code has to be built
+	 * without instructions from extended instruction sets (-mno-avx).
+	 */
 	sigstruct->body.xfrm = 3;
 
 	/* sanity check */

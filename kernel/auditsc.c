@@ -1653,8 +1653,8 @@ static void audit_log_uring(struct audit_context *ctx)
 	audit_log_format(ab, "uring_op=%d", ctx->uring_op);
 	if (ctx->return_valid != AUDITSC_INVALID)
 		audit_log_format(ab, " success=%s exit=%ld",
-				 (ctx->return_valid == AUDITSC_SUCCESS ?
-				  "yes" : "no"),
+				 str_yes_no(ctx->return_valid ==
+					    AUDITSC_SUCCESS),
 				 ctx->return_code);
 	audit_log_format(ab,
 			 " items=%d"
@@ -1696,8 +1696,8 @@ static void audit_log_exit(void)
 			audit_log_format(ab, " per=%lx", context->personality);
 		if (context->return_valid != AUDITSC_INVALID)
 			audit_log_format(ab, " success=%s exit=%ld",
-					 (context->return_valid == AUDITSC_SUCCESS ?
-					  "yes" : "no"),
+					 str_yes_no(context->return_valid ==
+						    AUDITSC_SUCCESS),
 					 context->return_code);
 		audit_log_format(ab,
 				 " a0=%lx a1=%lx a2=%lx a3=%lx items=%d",
@@ -2730,7 +2730,7 @@ void __audit_ptrace(struct task_struct *t)
 	context->target_uid = task_uid(t);
 	context->target_sessionid = audit_get_sessionid(t);
 	security_task_getsecid_obj(t, &context->target_sid);
-	memcpy(context->target_comm, t->comm, TASK_COMM_LEN);
+	strscpy(context->target_comm, t->comm);
 }
 
 /**
@@ -2757,7 +2757,7 @@ int audit_signal_info_syscall(struct task_struct *t)
 		ctx->target_uid = t_uid;
 		ctx->target_sessionid = audit_get_sessionid(t);
 		security_task_getsecid_obj(t, &ctx->target_sid);
-		memcpy(ctx->target_comm, t->comm, TASK_COMM_LEN);
+		strscpy(ctx->target_comm, t->comm);
 		return 0;
 	}
 
@@ -2778,7 +2778,7 @@ int audit_signal_info_syscall(struct task_struct *t)
 	axp->target_uid[axp->pid_count] = t_uid;
 	axp->target_sessionid[axp->pid_count] = audit_get_sessionid(t);
 	security_task_getsecid_obj(t, &axp->target_sid[axp->pid_count]);
-	memcpy(axp->target_comm[axp->pid_count], t->comm, TASK_COMM_LEN);
+	strscpy(axp->target_comm[axp->pid_count], t->comm);
 	axp->pid_count++;
 
 	return 0;
@@ -2870,7 +2870,7 @@ void __audit_openat2_how(struct open_how *how)
 	context->type = AUDIT_OPENAT2;
 }
 
-void __audit_log_kern_module(char *name)
+void __audit_log_kern_module(const char *name)
 {
 	struct audit_context *context = audit_context();
 

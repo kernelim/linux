@@ -1,4 +1,5 @@
 include Makefile.variables
+include Makefile.automotive
 
 #
 # Deprecated variables
@@ -56,6 +57,12 @@ ifneq ($(SPECGEMINI),0)
   SPECKEXTRAVERSION:=
 endif
 
+# When building kernel-automotive, set AUTOMOTIVE_BUILD=1.
+ifeq ($(AUTOMOTIVE_BUILD), 1)
+  SPECPACKAGE_NAME:=kernel-automotive
+  DIST:=.el$(RHEL_MAJOR)iv
+endif
+
 GITID:= $(shell $(GIT) log --max-count=1 --pretty=format:%H $(HEAD))
 ifndef RHSELFTESTDATA
   BUILD:=$(RHEL_RELEASE)
@@ -83,6 +90,11 @@ BUILD_TARGET_USERDEF:=$(BUILD_TARGET)
 
 ifndef DIST
   DIST := $(shell $(RPMBUILD) --eval '%{?dist}')
+else
+  # automotive uses a different dist tag
+  ifeq ($(DIST)iv, $(shell $(RPMBUILD) --eval '%{?dist}'))
+    DIST:=$(shell $(RPMBUILD) --eval '%{?dist}')
+  endif
 endif
 
 ifndef DISTRO
@@ -311,7 +323,7 @@ else
     else
       # This value is used by the dist[g]-targets.  Changing this value has significant
       # consequences for all of RHEL kernel engineering.
-      BUILD_TARGET:=rhel-$(RHEL_MAJOR).$(RHEL_MINOR)-z-test-pesign
+      BUILD_TARGET:=rhel-$(RHEL_MAJOR).$(RHEL_MINOR)-test-pesign
     endif
   endif
   ifeq ("$(DIST)", ".eln")
@@ -327,6 +339,36 @@ else
   endif
   PATCHLIST_URL:=none
   RHPKG_BIN:=rhpkg
+endif
+
+# When building kernel-automotive, set AUTOMOTIVE_BUILD=1.
+ifeq ($(AUTOMOTIVE_BUILD), 1)
+  ifeq ("$(DISTRO)", "rhel")
+    RHDISTGIT_BRANCH:=rhivos-$(AUTOMOTIVE_MAJOR).$(AUTOMOTIVE_MINOR).0
+    RHPKG_BIN:=rhpkg
+    RHPKG_NS:=
+    RHPKG_OPTS:=
+    ifeq ("$(DIST)", ".eln")
+      $(error "Error: the distro 'eln' does not support automotive.")
+    else
+      BUILD_TARGET=rhivos-$(AUTOMOTIVE_MAJOR)-newest-test-pesign
+    endif
+  else ifeq ("$(DISTRO)", "centos")
+    # This is a CentOS SIG dist-git for AutoSD rather than for CentOS Stream.
+    RHDISTGIT_BRANCH:=c$(RHEL_MAJOR)s-sig-automotive-main
+    RHPKG_BIN:=centpkg-sig
+    RHPKG_NS:=automotive/rpms/
+    RHPKG_OPTS:=--config $(REDHAT)/automotive-centpkg-sig.conf
+    BUILD_TARGET=autosd$(RHEL_MAJOR)s-packages-main-el$(RHEL_MAJOR)s
+  else
+    $(error "Error: the distro '$(DISTRO)' does not support automotive.")
+  endif
+  BUILDOPTS += +automotive_build
+  INCLUDE_FEDORA_FILES:=0
+  INCLUDE_RHEL_FILES:=0
+  INCLUDE_RT_FILES:=0
+  INCLUDE_AUTOMOTIVE_FILES:=1
+  FLAVOR:=rhel
 endif
 
 TARFILE:=linux-$(SPECTARFILE_RELEASE).tar.xz
@@ -555,12 +597,29 @@ dist-rhel-configs: FLAVOR = rhel
 dist-rhel-configs: dist-configs
 rh-configs: dist-rhel-configs
 
+dist-automotive-configs: ##build build only the automotive configs
+dist-automotive-configs: AUTOMOTIVE_BUILD := 1
+dist-automotive-configs: DISTRO=$(if $(DISTRO_USERDEF),$(DISTRO_USERDEF),centos)
+dist-automotive-configs:
+	$(MAKE) dist-configs
+
 dist-configs-check: dist-configs-prep
 	+cd $(REDHAT)/configs; ./process_configs.sh $(PROCESS_CONFIGS_CHECK_OPTS) "" ""
 
 dist-configs-prep: dist-clean-configs
+# automotive is not a flavor but we want to treat it like it is in this case
+ifdef AUTOMOTIVE_BUILD
+	@trap 'echo "Cleaning up..."; mv $(REDHAT)/configs/priority.$(FLAVOR).bak $(REDHAT)/configs/priority.$(FLAVOR); exit 1' SIGINT; \
+	cp $(REDHAT)/configs/priority.$(FLAVOR) $(REDHAT)/configs/priority.$(FLAVOR).bak; \
+	sed -i '/^#\|^ORDER\|^\(x86_64\|aarch64\)-automotive/!d' $(REDHAT)/configs/priority.$(FLAVOR); \
+	sed -i 's/^\([^=]*\)-automotive/\1/' $(REDHAT)/configs/priority.$(FLAVOR); \
+	cd $(REDHAT)/configs; ./build_configs.sh "partial" "snip"; \
+	cd $(REDHAT)/configs; ./build_configs.sh "$(SPECPACKAGE_NAME)" "$(FLAVOR)"; \
+	mv $(REDHAT)/configs/priority.$(FLAVOR).bak $(REDHAT)/configs/priority.$(FLAVOR)
+else
 	+cd $(REDHAT)/configs; ./build_configs.sh "partial" "snip"
 	+cd $(REDHAT)/configs; ./build_configs.sh "$(SPECPACKAGE_NAME)" "$(FLAVOR)"
+endif
 
 dist-configs-arch: ARCH_MACH = $(MACH)
 dist-configs-arch: dist-configs
@@ -702,9 +761,14 @@ sources-rh: $(TARBALL) $(KABI_TARBALL) $(KABIDW_TARBALL) generate-testpatch-tmp 
 		README.rst \
 		kernel-local \
 		dracut-virt.conf \
+		keys/redhatsecureboot504.cer \
+		uki.sbat.template \
+		uki-addons.sbat.template \
 		$(SOURCES)/
-	@cat $$(ls -1 $(SPECPACKAGE_NAME).changelog-* | sort -V -r) \
-		> $(SOURCES)/kernel.changelog
+	@changelog_glob="$(SPECPACKAGE_NAME).changelog-*"; \
+	[[ -n "$(AUTOMOTIVE_BUILD)" ]] && changelog_glob="kernel.changelog-*"; \
+	cat $$(ls -1 $$changelog_glob | sort -V -r) \
+		> $(SOURCES)/$(SPECPACKAGE_NAME).changelog
 	cp keys/redhatsecureboot{501,ca5}.cer $(SOURCES)/;
 	@for KABIARCH in $(ARCH_LIST); do \
 		cp kabi/Module.kabi_$$KABIARCH $(SOURCES)/; \
@@ -829,6 +893,16 @@ _dist-brew _dist-koji: _dist-%: dist-vr-check dist-srpm
 _distg-brew _distg-koji: _distg-%: dist-vr-check
 	$* $(BUILD_PROFILE) build $(BUILD_FLAGS) --scratch $(BUILD_TARGET) "$(RHGITURL)?redhat/koji#$(RHGITCOMMIT)"
 
+dist-cbs: ##build Create a kernel-automotive SRPM for the Automotive SIG and then call cbs to build the created SRPM.
+dist-cbs: AUTOMOTIVE_BUILD := 1
+dist-cbs: DISTRO=$(if $(DISTRO_USERDEF),$(DISTRO_USERDEF),centos)
+dist-cbs: BUILD_TARGET=$(if $(BUILD_TARGET_USERDEF),$(BUILD_TARGET_USERDEF))
+dist-cbs:
+	$(MAKE) _$@
+
+_dist-cbs: dist-srpm
+	cbs build $(BUILD_FLAGS) --scratch $(BUILD_TARGET) $(SRPMS)/$(RELEASETAG)$(DIST).src.rpm
+
 dist-git-test: export RH_DIST_GIT_TEST="1"
 dist-git-test: dist-git
 
@@ -868,7 +942,7 @@ dist-os-version:
 	@echo "OSVERSION: $(RHEL_MAJOR).$(RHEL_MINOR)"
 
 dist-dump-variables:
-	$(eval VARS:=$(sort $(shell cat Makefile.variables | sed '/^#/d; /^$$/d; s/[ ]*[?:]=.*//')))
+	$(eval VARS:=$(sort $(shell cat Makefile.variables Makefile.automotive | sed '/^#/d; /^$$/d; s/[ ]*[?:]=.*//')))
 	@$(foreach V,$(sort $(.VARIABLES)), $(if $(filter-out environment default automatic, $(origin $V)),$(info $V=$($V)),$(if $(filter $(VARS),$(V)),$(info $V=$($V)))))
 
 dist-self-test:

@@ -223,15 +223,19 @@ static void finish_netfs_read(struct ceph_osd_request *req)
 	      subreq->len, i_size_read(req->r_inode));
 
 	/* no object means success but no data */
-	if (err == -ENOENT)
+	if (err == -ENOENT) {
+		__set_bit(NETFS_SREQ_CLEAR_TAIL, &subreq->flags);
+		__set_bit(NETFS_SREQ_MADE_PROGRESS, &subreq->flags);
 		err = 0;
-	else if (err == -EBLOCKLISTED)
+	} else if (err == -EBLOCKLISTED) {
 		fsc->blocklisted = true;
+	}
 
 	if (err >= 0) {
 		if (sparse && err > 0)
 			err = ceph_sparse_ext_map_end(op);
 		if (err < subreq->len &&
+		    subreq->rreq->origin != NETFS_UNBUFFERED_READ &&
 		    subreq->rreq->origin != NETFS_DIO_READ)
 			__set_bit(NETFS_SREQ_CLEAR_TAIL, &subreq->flags);
 		if (IS_ENCRYPTED(inode) && err > 0) {
@@ -242,6 +246,8 @@ static void finish_netfs_read(struct ceph_osd_request *req)
 			if (err > subreq->len)
 				err = subreq->len;
 		}
+		if (err > 0)
+			__set_bit(NETFS_SREQ_CLEAR_TAIL, &subreq->flags);
 	}
 
 	if (osd_data->type == CEPH_OSD_DATA_TYPE_PAGES) {
@@ -253,8 +259,9 @@ static void finish_netfs_read(struct ceph_osd_request *req)
 		subreq->transferred = err;
 		err = 0;
 	}
+	subreq->error = err;
 	trace_netfs_sreq(subreq, netfs_sreq_trace_io_progress);
-	netfs_read_subreq_terminated(subreq, err, false);
+	netfs_read_subreq_terminated(subreq);
 	iput(req->r_inode);
 	ceph_dec_osd_stopping_blocker(fsc->mdsc);
 }
@@ -272,7 +279,8 @@ static bool ceph_netfs_issue_op_inline(struct netfs_io_subrequest *subreq)
 	size_t len;
 	int mode;
 
-	if (rreq->origin != NETFS_DIO_READ)
+	if (rreq->origin != NETFS_UNBUFFERED_READ &&
+	    rreq->origin != NETFS_DIO_READ)
 		__set_bit(NETFS_SREQ_CLEAR_TAIL, &subreq->flags);
 	__clear_bit(NETFS_SREQ_COPY_TO_CACHE, &subreq->flags);
 
@@ -314,7 +322,9 @@ static bool ceph_netfs_issue_op_inline(struct netfs_io_subrequest *subreq)
 
 	ceph_mdsc_put_request(req);
 out:
-	netfs_read_subreq_terminated(subreq, err, false);
+	subreq->error = err;
+	trace_netfs_sreq(subreq, netfs_sreq_trace_io_progress);
+	netfs_read_subreq_terminated(subreq);
 	return true;
 }
 
@@ -426,8 +436,10 @@ static void ceph_netfs_issue_read(struct netfs_io_subrequest *subreq)
 	ceph_osdc_start_request(req->r_osdc, req);
 out:
 	ceph_osdc_put_request(req);
-	if (err)
-		netfs_read_subreq_terminated(subreq, err, false);
+	if (err) {
+		subreq->error = err;
+		netfs_read_subreq_terminated(subreq);
+	}
 	doutc(cl, "%llx.%llx result %d\n", ceph_vinop(inode), err);
 }
 
@@ -526,7 +538,7 @@ static void ceph_set_page_fscache(struct page *page)
 	folio_start_private_2(page_folio(page)); /* [DEPRECATED] */
 }
 
-static void ceph_fscache_write_terminated(void *priv, ssize_t error, bool was_async)
+static void ceph_fscache_write_terminated(void *priv, ssize_t error)
 {
 	struct inode *inode = priv;
 
@@ -1054,7 +1066,9 @@ get_more_pages:
 		if (!nr_folios && !locked_pages)
 			break;
 		for (i = 0; i < nr_folios && locked_pages < max_pages; i++) {
-			page = &fbatch.folios[i]->page;
+			struct folio *folio = fbatch.folios[i];
+
+			page = &folio->page;
 			doutc(cl, "? %p idx %lu\n", page, page->index);
 			if (locked_pages == 0)
 				lock_page(page);  /* first page */
@@ -1081,8 +1095,6 @@ get_more_pages:
 				continue;
 			}
 			if (page_offset(page) >= ceph_wbc.i_size) {
-				struct folio *folio = page_folio(page);
-
 				doutc(cl, "folio at %lu beyond eof %llu\n",
 				      folio->index, ceph_wbc.i_size);
 				if ((ceph_wbc.size_stable ||
@@ -1098,16 +1110,16 @@ get_more_pages:
 				unlock_page(page);
 				break;
 			}
-			if (PageWriteback(page) ||
-			    PagePrivate2(page) /* [DEPRECATED] */) {
+			if (folio_test_writeback(folio) ||
+			    folio_test_private_2(folio) /* [DEPRECATED] */) {
 				if (wbc->sync_mode == WB_SYNC_NONE) {
-					doutc(cl, "%p under writeback\n", page);
-					unlock_page(page);
+					doutc(cl, "%p under writeback\n", folio);
+					folio_unlock(folio);
 					continue;
 				}
-				doutc(cl, "waiting on writeback %p\n", page);
-				wait_on_page_writeback(page);
-				folio_wait_private_2(page_folio(page)); /* [DEPRECATED] */
+				doutc(cl, "waiting on writeback %p\n", folio);
+				folio_wait_writeback(folio);
+				folio_wait_private_2(folio); /* [DEPRECATED] */
 			}
 
 			if (!clear_page_dirty_for_io(page)) {

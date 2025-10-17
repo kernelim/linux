@@ -21,6 +21,10 @@ ifneq ($(CONFIG_SND_SOC_UTILS_KUNIT_TEST),)
 obj-$(CONFIG_SND_SOC_UTILS_KUNIT_TEST) += soc-utils-test.o
 endif
 
+ifneq ($(CONFIG_SND_SOC_OPS_KUNIT_TEST),)
+obj-$(CONFIG_SND_SOC_OPS_KUNIT_TEST) += soc-ops-test.o
+endif
+
 ifneq ($(CONFIG_SND_SOC_GENERIC_DMAENGINE_PCM),)
 snd-soc-core-y += soc-generic-dmaengine-pcm.o
 endif
@@ -59,9 +63,10 @@ obj-$(CONFIG_SND_SOC)	+= mxs/
 obj-$(CONFIG_SND_SOC)	+= kirkwood/
 obj-$(CONFIG_SND_SOC)	+= pxa/
 obj-$(CONFIG_SND_SOC)	+= qcom/
+obj-$(CONFIG_SND_SOC)	+= renesas/
 obj-$(CONFIG_SND_SOC)	+= rockchip/
 obj-$(CONFIG_SND_SOC)	+= samsung/
-obj-$(CONFIG_SND_SOC)	+= sh/
+obj-$(CONFIG_SND_SOC)	+= sdca/
 obj-$(CONFIG_SND_SOC)	+= sof/
 obj-$(CONFIG_SND_SOC)	+= spear/
 obj-$(CONFIG_SND_SOC)	+= sprd/

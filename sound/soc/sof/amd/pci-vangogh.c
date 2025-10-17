@@ -13,11 +13,9 @@
 
 #include <linux/module.h>
 #include <linux/pci.h>
-#include <linux/platform_device.h>
 #include <sound/sof.h>
 #include <sound/soc-acpi.h>
 
-#include "../ops.h"
 #include "../sof-pci-dev.h"
 #include "../../amd/mach-config.h"
 #include "acp.h"
@@ -93,12 +91,12 @@ static struct pci_driver snd_sof_pci_amd_vgh_driver = {
 	.probe = acp_pci_vgh_probe,
 	.remove = acp_pci_vgh_remove,
 	.driver = {
-		.pm = &sof_pci_pm,
+		.pm = pm_ptr(&sof_pci_pm),
 	},
 };
 module_pci_driver(snd_sof_pci_amd_vgh_driver);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("VANGOGH SOF Driver");
-MODULE_IMPORT_NS(SND_SOC_SOF_AMD_COMMON);
-MODULE_IMPORT_NS(SND_SOC_SOF_PCI_DEV);
+MODULE_IMPORT_NS("SND_SOC_SOF_AMD_COMMON");
+MODULE_IMPORT_NS("SND_SOC_SOF_PCI_DEV");

@@ -210,8 +210,16 @@ struct snp_psc_desc {
 #define GHCB_RESP_CODE(v)		((v) & GHCB_MSR_INFO_MASK)
 
 /*
- * Error codes related to GHCB input that can be communicated back to the guest
- * by setting the lower 32-bits of the GHCB SW_EXITINFO1 field to 2.
+ * GHCB-defined return codes that are communicated back to the guest via
+ * SW_EXITINFO1.
+ */
+#define GHCB_HV_RESP_NO_ACTION		0
+#define GHCB_HV_RESP_ISSUE_EXCEPTION	1
+#define GHCB_HV_RESP_MALFORMED_INPUT	2
+
+/*
+ * GHCB-defined sub-error codes for malformed input (see above) that are
+ * communicated back to the guest via SW_EXITINFO2[31:0].
  */
 #define GHCB_ERR_NOT_REGISTERED		1
 #define GHCB_ERR_INVALID_USAGE		2
@@ -219,5 +227,32 @@ struct snp_psc_desc {
 #define GHCB_ERR_MISSING_INPUT		4
 #define GHCB_ERR_INVALID_INPUT		5
 #define GHCB_ERR_INVALID_EVENT		6
+
+struct sev_config {
+	__u64 debug		: 1,
+
+	      /*
+	       * Indicates when the per-CPU GHCB has been created and registered
+	       * and thus can be used by the BSP instead of the early boot GHCB.
+	       *
+	       * For APs, the per-CPU GHCB is created before they are started
+	       * and registered upon startup, so this flag can be used globally
+	       * for the BSP and APs.
+	       */
+	      ghcbs_initialized	: 1,
+
+	      /*
+	       * Indicates when the per-CPU SVSM CA is to be used instead of the
+	       * boot SVSM CA.
+	       *
+	       * For APs, the per-CPU SVSM CA is created as part of the AP
+	       * bringup, so this flag can be used globally for the BSP and APs.
+	       */
+	      use_cas		: 1,
+
+	      __reserved	: 61;
+};
+
+extern struct sev_config sev_cfg;
 
 #endif

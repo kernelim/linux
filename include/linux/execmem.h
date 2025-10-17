@@ -4,6 +4,7 @@
 
 #include <linux/types.h>
 #include <linux/moduleloader.h>
+#include <linux/cleanup.h>
 
 #if (defined(CONFIG_KASAN_GENERIC) || defined(CONFIG_KASAN_SW_TAGS)) && \
 		!defined(CONFIG_KASAN_VMALLOC)
@@ -169,6 +170,20 @@ void *execmem_alloc(enum execmem_type type, size_t size);
  * @ptr: pointer to the memory that should be freed
  */
 void execmem_free(void *ptr);
+
+DEFINE_FREE(execmem, void *, if (_T) execmem_free(_T));
+
+#ifdef CONFIG_MMU
+/**
+ * execmem_vmap - create virtual mapping for EXECMEM_MODULE_DATA memory
+ * @size: size of the virtual mapping in bytes
+ *
+ * Maps virtually contiguous area in the range suitable for EXECMEM_MODULE_DATA.
+ *
+ * Return: the area descriptor on success or %NULL on failure.
+ */
+struct vm_struct *execmem_vmap(size_t size);
+#endif
 
 /**
  * execmem_update_copy - copy an update to executable memory

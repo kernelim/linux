@@ -40,7 +40,7 @@ BUMP_RELEASE:=yes
 
 # This is the dist release suffix used in the package release, eg. .fc34,
 # .el8 etc. In a different branch this may be set to a fixed value.
-DIST ?= .el10_0
+DIST ?= .el10_1
 
 # This is a human readable distribution variable that is used to determine the
 # OS version (fedora, centos, or rhel).
@@ -62,10 +62,9 @@ HEAD ?= HEAD
 # be included as part of the source RPM.  Downstream projects, such as
 # centos-stream or RHEL, can disable file inclusion by setting these values
 # to '0'.
-INCLUDE_FEDORA_FILES:=0
-INCLUDE_RHEL_FILES:=1
-INCLUDE_RT_FILES:=1
-INCLUDE_AUTOMOTIVE_FILES:=1
+INCLUDE_FEDORA_FILES ?= 0
+INCLUDE_RHEL_FILES ?= 1
+INCLUDE_RT_FILES ?= 1
 
 # This variable is the location of the KABI cross compilers
 KABI_CROSS_COMPILE_PREFIX ?= /usr/bin/

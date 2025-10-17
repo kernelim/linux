@@ -12,6 +12,7 @@ TEST_PROGS = \
 	loopback.sh \
 	pp_alloc_fail.py \
 	rss_ctx.py \
+	rss_input_xfrm.py \
 	#
 
 TEST_FILES := \

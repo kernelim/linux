@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2017-2024 Broadcom. All Rights Reserved. The term *
+ * Copyright (C) 2017-2025 Broadcom. All Rights Reserved. The term *
  * “Broadcom” refers to Broadcom Inc. and/or its subsidiaries.  *
  * Copyright (C) 2004-2016 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
@@ -1906,6 +1906,9 @@ lpfc_sli4_port_sta_fn_reset(struct lpfc_hba *phba, int mbx_action,
 	int rc;
 	uint32_t intr_mode;
 	LPFC_MBOXQ_t *mboxq;
+
+	/* Notifying the transport that the targets are going offline. */
+	lpfc_scsi_dev_block(phba);
 
 	if (bf_get(lpfc_sli_intf_if_type, &phba->sli4_hba.sli_intf) >=
 	    LPFC_SLI_INTF_IF_TYPE_2) {
@@ -3847,8 +3850,8 @@ lpfc_offline_prep(struct lpfc_hba *phba, int mbx_action)
 					 * Otherwise, let dev_loss take care of
 					 * the node.
 					 */
-					if (!(ndlp->save_flags &
-					      NLP_IN_RECOV_POST_DEV_LOSS) &&
+					if (!test_bit(NLP_IN_RECOV_POST_DEV_LOSS,
+						      &ndlp->save_flags) &&
 					    !(ndlp->fc4_xpt_flags &
 					      (NVME_XPT_REGD | SCSI_XPT_REGD)))
 						lpfc_disc_state_machine
@@ -11109,14 +11112,11 @@ lpfc_sli4_queue_setup(struct lpfc_hba *phba)
 
 	phba->sli4_hba.fw_func_mode =
 			mboxq->u.mqe.un.query_fw_cfg.rsp.function_mode;
-	phba->sli4_hba.ulp0_mode = mboxq->u.mqe.un.query_fw_cfg.rsp.ulp0_mode;
-	phba->sli4_hba.ulp1_mode = mboxq->u.mqe.un.query_fw_cfg.rsp.ulp1_mode;
 	phba->sli4_hba.physical_port =
 			mboxq->u.mqe.un.query_fw_cfg.rsp.physical_port;
 	lpfc_printf_log(phba, KERN_INFO, LOG_INIT,
-			"3251 QUERY_FW_CFG: func_mode:x%x, ulp0_mode:x%x, "
-			"ulp1_mode:x%x\n", phba->sli4_hba.fw_func_mode,
-			phba->sli4_hba.ulp0_mode, phba->sli4_hba.ulp1_mode);
+			"3251 QUERY_FW_CFG: func_mode:x%x\n",
+			phba->sli4_hba.fw_func_mode);
 
 	mempool_free(mboxq, phba->mbox_mem_pool);
 
@@ -13173,6 +13173,7 @@ lpfc_sli4_enable_msi(struct lpfc_hba *phba)
 	eqhdl = lpfc_get_eq_hdl(0);
 	rc = pci_irq_vector(phba->pcidev, 0);
 	if (rc < 0) {
+		free_irq(phba->pcidev->irq, phba);
 		pci_free_irq_vectors(phba->pcidev);
 		lpfc_printf_log(phba, KERN_WARNING, LOG_INIT,
 				"0496 MSI pci_irq_vec failed (%d)\n", rc);
@@ -13253,6 +13254,7 @@ lpfc_sli4_enable_intr(struct lpfc_hba *phba, uint32_t cfg_mode)
 			eqhdl = lpfc_get_eq_hdl(0);
 			retval = pci_irq_vector(phba->pcidev, 0);
 			if (retval < 0) {
+				free_irq(phba->pcidev->irq, phba);
 				lpfc_printf_log(phba, KERN_WARNING, LOG_INIT,
 					"0502 INTR pci_irq_vec failed (%d)\n",
 					 retval);

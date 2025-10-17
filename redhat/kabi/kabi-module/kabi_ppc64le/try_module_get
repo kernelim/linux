@@ -1,3 +1,3 @@
-#0-
-0x11e172ee	try_module_get	vmlinux	EXPORT_SYMBOL	
+#1-
+0x28552a61	try_module_get	vmlinux	EXPORT_SYMBOL	
 

@@ -1,3 +1,3 @@
-#0-
-0x9cb052e7	register_netdevice	vmlinux	EXPORT_SYMBOL	
+#1-
+0x1da27023	register_netdevice	vmlinux	EXPORT_SYMBOL	
 

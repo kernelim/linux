@@ -83,11 +83,21 @@ class Type(SpecAttr):
         value = self.checks.get(limit, default)
         if value is None:
             return value
-        elif value in self.family.consts:
+        if isinstance(value, int):
+            return value
+        if value in self.family.consts:
+            raise Exception("Resolving family constants not implemented, yet")
+        return limit_to_number(value)
+
+    def get_limit_str(self, limit, default=None, suffix=''):
+        value = self.checks.get(limit, default)
+        if value is None:
+            return ''
+        if isinstance(value, int):
+            return str(value) + suffix
+        if value in self.family.consts:
             return c_upper(f"{self.family['name']}-{value}")
-        if not isinstance(value, int):
-            value = limit_to_number(value)
-        return value
+        return c_upper(value)
 
     def resolve(self):
         if 'name-prefix' in self.attr:
@@ -307,11 +317,14 @@ class TypeScalar(Type):
         if 'enum' in self.attr:
             enum = self.family.consts[self.attr['enum']]
             low, high = enum.value_range()
-            if 'min' not in self.checks:
-                if low != 0 or self.type[0] == 's':
-                    self.checks['min'] = low
-            if 'max' not in self.checks:
-                self.checks['max'] = high
+            if low == None and high == None:
+                self.checks['sparse'] = True
+            else:
+                if 'min' not in self.checks:
+                    if low != 0 or self.type[0] == 's':
+                        self.checks['min'] = low
+                if 'max' not in self.checks:
+                    self.checks['max'] = high
 
         if 'min' in self.checks and 'max' in self.checks:
             if self.get_limit('min') > self.get_limit('max'):
@@ -361,11 +374,13 @@ class TypeScalar(Type):
         elif 'full-range' in self.checks:
             return f"NLA_POLICY_FULL_RANGE({policy}, &{c_lower(self.enum_name)}_range)"
         elif 'range' in self.checks:
-            return f"NLA_POLICY_RANGE({policy}, {self.get_limit('min')}, {self.get_limit('max')})"
+            return f"NLA_POLICY_RANGE({policy}, {self.get_limit_str('min')}, {self.get_limit_str('max')})"
         elif 'min' in self.checks:
-            return f"NLA_POLICY_MIN({policy}, {self.get_limit('min')})"
+            return f"NLA_POLICY_MIN({policy}, {self.get_limit_str('min')})"
         elif 'max' in self.checks:
-            return f"NLA_POLICY_MAX({policy}, {self.get_limit('max')})"
+            return f"NLA_POLICY_MAX({policy}, {self.get_limit_str('max')})"
+        elif 'sparse' in self.checks:
+            return f"NLA_POLICY_VALIDATE_FN({policy}, &{c_lower(self.enum_name)}_validate)"
         return super()._attr_policy(policy)
 
     def _attr_typol(self):
@@ -416,11 +431,11 @@ class TypeString(Type):
 
     def _attr_policy(self, policy):
         if 'exact-len' in self.checks:
-            mem = 'NLA_POLICY_EXACT_LEN(' + str(self.get_limit('exact-len')) + ')'
+            mem = 'NLA_POLICY_EXACT_LEN(' + self.get_limit_str('exact-len') + ')'
         else:
             mem = '{ .type = ' + policy
             if 'max-len' in self.checks:
-                mem += ', .len = ' + str(self.get_limit('max-len'))
+                mem += ', .len = ' + self.get_limit_str('max-len')
             mem += ', }'
         return mem
 
@@ -467,17 +482,22 @@ class TypeBinary(Type):
         return f'.type = YNL_PT_BINARY,'
 
     def _attr_policy(self, policy):
-        if 'exact-len' in self.checks:
-            mem = 'NLA_POLICY_EXACT_LEN(' + str(self.get_limit('exact-len')) + ')'
+        if len(self.checks) == 0:
+            pass
+        elif len(self.checks) == 1:
+            check_name = list(self.checks)[0]
+            if check_name not in {'exact-len', 'min-len'}:
+                raise Exception('Unsupported check for binary type: ' + check_name)
         else:
-            mem = '{ '
-            if len(self.checks) == 1 and 'min-len' in self.checks:
-                mem += '.len = ' + str(self.get_limit('min-len'))
-            elif len(self.checks) == 0:
-                mem += '.type = NLA_BINARY'
-            else:
-                raise Exception('One or more of binary type checks not implemented, yet')
-            mem += ', }'
+            raise Exception('More than one check for binary type not implemented, yet')
+
+        if len(self.checks) == 0:
+            mem = '{ .type = NLA_BINARY, }'
+        elif 'exact-len' in self.checks:
+            mem = 'NLA_POLICY_EXACT_LEN(' + self.get_limit_str('exact-len') + ')'
+        elif 'min-len' in self.checks:
+            mem = '{ .len = ' + self.get_limit_str('min-len') + ', }'
+
         return mem
 
     def attr_put(self, ri, var):
@@ -781,6 +801,8 @@ class EnumSet(SpecEnumSet):
             self.user_type = 'int'
 
         self.value_pfx = yaml.get('name-prefix', f"{family.ident_name}-{yaml['name']}-")
+        self.header = yaml.get('header', None)
+        self.enum_cnt_name = yaml.get('enum-cnt-name', None)
 
         super().__init__(family, yaml)
 
@@ -792,7 +814,7 @@ class EnumSet(SpecEnumSet):
         high = max([x.value for x in self.entries.values()])
 
         if high - low + 1 != len(self.entries):
-            raise Exception("Can't get value range for a noncontiguous enum")
+            return None, None
 
         return low, high
 
@@ -2164,11 +2186,51 @@ def print_kernel_policy_ranges(family, cw):
             cw.block_start(line=f'static const struct netlink_range_validation{sign} {c_lower(attr.enum_name)}_range =')
             members = []
             if 'min' in attr.checks:
-                members.append(('min', str(attr.get_limit('min')) + suffix))
+                members.append(('min', attr.get_limit_str('min', suffix=suffix)))
             if 'max' in attr.checks:
-                members.append(('max', str(attr.get_limit('max')) + suffix))
+                members.append(('max', attr.get_limit_str('max', suffix=suffix)))
             cw.write_struct_init(members)
             cw.block_end(line=';')
+            cw.nl()
+
+
+def print_kernel_policy_sparse_enum_validates(family, cw):
+    first = True
+    for _, attr_set in family.attr_sets.items():
+        if attr_set.subset_of:
+            continue
+
+        for _, attr in attr_set.items():
+            if not attr.request:
+                continue
+            if not attr.enum_name:
+                continue
+            if 'sparse' not in attr.checks:
+                continue
+
+            if first:
+                cw.p('/* Sparse enums validation callbacks */')
+                first = False
+
+            sign = '' if attr.type[0] == 'u' else '_signed'
+            suffix = 'ULL' if attr.type[0] == 'u' else 'LL'
+            cw.write_func_prot('static int', f'{c_lower(attr.enum_name)}_validate',
+                               ['const struct nlattr *attr', 'struct netlink_ext_ack *extack'])
+            cw.block_start()
+            cw.block_start(line=f'switch (nla_get_{attr["type"]}(attr))')
+            enum = family.consts[attr['enum']]
+            first_entry = True
+            for entry in enum.entries.values():
+                if first_entry:
+                    first_entry = False
+                else:
+                    cw.p('fallthrough;')
+                cw.p(f'case {entry.c_name}:')
+            cw.p('return 0;')
+            cw.block_end()
+            cw.p('NL_SET_ERR_MSG_ATTR(extack, attr, "invalid enum value");')
+            cw.p('return -EINVAL;')
+            cw.block_end()
             cw.nl()
 
 
@@ -2397,6 +2459,87 @@ def uapi_enum_start(family, cw, obj, ckey='', enum_name='enum-name'):
     cw.block_start(line=start_line)
 
 
+def render_uapi_unified(family, cw, max_by_define, separate_ntf):
+    max_name = c_upper(family.get('cmd-max-name', f"{family.op_prefix}MAX"))
+    cnt_name = c_upper(family.get('cmd-cnt-name', f"__{family.op_prefix}MAX"))
+    max_value = f"({cnt_name} - 1)"
+
+    uapi_enum_start(family, cw, family['operations'], 'enum-name')
+    val = 0
+    for op in family.msgs.values():
+        if separate_ntf and ('notify' in op or 'event' in op):
+            continue
+
+        suffix = ','
+        if op.value != val:
+            suffix = f" = {op.value},"
+            val = op.value
+        cw.p(op.enum_name + suffix)
+        val += 1
+    cw.nl()
+    cw.p(cnt_name + ('' if max_by_define else ','))
+    if not max_by_define:
+        cw.p(f"{max_name} = {max_value}")
+    cw.block_end(line=';')
+    if max_by_define:
+        cw.p(f"#define {max_name} {max_value}")
+    cw.nl()
+
+
+def render_uapi_directional(family, cw, max_by_define):
+    max_name = f"{family.op_prefix}USER_MAX"
+    cnt_name = f"__{family.op_prefix}USER_CNT"
+    max_value = f"({cnt_name} - 1)"
+
+    cw.block_start(line='enum')
+    cw.p(c_upper(f'{family.name}_MSG_USER_NONE = 0,'))
+    val = 0
+    for op in family.msgs.values():
+        if 'do' in op and 'event' not in op:
+            suffix = ','
+            if op.value and op.value != val:
+                suffix = f" = {op.value},"
+                val = op.value
+            cw.p(op.enum_name + suffix)
+            val += 1
+    cw.nl()
+    cw.p(cnt_name + ('' if max_by_define else ','))
+    if not max_by_define:
+        cw.p(f"{max_name} = {max_value}")
+    cw.block_end(line=';')
+    if max_by_define:
+        cw.p(f"#define {max_name} {max_value}")
+    cw.nl()
+
+    max_name = f"{family.op_prefix}KERNEL_MAX"
+    cnt_name = f"__{family.op_prefix}KERNEL_CNT"
+    max_value = f"({cnt_name} - 1)"
+
+    cw.block_start(line='enum')
+    cw.p(c_upper(f'{family.name}_MSG_KERNEL_NONE = 0,'))
+    val = 0
+    for op in family.msgs.values():
+        if ('do' in op and 'reply' in op['do']) or 'notify' in op or 'event' in op:
+            enum_name = op.enum_name
+            if 'event' not in op and 'notify' not in op:
+                enum_name = f'{enum_name}_REPLY'
+
+            suffix = ','
+            if op.value and op.value != val:
+                suffix = f" = {op.value},"
+                val = op.value
+            cw.p(enum_name + suffix)
+            val += 1
+    cw.nl()
+    cw.p(cnt_name + ('' if max_by_define else ','))
+    if not max_by_define:
+        cw.p(f"{max_name} = {max_value}")
+    cw.block_end(line=';')
+    if max_by_define:
+        cw.p(f"#define {max_name} {max_value}")
+    cw.nl()
+
+
 def render_uapi(family, cw):
     hdr_prot = f"_UAPI_LINUX_{c_upper(family.uapi_header_name)}_H"
     cw.p('#ifndef ' + hdr_prot)
@@ -2419,12 +2562,19 @@ def render_uapi(family, cw):
         if const['type'] == 'enum' or const['type'] == 'flags':
             enum = family.consts[const['name']]
 
+            if enum.header:
+                continue
+
             if enum.has_doc():
-                cw.p('/**')
-                doc = ''
-                if 'doc' in enum:
-                    doc = ' - ' + enum['doc']
-                cw.write_doc_line(enum.enum_name + doc)
+                if enum.has_entry_doc():
+                    cw.p('/**')
+                    doc = ''
+                    if 'doc' in enum:
+                        doc = ' - ' + enum['doc']
+                    cw.write_doc_line(enum.enum_name + doc)
+                else:
+                    cw.p('/*')
+                    cw.write_doc_line(enum['doc'], indent=False)
                 for entry in enum.entries.values():
                     if entry.has_doc():
                         doc = '@' + entry.c_name + ': ' + entry['doc']
@@ -2447,9 +2597,12 @@ def render_uapi(family, cw):
                     max_val = f' = {enum.get_mask()},'
                     cw.p(max_name + max_val)
                 else:
+                    cnt_name = enum.enum_cnt_name
                     max_name = c_upper(name_pfx + 'max')
-                    cw.p('__' + max_name + ',')
-                    cw.p(max_name + ' = (__' + max_name + ' - 1)')
+                    if not cnt_name:
+                        cnt_name = '__' + name_pfx + 'max'
+                    cw.p(c_upper(cnt_name) + ',')
+                    cw.p(max_name + ' = (' + c_upper(cnt_name) + ' - 1)')
             cw.block_end(line=';')
             cw.nl()
         elif const['type'] == 'const':
@@ -2490,30 +2643,12 @@ def render_uapi(family, cw):
     # Commands
     separate_ntf = 'async-prefix' in family['operations']
 
-    max_name = c_upper(family.get('cmd-max-name', f"{family.op_prefix}MAX"))
-    cnt_name = c_upper(family.get('cmd-cnt-name', f"__{family.op_prefix}MAX"))
-    max_value = f"({cnt_name} - 1)"
-
-    uapi_enum_start(family, cw, family['operations'], 'enum-name')
-    val = 0
-    for op in family.msgs.values():
-        if separate_ntf and ('notify' in op or 'event' in op):
-            continue
-
-        suffix = ','
-        if op.value != val:
-            suffix = f" = {op.value},"
-            val = op.value
-        cw.p(op.enum_name + suffix)
-        val += 1
-    cw.nl()
-    cw.p(cnt_name + ('' if max_by_define else ','))
-    if not max_by_define:
-        cw.p(f"{max_name} = {max_value}")
-    cw.block_end(line=';')
-    if max_by_define:
-        cw.p(f"#define {max_name} {max_value}")
-    cw.nl()
+    if family.msg_id_model == 'unified':
+        render_uapi_unified(family, cw, max_by_define, separate_ntf)
+    elif family.msg_id_model == 'directional':
+        render_uapi_directional(family, cw, max_by_define)
+    else:
+        raise Exception(f'Unsupported message enum-model {family.msg_id_model}')
 
     if separate_ntf:
         uapi_enum_start(family, cw, family['operations'], enum_name='async-enum')
@@ -2637,13 +2772,6 @@ def main():
         os.sys.exit(1)
         return
 
-    supported_models = ['unified']
-    if args.mode in ['user', 'kernel']:
-        supported_models += ['directional']
-    if parsed.msg_id_model not in supported_models:
-        print(f'Message enum-model {parsed.msg_id_model} not supported for {args.mode} generation')
-        os.sys.exit(1)
-
     cw = CodeWriter(BaseNlLib(), args.out_file, overwrite=(not args.cmp_out))
 
     _, spec_kernel = find_kernel_root(args.spec)
@@ -2693,12 +2821,17 @@ def main():
         else:
             cw.p(f'#include "{hdr_file}"')
             cw.p('#include "ynl.h"')
-        headers = [parsed.uapi_header]
+        headers = []
     for definition in parsed['definitions']:
         if 'header' in definition:
             headers.append(definition['header'])
+    if args.mode == 'user':
+        headers.append(parsed.uapi_header)
+    seen_header = []
     for one in headers:
-        cw.p(f"#include <{one}>")
+        if one not in seen_header:
+            cw.p(f"#include <{one}>")
+            seen_header.append(one)
     cw.nl()
 
     if args.mode == "user":
@@ -2743,6 +2876,7 @@ def main():
             print_kernel_family_struct_hdr(parsed, cw)
         else:
             print_kernel_policy_ranges(parsed, cw)
+            print_kernel_policy_sparse_enum_validates(parsed, cw)
 
             for _, struct in sorted(parsed.pure_nested_structs.items()):
                 if struct.request:

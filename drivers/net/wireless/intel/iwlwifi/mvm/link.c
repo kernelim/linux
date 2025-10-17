@@ -12,6 +12,7 @@
 	HOW(BLOCKED_FW)			\
 	HOW(BLOCKED_NON_BSS)		\
 	HOW(BLOCKED_ROC)		\
+	HOW(BLOCKED_TMP_NON_BSS)	\
 	HOW(EXIT_MISSED_BEACON)		\
 	HOW(EXIT_LOW_RSSI)		\
 	HOW(EXIT_COEX)			\
@@ -360,7 +361,8 @@ int iwl_mvm_link_changed(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 send_cmd:
 	cmd.modify_mask = cpu_to_le32(changes);
 	cmd.flags = cpu_to_le32(flags);
-	cmd.flags_mask = cpu_to_le32(flags_mask);
+	if (cmd_ver < 6)
+		cmd.flags_mask = cpu_to_le32(flags_mask);
 	cmd.spec_link_id = link_conf->link_id;
 	if (cmd_ver < 2)
 		cmd.listen_lmac = cpu_to_le32(link_info->listen_lmac);
@@ -410,9 +412,8 @@ int iwl_mvm_remove_link(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 
 	ret = iwl_mvm_link_cmd_send(mvm, &cmd, FW_CTXT_ACTION_REMOVE);
 
-	if (!ret)
-		if (iwl_mvm_sf_update(mvm, vif, true))
-			IWL_ERR(mvm, "Failed to update SF state\n");
+	if (!ret && iwl_mvm_sf_update(mvm, vif, true))
+		IWL_ERR(mvm, "Failed to update SF state\n");
 
 	return ret;
 }
@@ -760,9 +761,8 @@ bool iwl_mvm_mld_valid_link_pair(struct ieee80211_vif *vif,
 	    iwl_mvm_esr_disallowed_with_link(mvm, vif, b, false))
 		return false;
 
-	if (a->chandef->width != b->chandef->width ||
-	    !(a->chandef->chan->band == NL80211_BAND_6GHZ &&
-	      b->chandef->chan->band == NL80211_BAND_5GHZ))
+	if (a->chandef->chan->band == b->chandef->chan->band ||
+	    a->chandef->width != b->chandef->width)
 		ret |= IWL_MVM_ESR_EXIT_BANDWIDTH;
 
 	if (ret) {
@@ -1164,4 +1164,15 @@ void iwl_mvm_unblock_esr(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 
 	if (!mvmvif->esr_disable_reason)
 		iwl_mvm_esr_unblocked(mvm, vif);
+}
+
+void iwl_mvm_init_link(struct iwl_mvm_vif_link_info *link)
+{
+	link->bcast_sta.sta_id = IWL_INVALID_STA;
+	link->mcast_sta.sta_id = IWL_INVALID_STA;
+	link->ap_sta_id = IWL_INVALID_STA;
+
+	for (int r = 0; r < NUM_IWL_MVM_SMPS_REQ; r++)
+		link->smps_requests[r] =
+			IEEE80211_SMPS_AUTOMATIC;
 }

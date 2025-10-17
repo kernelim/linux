@@ -131,6 +131,12 @@ struct test_env {
 	pid_t *worker_pids; /* array of worker pids */
 	int *worker_socks; /* array of worker socks */
 	int *worker_current_test; /* array of current running test for each worker */
+
+	pthread_t main_thread;
+	int secs_till_notify;
+	int secs_till_kill;
+	timer_t watchdog; /* watch for stalled tests/subtests */
+	enum { WD_NOTIFY, WD_KILL } watchdog_state;
 };
 
 #define MAX_LOG_TRUNK_SIZE 8192
@@ -179,6 +185,7 @@ void test__end_subtest(void);
 void test__skip(void);
 void test__fail(void);
 int test__join_cgroup(const char *path);
+void hexdump(const char *prefix, const void *buf, size_t len);
 
 #define PRINT_FAIL(format...)                                                  \
 	({                                                                     \
@@ -338,6 +345,20 @@ int test__join_cgroup(const char *path);
 	___ok;								\
 })
 
+#define ASSERT_MEMEQ(actual, expected, len, name) ({			\
+	static int duration = 0;					\
+	const void *__act = actual;					\
+	const void *__exp = expected;					\
+	int __len = len;						\
+	bool ___ok = memcmp(__act, __exp, __len) == 0;			\
+	CHECK(!___ok, (name), "unexpected memory mismatch\n");		\
+	fprintf(stdout, "actual:\n");					\
+	hexdump("\t", __act, __len);					\
+	fprintf(stdout, "expected:\n");					\
+	hexdump("\t", __exp, __len);					\
+	___ok;								\
+})
+
 #define ASSERT_OK(res, name) ({						\
 	static int duration = 0;					\
 	long long ___res = (res);					\
@@ -387,6 +408,14 @@ int test__join_cgroup(const char *path);
 	bool ___ok = ___fd >= 0;					\
 	CHECK(!___ok, (name), "unexpected fd: %d (errno %d)\n",		\
 	      ___fd, errno);						\
+	___ok;								\
+})
+
+#define ASSERT_ERR_FD(fd, name) ({					\
+	static int duration = 0;					\
+	int ___fd = (fd);						\
+	bool ___ok = ___fd < 0;						\
+	CHECK(!___ok, (name), "unexpected fd: %d\n", ___fd);		\
 	___ok;								\
 })
 

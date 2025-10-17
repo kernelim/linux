@@ -17,6 +17,8 @@
 #include <linux/of.h>
 #include <linux/netdevice.h>
 #include <dt-bindings/net/mscc-phy-vsc8531.h>
+
+#include "../phylib.h"
 #include "mscc_serdes.h"
 #include "mscc.h"
 
@@ -139,8 +141,7 @@ static void vsc85xx_get_strings(struct phy_device *phydev, u8 *data)
 		return;
 
 	for (i = 0; i < priv->nstats; i++)
-		strscpy(data + i * ETH_GSTRING_LEN, priv->hw_stats[i].string,
-			ETH_GSTRING_LEN);
+		ethtool_puts(&data, priv->hw_stats[i].string);
 }
 
 static u64 vsc85xx_get_stat(struct phy_device *phydev, int i)
@@ -2700,7 +2701,7 @@ static struct phy_driver vsc85xx_driver[] = {
 
 module_phy_driver(vsc85xx_driver);
 
-static struct mdio_device_id __maybe_unused vsc85xx_tbl[] = {
+static const struct mdio_device_id __maybe_unused vsc85xx_tbl[] = {
 	{ PHY_ID_MATCH_VENDOR(PHY_VENDOR_MSCC) },
 	{ }
 };

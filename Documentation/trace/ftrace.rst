@@ -1037,8 +1037,8 @@ explains which is which.
 	- 'N' both TIF_NEED_RESCHED and PREEMPT_NEED_RESCHED is set,
 	- 'n' only TIF_NEED_RESCHED is set,
 	- 'p' only PREEMPT_NEED_RESCHED is set,
-	- 'L' borg PREEMPT_NEED_RESCHED and TIF_RESCHED_LAZY is set,
-	- 'b' borg TIF_NEED_RESCHED and TIF_RESCHED_LAZY is set,
+	- 'L' both PREEMPT_NEED_RESCHED and TIF_RESCHED_LAZY is set,
+	- 'b' both TIF_NEED_RESCHED and TIF_RESCHED_LAZY is set,
 	- 'l' only TIF_RESCHED_LAZY is set
 	- '.' otherwise.
 

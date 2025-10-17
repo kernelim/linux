@@ -4,6 +4,11 @@
 
 #include "dml2_debug.h"
 
+int dml2_log_internal(const char *format, ...)
+{
+	return 0;
+}
+
 int dml2_printf(const char *format, ...)
 {
 #ifdef _DEBUG
@@ -23,9 +28,4 @@ int dml2_printf(const char *format, ...)
 #else
 	return 0;
 #endif
-}
-
-void dml2_assert(int condition)
-{
-	//ASSERT(condition);
 }

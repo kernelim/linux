@@ -1,0 +1,15 @@
+# Variables in this file are available for command line modification and is
+# included in redhat/Makefile.
+#
+# These variables are automotive specific and are only needed when working
+# with the kernel-automotive package.
+
+# Repurpose the stock kernel make targets for kernel-automotive.
+# Set this to '1' to build kernel-automotive configs, srpm, etc.
+AUTOMOTIVE_BUILD ?=
+
+# Indicates if the specific OS flavor files will be included as part of the
+# source RPM. Although automotive is not a true flavor, it is not a true
+# variant of the stock kernel either and therefore we need to manage its
+# source files independently.
+INCLUDE_AUTOMOTIVE_FILES ?= 0

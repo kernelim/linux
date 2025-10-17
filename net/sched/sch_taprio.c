@@ -1328,15 +1328,13 @@ static int taprio_dev_notifier(struct notifier_block *nb, unsigned long event,
 
 		stab = rtnl_dereference(q->root->stab);
 
-		rcu_read_lock();
-		oper = rcu_dereference(q->oper_sched);
+		oper = rtnl_dereference(q->oper_sched);
 		if (oper)
 			taprio_update_queue_max_sdu(q, oper, stab);
 
-		admin = rcu_dereference(q->admin_sched);
+		admin = rtnl_dereference(q->admin_sched);
 		if (admin)
 			taprio_update_queue_max_sdu(q, admin, stab);
-		rcu_read_unlock();
 
 		break;
 	}

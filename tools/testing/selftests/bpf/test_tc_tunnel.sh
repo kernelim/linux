@@ -195,6 +195,12 @@ readonly datalen=$4
 
 echo "encap ${addr1} to ${addr2}, type ${tuntype}, mac ${mac} len ${datalen}"
 
+if [[ "$tuntype" =~ "udp" ]]; then
+	# We do not have FOU enabled, skip the FOU tests
+	echo SKIP
+	exit 0
+fi
+
 trap cleanup EXIT
 
 setup

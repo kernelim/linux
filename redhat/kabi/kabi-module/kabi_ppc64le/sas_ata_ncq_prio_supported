@@ -1,3 +1,3 @@
-#0-
-0xd6049012	sas_ata_ncq_prio_supported	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL_GPL	
+#1-
+0xd6a1e692	sas_ata_ncq_prio_supported	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL_GPL	
 

@@ -30,6 +30,7 @@
 #include <drm/drm_crtc.h>
 #include <drm/drm_edid.h>
 #include <drm/drm_mipi_dsi.h>
+#include <drm/drm_probe_helper.h>
 
 #include "i915_drv.h"
 #include "i915_reg.h"
@@ -43,6 +44,7 @@
 #include "intel_dsi_vbt.h"
 #include "intel_fifo_underrun.h"
 #include "intel_panel.h"
+#include "intel_pfit.h"
 #include "skl_scaler.h"
 #include "vlv_dsi.h"
 #include "vlv_dsi_pll.h"
@@ -57,7 +59,7 @@ static u16 txbyteclkhs(u16 pixels, int bpp, int lane_count,
 					 8 * 100), lane_count);
 }
 
-/* return pixels equvalent to txbyteclkhs */
+/* return pixels equivalent to txbyteclkhs */
 static u16 pixels_from_txbyteclkhs(u16 clk_hs, int bpp, int lane_count,
 			u16 burst_mode_ratio)
 {
@@ -65,9 +67,8 @@ static u16 pixels_from_txbyteclkhs(u16 clk_hs, int bpp, int lane_count,
 						(bpp * burst_mode_ratio));
 }
 
-enum mipi_dsi_pixel_format pixel_format_from_register_bits(u32 fmt)
+static enum mipi_dsi_pixel_format pixel_format_from_register_bits(u32 fmt)
 {
-	/* It just so happens the VBT matches register contents. */
 	switch (fmt) {
 	case VID_MODE_FORMAT_RGB888:
 		return MIPI_DSI_FMT_RGB888;
@@ -282,7 +283,7 @@ static int intel_dsi_compute_config(struct intel_encoder *encoder,
 	if (ret)
 		return ret;
 
-	ret = intel_panel_fitting(pipe_config, conn_state);
+	ret = intel_pfit_compute_config(pipe_config, conn_state);
 	if (ret)
 		return ret;
 
@@ -738,7 +739,7 @@ static void intel_dsi_pre_enable(struct intel_atomic_state *state,
 
 	intel_dsi_wait_panel_power_cycle(intel_dsi);
 
-	intel_set_cpu_fifo_underrun_reporting(dev_priv, pipe, true);
+	intel_set_cpu_fifo_underrun_reporting(display, pipe, true);
 
 	/*
 	 * The BIOS may leave the PLL in a wonky state where it doesn't
@@ -946,7 +947,7 @@ static bool intel_dsi_get_hw_state(struct intel_encoder *encoder,
 
 	drm_dbg_kms(display->drm, "\n");
 
-	wakeref = intel_display_power_get_if_enabled(dev_priv,
+	wakeref = intel_display_power_get_if_enabled(display,
 						     encoder->power_domain);
 	if (!wakeref)
 		return false;
@@ -1006,7 +1007,7 @@ static bool intel_dsi_get_hw_state(struct intel_encoder *encoder,
 	}
 
 out_put_power:
-	intel_display_power_put(dev_priv, encoder->power_domain, wakeref);
+	intel_display_power_put(display, encoder->power_domain, wakeref);
 
 	return active;
 }
@@ -1059,7 +1060,7 @@ static void bxt_dsi_get_pipe_config(struct intel_encoder *encoder,
 				              BXT_MIPI_TRANS_VACTIVE(port));
 	adjusted_mode->crtc_vtotal =
 				intel_de_read(display,
-				              BXT_MIPI_TRANS_VTOTAL(port));
+				              BXT_MIPI_TRANS_VTOTAL(port)) + 1;
 
 	hactive = adjusted_mode->crtc_hdisplay;
 	hfp = intel_de_read(display, MIPI_HFP_COUNT(display, port));
@@ -1071,7 +1072,7 @@ static void bxt_dsi_get_pipe_config(struct intel_encoder *encoder,
 	hsync = intel_de_read(display, MIPI_HSYNC_PADDING_COUNT(display, port));
 	hbp = intel_de_read(display, MIPI_HBP_COUNT(display, port));
 
-	/* harizontal values are in terms of high speed byte clock */
+	/* horizontal values are in terms of high speed byte clock */
 	hfp = pixels_from_txbyteclkhs(hfp, bpp, lane_count,
 						intel_dsi->burst_mode_ratio);
 	hsync = pixels_from_txbyteclkhs(hsync, bpp, lane_count,
@@ -1264,7 +1265,7 @@ static void set_dsi_timings(struct intel_encoder *encoder,
 			intel_de_write(display, BXT_MIPI_TRANS_VACTIVE(port),
 				       adjusted_mode->crtc_vdisplay);
 			intel_de_write(display, BXT_MIPI_TRANS_VTOTAL(port),
-				       adjusted_mode->crtc_vtotal);
+				       adjusted_mode->crtc_vtotal - 1);
 		}
 
 		intel_de_write(display, MIPI_HACTIVE_AREA_COUNT(display, port),
@@ -1540,14 +1541,14 @@ static const struct drm_encoder_funcs intel_dsi_funcs = {
 };
 
 static enum drm_mode_status vlv_dsi_mode_valid(struct drm_connector *connector,
-					       struct drm_display_mode *mode)
+					       const struct drm_display_mode *mode)
 {
-	struct drm_i915_private *i915 = to_i915(connector->dev);
+	struct intel_display *display = to_intel_display(connector->dev);
 
-	if (IS_VALLEYVIEW(i915) || IS_CHERRYVIEW(i915)) {
+	if (display->platform.valleyview || display->platform.cherryview) {
 		enum drm_mode_status status;
 
-		status = intel_cpu_transcoder_mode_valid(i915, mode);
+		status = intel_cpu_transcoder_mode_valid(display, mode);
 		if (status != MODE_OK)
 			return status;
 	}
@@ -1756,6 +1757,31 @@ static void vlv_dphy_param_init(struct intel_dsi *intel_dsi)
 	intel_dsi->clk_hs_to_lp_count += extra_byte_count;
 
 	intel_dsi_log_params(intel_dsi);
+}
+
+int vlv_dsi_min_cdclk(const struct intel_crtc_state *crtc_state)
+{
+	struct drm_i915_private *dev_priv = to_i915(crtc_state->uapi.crtc->dev);
+
+	if (!intel_crtc_has_type(crtc_state, INTEL_OUTPUT_DSI))
+		return 0;
+
+	/*
+	 * On Valleyview some DSI panels lose (v|h)sync when the clock is lower
+	 * than 320000KHz.
+	 */
+	if (IS_VALLEYVIEW(dev_priv))
+		return 320000;
+
+	/*
+	 * On Geminilake once the CDCLK gets as low as 79200
+	 * picture gets unstable, despite that values are
+	 * correct for DSI PLL and DE PLL.
+	 */
+	if (IS_GEMINILAKE(dev_priv))
+		return 158400;
+
+	return 0;
 }
 
 typedef void (*vlv_dsi_dmi_quirk_func)(struct intel_dsi *intel_dsi);

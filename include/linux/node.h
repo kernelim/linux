@@ -59,6 +59,11 @@ enum cache_write_policy {
 	NODE_CACHE_WRITE_OTHER,
 };
 
+enum cache_mode {
+	NODE_CACHE_ADDR_MODE_RESERVED,
+	NODE_CACHE_ADDR_MODE_EXTENDED_LINEAR,
+};
+
 /**
  * struct node_cache_attrs - system memory caching attributes
  *
@@ -67,6 +72,7 @@ enum cache_write_policy {
  * @size:		Total size of cache in bytes
  * @line_size:		Number of bytes fetched on a cache miss
  * @level:		The cache hierarchy level
+ * @address_mode:		The address mode
  */
 struct node_cache_attrs {
 	enum cache_indexing indexing;
@@ -74,6 +80,7 @@ struct node_cache_attrs {
 	u64 size;
 	u16 line_size;
 	u8 level;
+	u16 address_mode;
 };
 
 #ifdef CONFIG_HMEM_REPORTING

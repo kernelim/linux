@@ -1656,10 +1656,8 @@ _xfs_buf_ioapply(
 	op |= REQ_META;
 
 	/* in-memory targets are directly mapped, no IO required. */
-	if (xfs_buftarg_is_mem(bp->b_target)) {
-		xfs_buf_ioend(bp);
+	if (xfs_buftarg_is_mem(bp->b_target))
 		return;
-	}
 
 	/*
 	 * Walk all the vectors issuing IO on them. Set up the initial offset
@@ -1857,7 +1855,6 @@ static enum lru_status
 xfs_buftarg_drain_rele(
 	struct list_head	*item,
 	struct list_lru_one	*lru,
-	spinlock_t		*lru_lock,
 	void			*arg)
 
 {
@@ -1956,7 +1953,6 @@ static enum lru_status
 xfs_buftarg_isolate(
 	struct list_head	*item,
 	struct list_lru_one	*lru,
-	spinlock_t		*lru_lock,
 	void			*arg)
 {
 	struct xfs_buf		*bp = container_of(item, struct xfs_buf, b_lru);

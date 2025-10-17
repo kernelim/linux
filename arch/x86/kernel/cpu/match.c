@@ -26,9 +26,9 @@ static bool x86_match_vendor_cpu_type(struct cpuinfo_x86 *c, const struct x86_cp
 		return true;
 
 	if (c->x86_vendor == X86_VENDOR_INTEL)
-		return m->type == c->topo_intel_type;
+		return m->type == c->topo.intel_type;
 	if (c->x86_vendor == X86_VENDOR_AMD)
-		return m->type == c->topo_amd_type;
+		return m->type == c->topo.amd_type;
 
 	return false;
 }

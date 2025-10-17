@@ -1,3 +1,3 @@
-#0-
-0x6e078f5b	pci_try_set_mwi	vmlinux	EXPORT_SYMBOL	
+#1-
+0x8289589e	pci_try_set_mwi	vmlinux	EXPORT_SYMBOL	
 

@@ -100,7 +100,7 @@ vmlinux_link()
 	${ld} ${ldflags} -o ${output}					\
 		${wl}--whole-archive ${objs} ${wl}--no-whole-archive	\
 		${wl}--start-group ${libs} ${wl}--end-group		\
-		${kallsymso} ${btf_vmlinux_bin_o} ${ldlibs}
+		${kallsymso} ${btf_vmlinux_bin_o} ${arch_vmlinux_o} ${ldlibs}
 }
 
 # generate .BTF typeinfo from DWARF debuginfo
@@ -198,6 +198,11 @@ fi
 
 ${MAKE} -f "${srctree}/scripts/Makefile.build" obj=init init/version-timestamp.o
 
+arch_vmlinux_o=
+if is_enabled CONFIG_ARCH_WANTS_PRE_LINK_VMLINUX; then
+	arch_vmlinux_o=arch/${SRCARCH}/tools/vmlinux.arch.o
+fi
+
 btf_vmlinux_bin_o=
 kallsymso=
 strip_debug=
@@ -274,7 +279,11 @@ vmlinux_link vmlinux
 # fill in BTF IDs
 if is_enabled CONFIG_DEBUG_INFO_BTF; then
 	info BTFIDS vmlinux
-	${RESOLVE_BTFIDS} vmlinux
+	RESOLVE_BTFIDS_ARGS=""
+	if is_enabled CONFIG_WERROR; then
+		RESOLVE_BTFIDS_ARGS=" --fatal_warnings "
+	fi
+	${RESOLVE_BTFIDS} ${RESOLVE_BTFIDS_ARGS} vmlinux
 fi
 
 mksysmap vmlinux System.map

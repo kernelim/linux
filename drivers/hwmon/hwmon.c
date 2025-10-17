@@ -330,7 +330,7 @@ static int hwmon_attr_base(enum hwmon_sensor_types type)
 
 static DEFINE_MUTEX(hwmon_pec_mutex);
 
-static int hwmon_match_device(struct device *dev, void *data)
+static int hwmon_match_device(struct device *dev, const void *data)
 {
 	return dev->class == &hwmon_class;
 }
@@ -1063,7 +1063,7 @@ hwmon_device_register_for_thermal(struct device *dev, const char *name,
 
 	return __hwmon_device_register(dev, name, drvdata, NULL, NULL);
 }
-EXPORT_SYMBOL_NS_GPL(hwmon_device_register_for_thermal, HWMON_THERMAL);
+EXPORT_SYMBOL_NS_GPL(hwmon_device_register_for_thermal, "HWMON_THERMAL");
 
 /**
  * hwmon_device_register - register w/ hwmon

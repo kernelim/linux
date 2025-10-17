@@ -1,3 +1,3 @@
-#0-
-0x05a047be	sas_port_add	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL	
+#1-
+0x83f94a18	sas_port_add	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL	
 

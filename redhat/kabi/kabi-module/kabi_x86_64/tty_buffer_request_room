@@ -1,3 +1,3 @@
-#0-
-0x29369a7f	tty_buffer_request_room	vmlinux	EXPORT_SYMBOL_GPL	
+#1-
+0x6c3c9803	tty_buffer_request_room	vmlinux	EXPORT_SYMBOL_GPL	
 

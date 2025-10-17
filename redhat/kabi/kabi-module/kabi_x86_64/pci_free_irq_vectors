@@ -1,3 +1,3 @@
-#0-
-0x00abe20c	pci_free_irq_vectors	vmlinux	EXPORT_SYMBOL	
+#1-
+0xb65f50d8	pci_free_irq_vectors	vmlinux	EXPORT_SYMBOL	
 

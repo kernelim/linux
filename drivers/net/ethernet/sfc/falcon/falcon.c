@@ -2564,7 +2564,7 @@ static void falcon_remove_nic(struct ef4_nic *efx)
 	efx->nic_data = NULL;
 }
 
-static size_t falcon_describe_nic_stats(struct ef4_nic *efx, u8 *names)
+static size_t falcon_describe_nic_stats(struct ef4_nic *efx, u8 **names)
 {
 	return ef4_nic_describe_stats(falcon_stat_desc, FALCON_STAT_COUNT,
 				      falcon_stat_mask, names);
@@ -2657,7 +2657,7 @@ void falcon_stop_nic_stats(struct ef4_nic *efx)
 	++nic_data->stats_disable_count;
 	spin_unlock_bh(&efx->stats_lock);
 
-	del_timer_sync(&nic_data->stats_timer);
+	timer_delete_sync(&nic_data->stats_timer);
 
 	/* Wait enough time for the most recent transfer to
 	 * complete. */

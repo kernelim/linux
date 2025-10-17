@@ -26,6 +26,8 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+#include <linux/bitops.h>
+#include <linux/cgroup_dmem.h>
 #include <linux/debugfs.h>
 #include <linux/fs.h>
 #include <linux/module.h>
@@ -33,12 +35,13 @@
 #include <linux/mount.h>
 #include <linux/pseudo_fs.h>
 #include <linux/slab.h>
+#include <linux/sprintf.h>
 #include <linux/srcu.h>
 #include <linux/xarray.h>
 
 #include <drm/drm_accel.h>
 #include <drm/drm_cache.h>
-#include <drm/drm_client.h>
+#include <drm/drm_client_event.h>
 #include <drm/drm_color_mgmt.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_file.h>
@@ -498,6 +501,72 @@ void drm_dev_unplug(struct drm_device *dev)
 EXPORT_SYMBOL(drm_dev_unplug);
 
 /*
+ * Available recovery methods for wedged device. To be sent along with device
+ * wedged uevent.
+ */
+static const char *drm_get_wedge_recovery(unsigned int opt)
+{
+	switch (BIT(opt)) {
+	case DRM_WEDGE_RECOVERY_NONE:
+		return "none";
+	case DRM_WEDGE_RECOVERY_REBIND:
+		return "rebind";
+	case DRM_WEDGE_RECOVERY_BUS_RESET:
+		return "bus-reset";
+	default:
+		return NULL;
+	}
+}
+
+/**
+ * drm_dev_wedged_event - generate a device wedged uevent
+ * @dev: DRM device
+ * @method: method(s) to be used for recovery
+ *
+ * This generates a device wedged uevent for the DRM device specified by @dev.
+ * Recovery @method\(s) of choice will be sent in the uevent environment as
+ * ``WEDGED=<method1>[,..,<methodN>]`` in order of less to more side-effects.
+ * If caller is unsure about recovery or @method is unknown (0),
+ * ``WEDGED=unknown`` will be sent instead.
+ *
+ * Refer to "Device Wedging" chapter in Documentation/gpu/drm-uapi.rst for more
+ * details.
+ *
+ * Returns: 0 on success, negative error code otherwise.
+ */
+int drm_dev_wedged_event(struct drm_device *dev, unsigned long method)
+{
+	const char *recovery = NULL;
+	unsigned int len, opt;
+	/* Event string length up to 28+ characters with available methods */
+	char event_string[32];
+	char *envp[] = { event_string, NULL };
+
+	len = scnprintf(event_string, sizeof(event_string), "%s", "WEDGED=");
+
+	for_each_set_bit(opt, &method, BITS_PER_TYPE(method)) {
+		recovery = drm_get_wedge_recovery(opt);
+		if (drm_WARN_ONCE(dev, !recovery, "invalid recovery method %u\n", opt))
+			break;
+
+		len += scnprintf(event_string + len, sizeof(event_string) - len, "%s,", recovery);
+	}
+
+	if (recovery)
+		/* Get rid of trailing comma */
+		event_string[len - 1] = '\0';
+	else
+		/* Caller is unsure about recovery, do the best we can at this point. */
+		snprintf(event_string, sizeof(event_string), "%s", "WEDGED=unknown");
+
+	drm_info(dev, "device wedged, %s\n", method == DRM_WEDGE_RECOVERY_NONE ?
+		 "but recovered through reset" : "needs recovery");
+
+	return kobject_uevent_env(&dev->primary->kdev->kobj, KOBJ_CHANGE, envp);
+}
+EXPORT_SYMBOL(drm_dev_wedged_event);
+
+/*
  * DRM internal mount
  * We want to be able to allocate our own "struct address_space" to control
  * memory-mappings in VRAM (or stolen RAM, ...). However, core MM does not allow
@@ -819,6 +888,37 @@ void drm_dev_put(struct drm_device *dev)
 		kref_put(&dev->ref, drm_dev_release);
 }
 EXPORT_SYMBOL(drm_dev_put);
+
+static void drmm_cg_unregister_region(struct drm_device *dev, void *arg)
+{
+	dmem_cgroup_unregister_region(arg);
+}
+
+/**
+ * drmm_cgroup_register_region - Register a region of a DRM device to cgroups
+ * @dev: device for region
+ * @region_name: Region name for registering
+ * @size: Size of region in bytes
+ *
+ * This decreases the ref-count of @dev by one. The device is destroyed if the
+ * ref-count drops to zero.
+ */
+struct dmem_cgroup_region *drmm_cgroup_register_region(struct drm_device *dev, const char *region_name, u64 size)
+{
+	struct dmem_cgroup_region *region;
+	int ret;
+
+	region = dmem_cgroup_register_region(size, "drm/%s/%s", dev->unique, region_name);
+	if (IS_ERR_OR_NULL(region))
+		return region;
+
+	ret = drmm_add_action_or_reset(dev, drmm_cg_unregister_region, region);
+	if (ret)
+		return ERR_PTR(ret);
+
+	return region;
+}
+EXPORT_SYMBOL_GPL(drmm_cgroup_register_region);
 
 static int create_compat_control_link(struct drm_device *dev)
 {

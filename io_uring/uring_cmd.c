@@ -182,18 +182,12 @@ static int io_uring_cmd_prep_setup(struct io_kiocb *req,
 	struct uring_cache *cache;
 
 	cache = io_uring_async_get(req);
-	if (unlikely(!cache))
-		return -ENOMEM;
-
-	if (!(req->flags & REQ_F_FORCE_ASYNC)) {
-		/* defer memcpy until we need it */
-		ioucmd->sqe = sqe;
+	if (cache) {
+		memcpy(cache->sqes, sqe, uring_sqe_size(req->ctx));
+		ioucmd->sqe = req->async_data;
 		return 0;
 	}
-
-	memcpy(req->async_data, sqe, uring_sqe_size(req->ctx));
-	ioucmd->sqe = req->async_data;
-	return 0;
+	return -ENOMEM;
 }
 
 int io_uring_cmd_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
@@ -251,15 +245,8 @@ int io_uring_cmd(struct io_kiocb *req, unsigned int issue_flags)
 	}
 
 	ret = file->f_op->uring_cmd(ioucmd, issue_flags);
-	if (ret == -EAGAIN) {
-		struct uring_cache *cache = req->async_data;
-
-		if (ioucmd->sqe != (void *) cache)
-			memcpy(cache, ioucmd->sqe, uring_sqe_size(req->ctx));
-		return -EAGAIN;
-	} else if (ret == -EIOCBQUEUED) {
-		return -EIOCBQUEUED;
-	}
+	if (ret == -EAGAIN || ret == -EIOCBQUEUED)
+		return ret;
 
 	if (ret < 0)
 		req_set_fail(req);
@@ -269,7 +256,8 @@ int io_uring_cmd(struct io_kiocb *req, unsigned int issue_flags)
 }
 
 int io_uring_cmd_import_fixed(u64 ubuf, unsigned long len, int rw,
-			      struct iov_iter *iter, void *ioucmd)
+			      struct iov_iter *iter, void *ioucmd,
+			      unsigned int issue_flags)
 {
 	struct io_kiocb *req = cmd_to_io_kiocb(ioucmd);
 

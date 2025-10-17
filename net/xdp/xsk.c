@@ -322,7 +322,6 @@ static int xsk_rcv_check(struct xdp_sock *xs, struct xdp_buff *xdp, u32 len)
 		return -ENOSPC;
 	}
 
-	sk_mark_napi_id_once_xdp(&xs->sk, xdp);
 	return 0;
 }
 
@@ -743,6 +742,9 @@ static struct sk_buff *xsk_build_skb(struct xdp_sock *xs,
 						goto free_err;
 				}
 			}
+
+			if (meta->flags & XDP_TXMD_FLAGS_LAUNCH_TIME)
+				skb->skb_mstamp_ns = meta->request.launch_time;
 		}
 	}
 
@@ -908,11 +910,8 @@ static int __xsk_sendmsg(struct socket *sock, struct msghdr *m, size_t total_len
 	if (unlikely(!xs->tx))
 		return -ENOBUFS;
 
-	if (sk_can_busy_loop(sk)) {
-		if (xs->zc)
-			__sk_mark_napi_id_once(sk, xsk_pool_get_napi_id(xs->pool));
+	if (sk_can_busy_loop(sk))
 		sk_busy_loop(sk, 1); /* only support non-blocking sockets */
-	}
 
 	if (xs->zc && xsk_no_wakeup(sk))
 		return 0;
@@ -1297,6 +1296,14 @@ static int xsk_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 	xs->sg = !!(xs->umem->flags & XDP_UMEM_SG_FLAG);
 	xs->queue_id = qid;
 	xp_add_xsk(xs->pool, xs);
+
+	if (xs->zc && qid < dev->real_num_rx_queues) {
+		struct netdev_rx_queue *rxq;
+
+		rxq = __netif_get_rx_queue(dev, qid);
+		if (rxq->napi)
+			__sk_mark_napi_id_once(sk, rxq->napi->napi_id);
+	}
 
 out_unlock:
 	if (err) {

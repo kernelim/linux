@@ -502,7 +502,7 @@ static void ivb_init_clock_gating(struct drm_i915_private *i915)
 			   CHICKEN3_DGMG_REQ_OUT_FIX_DISABLE |
 			   CHICKEN3_DGMG_DONE_FIX_DISABLE);
 
-	if (IS_IVB_GT1(i915))
+	if (INTEL_INFO(i915)->gt == 1)
 		intel_uncore_write(&i915->uncore, GEN7_ROW_CHICKEN2,
 				   _MASKED_BIT_ENABLE(DOP_CLOCK_GATING_DISABLE));
 	else {
@@ -682,7 +682,7 @@ static void i85x_init_clock_gating(struct drm_i915_private *i915)
 	 * Have FBC ignore 3D activity since we use software
 	 * render tracking, and otherwise a pure 3D workload
 	 * (even if it just renders a single frame and then does
-	 * abosultely nothing) would not allow FBC to recompress
+	 * absolutely nothing) would not allow FBC to recompress
 	 * until a 2D blit occurs.
 	 */
 	intel_uncore_write(&i915->uncore, SCPD0,

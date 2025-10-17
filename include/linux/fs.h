@@ -45,6 +45,7 @@
 #include <linux/slab.h>
 #include <linux/maple_tree.h>
 #include <linux/rw_hint.h>
+#include <linux/file_ref.h>
 
 #include <asm/byteorder.h>
 #include <uapi/linux/fs.h>
@@ -346,6 +347,7 @@ struct readahead_control;
 #define IOCB_DIO_CALLER_COMP	(1 << 22)
 /* kiocb is a read or write operation submitted by fs/aio.c. */
 #define IOCB_AIO_RW		(1 << 23)
+#define IOCB_HAS_METADATA	(1 << 24)
 
 /* for use in trace events */
 #define TRACE_IOCB_STRINGS \
@@ -1005,7 +1007,7 @@ static inline int ra_has_index(struct file_ra_state *ra, pgoff_t index)
 
 /**
  * struct file - Represents a file
- * @f_count: reference count
+ * @f_ref: reference count
  * @f_lock: Protects f_ep, f_flags. Must not be taken from IRQ context.
  * @f_mode: FMODE_* flags often used in hotpaths
  * @f_op: file operations
@@ -1030,7 +1032,7 @@ static inline int ra_has_index(struct file_ra_state *ra, pgoff_t index)
  * @f_freeptr: Pointer used by SLAB_TYPESAFE_BY_RCU file cache (don't touch.)
  */
 struct file {
-	atomic_long_t			f_count;
+	file_ref_t			f_ref;
 	spinlock_t			f_lock;
 	fmode_t				f_mode;
 	const struct file_operations	*f_op;
@@ -1078,15 +1080,14 @@ struct file_handle {
 
 static inline struct file *get_file(struct file *f)
 {
-	long prior = atomic_long_fetch_inc_relaxed(&f->f_count);
-	WARN_ONCE(!prior, "struct file::f_count incremented from zero; use-after-free condition present!\n");
+	file_ref_inc(&f->f_ref);
 	return f;
 }
 
 struct file *get_file_rcu(struct file __rcu **f);
 struct file *get_file_active(struct file **f);
 
-#define file_count(x)	atomic_long_read(&(x)->f_count)
+#define file_count(f)	file_ref_read(&(f)->f_ref)
 
 #define	MAX_NON_LFS	((1UL<<31) - 1)
 
@@ -2116,6 +2117,8 @@ struct file_operations {
 #define FOP_HUGE_PAGES		((__force fop_flags_t)(1 << 4))
 /* Treat loff_t as unsigned (e.g., /dev/mem) */
 #define FOP_UNSIGNED_OFFSET	((__force fop_flags_t)(1 << 5))
+/* Supports asynchronous lock callbacks */
+#define FOP_ASYNC_LOCK         ((__force fop_flags_t)(1 << 5))
 
 /* Wrap a directory iterator that needs exclusive inode access */
 int wrap_directory_iterator(struct file *, struct dir_context *,
@@ -2766,7 +2769,18 @@ extern struct filename *getname_flags(const char __user *, int);
 extern struct filename *getname_uflags(const char __user *, int);
 extern struct filename *getname(const char __user *);
 extern struct filename *getname_kernel(const char *);
+extern struct filename *__getname_maybe_null(const char __user *);
+static inline struct filename *getname_maybe_null(const char __user *name, int flags)
+{
+	if (!(flags & AT_EMPTY_PATH))
+		return getname(name);
+
+	if (!name)
+		return NULL;
+	return __getname_maybe_null(name);
+}
 extern void putname(struct filename *name);
+DEFINE_FREE(putname, struct filename *, if (!IS_ERR_OR_NULL(_T)) putname(_T))
 
 extern int finish_open(struct file *file, struct dentry *dentry,
 			int (*open)(struct inode *, struct file *));
@@ -3728,6 +3742,6 @@ static inline bool vfs_empty_path(int dfd, const char __user *path)
 	return !c;
 }
 
-bool generic_atomic_write_valid(struct iov_iter *iter, loff_t pos);
+int generic_atomic_write_valid(struct kiocb *iocb, struct iov_iter *iter);
 
 #endif /* _LINUX_FS_H */

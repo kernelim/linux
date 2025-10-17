@@ -100,7 +100,7 @@ static ssize_t _name##_show(struct device *dev,			\
 {								\
 	struct memory_failure_stats *mf_stats =			\
 		&NODE_DATA(dev->id)->mf_stats;			\
-	return sprintf(buf, "%lu\n", mf_stats->_name);		\
+	return sysfs_emit(buf, "%lu\n", mf_stats->_name);	\
 }								\
 static DEVICE_ATTR_RO(_name)
 
@@ -445,7 +445,7 @@ static unsigned long dev_pagemap_mapping_shift(struct vm_area_struct *vma,
  * Schedule a process for later kill.
  * Uses GFP_ATOMIC allocations to avoid potential recursions in the VM.
  */
-static void __add_to_kill(struct task_struct *tsk, struct page *p,
+static void __add_to_kill(struct task_struct *tsk, const struct page *p,
 			  struct vm_area_struct *vma, struct list_head *to_kill,
 			  unsigned long addr)
 {
@@ -461,7 +461,7 @@ static void __add_to_kill(struct task_struct *tsk, struct page *p,
 	if (is_zone_device_page(p))
 		tk->size_shift = dev_pagemap_mapping_shift(vma, tk->addr);
 	else
-		tk->size_shift = page_shift(compound_head(p));
+		tk->size_shift = folio_shift(page_folio(p));
 
 	/*
 	 * Send SIGKILL if "tk->addr == -EFAULT". Also, as
@@ -486,7 +486,7 @@ static void __add_to_kill(struct task_struct *tsk, struct page *p,
 	list_add_tail(&tk->nd, to_kill);
 }
 
-static void add_to_kill_anon_file(struct task_struct *tsk, struct page *p,
+static void add_to_kill_anon_file(struct task_struct *tsk, const struct page *p,
 		struct vm_area_struct *vma, struct list_head *to_kill,
 		unsigned long addr)
 {
@@ -509,7 +509,7 @@ static bool task_in_to_kill_list(struct list_head *to_kill,
 	return false;
 }
 
-void add_to_kill_ksm(struct task_struct *tsk, struct page *p,
+void add_to_kill_ksm(struct task_struct *tsk, const struct page *p,
 		     struct vm_area_struct *vma, struct list_head *to_kill,
 		     unsigned long addr)
 {
@@ -606,8 +606,9 @@ struct task_struct *task_early_kill(struct task_struct *tsk, int force_early)
 /*
  * Collect processes when the error hit an anonymous page.
  */
-static void collect_procs_anon(struct folio *folio, struct page *page,
-		struct list_head *to_kill, int force_early)
+static void collect_procs_anon(const struct folio *folio,
+		const struct page *page, struct list_head *to_kill,
+		int force_early)
 {
 	struct task_struct *tsk;
 	struct anon_vma *av;
@@ -617,7 +618,7 @@ static void collect_procs_anon(struct folio *folio, struct page *page,
 	if (av == NULL)	/* Not actually mapped anymore */
 		return;
 
-	pgoff = page_to_pgoff(page);
+	pgoff = page_pgoff(folio, page);
 	rcu_read_lock();
 	for_each_process(tsk) {
 		struct vm_area_struct *vma;
@@ -643,8 +644,9 @@ static void collect_procs_anon(struct folio *folio, struct page *page,
 /*
  * Collect processes when the error hit a file mapped page.
  */
-static void collect_procs_file(struct folio *folio, struct page *page,
-		struct list_head *to_kill, int force_early)
+static void collect_procs_file(const struct folio *folio,
+		const struct page *page, struct list_head *to_kill,
+		int force_early)
 {
 	struct vm_area_struct *vma;
 	struct task_struct *tsk;
@@ -653,7 +655,7 @@ static void collect_procs_file(struct folio *folio, struct page *page,
 
 	i_mmap_lock_read(mapping);
 	rcu_read_lock();
-	pgoff = page_to_pgoff(page);
+	pgoff = page_pgoff(folio, page);
 	for_each_process(tsk) {
 		struct task_struct *t = task_early_kill(tsk, force_early);
 		unsigned long addr;
@@ -671,7 +673,7 @@ static void collect_procs_file(struct folio *folio, struct page *page,
 			 */
 			if (vma->vm_mm != t->mm)
 				continue;
-			addr = page_address_in_vma(page, vma);
+			addr = page_address_in_vma(folio, page, vma);
 			add_to_kill_anon_file(t, page, vma, to_kill, addr);
 		}
 	}
@@ -680,7 +682,7 @@ static void collect_procs_file(struct folio *folio, struct page *page,
 }
 
 #ifdef CONFIG_FS_DAX
-static void add_to_kill_fsdax(struct task_struct *tsk, struct page *p,
+static void add_to_kill_fsdax(struct task_struct *tsk, const struct page *p,
 			      struct vm_area_struct *vma,
 			      struct list_head *to_kill, pgoff_t pgoff)
 {
@@ -691,7 +693,7 @@ static void add_to_kill_fsdax(struct task_struct *tsk, struct page *p,
 /*
  * Collect processes when the error hit a fsdax page.
  */
-static void collect_procs_fsdax(struct page *page,
+static void collect_procs_fsdax(const struct page *page,
 		struct address_space *mapping, pgoff_t pgoff,
 		struct list_head *to_kill, bool pre_remove)
 {
@@ -725,7 +727,7 @@ static void collect_procs_fsdax(struct page *page,
 /*
  * Collect the processes who have the corrupted page mapped to kill.
  */
-static void collect_procs(struct folio *folio, struct page *page,
+static void collect_procs(const struct folio *folio, const struct page *page,
 		struct list_head *tokill, int force_early)
 {
 	if (!folio->mapping)
@@ -1554,11 +1556,35 @@ static int get_hwpoison_page(struct page *p, unsigned long flags)
 	return ret;
 }
 
-void unmap_poisoned_folio(struct folio *folio, enum ttu_flags ttu)
+int unmap_poisoned_folio(struct folio *folio, unsigned long pfn, bool must_kill)
 {
-	if (folio_test_hugetlb(folio) && !folio_test_anon(folio)) {
-		struct address_space *mapping;
+	enum ttu_flags ttu = TTU_IGNORE_MLOCK | TTU_SYNC | TTU_HWPOISON;
+	struct address_space *mapping;
 
+	if (folio_test_swapcache(folio)) {
+		pr_err("%#lx: keeping poisoned page in swap cache\n", pfn);
+		ttu &= ~TTU_HWPOISON;
+	}
+
+	/*
+	 * Propagate the dirty bit from PTEs to struct page first, because we
+	 * need this to decide if we should kill or just drop the page.
+	 * XXX: the dirty test could be racy: set_page_dirty() may not always
+	 * be called inside page lock (it's recommended but not enforced).
+	 */
+	mapping = folio_mapping(folio);
+	if (!must_kill && !folio_test_dirty(folio) && mapping &&
+	    mapping_can_writeback(mapping)) {
+		if (folio_mkclean(folio)) {
+			folio_set_dirty(folio);
+		} else {
+			ttu &= ~TTU_HWPOISON;
+			pr_info("%#lx: corrupted page was clean: dropped without side effects\n",
+				pfn);
+		}
+	}
+
+	if (folio_test_hugetlb(folio) && !folio_test_anon(folio)) {
 		/*
 		 * For hugetlb folios in shared mappings, try_to_unmap
 		 * could potentially call huge_pmd_unshare.  Because of
@@ -1570,7 +1596,7 @@ void unmap_poisoned_folio(struct folio *folio, enum ttu_flags ttu)
 		if (!mapping) {
 			pr_info("%#lx: could not lock mapping for mapped hugetlb folio\n",
 				folio_pfn(folio));
-			return;
+			return -EBUSY;
 		}
 
 		try_to_unmap(folio, ttu|TTU_RMAP_LOCKED);
@@ -1578,6 +1604,8 @@ void unmap_poisoned_folio(struct folio *folio, enum ttu_flags ttu)
 	} else {
 		try_to_unmap(folio, ttu);
 	}
+
+	return folio_mapped(folio) ? -EBUSY : 0;
 }
 
 /*
@@ -1587,8 +1615,6 @@ void unmap_poisoned_folio(struct folio *folio, enum ttu_flags ttu)
 static bool hwpoison_user_mappings(struct folio *folio, struct page *p,
 		unsigned long pfn, int flags)
 {
-	enum ttu_flags ttu = TTU_IGNORE_MLOCK | TTU_SYNC | TTU_HWPOISON;
-	struct address_space *mapping;
 	LIST_HEAD(tokill);
 	bool unmap_success;
 	int forcekill;
@@ -1611,29 +1637,6 @@ static bool hwpoison_user_mappings(struct folio *folio, struct page *p,
 	if (!folio_mapped(folio))
 		return true;
 
-	if (folio_test_swapcache(folio)) {
-		pr_err("%#lx: keeping poisoned page in swap cache\n", pfn);
-		ttu &= ~TTU_HWPOISON;
-	}
-
-	/*
-	 * Propagate the dirty bit from PTEs to struct page first, because we
-	 * need this to decide if we should kill or just drop the page.
-	 * XXX: the dirty test could be racy: set_page_dirty() may not always
-	 * be called inside page lock (it's recommended but not enforced).
-	 */
-	mapping = folio_mapping(folio);
-	if (!(flags & MF_MUST_KILL) && !folio_test_dirty(folio) && mapping &&
-	    mapping_can_writeback(mapping)) {
-		if (folio_mkclean(folio)) {
-			folio_set_dirty(folio);
-		} else {
-			ttu &= ~TTU_HWPOISON;
-			pr_info("%#lx: corrupted page was clean: dropped without side effects\n",
-				pfn);
-		}
-	}
-
 	/*
 	 * First collect all the processes that have the page
 	 * mapped in dirty form.  This has to be done before try_to_unmap,
@@ -1641,9 +1644,7 @@ static bool hwpoison_user_mappings(struct folio *folio, struct page *p,
 	 */
 	collect_procs(folio, p, &tokill, flags & MF_ACTION_REQUIRED);
 
-	unmap_poisoned_folio(folio, ttu);
-
-	unmap_success = !folio_mapped(folio);
+	unmap_success = !unmap_poisoned_folio(folio, pfn, flags & MF_MUST_KILL);
 	if (!unmap_success)
 		pr_err("%#lx: failed to unmap page (folio mapcount=%d)\n",
 		       pfn, folio_mapcount(folio));

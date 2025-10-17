@@ -986,7 +986,7 @@ void insert_resource_expand_to_fit(struct resource *root, struct resource *new)
  * to use this interface. The former are built-in and only the latter,
  * CXL, is a module.
  */
-EXPORT_SYMBOL_NS_GPL(insert_resource_expand_to_fit, CXL);
+EXPORT_SYMBOL_NS_GPL(insert_resource_expand_to_fit, "CXL");
 
 /**
  * remove_resource - Remove a resource in the resource tree
@@ -1869,7 +1869,7 @@ static resource_size_t gfr_start(struct resource *base, resource_size_t size,
 	if (flags & GFR_DESCENDING) {
 		resource_size_t end;
 
-		end = min_t(resource_size_t, base->end, PHYSMEM_END);
+		end = min_t(resource_size_t, base->end, DIRECT_MAP_PHYSMEM_END);
 		return end - size + 1;
 	}
 
@@ -1886,7 +1886,7 @@ static bool gfr_continue(struct resource *base, resource_size_t addr,
 	 * @size did not wrap 0.
 	 */
 	return addr > addr - size &&
-	       addr <= min_t(resource_size_t, base->end, PHYSMEM_END);
+	       addr <= min_t(resource_size_t, base->end, DIRECT_MAP_PHYSMEM_END);
 }
 
 static resource_size_t gfr_next(resource_size_t addr, resource_size_t size,

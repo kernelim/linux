@@ -8,6 +8,7 @@
 #include <linux/string_helpers.h>
 
 #include "g4x_dp.h"
+#include "i915_drv.h"
 #include "i915_reg.h"
 #include "intel_audio.h"
 #include "intel_backlight.h"
@@ -19,6 +20,7 @@
 #include "intel_dp.h"
 #include "intel_dp_aux.h"
 #include "intel_dp_link_training.h"
+#include "intel_dp_test.h"
 #include "intel_dpio_phy.h"
 #include "intel_encoder.h"
 #include "intel_fifo_underrun.h"
@@ -49,28 +51,29 @@ static const struct dpll chv_dpll[] = {
 	{ .dot = 270000, .p1 = 4, .p2 = 1, .n = 1, .m1 = 2, .m2 = 0x6c00000 /* 27.0 */ },
 };
 
-const struct dpll *vlv_get_dpll(struct drm_i915_private *i915)
+const struct dpll *vlv_get_dpll(struct intel_display *display)
 {
-	return IS_CHERRYVIEW(i915) ? &chv_dpll[0] : &vlv_dpll[0];
+	return display->platform.cherryview ? &chv_dpll[0] : &vlv_dpll[0];
 }
 
-void g4x_dp_set_clock(struct intel_encoder *encoder,
-		      struct intel_crtc_state *pipe_config)
+static void g4x_dp_set_clock(struct intel_encoder *encoder,
+			     struct intel_crtc_state *pipe_config)
 {
+	struct intel_display *display = to_intel_display(encoder);
 	struct drm_i915_private *dev_priv = to_i915(encoder->base.dev);
 	const struct dpll *divisor = NULL;
 	int i, count = 0;
 
-	if (IS_G4X(dev_priv)) {
+	if (display->platform.g4x) {
 		divisor = g4x_dpll;
 		count = ARRAY_SIZE(g4x_dpll);
 	} else if (HAS_PCH_SPLIT(dev_priv)) {
 		divisor = pch_dpll;
 		count = ARRAY_SIZE(pch_dpll);
-	} else if (IS_CHERRYVIEW(dev_priv)) {
+	} else if (display->platform.cherryview) {
 		divisor = chv_dpll;
 		count = ARRAY_SIZE(chv_dpll);
-	} else if (IS_VALLEYVIEW(dev_priv)) {
+	} else if (display->platform.valleyview) {
 		divisor = vlv_dpll;
 		count = ARRAY_SIZE(vlv_dpll);
 	}
@@ -127,7 +130,7 @@ static void intel_dp_prepare(struct intel_encoder *encoder,
 
 	/* Split out the IBX/CPU vs CPT settings */
 
-	if (IS_IVYBRIDGE(dev_priv) && port == PORT_A) {
+	if (display->platform.ivybridge && port == PORT_A) {
 		if (adjusted_mode->flags & DRM_MODE_FLAG_PHSYNC)
 			intel_dp->DP |= DP_SYNC_HS_HIGH;
 		if (adjusted_mode->flags & DRM_MODE_FLAG_PVSYNC)
@@ -146,7 +149,7 @@ static void intel_dp_prepare(struct intel_encoder *encoder,
 			     pipe_config->enhanced_framing ?
 			     TRANS_DP_ENH_FRAMING : 0);
 	} else {
-		if (IS_G4X(dev_priv) && pipe_config->limited_color_range)
+		if (display->platform.g4x && pipe_config->limited_color_range)
 			intel_dp->DP |= DP_COLOR_RANGE_16_235;
 
 		if (adjusted_mode->flags & DRM_MODE_FLAG_PHSYNC)
@@ -158,7 +161,7 @@ static void intel_dp_prepare(struct intel_encoder *encoder,
 		if (pipe_config->enhanced_framing)
 			intel_dp->DP |= DP_ENHANCED_FRAMING;
 
-		if (IS_CHERRYVIEW(dev_priv))
+		if (display->platform.cherryview)
 			intel_dp->DP |= DP_PIPE_SEL_CHV(crtc->pipe);
 		else
 			intel_dp->DP |= DP_PIPE_SEL(crtc->pipe);
@@ -169,24 +172,22 @@ static void assert_dp_port(struct intel_dp *intel_dp, bool state)
 {
 	struct intel_display *display = to_intel_display(intel_dp);
 	struct intel_digital_port *dig_port = dp_to_dig_port(intel_dp);
-	struct drm_i915_private *dev_priv = to_i915(dig_port->base.base.dev);
 	bool cur_state = intel_de_read(display, intel_dp->output_reg) & DP_PORT_EN;
 
-	I915_STATE_WARN(dev_priv, cur_state != state,
-			"[ENCODER:%d:%s] state assertion failure (expected %s, current %s)\n",
-			dig_port->base.base.base.id, dig_port->base.base.name,
-			str_on_off(state), str_on_off(cur_state));
+	INTEL_DISPLAY_STATE_WARN(display, cur_state != state,
+				 "[ENCODER:%d:%s] state assertion failure (expected %s, current %s)\n",
+				 dig_port->base.base.base.id, dig_port->base.base.name,
+				 str_on_off(state), str_on_off(cur_state));
 }
 #define assert_dp_port_disabled(d) assert_dp_port((d), false)
 
-static void assert_edp_pll(struct drm_i915_private *dev_priv, bool state)
+static void assert_edp_pll(struct intel_display *display, bool state)
 {
-	struct intel_display *display = &dev_priv->display;
 	bool cur_state = intel_de_read(display, DP_A) & DP_PLL_ENABLE;
 
-	I915_STATE_WARN(dev_priv, cur_state != state,
-			"eDP PLL state assertion failure (expected %s, current %s)\n",
-			str_on_off(state), str_on_off(cur_state));
+	INTEL_DISPLAY_STATE_WARN(display, cur_state != state,
+				 "eDP PLL state assertion failure (expected %s, current %s)\n",
+				 str_on_off(state), str_on_off(cur_state));
 }
 #define assert_edp_pll_enabled(d) assert_edp_pll((d), true)
 #define assert_edp_pll_disabled(d) assert_edp_pll((d), false)
@@ -196,11 +197,10 @@ static void ilk_edp_pll_on(struct intel_dp *intel_dp,
 {
 	struct intel_display *display = to_intel_display(intel_dp);
 	struct intel_crtc *crtc = to_intel_crtc(pipe_config->uapi.crtc);
-	struct drm_i915_private *dev_priv = to_i915(crtc->base.dev);
 
-	assert_transcoder_disabled(dev_priv, pipe_config->cpu_transcoder);
+	assert_transcoder_disabled(display, pipe_config->cpu_transcoder);
 	assert_dp_port_disabled(intel_dp);
-	assert_edp_pll_disabled(dev_priv);
+	assert_edp_pll_disabled(display);
 
 	drm_dbg_kms(display->drm, "enabling eDP PLL for clock %d\n",
 		    pipe_config->port_clock);
@@ -222,8 +222,8 @@ static void ilk_edp_pll_on(struct intel_dp *intel_dp,
 	 * 1. Wait for the start of vertical blank on the enabled pipe going to FDI
 	 * 2. Program DP PLL enable
 	 */
-	if (IS_IRONLAKE(dev_priv))
-		intel_wait_for_vblank_if_active(dev_priv, !crtc->pipe);
+	if (display->platform.ironlake)
+		intel_wait_for_vblank_if_active(display, !crtc->pipe);
 
 	intel_dp->DP |= DP_PLL_ENABLE;
 
@@ -236,12 +236,10 @@ static void ilk_edp_pll_off(struct intel_dp *intel_dp,
 			    const struct intel_crtc_state *old_crtc_state)
 {
 	struct intel_display *display = to_intel_display(intel_dp);
-	struct intel_crtc *crtc = to_intel_crtc(old_crtc_state->uapi.crtc);
-	struct drm_i915_private *dev_priv = to_i915(crtc->base.dev);
 
-	assert_transcoder_disabled(dev_priv, old_crtc_state->cpu_transcoder);
+	assert_transcoder_disabled(display, old_crtc_state->cpu_transcoder);
 	assert_dp_port_disabled(intel_dp);
-	assert_edp_pll_enabled(dev_priv);
+	assert_edp_pll_enabled(display);
 
 	drm_dbg_kms(display->drm, "disabling eDP PLL\n");
 
@@ -252,10 +250,9 @@ static void ilk_edp_pll_off(struct intel_dp *intel_dp,
 	udelay(200);
 }
 
-static bool cpt_dp_port_selected(struct drm_i915_private *dev_priv,
+static bool cpt_dp_port_selected(struct intel_display *display,
 				 enum port port, enum pipe *pipe)
 {
-	struct intel_display *display = &dev_priv->display;
 	enum pipe p;
 
 	for_each_pipe(display, p) {
@@ -276,11 +273,11 @@ static bool cpt_dp_port_selected(struct drm_i915_private *dev_priv,
 	return false;
 }
 
-bool g4x_dp_port_enabled(struct drm_i915_private *dev_priv,
+bool g4x_dp_port_enabled(struct intel_display *display,
 			 i915_reg_t dp_reg, enum port port,
 			 enum pipe *pipe)
 {
-	struct intel_display *display = &dev_priv->display;
+	struct drm_i915_private *dev_priv = to_i915(display->drm);
 	bool ret;
 	u32 val;
 
@@ -289,11 +286,11 @@ bool g4x_dp_port_enabled(struct drm_i915_private *dev_priv,
 	ret = val & DP_PORT_EN;
 
 	/* asserts want to know the pipe even if the port is disabled */
-	if (IS_IVYBRIDGE(dev_priv) && port == PORT_A)
+	if (display->platform.ivybridge && port == PORT_A)
 		*pipe = (val & DP_PIPE_SEL_MASK_IVB) >> DP_PIPE_SEL_SHIFT_IVB;
 	else if (HAS_PCH_CPT(dev_priv) && port != PORT_A)
-		ret &= cpt_dp_port_selected(dev_priv, port, pipe);
-	else if (IS_CHERRYVIEW(dev_priv))
+		ret &= cpt_dp_port_selected(display, port, pipe);
+	else if (display->platform.cherryview)
 		*pipe = (val & DP_PIPE_SEL_MASK_CHV) >> DP_PIPE_SEL_SHIFT_CHV;
 	else
 		*pipe = (val & DP_PIPE_SEL_MASK) >> DP_PIPE_SEL_SHIFT;
@@ -304,20 +301,20 @@ bool g4x_dp_port_enabled(struct drm_i915_private *dev_priv,
 static bool intel_dp_get_hw_state(struct intel_encoder *encoder,
 				  enum pipe *pipe)
 {
-	struct drm_i915_private *dev_priv = to_i915(encoder->base.dev);
+	struct intel_display *display = to_intel_display(encoder);
 	struct intel_dp *intel_dp = enc_to_intel_dp(encoder);
 	intel_wakeref_t wakeref;
 	bool ret;
 
-	wakeref = intel_display_power_get_if_enabled(dev_priv,
+	wakeref = intel_display_power_get_if_enabled(display,
 						     encoder->power_domain);
 	if (!wakeref)
 		return false;
 
-	ret = g4x_dp_port_enabled(dev_priv, intel_dp->output_reg,
+	ret = g4x_dp_port_enabled(display, intel_dp->output_reg,
 				  encoder->port, pipe);
 
-	intel_display_power_put(dev_priv, encoder->power_domain, wakeref);
+	intel_display_power_put(display, encoder->power_domain, wakeref);
 
 	return ret;
 }
@@ -389,7 +386,7 @@ static void intel_dp_get_config(struct intel_encoder *encoder,
 
 	pipe_config->hw.adjusted_mode.flags |= flags;
 
-	if (IS_G4X(dev_priv) && tmp & DP_COLOR_RANGE_16_235)
+	if (display->platform.g4x && tmp & DP_COLOR_RANGE_16_235)
 		pipe_config->limited_color_range = true;
 
 	pipe_config->lane_count =
@@ -431,7 +428,7 @@ intel_dp_link_down(struct intel_encoder *encoder,
 
 	drm_dbg_kms(display->drm, "\n");
 
-	if ((IS_IVYBRIDGE(dev_priv) && port == PORT_A) ||
+	if ((display->platform.ivybridge && port == PORT_A) ||
 	    (HAS_PCH_CPT(dev_priv) && port != PORT_A)) {
 		intel_dp->DP &= ~DP_LINK_TRAIN_MASK_CPT;
 		intel_dp->DP |= DP_LINK_TRAIN_PAT_IDLE_CPT;
@@ -456,8 +453,8 @@ intel_dp_link_down(struct intel_encoder *encoder,
 		 * We get CPU/PCH FIFO underruns on the other pipe when
 		 * doing the workaround. Sweep them under the rug.
 		 */
-		intel_set_cpu_fifo_underrun_reporting(dev_priv, PIPE_A, false);
-		intel_set_pch_fifo_underrun_reporting(dev_priv, PIPE_A, false);
+		intel_set_cpu_fifo_underrun_reporting(display, PIPE_A, false);
+		intel_set_pch_fifo_underrun_reporting(display, PIPE_A, false);
 
 		/* always enable with pattern 1 (as per spec) */
 		intel_dp->DP &= ~(DP_PIPE_SEL_MASK | DP_LINK_TRAIN_MASK);
@@ -470,19 +467,15 @@ intel_dp_link_down(struct intel_encoder *encoder,
 		intel_de_write(display, intel_dp->output_reg, intel_dp->DP);
 		intel_de_posting_read(display, intel_dp->output_reg);
 
-		intel_wait_for_vblank_if_active(dev_priv, PIPE_A);
-		intel_set_cpu_fifo_underrun_reporting(dev_priv, PIPE_A, true);
-		intel_set_pch_fifo_underrun_reporting(dev_priv, PIPE_A, true);
+		intel_wait_for_vblank_if_active(display, PIPE_A);
+		intel_set_cpu_fifo_underrun_reporting(display, PIPE_A, true);
+		intel_set_pch_fifo_underrun_reporting(display, PIPE_A, true);
 	}
 
 	msleep(intel_dp->pps.panel_power_down_delay);
 
-	if (IS_VALLEYVIEW(dev_priv) || IS_CHERRYVIEW(dev_priv)) {
-		intel_wakeref_t wakeref;
-
-		with_intel_pps_lock(intel_dp, wakeref)
-			intel_dp->pps.active_pipe = INVALID_PIPE;
-	}
+	if (display->platform.valleyview || display->platform.cherryview)
+		vlv_pps_port_disable(encoder, old_crtc_state);
 }
 
 static void g4x_dp_audio_enable(struct intel_encoder *encoder,
@@ -684,7 +677,6 @@ static void intel_enable_dp(struct intel_atomic_state *state,
 			    const struct drm_connector_state *conn_state)
 {
 	struct intel_display *display = to_intel_display(state);
-	struct drm_i915_private *dev_priv = to_i915(encoder->base.dev);
 	struct intel_dp *intel_dp = enc_to_intel_dp(encoder);
 	u32 dp_reg = intel_de_read(display, intel_dp->output_reg);
 	intel_wakeref_t wakeref;
@@ -693,8 +685,8 @@ static void intel_enable_dp(struct intel_atomic_state *state,
 		return;
 
 	with_intel_pps_lock(intel_dp, wakeref) {
-		if (IS_VALLEYVIEW(dev_priv) || IS_CHERRYVIEW(dev_priv))
-			vlv_pps_init(encoder, pipe_config);
+		if (display->platform.valleyview || display->platform.cherryview)
+			vlv_pps_port_enable_unlocked(encoder, pipe_config);
 
 		intel_dp_enable_port(intel_dp, pipe_config);
 
@@ -703,14 +695,13 @@ static void intel_enable_dp(struct intel_atomic_state *state,
 		intel_pps_vdd_off_unlocked(intel_dp, true);
 	}
 
-	if (IS_VALLEYVIEW(dev_priv) || IS_CHERRYVIEW(dev_priv)) {
+	if (display->platform.valleyview || display->platform.cherryview) {
 		unsigned int lane_mask = 0x0;
 
-		if (IS_CHERRYVIEW(dev_priv))
+		if (display->platform.cherryview)
 			lane_mask = intel_dp_unused_lane_mask(pipe_config->lane_count);
 
-		vlv_wait_port_ready(dev_priv, dp_to_dig_port(intel_dp),
-				    lane_mask);
+		vlv_wait_port_ready(encoder, lane_mask);
 	}
 
 	intel_dp_set_power(intel_dp, DP_SET_POWER_D0);
@@ -1172,12 +1163,8 @@ intel_dp_hotplug(struct intel_encoder *encoder,
 	struct intel_dp *intel_dp = enc_to_intel_dp(encoder);
 	enum intel_hotplug_state state;
 
-	if (intel_dp->compliance.test_active &&
-	    intel_dp->compliance.test_type == DP_TEST_LINK_PHY_TEST_PATTERN) {
-		intel_dp_phy_test(encoder);
-		/* just do the PHY test and nothing else */
+	if (intel_dp_test_phy(intel_dp))
 		return INTEL_HOTPLUG_UNCHANGED;
-	}
 
 	state = intel_encoder_hotplug(encoder, connector);
 
@@ -1232,6 +1219,25 @@ static bool ilk_digital_port_connected(struct intel_encoder *encoder)
 	return intel_de_read(display, DEISR) & bit;
 }
 
+static int g4x_dp_compute_config(struct intel_encoder *encoder,
+				 struct intel_crtc_state *crtc_state,
+				 struct drm_connector_state *conn_state)
+{
+	struct drm_i915_private *i915 = to_i915(encoder->base.dev);
+	int ret;
+
+	if (HAS_PCH_SPLIT(i915) && encoder->port != PORT_A)
+		crtc_state->has_pch_encoder = true;
+
+	ret = intel_dp_compute_config(encoder, crtc_state, conn_state);
+	if (ret)
+		return ret;
+
+	g4x_dp_set_clock(encoder, crtc_state);
+
+	return 0;
+}
+
 static void g4x_dp_suspend_complete(struct intel_encoder *encoder)
 {
 	/*
@@ -1249,36 +1255,18 @@ static void intel_dp_encoder_destroy(struct drm_encoder *encoder)
 	kfree(enc_to_dig_port(to_intel_encoder(encoder)));
 }
 
-enum pipe vlv_active_pipe(struct intel_dp *intel_dp)
-{
-	struct intel_display *display = to_intel_display(intel_dp);
-	struct drm_i915_private *dev_priv = to_i915(display->drm);
-	struct intel_encoder *encoder = &dp_to_dig_port(intel_dp)->base;
-	enum pipe pipe;
-
-	if (g4x_dp_port_enabled(dev_priv, intel_dp->output_reg,
-				encoder->port, &pipe))
-		return pipe;
-
-	return INVALID_PIPE;
-}
-
 static void intel_dp_encoder_reset(struct drm_encoder *encoder)
 {
 	struct intel_display *display = to_intel_display(encoder->dev);
-	struct drm_i915_private *dev_priv = to_i915(encoder->dev);
 	struct intel_dp *intel_dp = enc_to_intel_dp(to_intel_encoder(encoder));
 
 	intel_dp->DP = intel_de_read(display, intel_dp->output_reg);
 
 	intel_dp->reset_link_params = true;
+	intel_dp_invalidate_source_oui(intel_dp);
 
-	if (IS_VALLEYVIEW(dev_priv) || IS_CHERRYVIEW(dev_priv)) {
-		intel_wakeref_t wakeref;
-
-		with_intel_pps_lock(intel_dp, wakeref)
-			intel_dp->pps.active_pipe = vlv_active_pipe(intel_dp);
-	}
+	if (display->platform.valleyview || display->platform.cherryview)
+		vlv_pps_pipe_reset(intel_dp);
 
 	intel_pps_encoder_reset(intel_dp);
 }
@@ -1288,17 +1276,17 @@ static const struct drm_encoder_funcs intel_dp_enc_funcs = {
 	.destroy = intel_dp_encoder_destroy,
 };
 
-bool g4x_dp_init(struct drm_i915_private *dev_priv,
+bool g4x_dp_init(struct intel_display *display,
 		 i915_reg_t output_reg, enum port port)
 {
-	struct intel_display *display = &dev_priv->display;
+	struct drm_i915_private *dev_priv = to_i915(display->drm);
 	const struct intel_bios_encoder_data *devdata;
 	struct intel_digital_port *dig_port;
 	struct intel_encoder *intel_encoder;
 	struct drm_encoder *encoder;
 	struct intel_connector *intel_connector;
 
-	if (!assert_port_valid(dev_priv, port))
+	if (!assert_port_valid(display, port))
 		return false;
 
 	devdata = intel_bios_encoder_data_lookup(display, port);
@@ -1323,7 +1311,7 @@ bool g4x_dp_init(struct drm_i915_private *dev_priv,
 
 	intel_encoder->devdata = devdata;
 
-	mutex_init(&dig_port->hdcp_mutex);
+	mutex_init(&dig_port->hdcp.mutex);
 
 	if (drm_encoder_init(display->drm, &intel_encoder->base,
 			     &intel_dp_enc_funcs, DRM_MODE_ENCODER_TMDS,
@@ -1333,7 +1321,7 @@ bool g4x_dp_init(struct drm_i915_private *dev_priv,
 	intel_encoder_link_check_init(intel_encoder, intel_dp_link_check);
 
 	intel_encoder->hotplug = intel_dp_hotplug;
-	intel_encoder->compute_config = intel_dp_compute_config;
+	intel_encoder->compute_config = g4x_dp_compute_config;
 	intel_encoder->get_hw_state = intel_dp_get_hw_state;
 	intel_encoder->get_config = intel_dp_get_config;
 	intel_encoder->sync_state = intel_dp_sync_state;
@@ -1342,14 +1330,14 @@ bool g4x_dp_init(struct drm_i915_private *dev_priv,
 	intel_encoder->suspend = intel_dp_encoder_suspend;
 	intel_encoder->suspend_complete = g4x_dp_suspend_complete;
 	intel_encoder->shutdown = intel_dp_encoder_shutdown;
-	if (IS_CHERRYVIEW(dev_priv)) {
+	if (display->platform.cherryview) {
 		intel_encoder->pre_pll_enable = chv_dp_pre_pll_enable;
 		intel_encoder->pre_enable = chv_pre_enable_dp;
 		intel_encoder->enable = vlv_enable_dp;
 		intel_encoder->disable = vlv_disable_dp;
 		intel_encoder->post_disable = chv_post_disable_dp;
 		intel_encoder->post_pll_disable = chv_dp_post_pll_disable;
-	} else if (IS_VALLEYVIEW(dev_priv)) {
+	} else if (display->platform.valleyview) {
 		intel_encoder->pre_pll_enable = vlv_dp_pre_pll_enable;
 		intel_encoder->pre_enable = vlv_pre_enable_dp;
 		intel_encoder->enable = vlv_enable_dp;
@@ -1364,24 +1352,24 @@ bool g4x_dp_init(struct drm_i915_private *dev_priv,
 	intel_encoder->audio_enable = g4x_dp_audio_enable;
 	intel_encoder->audio_disable = g4x_dp_audio_disable;
 
-	if ((IS_IVYBRIDGE(dev_priv) && port == PORT_A) ||
+	if ((display->platform.ivybridge && port == PORT_A) ||
 	    (HAS_PCH_CPT(dev_priv) && port != PORT_A))
 		dig_port->dp.set_link_train = cpt_set_link_train;
 	else
 		dig_port->dp.set_link_train = g4x_set_link_train;
 
-	if (IS_CHERRYVIEW(dev_priv))
+	if (display->platform.cherryview)
 		intel_encoder->set_signal_levels = chv_set_signal_levels;
-	else if (IS_VALLEYVIEW(dev_priv))
+	else if (display->platform.valleyview)
 		intel_encoder->set_signal_levels = vlv_set_signal_levels;
-	else if (IS_IVYBRIDGE(dev_priv) && port == PORT_A)
+	else if (display->platform.ivybridge && port == PORT_A)
 		intel_encoder->set_signal_levels = ivb_cpu_edp_set_signal_levels;
-	else if (IS_SANDYBRIDGE(dev_priv) && port == PORT_A)
+	else if (display->platform.sandybridge && port == PORT_A)
 		intel_encoder->set_signal_levels = snb_cpu_edp_set_signal_levels;
 	else
 		intel_encoder->set_signal_levels = g4x_set_signal_levels;
 
-	if (IS_VALLEYVIEW(dev_priv) || IS_CHERRYVIEW(dev_priv) ||
+	if (display->platform.valleyview || display->platform.cherryview ||
 	    (HAS_PCH_SPLIT(dev_priv) && port != PORT_A)) {
 		dig_port->dp.preemph_max = intel_dp_preemph_max_3;
 		dig_port->dp.voltage_max = intel_dp_voltage_max_3;
@@ -1394,8 +1382,8 @@ bool g4x_dp_init(struct drm_i915_private *dev_priv,
 	dig_port->max_lanes = 4;
 
 	intel_encoder->type = INTEL_OUTPUT_DP;
-	intel_encoder->power_domain = intel_display_power_ddi_lanes_domain(dev_priv, port);
-	if (IS_CHERRYVIEW(dev_priv)) {
+	intel_encoder->power_domain = intel_display_power_ddi_lanes_domain(display, port);
+	if (display->platform.cherryview) {
 		if (port == PORT_D)
 			intel_encoder->pipe_mask = BIT(PIPE_C);
 		else
@@ -1405,7 +1393,7 @@ bool g4x_dp_init(struct drm_i915_private *dev_priv,
 	}
 	intel_encoder->cloneable = 0;
 	intel_encoder->port = port;
-	intel_encoder->hpd_pin = intel_hpd_pin_default(dev_priv, port);
+	intel_encoder->hpd_pin = intel_hpd_pin_default(port);
 
 	dig_port->hpd_pulse = intel_dp_hpd_pulse;
 

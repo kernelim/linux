@@ -191,6 +191,26 @@ _c_flags += $(if $(patsubst n%,, \
 	-D__KCSAN_INSTRUMENT_BARRIERS__)
 endif
 
+#
+# Enable AutoFDO build flags except some files or directories we don't want to
+# enable (depends on variables AUTOFDO_PROFILE_obj.o and AUTOFDO_PROFILE).
+#
+ifeq ($(CONFIG_AUTOFDO_CLANG),y)
+_c_flags += $(if $(patsubst n%,, \
+	$(AUTOFDO_PROFILE_$(target-stem).o)$(AUTOFDO_PROFILE)$(is-kernel-object)), \
+	$(CFLAGS_AUTOFDO_CLANG))
+endif
+
+#
+# Enable Propeller build flags except some files or directories we don't want to
+# enable (depends on variables AUTOFDO_PROPELLER_obj.o and PROPELLER_PROFILE).
+#
+ifdef CONFIG_PROPELLER_CLANG
+_c_flags += $(if $(patsubst n%,, \
+	$(AUTOFDO_PROFILE_$(target-stem).o)$(AUTOFDO_PROFILE)$(PROPELLER_PROFILE))$(is-kernel-object), \
+	$(CFLAGS_PROPELLER_CLANG))
+endif
+
 # $(src) for including checkin headers from generated source files
 # $(obj) for including generated headers from checkin source files
 ifeq ($(KBUILD_EXTMOD),)
@@ -257,8 +277,12 @@ objtool-args-$(CONFIG_MITIGATION_SLS)			+= --sls
 objtool-args-$(CONFIG_STACK_VALIDATION)			+= --stackval
 objtool-args-$(CONFIG_HAVE_STATIC_CALL_INLINE)		+= --static-call
 objtool-args-$(CONFIG_HAVE_UACCESS_VALIDATION)		+= --uaccess
-objtool-args-$(CONFIG_GCOV_KERNEL)			+= --no-unreachable
+objtool-args-$(or $(CONFIG_GCOV_KERNEL),$(CONFIG_KCOV))	+= --no-unreachable
 objtool-args-$(CONFIG_PREFIX_SYMBOLS)			+= --prefix=$(CONFIG_FUNCTION_PADDING_BYTES)
+# RHEL-only: don't enforce OBJTOOL_WERROR for out of tree modules
+ifeq ($(KBUILD_EXTMOD),)
+objtool-args-$(CONFIG_OBJTOOL_WERROR)			+= --Werror
+endif
 
 objtool-args = $(objtool-args-y)					\
 	$(if $(delay-objtool), --link)					\

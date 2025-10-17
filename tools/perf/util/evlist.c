@@ -48,6 +48,7 @@
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/timerfd.h>
+#include <sys/wait.h>
 
 #include <linux/bitops.h>
 #include <linux/hash.h>
@@ -318,62 +319,6 @@ struct evsel *evlist__add_sched_switch(struct evlist *evlist, bool system_wide)
 	return evsel;
 }
 #endif
-
-int evlist__add_attrs(struct evlist *evlist, struct perf_event_attr *attrs, size_t nr_attrs)
-{
-	struct evsel *evsel, *n;
-	LIST_HEAD(head);
-	size_t i;
-
-	for (i = 0; i < nr_attrs; i++) {
-		evsel = evsel__new_idx(attrs + i, evlist->core.nr_entries + i);
-		if (evsel == NULL)
-			goto out_delete_partial_list;
-		list_add_tail(&evsel->core.node, &head);
-	}
-
-	evlist__splice_list_tail(evlist, &head);
-
-	return 0;
-
-out_delete_partial_list:
-	__evlist__for_each_entry_safe(&head, n, evsel)
-		evsel__delete(evsel);
-	return -1;
-}
-
-int __evlist__add_default_attrs(struct evlist *evlist, struct perf_event_attr *attrs, size_t nr_attrs)
-{
-	size_t i;
-
-	for (i = 0; i < nr_attrs; i++)
-		event_attr_init(attrs + i);
-
-	return evlist__add_attrs(evlist, attrs, nr_attrs);
-}
-
-__weak int arch_evlist__add_default_attrs(struct evlist *evlist,
-					  struct perf_event_attr *attrs,
-					  size_t nr_attrs)
-{
-	if (!nr_attrs)
-		return 0;
-
-	return __evlist__add_default_attrs(evlist, attrs, nr_attrs);
-}
-
-struct evsel *evlist__find_tracepoint_by_id(struct evlist *evlist, int id)
-{
-	struct evsel *evsel;
-
-	evlist__for_each_entry(evlist, evsel) {
-		if (evsel->core.attr.type   == PERF_TYPE_TRACEPOINT &&
-		    (int)evsel->core.attr.config == id)
-			return evsel;
-	}
-
-	return NULL;
-}
 
 struct evsel *evlist__find_tracepoint_by_name(struct evlist *evlist, const char *name)
 {
@@ -1199,11 +1144,6 @@ int evlist__set_tp_filter_pids(struct evlist *evlist, size_t npids, pid_t *pids)
 	return ret;
 }
 
-int evlist__set_tp_filter_pid(struct evlist *evlist, pid_t pid)
-{
-	return evlist__set_tp_filter_pids(evlist, 1, &pid);
-}
-
 int evlist__append_tp_filter_pids(struct evlist *evlist, size_t npids, pid_t *pids)
 {
 	char *filter = asprintf__tp_filter_pids(npids, pids);
@@ -1433,19 +1373,18 @@ static int evlist__create_syswide_maps(struct evlist *evlist)
 	 */
 	cpus = perf_cpu_map__new_online_cpus();
 	if (!cpus)
-		goto out;
+		return -ENOMEM;
 
 	threads = perf_thread_map__new_dummy();
-	if (!threads)
-		goto out_put;
+	if (!threads) {
+		perf_cpu_map__put(cpus);
+		return -ENOMEM;
+	}
 
 	perf_evlist__set_maps(&evlist->core, cpus, threads);
-
 	perf_thread_map__put(threads);
-out_put:
 	perf_cpu_map__put(cpus);
-out:
-	return -ENOMEM;
+	return 0;
 }
 
 int evlist__open(struct evlist *evlist)
@@ -1483,6 +1422,8 @@ int evlist__prepare_workload(struct evlist *evlist, struct target *target, const
 {
 	int child_ready_pipe[2], go_pipe[2];
 	char bf;
+
+	evlist->workload.cork_fd = -1;
 
 	if (pipe(child_ready_pipe) < 0) {
 		perror("failed to create 'ready' pipe");
@@ -1536,7 +1477,7 @@ int evlist__prepare_workload(struct evlist *evlist, struct target *target, const
 		 * For cancelling the workload without actually running it,
 		 * the parent will just close workload.cork_fd, without writing
 		 * anything, i.e. read will return zero and we just exit()
-		 * here.
+		 * here (See evlist__cancel_workload()).
 		 */
 		if (ret != 1) {
 			if (ret == -1)
@@ -1600,7 +1541,7 @@ out_close_ready_pipe:
 
 int evlist__start_workload(struct evlist *evlist)
 {
-	if (evlist->workload.cork_fd > 0) {
+	if (evlist->workload.cork_fd >= 0) {
 		char bf = 0;
 		int ret;
 		/*
@@ -1611,10 +1552,22 @@ int evlist__start_workload(struct evlist *evlist)
 			perror("unable to write to pipe");
 
 		close(evlist->workload.cork_fd);
+		evlist->workload.cork_fd = -1;
 		return ret;
 	}
 
 	return 0;
+}
+
+void evlist__cancel_workload(struct evlist *evlist)
+{
+	int status;
+
+	if (evlist->workload.cork_fd >= 0) {
+		close(evlist->workload.cork_fd);
+		evlist->workload.cork_fd = -1;
+		waitpid(evlist->workload.pid, &status, WNOHANG);
+	}
 }
 
 int evlist__parse_sample(struct evlist *evlist, union perf_event *event, struct perf_sample *sample)
@@ -2581,10 +2534,10 @@ void evlist__warn_user_requested_cpus(struct evlist *evlist, const char *cpu_lis
 		return;
 
 	evlist__for_each_entry(evlist, pos) {
-		struct perf_cpu_map *intersect, *to_test;
+		struct perf_cpu_map *intersect, *to_test, *online = cpu_map__online();
 		const struct perf_pmu *pmu = evsel__find_pmu(pos);
 
-		to_test = pmu && pmu->is_core ? pmu->cpus : cpu_map__online();
+		to_test = pmu && pmu->is_core ? pmu->cpus : online;
 		intersect = perf_cpu_map__intersect(to_test, user_requested_cpus);
 		if (!perf_cpu_map__equal(intersect, user_requested_cpus)) {
 			char buf[128];
@@ -2594,6 +2547,7 @@ void evlist__warn_user_requested_cpus(struct evlist *evlist, const char *cpu_lis
 				cpu_list, pmu ? pmu->name : "cpu", buf, evsel__name(pos));
 		}
 		perf_cpu_map__put(intersect);
+		perf_cpu_map__put(online);
 	}
 	perf_cpu_map__put(user_requested_cpus);
 }
@@ -2619,7 +2573,8 @@ void evlist__uniquify_name(struct evlist *evlist)
 		else
 			attributes = empty_attributes;
 
-		if (asprintf(&new_name, "%s/%s/%s", pos->pmu_name, pos->name, attributes + 1)) {
+		if (asprintf(&new_name, "%s/%s/%s", pos->pmu ? pos->pmu->name : "",
+			     pos->name, attributes + 1)) {
 			free(pos->name);
 			pos->name = new_name;
 		} else {
@@ -2634,6 +2589,20 @@ bool evlist__has_bpf_output(struct evlist *evlist)
 
 	evlist__for_each_entry(evlist, evsel) {
 		if (evsel__is_bpf_output(evsel))
+			return true;
+	}
+
+	return false;
+}
+
+bool evlist__needs_bpf_sb_event(struct evlist *evlist)
+{
+	struct evsel *evsel;
+
+	evlist__for_each_entry(evlist, evsel) {
+		if (evsel__is_dummy_event(evsel))
+			continue;
+		if (!evsel->core.attr.exclude_kernel)
 			return true;
 	}
 

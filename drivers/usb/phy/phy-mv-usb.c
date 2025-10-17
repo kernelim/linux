@@ -109,7 +109,7 @@ static int mv_otg_cancel_timer(struct mv_otg *mvotg, unsigned int id)
 	timer = &mvotg->otg_ctrl.timer[id];
 
 	if (timer_pending(timer))
-		del_timer(timer);
+		timer_delete(timer);
 
 	return 0;
 }
@@ -867,7 +867,7 @@ static int mv_otg_resume(struct platform_device *pdev)
 
 static struct platform_driver mv_otg_driver = {
 	.probe = mv_otg_probe,
-	.remove_new = mv_otg_remove,
+	.remove = mv_otg_remove,
 	.driver = {
 		   .name = driver_name,
 		   .dev_groups = mv_otg_groups,

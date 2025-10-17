@@ -1,3 +1,3 @@
-#0-
-0x9d04eb39	netdev_reset_tc	vmlinux	EXPORT_SYMBOL	
+#1-
+0xc248b8f1	netdev_reset_tc	vmlinux	EXPORT_SYMBOL	
 

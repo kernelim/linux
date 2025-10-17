@@ -861,8 +861,6 @@ static const struct vb2_ops rcar_drif_vb2_ops = {
 	.buf_queue              = rcar_drif_buf_queue,
 	.start_streaming        = rcar_drif_start_streaming,
 	.stop_streaming         = rcar_drif_stop_streaming,
-	.wait_prepare		= vb2_ops_wait_prepare,
-	.wait_finish		= vb2_ops_wait_finish,
 };
 
 static int rcar_drif_querycap(struct file *file, void *fh,
@@ -1475,7 +1473,7 @@ static struct platform_driver rcar_drif_driver = {
 		.pm = &rcar_drif_pm_ops,
 		},
 	.probe = rcar_drif_probe,
-	.remove_new = rcar_drif_remove,
+	.remove = rcar_drif_remove,
 };
 
 module_platform_driver(rcar_drif_driver);
