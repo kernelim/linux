@@ -25,6 +25,7 @@ available subsections can be seen below.
    dma-buf
    device_link
    component
+   extcon
    message-based
    infiniband
    aperture

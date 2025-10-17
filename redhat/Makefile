@@ -270,7 +270,7 @@ else
     else
       # This value is used by the dist[g]-targets.  Changing this value has significant
       # consequences for all of RHEL kernel engineering.
-      BUILD_TARGET:=rhel-$(RHEL_MAJOR).$(RHEL_MINOR).0-z-test-pesign
+      BUILD_TARGET:=rhel-$(RHEL_MAJOR).$(RHEL_MINOR).0-test-pesign
     endif
   endif
   ifeq ("$(DIST)", ".eln)
@@ -632,7 +632,6 @@ sources-rh: $(TARBALL) generate-testpatch-tmp setup-source dist-configs-check
 		mod-denylist.sh \
 		mod-internal.list \
 		mod-partner.list \
-		mod-kvm.list \
 		mod-sign.sh \
 		scripts/uki_addons/uki_create_addons.py \
 		scripts/uki_addons/uki_addons.json \
@@ -645,6 +644,7 @@ sources-rh: $(TARBALL) generate-testpatch-tmp setup-source dist-configs-check
 		README.rst \
 		kernel-local \
 		dracut-virt.conf \
+		keys/redhatsecureboot504.cer \
 		$(SOURCES)/
 	@cat $$(ls -1 $(PACKAGE_NAME).changelog-* | sort -t '.' -k 3 -n -r) \
 		> $(SOURCES)/kernel.changelog

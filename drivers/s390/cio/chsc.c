@@ -24,7 +24,6 @@
 #include <asm/crw.h>
 #include <asm/isc.h>
 #include <asm/ebcdic.h>
-#include <asm/ap.h>
 
 #include "css.h"
 #include "cio.h"
@@ -39,6 +38,20 @@ static DEFINE_SPINLOCK(chsc_page_lock);
 
 #define SEI_VF_FLA	0xc0 /* VF flag for Full Link Address */
 #define SEI_RS_CHPID	0x4  /* 4 in RS field indicates CHPID */
+
+static BLOCKING_NOTIFIER_HEAD(chsc_notifiers);
+
+int chsc_notifier_register(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_register(&chsc_notifiers, nb);
+}
+EXPORT_SYMBOL(chsc_notifier_register);
+
+int chsc_notifier_unregister(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_unregister(&chsc_notifiers, nb);
+}
+EXPORT_SYMBOL(chsc_notifier_unregister);
 
 /**
  * chsc_error_from_response() - convert a chsc response to an error
@@ -219,16 +232,16 @@ EXPORT_SYMBOL_GPL(chsc_sadc);
 
 static int s390_subchannel_remove_chpid(struct subchannel *sch, void *data)
 {
-	spin_lock_irq(sch->lock);
+	spin_lock_irq(&sch->lock);
 	if (sch->driver && sch->driver->chp_event)
 		if (sch->driver->chp_event(sch, data, CHP_OFFLINE) != 0)
 			goto out_unreg;
-	spin_unlock_irq(sch->lock);
+	spin_unlock_irq(&sch->lock);
 	return 0;
 
 out_unreg:
 	sch->lpm = 0;
-	spin_unlock_irq(sch->lock);
+	spin_unlock_irq(&sch->lock);
 	css_schedule_eval(sch->schid);
 	return 0;
 }
@@ -258,10 +271,10 @@ void chsc_chp_offline(struct chp_id chpid)
 
 static int __s390_process_res_acc(struct subchannel *sch, void *data)
 {
-	spin_lock_irq(sch->lock);
+	spin_lock_irq(&sch->lock);
 	if (sch->driver && sch->driver->chp_event)
 		sch->driver->chp_event(sch, data, CHP_ONLINE);
-	spin_unlock_irq(sch->lock);
+	spin_unlock_irq(&sch->lock);
 
 	return 0;
 }
@@ -292,10 +305,10 @@ static void s390_process_res_acc(struct chp_link *link)
 
 static int process_fces_event(struct subchannel *sch, void *data)
 {
-	spin_lock_irq(sch->lock);
+	spin_lock_irq(&sch->lock);
 	if (sch->driver && sch->driver->chp_event)
 		sch->driver->chp_event(sch, data, CHP_FCES_EVENT);
-	spin_unlock_irq(sch->lock);
+	spin_unlock_irq(&sch->lock);
 	return 0;
 }
 
@@ -581,7 +594,8 @@ static void chsc_process_sei_ap_cfg_chg(struct chsc_sei_nt0_area *sei_area)
 	if (sei_area->rs != 5)
 		return;
 
-	ap_bus_cfg_chg();
+	blocking_notifier_call_chain(&chsc_notifiers,
+				     CHSC_NOTIFY_AP_CFG, NULL);
 }
 
 static void chsc_process_sei_fces_event(struct chsc_sei_nt0_area *sei_area)
@@ -769,11 +783,11 @@ static void __s390_subchannel_vary_chpid(struct subchannel *sch,
 
 	memset(&link, 0, sizeof(struct chp_link));
 	link.chpid = chpid;
-	spin_lock_irqsave(sch->lock, flags);
+	spin_lock_irqsave(&sch->lock, flags);
 	if (sch->driver && sch->driver->chp_event)
 		sch->driver->chp_event(sch, &link,
 				       on ? CHP_VARY_ON : CHP_VARY_OFF);
-	spin_unlock_irqrestore(sch->lock, flags);
+	spin_unlock_irqrestore(&sch->lock, flags);
 }
 
 static int s390_subchannel_vary_chpid_off(struct subchannel *sch, void *data)
@@ -844,7 +858,7 @@ chsc_add_cmg_attr(struct channel_subsystem *css)
 	}
 	return ret;
 cleanup:
-	for (--i; i >= 0; i--) {
+	while (i--) {
 		if (!css->chps[i])
 			continue;
 		chp_remove_cmg_attr(css->chps[i]);
@@ -1128,8 +1142,8 @@ int __init chsc_init(void)
 {
 	int ret;
 
-	sei_page = (void *)get_zeroed_page(GFP_KERNEL | GFP_DMA);
-	chsc_page = (void *)get_zeroed_page(GFP_KERNEL | GFP_DMA);
+	sei_page = (void *)get_zeroed_page(GFP_KERNEL);
+	chsc_page = (void *)get_zeroed_page(GFP_KERNEL);
 	if (!sei_page || !chsc_page) {
 		ret = -ENOMEM;
 		goto out_err;

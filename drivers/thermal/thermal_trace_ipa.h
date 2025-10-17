@@ -7,6 +7,8 @@
 
 #include <linux/tracepoint.h>
 
+#include "thermal_core.h"
+
 TRACE_EVENT(thermal_power_allocator,
 	TP_PROTO(struct thermal_zone_device *tz, u32 *req_power,
 		 u32 total_req_power, u32 *granted_power,

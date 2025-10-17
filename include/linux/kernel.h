@@ -37,6 +37,14 @@
  */
 #define REPEAT_BYTE(x)	((~0ul / 0xff) * (x))
 
+/**
+ * REPEAT_BYTE_U32 - repeat the value @x multiple times as a u32 value
+ * @x: value to repeat
+ *
+ * NOTE: @x is not checked for > 0xff; larger values produce odd results.
+ */
+#define REPEAT_BYTE_U32(x)	lower_32_bits(REPEAT_BYTE(x))
+
 /* generic data direction definitions */
 #define READ			0
 #define WRITE			1

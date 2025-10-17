@@ -8,7 +8,6 @@
 #include <linux/version.h>
 
 #include <net/mana/mana.h>
-#include <net/mana/hw_channel.h>
 
 #include <linux/cpu.h>
 struct dentry *mana_debugfs_root;
@@ -31,9 +30,6 @@ static void mana_gd_init_pf_regs(struct pci_dev *pdev)
 
 	gc->db_page_size = mana_gd_r32(gc, GDMA_PF_REG_DB_PAGE_SIZE) & 0xFFFF;
 	gc->db_page_base = gc->bar0_va +
-				mana_gd_r64(gc, GDMA_PF_REG_DB_PAGE_OFF);
-
-	gc->phys_db_page_base = gc->bar0_pa +
 				mana_gd_r64(gc, GDMA_PF_REG_DB_PAGE_OFF);
 
 	sriov_base_off = mana_gd_r64(gc, GDMA_SRIOV_REG_CFG_BASE_OFF);
@@ -66,24 +62,6 @@ static void mana_gd_init_registers(struct pci_dev *pdev)
 		mana_gd_init_pf_regs(pdev);
 	else
 		mana_gd_init_vf_regs(pdev);
-}
-
-/* Suppress logging when we set timeout to zero */
-bool mana_need_log(struct gdma_context *gc, int err)
-{
-	struct hw_channel_context *hwc;
-
-	if (err != -ETIMEDOUT)
-		return true;
-
-	if (!gc)
-		return true;
-
-	hwc = gc->hwc.driver_data;
-	if (hwc && hwc->hwc_timeout == 0)
-		return false;
-
-	return true;
 }
 
 static int mana_gd_query_max_resources(struct pci_dev *pdev)
@@ -289,9 +267,8 @@ static int mana_gd_disable_queue(struct gdma_queue *queue)
 
 	err = mana_gd_send_request(gc, sizeof(req), &req, sizeof(resp), &resp);
 	if (err || resp.hdr.status) {
-		if (mana_need_log(gc, err))
-			dev_err(gc->dev, "Failed to disable queue: %d, 0x%x\n", err,
-				resp.hdr.status);
+		dev_err(gc->dev, "Failed to disable queue: %d, 0x%x\n", err,
+			resp.hdr.status);
 		return err ? err : -EPROTO;
 	}
 
@@ -361,6 +338,7 @@ void mana_gd_wq_ring_doorbell(struct gdma_context *gc, struct gdma_queue *queue)
 	mana_gd_ring_doorbell(gc, queue->gdma_dev->doorbell, queue->type,
 			      queue->id, queue->head * GDMA_WQE_BU_SIZE, 0);
 }
+EXPORT_SYMBOL_NS(mana_gd_wq_ring_doorbell, NET_MANA);
 
 void mana_gd_ring_cq(struct gdma_queue *cq, u8 arm_bit)
 {
@@ -373,114 +351,13 @@ void mana_gd_ring_cq(struct gdma_queue *cq, u8 arm_bit)
 	mana_gd_ring_doorbell(gc, cq->gdma_dev->doorbell, cq->type, cq->id,
 			      head, arm_bit);
 }
-
-#define MANA_SERVICE_PERIOD 10
-
-static void mana_serv_fpga(struct pci_dev *pdev)
-{
-	struct pci_bus *bus, *parent;
-
-	pci_lock_rescan_remove();
-
-	bus = pdev->bus;
-	if (!bus) {
-		dev_err(&pdev->dev, "MANA service: no bus\n");
-		goto out;
-	}
-
-	parent = bus->parent;
-	if (!parent) {
-		dev_err(&pdev->dev, "MANA service: no parent bus\n");
-		goto out;
-	}
-
-	pci_stop_and_remove_bus_device(bus->self);
-
-	msleep(MANA_SERVICE_PERIOD * 1000);
-
-	pci_rescan_bus(parent);
-
-out:
-	pci_unlock_rescan_remove();
-}
-
-static void mana_serv_reset(struct pci_dev *pdev)
-{
-	struct gdma_context *gc = pci_get_drvdata(pdev);
-	struct hw_channel_context *hwc;
-
-	if (!gc) {
-		dev_err(&pdev->dev, "MANA service: no GC\n");
-		return;
-	}
-
-	hwc = gc->hwc.driver_data;
-	if (!hwc) {
-		dev_err(&pdev->dev, "MANA service: no HWC\n");
-		goto out;
-	}
-
-	/* HWC is not responding in this case, so don't wait */
-	hwc->hwc_timeout = 0;
-
-	dev_info(&pdev->dev, "MANA reset cycle start\n");
-
-	mana_gd_suspend(pdev, PMSG_SUSPEND);
-
-	msleep(MANA_SERVICE_PERIOD * 1000);
-
-	mana_gd_resume(pdev);
-
-	dev_info(&pdev->dev, "MANA reset cycle completed\n");
-
-out:
-	gc->in_service = false;
-}
-
-struct mana_serv_work {
-	struct work_struct serv_work;
-	struct pci_dev *pdev;
-	enum gdma_eqe_type type;
-};
-
-static void mana_serv_func(struct work_struct *w)
-{
-	struct mana_serv_work *mns_wk;
-	struct pci_dev *pdev;
-
-	mns_wk = container_of(w, struct mana_serv_work, serv_work);
-	pdev = mns_wk->pdev;
-
-	if (!pdev)
-		goto out;
-
-	switch (mns_wk->type) {
-	case GDMA_EQE_HWC_FPGA_RECONFIG:
-		mana_serv_fpga(pdev);
-		break;
-
-	case GDMA_EQE_HWC_RESET_REQUEST:
-		mana_serv_reset(pdev);
-		break;
-
-	default:
-		dev_err(&pdev->dev, "MANA service: unknown type %d\n",
-			mns_wk->type);
-		break;
-	}
-
-out:
-	pci_dev_put(pdev);
-	kfree(mns_wk);
-	module_put(THIS_MODULE);
-}
+EXPORT_SYMBOL_NS(mana_gd_ring_cq, NET_MANA);
 
 static void mana_gd_process_eqe(struct gdma_queue *eq)
 {
 	u32 head = eq->head % (eq->queue_size / GDMA_EQE_SIZE);
 	struct gdma_context *gc = eq->gdma_dev->gdma_context;
 	struct gdma_eqe *eq_eqe_ptr = eq->queue_mem_ptr;
-	struct mana_serv_work *mns_wk;
 	union gdma_eqe_info eqe_info;
 	enum gdma_eqe_type type;
 	struct gdma_event event;
@@ -515,6 +392,7 @@ static void mana_gd_process_eqe(struct gdma_queue *eq)
 	case GDMA_EQE_HWC_INIT_EQ_ID_DB:
 	case GDMA_EQE_HWC_INIT_DATA:
 	case GDMA_EQE_HWC_INIT_DONE:
+	case GDMA_EQE_HWC_SOC_SERVICE:
 	case GDMA_EQE_RNIC_QP_FATAL:
 		if (!eq->eq.callback)
 			break;
@@ -522,35 +400,6 @@ static void mana_gd_process_eqe(struct gdma_queue *eq)
 		event.type = type;
 		memcpy(&event.details, &eqe->details, GDMA_EVENT_DATA_SIZE);
 		eq->eq.callback(eq->eq.context, eq, &event);
-		break;
-
-	case GDMA_EQE_HWC_FPGA_RECONFIG:
-	case GDMA_EQE_HWC_RESET_REQUEST:
-		dev_info(gc->dev, "Recv MANA service type:%d\n", type);
-
-		if (gc->in_service) {
-			dev_info(gc->dev, "Already in service\n");
-			break;
-		}
-
-		if (!try_module_get(THIS_MODULE)) {
-			dev_info(gc->dev, "Module is unloading\n");
-			break;
-		}
-
-		mns_wk = kzalloc(sizeof(*mns_wk), GFP_ATOMIC);
-		if (!mns_wk) {
-			module_put(THIS_MODULE);
-			break;
-		}
-
-		dev_info(gc->dev, "Start MANA service type:%d\n", type);
-		gc->in_service = true;
-		mns_wk->pdev = to_pci_dev(gc->dev);
-		mns_wk->type = type;
-		pci_dev_get(mns_wk->pdev);
-		INIT_WORK(&mns_wk->serv_work, mana_serv_func);
-		schedule_work(&mns_wk->serv_work);
 		break;
 
 	default:
@@ -694,8 +543,7 @@ int mana_gd_test_eq(struct gdma_context *gc, struct gdma_queue *eq)
 
 	err = mana_gd_send_request(gc, sizeof(req), &req, sizeof(resp), &resp);
 	if (err) {
-		if (mana_need_log(gc, err))
-			dev_err(dev, "test_eq failed: %d\n", err);
+		dev_err(dev, "test_eq failed: %d\n", err);
 		goto out;
 	}
 
@@ -730,7 +578,7 @@ static void mana_gd_destroy_eq(struct gdma_context *gc, bool flush_evenets,
 
 	if (flush_evenets) {
 		err = mana_gd_test_eq(gc, queue);
-		if (err && mana_need_log(gc, err))
+		if (err)
 			dev_warn(gc->dev, "Failed to flush EQ: %d\n", err);
 	}
 
@@ -876,9 +724,8 @@ int mana_gd_destroy_dma_region(struct gdma_context *gc, u64 dma_region_handle)
 
 	err = mana_gd_send_request(gc, sizeof(req), &req, sizeof(resp), &resp);
 	if (err || resp.hdr.status) {
-		if (mana_need_log(gc, err))
-			dev_err(gc->dev, "Failed to destroy DMA region: %d, 0x%x\n",
-				err, resp.hdr.status);
+		dev_err(gc->dev, "Failed to destroy DMA region: %d, 0x%x\n",
+			err, resp.hdr.status);
 		return -EPROTO;
 	}
 
@@ -1051,6 +898,7 @@ free_q:
 	kfree(queue);
 	return err;
 }
+EXPORT_SYMBOL_NS(mana_gd_create_mana_wq_cq, NET_MANA);
 
 void mana_gd_destroy_queue(struct gdma_context *gc, struct gdma_queue *queue)
 {
@@ -1118,6 +966,7 @@ int mana_gd_verify_vf_version(struct pci_dev *pdev)
 			err, resp.hdr.status);
 		return err ? err : -EPROTO;
 	}
+	gc->pf_cap_flags1 = resp.pf_cap_flags1;
 	if (resp.pf_cap_flags1 & GDMA_DRV_CAP_FLAG_1_HWC_TIMEOUT_RECONFIG) {
 		err = mana_gd_query_hwc_timeout(pdev, &hwc->hwc_timeout);
 		if (err) {
@@ -1158,7 +1007,6 @@ int mana_gd_register_device(struct gdma_dev *gd)
 
 	return 0;
 }
-EXPORT_SYMBOL_NS(mana_gd_register_device, NET_MANA);
 
 int mana_gd_deregister_device(struct gdma_dev *gd)
 {
@@ -1177,9 +1025,8 @@ int mana_gd_deregister_device(struct gdma_dev *gd)
 
 	err = mana_gd_send_request(gc, sizeof(req), &req, sizeof(resp), &resp);
 	if (err || resp.hdr.status) {
-		if (mana_need_log(gc, err))
-			dev_err(gc->dev, "Failed to deregister device: %d, 0x%x\n",
-				err, resp.hdr.status);
+		dev_err(gc->dev, "Failed to deregister device: %d, 0x%x\n",
+			err, resp.hdr.status);
 		if (!err)
 			err = -EPROTO;
 	}
@@ -1190,7 +1037,6 @@ int mana_gd_deregister_device(struct gdma_dev *gd)
 
 	return err;
 }
-EXPORT_SYMBOL_NS(mana_gd_deregister_device, NET_MANA);
 
 u32 mana_gd_wq_avail_space(struct gdma_queue *wq)
 {
@@ -1226,7 +1072,7 @@ static u32 mana_gd_write_client_oob(const struct gdma_wqe_request *wqe_req,
 	header->inline_oob_size_div4 = client_oob_size / sizeof(u32);
 
 	if (oob_in_sgl) {
-		WARN_ON_ONCE(!pad_data || wqe_req->num_sge < 2);
+		WARN_ON_ONCE(wqe_req->num_sge < 2);
 
 		header->client_oob_in_sgl = 1;
 
@@ -1333,6 +1179,7 @@ int mana_gd_post_work_request(struct gdma_queue *wq,
 
 	return 0;
 }
+EXPORT_SYMBOL_NS(mana_gd_post_work_request, NET_MANA);
 
 int mana_gd_post_and_ring(struct gdma_queue *queue,
 			  const struct gdma_wqe_request *wqe_req,
@@ -1406,6 +1253,7 @@ int mana_gd_poll_cq(struct gdma_queue *cq, struct gdma_comp *comp, int num_cqe)
 
 	return cqe_idx;
 }
+EXPORT_SYMBOL_NS(mana_gd_poll_cq, NET_MANA);
 
 static irqreturn_t mana_gd_intr(int irq, void *arg)
 {
@@ -1622,10 +1470,14 @@ static int mana_gd_setup(struct pci_dev *pdev)
 	mana_gd_init_registers(pdev);
 	mana_smc_init(&gc->shm_channel, gc->dev, gc->shm_base);
 
+	gc->service_wq = alloc_ordered_workqueue("gdma_service_wq", 0);
+	if (!gc->service_wq)
+		return -ENOMEM;
+
 	err = mana_gd_setup_irqs(pdev);
 	if (err) {
 		dev_err(gc->dev, "Failed to setup IRQs: %d\n", err);
-		return err;
+		goto free_workqueue;
 	}
 
 	err = mana_hwc_create_channel(gc);
@@ -1651,6 +1503,8 @@ destroy_hwc:
 	mana_hwc_destroy_channel(gc);
 remove_irq:
 	mana_gd_remove_irqs(pdev);
+free_workqueue:
+	destroy_workqueue(gc->service_wq);
 	dev_err(&pdev->dev, "%s failed (error %d)\n", __func__, err);
 	return err;
 }
@@ -1662,6 +1516,8 @@ static void mana_gd_cleanup(struct pci_dev *pdev)
 	mana_hwc_destroy_channel(gc);
 
 	mana_gd_remove_irqs(pdev);
+
+	destroy_workqueue(gc->service_wq);
 	dev_dbg(&pdev->dev, "mana gdma cleanup successful\n");
 }
 
@@ -1731,8 +1587,14 @@ static int mana_gd_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (err)
 		goto cleanup_gd;
 
+	err = mana_rdma_probe(&gc->mana_ib);
+	if (err)
+		goto cleanup_mana;
+
 	return 0;
 
+cleanup_mana:
+	mana_remove(&gc->mana, false);
 cleanup_gd:
 	mana_gd_cleanup(pdev);
 unmap_bar:
@@ -1760,6 +1622,7 @@ static void mana_gd_remove(struct pci_dev *pdev)
 {
 	struct gdma_context *gc = pci_get_drvdata(pdev);
 
+	mana_rdma_remove(&gc->mana_ib);
 	mana_remove(&gc->mana, false);
 
 	mana_gd_cleanup(pdev);
@@ -1779,10 +1642,11 @@ static void mana_gd_remove(struct pci_dev *pdev)
 }
 
 /* The 'state' parameter is not used. */
-int mana_gd_suspend(struct pci_dev *pdev, pm_message_t state)
+static int mana_gd_suspend(struct pci_dev *pdev, pm_message_t state)
 {
 	struct gdma_context *gc = pci_get_drvdata(pdev);
 
+	mana_rdma_remove(&gc->mana_ib);
 	mana_remove(&gc->mana, true);
 
 	mana_gd_cleanup(pdev);
@@ -1794,7 +1658,7 @@ int mana_gd_suspend(struct pci_dev *pdev, pm_message_t state)
  * fail -- if this happens, it's safer to just report an error than try to undo
  * what has been done.
  */
-int mana_gd_resume(struct pci_dev *pdev)
+static int mana_gd_resume(struct pci_dev *pdev)
 {
 	struct gdma_context *gc = pci_get_drvdata(pdev);
 	int err;
@@ -1804,6 +1668,10 @@ int mana_gd_resume(struct pci_dev *pdev)
 		return err;
 
 	err = mana_probe(&gc->mana, true);
+	if (err)
+		return err;
+
+	err = mana_rdma_probe(&gc->mana_ib);
 	if (err)
 		return err;
 
@@ -1817,6 +1685,7 @@ static void mana_gd_shutdown(struct pci_dev *pdev)
 
 	dev_info(&pdev->dev, "Shutdown was called\n");
 
+	mana_rdma_remove(&gc->mana_ib);
 	mana_remove(&gc->mana, true);
 
 	mana_gd_cleanup(pdev);

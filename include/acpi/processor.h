@@ -280,6 +280,7 @@ int acpi_processor_ffh_cstate_probe(unsigned int cpu,
 				    struct acpi_processor_cx *cx,
 				    struct acpi_power_register *reg);
 void acpi_processor_ffh_cstate_enter(struct acpi_processor_cx *cstate);
+void __noreturn acpi_processor_ffh_play_dead(struct acpi_processor_cx *cx);
 #else
 static inline void acpi_processor_power_init_bm_check(struct
 						      acpi_processor_flags
@@ -299,6 +300,10 @@ static inline void acpi_processor_ffh_cstate_enter(struct acpi_processor_cx
 						   *cstate)
 {
 	return;
+}
+static inline void __noreturn acpi_processor_ffh_play_dead(struct acpi_processor_cx *cx)
+{
+	BUG();
 }
 #endif
 
@@ -464,5 +469,7 @@ static inline void acpi_thermal_cpufreq_exit(struct cpufreq_policy *policy)
 extern int acpi_processor_ffh_lpi_probe(unsigned int cpu);
 extern int acpi_processor_ffh_lpi_enter(struct acpi_lpi_state *lpi);
 #endif
+
+void acpi_processor_init_invariance_cppc(void);
 
 #endif

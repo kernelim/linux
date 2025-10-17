@@ -205,8 +205,6 @@ static inline bool unix_secdata_eq(struct scm_cookie *scm, struct sk_buff *skb)
 }
 #endif /* CONFIG_SECURITY_NETWORK */
 
-#define unix_peer(sk) (unix_sk(sk)->peer)
-
 static inline int unix_our_peer(struct sock *sk, struct sock *osk)
 {
 	return unix_peer(osk) == sk;
@@ -527,7 +525,9 @@ static void unix_write_space(struct sock *sk)
 static void unix_dgram_disconnected(struct sock *sk, struct sock *other)
 {
 	if (!skb_queue_empty(&sk->sk_receive_queue)) {
-		skb_queue_purge(&sk->sk_receive_queue);
+		skb_queue_purge_reason(&sk->sk_receive_queue,
+				       SKB_DROP_REASON_UNIX_DISCONNECT);
+
 		wake_up_interruptible_all(&unix_sk(sk)->peer_wait);
 
 		/* If one link of bidirectional dgram pipe is disconnected,
@@ -539,14 +539,13 @@ static void unix_dgram_disconnected(struct sock *sk, struct sock *other)
 			sk_error_report(other);
 		}
 	}
-	other->sk_state = TCP_CLOSE;
 }
 
 static void unix_sock_destructor(struct sock *sk)
 {
 	struct unix_sock *u = unix_sk(sk);
 
-	skb_queue_purge(&sk->sk_receive_queue);
+	skb_queue_purge_reason(&sk->sk_receive_queue, SKB_DROP_REASON_SOCKET_CLOSE);
 
 	WARN_ON(refcount_read(&sk->sk_wmem_alloc));
 	WARN_ON(!sk_unhashed(sk));
@@ -615,9 +614,9 @@ static void unix_release_sock(struct sock *sk, int embrion)
 	while ((skb = skb_dequeue(&sk->sk_receive_queue)) != NULL) {
 		if (state == TCP_LISTEN)
 			unix_release_sock(skb->sk, 1);
-		/* passed fds are erased in the kfree_skb hook	      */
+		/* passed fds are erased in the kfree_skb hook */
 		UNIXCB(skb).consumed = skb->len;
-		kfree_skb(skb);
+		kfree_skb_reason(skb, SKB_DROP_REASON_SOCKET_CLOSE);
 	}
 
 	if (path.dentry)
@@ -1351,8 +1350,15 @@ restart:
 
 		unix_state_double_unlock(sk, other);
 
-		if (other != old_peer)
+		if (other != old_peer) {
 			unix_dgram_disconnected(sk, old_peer);
+
+			unix_state_lock(old_peer);
+			if (!unix_peer(old_peer))
+				WRITE_ONCE(old_peer->sk_state, TCP_CLOSE);
+			unix_state_unlock(old_peer);
+		}
+
 		sock_put(old_peer);
 	} else {
 		unix_peer(sk) = other;
@@ -1417,32 +1423,30 @@ static int unix_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 	timeo = sock_sndtimeo(sk, flags & O_NONBLOCK);
 
 	/* First of all allocate resources.
-	   If we will make it after state is locked,
-	   we will have to recheck all again in any case.
+	 * If we will make it after state is locked,
+	 * we will have to recheck all again in any case.
 	 */
 
 	/* create new sock for complete connection */
 	newsk = unix_create1(sock_net(sk), NULL, 0, sock->type);
 	if (IS_ERR(newsk)) {
 		err = PTR_ERR(newsk);
-		newsk = NULL;
 		goto out;
 	}
 
-	err = -ENOMEM;
-
 	/* Allocate skb for sending to listening sock */
 	skb = sock_wmalloc(newsk, 1, 0, GFP_KERNEL);
-	if (skb == NULL)
-		goto out;
+	if (!skb) {
+		err = -ENOMEM;
+		goto out_free_sk;
+	}
 
 restart:
 	/*  Find listening sock. */
 	other = unix_find_other(net, sunaddr, addr_len, sk->sk_type);
 	if (IS_ERR(other)) {
 		err = PTR_ERR(other);
-		other = NULL;
-		goto out;
+		goto out_free_skb;
 	}
 
 	/* Latch state of peer */
@@ -1455,23 +1459,25 @@ restart:
 		goto restart;
 	}
 
-	err = -ECONNREFUSED;
-	if (other->sk_state != TCP_LISTEN)
+	if (other->sk_state != TCP_LISTEN ||
+	    other->sk_shutdown & RCV_SHUTDOWN) {
+		err = -ECONNREFUSED;
 		goto out_unlock;
-	if (other->sk_shutdown & RCV_SHUTDOWN)
-		goto out_unlock;
+	}
 
 	if (unix_recvq_full(other)) {
-		err = -EAGAIN;
-		if (!timeo)
+		if (!timeo) {
+			err = -EAGAIN;
 			goto out_unlock;
+		}
 
 		timeo = unix_wait_for_peer(other, timeo);
+		sock_put(other);
 
 		err = sock_intr_errno(timeo);
 		if (signal_pending(current))
-			goto out;
-		sock_put(other);
+			goto out_free_skb;
+
 		goto restart;
 	}
 
@@ -1573,15 +1579,13 @@ restart:
 	return 0;
 
 out_unlock:
-	if (other)
-		unix_state_unlock(other);
-
+	unix_state_unlock(other);
+	sock_put(other);
+out_free_skb:
+	consume_skb(skb);
+out_free_sk:
+	unix_release_sock(newsk, 0);
 out:
-	kfree_skb(skb);
-	if (newsk)
-		unix_release_sock(newsk, 0);
-	if (other)
-		sock_put(other);
 	return err;
 }
 
@@ -2033,7 +2037,7 @@ out_unlock:
 		unix_state_unlock(sk);
 	unix_state_unlock(other);
 out_free:
-	kfree_skb(skb);
+	consume_skb(skb);
 out:
 	if (other)
 		sock_put(other);
@@ -2050,38 +2054,39 @@ static int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg,
 			       size_t len)
 {
 	struct sock *sk = sock->sk;
+	struct sk_buff *skb = NULL;
 	struct sock *other = NULL;
-	int err, size;
-	struct sk_buff *skb;
-	int sent = 0;
 	struct scm_cookie scm;
 	bool fds_sent = false;
-	int data_len;
+	int err, sent = 0;
 
 	wait_for_unix_gc();
 	err = scm_send(sock, msg, &scm, false);
 	if (err < 0)
 		return err;
 
-	err = -EOPNOTSUPP;
-	if (msg->msg_flags&MSG_OOB)
+	if (msg->msg_flags & MSG_OOB) {
+		err = -EOPNOTSUPP;
 		goto out_err;
+	}
 
 	if (msg->msg_namelen) {
 		err = sk->sk_state == TCP_ESTABLISHED ? -EISCONN : -EOPNOTSUPP;
 		goto out_err;
 	} else {
-		err = -ENOTCONN;
 		other = unix_peer(sk);
-		if (!other)
+		if (!other) {
+			err = -ENOTCONN;
 			goto out_err;
+		}
 	}
 
 	if (READ_ONCE(sk->sk_shutdown) & SEND_SHUTDOWN)
-		goto pipe_err;
+		goto out_pipe;
 
 	while (sent < len) {
-		size = len - sent;
+		int size = len - sent;
+		int data_len;
 
 		/* Keep two messages in the pipe so it schedules better */
 		size = min_t(int, size, (sk->sk_sndbuf >> 1) - 64);
@@ -2101,26 +2106,23 @@ static int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg,
 
 		/* Only send the fds in the first buffer */
 		err = unix_scm_to_skb(&scm, skb, !fds_sent);
-		if (err < 0) {
-			kfree_skb(skb);
-			goto out_err;
-		}
+		if (err < 0)
+			goto out_free;
+
 		fds_sent = true;
 
 		skb_put(skb, size - data_len);
 		skb->data_len = data_len;
 		skb->len = size;
 		err = skb_copy_datagram_from_iter(skb, 0, &msg->msg_iter, size);
-		if (err) {
-			kfree_skb(skb);
-			goto out_err;
-		}
+		if (err)
+			goto out_free;
 
 		unix_state_lock(other);
 
 		if (sock_flag(other, SOCK_DEAD) ||
 		    (other->sk_shutdown & RCV_SHUTDOWN))
-			goto pipe_err_free;
+			goto out_pipe_unlock;
 
 		maybe_add_creds(skb, sock, other);
 		scm_stat_add(other, skb);
@@ -2134,13 +2136,14 @@ static int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg,
 
 	return sent;
 
-pipe_err_free:
+out_pipe_unlock:
 	unix_state_unlock(other);
-	kfree_skb(skb);
-pipe_err:
-	if (sent == 0 && !(msg->msg_flags&MSG_NOSIGNAL))
+out_pipe:
+	if (!sent && !(msg->msg_flags & MSG_NOSIGNAL))
 		send_sig(SIGPIPE, current, 0);
 	err = -EPIPE;
+out_free:
+	consume_skb(skb);
 out_err:
 	scm_destroy(&scm);
 	return sent ? : err;

@@ -68,26 +68,27 @@ int kvm_vcpu_init_nested(struct kvm_vcpu *vcpu)
 	if (!tmp)
 		return -ENOMEM;
 
+	swap(kvm->arch.nested_mmus, tmp);
+
 	/*
 	 * If we went through a realocation, adjust the MMU back-pointers in
 	 * the previously initialised kvm_pgtable structures.
 	 */
 	if (kvm->arch.nested_mmus != tmp)
 		for (int i = 0; i < kvm->arch.nested_mmus_size; i++)
-			tmp[i].pgt->mmu = &tmp[i];
+			kvm->arch.nested_mmus[i].pgt->mmu = &kvm->arch.nested_mmus[i];
 
 	for (int i = kvm->arch.nested_mmus_size; !ret && i < num_mmus; i++)
-		ret = init_nested_s2_mmu(kvm, &tmp[i]);
+		ret = init_nested_s2_mmu(kvm, &kvm->arch.nested_mmus[i]);
 
 	if (ret) {
 		for (int i = kvm->arch.nested_mmus_size; i < num_mmus; i++)
-			kvm_free_stage2_pgd(&tmp[i]);
+			kvm_free_stage2_pgd(&kvm->arch.nested_mmus[i]);
 
 		return ret;
 	}
 
 	kvm->arch.nested_mmus_size = num_mmus;
-	kvm->arch.nested_mmus = tmp;
 
 	return 0;
 }
@@ -820,8 +821,10 @@ static void limit_nv_id_regs(struct kvm *kvm)
 		 NV_FTR(PFR0, RAS)	|
 		 NV_FTR(PFR0, EL3)	|
 		 NV_FTR(PFR0, EL2)	|
-		 NV_FTR(PFR0, EL1));
-	/* 64bit EL1/EL2/EL3 only */
+		 NV_FTR(PFR0, EL1)	|
+		 NV_FTR(PFR0, EL0));
+	/* 64bit only at any EL */
+	val |= FIELD_PREP(NV_FTR(PFR0, EL0), 0b0001);
 	val |= FIELD_PREP(NV_FTR(PFR0, EL1), 0b0001);
 	val |= FIELD_PREP(NV_FTR(PFR0, EL2), 0b0001);
 	val |= FIELD_PREP(NV_FTR(PFR0, EL3), 0b0001);

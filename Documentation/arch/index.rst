@@ -22,5 +22,5 @@ implementation.
    s390/index
    ../sh/index
    ../sparc/index
-   ../x86/index
+   x86/index
    ../xtensa/index

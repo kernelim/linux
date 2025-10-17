@@ -61,15 +61,18 @@ static enum idh_event xgpu_nv_mailbox_peek_msg(struct amdgpu_device *adev)
 static int xgpu_nv_mailbox_rcv_msg(struct amdgpu_device *adev,
 				   enum idh_event event)
 {
+	int r = 0;
 	u32 reg;
 
 	reg = RREG32_NO_KIQ(mmMAILBOX_MSGBUF_RCV_DW0);
-	if (reg != event)
+	if (reg == IDH_FAIL)
+		r = -EINVAL;
+	else if (reg != event)
 		return -ENOENT;
 
 	xgpu_nv_mailbox_send_ack(adev);
 
-	return 0;
+	return r;
 }
 
 static uint8_t xgpu_nv_peek_ack(struct amdgpu_device *adev)
@@ -177,6 +180,12 @@ send_request:
 	case IDH_RAS_POISON:
 		if (data1 != 0)
 			event = IDH_RAS_POISON_READY;
+		break;
+	case IDH_REQ_RAS_ERROR_COUNT:
+		event = IDH_RAS_ERROR_COUNT_READY;
+		break;
+	case IDH_REQ_RAS_CPER_DUMP:
+		event = IDH_RAS_CPER_DUMP_READY;
 		break;
 	default:
 		break;
@@ -456,6 +465,21 @@ static bool xgpu_nv_rcvd_ras_intr(struct amdgpu_device *adev)
 	return (msg == IDH_RAS_ERROR_DETECTED || msg == 0xFFFFFFFF);
 }
 
+static int xgpu_nv_req_ras_err_count(struct amdgpu_device *adev)
+{
+	return xgpu_nv_send_access_requests(adev, IDH_REQ_RAS_ERROR_COUNT);
+}
+
+static int xgpu_nv_req_ras_cper_dump(struct amdgpu_device *adev, u64 vf_rptr)
+{
+	uint32_t vf_rptr_hi, vf_rptr_lo;
+
+	vf_rptr_hi = (uint32_t)(vf_rptr >> 32);
+	vf_rptr_lo = (uint32_t)(vf_rptr & 0xFFFFFFFF);
+	return xgpu_nv_send_access_requests_with_param(
+		adev, IDH_REQ_RAS_CPER_DUMP, vf_rptr_hi, vf_rptr_lo, 0);
+}
+
 const struct amdgpu_virt_ops xgpu_nv_virt_ops = {
 	.req_full_gpu	= xgpu_nv_request_full_gpu_access,
 	.rel_full_gpu	= xgpu_nv_release_full_gpu_access,
@@ -466,4 +490,6 @@ const struct amdgpu_virt_ops xgpu_nv_virt_ops = {
 	.trans_msg = xgpu_nv_mailbox_trans_msg,
 	.ras_poison_handler = xgpu_nv_ras_poison_handler,
 	.rcvd_ras_intr = xgpu_nv_rcvd_ras_intr,
+	.req_ras_err_count = xgpu_nv_req_ras_err_count,
+	.req_ras_cper_dump = xgpu_nv_req_ras_cper_dump,
 };

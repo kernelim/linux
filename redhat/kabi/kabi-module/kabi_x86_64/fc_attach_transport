@@ -1,3 +1,3 @@
-#6-
-0xea235452	fc_attach_transport	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
+#7-
+0x64ef0335	fc_attach_transport	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
 

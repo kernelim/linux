@@ -45,7 +45,6 @@
 #include <linux/workqueue.h>
 #include <linux/mempool.h>
 #include <linux/interrupt.h>
-#include <linux/idr.h>
 #include <linux/notifier.h>
 #include <linux/refcount.h>
 #include <linux/auxiliary_bus.h>
@@ -55,7 +54,6 @@
 #include <linux/mlx5/doorbell.h>
 #include <linux/mlx5/eq.h>
 #include <linux/timecounter.h>
-#include <linux/ptp_clock_kernel.h>
 #include <net/devlink.h>
 
 #define MLX5_ADEV_NAME "mlx5_core"
@@ -164,7 +162,9 @@ enum {
 	MLX5_REG_MRTCQ		 = 0x9182,
 	MLX5_REG_SBCAM		 = 0xB01F,
 	MLX5_REG_RESOURCE_DUMP   = 0xC000,
+	MLX5_REG_NIC_CAP	 = 0xC00D,
 	MLX5_REG_DTOR            = 0xC00E,
+	MLX5_REG_VHCA_ICM_CTRL	 = 0xC010,
 };
 
 enum mlx5_qpts_trust_state {
@@ -304,6 +304,8 @@ struct mlx5_cmd {
 		struct semaphore sem;
 		struct semaphore pages_sem;
 		struct semaphore throttle_sem;
+		struct semaphore unprivileged_sem;
+		struct xarray	privileged_uids;
 	} vars;
 	enum mlx5_cmdif_state	state;
 	void	       *cmd_alloc_buf;
@@ -475,36 +477,6 @@ struct mlx5_core_sriov {
 	u16			max_ec_vfs;
 };
 
-struct mlx5_fc_pool {
-	struct mlx5_core_dev *dev;
-	struct mutex pool_lock; /* protects pool lists */
-	struct list_head fully_used;
-	struct list_head partially_used;
-	struct list_head unused;
-	int available_fcs;
-	int used_fcs;
-	int threshold;
-};
-
-struct mlx5_fc_stats {
-	spinlock_t counters_idr_lock; /* protects counters_idr */
-	struct idr counters_idr;
-	struct list_head counters;
-	struct llist_head addlist;
-	struct llist_head dellist;
-
-	struct workqueue_struct *wq;
-	struct delayed_work work;
-	unsigned long next_query;
-	unsigned long sampling_interval; /* jiffies */
-	u32 *bulk_query_out;
-	int bulk_query_len;
-	size_t num_counters;
-	bool bulk_query_alloc_failed;
-	unsigned long next_bulk_query_alloc;
-	struct mlx5_fc_pool fc_pool;
-};
-
 struct mlx5_events;
 struct mlx5_mpfs;
 struct mlx5_eswitch;
@@ -556,6 +528,7 @@ enum {
 	 * creation/deletion on drivers rescan. Unset during device attach.
 	 */
 	MLX5_PRIV_FLAGS_DETACH = 1 << 2,
+	MLX5_PRIV_FLAGS_SWITCH_LEGACY = 1 << 3,
 };
 
 struct mlx5_adev {
@@ -631,7 +604,7 @@ struct mlx5_priv {
 	struct mlx5_devcom_comp_dev *hca_devcom_comp;
 	struct mlx5_fw_reset	*fw_reset;
 	struct mlx5_core_roce	roce;
-	struct mlx5_fc_stats		fc_stats;
+	struct mlx5_fc_stats		*fc_stats;
 	struct mlx5_rl_table            rl_table;
 	struct mlx5_ft_pool		*ft_pool;
 
@@ -705,55 +678,6 @@ struct mlx5_rsvd_gids {
 	unsigned int start;
 	unsigned int count;
 	struct ida ida;
-};
-
-/* RHEL 9.6 GA had an embedded struct mlx5_clock in struct mlx5_core_dev.
- * For PTP clock support with BF-3 (RHEL-87775), it needs to change to
- * a pointer. However, changes to struct mlx5_core_dev break KABI symbols:
- *   mlx5_blocking_notifier_register
- *   mlx5_blocking_notifier_unregister
- *   mlx5_core_access_reg
- *   mlx5_core_uplink_netdev_event_replay
- *
- * We assume that:
- *  - The functions are exported to serve the in-tree drivers (mlx5_ib,
- *    mlx5_dpll).
- *  - Mixing the in-tree mlx5_core with an external mlx5_* aux binary
- *    driver is unlikely.
- *  - Even if the mixing occurs, the external driver is unlikely to touch
- *    the "clock" member anyway.
- *
- * To preserve the maximum of the KABI, we keep a dummy struct mlx5_clock where
- * it was originally. To any external module accessing it, it will appear as if
- * mlx5_init_clock() had aborted the HW clock init and left the struct cleared.
- * To make this work, we keep the original struct layout definitions here.
- */
-#define RHEL96_KABI_MAX_PIN_NUM	8
-struct RH_KABI_RENAME(mlx5_pps, rhel96_kabi_mlx5_pps) {
-	u8                         pin_caps[RHEL96_KABI_MAX_PIN_NUM];
-	struct work_struct         out_work;
-	u64                        start[RHEL96_KABI_MAX_PIN_NUM];
-	u8                         enabled;
-	u64                        min_npps_period;
-	u64                        min_out_pulse_duration_ns;
-};
-
-struct RH_KABI_RENAME(mlx5_timer, rhel96_kabi_mlx5_timer) {
-	struct cyclecounter        cycles;
-	struct timecounter         tc;
-	u32                        nominal_c_mult;
-	unsigned long              overflow_period;
-	struct delayed_work        overflow_work;
-};
-
-struct RH_KABI_RENAME(mlx5_clock, rhel96_kabi_mlx5_clock) {
-	struct mlx5_nb             pps_nb;
-	seqlock_t                  lock;
-	struct hwtstamp_config     hwtstamp_config;
-	struct ptp_clock          *ptp;
-	struct ptp_clock_info      ptp_info;
-	struct RH_KABI_RENAME(mlx5_pps, rhel96_kabi_mlx5_pps) pps_info;
-	struct RH_KABI_RENAME(mlx5_timer, rhel96_kabi_mlx5_timer) timer;
 };
 
 struct mlx5_clock;
@@ -842,8 +766,8 @@ struct mlx5_core_dev {
 #ifdef CONFIG_MLX5_FPGA
 	struct mlx5_fpga_device *fpga;
 #endif
-	struct RH_KABI_RENAME(mlx5_clock, rhel96_kabi_mlx5_clock)
-		RH_KABI_RENAME(clock, rhel96_kabi_dummy_clock);
+	struct mlx5_clock       *clock;
+	struct mlx5_clock_dev_state *clock_state;
 	struct mlx5_ib_clock_info  *clock_info;
 	struct mlx5_fw_tracer   *tracer;
 	struct mlx5_rsc_dump    *rsc_dump;
@@ -862,8 +786,6 @@ struct mlx5_core_dev {
 	enum mlx5_wc_state wc_state;
 	/* sync write combining state */
 	struct mutex wc_state_lock;
-	RH_KABI_EXTEND(struct mlx5_clock *clock)
-	RH_KABI_EXTEND(struct mlx5_clock_dev_state *clock_state)
 };
 
 struct mlx5_db {
@@ -1045,6 +967,8 @@ struct mlx5_async_work {
 	mlx5_async_cbk_t user_callback;
 	u16 opcode; /* cmd opcode */
 	u16 op_mod; /* cmd op_mod */
+	u8 throttle_locked:1;
+	u8 unpriv_locked:1;
 	void *out; /* pointer to the cmd output buffer */
 };
 
@@ -1075,6 +999,8 @@ int mlx5_cmd_exec(struct mlx5_core_dev *dev, void *in, int in_size, void *out,
 int mlx5_cmd_exec_polling(struct mlx5_core_dev *dev, void *in, int in_size,
 			  void *out, int out_size);
 bool mlx5_cmd_is_down(struct mlx5_core_dev *dev);
+int mlx5_cmd_add_privileged_uid(struct mlx5_core_dev *dev, u16 uid);
+void mlx5_cmd_remove_privileged_uid(struct mlx5_core_dev *dev, u16 uid);
 
 void mlx5_core_uplink_netdev_set(struct mlx5_core_dev *mdev, struct net_device *netdev);
 void mlx5_core_uplink_netdev_event_replay(struct mlx5_core_dev *mdev);
@@ -1259,6 +1185,12 @@ static inline bool mlx5_core_is_pf(const struct mlx5_core_dev *dev)
 static inline bool mlx5_core_is_vf(const struct mlx5_core_dev *dev)
 {
 	return dev->coredev_type == MLX5_COREDEV_VF;
+}
+
+static inline bool mlx5_core_same_coredev_type(const struct mlx5_core_dev *dev1,
+					       const struct mlx5_core_dev *dev2)
+{
+	return dev1->coredev_type == dev2->coredev_type;
 }
 
 static inline bool mlx5_core_is_ecpf(const struct mlx5_core_dev *dev)

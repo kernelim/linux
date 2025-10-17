@@ -459,7 +459,7 @@ static void bxt_dsi_program_clocks(struct drm_device *dev, enum port port,
 
 	/*
 	 * rx divider value needs to be updated in the
-	 * two differnt bit fields in the register hence splitting the
+	 * two different bit fields in the register hence splitting the
 	 * rx divider value accordingly
 	 */
 	rx_div_lower = rx_div & RX_DIVIDER_BIT_1_2;
@@ -590,25 +590,26 @@ void bxt_dsi_reset_clocks(struct intel_encoder *encoder, enum port port)
 	intel_de_write(display, MIPI_EOT_DISABLE(display, port), CLOCKSTOP);
 }
 
-static void assert_dsi_pll(struct drm_i915_private *i915, bool state)
+static void assert_dsi_pll(struct intel_display *display, bool state)
 {
+	struct drm_i915_private *i915 = to_i915(display->drm);
 	bool cur_state;
 
 	vlv_cck_get(i915);
 	cur_state = vlv_cck_read(i915, CCK_REG_DSI_PLL_CONTROL) & DSI_PLL_VCO_EN;
 	vlv_cck_put(i915);
 
-	I915_STATE_WARN(i915, cur_state != state,
-			"DSI PLL state assertion failure (expected %s, current %s)\n",
-			str_on_off(state), str_on_off(cur_state));
+	INTEL_DISPLAY_STATE_WARN(display, cur_state != state,
+				 "DSI PLL state assertion failure (expected %s, current %s)\n",
+				 str_on_off(state), str_on_off(cur_state));
 }
 
-void assert_dsi_pll_enabled(struct drm_i915_private *i915)
+void assert_dsi_pll_enabled(struct intel_display *display)
 {
-	assert_dsi_pll(i915, true);
+	assert_dsi_pll(display, true);
 }
 
-void assert_dsi_pll_disabled(struct drm_i915_private *i915)
+void assert_dsi_pll_disabled(struct intel_display *display)
 {
-	assert_dsi_pll(i915, false);
+	assert_dsi_pll(display, false);
 }

@@ -367,6 +367,7 @@ MUX
   devm_mux_chip_alloc()
   devm_mux_chip_register()
   devm_mux_control_get()
+  devm_mux_state_get()
 
 NET
   devm_alloc_etherdev()
@@ -386,7 +387,8 @@ PCI
 
 PHY
   devm_usb_get_phy()
-  devm_usb_put_phy()
+  devm_usb_get_phy_by_node()
+  devm_usb_get_phy_by_phandle()
 
 PINCTRL
   devm_pinctrl_get()

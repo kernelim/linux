@@ -55,7 +55,6 @@
 #define MaxFault	50
 #include <linux/blkdev.h>
 #include <linux/module.h>
-#include <linux/raid/md_u.h>
 #include <linux/slab.h>
 #include "md.h"
 #include <linux/seq_file.h>
@@ -350,9 +349,13 @@ static void faulty_free(struct mddev *mddev, void *priv)
 
 static struct md_personality faulty_personality =
 {
-	.name		= "faulty",
-	.level		= LEVEL_FAULTY,
-	.owner		= THIS_MODULE,
+	.head = {
+		.type   = MD_PERSONALITY,
+		.id     = ID_FAULTY,
+		.name   = "faulty",
+		.owner  = THIS_MODULE,
+	},
+
 	.make_request	= faulty_make_request,
 	.run		= faulty_run,
 	.free		= faulty_free,
@@ -363,12 +366,12 @@ static struct md_personality faulty_personality =
 
 static int __init raid_init(void)
 {
-	return register_md_personality(&faulty_personality);
+	return register_md_submodule(&faulty_personality.head);
 }
 
 static void raid_exit(void)
 {
-	unregister_md_personality(&faulty_personality);
+	unregister_md_submodule(&faulty_personality.head);
 }
 
 module_init(raid_init);

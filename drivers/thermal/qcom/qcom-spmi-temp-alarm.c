@@ -292,24 +292,6 @@ static irqreturn_t qpnp_tm_isr(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static int qpnp_tm_get_critical_trip_temp(struct qpnp_tm_chip *chip)
-{
-	struct thermal_trip trip;
-	int i, ret;
-
-	for (i = 0; i < thermal_zone_get_num_trips(chip->tz_dev); i++) {
-
-		ret = thermal_zone_get_trip(chip->tz_dev, i, &trip);
-		if (ret)
-			continue;
-
-		if (trip.type == THERMAL_TRIP_CRITICAL)
-			return trip.temperature;
-	}
-
-	return THERMAL_TEMP_INVALID;
-}
-
 /*
  * This function initializes the internal temp value based on only the
  * current thermal stage and threshold. Setup threshold control and
@@ -344,7 +326,9 @@ static int qpnp_tm_init(struct qpnp_tm_chip *chip)
 
 	mutex_unlock(&chip->lock);
 
-	crit_temp = qpnp_tm_get_critical_trip_temp(chip);
+	ret = thermal_zone_get_crit_temp(chip->tz_dev, &crit_temp);
+	if (ret)
+		crit_temp = THERMAL_TEMP_INVALID;
 
 	mutex_lock(&chip->lock);
 
@@ -448,7 +432,7 @@ static int qpnp_tm_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return dev_err_probe(&pdev->dev, ret, "init failed\n");
 
-	if (devm_thermal_add_hwmon_sysfs(chip->tz_dev))
+	if (devm_thermal_add_hwmon_sysfs(&pdev->dev, chip->tz_dev))
 		dev_warn(&pdev->dev,
 			 "Failed to add hwmon sysfs attributes\n");
 

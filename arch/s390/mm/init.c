@@ -163,13 +163,10 @@ void __init mem_init(void)
         high_memory = (void *) __va(max_low_pfn * PAGE_SIZE);
 
 	pv_init();
-	kfence_split_mapping();
 
 	/* this will put all low memory onto the freelists */
 	memblock_free_all();
 	setup_zero_pages();	/* Setup zeroed pages. */
-
-	cmma_init_nodat();
 }
 
 void free_initmem(void)
@@ -282,9 +279,6 @@ int arch_add_memory(int nid, u64 start, u64 size,
 	unsigned long start_pfn = PFN_DOWN(start);
 	unsigned long size_pages = PFN_DOWN(size);
 	int rc;
-
-	if (WARN_ON_ONCE(params->altmap))
-		return -EINVAL;
 
 	if (WARN_ON_ONCE(params->pgprot.pgprot != PAGE_KERNEL.pgprot))
 		return -EINVAL;

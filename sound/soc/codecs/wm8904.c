@@ -1424,15 +1424,15 @@ static int wm8904_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	unsigned int aif3 = 0;
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
-	case SND_SOC_DAIFMT_CBS_CFM:
+	case SND_SOC_DAIFMT_CBC_CFP:
 		aif3 |= WM8904_LRCLK_DIR;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFS:
+	case SND_SOC_DAIFMT_CBP_CFC:
 		aif1 |= WM8904_BCLK_DIR;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		aif1 |= WM8904_BCLK_DIR;
 		aif3 |= WM8904_LRCLK_DIR;
 		break;
@@ -2196,18 +2196,7 @@ static int wm8904_i2c_probe(struct i2c_client *i2c)
 		return ret;
 	}
 
-	if (i2c->dev.of_node) {
-		const struct of_device_id *match;
-
-		match = of_match_node(wm8904_of_match, i2c->dev.of_node);
-		if (match == NULL)
-			return -EINVAL;
-		wm8904->devtype = (uintptr_t)match->data;
-	} else {
-		const struct i2c_device_id *id =
-			i2c_match_id(wm8904_i2c_id, i2c);
-		wm8904->devtype = id->driver_data;
-	}
+	wm8904->devtype = (uintptr_t)i2c_get_match_data(i2c);
 
 	i2c_set_clientdata(i2c, wm8904);
 	wm8904->pdata = i2c->dev.platform_data;

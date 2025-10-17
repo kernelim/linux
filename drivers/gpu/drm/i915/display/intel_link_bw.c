@@ -4,11 +4,11 @@
  */
 
 #include <drm/drm_fixed.h>
-
-#include "i915_drv.h"
+#include <drm/drm_print.h>
 
 #include "intel_atomic.h"
 #include "intel_crtc.h"
+#include "intel_display_core.h"
 #include "intel_display_types.h"
 #include "intel_dp_mst.h"
 #include "intel_dp_tunnel.h"
@@ -26,7 +26,6 @@ void intel_link_bw_init_limits(struct intel_atomic_state *state,
 			       struct intel_link_bw_limits *limits)
 {
 	struct intel_display *display = to_intel_display(state);
-	struct drm_i915_private *i915 = to_i915(state->base.dev);
 	enum pipe pipe;
 
 	limits->force_fec_pipes = 0;
@@ -34,7 +33,7 @@ void intel_link_bw_init_limits(struct intel_atomic_state *state,
 	for_each_pipe(display, pipe) {
 		const struct intel_crtc_state *crtc_state =
 			intel_atomic_get_new_crtc_state(state,
-							intel_crtc_for_pipe(i915, pipe));
+							intel_crtc_for_pipe(display, pipe));
 
 		if (state->base.duplicated && crtc_state) {
 			limits->max_bpp_x16[pipe] = crtc_state->max_link_bpp_x16;
@@ -223,7 +222,7 @@ assert_link_limit_change_valid(struct intel_display *display,
  * limits in @new_limits if there is a BW limitation.
  *
  * Returns:
- *   - 0 if the confugration is valid
+ *   - 0 if the configuration is valid
  *   - %-EAGAIN, if the configuration is invalid and @new_limits got updated
  *     with fallback values with which the configuration of all CRTCs
  *     in @state must be recomputed

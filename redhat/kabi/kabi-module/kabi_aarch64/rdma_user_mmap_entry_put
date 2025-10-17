@@ -1,3 +1,3 @@
-#6-
-0x8db8fabe	rdma_user_mmap_entry_put	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
+#7-
+0x07eb13e5	rdma_user_mmap_entry_put	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
 

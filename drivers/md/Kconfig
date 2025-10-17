@@ -58,7 +58,7 @@ config MD_BITMAP_FILE
 	  actually sitting on the MD device.
 
 config MD_LINEAR
-	tristate "Linear (append) mode (deprecated)"
+	tristate "Linear (append) mode"
 	depends on BLK_DEV_MD
 	help
 	  If you say Y here, then your multiple devices driver will be able to

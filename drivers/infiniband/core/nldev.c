@@ -171,6 +171,7 @@ static const struct nla_policy nldev_policy[RDMA_NLDEV_ATTR_MAX] = {
 	[RDMA_NLDEV_ATTR_PARENT_NAME]		= { .type = NLA_NUL_STRING },
 	[RDMA_NLDEV_ATTR_NAME_ASSIGN_TYPE]	= { .type = NLA_U8 },
 	[RDMA_NLDEV_ATTR_EVENT_TYPE]		= { .type = NLA_U8 },
+	[RDMA_NLDEV_ATTR_STAT_OPCOUNTER_ENABLED] = { .type = NLA_U8 },
 };
 
 static int put_driver_name_print_type(struct sk_buff *msg, const char *name,
@@ -2028,6 +2029,7 @@ static int nldev_stat_set_mode_doit(struct sk_buff *msg,
 				    struct ib_device *device, u32 port)
 {
 	u32 mode, mask = 0, qpn, cntn = 0;
+	bool opcnt = false;
 	int ret;
 
 	/* Currently only counter for QP is supported */
@@ -2035,12 +2037,17 @@ static int nldev_stat_set_mode_doit(struct sk_buff *msg,
 	    nla_get_u32(tb[RDMA_NLDEV_ATTR_STAT_RES]) != RDMA_NLDEV_ATTR_RES_QP)
 		return -EINVAL;
 
+	if (tb[RDMA_NLDEV_ATTR_STAT_OPCOUNTER_ENABLED])
+		opcnt = !!nla_get_u8(
+			tb[RDMA_NLDEV_ATTR_STAT_OPCOUNTER_ENABLED]);
+
 	mode = nla_get_u32(tb[RDMA_NLDEV_ATTR_STAT_MODE]);
 	if (mode == RDMA_COUNTER_MODE_AUTO) {
 		if (tb[RDMA_NLDEV_ATTR_STAT_AUTO_MODE_MASK])
 			mask = nla_get_u32(
 				tb[RDMA_NLDEV_ATTR_STAT_AUTO_MODE_MASK]);
-		return rdma_counter_set_auto_mode(device, port, mask, extack);
+		return rdma_counter_set_auto_mode(device, port, mask, opcnt,
+						  extack);
 	}
 
 	if (!tb[RDMA_NLDEV_ATTR_RES_LQPN])
@@ -2358,6 +2365,7 @@ static int stat_get_doit_qp(struct sk_buff *skb, struct nlmsghdr *nlh,
 	struct ib_device *device;
 	struct sk_buff *msg;
 	u32 index, port;
+	bool opcnt;
 	int ret;
 
 	if (tb[RDMA_NLDEV_ATTR_STAT_COUNTER_ID])
@@ -2393,7 +2401,7 @@ static int stat_get_doit_qp(struct sk_buff *skb, struct nlmsghdr *nlh,
 		goto err_msg;
 	}
 
-	ret = rdma_counter_get_mode(device, port, &mode, &mask);
+	ret = rdma_counter_get_mode(device, port, &mode, &mask, &opcnt);
 	if (ret)
 		goto err_msg;
 
@@ -2406,6 +2414,12 @@ static int stat_get_doit_qp(struct sk_buff *skb, struct nlmsghdr *nlh,
 
 	if ((mode == RDMA_COUNTER_MODE_AUTO) &&
 	    nla_put_u32(msg, RDMA_NLDEV_ATTR_STAT_AUTO_MODE_MASK, mask)) {
+		ret = -EMSGSIZE;
+		goto err_msg;
+	}
+
+	if ((mode == RDMA_COUNTER_MODE_AUTO) &&
+	    nla_put_u8(msg, RDMA_NLDEV_ATTR_STAT_OPCOUNTER_ENABLED, opcnt)) {
 		ret = -EMSGSIZE;
 		goto err_msg;
 	}
@@ -2729,6 +2743,25 @@ static const struct rdma_nl_cbs nldev_cb_table[RDMA_NLDEV_NUM_OPS] = {
 	},
 };
 
+static int fill_mon_netdev_rename(struct sk_buff *msg,
+				  struct ib_device *device, u32 port,
+				  const struct net *net)
+{
+	struct net_device *netdev = ib_device_get_netdev(device, port);
+	int ret = 0;
+
+	if (!netdev || !net_eq(dev_net(netdev), net))
+		goto out;
+
+	ret = nla_put_u32(msg, RDMA_NLDEV_ATTR_NDEV_INDEX, netdev->ifindex);
+	if (ret)
+		goto out;
+	ret = nla_put_string(msg, RDMA_NLDEV_ATTR_NDEV_NAME, netdev->name);
+out:
+	dev_put(netdev);
+	return ret;
+}
+
 static int fill_mon_netdev_association(struct sk_buff *msg,
 				       struct ib_device *device, u32 port,
 				       const struct net *net)
@@ -2793,6 +2826,18 @@ static void rdma_nl_notify_err_msg(struct ib_device *device, u32 port_num,
 				     "Failed to send RDMA monitor netdev detach event: port %d\n",
 				     port_num);
 		break;
+	case RDMA_RENAME_EVENT:
+		dev_warn_ratelimited(&device->dev,
+				     "Failed to send RDMA monitor rename device event\n");
+		break;
+
+	case RDMA_NETDEV_RENAME_EVENT:
+		netdev = ib_device_get_netdev(device, port_num);
+		dev_warn_ratelimited(&device->dev,
+				     "Failed to send RDMA monitor netdev rename event: port %d netdev %d\n",
+				     port_num, netdev->ifindex);
+		dev_put(netdev);
+		break;
 	default:
 		break;
 	}
@@ -2802,8 +2847,8 @@ int rdma_nl_notify_event(struct ib_device *device, u32 port_num,
 			  enum rdma_nl_notify_event_type type)
 {
 	struct sk_buff *skb;
+	int ret = -EMSGSIZE;
 	struct net *net;
-	int ret = 0;
 	void *nlh;
 
 	net = read_pnet(&device->coredev.rdma_net);
@@ -2822,14 +2867,19 @@ int rdma_nl_notify_event(struct ib_device *device, u32 port_num,
 	switch (type) {
 	case RDMA_REGISTER_EVENT:
 	case RDMA_UNREGISTER_EVENT:
+	case RDMA_RENAME_EVENT:
 		ret = fill_nldev_handle(skb, device);
 		if (ret)
 			goto err_free;
 		break;
 	case RDMA_NETDEV_ATTACH_EVENT:
 	case RDMA_NETDEV_DETACH_EVENT:
-		ret = fill_mon_netdev_association(skb, device,
-						  port_num, net);
+		ret = fill_mon_netdev_association(skb, device, port_num, net);
+		if (ret)
+			goto err_free;
+		break;
+	case RDMA_NETDEV_RENAME_EVENT:
+		ret = fill_mon_netdev_rename(skb, device, port_num, net);
 		if (ret)
 			goto err_free;
 		break;

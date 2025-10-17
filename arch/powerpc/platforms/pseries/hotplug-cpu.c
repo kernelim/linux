@@ -897,8 +897,8 @@ int dlpar_cpu(struct pseries_hp_errorlog *hp_elog)
 	u32 count, drc_index;
 	int rc;
 
-	count = hp_elog->_drc_u.drc_count;
-	drc_index = hp_elog->_drc_u.drc_index;
+	count = be32_to_cpu(hp_elog->_drc_u.drc_count);
+	drc_index = be32_to_cpu(hp_elog->_drc_u.drc_index);
 
 	lock_device_hotplug();
 

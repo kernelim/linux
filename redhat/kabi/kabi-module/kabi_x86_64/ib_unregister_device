@@ -1,3 +1,3 @@
-#6-
-0xe3649acc	ib_unregister_device	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
+#7-
+0x97db50ed	ib_unregister_device	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
 

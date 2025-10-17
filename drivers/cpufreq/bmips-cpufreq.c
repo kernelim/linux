@@ -121,11 +121,9 @@ static int bmips_cpufreq_target_index(struct cpufreq_policy *policy,
 	return 0;
 }
 
-static int bmips_cpufreq_exit(struct cpufreq_policy *policy)
+static void bmips_cpufreq_exit(struct cpufreq_policy *policy)
 {
 	kfree(policy->freq_table);
-
-	return 0;
 }
 
 static int bmips_cpufreq_init(struct cpufreq_policy *policy)
@@ -152,7 +150,6 @@ static struct cpufreq_driver bmips_cpufreq_driver = {
 	.get		= bmips_cpufreq_get,
 	.init		= bmips_cpufreq_init,
 	.exit		= bmips_cpufreq_exit,
-	.attr		= cpufreq_generic_attr,
 	.name		= BMIPS_CPUFREQ_PREFIX,
 };
 

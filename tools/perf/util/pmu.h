@@ -169,6 +169,10 @@ struct perf_pmu {
 		 * exclude_host.
 		 */
 		bool exclude_guest;
+		/**
+		 * @checked: Are the missing features checked?
+		 */
+		bool checked;
 	} missing_features;
 
 	/**

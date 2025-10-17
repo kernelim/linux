@@ -85,7 +85,6 @@ static __always_inline bool arch_try_cmpxchg128_local(volatile u128 *ptr, u128 *
 }
 #define arch_try_cmpxchg128_local arch_try_cmpxchg128_local
 
-#define system_has_cmpxchg_double()	boot_cpu_has(X86_FEATURE_CX16)
 #define system_has_cmpxchg128()		boot_cpu_has(X86_FEATURE_CX16)
 
 #endif /* _ASM_X86_CMPXCHG_64_H */

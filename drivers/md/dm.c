@@ -1481,12 +1481,12 @@ static void setup_split_accounting(struct clone_info *ci, unsigned int len)
 
 static void alloc_multiple_bios(struct bio_list *blist, struct clone_info *ci,
 				struct dm_target *ti, unsigned int num_bios,
-				unsigned *len, gfp_t gfp_flag)
+				unsigned *len)
 {
 	struct bio *bio;
-	int try = (gfp_flag & GFP_NOWAIT) ? 0 : 1;
+	int try;
 
-	for (; try < 2; try++) {
+	for (try = 0; try < 2; try++) {
 		int bio_nr;
 
 		if (try && num_bios > 1)
@@ -1510,8 +1510,7 @@ static void alloc_multiple_bios(struct bio_list *blist, struct clone_info *ci,
 }
 
 static unsigned int __send_duplicate_bios(struct clone_info *ci, struct dm_target *ti,
-					  unsigned int num_bios, unsigned int *len,
-					  gfp_t gfp_flag)
+					  unsigned int num_bios, unsigned int *len)
 {
 	struct bio_list blist = BIO_EMPTY_LIST;
 	struct bio *clone;
@@ -1528,7 +1527,7 @@ static unsigned int __send_duplicate_bios(struct clone_info *ci, struct dm_targe
 	 * Using alloc_multiple_bios(), even if num_bios is 1, to consistently
 	 * support allocating using GFP_NOWAIT with GFP_NOIO fallback.
 	 */
-	alloc_multiple_bios(&blist, ci, ti, num_bios, len, gfp_flag);
+	alloc_multiple_bios(&blist, ci, ti, num_bios, len);
 	while ((clone = bio_list_pop(&blist))) {
 		if (num_bios > 1)
 			dm_tio_set_flag(clone_to_tio(clone), DM_TIO_IS_DUPLICATE_BIO);
@@ -1543,14 +1542,18 @@ static void __send_empty_flush(struct clone_info *ci)
 {
 	struct dm_table *t = ci->map;
 	struct bio flush_bio;
+	blk_opf_t opf = REQ_OP_WRITE | REQ_PREFLUSH | REQ_SYNC;
+
+	if ((ci->io->orig_bio->bi_opf & (REQ_IDLE | REQ_SYNC)) ==
+	    (REQ_IDLE | REQ_SYNC))
+		opf |= REQ_IDLE;
 
 	/*
 	 * Use an on-stack bio for this, it's safe since we don't
 	 * need to reference it after submit. It's just used as
 	 * the basis for the clone(s).
 	 */
-	bio_init(&flush_bio, ci->io->md->disk->part0, NULL, 0,
-		 REQ_OP_WRITE | REQ_PREFLUSH | REQ_SYNC);
+	bio_init(&flush_bio, ci->io->md->disk->part0, NULL, 0, opf);
 
 	ci->bio = &flush_bio;
 	ci->sector_count = 0;
@@ -1566,7 +1569,7 @@ static void __send_empty_flush(struct clone_info *ci)
 
 			atomic_add(ti->num_flush_bios, &ci->io->io_count);
 			bios = __send_duplicate_bios(ci, ti, ti->num_flush_bios,
-						     NULL, GFP_NOWAIT);
+						     NULL);
 			atomic_sub(ti->num_flush_bios - bios, &ci->io->io_count);
 		}
 	} else {
@@ -1614,7 +1617,7 @@ static void __send_abnormal_io(struct clone_info *ci, struct dm_target *ti,
 		    __max_io_len(ti, ci->sector, max_granularity, max_sectors));
 
 	atomic_add(num_bios, &ci->io->io_count);
-	bios = __send_duplicate_bios(ci, ti, num_bios, &len, GFP_NOIO);
+	bios = __send_duplicate_bios(ci, ti, num_bios, &len);
 	/*
 	 * alloc_io() takes one extra reference for submission, so the
 	 * reference won't reach 0 without the following (+1) subtraction
@@ -1748,6 +1751,9 @@ static blk_status_t __split_and_process_bio(struct clone_info *ci)
 	ci->submit_as_polled = !!(ci->bio->bi_opf & REQ_POLLED);
 
 	len = min_t(sector_t, max_io_len(ti, ci->sector), ci->sector_count);
+	if (ci->bio->bi_opf & REQ_ATOMIC && len != ci->sector_count)
+		return BLK_STS_IOERR;
+
 	setup_split_accounting(ci, len);
 
 	if (unlikely(ci->bio->bi_opf & REQ_NOWAIT)) {
@@ -1851,7 +1857,7 @@ static blk_status_t __send_zone_reset_all_emulated(struct clone_info *ci,
 			 * not go crazy with the clone allocation.
 			 */
 			alloc_multiple_bios(&blist, ci, ti, min(nr_reset, 32),
-					    NULL, GFP_NOIO);
+					    NULL);
 		}
 
 		/* Get a clone and change it to a regular reset operation. */
@@ -1883,7 +1889,7 @@ static void __send_zone_reset_all_native(struct clone_info *ci,
 	unsigned int bios;
 
 	atomic_add(1, &ci->io->io_count);
-	bios = __send_duplicate_bios(ci, ti, 1, NULL, GFP_NOIO);
+	bios = __send_duplicate_bios(ci, ti, 1, NULL);
 	atomic_sub(1 - bios, &ci->io->io_count);
 
 	ci->sector_count = 0;
@@ -1971,6 +1977,15 @@ static void dm_split_and_process_bio(struct mapped_device *md,
 
 	/* Only support nowait for normal IO */
 	if (unlikely(bio->bi_opf & REQ_NOWAIT) && !is_abnormal) {
+		/*
+		 * Don't support NOWAIT for FLUSH because it may allocate
+		 * multiple bios and there's no easy way how to undo the
+		 * allocations.
+		 */
+		if (bio->bi_opf & REQ_PREFLUSH) {
+			bio_wouldblock_error(bio);
+			return;
+		}
 		io = alloc_io(md, bio, GFP_NOWAIT);
 		if (unlikely(!io)) {
 			/* Unable to do anything without dm_io. */
@@ -2517,12 +2532,6 @@ void dm_lock_md_type(struct mapped_device *md)
 void dm_unlock_md_type(struct mapped_device *md)
 {
 	mutex_unlock(&md->type_lock);
-}
-
-void dm_set_md_type(struct mapped_device *md, enum dm_queue_mode type)
-{
-	BUG_ON(!mutex_is_locked(&md->type_lock));
-	md->type = type;
 }
 
 enum dm_queue_mode dm_get_md_type(struct mapped_device *md)
@@ -3351,6 +3360,59 @@ void dm_free_md_mempools(struct dm_md_mempools *pools)
 	kfree(pools);
 }
 
+struct dm_blkdev_id {
+	u8 *id;
+	enum blk_unique_id type;
+};
+
+static int __dm_get_unique_id(struct dm_target *ti, struct dm_dev *dev,
+				sector_t start, sector_t len, void *data)
+{
+	struct dm_blkdev_id *dm_id = data;
+	const struct block_device_operations *fops = dev->bdev->bd_disk->fops;
+
+	if (!fops->get_unique_id)
+		return 0;
+
+	return fops->get_unique_id(dev->bdev->bd_disk, dm_id->id, dm_id->type);
+}
+
+/*
+ * Allow access to get_unique_id() for the first device returning a
+ * non-zero result.  Reasonable use expects all devices to have the
+ * same unique id.
+ */
+static int dm_blk_get_unique_id(struct gendisk *disk, u8 *id,
+		enum blk_unique_id type)
+{
+	struct mapped_device *md = disk->private_data;
+	struct dm_table *table;
+	struct dm_target *ti;
+	int ret = 0, srcu_idx;
+
+	struct dm_blkdev_id dm_id = {
+		.id = id,
+		.type = type,
+	};
+
+	table = dm_get_live_table(md, &srcu_idx);
+	if (!table || !dm_table_get_size(table))
+		goto out;
+
+	/* We only support devices that have a single target */
+	if (table->num_targets != 1)
+		goto out;
+	ti = dm_table_get_target(table, 0);
+
+	if (!ti->type->iterate_devices)
+		goto out;
+
+	ret = ti->type->iterate_devices(ti, __dm_get_unique_id, &dm_id);
+out:
+	dm_put_live_table(md, srcu_idx);
+	return ret;
+}
+
 struct dm_pr {
 	u64	old_key;
 	u64	new_key;
@@ -3679,6 +3741,7 @@ static const struct block_device_operations dm_blk_dops = {
 	.ioctl = dm_blk_ioctl,
 	.getgeo = dm_blk_getgeo,
 	.report_zones = dm_blk_report_zones,
+	.get_unique_id = dm_blk_get_unique_id,
 	.pr_ops = &dm_pr_ops,
 	.owner = THIS_MODULE
 };
@@ -3688,6 +3751,7 @@ static const struct block_device_operations dm_rq_blk_dops = {
 	.release = dm_blk_close,
 	.ioctl = dm_blk_ioctl,
 	.getgeo = dm_blk_getgeo,
+	.get_unique_id = dm_blk_get_unique_id,
 	.pr_ops = &dm_pr_ops,
 	.owner = THIS_MODULE
 };

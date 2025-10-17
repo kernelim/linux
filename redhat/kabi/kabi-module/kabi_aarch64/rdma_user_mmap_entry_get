@@ -1,3 +1,3 @@
-#6-
-0x6357af78	rdma_user_mmap_entry_get	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
+#7-
+0xcd895773	rdma_user_mmap_entry_get	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
 

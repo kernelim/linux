@@ -612,6 +612,13 @@ static inline bool id_aa64pfr1_sme(u64 pfr1)
 	return val > 0;
 }
 
+static inline bool id_aa64pfr0_mpam(u64 pfr0)
+{
+	u32 val = cpuid_feature_extract_unsigned_field(pfr0, ID_AA64PFR0_EL1_MPAM_SHIFT);
+
+	return val > 0;
+}
+
 static inline bool id_aa64pfr1_mte(u64 pfr1)
 {
 	u32 val = cpuid_feature_extract_unsigned_field(pfr1, ID_AA64PFR1_EL1_MTE_SHIFT);
@@ -830,6 +837,31 @@ static inline bool system_supports_tlb_range(void)
 static inline bool system_supports_lpa2(void)
 {
 	return cpus_have_final_cap(ARM64_HAS_LPA2);
+}
+
+/*
+ * RHEL Note: Creating stubs for system_supports_poe and system_supports_gcs
+ * to facilitate backporting 6e192214c6c8 for RHEL-78705. When support for these
+ * features is backported, then this commit should get reverted.
+ */
+static inline bool system_supports_poe(void)
+{
+	return false;
+}
+
+static inline bool system_supports_gcs(void)
+{
+	return false;
+}
+
+static __always_inline bool system_supports_mpam(void)
+{
+	return alternative_has_cap_unlikely(ARM64_MPAM);
+}
+
+static __always_inline bool system_supports_mpam_hcr(void)
+{
+	return alternative_has_cap_unlikely(ARM64_MPAM_HCR);
 }
 
 int do_emulate_mrs(struct pt_regs *regs, u32 sys_reg, u32 rt);

@@ -1224,8 +1224,10 @@ static void ceph_async_unlink_cb(struct ceph_mds_client *mdsc,
 
 	/* If op failed, mark everyone involved for errors */
 	if (result) {
-		struct ceph_path_info path_info = {0};
-		char *path = ceph_mdsc_build_path(dentry, &path_info, 0);
+		int pathlen = 0;
+		u64 base = 0;
+		char *path = ceph_mdsc_build_path(dentry, &pathlen,
+						  &base, 0);
 
 		/* mark error on parent + clear complete */
 		mapping_set_error(req->r_parent->i_mapping, result);
@@ -1239,8 +1241,8 @@ static void ceph_async_unlink_cb(struct ceph_mds_client *mdsc,
 		mapping_set_error(req->r_old_inode->i_mapping, result);
 
 		pr_warn("async unlink failure path=(%llx)%s result=%d!\n",
-			path_info.vino.ino, IS_ERR(path) ? "<<bad>>" : path, result);
-		ceph_mdsc_free_path_info(&path_info);
+			base, IS_ERR(path) ? "<<bad>>" : path, result);
+		ceph_mdsc_free_path(path, pathlen);
 	}
 out:
 	iput(req->r_old_inode);

@@ -138,6 +138,7 @@ static const u32 mt7915_offs[] = {
 	[AGG_ACR0]		= 0x084,
 	[AGG_ACR4]		= 0x08c,
 	[AGG_MRCR]		= 0x098,
+	[AGG_ATCR0]		= 0x0ec,
 	[AGG_ATCR1]		= 0x0f0,
 	[AGG_ATCR3]		= 0x0f4,
 	[LPON_UTTR0]		= 0x080,
@@ -212,6 +213,7 @@ static const u32 mt7916_offs[] = {
 	[AGG_ACR0]		= 0x054,
 	[AGG_ACR4]		= 0x05c,
 	[AGG_MRCR]		= 0x068,
+	[AGG_ATCR0]		= 0x1a4,
 	[AGG_ATCR1]		= 0x1a8,
 	[AGG_ATCR3]		= 0x080,
 	[LPON_UTTR0]		= 0x360,
@@ -484,7 +486,7 @@ static u32 __mt7915_reg_addr(struct mt7915_dev *dev, u32 addr)
 			continue;
 
 		ofs = addr - dev->reg.map[i].phys;
-		if (ofs > dev->reg.map[i].size)
+		if (ofs >= dev->reg.map[i].size)
 			continue;
 
 		return dev->reg.map[i].maps + ofs;
@@ -706,13 +708,13 @@ int mt7915_mmio_wed_init(struct mt7915_dev *dev, void *pdev_ptr,
 	}
 
 	wed->wlan.init_buf = mt7915_wed_init_buf;
-	wed->wlan.offload_enable = mt76_mmio_wed_offload_enable;
-	wed->wlan.offload_disable = mt76_mmio_wed_offload_disable;
-	wed->wlan.init_rx_buf = mt76_mmio_wed_init_rx_buf;
-	wed->wlan.release_rx_buf = mt76_mmio_wed_release_rx_buf;
+	wed->wlan.offload_enable = mt76_wed_offload_enable;
+	wed->wlan.offload_disable = mt76_wed_offload_disable;
+	wed->wlan.init_rx_buf = mt76_wed_init_rx_buf;
+	wed->wlan.release_rx_buf = mt76_wed_release_rx_buf;
 	wed->wlan.update_wo_rx_stats = mt7915_mmio_wed_update_rx_stats;
 	wed->wlan.reset = mt7915_mmio_wed_reset;
-	wed->wlan.reset_complete = mt76_mmio_wed_reset_complete;
+	wed->wlan.reset_complete = mt76_wed_reset_complete;
 
 	dev->mt76.rx_token_size = wed->wlan.rx_npkt;
 

@@ -328,7 +328,7 @@ void unix_gc(void)
 	}
 
 	/* Here we are. Hitlist is filled. Die. */
-	__skb_queue_purge(&hitlist);
+	__skb_queue_purge_reason(&hitlist, SKB_DROP_REASON_SOCKET_CLOSE);
 
 	spin_lock(&unix_gc_lock);
 

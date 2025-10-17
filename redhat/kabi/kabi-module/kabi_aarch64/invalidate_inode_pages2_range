@@ -1,3 +1,3 @@
-#6-
-0x56f64657	invalidate_inode_pages2_range	vmlinux	EXPORT_SYMBOL_GPL	
+#7-
+0xe9dea221	invalidate_inode_pages2_range	vmlinux	EXPORT_SYMBOL_GPL	
 

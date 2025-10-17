@@ -156,9 +156,9 @@ static void ser_state_run(struct rtw89_ser *ser, u8 evt)
 	rtw89_debug(rtwdev, RTW89_DBG_SER, "ser: %s receive %s\n",
 		    ser_st_name(ser), ser_ev_name(ser, evt));
 
-	mutex_lock(&rtwdev->mutex);
+	wiphy_lock(rtwdev->hw->wiphy);
 	rtw89_leave_lps(rtwdev);
-	mutex_unlock(&rtwdev->mutex);
+	wiphy_unlock(rtwdev->hw->wiphy);
 
 	ser->st_tbl[ser->state].st_func(ser, evt);
 }
@@ -300,37 +300,54 @@ static void drv_resume_rx(struct rtw89_ser *ser)
 
 static void ser_reset_vif(struct rtw89_dev *rtwdev, struct rtw89_vif *rtwvif)
 {
-	rtw89_core_release_bit_map(rtwdev->hw_port, rtwvif->port);
-	rtwvif->net_type = RTW89_NET_TYPE_NO_LINK;
-	rtwvif->trigger = false;
+	struct rtw89_vif_link *rtwvif_link;
+	unsigned int link_id;
+
 	rtwvif->tdls_peer = 0;
+
+	rtw89_vif_for_each_link(rtwvif, rtwvif_link, link_id) {
+		rtw89_core_release_bit_map(rtwdev->hw_port, rtwvif_link->port);
+		rtwvif_link->net_type = RTW89_NET_TYPE_NO_LINK;
+		rtwvif_link->trigger = false;
+	}
 }
 
 static void ser_sta_deinit_cam_iter(void *data, struct ieee80211_sta *sta)
 {
 	struct rtw89_vif *target_rtwvif = (struct rtw89_vif *)data;
-	struct rtw89_sta *rtwsta = (struct rtw89_sta *)sta->drv_priv;
+	struct rtw89_sta *rtwsta = sta_to_rtwsta(sta);
 	struct rtw89_vif *rtwvif = rtwsta->rtwvif;
 	struct rtw89_dev *rtwdev = rtwvif->rtwdev;
+	struct rtw89_vif_link *rtwvif_link;
+	struct rtw89_sta_link *rtwsta_link;
+	unsigned int link_id;
 
 	if (rtwvif != target_rtwvif)
 		return;
 
-	if (rtwvif->net_type == RTW89_NET_TYPE_AP_MODE || sta->tdls)
-		rtw89_cam_deinit_addr_cam(rtwdev, &rtwsta->addr_cam);
-	if (sta->tdls)
-		rtw89_cam_deinit_bssid_cam(rtwdev, &rtwsta->bssid_cam);
+	rtw89_sta_for_each_link(rtwsta, rtwsta_link, link_id) {
+		rtwvif_link = rtwsta_link->rtwvif_link;
 
-	INIT_LIST_HEAD(&rtwsta->ba_cam_list);
+		if (rtwvif_link->net_type == RTW89_NET_TYPE_AP_MODE || sta->tdls)
+			rtw89_cam_deinit_addr_cam(rtwdev, &rtwsta_link->addr_cam);
+		if (sta->tdls)
+			rtw89_cam_deinit_bssid_cam(rtwdev, &rtwsta_link->bssid_cam);
+
+		INIT_LIST_HEAD(&rtwsta_link->ba_cam_list);
+	}
 }
 
 static void ser_deinit_cam(struct rtw89_dev *rtwdev, struct rtw89_vif *rtwvif)
 {
+	struct rtw89_vif_link *rtwvif_link;
+	unsigned int link_id;
+
 	ieee80211_iterate_stations_atomic(rtwdev->hw,
 					  ser_sta_deinit_cam_iter,
 					  rtwvif);
 
-	rtw89_cam_deinit(rtwdev, rtwvif);
+	rtw89_vif_for_each_link(rtwvif, rtwvif_link, link_id)
+		rtw89_cam_deinit(rtwdev, rtwvif_link);
 
 	bitmap_zero(rtwdev->cam_info.ba_cam_map, RTW89_MAX_BA_CAM_NUM);
 }
@@ -348,6 +365,7 @@ static void ser_reset_mac_binding(struct rtw89_dev *rtwdev)
 		ser_reset_vif(rtwdev, rtwvif);
 
 	rtwdev->total_sta_assoc = 0;
+	refcount_set(&rtwdev->refcount_ap_info, 0);
 }
 
 /* hal function */
@@ -465,10 +483,13 @@ static void ser_l1_reset_pre_st_hdl(struct rtw89_ser *ser, u8 evt)
 static void ser_reset_trx_st_hdl(struct rtw89_ser *ser, u8 evt)
 {
 	struct rtw89_dev *rtwdev = container_of(ser, struct rtw89_dev, ser);
+	struct wiphy *wiphy = rtwdev->hw->wiphy;
 
 	switch (evt) {
 	case SER_EV_STATE_IN:
-		cancel_delayed_work_sync(&rtwdev->track_work);
+		wiphy_lock(wiphy);
+		wiphy_delayed_work_cancel(wiphy, &rtwdev->track_work);
+		wiphy_unlock(wiphy);
 		drv_stop_tx(ser);
 
 		if (hal_stop_dma(ser)) {
@@ -499,8 +520,8 @@ static void ser_reset_trx_st_hdl(struct rtw89_ser *ser, u8 evt)
 		hal_enable_dma(ser);
 		drv_resume_rx(ser);
 		drv_resume_tx(ser);
-		ieee80211_queue_delayed_work(rtwdev->hw, &rtwdev->track_work,
-					     RTW89_TRACK_WORK_PERIOD);
+		wiphy_delayed_work_queue(wiphy, &rtwdev->track_work,
+					 RTW89_TRACK_WORK_PERIOD);
 		break;
 
 	default:
@@ -690,9 +711,9 @@ static void ser_l2_reset_st_hdl(struct rtw89_ser *ser, u8 evt)
 
 	switch (evt) {
 	case SER_EV_STATE_IN:
-		mutex_lock(&rtwdev->mutex);
+		wiphy_lock(rtwdev->hw->wiphy);
 		ser_l2_reset_st_pre_hdl(ser);
-		mutex_unlock(&rtwdev->mutex);
+		wiphy_unlock(rtwdev->hw->wiphy);
 
 		ieee80211_restart_hw(rtwdev->hw);
 		ser_set_alarm(ser, SER_RECFG_TIMEOUT, SER_EV_L2_RECFG_TIMEOUT);

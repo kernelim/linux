@@ -17,6 +17,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <xalloc.h>
 #include "lkc.h"
 
 /* return true if 'path' exists, false otherwise */

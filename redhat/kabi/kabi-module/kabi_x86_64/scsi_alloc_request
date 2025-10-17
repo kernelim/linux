@@ -1,3 +1,3 @@
-#6-
-0x32ffcd74	scsi_alloc_request	vmlinux	EXPORT_SYMBOL_GPL	
+#7-
+0x00220947	scsi_alloc_request	vmlinux	EXPORT_SYMBOL_GPL	
 

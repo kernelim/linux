@@ -26,6 +26,7 @@
 #include "smbdirect.h"
 #endif
 #include "cifs_swn.h"
+#include "cached_dir.h"
 
 void
 cifs_dump_mem(char *label, void *data, int length)
@@ -59,7 +60,7 @@ void cifs_dump_mids(struct TCP_Server_Info *server)
 		return;
 
 	cifs_dbg(VFS, "Dump pending requests:\n");
-	spin_lock(&server->mid_lock);
+	spin_lock(&server->mid_queue_lock);
 	list_for_each_entry(mid_entry, &server->pending_mid_q, qhead) {
 		cifs_dbg(VFS, "State: %d Cmd: %d Pid: %d Cbdata: %p Mid %llu\n",
 			 mid_entry->mid_state,
@@ -82,7 +83,7 @@ void cifs_dump_mids(struct TCP_Server_Info *server)
 				mid_entry->resp_buf, 62);
 		}
 	}
-	spin_unlock(&server->mid_lock);
+	spin_unlock(&server->mid_queue_lock);
 #endif /* CONFIG_CIFS_DEBUG2 */
 }
 
@@ -272,6 +273,54 @@ static int cifs_debug_files_proc_show(struct seq_file *m, void *v)
 #endif /* CIFS_DEBUG2 */
 				}
 				spin_unlock(&tcon->open_file_lock);
+			}
+		}
+	}
+	spin_unlock(&cifs_tcp_ses_lock);
+	seq_putc(m, '\n');
+	return 0;
+}
+
+static int cifs_debug_dirs_proc_show(struct seq_file *m, void *v)
+{
+	struct list_head *stmp, *tmp, *tmp1;
+	struct TCP_Server_Info *server;
+	struct cifs_ses *ses;
+	struct cifs_tcon *tcon;
+	struct cached_fids *cfids;
+	struct cached_fid *cfid;
+	LIST_HEAD(entry);
+
+	seq_puts(m, "# Version:1\n");
+	seq_puts(m, "# Format:\n");
+	seq_puts(m, "# <tree id> <sess id> <persistent fid> <path>\n");
+
+	spin_lock(&cifs_tcp_ses_lock);
+	list_for_each(stmp, &cifs_tcp_ses_list) {
+		server = list_entry(stmp, struct TCP_Server_Info,
+				    tcp_ses_list);
+		list_for_each(tmp, &server->smb_ses_list) {
+			ses = list_entry(tmp, struct cifs_ses, smb_ses_list);
+			list_for_each(tmp1, &ses->tcon_list) {
+				tcon = list_entry(tmp1, struct cifs_tcon, tcon_list);
+				cfids = tcon->cfids;
+				spin_lock(&cfids->cfid_list_lock); /* check lock ordering */
+				seq_printf(m, "Num entries: %d\n", cfids->num_entries);
+				list_for_each_entry(cfid, &cfids->entries, entry) {
+					seq_printf(m, "0x%x 0x%llx 0x%llx     %s",
+						tcon->tid,
+						ses->Suid,
+						cfid->fid.persistent_fid,
+						cfid->path);
+					if (cfid->file_all_info_is_valid)
+						seq_printf(m, "\tvalid file info");
+					if (cfid->dirents.is_valid)
+						seq_printf(m, ", valid dirents");
+					seq_printf(m, "\n");
+				}
+				spin_unlock(&cfids->cfid_list_lock);
+
+
 			}
 		}
 	}
@@ -618,7 +667,7 @@ skip_rdma:
 
 				seq_printf(m, "\n\tServer ConnectionId: 0x%llx",
 					   chan_server->conn_id);
-				spin_lock(&chan_server->mid_lock);
+				spin_lock(&chan_server->mid_queue_lock);
 				list_for_each_entry(mid_entry, &chan_server->pending_mid_q, qhead) {
 					seq_printf(m, "\n\t\tState: %d com: %d pid: %d cbdata: %p mid %llu",
 						   mid_entry->mid_state,
@@ -627,7 +676,7 @@ skip_rdma:
 						   mid_entry->callback_data,
 						   mid_entry->mid);
 				}
-				spin_unlock(&chan_server->mid_lock);
+				spin_unlock(&chan_server->mid_queue_lock);
 			}
 			spin_unlock(&ses->chan_lock);
 			seq_puts(m, "\n--\n");
@@ -858,6 +907,9 @@ cifs_proc_init(void)
 	proc_create_single("open_files", 0400, proc_fs_cifs,
 			cifs_debug_files_proc_show);
 
+	proc_create_single("open_dirs", 0400, proc_fs_cifs,
+			cifs_debug_dirs_proc_show);
+
 	proc_create("Stats", 0644, proc_fs_cifs, &cifs_stats_proc_ops);
 	proc_create("cifsFYI", 0644, proc_fs_cifs, &cifsFYI_proc_ops);
 	proc_create("traceSMB", 0644, proc_fs_cifs, &traceSMB_proc_ops);
@@ -902,6 +954,7 @@ cifs_proc_clean(void)
 
 	remove_proc_entry("DebugData", proc_fs_cifs);
 	remove_proc_entry("open_files", proc_fs_cifs);
+	remove_proc_entry("open_dirs", proc_fs_cifs);
 	remove_proc_entry("cifsFYI", proc_fs_cifs);
 	remove_proc_entry("traceSMB", proc_fs_cifs);
 	remove_proc_entry("Stats", proc_fs_cifs);
@@ -1100,7 +1153,7 @@ static ssize_t cifs_security_flags_proc_write(struct file *file,
 	if ((count < 1) || (count > 11))
 		return -EINVAL;
 
-	memset(flags_string, 0, 12);
+	memset(flags_string, 0, sizeof(flags_string));
 
 	if (copy_from_user(flags_string, buffer, count))
 		return -EFAULT;

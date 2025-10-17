@@ -253,7 +253,7 @@ static void shmem_inode_unacct_blocks(struct inode *inode, long pages)
 }
 
 static const struct super_operations shmem_ops;
-const struct address_space_operations shmem_aops;
+static const struct address_space_operations shmem_aops;
 static const struct file_operations shmem_file_operations;
 static const struct inode_operations shmem_inode_operations;
 static const struct inode_operations shmem_dir_inode_operations;
@@ -261,6 +261,12 @@ static const struct inode_operations shmem_special_inode_operations;
 static const struct vm_operations_struct shmem_vm_ops;
 static const struct vm_operations_struct shmem_anon_vm_ops;
 static struct file_system_type shmem_fs_type;
+
+bool shmem_mapping(struct address_space *mapping)
+{
+	return mapping->a_ops == &shmem_aops;
+}
+EXPORT_SYMBOL_GPL(shmem_mapping);
 
 bool vma_is_anon_shmem(struct vm_area_struct *vma)
 {
@@ -392,12 +398,12 @@ static int shmem_reserve_inode(struct super_block *sb, ino_t *inop)
 	return 0;
 }
 
-static void shmem_free_inode(struct super_block *sb)
+static void shmem_free_inode(struct super_block *sb, size_t freed_ispace)
 {
 	struct shmem_sb_info *sbinfo = SHMEM_SB(sb);
 	if (sbinfo->max_inodes) {
 		raw_spin_lock(&sbinfo->stat_lock);
-		sbinfo->free_ispace += BOGO_INODE_SIZE;
+		sbinfo->free_ispace += BOGO_INODE_SIZE + freed_ispace;
 		raw_spin_unlock(&sbinfo->stat_lock);
 	}
 }
@@ -1238,6 +1244,7 @@ static void shmem_evict_inode(struct inode *inode)
 {
 	struct shmem_inode_info *info = SHMEM_I(inode);
 	struct shmem_sb_info *sbinfo = SHMEM_SB(inode->i_sb);
+	size_t freed = 0;
 
 	if (shmem_mapping(inode->i_mapping)) {
 		shmem_unacct_size(info->flags, inode->i_size);
@@ -1264,9 +1271,9 @@ static void shmem_evict_inode(struct inode *inode)
 		}
 	}
 
-	simple_xattrs_free(&info->xattrs);
+	simple_xattrs_free(&info->xattrs, sbinfo->max_inodes ? &freed : NULL);
+	shmem_free_inode(inode->i_sb, freed);
 	WARN_ON(inode->i_blocks);
-	shmem_free_inode(inode->i_sb);
 	clear_inode(inode);
 #ifdef CONFIG_TMPFS_QUOTA
 	dquot_free_inode(inode);
@@ -1440,7 +1447,7 @@ static int shmem_writepage(struct page *page, struct writeback_control *wbc)
 	if (WARN_ON_ONCE(!wbc->for_reclaim))
 		goto redirty;
 
-	if (WARN_ON_ONCE((info->flags & VM_LOCKED) || sbinfo->noswap))
+	if ((info->flags & VM_LOCKED) || sbinfo->noswap)
 		goto redirty;
 
 	if (!total_swap_pages)
@@ -1970,6 +1977,9 @@ static int shmem_get_folio_gfp(struct inode *inode, pgoff_t index,
 	int error;
 	bool alloced;
 
+	if (WARN_ON_ONCE(!shmem_mapping(inode->i_mapping)))
+		return -EINVAL;
+
 	if (index > (MAX_LFS_FILESIZE >> PAGE_SHIFT))
 		return -EFBIG;
 repeat:
@@ -2132,12 +2142,36 @@ unlock:
 	return error;
 }
 
+/**
+ * shmem_get_folio - find, and lock a shmem folio.
+ * @inode:	inode to search
+ * @index:	the page index.
+ * @foliop:	pointer to the folio if found
+ * @sgp:	SGP_* flags to control behavior
+ *
+ * Looks up the page cache entry at @inode & @index.  If a folio is
+ * present, it is returned locked with an increased refcount.
+ *
+ * If the caller modifies data in the folio, it must call folio_mark_dirty()
+ * before unlocking the folio to ensure that the folio is not reclaimed.
+ * There is no need to reserve space before calling folio_mark_dirty().
+ *
+ * When no folio is found, the behavior depends on @sgp:
+ *  - for SGP_READ, *foliop is %NULL and 0 is returned
+ *  - for SGP_NOALLOC, *foliop is %NULL and -ENOENT is returned
+ *  - for all other flags a new folio is allocated, inserted into the
+ *    page cache and returned locked in @foliop.
+ *
+ * Context: May sleep.
+ * Return: 0 if successful, else a negative error code.
+ */
 int shmem_get_folio(struct inode *inode, pgoff_t index, struct folio **foliop,
 		enum sgp_type sgp)
 {
 	return shmem_get_folio_gfp(inode, index, foliop, sgp,
 			mapping_gfp_mask(inode->i_mapping), NULL, NULL);
 }
+EXPORT_SYMBOL_GPL(shmem_get_folio);
 
 /*
  * This is like autoremove_wake_function, but it removes the wait queue
@@ -2244,8 +2278,6 @@ unsigned long shmem_get_unmapped_area(struct file *file,
 				      unsigned long uaddr, unsigned long len,
 				      unsigned long pgoff, unsigned long flags)
 {
-	unsigned long (*get_area)(struct file *,
-		unsigned long, unsigned long, unsigned long, unsigned long);
 	unsigned long addr;
 	unsigned long offset;
 	unsigned long inflated_len;
@@ -2255,8 +2287,8 @@ unsigned long shmem_get_unmapped_area(struct file *file,
 	if (len > TASK_SIZE)
 		return -ENOMEM;
 
-	get_area = current->mm->get_unmapped_area;
-	addr = get_area(file, uaddr, len, pgoff, flags);
+	addr = mm_get_unmapped_area(current->mm, file, uaddr, len, pgoff,
+				    flags);
 
 	if (!IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE))
 		return addr;
@@ -2313,7 +2345,8 @@ unsigned long shmem_get_unmapped_area(struct file *file,
 	if (inflated_len < len)
 		return addr;
 
-	inflated_addr = get_area(NULL, uaddr, inflated_len, 0, flags);
+	inflated_addr = mm_get_unmapped_area(current->mm, NULL, uaddr,
+					     inflated_len, 0, flags);
 	if (IS_ERR_VALUE(inflated_addr))
 		return addr;
 	if (inflated_addr & ~PAGE_MASK)
@@ -2472,7 +2505,7 @@ static struct inode *__shmem_get_inode(struct mnt_idmap *idmap,
 
 	inode = new_inode(sb);
 	if (!inode) {
-		shmem_free_inode(sb);
+		shmem_free_inode(sb, 0);
 		return ERR_PTR(-ENOSPC);
 	}
 
@@ -3346,7 +3379,7 @@ static int shmem_unlink(struct inode *dir, struct dentry *dentry)
 	struct inode *inode = d_inode(dentry);
 
 	if (inode->i_nlink > 1 && !S_ISDIR(inode->i_mode))
-		shmem_free_inode(inode->i_sb);
+		shmem_free_inode(inode->i_sb, 0);
 
 	dir->i_size -= BOGO_DIRENT_SIZE;
 	dir->i_mtime = inode_set_ctime_to_ts(dir,
@@ -3477,10 +3510,10 @@ static int shmem_symlink(struct mnt_idmap *idmap, struct inode *dir,
 		inode->i_op = &shmem_short_symlink_operations;
 	} else {
 		inode_nohighmem(inode);
+		inode->i_mapping->a_ops = &shmem_aops;
 		error = shmem_get_folio(inode, 0, &folio, SGP_WRITE);
 		if (error)
 			goto out_iput;
-		inode->i_mapping->a_ops = &shmem_aops;
 		inode->i_op = &shmem_symlink_inode_operations;
 		memcpy(folio_address(folio), symname, len);
 		folio_mark_uptodate(folio);
@@ -3584,21 +3617,40 @@ static int shmem_initxattrs(struct inode *inode,
 			    void *fs_info)
 {
 	struct shmem_inode_info *info = SHMEM_I(inode);
+	struct shmem_sb_info *sbinfo = SHMEM_SB(inode->i_sb);
 	const struct xattr *xattr;
 	struct simple_xattr *new_xattr;
+	size_t ispace = 0;
 	size_t len;
+
+	if (sbinfo->max_inodes) {
+		for (xattr = xattr_array; xattr->name != NULL; xattr++) {
+			ispace += simple_xattr_space(xattr->name,
+				xattr->value_len + XATTR_SECURITY_PREFIX_LEN);
+		}
+		if (ispace) {
+			raw_spin_lock(&sbinfo->stat_lock);
+			if (sbinfo->free_ispace < ispace)
+				ispace = 0;
+			else
+				sbinfo->free_ispace -= ispace;
+			raw_spin_unlock(&sbinfo->stat_lock);
+			if (!ispace)
+				return -ENOSPC;
+		}
+	}
 
 	for (xattr = xattr_array; xattr->name != NULL; xattr++) {
 		new_xattr = simple_xattr_alloc(xattr->value, xattr->value_len);
 		if (!new_xattr)
-			return -ENOMEM;
+			break;
 
 		len = strlen(xattr->name) + 1;
 		new_xattr->name = kmalloc(XATTR_SECURITY_PREFIX_LEN + len,
 					  GFP_KERNEL);
 		if (!new_xattr->name) {
 			kvfree(new_xattr);
-			return -ENOMEM;
+			break;
 		}
 
 		memcpy(new_xattr->name, XATTR_SECURITY_PREFIX,
@@ -3607,6 +3659,16 @@ static int shmem_initxattrs(struct inode *inode,
 		       xattr->name, len);
 
 		simple_xattr_add(&info->xattrs, new_xattr);
+	}
+
+	if (xattr->name != NULL) {
+		if (ispace) {
+			raw_spin_lock(&sbinfo->stat_lock);
+			sbinfo->free_ispace += ispace;
+			raw_spin_unlock(&sbinfo->stat_lock);
+		}
+		simple_xattrs_free(&info->xattrs, NULL);
+		return -ENOMEM;
 	}
 
 	return 0;
@@ -3629,15 +3691,38 @@ static int shmem_xattr_handler_set(const struct xattr_handler *handler,
 				   size_t size, int flags)
 {
 	struct shmem_inode_info *info = SHMEM_I(inode);
+	struct shmem_sb_info *sbinfo = SHMEM_SB(inode->i_sb);
 	struct simple_xattr *old_xattr;
+	size_t ispace = 0;
 
 	name = xattr_full_name(handler, name);
+	if (value && sbinfo->max_inodes) {
+		ispace = simple_xattr_space(name, size);
+		raw_spin_lock(&sbinfo->stat_lock);
+		if (sbinfo->free_ispace < ispace)
+			ispace = 0;
+		else
+			sbinfo->free_ispace -= ispace;
+		raw_spin_unlock(&sbinfo->stat_lock);
+		if (!ispace)
+			return -ENOSPC;
+	}
+
 	old_xattr = simple_xattr_set(&info->xattrs, name, value, size, flags);
 	if (!IS_ERR(old_xattr)) {
+		ispace = 0;
+		if (old_xattr && sbinfo->max_inodes)
+			ispace = simple_xattr_space(old_xattr->name,
+						    old_xattr->size);
 		simple_xattr_free(old_xattr);
 		old_xattr = NULL;
 		inode_set_ctime_current(inode);
 		inode_inc_iversion(inode);
+	}
+	if (ispace) {
+		raw_spin_lock(&sbinfo->stat_lock);
+		sbinfo->free_ispace += ispace;
+		raw_spin_unlock(&sbinfo->stat_lock);
 	}
 	return PTR_ERR(old_xattr);
 }
@@ -3654,6 +3739,12 @@ static const struct xattr_handler shmem_trusted_xattr_handler = {
 	.set = shmem_xattr_handler_set,
 };
 
+static const struct xattr_handler shmem_user_xattr_handler = {
+	.prefix = XATTR_USER_PREFIX,
+	.get = shmem_xattr_handler_get,
+	.set = shmem_xattr_handler_set,
+};
+
 static const struct xattr_handler *shmem_xattr_handlers[] = {
 #ifdef CONFIG_TMPFS_POSIX_ACL
 	&posix_acl_access_xattr_handler,
@@ -3661,6 +3752,7 @@ static const struct xattr_handler *shmem_xattr_handlers[] = {
 #endif
 	&shmem_security_xattr_handler,
 	&shmem_trusted_xattr_handler,
+	&shmem_user_xattr_handler,
 	NULL
 };
 
@@ -4406,7 +4498,7 @@ static int shmem_error_remove_page(struct address_space *mapping,
 	return 0;
 }
 
-const struct address_space_operations shmem_aops = {
+static const struct address_space_operations shmem_aops = {
 	.writepage	= shmem_writepage,
 	.dirty_folio	= noop_dirty_folio,
 #ifdef CONFIG_TMPFS
@@ -4418,7 +4510,6 @@ const struct address_space_operations shmem_aops = {
 #endif
 	.error_remove_page = shmem_error_remove_page,
 };
-EXPORT_SYMBOL(shmem_aops);
 
 static const struct file_operations shmem_file_operations = {
 	.mmap		= shmem_mmap,
@@ -4700,7 +4791,7 @@ unsigned long shmem_get_unmapped_area(struct file *file,
 				      unsigned long addr, unsigned long len,
 				      unsigned long pgoff, unsigned long flags)
 {
-	return current->mm->get_unmapped_area(file, addr, len, pgoff, flags);
+	return mm_get_unmapped_area(current->mm, file, addr, len, pgoff, flags);
 }
 #endif
 
@@ -4778,6 +4869,7 @@ struct file *shmem_kernel_file_setup(const char *name, loff_t size, unsigned lon
 {
 	return __shmem_file_setup(shm_mnt, name, size, flags, S_PRIVATE);
 }
+EXPORT_SYMBOL_GPL(shmem_kernel_file_setup);
 
 /**
  * shmem_file_setup - get an unlinked file living in tmpfs
@@ -4855,7 +4947,6 @@ struct folio *shmem_read_folio_gfp(struct address_space *mapping,
 	struct folio *folio;
 	int error;
 
-	BUG_ON(!shmem_mapping(mapping));
 	error = shmem_get_folio_gfp(inode, index, &folio, SGP_CACHE,
 				    gfp, NULL, NULL);
 	if (error)

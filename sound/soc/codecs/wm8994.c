@@ -2783,9 +2783,9 @@ static int wm8994_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	}
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		ms = WM8994_AIF1_MSTR;
 		break;
 	default:
@@ -4664,7 +4664,6 @@ static int wm8994_remove(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int wm8994_suspend(struct device *dev)
 {
 	struct wm8994_priv *wm8994 = dev_get_drvdata(dev);
@@ -4689,16 +4688,15 @@ static int wm8994_resume(struct device *dev)
 
 	return 0;
 }
-#endif
 
 static const struct dev_pm_ops wm8994_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(wm8994_suspend, wm8994_resume)
+	SYSTEM_SLEEP_PM_OPS(wm8994_suspend, wm8994_resume)
 };
 
 static struct platform_driver wm8994_codec_driver = {
 	.driver = {
 		.name = "wm8994-codec",
-		.pm = &wm8994_pm_ops,
+		.pm = pm_ptr(&wm8994_pm_ops),
 	},
 	.probe = wm8994_probe,
 	.remove = wm8994_remove,

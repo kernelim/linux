@@ -1,3 +1,3 @@
-#6-
-0x452d87a4	pci_restore_msi_state	vmlinux	EXPORT_SYMBOL_GPL	
+#7-
+0x3ba08404	pci_restore_msi_state	vmlinux	EXPORT_SYMBOL_GPL	
 

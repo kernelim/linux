@@ -201,7 +201,7 @@ static int cs42l83_i2c_remove(struct i2c_client *i2c_client)
 	return 0;
 }
 
-static int __maybe_unused cs42l83_i2c_resume(struct device *dev)
+static int cs42l83_i2c_resume(struct device *dev)
 {
 	int ret;
 
@@ -215,7 +215,7 @@ static int __maybe_unused cs42l83_i2c_resume(struct device *dev)
 }
 
 static const struct dev_pm_ops cs42l83_i2c_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(cs42l42_suspend, cs42l83_i2c_resume)
+	SYSTEM_SLEEP_PM_OPS(cs42l42_suspend, cs42l83_i2c_resume)
 };
 
 static const struct of_device_id __maybe_unused cs42l83_of_match[] = {
@@ -227,7 +227,7 @@ MODULE_DEVICE_TABLE(of, cs42l83_of_match);
 static struct i2c_driver cs42l83_i2c_driver = {
 	.driver = {
 		.name = "cs42l83",
-		.pm = &cs42l83_i2c_pm_ops,
+		.pm = pm_ptr(&cs42l83_i2c_pm_ops),
 		.of_match_table = of_match_ptr(cs42l83_of_match),
 		},
 	.probe_new = cs42l83_i2c_probe,

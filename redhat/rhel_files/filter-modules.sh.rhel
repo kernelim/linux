@@ -14,7 +14,7 @@
 # listed here.
 
 # Overrides is individual modules which need to remain in kernel-core due to deps.
-overrides="cec isst_if_common isst_tpmi_core isst_tpmi intel_vsec intel_vsec_tpmi wmi"
+overrides="cec isst_if_common isst_tpmi_core isst_tpmi intel-vsec intel-vsec_tpmi wmi"
 
 # Set the default dirs/modules to filter out
 driverdirs="atm auxdisplay bcma bluetooth firewire fmc iio infiniband isdn leds media memstick mfd mmc mtd nfc ntb pcmcia platform power ssb staging tty uio uwb w1"

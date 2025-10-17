@@ -3,7 +3,7 @@
 import os
 import shlex
 from pathlib import Path
-from lib.py import KsftSkipEx
+from lib.py import KsftSkipEx, KsftXfailEx
 from lib.py import cmd, ip
 from lib.py import NetNS, NetdevSimDev
 from .remote import Remote
@@ -76,7 +76,7 @@ class NetDrvEpEnv:
     nsim_v4_pfx = "192.0.2."
     nsim_v6_pfx = "2001:db8::"
 
-    def __init__(self, src_path):
+    def __init__(self, src_path, nsim_test=None):
 
         self.env = _load_env_file(src_path)
 
@@ -88,6 +88,8 @@ class NetDrvEpEnv:
         self._ns_peer = None
 
         if "NETIF" in self.env:
+            if nsim_test is True:
+                raise KsftXfailEx("Test only works on netdevsim")
             self.dev = ip("link show dev " + self.env['NETIF'], json=True)[0]
 
             self.v4 = self.env.get("LOCAL_V4")
@@ -97,6 +99,9 @@ class NetDrvEpEnv:
             kind = self.env["REMOTE_TYPE"]
             args = self.env["REMOTE_ARGS"]
         else:
+            if nsim_test is False:
+                raise KsftXfailEx("Test does not work on netdevsim")
+
             self.create_local()
 
             self.dev = self._ns.nsims[0].dev

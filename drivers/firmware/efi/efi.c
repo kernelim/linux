@@ -1070,6 +1070,7 @@ int efi_status_to_err(efi_status_t status)
 		return -EINVAL;
 	return found->errno;
 }
+EXPORT_SYMBOL_GPL(efi_status_to_err);
 
 const char *
 efi_status_to_str(efi_status_t status)

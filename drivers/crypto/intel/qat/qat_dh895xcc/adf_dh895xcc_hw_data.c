@@ -24,12 +24,11 @@ static const u32 thrd_to_arb_map[ADF_DH895XCC_MAX_ACCELENGINES] = {
 static struct adf_hw_device_class dh895xcc_class = {
 	.name = ADF_DH895XCC_DEVICE_NAME,
 	.type = DEV_DH895XCC,
-	.instances = 0
 };
 
 static u32 get_accel_mask(struct adf_hw_device_data *self)
 {
-	u32 fuses = self->fuses;
+	u32 fuses = self->fuses[ADF_FUSECTL0];
 
 	return ~fuses >> ADF_DH895XCC_ACCELERATORS_REG_OFFSET &
 			 ADF_DH895XCC_ACCELERATORS_MASK;
@@ -37,7 +36,7 @@ static u32 get_accel_mask(struct adf_hw_device_data *self)
 
 static u32 get_ae_mask(struct adf_hw_device_data *self)
 {
-	u32 fuses = self->fuses;
+	u32 fuses = self->fuses[ADF_FUSECTL0];
 
 	return ~fuses & ADF_DH895XCC_ACCELENGINES_MASK;
 }
@@ -99,7 +98,7 @@ static u32 get_accel_cap(struct adf_accel_dev *accel_dev)
 
 static enum dev_sku_info get_sku(struct adf_hw_device_data *self)
 {
-	int sku = (self->fuses & ADF_DH895XCC_FUSECTL_SKU_MASK)
+	int sku = (self->fuses[ADF_FUSECTL0] & ADF_DH895XCC_FUSECTL_SKU_MASK)
 	    >> ADF_DH895XCC_FUSECTL_SKU_SHIFT;
 
 	switch (sku) {

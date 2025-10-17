@@ -1,3 +1,3 @@
-#6-
-0x1f0698fb	rdma_resolve_route	drivers/infiniband/core/rdma_cm	EXPORT_SYMBOL	
+#7-
+0xd9638d96	rdma_resolve_route	drivers/infiniband/core/rdma_cm	EXPORT_SYMBOL	
 

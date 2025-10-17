@@ -19,7 +19,7 @@ static bool ovl_is_escaped_xattr(struct super_block *sb, const char *name)
 
 static bool ovl_is_own_xattr(struct super_block *sb, const char *name)
 {
-	struct ovl_fs *ofs = sb->s_fs_info;
+	struct ovl_fs *ofs = OVL_FS(sb);
 
 	if (ofs->config.userxattr)
 		return strncmp(name, OVL_XATTR_USER_PREFIX,
@@ -44,26 +44,26 @@ static int ovl_xattr_set(struct dentry *dentry, struct inode *inode, const char 
 	struct path realpath;
 	const struct cred *old_cred;
 
-	err = ovl_want_write(dentry);
-	if (err)
-		goto out;
-
 	if (!value && !upperdentry) {
 		ovl_path_lower(dentry, &realpath);
 		old_cred = ovl_override_creds(dentry->d_sb);
 		err = vfs_getxattr(mnt_idmap(realpath.mnt), realdentry, name, NULL, 0);
 		revert_creds(old_cred);
 		if (err < 0)
-			goto out_drop_write;
+			goto out;
 	}
 
 	if (!upperdentry) {
 		err = ovl_copy_up(dentry);
 		if (err)
-			goto out_drop_write;
+			goto out;
 
 		realdentry = ovl_dentry_upper(dentry);
 	}
+
+	err = ovl_want_write(dentry);
+	if (err)
+		goto out;
 
 	old_cred = ovl_override_creds(dentry->d_sb);
 	if (value) {
@@ -74,12 +74,10 @@ static int ovl_xattr_set(struct dentry *dentry, struct inode *inode, const char 
 		err = ovl_do_removexattr(ofs, realdentry, name);
 	}
 	revert_creds(old_cred);
+	ovl_drop_write(dentry);
 
 	/* copy c/mtime */
 	ovl_copyattr(inode);
-
-out_drop_write:
-	ovl_drop_write(dentry);
 out:
 	return err;
 }
@@ -254,7 +252,7 @@ static const struct xattr_handler ovl_other_xattr_handler = {
 	.set = ovl_other_xattr_set,
 };
 
-static const struct xattr_handler *ovl_trusted_xattr_handlers[] = {
+static const struct xattr_handler * const ovl_trusted_xattr_handlers[] = {
 #ifdef CONFIG_FS_POSIX_ACL
 	&posix_acl_access_xattr_handler,
 	&posix_acl_default_xattr_handler,
@@ -264,7 +262,7 @@ static const struct xattr_handler *ovl_trusted_xattr_handlers[] = {
 	NULL
 };
 
-static const struct xattr_handler *ovl_user_xattr_handlers[] = {
+static const struct xattr_handler * const ovl_user_xattr_handlers[] = {
 #ifdef CONFIG_FS_POSIX_ACL
 	&posix_acl_access_xattr_handler,
 	&posix_acl_default_xattr_handler,
@@ -274,7 +272,7 @@ static const struct xattr_handler *ovl_user_xattr_handlers[] = {
 	NULL
 };
 
-const struct xattr_handler **ovl_xattr_handlers(struct ovl_fs *ofs)
+const struct xattr_handler * const *ovl_xattr_handlers(struct ovl_fs *ofs)
 {
 	return ofs->config.userxattr ? ovl_user_xattr_handlers :
 		ovl_trusted_xattr_handlers;

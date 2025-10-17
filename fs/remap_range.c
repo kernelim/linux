@@ -97,8 +97,7 @@ static int generic_remap_checks(struct file *file_in, loff_t pos_in,
 	return 0;
 }
 
-static int remap_verify_area(struct file *file, loff_t pos, loff_t len,
-			     bool write)
+int remap_verify_area(struct file *file, loff_t pos, loff_t len, bool write)
 {
 	if (unlikely(pos < 0 || len < 0))
 		return -EINVAL;
@@ -108,6 +107,7 @@ static int remap_verify_area(struct file *file, loff_t pos, loff_t len,
 
 	return security_file_permission(file, write ? MAY_WRITE : MAY_READ);
 }
+EXPORT_SYMBOL_GPL(remap_verify_area);
 
 /*
  * Ensure that we don't remap a partial EOF block in the middle of something

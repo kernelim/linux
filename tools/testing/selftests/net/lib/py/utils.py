@@ -1,10 +1,25 @@
 # SPDX-License-Identifier: GPL-2.0
 
+import errno
 import json as _json
+import os
 import random
 import re
+import select
+import socket
 import subprocess
 import time
+
+
+class CmdExitFailure(Exception):
+    pass
+
+def fd_read_timeout(fd, timeout):
+    rlist, _, _ = select.select([fd], [], [], timeout)
+    if rlist:
+        return os.read(fd, 1024)
+    else:
+        raise TimeoutError("Timeout waiting for fd read")
 
 
 class cmd:
@@ -41,7 +56,8 @@ class cmd:
         if self.proc.returncode != 0 and fail:
             if len(stderr) > 0 and stderr[-1] == "\n":
                 stderr = stderr[:-1]
-            raise Exception("Command failed: %s\n%s" % (self.proc.args, stderr))
+            raise CmdExitFailure("Command failed: %s\nSTDOUT: %s\nSTDERR: %s" %
+                                 (self.proc.args, stdout, stderr))
 
 
 class bkg(cmd):
@@ -58,11 +74,45 @@ class bkg(cmd):
     def __exit__(self, ex_type, ex_value, ex_tb):
         return self.process(terminate=self.terminate, fail=self.check_fail)
 
+global_defer_queue = []
 
-def ip(args, json=None, ns=None, host=None):
-    cmd_str = "ip "
+
+class defer:
+    def __init__(self, func, *args, **kwargs):
+        global global_defer_queue
+
+        if not callable(func):
+            raise Exception("defer created with un-callable object, did you call the function instead of passing its name?")
+
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+
+        self._queue =  global_defer_queue
+        self._queue.append(self)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, ex_type, ex_value, ex_tb):
+        return self.exec()
+
+    def exec_only(self):
+        self.func(*self.args, **self.kwargs)
+
+    def cancel(self):
+        self._queue.remove(self)
+
+    def exec(self):
+        self.cancel()
+        self.exec_only()
+
+
+
+def tool(name, args, json=None, ns=None, host=None):
+    cmd_str = name + ' '
     if json:
-        cmd_str += '-j '
+        cmd_str += '--json '
     cmd_str += args
     cmd_obj = cmd(cmd_str, ns=ns, host=host)
     if json:
@@ -70,11 +120,23 @@ def ip(args, json=None, ns=None, host=None):
     return cmd_obj
 
 
-def rand_port():
+def ip(args, json=None, ns=None, host=None):
+    if ns:
+        args = f'-netns {ns} ' + args
+    return tool('ip', args, json=json, host=host)
+
+
+def ethtool(args, json=None, ns=None, host=None):
+    return tool('ethtool', args, json=json, ns=ns, host=host)
+
+
+def rand_port(type=socket.SOCK_STREAM):
     """
-    Get unprivileged port, for now just random, one day we may decide to check if used.
+    Get a random unprivileged port.
     """
-    return random.randint(1024, 65535)
+    with socket.socket(socket.AF_INET6, type) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
 
 
 def wait_port_listen(port, proto="tcp", ns=None, host=None, sleep=0.005, deadline=5):

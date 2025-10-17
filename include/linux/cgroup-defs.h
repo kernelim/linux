@@ -172,7 +172,11 @@ struct cgroup_subsys_state {
 	/* reference count - access via css_[try]get() and css_put() */
 	struct percpu_ref refcnt;
 
-	/* siblings list anchored at the parent's ->children */
+	/*
+	 * siblings list anchored at the parent's ->children
+	 *
+	 * linkage is protected by cgroup_mutex or RCU
+	 */
 	struct list_head sibling;
 	struct list_head children;
 
@@ -323,6 +327,7 @@ struct cgroup_base_stat {
 #ifdef CONFIG_SCHED_CORE
 	u64 forceidle_sum;
 #endif
+	u64 ntime;
 };
 
 /*
@@ -708,6 +713,7 @@ struct cgroup_subsys {
 	void (*css_released)(struct cgroup_subsys_state *css);
 	void (*css_free)(struct cgroup_subsys_state *css);
 	void (*css_reset)(struct cgroup_subsys_state *css);
+	void (*css_killed)(struct cgroup_subsys_state *css);
 	void (*css_rstat_flush)(struct cgroup_subsys_state *css, int cpu);
 	int (*css_extra_stat_show)(struct seq_file *seq,
 				   struct cgroup_subsys_state *css);
@@ -787,16 +793,6 @@ struct cgroup_subsys {
 	 * specifies the mask of subsystems that this one depends on.
 	 */
 	unsigned int depends_on;
-
-	/*
-	 * RH Notes:
-	 * There is only one cgroup_subsys per controller and it is not
-	 * embedded in other structures. Also 3rd party kernel modules are
-	 * not allowed to add new cgroup_subsys structure. So we can insert
-	 * new field at the end without any undesriable effect.
-	 */
-	RH_KABI_BROKEN_INSERT(
-		void (*css_killed)(struct cgroup_subsys_state *css))
 };
 
 extern struct percpu_rw_semaphore cgroup_threadgroup_rwsem;

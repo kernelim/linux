@@ -212,7 +212,7 @@ static int rcar_gen3_thermal_mcelsius_to_temp(struct rcar_gen3_thermal_tsc *tsc,
 
 static int rcar_gen3_thermal_set_trips(struct thermal_zone_device *tz, int low, int high)
 {
-	struct rcar_gen3_thermal_tsc *tsc = tz->devdata;
+	struct rcar_gen3_thermal_tsc *tsc = thermal_zone_device_priv(tz);
 	u32 irqmsk = 0;
 
 	if (low != -INT_MAX) {
@@ -562,11 +562,7 @@ static int rcar_gen3_thermal_probe(struct platform_device *pdev)
 		if (ret)
 			goto error_unregister;
 
-		ret = thermal_zone_get_num_trips(tsc->zone);
-		if (ret < 0)
-			goto error_unregister;
-
-		dev_info(dev, "Sensor %u: Loaded %d trip points\n", i, ret);
+		dev_info(dev, "Sensor %u: Loaded\n", i);
 	}
 
 	if (!priv->num_tscs) {

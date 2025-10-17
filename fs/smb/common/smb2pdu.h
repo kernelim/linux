@@ -95,6 +95,9 @@
  */
 #define SMB3_DEFAULT_IOSIZE (4 * 1024 * 1024)
 
+/* According to MS-SMB2 specification The minimum recommended value is 65536.*/
+#define CIFS_MIN_DEFAULT_IOSIZE (65536)
+
 /*
  * SMB2 Header Definition
  *
@@ -1263,6 +1266,7 @@ struct create_mxac_rsp {
 #define SMB2_LEASE_WRITE_CACHING_LE		cpu_to_le32(0x04)
 
 #define SMB2_LEASE_FLAG_BREAK_IN_PROGRESS_LE	cpu_to_le32(0x02)
+#define SMB2_LEASE_FLAG_PARENT_LEASE_KEY_SET_LE	cpu_to_le32(0x04)
 
 #define SMB2_LEASE_KEY_SIZE			16
 
@@ -1525,13 +1529,13 @@ struct reparse_nfs_data_buffer {
 	__u8	DataBuffer[];
 } __packed;
 
-/* For IO_REPARSE_TAG_LX_SYMLINK */
+/* For IO_REPARSE_TAG_LX_SYMLINK - see MS-FSCC 2.1.2.7 */
 struct reparse_wsl_symlink_data_buffer {
 	__le32	ReparseTag;
 	__le16	ReparseDataLength;
 	__u16	Reserved;
-	__le32	Flags;
-	__u8	PathBuffer[]; /* Variable Length UTF-8 string without nul-term */
+	__le32	Version; /* Always 2 */
+	__u8	Target[]; /* Variable Length UTF-8 string without nul-term */
 } __packed;
 
 struct validate_negotiate_info_req {
@@ -1668,23 +1672,33 @@ struct smb2_file_internal_info {
 } __packed; /* level 6 Query */
 
 struct smb2_file_rename_info { /* encoding of request for level 10 */
-	__u8   ReplaceIfExists; /* 1 = replace existing target with new */
-				/* 0 = fail if target already exists */
-	__u8   Reserved[7];
-	__u64  RootDirectory;  /* MBZ for network operations (why says spec?) */
-	__le32 FileNameLength;
+	/* New members MUST be added within the struct_group() macro below. */
+	__struct_group(smb2_file_rename_info_hdr, __hdr, __packed,
+		__u8   ReplaceIfExists; /* 1 = replace existing target with new */
+					/* 0 = fail if target already exists */
+		__u8   Reserved[7];
+		__u64  RootDirectory;  /* MBZ for network operations (why says spec?) */
+		__le32 FileNameLength;
+	);
 	char   FileName[];     /* New name to be assigned */
 	/* padding - overall struct size must be >= 24 so filename + pad >= 6 */
 } __packed; /* level 10 Set */
+static_assert(offsetof(struct smb2_file_rename_info, FileName) == sizeof(struct smb2_file_rename_info_hdr),
+	      "struct member likely outside of __struct_group()");
 
 struct smb2_file_link_info { /* encoding of request for level 11 */
-	__u8   ReplaceIfExists; /* 1 = replace existing link with new */
-				/* 0 = fail if link already exists */
-	__u8   Reserved[7];
-	__u64  RootDirectory;  /* MBZ for network operations (why says spec?) */
-	__le32 FileNameLength;
+	/* New members MUST be added within the struct_group() macro below. */
+	__struct_group(smb2_file_link_info_hdr, __hdr, __packed,
+		__u8   ReplaceIfExists; /* 1 = replace existing link with new */
+					/* 0 = fail if link already exists */
+		__u8   Reserved[7];
+		__u64  RootDirectory;  /* MBZ for network operations (why says spec?) */
+		__le32 FileNameLength;
+	);
 	char   FileName[];     /* Name to be assigned to new link */
 } __packed; /* level 11 Set */
+static_assert(offsetof(struct smb2_file_link_info, FileName) == sizeof(struct smb2_file_link_info_hdr),
+	      "struct member likely outside of __struct_group()");
 
 /*
  * This level 18, although with struct with same name is different from cifs

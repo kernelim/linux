@@ -160,7 +160,7 @@ static inline void interrupt_enter_prepare(struct pt_regs *regs, struct interrup
 
 	if (user_mode(regs)) {
 		kuap_lock();
-		CT_WARN_ON(ct_state() != CONTEXT_USER);
+		CT_WARN_ON(ct_state() != CT_STATE_USER);
 		user_exit_irqoff();
 
 		account_cpu_user_entry();
@@ -172,8 +172,8 @@ static inline void interrupt_enter_prepare(struct pt_regs *regs, struct interrup
 		 * so avoid recursion.
 		 */
 		if (TRAP(regs) != INTERRUPT_PROGRAM) {
-			CT_WARN_ON(ct_state() != CONTEXT_KERNEL &&
-				   ct_state() != CONTEXT_IDLE);
+			CT_WARN_ON(ct_state() != CT_STATE_KERNEL &&
+				   ct_state() != CT_STATE_IDLE);
 			if (IS_ENABLED(CONFIG_PPC_IRQ_SOFT_MASK_DEBUG))
 				BUG_ON(is_implicit_soft_masked(regs));
 		}

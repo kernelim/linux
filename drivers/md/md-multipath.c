@@ -13,7 +13,6 @@
 
 #include <linux/blkdev.h>
 #include <linux/module.h>
-#include <linux/raid/md_u.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include "md.h"
@@ -430,9 +429,12 @@ static void multipath_free(struct mddev *mddev, void *priv)
 
 static struct md_personality multipath_personality =
 {
-	.name		= "multipath",
-	.level		= LEVEL_MULTIPATH,
-	.owner		= THIS_MODULE,
+	.head = {
+		.type   = MD_PERSONALITY,
+		.id     = ID_MULTIPATH,
+		.name   = "multipath",
+		.owner  = THIS_MODULE,
+	},
 	.make_request	= multipath_make_request,
 	.run		= multipath_run,
 	.free		= multipath_free,
@@ -445,12 +447,12 @@ static struct md_personality multipath_personality =
 
 static int __init multipath_init (void)
 {
-	return register_md_personality (&multipath_personality);
+	return register_md_submodule(&multipath_personality.head);
 }
 
 static void __exit multipath_exit (void)
 {
-	unregister_md_personality (&multipath_personality);
+	unregister_md_submodule(&multipath_personality.head);
 }
 
 module_init(multipath_init);

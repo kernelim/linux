@@ -277,7 +277,7 @@ TRACE_EVENT(foo_bar,
 		__assign_bitmask(cpus, cpumask_bits(mask), num_possible_cpus());
 	),
 
-	TP_printk("foo %s %d %s %s %s %s (%s)", __entry->foo, __entry->bar,
+	TP_printk("foo %s %d %s %s %s %s %s (%s)", __entry->foo, __entry->bar,
 
 /*
  * Notice here the use of some helper functions. This includes:
@@ -321,6 +321,11 @@ TRACE_EVENT(foo_bar,
 		  __print_array(__get_dynamic_array(list),
 				__get_dynamic_array_len(list) / sizeof(int),
 				sizeof(int)),
+
+/*     A shortcut is to use __print_dynamic_array for dynamic arrays */
+
+		  __print_dynamic_array(list, sizeof(int)),
+
 		  __get_str(str), __get_bitmask(cpus))
 );
 

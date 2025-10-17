@@ -474,14 +474,19 @@ static bool brcm_avs_is_firmware_loaded(struct private_data *priv)
 	rc = brcm_avs_get_pmap(priv, NULL);
 	magic = readl(priv->base + AVS_MBOX_MAGIC);
 
-	return (magic == AVS_FIRMWARE_MAGIC) && ((rc != -ENOTSUPP) ||
-		(rc != -EINVAL));
+	return (magic == AVS_FIRMWARE_MAGIC) && (rc != -ENOTSUPP) &&
+		(rc != -EINVAL);
 }
 
 static unsigned int brcm_avs_cpufreq_get(unsigned int cpu)
 {
 	struct cpufreq_policy *policy = cpufreq_cpu_get(cpu);
-	struct private_data *priv = policy->driver_data;
+	struct private_data *priv;
+
+	if (!policy)
+		return 0;
+
+	priv = policy->driver_data;
 
 	cpufreq_cpu_put(policy);
 
@@ -715,7 +720,6 @@ cpufreq_freq_attr_ro(brcm_avs_voltage);
 cpufreq_freq_attr_ro(brcm_avs_frequency);
 
 static struct freq_attr *brcm_avs_cpufreq_attr[] = {
-	&cpufreq_freq_attr_scaling_available_freqs,
 	&brcm_avs_pstate,
 	&brcm_avs_mode,
 	&brcm_avs_pmap,

@@ -61,8 +61,8 @@ static int create_files(struct kernfs_node *parent, struct kobject *kobj,
 			     (*attr)->name, mode);
 
 			mode &= SYSFS_PREALLOC | 0664;
-			error = sysfs_add_file_mode_ns(parent, *attr, false,
-						       mode, uid, gid, NULL);
+			error = sysfs_add_file_mode_ns(parent, *attr, mode, uid,
+						       gid, NULL);
 			if (unlikely(error))
 				break;
 		}
@@ -75,6 +75,7 @@ static int create_files(struct kernfs_node *parent, struct kobject *kobj,
 	if (grp->bin_attrs) {
 		for (i = 0, bin_attr = grp->bin_attrs; *bin_attr; i++, bin_attr++) {
 			umode_t mode = (*bin_attr)->attr.mode;
+			size_t size = (*bin_attr)->size;
 
 			if (update)
 				kernfs_remove_by_name(parent,
@@ -84,16 +85,17 @@ static int create_files(struct kernfs_node *parent, struct kobject *kobj,
 				if (!mode)
 					continue;
 			}
+			if (grp->bin_size)
+				size = grp->bin_size(kobj, *bin_attr, i);
 
 			WARN(mode & ~(SYSFS_PREALLOC | 0664),
 			     "Attribute %s: Invalid permissions 0%o\n",
 			     (*bin_attr)->attr.name, mode);
 
 			mode &= SYSFS_PREALLOC | 0664;
-			error = sysfs_add_file_mode_ns(parent,
-					&(*bin_attr)->attr, true,
-					mode,
-					uid, gid, NULL);
+			error = sysfs_add_bin_file_mode_ns(parent, *bin_attr,
+							   mode, size, uid, gid,
+							   NULL);
 			if (error)
 				break;
 		}
@@ -340,8 +342,8 @@ int sysfs_merge_group(struct kobject *kobj,
 	kobject_get_ownership(kobj, &uid, &gid);
 
 	for ((i = 0, attr = grp->attrs); *attr && !error; (++i, ++attr))
-		error = sysfs_add_file_mode_ns(parent, *attr, false,
-					       (*attr)->mode, uid, gid, NULL);
+		error = sysfs_add_file_mode_ns(parent, *attr, (*attr)->mode,
+					       uid, gid, NULL);
 	if (error) {
 		while (--i >= 0)
 			kernfs_remove_by_name(parent, (*--attr)->name);

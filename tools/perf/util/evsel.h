@@ -221,6 +221,8 @@ struct perf_missing_features {
 	bool weight_struct;
 	bool read_lost;
 	bool branch_counters;
+	bool aux_action;
+	bool inherit_sample_read;
 };
 
 extern struct perf_missing_features perf_missing_features;
@@ -368,7 +370,6 @@ int evsel__open(struct evsel *evsel, struct perf_cpu_map *cpus,
 void evsel__close(struct evsel *evsel);
 int evsel__prepare_open(struct evsel *evsel, struct perf_cpu_map *cpus,
 		struct perf_thread_map *threads);
-bool evsel__detect_missing_features(struct evsel *evsel);
 
 bool evsel__precise_ip_fallback(struct evsel *evsel);
 

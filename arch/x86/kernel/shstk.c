@@ -134,28 +134,24 @@ static unsigned long adjust_shstk_size(unsigned long size)
 
 static void unmap_shadow_stack(u64 base, u64 size)
 {
-	while (1) {
-		int r;
+	int r;
 
-		r = vm_munmap(base, size);
+	r = vm_munmap(base, size);
 
-		/*
-		 * vm_munmap() returns -EINTR when mmap_lock is held by
-		 * something else, and that lock should not be held for a
-		 * long time.  Retry it for the case.
-		 */
-		if (r == -EINTR) {
-			cond_resched();
-			continue;
-		}
+	/*
+	 * mmap_write_lock_killable() failed with -EINTR. This means
+	 * the process is about to die and have it's MM cleaned up.
+	 * This task shouldn't ever make it back to userspace. In this
+	 * case it is ok to leak a shadow stack, so just exit out.
+	 */
+	if (r == -EINTR)
+		return;
 
-		/*
-		 * For all other types of vm_munmap() failure, either the
-		 * system is out of memory or there is bug.
-		 */
-		WARN_ON_ONCE(r);
-		break;
-	}
+	/*
+	 * For all other types of vm_munmap() failure, either the
+	 * system is out of memory or there is bug.
+	 */
+	WARN_ON_ONCE(r);
 }
 
 static int shstk_setup(void)
@@ -167,8 +163,8 @@ static int shstk_setup(void)
 	if (features_enabled(ARCH_SHSTK_SHSTK))
 		return 0;
 
-	/* Also not supported for 32 bit and x32 */
-	if (!cpu_feature_enabled(X86_FEATURE_USER_SHSTK) || in_32bit_syscall())
+	/* Also not supported for 32 bit */
+	if (!cpu_feature_enabled(X86_FEATURE_USER_SHSTK) || in_ia32_syscall())
 		return -EOPNOTSUPP;
 
 	size = adjust_shstk_size(0);
@@ -290,7 +286,7 @@ static int shstk_push_sigframe(unsigned long *ssp)
 		return -EINVAL;
 
 	*ssp -= SS_FRAME_SIZE;
-	if (put_shstk_data((void *__user)*ssp, target_ssp))
+	if (put_shstk_data((void __user *)*ssp, target_ssp))
 		return -EFAULT;
 
 	return 0;
@@ -430,7 +426,18 @@ void shstk_free(struct task_struct *tsk)
 	if (!shstk->base)
 		return;
 
+	/*
+	 * shstk->base is NULL for CLONE_VFORK child tasks, and so is
+	 * normal. But size = 0 on a shstk->base is not normal and
+	 * indicated an attempt to free the thread shadow stack twice.
+	 * Warn about it.
+	 */
+	if (WARN_ON(!shstk->size))
+		return;
+
 	unmap_shadow_stack(shstk->base, shstk->size);
+
+	shstk->size = 0;
 }
 
 static int wrss_control(bool enable)
@@ -525,16 +532,27 @@ SYSCALL_DEFINE3(map_shadow_stack, unsigned long, addr, unsigned long, size, unsi
 	return alloc_shstk(addr, aligned_size, size, set_tok);
 }
 
-long shstk_prctl(struct task_struct *task, int option, unsigned long features)
+long shstk_prctl(struct task_struct *task, int option, unsigned long arg2)
 {
+	unsigned long features = arg2;
+
+	if (option == ARCH_SHSTK_STATUS) {
+		return put_user(task->thread.features, (unsigned long __user *)arg2);
+	}
+
 	if (option == ARCH_SHSTK_LOCK) {
 		task->thread.features_locked |= features;
 		return 0;
 	}
 
-	/* Don't allow via ptrace */
-	if (task != current)
+	/* Only allow via ptrace */
+	if (task != current) {
+		if (option == ARCH_SHSTK_UNLOCK && IS_ENABLED(CONFIG_CHECKPOINT_RESTORE)) {
+			task->thread.features_locked &= ~features;
+			return 0;
+		}
 		return -EINVAL;
+	}
 
 	/* Do not allow to change locked features */
 	if (features & task->thread.features_locked)

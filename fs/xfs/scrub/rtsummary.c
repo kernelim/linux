@@ -17,10 +17,14 @@
 #include "xfs_bit.h"
 #include "xfs_bmap.h"
 #include "xfs_sb.h"
+#include "xfs_exchmaps.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
 #include "scrub/xfile.h"
+#include "scrub/repair.h"
+#include "scrub/tempexch.h"
+#include "scrub/rtsummary.h"
 
 /*
  * Realtime Summary
@@ -31,18 +35,6 @@
  * the ondisk version.  We use the 'xfile' functionality to store this
  * (potentially large) amount of data in pageable memory.
  */
-
-struct xchk_rtsummary {
-	struct xfs_rtalloc_args	args;
-
-	uint64_t		rextents;
-	uint64_t		rbmblocks;
-	uint64_t		rsumsize;
-	unsigned int		rsumlevels;
-
-	/* Memory buffer for the summary comparison. */
-	union xfs_suminfo_raw	words[];
-};
 
 /* Set us up to check the rtsummary file. */
 int
@@ -60,17 +52,24 @@ xchk_setup_rtsummary(
 		return -ENOMEM;
 	sc->buf = rts;
 
+	if (xchk_could_repair(sc)) {
+		error = xrep_setup_rtsummary(sc, rts);
+		if (error)
+			return error;
+	}
+
 	/*
 	 * Create an xfile to construct a new rtsummary file.  The xfile allows
 	 * us to avoid pinning kernel memory for this purpose.
 	 */
 	descr = xchk_xfile_descr(sc, "realtime summary file");
-	error = xfile_create(descr, mp->m_rsumsize, &sc->xfile);
+	error = xfile_create(descr, XFS_FSB_TO_B(mp, mp->m_rsumblocks),
+			&sc->xfile);
 	kfree(descr);
 	if (error)
 		return error;
 
-	error = xchk_trans_alloc(sc, 0);
+	error = xchk_trans_alloc(sc, rts->resblks);
 	if (error)
 		return error;
 
@@ -97,16 +96,14 @@ xchk_setup_rtsummary(
 	 * volume.  Hence it is safe to compute and check the geometry values.
 	 */
 	if (mp->m_sb.sb_rblocks) {
-		xfs_filblks_t	rsumblocks;
 		int		rextslog;
 
 		rts->rextents = xfs_rtb_to_rtx(mp, mp->m_sb.sb_rblocks);
 		rextslog = xfs_compute_rextslog(rts->rextents);
 		rts->rsumlevels = rextslog + 1;
 		rts->rbmblocks = xfs_rtbitmap_blockcount(mp, rts->rextents);
-		rsumblocks = xfs_rtsummary_blockcount(mp, rts->rsumlevels,
+		rts->rsumblocks = xfs_rtsummary_blockcount(mp, rts->rsumlevels,
 				rts->rbmblocks);
-		rts->rsumsize = XFS_FSB_TO_B(mp, rsumblocks);
 	}
 	return 0;
 }
@@ -119,7 +116,7 @@ xfsum_load(
 	xfs_rtsumoff_t		sumoff,
 	union xfs_suminfo_raw	*rawinfo)
 {
-	return xfile_obj_load(sc->xfile, rawinfo,
+	return xfile_load(sc->xfile, rawinfo,
 			sizeof(union xfs_suminfo_raw),
 			sumoff << XFS_WORDLOG);
 }
@@ -130,19 +127,19 @@ xfsum_store(
 	xfs_rtsumoff_t		sumoff,
 	const union xfs_suminfo_raw rawinfo)
 {
-	return xfile_obj_store(sc->xfile, &rawinfo,
+	return xfile_store(sc->xfile, &rawinfo,
 			sizeof(union xfs_suminfo_raw),
 			sumoff << XFS_WORDLOG);
 }
 
-static inline int
+inline int
 xfsum_copyout(
 	struct xfs_scrub	*sc,
 	xfs_rtsumoff_t		sumoff,
 	union xfs_suminfo_raw	*rawinfo,
 	unsigned int		nr_words)
 {
-	return xfile_obj_load(sc->xfile, rawinfo, nr_words << XFS_WORDLOG,
+	return xfile_load(sc->xfile, rawinfo, nr_words << XFS_WORDLOG,
 			sumoff << XFS_WORDLOG);
 }
 
@@ -318,7 +315,7 @@ xchk_rtsummary(
 	}
 
 	/* Is m_rsumsize correct? */
-	if (mp->m_rsumsize != rts->rsumsize) {
+	if (mp->m_rsumblocks != rts->rsumblocks) {
 		xchk_ino_set_corrupt(sc, mp->m_rsumip->i_ino);
 		goto out_rbm;
 	}
@@ -334,7 +331,7 @@ xchk_rtsummary(
 	 * growfsrt expands the summary file before updating sb_rextents, so
 	 * the file can be larger than rsumsize.
 	 */
-	if (mp->m_rsumip->i_disk_size < rts->rsumsize) {
+	if (mp->m_rsumip->i_disk_size < XFS_FSB_TO_B(mp, rts->rsumblocks)) {
 		xchk_ino_set_corrupt(sc, mp->m_rsumip->i_ino);
 		goto out_rbm;
 	}
@@ -362,7 +359,12 @@ xchk_rtsummary(
 	error = xchk_rtsum_compare(sc);
 
 out_rbm:
-	/* Unlock the rtbitmap since we're done with it. */
+	/*
+	 * Unlock the rtbitmap since we're done with it.  All other writers of
+	 * the rt free space metadata grab the bitmap and summary ILOCKs in
+	 * that order, so we're still protected against allocation activities
+	 * even if we continue on to the repair function.
+	 */
 	xfs_iunlock(mp->m_rbmip, XFS_ILOCK_SHARED | XFS_ILOCK_RTBITMAP);
 	return error;
 }

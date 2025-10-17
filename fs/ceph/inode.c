@@ -55,52 +55,6 @@ static int ceph_set_ino_cb(struct inode *inode, void *data)
 	return 0;
 }
 
-/*
- * Check if the parent inode matches the vino from directory reply info
- */
-static inline bool ceph_vino_matches_parent(struct inode *parent,
-					    struct ceph_vino vino)
-{
-	return ceph_ino(parent) == vino.ino && ceph_snap(parent) == vino.snap;
-}
-
-/*
- * Validate that the directory inode referenced by @req->r_parent matches the
- * inode number and snapshot id contained in the reply's directory record.  If
- * they do not match – which can theoretically happen if the parent dentry was
- * moved between the time the request was issued and the reply arrived – fall
- * back to looking up the correct inode in the inode cache.
- *
- * A reference is *always* returned.  Callers that receive a different inode
- * than the original @parent are responsible for dropping the extra reference
- * once the reply has been processed.
- */
-static struct inode *ceph_get_reply_dir(struct super_block *sb,
-					struct inode *parent,
-					struct ceph_mds_reply_info_parsed *rinfo)
-{
-	struct ceph_vino vino;
-
-	if (unlikely(!rinfo->diri.in))
-		return parent; /* nothing to compare against */
-
-	/* If we didn't have a cached parent inode to begin with, just bail out. */
-	if (!parent)
-		return NULL;
-
-	vino.ino  = le64_to_cpu(rinfo->diri.in->ino);
-	vino.snap = le64_to_cpu(rinfo->diri.in->snapid);
-
-	if (likely(ceph_vino_matches_parent(parent, vino)))
-		return parent; /* matches – use the original reference */
-
-	/* Mismatch – this should be rare.  Emit a WARN and obtain the correct inode. */
-	WARN_ONCE(1, "ceph: reply dir mismatch (parent valid %llx.%llx reply %llx.%llx)\n",
-		  ceph_ino(parent), ceph_snap(parent), vino.ino, vino.snap);
-
-	return ceph_get_inode(sb, vino, NULL);
-}
-
 /**
  * ceph_new_inode - allocate a new inode in advance of an expected create
  * @dir: parent directory for new inode
@@ -1535,7 +1489,6 @@ int ceph_fill_trace(struct super_block *sb, struct ceph_mds_request *req)
 	struct inode *in = NULL;
 	struct ceph_vino tvino, dvino;
 	struct ceph_fs_client *fsc = ceph_sb_to_client(sb);
-	struct inode *parent_dir = NULL;
 	int err = 0;
 
 	dout("fill_trace %p is_dentry %d is_target %d\n", req,
@@ -1549,18 +1502,10 @@ int ceph_fill_trace(struct super_block *sb, struct ceph_mds_request *req)
 	}
 
 	if (rinfo->head->is_dentry) {
-		/*
-		 * r_parent may be stale, in cases when R_PARENT_LOCKED is not set,
-		 * so we need to get the correct inode
-		 */
-		parent_dir = ceph_get_reply_dir(sb, req->r_parent, rinfo);
-		if (unlikely(IS_ERR(parent_dir))) {
-			err = PTR_ERR(parent_dir);
-			goto done;
-		}
+		struct inode *dir = req->r_parent;
 
-		if (parent_dir) {
-			err = ceph_fill_inode(parent_dir, NULL, &rinfo->diri,
+		if (dir) {
+			err = ceph_fill_inode(dir, NULL, &rinfo->diri,
 					      rinfo->dirfrag, session, -1,
 					      &req->r_caps_reservation);
 			if (err < 0)
@@ -1569,14 +1514,14 @@ int ceph_fill_trace(struct super_block *sb, struct ceph_mds_request *req)
 			WARN_ON_ONCE(1);
 		}
 
-		if (parent_dir && req->r_op == CEPH_MDS_OP_LOOKUPNAME &&
+		if (dir && req->r_op == CEPH_MDS_OP_LOOKUPNAME &&
 		    test_bit(CEPH_MDS_R_PARENT_LOCKED, &req->r_req_flags) &&
 		    !test_bit(CEPH_MDS_R_ABORTED, &req->r_req_flags)) {
 			bool is_nokey = false;
 			struct qstr dname;
 			struct dentry *dn, *parent;
 			struct fscrypt_str oname = FSTR_INIT(NULL, 0);
-			struct ceph_fname fname = { .dir	= parent_dir,
+			struct ceph_fname fname = { .dir	= dir,
 						    .name	= rinfo->dname,
 						    .ctext	= rinfo->altname,
 						    .name_len	= rinfo->dname_len,
@@ -1585,10 +1530,10 @@ int ceph_fill_trace(struct super_block *sb, struct ceph_mds_request *req)
 			BUG_ON(!rinfo->head->is_target);
 			BUG_ON(req->r_dentry);
 
-			parent = d_find_any_alias(parent_dir);
+			parent = d_find_any_alias(dir);
 			BUG_ON(!parent);
 
-			err = ceph_fname_alloc_buffer(parent_dir, &oname);
+			err = ceph_fname_alloc_buffer(dir, &oname);
 			if (err < 0) {
 				dput(parent);
 				goto done;
@@ -1597,7 +1542,7 @@ int ceph_fill_trace(struct super_block *sb, struct ceph_mds_request *req)
 			err = ceph_fname_to_usr(&fname, NULL, &oname, &is_nokey);
 			if (err < 0) {
 				dput(parent);
-				ceph_fname_free_buffer(parent_dir, &oname);
+				ceph_fname_free_buffer(dir, &oname);
 				goto done;
 			}
 			dname.name = oname.name;
@@ -1605,7 +1550,6 @@ int ceph_fill_trace(struct super_block *sb, struct ceph_mds_request *req)
 			dname.hash = full_name_hash(parent, dname.name, dname.len);
 			tvino.ino = le64_to_cpu(rinfo->targeti.in->ino);
 			tvino.snap = le64_to_cpu(rinfo->targeti.in->snapid);
-
 retry_lookup:
 			dn = d_lookup(parent, &dname);
 			dout("d_lookup on parent=%p name=%.*s got %p\n",
@@ -1617,7 +1561,7 @@ retry_lookup:
 				     dname.len, dname.name, dn);
 				if (!dn) {
 					dput(parent);
-					ceph_fname_free_buffer(parent_dir, &oname);
+					ceph_fname_free_buffer(dir, &oname);
 					err = -ENOMEM;
 					goto done;
 				}
@@ -1632,12 +1576,12 @@ retry_lookup:
 				    ceph_snap(d_inode(dn)) != tvino.snap)) {
 				dout(" dn %p points to wrong inode %p\n",
 				     dn, d_inode(dn));
-				ceph_dir_clear_ordered(parent_dir);
+				ceph_dir_clear_ordered(dir);
 				d_delete(dn);
 				dput(dn);
 				goto retry_lookup;
 			}
-			ceph_fname_free_buffer(parent_dir, &oname);
+			ceph_fname_free_buffer(dir, &oname);
 
 			req->r_dentry = dn;
 			dput(parent);
@@ -1819,9 +1763,6 @@ retry_lookup:
 					    &dvino, ptvino);
 	}
 done:
-	/* Drop extra ref from ceph_get_reply_dir() if it returned a new inode */
-	if (unlikely(!IS_ERR_OR_NULL(parent_dir) && parent_dir != req->r_parent))
-		iput(parent_dir);
 	dout("fill_trace done err=%d\n", err);
 	return err;
 }

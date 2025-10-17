@@ -193,7 +193,6 @@ always_cow_show(
 }
 XFS_SYSFS_ATTR_RW(always_cow);
 
-#ifdef DEBUG
 /*
  * Override how many threads the parallel work queue is allowed to create.
  * This has to be a debug-only global (instead of an errortag) because one of
@@ -260,7 +259,6 @@ larp_show(
 	return snprintf(buf, PAGE_SIZE, "%d\n", xfs_globals.larp);
 }
 XFS_SYSFS_ATTR_RW(larp);
-#endif /* DEBUG */
 
 STATIC ssize_t
 bload_leaf_slack_store(
@@ -319,10 +317,8 @@ static struct attribute *xfs_dbg_attrs[] = {
 	ATTR_LIST(log_recovery_delay),
 	ATTR_LIST(mount_delay),
 	ATTR_LIST(always_cow),
-#ifdef DEBUG
 	ATTR_LIST(pwork_threads),
 	ATTR_LIST(larp),
-#endif
 	ATTR_LIST(bload_leaf_slack),
 	ATTR_LIST(bload_node_slack),
 	NULL,
@@ -436,39 +432,30 @@ log_tail_lsn_show(
 XFS_SYSFS_ATTR_RO(log_tail_lsn);
 
 STATIC ssize_t
-reserve_grant_head_show(
+reserve_grant_head_bytes_show(
 	struct kobject	*kobject,
 	char		*buf)
-
 {
-	int cycle;
-	int bytes;
-	struct xlog *log = to_xlog(kobject);
-
-	xlog_crack_grant_head(&log->l_reserve_head.grant, &cycle, &bytes);
-	return sysfs_emit(buf, "%d:%d\n", cycle, bytes);
+	return sysfs_emit(buf, "%lld\n",
+			atomic64_read(&to_xlog(kobject)->l_reserve_head.grant));
 }
-XFS_SYSFS_ATTR_RO(reserve_grant_head);
+XFS_SYSFS_ATTR_RO(reserve_grant_head_bytes);
 
 STATIC ssize_t
-write_grant_head_show(
+write_grant_head_bytes_show(
 	struct kobject	*kobject,
 	char		*buf)
 {
-	int cycle;
-	int bytes;
-	struct xlog *log = to_xlog(kobject);
-
-	xlog_crack_grant_head(&log->l_write_head.grant, &cycle, &bytes);
-	return sysfs_emit(buf, "%d:%d\n", cycle, bytes);
+	return sysfs_emit(buf, "%lld\n",
+			atomic64_read(&to_xlog(kobject)->l_write_head.grant));
 }
-XFS_SYSFS_ATTR_RO(write_grant_head);
+XFS_SYSFS_ATTR_RO(write_grant_head_bytes);
 
 static struct attribute *xfs_log_attrs[] = {
 	ATTR_LIST(log_head_lsn),
 	ATTR_LIST(log_tail_lsn),
-	ATTR_LIST(reserve_grant_head),
-	ATTR_LIST(write_grant_head),
+	ATTR_LIST(reserve_grant_head_bytes),
+	ATTR_LIST(write_grant_head_bytes),
 	NULL,
 };
 ATTRIBUTE_GROUPS(xfs_log);

@@ -14,6 +14,7 @@
 
 #include "i915_utils.h"
 #include "intel_runtime_pm.h"
+#include "xe_device.h" /* for xe_device_has_flat_ccs() */
 #include "xe_device_types.h"
 
 static inline struct drm_i915_private *to_i915(const struct drm_device *dev)
@@ -66,18 +67,13 @@ static inline struct drm_i915_private *to_i915(const struct drm_device *dev)
 #define IS_METEORLAKE(dev_priv) IS_PLATFORM(dev_priv, XE_METEORLAKE)
 #define IS_LUNARLAKE(dev_priv) IS_PLATFORM(dev_priv, XE_LUNARLAKE)
 #define IS_BATTLEMAGE(dev_priv)  IS_PLATFORM(dev_priv, XE_BATTLEMAGE)
+#define IS_PANTHERLAKE(dev_priv) IS_PLATFORM(dev_priv, XE_PANTHERLAKE)
 
 #define IS_HASWELL_ULT(dev_priv) (dev_priv && 0)
 #define IS_BROADWELL_ULT(dev_priv) (dev_priv && 0)
 #define IS_BROADWELL_ULX(dev_priv) (dev_priv && 0)
 
-#define IP_VER(ver, rel)                ((ver) << 8 | (rel))
-
 #define IS_MOBILE(xe) (xe && 0)
-
-#define IS_LP(xe) ((xe) && 0)
-#define IS_GEN9_LP(xe) ((xe) && 0)
-#define IS_GEN9_BC(xe) ((xe) && 0)
 
 #define IS_TIGERLAKE_UY(xe) (xe && 0)
 #define IS_COMETLAKE_ULX(xe) (xe && 0)
@@ -98,14 +94,6 @@ static inline struct drm_i915_private *to_i915(const struct drm_device *dev)
 #define HAS_FLAT_CCS(xe) (xe_device_has_flat_ccs(xe))
 
 #define HAS_128_BYTE_Y_TILING(xe) (xe || 1)
-
-#define I915_PRIORITY_DISPLAY 0
-struct i915_sched_attr {
-	int priority;
-};
-#define i915_gem_fence_wait_priority(fence, attr) do { (void) attr; } while (0)
-
-#define FORCEWAKE_ALL XE_FORCEWAKE_ALL
 
 #ifdef CONFIG_ARM64
 /*

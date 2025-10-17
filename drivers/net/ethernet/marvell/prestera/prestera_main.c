@@ -316,7 +316,7 @@ static int prestera_port_create(struct prestera_switch *sw, u32 id)
 		goto err_dl_port_register;
 
 	dev->features |= NETIF_F_HW_TC;
-	dev->netns_local = true;
+	dev->netns_immutable = true;
 	dev->netdev_ops = &prestera_netdev_ops;
 	dev->ethtool_ops = &prestera_ethtool_ops;
 	SET_NETDEV_DEVLINK_PORT(dev, &port->dl_port);

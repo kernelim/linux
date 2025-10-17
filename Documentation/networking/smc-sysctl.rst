@@ -41,3 +41,17 @@ smcr_testlink_time - INTEGER
 	disabling TEST_LINK.
 
 	Default: 30 seconds.
+
+smcr_max_links_per_lgr - INTEGER
+	Controls the max number of links can be added to a SMC-R link group. Notice that
+	the actual number of the links added to a SMC-R link group depends on the number
+	of RDMA devices exist in the system. The acceptable value ranges from 1 to 2. Only
+	for SMC-R v2.1 and later.
+
+	Default: 2
+
+smcr_max_conns_per_lgr - INTEGER
+	Controls the max number of connections can be added to a SMC-R link group. The
+	acceptable value ranges from 16 to 255. Only for SMC-R v2.1 and later.
+
+	Default: 255

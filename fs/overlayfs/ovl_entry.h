@@ -6,17 +6,14 @@
  */
 
 struct ovl_config {
-	char *lowerdir;
 	char *upperdir;
 	char *workdir;
+	char **lowerdirs;
 	bool default_permissions;
-	bool redirect_dir;
-	bool redirect_follow;
-	const char *redirect_mode;
-	const char *verity;
+	int redirect_mode;
 	int verity_mode;
 	bool index;
-	bool uuid;
+	int uuid;
 	bool nfs_export;
 	int xino;
 	bool metacopy;
@@ -34,6 +31,7 @@ struct ovl_sb {
 };
 
 struct ovl_layer {
+	/* ovl_free_fs() relies on @mnt being the first member! */
 	struct vfsmount *mnt;
 	/* Trap in ovl inode cache */
 	struct inode *trap;
@@ -78,10 +76,10 @@ struct ovl_fs {
 	const struct cred *creator_cred;
 	bool tmpfile;
 	bool noxattr;
+	bool nofh;
 	/* Did we take the inuse lock? */
 	bool upperdir_locked;
 	bool workdir_locked;
-	bool share_whiteout;
 	/* Traps in ovl inode cache */
 	struct inode *workbasedir_trap;
 	struct inode *workdir_trap;
@@ -90,12 +88,12 @@ struct ovl_fs {
 	int xino_mode;
 	/* For allocation of non-persistent inode numbers */
 	atomic_long_t last_ino;
-	/* Whiteout dentry cache */
+	/* Shared whiteout cache */
 	struct dentry *whiteout;
+	bool no_shared_whiteout;
 	/* r/o snapshot of upperdir sb's only taken on volatile mounts */
 	errseq_t errseq;
 };
-
 
 /* Number of lower layers, not including data-only layers */
 static inline unsigned int ovl_numlowerlayer(struct ovl_fs *ofs)
@@ -112,6 +110,8 @@ static inline struct mnt_idmap *ovl_upper_mnt_idmap(struct ovl_fs *ofs)
 {
 	return mnt_idmap(ovl_upper_mnt(ofs));
 }
+
+extern struct file_system_type ovl_fs_type;
 
 static inline struct ovl_fs *OVL_FS(struct super_block *sb)
 {

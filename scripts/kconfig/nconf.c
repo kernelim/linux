@@ -11,6 +11,7 @@
 #include <strings.h>
 #include <stdlib.h>
 
+#include <xalloc.h>
 #include "lkc.h"
 #include "nconf.h"
 #include <ctype.h>

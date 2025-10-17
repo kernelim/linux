@@ -1,3 +1,3 @@
-#6-
-0x2ac6e22c	kthread_cancel_delayed_work_sync	vmlinux	EXPORT_SYMBOL_GPL	
+#7-
+0x849a3883	kthread_cancel_delayed_work_sync	vmlinux	EXPORT_SYMBOL_GPL	
 

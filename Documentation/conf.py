@@ -348,6 +348,12 @@ latex_elements = {
         verbatimhintsturnover=false,
     ''',
 
+    #
+    # Some of our authors are fond of deep nesting; tell latex to
+    # cope.
+    #
+    'maxlistdepth': '10',
+
     # Additional stuff for the LaTeX preamble.
     'preamble': '''
 	% Prevent column squeezing of tabulary.

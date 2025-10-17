@@ -32,6 +32,7 @@
 #include <linux/sched/task.h>
 #include <linux/mm.h>
 #include <linux/security.h>
+#include <linux/libfdt.h>
 
 #include <asm/acpi.h>
 #include <asm/fixmap.h>
@@ -201,6 +202,24 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 	dump_stack_set_arch_desc("%s (DT)", name);
 }
 
+static void __init init_secureboot_mode(void)
+{
+	void *fdt = initial_boot_params;
+	u64 chosen;
+	const __be32 *prop;
+	int len;
+
+	chosen = fdt_path_offset(fdt, "/chosen");
+	if (chosen < 0)
+		return;
+
+	prop = fdt_getprop(fdt, chosen, "secure-boot-mode", &len);
+	if (!prop || len != sizeof(u32))
+		return;
+
+	efi_set_secure_boot((enum efi_secureboot_mode)fdt32_to_cpu(*prop));
+}
+
 static void __init request_standard_resources(void)
 {
 	struct memblock_region *region;
@@ -326,6 +345,13 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 			pr_warn(FW_BUG "Kernel image misaligned at boot, please fix your bootloader!");
 		WARN_TAINT(mmu_enabled_at_boot, TAINT_FIRMWARE_WORKAROUND,
 			   FW_BUG "Booted with MMU enabled!");
+	} else {
+		init_secureboot_mode();
+
+#ifdef CONFIG_LOCK_DOWN_IN_EFI_SECURE_BOOT
+		if (efi_enabled(EFI_SECURE_BOOT))
+			security_lock_kernel_down("EFI Secure Boot mode", LOCKDOWN_INTEGRITY_MAX);
+#endif
 	}
 
 	arm64_memblock_init();

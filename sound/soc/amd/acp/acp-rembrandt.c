@@ -33,46 +33,6 @@
 #define MP1_C2PMSG_93 0x3B10A74
 #define HOST_BRIDGE_ID 0x14B5
 
-static struct acp_resource rsrc = {
-	.offset = 0,
-	.no_of_ctrls = 2,
-	.irqp_used = 1,
-	.soc_mclk = true,
-	.irq_reg_offset = 0x1a00,
-	.scratch_reg_offset = 0x12800,
-	.sram_pte_offset = 0x03802800,
-};
-
-static struct snd_soc_acpi_codecs amp_rt1019 = {
-	.num_codecs = 1,
-	.codecs = {"10EC1019"}
-};
-
-static struct snd_soc_acpi_codecs amp_max = {
-	.num_codecs = 1,
-	.codecs = {"MX98360A"}
-};
-
-static struct snd_soc_acpi_mach snd_soc_acpi_amd_rmb_acp_machines[] = {
-	{
-		.id = "10508825",
-		.drv_name = "rmb-nau8825-max",
-		.machine_quirk = snd_soc_acpi_codec_list,
-		.quirk_data = &amp_max,
-	},
-	{
-		.id = "AMDI0007",
-		.drv_name = "rembrandt-acp",
-	},
-	{
-		.id = "RTL5682",
-		.drv_name = "rmb-rt5682s-rt1019",
-		.machine_quirk = snd_soc_acpi_codec_list,
-		.quirk_data = &amp_rt1019,
-	},
-	{},
-};
-
 static struct snd_soc_dai_driver acp_rmb_dai[] = {
 {
 	.name = "acp-i2s-sp",
@@ -187,8 +147,6 @@ static int rembrandt_audio_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct acp_chip_info *chip;
-	struct acp_dev_data *adata;
-	struct resource *res;
 	u32 ret;
 
 	chip = dev_get_platdata(&pdev->dev);
@@ -197,50 +155,25 @@ static int rembrandt_audio_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	if (chip->acp_rev != ACP6X_DEV) {
+	if (chip->acp_rev != ACP_RMB_PCI_ID) {
 		dev_err(&pdev->dev, "Un-supported ACP Revision %d\n", chip->acp_rev);
 		return -ENODEV;
 	}
 
-	adata = devm_kzalloc(dev, sizeof(struct acp_dev_data), GFP_KERNEL);
-	if (!adata)
-		return -ENOMEM;
+	chip->dev = dev;
+	chip->dai_driver = acp_rmb_dai;
+	chip->num_dai = ARRAY_SIZE(acp_rmb_dai);
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "acp_mem");
-	if (!res) {
-		dev_err(&pdev->dev, "IORESOURCE_MEM FAILED\n");
-		return -ENODEV;
-	}
-
-	adata->acp_base = devm_ioremap(&pdev->dev, res->start, resource_size(res));
-	if (!adata->acp_base)
-		return -ENOMEM;
-
-	res = platform_get_resource_byname(pdev, IORESOURCE_IRQ, "acp_dai_irq");
-	if (!res) {
-		dev_err(&pdev->dev, "IORESOURCE_IRQ FAILED\n");
-		return -ENODEV;
-	}
-
-	adata->i2s_irq = res->start;
-	adata->dev = dev;
-	adata->dai_driver = acp_rmb_dai;
-	adata->num_dai = ARRAY_SIZE(acp_rmb_dai);
-	adata->rsrc = &rsrc;
-	adata->platform = REMBRANDT;
-	adata->flag = chip->flag;
-	adata->is_i2s_config = chip->is_i2s_config;
-	adata->machines = snd_soc_acpi_amd_rmb_acp_machines;
-	acp_machine_select(adata);
-
-	dev_set_drvdata(dev, adata);
-
-	if (chip->is_i2s_config && rsrc.soc_mclk) {
+	if (chip->is_i2s_config && chip->rsrc->soc_mclk) {
 		ret = acp6x_master_clock_generate(dev);
 		if (ret)
 			return ret;
 	}
-	acp_enable_interrupts(adata);
+	ret = acp_hw_en_interrupts(chip);
+	if (ret) {
+		dev_err(dev, "ACP en-interrupts failed\n");
+		return ret;
+	}
 	acp_platform_register(dev);
 	pm_runtime_set_autosuspend_delay(&pdev->dev, ACP_SUSPEND_DELAY_MS);
 	pm_runtime_use_autosuspend(&pdev->dev);
@@ -253,45 +186,49 @@ static int rembrandt_audio_probe(struct platform_device *pdev)
 static int rembrandt_audio_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct acp_dev_data *adata = dev_get_drvdata(dev);
+	struct acp_chip_info *chip = dev_get_platdata(dev);
+	int ret;
 
-	acp_disable_interrupts(adata);
+	ret = acp_hw_dis_interrupts(chip);
+	if (ret)
+		dev_err(dev, "ACP dis-interrupts failed\n");
+
 	acp_platform_unregister(dev);
 	pm_runtime_disable(&pdev->dev);
 	return 0;
 }
 
-static int __maybe_unused rmb_pcm_resume(struct device *dev)
+static int rmb_pcm_resume(struct device *dev)
 {
-	struct acp_dev_data *adata = dev_get_drvdata(dev);
+	struct acp_chip_info *chip = dev_get_drvdata(dev->parent);
 	struct acp_stream *stream;
 	struct snd_pcm_substream *substream;
 	snd_pcm_uframes_t buf_in_frames;
 	u64 buf_size;
 
-	if (adata->is_i2s_config && adata->rsrc->soc_mclk)
+	if (chip->is_i2s_config && chip->rsrc->soc_mclk)
 		acp6x_master_clock_generate(dev);
 
-	spin_lock(&adata->acp_lock);
-	list_for_each_entry(stream, &adata->stream_list, list) {
+	spin_lock(&chip->acp_lock);
+	list_for_each_entry(stream, &chip->stream_list, list) {
 		substream = stream->substream;
 		if (substream && substream->runtime) {
 			buf_in_frames = (substream->runtime->buffer_size);
 			buf_size = frames_to_bytes(substream->runtime, buf_in_frames);
-			config_pte_for_stream(adata, stream);
-			config_acp_dma(adata, stream, buf_size);
+			config_pte_for_stream(chip, stream);
+			config_acp_dma(chip, stream, buf_size);
 			if (stream->dai_id)
-				restore_acp_i2s_params(substream, adata, stream);
+				restore_acp_i2s_params(substream, chip, stream);
 			else
-				restore_acp_pdm_params(substream, adata);
+				restore_acp_pdm_params(substream, chip);
 		}
 	}
-	spin_unlock(&adata->acp_lock);
+	spin_unlock(&chip->acp_lock);
 	return 0;
 }
 
 static const struct dev_pm_ops rmb_dma_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(NULL, rmb_pcm_resume)
+	SYSTEM_SLEEP_PM_OPS(NULL, rmb_pcm_resume)
 };
 
 static struct platform_driver rembrandt_driver = {
@@ -299,7 +236,7 @@ static struct platform_driver rembrandt_driver = {
 	.remove = rembrandt_audio_remove,
 	.driver = {
 		.name = "acp_asoc_rembrandt",
-		.pm = &rmb_dma_pm_ops,
+		.pm = pm_ptr(&rmb_dma_pm_ops),
 	},
 };
 

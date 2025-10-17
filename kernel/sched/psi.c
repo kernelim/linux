@@ -999,7 +999,7 @@ void psi_account_irqtime(struct rq *rq, struct task_struct *curr, struct task_st
 	u64 now, irq;
 	s64 delta;
 
-	if (static_branch_likely(&psi_disabled))
+	if (static_branch_likely(&psi_disabled) || !irqtime_enabled())
 		return;
 
 	if (!curr->pid)
@@ -1240,6 +1240,11 @@ int psi_show(struct seq_file *m, struct psi_group *group, enum psi_res res)
 
 	if (static_branch_likely(&psi_disabled))
 		return -EOPNOTSUPP;
+
+#ifdef CONFIG_IRQ_TIME_ACCOUNTING
+	if (!irqtime_enabled() && res == PSI_IRQ)
+		return -EOPNOTSUPP;
+#endif
 
 	/* Update averages before reporting them */
 	mutex_lock(&group->avgs_lock);

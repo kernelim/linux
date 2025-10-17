@@ -15,6 +15,7 @@
 #include <linux/ioport.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
+#include <linux/string_choices.h>
 #include <linux/errno.h>
 #include <linux/timer.h>
 #include <linux/list.h>
@@ -910,7 +911,7 @@ static int oxu_buf_alloc(struct oxu_hcd *oxu, struct ehci_qtd *qtd, int len)
 	int a_blocks;	/* blocks allocated */
 	int i, j;
 
-	/* Don't allocte bigger than supported */
+	/* Don't allocate bigger than supported */
 	if (len > BUFFER_SIZE * BUFFER_NUM) {
 		oxu_err(oxu, "buffer too big (%d)\n", len);
 		return -ENOMEM;
@@ -927,7 +928,7 @@ static int oxu_buf_alloc(struct oxu_hcd *oxu, struct ehci_qtd *qtd, int len)
 
 	/* Find a suitable available data buffer */
 	for (i = 0; i < BUFFER_NUM;
-			i += max(a_blocks, (int)oxu->db_used[i])) {
+			i += max_t(int, a_blocks, oxu->db_used[i])) {
 
 		/* Check all the required blocks are available */
 		for (j = 0; j < a_blocks; j++)
@@ -1151,7 +1152,7 @@ static void ehci_mem_cleanup(struct oxu_hcd *oxu)
 		qh_put(oxu->async);
 	oxu->async = NULL;
 
-	del_timer(&oxu->urb_timer);
+	timer_delete(&oxu->urb_timer);
 
 	oxu->periodic = NULL;
 
@@ -2781,7 +2782,7 @@ static void ehci_port_power(struct oxu_hcd *oxu, int is_on)
 	if (!HCS_PPC(oxu->hcs_params))
 		return;
 
-	oxu_dbg(oxu, "...power%s ports...\n", is_on ? "up" : "down");
+	oxu_dbg(oxu, "...power%s ports...\n", str_up_down(is_on));
 	for (port = HCS_N_PORTS(oxu->hcs_params); port > 0; ) {
 		if (is_on)
 			oxu_hub_control(oxu_to_hcd(oxu), SetPortFeature,
@@ -3065,7 +3066,7 @@ static int oxu_hcd_init(struct usb_hcd *hcd)
 		 * make problems:  throughput reduction (!), data errors...
 		 */
 		if (park) {
-			park = min(park, (unsigned) 3);
+			park = min_t(unsigned int, park, 3);
 			temp |= CMD_PARK;
 			temp |= park << 8;
 		}
@@ -3178,7 +3179,7 @@ static void oxu_stop(struct usb_hcd *hcd)
 	ehci_port_power(oxu, 0);
 
 	/* no more interrupts ... */
-	del_timer_sync(&oxu->watchdog);
+	timer_delete_sync(&oxu->watchdog);
 
 	spin_lock_irq(&oxu->lock);
 	if (HC_IS_RUNNING(hcd->state))
@@ -3911,7 +3912,7 @@ static int oxu_bus_suspend(struct usb_hcd *hcd)
 
 	spin_unlock_irq(&oxu->lock);
 	/* turn off now-idle HC */
-	del_timer_sync(&oxu->watchdog);
+	timer_delete_sync(&oxu->watchdog);
 	spin_lock_irq(&oxu->lock);
 	ehci_halt(oxu);
 	hcd->state = HC_STATE_SUSPENDED;

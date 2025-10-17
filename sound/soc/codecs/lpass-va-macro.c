@@ -1676,7 +1676,7 @@ static int va_macro_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int __maybe_unused va_macro_runtime_suspend(struct device *dev)
+static int va_macro_runtime_suspend(struct device *dev)
 {
 	struct va_macro *va = dev_get_drvdata(dev);
 
@@ -1691,7 +1691,7 @@ static int __maybe_unused va_macro_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused va_macro_runtime_resume(struct device *dev)
+static int va_macro_runtime_resume(struct device *dev)
 {
 	struct va_macro *va = dev_get_drvdata(dev);
 	int ret;
@@ -1719,7 +1719,7 @@ static int __maybe_unused va_macro_runtime_resume(struct device *dev)
 
 
 static const struct dev_pm_ops va_macro_pm_ops = {
-	SET_RUNTIME_PM_OPS(va_macro_runtime_suspend, va_macro_runtime_resume, NULL)
+	RUNTIME_PM_OPS(va_macro_runtime_suspend, va_macro_runtime_resume, NULL)
 };
 
 static const struct of_device_id va_macro_dt_match[] = {
@@ -1737,7 +1737,7 @@ static struct platform_driver va_macro_driver = {
 		.name = "va_macro",
 		.of_match_table = va_macro_dt_match,
 		.suppress_bind_attrs = true,
-		.pm = &va_macro_pm_ops,
+		.pm = pm_ptr(&va_macro_pm_ops),
 	},
 	.probe = va_macro_probe,
 	.remove = va_macro_remove,

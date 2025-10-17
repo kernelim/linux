@@ -138,6 +138,7 @@ extern const struct cpumask *cpu_clustergroup_mask(int cpu);
 #define topology_logical_package_id(cpu)	(cpu_data(cpu).topo.logical_pkg_id)
 #define topology_physical_package_id(cpu)	(cpu_data(cpu).topo.pkg_id)
 #define topology_logical_die_id(cpu)		(cpu_data(cpu).topo.logical_die_id)
+#define topology_logical_core_id(cpu)		(cpu_data(cpu).topo.logical_core_id)
 #define topology_die_id(cpu)			(cpu_data(cpu).topo.die_id)
 #define topology_core_id(cpu)			(cpu_data(cpu).topo.core_id)
 #define topology_ppin(cpu)			(cpu_data(cpu).ppin)
@@ -156,11 +157,6 @@ enum x86_topology_cpu_type get_topology_cpu_type(struct cpuinfo_x86 *c);
 static inline unsigned int topology_max_packages(void)
 {
 	return __max_logical_packages;
-}
-
-static inline unsigned int topology_max_die_per_package(void)
-{
-	return __max_dies_per_package;
 }
 
 static inline unsigned int topology_max_dies_per_package(void)
@@ -250,7 +246,7 @@ extern bool x86_topology_update;
 #include <asm/percpu.h>
 
 DECLARE_PER_CPU_READ_MOSTLY(int, sched_core_priority);
-extern unsigned int __read_mostly sysctl_sched_itmt_enabled;
+extern bool __read_mostly sysctl_sched_itmt_enabled;
 
 /* Interface to set priority of a cpu */
 void sched_set_itmt_core_prio(int prio, int core_cpu);
@@ -263,7 +259,7 @@ void sched_clear_itmt_support(void);
 
 #else /* CONFIG_SCHED_MC_PRIO */
 
-#define sysctl_sched_itmt_enabled	0
+#define sysctl_sched_itmt_enabled	false
 static inline void sched_set_itmt_core_prio(int prio, int core_cpu)
 {
 }
@@ -313,10 +309,5 @@ static inline void freq_invariance_set_perf_ratio(u64 ratio, bool turbo_disabled
 
 extern void arch_scale_freq_tick(void);
 #define arch_scale_freq_tick arch_scale_freq_tick
-
-#ifdef CONFIG_ACPI_CPPC_LIB
-void init_freq_invariance_cppc(void);
-#define arch_init_invariance_cppc init_freq_invariance_cppc
-#endif
 
 #endif /* _ASM_X86_TOPOLOGY_H */

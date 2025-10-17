@@ -3131,7 +3131,7 @@ static void hisi_sas_map_queues(struct Scsi_Host *shost)
 	struct hisi_hba *hisi_hba = shost_priv(shost);
 	struct blk_mq_queue_map *qmap = &shost->tag_set.map[HCTX_TYPE_DEFAULT];
 
-	blk_mq_pci_map_queues(qmap, hisi_hba->pci_dev, BASE_VECTORS_V3_HW);
+	blk_mq_map_hw_queues(qmap, hisi_hba->dev, BASE_VECTORS_V3_HW);
 }
 
 static struct scsi_host_template sht_v3_hw = {
@@ -3160,7 +3160,7 @@ static struct scsi_host_template sht_v3_hw = {
 	.compat_ioctl		= sas_ioctl,
 #endif
 	.shost_attrs		= host_attrs_v3_hw,
-	.tag_alloc_policy	= BLK_TAG_ALLOC_RR,
+	.tag_alloc_policy_rr	= true,
 	.host_reset             = hisi_sas_host_reset,
 	.host_tagset		= 1,
 };

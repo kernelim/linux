@@ -292,8 +292,9 @@ struct scsi_device {
 	RH_KABI_USE(1, struct scsi_vpd __rcu *vpd_pgb0)
 	RH_KABI_USE(2, struct scsi_vpd __rcu *vpd_pgb1)
 	RH_KABI_USE(3, struct scsi_vpd __rcu *vpd_pgb2)
-	RH_KABI_RESERVE(4)
-	RH_KABI_RESERVE(5)
+	RH_KABI_USE(4, struct scsi_vpd __rcu *vpd_pgb7)
+	RH_KABI_USE_SPLIT(5, unsigned int ua_new_media_ctr,	/* Counter for New Media UNIT ATTENTIONs */
+			     unsigned int ua_por_ctr)		/* Counter for Power On / Reset UAs */
 	RH_KABI_RESERVE(6)
 
 	unsigned long		sdev_data[];
@@ -714,6 +715,12 @@ static inline int scsi_device_busy(struct scsi_device *sdev)
 {
 	return sbitmap_weight(&sdev->budget_map);
 }
+
+/* Macros to access the UNIT ATTENTION counters */
+#define scsi_get_ua_new_media_ctr(sdev) \
+	((const unsigned int)(sdev->ua_new_media_ctr))
+#define scsi_get_ua_por_ctr(sdev) \
+	((const unsigned int)(sdev->ua_por_ctr))
 
 #define MODULE_ALIAS_SCSI_DEVICE(type) \
 	MODULE_ALIAS("scsi:t-" __stringify(type) "*")

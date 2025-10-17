@@ -52,7 +52,6 @@ static DEVICE_ATTR_RO(mio_enabled);
 
 static int _do_recover(struct pci_dev *pdev, struct zpci_dev *zdev)
 {
-	u8 status;
 	int ret;
 
 	pci_stop_and_remove_bus_device(pdev);
@@ -70,16 +69,8 @@ static int _do_recover(struct pci_dev *pdev, struct zpci_dev *zdev)
 			return ret;
 	}
 
-	ret = zpci_enable_device(zdev);
-	if (ret)
-		return ret;
+	ret = zpci_reenable_device(zdev);
 
-	if (zdev->dma_table) {
-		ret = zpci_register_ioat(zdev, 0, zdev->start_dma, zdev->end_dma,
-					 virt_to_phys(zdev->dma_table), &status);
-		if (ret)
-			zpci_disable_device(zdev);
-	}
 	return ret;
 }
 
@@ -173,7 +164,6 @@ static ssize_t uid_is_unique_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(uid_is_unique);
 
-#ifndef CONFIG_DMI
 /* analogous to smbios index */
 static ssize_t index_show(struct device *dev,
 			  struct device_attribute *attr, char *buf)
@@ -199,11 +189,10 @@ static struct attribute *zpci_ident_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group zpci_ident_attr_group = {
+const struct attribute_group zpci_ident_attr_group = {
 	.attrs = zpci_ident_attrs,
 	.is_visible = zpci_index_is_visible,
 };
-#endif
 
 static struct bin_attribute *zpci_bin_attrs[] = {
 	&bin_attr_util_string,
@@ -227,7 +216,7 @@ static struct attribute *zpci_dev_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group zpci_attr_group = {
+const struct attribute_group zpci_attr_group = {
 	.attrs = zpci_dev_attrs,
 	.bin_attrs = zpci_bin_attrs,
 };
@@ -239,16 +228,8 @@ static struct attribute *pfip_attrs[] = {
 	&dev_attr_segment3.attr,
 	NULL,
 };
-static struct attribute_group pfip_attr_group = {
+
+const struct attribute_group pfip_attr_group = {
 	.name = "pfip",
 	.attrs = pfip_attrs,
-};
-
-const struct attribute_group *zpci_attr_groups[] = {
-	&zpci_attr_group,
-	&pfip_attr_group,
-#ifndef CONFIG_DMI
-	&zpci_ident_attr_group,
-#endif
-	NULL,
 };

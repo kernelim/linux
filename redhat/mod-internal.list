@@ -38,12 +38,15 @@ test_klp_callbacks_demo
 test_klp_callbacks_demo2
 test_klp_callbacks_busy
 test_klp_callbacks_mod
+test_klp_kprobe
 test_klp_livepatch
 test_klp_shadow_vars
 test_klp_syscall
 test_klp_state
 test_klp_state2
 test_klp_state3
+test_kmod
+test_module
 torture
 refscale
 rcuscale
@@ -63,6 +66,7 @@ iio-test-format
 iio-test-rescale
 cros_kunit
 cpumask_kunit
+drm_atomic_state_test
 drm_buddy_test
 drm_cmdline_parser_test
 drm_damage_helper_test
@@ -97,9 +101,12 @@ checksum_kunit
 arm-smmu-v3-test
 iwlwifi-tests
 iwlmvm-tests
+iwlmld-tests
 sound_kunit
 amd-pstate-ut
 ptp_mock
 usbip-core
 usbip-host
 vhci-hcd
+packing_test
+soc-ops-test

@@ -45,6 +45,8 @@ struct fib_rule {
 	struct fib_kuid_range	uid_range;
 	struct fib_rule_port_range	sport_range;
 	struct fib_rule_port_range	dport_range;
+	u8                      iif_is_l3_master;
+	u8                      oif_is_l3_master;
 	struct rcu_head		rcu;
 
 	RH_KABI_RESERVE(1)

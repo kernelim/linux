@@ -961,6 +961,7 @@ struct migration_target_control {
 	int nid;		/* preferred node id */
 	nodemask_t *nmask;
 	gfp_t gfp_mask;
+	enum migrate_reason reason;
 };
 
 /*
@@ -1006,7 +1007,7 @@ int numa_migrate_prep(struct folio *folio, struct vm_area_struct *vma,
 int __must_check try_grab_folio(struct folio *folio, int refs,
 				unsigned int flags);
 void free_zone_device_page(struct page *page);
-int migrate_device_coherent_page(struct page *page);
+int migrate_device_coherent_folio(struct folio *folio);
 
 /*
  * mm/huge_memory.c
@@ -1269,5 +1270,15 @@ static inline void shrinker_debugfs_remove(struct dentry *debugfs_entry,
 {
 }
 #endif /* CONFIG_SHRINKER_DEBUG */
+
+/* Only track the nodes of mappings with shadow entries */
+void workingset_update_node(struct xa_node *node);
+extern struct list_lru shadow_nodes;
+#define mapping_set_update(xas, mapping) do {			\
+	if (!dax_mapping(mapping) && !shmem_mapping(mapping)) {	\
+		xas_set_update(xas, workingset_update_node);	\
+		xas_set_lru(xas, &shadow_nodes);		\
+	}							\
+} while (0)
 
 #endif	/* __MM_INTERNAL_H */

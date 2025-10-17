@@ -197,9 +197,8 @@ mt76_dma_sync_idx(struct mt76_dev *dev, struct mt76_queue *q)
 	q->tail = q->head;
 }
 
-static void
-__mt76_dma_queue_reset(struct mt76_dev *dev, struct mt76_queue *q,
-		       bool reset_idx)
+void __mt76_dma_queue_reset(struct mt76_dev *dev, struct mt76_queue *q,
+			    bool reset_idx)
 {
 	if (!q || !q->ndesc)
 		return;
@@ -219,8 +218,7 @@ __mt76_dma_queue_reset(struct mt76_dev *dev, struct mt76_queue *q,
 	mt76_dma_sync_idx(dev, q);
 }
 
-static void
-mt76_dma_queue_reset(struct mt76_dev *dev, struct mt76_queue *q)
+void mt76_dma_queue_reset(struct mt76_dev *dev, struct mt76_queue *q)
 {
 	__mt76_dma_queue_reset(dev, q, true);
 }
@@ -634,16 +632,14 @@ free_skb:
 }
 
 static int
-mt76_dma_rx_fill(struct mt76_dev *dev, struct mt76_queue *q,
-		 bool allow_direct)
+mt76_dma_rx_fill_buf(struct mt76_dev *dev, struct mt76_queue *q,
+		     bool allow_direct)
 {
 	int len = SKB_WITH_OVERHEAD(q->buf_size);
 	int frames = 0;
 
 	if (!q->ndesc)
 		return 0;
-
-	spin_lock_bh(&q->lock);
 
 	while (q->queued < q->ndesc - 1) {
 		struct mt76_queue_buf qbuf = {};
@@ -677,85 +673,23 @@ done:
 	if (frames || mt76_queue_is_wed_rx(q))
 		mt76_dma_kick_queue(dev, q);
 
+	return frames;
+}
+
+int mt76_dma_rx_fill(struct mt76_dev *dev, struct mt76_queue *q,
+		     bool allow_direct)
+{
+	int frames;
+
+	if (!q->ndesc)
+		return 0;
+
+	spin_lock_bh(&q->lock);
+	frames = mt76_dma_rx_fill_buf(dev, q, allow_direct);
 	spin_unlock_bh(&q->lock);
 
 	return frames;
 }
-
-int mt76_dma_wed_setup(struct mt76_dev *dev, struct mt76_queue *q, bool reset)
-{
-#ifdef CONFIG_NET_MEDIATEK_SOC_WED
-	int ret = 0, type, ring;
-	u16 flags;
-
-	if (!q || !q->ndesc)
-		return -EINVAL;
-
-	flags = q->flags;
-	if (!q->wed || !mtk_wed_device_active(q->wed))
-		q->flags &= ~MT_QFLAG_WED;
-
-	if (!(q->flags & MT_QFLAG_WED))
-		return 0;
-
-	type = FIELD_GET(MT_QFLAG_WED_TYPE, q->flags);
-	ring = FIELD_GET(MT_QFLAG_WED_RING, q->flags);
-
-	switch (type) {
-	case MT76_WED_Q_TX:
-		ret = mtk_wed_device_tx_ring_setup(q->wed, ring, q->regs,
-						   reset);
-		if (!ret)
-			q->wed_regs = q->wed->tx_ring[ring].reg_base;
-		break;
-	case MT76_WED_Q_TXFREE:
-		/* WED txfree queue needs ring to be initialized before setup */
-		q->flags = 0;
-		mt76_dma_queue_reset(dev, q);
-		mt76_dma_rx_fill(dev, q, false);
-
-		ret = mtk_wed_device_txfree_ring_setup(q->wed, q->regs);
-		if (!ret)
-			q->wed_regs = q->wed->txfree_ring.reg_base;
-		break;
-	case MT76_WED_Q_RX:
-		ret = mtk_wed_device_rx_ring_setup(q->wed, ring, q->regs,
-						   reset);
-		if (!ret)
-			q->wed_regs = q->wed->rx_ring[ring].reg_base;
-		break;
-	case MT76_WED_RRO_Q_DATA:
-		q->flags &= ~MT_QFLAG_WED;
-		__mt76_dma_queue_reset(dev, q, false);
-		mtk_wed_device_rro_rx_ring_setup(q->wed, ring, q->regs);
-		q->head = q->ndesc - 1;
-		q->queued = q->head;
-		break;
-	case MT76_WED_RRO_Q_MSDU_PG:
-		q->flags &= ~MT_QFLAG_WED;
-		__mt76_dma_queue_reset(dev, q, false);
-		mtk_wed_device_msdu_pg_rx_ring_setup(q->wed, ring, q->regs);
-		q->head = q->ndesc - 1;
-		q->queued = q->head;
-		break;
-	case MT76_WED_RRO_Q_IND:
-		q->flags &= ~MT_QFLAG_WED;
-		mt76_dma_queue_reset(dev, q);
-		mt76_dma_rx_fill(dev, q, false);
-		mtk_wed_device_ind_rx_ring_setup(q->wed, q->regs);
-		break;
-	default:
-		ret = -EINVAL;
-		break;
-	}
-	q->flags = flags;
-
-	return ret;
-#else
-	return 0;
-#endif
-}
-EXPORT_SYMBOL_GPL(mt76_dma_wed_setup);
 
 static int
 mt76_dma_alloc_queue(struct mt76_dev *dev, struct mt76_queue *q,
@@ -801,7 +735,7 @@ mt76_dma_alloc_queue(struct mt76_dev *dev, struct mt76_queue *q,
 	if (ret)
 		return ret;
 
-	ret = mt76_dma_wed_setup(dev, q, false);
+	ret = mt76_wed_dma_setup(dev, q, false);
 	if (ret)
 		return ret;
 
@@ -864,7 +798,7 @@ mt76_dma_rx_reset(struct mt76_dev *dev, enum mt76_rxq_id qid)
 	mt76_dma_rx_cleanup(dev, q);
 
 	/* reset WED rx queues */
-	mt76_dma_wed_setup(dev, q, true);
+	mt76_wed_dma_setup(dev, q, true);
 
 	if (mt76_queue_is_wed_tx_free(q))
 		return;
@@ -874,7 +808,7 @@ mt76_dma_rx_reset(struct mt76_dev *dev, enum mt76_rxq_id qid)
 		return;
 
 	mt76_dma_sync_idx(dev, q);
-	mt76_dma_rx_fill(dev, q, false);
+	mt76_dma_rx_fill_buf(dev, q, false);
 }
 
 static void
@@ -1047,7 +981,7 @@ mt76_dma_init(struct mt76_dev *dev,
 
 	mt76_for_each_q_rx(dev, i) {
 		netif_napi_add(dev->napi_dev, &dev->napi[i], poll);
-		mt76_dma_rx_fill(dev, &dev->q_rx[i], false);
+		mt76_dma_rx_fill_buf(dev, &dev->q_rx[i], false);
 		napi_enable(&dev->napi[i]);
 	}
 
@@ -1072,25 +1006,12 @@ void mt76_dma_attach(struct mt76_dev *dev)
 }
 EXPORT_SYMBOL_GPL(mt76_dma_attach);
 
-void mt76_dma_wed_reset(struct mt76_dev *dev)
-{
-	struct mt76_mmio *mmio = &dev->mmio;
-
-	if (!test_bit(MT76_STATE_WED_RESET, &dev->phy.state))
-		return;
-
-	complete(&mmio->wed_reset);
-
-	if (!wait_for_completion_timeout(&mmio->wed_reset_complete, 3 * HZ))
-		dev_err(dev->dev, "wed reset complete timeout\n");
-}
-EXPORT_SYMBOL_GPL(mt76_dma_wed_reset);
-
 void mt76_dma_cleanup(struct mt76_dev *dev)
 {
 	int i;
 
 	mt76_worker_disable(&dev->tx_worker);
+	napi_disable(&dev->tx_napi);
 	netif_napi_del(&dev->tx_napi);
 
 	for (i = 0; i < ARRAY_SIZE(dev->phys); i++) {

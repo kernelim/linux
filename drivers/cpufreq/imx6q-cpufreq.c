@@ -205,7 +205,6 @@ static struct cpufreq_driver imx6q_cpufreq_driver = {
 	.get = cpufreq_generic_get,
 	.init = imx6q_cpufreq_init,
 	.name = "imx6q-cpufreq",
-	.attr = cpufreq_generic_attr,
 	.suspend = cpufreq_generic_suspend,
 };
 

@@ -858,7 +858,6 @@ skip_dsp:
 
 static int hda_resume(struct snd_sof_dev *sdev, bool runtime_resume)
 {
-	const struct sof_intel_dsp_desc *chip;
 	int ret;
 
 	/* display codec must be powered before link reset */
@@ -890,10 +889,6 @@ static int hda_resume(struct snd_sof_dev *sdev, bool runtime_resume)
 		hda_dsp_ctrl_ppcap_enable(sdev, true);
 		hda_dsp_ctrl_ppcap_int_enable(sdev, true);
 	}
-
-	chip = get_chip_info(sdev->pdata);
-	if (chip && chip->hw_ip_version >= SOF_INTEL_ACE_2_0)
-		hda_sdw_int_enable(sdev, true);
 
 cleanup:
 	/* display codec can powered off after controller init */
@@ -996,6 +991,10 @@ int hda_dsp_runtime_suspend(struct snd_sof_dev *sdev)
 	if (!sdev->dspless_mode_selected) {
 		/* cancel any attempt for DSP D0I3 */
 		cancel_delayed_work_sync(&hda->d0i3_work);
+
+		/* Cancel the microphone privacy work if mic privacy is active */
+		if (hda->mic_privacy.active)
+			cancel_work_sync(&hda->mic_privacy.work);
 	}
 
 	/* stop hda controller and power dsp off */
@@ -1022,6 +1021,10 @@ int hda_dsp_suspend(struct snd_sof_dev *sdev, u32 target_state)
 	if (!sdev->dspless_mode_selected) {
 		/* cancel any attempt for DSP D0I3 */
 		cancel_delayed_work_sync(&hda->d0i3_work);
+
+		/* Cancel the microphone privacy work if mic privacy is active */
+		if (hda->mic_privacy.active)
+			cancel_work_sync(&hda->mic_privacy.work);
 	}
 
 	if (target_state == SOF_DSP_PM_D0) {

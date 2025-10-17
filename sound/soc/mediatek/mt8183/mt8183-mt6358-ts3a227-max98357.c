@@ -548,7 +548,7 @@ static struct snd_soc_dai_link mt8183_mt6358_ts3a227_dai_links[] = {
 		.no_pcm = 1,
 		.dai_fmt = SND_SOC_DAIFMT_I2S |
 			   SND_SOC_DAIFMT_IB_IF |
-			   SND_SOC_DAIFMT_CBM_CFM,
+			   SND_SOC_DAIFMT_CBM_CFP,
 		.dpcm_playback = 1,
 		.ignore_suspend = 1,
 		.be_hw_params_fixup = mt8183_i2s_hw_params_fixup,
@@ -715,7 +715,7 @@ mt8183_mt6358_ts3a227_max98357_dev_probe(struct platform_device *pdev)
 			    strcmp(dai_link->name, "I2S3") == 0)
 				dai_link->dai_fmt = SND_SOC_DAIFMT_LEFT_J |
 						    SND_SOC_DAIFMT_NB_NF |
-						    SND_SOC_DAIFMT_CBM_CFM;
+						    SND_SOC_DAIFMT_CBP_CFP;
 		}
 
 		if (hdmi_codec && strcmp(dai_link->name, "TDM") == 0) {

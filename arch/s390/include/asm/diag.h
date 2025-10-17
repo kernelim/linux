@@ -35,8 +35,10 @@ enum diag_stat_enum {
 	DIAG_STAT_X2FC,
 	DIAG_STAT_X304,
 	DIAG_STAT_X308,
+	DIAG_STAT_X310,
 	DIAG_STAT_X318,
 	DIAG_STAT_X320,
+	DIAG_STAT_X324,
 	DIAG_STAT_X49C,
 	DIAG_STAT_X500,
 	NR_DIAG_STAT
@@ -44,6 +46,13 @@ enum diag_stat_enum {
 
 void diag_stat_inc(enum diag_stat_enum nr);
 void diag_stat_inc_norecursion(enum diag_stat_enum nr);
+
+struct hypfs_diag0c_entry;
+
+/*
+ * Diagnose 0c: Pseudo Timer
+ */
+void diag0c(struct hypfs_diag0c_entry *data);
 
 /*
  * Diagnose 10: Release page range
@@ -332,10 +341,10 @@ struct hypfs_diag0c_entry;
  */
 struct diag_ops {
 	int (*diag210)(struct diag210 *addr);
-	int (*diag26c)(void *req, void *resp, enum diag26c_sc subcode);
+	int (*diag26c)(unsigned long rx, unsigned long rx1, enum diag26c_sc subcode);
 	int (*diag14)(unsigned long rx, unsigned long ry1, unsigned long subcode);
 	int (*diag8c)(struct diag8c *addr, struct ccw_dev_id *devno, size_t len);
-	void (*diag0c)(struct hypfs_diag0c_entry *entry);
+	void (*diag0c)(unsigned long rx);
 	void (*diag308_reset)(void);
 };
 
@@ -343,9 +352,9 @@ extern struct diag_ops diag_amode31_ops;
 extern struct diag210 *__diag210_tmp_amode31;
 
 int _diag210_amode31(struct diag210 *addr);
-int _diag26c_amode31(void *req, void *resp, enum diag26c_sc subcode);
+int _diag26c_amode31(unsigned long rx, unsigned long rx1, enum diag26c_sc subcode);
 int _diag14_amode31(unsigned long rx, unsigned long ry1, unsigned long subcode);
-void _diag0c_amode31(struct hypfs_diag0c_entry *entry);
+void _diag0c_amode31(unsigned long rx);
 void _diag308_reset_amode31(void);
 int _diag8c_amode31(struct diag8c *addr, struct ccw_dev_id *devno, size_t len);
 

@@ -128,7 +128,7 @@ struct va_format {
 #define no_printk(fmt, ...)				\
 ({							\
 	if (0)						\
-		printk(fmt, ##__VA_ARGS__);		\
+		_printk(fmt, ##__VA_ARGS__);		\
 	0;						\
 })
 
@@ -201,6 +201,7 @@ void printk_legacy_allow_panic_sync(void);
 extern void nbcon_acquire(struct uart_port *up);
 extern void nbcon_release(struct uart_port *up);
 void nbcon_atomic_flush_unsafe(void);
+bool pr_flush(int timeout_ms, bool reset_on_progress);
 #else
 static inline __printf(1, 0)
 int vprintk(const char *s, va_list args)
@@ -295,6 +296,11 @@ static inline void nbcon_release(struct uart_port *up)
 
 static inline void nbcon_atomic_flush_unsafe(void)
 {
+}
+
+static inline bool pr_flush(int timeout_ms, bool reset_on_progress)
+{
+	return true;
 }
 
 #endif

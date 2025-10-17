@@ -37,6 +37,8 @@
 #define DC_LOGGER dc->ctx->logger
 #ifndef MIN
 #define MIN(X, Y) ((X) < (Y) ? (X) : (Y))
+#endif
+#ifndef MAX
 #define MAX(x, y) ((x > y) ? x : y)
 #endif
 
@@ -199,7 +201,8 @@ struct dc_stream_state *dc_copy_stream(const struct dc_stream_state *stream)
 	dc_stream_assign_stream_id(new_stream);
 
 	/* If using dynamic encoder assignment, wait till stream committed to assign encoder. */
-	if (new_stream->ctx->dc->res_pool->funcs->link_encs_assign)
+	if (new_stream->ctx->dc->res_pool->funcs->link_encs_assign &&
+			!new_stream->ctx->dc->config.unify_link_enc_assignment)
 		new_stream->link_enc = NULL;
 
 	kref_init(&new_stream->refcount);
@@ -292,7 +295,9 @@ bool dc_stream_set_cursor_attributes(
 	 * 2. If not subvp high refresh, for single display cases, if resolution is >= 5K and refresh rate < 120hz
 	 * 3. If not subvp high refresh, for multi display cases, if resolution is >= 4K and refresh rate < 120hz
 	 */
-	if (dc->debug.allow_sw_cursor_fallback && attributes->height * attributes->width * 4 > 16384) {
+	if (dc->debug.allow_sw_cursor_fallback &&
+		attributes->height * attributes->width * 4 > 16384 &&
+		!stream->hw_cursor_req) {
 		if (check_subvp_sw_cursor_fallback_req(dc, stream))
 			return false;
 	}
@@ -421,7 +426,6 @@ bool dc_stream_program_cursor_position(
 		/* apply/update visual confirm */
 		if (dc->debug.visual_confirm == VISUAL_CONFIRM_HW_CURSOR) {
 			/* update software state */
-			uint32_t color_value = MAX_TG_COLOR_VALUE;
 			int i;
 
 			for (i = 0; i < dc->res_pool->pipe_count; i++) {
@@ -429,15 +433,7 @@ bool dc_stream_program_cursor_position(
 
 				/* adjust visual confirm color for all pipes with current stream */
 				if (stream == pipe_ctx->stream) {
-					if (stream->cursor_position.enable) {
-						pipe_ctx->visual_confirm_color.color_r_cr = color_value;
-						pipe_ctx->visual_confirm_color.color_g_y = 0;
-						pipe_ctx->visual_confirm_color.color_b_cb = 0;
-					} else {
-						pipe_ctx->visual_confirm_color.color_r_cr = 0;
-						pipe_ctx->visual_confirm_color.color_g_y = 0;
-						pipe_ctx->visual_confirm_color.color_b_cb = color_value;
-					}
+					get_cursor_visual_confirm_color(pipe_ctx, &(pipe_ctx->visual_confirm_color));
 
 					/* programming hardware */
 					if (pipe_ctx->plane_state)
@@ -612,17 +608,6 @@ bool dc_stream_remove_writeback(struct dc *dc,
 	return true;
 }
 
-bool dc_stream_warmup_writeback(struct dc *dc,
-		int num_dwb,
-		struct dc_writeback_info *wb_info)
-{
-	dc_exit_ips_for_hw_access(dc);
-
-	if (dc->hwss.mmhubbub_warmup)
-		return dc->hwss.mmhubbub_warmup(dc, num_dwb, wb_info);
-	else
-		return false;
-}
 uint32_t dc_stream_get_vblank_counter(const struct dc_stream_state *stream)
 {
 	uint8_t i;

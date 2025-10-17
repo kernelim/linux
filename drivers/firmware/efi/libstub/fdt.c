@@ -132,6 +132,11 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
 		}
 	}
 
+	fdt_val32 = cpu_to_fdt32((u32)efi_get_secureboot());
+	status = fdt_setprop_var(fdt, node, "secure-boot-mode", fdt_val32);
+	if (status)
+		goto fdt_set_fail;
+
 	/* Shrink the FDT back to its minimum size: */
 	fdt_pack(fdt);
 

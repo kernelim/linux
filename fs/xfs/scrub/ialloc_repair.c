@@ -657,14 +657,14 @@ xrep_ibt_build_new_trees(
 	 * Start by setting up the inobt staging cursor.
 	 */
 	fsbno = XFS_AGB_TO_FSB(sc->mp, sc->sa.pag->pag_agno,
-			XFS_IBT_BLOCK(sc->mp)),
+			XFS_IBT_BLOCK(sc->mp));
 	xrep_newbt_init_ag(&ri->new_inobt, sc, &XFS_RMAP_OINFO_INOBT, fsbno,
 			XFS_AG_RESV_NONE);
 	ri->new_inobt.bload.claim_block = xrep_ibt_claim_block;
 	ri->new_inobt.bload.get_records = xrep_ibt_get_records;
 
-	ino_cur = xfs_inobt_stage_cursor(sc->sa.pag, &ri->new_inobt.afake,
-			XFS_BTNUM_INO);
+	ino_cur = xfs_inobt_init_cursor(sc->sa.pag, NULL, NULL);
+	xfs_btree_stage_afakeroot(ino_cur, &ri->new_inobt.afake);
 	error = xfs_btree_bload_compute_geometry(ino_cur, &ri->new_inobt.bload,
 			xfarray_length(ri->inode_records));
 	if (error)
@@ -678,14 +678,14 @@ xrep_ibt_build_new_trees(
 			resv = XFS_AG_RESV_NONE;
 
 		fsbno = XFS_AGB_TO_FSB(sc->mp, sc->sa.pag->pag_agno,
-				XFS_FIBT_BLOCK(sc->mp)),
+				XFS_FIBT_BLOCK(sc->mp));
 		xrep_newbt_init_ag(&ri->new_finobt, sc, &XFS_RMAP_OINFO_INOBT,
 				fsbno, resv);
 		ri->new_finobt.bload.claim_block = xrep_fibt_claim_block;
 		ri->new_finobt.bload.get_records = xrep_fibt_get_records;
 
-		fino_cur = xfs_inobt_stage_cursor(sc->sa.pag,
-				&ri->new_finobt.afake, XFS_BTNUM_FINO);
+		fino_cur = xfs_finobt_init_cursor(sc->sa.pag, NULL, NULL);
+		xfs_btree_stage_afakeroot(fino_cur, &ri->new_finobt.afake);
 		error = xfs_btree_bload_compute_geometry(fino_cur,
 				&ri->new_finobt.bload, ri->finobt_recs);
 		if (error)

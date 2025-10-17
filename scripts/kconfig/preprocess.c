@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "list.h"
+#include <xalloc.h>
 #include "lkc.h"
 
 #define ARRAY_SIZE(arr)		(sizeof(arr) / sizeof((arr)[0]))

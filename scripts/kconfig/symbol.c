@@ -9,6 +9,7 @@
 #include <string.h>
 #include <regex.h>
 
+#include <xalloc.h>
 #include "lkc.h"
 
 struct symbol symbol_yes = {

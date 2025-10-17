@@ -69,6 +69,9 @@
 
 #define DMUB_PC_SNAPSHOT_COUNT 10
 
+/* Default tracebuffer size if meta is absent. */
+#define DMUB_TRACE_BUFFER_SIZE (64 * 1024)
+
 /* Forward declarations */
 struct dmub_srv;
 struct dmub_srv_common_regs;
@@ -111,6 +114,7 @@ enum dmub_asic {
 	DMUB_ASIC_DCN321,
 	DMUB_ASIC_DCN35,
 	DMUB_ASIC_DCN351,
+	DMUB_ASIC_DCN36,
 	DMUB_ASIC_DCN401,
 	DMUB_ASIC_MAX,
 };
@@ -301,6 +305,7 @@ struct dmub_srv_hw_params {
 	bool disallow_phy_access;
 	bool disable_sldo_opt;
 	bool enable_non_transparent_setconfig;
+	bool lower_hbr3_phy_ssc;
 };
 
 /**
@@ -308,7 +313,7 @@ struct dmub_srv_hw_params {
  * @timeout_occured: Indicates a timeout occured on any message from driver to dmub
  * @timeout_cmd: first cmd sent from driver that timed out - subsequent timeouts are not stored
  */
-struct dmub_srv_debug {
+struct dmub_timeout_info {
 	bool timeout_occured;
 	union dmub_rb_cmd timeout_cmd;
 	unsigned long long timestamp;
@@ -335,7 +340,7 @@ struct dmub_diagnostic_data {
 	uint32_t outbox1_wptr;
 	uint32_t outbox1_size;
 	uint32_t gpint_datain0;
-	struct dmub_srv_debug timeout_info;
+	struct dmub_timeout_info timeout_info;
 	uint8_t is_dmcub_enabled : 1;
 	uint8_t is_dmcub_soft_reset : 1;
 	uint8_t is_dmcub_secure_reset : 1;
@@ -451,7 +456,7 @@ struct dmub_srv_hw_funcs {
 	void (*send_inbox0_cmd)(struct dmub_srv *dmub, union dmub_inbox0_data_register data);
 	uint32_t (*get_current_time)(struct dmub_srv *dmub);
 
-	void (*get_diagnostic_data)(struct dmub_srv *dmub, struct dmub_diagnostic_data *dmub_oca);
+	void (*get_diagnostic_data)(struct dmub_srv *dmub);
 
 	bool (*should_detect)(struct dmub_srv *dmub);
 	void (*init_reg_offsets)(struct dmub_srv *dmub, struct dc_context *ctx);
@@ -514,7 +519,6 @@ struct dmub_srv {
 	struct dmub_srv_dcn32_regs *regs_dcn32;
 	struct dmub_srv_dcn35_regs *regs_dcn35;
 	const struct dmub_srv_dcn401_regs *regs_dcn401;
-
 	struct dmub_srv_base_funcs funcs;
 	struct dmub_srv_hw_funcs hw_funcs;
 	struct dmub_rb inbox1_rb;
@@ -540,7 +544,7 @@ struct dmub_srv {
 	struct dmub_visual_confirm_color visual_confirm_color;
 
 	enum dmub_srv_power_state_type power_state;
-	struct dmub_srv_debug debug;
+	struct dmub_diagnostic_data debug;
 };
 
 /**
@@ -568,6 +572,14 @@ struct dmub_notification {
 		struct dmub_rb_cmd_dpia_notification dpia_notification;
 		struct dmub_rb_cmd_hpd_sense_notify_data hpd_sense_notify;
 	};
+};
+
+/* enum dmub_ips_mode - IPS mode identifier */
+enum dmub_ips_mode {
+	DMUB_IPS_MODE_IPS1_MAX		= 0,
+	DMUB_IPS_MODE_IPS2,
+	DMUB_IPS_MODE_IPS1_RCG,
+	DMUB_IPS_MODE_IPS1_ONO2_ON
 };
 
 /**
@@ -888,7 +900,7 @@ enum dmub_status dmub_srv_set_skip_panel_power_sequence(struct dmub_srv *dmub,
 
 bool dmub_srv_get_outbox0_msg(struct dmub_srv *dmub, struct dmcub_trace_buf_entry *entry);
 
-bool dmub_srv_get_diagnostic_data(struct dmub_srv *dmub, struct dmub_diagnostic_data *diag_data);
+bool dmub_srv_get_diagnostic_data(struct dmub_srv *dmub);
 
 bool dmub_srv_should_detect(struct dmub_srv *dmub);
 

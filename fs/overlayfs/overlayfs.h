@@ -46,6 +46,7 @@ enum ovl_xattr {
 	OVL_XATTR_IMPURE,
 	OVL_XATTR_NLINK,
 	OVL_XATTR_UPPER,
+	OVL_XATTR_UUID,
 	OVL_XATTR_METACOPY,
 	OVL_XATTR_PROTATTR,
 	OVL_XATTR_XWHITEOUT,
@@ -70,6 +71,20 @@ enum ovl_entry_flag {
 	OVL_E_CONNECTED,
 	/* Lower stack may contain xwhiteout entries */
 	OVL_E_XWHITEOUTS,
+};
+
+enum {
+	OVL_REDIRECT_OFF,	/* "off" mode is never used. In effect	*/
+	OVL_REDIRECT_FOLLOW,	/* ...it translates to either "follow"	*/
+	OVL_REDIRECT_NOFOLLOW,	/* ...or "nofollow".			*/
+	OVL_REDIRECT_ON,
+};
+
+enum {
+	OVL_UUID_OFF,
+	OVL_UUID_NULL,
+	OVL_UUID_AUTO,
+	OVL_UUID_ON,
 };
 
 enum {
@@ -131,7 +146,7 @@ struct ovl_fh {
 	u8 padding[3];	/* make sure fb.fid is 32bit aligned */
 	union {
 		struct ovl_fb fb;
-		u8 buf[0];
+		DECLARE_FLEX_ARRAY(u8, buf);
 	};
 } __packed;
 
@@ -393,19 +408,11 @@ static inline bool ovl_open_flags_need_copy_up(int flags)
 	return ((OPEN_FMODE(flags) & FMODE_WRITE) || (flags & O_TRUNC));
 }
 
-static inline bool ovl_allow_offline_changes(struct ovl_fs *ofs)
-{
-	/*
-	 * To avoid regressions in existing setups with overlay lower offline
-	 * changes, we allow lower changes only if none of the new features
-	 * are used.
-	 */
-	return (!ofs->config.index && !ofs->config.metacopy &&
-		!ofs->config.redirect_dir && ofs->config.xino != OVL_XINO_ON);
-}
-
-
 /* util.c */
+int ovl_get_write_access(struct dentry *dentry);
+void ovl_put_write_access(struct dentry *dentry);
+void ovl_start_write(struct dentry *dentry);
+void ovl_end_write(struct dentry *dentry);
 int ovl_want_write(struct dentry *dentry);
 void ovl_drop_write(struct dentry *dentry);
 struct dentry *ovl_workdir(struct dentry *dentry);
@@ -466,12 +473,11 @@ bool ovl_dentry_needs_data_copy_up(struct dentry *dentry, int flags);
 bool ovl_dentry_needs_data_copy_up_locked(struct dentry *dentry, int flags);
 bool ovl_has_upperdata(struct inode *inode);
 void ovl_set_upperdata(struct inode *inode);
-bool ovl_redirect_dir(struct super_block *sb);
 const char *ovl_dentry_get_redirect(struct dentry *dentry);
 void ovl_dentry_set_redirect(struct dentry *dentry, const char *redirect);
 void ovl_inode_update(struct inode *inode, struct dentry *upperdentry);
 void ovl_dir_modified(struct dentry *dentry, bool impurity);
-u64 ovl_dentry_version_get(struct dentry *dentry);
+u64 ovl_inode_version_get(struct inode *inode);
 bool ovl_is_whiteout(struct dentry *dentry);
 bool ovl_path_is_whiteout(struct ovl_fs *ofs, const struct path *path);
 struct file *ovl_path_open(const struct path *path, int flags);
@@ -482,6 +488,8 @@ char ovl_get_dir_xattr_val(struct ovl_fs *ofs, const struct path *path,
 			   enum ovl_xattr ox);
 bool ovl_path_check_origin_xattr(struct ovl_fs *ofs, const struct path *path);
 bool ovl_path_check_xwhiteout_xattr(struct ovl_fs *ofs, const struct path *path);
+bool ovl_init_uuid_xattr(struct super_block *sb, struct ovl_fs *ofs,
+			 const struct path *upperpath);
 
 static inline bool ovl_upper_is_whiteout(struct ovl_fs *ofs,
 					 struct dentry *upperdentry)
@@ -521,8 +529,6 @@ int ovl_set_metacopy_xattr(struct ovl_fs *ofs, struct dentry *d,
 bool ovl_is_metacopy_dentry(struct dentry *dentry);
 char *ovl_get_redirect_xattr(struct ovl_fs *ofs, const struct path *path, int padding);
 int ovl_ensure_verity_loaded(struct path *path);
-int ovl_get_verity_xattr(struct ovl_fs *ofs, const struct path *path,
-			 u8 *digest_buf, int *buf_length);
 int ovl_validate_verity(struct ovl_fs *ofs,
 			struct path *metapath,
 			struct path *datapath);
@@ -563,31 +569,62 @@ static inline char ovl_get_opaquedir_val(struct ovl_fs *ofs,
 	return ovl_get_dir_xattr_val(ofs, path, OVL_XATTR_OPAQUE);
 }
 
+static inline bool ovl_redirect_follow(struct ovl_fs *ofs)
+{
+	return ofs->config.redirect_mode != OVL_REDIRECT_NOFOLLOW;
+}
+
+static inline bool ovl_redirect_dir(struct ovl_fs *ofs)
+{
+	return ofs->config.redirect_mode == OVL_REDIRECT_ON;
+}
+
+static inline bool ovl_origin_uuid(struct ovl_fs *ofs)
+{
+	return ofs->config.uuid != OVL_UUID_OFF;
+}
+
+static inline bool ovl_has_fsid(struct ovl_fs *ofs)
+{
+	return ofs->config.uuid == OVL_UUID_ON ||
+	       ofs->config.uuid == OVL_UUID_AUTO;
+}
+
 /*
  * With xino=auto, we do best effort to keep all inodes on same st_dev and
  * d_ino consistent with st_ino.
  * With xino=on, we do the same effort but we warn if we failed.
  */
-static inline bool ovl_xino_warn(struct super_block *sb)
+static inline bool ovl_xino_warn(struct ovl_fs *ofs)
 {
-	return OVL_FS(sb)->config.xino == OVL_XINO_ON;
+	return ofs->config.xino == OVL_XINO_ON;
+}
+
+/*
+ * To avoid regressions in existing setups with overlay lower offline changes,
+ * we allow lower changes only if none of the new features are used.
+ */
+static inline bool ovl_allow_offline_changes(struct ovl_fs *ofs)
+{
+	return (!ofs->config.index && !ofs->config.metacopy &&
+		!ovl_redirect_dir(ofs) && !ovl_xino_warn(ofs));
 }
 
 /* All layers on same fs? */
-static inline bool ovl_same_fs(struct super_block *sb)
+static inline bool ovl_same_fs(struct ovl_fs *ofs)
 {
-	return OVL_FS(sb)->xino_mode == 0;
+	return ofs->xino_mode == 0;
 }
 
 /* All overlay inodes have same st_dev? */
-static inline bool ovl_same_dev(struct super_block *sb)
+static inline bool ovl_same_dev(struct ovl_fs *ofs)
 {
-	return OVL_FS(sb)->xino_mode >= 0;
+	return ofs->xino_mode >= 0;
 }
 
-static inline unsigned int ovl_xino_bits(struct super_block *sb)
+static inline unsigned int ovl_xino_bits(struct ovl_fs *ofs)
 {
-	return ovl_same_dev(sb) ? OVL_FS(sb)->xino_mode : 0;
+	return ovl_same_dev(ofs) ? ofs->xino_mode : 0;
 }
 
 static inline void ovl_inode_lock(struct inode *inode)
@@ -622,10 +659,15 @@ struct dentry *ovl_decode_real_fh(struct ovl_fs *ofs, struct ovl_fh *fh,
 int ovl_check_origin_fh(struct ovl_fs *ofs, struct ovl_fh *fh, bool connected,
 			struct dentry *upperdentry, struct ovl_path **stackp);
 int ovl_verify_set_fh(struct ovl_fs *ofs, struct dentry *dentry,
-		      enum ovl_xattr ox, struct dentry *real, bool is_upper,
-		      bool set);
-struct dentry *ovl_index_upper(struct ovl_fs *ofs, struct dentry *index);
+		      enum ovl_xattr ox, const struct ovl_fh *fh,
+		      bool is_upper, bool set);
+int ovl_verify_origin_xattr(struct ovl_fs *ofs, struct dentry *dentry,
+			    enum ovl_xattr ox, struct dentry *real,
+			    bool is_upper, bool set);
+struct dentry *ovl_index_upper(struct ovl_fs *ofs, struct dentry *index,
+			       bool connected);
 int ovl_verify_index(struct ovl_fs *ofs, struct dentry *index);
+int ovl_get_index_name_fh(const struct ovl_fh *fh, struct qstr *name);
 int ovl_get_index_name(struct ovl_fs *ofs, struct dentry *origin,
 		       struct qstr *name);
 struct dentry *ovl_get_index_fh(struct ovl_fs *ofs, struct ovl_fh *fh);
@@ -638,17 +680,24 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			  unsigned int flags);
 bool ovl_lower_positive(struct dentry *dentry);
 
+static inline int ovl_verify_origin_fh(struct ovl_fs *ofs, struct dentry *upper,
+				       const struct ovl_fh *fh, bool set)
+{
+	return ovl_verify_set_fh(ofs, upper, OVL_XATTR_ORIGIN, fh, false, set);
+}
+
 static inline int ovl_verify_origin(struct ovl_fs *ofs, struct dentry *upper,
 				    struct dentry *origin, bool set)
 {
-	return ovl_verify_set_fh(ofs, upper, OVL_XATTR_ORIGIN, origin,
-				 false, set);
+	return ovl_verify_origin_xattr(ofs, upper, OVL_XATTR_ORIGIN, origin,
+				       false, set);
 }
 
 static inline int ovl_verify_upper(struct ovl_fs *ofs, struct dentry *index,
 				   struct dentry *upper, bool set)
 {
-	return ovl_verify_set_fh(ofs, index, OVL_XATTR_UPPER, upper, true, set);
+	return ovl_verify_origin_xattr(ofs, index, OVL_XATTR_UPPER, upper,
+				       true, set);
 }
 
 /* readdir.c */
@@ -671,9 +720,9 @@ int ovl_indexdir_cleanup(struct ovl_fs *ofs);
  * lower dir was removed under it and possibly before it was rotated from upper
  * to lower layer.
  */
-static inline bool ovl_dir_is_real(struct dentry *dir)
+static inline bool ovl_dir_is_real(struct inode *dir)
 {
-	return !ovl_test_flag(OVL_WHITEOUTS, d_inode(dir));
+	return !ovl_test_flag(OVL_WHITEOUTS, dir);
 }
 
 /* inode.c */
@@ -800,17 +849,28 @@ int ovl_copy_up_with_data(struct dentry *dentry);
 int ovl_maybe_copy_up(struct dentry *dentry, int flags);
 int ovl_copy_xattr(struct super_block *sb, const struct path *path, struct dentry *new);
 int ovl_set_attr(struct ovl_fs *ofs, struct dentry *upper, struct kstat *stat);
-struct ovl_fh *ovl_encode_real_fh(struct ovl_fs *ofs, struct dentry *real,
+struct ovl_fh *ovl_encode_real_fh(struct ovl_fs *ofs, struct inode *realinode,
 				  bool is_upper);
-int ovl_set_origin(struct ovl_fs *ofs, struct dentry *lower,
-		   struct dentry *upper);
+struct ovl_fh *ovl_get_origin_fh(struct ovl_fs *ofs, struct dentry *origin);
+int ovl_set_origin_fh(struct ovl_fs *ofs, const struct ovl_fh *fh,
+		      struct dentry *upper);
 
 /* export.c */
 extern const struct export_operations ovl_export_operations;
+extern const struct export_operations ovl_export_fid_operations;
+
+/* super.c */
+int ovl_fill_super(struct super_block *sb, struct fs_context *fc);
+
+/* Will this overlay be forced to mount/remount ro? */
+static inline bool ovl_force_readonly(struct ovl_fs *ofs)
+{
+	return (!ovl_upper_mnt(ofs) || !ofs->workdir);
+}
 
 /* xattr.c */
 
-const struct xattr_handler **ovl_xattr_handlers(struct ovl_fs *ofs);
+const struct xattr_handler * const *ovl_xattr_handlers(struct ovl_fs *ofs);
 int ovl_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		struct iattr *attr);
 int ovl_getattr(struct mnt_idmap *idmap, const struct path *path,

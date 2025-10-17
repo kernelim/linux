@@ -379,7 +379,7 @@ static struct soc_sensor_entry *alloc_soc_dts(void)
 	aux_entry->tzone = thermal_zone_device_register_with_trips("quark_dts",
 								   trips,
 								   QRK_MAX_DTS_TRIPS,
-								   0, aux_entry,
+								   aux_entry,
 								   &tzone_ops,
 								   NULL, 0, polling_delay);
 	if (IS_ERR(aux_entry->tzone)) {
@@ -401,7 +401,7 @@ err_ret:
 }
 
 static const struct x86_cpu_id qrk_thermal_ids[] __initconst  = {
-	X86_MATCH_VENDOR_FAM_MODEL(INTEL, 5, INTEL_FAM5_QUARK_X1000, NULL),
+	X86_MATCH_VFM(INTEL_QUARK_X1000, NULL),
 	{}
 };
 MODULE_DEVICE_TABLE(x86cpu, qrk_thermal_ids);

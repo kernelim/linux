@@ -13,6 +13,7 @@ Contents:
    can
    can_ucan_protocol
    device_drivers/index
+   diagnostic/index
    dsa/index
    devlink/index
    caif/index

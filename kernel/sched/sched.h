@@ -1079,7 +1079,7 @@ struct rq {
 	 * one CPU and if it got migrated afterwards it may decrease
 	 * it on another CPU. Always updated under the runqueue lock:
 	 */
-	unsigned int		nr_uninterruptible;
+	unsigned long 		nr_uninterruptible;
 
 	struct task_struct __rcu	*curr;
 	struct task_struct	*idle;
@@ -2221,7 +2221,7 @@ static inline int task_on_cpu(struct rq *rq, struct task_struct *p)
 
 static inline int task_on_rq_queued(struct task_struct *p)
 {
-	return p->on_rq == TASK_ON_RQ_QUEUED;
+	return READ_ONCE(p->on_rq) == TASK_ON_RQ_QUEUED;
 }
 
 static inline int task_on_rq_migrating(struct task_struct *p)
@@ -3029,6 +3029,12 @@ struct irqtime {
 };
 
 DECLARE_PER_CPU(struct irqtime, cpu_irqtime);
+extern int sched_clock_irqtime;
+
+static inline int irqtime_enabled(void)
+{
+	return sched_clock_irqtime;
+}
 
 /*
  * Returns the irqtime minus the softirq time computed by ksoftirqd.
@@ -3047,6 +3053,13 @@ static inline u64 irq_time_read(int cpu)
 	} while (__u64_stats_fetch_retry(&irqtime->sync, seq));
 
 	return total;
+}
+
+#else
+
+static inline int irqtime_enabled(void)
+{
+	return 0;
 }
 
 #endif /* CONFIG_IRQ_TIME_ACCOUNTING */
@@ -3371,6 +3384,29 @@ extern int try_to_wake_up(struct task_struct *tsk, unsigned int state, int wake_
 extern int preempt_dynamic_mode;
 extern int sched_dynamic_mode(const char *str);
 extern void sched_dynamic_update(int mode);
+#endif
+
+#ifdef CONFIG_SMP
+static inline
+void move_queued_task_locked(struct rq *src_rq, struct rq *dst_rq, struct task_struct *task)
+{
+	lockdep_assert_rq_held(src_rq);
+	lockdep_assert_rq_held(dst_rq);
+
+	deactivate_task(src_rq, task, 0);
+	set_task_cpu(task, dst_rq->cpu);
+	activate_task(dst_rq, task, 0);
+}
+
+static inline
+bool task_is_pushable(struct rq *rq, struct task_struct *p, int cpu)
+{
+	if (!task_on_cpu(rq, p) &&
+	    cpumask_test_cpu(cpu, &p->cpus_mask))
+		return true;
+
+	return false;
+}
 #endif
 
 #ifdef CONFIG_RT_MUTEXES

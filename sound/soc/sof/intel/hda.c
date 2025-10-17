@@ -63,6 +63,11 @@ static int sdw_params_stream(struct device *dev,
 	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(d, params_data->substream->stream);
 	struct snd_sof_dai_config_data data = { 0 };
 
+	if (!w) {
+		dev_err(dev, "%s widget not found, check amp link num in the topology\n",
+			d->name);
+		return -EINVAL;
+	}
 	data.dai_index = (params_data->link_id << 8) | d->id;
 	data.dai_data = params_data->alh_stream_id;
 	data.dai_node_id = data.dai_data;
@@ -347,6 +352,27 @@ void hda_sdw_process_wakeen_common(struct snd_sof_dev *sdev)
 }
 EXPORT_SYMBOL_NS(hda_sdw_process_wakeen_common, SND_SOC_SOF_INTEL_HDA_GENERIC);
 
+static bool hda_dsp_sdw_check_mic_privacy_irq(struct snd_sof_dev *sdev)
+{
+	const struct sof_intel_dsp_desc *chip;
+
+	chip = get_chip_info(sdev->pdata);
+	if (chip && chip->check_mic_privacy_irq)
+		return chip->check_mic_privacy_irq(sdev, true,
+						   AZX_REG_ML_LEPTR_ID_SDW);
+
+	return false;
+}
+
+static void hda_dsp_sdw_process_mic_privacy(struct snd_sof_dev *sdev)
+{
+	const struct sof_intel_dsp_desc *chip;
+
+	chip = get_chip_info(sdev->pdata);
+	if (chip && chip->process_mic_privacy)
+		chip->process_mic_privacy(sdev, true, AZX_REG_ML_LEPTR_ID_SDW);
+}
+
 #else /* IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE) */
 static inline int hda_sdw_acpi_scan(struct snd_sof_dev *sdev)
 {
@@ -377,6 +403,13 @@ static inline bool hda_sdw_check_wakeen_irq(struct snd_sof_dev *sdev)
 {
 	return false;
 }
+
+static inline bool hda_dsp_sdw_check_mic_privacy_irq(struct snd_sof_dev *sdev)
+{
+	return false;
+}
+
+static inline void hda_dsp_sdw_process_mic_privacy(struct snd_sof_dev *sdev) { }
 
 #endif /* IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE) */
 
@@ -673,7 +706,13 @@ static irqreturn_t hda_dsp_interrupt_thread(int irq, void *context)
 
 	if (hda_dsp_check_sdw_irq(sdev)) {
 		trace_sof_intel_hda_irq(sdev, "sdw");
+
 		hda_dsp_sdw_thread(irq, hdev->sdw);
+
+		if (hda_dsp_sdw_check_mic_privacy_irq(sdev)) {
+			trace_sof_intel_hda_irq(sdev, "mic privacy");
+			hda_dsp_sdw_process_mic_privacy(sdev);
+		}
 	}
 
 	if (hda_sdw_check_wakeen_irq(sdev)) {
@@ -866,8 +905,6 @@ skip_dsp_setup:
 			dev_err(sdev->dev, "could not startup SoundWire links\n");
 			goto disable_pp_cap;
 		}
-
-		hda_sdw_int_enable(sdev, true);
 	}
 
 	init_waitqueue_head(&hdev->waitq);
@@ -931,12 +968,22 @@ void hda_dsp_remove(struct snd_sof_dev *sdev)
 	if (sdev->dspless_mode_selected)
 		goto skip_disable_dsp;
 
+	/* Cancel the microphone privacy work if mic privacy is active */
+	if (hda->mic_privacy.active)
+		cancel_work_sync(&hda->mic_privacy.work);
+
 	/* no need to check for error as the DSP will be disabled anyway */
 	if (chip && chip->power_down_dsp)
 		chip->power_down_dsp(sdev);
 
 	/* disable DSP */
 	hda_dsp_ctrl_ppcap_enable(sdev, false);
+
+	/* Free the persistent DMA buffers used for base firmware download */
+	if (hda->cl_dmab.area)
+		snd_dma_free_pages(&hda->cl_dmab);
+	if (hda->iccmax_dmab.area)
+		snd_dma_free_pages(&hda->iccmax_dmab);
 
 skip_disable_dsp:
 	free_irq(sdev->ipc_irq, sdev);
@@ -1002,7 +1049,21 @@ static void hda_generic_machine_select(struct snd_sof_dev *sdev,
 		if (!*mach && codec_num <= 2) {
 			bool tplg_fixup = false;
 
-			hda_mach = snd_soc_acpi_intel_hda_machines;
+			/*
+			 * make a local copy of the match array since we might
+			 * be modifying it
+			 */
+			hda_mach = devm_kmalloc_array(sdev->dev,
+					2, /* we have one entry + sentinel in the array */
+					sizeof(snd_soc_acpi_intel_hda_machines[0]),
+					GFP_KERNEL);
+			if (!hda_mach) {
+				dev_err(bus->dev,
+					"%s: failed to duplicate the HDA match table\n",
+					__func__);
+				return;
+			}
+			memcpy(hda_mach, snd_soc_acpi_intel_hda_machines, 2 * sizeof(snd_soc_acpi_intel_hda_machines[0]));
 
 			dev_info(bus->dev, "using HDA machine driver %s now\n",
 				 hda_mach->drv_name);
@@ -1067,7 +1128,7 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 {
 	struct snd_sof_pdata *pdata = sdev->pdata;
 	const struct snd_soc_acpi_link_adr *link;
-	struct sdw_extended_slave_id *ids;
+	struct sdw_peripherals *peripherals;
 	struct snd_soc_acpi_mach *mach;
 	struct sof_intel_hda_dev *hdev;
 	u32 link_mask;
@@ -1086,7 +1147,7 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 		return NULL;
 	}
 
-	if (!hdev->sdw->num_slaves) {
+	if (!hdev->sdw->peripherals || !hdev->sdw->peripherals->num_peripherals) {
 		dev_warn(sdev->dev, "No SoundWire peripheral detected in ACPI tables\n");
 		return NULL;
 	}
@@ -1122,13 +1183,13 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 			 * are not found on this link.
 			 */
 			if (!snd_soc_acpi_sdw_link_slaves_found(sdev->dev, link,
-								hdev->sdw->ids,
-								hdev->sdw->num_slaves))
+								hdev->sdw->peripherals))
 				break;
 		}
 		/* Found if all Slaves are checked */
 		if (i == hdev->info.count || !link->num_adr)
-			break;
+			if (!mach->machine_check || mach->machine_check(hdev->sdw))
+				break;
 	}
 	if (mach && mach->link_mask) {
 		mach->mach_params.links = mach->links;
@@ -1139,10 +1200,13 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 	}
 
 	dev_info(sdev->dev, "No SoundWire machine driver found for the ACPI-reported configuration:\n");
-	ids = hdev->sdw->ids;
-	for (i = 0; i < hdev->sdw->num_slaves; i++)
+	peripherals = hdev->sdw->peripherals;
+	for (i = 0; i < peripherals->num_peripherals; i++)
 		dev_info(sdev->dev, "link %d mfg_id 0x%04x part_id 0x%04x version %#x\n",
-			 ids[i].link_id, ids[i].id.mfg_id, ids[i].id.part_id, ids[i].id.sdw_version);
+			 peripherals->array[i]->bus->link_id,
+			 peripherals->array[i]->id.mfg_id,
+			 peripherals->array[i]->id.part_id,
+			 peripherals->array[i]->id.sdw_version);
 
 	return NULL;
 }
@@ -1191,11 +1255,11 @@ static int check_tplg_quirk_mask(struct snd_soc_acpi_mach *mach)
 	return 0;
 }
 
-static char *remove_file_ext(const char *tplg_filename)
+static char *remove_file_ext(struct device *dev, const char *tplg_filename)
 {
 	char *filename, *tmp;
 
-	filename = kstrdup(tplg_filename, GFP_KERNEL);
+	filename = devm_kstrdup(dev, tplg_filename, GFP_KERNEL);
 	if (!filename)
 		return NULL;
 
@@ -1279,7 +1343,7 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 		 */
 		if (!sof_pdata->tplg_filename) {
 			/* remove file extension if it exists */
-			tplg_filename = remove_file_ext(mach->sof_tplg_filename);
+			tplg_filename = remove_file_ext(sdev->dev, mach->sof_tplg_filename);
 			if (!tplg_filename)
 				return NULL;
 
@@ -1301,22 +1365,8 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 		/* report to machine driver if any DMICs are found */
 		mach->mach_params.dmic_num = check_dmic_num(sdev);
 
-		if (sdw_mach_found) {
-			/*
-			 * DMICs use up to 4 pins and are typically pin-muxed with SoundWire
-			 * link 2 and 3, or link 1 and 2, thus we only try to enable dmics
-			 * if all conditions are true:
-			 * a) 2 or fewer links are used by SoundWire
-			 * b) the NHLT table reports the presence of microphones
-			 */
-			if (hweight_long(mach->link_mask) <= 2)
-				dmic_fixup = true;
-			else
-				mach->mach_params.dmic_num = 0;
-		} else {
-			if (mach->tplg_quirk_mask & SND_SOC_ACPI_TPLG_INTEL_DMIC_NUMBER)
-				dmic_fixup = true;
-		}
+		if (sdw_mach_found || mach->tplg_quirk_mask & SND_SOC_ACPI_TPLG_INTEL_DMIC_NUMBER)
+			dmic_fixup = true;
 
 		if (tplg_fixup &&
 		    dmic_fixup &&

@@ -1,3 +1,3 @@
-#6-
-0x54718c86	rdma_destroy_id	drivers/infiniband/core/rdma_cm	EXPORT_SYMBOL	
+#7-
+0xa31ec16e	rdma_destroy_id	drivers/infiniband/core/rdma_cm	EXPORT_SYMBOL	
 

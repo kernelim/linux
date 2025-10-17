@@ -335,7 +335,7 @@ static const struct snd_soc_dai_link rockchip_dais[] = {
 		.stream_name = "DP PCM",
 		.init = rockchip_sound_cdndp_init,
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
-			SND_SOC_DAIFMT_CBS_CFS,
+			SND_SOC_DAIFMT_CBC_CFC,
 		SND_SOC_DAILINK_REG(cdndp),
 	},
 	[DAILINK_DA7219] = {
@@ -345,7 +345,7 @@ static const struct snd_soc_dai_link rockchip_dais[] = {
 		.ops = &rockchip_sound_da7219_ops,
 		/* set da7219 as slave */
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
-			SND_SOC_DAIFMT_CBS_CFS,
+			SND_SOC_DAIFMT_CBC_CFC,
 		SND_SOC_DAILINK_REG(da7219),
 	},
 	[DAILINK_DMIC] = {
@@ -353,7 +353,7 @@ static const struct snd_soc_dai_link rockchip_dais[] = {
 		.stream_name = "DMIC PCM",
 		.ops = &rockchip_sound_dmic_ops,
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
-			SND_SOC_DAIFMT_CBS_CFS,
+			SND_SOC_DAIFMT_CBC_CFC,
 		SND_SOC_DAILINK_REG(dmic),
 	},
 	[DAILINK_MAX98357A] = {
@@ -362,7 +362,7 @@ static const struct snd_soc_dai_link rockchip_dais[] = {
 		.ops = &rockchip_sound_max98357a_ops,
 		/* set max98357a as slave */
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
-			SND_SOC_DAIFMT_CBS_CFS,
+			SND_SOC_DAIFMT_CBC_CFC,
 		SND_SOC_DAILINK_REG(max98357a),
 	},
 	[DAILINK_RT5514] = {
@@ -371,7 +371,7 @@ static const struct snd_soc_dai_link rockchip_dais[] = {
 		.ops = &rockchip_sound_rt5514_ops,
 		/* set rt5514 as slave */
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
-			SND_SOC_DAIFMT_CBS_CFS,
+			SND_SOC_DAIFMT_CBC_CFC,
 		SND_SOC_DAILINK_REG(rt5514),
 	},
 	/* RT5514 DSP for voice wakeup via spi bus */

@@ -35,8 +35,6 @@
 
 #include <linux/ptp_clock_kernel.h>
 
-/* KABI checker sees the old definitions in include/linux/mlx5/driver.h */
-#ifndef __GENKSYMS__
 #define MAX_PIN_NUM	8
 struct mlx5_pps {
 	u8                         pin_caps[MAX_PIN_NUM];
@@ -63,7 +61,6 @@ struct mlx5_clock {
 	struct mlx5_timer          timer;
 	bool                       shared;
 };
-#endif
 
 static inline bool mlx5_is_real_time_rq(struct mlx5_core_dev *mdev)
 {

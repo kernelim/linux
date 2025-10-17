@@ -3,6 +3,6 @@
 TEST_FILES := ../../../../../Documentation/netlink/specs
 TEST_FILES += ../../../../net/ynl
 
-TEST_INCLUDES := $(wildcard py/*.py)
+TEST_INCLUDES := $(wildcard py/*.py sh/*.sh)
 
 include ../../lib.mk

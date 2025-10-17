@@ -15,10 +15,8 @@ struct intel_crtc_state;
 struct intel_plane_state;
 
 void intel_update_watermarks(struct drm_i915_private *i915);
-int intel_compute_pipe_wm(struct intel_atomic_state *state,
-			  struct intel_crtc *crtc);
-int intel_compute_intermediate_wm(struct intel_atomic_state *state,
-				  struct intel_crtc *crtc);
+int intel_wm_compute(struct intel_atomic_state *state,
+		     struct intel_crtc *crtc);
 bool intel_initial_watermarks(struct intel_atomic_state *state,
 			      struct intel_crtc *crtc);
 void intel_atomic_update_watermarks(struct intel_atomic_state *state,
@@ -27,6 +25,7 @@ void intel_optimize_watermarks(struct intel_atomic_state *state,
 			       struct intel_crtc *crtc);
 int intel_compute_global_watermarks(struct intel_atomic_state *state);
 void intel_wm_get_hw_state(struct drm_i915_private *i915);
+void intel_wm_sanitize(struct drm_i915_private *i915);
 bool intel_wm_plane_visible(const struct intel_crtc_state *crtc_state,
 			    const struct intel_plane_state *plane_state);
 void intel_print_wm_latency(struct drm_i915_private *i915,

@@ -38,6 +38,7 @@
 #include "dmub_dcn32.h"
 #include "dmub_dcn35.h"
 #include "dmub_dcn351.h"
+#include "dmub_dcn36.h"
 #include "dmub_dcn401.h"
 #include "os_types.h"
 /*
@@ -60,10 +61,6 @@
 
 /* Default state size if meta is absent. */
 #define DMUB_FW_STATE_SIZE (64 * 1024)
-
-/* Default tracebuffer size if meta is absent. */
-#define DMUB_TRACE_BUFFER_SIZE (64 * 1024)
-
 
 /* Default scratch mem size. */
 #define DMUB_SCRATCH_MEM_SIZE (1024)
@@ -318,6 +315,7 @@ static bool dmub_srv_hw_setup(struct dmub_srv *dmub, enum dmub_asic asic)
 
 	case DMUB_ASIC_DCN35:
 	case DMUB_ASIC_DCN351:
+	case DMUB_ASIC_DCN36:
 			dmub->regs_dcn35 = &dmub_srv_dcn35_regs;
 			funcs->configure_dmub_in_system_memory = dmub_dcn35_configure_dmub_in_system_memory;
 			funcs->send_inbox0_cmd = dmub_dcn35_send_inbox0_cmd;
@@ -355,7 +353,9 @@ static bool dmub_srv_hw_setup(struct dmub_srv *dmub, enum dmub_asic asic)
 
 			funcs->init_reg_offsets = dmub_srv_dcn35_regs_init;
 			if (asic == DMUB_ASIC_DCN351)
-                                funcs->init_reg_offsets = dmub_srv_dcn351_regs_init;
+				funcs->init_reg_offsets = dmub_srv_dcn351_regs_init;
+			if (asic == DMUB_ASIC_DCN36)
+				funcs->init_reg_offsets = dmub_srv_dcn36_regs_init;
 
 			funcs->is_hw_powered_up = dmub_dcn35_is_hw_powered_up;
 			funcs->should_detect = dmub_dcn35_should_detect;
@@ -497,6 +497,7 @@ enum dmub_status
 	const struct dmub_fw_meta_info *fw_info;
 	uint32_t fw_state_size = DMUB_FW_STATE_SIZE;
 	uint32_t trace_buffer_size = DMUB_TRACE_BUFFER_SIZE;
+	uint32_t shared_state_size = DMUB_FW_HEADER_SHARED_STATE_SIZE;
 	uint32_t window_sizes[DMUB_WINDOW_TOTAL] = { 0 };
 
 	if (!dmub->sw_init)
@@ -514,6 +515,7 @@ enum dmub_status
 
 		fw_state_size = fw_info->fw_region_size;
 		trace_buffer_size = fw_info->trace_buffer_size;
+		shared_state_size = fw_info->shared_state_size;
 
 		/**
 		 * If DM didn't fill in a version, then fill it in based on
@@ -534,7 +536,7 @@ enum dmub_status
 	window_sizes[DMUB_WINDOW_5_TRACEBUFF] = trace_buffer_size;
 	window_sizes[DMUB_WINDOW_6_FW_STATE] = fw_state_size;
 	window_sizes[DMUB_WINDOW_7_SCRATCH_MEM] = DMUB_SCRATCH_MEM_SIZE;
-	window_sizes[DMUB_WINDOW_SHARED_STATE] = DMUB_FW_HEADER_SHARED_STATE_SIZE;
+	window_sizes[DMUB_WINDOW_SHARED_STATE] = max(DMUB_FW_HEADER_SHARED_STATE_SIZE, shared_state_size);
 
 	out->fb_size =
 		dmub_srv_calc_regions_for_memory_type(params, out, window_sizes, DMUB_WINDOW_MEMORY_TYPE_FB);
@@ -706,7 +708,7 @@ enum dmub_status dmub_srv_hw_init(struct dmub_srv *dmub,
 	cw6.region.base = DMUB_CW6_BASE;
 	cw6.region.top = cw6.region.base + fw_state_fb->size;
 
-	dmub->fw_state = fw_state_fb->cpu_addr;
+	dmub->fw_state = (void *)((uintptr_t)(fw_state_fb->cpu_addr) + DMUB_DEBUG_FW_STATE_OFFSET);
 
 	region6.offset.quad_part = shared_state_fb->gpu_addr;
 	region6.region.base = DMUB_CW6_BASE;
@@ -848,7 +850,7 @@ enum dmub_status dmub_srv_cmd_execute(struct dmub_srv *dmub)
 	flush_rb.rptr = dmub->inbox1_last_wptr;
 	dmub_rb_flush_pending(&flush_rb);
 
-	dmub->hw_funcs.set_inbox1_wptr(dmub, dmub->inbox1_rb.wrpt);
+		dmub->hw_funcs.set_inbox1_wptr(dmub, dmub->inbox1_rb.wrpt);
 
 	dmub->inbox1_last_wptr = dmub->inbox1_rb.wrpt;
 
@@ -917,7 +919,7 @@ enum dmub_status dmub_srv_wait_for_idle(struct dmub_srv *dmub,
 		return DMUB_STATUS_INVALID;
 
 	for (i = 0; i <= timeout_us; ++i) {
-		rptr = dmub->hw_funcs.get_inbox1_rptr(dmub);
+			rptr = dmub->hw_funcs.get_inbox1_rptr(dmub);
 
 		if (rptr > dmub->inbox1_rb.capacity)
 			return DMUB_STATUS_HW_FAILURE;
@@ -1097,11 +1099,11 @@ bool dmub_srv_get_outbox0_msg(struct dmub_srv *dmub, struct dmcub_trace_buf_entr
 	return dmub_rb_out_trace_buffer_front(&dmub->outbox0_rb, (void *)entry);
 }
 
-bool dmub_srv_get_diagnostic_data(struct dmub_srv *dmub, struct dmub_diagnostic_data *diag_data)
+bool dmub_srv_get_diagnostic_data(struct dmub_srv *dmub)
 {
-	if (!dmub || !dmub->hw_funcs.get_diagnostic_data || !diag_data)
+	if (!dmub || !dmub->hw_funcs.get_diagnostic_data)
 		return false;
-	dmub->hw_funcs.get_diagnostic_data(dmub, diag_data);
+	dmub->hw_funcs.get_diagnostic_data(dmub);
 	return true;
 }
 
@@ -1157,6 +1159,7 @@ void dmub_srv_subvp_save_surf_addr(struct dmub_srv *dmub, const struct dc_plane_
 				subvp_index);
 	}
 }
+
 
 enum dmub_status dmub_srv_send_reg_inbox0_cmd(
 		struct dmub_srv *dmub,

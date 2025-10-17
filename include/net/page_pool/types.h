@@ -157,8 +157,6 @@ struct page_pool {
 	bool system:1;			/* This is a global percpu pool */
 #endif
 
-	RH_KABI_FILL_HOLE(struct xarray dma_mapped)
-
 	/* The following block must stay within one cacheline. On 32-bit
 	 * systems, sizeof(long) == sizeof(int), so that the block size is
 	 * ``3 * sizeof(long)``. On 64-bit systems, the actual size is
@@ -212,6 +210,8 @@ struct page_pool {
 	 */
 	struct ptr_ring ring;
 
+	struct xarray dma_mapped;
+
 #ifdef CONFIG_PAGE_POOL_STATS
 	/* recycle stats are per-cpu to avoid locking */
 	struct page_pool_recycle_stats __percpu *recycle_stats;
@@ -232,7 +232,6 @@ struct page_pool {
 	struct {
 		struct hlist_node list;
 		u64 detach_time;
-		u32 napi_id;
 		u32 id;
 	} user;
 };

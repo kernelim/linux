@@ -22,6 +22,7 @@ place where this information is gathered.
    unshare
    spec_ctrl
    accelerators/ocxl
+   fwctl/index
    ebpf/index
    ioctl/index
    iommu

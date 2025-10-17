@@ -14,7 +14,7 @@
  *                     FREQUENCY TABLE HELPERS                       *
  *********************************************************************/
 
-bool policy_has_boost_freq(struct cpufreq_policy *policy)
+static bool policy_has_boost_freq(struct cpufreq_policy *policy)
 {
 	struct cpufreq_frequency_table *pos, *table = policy->freq_table;
 
@@ -27,7 +27,6 @@ bool policy_has_boost_freq(struct cpufreq_policy *policy)
 
 	return false;
 }
-EXPORT_SYMBOL_GPL(policy_has_boost_freq);
 
 int cpufreq_frequency_table_cpuinfo(struct cpufreq_policy *policy,
 				    struct cpufreq_frequency_table *table)
@@ -70,7 +69,7 @@ int cpufreq_frequency_table_verify(struct cpufreq_policy_data *policy,
 				   struct cpufreq_frequency_table *table)
 {
 	struct cpufreq_frequency_table *pos;
-	unsigned int freq, next_larger = ~0;
+	unsigned int freq, prev_smaller = 0;
 	bool found = false;
 
 	pr_debug("request for verification of policy (%u - %u kHz) for cpu %u\n",
@@ -86,12 +85,12 @@ int cpufreq_frequency_table_verify(struct cpufreq_policy_data *policy,
 			break;
 		}
 
-		if ((next_larger > freq) && (freq > policy->max))
-			next_larger = freq;
+		if ((prev_smaller < freq) && (freq <= policy->max))
+			prev_smaller = freq;
 	}
 
 	if (!found) {
-		policy->max = next_larger;
+		policy->max = prev_smaller;
 		cpufreq_verify_within_cpu_limits(policy);
 	}
 
@@ -116,8 +115,8 @@ int cpufreq_generic_frequency_table_verify(struct cpufreq_policy_data *policy)
 EXPORT_SYMBOL_GPL(cpufreq_generic_frequency_table_verify);
 
 int cpufreq_table_index_unsorted(struct cpufreq_policy *policy,
-				 unsigned int target_freq,
-				 unsigned int relation)
+				 unsigned int target_freq, unsigned int min,
+				 unsigned int max, unsigned int relation)
 {
 	struct cpufreq_frequency_table optimal = {
 		.driver_data = ~0,
@@ -148,7 +147,7 @@ int cpufreq_table_index_unsorted(struct cpufreq_policy *policy,
 	cpufreq_for_each_valid_entry_idx(pos, table, i) {
 		freq = pos->frequency;
 
-		if ((freq < policy->min) || (freq > policy->max))
+		if (freq < min || freq > max)
 			continue;
 		if (freq == target_freq) {
 			optimal.driver_data = i;
@@ -194,7 +193,7 @@ int cpufreq_table_index_unsorted(struct cpufreq_policy *policy,
 	}
 	if (optimal.driver_data > i) {
 		if (suboptimal.driver_data > i) {
-			WARN(1, "Invalid frequency table: %d\n", policy->cpu);
+			WARN(1, "Invalid frequency table: %u\n", policy->cpu);
 			return 0;
 		}
 
@@ -254,7 +253,7 @@ static ssize_t show_available_freqs(struct cpufreq_policy *policy, char *buf,
 		if (show_boost ^ (pos->flags & CPUFREQ_BOOST_FREQ))
 			continue;
 
-		count += sprintf(&buf[count], "%d ", pos->frequency);
+		count += sprintf(&buf[count], "%u ", pos->frequency);
 	}
 	count += sprintf(&buf[count], "\n");
 
@@ -366,6 +365,10 @@ int cpufreq_table_validate_and_sort(struct cpufreq_policy *policy)
 	ret = cpufreq_frequency_table_cpuinfo(policy, policy->freq_table);
 	if (ret)
 		return ret;
+
+	/* Driver's may have set this field already */
+	if (policy_has_boost_freq(policy))
+		policy->boost_supported = true;
 
 	return set_freq_table_sorted(policy);
 }

@@ -480,7 +480,7 @@ xrep_bmap_iroot_size(
 {
 	ASSERT(level > 0);
 
-	return XFS_BMAP_BROOT_SPACE_CALC(cur->bc_mp, nr_this_level);
+	return xfs_bmap_broot_space_calc(cur->bc_mp, nr_this_level);
 }
 
 /* Update the inode counters. */
@@ -639,7 +639,13 @@ xrep_bmap_build_new_fork(
 	rb->new_bmapbt.bload.get_records = xrep_bmap_get_records;
 	rb->new_bmapbt.bload.claim_block = xrep_bmap_claim_block;
 	rb->new_bmapbt.bload.iroot_size = xrep_bmap_iroot_size;
-	bmap_cur = xfs_bmbt_stage_cursor(sc->mp, sc->ip, ifake);
+
+	/*
+	 * Allocate a new bmap btree cursor for reloading an inode block mapping
+	 * data structure.
+	 */
+	bmap_cur = xfs_bmbt_init_cursor(sc->mp, NULL, sc->ip, XFS_STAGING_FORK);
+	xfs_btree_stage_ifakeroot(bmap_cur, ifake);
 
 	/*
 	 * Figure out the size and format of the new fork, then fill it with

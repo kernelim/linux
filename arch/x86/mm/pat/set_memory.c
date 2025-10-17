@@ -31,8 +31,6 @@
 #include <asm/pgalloc.h>
 #include <asm/proto.h>
 #include <asm/memtype.h>
-#include <asm/hyperv-tlfs.h>
-#include <asm/mshyperv.h>
 
 #include "../mm_internal.h"
 
@@ -234,7 +232,7 @@ within_inclusive(unsigned long addr, unsigned long start, unsigned long end)
  * take full advantage of the limited (s32) immediate addressing range (2G)
  * of x86_64.
  *
- * See Documentation/x86/x86_64/mm.rst for more detail.
+ * See Documentation/arch/x86/x86_64/mm.rst for more detail.
  */
 
 static inline unsigned long highmap_start_pfn(void)

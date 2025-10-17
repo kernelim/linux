@@ -24,6 +24,11 @@
  * @pin_refs:		stores pins registered within a dpll
  * @refcount:		refcount
  * @registration_list:	list of registered ops and priv data of dpll owners
+ *
+ * RHEL: The content of the structure is invisible for modules and also
+ * all its instances are allocated by DPLL core so it is safe to modify this
+ * structure but RH_KABI_EXTEND macro has to be used to avoid kABI checker
+ * errors.
  **/
 struct dpll_device {
 	u32 id;
@@ -48,6 +53,11 @@ struct dpll_device {
  * @rclk_dev_name:	holds name of device when pin can recover clock from it
  * @refcount:		refcount
  * @rcu:		rcu_head for kfree_rcu()
+ *
+ * RHEL: The content of the structure is invisible for modules and also
+ * all its instances are allocated by DPLL core so it is safe to modify this
+ * structure but RH_KABI_EXTEND macro has to be used to avoid kABI checker
+ * errors.
  **/
 struct dpll_pin {
 	u32 id;

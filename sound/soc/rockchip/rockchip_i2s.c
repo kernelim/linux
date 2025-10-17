@@ -861,8 +861,7 @@ static int rockchip_i2s_remove(struct platform_device *pdev)
 }
 
 static const struct dev_pm_ops rockchip_i2s_pm_ops = {
-	SET_RUNTIME_PM_OPS(i2s_runtime_suspend, i2s_runtime_resume,
-			   NULL)
+	RUNTIME_PM_OPS(i2s_runtime_suspend, i2s_runtime_resume, NULL)
 };
 
 static struct platform_driver rockchip_i2s_driver = {
@@ -871,7 +870,7 @@ static struct platform_driver rockchip_i2s_driver = {
 	.driver = {
 		.name = DRV_NAME,
 		.of_match_table = of_match_ptr(rockchip_i2s_match),
-		.pm = &rockchip_i2s_pm_ops,
+		.pm = pm_ptr(&rockchip_i2s_pm_ops),
 	},
 };
 module_platform_driver(rockchip_i2s_driver);

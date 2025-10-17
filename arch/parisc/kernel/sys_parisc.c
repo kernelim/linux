@@ -100,13 +100,16 @@ static unsigned long mmap_upper_limit(struct rlimit *rlim_stack)
 
 
 unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr,
-		unsigned long len, unsigned long pgoff, unsigned long flags)
+		unsigned long len, unsigned long pgoff, unsigned long flags,
+		vm_flags_t vm_flags)
 {
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma, *prev;
 	unsigned long task_size = TASK_SIZE;
 	int do_color_align, last_mmap;
-	struct vm_unmapped_area_info info;
+	struct vm_unmapped_area_info info = {
+		.length = len
+	};
 
 	if (len > task_size)
 		return -ENOMEM;
@@ -137,8 +140,6 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr,
 			goto found_addr;
 	}
 
-	info.flags = 0;
-	info.length = len;
 	info.low_limit = mm->mmap_legacy_base;
 	info.high_limit = mmap_upper_limit(NULL);
 	info.align_mask = last_mmap ? (PAGE_MASK & (SHM_COLOUR - 1)) : 0;
@@ -155,13 +156,15 @@ found_addr:
 unsigned long
 arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 			  const unsigned long len, const unsigned long pgoff,
-			  const unsigned long flags)
+			  const unsigned long flags, vm_flags_t vm_flags)
 {
 	struct vm_area_struct *vma, *prev;
 	struct mm_struct *mm = current->mm;
 	unsigned long addr = addr0;
 	int do_color_align, last_mmap;
-	struct vm_unmapped_area_info info;
+	struct vm_unmapped_area_info info = {
+		.length = len
+	};
 
 	/* requested length too big for entire address space */
 	if (len > TASK_SIZE)
@@ -195,7 +198,6 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 	}
 
 	info.flags = VM_UNMAPPED_AREA_TOPDOWN;
-	info.length = len;
 	info.low_limit = PAGE_SIZE;
 	info.high_limit = mm->mmap_base;
 	info.align_mask = last_mmap ? (PAGE_MASK & (SHM_COLOUR - 1)) : 0;
@@ -211,7 +213,7 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 	 * can happen with large stack limits and large mmap()
 	 * allocations.
 	 */
-	return arch_get_unmapped_area(filp, addr0, len, pgoff, flags);
+	return arch_get_unmapped_area(filp, addr0, len, pgoff, flags, vm_flags);
 
 found_addr:
 	if (do_color_align && !last_mmap && !(addr & ~PAGE_MASK))

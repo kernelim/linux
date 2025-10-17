@@ -51,7 +51,6 @@ struct_net_device_core_stats*       core_stats
 atomic_t                            carrier_up_count                                                
 atomic_t                            carrier_down_count                                              
 struct_iw_handler_def*              wireless_handlers                                               
-struct_iw_public_data*              wireless_data                                                   
 struct_ethtool_ops*                 ethtool_ops                                                     
 struct_l3mdev_ops*                  l3mdev_ops                                                      
 struct_ndisc_ops*                   ndisc_ops                                                       
@@ -166,7 +165,7 @@ unsigned:1                          wol_enabled
 unsigned:1                          threaded                -                   -                   napi_poll(napi_enable,dev_set_threaded)
 unsigned_long:1                     see_all_hwtstamp_requests                                       
 unsigned_long:1                     change_proto_down                                               
-unsigned_long:1                     netns_local                                                     
+unsigned_long:1                     netns_immutable                                                 
 unsigned_long:1                     fcoe_mtu                                                        
 struct_list_head                    net_notifier_list                                               
 struct_macsec_ops*                  macsec_ops                                                      
@@ -181,3 +180,7 @@ netdevice_tracker                   dev_registered_tracker
 struct_rtnl_hw_stats64*             offload_xstats_l3                                               
 struct_devlink_port*                devlink_port                                                    
 struct_dpll_pin*                    dpll_pin                                                        
+u64                                 max_pacing_offload_horizon
+struct_napi_config*                 napi_config
+unsigned_long                       gro_flush_timeout
+u32                                 napi_defer_hard_irqs

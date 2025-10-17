@@ -134,6 +134,8 @@ struct scsi_disk {
 	unsigned int	physical_block_size;
 	unsigned int	max_medium_access_timeouts;
 	unsigned int	medium_access_timed_out;
+			/* number of permanent streams */
+	u16		permanent_stream_count;
 	u8		media_present;
 	u8		write_prot;
 	u8		protection_type;/* Data Integrity Field */
@@ -162,6 +164,7 @@ struct scsi_disk {
 	RH_KABI_FILL_HOLE(unsigned use_atomic_write_boundary:1)
 
 	RH_KABI_FILL_HOLE(bool suspended)	/* Disk is suspended (stopped) */
+	RH_KABI_FILL_HOLE(unsigned rscs:1)
 
 	/* FOR RH USE ONLY
 	 *

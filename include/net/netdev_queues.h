@@ -6,6 +6,16 @@
 
 #include <linux/rh_kabi.h>
 
+/**
+ * struct netdev_config - queue-related configuration for a netdev
+ * @hds_thresh:		HDS Threshold value.
+ * @hds_config:		HDS value from userspace.
+ */
+struct netdev_config {
+	u32	hds_thresh;
+	u8	hds_config;
+};
+
 /* See the netdev.yaml spec for definition of each statistic */
 struct netdev_queue_stats_rx {
 	u64 bytes;

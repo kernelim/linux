@@ -160,7 +160,8 @@ xrep_newbt_add_blocks(
 	if (args->tp) {
 		ASSERT(xnr->oinfo.oi_offset == 0);
 
-		error = xfs_alloc_schedule_autoreap(args, true, &resv->autoreap);
+		error = xfs_alloc_schedule_autoreap(args,
+				XFS_FREE_EXTENT_SKIP_DISCARD, &resv->autoreap);
 		if (error)
 			goto out_pag;
 	}
@@ -239,7 +240,11 @@ xrep_newbt_alloc_ag_blocks(
 
 		xrep_newbt_validate_ag_alloc_hint(xnr);
 
-		error = xfs_alloc_vextent_near_bno(&args, xnr->alloc_hint);
+		if (xnr->alloc_vextent)
+			error = xnr->alloc_vextent(sc, &args, xnr->alloc_hint);
+		else
+			error = xfs_alloc_vextent_near_bno(&args,
+					xnr->alloc_hint);
 		if (error)
 			return error;
 		if (args.fsbno == NULLFSBLOCK)
@@ -309,7 +314,11 @@ xrep_newbt_alloc_file_blocks(
 
 		xrep_newbt_validate_file_alloc_hint(xnr);
 
-		error = xfs_alloc_vextent_start_ag(&args, xnr->alloc_hint);
+		if (xnr->alloc_vextent)
+			error = xnr->alloc_vextent(sc, &args, xnr->alloc_hint);
+		else
+			error = xfs_alloc_vextent_start_ag(&args,
+					xnr->alloc_hint);
 		if (error)
 			return error;
 		if (args.fsbno == NULLFSBLOCK)
@@ -406,7 +415,7 @@ xrep_newbt_free_extent(
 	 */
 	fsbno = XFS_AGB_TO_FSB(sc->mp, resv->pag->pag_agno, free_agbno);
 	error = xfs_free_extent_later(sc->tp, fsbno, free_aglen, &xnr->oinfo,
-			xnr->resv, true);
+			xnr->resv, XFS_FREE_EXTENT_SKIP_DISCARD);
 	if (error)
 		return error;
 
@@ -535,7 +544,7 @@ xrep_newbt_claim_block(
 	trace_xrep_newbt_claim_block(mp, resv->pag->pag_agno, agbno, 1,
 			xnr->oinfo.oi_owner);
 
-	if (cur->bc_flags & XFS_BTREE_LONG_PTRS)
+	if (cur->bc_ops->ptr_len == XFS_BTREE_LONG_PTR_LEN)
 		ptr->l = cpu_to_be64(XFS_AGB_TO_FSB(mp, resv->pag->pag_agno,
 								agbno));
 	else

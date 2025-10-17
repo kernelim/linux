@@ -395,7 +395,7 @@ static int acp6x_pdm_audio_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int __maybe_unused acp6x_pdm_resume(struct device *dev)
+static int acp6x_pdm_resume(struct device *dev)
 {
 	struct pdm_dev_data *adata;
 	struct snd_pcm_runtime *runtime;
@@ -416,7 +416,7 @@ static int __maybe_unused acp6x_pdm_resume(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused acp6x_pdm_suspend(struct device *dev)
+static int acp6x_pdm_suspend(struct device *dev)
 {
 	struct pdm_dev_data *adata;
 
@@ -425,7 +425,7 @@ static int __maybe_unused acp6x_pdm_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused acp6x_pdm_runtime_resume(struct device *dev)
+static int acp6x_pdm_runtime_resume(struct device *dev)
 {
 	struct pdm_dev_data *adata;
 
@@ -435,8 +435,8 @@ static int __maybe_unused acp6x_pdm_runtime_resume(struct device *dev)
 }
 
 static const struct dev_pm_ops acp6x_pdm_pm_ops = {
-	SET_RUNTIME_PM_OPS(acp6x_pdm_suspend, acp6x_pdm_runtime_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(acp6x_pdm_suspend, acp6x_pdm_resume)
+	RUNTIME_PM_OPS(acp6x_pdm_suspend, acp6x_pdm_runtime_resume, NULL)
+	SYSTEM_SLEEP_PM_OPS(acp6x_pdm_suspend, acp6x_pdm_resume)
 };
 
 static struct platform_driver acp6x_pdm_dma_driver = {
@@ -444,7 +444,7 @@ static struct platform_driver acp6x_pdm_dma_driver = {
 	.remove = acp6x_pdm_audio_remove,
 	.driver = {
 		.name = "acp_yc_pdm_dma",
-		.pm = &acp6x_pdm_pm_ops,
+		.pm = pm_ptr(&acp6x_pdm_pm_ops),
 	},
 };
 

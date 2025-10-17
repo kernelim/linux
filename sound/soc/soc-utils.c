@@ -15,6 +15,33 @@
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 
+int snd_soc_ret(const struct device *dev, int ret, const char *fmt, ...)
+{
+	struct va_format vaf;
+	va_list args;
+
+	/* Positive, Zero values are not errors */
+	if (ret >= 0)
+		return ret;
+
+	/* Negative values might be errors */
+	switch (ret) {
+	case -EPROBE_DEFER:
+	case -ENOTSUPP:
+	case -EOPNOTSUPP:
+		break;
+	default:
+		va_start(args, fmt);
+		vaf.fmt = fmt;
+		vaf.va = &args;
+
+		dev_err(dev, "ASoC error (%d): %pV", ret, &vaf);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(snd_soc_ret);
+
 int snd_soc_calc_frame_size(int sample_size, int channels, int tdm_slots)
 {
 	return sample_size * channels * tdm_slots;
@@ -103,8 +130,8 @@ static const struct snd_pcm_hardware dummy_dma_hardware = {
 	.info			= SNDRV_PCM_INFO_INTERLEAVED |
 				  SNDRV_PCM_INFO_BLOCK_TRANSFER,
 	.buffer_bytes_max	= 128*1024,
-	.period_bytes_min	= PAGE_SIZE,
-	.period_bytes_max	= PAGE_SIZE*2,
+	.period_bytes_min	= 4096,
+	.period_bytes_max	= 4096*2,
 	.periods_min		= 2,
 	.periods_max		= 128,
 };

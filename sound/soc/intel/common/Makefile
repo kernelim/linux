@@ -14,9 +14,13 @@ snd-soc-acpi-intel-match-y := soc-acpi-intel-byt-match.o soc-acpi-intel-cht-matc
 	soc-acpi-intel-lnl-match.o \
 	soc-acpi-intel-ptl-match.o \
 	soc-acpi-intel-hda-match.o \
-	soc-acpi-intel-sdw-mockup-match.o
+	soc-acpi-intel-sdw-mockup-match.o sof-function-topology-lib.o
 
 snd-soc-acpi-intel-match-y += soc-acpi-intel-ssp-common.o
 
+snd-soc-acpi-intel-sdca-quirks-y += soc-acpi-intel-sdca-quirks.o
+
 obj-$(CONFIG_SND_SOC_INTEL_SST) += snd-soc-sst-dsp.o snd-soc-sst-ipc.o
+
 obj-$(CONFIG_SND_SOC_ACPI_INTEL_MATCH) += snd-soc-acpi-intel-match.o
+obj-$(CONFIG_SND_SOC_ACPI_INTEL_SDCA_QUIRKS) += snd-soc-acpi-intel-sdca-quirks.o

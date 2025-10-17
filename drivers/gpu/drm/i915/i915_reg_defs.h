@@ -284,4 +284,22 @@ typedef struct {
 #define i915_mmio_reg_equal(a, b) (i915_mmio_reg_offset(a) == i915_mmio_reg_offset(b))
 #define i915_mmio_reg_valid(r) (!i915_mmio_reg_equal(r, INVALID_MMIO_REG))
 
+/* A triplet for IMR/IER/IIR registers. */
+struct i915_irq_regs {
+	i915_reg_t imr;
+	i915_reg_t ier;
+	i915_reg_t iir;
+};
+
+#define I915_IRQ_REGS(_imr, _ier, _iir) \
+	((const struct i915_irq_regs){ .imr = (_imr), .ier = (_ier), .iir = (_iir) })
+
+struct i915_error_regs {
+	i915_reg_t emr;
+	i915_reg_t eir;
+};
+
+#define I915_ERROR_REGS(_emr, _eir) \
+	((const struct i915_error_regs){ .emr = (_emr), .eir = (_eir) })
+
 #endif /* __I915_REG_DEFS__ */

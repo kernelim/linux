@@ -1,3 +1,3 @@
-#6-
-0xc0e56771	ib_device_set_netdev	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
+#7-
+0x3371ac25	ib_device_set_netdev	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
 

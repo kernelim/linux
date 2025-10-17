@@ -1,3 +1,3 @@
-#6-
-0xe476717f	scsi_unblock_requests	vmlinux	EXPORT_SYMBOL	
+#7-
+0x206be3fd	scsi_unblock_requests	vmlinux	EXPORT_SYMBOL	
 

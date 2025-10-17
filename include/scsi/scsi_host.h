@@ -449,8 +449,10 @@ struct scsi_host_template {
 	 */
 	unsigned char present;
 
-	/* If use block layer to manage tags, this is tag allocation policy */
-	int tag_alloc_policy;
+	/*
+	 * Allocate tags starting from last allocated tag.
+	 */
+	bool tag_alloc_policy_rr : 1;
 
 	/*
 	 * Track QUEUE_FULL events and reduce queue depth on demand.
@@ -635,7 +637,7 @@ struct Scsi_Host {
 	 * have some way of identifying each detected host adapter properly
 	 * and uniquely.  For hosts that do not support more than one card
 	 * in the system at one time, this does not need to be set.  It is
-	 * initialized to 0 in scsi_register.
+	 * initialized to 0 in scsi_host_alloc.
 	 */
 	unsigned int unique_id;
 

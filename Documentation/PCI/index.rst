@@ -18,3 +18,4 @@ Linux PCI Bus Subsystem
    pcieaer-howto
    endpoint/index
    boot-interrupts
+   tph

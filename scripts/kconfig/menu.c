@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <xalloc.h>
 #include "lkc.h"
 #include "internal.h"
 

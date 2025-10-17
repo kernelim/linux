@@ -14,11 +14,13 @@
 
 #include <linux/bits.h>
 
+#define CIF_SIE			0	/* CPU needs SIE exit cleanup */
 #define CIF_NOHZ_DELAY		2	/* delay HZ disable for a tick */
 #define CIF_ENABLED_WAIT	5	/* in enabled wait state */
 #define CIF_MCCK_GUEST		6	/* machine check happening in guest */
 #define CIF_DEDICATED_CPU	7	/* this CPU is dedicated */
 
+#define _CIF_SIE		BIT(CIF_SIE)
 #define _CIF_NOHZ_DELAY		BIT(CIF_NOHZ_DELAY)
 #define _CIF_ENABLED_WAIT	BIT(CIF_ENABLED_WAIT)
 #define _CIF_MCCK_GUEST		BIT(CIF_MCCK_GUEST)
@@ -38,6 +40,7 @@
 #include <asm/setup.h>
 #include <asm/runtime_instr.h>
 #include <asm/irqflags.h>
+#include <asm/alternative.h>
 
 typedef long (*sys_call_ptr_t)(struct pt_regs *regs);
 
@@ -90,12 +93,21 @@ static inline void get_cpu_id(struct cpuid *ptr)
 	asm volatile("stidp %0" : "=Q" (*ptr));
 }
 
+static __always_inline unsigned long get_cpu_timer(void)
+{
+	unsigned long timer;
+
+	asm volatile("stpt	%[timer]" : [timer] "=Q" (timer));
+	return timer;
+}
+
 void s390_adjust_jiffies(void);
 void s390_update_cpu_mhz(void);
 void cpu_detect_mhz_feature(void);
 
 extern const struct seq_operations cpuinfo_op;
 extern void execve_tail(void);
+unsigned long vdso_text_size(void);
 unsigned long vdso_size(void);
 
 /*
@@ -302,8 +314,8 @@ static inline void __load_psw(psw_t psw)
  */
 static __always_inline void __load_psw_mask(unsigned long mask)
 {
+	psw_t psw __uninitialized;
 	unsigned long addr;
-	psw_t psw;
 
 	psw.mask = mask;
 
@@ -326,14 +338,36 @@ static inline unsigned long __extract_psw(void)
 	return (((unsigned long) reg1) << 32) | ((unsigned long) reg2);
 }
 
-static inline void local_mcck_enable(void)
+static inline unsigned long __local_mcck_save(void)
 {
-	__load_psw_mask(__extract_psw() | PSW_MASK_MCHECK);
+	unsigned long mask = __extract_psw();
+
+	__load_psw_mask(mask & ~PSW_MASK_MCHECK);
+	return mask & PSW_MASK_MCHECK;
+}
+
+#define local_mcck_save(mflags)			\
+do {						\
+	typecheck(unsigned long, mflags);	\
+	mflags = __local_mcck_save();		\
+} while (0)
+
+static inline void local_mcck_restore(unsigned long mflags)
+{
+	unsigned long mask = __extract_psw();
+
+	mask &= ~PSW_MASK_MCHECK;
+	__load_psw_mask(mask | mflags);
 }
 
 static inline void local_mcck_disable(void)
 {
-	__load_psw_mask(__extract_psw() & ~PSW_MASK_MCHECK);
+	__local_mcck_save();
+}
+
+static inline void local_mcck_enable(void)
+{
+	__load_psw_mask(__extract_psw() | PSW_MASK_MCHECK);
 }
 
 /*
@@ -367,6 +401,11 @@ static __always_inline void __noreturn disabled_wait(void)
 static __always_inline bool regs_irqs_disabled(struct pt_regs *regs)
 {
 	return arch_irqs_disabled_flags(regs->psw.mask);
+}
+
+static __always_inline void bpon(void)
+{
+	asm volatile(ALTERNATIVE("nop", ".insn	rrf,0xb2e80000,0,0,13,0", 82));
 }
 
 #endif /* __ASSEMBLY__ */

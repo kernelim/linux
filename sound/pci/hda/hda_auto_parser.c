@@ -80,7 +80,11 @@ static int compare_input_type(const void *ap, const void *bp)
 
 	/* In case one has boost and the other one has not,
 	   pick the one with boost first. */
-	return (int)(b->has_boost_on_pin - a->has_boost_on_pin);
+	if (a->has_boost_on_pin != b->has_boost_on_pin)
+		return (int)(b->has_boost_on_pin - a->has_boost_on_pin);
+
+	/* Keep the original order */
+	return a->order - b->order;
 }
 
 /* Reorder the surround channels
@@ -400,6 +404,8 @@ int snd_hda_parse_pin_defcfg(struct hda_codec *codec,
 	reorder_outputs(cfg->speaker_outs, cfg->speaker_pins);
 
 	/* sort inputs in the order of AUTO_PIN_* type */
+	for (i = 0; i < cfg->num_inputs; i++)
+		cfg->inputs[i].order = i;
 	sort(cfg->inputs, cfg->num_inputs, sizeof(cfg->inputs[0]),
 	     compare_input_type, NULL);
 
@@ -933,6 +939,7 @@ void snd_hda_pick_pin_fixup(struct hda_codec *codec,
 			    bool match_all_pins)
 {
 	const struct snd_hda_pin_quirk *pq;
+	const char *name = NULL;
 
 	if (codec->fixup_id != HDA_FIXUP_ID_NOT_SET)
 		return;
@@ -946,9 +953,10 @@ void snd_hda_pick_pin_fixup(struct hda_codec *codec,
 			codec->fixup_id = pq->value;
 #ifdef CONFIG_SND_DEBUG_VERBOSE
 			codec->fixup_name = pq->name;
-			codec_dbg(codec, "%s: picked fixup %s (pin match)\n",
-				  codec->core.chip_name, codec->fixup_name);
+			name = pq->name;
 #endif
+			codec_info(codec, "%s: picked fixup %s (pin match)\n",
+				   codec->core.chip_name, name ? name : "");
 			codec->fixup_list = fixlist;
 			return;
 		}
@@ -1015,8 +1023,8 @@ void snd_hda_pick_fixup(struct hda_codec *codec,
 	if (codec->modelname && !strcmp(codec->modelname, "nofixup")) {
 		id = HDA_FIXUP_ID_NO_FIXUP;
 		fixlist = NULL;
-		codec_dbg(codec, "%s: picked no fixup (nofixup specified)\n",
-			  codec->core.chip_name);
+		codec_info(codec, "%s: picked no fixup (nofixup specified)\n",
+			   codec->core.chip_name);
 		goto found;
 	}
 
@@ -1026,8 +1034,8 @@ void snd_hda_pick_fixup(struct hda_codec *codec,
 			if (!strcmp(codec->modelname, models->name)) {
 				id = models->id;
 				name = models->name;
-				codec_dbg(codec, "%s: picked fixup %s (model specified)\n",
-					  codec->core.chip_name, codec->fixup_name);
+				codec_info(codec, "%s: picked fixup %s (model specified)\n",
+					   codec->core.chip_name, name);
 				goto found;
 			}
 			models++;
@@ -1085,9 +1093,9 @@ void snd_hda_pick_fixup(struct hda_codec *codec,
 #ifdef CONFIG_SND_DEBUG_VERBOSE
 	name = q->name;
 #endif
-	codec_dbg(codec, "%s: picked fixup %s for %s %04x:%04x\n",
-		  codec->core.chip_name, name ? name : "",
-		  type, q->subvendor, q->subdevice);
+	codec_info(codec, "%s: picked fixup %s for %s %04x:%04x\n",
+		   codec->core.chip_name, name ? name : "",
+		   type, q->subvendor, q->subdevice);
  found:
 	codec->fixup_id = id;
 	codec->fixup_list = fixlist;

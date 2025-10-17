@@ -1,3 +1,3 @@
-#6-
-0x11fb213e	pci_msix_free_irq	vmlinux	EXPORT_SYMBOL_GPL	
+#7-
+0x3fff4a74	pci_msix_free_irq	vmlinux	EXPORT_SYMBOL_GPL	
 

@@ -137,8 +137,10 @@ tcon_info_alloc(bool dir_leases_enabled, enum smb3_tcon_ref_trace trace)
 	spin_lock_init(&ret_buf->tc_lock);
 	INIT_LIST_HEAD(&ret_buf->openFileList);
 	INIT_LIST_HEAD(&ret_buf->tcon_list);
+	INIT_LIST_HEAD(&ret_buf->cifs_sb_list);
 	spin_lock_init(&ret_buf->open_file_lock);
 	spin_lock_init(&ret_buf->stat_lock);
+	spin_lock_init(&ret_buf->sb_list_lock);
 	atomic_set(&ret_buf->num_local_opens, 0);
 	atomic_set(&ret_buf->num_remote_opens, 0);
 	ret_buf->stats_from_time = ktime_get_real_seconds();
@@ -148,6 +150,12 @@ tcon_info_alloc(bool dir_leases_enabled, enum smb3_tcon_ref_trace trace)
 	trace_smb3_tcon_ref(ret_buf->debug_id, ret_buf->tc_count, trace);
 #ifdef CONFIG_CIFS_DFS_UPCALL
 	INIT_LIST_HEAD(&ret_buf->dfs_ses_list);
+#endif
+	INIT_LIST_HEAD(&ret_buf->pending_opens);
+	INIT_DELAYED_WORK(&ret_buf->query_interfaces,
+			  smb2_query_server_interfaces);
+#ifdef CONFIG_CIFS_DFS_UPCALL
+	INIT_DELAYED_WORK(&ret_buf->dfs_cache_work, dfs_cache_refresh);
 #endif
 
 	return ret_buf;
@@ -322,6 +330,14 @@ check_smb_hdr(struct smb_hdr *smb)
 
 	/* only one valid case where server sends us request */
 	if (smb->Command == SMB_COM_LOCKING_ANDX)
+		return 0;
+
+	/*
+	 * Windows NT server returns error resposne (e.g. STATUS_DELETE_PENDING
+	 * or STATUS_OBJECT_NAME_NOT_FOUND or ERRDOS/ERRbadfile or any other)
+	 * for some TRANS2 requests without the RESPONSE flag set in header.
+	 */
+	if (smb->Command == SMB_COM_TRANSACTION2 && smb->Status.CifsError != 0)
 		return 0;
 
 	cifs_dbg(VFS, "Server sent request, not response. mid=%u\n",
@@ -816,28 +832,33 @@ cifs_close_all_deferred_files(struct cifs_tcon *tcon)
 		kfree(tmp_list);
 	}
 }
-
-void cifs_close_deferred_file_under_dentry(struct cifs_tcon *tcon,
-					   struct dentry *dentry)
+void
+cifs_close_deferred_file_under_dentry(struct cifs_tcon *tcon, const char *path)
 {
-	struct file_list *tmp_list, *tmp_next_list;
 	struct cifsFileInfo *cfile;
+	struct file_list *tmp_list, *tmp_next_list;
+	void *page;
+	const char *full_path;
 	LIST_HEAD(file_head);
 
+	page = alloc_dentry_path();
 	spin_lock(&tcon->open_file_lock);
 	list_for_each_entry(cfile, &tcon->openFileList, tlist) {
-		if ((cfile->dentry == dentry) &&
-		    delayed_work_pending(&cfile->deferred) &&
-		    cancel_delayed_work(&cfile->deferred)) {
-			spin_lock(&CIFS_I(d_inode(cfile->dentry))->deferred_lock);
-			cifs_del_deferred_close(cfile);
-			spin_unlock(&CIFS_I(d_inode(cfile->dentry))->deferred_lock);
+		full_path = build_path_from_dentry(cfile->dentry, page);
+		if (strstr(full_path, path)) {
+			if (delayed_work_pending(&cfile->deferred)) {
+				if (cancel_delayed_work(&cfile->deferred)) {
+					spin_lock(&CIFS_I(d_inode(cfile->dentry))->deferred_lock);
+					cifs_del_deferred_close(cfile);
+					spin_unlock(&CIFS_I(d_inode(cfile->dentry))->deferred_lock);
 
-			tmp_list = kmalloc(sizeof(struct file_list), GFP_ATOMIC);
-			if (tmp_list == NULL)
-				break;
-			tmp_list->cfile = cfile;
-			list_add_tail(&tmp_list->list, &file_head);
+					tmp_list = kmalloc(sizeof(struct file_list), GFP_ATOMIC);
+					if (tmp_list == NULL)
+						break;
+					tmp_list->cfile = cfile;
+					list_add_tail(&tmp_list->list, &file_head);
+				}
+			}
 		}
 	}
 	spin_unlock(&tcon->open_file_lock);
@@ -847,6 +868,7 @@ void cifs_close_deferred_file_under_dentry(struct cifs_tcon *tcon,
 		list_del(&tmp_list->list);
 		kfree(tmp_list);
 	}
+	free_dentry_path(page);
 }
 
 /*

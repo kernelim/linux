@@ -57,6 +57,8 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_AW8738
 	imply SND_SOC_AW87390
 	imply SND_SOC_AW88395
+	imply SND_SOC_AW88081
+	imply SND_SOC_AW88166
 	imply SND_SOC_AW88261
 	imply SND_SOC_AW88399
 	imply SND_SOC_BT_SCO
@@ -84,6 +86,7 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_CS42L52
 	imply SND_SOC_CS42L56
 	imply SND_SOC_CS42L73
+	imply SND_SOC_CS42L84
 	imply SND_SOC_CS4234
 	imply SND_SOC_CS4265
 	imply SND_SOC_CS4270
@@ -216,6 +219,7 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_RT712_SDCA_DMIC_SDW
 	imply SND_SOC_RT715_SDW
 	imply SND_SOC_RT715_SDCA_SDW
+	imply SND_SOC_RT721_SDCA_SDW
 	imply SND_SOC_RT722_SDCA_SDW
 	imply SND_SOC_RT1308_SDW
 	imply SND_SOC_RT1316_SDW
@@ -230,6 +234,7 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_SIMPLE_AMPLIFIER
 	imply SND_SOC_SIMPLE_MUX
 	imply SND_SOC_SMA1303
+	imply SND_SOC_SMA1307
 	imply SND_SOC_SPDIF
 	imply SND_SOC_SRC4XXX_I2C
 	imply SND_SOC_SSM2305
@@ -455,7 +460,7 @@ config SND_SOC_ADAU1372_SPI
 	select REGMAP_SPI
 
 config SND_SOC_ADAU1373
-	tristate
+	tristate "Analog Devices ADAU1373 CODEC"
 	depends on I2C
 	select SND_SOC_ADAU_UTILS
 
@@ -666,6 +671,18 @@ config SND_SOC_AW88395
 	  digital Smart K audio amplifier with an integrated 10V
 	  smart boost convert.
 
+config SND_SOC_AW88166
+	tristate "Soc Audio for awinic aw88166"
+	depends on I2C
+	select REGMAP_I2C
+	select GPIOLIB
+	select SND_SOC_AW88395_LIB
+	help
+	  This option enables support for aw88166 Smart PA.
+	  The awinic AW88166 is an I2S/TDM input, high efficiency
+	  digital Smart K audio amplifier with sound quality
+	  enhancement algorithms and speaker protection.
+
 config SND_SOC_AW88261
 	tristate "Soc Audio for awinic aw88261"
 	depends on I2C
@@ -678,6 +695,17 @@ config SND_SOC_AW88261
 	  digital Smart K audio amplifier. The output voltage of
 	  boost converter can be adjusted smartly according to
 	  the input amplitude.
+
+config SND_SOC_AW88081
+	tristate "Soc Audio for awinic aw88081/aw88083"
+	depends on I2C
+	select REGMAP_I2C
+	select SND_SOC_AW88395_LIB
+	help
+	  This option enables support for aw88081 Smart PA.
+	  The awinic AW88081 is an I2S/TDM input, high efficiency
+	  digital Smart K audio amplifier. Due to its 9uV noise
+	  floor and ultra-low distortion, clean listening is guaranteed.
 
 config SND_SOC_AW87390
 	tristate "Soc Audio for awinic aw87390"
@@ -740,10 +768,9 @@ config SND_SOC_CS_AMP_LIB
 	tristate
 
 config SND_SOC_CS_AMP_LIB_TEST
-	tristate "KUnit test for Cirrus Logic cs-amp-lib"
-	depends on KUNIT
+	tristate "KUnit test for Cirrus Logic cs-amp-lib" if !KUNIT_ALL_TESTS
+	depends on SND_SOC_CS_AMP_LIB && KUNIT
 	default KUNIT_ALL_TESTS
-	select SND_SOC_CS_AMP_LIB
 	help
 	  This builds KUnit tests for the Cirrus Logic common
 	  amplifier library.
@@ -909,6 +936,12 @@ config SND_SOC_CS42L83
 	select REGMAP
 	select REGMAP_I2C
 	select SND_SOC_CS42L42_CORE
+
+config SND_SOC_CS42L84
+	tristate "Cirrus Logic CS42L84 CODEC"
+	depends on I2C
+	select REGMAP
+	select REGMAP_I2C
 
 config SND_SOC_CS4234
 	tristate "Cirrus Logic CS4234 CODEC"
@@ -1475,6 +1508,11 @@ config SND_SOC_RL6231
 	default m if SND_SOC_RT1305=m
 	default m if SND_SOC_RT1308=m
 
+config SND_SOC_RT_SDW_COMMON
+	tristate
+	default y if SND_SOC_RT721_SDCA_SDW=y
+	default m if SND_SOC_RT721_SDCA_SDW=m
+
 config SND_SOC_RL6347A
 	tristate
 	default y if SND_SOC_RT274=y
@@ -1673,6 +1711,12 @@ config SND_SOC_RT712_SDCA_DMIC_SDW
 	select REGMAP_SOUNDWIRE
 	select REGMAP_SOUNDWIRE_MBQ
 
+config SND_SOC_RT721_SDCA_SDW
+	tristate "Realtek RT721 SDCA Codec - SDW"
+	depends on SOUNDWIRE
+	select REGMAP_SOUNDWIRE
+	select REGMAP_SOUNDWIRE_MBQ
+
 config SND_SOC_RT722_SDCA_SDW
 	tristate "Realtek RT722 SDCA Codec - SDW"
 	depends on SOUNDWIRE
@@ -1765,6 +1809,15 @@ config SND_SOC_SMA1303
 	depends on I2C
 	help
 	  Enable support for Iron Device SMA1303 Boosted Class-D amplifier
+
+config SND_SOC_SMA1307
+	tristate "Iron Device SMA1307 Audio Amplifier"
+	depends on I2C
+	help
+	  Enable support for Iron Device SMA1307 boosted digital speaker
+	  amplifier with feedback-loop.
+	  If you are using a system with an SMA1307 amplifier connected
+	  via I2C, enable this option.
 
 config SND_SOC_SPDIF
 	tristate "S/PDIF CODEC"
@@ -2327,6 +2380,7 @@ config SND_SOC_WM8993
 
 config SND_SOC_WM8994
 	tristate
+	depends on MFD_WM8994
 
 config SND_SOC_WM8995
 	tristate
@@ -2490,6 +2544,19 @@ config SND_SOC_NAU8824
 
 config SND_SOC_NAU8825
 	tristate
+	depends on I2C
+
+config SND_SOC_NTPFW
+	tristate
+
+config SND_SOC_NTP8918
+	select SND_SOC_NTPFW
+	tristate "NeoFidelity NTP8918 amplifier"
+	depends on I2C
+
+config SND_SOC_NTP8835
+	select SND_SOC_NTPFW
+	tristate "NeoFidelity NTP8835 and NTP8835C amplifiers"
 	depends on I2C
 
 config SND_SOC_TPA6130A2

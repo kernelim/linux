@@ -9,6 +9,7 @@
  *
  */
 #include <linux/fs.h>
+#include <linux/filelock.h>
 #include <linux/backing-dev.h>
 #include <linux/stat.h>
 #include <linux/fcntl.h>
@@ -680,10 +681,7 @@ int cifs_open(struct inode *inode, struct file *file)
 
 	/* Get the cached handle as SMB2 close is deferred */
 	if (OPEN_FMODE(file->f_flags) & FMODE_WRITE) {
-		rc = cifs_get_writable_path(tcon, full_path,
-					    FIND_WR_FSUID_ONLY |
-					    FIND_WR_NO_PENDING_DELETE,
-					    &cfile);
+		rc = cifs_get_writable_path(tcon, full_path, FIND_WR_FSUID_ONLY, &cfile);
 	} else {
 		rc = cifs_get_readable_path(tcon, full_path, &cfile);
 	}
@@ -2288,9 +2286,6 @@ refind_writable:
 			continue;
 		if (with_delete && !(open_file->fid.access & DELETE))
 			continue;
-		if ((flags & FIND_WR_NO_PENDING_DELETE) &&
-		    open_file->status_file_deleted)
-			continue;
 		if (OPEN_FMODE(open_file->f_flags) & FMODE_WRITE) {
 			if (!open_file->invalidHandle) {
 				/* found a good writable file */
@@ -2408,16 +2403,6 @@ cifs_get_readable_path(struct cifs_tcon *tcon, const char *name,
 		spin_unlock(&tcon->open_file_lock);
 		free_dentry_path(page);
 		*ret_file = find_readable_file(cinode, 0);
-		if (*ret_file) {
-			spin_lock(&cinode->open_file_lock);
-			if ((*ret_file)->status_file_deleted) {
-				spin_unlock(&cinode->open_file_lock);
-				cifsFileInfo_put(*ret_file);
-				*ret_file = NULL;
-			} else {
-				spin_unlock(&cinode->open_file_lock);
-			}
-		}
 		return *ret_file ? 0 : -ENOENT;
 	}
 
@@ -2884,6 +2869,10 @@ retry:
 		/* in case of an error store it to return later */
 		if (rc)
 			get_file_rc = rc;
+
+		if (cifs_sb->ctx->wsize == 0)
+			cifs_negotiate_wsize(server, cifs_sb->ctx,
+					     cifs_sb_master_tcon(cifs_sb));
 
 		rc = server->ops->wait_mtu_credits(server, cifs_sb->ctx->wsize,
 						   &wsize, credits);
@@ -3459,6 +3448,10 @@ cifs_write_from_iter(loff_t offset, size_t len, struct iov_iter *from,
 			else if (rc)
 				break;
 		}
+
+		if (cifs_sb->ctx->wsize == 0)
+			cifs_negotiate_wsize(server, cifs_sb->ctx,
+					     tlink_tcon(open_file->tlink));
 
 		rc = server->ops->wait_mtu_credits(server, cifs_sb->ctx->wsize,
 						   &wsize, credits);
@@ -4202,9 +4195,8 @@ cifs_send_async_read(loff_t offset, size_t len, struct cifsFileInfo *open_file,
 		}
 
 		if (cifs_sb->ctx->rsize == 0)
-			cifs_sb->ctx->rsize =
-				server->ops->negotiate_rsize(tlink_tcon(open_file->tlink),
-							     cifs_sb->ctx);
+			cifs_negotiate_rsize(server, cifs_sb->ctx,
+					     tlink_tcon(open_file->tlink));
 
 		rc = server->ops->wait_mtu_credits(server, cifs_sb->ctx->rsize,
 						   &rsize, credits);
@@ -5308,7 +5300,7 @@ void cifs_oplock_break(struct work_struct *work)
 		cinode->oplock = 0;
 	}
 
-	if (inode && S_ISREG(inode->i_mode)) {
+	if (S_ISREG(inode->i_mode)) {
 		if (CIFS_CACHE_READ(cinode))
 			break_lease(inode, O_RDONLY);
 		else

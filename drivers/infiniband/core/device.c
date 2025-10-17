@@ -209,23 +209,6 @@ static void __ibdev_printk(const char *level, const struct ib_device *ibdev,
 		printk("%s(NULL ib_device): %pV", level, vaf);
 }
 
-void ibdev_printk(const char *level, const struct ib_device *ibdev,
-		  const char *format, ...)
-{
-	struct va_format vaf;
-	va_list args;
-
-	va_start(args, format);
-
-	vaf.fmt = format;
-	vaf.va = &args;
-
-	__ibdev_printk(level, ibdev, &vaf);
-
-	va_end(args);
-}
-EXPORT_SYMBOL(ibdev_printk);
-
 #define define_ibdev_printk_level(func, level)                  \
 void func(const struct ib_device *ibdev, const char *fmt, ...)  \
 {                                                               \
@@ -437,6 +420,7 @@ int ib_device_rename(struct ib_device *ibdev, const char *name)
 		client->rename(ibdev, client_data);
 	}
 	up_read(&ibdev->client_data_rwsem);
+	rdma_nl_notify_event(ibdev, 0, RDMA_RENAME_EVENT);
 	up_read(&devices_rwsem);
 	return 0;
 }
@@ -544,6 +528,8 @@ static struct class ib_class = {
 static void rdma_init_coredev(struct ib_core_device *coredev,
 			      struct ib_device *dev, struct net *net)
 {
+	bool is_full_dev = &dev->coredev == coredev;
+
 	/* This BUILD_BUG_ON is intended to catch layout change
 	 * of union of ib_core_device and device.
 	 * dev must be the first element as ib_core and providers
@@ -555,6 +541,13 @@ static void rdma_init_coredev(struct ib_core_device *coredev,
 
 	coredev->dev.class = &ib_class;
 	coredev->dev.groups = dev->groups;
+
+	/*
+	 * Don't expose hw counters outside of the init namespace.
+	 */
+	if (!is_full_dev && dev->hw_stats_attr_index)
+		coredev->dev.groups[dev->hw_stats_attr_index] = NULL;
+
 	device_initialize(&coredev->dev);
 	coredev->owner = dev;
 	INIT_LIST_HEAD(&coredev->port_list);
@@ -2300,6 +2293,33 @@ struct net_device *ib_device_get_netdev(struct ib_device *ib_dev,
 EXPORT_SYMBOL(ib_device_get_netdev);
 
 /**
+ * ib_query_netdev_port - Query the port number of a net_device
+ * associated with an ibdev
+ * @ibdev: IB device
+ * @ndev: Network device
+ * @port: IB port the net_device is connected to
+ */
+int ib_query_netdev_port(struct ib_device *ibdev, struct net_device *ndev,
+			 u32 *port)
+{
+	struct net_device *ib_ndev;
+	u32 port_num;
+
+	rdma_for_each_port(ibdev, port_num) {
+		ib_ndev = ib_device_get_netdev(ibdev, port_num);
+		if (ndev == ib_ndev) {
+			*port = port_num;
+			dev_put(ib_ndev);
+			return 0;
+		}
+		dev_put(ib_ndev);
+	}
+
+	return -ENOENT;
+}
+EXPORT_SYMBOL(ib_query_netdev_port);
+
+/**
  * ib_device_get_by_netdev - Find an IB device associated with a netdev
  * @ndev: netdev to locate
  * @driver_id: The driver ID that must match (RDMA_DRIVER_UNKNOWN matches all)
@@ -2663,6 +2683,7 @@ void ib_set_device_ops(struct ib_device *dev, const struct ib_device_ops *ops)
 	SET_DEVICE_OP(dev_ops, counter_alloc_stats);
 	SET_DEVICE_OP(dev_ops, counter_bind_qp);
 	SET_DEVICE_OP(dev_ops, counter_dealloc);
+	SET_DEVICE_OP(dev_ops, counter_init);
 	SET_DEVICE_OP(dev_ops, counter_unbind_qp);
 	SET_DEVICE_OP(dev_ops, counter_update_stats);
 	SET_DEVICE_OP(dev_ops, create_ah);
@@ -2764,6 +2785,8 @@ void ib_set_device_ops(struct ib_device *dev, const struct ib_device_ops *ops)
 	SET_DEVICE_OP(dev_ops, resize_cq);
 	SET_DEVICE_OP(dev_ops, set_vf_guid);
 	SET_DEVICE_OP(dev_ops, set_vf_link_state);
+	SET_DEVICE_OP(dev_ops, ufile_hw_cleanup);
+	SET_DEVICE_OP(dev_ops, report_port_event);
 
 	SET_OBJ_SIZE(dev_ops, ib_ah);
 	SET_OBJ_SIZE(dev_ops, ib_counters);
@@ -2775,6 +2798,7 @@ void ib_set_device_ops(struct ib_device *dev, const struct ib_device_ops *ops)
 	SET_OBJ_SIZE(dev_ops, ib_srq);
 	SET_OBJ_SIZE(dev_ops, ib_ucontext);
 	SET_OBJ_SIZE(dev_ops, ib_xrcd);
+	SET_OBJ_SIZE(dev_ops, rdma_counter);
 }
 EXPORT_SYMBOL(ib_set_device_ops);
 
@@ -2857,6 +2881,97 @@ static const struct rdma_nl_cbs ibnl_ls_cb_table[RDMA_NL_LS_NUM_OPS] = {
 	},
 };
 
+void ib_dispatch_port_state_event(struct ib_device *ibdev, struct net_device *ndev)
+{
+	enum ib_port_state curr_state;
+	struct ib_event ibevent = {};
+	u32 port;
+
+	if (ib_query_netdev_port(ibdev, ndev, &port))
+		return;
+
+	curr_state = ib_get_curr_port_state(ndev);
+
+	write_lock_irq(&ibdev->cache_lock);
+	if (ibdev->port_data[port].cache.last_port_state == curr_state) {
+		write_unlock_irq(&ibdev->cache_lock);
+		return;
+	}
+	ibdev->port_data[port].cache.last_port_state = curr_state;
+	write_unlock_irq(&ibdev->cache_lock);
+
+	ibevent.event = (curr_state == IB_PORT_DOWN) ?
+					IB_EVENT_PORT_ERR : IB_EVENT_PORT_ACTIVE;
+	ibevent.device = ibdev;
+	ibevent.element.port_num = port;
+	ib_dispatch_event(&ibevent);
+}
+EXPORT_SYMBOL(ib_dispatch_port_state_event);
+
+static void handle_port_event(struct net_device *ndev, unsigned long event)
+{
+	struct ib_device *ibdev;
+
+	/* Currently, link events in bonding scenarios are still
+	 * reported by drivers that support bonding.
+	 */
+	if (netif_is_lag_master(ndev) || netif_is_lag_port(ndev))
+		return;
+
+	ibdev = ib_device_get_by_netdev(ndev, RDMA_DRIVER_UNKNOWN);
+	if (!ibdev)
+		return;
+
+	if (ibdev->ops.report_port_event) {
+		ibdev->ops.report_port_event(ibdev, ndev, event);
+		goto put_ibdev;
+	}
+
+	ib_dispatch_port_state_event(ibdev, ndev);
+
+put_ibdev:
+	ib_device_put(ibdev);
+};
+
+static int ib_netdevice_event(struct notifier_block *this,
+			      unsigned long event, void *ptr)
+{
+	struct net_device *ndev = netdev_notifier_info_to_dev(ptr);
+	struct ib_device *ibdev;
+	u32 port;
+
+	switch (event) {
+	case NETDEV_CHANGENAME:
+		ibdev = ib_device_get_by_netdev(ndev, RDMA_DRIVER_UNKNOWN);
+		if (!ibdev)
+			return NOTIFY_DONE;
+
+		if (ib_query_netdev_port(ibdev, ndev, &port)) {
+			ib_device_put(ibdev);
+			break;
+		}
+
+		rdma_nl_notify_event(ibdev, port, RDMA_NETDEV_RENAME_EVENT);
+		ib_device_put(ibdev);
+		break;
+
+	case NETDEV_UP:
+	case NETDEV_CHANGE:
+	case NETDEV_DOWN:
+		handle_port_event(ndev, event);
+		break;
+
+	default:
+		break;
+	}
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block nb_netdevice = {
+	.notifier_call = ib_netdevice_event,
+};
+
 static int __init ib_core_init(void)
 {
 	int ret = -ENOMEM;
@@ -2928,6 +3043,8 @@ static int __init ib_core_init(void)
 		goto err_parent;
 	}
 
+	register_netdevice_notifier(&nb_netdevice);
+
 	return 0;
 
 err_parent:
@@ -2957,6 +3074,7 @@ err:
 
 static void __exit ib_core_cleanup(void)
 {
+	unregister_netdevice_notifier(&nb_netdevice);
 	roce_gid_mgmt_cleanup();
 	rdma_nl_unregister(RDMA_NL_LS);
 	nldev_exit();

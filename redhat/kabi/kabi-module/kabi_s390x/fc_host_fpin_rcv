@@ -1,3 +1,3 @@
-#6-
-0x95b4c6bf	fc_host_fpin_rcv	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
+#7-
+0x44a4600c	fc_host_fpin_rcv	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
 

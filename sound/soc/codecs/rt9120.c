@@ -591,7 +591,7 @@ static int rt9120_remove(struct i2c_client *i2c)
 	return 0;
 }
 
-static int __maybe_unused rt9120_runtime_suspend(struct device *dev)
+static int rt9120_runtime_suspend(struct device *dev)
 {
 	struct rt9120_data *data = dev_get_drvdata(dev);
 
@@ -604,7 +604,7 @@ static int __maybe_unused rt9120_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused rt9120_runtime_resume(struct device *dev)
+static int rt9120_runtime_resume(struct device *dev)
 {
 	struct rt9120_data *data = dev_get_drvdata(dev);
 
@@ -619,7 +619,7 @@ static int __maybe_unused rt9120_runtime_resume(struct device *dev)
 }
 
 static const struct dev_pm_ops rt9120_pm_ops = {
-	SET_RUNTIME_PM_OPS(rt9120_runtime_suspend, rt9120_runtime_resume, NULL)
+	RUNTIME_PM_OPS(rt9120_runtime_suspend, rt9120_runtime_resume, NULL)
 };
 
 static const struct of_device_id __maybe_unused rt9120_device_table[] = {
@@ -632,7 +632,7 @@ static struct i2c_driver rt9120_driver = {
 	.driver = {
 		.name = "rt9120",
 		.of_match_table = rt9120_device_table,
-		.pm = &rt9120_pm_ops,
+		.pm = pm_ptr(&rt9120_pm_ops),
 	},
 	.probe_new = rt9120_probe,
 	.remove = rt9120_remove,

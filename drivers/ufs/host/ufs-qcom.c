@@ -2090,14 +2090,14 @@ static int ufs_qcom_probe(struct platform_device *pdev)
  *
  * Always returns 0
  */
-static int ufs_qcom_remove(struct platform_device *pdev)
+static void ufs_qcom_remove(struct platform_device *pdev)
 {
 	struct ufs_hba *hba =  platform_get_drvdata(pdev);
+	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 
-	pm_runtime_get_sync(&(pdev)->dev);
-	ufshcd_remove(hba);
-	platform_msi_domain_free_irqs(hba->dev);
-	return 0;
+	ufshcd_pltfrm_remove(pdev);
+	if (host->esi_enabled)
+		platform_msi_domain_free_irqs(hba->dev);
 }
 
 static const struct of_device_id ufs_qcom_of_match[] = {
@@ -2129,7 +2129,7 @@ static const struct dev_pm_ops ufs_qcom_pm_ops = {
 
 static struct platform_driver ufs_qcom_pltform = {
 	.probe	= ufs_qcom_probe,
-	.remove	= ufs_qcom_remove,
+	.remove_new = ufs_qcom_remove,
 	.driver	= {
 		.name	= "ufshcd-qcom",
 		.pm	= &ufs_qcom_pm_ops,

@@ -82,11 +82,6 @@ static ssize_t data_vault_read(struct file *file, struct kobject *kobj,
 
 static BIN_ATTR_RO(data_vault, 0);
 
-static struct bin_attribute *data_attributes[] = {
-	&bin_attr_data_vault,
-	NULL,
-};
-
 static ssize_t imok_store(struct device *dev, struct device_attribute *attr,
 			  const char *buf, size_t count)
 {
@@ -115,10 +110,6 @@ static const struct attribute_group imok_attribute_group = {
 	.attrs = imok_attr,
 };
 
-static const struct attribute_group data_attribute_group = {
-	.bin_attrs = data_attributes,
-};
-
 static ssize_t available_uuids_show(struct device *dev,
 				    struct device_attribute *attr,
 				    char *buf)
@@ -144,7 +135,7 @@ static ssize_t current_uuid_show(struct device *dev,
 	struct int3400_thermal_priv *priv = dev_get_drvdata(dev);
 	int i, length = 0;
 
-	if (priv->current_uuid_index > 0)
+	if (priv->current_uuid_index >= 0)
 		return sprintf(buf, "%s\n",
 			       int3400_thermal_uuids[priv->current_uuid_index]);
 
@@ -537,7 +528,6 @@ static struct thermal_zone_device_ops int3400_thermal_ops = {
 };
 
 static struct thermal_zone_params int3400_thermal_params = {
-	.governor_name = "user_space",
 	.no_hwmon = true,
 };
 
@@ -631,8 +621,7 @@ static int int3400_thermal_probe(struct platform_device *pdev)
 	}
 
 	if (!ZERO_OR_NULL_PTR(priv->data_vault)) {
-		result = sysfs_create_group(&pdev->dev.kobj,
-					    &data_attribute_group);
+		result = device_create_bin_file(&pdev->dev, &bin_attr_data_vault);
 		if (result)
 			goto free_uuid;
 	}
@@ -655,7 +644,7 @@ free_notify:
 free_sysfs:
 	cleanup_odvp(priv);
 	if (!ZERO_OR_NULL_PTR(priv->data_vault)) {
-		sysfs_remove_group(&pdev->dev.kobj, &data_attribute_group);
+		device_remove_bin_file(&pdev->dev, &bin_attr_data_vault);
 		kfree(priv->data_vault);
 	}
 free_uuid:
@@ -690,7 +679,7 @@ static void int3400_thermal_remove(struct platform_device *pdev)
 		acpi_thermal_rel_misc_device_remove(priv->adev->handle);
 
 	if (!ZERO_OR_NULL_PTR(priv->data_vault))
-		sysfs_remove_group(&pdev->dev.kobj, &data_attribute_group);
+		device_remove_bin_file(&pdev->dev, &bin_attr_data_vault);
 	sysfs_remove_group(&pdev->dev.kobj, &uuid_attribute_group);
 	sysfs_remove_group(&pdev->dev.kobj, &imok_attribute_group);
 	thermal_zone_device_unregister(priv->thermal);
@@ -707,6 +696,7 @@ static const struct acpi_device_id int3400_thermal_match[] = {
 	{"INTC1042", 0},
 	{"INTC1068", 0},
 	{"INTC10A0", 0},
+	{"INTC10D4", 0},
 	{}
 };
 

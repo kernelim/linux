@@ -1,3 +1,3 @@
-#6-
-0x86dc080f	sas_port_delete_phy	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL	
+#7-
+0xb4188cf8	sas_port_delete_phy	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL	
 
