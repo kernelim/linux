@@ -161,6 +161,7 @@ enum {
 	MLX5_REG_MIRC		 = 0x9162,
 	MLX5_REG_MTPTM		 = 0x9180,
 	MLX5_REG_MTCTR		 = 0x9181,
+	MLX5_REG_MRTCQ		 = 0x9182,
 	MLX5_REG_SBCAM		 = 0xB01F,
 	MLX5_REG_RESOURCE_DUMP   = 0xC000,
 	MLX5_REG_DTOR            = 0xC00E,
@@ -706,17 +707,38 @@ struct mlx5_rsvd_gids {
 	struct ida ida;
 };
 
-#define MAX_PIN_NUM	8
-struct mlx5_pps {
-	u8                         pin_caps[MAX_PIN_NUM];
+/* RHEL 10.0 GA had an embedded struct mlx5_clock in struct mlx5_core_dev.
+ * For PTP clock support with BF-3 (RHEL-87775), it needs to change to
+ * a pointer. However, changes to struct mlx5_core_dev break KABI symbols:
+ *   mlx5_blocking_notifier_register
+ *   mlx5_blocking_notifier_unregister
+ *   mlx5_core_access_reg
+ *   mlx5_core_uplink_netdev_event_replay
+ *
+ * We assume that:
+ *  - The functions are exported to serve the in-tree drivers (mlx5_ib,
+ *    mlx5_dpll).
+ *  - Mixing the in-tree mlx5_core with an external mlx5_* aux binary
+ *    driver is unlikely.
+ *  - Even if the mixing occurs, the external driver is unlikely to touch
+ *    the "clock" member anyway.
+ *
+ * To preserve the maximum of the KABI, we keep a dummy struct mlx5_clock where
+ * it was originally. To any external module accessing it, it will appear as if
+ * mlx5_init_clock() had aborted the HW clock init and left the struct cleared.
+ * To make this work, we keep the original struct layout definitions here.
+ */
+#define RHEL96_KABI_MAX_PIN_NUM	8
+struct RH_KABI_RENAME(mlx5_pps, rhel96_kabi_mlx5_pps) {
+	u8                         pin_caps[RHEL96_KABI_MAX_PIN_NUM];
 	struct work_struct         out_work;
-	u64                        start[MAX_PIN_NUM];
+	u64                        start[RHEL96_KABI_MAX_PIN_NUM];
 	u8                         enabled;
 	u64                        min_npps_period;
 	u64                        min_out_pulse_duration_ns;
 };
 
-struct mlx5_timer {
+struct RH_KABI_RENAME(mlx5_timer, rhel96_kabi_mlx5_timer) {
 	struct cyclecounter        cycles;
 	struct timecounter         tc;
 	u32                        nominal_c_mult;
@@ -724,16 +746,18 @@ struct mlx5_timer {
 	struct delayed_work        overflow_work;
 };
 
-struct mlx5_clock {
+struct RH_KABI_RENAME(mlx5_clock, rhel96_kabi_mlx5_clock) {
 	struct mlx5_nb             pps_nb;
 	seqlock_t                  lock;
 	struct hwtstamp_config     hwtstamp_config;
 	struct ptp_clock          *ptp;
 	struct ptp_clock_info      ptp_info;
-	struct mlx5_pps            pps_info;
-	struct mlx5_timer          timer;
+	struct RH_KABI_RENAME(mlx5_pps, rhel96_kabi_mlx5_pps) pps_info;
+	struct RH_KABI_RENAME(mlx5_timer, rhel96_kabi_mlx5_timer) timer;
 };
 
+struct mlx5_clock;
+struct mlx5_clock_dev_state;
 struct mlx5_dm;
 struct mlx5_fw_tracer;
 struct mlx5_vxlan;
@@ -817,7 +841,8 @@ struct mlx5_core_dev {
 #ifdef CONFIG_MLX5_FPGA
 	struct mlx5_fpga_device *fpga;
 #endif
-	struct mlx5_clock        clock;
+	struct RH_KABI_RENAME(mlx5_clock, rhel96_kabi_mlx5_clock)
+		RH_KABI_RENAME(clock, rhel96_kabi_dummy_clock);
 	struct mlx5_ib_clock_info  *clock_info;
 	struct mlx5_fw_tracer   *tracer;
 	struct mlx5_rsc_dump    *rsc_dump;
@@ -836,6 +861,8 @@ struct mlx5_core_dev {
 	enum mlx5_wc_state wc_state;
 	/* sync write combining state */
 	struct mutex wc_state_lock;
+	RH_KABI_EXTEND(struct mlx5_clock *clock)
+	RH_KABI_EXTEND(struct mlx5_clock_dev_state *clock_state)
 };
 
 struct mlx5_db {

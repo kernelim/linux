@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.40.1
+%define pkgrelease 55.41.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.40.1.el10_0
+%define tarfile_release 6.12.0-55.41.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.40.1%{?buildid}%{?dist}
+%define specrelease 55.41.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.40.1.el10_0
+%define kabiversion 6.12.0-55.41.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4317,10 +4317,32 @@ fi\
 #
 #
 %changelog
-* Wed Oct 22 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.40.1
+* Thu Oct 30 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.41.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Mon Oct 20 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.41.1.el10_0]
+- ALSA: hda/ca0132: Fix buffer overflow in add_tuning_control (CKI Backport Bot) [RHEL-114853] {CVE-2025-39751}
+- erofs: fix blksize < PAGE_SIZE for file-backed mounts (CKI Backport Bot) [RHEL-83885] {CVE-2024-56750}
+- s390/ism: fix concurrency management in ism_cmd() (CKI Backport Bot) [RHEL-114499]
+- NFS: Fix filehandle bounds checking in nfs_fh_to_dentry() (CKI Backport Bot) [RHEL-113614] {CVE-2025-39730}
+- net/mlx5: Generate PPS IN event on new function for shared clock (Benjamin Poirier) [RHEL-101997]
+- net/mlx5: Support one PTP device per hardware clock (Benjamin Poirier) [RHEL-101997]
+- net/mlx5: Move PPS notifier and out_work to clock_state (Benjamin Poirier) [RHEL-101997]
+- net/mlx5: Add devcom component for the clock shared by functions (Michal Schmidt) [RHEL-101997]
+- net/mlx5: Change clock in mlx5_core_dev to mlx5_clock pointer (Michal Schmidt) [RHEL-101997]
+- net/mlx5: Add API to get mlx5_core_dev from mlx5_clock (Benjamin Poirier) [RHEL-101997]
+- net/mlx5: Add init and destruction functions for a single HW clock (Benjamin Poirier) [RHEL-101997]
+- net/mlx5: Change parameters for PTP internal functions (Benjamin Poirier) [RHEL-101997]
+- net/mlx5: Add helper functions for PTP callbacks (Benjamin Poirier) [RHEL-101997]
+- net/mlx5: Add support for MRTCQ register (Benjamin Poirier) [RHEL-101997]
+- net/mlx5: use do_aux_work for PHC overflow checks (Michal Schmidt) [RHEL-101997]
+- mlx5_en: use read sequence for gettimex64 (Benjamin Poirier) [RHEL-101997]
+- NFS: Fix a race when updating an existing write (CKI Backport Bot) [RHEL-113859] {CVE-2025-39697}
+- vsock/virtio: Validate length in packet header before skb_put() (Jon Maloy) [RHEL-114304] {CVE-2025-39718}
+- mm: swap: fix potential buffer overflow in setup_clusters() (CKI Backport Bot) [RHEL-114863] {CVE-2025-39727}
+- wifi: cfg80211: sme: cap SSID length in __cfg80211_connect_result() (CKI Backport Bot) [RHEL-117583] {CVE-2025-39849}
 
 * Sat Oct 11 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-55.40.1.el10_0]
 - scsi: lpfc: Fix buffer free/clear order in deferred receive path (CKI Backport Bot) [RHEL-119125] {CVE-2025-39841}
