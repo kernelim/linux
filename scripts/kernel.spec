@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 570.55.1
+%define pkgrelease 570.58.1
 %define kversion 5
-%define tarfile_release 5.14.0-570.55.1.el9_6
+%define tarfile_release 5.14.0-570.58.1.el9_6
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 570.55.1%{?buildid}%{?dist}
+%define specrelease 570.58.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-570.55.1.el9_6
+%define kabiversion 5.14.0-570.58.1.el9_6
 
 #
 # End of genspec.sh variables
@@ -3788,9 +3788,33 @@ fi
 #
 #
 %changelog
-* Wed Oct 22 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.55.1
+* Thu Oct 30 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.58.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Tue Oct 21 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.58.1.el9_6]
+- pstore/ram: Check start of empty przs during init (CKI Backport Bot) [RHEL-122067] {CVE-2023-53331}
+- vsock/virtio: Validate length in packet header before skb_put() (Jon Maloy) [RHEL-114299] {CVE-2025-39718}
+
+* Mon Oct 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.57.1.el9_6]
+- NFSv4/flexfiles: Fix layout merge mirror check. (Benjamin Coddington) [RHEL-118731]
+- NFS: Fix filehandle bounds checking in nfs_fh_to_dentry() (CKI Backport Bot) [RHEL-113610] {CVE-2025-39730}
+
+* Thu Oct 16 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.56.1.el9_6]
+- NFS: Return the file btime in the statx results when appropriate (Benjamin Coddington) [RHEL-111706]
+- nfs: Add timecreate to nfs inode (Benjamin Coddington) [RHEL-111706]
+- Expand the type of nfs_fattr->valid (Benjamin Coddington) [RHEL-111706]
+- smb: client: fix wrong index reference in smb2_compound_op() (Paulo Alcantara) [RHEL-117879]
+- smb: client: handle unlink(2) of files open by different clients (Paulo Alcantara) [RHEL-117879]
+- smb: client: fix file open check in __cifs_unlink() (Paulo Alcantara) [RHEL-117879]
+- smb: client: fix filename matching of deferred files (Paulo Alcantara) [RHEL-117879]
+- smb: client: fix data loss due to broken rename(2) (Paulo Alcantara) [RHEL-117879]
+- smb: client: fix compound alignment with encryption (Paulo Alcantara) [RHEL-117879]
+- fs/smb: Fix inconsistent refcnt update (Paulo Alcantara) [RHEL-117879] {CVE-2025-39819}
+- ALSA: hda/ca0132: Fix buffer overflow in add_tuning_control (CKI Backport Bot) [RHEL-114848] {CVE-2025-39751}
+- NFS: Fixup allocation flags for nfsiod's __GFP_NORETRY (Benjamin Coddington) [RHEL-116232]
+- xfs: make sure sb_fdblocks is non-negative (CKI Backport Bot) [RHEL-114540]
+- block: fix adding folio to bio (Ming Lei) [RHEL-96789]
 
 * Tue Oct 14 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.55.1.el9_6]
 - scsi: lpfc: Fix buffer free/clear order in deferred receive path (CKI Backport Bot) [RHEL-119115] {CVE-2025-39841}
