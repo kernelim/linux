@@ -225,7 +225,7 @@ smb2_check_message(char *buf, unsigned int len, struct TCP_Server_Info *server)
 		}
 	}
 
-	calc_len = smb2_calc_size(buf, server);
+	calc_len = smb2_calc_size(buf);
 
 	/* For SMB2_IOCTL, OutputOffset and OutputLength are optional, so might
 	 * be 0, and not a real miscalculation */
@@ -413,9 +413,9 @@ smb2_get_data_area_len(int *off, int *len, struct smb2_hdr *shdr)
  * portion, the number of word parameters and the data portion of the message.
  */
 unsigned int
-smb2_calc_size(void *buf, struct TCP_Server_Info *srvr)
+smb2_calc_size(void *buf)
 {
-	struct smb2_pdu *pdu = (struct smb2_pdu *)buf;
+	struct smb2_pdu *pdu = buf;
 	struct smb2_hdr *shdr = &pdu->hdr;
 	int offset; /* the offset from the beginning of SMB to data area */
 	int data_length; /* the length of the variable length data area */
@@ -611,58 +611,59 @@ smb2_tcon_find_pending_open_lease(struct cifs_tcon *tcon,
 }
 
 static bool
-smb2_is_valid_lease_break(char *buffer)
+smb2_is_valid_lease_break(char *buffer, struct TCP_Server_Info *server)
 {
 	struct smb2_lease_break *rsp = (struct smb2_lease_break *)buffer;
-	struct TCP_Server_Info *server;
+	struct TCP_Server_Info *pserver;
 	struct cifs_ses *ses;
 	struct cifs_tcon *tcon;
 	struct cifs_pending_open *open;
 
 	cifs_dbg(FYI, "Checking for lease break\n");
 
+	/* If server is a channel, select the primary channel */
+	pserver = CIFS_SERVER_IS_CHAN(server) ? server->primary_server : server;
+
 	/* look up tcon based on tid & uid */
 	spin_lock(&cifs_tcp_ses_lock);
-	list_for_each_entry(server, &cifs_tcp_ses_list, tcp_ses_list) {
-		list_for_each_entry(ses, &server->smb_ses_list, smb_ses_list) {
-			list_for_each_entry(tcon, &ses->tcon_list, tcon_list) {
-				spin_lock(&tcon->open_file_lock);
-				cifs_stats_inc(
-				    &tcon->stats.cifs_stats.num_oplock_brks);
-				if (smb2_tcon_has_lease(tcon, rsp)) {
-					spin_unlock(&tcon->open_file_lock);
-					spin_unlock(&cifs_tcp_ses_lock);
-					return true;
-				}
-				open = smb2_tcon_find_pending_open_lease(tcon,
-									 rsp);
-				if (open) {
-					__u8 lease_key[SMB2_LEASE_KEY_SIZE];
-					struct tcon_link *tlink;
-
-					tlink = cifs_get_tlink(open->tlink);
-					memcpy(lease_key, open->lease_key,
-					       SMB2_LEASE_KEY_SIZE);
-					spin_unlock(&tcon->open_file_lock);
-					spin_unlock(&cifs_tcp_ses_lock);
-					smb2_queue_pending_open_break(tlink,
-								      lease_key,
-								      rsp->NewLeaseState);
-					return true;
-				}
+	list_for_each_entry(ses, &pserver->smb_ses_list, smb_ses_list) {
+		list_for_each_entry(tcon, &ses->tcon_list, tcon_list) {
+			spin_lock(&tcon->open_file_lock);
+			cifs_stats_inc(
+				       &tcon->stats.cifs_stats.num_oplock_brks);
+			if (smb2_tcon_has_lease(tcon, rsp)) {
 				spin_unlock(&tcon->open_file_lock);
+				spin_unlock(&cifs_tcp_ses_lock);
+				return true;
+			}
+			open = smb2_tcon_find_pending_open_lease(tcon,
+								 rsp);
+			if (open) {
+				__u8 lease_key[SMB2_LEASE_KEY_SIZE];
+				struct tcon_link *tlink;
 
-				if (tcon->crfid.is_valid &&
-				    !memcmp(rsp->LeaseKey,
-					    tcon->crfid.fid->lease_key,
-					    SMB2_LEASE_KEY_SIZE)) {
-					INIT_WORK(&tcon->crfid.lease_break,
-						  smb2_cached_lease_break);
-					queue_work(cifsiod_wq,
-						   &tcon->crfid.lease_break);
-					spin_unlock(&cifs_tcp_ses_lock);
-					return true;
-				}
+				tlink = cifs_get_tlink(open->tlink);
+				memcpy(lease_key, open->lease_key,
+				       SMB2_LEASE_KEY_SIZE);
+				spin_unlock(&tcon->open_file_lock);
+				spin_unlock(&cifs_tcp_ses_lock);
+				smb2_queue_pending_open_break(tlink,
+							      lease_key,
+							      rsp->NewLeaseState);
+				return true;
+			}
+			spin_unlock(&tcon->open_file_lock);
+
+			if (tcon->crfid.is_valid &&
+			    !memcmp(rsp->LeaseKey,
+				    tcon->crfid.fid->lease_key,
+				    SMB2_LEASE_KEY_SIZE)) {
+				INIT_WORK(&tcon->crfid.lease_break,
+					  smb2_cached_lease_break);
+				queue_work(cifsiod_wq,
+					   &tcon->crfid.lease_break);
+				spin_unlock(&cifs_tcp_ses_lock);
+				return true;
 			}
 		}
 	}
@@ -689,7 +690,7 @@ smb2_is_valid_oplock_break(char *buffer, struct TCP_Server_Info *server)
 	if (rsp->StructureSize !=
 				smb2_rsp_struct_sizes[SMB2_OPLOCK_BREAK_HE]) {
 		if (le16_to_cpu(rsp->StructureSize) == 44)
-			return smb2_is_valid_lease_break(buffer);
+			return smb2_is_valid_lease_break(buffer, server);
 		else
 			return false;
 	}
@@ -865,12 +866,12 @@ smb2_handle_cancelled_mid(struct mid_q_entry *mid, struct TCP_Server_Info *serve
  * SMB2 header.
  */
 int
-smb311_update_preauth_hash(struct cifs_ses *ses, struct kvec *iov, int nvec)
+smb311_update_preauth_hash(struct cifs_ses *ses, struct TCP_Server_Info *server,
+			   struct kvec *iov, int nvec)
 {
 	int i, rc;
 	struct sdesc *d;
 	struct smb2_hdr *hdr;
-	struct TCP_Server_Info *server = cifs_ses_server(ses);
 
 	hdr = (struct smb2_hdr *)iov[0].iov_base;
 	/* neg prot are always taken */

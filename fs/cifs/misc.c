@@ -69,12 +69,14 @@ sesInfoAlloc(void)
 	ret_buf = kzalloc(sizeof(struct cifs_ses), GFP_KERNEL);
 	if (ret_buf) {
 		atomic_inc(&sesInfoAllocCount);
-		ret_buf->status = CifsNew;
+		spin_lock_init(&ret_buf->ses_lock);
+		ret_buf->ses_status = SES_NEW;
 		++ret_buf->ses_count;
 		INIT_LIST_HEAD(&ret_buf->smb_ses_list);
 		INIT_LIST_HEAD(&ret_buf->tcon_list);
 		mutex_init(&ret_buf->session_mutex);
 		spin_lock_init(&ret_buf->iface_lock);
+		INIT_LIST_HEAD(&ret_buf->iface_list);
 		spin_lock_init(&ret_buf->chan_lock);
 	}
 	return ret_buf;
@@ -83,6 +85,8 @@ sesInfoAlloc(void)
 void
 sesInfoFree(struct cifs_ses *buf_to_free)
 {
+	struct cifs_server_iface *iface = NULL, *niface = NULL;
+
 	if (buf_to_free == NULL) {
 		cifs_dbg(FYI, "Null buffer passed to sesInfoFree\n");
 		return;
@@ -96,7 +100,11 @@ sesInfoFree(struct cifs_ses *buf_to_free)
 	kfree(buf_to_free->user_name);
 	kfree(buf_to_free->domainName);
 	kfree_sensitive(buf_to_free->auth_key.response);
-	kfree(buf_to_free->iface_list);
+	spin_lock(&buf_to_free->iface_lock);
+	list_for_each_entry_safe(iface, niface, &buf_to_free->iface_list,
+				 iface_head)
+		kref_put(&iface->refcount, release_iface);
+	spin_unlock(&buf_to_free->iface_lock);
 	kfree_sensitive(buf_to_free);
 }
 
@@ -115,8 +123,9 @@ tconInfoAlloc(void)
 	}
 
 	atomic_inc(&tconInfoAllocCount);
-	ret_buf->tidStatus = CifsNew;
+	ret_buf->status = TID_NEW;
 	++ret_buf->tc_count;
+	spin_lock_init(&ret_buf->tc_lock);
 	INIT_LIST_HEAD(&ret_buf->openFileList);
 	INIT_LIST_HEAD(&ret_buf->tcon_list);
 	spin_lock_init(&ret_buf->open_file_lock);
@@ -163,9 +172,9 @@ cifs_buf_get(void)
 	/* clear the first few header bytes */
 	/* for most paths, more is cleared in header_assemble */
 	memset(ret_buf, 0, buf_size + 3);
-	atomic_inc(&bufAllocCount);
+	atomic_inc(&buf_alloc_count);
 #ifdef CONFIG_CIFS_STATS2
-	atomic_inc(&totBufAllocCount);
+	atomic_inc(&total_buf_alloc_count);
 #endif /* CONFIG_CIFS_STATS2 */
 
 	return ret_buf;
@@ -180,7 +189,7 @@ cifs_buf_release(void *buf_to_free)
 	}
 	mempool_free(buf_to_free, cifs_req_poolp);
 
-	atomic_dec(&bufAllocCount);
+	atomic_dec(&buf_alloc_count);
 	return;
 }
 
@@ -196,9 +205,9 @@ cifs_small_buf_get(void)
 	ret_buf = mempool_alloc(cifs_sm_req_poolp, GFP_NOFS);
 	/* No need to clear memory here, cleared in header assemble */
 	/*	memset(ret_buf, 0, sizeof(struct smb_hdr) + 27);*/
-	atomic_inc(&smBufAllocCount);
+	atomic_inc(&small_buf_alloc_count);
 #ifdef CONFIG_CIFS_STATS2
-	atomic_inc(&totSmBufAllocCount);
+	atomic_inc(&total_small_buf_alloc_count);
 #endif /* CONFIG_CIFS_STATS2 */
 
 	return ret_buf;
@@ -214,7 +223,7 @@ cifs_small_buf_release(void *buf_to_free)
 	}
 	mempool_free(buf_to_free, cifs_sm_req_poolp);
 
-	atomic_dec(&smBufAllocCount);
+	atomic_dec(&small_buf_alloc_count);
 	return;
 }
 
@@ -349,7 +358,7 @@ checkSMB(char *buf, unsigned int total_read, struct TCP_Server_Info *server)
 	/* otherwise, there is enough to get to the BCC */
 	if (check_smb_hdr(smb))
 		return -EIO;
-	clc_len = smbCalcSize(smb, server);
+	clc_len = smbCalcSize(smb);
 
 	if (4 + rfclen != total_read) {
 		cifs_dbg(VFS, "Length read does not match RFC1001 length %d\n",
@@ -1123,8 +1132,10 @@ int match_target_ip(struct TCP_Server_Info *server,
 		goto out;
 	}
 
+	spin_lock(&server->srv_lock);
 	*result = cifs_match_ipaddr((struct sockaddr *)&server->dstaddr,
 				    &tipaddr);
+	spin_unlock(&server->srv_lock);
 	cifs_dbg(FYI, "%s: ip addresses match: %u\n", __func__, *result);
 	rc = 0;
 
@@ -1152,3 +1163,47 @@ int cifs_update_super_prepath(struct cifs_sb_info *cifs_sb, char *prefix)
 	return 0;
 }
 #endif
+
+int cifs_wait_for_server_reconnect(struct TCP_Server_Info *server, bool retry)
+{
+	int timeout = 10;
+	int rc;
+
+	spin_lock(&server->srv_lock);
+	if (server->tcpStatus != CifsNeedReconnect) {
+		spin_unlock(&server->srv_lock);
+		return 0;
+	}
+	timeout *= server->nr_targets;
+	spin_unlock(&server->srv_lock);
+
+	/*
+	 * Give demultiplex thread up to 10 seconds to each target available for
+	 * reconnect -- should be greater than cifs socket timeout which is 7
+	 * seconds.
+	 *
+	 * On "soft" mounts we wait once. Hard mounts keep retrying until
+	 * process is killed or server comes back on-line.
+	 */
+	do {
+		rc = wait_event_interruptible_timeout(server->response_q,
+						      (server->tcpStatus != CifsNeedReconnect),
+						      timeout * HZ);
+		if (rc < 0) {
+			cifs_dbg(FYI, "%s: aborting reconnect due to received signal\n",
+				 __func__);
+			return -ERESTARTSYS;
+		}
+
+		/* are we still trying to reconnect? */
+		spin_lock(&server->srv_lock);
+		if (server->tcpStatus != CifsNeedReconnect) {
+			spin_unlock(&server->srv_lock);
+			return 0;
+		}
+		spin_unlock(&server->srv_lock);
+	} while (retry);
+
+	cifs_dbg(FYI, "%s: gave up waiting on reconnect\n", __func__);
+	return -EHOSTDOWN;
+}

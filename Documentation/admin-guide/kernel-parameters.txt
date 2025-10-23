@@ -4757,6 +4757,20 @@
 	rhash_entries=	[KNL,NET]
 			Set number of hash buckets for route cache
 
+	rh_waived=
+			Enable waived items in RHEL.
+
+			Some specific features, or security mitigations, can be
+			waived (toggled on/off) on demand in RHEL.  However,
+			waiving any of these items should be used judiciously,
+			as it generally means the system might end up being
+			considered insecure or even out-of-scope for support.
+
+			Format: <item-1>,<item-2>...<item-n>
+
+			Use 'rh_waived' to enable all waived features listed at
+			Documentation/admin-guide/rh-waived-features.rst
+
 	ring3mwait=disable
 			[KNL] Disable ring 3 MONITOR/MWAIT feature on supported
 			CPUs.

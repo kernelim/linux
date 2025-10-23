@@ -40,6 +40,7 @@
 #include <linux/node.h>
 #include <linux/userfaultfd_k.h>
 #include <linux/page_owner.h>
+#include <linux/rh_waived.h>
 #include "internal.h"
 
 int hugetlb_max_hstate __read_mostly;
@@ -5667,8 +5668,14 @@ int huge_pmd_unshare(struct mm_struct *mm, struct vm_area_struct *vma,
 	 * using this page table as a normal, non-hugetlb page table.
 	 * Wait for pending gup_fast() in other threads to finish before letting
 	 * that happen.
+	 *
+	 * RHEL-120391: some customers reported severe interference/performance
+	 * degradation on particular database workloads, thus we are including
+	 * a waiving flag to allow for disabling this CVE mitigation
 	 */
-	tlb_remove_table_sync_one();
+	if (likely(!is_rh_waived(CVE_2025_38085)))
+		tlb_remove_table_sync_one();
+
 	put_page(virt_to_page(ptep));
 	mm_dec_nr_pmds(mm);
 	/*

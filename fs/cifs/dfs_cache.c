@@ -1355,9 +1355,9 @@ static bool target_share_equal(struct TCP_Server_Info *server, const char *s1, c
 		cifs_dbg(VFS, "%s: failed to convert address \'%s\'. skip address matching.\n",
 			 __func__, ip);
 	} else {
-		mutex_lock(&server->srv_mutex);
+		cifs_server_lock(server);
 		match = cifs_match_ipaddr((struct sockaddr *)&server->dstaddr, &sa);
-		mutex_unlock(&server->srv_mutex);
+		cifs_server_unlock(server);
 	}
 
 	kfree(ip);
@@ -1383,7 +1383,7 @@ static void mark_for_reconnect_if_needed(struct cifs_tcon *tcon, struct dfs_cach
 	}
 
 	cifs_dbg(FYI, "%s: no cached or matched targets. mark dfs share for reconnect.\n", __func__);
-	cifs_ses_mark_for_reconnect(tcon->ses);
+	cifs_signal_cifsd_for_reconnect(tcon->ses->server, true);
 }
 
 /* Refresh dfs referral of tcon and mark it for reconnect if needed */
@@ -1540,15 +1540,21 @@ static void refresh_mounts(struct cifs_ses **sessions)
 
 	spin_lock(&cifs_tcp_ses_lock);
 	list_for_each_entry(server, &cifs_tcp_ses_list, tcp_ses_list) {
-		if (!server->is_dfs_conn)
+		spin_lock(&server->srv_lock);
+		if (!server->is_dfs_conn) {
+			spin_unlock(&server->srv_lock);
 			continue;
+		}
+		spin_unlock(&server->srv_lock);
 
 		list_for_each_entry(ses, &server->smb_ses_list, smb_ses_list) {
 			list_for_each_entry(tcon, &ses->tcon_list, tcon_list) {
+				spin_lock(&tcon->tc_lock);
 				if (!tcon->ipc && !tcon->need_reconnect) {
 					tcon->tc_count++;
 					list_add_tail(&tcon->ulist, &tcons);
 				}
+				spin_unlock(&tcon->tc_lock);
 			}
 		}
 	}
