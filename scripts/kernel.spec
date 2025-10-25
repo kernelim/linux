@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 570.58.1
+%define pkgrelease 570.60.1
 %define kversion 5
-%define tarfile_release 5.14.0-570.58.1.el9_6
+%define tarfile_release 5.14.0-570.60.1.el9_6
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 570.58.1%{?buildid}%{?dist}
+%define specrelease 570.60.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-570.58.1.el9_6
+%define kabiversion 5.14.0-570.60.1.el9_6
 
 #
 # End of genspec.sh variables
@@ -3788,9 +3788,23 @@ fi
 #
 #
 %changelog
-* Thu Oct 30 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.58.1
+* Wed Nov 05 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.60.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Sat Oct 25 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.60.1.el9_6]
+- ibmveth: Add multi buffers rx replenishment hcall support (Mamatha Inamdar) [RHEL-117437]
+- net: ibmveth: Reset the adapter when unexpected states are detected (Mamatha Inamdar) [RHEL-117437]
+- crypto: xts - Handle EBUSY correctly (CKI Backport Bot) [RHEL-119235] {CVE-2023-53494}
+
+* Thu Oct 23 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.59.1.el9_6]
+- nvme-tcp: fix premature queue removal and I/O failover (Maurizio Lombardi) [RHEL-105111]
+- KVM: arm64: Disable MPAM visibility by default and ignore VMM writes (Gavin Shan) [RHEL-120964]
+- KVM: arm64: Add a macro for creating filtered sys_reg_descs entries (Gavin Shan) [RHEL-120964]
+- NFSv4: Allow FREE_STATEID to clean up delegations (Benjamin Coddington) [RHEL-118857]
+- SUNRPC: Cleanup/fix initial rq_pages allocation (Benjamin Coddington) [RHEL-108160]
+- fs: fix UAF/GPF bug in nilfs_mdt_destroy (CKI Backport Bot) [RHEL-116666] {CVE-2022-50367}
+- ipv6: sr: Fix MAC comparison to be constant-time (CKI Backport Bot) [RHEL-116384] {CVE-2025-39702}
 
 * Tue Oct 21 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.58.1.el9_6]
 - pstore/ram: Check start of empty przs during init (CKI Backport Bot) [RHEL-122067] {CVE-2023-53331}
