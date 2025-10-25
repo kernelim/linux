@@ -1,3 +1,13 @@
+* Sat Oct 25 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-55.42.1.el10_0]
+- platform/x86/intel: power-domains: Use topology_logical_package_id() for package ID (CKI Backport Bot) [RHEL-123288]
+- KVM: arm64: Disable MPAM visibility by default and ignore VMM writes (Gavin Shan) [RHEL-121690]
+- KVM: arm64: Add a macro for creating filtered sys_reg_descs entries (Gavin Shan) [RHEL-121690]
+- redhat: rpminspect: update emptyrpm list for kernel variants (Alexandra Hájková)
+- cgroup/psi: Set of->priv to NULL upon file release (CKI Backport Bot) [RHEL-119147] {CVE-2025-39881}
+- kernfs: Fix UAF in polling when open file is released (CKI Backport Bot) [RHEL-119147] {CVE-2025-39881}
+- ipv6: sr: Fix MAC comparison to be constant-time (CKI Backport Bot) [RHEL-116388] {CVE-2025-39702}
+Resolves: RHEL-116388, RHEL-119147, RHEL-121690, RHEL-123288
+
 * Mon Oct 20 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.41.1.el10_0]
 - ALSA: hda/ca0132: Fix buffer overflow in add_tuning_control (CKI Backport Bot) [RHEL-114853] {CVE-2025-39751}
 - erofs: fix blksize < PAGE_SIZE for file-backed mounts (CKI Backport Bot) [RHEL-83885] {CVE-2024-56750}

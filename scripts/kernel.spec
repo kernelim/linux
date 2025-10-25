@@ -162,15 +162,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 55.41.1
+%define pkgrelease 55.42.1
 %define kversion 6
-%define tarfile_release 6.12.0-55.41.1.el10_0
+%define tarfile_release 6.12.0-55.42.1.el10_0
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 55.41.1%{?buildid}%{?dist}
+%define specrelease 55.42.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-55.41.1.el10_0
+%define kabiversion 6.12.0-55.42.1.el10_0
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4317,10 +4317,19 @@ fi\
 #
 #
 %changelog
-* Thu Oct 30 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.41.1
+* Wed Nov 05 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-55.42.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Sat Oct 25 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-55.42.1.el10_0]
+- platform/x86/intel: power-domains: Use topology_logical_package_id() for package ID (CKI Backport Bot) [RHEL-123288]
+- KVM: arm64: Disable MPAM visibility by default and ignore VMM writes (Gavin Shan) [RHEL-121690]
+- KVM: arm64: Add a macro for creating filtered sys_reg_descs entries (Gavin Shan) [RHEL-121690]
+- redhat: rpminspect: update emptyrpm list for kernel variants (Alexandra Hájková)
+- cgroup/psi: Set of->priv to NULL upon file release (CKI Backport Bot) [RHEL-119147] {CVE-2025-39881}
+- kernfs: Fix UAF in polling when open file is released (CKI Backport Bot) [RHEL-119147] {CVE-2025-39881}
+- ipv6: sr: Fix MAC comparison to be constant-time (CKI Backport Bot) [RHEL-116388] {CVE-2025-39702}
 
 * Mon Oct 20 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-55.41.1.el10_0]
 - ALSA: hda/ca0132: Fix buffer overflow in add_tuning_control (CKI Backport Bot) [RHEL-114853] {CVE-2025-39751}
