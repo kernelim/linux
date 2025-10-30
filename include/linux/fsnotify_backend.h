@@ -203,6 +203,8 @@ struct fsnotify_group {
 			int f_flags; /* event_f_flags from fanotify_init() */
 			unsigned int max_marks;
 			struct user_struct *user;
+			/* chained on perm_group_list */
+			struct list_head perm_grp_list;
 		} fanotify_data;
 #endif /* CONFIG_FANOTIFY */
 	};
