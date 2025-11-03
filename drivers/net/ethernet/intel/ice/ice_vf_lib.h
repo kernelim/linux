@@ -59,6 +59,13 @@ struct ice_fdir_prof_info {
 	u64 fdir_active_cnt;
 };
 
+struct ice_vf_qs_bw {
+	u32 committed;
+	u32 peak;
+	u16 queue_id;
+	u8 tc;
+};
+
 /* VF operations */
 struct ice_vf_ops {
 	enum ice_disq_rst_src reset_type;
@@ -117,6 +124,9 @@ struct ice_vf {
 	u8 spoofchk:1;
 	u8 link_forced:1;
 	u8 link_up:1;			/* only valid if VF link is forced */
+
+	u32 ptp_caps;
+
 	unsigned int min_tx_rate;	/* Minimum Tx bandwidth limit in Mbps */
 	unsigned int max_tx_rate;	/* Maximum Tx bandwidth limit in Mbps */
 	DECLARE_BITMAP(vf_states, ICE_VF_STATES_NBITS);	/* VF runtime states */
@@ -140,6 +150,7 @@ struct ice_vf {
 	struct devlink_port devlink_port;
 
 	u16 num_msix;			/* num of MSI-X configured on this VF */
+	struct ice_vf_qs_bw qs_bw[ICE_MAX_RSS_QS_PER_VF];
 };
 
 /* Flags for controlling behavior of ice_reset_vf */
