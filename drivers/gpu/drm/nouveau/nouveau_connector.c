@@ -1274,6 +1274,13 @@ nouveau_connector_create(struct drm_device *dev,
 	int type, ret = 0;
 	bool dummy;
 
+	// Don't attempt to create the connector if we wouldn't be able to actually use it.
+	if (!(disp->disp.conn_mask & BIT(index))) {
+	    NV_DEBUG(drm, "conn %02x:%02x%02x: disabled by disp conn_mask (%08lx), skipping\n",
+		     index, dcbe->location, dcbe->type, disp->disp.conn_mask);
+	    return ERR_PTR(-EBUSY);
+	}
+
 	drm_connector_list_iter_begin(dev, &conn_iter);
 	nouveau_for_each_non_mst_connector_iter(connector, &conn_iter) {
 		nv_connector = nouveau_connector(connector);
@@ -1404,7 +1411,7 @@ nouveau_connector_create(struct drm_device *dev,
 	drm_connector_helper_add(connector, &nouveau_connector_helper_funcs);
 	connector->polled = DRM_CONNECTOR_POLL_CONNECT;
 
-	if (nv_connector->dcb && (disp->disp.conn_mask & BIT(nv_connector->index))) {
+	if (nv_connector->dcb) {
 		ret = nvif_conn_ctor(&disp->disp, nv_connector->base.name, nv_connector->index,
 				     &nv_connector->conn);
 		if (ret) {

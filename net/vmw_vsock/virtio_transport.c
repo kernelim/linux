@@ -506,8 +506,8 @@ static void virtio_transport_rx_work(struct work_struct *work)
 	do {
 		virtqueue_disable_cb(vq);
 		for (;;) {
+			unsigned int len, payload_len;
 			struct virtio_vsock_pkt *pkt;
-			unsigned int len;
 
 			if (!virtio_transport_more_replies(vsock)) {
 				/* Stop rx until the device processes already
@@ -527,6 +527,12 @@ static void virtio_transport_rx_work(struct work_struct *work)
 			/* Drop short/long packets */
 			if (unlikely(len < sizeof(pkt->hdr) ||
 				     len > sizeof(pkt->hdr) + pkt->len)) {
+				virtio_transport_free_pkt(pkt);
+				continue;
+			}
+
+			payload_len = le32_to_cpu(pkt->hdr.len);
+			if (unlikely(payload_len > len - sizeof(pkt->hdr))) {
 				virtio_transport_free_pkt(pkt);
 				continue;
 			}
