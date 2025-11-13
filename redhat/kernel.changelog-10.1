@@ -1,3 +1,116 @@
+* Thu Nov 13 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.13.1.el10_1]
+- NFSv4: handle ERR_GRACE on delegation recalls (Olga Kornievskaia) [RHEL-127623]
+- nfsd: nfserr_jukebox in nlm_fopen should lead to a retry (Olga Kornievskaia) [RHEL-127623]
+- Revert "SUNRPC: Don't allow waiting for exiting tasks" (Scott Mayhew) [RHEL-110051]
+- smb: client: get rid of d_drop() in cifs_do_rename() (Paulo Alcantara) [RHEL-124955]
+- smb: client: fix wrong index reference in smb2_compound_op() (Paulo Alcantara) [RHEL-124955]
+- smb: client: handle unlink(2) of files open by different clients (Paulo Alcantara) [RHEL-124955]
+- smb: client: fix filename matching of deferred files (Paulo Alcantara) [RHEL-124955]
+- fs/smb: Fix inconsistent refcnt update (Paulo Alcantara) [RHEL-124955] {CVE-2025-39819}
+- ice: don't leave device non-functional if Tx scheduler config fails (Petr Oros) [RHEL-116535]
+Resolves: RHEL-110051, RHEL-116535, RHEL-124955, RHEL-127623
+
+* Tue Nov 11 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.12.1.el10_1]
+- tcp: Don't call reqsk_fastopen_remove() in tcp_conn_request(). (Antoine Tenart) [RHEL-120672]
+- tcp: Clear tcp_sk(sk)->fastopen_rsk in tcp_disconnect(). (Antoine Tenart) [RHEL-120672] {CVE-2025-39955}
+- NFS: Fix filehandle bounds checking in nfs_fh_to_dentry() (CKI Backport Bot) [RHEL-113613] {CVE-2025-39730}
+Resolves: RHEL-113613, RHEL-120672
+
+* Thu Nov 06 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.11.1.el10_1]
+- of_numa: fix uninitialized memory nodes causing kernel panic (Charles Mirabile) [RHEL-123154] {CVE-2025-39903}
+- redhat: use the same cert as UKI's to sign addons (Li Tian) [RHEL-124734]
+- ibmveth: Add multi buffers rx replenishment hcall support (Mamatha Inamdar) [RHEL-116193]
+- net: ibmveth: Reset the adapter when unexpected states are detected (Mamatha Inamdar) [RHEL-116193]
+- ibmvnic: Increase max subcrq indirect entries with fallback (Mamatha Inamdar) [RHEL-116189]
+- redhat: enable TDX host config (Paolo Bonzini) [RHEL-27145]
+- KVM/TDX: Explicitly do WBINVD when no more TDX SEAMCALLs (Paolo Bonzini) [RHEL-27145]
+- x86/virt/tdx: Update the kexec section in the TDX documentation (Paolo Bonzini) [RHEL-27145]
+- x86/virt/tdx: Remove the !KEXEC_CORE dependency (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Disable kexec/kdump on platforms with TDX partial write erratum (Paolo Bonzini) [RHEL-27145]
+- x86/virt/tdx: Mark memory cache state incoherent when making SEAMCALL (Paolo Bonzini) [RHEL-27145]
+- x86/sme: Use percpu boolean to control WBINVD during kexec (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Consolidate relocate_kernel() function parameters (Paolo Bonzini) [RHEL-27145]
+- x86/paravirt: Remove the WBINVD callback (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Use typedef for relocate_kernel_fn function prototype (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Cope with relocate_kernel() not being at the start of the page (Paolo Bonzini) [RHEL-27145]
+- kexec_core: Add and update comments regarding the KEXEC_JUMP flow (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Mark machine_kexec() with __nocfi (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Fix location of relocate_kernel with -ffunction-sections (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Fix stack and handling of re-entry point for ::preserve_context (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Use correct swap page in swap_pages function (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Ensure preserve_context flag is set on return to kernel (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Disable global pages before writing to control page (Paolo Bonzini) [RHEL-27145]
+- x86: Fix build regression with CONFIG_KEXEC_JUMP enabled (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Mark relocate_kernel page as ROX instead of RWX (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Clean up register usage in relocate_kernel() (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Eliminate writes through kernel mapping of relocate_kernel page (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Drop page_list argument from relocate_kernel() (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Add data section to relocate_kernel (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Move relocate_kernel to kernel .data section (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Invoke copy of relocate_kernel() instead of the original (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Copy control page into place in machine_kexec_prepare() (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Allocate PGD for x86_64 transition page tables separately (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Only swap pages for ::preserve_context mode (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Use named labels in swap_pages in relocate_kernel_64.S (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Clean up and document register use in relocate_kernel_64.S (Paolo Bonzini) [RHEL-27145]
+- x86/kexec: Restore GDT on return from ::preserve_context kexec (Paolo Bonzini) [RHEL-27145]
+Resolves: RHEL-116189, RHEL-116193, RHEL-123154, RHEL-124734, RHEL-27145
+
+* Sat Nov 01 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.10.1.el10_1]
+- wifi: cfg80211: fix use-after-free in cmp_bss() (CKI Backport Bot) [RHEL-122880] {CVE-2025-39864}
+- selftests: tls: test skb copy under mem pressure and OOB (CKI Backport Bot) [RHEL-120380] {CVE-2025-39946}
+- tls: make sure to abort the stream if headers are bogus (CKI Backport Bot) [RHEL-120380] {CVE-2025-39946}
+- ixgbe: fix ixgbe_orom_civd_info struct layout (Michal Schmidt) [RHEL-119079]
+- ice: fix Rx page leak on multi-buffer frames (Petr Oros) [RHEL-116543]
+- eventpoll: Fix semi-unbounded recursion (CKI Backport Bot) [RHEL-111055] {CVE-2025-38614}
+Resolves: RHEL-111055, RHEL-116543, RHEL-119079, RHEL-120380, RHEL-122880
+
+* Tue Oct 28 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.9.1.el10_1]
+- platform/x86/intel: power-domains: Use topology_logical_package_id() for package ID (CKI Backport Bot) [RHEL-123290]
+- smb: client: fix file open check in __cifs_unlink() (Paulo Alcantara) [RHEL-122417]
+- smb: client: fix data loss due to broken rename(2) (Paulo Alcantara) [RHEL-122417]
+- smb: client: fix compound alignment with encryption (Paulo Alcantara) [RHEL-122417]
+- smb: client: fix race with concurrent opens in rename(2) (Paulo Alcantara) [RHEL-122417]
+- smb: client: fix race with concurrent opens in unlink(2) (Paulo Alcantara) [RHEL-122417]
+- use uniform permission checks for all mount propagation changes (Ian Kent) [RHEL-121702] {CVE-2025-38498}
+- do_change_type(): refuse to operate on unmounted/not ours mounts (Ian Kent) [RHEL-121702] {CVE-2025-38498}
+- cgroup/psi: Set of->priv to NULL upon file release (CKI Backport Bot) [RHEL-119143] {CVE-2025-39881}
+- kernfs: Fix UAF in polling when open file is released (CKI Backport Bot) [RHEL-119143] {CVE-2025-39881}
+- redhat: rpminspect: update emptyrpm list for kernel variants (Alexandra Hájková)
+- scsi: lpfc: Fix buffer free/clear order in deferred receive path (CKI Backport Bot) [RHEL-119132] {CVE-2025-39841}
+- efivarfs: Fix slab-out-of-bounds in efivarfs_d_compare (CKI Backport Bot) [RHEL-118462] {CVE-2025-39817}
+- wifi: cfg80211: sme: cap SSID length in __cfg80211_connect_result() (CKI Backport Bot) [RHEL-117585] {CVE-2025-39849}
+- xfs: do not propagate ENODATA disk errors into xattr code (Carlos Maiolino) [RHEL-115733]
+- ipv6: sr: Fix MAC comparison to be constant-time (CKI Backport Bot) [RHEL-116387] {CVE-2025-39702}
+- s390/ism: fix concurrency management in ism_cmd() (CKI Backport Bot) [RHEL-114500]
+- s390/hypfs: Enable limited access during lockdown (CKI Backport Bot) [RHEL-114431]
+- s390/hypfs: Avoid unnecessary ioctl registration in debugfs (CKI Backport Bot) [RHEL-114431]
+- redhat/configs: Enable CONFIG_MITIGATION_VMSCAPE for x86 (Waiman Long) [RHEL-114276]
+- x86/vmscape: Add old Intel CPUs to affected list (Waiman Long) [RHEL-114276] {CVE-2025-40300}
+- x86/vmscape: Warn when STIBP is disabled with SMT (Waiman Long) [RHEL-114276] {CVE-2025-40300}
+- x86/bugs: Move cpu_bugs_smt_update() down (Waiman Long) [RHEL-114276] {CVE-2025-40300}
+- x86/vmscape: Enable the mitigation (Waiman Long) [RHEL-114276] {CVE-2025-40300}
+- x86/vmscape: Add conditional IBPB mitigation (Waiman Long) [RHEL-114276] {CVE-2025-40300}
+- x86/vmscape: Enumerate VMSCAPE bug (Waiman Long) [RHEL-114276] {CVE-2025-40300}
+- Documentation/hw-vuln: Add VMSCAPE documentation (Waiman Long) [RHEL-114276] {CVE-2025-40300}
+- RDMA/mana_ib: Fix DSCP value in modify QP (Maxim Levitsky) [RHEL-114931]
+- net: mana: Handle Reset Request from MANA NIC (Maxim Levitsky) [RHEL-114931]
+- net: mana: Set tx_packets to post gso processing packet count (Maxim Levitsky) [RHEL-114931]
+- net: mana: Handle unsupported HWC commands (Maxim Levitsky) [RHEL-114931]
+- net: mana: Add handler for hardware servicing events (Maxim Levitsky) [RHEL-114931]
+- net: mana: Expose additional hardware counters for drop and TC via ethtool. (Maxim Levitsky) [RHEL-114931]
+- mm: swap: fix potential buffer overflow in setup_clusters() (CKI Backport Bot) [RHEL-114862] {CVE-2025-39727}
+- ALSA: hda/ca0132: Fix buffer overflow in add_tuning_control (CKI Backport Bot) [RHEL-114852] {CVE-2025-39751}
+- ALSA: usb-audio: Validate UAC3 power domain descriptors, too (Jaroslav Kysela) [RHEL-114693] {CVE-2025-38729}
+- ALSA: usb-audio: Fix size validation in convert_chmap_v3() (Jaroslav Kysela) [RHEL-114693]
+- ALSA: usb-audio: Validate UAC3 cluster segment descriptors (CKI Backport Bot) [RHEL-114693] {CVE-2025-39757}
+- ibmvnic: Use ndo_get_stats64 to fix inaccurate SAR reporting (Mamatha Inamdar) [RHEL-114439]
+- ibmvnic: Fix hardcoded NUM_RX_STATS/NUM_TX_STATS with dynamic sizeof (Mamatha Inamdar) [RHEL-114439]
+- ibmvnic: Add stat for tx direct vs tx batched (Mamatha Inamdar) [RHEL-114439]
+- vsock/virtio: Validate length in packet header before skb_put() (CKI Backport Bot) [RHEL-114301] {CVE-2025-39718}
+- NFS: Fix a race when updating an existing write (CKI Backport Bot) [RHEL-113861] {CVE-2025-39697}
+Resolves: RHEL-113861, RHEL-114276, RHEL-114301, RHEL-114431, RHEL-114439, RHEL-114500, RHEL-114693, RHEL-114852, RHEL-114862, RHEL-114931, RHEL-115733, RHEL-116387, RHEL-117585, RHEL-118462, RHEL-119132, RHEL-119143, RHEL-121702, RHEL-122417, RHEL-123290
+
 * Fri Oct 17 2025 Jan Stancek <jstancek@redhat.com> [6.12.0-124.8.1.el10_1]
 - redhat: revert to using redhatsecureboot504 for RHEL UKI (Vitaly Kuznetsov) [RHEL-122226]
 Resolves: RHEL-122226

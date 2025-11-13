@@ -323,7 +323,7 @@ static enum ucode_state __apply_microcode(struct ucode_cpu_info *uci,
 	 * Writeback and invalidate caches before updating microcode to avoid
 	 * internal issues depending on what the microcode is updating.
 	 */
-	native_wbinvd();
+	wbinvd();
 
 	/* write microcode via MSR 0x79 */
 	native_wrmsrl(MSR_IA32_UCODE_WRITE, (unsigned long)mc->bits);

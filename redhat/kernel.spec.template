@@ -2795,6 +2795,11 @@ BuildKernel() {
 %endif
 
         %pesign -s -i $KernelUnifiedImage -o $KernelUnifiedImage.signed -a %{secureboot_ca_0} -c $UKI_secureboot_cert -n $UKI_secureboot_name
+        for addon in "$KernelAddonsDirOut"/*; do
+            %pesign -s -i $addon -o $addon.signed -a %{secureboot_ca_0} -c $UKI_secureboot_cert -n $UKI_secureboot_name
+            rm -f $addon
+            mv $addon.signed $addon
+        done
 # 0%{?fedora}%{?eln}
 %endif
         if [ ! -s $KernelUnifiedImage.signed ]; then
@@ -2802,12 +2807,6 @@ BuildKernel() {
             exit 1
         fi
         mv $KernelUnifiedImage.signed $KernelUnifiedImage
-
-      for addon in "$KernelAddonsDirOut"/*; do
-        %pesign -s -i $addon -o $addon.signed -a %{secureboot_ca_0} -c %{secureboot_key_0} -n %{pesign_name_0}
-        rm -f $addon
-        mv $addon.signed $addon
-      done
 
       mkdir -p $RPM_BUILD_ROOT%{_datadir}/doc/kernel-keys/$KernelVer
       cp -a $UKI_secureboot_cert $RPM_BUILD_ROOT%{_datadir}/doc/kernel-keys/$KernelVer/secureboot-uki-%{_arch}.cer
