@@ -86,7 +86,7 @@ def create_json(addons):
 
 def write_json(obj, dest_file):
     with open(dest_file, 'w') as f:
-        json.dump(obj , f, indent=4)
+        json.dump(obj , f, indent=4, sort_keys=True)
     print(f'Processed addons files are in {dest_file}')
 
 if __name__ == "__main__":

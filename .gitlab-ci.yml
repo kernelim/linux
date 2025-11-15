@@ -11,6 +11,10 @@ include:
 
 workflow: !reference [.workflow]
 
+.disabled:
+  rules:
+    - when: never
+
 .9-common:
   variables:
     srpm_make_target: dist-srpm
@@ -96,7 +100,7 @@ c9s_64k_merge_request:
 c9s_automotive_check_merge_request:
   extends: [.trusted, .merge_request,
             .9-common, .trigger_c9s_pipeline,
-            .automotive_check_common, .automotive_check_c9s]
+            .automotive_check_common, .automotive_check_c9s, .disabled]
 
 c9s_baseline_coverage_build:
   extends: [.trusted, .baseline, .rhel_common, .only_build_and_publish,
@@ -111,13 +115,13 @@ c9s_rhel9_compat_merge_request:
 c9s_automotive_merge_request:
   extends: [.trusted, .merge_request,
             .9-common, .trigger_c9s_pipeline,
-            .automotive_pipeline_common, .automotive_pipeline_c9s]
+            .automotive_pipeline_common, .automotive_pipeline_c9s, .disabled]
 
 c9s_automotive_baseline_coverage:
   extends: [.trusted, .baseline,
             .9-common, .trigger_c9s_pipeline,
             .automotive_pipeline_common, .automotive_pipeline_c9s,
-            .coverage]
+            .coverage, .disabled]
 
 # RHEL9 CI
 rhel9_merge_request:
@@ -146,7 +150,7 @@ rhel9_automotive_check_merge_request:
   # Don't add .rhel_common as we overwrite those configs
   extends: [.internal, .merge_request, .with_notifications,
             .9-common, .trigger_rhel9_pipeline,
-            .automotive_check_common, .automotive_check_rhel9]
+            .automotive_check_common, .automotive_check_rhel9, .disabled]
 
 rhel9_baseline_coverage_build:
   extends: [.internal, .baseline, .rhel_common, .only_build_and_publish,
@@ -157,7 +161,7 @@ rhel9_baseline_coverage_build:
 rhel9_automotive_merge_request:
   extends: [.internal, .merge_request,
             .9-common, .trigger_rhel9_pipeline,
-            .automotive_pipeline_common, .automotive_pipeline_rhel9]
+            .automotive_pipeline_common, .automotive_pipeline_rhel9, .disabled]
 
 # RHEL9 private CI (including RT branches)
 rhel9_merge_request_private:
@@ -186,4 +190,4 @@ rhel9_automotive_check_merge_request_private:
   # Don't add .rhel_common as we overwrite those configs
   extends: [.scratch, .merge_request,
             .9-common, .trigger_rhel9_pipeline,
-            .automotive_check_common, .automotive_check_rhel9]
+            .automotive_check_common, .automotive_check_rhel9, .disabled]

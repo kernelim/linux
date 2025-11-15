@@ -1,3 +1,111 @@
+* Sat Nov 15 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.9.1.el9_7]
+- NFSv4: handle ERR_GRACE on delegation recalls (Olga Kornievskaia) [RHEL-124651]
+- nfsd: nfserr_jukebox in nlm_fopen should lead to a retry (Olga Kornievskaia) [RHEL-124651]
+- mm: slub: avoid wake up kswapd in set_track_prepare (Audra Mitchell) [RHEL-125521] {CVE-2025-39843}
+- slub: Reflow ___slab_alloc() (Audra Mitchell) [RHEL-125521] {CVE-2025-39843}
+- nvme-multipath: Skip nr_active increments in RETRY disposition (Ewan D. Milne) [RHEL-123686]
+Resolves: RHEL-123686, RHEL-124651, RHEL-125521
+
+* Thu Nov 13 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.8.1.el9_7]
+- NFSD: Fix callback decoder status codes (Jay Shin) [RHEL-127193]
+- NFSD: Fix CB_GETATTR status fix (Jay Shin) [RHEL-127193]
+- NFSD: fix decoding in nfs4_xdr_dec_cb_getattr (Jay Shin) [RHEL-127193]
+- kernfs: Fix UAF in polling when open file is released (Pavel Reichl) [RHEL-122087] {CVE-2025-39881}
+- gitlab-ci: disable automotive pipelines (Scott Weaver)
+- NFS: Fix wakeup of __nfs_lookup_revalidate() in unblock_revalidate() (Benjamin Coddington) [RHEL-122154]
+- sched: Add wait/wake interface for variable updated under a lock. (Benjamin Coddington) [RHEL-122154]
+- sched: Add test_and_clear_wake_up_bit() and atomic_dec_and_wake_up() (Benjamin Coddington) [RHEL-122154]
+- sched: Document wait_var_event() family of functions and wake_up_var() (Benjamin Coddington) [RHEL-122154]
+- sched: Improve documentation for wake_up_bit/wait_on_bit family of functions (Benjamin Coddington) [RHEL-122154]
+- sched: change wake_up_bit() and related function to expect unsigned long * (Benjamin Coddington) [RHEL-122154]
+- bpf: Fix metadata_dst leak __bpf_redirect_neigh_v{4,6} [rhel-9.7.z] (Xin Long) [RHEL-125513]
+- redhat: use the same cert as UKI's to sign addons (Li Tian) [RHEL-125317]
+- i40e: add mask to apply valid bits for itr_idx (Michal Schmidt) [RHEL-123808]
+- i40e: add max boundary check for VF filters (Michal Schmidt) [RHEL-123808] {CVE-2025-39968}
+- i40e: fix validation of VF state in get resources (Michal Schmidt) [RHEL-123808] {CVE-2025-39969}
+- i40e: fix input validation logic for action_meta (Michal Schmidt) [RHEL-123808] {CVE-2025-39970}
+- i40e: fix idx validation in config queues msg (Michal Schmidt) [RHEL-123808] {CVE-2025-39971}
+- i40e: fix idx validation in i40e_validate_queue_map (Michal Schmidt) [RHEL-123808] {CVE-2025-39972}
+- i40e: add validation for ring_len param (Michal Schmidt) [RHEL-123808] {CVE-2025-39973}
+- io_uring/waitid: always prune wait queue entry in io_waitid_wait() (CKI Backport Bot) [RHEL-124971] {CVE-2025-40047}
+- Bluetooth: hci_event: Fix UAF in hci_conn_tx_dequeue (CKI Backport Bot) [RHEL-124129] {CVE-2025-39983}
+- Bluetooth: hci_event: Fix UAF in hci_acl_create_conn_sync (CKI Backport Bot) [RHEL-123821] {CVE-2025-39982}
+- use uniform permission checks for all mount propagation changes (Ian Kent) [RHEL-121704] {CVE-2025-38498}
+- do_change_type(): refuse to operate on unmounted/not ours mounts (Ian Kent) [RHEL-121704] {CVE-2025-38498}
+- KVM: x86/hyper-v: Skip non-canonical addresses during PV TLB flush (Jon Maloy) [RHEL-117136] {CVE-2025-38351}
+- ibmveth: Add multi buffers rx replenishment hcall support (Mamatha Inamdar) [RHEL-117438]
+- net: ibmveth: Reset the adapter when unexpected states are detected (Mamatha Inamdar) [RHEL-117438]
+- NFS: Fix a race when updating an existing write (CKI Backport Bot) [RHEL-113855] {CVE-2025-39697}
+Resolves: RHEL-113855, RHEL-117136, RHEL-117438, RHEL-121704, RHEL-122087, RHEL-122154, RHEL-123808, RHEL-123821, RHEL-124129, RHEL-124971, RHEL-125317, RHEL-125513, RHEL-127193
+
+* Thu Oct 30 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.7.1.el9_7]
+- The rpminspect.yaml emptyrpm list needs to be expanded (Alexandra Hájková)
+- crypto: xts - Handle EBUSY correctly (Vladis Dronov) [RHEL-119236] {CVE-2023-53494}
+- ice: fix NULL access of tx->in_use in ice_ll_ts_intr (Petr Oros) [RHEL-112874]
+- ice: fix NULL access of tx->in_use in ice_ptp_ts_irq (Petr Oros) [RHEL-112874]
+- ice: fix Rx page leak on multi-buffer frames (Petr Oros) [RHEL-116540]
+- xfs: do not propagate ENODATA disk errors into xattr code (Carlos Maiolino) [RHEL-115730]
+- ipv6: sr: Fix MAC comparison to be constant-time (CKI Backport Bot) [RHEL-116383] {CVE-2025-39702}
+- s390/hypfs: Enable limited access during lockdown (CKI Backport Bot) [RHEL-114434]
+- s390/hypfs: Avoid unnecessary ioctl registration in debugfs (CKI Backport Bot) [RHEL-114434]
+- vsock/virtio: Validate length in packet header before skb_put() (Jon Maloy) [RHEL-114298] {CVE-2025-39718}
+Resolves: RHEL-112874, RHEL-114298, RHEL-114434, RHEL-115730, RHEL-116383, RHEL-116540, RHEL-119236
+
+* Thu Oct 23 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.6.1.el9_7]
+- pstore/ram: Check start of empty przs during init (CKI Backport Bot) [RHEL-122068] {CVE-2023-53331}
+- ixgbe: fix ixgbe_orom_civd_info struct layout (Michal Schmidt) [RHEL-119074]
+- scsi: lpfc: Fix buffer free/clear order in deferred receive path (CKI Backport Bot) [RHEL-119130] {CVE-2025-39841}
+- efivarfs: Fix slab-out-of-bounds in efivarfs_d_compare (CKI Backport Bot) [RHEL-118257] {CVE-2025-39817}
+- SUNRPC: call xs_sock_process_cmsg for all cmsg (Olga Kornievskaia) [RHEL-110810]
+- sunrpc: fix client side handling of tls alerts (Olga Kornievskaia) [RHEL-110810] {CVE-2025-38571}
+- smb: client: fix wrong index reference in smb2_compound_op() (Paulo Alcantara) [RHEL-117880]
+- smb: client: handle unlink(2) of files open by different clients (Paulo Alcantara) [RHEL-117880]
+- smb: client: fix file open check in __cifs_unlink() (Paulo Alcantara) [RHEL-117880]
+- smb: client: fix filename matching of deferred files (Paulo Alcantara) [RHEL-117880]
+- smb: client: fix data loss due to broken rename(2) (Paulo Alcantara) [RHEL-117880]
+- smb: client: fix compound alignment with encryption (Paulo Alcantara) [RHEL-117880]
+- fs/smb: Fix inconsistent refcnt update (Paulo Alcantara) [RHEL-117880] {CVE-2025-39819}
+- sunrpc: fix handling of server side tls alerts (Steve Dickson) [RHEL-111069] {CVE-2025-38566}
+- wifi: cfg80211: sme: cap SSID length in __cfg80211_connect_result() (CKI Backport Bot) [RHEL-117580] {CVE-2025-39849}
+- crypto: seqiv - Handle EBUSY correctly (CKI Backport Bot) [RHEL-117235] {CVE-2023-53373}
+- ibmvnic: Increase max subcrq indirect entries with fallback (Mamatha Inamdar) [RHEL-116187]
+- fs: fix UAF/GPF bug in nilfs_mdt_destroy (CKI Backport Bot) [RHEL-116662] {CVE-2022-50367}
+- firmware: arm_scpi: Ensure scpi_info is not assigned if the probe fails (Charles Mirabile) [RHEL-113837] {CVE-2022-50087}
+- hv_netvsc: Fix panic during namespace deletion with VF (Maxim Levitsky) [RHEL-115070]
+- RDMA/mana_ib: Fix DSCP value in modify QP (Maxim Levitsky) [RHEL-115070]
+- net: mana: Handle Reset Request from MANA NIC (Maxim Levitsky) [RHEL-115070]
+- net: mana: Set tx_packets to post gso processing packet count (Maxim Levitsky) [RHEL-115070]
+- net: mana: Handle unsupported HWC commands (Maxim Levitsky) [RHEL-115070]
+- net: mana: Add handler for hardware servicing events (Maxim Levitsky) [RHEL-115070]
+- RDMA/mana_ib: Add device statistics support (Maxim Levitsky) [RHEL-115070]
+- net: mana: Expose additional hardware counters for drop and TC via ethtool. (Maxim Levitsky) [RHEL-115070]
+- net: mana: Fix warnings for missing export.h header inclusion (Maxim Levitsky) [RHEL-115070]
+- net: mana: Record doorbell physical address in PF mode (Maxim Levitsky) [RHEL-115070]
+- s390/pci: Do not try re-enabling load/store if device is disabled (CKI Backport Bot) [RHEL-114451]
+- s390/pci: Fix stale function handles in error handling (CKI Backport Bot) [RHEL-114451]
+- redhat: enable TDX host config (Paolo Bonzini) [RHEL-27146]
+- KVM: TDX: Explicitly do WBINVD when no more TDX SEAMCALLs (Paolo Bonzini) [RHEL-27146]
+- x86/virt/tdx: Update the kexec section in the TDX documentation (Paolo Bonzini) [RHEL-27146]
+- x86/virt/tdx: Remove the !KEXEC_CORE dependency (Paolo Bonzini) [RHEL-27146]
+- x86/kexec: Disable kexec/kdump on platforms with TDX partial write erratum (Paolo Bonzini) [RHEL-27146]
+- x86/virt/tdx: Mark memory cache state incoherent when making SEAMCALL (Paolo Bonzini) [RHEL-27146]
+- x86/sme: Use percpu boolean to control WBINVD during kexec (Paolo Bonzini) [RHEL-27146]
+- x86/virt/tdx: Avoid indirect calls to TDX assembly functions (Paolo Bonzini) [RHEL-27146]
+- ibmvnic: Use ndo_get_stats64 to fix inaccurate SAR reporting (Mamatha Inamdar) [RHEL-114437]
+- ibmvnic: Fix hardcoded NUM_RX_STATS/NUM_TX_STATS with dynamic sizeof (Mamatha Inamdar) [RHEL-114437]
+- ibmvnic: Add stat for tx direct vs tx batched (Mamatha Inamdar) [RHEL-114437]
+- redhat/configs: Enable CONFIG_MITIGATION_VMSCAPE for x86 (Waiman Long) [RHEL-114272]
+- x86/vmscape: Add old Intel CPUs to affected list (Waiman Long) [RHEL-114272] {CVE-2025-40300}
+- x86/vmscape: Warn when STIBP is disabled with SMT (Waiman Long) [RHEL-114272] {CVE-2025-40300}
+- x86/bugs: Move cpu_bugs_smt_update() down (Waiman Long) [RHEL-114272] {CVE-2025-40300}
+- x86/vmscape: Enable the mitigation (Waiman Long) [RHEL-114272] {CVE-2025-40300}
+- x86/vmscape: Add conditional IBPB mitigation (Waiman Long) [RHEL-114272] {CVE-2025-40300}
+- x86/vmscape: Enumerate VMSCAPE bug (Waiman Long) [RHEL-114272] {CVE-2025-40300}
+- Documentation/hw-vuln: Add VMSCAPE documentation (Waiman Long) [RHEL-114272] {CVE-2025-40300}
+- randomize_kstack: Remove non-functional per-arch entropy filtering (Waiman Long) [RHEL-114272]
+- tunnels: reset the GSO metadata before reusing the skb (Antoine Tenart) [RHEL-113917]
+Resolves: RHEL-110810, RHEL-111069, RHEL-113837, RHEL-113917, RHEL-114272, RHEL-114437, RHEL-114451, RHEL-115070, RHEL-116187, RHEL-116662, RHEL-117235, RHEL-117580, RHEL-117880, RHEL-118257, RHEL-119074, RHEL-119130, RHEL-122068, RHEL-27146
+
 * Fri Oct 17 2025 Augusto Caringi <acaringi@redhat.com> [5.14.0-611.5.1.el9_7]
 - redhat: revert to using redhatsecureboot504 for RHEL UKI (Vitaly Kuznetsov) [RHEL-122230]
 Resolves: RHEL-122230
