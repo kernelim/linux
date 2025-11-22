@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 124.13.1
+%define pkgrelease 124.16.1
 %define kversion 6
-%define tarfile_release 6.12.0-124.13.1.el10_1
+%define tarfile_release 6.12.0-124.16.1.el10_1
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 124.13.1%{?buildid}%{?dist}
+%define specrelease 124.16.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-124.13.1.el10_1
+%define kabiversion 6.12.0-124.16.1.el10_1
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -2006,11 +2006,6 @@ rm -f localversion-next localversion-rt
 	scripts/clang-tools 2> /dev/null
 
 # SBAT data
-%if 0%{?rocky}
-sed -i '2a kernel-uki-virt.rocky,1,RESF,kernel-uki-virt,@KVER,mailto:security@rockylinux.org' %{SOURCE83}
-sed -i '2a kernel-uki-virt-addons.rocky,1,RESF,kernel-uki-virt-addons,@KVER,mailto:security@rockylinux.org' %{SOURCE84}
-%endif
-
 sed -e s,@KVER,%{KVERREL}, -e s,@SBAT_SUFFIX,%{sbat_suffix}, %{SOURCE83} > uki.sbat
 sed -e s,@KVER,%{KVERREL}, -e s,@SBAT_SUFFIX,%{sbat_suffix}, %{SOURCE84} > uki-addons.sbat
 
@@ -4366,10 +4361,32 @@ fi\
 #
 #
 %changelog
-* Mon Nov 24 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-124.13.1
+* Wed Dec 03 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-124.16.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Sat Nov 22 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.16.1.el10_1]
+- bpf: Fix metadata_dst leak __bpf_redirect_neigh_v{4,6} (Xin Long) [RHEL-125759]
+- mm/memory-failure: fix VM_BUG_ON_PAGE(PagePoisoned(page)) when unpoison memory (CKI Backport Bot) [RHEL-119161] {CVE-2025-39883}
+
+* Thu Nov 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.15.1.el10_1]
+- nfsd: handle get_client_locked() failure in nfsd4_setclientid_confirm() (CKI Backport Bot) [RHEL-125623] {CVE-2025-38724}
+- wifi: mt76: free pending offchannel tx frames on wcid cleanup (Jose Ignacio Tornos Martinez) [RHEL-123070]
+- wifi: mt76: do not add non-sta wcid entries to the poll list (Jose Ignacio Tornos Martinez) [RHEL-123070]
+- wifi: mt76: fix linked list corruption (Jose Ignacio Tornos Martinez) [RHEL-123070] {CVE-2025-39918}
+
+* Wed Nov 19 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.14.1.el10_1]
+- ublk: make sure ubq->canceling is set when queue is frozen (Ming Lei) [RHEL-99436] {CVE-2025-22068}
+- e1000e: fix heap overflow in e1000_set_eeprom (Corinna Vinschen) [RHEL-123127] {CVE-2025-39898}
+- i40e: add mask to apply valid bits for itr_idx (Michal Schmidt) [RHEL-123811]
+- i40e: add max boundary check for VF filters (Michal Schmidt) [RHEL-123811] {CVE-2025-39968}
+- i40e: fix validation of VF state in get resources (Michal Schmidt) [RHEL-123811] {CVE-2025-39969}
+- i40e: fix input validation logic for action_meta (Michal Schmidt) [RHEL-123811] {CVE-2025-39970}
+- i40e: fix idx validation in config queues msg (Michal Schmidt) [RHEL-123811] {CVE-2025-39971}
+- i40e: fix idx validation in i40e_validate_queue_map (Michal Schmidt) [RHEL-123811] {CVE-2025-39972}
+- i40e: add validation for ring_len param (Michal Schmidt) [RHEL-123811] {CVE-2025-39973}
+- nvme-multipath: Skip nr_active increments in RETRY disposition (Ewan D. Milne) [RHEL-123689]
 
 * Thu Nov 13 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.13.1.el10_1]
 - NFSv4: handle ERR_GRACE on delegation recalls (Olga Kornievskaia) [RHEL-127623]
