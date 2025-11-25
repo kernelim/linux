@@ -219,6 +219,7 @@ static int __prombss mem_reserve_cnt;
 static cell_t __prombss regbuf[1024];
 
 static bool  __prombss rtas_has_query_cpu_stopped;
+static int __prombss enable_p11_val;
 
 
 /*
@@ -816,6 +817,15 @@ static void __init early_cmdline_parse(void)
 		} else
 			prom_radix_disable = true;
 	}
+
+	opt = prom_strstr(prom_cmd_line, "enable_p11");
+	if (opt) {
+		opt += 12;
+		enable_p11_val = 1;
+	} else {
+		enable_p11_val = 0;
+	}
+
 	if (prom_radix_disable)
 		prom_debug("Radix disabled from cmdline\n");
 
@@ -922,7 +932,7 @@ struct option_vector6 {
 } __packed;
 
 struct ibm_arch_vec {
-	struct { u32 mask, val; } pvrs[14];
+	struct { u32 mask, val; } pvrs[16];
 
 	u8 num_vectors;
 
@@ -978,6 +988,14 @@ static const struct ibm_arch_vec ibm_architecture_vec_template __initconst = {
 		{
 			.mask = cpu_to_be32(0xffff0000), /* POWER10 */
 			.val  = cpu_to_be32(0x00800000),
+		},
+		{
+			.mask = cpu_to_be32(0xffff0000), /* POWER11 */
+			.val  = cpu_to_be32(0x00820000),
+		},
+		{
+			.mask = cpu_to_be32(0xffffffff), /* P11 compliant */
+			.val  = cpu_to_be32(0x0f000007),
 		},
 		{
 			.mask = cpu_to_be32(0xffffffff), /* all 3.1-compliant */
@@ -1308,9 +1326,18 @@ static void __init prom_check_platform_support(void)
 	};
 	int prop_len = prom_getproplen(prom.chosen,
 				       "ibm,arch-vec-5-platform-support");
+	int i;
 
 	/* First copy the architecture vec template */
 	ibm_architecture_vec = ibm_architecture_vec_template;
+
+	if (!enable_p11_val) {
+		for (i=0;i<16; i++) {
+			if ((ibm_architecture_vec.pvrs[i].val == cpu_to_be32(0x0f000007)) ||
+			    (ibm_architecture_vec.pvrs[i].val == cpu_to_be32(0x00820000)))
+				ibm_architecture_vec.pvrs[i].val = 0x0;
+		}
+	}
 
 	if (prop_len > 1) {
 		int i;

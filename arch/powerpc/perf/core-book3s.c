@@ -2510,7 +2510,7 @@ static int power_pmu_prepare_cpu(unsigned int cpu)
 	return 0;
 }
 
-int register_power_pmu(struct power_pmu *pmu)
+int __init register_power_pmu(struct power_pmu *pmu)
 {
 	if (ppmu)
 		return -EBUSY;		/* something's already registered */
@@ -2553,6 +2553,8 @@ static int __init init_ppc64_pmu(void)
 	else if (!init_power9_pmu())
 		return 0;
 	else if (!init_power10_pmu())
+		return 0;
+	else if (!init_power11_pmu())
 		return 0;
 	else if (!init_ppc970_pmu())
 		return 0;

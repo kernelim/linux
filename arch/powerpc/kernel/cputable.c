@@ -130,6 +130,10 @@ extern void __restore_cpu_e6500(void);
 				 PPC_FEATURE2_ISEL | PPC_FEATURE2_TAR | \
 				 PPC_FEATURE2_VEC_CRYPTO)
 
+#define COMMON_USER_POWER11	COMMON_USER_POWER10
+#define COMMON_USER2_POWER11	COMMON_USER2_POWER10
+
+
 #ifdef CONFIG_PPC_BOOK3E_64
 #define COMMON_USER_BOOKE	(COMMON_USER_PPC64 | PPC_FEATURE_BOOKE)
 #else
@@ -393,6 +397,20 @@ static struct cpu_spec __initdata cpu_specs[] = {
 		.cpu_restore		= __restore_cpu_power10,
 		.platform		= "power10",
 	},
+	{       /* 3.1-compliant processor, i.e. Power11 "architected" mode */
+		.pvr_mask               = 0xffffffff,
+		.pvr_value              = 0x0f000007,
+		.cpu_name               = "Power11 (architected)",
+		.cpu_features           = CPU_FTRS_POWER11,
+		.cpu_user_features      = COMMON_USER_POWER11,
+		.cpu_user_features2     = COMMON_USER2_POWER11,
+		.mmu_features           = MMU_FTRS_POWER11,
+		.icache_bsize           = 128,
+		.dcache_bsize           = 128,
+		.cpu_setup              = __setup_cpu_power10,
+		.cpu_restore            = __restore_cpu_power10,
+		.platform               = "power11",
+	},
 	{	/* Power7 */
 		.pvr_mask		= 0xffff0000,
 		.pvr_value		= 0x003f0000,
@@ -582,6 +600,23 @@ static struct cpu_spec __initdata cpu_specs[] = {
 		.cpu_restore		= __restore_cpu_power10,
 		.machine_check_early	= __machine_check_early_realmode_p10,
 		.platform		= "power10",
+	},
+	{       /* Power11 */
+		.pvr_mask		= 0xffff0000,
+		.pvr_value		= 0x00820000,
+		.cpu_name		= "Power11 (raw)",
+		.cpu_features		= CPU_FTRS_POWER11,
+		.cpu_user_features	= COMMON_USER_POWER11,
+		.cpu_user_features2	= COMMON_USER2_POWER11,
+		.mmu_features		= MMU_FTRS_POWER11,
+		.icache_bsize		= 128,
+		.dcache_bsize		= 128,
+		.num_pmcs		= 6,
+		.pmc_type		= PPC_PMC_IBM,
+		.cpu_setup		= __setup_cpu_power10,
+		.cpu_restore		= __restore_cpu_power10,
+		.machine_check_early	= __machine_check_early_realmode_p10,
+		.platform		= "power11",
 	},
 	{	/* Cell Broadband Engine */
 		.pvr_mask		= 0xffff0000,

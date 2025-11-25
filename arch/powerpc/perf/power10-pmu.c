@@ -593,7 +593,7 @@ static struct power_pmu power10_pmu = {
 	.check_attr_config	= power10_check_attr_config,
 };
 
-int init_power10_pmu(void)
+int __init init_power10_pmu(void)
 {
 	unsigned int pvr;
 	int rc;
@@ -618,6 +618,33 @@ int init_power10_pmu(void)
 	}
 
 	rc = register_power_pmu(&power10_pmu);
+	if (rc)
+		return rc;
+
+	/* Tell userspace that EBB is supported */
+	cur_cpu_spec->cpu_user_features2 |= PPC_FEATURE2_EBB;
+
+	return 0;
+}
+
+static struct power_pmu power11_pmu;
+
+int __init init_power11_pmu(void)
+{
+	unsigned int pvr;
+	int rc;
+
+	pvr = mfspr(SPRN_PVR);
+	if (PVR_VER(pvr) != PVR_POWER11)
+		return -ENODEV;
+
+	/* Set the PERF_REG_EXTENDED_MASK here */
+	PERF_REG_EXTENDED_MASK = PERF_REG_PMU_MASK_31;
+
+	power11_pmu = power10_pmu;
+	power11_pmu.name = "Power11";
+
+	rc = register_power_pmu(&power11_pmu);
 	if (rc)
 		return rc;
 
