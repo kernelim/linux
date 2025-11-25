@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 611.9.1
+%define pkgrelease 611.11.1
 %define kversion 5
-%define tarfile_release 5.14.0-611.9.1.el9_7
+%define tarfile_release 5.14.0-611.11.1.el9_7
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 611.9.1%{?buildid}%{?dist}
+%define specrelease 611.11.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-611.9.1.el9_7
+%define kabiversion 5.14.0-611.11.1.el9_7
 
 #
 # End of genspec.sh variables
@@ -3695,9 +3695,31 @@ fi
 #
 #
 %changelog
-* Mon Nov 24 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-611.9.1
+* Wed Dec 03 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-611.11.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Tue Nov 25 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.11.1.el9_7]
+- tcp: Don't call reqsk_fastopen_remove() in tcp_conn_request(). (Antoine Tenart) [RHEL-120668]
+- tcp: Clear tcp_sk(sk)->fastopen_rsk in tcp_disconnect(). (Antoine Tenart) [RHEL-120668] {CVE-2025-39955}
+- Bluetooth: MGMT: fix crash in set_mesh_sync and set_mesh_complete (CKI Backport Bot) [RHEL-122892] {CVE-2025-39981}
+- Bluetooth: MGMT: Fix sparse errors (CKI Backport Bot) [RHEL-122892] {CVE-2025-39981}
+- Bluetooth: MGMT: Fix possible UAFs (CKI Backport Bot) [RHEL-122892] {CVE-2025-39981}
+- Bluetooth: hci_sync: fix set_local_name race condition (CKI Backport Bot) [RHEL-122892] {CVE-2025-39981}
+- Bluetooth: MGMT: set_mesh: update LE scan interval and window (CKI Backport Bot) [RHEL-122892] {CVE-2025-39981}
+- Bluetooth: MGMT: Protect mgmt_pending list with its own lock (CKI Backport Bot) [RHEL-122892] {CVE-2025-39981}
+- Bluetooth: MGMT: Fix UAF on mgmt_remove_adv_monitor_complete (CKI Backport Bot) [RHEL-122892] {CVE-2025-39981}
+- wifi: mt76: free pending offchannel tx frames on wcid cleanup (Jose Ignacio Tornos Martinez) [RHEL-123064]
+- wifi: mt76: do not add non-sta wcid entries to the poll list (Jose Ignacio Tornos Martinez) [RHEL-123064]
+- wifi: mt76: fix linked list corruption (Jose Ignacio Tornos Martinez) [RHEL-123064] {CVE-2025-39918}
+
+* Thu Nov 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.10.1.el9_7]
+- ice: ice_adapter: release xa entry on adapter allocation failure (CKI Backport Bot) [RHEL-128469] {CVE-2025-40185}
+- iommu/vt-d: Disallow dirty tracking if incoherent page walk (Eder Zulian) [RHEL-125478] {CVE-2025-40058}
+- e1000e: fix heap overflow in e1000_set_eeprom (Corinna Vinschen) [RHEL-123111] {CVE-2025-39898}
+- nfsd: handle get_client_locked() failure in nfsd4_setclientid_confirm() (CKI Backport Bot) [RHEL-125604] {CVE-2025-38724}
+- wifi: cfg80211: fix use-after-free in cmp_bss() (CKI Backport Bot) [RHEL-122874] {CVE-2025-39864}
+- platform/x86/intel: power-domains: Use topology_logical_package_id() for package ID (Jay Shin) [RHEL-116680]
 
 * Sat Nov 15 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.9.1.el9_7]
 - NFSv4: handle ERR_GRACE on delegation recalls (Olga Kornievskaia) [RHEL-124651]
