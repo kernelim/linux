@@ -96,3 +96,4 @@ parameters, info versions, and other features it supports.
    prestera
    iosm
    sfc
+   zl3073x
