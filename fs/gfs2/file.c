@@ -1414,6 +1414,7 @@ static int gfs2_lock(struct file *file, int cmd, struct file_lock *fl)
 	struct gfs2_inode *ip = GFS2_I(file->f_mapping->host);
 	struct gfs2_sbd *sdp = GFS2_SB(file->f_mapping->host);
 	struct lm_lockstruct *ls = &sdp->sd_lockstruct;
+	int ret;
 
 	if (!(fl->fl_flags & FL_POSIX))
 		return -ENOLCK;
@@ -1430,12 +1431,18 @@ static int gfs2_lock(struct file *file, int cmd, struct file_lock *fl)
 			locks_lock_file_wait(file, fl);
 		return -EIO;
 	}
-	if (IS_GETLK(cmd))
-		return dlm_posix_get(ls->ls_dlm, ip->i_no_addr, file, fl);
-	else if (fl->fl_type == F_UNLCK)
-		return dlm_posix_unlock(ls->ls_dlm, ip->i_no_addr, file, fl);
-	else
-		return dlm_posix_lock(ls->ls_dlm, ip->i_no_addr, file, cmd, fl);
+	down_read(&ls->ls_sem);
+	ret = -ENODEV;
+	if (likely(ls->ls_dlm != NULL)) {
+		if (IS_GETLK(cmd))
+			ret = dlm_posix_get(ls->ls_dlm, ip->i_no_addr, file, fl);
+		else if (fl->fl_type == F_UNLCK)
+			ret = dlm_posix_unlock(ls->ls_dlm, ip->i_no_addr, file, fl);
+		else
+			ret = dlm_posix_lock(ls->ls_dlm, ip->i_no_addr, file, cmd, fl);
+	}
+	up_read(&ls->ls_sem);
+	return ret;
 }
 
 static int do_flock(struct file *file, int cmd, struct file_lock *fl)
