@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 124.16.1
+%define pkgrelease 124.20.1
 %define kversion 6
-%define tarfile_release 6.12.0-124.16.1.el10_1
+%define tarfile_release 6.12.0-124.20.1.el10_1
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 124.16.1%{?buildid}%{?dist}
+%define specrelease 124.20.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-124.16.1.el10_1
+%define kabiversion 6.12.0-124.20.1.el10_1
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4361,10 +4361,74 @@ fi\
 #
 #
 %changelog
-* Wed Dec 03 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-124.16.1
+* Wed Dec 10 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-124.20.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Tue Dec 02 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.20.1.el10_1]
+- iommu/vt-d: Disallow dirty tracking if incoherent page walk (CKI Backport Bot) [RHEL-125482] {CVE-2025-40058}
+- net/mlx5: fs, fix UAF in flow counter release (Michal Schmidt) [RHEL-124432] {CVE-2025-39979}
+- dpll: zl3073x: Fix output pin registration (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: Handle missing or corrupted flash configuration (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: Refactor DPLL initialization (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: ZL3073X_I2C and ZL3073X_SPI should depend on NET (Ivan Vecera) [RHEL-114795]
+- dpll: Make ZL3073X invisible (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: Fix build failure (Ivan Vecera) [RHEL-114795]
+- redhat/configs: enable CONFIG_ZL3073X* (Ivan Vecera) [RHEL-114795]
+- redhat/configs: enable CONFIG_I2C_MUX_PCA954x on x86 (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: Add support to get fractional frequency offset (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: Add support to adjust phase (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: Implement phase offset monitor feature (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: Add support to get phase offset on connected input pin (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: Add support to get/set esync on pins (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: Add support to get/set frequency on pins (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: Implement input pin state setting in automatic mode (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: Add support to get/set priority on input pins (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: Implement input pin selection in manual mode (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: Register DPLL devices and pins (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: Read DPLL types and pin properties from system firmware (Ivan Vecera) [RHEL-114795]
+- dpll: zl3073x: Fetch invariants during probe (Ivan Vecera) [RHEL-114795]
+- dpll: Add basic Microchip ZL3073x support (Ivan Vecera) [RHEL-114795]
+- dt-bindings: dpll: Add support for Microchip Azurite chip family (Ivan Vecera) [RHEL-114795]
+- dt-bindings: dpll: Add DPLL device and pin (Ivan Vecera) [RHEL-114795]
+- idpf: set mac type when adding and removing MAC filters (CKI Backport Bot) [RHEL-123372]
+- crypto: ccp - Always pass in an error pointer to __sev_platform_shutdown_locked() (Lenny Szubowicz) [RHEL-76557]
+- crypto: ccp - Fix SNP panic notifier unregistration (Lenny Szubowicz) [RHEL-76557]
+- crypto: ccp - Fix dereferencing uninitialized error pointer (Lenny Szubowicz) [RHEL-76557]
+- crypto: ccp - Fix __sev_snp_shutdown_locked (Lenny Szubowicz) [RHEL-76557]
+- crypto: ccp - Move SEV/SNP Platform initialization to KVM (Lenny Szubowicz) [RHEL-76557]
+- KVM: SVM: Add support to initialize SEV/SNP functionality in KVM (Lenny Szubowicz) [RHEL-76557]
+- crypto: ccp - Add new SEV/SNP platform shutdown API (Lenny Szubowicz) [RHEL-76557]
+- crypto: ccp - Register SNP panic notifier only if SNP is enabled (Lenny Szubowicz) [RHEL-76557]
+- crypto: ccp - Reset TMR size at SNP Shutdown (Lenny Szubowicz) [RHEL-76557]
+- crypto: ccp - Ensure implicit SEV/SNP init and shutdown in ioctls (Lenny Szubowicz) [RHEL-76557]
+- crypto: ccp - Move dev_info/err messages for SEV/SNP init and shutdown (Lenny Szubowicz) [RHEL-76557]
+- crypto: ccp - Abort doing SEV INIT if SNP INIT fails (Lenny Szubowicz) [RHEL-76557]
+- s390/pci: Do not try re-enabling load/store if device is disabled (CKI Backport Bot) [RHEL-114448]
+- s390/pci: Fix stale function handles in error handling (CKI Backport Bot) [RHEL-114448]
+
+* Sat Nov 29 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.19.1.el10_1]
+- Bluetooth: MGMT: fix crash in set_mesh_sync and set_mesh_complete (CKI Backport Bot) [RHEL-122901] {CVE-2025-39981}
+- Bluetooth: MGMT: Fix sparse errors (CKI Backport Bot) [RHEL-122901] {CVE-2025-39981}
+- Bluetooth: MGMT: Fix possible UAFs (CKI Backport Bot) [RHEL-122901] {CVE-2025-39981}
+- Bluetooth: hci_sync: fix set_local_name race condition (CKI Backport Bot) [RHEL-122901] {CVE-2025-39981}
+- Bluetooth: MGMT: set_mesh: update LE scan interval and window (CKI Backport Bot) [RHEL-122901] {CVE-2025-39981}
+- Bluetooth: MGMT: Protect mgmt_pending list with its own lock (CKI Backport Bot) [RHEL-122901] {CVE-2025-39981}
+- Bluetooth: MGMT: Fix UAF on mgmt_remove_adv_monitor_complete (CKI Backport Bot) [RHEL-122901] {CVE-2025-39981}
+- Bluetooth: hci_event: Fix UAF in hci_conn_tx_dequeue (CKI Backport Bot) [RHEL-124134] {CVE-2025-39983}
+- can: j1939: add missing calls in NETDEV_UNREGISTER notification handler (CKI Backport Bot) [RHEL-124110] {CVE-2025-39925}
+- can: j1939: implement NETDEV_UNREGISTER notification handler (CKI Backport Bot) [RHEL-124110] {CVE-2025-39925}
+- Bluetooth: hci_event: Fix UAF in hci_acl_create_conn_sync (CKI Backport Bot) [RHEL-123824] {CVE-2025-39982}
+
+* Thu Nov 27 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.18.1.el10_1]
+- ice: ice_adapter: release xa entry on adapter allocation failure (CKI Backport Bot) [RHEL-128472] {CVE-2025-40185}
+- cifs: Fix oops due to uninitialised variable (CKI Backport Bot) [RHEL-120562] {CVE-2025-38737}
+
+* Tue Nov 25 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.17.1.el10_1]
+- x86/hyperv: Fix kdump on Azure CVMs (Li Tian) [RHEL-129777]
+- tunnels: reset the GSO metadata before reusing the skb (Antoine Tenart) [RHEL-113919]
+- io_uring/waitid: always prune wait queue entry in io_waitid_wait() (CKI Backport Bot) [RHEL-124974] {CVE-2025-40047}
 
 * Sat Nov 22 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.16.1.el10_1]
 - bpf: Fix metadata_dst leak __bpf_redirect_neigh_v{4,6} (Xin Long) [RHEL-125759]
