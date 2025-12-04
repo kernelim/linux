@@ -1,3 +1,8 @@
+* Thu Dec 04 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.21.1.el10_1]
+- CVE-2025-38499 kernel: clone_private_mnt(): make sure that caller has CAP_SYS_ADMIN in the right userns (Abhi Das) [RHEL-129282] {CVE-2025-38499}
+- net: tun: Update napi->skb after XDP process (CKI Backport Bot) [RHEL-122247] {CVE-2025-39984}
+Resolves: RHEL-122247, RHEL-129282
+
 * Tue Dec 02 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.20.1.el10_1]
 - iommu/vt-d: Disallow dirty tracking if incoherent page walk (CKI Backport Bot) [RHEL-125482] {CVE-2025-40058}
 - net/mlx5: fs, fix UAF in flow counter release (Michal Schmidt) [RHEL-124432] {CVE-2025-39979}

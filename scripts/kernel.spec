@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 124.20.1
+%define pkgrelease 124.21.1
 %define kversion 6
-%define tarfile_release 6.12.0-124.20.1.el10_1
+%define tarfile_release 6.12.0-124.21.1.el10_1
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 124.20.1%{?buildid}%{?dist}
+%define specrelease 124.21.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-124.20.1.el10_1
+%define kabiversion 6.12.0-124.21.1.el10_1
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4361,10 +4361,14 @@ fi\
 #
 #
 %changelog
-* Wed Dec 10 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-124.20.1
+* Fri Dec 19 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-124.21.1
 - Porting to Rocky Linux 10, debranding and Rocky Linux branding
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Thu Dec 04 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.21.1.el10_1]
+- CVE-2025-38499 kernel: clone_private_mnt(): make sure that caller has CAP_SYS_ADMIN in the right userns (Abhi Das) [RHEL-129282] {CVE-2025-38499}
+- net: tun: Update napi->skb after XDP process (CKI Backport Bot) [RHEL-122247] {CVE-2025-39984}
 
 * Tue Dec 02 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.20.1.el10_1]
 - iommu/vt-d: Disallow dirty tracking if incoherent page walk (CKI Backport Bot) [RHEL-125482] {CVE-2025-40058}
