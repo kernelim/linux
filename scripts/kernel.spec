@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 611.13.1
+%define pkgrelease 611.16.1
 %define kversion 5
-%define tarfile_release 5.14.0-611.13.1.el9_7
+%define tarfile_release 5.14.0-611.16.1.el9_7
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 611.13.1%{?buildid}%{?dist}
+%define specrelease 611.16.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-611.13.1.el9_7
+%define kabiversion 5.14.0-611.16.1.el9_7
 
 #
 # End of genspec.sh variables
@@ -3695,9 +3695,33 @@ fi
 #
 #
 %changelog
-* Wed Dec 10 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-611.13.1
+* Fri Dec 19 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-611.16.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Sun Dec 07 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.16.1.el9_7]
+- CVE-2025-38499 kernel: clone_private_mnt(): make sure that caller has CAP_SYS_ADMIN in the right userns (Abhi Das) [RHEL-129261] {CVE-2025-38499}
+- tls: wait for pending async decryptions if tls_strp_msg_hold fails (CKI Backport Bot) [RHEL-128860] {CVE-2025-40176}
+
+* Thu Dec 04 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.15.1.el9_7]
+- nbd: override creds to kernel when calling sock_{send,recv}msg() (Ming Lei) [RHEL-123845]
+- scsi: lpfc: avoid crashing in lpfc_nlp_get() if lpfc_nodelist was freed (Ewan D. Milne) [RHEL-127982]
+- scsi: lpfc: Fix reusing an ndlp that is marked NLP_DROPPED during FLOGI (Ewan D. Milne) [RHEL-127982]
+- crypto: ccp - Always pass in an error pointer to __sev_platform_shutdown_locked() (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Fix SNP panic notifier unregistration (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Fix dereferencing uninitialized error pointer (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Fix __sev_snp_shutdown_locked (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Move SEV/SNP Platform initialization to KVM (Lenny Szubowicz) [RHEL-70006]
+- KVM: SVM: Add support to initialize SEV/SNP functionality in KVM (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Add new SEV/SNP platform shutdown API (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Register SNP panic notifier only if SNP is enabled (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Reset TMR size at SNP Shutdown (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Ensure implicit SEV/SNP init and shutdown in ioctls (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Move dev_info/err messages for SEV/SNP init and shutdown (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Abort doing SEV INIT if SNP INIT fails (Lenny Szubowicz) [RHEL-70006]
+
+* Tue Dec 02 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.14.1.el9_7]
+- iommufd: Fix race during abort for file descriptors (Eder Zulian) [RHEL-123786] {CVE-2025-39966}
 
 * Sat Nov 29 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.13.1.el9_7]
 - can: j1939: add missing calls in NETDEV_UNREGISTER notification handler (CKI Backport Bot) [RHEL-124105] {CVE-2025-39925}
