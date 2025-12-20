@@ -57,9 +57,11 @@ struct landlock_ruleset_attr {
  *
  * - %LANDLOCK_CREATE_RULESET_VERSION: Get the highest supported Landlock ABI
  *   version.
+ * - %LANDLOCK_CREATE_RULESET_ERRATA: Get a bitmask of fixed issues.
  */
 /* clang-format off */
 #define LANDLOCK_CREATE_RULESET_VERSION			(1U << 0)
+#define LANDLOCK_CREATE_RULESET_ERRATA			(1U << 1)
 /* clang-format on */
 
 /**
@@ -296,9 +298,12 @@ struct landlock_net_port_attr {
  * - %LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET: Restrict a sandboxed process from
  *   connecting to an abstract UNIX socket created by a process outside the
  *   related Landlock domain (e.g. a parent domain or a non-sandboxed process).
+ * - %LANDLOCK_SCOPE_SIGNAL: Restrict a sandboxed process from sending a signal
+ *   to another process outside the domain.
  */
 /* clang-format off */
 #define LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET		(1ULL << 0)
+#define LANDLOCK_SCOPE_SIGNAL		                (1ULL << 1)
 /* clang-format on*/
 
 #endif /* _UAPI_LINUX_LANDLOCK_H */

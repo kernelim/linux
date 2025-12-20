@@ -27,7 +27,9 @@
 #include <linux/mount.h>
 #include <linux/namei.h>
 #include <linux/path.h>
+#include <linux/pid.h>
 #include <linux/rcupdate.h>
+#include <linux/sched/signal.h>
 #include <linux/spinlock.h>
 #include <linux/stat.h>
 #include <linux/types.h>
@@ -1636,6 +1638,54 @@ static int hook_file_ioctl_compat(struct file *file, unsigned int cmd,
 	return -EACCES;
 }
 
+/*
+ * Always allow sending signals between threads of the same process.  This
+ * ensures consistency with hook_task_kill().
+ */
+static bool control_current_fowner(struct fown_struct *const fown)
+{
+	struct task_struct *p;
+
+	/*
+	 * Lock already held by __f_setown(), see commit 26f204380a3c ("fs: Fix
+	 * file_set_fowner LSM hook inconsistencies").
+	 */
+	lockdep_assert_held(&fown->lock);
+
+	/*
+	 * Some callers (e.g. fcntl_dirnotify) may not be in an RCU read-side
+	 * critical section.
+	 */
+	guard(rcu)();
+	p = pid_task(fown->pid, fown->pid_type);
+	if (!p)
+		return true;
+
+	return !same_thread_group(p, current);
+}
+
+static void hook_file_set_fowner(struct file *file)
+{
+	struct landlock_ruleset *prev_dom;
+	struct landlock_ruleset *new_dom = NULL;
+
+	if (control_current_fowner(&file->f_owner)) {
+		new_dom = landlock_get_current_domain();
+		landlock_get_ruleset(new_dom);
+	}
+
+	prev_dom = landlock_file(file)->fown_domain;
+	landlock_file(file)->fown_domain = new_dom;
+
+	/* May be called in an RCU read-side critical section. */
+	landlock_put_ruleset_deferred(prev_dom);
+}
+
+static void hook_file_free_security(struct file *file)
+{
+	landlock_put_ruleset_deferred(landlock_file(file)->fown_domain);
+}
+
 static struct security_hook_list landlock_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(inode_free_security, hook_inode_free_security),
 
@@ -1660,6 +1710,8 @@ static struct security_hook_list landlock_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(file_truncate, hook_file_truncate),
 	LSM_HOOK_INIT(file_ioctl, hook_file_ioctl),
 	LSM_HOOK_INIT(file_ioctl_compat, hook_file_ioctl_compat),
+	LSM_HOOK_INIT(file_set_fowner, hook_file_set_fowner),
+	LSM_HOOK_INIT(file_free_security, hook_file_free_security),
 };
 
 __init void landlock_add_fs_hooks(void)

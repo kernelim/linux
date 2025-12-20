@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 611.16.1
+%define pkgrelease 611.20.1
 %define kversion 5
-%define tarfile_release 5.14.0-611.16.1.el9_7
+%define tarfile_release 5.14.0-611.20.1.el9_7
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 611.16.1%{?buildid}%{?dist}
+%define specrelease 611.20.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-611.16.1.el9_7
+%define kabiversion 5.14.0-611.20.1.el9_7
 
 #
 # End of genspec.sh variables
@@ -789,7 +789,19 @@ Source2: kernel.changelog
 %define secureboot_ca_0 %{_datadir}/pki/sb-certs/secureboot-ca-%{_arch}.cer
 %define secureboot_key_0 %{_datadir}/pki/sb-certs/secureboot-kernel-%{_arch}.cer
 
+%if 0%{?centos}
 %define pesign_name_0 rockybootsigningcert
+%else
+%ifarch x86_64 aarch64
+%define pesign_name_0 rockybootsigningcert
+%endif
+%ifarch s390x
+%define pesign_name_0 rockybootsigningcert
+%endif
+%ifarch ppc64le
+%define pesign_name_0 rockybootsigningcert
+%endif
+%endif
 
 # signkernel
 %endif
@@ -893,6 +905,7 @@ Source115: rocky-nvidiagpuoot101-aarch64.x509
 %endif
 
 %define ima_signing_cert %{SOURCE103}
+
 %define ima_cert_name ima.cer
 
 Source150: dracut-virt.conf
@@ -1094,10 +1107,10 @@ This package provides debug information for the libperf package.
 %package -n kernel-tools
 Summary: Assortment of tools for the Linux kernel
 %ifarch %{cpupowerarchs}
-Provides: cpupowerutils = 1:009-0.6.p1
+Provides:  cpupowerutils = 1:009-0.6.p1
 Obsoletes: cpupowerutils < 1:009-0.6.p1
-Provides: cpufreq-utils = 1:009-0.6.p1
-Provides: cpufrequtils = 1:009-0.6.p1
+Provides:  cpufreq-utils = 1:009-0.6.p1
+Provides:  cpufrequtils = 1:009-0.6.p1
 Obsoletes: cpufreq-utils < 1:009-0.6.p1
 Obsoletes: cpufrequtils < 1:009-0.6.p1
 Obsoletes: cpuspeed < 1:1.5-16
@@ -1118,7 +1131,7 @@ from the kernel source.
 Summary: Assortment of tools for the Linux kernel
 Requires: kernel-tools = %{version}-%{release}
 %ifarch %{cpupowerarchs}
-Provides: cpupowerutils-devel = 1:009-0.6.p1
+Provides:  cpupowerutils-devel = 1:009-0.6.p1
 Obsoletes: cpupowerutils-devel < 1:009-0.6.p1
 %endif
 Requires: kernel-tools-libs = %{version}-%{release}
@@ -1197,8 +1210,8 @@ Summary: gcov graph and source files for coverage data collection.\
 Summary: The Rocky Linux kernel ABI symbol stablelists
 AutoReqProv: no
 %description -n kernel-abi-stablelists
-The kABI package contains information pertaining to the Rocky
-Linux kernel ABI, including lists of kernel symbols that are needed by
+The kABI package contains information pertaining to the Rocky Linux
+kernel ABI, including lists of kernel symbols that are needed by
 external Linux kernel modules, and a yum plugin to aid enforcement.
 
 %if %{with_kabidw_base}
@@ -1207,8 +1220,8 @@ Summary: The baseline dataset for kABI verification using DWARF data
 Group: System Environment/Kernel
 AutoReqProv: no
 %description kernel-kabidw-base-internal
-The package contains data describing the current ABI of the Rocky
-Linux kernel, suitable for the kabi-dw tool.
+The package contains data describing the current ABI of the Rocky Linux
+kernel, suitable for the kabi-dw tool.
 %endif
 
 #
@@ -1646,6 +1659,7 @@ ApplyOptionalPatch patch-%{patchversion}-redhat.patch
 %endif
 
 ApplyOptionalPatch linux-kernel-test.patch
+ApplyOptionalPatch 1000-debrand-some-messages.patch
 ApplyOptionalPatch 1000-debrand-some-messages.patch
 
 # END OF PATCH APPLICATIONS
@@ -3695,9 +3709,37 @@ fi
 #
 #
 %changelog
-* Fri Dec 19 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-611.16.1
-- Porting to Rocky Linux 9, debranding and Rocky branding
-- Ensure aarch64 kernel is not compressed
+* Thu Jan 15 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-611.20.1
+- Replace sbat with Rocky Linux sbat (label)
+- Change bug tracker URL (label)
+- Ensure appended release in sbat is removed
+
+* Sat Dec 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.20.1.el9_7]
+- HID: multitouch: fix slab out-of-bounds access in mt_report_fixup() (CKI Backport Bot) [RHEL-124607] {CVE-2025-39806}
+- sctp: avoid NULL dereference when chunk data buffer is missing (CKI Backport Bot) [RHEL-134001] {CVE-2025-40240}
+- selftests/landlock: Add a new test for setuid() (Štěpán Horáček) [RHEL-132712]
+- selftests/landlock: Split signal_scoping_threads tests (Štěpán Horáček) [RHEL-132712]
+- landlock: Always allow signals between threads of the same process (Štěpán Horáček) [RHEL-132712]
+- landlock: Prepare to add second errata (Štěpán Horáček) [RHEL-132712]
+- landlock: Add the errata interface (Štěpán Horáček) [RHEL-132712]
+- selftests/landlock: Test signal scoping for threads (Štěpán Horáček) [RHEL-132712]
+- selftests/landlock: Test signal scoping (Štěpán Horáček) [RHEL-132712]
+- landlock: Add signal scoping (Štěpán Horáček) [RHEL-132712]
+
+* Thu Dec 18 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.19.1.el9_7]
+- scsi: st: Skip buffer flush for information ioctls (John Meneghini) [RHEL-133543]
+- scsi: st: Separate st-unique ioctl handling from SCSI common ioctl handling (John Meneghini) [RHEL-133543]
+- audit: fix out-of-bounds read in audit_compare_dname_path() (Richard Guy Briggs) [RHEL-119176] {CVE-2025-39840}
+
+* Sat Dec 13 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.18.1.el9_7]
+- NFS: remove revoked delegation from server's delegation list (Benjamin Coddington) [RHEL-134237]
+- redhat: use RELEASE_LOCALVERSION also for dist-get-tag (Jan Stancek)
+- redhat: introduce RELEASE_LOCALVERSION variable (Jan Stancek)
+
+* Thu Dec 11 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.17.1.el9_7]
+- smb: client: handle lack of IPC in dfs_cache_refresh() (Paulo Alcantara) [RHEL-126165]
+- smb: client: get rid of d_drop() in cifs_do_rename() (Paulo Alcantara) [RHEL-124917]
+- mm/memory-failure: fix VM_BUG_ON_PAGE(PagePoisoned(page)) when unpoison memory (CKI Backport Bot) [RHEL-119150] {CVE-2025-39883}
 
 * Sun Dec 07 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.16.1.el9_7]
 - CVE-2025-38499 kernel: clone_private_mnt(): make sure that caller has CAP_SYS_ADMIN in the right userns (Abhi Das) [RHEL-129261] {CVE-2025-38499}
