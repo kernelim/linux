@@ -1,3 +1,55 @@
+* Sat Dec 27 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.27.1.el10_1]
+- arm64: errata: Expand speculative SSBS workaround for Cortex-A720AE (Waiman Long) [RHEL-120684]
+- arm64: cputype: Add Cortex-A720AE definitions (Waiman Long) [RHEL-120684]
+- arm64: errata: Add missing sentinels to Spectre-BHB MIDR arrays (Waiman Long) [RHEL-120684]
+- arm64: Add support for HIP09 Spectre-BHB mitigation (Waiman Long) [RHEL-120684]
+- arm64: errata: Add newer ARM cores to the spectre_bhb_loop_affected() lists (Waiman Long) [RHEL-120684]
+- arm64: cputype: Add MIDR_CORTEX_A76AE (Waiman Long) [RHEL-120684]
+- arm64: errata: Add KRYO 2XX/3XX/4XX silver cores to Spectre BHB safe list (Waiman Long) [RHEL-120684]
+- kmem/tracing: add kmem name to kmem_cache_alloc tracepoint (Charles Haithcock) [RHEL-129882]
+- mm: memory-tiering: fix PGPROMOTE_CANDIDATE counting (Rafael Aquini) [RHEL-128383]
+Resolves: RHEL-120684, RHEL-128383, RHEL-129882
+
+* Tue Dec 23 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.26.1.el10_1]
+- usb: dwc3: Fix race condition between concurrent dwc3_remove_requests() call paths (CKI Backport Bot) [RHEL-137150] {CVE-2025-68287}
+- drm/vmwgfx: Validate command header size against SVGA_CMD_MAX_DATASIZE (CKI Backport Bot) [RHEL-134431] {CVE-2025-40277}
+- net: phylink: add lock for serializing concurrent pl->phydev writes with resolver (CKI Backport Bot) [RHEL-129812] {CVE-2025-39905}
+Resolves: RHEL-129812, RHEL-134431, RHEL-137150
+
+* Sat Dec 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.25.1.el10_1]
+- sctp: avoid NULL dereference when chunk data buffer is missing (CKI Backport Bot) [RHEL-134010] {CVE-2025-40240}
+- HID: i2c-hid: Resolve touchpad issues on Dell systems during S4 (CKI Backport Bot) [RHEL-128281]
+- HID: multitouch: fix slab out-of-bounds access in mt_report_fixup() (CKI Backport Bot) [RHEL-124610] {CVE-2025-39806}
+- inetpeer: do not get a refcount in inet_getpeer() (Guillaume Nault) [RHEL-115287]
+- inetpeer: update inetpeer timestamp in inet_getpeer() (Guillaume Nault) [RHEL-115287]
+- inetpeer: remove create argument of inet_getpeer() (Guillaume Nault) [RHEL-115287]
+- inetpeer: remove create argument of inet_getpeer_v[46]() (Guillaume Nault) [RHEL-115287]
+Resolves: RHEL-115287, RHEL-124610, RHEL-128281, RHEL-134010
+
+* Tue Dec 16 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.24.1.el10_1]
+- audit: fix out-of-bounds read in audit_compare_dname_path() (Richard Guy Briggs) [RHEL-119185] {CVE-2025-39840}
+Resolves: RHEL-119185
+
+* Sat Dec 13 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.23.1.el10_1]
+- redhat: use RELEASE_LOCALVERSION also for dist-get-tag (Jan Stancek)
+- redhat: introduce RELEASE_LOCALVERSION variable (Jan Stancek)
+- iommufd: Fix race during abort for file descriptors (Eder Zulian) [RHEL-123789] {CVE-2025-39966}
+- smb: client: handle lack of IPC in dfs_cache_refresh() (Paulo Alcantara) [RHEL-126227]
+- mm: slub: avoid wake up kswapd in set_track_prepare (Audra Mitchell) [RHEL-125522] {CVE-2025-39843}
+- dpll: zl3073x: Increase maximum size of flash utility (Ivan Vecera) [RHEL-116157]
+- dpll: zl3073x: Fix double free in zl3073x_devlink_flash_update() (Ivan Vecera) [RHEL-116157]
+- dpll: zl3073x: Implement devlink flash callback (Ivan Vecera) [RHEL-116157]
+- dpll: zl3073x: Add firmware loading functionality (Ivan Vecera) [RHEL-116157]
+- dpll: zl3073x: Add low-level flash functions (Ivan Vecera) [RHEL-116157]
+- dpll: zl3073x: Add functions to access hardware registers (Ivan Vecera) [RHEL-116157]
+Resolves: RHEL-116157, RHEL-123789, RHEL-125522, RHEL-126227
+
+* Sun Dec 07 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.22.1.el10_1]
+- ASoC: Intel: sof_sdw: Add quirks for Lenovo P1 and P16 (CKI Backport Bot) [RHEL-130550]
+- tls: wait for pending async decryptions if tls_strp_msg_hold fails (CKI Backport Bot) [RHEL-128866] {CVE-2025-40176}
+- sched/deadline: Fix RT task potential starvation when expiry time passed (CKI Backport Bot) [RHEL-124660]
+Resolves: RHEL-124660, RHEL-128866, RHEL-130550
+
 * Thu Dec 04 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.21.1.el10_1]
 - CVE-2025-38499 kernel: clone_private_mnt(): make sure that caller has CAP_SYS_ADMIN in the right userns (Abhi Das) [RHEL-129282] {CVE-2025-38499}
 - net: tun: Update napi->skb after XDP process (CKI Backport Bot) [RHEL-122247] {CVE-2025-39984}

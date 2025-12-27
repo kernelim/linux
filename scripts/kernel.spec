@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 124.21.1
+%define pkgrelease 124.27.1
 %define kversion 6
-%define tarfile_release 6.12.0-124.21.1.el10_1
+%define tarfile_release 6.12.0-124.27.1.el10_1
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 124.21.1%{?buildid}%{?dist}
+%define specrelease 124.27.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-124.21.1.el10_1
+%define kabiversion 6.12.0-124.27.1.el10_1
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -922,7 +922,7 @@ Source13: redhatsecureboot501.cer
 # Fedora/ELN pesign macro expects to see these cert file names, see:
 # https://github.com/rhboot/pesign/blob/main/src/pesign-rpmbuild-helper.in#L216
 %if 0%{?fedora}%{?eln}
-%define pesign_name_0 redhatsecureboot501
+%define pesign_name_0 rockysigning
 %define secureboot_ca_0 %{SOURCE10}
 %define secureboot_key_0 %{SOURCE13}
 %endif
@@ -932,7 +932,20 @@ Source13: redhatsecureboot501.cer
 %define secureboot_ca_0 %{_datadir}/pki/sb-certs/secureboot-ca-%{_arch}.cer
 %define secureboot_key_0 %{_datadir}/pki/sb-certs/secureboot-kernel-%{_arch}.cer
 
+%if 0%{?centos}
 %define pesign_name_0 rockysigning
+%else
+%ifarch x86_64 aarch64
+%define pesign_name_0 rockysigning
+%endif
+%ifarch s390x
+%define pesign_name_0 rockysigning
+%endif
+%ifarch ppc64le
+%define pesign_name_0 rockysigning
+%endif
+%endif
+# rhel && !eln
 %endif
 
 # signkernel
@@ -957,9 +970,6 @@ Source33: %{name}-x86_64-debug-rhel.config
 # ARM64 64K page-size kernel config
 Source42: %{name}-aarch64-64k-rhel.config
 Source43: %{name}-aarch64-64k-debug-rhel.config
-# riscv64 kernel configs
-Source1000: %{name}-riscv64-rhel.config
-Source1001: %{name}-riscv64-debug-rhel.config
 %endif
 
 %if %{include_rhel} || %{include_automotive}
@@ -1011,36 +1021,17 @@ Source152: uki_addons.json
 # Temporary use redhatsecureboot504 for x86 UKI, see RHEL-122230
 Source153: redhatsecureboot504.cer
 
-Source100: rockydup1.x509
-Source101: rockykpatch1.x509
-Source102: rocky-nvidiagpuoot101.x509
-Source110: rockydup1-aarch64.x509
-Source111: rockykpatch1-aarch64.x509
-Source112: rocky-nvidiagpuoot101-aarch64.x509
-Source103: rocky-ima-ca.crt
-Source104: rocky-imarelease.crt
-Source106: fedoraimaca.x509
-
-%if 0%{?fedora}%{?eln}
-%define ima_ca_cert %{SOURCE106}
+# Rocky Linux has all SB/IMA certificates in its release
+%if 0%{?rocky}
+BuildRequires: system-sb-certs
 %endif
 
-%if 0%{?rhel} && !0%{?eln}
-%define ima_ca_cert %{SOURCE103}
-# rhel && !eln
-%endif
+%define driver_cert %{_datadir}/pki/sb-certs/kernel-dup1-%{_arch}.der
+%define kpatch_cert %{_datadir}/pki/sb-certs/kernel-kpatch1-%{_arch}.der
+%define nvidia_cert %{_datadir}/pki/sb-certs/kernel-nvidiagpuoot101-%{_arch}.der
+%define ima_signing_cert %{_datadir}/pki/sb-certs/rocky-imarelease.crt
+%define ima_ca_cert %{_datadir}/pki/sb-certs/rocky-ima-ca.crt
 
-%ifarch aarch64
-%define driver_cert %{SOURCE110}
-%define kpatch_cert %{SOURCE111}
-%define nvidia_cert %{SOURCE112}
-%else
-%define driver_cert %{SOURCE100}
-%define kpatch_cert %{SOURCE101}
-%define nvidia_cert %{SOURCE102}
-%endif
-
-%define ima_signing_cert %{SOURCE104}
 %define ima_cert_name ima.cer
 
 Source200: check-kabi
@@ -1111,6 +1102,8 @@ Source3002: Patchlist.changelog
 Source4000: README.rst
 Source4001: rpminspect.yaml
 Source4002: gating.yaml
+Source1000: kernel-riscv64-rhel.config
+Source1001: kernel-riscv64-debug-rhel.config
 
 ## Patches needed for building this package
 
@@ -1299,10 +1292,10 @@ This package provides debug information for the libperf package.
 %package -n %{package_name}-tools
 Summary: Assortment of tools for the Linux kernel
 %ifarch %{cpupowerarchs}
-Provides: cpupowerutils = 1:009-0.6.p1
+Provides:  cpupowerutils = 1:009-0.6.p1
 Obsoletes: cpupowerutils < 1:009-0.6.p1
-Provides: cpufreq-utils = 1:009-0.6.p1
-Provides: cpufrequtils = 1:009-0.6.p1
+Provides:  cpufreq-utils = 1:009-0.6.p1
+Provides:  cpufrequtils = 1:009-0.6.p1
 Obsoletes: cpufreq-utils < 1:009-0.6.p1
 Obsoletes: cpufrequtils < 1:009-0.6.p1
 Obsoletes: cpuspeed < 1:1.5-16
@@ -1323,7 +1316,7 @@ from the kernel source.
 Summary: Assortment of tools for the Linux kernel
 Requires: %{package_name}-tools = %{version}-%{release}
 %ifarch %{cpupowerarchs}
-Provides: cpupowerutils-devel = 1:009-0.6.p1
+Provides:  cpupowerutils-devel = 1:009-0.6.p1
 Obsoletes: cpupowerutils-devel < 1:009-0.6.p1
 %endif
 Requires: %{package_name}-tools-libs = %{version}-%{release}
@@ -1406,8 +1399,8 @@ Summary: gcov graph and source files for coverage data collection.\
 Summary: The Rocky Linux kernel ABI symbol stablelists
 AutoReqProv: no
 %description -n %{package_name}-abi-stablelists
-The kABI package contains information pertaining to the Rocky
-Linux kernel ABI, including lists of kernel symbols that are needed by
+The kABI package contains information pertaining to the Rocky Linux
+kernel ABI, including lists of kernel symbols that are needed by
 external Linux kernel modules, and a yum plugin to aid enforcement.
 %endif
 
@@ -1417,8 +1410,8 @@ Summary: The baseline dataset for kABI verification using DWARF data
 Group: System Environment/Kernel
 AutoReqProv: no
 %description kernel-kabidw-base-internal
-The package contains data describing the current ABI of the Rocky
-Linux kernel, suitable for the kabi-dw tool.
+The package contains data describing the current ABI of the Rocky Linux
+kernel, suitable for the kabi-dw tool.
 %endif
 
 #
@@ -1969,11 +1962,11 @@ cp -a %{SOURCE1} .
 ApplyOptionalPatch patch-%{patchversion}-redhat.patch
 %endif
 
+ApplyOptionalPatch linux-kernel-test.patch
 ApplyOptionalPatch 1000-debrand-some-messages.patch
 %ifarch riscv64
 ApplyOptionalPatch 0001-patch-mmu-for-riscv.patch
 %endif
-ApplyOptionalPatch linux-kernel-test.patch
 
 %{log_msg "End of patch applications"}
 # END OF PATCH APPLICATIONS
@@ -4361,10 +4354,56 @@ fi\
 #
 #
 %changelog
-* Fri Dec 19 2025 Release Engineering <releng@rockylinux.org> - 6.12.0-124.21.1
-- Porting to Rocky Linux 10, debranding and Rocky Linux branding
+* Thu Jan 15 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.27.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+- Patch MMU for riscv64
+
+* Sat Dec 27 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.27.1.el10_1]
+- arm64: errata: Expand speculative SSBS workaround for Cortex-A720AE (Waiman Long) [RHEL-120684]
+- arm64: cputype: Add Cortex-A720AE definitions (Waiman Long) [RHEL-120684]
+- arm64: errata: Add missing sentinels to Spectre-BHB MIDR arrays (Waiman Long) [RHEL-120684]
+- arm64: Add support for HIP09 Spectre-BHB mitigation (Waiman Long) [RHEL-120684]
+- arm64: errata: Add newer ARM cores to the spectre_bhb_loop_affected() lists (Waiman Long) [RHEL-120684]
+- arm64: cputype: Add MIDR_CORTEX_A76AE (Waiman Long) [RHEL-120684]
+- arm64: errata: Add KRYO 2XX/3XX/4XX silver cores to Spectre BHB safe list (Waiman Long) [RHEL-120684]
+- kmem/tracing: add kmem name to kmem_cache_alloc tracepoint (Charles Haithcock) [RHEL-129882]
+- mm: memory-tiering: fix PGPROMOTE_CANDIDATE counting (Rafael Aquini) [RHEL-128383]
+
+* Tue Dec 23 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.26.1.el10_1]
+- usb: dwc3: Fix race condition between concurrent dwc3_remove_requests() call paths (CKI Backport Bot) [RHEL-137150] {CVE-2025-68287}
+- drm/vmwgfx: Validate command header size against SVGA_CMD_MAX_DATASIZE (CKI Backport Bot) [RHEL-134431] {CVE-2025-40277}
+- net: phylink: add lock for serializing concurrent pl->phydev writes with resolver (CKI Backport Bot) [RHEL-129812] {CVE-2025-39905}
+
+* Sat Dec 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.25.1.el10_1]
+- sctp: avoid NULL dereference when chunk data buffer is missing (CKI Backport Bot) [RHEL-134010] {CVE-2025-40240}
+- HID: i2c-hid: Resolve touchpad issues on Dell systems during S4 (CKI Backport Bot) [RHEL-128281]
+- HID: multitouch: fix slab out-of-bounds access in mt_report_fixup() (CKI Backport Bot) [RHEL-124610] {CVE-2025-39806}
+- inetpeer: do not get a refcount in inet_getpeer() (Guillaume Nault) [RHEL-115287]
+- inetpeer: update inetpeer timestamp in inet_getpeer() (Guillaume Nault) [RHEL-115287]
+- inetpeer: remove create argument of inet_getpeer() (Guillaume Nault) [RHEL-115287]
+- inetpeer: remove create argument of inet_getpeer_v[46]() (Guillaume Nault) [RHEL-115287]
+
+* Tue Dec 16 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.24.1.el10_1]
+- audit: fix out-of-bounds read in audit_compare_dname_path() (Richard Guy Briggs) [RHEL-119185] {CVE-2025-39840}
+
+* Sat Dec 13 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.23.1.el10_1]
+- redhat: use RELEASE_LOCALVERSION also for dist-get-tag (Jan Stancek)
+- redhat: introduce RELEASE_LOCALVERSION variable (Jan Stancek)
+- iommufd: Fix race during abort for file descriptors (Eder Zulian) [RHEL-123789] {CVE-2025-39966}
+- smb: client: handle lack of IPC in dfs_cache_refresh() (Paulo Alcantara) [RHEL-126227]
+- mm: slub: avoid wake up kswapd in set_track_prepare (Audra Mitchell) [RHEL-125522] {CVE-2025-39843}
+- dpll: zl3073x: Increase maximum size of flash utility (Ivan Vecera) [RHEL-116157]
+- dpll: zl3073x: Fix double free in zl3073x_devlink_flash_update() (Ivan Vecera) [RHEL-116157]
+- dpll: zl3073x: Implement devlink flash callback (Ivan Vecera) [RHEL-116157]
+- dpll: zl3073x: Add firmware loading functionality (Ivan Vecera) [RHEL-116157]
+- dpll: zl3073x: Add low-level flash functions (Ivan Vecera) [RHEL-116157]
+- dpll: zl3073x: Add functions to access hardware registers (Ivan Vecera) [RHEL-116157]
+
+* Sun Dec 07 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.22.1.el10_1]
+- ASoC: Intel: sof_sdw: Add quirks for Lenovo P1 and P16 (CKI Backport Bot) [RHEL-130550]
+- tls: wait for pending async decryptions if tls_strp_msg_hold fails (CKI Backport Bot) [RHEL-128866] {CVE-2025-40176}
+- sched/deadline: Fix RT task potential starvation when expiry time passed (CKI Backport Bot) [RHEL-124660]
 
 * Thu Dec 04 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.21.1.el10_1]
 - CVE-2025-38499 kernel: clone_private_mnt(): make sure that caller has CAP_SYS_ADMIN in the right userns (Abhi Das) [RHEL-129282] {CVE-2025-38499}

@@ -115,21 +115,29 @@ ifndef RHJOBS
 	  fi)
 endif
 
-LOCVERFILE:=../localversion
-# create an empty localversion file if you don't want a local buildid
-ifneq ($(wildcard $(LOCVERFILE)),)
-  DISTLOCALVERSION:=$(shell cat $(LOCVERFILE))
-  ifeq (,$(findstring s,$(firstword -$(MAKEFLAGS))))
-    $(info DISTLOCALVERSION is "$(DISTLOCALVERSION)". Update '$(shell dirname $(REDHAT))/localversion' to change.)
-  endif
-else
-  ifeq ($(DISTLOCALVERSION),)
-    DISTLOCALVERSION:=.test
-  endif
+# for official builds use RELEASE_LOCALVERSION persisted in Makefile.variables
+ifneq ($(filter $(MAKECMDGOALS),dist-release dist-release-tag dist-release-git dist-rtg dist-get-tag),)
+  DISTLOCALVERSION:=$(RELEASE_LOCALVERSION)
   ifeq (,$(findstring s,$(firstword -$(MAKEFLAGS))))
     $(info DISTLOCALVERSION is "$(DISTLOCALVERSION)".)
   endif
-endif
+else
+  LOCVERFILE:=../localversion
+  # create an empty localversion file if you don't want a local buildid
+  ifneq ($(wildcard $(LOCVERFILE)),)
+    DISTLOCALVERSION:=$(shell cat $(LOCVERFILE))
+    ifeq (,$(findstring s,$(firstword -$(MAKEFLAGS))))
+      $(info DISTLOCALVERSION is "$(DISTLOCALVERSION)". Update '$(shell dirname $(REDHAT))/localversion' to change.)
+    endif
+  else
+    ifeq ($(DISTLOCALVERSION),)
+      DISTLOCALVERSION:=.test
+    endif
+    ifeq (,$(findstring s,$(firstword -$(MAKEFLAGS))))
+      $(info DISTLOCALVERSION is "$(DISTLOCALVERSION)".)
+    endif
+  endif
+endif # MAKECMDGOALS
 
 # options for process_configs.sh script
 ifdef NO_CONFIGCHECKS

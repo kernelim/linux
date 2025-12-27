@@ -1269,6 +1269,7 @@ const char * const vmstat_text[] = {
 #ifdef CONFIG_NUMA_BALANCING
 	"pgpromote_success",
 	"pgpromote_candidate",
+	"pgpromote_candidate_nrl",
 #endif
 	"pgdemote_kswapd",
 	"pgdemote_direct",

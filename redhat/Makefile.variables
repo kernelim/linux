@@ -94,6 +94,10 @@ PATCHLIST_URL ?= none
 #  unreleased kernel development snapshot.
 RELEASED_KERNEL:=0
 
+# Local version to be used for official (non-scratch) builds. Makefile
+# dist-{release/tag/git} targets will ignore localversion and DISTLOCALVERSION
+RELEASE_LOCALVERSION:=
+
 # This variable is used by the redhat/self-tests.  It should not be
 # considered stable and my be changed or removed without warning.
 RHDISTDATADIR ?=
