@@ -334,7 +334,7 @@ enum {
 	GLF_UNLOCKED			= 16, /* Wait for glock to be unlocked */
 	GLF_TRY_TO_EVICT		= 17, /* iopen glocks only */
 	GLF_VERIFY_DELETE		= 18, /* iopen glocks only */
-	GLF_PENDING_REPLY		= 19,
+	GLF_MAY_CANCEL			= 19,
 	GLF_DEFER_DELETE		= 20, /* iopen glocks only */
 	GLF_CANCELING			= 21,
 };

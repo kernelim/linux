@@ -145,10 +145,9 @@ char *cifs_compose_mount_options(const char *sb_mountdata,
 	char *mountdata = NULL;
 	const char *prepath = NULL;
 	int md_len;
-	char *tkn_e;
+	const char *start, *end;
 	char *srvIP = NULL;
 	char sep = ',';
-	int off, noff;
 
 	if (sb_mountdata == NULL)
 		return ERR_PTR(-EINVAL);
@@ -199,45 +198,31 @@ char *cifs_compose_mount_options(const char *sb_mountdata,
 		goto compose_mount_options_err;
 	}
 
-	/* copy all options except of unc,ip,prefixpath */
-	off = 0;
-	if (strncmp(sb_mountdata, "sep=", 4) == 0) {
-			sep = sb_mountdata[4];
-			strncpy(mountdata, sb_mountdata, 5);
-			off += 5;
+	/* copy all options except of unc,ip,prefixpath,cruid */
+	start = end = sb_mountdata;
+	for (;;) {
+		end = strchrnul(end, sep);
+		while (*end && end[0] == sep && end[1] == sep)
+			end += 2;
+
+		if (strncasecmp(start, "prefixpath=", 11) == 0 ||
+		    strncasecmp(start, "cruid=", 6) == 0 ||
+		    strncasecmp(start, "unc=", 4) == 0 ||
+		    strncasecmp(start, "ip=", 3) == 0)
+			goto next_opt;
+
+		if (*mountdata)
+			strncat(mountdata, &sep, 1);
+		strncat(mountdata, start, end - start);
+next_opt:
+		if (!*end)
+			break;
+		start = ++end;
 	}
-
-	do {
-		tkn_e = strchr(sb_mountdata + off, sep);
-		if (tkn_e == NULL)
-			noff = strlen(sb_mountdata + off);
-		else
-			noff = tkn_e - (sb_mountdata + off) + 1;
-
-		if (strncasecmp(sb_mountdata + off, "cruid=", 6) == 0) {
-			off += noff;
-			continue;
-		}
-		if (strncasecmp(sb_mountdata + off, "unc=", 4) == 0) {
-			off += noff;
-			continue;
-		}
-		if (strncasecmp(sb_mountdata + off, "ip=", 3) == 0) {
-			off += noff;
-			continue;
-		}
-		if (strncasecmp(sb_mountdata + off, "prefixpath=", 11) == 0) {
-			off += noff;
-			continue;
-		}
-		strncat(mountdata, sb_mountdata + off, noff);
-		off += noff;
-	} while (tkn_e);
-	strcat(mountdata, sb_mountdata + off);
 	mountdata[md_len] = '\0';
 
 	/* copy new IP and ref share name */
-	if (mountdata[strlen(mountdata) - 1] != sep)
+	if (*mountdata)
 		strncat(mountdata, &sep, 1);
 	strcat(mountdata, "ip=");
 	strcat(mountdata, srvIP);
@@ -247,8 +232,8 @@ char *cifs_compose_mount_options(const char *sb_mountdata,
 	else
 		kfree(name);
 
-	/*cifs_dbg(FYI, "%s: parent mountdata: %s\n", __func__, sb_mountdata);*/
-	/*cifs_dbg(FYI, "%s: submount mountdata: %s\n", __func__, mountdata );*/
+	cifs_dbg(FYI, "%s: parent mountdata: %s\n", __func__, sb_mountdata);
+	cifs_dbg(FYI, "%s: submount mountdata: %s\n", __func__, mountdata);
 
 compose_mount_options_out:
 	kfree(srvIP);

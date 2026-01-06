@@ -525,11 +525,10 @@ static void ceph_async_create_cb(struct ceph_mds_client *mdsc,
 
 	if (result) {
 		struct dentry *dentry = req->r_dentry;
+		struct ceph_path_info path_info = {0};
 		struct inode *inode = d_inode(dentry);
-		int pathlen = 0;
-		u64 base = 0;
-		char *path = ceph_mdsc_build_path(req->r_dentry, &pathlen,
-						  &base, 0);
+		char *path = ceph_mdsc_build_path(mdsc, req->r_dentry,
+						  &path_info, 0);
 
 		ceph_dir_clear_complete(req->r_parent);
 		if (!d_unhashed(dentry))
@@ -538,8 +537,9 @@ static void ceph_async_create_cb(struct ceph_mds_client *mdsc,
 		ceph_inode_shutdown(inode);
 
 		pr_warn("async create failure path=(%llx)%s result=%d!\n",
-			base, IS_ERR(path) ? "<<bad>>" : path, result);
-		ceph_mdsc_free_path(path, pathlen);
+			path_info.vino.ino, IS_ERR(path) ? "<<bad>>" : path,
+			result);
+		ceph_mdsc_free_path_info(&path_info);
 	}
 
 	if (req->r_target_inode) {

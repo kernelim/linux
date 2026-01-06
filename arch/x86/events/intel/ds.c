@@ -2,12 +2,14 @@
 #include <linux/bitops.h>
 #include <linux/types.h>
 #include <linux/slab.h>
+#include <linux/sched/clock.h>
 
 #include <asm/cpu_entry_area.h>
 #include <asm/perf_event.h>
 #include <asm/tlbflush.h>
 #include <asm/insn.h>
 #include <asm/io.h>
+#include <asm/timer.h>
 
 #include "../perf_event.h"
 
@@ -1541,6 +1543,27 @@ static u64 get_data_src(struct perf_event *event, u64 aux)
 	return val;
 }
 
+static void setup_pebs_time(struct perf_event *event,
+			    struct perf_sample_data *data,
+			    u64 tsc)
+{
+	/* Converting to a user-defined clock is not supported yet. */
+	if (event->attr.use_clockid != 0)
+		return;
+
+	/*
+	 * Doesn't support the conversion when the TSC is unstable.
+	 * The TSC unstable case is a corner case and very unlikely to
+	 * happen. If it happens, the TSC in a PEBS record will be
+	 * dropped and fall back to perf_event_clock().
+	 */
+	if (!using_native_sched_clock() || !sched_clock_stable())
+		return;
+
+	data->time = native_sched_clock_from_tsc(tsc) + __sched_clock_offset;
+	data->sample_flags |= PERF_SAMPLE_TIME;
+}
+
 static void setup_pebs_fixed_sample_data(struct perf_event *event,
 				   struct pt_regs *iregs, void *__pebs,
 				   struct perf_sample_data *data,
@@ -1675,9 +1698,8 @@ static void setup_pebs_fixed_sample_data(struct perf_event *event,
 	 *
 	 * We can only do this for the default trace clock.
 	 */
-	if (x86_pmu.intel_cap.pebs_format >= 3 &&
-		event->attr.use_clockid == 0)
-		data->time = native_sched_clock_from_tsc(pebs->tsc);
+	if (x86_pmu.intel_cap.pebs_format >= 3)
+		setup_pebs_time(event, data, pebs->tsc);
 
 	if (has_branch_stack(event))
 		data->br_stack = &cpuc->lbr_stack;
@@ -1739,8 +1761,7 @@ static void setup_pebs_adaptive_sample_data(struct perf_event *event,
 	perf_sample_data_init(data, 0, event->hw.last_period);
 	data->period = event->hw.last_period;
 
-	if (event->attr.use_clockid == 0)
-		data->time = native_sched_clock_from_tsc(basic->tsc);
+	setup_pebs_time(event, data, basic->tsc);
 
 	/*
 	 * We must however always use iregs for the unwinder to stay sane; the
