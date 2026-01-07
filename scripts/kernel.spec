@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 124.27.1
+%define pkgrelease 124.28.1
 %define kversion 6
-%define tarfile_release 6.12.0-124.27.1.el10_1
+%define tarfile_release 6.12.0-124.28.1.el10_1
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 124.27.1%{?buildid}%{?dist}
+%define specrelease 124.28.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-124.27.1.el10_1
+%define kabiversion 6.12.0-124.28.1.el10_1
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4354,10 +4354,13 @@ fi\
 #
 #
 %changelog
-* Thu Jan 15 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.27.1
+* Wed Jan 21 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.28.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
 - Patch MMU for riscv64
+
+* Wed Jan 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.28.1.el10_1]
+- libceph: fix potential use-after-free in have_mon_and_osd_map() (CKI Backport Bot) [RHEL-137403] {CVE-2025-68285}
 
 * Sat Dec 27 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.27.1.el10_1]
 - arm64: errata: Expand speculative SSBS workaround for Cortex-A720AE (Waiman Long) [RHEL-120684]
