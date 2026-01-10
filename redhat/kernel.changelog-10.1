@@ -1,3 +1,31 @@
+* Sat Jan 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.29.1.el10_1]
+- gitlab-ci: use rhel10.1 builder image (Michael Hofmann)
+- mm/vmalloc: fix data race in show_numa_info() (Waiman Long) [RHEL-137997] {CVE-2025-38383}
+- vmalloc: use for_each_vmap_node() in purge-vmap-area (Waiman Long) [RHEL-137997]
+- vmalloc: switch to for_each_vmap_node() helper (Waiman Long) [RHEL-137997]
+- vmalloc: add for_each_vmap_node() helper (Waiman Long) [RHEL-137997]
+- smb: client: fix refcount leak in smb2_set_path_attr (Paulo Alcantara) [RHEL-128581]
+- smb: client: fix potential UAF in smb2_close_cached_fid() (Paulo Alcantara) [RHEL-128581]
+- smb: client: fix potential cfid UAF in smb2_query_info_compound (Paulo Alcantara) [RHEL-128581]
+- smb: client: Fix refcount leak for cifs_sb_tlink (Paulo Alcantara) [RHEL-128581]
+- cifs: parse_dfs_referrals: prevent oob on malformed input (Paulo Alcantara) [RHEL-128581]
+- smb: client: remove cfids_invalidation_worker (Paulo Alcantara) [RHEL-128581]
+- smb client: fix bug with newly created file in cached dir (Paulo Alcantara) [RHEL-128581]
+- smb: client: short-circuit negative lookups when parent dir is fully cached (Paulo Alcantara) [RHEL-128581]
+- smb: client: short-circuit in open_cached_dir_by_dentry() if !dentry (Paulo Alcantara) [RHEL-128581]
+- smb: client: remove pointless cfid->has_lease check (Paulo Alcantara) [RHEL-128581]
+- smb: client: remove unused fid_lock (Paulo Alcantara) [RHEL-128581]
+- smb: client: update cfid->last_access_time in open_cached_dir_by_dentry() (Paulo Alcantara) [RHEL-128581]
+- smb: client: ensure open_cached_dir_by_dentry() only returns valid cfid (Paulo Alcantara) [RHEL-128581]
+- smb: client: account smb directory cache usage and per-tcon totals (Paulo Alcantara) [RHEL-128581]
+- smb: client: add drop_dir_cache module parameter to invalidate cached dirents (Paulo Alcantara) [RHEL-128581]
+- smb: client: show lease state as R/H/W (or NONE) in open_files (Paulo Alcantara) [RHEL-128581]
+- smb: client: show negotiated cipher in DebugData (Paulo Alcantara) [RHEL-128581]
+- smb: client: add new tracepoint to trace lease break notification (Paulo Alcantara) [RHEL-128581]
+- smb: client: Fix NULL pointer dereference in cifs_debug_dirs_proc_show() (Paulo Alcantara) [RHEL-128581]
+- coredump: Only sort VMAs when core_sort_vma sysctl is set (Herton R. Krzesinski) [RHEL-113364]
+Resolves: RHEL-113364, RHEL-128581, RHEL-137997
+
 * Wed Jan 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.28.1.el10_1]
 - libceph: fix potential use-after-free in have_mon_and_osd_map() (CKI Backport Bot) [RHEL-137403] {CVE-2025-68285}
 Resolves: RHEL-137403
