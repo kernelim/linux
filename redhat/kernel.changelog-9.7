@@ -1,3 +1,65 @@
+* Sat Jan 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.24.1.el9_7]
+- gitlab-ci: use rhel9.7 builder image (Michael Hofmann)
+- smb: client: let recv_done verify data_offset, data_length and remaining_data_length (Paulo Alcantara) [RHEL-131388] {CVE-2025-39933}
+- tty: n_tty: Fix buffer offsets when lookahead is used (Radostin Stoyanov) [RHEL-130039]
+Resolves: RHEL-130039, RHEL-131388
+
+* Thu Jan 08 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.23.1.el9_7]
+- book3s64/hash: Remove kfence support temporarily (Mamatha Inamdar) [RHEL-135574]
+- xfs: rework datasync tracking and execution (CKI Backport Bot) [RHEL-135714]
+- xfs: rearrange code in xfs_inode_item_precommit (CKI Backport Bot) [RHEL-135714]
+- inetpeer: do not get a refcount in inet_getpeer() (Guillaume Nault) [RHEL-116121]
+- inetpeer: update inetpeer timestamp in inet_getpeer() (Guillaume Nault) [RHEL-116121]
+- inetpeer: remove create argument of inet_getpeer() (Guillaume Nault) [RHEL-116121]
+- inetpeer: remove create argument of inet_getpeer_v[46]() (Guillaume Nault) [RHEL-116121]
+- ipv4/route: avoid unused-but-set-variable warning (Guillaume Nault) [RHEL-116121]
+- arm64: errata: Expand speculative SSBS workaround for Cortex-A720AE (Waiman Long) [RHEL-130734]
+- arm64: cputype: Add Cortex-A720AE definitions (Waiman Long) [RHEL-130734]
+- arm64: errata: Add missing sentinels to Spectre-BHB MIDR arrays (Waiman Long) [RHEL-130734]
+- arm64: Add support for HIP09 Spectre-BHB mitigation (Waiman Long) [RHEL-130734]
+- arm64: errata: Add newer ARM cores to the spectre_bhb_loop_affected() lists (Waiman Long) [RHEL-130734]
+- arm64: cputype: Add MIDR_CORTEX_A76AE (Waiman Long) [RHEL-130734]
+- arm64: errata: Add KRYO 2XX/3XX/4XX silver cores to Spectre BHB safe list (Waiman Long) [RHEL-130734]
+- arm64: Subscribe Microsoft Azure Cobalt 100 to erratum 3194386 (Waiman Long) [RHEL-130734]
+- arm64: errata: Expand speculative SSBS workaround once more (Waiman Long) [RHEL-130734]
+- arm64: errata: Expand speculative SSBS workaround (again) (Waiman Long) [RHEL-130734]
+- tools headers arm64: Sync arm64's cputype.h with the kernel sources (Waiman Long) [RHEL-130734]
+- arm64: cputype: Add Neoverse-N3 definitions (Waiman Long) [RHEL-130734]
+- arm64: cputype: Add Cortex-A725 definitions (Waiman Long) [RHEL-130734]
+- arm64: cputype: Add Cortex-X1C definitions (Waiman Long) [RHEL-130734]
+- drm/xe: Make dma-fences compliant with the safe access rules (Mika Penttilä) [RHEL-122263] {CVE-2025-38703}
+Resolves: RHEL-116121, RHEL-122263, RHEL-130734, RHEL-135574, RHEL-135714
+
+* Wed Jan 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.22.1.el9_7]
+- libceph: fix potential use-after-free in have_mon_and_osd_map() (CKI Backport Bot) [RHEL-137400] {CVE-2025-68285}
+Resolves: RHEL-137400
+
+* Thu Jan 01 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.21.1.el9_7]
+- usb: dwc3: Fix race condition between concurrent dwc3_remove_requests() call paths (CKI Backport Bot) [RHEL-137147] {CVE-2025-68287}
+- redhat: conflict with unsupported shim on x86/aarch64 (9.7.z) (Li Tian) [RHEL-135775]
+- drm/vmwgfx: Validate command header size against SVGA_CMD_MAX_DATASIZE (CKI Backport Bot) [RHEL-134428] {CVE-2025-40277}
+- perf tools: Don't set attr.exclude_guest by default (Michael Petlan) [RHEL-131726]
+- smb: client: fix refcount leak in smb2_set_path_attr (Paulo Alcantara) [RHEL-127422]
+- smb: client: fix potential UAF in smb2_close_cached_fid() (Paulo Alcantara) [RHEL-127422]
+- smb: client: fix potential cfid UAF in smb2_query_info_compound (Paulo Alcantara) [RHEL-127422]
+- smb: client: Fix refcount leak for cifs_sb_tlink (Paulo Alcantara) [RHEL-127422]
+- cifs: parse_dfs_referrals: prevent oob on malformed input (Paulo Alcantara) [RHEL-127422]
+- smb: client: remove cfids_invalidation_worker (Paulo Alcantara) [RHEL-127422]
+- smb client: fix bug with newly created file in cached dir (Paulo Alcantara) [RHEL-127422]
+- smb: client: short-circuit negative lookups when parent dir is fully cached (Paulo Alcantara) [RHEL-127422]
+- smb: client: short-circuit in open_cached_dir_by_dentry() if !dentry (Paulo Alcantara) [RHEL-127422]
+- smb: client: remove pointless cfid->has_lease check (Paulo Alcantara) [RHEL-127422]
+- smb: client: remove unused fid_lock (Paulo Alcantara) [RHEL-127422]
+- smb: client: update cfid->last_access_time in open_cached_dir_by_dentry() (Paulo Alcantara) [RHEL-127422]
+- smb: client: ensure open_cached_dir_by_dentry() only returns valid cfid (Paulo Alcantara) [RHEL-127422]
+- smb: client: account smb directory cache usage and per-tcon totals (Paulo Alcantara) [RHEL-127422]
+- smb: client: add drop_dir_cache module parameter to invalidate cached dirents (Paulo Alcantara) [RHEL-127422]
+- smb: client: show lease state as R/H/W (or NONE) in open_files (Paulo Alcantara) [RHEL-127422]
+- smb: client: show negotiated cipher in DebugData (Paulo Alcantara) [RHEL-127422]
+- smb: client: add new tracepoint to trace lease break notification (Paulo Alcantara) [RHEL-127422]
+- smb: client: Fix NULL pointer dereference in cifs_debug_dirs_proc_show() (Paulo Alcantara) [RHEL-127422]
+Resolves: RHEL-127422, RHEL-131726, RHEL-134428, RHEL-135775, RHEL-137147
+
 * Sat Dec 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.20.1.el9_7]
 - HID: multitouch: fix slab out-of-bounds access in mt_report_fixup() (CKI Backport Bot) [RHEL-124607] {CVE-2025-39806}
 - sctp: avoid NULL dereference when chunk data buffer is missing (CKI Backport Bot) [RHEL-134001] {CVE-2025-40240}

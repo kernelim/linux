@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 611.20.1
+%define pkgrelease 611.24.1
 %define kversion 5
-%define tarfile_release 5.14.0-611.20.1.el9_7
+%define tarfile_release 5.14.0-611.24.1.el9_7
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 611.20.1%{?buildid}%{?dist}
+%define specrelease 611.24.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-611.20.1.el9_7
+%define kabiversion 5.14.0-611.24.1.el9_7
 
 #
 # End of genspec.sh variables
@@ -881,30 +881,16 @@ Source82: update_scripts.sh
 Source84: mod-internal.list
 Source85: mod-partner.list
 
-# dup1
-Source100: rockydup1.x509
-Source110: rockydup1-aarch64.x509
-# kpatch
-Source101: rockykpatch1.x509
-Source111: rockykpatch1-aarch64.x509
-# ima
-Source102: rocky-ima-ca.crt
-Source103: rocky-imarelease.crt
-# nvidia
-Source105: rocky-nvidiagpuoot101.x509
-Source115: rocky-nvidiagpuoot101-aarch64.x509
-
-%ifarch aarch64
-%define driver_cert %{SOURCE110}
-%define kpatch_cert %{SOURCE111}
-%define nvidia_cert %{SOURCE115}
-%else
-%define driver_cert %{SOURCE100}
-%define kpatch_cert %{SOURCE101}
-%define nvidia_cert %{SOURCE105}
+# Rocky Linux has all SB/IMA certificates in its release
+%if 0%{?rocky}
+BuildRequires: system-sb-certs
 %endif
 
-%define ima_signing_cert %{SOURCE103}
+%define driver_cert %{_datadir}/pki/sb-certs/kernel-dup1-%{_arch}.der
+%define kpatch_cert %{_datadir}/pki/sb-certs/kernel-kpatch1-%{_arch}.der
+%define nvidia_cert %{_datadir}/pki/sb-certs/kernel-nvidiagpuoot101-%{_arch}.der
+%define ima_signing_cert %{_datadir}/pki/sb-certs/rocky-imarelease.crt
+%define ima_ca_cert %{_datadir}/pki/sb-certs/rocky-ima-ca.crt
 
 %define ima_cert_name ima.cer
 
@@ -985,6 +971,9 @@ Recommends: linux-firmware\
 Requires(preun): systemd >= 200\
 Conflicts: xfsprogs < 4.3.0-1\
 Conflicts: xorg-x11-drv-vmmouse < 13.0.99\
+%ifarch x86_64 aarch64\
+Conflicts: shim < 15.8-1\
+%endif\
 %{expand:%%{?kernel%{?1:_%{1}}_conflicts:Conflicts: %%{kernel%{?1:_%{1}}_conflicts}}}\
 %{expand:%%{?kernel%{?1:_%{1}}_obsoletes:Obsoletes: %%{kernel%{?1:_%{1}}_obsoletes}}}\
 %{expand:%%{?kernel%{?1:_%{1}}_provides:Provides: %%{kernel%{?1:_%{1}}_provides}}}\
@@ -1660,7 +1649,6 @@ ApplyOptionalPatch patch-%{patchversion}-redhat.patch
 
 ApplyOptionalPatch linux-kernel-test.patch
 ApplyOptionalPatch 1000-debrand-some-messages.patch
-ApplyOptionalPatch 1000-debrand-some-messages.patch
 
 # END OF PATCH APPLICATIONS
 
@@ -1736,7 +1724,7 @@ done
 %if %{signkernel}%{signmodules}
 openssl x509 -inform der -in %{driver_cert} -out rheldup3.pem
 openssl x509 -inform der -in %{kpatch_cert} -out rhelkpatch1.pem
-openssl x509 -inform der -in %{SOURCE102} -out rhelimaca1.pem
+openssl x509 -inform der -in %{ima_ca_cert} -out rhelimaca1.pem
 openssl x509 -inform der -in %{nvidia_cert} -out nvidiagpuoot001.pem
 cat rheldup3.pem rhelkpatch1.pem rhelimaca1.pem nvidiagpuoot001.pem > ../certs/rhel.pem
 %if %{signkernel}
@@ -3709,10 +3697,68 @@ fi
 #
 #
 %changelog
-* Thu Jan 15 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-611.20.1
+* Wed Jan 21 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-611.24.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Sat Jan 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.24.1.el9_7]
+- gitlab-ci: use rhel9.7 builder image (Michael Hofmann)
+- smb: client: let recv_done verify data_offset, data_length and remaining_data_length (Paulo Alcantara) [RHEL-131388] {CVE-2025-39933}
+- tty: n_tty: Fix buffer offsets when lookahead is used (Radostin Stoyanov) [RHEL-130039]
+
+* Thu Jan 08 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.23.1.el9_7]
+- book3s64/hash: Remove kfence support temporarily (Mamatha Inamdar) [RHEL-135574]
+- xfs: rework datasync tracking and execution (CKI Backport Bot) [RHEL-135714]
+- xfs: rearrange code in xfs_inode_item_precommit (CKI Backport Bot) [RHEL-135714]
+- inetpeer: do not get a refcount in inet_getpeer() (Guillaume Nault) [RHEL-116121]
+- inetpeer: update inetpeer timestamp in inet_getpeer() (Guillaume Nault) [RHEL-116121]
+- inetpeer: remove create argument of inet_getpeer() (Guillaume Nault) [RHEL-116121]
+- inetpeer: remove create argument of inet_getpeer_v[46]() (Guillaume Nault) [RHEL-116121]
+- ipv4/route: avoid unused-but-set-variable warning (Guillaume Nault) [RHEL-116121]
+- arm64: errata: Expand speculative SSBS workaround for Cortex-A720AE (Waiman Long) [RHEL-130734]
+- arm64: cputype: Add Cortex-A720AE definitions (Waiman Long) [RHEL-130734]
+- arm64: errata: Add missing sentinels to Spectre-BHB MIDR arrays (Waiman Long) [RHEL-130734]
+- arm64: Add support for HIP09 Spectre-BHB mitigation (Waiman Long) [RHEL-130734]
+- arm64: errata: Add newer ARM cores to the spectre_bhb_loop_affected() lists (Waiman Long) [RHEL-130734]
+- arm64: cputype: Add MIDR_CORTEX_A76AE (Waiman Long) [RHEL-130734]
+- arm64: errata: Add KRYO 2XX/3XX/4XX silver cores to Spectre BHB safe list (Waiman Long) [RHEL-130734]
+- arm64: Subscribe Microsoft Azure Cobalt 100 to erratum 3194386 (Waiman Long) [RHEL-130734]
+- arm64: errata: Expand speculative SSBS workaround once more (Waiman Long) [RHEL-130734]
+- arm64: errata: Expand speculative SSBS workaround (again) (Waiman Long) [RHEL-130734]
+- tools headers arm64: Sync arm64's cputype.h with the kernel sources (Waiman Long) [RHEL-130734]
+- arm64: cputype: Add Neoverse-N3 definitions (Waiman Long) [RHEL-130734]
+- arm64: cputype: Add Cortex-A725 definitions (Waiman Long) [RHEL-130734]
+- arm64: cputype: Add Cortex-X1C definitions (Waiman Long) [RHEL-130734]
+- drm/xe: Make dma-fences compliant with the safe access rules (Mika Penttilä) [RHEL-122263] {CVE-2025-38703}
+
+* Wed Jan 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.22.1.el9_7]
+- libceph: fix potential use-after-free in have_mon_and_osd_map() (CKI Backport Bot) [RHEL-137400] {CVE-2025-68285}
+
+* Thu Jan 01 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.21.1.el9_7]
+- usb: dwc3: Fix race condition between concurrent dwc3_remove_requests() call paths (CKI Backport Bot) [RHEL-137147] {CVE-2025-68287}
+- redhat: conflict with unsupported shim on x86/aarch64 (9.7.z) (Li Tian) [RHEL-135775]
+- drm/vmwgfx: Validate command header size against SVGA_CMD_MAX_DATASIZE (CKI Backport Bot) [RHEL-134428] {CVE-2025-40277}
+- perf tools: Don't set attr.exclude_guest by default (Michael Petlan) [RHEL-131726]
+- smb: client: fix refcount leak in smb2_set_path_attr (Paulo Alcantara) [RHEL-127422]
+- smb: client: fix potential UAF in smb2_close_cached_fid() (Paulo Alcantara) [RHEL-127422]
+- smb: client: fix potential cfid UAF in smb2_query_info_compound (Paulo Alcantara) [RHEL-127422]
+- smb: client: Fix refcount leak for cifs_sb_tlink (Paulo Alcantara) [RHEL-127422]
+- cifs: parse_dfs_referrals: prevent oob on malformed input (Paulo Alcantara) [RHEL-127422]
+- smb: client: remove cfids_invalidation_worker (Paulo Alcantara) [RHEL-127422]
+- smb client: fix bug with newly created file in cached dir (Paulo Alcantara) [RHEL-127422]
+- smb: client: short-circuit negative lookups when parent dir is fully cached (Paulo Alcantara) [RHEL-127422]
+- smb: client: short-circuit in open_cached_dir_by_dentry() if !dentry (Paulo Alcantara) [RHEL-127422]
+- smb: client: remove pointless cfid->has_lease check (Paulo Alcantara) [RHEL-127422]
+- smb: client: remove unused fid_lock (Paulo Alcantara) [RHEL-127422]
+- smb: client: update cfid->last_access_time in open_cached_dir_by_dentry() (Paulo Alcantara) [RHEL-127422]
+- smb: client: ensure open_cached_dir_by_dentry() only returns valid cfid (Paulo Alcantara) [RHEL-127422]
+- smb: client: account smb directory cache usage and per-tcon totals (Paulo Alcantara) [RHEL-127422]
+- smb: client: add drop_dir_cache module parameter to invalidate cached dirents (Paulo Alcantara) [RHEL-127422]
+- smb: client: show lease state as R/H/W (or NONE) in open_files (Paulo Alcantara) [RHEL-127422]
+- smb: client: show negotiated cipher in DebugData (Paulo Alcantara) [RHEL-127422]
+- smb: client: add new tracepoint to trace lease break notification (Paulo Alcantara) [RHEL-127422]
+- smb: client: Fix NULL pointer dereference in cifs_debug_dirs_proc_show() (Paulo Alcantara) [RHEL-127422]
 
 * Sat Dec 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.20.1.el9_7]
 - HID: multitouch: fix slab out-of-bounds access in mt_report_fixup() (CKI Backport Bot) [RHEL-124607] {CVE-2025-39806}
