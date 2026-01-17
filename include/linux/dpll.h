@@ -173,6 +173,7 @@ struct dpll_pin_properties {
 	const char *panel_label;
 	const char *package_label;
 	enum dpll_pin_type type;
+	RH_KABI_FILL_HOLE(u32 phase_gran)
 	unsigned long capabilities;
 	u32 freq_supported_num;
 	struct dpll_pin_frequency *freq_supported;

@@ -710,7 +710,7 @@ queue_attr_store(struct kobject *kobj, struct attribute *attr,
 			return res;
 		}
 
-		res = queue_limits_commit_update_frozen(q, &lim);
+		res = queue_limits_commit_update(q, &lim);
 		if (res)
 			return res;
 		return length;

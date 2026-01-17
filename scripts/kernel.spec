@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 611.24.1
+%define pkgrelease 611.26.1
 %define kversion 5
-%define tarfile_release 5.14.0-611.24.1.el9_7
+%define tarfile_release 5.14.0-611.26.1.el9_7
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 611.24.1%{?buildid}%{?dist}
+%define specrelease 611.26.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-611.24.1.el9_7
+%define kabiversion 5.14.0-611.26.1.el9_7
 
 #
 # End of genspec.sh variables
@@ -3697,10 +3697,29 @@ fi
 #
 #
 %changelog
-* Wed Jan 21 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-611.24.1
+* Thu Jan 29 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-611.26.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Sat Jan 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.26.1.el9_7]
+- Bluetooth: hci_sock: Prevent race in socket write iter and sock bind (CKI Backport Bot) [RHEL-139462] {CVE-2025-68305}
+- dm: fix dm_blk_report_zones (CKI Backport Bot) [RHEL-137949] {CVE-2025-38141}
+- Bluetooth: MGMT: Fix OOB access in parse_adv_monitor_pattern() (CKI Backport Bot) [RHEL-136964] {CVE-2025-40294}
+- drm/xe: Fix vm_bind_ioctl double free bug (CKI Backport Bot) [RHEL-122309] {CVE-2025-38731}
+
+* Thu Jan 15 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.25.1.el9_7]
+- ice: Fix kernel panic due to page refcount underflow (Mohammad Heib) [RHEL-139731]
+- net: atlantic: fix fragment overflow handling in RX path (CKI Backport Bot) [RHEL-139487] {CVE-2025-68301}
+- KVM: arm64: Hide ID_AA64MMFR2_EL1.NV from guest and userspace (Donald Dutile) [RHEL-134767]
+- Set fc_nlinfo in nh_create_ipv4, nh_create_ipv6 (Guillaume Nault) [RHEL-138493]
+- vsock: Ignore signal/timeout on connect() if already established (CKI Backport Bot) [RHEL-139284] {CVE-2025-40248}
+- eventpoll: don't decrement ep refcount while still holding the ep mutex (CKI Backport Bot) [RHEL-138035] {CVE-2025-38349}
+- block: don't freeze queue for updating queue limits (Ming Lei) [RHEL-135268]
+- mptcp: fix race condition in mptcp_schedule_work() (CKI Backport Bot) [RHEL-134448] {CVE-2025-40258}
+- uprobes: Fix race in uprobe_free_utask (Jay Shin) [RHEL-133868]
+- dpll: zl3073x: Specify phase adjustment granularity for pins (Ivan Vecera) [RHEL-129504]
+- dpll: add phase-adjust-gran pin attribute (Ivan Vecera) [RHEL-129504]
 
 * Sat Jan 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.24.1.el9_7]
 - gitlab-ci: use rhel9.7 builder image (Michael Hofmann)

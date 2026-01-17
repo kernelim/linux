@@ -2567,3 +2567,6 @@ void __ref text_poke_bp(void *addr, const void *opcode, size_t len, const void *
 	text_poke_loc_init(&tp, addr, opcode, len, emulate);
 	text_poke_bp_batch(&tp, 1);
 }
+
+struct alt_instr __kabi__alt_instr[0];
+EXPORT_SYMBOL_GPL(__kabi__alt_instr);
