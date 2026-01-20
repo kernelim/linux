@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 611.26.1
+%define pkgrelease 611.27.1
 %define kversion 5
-%define tarfile_release 5.14.0-611.26.1.el9_7
+%define tarfile_release 5.14.0-611.27.1.el9_7
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 611.26.1%{?buildid}%{?dist}
+%define specrelease 611.27.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-611.26.1.el9_7
+%define kabiversion 5.14.0-611.27.1.el9_7
 
 #
 # End of genspec.sh variables
@@ -3697,10 +3697,15 @@ fi
 #
 #
 %changelog
-* Thu Jan 29 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-611.26.1
+* Fri Feb 06 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-611.27.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Tue Jan 20 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.27.1.el9_7]
+- net/sched: mqprio: fix stack out-of-bounds write in tc entry parsing (CKI Backport Bot) [RHEL-136822] {CVE-2025-38568}
+- devlink: rate: Unset parent pointer in devl_rate_nodes_destroy (CKI Backport Bot) [RHEL-134923] {CVE-2025-40251}
+- ASoC: Intel: bytcr_rt5640: Fix invalid quirk input mapping (CKI Backport Bot) [RHEL-129112] {CVE-2025-40154}
 
 * Sat Jan 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.26.1.el9_7]
 - Bluetooth: hci_sock: Prevent race in socket write iter and sock bind (CKI Backport Bot) [RHEL-139462] {CVE-2025-68305}
