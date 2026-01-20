@@ -52,9 +52,6 @@ static int
 lpfc_check_adisc(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 		 struct lpfc_name *nn, struct lpfc_name *pn)
 {
-	/* First, we MUST have a RPI registered */
-	if (!(ndlp->nlp_flag & NLP_RPI_REGISTERED))
-		return 0;
 
 	/* Compare the ADISC rsp WWNN / WWPN matches our internal node
 	 * table entry for that node.
@@ -498,6 +495,10 @@ lpfc_rcv_plogi(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 			lpfc_config_link(phba, link_mbox);
 			link_mbox->mbox_cmpl = lpfc_sli_def_mbox_cmpl;
 			link_mbox->vport = vport;
+
+			/* The default completion handling for CONFIG_LINK
+			 * does not require the ndlp so no reference is needed.
+			 */
 			link_mbox->ctx_ndlp = ndlp;
 
 			rc = lpfc_sli_issue_mbox(phba, link_mbox, MBX_NOWAIT);
@@ -623,6 +624,9 @@ lpfc_rcv_plogi(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 	 */
 	login_mbox->mbox_cmpl = lpfc_defer_plogi_acc;
 	login_mbox->ctx_ndlp = lpfc_nlp_get(ndlp);
+	if (!login_mbox->ctx_ndlp)
+		goto out;
+
 	login_mbox->context3 = save_iocb; /* For PLOGI ACC */
 
 	spin_lock_irq(&ndlp->lock);
@@ -631,8 +635,10 @@ lpfc_rcv_plogi(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 
 	/* Start the ball rolling by issuing REG_LOGIN here */
 	rc = lpfc_sli_issue_mbox(phba, login_mbox, MBX_NOWAIT);
-	if (rc == MBX_NOT_FINISHED)
+	if (rc == MBX_NOT_FINISHED) {
+		lpfc_nlp_put(ndlp);
 		goto out;
+	}
 	lpfc_nlp_set_state(vport, ndlp, NLP_STE_REG_LOGIN_ISSUE);
 
 	return 1;
@@ -695,6 +701,7 @@ lpfc_rcv_padisc(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 	IOCB_t *icmd;
 	uint32_t *lp;
 	uint32_t cmd;
+	int rc;
 
 	pcmd = (struct lpfc_dmabuf *) cmdiocb->context2;
 	lp = (uint32_t *) pcmd->virt;
@@ -719,22 +726,29 @@ lpfc_rcv_padisc(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 		 * resume the RPI before the ACC goes out.
 		 */
 		if (vport->phba->sli_rev == LPFC_SLI_REV4) {
-			elsiocb = kmalloc(sizeof(struct lpfc_iocbq),
-				GFP_KERNEL);
-			if (elsiocb) {
+			/* Don't resume an unregistered RPI - unnecessary
+			 * mailbox. Just send the ACC when the RPI is not
+			 * registered.
+			 */
+			if (ndlp->nlp_flag & NLP_RPI_REGISTERED) {
+				elsiocb = kmalloc(sizeof(*elsiocb), GFP_KERNEL);
+				if (elsiocb) {
+					/* Save info from cmd IOCB used in
+					 * rsp
+					 */
+					memcpy(elsiocb, cmdiocb,
+					       sizeof(*elsiocb));
 
-				/* Save info from cmd IOCB used in rsp */
-				memcpy((uint8_t *)elsiocb, (uint8_t *)cmdiocb,
-					sizeof(struct lpfc_iocbq));
+					elsiocb->drvrTimeout = cmd;
 
-				/* Save the ELS cmd */
-				elsiocb->drvrTimeout = cmd;
+					rc = lpfc_sli4_resume_rpi(ndlp,
+								  lpfc_mbx_cmpl_resume_rpi,
+								  elsiocb);
+					if (rc)
+						kfree(elsiocb);
 
-				if (lpfc_sli4_resume_rpi(ndlp,
-						lpfc_mbx_cmpl_resume_rpi,
-						elsiocb))
-					kfree(elsiocb);
-				goto out;
+					goto out;
+				}
 			}
 		}
 
@@ -778,7 +792,6 @@ out:
 	spin_unlock_irq(&ndlp->lock);
 	ndlp->nlp_last_elscmd = ELS_CMD_PLOGI;
 	ndlp->nlp_prev_state = ndlp->nlp_state;
-	lpfc_nlp_set_state(vport, ndlp, NLP_STE_NPR_NODE);
 	return 0;
 }
 
@@ -1104,8 +1117,10 @@ lpfc_release_rpi(struct lpfc_hba *phba, struct lpfc_vport *vport,
 				 ndlp->nlp_rpi, ndlp->nlp_DID, ndlp->nlp_flag);
 
 		rc = lpfc_sli_issue_mbox(phba, pmb, MBX_NOWAIT);
-		if (rc == MBX_NOT_FINISHED)
+		if (rc == MBX_NOT_FINISHED) {
+			lpfc_nlp_put(ndlp);
 			mempool_free(pmb, phba->mbox_mem_pool);
+		}
 	}
 }
 
@@ -2265,13 +2280,13 @@ lpfc_cmpl_prli_prli_issue(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 	    (vport->port_type == LPFC_NPIV_PORT) &&
 	     vport->cfg_restrict_login) {
 out:
-		spin_lock_irq(&ndlp->lock);
-		ndlp->nlp_flag |= NLP_TARGET_REMOVE;
-		spin_unlock_irq(&ndlp->lock);
+		lpfc_printf_vlog(vport, KERN_INFO,
+				 LOG_ELS | LOG_DISCOVERY | LOG_NODE,
+				 "6228 Sending LOGO, determined nlp_type "
+				 "0x%x nlp_flag x%x refcnt %u\n",
+				 ndlp->nlp_type, ndlp->nlp_flag,
+				 kref_read(&ndlp->kref));
 		lpfc_issue_els_logo(vport, ndlp, 0);
-
-		ndlp->nlp_prev_state = NLP_STE_PRLI_ISSUE;
-		lpfc_nlp_set_state(vport, ndlp, NLP_STE_NPR_NODE);
 		return ndlp->nlp_state;
 	}
 
@@ -2620,8 +2635,26 @@ lpfc_rcv_prlo_mapped_node(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 	/* flush the target */
 	lpfc_sli_abort_iocb(vport, ndlp->nlp_sid, 0, LPFC_CTX_TGT);
 
-	/* Treat like rcv logo */
-	lpfc_rcv_logo(vport, ndlp, cmdiocb, ELS_CMD_PRLO);
+	/* Send PRLO_ACC */
+	spin_lock_irq(&ndlp->lock);
+	ndlp->nlp_flag |= NLP_LOGO_ACC;
+	spin_unlock_irq(&ndlp->lock);
+	lpfc_els_rsp_acc(vport, ELS_CMD_PRLO, cmdiocb, ndlp, NULL);
+
+	/* Save ELS_CMD_PRLO as the last elscmd and then set to NPR.
+	 * lpfc_cmpl_els_logo_acc is expected to restart discovery.
+	 */
+	ndlp->nlp_last_elscmd = ELS_CMD_PRLO;
+	ndlp->nlp_prev_state = ndlp->nlp_state;
+
+	lpfc_printf_vlog(vport, KERN_INFO, LOG_NODE | LOG_ELS | LOG_DISCOVERY,
+			 "3422 DID x%06x nflag x%x lastels x%x ref cnt %u\n",
+			 ndlp->nlp_DID, ndlp->nlp_flag,
+			 ndlp->nlp_last_elscmd,
+			 kref_read(&ndlp->kref));
+
+	lpfc_nlp_set_state(vport, ndlp, NLP_STE_NPR_NODE);
+
 	return ndlp->nlp_state;
 }
 
