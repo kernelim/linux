@@ -1,3 +1,49 @@
+* Thu Jan 22 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.31.1.el10_1]
+- i40e: support generic devlink param "max_mac_per_vf" (Mohammad Heib) [RHEL-121647]
+- devlink: Add new "max_mac_per_vf" generic device param (Mohammad Heib) [RHEL-121647]
+- i40e: improve VF MAC filters accounting (Mohammad Heib) [RHEL-121647]
+- KVM: arm64: Hide ID_AA64MMFR2_EL1.NV from guest and userspace (Donald Dutile) [RHEL-134763]
+- scsi: st: Skip buffer flush for information ioctls (Ewan D. Milne) [RHEL-136289]
+- scsi: st: Separate st-unique ioctl handling from SCSI common ioctl handling (Ewan D. Milne) [RHEL-136289]
+- scsi: st: Don't set pos_unknown just after device recognition (Ewan D. Milne) [RHEL-136289]
+- scsi: st: New session only when Unit Attention for new tape (Ewan D. Milne) [RHEL-136289]
+- scsi: st: Add MTIOCGET and MTLOAD to ioctls allowed after device reset (Ewan D. Milne) [RHEL-136289]
+- scsi: st: Don't modify unknown block number in MTIOCGET (Ewan D. Milne) [RHEL-136289]
+- xfs: rework datasync tracking and execution (CKI Backport Bot) [RHEL-126599]
+- xfs: rearrange code in xfs_inode_item_precommit (CKI Backport Bot) [RHEL-126599]
+- s390: Disable ARCH_WANT_OPTIMIZE_HUGETLB_VMEMMAP (Luiz Capitulino) [RHEL-133336]
+- s390: mm: add stub for hugetlb_optimize_vmemmap_key (Luiz Capitulino) [RHEL-133336]
+- x86/mm/init: Handle the special case of device private pages in add_pages(), to not increase max_pfn and trigger dma_addressing_limited() bounce buffers (Ricardo Robaina) [RHEL-129452]
+- x86/kaslr: Reduce KASLR entropy on most x86 systems (Ricardo Robaina) [RHEL-129452]
+- x86/boot/compressed: Remove unused header includes from kaslr.c (Ricardo Robaina) [RHEL-129452]
+- RDMA/core: Fix "KASAN: slab-use-after-free Read in ib_register_device" problem (CKI Backport Bot) [RHEL-134363] {CVE-2025-38022}
+- uprobes: Fix race in uprobe_free_utask (Jay Shin) [RHEL-133456]
+- ASoC: Intel: bytcr_rt5640: Fix invalid quirk input mapping (CKI Backport Bot) [RHEL-129115] {CVE-2025-40154}
+Resolves: RHEL-121647, RHEL-122759, RHEL-126599, RHEL-129115, RHEL-129452, RHEL-133336, RHEL-133456, RHEL-134363, RHEL-134763, RHEL-136289
+
+* Wed Jan 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.30.1.el10_1]
+- io_uring/msg_ring: ensure io_kiocb freeing is deferred for RCU (Jeff Moyer) [RHEL-129623] {CVE-2025-38453}
+- net: atlantic: fix fragment overflow handling in RX path (CKI Backport Bot) [RHEL-139490] {CVE-2025-68301}
+- Bluetooth: hci_sock: Prevent race in socket write iter and sock bind (CKI Backport Bot) [RHEL-139465] {CVE-2025-68305}
+- vsock: Ignore signal/timeout on connect() if already established (CKI Backport Bot) [RHEL-139287] {CVE-2025-40248}
+- net: use dst_dev_rcu() in sk_setup_caps() (Hangbin Liu) [RHEL-129087] {CVE-2025-40170}
+- ipv6: use RCU in ip6_xmit() (Hangbin Liu) [RHEL-129026] {CVE-2025-40135}
+- ipv6: use RCU in ip6_output() (Hangbin Liu) [RHEL-128991] {CVE-2025-40158}
+- net: dst: introduce dst->dev_rcu (Hangbin Liu) [RHEL-129026]
+- net: Add locking to protect skb->dev access in ip_output (Hangbin Liu) [RHEL-129026]
+- net: dst: add four helpers to annotate data-races around dst->dev (Hangbin Liu) [RHEL-129026]
+- eventpoll: don't decrement ep refcount while still holding the ep mutex (CKI Backport Bot) [RHEL-138041] {CVE-2025-38349}
+- fs/proc: fix uaf in proc_readdir_de() (CKI Backport Bot) [RHEL-137101] {CVE-2025-40271}
+- Bluetooth: MGMT: Fix OOB access in parse_adv_monitor_pattern() (CKI Backport Bot) [RHEL-136972] {CVE-2025-40294}
+- Bluetooth: hci_event: validate skb length for unknown CC opcode (CKI Backport Bot) [RHEL-136951] {CVE-2025-40301}
+- net/sched: mqprio: fix stack out-of-bounds write in tc entry parsing (CKI Backport Bot) [RHEL-136836] {CVE-2025-38568}
+- Bluetooth: hci_sync: fix race in hci_cmd_sync_dequeue_once (CKI Backport Bot) [RHEL-136259] {CVE-2025-40318}
+- devlink: rate: Unset parent pointer in devl_rate_nodes_destroy (CKI Backport Bot) [RHEL-134926] {CVE-2025-40251}
+- mptcp: fix race condition in mptcp_schedule_work() (CKI Backport Bot) [RHEL-134451] {CVE-2025-40258}
+- irqchip/gic-v2m: Prevent use after free of gicv2m_get_fwnode() (CKI Backport Bot) [RHEL-131989] {CVE-2025-37819}
+- drm/xe: Fix vm_bind_ioctl double free bug (Anusha Srivatsa) [RHEL-122312] {CVE-2025-38731}
+Resolves: RHEL-122312, RHEL-128991, RHEL-129026, RHEL-129087, RHEL-129623, RHEL-131989, RHEL-134451, RHEL-134926, RHEL-136259, RHEL-136836, RHEL-136951, RHEL-136972, RHEL-137101, RHEL-138041, RHEL-139287, RHEL-139465, RHEL-139490
+
 * Sat Jan 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.29.1.el10_1]
 - gitlab-ci: use rhel10.1 builder image (Michael Hofmann)
 - mm/vmalloc: fix data race in show_numa_info() (Waiman Long) [RHEL-137997] {CVE-2025-38383}

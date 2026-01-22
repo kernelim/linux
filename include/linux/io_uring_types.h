@@ -663,6 +663,8 @@ struct io_kiocb {
 		u64			extra1;
 		u64			extra2;
 	} big_cqe;
+	/* for private io_kiocb freeing */
+	RH_KABI_EXTEND(struct rcu_head rcu_head)
 };
 
 struct io_overflow_cqe {
