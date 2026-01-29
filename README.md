@@ -21,7 +21,10 @@ See the following tree branches:
 ## Available tags
 
 The following is a chronological list of distribution kernel tags managed in this repository:
+* Rocky 8.x kernel version **4.18.0-553.97.1.el8_10** - [tag](https://github.com/kernelim/linux/releases/tag/linux-4.18.0-553.97.1.el8_10.tar.xz), dated 2026-01-20 07:09:43
+* Rocky 9.x kernel version **5.14.0-611.26.1.el9_7** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-611.26.1.el9_7.tar.xz), dated 2026-01-17 11:09:50
 * Rocky 8.x kernel version **4.18.0-553.94.1.el8_10** - [tag](https://github.com/kernelim/linux/releases/tag/linux-4.18.0-553.94.1.el8_10.tar.xz), dated 2026-01-13 07:10:39
+* Rocky 10.x kernel version **6.12.0-124.29.1.el10_1** - [tag](https://github.com/kernelim/linux/releases/tag/linux-6.12.0-124.29.1.el10_1.tar.xz), dated 2026-01-11 01:09:33
 * Rocky 9.x kernel version **5.14.0-611.24.1.el9_7** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-611.24.1.el9_7.tar.xz), dated 2026-01-10 11:10:09
 * Rocky 10.x kernel version **6.12.0-124.28.1.el10_1** - [tag](https://github.com/kernelim/linux/releases/tag/linux-6.12.0-124.28.1.el10_1.tar.xz), dated 2026-01-07 05:50:39
 * Rocky 8.x kernel version **4.18.0-553.92.1.el8_10** - [tag](https://github.com/kernelim/linux/releases/tag/linux-4.18.0-553.92.1.el8_10.tar.xz), dated 2026-01-06 07:10:11
