@@ -15,6 +15,17 @@
 #include <linux/mman.h>
 #include <linux/sched/mm.h>
 #include <linux/security.h>
+#include <linux/jump_label.h>
+
+/*
+ * RHEL-only: Since the 'hugetlb_optimize_vmemmap_key' static key is part
+ * of the kABI, we need stub definitions to avoid breaking the build
+ * when CONFIG_ARCH_WANT_OPTIMIZE_HUGETLB_VMEMMAP=n.
+ */
+#ifndef CONFIG_ARCH_WANT_OPTIMIZE_HUGETLB_VMEMMAP
+DEFINE_STATIC_KEY_FALSE(hugetlb_optimize_vmemmap_key);
+EXPORT_SYMBOL(hugetlb_optimize_vmemmap_key);
+#endif
 
 /*
  * If the bit selected by single-bit bitmask "a" is set within "x", move

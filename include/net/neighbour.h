@@ -308,14 +308,14 @@ static inline struct neighbour *___neigh_lookup_noref(
 	const void *pkey,
 	struct net_device *dev)
 {
-	struct neigh_hash_table *nht = rcu_dereference_bh(tbl->nht);
+	struct neigh_hash_table *nht = rcu_dereference(tbl->nht);
 	struct neighbour *n;
 	u32 hash_val;
 
 	hash_val = hash(pkey, dev, nht->hash_rnd) >> (32 - nht->hash_shift);
-	for (n = rcu_dereference_bh(nht->hash_buckets[hash_val]);
+	for (n = rcu_dereference(nht->hash_buckets[hash_val]);
 	     n != NULL;
-	     n = rcu_dereference_bh(n->next)) {
+	     n = rcu_dereference(n->next)) {
 		if (n->dev == dev && key_eq(n, pkey))
 			return n;
 	}
@@ -328,6 +328,17 @@ static inline struct neighbour *__neigh_lookup_noref(struct neigh_table *tbl,
 						     struct net_device *dev)
 {
 	return ___neigh_lookup_noref(tbl, tbl->key_eq, tbl->hash, pkey, dev);
+}
+
+static inline void neigh_confirm(struct neighbour *n)
+{
+	if (n) {
+		unsigned long now = jiffies;
+
+		/* avoid dirtying neighbour */
+		if (READ_ONCE(n->confirmed) != now)
+			WRITE_ONCE(n->confirmed, now);
+	}
 }
 
 void neigh_table_init(int index, struct neigh_table *tbl);

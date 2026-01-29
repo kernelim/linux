@@ -1,3 +1,76 @@
+* Thu Jan 29 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.30.1.el9_7]
+- io_uring/net: commit partial buffers on retry (Jeff Moyer) [RHEL-137329] {CVE-2025-38730}
+- io_uring/kbuf: add io_kbuf_commit() helper (Jeff Moyer) [RHEL-137329]
+- io_uring/kbuf: use 'bl' directly rather than req->buf_list (Jeff Moyer) [RHEL-137329]
+- ice: prevent NULL deref in ice_lag_move_new_vf_nodes() (Michal Schmidt) [RHEL-143296]
+- net: openvswitch: Avoid needlessly taking the RTNL on vport destroy (Adrian Moreno) [RHEL-141404]
+- atm: clip: Fix infinite recursive call of clip_push(). (Guillaume Nault) [RHEL-137601] {CVE-2025-38459}
+- dpll: zl3073x: Remove unused dev wrappers (Ivan Vecera) [RHEL-139699]
+- dpll: zl3073x: Cache all output properties in zl3073x_out (Ivan Vecera) [RHEL-139699]
+- dpll: zl3073x: Cache all reference properties in zl3073x_ref (Ivan Vecera) [RHEL-139699]
+- dpll: zl3073x: Cache reference monitor status (Ivan Vecera) [RHEL-139699]
+- dpll: zl3073x: Split ref, out, and synth logic from core (Ivan Vecera) [RHEL-139699]
+- dpll: zl3073x: Store raw register values instead of parsed state (Ivan Vecera) [RHEL-139699]
+- dpll: fix device-id-get and pin-id-get to return errors properly (Ivan Vecera) [RHEL-139699]
+- dpll: spec: add missing module-name and clock-id to pin-get reply (Ivan Vecera) [RHEL-139699]
+- dpll: zl3073x: Allow to configure phase offset averaging factor (Ivan Vecera) [RHEL-139699]
+- dpll: add phase_offset_avg_factor_get/set callback ops (Ivan Vecera) [RHEL-139699]
+- dpll: add phase-offset-avg-factor device attribute to netlink spec (Ivan Vecera) [RHEL-139699]
+- dpll: fix clock quality level reporting (Ivan Vecera) [RHEL-139699]
+- dpll: add reference sync get/set (Ivan Vecera) [RHEL-139699]
+- dpll: add reference-sync netlink attribute (Ivan Vecera) [RHEL-139699]
+- dpll: remove documentation of rclk_dev_name (Ivan Vecera) [RHEL-139699]
+- net: use dst_dev_rcu() in sk_setup_caps() (Hangbin Liu) [RHEL-129084] {CVE-2025-40170}
+- ipv4: use RCU protection in ip_dst_mtu_maybe_forward() (Hangbin Liu) [RHEL-129084]
+- net: ipv4: Consolidate ipv4_mtu and ip_dst_mtu_maybe_forward (Hangbin Liu) [RHEL-129084]
+- ipv6: use RCU in ip6_xmit() (Hangbin Liu) [RHEL-129018] {CVE-2025-40135}
+- ipv6: use RCU in ip6_output() (Hangbin Liu) [RHEL-128982] {CVE-2025-40158}
+- net: dst: introduce dst->dev_rcu (Hangbin Liu) [RHEL-128982]
+- ipv4: use RCU protection in __ip_rt_update_pmtu() (Hangbin Liu) [RHEL-128982]
+- net: Add locking to protect skb->dev access in ip_output (Hangbin Liu) [RHEL-128982]
+- net: dst: add four helpers to annotate data-races around dst->dev (Hangbin Liu) [RHEL-128982]
+- bpf: Fix mismatched RCU unlock flavour in bpf_out_neigh_v6 (Hangbin Liu) [RHEL-128982]
+- vrf: Fix lockdep splat in output path (Hangbin Liu) [RHEL-128982]
+- ipv6: remove nexthop_fib6_nh_bh() (Hangbin Liu) [RHEL-128982]
+- net: remove rcu_dereference_bh_rtnl() (Hangbin Liu) [RHEL-128982]
+- neighbour: switch to standard rcu, instead of rcu_bh (Hangbin Liu) [RHEL-128982]
+- ipv6: flowlabel: do not disable BH where not needed (Hangbin Liu) [RHEL-128982]
+- ipv6: remove one read_lock()/read_unlock() pair in rt6_check_neigh() (Hangbin Liu) [RHEL-128982]
+- neigh: introduce neigh_confirm() helper function (Hangbin Liu) [RHEL-128982]
+- net: bonding: update the slave array for broadcast mode (Hangbin Liu) [RHEL-132923]
+- net: bonding: add broadcast_neighbor netlink option (Hangbin Liu) [RHEL-132923]
+- net: bonding: add broadcast_neighbor option for 802.3ad (Hangbin Liu) [RHEL-132923]
+- vsock/vmci: Clear the vmci transport packet properly when initializing it (CKI Backport Bot) [RHEL-137697] {CVE-2025-38403}
+- ALSA: usb-audio: Fix potential overflow of PCM transfer buffer (CKI Backport Bot) [RHEL-136909] {CVE-2025-40269}
+- nvme: tcp: Fix compilation warning with W=1 (John Meneghini) [RHEL-129928]
+- nvme-tcp: Fix I/O queue cpu spreading for multiple controllers (John Meneghini) [RHEL-129928]
+Resolves: RHEL-128982, RHEL-129018, RHEL-129084, RHEL-129928, RHEL-132923, RHEL-136909, RHEL-137329, RHEL-137601, RHEL-137697, RHEL-139699, RHEL-141404, RHEL-143296
+
+* Tue Jan 27 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.29.1.el9_7]
+- squashfs: fix memory leak in squashfs_fill_super (Abhi Das) [RHEL-138015] {CVE-2025-38415}
+- Squashfs: check return result of sb_min_blocksize (CKI Backport Bot) [RHEL-138015] {CVE-2025-38415}
+- usb: core: config: Prevent OOB read in SS endpoint companion parsing (CKI Backport Bot) [RHEL-137364] {CVE-2025-39760}
+- RDMA/rxe: Fix slab-use-after-free Read in rxe_queue_cleanup bug (CKI Backport Bot) [RHEL-137069] {CVE-2025-38024}
+Resolves: RHEL-137069, RHEL-137364, RHEL-138015
+
+* Thu Jan 22 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.28.1.el9_7]
+- s390: Disable ARCH_WANT_OPTIMIZE_HUGETLB_VMEMMAP (Luiz Capitulino) [RHEL-133337]
+- s390: mm: add stub for hugetlb_optimize_vmemmap_key (Luiz Capitulino) [RHEL-133337]
+- fs/proc: fix uaf in proc_readdir_de() (CKI Backport Bot) [RHEL-137098] {CVE-2025-40271}
+- Bluetooth: hci_sync: fix race in hci_cmd_sync_dequeue_once (CKI Backport Bot) [RHEL-136256] {CVE-2025-40318}
+- RDMA/core: Fix "KASAN: slab-use-after-free Read in ib_register_device" problem (CKI Backport Bot) [RHEL-134352] {CVE-2025-38022}
+- cifs: Fix deadlock in cifs_writepages during reconnect (Paulo Alcantara) [RHEL-134234]
+- irqchip/gic-v2m: Prevent use after free of gicv2m_get_fwnode() (CKI Backport Bot) [RHEL-131974] {CVE-2025-37819}
+- net: openvswitch: fix nested key length validation in the set() action (CKI Backport Bot) [RHEL-131801] {CVE-2025-37789}
+- md: avoid repeated calls to del_gendisk (Nigel Croxon) [RHEL-126532]
+- md: delete mddev kobj before deleting gendisk kobj (Nigel Croxon) [RHEL-126532]
+- md: add legacy_async_del_gendisk mode (Nigel Croxon) [RHEL-126532]
+- md: Don't clear MD_CLOSING until mddev is freed (Nigel Croxon) [RHEL-126532]
+- md: fix create on open mddev lifetime regression (Nigel Croxon) [RHEL-126532]
+- md: call del_gendisk in control path (Nigel Croxon) [RHEL-126532]
+- Bluetooth: ISO: Fix possible UAF on iso_conn_free (CKI Backport Bot) [RHEL-128891] {CVE-2025-40141}
+Resolves: RHEL-126532, RHEL-128891, RHEL-131801, RHEL-131974, RHEL-133337, RHEL-134234, RHEL-134352, RHEL-136256, RHEL-137098
+
 * Tue Jan 20 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.27.1.el9_7]
 - net/sched: mqprio: fix stack out-of-bounds write in tc entry parsing (CKI Backport Bot) [RHEL-136822] {CVE-2025-38568}
 - devlink: rate: Unset parent pointer in devl_rate_nodes_destroy (CKI Backport Bot) [RHEL-134923] {CVE-2025-40251}

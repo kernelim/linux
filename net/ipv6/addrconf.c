@@ -1033,7 +1033,7 @@ static int ipv6_add_addr_hash(struct net_device *dev, struct inet6_ifaddr *ifa)
 	unsigned int hash = inet6_addr_hash(dev_net(dev), &ifa->addr);
 	int err = 0;
 
-	spin_lock(&addrconf_hash_lock);
+	spin_lock_bh(&addrconf_hash_lock);
 
 	/* Ignore adding duplicate addresses on an interface */
 	if (ipv6_chk_same_addr(dev_net(dev), &ifa->addr, dev, hash)) {
@@ -1043,7 +1043,7 @@ static int ipv6_add_addr_hash(struct net_device *dev, struct inet6_ifaddr *ifa)
 		hlist_add_head_rcu(&ifa->addr_lst, &inet6_addr_lst[hash]);
 	}
 
-	spin_unlock(&addrconf_hash_lock);
+	spin_unlock_bh(&addrconf_hash_lock);
 
 	return err;
 }
@@ -1145,15 +1145,15 @@ ipv6_add_addr(struct inet6_dev *idev, struct ifa6_config *cfg,
 	/* For caller */
 	refcount_set(&ifa->refcnt, 1);
 
-	rcu_read_lock_bh();
+	rcu_read_lock();
 
 	err = ipv6_add_addr_hash(idev->dev, ifa);
 	if (err < 0) {
-		rcu_read_unlock_bh();
+		rcu_read_unlock();
 		goto out;
 	}
 
-	write_lock(&idev->lock);
+	write_lock_bh(&idev->lock);
 
 	/* Add to inet6_dev unicast addr list. */
 	ipv6_link_dev_addr(idev, ifa);
@@ -1164,9 +1164,9 @@ ipv6_add_addr(struct inet6_dev *idev, struct ifa6_config *cfg,
 	}
 
 	in6_ifa_hold(ifa);
-	write_unlock(&idev->lock);
+	write_unlock_bh(&idev->lock);
 
-	rcu_read_unlock_bh();
+	rcu_read_unlock();
 
 	inet6addr_notifier_call_chain(NETDEV_UP, ifa);
 out:
