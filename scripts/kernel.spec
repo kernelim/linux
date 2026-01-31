@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 124.31.1
+%define pkgrelease 124.35.1
 %define kversion 6
-%define tarfile_release 6.12.0-124.31.1.el10_1
+%define tarfile_release 6.12.0-124.35.1.el10_1
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 124.31.1%{?buildid}%{?dist}
+%define specrelease 124.35.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-124.31.1.el10_1
+%define kabiversion 6.12.0-124.35.1.el10_1
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4354,10 +4354,35 @@ fi\
 #
 #
 %changelog
-* Fri Feb 06 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.31.1
+* Thu Feb 12 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.35.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
 - Patch MMU for riscv64
+
+* Sat Jan 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.35.1.el10_1]
+- ice: Fix kernel panic due to page refcount underflow (CKI Backport Bot) [RHEL-139734]
+- mptcp: Use __sk_dst_get() and dst_dev_rcu() in mptcp_active_enable(). (Davide Caratti) [RHEL-129044] {CVE-2025-40133}
+- mptcp: Call dst_release() in mptcp_active_enable(). (Davide Caratti) [RHEL-129044]
+- vsock/vmci: Clear the vmci transport packet properly when initializing it (CKI Backport Bot) [RHEL-137703] {CVE-2025-38403}
+
+* Thu Jan 29 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.34.1.el10_1]
+- ice: prevent NULL deref in ice_lag_move_new_vf_nodes() (Michal Schmidt) [RHEL-143255]
+- svcrdma: use rc_pageoff for memcpy byte offset (CKI Backport Bot) [RHEL-142793] {CVE-2025-68811}
+- exec: Make sure task->comm is always NUL-terminated (Luiz Capitulino) [RHEL-141711]
+- lib/buildid: use __kernel_read() for sleepable context (Waiman Long) [RHEL-141229]
+- net: bonding: update the slave array for broadcast mode (Hangbin Liu) [RHEL-138325]
+- net: bonding: add broadcast_neighbor netlink option (Hangbin Liu) [RHEL-138325]
+- net: bonding: add broadcast_neighbor option for 802.3ad (Hangbin Liu) [RHEL-138325]
+
+* Tue Jan 27 2026 Julio Faracco <jfaracco@redhat.com> [6.12.0-124.33.1.el10_1]
+- io_uring/net: commit partial buffers on retry (Jeff Moyer) [RHEL-137333] {CVE-2025-38730}
+- smb: client: let recv_done verify data_offset, data_length and remaining_data_length (Paulo Alcantara) [RHEL-131394] {CVE-2025-39933}
+
+* Sat Jan 24 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.32.1.el10_1]
+- squashfs: fix memory leak in squashfs_fill_super (Abhi Das) [RHEL-138024] {CVE-2025-38415}
+- Squashfs: check return result of sb_min_blocksize (CKI Backport Bot) [RHEL-138024] {CVE-2025-38415}
+- fbdev: Add bounds checking in bit_putcs to fix vmalloc-out-of-bounds (CKI Backport Bot) [RHEL-137686] {CVE-2025-40304}
+- fbdev: bitblit: bound-check glyph index in bit_putcs* (CKI Backport Bot) [RHEL-136945] {CVE-2025-40322}
 
 * Thu Jan 22 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.31.1.el10_1]
 - i40e: support generic devlink param "max_mac_per_vf" (Mohammad Heib) [RHEL-121647]
@@ -4380,6 +4405,7 @@ fi\
 - RDMA/core: Fix "KASAN: slab-use-after-free Read in ib_register_device" problem (CKI Backport Bot) [RHEL-134363] {CVE-2025-38022}
 - uprobes: Fix race in uprobe_free_utask (Jay Shin) [RHEL-133456]
 - ASoC: Intel: bytcr_rt5640: Fix invalid quirk input mapping (CKI Backport Bot) [RHEL-129115] {CVE-2025-40154}
+- kabi: stabilize struct alt_instr (Čestmír Kalina) [RHEL-122759]
 
 * Wed Jan 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.30.1.el10_1]
 - io_uring/msg_ring: ensure io_kiocb freeing is deferred for RCU (Jeff Moyer) [RHEL-129623] {CVE-2025-38453}

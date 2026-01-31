@@ -919,8 +919,10 @@ ice_get_rx_buf(struct ice_rx_ring *rx_ring, const unsigned int size,
 	rx_buf = &rx_ring->rx_buf[ntc];
 	prefetchw(rx_buf->page);
 
-	if (!size)
+	if (!size) {
+		rx_buf->pagecnt_bias--;
 		return rx_buf;
+	}
 	/* we are reusing so sync this buffer for CPU use */
 	dma_sync_single_range_for_cpu(rx_ring->dev, rx_buf->dma,
 				      rx_buf->page_offset, size,
