@@ -429,7 +429,7 @@ static int __cifs_reconnect(struct TCP_Server_Info *server,
 			spin_unlock(&server->srv_lock);
 			cifs_swn_reset_server_dstaddr(server);
 			cifs_server_unlock(server);
-			mod_delayed_work(cifsiod_wq, &server->reconnect, 0);
+			cifs_queue_server_reconn(server);
 		}
 	} while (server->tcpStatus == CifsNeedReconnect);
 
@@ -568,7 +568,7 @@ static int reconnect_dfs_server(struct TCP_Server_Info *server)
 		spin_unlock(&server->srv_lock);
 		cifs_swn_reset_server_dstaddr(server);
 		cifs_server_unlock(server);
-		mod_delayed_work(cifsiod_wq, &server->reconnect, 0);
+		cifs_queue_server_reconn(server);
 	} while (server->tcpStatus == CifsNeedReconnect);
 
 	dfs_cache_noreq_update_tgthint(ref_path, target_hint);
@@ -4246,8 +4246,10 @@ cifs_setup_session(const unsigned int xid, struct cifs_ses *ses,
 	struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)&pserver->dstaddr;
 	struct sockaddr_in *addr = (struct sockaddr_in *)&pserver->dstaddr;
 	bool is_binding = false;
+	bool new_ses;
 
 	spin_lock(&ses->ses_lock);
+	new_ses = ses->ses_status == SES_NEW;
 	cifs_dbg(FYI, "%s: channel connect bitmap: 0x%lx\n",
 		 __func__, ses->chans_need_reconnect);
 
@@ -4333,7 +4335,10 @@ cifs_setup_session(const unsigned int xid, struct cifs_ses *ses,
 	}
 
 	if (rc) {
-		cifs_server_dbg(VFS, "Send error in SessSetup = %d\n", rc);
+		if (new_ses) {
+			cifs_server_dbg(VFS, "failed to create a new SMB session with %s: %d\n",
+					get_security_type_str(ses->sectype), rc);
+		}
 		spin_lock(&ses->ses_lock);
 		if (ses->ses_status == SES_IN_SETUP)
 			ses->ses_status = SES_NEED_RECON;

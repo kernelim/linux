@@ -460,7 +460,7 @@ skip_add_channels:
 	spin_unlock(&ses->ses_lock);
 
 	if (smb2_command != SMB2_INTERNAL_CMD)
-		mod_delayed_work(cifsiod_wq, &server->reconnect, 0);
+		cifs_queue_server_reconn(server);
 
 	atomic_inc(&tconInfoReconnectCount);
 out:
@@ -1625,8 +1625,6 @@ SMB2_auth_kerberos(struct SMB2_sess_data *sess_data)
 	spnego_key = cifs_get_spnego_key(ses, server);
 	if (IS_ERR(spnego_key)) {
 		rc = PTR_ERR(spnego_key);
-		if (rc == -ENOKEY)
-			cifs_dbg(VFS, "Verify user has a krb5 ticket and keyutils is installed\n");
 		spnego_key = NULL;
 		goto out;
 	}
@@ -4243,7 +4241,7 @@ void smb2_reconnect_server(struct work_struct *work)
 done:
 	cifs_dbg(FYI, "Reconnecting tcons and channels finished\n");
 	if (resched)
-		queue_delayed_work(cifsiod_wq, &server->reconnect, 2 * HZ);
+		cifs_requeue_server_reconn(server);
 	mutex_unlock(&pserver->reconnect_mutex);
 
 	/* now we can safely release srv struct */
@@ -4267,7 +4265,7 @@ SMB2_echo(struct TCP_Server_Info *server)
 	    server->ops->need_neg(server)) {
 		spin_unlock(&server->srv_lock);
 		/* No need to send echo on newly established connections */
-		mod_delayed_work(cifsiod_wq, &server->reconnect, 0);
+		cifs_queue_server_reconn(server);
 		return rc;
 	}
 	spin_unlock(&server->srv_lock);

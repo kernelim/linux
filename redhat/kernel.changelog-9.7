@@ -1,3 +1,32 @@
+* Sat Feb 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.34.1.el9_7]
+- scsi: storvsc: Process unsupported MODE_SENSE_10 (Li Tian) [RHEL-145183]
+- smb: client: Add tracepoint for krb5 auth (Paulo Alcantara) [RHEL-127498]
+- smb: client: improve error message when creating SMB session (Paulo Alcantara) [RHEL-127498]
+- smb: client: relax session and tcon reconnect attempts (Paulo Alcantara) [RHEL-127498]
+- cifs: #include cifsglob.h before trace.h to allow structs in tracepoints (Paulo Alcantara) [RHEL-127498]
+- smc: Fix use-after-free in __pnet_find_base_ndev(). (Mete Durlu) [RHEL-126890] {CVE-2025-40064}
+Resolves: RHEL-126890, RHEL-127498, RHEL-145183
+
+* Thu Feb 05 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.33.1.el9_7]
+- i40e: avoid redundant VF link state updates (CKI Backport Bot) [RHEL-141877]
+- x86/sev: Guard sev_evict_cache() with CONFIG_AMD_MEM_ENCRYPT (Paolo Bonzini) [RHEL-128030]
+- x86/sev: Evict cache lines during SNP memory validation (Paolo Bonzini) [RHEL-128030]
+- ntb_hw_switchtec: Fix shift-out-of-bounds in switchtec_ntb_mw_set_trans (Myron Stowe) [RHEL-132891] {CVE-2023-53034}
+- fbdev: Add bounds checking in bit_putcs to fix vmalloc-out-of-bounds (CKI Backport Bot) [RHEL-137683] {CVE-2025-40304}
+- crypto: iaa - Optimize rebalance_wq_table() (Jay Shin) [RHEL-137272]
+- fbdev: bitblit: bound-check glyph index in bit_putcs* (CKI Backport Bot) [RHEL-136942] {CVE-2025-40322}
+- bpf: Do not audit capability check in do_jit() (Jay Shin) [RHEL-135137]
+Resolves: RHEL-128030, RHEL-132891, RHEL-135137, RHEL-136942, RHEL-137272, RHEL-137683, RHEL-141877
+
+* Tue Feb 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.32.1.el9_7]
+- svcrdma: use rc_pageoff for memcpy byte offset (CKI Backport Bot) [RHEL-142790] {CVE-2025-68811}
+- NFSv4/pNFS: Clear NFS_INO_LAYOUTCOMMIT in pnfs_mark_layout_stateid_invalid (CKI Backport Bot) [RHEL-140260] {CVE-2025-68349}
+Resolves: RHEL-140260, RHEL-142790
+
+* Sat Jan 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.31.1.el9_7]
+- nvme-tcp: fix NULL pointer dereferences in nvmet_tcp_build_pdu_iovec (CKI Backport Bot) [RHEL-144332] {CVE-2026-22998}
+Resolves: RHEL-144332
+
 * Thu Jan 29 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.30.1.el9_7]
 - io_uring/net: commit partial buffers on retry (Jeff Moyer) [RHEL-137329] {CVE-2025-38730}
 - io_uring/kbuf: add io_kbuf_commit() helper (Jeff Moyer) [RHEL-137329]
