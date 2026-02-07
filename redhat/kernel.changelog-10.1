@@ -1,3 +1,22 @@
+* Sat Feb 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.38.1.el10_1]
+- scsi: storvsc: Process unsupported MODE_SENSE_10 (Li Tian) [RHEL-147288]
+- nvme-tcp: fix NULL pointer dereferences in nvmet_tcp_build_pdu_iovec (CKI Backport Bot) [RHEL-144335] {CVE-2026-22998}
+Resolves: RHEL-144335, RHEL-147288
+
+* Thu Feb 05 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.37.1.el10_1]
+- i40e: avoid redundant VF link state updates (CKI Backport Bot) [RHEL-141876]
+- bpf: Do not audit capability check in do_jit() (Jay Shin) [RHEL-135138]
+- smc: Fix use-after-free in __pnet_find_base_ndev(). (Mete Durlu) [RHEL-126896] {CVE-2025-40064}
+Resolves: RHEL-126896, RHEL-135138, RHEL-140874, RHEL-141876
+
+* Tue Feb 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.36.1.el10_1]
+- NFSv4/pNFS: Clear NFS_INO_LAYOUTCOMMIT in pnfs_mark_layout_stateid_invalid (CKI Backport Bot) [RHEL-140263] {CVE-2025-68349}
+- ntb_hw_switchtec: Fix shift-out-of-bounds in switchtec_ntb_mw_set_trans (Myron Stowe) [RHEL-132908] {CVE-2023-53034}
+- erofs: avoid using multiple devices with different type (CKI Backport Bot) [RHEL-137977] {CVE-2025-38172}
+- ALSA: usb-audio: Fix potential overflow of PCM transfer buffer (CKI Backport Bot) [RHEL-136912] {CVE-2025-40269}
+- Bluetooth: ISO: Fix possible UAF on iso_conn_free (CKI Backport Bot) [RHEL-128899] {CVE-2025-40141}
+Resolves: RHEL-128899, RHEL-132908, RHEL-136912, RHEL-137977, RHEL-140263
+
 * Sat Jan 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.35.1.el10_1]
 - ice: Fix kernel panic due to page refcount underflow (CKI Backport Bot) [RHEL-139734]
 - mptcp: Use __sk_dst_get() and dst_dev_rcu() in mptcp_active_enable(). (Davide Caratti) [RHEL-129044] {CVE-2025-40133}

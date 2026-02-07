@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 124.35.1
+%define pkgrelease 124.38.1
 %define kversion 6
-%define tarfile_release 6.12.0-124.35.1.el10_1
+%define tarfile_release 6.12.0-124.38.1.el10_1
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 124.35.1%{?buildid}%{?dist}
+%define specrelease 124.38.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-124.35.1.el10_1
+%define kabiversion 6.12.0-124.38.1.el10_1
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4354,10 +4354,26 @@ fi\
 #
 #
 %changelog
-* Thu Feb 12 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.35.1
+* Fri Feb 20 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.38.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
 - Patch MMU for riscv64
+
+* Sat Feb 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.38.1.el10_1]
+- scsi: storvsc: Process unsupported MODE_SENSE_10 (Li Tian) [RHEL-147288]
+- nvme-tcp: fix NULL pointer dereferences in nvmet_tcp_build_pdu_iovec (CKI Backport Bot) [RHEL-144335] {CVE-2026-22998}
+
+* Thu Feb 05 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.37.1.el10_1]
+- i40e: avoid redundant VF link state updates (CKI Backport Bot) [RHEL-141876]
+- bpf: Do not audit capability check in do_jit() (Jay Shin) [RHEL-135138]
+- smc: Fix use-after-free in __pnet_find_base_ndev(). (Mete Durlu) [RHEL-126896] {CVE-2025-40064}
+
+* Tue Feb 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.36.1.el10_1]
+- NFSv4/pNFS: Clear NFS_INO_LAYOUTCOMMIT in pnfs_mark_layout_stateid_invalid (CKI Backport Bot) [RHEL-140263] {CVE-2025-68349}
+- ntb_hw_switchtec: Fix shift-out-of-bounds in switchtec_ntb_mw_set_trans (Myron Stowe) [RHEL-132908] {CVE-2023-53034}
+- erofs: avoid using multiple devices with different type (CKI Backport Bot) [RHEL-137977] {CVE-2025-38172}
+- ALSA: usb-audio: Fix potential overflow of PCM transfer buffer (CKI Backport Bot) [RHEL-136912] {CVE-2025-40269}
+- Bluetooth: ISO: Fix possible UAF on iso_conn_free (CKI Backport Bot) [RHEL-128899] {CVE-2025-40141}
 
 * Sat Jan 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.35.1.el10_1]
 - ice: Fix kernel panic due to page refcount underflow (CKI Backport Bot) [RHEL-139734]
