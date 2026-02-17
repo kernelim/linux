@@ -1,3 +1,10 @@
+* Tue Feb 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.39.1.el10_1]
+- exfat: fix double free in delayed_free (CKI Backport Bot) [RHEL-146406] {CVE-2025-38206}
+- mlxsw: spectrum_mr: Fix use-after-free when updating multicast route stats (CKI Backport Bot) [RHEL-143196] {CVE-2025-68800}
+- drm/sched: Fix potential double free in drm_sched_job_add_resv_dependencies (Mika Penttilä) [RHEL-125464] {CVE-2025-40096}
+- smc: Use __sk_dst_get() and dst_dev_rcu() in smc_clc_prfx_match(). (Mete Durlu) [RHEL-130020] {CVE-2025-40168}
+Resolves: RHEL-125464, RHEL-130020, RHEL-143196, RHEL-146406
+
 * Sat Feb 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.38.1.el10_1]
 - scsi: storvsc: Process unsupported MODE_SENSE_10 (Li Tian) [RHEL-147288]
 - nvme-tcp: fix NULL pointer dereferences in nvmet_tcp_build_pdu_iovec (CKI Backport Bot) [RHEL-144335] {CVE-2026-22998}

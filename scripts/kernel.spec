@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 124.38.1
+%define pkgrelease 124.39.1
 %define kversion 6
-%define tarfile_release 6.12.0-124.38.1.el10_1
+%define tarfile_release 6.12.0-124.39.1.el10_1
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 124.38.1%{?buildid}%{?dist}
+%define specrelease 124.39.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-124.38.1.el10_1
+%define kabiversion 6.12.0-124.39.1.el10_1
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4354,10 +4354,16 @@ fi\
 #
 #
 %changelog
-* Fri Feb 20 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.38.1
+* Fri Feb 27 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.39.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
 - Patch MMU for riscv64
+
+* Tue Feb 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.39.1.el10_1]
+- exfat: fix double free in delayed_free (CKI Backport Bot) [RHEL-146406] {CVE-2025-38206}
+- mlxsw: spectrum_mr: Fix use-after-free when updating multicast route stats (CKI Backport Bot) [RHEL-143196] {CVE-2025-68800}
+- drm/sched: Fix potential double free in drm_sched_job_add_resv_dependencies (Mika Penttilä) [RHEL-125464] {CVE-2025-40096}
+- smc: Use __sk_dst_get() and dst_dev_rcu() in smc_clc_prfx_match(). (Mete Durlu) [RHEL-130020] {CVE-2025-40168}
 
 * Sat Feb 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.38.1.el10_1]
 - scsi: storvsc: Process unsupported MODE_SENSE_10 (Li Tian) [RHEL-147288]
