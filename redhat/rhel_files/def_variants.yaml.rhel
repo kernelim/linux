@@ -436,6 +436,7 @@ rules:
   - net/dns_resolver/.*: modules-core
   - net/hsr/.*: modules-core
   - net/ife/.*: modules-core
+  - net/ipv4/fou.ko: modules-extra
   - net/ipv4/netfilter/arp.*: modules-extra
   - net/ipv4/netfilter/ip[_t].*: modules-extra
   - net/ipv4/tcp_bic.*: modules-extra
@@ -450,6 +451,7 @@ rules:
   - net/ipv4/tcp_westwood.*: modules-extra
   - net/ipv4/tcp_yeah.*: modules-extra
   - net/ipv4/.*: modules-core
+  - net/ipv6/fou6.ko: modules-extra
   - net/ipv6/netfilter/ebt.*: modules-extra
   - net/ipv6/netfilter/ip6[_t].*: modules-extra
   - net/ipv6/.*: modules-core

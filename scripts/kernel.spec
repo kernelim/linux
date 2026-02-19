@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 124.39.1
+%define pkgrelease 124.40.1
 %define kversion 6
-%define tarfile_release 6.12.0-124.39.1.el10_1
+%define tarfile_release 6.12.0-124.40.1.el10_1
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 124.39.1%{?buildid}%{?dist}
+%define specrelease 124.40.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-124.39.1.el10_1
+%define kabiversion 6.12.0-124.40.1.el10_1
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4354,10 +4354,26 @@ fi\
 #
 #
 %changelog
-* Fri Feb 27 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.39.1
+* Mon Mar 02 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.40.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
 - Patch MMU for riscv64
+
+* Thu Feb 19 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.40.1.el10_1]
+- s390/mm: Fix __ptep_rdp() inline assembly (Mete Durlu) [RHEL-143715]
+- ice: PTP: fix missing timestamps on E825 hardware (CKI Backport Bot) [RHEL-148168]
+- fou: Don't allow 0 for FOU_ATTR_IPPROTO. (Xin Long) [RHEL-144984]
+- tools: ynl: Specify --no-line-number in ynl-regen.sh. (Xin Long) [RHEL-144984]
+- gue: Fix skb memleak with inner IP protocol 0. (Xin Long) [RHEL-144984]
+- netlink: specs: fou: replace underscores with dashes in names (Xin Long) [RHEL-144984]
+- redhat: enable FOU modules in kernel-modules-extra (Xin Long) [RHEL-144984]
+- net/smc: Remove validation of reserved bits in CLC Decline message (CKI Backport Bot) [RHEL-143717]
+- scsi: s390: zfcp: Ensure synchronous unit_add (CKI Backport Bot) [RHEL-143733]
+- smb: client: Add tracepoint for krb5 auth (Paulo Alcantara) [RHEL-145511]
+- smb: client: improve error message when creating SMB session (Paulo Alcantara) [RHEL-145511]
+- smb: client: relax session and tcon reconnect attempts (Paulo Alcantara) [RHEL-145511]
+- cifs: #include cifsglob.h before trace.h to allow structs in tracepoints (Paulo Alcantara) [RHEL-145511]
+- ALSA: hda/realtek - Enable Mute LED for Lenovo platform (Jaroslav Kysela) [RHEL-141440]
 
 * Tue Feb 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.39.1.el10_1]
 - exfat: fix double free in delayed_free (CKI Backport Bot) [RHEL-146406] {CVE-2025-38206}

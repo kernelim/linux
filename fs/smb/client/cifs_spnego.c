@@ -178,6 +178,7 @@ cifs_get_spnego_key(struct cifs_ses *sesInfo,
 	saved_cred = override_creds(spnego_cred);
 	spnego_key = request_key(&cifs_spnego_key_type, description, "");
 	revert_creds(saved_cred);
+	trace_smb3_kerberos_auth(server, sesInfo, PTR_ERR_OR_ZERO(spnego_key));
 
 #ifdef CONFIG_CIFS_DEBUG2
 	if (cifsFYI && !IS_ERR(spnego_key)) {
