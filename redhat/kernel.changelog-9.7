@@ -1,3 +1,31 @@
+* Tue Feb 24 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.36.1.el9_7]
+- net/smc: Remove validation of reserved bits in CLC Decline message (Mete Durlu) [RHEL-143718]
+- autofs: dont trigger mount if it cant succeed (Ian Kent) [RHEL-149495]
+- migrate: correct lock ordering for hugetlb file folios (Luiz Capitulino) [RHEL-147266] {CVE-2026-23097}
+- ice: PTP: fix missing timestamps on E825 hardware (CKI Backport Bot) [RHEL-148166]
+- fou: Don't allow 0 for FOU_ATTR_IPPROTO. (Xin Long) [RHEL-144987]
+- tools: ynl: Specify --no-line-number in ynl-regen.sh. (Xin Long) [RHEL-144987]
+- gue: Fix skb memleak with inner IP protocol 0. (Xin Long) [RHEL-144987]
+- netlink: specs: fou: replace underscores with dashes in names (Xin Long) [RHEL-144987]
+- fou: fix initialization of grc (Xin Long) [RHEL-144987]
+- fou: Fix null-ptr-deref in GRO. (Xin Long) [RHEL-144987]
+- fou: remove warn in gue_gro_receive on unsupported protocol (Xin Long) [RHEL-144987]
+- fou: Remove XRFM from NET_FOU Kconfig (Xin Long) [RHEL-144987]
+- fou: remove sparse errors (Xin Long) [RHEL-144987]
+- redhat: enable FOU modules in kernel-modules-extra (Xin Long) [RHEL-144987]
+- s390/mm: Fix __ptep_rdp() inline assembly (Mete Durlu) [RHEL-143713]
+- dpll: expose fractional frequency offset in ppt (Ivan Vecera) [RHEL-146357]
+- dpll: zl3073x: Implement device mode setting support (Ivan Vecera) [RHEL-147459]
+- dpll: add dpll_device op to set working mode (Ivan Vecera) [RHEL-147459]
+- dpll: add dpll_device op to get supported modes (Ivan Vecera) [RHEL-147459]
+- i40e: add rh_phys_port_name mod option to behave like upstream (CKI Backport Bot) [RHEL-128237]
+- ice: add rh_phys_port_name mod option to behave like upstream (CKI Backport Bot) [RHEL-128237]
+- scsi: qla2xxx: Fix bsg_done() causing double free (Ewan D. Milne) [RHEL-146049]
+- ipv6: BUG() in pskb_expand_head() as part of calipso_skbuff_setattr() (CKI Backport Bot) [RHEL-143545] {CVE-2025-71085}
+- tick/sched: Limit non-timekeeper CPUs calling jiffies update (Phil Auld) [RHEL-141462]
+- smc: Use __sk_dst_get() and dst_dev_rcu() in smc_clc_prfx_match(). (Mete Durlu) [RHEL-130017] {CVE-2025-40168}
+Resolves: RHEL-128237, RHEL-130017, RHEL-141462, RHEL-143545, RHEL-143713, RHEL-143718, RHEL-144987, RHEL-146049, RHEL-146357, RHEL-147266, RHEL-147459, RHEL-148166, RHEL-149495
+
 * Tue Feb 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.35.1.el9_7]
 - page_pool: Fix use-after-free in page_pool_recycle_in_ring (Paolo Abeni) [RHEL-137841] {CVE-2025-38129}
 - exfat: fix double free in delayed_free (CKI Backport Bot) [RHEL-146403] {CVE-2025-38206}

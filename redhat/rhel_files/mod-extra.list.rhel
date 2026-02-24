@@ -47,6 +47,8 @@ ems_pci.ko
 ems_usb.ko
 esd_usb2.ko
 esi-sir.ko
+fou.ko
+fou6.ko
 gamecon.ko
 gf2k.ko
 gigaset.ko

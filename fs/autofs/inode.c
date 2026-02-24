@@ -239,6 +239,7 @@ int autofs_fill_super(struct super_block *s, void *data, int silent)
 	s->s_fs_info = sbi;
 	sbi->magic = AUTOFS_SBI_MAGIC;
 	sbi->pipefd = -1;
+	sbi->mnt_ns_id = current->nsproxy->mnt_ns->seq;
 	sbi->pipe = NULL;
 	sbi->exp_timeout = 0;
 	sbi->oz_pgrp = NULL;

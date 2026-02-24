@@ -5,6 +5,10 @@
 #include "i40e.h"
 #include "i40e_devlink.h"
 
+/* RHEL-specific opt-in to expose "phys_port_name" in sysfs to match upstream behavior. */
+static int rh_phys_port_name;
+module_param(rh_phys_port_name, int, 0644);
+
 static void i40e_info_get_dsn(struct i40e_pf *pf, char *buf, size_t len)
 {
 	u8 dsn[8];
@@ -229,7 +233,7 @@ int i40e_devlink_create_port(struct i40e_pf *pf)
  **/
 struct devlink_port *i40e_get_devlink_port(struct net_device *netdev)
 {
-	return NULL;
+	return rh_phys_port_name ? netdev->devlink_port : NULL;
 }
 
 /**

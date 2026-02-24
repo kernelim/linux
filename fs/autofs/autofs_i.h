@@ -16,6 +16,8 @@
 #include <linux/wait.h>
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
+#include <uapi/linux/mount.h>
+#include <linux/nsproxy.h>
 #include <linux/mount.h>
 #include <linux/namei.h>
 #include <linux/uaccess.h>
@@ -25,6 +27,8 @@
 #include <linux/completion.h>
 #include <linux/file.h>
 #include <linux/magic.h>
+#include "../mount.h"
+#include <linux/ns_common.h>
 
 /* This is the range of ioctl() numbers we claim as ours */
 #define AUTOFS_IOC_FIRST     AUTOFS_IOC_READY
@@ -112,6 +116,7 @@ struct autofs_sb_info {
 	int pipefd;
 	struct file *pipe;
 	struct pid *oz_pgrp;
+	u64 mnt_ns_id;
 	int version;
 	int sub_version;
 	int min_proto;
