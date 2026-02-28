@@ -3302,6 +3302,14 @@ struct mnt_namespace *copy_mnt_ns(unsigned long flags, struct mnt_namespace *ns,
 	 * as belonging to new namespace.  We have already acquired a private
 	 * fs_struct, so tsk->fs->lock is not needed.
 	 */
+	if (new_fs)
+		WARN_ON_ONCE(new_fs->users != 1);
+
+	/* Release the extra pwd references of new_fs, if present. */
+	while (new_fs && new_fs->pwd_refs) {
+		path_put(&new_fs->pwd);
+		new_fs->pwd_refs--;
+	}
 	p = old;
 	q = new;
 	while (p) {

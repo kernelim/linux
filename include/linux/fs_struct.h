@@ -12,6 +12,7 @@ struct fs_struct {
 	seqcount_t seq;
 	int umask;
 	int in_exec;
+	RH_KABI_FILL_HOLE(int pwd_refs)	/* A pool of extra pwd references */
 	struct path root, pwd;
 } __randomize_layout;
 
@@ -38,6 +39,33 @@ static inline void get_fs_pwd(struct fs_struct *fs, struct path *pwd)
 	*pwd = fs->pwd;
 	path_get(pwd);
 	spin_unlock(&fs->lock);
+}
+
+/* Acquire a pwd reference from the pwd_refs pool, if available */
+static inline void get_fs_pwd_pool(struct fs_struct *fs, struct path *pwd)
+{
+	spin_lock(&fs->lock);
+	*pwd = fs->pwd;
+	if (fs->pwd_refs)
+		fs->pwd_refs--;
+	else
+		path_get(pwd);
+	spin_unlock(&fs->lock);
+}
+
+/* Release a pwd reference back to the pwd_refs pool, if appropriate */
+static inline void put_fs_pwd_pool(struct fs_struct *fs, struct path *pwd)
+{
+	bool put = false;
+
+	spin_lock(&fs->lock);
+	if ((fs->pwd.dentry == pwd->dentry) && (fs->pwd.mnt == pwd->mnt))
+		fs->pwd_refs++;
+	else
+		put = true;
+	spin_unlock(&fs->lock);
+	if (put)
+		path_put(pwd);
 }
 
 extern bool current_chrooted(void);

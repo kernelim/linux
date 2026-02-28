@@ -35,17 +35,21 @@ void set_fs_root(struct fs_struct *fs, const struct path *path)
 void set_fs_pwd(struct fs_struct *fs, const struct path *path)
 {
 	struct path old_pwd;
+	int count;
 
 	path_get(path);
 	spin_lock(&fs->lock);
 	write_seqcount_begin(&fs->seq);
 	old_pwd = fs->pwd;
 	fs->pwd = *path;
+	count = fs->pwd_refs + 1;
+	fs->pwd_refs = 0;
 	write_seqcount_end(&fs->seq);
 	spin_unlock(&fs->lock);
 
 	if (old_pwd.dentry)
-		path_put(&old_pwd);
+		while (count--)
+			path_put(&old_pwd);
 }
 
 static inline int replace_path(struct path *p, const struct path *old, const struct path *new)
@@ -67,11 +71,16 @@ void chroot_fs_refs(const struct path *old_root, const struct path *new_root)
 		task_lock(p);
 		fs = p->fs;
 		if (fs) {
-			int hits = 0;
+			int hits;
+
 			spin_lock(&fs->lock);
 			write_seqcount_begin(&fs->seq);
+			hits = replace_path(&fs->pwd, old_root, new_root);
+			if (hits && fs->pwd_refs) {
+				count += fs->pwd_refs;
+				fs->pwd_refs = 0;
+			}
 			hits += replace_path(&fs->root, old_root, new_root);
-			hits += replace_path(&fs->pwd, old_root, new_root);
 			write_seqcount_end(&fs->seq);
 			while (hits--) {
 				count++;
@@ -88,8 +97,11 @@ void chroot_fs_refs(const struct path *old_root, const struct path *new_root)
 
 void free_fs_struct(struct fs_struct *fs)
 {
+	int count = fs->pwd_refs + 1;
+
 	path_put(&fs->root);
-	path_put(&fs->pwd);
+	while (count--)
+		path_put(&fs->pwd);
 	kmem_cache_free(fs_cachep, fs);
 }
 
@@ -117,6 +129,7 @@ struct fs_struct *copy_fs_struct(struct fs_struct *old)
 	if (fs) {
 		fs->users = 1;
 		fs->in_exec = 0;
+		fs->pwd_refs = 0;
 		spin_lock_init(&fs->lock);
 		seqcount_init(&fs->seq);
 		fs->umask = old->umask;
@@ -125,7 +138,10 @@ struct fs_struct *copy_fs_struct(struct fs_struct *old)
 		fs->root = old->root;
 		path_get(&fs->root);
 		fs->pwd = old->pwd;
-		path_get(&fs->pwd);
+		if (old->pwd_refs)
+			old->pwd_refs--;
+		else
+			path_get(&fs->pwd);
 		spin_unlock(&old->lock);
 	}
 	return fs;
