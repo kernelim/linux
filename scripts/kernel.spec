@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 611.36.1
+%define pkgrelease 611.41.1
 %define kversion 5
-%define tarfile_release 5.14.0-611.36.1.el9_7
+%define tarfile_release 5.14.0-611.41.1.el9_7
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 611.36.1%{?buildid}%{?dist}
+%define specrelease 611.41.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-611.36.1.el9_7
+%define kabiversion 5.14.0-611.41.1.el9_7
 
 #
 # End of genspec.sh variables
@@ -3697,10 +3697,44 @@ fi
 #
 #
 %changelog
-* Mon Mar 02 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-611.36.1
+* Thu Mar 19 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-611.41.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Sat Mar 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.41.1.el9_7]
+- net: vxlan: prevent NULL deref in vxlan_xmit_one (Antoine Tenart) [RHEL-133369]
+- ACPI: PRM: Reduce unnecessary printing to avoid user confusion (Mark Langsdorf) [RHEL-123057]
+
+* Thu Mar 05 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.40.1.el9_7]
+- s390/pci: Allow automatic recovery with minimal driver support (CKI Backport Bot) [RHEL-118881]
+- mm/hugetlb: ignore hugepage kernel args if hugepages are unsupported (Luiz Capitulino) [RHEL-143846]
+
+* Tue Mar 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.39.1.el9_7]
+- HID: intel-thc-hid: intel-thc: Fix incorrect pointer arithmetic in I2C regs save (CKI Backport Bot) [RHEL-142232] {CVE-2025-39818}
+
+* Sat Feb 28 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.38.1.el9_7]
+- mlxsw: spectrum_mr: Fix use-after-free when updating multicast route stats (CKI Backport Bot) [RHEL-143194] {CVE-2025-68800}
+
+* Thu Feb 26 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.37.1.el9_7]
+- printk: Use console_is_usable on console_unblank (CKI Backport Bot) [RHEL-148302]
+- printk: Check CON_SUSPEND when unblanking a console (CKI Backport Bot) [RHEL-148302]
+- printk: Avoid irq_work for printk_deferred() on suspend (CKI Backport Bot) [RHEL-148302]
+- printk: Avoid scheduling irq_work on suspend (CKI Backport Bot) [RHEL-148302]
+- printk: nbcon: Allow reacquire during panic (CKI Backport Bot) [RHEL-148302]
+- printk: Allow printk_trigger_flush() to flush all types (CKI Backport Bot) [RHEL-148302]
+- printk: nbcon: Use raw_cpu_ptr() instead of open coding (CKI Backport Bot) [RHEL-148302]
+- backport "printk: Add helper for flush type logic" and associated changes (CKI Backport Bot) [RHEL-148302]
+- printk: Remove redundant deferred check in vprintk() (CKI Backport Bot) [RHEL-148302]
+- printk: Introduce force_legacy_kthread() macro (CKI Backport Bot) [RHEL-148302]
+- printk: Add is_printk_legacy_deferred() (CKI Backport Bot) [RHEL-148302]
+- io_uring/sqpoll: don't put task_struct on tctx setup failure (Jeff Moyer) [RHEL-137988]
+- io_uring: consistently use rcu semantics with sqpoll thread (Jeff Moyer) [RHEL-137988]
+- io_uring: fix use-after-free of sq->thread in __io_uring_show_fdinfo() (Jeff Moyer) [RHEL-137988] {CVE-2025-38106}
+- io_uring/sqpoll: fix sqpoll error handling races (Jeff Moyer) [RHEL-137988]
+- io_uring/sqpoll: annotate debug task == current with data_race() (Jeff Moyer) [RHEL-137988]
+- macvlan: fix possible UAF in macvlan_forward_source() (CKI Backport Bot) [RHEL-144125] {CVE-2026-23001}
+- net/smc: Fix lookup of netdev by using ib_device_get_netdev() (CKI Backport Bot) [RHEL-114786]
 
 * Tue Feb 24 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.36.1.el9_7]
 - net/smc: Remove validation of reserved bits in CLC Decline message (Mete Durlu) [RHEL-143718]

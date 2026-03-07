@@ -485,6 +485,12 @@ bool have_nbcon_console;
  */
 bool have_boot_console;
 
+/* See printk_legacy_allow_panic_sync() for details. */
+bool legacy_allow_panic_sync;
+
+/* Avoid using irq_work when suspending. */
+bool console_irqwork_blocked;
+
 #ifdef CONFIG_PRINTK
 DECLARE_WAIT_QUEUE_HEAD(log_wait);
 
@@ -2339,23 +2345,28 @@ out:
 	return ret;
 }
 
-static bool legacy_allow_panic_sync;
-
 /*
  * This acts as a one-way switch to allow legacy consoles to print from
  * the printk() caller context on a panic CPU.
  */
 void printk_legacy_allow_panic_sync(void)
 {
+	struct console_flush_type ft;
+
 	legacy_allow_panic_sync = true;
+
+	printk_get_console_flush_type(&ft);
+	if (ft.legacy_direct) {
+		if (console_trylock())
+			console_unlock();
+	}
 }
 
 asmlinkage int vprintk_emit(int facility, int level,
 			    const struct dev_printk_info *dev_info,
 			    const char *fmt, va_list args)
 {
-	bool do_trylock_unlock = printing_via_unlock &&
-				 !IS_ENABLED(CONFIG_PREEMPT_RT);
+	struct console_flush_type ft;
 	int printed_len;
 
 	/* Suppress unimportant messages after panic happens */
@@ -2370,56 +2381,25 @@ asmlinkage int vprintk_emit(int facility, int level,
 	if (other_cpu_in_panic())
 		return 0;
 
+	printk_get_console_flush_type(&ft);
+
 	if (level == LOGLEVEL_SCHED) {
 		level = LOGLEVEL_DEFAULT;
-		/* If called from the scheduler, we can not call up(). */
-		do_trylock_unlock = false;
+		ft.legacy_offload |= ft.legacy_direct && !console_irqwork_blocked;
+		ft.legacy_direct = false;
 	}
 
 	printk_delay(level);
 
 	printed_len = vprintk_store(facility, level, dev_info, fmt, args);
 
-	if (!have_boot_console && have_nbcon_console) {
-		bool is_panic_context = this_cpu_in_panic();
+	if (ft.nbcon_atomic)
+		nbcon_atomic_flush_all();
 
-		/*
-		 * In panic, the legacy consoles are not allowed to print from
-		 * the printk calling context unless explicitly allowed. This
-		 * gives the safe nbcon consoles a chance to print out all the
-		 * panic messages first. This restriction only applies if
-		 * there are nbcon consoles registered.
-		 */
-		if (is_panic_context)
-			do_trylock_unlock &= legacy_allow_panic_sync;
+	if (ft.nbcon_offload)
+		nbcon_wake_threads();
 
-		/*
-		 * There are situations where nbcon atomic printing should
-		 * happen in the printk() caller context:
-		 *
-		 * - When this CPU is in panic.
-		 *
-		 * - When booting, before the printing threads have been
-		 *   started.
-		 *
-		 * - During shutdown, since the printing threads may not get
-		 *   a chance to print the final messages.
-		 *
-		 * Note that if boot consoles are registered, the
-		 * console_lock/console_unlock dance must be relied upon
-		 * instead because nbcon consoles cannot print simultaneously
-		 * with boot consoles.
-		 */
-		if (is_panic_context ||
-		    !printk_threads_enabled ||
-		    (system_state > SYSTEM_RUNNING)) {
-			nbcon_atomic_flush_all();
-		}
-	}
-
-	nbcon_wake_threads();
-
-	if (do_trylock_unlock) {
+	if (ft.legacy_direct) {
 		/*
 		 * The caller may be holding system-critical or
 		 * timing-sensitive locks. Disable preemption during
@@ -2430,32 +2410,21 @@ asmlinkage int vprintk_emit(int facility, int level,
 		 * Also, nbcon_get_default_prio() requires migration disabled.
 		 */
 		preempt_disable();
-
 		/*
-		 * Do not emit for EMERGENCY priority. The console will be
-		 * explicitly flushed when exiting the emergency section.
+		 * Try to acquire and then immediately release the console
+		 * semaphore. The release will print out buffers. With the
+		 * spinning variant, this context tries to take over the
+		 * printing from another printing context.
 		 */
-		if (nbcon_get_default_prio() == NBCON_PRIO_EMERGENCY) {
-			do_trylock_unlock = false;
-		} else {
-			/*
-			 * Try to acquire and then immediately release the
-			 * console semaphore. The release will print out
-			 * buffers. With the spinning variant, this context
-			 * tries to take over the printing from another
-			 * printing context.
-			 */
-			if (console_trylock_spinning())
-				console_unlock();
-		}
-
+		if (console_trylock_spinning())
+			console_unlock();
 		preempt_enable();
 	}
 
-	if (do_trylock_unlock)
-		wake_up_klogd();
-	else
+	if (ft.legacy_offload)
 		defer_console_output();
+	else if (!console_irqwork_blocked)
+		wake_up_klogd();
 
 	return printed_len;
 }
@@ -2689,10 +2658,20 @@ void suspend_console(void)
 {
 	struct console *con;
 
+	if (console_suspend_enabled)
+		pr_info("Suspending console(s) (use no_console_suspend to debug)\n");
+
+	/*
+	 * Flush any console backlog and then avoid queueing irq_work until
+	 * console_resume_all(). Until then deferred printing is no longer
+	 * triggered, NBCON consoles transition to atomic flushing, and
+	 * any klogd waiters are not triggered.
+	 */
+	pr_flush(1000, true);
+	console_irqwork_blocked = true;
+
 	if (!console_suspend_enabled)
 		return;
-	pr_info("Suspending console(s) (use no_console_suspend to debug)\n");
-	pr_flush(1000, true);
 
 	console_list_lock();
 	for_each_console(con)
@@ -2710,38 +2689,37 @@ void suspend_console(void)
 
 void resume_console(void)
 {
+	struct console_flush_type ft;
 	struct console *con;
-	short flags;
-	int cookie;
-
-	if (!console_suspend_enabled)
-		return;
-
-	console_list_lock();
-	for_each_console(con)
-		console_srcu_write_flags(con, con->flags & ~CON_SUSPENDED);
-	console_list_unlock();
 
 	/*
-	 * Ensure that all SRCU list walks have completed. All printing
-	 * contexts must be able to see they are no longer suspended so
-	 * that they are guaranteed to wake up and resume printing.
+	 * Allow queueing irq_work. After restoring console state, deferred
+	 * printing and any klogd waiters need to be triggered in case there
+	 * is now a console backlog.
 	 */
-	synchronize_srcu(&console_srcu);
+	console_irqwork_blocked = false;
 
-	/*
-	 * Since this runs in task context, wake the threaded printers
-	 * directly rather than scheduling irq_work to do it.
-	 */
-	cookie = console_srcu_read_lock();
-	for_each_console_srcu(con) {
-		flags = console_srcu_read_flags(con);
-		if (flags & CON_NBCON)
-			nbcon_kthread_wake(con);
+	if (console_suspend_enabled) {
+		console_list_lock();
+		for_each_console(con)
+			console_srcu_write_flags(con, con->flags & ~CON_SUSPENDED);
+		console_list_unlock();
+
+		/*
+		 * Ensure that all SRCU list walks have completed. All printing
+		 * contexts must be able to see they are no longer suspended so
+		 * that they are guaranteed to wake up and resume printing.
+		 */
+		synchronize_srcu(&console_srcu);
 	}
-	console_srcu_read_unlock(cookie);
 
-	wake_up_legacy_kthread();
+	printk_get_console_flush_type(&ft);
+	if (ft.nbcon_offload)
+		nbcon_wake_threads();
+	if (ft.legacy_offload)
+		defer_console_output();
+	else
+		wake_up_klogd();
 
 	pr_flush(1000, true);
 }
@@ -2757,11 +2735,16 @@ void resume_console(void)
  */
 static int console_cpu_notify(unsigned int cpu)
 {
-	if (!cpuhp_tasks_frozen && printing_via_unlock &&
-	    !IS_ENABLED(CONFIG_PREEMPT_RT)) {
-		/* If trylock fails, someone else is doing the printing */
-		if (console_trylock())
-			console_unlock();
+	struct console_flush_type ft;
+
+	if (!cpuhp_tasks_frozen) {
+		printk_get_console_flush_type(&ft);
+		if (ft.nbcon_atomic)
+			nbcon_atomic_flush_all();
+		if (ft.legacy_direct) {
+			if (console_trylock())
+				console_unlock();
+		}
 	}
 	return 0;
 }
@@ -2987,7 +2970,7 @@ static bool console_emit_next_record(struct console *con, bool *handover, int co
 
 	/* Write everything out to the hardware. */
 
-	if (IS_ENABLED(CONFIG_PREEMPT_RT)) {
+	if (force_legacy_kthread()) {
 		/*
 		 * On PREEMPT_RT this function is either in a thread or
 		 * panic context. So there is no need for concern about
@@ -3199,7 +3182,7 @@ void console_unlock(void)
 	 * PREEMPT_RT relies on kthread and atomic consoles for printing.
 	 * It never attempts to print from console_unlock().
 	 */
-	if (IS_ENABLED(CONFIG_PREEMPT_RT)) {
+	if (force_legacy_kthread()) {
 		__console_unlock();
 		return;
 	}
@@ -3238,7 +3221,10 @@ void console_unblank(void)
 	 */
 	cookie = console_srcu_read_lock();
 	for_each_console_srcu(c) {
-		if ((console_srcu_read_flags(c) & CON_ENABLED) && c->unblank) {
+		if (!console_is_usable(c, console_srcu_read_flags(c), true))
+			continue;
+
+		if (c->unblank) {
 			found_unblank = true;
 			break;
 		}
@@ -3275,7 +3261,10 @@ void console_unblank(void)
 
 	cookie = console_srcu_read_lock();
 	for_each_console_srcu(c) {
-		if ((console_srcu_read_flags(c) & CON_ENABLED) && c->unblank)
+		if (!console_is_usable(c, console_srcu_read_flags(c), true))
+			continue;
+
+		if (c->unblank)
 			c->unblank();
 	}
 	console_srcu_read_unlock(cookie);
@@ -3294,6 +3283,7 @@ void console_unblank(void)
  */
 void console_flush_on_panic(enum con_flush_mode mode)
 {
+	struct console_flush_type ft;
 	bool handover;
 	u64 next_seq;
 
@@ -3339,9 +3329,12 @@ void console_flush_on_panic(enum con_flush_mode mode)
 		console_srcu_read_unlock(cookie);
 	}
 
-	nbcon_atomic_flush_all();
+	printk_get_console_flush_type(&ft);
+	if (ft.nbcon_atomic)
+		nbcon_atomic_flush_all();
 
-	if (printing_via_unlock)
+	/* Flush legacy consoles once allowed, even when dangerous. */
+	if (legacy_allow_panic_sync)
 		console_flush_all(false, &next_seq, &handover);
 }
 
@@ -3493,7 +3486,7 @@ void nbcon_legacy_kthread_create(void)
 
 	lockdep_assert_held(&console_mutex);
 
-	if (!IS_ENABLED(CONFIG_PREEMPT_RT))
+	if (!force_legacy_kthread())
 		return;
 
 	if (!printk_threads_enabled || nbcon_legacy_kthread)
@@ -3936,7 +3929,7 @@ static int unregister_console_locked(struct console *console)
 	}
 
 #ifdef CONFIG_PRINTK
-	if (!printing_via_unlock && nbcon_legacy_kthread) {
+	if (!(have_legacy_console || have_boot_console) && nbcon_legacy_kthread) {
 		kthread_stop(nbcon_legacy_kthread);
 		nbcon_legacy_kthread = NULL;
 	}
@@ -4088,6 +4081,7 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
 {
 	unsigned long timeout_jiffies = msecs_to_jiffies(timeout_ms);
 	unsigned long remaining_jiffies = timeout_jiffies;
+	struct console_flush_type ft;
 	struct console *c;
 	u64 last_diff = 0;
 	u64 printk_seq;
@@ -4106,7 +4100,10 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
 	 * Otherwise this function will just wait for the threaded printers
 	 * to print up to @seq.
 	 */
-	if (printing_via_unlock && !IS_ENABLED(CONFIG_PREEMPT_RT)) {
+	printk_get_console_flush_type(&ft);
+	if (ft.nbcon_atomic)
+		nbcon_atomic_flush_all();
+	if (ft.legacy_direct) {
 		console_lock();
 		console_unlock();
 	}
@@ -4118,7 +4115,7 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
 		locked = false;
 		diff = 0;
 
-		if (printing_via_unlock) {
+		if (have_legacy_console || have_boot_console) {
 			/*
 			 * Hold the console_lock to guarantee safe access to
 			 * console->seq. Releasing console_lock flushes more
@@ -4214,7 +4211,7 @@ static void wake_up_klogd_work_func(struct irq_work *irq_work)
 	int pending = this_cpu_xchg(printk_pending, 0);
 
 	if (pending & PRINTK_PENDING_OUTPUT) {
-		if (IS_ENABLED(CONFIG_PREEMPT_RT)) {
+		if (force_legacy_kthread()) {
 			wake_up_interruptible(&legacy_wait);
 		} else {
 			/*
@@ -4236,6 +4233,13 @@ static DEFINE_PER_CPU(struct irq_work, wake_up_klogd_work) =
 static void __wake_up_klogd(int val)
 {
 	if (!printk_percpu_data_ready())
+		return;
+
+	/*
+	 * It is not allowed to call this function when console irq_work
+	 * is blocked.
+	 */
+	if (WARN_ON_ONCE(console_irqwork_blocked))
 		return;
 
 	preempt_disable();
@@ -4293,15 +4297,35 @@ void defer_console_output(void)
 	 */
 	int val = PRINTK_PENDING_WAKEUP;
 
-	if (printing_via_unlock)
+	if (have_legacy_console || have_boot_console)
 		val |= PRINTK_PENDING_OUTPUT;
 	__wake_up_klogd(val);
 }
 
+/**
+ * printk_trigger_flush - Attempt to flush printk buffer to consoles.
+ *
+ * If possible, flush the printk buffer to all consoles in the caller's
+ * context. If offloading is available, trigger deferred printing.
+ *
+ * This is best effort. Depending on the system state, console states,
+ * and caller context, no actual flushing may result from this call.
+ */
 void printk_trigger_flush(void)
 {
-	nbcon_wake_threads();
-	defer_console_output();
+	struct console_flush_type ft;
+
+	printk_get_console_flush_type(&ft);
+	if (ft.nbcon_atomic)
+		nbcon_atomic_flush_all();
+	if (ft.nbcon_offload)
+		nbcon_wake_threads();
+	if (ft.legacy_direct) {
+		if (console_trylock())
+			console_unlock();
+	}
+	if (ft.legacy_offload)
+		defer_console_output();
 }
 
 int vprintk_deferred(const char *fmt, va_list args)

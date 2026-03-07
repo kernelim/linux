@@ -209,8 +209,9 @@ bool printk_threads_enabled __ro_after_init;
 
 /**
  * nbcon_context_try_acquire_direct - Try to acquire directly
- * @ctxt:	The context of the caller
- * @cur:	The current console state
+ * @ctxt:		The context of the caller
+ * @cur:		The current console state
+ * @is_reacquire:	This acquire is a reacquire
  *
  * Acquire the console when it is released. Also acquire the console when
  * the current owner has a lower priority and the console is in a safe state.
@@ -220,25 +221,38 @@ bool printk_threads_enabled __ro_after_init;
  *
  * Errors:
  *
- *	-EPERM:		A panic is in progress and this is not the panic CPU.
- *			Or the current owner or waiter has the same or higher
- *			priority. No acquire method can be successful in
- *			this case.
+ *	-EPERM:		A panic is in progress and this is neither the panic
+ *			CPU nor is this a reacquire. Or the current owner or
+ *			waiter has the same or higher priority. No acquire
+ *			method can be successful in these cases.
  *
  *	-EBUSY:		The current owner has a lower priority but the console
  *			in an unsafe state. The caller should try using
  *			the handover acquire method.
  */
 static int nbcon_context_try_acquire_direct(struct nbcon_context *ctxt,
-					    struct nbcon_state *cur)
+					    struct nbcon_state *cur, bool is_reacquire)
 {
 	unsigned int cpu = smp_processor_id();
 	struct console *con = ctxt->console;
 	struct nbcon_state new;
 
 	do {
-		if (other_cpu_in_panic())
+		/*
+		 * Panic does not imply that the console is owned. However,
+		 * since all non-panic CPUs are stopped during panic(), it
+		 * is safer to have them avoid gaining console ownership.
+		 *
+		 * If this acquire is a reacquire (and an unsafe takeover
+		 * has not previously occurred) then it is allowed to attempt
+		 * a direct acquire in panic. This gives console drivers an
+		 * opportunity to perform any necessary cleanup if they were
+		 * interrupted by the panic CPU while printing.
+		 */
+		if (other_cpu_in_panic() &&
+		    (!is_reacquire || cur->unsafe_takeover)) {
 			return -EPERM;
+		}
 
 		if (ctxt->prio <= cur->prio || ctxt->prio <= cur->req_prio)
 			return -EPERM;
@@ -275,11 +289,20 @@ static bool nbcon_waiter_matches(struct nbcon_state *cur, int expected_prio)
 	 *
 	 * As a result, the following scenario is *not* possible:
 	 *
-	 * 1. Another context with a higher priority directly takes ownership.
-	 * 2. The higher priority context releases the ownership.
-	 * 3. A lower priority context takes the ownership.
-	 * 4. Another context with the same priority as this context
+	 * 1. This context is currently a waiter.
+	 * 2. Another context with a higher priority than this context
+	 *    directly takes ownership.
+	 * 3. The higher priority context releases the ownership.
+	 * 4. Another lower priority context takes the ownership.
+	 * 5. Another context with the same priority as this context
 	 *    creates a request and starts waiting.
+	 *
+	 * Event #1 implies this context is EMERGENCY.
+	 * Event #2 implies the new context is PANIC.
+	 * Event #3 occurs when panic() has flushed the console.
+	 * Event #4 occurs when a non-panic CPU reacquires.
+	 * Event #5 is not possible due to the other_cpu_in_panic() check
+	 *          in nbcon_context_try_acquire_handover().
 	 */
 
 	return (cur->req_prio == expected_prio);
@@ -408,6 +431,16 @@ static int nbcon_context_try_acquire_handover(struct nbcon_context *ctxt,
 	WARN_ON_ONCE(ctxt->prio <= cur->prio || ctxt->prio <= cur->req_prio);
 	WARN_ON_ONCE(!cur->unsafe);
 
+	/*
+	 * Panic does not imply that the console is owned. However, it
+	 * is critical that non-panic CPUs during panic are unable to
+	 * wait for a handover in order to satisfy the assumptions of
+	 * nbcon_waiter_matches(). In particular, the assumption that
+	 * lower priorities are ignored during panic.
+	 */
+	if (other_cpu_in_panic())
+		return -EPERM;
+
 	/* Handover is not possible on the same CPU. */
 	if (cur->cpu == cpu)
 		return -EBUSY;
@@ -535,7 +568,8 @@ static struct printk_buffers panic_nbcon_pbufs;
 
 /**
  * nbcon_context_try_acquire - Try to acquire nbcon console
- * @ctxt:	The context of the caller
+ * @ctxt:		The context of the caller
+ * @is_reacquire:	This acquire is a reacquire
  *
  * Context:	Any context which could not be migrated to another CPU.
  * Return:	True if the console was acquired. False otherwise.
@@ -545,7 +579,7 @@ static struct printk_buffers panic_nbcon_pbufs;
  * in an unsafe state. Otherwise, on success the caller may assume
  * the console is not in an unsafe state.
  */
-static bool nbcon_context_try_acquire(struct nbcon_context *ctxt)
+static bool nbcon_context_try_acquire(struct nbcon_context *ctxt, bool is_reacquire)
 {
 	unsigned int cpu = smp_processor_id();
 	struct console *con = ctxt->console;
@@ -554,7 +588,7 @@ static bool nbcon_context_try_acquire(struct nbcon_context *ctxt)
 
 	nbcon_state_read(con, &cur);
 try_again:
-	err = nbcon_context_try_acquire_direct(ctxt, &cur);
+	err = nbcon_context_try_acquire_direct(ctxt, &cur, is_reacquire);
 	if (err != -EBUSY)
 		goto out;
 
@@ -852,7 +886,7 @@ void nbcon_reacquire(struct nbcon_write_context *wctxt)
 	struct console *con = ctxt->console;
 	struct nbcon_state cur;
 
-	while (!nbcon_context_try_acquire(ctxt))
+	while (!nbcon_context_try_acquire(ctxt, true))
 		cpu_relax();
 
 	wctxt->outbuf = NULL;
@@ -1066,7 +1100,7 @@ wait_for_event:
 			 */
 			cant_migrate();
 
-			if (nbcon_context_try_acquire(ctxt)) {
+			if (nbcon_context_try_acquire(ctxt, false)) {
 				/*
 				 * If the emit fails, this context is no
 				 * longer the owner.
@@ -1124,6 +1158,16 @@ void nbcon_wake_threads(void)
 	struct console *con;
 	int cookie;
 
+	if (!printk_threads_enabled)
+		return;
+
+	/*
+	 * It is not allowed to call this function when console irq_work
+	 * is blocked.
+	 */
+	if (WARN_ON_ONCE(console_irqwork_blocked))
+		return;
+
 	cookie = console_srcu_read_lock();
 	for_each_console_srcu(con) {
 		/*
@@ -1144,8 +1188,14 @@ static unsigned int early_nbcon_pcpu_emergency_nesting __initdata;
 /**
  * nbcon_get_cpu_emergency_nesting - Get the per CPU emergency nesting pointer
  *
+ * Context:	For reading, any context. For writing, any context which could
+ *		not be migrated to another CPU.
  * Return:	Either a pointer to the per CPU emergency nesting counter of
  *		the current CPU or to the init data during early boot.
+ *
+ * The function is safe for reading per-CPU variables in any context because
+ * preemption is disabled if the current CPU is in the emergency state. See
+ * also nbcon_cpu_emergency_enter().
  */
 static __ref unsigned int *nbcon_get_cpu_emergency_nesting(void)
 {
@@ -1157,7 +1207,7 @@ static __ref unsigned int *nbcon_get_cpu_emergency_nesting(void)
 	if (!printk_percpu_data_ready())
 		return &early_nbcon_pcpu_emergency_nesting;
 
-	return this_cpu_ptr(&nbcon_pcpu_emergency_nesting);
+	return raw_cpu_ptr(&nbcon_pcpu_emergency_nesting);
 }
 
 /**
@@ -1176,7 +1226,7 @@ static bool nbcon_atomic_emit_one(struct nbcon_write_context *wctxt)
 {
 	struct nbcon_context *ctxt = &ACCESS_PRIVATE(wctxt, ctxt);
 
-	if (!nbcon_context_try_acquire(ctxt))
+	if (!nbcon_context_try_acquire(ctxt, false))
 		return false;
 
 	/*
@@ -1196,9 +1246,13 @@ static bool nbcon_atomic_emit_one(struct nbcon_write_context *wctxt)
  * nbcon_get_default_prio - The appropriate nbcon priority to use for nbcon
  *				printing on the current CPU
  *
- * Context:	Any context which could not be migrated to another CPU.
+ * Context:	Any context.
  * Return:	The nbcon_prio to use for acquiring an nbcon console in this
  *		context for printing.
+ *
+ * The function is safe for reading per-CPU data in any context because
+ * preemption is disabled if the current CPU is in the emergency or panic
+ * state.
  */
 enum nbcon_prio nbcon_get_default_prio(void)
 {
@@ -1242,7 +1296,7 @@ bool nbcon_atomic_emit_next_record(struct console *con, bool *handover, int cook
 	*handover = false;
 
 	/* Use the same locking order as console_emit_next_record(). */
-	if (!IS_ENABLED(CONFIG_PREEMPT_RT)) {
+	if (!force_legacy_kthread()) {
 		printk_safe_enter_irqsave(flags);
 		console_lock_spinning_enable();
 		stop_critical_timings();
@@ -1258,7 +1312,7 @@ bool nbcon_atomic_emit_next_record(struct console *con, bool *handover, int cook
 
 	con->driver_exit(con, driver_flags);
 
-	if (!IS_ENABLED(CONFIG_PREEMPT_RT)) {
+	if (!force_legacy_kthread()) {
 		start_critical_timings();
 		*handover = console_lock_spinning_disable_and_check(cookie);
 		printk_safe_exit_irqrestore(flags);
@@ -1275,10 +1329,11 @@ bool nbcon_atomic_emit_next_record(struct console *con, bool *handover, int cook
  */
 static void __nbcon_atomic_flush_all(u64 stop_seq, bool allow_unsafe_takeover)
 {
+	struct console_flush_type ft;
 	struct nbcon_write_context wctxt = { };
 	struct nbcon_context *ctxt = &ACCESS_PRIVATE(&wctxt, ctxt);
 	struct console *con;
-	bool any_progress;
+	bool any_progress, progress;
 	int cookie;
 
 	do {
@@ -1295,6 +1350,7 @@ static void __nbcon_atomic_flush_all(u64 stop_seq, bool allow_unsafe_takeover)
 			if (!console_is_usable(con, flags, true))
 				continue;
 
+again:
 			if (nbcon_seq_read(con) >= stop_seq)
 				continue;
 
@@ -1318,9 +1374,25 @@ static void __nbcon_atomic_flush_all(u64 stop_seq, bool allow_unsafe_takeover)
 
 			ctxt->prio = nbcon_get_default_prio();
 
-			any_progress |= nbcon_atomic_emit_one(&wctxt);
+			progress = nbcon_atomic_emit_one(&wctxt);
 
 			local_irq_restore(irq_flags);
+
+			if (!progress)
+				continue;
+			any_progress = true;
+
+			/*
+			 * If flushing was successful but more records are
+			 * available, this context must flush those remaining
+			 * records if the printer thread is not available do it.
+			 */
+			printk_get_console_flush_type(&ft);
+			if (!ft.nbcon_offload &&
+			    prb_read_valid(prb, nbcon_seq_read(con), NULL)) {
+				stop_seq = prb_next_reserve_seq(prb);
+				goto again;
+			}
 		}
 		console_srcu_read_unlock(cookie);
 	} while (any_progress);
@@ -1353,16 +1425,12 @@ void nbcon_atomic_flush_unsafe(void)
 
 /**
  * nbcon_cpu_emergency_enter - Enter an emergency section where printk()
- *	messages for that CPU are only stored
- *
- * Upon exiting the emergency section, all stored messages are flushed.
+ *				messages for that CPU are flushed directly
  *
  * Context:	Any context. Disables preemption.
  *
- * When within an emergency section, no printing occurs on that CPU. This
- * is to allow all emergency messages to be dumped into the ringbuffer before
- * flushing the ringbuffer. The actual printing occurs when exiting the
- * outermost emergency section.
+ * When within an emergency section, printk() calls will attempt to flush any
+ * pending messages in the ringbuffer.
  */
 void nbcon_cpu_emergency_enter(void)
 {
@@ -1375,32 +1443,20 @@ void nbcon_cpu_emergency_enter(void)
 }
 
 /**
- * nbcon_cpu_emergency_exit - Exit an emergency section and flush the
- *	stored messages
+ * nbcon_cpu_emergency_exit - Exit an emergency section
  *
- * Flushing only occurs when exiting all nesting for the CPU.
- *
- * Context:	Any context. Enables preemption.
+ * Context:	Within an emergency section. Enables preemption.
  */
 void nbcon_cpu_emergency_exit(void)
 {
 	unsigned int *cpu_emergency_nesting;
-	bool do_trigger_flush = false;
 
 	cpu_emergency_nesting = nbcon_get_cpu_emergency_nesting();
 
-	WARN_ON_ONCE(*cpu_emergency_nesting == 0);
-
-	if (*cpu_emergency_nesting == 1)
-		do_trigger_flush = true;
-
-	/* Undo the nesting count of nbcon_cpu_emergency_enter(). */
-	(*cpu_emergency_nesting)--;
+	if (!WARN_ON_ONCE(*cpu_emergency_nesting == 0))
+		(*cpu_emergency_nesting)--;
 
 	preempt_enable();
-
-	if (do_trigger_flush)
-		printk_trigger_flush();
 }
 
 /**
@@ -1468,7 +1524,7 @@ static int __init printk_setup_threads(void)
 	printk_threads_enabled = true;
 	for_each_console(con)
 		nbcon_kthread_create(con);
-	if (IS_ENABLED(CONFIG_PREEMPT_RT) && printing_via_unlock)
+	if (force_legacy_kthread() && (have_legacy_console || have_boot_console))
 		nbcon_legacy_kthread_create();
 	console_list_unlock();
 	return 0;
@@ -1588,7 +1644,7 @@ void nbcon_acquire(struct uart_port *up)
 			memset(&ctxt, 0, sizeof(ctxt));
 			ctxt.console	= con;
 			ctxt.prio	= NBCON_PRIO_NORMAL;
-		} while (!nbcon_context_try_acquire(&ctxt));
+		} while (!nbcon_context_try_acquire(&ctxt, false));
 
 	} while (!nbcon_context_enter_unsafe(&ctxt));
 
