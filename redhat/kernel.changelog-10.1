@@ -1,3 +1,72 @@
+* Tue Mar 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.45.1.el10_1]
+- ipv6: Fix use-after-free in inet6_addr_del(). (CKI Backport Bot) [RHEL-144768] {CVE-2026-23010}
+Resolves: RHEL-144768
+
+* Thu Mar 05 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.44.1.el10_1]
+- dpll: expose fractional frequency offset in ppt (Ivan Vecera) [RHEL-146354]
+- dpll: zl3073x: Implement device mode setting support (Ivan Vecera) [RHEL-151824]
+- dpll: add dpll_device op to set working mode (Ivan Vecera) [RHEL-151824]
+- dpll: add dpll_device op to get supported modes (Ivan Vecera) [RHEL-151824]
+- net: vxlan: prevent NULL deref in vxlan_xmit_one (Antoine Tenart) [RHEL-133362]
+- NFS: Fixup allocation flags for nfsiod's __GFP_NORETRY (Olga Kornievskaia) [RHEL-144916]
+- s390/pci: Allow automatic recovery with minimal driver support (CKI Backport Bot) [RHEL-118883]
+Resolves: RHEL-118883, RHEL-133362, RHEL-144916, RHEL-146354, RHEL-151824
+
+* Tue Mar 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.43.1.el10_1]
+- HID: intel-thc-hid: intel-thc: Fix incorrect pointer arithmetic in I2C regs save (CKI Backport Bot) [RHEL-142253] {CVE-2025-39818}
+- drm/xe: Make dma-fences compliant with the safe access rules (Mika Penttilä) [RHEL-122272] {CVE-2025-38703}
+Resolves: RHEL-122272, RHEL-142253
+
+* Sat Feb 28 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.42.1.el10_1]
+- dpll: zl3073x: Fix ref frequency setting (Ivan Vecera) [RHEL-139828]
+- dpll: Prevent duplicate registrations (Ivan Vecera) [RHEL-139828]
+- dpll: zl3073x: Remove unused dev wrappers (Ivan Vecera) [RHEL-139828]
+- dpll: zl3073x: Cache all output properties in zl3073x_out (Ivan Vecera) [RHEL-139828]
+- dpll: zl3073x: Cache all reference properties in zl3073x_ref (Ivan Vecera) [RHEL-139828]
+- dpll: zl3073x: Cache reference monitor status (Ivan Vecera) [RHEL-139828]
+- dpll: zl3073x: Split ref, out, and synth logic from core (Ivan Vecera) [RHEL-139828]
+- dpll: zl3073x: Store raw register values instead of parsed state (Ivan Vecera) [RHEL-139828]
+- dpll: zl3073x: fix kernel-doc name and missing parameter in fw.c (Ivan Vecera) [RHEL-139828]
+- dpll: zl3073x: Specify phase adjustment granularity for pins (Ivan Vecera) [RHEL-139828]
+- dpll: add phase-adjust-gran pin attribute (Ivan Vecera) [RHEL-139828]
+- dpll: fix device-id-get and pin-id-get to return errors properly (Ivan Vecera) [RHEL-139828]
+- dpll: spec: add missing module-name and clock-id to pin-get reply (Ivan Vecera) [RHEL-139828]
+- dpll: zl3073x: Allow to configure phase offset averaging factor (Ivan Vecera) [RHEL-139828]
+- dpll: add phase_offset_avg_factor_get/set callback ops (Ivan Vecera) [RHEL-139828]
+- dpll: add phase-offset-avg-factor device attribute to netlink spec (Ivan Vecera) [RHEL-139828]
+- dpll: fix clock quality level reporting (Ivan Vecera) [RHEL-139828]
+- dpll: add reference sync get/set (Ivan Vecera) [RHEL-139828]
+- dpll: add reference-sync netlink attribute (Ivan Vecera) [RHEL-139828]
+- dpll: remove documentation of rclk_dev_name (Ivan Vecera) [RHEL-139828]
+- ipv6: BUG() in pskb_expand_head() as part of calipso_skbuff_setattr() (CKI Backport Bot) [RHEL-143548] {CVE-2025-71085}
+- usb: core: config: Prevent OOB read in SS endpoint companion parsing (CKI Backport Bot) [RHEL-137370] {CVE-2025-39760}
+- sched_ext: Fix scx_kick_pseqs corruption on concurrent scheduler loads (Phil Auld) [RHEL-124637]
+- sched_ext: Allocate scx_kick_cpus_pnt_seqs lazily using kvzalloc() (Phil Auld) [RHEL-124637]
+Resolves: RHEL-124637, RHEL-137370, RHEL-139828, RHEL-143548
+
+* Thu Feb 26 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.41.1.el10_1]
+- vfs: check dentry is still valid in get_link() (Ian Kent) [RHEL-134853]
+- efivarfs: fix error propagation in efivar_entry_get() (CKI Backport Bot) [RHEL-150116] {CVE-2026-23156}
+- KVM: x86: Apply runtime updates to current CPUID during KVM_SET_CPUID{,2} (Igor Mammedov) [RHEL-148458]
+- printk: Use console_is_usable on console_unblank (CKI Backport Bot) [RHEL-148303]
+- printk: Avoid irq_work for printk_deferred() on suspend (CKI Backport Bot) [RHEL-148303]
+- printk: Avoid scheduling irq_work on suspend (CKI Backport Bot) [RHEL-148303]
+- printk: Allow printk_trigger_flush() to flush all types (CKI Backport Bot) [RHEL-148303]
+- printk: Check CON_SUSPEND when unblanking a console (CKI Backport Bot) [RHEL-148303]
+- printk: nbcon: Allow reacquire during panic (CKI Backport Bot) [RHEL-148303]
+- migrate: correct lock ordering for hugetlb file folios (Luiz Capitulino) [RHEL-147270] {CVE-2026-23097}
+- io_uring/sqpoll: don't put task_struct on tctx setup failure (Jeff Moyer) [RHEL-137992]
+- io_uring: consistently use rcu semantics with sqpoll thread (Jeff Moyer) [RHEL-137992]
+- io_uring: fix use-after-free of sq->thread in __io_uring_show_fdinfo() (Jeff Moyer) [RHEL-137992] {CVE-2025-38106}
+- io_uring/sqpoll: fix sqpoll error handling races (Jeff Moyer) [RHEL-137992]
+- gpio: cdev: Fix resource leaks on errors in lineinfo_changed_notify() (CKI Backport Bot) [RHEL-145597] {CVE-2025-40249}
+- gpio: cdev: make sure the cdev fd is still active before emitting events (CKI Backport Bot) [RHEL-145597] {CVE-2025-40249}
+- macvlan: fix possible UAF in macvlan_forward_source() (CKI Backport Bot) [RHEL-144128] {CVE-2026-23001}
+- dm: use READ_ONCE in dm_blk_report_zones (Benjamin Marzinski) [RHEL-137953]
+- dm: fix unlocked test for dm_suspended_md (Benjamin Marzinski) [RHEL-137953]
+- dm: fix dm_blk_report_zones (CKI Backport Bot) [RHEL-137953] {CVE-2025-38141}
+Resolves: RHEL-134853, RHEL-137953, RHEL-137992, RHEL-144128, RHEL-145597, RHEL-147270, RHEL-148303, RHEL-148458, RHEL-150116
+
 * Thu Feb 19 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.40.1.el10_1]
 - s390/mm: Fix __ptep_rdp() inline assembly (Mete Durlu) [RHEL-143715]
 - ice: PTP: fix missing timestamps on E825 hardware (CKI Backport Bot) [RHEL-148168]

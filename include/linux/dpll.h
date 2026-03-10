@@ -41,10 +41,17 @@ struct dpll_device_ops {
 					enum dpll_feature_state *state,
 					struct netlink_ext_ack *extack);
 
-	RH_KABI_RESERVE(1)
-	RH_KABI_RESERVE(2)
-	RH_KABI_RESERVE(3)
-	RH_KABI_RESERVE(4)
+	RH_KABI_USE(1, int (*phase_offset_avg_factor_set)(const struct dpll_device *dpll,
+					   void *dpll_priv, u32 factor,
+					   struct netlink_ext_ack *extack))
+	RH_KABI_USE(2, int (*phase_offset_avg_factor_get)(const struct dpll_device *dpll,
+					   void *dpll_priv, u32 *factor,
+					   struct netlink_ext_ack *extack))
+	RH_KABI_USE(3, int (*supported_modes_get)(const struct dpll_device *dpll,
+				   void *dpll_priv, unsigned long *modes,
+				   struct netlink_ext_ack *extack))
+	RH_KABI_USE(4, int (*mode_set)(const struct dpll_device *dpll, void *dpll_priv,
+			enum dpll_mode mode, struct netlink_ext_ack *extack))
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)
 	RH_KABI_RESERVE(7)
@@ -117,8 +124,16 @@ struct dpll_pin_ops {
 			 struct dpll_pin_esync *esync,
 			 struct netlink_ext_ack *extack);
 
-	RH_KABI_RESERVE(1)
-	RH_KABI_RESERVE(2)
+	RH_KABI_USE(1, int (*ref_sync_set)(const struct dpll_pin *pin, void *pin_priv,
+			    const struct dpll_pin *ref_sync_pin,
+			    void *ref_sync_pin_priv,
+			    const enum dpll_pin_state state,
+			    struct netlink_ext_ack *extack))
+	RH_KABI_USE(2, int (*ref_sync_get)(const struct dpll_pin *pin, void *pin_priv,
+			    const struct dpll_pin *ref_sync_pin,
+			    void *ref_sync_pin_priv,
+			    enum dpll_pin_state *state,
+			    struct netlink_ext_ack *extack))
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
 	RH_KABI_RESERVE(5)
@@ -173,6 +188,7 @@ struct dpll_pin_properties {
 	const char *panel_label;
 	const char *package_label;
 	enum dpll_pin_type type;
+	RH_KABI_FILL_HOLE(u32 phase_gran)
 	unsigned long capabilities;
 	u32 freq_supported_num;
 	struct dpll_pin_frequency *freq_supported;
@@ -231,6 +247,9 @@ int dpll_pin_on_pin_register(struct dpll_pin *parent, struct dpll_pin *pin,
 
 void dpll_pin_on_pin_unregister(struct dpll_pin *parent, struct dpll_pin *pin,
 				const struct dpll_pin_ops *ops, void *priv);
+
+int dpll_pin_ref_sync_pair_add(struct dpll_pin *pin,
+			       struct dpll_pin *ref_sync_pin);
 
 int dpll_device_change_ntf(struct dpll_device *dpll);
 

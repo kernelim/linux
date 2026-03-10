@@ -953,8 +953,19 @@ static struct {
 
 #endif	/* CONFIG_SMP */
 
-/* for %SCX_KICK_WAIT */
-static unsigned long __percpu *scx_kick_cpus_pnt_seqs;
+/*
+ * For %SCX_KICK_WAIT: Each CPU has a pointer to an array of pick_task sequence
+ * numbers. The arrays are allocated with kvzalloc() as size can exceed percpu
+ * allocator limits on large machines. O(nr_cpu_ids^2) allocation, allocated
+ * lazily when enabling and freed when disabling to avoid waste when sched_ext
+ * isn't active.
+ */
+struct scx_kick_pseqs {
+	struct rcu_head		rcu;
+	unsigned long		seqs[];
+};
+
+static DEFINE_PER_CPU(struct scx_kick_pseqs __rcu *, scx_kick_pseqs);
 
 /*
  * Direct dispatch marker.
@@ -4992,6 +5003,27 @@ static const char *scx_exit_reason(enum scx_exit_kind kind)
 	}
 }
 
+static void free_kick_pseqs_rcu(struct rcu_head *rcu)
+{
+	struct scx_kick_pseqs *pseqs = container_of(rcu, struct scx_kick_pseqs, rcu);
+
+	kvfree(pseqs);
+}
+
+static void free_kick_pseqs(void)
+{
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		struct scx_kick_pseqs **pseqs = per_cpu_ptr(&scx_kick_pseqs, cpu);
+		struct scx_kick_pseqs *to_free;
+
+		to_free = rcu_replace_pointer(*pseqs, NULL, true);
+		if (to_free)
+			call_rcu(&to_free->rcu, free_kick_pseqs_rcu);
+	}
+}
+
 static void scx_ops_disable_workfn(struct kthread_work *work)
 {
 	struct scx_exit_info *ei = scx_exit_info;
@@ -5147,6 +5179,7 @@ static void scx_ops_disable_workfn(struct kthread_work *work)
 	free_percpu(scx_dsp_ctx);
 	scx_dsp_ctx = NULL;
 	scx_dsp_max_batch = 0;
+	free_kick_pseqs();
 
 	free_exit_info(scx_exit_info);
 	scx_exit_info = NULL;
@@ -5476,6 +5509,33 @@ static void scx_ops_error_irq_workfn(struct irq_work *irq_work)
 
 static DEFINE_IRQ_WORK(scx_ops_error_irq_work, scx_ops_error_irq_workfn);
 
+static int alloc_kick_pseqs(void)
+{
+	int cpu;
+
+	/*
+	 * Allocate per-CPU arrays sized by nr_cpu_ids. Use kvzalloc as size
+	 * can exceed percpu allocator limits on large machines.
+	 */
+	for_each_possible_cpu(cpu) {
+		struct scx_kick_pseqs **pseqs = per_cpu_ptr(&scx_kick_pseqs, cpu);
+		struct scx_kick_pseqs *new_pseqs;
+
+		WARN_ON_ONCE(rcu_access_pointer(*pseqs));
+
+		new_pseqs = kvzalloc_node(struct_size(new_pseqs, seqs, nr_cpu_ids),
+					  GFP_KERNEL, cpu_to_node(cpu));
+		if (!new_pseqs) {
+			free_kick_pseqs();
+			return -ENOMEM;
+		}
+
+		rcu_assign_pointer(*pseqs, new_pseqs);
+	}
+
+	return 0;
+}
+
 static __printf(3, 4) void scx_ops_exit_kind(enum scx_exit_kind kind,
 					     s64 exit_code,
 					     const char *fmt, ...)
@@ -5606,10 +5666,14 @@ static int scx_ops_enable(struct sched_ext_ops *ops, struct bpf_link *link)
 		goto err_unlock;
 	}
 
+	ret = alloc_kick_pseqs();
+	if (ret)
+		goto err_unlock;
+
 	scx_root_kobj = kzalloc(sizeof(*scx_root_kobj), GFP_KERNEL);
 	if (!scx_root_kobj) {
 		ret = -ENOMEM;
-		goto err_unlock;
+		goto err_free_pseqs;
 	}
 
 	scx_root_kobj->kset = scx_kset;
@@ -5841,6 +5905,8 @@ err:
 		free_exit_info(scx_exit_info);
 		scx_exit_info = NULL;
 	}
+err_free_pseqs:
+	free_kick_pseqs();
 err_unlock:
 	mutex_unlock(&scx_ops_enable_mutex);
 	return ret;
@@ -6232,9 +6298,17 @@ static void kick_cpus_irq_workfn(struct irq_work *irq_work)
 {
 	struct rq *this_rq = this_rq();
 	struct scx_rq *this_scx = &this_rq->scx;
-	unsigned long *pseqs = this_cpu_ptr(scx_kick_cpus_pnt_seqs);
+	struct scx_kick_pseqs __rcu *pseqs_pcpu = __this_cpu_read(scx_kick_pseqs);
 	bool should_wait = false;
+	unsigned long *pseqs;
 	s32 cpu;
+
+	if (unlikely(!pseqs_pcpu)) {
+		pr_warn_once("kick_cpus_irq_workfn() called with NULL scx_kick_pseqs");
+		return;
+	}
+
+	pseqs = rcu_dereference_bh(pseqs_pcpu)->seqs;
 
 	for_each_cpu(cpu, this_scx->cpus_to_kick) {
 		should_wait |= kick_one_cpu(cpu, this_rq, pseqs);
@@ -6360,10 +6434,6 @@ void __init init_sched_ext_class(void)
 	BUG_ON(!alloc_cpumask_var(&idle_masks.cpu, GFP_KERNEL));
 	BUG_ON(!alloc_cpumask_var(&idle_masks.smt, GFP_KERNEL));
 #endif
-	scx_kick_cpus_pnt_seqs =
-		__alloc_percpu(sizeof(scx_kick_cpus_pnt_seqs[0]) * nr_cpu_ids,
-			       __alignof__(scx_kick_cpus_pnt_seqs[0]));
-	BUG_ON(!scx_kick_cpus_pnt_seqs);
 
 	for_each_possible_cpu(cpu) {
 		struct rq *rq = cpu_rq(cpu);
