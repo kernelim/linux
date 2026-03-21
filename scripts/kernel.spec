@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 124.45.1
+%define pkgrelease 124.47.1
 %define kversion 6
-%define tarfile_release 6.12.0-124.45.1.el10_1
+%define tarfile_release 6.12.0-124.47.1.el10_1
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 124.45.1%{?buildid}%{?dist}
+%define specrelease 124.47.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-124.45.1.el10_1
+%define kabiversion 6.12.0-124.47.1.el10_1
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4354,10 +4354,19 @@ fi\
 #
 #
 %changelog
-* Thu Mar 19 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.45.1
+* Thu Apr 02 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.47.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
 - Patch MMU for riscv64
+
+* Sat Mar 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.47.1.el10_1]
+- dpll: zl3073x: Fix output pin phase adjustment sign (Ivan Vecera) [RHEL-149766]
+- redhat: genlog: add new JIRA cloud server hostname (Jan Stancek)
+- scsi: qla2xxx: Fix bsg_done() causing double free (Ewan D. Milne) [RHEL-153413] {CVE-2025-71238}
+- mm/debug_vm_pgtable: clear page table entries at destroy_args() (Herton R. Krzesinski) [RHEL-127317]
+
+* Tue Mar 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.46.1.el10_1]
+- netfilter: nf_tables: fix use-after-free in nf_tables_addchain() (CKI Backport Bot) [RHEL-153272] {CVE-2026-23231}
 
 * Tue Mar 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.45.1.el10_1]
 - ipv6: Fix use-after-free in inet6_addr_del(). (CKI Backport Bot) [RHEL-144768] {CVE-2026-23010}

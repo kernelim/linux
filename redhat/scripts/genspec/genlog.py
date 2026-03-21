@@ -17,7 +17,7 @@ class CommitTags:
             r'(\d{4,8})\s*$',
             r'https?://bugzilla\.redhat\.com/(?:show_bug\.cgi\?id=)?(\d{4,8})',
         ],
-        'JIRA': [r'https://issues\.redhat\.com/(?:browse|projects/RHEL/issues)/(RHEL-\d{1,8})'],
+        'JIRA': [r'https://(?:issues\.redhat\.com|redhat\.atlassian\.net)/(?:browse|projects/RHEL/issues)/(RHEL-\d{1,8})'],
         'CVE': [r'(CVE-\d{4}-\d{4,7})'],
         'MR': [r'(.*)'],
         'Y-Commit': [r'([0-9a-fA-F]+)'],

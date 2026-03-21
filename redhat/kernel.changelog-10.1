@@ -1,3 +1,14 @@
+* Sat Mar 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.47.1.el10_1]
+- dpll: zl3073x: Fix output pin phase adjustment sign (Ivan Vecera) [RHEL-149766]
+- redhat: genlog: add new JIRA cloud server hostname (Jan Stancek)
+- scsi: qla2xxx: Fix bsg_done() causing double free (Ewan D. Milne) [RHEL-153413] {CVE-2025-71238}
+- mm/debug_vm_pgtable: clear page table entries at destroy_args() (Herton R. Krzesinski) [RHEL-127317]
+Resolves: RHEL-127317, RHEL-149766, RHEL-153413
+
+* Tue Mar 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.46.1.el10_1]
+- netfilter: nf_tables: fix use-after-free in nf_tables_addchain() (CKI Backport Bot) [RHEL-153272] {CVE-2026-23231}
+Resolves: RHEL-153272
+
 * Tue Mar 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.45.1.el10_1]
 - ipv6: Fix use-after-free in inet6_addr_del(). (CKI Backport Bot) [RHEL-144768] {CVE-2026-23010}
 Resolves: RHEL-144768
