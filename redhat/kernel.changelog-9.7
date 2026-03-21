@@ -1,3 +1,40 @@
+* Sat Mar 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.45.1.el9_7]
+- net/sched: cls_u32: use skb_header_pointer_careful() (Paolo Abeni) [RHEL-150403] {CVE-2026-23204}
+- net: add skb_header_pointer_careful() helper (Paolo Abeni) [RHEL-150403]
+- iommu: Skip PASID validation for devices without PASID capability (Eder Zulian) [RHEL-95264]
+Resolves: RHEL-150403, RHEL-95264
+
+* Thu Mar 19 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.44.1.el9_7]
+- nfsd: add list_head nf_gc to struct nfsd_file (Roberto Bergantinos Corpas) [RHEL-152551]
+- redhat: genlog: add new JIRA cloud server hostname (Jan Stancek)
+- smb: client: fix oops due to uninitialised var in smb2_unlink() (Paulo Alcantara) [RHEL-154395]
+- cifs: some missing initializations on replay (Paulo Alcantara) [RHEL-154395]
+- smb: client: fix potential UAF and double free in smb2_open_file() (Paulo Alcantara) [RHEL-154395]
+- smb/client: fix memory leak in smb2_open_file() (Paulo Alcantara) [RHEL-154395]
+- smb: client: split cached_fid bitfields to avoid shared-byte RMW races (Paulo Alcantara) [RHEL-154395]
+- bonding: fix use-after-free due to enslave fail after slave array update (CKI Backport Bot) [RHEL-152383] {CVE-2026-23171}
+- mm/damon/sysfs: cleanup attrs subdirs on context dir setup failure (CKI Backport Bot) [RHEL-150477] {CVE-2026-23144}
+- macvlan: observe an RCU grace period in macvlan_common_newlink() error path (Hangbin Liu) [RHEL-150226]
+- macvlan: fix error recovery in macvlan_common_newlink() (CKI Backport Bot) [RHEL-150226] {CVE-2026-23209}
+- dpll: zl3073x: Fix output pin phase adjustment sign (CKI Backport Bot) [RHEL-149764]
+- scsi: s390: zfcp: Ensure synchronous unit_add (CKI Backport Bot) [RHEL-143736]
+Resolves: RHEL-143736, RHEL-149764, RHEL-150226, RHEL-150477, RHEL-152383, RHEL-152551, RHEL-154395
+
+* Tue Mar 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.43.1.el9_7]
+- scsi: target: iscsi: Fix use-after-free in iscsit_dec_session_usage_count() (CKI Backport Bot) [RHEL-150422] {CVE-2026-23193}
+- ALSA: aloop: Fix racy access at PCM trigger (CKI Backport Bot) [RHEL-150130] {CVE-2026-23191}
+- net: atm: fix /proc/net/atm/lec handling (Hangbin Liu) [RHEL-146421] {CVE-2025-38180}
+- net: atm: add lec_mutex (Hangbin Liu) [RHEL-146421] {CVE-2025-38323}
+- drm/sched: Fix potential double free in drm_sched_job_add_resv_dependencies (Mika Penttilä) [RHEL-125460] {CVE-2025-40096}
+Resolves: RHEL-125460, RHEL-146421, RHEL-150130, RHEL-150422
+
+* Thu Mar 12 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.42.1.el9_7]
+- scsi: qla2xxx: Allow recovery for tape devices (Ewan D. Milne) [RHEL-153437]
+- xfs: set max_agbno to allow sparse alloc of last full inode chunk (Brian Foster) [RHEL-142600]
+- mm/debug_vm_pgtable: clear page table entries at destroy_args() (Herton R. Krzesinski) [RHEL-128734]
+- kbuild: use $(srctree)/$(src) for some Makefiles to fix the buildcheck test (Herton R. Krzesinski) [RHEL-106032]
+Resolves: RHEL-106032, RHEL-128734, RHEL-142600, RHEL-153437
+
 * Sat Mar 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.41.1.el9_7]
 - net: vxlan: prevent NULL deref in vxlan_xmit_one (Antoine Tenart) [RHEL-133369]
 - ACPI: PRM: Reduce unnecessary printing to avoid user confusion (Mark Langsdorf) [RHEL-123057]

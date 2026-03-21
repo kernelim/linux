@@ -19,4 +19,4 @@ intel-quicki2c-objs += intel-quicki2c/pci-quicki2c.o
 intel-quicki2c-objs += intel-quicki2c/quicki2c-hid.o
 intel-quicki2c-objs += intel-quicki2c/quicki2c-protocol.o
 
-ccflags-y += -I $(src)/intel-thc
+ccflags-y += -I $(srctree)/$(src)/intel-thc
