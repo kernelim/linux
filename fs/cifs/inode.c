@@ -57,13 +57,9 @@ static void cifs_set_ops(struct inode *inode)
 			inode->i_data.a_ops = &cifs_addr_ops;
 		break;
 	case S_IFDIR:
-#ifdef CONFIG_CIFS_DFS_UPCALL
 		if (IS_AUTOMOUNT(inode)) {
-			inode->i_op = &cifs_dfs_referral_inode_operations;
+			inode->i_op = &cifs_namespace_inode_operations;
 		} else {
-#else /* NO DFS support, treat as a directory */
-		{
-#endif
 			inode->i_op = &cifs_dir_inode_ops;
 			inode->i_fop = &cifs_dir_ops;
 		}
@@ -796,11 +792,15 @@ static __u64 simple_hashstr(const char *str)
  * cifs_backup_query_path_info - SMB1 fallback code to get ino
  *
  * Fallback code to get file metadata when we don't have access to
- * @full_path (EACCES) and have backup creds.
+ * full_path (EACCES) and have backup creds.
  *
- * @data will be set to search info result buffer
- * @resp_buf will be set to cifs resp buf and needs to be freed with
- * cifs_buf_release() when done with @data.
+ * @xid:	transaction id used to identify original request in logs
+ * @tcon:	information about the server share we have mounted
+ * @sb:	the superblock stores info such as disk space available
+ * @full_path:	name of the file we are getting the metadata for
+ * @resp_buf:	will be set to cifs resp buf and needs to be freed with
+ * 		cifs_buf_release() when done with @data
+ * @data:	will be set to search info result buffer
  */
 static int
 cifs_backup_query_path_info(int xid,
@@ -2263,7 +2263,9 @@ cifs_invalidate_mapping(struct inode *inode)
 
 /**
  * cifs_wait_bit_killable - helper for functions that are sleeping on bit locks
- * @word: long word containing the bit lock
+ *
+ * @key:	currently unused
+ * @mode:	the task state to sleep in
  */
 static int
 cifs_wait_bit_killable(struct wait_bit_key *key, int mode)

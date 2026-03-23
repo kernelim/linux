@@ -350,6 +350,7 @@ ENTRY(startup_kdump)
 	.quad	0			# INITRD_SIZE
 	.quad	0			# OLDMEM_BASE
 	.quad	0			# OLDMEM_SIZE
+	.quad	0			# KERNEL_VERSION
 	.quad	COMMAND_LINE_SIZE
 
 	.org	COMMAND_LINE

@@ -259,8 +259,11 @@ struct smb3_fs_context {
 	__u16 compression; /* compression algorithm 0xFFFF default 0=disabled */
 	bool rootfs:1; /* if it's a SMB root file system */
 	bool witness:1; /* use witness protocol */
-
-	char *mount_options;
+	char *leaf_fullpath;
+	struct cifs_ses *dfs_root_ses;
+	bool dfs_automount:1; /* set for dfs automount only */
+	bool dfs_conn:1; /* set for dfs mounts */
+	char *dns_dom;
 };
 
 extern const struct fs_parameter_spec smb3_fs_parameters[];
@@ -278,5 +281,17 @@ extern int smb3_fs_context_dup(struct smb3_fs_context *new_ctx, struct smb3_fs_c
 extern void smb3_update_mnt_flags(struct cifs_sb_info *cifs_sb);
 
 extern char *cifs_sanitize_prepath(char *prepath, gfp_t gfp);
+
+extern struct mutex cifs_mount_mutex;
+
+static inline void cifs_mount_lock(void)
+{
+	mutex_lock(&cifs_mount_mutex);
+}
+
+static inline void cifs_mount_unlock(void)
+{
+	mutex_unlock(&cifs_mount_mutex);
+}
 
 #endif

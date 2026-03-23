@@ -72,7 +72,7 @@
 #include <linux/memremap.h>
 #include <linux/userfaultfd_k.h>
 
-#include <asm/tlbflush.h>
+#include <asm/tlb.h>
 
 #include <trace/events/tlb.h>
 
@@ -1519,13 +1519,17 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 		address = pvmw.address;
 
 		if (PageHuge(page) && !PageAnon(page)) {
+			struct mmu_gather tlb;
+
 			/*
 			 * To call huge_pmd_unshare, i_mmap_rwsem must be
 			 * held in write mode.  Caller needs to explicitly
 			 * do this outside rmap routines.
 			 */
 			VM_BUG_ON(!(flags & TTU_RMAP_LOCKED));
-			if (huge_pmd_unshare(mm, vma, &address, pvmw.pte)) {
+
+			tlb_gather_mmu_vma(&tlb, vma);
+			if (huge_pmd_unshare(&tlb, vma, &address, pvmw.pte)) {
 				/*
 				 * huge_pmd_unshare unmapped an entire PMD
 				 * page.  There is no way of knowing exactly
@@ -1534,7 +1538,8 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 				 * already adjusted above to cover this range.
 				 */
 				flush_cache_range(vma, range.start, range.end);
-				flush_tlb_range(vma, range.start, range.end);
+				huge_pmd_unshare_flush(&tlb, vma);
+				tlb_finish_mmu(&tlb);
 				mmu_notifier_invalidate_range(mm, range.start,
 							      range.end);
 
@@ -1550,6 +1555,7 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 				page_vma_mapped_walk_done(&pvmw);
 				break;
 			}
+			tlb_finish_mmu(&tlb);
 		}
 
 		if (IS_ENABLED(CONFIG_MIGRATION) &&

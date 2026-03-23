@@ -12,6 +12,7 @@
  *
  */
 
+#include <linux/inet.h>
 #include <linux/slab.h>
 #include <linux/dns_resolver.h>
 #include "dns_resolve.h"
@@ -19,70 +20,76 @@
 #include "cifsproto.h"
 #include "cifs_debug.h"
 
-/**
- * dns_resolve_server_name_to_ip - Resolve UNC server name to ip address.
- * @unc: UNC path specifying the server (with '/' as delimiter)
- * @ip_addr: Where to return the IP address.
- * @expiry: Where to return the expiry time for the dns record.
- *
- * The IP address will be returned in string form, and the caller is
- * responsible for freeing it.
- *
- * Returns length of result on success, -ve on error.
- */
-int
-dns_resolve_server_name_to_ip(const char *unc, char **ip_addr, time64_t *expiry)
+static int resolve_name(const char *name, size_t namelen, struct sockaddr *addr)
 {
-	struct sockaddr_storage ss;
-	const char *hostname, *sep;
-	char *name;
-	int len, rc;
+	char *ip;
+	int rc;
 
-	if (!ip_addr || !unc)
+	rc = dns_query(NULL, name, namelen, NULL, &ip, NULL);
+	if (rc < 0) {
+		cifs_dbg(FYI, "%s: unable to resolve: %*.*s\n",
+			 __func__, (int)namelen, (int)namelen, name);
+	} else {
+		cifs_dbg(FYI, "%s: resolved: %*.*s to %s\n",
+			 __func__, (int)namelen, (int)namelen, name, ip);
+
+		rc = cifs_convert_address(addr, ip, strlen(ip));
+		kfree(ip);
+		if (!rc) {
+			cifs_dbg(FYI, "%s: unable to determine ip address\n",
+				 __func__);
+			rc = -EHOSTUNREACH;
+		} else {
+			rc = 0;
+		}
+	}
+	return rc;
+}
+
+/**
+ * dns_resolve_name - Perform an upcall to resolve hostname to an ip address.
+ * @dom: DNS domain name (or NULL)
+ * @name: Name to look up
+ * @namelen: Length of name
+ * @ip_addr: Where to return the IP address
+ *
+ * Returns zero on success, -ve code otherwise.
+ */
+int dns_resolve_name(const char *dom, const char *name,
+		     size_t namelen, struct sockaddr *ip_addr)
+{
+	size_t len;
+	char *s;
+	int rc;
+
+	cifs_dbg(FYI, "%s: dom=%s name=%.*s\n", __func__, dom, (int)namelen, name);
+	if (!ip_addr || !name || !*name || !namelen)
 		return -EINVAL;
 
-	len = strlen(unc);
-	if (len < 3) {
-		cifs_dbg(FYI, "%s: unc is too short: %s\n", __func__, unc);
-		return -EINVAL;
+	cifs_dbg(FYI, "%s: hostname=%.*s\n", __func__, (int)namelen, name);
+	/* Try to interpret hostname as an IPv4 or IPv6 address */
+	rc = cifs_convert_address(ip_addr, name, namelen);
+	if (rc > 0) {
+		cifs_dbg(FYI, "%s: unc is IP, skipping dns upcall: %*.*s\n",
+			 __func__, (int)namelen, (int)namelen, name);
+		return 0;
 	}
 
-	/* Discount leading slashes for cifs */
-	len -= 2;
-	hostname = unc + 2;
+	/*
+	 * If @name contains a NetBIOS name and @dom has been specified, then
+	 * convert @name to an FQDN and try resolving it first.
+	 */
+	if (dom && *dom && cifs_netbios_name(name, namelen)) {
+		len = strnlen(dom, CIFS_MAX_DOMAINNAME_LEN) + namelen + 2;
+		s = kmalloc(len, GFP_KERNEL);
+		if (!s)
+			return -ENOMEM;
 
-	/* Search for server name delimiter */
-	sep = memchr(hostname, '/', len);
-	if (sep)
-		len = sep - hostname;
-	else
-		cifs_dbg(FYI, "%s: probably server name is whole unc: %s\n",
-			 __func__, unc);
-
-	/* Try to interpret hostname as an IPv4 or IPv6 address */
-	rc = cifs_convert_address((struct sockaddr *)&ss, hostname, len);
-	if (rc > 0)
-		goto name_is_IP_address;
-
-	/* Perform the upcall */
-	rc = dns_query(NULL, hostname, len, NULL, ip_addr, expiry);
-	if (rc < 0)
-		cifs_dbg(FYI, "%s: unable to resolve: %*.*s\n",
-			 __func__, len, len, hostname);
-	else
-		cifs_dbg(FYI, "%s: resolved: %*.*s to %s expiry %llu\n",
-			 __func__, len, len, hostname, *ip_addr,
-			 expiry ? (*expiry) : 0);
-	return rc;
-
-name_is_IP_address:
-	name = kmalloc(len + 1, GFP_KERNEL);
-	if (!name)
-		return -ENOMEM;
-	memcpy(name, hostname, len);
-	name[len] = 0;
-	cifs_dbg(FYI, "%s: unc is IP, skipping dns upcall: %s\n",
-		 __func__, name);
-	*ip_addr = name;
-	return 0;
+		scnprintf(s, len, "%.*s.%s", (int)namelen, name, dom);
+		rc = resolve_name(s, len - 1, ip_addr);
+		kfree(s);
+		if (!rc)
+			return 0;
+	}
+	return resolve_name(name, namelen, ip_addr);
 }

@@ -1282,6 +1282,9 @@ static enum evict_behavior evict_should_delete(struct inode *inode,
 	struct gfs2_sbd *sdp = sb->s_fs_info;
 	int ret;
 
+	if (inode->i_nlink)
+		return EVICT_SHOULD_SKIP_DELETE;
+
 	if (gfs2_holder_initialized(&ip->i_iopen_gh) &&
 	    test_bit(GLF_DEFER_DELETE, &ip->i_iopen_gh.gh_gl->gl_flags))
 		return EVICT_SHOULD_DEFER_DELETE;
@@ -1301,11 +1304,9 @@ static enum evict_behavior evict_should_delete(struct inode *inode,
 	if (ret)
 		return EVICT_SHOULD_SKIP_DELETE;
 
-	if (test_bit(GLF_INSTANTIATE_NEEDED, &ip->i_gl->gl_flags)) {
-		ret = gfs2_instantiate(gh);
-		if (ret)
-			return EVICT_SHOULD_SKIP_DELETE;
-	}
+	ret = gfs2_instantiate(gh);
+	if (ret)
+		return EVICT_SHOULD_SKIP_DELETE;
 
 	/*
 	 * The inode may have been recreated in the meantime.
@@ -1322,11 +1323,17 @@ static enum evict_behavior evict_should_delete(struct inode *inode,
 /**
  * evict_unlinked_inode - delete the pieces of an unlinked evicted inode
  * @inode: The inode to evict
+ * @gh: The glock holder structure
  */
-static int evict_unlinked_inode(struct inode *inode)
+static int evict_unlinked_inode(struct inode *inode, struct gfs2_holder *gh)
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
+	struct gfs2_glock *gl = ip->i_gl;
 	int ret;
+
+	/* The inode glock must be held exclusively and be instantiated. */
+	BUG_ON(!gfs2_holder_initialized(gh) ||
+	       test_bit(GLF_INSTANTIATE_NEEDED, &gl->gl_flags));
 
 	if (S_ISDIR(inode->i_mode) &&
 	    (ip->i_diskflags & GFS2_DIF_EXHASH)) {
@@ -1347,9 +1354,6 @@ static int evict_unlinked_inode(struct inode *inode)
 			goto out;
 	}
 
-	if (ip->i_gl)
-		gfs2_inode_remember_delete(ip->i_gl, ip->i_no_formal_ino);
-
 	/*
 	 * As soon as we clear the bitmap for the dinode, gfs2_create_inode()
 	 * can get called to recreate it, or even gfs2_inode_lookup() if the
@@ -1363,6 +1367,9 @@ static int evict_unlinked_inode(struct inode *inode)
 	 */
 
 	ret = gfs2_dinode_dealloc(ip);
+	if (!ret)
+		gfs2_inode_remember_delete(gl, ip->i_no_formal_ino);
+
 out:
 	return ret;
 }
@@ -1370,33 +1377,40 @@ out:
 /*
  * evict_linked_inode - evict an inode whose dinode has not been unlinked
  * @inode: The inode to evict
+ * @gh: The glock holder structure
  */
-static int evict_linked_inode(struct inode *inode)
+static int evict_linked_inode(struct inode *inode, struct gfs2_holder *gh)
 {
 	struct super_block *sb = inode->i_sb;
 	struct gfs2_sbd *sdp = sb->s_fs_info;
 	struct gfs2_inode *ip = GFS2_I(inode);
-	struct address_space *metamapping;
+	struct gfs2_glock *gl = ip->i_gl;
+	struct address_space *metamapping = gfs2_glock2aspace(gl);
 	int ret;
 
-	gfs2_log_flush(sdp, ip->i_gl, GFS2_LOG_HEAD_FLUSH_NORMAL |
+	if (!(test_bit(GLF_DIRTY, &gl->gl_flags) || inode->i_flags & I_DIRTY))
+		goto clean;
+
+	/* The inode glock must be held exclusively and be instantiated. */
+	if (!gfs2_holder_initialized(gh))
+		ret = gfs2_glock_nq_init(gl, LM_ST_EXCLUSIVE, 0, gh);
+	else
+		ret = gfs2_instantiate(gh);
+	if (ret)
+		return ret;
+
+	gfs2_log_flush(sdp, gl, GFS2_LOG_HEAD_FLUSH_NORMAL |
 		       GFS2_LFC_EVICT_INODE);
-	metamapping = gfs2_glock2aspace(ip->i_gl);
-	if (test_bit(GLF_DIRTY, &ip->i_gl->gl_flags)) {
+	if (test_bit(GLF_DIRTY, &gl->gl_flags)) {
 		filemap_fdatawrite(metamapping);
 		filemap_fdatawait(metamapping);
 	}
 	write_inode_now(inode, 1);
-	gfs2_ail_flush(ip->i_gl, 0);
+	gfs2_ail_flush(gl, 0);
 
-	ret = gfs2_trans_begin(sdp, 0, sdp->sd_jdesc->jd_blocks);
-	if (ret)
-		return ret;
-
-	/* Needs to be done before glock release & also in a transaction */
+clean:
 	truncate_inode_pages(&inode->i_data, 0);
 	truncate_inode_pages(metamapping, 0);
-	gfs2_trans_end(sdp);
 	return 0;
 }
 
@@ -1431,7 +1445,7 @@ static void gfs2_evict_inode(struct inode *inode)
 	int ret;
 
 	gfs2_holder_mark_uninitialized(&gh);
-	if (inode->i_nlink || sb_rdonly(sb) || !ip->i_no_addr)
+	if (sb_rdonly(sb) || !ip->i_no_addr || !ip->i_gl)
 		goto out;
 
 	/*
@@ -1455,14 +1469,14 @@ static void gfs2_evict_inode(struct inode *inode)
 		behavior = EVICT_SHOULD_SKIP_DELETE;
 	}
 	if (behavior == EVICT_SHOULD_DELETE)
-		ret = evict_unlinked_inode(inode);
+		ret = evict_unlinked_inode(inode, &gh);
 	else
-		ret = evict_linked_inode(inode);
+		ret = evict_linked_inode(inode, &gh);
 
 	if (gfs2_rs_active(&ip->i_res))
 		gfs2_rs_deltree(&ip->i_res);
 
-	if (ret && ret != GLR_TRYFAILED && ret != -EROFS)
+	if (ret && ret != -EROFS)
 		fs_warn(sdp, "gfs2_evict_inode: %d\n", ret);
 out:
 	if (gfs2_holder_initialized(&gh))

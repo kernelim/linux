@@ -3268,7 +3268,7 @@ xfs_alloc_vextent(
 {
 	xfs_agblock_t		agsize;	/* allocation group size */
 	int			error;
-	int			flags;	/* XFS_ALLOC_FLAG_... locking flags */
+	int			flags = 0; /* XFS_ALLOC_FLAG_... locking flags */
 	struct xfs_mount	*mp;	/* mount structure pointer */
 	xfs_agnumber_t		sagno;	/* starting allocation group number */
 	xfs_alloctype_t		type;	/* input allocation type */
@@ -3359,9 +3359,10 @@ xfs_alloc_vextent(
 			/*
 			 * Start with allocation group given by bno.
 			 */
-			args->agno = XFS_FSB_TO_AGNO(mp, args->fsbno);
+			args->agno = sagno = XFS_FSB_TO_AGNO(mp, args->fsbno);
 			args->type = XFS_ALLOCTYPE_THIS_AG;
-			sagno = minimum_agno;
+			if (args->agno < minimum_agno)
+				args->agno = sagno = minimum_agno;
 			flags = 0;
 		} else {
 			/*
@@ -3403,15 +3404,15 @@ xfs_alloc_vextent(
 			/*
 			 * If we are try-locking, we can't deadlock on AGF
 			 * locks, so we can wrap all the way back to the first
-			 * AG. Otherwise, wrap back to the start AG so we can't
-			 * deadlock, and let the end of scan handler decide what
-			 * to do next.
+			 * AG. Otherwise, wrap back to the minimum allowable AG
+			 * so we can't deadlock, and let the end of scan handler
+			 * decide what to do next.
 			 */
 			if (++(args->agno) == mp->m_sb.sb_agcount) {
 				if (flags & XFS_ALLOC_FLAG_TRYLOCK)
 					args->agno = 0;
 				else
-					args->agno = sagno;
+					args->agno = minimum_agno;
 			}
 
 			/*
@@ -3426,17 +3427,19 @@ xfs_alloc_vextent(
 				}
 
 				/*
-				 * Blocking pass next, so we must obey minimum
+				 * Blocking pass next. Similar to how FIRST_AG
+				 * mode is handled above, we must obey minimum
 				 * agno constraints to avoid ABBA AGF deadlocks.
 				 */
 				flags = 0;
-				if (minimum_agno > sagno)
-					sagno = minimum_agno;
-
 				if (type == XFS_ALLOCTYPE_START_BNO) {
 					args->agbno = XFS_FSB_TO_AGBNO(mp,
 						args->fsbno);
 					args->type = XFS_ALLOCTYPE_NEAR_BNO;
+					if (sagno < minimum_agno) {
+						args->agno = sagno = minimum_agno;
+						args->type = XFS_ALLOCTYPE_THIS_AG;
+					}
 				}
 			}
 			xfs_perag_put(args->pag);
