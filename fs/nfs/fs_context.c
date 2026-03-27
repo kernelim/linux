@@ -43,6 +43,7 @@ enum nfs_param {
 	Opt_bsize,
 	Opt_clientaddr,
 	Opt_cto,
+	Opt_fatal_neterrors,
 	Opt_fg,
 	Opt_fscache,
 	Opt_fscache_flag,
@@ -89,6 +90,20 @@ enum nfs_param {
 };
 
 enum {
+	Opt_fatal_neterrors_default,
+	Opt_fatal_neterrors_enetunreach,
+	Opt_fatal_neterrors_none,
+};
+
+static const struct constant_table nfs_param_enums_fatal_neterrors[] = {
+	{ "default",			Opt_fatal_neterrors_default },
+	{ "ENETDOWN:ENETUNREACH",	Opt_fatal_neterrors_enetunreach },
+	{ "ENETUNREACH:ENETDOWN",	Opt_fatal_neterrors_enetunreach },
+	{ "none",			Opt_fatal_neterrors_none },
+	{}
+};
+
+enum {
 	Opt_local_lock_all,
 	Opt_local_lock_flock,
 	Opt_local_lock_none,
@@ -130,6 +145,8 @@ static const struct fs_parameter_spec nfs_fs_parameters[] = {
 	fsparam_u32   ("bsize",		Opt_bsize),
 	fsparam_string("clientaddr",	Opt_clientaddr),
 	fsparam_flag_no("cto",		Opt_cto),
+	fsparam_enum("fatal_neterrors", Opt_fatal_neterrors,
+		     nfs_param_enums_fatal_neterrors),
 	fsparam_flag  ("fg",		Opt_fg),
 	fsparam_flag_no("fsc",		Opt_fscache_flag),
 	fsparam_string("fsc",		Opt_fscache),
@@ -775,6 +792,24 @@ static int nfs_fs_context_parse_param(struct fs_context *fc,
 		if (result.uint_32 < 1 || result.uint_32 > NFS_MAX_TRANSPORTS)
 			goto out_of_bounds;
 		ctx->nfs_server.max_connect = result.uint_32;
+		break;
+	case Opt_fatal_neterrors:
+		switch (result.uint_32) {
+		case Opt_fatal_neterrors_default:
+			if (fc->net_ns != &init_net)
+				ctx->flags |= NFS_MOUNT_NETUNREACH_FATAL;
+			else
+				ctx->flags &= ~NFS_MOUNT_NETUNREACH_FATAL;
+			break;
+		case Opt_fatal_neterrors_enetunreach:
+			ctx->flags |= NFS_MOUNT_NETUNREACH_FATAL;
+			break;
+		case Opt_fatal_neterrors_none:
+			ctx->flags &= ~NFS_MOUNT_NETUNREACH_FATAL;
+			break;
+		default:
+			goto out_invalid_value;
+		}
 		break;
 	case Opt_lookupcache:
 		switch (result.uint_32) {
@@ -1527,6 +1562,9 @@ static int nfs_init_fs_context(struct fs_context *fc)
 		ctx->selected_flavor	= RPC_AUTH_MAXFLAVOR;
 		ctx->minorversion	= 0;
 		ctx->need_mount		= true;
+
+		if (fc->net_ns != &init_net)
+			ctx->flags |= NFS_MOUNT_NETUNREACH_FATAL;
 
 		fc->s_iflags		|= SB_I_STABLE_WRITES;
 	}

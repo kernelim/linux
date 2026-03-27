@@ -1541,6 +1541,18 @@ int pnfs_roc_done(struct rpc_task *task, struct nfs4_layoutreturn_args **argpp,
 		/* Was there an RPC level error? If not, retry */
 		if (task->tk_rpc_status == 0)
 			break;
+		/*
+		 * Is there a fatal network level error?
+		 * If so release the layout, but flag the error.
+		 */
+		if ((task->tk_rpc_status == -ENETDOWN ||
+		     task->tk_rpc_status == -ENETUNREACH) &&
+		    task->tk_flags & RPC_TASK_NETUNREACH_FATAL) {
+			*ret = 0;
+			(*respp)->lrs_present = 0;
+			retval = -EIO;
+			break;
+		}
 		/* If the call was not sent, let caller handle it */
 		if (!RPC_WAS_SENT(task))
 			return 0;
@@ -2715,7 +2727,8 @@ pnfs_generic_pg_init_read(struct nfs_pageio_descriptor *pgio, struct nfs_page *r
 		if (pgio->pg_dreq == NULL)
 			rd_size = i_size_read(pgio->pg_inode) - req_offset(req);
 		else
-			rd_size = nfs_dreq_bytes_left(pgio->pg_dreq);
+			rd_size = nfs_dreq_bytes_left(pgio->pg_dreq,
+						      req_offset(req));
 
 		pgio->pg_lseg = pnfs_update_layout(pgio->pg_inode,
 						   nfs_req_openctx(req),

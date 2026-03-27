@@ -332,6 +332,8 @@ struct xprt_create {
 	struct svc_xprt		*bc_xprt;	/* NFSv4.1 backchannel */
 	struct rpc_xprt_switch	*bc_xps;
 	unsigned int		flags;
+	unsigned long		connect_timeout;
+	unsigned long		reconnect_timeout;
 };
 
 struct xprt_class {

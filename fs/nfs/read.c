@@ -193,10 +193,6 @@ static void nfs_initiate_read(struct nfs_pgio_header *hdr,
 			      const struct nfs_rpc_ops *rpc_ops,
 			      struct rpc_task_setup *task_setup_data, int how)
 {
-	struct inode *inode = hdr->inode;
-	int swap_flags = IS_SWAPFILE(inode) ? NFS_RPC_SWAPFLAGS : 0;
-
-	task_setup_data->flags |= swap_flags;
 	rpc_ops->read_setup(hdr, msg);
 	trace_nfs_initiate_read(hdr);
 }
@@ -304,7 +300,8 @@ readpage_async_filler(void *data, struct page *page)
 
 	aligned_len = min_t(unsigned int, ALIGN(len, rsize), PAGE_SIZE);
 
-	new = nfs_create_request(desc->ctx, page, 0, aligned_len);
+	new = nfs_page_create_from_page(desc->ctx, page, 0,
+					page_index(page) << PAGE_SHIFT, aligned_len);
 	if (IS_ERR(new))
 		goto out_error;
 

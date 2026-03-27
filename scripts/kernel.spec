@@ -38,10 +38,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.115.1.el8_10
+%define pkgrelease 553.117.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.115.1%{?dist}
+%define specrelease 553.117.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2691,13 +2691,60 @@ fi
 #
 #
 %changelog
-* Thu Apr 02 2026 Release Engineering <releng@rockylinux.org> - %{specversion}
+* Tue Apr 07 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.117.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Fri Mar 27 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.117.1.el8_10]
+- nvme-pci: do not directly handle subsys reset fallout (Maurizio Lombardi) [RHEL-136436]
+- scsi: target: iscsi: Fix use-after-free in iscsit_dec_session_usage_count() (CKI Backport Bot) [RHEL-150417] {CVE-2026-23193}
+
+* Wed Mar 25 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.116.1.el8_10]
+- nouveau: fix instmem race condition around ptr stores (Lyude Paul) [RHEL-111846] {CVE-2024-26984}
+- s390/pci: Avoid deadlock between PCI error recovery and mlx5 crdump (Mete Durlu) [RHEL-157930]
+- NFSv4/flexfiles: Fix layout merge mirror check. (Mike Snitzer) [RHEL-157242]
+- flexfiles/pNFS: fix NULL checks on result of ff_layout_choose_ds_for_read (Mike Snitzer) [RHEL-157242]
+- pnfs/flexfiles: retry getting layout segment for reads (Mike Snitzer) [RHEL-157242]
+- pNFS/flexfiles: don't attempt pnfs on fatal DS errors (Mike Snitzer) [RHEL-157242]
+- NFSv4/flexfiles: Fix handling of NFS level errors in I/O (Mike Snitzer) [RHEL-157242]
+- flexfiles/pNFS: update stats on NFS4ERR_DELAY for v4.1 DSes (Mike Snitzer) [RHEL-157242]
+- pNFS/flexfiles: Record the RPC errors in the I/O tracepoints (Mike Snitzer) [RHEL-157242]
+- NFSv4/pnfs: Layoutreturn on close must handle fatal networking errors (Mike Snitzer) [RHEL-157242]
+- NFSv4: Handle fatal ENETDOWN and ENETUNREACH errors (Mike Snitzer) [RHEL-157242]
+- pNFS/flexfiles: Report ENETDOWN as a connection error (Mike Snitzer) [RHEL-157242]
+- pNFS/flexfiles: Treat ENETUNREACH errors as fatal in containers (Mike Snitzer) [RHEL-157242]
+- NFS: Treat ENETUNREACH errors as fatal in containers (Mike Snitzer) [RHEL-157242]
+- NFS: Add a mount option to make ENETUNREACH errors fatal (Mike Snitzer) [RHEL-157242]
+- NFSv4.1 another fix for EXCHGID4_FLAG_USE_PNFS_DS for DS server (Mike Snitzer) [RHEL-157242]
+- SUNRPC: ECONNRESET might require a rebind (Mike Snitzer) [RHEL-157242]
+- NFS/pNFS: Set the connect timeout for the pNFS flexfiles driver (Mike Snitzer) [RHEL-157242]
+- SUNRPC: Don't override connect timeouts in rpc_clnt_add_xprt() (Mike Snitzer) [RHEL-157242]
+- SUNRPC: Allow specification of TCP client connect timeout at setup (Mike Snitzer) [RHEL-157242]
+- SUNRPC: Refactor and simplify connect timeout (Mike Snitzer) [RHEL-157242]
+- SUNRPC: Set the TCP_SYNCNT to match the socket timeout (Mike Snitzer) [RHEL-157242]
+- NFS: discard NFS_RPC_SWAPFLAGS and RPC_TASK_ROOTCREDS (Mike Snitzer) [RHEL-157242]
+- NFS: O_DIRECT writes must check and adjust the file length (Mike Snitzer) [RHEL-156419]
+- nfs: properly protect nfs_direct_req fields (Mike Snitzer) [RHEL-156419]
+- pNFS: Fix the pnfs block driver's calculation of layoutget size (Mike Snitzer) [RHEL-156419]
+- NFS: More fixes for nfs_direct_write_reschedule_io() (Mike Snitzer) [RHEL-156419]
+- NFS: Use the correct commit info in nfs_join_page_group() (Mike Snitzer) [RHEL-156419]
+- NFS: More O_DIRECT accounting fixes for error paths (Mike Snitzer) [RHEL-156419]
+- NFS: Fix O_DIRECT locking issues (Mike Snitzer) [RHEL-156419]
+- NFS: Fix error handling for O_DIRECT write scheduling (Mike Snitzer) [RHEL-156419]
+- NFS: Fix a potential data corruption (Mike Snitzer) [RHEL-156419]
+- NFS: Fix a use after free in nfs_direct_join_group() (Mike Snitzer) [RHEL-156419]
+- NFS: Clean up O_DIRECT request allocation (Mike Snitzer) [RHEL-156419]
+- NFS: add nfs_page_create and nfs_page_assign_page as backport prereq (Mike Snitzer) [RHEL-156419]
+- nfs: only issue commit in DIO codepath if we have uncommitted data (Mike Snitzer) [RHEL-156419]
+- nfs: always check dreq->error after a commit (Mike Snitzer) [RHEL-156419]
+- nfs: add new nfs_direct_req tracepoint events (Mike Snitzer) [RHEL-156419]
+- scsi: qla2xxx: Fix bsg_done() causing double free (Ewan D. Milne) [RHEL-153405] {CVE-2025-71238}
+- netfilter: nf_tables: fix use-after-free in nf_tables_addchain() (Florian Westphal) [RHEL-153264] {CVE-2026-23231}
+- ACPI: processor: idle: Return an error if both P_LVL{2,3} idle states are invalid (Mark Langsdorf) [RHEL-123942]
 
 * Mon Mar 23 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.115.1.el8_10]
 - x86/microcode/AMD: Revert "Backport AMD microcode commits for better microcode loading support" (Waiman Long) [RHEL-155860]

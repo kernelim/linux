@@ -49,6 +49,7 @@ struct nfs_client {
 #define NFS_CS_DS		7		/* - Server is a DS */
 #define NFS_CS_REUSEPORT	8		/* - reuse src port on reconnect */
 #define NFS_CS_PNFS		9		/* - Server used for pnfs */
+#define NFS_CS_NETUNREACH_FATAL	10		/* - ENETUNREACH errors are fatal */
 	struct sockaddr_storage	cl_addr;	/* server identifier */
 	size_t			cl_addrlen;
 	char *			cl_hostname;	/* hostname of server */
@@ -159,6 +160,7 @@ struct nfs_server {
 #define NFS_MOUNT_WRITE_WAIT		0x02000000
 #define NFS_MOUNT_TRUNK_DISCOVERY	0x04000000
 #define NFS_MOUNT_FORCE_RDIRPLUS	0x20000000
+#define NFS_MOUNT_NETUNREACH_FATAL	0x40000000
 
 	unsigned int		caps;		/* server capabilities */
 	unsigned int		rsize;		/* read size */

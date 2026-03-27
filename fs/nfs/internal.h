@@ -81,6 +81,8 @@ struct nfs_client_initdata {
 	struct net *net;
 	const struct rpc_timeout *timeparms;
 	const struct cred *cred;
+	unsigned long connect_timeout;
+	unsigned long reconnect_timeout;
 };
 
 /*
@@ -620,7 +622,7 @@ extern int nfs_sillyrename(struct inode *dir, struct dentry *dentry);
 /* direct.c */
 void nfs_init_cinfo_from_dreq(struct nfs_commit_info *cinfo,
 			      struct nfs_direct_req *dreq);
-extern ssize_t nfs_dreq_bytes_left(struct nfs_direct_req *dreq);
+extern ssize_t nfs_dreq_bytes_left(struct nfs_direct_req *dreq, loff_t offset);
 
 /* nfs4proc.c */
 extern struct nfs_client *nfs4_init_client(struct nfs_client *clp,
@@ -865,3 +867,36 @@ static inline void nfs_set_port(struct sockaddr *sap, int *port,
 
 	rpc_set_port(sap, *port);
 }
+
+struct nfs_direct_req {
+	struct kref		kref;		/* release manager */
+
+	/* I/O parameters */
+	struct nfs_open_context	*ctx;		/* file open context info */
+	struct nfs_lock_context *l_ctx;		/* Lock context info */
+	struct kiocb *		iocb;		/* controlling i/o request */
+	struct inode *		inode;		/* target file of i/o */
+
+	/* completion state */
+	atomic_t		io_count;	/* i/os we're waiting for */
+	spinlock_t		lock;		/* protect completion state */
+
+	loff_t			io_start;	/* Start offset for I/O */
+	ssize_t			count,		/* bytes actually processed */
+				max_count,	/* max expected count */
+				bytes_left,	/* bytes left to be sent */
+				error;		/* any reported error */
+	struct completion	completion;	/* wait for i/o completion */
+
+	/* commit state */
+	struct nfs_mds_commit_info mds_cinfo;	/* Storage for cinfo */
+	struct pnfs_ds_commit_info ds_cinfo;	/* Storage for cinfo */
+	struct work_struct	work;
+	int			flags;
+	/* for write */
+#define NFS_ODIRECT_DO_COMMIT		(1)	/* an unstable reply was received */
+#define NFS_ODIRECT_RESCHED_WRITES	(2)	/* write verification failed */
+	/* for read */
+#define NFS_ODIRECT_SHOULD_DIRTY	(3)	/* dirty user-space page after read */
+#define NFS_ODIRECT_DONE		INT_MAX	/* write verification failed */
+};

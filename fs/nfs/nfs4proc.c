@@ -188,6 +188,9 @@ static int nfs4_map_errors(int err)
 		return -EBUSY;
 	case -NFS4ERR_NOT_SAME:
 		return -ENOTSYNC;
+	case -ENETDOWN:
+	case -ENETUNREACH:
+		break;
 	default:
 		dprintk("%s could not handle NFSv4 error %d\n",
 				__func__, -err);
@@ -621,6 +624,15 @@ nfs4_async_handle_exception(struct rpc_task *task, struct nfs_server *server,
 {
 	struct nfs_client *clp = server->nfs_client;
 	int ret;
+
+	if ((task->tk_rpc_status == -ENETDOWN ||
+	     task->tk_rpc_status == -ENETUNREACH) &&
+	    task->tk_flags & RPC_TASK_NETUNREACH_FATAL) {
+		exception->delay = 0;
+		exception->recovering = 0;
+		exception->retry = 0;
+		return -EIO;
+	}
 
 	ret = nfs4_do_handle_exception(server, errorcode, exception);
 	if (exception->delay) {
@@ -8690,7 +8702,7 @@ nfs4_run_exchange_id(struct nfs_client *clp, const struct cred *cred,
 #ifdef CONFIG_NFS_V4_1_MIGRATION
 	calldata->args.flags |= EXCHGID4_FLAG_SUPP_MOVED_MIGR;
 #endif
-	if (test_bit(NFS_CS_DS, &clp->cl_flags))
+	if (test_bit(NFS_CS_PNFS, &clp->cl_flags))
 		calldata->args.flags |= EXCHGID4_FLAG_USE_PNFS_DS;
 	msg.rpc_argp = &calldata->args;
 	msg.rpc_resp = &calldata->res;

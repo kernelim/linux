@@ -1993,13 +1993,15 @@ DEFINE_PNFS_DEVICEID_STATUS(nfs4_find_deviceid);
 
 DECLARE_EVENT_CLASS(nfs4_flexfiles_io_event,
 		TP_PROTO(
-			const struct nfs_pgio_header *hdr
+			const struct nfs_pgio_header *hdr,
+			int error
 		),
 
-		TP_ARGS(hdr),
+		TP_ARGS(hdr, error),
 
 		TP_STRUCT__entry(
 			__field(unsigned long, error)
+			__field(unsigned long, nfs_error)
 			__field(dev_t, dev)
 			__field(u32, fhandle)
 			__field(u64, fileid)
@@ -2015,7 +2017,8 @@ DECLARE_EVENT_CLASS(nfs4_flexfiles_io_event,
 		TP_fast_assign(
 			const struct inode *inode = hdr->inode;
 
-			__entry->error = hdr->res.op_status;
+			__entry->error = -error;
+			__entry->nfs_error = hdr->res.op_status;
 			__entry->fhandle = nfs_fhandle_hash(hdr->args.fh);
 			__entry->fileid = NFS_FILEID(inode);
 			__entry->dev = inode->i_sb->s_dev;
@@ -2032,7 +2035,8 @@ DECLARE_EVENT_CLASS(nfs4_flexfiles_io_event,
 
 		TP_printk(
 			"error=%ld (%s) fileid=%02x:%02x:%llu fhandle=0x%08x "
-			"offset=%llu count=%u stateid=%d:0x%08x dstaddr=%s",
+			"offset=%llu count=%u stateid=%d:0x%08x dstaddr=%s "
+			"nfs_error=%lu (%s)",
 			-__entry->error,
 			show_nfs4_status(__entry->error),
 			MAJOR(__entry->dev), MINOR(__entry->dev),
@@ -2040,28 +2044,32 @@ DECLARE_EVENT_CLASS(nfs4_flexfiles_io_event,
 			__entry->fhandle,
 			__entry->offset, __entry->count,
 			__entry->stateid_seq, __entry->stateid_hash,
-			__get_str(dstaddr)
+			__get_str(dstaddr), __entry->nfs_error,
+			show_nfs4_status(__entry->nfs_error)
 		)
 );
 
 #define DEFINE_NFS4_FLEXFILES_IO_EVENT(name) \
 	DEFINE_EVENT(nfs4_flexfiles_io_event, name, \
 			TP_PROTO( \
-				const struct nfs_pgio_header *hdr \
+				const struct nfs_pgio_header *hdr, \
+				int error \
 			), \
-			TP_ARGS(hdr))
+			TP_ARGS(hdr, error))
 DEFINE_NFS4_FLEXFILES_IO_EVENT(ff_layout_read_error);
 DEFINE_NFS4_FLEXFILES_IO_EVENT(ff_layout_write_error);
 
 TRACE_EVENT(ff_layout_commit_error,
 		TP_PROTO(
-			const struct nfs_commit_data *data
+			const struct nfs_commit_data *data,
+			int error
 		),
 
-		TP_ARGS(data),
+		TP_ARGS(data, error),
 
 		TP_STRUCT__entry(
 			__field(unsigned long, error)
+			__field(unsigned long, nfs_error)
 			__field(dev_t, dev)
 			__field(u32, fhandle)
 			__field(u64, fileid)
@@ -2075,7 +2083,8 @@ TRACE_EVENT(ff_layout_commit_error,
 		TP_fast_assign(
 			const struct inode *inode = data->inode;
 
-			__entry->error = data->res.op_status;
+			__entry->error = -error;
+			__entry->nfs_error = data->res.op_status;
 			__entry->fhandle = nfs_fhandle_hash(data->args.fh);
 			__entry->fileid = NFS_FILEID(inode);
 			__entry->dev = inode->i_sb->s_dev;
@@ -2088,14 +2097,15 @@ TRACE_EVENT(ff_layout_commit_error,
 
 		TP_printk(
 			"error=%ld (%s) fileid=%02x:%02x:%llu fhandle=0x%08x "
-			"offset=%llu count=%u dstaddr=%s",
+			"offset=%llu count=%u dstaddr=%s nfs_error=%lu (%s)",
 			-__entry->error,
 			show_nfs4_status(__entry->error),
 			MAJOR(__entry->dev), MINOR(__entry->dev),
 			(unsigned long long)__entry->fileid,
 			__entry->fhandle,
 			__entry->offset, __entry->count,
-			__get_str(dstaddr)
+			__get_str(dstaddr), __entry->nfs_error,
+			show_nfs4_status(__entry->nfs_error)
 		)
 );
 

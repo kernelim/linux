@@ -2177,6 +2177,7 @@ err2:
 	nft_use_dec_restore(&table->use);
 err_use:
 	nf_tables_unregister_hook(net, table, chain);
+	synchronize_rcu();
 err1:
 	nf_tables_chain_destroy(ctx);
 

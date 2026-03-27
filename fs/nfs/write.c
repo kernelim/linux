@@ -57,7 +57,8 @@ static const struct nfs_pgio_completion_ops nfs_async_write_completion_ops;
 static const struct nfs_commit_completion_ops nfs_commit_completion_ops;
 static const struct nfs_rw_ops nfs_rw_write_ops;
 static void nfs_inode_remove_request(struct nfs_page *req);
-static void nfs_clear_request_commit(struct nfs_page *req);
+static void nfs_clear_request_commit(struct nfs_commit_info *cinfo,
+				     struct nfs_page *req);
 static void nfs_init_cinfo_from_inode(struct nfs_commit_info *cinfo,
 				      struct inode *inode);
 static struct nfs_page *
@@ -451,8 +452,8 @@ nfs_destroy_unlinked_subrequests(struct nfs_page *destroy_list,
  * the (former) group.  All subrequests are removed from any write or commit
  * lists, unlinked from the group and destroyed.
  */
-void
-nfs_join_page_group(struct nfs_page *head, struct inode *inode)
+void nfs_join_page_group(struct nfs_page *head, struct nfs_commit_info *cinfo,
+			 struct inode *inode)
 {
 	struct nfs_page *subreq;
 	struct nfs_page *destroy_list = NULL;
@@ -482,7 +483,7 @@ nfs_join_page_group(struct nfs_page *head, struct inode *inode)
 	 * Commit list removal accounting is done after locks are dropped */
 	subreq = head;
 	do {
-		nfs_clear_request_commit(subreq);
+		nfs_clear_request_commit(cinfo, subreq);
 		subreq = subreq->wb_this_page;
 	} while (subreq != head);
 
@@ -567,8 +568,10 @@ nfs_lock_and_join_requests(struct page *page)
 {
 	struct inode *inode = page_file_mapping(page)->host;
 	struct nfs_page *head, *subreq;
+	struct nfs_commit_info cinfo;
 	int ret;
 
+	nfs_init_cinfo_from_inode(&cinfo, inode);
 	/*
 	 * A reference is taken only on the head request which acts as a
 	 * reference to the whole page group - the group will not be destroyed
@@ -611,7 +614,7 @@ retry:
 
 	nfs_page_group_unlock(head);
 
-	nfs_join_page_group(head, inode);
+	nfs_join_page_group(head, &cinfo, inode);
 	return head;
 
 out_unlock:
@@ -978,18 +981,16 @@ nfs_clear_page_commit(struct page *page)
 }
 
 /* Called holding the request lock on @req */
-static void
-nfs_clear_request_commit(struct nfs_page *req)
+static void nfs_clear_request_commit(struct nfs_commit_info *cinfo,
+				     struct nfs_page *req)
 {
 	if (test_bit(PG_CLEAN, &req->wb_flags)) {
 		struct nfs_open_context *ctx = nfs_req_openctx(req);
 		struct inode *inode = d_inode(ctx->dentry);
-		struct nfs_commit_info cinfo;
 
-		nfs_init_cinfo_from_inode(&cinfo, inode);
 		mutex_lock(&NFS_I(inode)->commit_mutex);
-		if (!pnfs_clear_request_commit(req, &cinfo)) {
-			nfs_request_remove_commit_list(req, &cinfo);
+		if (!pnfs_clear_request_commit(req, cinfo)) {
+			nfs_request_remove_commit_list(req, cinfo);
 		}
 		mutex_unlock(&NFS_I(inode)->commit_mutex);
 		nfs_clear_page_commit(req->wb_page);
@@ -1175,11 +1176,13 @@ static struct nfs_page * nfs_setup_write_request(struct nfs_open_context* ctx,
 {
 	struct inode *inode = page_file_mapping(page)->host;
 	struct nfs_page	*req;
+	loff_t file_offset;
 
 	req = nfs_try_to_update_request(inode, page, offset, bytes);
 	if (req != NULL)
 		goto out;
-	req = nfs_create_request(ctx, page, offset, bytes);
+	file_offset = ((loff_t)page_index(page) << PAGE_SHIFT) + offset;
+	req = nfs_page_create_from_page(ctx, page, offset, file_offset, bytes);
 	if (IS_ERR(req))
 		goto out;
 	nfs_inode_add_request(inode, req);
@@ -1572,25 +1575,37 @@ static int nfs_writeback_done(struct rpc_task *task,
 	nfs_add_stats(inode, NFSIOS_SERVERWRITTENBYTES, hdr->res.count);
 	trace_nfs_writeback_done(task, hdr);
 
-	if (hdr->res.verf->committed < hdr->args.stable &&
-	    task->tk_status >= 0) {
-		/* We tried a write call, but the server did not
-		 * commit data to stable storage even though we
-		 * requested it.
-		 * Note: There is a known bug in Tru64 < 5.0 in which
-		 *	 the server reports NFS_DATA_SYNC, but performs
-		 *	 NFS_FILE_SYNC. We therefore implement this checking
-		 *	 as a dprintk() in order to avoid filling syslog.
-		 */
-		static unsigned long    complain;
+	if (task->tk_status >= 0) {
+		enum nfs3_stable_how committed = hdr->res.verf->committed;
 
-		/* Note this will print the MDS for a DS write */
-		if (time_before(complain, jiffies)) {
-			dprintk("NFS:       faulty NFS server %s:"
-				" (committed = %d) != (stable = %d)\n",
-				NFS_SERVER(inode)->nfs_client->cl_hostname,
-				hdr->res.verf->committed, hdr->args.stable);
-			complain = jiffies + 300 * HZ;
+		if (committed == NFS_UNSTABLE) {
+			/*
+			 * We have some uncommitted data on the server at
+			 * this point, so ensure that we keep track of that
+			 * fact irrespective of what later writes do.
+			 */
+			set_bit(NFS_IOHDR_UNSTABLE_WRITES, &hdr->flags);
+		}
+
+		if (committed < hdr->args.stable) {
+			/* We tried a write call, but the server did not
+			 * commit data to stable storage even though we
+			 * requested it.
+			 * Note: There is a known bug in Tru64 < 5.0 in which
+			 *	 the server reports NFS_DATA_SYNC, but performs
+			 *	 NFS_FILE_SYNC. We therefore implement this checking
+			 *	 as a dprintk() in order to avoid filling syslog.
+			 */
+			static unsigned long    complain;
+
+			/* Note this will print the MDS for a DS write */
+			if (time_before(complain, jiffies)) {
+				dprintk("NFS:       faulty NFS server %s:"
+					" (committed = %d) != (stable = %d)\n",
+					NFS_SERVER(inode)->nfs_client->cl_hostname,
+					committed, hdr->args.stable);
+				complain = jiffies + 300 * HZ;
+			}
 		}
 	}
 
