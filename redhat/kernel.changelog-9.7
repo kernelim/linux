@@ -1,3 +1,15 @@
+* Tue Mar 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.47.1.el9_7]
+- net/mlx5: Fix ECVF vports unload on shutdown flow (CKI Backport Bot) [RHEL-154537] {CVE-2025-38109}
+- netfilter: nf_tables: fix use-after-free in nf_tables_addchain() (CKI Backport Bot) [RHEL-153269] {CVE-2026-23231}
+- ice: Fix PTP NULL pointer dereference during VSI rebuild (CKI Backport Bot) [RHEL-150245] {CVE-2026-23210}
+- netfilter: nf_tables: fix inverted genmask check in nft_map_catchall_activate() (CKI Backport Bot) [RHEL-149748] {CVE-2026-23111}
+Resolves: RHEL-149748, RHEL-150245, RHEL-153269, RHEL-154537
+
+* Thu Mar 26 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.46.1.el9_7]
+- ice: fix page leak for zero-size Rx descriptors (CKI Backport Bot) [RHEL-154094]
+- net: mana: Reduce waiting time if HWC not responding (Maxim Levitsky) [RHEL-92243]
+Resolves: RHEL-154094, RHEL-92243
+
 * Sat Mar 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.45.1.el9_7]
 - net/sched: cls_u32: use skb_header_pointer_careful() (Paolo Abeni) [RHEL-150403] {CVE-2026-23204}
 - net: add skb_header_pointer_careful() helper (Paolo Abeni) [RHEL-150403]

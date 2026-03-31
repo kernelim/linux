@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 611.45.1
+%define pkgrelease 611.47.1
 %define kversion 5
-%define tarfile_release 5.14.0-611.45.1.el9_7
+%define tarfile_release 5.14.0-611.47.1.el9_7
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 611.45.1%{?buildid}%{?dist}
+%define specrelease 611.47.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-611.45.1.el9_7
+%define kabiversion 5.14.0-611.47.1.el9_7
 
 #
 # End of genspec.sh variables
@@ -3697,10 +3697,20 @@ fi
 #
 #
 %changelog
-* Thu Apr 02 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-611.45.1
+* Tue Apr 07 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-611.47.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Tue Mar 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.47.1.el9_7]
+- net/mlx5: Fix ECVF vports unload on shutdown flow (CKI Backport Bot) [RHEL-154537] {CVE-2025-38109}
+- netfilter: nf_tables: fix use-after-free in nf_tables_addchain() (CKI Backport Bot) [RHEL-153269] {CVE-2026-23231}
+- ice: Fix PTP NULL pointer dereference during VSI rebuild (CKI Backport Bot) [RHEL-150245] {CVE-2026-23210}
+- netfilter: nf_tables: fix inverted genmask check in nft_map_catchall_activate() (CKI Backport Bot) [RHEL-149748] {CVE-2026-23111}
+
+* Thu Mar 26 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.46.1.el9_7]
+- ice: fix page leak for zero-size Rx descriptors (CKI Backport Bot) [RHEL-154094]
+- net: mana: Reduce waiting time if HWC not responding (Maxim Levitsky) [RHEL-92243]
 
 * Sat Mar 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.45.1.el9_7]
 - net/sched: cls_u32: use skb_header_pointer_careful() (Paolo Abeni) [RHEL-150403] {CVE-2026-23204}
