@@ -1,3 +1,22 @@
+* Tue Apr 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.49.1.el9_7]
+- rtnetlink: Allocate vfinfo size for VF GUIDs when supported (Kamal Heib) [RHEL-149469] {CVE-2025-22075}
+Resolves: RHEL-149469
+
+* Fri Apr 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.48.1.el9_7]
+- scsi: qla2xxx: Fix improper freeing of purex item (CKI Backport Bot) [RHEL-159222] {CVE-2025-68741}
+- NFSv4: Check for delegation validity in nfs_start_delegation_return_locked() (Scott Mayhew) [RHEL-151414]
+- Bluetooth: MGMT: Fix memory leak in set_ssp_complete (David Marlin) [RHEL-151728]
+- Bluetooth: hci_uart: fix null-ptr-deref in hci_uart_write_work (David Marlin) [RHEL-151728]
+- Bluetooth: btusb: revert use of devm_kzalloc in btusb (David Marlin) [RHEL-151728]
+- Bluetooth: btusb: reorder cleanup in btusb_disconnect to avoid UAF (David Marlin) [RHEL-151728]
+- net: hv_netvsc: reject RSS hash key programming without RX indirection table (Medha Mummigatti) [RHEL-150571]
+- net/sched: sch_cake: Fix incorrect qlen reduction in cake_drop (CKI Backport Bot) [RHEL-150455] {CVE-2025-39766}
+- net/sched: Make cake_enqueue return NET_XMIT_CN when past buffer_limit (CKI Backport Bot) [RHEL-150455] {CVE-2025-39766}
+- iommu/vt-d: Deduplicate cache_tag_flush_all by reusing flush_range (Jerry Snitselaar) [RHEL-144218]
+- iommu/vt-d: Fix missing PASID in dev TLB flush with cache_tag_flush_all (Jerry Snitselaar) [RHEL-144218]
+- i40e: validate ring_len parameter against hardware-specific values (CKI Backport Bot) [RHEL-141722]
+Resolves: RHEL-141722, RHEL-144218, RHEL-150455, RHEL-150571, RHEL-151414, RHEL-151728, RHEL-159222
+
 * Tue Mar 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.47.1.el9_7]
 - net/mlx5: Fix ECVF vports unload on shutdown flow (CKI Backport Bot) [RHEL-154537] {CVE-2025-38109}
 - netfilter: nf_tables: fix use-after-free in nf_tables_addchain() (CKI Backport Bot) [RHEL-153269] {CVE-2026-23231}
