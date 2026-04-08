@@ -38,10 +38,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.117.1.el8_10
+%define pkgrelease 553.120.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.117.1%{?dist}
+%define specrelease 553.120.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -1530,6 +1530,8 @@ BuildKernel() {
     cp -a --parents arch/arm/include/asm/opcodes.h $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/
 %endif
     cp -a include $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/include
+    # Cross-reference from include/perf/events/sof.h
+    cp -a sound/soc/sof/sof-audio.h $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/sound/soc/sof
 %ifarch x86_64
     # files for 'make prepare' to succeed with kernel-devel
     cp -a --parents arch/x86/entry/syscalls/syscall_32.tbl $RPM_BUILD_ROOT/lib/modules/$KernelVer/build/
@@ -2691,13 +2693,44 @@ fi
 #
 #
 %changelog
-* Tue Apr 07 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.117.1
+* Wed Apr 22 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.120.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Wed Apr 08 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.120.1.el8_10]
+- gfs2: bufdata allocation race (Andreas Gruenbacher) [RHEL-160075]
+- gfs2: Get rid of gfs2_log_[un]lock helpers (Andreas Gruenbacher) [RHEL-160075]
+- gfs2: Avoid unnecessary transactions in evict_linked_inode (Andreas Gruenbacher) [RHEL-160075]
+- KVM: x86: Fix a semi theoretical bug in kvm_arch_async_page_present_queued() (Maxim Levitsky) [RHEL-152657]
+- KVM: x86: Don't clear async #PF queue when CR0.PG is disabled (e.g. on #SMI) (Maxim Levitsky) [RHEL-152657]
+
+* Tue Apr 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.119.1.el8_10]
+- s390/dasd: Copy detected format information to secondary device (Mete Durlu) [RHEL-161532]
+- s390/dasd: Move quiesce state with pprc swap (Mete Durlu) [RHEL-161532]
+- s390/dasd: Fix gendisk parent after copy pair swap (Mete Durlu) [RHEL-161532]
+- redhat: kernel.spec: add missing sound/soc/sof/sof-audio.h to kernel-devel package (Jaroslav Kysela) [RHEL-152417]
+- s390/virtio_ccw: Fix dma_parm pointer not set up (CKI Backport Bot) [RHEL-148307]
+- dlm: fix recovery pending middle conversion (Alexander Aring) [RHEL-125538]
+- dlm: check for undefined release_option values (Alexander Aring) [RHEL-136236]
+- dlm: handle release_option as unsigned (Alexander Aring) [RHEL-136236]
+- dlm: handle invalid lockspace member remove (Alexander Aring) [RHEL-136236]
+- dlm: add new flag DLM_RELEASE_RECOVER for dlm_lockspace_release (Alexander Aring) [RHEL-136236]
+- dlm: add new configfs entry release_recover for lockspace members (Alexander Aring) [RHEL-136236]
+- dlm: add new RELEASE_RECOVER uevent attribute for release_lockspace (Alexander Aring) [RHEL-136236]
+- dlm: use defines for force values in dlm_release_lockspace (Alexander Aring) [RHEL-136236]
+- dlm: check for defined force value in dlm_lockspace_release (Alexander Aring) [RHEL-136236]
+- dlm: disallow different configs nodeid storages (Alexander Aring) [RHEL-136236]
+- dlm: prevent NPD when writing a positive value to event_done (Alexander Aring) [RHEL-136236] {CVE-2025-23131}
+- dlm: Switch to using wait_event() (Alexander Aring) [RHEL-136236]
+
+* Wed Apr 01 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.118.1.el8_10]
+- scsi: qla2xxx: Fix improper freeing of purex item (CKI Backport Bot) [RHEL-159219] {CVE-2025-68741}
+- ALSA: aloop: Fix racy access at PCM trigger (Jaroslav Kysela) [RHEL-150125] {CVE-2026-23191}
+- ALSA: aloop: Introduce a function to get if access is interleaved mode (CKI Backport Bot) [RHEL-150125] {CVE-2026-23191}
 
 * Fri Mar 27 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.117.1.el8_10]
 - nvme-pci: do not directly handle subsys reset fallout (Maurizio Lombardi) [RHEL-136436]

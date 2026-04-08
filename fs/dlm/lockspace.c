@@ -196,34 +196,29 @@ static struct kobj_type dlm_ktype = {
 
 static struct kset *dlm_kset;
 
-static int do_uevent(struct dlm_ls *ls, int in)
+static int do_uevent(struct dlm_ls *ls, int in, unsigned int release_recover)
 {
-	int error;
+	char message[512] = {};
+	char *envp[] = { message, NULL };
 
-	if (in)
+	if (in) {
 		kobject_uevent(&ls->ls_kobj, KOBJ_ONLINE);
-	else
-		kobject_uevent(&ls->ls_kobj, KOBJ_OFFLINE);
+	} else {
+		snprintf(message, 511, "RELEASE_RECOVER=%u", release_recover);
+		kobject_uevent_env(&ls->ls_kobj, KOBJ_OFFLINE, envp);
+	}
 
 	log_rinfo(ls, "%s the lockspace group...", in ? "joining" : "leaving");
 
 	/* dlm_controld will see the uevent, do the necessary group management
 	   and then write to sysfs to wake us */
 
-	error = wait_event_interruptible(ls->ls_uevent_wait,
-			test_and_clear_bit(LSFL_UEVENT_WAIT, &ls->ls_flags));
+	wait_event(ls->ls_uevent_wait,
+		   test_and_clear_bit(LSFL_UEVENT_WAIT, &ls->ls_flags));
 
-	log_rinfo(ls, "group event done %d %d", error, ls->ls_uevent_result);
+	log_rinfo(ls, "group event done %d", ls->ls_uevent_result);
 
-	if (error)
-		goto out;
-
-	error = ls->ls_uevent_result;
- out:
-	if (error)
-		log_error(ls, "group %s failed %d %d", in ? "join" : "leave",
-			  error, ls->ls_uevent_result);
-	return error;
+	return ls->ls_uevent_result;
 }
 
 static int dlm_uevent(struct kset *kset, struct kobject *kobj,
@@ -649,8 +644,8 @@ static int new_lockspace(const char *name, const char *cluster,
 	   current lockspace members are (via configfs) and then tells the
 	   lockspace to start running (via sysfs) in dlm_ls_start(). */
 
-	error = do_uevent(ls, 1);
-	if (error)
+	error = do_uevent(ls, 1, 0);
+	if (error < 0)
 		goto out_recoverd;
 
 	wait_for_completion(&ls->ls_members_done);
@@ -665,7 +660,7 @@ static int new_lockspace(const char *name, const char *cluster,
 	return 0;
 
  out_members:
-	do_uevent(ls, 0);
+	do_uevent(ls, 0, 0);
 	dlm_clear_members(ls);
 	kfree(ls->ls_node_array);
  out_recoverd:
@@ -749,14 +744,14 @@ static int lkb_idr_free(int id, void *p, void *data)
    This is because there may be LKBs queued as ASTs that have been unlinked
    from their RSBs and are pending deletion once the AST has been delivered */
 
-static int lockspace_busy(struct dlm_ls *ls, int force)
+static int lockspace_busy(struct dlm_ls *ls, unsigned int release_option)
 {
 	int rv;
 
 	spin_lock(&ls->ls_lkbidr_spin);
-	if (force == 0) {
+	if (release_option == DLM_RELEASE_NO_LOCKS) {
 		rv = idr_for_each(&ls->ls_lkbidr, lkb_idr_is_any, ls);
-	} else if (force == 1) {
+	} else if (release_option == DLM_RELEASE_UNUSED) {
 		rv = idr_for_each(&ls->ls_lkbidr, lkb_idr_is_local, ls);
 	} else {
 		rv = 0;
@@ -765,13 +760,13 @@ static int lockspace_busy(struct dlm_ls *ls, int force)
 	return rv;
 }
 
-static int release_lockspace(struct dlm_ls *ls, int force)
+static int release_lockspace(struct dlm_ls *ls, unsigned int release_option)
 {
 	struct dlm_rsb *rsb;
 	struct rb_node *n;
 	int i, busy, rv;
 
-	busy = lockspace_busy(ls, force);
+	busy = lockspace_busy(ls, release_option);
 
 	spin_lock(&lslist_lock);
 	if (ls->ls_create_count == 1) {
@@ -796,8 +791,9 @@ static int release_lockspace(struct dlm_ls *ls, int force)
 
 	dlm_device_deregister(ls);
 
-	if (force < 3 && dlm_user_daemon_available())
-		do_uevent(ls, 0);
+	if (release_option != DLM_RELEASE_NO_EVENT &&
+	    dlm_user_daemon_available())
+		do_uevent(ls, 0, (release_option == DLM_RELEASE_RECOVER));
 
 	dlm_recoverd_stop(ls);
 
@@ -870,17 +866,16 @@ static int release_lockspace(struct dlm_ls *ls, int force)
  * lockspace must continue to function as usual, participating in recoveries,
  * until this returns.
  *
- * Force has 4 possible values:
- * 0 - don't destroy locksapce if it has any LKBs
- * 1 - destroy lockspace if it has remote LKBs but not if it has local LKBs
- * 2 - destroy lockspace regardless of LKBs
- * 3 - destroy lockspace as part of a forced shutdown
+ * See DLM_RELEASE defines for release_option values and their meaning.
  */
 
-int dlm_release_lockspace(void *lockspace, int force)
+int dlm_release_lockspace(void *lockspace, unsigned int release_option)
 {
 	struct dlm_ls *ls;
 	int error;
+
+	if (release_option > __DLM_RELEASE_MAX)
+		return -EINVAL;
 
 	ls = dlm_find_lockspace_local(lockspace);
 	if (!ls)
@@ -888,7 +883,7 @@ int dlm_release_lockspace(void *lockspace, int force)
 	dlm_put_lockspace(ls);
 
 	mutex_lock(&ls_lock);
-	error = release_lockspace(ls, force);
+	error = release_lockspace(ls, release_option);
 	if (!error)
 		ls_count--;
 	if (!ls_count)
