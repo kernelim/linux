@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 124.49.1
+%define pkgrelease 124.52.1
 %define kversion 6
-%define tarfile_release 6.12.0-124.49.1.el10_1
+%define tarfile_release 6.12.0-124.52.1.el10_1
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 124.49.1%{?buildid}%{?dist}
+%define specrelease 124.52.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-124.49.1.el10_1
+%define kabiversion 6.12.0-124.52.1.el10_1
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4354,10 +4354,39 @@ fi\
 #
 #
 %changelog
-* Tue Apr 07 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.49.1
+* Wed Apr 22 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.52.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
 - Patch MMU for riscv64
+
+* Sat Apr 11 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.52.1.el10_1]
+- md/raid1: fix data lost for writemostly rdev (Nigel Croxon) [RHEL-143660]
+
+* Thu Apr 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.51.1.el10_1]
+- smb: client: fix krb5 mount with username option (Paulo Alcantara) [RHEL-158989]
+
+* Thu Apr 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.50.1.el10_1]
+- scsi: qla2xxx: Fix improper freeing of purex item (CKI Backport Bot) [RHEL-159225] {CVE-2025-68741}
+- net: hv_netvsc: reject RSS hash key programming without RX indirection table (Vinay Mulugund) [RHEL-150573]
+- smb: client: fix oops due to uninitialised var in smb2_unlink() (Paulo Alcantara) [RHEL-154414]
+- cifs: some missing initializations on replay (Paulo Alcantara) [RHEL-154414]
+- smb: client: split cached_fid bitfields to avoid shared-byte RMW races (Paulo Alcantara) [RHEL-154414]
+- cifs: make retry logic in read/write path consistent with other paths (Paulo Alcantara) [RHEL-154414]
+- cifs: on replayable errors back-off before replay, not after (Paulo Alcantara) [RHEL-154414]
+- smb: client: fix potential UAF and double free in smb2_open_file() (Paulo Alcantara) [RHEL-154414]
+- smb/client: fix memory leak in smb2_open_file() (Paulo Alcantara) [RHEL-154414]
+- netfs: avoid double increment of retry_count in subreq (Paulo Alcantara) [RHEL-154414]
+- netfs: when subreq is marked for retry, do not check if it faced an error (Paulo Alcantara) [RHEL-154414]
+- netfs: Fix early read unlock of page with EOF in middle (Paulo Alcantara) [RHEL-154414]
+- netfs: fix reference leak (Paulo Alcantara) [RHEL-154414]
+- netfs: Prevent duplicate unlocking (Paulo Alcantara) [RHEL-154414]
+- netfs: Fix unbuffered write error handling (Paulo Alcantara) [RHEL-154414]
+- net/sched: sch_cake: Fix incorrect qlen reduction in cake_drop (CKI Backport Bot) [RHEL-150451] {CVE-2025-39766}
+- net/sched: Make cake_enqueue return NET_XMIT_CN when past buffer_limit (CKI Backport Bot) [RHEL-150451] {CVE-2025-39766}
+- xfs: set max_agbno to allow sparse alloc of last full inode chunk (Brian Foster) [RHEL-142607]
+- iommu/vt-d: Deduplicate cache_tag_flush_all by reusing flush_range (Jerry Snitselaar) [RHEL-144317]
+- iommu/vt-d: Fix missing PASID in dev TLB flush with cache_tag_flush_all (Jerry Snitselaar) [RHEL-144317]
+- i40e: validate ring_len parameter against hardware-specific values (CKI Backport Bot) [RHEL-141694]
 
 * Tue Mar 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.49.1.el10_1]
 - net/mlx5: Fix ECVF vports unload on shutdown flow (CKI Backport Bot) [RHEL-154540] {CVE-2025-38109}
