@@ -1,3 +1,28 @@
+* Sat May 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.55.1.el10_1]
+- crypto: algif_aead - snapshot IV for async AEAD requests (Vladislav Dronov) [RHEL-172211]
+- crypto: algif_aead - Fix minimum RX size check for decryption (Vladislav Dronov) [RHEL-172211]
+- crypto: authencesn - reject short ahash digests during instance creation (Vladislav Dronov) [RHEL-172211]
+- crypto: authencesn - Fix src offset when decrypting in-place (Vladislav Dronov) [RHEL-172211]
+- crypto: authencesn - Do not place hiseq at end of dst for out-of-place decryption (Vladislav Dronov) [RHEL-172211] {CVE-2026-31431}
+- crypto: authencesn - reject too-short AAD (assoclen<8) to match ESP/ESN spec (Vladislav Dronov) [RHEL-172211] {CVE-2026-23060}
+- crypto: af_alg - Fix page reassignment overflow in af_alg_pull_tsgl (Vladislav Dronov) [RHEL-172211]
+- crypto: af_alg - limit RX SG extraction by receive buffer budget (Vladislav Dronov) [RHEL-172211] {CVE-2026-31677}
+- crypto: algif_aead - Revert to operating out-of-place (Vladislav Dronov) [RHEL-172211] {CVE-2026-31431}
+- crypto: af-alg - fix NULL pointer dereference in scatterwalk (Vladislav Dronov) [RHEL-172211]
+Resolves: RHEL-172211
+
+* Mon Apr 27 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.54.1.el10_1]
+- thunderbolt: Fix wake on connect at runtime (Desnes Nunes) [RHEL-108357]
+- thunderbolt: Fix a logic error in wake on connect (Desnes Nunes) [RHEL-108357]
+- thunderbolt: Use wake on connect and disconnect over suspend (Desnes Nunes) [RHEL-108357]
+- net: bonding: fix use-after-free in bond_xmit_broadcast() (CKI Backport Bot) [RHEL-168071] {CVE-2026-31419}
+- net/sched: Only allow act_ct to bind to clsact/ingress qdiscs and shared blocks (CKI Backport Bot) [RHEL-157330] {CVE-2026-23270}
+Resolves: RHEL-108357, RHEL-157330, RHEL-168071
+
+* Tue Apr 14 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.53.1.el10_1]
+- nfsd: fix heap overflow in NFSv4.0 LOCK replay cache (Scott Mayhew) [RHEL-167019] {CVE-2026-31402}
+Resolves: RHEL-167019
+
 * Sat Apr 11 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.52.1.el10_1]
 - md/raid1: fix data lost for writemostly rdev (Nigel Croxon) [RHEL-143660]
 Resolves: RHEL-143660
