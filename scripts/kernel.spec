@@ -38,10 +38,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.120.1.el8_10
+%define pkgrelease 553.123.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.120.1%{?dist}
+%define specrelease 553.123.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2693,13 +2693,35 @@ fi
 #
 #
 %changelog
-* Wed Apr 22 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.120.1
+* Tue May 05 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.123.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Mon May 04 2026 Denys Vlasenko <dvlasenk@redhat.com> [4.18.0-553.123.1.el8_10]
+- crypto: algif_aead - snapshot IV for async AEAD requests (Herbert Xu) [RHEL-172187]
+- crypto: algif_aead - Fix minimum RX size check for decryption (Herbert Xu) [RHEL-172187]
+- crypto: authencesn - reject short ahash digests during instance creation (Herbert Xu) [RHEL-172187]
+- crypto: authencesn - Fix src offset when decrypting in-place (Herbert Xu) [RHEL-172187]
+- crypto: authencesn - Do not place hiseq at end of dst for out-of-place decryption (Herbert Xu) [RHEL-172187] {CVE-2026-31431}
+- crypto: authencesn - reject too-short AAD (assoclen<8) to match ESP/ESN spec (Herbert Xu) [RHEL-172187] {CVE-2026-23060}
+- crypto: af_alg - Fix page reassignment overflow in af_alg_pull_tsgl (Herbert Xu) [RHEL-172187]
+- crypto: af_alg - limit RX SG extraction by receive buffer budget (Herbert Xu) [RHEL-172187] {CVE-2026-31677}
+- crypto: algif_aead - Revert to operating out-of-place (Herbert Xu) [RHEL-172187] {CVE-2026-31431}
+- crypto: af-alg - fix NULL pointer dereference in scatterwalk (Herbert Xu) [RHEL-172187]
+- KVM: x86/mmu: Drop/zap existing present SPTE even when creating an MMIO SPTE (Paolo Bonzini) [RHEL-153727] {CVE-2026-23401}
+
+* Fri Apr 24 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.122.1.el8_10]
+- nvme: avoid double free special payload (Maurizio Lombardi) [RHEL-51303] {CVE-2024-41073}
+- crypto: asymmetric_keys - prevent overflow in asymmetric_key_generate_id (CKI Backport Bot) [RHEL-166921] {CVE-2025-68724}
+- net: qlogic/qede: fix potential out-of-bounds read in qede_tpa_cont() and qede_tpa_end() (Jay Shin) [RHEL-166155] {CVE-2025-40252}
+- kernel.h: Move ARRAY_SIZE() to a separate header (Jay Shin) [RHEL-166155] {CVE-2025-40252}
+
+* Wed Apr 15 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.121.1.el8_10]
+- nfsd: fix heap overflow in NFSv4.0 LOCK replay cache (Scott Mayhew) [RHEL-167011] {CVE-2026-31402}
 
 * Wed Apr 08 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.120.1.el8_10]
 - gfs2: bufdata allocation race (Andreas Gruenbacher) [RHEL-160075]
