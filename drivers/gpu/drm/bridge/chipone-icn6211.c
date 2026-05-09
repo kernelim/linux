@@ -580,11 +580,13 @@ static int chipone_dsi_host_attach(struct chipone *icn)
 	return ret;
 }
 
-static int chipone_attach(struct drm_bridge *bridge, enum drm_bridge_attach_flags flags)
+static int chipone_attach(struct drm_bridge *bridge,
+			  struct drm_encoder *encoder,
+			  enum drm_bridge_attach_flags flags)
 {
 	struct chipone *icn = bridge_to_chipone(bridge);
 
-	return drm_bridge_attach(bridge->encoder, icn->panel_bridge, bridge, flags);
+	return drm_bridge_attach(encoder, icn->panel_bridge, bridge, flags);
 }
 
 #define MAX_INPUT_SEL_FORMATS	1
@@ -689,9 +691,10 @@ static int chipone_common_probe(struct device *dev, struct chipone **icnr)
 	struct chipone *icn;
 	int ret;
 
-	icn = devm_kzalloc(dev, sizeof(struct chipone), GFP_KERNEL);
-	if (!icn)
-		return -ENOMEM;
+	icn = devm_drm_bridge_alloc(dev, struct chipone, bridge,
+				    &chipone_bridge_funcs);
+	if (IS_ERR(icn))
+		return PTR_ERR(icn);
 
 	icn->dev = dev;
 
@@ -699,7 +702,6 @@ static int chipone_common_probe(struct device *dev, struct chipone **icnr)
 	if (ret)
 		return ret;
 
-	icn->bridge.funcs = &chipone_bridge_funcs;
 	icn->bridge.type = DRM_MODE_CONNECTOR_DPI;
 	icn->bridge.of_node = dev->of_node;
 

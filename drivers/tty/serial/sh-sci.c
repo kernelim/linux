@@ -1139,7 +1139,7 @@ static int scif_rtrg_enabled(struct uart_port *port)
 
 static void rx_fifo_timer_fn(struct timer_list *t)
 {
-	struct sci_port *s = from_timer(s, t, rx_fifo_timer);
+	struct sci_port *s = timer_container_of(s, t, rx_fifo_timer);
 	struct uart_port *port = &s->port;
 
 	dev_dbg(port->dev, "Rx timed out\n");
@@ -1695,8 +1695,7 @@ static void sci_request_dma(struct uart_port *port)
 			dma += s->buf_len_rx;
 		}
 
-		hrtimer_init(&s->rx_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-		s->rx_timer.function = sci_dma_rx_timer_fn;
+		hrtimer_setup(&s->rx_timer, sci_dma_rx_timer_fn, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 
 		s->chan_rx_saved = s->chan_rx = chan;
 
@@ -2290,7 +2289,7 @@ static void sci_shutdown(struct uart_port *port)
 #endif
 
 	if (s->rx_trigger > 1 && s->rx_fifo_timeout > 0)
-		del_timer_sync(&s->rx_fifo_timer);
+		timer_delete_sync(&s->rx_fifo_timer);
 	sci_free_irq(s);
 	sci_free_dma(port);
 }

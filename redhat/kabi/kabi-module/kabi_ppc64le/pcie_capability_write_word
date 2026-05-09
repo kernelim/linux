@@ -1,3 +1,3 @@
-#1-
-0x293c8e8c	pcie_capability_write_word	vmlinux	EXPORT_SYMBOL	
+#2-
+0x0513039d	pcie_capability_write_word	vmlinux	EXPORT_SYMBOL	
 

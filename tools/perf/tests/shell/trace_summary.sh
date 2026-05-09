@@ -1,5 +1,5 @@
-#!/bin/sh
-# perf trace summary
+#!/bin/bash
+# perf trace summary (exclusive)
 # SPDX-License-Identifier: GPL-2.0
 
 # Check that perf trace works with various summary mode
@@ -53,6 +53,12 @@ test_perf_trace "-as --summary-mode=thread --no-bpf-summary"
 # summary only for system wide - total summary mode
 test_perf_trace "-as --summary-mode=total --no-bpf-summary"
 
+if ! perf check feature -q bpf; then
+    echo "Skip --bpf-summary tests as perf built without libbpf"
+    rm -f ${OUTPUT}
+    exit 2
+fi
+
 # summary only for system wide - per-thread summary with BPF
 test_perf_trace "-as --summary-mode=thread --bpf-summary"
 
@@ -61,5 +67,11 @@ test_perf_trace "-as --summary-mode=total --bpf-summary"
 
 # summary with normal output for system wide - total summary mode with BPF
 test_perf_trace "-aS --summary-mode=total --bpf-summary"
+
+# summary only for system wide - cgroup summary mode with BPF
+test_perf_trace "-as --summary-mode=cgroup --bpf-summary"
+
+# summary with normal output for system wide - cgroup summary mode with BPF
+test_perf_trace "-aS --summary-mode=cgroup --bpf-summary"
 
 rm -f ${OUTPUT}

@@ -37,6 +37,8 @@ netdev_nl_dev_fill(struct net_device *netdev, struct sk_buff *rsp,
 	u64 xdp_rx_meta = 0;
 	void *hdr;
 
+	netdev_assert_locked(netdev); /* note: rtnl_lock may not be held! */
+
 	hdr = genlmsg_iput(rsp, info);
 	if (!hdr)
 		return -EMSGSIZE;
@@ -121,15 +123,14 @@ int netdev_nl_dev_get_doit(struct sk_buff *skb, struct genl_info *info)
 	if (!rsp)
 		return -ENOMEM;
 
-	rtnl_lock();
-
-	netdev = __dev_get_by_index(genl_info_net(info), ifindex);
-	if (netdev)
-		err = netdev_nl_dev_fill(netdev, rsp, info);
-	else
+	netdev = netdev_get_by_index_lock(genl_info_net(info), ifindex);
+	if (!netdev) {
 		err = -ENODEV;
+		goto err_free_msg;
+	}
 
-	rtnl_unlock();
+	err = netdev_nl_dev_fill(netdev, rsp, info);
+	netdev_unlock(netdev);
 
 	if (err)
 		goto err_free_msg;
@@ -145,44 +146,45 @@ int netdev_nl_dev_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 {
 	struct netdev_nl_dump_ctx *ctx = netdev_dump_ctx(cb);
 	struct net *net = sock_net(skb->sk);
-	struct net_device *netdev;
-	int err = 0;
+	int err;
 
-	rtnl_lock();
-	for_each_netdev_dump(net, netdev, ctx->ifindex) {
+	for_each_netdev_lock_scoped(net, netdev, ctx->ifindex) {
 		err = netdev_nl_dev_fill(netdev, skb, genl_info_dump(cb));
 		if (err < 0)
-			break;
+			return err;
 	}
-	rtnl_unlock();
 
-	return err;
+	return 0;
 }
 
 static int
 netdev_nl_napi_fill_one(struct sk_buff *rsp, struct napi_struct *napi,
 			const struct genl_info *info)
 {
+	unsigned long irq_suspend_timeout;
 	unsigned long gro_flush_timeout;
 	u32 napi_defer_hard_irqs;
 	void *hdr;
 	pid_t pid;
 
-	if (!(napi->dev->flags & IFF_UP))
+	if (!napi->dev->up)
 		return 0;
 
 	hdr = genlmsg_iput(rsp, info);
 	if (!hdr)
 		return -EMSGSIZE;
 
-	if (napi->napi_id >= MIN_NAPI_ID &&
-	    nla_put_u32(rsp, NETDEV_A_NAPI_ID, napi->napi_id))
+	if (nla_put_u32(rsp, NETDEV_A_NAPI_ID, napi->napi_id))
 		goto nla_put_failure;
 
 	if (nla_put_u32(rsp, NETDEV_A_NAPI_IFINDEX, napi->dev->ifindex))
 		goto nla_put_failure;
 
 	if (napi->irq >= 0 && nla_put_u32(rsp, NETDEV_A_NAPI_IRQ, napi->irq))
+		goto nla_put_failure;
+
+	if (nla_put_uint(rsp, NETDEV_A_NAPI_THREADED,
+			 napi_get_threaded(napi)))
 		goto nla_put_failure;
 
 	if (napi->thread) {
@@ -194,6 +196,11 @@ netdev_nl_napi_fill_one(struct sk_buff *rsp, struct napi_struct *napi,
 	napi_defer_hard_irqs = napi_get_defer_hard_irqs(napi);
 	if (nla_put_s32(rsp, NETDEV_A_NAPI_DEFER_HARD_IRQS,
 			napi_defer_hard_irqs))
+		goto nla_put_failure;
+
+	irq_suspend_timeout = napi_get_irq_suspend_timeout(napi);
+	if (nla_put_uint(rsp, NETDEV_A_NAPI_IRQ_SUSPEND_TIMEOUT,
+			 irq_suspend_timeout))
 		goto nla_put_failure;
 
 	gro_flush_timeout = napi_get_gro_flush_timeout(napi);
@@ -226,22 +233,21 @@ int netdev_nl_napi_get_doit(struct sk_buff *skb, struct genl_info *info)
 	if (!rsp)
 		return -ENOMEM;
 
-	rtnl_lock();
-	rcu_read_lock();
-
-	napi = netdev_napi_by_id(genl_info_net(info), napi_id);
+	napi = netdev_napi_by_id_lock(genl_info_net(info), napi_id);
 	if (napi) {
 		err = netdev_nl_napi_fill_one(rsp, napi, info);
+		netdev_unlock(napi->dev);
 	} else {
 		NL_SET_BAD_ATTR(info->extack, info->attrs[NETDEV_A_NAPI_ID]);
 		err = -ENOENT;
 	}
 
-	rcu_read_unlock();
-	rtnl_unlock();
-
-	if (err)
+	if (err) {
 		goto err_free_msg;
+	} else if (!rsp->len) {
+		err = -ENOENT;
+		goto err_free_msg;
+	}
 
 	return genlmsg_reply(rsp, info);
 
@@ -258,10 +264,12 @@ netdev_nl_napi_dump_one(struct net_device *netdev, struct sk_buff *rsp,
 	struct napi_struct *napi;
 	int err = 0;
 
-	if (!(netdev->flags & IFF_UP))
+	if (!netdev->up)
 		return err;
 
 	list_for_each_entry(napi, &netdev->napi_list, dev_list) {
+		if (napi->napi_id < MIN_NAPI_ID)
+			continue;
 		if (ctx->napi_id && napi->napi_id >= ctx->napi_id)
 			continue;
 
@@ -285,22 +293,22 @@ int netdev_nl_napi_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 	if (info->attrs[NETDEV_A_NAPI_IFINDEX])
 		ifindex = nla_get_u32(info->attrs[NETDEV_A_NAPI_IFINDEX]);
 
-	rtnl_lock();
 	if (ifindex) {
-		netdev = __dev_get_by_index(net, ifindex);
-		if (netdev)
+		netdev = netdev_get_by_index_lock(net, ifindex);
+		if (netdev) {
 			err = netdev_nl_napi_dump_one(netdev, skb, info, ctx);
-		else
+			netdev_unlock(netdev);
+		} else {
 			err = -ENODEV;
+		}
 	} else {
-		for_each_netdev_dump(net, netdev, ctx->ifindex) {
+		for_each_netdev_lock_scoped(net, netdev, ctx->ifindex) {
 			err = netdev_nl_napi_dump_one(netdev, skb, info, ctx);
 			if (err < 0)
 				break;
 			ctx->napi_id = 0;
 		}
 	}
-	rtnl_unlock();
 
 	return err;
 }
@@ -308,12 +316,28 @@ int netdev_nl_napi_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 static int
 netdev_nl_napi_set_config(struct napi_struct *napi, struct genl_info *info)
 {
+	u64 irq_suspend_timeout = 0;
 	u64 gro_flush_timeout = 0;
+	u8 threaded = 0;
 	u32 defer = 0;
+
+	if (info->attrs[NETDEV_A_NAPI_THREADED]) {
+		int ret;
+
+		threaded = nla_get_uint(info->attrs[NETDEV_A_NAPI_THREADED]);
+		ret = napi_set_threaded(napi, threaded);
+		if (ret)
+			return ret;
+	}
 
 	if (info->attrs[NETDEV_A_NAPI_DEFER_HARD_IRQS]) {
 		defer = nla_get_u32(info->attrs[NETDEV_A_NAPI_DEFER_HARD_IRQS]);
 		napi_set_defer_hard_irqs(napi, defer);
+	}
+
+	if (info->attrs[NETDEV_A_NAPI_IRQ_SUSPEND_TIMEOUT]) {
+		irq_suspend_timeout = nla_get_uint(info->attrs[NETDEV_A_NAPI_IRQ_SUSPEND_TIMEOUT]);
+		napi_set_irq_suspend_timeout(napi, irq_suspend_timeout);
 	}
 
 	if (info->attrs[NETDEV_A_NAPI_GRO_FLUSH_TIMEOUT]) {
@@ -335,19 +359,14 @@ int netdev_nl_napi_set_doit(struct sk_buff *skb, struct genl_info *info)
 
 	napi_id = nla_get_u32(info->attrs[NETDEV_A_NAPI_ID]);
 
-	rtnl_lock();
-	rcu_read_lock();
-
-	napi = netdev_napi_by_id(genl_info_net(info), napi_id);
+	napi = netdev_napi_by_id_lock(genl_info_net(info), napi_id);
 	if (napi) {
 		err = netdev_nl_napi_set_config(napi, info);
+		netdev_unlock(napi->dev);
 	} else {
 		NL_SET_BAD_ATTR(info->extack, info->attrs[NETDEV_A_NAPI_ID]);
 		err = -ENOENT;
 	}
-
-	rcu_read_unlock();
-	rtnl_unlock();
 
 	return err;
 }
@@ -418,10 +437,10 @@ static int
 netdev_nl_queue_fill(struct sk_buff *rsp, struct net_device *netdev, u32 q_idx,
 		     u32 q_type, const struct genl_info *info)
 {
-	int err = 0;
+	int err;
 
-	if (!(netdev->flags & IFF_UP))
-		return err;
+	if (!netdev->up)
+		return -ENOENT;
 
 	err = netdev_nl_queue_validate(netdev, q_idx, q_type);
 	if (err)
@@ -450,15 +469,14 @@ int netdev_nl_queue_get_doit(struct sk_buff *skb, struct genl_info *info)
 	if (!rsp)
 		return -ENOMEM;
 
-	rtnl_lock();
-
-	netdev = __dev_get_by_index(genl_info_net(info), ifindex);
-	if (netdev)
+	netdev = netdev_get_by_index_lock_ops_compat(genl_info_net(info),
+						     ifindex);
+	if (netdev) {
 		err = netdev_nl_queue_fill(rsp, netdev, q_id, q_type, info);
-	else
+		netdev_unlock_ops_compat(netdev);
+	} else {
 		err = -ENODEV;
-
-	rtnl_unlock();
+	}
 
 	if (err)
 		goto err_free_msg;
@@ -476,24 +494,21 @@ netdev_nl_queue_dump_one(struct net_device *netdev, struct sk_buff *rsp,
 			 struct netdev_nl_dump_ctx *ctx)
 {
 	int err = 0;
-	int i;
 
-	if (!(netdev->flags & IFF_UP))
+	if (!netdev->up)
 		return err;
 
-	for (i = ctx->rxq_idx; i < netdev->real_num_rx_queues;) {
-		err = netdev_nl_queue_fill_one(rsp, netdev, i,
+	for (; ctx->rxq_idx < netdev->real_num_rx_queues; ctx->rxq_idx++) {
+		err = netdev_nl_queue_fill_one(rsp, netdev, ctx->rxq_idx,
 					       NETDEV_QUEUE_TYPE_RX, info);
 		if (err)
 			return err;
-		ctx->rxq_idx = i++;
 	}
-	for (i = ctx->txq_idx; i < netdev->real_num_tx_queues;) {
-		err = netdev_nl_queue_fill_one(rsp, netdev, i,
+	for (; ctx->txq_idx < netdev->real_num_tx_queues; ctx->txq_idx++) {
+		err = netdev_nl_queue_fill_one(rsp, netdev, ctx->txq_idx,
 					       NETDEV_QUEUE_TYPE_TX, info);
 		if (err)
 			return err;
-		ctx->txq_idx = i++;
 	}
 
 	return err;
@@ -511,15 +526,17 @@ int netdev_nl_queue_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 	if (info->attrs[NETDEV_A_QUEUE_IFINDEX])
 		ifindex = nla_get_u32(info->attrs[NETDEV_A_QUEUE_IFINDEX]);
 
-	rtnl_lock();
 	if (ifindex) {
-		netdev = __dev_get_by_index(net, ifindex);
-		if (netdev)
+		netdev = netdev_get_by_index_lock_ops_compat(net, ifindex);
+		if (netdev) {
 			err = netdev_nl_queue_dump_one(netdev, skb, info, ctx);
-		else
+			netdev_unlock_ops_compat(netdev);
+		} else {
 			err = -ENODEV;
+		}
 	} else {
-		for_each_netdev_dump(net, netdev, ctx->ifindex) {
+		for_each_netdev_lock_ops_compat_scoped(net, netdev,
+						       ctx->ifindex) {
 			err = netdev_nl_queue_dump_one(netdev, skb, info, ctx);
 			if (err < 0)
 				break;
@@ -527,7 +544,6 @@ int netdev_nl_queue_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 			ctx->txq_idx = 0;
 		}
 	}
-	rtnl_unlock();
 
 	return err;
 }
@@ -659,7 +675,7 @@ netdev_nl_stats_by_queue(struct net_device *netdev, struct sk_buff *rsp,
 					    i, info);
 		if (err)
 			return err;
-		ctx->rxq_idx = i++;
+		ctx->rxq_idx = ++i;
 	}
 	i = ctx->txq_idx;
 	while (ops->get_queue_stats_tx && i < netdev->real_num_tx_queues) {
@@ -667,7 +683,7 @@ netdev_nl_stats_by_queue(struct net_device *netdev, struct sk_buff *rsp,
 					    i, info);
 		if (err)
 			return err;
-		ctx->txq_idx = i++;
+		ctx->txq_idx = ++i;
 	}
 
 	ctx->rxq_idx = 0;
@@ -768,26 +784,31 @@ int netdev_nl_qstats_get_dumpit(struct sk_buff *skb,
 	if (info->attrs[NETDEV_A_QSTATS_IFINDEX])
 		ifindex = nla_get_u32(info->attrs[NETDEV_A_QSTATS_IFINDEX]);
 
-	rtnl_lock();
 	if (ifindex) {
-		netdev = __dev_get_by_index(net, ifindex);
-		if (netdev && netdev->stat_ops) {
+		netdev = netdev_get_by_index_lock_ops_compat(net, ifindex);
+		if (!netdev) {
+			NL_SET_BAD_ATTR(info->extack,
+					info->attrs[NETDEV_A_QSTATS_IFINDEX]);
+			return -ENODEV;
+		}
+		if (netdev->stat_ops) {
 			err = netdev_nl_qstats_get_dump_one(netdev, scope, skb,
 							    info, ctx);
 		} else {
 			NL_SET_BAD_ATTR(info->extack,
 					info->attrs[NETDEV_A_QSTATS_IFINDEX]);
-			err = netdev ? -EOPNOTSUPP : -ENODEV;
+			err = -EOPNOTSUPP;
 		}
-	} else {
-		for_each_netdev_dump(net, netdev, ctx->ifindex) {
-			err = netdev_nl_qstats_get_dump_one(netdev, scope, skb,
-							    info, ctx);
-			if (err < 0)
-				break;
-		}
+		netdev_unlock_ops_compat(netdev);
+		return err;
 	}
-	rtnl_unlock();
+
+	for_each_netdev_lock_ops_compat_scoped(net, netdev, ctx->ifindex) {
+		err = netdev_nl_qstats_get_dump_one(netdev, scope, skb,
+						    info, ctx);
+		if (err < 0)
+			break;
+	}
 
 	return err;
 }
@@ -796,8 +817,8 @@ int netdev_nl_bind_rx_doit(struct sk_buff *skb, struct genl_info *info)
 {
 	struct nlattr *tb[ARRAY_SIZE(netdev_queue_id_nl_policy)];
 	struct net_devmem_dmabuf_binding *binding;
-	struct list_head *sock_binding_list;
 	u32 ifindex, dmabuf_fd, rxq_idx;
+	struct netdev_nl_sock *priv;
 	struct net_device *netdev;
 	struct sk_buff *rsp;
 	struct nlattr *attr;
@@ -812,10 +833,9 @@ int netdev_nl_bind_rx_doit(struct sk_buff *skb, struct genl_info *info)
 	ifindex = nla_get_u32(info->attrs[NETDEV_A_DEV_IFINDEX]);
 	dmabuf_fd = nla_get_u32(info->attrs[NETDEV_A_DMABUF_FD]);
 
-	sock_binding_list = genl_sk_priv_get(&netdev_nl_family,
-					     NETLINK_CB(skb).sk);
-	if (IS_ERR(sock_binding_list))
-		return PTR_ERR(sock_binding_list);
+	priv = genl_sk_priv_get(&netdev_nl_family, NETLINK_CB(skb).sk);
+	if (IS_ERR(priv))
+		return PTR_ERR(priv);
 
 	rsp = genlmsg_new(GENLMSG_DEFAULT_SIZE, GFP_KERNEL);
 	if (!rsp)
@@ -827,11 +847,21 @@ int netdev_nl_bind_rx_doit(struct sk_buff *skb, struct genl_info *info)
 		goto err_genlmsg_free;
 	}
 
-	rtnl_lock();
+	mutex_lock(&priv->lock);
 
-	netdev = __dev_get_by_index(genl_info_net(info), ifindex);
-	if (!netdev || !netif_device_present(netdev)) {
+	err = 0;
+	netdev = netdev_get_by_index_lock(genl_info_net(info), ifindex);
+	if (!netdev) {
 		err = -ENODEV;
+		goto err_unlock_sock;
+	}
+	if (!netif_device_present(netdev))
+		err = -ENODEV;
+	else if (!netdev_need_ops_lock(netdev))
+		err = -EOPNOTSUPP;
+	if (err) {
+		NL_SET_BAD_ATTR(info->extack,
+				info->attrs[NETDEV_A_DEV_IFINDEX]);
 		goto err_unlock;
 	}
 
@@ -876,7 +906,7 @@ int netdev_nl_bind_rx_doit(struct sk_buff *skb, struct genl_info *info)
 			goto err_unbind;
 	}
 
-	list_add(&binding->list, sock_binding_list);
+	list_add(&binding->list, &priv->bindings);
 
 	nla_put_u32(rsp, NETDEV_A_DMABUF_ID, binding->id);
 	genlmsg_end(rsp, hdr);
@@ -885,34 +915,54 @@ int netdev_nl_bind_rx_doit(struct sk_buff *skb, struct genl_info *info)
 	if (err)
 		goto err_unbind;
 
-	rtnl_unlock();
+	netdev_unlock(netdev);
+
+	mutex_unlock(&priv->lock);
 
 	return 0;
 
 err_unbind:
 	net_devmem_unbind_dmabuf(binding);
 err_unlock:
-	rtnl_unlock();
+	netdev_unlock(netdev);
+err_unlock_sock:
+	mutex_unlock(&priv->lock);
 err_genlmsg_free:
 	nlmsg_free(rsp);
 	return err;
 }
 
-void netdev_nl_sock_priv_init(struct list_head *priv)
+void netdev_nl_sock_priv_init(struct netdev_nl_sock *priv)
 {
-	INIT_LIST_HEAD(priv);
+	INIT_LIST_HEAD(&priv->bindings);
+	mutex_init(&priv->lock);
 }
 
-void netdev_nl_sock_priv_destroy(struct list_head *priv)
+void netdev_nl_sock_priv_destroy(struct netdev_nl_sock *priv)
 {
 	struct net_devmem_dmabuf_binding *binding;
 	struct net_devmem_dmabuf_binding *temp;
+	netdevice_tracker dev_tracker;
+	struct net_device *dev;
 
-	list_for_each_entry_safe(binding, temp, priv, list) {
-		rtnl_lock();
+	mutex_lock(&priv->lock);
+	list_for_each_entry_safe(binding, temp, &priv->bindings, list) {
+		mutex_lock(&binding->lock);
+		dev = binding->dev;
+		if (!dev) {
+			mutex_unlock(&binding->lock);
+			net_devmem_unbind_dmabuf(binding);
+			continue;
+		}
+		netdev_hold(dev, &dev_tracker, GFP_KERNEL);
+		mutex_unlock(&binding->lock);
+
+		netdev_lock(dev);
 		net_devmem_unbind_dmabuf(binding);
-		rtnl_unlock();
+		netdev_unlock(dev);
+		netdev_put(dev, &dev_tracker);
 	}
+	mutex_unlock(&priv->lock);
 }
 
 static int netdev_genl_netdevice_event(struct notifier_block *nb,
@@ -922,10 +972,14 @@ static int netdev_genl_netdevice_event(struct notifier_block *nb,
 
 	switch (event) {
 	case NETDEV_REGISTER:
+		netdev_lock_ops_to_full(netdev);
 		netdev_genl_dev_notify(netdev, NETDEV_CMD_DEV_ADD_NTF);
+		netdev_unlock_full_to_ops(netdev);
 		break;
 	case NETDEV_UNREGISTER:
+		netdev_lock(netdev);
 		netdev_genl_dev_notify(netdev, NETDEV_CMD_DEV_DEL_NTF);
+		netdev_unlock(netdev);
 		break;
 	case NETDEV_XDP_FEAT_CHANGE:
 		netdev_genl_dev_notify(netdev, NETDEV_CMD_DEV_CHANGE_NTF);

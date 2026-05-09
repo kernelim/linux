@@ -461,7 +461,7 @@ static int bmac_suspend(struct macio_dev *mdev, pm_message_t state)
 	/* prolly should wait for dma to finish & turn off the chip */
 	spin_lock_irqsave(&bp->lock, flags);
 	if (bp->timeout_active) {
-		del_timer(&bp->tx_timeout);
+		timer_delete(&bp->tx_timeout);
 		bp->timeout_active = 0;
 	}
 	disable_irq(dev->irq);
@@ -546,7 +546,7 @@ static inline void bmac_set_timeout(struct net_device *dev)
 
 	spin_lock_irqsave(&bp->lock, flags);
 	if (bp->timeout_active)
-		del_timer(&bp->tx_timeout);
+		timer_delete(&bp->tx_timeout);
 	bp->tx_timeout.expires = jiffies + TX_TIMEOUT;
 	add_timer(&bp->tx_timeout);
 	bp->timeout_active = 1;
@@ -755,7 +755,7 @@ static irqreturn_t bmac_txdma_intr(int irq, void *dev_id)
 		XXDEBUG(("bmac_txdma_intr\n"));
 	}
 
-	/*     del_timer(&bp->tx_timeout); */
+	/*     timer_delete(&bp->tx_timeout); */
 	/*     bp->timeout_active = 0; */
 
 	while (1) {
@@ -1466,7 +1466,7 @@ bmac_output(struct sk_buff *skb, struct net_device *dev)
 
 static void bmac_tx_timeout(struct timer_list *t)
 {
-	struct bmac_data *bp = from_timer(bp, t, tx_timeout);
+	struct bmac_data *bp = timer_container_of(bp, t, tx_timeout);
 	struct net_device *dev = macio_get_drvdata(bp->mdev);
 	volatile struct dbdma_regs __iomem *td = bp->tx_dma;
 	volatile struct dbdma_regs __iomem *rd = bp->rx_dma;

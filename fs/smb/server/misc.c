@@ -164,8 +164,10 @@ char *convert_to_nt_pathname(struct ksmbd_share_config *share,
 {
 	char *pathname, *ab_pathname, *nt_pathname;
 	int share_path_len = share->path_sz;
+	size_t ab_pathname_len;
+	int prefix;
 
-	pathname = kmalloc(PATH_MAX, GFP_KERNEL);
+	pathname = kmalloc(PATH_MAX, KSMBD_DEFAULT_GFP);
 	if (!pathname)
 		return ERR_PTR(-EACCES);
 
@@ -180,14 +182,18 @@ char *convert_to_nt_pathname(struct ksmbd_share_config *share,
 		goto free_pathname;
 	}
 
-	nt_pathname = kzalloc(strlen(&ab_pathname[share_path_len]) + 2, GFP_KERNEL);
+	ab_pathname_len = strlen(&ab_pathname[share_path_len]);
+	prefix = ab_pathname[share_path_len] == '\0' ? 1 : 0;
+	nt_pathname = kmalloc(prefix + ab_pathname_len + 1, KSMBD_DEFAULT_GFP);
 	if (!nt_pathname) {
 		nt_pathname = ERR_PTR(-ENOMEM);
 		goto free_pathname;
 	}
-	if (ab_pathname[share_path_len] == '\0')
-		strcpy(nt_pathname, "/");
-	strcat(nt_pathname, &ab_pathname[share_path_len]);
+
+	if (prefix)
+		*nt_pathname = '/';
+	memcpy(nt_pathname + prefix, &ab_pathname[share_path_len],
+	       ab_pathname_len + 1);
 
 	ksmbd_conv_path_to_windows(nt_pathname);
 
@@ -232,7 +238,7 @@ char *ksmbd_casefold_sharename(struct unicode_map *um, const char *name)
 	char *cf_name;
 	int cf_len;
 
-	cf_name = kzalloc(KSMBD_REQ_MAX_SHARE_NAME, GFP_KERNEL);
+	cf_name = kzalloc(KSMBD_REQ_MAX_SHARE_NAME, KSMBD_DEFAULT_GFP);
 	if (!cf_name)
 		return ERR_PTR(-ENOMEM);
 
@@ -294,7 +300,7 @@ char *convert_to_unix_name(struct ksmbd_share_config *share, const char *name)
 
 	path_len = share->path_sz;
 	name_len = strlen(name);
-	new_name = kmalloc(path_len + name_len + 2, GFP_KERNEL);
+	new_name = kmalloc(path_len + name_len + 2, KSMBD_DEFAULT_GFP);
 	if (!new_name)
 		return new_name;
 
@@ -320,7 +326,7 @@ char *ksmbd_convert_dir_info_name(struct ksmbd_dir_info *d_info,
 	if (!sz)
 		return NULL;
 
-	conv = kmalloc(sz, GFP_KERNEL);
+	conv = kmalloc(sz, KSMBD_DEFAULT_GFP);
 	if (!conv)
 		return NULL;
 

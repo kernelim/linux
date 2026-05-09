@@ -69,7 +69,8 @@ srmcons_do_receive_chars(struct tty_port *port)
 static void
 srmcons_receive_chars(struct timer_list *t)
 {
-	struct srmcons_private *srmconsp = from_timer(srmconsp, t, timer);
+	struct srmcons_private *srmconsp = timer_container_of(srmconsp, t,
+							      timer);
 	struct tty_port *port = &srmconsp->port;
 	unsigned long flags;
 	int incr = 10;
@@ -177,7 +178,7 @@ srmcons_close(struct tty_struct *tty, struct file *filp)
 
 	if (tty->count == 1) {
 		port->tty = NULL;
-		del_timer(&srmconsp->timer);
+		timer_delete(&srmconsp->timer);
 	}
 
 	spin_unlock_irqrestore(&port->lock, flags);

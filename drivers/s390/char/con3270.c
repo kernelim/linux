@@ -523,7 +523,7 @@ static void tty3270_update_lines_all(struct tty3270 *tp, struct raw3270_request 
  */
 static void tty3270_update(struct timer_list *t)
 {
-	struct tty3270 *tp = from_timer(tp, t, timer);
+	struct tty3270 *tp = timer_container_of(tp, t, timer);
 	struct raw3270_request *wrq;
 	u8 cmd = TC_WRITE;
 	int rc, len;
@@ -792,7 +792,7 @@ static void tty3270_deactivate(struct raw3270_view *view)
 {
 	struct tty3270 *tp = container_of(view, struct tty3270, view);
 
-	del_timer(&tp->timer);
+	timer_delete(&tp->timer);
 }
 
 static void tty3270_irq(struct tty3270 *tp, struct raw3270_request *rq, struct irb *irb)
@@ -1059,7 +1059,7 @@ static void tty3270_free(struct raw3270_view *view)
 {
 	struct tty3270 *tp = container_of(view, struct tty3270, view);
 
-	del_timer_sync(&tp->timer);
+	timer_delete_sync(&tp->timer);
 	tty3270_free_screen(tp->screen, tp->allocated_lines);
 	free_page((unsigned long)tp->converted_line);
 	kfree(tp->input);

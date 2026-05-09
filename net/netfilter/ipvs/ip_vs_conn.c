@@ -822,7 +822,7 @@ static void ip_vs_conn_rcu_free(struct rcu_head *head)
 /* Try to delete connection while not holding reference */
 static void ip_vs_conn_del(struct ip_vs_conn *cp)
 {
-	if (del_timer(&cp->timer)) {
+	if (timer_delete(&cp->timer)) {
 		/* Drop cp->control chain too */
 		if (cp->control)
 			cp->timeout = 0;
@@ -833,7 +833,7 @@ static void ip_vs_conn_del(struct ip_vs_conn *cp)
 /* Try to delete connection while holding reference */
 static void ip_vs_conn_del_put(struct ip_vs_conn *cp)
 {
-	if (del_timer(&cp->timer)) {
+	if (timer_delete(&cp->timer)) {
 		/* Drop cp->control chain too */
 		if (cp->control)
 			cp->timeout = 0;
@@ -846,7 +846,7 @@ static void ip_vs_conn_del_put(struct ip_vs_conn *cp)
 
 static void ip_vs_conn_expire(struct timer_list *t)
 {
-	struct ip_vs_conn *cp = from_timer(cp, t, timer);
+	struct ip_vs_conn *cp = timer_container_of(cp, t, timer);
 	struct netns_ipvs *ipvs = cp->ipvs;
 
 	/*
@@ -860,7 +860,7 @@ static void ip_vs_conn_expire(struct timer_list *t)
 		struct ip_vs_conn *ct = cp->control;
 
 		/* delete the timer if it is activated by other users */
-		del_timer(&cp->timer);
+		timer_delete(&cp->timer);
 
 		/* does anybody control me? */
 		if (ct) {
@@ -885,7 +885,7 @@ static void ip_vs_conn_expire(struct timer_list *t)
 			 * conntrack cleanup for the net.
 			 */
 			smp_rmb();
-			if (ipvs->enable)
+			if (READ_ONCE(ipvs->enable))
 				ip_vs_conn_drop_conntrack(cp);
 		}
 
@@ -926,7 +926,7 @@ static void ip_vs_conn_expire(struct timer_list *t)
 void ip_vs_conn_expire_now(struct ip_vs_conn *cp)
 {
 	/* Using mod_timer_pending will ensure the timer is not
-	 * modified after the final del_timer in ip_vs_conn_expire.
+	 * modified after the final timer_delete in ip_vs_conn_expire.
 	 */
 	if (timer_pending(&cp->timer) &&
 	    time_after(cp->timer.expires, jiffies))
@@ -1439,7 +1439,7 @@ void ip_vs_expire_nodest_conn_flush(struct netns_ipvs *ipvs)
 		cond_resched_rcu();
 
 		/* netns clean up started, abort delayed work */
-		if (!ipvs->enable)
+		if (!READ_ONCE(ipvs->enable))
 			break;
 	}
 	rcu_read_unlock();
@@ -1501,8 +1501,8 @@ int __init ip_vs_conn_init(void)
 	max_avail -= 2;		/* ~4 in hash row */
 	max_avail -= 1;		/* IPVS up to 1/2 of mem */
 	max_avail -= order_base_2(sizeof(struct ip_vs_conn));
-	max = clamp(max, min, max_avail);
-	ip_vs_conn_tab_bits = clamp_val(ip_vs_conn_tab_bits, min, max);
+	max = clamp(max_avail, min, max);
+	ip_vs_conn_tab_bits = clamp(ip_vs_conn_tab_bits, min, max);
 	ip_vs_conn_tab_size = 1 << ip_vs_conn_tab_bits;
 	ip_vs_conn_tab_mask = ip_vs_conn_tab_size - 1;
 

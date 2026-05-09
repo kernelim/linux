@@ -190,7 +190,7 @@ int sctp_rcv(struct sk_buff *skb)
 		goto discard_release;
 	nf_reset_ct(skb);
 
-	if (sk_filter(sk, skb))
+	if (sk_filter(sk, skb) || skb->len < sizeof(struct sctp_chunkhdr))
 		goto discard_release;
 
 	/* Create an SCTP packet structure. */
@@ -446,7 +446,7 @@ void sctp_icmp_proto_unreachable(struct sock *sk,
 		pr_debug("%s: unrecognized next header type "
 			 "encountered!\n", __func__);
 
-		if (del_timer(&t->proto_unreach_timer))
+		if (timer_delete(&t->proto_unreach_timer))
 			sctp_transport_put(t);
 
 		sctp_do_sm(net, SCTP_EVENT_T_OTHER,

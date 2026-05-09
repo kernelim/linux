@@ -192,8 +192,8 @@ int txgbe_setup_misc_irq(struct txgbe *txgbe)
 	int hwirq, err;
 
 	txgbe->misc.nirqs = 2;
-	txgbe->misc.domain = irq_domain_add_simple(NULL, txgbe->misc.nirqs, 0,
-						   &txgbe_misc_irq_domain_ops, txgbe);
+	txgbe->misc.domain = irq_domain_create_simple(NULL, txgbe->misc.nirqs, 0,
+						      &txgbe_misc_irq_domain_ops, txgbe);
 	if (!txgbe->misc.domain)
 		return -ENOMEM;
 

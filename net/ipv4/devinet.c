@@ -123,7 +123,7 @@ static struct hlist_head inet_addr_lst[IN4_ADDR_HSIZE];
 
 static u32 inet_addr_hash(const struct net *net, __be32 addr)
 {
-	u32 val = (__force u32) addr ^ net_hash_mix(net);
+	u32 val = __ipv4_addr_hash(addr, net_hash_mix(net));
 
 	return hash_32(val, IN4_ADDR_HSIZE_SHIFT);
 }
@@ -292,7 +292,7 @@ static struct in_device *inetdev_init(struct net_device *dev)
 	if (!in_dev->arp_parms)
 		goto out_kfree;
 	if (IPV4_DEVCONF(in_dev->cnf, FORWARDING))
-		dev_disable_lro(dev);
+		netif_disable_lro(dev);
 	/* Reference in_dev->dev */
 	netdev_hold(dev, &in_dev->dev_tracker, GFP_KERNEL);
 	/* Account for reference dev->ip_ptr (below) */
@@ -351,14 +351,13 @@ static void inetdev_destroy(struct in_device *in_dev)
 
 static int __init inet_blackhole_dev_init(void)
 {
-	int err = 0;
+	struct in_device *in_dev;
 
 	rtnl_lock();
-	if (!inetdev_init(blackhole_netdev))
-		err = -ENOMEM;
+	in_dev = inetdev_init(blackhole_netdev);
 	rtnl_unlock();
 
-	return err;
+	return PTR_ERR_OR_ZERO(in_dev);
 }
 late_initcall(inet_blackhole_dev_init);
 

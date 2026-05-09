@@ -1,3 +1,3 @@
-#1-
-0x601105c6	pci_request_regions	vmlinux	EXPORT_SYMBOL	
+#2-
+0x84c41f43	pci_request_regions	vmlinux	EXPORT_SYMBOL	
 

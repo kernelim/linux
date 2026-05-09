@@ -762,9 +762,6 @@ static int nxp_c45_perout_enable(struct nxp_c45_phy *priv,
 	struct phy_device *phydev = priv->phydev;
 	int pin;
 
-	if (perout->flags & ~PTP_PEROUT_PHASE)
-		return -EOPNOTSUPP;
-
 	pin = ptp_find_pin(priv->ptp_clock, PTP_PF_PEROUT, perout->index);
 	if (pin < 0)
 		return pin;
@@ -859,12 +856,6 @@ static int nxp_c45_extts_enable(struct nxp_c45_phy *priv,
 {
 	const struct nxp_c45_phy_data *data = nxp_c45_get_data(priv->phydev);
 	int pin;
-
-	if (extts->flags & ~(PTP_ENABLE_FEATURE |
-			      PTP_RISING_EDGE |
-			      PTP_FALLING_EDGE |
-			      PTP_STRICT_FLAGS))
-		return -EOPNOTSUPP;
 
 	/* Sampling on both edges is not supported */
 	if ((extts->flags & PTP_RISING_EDGE) &&
@@ -961,6 +952,10 @@ static int nxp_c45_init_ptp_clock(struct nxp_c45_phy *priv)
 		.n_pins		= ARRAY_SIZE(nxp_c45_ptp_pins),
 		.n_ext_ts	= 1,
 		.n_per_out	= 1,
+		.supported_extts_flags = PTP_RISING_EDGE |
+					 PTP_FALLING_EDGE |
+					 PTP_STRICT_FLAGS,
+		.supported_perout_flags = PTP_PEROUT_PHASE,
 	};
 
 	priv->ptp_clock = ptp_clock_register(&priv->caps,
@@ -1017,9 +1012,22 @@ static bool nxp_c45_rxtstamp(struct mii_timestamper *mii_ts,
 	return true;
 }
 
-static int nxp_c45_hwtstamp(struct mii_timestamper *mii_ts,
-			    struct kernel_hwtstamp_config *cfg,
-			    struct netlink_ext_ack *extack)
+static int nxp_c45_hwtstamp_get(struct mii_timestamper *mii_ts,
+				struct kernel_hwtstamp_config *cfg)
+{
+	struct nxp_c45_phy *priv = container_of(mii_ts, struct nxp_c45_phy,
+						mii_ts);
+
+	cfg->tx_type = priv->hwts_tx;
+	cfg->rx_filter = priv->hwts_rx ? HWTSTAMP_FILTER_PTP_V2_L2_EVENT
+				       : HWTSTAMP_FILTER_NONE;
+
+	return 0;
+}
+
+static int nxp_c45_hwtstamp_set(struct mii_timestamper *mii_ts,
+				struct kernel_hwtstamp_config *cfg,
+				struct netlink_ext_ack *extack)
 {
 	struct nxp_c45_phy *priv = container_of(mii_ts, struct nxp_c45_phy,
 						mii_ts);
@@ -1754,7 +1762,8 @@ static int nxp_c45_probe(struct phy_device *phydev)
 	    IS_ENABLED(CONFIG_NETWORK_PHY_TIMESTAMPING)) {
 		priv->mii_ts.rxtstamp = nxp_c45_rxtstamp;
 		priv->mii_ts.txtstamp = nxp_c45_txtstamp;
-		priv->mii_ts.hwtstamp = nxp_c45_hwtstamp;
+		priv->mii_ts.hwtstamp_set = nxp_c45_hwtstamp_set;
+		priv->mii_ts.hwtstamp_get = nxp_c45_hwtstamp_get;
 		priv->mii_ts.ts_info = nxp_c45_ts_info;
 		phydev->mii_ts = &priv->mii_ts;
 		ret = nxp_c45_init_ptp_clock(priv);
@@ -1970,24 +1979,27 @@ static int nxp_c45_macsec_ability(struct phy_device *phydev)
 	return macsec_ability;
 }
 
+static bool tja11xx_phy_id_compare(struct phy_device *phydev,
+				   const struct phy_driver *phydrv)
+{
+	u32 id = phydev->is_c45 ? phydev->c45_ids.device_ids[MDIO_MMD_PMAPMD] :
+				  phydev->phy_id;
+
+	return phy_id_compare(id, phydrv->phy_id, phydrv->phy_id_mask);
+}
+
 static int tja11xx_no_macsec_match_phy_device(struct phy_device *phydev,
 					      const struct phy_driver *phydrv)
 {
-	if (!phy_id_compare(phydev->phy_id, phydrv->phy_id,
-			    phydrv->phy_id_mask))
-		return 0;
-
-	return !nxp_c45_macsec_ability(phydev);
+	return tja11xx_phy_id_compare(phydev, phydrv) &&
+	       !nxp_c45_macsec_ability(phydev);
 }
 
 static int tja11xx_macsec_match_phy_device(struct phy_device *phydev,
 					   const struct phy_driver *phydrv)
 {
-	if (!phy_id_compare(phydev->phy_id, phydrv->phy_id,
-			    phydrv->phy_id_mask))
-		return 0;
-
-	return nxp_c45_macsec_ability(phydev);
+	return tja11xx_phy_id_compare(phydev, phydrv) &&
+	       nxp_c45_macsec_ability(phydev);
 }
 
 static const struct nxp_c45_regmap tja1120_regmap = {

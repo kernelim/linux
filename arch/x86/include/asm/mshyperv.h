@@ -111,12 +111,6 @@ static inline u64 hv_do_hypercall(u64 control, void *input, void *output)
 	return hv_status;
 }
 
-/* Hypercall to the L0 hypervisor */
-static inline u64 hv_do_nested_hypercall(u64 control, void *input, void *output)
-{
-	return hv_do_hypercall(control | HV_HYPERCALL_NESTED, input, output);
-}
-
 /* Fast hypercall with 8 bytes of input and no output */
 static inline u64 _hv_do_fast_hypercall8(u64 control, u64 input1)
 {
@@ -160,13 +154,6 @@ static inline u64 _hv_do_fast_hypercall8(u64 control, u64 input1)
 static inline u64 hv_do_fast_hypercall8(u16 code, u64 input1)
 {
 	u64 control = (u64)code | HV_HYPERCALL_FAST_BIT;
-
-	return _hv_do_fast_hypercall8(control, input1);
-}
-
-static inline u64 hv_do_fast_nested_hypercall8(u16 code, u64 input1)
-{
-	u64 control = (u64)code | HV_HYPERCALL_FAST_BIT | HV_HYPERCALL_NESTED;
 
 	return _hv_do_fast_hypercall8(control, input1);
 }
@@ -222,13 +209,6 @@ static inline u64 hv_do_fast_hypercall16(u16 code, u64 input1, u64 input2)
 	return _hv_do_fast_hypercall16(control, input1, input2);
 }
 
-static inline u64 hv_do_fast_nested_hypercall16(u16 code, u64 input1, u64 input2)
-{
-	u64 control = (u64)code | HV_HYPERCALL_FAST_BIT | HV_HYPERCALL_NESTED;
-
-	return _hv_do_fast_hypercall16(control, input1, input2);
-}
-
 extern struct hv_vp_assist_page **hv_vp_assist_page;
 
 static inline struct hv_vp_assist_page *hv_get_vp_assist_page(unsigned int cpu)
@@ -250,6 +230,8 @@ int hyperv_flush_guest_mapping_range(u64 as,
 int hyperv_fill_flush_guest_mapping_list(
 		struct hv_guest_mapping_flush_list *flush,
 		u64 start_gfn, u64 end_gfn);
+void hv_sleep_notifiers_register(void);
+void hv_machine_power_off(void);
 
 #ifdef CONFIG_X86_64
 void hv_apic_init(void);
@@ -261,6 +243,8 @@ static inline void hv_apic_init(void) {}
 
 struct irq_domain *hv_create_pci_msi_domain(void);
 
+int hv_map_msi_interrupt(struct irq_data *data,
+			 struct hv_interrupt_entry *out_entry);
 int hv_map_ioapic_interrupt(int ioapic_id, bool level, int vcpu, int vector,
 		struct hv_interrupt_entry *entry);
 int hv_unmap_ioapic_interrupt(int ioapic_id, struct hv_interrupt_entry *entry);

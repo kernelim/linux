@@ -231,7 +231,7 @@ void BPF_STRUCT_OPS(qmap_enqueue, struct task_struct *p, u64 enq_flags)
 	}
 
 	/* if select_cpu() wasn't called, try direct dispatch */
-	if (!(enq_flags & SCX_ENQ_CPU_SELECTED) &&
+	if (!__COMPAT_is_enq_cpu_selected(enq_flags) &&
 	    (cpu = pick_direct_dispatch_cpu(p, scx_bpf_task_cpu(p))) >= 0) {
 		__sync_fetch_and_add(&nr_ddsp_from_enq, 1);
 		scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL_ON | cpu, slice_ns, enq_flags);
@@ -615,6 +615,26 @@ void BPF_STRUCT_OPS(qmap_dump_task, struct scx_dump_ctx *dctx, struct task_struc
 		     taskc->force_local, taskc->core_sched_seq);
 }
 
+s32 BPF_STRUCT_OPS(qmap_cgroup_init, struct cgroup *cgrp, struct scx_cgroup_init_args *args)
+{
+	bpf_printk("CGRP INIT %llu weight=%u period=%lu quota=%ld burst=%lu",
+		   cgrp->kn->id, args->weight, args->bw_period_us,
+		   args->bw_quota_us, args->bw_burst_us);
+	return 0;
+}
+
+void BPF_STRUCT_OPS(qmap_cgroup_set_weight, struct cgroup *cgrp, u32 weight)
+{
+	bpf_printk("CGRP SET %llu weight=%u", cgrp->kn->id, weight);
+}
+
+void BPF_STRUCT_OPS(qmap_cgroup_set_bandwidth, struct cgroup *cgrp,
+		    u64 period_us, u64 quota_us, u64 burst_us)
+{
+	bpf_printk("CGRP SET %llu period=%lu quota=%ld burst=%lu", cgrp->kn->id,
+		   period_us, quota_us, burst_us);
+}
+
 /*
  * Print out the online and possible CPU map using bpf_printk() as a
  * demonstration of using the cpumask kfuncs and ops.cpu_on/offline().
@@ -763,6 +783,8 @@ static void dump_shared_dsq(void)
 
 static int monitor_timerfn(void *map, int *key, struct bpf_timer *timer)
 {
+	struct scx_event_stats events;
+
 	bpf_rcu_read_lock();
 	dispatch_highpri(true);
 	bpf_rcu_read_unlock();
@@ -771,6 +793,25 @@ static int monitor_timerfn(void *map, int *key, struct bpf_timer *timer)
 
 	if (print_shared_dsq)
 		dump_shared_dsq();
+
+	__COMPAT_scx_bpf_events(&events, sizeof(events));
+
+	bpf_printk("%35s: %lld", "SCX_EV_SELECT_CPU_FALLBACK",
+		   scx_read_event(&events, SCX_EV_SELECT_CPU_FALLBACK));
+	bpf_printk("%35s: %lld", "SCX_EV_DISPATCH_LOCAL_DSQ_OFFLINE",
+		   scx_read_event(&events, SCX_EV_DISPATCH_LOCAL_DSQ_OFFLINE));
+	bpf_printk("%35s: %lld", "SCX_EV_DISPATCH_KEEP_LAST",
+		   scx_read_event(&events, SCX_EV_DISPATCH_KEEP_LAST));
+	bpf_printk("%35s: %lld", "SCX_EV_ENQ_SKIP_EXITING",
+		   scx_read_event(&events, SCX_EV_ENQ_SKIP_EXITING));
+	bpf_printk("%35s: %lld", "SCX_EV_REFILL_SLICE_DFL",
+		   scx_read_event(&events, SCX_EV_REFILL_SLICE_DFL));
+	bpf_printk("%35s: %lld", "SCX_EV_BYPASS_DURATION",
+		   scx_read_event(&events, SCX_EV_BYPASS_DURATION));
+	bpf_printk("%35s: %lld", "SCX_EV_BYPASS_DISPATCH",
+		   scx_read_event(&events, SCX_EV_BYPASS_DISPATCH));
+	bpf_printk("%35s: %lld", "SCX_EV_BYPASS_ACTIVATE",
+		   scx_read_event(&events, SCX_EV_BYPASS_ACTIVATE));
 
 	bpf_timer_start(timer, ONE_SEC_IN_NS, 0);
 	return 0;
@@ -819,6 +860,9 @@ SCX_OPS_DEFINE(qmap_ops,
 	       .dump			= (void *)qmap_dump,
 	       .dump_cpu		= (void *)qmap_dump_cpu,
 	       .dump_task		= (void *)qmap_dump_task,
+	       .cgroup_init		= (void *)qmap_cgroup_init,
+	       .cgroup_set_weight	= (void *)qmap_cgroup_set_weight,
+	       .cgroup_set_bandwidth	= (void *)qmap_cgroup_set_bandwidth,
 	       .cpu_online		= (void *)qmap_cpu_online,
 	       .cpu_offline		= (void *)qmap_cpu_offline,
 	       .init			= (void *)qmap_init,

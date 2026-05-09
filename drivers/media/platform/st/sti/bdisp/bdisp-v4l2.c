@@ -35,6 +35,11 @@
 
 #define fh_to_ctx(__fh) container_of(__fh, struct bdisp_ctx, fh)
 
+static inline struct bdisp_ctx *file_to_ctx(struct file *filp)
+{
+	return fh_to_ctx(file_to_v4l2_fh(filp));
+}
+
 enum bdisp_dev_flags {
 	ST_M2M_OPEN,            /* Driver opened */
 	ST_M2M_RUNNING,         /* HW device running */
@@ -603,8 +608,7 @@ static int bdisp_open(struct file *file)
 
 	/* Use separate control handler per file handle */
 	ctx->fh.ctrl_handler = &ctx->ctrl_handler;
-	file->private_data = &ctx->fh;
-	v4l2_fh_add(&ctx->fh);
+	v4l2_fh_add(&ctx->fh, file);
 
 	/* Default format */
 	ctx->src = bdisp_dflt_fmt;
@@ -630,7 +634,7 @@ static int bdisp_open(struct file *file)
 
 error_ctrls:
 	bdisp_ctrls_delete(ctx);
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 error_fh:
 	v4l2_fh_exit(&ctx->fh);
 	bdisp_hw_free_nodes(ctx);
@@ -644,7 +648,7 @@ unlock:
 
 static int bdisp_release(struct file *file)
 {
-	struct bdisp_ctx *ctx = fh_to_ctx(file->private_data);
+	struct bdisp_ctx *ctx = file_to_ctx(file);
 	struct bdisp_dev *bdisp = ctx->bdisp_dev;
 
 	dev_dbg(bdisp->dev, "%s\n", __func__);
@@ -655,7 +659,7 @@ static int bdisp_release(struct file *file)
 
 	bdisp_ctrls_delete(ctx);
 
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 
 	if (--bdisp->m2m.refcnt <= 0)

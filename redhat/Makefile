@@ -57,15 +57,22 @@ ifneq ($(SPECGEMINI),0)
   SPECKEXTRAVERSION:=
 endif
 
-# When building kernel-automotive, set AUTOMOTIVE_BUILD=1.
+# When building the automotive kernel package, set AUTOMOTIVE_BUILD=1.
 ifeq ($(AUTOMOTIVE_BUILD), 1)
-  SPECPACKAGE_NAME:=kernel-automotive
-  DIST:=.el$(RHEL_MAJOR)iv
+  SPECPACKAGE_NAME:=$(AUTOMOTIVE_PKG_NAME)
+  DIST:=$(AUTOMOTIVE_PKG_DIST)
 endif
 
 GITID:= $(shell $(GIT) log --max-count=1 --pretty=format:%H $(HEAD))
+
+# Derivative kernel version elements used in the package NVR
+# If a 'dot' or any other separator is required, include it in DERIVATIVE_TAG.
+ifeq ("$(DERIVATIVE_STREAM)", "yes")
+  DERIVATIVE_VERSION:=$(DERIVATIVE_TAG).$(DERIVATIVE_BUILD)
+endif
+
 ifndef RHSELFTESTDATA
-  BUILD:=$(RHEL_RELEASE)
+  BUILD:=$(RHEL_RELEASE)$(DERIVATIVE_VERSION)
 endif
 FLAVOR=
 CURARCH := $(shell uname -m)
@@ -349,10 +356,10 @@ else
   RHPKG_BIN:=rhpkg
 endif
 
-# When building kernel-automotive, set AUTOMOTIVE_BUILD=1.
+# When building the automotive kernel package, set AUTOMOTIVE_BUILD=1.
 ifeq ($(AUTOMOTIVE_BUILD), 1)
   ifeq ("$(DISTRO)", "rhel")
-    RHDISTGIT_BRANCH:=rhivos-$(AUTOMOTIVE_MAJOR).$(AUTOMOTIVE_MINOR).0
+    RHDISTGIT_BRANCH:=rhivos-$(AUTOMOTIVE_MAJOR).$(AUTOMOTIVE_MINOR)
     RHPKG_BIN:=rhpkg
     RHPKG_NS:=
     RHPKG_OPTS:=
@@ -407,14 +414,11 @@ ifeq ("$(ZSTREAM)", "yes")
   BUILDOPTS += +kabidupchk
 else
   ZSTREAM_FLAG = no
-  ifeq ("$(EARLY_YSTREAM)", "yes")
-    YSTREAM_FLAG = early
-  else
-    YSTREAM_FLAG = yes
-  endif
+  YSTREAM_FLAG = yes
 endif
 
 include Makefile.cross
+include Makefile.exports
 
 #
 # Targets
@@ -706,6 +710,9 @@ dist-get-buildreqs: setup-source
 # recipes may be ordered before/in parallel with dist-clean-sources
 # (prerequisite of setup-source), which would then delete their results.
 setup-source: dist-clean-sources dist-git-version-check
+	@if [ "$(SPECPACKAGE_REBUILD)" = "1" ]; then \
+		$(REDHAT)/scripts/generate-rebuild-changelog.sh; \
+	fi
 	@if [ ! -e $(REDHAT)/$(SPECFILE).template ]; then \
 		echo "Creating $(REDHAT)/$(SPECFILE).template as a copy of $(REDHAT)/kernel.spec.template"; \
 		cp $(REDHAT)/kernel.spec.template $(REDHAT)/$(SPECFILE).template; \
@@ -768,13 +775,13 @@ sources-rh: $(TARBALL) $(KABI_TARBALL) $(KABIDW_TARBALL) generate-testpatch-tmp 
 		../Makefile.rhelver \
 		README.rst \
 		kernel-local \
+		kernel.sbat.template \
 		dracut-virt.conf \
 		keys/redhatsecureboot504.cer \
 		uki.sbat.template \
 		uki-addons.sbat.template \
 		$(SOURCES)/
 	@changelog_glob="$(SPECPACKAGE_NAME).changelog-*"; \
-	[[ -n "$(AUTOMOTIVE_BUILD)" ]] && changelog_glob="kernel.changelog-*"; \
 	cat $$(ls -1 $$changelog_glob | sort -V -r) \
 		> $(SOURCES)/$(SPECPACKAGE_NAME).changelog
 	cp keys/redhatsecureboot{501,ca5}.cer $(SOURCES)/;
@@ -820,13 +827,13 @@ dist-perf: dist-sources do-rpmbuild
 dist-rpm-baseonly: RPMBUILDOPTS=--target $(MACH) --without debug --without debuginfo --without vdso_install --without bpftool --without perf --without tools -bb
 dist-rpm-baseonly: dist-sources do-rpmbuild
 
-# unless you know what you're doing, you don't want to use the next four ones
+# dist-release related targets are used by the kernel maintainer team
 dist-release-finish: setup-source
 	@cp $(SOURCES)/$(SPECCHANGELOG) $(REDHAT)/$(SPECCHANGELOG)
 	@echo $(MARKER) > $(REDHAT)/marker
 	@$(GIT) add $(REDHAT)/$(SPECCHANGELOG)
 	@$(GIT) add $(REDHAT)/marker
-	@$(GIT) commit -s ../Makefile.rhelver $(REDHAT)/marker $(REDHAT)/$(SPECCHANGELOG) $(SPECFILE).template -m "[redhat] $(DISTRELEASETAG)"
+	@$(GIT) commit -s ../Makefile.rhelver $(REDHAT)/marker $(REDHAT)/$(SPECCHANGELOG) -m "[redhat] $(DISTRELEASETAG)"
 dist-release-changed:
 	@CLOGF="$$(mktemp)"; \
 	trap 'rm -f "$$CLOGF"' SIGHUP SIGINT SIGTERM EXIT; \
@@ -835,7 +842,9 @@ dist-release-changed:
 		   [ "$$(wc -l $$CLOGF | cut -d ' ' -f 1)" -le 3 ]; then \
 			echo "Nothing changed, skipping updates"; \
 		else \
-			$(REDHAT)/scripts/new_release.sh; \
+			if [ "$(BUMP_RELEASE)" == "yes" ]; then \
+				$(REDHAT)/scripts/new_release.sh; \
+			fi; \
 			$(MAKE) dist-release-finish; \
 		fi \
 	else \
@@ -950,8 +959,7 @@ dist-os-version:
 	@echo "OSVERSION: $(RHEL_MAJOR).$(RHEL_MINOR)"
 
 dist-dump-variables:
-	$(eval VARS:=$(sort $(shell cat Makefile.variables Makefile.automotive | sed '/^#/d; /^$$/d; s/[ ]*[?:]=.*//')))
-	@$(foreach V,$(sort $(.VARIABLES)), $(if $(filter-out environment default automatic, $(origin $V)),$(info $V=$($V)),$(if $(filter $(VARS),$(V)),$(info $V=$($V)))))
+	@$(foreach V,$(sort $(.VARIABLES)), $(if $(filter-out environment default automatic override, $(origin $V)),$(info $V=$($V)),$(if $(filter $(EXPORTED_VARS),$(V)),$(info $V=$($V)))))
 
 dist-self-test:
 	@if test -x /usr/bin/bats; then \
@@ -1098,4 +1106,4 @@ dist-full-help:
 	@echo  '                        specfile template.'
 	@echo  ''
 
-export
+$(foreach var,$(EXPORTED_VARS),$(eval export $(var)))

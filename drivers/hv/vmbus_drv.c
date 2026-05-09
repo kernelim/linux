@@ -315,7 +315,7 @@ static ssize_t out_read_index_show(struct device *dev,
 					  &outbound);
 	if (ret < 0)
 		return ret;
-	return sysfs_emit(buf, "%d\n", outbound.current_read_index);
+	return sysfs_emit(buf, "%u\n", outbound.current_read_index);
 }
 static DEVICE_ATTR_RO(out_read_index);
 
@@ -334,7 +334,7 @@ static ssize_t out_write_index_show(struct device *dev,
 					  &outbound);
 	if (ret < 0)
 		return ret;
-	return sysfs_emit(buf, "%d\n", outbound.current_write_index);
+	return sysfs_emit(buf, "%u\n", outbound.current_write_index);
 }
 static DEVICE_ATTR_RO(out_write_index);
 
@@ -1712,7 +1712,7 @@ static ssize_t target_cpu_store(struct vmbus_channel *channel,
 	u32 target_cpu;
 	ssize_t ret;
 
-	if (sscanf(buf, "%uu", &target_cpu) != 1)
+	if (sscanf(buf, "%u", &target_cpu) != 1)
 		return -EIO;
 
 	cpus_read_lock();
@@ -1841,7 +1841,7 @@ static struct attribute *vmbus_chan_attrs[] = {
 	NULL
 };
 
-static struct bin_attribute *vmbus_chan_bin_attrs[] = {
+static const struct bin_attribute *vmbus_chan_bin_attrs[] = {
 	&chan_attr_ring_buffer,
 	NULL
 };
@@ -1917,7 +1917,7 @@ static const struct kobj_type vmbus_chan_ktype = {
  * is running.
  * For example, HV_NIC device is used either by uio_hv_generic or hv_netvsc at any given point of
  * time, and "ring" sysfs is needed only when uio_hv_generic is bound to that device. To avoid
- * exposing the ring buffer by default, this function is reponsible to enable visibility of
+ * exposing the ring buffer by default, this function is responsible to enable visibility of
  * ring for userspace to use.
  * Note: Race conditions can happen with userspace and it is not encouraged to create new
  * use-cases for this. This was added to maintain backward compatibility, while solving
@@ -2065,7 +2065,7 @@ int vmbus_device_register(struct hv_device *child_device_obj)
 	ret = vmbus_add_channel_kobj(child_device_obj,
 				     child_device_obj->channel);
 	if (ret) {
-		pr_err("Unable to register primary channeln");
+		pr_err("Unable to register primary channel\n");
 		goto err_kset_unregister;
 	}
 	hv_debug_add_dev_dir(child_device_obj);

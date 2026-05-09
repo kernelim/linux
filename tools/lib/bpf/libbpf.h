@@ -242,6 +242,19 @@ bpf_object__open_mem(const void *obj_buf, size_t obj_buf_sz,
 		     const struct bpf_object_open_opts *opts);
 
 /**
+ * @brief **bpf_object__prepare()** prepares BPF object for loading:
+ * performs ELF processing, relocations, prepares final state of BPF program
+ * instructions (accessible with bpf_program__insns()), creates and
+ * (potentially) pins maps. Leaves BPF object in the state ready for program
+ * loading.
+ * @param obj Pointer to a valid BPF object instance returned by
+ * **bpf_object__open*()** API
+ * @return 0, on success; negative error code, otherwise, error code is
+ * stored in errno
+ */
+LIBBPF_API int bpf_object__prepare(struct bpf_object *obj);
+
+/**
  * @brief **bpf_object__load()** loads BPF object into kernel.
  * @param obj Pointer to a valid BPF object instance returned by
  * **bpf_object__open*()** APIs
@@ -486,9 +499,11 @@ struct bpf_perf_event_opts {
 	__u64 bpf_cookie;
 	/* don't use BPF link when attach BPF program */
 	bool force_ioctl_attach;
+	/* don't automatically enable the event */
+	bool dont_enable;
 	size_t :0;
 };
-#define bpf_perf_event_opts__last_field force_ioctl_attach
+#define bpf_perf_event_opts__last_field dont_enable
 
 LIBBPF_API struct bpf_link *
 bpf_program__attach_perf_event(const struct bpf_program *prog, int pfd);
@@ -864,6 +879,21 @@ LIBBPF_API struct bpf_link *
 bpf_program__attach_netkit(const struct bpf_program *prog, int ifindex,
 			   const struct bpf_netkit_opts *opts);
 
+struct bpf_cgroup_opts {
+	/* size of this struct, for forward/backward compatibility */
+	size_t sz;
+	__u32 flags;
+	__u32 relative_fd;
+	__u32 relative_id;
+	__u64 expected_revision;
+	size_t :0;
+};
+#define bpf_cgroup_opts__last_field expected_revision
+
+LIBBPF_API struct bpf_link *
+bpf_program__attach_cgroup_opts(const struct bpf_program *prog, int cgroup_fd,
+				const struct bpf_cgroup_opts *opts);
+
 struct bpf_map;
 
 LIBBPF_API struct bpf_link *bpf_map__attach_struct_ops(const struct bpf_map *map);
@@ -926,6 +956,12 @@ LIBBPF_API __u32 bpf_program__log_level(const struct bpf_program *prog);
 LIBBPF_API int bpf_program__set_log_level(struct bpf_program *prog, __u32 log_level);
 LIBBPF_API const char *bpf_program__log_buf(const struct bpf_program *prog, size_t *log_size);
 LIBBPF_API int bpf_program__set_log_buf(struct bpf_program *prog, char *log_buf, size_t log_size);
+
+LIBBPF_API struct bpf_func_info *bpf_program__func_info(const struct bpf_program *prog);
+LIBBPF_API __u32 bpf_program__func_info_cnt(const struct bpf_program *prog);
+
+LIBBPF_API struct bpf_line_info *bpf_program__line_info(const struct bpf_program *prog);
+LIBBPF_API __u32 bpf_program__line_info_cnt(const struct bpf_program *prog);
 
 /**
  * @brief **bpf_program__set_attach_target()** sets BTF-based attach target

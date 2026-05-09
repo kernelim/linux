@@ -1,3 +1,3 @@
-#1-
-0x118eaa27	dma_set_coherent_mask	vmlinux	EXPORT_SYMBOL	
+#2-
+0x2827eb38	dma_set_coherent_mask	vmlinux	EXPORT_SYMBOL	
 

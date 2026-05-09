@@ -12,34 +12,8 @@
 #include <asm/mmu_context.h>
 #include <asm/page-states.h>
 #include <asm/pgalloc.h>
-#include <asm/gmap.h>
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
-
-#ifdef CONFIG_PGSTE
-
-int page_table_allocate_pgste = 0;
-EXPORT_SYMBOL(page_table_allocate_pgste);
-
-static struct ctl_table page_table_sysctl[] = {
-	{
-		.procname	= "allocate_pgste",
-		.data		= &page_table_allocate_pgste,
-		.maxlen		= sizeof(int),
-		.mode		= S_IRUGO | S_IWUSR,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= SYSCTL_ZERO,
-		.extra2		= SYSCTL_ONE,
-	},
-};
-
-static int __init page_table_register_sysctl(void)
-{
-	return register_sysctl("vm", page_table_sysctl) ? 0 : -ENOMEM;
-}
-__initcall(page_table_register_sysctl);
-
-#endif /* CONFIG_PGSTE */
 
 unsigned long *crst_table_alloc(struct mm_struct *mm)
 {

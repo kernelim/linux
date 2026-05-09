@@ -1353,8 +1353,8 @@ static int pcmdev_gain_ctrl_add(struct pcmdevice_priv *pcm_dev,
 		return 0;
 	}
 
-	pcmdev_controls = devm_kzalloc(pcm_dev->dev,
-		nr_chn * sizeof(struct snd_kcontrol_new), GFP_KERNEL);
+	pcmdev_controls = devm_kcalloc(pcm_dev->dev, nr_chn,
+				       sizeof(struct snd_kcontrol_new), GFP_KERNEL);
 	if (!pcmdev_controls)
 		return -ENOMEM;
 
@@ -1642,8 +1642,7 @@ static int pcmdevice_comp_probe(struct snd_soc_component *comp)
 	}
 	ret = pcmdev_profile_ctrl_add(pcm_dev);
 out:
-	if (fw_entry)
-		release_firmware(fw_entry);
+	release_firmware(fw_entry);
 
 	mutex_unlock(&pcm_dev->codec_lock);
 	return ret;

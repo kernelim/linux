@@ -285,6 +285,7 @@ struct sk_filter;
   *	@sk_ack_backlog: current listen backlog
   *	@sk_max_ack_backlog: listen backlog set in listen()
   *	@sk_uid: user id of owner
+  *	@sk_ino: inode number (zero if orphaned)
   *	@sk_prefer_busy_poll: prefer busypolling over softirq processing
   *	@sk_busy_poll_budget: napi processing budget when busypolling
   *	@sk_priority: %SO_PRIORITY setting
@@ -512,6 +513,7 @@ struct sock {
 	u32			sk_ack_backlog;
 	u32			sk_max_ack_backlog;
 	kuid_t			sk_uid;
+	unsigned long		sk_ino;
 	spinlock_t		sk_peer_lock;
 	int			sk_bind_phc;
 	struct pid		*sk_peer_pid;
@@ -830,6 +832,19 @@ static inline bool sk_nulls_del_node_init_rcu(struct sock *sk)
 		__sock_put(sk);
 	}
 	return rc;
+}
+
+static inline bool sk_nulls_replace_node_init_rcu(struct sock *old,
+						  struct sock *new)
+{
+	if (sk_hashed(old)) {
+		hlist_nulls_replace_init_rcu(&old->sk_nulls_node,
+					     &new->sk_nulls_node);
+		__sock_put(old);
+		return true;
+	}
+
+	return false;
 }
 
 static inline void __sk_add_node(struct sock *sk, struct hlist_head *list)
@@ -2027,6 +2042,13 @@ static inline int sk_rx_queue_get(const struct sock *sk)
 static inline void sk_set_socket(struct sock *sk, struct socket *sock)
 {
 	sk->sk_socket = sock;
+	if (sock) {
+		WRITE_ONCE(sk->sk_uid, SOCK_INODE(sock)->i_uid);
+		WRITE_ONCE(sk->sk_ino, SOCK_INODE(sock)->i_ino);
+	} else {
+		/* Note: sk_uid is unchanged. */
+		WRITE_ONCE(sk->sk_ino, 0);
+	}
 }
 
 static inline wait_queue_head_t *sk_sleep(struct sock *sk)
@@ -2057,14 +2079,17 @@ static inline void sock_graft(struct sock *sk, struct socket *parent)
 	rcu_assign_pointer(sk->sk_wq, &parent->wq);
 	parent->sk = sk;
 	sk_set_socket(sk, parent);
-	sk->sk_uid = SOCK_INODE(parent)->i_uid;
 	security_sock_graft(sk, parent);
 	write_unlock_bh(&sk->sk_callback_lock);
 }
 
+static inline unsigned long sock_i_ino(const struct sock *sk)
+{
+	/* Paired with WRITE_ONCE() in sock_graft() and sock_orphan() */
+	return READ_ONCE(sk->sk_ino);
+}
+
 kuid_t sock_i_uid(struct sock *sk);
-unsigned long __sock_i_ino(struct sock *sk);
-unsigned long sock_i_ino(struct sock *sk);
 
 static inline kuid_t sock_net_uid(const struct net *net, const struct sock *sk)
 {
@@ -2726,8 +2751,6 @@ static inline void _sock_tx_timestamp(struct sock *sk,
 				*tskey = atomic_inc_return(&sk->sk_tskey) - 1;
 		}
 	}
-	if (unlikely(sock_flag(sk, SOCK_WIFI_STATUS)))
-		*tx_flags |= SKBTX_WIFI_STATUS;
 }
 
 static inline void sock_tx_timestamp(struct sock *sk,
@@ -2812,6 +2835,12 @@ sk_is_refcounted(struct sock *sk)
 {
 	/* Only full sockets have sk->sk_flags. */
 	return !sk_fullsock(sk) || !sock_flag(sk, SOCK_RCU_FREE);
+}
+
+static inline bool
+sk_requests_wifi_status(struct sock *sk)
+{
+	return sk && sk_fullsock(sk) && sock_flag(sk, SOCK_WIFI_STATUS);
 }
 
 /* Checks if this SKB belongs to an HW offloaded socket
@@ -2970,8 +2999,11 @@ int sock_ioctl_inout(struct sock *sk, unsigned int cmd,
 int sk_ioctl(struct sock *sk, unsigned int cmd, void __user *arg);
 static inline bool sk_is_readable(struct sock *sk)
 {
-	if (sk->sk_prot->sock_is_readable)
-		return sk->sk_prot->sock_is_readable(sk);
+	const struct proto *prot = READ_ONCE(sk->sk_prot);
+
+	if (prot->sock_is_readable)
+		return prot->sock_is_readable(sk);
+
 	return false;
 }
 #endif	/* _SOCK_H */

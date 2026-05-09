@@ -408,7 +408,7 @@ static const char table_sigs[][ACPI_NAMESEG_SIZE] __initconst = {
 	ACPI_SIG_PSDT, ACPI_SIG_RSDT, ACPI_SIG_XSDT, ACPI_SIG_SSDT,
 	ACPI_SIG_IORT, ACPI_SIG_NFIT, ACPI_SIG_HMAT, ACPI_SIG_PPTT,
 	ACPI_SIG_NHLT, ACPI_SIG_AEST, ACPI_SIG_CEDT, ACPI_SIG_AGDI,
-	ACPI_SIG_NBFT };
+	ACPI_SIG_NBFT, ACPI_SIG_SWFT};
 
 #define ACPI_HEADER_SIZE sizeof(struct acpi_table_header)
 
@@ -719,8 +719,12 @@ int __init acpi_locate_initial_tables(void)
 	}
 
 	status = acpi_initialize_tables(initial_tables, ACPI_MAX_TABLES, 0);
-	if (ACPI_FAILURE(status))
+	if (ACPI_FAILURE(status)) {
+		const char *msg = acpi_format_exception(status);
+
+		pr_warn("Failed to initialize tables, status=0x%x (%s)", status, msg);
 		return -EINVAL;
+	}
 
 	return 0;
 }

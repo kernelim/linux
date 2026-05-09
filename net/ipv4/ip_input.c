@@ -257,10 +257,11 @@ int ip_local_deliver(struct sk_buff *skb)
 }
 EXPORT_SYMBOL(ip_local_deliver);
 
-static inline bool ip_rcv_options(struct sk_buff *skb, struct net_device *dev)
+static inline enum skb_drop_reason
+ip_rcv_options(struct sk_buff *skb, struct net_device *dev)
 {
-	struct ip_options *opt;
 	const struct iphdr *iph;
+	struct ip_options *opt;
 
 	/* It looks as overkill, because not all
 	   IP options require packet mangling.
@@ -271,7 +272,7 @@ static inline bool ip_rcv_options(struct sk_buff *skb, struct net_device *dev)
 	*/
 	if (skb_cow(skb, skb_headroom(skb))) {
 		__IP_INC_STATS(dev_net(dev), IPSTATS_MIB_INDISCARDS);
-		goto drop;
+		return SKB_DROP_REASON_NOMEM;
 	}
 
 	iph = ip_hdr(skb);
@@ -280,7 +281,7 @@ static inline bool ip_rcv_options(struct sk_buff *skb, struct net_device *dev)
 
 	if (ip_options_compile(dev_net(dev), opt, skb)) {
 		__IP_INC_STATS(dev_net(dev), IPSTATS_MIB_INHDRERRORS);
-		goto drop;
+		return SKB_DROP_REASON_IP_INHDR;
 	}
 
 	if (unlikely(opt->srr)) {
@@ -292,17 +293,15 @@ static inline bool ip_rcv_options(struct sk_buff *skb, struct net_device *dev)
 					net_info_ratelimited("source route option %pI4 -> %pI4\n",
 							     &iph->saddr,
 							     &iph->daddr);
-				goto drop;
+				return SKB_DROP_REASON_NOT_SPECIFIED;
 			}
 		}
 
 		if (ip_options_rcv_srr(skb, dev))
-			goto drop;
+			return SKB_DROP_REASON_NOT_SPECIFIED;
 	}
 
-	return false;
-drop:
-	return true;
+	return SKB_NOT_DROPPED_YET;
 }
 
 static bool ip_can_use_hint(const struct sk_buff *skb, const struct iphdr *iph,
@@ -313,7 +312,7 @@ static bool ip_can_use_hint(const struct sk_buff *skb, const struct iphdr *iph,
 }
 
 int tcp_v4_early_demux(struct sk_buff *skb);
-int udp_v4_early_demux(struct sk_buff *skb);
+enum skb_drop_reason udp_v4_early_demux(struct sk_buff *skb);
 static int ip_rcv_finish_core(struct net *net, struct sock *sk,
 			      struct sk_buff *skb, struct net_device *dev,
 			      const struct sk_buff *hint)
@@ -329,7 +328,6 @@ static int ip_rcv_finish_core(struct net *net, struct sock *sk,
 			goto drop_error;
 	}
 
-	drop_reason = SKB_DROP_REASON_NOT_SPECIFIED;
 	if (READ_ONCE(net->ipv4.sysctl_ip_early_demux) &&
 	    !skb_dst(skb) &&
 	    !skb->sk &&
@@ -348,7 +346,6 @@ static int ip_rcv_finish_core(struct net *net, struct sock *sk,
 				drop_reason = udp_v4_early_demux(skb);
 				if (unlikely(drop_reason))
 					goto drop_error;
-				drop_reason = SKB_DROP_REASON_NOT_SPECIFIED;
 
 				/* must reload iph, skb->head might have changed */
 				iph = ip_hdr(skb);
@@ -366,7 +363,6 @@ static int ip_rcv_finish_core(struct net *net, struct sock *sk,
 						   iph->tos, dev);
 		if (unlikely(drop_reason))
 			goto drop_error;
-		drop_reason = SKB_DROP_REASON_NOT_SPECIFIED;
 	} else {
 		struct in_device *in_dev = __in_dev_get_rcu(dev);
 
@@ -385,8 +381,11 @@ static int ip_rcv_finish_core(struct net *net, struct sock *sk,
 	}
 #endif
 
-	if (iph->ihl > 5 && ip_rcv_options(skb, dev))
-		goto drop;
+	if (iph->ihl > 5) {
+		drop_reason = ip_rcv_options(skb, dev);
+		if (drop_reason)
+			goto drop;
+	}
 
 	rt = skb_rtable(skb);
 	if (rt->rt_type == RTN_MULTICAST) {

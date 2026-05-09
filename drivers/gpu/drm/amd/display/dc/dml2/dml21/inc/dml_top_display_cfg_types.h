@@ -166,7 +166,7 @@ struct dml2_surface_cfg {
 	enum dml2_swizzle_mode tiling;
 
 	struct {
-		unsigned long pitch;
+		unsigned long pitch; // In elements, two pixels per element in 422 packed format
 		unsigned long width;
 		unsigned long height;
 	} plane0;
@@ -222,6 +222,7 @@ struct dml2_composition_cfg {
 
 	struct {
 		bool enabled;
+		bool upsp_enabled;
 		struct {
 			double h_ratio;
 			double v_ratio;
@@ -385,6 +386,7 @@ struct dml2_plane_parameters {
 		long reserved_vblank_time_ns;
 		unsigned int max_vactive_det_fill_delay_us; // 0 = no reserved time, +ve = explicit max delay
 		unsigned int gpuvm_min_page_size_kbytes;
+		unsigned int hostvm_min_page_size_kbytes;
 
 		enum dml2_svp_mode_override legacy_svp_config; //TODO remove in favor of svp_config
 
@@ -425,6 +427,7 @@ struct dml2_stream_parameters {
 
 struct dml2_display_cfg {
 	bool gpuvm_enable;
+	bool ffbm_enable;
 	bool hostvm_enable;
 
 	// Allocate DET proportionally between streams based on pixel rate

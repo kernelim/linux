@@ -480,8 +480,8 @@ static void sveaes2_sigill(void)
 
 static void sveb16b16_sigill(void)
 {
-	/* BFADD ZA.H[W0, 0], {Z0.H-Z1.H} */
-	asm volatile(".inst 0xC1E41C00" : : : );
+	/* BFADD Z0.H, Z0.H, Z0.H */
+	asm volatile(".inst 0x65000000" : : : );
 }
 
 static void svebfscale_sigill(void)
@@ -634,7 +634,7 @@ static const struct hwcap_data {
 		.name = "F8DP2",
 		.at_hwcap = AT_HWCAP2,
 		.hwcap_bit = HWCAP2_F8DP2,
-		.cpuinfo = "f8dp4",
+		.cpuinfo = "f8dp2",
 		.sigill_fn = f8dp2_sigill,
 	},
 	{
@@ -1097,6 +1097,18 @@ static const struct hwcap_data {
 		.cpuinfo = "hbc",
 		.sigill_fn = hbc_sigill,
 		.sigill_reliable = true,
+	},
+	{
+		.name = "MTE_FAR",
+		.at_hwcap = AT_HWCAP3,
+		.hwcap_bit = HWCAP3_MTE_FAR,
+		.cpuinfo = "mtefar",
+	},
+	{
+		.name = "MTE_STOREONLY",
+		.at_hwcap = AT_HWCAP3,
+		.hwcap_bit = HWCAP3_MTE_STORE_ONLY,
+		.cpuinfo = "mtestoreonly",
 	},
 };
 

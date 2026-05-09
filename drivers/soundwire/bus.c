@@ -56,6 +56,8 @@ int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
 		return ret;
 	}
 
+	ida_init(&bus->slave_ida);
+
 	ret = sdw_master_device_add(bus, parent, fwnode);
 	if (ret < 0) {
 		dev_err(parent, "Failed to add master device at link %d\n",
@@ -751,41 +753,36 @@ err:
 static int sdw_assign_device_num(struct sdw_slave *slave)
 {
 	struct sdw_bus *bus = slave->bus;
-	int ret, dev_num;
-	bool new_device = false;
+	struct device *dev = bus->dev;
+	int ret;
 
 	/* check first if device number is assigned, if so reuse that */
 	if (!slave->dev_num) {
 		if (!slave->dev_num_sticky) {
+			int dev_num;
+
 			mutex_lock(&slave->bus->bus_lock);
 			dev_num = sdw_get_device_num(slave);
 			mutex_unlock(&slave->bus->bus_lock);
 			if (dev_num < 0) {
-				dev_err(bus->dev, "Get dev_num failed: %d\n",
-					dev_num);
+				dev_err(dev, "Get dev_num failed: %d\n", dev_num);
 				return dev_num;
 			}
-			slave->dev_num = dev_num;
+
 			slave->dev_num_sticky = dev_num;
-			new_device = true;
 		} else {
-			slave->dev_num = slave->dev_num_sticky;
+			dev_dbg(dev, "Slave already registered, reusing dev_num: %d\n",
+				slave->dev_num_sticky);
 		}
 	}
 
-	if (!new_device)
-		dev_dbg(bus->dev,
-			"Slave already registered, reusing dev_num:%d\n",
-			slave->dev_num);
-
 	/* Clear the slave->dev_num to transfer message on device 0 */
-	dev_num = slave->dev_num;
 	slave->dev_num = 0;
 
-	ret = sdw_write_no_pm(slave, SDW_SCP_DEVNUMBER, dev_num);
+	ret = sdw_write_no_pm(slave, SDW_SCP_DEVNUMBER, slave->dev_num_sticky);
 	if (ret < 0) {
-		dev_err(bus->dev, "Program device_num %d failed: %d\n",
-			dev_num, ret);
+		dev_err(dev, "Program device_num %d failed: %d\n",
+			slave->dev_num_sticky, ret);
 		return ret;
 	}
 
@@ -793,7 +790,7 @@ static int sdw_assign_device_num(struct sdw_slave *slave)
 	slave->dev_num = slave->dev_num_sticky;
 
 	if (bus->ops && bus->ops->new_peripheral_assigned)
-		bus->ops->new_peripheral_assigned(bus, slave, dev_num);
+		bus->ops->new_peripheral_assigned(bus, slave, slave->dev_num);
 
 	return 0;
 }
@@ -1363,6 +1360,18 @@ int sdw_slave_get_scale_index(struct sdw_slave *slave, u8 *base)
 }
 EXPORT_SYMBOL(sdw_slave_get_scale_index);
 
+int sdw_slave_get_current_bank(struct sdw_slave *slave)
+{
+	int tmp;
+
+	tmp = sdw_read(slave, SDW_SCP_CTRL);
+	if (tmp < 0)
+		return tmp;
+
+	return FIELD_GET(SDW_SCP_STAT_CURR_BANK, tmp);
+}
+EXPORT_SYMBOL_GPL(sdw_slave_get_current_bank);
+
 static int sdw_slave_set_frequency(struct sdw_slave *slave)
 {
 	int scale_index;
@@ -1756,14 +1765,14 @@ static int sdw_handle_slave_alerts(struct sdw_slave *slave)
 
 		/* Update the Slave driver */
 		if (slave_notify) {
+			if (slave->prop.use_domain_irq && slave->irq)
+				handle_nested_irq(slave->irq);
+
 			mutex_lock(&slave->sdw_dev_lock);
 
 			if (slave->probed) {
 				struct device *dev = &slave->dev;
 				struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
-
-				if (slave->prop.use_domain_irq && slave->irq)
-					handle_nested_irq(slave->irq);
 
 				if (drv->ops && drv->ops->interrupt_callback) {
 					slave_intr.sdca_cascade = sdca_cascade;

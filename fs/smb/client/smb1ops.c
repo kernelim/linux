@@ -29,20 +29,25 @@
  * SMB_COM_NT_CANCEL request and then sends it.
  */
 static int
-send_nt_cancel(struct TCP_Server_Info *server, struct smb_rqst *rqst,
-	       struct mid_q_entry *mid)
+send_nt_cancel(struct cifs_ses *ses, struct TCP_Server_Info *server,
+	       struct smb_rqst *rqst, struct mid_q_entry *mid,
+	       unsigned int xid)
 {
-	int rc = 0;
 	struct smb_hdr *in_buf = (struct smb_hdr *)rqst->rq_iov[0].iov_base;
+	struct kvec iov[1];
+	struct smb_rqst crqst = { .rq_iov = iov, .rq_nvec = 1 };
+	int rc = 0;
 
-	/* -4 for RFC1001 length and +2 for BCC field */
-	in_buf->smb_buf_length = cpu_to_be32(sizeof(struct smb_hdr) - 4  + 2);
+	/* +2 for BCC field */
 	in_buf->Command = SMB_COM_NT_CANCEL;
 	in_buf->WordCount = 0;
 	put_bcc(0, in_buf);
 
+	iov[0].iov_base = in_buf;
+	iov[0].iov_len  = sizeof(struct smb_hdr) + 2;
+
 	cifs_server_lock(server);
-	rc = cifs_sign_smb(in_buf, server, &mid->sequence_number);
+	rc = cifs_sign_rqst(&crqst, server, &mid->sequence_number);
 	if (rc) {
 		cifs_server_unlock(server);
 		return rc;
@@ -54,7 +59,7 @@ send_nt_cancel(struct TCP_Server_Info *server, struct smb_rqst *rqst,
 	 * after signing here.
 	 */
 	--server->sequence_number;
-	rc = smb_send(server, in_buf, be32_to_cpu(in_buf->smb_buf_length));
+	rc = __smb_send_rqst(server, 1, &crqst);
 	if (rc < 0)
 		server->sequence_number--;
 
@@ -64,6 +69,46 @@ send_nt_cancel(struct TCP_Server_Info *server, struct smb_rqst *rqst,
 		 get_mid(in_buf), rc);
 
 	return rc;
+}
+
+/*
+ * Send a LOCKINGX_CANCEL_LOCK to cause the Windows blocking lock to
+ * return.
+ */
+static int
+send_lock_cancel(struct cifs_ses *ses, struct TCP_Server_Info *server,
+		 struct smb_rqst *rqst, struct mid_q_entry *mid,
+		 unsigned int xid)
+{
+	struct smb_hdr *in_buf = (struct smb_hdr *)rqst->rq_iov[0].iov_base;
+	unsigned int in_len = rqst->rq_iov[0].iov_len;
+	LOCK_REQ *pSMB = (LOCK_REQ *)in_buf;
+	int rc;
+
+	/* We just modify the current in_buf to change
+	 * the type of lock from LOCKING_ANDX_SHARED_LOCK
+	 * or LOCKING_ANDX_EXCLUSIVE_LOCK to
+	 * LOCKING_ANDX_CANCEL_LOCK.
+	 */
+	pSMB->LockType = LOCKING_ANDX_CANCEL_LOCK|LOCKING_ANDX_LARGE_FILES;
+	pSMB->Timeout = 0;
+	pSMB->hdr.Mid = get_next_mid(ses->server);
+
+	rc = SendReceive(xid, ses, in_buf, in_len, NULL, NULL, 0);
+	if (rc == -ENOLCK)
+		rc = 0; /* If we get back -ENOLCK, it probably means we managed
+			 * to cancel the lock command before it took effect.
+			 */
+	return rc;
+}
+
+static int cifs_send_cancel(struct cifs_ses *ses, struct TCP_Server_Info *server,
+			    struct smb_rqst *rqst, struct mid_q_entry *mid,
+			    unsigned int xid)
+{
+	if (mid->sr_flags & CIFS_WINDOWS_LOCK)
+		return send_lock_cancel(ses, server, rqst, mid, xid);
+	return send_nt_cancel(ses, server, rqst, mid, xid);
 }
 
 static bool
@@ -100,7 +145,7 @@ cifs_find_mid(struct TCP_Server_Info *server, char *buffer)
 		if (compare_mid(mid->mid, buf) &&
 		    mid->mid_state == MID_REQUEST_SUBMITTED &&
 		    le16_to_cpu(mid->command) == buf->Command) {
-			kref_get(&mid->refcount);
+			smb_get_mid(mid);
 			spin_unlock(&server->mid_queue_lock);
 			return mid;
 		}
@@ -288,7 +333,7 @@ check2ndT2(char *buf)
 }
 
 static int
-coalesce_t2(char *second_buf, struct smb_hdr *target_hdr)
+coalesce_t2(char *second_buf, struct smb_hdr *target_hdr, unsigned int *pdu_len)
 {
 	struct smb_t2_rsp *pSMBs = (struct smb_t2_rsp *)second_buf;
 	struct smb_t2_rsp *pSMBt  = (struct smb_t2_rsp *)target_hdr;
@@ -354,15 +399,15 @@ coalesce_t2(char *second_buf, struct smb_hdr *target_hdr)
 	}
 	put_bcc(byte_count, target_hdr);
 
-	byte_count = be32_to_cpu(target_hdr->smb_buf_length);
+	byte_count = *pdu_len;
 	byte_count += total_in_src;
 	/* don't allow buffer to overflow */
-	if (byte_count > CIFSMaxBufSize + MAX_CIFS_HDR_SIZE - 4) {
+	if (byte_count > CIFSMaxBufSize + MAX_CIFS_HDR_SIZE) {
 		cifs_dbg(FYI, "coalesced BCC exceeds buffer size (%u)\n",
 			 byte_count);
 		return -ENOBUFS;
 	}
-	target_hdr->smb_buf_length = cpu_to_be32(byte_count);
+	*pdu_len = byte_count;
 
 	/* copy second buffer into end of first buffer */
 	memcpy(data_area_of_tgt, data_area_of_src, total_in_src);
@@ -397,12 +442,12 @@ cifs_check_trans2(struct mid_q_entry *mid, struct TCP_Server_Info *server,
 	mid->multiRsp = true;
 	if (mid->resp_buf) {
 		/* merge response - fix up 1st*/
-		malformed = coalesce_t2(buf, mid->resp_buf);
+		malformed = coalesce_t2(buf, mid->resp_buf, &mid->response_pdu_len);
 		if (malformed > 0)
 			return true;
 		/* All parts received or packet is malformed. */
 		mid->multiEnd = true;
-		dequeue_mid(mid, malformed);
+		dequeue_mid(server, mid, malformed);
 		return true;
 	}
 	if (!server->large_buf) {
@@ -460,7 +505,7 @@ smb1_negotiate_wsize(struct cifs_tcon *tcon, struct smb3_fs_context *ctx)
 	if (!(server->capabilities & CAP_LARGE_WRITE_X) ||
 	    (!(server->capabilities & CAP_UNIX) && server->sign))
 		wsize = min_t(unsigned int, wsize,
-				server->maxBuf - sizeof(WRITE_REQ) + 4);
+				server->maxBuf - sizeof(WRITE_REQ));
 
 	/* hard limit of CIFS_MAX_WSIZE */
 	wsize = min_t(unsigned int, wsize, CIFS_MAX_WSIZE);
@@ -647,18 +692,76 @@ static int cifs_query_path_info(const unsigned int xid,
 
 	if (!rc) {
 		move_cifs_info_to_smb2(&data->fi, &fi);
-		data->reparse_point = le32_to_cpu(fi.Attributes) & ATTR_REPARSE;
+		data->reparse_point = le32_to_cpu(fi.Attributes) & ATTR_REPARSE_POINT;
 	}
 
 #ifdef CONFIG_CIFS_XATTR
+	/*
+	 * For non-symlink WSL reparse points it is required to fetch
+	 * EA $LXMOD which contains in its S_DT part the mandatory file type.
+	 */
+	if (!rc && data->reparse_point) {
+		struct smb2_file_full_ea_info *ea;
+		u32 next = 0;
+
+		ea = (struct smb2_file_full_ea_info *)data->wsl.eas;
+		do {
+			ea = (void *)((u8 *)ea + next);
+			next = le32_to_cpu(ea->next_entry_offset);
+		} while (next);
+		if (le16_to_cpu(ea->ea_value_length)) {
+			ea->next_entry_offset = cpu_to_le32(ALIGN(sizeof(*ea) +
+						ea->ea_name_length + 1 +
+						le16_to_cpu(ea->ea_value_length), 4));
+			ea = (void *)((u8 *)ea + le32_to_cpu(ea->next_entry_offset));
+		}
+
+		rc = CIFSSMBQAllEAs(xid, tcon, full_path, SMB2_WSL_XATTR_MODE,
+				    &ea->ea_data[SMB2_WSL_XATTR_NAME_LEN + 1],
+				    SMB2_WSL_XATTR_MODE_SIZE, cifs_sb);
+		if (rc == SMB2_WSL_XATTR_MODE_SIZE) {
+			ea->next_entry_offset = cpu_to_le32(0);
+			ea->flags = 0;
+			ea->ea_name_length = SMB2_WSL_XATTR_NAME_LEN;
+			ea->ea_value_length = cpu_to_le16(SMB2_WSL_XATTR_MODE_SIZE);
+			memcpy(&ea->ea_data[0], SMB2_WSL_XATTR_MODE, SMB2_WSL_XATTR_NAME_LEN + 1);
+			data->wsl.eas_len += ALIGN(sizeof(*ea) + SMB2_WSL_XATTR_NAME_LEN + 1 +
+						   SMB2_WSL_XATTR_MODE_SIZE, 4);
+			rc = 0;
+		} else if (rc >= 0) {
+			/* It is an error if EA $LXMOD has wrong size. */
+			rc = -EINVAL;
+		} else {
+			/*
+			 * In all other cases ignore error if fetching
+			 * of EA $LXMOD failed. It is needed only for
+			 * non-symlink WSL reparse points and wsl_to_fattr()
+			 * handle the case when EA is missing.
+			 */
+			rc = 0;
+		}
+	}
+
 	/*
 	 * For WSL CHR and BLK reparse points it is required to fetch
 	 * EA $LXDEV which contains major and minor device numbers.
 	 */
 	if (!rc && data->reparse_point) {
 		struct smb2_file_full_ea_info *ea;
+		u32 next = 0;
 
 		ea = (struct smb2_file_full_ea_info *)data->wsl.eas;
+		do {
+			ea = (void *)((u8 *)ea + next);
+			next = le32_to_cpu(ea->next_entry_offset);
+		} while (next);
+		if (le16_to_cpu(ea->ea_value_length)) {
+			ea->next_entry_offset = cpu_to_le32(ALIGN(sizeof(*ea) +
+						ea->ea_name_length + 1 +
+						le16_to_cpu(ea->ea_value_length), 4));
+			ea = (void *)((u8 *)ea + le32_to_cpu(ea->next_entry_offset));
+		}
+
 		rc = CIFSSMBQAllEAs(xid, tcon, full_path, SMB2_WSL_XATTR_DEV,
 				    &ea->ea_data[SMB2_WSL_XATTR_NAME_LEN + 1],
 				    SMB2_WSL_XATTR_DEV_SIZE, cifs_sb);
@@ -668,8 +771,8 @@ static int cifs_query_path_info(const unsigned int xid,
 			ea->ea_name_length = SMB2_WSL_XATTR_NAME_LEN;
 			ea->ea_value_length = cpu_to_le16(SMB2_WSL_XATTR_DEV_SIZE);
 			memcpy(&ea->ea_data[0], SMB2_WSL_XATTR_DEV, SMB2_WSL_XATTR_NAME_LEN + 1);
-			data->wsl.eas_len = sizeof(*ea) + SMB2_WSL_XATTR_NAME_LEN + 1 +
-					    SMB2_WSL_XATTR_DEV_SIZE;
+			data->wsl.eas_len += ALIGN(sizeof(*ea) + SMB2_WSL_XATTR_NAME_LEN + 1 +
+						   SMB2_WSL_XATTR_MODE_SIZE, 4);
 			rc = 0;
 		} else if (rc >= 0) {
 			/* It is an error if EA $LXDEV has wrong size. */
@@ -818,6 +921,11 @@ cifs_mkdir_setinfo(struct inode *inode, const char *full_path,
 	info.Attributes = cpu_to_le32(dosattrs);
 	rc = CIFSSMBSetPathInfo(xid, tcon, full_path, &info, cifs_sb->local_nls,
 				cifs_sb);
+	if (rc == -EOPNOTSUPP || rc == -EINVAL)
+		rc = SMBSetInformation(xid, tcon, full_path,
+				       info.Attributes,
+				       0 /* do not change write time */,
+				       cifs_sb->local_nls, cifs_sb);
 	if (rc == 0)
 		cifsInode->cifsAttrs = dosattrs;
 }
@@ -974,7 +1082,7 @@ smb_set_file_info(struct inode *inode, const char *full_path,
 		.tcon = tcon,
 		.cifs_sb = cifs_sb,
 		.desired_access = SYNCHRONIZE | FILE_WRITE_ATTRIBUTES,
-		.create_options = cifs_create_options(cifs_sb, CREATE_NOT_DIR),
+		.create_options = cifs_create_options(cifs_sb, 0),
 		.disposition = FILE_OPEN,
 		.path = full_path,
 		.fid = &fid,
@@ -1005,7 +1113,7 @@ smb_set_file_info(struct inode *inode, const char *full_path,
 			rc = -EOPNOTSUPP;
 	}
 
-	/* Fallback to SMB_COM_SETATTR command when absolutelty needed. */
+	/* Fallback to SMB_COM_SETATTR command when absolutely needed. */
 	if (rc == -EOPNOTSUPP) {
 		cifs_dbg(FYI, "calling SetInformation since SetPathInfo for attrs/times not supported by this server\n");
 		rc = SMBSetInformation(xid, tcon, full_path,
@@ -1039,7 +1147,7 @@ set_via_filehandle:
 		cifsFileInfo_put(open_file);
 
 	/*
-	 * Setting the read-only bit is not honered on non-NT servers when done
+	* Setting the read-only bit is not honored on non-NT servers when done
 	 * via open-semantics. So for setting it, use SMB_COM_SETATTR command.
 	 * This command works only after the file is closed, so use it only when
 	 * operation was called without the filehandle.
@@ -1329,7 +1437,7 @@ cifs_is_network_name_deleted(char *buf, struct TCP_Server_Info *server)
 }
 
 struct smb_version_operations smb1_operations = {
-	.send_cancel = send_nt_cancel,
+	.send_cancel = cifs_send_cancel,
 	.compare_fids = cifs_compare_fids,
 	.setup_request = cifs_setup_request,
 	.setup_async_request = cifs_setup_async_request,
@@ -1423,7 +1531,6 @@ struct smb_version_values smb1_values = {
 	.exclusive_lock_type = 0,
 	.shared_lock_type = LOCKING_ANDX_SHARED_LOCK,
 	.unlock_lock_type = 0,
-	.header_preamble_size = 4,
 	.header_size = sizeof(struct smb_hdr),
 	.max_header_size = MAX_CIFS_HDR_SIZE,
 	.read_rsp_size = sizeof(READ_RSP),

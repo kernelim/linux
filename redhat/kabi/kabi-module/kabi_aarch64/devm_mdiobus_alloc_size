@@ -1,3 +1,3 @@
-#1-
-0x48525387	devm_mdiobus_alloc_size	vmlinux	EXPORT_SYMBOL	
+#2-
+0x3572d213	devm_mdiobus_alloc_size	vmlinux	EXPORT_SYMBOL	
 

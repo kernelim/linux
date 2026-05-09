@@ -1,3 +1,3 @@
-#1-
-0xf145b558	sas_port_alloc_num	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL	
+#2-
+0x70a76c6d	sas_port_alloc_num	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL	
 

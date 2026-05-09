@@ -1,3 +1,3 @@
-#1-
-0x6cd76852	pci_sriov_set_totalvfs	vmlinux	EXPORT_SYMBOL_GPL	
+#2-
+0xc7f54ff0	pci_sriov_set_totalvfs	vmlinux	EXPORT_SYMBOL_GPL	
 

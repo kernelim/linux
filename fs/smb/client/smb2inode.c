@@ -21,7 +21,6 @@
 #include "cifs_unicode.h"
 #include "fscache.h"
 #include "smb2glob.h"
-#include "smb2pdu.h"
 #include "smb2proto.h"
 #include "cached_dir.h"
 #include "../common/smb2status.h"
@@ -31,16 +30,20 @@ static struct reparse_data_buffer *reparse_buf_ptr(struct kvec *iov)
 	struct reparse_data_buffer *buf;
 	struct smb2_ioctl_rsp *io = iov->iov_base;
 	u32 off, count, len;
+	u16 rdlen;
 
 	count = le32_to_cpu(io->OutputCount);
 	off = le32_to_cpu(io->OutputOffset);
 	if (check_add_overflow(off, count, &len) || len > iov->iov_len)
-		return ERR_PTR(-EIO);
+		return ERR_PTR(smb_EIO2(smb_eio_trace_reparse_overlong,
+					off, count));
 
 	buf = (struct reparse_data_buffer *)((u8 *)io + off);
 	len = sizeof(*buf);
-	if (count < len || count < le16_to_cpu(buf->ReparseDataLength) + len)
-		return ERR_PTR(-EIO);
+	rdlen = le16_to_cpu(buf->ReparseDataLength);
+
+	if (count < len || count < rdlen + len)
+		return ERR_PTR(smb_EIO2(smb_eio_trace_reparse_rdlen, count, rdlen));
 	return buf;
 }
 
@@ -50,7 +53,7 @@ static inline __u32 file_create_options(struct dentry *dentry)
 
 	if (dentry) {
 		ci = CIFS_I(d_inode(dentry));
-		if (ci->cifsAttrs & ATTR_REPARSE)
+		if (ci->cifsAttrs & ATTR_REPARSE_POINT)
 			return OPEN_REPARSE_POINT;
 	}
 	return 0;
@@ -684,7 +687,7 @@ finished:
 		idata->fi.EndOfFile = create_rsp->EndofFile;
 		if (le32_to_cpu(idata->fi.NumberOfLinks) == 0)
 			idata->fi.NumberOfLinks = cpu_to_le32(1); /* dummy value */
-		idata->fi.DeletePending = 0;
+		idata->fi.DeletePending = 0; /* successful open = not delete pending */
 		idata->fi.Directory = !!(le32_to_cpu(create_rsp->FileAttributes) & ATTR_DIRECTORY);
 
 		/* smb2_parse_contexts() fills idata->fi.IndexNumber */
@@ -1397,31 +1400,33 @@ int
 smb2_set_file_info(struct inode *inode, const char *full_path,
 		   FILE_BASIC_INFO *buf, const unsigned int xid)
 {
-	struct cifs_open_parms oparms;
+	struct kvec in_iov = { .iov_base = buf, .iov_len = sizeof(*buf), };
 	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
+	struct cifsFileInfo *cfile = NULL;
+	struct cifs_open_parms oparms;
 	struct tcon_link *tlink;
 	struct cifs_tcon *tcon;
-	struct cifsFileInfo *cfile;
-	struct kvec in_iov = { .iov_base = buf, .iov_len = sizeof(*buf), };
-	int rc;
-
-	if ((buf->CreationTime == 0) && (buf->LastAccessTime == 0) &&
-	    (buf->LastWriteTime == 0) && (buf->ChangeTime == 0) &&
-	    (buf->Attributes == 0))
-		return 0; /* would be a no op, no sense sending this */
+	int rc = 0;
 
 	tlink = cifs_sb_tlink(cifs_sb);
 	if (IS_ERR(tlink))
 		return PTR_ERR(tlink);
 	tcon = tlink_tcon(tlink);
 
-	cifs_get_writable_path(tcon, full_path, FIND_WR_ANY, &cfile);
+	if ((buf->CreationTime == 0) && (buf->LastAccessTime == 0) &&
+	    (buf->LastWriteTime == 0) && (buf->ChangeTime == 0)) {
+		if (buf->Attributes == 0)
+			goto out; /* would be a no op, no sense sending this */
+		cifs_get_writable_path(tcon, full_path, FIND_WR_ANY, &cfile);
+	}
+
 	oparms = CIFS_OPARMS(cifs_sb, tcon, full_path, FILE_WRITE_ATTRIBUTES,
 			     FILE_OPEN, 0, ACL_NO_MODE);
 	rc = smb2_compound_op(xid, tcon, cifs_sb,
 			      full_path, &oparms, &in_iov,
 			      &(int){SMB2_OP_SET_INFO}, 1,
 			      cfile, NULL, NULL, NULL);
+out:
 	cifs_put_tlink(tlink);
 	return rc;
 }
@@ -1646,7 +1651,7 @@ int smb2_rename_pending_delete(const char *full_path,
 	} else {
 		cifs_tcon_dbg(FYI, "%s: failed to rename '%s' to '%s': %d\n",
 			      __func__, full_path, to_name, rc);
-		rc = -EIO;
+		rc = smb_EIO1(smb_eio_trace_pend_del_fail, rc);
 	}
 out:
 	cifs_put_tlink(tlink);

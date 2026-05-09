@@ -1,3 +1,3 @@
-#1-
-0x532c39cb	scsi_device_from_queue	vmlinux	EXPORT_SYMBOL_GPL	
+#2-
+0xe8488fb9	scsi_device_from_queue	vmlinux	EXPORT_SYMBOL_GPL	
 

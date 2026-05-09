@@ -150,7 +150,6 @@ enum zone_stat_item {
 	NR_ZONE_WRITE_PENDING,	/* Count of dirty, writeback and unstable pages */
 	NR_MLOCK,		/* mlock()ed pages found and moved off LRU */
 	/* Second 128 byte cacheline */
-	NR_BOUNCE,
 #if IS_ENABLED(CONFIG_ZSMALLOC)
 	NR_ZSPAGES,		/* allocated in zsmalloc */
 #endif
@@ -231,7 +230,7 @@ enum node_stat_item {
 	 * threshold-adjustment logic.
 	 * This is for statistics/monitoring purposes.
 	 */
-	RH_KABI_BROKEN_INSERT_ENUM(PGPROMOTE_CANDIDATE_NRL)
+	PGPROMOTE_CANDIDATE_NRL,
 #endif
 	/* PGDEMOTE_*: pages demoted */
 	PGDEMOTE_KSWAPD,
@@ -995,6 +994,9 @@ struct zone {
 
 	/* Primarily protects free_area */
 	spinlock_t		lock;
+
+	/* Pages to be freed when next trylock succeeds */
+	struct llist_head	trylock_free_pages;
 
 	/* Write-intensive fields used by compaction and vmstats. */
 	CACHELINE_PADDING(_pad2_);

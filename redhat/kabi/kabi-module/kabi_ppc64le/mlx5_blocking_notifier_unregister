@@ -1,3 +1,3 @@
-#1-
-0x151d6fa1	mlx5_blocking_notifier_unregister	drivers/net/ethernet/mellanox/mlx5/core/mlx5_core	EXPORT_SYMBOL	
+#2-
+0x60478064	mlx5_blocking_notifier_unregister	drivers/net/ethernet/mellanox/mlx5/core/mlx5_core	EXPORT_SYMBOL	
 

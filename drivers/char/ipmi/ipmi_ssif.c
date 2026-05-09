@@ -541,7 +541,8 @@ static void start_resend(struct ssif_info *ssif_info);
 
 static void retry_timeout(struct timer_list *t)
 {
-	struct ssif_info *ssif_info = from_timer(ssif_info, t, retry_timer);
+	struct ssif_info *ssif_info = timer_container_of(ssif_info, t,
+							 retry_timer);
 	unsigned long oflags, *flags;
 	bool waiting, resend;
 
@@ -565,7 +566,8 @@ static void retry_timeout(struct timer_list *t)
 
 static void watch_timeout(struct timer_list *t)
 {
-	struct ssif_info *ssif_info = from_timer(ssif_info, t, watch_timer);
+	struct ssif_info *ssif_info = timer_container_of(ssif_info, t,
+							 watch_timer);
 	unsigned long oflags, *flags;
 
 	if (ssif_info->stopping)
@@ -599,7 +601,7 @@ static void ssif_alert(struct i2c_client *client, enum i2c_alert_protocol type,
 	flags = ipmi_ssif_lock_cond(ssif_info, &oflags);
 	if (ssif_info->waiting_alert) {
 		ssif_info->waiting_alert = false;
-		del_timer(&ssif_info->retry_timer);
+		timer_delete(&ssif_info->retry_timer);
 		do_get = true;
 	} else if (ssif_info->curr_msg) {
 		ssif_info->got_alert = true;
@@ -1268,8 +1270,8 @@ static void shutdown_ssif(void *send_info)
 		schedule_timeout(1);
 
 	ssif_info->stopping = true;
-	del_timer_sync(&ssif_info->watch_timer);
-	del_timer_sync(&ssif_info->retry_timer);
+	timer_delete_sync(&ssif_info->watch_timer);
+	timer_delete_sync(&ssif_info->retry_timer);
 	if (ssif_info->thread) {
 		complete(&ssif_info->wake_thread);
 		kthread_stop(ssif_info->thread);

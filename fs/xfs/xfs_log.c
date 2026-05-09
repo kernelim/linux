@@ -20,6 +20,7 @@
 #include "xfs_sysfs.h"
 #include "xfs_sb.h"
 #include "xfs_health.h"
+#include "xfs_zone_alloc.h"
 
 struct kmem_cache	*xfs_log_ticket_cache;
 
@@ -2744,8 +2745,6 @@ xfs_log_ticket_regrant(
 	if (!ticket->t_cnt) {
 		xlog_grant_add_space(&log->l_reserve_head, ticket->t_unit_res);
 		trace_xfs_log_ticket_regrant_exit(log, ticket);
-
-		ticket->t_curr_res = ticket->t_unit_res;
 	}
 
 	xfs_log_ticket_put(ticket);
@@ -2889,7 +2888,7 @@ xlog_force_and_check_iclog(
  *
  *	1. the current iclog is active and has no data; the previous iclog
  *		is in the active or dirty state.
- *	2. the current iclog is drity, and the previous iclog is in the
+ *	2. the current iclog is dirty, and the previous iclog is in the
  *		active or dirty state.
  *
  * We may sleep if:
@@ -3456,6 +3455,16 @@ xlog_force_shutdown(
 		return false;
 
 	/*
+	 * Ensure that there is only ever one log shutdown being processed.
+	 * If we allow the log force below on a second pass after shutting
+	 * down the log, we risk deadlocking the CIL push as it may require
+	 * locks on objects the current shutdown context holds (e.g. taking
+	 * buffer locks to abort buffers on last unpin of buf log items).
+	 */
+	if (test_and_set_bit(XLOG_SHUTDOWN_STARTED, &log->l_opstate))
+		return false;
+
+	/*
 	 * Flush all the completed transactions to disk before marking the log
 	 * being shut down. We need to do this first as shutting down the log
 	 * before the force will prevent the log force from flushing the iclogs
@@ -3487,6 +3496,7 @@ xlog_force_shutdown(
 	spin_lock(&log->l_icloglock);
 	if (test_and_set_bit(XLOG_IO_ERROR, &log->l_opstate)) {
 		spin_unlock(&log->l_icloglock);
+		ASSERT(0);
 		return false;
 	}
 	spin_unlock(&log->l_icloglock);
@@ -3531,6 +3541,9 @@ xlog_force_shutdown(
 	spin_unlock(&log->l_icloglock);
 
 	wake_up_var(&log->l_opstate);
+	if (IS_ENABLED(CONFIG_XFS_RT) && xfs_has_zoned(log->l_mp))
+		xfs_zoned_wake_all(log->l_mp);
+
 	return log_error;
 }
 

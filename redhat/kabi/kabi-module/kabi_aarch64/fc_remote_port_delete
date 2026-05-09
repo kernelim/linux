@@ -1,3 +1,3 @@
-#1-
-0xa721dd55	fc_remote_port_delete	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
+#2-
+0x8ab92304	fc_remote_port_delete	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
 

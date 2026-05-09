@@ -32,11 +32,11 @@ def test_rss_input_xfrm(cfg, ipver):
     if multiprocessing.cpu_count() < 2:
         raise KsftSkipEx("Need at least two CPUs to test symmetric RSS hash")
 
-    input_xfrm = cfg.ethnl.rss_get(
-        {'header': {'dev-name': cfg.ifname}}).get('input_xfrm')
+    rss = cfg.ethnl.rss_get({'header': {'dev-name': cfg.ifname}})
+    input_xfrm = set(filter(lambda x: 'sym' in x, rss.get('input-xfrm', {})))
 
     # Check for symmetric xor/or-xor
-    if not input_xfrm or (input_xfrm != 1 and input_xfrm != 2):
+    if not input_xfrm:
         raise KsftSkipEx("Symmetric RSS hash not requested")
 
     cpus = set()

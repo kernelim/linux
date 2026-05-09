@@ -964,7 +964,7 @@ EXPORT_SYMBOL_GPL(hisi_sas_notify_phy_event);
 
 static void hisi_sas_wait_phyup_timedout(struct timer_list *t)
 {
-	struct hisi_sas_phy *phy = from_timer(phy, t, timer);
+	struct hisi_sas_phy *phy = timer_container_of(phy, t, timer);
 	struct hisi_hba *hisi_hba = phy->hisi_hba;
 	struct device *dev = hisi_hba->dev;
 	int phy_no = phy->sas_phy.id;
@@ -1512,7 +1512,7 @@ void hisi_sas_controller_reset_prepare(struct hisi_hba *hisi_hba)
 	 * which is also only used for v1/v2 hw to skip it for v3 hw
 	 */
 	if (hisi_hba->hw->sht)
-		del_timer_sync(&hisi_hba->timer);
+		timer_delete_sync(&hisi_hba->timer);
 
 	set_bit(HISI_SAS_REJECT_CMD_BIT, &hisi_hba->flags);
 }
@@ -2321,7 +2321,7 @@ void hisi_sas_free(struct hisi_hba *hisi_hba)
 	for (i = 0; i < hisi_hba->n_phy; i++) {
 		struct hisi_sas_phy *phy = &hisi_hba->phy[i];
 
-		del_timer_sync(&phy->timer);
+		timer_delete_sync(&phy->timer);
 	}
 
 	if (hisi_hba->wq)
@@ -2578,7 +2578,7 @@ void hisi_sas_remove(struct platform_device *pdev)
 	struct hisi_hba *hisi_hba = sha->lldd_ha;
 	struct Scsi_Host *shost = sha->shost;
 
-	del_timer_sync(&hisi_hba->timer);
+	timer_delete_sync(&hisi_hba->timer);
 
 	sas_unregister_ha(sha);
 	sas_remove_host(shost);

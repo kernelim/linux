@@ -1,3 +1,3 @@
-#1-
-0xbfe88c33	sas_attach_transport	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL	
+#2-
+0x1c584e4c	sas_attach_transport	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL	
 

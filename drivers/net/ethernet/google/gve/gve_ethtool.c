@@ -67,7 +67,7 @@ static const char gve_gstrings_tx_stats[][ETH_GSTRING_LEN] = {
 	"tx_xsk_done[%u]", "tx_xsk_sent[%u]", "tx_xdp_xmit[%u]", "tx_xdp_xmit_errors[%u]"
 };
 
-static const char gve_gstrings_adminq_stats[][ETH_GSTRING_LEN] = {
+static const char gve_gstrings_adminq_stats[][ETH_GSTRING_LEN] __nonstring_array = {
 	"adminq_prod_cnt", "adminq_cmd_fail", "adminq_timeouts",
 	"adminq_describe_device_cnt", "adminq_cfg_device_resources_cnt",
 	"adminq_register_page_list_cnt", "adminq_unregister_page_list_cnt",
@@ -113,7 +113,7 @@ static void gve_get_strings(struct net_device *netdev, u32 stringset, u8 *data)
 						i);
 
 		for (i = 0; i < ARRAY_SIZE(gve_gstrings_adminq_stats); i++)
-			ethtool_puts(&s, gve_gstrings_adminq_stats[i]);
+			ethtool_cpy(&s, gve_gstrings_adminq_stats[i]);
 
 		break;
 
@@ -700,7 +700,7 @@ static int gve_set_priv_flags(struct net_device *netdev, u32 flags)
 
 		memset(priv->stats_report->stats, 0, (tx_stats_num + rx_stats_num) *
 				   sizeof(struct stats));
-		del_timer_sync(&priv->stats_report_timer);
+		timer_delete_sync(&priv->stats_report_timer);
 	}
 	return 0;
 }
@@ -793,9 +793,6 @@ static int gve_set_rxnfc(struct net_device *netdev, struct ethtool_rxnfc *cmd)
 	case ETHTOOL_SRXCLSRLDEL:
 		err = gve_del_flow_rule(priv, cmd);
 		break;
-	case ETHTOOL_SRXFH:
-		err = -EOPNOTSUPP;
-		break;
 	default:
 		err = -EOPNOTSUPP;
 		break;
@@ -829,9 +826,6 @@ static int gve_get_rxnfc(struct net_device *netdev, struct ethtool_rxnfc *cmd, u
 		break;
 	case ETHTOOL_GRXCLSRLALL:
 		err = gve_get_flow_rule_ids(priv, cmd, (u32 *)rule_locs);
-		break;
-	case ETHTOOL_GRXFH:
-		err = -EOPNOTSUPP;
 		break;
 	default:
 		err = -EOPNOTSUPP;

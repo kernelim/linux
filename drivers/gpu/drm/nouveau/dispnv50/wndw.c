@@ -556,14 +556,24 @@ nv50_wndw_prepare_fb(struct drm_plane *plane, struct drm_plane_state *state)
 		return ret;
 
 	if (wndw->ctxdma.parent) {
-		ctxdma = nv50_wndw_ctxdma_new(wndw, fb);
-		if (IS_ERR(ctxdma)) {
-			nouveau_bo_unpin(nvbo);
-			return PTR_ERR(ctxdma);
-		}
+		if (wndw->wndw.base.user.oclass < GB202_DISP_WINDOW_CHANNEL_DMA) {
+			ctxdma = nv50_wndw_ctxdma_new(wndw, fb);
+			if (IS_ERR(ctxdma)) {
+				nouveau_bo_unpin(nvbo);
+				return PTR_ERR(ctxdma);
+			}
 
-		if (asyw->visible)
-			asyw->image.handle[0] = ctxdma->object.handle;
+			if (asyw->visible)
+				asyw->image.handle[0] = ctxdma->object.handle;
+		} else {
+			/* No CTXDMAs on Blackwell. */
+			if (asyw->visible) {
+				/* "handle != NULL_HANDLE" is used to determine enable status
+				 * in a number of places, so fill in a fake object handle.
+				 */
+				asyw->image.handle[0] = NV50_DISP_HANDLE_WNDW_CTX(0);
+			}
+		}
 	}
 
 	ret = drm_gem_plane_helper_prepare_fb(plane, state);
@@ -573,7 +583,7 @@ nv50_wndw_prepare_fb(struct drm_plane *plane, struct drm_plane_state *state)
 	asyw->image.offset[0] = nvbo->offset;
 
 	if (wndw->func->prepare) {
-		asyh = nv50_head_atom_get(asyw->state.state, asyw->state.crtc);
+		asyh = nv50_head_atom_get_new(asyw->state.state, asyw->state.crtc);
 		if (IS_ERR(asyh))
 			return PTR_ERR(asyh);
 
@@ -776,23 +786,47 @@ nv50_wndw_destroy(struct drm_plane *plane)
 }
 
 /* This function assumes the format has already been validated against the plane
- * and the modifier was validated against the device-wides modifier list at FB
+ * and the modifier was validated against the device-wide modifier list at FB
  * creation time.
  */
 static bool nv50_plane_format_mod_supported(struct drm_plane *plane,
 					    u32 format, u64 modifier)
 {
 	struct nouveau_drm *drm = nouveau_drm(plane->dev);
+	const struct drm_format_info *info = drm_format_info(format);
 	uint8_t i;
 
+	/* All chipsets can display all formats in linear layout */
+	if (modifier == DRM_FORMAT_MOD_LINEAR)
+		return true;
+
 	if (drm->client.device.info.chipset < 0xc0) {
-		const struct drm_format_info *info = drm_format_info(format);
 		const uint8_t kind = (modifier >> 12) & 0xff;
 
 		if (!format) return false;
 
 		for (i = 0; i < info->num_planes; i++)
 			if ((info->cpp[i] != 4) && kind != 0x70) return false;
+	} else if (drm->client.device.info.chipset >= 0x1b2) {
+		const uint8_t slayout = ((modifier >> 22) & 0x1) |
+			((modifier >> 25) & 0x6);
+
+		if (!format)
+			return false;
+
+		/*
+		 * Note in practice this implies only formats where cpp is equal
+		 * for each plane, or >= 4 for all planes, are supported.
+		 */
+		for (i = 0; i < info->num_planes; i++) {
+			if (((info->cpp[i] == 2) && slayout != 3) ||
+			    ((info->cpp[i] == 1) && slayout != 2) ||
+			    ((info->cpp[i] >= 4) && slayout != 1))
+				return false;
+
+			/* 24-bit not supported. It has yet another layout */
+			WARN_ON(info->cpp[i] == 3);
+		}
 	}
 
 	return true;
@@ -901,6 +935,7 @@ nv50_wndw_new(struct nouveau_drm *drm, enum drm_plane_type type, int index,
 		int (*new)(struct nouveau_drm *, enum drm_plane_type,
 			   int, s32, struct nv50_wndw **);
 	} wndws[] = {
+		{ GB202_DISP_WINDOW_CHANNEL_DMA, 0, wndwca7e_new },
 		{ GA102_DISP_WINDOW_CHANNEL_DMA, 0, wndwc67e_new },
 		{ TU102_DISP_WINDOW_CHANNEL_DMA, 0, wndwc57e_new },
 		{ GV100_DISP_WINDOW_CHANNEL_DMA, 0, wndwc37e_new },

@@ -427,6 +427,14 @@ void hexdump(const char *prefix, const void *buf, size_t len);
 			goto goto_label;				\
 	})
 
+#define SYS_FAIL(goto_label, fmt, ...)					\
+	({								\
+		char cmd[1024];						\
+		snprintf(cmd, sizeof(cmd), fmt, ##__VA_ARGS__);		\
+		if (!ASSERT_NEQ(0, system(cmd), cmd))			\
+			goto goto_label;				\
+	})
+
 #define ALL_TO_DEV_NULL " >/dev/null 2>&1"
 
 #define SYS_NOFAIL(fmt, ...)						\
@@ -450,6 +458,34 @@ static inline __u64 ptr_to_u64(const void *ptr)
 static inline void *u64_to_ptr(__u64 ptr)
 {
 	return (void *) (unsigned long) ptr;
+}
+
+static inline __u32 id_from_prog_fd(int fd)
+{
+	struct bpf_prog_info prog_info = {};
+	__u32 prog_info_len = sizeof(prog_info);
+	int err;
+
+	err = bpf_obj_get_info_by_fd(fd, &prog_info, &prog_info_len);
+	if (!ASSERT_OK(err, "id_from_prog_fd"))
+		return 0;
+
+	ASSERT_NEQ(prog_info.id, 0, "prog_info.id");
+	return prog_info.id;
+}
+
+static inline __u32 id_from_link_fd(int fd)
+{
+	struct bpf_link_info link_info = {};
+	__u32 link_info_len = sizeof(link_info);
+	int err;
+
+	err = bpf_link_get_info_by_fd(fd, &link_info, &link_info_len);
+	if (!ASSERT_OK(err, "id_from_link_fd"))
+		return 0;
+
+	ASSERT_NEQ(link_info.id, 0, "link_info.id");
+	return link_info.id;
 }
 
 int bpf_find_map(const char *test, struct bpf_object *obj, const char *name);

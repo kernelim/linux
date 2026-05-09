@@ -1,3 +1,3 @@
-#1-
-0xe05d3438	crypto_destroy_tfm	vmlinux	EXPORT_SYMBOL_GPL	
+#2-
+0xaabf26de	crypto_destroy_tfm	vmlinux	EXPORT_SYMBOL_GPL	
 

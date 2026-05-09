@@ -41,6 +41,44 @@ config HOTPLUG_SMT
 config SMT_NUM_THREADS_DYNAMIC
 	bool
 
+config ARCH_SUPPORTS_SCHED_SMT
+	bool
+
+config ARCH_SUPPORTS_SCHED_CLUSTER
+	bool
+
+config ARCH_SUPPORTS_SCHED_MC
+	bool
+
+config SCHED_SMT
+	bool "SMT (Hyperthreading) scheduler support"
+	depends on ARCH_SUPPORTS_SCHED_SMT
+	default y
+	help
+	  Improves the CPU scheduler's decision making when dealing with
+	  MultiThreading at a cost of slightly increased overhead in some
+	  places. If unsure say N here.
+
+config SCHED_CLUSTER
+	bool "Cluster scheduler support"
+	depends on ARCH_SUPPORTS_SCHED_CLUSTER
+	default y
+	help
+	  Cluster scheduler support improves the CPU scheduler's decision
+	  making when dealing with machines that have clusters of CPUs.
+	  Cluster usually means a couple of CPUs which are placed closely
+	  by sharing mid-level caches, last-level cache tags or internal
+	  busses.
+
+config SCHED_MC
+	bool "Multi-Core Cache (MC) scheduler support"
+	depends on ARCH_SUPPORTS_SCHED_MC
+	default y
+	help
+	  Multi-core scheduler support improves the CPU scheduler's decision
+	  making when dealing with multi-core CPU chips at a cost of slightly
+	  increased overhead in some places. If unsure say N here.
+
 # Selected by HOTPLUG_CORE_SYNC_DEAD or HOTPLUG_CORE_SYNC_FULL
 config HOTPLUG_CORE_SYNC
 	bool
@@ -859,6 +897,13 @@ config ARCH_SUPPORTS_CFI_CLANG
 config ARCH_USES_CFI_TRAPS
 	bool
 
+config ARCH_USES_CFI_GENERIC_LLVM_PASS
+	bool
+	help
+	  An architecture should select this option if it uses the generic
+	  KCFIPass in LLVM to expand kCFI bundles instead of architecture-specific
+	  lowering.
+
 config CFI_CLANG
 	bool "Use Clang's Control Flow Integrity (CFI)"
 	depends on ARCH_SUPPORTS_CFI_CLANG
@@ -1517,6 +1562,14 @@ config STRICT_MODULE_RWX
 config ARCH_HAS_PHYS_TO_DMA
 	bool
 
+config ARCH_HAS_CPU_RESCTRL
+	bool
+	help
+	  An architecture selects this option to indicate that the necessary
+	  hooks are provided to support the common memory system usage
+	  monitoring and control interfaces provided by the 'resctrl'
+	  filesystem (see RESCTRL_FS).
+
 config HAVE_ARCH_COMPILER_H
 	bool
 	help
@@ -1575,7 +1628,11 @@ config HAVE_SPARSE_SYSCALL_NR
 	  entries at 4000, 5000 and 6000 locations. This option turns on syscall
 	  related optimizations for a given architecture.
 
-config ARCH_HAS_VDSO_DATA
+config ARCH_HAS_VDSO_ARCH_DATA
+	depends on GENERIC_VDSO_DATA_STORE
+	bool
+
+config ARCH_HAS_VDSO_TIME_DATA
 	bool
 
 config HAVE_STATIC_CALL
@@ -1734,5 +1791,8 @@ config ARCH_WANTS_PRE_LINK_VMLINUX
 	help
 	  An architecture can select this if it provides arch/<arch>/tools/Makefile
 	  with .arch.vmlinux.o target to be linked into vmlinux.
+
+config ARCH_HAS_CPU_ATTACK_VECTORS
+	bool
 
 endmenu

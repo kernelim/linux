@@ -99,12 +99,14 @@ static void stdio_restore_cleanup(void)
 	fflush(stdout);
 
 	if (env.subtest_state) {
-		fclose(env.subtest_state->stdout_saved);
+		if (env.subtest_state->stdout_saved)
+			fclose(env.subtest_state->stdout_saved);
 		env.subtest_state->stdout_saved = NULL;
 		stdout = env.test_state->stdout_saved;
 		stderr = env.test_state->stdout_saved;
 	} else {
-		fclose(env.test_state->stdout_saved);
+		if (env.test_state->stdout_saved)
+			fclose(env.test_state->stdout_saved);
 		env.test_state->stdout_saved = NULL;
 	}
 #endif
@@ -1365,10 +1367,19 @@ static int recv_message(int sock, struct msg *msg)
 	return ret;
 }
 
+static bool ns_is_needed(const char *test_name)
+{
+	if (strlen(test_name) < 3)
+		return false;
+
+	return !strncmp(test_name, "ns_", 3);
+}
+
 static void run_one_test(int test_num)
 {
 	struct prog_test_def *test = &prog_test_defs[test_num];
 	struct test_state *state = &test_states[test_num];
+	struct netns_obj *ns = NULL;
 
 	env.test = test;
 	env.test_state = state;
@@ -1376,10 +1387,13 @@ static void run_one_test(int test_num)
 	stdio_hijack(&state->log_buf, &state->log_cnt);
 
 	watchdog_start();
+	if (ns_is_needed(test->test_name))
+		ns = netns_new(test->test_name, true);
 	if (test->run_test)
 		test->run_test();
 	else if (test->run_serial_test)
 		test->run_serial_test();
+	netns_free(ns);
 	watchdog_stop();
 
 	/* ensure last sub-test is finalized properly */

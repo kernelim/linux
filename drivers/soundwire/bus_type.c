@@ -101,13 +101,20 @@ static int sdw_drv_probe(struct device *dev)
 	/*
 	 * attach to power domain but don't turn on (last arg)
 	 */
-	ret = dev_pm_domain_attach(dev, false);
+	ret = dev_pm_domain_attach(dev, 0);
 	if (ret)
 		return ret;
 
+	ret = ida_alloc_max(&slave->bus->slave_ida, SDW_FW_MAX_DEVICES - 1, GFP_KERNEL);
+	if (ret < 0) {
+		dev_err(dev, "Failed to allocated ID: %d\n", ret);
+		return ret;
+	}
+	slave->index = ret;
+
 	ret = drv->probe(slave, id);
 	if (ret) {
-		dev_pm_domain_detach(dev, false);
+		ida_free(&slave->bus->slave_ida, slave->index);
 		return ret;
 	}
 
@@ -172,7 +179,7 @@ static int sdw_drv_remove(struct device *dev)
 	if (drv->remove)
 		ret = drv->remove(slave);
 
-	dev_pm_domain_detach(dev, false);
+	ida_free(&slave->bus->slave_ida, slave->index);
 
 	return ret;
 }

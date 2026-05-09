@@ -1,15 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-only
 menu "VFIO support for PCI devices"
-	depends on PCI && MMU
+	depends on PCI
 
 config VFIO_PCI_CORE
 	tristate
 	select VFIO_VIRQFD
 	select IRQ_BYPASS_MANAGER
-
-config VFIO_PCI_MMAP
-	def_bool y if !S390
-	depends on VFIO_PCI_CORE
 
 config VFIO_PCI_INTX
 	def_bool y if !S390
@@ -58,6 +54,9 @@ config VFIO_PCI_ZDEV_KVM
 	  zPCI instructions.
 
 	  To enable s390x KVM vfio-pci extensions, say Y.
+
+config VFIO_PCI_DMABUF
+	def_bool y if VFIO_PCI_CORE && PCI_P2PDMA && DMA_SHARED_BUFFER
 
 source "drivers/vfio/pci/mlx5/Kconfig"
 

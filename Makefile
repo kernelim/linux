@@ -8,8 +8,8 @@ NAME = Baby Opossum Posse
 # DRM backport version
 #
 RHEL_DRM_VERSION = 6
-RHEL_DRM_PATCHLEVEL = 15
-RHEL_DRM_SUBLEVEL = 5
+RHEL_DRM_PATCHLEVEL = 18
+RHEL_DRM_SUBLEVEL = 
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"

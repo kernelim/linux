@@ -18,7 +18,7 @@
 #ifdef CONFIG_EXPOLINE_EXTERN
 	SYM_CODE_START(\name)
 #else
-	.pushsection .text.\name,"axG",@progbits,\name,comdat
+	.pushsection .text..\name,"axG",@progbits,\name,comdat
 	.globl \name
 	.hidden \name
 	.type \name,@function

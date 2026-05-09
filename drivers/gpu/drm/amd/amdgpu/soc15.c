@@ -584,6 +584,8 @@ soc15_asic_reset_method(struct amdgpu_device *adev)
 		 * Enable triggering of GPU reset only if specified
 		 * by module parameter.
 		 */
+		if (adev->pcie_reset_ctx.in_link_reset)
+			return AMD_RESET_METHOD_LINK;
 		if (amdgpu_gpu_recovery == 4 || amdgpu_gpu_recovery == 5)
 			return AMD_RESET_METHOD_MODE2;
 		else if (!(adev->flags & AMD_IS_APU))
@@ -640,6 +642,9 @@ asic_reset:
 	case AMD_RESET_METHOD_MODE2:
 		dev_info(adev->dev, "MODE2 reset\n");
 		return amdgpu_dpm_mode2_reset(adev);
+	case AMD_RESET_METHOD_LINK:
+		dev_info(adev->dev, "Link reset\n");
+		return amdgpu_device_link_reset(adev);
 	default:
 		dev_info(adev->dev, "MODE1 reset\n");
 		return amdgpu_device_mode1_reset(adev);
@@ -736,7 +741,6 @@ static void soc15_reg_base_init(struct amdgpu_device *adev)
 void soc15_set_virt_ops(struct amdgpu_device *adev)
 {
 	adev->virt.ops = &xgpu_ai_virt_ops;
-
 	/* init soc15 reg base early enough so we can
 	 * request request full access for sriov before
 	 * set_ip_blocks. */
@@ -1213,6 +1217,8 @@ static int soc15_common_early_init(struct amdgpu_ip_block *ip_block)
 			AMD_PG_SUPPORT_JPEG;
 		/*TODO: need a new external_rev_id for GC 9.4.4? */
 		adev->external_rev_id = adev->rev_id + 0x46;
+		if (amdgpu_ip_version(adev, GC_HWIP, 0) == IP_VERSION(9, 5, 0))
+			adev->external_rev_id = adev->rev_id + 0x50;
 		break;
 	default:
 		/* FIXME: not supported yet */

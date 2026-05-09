@@ -104,6 +104,7 @@ rules:
   - drivers/hid/hid-prodikeys.*: modules
   - drivers/hid/.*: modules-core
   - drivers/hte/.*: modules-core
+  - drivers/hv/mshv_root.*: modules-extra
   - drivers/hv/.*: modules-core
   - drivers/hwmon/asus_wmi_sensors.*: modules
   - drivers/hwmon/dell-smm-hwmon.*: modules
@@ -331,6 +332,7 @@ rules:
   - drivers/usb/gadget/function/usb_f_midi2.*: modules
   - drivers/usb/image/.*: modules
   - drivers/usb/misc/trancevibrator.*: modules-extra
+  - drivers/usb/misc/usbio.ko: modules-core
   - drivers/usb/misc/.*: modules
   - drivers/usb/serial/.*: modules
   - drivers/usb/typec/mux/nb7vpq904m.*: modules
@@ -371,6 +373,7 @@ rules:
   - fs/bcachefs/.*: modules-core
   - fs/befs/befs.*: modules-extra
   - fs/binfmt_misc.ko: modules-core
+  - fs/btrfs/.*: modules-internal
   - fs/cachefiles/.*: modules-core
   - fs/ceph/.*: modules-core
   - fs/coda/coda.*: modules-extra

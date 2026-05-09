@@ -98,13 +98,15 @@ enum ast_config_mode {
 	ast_use_defaults
 };
 
-#define AST_DRAM_512Mx16 0
-#define AST_DRAM_1Gx16   1
-#define AST_DRAM_512Mx32 2
-#define AST_DRAM_1Gx32   3
-#define AST_DRAM_2Gx16   6
-#define AST_DRAM_4Gx16   7
-#define AST_DRAM_8Gx16   8
+enum ast_dram_layout {
+	AST_DRAM_512Mx16 = 0,
+	AST_DRAM_1Gx16 = 1,
+	AST_DRAM_512Mx32 = 2,
+	AST_DRAM_1Gx32 = 3,
+	AST_DRAM_2Gx16 = 6,
+	AST_DRAM_4Gx16 = 7,
+	AST_DRAM_8Gx16 = 8,
+};
 
 /*
  * Hardware cursor
@@ -112,11 +114,8 @@ enum ast_config_mode {
 
 #define AST_MAX_HWC_WIDTH	64
 #define AST_MAX_HWC_HEIGHT	64
-
 #define AST_HWC_PITCH		(AST_MAX_HWC_WIDTH * SZ_2)
 #define AST_HWC_SIZE		(AST_MAX_HWC_HEIGHT * AST_HWC_PITCH)
-
-#define AST_HWC_SIGNATURE_SIZE	32
 
 /*
  * Planes
@@ -125,7 +124,6 @@ enum ast_config_mode {
 struct ast_plane {
 	struct drm_plane base;
 
-	void __iomem *vaddr;
 	u64 offset;
 	unsigned long size;
 };
@@ -176,14 +174,9 @@ struct ast_device {
 	enum ast_config_mode config_mode;
 	enum ast_chip chip;
 
-	uint32_t dram_bus_width;
-	uint32_t dram_type;
-	uint32_t mclk;
-
 	void __iomem	*vram;
 	unsigned long	vram_base;
 	unsigned long	vram_size;
-	unsigned long	vram_fb_available;
 
 	struct mutex modeset_lock; /* Protects access to modeset I/O registers in ioregs */
 
@@ -289,13 +282,13 @@ static inline void __ast_write8_i(void __iomem *addr, u32 reg, u8 index, u8 val)
 	__ast_write8(addr, reg + 1, val);
 }
 
-static inline void __ast_write8_i_masked(void __iomem *addr, u32 reg, u8 index, u8 read_mask,
+static inline void __ast_write8_i_masked(void __iomem *addr, u32 reg, u8 index, u8 preserve_mask,
 					 u8 val)
 {
-	u8 tmp = __ast_read8_i_masked(addr, reg, index, read_mask);
+	u8 tmp = __ast_read8_i_masked(addr, reg, index, preserve_mask);
 
-	tmp |= val;
-	__ast_write8_i(addr, reg, index, tmp);
+	val &= ~preserve_mask;
+	__ast_write8_i(addr, reg, index, tmp | val);
 }
 
 static inline u32 ast_read32(struct ast_device *ast, u32 reg)
@@ -339,14 +332,6 @@ static inline void ast_set_index_reg_mask(struct ast_device *ast, u32 base, u8 i
 {
 	__ast_write8_i_masked(ast->ioregs, base, index, preserve_mask, val);
 }
-
-#define AST_VIDMEM_SIZE_8M    0x00800000
-#define AST_VIDMEM_SIZE_16M   0x01000000
-#define AST_VIDMEM_SIZE_32M   0x02000000
-#define AST_VIDMEM_SIZE_64M   0x04000000
-#define AST_VIDMEM_SIZE_128M  0x08000000
-
-#define AST_VIDMEM_DEFAULT_SIZE AST_VIDMEM_SIZE_8M
 
 struct ast_vbios_stdtable {
 	u8 misc;
@@ -430,16 +415,32 @@ struct ast_crtc_state {
 
 int ast_mm_init(struct ast_device *ast);
 
+/* ast_2000.c */
+int ast_2000_post(struct ast_device *ast);
+
+/* ast_2100.c */
+int ast_2100_post(struct ast_device *ast);
+
+/* ast_2300.c */
+int ast_2300_post(struct ast_device *ast);
+
+/* ast_2500.c */
+void ast_2500_patch_ahb(void __iomem *regs);
+int ast_2500_post(struct ast_device *ast);
+
+/* ast_2600.c */
+int ast_2600_post(struct ast_device *ast);
+
 /* ast post */
 int ast_post_gpu(struct ast_device *ast);
 u32 ast_mindwm(struct ast_device *ast, u32 r);
 void ast_moutdwm(struct ast_device *ast, u32 r, u32 v);
-void ast_patch_ahb_2500(void __iomem *regs);
 
 int ast_vga_output_init(struct ast_device *ast);
 int ast_sil164_output_init(struct ast_device *ast);
 
 /* ast_cursor.c */
+long ast_cursor_vram_offset(struct ast_device *ast);
 int ast_cursor_plane_init(struct ast_device *ast);
 
 /* ast dp501 */
@@ -454,11 +455,12 @@ int ast_astdp_output_init(struct ast_device *ast);
 /* ast_mode.c */
 int ast_mode_config_init(struct ast_device *ast);
 int ast_plane_init(struct drm_device *dev, struct ast_plane *ast_plane,
-		   void __iomem *vaddr, u64 offset, unsigned long size,
+		   u64 offset, unsigned long size,
 		   uint32_t possible_crtcs,
 		   const struct drm_plane_funcs *funcs,
 		   const uint32_t *formats, unsigned int format_count,
 		   const uint64_t *format_modifiers,
 		   enum drm_plane_type type);
+void __iomem *ast_plane_vaddr(struct ast_plane *ast);
 
 #endif

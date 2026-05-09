@@ -10,7 +10,7 @@
 
 static void RxPktPendingTimeout(struct timer_list *t)
 {
-	struct rx_ts_record *ts = from_timer(ts, t, rx_pkt_pending_timer);
+	struct rx_ts_record *ts = timer_container_of(ts, t, rx_pkt_pending_timer);
 	struct rtllib_device *ieee = container_of(ts, struct rtllib_device,
 						  rx_ts_records[ts->num]);
 
@@ -82,7 +82,7 @@ static void RxPktPendingTimeout(struct timer_list *t)
 
 static void TsAddBaProcess(struct timer_list *t)
 {
-	struct tx_ts_record *ts = from_timer(ts, t, ts_add_ba_timer);
+	struct tx_ts_record *ts = timer_container_of(ts, t, ts_add_ba_timer);
 	u8 num = ts->num;
 	struct rtllib_device *ieee = container_of(ts, struct rtllib_device,
 				     tx_ts_records[num]);

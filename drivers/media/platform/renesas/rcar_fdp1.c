@@ -635,6 +635,11 @@ static inline struct fdp1_ctx *fh_to_ctx(struct v4l2_fh *fh)
 	return container_of(fh, struct fdp1_ctx, fh);
 }
 
+static inline struct fdp1_ctx *file_to_ctx(struct file *filp)
+{
+	return fh_to_ctx(file_to_v4l2_fh(filp));
+}
+
 static struct fdp1_q_data *get_q_data(struct fdp1_ctx *ctx,
 					 enum v4l2_buf_type type)
 {
@@ -2088,7 +2093,6 @@ static int fdp1_open(struct file *file)
 	}
 
 	v4l2_fh_init(&ctx->fh, video_devdata(file));
-	file->private_data = &ctx->fh;
 	ctx->fdp1 = fdp1;
 
 	/* Initialise Queues */
@@ -2137,7 +2141,7 @@ static int fdp1_open(struct file *file)
 	if (ret < 0)
 		goto error_pm;
 
-	v4l2_fh_add(&ctx->fh);
+	v4l2_fh_add(&ctx->fh, file);
 
 	dprintk(fdp1, "Created instance: %p, m2m_ctx: %p\n",
 		ctx, ctx->fh.m2m_ctx);
@@ -2158,11 +2162,11 @@ done:
 static int fdp1_release(struct file *file)
 {
 	struct fdp1_dev *fdp1 = video_drvdata(file);
-	struct fdp1_ctx *ctx = fh_to_ctx(file->private_data);
+	struct fdp1_ctx *ctx = file_to_ctx(file);
 
 	dprintk(fdp1, "Releasing instance %p\n", ctx);
 
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 	v4l2_ctrl_handler_free(&ctx->hdl);
 	mutex_lock(&fdp1->dev_mutex);

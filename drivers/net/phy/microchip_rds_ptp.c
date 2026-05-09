@@ -224,10 +224,6 @@ static int mchp_rds_ptp_perout(struct ptp_clock_info *ptpci,
 	struct phy_device *phydev = clock->phydev;
 	int ret, event_pin, pulsewidth;
 
-	/* Reject requests with unsupported flags */
-	if (perout->flags & ~PTP_PEROUT_DUTY_CYCLE)
-		return -EOPNOTSUPP;
-
 	event_pin = ptp_find_pin(clock->ptp_clock, PTP_PF_PEROUT,
 				 perout->index);
 	if (event_pin != clock->event_pin)
@@ -480,9 +476,9 @@ static bool mchp_rds_ptp_rxtstamp(struct mii_timestamper *mii_ts,
 	return true;
 }
 
-static int mchp_rds_ptp_hwtstamp(struct mii_timestamper *mii_ts,
-				 struct kernel_hwtstamp_config *config,
-				 struct netlink_ext_ack *extack)
+static int mchp_rds_ptp_hwtstamp_set(struct mii_timestamper *mii_ts,
+				     struct kernel_hwtstamp_config *config,
+				     struct netlink_ext_ack *extack)
 {
 	struct mchp_rds_ptp_clock *clock =
 				container_of(mii_ts, struct mchp_rds_ptp_clock,
@@ -1259,6 +1255,7 @@ struct mchp_rds_ptp_clock *mchp_rds_ptp_probe(struct phy_device *phydev, u8 mmd,
 	clock->caps.pps            = 0;
 	clock->caps.n_pins         = MCHP_RDS_PTP_N_PIN;
 	clock->caps.n_per_out      = MCHP_RDS_PTP_N_PEROUT;
+	clock->caps.supported_perout_flags = PTP_PEROUT_DUTY_CYCLE;
 	clock->caps.pin_config     = clock->pin_config;
 	clock->caps.adjfine        = mchp_rds_ptp_ltc_adjfine;
 	clock->caps.adjtime        = mchp_rds_ptp_ltc_adjtime;
@@ -1284,7 +1281,7 @@ struct mchp_rds_ptp_clock *mchp_rds_ptp_probe(struct phy_device *phydev, u8 mmd,
 
 	clock->mii_ts.rxtstamp = mchp_rds_ptp_rxtstamp;
 	clock->mii_ts.txtstamp = mchp_rds_ptp_txtstamp;
-	clock->mii_ts.hwtstamp = mchp_rds_ptp_hwtstamp;
+	clock->mii_ts.hwtstamp_set = mchp_rds_ptp_hwtstamp_set;
 	clock->mii_ts.ts_info = mchp_rds_ptp_ts_info;
 
 	phydev->mii_ts = &clock->mii_ts;

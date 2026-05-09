@@ -253,7 +253,7 @@ static int dump_btf_type(const struct btf *btf, __u32 id,
 				if (btf_kflag(t))
 					printf("\n\t'%s' val=%d", name, v->val);
 				else
-					printf("\n\t'%s' val=%u", name, v->val);
+					printf("\n\t'%s' val=%u", name, (__u32)v->val);
 			}
 		}
 		if (json_output)
@@ -905,7 +905,8 @@ static int do_dump(int argc, char **argv)
 			return -1;
 		}
 
-		fd = map_parse_fd_and_info(&argc, &argv, &info, &len);
+		fd = map_parse_fd_and_info(&argc, &argv, &info, &len,
+					   BPF_F_RDONLY);
 		if (fd < 0)
 			return -1;
 
@@ -1022,7 +1023,7 @@ static int do_dump(int argc, char **argv)
 			for (i = 0; i < root_type_cnt; i++) {
 				if (root_type_ids[i] == root_id) {
 					err = -EINVAL;
-					p_err("duplicate root_id %d supplied", root_id);
+					p_err("duplicate root_id %u supplied", root_id);
 					goto done;
 				}
 			}
@@ -1118,9 +1119,12 @@ build_btf_type_table(struct hashmap *tab, enum bpf_obj_type type,
 		[BPF_OBJ_PROG]		= "prog",
 		[BPF_OBJ_MAP]		= "map",
 	};
+	LIBBPF_OPTS(bpf_get_fd_by_id_opts, opts_ro);
 	__u32 btf_id, id = 0;
 	int err;
 	int fd;
+
+	opts_ro.open_flags = BPF_F_RDONLY;
 
 	while (true) {
 		switch (type) {
@@ -1132,7 +1136,7 @@ build_btf_type_table(struct hashmap *tab, enum bpf_obj_type type,
 			break;
 		default:
 			err = -1;
-			p_err("unexpected object type: %d", type);
+			p_err("unexpected object type: %u", type);
 			goto err_free;
 		}
 		if (err) {
@@ -1151,11 +1155,11 @@ build_btf_type_table(struct hashmap *tab, enum bpf_obj_type type,
 			fd = bpf_prog_get_fd_by_id(id);
 			break;
 		case BPF_OBJ_MAP:
-			fd = bpf_map_get_fd_by_id(id);
+			fd = bpf_map_get_fd_by_id_opts(id, &opts_ro);
 			break;
 		default:
 			err = -1;
-			p_err("unexpected object type: %d", type);
+			p_err("unexpected object type: %u", type);
 			goto err_free;
 		}
 		if (fd < 0) {
@@ -1188,7 +1192,7 @@ build_btf_type_table(struct hashmap *tab, enum bpf_obj_type type,
 			break;
 		default:
 			err = -1;
-			p_err("unexpected object type: %d", type);
+			p_err("unexpected object type: %u", type);
 			goto err_free;
 		}
 		if (!btf_id)
@@ -1254,12 +1258,12 @@ show_btf_plain(struct bpf_btf_info *info, int fd,
 
 	n = 0;
 	hashmap__for_each_key_entry(btf_prog_table, entry, info->id) {
-		printf("%s%lu", n++ == 0 ? "  prog_ids " : ",", entry->value);
+		printf("%s%lu", n++ == 0 ? "  prog_ids " : ",", (unsigned long)entry->value);
 	}
 
 	n = 0;
 	hashmap__for_each_key_entry(btf_map_table, entry, info->id) {
-		printf("%s%lu", n++ == 0 ? "  map_ids " : ",", entry->value);
+		printf("%s%lu", n++ == 0 ? "  map_ids " : ",", (unsigned long)entry->value);
 	}
 
 	emit_obj_refs_plain(refs_table, info->id, "\n\tpids ");

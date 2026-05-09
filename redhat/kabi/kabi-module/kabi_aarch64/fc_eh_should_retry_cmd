@@ -1,3 +1,3 @@
-#1-
-0x32b24340	fc_eh_should_retry_cmd	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL_GPL	
+#2-
+0x8a2b611c	fc_eh_should_retry_cmd	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL_GPL	
 

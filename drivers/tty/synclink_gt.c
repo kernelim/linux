@@ -407,9 +407,9 @@ static void  wr_reg32(struct slgt_info *info, unsigned int addr, __u32 value);
 
 static void  msc_set_vcr(struct slgt_info *info);
 
-static int  startup(struct slgt_info *info);
+static int  startup_hw(struct slgt_info *info);
 static int  block_til_ready(struct tty_struct *tty, struct file * filp,struct slgt_info *info);
-static void shutdown(struct slgt_info *info);
+static void shutdown_hw(struct slgt_info *info);
 static void program_hw(struct slgt_info *info);
 static void change_params(struct slgt_info *info);
 
@@ -622,7 +622,7 @@ static int open(struct tty_struct *tty, struct file *filp)
 
 	if (info->port.count == 1) {
 		/* 1st open on this device, init hardware */
-		retval = startup(info);
+		retval = startup_hw(info);
 		if (retval < 0) {
 			mutex_unlock(&info->port.mutex);
 			goto cleanup;
@@ -666,7 +666,7 @@ static void close(struct tty_struct *tty, struct file *filp)
 	flush_buffer(tty);
 	tty_ldisc_flush(tty);
 
-	shutdown(info);
+	shutdown_hw(info);
 	mutex_unlock(&info->port.mutex);
 
 	tty_port_close_end(&info->port, tty);
@@ -687,7 +687,7 @@ static void hangup(struct tty_struct *tty)
 	flush_buffer(tty);
 
 	mutex_lock(&info->port.mutex);
-	shutdown(info);
+	shutdown_hw(info);
 
 	spin_lock_irqsave(&info->port.lock, flags);
 	info->port.count = 0;
@@ -1445,7 +1445,7 @@ static int hdlcdev_open(struct net_device *dev)
 	spin_unlock_irqrestore(&info->netlock, flags);
 
 	/* claim resources and init adapter */
-	if ((rc = startup(info)) != 0) {
+	if ((rc = startup_hw(info)) != 0) {
 		spin_lock_irqsave(&info->netlock, flags);
 		info->netcount=0;
 		spin_unlock_irqrestore(&info->netlock, flags);
@@ -1455,7 +1455,7 @@ static int hdlcdev_open(struct net_device *dev)
 	/* generic HDLC layer open processing */
 	rc = hdlc_open(dev);
 	if (rc) {
-		shutdown(info);
+		shutdown_hw(info);
 		spin_lock_irqsave(&info->netlock, flags);
 		info->netcount = 0;
 		spin_unlock_irqrestore(&info->netlock, flags);
@@ -1499,7 +1499,7 @@ static int hdlcdev_close(struct net_device *dev)
 	netif_stop_queue(dev);
 
 	/* shutdown adapter and release resources */
-	shutdown(info);
+	shutdown_hw(info);
 
 	hdlc_close(dev);
 
@@ -2220,7 +2220,7 @@ static void isr_txeom(struct slgt_info *info, unsigned short status)
 		}
 		info->tx_active = false;
 
-		del_timer(&info->tx_timer);
+		timer_delete(&info->tx_timer);
 
 		if (info->params.mode != MGSL_MODE_ASYNC && info->drop_rts_on_tx_done) {
 			info->signals &= ~SerialSignal_RTS;
@@ -2328,7 +2328,7 @@ static irqreturn_t slgt_interrupt(int dummy, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static int startup(struct slgt_info *info)
+static int startup_hw(struct slgt_info *info)
 {
 	DBGINFO(("%s startup\n", info->device_name));
 
@@ -2361,7 +2361,7 @@ static int startup(struct slgt_info *info)
 /*
  *  called by close() and hangup() to shutdown hardware
  */
-static void shutdown(struct slgt_info *info)
+static void shutdown_hw(struct slgt_info *info)
 {
 	unsigned long flags;
 
@@ -2375,8 +2375,8 @@ static void shutdown(struct slgt_info *info)
 	wake_up_interruptible(&info->status_event_wait_q);
 	wake_up_interruptible(&info->event_wait_q);
 
-	del_timer_sync(&info->tx_timer);
-	del_timer_sync(&info->rx_timer);
+	timer_delete_sync(&info->tx_timer);
+	timer_delete_sync(&info->rx_timer);
 
 	kfree(info->tx_buf);
 	info->tx_buf = NULL;
@@ -3955,7 +3955,7 @@ static void tx_stop(struct slgt_info *info)
 {
 	unsigned short val;
 
-	del_timer(&info->tx_timer);
+	timer_delete(&info->tx_timer);
 
 	tdma_reset(info);
 
@@ -5002,7 +5002,7 @@ static int adapter_test(struct slgt_info *info)
  */
 static void tx_timeout(struct timer_list *t)
 {
-	struct slgt_info *info = from_timer(info, t, tx_timer);
+	struct slgt_info *info = timer_container_of(info, t, tx_timer);
 	unsigned long flags;
 
 	DBGINFO(("%s tx_timeout\n", info->device_name));
@@ -5026,7 +5026,7 @@ static void tx_timeout(struct timer_list *t)
  */
 static void rx_timeout(struct timer_list *t)
 {
-	struct slgt_info *info = from_timer(info, t, rx_timer);
+	struct slgt_info *info = timer_container_of(info, t, rx_timer);
 	unsigned long flags;
 
 	DBGINFO(("%s rx_timeout\n", info->device_name));

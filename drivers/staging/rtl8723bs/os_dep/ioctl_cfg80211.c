@@ -1308,7 +1308,8 @@ exit:
 	return ret;
 }
 
-static int cfg80211_rtw_set_wiphy_params(struct wiphy *wiphy, u32 changed)
+static int cfg80211_rtw_set_wiphy_params(struct wiphy *wiphy, int radio_idx,
+					 u32 changed)
 {
 	return 0;
 }
@@ -1805,7 +1806,7 @@ static int cfg80211_rtw_disconnect(struct wiphy *wiphy, struct net_device *ndev,
 }
 
 static int cfg80211_rtw_set_txpower(struct wiphy *wiphy,
-				    struct wireless_dev *wdev,
+				    struct wireless_dev *wdev, int radio_idx,
 				    enum nl80211_tx_power_setting type, int mbm)
 {
 	return 0;
@@ -1813,6 +1814,7 @@ static int cfg80211_rtw_set_txpower(struct wiphy *wiphy,
 
 static int cfg80211_rtw_get_txpower(struct wiphy *wiphy,
 				    struct wireless_dev *wdev,
+				    int radio_idx,
 				    unsigned int link_id, int *dbm)
 {
 	*dbm = (12);
@@ -2449,13 +2451,6 @@ exit:
 	return ret;
 }
 
-static int	cfg80211_rtw_change_bss(struct wiphy *wiphy,
-					struct net_device *ndev,
-					struct bss_parameters *params)
-{
-	return 0;
-}
-
 void rtw_cfg80211_rx_action(struct adapter *adapter, u8 *frame, uint frame_len, const char *msg)
 {
 	s32 freq;
@@ -2712,7 +2707,6 @@ static struct cfg80211_ops rtw_cfg80211_ops = {
 	.del_station = cfg80211_rtw_del_station,
 	.change_station = cfg80211_rtw_change_station,
 	.dump_station = cfg80211_rtw_dump_station,
-	.change_bss = cfg80211_rtw_change_bss,
 
 	.mgmt_tx = cfg80211_rtw_mgmt_tx,
 };

@@ -395,8 +395,7 @@ static int rga_open(struct file *file)
 		return ret;
 	}
 	v4l2_fh_init(&ctx->fh, video_devdata(file));
-	file->private_data = &ctx->fh;
-	v4l2_fh_add(&ctx->fh);
+	v4l2_fh_add(&ctx->fh, file);
 
 	rga_setup_ctrls(ctx);
 
@@ -411,8 +410,7 @@ static int rga_open(struct file *file)
 
 static int rga_release(struct file *file)
 {
-	struct rga_ctx *ctx =
-		container_of(file->private_data, struct rga_ctx, fh);
+	struct rga_ctx *ctx = file_to_rga_ctx(file);
 	struct rockchip_rga *rga = ctx->rga;
 
 	mutex_lock(&rga->mutex);
@@ -420,7 +418,7 @@ static int rga_release(struct file *file)
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
 
 	v4l2_ctrl_handler_free(&ctx->ctrl_handler);
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 	kfree(ctx);
 
@@ -448,7 +446,7 @@ vidioc_querycap(struct file *file, void *priv, struct v4l2_capability *cap)
 	return 0;
 }
 
-static int vidioc_enum_fmt(struct file *file, void *prv, struct v4l2_fmtdesc *f)
+static int vidioc_enum_fmt(struct file *file, void *priv, struct v4l2_fmtdesc *f)
 {
 	struct rga_fmt *fmt;
 
@@ -461,7 +459,7 @@ static int vidioc_enum_fmt(struct file *file, void *prv, struct v4l2_fmtdesc *f)
 	return 0;
 }
 
-static int vidioc_g_fmt(struct file *file, void *prv, struct v4l2_format *f)
+static int vidioc_g_fmt(struct file *file, void *priv, struct v4l2_format *f)
 {
 	struct v4l2_pix_format_mplane *pix_fmt = &f->fmt.pix_mp;
 	struct rga_ctx *ctx = prv;
@@ -483,7 +481,7 @@ static int vidioc_g_fmt(struct file *file, void *prv, struct v4l2_format *f)
 	return 0;
 }
 
-static int vidioc_try_fmt(struct file *file, void *prv, struct v4l2_format *f)
+static int vidioc_try_fmt(struct file *file, void *priv, struct v4l2_format *f)
 {
 	struct v4l2_pix_format_mplane *pix_fmt = &f->fmt.pix_mp;
 	struct rga_fmt *fmt;
@@ -503,7 +501,7 @@ static int vidioc_try_fmt(struct file *file, void *prv, struct v4l2_format *f)
 	return 0;
 }
 
-static int vidioc_s_fmt(struct file *file, void *prv, struct v4l2_format *f)
+static int vidioc_s_fmt(struct file *file, void *priv, struct v4l2_format *f)
 {
 	struct v4l2_pix_format_mplane *pix_fmt = &f->fmt.pix_mp;
 	struct rga_ctx *ctx = prv;
@@ -516,7 +514,7 @@ static int vidioc_s_fmt(struct file *file, void *prv, struct v4l2_format *f)
 	/* Adjust all values accordingly to the hardware capabilities
 	 * and chosen format.
 	 */
-	ret = vidioc_try_fmt(file, prv, f);
+	ret = vidioc_try_fmt(file, priv, f);
 	if (ret)
 		return ret;
 	vq = v4l2_m2m_get_vq(ctx->fh.m2m_ctx, f->type);
@@ -560,7 +558,7 @@ static int vidioc_s_fmt(struct file *file, void *prv, struct v4l2_format *f)
 	return 0;
 }
 
-static int vidioc_g_selection(struct file *file, void *prv,
+static int vidioc_g_selection(struct file *file, void *priv,
 			      struct v4l2_selection *s)
 {
 	struct rga_ctx *ctx = prv;
@@ -608,7 +606,7 @@ static int vidioc_g_selection(struct file *file, void *prv,
 	return 0;
 }
 
-static int vidioc_s_selection(struct file *file, void *prv,
+static int vidioc_s_selection(struct file *file, void *priv,
 			      struct v4l2_selection *s)
 {
 	struct rga_ctx *ctx = prv;

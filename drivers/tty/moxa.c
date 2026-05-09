@@ -1416,7 +1416,7 @@ static void __exit moxa_exit(void)
 		if (moxa_boards[i].ready)
 			moxa_board_deinit(&moxa_boards[i]);
 
-	del_timer_sync(&moxaTimer);
+	timer_delete_sync(&moxaTimer);
 
 	tty_unregister_driver(moxaDriver);
 	tty_driver_kref_put(moxaDriver);

@@ -190,7 +190,7 @@ bool kgdb_nmi_poll_knock(void)
  */
 static void kgdb_nmi_tty_receiver(struct timer_list *t)
 {
-	struct kgdb_nmi_tty_priv *priv = from_timer(priv, t, timer);
+	struct kgdb_nmi_tty_priv *priv = timer_container_of(priv, t, timer);
 	char ch;
 
 	priv->timer.expires = jiffies + (HZ/100);

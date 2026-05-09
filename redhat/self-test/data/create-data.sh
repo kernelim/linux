@@ -51,6 +51,7 @@ do
 			# UPSTREAM is the base merge commit and can change from day-to-day as
 			# the tree is changed.
 			# RHEL_RELEASE can change build-to-build.
+			# DERIVATIVE_BUILD and DERIVATIVE_VERSION can change build-to-build.
 			# SHELL can change depending on user's environment
 			# RHGITURL may change depending on the user's method of cloning
 			# RHDISTDATADIR will change based on these tests
@@ -59,6 +60,8 @@ do
 			make RHSELFTESTDATA=1 DIST="${DIST}" DISTRO="${DISTRO}" HEAD=${commit} dist-dump-variables | grep "=" |\
 				grep -v -w BUILD_TARGET |\
 				grep -v -w CURDIR |\
+				grep -v -w DERIVATIVE_BUILD |\
+				grep -v -w DERIVATIVE_VERSION |\
 				grep -v -w UPSTREAM |\
 				grep -v -w RHEL_RELEASE |\
 				grep -v -w SHELL |\

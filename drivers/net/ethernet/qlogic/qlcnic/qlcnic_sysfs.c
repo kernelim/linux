@@ -1217,7 +1217,6 @@ static const struct bin_attribute bin_attr_pci_config = {
 	.attr = { .name = "pci_config", .mode = 0644 },
 	.size = 0,
 	.read = qlcnic_sysfs_read_pci_config,
-	.write = NULL,
 };
 
 static const struct bin_attribute bin_attr_port_stats = {

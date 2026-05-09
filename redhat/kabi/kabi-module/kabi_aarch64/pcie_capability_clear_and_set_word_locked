@@ -1,3 +1,3 @@
-#1-
-0x92e84d6c	pcie_capability_clear_and_set_word_locked	vmlinux	EXPORT_SYMBOL	
+#2-
+0xaac57f85	pcie_capability_clear_and_set_word_locked	vmlinux	EXPORT_SYMBOL	
 

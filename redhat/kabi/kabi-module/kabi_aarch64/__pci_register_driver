@@ -1,3 +1,3 @@
-#1-
-0x973e70a1	__pci_register_driver	vmlinux	EXPORT_SYMBOL	
+#2-
+0x08857645	__pci_register_driver	vmlinux	EXPORT_SYMBOL	
 

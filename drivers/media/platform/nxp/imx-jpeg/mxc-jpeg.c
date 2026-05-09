@@ -617,6 +617,11 @@ static inline struct mxc_jpeg_ctx *mxc_jpeg_fh_to_ctx(struct v4l2_fh *fh)
 	return container_of(fh, struct mxc_jpeg_ctx, fh);
 }
 
+static inline struct mxc_jpeg_ctx *mxc_jpeg_file_to_ctx(struct file *filp)
+{
+	return mxc_jpeg_fh_to_ctx(file_to_v4l2_fh(filp));
+}
+
 static int enum_fmt(const struct mxc_jpeg_fmt *mxc_formats, int n,
 		    struct v4l2_fmtdesc *f, u32 type)
 {
@@ -1522,7 +1527,7 @@ end:
 static int mxc_jpeg_decoder_cmd(struct file *file, void *priv,
 				struct v4l2_decoder_cmd *cmd)
 {
-	struct v4l2_fh *fh = file->private_data;
+	struct v4l2_fh *fh = file_to_v4l2_fh(file);
 	struct mxc_jpeg_ctx *ctx = mxc_jpeg_fh_to_ctx(fh);
 	unsigned long flags;
 	int ret;
@@ -1555,7 +1560,7 @@ static int mxc_jpeg_decoder_cmd(struct file *file, void *priv,
 static int mxc_jpeg_encoder_cmd(struct file *file, void *priv,
 				struct v4l2_encoder_cmd *cmd)
 {
-	struct v4l2_fh *fh = file->private_data;
+	struct v4l2_fh *fh = file_to_v4l2_fh(file);
 	struct mxc_jpeg_ctx *ctx = mxc_jpeg_fh_to_ctx(fh);
 	unsigned long flags;
 	int ret;
@@ -2103,8 +2108,7 @@ static int mxc_jpeg_open(struct file *file)
 	}
 
 	v4l2_fh_init(&ctx->fh, mxc_vfd);
-	file->private_data = &ctx->fh;
-	v4l2_fh_add(&ctx->fh);
+	v4l2_fh_add(&ctx->fh, file);
 
 	ctx->mxc_jpeg = mxc_jpeg;
 
@@ -2137,7 +2141,7 @@ static int mxc_jpeg_open(struct file *file)
 err_ctrls_setup:
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
 error:
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 	mutex_unlock(&mxc_jpeg->lock);
 free:
@@ -2638,7 +2642,7 @@ static const struct v4l2_ioctl_ops mxc_jpeg_ioctl_ops = {
 static int mxc_jpeg_release(struct file *file)
 {
 	struct mxc_jpeg_dev *mxc_jpeg = video_drvdata(file);
-	struct mxc_jpeg_ctx *ctx = mxc_jpeg_fh_to_ctx(file->private_data);
+	struct mxc_jpeg_ctx *ctx = mxc_jpeg_file_to_ctx(file);
 	struct device *dev = mxc_jpeg->dev;
 
 	mutex_lock(&mxc_jpeg->lock);
@@ -2650,7 +2654,7 @@ static int mxc_jpeg_release(struct file *file)
 			ctx->slot);
 	v4l2_ctrl_handler_free(&ctx->ctrl_handler);
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 	kfree(ctx);
 	mutex_unlock(&mxc_jpeg->lock);

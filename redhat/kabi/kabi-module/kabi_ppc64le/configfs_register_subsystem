@@ -1,3 +1,3 @@
-#1-
-0x73dca66b	configfs_register_subsystem	vmlinux	EXPORT_SYMBOL	
+#2-
+0x21b828ce	configfs_register_subsystem	vmlinux	EXPORT_SYMBOL	
 

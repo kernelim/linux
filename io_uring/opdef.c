@@ -7,6 +7,7 @@
 #include <linux/fs.h>
 #include <linux/file.h>
 #include <linux/io_uring.h>
+#include <linux/io_uring/cmd.h>
 
 #include "io_uring.h"
 #include "opdef.h"
@@ -103,7 +104,7 @@ const struct io_issue_def io_issue_defs[] = {
 		.iopoll_queue		= 1,
 		.async_size		= sizeof(struct io_async_rw),
 		.prep			= io_prep_read_fixed,
-		.issue			= io_read,
+		.issue			= io_read_fixed,
 	},
 	[IORING_OP_WRITE_FIXED] = {
 		.needs_file		= 1,
@@ -117,7 +118,7 @@ const struct io_issue_def io_issue_defs[] = {
 		.iopoll_queue		= 1,
 		.async_size		= sizeof(struct io_async_rw),
 		.prep			= io_prep_write_fixed,
-		.issue			= io_write,
+		.issue			= io_write_fixed,
 	},
 	[IORING_OP_POLL_ADD] = {
 		.needs_file		= 1,
@@ -414,7 +415,7 @@ const struct io_issue_def io_issue_defs[] = {
 		.plug			= 1,
 		.iopoll			= 1,
 		.iopoll_queue		= 1,
-		.async_size		= 2 * sizeof(struct io_uring_sqe),
+		.async_size		= sizeof(struct io_async_cmd),
 		.prep			= io_uring_cmd_prep,
 		.issue			= io_uring_cmd,
 	},
@@ -514,6 +515,41 @@ const struct io_issue_def io_issue_defs[] = {
 #else
 		.prep			= io_eopnotsupp_prep,
 #endif
+	},
+	[IORING_OP_RECV_ZC] = {
+		.prep			= io_eopnotsupp_prep,
+	},
+	[IORING_OP_EPOLL_WAIT] = {
+		.prep			= io_eopnotsupp_prep,
+	},
+	[IORING_OP_READV_FIXED] = {
+		.needs_file		= 1,
+		.unbound_nonreg_file	= 1,
+		.pollin			= 1,
+		.plug			= 1,
+		.audit_skip		= 1,
+		.ioprio			= 1,
+		.iopoll			= 1,
+		.iopoll_queue		= 1,
+		.vectored		= 1,
+		.async_size		= sizeof(struct io_async_rw),
+		.prep			= io_prep_readv_fixed,
+		.issue			= io_read,
+	},
+	[IORING_OP_WRITEV_FIXED] = {
+		.needs_file		= 1,
+		.hash_reg_file		= 1,
+		.unbound_nonreg_file	= 1,
+		.pollout		= 1,
+		.plug			= 1,
+		.audit_skip		= 1,
+		.ioprio			= 1,
+		.iopoll			= 1,
+		.iopoll_queue		= 1,
+		.vectored		= 1,
+		.async_size		= sizeof(struct io_async_rw),
+		.prep			= io_prep_writev_fixed,
+		.issue			= io_write,
 	},
 };
 
@@ -641,6 +677,7 @@ const struct io_cold_def io_cold_defs[] = {
 	},
 	[IORING_OP_SPLICE] = {
 		.name			= "SPLICE",
+		.cleanup		= io_splice_cleanup,
 	},
 	[IORING_OP_PROVIDE_BUFFERS] = {
 		.name			= "PROVIDE_BUFFERS",
@@ -650,6 +687,7 @@ const struct io_cold_def io_cold_defs[] = {
 	},
 	[IORING_OP_TEE] = {
 		.name			= "TEE",
+		.cleanup		= io_splice_cleanup,
 	},
 	[IORING_OP_SHUTDOWN] = {
 		.name			= "SHUTDOWN",
@@ -699,6 +737,7 @@ const struct io_cold_def io_cold_defs[] = {
 	},
 	[IORING_OP_URING_CMD] = {
 		.name			= "URING_CMD",
+		.cleanup		= io_uring_cmd_cleanup,
 	},
 	[IORING_OP_SEND_ZC] = {
 		.name			= "SEND_ZC",
@@ -741,6 +780,22 @@ const struct io_cold_def io_cold_defs[] = {
 	},
 	[IORING_OP_LISTEN] = {
 		.name			= "LISTEN",
+	},
+	[IORING_OP_RECV_ZC] = {
+		.name			= "RECV_ZC_unsupported",
+	},
+	[IORING_OP_EPOLL_WAIT] = {
+		.name			= "EPOLL_WAIT_unsupported",
+	},
+	[IORING_OP_READV_FIXED] = {
+		.name			= "READV_FIXED",
+		.cleanup		= io_readv_writev_cleanup,
+		.fail			= io_rw_fail,
+	},
+	[IORING_OP_WRITEV_FIXED] = {
+		.name			= "WRITEV_FIXED",
+		.cleanup		= io_readv_writev_cleanup,
+		.fail			= io_rw_fail,
 	},
 };
 

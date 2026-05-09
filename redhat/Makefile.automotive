@@ -2,10 +2,10 @@
 # included in redhat/Makefile.
 #
 # These variables are automotive specific and are only needed when working
-# with the kernel-automotive package.
+# with an automotive kernel package.
 
-# Repurpose the stock kernel make targets for kernel-automotive.
-# Set this to '1' to build kernel-automotive configs, srpm, etc.
+# Repurpose the stock kernel make targets for the automotive kernel package.
+# Set this to '1' to build automotive configs, srpm, etc.
 AUTOMOTIVE_BUILD ?=
 
 # Indicates if the specific OS flavor files will be included as part of the
@@ -13,3 +13,9 @@ AUTOMOTIVE_BUILD ?=
 # variant of the stock kernel either and therefore we need to manage its
 # source files independently.
 INCLUDE_AUTOMOTIVE_FILES ?= 0
+
+# To support multiple branches (one for each automotive kernel package)
+# use the following to define packaging variables. When creating a new
+# automotive kernel, set the package name and the disttag here.
+AUTOMOTIVE_PKG_NAME ?= kernel-automotive
+AUTOMOTIVE_PKG_DIST ?= .el10_2iv

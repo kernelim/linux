@@ -23,6 +23,7 @@
 #include <linux/of.h>
 #include <linux/of_net.h>
 #include <linux/cpu.h>
+#include <net/netdev_lock.h>
 #include <net/netdev_rx_queue.h>
 #include <net/rps.h>
 
@@ -36,7 +37,7 @@ static const char fmt_uint[] = "%u\n";
 static const char fmt_ulong[] = "%lu\n";
 static const char fmt_u64[] = "%llu\n";
 
-/* Caller holds RTNL or RCU */
+/* Caller holds RTNL, netdev->lock or RCU */
 static inline int dev_isalive(const struct net_device *dev)
 {
 	return READ_ONCE(dev->reg_state) <= NETREG_REGISTERED;
@@ -105,6 +106,36 @@ static ssize_t netdev_store(struct device *dev, struct device_attribute *attr,
 	}
 	rtnl_unlock();
  err:
+	return ret;
+}
+
+/* Same as netdev_store() but takes netdev_lock() instead of rtnl_lock() */
+static ssize_t
+netdev_lock_store(struct device *dev, struct device_attribute *attr,
+		  const char *buf, size_t len,
+		  int (*set)(struct net_device *, unsigned long))
+{
+	struct net_device *netdev = to_net_dev(dev);
+	struct net *net = dev_net(netdev);
+	unsigned long new;
+	int ret;
+
+	if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
+		return -EPERM;
+
+	ret = kstrtoul(buf, 0, &new);
+	if (ret)
+		return ret;
+
+	netdev_lock(netdev);
+
+	if (dev_isalive(netdev)) {
+		ret = (*set)(netdev, new);
+		if (ret == 0)
+			ret = len;
+	}
+	netdev_unlock(netdev);
+
 	return ret;
 }
 
@@ -420,7 +451,7 @@ static ssize_t gro_flush_timeout_store(struct device *dev,
 	if (!capable(CAP_NET_ADMIN))
 		return -EPERM;
 
-	return netdev_store(dev, attr, buf, len, change_gro_flush_timeout);
+	return netdev_lock_store(dev, attr, buf, len, change_gro_flush_timeout);
 }
 NETDEVICE_SHOW_RW(gro_flush_timeout, fmt_ulong);
 
@@ -440,7 +471,8 @@ static ssize_t napi_defer_hard_irqs_store(struct device *dev,
 	if (!capable(CAP_NET_ADMIN))
 		return -EPERM;
 
-	return netdev_store(dev, attr, buf, len, change_napi_defer_hard_irqs);
+	return netdev_lock_store(dev, attr, buf, len,
+				 change_napi_defer_hard_irqs);
 }
 NETDEVICE_SHOW_RW(napi_defer_hard_irqs, fmt_uint);
 
@@ -629,7 +661,7 @@ static int modify_napi_threaded(struct net_device *dev, unsigned long val)
 	if (val != 0 && val != 1)
 		return -EOPNOTSUPP;
 
-	ret = dev_set_threaded(dev, val);
+	ret = netif_set_threaded(dev, val);
 
 	return ret;
 }
@@ -638,7 +670,7 @@ static ssize_t threaded_store(struct device *dev,
 			      struct device_attribute *attr,
 			      const char *buf, size_t len)
 {
-	return netdev_store(dev, attr, buf, len, modify_napi_threaded);
+	return netdev_lock_store(dev, attr, buf, len, modify_napi_threaded);
 }
 static DEVICE_ATTR_RW(threaded);
 
@@ -1340,8 +1372,10 @@ static ssize_t tx_maxrate_store(struct netdev_queue *queue,
 		return restart_syscall();
 
 	err = -EOPNOTSUPP;
+	netdev_lock_ops(dev);
 	if (dev->netdev_ops->ndo_set_tx_maxrate)
 		err = dev->netdev_ops->ndo_set_tx_maxrate(dev, index, rate);
+	netdev_unlock_ops(dev);
 
 	rtnl_unlock();
 	if (!err) {
@@ -1953,8 +1987,10 @@ static void remove_queue_kobjects(struct net_device *dev)
 	net_rx_queue_update_kobjects(dev, real_rx, 0);
 	netdev_queue_update_kobjects(dev, real_tx, 0);
 
+	netdev_lock_ops(dev);
 	dev->real_num_rx_queues = 0;
 	dev->real_num_tx_queues = 0;
+	netdev_unlock_ops(dev);
 #ifdef CONFIG_SYSFS
 	kset_unregister(dev->queues_kset);
 #endif

@@ -1,3 +1,3 @@
-#1-
-0x165c5c31	fc_vport_terminate	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
+#2-
+0x713ba903	fc_vport_terminate	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
 

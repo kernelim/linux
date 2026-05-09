@@ -250,14 +250,14 @@ enum mt8188_jacks {
 static struct snd_soc_jack_pin mt8188_hdmi_jack_pins[] = {
 	{
 		.pin = "HDMI",
-		.mask = SND_JACK_LINEOUT,
+		.mask = SND_JACK_AVOUT,
 	},
 };
 
 static struct snd_soc_jack_pin mt8188_dp_jack_pins[] = {
 	{
 		.pin = "DP",
-		.mask = SND_JACK_LINEOUT,
+		.mask = SND_JACK_AVOUT,
 	},
 };
 
@@ -408,7 +408,7 @@ static int mt8188_mt6359_mtkaif_calibration(struct snd_soc_pcm_runtime *rtd)
 	}
 
 	if (pin_w)
-		dapm_pinctrl_event(pin_w, NULL, SND_SOC_DAPM_PRE_PMU);
+		snd_soc_dapm_pinctrl_event(pin_w, NULL, SND_SOC_DAPM_PRE_PMU);
 	else
 		dev_dbg(afe->dev, "%s(), no pinmux widget, please check if default on\n", __func__);
 
@@ -510,7 +510,7 @@ static int mt8188_mt6359_mtkaif_calibration(struct snd_soc_pcm_runtime *rtd)
 		param->mtkaif_phase_cycle[i] = mtkaif_phase_cycle[i];
 
 	if (pin_w)
-		dapm_pinctrl_event(pin_w, NULL, SND_SOC_DAPM_POST_PMD);
+		snd_soc_dapm_pinctrl_event(pin_w, NULL, SND_SOC_DAPM_POST_PMD);
 
 	dev_dbg(afe->dev, "%s(), end, calibration ok %d\n",
 		__func__, param->mtkaif_calibration_ok);
@@ -638,7 +638,7 @@ static int mt8188_hdmi_codec_init(struct snd_soc_pcm_runtime *rtd)
 	int ret = 0;
 
 	ret = snd_soc_card_jack_new_pins(rtd->card, "HDMI Jack",
-					 SND_JACK_LINEOUT, jack,
+					 SND_JACK_AVOUT, jack,
 					 mt8188_hdmi_jack_pins,
 					 ARRAY_SIZE(mt8188_hdmi_jack_pins));
 	if (ret) {
@@ -663,7 +663,7 @@ static int mt8188_dptx_codec_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_component *component = snd_soc_rtd_to_codec(rtd, 0)->component;
 	int ret = 0;
 
-	ret = snd_soc_card_jack_new_pins(rtd->card, "DP Jack", SND_JACK_LINEOUT,
+	ret = snd_soc_card_jack_new_pins(rtd->card, "DP Jack", SND_JACK_AVOUT,
 					 jack, mt8188_dp_jack_pins,
 					 ARRAY_SIZE(mt8188_dp_jack_pins));
 	if (ret) {
@@ -1333,11 +1333,11 @@ static int mt8188_mt6359_soc_card_probe(struct mtk_soc_card_data *soc_card_data,
 	for_each_card_prelinks(card, i, dai_link) {
 		if (strcmp(dai_link->name, "DPTX_BE") == 0) {
 			if (dai_link->num_codecs &&
-			    strcmp(dai_link->codecs->dai_name, "snd-soc-dummy-dai"))
+			    !snd_soc_dlc_is_dummy(dai_link->codecs))
 				dai_link->init = mt8188_dptx_codec_init;
 		} else if (strcmp(dai_link->name, "ETDM3_OUT_BE") == 0) {
 			if (dai_link->num_codecs &&
-			    strcmp(dai_link->codecs->dai_name, "snd-soc-dummy-dai"))
+			    !snd_soc_dlc_is_dummy(dai_link->codecs))
 				dai_link->init = mt8188_hdmi_codec_init;
 		} else if (strcmp(dai_link->name, "DL_SRC_BE") == 0 ||
 			   strcmp(dai_link->name, "UL_SRC_BE") == 0) {
@@ -1387,7 +1387,7 @@ static int mt8188_mt6359_soc_card_probe(struct mtk_soc_card_data *soc_card_data,
 					init_es8326 = true;
 				}
 			} else {
-				if (strcmp(dai_link->codecs->dai_name, "snd-soc-dummy-dai")) {
+				if (!snd_soc_dlc_is_dummy(dai_link->codecs)) {
 					if (!init_dumb) {
 						dai_link->init = mt8188_dumb_amp_init;
 						init_dumb = true;

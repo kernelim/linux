@@ -31,6 +31,7 @@
 #include "gem/i915_gem_internal.h"
 #include "gem/i915_gem_object_frontbuffer.h"
 #include "gem/i915_gem_pm.h"
+
 #include "gt/intel_gpu_commands.h"
 #include "gt/intel_ring.h"
 
@@ -38,6 +39,7 @@
 #include "i915_reg.h"
 #include "intel_color_regs.h"
 #include "intel_de.h"
+#include "intel_display_regs.h"
 #include "intel_display_types.h"
 #include "intel_frontbuffer.h"
 #include "intel_overlay.h"
@@ -215,10 +217,9 @@ static void i830_overlay_clock_gating(struct intel_display *display,
 
 	/* WA_OVERLAY_CLKGATE:alm */
 	if (enable)
-		intel_de_write(display, DSPCLK_GATE_D(display), 0);
+		intel_de_write(display, DSPCLK_GATE_D, 0);
 	else
-		intel_de_write(display, DSPCLK_GATE_D(display),
-			       OVRUNIT_CLOCK_GATE_DISABLE);
+		intel_de_write(display, DSPCLK_GATE_D, OVRUNIT_CLOCK_GATE_DISABLE);
 
 	/* WA_DISABLE_L2CACHE_CLOCK_GATING:alm */
 	pci_bus_read_config_byte(pdev->bus,
@@ -291,7 +292,6 @@ static void intel_overlay_flip_prepare(struct intel_overlay *overlay,
 				       struct i915_vma *vma)
 {
 	struct intel_display *display = overlay->display;
-	struct drm_i915_private *i915 = to_i915(display->drm);
 	enum pipe pipe = overlay->crtc->pipe;
 	struct intel_frontbuffer *frontbuffer = NULL;
 
@@ -307,7 +307,7 @@ static void intel_overlay_flip_prepare(struct intel_overlay *overlay,
 		intel_frontbuffer_put(overlay->frontbuffer);
 	overlay->frontbuffer = frontbuffer;
 
-	intel_frontbuffer_flip_prepare(i915, INTEL_FRONTBUFFER_OVERLAY(pipe));
+	intel_frontbuffer_flip_prepare(display, INTEL_FRONTBUFFER_OVERLAY(pipe));
 
 	overlay->old_vma = overlay->vma;
 	if (vma)
@@ -359,14 +359,13 @@ static int intel_overlay_continue(struct intel_overlay *overlay,
 static void intel_overlay_release_old_vma(struct intel_overlay *overlay)
 {
 	struct intel_display *display = overlay->display;
-	struct drm_i915_private *i915 = to_i915(display->drm);
 	struct i915_vma *vma;
 
 	vma = fetch_and_zero(&overlay->old_vma);
 	if (drm_WARN_ON(display->drm, !vma))
 		return;
 
-	intel_frontbuffer_flip_complete(i915, INTEL_FRONTBUFFER_OVERLAY(overlay->crtc->pipe));
+	intel_frontbuffer_flip_complete(display, INTEL_FRONTBUFFER_OVERLAY(overlay->crtc->pipe));
 
 	i915_vma_unpin(vma);
 	i915_vma_put(vma);

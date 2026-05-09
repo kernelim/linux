@@ -753,4 +753,12 @@ config EP93XX_TIMER
 	  Enables support for the Cirrus Logic timer block
 	  EP93XX.
 
+config NXP_STM_TIMER
+	bool "NXP System Timer Module driver"
+	depends on ARCH_S32 || COMPILE_TEST
+	select CLKSRC_MMIO
+	help
+          Enables the support for NXP System Timer Module found in the
+          s32g NXP platform series.
+
 endmenu

@@ -142,6 +142,11 @@ struct deinterlace_ctx {
 	struct dma_interleaved_template *xt;
 };
 
+static inline struct deinterlace_ctx *file_to_ctx(struct file *filp)
+{
+	return container_of(file_to_v4l2_fh(filp), struct deinterlace_ctx, fh);
+}
+
 /*
  * mem2mem callbacks
  */
@@ -842,7 +847,6 @@ static int deinterlace_open(struct file *file)
 		return -ENOMEM;
 
 	v4l2_fh_init(&ctx->fh, video_devdata(file));
-	file->private_data = &ctx->fh;
 	ctx->dev = pcdev;
 
 	ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(pcdev->m2m_dev, ctx, &queue_init);
@@ -861,7 +865,7 @@ static int deinterlace_open(struct file *file)
 	}
 
 	ctx->colorspace = V4L2_COLORSPACE_REC709;
-	v4l2_fh_add(&ctx->fh);
+	v4l2_fh_add(&ctx->fh, file);
 
 	dprintk(pcdev, "Created instance %p, m2m_ctx: %p\n",
 		ctx, ctx->fh.m2m_ctx);
@@ -872,11 +876,11 @@ static int deinterlace_open(struct file *file)
 static int deinterlace_release(struct file *file)
 {
 	struct deinterlace_dev *pcdev = video_drvdata(file);
-	struct deinterlace_ctx *ctx = file->private_data;
+	struct deinterlace_ctx *ctx = file_to_ctx(file);
 
 	dprintk(pcdev, "Releasing instance %p\n", ctx);
 
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
 	kfree(ctx->xt);

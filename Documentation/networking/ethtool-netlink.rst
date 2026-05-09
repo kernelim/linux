@@ -239,6 +239,9 @@ Userspace to kernel:
   ``ETHTOOL_MSG_PHY_GET``               get Ethernet PHY information
   ``ETHTOOL_MSG_TSCONFIG_GET``          get hw timestamping configuration
   ``ETHTOOL_MSG_TSCONFIG_SET``          set hw timestamping configuration
+  ``ETHTOOL_MSG_RSS_SET``               set RSS settings
+  ``ETHTOOL_MSG_RSS_CREATE_ACT``        create an additional RSS context
+  ``ETHTOOL_MSG_RSS_DELETE_ACT``        delete an additional RSS context
   ===================================== =================================
 
 Kernel to userspace:
@@ -281,6 +284,7 @@ Kernel to userspace:
   ``ETHTOOL_MSG_MODULE_GET_REPLY``         transceiver module parameters
   ``ETHTOOL_MSG_PSE_GET_REPLY``            PSE parameters
   ``ETHTOOL_MSG_RSS_GET_REPLY``            RSS settings
+  ``ETHTOOL_MSG_RSS_NTF``                  RSS settings
   ``ETHTOOL_MSG_PLCA_GET_CFG_REPLY``       PLCA RS parameters
   ``ETHTOOL_MSG_PLCA_GET_STATUS_REPLY``    PLCA RS status
   ``ETHTOOL_MSG_PLCA_NTF``                 PLCA RS parameters
@@ -290,6 +294,10 @@ Kernel to userspace:
   ``ETHTOOL_MSG_PHY_NTF``                  Ethernet PHY information change
   ``ETHTOOL_MSG_TSCONFIG_GET_REPLY``       hw timestamping configuration
   ``ETHTOOL_MSG_TSCONFIG_SET_REPLY``       new hw timestamping configuration
+  ``ETHTOOL_MSG_RSS_NTF``                  RSS settings notification
+  ``ETHTOOL_MSG_RSS_CREATE_ACT_REPLY``     create an additional RSS context
+  ``ETHTOOL_MSG_RSS_CREATE_NTF``           additional RSS context created
+  ``ETHTOOL_MSG_RSS_DELETE_NTF``           additional RSS context deleted
   ======================================== =================================
 
 ``GET`` requests are sent by userspace applications to retrieve device
@@ -1532,6 +1540,11 @@ Drivers fill in the statistics in the following structure:
 .. kernel-doc:: include/linux/ethtool.h
     :identifiers: ethtool_fec_stats
 
+Statistics may have FEC bins histogram attribute ``ETHTOOL_A_FEC_STAT_HIST``
+as defined in IEEE 802.3ck-2022 and 802.3df-2024. Nested attributes will have
+the range of FEC errors in the bin (inclusive) and the amount of error events
+in the bin.
+
 FEC_SET
 =======
 
@@ -1919,14 +1932,15 @@ used to ignore context 0s and only dump additional contexts).
 
 Kernel response contents:
 
-=====================================  ======  ==========================
+=====================================  ======  ===============================
   ``ETHTOOL_A_RSS_HEADER``             nested  reply header
   ``ETHTOOL_A_RSS_CONTEXT``            u32     context number
   ``ETHTOOL_A_RSS_HFUNC``              u32     RSS hash func
   ``ETHTOOL_A_RSS_INDIR``              binary  Indir table bytes
   ``ETHTOOL_A_RSS_HKEY``               binary  Hash key bytes
   ``ETHTOOL_A_RSS_INPUT_XFRM``         u32     RSS input data transformation
-=====================================  ======  ==========================
+  ``ETHTOOL_A_RSS_FLOW_HASH``          nested  Header fields included in hash
+=====================================  ======  ===============================
 
 ETHTOOL_A_RSS_HFUNC attribute is bitmap indicating the hash function
 being used. Current supported options are toeplitz, xor or crc32.
@@ -1935,6 +1949,67 @@ indicates queue number.
 ETHTOOL_A_RSS_INPUT_XFRM attribute is a bitmap indicating the type of
 transformation applied to the input protocol fields before given to the RSS
 hfunc. Current supported options are symmetric-xor and symmetric-or-xor.
+ETHTOOL_A_RSS_FLOW_HASH carries per-flow type bitmask of which header
+fields are included in the hash calculation.
+
+RSS_SET
+=======
+
+Request contents:
+
+=====================================  ======  ==============================
+  ``ETHTOOL_A_RSS_HEADER``             nested  request header
+  ``ETHTOOL_A_RSS_CONTEXT``            u32     context number
+  ``ETHTOOL_A_RSS_HFUNC``              u32     RSS hash func
+  ``ETHTOOL_A_RSS_INDIR``              binary  Indir table bytes
+  ``ETHTOOL_A_RSS_HKEY``               binary  Hash key bytes
+  ``ETHTOOL_A_RSS_INPUT_XFRM``         u32     RSS input data transformation
+  ``ETHTOOL_A_RSS_FLOW_HASH``          nested  Header fields included in hash
+=====================================  ======  ==============================
+
+``ETHTOOL_A_RSS_INDIR`` is the minimal RSS table the user expects. Kernel and
+the device driver may replicate the table if its smaller than smallest table
+size supported by the device. For example if user requests ``[0, 1]`` but the
+device needs at least 8 entries - the real table in use will end up being
+``[0, 1, 0, 1, 0, 1, 0, 1]``. Most devices require the table size to be power
+of 2, so tables which size is not a power of 2 will likely be rejected.
+Using table of size 0 will reset the indirection table to the default.
+
+RSS_CREATE_ACT
+==============
+
+Request contents:
+
+=====================================  ======  ==============================
+  ``ETHTOOL_A_RSS_HEADER``             nested  request header
+  ``ETHTOOL_A_RSS_CONTEXT``            u32     context number
+  ``ETHTOOL_A_RSS_HFUNC``              u32     RSS hash func
+  ``ETHTOOL_A_RSS_INDIR``              binary  Indir table bytes
+  ``ETHTOOL_A_RSS_HKEY``               binary  Hash key bytes
+  ``ETHTOOL_A_RSS_INPUT_XFRM``         u32     RSS input data transformation
+=====================================  ======  ==============================
+
+Kernel response contents:
+
+=====================================  ======  ==============================
+  ``ETHTOOL_A_RSS_HEADER``             nested  request header
+  ``ETHTOOL_A_RSS_CONTEXT``            u32     context number
+=====================================  ======  ==============================
+
+Create an additional RSS context, if ``ETHTOOL_A_RSS_CONTEXT`` is not
+specified kernel will allocate one automatically.
+
+RSS_DELETE_ACT
+==============
+
+Request contents:
+
+=====================================  ======  ==============================
+  ``ETHTOOL_A_RSS_HEADER``             nested  request header
+  ``ETHTOOL_A_RSS_CONTEXT``            u32     context number
+=====================================  ======  ==============================
+
+Delete an additional RSS context.
 
 PLCA_GET_CFG
 ============
@@ -2386,8 +2461,8 @@ are netlink only.
   ``ETHTOOL_SFLAGS``                  ``ETHTOOL_MSG_FEATURES_SET``
   ``ETHTOOL_GPFLAGS``                 ``ETHTOOL_MSG_PRIVFLAGS_GET``
   ``ETHTOOL_SPFLAGS``                 ``ETHTOOL_MSG_PRIVFLAGS_SET``
-  ``ETHTOOL_GRXFH``                   n/a
-  ``ETHTOOL_SRXFH``                   n/a
+  ``ETHTOOL_GRXFH``                   ``ETHTOOL_MSG_RSS_GET``
+  ``ETHTOOL_SRXFH``                   ``ETHTOOL_MSG_RSS_SET``
   ``ETHTOOL_GGRO``                    ``ETHTOOL_MSG_FEATURES_GET``
   ``ETHTOOL_SGRO``                    ``ETHTOOL_MSG_FEATURES_SET``
   ``ETHTOOL_GRXRINGS``                n/a
@@ -2401,8 +2476,8 @@ are netlink only.
   ``ETHTOOL_SRXNTUPLE``               n/a
   ``ETHTOOL_GRXNTUPLE``               n/a
   ``ETHTOOL_GSSET_INFO``              ``ETHTOOL_MSG_STRSET_GET``
-  ``ETHTOOL_GRXFHINDIR``              n/a
-  ``ETHTOOL_SRXFHINDIR``              n/a
+  ``ETHTOOL_GRXFHINDIR``              ``ETHTOOL_MSG_RSS_GET``
+  ``ETHTOOL_SRXFHINDIR``              ``ETHTOOL_MSG_RSS_SET``
   ``ETHTOOL_GFEATURES``               ``ETHTOOL_MSG_FEATURES_GET``
   ``ETHTOOL_SFEATURES``               ``ETHTOOL_MSG_FEATURES_SET``
   ``ETHTOOL_GCHANNELS``               ``ETHTOOL_MSG_CHANNELS_GET``

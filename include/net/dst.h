@@ -24,10 +24,10 @@
 struct sk_buff;
 
 struct dst_entry {
-	RH_KABI_REPLACE(struct net_device *dev, union {
+	union {
 		struct net_device       *dev;
 		struct net_device __rcu *dev_rcu;
-	})
+	};
 	struct  dst_ops	        *ops;
 	unsigned long		_metrics;
 	unsigned long           expires;
@@ -243,9 +243,9 @@ static inline void dst_hold(struct dst_entry *dst)
 
 static inline void dst_use_noref(struct dst_entry *dst, unsigned long time)
 {
-	if (unlikely(time != dst->lastuse)) {
+	if (unlikely(time != READ_ONCE(dst->lastuse))) {
 		dst->__use++;
-		dst->lastuse = time;
+		WRITE_ONCE(dst->lastuse, time);
 	}
 }
 
@@ -434,13 +434,15 @@ static inline void dst_link_failure(struct sk_buff *skb)
 
 static inline void dst_set_expires(struct dst_entry *dst, int timeout)
 {
-	unsigned long expires = jiffies + timeout;
+	unsigned long old, expires = jiffies + timeout;
 
 	if (expires == 0)
 		expires = 1;
 
-	if (dst->expires == 0 || time_before(expires, dst->expires))
-		dst->expires = expires;
+	old = READ_ONCE(dst->expires);
+
+	if (!old || time_before(expires, old))
+		WRITE_ONCE(dst->expires, expires);
 }
 
 static inline unsigned int dst_dev_overhead(struct dst_entry *dst,
@@ -459,7 +461,7 @@ INDIRECT_CALLABLE_DECLARE(int ip_output(struct net *, struct sock *,
 /* Output packet to network from transport.  */
 static inline int dst_output(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
-	return INDIRECT_CALL_INET(skb_dst(skb)->output,
+	return INDIRECT_CALL_INET(READ_ONCE(skb_dst(skb)->output),
 				  ip6_output, ip_output,
 				  net, sk, skb);
 }
@@ -469,7 +471,7 @@ INDIRECT_CALLABLE_DECLARE(int ip_local_deliver(struct sk_buff *));
 /* Input packet from network to transport.  */
 static inline int dst_input(struct sk_buff *skb)
 {
-	return INDIRECT_CALL_INET(skb_dst(skb)->input,
+	return INDIRECT_CALL_INET(READ_ONCE(skb_dst(skb)->input),
 				  ip6_input, ip_local_deliver, skb);
 }
 
@@ -479,7 +481,7 @@ INDIRECT_CALLABLE_DECLARE(struct dst_entry *ipv4_dst_check(struct dst_entry *,
 							   u32));
 static inline struct dst_entry *dst_check(struct dst_entry *dst, u32 cookie)
 {
-	if (dst->obsolete)
+	if (READ_ONCE(dst->obsolete))
 		dst = INDIRECT_CALL_INET(dst->ops->check, ip6_dst_check,
 					 ipv4_dst_check, dst, cookie);
 	return dst;

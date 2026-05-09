@@ -1,3 +1,3 @@
-#1-
-0xabfd4b2d	netif_receive_skb	vmlinux	EXPORT_SYMBOL	
+#2-
+0xe60c4240	netif_receive_skb	vmlinux	EXPORT_SYMBOL	
 

@@ -74,7 +74,7 @@ static irqreturn_t pulse_handler(int irq, void *dev_id)
 
 static void sample_timer(struct timer_list *t)
 {
-	struct pwm_fan_ctx *ctx = from_timer(ctx, t, rpm_timer);
+	struct pwm_fan_ctx *ctx = timer_container_of(ctx, t, rpm_timer);
 	unsigned int delta = ktime_ms_delta(ktime_get(), ctx->sample_start);
 	int i;
 
@@ -466,7 +466,7 @@ static void pwm_fan_cleanup(void *__ctx)
 {
 	struct pwm_fan_ctx *ctx = __ctx;
 
-	del_timer_sync(&ctx->rpm_timer);
+	timer_delete_sync(&ctx->rpm_timer);
 	/* Switch off everything */
 	ctx->enable_mode = pwm_disable_reg_disable;
 	pwm_fan_power_off(ctx, true);

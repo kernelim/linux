@@ -11,7 +11,8 @@
 #include <linux/netdevice.h>
 #include <linux/vmalloc.h>
 #include <net/devlink.h>
-#include "bnxt_hsi.h"
+#include <net/netdev_lock.h>
+#include <linux/bnxt/hsi.h>
 #include "bnxt.h"
 #include "bnxt_hwrm.h"
 #include "bnxt_vfr.h"
@@ -38,12 +39,6 @@ bnxt_dl_flash_update(struct devlink *dl,
 {
 	struct bnxt *bp = bnxt_get_bp_from_dl(dl);
 	int rc;
-
-	if (!BNXT_PF(bp)) {
-		NL_SET_ERR_MSG_MOD(extack,
-				   "flash update not supported from a VF");
-		return -EPERM;
-	}
 
 	devlink_flash_update_status_notify(dl, "Preparing to flash", NULL, 0, 0);
 	rc = bnxt_flash_package_from_fw_obj(bp->dev, params->fw, 0, extack);
@@ -219,7 +214,7 @@ __bnxt_dl_reporter_create(struct bnxt *bp,
 {
 	struct devlink_health_reporter *reporter;
 
-	reporter = devlink_health_reporter_create(bp->dl, ops, 0, bp);
+	reporter = devlink_health_reporter_create(bp->dl, ops, bp);
 	if (IS_ERR(reporter)) {
 		netdev_warn(bp->dev, "Failed to create %s health reporter, rc = %ld\n",
 			    ops->name, PTR_ERR(reporter));
@@ -439,14 +434,17 @@ static int bnxt_dl_reload_down(struct devlink *dl, bool netns_change,
 	case DEVLINK_RELOAD_ACTION_DRIVER_REINIT: {
 		bnxt_ulp_stop(bp);
 		rtnl_lock();
+		netdev_lock(bp->dev);
 		if (bnxt_sriov_cfg(bp)) {
 			NL_SET_ERR_MSG_MOD(extack,
 					   "reload is unsupported while VFs are allocated or being configured");
+			netdev_unlock(bp->dev);
 			rtnl_unlock();
 			bnxt_ulp_start(bp, 0);
 			return -EOPNOTSUPP;
 		}
 		if (bp->dev->reg_state == NETREG_UNREGISTERED) {
+			netdev_unlock(bp->dev);
 			rtnl_unlock();
 			bnxt_ulp_start(bp, 0);
 			return -ENODEV;
@@ -458,7 +456,8 @@ static int bnxt_dl_reload_down(struct devlink *dl, bool netns_change,
 		if (rc) {
 			NL_SET_ERR_MSG_MOD(extack, "Failed to deregister");
 			if (netif_running(bp->dev))
-				dev_close(bp->dev);
+				netif_close(bp->dev);
+			netdev_unlock(bp->dev);
 			rtnl_unlock();
 			break;
 		}
@@ -479,7 +478,9 @@ static int bnxt_dl_reload_down(struct devlink *dl, bool netns_change,
 			return -EPERM;
 		}
 		rtnl_lock();
+		netdev_lock(bp->dev);
 		if (bp->dev->reg_state == NETREG_UNREGISTERED) {
+			netdev_unlock(bp->dev);
 			rtnl_unlock();
 			return -ENODEV;
 		}
@@ -493,6 +494,7 @@ static int bnxt_dl_reload_down(struct devlink *dl, bool netns_change,
 		if (rc) {
 			NL_SET_ERR_MSG_MOD(extack, "Failed to activate firmware");
 			clear_bit(BNXT_STATE_FW_ACTIVATE, &bp->state);
+			netdev_unlock(bp->dev);
 			rtnl_unlock();
 		}
 		break;
@@ -510,6 +512,8 @@ static int bnxt_dl_reload_up(struct devlink *dl, enum devlink_reload_action acti
 {
 	struct bnxt *bp = bnxt_get_bp_from_dl(dl);
 	int rc = 0;
+
+	netdev_assert_locked(bp->dev);
 
 	*actions_performed = 0;
 	switch (action) {
@@ -535,6 +539,7 @@ static int bnxt_dl_reload_up(struct devlink *dl, enum devlink_reload_action acti
 		if (!netif_running(bp->dev))
 			NL_SET_ERR_MSG_MOD(extack,
 					   "Device is closed, not waiting for reset notice that will never come");
+		netdev_unlock(bp->dev);
 		rtnl_unlock();
 		while (test_bit(BNXT_STATE_FW_ACTIVATE, &bp->state)) {
 			if (time_after(jiffies, timeout)) {
@@ -550,6 +555,7 @@ static int bnxt_dl_reload_up(struct devlink *dl, enum devlink_reload_action acti
 			msleep(50);
 		}
 		rtnl_lock();
+		netdev_lock(bp->dev);
 		if (!rc)
 			*actions_performed |= BIT(DEVLINK_RELOAD_ACTION_DRIVER_REINIT);
 		clear_bit(BNXT_STATE_FW_ACTIVATE, &bp->state);
@@ -568,8 +574,9 @@ static int bnxt_dl_reload_up(struct devlink *dl, enum devlink_reload_action acti
 		}
 		*actions_performed |= BIT(action);
 	} else if (netif_running(bp->dev)) {
-		dev_close(bp->dev);
+		netif_close(bp->dev);
 	}
+	netdev_unlock(bp->dev);
 	rtnl_unlock();
 	if (action == DEVLINK_RELOAD_ACTION_DRIVER_REINIT)
 		bnxt_ulp_start(bp, rc);
@@ -1067,15 +1074,8 @@ static int __bnxt_hwrm_nvm_req(struct bnxt *bp,
 static int bnxt_hwrm_nvm_req(struct bnxt *bp, u32 param_id, void *msg,
 			     union devlink_param_value *val)
 {
-	struct hwrm_nvm_get_variable_input *req = msg;
 	const struct bnxt_dl_nvm_param *nvm_param;
 	int i;
-
-	/* Get/Set NVM CFG parameter is supported only on PFs */
-	if (BNXT_VF(bp)) {
-		hwrm_req_drop(bp, req);
-		return -EPERM;
-	}
 
 	for (i = 0; i < ARRAY_SIZE(nvm_params); i++) {
 		nvm_param = &nvm_params[i];

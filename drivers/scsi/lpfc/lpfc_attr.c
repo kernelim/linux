@@ -2710,7 +2710,7 @@ lpfc_poll_store(struct device *dev, struct device_attribute *attr,
 	    (old_val & DISABLE_FCP_RING_INT))
 	{
 		spin_unlock_irq(&phba->hbalock);
-		del_timer(&phba->fcp_poll_timer);
+		timer_delete(&phba->fcp_poll_timer);
 		spin_lock_irq(&phba->hbalock);
 		if (lpfc_readl(phba->HCregaddr, &creg_val)) {
 			spin_unlock_irq(&phba->hbalock);
@@ -6319,7 +6319,7 @@ const struct attribute_group *lpfc_vport_groups[] = {
  **/
 static ssize_t
 sysfs_ctlreg_write(struct file *filp, struct kobject *kobj,
-		   struct bin_attribute *bin_attr,
+		   const struct bin_attribute *bin_attr,
 		   char *buf, loff_t off, size_t count)
 {
 	size_t buf_off;
@@ -6378,7 +6378,7 @@ sysfs_ctlreg_write(struct file *filp, struct kobject *kobj,
  **/
 static ssize_t
 sysfs_ctlreg_read(struct file *filp, struct kobject *kobj,
-		  struct bin_attribute *bin_attr,
+		  const struct bin_attribute *bin_attr,
 		  char *buf, loff_t off, size_t count)
 {
 	size_t buf_off;
@@ -6414,7 +6414,7 @@ sysfs_ctlreg_read(struct file *filp, struct kobject *kobj,
 	return count;
 }
 
-static struct bin_attribute sysfs_ctlreg_attr = {
+static const struct bin_attribute sysfs_ctlreg_attr = {
 	.attr = {
 		.name = "ctlreg",
 		.mode = S_IRUSR | S_IWUSR,
@@ -6442,7 +6442,7 @@ static struct bin_attribute sysfs_ctlreg_attr = {
  **/
 static ssize_t
 sysfs_mbox_write(struct file *filp, struct kobject *kobj,
-		 struct bin_attribute *bin_attr,
+		 const struct bin_attribute *bin_attr,
 		 char *buf, loff_t off, size_t count)
 {
 	return -EPERM;
@@ -6466,13 +6466,13 @@ sysfs_mbox_write(struct file *filp, struct kobject *kobj,
  **/
 static ssize_t
 sysfs_mbox_read(struct file *filp, struct kobject *kobj,
-		struct bin_attribute *bin_attr,
+		const struct bin_attribute *bin_attr,
 		char *buf, loff_t off, size_t count)
 {
 	return -EPERM;
 }
 
-static struct bin_attribute sysfs_mbox_attr = {
+static const struct bin_attribute sysfs_mbox_attr = {
 	.attr = {
 		.name = "mbox",
 		.mode = S_IRUSR | S_IWUSR,

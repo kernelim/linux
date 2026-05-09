@@ -143,7 +143,7 @@ void s5p_mfc_cleanup_queue(struct list_head *lh, struct vb2_queue *vq)
 
 static void s5p_mfc_watchdog(struct timer_list *t)
 {
-	struct s5p_mfc_dev *dev = from_timer(dev, t, watchdog_timer);
+	struct s5p_mfc_dev *dev = timer_container_of(dev, t, watchdog_timer);
 
 	if (test_bit(0, &dev->hw_lock))
 		atomic_inc(&dev->watchdog_cnt);
@@ -785,8 +785,7 @@ static int s5p_mfc_open(struct file *file)
 	}
 	init_waitqueue_head(&ctx->queue);
 	v4l2_fh_init(&ctx->fh, vdev);
-	file->private_data = &ctx->fh;
-	v4l2_fh_add(&ctx->fh);
+	v4l2_fh_add(&ctx->fh, file);
 	ctx->dev = dev;
 	INIT_LIST_HEAD(&ctx->src_queue);
 	INIT_LIST_HEAD(&ctx->dst_queue);
@@ -933,14 +932,14 @@ err_pwr_enable:
 	if (dev->num_inst == 1) {
 		if (s5p_mfc_power_off(dev) < 0)
 			mfc_err("power off failed\n");
-		del_timer_sync(&dev->watchdog_timer);
+		timer_delete_sync(&dev->watchdog_timer);
 	}
 err_ctrls_setup:
 	s5p_mfc_dec_ctrls_delete(ctx);
 err_bad_node:
 	dev->ctx[ctx->num] = NULL;
 err_no_ctx:
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 	kfree(ctx);
 err_alloc:
@@ -953,7 +952,7 @@ err_alloc:
 /* Release MFC context */
 static int s5p_mfc_release(struct file *file)
 {
-	struct s5p_mfc_ctx *ctx = fh_to_ctx(file->private_data);
+	struct s5p_mfc_ctx *ctx = file_to_ctx(file);
 	struct s5p_mfc_dev *dev = ctx->dev;
 
 	/* if dev is null, do cleanup that doesn't need dev */
@@ -982,7 +981,7 @@ static int s5p_mfc_release(struct file *file)
 		if (dev->num_inst == 0) {
 			mfc_debug(2, "Last instance\n");
 			s5p_mfc_deinit_hw(dev);
-			del_timer_sync(&dev->watchdog_timer);
+			timer_delete_sync(&dev->watchdog_timer);
 			s5p_mfc_clock_off(dev);
 			if (s5p_mfc_power_off(dev) < 0)
 				mfc_err("Power off failed\n");
@@ -994,7 +993,7 @@ static int s5p_mfc_release(struct file *file)
 	if (dev)
 		dev->ctx[ctx->num] = NULL;
 	s5p_mfc_dec_ctrls_delete(ctx);
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	/* vdev is gone if dev is null */
 	if (dev)
 		v4l2_fh_exit(&ctx->fh);
@@ -1010,7 +1009,7 @@ static int s5p_mfc_release(struct file *file)
 static __poll_t s5p_mfc_poll(struct file *file,
 				 struct poll_table_struct *wait)
 {
-	struct s5p_mfc_ctx *ctx = fh_to_ctx(file->private_data);
+	struct s5p_mfc_ctx *ctx = file_to_ctx(file);
 	struct s5p_mfc_dev *dev = ctx->dev;
 	struct vb2_queue *src_q, *dst_q;
 	struct vb2_buffer *src_vb = NULL, *dst_vb = NULL;
@@ -1061,7 +1060,7 @@ end:
 /* Mmap */
 static int s5p_mfc_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	struct s5p_mfc_ctx *ctx = fh_to_ctx(file->private_data);
+	struct s5p_mfc_ctx *ctx = file_to_ctx(file);
 	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
 	int ret;
 
@@ -1458,7 +1457,7 @@ static void s5p_mfc_remove(struct platform_device *pdev)
 	}
 	mutex_unlock(&dev->mfc_mutex);
 
-	del_timer_sync(&dev->watchdog_timer);
+	timer_delete_sync(&dev->watchdog_timer);
 	flush_work(&dev->watchdog_work);
 
 	video_unregister_device(dev->vfd_enc);

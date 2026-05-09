@@ -157,7 +157,7 @@ struct ibmveth_adapter {
     struct vio_dev *vdev;
     struct net_device *netdev;
     struct napi_struct napi;
-    struct work_struct work;
+	struct work_struct work;
     unsigned int mcastFilterSize;
     void * buffer_list_addr;
     void * filter_list_addr;
@@ -171,7 +171,7 @@ struct ibmveth_adapter {
     int rx_csum;
     int large_send;
     bool is_active_trunk;
-    unsigned int rx_buffers_per_hcall;
+	unsigned int rx_buffers_per_hcall;
 
     u64 fw_ipv6_csum_support;
     u64 fw_ipv4_csum_support;

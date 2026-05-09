@@ -11,8 +11,6 @@
 #include "cxlpci.h"
 #include "cxl.h"
 
-#define CXL_RCRB_SIZE	SZ_8K
-
 struct cxl_cxims_data {
 	int nr_maps;
 	u64 xormaps[] __counted_by(nr_maps);
@@ -425,15 +423,14 @@ static int cxl_parse_cfmws(union acpi_subtable_headers *header, void *arg,
 	rc = cxl_decoder_add(cxld, target_map);
 	if (rc)
 		return rc;
+
+
 	rc = cxl_root_decoder_autoremove(dev, no_free_ptr(cxlrd));
-	if (rc) {
-		dev_err(dev, "Failed to add decode range: %pr", res);
+	if (rc)
 		return rc;
-	}
-	dev_dbg(dev, "add: %s node: %d range [%#llx - %#llx]\n",
-		dev_name(&cxld->dev),
-		phys_to_target_node(cxld->hpa_range.start),
-		cxld->hpa_range.start, cxld->hpa_range.end);
+
+	dev_dbg(root_port->dev.parent, "%s added to %s\n",
+		dev_name(&cxld->dev), dev_name(&root_port->dev));
 
 	return 0;
 }
@@ -470,7 +467,11 @@ static int cxl_get_chbs_iter(union acpi_subtable_headers *header, void *arg,
 	chbs = (struct acpi_cedt_chbs *) header;
 
 	if (chbs->cxl_version == ACPI_CEDT_CHBS_VERSION_CXL11 &&
-	    chbs->length != CXL_RCRB_SIZE)
+	    chbs->length != ACPI_CEDT_CHBS_LENGTH_CXL11)
+		return 0;
+
+	if (chbs->cxl_version == ACPI_CEDT_CHBS_VERSION_CXL20 &&
+	    chbs->length != ACPI_CEDT_CHBS_LENGTH_CXL20)
 		return 0;
 
 	if (!chbs->base)
@@ -730,10 +731,10 @@ static void remove_cxl_resources(void *data)
  * expanding its boundaries to ensure that any conflicting resources become
  * children. If a window is expanded it may then conflict with a another window
  * entry and require the window to be truncated or trimmed. Consider this
- * situation:
+ * situation::
  *
- * |-- "CXL Window 0" --||----- "CXL Window 1" -----|
- * |--------------- "System RAM" -------------|
+ *	|-- "CXL Window 0" --||----- "CXL Window 1" -----|
+ *	|--------------- "System RAM" -------------|
  *
  * ...where platform firmware has established as System RAM resource across 2
  * windows, but has left some portion of window 1 for dynamic CXL region

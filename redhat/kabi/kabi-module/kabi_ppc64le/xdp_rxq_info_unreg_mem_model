@@ -1,3 +1,3 @@
-#1-
-0x8853bce8	xdp_rxq_info_unreg_mem_model	vmlinux	EXPORT_SYMBOL_GPL	
+#2-
+0x507add73	xdp_rxq_info_unreg_mem_model	vmlinux	EXPORT_SYMBOL_GPL	
 

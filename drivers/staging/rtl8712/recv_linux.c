@@ -127,7 +127,7 @@ _recv_indicatepkt_drop:
 static void _r8712_reordering_ctrl_timeout_handler (struct timer_list *t)
 {
 	struct recv_reorder_ctrl *reorder_ctrl =
-			 from_timer(reorder_ctrl, t, reordering_ctrl_timer);
+			 timer_container_of(reorder_ctrl, t, reordering_ctrl_timer);
 
 	r8712_reordering_ctrl_timeout_handler(reorder_ctrl);
 }

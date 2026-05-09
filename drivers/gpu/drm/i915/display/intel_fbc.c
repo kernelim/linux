@@ -45,9 +45,10 @@
 #include <drm/drm_fourcc.h>
 
 #include "gem/i915_gem_stolen.h"
+
 #include "gt/intel_gt_types.h"
+
 #include "i915_drv.h"
-#include "i915_reg.h"
 #include "i915_utils.h"
 #include "i915_vgpu.h"
 #include "i915_vma.h"
@@ -55,6 +56,8 @@
 #include "intel_cdclk.h"
 #include "intel_de.h"
 #include "intel_display_device.h"
+#include "intel_display_regs.h"
+#include "intel_display_rpm.h"
 #include "intel_display_trace.h"
 #include "intel_display_types.h"
 #include "intel_display_wa.h"
@@ -95,11 +98,7 @@ struct intel_fbc {
 	struct intel_display *display;
 	const struct intel_fbc_funcs *funcs;
 
-	/*
-	 * This is always the inner lock when overlapping with
-	 * struct_mutex and it's the outer lock when overlapping
-	 * with stolen_lock.
-	 */
+	/* This is always the outer lock when overlapping with stolen_lock */
 	struct mutex lock;
 	unsigned int busy_bits;
 
@@ -251,9 +250,12 @@ static u16 intel_fbc_override_cfb_stride(const struct intel_plane_state *plane_s
 	 * Gen9 hw miscalculates cfb stride for linear as
 	 * PLANE_STRIDE*512 instead of PLANE_STRIDE*64, so
 	 * we always need to use the override there.
+	 *
+	 * wa_14022269668 For bmg, always program the FBC_STRIDE before fbc enable
 	 */
 	if (stride != stride_aligned ||
-	    (DISPLAY_VER(display) == 9 && fb->modifier == DRM_FORMAT_MOD_LINEAR))
+	    (DISPLAY_VER(display) == 9 && fb->modifier == DRM_FORMAT_MOD_LINEAR) ||
+	    display->platform.battlemage)
 		return stride_aligned * 4 / 64;
 
 	return 0;
@@ -377,11 +379,11 @@ static void i8xx_fbc_program_cfb(struct intel_fbc *fbc)
 	struct drm_i915_private *i915 = to_i915(display->drm);
 
 	drm_WARN_ON(display->drm,
-		    range_overflows_end_t(u64, i915_gem_stolen_area_address(i915),
+		    range_end_overflows_t(u64, i915_gem_stolen_area_address(i915),
 					  i915_gem_stolen_node_offset(&fbc->compressed_fb),
 					  U32_MAX));
 	drm_WARN_ON(display->drm,
-		    range_overflows_end_t(u64, i915_gem_stolen_area_address(i915),
+		    range_end_overflows_t(u64, i915_gem_stolen_area_address(i915),
 					  i915_gem_stolen_node_offset(&fbc->compressed_llb),
 					  U32_MAX));
 	intel_de_write(display, FBC_CFB_BASE,
@@ -517,6 +519,20 @@ static void ilk_fbc_activate(struct intel_fbc *fbc)
 
 	intel_de_write(display, ILK_DPFC_CONTROL(fbc->id),
 		       DPFC_CTL_EN | g4x_dpfc_ctl(fbc));
+}
+
+static void fbc_compressor_clkgate_disable_wa(struct intel_fbc *fbc,
+					      bool disable)
+{
+	struct intel_display *display = fbc->display;
+
+	if (display->platform.dg2)
+		intel_de_rmw(display, GEN9_CLKGATE_DIS_4, DG2_DPFC_GATING_DIS,
+			     disable ? DG2_DPFC_GATING_DIS : 0);
+	else if (DISPLAY_VER(display) >= 14)
+		intel_de_rmw(display, MTL_PIPE_CLKGATE_DIS2(fbc->id),
+			     MTL_DPFC_GATING_DIS,
+			     disable ? MTL_DPFC_GATING_DIS : 0);
 }
 
 static void ilk_fbc_deactivate(struct intel_fbc *fbc)
@@ -921,6 +937,10 @@ static void intel_fbc_program_workarounds(struct intel_fbc *fbc)
 	if (DISPLAY_VER(display) >= 11 && !display->platform.dg2)
 		intel_de_rmw(display, ILK_DPFC_CHICKEN(fbc->id),
 			     0, DPFC_CHICKEN_FORCE_SLB_INVALIDATION);
+
+	/* wa_18038517565 Disable DPFC clock gating before FBC enable */
+	if (display->platform.dg2 || DISPLAY_VER(display) >= 14)
+		fbc_compressor_clkgate_disable_wa(fbc, true);
 }
 
 static void __intel_fbc_cleanup_cfb(struct intel_fbc *fbc)
@@ -1436,7 +1456,7 @@ static int intel_fbc_check_plane(struct intel_atomic_state *state,
 		return 0;
 	}
 
-	if (intel_display_needs_wa_16023588340(i915)) {
+	if (intel_display_wa(display, 16023588340)) {
 		plane_state->no_fbc_reason = "Wa_16023588340";
 		return 0;
 	}
@@ -1464,14 +1484,15 @@ static int intel_fbc_check_plane(struct intel_atomic_state *state,
 	 * Recommendation is to keep this combination disabled
 	 * Bspec: 50422 HSD: 14010260002
 	 *
-	 * In Xe3, PSR2 selective fetch and FBC dirty rect feature cannot
-	 * coexist. So if PSR2 selective fetch is supported then mark that
-	 * FBC is not supported.
-	 * TODO: Need a logic to decide between PSR2 and FBC Dirty rect
+	 * TODO: Implement a logic to select between PSR2 selective fetch and
+	 * FBC based on Bspec: 68881 in xe2lpd onwards.
+	 *
+	 * As we still see some strange underruns in those platforms while
+	 * disabling PSR2, keep FBC disabled in case of selective update is on
+	 * until the selection logic is implemented.
 	 */
-	if ((IS_DISPLAY_VER(display, 12, 14) || HAS_FBC_DIRTY_RECT(display)) &&
-	    crtc_state->has_sel_update && !crtc_state->has_panel_replay) {
-		plane_state->no_fbc_reason = "PSR2 enabled";
+	if (DISPLAY_VER(display) >= 12 && crtc_state->has_sel_update) {
+		plane_state->no_fbc_reason = "Selective update enabled";
 		return 0;
 	}
 
@@ -1525,14 +1546,14 @@ static int intel_fbc_check_plane(struct intel_atomic_state *state,
 	 * having a Y offset that isn't divisible by 4 causes FIFO underrun
 	 * and screen flicker.
 	 */
-	if (DISPLAY_VER(display) >= 9 &&
+	if (IS_DISPLAY_VER(display, 9, 12) &&
 	    plane_state->view.color_plane[0].y & 3) {
 		plane_state->no_fbc_reason = "plane start Y offset misaligned";
 		return 0;
 	}
 
 	/* Wa_22010751166: icl, ehl, tgl, dg1, rkl */
-	if (DISPLAY_VER(display) >= 11 &&
+	if (IS_DISPLAY_VER(display, 9, 12) &&
 	    (plane_state->view.color_plane[0].y +
 	     (drm_rect_height(&plane_state->uapi.src) >> 16)) & 3) {
 		plane_state->no_fbc_reason = "plane end Y offset misaligned";
@@ -1547,7 +1568,7 @@ static int intel_fbc_check_plane(struct intel_atomic_state *state,
 		if (IS_ERR(cdclk_state))
 			return PTR_ERR(cdclk_state);
 
-		if (crtc_state->pixel_rate >= cdclk_state->logical.cdclk * 95 / 100) {
+		if (crtc_state->pixel_rate >= intel_cdclk_logical(cdclk_state) * 95 / 100) {
 			plane_state->no_fbc_reason = "pixel rate too high";
 			return 0;
 		}
@@ -1680,6 +1701,10 @@ static void __intel_fbc_disable(struct intel_fbc *fbc)
 	intel_fbc_invalidate_dirty_rect(fbc);
 
 	__intel_fbc_cleanup_cfb(fbc);
+
+	/* wa_18038517565 Enable DPFC clock gating after FBC disable */
+	if (display->platform.dg2 || DISPLAY_VER(display) >= 14)
+		fbc_compressor_clkgate_disable_wa(fbc, false);
 
 	fbc->state.plane = NULL;
 	fbc->flip_pending = false;
@@ -1982,7 +2007,7 @@ void intel_fbc_reset_underrun(struct intel_display *display)
 
 static void __intel_fbc_handle_fifo_underrun_irq(struct intel_fbc *fbc)
 {
-	struct drm_i915_private *i915 = to_i915(fbc->display->drm);
+	struct intel_display *display = fbc->display;
 
 	/*
 	 * There's no guarantee that underrun_detected won't be set to true
@@ -1995,7 +2020,7 @@ static void __intel_fbc_handle_fifo_underrun_irq(struct intel_fbc *fbc)
 	if (READ_ONCE(fbc->underrun_detected))
 		return;
 
-	queue_work(i915->unordered_wq, &fbc->underrun_work);
+	queue_work(display->wq.unordered, &fbc->underrun_work);
 }
 
 /**
@@ -2120,13 +2145,12 @@ static int intel_fbc_debugfs_status_show(struct seq_file *m, void *unused)
 {
 	struct intel_fbc *fbc = m->private;
 	struct intel_display *display = fbc->display;
-	struct drm_i915_private *i915 = to_i915(display->drm);
 	struct intel_plane *plane;
-	intel_wakeref_t wakeref;
+	struct ref_tracker *wakeref;
 
 	drm_modeset_lock_all(display->drm);
 
-	wakeref = intel_runtime_pm_get(&i915->runtime_pm);
+	wakeref = intel_display_rpm_get(display);
 	mutex_lock(&fbc->lock);
 
 	if (fbc->active) {
@@ -2151,7 +2175,7 @@ static int intel_fbc_debugfs_status_show(struct seq_file *m, void *unused)
 	}
 
 	mutex_unlock(&fbc->lock);
-	intel_runtime_pm_put(&i915->runtime_pm, wakeref);
+	intel_display_rpm_put(display, wakeref);
 
 	drm_modeset_unlock_all(display->drm);
 
@@ -2212,10 +2236,9 @@ void intel_fbc_crtc_debugfs_add(struct intel_crtc *crtc)
 /* FIXME: remove this once igt is on board with per-crtc stuff */
 void intel_fbc_debugfs_register(struct intel_display *display)
 {
-	struct drm_minor *minor = display->drm->primary;
 	struct intel_fbc *fbc;
 
 	fbc = display->fbc[INTEL_FBC_A];
 	if (fbc)
-		intel_fbc_debugfs_add(fbc, minor->debugfs_root);
+		intel_fbc_debugfs_add(fbc, display->drm->debugfs_root);
 }

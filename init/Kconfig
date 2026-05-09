@@ -120,6 +120,9 @@ config CC_HAS_ASM_INLINE
 config CC_HAS_NO_PROFILE_FN_ATTR
 	def_bool $(success,echo '__attribute__((no_profile_instrument_function)) int x();' | $(CC) -x c - -c -o /dev/null -Werror)
 
+config CC_HAS_MULTIDIMENSIONAL_NONSTRING
+	def_bool $(success,echo 'char tag[][4] __attribute__((__nonstring__)) = { };' | $(CC) $(CLANG_FLAGS) -x c - -c -o /dev/null -Werror)
+
 config PAHOLE_VERSION
 	int
 	default $(shell,$(srctree)/scripts/pahole-version.sh $(PAHOLE))
@@ -1039,6 +1042,9 @@ if CGROUP_SCHED
 config GROUP_SCHED_WEIGHT
 	def_bool n
 
+config GROUP_SCHED_BANDWIDTH
+        def_bool n
+
 config FAIR_GROUP_SCHED
 	bool "Group scheduling for SCHED_OTHER"
 	depends on CGROUP_SCHED
@@ -1048,6 +1054,7 @@ config FAIR_GROUP_SCHED
 config CFS_BANDWIDTH
 	bool "CPU bandwidth provisioning for FAIR_GROUP_SCHED"
 	depends on FAIR_GROUP_SCHED
+	select GROUP_SCHED_BANDWIDTH
 	default n
 	help
 	  This option allows users to define CPU bandwidth rates (limits) for
@@ -1067,10 +1074,22 @@ config RT_GROUP_SCHED
 	  realtime bandwidth for them.
 	  See Documentation/scheduler/sched-rt-group.rst for more information.
 
+config RT_GROUP_SCHED_DEFAULT_DISABLED
+	bool "Require boot parameter to enable group scheduling for SCHED_RR/FIFO"
+	depends on RT_GROUP_SCHED
+	default n
+	help
+	  When set, the RT group scheduling is disabled by default. The option
+	  is in inverted form so that mere RT_GROUP_SCHED enables the group
+	  scheduling.
+
+	  Say N if unsure.
+
 config EXT_GROUP_SCHED
 	bool
 	depends on SCHED_CLASS_EXT && CGROUP_SCHED
 	select GROUP_SCHED_WEIGHT
+	select GROUP_SCHED_BANDWIDTH
 	default y
 
 endif #CGROUP_SCHED
@@ -1669,6 +1688,16 @@ config FUTEX
 config FUTEX_PI
 	bool
 	depends on FUTEX && RT_MUTEXES
+	default y
+
+config FUTEX_PRIVATE_HASH
+	bool
+	depends on FUTEX && !BASE_SMALL && MMU
+	default y
+
+config FUTEX_MPOL
+	bool
+	depends on FUTEX && NUMA
 	default y
 
 config EPOLL

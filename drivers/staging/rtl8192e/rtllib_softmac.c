@@ -958,7 +958,7 @@ static void rtllib_associate_abort(struct rtllib_device *ieee)
 
 static void rtllib_associate_abort_cb(struct timer_list *t)
 {
-	struct rtllib_device *dev = from_timer(dev, t, associate_timer);
+	struct rtllib_device *dev = timer_container_of(dev, t, associate_timer);
 
 	rtllib_associate_abort(dev);
 }

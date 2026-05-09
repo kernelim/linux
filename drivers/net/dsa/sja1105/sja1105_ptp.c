@@ -727,10 +727,6 @@ static int sja1105_per_out_enable(struct sja1105_private *priv,
 	if (perout->index != 0)
 		return -EOPNOTSUPP;
 
-	/* Reject requests with unsupported flags */
-	if (perout->flags)
-		return -EOPNOTSUPP;
-
 	mutex_lock(&ptp_data->lock);
 
 	rc = sja1105_change_ptp_clk_pin_func(priv, PTP_PF_PEROUT);
@@ -810,13 +806,6 @@ static int sja1105_extts_enable(struct sja1105_private *priv,
 	if (extts->index != 0)
 		return -EOPNOTSUPP;
 
-	/* Reject requests with unsupported flags */
-	if (extts->flags & ~(PTP_ENABLE_FEATURE |
-			     PTP_RISING_EDGE |
-			     PTP_FALLING_EDGE |
-			     PTP_STRICT_FLAGS))
-		return -EOPNOTSUPP;
-
 	/* We can only enable time stamping on both edges, sadly. */
 	if ((extts->flags & PTP_STRICT_FLAGS) &&
 	    (extts->flags & PTP_ENABLE_FEATURE) &&
@@ -832,7 +821,7 @@ static int sja1105_extts_enable(struct sja1105_private *priv,
 	if (on)
 		sja1105_ptp_extts_setup_timer(&priv->ptp_data);
 	else
-		del_timer_sync(&priv->ptp_data.extts_timer);
+		timer_delete_sync(&priv->ptp_data.extts_timer);
 
 	return 0;
 }
@@ -902,6 +891,9 @@ int sja1105_ptp_clock_register(struct dsa_switch *ds)
 		.n_pins		= 1,
 		.n_ext_ts	= 1,
 		.n_per_out	= 1,
+		.supported_extts_flags = PTP_RISING_EDGE |
+					 PTP_FALLING_EDGE |
+					 PTP_STRICT_FLAGS,
 	};
 
 	/* Only used on SJA1105 */
@@ -929,7 +921,7 @@ void sja1105_ptp_clock_unregister(struct dsa_switch *ds)
 	if (IS_ERR_OR_NULL(ptp_data->clock))
 		return;
 
-	del_timer_sync(&ptp_data->extts_timer);
+	timer_delete_sync(&ptp_data->extts_timer);
 	ptp_cancel_worker_sync(ptp_data->clock);
 	skb_queue_purge(&ptp_data->skb_txtstamp_queue);
 	skb_queue_purge(&ptp_data->skb_rxtstamp_queue);

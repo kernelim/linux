@@ -364,7 +364,7 @@ static void throtl_pd_free(struct blkg_policy_data *pd)
 {
 	struct throtl_grp *tg = pd_to_tg(pd);
 
-	del_timer_sync(&tg->service_queue.pending_timer);
+	timer_delete_sync(&tg->service_queue.pending_timer);
 	blkg_rwstat_exit(&tg->stat_bytes);
 	blkg_rwstat_exit(&tg->stat_ios);
 	kfree(tg);
@@ -1125,7 +1125,8 @@ static int throtl_select_dispatch(struct throtl_service_queue *parent_sq)
  */
 static void throtl_pending_timer_fn(struct timer_list *t)
 {
-	struct throtl_service_queue *sq = from_timer(sq, t, pending_timer);
+	struct throtl_service_queue *sq = timer_container_of(sq, t,
+							     pending_timer);
 	struct throtl_grp *tg = sq_to_tg(sq);
 	struct throtl_data *td = sq_to_td(sq);
 	struct throtl_service_queue *parent_sq;
@@ -1848,7 +1849,7 @@ void blk_throtl_exit(struct gendisk *disk)
 	if (!blk_throtl_activated(q))
 		return;
 
-	del_timer_sync(&q->td->service_queue.pending_timer);
+	timer_delete_sync(&q->td->service_queue.pending_timer);
 	throtl_shutdown_wq(q);
 	blkcg_deactivate_policy(disk, &blkcg_policy_throtl);
 	kfree(q->td);

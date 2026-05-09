@@ -1,3 +1,3 @@
-#1-
-0xd3723209	rdma_read_gid_l2_fields	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
+#2-
+0xd6b629fc	rdma_read_gid_l2_fields	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
 

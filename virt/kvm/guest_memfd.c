@@ -382,23 +382,12 @@ static const struct address_space_operations kvm_gmem_aops = {
 #endif
 };
 
-static int kvm_gmem_getattr(struct mnt_idmap *idmap, const struct path *path,
-			    struct kstat *stat, u32 request_mask,
-			    unsigned int query_flags)
-{
-	struct inode *inode = path->dentry->d_inode;
-
-	generic_fillattr(idmap, request_mask, inode, stat);
-	return 0;
-}
-
 static int kvm_gmem_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 			    struct iattr *attr)
 {
 	return -EINVAL;
 }
 static const struct inode_operations kvm_gmem_iops = {
-	.getattr	= kvm_gmem_getattr,
 	.setattr	= kvm_gmem_setattr,
 };
 
@@ -650,7 +639,8 @@ long kvm_gmem_populate(struct kvm *kvm, gfn_t start_gfn, void __user *src, long 
 	long i;
 
 	lockdep_assert_held(&kvm->slots_lock);
-	if (npages < 0)
+
+	if (WARN_ON_ONCE(npages <= 0))
 		return -EINVAL;
 
 	slot = gfn_to_memslot(kvm, start_gfn);

@@ -1,3 +1,3 @@
-#1-
-0xcc1c4908	trace_event_buffer_reserve	vmlinux	EXPORT_SYMBOL_GPL	
+#2-
+0xd5e122db	trace_event_buffer_reserve	vmlinux	EXPORT_SYMBOL_GPL	
 

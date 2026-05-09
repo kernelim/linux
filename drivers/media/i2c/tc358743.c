@@ -1474,7 +1474,7 @@ static irqreturn_t tc358743_irq_handler(int irq, void *dev_id)
 
 static void tc358743_irq_poll_timer(struct timer_list *t)
 {
-	struct tc358743_state *state = from_timer(state, t, timer);
+	struct tc358743_state *state = timer_container_of(state, t, timer);
 	unsigned int msecs;
 
 	schedule_work(&state->work_i2c_poll);
@@ -2184,7 +2184,7 @@ static void tc358743_remove(struct i2c_client *client)
 	struct tc358743_state *state = to_state(sd);
 
 	if (!state->i2c_client->irq) {
-		del_timer_sync(&state->timer);
+		timer_delete_sync(&state->timer);
 		flush_work(&state->work_i2c_poll);
 	}
 	cancel_delayed_work_sync(&state->delayed_work_enable_hotplug);

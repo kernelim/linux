@@ -24,11 +24,14 @@
 #include <net/page_pool/helpers.h>
 #include <net/netlink.h>
 #include <net/net_shaper.h>
+#include <net/netdev_lock.h>
 #include <net/pkt_cls.h>
 #include <net/rtnetlink.h>
 #include <net/udp_tunnel.h>
 
 #include "netdevsim.h"
+
+MODULE_IMPORT_NS("NETDEV_INTERNAL");
 
 #define NSIM_RING_SIZE		256
 
@@ -400,7 +403,7 @@ static int nsim_init_napi(struct netdevsim *ns)
 	for (i = 0; i < dev->num_rx_queues; i++) {
 		rq = &ns->rq[i];
 
-		netif_napi_add(dev, &rq->napi, nsim_poll);
+		netif_napi_add_config_locked(dev, &rq->napi, nsim_poll, i);
 	}
 
 	for (i = 0; i < dev->num_rx_queues; i++) {
@@ -420,7 +423,7 @@ err_pp_destroy:
 	}
 
 	for (i = 0; i < dev->num_rx_queues; i++)
-		__netif_napi_del(&ns->rq[i].napi);
+		__netif_napi_del_locked(&ns->rq[i].napi);
 
 	return err;
 }
@@ -434,20 +437,29 @@ static void nsim_enable_napi(struct netdevsim *ns)
 		struct nsim_rq *rq = &ns->rq[i];
 
 		netif_queue_set_napi(dev, i, NETDEV_QUEUE_TYPE_RX, &rq->napi);
-		napi_enable(&rq->napi);
+		napi_enable_locked(&rq->napi);
 	}
 }
 
 static int nsim_open(struct net_device *dev)
 {
 	struct netdevsim *ns = netdev_priv(dev);
+	struct netdevsim *peer;
 	int err;
+
+	netdev_assert_locked(dev);
 
 	err = nsim_init_napi(ns);
 	if (err)
 		return err;
 
 	nsim_enable_napi(ns);
+
+	peer = rtnl_dereference(ns->peer);
+	if (peer && netif_running(peer->netdev)) {
+		netif_carrier_on(dev);
+		netif_carrier_on(peer->netdev);
+	}
 
 	return 0;
 }
@@ -460,8 +472,8 @@ static void nsim_del_napi(struct netdevsim *ns)
 	for (i = 0; i < dev->num_rx_queues; i++) {
 		struct nsim_rq *rq = &ns->rq[i];
 
-		napi_disable(&rq->napi);
-		__netif_napi_del(&rq->napi);
+		napi_disable_locked(&rq->napi);
+		__netif_napi_del_locked(&rq->napi);
 	}
 	synchronize_net();
 
@@ -475,6 +487,8 @@ static int nsim_stop(struct net_device *dev)
 {
 	struct netdevsim *ns = netdev_priv(dev);
 	struct netdevsim *peer;
+
+	netdev_assert_locked(dev);
 
 	netif_carrier_off(dev);
 	peer = rtnl_dereference(ns->peer);
@@ -723,6 +737,7 @@ static int nsim_init_netdevsim(struct netdevsim *ns)
 	ns->phc = phc;
 	ns->netdev->netdev_ops = &nsim_netdev_ops;
 	ns->netdev->stat_ops = &nsim_stat_ops;
+	netdev_lockdep_set_classes(ns->netdev);
 
 	err = nsim_udp_tunnels_info_create(ns->nsim_dev, ns->netdev);
 	if (err)
@@ -744,6 +759,14 @@ static int nsim_init_netdevsim(struct netdevsim *ns)
 	if (err)
 		goto err_ipsec_teardown;
 	rtnl_unlock();
+
+	if (IS_ENABLED(CONFIG_DEBUG_NET)) {
+		ns->nb.notifier_call = netdev_debug_event;
+		if (register_netdevice_notifier_dev_net(ns->netdev, &ns->nb,
+							&ns->nn))
+			ns->nb.notifier_call = NULL;
+	}
+
 	return 0;
 
 err_ipsec_teardown:
@@ -822,6 +845,10 @@ void nsim_destroy(struct netdevsim *ns)
 	struct netdevsim *peer;
 
 	debugfs_remove(ns->pp_dfs);
+
+	if (ns->nb.notifier_call)
+		unregister_netdevice_notifier_dev_net(ns->netdev, &ns->nb,
+						      &ns->nn);
 
 	rtnl_lock();
 	peer = rtnl_dereference(ns->peer);

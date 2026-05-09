@@ -1358,7 +1358,7 @@ static void dpu_encoder_virt_atomic_disable(struct drm_encoder *drm_enc,
 	/* after phys waits for frame-done, should be no more frames pending */
 	if (atomic_xchg(&dpu_enc->frame_done_timeout_ms, 0)) {
 		DPU_ERROR("enc%d timeout pending\n", drm_enc->base.id);
-		del_timer_sync(&dpu_enc->frame_done_timer);
+		timer_delete_sync(&dpu_enc->frame_done_timer);
 	}
 
 	dpu_encoder_resource_control(drm_enc, DPU_ENC_RC_EVENT_STOP);
@@ -1499,7 +1499,7 @@ void dpu_encoder_frame_done_callback(
 
 		if (!dpu_enc->frame_busy_mask[0]) {
 			atomic_set(&dpu_enc->frame_done_timeout_ms, 0);
-			del_timer(&dpu_enc->frame_done_timer);
+			timer_delete(&dpu_enc->frame_done_timer);
 
 			dpu_encoder_resource_control(drm_enc,
 					DPU_ENC_RC_EVENT_FRAME_DONE);
@@ -2432,8 +2432,8 @@ static int dpu_encoder_setup_display(struct dpu_encoder_virt *dpu_enc,
 
 static void dpu_encoder_frame_done_timeout(struct timer_list *t)
 {
-	struct dpu_encoder_virt *dpu_enc = from_timer(dpu_enc, t,
-			frame_done_timer);
+	struct dpu_encoder_virt *dpu_enc = timer_container_of(dpu_enc, t,
+							      frame_done_timer);
 	struct drm_encoder *drm_enc = &dpu_enc->base;
 	u32 event;
 

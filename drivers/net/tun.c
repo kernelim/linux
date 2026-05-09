@@ -187,7 +187,8 @@ struct tun_struct {
 	struct net_device	*dev;
 	netdev_features_t	set_features;
 #define TUN_USER_FEATURES (NETIF_F_HW_CSUM|NETIF_F_TSO_ECN|NETIF_F_TSO| \
-			  NETIF_F_TSO6 | NETIF_F_GSO_UDP_L4)
+			  NETIF_F_TSO6 | NETIF_F_GSO_UDP_L4 | \
+			  NETIF_F_GSO_UDP_TUNNEL | NETIF_F_GSO_UDP_TUNNEL_CSUM)
 
 	int			align;
 	int			vnet_hdr_sz;
@@ -362,6 +363,118 @@ static inline __virtio16 cpu_to_tun16(struct tun_struct *tun, u16 val)
 	return __cpu_to_virtio16(tun_is_little_endian(tun), val);
 }
 
+#define TUN_VNET_TNL_SIZE	sizeof(struct virtio_net_hdr_v1_hash_tunnel)
+
+static inline unsigned int tun_vnet_parse_size(netdev_features_t features)
+{
+	if (!(features & NETIF_F_GSO_UDP_TUNNEL))
+		return sizeof(struct virtio_net_hdr);
+
+	return TUN_VNET_TNL_SIZE;
+}
+
+static inline int __tun_vnet_hdr_get(int sz, struct tun_struct *tun,
+				     netdev_features_t features,
+				     struct iov_iter *from,
+				     struct virtio_net_hdr *hdr)
+{
+	unsigned int parsed_size = tun_vnet_parse_size(features);
+	u16 hdr_len;
+
+	if (iov_iter_count(from) < sz)
+		return -EINVAL;
+
+	if (!copy_from_iter_full(hdr, parsed_size, from))
+		return -EFAULT;
+
+	hdr_len = tun16_to_cpu(tun, hdr->hdr_len);
+
+	if (hdr->flags & VIRTIO_NET_HDR_F_NEEDS_CSUM) {
+		hdr_len = max(tun16_to_cpu(tun, hdr->csum_start) + tun16_to_cpu(tun, hdr->csum_offset) + 2, hdr_len);
+		hdr->hdr_len = cpu_to_tun16(tun, hdr_len);
+	}
+
+	if (hdr_len > iov_iter_count(from))
+		return -EINVAL;
+
+	iov_iter_advance(from, sz - parsed_size);
+
+	return hdr_len;
+}
+
+static inline int __tun_vnet_hdr_put(int sz, netdev_features_t features,
+				     struct iov_iter *iter,
+				     const struct virtio_net_hdr *hdr)
+{
+	unsigned int parsed_size = tun_vnet_parse_size(features);
+
+	if (unlikely(iov_iter_count(iter) < sz))
+		return -EINVAL;
+
+	if (unlikely(copy_to_iter(hdr, parsed_size, iter) != parsed_size))
+		return -EFAULT;
+
+	if (iov_iter_zero(sz - parsed_size, iter) != sz - parsed_size)
+		return -EFAULT;
+
+	return 0;
+}
+
+/*
+ * Tun is not aware of the negotiated guest features, guess them from the
+ * virtio net hdr size
+ */
+static inline netdev_features_t tun_vnet_hdr_guest_features(int vnet_hdr_sz)
+{
+	if (vnet_hdr_sz >= TUN_VNET_TNL_SIZE)
+		return NETIF_F_GSO_UDP_TUNNEL | NETIF_F_GSO_UDP_TUNNEL_CSUM;
+	return 0;
+}
+
+static inline int
+tun_vnet_hdr_tnl_to_skb(struct tun_struct *tun, netdev_features_t features,
+			struct sk_buff *skb,
+			const struct virtio_net_hdr_v1_hash_tunnel *hdr)
+{
+	return virtio_net_hdr_tnl_to_skb(skb, hdr,
+				features & NETIF_F_GSO_UDP_TUNNEL,
+				features & NETIF_F_GSO_UDP_TUNNEL_CSUM,
+				tun_is_little_endian(tun));
+}
+
+static inline int
+tun_vnet_hdr_tnl_from_skb(struct tun_struct *tun,
+			  const struct net_device *dev,
+			  const struct sk_buff *skb,
+			  struct virtio_net_hdr_v1_hash_tunnel *tnl_hdr)
+{
+	bool has_tnl_offload = !!(dev->features & NETIF_F_GSO_UDP_TUNNEL);
+	int vlan_hlen = skb_vlan_tag_present(skb) ? VLAN_HLEN : 0;
+
+	if (virtio_net_hdr_tnl_from_skb(skb, tnl_hdr, has_tnl_offload,
+					tun_is_little_endian(tun),
+					vlan_hlen, true)) {
+		struct virtio_net_hdr_v1 *hdr = &tnl_hdr->hash_hdr.hdr;
+		struct skb_shared_info *sinfo = skb_shinfo(skb);
+
+		if (net_ratelimit()) {
+			int hdr_len = tun16_to_cpu(tun, hdr->hdr_len);
+
+			netdev_err(dev, "unexpected GSO type: 0x%x, gso_size %d, hdr_len %d\n",
+				   sinfo->gso_type,
+				   tun16_to_cpu(tun, hdr->gso_size),
+				   tun16_to_cpu(tun, hdr->hdr_len));
+			print_hex_dump(KERN_ERR, "tun: ", DUMP_PREFIX_NONE,
+				       16, 1, skb->head, min(hdr_len, 64),
+				       true);
+		}
+		WARN_ON_ONCE(1);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static inline u32 tun_hashfn(u32 rxhash)
 {
 	return rxhash & TUN_MASK_FLOW_ENTRIES;
@@ -442,7 +555,7 @@ static void tun_flow_delete_by_queue(struct tun_struct *tun, u16 queue_index)
 
 static void tun_flow_cleanup(struct timer_list *t)
 {
-	struct tun_struct *tun = from_timer(tun, t, flow_gc_timer);
+	struct tun_struct *tun = timer_container_of(tun, t, flow_gc_timer);
 	unsigned long delay = tun->ageing_time;
 	unsigned long next_timer = jiffies + delay;
 	unsigned long count = 0;
@@ -990,6 +1103,7 @@ static int tun_net_init(struct net_device *dev)
 	dev->hw_features = NETIF_F_SG | NETIF_F_FRAGLIST |
 			   TUN_USER_FEATURES | NETIF_F_HW_VLAN_CTAG_TX |
 			   NETIF_F_HW_VLAN_STAG_TX;
+	dev->hw_enc_features = dev->hw_features;
 	dev->features = dev->hw_features;
 	dev->vlan_features = dev->features &
 			     ~(NETIF_F_HW_VLAN_CTAG_TX |
@@ -1065,8 +1179,8 @@ static unsigned int run_ebpf_filter(struct tun_struct *tun,
 /* Net device start xmit */
 static netdev_tx_t tun_net_xmit(struct sk_buff *skb, struct net_device *dev)
 {
+	enum skb_drop_reason drop_reason = SKB_DROP_REASON_NOT_SPECIFIED;
 	struct tun_struct *tun = netdev_priv(dev);
-	enum skb_drop_reason drop_reason;
 	int txq = skb->queue_mapping;
 	struct netdev_queue *queue;
 	struct tun_file *tfile;
@@ -1095,10 +1209,8 @@ static netdev_tx_t tun_net_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	if (tfile->socket.sk->sk_filter &&
-	    sk_filter(tfile->socket.sk, skb)) {
-		drop_reason = SKB_DROP_REASON_SOCKET_FILTER;
+	    sk_filter_reason(tfile->socket.sk, skb, &drop_reason))
 		goto drop;
-	}
 
 	len = run_ebpf_filter(tun, skb, len);
 	if (len == 0) {
@@ -1360,7 +1472,7 @@ static void tun_flow_init(struct tun_struct *tun)
 
 static void tun_flow_uninit(struct tun_struct *tun)
 {
-	del_timer_sync(&tun->flow_gc_timer);
+	timer_delete_sync(&tun->flow_gc_timer);
 	tun_flow_flush(tun);
 }
 
@@ -1753,7 +1865,8 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 	struct sk_buff *skb;
 	size_t total_len = iov_iter_count(from);
 	size_t len = total_len, align = tun->align, linear;
-	struct virtio_net_hdr gso = { 0 };
+	struct virtio_net_hdr_v1_hash_tunnel hdr;
+	struct virtio_net_hdr *gso;
 	int good_linear;
 	int copylen;
 	bool zerocopy = false;
@@ -1762,6 +1875,15 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 	int skb_xdp = 1;
 	bool frags = tun_napi_frags_enabled(tfile);
 	enum skb_drop_reason drop_reason = SKB_DROP_REASON_NOT_SPECIFIED;
+	netdev_features_t features = 0;
+
+	/*
+	 * Keep it easy and always zero the whole buffer, even if the
+	 * tunnel-related field will be touched only when the feature
+	 * is enabled and the hdr size id compatible.
+	 */
+	memset(&hdr, 0, sizeof(hdr));
+	gso = (struct virtio_net_hdr *)&hdr;
 
 	if (!(tun->flags & IFF_NO_PI)) {
 		if (len < sizeof(pi))
@@ -1774,27 +1896,21 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 
 	if (tun->flags & IFF_VNET_HDR) {
 		int vnet_hdr_sz = READ_ONCE(tun->vnet_hdr_sz);
+		int hdr_len;
 
-		if (len < vnet_hdr_sz)
-			return -EINVAL;
+		features = tun_vnet_hdr_guest_features(vnet_hdr_sz);
+		hdr_len = __tun_vnet_hdr_get(vnet_hdr_sz, tun,
+					     features, from, gso);
+		if (hdr_len < 0)
+			return hdr_len;
+
 		len -= vnet_hdr_sz;
-
-		if (!copy_from_iter_full(&gso, sizeof(gso), from))
-			return -EFAULT;
-
-		if ((gso.flags & VIRTIO_NET_HDR_F_NEEDS_CSUM) &&
-		    tun16_to_cpu(tun, gso.csum_start) + tun16_to_cpu(tun, gso.csum_offset) + 2 > tun16_to_cpu(tun, gso.hdr_len))
-			gso.hdr_len = cpu_to_tun16(tun, tun16_to_cpu(tun, gso.csum_start) + tun16_to_cpu(tun, gso.csum_offset) + 2);
-
-		if (tun16_to_cpu(tun, gso.hdr_len) > len)
-			return -EINVAL;
-		iov_iter_advance(from, vnet_hdr_sz - sizeof(gso));
 	}
 
 	if ((tun->flags & TUN_TYPE_MASK) == IFF_TAP) {
 		align += NET_IP_ALIGN;
 		if (unlikely(len < ETH_HLEN ||
-			     (gso.hdr_len && tun16_to_cpu(tun, gso.hdr_len) < ETH_HLEN)))
+			     (gso->hdr_len && tun16_to_cpu(tun, gso->hdr_len) < ETH_HLEN)))
 			return -EINVAL;
 	}
 
@@ -1807,7 +1923,7 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 		 * enough room for skb expand head in case it is used.
 		 * The rest of the buffer is mapped from userspace.
 		 */
-		copylen = gso.hdr_len ? tun16_to_cpu(tun, gso.hdr_len) : GOODCOPY_LEN;
+		copylen = gso->hdr_len ? tun16_to_cpu(tun, gso->hdr_len) : GOODCOPY_LEN;
 		if (copylen > good_linear)
 			copylen = good_linear;
 		linear = copylen;
@@ -1821,7 +1937,7 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 		 * (e.g gso or jumbo packet), we will do it at after
 		 * skb was created with generic XDP routine.
 		 */
-		skb = tun_build_skb(tun, tfile, from, &gso, len, &skb_xdp);
+		skb = tun_build_skb(tun, tfile, from, gso, len, &skb_xdp);
 		err = PTR_ERR_OR_ZERO(skb);
 		if (err)
 			goto drop;
@@ -1830,10 +1946,10 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 	} else {
 		if (!zerocopy) {
 			copylen = len;
-			if (tun16_to_cpu(tun, gso.hdr_len) > good_linear)
+			if (tun16_to_cpu(tun, gso->hdr_len) > good_linear)
 				linear = good_linear;
 			else
-				linear = tun16_to_cpu(tun, gso.hdr_len);
+				linear = tun16_to_cpu(tun, gso->hdr_len);
 		}
 
 		if (frags) {
@@ -1868,7 +1984,7 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 		}
 	}
 
-	if (virtio_net_hdr_to_skb(skb, &gso, tun_is_little_endian(tun))) {
+	if (tun_vnet_hdr_tnl_to_skb(tun, features, skb, &hdr)) {
 		atomic_long_inc(&tun->rx_frame_errors);
 		err = -EINVAL;
 		goto free_skb;
@@ -2100,6 +2216,7 @@ static ssize_t tun_put_user(struct tun_struct *tun,
 	int vlan_offset = 0;
 	int vlan_hlen = 0;
 	int vnet_hdr_sz = 0;
+	int ret;
 
 	if (skb_vlan_tag_present(skb))
 		vlan_hlen = VLAN_HLEN;
@@ -2124,33 +2241,23 @@ static ssize_t tun_put_user(struct tun_struct *tun,
 	}
 
 	if (vnet_hdr_sz) {
-		struct virtio_net_hdr gso;
+		struct virtio_net_hdr_v1_hash_tunnel hdr;
+		struct virtio_net_hdr *gso;
 
-		if (iov_iter_count(iter) < vnet_hdr_sz)
-			return -EINVAL;
+		ret = tun_vnet_hdr_tnl_from_skb(tun, tun->dev, skb,
+						&hdr);
+		if (ret)
+			return ret;
 
-		if (virtio_net_hdr_from_skb(skb, &gso,
-					    tun_is_little_endian(tun), true,
-					    vlan_hlen)) {
-			struct skb_shared_info *sinfo = skb_shinfo(skb);
-
-			if (net_ratelimit()) {
-				netdev_err(tun->dev, "unexpected GSO type: 0x%x, gso_size %d, hdr_len %d\n",
-					   sinfo->gso_type, tun16_to_cpu(tun, gso.gso_size),
-					   tun16_to_cpu(tun, gso.hdr_len));
-				print_hex_dump(KERN_ERR, "tun: ",
-					       DUMP_PREFIX_NONE,
-					       16, 1, skb->head,
-					       min((int)tun16_to_cpu(tun, gso.hdr_len), 64), true);
-			}
-			WARN_ON_ONCE(1);
-			return -EINVAL;
-		}
-
-		if (copy_to_iter(&gso, sizeof(gso), iter) != sizeof(gso))
-			return -EFAULT;
-
-		iov_iter_advance(iter, vnet_hdr_sz - sizeof(gso));
+		/*
+		 * Drop the packet if the configured header size is too small
+		 * WRT the enabled offloads.
+		 */
+		gso = (struct virtio_net_hdr *)&hdr;
+		ret = __tun_vnet_hdr_put(vnet_hdr_sz, tun->dev->features,
+					 iter, gso);
+		if (ret)
+			return ret;
 	}
 
 	if (vlan_hlen) {
@@ -2449,10 +2556,12 @@ static int tun_xdp_one(struct tun_struct *tun,
 {
 	unsigned int datasize = xdp->data_end - xdp->data;
 	struct tun_xdp_hdr *hdr = xdp->data_hard_start;
+	struct virtio_net_hdr_v1_hash_tunnel *tnl_hdr;
 	struct virtio_net_hdr *gso = &hdr->gso;
 	struct bpf_prog *xdp_prog;
 	struct sk_buff *skb = NULL;
 	struct sk_buff_head *queue;
+	netdev_features_t features;
 	u32 rxhash = 0, act;
 	int buflen = hdr->buflen;
 	int ret = 0;
@@ -2510,7 +2619,9 @@ build:
 	skb_reserve(skb, xdp->data - xdp->data_hard_start);
 	skb_put(skb, xdp->data_end - xdp->data);
 
-	if (virtio_net_hdr_to_skb(skb, gso, tun_is_little_endian(tun))) {
+	features = tun_vnet_hdr_guest_features(READ_ONCE(tun->vnet_hdr_sz));
+	tnl_hdr = (struct virtio_net_hdr_v1_hash_tunnel *)gso;
+	if (tun_vnet_hdr_tnl_to_skb(tun, features, skb, tnl_hdr)) {
 		atomic_long_inc(&tun->rx_frame_errors);
 		kfree_skb(skb);
 		ret = -EINVAL;
@@ -2896,6 +3007,8 @@ static void tun_get_iff(struct tun_struct *tun, struct ifreq *ifr)
 
 }
 
+#define PLAIN_GSO (NETIF_F_GSO_UDP_L4 | NETIF_F_TSO | NETIF_F_TSO6)
+
 /* This is like a cut-down ethtool ops, except done via tun fd so no
  * privs required. */
 static int set_offload(struct tun_struct *tun, unsigned long arg)
@@ -2924,6 +3037,18 @@ static int set_offload(struct tun_struct *tun, unsigned long arg)
 		if (arg & TUN_F_USO4 && arg & TUN_F_USO6) {
 			features |= NETIF_F_GSO_UDP_L4;
 			arg &= ~(TUN_F_USO4 | TUN_F_USO6);
+		}
+
+		/*
+		 * Tunnel offload is allowed only if some plain offload is
+		 * available, too.
+		 */
+		if (features & PLAIN_GSO && arg & TUN_F_UDP_TUNNEL_GSO) {
+			features |= NETIF_F_GSO_UDP_TUNNEL;
+			if (arg & TUN_F_UDP_TUNNEL_GSO_CSUM)
+				features |= NETIF_F_GSO_UDP_TUNNEL_CSUM;
+			arg &= ~(TUN_F_UDP_TUNNEL_GSO |
+				 TUN_F_UDP_TUNNEL_GSO_CSUM);
 		}
 	}
 

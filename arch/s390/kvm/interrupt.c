@@ -1322,6 +1322,7 @@ int kvm_s390_handle_wait(struct kvm_vcpu *vcpu)
 	VCPU_EVENT(vcpu, 4, "enabled wait: %llu ns", sltime);
 no_timer:
 	kvm_vcpu_srcu_read_unlock(vcpu);
+	vcpu->kvm->arch.float_int.last_sleep_cpu = vcpu->vcpu_idx;
 	kvm_vcpu_halt(vcpu);
 	vcpu->valid_wakeup = false;
 	__unset_cpu_idle(vcpu);
@@ -1948,18 +1949,15 @@ static void __floating_irq_kick(struct kvm *kvm, u64 type)
 	if (!online_vcpus)
 		return;
 
-	/* find idle VCPUs first, then round robin */
-	sigcpu = find_first_bit(kvm->arch.idle_mask, online_vcpus);
-	if (sigcpu == online_vcpus) {
-		do {
-			sigcpu = kvm->arch.float_int.next_rr_cpu++;
-			kvm->arch.float_int.next_rr_cpu %= online_vcpus;
-			/* avoid endless loops if all vcpus are stopped */
-			if (nr_tries++ >= online_vcpus)
-				return;
-		} while (is_vcpu_stopped(kvm_get_vcpu(kvm, sigcpu)));
+	for (sigcpu = kvm->arch.float_int.last_sleep_cpu; ; sigcpu++) {
+		sigcpu %= online_vcpus;
+		dst_vcpu = kvm_get_vcpu(kvm, sigcpu);
+		if (!is_vcpu_stopped(dst_vcpu))
+			break;
+		/* avoid endless loops if all vcpus are stopped */
+		if (nr_tries++ >= online_vcpus)
+			return;
 	}
-	dst_vcpu = kvm_get_vcpu(kvm, sigcpu);
 
 	/* make the VCPU drop out of the SIE, or wake it up if sleeping */
 	switch (type) {
@@ -2777,12 +2775,19 @@ static unsigned long get_ind_bit(__u64 addr, unsigned long bit_nr, bool swap)
 
 static struct page *get_map_page(struct kvm *kvm, u64 uaddr)
 {
+	struct mm_struct *mm = kvm->mm;
 	struct page *page = NULL;
+	int locked = 1;
 
-	mmap_read_lock(kvm->mm);
-	get_user_pages_remote(kvm->mm, uaddr, 1, FOLL_WRITE,
-			      &page, NULL);
-	mmap_read_unlock(kvm->mm);
+	if (mmget_not_zero(mm)) {
+		mmap_read_lock(mm);
+		get_user_pages_remote(mm, uaddr, 1, FOLL_WRITE,
+				      &page, &locked);
+		if (locked)
+			mmap_read_unlock(mm);
+		mmput(mm);
+	}
+
 	return page;
 }
 
@@ -3174,8 +3179,7 @@ void kvm_s390_gisa_init(struct kvm *kvm)
 	gi->alert.mask = 0;
 	spin_lock_init(&gi->alert.ref_lock);
 	gi->expires = 50 * 1000; /* 50 usec */
-	hrtimer_init(&gi->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	gi->timer.function = gisa_vcpu_kicker;
+	hrtimer_setup(&gi->timer, gisa_vcpu_kicker, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	memset(gi->origin, 0, sizeof(struct kvm_s390_gisa));
 	gi->origin->next_alert = (u32)virt_to_phys(gi->origin);
 	VM_EVENT(kvm, 3, "gisa 0x%p initialized", gi->origin);

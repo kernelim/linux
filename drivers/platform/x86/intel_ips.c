@@ -934,7 +934,7 @@ static u32 calc_avg_power(struct ips_driver *ips, u32 *array)
 
 static void monitor_timeout(struct timer_list *t)
 {
-	struct ips_driver *ips = from_timer(ips, t, timer);
+	struct ips_driver *ips = timer_container_of(ips, t, timer);
 	wake_up_process(ips->monitor);
 }
 
@@ -1108,7 +1108,7 @@ static int ips_monitor(void *data)
 			last_sample_period = 1;
 	} while (!kthread_should_stop());
 
-	del_timer_sync(&ips->timer);
+	timer_delete_sync(&ips->timer);
 
 	dev_dbg(ips->dev, "ips-monitor thread stopped\n");
 

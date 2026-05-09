@@ -15,6 +15,11 @@ static inline struct mdp_m2m_ctx *fh_to_ctx(struct v4l2_fh *fh)
 	return container_of(fh, struct mdp_m2m_ctx, fh);
 }
 
+static inline struct mdp_m2m_ctx *file_to_ctx(struct file *filp)
+{
+	return fh_to_ctx(file_to_v4l2_fh(filp));
+}
+
 static inline struct mdp_m2m_ctx *ctrl_to_ctx(struct v4l2_ctrl *ctrl)
 {
 	return container_of(ctrl->handler, struct mdp_m2m_ctx, ctrl_handler);
@@ -585,14 +590,13 @@ static int mdp_m2m_open(struct file *file)
 	ctx->mdp_dev = mdp;
 
 	v4l2_fh_init(&ctx->fh, vdev);
-	file->private_data = &ctx->fh;
 	ret = mdp_m2m_ctrls_create(ctx);
 	if (ret)
 		goto err_exit_fh;
 
 	/* Use separate control handler per file handle */
 	ctx->fh.ctrl_handler = &ctx->ctrl_handler;
-	v4l2_fh_add(&ctx->fh);
+	v4l2_fh_add(&ctx->fh, file);
 
 	mutex_init(&ctx->ctx_lock);
 	ctx->m2m_ctx = v4l2_m2m_ctx_init(mdp->m2m_dev, ctx, mdp_m2m_queue_init);
@@ -629,7 +633,7 @@ err_release_m2m_ctx:
 	v4l2_m2m_ctx_release(ctx->m2m_ctx);
 err_release_handler:
 	v4l2_ctrl_handler_free(&ctx->ctrl_handler);
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 err_exit_fh:
 	v4l2_fh_exit(&ctx->fh);
 	ida_free(&mdp->mdp_ida, ctx->id);
@@ -643,7 +647,7 @@ err_free_ctx:
 
 static int mdp_m2m_release(struct file *file)
 {
-	struct mdp_m2m_ctx *ctx = fh_to_ctx(file->private_data);
+	struct mdp_m2m_ctx *ctx = file_to_ctx(file);
 	struct mdp_dev *mdp = video_drvdata(file);
 	struct device *dev = &mdp->pdev->dev;
 
@@ -653,7 +657,7 @@ static int mdp_m2m_release(struct file *file)
 		mdp_vpu_put_locked(mdp);
 
 	v4l2_ctrl_handler_free(&ctx->ctrl_handler);
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 	ida_free(&mdp->mdp_ida, ctx->id);
 	mutex_unlock(&mdp->m2m_lock);

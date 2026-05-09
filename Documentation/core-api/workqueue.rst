@@ -183,6 +183,12 @@ resources, scheduled and executed.
   BH work items cannot sleep. All other features such as delayed queueing,
   flushing and canceling are supported.
 
+``WQ_PERCPU``
+  Work items queued to a per-cpu wq are bound to a specific CPU.
+  This flag is the right choice when cpu locality is important.
+
+  This flag is the complement of ``WQ_UNBOUND``.
+
 ``WQ_UNBOUND``
   Work items queued to an unbound wq are served by the special
   worker-pools which host workers which are not bound to any
@@ -245,8 +251,8 @@ CPU which can be assigned to the work items of a wq. For example, with
 at the same time per CPU. This is always a per-CPU attribute, even for
 unbound workqueues.
 
-The maximum limit for ``@max_active`` is 512 and the default value used
-when 0 is specified is 256. These values are chosen sufficiently high
+The maximum limit for ``@max_active`` is 2048 and the default value used
+when 0 is specified is 1024. These values are chosen sufficiently high
 such that they are not the limiting factor while providing protection in
 runaway cases.
 

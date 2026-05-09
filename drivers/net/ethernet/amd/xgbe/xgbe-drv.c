@@ -643,7 +643,8 @@ static irqreturn_t xgbe_dma_isr(int irq, void *data)
 
 static void xgbe_tx_timer(struct timer_list *t)
 {
-	struct xgbe_channel *channel = from_timer(channel, t, tx_timer);
+	struct xgbe_channel *channel = timer_container_of(channel, t,
+							  tx_timer);
 	struct xgbe_prv_data *pdata = channel->pdata;
 	struct napi_struct *napi;
 
@@ -681,7 +682,8 @@ static void xgbe_service(struct work_struct *work)
 
 static void xgbe_service_timer(struct timer_list *t)
 {
-	struct xgbe_prv_data *pdata = from_timer(pdata, t, service_timer);
+	struct xgbe_prv_data *pdata = timer_container_of(pdata, t,
+							 service_timer);
 	struct xgbe_channel *channel;
 	unsigned int i;
 
@@ -728,7 +730,7 @@ static void xgbe_stop_timers(struct xgbe_prv_data *pdata)
 	struct xgbe_channel *channel;
 	unsigned int i;
 
-	del_timer_sync(&pdata->service_timer);
+	timer_delete_sync(&pdata->service_timer);
 
 	for (i = 0; i < pdata->channel_count; i++) {
 		channel = pdata->channel[i];
@@ -736,7 +738,7 @@ static void xgbe_stop_timers(struct xgbe_prv_data *pdata)
 			break;
 
 		/* Deactivate the Tx timer */
-		del_timer_sync(&channel->tx_timer);
+		timer_delete_sync(&channel->tx_timer);
 		channel->tx_timer_active = 0;
 	}
 }

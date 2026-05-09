@@ -391,12 +391,11 @@ PCI
   devm_pci_remap_cfgspace()	: ioremap PCI configuration space
   devm_pci_remap_cfg_resource()	: ioremap PCI configuration space resource
 
-  pcim_enable_device()		: after success, some PCI ops become managed
+  pcim_enable_device()		: after success, the PCI device gets disabled automatically on driver detach
   pcim_iomap()			: do iomap() on a single BAR
   pcim_iomap_regions()		: do request_region() and iomap() on multiple BARs
   pcim_iomap_table()		: array of mapped addresses indexed by BAR
   pcim_iounmap()		: do iounmap() on a single BAR
-  pcim_iounmap_regions()	: do iounmap() and release_region() on multiple BARs
   pcim_pin_device()		: keep PCI device enabled after release
   pcim_set_mwi()		: enable Memory-Write-Invalidate PCI transaction
 
@@ -457,10 +456,11 @@ SERDEV
 
 SLAVE DMA ENGINE
   devm_acpi_dma_controller_register()
+  devm_acpi_dma_controller_free()
 
 SPI
-  devm_spi_alloc_master()
-  devm_spi_alloc_slave()
+  devm_spi_alloc_host()
+  devm_spi_alloc_target()
   devm_spi_optimize_message()
   devm_spi_register_controller()
   devm_spi_register_host()

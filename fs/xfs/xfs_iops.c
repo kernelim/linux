@@ -29,6 +29,7 @@
 #include "xfs_xattr.h"
 #include "xfs_file.h"
 #include "xfs_bmap.h"
+#include "xfs_zone_alloc.h"
 
 #include <linux/posix_acl.h>
 #include <linux/security.h>
@@ -42,7 +43,9 @@
  * held. For regular files, the lock order is the other way around - the
  * mmap_lock is taken during the page fault, and then we lock the ilock to do
  * block mapping. Hence we need a different class for the directory ilock so
- * that lockdep can tell them apart.
+ * that lockdep can tell them apart.  Directories in the metadata directory
+ * tree get a separate class so that lockdep reports will warn us if someone
+ * ever tries to lock regular directories after locking metadata directories.
  */
 static struct lock_class_key xfs_nondir_ilock_class;
 static struct lock_class_key xfs_dir_ilock_class;
@@ -597,8 +600,9 @@ xfs_vn_getattr(
 	stat->gid = vfsgid_into_kgid(vfsgid);
 	stat->ino = ip->i_ino;
 	stat->atime = inode_get_atime(inode);
-	stat->mtime = inode_get_mtime(inode);
-	stat->ctime = inode_get_ctime(inode);
+
+	fill_mg_cmtime(stat, request_mask, inode);
+
 	stat->blocks = XFS_FSB_TO_BB(mp, ip->i_nblocks + ip->i_delayed_blks);
 
 	if (xfs_has_v3inodes(mp)) {
@@ -606,11 +610,6 @@ xfs_vn_getattr(
 			stat->result_mask |= STATX_BTIME;
 			stat->btime = ip->i_crtime;
 		}
-	}
-
-	if ((request_mask & STATX_CHANGE_COOKIE) && IS_I_VERSION(inode)) {
-		stat->change_cookie = inode_query_iversion(inode);
-		stat->result_mask |= STATX_CHANGE_COOKIE;
 	}
 
 	/*
@@ -820,6 +819,7 @@ xfs_setattr_size(
 	uint			lock_flags = 0;
 	uint			resblks = 0;
 	bool			did_zeroing = false;
+	struct xfs_zone_alloc_ctx ac = { };
 
 	xfs_assert_ilocked(ip, XFS_IOLOCK_EXCL | XFS_MMAPLOCK_EXCL);
 	ASSERT(S_ISREG(inode->i_mode));
@@ -856,6 +856,28 @@ xfs_setattr_size(
 	inode_dio_wait(inode);
 
 	/*
+	 * Normally xfs_zoned_space_reserve is supposed to be called outside the
+	 * IOLOCK.  For truncate we can't do that since ->setattr is called with
+	 * it already held by the VFS.  So for now chicken out and try to
+	 * allocate space under it.
+	 *
+	 * To avoid deadlocks this means we can't block waiting for space, which
+	 * can lead to spurious -ENOSPC if there are no directly available
+	 * blocks.  We mitigate this a bit by allowing zeroing to dip into the
+	 * reserved pool, but eventually the VFS calling convention needs to
+	 * change.
+	 */
+	if (xfs_is_zoned_inode(ip)) {
+		error = xfs_zoned_space_reserve(ip, 1,
+				XFS_ZR_NOWAIT | XFS_ZR_RESERVED, &ac);
+		if (error) {
+			if (error == -EAGAIN)
+				return -ENOSPC;
+			return error;
+		}
+	}
+
+	/*
 	 * File data changes must be complete before we start the transaction to
 	 * modify the inode.  This needs to be done before joining the inode to
 	 * the transaction because the inode cannot be unlocked once it is a
@@ -868,10 +890,13 @@ xfs_setattr_size(
 	if (newsize > oldsize) {
 		trace_xfs_zero_eof(ip, oldsize, newsize - oldsize);
 		error = xfs_zero_range(ip, oldsize, newsize - oldsize,
-				&did_zeroing);
+				&ac, &did_zeroing);
 	} else {
-		error = xfs_truncate_page(ip, newsize, &did_zeroing);
+		error = xfs_truncate_page(ip, newsize, &ac, &did_zeroing);
 	}
+
+	if (xfs_is_zoned_inode(ip))
+		xfs_zoned_space_unreserve(ip, &ac);
 
 	if (error)
 		return error;
@@ -1289,6 +1314,7 @@ xfs_setup_inode(
 {
 	struct inode		*inode = &ip->i_vnode;
 	gfp_t			gfp_mask;
+	bool			is_meta = xfs_is_internal_inode(ip);
 
 	inode->i_ino = ip->i_ino;
 	inode->i_state |= I_NEW;
@@ -1299,6 +1325,16 @@ xfs_setup_inode(
 
 	i_size_write(inode, ip->i_disk_size);
 	xfs_diflags_to_iflags(ip, true);
+
+	/*
+	 * Mark our metadata files as private so that LSMs and the ACL code
+	 * don't try to add their own metadata or reason about these files,
+	 * and users cannot ever obtain file handles to them.
+	 */
+	if (is_meta) {
+		inode->i_flags |= S_PRIVATE;
+		inode->i_opflags &= ~IOP_XATTR;
+	}
 
 	if (S_ISDIR(inode->i_mode)) {
 		/*

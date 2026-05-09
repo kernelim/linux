@@ -20,6 +20,9 @@
 #include <asm/ptrace.h>
 #include <asm/tlbflush.h>
 
+#define CREATE_TRACE_POINTS
+#include <trace/events/exceptions.h>
+
 #include "../kernel/head.h"
 
 static void die_kernel_fault(const char *msg, unsigned long addr,
@@ -238,6 +241,11 @@ void handle_page_fault(struct pt_regs *regs)
 
 	if (kprobe_page_fault(regs, cause))
 		return;
+
+	if (user_mode(regs))
+		trace_page_fault_user(addr, regs, cause);
+	else
+		trace_page_fault_kernel(addr, regs, cause);
 
 	/*
 	 * Fault-in kernel-space virtual memory on-demand.

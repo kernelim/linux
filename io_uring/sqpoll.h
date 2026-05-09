@@ -35,3 +35,4 @@ static inline struct task_struct *sqpoll_task_locked(struct io_sq_data *sqd)
 	return rcu_dereference_protected(sqd->thread,
 					 lockdep_is_held(&sqd->lock));
 }
+u64 io_sq_cpu_usec(struct task_struct *tsk);

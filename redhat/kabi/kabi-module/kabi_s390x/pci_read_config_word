@@ -1,3 +1,3 @@
-#1-
-0x296402f7	pci_read_config_word	vmlinux	EXPORT_SYMBOL	
+#2-
+0x9ec01a3c	pci_read_config_word	vmlinux	EXPORT_SYMBOL	
 

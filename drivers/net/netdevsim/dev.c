@@ -314,6 +314,8 @@ static int nsim_dev_debugfs_init(struct nsim_dev *nsim_dev)
 			    &nsim_dev->fw_update_status);
 	debugfs_create_u32("fw_update_overwrite_mask", 0600, nsim_dev->ddir,
 			    &nsim_dev->fw_update_overwrite_mask);
+	debugfs_create_u32("fw_update_flash_chunk_time_ms", 0600, nsim_dev->ddir,
+			   &nsim_dev->fw_update_flash_chunk_time_ms);
 	debugfs_create_u32("max_macs", 0600, nsim_dev->ddir,
 			   &nsim_dev->max_macs);
 	debugfs_create_bool("test1", 0600, nsim_dev->ddir,
@@ -388,6 +390,17 @@ static const struct file_operations nsim_dev_rate_parent_fops = {
 	.owner = THIS_MODULE,
 };
 
+static void nsim_dev_tc_bw_debugfs_init(struct dentry *ddir, u32 *tc_bw)
+{
+	int i;
+
+	for (i = 0; i < DEVLINK_RATE_TCS_MAX; i++) {
+		char name[16];
+
+		snprintf(name, sizeof(name), "tc%d_bw", i);
+		debugfs_create_u32(name, 0400, ddir, &tc_bw[i]);
+	}
+}
 static int nsim_dev_port_debugfs_init(struct nsim_dev *nsim_dev,
 				      struct nsim_dev_port *nsim_dev_port)
 {
@@ -415,6 +428,8 @@ static int nsim_dev_port_debugfs_init(struct nsim_dev *nsim_dev,
 								 nsim_dev_port->ddir,
 								 &nsim_dev_port->parent_name,
 								 &nsim_dev_rate_parent_fops);
+		nsim_dev_tc_bw_debugfs_init(nsim_dev_port->ddir,
+					    nsim_dev_port->tc_bw);
 	}
 	debugfs_create_symlink("dev", nsim_dev_port->ddir, dev_link_name);
 
@@ -836,7 +851,7 @@ static void nsim_dev_trap_report_work(struct work_struct *work)
 	nsim_dev = nsim_trap_data->nsim_dev;
 
 	if (!devl_trylock(priv_to_devlink(nsim_dev))) {
-		queue_delayed_work(system_unbound_wq,
+		queue_delayed_work(system_dfl_wq,
 				   &nsim_dev->trap_data->trap_report_dw, 1);
 		return;
 	}
@@ -852,7 +867,7 @@ static void nsim_dev_trap_report_work(struct work_struct *work)
 		cond_resched();
 	}
 	devl_unlock(priv_to_devlink(nsim_dev));
-	queue_delayed_work(system_unbound_wq,
+	queue_delayed_work(system_dfl_wq,
 			   &nsim_dev->trap_data->trap_report_dw,
 			   msecs_to_jiffies(NSIM_TRAP_REPORT_INTERVAL_MS));
 }
@@ -909,7 +924,7 @@ static int nsim_dev_traps_init(struct devlink *devlink)
 
 	INIT_DELAYED_WORK(&nsim_dev->trap_data->trap_report_dw,
 			  nsim_dev_trap_report_work);
-	queue_delayed_work(system_unbound_wq,
+	queue_delayed_work(system_dfl_wq,
 			   &nsim_dev->trap_data->trap_report_dw,
 			   msecs_to_jiffies(NSIM_TRAP_REPORT_INTERVAL_MS));
 
@@ -1002,9 +1017,9 @@ static int nsim_dev_info_get(struct devlink *devlink,
 						    DEVLINK_INFO_VERSION_TYPE_COMPONENT);
 }
 
-#define NSIM_DEV_FLASH_SIZE 500000
+#define NSIM_DEV_FLASH_SIZE 50000
 #define NSIM_DEV_FLASH_CHUNK_SIZE 1000
-#define NSIM_DEV_FLASH_CHUNK_TIME_MS 10
+#define NSIM_DEV_FLASH_CHUNK_TIME_MS_DEFAULT 100
 
 static int nsim_dev_flash_update(struct devlink *devlink,
 				 struct devlink_flash_update_params *params,
@@ -1028,7 +1043,7 @@ static int nsim_dev_flash_update(struct devlink *devlink,
 							   params->component,
 							   i * NSIM_DEV_FLASH_CHUNK_SIZE,
 							   NSIM_DEV_FLASH_SIZE);
-		msleep(NSIM_DEV_FLASH_CHUNK_TIME_MS);
+		msleep(nsim_dev->fw_update_flash_chunk_time_ms ?: 1);
 	}
 
 	if (nsim_dev->fw_update_status) {
@@ -1172,6 +1187,19 @@ static int nsim_rate_bytes_to_units(char *name, u64 *rate, struct netlink_ext_ac
 	return 0;
 }
 
+static int nsim_leaf_tc_bw_set(struct devlink_rate *devlink_rate,
+			       void *priv, u32 *tc_bw,
+			       struct netlink_ext_ack *extack)
+{
+	struct nsim_dev_port *nsim_dev_port = priv;
+	int i;
+
+	for (i = 0; i < DEVLINK_RATE_TCS_MAX; i++)
+		nsim_dev_port->tc_bw[i] = tc_bw[i];
+
+	return 0;
+}
+
 static int nsim_leaf_tx_share_set(struct devlink_rate *devlink_rate, void *priv,
 				  u64 tx_share, struct netlink_ext_ack *extack)
 {
@@ -1210,7 +1238,20 @@ struct nsim_rate_node {
 	char *parent_name;
 	u16 tx_share;
 	u16 tx_max;
+	u32 tc_bw[DEVLINK_RATE_TCS_MAX];
 };
+
+static int nsim_node_tc_bw_set(struct devlink_rate *devlink_rate, void *priv,
+			       u32 *tc_bw, struct netlink_ext_ack *extack)
+{
+	struct nsim_rate_node *nsim_node = priv;
+	int i;
+
+	for (i = 0; i < DEVLINK_RATE_TCS_MAX; i++)
+		nsim_node->tc_bw[i] = tc_bw[i];
+
+	return 0;
+}
 
 static int nsim_node_tx_share_set(struct devlink_rate *devlink_rate, void *priv,
 				  u64 tx_share, struct netlink_ext_ack *extack)
@@ -1263,6 +1304,8 @@ static int nsim_rate_node_new(struct devlink_rate *node, void **priv,
 						     nsim_node->ddir,
 						     &nsim_node->parent_name,
 						     &nsim_dev_rate_parent_fops);
+
+	nsim_dev_tc_bw_debugfs_init(nsim_node->ddir, nsim_node->tc_bw);
 
 	*priv = nsim_node;
 	return 0;
@@ -1340,8 +1383,10 @@ static const struct devlink_ops nsim_dev_devlink_ops = {
 	.trap_policer_counter_get = nsim_dev_devlink_trap_policer_counter_get,
 	.rate_leaf_tx_share_set = nsim_leaf_tx_share_set,
 	.rate_leaf_tx_max_set = nsim_leaf_tx_max_set,
+	.rate_leaf_tc_bw_set = nsim_leaf_tc_bw_set,
 	.rate_node_tx_share_set = nsim_node_tx_share_set,
 	.rate_node_tx_max_set = nsim_node_tx_max_set,
+	.rate_node_tc_bw_set = nsim_node_tc_bw_set,
 	.rate_node_new = nsim_rate_node_new,
 	.rate_node_del = nsim_rate_node_del,
 	.rate_leaf_parent_set = nsim_rate_leaf_parent_set,
@@ -1542,6 +1587,7 @@ int nsim_drv_probe(struct nsim_bus_dev *nsim_bus_dev)
 	INIT_LIST_HEAD(&nsim_dev->port_list);
 	nsim_dev->fw_update_status = true;
 	nsim_dev->fw_update_overwrite_mask = 0;
+	nsim_dev->fw_update_flash_chunk_time_ms = NSIM_DEV_FLASH_CHUNK_TIME_MS_DEFAULT;
 	nsim_dev->max_macs = NSIM_DEV_MAX_MACS_DEFAULT;
 	nsim_dev->test1 = NSIM_DEV_TEST1_DEFAULT;
 	spin_lock_init(&nsim_dev->fa_cookie_lock);

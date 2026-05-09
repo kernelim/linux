@@ -4,6 +4,14 @@ set -e
 
 LAST_MARKER=$(cat "${REDHAT}"/marker)
 clogf="$1"
+
+# For package rebuilds (e.g., kernel-automotive), the changelog is generated
+# by generate-rebuild-changelog.sh rather than from git log.
+if [[ "$SPECPACKAGE_REBUILD" == "1" ]]; then
+    echo -n > "$clogf"
+    exit 0
+fi
+
 # hide [redhat] entries from changelog
 HIDE_REDHAT=1;
 # hide entries for unsupported arches
@@ -14,7 +22,7 @@ LC_TIME=
 GIT_FORMAT="--format=- %s (%an)%n%N%n^^^NOTES-END^^^%n%b"
 GIT_NOTES="--notes=refs/notes/${RHEL_MAJOR}.${RHEL_MINOR}*"
 
-lasttag=$(git rev-list --first-parent --grep="^\[redhat\] kernel-${SPECKVERSION}.${SPECKPATCHLEVEL}" --max-count=1 HEAD)
+lasttag=$(git rev-list --first-parent --grep="^\[redhat\] ${SPECPACKAGE_NAME}-${SPECKVERSION}.${SPECKPATCHLEVEL}" --max-count=1 HEAD)
 # if we didn't find the proper tag, assume this is the first release
 if [[ -z $lasttag ]]; then
     if [[ -z ${MARKER//[0-9a-f]/} ]]; then

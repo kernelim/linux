@@ -573,15 +573,6 @@ static inline int mm_is_protected(struct mm_struct *mm)
 	return 0;
 }
 
-static inline int mm_alloc_pgste(struct mm_struct *mm)
-{
-#ifdef CONFIG_PGSTE
-	if (unlikely(mm->context.alloc_pgste))
-		return 1;
-#endif
-	return 0;
-}
-
 static inline pgste_t clear_pgste_bit(pgste_t pgste, unsigned long mask)
 {
 	return __pgste(pgste_val(pgste) & ~mask);
@@ -2022,6 +2013,28 @@ static inline unsigned long gmap_pgste_get_pgt_addr(unsigned long *pgt)
 	res |= (pgstes[3] & PGSTE_ST2_MASK) >> 32;
 
 	return res;
+}
+
+static inline pgste_t pgste_get_lock(pte_t *ptep)
+{
+	unsigned long value = 0;
+#ifdef CONFIG_PGSTE
+	unsigned long *ptr = (unsigned long *)(ptep + PTRS_PER_PTE);
+
+	do {
+		value = __atomic64_or_barrier(PGSTE_PCL_BIT, ptr);
+	} while (value & PGSTE_PCL_BIT);
+	value |= PGSTE_PCL_BIT;
+#endif
+	return __pgste(value);
+}
+
+static inline void pgste_set_unlock(pte_t *ptep, pgste_t pgste)
+{
+#ifdef CONFIG_PGSTE
+	barrier();
+	WRITE_ONCE(*(unsigned long *)(ptep + PTRS_PER_PTE), pgste_val(pgste) & ~PGSTE_PCL_BIT);
+#endif
 }
 
 #endif /* _S390_PAGE_H */

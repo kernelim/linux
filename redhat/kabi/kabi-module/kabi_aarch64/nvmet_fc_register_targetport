@@ -1,3 +1,3 @@
-#1-
-0xc05f071c	nvmet_fc_register_targetport	drivers/nvme/target/nvmet-fc	EXPORT_SYMBOL_GPL	
+#2-
+0xb10ef3ed	nvmet_fc_register_targetport	drivers/nvme/target/nvmet-fc	EXPORT_SYMBOL_GPL	
 

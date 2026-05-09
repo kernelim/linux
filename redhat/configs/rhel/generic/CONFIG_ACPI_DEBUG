@@ -1,1 +1,1 @@
-# CONFIG_ACPI_DEBUG is not set
+CONFIG_ACPI_DEBUG=y

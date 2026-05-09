@@ -222,7 +222,7 @@ int lbs_stop_iface(struct lbs_private *priv)
 	spin_unlock_irqrestore(&priv->driver_lock, flags);
 
 	cancel_work_sync(&priv->mcast_work);
-	del_timer_sync(&priv->tx_lockup_timer);
+	timer_delete_sync(&priv->tx_lockup_timer);
 
 	/* Disable command processing, and wait for all commands to complete */
 	lbs_deb_main("waiting for commands to complete\n");
@@ -270,7 +270,7 @@ void lbs_host_to_card_done(struct lbs_private *priv)
 	unsigned long flags;
 
 	spin_lock_irqsave(&priv->driver_lock, flags);
-	del_timer(&priv->tx_lockup_timer);
+	timer_delete(&priv->tx_lockup_timer);
 
 	priv->dnld_sent = DNLD_RES_RECEIVED;
 
@@ -724,7 +724,7 @@ EXPORT_SYMBOL_GPL(lbs_resume);
  */
 static void lbs_cmd_timeout_handler(struct timer_list *t)
 {
-	struct lbs_private *priv = from_timer(priv, t, command_timer);
+	struct lbs_private *priv = timer_container_of(priv, t, command_timer);
 	unsigned long flags;
 
 	spin_lock_irqsave(&priv->driver_lock, flags);
@@ -758,7 +758,8 @@ out:
  */
 static void lbs_tx_lockup_handler(struct timer_list *t)
 {
-	struct lbs_private *priv = from_timer(priv, t, tx_lockup_timer);
+	struct lbs_private *priv = timer_container_of(priv, t,
+						      tx_lockup_timer);
 	unsigned long flags;
 
 	spin_lock_irqsave(&priv->driver_lock, flags);
@@ -781,7 +782,7 @@ static void lbs_tx_lockup_handler(struct timer_list *t)
  */
 static void auto_deepsleep_timer_fn(struct timer_list *t)
 {
-	struct lbs_private *priv = from_timer(priv, t, auto_deepsleep_timer);
+	struct lbs_private *priv = timer_container_of(priv, t, auto_deepsleep_timer);
 
 	if (priv->is_activity_detected) {
 		priv->is_activity_detected = 0;

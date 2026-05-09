@@ -727,7 +727,7 @@ static int alloc_wq_table(int max_wqs)
 
 	for (cpu = 0; cpu < nr_cpus; cpu++) {
 		entry = per_cpu_ptr(wq_table, cpu);
-		entry->wqs = kcalloc(max_wqs, sizeof(struct wq *), GFP_KERNEL);
+		entry->wqs = kcalloc(max_wqs, sizeof(*entry->wqs), GFP_KERNEL);
 		if (!entry->wqs) {
 			free_wq_table();
 			return -ENOMEM;
@@ -807,7 +807,7 @@ static int save_iaa_wq(struct idxd_wq *wq)
 	if (!cpus_per_iaa)
 		cpus_per_iaa = 1;
 out:
-	return 0;
+	return ret;
 }
 
 static void remove_iaa_wq(struct idxd_wq *wq)
@@ -896,7 +896,7 @@ out:
 static void rebalance_wq_table(void)
 {
 	const struct cpumask *node_cpus;
-	int node, cpu, iaa = -1;
+	int node_cpu, node, cpu, iaa = 0;
 
 	if (nr_iaa == 0)
 		return;
@@ -907,36 +907,29 @@ static void rebalance_wq_table(void)
 	clear_wq_table();
 
 	if (nr_iaa == 1) {
-		for (cpu = 0; cpu < nr_cpus; cpu++) {
-			if (WARN_ON(wq_table_add_wqs(0, cpu))) {
-				pr_debug("could not add any wqs for iaa 0 to cpu %d!\n", cpu);
-				return;
-			}
+		for_each_possible_cpu(cpu) {
+			if (WARN_ON(wq_table_add_wqs(0, cpu)))
+				goto err;
 		}
 
 		return;
 	}
 
 	for_each_node_with_cpus(node) {
+		cpu = 0;
 		node_cpus = cpumask_of_node(node);
 
-		for (cpu = 0; cpu <  cpumask_weight(node_cpus); cpu++) {
-			int node_cpu = cpumask_nth(cpu, node_cpus);
-
-			if (WARN_ON(node_cpu >= nr_cpu_ids)) {
-				pr_debug("node_cpu %d doesn't exist!\n", node_cpu);
-				return;
-			}
-
-			if ((cpu % cpus_per_iaa) == 0)
-				iaa++;
-
-			if (WARN_ON(wq_table_add_wqs(iaa, node_cpu))) {
-				pr_debug("could not add any wqs for iaa %d to cpu %d!\n", iaa, cpu);
-				return;
-			}
+		for_each_cpu(node_cpu, node_cpus) {
+			iaa = cpu / cpus_per_iaa;
+			if (WARN_ON(wq_table_add_wqs(iaa, node_cpu)))
+				goto err;
+			cpu++;
 		}
 	}
+
+	return;
+err:
+	pr_debug("could not add any wqs for iaa %d to cpu %d!\n", iaa, cpu);
 }
 
 static inline int check_completion(struct device *dev,

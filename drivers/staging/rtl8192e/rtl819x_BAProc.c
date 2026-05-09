@@ -510,7 +510,7 @@ void rtllib_ts_init_del_ba(struct rtllib_device *ieee,
 
 void rtllib_ba_setup_timeout(struct timer_list *t)
 {
-	struct tx_ts_record *ts = from_timer(ts, t,
+	struct tx_ts_record *ts = timer_container_of(ts, t,
 					      tx_pending_ba_record.timer);
 
 	ts->add_ba_req_in_progress = false;
@@ -520,7 +520,7 @@ void rtllib_ba_setup_timeout(struct timer_list *t)
 
 void rtllib_tx_ba_inact_timeout(struct timer_list *t)
 {
-	struct tx_ts_record *ts = from_timer(ts, t,
+	struct tx_ts_record *ts = timer_container_of(ts, t,
 					      tx_admitted_ba_record.timer);
 	struct rtllib_device *ieee = container_of(ts, struct rtllib_device,
 				     tx_ts_records[ts->num]);
@@ -532,7 +532,7 @@ void rtllib_tx_ba_inact_timeout(struct timer_list *t)
 
 void rtllib_rx_ba_inact_timeout(struct timer_list *t)
 {
-	struct rx_ts_record *ts = from_timer(ts, t,
+	struct rx_ts_record *ts = timer_container_of(ts, t,
 					      rx_admitted_ba_record.timer);
 	struct rtllib_device *ieee = container_of(ts, struct rtllib_device,
 				     rx_ts_records[ts->num]);

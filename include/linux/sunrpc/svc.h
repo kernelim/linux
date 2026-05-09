@@ -196,7 +196,7 @@ struct svc_rqst {
 	struct xdr_buf		rq_arg;
 	struct xdr_stream	rq_arg_stream;
 	struct xdr_stream	rq_res_stream;
-	struct page		*rq_scratch_page;
+	struct folio		*rq_scratch_folio;
 	struct xdr_buf		rq_res;
 	unsigned long		rq_maxpages;	/* num of entries in rq_pages */
 	struct page *		*rq_pages;
@@ -245,10 +245,10 @@ struct svc_rqst {
 						 * initialisation success.
 						 */
 
-	unsigned long	bc_to_initval;
-	unsigned int	bc_to_retries;
-	void **			rq_lease_breaker; /* The v4 client breaking a lease */
+	unsigned long		bc_to_initval;
+	unsigned int		bc_to_retries;
 	unsigned int		rq_status_counter; /* RPC processing counter */
+	void			**rq_lease_breaker; /* The v4 client breaking a lease */
 };
 
 /* bits for rq_flags */
@@ -333,12 +333,7 @@ static inline bool svc_thread_should_stop(struct svc_rqst *rqstp)
  */
 static inline void svc_thread_init_status(struct svc_rqst *rqstp, int err)
 {
-	rqstp->rq_err = err;
-	/* memory barrier ensures assignment to error above is visible before
-	 * waitqueue_active() test below completes.
-	 */
-	smp_mb();
-	wake_up_var(&rqstp->rq_err);
+	store_release_wake_up(&rqstp->rq_err, err);
 	if (err)
 		kthread_exit(1);
 }
@@ -508,7 +503,7 @@ static inline void svcxdr_init_decode(struct svc_rqst *rqstp)
 	buf->len = buf->head->iov_len + buf->page_len + buf->tail->iov_len;
 
 	xdr_init_decode(xdr, buf, argv->iov_base, NULL);
-	xdr_set_scratch_page(xdr, rqstp->rq_scratch_page);
+	xdr_set_scratch_folio(xdr, rqstp->rq_scratch_folio);
 }
 
 /**

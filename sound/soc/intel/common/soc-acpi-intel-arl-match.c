@@ -45,23 +45,22 @@ static const struct snd_soc_acpi_endpoint spk_3_endpoint = {
 	.group_id = 1,
 };
 
-/*
- * RT722 is a multi-function codec, three endpoints are created for
- * its headset, amp and dmic functions.
- */
-static const struct snd_soc_acpi_endpoint rt722_endpoints[] = {
+static const struct snd_soc_acpi_endpoint jack_amp_g1_dmic_endpoints[] = {
+	/* Jack Endpoint */
 	{
 		.num = 0,
 		.aggregated = 0,
 		.group_position = 0,
 		.group_id = 0,
 	},
+	/* Amp Endpoint, work as spk_l_endpoint */
 	{
 		.num = 1,
-		.aggregated = 0,
+		.aggregated = 1,
 		.group_position = 0,
-		.group_id = 0,
+		.group_id = 1,
 	},
+	/* DMIC Endpoint */
 	{
 		.num = 2,
 		.aggregated = 0,
@@ -229,12 +228,21 @@ static const struct snd_soc_acpi_adr_device rt711_sdca_0_adr[] = {
 	}
 };
 
-static const struct snd_soc_acpi_adr_device rt722_0_single_adr[] = {
+static const struct snd_soc_acpi_adr_device rt722_0_agg_adr[] = {
 	{
 		.adr = 0x000030025D072201ull,
-		.num_endpoints = ARRAY_SIZE(rt722_endpoints),
-		.endpoints = rt722_endpoints,
+		.num_endpoints = ARRAY_SIZE(jack_amp_g1_dmic_endpoints),
+		.endpoints = jack_amp_g1_dmic_endpoints,
 		.name_prefix = "rt722"
+	}
+};
+
+static const struct snd_soc_acpi_adr_device rt1316_3_single_adr[] = {
+	{
+		.adr = 0x000330025D131601ull,
+		.num_endpoints = 1,
+		.endpoints = &single_endpoint,
+		.name_prefix = "rt1316-1"
 	}
 };
 
@@ -368,11 +376,25 @@ static const struct snd_soc_acpi_link_adr arl_sdca_rvp[] = {
 	{}
 };
 
+static const struct snd_soc_acpi_link_adr arl_rt711_l0_rt1316_l3[] = {
+	{
+		.mask = BIT(0),
+		.num_adr = ARRAY_SIZE(rt711_sdca_0_adr),
+		.adr_d = rt711_sdca_0_adr,
+	},
+	{
+		.mask = BIT(3),
+		.num_adr = ARRAY_SIZE(rt1316_3_single_adr),
+		.adr_d = rt1316_3_single_adr,
+	},
+	{}
+};
+
 static const struct snd_soc_acpi_link_adr arl_rt722_l0_rt1320_l2[] = {
 	{
 		.mask = BIT(0),
-		.num_adr = ARRAY_SIZE(rt722_0_single_adr),
-		.adr_d = rt722_0_single_adr,
+		.num_adr = ARRAY_SIZE(rt722_0_agg_adr),
+		.adr_d = rt722_0_agg_adr,
 	},
 	{
 		.mask = BIT(2),
@@ -480,6 +502,12 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_arl_sdw_machines[] = {
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-arl-cs42l43-l2.tplg",
 		.get_function_tplg_files = sof_sdw_get_tplg_files,
+	},
+	{
+		.link_mask = BIT(0) | BIT(3),
+		.links = arl_rt711_l0_rt1316_l3,
+		.drv_name = "sof_sdw",
+		.sof_tplg_filename = "sof-arl-rt711-l0-rt1316-l3.tplg",
 	},
 	{
 		.link_mask = 0x1, /* link0 required */

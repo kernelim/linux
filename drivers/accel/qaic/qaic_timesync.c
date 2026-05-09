@@ -129,7 +129,7 @@ static void qaic_timesync_dl_xfer_cb(struct mhi_device *mhi_dev, struct mhi_resu
 
 static void qaic_timesync_timer(struct timer_list *t)
 {
-	struct mqts_dev *mqtsdev = from_timer(mqtsdev, t, timer);
+	struct mqts_dev *mqtsdev = timer_container_of(mqtsdev, t, timer);
 	struct qts_host_time_sync_msg_data *sync_msg;
 	u64 device_qtimer_us;
 	u64 device_qtimer;
@@ -171,6 +171,13 @@ mod_timer:
 		dev_err(mqtsdev->dev, "%s mod_timer error:%d\n", __func__, ret);
 }
 
+void qaic_mqts_ch_stop_timer(struct mhi_device *mhi_dev)
+{
+	struct mqts_dev *mqtsdev = dev_get_drvdata(&mhi_dev->dev);
+
+	timer_delete_sync(&mqtsdev->timer);
+}
+
 static int qaic_timesync_probe(struct mhi_device *mhi_dev, const struct mhi_device_id *id)
 {
 	struct qaic_device *qdev = pci_get_drvdata(to_pci_dev(mhi_dev->mhi_cntrl->cntrl_dev));
@@ -201,11 +208,12 @@ static int qaic_timesync_probe(struct mhi_device *mhi_dev, const struct mhi_devi
 		goto free_sync_msg;
 
 	/* Qtimer register pointer */
-	mqtsdev->qtimer_addr = qdev->bar_0 + QTIMER_REG_OFFSET;
+	mqtsdev->qtimer_addr = qdev->bar_mhi + QTIMER_REG_OFFSET;
 	timer_setup(timer, qaic_timesync_timer, 0);
 	timer->expires = jiffies + msecs_to_jiffies(timesync_delay_ms);
 	add_timer(timer);
 	dev_set_drvdata(&mhi_dev->dev, mqtsdev);
+	qdev->mqts_ch = mhi_dev;
 
 	return 0;
 
@@ -221,7 +229,8 @@ static void qaic_timesync_remove(struct mhi_device *mhi_dev)
 {
 	struct mqts_dev *mqtsdev = dev_get_drvdata(&mhi_dev->dev);
 
-	del_timer_sync(&mqtsdev->timer);
+	mqtsdev->qdev->mqts_ch = NULL;
+	timer_delete_sync(&mqtsdev->timer);
 	mhi_unprepare_from_transfer(mqtsdev->mhi_dev);
 	kfree(mqtsdev->sync_msg);
 	kfree(mqtsdev);

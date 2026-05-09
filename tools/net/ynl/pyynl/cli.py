@@ -7,7 +7,6 @@ import os
 import pathlib
 import pprint
 import sys
-import time
 
 sys.path.append(pathlib.Path(__file__).resolve().parent.as_posix())
 from lib import YnlFamily, Netlink, NlError
@@ -72,7 +71,10 @@ def main():
     group.add_argument('--list-ops', action='store_true')
     group.add_argument('--list-msgs', action='store_true')
 
-    parser.add_argument('--sleep', dest='sleep', type=int)
+    parser.add_argument('--duration', dest='duration', type=int,
+                        help='when subscribed, watch for DURATION seconds')
+    parser.add_argument('--sleep', dest='duration', type=int,
+                        help='alias for duration')
     parser.add_argument('--subscribe', dest='ntf', type=str)
     parser.add_argument('--replace', dest='flags', action='append_const',
                         const=Netlink.NLM_F_REPLACE)
@@ -111,6 +113,8 @@ def main():
         spec = f"{spec_dir()}/{args.family}.yaml"
         if args.schema is None and spec.startswith(sys_schema_dir):
             args.schema = '' # disable schema validation when installed
+        if args.process_unknown is None:
+            args.process_unknown = True
     else:
         spec = args.spec
     if not os.path.isfile(spec):
@@ -123,9 +127,6 @@ def main():
 
     if args.ntf:
         ynl.ntf_subscribe(args.ntf)
-
-    if args.sleep:
-        time.sleep(args.sleep)
 
     if args.list_ops:
         for op_name, op in ynl.ops.items():
@@ -145,13 +146,17 @@ def main():
             ops = [ (item[0], json.loads(item[1]), args.flags or []) for item in args.multi ]
             reply = ynl.do_multi(ops)
             output(reply)
+
+        if args.ntf:
+            for msg in ynl.poll_ntf(duration=args.duration):
+                output(msg)
     except NlError as e:
         print(e)
         exit(1)
-
-    if args.ntf:
-        ynl.check_ntf()
-        output(ynl.async_msg_queue)
+    except KeyboardInterrupt:
+        pass
+    except BrokenPipeError:
+        pass
 
 
 if __name__ == "__main__":

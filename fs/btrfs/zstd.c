@@ -24,7 +24,7 @@
 #include "super.h"
 
 #define ZSTD_BTRFS_MAX_WINDOWLOG 17
-#define ZSTD_BTRFS_MAX_INPUT (1 << ZSTD_BTRFS_MAX_WINDOWLOG)
+#define ZSTD_BTRFS_MAX_INPUT (1U << ZSTD_BTRFS_MAX_WINDOWLOG)
 #define ZSTD_BTRFS_DEFAULT_LEVEL 3
 #define ZSTD_BTRFS_MAX_LEVEL 15
 /* 307s to avoid pathologically clashing with transaction commit */
@@ -216,7 +216,7 @@ void zstd_cleanup_workspace_manager(void)
 	}
 	spin_unlock_bh(&wsm.lock);
 
-	del_timer_sync(&wsm.timer);
+	timer_delete_sync(&wsm.timer);
 }
 
 /*

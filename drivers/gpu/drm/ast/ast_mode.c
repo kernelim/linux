@@ -29,11 +29,11 @@
  */
 
 #include <linux/delay.h>
-#include <linux/export.h>
 #include <linux/pci.h>
 
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
+#include <drm/drm_color_mgmt.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_damage_helper.h>
 #include <drm/drm_format_helper.h>
@@ -51,31 +51,64 @@
 
 #define AST_LUT_SIZE 256
 
-static inline void ast_load_palette_index(struct ast_device *ast,
-				     u8 index, u8 red, u8 green,
-				     u8 blue)
+#define AST_PRIMARY_PLANE_MAX_OFFSET	(BIT(16) - 1)
+
+static unsigned long ast_fb_vram_offset(void)
 {
-	ast_io_write8(ast, AST_IO_VGADWR, index);
+	return 0; // with shmem, the primary plane is always at offset 0
+}
+
+static unsigned long ast_fb_vram_size(struct ast_device *ast)
+{
+	struct drm_device *dev = &ast->base;
+	unsigned long offset = ast_fb_vram_offset(); // starts at offset
+	long cursor_offset = ast_cursor_vram_offset(ast); // ends at cursor offset
+
+	if (cursor_offset < 0)
+		cursor_offset = ast->vram_size; // no cursor; it's all ours
+	if (drm_WARN_ON_ONCE(dev, offset > cursor_offset))
+		return 0; // cannot legally happen; signal error
+	return cursor_offset - offset;
+}
+
+static void ast_set_gamma_lut(struct drm_crtc *crtc, unsigned int index,
+			      u16 red, u16 green, u16 blue)
+{
+	struct drm_device *dev = crtc->dev;
+	struct ast_device *ast = to_ast_device(dev);
+	u8 i8 = index & 0xff;
+	u8 r8 = red >> 8;
+	u8 g8 = green >> 8;
+	u8 b8 = blue >> 8;
+
+	if (drm_WARN_ON_ONCE(dev, index != i8))
+		return; /* driver bug */
+
+	ast_io_write8(ast, AST_IO_VGADWR, i8);
 	ast_io_read8(ast, AST_IO_VGASRI);
-	ast_io_write8(ast, AST_IO_VGAPDR, red);
+	ast_io_write8(ast, AST_IO_VGAPDR, r8);
 	ast_io_read8(ast, AST_IO_VGASRI);
-	ast_io_write8(ast, AST_IO_VGAPDR, green);
+	ast_io_write8(ast, AST_IO_VGAPDR, g8);
 	ast_io_read8(ast, AST_IO_VGASRI);
-	ast_io_write8(ast, AST_IO_VGAPDR, blue);
+	ast_io_write8(ast, AST_IO_VGAPDR, b8);
 	ast_io_read8(ast, AST_IO_VGASRI);
 }
 
-static void ast_crtc_set_gamma_linear(struct ast_device *ast,
-				      const struct drm_format_info *format)
+static void ast_crtc_fill_gamma(struct ast_device *ast,
+				const struct drm_format_info *format)
 {
-	int i;
+	struct drm_crtc *crtc = &ast->crtc;
 
 	switch (format->format) {
-	case DRM_FORMAT_C8: /* In this case, gamma table is used as color palette */
+	case DRM_FORMAT_C8:
+		/* gamma table is used as color palette */
+		drm_crtc_fill_palette_8(crtc, ast_set_gamma_lut);
+		break;
 	case DRM_FORMAT_RGB565:
+		/* also uses 8-bit gamma ramp on low-color modes */
+		fallthrough;
 	case DRM_FORMAT_XRGB8888:
-		for (i = 0; i < AST_LUT_SIZE; i++)
-			ast_load_palette_index(ast, i, i, i, i);
+		drm_crtc_fill_gamma_888(crtc, ast_set_gamma_lut);
 		break;
 	default:
 		drm_warn_once(&ast->base, "Unsupported format %p4cc for gamma correction\n",
@@ -84,21 +117,22 @@ static void ast_crtc_set_gamma_linear(struct ast_device *ast,
 	}
 }
 
-static void ast_crtc_set_gamma(struct ast_device *ast,
-			       const struct drm_format_info *format,
-			       struct drm_color_lut *lut)
+static void ast_crtc_load_gamma(struct ast_device *ast,
+				const struct drm_format_info *format,
+				struct drm_color_lut *lut)
 {
-	int i;
+	struct drm_crtc *crtc = &ast->crtc;
 
 	switch (format->format) {
-	case DRM_FORMAT_C8: /* In this case, gamma table is used as color palette */
+	case DRM_FORMAT_C8:
+		/* gamma table is used as color palette */
+		drm_crtc_load_palette_8(crtc, lut, ast_set_gamma_lut);
+		break;
 	case DRM_FORMAT_RGB565:
+		/* also uses 8-bit gamma ramp on low-color modes */
+		fallthrough;
 	case DRM_FORMAT_XRGB8888:
-		for (i = 0; i < AST_LUT_SIZE; i++)
-			ast_load_palette_index(ast, i,
-					       lut[i].red >> 8,
-					       lut[i].green >> 8,
-					       lut[i].blue >> 8);
+		drm_crtc_load_gamma_888(crtc, lut, ast_set_gamma_lut);
 		break;
 	default:
 		drm_warn_once(&ast->base, "Unsupported format %p4cc for gamma correction\n",
@@ -439,7 +473,7 @@ static void ast_wait_for_vretrace(struct ast_device *ast)
  */
 
 int ast_plane_init(struct drm_device *dev, struct ast_plane *ast_plane,
-		   void __iomem *vaddr, u64 offset, unsigned long size,
+		   u64 offset, unsigned long size,
 		   uint32_t possible_crtcs,
 		   const struct drm_plane_funcs *funcs,
 		   const uint32_t *formats, unsigned int format_count,
@@ -448,13 +482,19 @@ int ast_plane_init(struct drm_device *dev, struct ast_plane *ast_plane,
 {
 	struct drm_plane *plane = &ast_plane->base;
 
-	ast_plane->vaddr = vaddr;
 	ast_plane->offset = offset;
 	ast_plane->size = size;
 
 	return drm_universal_plane_init(dev, plane, possible_crtcs, funcs,
 					formats, format_count, format_modifiers,
 					type, NULL);
+}
+
+void __iomem *ast_plane_vaddr(struct ast_plane *ast_plane)
+{
+	struct ast_device *ast = to_ast_device(ast_plane->base.dev);
+
+	return ast->vram + ast_plane->offset;
 }
 
 /*
@@ -503,7 +543,7 @@ static void ast_handle_damage(struct ast_plane *ast_plane, struct iosys_map *src
 			      struct drm_framebuffer *fb,
 			      const struct drm_rect *clip)
 {
-	struct iosys_map dst = IOSYS_MAP_INIT_VADDR_IOMEM(ast_plane->vaddr);
+	struct iosys_map dst = IOSYS_MAP_INIT_VADDR_IOMEM(ast_plane_vaddr(ast_plane));
 
 	iosys_map_incr(&dst, drm_fb_clip_offset(fb->pitches[0], fb->format, clip));
 	drm_fb_memcpy(&dst, fb->pitches, src, fb, clip);
@@ -576,12 +616,12 @@ static int ast_primary_plane_helper_get_scanout_buffer(struct drm_plane *plane,
 {
 	struct ast_plane *ast_plane = to_ast_plane(plane);
 
-	if (plane->state && plane->state->fb && ast_plane->vaddr) {
+	if (plane->state && plane->state->fb) {
 		sb->format = plane->state->fb->format;
 		sb->width = plane->state->fb->width;
 		sb->height = plane->state->fb->height;
 		sb->pitch[0] = plane->state->fb->pitches[0];
-		iosys_map_set_vaddr_iomem(&sb->map[0], ast_plane->vaddr);
+		iosys_map_set_vaddr_iomem(&sb->map[0], ast_plane_vaddr(ast_plane));
 		return 0;
 	}
 	return -ENODEV;
@@ -608,13 +648,11 @@ static int ast_primary_plane_init(struct ast_device *ast)
 	struct drm_device *dev = &ast->base;
 	struct ast_plane *ast_primary_plane = &ast->primary_plane;
 	struct drm_plane *primary_plane = &ast_primary_plane->base;
-	void __iomem *vaddr = ast->vram;
-	u64 offset = 0; /* with shmem, the primary plane is always at offset 0 */
-	unsigned long cursor_size = roundup(AST_HWC_SIZE + AST_HWC_SIGNATURE_SIZE, PAGE_SIZE);
-	unsigned long size = ast->vram_fb_available - cursor_size;
+	u64 offset = ast_fb_vram_offset();
+	unsigned long size = ast_fb_vram_size(ast);
 	int ret;
 
-	ret = ast_plane_init(dev, ast_primary_plane, vaddr, offset, size,
+	ret = ast_plane_init(dev, ast_primary_plane, offset, size,
 			     0x01, &ast_primary_plane_funcs,
 			     ast_primary_plane_formats, ARRAY_SIZE(ast_primary_plane_formats),
 			     NULL, DRM_PLANE_TYPE_PRIMARY);
@@ -787,33 +825,35 @@ ast_crtc_helper_atomic_flush(struct drm_crtc *crtc,
 	 */
 	if (crtc_state->enable && crtc_state->color_mgmt_changed) {
 		if (crtc_state->gamma_lut)
-			ast_crtc_set_gamma(ast,
-					   ast_crtc_state->format,
-					   crtc_state->gamma_lut->data);
+			ast_crtc_load_gamma(ast,
+					    ast_crtc_state->format,
+					    crtc_state->gamma_lut->data);
 		else
-			ast_crtc_set_gamma_linear(ast, ast_crtc_state->format);
+			ast_crtc_fill_gamma(ast, ast_crtc_state->format);
 	}
 }
 
 static void ast_crtc_helper_atomic_enable(struct drm_crtc *crtc, struct drm_atomic_state *state)
 {
 	struct ast_device *ast = to_ast_device(crtc->dev);
+	u8 vgacr17 = 0x00;
+	u8 vgacrb6 = 0xff;
 
-	ast_set_index_reg_mask(ast, AST_IO_VGACRI, 0xb6, 0xfc, 0x00);
-	ast_set_index_reg_mask(ast, AST_IO_VGASRI, 0x01, 0xdf, 0x00);
+	vgacr17 |= AST_IO_VGACR17_SYNC_ENABLE;
+	vgacrb6 &= ~(AST_IO_VGACRB6_VSYNC_OFF | AST_IO_VGACRB6_HSYNC_OFF);
+
+	ast_set_index_reg_mask(ast, AST_IO_VGACRI, 0x17, 0x7f, vgacr17);
+	ast_set_index_reg_mask(ast, AST_IO_VGACRI, 0xb6, 0xfc, vgacrb6);
 }
 
 static void ast_crtc_helper_atomic_disable(struct drm_crtc *crtc, struct drm_atomic_state *state)
 {
 	struct drm_crtc_state *old_crtc_state = drm_atomic_get_old_crtc_state(state, crtc);
 	struct ast_device *ast = to_ast_device(crtc->dev);
-	u8 vgacrb6;
+	u8 vgacr17 = 0xff;
 
-	ast_set_index_reg_mask(ast, AST_IO_VGASRI, 0x01, 0xdf, AST_IO_VGASR1_SD);
-
-	vgacrb6 = AST_IO_VGACRB6_VSYNC_OFF |
-		  AST_IO_VGACRB6_HSYNC_OFF;
-	ast_set_index_reg_mask(ast, AST_IO_VGACRI, 0xb6, 0xfc, vgacrb6);
+	vgacr17 &= ~AST_IO_VGACR17_SYNC_ENABLE;
+	ast_set_index_reg_mask(ast, AST_IO_VGACRI, 0x17, 0x7f, vgacr17);
 
 	/*
 	 * HW cursors require the underlying primary plane and CRTC to
@@ -938,16 +978,20 @@ static const struct drm_mode_config_helper_funcs ast_mode_config_helper_funcs = 
 static enum drm_mode_status ast_mode_config_mode_valid(struct drm_device *dev,
 						       const struct drm_display_mode *mode)
 {
-	static const unsigned long max_bpp = 4; /* DRM_FORMAT_XRGB8888 */
+	const struct drm_format_info *info = drm_format_info(DRM_FORMAT_XRGB8888);
 	struct ast_device *ast = to_ast_device(dev);
-	unsigned long fbsize, fbpages, max_fbpages;
+	unsigned long max_fb_size = ast_fb_vram_size(ast);
+	u64 pitch;
 
-	max_fbpages = (ast->vram_fb_available) >> PAGE_SHIFT;
+	if (drm_WARN_ON_ONCE(dev, !info))
+		return MODE_ERROR; /* driver bug */
 
-	fbsize = mode->hdisplay * mode->vdisplay * max_bpp;
-	fbpages = DIV_ROUND_UP(fbsize, PAGE_SIZE);
-
-	if (fbpages > max_fbpages)
+	pitch = drm_format_info_min_pitch(info, 0, mode->hdisplay);
+	if (!pitch)
+		return MODE_BAD_WIDTH;
+	if (pitch > AST_PRIMARY_PLANE_MAX_OFFSET)
+		return MODE_BAD_WIDTH; /* maximum programmable pitch */
+	if (pitch > max_fb_size / mode->vdisplay)
 		return MODE_MEM;
 
 	return MODE_OK;
@@ -1018,10 +1062,7 @@ int ast_mode_config_init(struct ast_device *ast)
 		return ret;
 
 	drm_mode_config_reset(dev);
-
-	ret = drmm_kms_helper_poll_init(dev);
-	if (ret)
-		return ret;
+	drmm_kms_helper_poll_init(dev);
 
 	return 0;
 }

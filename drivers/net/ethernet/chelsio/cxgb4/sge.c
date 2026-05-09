@@ -4233,7 +4233,7 @@ static void sge_rx_timer_cb(struct timer_list *t)
 {
 	unsigned long m;
 	unsigned int i;
-	struct adapter *adap = from_timer(adap, t, sge.rx_timer);
+	struct adapter *adap = timer_container_of(adap, t, sge.rx_timer);
 	struct sge *s = &adap->sge;
 
 	for (i = 0; i < BITS_TO_LONGS(s->egr_sz); i++)
@@ -4268,7 +4268,7 @@ done:
 
 static void sge_tx_timer_cb(struct timer_list *t)
 {
-	struct adapter *adap = from_timer(adap, t, sge.tx_timer);
+	struct adapter *adap = timer_container_of(adap, t, sge.tx_timer);
 	struct sge *s = &adap->sge;
 	unsigned long m, period;
 	unsigned int i, budget;
@@ -5012,9 +5012,9 @@ void t4_sge_stop(struct adapter *adap)
 	struct sge *s = &adap->sge;
 
 	if (s->rx_timer.function)
-		del_timer_sync(&s->rx_timer);
+		timer_delete_sync(&s->rx_timer);
 	if (s->tx_timer.function)
-		del_timer_sync(&s->tx_timer);
+		timer_delete_sync(&s->tx_timer);
 
 	if (is_offload(adap)) {
 		struct sge_uld_txq_info *txq_info;

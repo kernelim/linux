@@ -318,7 +318,7 @@ static void neigh_add_timer(struct neighbour *n, unsigned long when)
 static int neigh_del_timer(struct neighbour *n)
 {
 	if ((n->nud_state & NUD_IN_TIMER) &&
-	    del_timer(&n->timer)) {
+	    timer_delete(&n->timer)) {
 		neigh_release(n);
 		return 1;
 	}
@@ -448,7 +448,7 @@ static int __neigh_ifdown(struct neigh_table *tbl, struct net_device *dev,
 	pneigh_queue_purge(&tbl->proxy_queue, dev ? dev_net(dev) : NULL,
 			   tbl->family);
 	if (skb_queue_empty_lockless(&tbl->proxy_queue))
-		del_timer_sync(&tbl->proxy_timer);
+		timer_delete_sync(&tbl->proxy_timer);
 	return 0;
 }
 
@@ -1084,7 +1084,7 @@ static void neigh_probe(struct neighbour *neigh)
 static void neigh_timer_handler(struct timer_list *t)
 {
 	unsigned long now, next;
-	struct neighbour *neigh = from_timer(neigh, t, timer);
+	struct neighbour *neigh = timer_container_of(neigh, t, timer);
 	unsigned int state;
 	int notify = 0;
 
@@ -1455,7 +1455,8 @@ static int __neigh_update(struct neighbour *neigh, const u8 *lladdr,
 			 * we can reinject the packet there.
 			 */
 			n2 = NULL;
-			if (dst && dst->obsolete != DST_OBSOLETE_DEAD) {
+			if (dst &&
+			    READ_ONCE(dst->obsolete) != DST_OBSOLETE_DEAD) {
 				n2 = dst_neigh_lookup_skb(dst, skb);
 				if (n2)
 					n1 = n2;
@@ -1570,7 +1571,7 @@ out:
 	return rc;
 out_kfree_skb:
 	rc = -EINVAL;
-	kfree_skb(skb);
+	kfree_skb_reason(skb, SKB_DROP_REASON_NEIGH_HH_FILLFAIL);
 	goto out;
 }
 EXPORT_SYMBOL(neigh_resolve_output);
@@ -1594,7 +1595,7 @@ int neigh_connected_output(struct neighbour *neigh, struct sk_buff *skb)
 		err = dev_queue_xmit(skb);
 	else {
 		err = -EINVAL;
-		kfree_skb(skb);
+		kfree_skb_reason(skb, SKB_DROP_REASON_NEIGH_HH_FILLFAIL);
 	}
 	return err;
 }
@@ -1622,7 +1623,7 @@ static void neigh_managed_work(struct work_struct *work)
 
 static void neigh_proxy_process(struct timer_list *t)
 {
-	struct neigh_table *tbl = from_timer(tbl, t, proxy_timer);
+	struct neigh_table *tbl = timer_container_of(tbl, t, proxy_timer);
 	long sched_next = 0;
 	unsigned long now = jiffies;
 	struct sk_buff *skb, *n;
@@ -1650,7 +1651,7 @@ static void neigh_proxy_process(struct timer_list *t)
 		} else if (!sched_next || tdif < sched_next)
 			sched_next = tdif;
 	}
-	del_timer(&tbl->proxy_timer);
+	timer_delete(&tbl->proxy_timer);
 	if (sched_next)
 		mod_timer(&tbl->proxy_timer, jiffies + sched_next);
 	spin_unlock(&tbl->proxy_queue.lock);
@@ -1681,7 +1682,7 @@ void pneigh_enqueue(struct neigh_table *tbl, struct neigh_parms *p,
 	NEIGH_CB(skb)->flags |= LOCALLY_ENQUEUED;
 
 	spin_lock(&tbl->proxy_queue.lock);
-	if (del_timer(&tbl->proxy_timer)) {
+	if (timer_delete(&tbl->proxy_timer)) {
 		if (time_before(tbl->proxy_timer.expires, sched_next))
 			sched_next = tbl->proxy_timer.expires;
 	}
@@ -1844,7 +1845,7 @@ int neigh_table_clear(int index, struct neigh_table *tbl)
 	/* It is not clean... Fix it to unload IPv6 module safely */
 	cancel_delayed_work_sync(&tbl->managed_work);
 	cancel_delayed_work_sync(&tbl->gc_work);
-	del_timer_sync(&tbl->proxy_timer);
+	timer_delete_sync(&tbl->proxy_timer);
 	pneigh_queue_purge(&tbl->proxy_queue, NULL, tbl->family);
 	neigh_ifdown(tbl, NULL);
 	if (atomic_read(&tbl->entries))

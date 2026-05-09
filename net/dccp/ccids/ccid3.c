@@ -188,7 +188,7 @@ static inline void ccid3_hc_tx_update_win_count(struct ccid3_hc_tx_sock *hc,
 
 static void ccid3_hc_tx_no_feedback_timer(struct timer_list *t)
 {
-	struct ccid3_hc_tx_sock *hc = from_timer(hc, t, tx_no_feedback_timer);
+	struct ccid3_hc_tx_sock *hc = timer_container_of(hc, t, tx_no_feedback_timer);
 	struct sock *sk = hc->sk;
 	unsigned long t_nfb = USEC_PER_SEC / 5;
 

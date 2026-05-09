@@ -53,6 +53,7 @@ static void pci_destroy_dev(struct pci_dev *dev)
 	if (pci_dev_test_and_set_removed(dev))
 		return;
 
+	pci_doe_sysfs_teardown(dev);
 	pci_npem_remove(dev);
 
 	device_del(&dev->dev);
@@ -162,6 +163,8 @@ void pci_stop_root_bus(struct pci_bus *bus)
 	list_for_each_entry_safe_reverse(child, tmp,
 					 &bus->devices, bus_list)
 		pci_stop_bus_device(child);
+
+	of_pci_remove_host_bridge_node(host_bridge);
 
 	/* stop the host bridge */
 	device_release_driver(&host_bridge->dev);

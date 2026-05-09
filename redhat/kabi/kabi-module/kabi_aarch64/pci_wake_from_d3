@@ -1,3 +1,3 @@
-#1-
-0x4e159be8	pci_wake_from_d3	vmlinux	EXPORT_SYMBOL	
+#2-
+0x5c77869c	pci_wake_from_d3	vmlinux	EXPORT_SYMBOL	
 

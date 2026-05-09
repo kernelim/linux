@@ -153,7 +153,6 @@ xfs_inode_item_precommit(
 	}
 
 	spin_lock(&iip->ili_lock);
-
 	if (!iip->ili_item.li_buf) {
 		struct xfs_buf	*bp;
 		int		error;
@@ -182,7 +181,7 @@ xfs_inode_item_precommit(
 		xfs_buf_hold(bp);
 		spin_lock(&iip->ili_lock);
 		iip->ili_item.li_buf = bp;
-		bp->b_flags |= _XBF_INODES;
+		bp->b_iodone = xfs_buf_inode_iodone;
 		list_add_tail(&iip->ili_item.li_bio_list, &bp->b_li_list);
 		xfs_trans_brelse(tp, bp);
 	}
@@ -247,6 +246,7 @@ xfs_inode_item_data_fork_size(
 		}
 		break;
 	case XFS_DINODE_FMT_BTREE:
+	case XFS_DINODE_FMT_META_BTREE:
 		if ((iip->ili_fields & XFS_ILOG_DBROOT) &&
 		    ip->i_df.if_broot_bytes > 0) {
 			*nbytes += ip->i_df.if_broot_bytes;
@@ -367,6 +367,7 @@ xfs_inode_item_format_data_fork(
 		}
 		break;
 	case XFS_DINODE_FMT_BTREE:
+	case XFS_DINODE_FMT_META_BTREE:
 		iip->ili_fields &=
 			~(XFS_ILOG_DDATA | XFS_ILOG_DEXT | XFS_ILOG_DEV);
 
@@ -561,7 +562,6 @@ xfs_inode_to_log_dinode(
 	to->di_projid_lo = ip->i_projid & 0xffff;
 	to->di_projid_hi = ip->i_projid >> 16;
 
-	memset(to->di_pad3, 0, sizeof(to->di_pad3));
 	to->di_atime = xfs_inode_to_log_dinode_ts(ip, inode_get_atime(inode));
 	to->di_mtime = xfs_inode_to_log_dinode_ts(ip, inode_get_mtime(inode));
 	to->di_ctime = xfs_inode_to_log_dinode_ts(ip, inode_get_ctime(inode));
@@ -586,6 +586,7 @@ xfs_inode_to_log_dinode(
 		to->di_changecount = inode_peek_iversion(inode);
 		to->di_crtime = xfs_inode_to_log_dinode_ts(ip, ip->i_crtime);
 		to->di_flags2 = ip->i_diflags2;
+		/* also covers the di_used_blocks union arm: */
 		to->di_cowextsize = ip->i_cowextsize;
 		to->di_ino = ip->i_ino;
 		to->di_lsn = lsn;
@@ -595,10 +596,16 @@ xfs_inode_to_log_dinode(
 
 		/* dummy value for initialisation */
 		to->di_crc = 0;
+
+		if (xfs_is_metadir_inode(ip))
+			to->di_metatype = ip->i_metatype;
+		else
+			to->di_metatype = 0;
 	} else {
 		to->di_version = 2;
 		to->di_flushiter = ip->i_flushiter;
 		memset(to->di_v2_pad, 0, sizeof(to->di_v2_pad));
+		to->di_metatype = 0;
 	}
 
 	xfs_inode_to_log_dinode_iext_counters(ip, to);
@@ -752,11 +759,14 @@ xfs_inode_item_push(
 		 * completed and items removed from the AIL before the next push
 		 * attempt.
 		 */
+		trace_xfs_inode_push_stale(ip, _RET_IP_);
 		return XFS_ITEM_PINNED;
 	}
 
-	if (xfs_ipincount(ip) > 0 || xfs_buf_ispinned(bp))
+	if (xfs_ipincount(ip) > 0 || xfs_buf_ispinned(bp)) {
+		trace_xfs_inode_push_pinned(ip, _RET_IP_);
 		return XFS_ITEM_PINNED;
+	}
 
 	if (xfs_iflags_test(ip, XFS_IFLUSHING))
 		return XFS_ITEM_FLUSHING;
@@ -1067,18 +1077,6 @@ xfs_buf_inode_iodone(
 		list_splice_tail(&flushed_inodes, &bp->b_li_list);
 }
 
-void
-xfs_buf_inode_io_fail(
-	struct xfs_buf		*bp)
-{
-	struct xfs_log_item	*lip;
-
-	list_for_each_entry(lip, &bp->b_li_list, li_bio_list) {
-		set_bit(XFS_LI_FAILED, &lip->li_flags);
-		clear_bit(XFS_LI_FLUSHING, &lip->li_flags);
-	}
-}
-
 /*
  * Clear the inode logging fields so no more flushes are attempted.  If we are
  * on a buffer list, it is now safe to remove it because the buffer is
@@ -1127,13 +1125,7 @@ xfs_iflush_abort(
 	 * state. Whilst the inode is in the AIL, it should have a valid buffer
 	 * pointer for push operations to access - it is only safe to remove the
 	 * inode from the buffer once it has been removed from the AIL.
-	 *
-	 * We also clear the failed bit before removing the item from the AIL
-	 * as xfs_trans_ail_delete()->xfs_clear_li_failed() will release buffer
-	 * references the inode item owns and needs to hold until we've fully
-	 * aborted the inode log item and detached it from the buffer.
 	 */
-	clear_bit(XFS_LI_FAILED, &iip->ili_item.li_flags);
 	xfs_trans_ail_delete(&iip->ili_item, 0);
 
 	/*

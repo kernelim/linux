@@ -1,3 +1,3 @@
-#1-
-0x5ce01238	pci_get_slot	vmlinux	EXPORT_SYMBOL	
+#2-
+0x25d35242	pci_get_slot	vmlinux	EXPORT_SYMBOL	
 

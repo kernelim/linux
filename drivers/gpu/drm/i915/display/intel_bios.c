@@ -36,7 +36,10 @@
 #include "soc/intel_rom.h"
 
 #include "i915_drv.h"
+#include "i915_utils.h"
 #include "intel_display.h"
+#include "intel_display_core.h"
+#include "intel_display_rpm.h"
 #include "intel_display_types.h"
 #include "intel_gmbus.h"
 
@@ -1564,10 +1567,7 @@ parse_psr(struct intel_display *display,
 
 	panel->vbt.psr.full_link = psr_table->full_link;
 	panel->vbt.psr.require_aux_wakeup = psr_table->require_aux_to_wakeup;
-
-	/* Allowed VBT values goes from 0 to 15 */
-	panel->vbt.psr.idle_frames = psr_table->idle_frames < 0 ? 0 :
-		psr_table->idle_frames > 15 ? 15 : psr_table->idle_frames;
+	panel->vbt.psr.idle_frames = psr_table->idle_frames;
 
 	/*
 	 * New psr options 0=500us, 1=100us, 2=2500us, 3=0us
@@ -1937,7 +1937,7 @@ static int get_init_otp_deassert_fragment_len(struct intel_display *display,
 	int index, len;
 
 	if (drm_WARN_ON(display->drm,
-			!data || panel->vbt.dsi.seq_version != 1))
+			!data || panel->vbt.dsi.seq_version >= 3))
 		return 0;
 
 	/* index = 1 to skip sequence byte */
@@ -1960,7 +1960,7 @@ static int get_init_otp_deassert_fragment_len(struct intel_display *display,
 }
 
 /*
- * Some v1 VBT MIPI sequences do the deassert in the init OTP sequence.
+ * Some v1/v2 VBT MIPI sequences do the deassert in the init OTP sequence.
  * The deassert must be done before calling intel_dsi_device_ready, so for
  * these devices we split the init OTP sequence into a deassert sequence and
  * the actual init OTP part.
@@ -1971,9 +1971,9 @@ static void vlv_fixup_mipi_sequences(struct intel_display *display,
 	u8 *init_otp;
 	int len;
 
-	/* Limit this to v1 vid-mode sequences */
+	/* Limit this to v1/v2 vid-mode sequences */
 	if (panel->vbt.dsi.config->is_cmd_mode ||
-	    panel->vbt.dsi.seq_version != 1)
+	    panel->vbt.dsi.seq_version >= 3)
 		return;
 
 	/* Only do this if there are otp and assert seqs and no deassert seq */
@@ -2244,28 +2244,27 @@ static const u8 adlp_ddc_pin_map[] = {
 
 static u8 map_ddc_pin(struct intel_display *display, u8 vbt_pin)
 {
-	struct drm_i915_private *i915 = to_i915(display->drm);
 	const u8 *ddc_pin_map;
 	int i, n_entries;
 
-	if (INTEL_PCH_TYPE(i915) >= PCH_MTL || display->platform.alderlake_p) {
+	if (INTEL_PCH_TYPE(display) >= PCH_MTL || display->platform.alderlake_p) {
 		ddc_pin_map = adlp_ddc_pin_map;
 		n_entries = ARRAY_SIZE(adlp_ddc_pin_map);
 	} else if (display->platform.alderlake_s) {
 		ddc_pin_map = adls_ddc_pin_map;
 		n_entries = ARRAY_SIZE(adls_ddc_pin_map);
-	} else if (INTEL_PCH_TYPE(i915) >= PCH_DG1) {
+	} else if (INTEL_PCH_TYPE(display) >= PCH_DG1) {
 		return vbt_pin;
-	} else if (display->platform.rocketlake && INTEL_PCH_TYPE(i915) == PCH_TGP) {
+	} else if (display->platform.rocketlake && INTEL_PCH_TYPE(display) == PCH_TGP) {
 		ddc_pin_map = rkl_pch_tgp_ddc_pin_map;
 		n_entries = ARRAY_SIZE(rkl_pch_tgp_ddc_pin_map);
-	} else if (HAS_PCH_TGP(i915) && DISPLAY_VER(display) == 9) {
+	} else if (HAS_PCH_TGP(display) && DISPLAY_VER(display) == 9) {
 		ddc_pin_map = gen9bc_tgp_ddc_pin_map;
 		n_entries = ARRAY_SIZE(gen9bc_tgp_ddc_pin_map);
-	} else if (INTEL_PCH_TYPE(i915) >= PCH_ICP) {
+	} else if (INTEL_PCH_TYPE(display) >= PCH_ICP) {
 		ddc_pin_map = icp_ddc_pin_map;
 		n_entries = ARRAY_SIZE(icp_ddc_pin_map);
-	} else if (HAS_PCH_CNP(i915)) {
+	} else if (HAS_PCH_CNP(display)) {
 		ddc_pin_map = cnp_ddc_pin_map;
 		n_entries = ARRAY_SIZE(cnp_ddc_pin_map);
 	} else {
@@ -2479,6 +2478,25 @@ static int parse_bdb_216_dp_max_link_rate(const int vbt_max_link_rate)
 	}
 }
 
+static u32 edp_rate_override_mask(int rate)
+{
+	switch (rate) {
+	case 2000000: return BDB_263_VBT_EDP_LINK_RATE_20;
+	case 1350000: return BDB_263_VBT_EDP_LINK_RATE_13_5;
+	case 1000000: return BDB_263_VBT_EDP_LINK_RATE_10;
+	case 810000: return BDB_263_VBT_EDP_LINK_RATE_8_1;
+	case 675000: return BDB_263_VBT_EDP_LINK_RATE_6_75;
+	case 540000: return BDB_263_VBT_EDP_LINK_RATE_5_4;
+	case 432000: return BDB_263_VBT_EDP_LINK_RATE_4_32;
+	case 324000: return BDB_263_VBT_EDP_LINK_RATE_3_24;
+	case 270000: return BDB_263_VBT_EDP_LINK_RATE_2_7;
+	case 243000: return BDB_263_VBT_EDP_LINK_RATE_2_43;
+	case 216000: return BDB_263_VBT_EDP_LINK_RATE_2_16;
+	case 162000: return BDB_263_VBT_EDP_LINK_RATE_1_62;
+	default: return 0;
+	}
+}
+
 int intel_bios_dp_max_link_rate(const struct intel_bios_encoder_data *devdata)
 {
 	if (!devdata || devdata->display->vbt.version < 216)
@@ -2496,6 +2514,19 @@ int intel_bios_dp_max_lane_count(const struct intel_bios_encoder_data *devdata)
 		return 0;
 
 	return devdata->child.dp_max_lane_count + 1;
+}
+
+bool
+intel_bios_encoder_reject_edp_rate(const struct intel_bios_encoder_data *devdata,
+				   int rate)
+{
+	if (!devdata || devdata->display->vbt.version < 263)
+		return false;
+
+	if (devdata->child.edp_data_rate_override == BDB_263_VBT_EDP_RATES_MASK)
+		return false;
+
+	return devdata->child.edp_data_rate_override & edp_rate_override_mask(rate);
 }
 
 static void sanitize_device_type(struct intel_bios_encoder_data *devdata,
@@ -2746,8 +2777,10 @@ static int child_device_expected_size(u16 version)
 {
 	BUILD_BUG_ON(sizeof(struct child_device_config) < 40);
 
-	if (version > 256)
+	if (version > 263)
 		return -ENOENT;
+	else if (version >= 263)
+		return 44;
 	else if (version >= 256)
 		return 40;
 	else if (version >= 216)
@@ -2864,8 +2897,6 @@ parse_general_definitions(struct intel_display *display)
 static void
 init_vbt_defaults(struct intel_display *display)
 {
-	struct drm_i915_private *i915 = to_i915(display->drm);
-
 	display->vbt.crt_ddc_pin = GMBUS_PIN_VGADDC;
 
 	/* general features */
@@ -2882,7 +2913,7 @@ init_vbt_defaults(struct intel_display *display)
 	 * clock for LVDS.
 	 */
 	display->vbt.lvds_ssc_freq = intel_bios_ssc_frequency(display,
-							      !HAS_PCH_SPLIT(i915));
+							      !HAS_PCH_SPLIT(display));
 	drm_dbg_kms(display->drm, "Set default to SSC at %d kHz\n",
 		    display->vbt.lvds_ssc_freq);
 }
@@ -3115,7 +3146,6 @@ static const struct vbt_header *intel_bios_get_vbt(struct intel_display *display
 {
 	struct drm_i915_private *i915 = to_i915(display->drm);
 	const struct vbt_header *vbt = NULL;
-	intel_wakeref_t wakeref;
 
 	vbt = firmware_get_vbt(display, sizep);
 
@@ -3126,12 +3156,12 @@ static const struct vbt_header *intel_bios_get_vbt(struct intel_display *display
 	 * If the OpRegion does not have VBT, look in SPI flash
 	 * through MMIO or PCI mapping
 	 */
-	if (!vbt && IS_DGFX(i915))
-		with_intel_runtime_pm(&i915->runtime_pm, wakeref)
+	if (!vbt && display->platform.dgfx)
+		with_intel_display_rpm(display)
 			vbt = oprom_get_vbt(display, intel_rom_spi(i915), sizep, "SPI flash");
 
 	if (!vbt)
-		with_intel_runtime_pm(&i915->runtime_pm, wakeref)
+		with_intel_display_rpm(display)
 			vbt = oprom_get_vbt(display, intel_rom_pci(i915), sizep, "PCI ROM");
 
 	return vbt;
@@ -3745,8 +3775,6 @@ DEFINE_SHOW_ATTRIBUTE(intel_bios_vbt);
 
 void intel_bios_debugfs_register(struct intel_display *display)
 {
-	struct drm_minor *minor = display->drm->primary;
-
-	debugfs_create_file("i915_vbt", 0444, minor->debugfs_root,
+	debugfs_create_file("i915_vbt", 0444, display->drm->debugfs_root,
 			    display, &intel_bios_vbt_fops);
 }

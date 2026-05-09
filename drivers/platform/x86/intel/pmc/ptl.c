@@ -162,7 +162,7 @@ static const struct pmc_bit_map ptl_pcdp_ltr_show_map[] = {
 	{}
 };
 
-static const struct pmc_bit_map ptl_pcdp_clocksource_status_map[] = {
+const struct pmc_bit_map ptl_pcdp_clocksource_status_map[] = {
 	{"AON2_OFF_STS",                 BIT(0),	1},
 	{"AON3_OFF_STS",                 BIT(1),	0},
 	{"AON4_OFF_STS",                 BIT(2),	1},
@@ -382,7 +382,7 @@ static const struct pmc_bit_map ptl_pcdp_vnn_req_status_2_map[] = {
 	{}
 };
 
-static const struct pmc_bit_map ptl_pcdp_vnn_req_status_3_map[] = {
+const struct pmc_bit_map ptl_pcdp_vnn_req_status_3_map[] = {
 	{"DTS0_VNN_REQ_STS",             BIT(7),	0},
 	{"GPIOCOM5_VNN_REQ_STS",         BIT(11),	1},
 	{}
@@ -421,7 +421,7 @@ static const struct pmc_bit_map ptl_pcdp_vnn_misc_status_map[] = {
 	{}
 };
 
-static const struct pmc_bit_map ptl_pcdp_signal_status_map[] = {
+const struct pmc_bit_map ptl_pcdp_signal_status_map[] = {
 	{"LSX_Wake0_STS",		 BIT(0),	0},
 	{"LSX_Wake1_STS",		 BIT(1),	0},
 	{"LSX_Wake2_STS",		 BIT(2),	0},

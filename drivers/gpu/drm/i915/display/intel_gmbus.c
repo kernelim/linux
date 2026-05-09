@@ -30,6 +30,7 @@
 #include <linux/export.h>
 #include <linux/i2c-algo-bit.h>
 #include <linux/i2c.h>
+#include <linux/iopoll.h>
 
 #include <drm/display/drm_hdcp_helper.h>
 
@@ -37,7 +38,9 @@
 #include "i915_irq.h"
 #include "i915_reg.h"
 #include "intel_de.h"
+#include "intel_display_regs.h"
 #include "intel_display_types.h"
+#include "intel_display_wa.h"
 #include "intel_gmbus.h"
 #include "intel_gmbus_regs.h"
 
@@ -152,32 +155,31 @@ static const struct gmbus_pin gmbus_pins_mtp[] = {
 static const struct gmbus_pin *get_gmbus_pin(struct intel_display *display,
 					     unsigned int pin)
 {
-	struct drm_i915_private *i915 = to_i915(display->drm);
 	const struct gmbus_pin *pins;
 	size_t size;
 
-	if (INTEL_PCH_TYPE(i915) >= PCH_MTL) {
+	if (INTEL_PCH_TYPE(display) >= PCH_MTL) {
 		pins = gmbus_pins_mtp;
 		size = ARRAY_SIZE(gmbus_pins_mtp);
-	} else if (INTEL_PCH_TYPE(i915) >= PCH_DG2) {
+	} else if (INTEL_PCH_TYPE(display) >= PCH_DG2) {
 		pins = gmbus_pins_dg2;
 		size = ARRAY_SIZE(gmbus_pins_dg2);
-	} else if (INTEL_PCH_TYPE(i915) >= PCH_DG1) {
+	} else if (INTEL_PCH_TYPE(display) >= PCH_DG1) {
 		pins = gmbus_pins_dg1;
 		size = ARRAY_SIZE(gmbus_pins_dg1);
-	} else if (INTEL_PCH_TYPE(i915) >= PCH_ICP) {
+	} else if (INTEL_PCH_TYPE(display) >= PCH_ICP) {
 		pins = gmbus_pins_icp;
 		size = ARRAY_SIZE(gmbus_pins_icp);
-	} else if (HAS_PCH_CNP(i915)) {
+	} else if (HAS_PCH_CNP(display)) {
 		pins = gmbus_pins_cnp;
 		size = ARRAY_SIZE(gmbus_pins_cnp);
-	} else if (IS_GEMINILAKE(i915) || IS_BROXTON(i915)) {
+	} else if (display->platform.geminilake || display->platform.broxton) {
 		pins = gmbus_pins_bxt;
 		size = ARRAY_SIZE(gmbus_pins_bxt);
 	} else if (DISPLAY_VER(display) == 9) {
 		pins = gmbus_pins_skl;
 		size = ARRAY_SIZE(gmbus_pins_skl);
-	} else if (IS_BROADWELL(i915)) {
+	} else if (display->platform.broadwell) {
 		pins = gmbus_pins_bdw;
 		size = ARRAY_SIZE(gmbus_pins_bdw);
 	} else {
@@ -217,7 +219,7 @@ static void pnv_gmbus_clock_gating(struct intel_display *display,
 				   bool enable)
 {
 	/* When using bit bashing for I2C, this bit needs to be set to 1 */
-	intel_de_rmw(display, DSPCLK_GATE_D(display),
+	intel_de_rmw(display, DSPCLK_GATE_D,
 		     PNV_GMBUSUNIT_CLOCK_GATE_DISABLE,
 		     !enable ? PNV_GMBUSUNIT_CLOCK_GATE_DISABLE : 0);
 }
@@ -240,15 +242,20 @@ static void bxt_gmbus_clock_gating(struct intel_display *display,
 static u32 get_reserved(struct intel_gmbus *bus)
 {
 	struct intel_display *display = bus->display;
-	struct drm_i915_private *i915 = to_i915(display->drm);
-	u32 reserved = 0;
+	u32 preserve_bits = 0;
+
+	if (display->platform.i830 || display->platform.i845g)
+		return 0;
 
 	/* On most chips, these bits must be preserved in software. */
-	if (!IS_I830(i915) && !IS_I845G(i915))
-		reserved = intel_de_read_notrace(display, bus->gpio_reg) &
-			(GPIO_DATA_PULLUP_DISABLE | GPIO_CLOCK_PULLUP_DISABLE);
+	preserve_bits |= GPIO_DATA_PULLUP_DISABLE | GPIO_CLOCK_PULLUP_DISABLE;
 
-	return reserved;
+	/* Wa_16025573575: the masks bits need to be preserved through out */
+	if (intel_display_wa(display, 16025573575))
+		preserve_bits |= GPIO_CLOCK_DIR_MASK | GPIO_CLOCK_VAL_MASK |
+				 GPIO_DATA_DIR_MASK | GPIO_DATA_VAL_MASK;
+
+	return intel_de_read_notrace(display, bus->gpio_reg) & preserve_bits;
 }
 
 static int get_clock(void *data)
@@ -309,17 +316,35 @@ static void set_data(void *data, int state_high)
 	intel_de_posting_read(display, bus->gpio_reg);
 }
 
+static void
+ptl_handle_mask_bits(struct intel_gmbus *bus, bool set)
+{
+	struct intel_display *display = bus->display;
+	u32 reg_val = intel_de_read_notrace(display, bus->gpio_reg);
+	u32 mask_bits = GPIO_CLOCK_DIR_MASK | GPIO_CLOCK_VAL_MASK |
+			GPIO_DATA_DIR_MASK | GPIO_DATA_VAL_MASK;
+	if (set)
+		reg_val |= mask_bits;
+	else
+		reg_val &= ~mask_bits;
+
+	intel_de_write_notrace(display, bus->gpio_reg, reg_val);
+	intel_de_posting_read(display, bus->gpio_reg);
+}
+
 static int
 intel_gpio_pre_xfer(struct i2c_adapter *adapter)
 {
 	struct intel_gmbus *bus = to_intel_gmbus(adapter);
 	struct intel_display *display = bus->display;
-	struct drm_i915_private *i915 = to_i915(display->drm);
 
 	intel_gmbus_reset(display);
 
-	if (IS_PINEVIEW(i915))
+	if (display->platform.pineview)
 		pnv_gmbus_clock_gating(display, false);
+
+	if (intel_display_wa(display, 16025573575))
+		ptl_handle_mask_bits(bus, true);
 
 	set_data(bus, 1);
 	set_clock(bus, 1);
@@ -332,13 +357,15 @@ intel_gpio_post_xfer(struct i2c_adapter *adapter)
 {
 	struct intel_gmbus *bus = to_intel_gmbus(adapter);
 	struct intel_display *display = bus->display;
-	struct drm_i915_private *i915 = to_i915(display->drm);
 
 	set_data(bus, 1);
 	set_clock(bus, 1);
 
-	if (IS_PINEVIEW(i915))
+	if (display->platform.pineview)
 		pnv_gmbus_clock_gating(display, true);
+
+	if (intel_display_wa(display, 16025573575))
+		ptl_handle_mask_bits(bus, false);
 }
 
 static void
@@ -388,11 +415,14 @@ static int gmbus_wait(struct intel_display *display, u32 status, u32 irq_en)
 	intel_de_write_fw(display, GMBUS4(display), irq_en);
 
 	status |= GMBUS_SATOER;
-	ret = wait_for_us((gmbus2 = intel_de_read_fw(display, GMBUS2(display))) & status,
-			  2);
+
+	ret = poll_timeout_us_atomic(gmbus2 = intel_de_read_fw(display, GMBUS2(display)),
+				     gmbus2 & status,
+				     0, 2, false);
 	if (ret)
-		ret = wait_for((gmbus2 = intel_de_read_fw(display, GMBUS2(display))) & status,
-			       50);
+		ret = poll_timeout_us(gmbus2 = intel_de_read_fw(display, GMBUS2(display)),
+				      gmbus2 & status,
+				      500, 50 * 1000, false);
 
 	intel_de_write_fw(display, GMBUS4(display), 0);
 	remove_wait_queue(&display->gmbus.wait_queue, &wait);
@@ -418,7 +448,7 @@ gmbus_wait_idle(struct intel_display *display)
 	add_wait_queue(&display->gmbus.wait_queue, &wait);
 	intel_de_write_fw(display, GMBUS4(display), irq_enable);
 
-	ret = intel_de_wait_fw(display, GMBUS2(display), GMBUS_ACTIVE, 0, 10);
+	ret = intel_de_wait_fw(display, GMBUS2(display), GMBUS_ACTIVE, 0, 10, NULL);
 
 	intel_de_write_fw(display, GMBUS4(display), 0);
 	remove_wait_queue(&display->gmbus.wait_queue, &wait);
@@ -630,14 +660,13 @@ do_gmbus_xfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num,
 {
 	struct intel_gmbus *bus = to_intel_gmbus(adapter);
 	struct intel_display *display = bus->display;
-	struct drm_i915_private *i915 = to_i915(display->drm);
 	int i = 0, inc, try = 0;
 	int ret = 0;
 
 	/* Display WA #0868: skl,bxt,kbl,cfl,glk */
-	if (IS_GEMINILAKE(i915) || IS_BROXTON(i915))
+	if (display->platform.geminilake || display->platform.broxton)
 		bxt_gmbus_clock_gating(display, false);
-	else if (HAS_PCH_SPT(i915) || HAS_PCH_CNP(i915))
+	else if (HAS_PCH_SPT(display) || HAS_PCH_CNP(display))
 		pch_gmbus_clock_gating(display, false);
 
 retry:
@@ -748,9 +777,9 @@ timeout:
 
 out:
 	/* Display WA #0868: skl,bxt,kbl,cfl,glk */
-	if (IS_GEMINILAKE(i915) || IS_BROXTON(i915))
+	if (display->platform.geminilake || display->platform.broxton)
 		bxt_gmbus_clock_gating(display, true);
-	else if (HAS_PCH_SPT(i915) || HAS_PCH_CNP(i915))
+	else if (HAS_PCH_SPT(display) || HAS_PCH_CNP(display))
 		pch_gmbus_clock_gating(display, true);
 
 	return ret;
@@ -873,12 +902,11 @@ static const struct i2c_lock_operations gmbus_lock_ops = {
  */
 int intel_gmbus_setup(struct intel_display *display)
 {
-	struct drm_i915_private *i915 = to_i915(display->drm);
 	struct pci_dev *pdev = to_pci_dev(display->drm->dev);
 	unsigned int pin;
 	int ret;
 
-	if (IS_VALLEYVIEW(i915) || IS_CHERRYVIEW(i915))
+	if (display->platform.valleyview || display->platform.cherryview)
 		display->gmbus.mmio_base = VLV_DISPLAY_BASE;
 	else if (!HAS_GMCH(display))
 		/*
@@ -925,7 +953,7 @@ int intel_gmbus_setup(struct intel_display *display)
 		bus->reg0 = pin | GMBUS_RATE_100KHZ;
 
 		/* gmbus seems to be broken on i830 */
-		if (IS_I830(i915))
+		if (display->platform.i830)
 			bus->force_bit = 1;
 
 		intel_gpio_setup(bus, GPIO(display, gmbus_pin->gpio));

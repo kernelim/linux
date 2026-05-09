@@ -30,6 +30,8 @@ properties:
     items:
       # Entries are sorted alphanumerically by the compatible
       - enum:
+            # ABB register based spi sensors
+          - abb,spi-sensor
             # Acbel fsg032 power supply
           - acbel,fsg032
             # SMBus/I2C Digital Temperature Sensor in 6-Pin SOT with SMBus Alert and Over Temperature Pin
@@ -307,8 +309,12 @@ properties:
           - national,lm92
             # Nuvoton Temperature Sensor
           - nuvoton,w83773g
+            # NXP ISP1301 USB transceiver
+          - nxp,isp1301
             # OKI ML86V7667 video decoder
           - oki,ml86v7667
+            # ON Semiconductor ADT7462 Temperature, Voltage Monitor and Fan Controller
+          - onnn,adt7462
             # 48-Lane, 12-Port PCI Express Gen 2 (5.0 GT/s) Switch
           - plx,pex8648
             # Pulsedlight LIDAR range-finding sensor

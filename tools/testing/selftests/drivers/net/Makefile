@@ -5,6 +5,7 @@ TEST_INCLUDES := $(wildcard lib/py/*.py) \
 		 ../../net/lib.sh \
 
 TEST_PROGS := \
+	napi_threaded.py \
 	netcons_basic.sh \
 	ping.py \
 	queues.py \

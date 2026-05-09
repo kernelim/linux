@@ -12,9 +12,11 @@
 #include <linux/delay.h>
 #include <linux/iopoll.h>
 #include <linux/irq.h>
+#include <linux/irqchip/irq-msi-lib.h>
 #include <linux/irqchip/chained_irq.h>
 #include <linux/irqdomain.h>
 #include <linux/kernel.h>
+#include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/msi.h>
 #include <linux/of_device.h>
@@ -24,6 +26,7 @@
 #include <linux/platform_device.h>
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
+#include <linux/regmap.h>
 #include <linux/reset.h>
 
 #include "../pci.h"
@@ -185,7 +188,6 @@ struct mtk_msi_set {
  * @saved_irq_state: IRQ enable state saved at suspend time
  * @irq_lock: lock protecting IRQ register access
  * @intx_domain: legacy INTx IRQ domain
- * @msi_domain: MSI IRQ domain
  * @msi_bottom_domain: MSI IRQ bottom domain
  * @msi_sets: MSI sets information
  * @lock: lock protecting IRQ bit map
@@ -208,7 +210,6 @@ struct mtk_gen3_pcie {
 	u32 saved_irq_state;
 	raw_spinlock_t irq_lock;
 	struct irq_domain *intx_domain;
-	struct irq_domain *msi_domain;
 	struct irq_domain *msi_bottom_domain;
 	struct mtk_msi_set msi_sets[PCIE_MSI_SET_NUM];
 	struct mutex lock;
@@ -352,7 +353,8 @@ static int mtk_pcie_set_trans_table(struct mtk_gen3_pcie *pcie,
 
 		dev_dbg(pcie->dev, "set %s trans window[%d]: cpu_addr = %#llx, pci_addr = %#llx, size = %#llx\n",
 			range_type, *num, (unsigned long long)cpu_addr,
-			(unsigned long long)pci_addr, (unsigned long long)table_size);
+			(unsigned long long)pci_addr,
+			(unsigned long long)table_size);
 
 		cpu_addr += table_size;
 		pci_addr += table_size;
@@ -523,30 +525,22 @@ static int mtk_pcie_startup_port(struct mtk_gen3_pcie *pcie)
 	return 0;
 }
 
-static void mtk_pcie_msi_irq_mask(struct irq_data *data)
-{
-	pci_msi_mask_irq(data);
-	irq_chip_mask_parent(data);
-}
+#define MTK_MSI_FLAGS_REQUIRED (MSI_FLAG_USE_DEF_DOM_OPS	| \
+				MSI_FLAG_USE_DEF_CHIP_OPS	| \
+				MSI_FLAG_NO_AFFINITY		| \
+				MSI_FLAG_PCI_MSI_MASK_PARENT)
 
-static void mtk_pcie_msi_irq_unmask(struct irq_data *data)
-{
-	pci_msi_unmask_irq(data);
-	irq_chip_unmask_parent(data);
-}
+#define MTK_MSI_FLAGS_SUPPORTED (MSI_GENERIC_FLAGS_MASK		| \
+				 MSI_FLAG_PCI_MSIX		| \
+				 MSI_FLAG_MULTI_PCI_MSI)
 
-static struct irq_chip mtk_msi_irq_chip = {
-	.irq_ack = irq_chip_ack_parent,
-	.irq_mask = mtk_pcie_msi_irq_mask,
-	.irq_unmask = mtk_pcie_msi_irq_unmask,
-	.name = "MSI",
-};
-
-static struct msi_domain_info mtk_msi_domain_info = {
-	.flags	= MSI_FLAG_USE_DEF_DOM_OPS | MSI_FLAG_USE_DEF_CHIP_OPS |
-		  MSI_FLAG_NO_AFFINITY | MSI_FLAG_PCI_MSIX |
-		  MSI_FLAG_MULTI_PCI_MSI,
-	.chip	= &mtk_msi_irq_chip,
+static const struct msi_parent_ops mtk_msi_parent_ops = {
+	.required_flags		= MTK_MSI_FLAGS_REQUIRED,
+	.supported_flags	= MTK_MSI_FLAGS_SUPPORTED,
+	.bus_select_token	= DOMAIN_BUS_PCI_MSI,
+	.chip_flags		= MSI_CHIP_FLAG_SET_ACK,
+	.prefix			= "MTK3-",
+	.init_dev_msi_info	= msi_lib_init_dev_msi_info,
 };
 
 static void mtk_compose_msi_msg(struct irq_data *data, struct msi_msg *msg)
@@ -742,8 +736,8 @@ static int mtk_pcie_init_irq_domains(struct mtk_gen3_pcie *pcie)
 		return -ENODEV;
 	}
 
-	pcie->intx_domain = irq_domain_add_linear(intc_node, PCI_NUM_INTX,
-						  &intx_domain_ops, pcie);
+	pcie->intx_domain = irq_domain_create_linear(of_fwnode_handle(intc_node), PCI_NUM_INTX,
+						     &intx_domain_ops, pcie);
 	if (!pcie->intx_domain) {
 		dev_err(dev, "failed to create INTx IRQ domain\n");
 		ret = -ENODEV;
@@ -753,28 +747,23 @@ static int mtk_pcie_init_irq_domains(struct mtk_gen3_pcie *pcie)
 	/* Setup MSI */
 	mutex_init(&pcie->lock);
 
-	pcie->msi_bottom_domain = irq_domain_add_linear(node, PCIE_MSI_IRQS_NUM,
-				  &mtk_msi_bottom_domain_ops, pcie);
+	struct irq_domain_info info = {
+		.fwnode		= dev_fwnode(dev),
+		.ops		= &mtk_msi_bottom_domain_ops,
+		.host_data	= pcie,
+		.size		= PCIE_MSI_IRQS_NUM,
+	};
+
+	pcie->msi_bottom_domain = msi_create_parent_irq_domain(&info, &mtk_msi_parent_ops);
 	if (!pcie->msi_bottom_domain) {
 		dev_err(dev, "failed to create MSI bottom domain\n");
 		ret = -ENODEV;
 		goto err_msi_bottom_domain;
 	}
 
-	pcie->msi_domain = pci_msi_create_irq_domain(dev->fwnode,
-						     &mtk_msi_domain_info,
-						     pcie->msi_bottom_domain);
-	if (!pcie->msi_domain) {
-		dev_err(dev, "failed to create MSI domain\n");
-		ret = -ENODEV;
-		goto err_msi_domain;
-	}
-
 	of_node_put(intc_node);
 	return 0;
 
-err_msi_domain:
-	irq_domain_remove(pcie->msi_bottom_domain);
 err_msi_bottom_domain:
 	irq_domain_remove(pcie->intx_domain);
 out_put_node:
@@ -788,9 +777,6 @@ static void mtk_pcie_irq_teardown(struct mtk_gen3_pcie *pcie)
 
 	if (pcie->intx_domain)
 		irq_domain_remove(pcie->intx_domain);
-
-	if (pcie->msi_domain)
-		irq_domain_remove(pcie->msi_domain);
 
 	if (pcie->msi_bottom_domain)
 		irq_domain_remove(pcie->msi_bottom_domain);
@@ -887,7 +873,8 @@ static int mtk_pcie_parse_port(struct mtk_gen3_pcie *pcie)
 	for (i = 0; i < num_resets; i++)
 		pcie->phy_resets[i].id = pcie->soc->phy_resets.id[i];
 
-	ret = devm_reset_control_bulk_get_optional_shared(dev, num_resets, pcie->phy_resets);
+	ret = devm_reset_control_bulk_get_optional_shared(dev, num_resets,
+							  pcie->phy_resets);
 	if (ret) {
 		dev_err(dev, "failed to get PHY bulk reset\n");
 		return ret;
@@ -917,22 +904,27 @@ static int mtk_pcie_parse_port(struct mtk_gen3_pcie *pcie)
 		return pcie->num_clks;
 	}
 
-       ret = of_property_read_u32(dev->of_node, "num-lanes", &num_lanes);
-       if (ret == 0) {
-	       if (num_lanes == 0 || num_lanes > 16 || (num_lanes != 1 && num_lanes % 2))
+	ret = of_property_read_u32(dev->of_node, "num-lanes", &num_lanes);
+	if (ret == 0) {
+		if (num_lanes == 0 || num_lanes > 16 ||
+		    (num_lanes != 1 && num_lanes % 2))
 			dev_warn(dev, "invalid num-lanes, using controller defaults\n");
-	       else
+		else
 			pcie->num_lanes = num_lanes;
-       }
+	}
 
 	return 0;
 }
 
 static int mtk_pcie_en7581_power_up(struct mtk_gen3_pcie *pcie)
 {
+	struct pci_host_bridge *host = pci_host_bridge_from_priv(pcie);
 	struct device *dev = pcie->dev;
+	struct resource_entry *entry;
+	struct regmap *pbus_regmap;
+	u32 val, args[2], size;
+	resource_size_t addr;
 	int err;
-	u32 val;
 
 	/*
 	 * The controller may have been left out of reset by the bootloader
@@ -940,10 +932,29 @@ static int mtk_pcie_en7581_power_up(struct mtk_gen3_pcie *pcie)
 	 */
 	reset_control_bulk_assert(pcie->soc->phy_resets.num_resets,
 				  pcie->phy_resets);
-	reset_control_assert(pcie->mac_reset);
 
 	/* Wait for the time needed to complete the reset lines assert. */
 	msleep(PCIE_EN7581_RESET_TIME_MS);
+
+	/*
+	 * Configure PBus base address and base address mask to allow the
+	 * hw to detect if a given address is accessible on PCIe controller.
+	 */
+	pbus_regmap = syscon_regmap_lookup_by_phandle_args(dev->of_node,
+							   "mediatek,pbus-csr",
+							   ARRAY_SIZE(args),
+							   args);
+	if (IS_ERR(pbus_regmap))
+		return PTR_ERR(pbus_regmap);
+
+	entry = resource_list_first_type(&host->windows, IORESOURCE_MEM);
+	if (!entry)
+		return -ENODEV;
+
+	addr = entry->res->start - entry->offset;
+	regmap_write(pbus_regmap, args[0], lower_32_bits(addr));
+	size = lower_32_bits(resource_size(entry->res));
+	regmap_write(pbus_regmap, args[1], GENMASK(31, __fls(size)));
 
 	/*
 	 * Unlike the other MediaTek Gen3 controllers, the Airoha EN7581
@@ -961,7 +972,8 @@ static int mtk_pcie_en7581_power_up(struct mtk_gen3_pcie *pcie)
 		goto err_phy_on;
 	}
 
-	err = reset_control_bulk_deassert(pcie->soc->phy_resets.num_resets, pcie->phy_resets);
+	err = reset_control_bulk_deassert(pcie->soc->phy_resets.num_resets,
+					  pcie->phy_resets);
 	if (err) {
 		dev_err(dev, "failed to deassert PHYs\n");
 		goto err_phy_deassert;
@@ -1006,7 +1018,8 @@ static int mtk_pcie_en7581_power_up(struct mtk_gen3_pcie *pcie)
 err_clk_prepare_enable:
 	pm_runtime_put_sync(dev);
 	pm_runtime_disable(dev);
-	reset_control_bulk_assert(pcie->soc->phy_resets.num_resets, pcie->phy_resets);
+	reset_control_bulk_assert(pcie->soc->phy_resets.num_resets,
+				  pcie->phy_resets);
 err_phy_deassert:
 	phy_power_off(pcie->phy);
 err_phy_on:
@@ -1030,7 +1043,8 @@ static int mtk_pcie_power_up(struct mtk_gen3_pcie *pcie)
 	usleep_range(PCIE_MTK_RESET_TIME_US, 2 * PCIE_MTK_RESET_TIME_US);
 
 	/* PHY power on and enable pipe clock */
-	err = reset_control_bulk_deassert(pcie->soc->phy_resets.num_resets, pcie->phy_resets);
+	err = reset_control_bulk_deassert(pcie->soc->phy_resets.num_resets,
+					  pcie->phy_resets);
 	if (err) {
 		dev_err(dev, "failed to deassert PHYs\n");
 		return err;
@@ -1070,7 +1084,8 @@ err_clk_init:
 err_phy_on:
 	phy_exit(pcie->phy);
 err_phy_init:
-	reset_control_bulk_assert(pcie->soc->phy_resets.num_resets, pcie->phy_resets);
+	reset_control_bulk_assert(pcie->soc->phy_resets.num_resets,
+				  pcie->phy_resets);
 
 	return err;
 }
@@ -1085,7 +1100,8 @@ static void mtk_pcie_power_down(struct mtk_gen3_pcie *pcie)
 
 	phy_power_off(pcie->phy);
 	phy_exit(pcie->phy);
-	reset_control_bulk_assert(pcie->soc->phy_resets.num_resets, pcie->phy_resets);
+	reset_control_bulk_assert(pcie->soc->phy_resets.num_resets,
+				  pcie->phy_resets);
 }
 
 static int mtk_pcie_get_controller_max_link_speed(struct mtk_gen3_pcie *pcie)
@@ -1112,7 +1128,8 @@ static int mtk_pcie_setup(struct mtk_gen3_pcie *pcie)
 	 * Deassert the line in order to avoid unbalance in deassert_count
 	 * counter since the bulk is shared.
 	 */
-	reset_control_bulk_deassert(pcie->soc->phy_resets.num_resets, pcie->phy_resets);
+	reset_control_bulk_deassert(pcie->soc->phy_resets.num_resets,
+				    pcie->phy_resets);
 
 	/* Don't touch the hardware registers before power up */
 	err = pcie->soc->power_up(pcie);

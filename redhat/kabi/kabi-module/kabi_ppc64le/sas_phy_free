@@ -1,3 +1,3 @@
-#1-
-0xced8c8f7	sas_phy_free	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL	
+#2-
+0x4bd5e531	sas_phy_free	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL	
 

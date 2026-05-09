@@ -2225,7 +2225,7 @@ static int niu_link_status(struct niu *np, int *link_up_p)
 
 static void niu_timer(struct timer_list *t)
 {
-	struct niu *np = from_timer(np, t, timer);
+	struct niu *np = timer_container_of(np, t, timer);
 	unsigned long off;
 	int err, link_up;
 
@@ -6086,7 +6086,7 @@ static void niu_enable_napi(struct niu *np)
 	int i;
 
 	for (i = 0; i < np->num_ldg; i++)
-		napi_enable(&np->ldg[i].napi);
+		napi_enable_locked(&np->ldg[i].napi);
 }
 
 static void niu_disable_napi(struct niu *np)
@@ -6116,7 +6116,9 @@ static int niu_open(struct net_device *dev)
 	if (err)
 		goto out_free_channels;
 
+	netdev_lock(dev);
 	niu_enable_napi(np);
+	netdev_unlock(dev);
 
 	spin_lock_irq(&np->lock);
 
@@ -6163,7 +6165,7 @@ static void niu_full_shutdown(struct niu *np, struct net_device *dev)
 	niu_disable_napi(np);
 	netif_tx_stop_all_queues(dev);
 
-	del_timer_sync(&np->timer);
+	timer_delete_sync(&np->timer);
 
 	spin_lock_irq(&np->lock);
 
@@ -6509,7 +6511,7 @@ static void niu_reset_task(struct work_struct *work)
 
 	spin_unlock_irqrestore(&np->lock, flags);
 
-	del_timer_sync(&np->timer);
+	timer_delete_sync(&np->timer);
 
 	niu_netif_stop(np);
 
@@ -6521,6 +6523,7 @@ static void niu_reset_task(struct work_struct *work)
 
 	niu_reset_buffers(np);
 
+	netdev_lock(np->dev);
 	spin_lock_irqsave(&np->lock, flags);
 
 	err = niu_init_hw(np);
@@ -6531,6 +6534,7 @@ static void niu_reset_task(struct work_struct *work)
 	}
 
 	spin_unlock_irqrestore(&np->lock, flags);
+	netdev_unlock(np->dev);
 }
 
 static void niu_tx_timeout(struct net_device *dev, unsigned int txqueue)
@@ -6761,7 +6765,9 @@ static int niu_change_mtu(struct net_device *dev, int new_mtu)
 
 	niu_free_channels(np);
 
+	netdev_lock(dev);
 	niu_enable_napi(np);
+	netdev_unlock(dev);
 
 	err = niu_alloc_channels(np);
 	if (err)
@@ -7071,8 +7077,10 @@ static int niu_ethflow_to_flowkey(u64 ethflow, u64 *flow_key)
 
 }
 
-static int niu_get_hash_opts(struct niu *np, struct ethtool_rxnfc *nfc)
+static int niu_get_rxfh_fields(struct net_device *dev,
+			       struct ethtool_rxfh_fields *nfc)
 {
+	struct niu *np = netdev_priv(dev);
 	u64 class;
 
 	nfc->data = 0;
@@ -7284,9 +7292,6 @@ static int niu_get_nfc(struct net_device *dev, struct ethtool_rxnfc *cmd,
 	int ret = 0;
 
 	switch (cmd->cmd) {
-	case ETHTOOL_GRXFH:
-		ret = niu_get_hash_opts(np, cmd);
-		break;
 	case ETHTOOL_GRXRINGS:
 		cmd->data = np->num_rx_rings;
 		break;
@@ -7307,8 +7312,11 @@ static int niu_get_nfc(struct net_device *dev, struct ethtool_rxnfc *cmd,
 	return ret;
 }
 
-static int niu_set_hash_opts(struct niu *np, struct ethtool_rxnfc *nfc)
+static int niu_set_rxfh_fields(struct net_device *dev,
+			       const struct ethtool_rxfh_fields *nfc,
+			       struct netlink_ext_ack *extack)
 {
+	struct niu *np = netdev_priv(dev);
 	u64 class;
 	u64 flow_key = 0;
 	unsigned long flags;
@@ -7650,9 +7658,6 @@ static int niu_set_nfc(struct net_device *dev, struct ethtool_rxnfc *cmd)
 	int ret = 0;
 
 	switch (cmd->cmd) {
-	case ETHTOOL_SRXFH:
-		ret = niu_set_hash_opts(np, cmd);
-		break;
 	case ETHTOOL_SRXCLSRLINS:
 		ret = niu_add_ethtool_tcam_entry(np, cmd);
 		break;
@@ -7906,6 +7911,8 @@ static const struct ethtool_ops niu_ethtool_ops = {
 	.set_phys_id		= niu_set_phys_id,
 	.get_rxnfc		= niu_get_nfc,
 	.set_rxnfc		= niu_set_nfc,
+	.get_rxfh_fields	= niu_get_rxfh_fields,
+	.set_rxfh_fields	= niu_set_rxfh_fields,
 	.get_link_ksettings	= niu_get_link_ksettings,
 	.set_link_ksettings	= niu_set_link_ksettings,
 };
@@ -9908,7 +9915,7 @@ static int __maybe_unused niu_suspend(struct device *dev_d)
 	flush_work(&np->reset_task);
 	niu_netif_stop(np);
 
-	del_timer_sync(&np->timer);
+	timer_delete_sync(&np->timer);
 
 	spin_lock_irqsave(&np->lock, flags);
 	niu_enable_interrupts(np, 0);
@@ -9937,6 +9944,7 @@ static int __maybe_unused niu_resume(struct device *dev_d)
 
 	spin_lock_irqsave(&np->lock, flags);
 
+	netdev_lock(dev);
 	err = niu_init_hw(np);
 	if (!err) {
 		np->timer.expires = jiffies + HZ;
@@ -9945,6 +9953,7 @@ static int __maybe_unused niu_resume(struct device *dev_d)
 	}
 
 	spin_unlock_irqrestore(&np->lock, flags);
+	netdev_unlock(dev);
 
 	return err;
 }

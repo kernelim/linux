@@ -20,9 +20,9 @@
 #include <linux/bits.h>
 #include <linux/build_bug.h>
 #include <linux/device.h>
+#include <linux/idr.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
-#include <linux/list.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/rwsem.h>
@@ -36,8 +36,6 @@
 MODULE_AUTHOR("Carlos Corbacho");
 MODULE_DESCRIPTION("ACPI-WMI Mapping Driver");
 MODULE_LICENSE("GPL");
-
-static LIST_HEAD(wmi_block_list);
 
 struct guid_block {
 	guid_t guid;
@@ -63,7 +61,6 @@ enum {	/* wmi_block flags */
 
 struct wmi_block {
 	struct wmi_device dev;
-	struct list_head list;
 	struct guid_block gblock;
 	struct acpi_device *acpi_device;
 	struct rw_semaphore notify_lock;	/* Protects notify callback add/remove */
@@ -73,6 +70,12 @@ struct wmi_block {
 	unsigned long flags;
 };
 
+struct wmi_guid_count_context {
+	const guid_t *guid;
+	int count;
+};
+
+static DEFINE_IDA(wmi_ida);
 
 /*
  * If the GUID data block is marked as expensive, we must enable and
@@ -915,21 +918,43 @@ static const struct device_type wmi_type_data = {
 	.release = wmi_dev_release,
 };
 
-/*
- * _WDG is a static list that is only parsed at startup,
- * so it's safe to count entries without extra protection.
- */
+static int wmi_count_guids(struct device *dev, void *data)
+{
+	struct wmi_guid_count_context *context = data;
+	struct wmi_block *wblock = dev_to_wblock(dev);
+
+	if (guid_equal(&wblock->gblock.guid, context->guid))
+		context->count++;
+
+	return 0;
+}
+
 static int guid_count(const guid_t *guid)
 {
-	struct wmi_block *wblock;
-	int count = 0;
+	struct wmi_guid_count_context context = {
+		.guid = guid,
+		.count = 0,
+	};
+	int ret;
 
-	list_for_each_entry(wblock, &wmi_block_list, list) {
-		if (guid_equal(&wblock->gblock.guid, guid))
-			count++;
+	ret = bus_for_each_dev(&wmi_bus_type, NULL, &context, wmi_count_guids);
+	if (ret < 0)
+		return ret;
+
+	return context.count;
+}
+
+static int wmi_dev_set_name(struct wmi_block *wblock, int count)
+{
+	if (IS_ENABLED(CONFIG_ACPI_WMI_LEGACY_DEVICE_NAMES)) {
+		if (count)
+			return dev_set_name(&wblock->dev.dev, "%pUL-%d", &wblock->gblock.guid,
+					    count);
+		else
+			return dev_set_name(&wblock->dev.dev, "%pUL", &wblock->gblock.guid);
 	}
 
-	return count;
+	return dev_set_name(&wblock->dev.dev, "%pUL-%d", &wblock->gblock.guid, wblock->dev.dev.id);
 }
 
 static int wmi_create_device(struct device *wmi_bus_dev,
@@ -940,7 +965,7 @@ static int wmi_create_device(struct device *wmi_bus_dev,
 	struct acpi_device_info *info;
 	acpi_handle method_handle;
 	acpi_status status;
-	uint count;
+	int count, ret;
 
 	if (wblock->gblock.flags & ACPI_WMI_EVENT) {
 		wblock->dev.dev.type = &wmi_type_event;
@@ -1008,11 +1033,21 @@ static int wmi_create_device(struct device *wmi_bus_dev,
 	wblock->dev.dev.parent = wmi_bus_dev;
 
 	count = guid_count(&wblock->gblock.guid);
-	if (count) {
-		dev_set_name(&wblock->dev.dev, "%pUL-%d", &wblock->gblock.guid, count);
+	if (count < 0)
+		return count;
+
+	if (count)
 		set_bit(WMI_GUID_DUPLICATED, &wblock->flags);
-	} else {
-		dev_set_name(&wblock->dev.dev, "%pUL", &wblock->gblock.guid);
+
+	ret = ida_alloc(&wmi_ida, GFP_KERNEL);
+	if (ret < 0)
+		return ret;
+
+	wblock->dev.dev.id = ret;
+	ret = wmi_dev_set_name(wblock, count);
+	if (ret < 0) {
+		ida_free(&wmi_ida, wblock->dev.dev.id);
+		return ret;
 	}
 
 	device_initialize(&wblock->dev.dev);
@@ -1093,14 +1128,12 @@ static int parse_wdg(struct device *wmi_bus_dev, struct platform_device *pdev)
 			continue;
 		}
 
-		list_add_tail(&wblock->list, &wmi_block_list);
-
 		retval = wmi_add_device(pdev, &wblock->dev);
 		if (retval) {
 			dev_err(wmi_bus_dev, "failed to register %pUL\n",
 				&wblock->gblock.guid);
 
-			list_del(&wblock->list);
+			ida_free(&wmi_ida, wblock->dev.dev.id);
 			put_device(&wblock->dev.dev);
 		}
 	}
@@ -1200,10 +1233,10 @@ static void acpi_wmi_notify_handler(acpi_handle handle, u32 event, void *context
 
 static int wmi_remove_device(struct device *dev, void *data)
 {
-	struct wmi_block *wblock = dev_to_wblock(dev);
+	int id = dev->id;
 
-	list_del(&wblock->list);
 	device_unregister(dev);
+	ida_free(&wmi_ida, id);
 
 	return 0;
 }

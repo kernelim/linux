@@ -17,6 +17,9 @@ struct nvkm_gsp_mem {
 	dma_addr_t addr;
 };
 
+int nvkm_gsp_mem_ctor(struct nvkm_gsp *, size_t size, struct nvkm_gsp_mem *);
+void nvkm_gsp_mem_dtor(struct nvkm_gsp_mem *);
+
 struct nvkm_gsp_radix3 {
 	struct nvkm_gsp_mem lvl0;
 	struct nvkm_gsp_mem lvl1;
@@ -41,6 +44,9 @@ typedef void (*nvkm_gsp_event_func)(struct nvkm_gsp_event *, void *repv, u32 rep
  * NVKM_GSP_RPC_REPLY_NOWAIT - If specified, immediately return to the
  * caller after the GSP RPC command is issued.
  *
+ * NVKM_GSP_RPC_REPLY_NOSEQ - If specified, exactly like NOWAIT
+ * but don't emit RPC sequence number.
+ *
  * NVKM_GSP_RPC_REPLY_RECV - If specified, wait and receive the entire GSP
  * RPC message after the GSP RPC command is issued.
  *
@@ -50,6 +56,7 @@ typedef void (*nvkm_gsp_event_func)(struct nvkm_gsp_event *, void *repv, u32 rep
  */
 enum nvkm_gsp_rpc_reply_policy {
 	NVKM_GSP_RPC_REPLY_NOWAIT = 0,
+	NVKM_GSP_RPC_REPLY_NOSEQ,
 	NVKM_GSP_RPC_REPLY_RECV,
 	NVKM_GSP_RPC_REPLY_POLL,
 };
@@ -65,8 +72,15 @@ struct nvkm_gsp {
 			const struct firmware *load;
 			const struct firmware *unload;
 		} booter;
+
+		const struct firmware *fmc;
+
 		const struct firmware *bl;
 		const struct firmware *rm;
+
+		struct {
+			struct nvkm_falcon_fw sb;
+		} falcon;
 	} fws;
 
 	struct nvkm_firmware fw;
@@ -112,6 +126,15 @@ struct nvkm_gsp {
 
 	struct {
 		struct nvkm_gsp_mem fw;
+		u8 *hash;
+		u8 *pkey;
+		u8 *sig;
+
+		struct nvkm_gsp_mem args;
+	} fmc;
+
+	struct {
+		struct nvkm_gsp_mem fw;
 		u32 code_offset;
 		u32 data_offset;
 		u32 manifest_offset;
@@ -130,6 +153,7 @@ struct nvkm_gsp {
 		struct sg_table sgt;
 		struct nvkm_gsp_radix3 radix3;
 		struct nvkm_gsp_mem meta;
+		struct sg_table fbsr;
 	} sr;
 
 	struct {
@@ -209,29 +233,7 @@ struct nvkm_gsp {
 		u8 tpcs;
 	} gr;
 
-	const struct nvkm_gsp_rm {
-		const struct nvkm_rm_api *api;
-
-		void *(*rm_ctrl_get)(struct nvkm_gsp_object *, u32 cmd, u32 argc);
-		int (*rm_ctrl_push)(struct nvkm_gsp_object *, void **argv, u32 repc);
-		void (*rm_ctrl_done)(struct nvkm_gsp_object *, void *repv);
-
-		void *(*rm_alloc_get)(struct nvkm_gsp_object *, u32 oclass, u32 argc);
-		void *(*rm_alloc_push)(struct nvkm_gsp_object *, void *argv);
-		void (*rm_alloc_done)(struct nvkm_gsp_object *, void *repv);
-
-		int (*rm_free)(struct nvkm_gsp_object *);
-
-		int (*client_ctor)(struct nvkm_gsp *, struct nvkm_gsp_client *);
-		void (*client_dtor)(struct nvkm_gsp_client *);
-
-		int (*device_ctor)(struct nvkm_gsp_client *, struct nvkm_gsp_device *);
-		void (*device_dtor)(struct nvkm_gsp_device *);
-
-		int (*event_ctor)(struct nvkm_gsp_device *, u32 handle, u32 id,
-				  nvkm_gsp_event_func, struct nvkm_gsp_event *);
-		void (*event_dtor)(struct nvkm_gsp_event *);
-	} *rm;
+	struct nvkm_rm *rm;
 
 	struct {
 		struct mutex mutex;
@@ -243,6 +245,8 @@ struct nvkm_gsp {
 
 	/* The size of the registry RPC */
 	size_t registry_rpc_size;
+
+	u32 rpc_seq;
 
 #ifdef CONFIG_DEBUG_FS
 	/*
@@ -316,13 +320,13 @@ nvkm_gsp_rpc_done(struct nvkm_gsp *gsp, void *repv)
 static inline void *
 nvkm_gsp_rm_ctrl_get(struct nvkm_gsp_object *object, u32 cmd, u32 argc)
 {
-	return object->client->gsp->rm->rm_ctrl_get(object, cmd, argc);
+	return object->client->gsp->rm->api->ctrl->get(object, cmd, argc);
 }
 
 static inline int
 nvkm_gsp_rm_ctrl_push(struct nvkm_gsp_object *object, void *argv, u32 repc)
 {
-	return object->client->gsp->rm->rm_ctrl_push(object, argv, repc);
+	return object->client->gsp->rm->api->ctrl->push(object, argv, repc);
 }
 
 static inline void *
@@ -353,7 +357,7 @@ nvkm_gsp_rm_ctrl_wr(struct nvkm_gsp_object *object, void *argv)
 static inline void
 nvkm_gsp_rm_ctrl_done(struct nvkm_gsp_object *object, void *repv)
 {
-	object->client->gsp->rm->rm_ctrl_done(object, repv);
+	object->client->gsp->rm->api->ctrl->done(object, repv);
 }
 
 static inline void *
@@ -368,7 +372,7 @@ nvkm_gsp_rm_alloc_get(struct nvkm_gsp_object *parent, u32 handle, u32 oclass, u3
 	object->parent = parent;
 	object->handle = handle;
 
-	argv = gsp->rm->rm_alloc_get(object, oclass, argc);
+	argv = gsp->rm->api->alloc->get(object, oclass, argc);
 	if (IS_ERR_OR_NULL(argv)) {
 		object->client = NULL;
 		return argv;
@@ -380,7 +384,7 @@ nvkm_gsp_rm_alloc_get(struct nvkm_gsp_object *parent, u32 handle, u32 oclass, u3
 static inline void *
 nvkm_gsp_rm_alloc_push(struct nvkm_gsp_object *object, void *argv)
 {
-	void *repv = object->client->gsp->rm->rm_alloc_push(object, argv);
+	void *repv = object->client->gsp->rm->api->alloc->push(object, argv);
 
 	if (IS_ERR(repv))
 		object->client = NULL;
@@ -402,7 +406,7 @@ nvkm_gsp_rm_alloc_wr(struct nvkm_gsp_object *object, void *argv)
 static inline void
 nvkm_gsp_rm_alloc_done(struct nvkm_gsp_object *object, void *repv)
 {
-	object->client->gsp->rm->rm_alloc_done(object, repv);
+	object->client->gsp->rm->api->alloc->done(object, repv);
 }
 
 static inline int
@@ -420,39 +424,29 @@ nvkm_gsp_rm_alloc(struct nvkm_gsp_object *parent, u32 handle, u32 oclass, u32 ar
 static inline int
 nvkm_gsp_rm_free(struct nvkm_gsp_object *object)
 {
-	if (object->client)
-		return object->client->gsp->rm->rm_free(object);
+	if (object->client) {
+		int ret = object->client->gsp->rm->api->alloc->free(object);
+		object->client = NULL;
+		return ret;
+	}
 
 	return 0;
 }
 
-static inline int
-nvkm_gsp_client_ctor(struct nvkm_gsp *gsp, struct nvkm_gsp_client *client)
-{
-	if (WARN_ON(!gsp->rm))
-		return -ENOSYS;
-
-	return gsp->rm->client_ctor(gsp, client);
-}
-
-static inline void
-nvkm_gsp_client_dtor(struct nvkm_gsp_client *client)
-{
-	if (client->gsp)
-		client->gsp->rm->client_dtor(client);
-}
+int nvkm_gsp_client_ctor(struct nvkm_gsp *, struct nvkm_gsp_client *);
+void nvkm_gsp_client_dtor(struct nvkm_gsp_client *);
 
 static inline int
 nvkm_gsp_device_ctor(struct nvkm_gsp_client *client, struct nvkm_gsp_device *device)
 {
-	return client->gsp->rm->device_ctor(client, device);
+	return client->gsp->rm->api->device->ctor(client, device);
 }
 
 static inline void
 nvkm_gsp_device_dtor(struct nvkm_gsp_device *device)
 {
 	if (device->object.client)
-		device->object.client->gsp->rm->device_dtor(device);
+		device->object.client->gsp->rm->api->device->dtor(device);
 }
 
 static inline int
@@ -484,7 +478,9 @@ static inline int
 nvkm_gsp_device_event_ctor(struct nvkm_gsp_device *device, u32 handle, u32 id,
 			   nvkm_gsp_event_func func, struct nvkm_gsp_event *event)
 {
-	return device->object.client->gsp->rm->event_ctor(device, handle, id, func, event);
+	struct nvkm_rm *rm = device->object.client->gsp->rm;
+
+	return rm->api->device->event.ctor(device, handle, id, func, event);
 }
 
 static inline void
@@ -493,7 +489,7 @@ nvkm_gsp_event_dtor(struct nvkm_gsp_event *event)
 	struct nvkm_gsp_device *device = event->device;
 
 	if (device)
-		device->object.client->gsp->rm->event_dtor(event);
+		device->object.client->gsp->rm->api->device->event.dtor(event);
 }
 
 int nvkm_gsp_intr_stall(struct nvkm_gsp *, enum nvkm_subdev_type, int);
@@ -504,5 +500,8 @@ int tu102_gsp_new(struct nvkm_device *, enum nvkm_subdev_type, int, struct nvkm_
 int tu116_gsp_new(struct nvkm_device *, enum nvkm_subdev_type, int, struct nvkm_gsp **);
 int ga100_gsp_new(struct nvkm_device *, enum nvkm_subdev_type, int, struct nvkm_gsp **);
 int ga102_gsp_new(struct nvkm_device *, enum nvkm_subdev_type, int, struct nvkm_gsp **);
+int gh100_gsp_new(struct nvkm_device *, enum nvkm_subdev_type, int, struct nvkm_gsp **);
 int ad102_gsp_new(struct nvkm_device *, enum nvkm_subdev_type, int, struct nvkm_gsp **);
+int gb100_gsp_new(struct nvkm_device *, enum nvkm_subdev_type, int, struct nvkm_gsp **);
+int gb202_gsp_new(struct nvkm_device *, enum nvkm_subdev_type, int, struct nvkm_gsp **);
 #endif

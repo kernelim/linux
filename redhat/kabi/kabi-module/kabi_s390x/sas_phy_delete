@@ -1,3 +1,3 @@
-#1-
-0x37b2b99a	sas_phy_delete	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL	
+#2-
+0x92d45ff1	sas_phy_delete	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL	
 

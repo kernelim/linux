@@ -178,6 +178,7 @@ redhat/rhdocs
 localversion
 .get_maintainer.conf
 kernel-automotive*
+!kernel-automotive.changelog-*
 kernel-redhat.spec.template
 filtermods.log
 

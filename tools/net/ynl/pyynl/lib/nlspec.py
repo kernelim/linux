@@ -219,7 +219,10 @@ class SpecAttrSet(SpecElement):
         else:
             real_set = family.attr_sets[self.subset_of]
             for elem in self.yaml['attributes']:
-                attr = real_set[elem['name']]
+                real_attr = real_set[elem['name']]
+                combined_elem = real_attr.yaml | elem
+                attr = self.new_attr(combined_elem, real_attr.value)
+
                 self.attrs[attr.name] = attr
                 self.attrs_by_val[attr.value] = attr
 
@@ -498,7 +501,7 @@ class SpecFamily(SpecElement):
         return SpecStruct(self, elem)
 
     def new_sub_message(self, elem):
-        return SpecSubMessage(self, elem);
+        return SpecSubMessage(self, elem)
 
     def new_operation(self, elem, req_val, rsp_val):
         return SpecOperation(self, elem, req_val, rsp_val)

@@ -3,11 +3,13 @@
  * Copyright © 2023 Intel Corporation
  */
 
-#include <drm/intel/pciids.h>
-#include <drm/drm_color_mgmt.h>
 #include <linux/pci.h>
 
-#include "i915_drv.h"
+#include <drm/drm_color_mgmt.h>
+#include <drm/drm_drv.h>
+#include <drm/drm_print.h>
+#include <drm/intel/pciids.h>
+
 #include "i915_reg.h"
 #include "intel_cx0_phy_regs.h"
 #include "intel_de.h"
@@ -16,6 +18,7 @@
 #include "intel_display_params.h"
 #include "intel_display_power.h"
 #include "intel_display_reg_defs.h"
+#include "intel_display_regs.h"
 #include "intel_display_types.h"
 #include "intel_fbc.h"
 #include "intel_step.h"
@@ -1351,6 +1354,19 @@ static const struct intel_display_device_info xe2_lpd_display = {
 	.__runtime_defaults.has_dbuf_overlap_detection = true,
 };
 
+static const struct intel_display_device_info wcl_display = {
+	XE_LPDP_FEATURES,
+
+	.__runtime_defaults.cpu_transcoder_mask =
+		BIT(TRANSCODER_A) | BIT(TRANSCODER_B) | BIT(TRANSCODER_C),
+	.__runtime_defaults.pipe_mask =
+		BIT(PIPE_A) | BIT(PIPE_B) | BIT(PIPE_C),
+	.__runtime_defaults.fbc_mask =
+		BIT(INTEL_FBC_A) | BIT(INTEL_FBC_B) | BIT(INTEL_FBC_C),
+	.__runtime_defaults.port_mask =
+		BIT(PORT_A) | BIT(PORT_B) | BIT(PORT_TC1) | BIT(PORT_TC2),
+};
+
 static const struct intel_display_device_info xe2_hpd_display = {
 	XE_LPDP_FEATURES,
 	.__runtime_defaults.port_mask = BIT(PORT_A) |
@@ -1388,8 +1404,20 @@ static const struct platform_desc bmg_desc = {
 	PLATFORM_GROUP(dgfx),
 };
 
+static const u16 wcl_ids[] = {
+	INTEL_WCL_IDS(ID),
+	0
+};
+
 static const struct platform_desc ptl_desc = {
 	PLATFORM(pantherlake),
+	.subplatforms = (const struct subplatform_desc[]) {
+		{
+			SUBPLATFORM(pantherlake, wildcatlake),
+			.pciidlist = wcl_ids,
+		},
+		{},
+	}
 };
 
 __diag_pop();
@@ -1466,6 +1494,7 @@ static const struct {
 	INTEL_LNL_IDS(INTEL_DISPLAY_DEVICE, &lnl_desc),
 	INTEL_BMG_IDS(INTEL_DISPLAY_DEVICE, &bmg_desc),
 	INTEL_PTL_IDS(INTEL_DISPLAY_DEVICE, &ptl_desc),
+	INTEL_WCL_IDS(INTEL_DISPLAY_DEVICE, &ptl_desc),
 };
 
 static const struct {
@@ -1477,6 +1506,7 @@ static const struct {
 	{ 14,  1, &xe2_hpd_display },
 	{ 20,  0, &xe2_lpd_display },
 	{ 30,  0, &xe2_lpd_display },
+	{ 30,  2, &wcl_display },
 };
 
 static const struct intel_display_device_info *
@@ -1619,12 +1649,16 @@ static void display_platforms_or(struct intel_display_platforms *dst,
 
 struct intel_display *intel_display_device_probe(struct pci_dev *pdev)
 {
-	struct intel_display *display = to_intel_display(pdev);
+	struct intel_display *display;
 	const struct intel_display_device_info *info;
 	struct intel_display_ip_ver ip_ver = {};
 	const struct platform_desc *desc;
 	const struct subplatform_desc *subdesc;
 	enum intel_step step;
+
+	display = kzalloc(sizeof(*display), GFP_KERNEL);
+	if (!display)
+		return ERR_PTR(-ENOMEM);
 
 	/* Add drm device backpointer as early as possible. */
 	display->drm = pci_get_drvdata(pdev);
@@ -1706,12 +1740,15 @@ no_display:
 
 void intel_display_device_remove(struct intel_display *display)
 {
+	if (!display)
+		return;
+
 	intel_display_params_free(&display->params);
+	kfree(display);
 }
 
 static void __intel_display_device_info_runtime_init(struct intel_display *display)
 {
-	struct drm_i915_private *i915 = to_i915(display->drm);
 	struct intel_display_runtime_info *display_runtime = DISPLAY_RUNTIME_INFO(display);
 	enum pipe pipe;
 
@@ -1775,7 +1812,7 @@ static void __intel_display_device_info_runtime_init(struct intel_display *displ
 		goto display_fused_off;
 	}
 
-	if (IS_DISPLAY_VER(display, 7, 8) && HAS_PCH_SPLIT(i915)) {
+	if (IS_DISPLAY_VER(display, 7, 8) && HAS_PCH_SPLIT(display)) {
 		u32 fuse_strap = intel_de_read(display, FUSE_STRAP);
 		u32 sfuse_strap = intel_de_read(display, SFUSE_STRAP);
 
@@ -1790,7 +1827,7 @@ static void __intel_display_device_info_runtime_init(struct intel_display *displ
 		 */
 		if (fuse_strap & ILK_INTERNAL_DISPLAY_DISABLE ||
 		    sfuse_strap & SFUSE_STRAP_DISPLAY_DISABLED ||
-		    (HAS_PCH_CPT(i915) &&
+		    (HAS_PCH_CPT(display) &&
 		     !(sfuse_strap & SFUSE_STRAP_FUSE_LOCK))) {
 			drm_info(display->drm,
 				 "Display fused off, disabling\n");
@@ -1918,6 +1955,11 @@ void intel_display_device_info_print(const struct intel_display_device_info *inf
 	drm_printf(p, "has_dsc: %s\n", str_yes_no(runtime->has_dsc));
 
 	drm_printf(p, "rawclk rate: %u kHz\n", runtime->rawclk_freq);
+}
+
+bool intel_display_device_present(struct intel_display *display)
+{
+	return display && HAS_DISPLAY(display);
 }
 
 /*

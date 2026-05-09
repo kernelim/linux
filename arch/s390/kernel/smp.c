@@ -439,16 +439,16 @@ void notrace smp_emergency_stop(void)
 	cpumask_copy(&cpumask, cpu_online_mask);
 	cpumask_clear_cpu(smp_processor_id(), &cpumask);
 
-	end = get_tod_clock() + (1000000UL << 12);
+	end = get_tod_clock_monotonic() + (1000000UL << 12);
 	for_each_cpu(cpu, &cpumask) {
 		struct pcpu *pcpu = per_cpu_ptr(&pcpu_devices, cpu);
 		set_bit(ec_stop_cpu, &pcpu->ec_mask);
 		while (__pcpu_sigp(pcpu->address, SIGP_EMERGENCY_SIGNAL,
 				   0, NULL) == SIGP_CC_BUSY &&
-		       get_tod_clock() < end)
+		       get_tod_clock_monotonic() < end)
 			cpu_relax();
 	}
-	while (get_tod_clock() < end) {
+	while (get_tod_clock_monotonic() < end) {
 		for_each_cpu(cpu, &cpumask)
 			if (pcpu_stopped(per_cpu_ptr(&pcpu_devices, cpu)))
 				cpumask_clear_cpu(cpu, &cpumask);
@@ -574,7 +574,7 @@ int smp_store_status(int cpu)
 
 /*
  * Collect CPU state of the previous, crashed system.
- * There are four cases:
+ * There are three cases:
  * 1) standard zfcp/nvme dump
  *    condition: OLDMEM_BASE == NULL && is_ipl_type_dump() == true
  *    The state for all CPUs except the boot CPU needs to be collected
@@ -587,16 +587,16 @@ int smp_store_status(int cpu)
  *    with sigp stop-and-store-status. The firmware or the boot-loader
  *    stored the registers of the boot CPU in the absolute lowcore in the
  *    memory of the old system.
- * 3) kdump and the old kernel did not store the CPU state,
- *    or stand-alone kdump for DASD
- *    condition: OLDMEM_BASE != NULL && !is_kdump_kernel()
+ * 3) kdump or stand-alone kdump for DASD
+ *    condition: OLDMEM_BASE != NULL && is_ipl_type_dump() == false
  *    The state for all CPUs except the boot CPU needs to be collected
  *    with sigp stop-and-store-status. The kexec code or the boot-loader
  *    stored the registers of the boot CPU in the memory of the old system.
- * 4) kdump and the old kernel stored the CPU state
- *    condition: OLDMEM_BASE != NULL && is_kdump_kernel()
- *    This case does not exist for s390 anymore, setup_arch explicitly
- *    deactivates the elfcorehdr= kernel parameter
+ *
+ * Note that the legacy kdump mode where the old kernel stored the CPU states
+ * does no longer exist: setup_arch() explicitly deactivates the elfcorehdr=
+ * kernel parameter. The is_kdump_kernel() implementation on s390 is independent
+ * of the elfcorehdr= parameter.
  */
 static bool dump_available(void)
 {

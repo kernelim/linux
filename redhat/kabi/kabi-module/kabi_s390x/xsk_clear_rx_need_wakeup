@@ -1,3 +1,3 @@
-#1-
-0x1a819d9b	xsk_clear_rx_need_wakeup	vmlinux	EXPORT_SYMBOL	
+#2-
+0xb3e5a00e	xsk_clear_rx_need_wakeup	vmlinux	EXPORT_SYMBOL	
 

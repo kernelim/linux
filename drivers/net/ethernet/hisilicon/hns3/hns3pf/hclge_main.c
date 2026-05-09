@@ -4487,7 +4487,7 @@ static void hclge_set_def_reset_request(struct hnae3_ae_dev *ae_dev,
 
 static void hclge_reset_timer(struct timer_list *t)
 {
-	struct hclge_dev *hdev = from_timer(hdev, t, reset_timer);
+	struct hclge_dev *hdev = timer_container_of(hdev, t, reset_timer);
 
 	/* if default_reset_request has no value, it means that this reset
 	 * request has already be handled, so just return here
@@ -4856,7 +4856,7 @@ static int hclge_set_rss(struct hnae3_handle *handle, const u32 *indir,
 }
 
 static int hclge_set_rss_tuple(struct hnae3_handle *handle,
-			       struct ethtool_rxnfc *nfc)
+			       const struct ethtool_rxfh_fields *nfc)
 {
 	struct hclge_vport *vport = hclge_get_vport(handle);
 	struct hclge_dev *hdev = vport->back;
@@ -4874,7 +4874,7 @@ static int hclge_set_rss_tuple(struct hnae3_handle *handle,
 }
 
 static int hclge_get_rss_tuple(struct hnae3_handle *handle,
-			       struct ethtool_rxnfc *nfc)
+			       struct ethtool_rxfh_fields *nfc)
 {
 	struct hclge_vport *vport = hclge_get_vport(handle);
 	u8 tuple_sets;
@@ -11476,7 +11476,7 @@ static void hclge_state_uninit(struct hclge_dev *hdev)
 	set_bit(HCLGE_STATE_REMOVING, &hdev->state);
 
 	if (hdev->reset_timer.function)
-		del_timer_sync(&hdev->reset_timer);
+		timer_delete_sync(&hdev->reset_timer);
 	if (hdev->service_task.work.func)
 		cancel_delayed_work_sync(&hdev->service_task);
 }
@@ -12889,7 +12889,8 @@ static int __init hclge_init(void)
 {
 	pr_info("%s is initializing\n", HCLGE_NAME);
 
-	hclge_wq = alloc_workqueue("%s", WQ_UNBOUND, 0, HCLGE_NAME);
+	hclge_wq = alloc_workqueue("%s", WQ_UNBOUND, 0,
+				   HCLGE_NAME);
 	if (!hclge_wq) {
 		pr_err("%s: failed to create workqueue\n", HCLGE_NAME);
 		return -ENOMEM;

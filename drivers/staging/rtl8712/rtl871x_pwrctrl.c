@@ -155,7 +155,7 @@ static void rpwm_workitem_callback(struct work_struct *work)
 static void rpwm_check_handler (struct timer_list *t)
 {
 	struct _adapter *adapter =
-		from_timer(adapter, t, pwrctrlpriv.rpwm_check_timer);
+		timer_container_of(adapter, t, pwrctrlpriv.rpwm_check_timer);
 
 	_rpwm_check_handler(adapter);
 }

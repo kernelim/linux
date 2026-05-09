@@ -9,6 +9,7 @@
 
 #include <linux/bitfield.h>
 #include <linux/clk.h>
+#include <linux/export.h>
 #include <linux/iopoll.h>
 #include <linux/media-bus-format.h>
 #include <linux/module.h>
@@ -870,15 +871,16 @@ dw_mipi_dsi2_bridge_mode_valid(struct drm_bridge *bridge,
 }
 
 static int dw_mipi_dsi2_bridge_attach(struct drm_bridge *bridge,
+				      struct drm_encoder *encoder,
 				      enum drm_bridge_attach_flags flags)
 {
 	struct dw_mipi_dsi2 *dsi2 = bridge_to_dsi2(bridge);
 
 	/* Set the encoder type as caller does not know it */
-	bridge->encoder->encoder_type = DRM_MODE_ENCODER_DSI;
+	encoder->encoder_type = DRM_MODE_ENCODER_DSI;
 
 	/* Attach the panel-bridge to the dsi bridge */
-	return drm_bridge_attach(bridge->encoder, dsi2->panel_bridge, bridge,
+	return drm_bridge_attach(encoder, dsi2->panel_bridge, bridge,
 				 flags);
 }
 
@@ -913,9 +915,10 @@ __dw_mipi_dsi2_probe(struct platform_device *pdev,
 	struct dw_mipi_dsi2 *dsi2;
 	int ret;
 
-	dsi2 = devm_kzalloc(dev, sizeof(*dsi2), GFP_KERNEL);
-	if (!dsi2)
-		return ERR_PTR(-ENOMEM);
+	dsi2 = devm_drm_bridge_alloc(dev, struct dw_mipi_dsi2, bridge,
+				     &dw_mipi_dsi2_bridge_funcs);
+	if (IS_ERR(dsi2))
+		return ERR_CAST(dsi2);
 
 	dsi2->dev = dev;
 	dsi2->plat_data = plat_data;
@@ -980,7 +983,6 @@ __dw_mipi_dsi2_probe(struct platform_device *pdev,
 	}
 
 	dsi2->bridge.driver_private = dsi2;
-	dsi2->bridge.funcs = &dw_mipi_dsi2_bridge_funcs;
 	dsi2->bridge.of_node = pdev->dev.of_node;
 
 	return dsi2;

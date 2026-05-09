@@ -1,3 +1,3 @@
-#1-
-0x5dcb77ec	pci_enable_msix_range	vmlinux	EXPORT_SYMBOL	
+#2-
+0xcbc4f0fa	pci_enable_msix_range	vmlinux	EXPORT_SYMBOL	
 

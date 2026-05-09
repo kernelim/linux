@@ -2,6 +2,8 @@
 #ifndef _ASM_X86_ASM_H
 #define _ASM_X86_ASM_H
 
+#include <linux/annotate.h>
+
 #ifdef __ASSEMBLY__
 # define __ASM_FORM(x, ...)		x,## __VA_ARGS__
 # define __ASM_FORM_RAW(x, ...)		x,## __VA_ARGS__
@@ -149,6 +151,7 @@ static __always_inline __pure void *rip_rel_ptr(void *p)
 # define _ASM_EXTABLE_TYPE(from, to, type)			\
 	.pushsection "__ex_table","a" ;				\
 	.balign 4 ;						\
+	ANNOTATE_DATA_SPECIAL ;					\
 	.long (from) - . ;					\
 	.long (to) - . ;					\
 	.long type ;						\
@@ -196,6 +199,7 @@ static __always_inline __pure void *rip_rel_ptr(void *p)
 # define _ASM_EXTABLE_TYPE(from, to, type)			\
 	" .pushsection \"__ex_table\",\"a\"\n"			\
 	" .balign 4\n"						\
+	ANNOTATE_DATA_SPECIAL					\
 	" .long (" #from ") - .\n"				\
 	" .long (" #to ") - .\n"				\
 	" .long " __stringify(type) " \n"			\
@@ -204,6 +208,7 @@ static __always_inline __pure void *rip_rel_ptr(void *p)
 # define _ASM_EXTABLE_TYPE_REG(from, to, type, reg)				\
 	" .pushsection \"__ex_table\",\"a\"\n"					\
 	" .balign 4\n"								\
+	ANNOTATE_DATA_SPECIAL							\
 	" .long (" #from ") - .\n"						\
 	" .long (" #to ") - .\n"						\
 	DEFINE_EXTABLE_TYPE_REG							\

@@ -1,3 +1,3 @@
-#1-
-0x2edd0419	pci_read_vpd	vmlinux	EXPORT_SYMBOL	
+#2-
+0xea3de126	pci_read_vpd	vmlinux	EXPORT_SYMBOL	
 

@@ -1660,7 +1660,7 @@ static void panel_attach(struct parport *port)
 
 err_lcd_unreg:
 	if (scan_timer.function)
-		del_timer_sync(&scan_timer);
+		timer_delete_sync(&scan_timer);
 	if (lcd.enabled)
 		charlcd_unregister(lcd.charlcd);
 err_unreg_device:
@@ -1681,7 +1681,7 @@ static void panel_detach(struct parport *port)
 		return;
 	}
 	if (scan_timer.function)
-		del_timer_sync(&scan_timer);
+		timer_delete_sync(&scan_timer);
 
 	if (keypad.enabled) {
 		misc_deregister(&keypad_dev);

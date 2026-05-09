@@ -51,6 +51,10 @@ extern atomic_t dev_unreg_count;
 extern struct rw_semaphore pernet_ops_rwsem;
 extern struct rw_semaphore net_rwsem;
 
+#define ASSERT_RTNL() \
+	WARN_ONCE(!rtnl_is_locked(), \
+		  "RTNL: assertion failed at %s (%d)\n", __FILE__,  __LINE__)
+
 #ifdef CONFIG_PROVE_LOCKING
 extern bool lockdep_rtnl_is_held(void);
 #else
@@ -92,6 +96,11 @@ static inline bool lockdep_rtnl_is_held(void)
 #define rcu_replace_pointer_rtnl(rp, p)			\
 	rcu_replace_pointer(rp, p, lockdep_rtnl_is_held())
 
+static inline void ASSERT_RTNL_NET(struct net *net)
+{
+	ASSERT_RTNL();
+}
+
 static inline struct netdev_queue *dev_ingress_queue(struct net_device *dev)
 {
 	return rtnl_dereference(dev->ingress_queue);
@@ -118,10 +127,6 @@ void netdev_xmit_skip_txqueue(bool skip);
 void rtnetlink_init(void);
 void __rtnl_unlock(void);
 void rtnl_kfree_skbs(struct sk_buff *head, struct sk_buff *tail);
-
-#define ASSERT_RTNL() \
-	WARN_ONCE(!rtnl_is_locked(), \
-		  "RTNL: assertion failed at %s (%d)\n", __FILE__,  __LINE__)
 
 extern int ndo_dflt_fdb_dump(struct sk_buff *skb,
 			     struct netlink_callback *cb,
@@ -172,6 +177,6 @@ rtnl_notify_needed(const struct net *net, u16 nlflags, u32 group)
 	return (nlflags & NLM_F_ECHO) || rtnl_has_listeners(net, group);
 }
 
-void netdev_set_operstate(struct net_device *dev, int newstate);
+void netif_set_operstate(struct net_device *dev, int newstate);
 
 #endif	/* __LINUX_RTNETLINK_H */

@@ -1,3 +1,3 @@
-#1-
-0x23932060	gnss_insert_raw	drivers/gnss/gnss	EXPORT_SYMBOL_GPL	
+#2-
+0x3f4ee20e	gnss_insert_raw	drivers/gnss/gnss	EXPORT_SYMBOL_GPL	
 

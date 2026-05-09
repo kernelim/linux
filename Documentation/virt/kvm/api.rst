@@ -2006,7 +2006,7 @@ frequency is KHz.
 
 If the KVM_CAP_VM_TSC_CONTROL capability is advertised, this can also
 be used as a vm ioctl to set the initial tsc frequency of subsequently
-created vCPUs.
+created vCPUs.  Note, the vm ioctl is only allowed prior to creating vCPUs.
 
 For TSC protected Confidential Computing (CoCo) VMs where TSC frequency
 is configured once at VM scope and remains unchanged during VM's
@@ -3074,6 +3074,12 @@ This IOCTL replaces the obsolete KVM_GET_PIT.
 
 Sets the state of the in-kernel PIT model. Only valid after KVM_CREATE_PIT2.
 See KVM_GET_PIT2 for details on struct kvm_pit_state2.
+
+.. Tip::
+  ``KVM_SET_PIT2`` strictly adheres to the spec of Intel 8254 PIT.  For example,
+  a ``count`` value of 0 in ``struct kvm_pit_channel_state`` is interpreted as
+  65536, which is the maximum count value. Refer to `Intel 8254 programmable
+  interval timer <https://www.scs.stanford.edu/10wi-cs140/pintos/specs/8254.pdf>`_.
 
 This IOCTL replaces the obsolete KVM_SET_PIT.
 
@@ -7851,6 +7857,7 @@ Valid bits in args[0] are::
   #define KVM_X86_DISABLE_EXITS_HLT              (1 << 1)
   #define KVM_X86_DISABLE_EXITS_PAUSE            (1 << 2)
   #define KVM_X86_DISABLE_EXITS_CSTATE           (1 << 3)
+  #define KVM_X86_DISABLE_EXITS_APERFMPERF       (1 << 4)
 
 Enabling this capability on a VM provides userspace with a way to no
 longer intercept some instructions for improved latency in some
@@ -7860,6 +7867,28 @@ just pass the KVM_CHECK_EXTENSION result to KVM_ENABLE_CAP to disable
 all such vmexits.
 
 Do not enable KVM_FEATURE_PV_UNHALT if you disable HLT exits.
+
+Virtualizing the ``IA32_APERF`` and ``IA32_MPERF`` MSRs requires more
+than just disabling APERF/MPERF exits. While both Intel and AMD
+document strict usage conditions for these MSRs--emphasizing that only
+the ratio of their deltas over a time interval (T0 to T1) is
+architecturally defined--simply passing through the MSRs can still
+produce an incorrect ratio.
+
+This erroneous ratio can occur if, between T0 and T1:
+
+1. The vCPU thread migrates between logical processors.
+2. Live migration or suspend/resume operations take place.
+3. Another task shares the vCPU's logical processor.
+4. C-states lower than C0 are emulated (e.g., via HLT interception).
+5. The guest TSC frequency doesn't match the host TSC frequency.
+
+Due to these complexities, KVM does not automatically associate this
+passthrough capability with the guest CPUID bit,
+``CPUID.6:ECX.APERFMPERF[bit 0]``. Userspace VMMs that deem this
+mechanism adequate for virtualizing the ``IA32_APERF`` and
+``IA32_MPERF`` MSRs must set the guest CPUID bit explicitly.
+
 
 7.14 KVM_CAP_S390_HPAGE_1M
 --------------------------
@@ -8071,6 +8100,11 @@ such VM exits, e.g. to allow userspace to throttle the offending guest and/or
 apply some other policy-based mitigation. When exiting to userspace, KVM sets
 KVM_RUN_X86_BUS_LOCK in vcpu-run->flags, and conditionally sets the exit_reason
 to KVM_EXIT_X86_BUS_LOCK.
+
+Due to differences in the underlying hardware implementation, the vCPU's RIP at
+the time of exit diverges between Intel and AMD.  On Intel hosts, RIP points at
+the next instruction, i.e. the exit is trap-like.  On AMD hosts, RIP points at
+the offending instruction, i.e. the exit is fault-like.
 
 Note! Detected bus locks may be coincident with other exits to userspace, i.e.
 KVM_RUN_X86_BUS_LOCK should be checked regardless of the primary exit reason if

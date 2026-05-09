@@ -9,6 +9,8 @@ inspections:
     license: off
     debuginfo: off
     removedfiles: off
+    disttag: off
+    patches: off
 
 badfuncs:
     ignore:
@@ -21,9 +23,12 @@ emptyrpm:
         - kernel-debug
         - kernel-debug-devel-matched
         - kernel-devel-matched
+        - kernel-modules-extra-matched
         - kernel-zfcpdump
         - kernel-zfcpdump-devel-matched
         - kernel-zfcpdump-modules
+        - kernel-zfcpdump-modules-extra
+        - kernel-zfcpdump-modules-internal
         - kernel-zfcpdump-modules-partner
         - kernel-rt
         - kernel-rt-debug
@@ -37,6 +42,7 @@ emptyrpm:
         - kernel-rt-64k-debug
         - kernel-rt-64k-debug-devel-matched
         - kernel-rt-64k-devel-matched
+        - kernel-tools-libs                 # empty on s390x
 
 patches:
     ignore_list:
@@ -64,3 +70,6 @@ elf:
 annocheck:
     ignore:
         - /usr/libexec/kselftests/*
+        - /lib/modules/*/vmlinuz
+        - /lib/modules/*/vdso/*
+        - /usr/libexec/ksamples/*

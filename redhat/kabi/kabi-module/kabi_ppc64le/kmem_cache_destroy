@@ -1,3 +1,3 @@
-#1-
-0x20ba7c18	kmem_cache_destroy	vmlinux	EXPORT_SYMBOL	
+#2-
+0xa978228b	kmem_cache_destroy	vmlinux	EXPORT_SYMBOL	
 

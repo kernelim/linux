@@ -124,7 +124,7 @@ static void dccp_retransmit_timer(struct sock *sk)
 static void dccp_write_timer(struct timer_list *t)
 {
 	struct inet_connection_sock *icsk =
-			from_timer(icsk, t, icsk_retransmit_timer);
+			timer_container_of(icsk, t, icsk_retransmit_timer);
 	struct sock *sk = &icsk->icsk_inet.sk;
 	int event = 0;
 
@@ -160,7 +160,7 @@ out:
 
 static void dccp_keepalive_timer(struct timer_list *t)
 {
-	struct sock *sk = from_timer(sk, t, sk_timer);
+	struct sock *sk = timer_container_of(sk, t, sk_timer);
 
 	pr_err("dccp should not use a keepalive timer !\n");
 	sock_put(sk);
@@ -170,7 +170,7 @@ static void dccp_keepalive_timer(struct timer_list *t)
 static void dccp_delack_timer(struct timer_list *t)
 {
 	struct inet_connection_sock *icsk =
-			from_timer(icsk, t, icsk_delack_timer);
+			timer_container_of(icsk, t, icsk_delack_timer);
 	struct sock *sk = &icsk->icsk_inet.sk;
 
 	bh_lock_sock(sk);
@@ -235,7 +235,7 @@ static void dccp_write_xmitlet(struct tasklet_struct *t)
 
 static void dccp_write_xmit_timer(struct timer_list *t)
 {
-	struct dccp_sock *dp = from_timer(dp, t, dccps_xmit_timer);
+	struct dccp_sock *dp = timer_container_of(dp, t, dccps_xmit_timer);
 
 	dccp_write_xmitlet(&dp->dccps_xmitlet);
 }

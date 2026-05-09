@@ -192,6 +192,20 @@ static inline void notify_partition_change(struct cpuset *cs, int old_prs)
 		WRITE_ONCE(cs->prs_err, PERR_NONE);
 }
 
+/*
+ * The top_cpuset is always synchronized to cpu_active_mask and we should avoid
+ * using cpu_online_mask as much as possible. An active CPU is always an online
+ * CPU, but not vice versa. cpu_active_mask and cpu_online_mask can differ
+ * during hotplug operations. A CPU is marked active at the last stage of CPU
+ * bringup (CPUHP_AP_ACTIVE). It is also the stage where cpuset hotplug code
+ * will be called to update the sched domains so that the scheduler can move
+ * a normal task to a newly active CPU or remove tasks away from a newly
+ * inactivated CPU. The online bit is set much earlier in the CPU bringup
+ * process and cleared much later in CPU teardown.
+ *
+ * If cpu_online_mask is used while a hotunplug operation is happening in
+ * parallel, we may leave an offline CPU in cpu_allowed or some other masks.
+ */
 static struct cpuset top_cpuset = {
 	.flags = BIT(CS_ONLINE) | BIT(CS_CPU_EXCLUSIVE) |
 		 BIT(CS_MEM_EXCLUSIVE) | BIT(CS_SCHED_LOAD_BALANCE),
@@ -266,7 +280,7 @@ static inline void check_insane_mems_config(nodemask_t *nodes)
 {
 	if (!cpusets_insane_config() &&
 		movable_only_nodes(nodes)) {
-		static_branch_enable(&cpusets_insane_config_key);
+		static_branch_enable_cpuslocked(&cpusets_insane_config_key);
 		pr_info("Unsupported (movable nodes only) cpuset configuration detected (nmask=%*pbl)!\n"
 			"Cpuset allocations might fail even with a lot of memory available.\n",
 			nodemask_pr_args(nodes));
@@ -355,18 +369,18 @@ static inline bool partition_is_populated(struct cpuset *cs,
  * appropriate cpus.
  *
  * One way or another, we guarantee to return some non-empty subset
- * of cpu_online_mask.
+ * of cpu_active_mask.
  *
  * Call with callback_lock or cpuset_mutex held.
  */
-static void guarantee_online_cpus(struct task_struct *tsk,
+static void guarantee_active_cpus(struct task_struct *tsk,
 				  struct cpumask *pmask)
 {
 	const struct cpumask *possible_mask = task_cpu_possible_mask(tsk);
 	struct cpuset *cs;
 
-	if (WARN_ON(!cpumask_and(pmask, possible_mask, cpu_online_mask)))
-		cpumask_copy(pmask, cpu_online_mask);
+	if (WARN_ON(!cpumask_and(pmask, possible_mask, cpu_active_mask)))
+		cpumask_copy(pmask, cpu_active_mask);
 
 	rcu_read_lock();
 	cs = task_cs(tsk);
@@ -1116,9 +1130,11 @@ void cpuset_update_tasks_cpumask(struct cpuset *cs, struct cpumask *new_cpus)
 
 		if (top_cs) {
 			/*
-			 * Percpu kthreads in top_cpuset are ignored
+			 * PF_NO_SETAFFINITY tasks are ignored.
+			 * All per cpu kthreads should have PF_NO_SETAFFINITY
+			 * flag set, see kthread_set_per_cpu().
 			 */
-			if (kthread_is_per_cpu(task))
+			if (task->flags & PF_NO_SETAFFINITY)
 				continue;
 			cpumask_andnot(new_cpus, possible_mask, subpartitions_cpus);
 		} else {
@@ -1388,14 +1404,12 @@ static int compute_effective_exclusive_cpumask(struct cpuset *cs,
 		if (sibling == cs)
 			continue;
 
-		if (!cpumask_empty(sibling->exclusive_cpus) &&
-		    cpumask_intersects(xcpus, sibling->exclusive_cpus)) {
+		if (cpumask_intersects(xcpus, sibling->exclusive_cpus)) {
 			cpumask_andnot(xcpus, xcpus, sibling->exclusive_cpus);
 			retval++;
 			continue;
 		}
-		if (!cpumask_empty(sibling->effective_xcpus) &&
-		    cpumask_intersects(xcpus, sibling->effective_xcpus)) {
+		if (cpumask_intersects(xcpus, sibling->effective_xcpus)) {
 			cpumask_andnot(xcpus, xcpus, sibling->effective_xcpus);
 			retval++;
 		}
@@ -1829,7 +1843,7 @@ static int update_parent_effective_cpumask(struct cpuset *cs, int cmd,
 			if (is_partition_valid(cs))
 				adding = cpumask_and(tmp->addmask,
 						xcpus, parent->effective_xcpus);
-		} else if (is_partition_invalid(cs) &&
+		} else if (is_partition_invalid(cs) && !cpumask_empty(xcpus) &&
 			   cpumask_subset(xcpus, parent->effective_xcpus)) {
 			struct cgroup_subsys_state *css;
 			struct cpuset *child;
@@ -2286,7 +2300,7 @@ static int update_cpumask(struct cpuset *cs, struct cpuset *trialcs,
 	bool force = false;
 	int old_prs = cs->partition_root_state;
 
-	/* top_cpuset.cpus_allowed tracks cpu_online_mask; it's read-only */
+	/* top_cpuset.cpus_allowed tracks cpu_active_mask; it's read-only */
 	if (cs == &top_cpuset)
 		return -EACCES;
 
@@ -3105,7 +3119,7 @@ static void cpuset_attach_task(struct cpuset *cs, struct task_struct *task)
 	lockdep_assert_held(&cpuset_mutex);
 
 	if (cs != &top_cpuset)
-		guarantee_online_cpus(task, cpus_attach);
+		guarantee_active_cpus(task, cpus_attach);
 	else
 		cpumask_andnot(cpus_attach, task_cpu_possible_mask(task),
 			       subpartitions_cpus);
@@ -3344,14 +3358,12 @@ static ssize_t cpuset_partition_write(struct kernfs_open_file *of, char *buf,
 	else
 		return -EINVAL;
 
-	css_get(&cs->css);
 	cpus_read_lock();
 	mutex_lock(&cpuset_mutex);
 	if (is_cpuset_online(cs))
 		retval = update_prstate(cs, val);
 	mutex_unlock(&cpuset_mutex);
 	cpus_read_unlock();
-	css_put(&cs->css);
 	return retval ?: nbytes;
 }
 
@@ -3547,11 +3559,7 @@ out_unlock:
  * will call rebuild_sched_domains_locked(). That is not needed
  * in the default hierarchy where only changes in partition
  * will cause repartitioning.
- *
- * If the cpuset has the 'sched.partition' flag enabled, simulate
- * turning 'sched.partition" off.
  */
-
 static void cpuset_css_offline(struct cgroup_subsys_state *css)
 {
 	struct cpuset *cs = css_cs(css);
@@ -3569,6 +3577,11 @@ static void cpuset_css_offline(struct cgroup_subsys_state *css)
 	cpus_read_unlock();
 }
 
+/*
+ * If a dying cpuset has the 'cpus.partition' enabled, turn it off by
+ * changing it back to member to free its exclusive CPUs back to the pool to
+ * be used by other online cpusets.
+ */
 static void cpuset_css_killed(struct cgroup_subsys_state *css)
 {
 	struct cpuset *cs = css_cs(css);
@@ -3855,9 +3868,10 @@ retry:
 		partcmd = partcmd_invalidate;
 	/*
 	 * On the other hand, an invalid partition root may be transitioned
-	 * back to a regular one.
+	 * back to a regular one with a non-empty effective xcpus.
 	 */
-	else if (is_partition_valid(parent) && is_partition_invalid(cs))
+	else if (is_partition_valid(parent) && is_partition_invalid(cs) &&
+		 !cpumask_empty(cs->effective_xcpus))
 		partcmd = partcmd_update;
 
 	if (partcmd >= 0) {
@@ -4049,7 +4063,7 @@ void __init cpuset_init_smp(void)
  *
  * Description: Returns the cpumask_var_t cpus_allowed of the cpuset
  * attached to the specified @tsk.  Guaranteed to return some non-empty
- * subset of cpu_online_mask, even if this means going outside the
+ * subset of cpu_active_mask, even if this means going outside the
  * tasks cpuset, except when the task is in the top cpuset.
  **/
 
@@ -4063,7 +4077,7 @@ void cpuset_cpus_allowed(struct task_struct *tsk, struct cpumask *pmask)
 
 	cs = task_cs(tsk);
 	if (cs != &top_cpuset)
-		guarantee_online_cpus(tsk, pmask);
+		guarantee_active_cpus(tsk, pmask);
 	/*
 	 * Tasks in the top cpuset won't get update to their cpumasks
 	 * when a hotplug online/offline event happens. So we include all
@@ -4077,7 +4091,7 @@ void cpuset_cpus_allowed(struct task_struct *tsk, struct cpumask *pmask)
 		 * allowable online cpu left, we fall back to all possible cpus.
 		 */
 		cpumask_andnot(pmask, possible_mask, subpartitions_cpus);
-		if (!cpumask_intersects(pmask, cpu_online_mask))
+		if (!cpumask_intersects(pmask, cpu_active_mask))
 			cpumask_copy(pmask, possible_mask);
 	}
 

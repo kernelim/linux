@@ -97,6 +97,9 @@
 /* page number for queue file region */
 #define QM_DOORBELL_PAGE_NR		1
 
+#define QM_MIG_REGION_SEL		0x100198
+#define QM_MIG_REGION_EN		BIT(0)
+
 /* uacce mode of the driver */
 #define UACCE_MODE_NOUACCE		0 /* don't use uacce */
 #define UACCE_MODE_SVA			1 /* use uacce sva mode */

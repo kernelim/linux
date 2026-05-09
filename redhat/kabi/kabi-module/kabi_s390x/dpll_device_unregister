@@ -1,3 +1,3 @@
-#1-
-0x9190dd92	dpll_device_unregister	vmlinux	EXPORT_SYMBOL_GPL	
+#2-
+0x1e202806	dpll_device_unregister	vmlinux	EXPORT_SYMBOL_GPL	
 

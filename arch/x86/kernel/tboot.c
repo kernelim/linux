@@ -28,6 +28,7 @@
 #include <asm/setup.h>
 #include <asm/e820/api.h>
 #include <asm/io.h>
+#include <asm/cpu.h>
 
 #include "../realmode/rm/wakeup.h"
 
@@ -248,6 +249,10 @@ void tboot_shutdown(u32 shutdown_type)
 
 	switch_to_tboot_pt();
 
+	/*
+	 * toggle off CET while we call shutdown_entry in bios
+	 */
+	cet_disable();
 	shutdown = (void(*)(void))(unsigned long)tboot->shutdown_entry;
 	shutdown();
 

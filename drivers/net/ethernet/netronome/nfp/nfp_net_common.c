@@ -159,7 +159,7 @@ static int nfp_net_reconfig_wait(struct nfp_net *nn, unsigned long deadline)
 
 static void nfp_net_reconfig_timer(struct timer_list *t)
 {
-	struct nfp_net *nn = from_timer(nn, t, reconfig_timer);
+	struct nfp_net *nn = timer_container_of(nn, t, reconfig_timer);
 
 	spin_lock_bh(&nn->reconfig_lock);
 
@@ -227,7 +227,7 @@ static void nfp_net_reconfig_sync_enter(struct nfp_net *nn)
 	spin_unlock_bh(&nn->reconfig_lock);
 
 	if (cancelled_timer) {
-		del_timer_sync(&nn->reconfig_timer);
+		timer_delete_sync(&nn->reconfig_timer);
 		nfp_net_reconfig_wait(nn, nn->reconfig_timer.expires);
 	}
 
@@ -2394,8 +2394,7 @@ static int nfp_udp_tunnel_sync(struct net_device *netdev, unsigned int table)
 
 static const struct udp_tunnel_nic_info nfp_udp_tunnels = {
 	.sync_table     = nfp_udp_tunnel_sync,
-	.flags          = UDP_TUNNEL_NIC_INFO_MAY_SLEEP |
-			  UDP_TUNNEL_NIC_INFO_OPEN_ONLY,
+	.flags          = UDP_TUNNEL_NIC_INFO_OPEN_ONLY,
 	.tables         = {
 		{
 			.n_entries      = NFP_NET_N_VXLAN_PORTS,

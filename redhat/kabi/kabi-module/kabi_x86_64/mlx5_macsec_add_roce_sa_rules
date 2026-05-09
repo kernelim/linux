@@ -1,0 +1,3 @@
+#2-
+0x49566105	mlx5_macsec_add_roce_sa_rules	drivers/net/ethernet/mellanox/mlx5/core/mlx5_core	EXPORT_SYMBOL_GPL	
+

@@ -1,3 +1,3 @@
-#1-
-0xe348ad0e	pci_get_domain_bus_and_slot	vmlinux	EXPORT_SYMBOL	
+#2-
+0x1e63850c	pci_get_domain_bus_and_slot	vmlinux	EXPORT_SYMBOL	
 

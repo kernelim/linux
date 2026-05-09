@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2023 Intel Corporation
+ * Copyright (C) 2023, 2025 Intel Corporation
  */
 #include <linux/dmi.h>
 #include "iwl-drv.h"
@@ -34,6 +34,7 @@ IWL_BIOS_TABLE_LOADER(wrds_table);
 IWL_BIOS_TABLE_LOADER(ewrd_table);
 IWL_BIOS_TABLE_LOADER(wgds_table);
 IWL_BIOS_TABLE_LOADER(ppag_table);
+IWL_BIOS_TABLE_LOADER(phy_filters);
 IWL_BIOS_TABLE_LOADER_DATA(tas_table, struct iwl_tas_data);
 IWL_BIOS_TABLE_LOADER_DATA(pwr_limit, u64);
 IWL_BIOS_TABLE_LOADER_DATA(mcc, char);
@@ -58,9 +59,14 @@ static const struct dmi_system_id dmi_ppag_approved_list[] = {
 			DMI_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
 		},
 	},
-	{ .ident = "ASUS",
+	{ .ident = "ASUSTEK",
 	  .matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
+		},
+	},
+	{ .ident = "ASUS",
+	  .matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "ASUS"),
 		},
 	},
 	{ .ident = "GOOGLE-HP",
@@ -140,9 +146,14 @@ static const struct dmi_system_id dmi_tas_approved_list[] = {
 			DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
 		},
 	},
-	{ .ident = "ASUS",
+	{ .ident = "ASUSTEK",
 	  .matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
+		},
+	},
+	{ .ident = "ASUS",
+	  .matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "ASUS"),
 		},
 	},
 	{ .ident = "GOOGLE-HP",
@@ -180,9 +191,9 @@ bool iwl_sar_geo_support(struct iwl_fw_runtime *fwrt)
 	 */
 	return IWL_UCODE_SERIAL(fwrt->fw->ucode_ver) >= 38 ||
 		(IWL_UCODE_SERIAL(fwrt->fw->ucode_ver) == 17 &&
-		 fwrt->trans->hw_rev != CSR_HW_REV_TYPE_3160) ||
+		 fwrt->trans->info.hw_rev != CSR_HW_REV_TYPE_3160) ||
 		(IWL_UCODE_SERIAL(fwrt->fw->ucode_ver) == 29 &&
-		 ((fwrt->trans->hw_rev & CSR_HW_REV_TYPE_MSK) ==
+		 ((fwrt->trans->info.hw_rev & CSR_HW_REV_TYPE_MSK) ==
 		  CSR_HW_REV_TYPE_7265D));
 }
 IWL_EXPORT_SYMBOL(iwl_sar_geo_support);
@@ -304,6 +315,7 @@ static bool iwl_ppag_value_valid(struct iwl_fw_runtime *fwrt, int chain,
 	return true;
 }
 
+/* Utility function for iwlmvm and iwlxvt */
 int iwl_fill_ppag_table(struct iwl_fw_runtime *fwrt,
 			union iwl_ppag_table_cmd *cmd, int *cmd_size)
 {
@@ -313,7 +325,7 @@ int iwl_fill_ppag_table(struct iwl_fw_runtime *fwrt,
 	bool send_ppag_always;
 
 	/* many firmware images for JF lie about this */
-	if (CSR_HW_RFID_TYPE(fwrt->trans->hw_rf_id) ==
+	if (CSR_HW_RFID_TYPE(fwrt->trans->info.hw_rf_id) ==
 	    CSR_HW_RFID_TYPE(CSR_HW_RF_ID_TYPE_JF))
 		return -EOPNOTSUPP;
 
@@ -338,31 +350,35 @@ int iwl_fill_ppag_table(struct iwl_fw_runtime *fwrt,
 		return -EINVAL;
 	}
 
-	/* The 'flags' field is the same in v1 and in v2 so we can just
-	 * use v1 to access it.
-	 */
-	cmd->v1.flags = cpu_to_le32(fwrt->ppag_flags);
-
 	IWL_DEBUG_RADIO(fwrt, "PPAG cmd ver is %d\n", cmd_ver);
 	if (cmd_ver == 1) {
 		num_sub_bands = IWL_NUM_SUB_BANDS_V1;
 		gain = cmd->v1.gain[0];
 		*cmd_size = sizeof(cmd->v1);
-		if (fwrt->ppag_ver >= 1) {
+		cmd->v1.flags = cpu_to_le32(fwrt->ppag_flags & IWL_PPAG_CMD_V1_MASK);
+		if (fwrt->ppag_bios_rev >= 1) {
 			/* in this case FW supports revision 0 */
 			IWL_DEBUG_RADIO(fwrt,
 					"PPAG table rev is %d, send truncated table\n",
-					fwrt->ppag_ver);
+					fwrt->ppag_bios_rev);
 		}
-	} else if (cmd_ver >= 2 && cmd_ver <= 6) {
+	} else if (cmd_ver == 5) {
 		num_sub_bands = IWL_NUM_SUB_BANDS_V2;
-		gain = cmd->v2.gain[0];
-		*cmd_size = sizeof(cmd->v2);
-		if (fwrt->ppag_ver == 0) {
+		gain = cmd->v5.gain[0];
+		*cmd_size = sizeof(cmd->v5);
+		cmd->v5.flags = cpu_to_le32(fwrt->ppag_flags & IWL_PPAG_CMD_V5_MASK);
+		if (fwrt->ppag_bios_rev == 0) {
 			/* in this case FW supports revisions 1,2 or 3 */
 			IWL_DEBUG_RADIO(fwrt,
 					"PPAG table rev is 0, send padded table\n");
 		}
+	} else if (cmd_ver == 7) {
+		num_sub_bands = IWL_NUM_SUB_BANDS_V2;
+		gain = cmd->v7.gain[0];
+		*cmd_size = sizeof(cmd->v7);
+		cmd->v7.ppag_config_info.table_source = fwrt->ppag_bios_source;
+		cmd->v7.ppag_config_info.table_revision = fwrt->ppag_bios_rev;
+		cmd->v7.ppag_config_info.value = cpu_to_le32(fwrt->ppag_flags);
 	} else {
 		IWL_DEBUG_RADIO(fwrt, "Unsupported PPAG command version\n");
 		return -EINVAL;
@@ -371,26 +387,24 @@ int iwl_fill_ppag_table(struct iwl_fw_runtime *fwrt,
 	/* ppag mode */
 	IWL_DEBUG_RADIO(fwrt,
 			"PPAG MODE bits were read from bios: %d\n",
-			le32_to_cpu(cmd->v1.flags));
+			fwrt->ppag_flags);
 
-	if (cmd_ver == 5)
-		cmd->v1.flags &= cpu_to_le32(IWL_PPAG_CMD_V5_MASK);
-	else if (cmd_ver < 5)
-		cmd->v1.flags &= cpu_to_le32(IWL_PPAG_CMD_V4_MASK);
-
-	if ((cmd_ver == 1 &&
-	     !fw_has_capa(&fwrt->fw->ucode_capa,
-			  IWL_UCODE_TLV_CAPA_PPAG_CHINA_BIOS_SUPPORT)) ||
-	    (cmd_ver == 2 && fwrt->ppag_ver >= 2)) {
+	if (cmd_ver == 1 &&
+	    !fw_has_capa(&fwrt->fw->ucode_capa,
+			 IWL_UCODE_TLV_CAPA_PPAG_CHINA_BIOS_SUPPORT)) {
 		cmd->v1.flags &= cpu_to_le32(IWL_PPAG_ETSI_MASK);
 		IWL_DEBUG_RADIO(fwrt, "masking ppag China bit\n");
 	} else {
 		IWL_DEBUG_RADIO(fwrt, "isn't masking ppag China bit\n");
 	}
 
+	/* The 'flags' field is the same in v1 and v5 so we can just
+	 * use v1 to access it.
+	 */
 	IWL_DEBUG_RADIO(fwrt,
 			"PPAG MODE bits going to be sent: %d\n",
-			le32_to_cpu(cmd->v1.flags));
+			(cmd_ver < 7) ? le32_to_cpu(cmd->v1.flags) :
+					le32_to_cpu(cmd->v7.ppag_config_info.value));
 
 	for (i = 0; i < IWL_NUM_CHAIN_LIMITS; i++) {
 		for (j = 0; j < num_sub_bands; j++) {
@@ -480,7 +494,7 @@ __le32 iwl_get_lari_config_bitmap(struct iwl_fw_runtime *fwrt)
 	u32 val;
 	__le32 config_bitmap = 0;
 
-	switch (CSR_HW_RFID_TYPE(fwrt->trans->hw_rf_id)) {
+	switch (CSR_HW_RFID_TYPE(fwrt->trans->info.hw_rf_id)) {
 	case IWL_CFG_RF_TYPE_HR1:
 	case IWL_CFG_RF_TYPE_HR2:
 	case IWL_CFG_RF_TYPE_JF1:
@@ -568,6 +582,8 @@ int iwl_fill_lari_config(struct iwl_fw_runtime *fwrt,
 {
 	int ret;
 	u32 value;
+	bool has_raw_dsm_capa = fw_has_capa(&fwrt->fw->ucode_capa,
+					    IWL_UCODE_TLV_CAPA_FW_ACCEPTS_RAW_DSM_TABLE);
 	u8 cmd_ver = iwl_fw_lookup_cmd_ver(fwrt->fw,
 					   WIDE_ID(REGULATORY_AND_NVM_GROUP,
 						   LARI_CONFIG_CHANGE), 1);
@@ -582,17 +598,22 @@ int iwl_fill_lari_config(struct iwl_fw_runtime *fwrt,
 	cmd->config_bitmap = iwl_get_lari_config_bitmap(fwrt);
 
 	ret = iwl_bios_get_dsm(fwrt, DSM_FUNC_11AX_ENABLEMENT, &value);
-	if (!ret)
+	if (!ret) {
+		if (!has_raw_dsm_capa)
+			value &= DSM_11AX_ALLOW_BITMAP;
 		cmd->oem_11ax_allow_bitmap = cpu_to_le32(value);
+	}
 
 	ret = iwl_bios_get_dsm(fwrt, DSM_FUNC_ENABLE_UNII4_CHAN, &value);
 	if (!ret) {
-		value &= DSM_UNII4_ALLOW_BITMAP;
+		if (!has_raw_dsm_capa)
+			value &= DSM_UNII4_ALLOW_BITMAP;
 
 		/* Since version 9, bits 4 and 5 are supported
-		 * regardless of this capability.
+		 * regardless of this capability, By pass this masking
+		 * if firmware has capability of accepting raw DSM table.
 		 */
-		if (cmd_ver < 9 &&
+		if (!has_raw_dsm_capa && cmd_ver < 9 &&
 		    !fw_has_capa(&fwrt->fw->ucode_capa,
 				 IWL_UCODE_TLV_CAPA_BIOS_OVERRIDE_5G9_FOR_CA))
 			value &= ~(DSM_VALUE_UNII4_CANADA_OVERRIDE_MSK |
@@ -603,13 +624,17 @@ int iwl_fill_lari_config(struct iwl_fw_runtime *fwrt,
 
 	ret = iwl_bios_get_dsm(fwrt, DSM_FUNC_ACTIVATE_CHANNEL, &value);
 	if (!ret) {
-		if (cmd_ver < 8)
+		if (!has_raw_dsm_capa)
+			value &= CHAN_STATE_ACTIVE_BITMAP_CMD_V12;
+
+		if (!has_raw_dsm_capa && cmd_ver < 8)
 			value &= ~ACTIVATE_5G2_IN_WW_MASK;
 
 		/* Since version 12, bits 5 and 6 are supported
-		 * regardless of this capability.
+		 * regardless of this capability, By pass this masking
+		 * if firmware has capability of accepting raw DSM table.
 		 */
-		if (cmd_ver < 12 &&
+		if (!has_raw_dsm_capa && cmd_ver < 12 &&
 		    !fw_has_capa(&fwrt->fw->ucode_capa,
 				 IWL_UCODE_TLV_CAPA_BIOS_OVERRIDE_UNII4_US_CA))
 			value &= CHAN_STATE_ACTIVE_BITMAP_CMD_V11;
@@ -622,13 +647,19 @@ int iwl_fill_lari_config(struct iwl_fw_runtime *fwrt,
 		cmd->oem_uhb_allow_bitmap = cpu_to_le32(value);
 
 	ret = iwl_bios_get_dsm(fwrt, DSM_FUNC_FORCE_DISABLE_CHANNELS, &value);
-	if (!ret)
+	if (!ret) {
+		if (!has_raw_dsm_capa)
+			value &= DSM_FORCE_DISABLE_CHANNELS_ALLOWED_BITMAP;
 		cmd->force_disable_channels_bitmap = cpu_to_le32(value);
+	}
 
 	ret = iwl_bios_get_dsm(fwrt, DSM_FUNC_ENERGY_DETECTION_THRESHOLD,
 			       &value);
-	if (!ret)
+	if (!ret) {
+		if (!has_raw_dsm_capa)
+			value &= DSM_EDT_ALLOWED_BITMAP;
 		cmd->edt_bitmap = cpu_to_le32(value);
+	}
 
 	ret = iwl_bios_get_wbem(fwrt, &value);
 	if (!ret)

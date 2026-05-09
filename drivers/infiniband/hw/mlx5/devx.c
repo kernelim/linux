@@ -159,7 +159,7 @@ int mlx5_ib_devx_create(struct mlx5_ib_dev *dev, bool is_user, u64 req_ucaps)
 	uctx = MLX5_ADDR_OF(create_uctx_in, in, uctx);
 	if (is_user &&
 	    (MLX5_CAP_GEN(dev->mdev, uctx_cap) & MLX5_UCTX_CAP_RAW_TX) &&
-	    capable(CAP_NET_RAW))
+	    rdma_dev_has_raw_cap(&dev->ib_dev))
 		cap |= MLX5_UCTX_CAP_RAW_TX;
 	if (is_user &&
 	    (MLX5_CAP_GEN(dev->mdev, uctx_cap) &
@@ -233,6 +233,7 @@ static u16 get_legacy_obj_type(u16 opcode)
 {
 	switch (opcode) {
 	case MLX5_CMD_OP_CREATE_RQ:
+	case MLX5_CMD_OP_CREATE_RMP:
 		return MLX5_EVENT_QUEUE_TYPE_RQ;
 	case MLX5_CMD_OP_CREATE_QP:
 		return MLX5_EVENT_QUEUE_TYPE_QP;
@@ -1224,6 +1225,11 @@ static void devx_obj_build_destroy_cmd(void *in, void *out, void *din,
 			 MLX5_GET(create_flow_table_in,  in, other_vport));
 		MLX5_SET(destroy_flow_table_in, din, vport_number,
 			 MLX5_GET(create_flow_table_in,  in, vport_number));
+		MLX5_SET(destroy_flow_table_in, din, other_eswitch,
+			 MLX5_GET(create_flow_table_in,  in, other_eswitch));
+		MLX5_SET(destroy_flow_table_in, din, eswitch_owner_vhca_id,
+			 MLX5_GET(create_flow_table_in, in,
+				  eswitch_owner_vhca_id));
 		MLX5_SET(destroy_flow_table_in, din, table_type,
 			 MLX5_GET(create_flow_table_in,  in, table_type));
 		MLX5_SET(destroy_flow_table_in, din, table_id, *obj_id);
@@ -1236,6 +1242,11 @@ static void devx_obj_build_destroy_cmd(void *in, void *out, void *din,
 			 MLX5_GET(create_flow_group_in, in, other_vport));
 		MLX5_SET(destroy_flow_group_in, din, vport_number,
 			 MLX5_GET(create_flow_group_in, in, vport_number));
+		MLX5_SET(destroy_flow_group_in, din, other_eswitch,
+			 MLX5_GET(create_flow_group_in, in, other_eswitch));
+		MLX5_SET(destroy_flow_group_in, din, eswitch_owner_vhca_id,
+			 MLX5_GET(create_flow_group_in, in,
+				  eswitch_owner_vhca_id));
 		MLX5_SET(destroy_flow_group_in, din, table_type,
 			 MLX5_GET(create_flow_group_in, in, table_type));
 		MLX5_SET(destroy_flow_group_in, din, table_id,
@@ -1250,6 +1261,10 @@ static void devx_obj_build_destroy_cmd(void *in, void *out, void *din,
 			 MLX5_GET(set_fte_in,  in, other_vport));
 		MLX5_SET(delete_fte_in, din, vport_number,
 			 MLX5_GET(set_fte_in, in, vport_number));
+		MLX5_SET(delete_fte_in, din, other_eswitch,
+			 MLX5_GET(set_fte_in,  in, other_eswitch));
+		MLX5_SET(delete_fte_in, din, eswitch_owner_vhca_id,
+			 MLX5_GET(set_fte_in, in, eswitch_owner_vhca_id));
 		MLX5_SET(delete_fte_in, din, table_type,
 			 MLX5_GET(set_fte_in, in, table_type));
 		MLX5_SET(delete_fte_in, din, table_id,
@@ -1958,6 +1973,7 @@ subscribe_event_xa_alloc(struct mlx5_devx_event_table *devx_event_table,
 			/* Level1 is valid for future use, no need to free */
 			return -ENOMEM;
 
+		INIT_LIST_HEAD(&obj_event->obj_sub_list);
 		err = xa_insert(&event->object_ids,
 				key_level2,
 				obj_event,
@@ -1966,7 +1982,6 @@ subscribe_event_xa_alloc(struct mlx5_devx_event_table *devx_event_table,
 			kfree(obj_event);
 			return err;
 		}
-		INIT_LIST_HEAD(&obj_event->obj_sub_list);
 	}
 
 	return 0;

@@ -1182,7 +1182,7 @@ static void dw_mci_submit_data(struct dw_mci *host, struct mmc_data *data)
 		/*
 		 * Use the initial fifoth_val for PIO mode. If wm_algined
 		 * is set, we set watermark same as data size.
-		 * If next issued data may be transfered by DMA mode,
+		 * If next issued data may be transferred by DMA mode,
 		 * prev_blksz should be invalidated.
 		 */
 		if (host->wm_aligned)
@@ -1875,8 +1875,7 @@ static void dw_mci_init_fault(struct dw_mci *host)
 {
 	host->fail_data_crc = (struct fault_attr) FAULT_ATTR_INITIALIZER;
 
-	hrtimer_init(&host->fault_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	host->fault_timer.function = dw_mci_fault_timer;
+	hrtimer_setup(&host->fault_timer, dw_mci_fault_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 }
 #else
 static void dw_mci_init_fault(struct dw_mci *host)
@@ -2041,10 +2040,10 @@ static bool dw_mci_clear_pending_cmd_complete(struct dw_mci *host)
 	 * Really be certain that the timer has stopped.  This is a bit of
 	 * paranoia and could only really happen if we had really bad
 	 * interrupt latency and the interrupt routine and timeout were
-	 * running concurrently so that the del_timer() in the interrupt
+	 * running concurrently so that the timer_delete() in the interrupt
 	 * handler couldn't run.
 	 */
-	WARN_ON(del_timer_sync(&host->cto_timer));
+	WARN_ON(timer_delete_sync(&host->cto_timer));
 	clear_bit(EVENT_CMD_COMPLETE, &host->pending_events);
 
 	return true;
@@ -2056,7 +2055,7 @@ static bool dw_mci_clear_pending_data_complete(struct dw_mci *host)
 		return false;
 
 	/* Extra paranoia just like dw_mci_clear_pending_cmd_complete() */
-	WARN_ON(del_timer_sync(&host->dto_timer));
+	WARN_ON(timer_delete_sync(&host->dto_timer));
 	clear_bit(EVENT_DATA_COMPLETE, &host->pending_events);
 
 	return true;
@@ -2704,7 +2703,7 @@ done:
 
 static void dw_mci_cmd_interrupt(struct dw_mci *host, u32 status)
 {
-	del_timer(&host->cto_timer);
+	timer_delete(&host->cto_timer);
 
 	if (!host->cmd_status)
 		host->cmd_status = status;
@@ -2748,13 +2747,13 @@ static irqreturn_t dw_mci_interrupt(int irq, void *dev_id)
 			dw_mci_cmd_interrupt(host, pending);
 			spin_unlock(&host->irq_lock);
 
-			del_timer(&host->cmd11_timer);
+			timer_delete(&host->cmd11_timer);
 		}
 
 		if (pending & DW_MCI_CMD_ERROR_FLAGS) {
 			spin_lock(&host->irq_lock);
 
-			del_timer(&host->cto_timer);
+			timer_delete(&host->cto_timer);
 			mci_writel(host, RINTSTS, DW_MCI_CMD_ERROR_FLAGS);
 			host->cmd_status = pending;
 			smp_wmb(); /* drain writebuffer */
@@ -2767,7 +2766,7 @@ static irqreturn_t dw_mci_interrupt(int irq, void *dev_id)
 			spin_lock(&host->irq_lock);
 
 			if (host->quirks & DW_MMC_QUIRK_EXTENDED_TMOUT)
-				del_timer(&host->dto_timer);
+				timer_delete(&host->dto_timer);
 
 			/* if there is an error report DATA_ERROR */
 			mci_writel(host, RINTSTS, DW_MCI_DATA_ERROR_FLAGS);
@@ -2788,7 +2787,7 @@ static irqreturn_t dw_mci_interrupt(int irq, void *dev_id)
 		if (pending & SDMMC_INT_DATA_OVER) {
 			spin_lock(&host->irq_lock);
 
-			del_timer(&host->dto_timer);
+			timer_delete(&host->dto_timer);
 
 			mci_writel(host, RINTSTS, SDMMC_INT_DATA_OVER);
 			if (!host->data_status)
@@ -3095,7 +3094,7 @@ no_dma:
 
 static void dw_mci_cmd11_timer(struct timer_list *t)
 {
-	struct dw_mci *host = from_timer(host, t, cmd11_timer);
+	struct dw_mci *host = timer_container_of(host, t, cmd11_timer);
 
 	if (host->state != STATE_SENDING_CMD11) {
 		dev_warn(host->dev, "Unexpected CMD11 timeout\n");
@@ -3109,7 +3108,7 @@ static void dw_mci_cmd11_timer(struct timer_list *t)
 
 static void dw_mci_cto_timer(struct timer_list *t)
 {
-	struct dw_mci *host = from_timer(host, t, cto_timer);
+	struct dw_mci *host = timer_container_of(host, t, cto_timer);
 	unsigned long irqflags;
 	u32 pending;
 
@@ -3164,7 +3163,7 @@ exit:
 
 static void dw_mci_dto_timer(struct timer_list *t)
 {
-	struct dw_mci *host = from_timer(host, t, dto_timer);
+	struct dw_mci *host = timer_container_of(host, t, dto_timer);
 	unsigned long irqflags;
 	u32 pending;
 

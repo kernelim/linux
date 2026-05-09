@@ -1,3 +1,3 @@
-#1-
-0x98ff8ea6	crypto_alloc_shash	vmlinux	EXPORT_SYMBOL_GPL	
+#2-
+0x8cf0d61a	crypto_alloc_shash	vmlinux	EXPORT_SYMBOL_GPL	
 

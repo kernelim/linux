@@ -35,6 +35,7 @@
 #ifndef _NFSD4_STATE_H
 #define _NFSD4_STATE_H
 
+#include <crypto/md5.h>
 #include <linux/idr.h>
 #include <linux/refcount.h>
 #include <linux/sunrpc/svc_xprt.h>
@@ -224,6 +225,11 @@ struct nfs4_delegation {
 
 	/* for CB_GETATTR */
 	struct nfs4_cb_fattr    dl_cb_fattr;
+
+	/* For delegated timestamps */
+	struct timespec64	dl_atime;
+	struct timespec64	dl_mtime;
+	struct timespec64	dl_ctime;
 };
 
 static inline bool deleg_is_read(u32 dl_type)
@@ -241,6 +247,9 @@ static inline bool deleg_attrs_deleg(u32 dl_type)
 	return dl_type == OPEN_DELEGATE_READ_ATTRS_DELEG ||
 	       dl_type == OPEN_DELEGATE_WRITE_ATTRS_DELEG;
 }
+
+bool nfsd4_vet_deleg_time(struct timespec64 *cb, const struct timespec64 *orig,
+			  const struct timespec64 *now);
 
 #define cb_to_delegation(cb) \
 	container_of(cb, struct nfs4_delegation, dl_recall)
@@ -381,7 +390,8 @@ struct nfsd4_sessionid {
 	u32		reserved;
 };
 
-#define HEXDIR_LEN     33 /* hex version of 16 byte md5 of cl_name plus '\0' */
+/* Length of MD5 digest as hex, plus terminating '\0' */
+#define HEXDIR_LEN	(2 * MD5_DIGEST_SIZE + 1)
 
 /*
  *       State                Meaning                  Where set
@@ -529,18 +539,11 @@ struct nfs4_client_reclaim {
 	struct xdr_netobj	cr_princhash;
 };
 
-/*
- * REPLAY_ISIZE is sized for an OPEN response with delegation:
- *   4(status) + 8(stateid) + 20(changeinfo) + 4(rflags) +
- *   8(verifier) + 4(deleg. type) + 8(deleg. stateid) +
- *   4(deleg. recall flag) + 20(deleg. space limit) +
- *   ~32(deleg. ace) = 112 bytes
- *
- * Some responses can exceed this. A LOCK denial includes the conflicting
- * lock owner, which can be up to 1024 bytes (NFS4_OPAQUE_LIMIT). Responses
- * larger than REPLAY_ISIZE are not cached in rp_ibuf; only rp_status is
- * saved. Enlarging this constant increases the size of every
- * nfs4_stateowner.
+/* A reasonable value for REPLAY_ISIZE was estimated as follows:  
+ * The OPEN response, typically the largest, requires 
+ *   4(status) + 8(stateid) + 20(changeinfo) + 4(rflags) +  8(verifier) + 
+ *   4(deleg. type) + 8(deleg. stateid) + 4(deleg. recall flag) + 
+ *   20(deleg. space limit) + ~32(deleg. ace) = 112 bytes 
  */
 
 #define NFSD4_REPLAY_ISIZE       112 
@@ -554,7 +557,7 @@ struct nfs4_replay {
 	unsigned int		rp_buflen;
 	char			*rp_buf;
 	struct knfsd_fh		rp_openfh;
-	atomic_t		rp_locked;
+	int			rp_locked;
 	char			rp_ibuf[NFSD4_REPLAY_ISIZE];
 };
 
@@ -672,6 +675,7 @@ struct nfs4_file {
 	atomic_t		fi_access[2];
 	u32			fi_share_deny;
 	struct nfsd_file	*fi_deleg_file;
+	struct nfsd_file	*fi_rdeleg_file;
 	int			fi_delegees;
 	struct knfsd_fh		fi_fhandle;
 	bool			fi_had_conflict;

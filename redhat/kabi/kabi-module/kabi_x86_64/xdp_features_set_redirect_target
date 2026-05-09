@@ -1,3 +1,3 @@
-#1-
-0x34fe5cf5	xdp_features_set_redirect_target	vmlinux	EXPORT_SYMBOL_GPL	
+#2-
+0x3b4b0b64	xdp_features_set_redirect_target	vmlinux	EXPORT_SYMBOL_GPL	
 

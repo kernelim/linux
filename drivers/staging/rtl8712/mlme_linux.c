@@ -23,7 +23,7 @@
 static void sitesurvey_ctrl_handler(struct timer_list *t)
 {
 	struct _adapter *adapter =
-		from_timer(adapter, t,
+		timer_container_of(adapter, t,
 			   mlmepriv.sitesurveyctrl.sitesurvey_ctrl_timer);
 
 	_r8712_sitesurvey_ctrl_handler(adapter);
@@ -34,7 +34,7 @@ static void sitesurvey_ctrl_handler(struct timer_list *t)
 static void join_timeout_handler (struct timer_list *t)
 {
 	struct _adapter *adapter =
-		from_timer(adapter, t, mlmepriv.assoc_timer);
+		timer_container_of(adapter, t, mlmepriv.assoc_timer);
 
 	_r8712_join_timeout_handler(adapter);
 }
@@ -42,7 +42,7 @@ static void join_timeout_handler (struct timer_list *t)
 static void _scan_timeout_handler (struct timer_list *t)
 {
 	struct _adapter *adapter =
-		from_timer(adapter, t, mlmepriv.scan_to_timer);
+		timer_container_of(adapter, t, mlmepriv.scan_to_timer);
 
 	r8712_scan_timeout_handler(adapter);
 }
@@ -50,7 +50,7 @@ static void _scan_timeout_handler (struct timer_list *t)
 static void dhcp_timeout_handler (struct timer_list *t)
 {
 	struct _adapter *adapter =
-		from_timer(adapter, t, mlmepriv.dhcp_timer);
+		timer_container_of(adapter, t, mlmepriv.dhcp_timer);
 
 	_r8712_dhcp_timeout_handler(adapter);
 }
@@ -58,7 +58,7 @@ static void dhcp_timeout_handler (struct timer_list *t)
 static void wdg_timeout_handler (struct timer_list *t)
 {
 	struct _adapter *adapter =
-		from_timer(adapter, t, mlmepriv.wdg_timer);
+		timer_container_of(adapter, t, mlmepriv.wdg_timer);
 
 	r8712_wdg_wk_cmd(adapter);
 

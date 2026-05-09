@@ -26,6 +26,8 @@
 #include "amdgpu_sdma.h"
 #include "amdgpu_ras.h"
 #include "amdgpu_reset.h"
+#include "gc/gc_10_1_0_offset.h"
+#include "gc/gc_10_3_0_sh_mask.h"
 
 #define AMDGPU_CSA_SDMA_SIZE 64
 /* SDMA CSA reside in the 3rd page of CSA */
@@ -76,22 +78,14 @@ uint64_t amdgpu_sdma_get_csa_mc_addr(struct amdgpu_ring *ring,
 	if (amdgpu_sriov_vf(adev) || vmid == 0 || !adev->gfx.mcbp)
 		return 0;
 
-	if (ring->is_mes_queue) {
-		uint32_t offset = 0;
+	r = amdgpu_sdma_get_index_from_ring(ring, &index);
 
-		offset = offsetof(struct amdgpu_mes_ctx_meta_data,
-				  sdma[ring->idx].sdma_meta_data);
-		csa_mc_addr = amdgpu_mes_ctx_get_offs_gpu_addr(ring, offset);
-	} else {
-		r = amdgpu_sdma_get_index_from_ring(ring, &index);
-
-		if (r || index > 31)
-			csa_mc_addr = 0;
-		else
-			csa_mc_addr = amdgpu_csa_vaddr(adev) +
-				AMDGPU_CSA_SDMA_OFFSET +
-				index * AMDGPU_CSA_SDMA_SIZE;
-	}
+	if (r || index > 31)
+		csa_mc_addr = 0;
+	else
+		csa_mc_addr = amdgpu_csa_vaddr(adev) +
+			AMDGPU_CSA_SDMA_OFFSET +
+			index * AMDGPU_CSA_SDMA_SIZE;
 
 	return csa_mc_addr;
 }
@@ -537,110 +531,78 @@ bool amdgpu_sdma_is_shared_inv_eng(struct amdgpu_device *adev, struct amdgpu_rin
 		return false;
 }
 
-/**
- * amdgpu_sdma_register_on_reset_callbacks - Register SDMA reset callbacks
- * @funcs: Pointer to the callback structure containing pre_reset and post_reset functions
- *
- * This function allows KFD and AMDGPU to register their own callbacks for handling
- * pre-reset and post-reset operations for engine reset. These are needed because engine
- * reset will stop all queues on that engine.
- */
-void amdgpu_sdma_register_on_reset_callbacks(struct amdgpu_device *adev, struct sdma_on_reset_funcs *funcs)
+static int amdgpu_sdma_soft_reset(struct amdgpu_device *adev, u32 instance_id)
 {
-	if (!funcs)
-		return;
+	struct amdgpu_sdma_instance *sdma_instance = &adev->sdma.instance[instance_id];
 
-	/* Ensure the reset_callback_list is initialized */
-	if (!adev->sdma.reset_callback_list.next) {
-		INIT_LIST_HEAD(&adev->sdma.reset_callback_list);
-	}
-	/* Initialize the list node in the callback structure */
-	INIT_LIST_HEAD(&funcs->list);
+	if (sdma_instance->funcs->soft_reset_kernel_queue)
+		return sdma_instance->funcs->soft_reset_kernel_queue(adev, instance_id);
 
-	/* Add the callback structure to the global list */
-	list_add_tail(&funcs->list, &adev->sdma.reset_callback_list);
+	return -EOPNOTSUPP;
 }
 
 /**
  * amdgpu_sdma_reset_engine - Reset a specific SDMA engine
  * @adev: Pointer to the AMDGPU device
- * @instance_id: ID of the SDMA engine instance to reset
- *
- * This function performs the following steps:
- * 1. Calls all registered pre_reset callbacks to allow KFD and AMDGPU to save their state.
- * 2. Resets the specified SDMA engine instance.
- * 3. Calls all registered post_reset callbacks to allow KFD and AMDGPU to restore their state.
+ * @instance_id: Logical ID of the SDMA engine instance to reset
+ * @caller_handles_kernel_queues: Skip kernel queue processing. Caller
+ * will handle it.
  *
  * Returns: 0 on success, or a negative error code on failure.
  */
-int amdgpu_sdma_reset_engine(struct amdgpu_device *adev, uint32_t instance_id)
+int amdgpu_sdma_reset_engine(struct amdgpu_device *adev, uint32_t instance_id,
+			     bool caller_handles_kernel_queues)
 {
-	struct sdma_on_reset_funcs *funcs;
 	int ret = 0;
 	struct amdgpu_sdma_instance *sdma_instance = &adev->sdma.instance[instance_id];
 	struct amdgpu_ring *gfx_ring = &sdma_instance->ring;
 	struct amdgpu_ring *page_ring = &sdma_instance->page;
-	bool gfx_sched_stopped = false, page_sched_stopped = false;
 
 	mutex_lock(&sdma_instance->engine_reset_mutex);
-	/* Stop the scheduler's work queue for the GFX and page rings if they are running.
-	* This ensures that no new tasks are submitted to the queues while
-	* the reset is in progress.
-	*/
-	if (!amdgpu_ring_sched_ready(gfx_ring)) {
+
+	if (!caller_handles_kernel_queues) {
+		/* Stop the scheduler's work queue for the GFX and page rings if they are running.
+		 * This ensures that no new tasks are submitted to the queues while
+		 * the reset is in progress.
+		 */
 		drm_sched_wqueue_stop(&gfx_ring->sched);
-		gfx_sched_stopped = true;
+
+		if (adev->sdma.has_page_queue)
+			drm_sched_wqueue_stop(&page_ring->sched);
 	}
 
-	if (adev->sdma.has_page_queue && !amdgpu_ring_sched_ready(page_ring)) {
-		drm_sched_wqueue_stop(&page_ring->sched);
-		page_sched_stopped = true;
-	}
-
-	/* Invoke all registered pre_reset callbacks */
-	list_for_each_entry(funcs, &adev->sdma.reset_callback_list, list) {
-		if (funcs->pre_reset) {
-			ret = funcs->pre_reset(adev, instance_id);
-			if (ret) {
-				dev_err(adev->dev,
-				"beforeReset callback failed for instance %u: %d\n",
-					instance_id, ret);
-				goto exit;
-			}
-		}
+	if (sdma_instance->funcs->stop_kernel_queue) {
+		sdma_instance->funcs->stop_kernel_queue(gfx_ring);
+		if (adev->sdma.has_page_queue)
+			sdma_instance->funcs->stop_kernel_queue(page_ring);
 	}
 
 	/* Perform the SDMA reset for the specified instance */
-	ret = amdgpu_dpm_reset_sdma(adev, 1 << instance_id);
+	ret = amdgpu_sdma_soft_reset(adev, instance_id);
 	if (ret) {
-		dev_err(adev->dev, "Failed to reset SDMA instance %u\n", instance_id);
+		dev_err(adev->dev, "Failed to reset SDMA logical instance %u\n", instance_id);
 		goto exit;
 	}
 
-	/* Invoke all registered post_reset callbacks */
-	list_for_each_entry(funcs, &adev->sdma.reset_callback_list, list) {
-		if (funcs->post_reset) {
-			ret = funcs->post_reset(adev, instance_id);
-			if (ret) {
-				dev_err(adev->dev,
-				"afterReset callback failed for instance %u: %d\n",
-					instance_id, ret);
-				goto exit;
-			}
-		}
+	if (sdma_instance->funcs->start_kernel_queue) {
+		sdma_instance->funcs->start_kernel_queue(gfx_ring);
+		if (adev->sdma.has_page_queue)
+			sdma_instance->funcs->start_kernel_queue(page_ring);
 	}
 
 exit:
-	/* Restart the scheduler's work queue for the GFX and page rings
-	 * if they were stopped by this function. This allows new tasks
-	 * to be submitted to the queues after the reset is complete.
-	 */
-	if (!ret) {
-		if (gfx_sched_stopped && amdgpu_ring_sched_ready(gfx_ring)) {
+	if (!caller_handles_kernel_queues) {
+		/* Restart the scheduler's work queue for the GFX and page rings
+		 * if they were stopped by this function. This allows new tasks
+		 * to be submitted to the queues after the reset is complete.
+		 */
+		if (!ret) {
+			amdgpu_fence_driver_force_completion(gfx_ring);
 			drm_sched_wqueue_start(&gfx_ring->sched);
-		}
-		if (page_sched_stopped && amdgpu_ring_sched_ready(page_ring)) {
-			drm_sched_wqueue_start(&page_ring->sched);
+			if (adev->sdma.has_page_queue) {
+				amdgpu_fence_driver_force_completion(page_ring);
+				drm_sched_wqueue_start(&page_ring->sched);
+			}
 		}
 	}
 	mutex_unlock(&sdma_instance->engine_reset_mutex);

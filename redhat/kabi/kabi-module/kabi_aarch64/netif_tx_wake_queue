@@ -1,3 +1,3 @@
-#1-
-0x881a3972	netif_tx_wake_queue	vmlinux	EXPORT_SYMBOL	
+#2-
+0xe8427b86	netif_tx_wake_queue	vmlinux	EXPORT_SYMBOL	
 

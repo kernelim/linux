@@ -409,7 +409,6 @@ static int cmp_size_smaller_first(void *priv, const struct list_head *a,
  * radeon_cs_parser_fini() - clean parser states
  * @parser:	parser structure holding parsing context.
  * @error:	error number
- * @backoff:	indicator to backoff the reservation
  *
  * If error is set than unvalidate buffer, otherwise just free memory
  * used by parsing context.
@@ -835,7 +834,7 @@ void radeon_cs_dump_packet(struct radeon_cs_parser *p,
 	ib = p->ib.ptr;
 	idx = pkt->idx;
 	for (i = 0; i <= (pkt->count + 1); i++, idx++)
-		DRM_INFO("ib[%d]=0x%08X\n", idx, ib[idx]);
+		dev_dbg(p->dev, "ib[%d]=0x%08X\n", idx, ib[idx]);
 }
 
 /**

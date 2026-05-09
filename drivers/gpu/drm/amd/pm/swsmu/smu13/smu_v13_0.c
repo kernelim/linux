@@ -288,7 +288,8 @@ int smu_v13_0_check_fw_version(struct smu_context *smu)
 	 * Considering above, we just leave user a verbal message instead
 	 * of halt driver loading.
 	 */
-	if (if_version != smu->smc_driver_if_version) {
+	if (smu->smc_driver_if_version != SMU_IGNORE_IF_VERSION &&
+	    if_version != smu->smc_driver_if_version) {
 		dev_info(adev->dev, "smu driver if version = 0x%08x, smu fw if version = 0x%08x, "
 			 "smu fw program = %d, smu fw version = 0x%08x (%d.%d.%d)\n",
 			 smu->smc_driver_if_version, if_version,
@@ -715,18 +716,6 @@ int smu_v13_0_notify_memory_pool_location(struct smu_context *smu)
 	return ret;
 }
 
-int smu_v13_0_set_min_deep_sleep_dcefclk(struct smu_context *smu, uint32_t clk)
-{
-	int ret;
-
-	ret = smu_cmn_send_smc_msg_with_param(smu,
-					      SMU_MSG_SetMinDeepSleepDcefclk, clk, NULL);
-	if (ret)
-		dev_err(smu->adev->dev, "SMU13 attempt to set divider for DCEFCLK Failed!");
-
-	return ret;
-}
-
 int smu_v13_0_set_driver_table_location(struct smu_context *smu)
 {
 	struct smu_table *driver_table = &smu->smu_table.driver_table;
@@ -763,18 +752,6 @@ int smu_v13_0_set_tool_table_location(struct smu_context *smu)
 							      lower_32_bits(tool_table->mc_address),
 							      NULL);
 	}
-
-	return ret;
-}
-
-int smu_v13_0_init_display_count(struct smu_context *smu, uint32_t count)
-{
-	int ret = 0;
-
-	if (!smu->pm_enabled)
-		return ret;
-
-	ret = smu_cmn_send_smc_msg_with_param(smu, SMU_MSG_NumOfDisplays, count, NULL);
 
 	return ret;
 }
@@ -1077,56 +1054,6 @@ int smu_v13_0_get_gfx_vdd(struct smu_context *smu, uint32_t *value)
 
 	return 0;
 
-}
-
-int
-smu_v13_0_display_clock_voltage_request(struct smu_context *smu,
-					struct pp_display_clock_request
-					*clock_req)
-{
-	enum amd_pp_clock_type clk_type = clock_req->clock_type;
-	int ret = 0;
-	enum smu_clk_type clk_select = 0;
-	uint32_t clk_freq = clock_req->clock_freq_in_khz / 1000;
-
-	if (smu_cmn_feature_is_enabled(smu, SMU_FEATURE_DPM_DCEFCLK_BIT) ||
-	    smu_cmn_feature_is_enabled(smu, SMU_FEATURE_DPM_UCLK_BIT)) {
-		switch (clk_type) {
-		case amd_pp_dcef_clock:
-			clk_select = SMU_DCEFCLK;
-			break;
-		case amd_pp_disp_clock:
-			clk_select = SMU_DISPCLK;
-			break;
-		case amd_pp_pixel_clock:
-			clk_select = SMU_PIXCLK;
-			break;
-		case amd_pp_phy_clock:
-			clk_select = SMU_PHYCLK;
-			break;
-		case amd_pp_mem_clock:
-			clk_select = SMU_UCLK;
-			break;
-		default:
-			dev_info(smu->adev->dev, "[%s] Invalid Clock Type!", __func__);
-			ret = -EINVAL;
-			break;
-		}
-
-		if (ret)
-			goto failed;
-
-		if (clk_select == SMU_UCLK && smu->disable_uclk_switch)
-			return 0;
-
-		ret = smu_v13_0_set_hard_freq_limited_range(smu, clk_select, clk_freq, 0);
-
-		if (clk_select == SMU_UCLK)
-			smu->hard_min_uclk_req_from_dal = clk_freq;
-	}
-
-failed:
-	return ret;
 }
 
 uint32_t smu_v13_0_get_fan_control_mode(struct smu_context *smu)
@@ -1650,45 +1577,6 @@ int smu_v13_0_set_soft_freq_limited_range(struct smu_context *smu,
 	}
 
 out:
-	return ret;
-}
-
-int smu_v13_0_set_hard_freq_limited_range(struct smu_context *smu,
-					  enum smu_clk_type clk_type,
-					  uint32_t min,
-					  uint32_t max)
-{
-	int ret = 0, clk_id = 0;
-	uint32_t param;
-
-	if (min <= 0 && max <= 0)
-		return -EINVAL;
-
-	if (!smu_cmn_clk_dpm_is_enabled(smu, clk_type))
-		return 0;
-
-	clk_id = smu_cmn_to_asic_specific_index(smu,
-						CMN2ASIC_MAPPING_CLK,
-						clk_type);
-	if (clk_id < 0)
-		return clk_id;
-
-	if (max > 0) {
-		param = (uint32_t)((clk_id << 16) | (max & 0xffff));
-		ret = smu_cmn_send_smc_msg_with_param(smu, SMU_MSG_SetHardMaxByFreq,
-						      param, NULL);
-		if (ret)
-			return ret;
-	}
-
-	if (min > 0) {
-		param = (uint32_t)((clk_id << 16) | (min & 0xffff));
-		ret = smu_cmn_send_smc_msg_with_param(smu, SMU_MSG_SetHardMinByFreq,
-						      param, NULL);
-		if (ret)
-			return ret;
-	}
-
 	return ret;
 }
 
@@ -2499,7 +2387,8 @@ int smu_v13_0_update_pcie_parameters(struct smu_context *smu,
 				&dpm_context->dpm_tables.pcie_table;
 	int num_of_levels = pcie_table->num_of_link_levels;
 	uint32_t smu_pcie_arg;
-	int ret, i;
+	int ret = 0;
+	int i;
 
 	if (!num_of_levels)
 		return 0;
@@ -2515,30 +2404,38 @@ int smu_v13_0_update_pcie_parameters(struct smu_context *smu,
 		for (i = 0; i < num_of_levels; i++) {
 			pcie_table->pcie_gen[i] = pcie_gen_cap;
 			pcie_table->pcie_lane[i] = pcie_width_cap;
+			smu_pcie_arg = i << 16;
+			smu_pcie_arg |= pcie_table->pcie_gen[i] << 8;
+			smu_pcie_arg |= pcie_table->pcie_lane[i];
+
+			ret = smu_cmn_send_smc_msg_with_param(smu,
+								SMU_MSG_OverridePcieParameters,
+								smu_pcie_arg,
+								NULL);
+			if (ret)
+				break;
 		}
 	} else {
 		for (i = 0; i < num_of_levels; i++) {
-			if (pcie_table->pcie_gen[i] > pcie_gen_cap)
+			if (pcie_table->pcie_gen[i] > pcie_gen_cap ||
+				pcie_table->pcie_lane[i] > pcie_width_cap) {
 				pcie_table->pcie_gen[i] = pcie_gen_cap;
-			if (pcie_table->pcie_lane[i] > pcie_width_cap)
 				pcie_table->pcie_lane[i] = pcie_width_cap;
+				smu_pcie_arg = i << 16;
+				smu_pcie_arg |= pcie_table->pcie_gen[i] << 8;
+				smu_pcie_arg |= pcie_table->pcie_lane[i];
+
+				ret = smu_cmn_send_smc_msg_with_param(smu,
+									SMU_MSG_OverridePcieParameters,
+									smu_pcie_arg,
+									NULL);
+				if (ret)
+					break;
+			}
 		}
 	}
 
-	for (i = 0; i < num_of_levels; i++) {
-		smu_pcie_arg = i << 16;
-		smu_pcie_arg |= pcie_table->pcie_gen[i] << 8;
-		smu_pcie_arg |= pcie_table->pcie_lane[i];
-
-		ret = smu_cmn_send_smc_msg_with_param(smu,
-						      SMU_MSG_OverridePcieParameters,
-						      smu_pcie_arg,
-						      NULL);
-		if (ret)
-			return ret;
-	}
-
-	return 0;
+	return ret;
 }
 
 int smu_v13_0_disable_pmfw_state(struct smu_context *smu)

@@ -750,7 +750,7 @@ static int br_mdb_replace_group_sg(const struct br_mdb_config *cfg,
 		mod_timer(&pg->timer,
 			  now + brmctx->multicast_membership_interval);
 	else
-		del_timer(&pg->timer);
+		timer_delete(&pg->timer);
 
 	br_mdb_notify(cfg->br->dev, mp, pg, RTM_NEWMDB);
 
@@ -871,7 +871,7 @@ static int br_mdb_add_group_src(const struct br_mdb_config *cfg,
 	    cfg->entry->state == MDB_TEMPORARY)
 		mod_timer(&ent->timer, now + br_multicast_gmi(brmctx));
 	else
-		del_timer(&ent->timer);
+		timer_delete(&ent->timer);
 
 	/* Install a (S, G) forwarding entry for the source. */
 	err = br_mdb_add_group_src_fwd(cfg, &src->addr, brmctx, extack);
@@ -971,7 +971,7 @@ static int br_mdb_replace_group_star_g(const struct br_mdb_config *cfg,
 		mod_timer(&pg->timer,
 			  now + brmctx->multicast_membership_interval);
 	else
-		del_timer(&pg->timer);
+		timer_delete(&pg->timer);
 
 	br_mdb_notify(cfg->br->dev, mp, pg, RTM_NEWMDB);
 

@@ -102,6 +102,49 @@ const char *phy_rate_matching_to_str(int rate_matching)
 EXPORT_SYMBOL_GPL(phy_rate_matching_to_str);
 
 /**
+ * phy_fix_phy_mode_for_mac_delays - Convenience function for fixing PHY
+ * mode based on whether mac adds internal delay
+ *
+ * @interface: The current interface mode of the port
+ * @mac_txid: True if the mac adds internal tx delay
+ * @mac_rxid: True if the mac adds internal rx delay
+ *
+ * Return: fixed PHY mode, or PHY_INTERFACE_MODE_NA if the interface can
+ * not apply the internal delay
+ */
+phy_interface_t phy_fix_phy_mode_for_mac_delays(phy_interface_t interface,
+						bool mac_txid, bool mac_rxid)
+{
+	if (!phy_interface_mode_is_rgmii(interface))
+		return interface;
+
+	if (mac_txid && mac_rxid) {
+		if (interface == PHY_INTERFACE_MODE_RGMII_ID)
+			return PHY_INTERFACE_MODE_RGMII;
+		return PHY_INTERFACE_MODE_NA;
+	}
+
+	if (mac_txid) {
+		if (interface == PHY_INTERFACE_MODE_RGMII_ID)
+			return PHY_INTERFACE_MODE_RGMII_RXID;
+		if (interface == PHY_INTERFACE_MODE_RGMII_TXID)
+			return PHY_INTERFACE_MODE_RGMII;
+		return PHY_INTERFACE_MODE_NA;
+	}
+
+	if (mac_rxid) {
+		if (interface == PHY_INTERFACE_MODE_RGMII_ID)
+			return PHY_INTERFACE_MODE_RGMII_TXID;
+		if (interface == PHY_INTERFACE_MODE_RGMII_RXID)
+			return PHY_INTERFACE_MODE_RGMII;
+		return PHY_INTERFACE_MODE_NA;
+	}
+
+	return interface;
+}
+EXPORT_SYMBOL_GPL(phy_fix_phy_mode_for_mac_delays);
+
+/**
  * phy_interface_num_ports - Return the number of links that can be carried by
  *			     a given MAC-PHY physical link. Returns 0 if this is
  *			     unknown, the number of links else.
@@ -115,6 +158,7 @@ int phy_interface_num_ports(phy_interface_t interface)
 		return 0;
 	case PHY_INTERFACE_MODE_INTERNAL:
 	case PHY_INTERFACE_MODE_MII:
+	case PHY_INTERFACE_MODE_MIILITE:
 	case PHY_INTERFACE_MODE_GMII:
 	case PHY_INTERFACE_MODE_TBI:
 	case PHY_INTERFACE_MODE_REVMII:
@@ -142,6 +186,9 @@ int phy_interface_num_ports(phy_interface_t interface)
 	case PHY_INTERFACE_MODE_RXAUI:
 	case PHY_INTERFACE_MODE_XAUI:
 	case PHY_INTERFACE_MODE_1000BASEKX:
+	case PHY_INTERFACE_MODE_50GBASER:
+	case PHY_INTERFACE_MODE_LAUI:
+	case PHY_INTERFACE_MODE_100GBASEP:
 		return 1;
 	case PHY_INTERFACE_MODE_QSGMII:
 	case PHY_INTERFACE_MODE_QUSGMII:
@@ -375,8 +422,8 @@ static void mmd_phy_indirect(struct mii_bus *bus, int phy_addr, int devad,
 			devad | MII_MMD_CTRL_NOINCR);
 }
 
-static int mmd_phy_read(struct mii_bus *bus, int phy_addr, bool is_c45,
-			int devad, u32 regnum)
+int mmd_phy_read(struct mii_bus *bus, int phy_addr, bool is_c45,
+		 int devad, u32 regnum)
 {
 	if (is_c45)
 		return __mdiobus_c45_read(bus, phy_addr, devad, regnum);
@@ -385,9 +432,10 @@ static int mmd_phy_read(struct mii_bus *bus, int phy_addr, bool is_c45,
 	/* Read the content of the MMD's selected register */
 	return __mdiobus_read(bus, phy_addr, MII_MMD_DATA);
 }
+EXPORT_SYMBOL_GPL(mmd_phy_read);
 
-static int mmd_phy_write(struct mii_bus *bus, int phy_addr, bool is_c45,
-			 int devad, u32 regnum, u16 val)
+int mmd_phy_write(struct mii_bus *bus, int phy_addr, bool is_c45,
+		  int devad, u32 regnum, u16 val)
 {
 	if (is_c45)
 		return __mdiobus_c45_write(bus, phy_addr, devad, regnum, val);
@@ -396,6 +444,7 @@ static int mmd_phy_write(struct mii_bus *bus, int phy_addr, bool is_c45,
 	/* Write the data into MMD's selected register */
 	return __mdiobus_write(bus, phy_addr, MII_MMD_DATA, val);
 }
+EXPORT_SYMBOL_GPL(mmd_phy_write);
 
 /**
  * __phy_read_mmd - Convenience function for reading a register
@@ -484,71 +533,6 @@ int phy_write_mmd(struct phy_device *phydev, int devad, u32 regnum, u16 val)
 	return ret;
 }
 EXPORT_SYMBOL(phy_write_mmd);
-
-/**
- * __phy_package_read_mmd - read MMD reg relative to PHY package base addr
- * @phydev: The phy_device struct
- * @addr_offset: The offset to be added to PHY package base_addr
- * @devad: The MMD to read from
- * @regnum: The register on the MMD to read
- *
- * Convenience helper for reading a register of an MMD on a given PHY
- * using the PHY package base address. The base address is added to
- * the addr_offset value.
- *
- * Same calling rules as for __phy_read();
- *
- * NOTE: It's assumed that the entire PHY package is either C22 or C45.
- */
-int __phy_package_read_mmd(struct phy_device *phydev,
-			   unsigned int addr_offset, int devad,
-			   u32 regnum)
-{
-	int addr = phy_package_address(phydev, addr_offset);
-
-	if (addr < 0)
-		return addr;
-
-	if (regnum > (u16)~0 || devad > 32)
-		return -EINVAL;
-
-	return mmd_phy_read(phydev->mdio.bus, addr, phydev->is_c45, devad,
-			    regnum);
-}
-EXPORT_SYMBOL(__phy_package_read_mmd);
-
-/**
- * __phy_package_write_mmd - write MMD reg relative to PHY package base addr
- * @phydev: The phy_device struct
- * @addr_offset: The offset to be added to PHY package base_addr
- * @devad: The MMD to write to
- * @regnum: The register on the MMD to write
- * @val: value to write to @regnum
- *
- * Convenience helper for writing a register of an MMD on a given PHY
- * using the PHY package base address. The base address is added to
- * the addr_offset value.
- *
- * Same calling rules as for __phy_write();
- *
- * NOTE: It's assumed that the entire PHY package is either C22 or C45.
- */
-int __phy_package_write_mmd(struct phy_device *phydev,
-			    unsigned int addr_offset, int devad,
-			    u32 regnum, u16 val)
-{
-	int addr = phy_package_address(phydev, addr_offset);
-
-	if (addr < 0)
-		return addr;
-
-	if (regnum > (u16)~0 || devad > 32)
-		return -EINVAL;
-
-	return mmd_phy_write(phydev->mdio.bus, addr, phydev->is_c45, devad,
-			     regnum, val);
-}
-EXPORT_SYMBOL(__phy_package_write_mmd);
 
 /**
  * phy_modify_changed - Function for modifying a PHY register

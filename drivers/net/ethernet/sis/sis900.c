@@ -1314,7 +1314,8 @@ static void sis630_set_eq(struct net_device *net_dev, u8 revision)
 
 static void sis900_timer(struct timer_list *t)
 {
-	struct sis900_private *sis_priv = from_timer(sis_priv, t, timer);
+	struct sis900_private *sis_priv = timer_container_of(sis_priv, t,
+							     timer);
 	struct net_device *net_dev = sis_priv->mii_info.dev;
 	struct mii_phy *mii_phy = sis_priv->mii;
 	static const int next_tick = 5*HZ;
@@ -1983,7 +1984,7 @@ static int sis900_close(struct net_device *net_dev)
 	/* Stop the chip's Tx and Rx Status Machine */
 	sw32(cr, RxDIS | TxDIS | sr32(cr));
 
-	del_timer(&sis_priv->timer);
+	timer_delete(&sis_priv->timer);
 
 	free_irq(pdev->irq, net_dev);
 
