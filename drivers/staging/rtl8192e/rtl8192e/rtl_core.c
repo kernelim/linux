@@ -1516,7 +1516,7 @@ static void _rtl92e_watchdog_wq_cb(void *data)
 
 static void _rtl92e_watchdog_timer_cb(struct timer_list *t)
 {
-	struct r8192_priv *priv = from_timer(priv, t, watch_dog_timer);
+	struct r8192_priv *priv = timer_container_of(priv, t, watch_dog_timer);
 
 	schedule_delayed_work(&priv->watch_dog_wq, 0);
 	mod_timer(&priv->watch_dog_timer, jiffies +
@@ -2619,7 +2619,7 @@ module_pci_driver(rtl8192_pci_driver);
 
 void rtl92e_check_rfctrl_gpio_timer(struct timer_list *t)
 {
-	struct r8192_priv *priv = from_timer(priv, t, gpio_polling_timer);
+	struct r8192_priv *priv = timer_container_of(priv, t, gpio_polling_timer);
 
 	priv->polling_timer_on = 1;
 

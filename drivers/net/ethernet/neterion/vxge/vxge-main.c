@@ -2578,7 +2578,7 @@ INTA_MODE:
 
 static void vxge_poll_vp_reset(struct timer_list *t)
 {
-	struct vxgedev *vdev = from_timer(vdev, t, vp_reset_timer);
+	struct vxgedev *vdev = timer_container_of(vdev, t, vp_reset_timer);
 	int i, j = 0;
 
 	for (i = 0; i < vdev->no_of_vpath; i++) {
@@ -2597,7 +2597,7 @@ static void vxge_poll_vp_reset(struct timer_list *t)
 
 static void vxge_poll_vp_lockup(struct timer_list *t)
 {
-	struct vxgedev *vdev = from_timer(vdev, t, vp_lockup_timer);
+	struct vxgedev *vdev = timer_container_of(vdev, t, vp_lockup_timer);
 	enum vxge_hw_status status = VXGE_HW_OK;
 	struct vxge_vpath *vpath;
 	struct vxge_ring *ring;

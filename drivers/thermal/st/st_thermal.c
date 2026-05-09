@@ -167,7 +167,7 @@ static int st_thermal_get_trip_temp(struct thermal_zone_device *th,
 	return 0;
 }
 
-static struct thermal_zone_device_ops st_tz_ops = {
+static const struct thermal_zone_device_ops st_tz_ops = {
 	.get_temp	= st_thermal_get_temp,
 	.get_trip_type	= st_thermal_get_trip_type,
 	.get_trip_temp	= st_thermal_get_trip_temp,

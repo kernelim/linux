@@ -35,20 +35,22 @@ struct saved_msrs {
 };
 
 /*
- * both i386 and x86_64 returns 64-bit value in edx:eax, but gcc's "A"
- * constraint has different meanings. For i386, "A" means exactly
- * edx:eax, while for x86_64 it doesn't mean rdx:rax or edx:eax. Instead,
- * it means rax *or* rdx.
+ * Both i386 and x86_64 returns 64-bit values in edx:eax for certain
+ * instructions, but GCC's "A" constraint has different meanings.
+ * For i386, "A" means exactly edx:eax, while for x86_64 it
+ * means rax *or* rdx.
+ *
+ * These helpers wrapping these semantic differences save one instruction
+ * clearing the high half of 'low':
  */
 #ifdef CONFIG_X86_64
-/* Using 64-bit values saves one instruction clearing the high half of low */
-#define DECLARE_ARGS(val, low, high)	unsigned long low, high
-#define EAX_EDX_VAL(val, low, high)	((low) | (high) << 32)
-#define EAX_EDX_RET(val, low, high)	"=a" (low), "=d" (high)
+# define EAX_EDX_DECLARE_ARGS(val, low, high)	unsigned long low, high
+# define EAX_EDX_VAL(val, low, high)		((low) | (high) << 32)
+# define EAX_EDX_RET(val, low, high)		"=a" (low), "=d" (high)
 #else
-#define DECLARE_ARGS(val, low, high)	unsigned long long val
-#define EAX_EDX_VAL(val, low, high)	(val)
-#define EAX_EDX_RET(val, low, high)	"=A" (val)
+# define EAX_EDX_DECLARE_ARGS(val, low, high)	u64 val
+# define EAX_EDX_VAL(val, low, high)		(val)
+# define EAX_EDX_RET(val, low, high)		"=A" (val)
 #endif
 
 /*
@@ -77,9 +79,9 @@ static inline void do_trace_rdpmc(unsigned int msr, u64 val, int failed) {}
  * think of extending them - you will be slapped with a stinking trout or a frozen
  * shark will reach you, wherever you are! You've been warned.
  */
-static __always_inline unsigned long long __rdmsr(unsigned int msr)
+static __always_inline u64 __rdmsr(unsigned int msr)
 {
-	DECLARE_ARGS(val, low, high);
+	EAX_EDX_DECLARE_ARGS(val, low, high);
 
 	asm volatile("1: rdmsr\n"
 		     "2:\n"
@@ -124,9 +126,9 @@ do {							\
 	__wrmsr((msr), (u32)((u64)(val)),		\
 		       (u32)((u64)(val) >> 32))
 
-static inline unsigned long long native_read_msr(unsigned int msr)
+static inline u64 native_read_msr(unsigned int msr)
 {
-	unsigned long long val;
+	u64 val;
 
 	val = __rdmsr(msr);
 
@@ -136,10 +138,10 @@ static inline unsigned long long native_read_msr(unsigned int msr)
 	return val;
 }
 
-static inline unsigned long long native_read_msr_safe(unsigned int msr,
+static inline u64 native_read_msr_safe(unsigned int msr,
 						      int *err)
 {
-	DECLARE_ARGS(val, low, high);
+	EAX_EDX_DECLARE_ARGS(val, low, high);
 
 	asm volatile("1: rdmsr ; xor %[err],%[err]\n"
 		     "2:\n\t"
@@ -190,9 +192,9 @@ extern int wrmsr_safe_regs(u32 regs[8]);
  * CPU can and will speculatively execute that RDTSC, though, so the
  * results can be non-monotonic if compared on different CPUs.
  */
-static __always_inline unsigned long long rdtsc(void)
+static __always_inline u64 rdtsc(void)
 {
-	DECLARE_ARGS(val, low, high);
+	EAX_EDX_DECLARE_ARGS(val, low, high);
 
 	asm volatile("rdtsc" : EAX_EDX_RET(val, low, high));
 
@@ -207,9 +209,9 @@ static __always_inline unsigned long long rdtsc(void)
  * be impossible to observe non-monotonic rdtsc_unordered() behavior
  * across multiple CPUs as long as the TSC is synced.
  */
-static __always_inline unsigned long long rdtsc_ordered(void)
+static __always_inline u64 rdtsc_ordered(void)
 {
-	DECLARE_ARGS(val, low, high);
+	EAX_EDX_DECLARE_ARGS(val, low, high);
 
 	/*
 	 * The RDTSC instruction is not ordered relative to memory
@@ -235,9 +237,9 @@ static __always_inline unsigned long long rdtsc_ordered(void)
 	return EAX_EDX_VAL(val, low, high);
 }
 
-static inline unsigned long long native_read_pmc(int counter)
+static inline u64 native_read_pmc(int counter)
 {
-	DECLARE_ARGS(val, low, high);
+	EAX_EDX_DECLARE_ARGS(val, low, high);
 
 	asm volatile("rdpmc" : EAX_EDX_RET(val, low, high) : "c" (counter));
 	if (tracepoint_enabled(rdpmc))
@@ -291,7 +293,7 @@ static inline int wrmsr_safe(unsigned int msr, u32 low, u32 high)
 	__err;							\
 })
 
-static inline int rdmsrl_safe(unsigned int msr, unsigned long long *p)
+static inline int rdmsrl_safe(unsigned int msr, u64 *p)
 {
 	int err;
 

@@ -1680,10 +1680,10 @@ void atomisp_wdt(struct timer_list *t)
 	struct atomisp_device *isp;
 
 	if (!IS_ISP2401) {
-		asd = from_timer(asd, t, wdt);
+		asd = timer_container_of(asd, t, wdt);
 		isp = asd->isp;
 	} else {
-		struct atomisp_video_pipe *pipe = from_timer(pipe, t, wdt);
+		struct atomisp_video_pipe *pipe = timer_container_of(pipe, t, wdt);
 
 		asd = pipe->asd;
 		isp = asd->isp;

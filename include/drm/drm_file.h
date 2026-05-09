@@ -300,6 +300,9 @@ struct drm_file {
 	 *
 	 * Mapping of mm object handles to object pointers. Used by the GEM
 	 * subsystem. Protected by @table_lock.
+	 *
+	 * Note that allocated entries might be NULL as a transient state when
+	 * creating or deleting a handle.
 	 */
 	struct idr object_idr;
 
@@ -400,6 +403,13 @@ struct drm_file {
 	 * @client_name_lock: Protects @client_name.
 	 */
 	struct mutex client_name_lock;
+
+	/**
+	 * @debugfs_client:
+	 *
+	 * debugfs directory for each client under a drm node.
+	 */
+	struct dentry *debugfs_client;
 };
 
 /**
@@ -445,6 +455,9 @@ static inline bool drm_is_accel_client(const struct drm_file *file_priv)
 {
 	return file_priv->minor->type == DRM_MINOR_ACCEL;
 }
+
+__printf(2, 3)
+void drm_file_err(struct drm_file *file_priv, const char *fmt, ...);
 
 void drm_file_update_pid(struct drm_file *);
 

@@ -1,0 +1,3 @@
+#8-
+0x0ca6b39c	nvme_unquiesce_io_queues	drivers/nvme/host/nvme-core	EXPORT_SYMBOL_GPL	
+

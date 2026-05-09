@@ -6,9 +6,6 @@
  * Copyright (C) 2018, Red Hat, Inc.
  * Copyright (C) 2019, Google, Inc.
  */
-
-#define _GNU_SOURCE /* for pipe2 */
-
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +19,7 @@
 #include "test_util.h"
 #include "memstress.h"
 #include "guest_modes.h"
+#include "ucall_common.h"
 #include "userfaultfd_util.h"
 
 #ifdef __NR_userfaultfd

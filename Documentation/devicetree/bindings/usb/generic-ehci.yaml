@@ -79,8 +79,11 @@ properties:
           - marvell,ac5-ehci
           - marvell,armada-3700-ehci
           - marvell,orion-ehci
+          - nuvoton,npcm750-ehci
+          - nuvoton,npcm845-ehci
           - ti,ehci-omap
           - usb-ehci
+          - via,vt8500-ehci
 
   reg:
     minItems: 1

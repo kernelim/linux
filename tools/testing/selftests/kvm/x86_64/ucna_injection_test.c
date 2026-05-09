@@ -17,14 +17,11 @@
  * delivered into the guest or not.
  *
  */
-
-#define _GNU_SOURCE /* for program_invocation_short_name */
 #include <pthread.h>
 #include <inttypes.h>
 #include <string.h>
 #include <time.h>
 
-#include "kvm_util_base.h"
 #include "kvm_util.h"
 #include "mce.h"
 #include "processor.h"

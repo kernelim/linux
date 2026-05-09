@@ -174,7 +174,7 @@ static void hostap_event_expired_sta(struct net_device *dev,
 
 static void ap_handle_timer(struct timer_list *t)
 {
-	struct sta_info *sta = from_timer(sta, t, timer);
+	struct sta_info *sta = timer_container_of(sta, t, timer);
 	local_info_t *local;
 	struct ap_data *ap;
 	unsigned long next_time = 0;

@@ -9,6 +9,7 @@
 #include <asm-generic/sections.h>
 
 extern char __head_end[];
+extern char __exittext_begin[], __exittext_end[];
 
 #ifdef __powerpc64__
 

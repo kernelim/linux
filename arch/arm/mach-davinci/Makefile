@@ -4,7 +4,7 @@
 #
 #
 
-ccflags-$(CONFIG_ARCH_MULTIPLATFORM) := -I$(srctree)/$(src)/include
+ccflags-$(CONFIG_ARCH_MULTIPLATFORM) := -I$(src)/include
 
 # Common objects
 obj-y 					:= serial.o usb.o common.o sram.o

@@ -75,6 +75,12 @@ void kvm_arm_init_debug(void)
 	__this_cpu_write(mdcr_el2, kvm_call_hyp_ret(__kvm_get_mdcr_el2));
 }
 
+static int cpu_has_spe(u64 dfr0)
+{
+	return cpuid_feature_extract_unsigned_field(dfr0, ID_AA64DFR0_EL1_PMSVer_SHIFT) &&
+	       !(read_sysreg_s(SYS_PMBIDR_EL1) & PMBIDR_EL1_P);
+}
+
 /**
  * kvm_arm_setup_mdcr_el2 - configure vcpu mdcr_el2 value
  *
@@ -134,6 +140,15 @@ void kvm_arm_vcpu_init_debug(struct kvm_vcpu *vcpu)
 	preempt_disable();
 	kvm_arm_setup_mdcr_el2(vcpu);
 	preempt_enable();
+}
+
+void kvm_debug_init_vhe(void)
+{
+	u64 dfr0 = read_sysreg(id_aa64dfr0_el1);
+
+	/* Clear PMSCR_EL1.E{0,1}SPE which reset to UNKNOWN values. */
+	if (cpu_has_spe(dfr0))
+		write_sysreg_el1(0, SYS_PMSCR);
 }
 
 /**

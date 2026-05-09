@@ -1888,7 +1888,7 @@ void dlm_scan_timeout(struct dlm_ls *ls)
 		}
 		mutex_unlock(&ls->ls_timeout_mutex);
 
-		if (!lkb)
+		if (!do_cancel && !do_warn)
 			break;
 
 		r = lkb->lkb_resource;
@@ -5649,7 +5649,7 @@ static int receive_rcom_lock_args(struct dlm_ls *ls, struct dlm_lkb *lkb,
 
 	if (rl->rl_status == DLM_LKSTS_CONVERT && middle_conversion(lkb)) {
 		/* We may need to adjust grmode depending on other granted locks. */
-		log_limit(ls, "%s %x middle convert gr %d rq %d remote %d %x",
+		log_rinfo(ls, "%s %x middle convert gr %d rq %d remote %d %x",
 			  __func__, lkb->lkb_id, lkb->lkb_grmode,
 			  lkb->lkb_rqmode, lkb->lkb_nodeid, lkb->lkb_remid);
 		rsb_set_flag(r, RSB_RECOVER_CONVERT);

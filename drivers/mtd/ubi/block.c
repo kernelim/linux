@@ -303,7 +303,7 @@ static void ubiblock_do_work(struct work_struct *work)
 	 * the number of sg entries is limited to UBI_MAX_SG_COUNT
 	 * and ubi_read_sg() will check that limit.
 	 */
-	blk_rq_map_sg(req->q, req, pdu->usgl.sg);
+	blk_rq_map_sg(req, pdu->usgl.sg);
 
 	ret = ubiblock_read(pdu);
 

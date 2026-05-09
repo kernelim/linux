@@ -1,3 +1,3 @@
-#7-
-0x58c6b67c	i2c_del_adapter	drivers/i2c/i2c-core	EXPORT_SYMBOL	
+#8-
+0x52b92305	i2c_del_adapter	drivers/i2c/i2c-core	EXPORT_SYMBOL	
 

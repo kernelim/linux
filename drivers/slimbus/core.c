@@ -30,10 +30,10 @@ static const struct slim_device_id *slim_match(const struct slim_device_id *id,
 	return NULL;
 }
 
-static int slim_device_match(struct device *dev, struct device_driver *drv)
+static int slim_device_match(struct device *dev, const struct device_driver *drv)
 {
 	struct slim_device *sbdev = to_slim_device(dev);
-	struct slim_driver *sbdrv = to_slim_driver(drv);
+	const struct slim_driver *sbdrv = to_slim_driver(drv);
 
 	/* Attempt an OF style match first */
 	if (of_driver_match_device(dev, drv))
@@ -336,9 +336,9 @@ static bool slim_eaddr_equal(struct slim_eaddr *a, struct slim_eaddr *b)
 		a->instance == b->instance);
 }
 
-static int slim_match_dev(struct device *dev, void *data)
+static int slim_match_dev(struct device *dev, const void *data)
 {
-	struct slim_eaddr *e_addr = data;
+	const struct slim_eaddr *e_addr = data;
 	struct slim_device *sbdev = to_slim_device(dev);
 
 	return slim_eaddr_equal(&sbdev->e_addr, e_addr);
@@ -384,9 +384,9 @@ struct slim_device *slim_get_device(struct slim_controller *ctrl,
 }
 EXPORT_SYMBOL_GPL(slim_get_device);
 
-static int of_slim_match_dev(struct device *dev, void *data)
+static int of_slim_match_dev(struct device *dev, const void *data)
 {
-	struct device_node *np = data;
+	const struct device_node *np = data;
 	struct slim_device *sbdev = to_slim_device(dev);
 
 	return (sbdev->dev.of_node == np);

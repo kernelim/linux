@@ -4,6 +4,7 @@
 
 #include <linux/types.h>
 #include <linux/stringify.h>
+#include <linux/objtool.h>
 #include <asm/asm.h>
 
 #define ALT_FLAGS_SHIFT		16
@@ -53,16 +54,6 @@
 #define LOCK_PREFIX_HERE ""
 #define LOCK_PREFIX ""
 #endif
-
-/*
- * objtool annotation to ignore the alternatives and only consider the original
- * instruction(s).
- */
-#define ANNOTATE_IGNORE_ALTERNATIVE				\
-	"999:\n\t"						\
-	".pushsection .discard.ignore_alts\n\t"			\
-	".long 999b\n\t"					\
-	".popsection\n\t"
 
 /*
  * The patching flags are part of the upper bits of the @ft_flags parameter when
@@ -117,7 +108,6 @@ extern void callthunks_patch_builtin_calls(void);
 extern void callthunks_patch_module_calls(struct callthunk_sites *sites,
 					  struct module *mod);
 extern void *callthunks_translate_call_dest(void *dest);
-extern bool is_callthunk(void *addr);
 extern int x86_call_depth_emit_accounting(u8 **pprog, void *func, void *ip);
 #else
 static __always_inline void callthunks_patch_builtin_calls(void) {}
@@ -127,10 +117,6 @@ callthunks_patch_module_calls(struct callthunk_sites *sites,
 static __always_inline void *callthunks_translate_call_dest(void *dest)
 {
 	return dest;
-}
-static __always_inline bool is_callthunk(void *addr)
-{
-	return false;
 }
 static __always_inline int x86_call_depth_emit_accounting(u8 **pprog,
 							  void *func, void *ip)
@@ -385,17 +371,6 @@ void nop_func(void);
 	.macro LOCK_PREFIX
 	.endm
 #endif
-
-/*
- * objtool annotation to ignore the alternatives and only consider the original
- * instruction(s).
- */
-.macro ANNOTATE_IGNORE_ALTERNATIVE
-	.Lannotate_\@:
-	.pushsection .discard.ignore_alts
-	.long .Lannotate_\@
-	.popsection
-.endm
 
 /*
  * Issue one struct alt_instr descriptor entry (need to put it into

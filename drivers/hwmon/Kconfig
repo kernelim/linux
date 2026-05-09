@@ -300,7 +300,7 @@ config SENSORS_K8TEMP
 
 config SENSORS_K10TEMP
 	tristate "AMD Family 10h+ temperature sensor"
-	depends on X86 && PCI && AMD_NB
+	depends on X86 && PCI && AMD_NODE
 	help
 	  If you say yes here you get support for the temperature
 	  sensor(s) inside your CPU. Supported are later revisions of
@@ -2190,6 +2190,7 @@ config SENSORS_ACPI_POWER
 config SENSORS_ATK0110
 	tristate "ASUS ATK0110"
 	depends on X86
+	depends on ACPI_EC
 	help
 	  If you say yes here you get support for the ACPI hardware
 	  monitoring interface found in many ASUS motherboards. This

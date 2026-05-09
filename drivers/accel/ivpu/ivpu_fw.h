@@ -39,12 +39,13 @@ struct ivpu_fw_info {
 	u64 read_only_addr;
 	u32 read_only_size;
 	u32 sched_mode;
+	u64 last_heartbeat;
 };
 
 int ivpu_fw_init(struct ivpu_device *vdev);
 void ivpu_fw_fini(struct ivpu_device *vdev);
 void ivpu_fw_load(struct ivpu_device *vdev);
-void ivpu_fw_boot_params_setup(struct ivpu_device *vdev, struct vpu_boot_params *bp);
+void ivpu_fw_boot_params_setup(struct ivpu_device *vdev, struct vpu_boot_params *boot_params);
 
 static inline bool ivpu_fw_is_cold_boot(struct ivpu_device *vdev)
 {

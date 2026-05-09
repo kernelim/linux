@@ -811,7 +811,7 @@ static void SwLedBlink6(struct LED_871x *pLed)
  */
 static void BlinkTimerCallback(struct timer_list *t)
 {
-	struct LED_871x  *pLed = from_timer(pLed, t, BlinkTimer);
+	struct LED_871x  *pLed = timer_container_of(pLed, t, BlinkTimer);
 
 	/* This fixed the crash problem on Fedora 12 when trying to do the
 	 * insmod;ifconfig up;rmmod commands.

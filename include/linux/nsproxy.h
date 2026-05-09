@@ -29,7 +29,7 @@ struct fs_struct;
  * nsproxy is copied.
  */
 struct nsproxy {
-	atomic_t count;
+	refcount_t count;
 	struct uts_namespace *uts_ns;
 	struct ipc_namespace *ipc_ns;
 	struct mnt_namespace *mnt_ns;
@@ -40,6 +40,17 @@ struct nsproxy {
 	struct cgroup_namespace *cgroup_ns;
 };
 extern struct nsproxy init_nsproxy;
+
+#define to_ns_common(__ns)                              \
+	_Generic((__ns),                                \
+		struct cgroup_namespace *: &(__ns->ns), \
+		struct ipc_namespace *:    &(__ns->ns), \
+		struct net *:              &(__ns->ns), \
+		struct pid_namespace *:    &(__ns->ns), \
+		struct mnt_namespace *:    &(__ns->ns), \
+		struct time_namespace *:   &(__ns->ns), \
+		struct user_namespace *:   &(__ns->ns), \
+		struct uts_namespace *:    &(__ns->ns))
 
 /*
  * A structure to encompass all bits needed to install
@@ -102,14 +113,15 @@ int __init nsproxy_cache_init(void);
 
 static inline void put_nsproxy(struct nsproxy *ns)
 {
-	if (atomic_dec_and_test(&ns->count)) {
+	if (refcount_dec_and_test(&ns->count))
 		free_nsproxy(ns);
-	}
 }
 
 static inline void get_nsproxy(struct nsproxy *ns)
 {
-	atomic_inc(&ns->count);
+	refcount_inc(&ns->count);
 }
+
+DEFINE_FREE(put_nsproxy, struct nsproxy *, if (_T) put_nsproxy(_T))
 
 #endif

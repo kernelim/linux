@@ -317,7 +317,7 @@ static inline void ezusb_mod_timer(struct ezusb_priv *upriv,
 
 static void ezusb_request_timerfn(struct timer_list *t)
 {
-	struct request_context *ctx = from_timer(ctx, t, timer);
+	struct request_context *ctx = timer_container_of(ctx, t, timer);
 
 	ctx->outurb->transfer_flags |= URB_ASYNC_UNLINK;
 	if (usb_unlink_urb(ctx->outurb) == -EINPROGRESS) {

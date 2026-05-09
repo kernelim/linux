@@ -21,7 +21,6 @@
  * Specify enums for tracing information.
  */
 #define smb3_tcon_ref_traces					      \
-	EM(netfs_trace_tcon_ref_dec_dfs_refer,		"DEC DfsRef") \
 	EM(netfs_trace_tcon_ref_free,			"FRE       ") \
 	EM(netfs_trace_tcon_ref_free_fail,		"FRE Fail  ") \
 	EM(netfs_trace_tcon_ref_free_ipc,		"FRE Ipc   ") \
@@ -42,6 +41,7 @@
 	EM(netfs_trace_tcon_ref_put_cancelled_close_fid, "PUT Cn-Fid") \
 	EM(netfs_trace_tcon_ref_put_cancelled_mid,	"PUT Cn-Mid") \
 	EM(netfs_trace_tcon_ref_put_mnt_ctx,		"PUT MntCtx") \
+	EM(netfs_trace_tcon_ref_put_dfs_refer,		"PUT DfsRfr") \
 	EM(netfs_trace_tcon_ref_put_reconnect_server,	"PUT Reconn") \
 	EM(netfs_trace_tcon_ref_put_tlink,		"PUT Tlink ") \
 	EM(netfs_trace_tcon_ref_see_cancelled_close,	"SEE Cn-Cls") \
@@ -192,7 +192,7 @@ DEFINE_EVENT(smb3_copy_range_err_class, smb3_##name, \
 	TP_ARGS(xid, src_fid, target_fid, tid, sesid, src_offset, target_offset, len, rc))
 
 DEFINE_SMB3_COPY_RANGE_ERR_EVENT(clone_err);
-/* TODO: Add SMB3_COPY_RANGE_ERR_EVENT(copychunk_err) */
+DEFINE_SMB3_COPY_RANGE_ERR_EVENT(copychunk_err);
 
 DECLARE_EVENT_CLASS(smb3_copy_range_done_class,
 	TP_PROTO(unsigned int xid,
@@ -1322,6 +1322,7 @@ DEFINE_EVENT(smb3_ioctl_class, smb3_##name,  \
 	TP_ARGS(xid, fid, command))
 
 DEFINE_SMB3_IOCTL_EVENT(ioctl);
+DEFINE_SMB3_IOCTL_EVENT(unsupported_ioctl);
 
 DECLARE_EVENT_CLASS(smb3_shutdown_class,
 	TP_PROTO(__u32 flags,

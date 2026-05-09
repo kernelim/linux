@@ -62,13 +62,13 @@ config PINCTRL_INTEL
 
 config PINCTRL_INTEL_PLATFORM
 	tristate "Intel pinctrl and GPIO platform driver"
-	depends on ACPI
 	select PINCTRL_INTEL
 	help
 	  This pinctrl driver provides an interface that allows configuring
 	  of Intel PCH pins and using them as GPIOs. Currently the following
 	  Intel SoCs / platforms require this to be functional:
 	  - Lunar Lake
+	  - Panther Lake
 
 config PINCTRL_ALDERLAKE
 	tristate "Intel Alder Lake pinctrl and GPIO driver"
@@ -163,7 +163,6 @@ config PINCTRL_METEORLAKE
 
 config PINCTRL_METEORPOINT
 	tristate "Intel Meteor Point pinctrl and GPIO driver"
-	depends on ACPI
 	select PINCTRL_INTEL
 	help
 	  Meteor Point is the PCH of Intel Meteor Lake. This pinctrl driver

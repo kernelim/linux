@@ -3,7 +3,7 @@
 # SPEAr Platform specific Makefile
 #
 
-ccflags-$(CONFIG_ARCH_MULTIPLATFORM) := -I$(srctree)/$(src)/include
+ccflags-$(CONFIG_ARCH_MULTIPLATFORM) := -I$(src)/include
 
 # Common support
 obj-y	:= restart.o time.o

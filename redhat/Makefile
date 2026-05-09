@@ -314,11 +314,7 @@ ifeq ("$(ZSTREAM)", "yes")
   BUILDOPTS += +kabidupchk
 else
   ZSTREAM_FLAG = no
-  ifeq ("$(EARLY_YSTREAM)", "yes")
-    YSTREAM_FLAG = early
-  else
-    YSTREAM_FLAG = yes
-  endif
+  YSTREAM_FLAG = yes
 endif
 
 include Makefile.cross
@@ -651,6 +647,7 @@ sources-rh: $(TARBALL) generate-testpatch-tmp setup-source dist-configs-check
 		../Makefile.rhelver \
 		README.rst \
 		kernel-local \
+		kernel.sbat.template \
 		dracut-virt.conf \
 		keys/redhatsecureboot504.cer \
 		$(SOURCES)/

@@ -15,7 +15,7 @@
 /*  */
 static void BlinkTimerCallback(struct timer_list *t)
 {
-	struct LED_871x *pLed = from_timer(pLed, t, BlinkTimer);
+	struct LED_871x *pLed = timer_container_of(pLed, t, BlinkTimer);
 	struct adapter *padapter = pLed->padapter;
 
 	if (padapter->bSurpriseRemoved || padapter->bDriverStopped)

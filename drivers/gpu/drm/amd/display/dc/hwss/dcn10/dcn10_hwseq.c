@@ -55,7 +55,7 @@
 #include "dce/dmub_hw_lock_mgr.h"
 #include "dc_trace.h"
 #include "dce/dmub_outbox.h"
-#include "link.h"
+#include "link_service.h"
 #include "dc_state_priv.h"
 
 #define DC_LOGGER \
@@ -92,6 +92,128 @@ static void print_microsec(struct dc_context *dc_ctx,
 	DTN_INFO("  %11d.%03d",
 			us_x10 / frac,
 			us_x10 % frac);
+}
+
+/*
+ * Delay until we passed busy-until-point to which we can
+ * do necessary locking/programming on consecutive full updates
+ */
+void dcn10_wait_for_pipe_update_if_needed(struct dc *dc, struct pipe_ctx *pipe_ctx, bool is_surface_update_only)
+{
+	struct crtc_position position;
+	struct dc_stream_state *stream = pipe_ctx->stream;
+	unsigned int vpos, frame_count;
+	uint32_t vupdate_start, vupdate_end, vblank_start;
+	unsigned int lines_to_vupdate, us_to_vupdate;
+	unsigned int us_per_line, us_vupdate;
+
+	if (!pipe_ctx->stream ||
+		!pipe_ctx->stream_res.tg ||
+		!pipe_ctx->stream_res.stream_enc)
+		return;
+
+	if (pipe_ctx->prev_odm_pipe &&
+				pipe_ctx->stream)
+		return;
+
+	if (!pipe_ctx->wait_is_required)
+		return;
+
+	struct timing_generator *tg = pipe_ctx->stream_res.tg;
+
+	if (tg->funcs->is_tg_enabled && !tg->funcs->is_tg_enabled(tg))
+		return;
+
+	dc->hwss.calc_vupdate_position(dc, pipe_ctx, &vupdate_start,
+						&vupdate_end);
+
+	dc->hwss.get_position(&pipe_ctx, 1, &position);
+	vpos = position.vertical_count;
+
+	frame_count = tg->funcs->get_frame_count(tg);
+
+	if (frame_count - pipe_ctx->wait_frame_count > 2)
+		return;
+
+	vblank_start = pipe_ctx->pipe_dlg_param.vblank_start;
+
+	if (vpos >= vupdate_start && vupdate_start >= vblank_start)
+		lines_to_vupdate = stream->timing.v_total - vpos + vupdate_start;
+	else
+		lines_to_vupdate = vupdate_start - vpos;
+
+	us_per_line =
+		stream->timing.h_total * 10000u / stream->timing.pix_clk_100hz;
+	us_to_vupdate = lines_to_vupdate * us_per_line;
+
+	if (vupdate_end < vupdate_start)
+		vupdate_end += stream->timing.v_total;
+
+	if (lines_to_vupdate > stream->timing.v_total - vupdate_end + vupdate_start)
+		us_to_vupdate = 0;
+
+	us_vupdate = (vupdate_end - vupdate_start + 1) * us_per_line;
+
+	if (is_surface_update_only && us_to_vupdate + us_vupdate > 200) {
+		//surface updates come in at high irql
+		pipe_ctx->wait_is_required = true;
+		return;
+	}
+
+	fsleep(us_to_vupdate + us_vupdate);
+
+	//clear
+	pipe_ctx->next_vupdate = 0;
+	pipe_ctx->wait_frame_count = 0;
+	pipe_ctx->wait_is_required = false;
+}
+
+/*
+ * On pipe unlock and programming, indicate pipe will be busy
+ * until some frame and line (vupdate), this is required for consecutive
+ * full updates, need to wait for updates
+ * to latch to try and program the next update
+ */
+void dcn10_set_wait_for_update_needed_for_pipe(struct dc *dc, struct pipe_ctx *pipe_ctx)
+{
+	uint32_t vupdate_start, vupdate_end;
+	struct crtc_position position;
+	unsigned int vpos, cur_frame;
+
+	if (!pipe_ctx->stream ||
+		!pipe_ctx->stream_res.tg ||
+		!pipe_ctx->stream_res.stream_enc)
+		return;
+
+	dc->hwss.get_position(&pipe_ctx, 1, &position);
+	vpos = position.vertical_count;
+
+	dc->hwss.calc_vupdate_position(dc, pipe_ctx, &vupdate_start,
+						&vupdate_end);
+
+	struct timing_generator *tg = pipe_ctx->stream_res.tg;
+
+	struct optc *optc1 = DCN10TG_FROM_TG(tg);
+
+	ASSERT(optc1->max_frame_count != 0);
+
+	if (tg->funcs->is_tg_enabled && !tg->funcs->is_tg_enabled(tg))
+		return;
+
+	pipe_ctx->next_vupdate = vupdate_start;
+
+	cur_frame = tg->funcs->get_frame_count(tg);
+
+	if (vpos < vupdate_start) {
+		pipe_ctx->wait_frame_count = cur_frame;
+	} else {
+		if (cur_frame + 1 > optc1->max_frame_count)
+			pipe_ctx->wait_frame_count = cur_frame + 1 - optc1->max_frame_count;
+		else
+			pipe_ctx->wait_frame_count = cur_frame + 1;
+	}
+
+	pipe_ctx->wait_is_required = true;
 }
 
 void dcn10_lock_all_pipes(struct dc *dc,
@@ -202,6 +324,46 @@ static void dcn10_log_hubp_states(struct dc *dc, void *log_ctx)
 			DTN_INFO_MICRO_SEC(s->qos_level_low_wm);
 			DTN_INFO_MICRO_SEC(s->qos_level_high_wm);
 			DTN_INFO("\n");
+		}
+	}
+
+	DTN_INFO("\n=======HUBP FL======\n");
+	static const char * const pLabels[] = {
+		"inst", "Enabled ", "Done ", "adr_mode ", "width ", "mpc_width ",
+		"tmz", "xbar_sel_R", "xbar_sel_G", "xbar_sel_B", "adr_hi ",
+		"adr_low", "REFCYC", "Bias", "Scale", "Mode",
+		"Format", "prefetch"};
+
+	for (i = 0; i < pool->pipe_count; i++) {
+		struct dcn_hubp_state *s = &(TO_DCN10_HUBP(pool->hubps[i])->state);
+		struct dcn_fl_regs_st *fl_regs = &s->fl_regs;
+		struct _vcs_dpi_display_dlg_regs_st *dlg_regs = &s->dlg_attr;
+
+		if (!s->blank_en) {
+			uint32_t values[] = {
+					pool->hubps[i]->inst,
+					fl_regs->lut_enable,
+					fl_regs->lut_done,
+					fl_regs->lut_addr_mode,
+					fl_regs->lut_width,
+					fl_regs->lut_mpc_width,
+					fl_regs->lut_tmz,
+					fl_regs->lut_crossbar_sel_r,
+					fl_regs->lut_crossbar_sel_g,
+					fl_regs->lut_crossbar_sel_b,
+					fl_regs->lut_addr_hi,
+					fl_regs->lut_addr_lo,
+					fl_regs->refcyc_3dlut_group,
+					fl_regs->lut_fl_bias,
+					fl_regs->lut_fl_scale,
+					fl_regs->lut_fl_mode,
+					fl_regs->lut_fl_format,
+					dlg_regs->dst_y_prefetch};
+
+			int num_elements = 18;
+
+			for (int j = 0; j < num_elements; j++)
+				DTN_INFO("%s \t %8xh\n", pLabels[j], values[j]);
 		}
 	}
 
@@ -389,6 +551,60 @@ static void dcn10_log_color_state(struct dc *dc,
 		 dc->caps.color.mpc.num_3dluts,
 		 dc->caps.color.mpc.ogam_ram,
 		 dc->caps.color.mpc.ocsc);
+	DTN_INFO("===== MPC RMCM 3DLUT =====\n");
+	static const char * const pLabels[] = {
+		"MPCC", "SIZE", "MODE", "MODE_CUR", "RD_SEL",
+		"30BIT_EN", "WR_EN_MASK", "RAM_SEL", "OUT_NORM_FACTOR", "FL_SEL",
+		"OUT_OFFSET", "OUT_SCALE", "FL_DONE", "SOFT_UNDERFLOW", "HARD_UNDERFLOW",
+		"MEM_PWR_ST", "FORCE", "DIS", "MODE"};
+
+	for (i = 0; i < pool->mpcc_count; i++) {
+		struct mpcc_state s = {0};
+
+		pool->mpc->funcs->read_mpcc_state(pool->mpc, i, &s);
+		if (s.opp_id != 0xf) {
+			uint32_t values[] = {
+				i,
+				s.rmcm_regs.rmcm_3dlut_size,
+				s.rmcm_regs.rmcm_3dlut_mode,
+				s.rmcm_regs.rmcm_3dlut_mode_cur,
+				s.rmcm_regs.rmcm_3dlut_read_sel,
+				s.rmcm_regs.rmcm_3dlut_30bit_en,
+				s.rmcm_regs.rmcm_3dlut_wr_en_mask,
+				s.rmcm_regs.rmcm_3dlut_ram_sel,
+				s.rmcm_regs.rmcm_3dlut_out_norm_factor,
+				s.rmcm_regs.rmcm_3dlut_fl_sel,
+				s.rmcm_regs.rmcm_3dlut_out_offset_r,
+				s.rmcm_regs.rmcm_3dlut_out_scale_r,
+				s.rmcm_regs.rmcm_3dlut_fl_done,
+				s.rmcm_regs.rmcm_3dlut_fl_soft_underflow,
+				s.rmcm_regs.rmcm_3dlut_fl_hard_underflow,
+				s.rmcm_regs.rmcm_3dlut_mem_pwr_state,
+				s.rmcm_regs.rmcm_3dlut_mem_pwr_force,
+				s.rmcm_regs.rmcm_3dlut_mem_pwr_dis,
+				s.rmcm_regs.rmcm_3dlut_mem_pwr_mode};
+
+			int num_elements = 19;
+
+			for (int j = 0; j < num_elements; j++)
+				DTN_INFO("%s \t %8xh\n", pLabels[j], values[j]);
+		}
+	}
+	DTN_INFO("\n");
+	DTN_INFO("===== MPC RMCM Shaper =====\n");
+	DTN_INFO("MPCC:  CNTL  LUT_MODE  MODE_CUR  WR_EN_MASK  WR_SEL  OFFSET  SCALE  START_B	START_SEG_B	END_B	END_BASE_B	MEM_PWR_ST	FORCE	DIS	MODE\n");
+	for (i = 0; i < pool->mpcc_count; i++) {
+		struct mpcc_state s = {0};
+
+		pool->mpc->funcs->read_mpcc_state(pool->mpc, i, &s);
+		if (s.opp_id != 0xf)
+			DTN_INFO("[%2d]:  %4xh  %4xh  %6xh  %4x  %4x  %4x  %4x  %4x %4xh  %4xh  %6xh  %4x  %4x  %4x  %4x\n",
+				i, s.rmcm_regs.rmcm_cntl, s.rmcm_regs.rmcm_shaper_lut_mode, s.rmcm_regs.rmcm_shaper_mode_cur,
+				s.rmcm_regs.rmcm_shaper_lut_write_en_mask, s.rmcm_regs.rmcm_shaper_lut_write_sel, s.rmcm_regs.rmcm_shaper_offset_b,
+				s.rmcm_regs.rmcm_shaper_scale_b, s.rmcm_regs.rmcm_shaper_rama_exp_region_start_b, s.rmcm_regs.rmcm_shaper_rama_exp_region_start_seg_b,
+				s.rmcm_regs.rmcm_shaper_rama_exp_region_end_b, s.rmcm_regs.rmcm_shaper_rama_exp_region_end_base_b, s.rmcm_regs.rmcm_shaper_mem_pwr_state,
+				s.rmcm_regs.rmcm_shaper_mem_pwr_force, s.rmcm_regs.rmcm_shaper_mem_pwr_dis, s.rmcm_regs.rmcm_shaper_mem_pwr_mode);
+	}
 }
 
 void dcn10_log_hw_state(struct dc *dc,
@@ -2664,7 +2880,6 @@ void dcn10_update_visual_confirm_color(struct dc *dc,
 	struct mpc *mpc = dc->res_pool->mpc;
 
 	if (mpc->funcs->set_bg_color) {
-		memcpy(&pipe_ctx->plane_state->visual_confirm_color, &(pipe_ctx->visual_confirm_color), sizeof(struct tg_color));
 		mpc->funcs->set_bg_color(mpc, &(pipe_ctx->visual_confirm_color), mpcc_id);
 	}
 }
@@ -3132,7 +3347,7 @@ void dcn10_prepare_bandwidth(
 			context,
 			false);
 
-	dc->wm_optimized_required = hubbub->funcs->program_watermarks(hubbub,
+	dc->optimized_required = hubbub->funcs->program_watermarks(hubbub,
 			&context->bw_ctx.bw.dcn.watermarks,
 			dc->res_pool->ref_clocks.dchub_ref_clock_inKhz / 1000,
 			true);
@@ -3448,6 +3663,8 @@ void dcn10_set_cursor_position(struct pipe_ctx *pipe_ctx)
 	int y_plane = pipe_ctx->plane_state->dst_rect.y;
 	int x_pos = pos_cpy.x;
 	int y_pos = pos_cpy.y;
+	int clip_x = pipe_ctx->plane_state->clip_rect.x;
+	int clip_width = pipe_ctx->plane_state->clip_rect.width;
 
 	if ((pipe_ctx->top_pipe != NULL) || (pipe_ctx->bottom_pipe != NULL)) {
 		if ((pipe_ctx->plane_state->src_rect.width != pipe_ctx->plane_res.scl_data.viewport.width) ||
@@ -3466,7 +3683,7 @@ void dcn10_set_cursor_position(struct pipe_ctx *pipe_ctx)
 	 */
 
 	/**
-	 * Translate cursor from stream space to plane space.
+	 * Translate cursor and clip offset from stream space to plane space.
 	 *
 	 * If the cursor is scaled then we need to scale the position
 	 * to be in the approximately correct place. We can't do anything
@@ -3483,6 +3700,10 @@ void dcn10_set_cursor_position(struct pipe_ctx *pipe_ctx)
 				pipe_ctx->plane_state->dst_rect.width;
 		y_pos = (y_pos - y_plane) * pipe_ctx->plane_state->src_rect.height /
 				pipe_ctx->plane_state->dst_rect.height;
+		clip_x = (clip_x - x_plane) * pipe_ctx->plane_state->src_rect.width /
+				pipe_ctx->plane_state->dst_rect.width;
+		clip_width = clip_width * pipe_ctx->plane_state->src_rect.width /
+				pipe_ctx->plane_state->dst_rect.width;
 	}
 
 	/**
@@ -3529,30 +3750,18 @@ void dcn10_set_cursor_position(struct pipe_ctx *pipe_ctx)
 
 
 	if (param.rotation == ROTATION_ANGLE_0) {
-		int viewport_width =
-			pipe_ctx->plane_res.scl_data.viewport.width;
-		int viewport_x =
-			pipe_ctx->plane_res.scl_data.viewport.x;
 
 		if (param.mirror) {
-			if (pipe_split_on || odm_combine_on) {
-				if (pos_cpy.x >= viewport_width + viewport_x) {
-					pos_cpy.x = 2 * viewport_width
-							- pos_cpy.x + 2 * viewport_x;
-				} else {
-					uint32_t temp_x = pos_cpy.x;
-
-					pos_cpy.x = 2 * viewport_x - pos_cpy.x;
-					if (temp_x >= viewport_x +
-						(int)hubp->curs_attr.width || pos_cpy.x
-						<= (int)hubp->curs_attr.width +
-						pipe_ctx->plane_state->src_rect.x) {
-						pos_cpy.x = 2 * viewport_width - temp_x;
-					}
-				}
-			} else {
-				pos_cpy.x = viewport_width - pos_cpy.x + 2 * viewport_x;
-			}
+			/*
+			 * The plane is split into multiple viewports.
+			 * The combination of all viewports span the
+			 * entirety of the clip rect.
+			 *
+			 * For no pipe_split, viewport_width is represents
+			 * the full width of the clip_rect, so we can just
+			 * mirror it.
+			 */
+			pos_cpy.x = clip_width - pos_cpy.x + 2 * clip_x;
 		}
 	}
 	// Swap axis and mirror horizontally
@@ -3622,30 +3831,17 @@ void dcn10_set_cursor_position(struct pipe_ctx *pipe_ctx)
 	}
 	// Mirror horizontally and vertically
 	else if (param.rotation == ROTATION_ANGLE_180) {
-		int viewport_width =
-			pipe_ctx->plane_res.scl_data.viewport.width;
-		int viewport_x =
-			pipe_ctx->plane_res.scl_data.viewport.x;
-
 		if (!param.mirror) {
-			if (pipe_split_on || odm_combine_on) {
-				if (pos_cpy.x >= viewport_width + viewport_x) {
-					pos_cpy.x = 2 * viewport_width
-							- pos_cpy.x + 2 * viewport_x;
-				} else {
-					uint32_t temp_x = pos_cpy.x;
-
-					pos_cpy.x = 2 * viewport_x - pos_cpy.x;
-					if (temp_x >= viewport_x +
-						(int)hubp->curs_attr.width || pos_cpy.x
-						<= (int)hubp->curs_attr.width +
-						pipe_ctx->plane_state->src_rect.x) {
-						pos_cpy.x = temp_x + viewport_width;
-					}
-				}
-			} else {
-				pos_cpy.x = viewport_width - pos_cpy.x + 2 * viewport_x;
-			}
+			/*
+			 * The plane is split into multiple viewports.
+			 * The combination of all viewports span the
+			 * entirety of the clip rect.
+			 *
+			 * For no pipe_split, viewport_width is represents
+			 * the full width of the clip_rect, so we can just
+			 * mirror it.
+			 */
+			pos_cpy.x = clip_width - pos_cpy.x + 2 * clip_x;
 		}
 
 		/**

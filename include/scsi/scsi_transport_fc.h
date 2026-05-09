@@ -383,6 +383,8 @@ struct fc_rport {	/* aka fc_starget_attrs */
  	struct work_struct stgt_delete_work;
 	struct work_struct rport_delete_work;
 	struct request_queue *rqst_q;	/* bsg support */
+
+	RH_KABI_EXTEND(struct workqueue_struct *devloss_work_q)
 } __attribute__((aligned(sizeof(unsigned long))));
 
 /* bit field values for struct fc_rport "flags" field: */
@@ -578,7 +580,7 @@ struct fc_host_attrs {
 	RH_KABI_DEPRECATE(char, work_q_name[20])
 	struct workqueue_struct *work_q;
 	RH_KABI_DEPRECATE(char, devloss_work_q_name[20])
-	struct workqueue_struct *devloss_work_q;
+	RH_KABI_DEPRECATE(struct workqueue_struct *, devloss_work_q)
 
 	/* bsg support */
 	struct request_queue *rqst_q;
@@ -656,8 +658,6 @@ struct fc_host_attrs {
 	(((struct fc_host_attrs *)(x)->shost_data)->npiv_vports_inuse)
 #define fc_host_work_q(x) \
 	(((struct fc_host_attrs *)(x)->shost_data)->work_q)
-#define fc_host_devloss_work_q(x) \
-	(((struct fc_host_attrs *)(x)->shost_data)->devloss_work_q)
 #define fc_host_dev_loss_tmo(x) \
 	(((struct fc_host_attrs *)(x)->shost_data)->dev_loss_tmo)
 #define fc_host_max_ct_payload(x)  \

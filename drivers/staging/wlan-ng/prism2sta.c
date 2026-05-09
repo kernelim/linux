@@ -1997,7 +1997,7 @@ void prism2sta_commsqual_defer(struct work_struct *data)
 
 void prism2sta_commsqual_timer(struct timer_list *t)
 {
-	struct hfa384x *hw = from_timer(hw, t, commsqual_timer);
+	struct hfa384x *hw = timer_container_of(hw, t, commsqual_timer);
 
 	schedule_work(&hw->commsqual_bh);
 }

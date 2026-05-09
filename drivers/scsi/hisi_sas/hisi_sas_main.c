@@ -892,7 +892,7 @@ EXPORT_SYMBOL_GPL(hisi_sas_notify_phy_event);
 
 static void hisi_sas_wait_phyup_timedout(struct timer_list *t)
 {
-	struct hisi_sas_phy *phy = from_timer(phy, t, timer);
+	struct hisi_sas_phy *phy = timer_container_of(phy, t, timer);
 	struct hisi_hba *hisi_hba = phy->hisi_hba;
 	struct device *dev = hisi_hba->dev;
 	int phy_no = phy->sas_phy.id;
@@ -1178,7 +1178,7 @@ static void hisi_sas_task_done(struct sas_task *task)
 
 static void hisi_sas_tmf_timedout(struct timer_list *t)
 {
-	struct sas_task_slow *slow = from_timer(slow, t, timer);
+	struct sas_task_slow *slow = timer_container_of(slow, t, timer);
 	struct sas_task *task = slow->task;
 	unsigned long flags;
 	bool is_completed = true;

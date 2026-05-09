@@ -29,6 +29,7 @@
 #include <linux/init.h>
 #include <linux/types.h>
 #include <linux/slab.h>
+#include <linux/string_choices.h>
 #include <linux/pm_runtime.h>
 #include <linux/sysfs.h>
 #include <linux/acpi.h>
@@ -197,7 +198,7 @@ static int __get_state(acpi_handle handle, u8 *state)
 	cur_state = sta & ACPI_POWER_RESOURCE_STATE_ON;
 
 	acpi_handle_debug(handle, "Power resource is %s\n",
-			  cur_state ? "on" : "off");
+			  str_on_off(cur_state));
 
 	*state = cur_state;
 	return 0;
@@ -240,7 +241,7 @@ static int acpi_power_get_list_state(struct list_head *list, u8 *state)
 			break;
 	}
 
-	pr_debug("Power resource list is %s\n", cur_state ? "on" : "off");
+	pr_debug("Power resource list is %s\n", str_on_off(cur_state));
 
 	*state = cur_state;
 	return 0;
@@ -950,8 +951,8 @@ struct acpi_device *acpi_add_power_resource(acpi_handle handle)
 	mutex_init(&resource->resource_lock);
 	INIT_LIST_HEAD(&resource->list_node);
 	INIT_LIST_HEAD(&resource->dependents);
-	strcpy(acpi_device_name(device), ACPI_POWER_DEVICE_NAME);
-	strcpy(acpi_device_class(device), ACPI_POWER_CLASS);
+	strscpy(acpi_device_name(device), ACPI_POWER_DEVICE_NAME);
+	strscpy(acpi_device_class(device), ACPI_POWER_CLASS);
 	device->power.state = ACPI_STATE_UNKNOWN;
 	device->flags.match_driver = true;
 

@@ -858,7 +858,7 @@ static int hclgevf_set_rss(struct hnae3_handle *handle, const u32 *indir,
 	return hclgevf_set_rss_indir_table(hdev);
 }
 
-static u8 hclgevf_get_rss_hash_bits(struct ethtool_rxnfc *nfc)
+static u8 hclgevf_get_rss_hash_bits(const struct ethtool_rxfh_fields *nfc)
 {
 	u8 hash_sets = nfc->data & RXH_L4_B_0_1 ? HCLGEVF_S_PORT_BIT : 0;
 
@@ -884,7 +884,7 @@ static u8 hclgevf_get_rss_hash_bits(struct ethtool_rxnfc *nfc)
 }
 
 static int hclgevf_init_rss_tuple_cmd(struct hnae3_handle *handle,
-				      struct ethtool_rxnfc *nfc,
+				      const struct ethtool_rxfh_fields *nfc,
 				      struct hclgevf_rss_input_tuple_cmd *req)
 {
 	struct hclgevf_dev *hdev = hclgevf_ae_get_hdev(handle);
@@ -938,7 +938,7 @@ static int hclgevf_init_rss_tuple_cmd(struct hnae3_handle *handle,
 }
 
 static int hclgevf_set_rss_tuple(struct hnae3_handle *handle,
-				 struct ethtool_rxnfc *nfc)
+				 const struct ethtool_rxfh_fields *nfc)
 {
 	struct hclgevf_dev *hdev = hclgevf_ae_get_hdev(handle);
 	struct hclgevf_rss_cfg *rss_cfg = &hdev->rss_cfg;
@@ -1031,7 +1031,7 @@ static u64 hclgevf_convert_rss_tuple(u8 tuple_sets)
 }
 
 static int hclgevf_get_rss_tuple(struct hnae3_handle *handle,
-				 struct ethtool_rxnfc *nfc)
+				 struct ethtool_rxfh_fields *nfc)
 {
 	struct hclgevf_dev *hdev = hclgevf_ae_get_hdev(handle);
 	u8 tuple_sets;

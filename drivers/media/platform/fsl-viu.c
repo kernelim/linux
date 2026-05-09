@@ -336,7 +336,7 @@ static int restart_video_queue(struct viu_dmaqueue *vidq)
 
 static void viu_vid_timeout(struct timer_list *t)
 {
-	struct viu_dev *dev = from_timer(dev, t, vidq.timeout);
+	struct viu_dev *dev = timer_container_of(dev, t, vidq.timeout);
 	struct viu_buf *buf;
 	struct viu_dmaqueue *vidq = &dev->vidq;
 

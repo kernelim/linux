@@ -171,7 +171,7 @@ static int vfio_ccw_sch_probe(struct subchannel *sch)
 		return -ENODEV;
 	}
 
-	parent = kzalloc(struct_size(parent, mdev_types, 1), GFP_KERNEL);
+	parent = kzalloc(sizeof(*parent), GFP_KERNEL);
 	if (!parent)
 		return -ENOMEM;
 
@@ -186,10 +186,10 @@ static int vfio_ccw_sch_probe(struct subchannel *sch)
 
 	parent->mdev_type.sysfs_name = "io";
 	parent->mdev_type.pretty_name = "I/O subchannel (Non-QDIO)";
-	parent->mdev_types[0] = &parent->mdev_type;
+	parent->mdev_types = &parent->mdev_type;
 	ret = mdev_register_parent(&parent->parent, &sch->dev,
 				   &vfio_ccw_mdev_driver,
-				   parent->mdev_types, 1);
+				   &parent->mdev_types, 1);
 	if (ret)
 		goto out_unreg;
 
@@ -488,4 +488,5 @@ static void __exit vfio_ccw_sch_exit(void)
 module_init(vfio_ccw_sch_init);
 module_exit(vfio_ccw_sch_exit);
 
+MODULE_DESCRIPTION("VFIO based Subchannel device driver");
 MODULE_LICENSE("GPL v2");

@@ -93,6 +93,10 @@ Contact:	Martin K. Petersen <martin.petersen@oracle.com>
 Description:
 		Indicates whether a storage device is capable of storing
 		integrity metadata. Set if the device is T10 PI-capable.
+		This flag is set to 1 if the storage media is formatted
+		with T10 Protection Information. If the storage media is
+		not formatted with T10 Protection Information, this flag
+		is set to 0.
 
 
 What:		/sys/block/<disk>/integrity/format
@@ -101,6 +105,13 @@ Contact:	Martin K. Petersen <martin.petersen@oracle.com>
 Description:
 		Metadata format for integrity capable block device.
 		E.g. T10-DIF-TYPE1-CRC.
+		This field describes the type of T10 Protection Information
+		that the block device can send and receive.
+		If the device can store application integrity metadata but
+		no T10 Protection Information profile is used, this field
+		contains "nop".
+		If the device does not support integrity metadata, this
+		field contains "none".
 
 
 What:		/sys/block/<disk>/integrity/protection_interval_bytes
@@ -126,7 +137,17 @@ Date:		June 2008
 Contact:	Martin K. Petersen <martin.petersen@oracle.com>
 Description:
 		Number of bytes of integrity tag space available per
-		512 bytes of data.
+		protection_interval_bytes, which is typically
+		the device's logical block size.
+		This field describes the size of the application tag
+		if the storage device is formatted with T10 Protection
+		Information and permits use of the application tag.
+		The tag_size is reported in bytes and indicates the
+		space available for adding an opaque tag to each block
+		(protection_interval_bytes).
+		If the device does not support T10 Protection Information
+		(even if the device provides application integrity
+		metadata space), this field is set to 0.
 
 
 What:		/sys/block/<disk>/integrity/write_generate
@@ -445,6 +466,21 @@ Description:
 		zone commands, they will be treated as regular block
 		devices and zoned will report "none".
 
+What:		/sys/block/<disk>/queue/max_write_streams
+Date:		November 2024
+Contact:	linux-block@vger.kernel.org
+Description:
+		[RO] Maximum number of write streams supported, 0 if not
+		supported. If supported, valid values are 1 through
+		max_write_streams, inclusive.
+
+What:		/sys/block/<disk>/queue/write_stream_granularity
+Date:		November 2024
+Contact:	linux-block@vger.kernel.org
+Description:
+		[RO] Granularity of a write stream in bytes.  The granularity
+		of a write stream is the size that should be discarded or
+		overwritten together to avoid write amplification in the device.
 
 What:		/sys/block/<disk>/stat
 Date:		February 2008

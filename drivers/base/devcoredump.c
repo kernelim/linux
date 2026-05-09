@@ -132,12 +132,8 @@ static ssize_t devcd_data_write(struct file *filp, struct kobject *kobj,
 	return count;
 }
 
-static struct bin_attribute devcd_attr_data = {
-	.attr = { .name = "data", .mode = S_IRUSR | S_IWUSR, },
-	.size = 0,
-	.read = devcd_data_read,
-	.write = devcd_data_write,
-};
+static struct bin_attribute devcd_attr_data =
+	__BIN_ATTR(data, 0600, devcd_data_read, devcd_data_write, 0);
 
 static struct bin_attribute *devcd_dev_bin_attrs[] = {
 	&devcd_attr_data, NULL,
@@ -186,9 +182,9 @@ static ssize_t disabled_show(const struct class *class, const struct class_attri
  *             mutex_lock(&devcd->mutex);
  *
  *
- * In the above diagram, It looks like disabled_store() would be racing with parallely
+ * In the above diagram, it looks like disabled_store() would be racing with parallelly
  * running devcd_del() and result in memory abort while acquiring devcd->mutex which
- * is called after kfree of devcd memory  after dropping its last reference with
+ * is called after kfree of devcd memory after dropping its last reference with
  * put_device(). However, this will not happens as fn(dev, data) runs
  * with its own reference to device via klist_node so it is not its last reference.
  * so, above situation would not occur.
@@ -285,6 +281,8 @@ static void devcd_free_sgtable(void *data)
  * @offset: start copy from @offset@ bytes from the head of the data
  *	in the given scatterlist
  * @data_len: the length of the data in the sg_table
+ *
+ * Returns: the number of bytes copied
  */
 static ssize_t devcd_read_from_sgtable(char *buffer, loff_t offset,
 				       size_t buf_len, void *data,
@@ -386,6 +384,7 @@ void dev_coredumpm_timeout(struct device *dev, struct module *owner,
 	devcd->devcd_dev.class = &devcd_class;
 
 	mutex_lock(&devcd->mutex);
+	dev_set_uevent_suppress(&devcd->devcd_dev, true);
 	if (device_add(&devcd->devcd_dev))
 		goto put_device;
 
@@ -400,6 +399,8 @@ void dev_coredumpm_timeout(struct device *dev, struct module *owner,
 		              "devcoredump"))
 		dev_warn(dev, "devcoredump create_link failed\n");
 
+	dev_set_uevent_suppress(&devcd->devcd_dev, false);
+	kobject_uevent(&devcd->devcd_dev.kobj, KOBJ_ADD);
 	INIT_DELAYED_WORK(&devcd->del_wk, devcd_del);
 	schedule_delayed_work(&devcd->del_wk, timeout);
 	mutex_unlock(&devcd->mutex);

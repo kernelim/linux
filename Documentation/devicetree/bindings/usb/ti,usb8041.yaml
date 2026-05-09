@@ -17,6 +17,8 @@ properties:
     enum:
       - usb451,8140
       - usb451,8142
+      - usb451,8440
+      - usb451,8442
 
   reg: true
 

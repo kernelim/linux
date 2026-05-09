@@ -6,15 +6,17 @@
 #include <linux/string_helpers.h>
 
 #include <drm/drm_fixed.h>
+#include <drm/drm_print.h>
 
-#include "i915_drv.h"
 #include "i915_reg.h"
+#include "i915_utils.h"
 #include "intel_atomic.h"
 #include "intel_crtc.h"
 #include "intel_ddi.h"
 #include "intel_de.h"
-#include "intel_dp.h"
+#include "intel_display_regs.h"
 #include "intel_display_types.h"
+#include "intel_dp.h"
 #include "intel_fdi.h"
 #include "intel_fdi_regs.h"
 #include "intel_link_bw.h"
@@ -290,34 +292,6 @@ int intel_fdi_link_freq(struct intel_display *display,
 		return display->fdi.pll_freq;
 }
 
-/**
- * intel_fdi_compute_pipe_bpp - compute pipe bpp limited by max link bpp
- * @crtc_state: the crtc state
- *
- * Compute the pipe bpp limited by the CRTC's maximum link bpp. Encoders can
- * call this function during state computation in the simple case where the
- * link bpp will always match the pipe bpp. This is the case for all non-DP
- * encoders, while DP encoders will use a link bpp lower than pipe bpp in case
- * of DSC compression.
- *
- * Returns %true in case of success, %false if pipe bpp would need to be
- * reduced below its valid range.
- */
-bool intel_fdi_compute_pipe_bpp(struct intel_crtc_state *crtc_state)
-{
-	int pipe_bpp = min(crtc_state->pipe_bpp,
-			   fxp_q4_to_int(crtc_state->max_link_bpp_x16));
-
-	pipe_bpp = rounddown(pipe_bpp, 2 * 3);
-
-	if (pipe_bpp < 6 * 3)
-		return false;
-
-	crtc_state->pipe_bpp = pipe_bpp;
-
-	return true;
-}
-
 int ilk_fdi_compute_config(struct intel_crtc *crtc,
 			   struct intel_crtc_state *pipe_config)
 {
@@ -464,7 +438,6 @@ static void ivb_update_fdi_bc_bifurcation(const struct intel_crtc_state *crtc_st
 void intel_fdi_normal_train(struct intel_crtc *crtc)
 {
 	struct intel_display *display = to_intel_display(crtc);
-	struct drm_i915_private *dev_priv = to_i915(display->drm);
 	enum pipe pipe = crtc->pipe;
 	i915_reg_t reg;
 	u32 temp;
@@ -483,7 +456,7 @@ void intel_fdi_normal_train(struct intel_crtc *crtc)
 
 	reg = FDI_RX_CTL(pipe);
 	temp = intel_de_read(display, reg);
-	if (HAS_PCH_CPT(dev_priv)) {
+	if (HAS_PCH_CPT(display)) {
 		temp &= ~FDI_LINK_TRAIN_PATTERN_MASK_CPT;
 		temp |= FDI_LINK_TRAIN_NORMAL_CPT;
 	} else {
@@ -607,7 +580,6 @@ static void gen6_fdi_link_train(struct intel_crtc *crtc,
 				const struct intel_crtc_state *crtc_state)
 {
 	struct intel_display *display = to_intel_display(crtc);
-	struct drm_i915_private *dev_priv = to_i915(display->drm);
 	enum pipe pipe = crtc->pipe;
 	i915_reg_t reg;
 	u32 temp, i, retry;
@@ -647,7 +619,7 @@ static void gen6_fdi_link_train(struct intel_crtc *crtc,
 
 	reg = FDI_RX_CTL(pipe);
 	temp = intel_de_read(display, reg);
-	if (HAS_PCH_CPT(dev_priv)) {
+	if (HAS_PCH_CPT(display)) {
 		temp &= ~FDI_LINK_TRAIN_PATTERN_MASK_CPT;
 		temp |= FDI_LINK_TRAIN_PATTERN_1_CPT;
 	} else {
@@ -698,7 +670,7 @@ static void gen6_fdi_link_train(struct intel_crtc *crtc,
 
 	reg = FDI_RX_CTL(pipe);
 	temp = intel_de_read(display, reg);
-	if (HAS_PCH_CPT(dev_priv)) {
+	if (HAS_PCH_CPT(display)) {
 		temp &= ~FDI_LINK_TRAIN_PATTERN_MASK_CPT;
 		temp |= FDI_LINK_TRAIN_PATTERN_2_CPT;
 	} else {
@@ -911,7 +883,7 @@ void hsw_fdi_link_train(struct intel_encoder *encoder,
 	intel_de_write(display, FDI_RX_CTL(PIPE_A), rx_ctl_val);
 
 	/* Configure Port Clock Select */
-	drm_WARN_ON(display->drm, crtc_state->shared_dpll->info->id != DPLL_ID_SPLL);
+	drm_WARN_ON(display->drm, crtc_state->intel_dpll->info->id != DPLL_ID_SPLL);
 	intel_ddi_enable_clock(encoder, crtc_state);
 
 	/* Start the training iterating through available voltages and emphasis,
@@ -1077,7 +1049,6 @@ void ilk_fdi_pll_disable(struct intel_crtc *crtc)
 void ilk_fdi_disable(struct intel_crtc *crtc)
 {
 	struct intel_display *display = to_intel_display(crtc);
-	struct drm_i915_private *dev_priv = to_i915(crtc->base.dev);
 	enum pipe pipe = crtc->pipe;
 	i915_reg_t reg;
 	u32 temp;
@@ -1096,7 +1067,7 @@ void ilk_fdi_disable(struct intel_crtc *crtc)
 	udelay(100);
 
 	/* Ironlake workaround, disable clock pointer after downing FDI */
-	if (HAS_PCH_IBX(dev_priv))
+	if (HAS_PCH_IBX(display))
 		intel_de_write(display, FDI_RX_CHICKEN(pipe),
 			       FDI_RX_PHASE_SYNC_POINTER_OVR);
 
@@ -1106,7 +1077,7 @@ void ilk_fdi_disable(struct intel_crtc *crtc)
 
 	reg = FDI_RX_CTL(pipe);
 	temp = intel_de_read(display, reg);
-	if (HAS_PCH_CPT(dev_priv)) {
+	if (HAS_PCH_CPT(display)) {
 		temp &= ~FDI_LINK_TRAIN_PATTERN_MASK_CPT;
 		temp |= FDI_LINK_TRAIN_PATTERN_1_CPT;
 	} else {

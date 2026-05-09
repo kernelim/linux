@@ -10,6 +10,14 @@
 #include <asm/ppc-opcode.h>
 #include <asm/export.h>
 
+#ifdef CONFIG_PPC_FTRACE_OUT_OF_LINE
+SYM_DATA(ftrace_ool_stub_text_count, .long CONFIG_PPC_FTRACE_OUT_OF_LINE_NUM_RESERVE)
+
+SYM_START(ftrace_ool_stub_text, SYM_L_GLOBAL, .balign SZL)
+	.space CONFIG_PPC_FTRACE_OUT_OF_LINE_NUM_RESERVE * FTRACE_OOL_STUB_SIZE
+SYM_CODE_END(ftrace_ool_stub_text)
+#endif
+
 .pushsection ".tramp.ftrace.text","aw",@progbits;
 .globl ftrace_tramp_text
 ftrace_tramp_text:
@@ -22,6 +30,7 @@ ftrace_tramp_init:
 	.space 64
 .popsection
 
+#ifndef CONFIG_ARCH_USING_PATCHABLE_FUNCTION_ENTRY
 _GLOBAL(mcount)
 _GLOBAL(_mcount)
 EXPORT_SYMBOL(_mcount)
@@ -29,6 +38,7 @@ EXPORT_SYMBOL(_mcount)
 	mtctr	r12
 	mtlr	r0
 	bctr
+#endif
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 _GLOBAL(return_to_handler)

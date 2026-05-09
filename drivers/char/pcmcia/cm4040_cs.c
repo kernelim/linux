@@ -106,7 +106,7 @@ static inline unsigned char xinb(unsigned short port)
  * the poll syscall. */
 static void cm4040_do_poll(struct timer_list *t)
 {
-	struct reader_dev *dev = from_timer(dev, t, poll_timer);
+	struct reader_dev *dev = timer_container_of(dev, t, poll_timer);
 	unsigned int obs = xinb(dev->p_dev->resource[0]->start
 				+ REG_OFFSET_BUFFER_STATUS);
 

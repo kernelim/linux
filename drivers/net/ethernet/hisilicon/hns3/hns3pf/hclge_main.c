@@ -4228,7 +4228,7 @@ static void hclge_set_def_reset_request(struct hnae3_ae_dev *ae_dev,
 
 static void hclge_reset_timer(struct timer_list *t)
 {
-	struct hclge_dev *hdev = from_timer(hdev, t, reset_timer);
+	struct hclge_dev *hdev = timer_container_of(hdev, t, reset_timer);
 
 	/* if default_reset_request has no value, it means that this reset
 	 * request has already be handled, so just return here
@@ -4779,7 +4779,7 @@ static int hclge_set_rss(struct hnae3_handle *handle, const u32 *indir,
 	return hclge_set_rss_indir_table(hdev, vport->rss_indirection_tbl);
 }
 
-static u8 hclge_get_rss_hash_bits(struct ethtool_rxnfc *nfc)
+static u8 hclge_get_rss_hash_bits(const struct ethtool_rxfh_fields *nfc)
 {
 	u8 hash_sets = nfc->data & RXH_L4_B_0_1 ? HCLGE_S_PORT_BIT : 0;
 
@@ -4805,7 +4805,7 @@ static u8 hclge_get_rss_hash_bits(struct ethtool_rxnfc *nfc)
 }
 
 static int hclge_init_rss_tuple_cmd(struct hclge_vport *vport,
-				    struct ethtool_rxnfc *nfc,
+				    const struct ethtool_rxfh_fields *nfc,
 				    struct hclge_rss_input_tuple_cmd *req)
 {
 	struct hclge_dev *hdev = vport->back;
@@ -4858,7 +4858,7 @@ static int hclge_init_rss_tuple_cmd(struct hclge_vport *vport,
 }
 
 static int hclge_set_rss_tuple(struct hnae3_handle *handle,
-			       struct ethtool_rxnfc *nfc)
+			       const struct ethtool_rxfh_fields *nfc)
 {
 	struct hclge_vport *vport = hclge_get_vport(handle);
 	struct hclge_dev *hdev = vport->back;
@@ -4949,7 +4949,7 @@ static u64 hclge_convert_rss_tuple(u8 tuple_sets)
 }
 
 static int hclge_get_rss_tuple(struct hnae3_handle *handle,
-			       struct ethtool_rxnfc *nfc)
+			       struct ethtool_rxfh_fields *nfc)
 {
 	struct hclge_vport *vport = hclge_get_vport(handle);
 	u8 tuple_sets;
@@ -7905,7 +7905,7 @@ static int hclge_enable_phy_loopback(struct hclge_dev *hdev,
 	if (ret)
 		return ret;
 
-	return phy_loopback(phydev, true);
+	return phy_loopback(phydev, true, 0);
 }
 
 static int hclge_disable_phy_loopback(struct hclge_dev *hdev,
@@ -7913,7 +7913,7 @@ static int hclge_disable_phy_loopback(struct hclge_dev *hdev,
 {
 	int ret;
 
-	ret = phy_loopback(phydev, false);
+	ret = phy_loopback(phydev, false, 0);
 	if (ret)
 		return ret;
 

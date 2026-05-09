@@ -1405,7 +1405,7 @@ static irqreturn_t interrupt_handler(int irq, void *dev_id)
 
 static void do_housekeeping (struct timer_list *t) {
   // just stats at the moment
-  hrz_dev * dev = from_timer(dev, t, housekeeping);
+  hrz_dev * dev = timer_container_of(dev, t, housekeeping);
 
   // collect device-specific (not driver/atm-linux) stats here
   dev->tx_cell_count += rd_regw (dev, TX_CELL_COUNT_OFF);

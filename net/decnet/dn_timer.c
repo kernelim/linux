@@ -49,7 +49,7 @@ void dn_stop_slow_timer(struct sock *sk)
 
 static void dn_slow_timer(struct timer_list *t)
 {
-	struct sock *sk = from_timer(sk, t, sk_timer);
+	struct sock *sk = timer_container_of(sk, t, sk_timer);
 	struct dn_scp *scp = DN_SK(sk);
 
 	bh_lock_sock(sk);

@@ -126,7 +126,7 @@ static void dccp_tasklet_schedule(struct sock *sk)
 
 static void ccid2_hc_tx_rto_expire(struct timer_list *t)
 {
-	struct ccid2_hc_tx_sock *hc = from_timer(hc, t, tx_rtotimer);
+	struct ccid2_hc_tx_sock *hc = timer_container_of(hc, t, tx_rtotimer);
 	struct sock *sk = hc->sk;
 	const bool sender_was_blocked = ccid2_cwnd_network_limited(hc);
 

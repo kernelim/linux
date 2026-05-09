@@ -191,7 +191,7 @@ static int creg_queue_cmd(struct rsxx_cardinfo *card,
 
 static void creg_cmd_timed_out(struct timer_list *t)
 {
-	struct rsxx_cardinfo *card = from_timer(card, t, creg_ctrl.cmd_timer);
+	struct rsxx_cardinfo *card = timer_container_of(card, t, creg_ctrl.cmd_timer);
 	struct creg_cmd *cmd;
 
 	spin_lock(&card->creg_ctrl.lock);

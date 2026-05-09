@@ -26,6 +26,9 @@ static inline void * __must_check ERR_PTR(long error)
 	return (void *) error;
 }
 
+/* Cast an error pointer to __iomem. */
+#define IOMEM_ERR_PTR(error) (__force void __iomem *)ERR_PTR(error)
+
 static inline long __must_check PTR_ERR(__force const void *ptr)
 {
 	return (long) ptr;

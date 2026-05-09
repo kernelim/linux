@@ -940,7 +940,7 @@ static void check_duplex(struct net_device *dev)
 
 static void netdev_timer(struct timer_list *t)
 {
-	struct netdev_private *np = from_timer(np, t, timer);
+	struct netdev_private *np = timer_container_of(np, t, timer);
 	struct net_device *dev = np->mii_if.dev;
 	void __iomem *ioaddr = np->base;
 	int next_tick = 10*HZ;

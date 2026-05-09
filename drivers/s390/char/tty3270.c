@@ -364,7 +364,7 @@ tty3270_write_callback(struct raw3270_request *rq, void *data)
 static void
 tty3270_update(struct timer_list *t)
 {
-	struct tty3270 *tp = from_timer(tp, t, timer);
+	struct tty3270 *tp = timer_container_of(tp, t, timer);
 	static char invalid_sba[2] = { 0xff, 0xff };
 	struct raw3270_request *wrq;
 	unsigned long updated;

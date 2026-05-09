@@ -3,7 +3,7 @@
  *
  * Name: acpixf.h - External interfaces to the ACPI subsystem
  *
- * Copyright (C) 2000 - 2023, Intel Corp.
+ * Copyright (C) 2000 - 2025, Intel Corp.
  *
  *****************************************************************************/
 
@@ -878,10 +878,10 @@ ACPI_EXTERNAL_RETURN_STATUS(acpi_status
 			    acpi_leave_sleep_state_prep(u8 sleep_state))
 ACPI_EXTERNAL_RETURN_STATUS(acpi_status acpi_leave_sleep_state(u8 sleep_state))
 
-ACPI_HW_DEPENDENT_RETURN_STATUS(acpi_status
-				acpi_set_firmware_waking_vector
-				(acpi_physical_address physical_address,
-				 acpi_physical_address physical_address64))
+ACPI_EXTERNAL_RETURN_STATUS(acpi_status
+			    acpi_set_firmware_waking_vector
+			    (acpi_physical_address physical_address,
+			     acpi_physical_address physical_address64))
 /*
  * ACPI Timer interfaces
  */

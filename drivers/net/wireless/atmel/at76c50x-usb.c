@@ -2008,7 +2008,7 @@ exit:
 	return 0;
 }
 
-static int at76_config(struct ieee80211_hw *hw, u32 changed)
+static int at76_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
 {
 	struct at76_priv *priv = hw->priv;
 
@@ -2423,7 +2423,7 @@ static void at76_delete_device(struct at76_priv *priv)
 
 	kfree(priv->bulk_out_buffer);
 
-	del_timer_sync(&ledtrig_tx_timer);
+	timer_delete_sync(&ledtrig_tx_timer);
 
 	kfree_skb(priv->rx_skb);
 

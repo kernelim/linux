@@ -277,7 +277,7 @@ static int pwm_export_child(struct device *parent, struct pwm_device *pwm)
 	return 0;
 }
 
-static int pwm_unexport_match(struct device *child, void *data)
+static int pwm_unexport_match(struct device *child, const void *data)
 {
 	return child_to_pwm_device(child) == data;
 }

@@ -43,7 +43,7 @@ static void do_overwritten(void)
 	return;
 }
 
-static noinline void execute_location(void *dst, bool write)
+static noinline __nocfi void execute_location(void *dst, bool write)
 {
 	void (*func)(void) = dst;
 

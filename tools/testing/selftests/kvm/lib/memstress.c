@@ -2,14 +2,13 @@
 /*
  * Copyright (C) 2020, Google LLC.
  */
-#define _GNU_SOURCE
-
 #include <inttypes.h>
 #include <linux/bitmap.h>
 
 #include "kvm_util.h"
 #include "memstress.h"
 #include "processor.h"
+#include "ucall_common.h"
 
 struct memstress_args memstress_args;
 

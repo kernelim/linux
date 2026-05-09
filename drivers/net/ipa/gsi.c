@@ -1687,10 +1687,10 @@ static int gsi_channel_setup_one(struct gsi *gsi, u32 channel_id)
 	gsi_channel_program(channel, true);
 
 	if (channel->toward_ipa)
-		netif_napi_add_tx(&gsi->dummy_dev, &channel->napi,
+		netif_napi_add_tx(gsi->dummy_dev, &channel->napi,
 				  gsi_channel_poll);
 	else
-		netif_napi_add(&gsi->dummy_dev, &channel->napi,
+		netif_napi_add(gsi->dummy_dev, &channel->napi,
 			       gsi_channel_poll);
 
 	return 0;
@@ -2173,19 +2173,23 @@ int gsi_init(struct gsi *gsi, struct platform_device *pdev,
 	/* GSI uses NAPI on all channels.  Create a dummy network device
 	 * for the channel NAPI contexts to be associated with.
 	 */
-	init_dummy_netdev(&gsi->dummy_dev);
+	gsi->dummy_dev = alloc_netdev_dummy(0);
+	if (!gsi->dummy_dev)
+		return -ENOMEM;
 
 	/* Get GSI memory range and map it */
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "gsi");
 	if (!res) {
 		dev_err(dev, "DT error getting \"gsi\" memory property\n");
-		return -ENODEV;
+		ret = -ENODEV;
+		goto err_reg_exit;
 	}
 
 	size = resource_size(res);
 	if (res->start > U32_MAX || size > U32_MAX - res->start) {
 		dev_err(dev, "DT memory resource \"gsi\" out of range\n");
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err_reg_exit;
 	}
 
 	/* Make sure we can make our pointer adjustment if necessary */
@@ -2193,13 +2197,15 @@ int gsi_init(struct gsi *gsi, struct platform_device *pdev,
 	if (res->start < adjust) {
 		dev_err(dev, "DT memory resource \"gsi\" too low (< %u)\n",
 			adjust);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err_reg_exit;
 	}
 
 	gsi->virt_raw = ioremap(res->start, size);
 	if (!gsi->virt_raw) {
 		dev_err(dev, "unable to remap \"gsi\" memory\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto err_reg_exit;
 	}
 	/* Most registers are accessed using an adjusted register range */
 	gsi->virt = gsi->virt_raw - adjust;
@@ -2222,6 +2228,8 @@ err_irq_exit:
 	gsi_irq_exit(gsi);
 err_iounmap:
 	iounmap(gsi->virt_raw);
+err_reg_exit:
+	free_netdev(gsi->dummy_dev);
 
 	return ret;
 }

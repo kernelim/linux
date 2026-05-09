@@ -119,7 +119,7 @@ EXPORT_SYMBOL(ax25_display_timer);
 static void ax25_heartbeat_expiry(struct timer_list *t)
 {
 	int proto = AX25_PROTO_STD_SIMPLEX;
-	ax25_cb *ax25 = from_timer(ax25, t, timer);
+	ax25_cb *ax25 = timer_container_of(ax25, t, timer);
 
 	if (ax25->ax25_dev)
 		proto = ax25->ax25_dev->values[AX25_VALUES_PROTOCOL];
@@ -143,7 +143,7 @@ static void ax25_heartbeat_expiry(struct timer_list *t)
 
 static void ax25_t1timer_expiry(struct timer_list *t)
 {
-	ax25_cb *ax25 = from_timer(ax25, t, t1timer);
+	ax25_cb *ax25 = timer_container_of(ax25, t, t1timer);
 
 	switch (ax25->ax25_dev->values[AX25_VALUES_PROTOCOL]) {
 	case AX25_PROTO_STD_SIMPLEX:
@@ -162,7 +162,7 @@ static void ax25_t1timer_expiry(struct timer_list *t)
 
 static void ax25_t2timer_expiry(struct timer_list *t)
 {
-	ax25_cb *ax25 = from_timer(ax25, t, t2timer);
+	ax25_cb *ax25 = timer_container_of(ax25, t, t2timer);
 
 	switch (ax25->ax25_dev->values[AX25_VALUES_PROTOCOL]) {
 	case AX25_PROTO_STD_SIMPLEX:
@@ -181,7 +181,7 @@ static void ax25_t2timer_expiry(struct timer_list *t)
 
 static void ax25_t3timer_expiry(struct timer_list *t)
 {
-	ax25_cb *ax25 = from_timer(ax25, t, t3timer);
+	ax25_cb *ax25 = timer_container_of(ax25, t, t3timer);
 
 	switch (ax25->ax25_dev->values[AX25_VALUES_PROTOCOL]) {
 	case AX25_PROTO_STD_SIMPLEX:
@@ -202,7 +202,7 @@ static void ax25_t3timer_expiry(struct timer_list *t)
 
 static void ax25_idletimer_expiry(struct timer_list *t)
 {
-	ax25_cb *ax25 = from_timer(ax25, t, idletimer);
+	ax25_cb *ax25 = timer_container_of(ax25, t, idletimer);
 
 	switch (ax25->ax25_dev->values[AX25_VALUES_PROTOCOL]) {
 	case AX25_PROTO_STD_SIMPLEX:

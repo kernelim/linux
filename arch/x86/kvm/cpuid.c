@@ -837,6 +837,8 @@ void kvm_set_cpu_caps(void)
 	kvm_cpu_cap_check_and_set(X86_FEATURE_TSA_SQ_NO);
 	kvm_cpu_cap_check_and_set(X86_FEATURE_TSA_L1_NO);
 
+	kvm_cpu_cap_check_and_set(X86_FEATURE_PREFETCHI);
+
 	kvm_cpu_cap_init_kvm_defined(CPUID_8000_0022_EAX,
 		F(PERFMON_V2)
 	);

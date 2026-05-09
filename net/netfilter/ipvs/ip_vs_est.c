@@ -98,7 +98,7 @@ static void estimation_timer(struct timer_list *t)
 	struct ip_vs_estimator *e;
 	struct ip_vs_stats *s;
 	u64 rate;
-	struct netns_ipvs *ipvs = from_timer(ipvs, t, est_timer);
+	struct netns_ipvs *ipvs = timer_container_of(ipvs, t, est_timer);
 
 	if (!sysctl_run_estimation(ipvs))
 		goto skip;

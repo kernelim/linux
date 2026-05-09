@@ -6,64 +6,9 @@
 #include <unistd.h>
 #include <asm/orc_types.h>
 #include <objtool/objtool.h>
+#include <objtool/orc.h>
 #include <objtool/warn.h>
 #include <objtool/endianness.h>
-
-static const char *reg_name(unsigned int reg)
-{
-	switch (reg) {
-	case ORC_REG_PREV_SP:
-		return "prevsp";
-	case ORC_REG_DX:
-		return "dx";
-	case ORC_REG_DI:
-		return "di";
-	case ORC_REG_BP:
-		return "bp";
-	case ORC_REG_SP:
-		return "sp";
-	case ORC_REG_R10:
-		return "r10";
-	case ORC_REG_R13:
-		return "r13";
-	case ORC_REG_BP_INDIRECT:
-		return "bp(ind)";
-	case ORC_REG_SP_INDIRECT:
-		return "sp(ind)";
-	default:
-		return "?";
-	}
-}
-
-static const char *orc_type_name(unsigned int type)
-{
-	switch (type) {
-	case ORC_TYPE_UNDEFINED:
-		return "(und)";
-	case ORC_TYPE_END_OF_STACK:
-		return "end";
-	case ORC_TYPE_CALL:
-		return "call";
-	case ORC_TYPE_REGS:
-		return "regs";
-	case ORC_TYPE_REGS_PARTIAL:
-		return "regs (partial)";
-	default:
-		return "?";
-	}
-}
-
-static void print_reg(unsigned int reg, int offset)
-{
-	if (reg == ORC_REG_BP_INDIRECT)
-		printf("(bp%+d)", offset);
-	else if (reg == ORC_REG_SP_INDIRECT)
-		printf("(sp)%+d", offset);
-	else if (reg == ORC_REG_UNDEFINED)
-		printf("(und)");
-	else
-		printf("%s%+d", reg_name(reg), offset);
-}
 
 int orc_dump(const char *filename)
 {
@@ -79,6 +24,7 @@ int orc_dump(const char *filename)
 	GElf_Rela rela;
 	GElf_Sym sym;
 	Elf_Data *data, *symtab = NULL, *rela_orc_ip = NULL;
+	struct elf dummy_elf = {};
 
 	elf_version(EV_CURRENT);
 
@@ -90,41 +36,47 @@ int orc_dump(const char *filename)
 
 	elf = elf_begin(fd, ELF_C_READ_MMAP, NULL);
 	if (!elf) {
-		WARN_ELF("elf_begin");
+		ERROR_ELF("elf_begin");
 		return -1;
 	}
 
+	if (!elf64_getehdr(elf)) {
+		ERROR_ELF("elf64_getehdr");
+		return -1;
+	}
+	memcpy(&dummy_elf.ehdr, elf64_getehdr(elf), sizeof(dummy_elf.ehdr));
+
 	if (elf_getshdrnum(elf, &nr_sections)) {
-		WARN_ELF("elf_getshdrnum");
+		ERROR_ELF("elf_getshdrnum");
 		return -1;
 	}
 
 	if (elf_getshdrstrndx(elf, &shstrtab_idx)) {
-		WARN_ELF("elf_getshdrstrndx");
+		ERROR_ELF("elf_getshdrstrndx");
 		return -1;
 	}
 
 	for (i = 0; i < nr_sections; i++) {
 		scn = elf_getscn(elf, i);
 		if (!scn) {
-			WARN_ELF("elf_getscn");
+			ERROR_ELF("elf_getscn");
 			return -1;
 		}
 
 		if (!gelf_getshdr(scn, &sh)) {
-			WARN_ELF("gelf_getshdr");
+			ERROR_ELF("gelf_getshdr");
 			return -1;
 		}
 
 		name = elf_strptr(elf, shstrtab_idx, sh.sh_name);
 		if (!name) {
-			WARN_ELF("elf_strptr");
+			ERROR_ELF("elf_strptr");
 			return -1;
 		}
 
 		data = elf_getdata(scn, NULL);
 		if (!data) {
-			WARN_ELF("elf_getdata");
+			ERROR_ELF("elf_getdata");
 			return -1;
 		}
 
@@ -147,7 +99,7 @@ int orc_dump(const char *filename)
 		return 0;
 
 	if (orc_size % sizeof(*orc) != 0) {
-		WARN("bad .orc_unwind section size");
+		ERROR("bad .orc_unwind section size");
 		return -1;
 	}
 
@@ -155,36 +107,36 @@ int orc_dump(const char *filename)
 	for (i = 0; i < nr_entries; i++) {
 		if (rela_orc_ip) {
 			if (!gelf_getrela(rela_orc_ip, i, &rela)) {
-				WARN_ELF("gelf_getrela");
+				ERROR_ELF("gelf_getrela");
 				return -1;
 			}
 
 			if (!gelf_getsym(symtab, GELF_R_SYM(rela.r_info), &sym)) {
-				WARN_ELF("gelf_getsym");
+				ERROR_ELF("gelf_getsym");
 				return -1;
 			}
 
 			if (GELF_ST_TYPE(sym.st_info) == STT_SECTION) {
 				scn = elf_getscn(elf, sym.st_shndx);
 				if (!scn) {
-					WARN_ELF("elf_getscn");
+					ERROR_ELF("elf_getscn");
 					return -1;
 				}
 
 				if (!gelf_getshdr(scn, &sh)) {
-					WARN_ELF("gelf_getshdr");
+					ERROR_ELF("gelf_getshdr");
 					return -1;
 				}
 
 				name = elf_strptr(elf, shstrtab_idx, sh.sh_name);
 				if (!name) {
-					WARN_ELF("elf_strptr");
+					ERROR_ELF("elf_strptr");
 					return -1;
 				}
 			} else {
 				name = elf_strptr(elf, strtab_idx, sym.st_name);
 				if (!name) {
-					WARN_ELF("elf_strptr");
+					ERROR_ELF("elf_strptr");
 					return -1;
 				}
 			}
@@ -195,17 +147,7 @@ int orc_dump(const char *filename)
 			printf("%llx:", (unsigned long long)(orc_ip_addr + (i * sizeof(int)) + orc_ip[i]));
 		}
 
-		printf("type:%s", orc_type_name(orc[i].type));
-
-		printf(" sp:");
-
-		print_reg(orc[i].sp_reg, bswap_if_needed(orc[i].sp_offset));
-
-		printf(" bp:");
-
-		print_reg(orc[i].bp_reg, bswap_if_needed(orc[i].bp_offset));
-
-		printf(" signal:%d\n", orc[i].signal);
+		orc_print_dump(&dummy_elf, orc, i);
 	}
 
 	elf_end(elf);

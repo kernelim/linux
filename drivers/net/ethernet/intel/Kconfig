@@ -44,7 +44,7 @@ config E100
 
 config E1000
 	tristate "Intel(R) PRO/1000 Gigabit Ethernet support"
-	depends on PCI
+	depends on PCI && HAS_IOPORT
 	help
 	  This driver supports Intel(R) PRO/1000 gigabit ethernet family of
 	  adapters.  For more information on how to identify your adapter, go
@@ -142,27 +142,11 @@ config IGBVF
 	  To compile this driver as a module, choose M here. The module
 	  will be called igbvf.
 
-config IXGB
-	tristate "Intel(R) PRO/10GbE support"
-	depends on PCI
-	help
-	  This driver supports Intel(R) PRO/10GbE family of adapters for
-	  PCI-X type cards. For PCI-E type cards, use the "ixgbe" driver
-	  instead. For more information on how to identify your adapter, go
-	  to the Adapter & Driver ID Guide that can be located at:
-
-	  <http://support.intel.com>
-
-	  More specific information on configuring the driver is in
-	  <file:Documentation/networking/device_drivers/ethernet/intel/ixgb.rst>.
-
-	  To compile this driver as a module, choose M here. The module
-	  will be called ixgb.
-
 config IXGBE
 	tristate "Intel(R) 10GbE PCI Express adapters support"
 	depends on PCI
 	depends on PTP_1588_CLOCK_OPTIONAL
+	select LIBIE_FWLOG if DEBUG_FS
 	select MDIO
 	select NET_DEVLINK
 	select PLDMFW
@@ -248,6 +232,7 @@ config I40E
 	depends on PCI
 	select AUXILIARY_BUS
 	select LIBIE
+	select LIBIE_ADMINQ
 	select NET_DEVLINK
 	help
 	  This driver supports Intel(R) Ethernet Controller XL710 Family of
@@ -277,6 +262,7 @@ config I40E_DCB
 config IAVF
 	tristate
 	select LIBIE
+	select LIBIE_ADMINQ
 	select NET_SHAPER
 
 config I40EVF
@@ -311,6 +297,8 @@ config ICE
 	select AUXILIARY_BUS
 	select DIMLIB
 	select LIBIE
+	select LIBIE_ADMINQ
+	select LIBIE_FWLOG if DEBUG_FS
 	select NET_DEVLINK
 	select PACKING
 	select PLDMFW
@@ -386,6 +374,7 @@ config IGC
 	default n
 	depends on PCI
 	depends on PTP_1588_CLOCK_OPTIONAL
+	depends on ETHTOOL_NETLINK
 	help
 	  This driver supports Intel(R) Ethernet Controller I225-LM/I225-V
 	  family of adapters.

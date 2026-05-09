@@ -22,8 +22,6 @@
 #define DP83826C_PHY_ID		0x2000a130
 #define DP83826NC_PHY_ID	0x2000a110
 
-#define DP83822_DEVADDR		0x1f
-
 #define MII_DP83822_CTRL_2	0x0a
 #define MII_DP83822_PHYSTS	0x10
 #define MII_DP83822_PHYSCR	0x11
@@ -32,6 +30,7 @@
 #define MII_DP83822_FCSCR	0x14
 #define MII_DP83822_RCSR	0x17
 #define MII_DP83822_RESET_CTRL	0x1f
+#define MII_DP83822_IOCTRL2	0x463
 #define MII_DP83822_GENCFG	0x465
 #define MII_DP83822_SOR1	0x467
 
@@ -106,6 +105,18 @@
 #define DP83822_RX_CLK_SHIFT	BIT(12)
 #define DP83822_TX_CLK_SHIFT	BIT(11)
 
+/* IOCTRL2 bits */
+#define DP83822_IOCTRL2_GPIO2_CLK_SRC		GENMASK(6, 4)
+#define DP83822_IOCTRL2_GPIO2_CTRL		GENMASK(2, 0)
+#define DP83822_IOCTRL2_GPIO2_CTRL_CLK_REF	GENMASK(1, 0)
+
+#define DP83822_CLK_SRC_MAC_IF			0x0
+#define DP83822_CLK_SRC_XI			0x1
+#define DP83822_CLK_SRC_INT_REF			0x2
+#define DP83822_CLK_SRC_RMII_MASTER_MODE_REF	0x4
+#define DP83822_CLK_SRC_FREE_RUNNING		0x6
+#define DP83822_CLK_SRC_RECOVERED		0x7
+
 /* SOR1 mode */
 #define DP83822_STRAP_MODE1	0
 #define DP83822_STRAP_MODE2	BIT(0)
@@ -141,6 +152,8 @@ struct dp83822_private {
 	u8 cfg_dac_minus;
 	u8 cfg_dac_plus;
 	struct ethtool_wolinfo wol;
+	bool set_gpio2_clk_out;
+	u32 gpio2_clk_out;
 };
 
 static int dp83822_config_wol(struct phy_device *phydev,
@@ -159,14 +172,14 @@ static int dp83822_config_wol(struct phy_device *phydev,
 		/* MAC addresses start with byte 5, but stored in mac[0].
 		 * 822 PHYs store bytes 4|5, 2|3, 0|1
 		 */
-		phy_write_mmd(phydev, DP83822_DEVADDR, MII_DP83822_WOL_DA1,
+		phy_write_mmd(phydev, MDIO_MMD_VEND2, MII_DP83822_WOL_DA1,
 			      (mac[1] << 8) | mac[0]);
-		phy_write_mmd(phydev, DP83822_DEVADDR, MII_DP83822_WOL_DA2,
+		phy_write_mmd(phydev, MDIO_MMD_VEND2, MII_DP83822_WOL_DA2,
 			      (mac[3] << 8) | mac[2]);
-		phy_write_mmd(phydev, DP83822_DEVADDR, MII_DP83822_WOL_DA3,
+		phy_write_mmd(phydev, MDIO_MMD_VEND2, MII_DP83822_WOL_DA3,
 			      (mac[5] << 8) | mac[4]);
 
-		value = phy_read_mmd(phydev, DP83822_DEVADDR,
+		value = phy_read_mmd(phydev, MDIO_MMD_VEND2,
 				     MII_DP83822_WOL_CFG);
 		if (wol->wolopts & WAKE_MAGIC)
 			value |= DP83822_WOL_MAGIC_EN;
@@ -174,13 +187,13 @@ static int dp83822_config_wol(struct phy_device *phydev,
 			value &= ~DP83822_WOL_MAGIC_EN;
 
 		if (wol->wolopts & WAKE_MAGICSECURE) {
-			phy_write_mmd(phydev, DP83822_DEVADDR,
+			phy_write_mmd(phydev, MDIO_MMD_VEND2,
 				      MII_DP83822_RXSOP1,
 				      (wol->sopass[1] << 8) | wol->sopass[0]);
-			phy_write_mmd(phydev, DP83822_DEVADDR,
+			phy_write_mmd(phydev, MDIO_MMD_VEND2,
 				      MII_DP83822_RXSOP2,
 				      (wol->sopass[3] << 8) | wol->sopass[2]);
-			phy_write_mmd(phydev, DP83822_DEVADDR,
+			phy_write_mmd(phydev, MDIO_MMD_VEND2,
 				      MII_DP83822_RXSOP3,
 				      (wol->sopass[5] << 8) | wol->sopass[4]);
 			value |= DP83822_WOL_SECURE_ON;
@@ -194,10 +207,10 @@ static int dp83822_config_wol(struct phy_device *phydev,
 		value |= DP83822_WOL_EN | DP83822_WOL_INDICATION_SEL |
 			 DP83822_WOL_CLR_INDICATION;
 
-		return phy_write_mmd(phydev, DP83822_DEVADDR,
+		return phy_write_mmd(phydev, MDIO_MMD_VEND2,
 				     MII_DP83822_WOL_CFG, value);
 	} else {
-		return phy_clear_bits_mmd(phydev, DP83822_DEVADDR,
+		return phy_clear_bits_mmd(phydev, MDIO_MMD_VEND2,
 					  MII_DP83822_WOL_CFG,
 					  DP83822_WOL_EN |
 					  DP83822_WOL_MAGIC_EN |
@@ -226,23 +239,23 @@ static void dp83822_get_wol(struct phy_device *phydev,
 	wol->supported = (WAKE_MAGIC | WAKE_MAGICSECURE);
 	wol->wolopts = 0;
 
-	value = phy_read_mmd(phydev, DP83822_DEVADDR, MII_DP83822_WOL_CFG);
+	value = phy_read_mmd(phydev, MDIO_MMD_VEND2, MII_DP83822_WOL_CFG);
 
 	if (value & DP83822_WOL_MAGIC_EN)
 		wol->wolopts |= WAKE_MAGIC;
 
 	if (value & DP83822_WOL_SECURE_ON) {
-		sopass_val = phy_read_mmd(phydev, DP83822_DEVADDR,
+		sopass_val = phy_read_mmd(phydev, MDIO_MMD_VEND2,
 					  MII_DP83822_RXSOP1);
 		wol->sopass[0] = (sopass_val & 0xff);
 		wol->sopass[1] = (sopass_val >> 8);
 
-		sopass_val = phy_read_mmd(phydev, DP83822_DEVADDR,
+		sopass_val = phy_read_mmd(phydev, MDIO_MMD_VEND2,
 					  MII_DP83822_RXSOP2);
 		wol->sopass[2] = (sopass_val & 0xff);
 		wol->sopass[3] = (sopass_val >> 8);
 
-		sopass_val = phy_read_mmd(phydev, DP83822_DEVADDR,
+		sopass_val = phy_read_mmd(phydev, MDIO_MMD_VEND2,
 					  MII_DP83822_RXSOP3);
 		wol->sopass[4] = (sopass_val & 0xff);
 		wol->sopass[5] = (sopass_val >> 8);
@@ -408,40 +421,46 @@ static int dp83822_read_status(struct phy_device *phydev)
 static int dp83822_config_init(struct phy_device *phydev)
 {
 	struct dp83822_private *dp83822 = phydev->priv;
-	struct device *dev = &phydev->mdio.dev;
 	int rgmii_delay = 0;
 	s32 rx_int_delay;
 	s32 tx_int_delay;
 	int err = 0;
 	int bmcr;
 
+	if (dp83822->set_gpio2_clk_out)
+		phy_modify_mmd(phydev, MDIO_MMD_VEND2, MII_DP83822_IOCTRL2,
+			       DP83822_IOCTRL2_GPIO2_CTRL |
+			       DP83822_IOCTRL2_GPIO2_CLK_SRC,
+			       FIELD_PREP(DP83822_IOCTRL2_GPIO2_CTRL,
+					  DP83822_IOCTRL2_GPIO2_CTRL_CLK_REF) |
+			       FIELD_PREP(DP83822_IOCTRL2_GPIO2_CLK_SRC,
+					  dp83822->gpio2_clk_out));
+
 	if (phy_interface_is_rgmii(phydev)) {
-		rx_int_delay = phy_get_internal_delay(phydev, dev, NULL, 0,
-						      true);
+		rx_int_delay = phy_get_internal_delay(phydev, NULL, 0, true);
 
 		/* Set DP83822_RX_CLK_SHIFT to enable rx clk internal delay */
 		if (rx_int_delay > 0)
 			rgmii_delay |= DP83822_RX_CLK_SHIFT;
 
-		tx_int_delay = phy_get_internal_delay(phydev, dev, NULL, 0,
-						      false);
+		tx_int_delay = phy_get_internal_delay(phydev, NULL, 0, false);
 
 		/* Set DP83822_TX_CLK_SHIFT to disable tx clk internal delay */
 		if (tx_int_delay <= 0)
 			rgmii_delay |= DP83822_TX_CLK_SHIFT;
 
-		err = phy_modify_mmd(phydev, DP83822_DEVADDR, MII_DP83822_RCSR,
+		err = phy_modify_mmd(phydev, MDIO_MMD_VEND2, MII_DP83822_RCSR,
 				     DP83822_RX_CLK_SHIFT | DP83822_TX_CLK_SHIFT, rgmii_delay);
 		if (err)
 			return err;
 
-		err = phy_set_bits_mmd(phydev, DP83822_DEVADDR,
+		err = phy_set_bits_mmd(phydev, MDIO_MMD_VEND2,
 				       MII_DP83822_RCSR, DP83822_RGMII_MODE_EN);
 
 		if (err)
 			return err;
 	} else {
-		err = phy_clear_bits_mmd(phydev, DP83822_DEVADDR,
+		err = phy_clear_bits_mmd(phydev, MDIO_MMD_VEND2,
 					 MII_DP83822_RCSR, DP83822_RGMII_MODE_EN);
 
 		if (err)
@@ -496,7 +515,7 @@ static int dp83822_config_init(struct phy_device *phydev)
 			return err;
 
 		if (dp83822->fx_signal_det_low) {
-			err = phy_set_bits_mmd(phydev, DP83822_DEVADDR,
+			err = phy_set_bits_mmd(phydev, MDIO_MMD_VEND2,
 					       MII_DP83822_GENCFG,
 					       DP83822_SIG_DET_LOW);
 			if (err)
@@ -506,7 +525,7 @@ static int dp83822_config_init(struct phy_device *phydev)
 	return dp83822_config_wol(phydev, &dp83822->wol);
 }
 
-static int dp83826_config_rmii_mode(struct phy_device *phydev)
+static int dp8382x_config_rmii_mode(struct phy_device *phydev)
 {
 	struct device *dev = &phydev->mdio.dev;
 	const char *of_val;
@@ -514,10 +533,10 @@ static int dp83826_config_rmii_mode(struct phy_device *phydev)
 
 	if (!device_property_read_string(dev, "ti,rmii-mode", &of_val)) {
 		if (strcmp(of_val, "master") == 0) {
-			ret = phy_clear_bits_mmd(phydev, DP83822_DEVADDR, MII_DP83822_RCSR,
+			ret = phy_clear_bits_mmd(phydev, MDIO_MMD_VEND2, MII_DP83822_RCSR,
 						 DP83822_RMII_MODE_SEL);
 		} else if (strcmp(of_val, "slave") == 0) {
-			ret = phy_set_bits_mmd(phydev, DP83822_DEVADDR, MII_DP83822_RCSR,
+			ret = phy_set_bits_mmd(phydev, MDIO_MMD_VEND2, MII_DP83822_RCSR,
 					       DP83822_RMII_MODE_SEL);
 		} else {
 			phydev_err(phydev, "Invalid value for ti,rmii-mode property (%s)\n",
@@ -539,16 +558,16 @@ static int dp83826_config_init(struct phy_device *phydev)
 	int ret;
 
 	if (phydev->interface == PHY_INTERFACE_MODE_RMII) {
-		ret = phy_set_bits_mmd(phydev, DP83822_DEVADDR, MII_DP83822_RCSR,
+		ret = phy_set_bits_mmd(phydev, MDIO_MMD_VEND2, MII_DP83822_RCSR,
 				       DP83822_RMII_MODE_EN);
 		if (ret)
 			return ret;
 
-		ret = dp83826_config_rmii_mode(phydev);
+		ret = dp8382x_config_rmii_mode(phydev);
 		if (ret)
 			return ret;
 	} else {
-		ret = phy_clear_bits_mmd(phydev, DP83822_DEVADDR, MII_DP83822_RCSR,
+		ret = phy_clear_bits_mmd(phydev, MDIO_MMD_VEND2, MII_DP83822_RCSR,
 					 DP83822_RMII_MODE_EN);
 		if (ret)
 			return ret;
@@ -560,7 +579,7 @@ static int dp83826_config_init(struct phy_device *phydev)
 				 FIELD_GET(DP83826_CFG_DAC_MINUS_MDIX_5_TO_4,
 					   dp83822->cfg_dac_minus));
 		mask = DP83826_VOD_CFG1_MINUS_MDIX_MASK | DP83826_VOD_CFG1_MINUS_MDI_MASK;
-		ret = phy_modify_mmd(phydev, DP83822_DEVADDR, MII_DP83826_VOD_CFG1, mask, val);
+		ret = phy_modify_mmd(phydev, MDIO_MMD_VEND2, MII_DP83826_VOD_CFG1, mask, val);
 		if (ret)
 			return ret;
 
@@ -568,7 +587,7 @@ static int dp83826_config_init(struct phy_device *phydev)
 				 FIELD_GET(DP83826_CFG_DAC_MINUS_MDIX_3_TO_0,
 					   dp83822->cfg_dac_minus));
 		mask = DP83826_VOD_CFG2_MINUS_MDIX_MASK;
-		ret = phy_modify_mmd(phydev, DP83822_DEVADDR, MII_DP83826_VOD_CFG2, mask, val);
+		ret = phy_modify_mmd(phydev, MDIO_MMD_VEND2, MII_DP83826_VOD_CFG2, mask, val);
 		if (ret)
 			return ret;
 	}
@@ -577,7 +596,7 @@ static int dp83826_config_init(struct phy_device *phydev)
 		val = FIELD_PREP(DP83826_VOD_CFG2_PLUS_MDIX_MASK, dp83822->cfg_dac_plus) |
 		      FIELD_PREP(DP83826_VOD_CFG2_PLUS_MDI_MASK, dp83822->cfg_dac_plus);
 		mask = DP83826_VOD_CFG2_PLUS_MDIX_MASK | DP83826_VOD_CFG2_PLUS_MDI_MASK;
-		ret = phy_modify_mmd(phydev, DP83822_DEVADDR, MII_DP83826_VOD_CFG2, mask, val);
+		ret = phy_modify_mmd(phydev, MDIO_MMD_VEND2, MII_DP83826_VOD_CFG2, mask, val);
 		if (ret)
 			return ret;
 	}
@@ -585,9 +604,14 @@ static int dp83826_config_init(struct phy_device *phydev)
 	return dp83822_config_wol(phydev, &dp83822->wol);
 }
 
-static int dp8382x_config_init(struct phy_device *phydev)
+static int dp83825_config_init(struct phy_device *phydev)
 {
 	struct dp83822_private *dp83822 = phydev->priv;
+	int ret;
+
+	ret = dp8382x_config_rmii_mode(phydev);
+	if (ret)
+		return ret;
 
 	return dp83822_config_wol(phydev, &dp83822->wol);
 }
@@ -608,6 +632,7 @@ static int dp83822_of_init(struct phy_device *phydev)
 {
 	struct dp83822_private *dp83822 = phydev->priv;
 	struct device *dev = &phydev->mdio.dev;
+	const char *of_val;
 
 	/* Signal detection for the PHY is only enabled if the FX_EN and the
 	 * SD_EN pins are strapped. Signal detection can only enabled if FX_EN
@@ -619,6 +644,29 @@ static int dp83822_of_init(struct phy_device *phydev)
 	if (!dp83822->fx_enabled)
 		dp83822->fx_enabled = device_property_present(dev,
 							      "ti,fiber-mode");
+
+	if (!device_property_read_string(dev, "ti,gpio2-clk-out", &of_val)) {
+		if (strcmp(of_val, "mac-if") == 0) {
+			dp83822->gpio2_clk_out = DP83822_CLK_SRC_MAC_IF;
+		} else if (strcmp(of_val, "xi") == 0) {
+			dp83822->gpio2_clk_out = DP83822_CLK_SRC_XI;
+		} else if (strcmp(of_val, "int-ref") == 0) {
+			dp83822->gpio2_clk_out = DP83822_CLK_SRC_INT_REF;
+		} else if (strcmp(of_val, "rmii-master-mode-ref") == 0) {
+			dp83822->gpio2_clk_out = DP83822_CLK_SRC_RMII_MASTER_MODE_REF;
+		} else if (strcmp(of_val, "free-running") == 0) {
+			dp83822->gpio2_clk_out = DP83822_CLK_SRC_FREE_RUNNING;
+		} else if (strcmp(of_val, "recovered") == 0) {
+			dp83822->gpio2_clk_out = DP83822_CLK_SRC_RECOVERED;
+		} else {
+			phydev_err(phydev,
+				   "Invalid value for ti,gpio2-clk-out property (%s)\n",
+				   of_val);
+			return -EINVAL;
+		}
+
+		dp83822->set_gpio2_clk_out = true;
+	}
 
 	return 0;
 }
@@ -668,7 +716,7 @@ static int dp83822_read_straps(struct phy_device *phydev)
 	int fx_enabled, fx_sd_enable;
 	int val;
 
-	val = phy_read_mmd(phydev, DP83822_DEVADDR, MII_DP83822_SOR1);
+	val = phy_read_mmd(phydev, MDIO_MMD_VEND2, MII_DP83822_SOR1);
 	if (val < 0)
 		return val;
 
@@ -743,7 +791,7 @@ static int dp83822_suspend(struct phy_device *phydev)
 {
 	int value;
 
-	value = phy_read_mmd(phydev, DP83822_DEVADDR, MII_DP83822_WOL_CFG);
+	value = phy_read_mmd(phydev, MDIO_MMD_VEND2, MII_DP83822_WOL_CFG);
 
 	if (!(value & DP83822_WOL_EN))
 		genphy_suspend(phydev);
@@ -757,9 +805,9 @@ static int dp83822_resume(struct phy_device *phydev)
 
 	genphy_resume(phydev);
 
-	value = phy_read_mmd(phydev, DP83822_DEVADDR, MII_DP83822_WOL_CFG);
+	value = phy_read_mmd(phydev, MDIO_MMD_VEND2, MII_DP83822_WOL_CFG);
 
-	phy_write_mmd(phydev, DP83822_DEVADDR, MII_DP83822_WOL_CFG, value |
+	phy_write_mmd(phydev, MDIO_MMD_VEND2, MII_DP83822_WOL_CFG, value |
 		      DP83822_WOL_CLR_INDICATION);
 
 	return 0;
@@ -774,6 +822,22 @@ static int dp83822_resume(struct phy_device *phydev)
 		.soft_reset	= dp83822_phy_reset,		\
 		.config_init	= dp83822_config_init,		\
 		.read_status	= dp83822_read_status,		\
+		.get_wol = dp83822_get_wol,			\
+		.set_wol = dp83822_set_wol,			\
+		.config_intr = dp83822_config_intr,		\
+		.handle_interrupt = dp83822_handle_interrupt,	\
+		.suspend = dp83822_suspend,			\
+		.resume = dp83822_resume,			\
+	}
+
+#define DP83825_PHY_DRIVER(_id, _name)				\
+	{							\
+		PHY_ID_MATCH_MODEL(_id),			\
+		.name		= (_name),			\
+		/* PHY_BASIC_FEATURES */			\
+		.probe          = dp8382x_probe,		\
+		.soft_reset	= dp83822_phy_reset,		\
+		.config_init	= dp83825_config_init,		\
 		.get_wol = dp83822_get_wol,			\
 		.set_wol = dp83822_set_wol,			\
 		.config_intr = dp83822_config_intr,		\
@@ -798,34 +862,18 @@ static int dp83822_resume(struct phy_device *phydev)
 		.resume = dp83822_resume,			\
 	}
 
-#define DP8382X_PHY_DRIVER(_id, _name)				\
-	{							\
-		PHY_ID_MATCH_MODEL(_id),			\
-		.name		= (_name),			\
-		/* PHY_BASIC_FEATURES */			\
-		.probe          = dp8382x_probe,		\
-		.soft_reset	= dp83822_phy_reset,		\
-		.config_init	= dp8382x_config_init,		\
-		.get_wol = dp83822_get_wol,			\
-		.set_wol = dp83822_set_wol,			\
-		.config_intr = dp83822_config_intr,		\
-		.handle_interrupt = dp83822_handle_interrupt,	\
-		.suspend = dp83822_suspend,			\
-		.resume = dp83822_resume,			\
-	}
-
 static struct phy_driver dp83822_driver[] = {
 	DP83822_PHY_DRIVER(DP83822_PHY_ID, "TI DP83822"),
-	DP8382X_PHY_DRIVER(DP83825I_PHY_ID, "TI DP83825I"),
+	DP83825_PHY_DRIVER(DP83825I_PHY_ID, "TI DP83825I"),
+	DP83825_PHY_DRIVER(DP83825S_PHY_ID, "TI DP83825S"),
+	DP83825_PHY_DRIVER(DP83825CM_PHY_ID, "TI DP83825M"),
+	DP83825_PHY_DRIVER(DP83825CS_PHY_ID, "TI DP83825CS"),
 	DP83826_PHY_DRIVER(DP83826C_PHY_ID, "TI DP83826C"),
 	DP83826_PHY_DRIVER(DP83826NC_PHY_ID, "TI DP83826NC"),
-	DP8382X_PHY_DRIVER(DP83825S_PHY_ID, "TI DP83825S"),
-	DP8382X_PHY_DRIVER(DP83825CM_PHY_ID, "TI DP83825M"),
-	DP8382X_PHY_DRIVER(DP83825CS_PHY_ID, "TI DP83825CS"),
 };
 module_phy_driver(dp83822_driver);
 
-static struct mdio_device_id __maybe_unused dp83822_tbl[] = {
+static const struct mdio_device_id __maybe_unused dp83822_tbl[] = {
 	{ DP83822_PHY_ID, 0xfffffff0 },
 	{ DP83825I_PHY_ID, 0xfffffff0 },
 	{ DP83826C_PHY_ID, 0xfffffff0 },

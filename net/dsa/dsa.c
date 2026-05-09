@@ -153,7 +153,7 @@ void dsa_tag_driver_put(const struct dsa_device_ops *ops)
 	mutex_unlock(&dsa_tag_drivers_lock);
 }
 
-static int dev_is_class(struct device *dev, void *class)
+static int dev_is_class(struct device *dev, const void *class)
 {
 	if (dev->class != NULL && !strcmp(dev->class->name, class))
 		return 1;

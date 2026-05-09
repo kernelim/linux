@@ -169,7 +169,7 @@ static int lm3554_set_config1(struct lm3554 *flash)
  */
 static void lm3554_flash_off_delay(struct timer_list *t)
 {
-	struct lm3554 *flash = from_timer(flash, t, flash_off_delay);
+	struct lm3554 *flash = timer_container_of(flash, t, flash_off_delay);
 	struct lm3554_platform_data *pdata = flash->pdata;
 
 	gpiod_set_value(pdata->gpio_strobe, 0);

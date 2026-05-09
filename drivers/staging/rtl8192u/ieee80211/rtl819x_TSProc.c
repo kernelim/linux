@@ -25,7 +25,7 @@ static void TsInactTimeout(struct timer_list *unused)
  ********************************************************************************************************************/
 static void RxPktPendingTimeout(struct timer_list *t)
 {
-	struct rx_ts_record     *pRxTs = from_timer(pRxTs, t, rx_pkt_pending_timer);
+	struct rx_ts_record     *pRxTs = timer_container_of(pRxTs, t, rx_pkt_pending_timer);
 	struct ieee80211_device *ieee = container_of(pRxTs, struct ieee80211_device, RxTsRecord[pRxTs->num]);
 
 	struct rx_reorder_entry	*pReorderEntry = NULL;
@@ -92,7 +92,7 @@ static void RxPktPendingTimeout(struct timer_list *t)
  ********************************************************************************************************************/
 static void TsAddBaProcess(struct timer_list *t)
 {
-	struct tx_ts_record *pTxTs = from_timer(pTxTs, t, ts_add_ba_timer);
+	struct tx_ts_record *pTxTs = timer_container_of(pTxTs, t, ts_add_ba_timer);
 	u8 num = pTxTs->num;
 	struct ieee80211_device *ieee = container_of(pTxTs, struct ieee80211_device, TxTsRecord[num]);
 

@@ -1,3 +1,3 @@
-#7-
-0x4fbc2cc9	pci_wait_for_pending_transaction	vmlinux	EXPORT_SYMBOL	
+#8-
+0xef0cc794	pci_wait_for_pending_transaction	vmlinux	EXPORT_SYMBOL	
 

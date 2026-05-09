@@ -288,7 +288,7 @@ void *callthunks_translate_call_dest(void *dest)
 }
 
 #ifdef CONFIG_BPF_JIT
-bool is_callthunk(void *addr)
+static bool is_callthunk(void *addr)
 {
 	unsigned int tmpl_size = SKL_TMPL_SIZE;
 	u8 insn_buff[MAX_PATCH_LEN];

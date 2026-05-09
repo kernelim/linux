@@ -393,7 +393,7 @@ static void rtllib_send_beacon(struct rtllib_device *ieee)
 static void rtllib_send_beacon_cb(struct timer_list *t)
 {
 	struct rtllib_device *ieee =
-		from_timer(ieee, t, beacon_timer);
+		timer_container_of(ieee, t, beacon_timer);
 	unsigned long flags;
 
 	spin_lock_irqsave(&ieee->beacon_lock, flags);
@@ -1419,7 +1419,7 @@ static void rtllib_associate_abort(struct rtllib_device *ieee)
 
 static void rtllib_associate_abort_cb(struct timer_list *t)
 {
-	struct rtllib_device *dev = from_timer(dev, t, associate_timer);
+	struct rtllib_device *dev = timer_container_of(dev, t, associate_timer);
 
 	rtllib_associate_abort(dev);
 }

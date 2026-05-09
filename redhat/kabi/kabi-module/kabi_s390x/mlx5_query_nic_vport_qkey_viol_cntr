@@ -1,0 +1,3 @@
+#8-
+0x5b6d083c	mlx5_query_nic_vport_qkey_viol_cntr	drivers/net/ethernet/mellanox/mlx5/core/mlx5_core	EXPORT_SYMBOL_GPL	
+

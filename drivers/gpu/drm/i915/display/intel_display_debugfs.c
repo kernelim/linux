@@ -4,15 +4,16 @@
  */
 
 #include <linux/debugfs.h>
+#include <linux/string_choices.h>
 #include <linux/string_helpers.h>
 
 #include <drm/drm_debugfs.h>
+#include <drm/drm_drv.h>
 #include <drm/drm_edid.h>
+#include <drm/drm_file.h>
 #include <drm/drm_fourcc.h>
 
 #include "hsw_ips.h"
-#include "i915_drv.h"
-#include "i915_irq.h"
 #include "i915_reg.h"
 #include "i9xx_wm_regs.h"
 #include "intel_alpm.h"
@@ -24,6 +25,8 @@
 #include "intel_display_debugfs_params.h"
 #include "intel_display_power.h"
 #include "intel_display_power_well.h"
+#include "intel_display_regs.h"
+#include "intel_display_rpm.h"
 #include "intel_display_types.h"
 #include "intel_dmc.h"
 #include "intel_dp.h"
@@ -37,6 +40,7 @@
 #include "intel_hdcp.h"
 #include "intel_hdmi.h"
 #include "intel_hotplug.h"
+#include "intel_link_bw.h"
 #include "intel_panel.h"
 #include "intel_pps.h"
 #include "intel_psr.h"
@@ -53,6 +57,8 @@ static int intel_display_caps(struct seq_file *m, void *data)
 {
 	struct intel_display *display = node_to_intel_display(m->private);
 	struct drm_printer p = drm_seq_file_printer(m);
+
+	drm_printf(&p, "PCH type: %d\n", INTEL_PCH_TYPE(display));
 
 	intel_display_device_info_print(DISPLAY_INFO(display),
 					DISPLAY_RUNTIME_INFO(display), &p);
@@ -81,7 +87,6 @@ static int i915_frontbuffer_tracking(struct seq_file *m, void *unused)
 static int i915_sr_status(struct seq_file *m, void *unused)
 {
 	struct intel_display *display = node_to_intel_display(m->private);
-	struct drm_i915_private *dev_priv = to_i915(display->drm);
 	intel_wakeref_t wakeref;
 	bool sr_enabled = false;
 
@@ -89,7 +94,7 @@ static int i915_sr_status(struct seq_file *m, void *unused)
 
 	if (DISPLAY_VER(display) >= 9)
 		/* no global SR status; inspect per-plane WM */;
-	else if (HAS_PCH_SPLIT(dev_priv))
+	else if (HAS_PCH_SPLIT(display))
 		sr_enabled = intel_de_read(display, WM1_LP_ILK) & WM_LP_ENABLE;
 	else if (display->platform.i965gm || display->platform.g4x ||
 		 display->platform.i945g || display->platform.i945gm)
@@ -554,6 +559,8 @@ static void intel_crtc_info(struct seq_file *m, struct intel_crtc *crtc)
 	seq_printf(m, "\tpipe src=" DRM_RECT_FMT ", dither=%s, bpp=%d\n",
 		   DRM_RECT_ARG(&crtc_state->pipe_src),
 		   str_yes_no(crtc_state->dither), crtc_state->pipe_bpp);
+	seq_printf(m, "\tport_clock=%d, lane_count=%d\n",
+		   crtc_state->port_clock, crtc_state->lane_count);
 
 	intel_scaler_info(m, crtc);
 
@@ -580,13 +587,12 @@ static void intel_crtc_info(struct seq_file *m, struct intel_crtc *crtc)
 static int i915_display_info(struct seq_file *m, void *unused)
 {
 	struct intel_display *display = node_to_intel_display(m->private);
-	struct drm_i915_private *dev_priv = to_i915(display->drm);
 	struct intel_crtc *crtc;
 	struct drm_connector *connector;
 	struct drm_connector_list_iter conn_iter;
-	intel_wakeref_t wakeref;
+	struct ref_tracker *wakeref;
 
-	wakeref = intel_runtime_pm_get(&dev_priv->runtime_pm);
+	wakeref = intel_display_rpm_get(display);
 
 	drm_modeset_lock_all(display->drm);
 
@@ -605,18 +611,7 @@ static int i915_display_info(struct seq_file *m, void *unused)
 
 	drm_modeset_unlock_all(display->drm);
 
-	intel_runtime_pm_put(&dev_priv->runtime_pm, wakeref);
-
-	return 0;
-}
-
-static int i915_display_capabilities(struct seq_file *m, void *unused)
-{
-	struct intel_display *display = node_to_intel_display(m->private);
-	struct drm_printer p = drm_seq_file_printer(m);
-
-	intel_display_device_info_print(DISPLAY_INFO(display),
-					DISPLAY_RUNTIME_INFO(display), &p);
+	intel_display_rpm_put(display, wakeref);
 
 	return 0;
 }
@@ -625,7 +620,7 @@ static int i915_shared_dplls_info(struct seq_file *m, void *unused)
 {
 	struct intel_display *display = node_to_intel_display(m->private);
 	struct drm_printer p = drm_seq_file_printer(m);
-	struct intel_shared_dpll *pll;
+	struct intel_dpll *pll;
 	int i;
 
 	drm_modeset_lock_all(display->drm);
@@ -634,7 +629,7 @@ static int i915_shared_dplls_info(struct seq_file *m, void *unused)
 		   display->dpll.ref_clks.nssc,
 		   display->dpll.ref_clks.ssc);
 
-	for_each_shared_dpll(display, pll, i) {
+	for_each_dpll(display, pll, i) {
 		drm_printf(&p, "DPLL%i: %s, id: %i\n", pll->index,
 			   pll->info->name, pll->info->id);
 		drm_printf(&p, " pipe_mask: 0x%x, active: 0x%x, on: %s\n",
@@ -690,14 +685,11 @@ static bool
 intel_lpsp_power_well_enabled(struct intel_display *display,
 			      enum i915_power_well_id power_well_id)
 {
-	struct drm_i915_private *i915 = to_i915(display->drm);
-	intel_wakeref_t wakeref;
 	bool is_enabled;
 
-	wakeref = intel_runtime_pm_get(&i915->runtime_pm);
-	is_enabled = intel_display_power_well_is_enabled(display,
-							 power_well_id);
-	intel_runtime_pm_put(&i915->runtime_pm, wakeref);
+	with_intel_display_rpm(display)
+		is_enabled = intel_display_power_well_is_enabled(display,
+								 power_well_id);
 
 	return is_enabled;
 }
@@ -820,7 +812,6 @@ static const struct drm_info_list intel_display_debugfs_list[] = {
 	{"i915_gem_framebuffer", i915_gem_framebuffer_info, 0},
 	{"i915_power_domain_info", i915_power_domain_info, 0},
 	{"i915_display_info", i915_display_info, 0},
-	{"i915_display_capabilities", i915_display_capabilities, 0},
 	{"i915_shared_dplls_info", i915_shared_dplls_info, 0},
 	{"i915_dp_mst_info", i915_dp_mst_info, 0},
 	{"i915_ddb_info", i915_ddb_info, 0},
@@ -829,25 +820,24 @@ static const struct drm_info_list intel_display_debugfs_list[] = {
 
 void intel_display_debugfs_register(struct intel_display *display)
 {
-	struct drm_i915_private *i915 = to_i915(display->drm);
-	struct drm_minor *minor = display->drm->primary;
+	struct dentry *debugfs_root = display->drm->debugfs_root;
 
-	debugfs_create_file("i915_fifo_underrun_reset", 0644, minor->debugfs_root,
+	debugfs_create_file("i915_fifo_underrun_reset", 0644, debugfs_root,
 			    display, &i915_fifo_underrun_reset_ops);
 
 	drm_debugfs_create_files(intel_display_debugfs_list,
 				 ARRAY_SIZE(intel_display_debugfs_list),
-				 minor->debugfs_root, minor);
+				 debugfs_root, display->drm->primary);
 
 	intel_bios_debugfs_register(display);
 	intel_cdclk_debugfs_register(display);
 	intel_dmc_debugfs_register(display);
 	intel_dp_test_debugfs_register(display);
 	intel_fbc_debugfs_register(display);
-	intel_hpd_debugfs_register(i915);
+	intel_hpd_debugfs_register(display);
 	intel_opregion_debugfs_register(display);
 	intel_psr_debugfs_register(display);
-	intel_wm_debugfs_register(i915);
+	intel_wm_debugfs_register(display);
 	intel_display_debugfs_params(display);
 }
 
@@ -984,7 +974,7 @@ static ssize_t i915_dsc_fec_support_write(struct file *file,
 		return ret;
 
 	drm_dbg(display->drm, "Got %s for DSC Enable\n",
-		(dsc_enable) ? "true" : "false");
+		str_true_false(dsc_enable));
 	intel_dp->force_dsc_en = dsc_enable;
 
 	*offp += len;
@@ -1195,7 +1185,7 @@ static ssize_t i915_dsc_fractional_bpp_write(struct file *file,
 		return ret;
 
 	drm_dbg(display->drm, "Got %s for DSC Fractional BPP Enable\n",
-		(dsc_fractional_bpp_enable) ? "true" : "false");
+		str_true_false(dsc_fractional_bpp_enable));
 	intel_dp->force_dsc_fractional_bpp_en = dsc_fractional_bpp_enable;
 
 	*offp += len;
@@ -1337,6 +1327,7 @@ void intel_connector_debugfs_add(struct intel_connector *connector)
 	intel_psr_connector_debugfs_add(connector);
 	intel_alpm_lobf_debugfs_add(connector);
 	intel_dp_link_training_debugfs_add(connector);
+	intel_link_bw_connector_debugfs_add(connector);
 
 	if (DISPLAY_VER(display) >= 11 &&
 	    ((connector_type == DRM_MODE_CONNECTOR_DisplayPort && !connector->mst.dp) ||

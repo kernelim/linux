@@ -208,7 +208,7 @@ con3270_write_callback(struct raw3270_request *rq, void *data)
 static void
 con3270_update(struct timer_list *t)
 {
-	struct con3270 *cp = from_timer(cp, t, timer);
+	struct con3270 *cp = timer_container_of(cp, t, timer);
 	struct raw3270_request *wrq;
 	char wcc, prolog[6];
 	unsigned long flags;

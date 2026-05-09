@@ -665,7 +665,7 @@ static void terminate_monitor(struct cm4000_dev *dev)
 
 static void monitor_card(struct timer_list *t)
 {
-	struct cm4000_dev *dev = from_timer(dev, t, timer);
+	struct cm4000_dev *dev = timer_container_of(dev, t, timer);
 	unsigned int iobase = dev->p_dev->resource[0]->start;
 	unsigned short s;
 	struct ptsreq ptsreq;

@@ -56,8 +56,8 @@ void generic_fillattr(struct mnt_idmap *idmap, struct inode *inode,
 	stat->gid = vfsgid_into_kgid(vfsgid);
 	stat->rdev = inode->i_rdev;
 	stat->size = i_size_read(inode);
-	stat->atime = inode->i_atime;
-	stat->mtime = inode->i_mtime;
+	stat->atime = inode_get_atime(inode);
+	stat->mtime = inode_get_mtime(inode);
 	stat->ctime = inode_get_ctime(inode);
 	stat->blksize = i_blocksize(inode);
 	stat->blocks = inode->i_blocks;
@@ -160,11 +160,25 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 	}
 
 	idmap = mnt_idmap(path->mnt);
-	if (inode->i_op->getattr)
-		return inode->i_op->getattr(idmap, path, stat,
-					    request_mask, query_flags);
+	if (inode->i_op->getattr) {
+		int ret;
 
-	generic_fillattr(idmap, inode, stat);
+		ret = inode->i_op->getattr(idmap, path, stat, request_mask,
+				query_flags);
+		if (ret)
+			return ret;
+	} else {
+		generic_fillattr(idmap, inode, stat);
+	}
+
+	/*
+	 * If this is a block device inode, override the filesystem attributes
+	 * with the block device specific parameters that need to be obtained
+	 * from the bdev backing inode.
+	 */
+	if (S_ISBLK(stat->mode))
+		bdev_statx(path, stat, request_mask);
+
 	return 0;
 }
 EXPORT_SYMBOL(vfs_getattr_nosec);
@@ -259,7 +273,6 @@ static int vfs_statx(int dfd, struct filename *filename, int flags,
 {
 	struct path path;
 	unsigned int lookup_flags = getname_statx_lookup_flags(flags);
-	struct inode *backing_inode;
 	int error;
 
 	if (flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT | AT_EMPTY_PATH |
@@ -279,15 +292,6 @@ retry:
 	if (path.mnt->mnt_root == path.dentry)
 		stat->attributes |= STATX_ATTR_MOUNT_ROOT;
 	stat->attributes_mask |= STATX_ATTR_MOUNT_ROOT;
-
-	/*
-	 * If this is a block device inode, override the filesystem
-	 * attributes with the block device specific parameters that need to be
-	 * obtained from the bdev backing inode.
-	 */
-	backing_inode = d_backing_inode(path.dentry);
-	if (S_ISBLK(backing_inode->i_mode))
-		bdev_statx(backing_inode, stat, request_mask);
 
 	path_put(&path);
 	if (retry_estale(error, lookup_flags)) {

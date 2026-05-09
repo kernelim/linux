@@ -1,3 +1,3 @@
-#7-
-0xd5538a87	sas_end_device_alloc	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL	
+#8-
+0x348b83db	sas_end_device_alloc	drivers/scsi/scsi_transport_sas	EXPORT_SYMBOL	
 

@@ -21,7 +21,6 @@ struct pv_state {
 
 struct objtool_file {
 	struct elf *elf;
-	struct list_head insn_list;
 	DECLARE_HASHTABLE(insn_hash, 20);
 	struct list_head retpoline_call_list;
 	struct list_head return_thunk_list;
@@ -42,7 +41,7 @@ struct objtool_file {
 
 struct objtool_file *objtool_open_read(const char *_objname);
 
-void objtool_pv_add(struct objtool_file *file, int idx, struct symbol *func);
+int objtool_pv_add(struct objtool_file *file, int idx, struct symbol *func);
 
 int check(struct objtool_file *file);
 int orc_dump(const char *objname);

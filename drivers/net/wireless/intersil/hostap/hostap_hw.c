@@ -2772,7 +2772,7 @@ static void prism2_check_sta_fw_version(local_info_t *local)
 
 static void hostap_passive_scan(struct timer_list *t)
 {
-	local_info_t *local = from_timer(local, t, passive_scan_timer);
+	local_info_t *local = timer_container_of(local, t, passive_scan_timer);
 	struct net_device *dev = local->dev;
 	u16 chan;
 
@@ -2848,7 +2848,7 @@ static void handle_comms_qual_update(struct work_struct *work)
 static void hostap_tick_timer(struct timer_list *t)
 {
 	static unsigned long last_inquire = 0;
-	local_info_t *local = from_timer(local, t, tick_timer);
+	local_info_t *local = timer_container_of(local, t, tick_timer);
 	local->last_tick_timer = jiffies;
 
 	/* Inquire CommTallies every 10 seconds to keep the statistics updated

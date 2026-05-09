@@ -893,6 +893,12 @@ of_fwnode_device_get_dma_attr(const struct fwnode_handle *fwnode)
 static bool of_fwnode_property_present(const struct fwnode_handle *fwnode,
 				       const char *propname)
 {
+	return of_property_present(to_of_node(fwnode), propname);
+}
+
+static bool of_fwnode_property_read_bool(const struct fwnode_handle *fwnode,
+					 const char *propname)
+{
 	return of_property_read_bool(to_of_node(fwnode), propname);
 }
 
@@ -1110,7 +1116,7 @@ static void of_link_to_phandle(struct device_node *con_np,
 		tmp_np = of_get_next_parent(tmp_np);
 	}
 
-	fwnode_link_add(of_fwnode_handle(con_np), of_fwnode_handle(sup_np));
+	fwnode_link_add(of_fwnode_handle(con_np), of_fwnode_handle(sup_np), 0);
 }
 
 /**
@@ -1460,6 +1466,7 @@ const struct fwnode_operations of_fwnode_ops = {
 	.device_dma_supported = of_fwnode_device_dma_supported,
 	.device_get_dma_attr = of_fwnode_device_get_dma_attr,
 	.property_present = of_fwnode_property_present,
+	.property_read_bool = of_fwnode_property_read_bool,
 	.property_read_int_array = of_fwnode_property_read_int_array,
 	.property_read_string_array = of_fwnode_property_read_string_array,
 	.get_name = of_fwnode_get_name,

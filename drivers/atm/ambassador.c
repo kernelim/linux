@@ -1479,7 +1479,7 @@ static const struct atmdev_ops amb_ops = {
 
 /********** housekeeping **********/
 static void do_housekeeping (struct timer_list *t) {
-  amb_dev * dev = from_timer(dev, t, housekeeping);
+  amb_dev * dev = timer_container_of(dev, t, housekeeping);
   
   // could collect device-specific (not driver/atm-linux) stats here
       

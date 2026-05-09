@@ -59,6 +59,7 @@
 #define FIRMWARE_8125B_2	"rtl_nic/rtl8125b-2.fw"
 #define FIRMWARE_8125D_1	"rtl_nic/rtl8125d-1.fw"
 #define FIRMWARE_8125D_2	"rtl_nic/rtl8125d-2.fw"
+#define FIRMWARE_8125BP_2	"rtl_nic/rtl8125bp-2.fw"
 #define FIRMWARE_8126A_2	"rtl_nic/rtl8126a-2.fw"
 #define FIRMWARE_8126A_3	"rtl_nic/rtl8126a-3.fw"
 
@@ -152,6 +153,7 @@ static const struct {
 	[RTL_GIGA_MAC_VER_63] = {"RTL8125B",		FIRMWARE_8125B_2},
 	[RTL_GIGA_MAC_VER_64] = {"RTL8125D",		FIRMWARE_8125D_1},
 	[RTL_GIGA_MAC_VER_65] = {"RTL8125D",		FIRMWARE_8125D_2},
+	[RTL_GIGA_MAC_VER_66] = {"RTL8125BP",		FIRMWARE_8125BP_2},
 	[RTL_GIGA_MAC_VER_70] = {"RTL8126A",		FIRMWARE_8126A_2},
 	[RTL_GIGA_MAC_VER_71] = {"RTL8126A",		FIRMWARE_8126A_3},
 };
@@ -643,6 +645,7 @@ enum rtl_dash_type {
 	RTL_DASH_NONE,
 	RTL_DASH_DP,
 	RTL_DASH_EP,
+	RTL_DASH_25_BP,
 };
 
 struct rtl8169_private {
@@ -722,6 +725,7 @@ MODULE_FIRMWARE(FIRMWARE_8125A_3);
 MODULE_FIRMWARE(FIRMWARE_8125B_2);
 MODULE_FIRMWARE(FIRMWARE_8125D_1);
 MODULE_FIRMWARE(FIRMWARE_8125D_2);
+MODULE_FIRMWARE(FIRMWARE_8125BP_2);
 MODULE_FIRMWARE(FIRMWARE_8126A_2);
 MODULE_FIRMWARE(FIRMWARE_8126A_3);
 
@@ -1408,10 +1412,19 @@ static void rtl8168ep_driver_start(struct rtl8169_private *tp)
 		rtl_loop_wait_high(tp, &rtl_ep_ocp_read_cond, 10000, 30);
 }
 
+static void rtl8125bp_driver_start(struct rtl8169_private *tp)
+{
+	r8168ep_ocp_write(tp, 0x01, 0x14, OOB_CMD_DRIVER_START);
+	r8168ep_ocp_write(tp, 0x01, 0x18, 0x00);
+	r8168ep_ocp_write(tp, 0x01, 0x10, 0x01);
+}
+
 static void rtl8168_driver_start(struct rtl8169_private *tp)
 {
 	if (tp->dash_type == RTL_DASH_DP)
 		rtl8168dp_driver_start(tp);
+	else if (tp->dash_type == RTL_DASH_25_BP)
+		rtl8125bp_driver_start(tp);
 	else
 		rtl8168ep_driver_start(tp);
 }
@@ -1432,10 +1445,19 @@ static void rtl8168ep_driver_stop(struct rtl8169_private *tp)
 		rtl_loop_wait_low(tp, &rtl_ep_ocp_read_cond, 10000, 10);
 }
 
+static void rtl8125bp_driver_stop(struct rtl8169_private *tp)
+{
+	r8168ep_ocp_write(tp, 0x01, 0x14, OOB_CMD_DRIVER_STOP);
+	r8168ep_ocp_write(tp, 0x01, 0x18, 0x00);
+	r8168ep_ocp_write(tp, 0x01, 0x10, 0x01);
+}
+
 static void rtl8168_driver_stop(struct rtl8169_private *tp)
 {
 	if (tp->dash_type == RTL_DASH_DP)
 		rtl8168dp_driver_stop(tp);
+	else if (tp->dash_type == RTL_DASH_25_BP)
+		rtl8125bp_driver_stop(tp);
 	else
 		rtl8168ep_driver_stop(tp);
 }
@@ -1458,6 +1480,7 @@ static bool rtl_dash_is_enabled(struct rtl8169_private *tp)
 	case RTL_DASH_DP:
 		return r8168dp_check_dash(tp);
 	case RTL_DASH_EP:
+	case RTL_DASH_25_BP:
 		return r8168ep_check_dash(tp);
 	default:
 		return false;
@@ -1473,6 +1496,8 @@ static enum rtl_dash_type rtl_get_dash_type(struct rtl8169_private *tp)
 		return RTL_DASH_DP;
 	case RTL_GIGA_MAC_VER_49 ... RTL_GIGA_MAC_VER_53:
 		return RTL_DASH_EP;
+	case RTL_GIGA_MAC_VER_66:
+		return RTL_DASH_25_BP;
 	default:
 		return RTL_DASH_NONE;
 	}
@@ -2309,6 +2334,9 @@ static enum mac_version rtl8169_get_mac_version(u16 xid, bool gmii)
 		/* 8126A family. */
 		{ 0x7cf, 0x64a,	RTL_GIGA_MAC_VER_71 },
 		{ 0x7cf, 0x649,	RTL_GIGA_MAC_VER_70 },
+
+		/* 8125BP family. */
+		{ 0x7cf, 0x681,	RTL_GIGA_MAC_VER_66 },
 
 		/* 8125D family. */
 		{ 0x7cf, 0x689,	RTL_GIGA_MAC_VER_65 },
@@ -3994,6 +4022,7 @@ static void rtl_hw_config(struct rtl8169_private *tp)
 		[RTL_GIGA_MAC_VER_63] = rtl_hw_start_8125b,
 		[RTL_GIGA_MAC_VER_64] = rtl_hw_start_8125d,
 		[RTL_GIGA_MAC_VER_65] = rtl_hw_start_8125d,
+		[RTL_GIGA_MAC_VER_66] = rtl_hw_start_8125d,
 		[RTL_GIGA_MAC_VER_70] = rtl_hw_start_8126a,
 		[RTL_GIGA_MAC_VER_71] = rtl_hw_start_8126a,
 	};
@@ -4013,6 +4042,7 @@ static void rtl_hw_start_8125(struct rtl8169_private *tp)
 	case RTL_GIGA_MAC_VER_61:
 	case RTL_GIGA_MAC_VER_64:
 	case RTL_GIGA_MAC_VER_65:
+	case RTL_GIGA_MAC_VER_66:
 		for (i = 0xa00; i < 0xb00; i += 4)
 			RTL_W32(tp, i, 0);
 		break;
@@ -5332,6 +5362,33 @@ static int r8169_mdio_write_reg(struct mii_bus *mii_bus, int phyaddr,
 	return 0;
 }
 
+static int r8169_mdio_read_reg_c45(struct mii_bus *mii_bus, int addr,
+				   int devnum, int regnum)
+{
+	struct rtl8169_private *tp = mii_bus->priv;
+
+	if (addr > 0)
+		return -ENODEV;
+
+	if (devnum == MDIO_MMD_VEND2 && regnum > MDIO_STAT2)
+		return r8168_phy_ocp_read(tp, regnum);
+
+	return 0;
+}
+
+static int r8169_mdio_write_reg_c45(struct mii_bus *mii_bus, int addr,
+				    int devnum, int regnum, u16 val)
+{
+	struct rtl8169_private *tp = mii_bus->priv;
+
+	if (addr > 0 || devnum != MDIO_MMD_VEND2 || regnum <= MDIO_STAT2)
+		return -ENODEV;
+
+	r8168_phy_ocp_write(tp, regnum, val);
+
+	return 0;
+}
+
 static int r8169_mdio_register(struct rtl8169_private *tp)
 {
 	struct pci_dev *pdev = tp->pci_dev;
@@ -5362,6 +5419,11 @@ static int r8169_mdio_register(struct rtl8169_private *tp)
 	new_bus->read = r8169_mdio_read_reg;
 	new_bus->write = r8169_mdio_write_reg;
 
+	if (tp->mac_version >= RTL_GIGA_MAC_VER_40) {
+		new_bus->read_c45 = r8169_mdio_read_reg_c45;
+		new_bus->write_c45 = r8169_mdio_write_reg_c45;
+	}
+
 	ret = devm_mdiobus_register(&pdev->dev, new_bus);
 	if (ret)
 		return ret;
@@ -5382,6 +5444,12 @@ static int r8169_mdio_register(struct rtl8169_private *tp)
 	if (rtl_supports_eee(tp))
 		phy_advertise_eee_all(tp->phydev);
 	phy_support_asym_pause(tp->phydev);
+
+	/* mimic behavior of r8125/r8126 vendor drivers */
+	if (tp->mac_version == RTL_GIGA_MAC_VER_61)
+		phy_disable_eee_mode(tp->phydev,
+				     ETHTOOL_LINK_MODE_2500baseT_Full_BIT);
+	phy_disable_eee_mode(tp->phydev, ETHTOOL_LINK_MODE_5000baseT_Full_BIT);
 
 	/* PHY will be woken up in rtl_open() */
 	phy_suspend(tp->phydev);

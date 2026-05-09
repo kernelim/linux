@@ -180,7 +180,7 @@ static void max3100_dowork(struct max3100_port *s)
 
 static void max3100_timeout(struct timer_list *t)
 {
-	struct max3100_port *s = from_timer(s, t, timer);
+	struct max3100_port *s = timer_container_of(s, t, timer);
 
 	if (s->port.state) {
 		max3100_dowork(s);

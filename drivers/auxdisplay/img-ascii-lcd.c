@@ -227,7 +227,7 @@ MODULE_DEVICE_TABLE(of, img_ascii_lcd_matches);
  */
 static void img_ascii_lcd_scroll(struct timer_list *t)
 {
-	struct img_ascii_lcd_ctx *ctx = from_timer(ctx, t, timer);
+	struct img_ascii_lcd_ctx *ctx = timer_container_of(ctx, t, timer);
 	unsigned int i, ch = ctx->scroll_pos;
 	unsigned int num_chars = ctx->cfg->num_chars;
 

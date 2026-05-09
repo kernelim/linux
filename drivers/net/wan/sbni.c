@@ -1044,7 +1044,7 @@ indicate_pkt( struct net_device  *dev )
 static void
 sbni_watchdog(struct timer_list *t)
 {
-	struct net_local   *nl  = from_timer(nl, t, watchdog);
+	struct net_local   *nl  = timer_container_of(nl, t, watchdog);
 	struct net_device  *dev = nl->watchdog_dev;
 	unsigned long	   flags;
 	unsigned char	   csr0;

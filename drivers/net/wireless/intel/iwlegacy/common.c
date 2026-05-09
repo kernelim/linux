@@ -4823,7 +4823,7 @@ il_check_stuck_queue(struct il_priv *il, int cnt)
 void
 il_bg_watchdog(struct timer_list *t)
 {
-	struct il_priv *il = from_timer(il, t, watchdog);
+	struct il_priv *il = timer_container_of(il, t, watchdog);
 	int cnt;
 	unsigned long timeout;
 
@@ -4861,7 +4861,7 @@ il_setup_watchdog(struct il_priv *il)
 		mod_timer(&il->watchdog,
 			  jiffies + msecs_to_jiffies(IL_WD_TICK(timeout)));
 	else
-		del_timer(&il->watchdog);
+		timer_delete(&il->watchdog);
 }
 EXPORT_SYMBOL(il_setup_watchdog);
 
@@ -5007,7 +5007,7 @@ il_update_qos(struct il_priv *il)
  * il_mac_config - mac80211 config callback
  */
 int
-il_mac_config(struct ieee80211_hw *hw, u32 changed)
+il_mac_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
 {
 	struct il_priv *il = hw->priv;
 	const struct il_channel_info *ch_info;

@@ -3,7 +3,7 @@
  *
  * Name: acenv.h - Host and compiler configuration
  *
- * Copyright (C) 2000 - 2023, Intel Corp.
+ * Copyright (C) 2000 - 2025, Intel Corp.
  *
  *****************************************************************************/
 
@@ -248,6 +248,12 @@
 
 #ifndef ACPI_RELEASE_GLOBAL_LOCK
 #define ACPI_RELEASE_GLOBAL_LOCK(Glptr, pending) pending = 0
+#endif
+
+/* NULL/invalid value to use for destroyed or not-yet-created semaphores. */
+
+#ifndef ACPI_SEMAPHORE_NULL
+#define ACPI_SEMAPHORE_NULL NULL
 #endif
 
 /* Flush CPU cache - used when going to sleep. Wbinvd or similar. */

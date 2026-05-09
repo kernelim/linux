@@ -11,6 +11,9 @@
 struct user_namespace;
 extern struct user_namespace init_user_ns;
 
+struct seq_file;
+struct vm_area_struct;
+
 struct timens_offsets {
 	struct timespec64 monotonic;
 	struct timespec64 boottime;

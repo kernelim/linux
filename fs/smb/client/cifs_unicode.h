@@ -89,7 +89,6 @@ extern signed char CifsUniLowerTable[512];
 extern const struct UniCaseRange CifsUniLowerRange[];
 #endif				/* UNIUPR_NOLOWER */
 
-#ifdef __KERNEL__
 int cifs_from_utf16(char *to, const __le16 *from, int tolen, int fromlen,
 		    const struct nls_table *cp, int map_type);
 int cifs_utf16_bytes(const __le16 *from, int maxbytes,
@@ -104,8 +103,6 @@ extern int cifs_remap(struct cifs_sb_info *cifs_sb);
 extern __le16 *cifs_strndup_to_utf16(const char *src, const int maxlen,
 				     int *utf16_len, const struct nls_table *cp,
 				     int remap);
-#endif
-
 wchar_t cifs_toupper(wchar_t in);
 
 /*

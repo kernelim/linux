@@ -455,7 +455,7 @@ static irqreturn_t i2c_pnx_interrupt(int irq, void *dev_id)
 
 static void i2c_pnx_timeout(struct timer_list *t)
 {
-	struct i2c_pnx_algo_data *alg_data = from_timer(alg_data, t, mif.timer);
+	struct i2c_pnx_algo_data *alg_data = timer_container_of(alg_data, t, mif.timer);
 	u32 ctl;
 
 	dev_err(&alg_data->adapter.dev,

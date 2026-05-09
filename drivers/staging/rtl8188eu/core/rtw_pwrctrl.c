@@ -240,7 +240,7 @@ exit:
 static void pwr_state_check_handler(struct timer_list *t)
 {
 	struct adapter *padapter =
-		from_timer(padapter, t,
+		timer_container_of(padapter, t,
 			   pwrctrlpriv.pwr_state_check_timer);
 
 	rtw_ps_cmd(padapter);

@@ -339,7 +339,7 @@ static void rsxx_handle_dma_error(struct rsxx_dma_ctrl *ctrl,
 
 static void dma_engine_stalled(struct timer_list *t)
 {
-	struct rsxx_dma_ctrl *ctrl = from_timer(ctrl, t, activity_timer);
+	struct rsxx_dma_ctrl *ctrl = timer_container_of(ctrl, t, activity_timer);
 	int cnt;
 
 	if (atomic_read(&ctrl->stats.hw_q_depth) == 0 ||

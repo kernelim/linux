@@ -119,6 +119,7 @@ drm_mode_validate_pipeline(struct drm_display_mode *mode,
 		*status = drm_bridge_chain_mode_valid(bridge,
 						      &connector->display_info,
 						      mode);
+		drm_bridge_put(bridge);
 		if (*status != MODE_OK) {
 			/* There is also no point in continuing for crtc check
 			 * here. */
@@ -958,15 +959,16 @@ static void drm_kms_helper_poll_init_release(struct drm_device *dev, void *res)
  * cleaned up when the DRM device goes away.
  *
  * See drm_kms_helper_poll_init() for more information.
- *
- * Returns:
- * 0 on success, or a negative errno code otherwise.
  */
-int drmm_kms_helper_poll_init(struct drm_device *dev)
+void drmm_kms_helper_poll_init(struct drm_device *dev)
 {
+	int ret;
+
 	drm_kms_helper_poll_init(dev);
 
-	return drmm_add_action_or_reset(dev, drm_kms_helper_poll_init_release, dev);
+	ret = drmm_add_action_or_reset(dev, drm_kms_helper_poll_init_release, dev);
+	if (ret)
+		drm_warn(dev, "Connector status will not be updated, error %d\n", ret);
 }
 EXPORT_SYMBOL(drmm_kms_helper_poll_init);
 

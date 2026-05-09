@@ -697,6 +697,8 @@ tcp_retries2 - INTEGER
 	seconds and is a lower bound for the effective timeout.
 	TCP will effectively time out at the first RTO which exceeds the
 	hypothetical timeout.
+	If tcp_rto_max_ms is decreased, it is recommended to also
+	change tcp_retries2.
 
 	RFC 1122 recommends at least 100 seconds for the timeout,
 	which corresponds to a value of at least 8.
@@ -1040,6 +1042,17 @@ tcp_challenge_ack_limit - INTEGER
 	Limits number of Challenge ACK sent per second, as recommended
 	in RFC 5961 (Improving TCP's Robustness to Blind In-Window Attacks)
 	Default: 1000
+
+tcp_rto_max_ms - INTEGER
+	Maximal TCP retransmission timeout (in ms).
+	Note that TCP_RTO_MAX_MS socket option has higher precedence.
+
+	When changing tcp_rto_max_ms, it is important to understand
+	that tcp_retries2 might need a change.
+
+	Possible Values: 1000 - 120,000
+
+	Default: 120,000
 
 UDP variables
 =============

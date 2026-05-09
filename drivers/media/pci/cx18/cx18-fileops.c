@@ -677,7 +677,7 @@ int cx18_v4l2_mmap(struct file *file, struct vm_area_struct *vma)
 
 void cx18_vb_timeout(struct timer_list *t)
 {
-	struct cx18_stream *s = from_timer(s, t, vb_timeout);
+	struct cx18_stream *s = timer_container_of(s, t, vb_timeout);
 	struct cx18_videobuf_buffer *buf;
 	unsigned long flags;
 

@@ -3675,7 +3675,7 @@ delresp:
  */
 static void hfa384x_usbctlx_reqtimerfn(struct timer_list *t)
 {
-	struct hfa384x *hw = from_timer(hw, t, reqtimer);
+	struct hfa384x *hw = timer_container_of(hw, t, reqtimer);
 	unsigned long flags;
 
 	spin_lock_irqsave(&hw->ctlxq.lock, flags);
@@ -3734,7 +3734,7 @@ static void hfa384x_usbctlx_reqtimerfn(struct timer_list *t)
  */
 static void hfa384x_usbctlx_resptimerfn(struct timer_list *t)
 {
-	struct hfa384x *hw = from_timer(hw, t, resptimer);
+	struct hfa384x *hw = timer_container_of(hw, t, resptimer);
 	unsigned long flags;
 
 	spin_lock_irqsave(&hw->ctlxq.lock, flags);
@@ -3774,7 +3774,7 @@ static void hfa384x_usbctlx_resptimerfn(struct timer_list *t)
  */
 static void hfa384x_usb_throttlefn(struct timer_list *t)
 {
-	struct hfa384x *hw = from_timer(hw, t, throttle);
+	struct hfa384x *hw = timer_container_of(hw, t, throttle);
 	unsigned long flags;
 
 	spin_lock_irqsave(&hw->ctlxq.lock, flags);

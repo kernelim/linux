@@ -1,3 +1,3 @@
-#7-
-0x3ff34a98	ib_get_eth_speed	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
+#8-
+0xbe9ddce4	ib_get_eth_speed	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
 

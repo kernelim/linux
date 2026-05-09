@@ -33,7 +33,6 @@ Contents:
    intel/idpf
    intel/igb
    intel/igbvf
-   intel/ixgb
    intel/ixgbe
    intel/ixgbevf
    intel/i40e
@@ -48,6 +47,7 @@ Contents:
    neterion/vxge
    netronome/nfp
    pensando/ionic
+   pensando/ionic_rdma
    smsc/smc9
    stmicro/stmmac
    ti/cpsw

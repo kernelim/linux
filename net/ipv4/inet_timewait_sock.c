@@ -161,7 +161,7 @@ EXPORT_SYMBOL_GPL(inet_twsk_hashdance_schedule);
 
 static void tw_timer_handler(struct timer_list *t)
 {
-	struct inet_timewait_sock *tw = from_timer(tw, t, tw_timer);
+	struct inet_timewait_sock *tw = timer_container_of(tw, t, tw_timer);
 
 	if (tw->tw_kill)
 		__NET_INC_STATS(twsk_net(tw), LINUX_MIB_TIMEWAITKILLED);

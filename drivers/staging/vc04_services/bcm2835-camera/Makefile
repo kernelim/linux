@@ -5,7 +5,4 @@ bcm2835-v4l2-$(CONFIG_VIDEO_BCM2835) := \
 
 obj-$(CONFIG_VIDEO_BCM2835) += bcm2835-v4l2.o
 
-ccflags-y += \
-	-I $(srctree)/$(src)/.. \
-	-I $(srctree)/$(src)/../vchiq-mmal/ \
-	-D__VCCOREVER__=0x04000000
+ccflags-y += -D__VCCOREVER__=0x04000000

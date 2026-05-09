@@ -1646,7 +1646,7 @@ static irqreturn_t fs_irq (int irq, void *dev_id)
 #ifdef FS_POLL_FREQ
 static void fs_poll (struct timer_list *t)
 {
-	struct fs_dev *dev = from_timer(dev, t, timer);
+	struct fs_dev *dev = timer_container_of(dev, t, timer);
   
 	fs_irq (0, dev);
 	dev->timer.expires = jiffies + FS_POLL_FREQ;

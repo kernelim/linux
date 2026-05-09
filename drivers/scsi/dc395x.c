@@ -821,7 +821,7 @@ static void waiting_process_next(struct AdapterCtlBlk *acb)
 static void waiting_timeout(struct timer_list *t)
 {
 	unsigned long flags;
-	struct AdapterCtlBlk *acb = from_timer(acb, t, waiting_timer);
+	struct AdapterCtlBlk *acb = timer_container_of(acb, t, waiting_timer);
 	dprintkdbg(DBG_1,
 		"waiting_timeout: Queue woken up by timer. acb=%p\n", acb);
 	DC395x_LOCK_IO(acb->scsi_host, flags);

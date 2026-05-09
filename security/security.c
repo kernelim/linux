@@ -1259,8 +1259,8 @@ int security_inode_init_security(struct inode *inode, struct inode *dir,
 	if (!xattr_count)
 		goto out;
 
-	ret = evm_inode_init_security(inode, new_xattrs,
-				      &new_xattrs[xattr_count]);
+	ret = evm_inode_init_security(inode, dir, qstr, new_xattrs,
+				      &xattr_count);
 	if (ret)
 		goto out;
 	ret = initxattrs(inode, new_xattrs, fs_data);
@@ -2940,9 +2940,9 @@ int security_lock_kernel_down(const char *where, enum lockdown_reason level)
 EXPORT_SYMBOL(security_lock_kernel_down);
 
 #ifdef CONFIG_PERF_EVENTS
-int security_perf_event_open(struct perf_event_attr *attr, int type)
+int security_perf_event_open(int type)
 {
-	return call_int_hook(perf_event_open, attr, type);
+	return call_int_hook(perf_event_open, type);
 }
 
 int security_perf_event_alloc(struct perf_event *event)

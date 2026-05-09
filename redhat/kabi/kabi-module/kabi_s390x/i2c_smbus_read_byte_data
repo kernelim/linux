@@ -1,3 +1,3 @@
-#7-
-0xa9fed1fc	i2c_smbus_read_byte_data	drivers/i2c/i2c-core	EXPORT_SYMBOL	
+#8-
+0x16e1e286	i2c_smbus_read_byte_data	drivers/i2c/i2c-core	EXPORT_SYMBOL	
 

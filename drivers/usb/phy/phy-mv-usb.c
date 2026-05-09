@@ -15,6 +15,7 @@
 #include <linux/clk.h>
 #include <linux/workqueue.h>
 #include <linux/platform_device.h>
+#include <linux/string_choices.h>
 
 #include <linux/usb.h>
 #include <linux/usb/ch9.h>
@@ -86,7 +87,7 @@ static void mv_otg_run_state_machine(struct mv_otg *mvotg,
 
 static void mv_otg_timer_await_bcon(struct timer_list *t)
 {
-	struct mv_otg *mvotg = from_timer(mvotg, t,
+	struct mv_otg *mvotg = timer_container_of(mvotg, t,
 					  otg_ctrl.timer[A_WAIT_BCON_TIMER]);
 
 	mvotg->otg_ctrl.a_wait_bcon_timeout = 1;
@@ -217,7 +218,7 @@ static void mv_otg_start_periphrals(struct mv_otg *mvotg, int on)
 	if (!otg->gadget)
 		return;
 
-	dev_info(mvotg->phy.dev, "gadget %s\n", on ? "on" : "off");
+	dev_info(mvotg->phy.dev, "gadget %s\n", str_on_off(on));
 
 	if (on)
 		usb_gadget_vbus_connect(otg->gadget);

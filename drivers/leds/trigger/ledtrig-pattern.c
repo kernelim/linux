@@ -73,7 +73,7 @@ static int pattern_trig_compute_brightness(struct pattern_trig_data *data)
 
 static void pattern_trig_timer_function(struct timer_list *t)
 {
-	struct pattern_trig_data *data = from_timer(data, t, timer);
+	struct pattern_trig_data *data = timer_container_of(data, t, timer);
 
 	for (;;) {
 		if (!data->is_indefinite && !data->repeat)

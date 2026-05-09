@@ -14,15 +14,6 @@
 
 #include "internal.h"
 
-/* Call with exclusively locked inode->i_rwsem */
-static void nfs_block_o_direct(struct nfs_inode *nfsi, struct inode *inode)
-{
-	if (test_bit(NFS_INO_ODIRECT, &nfsi->flags)) {
-		clear_bit(NFS_INO_ODIRECT, &nfsi->flags);
-		inode_dio_wait(inode);
-	}
-}
-
 /**
  * nfs_start_io_read - declare the file is being used for buffered reads
  * @inode: file inode
@@ -50,7 +41,7 @@ nfs_start_io_read(struct inode *inode)
 	up_read(&inode->i_rwsem);
 	/* Slow path.... */
 	down_write(&inode->i_rwsem);
-	nfs_block_o_direct(nfsi, inode);
+	nfs_file_block_o_direct(nfsi);
 	downgrade_write(&inode->i_rwsem);
 }
 
@@ -78,7 +69,7 @@ void
 nfs_start_io_write(struct inode *inode)
 {
 	down_write(&inode->i_rwsem);
-	nfs_block_o_direct(NFS_I(inode), inode);
+	nfs_file_block_o_direct(NFS_I(inode));
 }
 
 /**

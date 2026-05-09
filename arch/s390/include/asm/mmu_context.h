@@ -29,9 +29,6 @@ static inline int init_new_context(struct task_struct *tsk,
 	mm->context.gmap_asce = 0;
 	mm->context.flush_mm = 0;
 #ifdef CONFIG_PGSTE
-	mm->context.alloc_pgste = page_table_allocate_pgste ||
-		test_thread_flag(TIF_PGSTE) ||
-		(current->mm && current->mm->context.alloc_pgste);
 	mm->context.has_pgste = 0;
 	mm->context.uses_skeys = 0;
 	mm->context.uses_cmm = 0;
@@ -76,9 +73,9 @@ static inline void switch_mm_irqs_off(struct mm_struct *prev, struct mm_struct *
 	int cpu = smp_processor_id();
 
 	if (next == &init_mm)
-		S390_lowcore.user_asce = s390_invalid_asce;
+		get_lowcore()->user_asce = s390_invalid_asce;
 	else
-		S390_lowcore.user_asce.val = next->context.asce;
+		get_lowcore()->user_asce.val = next->context.asce;
 	cpumask_set_cpu(cpu, &next->context.cpu_attach_mask);
 	/* Clear previous user-ASCE from CR7 */
 	local_ctl_load(7, &s390_invalid_asce);
@@ -111,7 +108,7 @@ static inline void finish_arch_post_lock_switch(void)
 		__tlb_flush_mm_lazy(mm);
 		preempt_enable();
 	}
-	local_ctl_load(7, &S390_lowcore.user_asce);
+	local_ctl_load(7, &get_lowcore()->user_asce);
 }
 
 #define activate_mm activate_mm
@@ -120,7 +117,7 @@ static inline void activate_mm(struct mm_struct *prev,
 {
 	switch_mm(prev, next, current);
 	cpumask_set_cpu(smp_processor_id(), mm_cpumask(next));
-	local_ctl_load(7, &S390_lowcore.user_asce);
+	local_ctl_load(7, &get_lowcore()->user_asce);
 }
 
 #include <asm-generic/mmu_context.h>

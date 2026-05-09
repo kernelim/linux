@@ -39,7 +39,7 @@ struct mdio_device {
 	struct mii_bus *bus;
 	char modalias[MDIO_NAME_SIZE];
 
-	int (*bus_match)(struct device *dev, struct device_driver *drv);
+	int (*bus_match)(struct device *dev, const struct device_driver *drv);
 	void (*device_free)(struct mdio_device *mdiodev);
 	void (*device_remove)(struct mdio_device *mdiodev);
 
@@ -53,10 +53,7 @@ struct mdio_device {
 	unsigned int reset_deassert_delay;
 };
 
-static inline struct mdio_device *to_mdio_device(const struct device *dev)
-{
-	return container_of(dev, struct mdio_device, dev);
-}
+#define to_mdio_device(__dev)	container_of_const(__dev, struct mdio_device, dev)
 
 /* struct mdio_driver_common: Common to all MDIO drivers */
 struct mdio_driver_common {
@@ -65,11 +62,8 @@ struct mdio_driver_common {
 };
 #define MDIO_DEVICE_FLAG_PHY		1
 
-static inline struct mdio_driver_common *
-to_mdio_common_driver(const struct device_driver *driver)
-{
-	return container_of(driver, struct mdio_driver_common, driver);
-}
+#define to_mdio_common_driver(__drv_c)	container_of_const(__drv_c, struct mdio_driver_common,	\
+							   driver)
 
 /* struct mdio_driver: Generic MDIO driver */
 struct mdio_driver {
@@ -88,12 +82,8 @@ struct mdio_driver {
 	void (*shutdown)(struct mdio_device *mdiodev);
 };
 
-static inline struct mdio_driver *
-to_mdio_driver(const struct device_driver *driver)
-{
-	return container_of(to_mdio_common_driver(driver), struct mdio_driver,
-			    mdiodrv);
-}
+#define to_mdio_driver(__drv_m)	container_of_const(to_mdio_common_driver(__drv_m),	\
+						   struct mdio_driver, mdiodrv)
 
 /* device driver data */
 static inline void mdiodev_set_drvdata(struct mdio_device *mdio, void *data)
@@ -113,7 +103,6 @@ void mdio_device_remove(struct mdio_device *mdiodev);
 void mdio_device_reset(struct mdio_device *mdiodev, int value);
 int mdio_driver_register(struct mdio_driver *drv);
 void mdio_driver_unregister(struct mdio_driver *drv);
-int mdio_device_bus_match(struct device *dev, struct device_driver *drv);
 
 static inline void mdio_device_get(struct mdio_device *mdiodev)
 {
@@ -180,29 +169,10 @@ extern int mdio_set_flag(const struct mdio_if_info *mdio,
 			 bool sense);
 extern int mdio45_links_ok(const struct mdio_if_info *mdio, u32 mmds);
 extern int mdio45_nway_restart(const struct mdio_if_info *mdio);
-extern void mdio45_ethtool_gset_npage(const struct mdio_if_info *mdio,
-				      struct ethtool_cmd *ecmd,
-				      u32 npage_adv, u32 npage_lpa);
 extern void
 mdio45_ethtool_ksettings_get_npage(const struct mdio_if_info *mdio,
 				   struct ethtool_link_ksettings *cmd,
 				   u32 npage_adv, u32 npage_lpa);
-
-/**
- * mdio45_ethtool_gset - get settings for ETHTOOL_GSET
- * @mdio: MDIO interface
- * @ecmd: Ethtool request structure
- *
- * Since the CSRs for auto-negotiation using next pages are not fully
- * standardised, this function does not attempt to decode them.  Use
- * mdio45_ethtool_gset_npage() to specify advertisement bits from next
- * pages.
- */
-static inline void mdio45_ethtool_gset(const struct mdio_if_info *mdio,
-				       struct ethtool_cmd *ecmd)
-{
-	mdio45_ethtool_gset_npage(mdio, ecmd, 0, 0);
-}
 
 /**
  * mdio45_ethtool_ksettings_get - get settings for ETHTOOL_GLINKSETTINGS
@@ -737,16 +707,7 @@ struct phy_device *mdiobus_get_phy(struct mii_bus *bus, int addr);
  * init/exit. Each module may only use this macro once, and calling it
  * replaces module_init() and module_exit().
  */
-#define mdio_module_driver(_mdio_driver)				\
-static int __init mdio_module_init(void)				\
-{									\
-	return mdio_driver_register(&_mdio_driver);			\
-}									\
-module_init(mdio_module_init);						\
-static void __exit mdio_module_exit(void)				\
-{									\
-	mdio_driver_unregister(&_mdio_driver);				\
-}									\
-module_exit(mdio_module_exit)
+#define mdio_module_driver(_mdio_driver) \
+	module_driver(_mdio_driver, mdio_driver_register, mdio_driver_unregister)
 
 #endif /* __LINUX_MDIO_H__ */

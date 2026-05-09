@@ -687,7 +687,7 @@ static int is_lucent_phy(struct happy_meal *hp)
 
 static void happy_meal_timer(struct timer_list *t)
 {
-	struct happy_meal *hp = from_timer(hp, t, happy_timer);
+	struct happy_meal *hp = timer_container_of(hp, t, happy_timer);
 	void __iomem *tregs = hp->tcvregs;
 	int restart_timer = 0;
 

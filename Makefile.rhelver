@@ -1,5 +1,5 @@
 RHEL_MAJOR = 9
-RHEL_MINOR = 7
+RHEL_MINOR = 8
 
 #
 # RHEL_RELEASE
@@ -12,7 +12,7 @@ RHEL_MINOR = 7
 #
 # Use this spot to avoid future merge conflicts.
 # Do not trim this comment.
-RHEL_RELEASE = 611.55.1
+RHEL_RELEASE = 687.5.3
 
 #
 # ZSTREAM
@@ -35,33 +35,3 @@ RHEL_RELEASE = 611.55.1
 #  number will be incremented instead of the Y).
 #
 ZSTREAM ?= yes
-
-#
-# Early y+1 numbering
-# --------------------
-#
-# In early y+1 process, RHEL_RELEASE consists of 2 numbers: x.y
-# First is RHEL_RELEASE inherited/merged from y as-is, second number
-# is incremented with each build starting from 1. After merge from y,
-# it resets back to 1. This way y+1 nvr reflects status of last merge.
-#
-# Example:
-#
-# rhel8.0                        rhel-8.1
-#   kernel-4.18.0-58.el8   -->     kernel-4.18.0-58.1.el8
-#                                  kernel-4.18.0-58.2.el8
-#   kernel-4.18.0-59.el8           kernel-4.18.0-59.1.el8
-#   kernel-4.18.0-60.el8
-#   kernel-4.18.0-61.el8   -->     kernel-4.18.0-61.1.el8
-#
-#
-# Use this spot to avoid future merge conflicts.
-# Do not trim this comment.
-EARLY_YSTREAM ?= no
-EARLY_YBUILD:=
-EARLY_YRELEASE:=
-ifneq ("$(ZSTREAM)", "yes")
-  ifeq ("$(EARLY_YSTREAM)","yes")
-    RHEL_RELEASE:=$(RHEL_RELEASE).$(EARLY_YRELEASE)
-  endif
-endif

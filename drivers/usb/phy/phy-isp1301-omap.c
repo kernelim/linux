@@ -1172,7 +1172,7 @@ static irqreturn_t isp1301_irq(int irq, void *isp)
 
 static void isp1301_timer(struct timer_list *t)
 {
-	struct isp1301 *isp = from_timer(isp, t, timer);
+	struct isp1301 *isp = timer_container_of(isp, t, timer);
 
 	isp1301_defer_work(isp, WORK_TIMER);
 }

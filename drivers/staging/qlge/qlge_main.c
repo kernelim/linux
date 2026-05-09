@@ -4523,7 +4523,7 @@ static const struct net_device_ops qlge_netdev_ops = {
 
 static void qlge_timer(struct timer_list *t)
 {
-	struct qlge_adapter *qdev = from_timer(qdev, t, timer);
+	struct qlge_adapter *qdev = timer_container_of(qdev, t, timer);
 	u32 var = 0;
 
 	var = qlge_read32(qdev, STS);

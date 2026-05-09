@@ -3,7 +3,7 @@
 # Makefile for the HISILICON network device drivers.
 #
 
-ccflags-y += -I$(srctree)/$(src)
+ccflags-y += -I$(src)
 
 obj-$(CONFIG_HNS3) += hns3pf/
 obj-$(CONFIG_HNS3) += hns3vf/

@@ -543,7 +543,7 @@ static void int_timeout_handler(struct timer_list *t)
 	struct fm_irq *fmirq;
 
 	fmdbg("irq: timeout,trying to re-enable fm interrupts\n");
-	fmdev = from_timer(fmdev, t, irq_info.timer);
+	fmdev = timer_container_of(fmdev, t, irq_info.timer);
 	fmirq = &fmdev->irq_info;
 	fmirq->retry++;
 

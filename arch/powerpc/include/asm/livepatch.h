@@ -14,9 +14,7 @@
 #ifdef CONFIG_LIVEPATCH
 static inline void klp_arch_set_pc(struct ftrace_regs *fregs, unsigned long ip)
 {
-	struct pt_regs *regs = ftrace_get_regs(fregs);
-
-	regs_set_return_ip(regs, ip);
+	ftrace_regs_set_instruction_pointer(fregs, ip);
 }
 
 static inline void klp_init_thread_info(struct task_struct *p)

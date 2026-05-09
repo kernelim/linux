@@ -27,6 +27,7 @@ struct ppc_plt_entry {
 struct mod_arch_specific {
 #ifdef __powerpc64__
 	unsigned int stubs_section;	/* Index of stubs section in module */
+	unsigned int stub_count;	/* Number of stubs used */
 	unsigned int toc_section;	/* What section is the TOC? */
 	bool toc_fixed;			/* Have we fixed up .TOC.? */
 
@@ -43,6 +44,11 @@ struct mod_arch_specific {
 	unsigned long tramp;
 #ifdef CONFIG_DYNAMIC_FTRACE_WITH_REGS
 	unsigned long tramp_regs;
+#ifdef CONFIG_PPC_FTRACE_OUT_OF_LINE
+	struct ftrace_ool_stub *ool_stubs;
+	unsigned int ool_stub_count;
+	unsigned int ool_stub_index;
+#endif
 #endif
 #endif
 

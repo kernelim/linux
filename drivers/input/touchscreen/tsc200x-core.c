@@ -196,7 +196,7 @@ out:
 
 static void tsc200x_penup_timer(struct timer_list *t)
 {
-	struct tsc200x *ts = from_timer(ts, t, penup_timer);
+	struct tsc200x *ts = timer_container_of(ts, t, penup_timer);
 	unsigned long flags;
 
 	spin_lock_irqsave(&ts->lock, flags);

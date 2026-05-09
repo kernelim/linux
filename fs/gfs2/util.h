@@ -91,9 +91,9 @@ void gfs2_consist_rgrpd_i(struct gfs2_rgrpd *rgd,
 gfs2_consist_rgrpd_i((rgd), __func__, __FILE__, __LINE__)
 
 
-int gfs2_meta_check_ii(struct gfs2_sbd *sdp, struct buffer_head *bh,
-		       const char *type, const char *function,
-		       char *file, unsigned int line);
+void gfs2_meta_check_ii(struct gfs2_sbd *sdp, struct buffer_head *bh,
+			const char *function,
+			char *file, unsigned int line);
 
 static inline int gfs2_meta_check(struct gfs2_sbd *sdp,
 				    struct buffer_head *bh)
@@ -108,10 +108,10 @@ static inline int gfs2_meta_check(struct gfs2_sbd *sdp,
 	return 0;
 }
 
-int gfs2_metatype_check_ii(struct gfs2_sbd *sdp, struct buffer_head *bh,
-			   u16 type, u16 t,
-			   const char *function,
-			   char *file, unsigned int line);
+void gfs2_metatype_check_ii(struct gfs2_sbd *sdp, struct buffer_head *bh,
+			    u16 type, u16 t,
+			    const char *function,
+			    char *file, unsigned int line);
 
 static inline int gfs2_metatype_check_i(struct gfs2_sbd *sdp,
 					struct buffer_head *bh,
@@ -122,12 +122,16 @@ static inline int gfs2_metatype_check_i(struct gfs2_sbd *sdp,
 	struct gfs2_meta_header *mh = (struct gfs2_meta_header *)bh->b_data;
 	u32 magic = be32_to_cpu(mh->mh_magic);
 	u16 t = be32_to_cpu(mh->mh_type);
-	if (unlikely(magic != GFS2_MAGIC))
-		return gfs2_meta_check_ii(sdp, bh, "magic number", function,
-					  file, line);
-        if (unlikely(t != type))
-		return gfs2_metatype_check_ii(sdp, bh, type, t, function,
-					      file, line);
+	if (unlikely(magic != GFS2_MAGIC)) {
+		gfs2_meta_check_ii(sdp, bh, function,
+				   file, line);
+		return -EIO;
+	}
+        if (unlikely(t != type)) {
+		gfs2_metatype_check_ii(sdp, bh, type, t, function,
+				       file, line);
+		return -EIO;
+	}
 	return 0;
 }
 
@@ -144,8 +148,8 @@ static inline void gfs2_metatype_set(struct buffer_head *bh, u16 type,
 }
 
 
-int gfs2_io_error_i(struct gfs2_sbd *sdp, const char *function,
-		    char *file, unsigned int line);
+void gfs2_io_error_i(struct gfs2_sbd *sdp, const char *function,
+		     char *file, unsigned int line);
 
 int check_journal_clean(struct gfs2_sbd *sdp, struct gfs2_jdesc *jd,
 		        bool verbose);
@@ -198,13 +202,14 @@ static inline void gfs2_withdraw_delayed(struct gfs2_sbd *sdp)
 }
 
 /**
- * gfs2_withdrawn - test whether the file system is withdrawing or withdrawn
+ * gfs2_withdrawing_or_withdrawn - test whether the file system is withdrawing
+ *                                 or withdrawn
  * @sdp: the superblock
  */
-static inline bool gfs2_withdrawn(struct gfs2_sbd *sdp)
+static inline bool gfs2_withdrawing_or_withdrawn(struct gfs2_sbd *sdp)
 {
-	return test_bit(SDF_WITHDRAWN, &sdp->sd_flags) ||
-		test_bit(SDF_WITHDRAWING, &sdp->sd_flags);
+	return unlikely(test_bit(SDF_WITHDRAWN, &sdp->sd_flags) ||
+			test_bit(SDF_WITHDRAWING, &sdp->sd_flags));
 }
 
 /**
@@ -213,13 +218,13 @@ static inline bool gfs2_withdrawn(struct gfs2_sbd *sdp)
  */
 static inline bool gfs2_withdrawing(struct gfs2_sbd *sdp)
 {
-	return test_bit(SDF_WITHDRAWING, &sdp->sd_flags) &&
-	       !test_bit(SDF_WITHDRAWN, &sdp->sd_flags);
+	return unlikely(test_bit(SDF_WITHDRAWING, &sdp->sd_flags) &&
+			!test_bit(SDF_WITHDRAWN, &sdp->sd_flags));
 }
 
 static inline bool gfs2_withdraw_in_prog(struct gfs2_sbd *sdp)
 {
-	return test_bit(SDF_WITHDRAW_IN_PROG, &sdp->sd_flags);
+	return unlikely(test_bit(SDF_WITHDRAW_IN_PROG, &sdp->sd_flags));
 }
 
 #define gfs2_tune_get(sdp, field) \
@@ -227,6 +232,6 @@ gfs2_tune_get_i(&(sdp)->sd_tune, &(sdp)->sd_tune.field)
 
 __printf(2, 3)
 void gfs2_lm(struct gfs2_sbd *sdp, const char *fmt, ...);
-int gfs2_withdraw(struct gfs2_sbd *sdp);
+void gfs2_withdraw(struct gfs2_sbd *sdp);
 
 #endif /* __UTIL_DOT_H__ */

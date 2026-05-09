@@ -1161,7 +1161,7 @@ EXPORT_SYMBOL_GPL(acpi_subsys_complete);
  */
 int acpi_subsys_suspend(struct device *dev)
 {
-	if (!dev_pm_test_driver_flags(dev, DPM_FLAG_SMART_SUSPEND) ||
+	if (!dev_pm_smart_suspend(dev) ||
 	    acpi_dev_needs_resume(dev, ACPI_COMPANION(dev)))
 		pm_runtime_resume(dev);
 
@@ -1320,7 +1320,7 @@ EXPORT_SYMBOL_GPL(acpi_subsys_restore_early);
  */
 int acpi_subsys_poweroff(struct device *dev)
 {
-	if (!dev_pm_test_driver_flags(dev, DPM_FLAG_SMART_SUSPEND) ||
+	if (!dev_pm_smart_suspend(dev) ||
 	    acpi_dev_needs_resume(dev, ACPI_COMPANION(dev)))
 		pm_runtime_resume(dev);
 
@@ -1362,6 +1362,8 @@ static int acpi_subsys_poweroff_noirq(struct device *dev)
 }
 #endif /* CONFIG_PM_SLEEP */
 
+static void acpi_dev_pm_detach(struct device *dev, bool power_off);
+
 static struct dev_pm_domain acpi_general_pm_domain = {
 	.ops = {
 		.runtime_suspend = acpi_subsys_runtime_suspend,
@@ -1382,6 +1384,7 @@ static struct dev_pm_domain acpi_general_pm_domain = {
 		.restore_early = acpi_subsys_restore_early,
 #endif
 	},
+	.detach = acpi_dev_pm_detach,
 };
 
 /**
@@ -1465,7 +1468,6 @@ int acpi_dev_pm_attach(struct device *dev, bool power_on)
 		acpi_device_wakeup_disable(adev);
 	}
 
-	dev->pm_domain->detach = acpi_dev_pm_detach;
 	return 1;
 }
 EXPORT_SYMBOL_GPL(acpi_dev_pm_attach);

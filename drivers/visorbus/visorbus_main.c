@@ -486,7 +486,7 @@ static const struct file_operations bus_info_debugfs_fops = {
 
 static void dev_periodic_work(struct timer_list *t)
 {
-	struct visor_device *dev = from_timer(dev, t, timer);
+	struct visor_device *dev = timer_container_of(dev, t, timer);
 	struct visor_driver *drv = to_visor_driver(dev->device.driver);
 
 	drv->channel_interrupt(dev);

@@ -6603,7 +6603,8 @@ static void mib_read_work(struct work_struct *work)
 
 static void mib_monitor(struct timer_list *t)
 {
-	struct dev_info *hw_priv = from_timer(hw_priv, t, mib_timer_info.timer);
+	struct dev_info *hw_priv = timer_container_of(hw_priv, t,
+						      mib_timer_info.timer);
 
 	mib_read_work(&hw_priv->mib_read);
 
@@ -6630,7 +6631,8 @@ static void mib_monitor(struct timer_list *t)
  */
 static void dev_monitor(struct timer_list *t)
 {
-	struct dev_priv *priv = from_timer(priv, t, monitor_timer_info.timer);
+	struct dev_priv *priv = timer_container_of(priv, t,
+						   monitor_timer_info.timer);
 	struct net_device *dev = priv->mii_if.dev;
 	struct dev_info *hw_priv = priv->adapter;
 	struct ksz_hw *hw = &hw_priv->hw;

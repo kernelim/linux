@@ -1,3 +1,3 @@
-#7-
-0xb2653522	unregister_binfmt	vmlinux	EXPORT_SYMBOL	
+#8-
+0x1f26dede	unregister_binfmt	vmlinux	EXPORT_SYMBOL	
 

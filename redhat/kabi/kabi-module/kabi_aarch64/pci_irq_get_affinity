@@ -1,3 +1,3 @@
-#7-
-0x710fe2ff	pci_irq_get_affinity	vmlinux	EXPORT_SYMBOL	
+#8-
+0xc591e010	pci_irq_get_affinity	vmlinux	EXPORT_SYMBOL	
 

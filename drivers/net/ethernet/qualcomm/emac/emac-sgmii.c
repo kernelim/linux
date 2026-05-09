@@ -291,7 +291,7 @@ static struct sgmii_ops qdf2400_ops = {
 };
 #endif
 
-static int emac_sgmii_acpi_match(struct device *dev, void *data)
+static int emac_sgmii_acpi_match(struct device *dev, const void *data)
 {
 #ifdef CONFIG_ACPI
 	static const struct acpi_device_id match_table[] = {
@@ -301,7 +301,7 @@ static int emac_sgmii_acpi_match(struct device *dev, void *data)
 		{}
 	};
 	const struct acpi_device_id *id = acpi_match_device(match_table, dev);
-	struct sgmii_ops **ops = data;
+	const struct sgmii_ops **ops = (const struct sgmii_ops **) data;
 
 	if (id) {
 		acpi_handle handle = ACPI_HANDLE(dev);

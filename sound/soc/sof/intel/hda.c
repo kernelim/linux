@@ -192,6 +192,9 @@ static int hda_sdw_probe(struct snd_sof_dev *sdev)
 		res.ext = true;
 		res.ops = &sdw_ace2x_callback;
 
+		/* ACE3+ supports microphone privacy */
+		if (chip->hw_ip_version >= SOF_INTEL_ACE_3_0)
+			res.mic_privacy = true;
 	}
 	res.irq = sdev->ipc_irq;
 	res.handle = hdev->info.handle;
@@ -613,7 +616,7 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 		dev_dbg(sdev->dev, "PP capability, will probe DSP later.\n");
 
 	/* Init HDA controller after i915 init */
-	ret = hda_dsp_ctrl_init_chip(sdev);
+	ret = hda_dsp_ctrl_init_chip(sdev, true);
 	if (ret < 0) {
 		dev_err(bus->dev, "error: init chip failed with ret: %d\n",
 			ret);
@@ -624,6 +627,11 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 
 	/* Skip SoundWire if it is not supported */
 	if (!(interface_mask & BIT(SOF_DAI_INTEL_ALH)))
+		goto skip_soundwire;
+
+	/* Skip SoundWire in nocodec mode */
+	if (IS_ENABLED(CONFIG_SND_SOC_SOF_NOCODEC_DEBUG_SUPPORT) &&
+	    sof_debug_check_flag(SOF_DBG_FORCE_NOCODEC))
 		goto skip_soundwire;
 
 	/* scan SoundWire capabilities exposed by DSDT */

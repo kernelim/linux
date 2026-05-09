@@ -1780,7 +1780,8 @@ static int handle_control_request(struct dummy_hcd *dum_hcd, struct urb *urb,
  */
 static void dummy_timer(struct timer_list *t)
 {
-	struct dummy_hcd	*dum_hcd = from_timer(dum_hcd, t, timer);
+	struct dummy_hcd	*dum_hcd = timer_container_of(dum_hcd, t,
+							      timer);
 	struct dummy		*dum = dum_hcd->dum;
 	struct urbp		*urbp, *tmp;
 	unsigned long		flags;

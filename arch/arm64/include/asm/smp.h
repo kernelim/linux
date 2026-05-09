@@ -100,7 +100,7 @@ static inline void arch_send_wakeup_ipi(unsigned int cpu)
 extern int __cpu_disable(void);
 
 static inline void __cpu_die(unsigned int cpu) { }
-extern void cpu_die(void);
+extern void __noreturn cpu_die(void);
 extern void __noreturn cpu_die_early(void);
 
 static inline void __noreturn cpu_park_loop(void)

@@ -12,13 +12,13 @@
 #include <linux/init.h>
 #include <linux/rv.h>
 
-static void rv_printk_reaction(char *msg)
+__printf(1, 2) static void rv_printk_reaction(const char *msg, ...)
 {
-#if IS_ENABLED(CONFIG_PREEMPT_RT)
-	printk(msg);
-#else
-	printk_deferred(msg);
-#endif
+	va_list args;
+
+	va_start(args, msg);
+	vprintk_deferred(msg, args);
+	va_end(args);
 }
 
 static struct rv_reactor rv_printk = {

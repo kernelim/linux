@@ -3294,7 +3294,7 @@ static void rtl819x_watchdog_wqcallback(struct work_struct *work)
 
 static void watch_dog_timer_callback(struct timer_list *t)
 {
-	struct r8192_priv *priv = from_timer(priv, t, watch_dog_timer);
+	struct r8192_priv *priv = timer_container_of(priv, t, watch_dog_timer);
 
 	schedule_delayed_work(&priv->watch_dog_wq, 0);
 	mod_timer(&priv->watch_dog_timer,

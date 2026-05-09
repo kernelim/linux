@@ -620,7 +620,7 @@ static int lmc_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
 /* the watchdog process that cruises around */
 static void lmc_watchdog(struct timer_list *t) /*fold00*/
 {
-    lmc_softc_t *sc = from_timer(sc, t, timer);
+    lmc_softc_t *sc = timer_container_of(sc, t, timer);
     struct net_device *dev = sc->lmc_device;
     int link_status;
     u32 ticks;

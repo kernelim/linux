@@ -237,7 +237,7 @@ struct usb_function {
 	/* internals */
 	struct list_head		list;
 	DECLARE_BITMAP(endpoints, 32);
-	const struct usb_function_instance *fi;
+	struct usb_function_instance *fi;
 
 	unsigned int		bind_deactivated:1;
 };
@@ -338,9 +338,6 @@ struct usb_configuration {
 int usb_add_config(struct usb_composite_dev *,
 		struct usb_configuration *,
 		int (*)(struct usb_configuration *));
-
-void usb_remove_config(struct usb_composite_dev *,
-		struct usb_configuration *);
 
 /* predefined index for usb_composite_driver */
 enum {
@@ -483,6 +480,7 @@ struct usb_composite_dev {
 	struct usb_composite_driver	*driver;
 	u8				next_string_id;
 	char				*def_manufacturer;
+	struct usb_string		*usb_strings;
 
 	/* the gadget driver won't enable the data pullup
 	 * while the deactivation count is nonzero.

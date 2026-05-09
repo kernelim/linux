@@ -1192,7 +1192,7 @@ void rtw_stadel_event_callback(struct adapter *adapter, u8 *pbuf)
  */
 void _rtw_join_timeout_handler (struct timer_list *t)
 {
-	struct adapter *adapter = from_timer(adapter, t, mlmepriv.assoc_timer);
+	struct adapter *adapter = timer_container_of(adapter, t, mlmepriv.assoc_timer);
 	struct mlme_priv *pmlmepriv = &adapter->mlmepriv;
 	int do_join_r;
 
@@ -1226,7 +1226,7 @@ void _rtw_join_timeout_handler (struct timer_list *t)
  */
 void rtw_scan_timeout_handler (struct timer_list *t)
 {
-	struct adapter *adapter = from_timer(adapter, t,
+	struct adapter *adapter = timer_container_of(adapter, t,
 					     mlmepriv.scan_to_timer);
 	struct mlme_priv *pmlmepriv = &adapter->mlmepriv;
 
@@ -1252,7 +1252,7 @@ static void rtw_auto_scan_handler(struct adapter *padapter)
 
 void rtw_dynamic_check_timer_handlder(struct timer_list *t)
 {
-	struct adapter *adapter = from_timer(adapter, t,
+	struct adapter *adapter = timer_container_of(adapter, t,
 					     mlmepriv.dynamic_chk_timer);
 	struct registry_priv *pregistrypriv = &adapter->registrypriv;
 

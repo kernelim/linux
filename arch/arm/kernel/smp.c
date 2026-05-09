@@ -314,7 +314,7 @@ void arch_cpuhp_cleanup_dead_cpu(unsigned int cpu)
  * of the other hotplug-cpu capable cores, so presumably coming
  * out of idle fixes this.
  */
-void arch_cpu_idle_dead(void)
+void __noreturn arch_cpu_idle_dead(void)
 {
 	unsigned int cpu = smp_processor_id();
 
@@ -373,6 +373,8 @@ void arch_cpu_idle_dead(void)
 	"	b	secondary_start_kernel"
 		:
 		: "r" (task_stack_page(current) + THREAD_SIZE - 8));
+
+	unreachable();
 }
 #endif /* CONFIG_HOTPLUG_CPU */
 

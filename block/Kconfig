@@ -214,14 +214,6 @@ source "block/partitions/Kconfig"
 config BLOCK_COMPAT
 	def_bool COMPAT
 
-config BLK_MQ_PCI
-	def_bool PCI
-
-config BLK_MQ_VIRTIO
-	bool
-	depends on VIRTIO
-	default y
-
 config BLK_PM
 	def_bool PM
 

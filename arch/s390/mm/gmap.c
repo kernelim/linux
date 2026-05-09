@@ -285,7 +285,7 @@ EXPORT_SYMBOL_GPL(gmap_remove);
  */
 void gmap_enable(struct gmap *gmap)
 {
-	S390_lowcore.gmap = (unsigned long) gmap;
+	get_lowcore()->gmap = (unsigned long)gmap;
 }
 EXPORT_SYMBOL_GPL(gmap_enable);
 
@@ -295,7 +295,7 @@ EXPORT_SYMBOL_GPL(gmap_enable);
  */
 void gmap_disable(struct gmap *gmap)
 {
-	S390_lowcore.gmap = 0UL;
+	get_lowcore()->gmap = 0UL;
 }
 EXPORT_SYMBOL_GPL(gmap_disable);
 
@@ -306,7 +306,7 @@ EXPORT_SYMBOL_GPL(gmap_disable);
  */
 struct gmap *gmap_get_enabled(void)
 {
-	return (struct gmap *) S390_lowcore.gmap;
+	return (struct gmap *)get_lowcore()->gmap;
 }
 EXPORT_SYMBOL_GPL(gmap_get_enabled);
 
@@ -2641,9 +2641,6 @@ int s390_enable_sie(void)
 	/* Do we have pgstes? if yes, we are done */
 	if (mm_has_pgste(mm))
 		return 0;
-	/* Fail if the page tables are 2K */
-	if (!mm_alloc_pgste(mm))
-		return -EINVAL;
 	mmap_write_lock(mm);
 	mm->context.has_pgste = 1;
 	/* split thp mappings and disable thp for future mappings */

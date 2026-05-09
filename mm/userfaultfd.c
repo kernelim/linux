@@ -82,6 +82,7 @@ int mfill_atomic_install_pte(pmd_t *dst_pmd,
 	struct folio *folio;
 
 	_dst_pte = mk_pte(page, dst_vma->vm_page_prot);
+	_dst_pte = pte_mkdirty(_dst_pte);
 	if (page_in_cache && !vm_shared)
 		writable = false;
 	if (writable)

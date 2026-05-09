@@ -813,7 +813,7 @@ lcs_notify_lancmd_waiters(struct lcs_card *card, struct lcs_cmd *cmd)
 static void
 lcs_lancmd_timeout(struct timer_list *t)
 {
-	struct lcs_reply *reply = from_timer(reply, t, timer);
+	struct lcs_reply *reply = timer_container_of(reply, t, timer);
 	struct lcs_reply *list_reply, *r;
 	unsigned long flags;
 

@@ -3,7 +3,7 @@
 # Makefile for the linux kernel.
 #
 
-ccflags-y := -I$(srctree)/$(src)/include \
+ccflags-y := -I$(src)/include \
 	-I$(srctree)/arch/arm/plat-omap/include
 
 # Common support

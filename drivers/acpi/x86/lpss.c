@@ -338,8 +338,8 @@ static const struct lpss_device_desc bsw_spi_dev_desc = {
 };
 
 static const struct x86_cpu_id lpss_cpu_ids[] = {
-	X86_MATCH_INTEL_FAM6_MODEL(ATOM_SILVERMONT,	NULL),
-	X86_MATCH_INTEL_FAM6_MODEL(ATOM_AIRMONT,	NULL),
+	X86_MATCH_VFM(INTEL_ATOM_SILVERMONT,	NULL),
+	X86_MATCH_VFM(INTEL_ATOM_AIRMONT,	NULL),
 	{}
 };
 
@@ -386,9 +386,6 @@ static const struct acpi_device_id acpi_lpss_device_ids[] = {
 	{ "INT3434", LPSS_ADDR(lpt_uart_dev_desc) },
 	{ "INT3435", LPSS_ADDR(lpt_uart_dev_desc) },
 	{ "INT3436", LPSS_ADDR(lpt_sdio_dev_desc) },
-
-	/* Wildcat Point LPSS devices */
-	{ "INT3438", LPSS_ADDR(lpt_spi_dev_desc) },
 
 	{ }
 };

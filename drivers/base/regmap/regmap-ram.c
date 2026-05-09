@@ -66,12 +66,12 @@ struct regmap *__regmap_init_ram(struct device *dev,
 		return ERR_PTR(-EINVAL);
 	}
 
-	data->read = kcalloc(sizeof(bool), config->max_register + 1,
+	data->read = kcalloc(config->max_register + 1, sizeof(bool),
 			     GFP_KERNEL);
 	if (!data->read)
 		return ERR_PTR(-ENOMEM);
 
-	data->written = kcalloc(sizeof(bool), config->max_register + 1,
+	data->written = kcalloc(config->max_register + 1, sizeof(bool),
 				GFP_KERNEL);
 	if (!data->written)
 		return ERR_PTR(-ENOMEM);
@@ -83,4 +83,5 @@ struct regmap *__regmap_init_ram(struct device *dev,
 }
 EXPORT_SYMBOL_GPL(__regmap_init_ram);
 
+MODULE_DESCRIPTION("Register map access API - Memory region");
 MODULE_LICENSE("GPL v2");

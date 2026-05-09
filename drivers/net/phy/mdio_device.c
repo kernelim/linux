@@ -35,10 +35,11 @@ static void mdio_device_release(struct device *dev)
 	kfree(to_mdio_device(dev));
 }
 
-int mdio_device_bus_match(struct device *dev, struct device_driver *drv)
+static int mdio_device_bus_match(struct device *dev,
+				 const struct device_driver *drv)
 {
 	struct mdio_device *mdiodev = to_mdio_device(dev);
-	struct mdio_driver *mdiodrv = to_mdio_driver(drv);
+	const struct mdio_driver *mdiodrv = to_mdio_driver(drv);
 
 	if (mdiodrv->mdiodrv.flags & MDIO_DEVICE_IS_PHY)
 		return 0;
@@ -58,6 +59,7 @@ struct mdio_device *mdio_device_create(struct mii_bus *bus, int addr)
 	mdiodev->dev.release = mdio_device_release;
 	mdiodev->dev.parent = &bus->dev;
 	mdiodev->dev.bus = &mdio_bus_type;
+	mdiodev->bus_match = mdio_device_bus_match;
 	mdiodev->device_free = mdio_device_free;
 	mdiodev->device_remove = mdio_device_remove;
 	mdiodev->bus = bus;
@@ -75,6 +77,8 @@ EXPORT_SYMBOL(mdio_device_create);
 /**
  * mdio_device_register - Register the mdio device on the MDIO bus
  * @mdiodev: mdio_device structure to be added to the MDIO bus
+ *
+ * Return: Zero if successful, negative error code on failure
  */
 int mdio_device_register(struct mdio_device *mdiodev)
 {
@@ -150,6 +154,8 @@ EXPORT_SYMBOL(mdio_device_reset);
  *
  * Description: Take care of setting up the mdio_device structure
  * and calling the driver to probe the device.
+ *
+ * Return: Zero if successful, negative error code on failure
  */
 static int mdio_probe(struct device *dev)
 {
@@ -200,6 +206,8 @@ static void mdio_shutdown(struct device *dev)
 /**
  * mdio_driver_register - register an mdio_driver with the MDIO layer
  * @drv: new mdio_driver to register
+ *
+ * Return: Zero if successful, negative error code on failure
  */
 int mdio_driver_register(struct mdio_driver *drv)
 {

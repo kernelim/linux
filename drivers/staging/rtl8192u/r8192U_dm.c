@@ -2590,7 +2590,7 @@ static void dm_deInit_fsync(struct net_device *dev)
 
 void dm_fsync_timer_callback(struct timer_list *t)
 {
-	struct r8192_priv *priv = from_timer(priv, t, fsync_timer);
+	struct r8192_priv *priv = timer_container_of(priv, t, fsync_timer);
 	struct net_device *dev = priv->ieee80211->dev;
 	u32 rate_index, rate_count = 0, rate_count_diff = 0;
 	bool		bSwitchFromCountDiff = false;

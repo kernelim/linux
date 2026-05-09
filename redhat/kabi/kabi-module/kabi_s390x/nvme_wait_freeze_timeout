@@ -1,0 +1,3 @@
+#8-
+0xe4113a8a	nvme_wait_freeze_timeout	drivers/nvme/host/nvme-core	EXPORT_SYMBOL_GPL	
+

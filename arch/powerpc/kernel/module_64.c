@@ -185,10 +185,11 @@ static int relacmp(const void *_x, const void *_y)
 
 /* Get size of potential trampolines required. */
 static unsigned long get_stubs_size(const Elf64_Ehdr *hdr,
-				    const Elf64_Shdr *sechdrs)
+				    const Elf64_Shdr *sechdrs,
+				    char *secstrings,
+				    struct module *me)
 {
-	/* One extra reloc so it's always 0-funcaddr terminated */
-	unsigned long relocs = 1;
+	unsigned long relocs = 0;
 	unsigned i;
 
 	/* Every relocated section... */
@@ -221,6 +222,20 @@ static unsigned long get_stubs_size(const Elf64_Ehdr *hdr,
 	/* an additional one for ftrace_regs_caller */
 	relocs++;
 #endif
+#endif
+
+#ifdef CONFIG_PPC_FTRACE_OUT_OF_LINE
+	/* stubs for the function tracer */
+	for (i = 1; i < hdr->e_shnum; i++) {
+		if (!strcmp(secstrings + sechdrs[i].sh_name, "__patchable_function_entries")) {
+			me->arch.ool_stub_count = sechdrs[i].sh_size / sizeof(unsigned long);
+			me->arch.ool_stub_index = 0;
+			relocs += roundup(me->arch.ool_stub_count * sizeof(struct ftrace_ool_stub),
+					  sizeof(struct ppc64_stub_entry)) /
+				  sizeof(struct ppc64_stub_entry);
+			break;
+		}
+	}
 #endif
 
 	pr_debug("Looks like a total of %lu stubs, max\n", relocs);
@@ -322,11 +337,11 @@ int module_frob_arch_sections(Elf64_Ehdr *hdr,
 		me->arch.toc_section = me->arch.stubs_section;
 
 	/* Override the stubs size */
-	sechdrs[me->arch.stubs_section].sh_size = get_stubs_size(hdr, sechdrs);
+	sechdrs[me->arch.stubs_section].sh_size = get_stubs_size(hdr, sechdrs, secstrings, me);
 	return 0;
 }
 
-#ifdef CONFIG_MPROFILE_KERNEL
+#if defined(CONFIG_MPROFILE_KERNEL) || defined(CONFIG_ARCH_USING_PATCHABLE_FUNCTION_ENTRY)
 
 static u32 stub_insns[] = {
 	PPC_RAW_LD(_R12, _R13, offsetof(struct paca_struct, kernel_toc)),
@@ -479,7 +494,7 @@ static unsigned long stub_for_addr(const Elf64_Shdr *sechdrs,
 
 	/* Find this stub, or if that fails, the next avail. entry */
 	stubs = (void *)sechdrs[me->arch.stubs_section].sh_addr;
-	for (i = 0; stub_func_addr(stubs[i].funcdata); i++) {
+	for (i = 0; i < me->arch.stub_count; i++) {
 		if (WARN_ON(i >= num_stubs))
 			return 0;
 
@@ -490,6 +505,7 @@ static unsigned long stub_for_addr(const Elf64_Shdr *sechdrs,
 	if (!create_stub(sechdrs, &stubs[i], addr, me, name))
 		return 0;
 
+	me->arch.stub_count++;
 	return (unsigned long)&stubs[i];
 }
 
@@ -783,6 +799,27 @@ int module_trampoline_target(struct module *mod, unsigned long addr,
 	return 0;
 }
 
+static int setup_ftrace_ool_stubs(const Elf64_Shdr *sechdrs, unsigned long addr, struct module *me)
+{
+#ifdef CONFIG_PPC_FTRACE_OUT_OF_LINE
+	unsigned int total_stubs, num_stubs;
+	struct ppc64_stub_entry *stub;
+
+	total_stubs = sechdrs[me->arch.stubs_section].sh_size / sizeof(*stub);
+	num_stubs = roundup(me->arch.ool_stub_count * sizeof(struct ftrace_ool_stub),
+			    sizeof(struct ppc64_stub_entry)) / sizeof(struct ppc64_stub_entry);
+
+	if (WARN_ON(me->arch.stub_count + num_stubs > total_stubs))
+		return -1;
+
+	stub = (void *)sechdrs[me->arch.stubs_section].sh_addr;
+	me->arch.ool_stubs = (struct ftrace_ool_stub *)(stub + me->arch.stub_count);
+	me->arch.stub_count += num_stubs;
+#endif
+
+	return 0;
+}
+
 int module_finalize_ftrace(struct module *mod, const Elf_Shdr *sechdrs)
 {
 	mod->arch.tramp = stub_for_addr(sechdrs,
@@ -799,6 +836,9 @@ int module_finalize_ftrace(struct module *mod, const Elf_Shdr *sechdrs)
 #endif
 
 	if (!mod->arch.tramp)
+		return -ENOENT;
+
+	if (setup_ftrace_ool_stubs(sechdrs, mod->arch.tramp, mod))
 		return -ENOENT;
 
 	return 0;

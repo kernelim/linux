@@ -598,8 +598,8 @@ static int amdgpu_virt_write_vf2pf_data(struct amdgpu_device *adev)
 	vf2pf_info->driver_cert = 0;
 	vf2pf_info->os_info.all = 0;
 
-	vf2pf_info->fb_usage =
-		ttm_resource_manager_usage(&adev->mman.vram_mgr.manager) >> 20;
+	vf2pf_info->fb_usage = ttm_resource_manager_used(&adev->mman.vram_mgr.manager) ?
+		 ttm_resource_manager_usage(&adev->mman.vram_mgr.manager) >> 20 : 0;
 	vf2pf_info->fb_vis_usage =
 		amdgpu_vram_mgr_vis_usage(&adev->mman.vram_mgr) >> 20;
 	vf2pf_info->fb_size = adev->gmc.real_vram_size >> 20;
@@ -828,10 +828,13 @@ static void amdgpu_virt_init_ras(struct amdgpu_device *adev)
 {
 	ratelimit_state_init(&adev->virt.ras.ras_error_cnt_rs, 5 * HZ, 1);
 	ratelimit_state_init(&adev->virt.ras.ras_cper_dump_rs, 5 * HZ, 1);
+	ratelimit_state_init(&adev->virt.ras.ras_chk_criti_rs, 5 * HZ, 1);
 
 	ratelimit_set_flags(&adev->virt.ras.ras_error_cnt_rs,
 			    RATELIMIT_MSG_ON_RELEASE);
 	ratelimit_set_flags(&adev->virt.ras.ras_cper_dump_rs,
+			    RATELIMIT_MSG_ON_RELEASE);
+	ratelimit_set_flags(&adev->virt.ras.ras_chk_criti_rs,
 			    RATELIMIT_MSG_ON_RELEASE);
 
 	mutex_init(&adev->virt.ras.ras_telemetry_mutex);
@@ -1323,6 +1326,9 @@ static int amdgpu_virt_req_ras_err_count_internal(struct amdgpu_device *adev, bo
 {
 	struct amdgpu_virt *virt = &adev->virt;
 
+	if (!virt->ops || !virt->ops->req_ras_err_count)
+		return -EOPNOTSUPP;
+
 	/* Host allows 15 ras telemetry requests per 60 seconds. Afterwhich, the Host
 	 * will ignore incoming guest messages. Ratelimit the guest messages to
 	 * prevent guest self DOS.
@@ -1378,14 +1384,16 @@ amdgpu_virt_write_cpers_to_ring(struct amdgpu_device *adev,
 	used_size = host_telemetry->header.used_size;
 
 	if (used_size > (AMD_SRIOV_RAS_TELEMETRY_SIZE_KB << 10))
-		return 0;
+		return -EINVAL;
 
 	cper_dump = kmemdup(&host_telemetry->body.cper_dump, used_size, GFP_KERNEL);
 	if (!cper_dump)
 		return -ENOMEM;
 
-	if (checksum != amd_sriov_msg_checksum(cper_dump, used_size, 0, 0))
+	if (checksum != amd_sriov_msg_checksum(cper_dump, used_size, 0, 0)) {
+		ret = -EINVAL;
 		goto out;
+	}
 
 	*more = cper_dump->more;
 
@@ -1425,7 +1433,7 @@ static int amdgpu_virt_req_ras_cper_dump_internal(struct amdgpu_device *adev)
 	int ret = 0;
 	uint32_t more = 0;
 
-	if (!amdgpu_sriov_ras_cper_en(adev))
+	if (!virt->ops || !virt->ops->req_ras_cper_dump)
 		return -EOPNOTSUPP;
 
 	do {
@@ -1434,7 +1442,7 @@ static int amdgpu_virt_req_ras_cper_dump_internal(struct amdgpu_device *adev)
 				adev, virt->fw_reserve.ras_telemetry, &more);
 		else
 			ret = 0;
-	} while (more);
+	} while (more && !ret);
 
 	return ret;
 }
@@ -1443,6 +1451,9 @@ int amdgpu_virt_req_ras_cper_dump(struct amdgpu_device *adev, bool force_update)
 {
 	struct amdgpu_virt *virt = &adev->virt;
 	int ret = 0;
+
+	if (!amdgpu_sriov_ras_cper_en(adev))
+		return -EOPNOTSUPP;
 
 	if ((__ratelimit(&virt->ras.ras_cper_dump_rs) || force_update) &&
 	    down_read_trylock(&adev->reset_domain->sem)) {
@@ -1479,4 +1490,69 @@ bool amdgpu_virt_ras_telemetry_block_en(struct amdgpu_device *adev,
 		return false;
 
 	return true;
+}
+
+/*
+ * amdgpu_virt_request_bad_pages() - request bad pages
+ * @adev: amdgpu device.
+ * Send command to GPU hypervisor to write new bad pages into the shared PF2VF region
+ */
+void amdgpu_virt_request_bad_pages(struct amdgpu_device *adev)
+{
+	struct amdgpu_virt *virt = &adev->virt;
+
+	if (virt->ops && virt->ops->req_bad_pages)
+		virt->ops->req_bad_pages(adev);
+}
+
+static int amdgpu_virt_cache_chk_criti_hit(struct amdgpu_device *adev,
+					   struct amdsriov_ras_telemetry *host_telemetry,
+					   bool *hit)
+{
+	struct amd_sriov_ras_chk_criti *tmp = NULL;
+	uint32_t checksum, used_size;
+
+	checksum = host_telemetry->header.checksum;
+	used_size = host_telemetry->header.used_size;
+
+	if (used_size > (AMD_SRIOV_RAS_TELEMETRY_SIZE_KB << 10))
+		return 0;
+
+	tmp = kmemdup(&host_telemetry->body.chk_criti, used_size, GFP_KERNEL);
+	if (!tmp)
+		return -ENOMEM;
+
+	if (checksum != amd_sriov_msg_checksum(tmp, used_size, 0, 0))
+		goto out;
+
+	if (hit)
+		*hit = tmp->hit ? true : false;
+
+out:
+	kfree(tmp);
+
+	return 0;
+}
+
+int amdgpu_virt_check_vf_critical_region(struct amdgpu_device *adev, u64 addr, bool *hit)
+{
+	struct amdgpu_virt *virt = &adev->virt;
+	int r = -EPERM;
+
+	if (!virt->ops || !virt->ops->req_ras_chk_criti)
+		return -EOPNOTSUPP;
+
+	/* Host allows 15 ras telemetry requests per 60 seconds. Afterwhich, the Host
+	 * will ignore incoming guest messages. Ratelimit the guest messages to
+	 * prevent guest self DOS.
+	 */
+	if (__ratelimit(&virt->ras.ras_chk_criti_rs)) {
+		mutex_lock(&virt->ras.ras_telemetry_mutex);
+		if (!virt->ops->req_ras_chk_criti(adev, addr))
+			r = amdgpu_virt_cache_chk_criti_hit(
+				adev, virt->fw_reserve.ras_telemetry, hit);
+		mutex_unlock(&virt->ras.ras_telemetry_mutex);
+	}
+
+	return r;
 }

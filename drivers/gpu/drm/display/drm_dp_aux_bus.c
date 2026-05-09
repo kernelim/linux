@@ -12,6 +12,7 @@
  * to perform transactions on that bus.
  */
 
+#include <linux/export.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -36,7 +37,7 @@ struct dp_aux_ep_device_with_data {
  *
  * Return: True if this driver matches this device; false otherwise.
  */
-static int dp_aux_ep_match(struct device *dev, struct device_driver *drv)
+static int dp_aux_ep_match(struct device *dev, const struct device_driver *drv)
 {
 	return !!of_match_device(drv->of_match_table, dev);
 }

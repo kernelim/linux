@@ -9,7 +9,7 @@
 #include <linux/pci.h>
 #include <linux/suspend.h>
 #include <linux/vgaarb.h>
-#include <asm/amd_nb.h>
+#include <asm/amd/node.h>
 #include <asm/hpet.h>
 #include <asm/pci_x86.h>
 
@@ -828,7 +828,7 @@ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_ATI, 0x7910, rs690_fix_64bit_dma);
 
 #endif
 
-#ifdef CONFIG_AMD_NB
+#ifdef CONFIG_AMD_NODE
 
 #define AMD_15B8_RCC_DEV2_EPF0_STRAP2                                  0x10136008
 #define AMD_15B8_RCC_DEV2_EPF0_STRAP2_NO_SOFT_RESET_DEV2_F0_MASK       0x00000080L
@@ -970,13 +970,13 @@ static void amd_rp_pme_suspend(struct pci_dev *dev)
 	struct pci_dev *rp;
 
 	/*
-	 * PM_SUSPEND_ON means we're doing runtime suspend, which means
+	 * If system suspend is not in progress, we're doing runtime suspend, so
 	 * amd-pmc will not be involved so PMEs during D3 work as advertised.
 	 *
 	 * The PMEs *do* work if amd-pmc doesn't put the SoC in the hardware
 	 * sleep state, but we assume amd-pmc is always present.
 	 */
-	if (pm_suspend_target_state == PM_SUSPEND_ON)
+	if (!pm_suspend_in_progress())
 		return;
 
 	rp = pcie_find_root_port(dev);

@@ -810,6 +810,7 @@ trace_selftest_startup_function_graph(struct tracer *trace,
 	}
 
 #ifdef CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS
+static struct ftrace_ops direct;
 	tracing_reset_online_cpus(&tr->array_buffer);
 	set_graph_array(tr);
 
@@ -825,7 +826,8 @@ trace_selftest_startup_function_graph(struct tracer *trace,
 	 * Register direct function together with graph tracer
 	 * and make sure we get graph trace.
 	 */
-	ret = register_ftrace_direct((unsigned long) DYN_FTRACE_TEST_NAME,
+	ftrace_set_filter_ip(&direct, (unsigned long)DYN_FTRACE_TEST_NAME, 0, 0);
+	ret = register_ftrace_direct(&direct,
 				     (unsigned long)ftrace_stub_direct_tramp);
 	if (ret)
 		goto out;
@@ -846,8 +848,9 @@ trace_selftest_startup_function_graph(struct tracer *trace,
 
 	unregister_ftrace_graph(&fgraph_ops);
 
-	ret = unregister_ftrace_direct((unsigned long) DYN_FTRACE_TEST_NAME,
-				       (unsigned long)ftrace_stub_direct_tramp);
+	ret = unregister_ftrace_direct(&direct,
+				       (unsigned long)ftrace_stub_direct_tramp,
+				       true);
 	if (ret)
 		goto out;
 

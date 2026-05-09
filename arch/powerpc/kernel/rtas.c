@@ -76,7 +76,13 @@ unsigned long rtas_rmo_buf;
 void (*rtas_flash_term_hook)(int);
 EXPORT_SYMBOL(rtas_flash_term_hook);
 
+DEFINE_MUTEX(rtas_ibm_physical_attestation_lock);
 DEFINE_MUTEX(rtas_ibm_get_vpd_lock);
+DEFINE_MUTEX(rtas_ibm_get_indices_lock);
+DEFINE_MUTEX(rtas_ibm_set_dynamic_indicator_lock);
+DEFINE_MUTEX(rtas_ibm_get_dynamic_sensor_state_lock);
+DEFINE_MUTEX(rtas_ibm_receive_hvpipe_msg_lock);
+DEFINE_MUTEX(rtas_ibm_send_hvpipe_msg_lock);
 
 /* RTAS use home made raw locking instead of spin_lock_irqsave
  * because those can be called from within really nasty contexts
@@ -1008,6 +1014,8 @@ static struct rtas_filter rtas_filters[] __ro_after_init = {
 	{ "ibm,update-properties", -1, 0, -1, -1, -1, 4096 },
 #endif
 	{ "ibm,physical-attestation", -1, 0, 1, -1, -1 },
+	{ "ibm,receive-hvpipe-msg", -1, 0, 1, -1, -1 },
+	{ "ibm,send-hvpipe-msg", -1, 1, -1, -1, -1 },
 };
 
 static bool in_rmo_buf(u32 base, u32 end)
@@ -1108,6 +1116,37 @@ static void __init rtas_syscall_filter_init(void)
 
 #endif /* CONFIG_PPC_RTAS_FILTER */
 
+/*
+ * For specific RTAS calls, mutex will be held before
+ * RTAS enter. Return the mutex struct for those
+ * specific RTAS tokens.
+ */
+static struct mutex *find_rtas_mutex(int token)
+{
+	if (token == rtas_token("ibm,get-vpd"))
+		return &rtas_ibm_get_vpd_lock;
+
+	if (token == rtas_token("ibm,get-indices"))
+		return &rtas_ibm_get_indices_lock;
+
+	if (token == rtas_token("ibm,set-dynamic-indicator"))
+		return &rtas_ibm_set_dynamic_indicator_lock;
+
+	if (token == rtas_token("ibm,get-dynamic-sensor-state"))
+		return &rtas_ibm_get_dynamic_sensor_state_lock;
+
+	if (token == rtas_token("ibm,physical-attestation"))
+		return &rtas_ibm_physical_attestation_lock;
+
+	if (token == rtas_token("ibm,receive-hvpipe-msg"))
+		return &rtas_ibm_receive_hvpipe_msg_lock;
+
+	if (token == rtas_token("ibm,send-hvpipe-msg"))
+		return &rtas_ibm_send_hvpipe_msg_lock;
+
+	return NULL;
+}
+
 /* We assume to be passed big endian arguments */
 SYSCALL_DEFINE1(rtas, struct rtas_args __user *, uargs)
 {
@@ -1115,7 +1154,7 @@ SYSCALL_DEFINE1(rtas, struct rtas_args __user *, uargs)
 	unsigned long flags;
 	char *buff_copy, *errbuf = NULL;
 	int nargs, nret, token;
-	bool is_get_vpd;
+	struct mutex *rtas_token_mutex = NULL;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
@@ -1171,9 +1210,12 @@ SYSCALL_DEFINE1(rtas, struct rtas_args __user *, uargs)
 
 	buff_copy = get_errorlog_buffer();
 
-	is_get_vpd = (token == rtas_token("ibm,get-vpd"));
-	if (is_get_vpd)
-		mutex_lock(&rtas_ibm_get_vpd_lock);
+	/*
+	 * Hold mutex only for specific RTAS calls.
+	 */
+	rtas_token_mutex = find_rtas_mutex(token);
+	if (rtas_token_mutex)
+		mutex_lock(rtas_token_mutex);
 
 	flags = lock_rtas();
 
@@ -1188,8 +1230,8 @@ SYSCALL_DEFINE1(rtas, struct rtas_args __user *, uargs)
 
 	unlock_rtas(flags);
 
-	if (is_get_vpd)
-		mutex_unlock(&rtas_ibm_get_vpd_lock);
+	if (rtas_token_mutex)
+		mutex_unlock(rtas_token_mutex);
 
 	if (buff_copy) {
 		if (errbuf)

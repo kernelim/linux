@@ -377,7 +377,7 @@ static void ieee80211_send_beacon(struct ieee80211_device *ieee)
 static void ieee80211_send_beacon_cb(struct timer_list *t)
 {
 	struct ieee80211_device *ieee =
-		from_timer(ieee, t, beacon_timer);
+		timer_container_of(ieee, t, beacon_timer);
 	unsigned long flags;
 
 	spin_lock_irqsave(&ieee->beacon_lock, flags);
@@ -1186,7 +1186,7 @@ void ieee80211_associate_abort(struct ieee80211_device *ieee)
 
 static void ieee80211_associate_abort_cb(struct timer_list *t)
 {
-	struct ieee80211_device *dev = from_timer(dev, t, associate_timer);
+	struct ieee80211_device *dev = timer_container_of(dev, t, associate_timer);
 
 	ieee80211_associate_abort(dev);
 }

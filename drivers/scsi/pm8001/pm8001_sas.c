@@ -690,7 +690,7 @@ void pm8001_task_done(struct sas_task *task)
 
 static void pm8001_tmf_timedout(struct timer_list *t)
 {
-	struct sas_task_slow *slow = from_timer(slow, t, timer);
+	struct sas_task_slow *slow = timer_container_of(slow, t, timer);
 	struct sas_task *task = slow->task;
 	unsigned long flags;
 

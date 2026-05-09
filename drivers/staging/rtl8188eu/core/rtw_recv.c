@@ -1605,7 +1605,7 @@ _err_exit:
 
 void rtw_reordering_ctrl_timeout_handler(struct timer_list *t)
 {
-	struct recv_reorder_ctrl *preorder_ctrl = from_timer(preorder_ctrl, t,
+	struct recv_reorder_ctrl *preorder_ctrl = timer_container_of(preorder_ctrl, t,
 							   reordering_ctrl_timer);
 	struct adapter *padapter = preorder_ctrl->padapter;
 	struct __queue *ppending_recvframe_queue = &preorder_ctrl->pending_recvframe_queue;
@@ -1763,7 +1763,7 @@ int rtw_recv_entry(struct recv_frame *precvframe)
 static void rtw_signal_stat_timer_hdl(struct timer_list *t)
 {
 	struct adapter *adapter =
-		from_timer(adapter, t, recvpriv.signal_stat_timer);
+		timer_container_of(adapter, t, recvpriv.signal_stat_timer);
 	struct recv_priv *recvpriv = &adapter->recvpriv;
 
 	u32 tmp_s, tmp_q;

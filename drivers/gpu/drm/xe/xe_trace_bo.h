@@ -33,7 +33,7 @@ DECLARE_EVENT_CLASS(xe_bo,
 
 		    TP_fast_assign(
 			   __assign_str(dev, __dev_name_bo(bo));
-			   __entry->size = bo->size;
+			   __entry->size = xe_bo_size(bo);
 			   __entry->flags = bo->flags;
 			   __entry->vm = bo->vm;
 			   ),
@@ -73,7 +73,7 @@ TRACE_EVENT(xe_bo_move,
 
 	    TP_fast_assign(
 		   __entry->bo      = bo;
-		   __entry->size = bo->size;
+		   __entry->size = xe_bo_size(bo);
 		   __assign_str(new_placement_name, xe_mem_type_to_name[new_placement]);
 		   __assign_str(old_placement_name, xe_mem_type_to_name[old_placement]);
 		   __assign_str(device_id, __dev_name_bo(bo));

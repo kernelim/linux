@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 
-iwlwifi-tests-y += module.o devinfo.o
+iwlwifi-tests-y += module.o devinfo.o utils.o nvm_parse.o
 
-ccflags-y += -I$(srctree)/$(src)/../
+ccflags-y += -I$(src)/../
 
 obj-$(CONFIG_IWLWIFI_KUNIT_TESTS) += iwlwifi-tests.o

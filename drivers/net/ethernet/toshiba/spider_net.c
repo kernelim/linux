@@ -908,7 +908,7 @@ spider_net_xmit(struct sk_buff *skb, struct net_device *netdev)
 static void
 spider_net_cleanup_tx_ring(struct timer_list *t)
 {
-	struct spider_net_card *card = from_timer(card, t, tx_timer);
+	struct spider_net_card *card = timer_container_of(card, t, tx_timer);
 	if ((spider_net_release_tx_chain(card, 0) != 0) &&
 	    (card->netdev->flags & IFF_UP)) {
 		spider_net_kick_tx_dma(card);
@@ -1981,7 +1981,7 @@ init_firmware_failed:
  */
 static void spider_net_link_phy(struct timer_list *t)
 {
-	struct spider_net_card *card = from_timer(card, t, aneg_timer);
+	struct spider_net_card *card = timer_container_of(card, t, aneg_timer);
 	struct mii_phy *phy = &card->phy;
 
 	/* if link didn't come up after SPIDER_NET_ANEG_TIMEOUT tries, setup phy again */

@@ -1036,7 +1036,7 @@ static void dn_dev_set_timer(struct net_device *dev);
 
 static void dn_dev_timer_func(struct timer_list *t)
 {
-	struct dn_dev *dn_db = from_timer(dn_db, t, timer);
+	struct dn_dev *dn_db = timer_container_of(dn_db, t, timer);
 	struct net_device *dev;
 	struct dn_ifaddr *ifa;
 

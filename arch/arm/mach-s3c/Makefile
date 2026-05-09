@@ -2,14 +2,14 @@
 #
 # Copyright 2009 Simtec Electronics
 
-ccflags-$(CONFIG_ARCH_MULTIPLATFORM) += -I$(srctree)/$(src)/include
+ccflags-$(CONFIG_ARCH_MULTIPLATFORM) += -I$(src)/include
 
 ifdef CONFIG_ARCH_S3C24XX
-include $(srctree)/$(src)/Makefile.s3c24xx
+include $(src)/Makefile.s3c24xx
 endif
 
 ifdef CONFIG_ARCH_S3C64XX
-include $(srctree)/$(src)/Makefile.s3c64xx
+include $(src)/Makefile.s3c64xx
 endif
 
 # Objects we always build independent of SoC choice

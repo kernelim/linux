@@ -148,3 +148,4 @@ static inline bool is_anon_ns(struct mnt_namespace *ns)
 }
 
 extern void mnt_cursor_del(struct mnt_namespace *ns, struct mount *cursor);
+bool has_locked_children(struct mount *mnt, struct dentry *dentry);

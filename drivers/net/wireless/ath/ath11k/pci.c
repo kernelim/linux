@@ -33,11 +33,20 @@
 
 #define TCSR_SOC_HW_SUB_VER	0x1910010
 
+static ulong rh_ath11k_host_msi_vector_addr = 0;
+module_param_named(rh_host_msi_vector_addr, rh_ath11k_host_msi_vector_addr, ulong, 0644);
+MODULE_PARM_DESC(rh_host_msi_vector_addr,
+		 "Red Hat workaround to configure the MSI vector address that is used from host in order to be used in VM");
+static uint rh_ath11k_host_msi_vector_data = 0;
+module_param_named(rh_host_msi_vector_data, rh_ath11k_host_msi_vector_data, uint, 0644);
+MODULE_PARM_DESC(rh_host_msi_vector_data,
+		 "Red Hat workaround to configure the MSI vector data that is used from host in order to be used in VM");
+
 static const struct pci_device_id ath11k_pci_id_table[] = {
 	{ PCI_VDEVICE(QCOM, QCA6390_DEVICE_ID) },
 	{ PCI_VDEVICE(QCOM, WCN6855_DEVICE_ID) },
 	{ PCI_VDEVICE(QCOM, QCN9074_DEVICE_ID) },
-	{0}
+	{}
 };
 
 MODULE_DEVICE_TABLE(pci, ath11k_pci_id_table);
@@ -445,6 +454,18 @@ static int ath11k_pci_alloc_msi(struct ath11k_pci *ab_pci)
 
 	ath11k_pci_msi_disable(ab_pci);
 
+	if (rh_ath11k_host_msi_vector_addr) {
+		ab->pci.msi.ep_base_data = rh_ath11k_host_msi_vector_data;
+		ab->pci.msi.addr_hi = (u32)(rh_ath11k_host_msi_vector_addr >> 32);
+		ab->pci.msi.addr_lo = (u32)(rh_ath11k_host_msi_vector_addr & 0xffffffff);
+
+		ath11k_dbg(ab, ATH11K_DBG_PCI, "msi addr hi 0x%x lo 0x%x base data is %d\n",
+			   ab->pci.msi.addr_hi,
+			   ab->pci.msi.addr_lo,
+			   ab->pci.msi.ep_base_data);
+		return 0;
+	}
+
 	msi_desc = irq_get_msi_desc(ab_pci->pdev->irq);
 	if (!msi_desc) {
 		ath11k_err(ab, "msi_desc is NULL!\n");
@@ -483,6 +504,9 @@ static void ath11k_pci_free_msi(struct ath11k_pci *ab_pci)
 static int ath11k_pci_config_msi_data(struct ath11k_pci *ab_pci)
 {
 	struct msi_desc *msi_desc;
+
+	if (rh_ath11k_host_msi_vector_addr)
+		return 0;
 
 	msi_desc = irq_get_msi_desc(ab_pci->pdev->irq);
 	if (!msi_desc) {
@@ -692,7 +716,7 @@ static void ath11k_pci_coredump_download(struct ath11k_base *ab)
 	struct ath11k_tlv_dump_data *dump_tlv;
 	size_t hdr_len = sizeof(*file_data);
 	void *buf;
-	u32 dump_seg_sz[FW_CRASH_DUMP_TYPE_MAX] = { 0 };
+	u32 dump_seg_sz[FW_CRASH_DUMP_TYPE_MAX] = {};
 
 	ath11k_mhi_coredump(mhi_ctrl, false);
 
@@ -821,7 +845,7 @@ static int ath11k_pci_power_up(struct ath11k_base *ab)
 	return 0;
 }
 
-static void ath11k_pci_power_down(struct ath11k_base *ab)
+static void ath11k_pci_power_down(struct ath11k_base *ab, bool is_suspend)
 {
 	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
 
@@ -832,7 +856,7 @@ static void ath11k_pci_power_down(struct ath11k_base *ab)
 
 	ath11k_pci_msi_disable(ab_pci);
 
-	ath11k_mhi_stop(ab_pci);
+	ath11k_mhi_stop(ab_pci, is_suspend);
 	clear_bit(ATH11K_FLAG_DEVICE_INIT_DONE, &ab->dev_flags);
 	ath11k_pci_sw_reset(ab_pci->ab, false);
 }
@@ -929,7 +953,7 @@ static int ath11k_pci_probe(struct pci_dev *pdev,
 {
 	struct ath11k_base *ab;
 	struct ath11k_pci *ab_pci;
-	u32 soc_hw_version_major, soc_hw_version_minor, addr;
+	u32 soc_hw_version_major, soc_hw_version_minor;
 	int ret;
 	u32 sub_version;
 
@@ -955,8 +979,7 @@ static int ath11k_pci_probe(struct pci_dev *pdev,
 	 * from DT. If memory is reserved from DT for FW, ath11k driver need not
 	 * allocate memory.
 	 */
-	ret = of_property_read_u32(ab->dev->of_node, "memory-region", &addr);
-	if (!ret)
+	if (of_property_present(ab->dev->of_node, "memory-region"))
 		set_bit(ATH11K_FLAG_FIXED_MEM_RGN, &ab->dev_flags);
 
 	ret = ath11k_pci_claim(ab_pci, pdev);
@@ -1161,9 +1184,10 @@ static void ath11k_pci_remove(struct pci_dev *pdev)
 	ath11k_pci_set_irq_affinity_hint(ab_pci, NULL);
 
 	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
-		ath11k_pci_power_down(ab);
+		ath11k_pci_power_down(ab, false);
 		ath11k_debugfs_soc_destroy(ab);
 		ath11k_qmi_deinit_service(ab);
+		ath11k_core_pm_notifier_unregister(ab);
 		goto qmi_fail;
 	}
 
@@ -1192,7 +1216,7 @@ static void ath11k_pci_shutdown(struct pci_dev *pdev)
 	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
 
 	ath11k_pci_set_irq_affinity_hint(ab_pci, NULL);
-	ath11k_pci_power_down(ab);
+	ath11k_pci_power_down(ab, false);
 }
 
 static __maybe_unused int ath11k_pci_pm_suspend(struct device *dev)
@@ -1229,9 +1253,39 @@ static __maybe_unused int ath11k_pci_pm_resume(struct device *dev)
 	return ret;
 }
 
-static SIMPLE_DEV_PM_OPS(ath11k_pci_pm_ops,
-			 ath11k_pci_pm_suspend,
-			 ath11k_pci_pm_resume);
+static __maybe_unused int ath11k_pci_pm_suspend_late(struct device *dev)
+{
+	struct ath11k_base *ab = dev_get_drvdata(dev);
+	int ret;
+
+	ret = ath11k_core_suspend_late(ab);
+	if (ret)
+		ath11k_warn(ab, "failed to late suspend core: %d\n", ret);
+
+	/* Similar to ath11k_pci_pm_suspend(), we return success here
+	 * even error happens, to allow system suspend/hibernation survive.
+	 */
+	return 0;
+}
+
+static __maybe_unused int ath11k_pci_pm_resume_early(struct device *dev)
+{
+	struct ath11k_base *ab = dev_get_drvdata(dev);
+	int ret;
+
+	ret = ath11k_core_resume_early(ab);
+	if (ret)
+		ath11k_warn(ab, "failed to early resume core: %d\n", ret);
+
+	return ret;
+}
+
+static const struct dev_pm_ops __maybe_unused ath11k_pci_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(ath11k_pci_pm_suspend,
+				ath11k_pci_pm_resume)
+	SET_LATE_SYSTEM_SLEEP_PM_OPS(ath11k_pci_pm_suspend_late,
+				     ath11k_pci_pm_resume_early)
+};
 
 static struct pci_driver ath11k_pci_driver = {
 	.name = "ath11k_pci",

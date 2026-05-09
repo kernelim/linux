@@ -10,10 +10,10 @@ endif
 
 obj32-$(CONFIG_FUNCTION_TRACER)		+= ftrace_32.o
 obj64-$(CONFIG_FUNCTION_TRACER)		+= ftrace_64.o
-ifdef CONFIG_MPROFILE_KERNEL
-obj64-$(CONFIG_FUNCTION_TRACER)		+= ftrace_64_mprofile.o
-else
+ifeq ($(CONFIG_MPROFILE_KERNEL)$(CONFIG_ARCH_USING_PATCHABLE_FUNCTION_ENTRY),)
 obj64-$(CONFIG_FUNCTION_TRACER)		+= ftrace_64_pg.o
+else
+obj64-$(CONFIG_FUNCTION_TRACER)		+= ftrace_64_mprofile.o
 endif
 obj-$(CONFIG_DYNAMIC_FTRACE)		+= ftrace.o
 obj-$(CONFIG_FUNCTION_GRAPH_TRACER)	+= ftrace.o

@@ -20,6 +20,7 @@ powerpc
     eeh-pci-error-recovery
     elfnote
     firmware-assisted-dump
+    htm
     hvcs
     imc
     isa-versions

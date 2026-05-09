@@ -1,0 +1,3 @@
+#8-
+0x541dc187	rdma_read_gid_attr_ndev_rcu	drivers/infiniband/core/ib_core	EXPORT_SYMBOL	
+

@@ -1,0 +1,3 @@
+#8-
+0x64481cf5	br_fdb_clear_offload	net/bridge/bridge	EXPORT_SYMBOL_GPL	
+

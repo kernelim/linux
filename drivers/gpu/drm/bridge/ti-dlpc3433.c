@@ -242,12 +242,12 @@ static void dlpc_mode_set(struct drm_bridge *bridge,
 	drm_mode_copy(&dlpc->mode, adjusted_mode);
 }
 
-static int dlpc_attach(struct drm_bridge *bridge,
+static int dlpc_attach(struct drm_bridge *bridge, struct drm_encoder *encoder,
 		       enum drm_bridge_attach_flags flags)
 {
 	struct dlpc *dlpc = bridge_to_dlpc(bridge);
 
-	return drm_bridge_attach(bridge->encoder, dlpc->next_bridge, bridge, flags);
+	return drm_bridge_attach(encoder, dlpc->next_bridge, bridge, flags);
 }
 
 static const struct drm_bridge_funcs dlpc_bridge_funcs = {
@@ -348,9 +348,10 @@ static int dlpc3433_probe(struct i2c_client *client)
 	struct dlpc *dlpc;
 	int ret;
 
-	dlpc = devm_kzalloc(dev, sizeof(*dlpc), GFP_KERNEL);
-	if (!dlpc)
-		return -ENOMEM;
+	dlpc = devm_drm_bridge_alloc(dev, struct dlpc, bridge,
+				     &dlpc_bridge_funcs);
+	if (IS_ERR(dlpc))
+		return PTR_ERR(dlpc);
 
 	dlpc->dev = dev;
 
@@ -365,7 +366,6 @@ static int dlpc3433_probe(struct i2c_client *client)
 	dev_set_drvdata(dev, dlpc);
 	i2c_set_clientdata(client, dlpc);
 
-	dlpc->bridge.funcs = &dlpc_bridge_funcs;
 	dlpc->bridge.of_node = dev->of_node;
 	drm_bridge_add(&dlpc->bridge);
 

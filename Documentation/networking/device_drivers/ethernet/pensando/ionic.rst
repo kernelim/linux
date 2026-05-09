@@ -13,6 +13,7 @@ Contents
 - Identifying the Adapter
 - Enabling the driver
 - Configuring the driver
+- RDMA Support via Auxiliary Device
 - Statistics
 - Support
 
@@ -98,6 +99,15 @@ SR-IOV
 Minimal SR-IOV support is currently offered and can be enabled by setting
 the sysfs 'sriov_numvfs' value, if supported by your particular firmware
 configuration.
+
+RDMA Support via Auxiliary Device
+=================================
+
+The ionic driver supports RDMA (Remote Direct Memory Access) functionality
+through the Linux auxiliary device framework when advertised by the firmware.
+RDMA capability is detected during device initialization, and if supported,
+the ethernet driver will create an auxiliary device that allows the RDMA
+driver to bind and provide InfiniBand/RoCE functionality.
 
 Statistics
 ==========

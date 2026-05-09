@@ -3,48 +3,29 @@
 # MDIO Layer Configuration
 #
 
-menuconfig MDIO_DEVICE
-	tristate "MDIO bus device drivers"
-	help
-	  MDIO devices and driver infrastructure code.
-
-if MDIO_DEVICE
-
 config MDIO_BUS
-	tristate
-	default m if PHYLIB=m
-	default MDIO_DEVICE
+	tristate "MDIO bus consumer layer"
 	help
-	  This internal symbol is used for link time dependencies and it
-	  reflects whether the mdio_bus/mdio_device code is built as a
-	  loadable module or built-in.
+	  MDIO bus consumer layer
+
+if PHYLIB
 
 config FWNODE_MDIO
-	def_tristate PHYLIB
-	depends on (ACPI || OF) || COMPILE_TEST
+	def_tristate (ACPI || OF) || COMPILE_TEST
 	select FIXED_PHY
 	help
 	  FWNODE MDIO bus (Ethernet PHY) accessors
 
 config OF_MDIO
-	def_tristate PHYLIB
-	depends on OF
-	depends on PHYLIB
+	def_tristate OF
 	select FIXED_PHY
 	help
 	  OpenFirmware MDIO bus (Ethernet PHY) accessors
 
 config ACPI_MDIO
-	def_tristate PHYLIB
-	depends on ACPI
-	depends on PHYLIB
+	def_tristate ACPI
 	help
 	  ACPI MDIO bus (Ethernet PHY) accessors
-
-if MDIO_BUS
-
-config MDIO_DEVRES
-	tristate
 
 config MDIO_SUN4I
 	tristate "Allwinner sun4i MDIO interface support"
@@ -134,7 +115,6 @@ config MDIO_I2C
 config MDIO_MVUSB
 	tristate "Marvell USB to MDIO Adapter"
 	depends on USB
-	select MDIO_DEVRES
 	help
 	  A USB to MDIO converter present on development boards for
 	  Marvell's Link Street family of Ethernet switches.
@@ -142,7 +122,6 @@ config MDIO_MVUSB
 config MDIO_MSCC_MIIM
 	tristate "Microsemi MIIM interface support"
 	depends on HAS_IOMEM
-	select MDIO_DEVRES
 	help
 	  This driver supports the MIIM (MDIO) interface found in the network
 	  switches of the Microsemi SoCs; it is recommended to switch on
@@ -160,7 +139,6 @@ config MDIO_OCTEON
 	depends on (64BIT && OF_MDIO) || COMPILE_TEST
 	depends on HAS_IOMEM
 	select MDIO_CAVIUM
-	select MDIO_DEVRES
 	help
 	  This module provides a driver for the Octeon and ThunderX MDIO
 	  buses. It is required by the Octeon and ThunderX ethernet device
@@ -197,7 +175,6 @@ config MDIO_THUNDER
 	depends on 64BIT
 	depends on PCI
 	select MDIO_CAVIUM
-	select MDIO_DEVRES
 	help
 	  This driver supports the MDIO interfaces found on Cavium
 	  ThunderX SoCs when the MDIO bus device appears as a PCI
@@ -283,5 +260,4 @@ config MDIO_BUS_MUX_MMIOREG
 	  Currently, only 8/16/32 bits registers are supported.
 
 
-endif
 endif

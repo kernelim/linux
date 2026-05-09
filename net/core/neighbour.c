@@ -1061,7 +1061,7 @@ static void neigh_probe(struct neighbour *neigh)
 static void neigh_timer_handler(struct timer_list *t)
 {
 	unsigned long now, next;
-	struct neighbour *neigh = from_timer(neigh, t, timer);
+	struct neighbour *neigh = timer_container_of(neigh, t, timer);
 	unsigned int state;
 	int notify = 0;
 
@@ -1547,7 +1547,7 @@ out:
 	return rc;
 out_kfree_skb:
 	rc = -EINVAL;
-	kfree_skb(skb);
+	kfree_skb_reason(skb, SKB_DROP_REASON_NEIGH_HH_FILLFAIL);
 	goto out;
 }
 EXPORT_SYMBOL(neigh_resolve_output);
@@ -1571,7 +1571,7 @@ int neigh_connected_output(struct neighbour *neigh, struct sk_buff *skb)
 		err = dev_queue_xmit(skb);
 	else {
 		err = -EINVAL;
-		kfree_skb(skb);
+		kfree_skb_reason(skb, SKB_DROP_REASON_NEIGH_HH_FILLFAIL);
 	}
 	return err;
 }
@@ -1599,7 +1599,7 @@ static void neigh_managed_work(struct work_struct *work)
 
 static void neigh_proxy_process(struct timer_list *t)
 {
-	struct neigh_table *tbl = from_timer(tbl, t, proxy_timer);
+	struct neigh_table *tbl = timer_container_of(tbl, t, proxy_timer);
 	long sched_next = 0;
 	unsigned long now = jiffies;
 	struct sk_buff *skb, *n;

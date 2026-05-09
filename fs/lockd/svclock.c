@@ -493,6 +493,9 @@ nlmsvc_lock(struct svc_rqst *rqstp, struct nlm_file *file,
 				(long long)lock->fl.fl_end,
 				wait);
 
+	if (nlmsvc_file_cannot_lock(file))
+		return nlm_lck_denied_nolocks;
+
 	if (!locks_can_async_lock(nlmsvc_file_file(file)->f_op)) {
 		async_block = wait;
 		wait = 0;
@@ -619,6 +622,9 @@ nlmsvc_testlock(struct svc_rqst *rqstp, struct nlm_file *file,
 				(long long)lock->fl.fl_start,
 				(long long)lock->fl.fl_end);
 
+	if (nlmsvc_file_cannot_lock(file))
+		return nlm_lck_denied_nolocks;
+
 	if (locks_in_grace(SVC_NET(rqstp))) {
 		ret = nlm_lck_denied_grace_period;
 		goto out;
@@ -676,6 +682,9 @@ nlmsvc_unlock(struct net *net, struct nlm_file *file, struct nlm_lock *lock)
 				(long long)lock->fl.fl_start,
 				(long long)lock->fl.fl_end);
 
+	if (nlmsvc_file_cannot_lock(file))
+		return nlm_lck_denied_nolocks;
+
 	/* First, cancel any lock that might be there */
 	nlmsvc_cancel_blocked(net, file, lock);
 
@@ -712,6 +721,9 @@ nlmsvc_cancel_blocked(struct net *net, struct nlm_file *file, struct nlm_lock *l
 				lock->fl.fl_pid,
 				(long long)lock->fl.fl_start,
 				(long long)lock->fl.fl_end);
+
+	if (nlmsvc_file_cannot_lock(file))
+		return nlm_lck_denied_nolocks;
 
 	if (locks_in_grace(net))
 		return nlm_lck_denied_grace_period;

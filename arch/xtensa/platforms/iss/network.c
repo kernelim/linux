@@ -348,7 +348,7 @@ static int iss_net_poll(void)
 
 static void iss_net_timer(struct timer_list *t)
 {
-	struct iss_net_private *lp = from_timer(lp, t, timer);
+	struct iss_net_private *lp = timer_container_of(lp, t, timer);
 
 	iss_net_poll();
 	spin_lock(&lp->lock);

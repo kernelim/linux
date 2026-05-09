@@ -23,6 +23,7 @@
 #include <linux/fsnotify.h>
 #include <linux/unicode.h>
 #include <linux/fscrypt.h>
+#include <linux/pidfs.h>
 
 #include <linux/uaccess.h>
 
@@ -176,12 +177,6 @@ loff_t dcache_dir_lseek(struct file *file, loff_t offset, int whence)
 }
 EXPORT_SYMBOL(dcache_dir_lseek);
 
-/* Relationship between i_mode and the DT_xxx types */
-static inline unsigned char dt_type(struct inode *inode)
-{
-	return (inode->i_mode >> 12) & 15;
-}
-
 /*
  * Directory is locked and all positive dentries in it are safe, since
  * for ramfs-type trees they can't go away without unlink() or rmdir(),
@@ -205,7 +200,8 @@ int dcache_readdir(struct file *file, struct dir_context *ctx)
 
 	while ((next = scan_positives(cursor, p, 1, next)) != NULL) {
 		if (!dir_emit(ctx, next->d_name.name, next->d_name.len,
-			      d_inode(next)->i_ino, dt_type(d_inode(next))))
+			      d_inode(next)->i_ino,
+			      fs_umode_to_dtype(d_inode(next)->i_mode)))
 			break;
 		ctx->pos++;
 		p = &next->d_sib.next;
@@ -277,7 +273,7 @@ void simple_recursive_removal(struct dentry *dentry,
 		while ((child = find_next_child(this, victim)) == NULL) {
 			// kill and ascend
 			// update metadata while it's still locked
-			inode->i_ctime = current_time(inode);
+			inode_set_ctime_current(inode);
 			clear_nlink(inode);
 			inode_unlock(inode);
 			victim = this;
@@ -295,8 +291,8 @@ void simple_recursive_removal(struct dentry *dentry,
 				dput(victim);		// unpin it
 			}
 			if (victim == dentry) {
-				inode->i_ctime = inode->i_mtime =
-					current_time(inode);
+				inode_set_mtime_to_ts(inode,
+						      inode_set_ctime_current(inode));
 				if (d_is_dir(dentry))
 					drop_nlink(inode);
 				inode_unlock(inode);
@@ -324,6 +320,7 @@ static int pseudo_fs_fill_super(struct super_block *s, struct fs_context *fc)
 	s->s_blocksize_bits = PAGE_SHIFT;
 	s->s_magic = ctx->magic;
 	s->s_op = ctx->ops ?: &simple_super_operations;
+	s->s_export_op = ctx->eops;
 	s->s_xattr = ctx->xattr;
 	s->s_time_gran = 1;
 	root = new_inode(s);
@@ -337,7 +334,7 @@ static int pseudo_fs_fill_super(struct super_block *s, struct fs_context *fc)
 	 */
 	root->i_ino = 1;
 	root->i_mode = S_IFDIR | S_IRUSR | S_IWUSR;
-	root->i_atime = root->i_mtime = root->i_ctime = current_time(root);
+	simple_inode_init_ts(root);
 	s->s_root = d_make_root(root);
 	if (!s->s_root)
 		return -ENOMEM;
@@ -393,7 +390,8 @@ int simple_link(struct dentry *old_dentry, struct inode *dir, struct dentry *den
 {
 	struct inode *inode = d_inode(old_dentry);
 
-	inode->i_ctime = dir->i_ctime = dir->i_mtime = current_time(inode);
+	inode_set_mtime_to_ts(dir,
+			      inode_set_ctime_to_ts(dir, inode_set_ctime_current(inode)));
 	inc_nlink(inode);
 	ihold(inode);
 	dget(dentry);
@@ -427,7 +425,8 @@ int simple_unlink(struct inode *dir, struct dentry *dentry)
 {
 	struct inode *inode = d_inode(dentry);
 
-	inode->i_ctime = dir->i_ctime = dir->i_mtime = current_time(inode);
+	inode_set_mtime_to_ts(dir,
+			      inode_set_ctime_to_ts(dir, inode_set_ctime_current(inode)));
 	drop_nlink(inode);
 	dput(dentry);
 	return 0;
@@ -462,9 +461,10 @@ void simple_rename_timestamp(struct inode *old_dir, struct dentry *old_dentry,
 {
 	struct inode *newino = d_inode(new_dentry);
 
-	old_dir->i_mtime = inode_set_ctime_current(old_dir);
+	inode_set_mtime_to_ts(old_dir, inode_set_ctime_current(old_dir));
 	if (new_dir != old_dir)
-		new_dir->i_mtime = inode_set_ctime_current(new_dir);
+		inode_set_mtime_to_ts(new_dir,
+				      inode_set_ctime_current(new_dir));
 	inode_set_ctime_current(d_inode(old_dentry));
 	if (newino)
 		inode_set_ctime_current(newino);
@@ -678,7 +678,7 @@ int simple_fill_super(struct super_block *s, unsigned long magic,
 	 */
 	inode->i_ino = 1;
 	inode->i_mode = S_IFDIR | 0755;
-	inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+	simple_inode_init_ts(inode);
 	inode->i_op = &simple_dir_inode_operations;
 	inode->i_fop = &simple_dir_operations;
 	set_nlink(inode, 2);
@@ -704,7 +704,7 @@ int simple_fill_super(struct super_block *s, unsigned long magic,
 			return -ENOMEM;
 		}
 		inode->i_mode = S_IFREG | files->mode;
-		inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+		simple_inode_init_ts(inode);
 		inode->i_fop = files->ops;
 		inode->i_ino = i;
 		d_add(dentry, inode);
@@ -1266,7 +1266,7 @@ struct inode *alloc_anon_inode(struct super_block *s)
 	inode->i_uid = current_fsuid();
 	inode->i_gid = current_fsgid();
 	inode->i_flags |= S_PRIVATE;
-	inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+	simple_inode_init_ts(inode);
 	return inode;
 }
 EXPORT_SYMBOL(alloc_anon_inode);
@@ -1668,3 +1668,164 @@ ssize_t direct_write_fallback(struct kiocb *iocb, struct iov_iter *iter,
 	return direct_written + buffered_written;
 }
 EXPORT_SYMBOL_GPL(direct_write_fallback);
+
+/**
+ * simple_inode_init_ts - initialize the timestamps for a new inode
+ * @inode: inode to be initialized
+ *
+ * When a new inode is created, most filesystems set the timestamps to the
+ * current time. Add a helper to do this.
+ */
+struct timespec64 simple_inode_init_ts(struct inode *inode)
+{
+	struct timespec64 ts = inode_set_ctime_current(inode);
+
+	inode_set_atime_to_ts(inode, ts);
+	inode_set_mtime_to_ts(inode, ts);
+	return ts;
+}
+EXPORT_SYMBOL(simple_inode_init_ts);
+
+static inline struct dentry *get_stashed_dentry(struct dentry **stashed)
+{
+	struct dentry *dentry;
+
+	guard(rcu)();
+	dentry = rcu_dereference(*stashed);
+	if (!dentry)
+		return NULL;
+	if (!lockref_get_not_dead(&dentry->d_lockref))
+		return NULL;
+	return dentry;
+}
+
+static struct dentry *prepare_anon_dentry(struct dentry **stashed,
+					  struct super_block *sb,
+					  void *data)
+{
+	struct dentry *dentry;
+	struct inode *inode;
+	const struct stashed_operations *sops = sb->s_fs_info;
+	int ret;
+
+	inode = new_inode_pseudo(sb);
+	if (!inode) {
+		sops->put_data(data);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	inode->i_flags |= S_IMMUTABLE;
+	inode->i_mode = S_IFREG;
+	simple_inode_init_ts(inode);
+
+	ret = sops->init_inode(inode, data);
+	if (ret < 0) {
+		iput(inode);
+		return ERR_PTR(ret);
+	}
+
+	/* Notice when this is changed. */
+	WARN_ON_ONCE(!S_ISREG(inode->i_mode));
+	WARN_ON_ONCE(!IS_IMMUTABLE(inode));
+
+	dentry = d_alloc_anon(sb);
+	if (!dentry) {
+		iput(inode);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	/* Store address of location where dentry's supposed to be stashed. */
+	dentry->d_fsdata = stashed;
+
+	/* @data is now owned by the fs */
+	d_instantiate(dentry, inode);
+	return dentry;
+}
+
+static struct dentry *stash_dentry(struct dentry **stashed,
+				   struct dentry *dentry)
+{
+	guard(rcu)();
+	for (;;) {
+		struct dentry *old;
+
+		/* Assume any old dentry was cleared out. */
+		old = cmpxchg(stashed, NULL, dentry);
+		if (likely(!old))
+			return dentry;
+
+		/* Check if somebody else installed a reusable dentry. */
+		if (lockref_get_not_dead(&old->d_lockref))
+			return old;
+
+		/* There's an old dead dentry there, try to take it over. */
+		if (likely(try_cmpxchg(stashed, &old, dentry)))
+			return dentry;
+	}
+}
+
+/**
+ * path_from_stashed - create path from stashed or new dentry
+ * @stashed:    where to retrieve or stash dentry
+ * @mnt:        mnt of the filesystems to use
+ * @data:       data to store in inode->i_private
+ * @path:       path to create
+ *
+ * The function tries to retrieve a stashed dentry from @stashed. If the dentry
+ * is still valid then it will be reused. If the dentry isn't able the function
+ * will allocate a new dentry and inode. It will then check again whether it
+ * can reuse an existing dentry in case one has been added in the meantime or
+ * update @stashed with the newly added dentry.
+ *
+ * Special-purpose helper for nsfs and pidfs.
+ *
+ * Return: On success zero and on failure a negative error is returned.
+ */
+int path_from_stashed(struct dentry **stashed, struct vfsmount *mnt, void *data,
+		      struct path *path)
+{
+	struct dentry *dentry;
+	const struct stashed_operations *sops = mnt->mnt_sb->s_fs_info;
+
+	/* See if dentry can be reused. */
+	path->dentry = get_stashed_dentry(stashed);
+	if (path->dentry) {
+		sops->put_data(data);
+		goto out_path;
+	}
+
+	/* Allocate a new dentry. */
+	dentry = prepare_anon_dentry(stashed, mnt->mnt_sb, data);
+	if (IS_ERR(dentry))
+		return PTR_ERR(dentry);
+
+	/* Added a new dentry. @data is now owned by the filesystem. */
+	path->dentry = stash_dentry(stashed, dentry);
+	if (path->dentry != dentry)
+		dput(dentry);
+
+out_path:
+	WARN_ON_ONCE(path->dentry->d_fsdata != stashed);
+	WARN_ON_ONCE(d_inode(path->dentry)->i_private != data);
+	path->mnt = mntget(mnt);
+	return 0;
+}
+
+void stashed_dentry_prune(struct dentry *dentry)
+{
+	struct dentry **stashed = dentry->d_fsdata;
+	struct inode *inode = d_inode(dentry);
+
+	if (WARN_ON_ONCE(!stashed))
+		return;
+
+	if (!inode)
+		return;
+
+	/*
+	 * Only replace our own @dentry as someone else might've
+	 * already cleared out @dentry and stashed their own
+	 * dentry in there.
+	 */
+	cmpxchg(stashed, dentry, NULL);
+}

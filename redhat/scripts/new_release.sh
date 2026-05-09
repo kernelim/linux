@@ -18,17 +18,6 @@ if [ "$BUMP_RELEASE" == "no" ]; then
 elif [ "$ZSTREAM_FLAG" == "no" ]; then
 	if [ "$YSTREAM_FLAG" == "yes" ]; then
 		NEW_RELEASE="$((RELEASE + 1))";
-	else
-		EARLY_YBUILD=$(sed -n -e 's/^EARLY_YBUILD:=\(.*\)/\1/p' "$REDHAT"/../Makefile.rhelver);
-		EARLY_YRELEASE=$(sed -n -e 's/^EARLY_YRELEASE:=\(.*\)/\1/p' "$REDHAT"/../Makefile.rhelver);
-		if [ "$EARLY_YBUILD" != "$RELEASE" ]; then
-			NEW_EARLY_YRELEASE=1;
-		else
-			NEW_EARLY_YRELEASE="$((EARLY_YRELEASE + 1))";
-		fi
-		sed -i -e "s/^EARLY_YBUILD:=$EARLY_YBUILD/EARLY_YBUILD:=$RELEASE/" "$REDHAT"/../Makefile.rhelver;
-		sed -i -e "s/^EARLY_YRELEASE:=$EARLY_YRELEASE/EARLY_YRELEASE:=$NEW_EARLY_YRELEASE/" "$REDHAT"/../Makefile.rhelver;
-		NEW_RELEASE=$RELEASE;
 	fi
 elif [ "$ZSTREAM_FLAG" == "yes" ]; then
 	NEW_RELEASE=$YVER.$((ZMAJ+1)).1;

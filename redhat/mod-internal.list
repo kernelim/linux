@@ -6,6 +6,7 @@ list-test
 sysctl-test
 mptcp_crypto_test
 mptcp_token_test
+prp_dup_discard_test
 bitfield_kunit
 cmdline_kunit
 property-entry-test
@@ -67,6 +68,8 @@ iio-test-rescale
 cros_kunit
 cpumask_kunit
 drm_atomic_state_test
+drm_atomic_test
+drm_bridge_test
 drm_buddy_test
 drm_cmdline_parser_test
 drm_damage_helper_test
@@ -80,11 +83,14 @@ drm_kunit_helpers
 drm_mm_test
 drm_plane_helper_test
 drm_rect_test
+drm-sched-tests
+drm_sysfb_modeset_test
 gss_krb5_test
 drm_connector_test
 drm_managed_test
 drm_modes_test
 drm_probe_helper_test
+vkms-kunit-tests
 input_test
 hashtable_test
 hid-uclogic-test

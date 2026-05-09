@@ -928,6 +928,16 @@ static int hns3_set_rss(struct net_device *netdev,
 					rxfh->hfunc);
 }
 
+static int hns3_get_rxfh_fields(struct net_device *netdev,
+				struct ethtool_rxfh_fields *cmd)
+{
+	struct hnae3_handle *h = hns3_get_handle(netdev);
+
+	if (h->ae_algo->ops->get_rss_tuple)
+		return h->ae_algo->ops->get_rss_tuple(h, cmd);
+	return -EOPNOTSUPP;
+}
+
 static int hns3_get_rxnfc(struct net_device *netdev,
 			  struct ethtool_rxnfc *cmd,
 			  u32 *rule_locs)
@@ -938,10 +948,6 @@ static int hns3_get_rxnfc(struct net_device *netdev,
 	case ETHTOOL_GRXRINGS:
 		cmd->data = h->kinfo.num_tqps;
 		return 0;
-	case ETHTOOL_GRXFH:
-		if (h->ae_algo->ops->get_rss_tuple)
-			return h->ae_algo->ops->get_rss_tuple(h, cmd);
-		return -EOPNOTSUPP;
 	case ETHTOOL_GRXCLSRLCNT:
 		if (h->ae_algo->ops->get_fd_rule_cnt)
 			return h->ae_algo->ops->get_fd_rule_cnt(h, cmd);
@@ -1082,15 +1088,22 @@ static int hns3_set_ringparam(struct net_device *ndev,
 	return ret;
 }
 
+static int hns3_set_rxfh_fields(struct net_device *netdev,
+				const struct ethtool_rxfh_fields *cmd,
+				struct netlink_ext_ack *extack)
+{
+	struct hnae3_handle *h = hns3_get_handle(netdev);
+
+	if (h->ae_algo->ops->set_rss_tuple)
+		return h->ae_algo->ops->set_rss_tuple(h, cmd);
+	return -EOPNOTSUPP;
+}
+
 static int hns3_set_rxnfc(struct net_device *netdev, struct ethtool_rxnfc *cmd)
 {
 	struct hnae3_handle *h = hns3_get_handle(netdev);
 
 	switch (cmd->cmd) {
-	case ETHTOOL_SRXFH:
-		if (h->ae_algo->ops->set_rss_tuple)
-			return h->ae_algo->ops->set_rss_tuple(h, cmd);
-		return -EOPNOTSUPP;
 	case ETHTOOL_SRXCLSRLINS:
 		if (h->ae_algo->ops->add_fd_entry)
 			return h->ae_algo->ops->add_fd_entry(h, cmd);
@@ -1698,6 +1711,8 @@ static const struct ethtool_ops hns3vf_ethtool_ops = {
 	.get_rxfh_indir_size = hns3_get_rss_indir_size,
 	.get_rxfh = hns3_get_rss,
 	.set_rxfh = hns3_set_rss,
+	.get_rxfh_fields = hns3_get_rxfh_fields,
+	.set_rxfh_fields = hns3_set_rxfh_fields,
 	.get_link_ksettings = hns3_get_link_ksettings,
 	.get_channels = hns3_get_channels,
 	.set_channels = hns3_set_channels,
@@ -1732,6 +1747,8 @@ static const struct ethtool_ops hns3_ethtool_ops = {
 	.get_rxfh_indir_size = hns3_get_rss_indir_size,
 	.get_rxfh = hns3_get_rss,
 	.set_rxfh = hns3_set_rss,
+	.get_rxfh_fields = hns3_get_rxfh_fields,
+	.set_rxfh_fields = hns3_set_rxfh_fields,
 	.get_link_ksettings = hns3_get_link_ksettings,
 	.set_link_ksettings = hns3_set_link_ksettings,
 	.nway_reset = hns3_nway_reset,

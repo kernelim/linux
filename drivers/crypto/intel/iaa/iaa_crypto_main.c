@@ -727,7 +727,7 @@ static int alloc_wq_table(int max_wqs)
 
 	for (cpu = 0; cpu < nr_cpus; cpu++) {
 		entry = per_cpu_ptr(wq_table, cpu);
-		entry->wqs = kcalloc(max_wqs, sizeof(struct wq *), GFP_KERNEL);
+		entry->wqs = kcalloc(max_wqs, sizeof(*entry->wqs), GFP_KERNEL);
 		if (!entry->wqs) {
 			free_wq_table();
 			return -ENOMEM;
@@ -807,7 +807,7 @@ static int save_iaa_wq(struct idxd_wq *wq)
 	if (!cpus_per_iaa)
 		cpus_per_iaa = 1;
 out:
-	return 0;
+	return ret;
 }
 
 static void remove_iaa_wq(struct idxd_wq *wq)
@@ -1910,7 +1910,6 @@ static int iaa_crypto_probe(struct idxd_dev *idxd_dev)
 		}
 		try_module_get(THIS_MODULE);
 
-		mark_tech_preview("Intel IAA Compression Accelerator (IAA)", THIS_MODULE);
 		pr_info("iaa_crypto now ENABLED\n");
 	}
 

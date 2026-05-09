@@ -1381,7 +1381,7 @@ void r8712_aes_decrypt(struct _adapter *padapter, u8 *precvframe)
 void r8712_use_tkipkey_handler(struct timer_list *t)
 {
 	struct _adapter *padapter =
-		from_timer(padapter, t, securitypriv.tkip_timer);
+		timer_container_of(padapter, t, securitypriv.tkip_timer);
 
 	padapter->securitypriv.busetkipkey = true;
 }

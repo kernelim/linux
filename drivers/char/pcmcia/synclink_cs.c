@@ -3825,7 +3825,7 @@ static void trace_block(MGSLPC_INFO *info,const char* data, int count, int xmit)
  */
 static void tx_timeout(struct timer_list *t)
 {
-	MGSLPC_INFO *info = from_timer(info, t, tx_timer);
+	MGSLPC_INFO *info = timer_container_of(info, t, tx_timer);
 	unsigned long flags;
 
 	if (debug_level >= DEBUG_LEVEL_INFO)

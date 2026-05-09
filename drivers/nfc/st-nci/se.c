@@ -669,7 +669,8 @@ static void st_nci_se_wt_timeout(struct timer_list *t)
 	 */
 	/* hardware reset managed through VCC_UICC_OUT power supply */
 	u8 param = 0x01;
-	struct st_nci_info *info = from_timer(info, t, se_info.bwi_timer);
+	struct st_nci_info *info = timer_container_of(info, t,
+						      se_info.bwi_timer);
 
 	pr_debug("\n");
 
@@ -689,8 +690,8 @@ static void st_nci_se_wt_timeout(struct timer_list *t)
 
 static void st_nci_se_activation_timeout(struct timer_list *t)
 {
-	struct st_nci_info *info = from_timer(info, t,
-					      se_info.se_active_timer);
+	struct st_nci_info *info = timer_container_of(info, t,
+						      se_info.se_active_timer);
 
 	pr_debug("\n");
 

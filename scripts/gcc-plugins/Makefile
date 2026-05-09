@@ -3,7 +3,7 @@
 $(obj)/randomize_layout_plugin.so: $(objtree)/$(obj)/randomize_layout_seed.h
 quiet_cmd_create_randomize_layout_seed = GENSEED $@
 cmd_create_randomize_layout_seed = \
-  $(CONFIG_SHELL) $(srctree)/$(src)/gen-random-seed.sh $@ $(objtree)/include/generated/randomize_layout_hash.h
+  $(CONFIG_SHELL) $(src)/gen-random-seed.sh $@ $(objtree)/include/generated/randomize_layout_hash.h
 $(objtree)/$(obj)/randomize_layout_seed.h: FORCE
 	$(call if_changed,create_randomize_layout_seed)
 targets += randomize_layout_seed.h randomize_layout_hash.h

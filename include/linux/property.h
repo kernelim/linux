@@ -36,6 +36,7 @@ struct fwnode_handle *__dev_fwnode(struct device *dev);
 		 struct device *: __dev_fwnode)(dev)
 
 bool device_property_present(const struct device *dev, const char *propname);
+bool device_property_read_bool(const struct device *dev, const char *propname);
 int device_property_read_u8_array(const struct device *dev, const char *propname,
 				  u8 *val, size_t nval);
 int device_property_read_u16_array(const struct device *dev, const char *propname,
@@ -52,6 +53,8 @@ int device_property_match_string(const struct device *dev,
 				 const char *propname, const char *string);
 
 bool fwnode_property_present(const struct fwnode_handle *fwnode,
+			     const char *propname);
+bool fwnode_property_read_bool(const struct fwnode_handle *fwnode,
 			     const char *propname);
 int fwnode_property_read_u8_array(const struct fwnode_handle *fwnode,
 				  const char *propname, u8 *val,
@@ -116,6 +119,7 @@ struct fwnode_handle *fwnode_find_reference(const struct fwnode_handle *fwnode,
 
 const char *fwnode_get_name(const struct fwnode_handle *fwnode);
 const char *fwnode_get_name_prefix(const struct fwnode_handle *fwnode);
+bool fwnode_name_eq(const struct fwnode_handle *fwnode, const char *name);
 
 struct fwnode_handle *fwnode_get_parent(const struct fwnode_handle *fwnode);
 struct fwnode_handle *fwnode_get_next_parent(struct fwnode_handle *fwnode);
@@ -124,11 +128,9 @@ struct fwnode_handle *fwnode_get_next_parent(struct fwnode_handle *fwnode);
 	for (parent = fwnode_get_parent(fwnode); parent;	\
 	     parent = fwnode_get_next_parent(parent))
 
-struct device *fwnode_get_next_parent_dev(const struct fwnode_handle *fwnode);
 unsigned int fwnode_count_parents(const struct fwnode_handle *fwn);
 struct fwnode_handle *fwnode_get_nth_parent(struct fwnode_handle *fwn,
 					    unsigned int depth);
-bool fwnode_is_ancestor_of(const struct fwnode_handle *ancestor, const struct fwnode_handle *child);
 struct fwnode_handle *fwnode_get_next_child_node(
 	const struct fwnode_handle *fwnode, struct fwnode_handle *child);
 struct fwnode_handle *fwnode_get_next_available_child_node(
@@ -137,6 +139,10 @@ struct fwnode_handle *fwnode_get_next_available_child_node(
 #define fwnode_for_each_child_node(fwnode, child)			\
 	for (child = fwnode_get_next_child_node(fwnode, NULL); child;	\
 	     child = fwnode_get_next_child_node(fwnode, child))
+
+#define fwnode_for_each_named_child_node(fwnode, child, name)		\
+	fwnode_for_each_child_node(fwnode, child)			\
+		if (!fwnode_name_eq(child, name)) { } else
 
 #define fwnode_for_each_available_child_node(fwnode, child)		       \
 	for (child = fwnode_get_next_available_child_node(fwnode, NULL); child;\
@@ -149,10 +155,18 @@ struct fwnode_handle *device_get_next_child_node(const struct device *dev,
 	for (child = device_get_next_child_node(dev, NULL); child;	\
 	     child = device_get_next_child_node(dev, child))
 
+#define device_for_each_named_child_node(dev, child, name)		\
+	device_for_each_child_node(dev, child)				\
+		if (!fwnode_name_eq(child, name)) { } else
+
 #define device_for_each_child_node_scoped(dev, child)			\
 	for (struct fwnode_handle *child __free(fwnode_handle) =	\
 		device_get_next_child_node(dev, NULL);			\
 	     child; child = device_get_next_child_node(dev, child))
+
+#define device_for_each_named_child_node_scoped(dev, child, name)	\
+	device_for_each_child_node_scoped(dev, child)			\
+		if (!fwnode_name_eq(child, name)) { } else
 
 struct fwnode_handle *fwnode_get_named_child_node(const struct fwnode_handle *fwnode,
 						  const char *childname);
@@ -179,12 +193,19 @@ DEFINE_FREE(fwnode_handle, struct fwnode_handle *, fwnode_handle_put(_T))
 int fwnode_irq_get(const struct fwnode_handle *fwnode, unsigned int index);
 int fwnode_irq_get_byname(const struct fwnode_handle *fwnode, const char *name);
 
-unsigned int device_get_child_node_count(const struct device *dev);
+unsigned int fwnode_get_child_node_count(const struct fwnode_handle *fwnode);
 
-static inline bool device_property_read_bool(const struct device *dev,
-					     const char *propname)
+static inline unsigned int device_get_child_node_count(const struct device *dev)
 {
-	return device_property_present(dev, propname);
+	return fwnode_get_child_node_count(dev_fwnode(dev));
+}
+
+unsigned int fwnode_get_named_child_node_count(const struct fwnode_handle *fwnode,
+					       const char *name);
+static inline unsigned int device_get_named_child_node_count(const struct device *dev,
+							     const char *name)
+{
+	return fwnode_get_named_child_node_count(dev_fwnode(dev), name);
 }
 
 static inline int device_property_read_u8(const struct device *dev,
@@ -235,12 +256,6 @@ static inline int device_property_string_array_count(const struct device *dev,
 						     const char *propname)
 {
 	return device_property_read_string_array(dev, propname, NULL, 0);
-}
-
-static inline bool fwnode_property_read_bool(const struct fwnode_handle *fwnode,
-					     const char *propname)
-{
-	return fwnode_property_present(fwnode, propname);
 }
 
 static inline int fwnode_property_read_u8(const struct fwnode_handle *fwnode,

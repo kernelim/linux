@@ -36,7 +36,7 @@ struct io_futex_data {
 bool io_futex_cache_init(struct io_ring_ctx *ctx)
 {
 	return io_alloc_cache_init(&ctx->futex_cache, IO_FUTEX_ALLOC_CACHE_MAX,
-				sizeof(struct io_futex_data));
+				sizeof(struct io_futex_data), 0);
 }
 
 void io_futex_cache_free(struct io_ring_ctx *ctx)
@@ -44,30 +44,30 @@ void io_futex_cache_free(struct io_ring_ctx *ctx)
 	io_alloc_cache_free(&ctx->futex_cache, kfree);
 }
 
-static void __io_futex_complete(struct io_kiocb *req, struct io_tw_state *ts)
+static void __io_futex_complete(struct io_kiocb *req, io_tw_token_t tw)
 {
 	req->async_data = NULL;
 	hlist_del_init(&req->hash_node);
-	io_req_task_complete(req, ts);
+	io_req_task_complete(req, tw);
 }
 
-static void io_futex_complete(struct io_kiocb *req, struct io_tw_state *ts)
+static void io_futex_complete(struct io_kiocb *req, io_tw_token_t tw)
 {
 	struct io_futex_data *ifd = req->async_data;
 	struct io_ring_ctx *ctx = req->ctx;
 
-	io_tw_lock(ctx, ts);
+	io_tw_lock(ctx, tw);
 	if (!io_alloc_cache_put(&ctx->futex_cache, ifd))
 		kfree(ifd);
-	__io_futex_complete(req, ts);
+	__io_futex_complete(req, tw);
 }
 
-static void io_futexv_complete(struct io_kiocb *req, struct io_tw_state *ts)
+static void io_futexv_complete(struct io_kiocb *req, io_tw_token_t tw)
 {
 	struct io_futex *iof = io_kiocb_to_cmd(req, struct io_futex);
 	struct futex_vector *futexv = req->async_data;
 
-	io_tw_lock(req->ctx, ts);
+	io_tw_lock(req->ctx, tw);
 
 	if (!iof->futexv_unqueued) {
 		int res;
@@ -79,7 +79,7 @@ static void io_futexv_complete(struct io_kiocb *req, struct io_tw_state *ts)
 
 	kfree(req->async_data);
 	req->flags &= ~REQ_F_ASYNC_DATA;
-	__io_futex_complete(req, ts);
+	__io_futex_complete(req, tw);
 }
 
 static bool io_futexv_claim(struct io_futex *iof)
@@ -141,7 +141,7 @@ int io_futex_cancel(struct io_ring_ctx *ctx, struct io_cancel_data *cd,
 	return -ENOENT;
 }
 
-bool io_futex_remove_all(struct io_ring_ctx *ctx, struct task_struct *task,
+bool io_futex_remove_all(struct io_ring_ctx *ctx, struct io_uring_task *tctx,
 			 bool cancel_all)
 {
 	struct hlist_node *tmp;
@@ -151,7 +151,7 @@ bool io_futex_remove_all(struct io_ring_ctx *ctx, struct task_struct *task,
 	lockdep_assert_held(&ctx->uring_lock);
 
 	hlist_for_each_entry_safe(req, tmp, &ctx->futex_list, hash_node) {
-		if (!io_match_task_safe(req, task, cancel_all))
+		if (!io_match_task_safe(req, tctx, cancel_all))
 			continue;
 		hlist_del_init(&req->hash_node);
 		__io_futex_cancel(ctx, req);
@@ -186,6 +186,8 @@ int io_futex_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	    !futex_validate_input(iof->futex_flags, iof->futex_mask))
 		return -EINVAL;
 
+	/* Mark as inflight, so file exit cancelation will find it */
+	io_req_track_inflight(req);
 	return 0;
 }
 
@@ -231,6 +233,8 @@ int io_futexv_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 		return ret;
 	}
 
+	/* Mark as inflight, so file exit cancelation will find it */
+	io_req_track_inflight(req);
 	iof->futexv_owned = 0;
 	iof->futexv_unqueued = 0;
 	req->flags |= REQ_F_ASYNC_DATA;
@@ -249,17 +253,6 @@ static void io_futex_wake_fn(struct wake_q_head *wake_q, struct futex_q *q)
 	io_req_set_res(req, 0, 0);
 	req->io_task_work.func = io_futex_complete;
 	io_req_task_work_add(req);
-}
-
-static struct io_futex_data *io_alloc_ifd(struct io_ring_ctx *ctx)
-{
-	struct io_futex_data *ifd;
-
-	ifd = io_alloc_cache_get(&ctx->futex_cache);
-	if (ifd)
-		return ifd;
-
-	return kmalloc(sizeof(struct io_futex_data), GFP_NOWAIT);
 }
 
 int io_futexv_wait(struct io_kiocb *req, unsigned int issue_flags)
@@ -283,7 +276,7 @@ int io_futexv_wait(struct io_kiocb *req, unsigned int issue_flags)
 		kfree(futexv);
 		req->async_data = NULL;
 		req->flags &= ~REQ_F_ASYNC_DATA;
-		return IOU_OK;
+		return IOU_COMPLETE;
 	}
 
 	/*
@@ -322,7 +315,6 @@ int io_futex_wait(struct io_kiocb *req, unsigned int issue_flags)
 	struct io_futex *iof = io_kiocb_to_cmd(req, struct io_futex);
 	struct io_ring_ctx *ctx = req->ctx;
 	struct io_futex_data *ifd = NULL;
-	struct futex_hash_bucket *hb;
 	int ret;
 
 	if (!iof->futex_mask) {
@@ -331,7 +323,7 @@ int io_futex_wait(struct io_kiocb *req, unsigned int issue_flags)
 	}
 
 	io_ring_submit_lock(ctx, issue_flags);
-	ifd = io_alloc_ifd(ctx);
+	ifd = io_cache_alloc(&ctx->futex_cache, GFP_NOWAIT);
 	if (!ifd) {
 		ret = -ENOMEM;
 		goto done_unlock;
@@ -345,12 +337,11 @@ int io_futex_wait(struct io_kiocb *req, unsigned int issue_flags)
 	ifd->req = req;
 
 	ret = futex_wait_setup(iof->uaddr, iof->futex_val, iof->futex_flags,
-			       &ifd->q, &hb);
+			       &ifd->q, NULL, NULL);
 	if (!ret) {
 		hlist_add_head(&req->hash_node, &ctx->futex_list);
 		io_ring_submit_unlock(ctx, issue_flags);
 
-		futex_queue(&ifd->q, hb);
 		return IOU_ISSUE_SKIP_COMPLETE;
 	}
 
@@ -363,7 +354,7 @@ done:
 	req->async_data = NULL;
 	req->flags &= ~REQ_F_ASYNC_DATA;
 	kfree(ifd);
-	return IOU_OK;
+	return IOU_COMPLETE;
 }
 
 int io_futex_wake(struct io_kiocb *req, unsigned int issue_flags)
@@ -380,5 +371,5 @@ int io_futex_wake(struct io_kiocb *req, unsigned int issue_flags)
 	if (ret < 0)
 		req_set_fail(req);
 	io_req_set_res(req, ret, 0);
-	return IOU_OK;
+	return IOU_COMPLETE;
 }

@@ -48,6 +48,13 @@ static u64 sys_reg_to_index(const struct sys_reg_desc *reg);
 static int set_id_reg(struct kvm_vcpu *vcpu, const struct sys_reg_desc *rd,
 		      u64 val);
 
+static bool undef_access(struct kvm_vcpu *vcpu, struct sys_reg_params *p,
+			 const struct sys_reg_desc *r)
+{
+	kvm_inject_undefined(vcpu);
+	return false;
+}
+
 static bool bad_trap(struct kvm_vcpu *vcpu,
 		     struct sys_reg_params *params,
 		     const struct sys_reg_desc *r,
@@ -55,8 +62,7 @@ static bool bad_trap(struct kvm_vcpu *vcpu,
 {
 	WARN_ONCE(1, "Unexpected %s\n", msg);
 	print_sys_reg_instr(params);
-	kvm_inject_undefined(vcpu);
-	return false;
+	return undef_access(vcpu, params, r);
 }
 
 static bool read_from_write_only(struct kvm_vcpu *vcpu,
@@ -75,36 +81,103 @@ static bool write_to_read_only(struct kvm_vcpu *vcpu,
 			"sys_reg write to read-only register");
 }
 
-#define PURE_EL2_SYSREG(el2)						\
-	case el2: {							\
-		*el1r = el2;						\
-		return true;						\
-	}
+enum sr_loc_attr {
+	SR_LOC_MEMORY	= 0,	  /* Register definitely in memory */
+	SR_LOC_LOADED	= BIT(0), /* Register on CPU, unless it cannot */
+	SR_LOC_MAPPED	= BIT(1), /* Register in a different CPU register */
+	SR_LOC_XLATED	= BIT(2), /* Register translated to fit another reg */
+	SR_LOC_SPECIAL	= BIT(3), /* Demanding register, implies loaded */
+};
 
-#define MAPPED_EL2_SYSREG(el2, el1, fn)					\
-	case el2: {							\
-		*xlate = fn;						\
-		*el1r = el1;						\
-		return true;						\
-	}
+struct sr_loc {
+	enum sr_loc_attr loc;
+	enum vcpu_sysreg map_reg;
+	u64		 (*xlate)(u64);
+};
 
-static bool get_el2_to_el1_mapping(unsigned int reg,
-				   unsigned int *el1r, u64 (**xlate)(u64))
+static enum sr_loc_attr locate_direct_register(const struct kvm_vcpu *vcpu,
+					       enum vcpu_sysreg reg)
 {
 	switch (reg) {
-		PURE_EL2_SYSREG(  VPIDR_EL2	);
-		PURE_EL2_SYSREG(  VMPIDR_EL2	);
-		PURE_EL2_SYSREG(  ACTLR_EL2	);
-		PURE_EL2_SYSREG(  HCR_EL2	);
-		PURE_EL2_SYSREG(  MDCR_EL2	);
-		PURE_EL2_SYSREG(  HSTR_EL2	);
-		PURE_EL2_SYSREG(  HACR_EL2	);
-		PURE_EL2_SYSREG(  VTTBR_EL2	);
-		PURE_EL2_SYSREG(  VTCR_EL2	);
-		PURE_EL2_SYSREG(  RVBAR_EL2	);
-		PURE_EL2_SYSREG(  TPIDR_EL2	);
-		PURE_EL2_SYSREG(  HPFAR_EL2	);
-		PURE_EL2_SYSREG(  CNTHCTL_EL2	);
+	case SCTLR_EL1:
+	case CPACR_EL1:
+	case TTBR0_EL1:
+	case TTBR1_EL1:
+	case TCR_EL1:
+	case TCR2_EL1:
+	case PIR_EL1:
+	case PIRE0_EL1:
+	case ESR_EL1:
+	case AFSR0_EL1:
+	case AFSR1_EL1:
+	case FAR_EL1:
+	case MAIR_EL1:
+	case VBAR_EL1:
+	case CONTEXTIDR_EL1:
+	case AMAIR_EL1:
+	case CNTKCTL_EL1:
+	case ELR_EL1:
+	case SPSR_EL1:
+	case ZCR_EL1:
+		/*
+		 * EL1 registers which have an ELx2 mapping are loaded if
+		 * we're not in hypervisor context.
+		 */
+		return is_hyp_ctxt(vcpu) ? SR_LOC_MEMORY : SR_LOC_LOADED;
+
+	case TPIDR_EL0:
+	case TPIDRRO_EL0:
+	case TPIDR_EL1:
+	case PAR_EL1:
+	case DACR32_EL2:
+	case IFSR32_EL2:
+	case DBGVCR32_EL2:
+		/* These registers are always loaded, no matter what */
+		return SR_LOC_LOADED;
+
+	default:
+		/* Non-mapped EL2 registers are by definition in memory. */
+		return SR_LOC_MEMORY;
+	}
+}
+
+static void locate_mapped_el2_register(const struct kvm_vcpu *vcpu,
+				       enum vcpu_sysreg reg,
+				       enum vcpu_sysreg map_reg,
+				       u64 (*xlate)(u64),
+				       struct sr_loc *loc)
+{
+	if (!is_hyp_ctxt(vcpu)) {
+		loc->loc = SR_LOC_MEMORY;
+		return;
+	}
+
+	loc->loc = SR_LOC_LOADED | SR_LOC_MAPPED;
+	loc->map_reg = map_reg;
+
+	WARN_ON(locate_direct_register(vcpu, map_reg) != SR_LOC_MEMORY);
+
+	if (xlate != NULL && !vcpu_el2_e2h_is_set(vcpu)) {
+		loc->loc |= SR_LOC_XLATED;
+		loc->xlate = xlate;
+	}
+}
+
+#define MAPPED_EL2_SYSREG(r, m, t)					\
+	case r:	{							\
+		locate_mapped_el2_register(vcpu, r, m, t, loc);		\
+		break;							\
+	}
+
+static void locate_register(const struct kvm_vcpu *vcpu, enum vcpu_sysreg reg,
+			    struct sr_loc *loc)
+{
+	if (!vcpu_get_flag(vcpu, SYSREGS_ON_CPU)) {
+		loc->loc = SR_LOC_MEMORY;
+		return;
+	}
+
+	switch (reg) {
 		MAPPED_EL2_SYSREG(SCTLR_EL2,   SCTLR_EL1,
 				  translate_sctlr_el2_to_sctlr_el1	     );
 		MAPPED_EL2_SYSREG(CPTR_EL2,    CPACR_EL1,
@@ -124,94 +197,109 @@ static bool get_el2_to_el1_mapping(unsigned int reg,
 		MAPPED_EL2_SYSREG(ELR_EL2,     ELR_EL1,	    NULL	     );
 		MAPPED_EL2_SYSREG(SPSR_EL2,    SPSR_EL1,    NULL	     );
 		MAPPED_EL2_SYSREG(ZCR_EL2,     ZCR_EL1,     NULL	     );
+		MAPPED_EL2_SYSREG(CONTEXTIDR_EL2, CONTEXTIDR_EL1, NULL	     );
+	case CNTHCTL_EL2:
+		/* CNTHCTL_EL2 is super special, until we support NV2.1 */
+		loc->loc = ((is_hyp_ctxt(vcpu) && vcpu_el2_e2h_is_set(vcpu)) ?
+			    SR_LOC_SPECIAL : SR_LOC_MEMORY);
+		break;
 	default:
-		return false;
+		loc->loc = locate_direct_register(vcpu, reg);
 	}
 }
 
-u64 vcpu_read_sys_reg(const struct kvm_vcpu *vcpu, int reg)
+u64 vcpu_read_sys_reg(const struct kvm_vcpu *vcpu, enum vcpu_sysreg reg)
 {
-	u64 val = 0x8badf00d8badf00d;
-	u64 (*xlate)(u64) = NULL;
-	unsigned int el1r;
+	struct sr_loc loc = {};
 
-	if (!vcpu_get_flag(vcpu, SYSREGS_ON_CPU))
-		goto memory_read;
+	locate_register(vcpu, reg, &loc);
 
-	if (unlikely(get_el2_to_el1_mapping(reg, &el1r, &xlate))) {
-		if (!is_hyp_ctxt(vcpu))
-			goto memory_read;
+	WARN_ON_ONCE(!has_vhe() && loc.loc != SR_LOC_MEMORY);
 
-		/*
-		 * If this register does not have an EL1 counterpart,
-		 * then read the stored EL2 version.
-		 */
-		if (reg == el1r)
-			goto memory_read;
+	if (loc.loc & SR_LOC_SPECIAL) {
+		u64 val;
+
+		WARN_ON_ONCE(loc.loc & ~SR_LOC_SPECIAL);
 
 		/*
-		 * If we have a non-VHE guest and that the sysreg
-		 * requires translation to be used at EL1, use the
-		 * in-memory copy instead.
+		 * CNTHCTL_EL2 requires some special treatment to account
+		 * for the bits that can be set via CNTKCTL_EL1 when E2H==1.
 		 */
-		if (!vcpu_el2_e2h_is_set(vcpu) && xlate)
-			goto memory_read;
-
-		/* Get the current version of the EL1 counterpart. */
-		WARN_ON(!__vcpu_read_sys_reg_from_cpu(el1r, &val));
-		return val;
+		switch (reg) {
+		case CNTHCTL_EL2:
+			val = read_sysreg_el1(SYS_CNTKCTL);
+			val &= CNTKCTL_VALID_BITS;
+			val |= __vcpu_sys_reg(vcpu, reg) & ~CNTKCTL_VALID_BITS;
+			return val;
+		default:
+			WARN_ON_ONCE(1);
+		}
 	}
 
-	/* EL1 register can't be on the CPU if the guest is in vEL2. */
-	if (unlikely(is_hyp_ctxt(vcpu)))
-		goto memory_read;
+	if (loc.loc & SR_LOC_LOADED) {
+		enum vcpu_sysreg map_reg = reg;
+		u64 val = 0x8badf00d8badf00d;
 
-	if (__vcpu_read_sys_reg_from_cpu(reg, &val))
-		return val;
+		if (loc.loc & SR_LOC_MAPPED)
+			map_reg = loc.map_reg;
 
-memory_read:
+		if (!(loc.loc & SR_LOC_XLATED) &&
+		    __vcpu_read_sys_reg_from_cpu(map_reg, &val)) {
+
+			return val;
+		}
+	}
+
 	return __vcpu_sys_reg(vcpu, reg);
 }
 
-void vcpu_write_sys_reg(struct kvm_vcpu *vcpu, u64 val, int reg)
+void vcpu_write_sys_reg(struct kvm_vcpu *vcpu, u64 val, enum vcpu_sysreg reg)
 {
-	u64 (*xlate)(u64) = NULL;
-	unsigned int el1r;
+	struct sr_loc loc = {};
 
-	if (!vcpu_get_flag(vcpu, SYSREGS_ON_CPU))
-		goto memory_write;
+	locate_register(vcpu, reg, &loc);
 
-	if (unlikely(get_el2_to_el1_mapping(reg, &el1r, &xlate))) {
-		if (!is_hyp_ctxt(vcpu))
-			goto memory_write;
+	WARN_ON_ONCE(!has_vhe() && loc.loc != SR_LOC_MEMORY);
 
-		/*
-		 * Always store a copy of the write to memory to avoid having
-		 * to reverse-translate virtual EL2 system registers for a
-		 * non-VHE guest hypervisor.
-		 */
-		__vcpu_sys_reg(vcpu, reg) = val;
+	if (loc.loc & SR_LOC_SPECIAL) {
 
-		/* No EL1 counterpart? We're done here.? */
-		if (reg == el1r)
-			return;
+		WARN_ON_ONCE(loc.loc & ~SR_LOC_SPECIAL);
 
-		if (!vcpu_el2_e2h_is_set(vcpu) && xlate)
-			val = xlate(val);
-
-		/* Redirect this to the EL1 version of the register. */
-		WARN_ON(!__vcpu_write_sys_reg_to_cpu(val, el1r));
-		return;
+		switch (reg) {
+		case CNTHCTL_EL2:
+			/*
+			 * If E2H=1, some of the bits are backed by
+			 * CNTKCTL_EL1, while the rest is kept in memory.
+			 * Yes, this is fun stuff.
+			 */
+			write_sysreg_el1(val, SYS_CNTKCTL);
+			break;
+		default:
+			WARN_ON_ONCE(1);
+		}
 	}
 
-	/* EL1 register can't be on the CPU if the guest is in vEL2. */
-	if (unlikely(is_hyp_ctxt(vcpu)))
-		goto memory_write;
+	if (loc.loc & SR_LOC_LOADED) {
+		enum vcpu_sysreg map_reg = reg;
+		u64 xlated_val;
 
-	if (__vcpu_write_sys_reg_to_cpu(val, reg))
-		return;
+		if (loc.loc & SR_LOC_MAPPED)
+			map_reg = loc.map_reg;
 
-memory_write:
+		if (loc.loc & SR_LOC_XLATED)
+			xlated_val = loc.xlate(val);
+		else
+			xlated_val = val;
+
+		__vcpu_write_sys_reg_to_cpu(xlated_val, map_reg);
+
+		/*
+		 * Fall through to write the backing store anyway, which
+		 * allows translated registers to be directly read without a
+		 * reverse translation.
+		 */
+	}
+
 	 __vcpu_sys_reg(vcpu, reg) = val;
 }
 
@@ -347,10 +435,8 @@ static bool access_dcgsw(struct kvm_vcpu *vcpu,
 			 struct sys_reg_params *p,
 			 const struct sys_reg_desc *r)
 {
-	if (!kvm_has_mte(vcpu->kvm)) {
-		kvm_inject_undefined(vcpu);
-		return false;
-	}
+	if (!kvm_has_mte(vcpu->kvm))
+		return undef_access(vcpu, p, r);
 
 	/* Treat MTE S/W ops as we treat the classic ones: with contempt */
 	return access_dcsw(vcpu, p, r);
@@ -387,10 +473,8 @@ static bool access_vm_reg(struct kvm_vcpu *vcpu,
 	u64 val, mask, shift;
 
 	if (reg_to_encoding(r) == SYS_TCR2_EL1 &&
-	    !kvm_has_feat(vcpu->kvm, ID_AA64MMFR3_EL1, TCRX, IMP)) {
-		kvm_inject_undefined(vcpu);
-		return false;
-	}
+	    !kvm_has_feat(vcpu->kvm, ID_AA64MMFR3_EL1, TCRX, IMP))
+		return undef_access(vcpu, p, r);
 
 	BUG_ON(!p->is_write);
 
@@ -437,10 +521,8 @@ static bool access_gic_sgi(struct kvm_vcpu *vcpu,
 {
 	bool g1;
 
-	if (!kvm_has_gicv3(vcpu->kvm)) {
-		kvm_inject_undefined(vcpu);
-		return false;
-	}
+	if (!kvm_has_gicv3(vcpu->kvm))
+		return undef_access(vcpu, p, r);
 
 	if (!p->is_write)
 		return read_from_write_only(vcpu, p, r);
@@ -485,6 +567,9 @@ static bool access_gic_sre(struct kvm_vcpu *vcpu,
 			   struct sys_reg_params *p,
 			   const struct sys_reg_desc *r)
 {
+	if (!kvm_has_gicv3(vcpu->kvm))
+		return undef_access(vcpu, p, r);
+
 	if (p->is_write)
 		return ignore_write(vcpu, p);
 
@@ -502,14 +587,6 @@ static bool trap_raz_wi(struct kvm_vcpu *vcpu,
 		return read_zero(vcpu, p);
 }
 
-static bool trap_undef(struct kvm_vcpu *vcpu,
-		       struct sys_reg_params *p,
-		       const struct sys_reg_desc *r)
-{
-	kvm_inject_undefined(vcpu);
-	return false;
-}
-
 /*
  * ARMv8.1 mandates at least a trivial LORegion implementation, where all the
  * RW registers are RES0 (which we can implement as RAZ/WI). On an ARMv8.0
@@ -522,10 +599,8 @@ static bool trap_loregion(struct kvm_vcpu *vcpu,
 {
 	u32 sr = reg_to_encoding(r);
 
-	if (!kvm_has_feat(vcpu->kvm, ID_AA64MMFR1_EL1, LO, IMP)) {
-		kvm_inject_undefined(vcpu);
-		return false;
-	}
+	if (!kvm_has_feat(vcpu->kvm, ID_AA64MMFR1_EL1, LO, IMP))
+		return undef_access(vcpu, p, r);
 
 	if (p->is_write && sr == SYS_LORID_EL1)
 		return write_to_read_only(vcpu, p, r);
@@ -1257,10 +1332,8 @@ static bool access_pmuserenr(struct kvm_vcpu *vcpu, struct sys_reg_params *p,
 			     const struct sys_reg_desc *r)
 {
 	if (p->is_write) {
-		if (!vcpu_mode_priv(vcpu)) {
-			kvm_inject_undefined(vcpu);
-			return false;
-		}
+		if (!vcpu_mode_priv(vcpu))
+			return undef_access(vcpu, p, r);
 
 		__vcpu_sys_reg(vcpu, PMUSERENR_EL0) =
 			       p->regval & ARMV8_PMU_USERENR_MASK;
@@ -1348,14 +1421,6 @@ static int set_pmcr(struct kvm_vcpu *vcpu, const struct sys_reg_desc *r,
 	  .reset = reset_pmevtyper,					\
 	  .access = access_pmu_evtyper, .reg = (PMEVTYPER0_EL0 + n), }
 
-static bool undef_access(struct kvm_vcpu *vcpu, struct sys_reg_params *p,
-			 const struct sys_reg_desc *r)
-{
-	kvm_inject_undefined(vcpu);
-
-	return false;
-}
-
 /* Macro to expand the AMU counter and type registers*/
 #define AMU_AMEVCNTR0_EL0(n) { SYS_DESC(SYS_AMEVCNTR0_EL0(n)), undef_access }
 #define AMU_AMEVTYPER0_EL0(n) { SYS_DESC(SYS_AMEVTYPER0_EL0(n)), undef_access }
@@ -1414,8 +1479,7 @@ static bool access_arch_timer(struct kvm_vcpu *vcpu,
 		break;
 	default:
 		print_sys_reg_msg(p, "%s", "Unhandled trapped timer register");
-		kvm_inject_undefined(vcpu);
-		return false;
+		return undef_access(vcpu, p, r);
 	}
 
 	if (p->is_write)
@@ -2367,7 +2431,7 @@ static bool access_zcr_el2(struct kvm_vcpu *vcpu,
 
 	if (guest_hyp_sve_traps_enabled(vcpu)) {
 		kvm_inject_nested_sve_trap(vcpu);
-		return true;
+		return false;
 	}
 
 	if (!p->is_write) {
@@ -2402,7 +2466,7 @@ static bool access_mdcr(struct kvm_vcpu *vcpu,
 	 */
 	if (hpmn > vcpu->kvm->arch.nr_pmu_counters) {
 		hpmn = vcpu->kvm->arch.nr_pmu_counters;
-		u64_replace_bits(val, hpmn, MDCR_EL2_HPMN);
+		u64p_replace_bits(&val, hpmn, MDCR_EL2_HPMN);
 	}
 
 	__vcpu_sys_reg(vcpu, MDCR_EL2) = val;
@@ -2415,6 +2479,23 @@ static bool access_mdcr(struct kvm_vcpu *vcpu,
 		kvm_make_request(KVM_REQ_RELOAD_PMU, vcpu);
 
 	return true;
+}
+
+static bool access_ras(struct kvm_vcpu *vcpu,
+		       struct sys_reg_params *p,
+		       const struct sys_reg_desc *r)
+{
+	struct kvm *kvm = vcpu->kvm;
+
+	switch(reg_to_encoding(r)) {
+	default:
+		if (!kvm_has_feat(kvm, ID_AA64PFR0_EL1, RAS, IMP)) {
+			kvm_inject_undefined(vcpu);
+			return false;
+		}
+	}
+
+	return trap_raz_wi(vcpu, p, r);
 }
 
 /*
@@ -2557,7 +2638,7 @@ static const struct sys_reg_desc sys_reg_descs[] = {
 	// DBGDTR[TR]X_EL0 share the same encoding
 	{ SYS_DESC(SYS_DBGDTRTX_EL0), trap_raz_wi },
 
-	{ SYS_DESC(SYS_DBGVCR32_EL2), trap_undef, reset_val, DBGVCR32_EL2, 0 },
+	{ SYS_DESC(SYS_DBGVCR32_EL2), undef_access, reset_val, DBGVCR32_EL2, 0 },
 
 	IMPLEMENTATION_ID(MIDR_EL1),
 	{ SYS_DESC(SYS_MPIDR_EL1), NULL, reset_mpidr, MPIDR_EL1 },
@@ -2728,18 +2809,20 @@ static const struct sys_reg_desc sys_reg_descs[] = {
 	{ SYS_DESC(SYS_SPSR_EL1), access_spsr},
 	{ SYS_DESC(SYS_ELR_EL1), access_elr},
 
+	{ SYS_DESC(SYS_ICC_PMR_EL1), undef_access },
+
 	{ SYS_DESC(SYS_AFSR0_EL1), access_vm_reg, reset_unknown, AFSR0_EL1 },
 	{ SYS_DESC(SYS_AFSR1_EL1), access_vm_reg, reset_unknown, AFSR1_EL1 },
 	{ SYS_DESC(SYS_ESR_EL1), access_vm_reg, reset_unknown, ESR_EL1 },
 
-	{ SYS_DESC(SYS_ERRIDR_EL1), trap_raz_wi },
-	{ SYS_DESC(SYS_ERRSELR_EL1), trap_raz_wi },
-	{ SYS_DESC(SYS_ERXFR_EL1), trap_raz_wi },
-	{ SYS_DESC(SYS_ERXCTLR_EL1), trap_raz_wi },
-	{ SYS_DESC(SYS_ERXSTATUS_EL1), trap_raz_wi },
-	{ SYS_DESC(SYS_ERXADDR_EL1), trap_raz_wi },
-	{ SYS_DESC(SYS_ERXMISC0_EL1), trap_raz_wi },
-	{ SYS_DESC(SYS_ERXMISC1_EL1), trap_raz_wi },
+	{ SYS_DESC(SYS_ERRIDR_EL1), access_ras },
+	{ SYS_DESC(SYS_ERRSELR_EL1), access_ras },
+	{ SYS_DESC(SYS_ERXFR_EL1), access_ras },
+	{ SYS_DESC(SYS_ERXCTLR_EL1), access_ras },
+	{ SYS_DESC(SYS_ERXSTATUS_EL1), access_ras },
+	{ SYS_DESC(SYS_ERXADDR_EL1), access_ras },
+	{ SYS_DESC(SYS_ERXMISC0_EL1), access_ras },
+	{ SYS_DESC(SYS_ERXMISC1_EL1), access_ras },
 
 	MTE_REG(TFSR_EL1),
 	MTE_REG(TFSRE0_EL1),
@@ -2785,18 +2868,31 @@ static const struct sys_reg_desc sys_reg_descs[] = {
 	{ SYS_DESC(SYS_VBAR_EL1), access_rw, reset_val, VBAR_EL1, 0 },
 	{ SYS_DESC(SYS_DISR_EL1), NULL, reset_val, DISR_EL1, 0 },
 
-	{ SYS_DESC(SYS_ICC_IAR0_EL1), write_to_read_only },
-	{ SYS_DESC(SYS_ICC_EOIR0_EL1), read_from_write_only },
-	{ SYS_DESC(SYS_ICC_HPPIR0_EL1), write_to_read_only },
-	{ SYS_DESC(SYS_ICC_DIR_EL1), read_from_write_only },
-	{ SYS_DESC(SYS_ICC_RPR_EL1), write_to_read_only },
+	{ SYS_DESC(SYS_ICC_IAR0_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_EOIR0_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_HPPIR0_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_BPR0_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_AP0R0_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_AP0R1_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_AP0R2_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_AP0R3_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_AP1R0_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_AP1R1_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_AP1R2_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_AP1R3_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_DIR_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_RPR_EL1), undef_access },
 	{ SYS_DESC(SYS_ICC_SGI1R_EL1), access_gic_sgi },
 	{ SYS_DESC(SYS_ICC_ASGI1R_EL1), access_gic_sgi },
 	{ SYS_DESC(SYS_ICC_SGI0R_EL1), access_gic_sgi },
-	{ SYS_DESC(SYS_ICC_IAR1_EL1), write_to_read_only },
-	{ SYS_DESC(SYS_ICC_EOIR1_EL1), read_from_write_only },
-	{ SYS_DESC(SYS_ICC_HPPIR1_EL1), write_to_read_only },
+	{ SYS_DESC(SYS_ICC_IAR1_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_EOIR1_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_HPPIR1_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_BPR1_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_CTLR_EL1), undef_access },
 	{ SYS_DESC(SYS_ICC_SRE_EL1), access_gic_sre },
+	{ SYS_DESC(SYS_ICC_IGRPEN0_EL1), undef_access },
+	{ SYS_DESC(SYS_ICC_IGRPEN1_EL1), undef_access },
 
 	{ SYS_DESC(SYS_CONTEXTIDR_EL1), access_vm_reg, reset_val, CONTEXTIDR_EL1, 0 },
 	{ SYS_DESC(SYS_TPIDR_EL1), NULL, reset_unknown, TPIDR_EL1 },
@@ -3042,7 +3138,7 @@ static const struct sys_reg_desc sys_reg_descs[] = {
 	EL2_REG_VNCR(VTTBR_EL2, reset_val, 0),
 	EL2_REG_VNCR(VTCR_EL2, reset_val, 0),
 
-	{ SYS_DESC(SYS_DACR32_EL2), trap_undef, reset_unknown, DACR32_EL2 },
+	{ SYS_DESC(SYS_DACR32_EL2), undef_access, reset_unknown, DACR32_EL2 },
 	EL2_REG_VNCR(HDFGRTR_EL2, reset_val, 0),
 	EL2_REG_VNCR(HDFGWTR_EL2, reset_val, 0),
 	EL2_REG_VNCR(HAFGRTR_EL2, reset_val, 0),
@@ -3060,11 +3156,11 @@ static const struct sys_reg_desc sys_reg_descs[] = {
 	{ SYS_DESC(SYS_SPSR_fiq), .access = trap_raz_wi,
 	  .visibility = hidden_user_visibility },
 
-	{ SYS_DESC(SYS_IFSR32_EL2), trap_undef, reset_unknown, IFSR32_EL2 },
+	{ SYS_DESC(SYS_IFSR32_EL2), undef_access, reset_unknown, IFSR32_EL2 },
 	EL2_REG(AFSR0_EL2, access_rw, reset_val, 0),
 	EL2_REG(AFSR1_EL2, access_rw, reset_val, 0),
 	EL2_REG_REDIR(ESR_EL2, reset_val, 0),
-	{ SYS_DESC(SYS_FPEXC32_EL2), trap_undef, reset_val, FPEXC32_EL2, 0x700 },
+	{ SYS_DESC(SYS_FPEXC32_EL2), undef_access, reset_val, FPEXC32_EL2, 0x700 },
 
 	EL2_REG_REDIR(FAR_EL2, reset_val, 0),
 	EL2_REG(HPFAR_EL2, access_rw, reset_val, 0),
@@ -3084,8 +3180,8 @@ static const struct sys_reg_desc sys_reg_descs[] = {
 	{ SYS_DESC(SYS_MPAMVPM7_EL2), undef_access },
 
 	EL2_REG(VBAR_EL2, access_rw, reset_val, 0),
-	EL2_REG(RVBAR_EL2, access_rw, reset_val, 0),
-	{ SYS_DESC(SYS_RMR_EL2), trap_undef },
+	{ SYS_DESC(SYS_RVBAR_EL2), undef_access },
+	{ SYS_DESC(SYS_RMR_EL2), undef_access },
 
 	EL2_REG(CONTEXTIDR_EL2, access_rw, reset_val, 0),
 	EL2_REG(TPIDR_EL2, access_rw, reset_val, 0),
@@ -3119,10 +3215,8 @@ static bool handle_alle1is(struct kvm_vcpu *vcpu, struct sys_reg_params *p,
 {
 	u32 sys_encoding = sys_insn(p->Op0, p->Op1, p->CRn, p->CRm, p->Op2);
 
-	if (!kvm_supported_tlbi_s12_op(vcpu, sys_encoding)) {
-		kvm_inject_undefined(vcpu);
-		return false;
-	}
+	if (!kvm_supported_tlbi_s12_op(vcpu, sys_encoding))
+		return undef_access(vcpu, p, r);
 
 	write_lock(&vcpu->kvm->mmu_lock);
 
@@ -3191,10 +3285,8 @@ static bool handle_vmalls12e1is(struct kvm_vcpu *vcpu, struct sys_reg_params *p,
 	u32 sys_encoding = sys_insn(p->Op0, p->Op1, p->CRn, p->CRm, p->Op2);
 	u64 limit, vttbr;
 
-	if (!kvm_supported_tlbi_s12_op(vcpu, sys_encoding)) {
-		kvm_inject_undefined(vcpu);
-		return false;
-	}
+	if (!kvm_supported_tlbi_s12_op(vcpu, sys_encoding))
+		return undef_access(vcpu, p, r);
 
 	vttbr = vcpu_read_sys_reg(vcpu, VTTBR_EL2);
 	limit = BIT_ULL(kvm_get_pa_bits(vcpu->kvm));
@@ -3219,10 +3311,8 @@ static bool handle_ripas2e1is(struct kvm_vcpu *vcpu, struct sys_reg_params *p,
 	u64 base, range, tg, num, scale;
 	int shift;
 
-	if (!kvm_supported_tlbi_ipas2_op(vcpu, sys_encoding)) {
-		kvm_inject_undefined(vcpu);
-		return false;
-	}
+	if (!kvm_supported_tlbi_ipas2_op(vcpu, sys_encoding))
+		return undef_access(vcpu, p, r);
 
 	/*
 	 * Because the shadow S2 structure doesn't necessarily reflect that
@@ -3290,10 +3380,8 @@ static bool handle_ipas2e1is(struct kvm_vcpu *vcpu, struct sys_reg_params *p,
 	u32 sys_encoding = sys_insn(p->Op0, p->Op1, p->CRn, p->CRm, p->Op2);
 	u64 vttbr = vcpu_read_sys_reg(vcpu, VTTBR_EL2);
 
-	if (!kvm_supported_tlbi_ipas2_op(vcpu, sys_encoding)) {
-		kvm_inject_undefined(vcpu);
-		return false;
-	}
+	if (!kvm_supported_tlbi_ipas2_op(vcpu, sys_encoding))
+		return undef_access(vcpu, p, r);
 
 	kvm_s2_mmu_iterate_by_vmid(vcpu->kvm, get_vmid(vttbr),
 				   &(union tlbi_info) {
@@ -3333,10 +3421,8 @@ static bool handle_tlbi_el1(struct kvm_vcpu *vcpu, struct sys_reg_params *p,
 
 	WARN_ON(!vcpu_is_el2(vcpu));
 
-	if (!kvm_supported_tlbi_s1e1_op(vcpu, sys_encoding)) {
-		kvm_inject_undefined(vcpu);
-		return false;
-	}
+	if (!kvm_supported_tlbi_s1e1_op(vcpu, sys_encoding))
+		return undef_access(vcpu, p, r);
 
 	kvm_s2_mmu_iterate_by_vmid(vcpu->kvm, get_vmid(vttbr),
 				   &(union tlbi_info) {
@@ -3444,14 +3530,14 @@ static struct sys_reg_desc sys_insn_descs[] = {
 	SYS_INSN(TLBI_IPAS2LE1IS, handle_ipas2e1is),
 	SYS_INSN(TLBI_RIPAS2LE1IS, handle_ripas2e1is),
 
-	SYS_INSN(TLBI_ALLE2OS, trap_undef),
-	SYS_INSN(TLBI_VAE2OS, trap_undef),
+	SYS_INSN(TLBI_ALLE2OS, undef_access),
+	SYS_INSN(TLBI_VAE2OS, undef_access),
 	SYS_INSN(TLBI_ALLE1OS, handle_alle1is),
-	SYS_INSN(TLBI_VALE2OS, trap_undef),
+	SYS_INSN(TLBI_VALE2OS, undef_access),
 	SYS_INSN(TLBI_VMALLS12E1OS, handle_vmalls12e1is),
 
-	SYS_INSN(TLBI_RVAE2IS, trap_undef),
-	SYS_INSN(TLBI_RVALE2IS, trap_undef),
+	SYS_INSN(TLBI_RVAE2IS, undef_access),
+	SYS_INSN(TLBI_RVALE2IS, undef_access),
 
 	SYS_INSN(TLBI_ALLE1IS, handle_alle1is),
 	SYS_INSN(TLBI_VMALLS12E1IS, handle_vmalls12e1is),
@@ -3463,10 +3549,10 @@ static struct sys_reg_desc sys_insn_descs[] = {
 	SYS_INSN(TLBI_IPAS2LE1, handle_ipas2e1is),
 	SYS_INSN(TLBI_RIPAS2LE1, handle_ripas2e1is),
 	SYS_INSN(TLBI_RIPAS2LE1OS, handle_ripas2e1is),
-	SYS_INSN(TLBI_RVAE2OS, trap_undef),
-	SYS_INSN(TLBI_RVALE2OS, trap_undef),
-	SYS_INSN(TLBI_RVAE2, trap_undef),
-	SYS_INSN(TLBI_RVALE2, trap_undef),
+	SYS_INSN(TLBI_RVAE2OS, undef_access),
+	SYS_INSN(TLBI_RVALE2OS, undef_access),
+	SYS_INSN(TLBI_RVAE2, undef_access),
+	SYS_INSN(TLBI_RVALE2, undef_access),
 	SYS_INSN(TLBI_ALLE1, handle_alle1is),
 	SYS_INSN(TLBI_VMALLS12E1, handle_vmalls12e1is),
 
@@ -3475,19 +3561,19 @@ static struct sys_reg_desc sys_insn_descs[] = {
 	SYS_INSN(TLBI_IPAS2LE1ISNXS, handle_ipas2e1is),
 	SYS_INSN(TLBI_RIPAS2LE1ISNXS, handle_ripas2e1is),
 
-	SYS_INSN(TLBI_ALLE2OSNXS, trap_undef),
-	SYS_INSN(TLBI_VAE2OSNXS, trap_undef),
+	SYS_INSN(TLBI_ALLE2OSNXS, undef_access),
+	SYS_INSN(TLBI_VAE2OSNXS, undef_access),
 	SYS_INSN(TLBI_ALLE1OSNXS, handle_alle1is),
-	SYS_INSN(TLBI_VALE2OSNXS, trap_undef),
+	SYS_INSN(TLBI_VALE2OSNXS, undef_access),
 	SYS_INSN(TLBI_VMALLS12E1OSNXS, handle_vmalls12e1is),
 
-	SYS_INSN(TLBI_RVAE2ISNXS, trap_undef),
-	SYS_INSN(TLBI_RVALE2ISNXS, trap_undef),
-	SYS_INSN(TLBI_ALLE2ISNXS, trap_undef),
-	SYS_INSN(TLBI_VAE2ISNXS, trap_undef),
+	SYS_INSN(TLBI_RVAE2ISNXS, undef_access),
+	SYS_INSN(TLBI_RVALE2ISNXS, undef_access),
+	SYS_INSN(TLBI_ALLE2ISNXS, undef_access),
+	SYS_INSN(TLBI_VAE2ISNXS, undef_access),
 
 	SYS_INSN(TLBI_ALLE1ISNXS, handle_alle1is),
-	SYS_INSN(TLBI_VALE2ISNXS, trap_undef),
+	SYS_INSN(TLBI_VALE2ISNXS, undef_access),
 	SYS_INSN(TLBI_VMALLS12E1ISNXS, handle_vmalls12e1is),
 	SYS_INSN(TLBI_IPAS2E1OSNXS, handle_ipas2e1is),
 	SYS_INSN(TLBI_IPAS2E1NXS, handle_ipas2e1is),
@@ -3497,14 +3583,14 @@ static struct sys_reg_desc sys_insn_descs[] = {
 	SYS_INSN(TLBI_IPAS2LE1NXS, handle_ipas2e1is),
 	SYS_INSN(TLBI_RIPAS2LE1NXS, handle_ripas2e1is),
 	SYS_INSN(TLBI_RIPAS2LE1OSNXS, handle_ripas2e1is),
-	SYS_INSN(TLBI_RVAE2OSNXS, trap_undef),
-	SYS_INSN(TLBI_RVALE2OSNXS, trap_undef),
-	SYS_INSN(TLBI_RVAE2NXS, trap_undef),
-	SYS_INSN(TLBI_RVALE2NXS, trap_undef),
-	SYS_INSN(TLBI_ALLE2NXS, trap_undef),
-	SYS_INSN(TLBI_VAE2NXS, trap_undef),
+	SYS_INSN(TLBI_RVAE2OSNXS, undef_access),
+	SYS_INSN(TLBI_RVALE2OSNXS, undef_access),
+	SYS_INSN(TLBI_RVAE2NXS, undef_access),
+	SYS_INSN(TLBI_RVALE2NXS, undef_access),
+	SYS_INSN(TLBI_ALLE2NXS, undef_access),
+	SYS_INSN(TLBI_VAE2NXS, undef_access),
 	SYS_INSN(TLBI_ALLE1NXS, handle_alle1is),
-	SYS_INSN(TLBI_VALE2NXS, trap_undef),
+	SYS_INSN(TLBI_VALE2NXS, undef_access),
 	SYS_INSN(TLBI_VMALLS12E1NXS, handle_vmalls12e1is),
 };
 
@@ -3682,6 +3768,7 @@ static const struct sys_reg_desc cp15_regs[] = {
 	/* TTBCR2 */
 	{ AA32(HI), Op1( 0), CRn( 2), CRm( 0), Op2( 3), access_vm_reg, NULL, TCR_EL1 },
 	{ Op1( 0), CRn( 3), CRm( 0), Op2( 0), access_vm_reg, NULL, DACR32_EL2 },
+	{ CP15_SYS_DESC(SYS_ICC_PMR_EL1), undef_access },
 	/* DFSR */
 	{ Op1( 0), CRn( 5), CRm( 0), Op2( 0), access_vm_reg, NULL, ESR_EL1 },
 	{ Op1( 0), CRn( 5), CRm( 0), Op2( 1), access_vm_reg, NULL, IFSR32_EL2 },
@@ -3731,8 +3818,28 @@ static const struct sys_reg_desc cp15_regs[] = {
 	/* AMAIR1 */
 	{ AA32(HI), Op1( 0), CRn(10), CRm( 3), Op2( 1), access_vm_reg, NULL, AMAIR_EL1 },
 
-	/* ICC_SRE */
-	{ Op1( 0), CRn(12), CRm(12), Op2( 5), access_gic_sre },
+	{ CP15_SYS_DESC(SYS_ICC_IAR0_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_EOIR0_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_HPPIR0_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_BPR0_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_AP0R0_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_AP0R1_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_AP0R2_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_AP0R3_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_AP1R0_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_AP1R1_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_AP1R2_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_AP1R3_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_DIR_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_RPR_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_IAR1_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_EOIR1_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_HPPIR1_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_BPR1_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_CTLR_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_SRE_EL1), access_gic_sre },
+	{ CP15_SYS_DESC(SYS_ICC_IGRPEN0_EL1), undef_access },
+	{ CP15_SYS_DESC(SYS_ICC_IGRPEN1_EL1), undef_access },
 
 	{ Op1( 0), CRn(13), CRm( 0), Op2( 1), access_vm_reg, NULL, CONTEXTIDR_EL1 },
 
@@ -3829,12 +3936,12 @@ static const struct sys_reg_desc cp15_64_regs[] = {
 };
 
 static bool check_sysreg_table(const struct sys_reg_desc *table, unsigned int n,
-			       bool is_32)
+			       bool reset_check)
 {
 	unsigned int i;
 
 	for (i = 0; i < n; i++) {
-		if (!is_32 && table[i].reg && !table[i].reset) {
+		if (reset_check && table[i].reg && !table[i].reset) {
 			kvm_err("sys_reg table %pS entry %d (%s) lacks reset\n",
 				&table[i], i, table[i].name);
 			return false;
@@ -4847,17 +4954,21 @@ out:
 
 int __init kvm_sys_reg_table_init(void)
 {
+	const struct sys_reg_desc *gicv3_regs;
 	bool valid = true;
-	unsigned int i;
+	unsigned int i, sz;
 	int ret = 0;
 
 	/* Make sure tables are unique and in order. */
-	valid &= check_sysreg_table(sys_reg_descs, ARRAY_SIZE(sys_reg_descs), false);
-	valid &= check_sysreg_table(cp14_regs, ARRAY_SIZE(cp14_regs), true);
-	valid &= check_sysreg_table(cp14_64_regs, ARRAY_SIZE(cp14_64_regs), true);
-	valid &= check_sysreg_table(cp15_regs, ARRAY_SIZE(cp15_regs), true);
-	valid &= check_sysreg_table(cp15_64_regs, ARRAY_SIZE(cp15_64_regs), true);
+	valid &= check_sysreg_table(sys_reg_descs, ARRAY_SIZE(sys_reg_descs), true);
+	valid &= check_sysreg_table(cp14_regs, ARRAY_SIZE(cp14_regs), false);
+	valid &= check_sysreg_table(cp14_64_regs, ARRAY_SIZE(cp14_64_regs), false);
+	valid &= check_sysreg_table(cp15_regs, ARRAY_SIZE(cp15_regs), false);
+	valid &= check_sysreg_table(cp15_64_regs, ARRAY_SIZE(cp15_64_regs), false);
 	valid &= check_sysreg_table(sys_insn_descs, ARRAY_SIZE(sys_insn_descs), false);
+
+	gicv3_regs = vgic_v3_get_sysreg_table(&sz);
+	valid &= check_sysreg_table(gicv3_regs, sz, false);
 
 	if (!valid)
 		return -EINVAL;

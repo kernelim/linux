@@ -237,7 +237,7 @@ EXPORT_SYMBOL(ndlc_recv);
 
 static void ndlc_t1_timeout(struct timer_list *t)
 {
-	struct llt_ndlc *ndlc = from_timer(ndlc, t, t1_timer);
+	struct llt_ndlc *ndlc = timer_container_of(ndlc, t, t1_timer);
 
 	pr_debug("\n");
 
@@ -246,7 +246,7 @@ static void ndlc_t1_timeout(struct timer_list *t)
 
 static void ndlc_t2_timeout(struct timer_list *t)
 {
-	struct llt_ndlc *ndlc = from_timer(ndlc, t, t2_timer);
+	struct llt_ndlc *ndlc = timer_container_of(ndlc, t, t2_timer);
 
 	pr_debug("\n");
 

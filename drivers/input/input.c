@@ -2235,7 +2235,7 @@ static void devm_input_device_unregister(struct device *dev, void *res)
  */
 static void input_repeat_key(struct timer_list *t)
 {
-	struct input_dev *dev = from_timer(dev, t, timer);
+	struct input_dev *dev = timer_container_of(dev, t, timer);
 	unsigned long flags;
 
 	spin_lock_irqsave(&dev->event_lock, flags);

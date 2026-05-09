@@ -6,10 +6,9 @@
  * Linux wait-bit related types and methods:
  */
 #include <linux/wait.h>
-#include <linux/rh_kabi.h>
 
 struct wait_bit_key {
-	RH_KABI_REPLACE(void *flags, unsigned long *flags)
+	unsigned long		*flags;
 	int			bit_nr;
 	unsigned long		timeout;
 };

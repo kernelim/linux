@@ -61,12 +61,14 @@ struct syscalls_sys_exit {
 
 struct syscall_enter_args {
 	unsigned long long common_tp_fields;
+	unsigned char preempt_lazy_extra_field;
 	long		   syscall_nr;
 	unsigned long	   args[6];
 };
 
 struct syscall_exit_args {
 	unsigned long long common_tp_fields;
+	unsigned char preempt_lazy_extra_field;
 	long		   syscall_nr;
 	long		   ret;
 };

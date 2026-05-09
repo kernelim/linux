@@ -26,11 +26,6 @@ struct i40e_client_version {
 	u8 rsvd;
 };
 
-enum i40e_client_state {
-	__I40E_CLIENT_NULL,
-	__I40E_CLIENT_REGISTERED
-};
-
 enum i40e_client_instance_state {
 	__I40E_CLIENT_INSTANCE_NONE,
 	__I40E_CLIENT_INSTANCE_OPENED,
@@ -50,7 +45,7 @@ struct i40e_qv_info {
 
 struct i40e_qvlist_info {
 	u32 num_vectors;
-	struct i40e_qv_info qv_info[];
+	struct i40e_qv_info qv_info[] __counted_by(num_vectors);
 };
 
 
@@ -189,11 +184,6 @@ struct i40e_client {
 #define I40E_CLIENT_IWARP 0
 	const struct i40e_client_ops *ops; /* client ops provided by the client */
 };
-
-static inline bool i40e_client_is_registered(struct i40e_client *client)
-{
-	return test_bit(__I40E_CLIENT_REGISTERED, &client->state);
-}
 
 void i40e_client_device_register(struct i40e_info *ldev, struct i40e_client *client);
 void i40e_client_device_unregister(struct i40e_info *ldev);

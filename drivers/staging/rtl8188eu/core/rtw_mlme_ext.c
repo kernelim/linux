@@ -4466,7 +4466,7 @@ void linked_status_chk(struct adapter *padapter)
 
 void survey_timer_hdl(struct timer_list *t)
 {
-	struct adapter *padapter = from_timer(padapter, t,
+	struct adapter *padapter = timer_container_of(padapter, t,
 					      mlmeextpriv.survey_timer);
 	struct cmd_obj *ph2c;
 	struct sitesurvey_parm *psurveyPara;
@@ -4504,7 +4504,7 @@ exit_survey_timer_hdl:
 
 void link_timer_hdl(struct timer_list *t)
 {
-	struct adapter *padapter = from_timer(padapter, t,
+	struct adapter *padapter = timer_container_of(padapter, t,
 					    mlmeextpriv.link_timer);
 	struct mlme_ext_priv *pmlmeext = &padapter->mlmeextpriv;
 	struct mlme_ext_info *pmlmeinfo = &pmlmeext->mlmext_info;
@@ -4538,7 +4538,7 @@ void link_timer_hdl(struct timer_list *t)
 
 void addba_timer_hdl(struct timer_list *t)
 {
-	struct sta_info *psta = from_timer(psta, t, addba_retry_timer);
+	struct sta_info *psta = timer_container_of(psta, t, addba_retry_timer);
 	struct ht_priv *phtpriv;
 
 	if (!psta)

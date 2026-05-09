@@ -1,0 +1,3 @@
+#8-
+0x313fe8d2	nvme_complete_async_event	drivers/nvme/host/nvme-core	EXPORT_SYMBOL_GPL	
+

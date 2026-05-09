@@ -245,6 +245,11 @@ struct scsi_device {
 	 */
 	RH_KABI_FILL_HOLE(unsigned force_runtime_start_on_system_start:1)
 
+	/*
+	 * Set if the device is an ATA device.
+	 */
+	RH_KABI_FILL_HOLE(unsigned is_ata:1)
+
 	unsigned int queue_stopped;	/* request queue is quiesced */
 	bool offline_already;		/* Device offline message logged */
 
@@ -293,8 +298,8 @@ struct scsi_device {
 	RH_KABI_USE(2, struct scsi_vpd __rcu *vpd_pgb1)
 	RH_KABI_USE(3, struct scsi_vpd __rcu *vpd_pgb2)
 	RH_KABI_USE(4, struct scsi_vpd __rcu *vpd_pgb7)
-	RH_KABI_USE_SPLIT(5, unsigned int ua_new_media_ctr,	/* Counter for New Media UNIT ATTENTIONs */
-			     unsigned int ua_por_ctr)		/* Counter for Power On / Reset UAs */
+	RH_KABI_USE_SPLIT(5, atomic_t ua_new_media_ctr,	/* Counter for New Media UNIT ATTENTIONs */
+			     atomic_t ua_por_ctr)		/* Counter for Power On / Reset UAs */
 	RH_KABI_RESERVE(6)
 
 	unsigned long		sdev_data[];
@@ -717,10 +722,8 @@ static inline int scsi_device_busy(struct scsi_device *sdev)
 }
 
 /* Macros to access the UNIT ATTENTION counters */
-#define scsi_get_ua_new_media_ctr(sdev) \
-	((const unsigned int)(sdev->ua_new_media_ctr))
-#define scsi_get_ua_por_ctr(sdev) \
-	((const unsigned int)(sdev->ua_por_ctr))
+#define scsi_get_ua_new_media_ctr(sdev)	atomic_read(&sdev->ua_new_media_ctr)
+#define scsi_get_ua_por_ctr(sdev)	atomic_read(&sdev->ua_por_ctr)
 
 #define MODULE_ALIAS_SCSI_DEVICE(type) \
 	MODULE_ALIAS("scsi:t-" __stringify(type) "*")

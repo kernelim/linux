@@ -7,4 +7,4 @@ obj-$(CONFIG_UNISYS_VISORHBA)	+= visorhba.o
 
 visorhba-y := visorhba_main.o
 
-ccflags-y += -I $(srctree)/$(src)/../include
+ccflags-y += -I $(src)/../include

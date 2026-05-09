@@ -682,13 +682,19 @@ void reg_sequence_wait_done(const struct dc_context *ctx)
 	if (offload &&
 	    ctx->dc->debug.dmub_offload_enabled &&
 	    !ctx->dc->debug.dmcub_emulation) {
-		dc_dmub_srv_wait_idle(ctx->dmub_srv);
+		dc_dmub_srv_wait_for_idle(ctx->dmub_srv, DM_DMUB_WAIT_TYPE_WAIT, NULL);
 	}
 }
 
 char *dce_version_to_string(const int version)
 {
 	switch (version) {
+	case DCE_VERSION_6_0:
+		return "DCE 6.0";
+	case DCE_VERSION_6_1:
+		return "DCE 6.1";
+	case DCE_VERSION_6_4:
+		return "DCE 6.4";
 	case DCE_VERSION_8_0:
 		return "DCE 8.0";
 	case DCE_VERSION_8_1:
@@ -726,7 +732,7 @@ char *dce_version_to_string(const int version)
 	case DCN_VERSION_3_03:
 		return "DCN 3.0.3";
 	case DCN_VERSION_3_1:
-		return "DCN 3.1";
+		return "DCN 3.1.2";
 	case DCN_VERSION_3_14:
 		return "DCN 3.1.4";
 	case DCN_VERSION_3_15:
@@ -748,4 +754,9 @@ char *dce_version_to_string(const int version)
 	default:
 		return "Unknown";
 	}
+}
+
+bool dc_supports_vrr(const enum dce_version v)
+{
+	return v >= DCE_VERSION_8_0;
 }

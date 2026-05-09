@@ -6,12 +6,13 @@
 #include "gem/i915_gem_lmem.h"
 #include "gem/i915_gem_region.h"
 #include "i915_drv.h"
-#include "intel_atomic_plane.h"
 #include "intel_crtc.h"
 #include "intel_display.h"
+#include "intel_display_core.h"
 #include "intel_display_types.h"
 #include "intel_fb.h"
 #include "intel_frontbuffer.h"
+#include "intel_plane.h"
 #include "intel_plane_initial.h"
 
 void intel_plane_initial_vblank_wait(struct intel_crtc *crtc)
@@ -52,44 +53,57 @@ intel_reuse_initial_plane_obj(struct intel_crtc *this,
 	return false;
 }
 
-static bool
-initial_plane_phys_lmem(struct intel_display *display,
-			struct intel_initial_plane_config *plane_config)
+static enum intel_memory_type
+initial_plane_memory_type(struct intel_display *display)
 {
 	struct drm_i915_private *i915 = to_i915(display->drm);
-	gen8_pte_t __iomem *gte = to_gt(i915)->ggtt->gsm;
+
+	if (display->platform.dgfx)
+		return INTEL_MEMORY_LOCAL;
+	else if (HAS_LMEMBAR_SMEM_STOLEN(i915))
+		return INTEL_MEMORY_STOLEN_LOCAL;
+	else
+		return INTEL_MEMORY_STOLEN_SYSTEM;
+}
+
+static bool
+initial_plane_phys(struct intel_display *display,
+		   struct intel_initial_plane_config *plane_config)
+{
+	struct drm_i915_private *i915 = to_i915(display->drm);
+	struct i915_ggtt *ggtt = to_gt(i915)->ggtt;
 	struct intel_memory_region *mem;
+	enum intel_memory_type mem_type;
+	bool is_present, is_local;
 	dma_addr_t dma_addr;
-	gen8_pte_t pte;
 	u32 base;
+
+	mem_type = initial_plane_memory_type(display);
+	mem = intel_memory_region_by_type(i915, mem_type);
+	if (!mem) {
+		drm_dbg_kms(display->drm,
+			    "Initial plane memory region (type %s) not initialized\n",
+			    intel_memory_type_str(mem_type));
+		return false;
+	}
 
 	base = round_down(plane_config->base, I915_GTT_MIN_ALIGNMENT);
 
-	gte += base / I915_GTT_PAGE_SIZE;
+	dma_addr = intel_ggtt_read_entry(&ggtt->vm, base, &is_present, &is_local);
 
-	pte = ioread64(gte);
-	if (!(pte & GEN12_GGTT_PTE_LM)) {
+	if (!is_present) {
 		drm_err(display->drm,
-			"Initial plane programming missing PTE_LM bit\n");
+			"Initial plane FB PTE not present\n");
 		return false;
 	}
 
-	dma_addr = pte & GEN12_GGTT_PTE_ADDR_MASK;
-
-	if (IS_DGFX(i915))
-		mem = i915->mm.regions[INTEL_REGION_LMEM_0];
-	else
-		mem = i915->mm.stolen_region;
-	if (!mem) {
-		drm_dbg_kms(display->drm,
-			    "Initial plane memory region not initialized\n");
+	if (intel_memory_type_is_local(mem->type) != is_local) {
+		drm_err(display->drm,
+			"Initial plane FB PTE unsuitable for %s\n",
+			mem->region.name);
 		return false;
 	}
 
-	/*
-	 * On lmem we don't currently expect this to
-	 * ever be placed in the stolen portion.
-	 */
 	if (dma_addr < mem->region.start || dma_addr > mem->region.end) {
 		drm_err(display->drm,
 			"Initial plane programming using invalid range, dma_addr=%pa (%s [%pa-%pa])\n",
@@ -105,42 +119,6 @@ initial_plane_phys_lmem(struct intel_display *display,
 	plane_config->mem = mem;
 
 	return true;
-}
-
-static bool
-initial_plane_phys_smem(struct intel_display *display,
-			struct intel_initial_plane_config *plane_config)
-{
-	struct drm_i915_private *i915 = to_i915(display->drm);
-	struct intel_memory_region *mem;
-	u32 base;
-
-	base = round_down(plane_config->base, I915_GTT_MIN_ALIGNMENT);
-
-	mem = i915->mm.stolen_region;
-	if (!mem) {
-		drm_dbg_kms(display->drm,
-			    "Initial plane memory region not initialized\n");
-		return false;
-	}
-
-	/* FIXME get and validate the dma_addr from the PTE */
-	plane_config->phys_base = base;
-	plane_config->mem = mem;
-
-	return true;
-}
-
-static bool
-initial_plane_phys(struct intel_display *display,
-		   struct intel_initial_plane_config *plane_config)
-{
-	struct drm_i915_private *i915 = to_i915(display->drm);
-
-	if (IS_DGFX(i915) || HAS_LMEMBAR_SMEM_STOLEN(i915))
-		return initial_plane_phys_lmem(display, plane_config);
-	else
-		return initial_plane_phys_smem(display, plane_config);
 }
 
 static struct i915_vma *
@@ -311,7 +289,8 @@ intel_alloc_initial_plane_obj(struct intel_crtc *crtc,
 	mode_cmd.flags = DRM_MODE_FB_MODIFIERS;
 
 	if (intel_framebuffer_init(to_intel_framebuffer(fb),
-				   intel_bo_to_drm_bo(vma->obj), &mode_cmd)) {
+				   intel_bo_to_drm_bo(vma->obj),
+				   fb->format, &mode_cmd)) {
 		drm_dbg_kms(display->drm, "intel fb init failed\n");
 		goto err_vma;
 	}
@@ -380,6 +359,8 @@ valid_fb:
 	if (intel_plane_uses_fence(plane_state) &&
 	    i915_vma_pin_fence(vma) == 0 && vma->fence)
 		plane_state->flags |= PLANE_HAS_FENCE;
+
+	plane_state->surf = i915_ggtt_offset(plane_state->ggtt_vma);
 
 	plane_state->uapi.src_x = 0;
 	plane_state->uapi.src_y = 0;

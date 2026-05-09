@@ -40,8 +40,7 @@ struct kmem_cache *xfs_buf_cache;
  *
  * xfs_buf_rele:
  *	b_lock
- *	  pag_buf_lock
- *	    lru_lock
+ *	  lru_lock
  *
  * xfs_buftarg_drain_rele
  *	lru_lock
@@ -132,15 +131,6 @@ __xfs_buf_ioacct_dec(
 	}
 }
 
-static inline void
-xfs_buf_ioacct_dec(
-	struct xfs_buf	*bp)
-{
-	spin_lock(&bp->b_lock);
-	__xfs_buf_ioacct_dec(bp);
-	spin_unlock(&bp->b_lock);
-}
-
 /*
  * When we mark a buffer stale, we remove the buffer from the LRU and clear the
  * b_lru_ref count so that the buffer is freed immediately when the buffer
@@ -176,9 +166,9 @@ xfs_buf_stale(
 	atomic_set(&bp->b_lru_ref, 0);
 	if (!(bp->b_state & XFS_BSTATE_DISPOSE) &&
 	    (list_lru_del_obj(&bp->b_target->bt_lru, &bp->b_lru)))
-		atomic_dec(&bp->b_hold);
+		bp->b_hold--;
 
-	ASSERT(atomic_read(&bp->b_hold) >= 1);
+	ASSERT(bp->b_hold >= 1);
 	spin_unlock(&bp->b_lock);
 }
 
@@ -237,23 +227,25 @@ _xfs_buf_alloc(
 	 */
 	flags &= ~(XBF_UNMAPPED | XBF_TRYLOCK | XBF_ASYNC | XBF_READ_AHEAD);
 
-	atomic_set(&bp->b_hold, 1);
+	/*
+	 * A new buffer is held and locked by the owner.  This ensures that the
+	 * buffer is owned by the caller and racing RCU lookups right after
+	 * inserting into the hash table are safe (and will have to wait for
+	 * the unlock to do anything non-trivial).
+	 */
+	bp->b_hold = 1;
+	sema_init(&bp->b_sema, 0); /* held, no waiters */
+
+	spin_lock_init(&bp->b_lock);
 	atomic_set(&bp->b_lru_ref, 1);
 	init_completion(&bp->b_iowait);
 	INIT_LIST_HEAD(&bp->b_lru);
 	INIT_LIST_HEAD(&bp->b_list);
 	INIT_LIST_HEAD(&bp->b_li_list);
-	sema_init(&bp->b_sema, 0); /* held, no waiters */
-	spin_lock_init(&bp->b_lock);
 	bp->b_target = target;
 	bp->b_mount = target->bt_mount;
 	bp->b_flags = flags;
 
-	/*
-	 * Set length and io_length to the same value initially.
-	 * I/O routines should use io_length, which will be the same in
-	 * most cases but may be reset (e.g. XFS recovery).
-	 */
 	error = xfs_buf_get_maps(bp, nmaps);
 	if (error)  {
 		kmem_cache_free(xfs_buf_cache, bp);
@@ -519,7 +511,6 @@ int
 xfs_buf_cache_init(
 	struct xfs_buf_cache	*bch)
 {
-	spin_lock_init(&bch->bc_lock);
 	return rhashtable_init(&bch->bc_hash, &xfs_buf_hash_params);
 }
 
@@ -588,6 +579,20 @@ xfs_buf_find_lock(
 	return 0;
 }
 
+static bool
+xfs_buf_try_hold(
+	struct xfs_buf		*bp)
+{
+	spin_lock(&bp->b_lock);
+	if (bp->b_hold == 0) {
+		spin_unlock(&bp->b_lock);
+		return false;
+	}
+	bp->b_hold++;
+	spin_unlock(&bp->b_lock);
+	return true;
+}
+
 static inline int
 xfs_buf_lookup(
 	struct xfs_buf_cache	*bch,
@@ -600,7 +605,7 @@ xfs_buf_lookup(
 
 	rcu_read_lock();
 	bp = rhashtable_lookup(&bch->bc_hash, map, xfs_buf_hash_params);
-	if (!bp || !atomic_inc_not_zero(&bp->b_hold)) {
+	if (!bp || !xfs_buf_try_hold(bp)) {
 		rcu_read_unlock();
 		return -ENOENT;
 	}
@@ -655,18 +660,20 @@ xfs_buf_find_insert(
 	if (error)
 		goto out_free_buf;
 
-	spin_lock(&bch->bc_lock);
+	/* The new buffer keeps the perag reference until it is freed. */
+	new_bp->b_pag = pag;
+
+	rcu_read_lock();
 	bp = rhashtable_lookup_get_insert_fast(&bch->bc_hash,
 			&new_bp->b_rhash_head, xfs_buf_hash_params);
 	if (IS_ERR(bp)) {
+		rcu_read_unlock();
 		error = PTR_ERR(bp);
-		spin_unlock(&bch->bc_lock);
 		goto out_free_buf;
 	}
-	if (bp) {
+	if (bp && xfs_buf_try_hold(bp)) {
 		/* found an existing buffer */
-		atomic_inc(&bp->b_hold);
-		spin_unlock(&bch->bc_lock);
+		rcu_read_unlock();
 		error = xfs_buf_find_lock(bp, flags);
 		if (error)
 			xfs_buf_rele(bp);
@@ -674,10 +681,8 @@ xfs_buf_find_insert(
 			*bpp = bp;
 		goto out_free_buf;
 	}
+	rcu_read_unlock();
 
-	/* The new buffer keeps the perag reference until it is freed. */
-	new_bp->b_pag = pag;
-	spin_unlock(&bch->bc_lock);
 	*bpp = new_bp;
 	return 0;
 
@@ -1043,7 +1048,10 @@ xfs_buf_hold(
 	struct xfs_buf		*bp)
 {
 	trace_xfs_buf_hold(bp, _RET_IP_);
-	atomic_inc(&bp->b_hold);
+
+	spin_lock(&bp->b_lock);
+	bp->b_hold++;
+	spin_unlock(&bp->b_lock);
 }
 
 static void
@@ -1051,10 +1059,15 @@ xfs_buf_rele_uncached(
 	struct xfs_buf		*bp)
 {
 	ASSERT(list_empty(&bp->b_lru));
-	if (atomic_dec_and_test(&bp->b_hold)) {
-		xfs_buf_ioacct_dec(bp);
-		xfs_buf_free(bp);
+
+	spin_lock(&bp->b_lock);
+	if (--bp->b_hold) {
+		spin_unlock(&bp->b_lock);
+		return;
 	}
+	__xfs_buf_ioacct_dec(bp);
+	spin_unlock(&bp->b_lock);
+	xfs_buf_free(bp);
 }
 
 static void
@@ -1064,51 +1077,38 @@ xfs_buf_rele_cached(
 	struct xfs_buftarg	*btp = bp->b_target;
 	struct xfs_perag	*pag = bp->b_pag;
 	struct xfs_buf_cache	*bch = xfs_buftarg_buf_cache(btp, pag);
-	bool			release;
 	bool			freebuf = false;
 
 	trace_xfs_buf_rele(bp, _RET_IP_);
 
-	ASSERT(atomic_read(&bp->b_hold) > 0);
-
-	/*
-	 * We grab the b_lock here first to serialise racing xfs_buf_rele()
-	 * calls. The pag_buf_lock being taken on the last reference only
-	 * serialises against racing lookups in xfs_buf_find(). IOWs, the second
-	 * to last reference we drop here is not serialised against the last
-	 * reference until we take bp->b_lock. Hence if we don't grab b_lock
-	 * first, the last "release" reference can win the race to the lock and
-	 * free the buffer before the second-to-last reference is processed,
-	 * leading to a use-after-free scenario.
-	 */
 	spin_lock(&bp->b_lock);
-	release = atomic_dec_and_lock(&bp->b_hold, &bch->bc_lock);
-	if (!release) {
+	ASSERT(bp->b_hold >= 1);
+	if (bp->b_hold > 1) {
 		/*
 		 * Drop the in-flight state if the buffer is already on the LRU
 		 * and it holds the only reference. This is racy because we
 		 * haven't acquired the pag lock, but the use of _XBF_IN_FLIGHT
 		 * ensures the decrement occurs only once per-buf.
 		 */
-		if ((atomic_read(&bp->b_hold) == 1) && !list_empty(&bp->b_lru))
+		if (--bp->b_hold == 1 && !list_empty(&bp->b_lru))
 			__xfs_buf_ioacct_dec(bp);
 		goto out_unlock;
 	}
 
-	/* the last reference has been dropped ... */
+	/* we are asked to drop the last reference */
 	__xfs_buf_ioacct_dec(bp);
 	if (!(bp->b_flags & XBF_STALE) && atomic_read(&bp->b_lru_ref)) {
 		/*
-		 * If the buffer is added to the LRU take a new reference to the
+		 * If the buffer is added to the LRU, keep the reference to the
 		 * buffer for the LRU and clear the (now stale) dispose list
-		 * state flag
+		 * state flag, else drop the reference.
 		 */
-		if (list_lru_add_obj(&btp->bt_lru, &bp->b_lru)) {
+		if (list_lru_add_obj(&btp->bt_lru, &bp->b_lru))
 			bp->b_state &= ~XFS_BSTATE_DISPOSE;
-			atomic_inc(&bp->b_hold);
-		}
-		spin_unlock(&bch->bc_lock);
+		else
+			bp->b_hold--;
 	} else {
+		bp->b_hold--;
 		/*
 		 * most of the time buffers will already be removed from the
 		 * LRU, so optimise that case by checking for the
@@ -1124,7 +1124,6 @@ xfs_buf_rele_cached(
 		ASSERT(!(bp->b_flags & _XBF_DELWRI_Q));
 		rhashtable_remove_fast(&bch->bc_hash, &bp->b_rhash_head,
 				xfs_buf_hash_params);
-		spin_unlock(&bch->bc_lock);
 		if (pag)
 			xfs_perag_put(pag);
 		freebuf = true;
@@ -1862,13 +1861,14 @@ xfs_buftarg_drain_rele(
 	struct xfs_buf		*bp = container_of(item, struct xfs_buf, b_lru);
 	struct list_head	*dispose = arg;
 
-	if (atomic_read(&bp->b_hold) > 1) {
+	if (!spin_trylock(&bp->b_lock))
+		return LRU_SKIP;
+	if (bp->b_hold > 1) {
 		/* need to wait, so skip it this pass */
+		spin_unlock(&bp->b_lock);
 		trace_xfs_buf_drain_buftarg(bp, _RET_IP_);
 		return LRU_SKIP;
 	}
-	if (!spin_trylock(&bp->b_lock))
-		return LRU_SKIP;
 
 	/*
 	 * clear the LRU reference count so the buffer doesn't get
@@ -2201,7 +2201,7 @@ xfs_buf_delwri_queue(
 	 */
 	bp->b_flags |= _XBF_DELWRI_Q;
 	if (list_empty(&bp->b_list)) {
-		atomic_inc(&bp->b_hold);
+		xfs_buf_hold(bp);
 		list_add_tail(&bp->b_list, list);
 	}
 
@@ -2383,61 +2383,6 @@ xfs_buf_delwri_submit(
 		if (!error)
 			error = error2;
 	}
-
-	return error;
-}
-
-/*
- * Push a single buffer on a delwri queue.
- *
- * The purpose of this function is to submit a single buffer of a delwri queue
- * and return with the buffer still on the original queue. The waiting delwri
- * buffer submission infrastructure guarantees transfer of the delwri queue
- * buffer reference to a temporary wait list. We reuse this infrastructure to
- * transfer the buffer back to the original queue.
- *
- * Note the buffer transitions from the queued state, to the submitted and wait
- * listed state and back to the queued state during this call. The buffer
- * locking and queue management logic between _delwri_pushbuf() and
- * _delwri_queue() guarantee that the buffer cannot be queued to another list
- * before returning.
- */
-int
-xfs_buf_delwri_pushbuf(
-	struct xfs_buf		*bp,
-	struct list_head	*buffer_list)
-{
-	LIST_HEAD		(submit_list);
-	int			error;
-
-	ASSERT(bp->b_flags & _XBF_DELWRI_Q);
-
-	trace_xfs_buf_delwri_pushbuf(bp, _RET_IP_);
-
-	/*
-	 * Isolate the buffer to a new local list so we can submit it for I/O
-	 * independently from the rest of the original list.
-	 */
-	xfs_buf_lock(bp);
-	list_move(&bp->b_list, &submit_list);
-	xfs_buf_unlock(bp);
-
-	/*
-	 * Delwri submission clears the DELWRI_Q buffer flag and returns with
-	 * the buffer on the wait list with the original reference. Rather than
-	 * bounce the buffer from a local wait list back to the original list
-	 * after I/O completion, reuse the original list as the wait list.
-	 */
-	xfs_buf_delwri_submit_buffers(&submit_list, buffer_list);
-
-	/*
-	 * The buffer is now locked, under I/O and wait listed on the original
-	 * delwri queue. Wait for I/O completion, restore the DELWRI_Q flag and
-	 * return with the buffer unlocked and on the original queue.
-	 */
-	error = xfs_buf_iowait(bp);
-	bp->b_flags |= _XBF_DELWRI_Q;
-	xfs_buf_unlock(bp);
 
 	return error;
 }

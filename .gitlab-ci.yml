@@ -21,7 +21,7 @@ workflow: !reference [.workflow]
     native_tools: 'true'
     architectures: 'x86_64 ppc64le aarch64 s390x'
     debug_architectures: 'x86_64 ppc64le aarch64 s390x'
-    disttag_override: '.el9_7'
+    disttag_override: '.el9_8'
 
 .trigger_c9s_pipeline:
   trigger:
@@ -36,8 +36,8 @@ workflow: !reference [.workflow]
   trigger:
     branch: rhel9
   variables:
-    kcidb_tree_name: rhel-9.7
-    builder_image: quay.io/cki/builder-rhel9.7
+    kcidb_tree_name: rhel-9.8
+    builder_image: quay.io/cki/builder-rhel9
     run_redhat_self_test: 'true'
 
 .trigger_rhel9_build:

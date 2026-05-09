@@ -3265,6 +3265,7 @@ struct device_attribute *mpi3mr_host_attrs[] = {
 	&dev_attr_reply_queue_count,
 	&dev_attr_reply_qfull_count,
 	&dev_attr_logging_level,
+	NULL,
 };
 
 /*

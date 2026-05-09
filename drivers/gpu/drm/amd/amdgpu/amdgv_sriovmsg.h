@@ -113,7 +113,8 @@ union amd_sriov_reg_access_flags {
 		uint32_t vf_reg_access_mmhub		: 1;
 		uint32_t vf_reg_access_gc		: 1;
 		uint32_t vf_reg_access_l1_tlb_cntl	: 1;
-		uint32_t reserved			: 28;
+		uint32_t vf_reg_access_sq_config	: 1;
+		uint32_t reserved			: 27;
 	} flags;
 	uint32_t all;
 };
@@ -331,6 +332,7 @@ enum amd_sriov_mailbox_request_message {
 	MB_REQ_MSG_RAS_POISON = 202,
 	MB_REQ_RAS_ERROR_COUNT = 203,
 	MB_REQ_RAS_CPER_DUMP = 204,
+	MB_REQ_RAS_BAD_PAGES = 205,
 };
 
 /* mailbox message send from host to guest  */
@@ -348,6 +350,9 @@ enum amd_sriov_mailbox_response_message {
 	MB_RES_MSG_GPU_RMA			= 10,
 	MB_RES_MSG_RAS_ERROR_COUNT_READY	= 11,
 	MB_REQ_RAS_CPER_DUMP_READY		= 14,
+	MB_RES_MSG_RAS_BAD_PAGES_READY		= 15,
+	MB_RES_MSG_RAS_BAD_PAGES_NOTIFICATION	= 16,
+	MB_RES_MSG_UNRECOV_ERR_NOTIFICATION	= 17,
 	MB_RES_MSG_TEXT_MESSAGE			= 255
 };
 
@@ -400,12 +405,17 @@ struct amd_sriov_ras_cper_dump {
 	uint32_t buf[];
 };
 
+struct amd_sriov_ras_chk_criti {
+	uint32_t hit;
+};
+
 struct amdsriov_ras_telemetry {
 	struct amd_sriov_ras_telemetry_header header;
 
 	union {
 		struct amd_sriov_ras_telemetry_error_count error_count;
 		struct amd_sriov_ras_cper_dump cper_dump;
+		struct amd_sriov_ras_chk_criti chk_criti;
 	} body;
 };
 

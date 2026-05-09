@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only OR MIT
 # Copyright (c) 2023 Imagination Technologies Ltd.
 
-subdir-ccflags-y := -I$(srctree)/$(src)
+subdir-ccflags-y := -I$(src)
 
 powervr-y := \
 	pvr_ccb.o \
@@ -14,8 +14,10 @@ powervr-y := \
 	pvr_fw.o \
 	pvr_fw_meta.o \
 	pvr_fw_mips.o \
+	pvr_fw_riscv.o \
 	pvr_fw_startstop.o \
 	pvr_fw_trace.o \
+	pvr_fw_util.o \
 	pvr_gem.o \
 	pvr_hwrt.o \
 	pvr_job.o \

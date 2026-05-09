@@ -1,3 +1,3 @@
-#7-
-0x60474828	fc_release_transport	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
+#8-
+0xbf9a3b53	fc_release_transport	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
 

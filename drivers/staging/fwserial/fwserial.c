@@ -1748,7 +1748,7 @@ static void fwserial_release_port(struct fwtty_port *port, bool reset)
 
 static void fwserial_plug_timeout(struct timer_list *t)
 {
-	struct fwtty_peer *peer = from_timer(peer, t, timer);
+	struct fwtty_peer *peer = timer_container_of(peer, t, timer);
 	struct fwtty_port *port;
 
 	spin_lock_bh(&peer->lock);

@@ -61,8 +61,8 @@
 #include <linux/hdreg.h>
 #include <linux/reboot.h>
 #include <linux/stringify.h>
+#include <linux/irq.h>
 #include <asm/io.h>
-#include <asm/irq.h>
 #include <asm/processor.h>
 #include <scsi/scsi.h>
 #include <scsi/scsi_host.h>
@@ -2591,7 +2591,7 @@ static void ipr_process_error(struct ipr_cmnd *ipr_cmd)
  **/
 static void ipr_timeout(struct timer_list *t)
 {
-	struct ipr_cmnd *ipr_cmd = from_timer(ipr_cmd, t, timer);
+	struct ipr_cmnd *ipr_cmd = timer_container_of(ipr_cmd, t, timer);
 	unsigned long lock_flags = 0;
 	struct ipr_ioa_cfg *ioa_cfg = ipr_cmd->ioa_cfg;
 
@@ -2624,7 +2624,7 @@ static void ipr_timeout(struct timer_list *t)
  **/
 static void ipr_oper_timeout(struct timer_list *t)
 {
-	struct ipr_cmnd *ipr_cmd = from_timer(ipr_cmd, t, timer);
+	struct ipr_cmnd *ipr_cmd = timer_container_of(ipr_cmd, t, timer);
 	unsigned long lock_flags = 0;
 	struct ipr_ioa_cfg *ioa_cfg = ipr_cmd->ioa_cfg;
 
@@ -5154,7 +5154,7 @@ static void ipr_bus_reset_done(struct ipr_cmnd *ipr_cmd)
  **/
 static void ipr_abort_timeout(struct timer_list *t)
 {
-	struct ipr_cmnd *ipr_cmd = from_timer(ipr_cmd, t, timer);
+	struct ipr_cmnd *ipr_cmd = timer_container_of(ipr_cmd, t, timer);
 	struct ipr_cmnd *reset_cmd;
 	struct ipr_ioa_cfg *ioa_cfg = ipr_cmd->ioa_cfg;
 	struct ipr_cmd_pkt *cmd_pkt;
@@ -7531,7 +7531,7 @@ static int ipr_ioafp_identify_hrrq(struct ipr_cmnd *ipr_cmd)
  **/
 static void ipr_reset_timer_done(struct timer_list *t)
 {
-	struct ipr_cmnd *ipr_cmd = from_timer(ipr_cmd, t, timer);
+	struct ipr_cmnd *ipr_cmd = timer_container_of(ipr_cmd, t, timer);
 	struct ipr_ioa_cfg *ioa_cfg = ipr_cmd->ioa_cfg;
 	unsigned long lock_flags = 0;
 
@@ -7899,6 +7899,30 @@ static int ipr_dump_mailbox_wait(struct ipr_cmnd *ipr_cmd)
 }
 
 /**
+ * ipr_set_affinity_nobalance
+ * @ioa_cfg:	ipr_ioa_cfg struct for an ipr device
+ * @flag:	bool
+ *	true: ensable "IRQ_NO_BALANCING" bit for msix interrupt
+ *	false: disable "IRQ_NO_BALANCING" bit for msix interrupt
+ * Description: This function will be called to disable/enable
+ *	"IRQ_NO_BALANCING" to avoid irqbalance daemon
+ *	kicking in during adapter reset.
+ **/
+static void ipr_set_affinity_nobalance(struct ipr_ioa_cfg *ioa_cfg, bool flag)
+{
+	int irq, i;
+
+	for (i = 0; i < ioa_cfg->nvectors; i++) {
+		irq = pci_irq_vector(ioa_cfg->pdev, i);
+
+		if (flag)
+			irq_set_status_flags(irq, IRQ_NO_BALANCING);
+		else
+			irq_clear_status_flags(irq, IRQ_NO_BALANCING);
+	}
+}
+
+/**
  * ipr_reset_restore_cfg_space - Restore PCI config space.
  * @ipr_cmd:	ipr command struct
  *
@@ -7922,6 +7946,7 @@ static int ipr_reset_restore_cfg_space(struct ipr_cmnd *ipr_cmd)
 		return IPR_RC_JOB_CONTINUE;
 	}
 
+	ipr_set_affinity_nobalance(ioa_cfg, false);
 	ipr_fail_all_ops(ioa_cfg);
 
 	if (ioa_cfg->sis64) {
@@ -8001,6 +8026,7 @@ static int ipr_reset_start_bist(struct ipr_cmnd *ipr_cmd)
 		rc = pci_write_config_byte(ioa_cfg->pdev, PCI_BIST, PCI_BIST_START);
 
 	if (rc == PCIBIOS_SUCCESSFUL) {
+		ipr_set_affinity_nobalance(ioa_cfg, true);
 		ipr_cmd->job_step = ipr_reset_bist_done;
 		ipr_reset_start_timer(ipr_cmd, IPR_WAIT_FOR_BIST_TIMEOUT);
 		rc = IPR_RC_JOB_RETURN;

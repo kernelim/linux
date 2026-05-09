@@ -34,21 +34,10 @@ static int regcache_defaults_cmp(const void *a, const void *b)
 		return 0;
 }
 
-static void regcache_defaults_swap(void *a, void *b, int size)
-{
-	struct reg_default *x = a;
-	struct reg_default *y = b;
-	struct reg_default tmp;
-
-	tmp = *x;
-	*x = *y;
-	*y = tmp;
-}
-
 void regcache_sort_defaults(struct reg_default *defaults, unsigned int ndefaults)
 {
 	sort(defaults, ndefaults, sizeof(*defaults),
-	     regcache_defaults_cmp, regcache_defaults_swap);
+	     regcache_defaults_cmp, NULL);
 }
 EXPORT_SYMBOL_GPL(regcache_sort_defaults);
 
@@ -185,7 +174,7 @@ int regcache_init(struct regmap *map, const struct regmap_config *config)
 	map->num_reg_defaults = config->num_reg_defaults;
 	map->num_reg_defaults_raw = config->num_reg_defaults_raw;
 	map->reg_defaults_raw = config->reg_defaults_raw;
-	map->cache_word_size = DIV_ROUND_UP(config->val_bits, 8);
+	map->cache_word_size = BITS_TO_BYTES(config->val_bits);
 	map->cache_size_raw = map->cache_word_size * config->num_reg_defaults_raw;
 
 	map->cache = NULL;
@@ -218,13 +207,17 @@ int regcache_init(struct regmap *map, const struct regmap_config *config)
 			return 0;
 	}
 
-	if (!map->max_register && map->num_reg_defaults_raw)
+	if (!map->max_register_is_set && map->num_reg_defaults_raw) {
 		map->max_register = (map->num_reg_defaults_raw  - 1) * map->reg_stride;
+		map->max_register_is_set = true;
+	}
 
 	if (map->cache_ops->init) {
 		dev_dbg(map->dev, "Initializing %s cache\n",
 			map->cache_ops->name);
+		map->lock(map->lock_arg);
 		ret = map->cache_ops->init(map);
+		map->unlock(map->lock_arg);
 		if (ret)
 			goto err_free;
 	}
@@ -252,7 +245,9 @@ void regcache_exit(struct regmap *map)
 	if (map->cache_ops->exit) {
 		dev_dbg(map->dev, "Destroying %s cache\n",
 			map->cache_ops->name);
+		map->lock(map->lock_arg);
 		map->cache_ops->exit(map);
+		map->unlock(map->lock_arg);
 	}
 }
 
@@ -436,7 +431,7 @@ out:
 	 * have gone out of sync, force writes of all the paging
 	 * registers.
 	 */
-	rb_for_each(node, 0, &map->range_tree, rbtree_all) {
+	rb_for_each(node, NULL, &map->range_tree, rbtree_all) {
 		struct regmap_range_node *this =
 			rb_entry(node, struct regmap_range_node, node);
 

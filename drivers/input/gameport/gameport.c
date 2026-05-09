@@ -200,7 +200,8 @@ EXPORT_SYMBOL(gameport_stop_polling);
 
 static void gameport_run_poll_handler(struct timer_list *t)
 {
-	struct gameport *gameport = from_timer(gameport, t, poll_timer);
+	struct gameport *gameport = timer_container_of(gameport, t,
+						       poll_timer);
 
 	gameport->poll_handler(gameport);
 	if (gameport->poll_cnt)
@@ -776,9 +777,9 @@ start_over:
 }
 EXPORT_SYMBOL(gameport_unregister_driver);
 
-static int gameport_bus_match(struct device *dev, struct device_driver *drv)
+static int gameport_bus_match(struct device *dev, const struct device_driver *drv)
 {
-	struct gameport_driver *gameport_drv = to_gameport_driver(drv);
+	const struct gameport_driver *gameport_drv = to_gameport_driver(drv);
 
 	return !gameport_drv->ignore;
 }

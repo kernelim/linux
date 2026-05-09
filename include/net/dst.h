@@ -26,10 +26,10 @@
 struct sk_buff;
 
 struct dst_entry {
-	RH_KABI_REPLACE(struct net_device *dev, union {
+	union {
 		struct net_device       *dev;
 		struct net_device __rcu *dev_rcu;
-	})
+	};
 	struct  dst_ops	        *ops;
 	unsigned long		_metrics;
 	unsigned long           expires;

@@ -2,6 +2,7 @@
 config FSL_ENETC
 	tristate "ENETC PF driver"
 	depends on PCI && PCI_MSI
+	select MDIO_DEVRES
 	select FSL_ENETC_IERB
 	select FSL_ENETC_MDIO
 	select PHYLINK
@@ -36,7 +37,7 @@ config FSL_ENETC_IERB
 
 config FSL_ENETC_MDIO
 	tristate "ENETC MDIO driver"
-	depends on PCI && MDIO_DEVRES && MDIO_BUS
+	depends on PCI && PHYLIB
 	help
 	  This driver supports NXP ENETC Central MDIO controller as a PCIe
 	  physical function (PF) device.

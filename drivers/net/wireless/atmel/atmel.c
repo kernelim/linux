@@ -3418,7 +3418,7 @@ static void atmel_management_frame(struct atmel_private *priv,
 /* run when timer expires */
 static void atmel_management_timer(struct timer_list *t)
 {
-	struct atmel_private *priv = from_timer(priv, t, management_timer);
+	struct atmel_private *priv = timer_container_of(priv, t, management_timer);
 	unsigned long flags;
 
 	/* Check if the card has been yanked. */

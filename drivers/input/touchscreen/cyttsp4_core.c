@@ -1270,7 +1270,7 @@ static void cyttsp4_stop_wd_timer(struct cyttsp4 *cd)
 
 static void cyttsp4_watchdog_timer(struct timer_list *t)
 {
-	struct cyttsp4 *cd = from_timer(cd, t, watchdog_timer);
+	struct cyttsp4 *cd = timer_container_of(cd, t, watchdog_timer);
 
 	dev_vdbg(cd->dev, "%s: Watchdog timer triggered\n", __func__);
 

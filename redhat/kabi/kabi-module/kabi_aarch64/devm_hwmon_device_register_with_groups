@@ -1,3 +1,3 @@
-#7-
-0x3a50f672	devm_hwmon_device_register_with_groups	vmlinux	EXPORT_SYMBOL_GPL	
+#8-
+0x4000f700	devm_hwmon_device_register_with_groups	vmlinux	EXPORT_SYMBOL_GPL	
 
