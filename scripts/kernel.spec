@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 124.55.1
+%define pkgrelease 124.56.1
 %define kversion 6
-%define tarfile_release 6.12.0-124.55.1.el10_1
+%define tarfile_release 6.12.0-124.56.1.el10_1
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 124.55.1%{?buildid}%{?dist}
+%define specrelease 124.56.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-124.55.1.el10_1
+%define kabiversion 6.12.0-124.56.1.el10_1
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4354,10 +4354,13 @@ fi\
 #
 #
 %changelog
-* Mon May 04 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.55.1
+* Tue May 12 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-124.56.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
 - Patch MMU for riscv64
+
+* Sat May 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.56.1.el10_1]
+- xfrm: esp: avoid in-place decrypt on shared skb frags (CKI Backport Bot) [RHEL-174548] {CVE-2026-43284}
 
 * Sat May 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-124.55.1.el10_1]
 - crypto: algif_aead - snapshot IV for async AEAD requests (Vladislav Dronov) [RHEL-172211]
