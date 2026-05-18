@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 211.7.3
+%define pkgrelease 211.16.1
 %define kversion 6
-%define tarfile_release 6.12.0-211.7.3.el10_2
+%define tarfile_release 6.12.0-211.16.1.el10_2
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 211.7.3%{?buildid}%{?dist}
+%define specrelease 211.16.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-211.7.3.el10_2
+%define kabiversion 6.12.0-211.16.1.el10_2
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4470,24 +4470,83 @@ fi\
 #
 #
 %changelog
-* Tue May 19 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.7.3
+* Wed May 20 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.16.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
 
-* Sat May 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.7.3.el10_2]
+* Mon May 18 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.16.1.el10_2]
+- net: skbuff: propagate shared-frag marker through frag-transfer helpers (Sabrina Dubroca) [RHEL-176053] {CVE-2026-46300}
+- net: skbuff: preserve shared-frag marker during coalescing (Sabrina Dubroca) [RHEL-176053] {CVE-2026-46300}
+- ptrace: slightly saner 'get_dumpable()' logic (Ricardo Robaina) [RHEL-176449] {CVE-2026-46333}
+- RDMA/umem: Fix double dma_buf_unpin in failure path (CKI Backport Bot) [RHEL-174029] {CVE-2026-43128}
+- usbip: validate number_of_packets in usbip_pack_ret_submit() (CKI Backport Bot) [RHEL-171434] {CVE-2026-31607}
+
+* Mon May 11 2026 Patrick Talbert <ptalbert@redhat.com> [6.12.0-211.15.1.el10_2]
 - xfrm: esp: avoid in-place decrypt on shared skb frags (CKI Backport Bot) [RHEL-174546] {CVE-2026-43284}
 
-* Mon May 04 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.7.2.el10_2]
-- crypto: algif_aead - snapshot IV for async AEAD requests (Herbert Xu) [RHEL-172542]
-- crypto: algif_aead - Fix minimum RX size check for decryption (Herbert Xu) [RHEL-172542]
-- crypto: authencesn - reject short ahash digests during instance creation (Herbert Xu) [RHEL-172542]
-- crypto: authencesn - Fix src offset when decrypting in-place (Herbert Xu) [RHEL-172542]
-- crypto: authencesn - Do not place hiseq at end of dst for out-of-place decryption (Herbert Xu) [RHEL-172542] {CVE-2026-31431}
-- crypto: authencesn - reject too-short AAD (assoclen<8) to match ESP/ESN spec (Herbert Xu) [RHEL-172542] {CVE-2026-23060}
-- crypto: af_alg - Fix page reassignment overflow in af_alg_pull_tsgl (Herbert Xu) [RHEL-172542]
-- crypto: af_alg - limit RX SG extraction by receive buffer budget (Herbert Xu) [RHEL-172542] {CVE-2026-31677}
-- crypto: algif_aead - Revert to operating out-of-place (Herbert Xu) [RHEL-172542] {CVE-2026-31431}
-- crypto: af-alg - fix NULL pointer dereference in scatterwalk (Herbert Xu) [RHEL-172542]
+* Mon May 04 2026 Patrick Talbert <ptalbert@redhat.com> [6.12.0-211.14.1.el10_2]
+- crypto: algif_aead - snapshot IV for async AEAD requests (Herbert Xu) [RHEL-172213]
+- crypto: algif_aead - Fix minimum RX size check for decryption (Herbert Xu) [RHEL-172213]
+- crypto: authencesn - reject short ahash digests during instance creation (Herbert Xu) [RHEL-172213]
+- crypto: authencesn - Fix src offset when decrypting in-place (Herbert Xu) [RHEL-172213]
+- crypto: authencesn - Do not place hiseq at end of dst for out-of-place decryption (Herbert Xu) [RHEL-172213] {CVE-2026-31431}
+- crypto: authencesn - reject too-short AAD (assoclen<8) to match ESP/ESN spec (Herbert Xu) [RHEL-172213] {CVE-2026-23060}
+- crypto: af_alg - Fix page reassignment overflow in af_alg_pull_tsgl (Herbert Xu) [RHEL-172213]
+- crypto: af_alg - limit RX SG extraction by receive buffer budget (Herbert Xu) [RHEL-172213] {CVE-2026-31677}
+- crypto: algif_aead - Revert to operating out-of-place (Herbert Xu) [RHEL-172213] {CVE-2026-31431}
+- crypto: af-alg - fix NULL pointer dereference in scatterwalk (Herbert Xu) [RHEL-172213]
+
+* Thu Apr 30 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.13.1.el10_2]
+- scsi: storvsc: Handle PERSISTENT_RESERVE_IN truncation for Hyper-V vFC (Vitaly Kuznetsov) [RHEL-171531]
+- Bluetooth: SCO: Fix use-after-free in sco_recv_frame() due to missing sock_hold (CKI Backport Bot) [RHEL-170974] {CVE-2026-31408}
+
+* Mon Apr 27 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.12.1.el10_2]
+- drm/i915/dp: Fix panel replay when DSC is enabled (Anusha Srivatsa) [RHEL-169354]
+- drm/i915/dp_mst: Recompute all MST link CRTCs if DSC gets enabled on the link (Anusha Srivatsa) [RHEL-169354]
+- drm/i915/dp_mst: Track DSC enabled status on the MST link (Anusha Srivatsa) [RHEL-169354]
+- drm/i915/dp_mst: Reuse the DP-SST helper function to compute FEC config (Anusha Srivatsa) [RHEL-169354]
+- drm/i915/dp: Export helper to determine if FEC on non-UHBR links is required (Anusha Srivatsa) [RHEL-169354]
+- drm/i915/dp: Ensure the FEC state stays disabled for UHBR links (Anusha Srivatsa) [RHEL-169354]
+- drm/i915/dsc: Add helper to enable the DSC configuration for a CRTC (Anusha Srivatsa) [RHEL-169354]
+- crypto: asymmetric_keys - prevent overflow in asymmetric_key_generate_id (CKI Backport Bot) [RHEL-166932] {CVE-2025-68724}
+- net: af_can: do not leave a dangling sk pointer in can_create() (CKI Backport Bot) [RHEL-162253] {CVE-2024-56603}
+
+* Thu Apr 23 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.11.1.el10_2]
+- nfsd: fix heap overflow in NFSv4.0 LOCK replay cache (Scott Mayhew) [RHEL-168569] {CVE-2026-31402}
+- KVM: x86/mmu: Only WARN in direct MMUs when overwriting shadow-present SPTE (Paolo Bonzini) [RHEL-153716] {CVE-2026-23401}
+- KVM: x86/mmu: Drop/zap existing present SPTE even when creating an MMIO SPTE (Paolo Bonzini) [RHEL-153716] {CVE-2026-23401}
+
+* Thu Apr 23 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.10.1.el10_2]
+- ASoC: soc_sdw_utils: remove index from sdca codec name (Jaroslav Kysela) [RHEL-163717]
+- ASoC: soc_sdw_utils: partial match the codec name (Jaroslav Kysela) [RHEL-163717]
+- ASoC: add snd_soc_lookup_component_by_name helper (Jaroslav Kysela) [RHEL-163717]
+- ASoC: SDCA: Update counting of SU/GE DAPM routes (Jaroslav Kysela) [RHEL-163717]
+- ASoC: SDCA: Handle CONFIG_PM_SLEEP not being set (Jaroslav Kysela) [RHEL-163717]
+- ASoC: SDCA: Tidy up some memory allocations (Jaroslav Kysela) [RHEL-163717]
+- net/sched: Only allow act_ct to bind to clsact/ingress qdiscs and shared blocks (CKI Backport Bot) [RHEL-157332] {CVE-2026-23270}
+
+* Mon Apr 20 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.9.1.el10_2]
+- x86/boot: Handle relative CONFIG_EFI_SBAT_FILE file paths (Oleksii Baranov) [RHEL-157855]
+
+* Thu Apr 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.8.1.el10_2]
+- ice: drop udp_tunnel_get_rx_info() call from ndo_open() (Mohammad Heib) [RHEL-165081]
+- i40e: drop udp_tunnel_get_rx_info() call from i40e_open() (Mohammad Heib) [RHEL-165081]
+- ALSA: hda/tas2781: Ignore reset check for SPI device (Jaroslav Kysela) [RHEL-157285]
+- smb: client: fix krb5 mount with username option (Paulo Alcantara) [RHEL-158990]
+- scsi: qla2xxx: Fix improper freeing of purex item (CKI Backport Bot) [RHEL-159227] {CVE-2025-68741}
+- net: hv_netvsc: reject RSS hash key programming without RX indirection table (Vinay Mulugund) [RHEL-155205]
+- ionic: fix persistent MAC address override on PF (Mohammad Heib) [RHEL-158206]
+- net: openvswitch: Avoid releasing netdev before teardown completes (Toke Høiland-Jørgensen) [RHEL-157946]
+- RDMA/bnxt_re: convert timeouts to secs_to_jiffies() (CKI Backport Bot) [RHEL-155971]
+- RDMA/bnxt_re: Fix return code of bnxt_re_configure_cc (CKI Backport Bot) [RHEL-155971]
+- RDMA/bnxt_re: Fix missing error handling for tx_queue (CKI Backport Bot) [RHEL-155971]
+- RDMA/bnxt_re: Fix incorrect display of inactivity_cp in debugfs output (CKI Backport Bot) [RHEL-155971]
+- RDMA/bnxt_re: Use macro instead of hard coded value (CKI Backport Bot) [RHEL-155971]
+- RDMA/bnxt_re: Support 2G message size (CKI Backport Bot) [RHEL-155971]
+- RDMA/bnxt_re: Fix size of uverbs_copy_to() in BNXT_RE_METHOD_GET_TOGGLE_MEM (CKI Backport Bot) [RHEL-155971]
+- RDMA/bnxt_re: Support extended stats for Thor2 VF (CKI Backport Bot) [RHEL-155971]
+- net/sched: sch_cake: Fix incorrect qlen reduction in cake_drop (Davide Caratti) [RHEL-150456] {CVE-2025-39766}
+- net/sched: Make cake_enqueue return NET_XMIT_CN when past buffer_limit (Davide Caratti) [RHEL-150456] {CVE-2025-39766}
 
 * Wed Apr 01 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.7.1.el10_2]
 - kabi: enable check-kabi (Čestmír Kalina) [RHEL-153673]
