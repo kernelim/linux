@@ -122,6 +122,7 @@ vmlinux-objs-$(CONFIG_EFI_SBAT) += $(obj)/sbat.o
 ifdef CONFIG_EFI_SBAT
 # Strip quotes
 $(obj)/sbat.o: $(strip $(subst ",,$(CONFIG_EFI_SBAT_FILE)))
+AFLAGS_sbat.o += -I $(srctree)
 endif
 
 $(obj)/vmlinux: $(vmlinux-objs-y) FORCE

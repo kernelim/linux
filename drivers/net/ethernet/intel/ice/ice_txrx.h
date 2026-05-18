@@ -203,6 +203,7 @@ struct ice_rx_buf {
 	unsigned int page_offset;
 	unsigned int pgcnt;
 	unsigned int pagecnt_bias;
+	bool has_data;
 };
 
 struct ice_q_stats {

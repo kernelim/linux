@@ -650,6 +650,8 @@ lpfc_cmpl_els_flogi_fabric(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 		ndlp->nlp_class_sup |= FC_COS_CLASS2;
 	if (sp->cls3.classValid)
 		ndlp->nlp_class_sup |= FC_COS_CLASS3;
+	if (sp->cls4.classValid)
+		ndlp->nlp_class_sup |= FC_COS_CLASS4;
 	ndlp->nlp_maxframe = ((sp->cmn.bbRcvSizeMsb & 0x0F) << 8) |
 				sp->cmn.bbRcvSizeLsb;
 
@@ -1354,14 +1356,6 @@ lpfc_issue_els_flogi(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 		/* Can't do SLI4 class2 without support sequence coalescing */
 		sp->cls2.classValid = 0;
 		sp->cls2.seqDelivery = 0;
-
-		/* Fill out Auxiliary Parameter Data */
-		if (phba->pni) {
-			sp->aux.flags =
-				AUX_PARM_DATA_VALID | AUX_PARM_PNI_VALID;
-			sp->aux.pni = cpu_to_be64(phba->pni);
-			sp->aux.npiv_cnt = cpu_to_be16(phba->max_vpi - 1);
-		}
 	} else {
 		/* Historical, setting sequential-delivery bit for SLI3 */
 		sp->cls2.seqDelivery = (sp->cls2.classValid) ? 1 : 0;
@@ -1441,12 +1435,11 @@ lpfc_issue_els_flogi(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 				phba->defer_flogi_acc.ox_id;
 		}
 
-		/* The LS_ACC completion needs to drop the initial reference.
-		 * This is a special case for Pt2Pt because both FLOGIs need
-		 * to complete and lpfc defers the LS_ACC when the remote
-		 * FLOGI arrives before the driver's FLOGI.
-		 */
-		set_bit(NLP_FLOGI_DFR_ACC, &ndlp->nlp_flag);
+		lpfc_printf_vlog(vport, KERN_INFO, LOG_ELS,
+				 "3354 Xmit deferred FLOGI ACC: rx_id: x%x,"
+				 " ox_id: x%x, hba_flag x%lx\n",
+				 phba->defer_flogi_acc.rx_id,
+				 phba->defer_flogi_acc.ox_id, phba->hba_flag);
 
 		/* Send deferred FLOGI ACC */
 		lpfc_els_rsp_acc(vport, ELS_CMD_FLOGI, &defer_flogi_acc,
@@ -1461,14 +1454,6 @@ lpfc_issue_els_flogi(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 			lpfc_nlp_put(phba->defer_flogi_acc.ndlp);
 			phba->defer_flogi_acc.ndlp = NULL;
 		}
-
-		lpfc_printf_vlog(vport, KERN_INFO, LOG_ELS,
-				 "3354 Xmit deferred FLOGI ACC: rx_id: x%x,"
-				 " ox_id: x%x, ndlp x%px hba_flag x%lx\n",
-				 phba->defer_flogi_acc.rx_id,
-				 phba->defer_flogi_acc.ox_id,
-				 phba->defer_flogi_acc.ndlp,
-				 phba->hba_flag);
 
 		vport->fc_myDID = did;
 	}
@@ -2285,8 +2270,7 @@ lpfc_issue_els_plogi(struct lpfc_vport *vport, uint32_t did, uint8_t retry)
 
 	sp->cmn.valid_vendor_ver_level = 0;
 	memset(sp->un.vendorVersion, 0, sizeof(sp->un.vendorVersion));
-	if (!test_bit(FC_PT2PT, &vport->fc_flag))
-		sp->cmn.bbRcvSizeMsb &= 0xF;
+	sp->cmn.bbRcvSizeMsb &= 0xF;
 
 	/* Check if the destination port supports VMID */
 	ndlp->vmid_support = 0;
@@ -2405,7 +2389,7 @@ lpfc_cmpl_els_prli(struct lpfc_hba *phba, struct lpfc_iocbq *cmdiocb,
 			mode = KERN_INFO;
 
 		/* Warn PRLI status */
-		lpfc_vlog_msg(vport, mode, LOG_ELS,
+		lpfc_printf_vlog(vport, mode, LOG_ELS,
 				 "2754 PRLI DID:%06X Status:x%x/x%x, "
 				 "data: x%x x%x x%lx\n",
 				 ndlp->nlp_DID, ulp_status,
@@ -3062,7 +3046,6 @@ lpfc_cmpl_els_logo(struct lpfc_hba *phba, struct lpfc_iocbq *cmdiocb,
 			      ndlp->nlp_DID, ulp_status,
 			      ulp_word4);
 
-		/* Call NLP_EVT_DEVICE_RM if link is down or LOGO is aborted */
 		if (lpfc_error_lost_link(vport, ulp_status, ulp_word4))
 			skip_recovery = 1;
 	}
@@ -3301,7 +3284,7 @@ lpfc_reg_fab_ctrl_node(struct lpfc_vport *vport, struct lpfc_nodelist *fc_ndlp)
 		return -ENOMEM;
 	}
 	rc = lpfc_reg_rpi(phba, vport->vpi, fc_ndlp->nlp_DID,
-			  (u8 *)&ns_ndlp->fc_sparam, mbox, fc_ndlp->nlp_rpi);
+			  (u8 *)&vport->fc_sparam, mbox, fc_ndlp->nlp_rpi);
 	if (rc) {
 		rc = -EACCES;
 		goto out;
@@ -3345,8 +3328,7 @@ lpfc_reg_fab_ctrl_node(struct lpfc_vport *vport, struct lpfc_nodelist *fc_ndlp)
  *
  * This routine is a generic completion callback function for Discovery ELS cmd.
  * Currently used by the ELS command issuing routines for the ELS State Change
- * Request (SCR), lpfc_issue_els_scr(), Exchange Diagnostic Capabilities (EDC),
- * lpfc_issue_els_edc()  and the ELS RDF, lpfc_issue_els_rdf().
+ * Request (SCR), lpfc_issue_els_scr() and the ELS RDF, lpfc_issue_els_rdf().
  * These commands will be retried once only for ELS timeout errors.
  **/
 static void
@@ -3419,21 +3401,11 @@ lpfc_cmpl_els_disc_cmd(struct lpfc_hba *phba, struct lpfc_iocbq *cmdiocb,
 		lpfc_cmpl_els_edc(phba, cmdiocb, rspiocb);
 		return;
 	}
-
 	if (ulp_status) {
 		/* ELS discovery cmd completes with error */
 		lpfc_printf_vlog(vport, KERN_WARNING, LOG_ELS | LOG_CGN_MGMT,
 				 "4203 ELS cmd x%x error: x%x x%X\n", cmd,
 				 ulp_status, ulp_word4);
-
-		/* In the case where the ELS cmd completes with an error and
-		 * the node does not have RPI registered, the node is
-		 * outstanding and should put its initial reference.
-		 */
-		if ((cmd == ELS_CMD_SCR || cmd == ELS_CMD_RDF) &&
-		    !(ndlp->fc4_xpt_flags & SCSI_XPT_REGD) &&
-		    !test_and_set_bit(NLP_DROPPED, &ndlp->nlp_flag))
-			lpfc_nlp_put(ndlp);
 		goto out;
 	}
 
@@ -3502,7 +3474,6 @@ lpfc_issue_els_scr(struct lpfc_vport *vport, uint8_t retry)
 	uint8_t *pcmd;
 	uint16_t cmdsize;
 	struct lpfc_nodelist *ndlp;
-	bool node_created = false;
 
 	cmdsize = (sizeof(uint32_t) + sizeof(SCR));
 
@@ -3512,21 +3483,21 @@ lpfc_issue_els_scr(struct lpfc_vport *vport, uint8_t retry)
 		if (!ndlp)
 			return 1;
 		lpfc_enqueue_node(vport, ndlp);
-		node_created = true;
 	}
 
 	elsiocb = lpfc_prep_els_iocb(vport, 1, cmdsize, retry, ndlp,
 				     ndlp->nlp_DID, ELS_CMD_SCR);
 	if (!elsiocb)
-		goto out_node_created;
+		return 1;
 
 	if (phba->sli_rev == LPFC_SLI_REV4) {
 		rc = lpfc_reg_fab_ctrl_node(vport, ndlp);
 		if (rc) {
+			lpfc_els_free_iocb(phba, elsiocb);
 			lpfc_printf_vlog(vport, KERN_ERR, LOG_NODE,
 					 "0937 %s: Failed to reg fc node, rc %d\n",
 					 __func__, rc);
-			goto out_free_iocb;
+			return 1;
 		}
 	}
 	pcmd = (uint8_t *)elsiocb->cmd_dmabuf->virt;
@@ -3545,27 +3516,23 @@ lpfc_issue_els_scr(struct lpfc_vport *vport, uint8_t retry)
 	phba->fc_stat.elsXmitSCR++;
 	elsiocb->cmd_cmpl = lpfc_cmpl_els_disc_cmd;
 	elsiocb->ndlp = lpfc_nlp_get(ndlp);
-	if (!elsiocb->ndlp)
-		goto out_free_iocb;
+	if (!elsiocb->ndlp) {
+		lpfc_els_free_iocb(phba, elsiocb);
+		return 1;
+	}
 
 	lpfc_debugfs_disc_trc(vport, LPFC_DISC_TRC_ELS_CMD,
 			      "Issue SCR:     did:x%x refcnt %d",
 			      ndlp->nlp_DID, kref_read(&ndlp->kref), 0);
 
 	rc = lpfc_sli_issue_iocb(phba, LPFC_ELS_RING, elsiocb, 0);
-	if (rc == IOCB_ERROR)
-		goto out_iocb_error;
+	if (rc == IOCB_ERROR) {
+		lpfc_els_free_iocb(phba, elsiocb);
+		lpfc_nlp_put(ndlp);
+		return 1;
+	}
 
 	return 0;
-
-out_iocb_error:
-	lpfc_nlp_put(ndlp);
-out_free_iocb:
-	lpfc_els_free_iocb(phba, elsiocb);
-out_node_created:
-	if (node_created)
-		lpfc_nlp_put(ndlp);
-	return 1;
 }
 
 /**
@@ -3652,8 +3619,8 @@ lpfc_issue_els_rscn(struct lpfc_vport *vport, uint8_t retry)
 	}
 
 	lpfc_debugfs_disc_trc(vport, LPFC_DISC_TRC_ELS_CMD,
-			      "Issue RSCN:   did:x%x refcnt %d",
-			      ndlp->nlp_DID, kref_read(&ndlp->kref), 0);
+			      "Issue RSCN:       did:x%x",
+			      ndlp->nlp_DID, 0, 0);
 
 	rc = lpfc_sli_issue_iocb(phba, LPFC_ELS_RING, elsiocb, 0);
 	if (rc == IOCB_ERROR) {
@@ -3760,7 +3727,10 @@ lpfc_issue_els_farpr(struct lpfc_vport *vport, uint32_t nportid, uint8_t retry)
 		lpfc_nlp_put(ndlp);
 		return 1;
 	}
-
+	/* This will cause the callback-function lpfc_cmpl_els_cmd to
+	 * trigger the release of the node.
+	 */
+	/* Don't release reference count as RDF is likely outstanding */
 	return 0;
 }
 
@@ -3778,12 +3748,7 @@ lpfc_issue_els_farpr(struct lpfc_vport *vport, uint32_t nportid, uint8_t retry)
  *
  * Return code
  *   0 - Successfully issued rdf command
- *   < 0 - Failed to issue rdf command
- *   -EACCES - RDF not required for NPIV_PORT
- *   -ENODEV - No fabric controller device available
- *   -ENOMEM - No available memory
- *   -EIO - The mailbox failed to complete successfully.
- *
+ *   1 - Failed to issue rdf command
  **/
 int
 lpfc_issue_els_rdf(struct lpfc_vport *vport, uint8_t retry)
@@ -3794,14 +3759,8 @@ lpfc_issue_els_rdf(struct lpfc_vport *vport, uint8_t retry)
 	struct lpfc_nodelist *ndlp;
 	uint16_t cmdsize;
 	int rc;
-	bool node_created = false;
-	int err;
 
 	cmdsize = sizeof(*prdf);
-
-	/* RDF ELS is not required on an NPIV VN_Port. */
-	if (vport->port_type == LPFC_NPIV_PORT)
-		return -EACCES;
 
 	ndlp = lpfc_findnode_did(vport, Fabric_Cntl_DID);
 	if (!ndlp) {
@@ -3809,15 +3768,16 @@ lpfc_issue_els_rdf(struct lpfc_vport *vport, uint8_t retry)
 		if (!ndlp)
 			return -ENODEV;
 		lpfc_enqueue_node(vport, ndlp);
-		node_created = true;
 	}
+
+	/* RDF ELS is not required on an NPIV VN_Port. */
+	if (vport->port_type == LPFC_NPIV_PORT)
+		return -EACCES;
 
 	elsiocb = lpfc_prep_els_iocb(vport, 1, cmdsize, retry, ndlp,
 				     ndlp->nlp_DID, ELS_CMD_RDF);
-	if (!elsiocb) {
-		err = -ENOMEM;
-		goto out_node_created;
-	}
+	if (!elsiocb)
+		return -ENOMEM;
 
 	/* Configure the payload for the supported FPIN events. */
 	prdf = (struct lpfc_els_rdf_req *)elsiocb->cmd_dmabuf->virt;
@@ -3843,8 +3803,8 @@ lpfc_issue_els_rdf(struct lpfc_vport *vport, uint8_t retry)
 	elsiocb->cmd_cmpl = lpfc_cmpl_els_disc_cmd;
 	elsiocb->ndlp = lpfc_nlp_get(ndlp);
 	if (!elsiocb->ndlp) {
-		err = -EIO;
-		goto out_free_iocb;
+		lpfc_els_free_iocb(phba, elsiocb);
+		return -EIO;
 	}
 
 	lpfc_debugfs_disc_trc(vport, LPFC_DISC_TRC_ELS_CMD,
@@ -3853,19 +3813,11 @@ lpfc_issue_els_rdf(struct lpfc_vport *vport, uint8_t retry)
 
 	rc = lpfc_sli_issue_iocb(phba, LPFC_ELS_RING, elsiocb, 0);
 	if (rc == IOCB_ERROR) {
-		err = -EIO;
-		goto out_iocb_error;
+		lpfc_els_free_iocb(phba, elsiocb);
+		lpfc_nlp_put(ndlp);
+		return -EIO;
 	}
 	return 0;
-
-out_iocb_error:
-	lpfc_nlp_put(ndlp);
-out_free_iocb:
-	lpfc_els_free_iocb(phba, elsiocb);
-out_node_created:
-	if (node_created)
-		lpfc_nlp_put(ndlp);
-	return err;
 }
 
  /**
@@ -3886,23 +3838,19 @@ static int
 lpfc_els_rcv_rdf(struct lpfc_vport *vport, struct lpfc_iocbq *cmdiocb,
 		 struct lpfc_nodelist *ndlp)
 {
-	int rc;
-
-	rc = lpfc_els_rsp_acc(vport, ELS_CMD_RDF, cmdiocb, ndlp, NULL);
 	/* Send LS_ACC */
-	if (rc) {
+	if (lpfc_els_rsp_acc(vport, ELS_CMD_RDF, cmdiocb, ndlp, NULL)) {
 		lpfc_printf_vlog(vport, KERN_INFO, LOG_ELS | LOG_CGN_MGMT,
-				 "1623 Failed to RDF_ACC from x%x for x%x Data: %d\n",
-				 ndlp->nlp_DID, vport->fc_myDID, rc);
+				 "1623 Failed to RDF_ACC from x%x for x%x\n",
+				 ndlp->nlp_DID, vport->fc_myDID);
 		return -EIO;
 	}
 
-	rc = lpfc_issue_els_rdf(vport, 0);
 	/* Issue new RDF for reregistering */
-	if (rc) {
+	if (lpfc_issue_els_rdf(vport, 0)) {
 		lpfc_printf_vlog(vport, KERN_INFO, LOG_ELS | LOG_CGN_MGMT,
-				 "2623 Failed to re register RDF for x%x Data: %d\n",
-				 vport->fc_myDID, rc);
+				 "2623 Failed to re register RDF for x%x\n",
+				 vport->fc_myDID);
 		return -EIO;
 	}
 
@@ -4373,7 +4321,7 @@ lpfc_issue_els_edc(struct lpfc_vport *vport, uint8_t retry)
 	rc = lpfc_sli_issue_iocb(phba, LPFC_ELS_RING, elsiocb, 0);
 	if (rc == IOCB_ERROR) {
 		/* The additional lpfc_nlp_put will cause the following
-		 * lpfc_els_free_iocb routine to trigger the release of
+		 * lpfc_els_free_iocb routine to trigger the rlease of
 		 * the node.
 		 */
 		lpfc_els_free_iocb(phba, elsiocb);
@@ -5201,7 +5149,7 @@ lpfc_els_free_iocb(struct lpfc_hba *phba, struct lpfc_iocbq *elsiocb)
 {
 	struct lpfc_dmabuf *buf_ptr, *buf_ptr1;
 
-	/* The I/O iocb is complete.  Clear the node and first dmabuf */
+	/* The I/O iocb is complete.  Clear the node and first dmbuf */
 	elsiocb->ndlp = NULL;
 
 	/* cmd_dmabuf = cmd,  cmd_dmabuf->next = rsp, bpl_dmabuf = bpl */
@@ -5234,12 +5182,14 @@ lpfc_els_free_iocb(struct lpfc_hba *phba, struct lpfc_iocbq *elsiocb)
 		} else {
 			buf_ptr1 = elsiocb->cmd_dmabuf;
 			lpfc_els_free_data(phba, buf_ptr1);
+			elsiocb->cmd_dmabuf = NULL;
 		}
 	}
 
 	if (elsiocb->bpl_dmabuf) {
 		buf_ptr = elsiocb->bpl_dmabuf;
 		lpfc_els_free_bpl(phba, buf_ptr);
+		elsiocb->bpl_dmabuf = NULL;
 	}
 	lpfc_sli_release_iocbq(phba, elsiocb);
 	return 0;
@@ -5377,12 +5327,11 @@ lpfc_cmpl_els_rsp(struct lpfc_hba *phba, struct lpfc_iocbq *cmdiocb,
 	IOCB_t  *irsp;
 	LPFC_MBOXQ_t *mbox = NULL;
 	u32 ulp_status, ulp_word4, tmo, did, iotag;
-	u32 cmd;
 
 	if (!vport) {
 		lpfc_printf_log(phba, KERN_WARNING, LOG_ELS,
 				"3177 null vport in ELS rsp\n");
-		goto release;
+		goto out;
 	}
 	if (cmdiocb->context_un.mbox)
 		mbox = cmdiocb->context_un.mbox;
@@ -5412,12 +5361,12 @@ lpfc_cmpl_els_rsp(struct lpfc_hba *phba, struct lpfc_iocbq *cmdiocb,
 		ulp_status, ulp_word4, did);
 	/* ELS response tag <ulpIoTag> completes */
 	lpfc_printf_vlog(vport, KERN_INFO, LOG_ELS,
-			 "0110 ELS response tag x%x completes fc_flag x%lx"
+			 "0110 ELS response tag x%x completes "
 			 "Data: x%x x%x x%x x%x x%lx x%x x%x x%x %p %p\n",
-			 iotag, vport->fc_flag, ulp_status, ulp_word4, tmo,
+			 iotag, ulp_status, ulp_word4, tmo,
 			 ndlp->nlp_DID, ndlp->nlp_flag, ndlp->nlp_state,
 			 ndlp->nlp_rpi, kref_read(&ndlp->kref), mbox, ndlp);
-	if (mbox && !test_bit(FC_PT2PT, &vport->fc_flag)) {
+	if (mbox) {
 		if (ulp_status == 0 &&
 		    test_bit(NLP_ACC_REGLOGIN, &ndlp->nlp_flag)) {
 			if (!lpfc_unreg_rpi(vport, ndlp) &&
@@ -5476,10 +5425,6 @@ lpfc_cmpl_els_rsp(struct lpfc_hba *phba, struct lpfc_iocbq *cmdiocb,
 		}
 out_free_mbox:
 		lpfc_mbox_rsrc_cleanup(phba, mbox, MBOX_THD_UNLOCKED);
-	} else if (mbox && test_bit(FC_PT2PT, &vport->fc_flag) &&
-		   test_bit(NLP_ACC_REGLOGIN, &ndlp->nlp_flag)) {
-		lpfc_mbx_cmpl_reg_login(phba, mbox);
-		clear_bit(NLP_ACC_REGLOGIN, &ndlp->nlp_flag);
 	}
 out:
 	if (ndlp && shost) {
@@ -5492,7 +5437,7 @@ out:
 	 * these conditions because it doesn't need the login.
 	 */
 	if (phba->sli_rev == LPFC_SLI_REV4 &&
-	    vport->port_type == LPFC_NPIV_PORT &&
+	    vport && vport->port_type == LPFC_NPIV_PORT &&
 	    !(ndlp->fc4_xpt_flags & SCSI_XPT_REGD)) {
 		if (ndlp->nlp_state != NLP_STE_PLOGI_ISSUE &&
 		    ndlp->nlp_state != NLP_STE_REG_LOGIN_ISSUE &&
@@ -5508,27 +5453,6 @@ out:
 		}
 	}
 
-	/* The driver's unsolicited deferred FLOGI ACC in Pt2Pt needs to
-	 * release the initial reference because the put after the free_iocb
-	 * call removes only the reference from the defer logic. This FLOGI
-	 * is never registered with the SCSI transport.
-	 */
-	if (test_bit(FC_PT2PT, &vport->fc_flag) &&
-	    test_and_clear_bit(NLP_FLOGI_DFR_ACC, &ndlp->nlp_flag)) {
-		lpfc_printf_vlog(vport, KERN_INFO,
-				 LOG_ELS | LOG_NODE | LOG_DISCOVERY,
-				 "3357 Pt2Pt Defer FLOGI ACC ndlp x%px, "
-				 "nflags x%lx, fc_flag x%lx\n",
-				 ndlp, ndlp->nlp_flag,
-				 vport->fc_flag);
-		cmd = *((u32 *)cmdiocb->cmd_dmabuf->virt);
-		if (cmd == ELS_CMD_ACC) {
-			if (!test_and_set_bit(NLP_DROPPED, &ndlp->nlp_flag))
-				lpfc_nlp_put(ndlp);
-		}
-	}
-
-release:
 	/* Release the originating I/O reference. */
 	lpfc_els_free_iocb(phba, cmdiocb);
 	lpfc_nlp_put(ndlp);
@@ -5663,6 +5587,7 @@ lpfc_els_rsp_acc(struct lpfc_vport *vport, uint32_t flag,
 			sp->cls1.classValid = 0;
 			sp->cls2.classValid = 0;
 			sp->cls3.classValid = 0;
+			sp->cls4.classValid = 0;
 
 			/* Copy our worldwide names */
 			memcpy(&sp->portName, &vport->fc_sparam.portName,
@@ -5676,8 +5601,7 @@ lpfc_els_rsp_acc(struct lpfc_vport *vport, uint32_t flag,
 			sp->cmn.valid_vendor_ver_level = 0;
 			memset(sp->un.vendorVersion, 0,
 			       sizeof(sp->un.vendorVersion));
-			if (!test_bit(FC_PT2PT, &vport->fc_flag))
-				sp->cmn.bbRcvSizeMsb &= 0xF;
+			sp->cmn.bbRcvSizeMsb &= 0xF;
 
 			/* If our firmware supports this feature, convey that
 			 * info to the target using the vendor specific field.
@@ -7959,13 +7883,6 @@ lpfc_rscn_recovery_check(struct lpfc_vport *vport)
 
 	/* Move all affected nodes by pending RSCNs to NPR state. */
 	list_for_each_entry_safe(ndlp, n, &vport->fc_nodes, nlp_listp) {
-		if (test_bit(FC_UNLOADING, &vport->load_flag)) {
-			lpfc_printf_vlog(vport, KERN_INFO, LOG_ELS,
-					 "1000 %s Unloading set\n",
-					 __func__);
-			return 0;
-		}
-
 		if ((ndlp->nlp_state == NLP_STE_UNUSED_NODE) ||
 		    !lpfc_rscn_payload_check(vport, ndlp->nlp_DID))
 			continue;
@@ -8475,9 +8392,9 @@ lpfc_els_rcv_flogi(struct lpfc_vport *vport, struct lpfc_iocbq *cmdiocb,
 	clear_bit(FC_PUBLIC_LOOP, &vport->fc_flag);
 	lpfc_printf_vlog(vport, KERN_INFO, LOG_ELS,
 			 "3311 Rcv Flogi PS x%x new PS x%x "
-			 "fc_flag x%lx new fc_flag x%lx, hba_flag x%lx\n",
+			 "fc_flag x%lx new fc_flag x%lx\n",
 			 port_state, vport->port_state,
-			 fc_flag, vport->fc_flag, phba->hba_flag);
+			 fc_flag, vport->fc_flag);
 
 	/*
 	 * We temporarily set fc_myDID to make it look like we are
@@ -8497,6 +8414,13 @@ lpfc_els_rcv_flogi(struct lpfc_vport *vport, struct lpfc_iocbq *cmdiocb,
 						     &wqe->xmit_els_rsp.wqe_com);
 
 		vport->fc_myDID = did;
+
+		lpfc_printf_vlog(vport, KERN_INFO, LOG_ELS,
+				 "3344 Deferring FLOGI ACC: rx_id: x%x,"
+				 " ox_id: x%x, hba_flag x%lx\n",
+				 phba->defer_flogi_acc.rx_id,
+				 phba->defer_flogi_acc.ox_id, phba->hba_flag);
+
 		phba->defer_flogi_acc.flag = true;
 
 		/* This nlp_get is paired with nlp_puts that reset the
@@ -8505,14 +8429,6 @@ lpfc_els_rcv_flogi(struct lpfc_vport *vport, struct lpfc_iocbq *cmdiocb,
 		 * processed or cancelled.
 		 */
 		phba->defer_flogi_acc.ndlp = lpfc_nlp_get(ndlp);
-
-		lpfc_printf_vlog(vport, KERN_INFO, LOG_ELS,
-				 "3344 Deferring FLOGI ACC: rx_id: x%x,"
-				 " ox_id: x%x, ndlp x%px, hba_flag x%lx\n",
-				 phba->defer_flogi_acc.rx_id,
-				 phba->defer_flogi_acc.ox_id,
-				 phba->defer_flogi_acc.ndlp,
-				 phba->hba_flag);
 		return 0;
 	}
 
@@ -8830,7 +8746,7 @@ reject_out:
  * @cmdiocb: pointer to lpfc command iocb data structure.
  * @ndlp: pointer to a node-list data structure.
  *
- * This routine processes Read Timeout Value (RTV) IOCB received as an
+ * This routine processes Read Timout Value (RTV) IOCB received as an
  * ELS unsolicited event. It first checks the remote port state. If the
  * remote port is not in NLP_STE_UNMAPPED_NODE state or NLP_STE_MAPPED_NODE
  * state, it invokes the lpfc_els_rsl_reject() routine to send the reject
@@ -10458,8 +10374,11 @@ lpfc_els_unsol_buffer(struct lpfc_hba *phba, struct lpfc_sli_ring *pring,
 	 * Do not process any unsolicited ELS commands
 	 * if the ndlp is in DEV_LOSS
 	 */
-	if (test_bit(NLP_IN_DEV_LOSS, &ndlp->nlp_flag))
+	if (test_bit(NLP_IN_DEV_LOSS, &ndlp->nlp_flag)) {
+		if (newnode)
+			lpfc_nlp_put(ndlp);
 		goto dropit;
+	}
 
 	elsiocb->ndlp = lpfc_nlp_get(ndlp);
 	if (!elsiocb->ndlp)
@@ -10941,7 +10860,7 @@ lpfc_els_unsol_event(struct lpfc_hba *phba, struct lpfc_sli_ring *pring,
 	lpfc_els_unsol_buffer(phba, pring, vport, elsiocb);
 	/*
 	 * The different unsolicited event handlers would tell us
-	 * if they are done with "mp" by setting cmd_dmabuf/bpl_dmabuf to NULL.
+	 * if they are done with "mp" by setting cmd_dmabuf to NULL.
 	 */
 	if (elsiocb->cmd_dmabuf) {
 		lpfc_in_buf_free(phba, elsiocb->cmd_dmabuf);
@@ -11361,11 +11280,6 @@ lpfc_cmpl_els_fdisc(struct lpfc_hba *phba, struct lpfc_iocbq *cmdiocb,
 		lpfc_vlog_msg(vport, KERN_WARNING, LOG_ELS,
 			      "0126 FDISC cmpl status: x%x/x%x)\n",
 			      ulp_status, ulp_word4);
-
-		/* drop initial reference */
-		if (!test_and_set_bit(NLP_DROPPED, &ndlp->nlp_flag))
-			lpfc_nlp_put(ndlp);
-
 		goto fdisc_failed;
 	}
 
@@ -11520,13 +11434,6 @@ lpfc_issue_els_fdisc(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 	sp->cls1.classValid = 0;
 	sp->cls2.seqDelivery = 1;
 	sp->cls3.seqDelivery = 1;
-
-	/* Fill out Auxiliary Parameter Data */
-	if (phba->pni) {
-		sp->aux.flags =
-			AUX_PARM_DATA_VALID | AUX_PARM_PNI_VALID;
-		sp->aux.pni = cpu_to_be64(phba->pni);
-	}
 
 	pcmd += sizeof(uint32_t); /* CSP Word 2 */
 	pcmd += sizeof(uint32_t); /* CSP Word 3 */
@@ -12122,11 +12029,7 @@ lpfc_sli4_els_xri_aborted(struct lpfc_hba *phba,
 			sglq_entry->state = SGL_FREED;
 			spin_unlock_irqrestore(&phba->sli4_hba.sgl_list_lock,
 					       iflag);
-			lpfc_printf_log(phba, KERN_INFO, LOG_ELS | LOG_SLI |
-					LOG_DISCOVERY | LOG_NODE,
-					"0732 ELS XRI ABORT on Node: ndlp=x%px "
-					"xri=x%x\n",
-					ndlp, xri);
+
 			if (ndlp) {
 				lpfc_set_rrq_active(phba, ndlp,
 					sglq_entry->sli4_lxritag,

@@ -1,19 +1,114 @@
-* Sat May 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.5.3.el9_8]
+* Mon May 18 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.10.1.el9_8]
+- net: skbuff: propagate shared-frag marker through frag-transfer helpers (Sabrina Dubroca) [RHEL-176064] {CVE-2026-46300}
+- net: move skb_gro_receive_list from udp to core (Sabrina Dubroca) [RHEL-176064] {CVE-2026-46300}
+- net: skbuff: preserve shared-frag marker during coalescing (Sabrina Dubroca) [RHEL-176064] {CVE-2026-46300}
+- ptrace: slightly saner 'get_dumpable()' logic (Ricardo Robaina) [RHEL-176454] {CVE-2026-46333}
+- md/bitmap: fix GPF in write_page caused by resize race (Nigel Croxon) [RHEL-174091] {CVE-2026-43163}
+- RDMA/umem: Fix double dma_buf_unpin in failure path (CKI Backport Bot) [RHEL-174020] {CVE-2026-43128}
+- usbip: validate number_of_packets in usbip_pack_ret_submit() (CKI Backport Bot) [RHEL-171430] {CVE-2026-31607}
+- can: raw: fix ro->uniq use-after-free in raw_rcv() (CKI Backport Bot) [RHEL-170759] {CVE-2026-31532}
+Resolves: RHEL-170759, RHEL-171430, RHEL-174020, RHEL-174091, RHEL-176064, RHEL-176454
+
+* Mon May 11 2026 Patrick Talbert <ptalbert@redhat.com> [5.14.0-687.9.1.el9_8]
 - xfrm: esp: avoid in-place decrypt on shared skb frags (Sabrina Dubroca) [RHEL-174563] {CVE-2026-43284}
 Resolves: RHEL-174563
 
-* Fri May 01 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.5.2.el9_8]
-- crypto: algif_aead - snapshot IV for async AEAD requests (Herbert Xu) [RHEL-172543]
-- crypto: algif_aead - Fix minimum RX size check for decryption (Herbert Xu) [RHEL-172543]
-- crypto: authencesn - reject short ahash digests during instance creation (Herbert Xu) [RHEL-172543]
-- crypto: authencesn - Fix src offset when decrypting in-place (Herbert Xu) [RHEL-172543]
-- crypto: authencesn - Do not place hiseq at end of dst for out-of-place decryption (Herbert Xu) [RHEL-172543] {CVE-2026-31431}
-- crypto: authencesn - reject too-short AAD (assoclen<8) to match ESP/ESN spec (Herbert Xu) [RHEL-172543] {CVE-2026-23060}
-- crypto: af_alg - Fix page reassignment overflow in af_alg_pull_tsgl (Herbert Xu) [RHEL-172543]
-- crypto: af_alg - limit RX SG extraction by receive buffer budget (Herbert Xu) [RHEL-172543] {CVE-2026-31677}
-- crypto: algif_aead - Revert to operating out-of-place (Herbert Xu) [RHEL-172543] {CVE-2026-31431}
-- crypto: af-alg - fix NULL pointer dereference in scatterwalk (Herbert Xu) [RHEL-172543]
-Resolves: RHEL-172543
+* Mon May 04 2026 Patrick Talbert <ptalbert@redhat.com> [5.14.0-687.8.1.el9_8]
+- crypto: algif_aead - snapshot IV for async AEAD requests (Herbert Xu) [RHEL-172204]
+- crypto: algif_aead - Fix minimum RX size check for decryption (Herbert Xu) [RHEL-172204]
+- crypto: authencesn - reject short ahash digests during instance creation (Herbert Xu) [RHEL-172204]
+- crypto: authencesn - Fix src offset when decrypting in-place (Herbert Xu) [RHEL-172204]
+- crypto: authencesn - Do not place hiseq at end of dst for out-of-place decryption (Herbert Xu) [RHEL-172204] {CVE-2026-31431}
+- crypto: authencesn - reject too-short AAD (assoclen<8) to match ESP/ESN spec (Herbert Xu) [RHEL-172204] {CVE-2026-23060}
+- crypto: af_alg - Fix page reassignment overflow in af_alg_pull_tsgl (Herbert Xu) [RHEL-172204]
+- crypto: af_alg - limit RX SG extraction by receive buffer budget (Herbert Xu) [RHEL-172204] {CVE-2026-31677}
+- crypto: algif_aead - Revert to operating out-of-place (Herbert Xu) [RHEL-172204] {CVE-2026-31431}
+- crypto: af-alg - fix NULL pointer dereference in scatterwalk (Herbert Xu) [RHEL-172204]
+Resolves: RHEL-172204
+
+* Fri Apr 24 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.7.1.el9_8]
+- KVM: x86/mmu: Drop/zap existing present SPTE even when creating an MMIO SPTE (Paolo Bonzini) [RHEL-153722] {CVE-2026-23401}
+- powerpc/tools: drop `-o pipefail` in gcc check scripts (Jan Stancek) [RHEL-165125]
+- libceph: reset sparse-read state in osd_fault() (CKI Backport Bot) [RHEL-169078] {CVE-2026-23136}
+- libceph: replace overzealous BUG_ON in osdmap_apply_incremental() (CKI Backport Bot) [RHEL-169071] {CVE-2026-22990}
+- libceph: prevent potential out-of-bounds reads in handle_auth_done() (CKI Backport Bot) [RHEL-169067] {CVE-2026-22984}
+- libceph: make decode_pool() more resilient against corrupted osdmaps (CKI Backport Bot) [RHEL-169063] {CVE-2025-71116}
+- scsi: lpfc: avoid crashing in lpfc_nlp_get() if lpfc_nodelist was freed (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Revise logging format for failed CT MIB requests" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Update debugfs trace ring initialization messages" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Check for hdwq null ptr when cleaning up lpfc_vport structure" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Skip RSCN processing when FC_UNLOADING flag is set" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Early return out of FDMI cmpl for locally rejected statuses" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Simplify error handling for failed lpfc_get_sli4_parameters cmd" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Relocate clearing initial phba flags from link up to link down hdlr" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Ensure HBA_SETUP flag is used only for SLI4 in dev_loss_tmo_callbk" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Move clearing of HBA_SETUP flag to before lpfc_sli4_queue_unset" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Revise CQ_CREATE_SET mailbox bitfield definitions" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Modify end-of-life adapters' model descriptions" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Copyright updates for 14.4.0.10 patches" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Update lpfc version to 14.4.0.10" (Ewan D. Milne) [RHEL-167742]
+- Revert "lpfc: don't use file->f_path.dentry for comparisons" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Fix wrong function reference in a comment" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: use min() to improve code" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Use int type to store negative error codes" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Remove unused member variables in struct lpfc_hba and lpfc_vport" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Abort outstanding ELS WQEs regardless of if rmmod is in progress" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Clean up allocated queues when queue setup mbox commands fail" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Remove ndlp kref decrement clause for F_Port_Ctrl in lpfc_cleanup" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Decrement ndlp kref after FDISC retries exhausted" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Check return status of lpfc_reset_flush_io_context during TGT_RESET" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Ensure PLOGI_ACC is sent prior to PRLI in Point to Point topology" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Define size of debugfs entry for xri rebalancing" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Fix memory leak when nvmeio_trc debugfs entry is used" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Use switch case statements in DIF debugfs handlers" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Clean up extraneous phba dentries" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Convert debugfs directory counts from atomic to unsigned int" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Update lpfc version to 14.4.0.11" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Copyright updates for 14.4.0.11 patches" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Update various NPIV diagnostic log messaging" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Revise discovery related function headers and comments" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Remove redundant NULL ptr assignment in lpfc_els_free_iocb()" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Ensure unregistration of rpis for received PLOGIs" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Fix leaked ndlp krefs when in point-to-point topology" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Modify kref handling for Fabric Controller ndlps" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Allow support for BB credit recovery in point-to-point topology" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Add capability to register Platform Name ID to fabric" (Ewan D. Milne) [RHEL-167742]
+- Revert "scsi: lpfc: Update lpfc version to 14.4.0.12" (Ewan D. Milne) [RHEL-167742]
+- drm/i915/dp: Fix panel replay when DSC is enabled (Anusha Srivatsa) [RHEL-104822]
+- drm/i915/dp_mst: Recompute all MST link CRTCs if DSC gets enabled on the link (Anusha Srivatsa) [RHEL-104822]
+- drm/i915/dp_mst: Track DSC enabled status on the MST link (Anusha Srivatsa) [RHEL-104822]
+- drm/i915/dp_mst: Reuse the DP-SST helper function to compute FEC config (Anusha Srivatsa) [RHEL-104822]
+- drm/i915/dp: Export helper to determine if FEC on non-UHBR links is required (Anusha Srivatsa) [RHEL-104822]
+- drm/i915/dp: Ensure the FEC state stays disabled for UHBR links (Anusha Srivatsa) [RHEL-104822]
+- drm/i915/dsc: Add helper to enable the DSC configuration for a CRTC (Anusha Srivatsa) [RHEL-104822]
+- x86/boot: Handle relative CONFIG_EFI_SBAT_FILE file paths (Oleksii Baranov) [RHEL-157853]
+- net/sched: Only allow act_ct to bind to clsact/ingress qdiscs and shared blocks (CKI Backport Bot) [RHEL-157235] {CVE-2026-23270}
+- net/sched: cls_u32: use skb_header_pointer_careful() (Paolo Abeni) [RHEL-150404] {CVE-2026-23204}
+- net: add skb_header_pointer_careful() helper (Paolo Abeni) [RHEL-150404]
+Resolves: RHEL-104822, RHEL-150404, RHEL-153722, RHEL-157235, RHEL-157853, RHEL-165125, RHEL-167742, RHEL-169063, RHEL-169067, RHEL-169071, RHEL-169078
+
+* Thu Apr 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.6.1.el9_8]
+- nfsd: fix heap overflow in NFSv4.0 LOCK replay cache (Scott Mayhew) [RHEL-167017] {CVE-2026-31402}
+- scsi: qla2xxx: Fix improper freeing of purex item (CKI Backport Bot) [RHEL-159223] {CVE-2025-68741}
+- smb: client: fix krb5 mount with username option (Paulo Alcantara) [RHEL-158988]
+- ionic: fix persistent MAC address override on PF (Mohammad Heib) [RHEL-151378]
+- RDMA/bnxt_re: convert timeouts to secs_to_jiffies() (CKI Backport Bot) [RHEL-155966]
+- RDMA/bnxt_re: Fix return code of bnxt_re_configure_cc (CKI Backport Bot) [RHEL-155966]
+- RDMA/bnxt_re: Fix missing error handling for tx_queue (CKI Backport Bot) [RHEL-155966]
+- RDMA/bnxt_re: Fix incorrect display of inactivity_cp in debugfs output (CKI Backport Bot) [RHEL-155966]
+- RDMA/bnxt_re: Fix the condition check while programming congestion control (CKI Backport Bot) [RHEL-155966]
+- RDMA/bnxt_re: Fix buffer overflow in debugfs code (CKI Backport Bot) [RHEL-155966]
+- RDMA/bnxt_re: Congestion control settings using debugfs hook (CKI Backport Bot) [RHEL-155966]
+- RDMA/bnxt_re: Use macro instead of hard coded value (CKI Backport Bot) [RHEL-155966]
+- RDMA/bnxt_re: Support 2G message size (CKI Backport Bot) [RHEL-155966]
+- RDMA/bnxt_re: Fix size of uverbs_copy_to() in BNXT_RE_METHOD_GET_TOGGLE_MEM (CKI Backport Bot) [RHEL-155966]
+- RDMA/bnxt_re: Support extended stats for Thor2 VF (CKI Backport Bot) [RHEL-155966]
+- net: hv_netvsc: reject RSS hash key programming without RX indirection table (Medha Mummigatti) [RHEL-155207]
+- ice: fix page leak for zero-size Rx descriptors (CKI Backport Bot) [RHEL-154095]
+- net/sched: sch_cake: Fix incorrect qlen reduction in cake_drop (Davide Caratti) [RHEL-150444] {CVE-2025-39766}
+- net/sched: Make cake_enqueue return NET_XMIT_CN when past buffer_limit (Davide Caratti) [RHEL-150444] {CVE-2025-39766}
+- rtnetlink: Allocate vfinfo size for VF GUIDs when supported (Kamal Heib) [RHEL-145522] {CVE-2025-22075}
+Resolves: RHEL-145522, RHEL-150444, RHEL-151378, RHEL-154095, RHEL-155207, RHEL-155966, RHEL-158988, RHEL-159223, RHEL-167017
 
 * Wed Apr 01 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.5.1.el9_8]
 - kabi: enable check-kabi (Čestmír Kalina) [RHEL-153672]

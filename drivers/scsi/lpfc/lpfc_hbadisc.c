@@ -183,8 +183,7 @@ lpfc_dev_loss_tmo_callbk(struct fc_rport *rport)
 
 	/* Don't schedule a worker thread event if the vport is going down. */
 	if (test_bit(FC_UNLOADING, &vport->load_flag) ||
-	    (phba->sli_rev == LPFC_SLI_REV4 &&
-	    !test_bit(HBA_SETUP, &phba->hba_flag))) {
+	    !test_bit(HBA_SETUP, &phba->hba_flag)) {
 
 		spin_lock_irqsave(&ndlp->lock, iflags);
 		ndlp->rport = NULL;
@@ -1269,10 +1268,6 @@ lpfc_linkdown(struct lpfc_hba *phba)
 	}
 	phba->defer_flogi_acc.flag = false;
 
-	/* reinitialize initial HBA flag */
-	clear_bit(HBA_FLOGI_ISSUED, &phba->hba_flag);
-	clear_bit(HBA_RHBA_CMPL, &phba->hba_flag);
-
 	/* Clear external loopback plug detected flag */
 	phba->link_flag &= ~LS_EXTERNAL_LOOPBACK;
 
@@ -1442,6 +1437,10 @@ lpfc_linkup(struct lpfc_hba *phba)
 	spin_lock_irq(shost->host_lock);
 	phba->pport->rcv_flogi_cnt = 0;
 	spin_unlock_irq(shost->host_lock);
+
+	/* reinitialize initial HBA flag */
+	clear_bit(HBA_FLOGI_ISSUED, &phba->hba_flag);
+	clear_bit(HBA_RHBA_CMPL, &phba->hba_flag);
 
 	return 0;
 }
@@ -4373,8 +4372,6 @@ out:
 		lpfc_ns_cmd(vport, SLI_CTNS_RNN_ID, 0, 0);
 		lpfc_ns_cmd(vport, SLI_CTNS_RSNN_NN, 0, 0);
 		lpfc_ns_cmd(vport, SLI_CTNS_RSPN_ID, 0, 0);
-		if (phba->pni)
-			lpfc_ns_cmd(vport, SLI_CTNS_RSPNI_PNI, 0, 0);
 		lpfc_ns_cmd(vport, SLI_CTNS_RFT_ID, 0, 0);
 
 		if ((vport->cfg_enable_fc4_type == LPFC_ENABLE_BOTH) ||
@@ -6600,11 +6597,6 @@ lpfc_nlp_get(struct lpfc_nodelist *ndlp)
 	unsigned long flags;
 
 	if (ndlp) {
-		lpfc_debugfs_disc_trc(ndlp->vport, LPFC_DISC_TRC_NODE,
-			"node get:        did:x%x flg:x%lx refcnt:x%x",
-			ndlp->nlp_DID, ndlp->nlp_flag,
-			kref_read(&ndlp->kref));
-
 		/* The check of ndlp usage to prevent incrementing the
 		 * ndlp reference count that is in the process of being
 		 * released.
@@ -6612,9 +6604,8 @@ lpfc_nlp_get(struct lpfc_nodelist *ndlp)
 		spin_lock_irqsave(&ndlp->lock, flags);
 		if (!kref_get_unless_zero(&ndlp->kref)) {
 			spin_unlock_irqrestore(&ndlp->lock, flags);
-			lpfc_printf_vlog(ndlp->vport, KERN_WARNING, LOG_NODE,
-				"0276 %s: ndlp:x%px refcnt:%d\n",
-				__func__, (void *)ndlp, kref_read(&ndlp->kref));
+			pr_info("0276 %s: NDLP has zero reference count. "
+				"Exiting\n", __func__);
 			return NULL;
 		}
 		spin_unlock_irqrestore(&ndlp->lock, flags);

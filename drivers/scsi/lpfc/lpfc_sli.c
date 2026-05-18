@@ -27,8 +27,6 @@
 #include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/lockdep.h>
-#include <linux/dmi.h>
-#include <linux/of.h>
 
 #include <scsi/scsi.h>
 #include <scsi/scsi_cmnd.h>
@@ -5172,6 +5170,7 @@ lpfc_sli4_brdreset(struct lpfc_hba *phba)
 	phba->link_events = 0;
 	phba->pport->fc_myDID = 0;
 	phba->pport->fc_prevDID = 0;
+	clear_bit(HBA_SETUP, &phba->hba_flag);
 
 	spin_lock_irq(&phba->hbalock);
 	psli->sli_flag &= ~(LPFC_PROCESS_LA);
@@ -5288,7 +5287,6 @@ lpfc_sli_brdrestart_s4(struct lpfc_hba *phba)
 			"0296 Restart HBA Data: x%x x%x\n",
 			phba->pport->port_state, psli->sli_flag);
 
-	clear_bit(HBA_SETUP, &phba->hba_flag);
 	lpfc_sli4_queue_unset(phba);
 
 	rc = lpfc_sli4_brdreset(phba);
@@ -8452,70 +8450,6 @@ lpfc_set_host_tm(struct lpfc_hba *phba)
 }
 
 /**
- * lpfc_get_platform_uuid - Attempts to extract a platform uuid
- * @phba: pointer to lpfc hba data structure.
- *
- * This routine attempts to first read SMBIOS DMI data for the System
- * Information structure offset 08h called System UUID.  Else, no platform
- * UUID will be advertised.
- **/
-static void
-lpfc_get_platform_uuid(struct lpfc_hba *phba)
-{
-	int rc;
-	const char *uuid;
-	char pni[17] = {0}; /* 16 characters + '\0' */
-	bool is_ff = true, is_00 = true;
-	u8 i;
-
-	/* First attempt SMBIOS DMI */
-	uuid = dmi_get_system_info(DMI_PRODUCT_UUID);
-	if (uuid) {
-		lpfc_printf_log(phba, KERN_INFO, LOG_INIT,
-				"2088 SMBIOS UUID %s\n",
-				uuid);
-	} else {
-		lpfc_printf_log(phba, KERN_INFO, LOG_INIT,
-				"2099 Could not extract UUID\n");
-	}
-
-	if (uuid && uuid_is_valid(uuid)) {
-		/* Generate PNI from UUID format.
-		 *
-		 * 1.) Extract lower 64 bits from UUID format.
-		 * 2.) Set 3h for NAA Locally Assigned Name Identifier format.
-		 *
-		 * e.g. xxxxxxxx-xxxx-xxxx-yyyy-yyyyyyyyyyyy
-		 *
-		 * extract the yyyy-yyyyyyyyyyyy portion
-		 * final PNI   3yyyyyyyyyyyyyyy
-		 */
-		scnprintf(pni, sizeof(pni), "3%c%c%c%s",
-			  uuid[20], uuid[21], uuid[22], &uuid[24]);
-
-		/* Sanitize the converted PNI */
-		for (i = 1; i < 16 && (is_ff || is_00); i++) {
-			if (pni[i] != '0')
-				is_00 = false;
-			if (pni[i] != 'f' && pni[i] != 'F')
-				is_ff = false;
-		}
-
-		/* Convert from char* to unsigned long */
-		rc = kstrtoul(pni, 16, &phba->pni);
-		if (!rc && !is_ff && !is_00) {
-			lpfc_printf_log(phba, KERN_INFO, LOG_INIT,
-					"2100 PNI 0x%016lx\n", phba->pni);
-		} else {
-			lpfc_printf_log(phba, KERN_INFO, LOG_INIT,
-					"2101 PNI %s generation status %d\n",
-					pni, rc);
-			phba->pni = 0;
-		}
-	}
-}
-
-/**
  * lpfc_sli4_hba_setup - SLI4 device initialization PCI function
  * @phba: Pointer to HBA context object.
  *
@@ -8597,10 +8531,6 @@ lpfc_sli4_hba_setup(struct lpfc_hba *phba)
 	} else {
 		clear_bit(HBA_FCOE_MODE, &phba->hba_flag);
 	}
-
-	/* Obtain platform UUID, only for SLI4 FC adapters */
-	if (!test_bit(HBA_FCOE_MODE, &phba->hba_flag))
-		lpfc_get_platform_uuid(phba);
 
 	if (bf_get(lpfc_mbx_rd_rev_cee_ver, &mqe->un.read_rev) ==
 		LPFC_DCBX_CEE_MODE)
@@ -8893,7 +8823,7 @@ lpfc_sli4_hba_setup(struct lpfc_hba *phba)
 	if (unlikely(rc)) {
 		lpfc_printf_log(phba, KERN_ERR, LOG_TRACE_EVENT,
 				"0381 Error %d during queue setup.\n", rc);
-		goto out_destroy_queue;
+		goto out_stop_timers;
 	}
 	/* Initialize the driver internal SLI layer lists. */
 	lpfc_sli4_setup(phba);
@@ -9176,6 +9106,7 @@ out_free_iocblist:
 	lpfc_free_iocb_list(phba);
 out_destroy_queue:
 	lpfc_sli4_queue_destroy(phba);
+out_stop_timers:
 	lpfc_stop_hba_timers(phba);
 out_free_mbox:
 	mempool_free(mboxq, phba->mbox_mem_pool);
@@ -12515,11 +12446,19 @@ lpfc_sli_issue_abort_iotag(struct lpfc_hba *phba, struct lpfc_sli_ring *pring,
 	}
 
 	/*
-	 * Always abort the outstanding WQE and set the IA bit correctly
-	 * for the context.  This is necessary for correctly removing
-	 * outstanding ndlp reference counts when the CQE completes with
-	 * the XB bit set.
+	 * If we're unloading, don't abort iocb on the ELS ring, but change
+	 * the callback so that nothing happens when it finishes.
 	 */
+	if (test_bit(FC_UNLOADING, &vport->load_flag) &&
+	    pring->ringno == LPFC_ELS_RING) {
+		if (cmdiocb->cmd_flag & LPFC_IO_FABRIC)
+			cmdiocb->fabric_cmd_cmpl = lpfc_ignore_els_cmpl;
+		else
+			cmdiocb->cmd_cmpl = lpfc_ignore_els_cmpl;
+		return retval;
+	}
+
+	/* issue ABTS for this IOCB based on iotag */
 	abtsiocbp = __lpfc_sli_get_iocbq(phba);
 	if (abtsiocbp == NULL)
 		return IOCB_NORESOURCE;
@@ -16547,10 +16486,10 @@ lpfc_cq_create_set(struct lpfc_hba *phba, struct lpfc_queue **cqp,
 			case 4096:
 				if (phba->sli4_hba.pc_sli4_params.cqv ==
 				    LPFC_Q_CREATE_VERSION_2) {
-					bf_set(lpfc_mbx_cq_create_set_cqe_cnt_lo,
+					bf_set(lpfc_mbx_cq_create_set_cqe_cnt,
 					       &cq_set->u.request,
-					       cq->entry_count);
-					bf_set(lpfc_mbx_cq_create_set_cqecnt,
+						cq->entry_count);
+					bf_set(lpfc_mbx_cq_create_set_cqe_cnt,
 					       &cq_set->u.request,
 					       LPFC_CQ_CNT_WORD7);
 					break;
@@ -16566,15 +16505,15 @@ lpfc_cq_create_set(struct lpfc_hba *phba, struct lpfc_queue **cqp,
 				}
 				fallthrough;	/* otherwise default to smallest */
 			case 256:
-				bf_set(lpfc_mbx_cq_create_set_cqecnt,
+				bf_set(lpfc_mbx_cq_create_set_cqe_cnt,
 				       &cq_set->u.request, LPFC_CQ_CNT_256);
 				break;
 			case 512:
-				bf_set(lpfc_mbx_cq_create_set_cqecnt,
+				bf_set(lpfc_mbx_cq_create_set_cqe_cnt,
 				       &cq_set->u.request, LPFC_CQ_CNT_512);
 				break;
 			case 1024:
-				bf_set(lpfc_mbx_cq_create_set_cqecnt,
+				bf_set(lpfc_mbx_cq_create_set_cqe_cnt,
 				       &cq_set->u.request, LPFC_CQ_CNT_1024);
 				break;
 			}
@@ -19937,15 +19876,13 @@ lpfc_sli4_remove_rpis(struct lpfc_hba *phba)
 }
 
 /**
- * lpfc_sli4_resume_rpi - Resume traffic relative to an RPI
+ * lpfc_sli4_resume_rpi - Remove the rpi bitmask region
  * @ndlp: pointer to lpfc nodelist data structure.
  * @cmpl: completion call-back.
  * @iocbq: data to load as mbox ctx_u information
  *
- * Return codes
- *	0 - successful
- *	-ENOMEM - No available memory
- *	-EIO - The mailbox failed to complete successfully.
+ * This routine is invoked to remove the memory region that
+ * provided rpi via a bitmask.
  **/
 int
 lpfc_sli4_resume_rpi(struct lpfc_nodelist *ndlp,
@@ -19975,6 +19912,7 @@ lpfc_sli4_resume_rpi(struct lpfc_nodelist *ndlp,
 		return -EIO;
 	}
 
+	/* Post all rpi memory regions to the port. */
 	lpfc_resume_rpi(mboxq, ndlp);
 	if (cmpl) {
 		mboxq->mbox_cmpl = cmpl;
@@ -21444,7 +21382,7 @@ lpfc_sli4_issue_wqe(struct lpfc_hba *phba, struct lpfc_sli4_hdw_queue *qp,
 	struct lpfc_sglq *sglq;
 	struct lpfc_sli_ring *pring;
 	unsigned long iflags;
-	int ret = 0;
+	uint32_t ret = 0;
 
 	/* NVME_LS and NVME_LS ABTS requests. */
 	if (pwqe->cmd_flag & LPFC_IO_NVME_LS) {

@@ -1081,6 +1081,7 @@ ice_get_rx_buf(struct ice_rx_ring *rx_ring, const unsigned int size,
 
 	if (!size) {
 		rx_buf->pagecnt_bias--;
+		rx_buf->has_data = false;
 		return rx_buf;
 	}
 	/* we are reusing so sync this buffer for CPU use */
@@ -1090,6 +1091,7 @@ ice_get_rx_buf(struct ice_rx_ring *rx_ring, const unsigned int size,
 
 	/* We have pulled a buffer for use, so decrement pagecnt_bias */
 	rx_buf->pagecnt_bias--;
+	rx_buf->has_data = true;
 
 	return rx_buf;
 }
@@ -1302,25 +1304,15 @@ static void ice_put_rx_mbuf(struct ice_rx_ring *rx_ring, struct xdp_buff *xdp,
 	u32 idx = rx_ring->first_desc;
 	u32 cnt = rx_ring->count;
 	struct ice_rx_buf *buf;
-	u32 xdp_frags = 0;
-	int i = 0;
-
-	if (unlikely(xdp_buff_has_frags(xdp)))
-		xdp_frags = xdp_get_shared_info_from_buff(xdp)->nr_frags;
 
 	while (idx != ntc) {
 		buf = &rx_ring->rx_buf[idx];
 		if (++idx == cnt)
 			idx = 0;
 
-		/* An XDP program could release fragments from the end of the
-		 * buffer. For these, we need to keep the pagecnt_bias as-is.
-		 * To do this, only adjust pagecnt_bias for fragments up to
-		 * the total remaining after the XDP program has run.
-		 */
-		if (verdict != ICE_XDP_CONSUMED)
+		if (verdict != ICE_XDP_CONSUMED && buf->has_data)
 			ice_rx_buf_adjust_pg_offset(buf, xdp->frame_sz);
-		else if (i++ <= xdp_frags)
+		else
 			buf->pagecnt_bias++;
 
 		ice_put_rx_buf(rx_ring, buf);

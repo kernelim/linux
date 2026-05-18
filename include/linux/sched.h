@@ -936,6 +936,9 @@ struct task_struct {
 	unsigned			sched_migrated:1;
 	unsigned			sched_task_hot:1;
 
+	/* Save user-dumpable when mm goes away */
+	RH_KABI_FILL_HOLE(unsigned user_dumpable:1)
+
 	/* Force alignment to the next boundary: */
 	unsigned			:0;
 
