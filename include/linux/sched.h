@@ -864,6 +864,8 @@ struct task_struct {
 #ifdef CONFIG_PSI
 	RH_KABI_FILL_HOLE(unsigned	sched_psi_wake_requeue:1)
 #endif
+	/* Save user-dumpable when mm goes away */
+	RH_KABI_FILL_HOLE(unsigned	user_dumpable:1)
 
 	/* Force alignment to the next boundary: */
 	unsigned			:0;
