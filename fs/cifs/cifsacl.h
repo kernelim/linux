@@ -77,7 +77,8 @@ struct cifs_sid {
 struct cifs_acl {
 	__le16 revision; /* revision level */
 	__le16 size;
-	__le32 num_aces;
+	__le16 num_aces;
+	__le16 reserved;
 } __attribute__((packed));
 
 /* ACE types - see MS-DTYP 2.4.4.1 */

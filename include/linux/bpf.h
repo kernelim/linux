@@ -88,7 +88,14 @@ struct bpf_map_ops {
 	/* funcs called by prog_array and perf_event_array map */
 	void *(*map_fd_get_ptr)(struct bpf_map *map, struct file *map_file,
 				int fd);
-	void (*map_fd_put_ptr)(void *ptr);
+	RH_KABI_REPLACE(
+		void (*map_fd_put_ptr)(void *ptr),
+		/* If need_defer is true, the implementation should guarantee that
+		 * the to-be-put element is still alive before the bpf program, which
+		 * may manipulate it, exists.
+		 */
+		void (*map_fd_put_ptr)(void *ptr, struct bpf_map *map, bool need_defer)
+	)
 	RH_KABI_BROKEN_REPLACE(
 		u32 (*map_gen_lookup)(struct bpf_map *map, struct bpf_insn *insn_buf),
 		int (*map_gen_lookup)(struct bpf_map *map, struct bpf_insn *insn_buf)
@@ -184,7 +191,10 @@ struct bpf_map {
 	RH_KABI_BROKEN_INSERT(u32 btf_vmlinux_value_type_id)
 	RH_KABI_REPLACE(bool unpriv_array, bool bypass_spec_v1)
 	RH_KABI_FILL_HOLE(bool frozen) /* write-once; write-protected by freeze_mutex*/
-	/* 22 bytes hole */
+	RH_KABI_FILL_HOLE(bool free_after_mult_rcu_gp)
+	RH_KABI_FILL_HOLE(bool free_after_rcu_gp)
+	RH_KABI_FILL_HOLE(atomic64_t sleepable_refcnt)
+	/* 16 bytes hole */
 
 	/* The 3rd and 4th cacheline with misc members to avoid false sharing
 	 * particularly with refcounting.
@@ -195,7 +205,11 @@ struct bpf_map {
 	) /* RH_KABI_BROKEN_REMOVE_BLOCK */
 	RH_KABI_BROKEN_INSERT(atomic64_t refcnt ____cacheline_aligned)
 	RH_KABI_BROKEN_REPLACE(atomic_t usercnt, atomic64_t usercnt)
-	struct work_struct work;
+	/* rcu is used before freeing and work is only used during freeing */
+	RH_KABI_REPLACE(struct work_struct work, union {
+		struct work_struct work;
+		struct rcu_head rcu;
+	})
 	RH_KABI_BROKEN_REMOVE(char name[BPF_OBJ_NAME_LEN])
 	RH_KABI_BROKEN_INSERT(struct mutex freeze_mutex)
 	RH_KABI_BROKEN_INSERT(u64 writecnt) /* writable mmap cnt; protected by freeze_mutex */

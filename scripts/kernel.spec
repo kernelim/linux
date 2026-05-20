@@ -38,10 +38,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.125.1.el8_10
+%define pkgrelease 553.126.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.125.1%{?dist}
+%define specrelease 553.126.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2693,13 +2693,113 @@ fi
 #
 #
 %changelog
-* Wed May 20 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.125.1
+* Thu May 28 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.126.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Wed May 20 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.126.1.el8_10]
+- crypto: af_alg - Work around empty control messages without MSG_MORE (Thomas Huth) [RHEL-175772]
+- crypto: af_alg - Fix regression on empty requests (Thomas Huth) [RHEL-175772]
+- crypto: af_alg - fix use-after-free in af_alg_accept() due to bh_lock_sock() (Thomas Huth) [RHEL-175772]
+- crypto: af_alg - remove redundant initializations of sk_family (Thomas Huth) [RHEL-175772]
+- crypto: af_alg - Use bh_lock_sock in sk_destruct (Thomas Huth) [RHEL-175772]
+- crypto: algif_aead - fix uninitialized ctx->init (Thomas Huth) [RHEL-175772]
+- crypto: algif_aead - Only wake up when ctx->more is zero (Thomas Huth) [RHEL-175772]
+- crypto: algif_aead - Do not set MAY_BACKLOG on the async path (Thomas Huth) [RHEL-175772]
+- crypto: null - Remove VLA usage of skcipher (Thomas Huth) [RHEL-175772]
+- smb: client: validate dacloffset before building DACL pointers (Paulo Alcantara) [RHEL-172815]
+- smb: client: use kzalloc to zero-initialize security descriptor buffer (Paulo Alcantara) [RHEL-172815]
+- smb: client: scope end_of_dacl to CIFS_DEBUG2 use in parse_dacl (Paulo Alcantara) [RHEL-172815]
+- smb: client: require a full NFS mode SID before reading mode bits (Paulo Alcantara) [RHEL-172815]
+- smb: client: validate the whole DACL before rewriting it in cifsacl (Paulo Alcantara) [RHEL-172815] {CVE-2026-31709}
+- smb: client: Return a status code only as a constant in sid_to_id() (Paulo Alcantara) [RHEL-172815]
+- cifs: add validation check for the fields in smb_aces (Paulo Alcantara) [RHEL-172815]
+- cifs: fix incorrect validation for num_aces field of smb_acl (Paulo Alcantara) [RHEL-172815]
+- smb: common: change the data type of num_aces to le16 (Paulo Alcantara) [RHEL-172815]
+- netfilter: xt_tcpmss: check remaining length before reading optlen (CKI Backport Bot) [RHEL-174212] {CVE-2026-43190}
+- md/bitmap: fix GPF in write_page caused by resize race (CKI Backport Bot) [RHEL-174088] {CVE-2026-43163}
+- xfs: fix freemap adjustments when adding xattrs to leaf blocks (CKI Backport Bot) [RHEL-174045] {CVE-2026-43158}
+- xfs: delete attr leaf freemap entries when empty (CKI Backport Bot) [RHEL-174045] {CVE-2026-43158}
+- can: raw: fix ro->uniq use-after-free in raw_rcv() (Davide Caratti) [RHEL-170753] {CVE-2026-31532}
+- can: af_can: export can_sock_destruct() (Davide Caratti) [RHEL-170753] {CVE-2026-31532}
+- HID: wacom: fix out-of-bounds read in wacom_intuos_bt_irq (CKI Backport Bot) [RHEL-172734] {CVE-2026-43051}
+- netfilter: nf_conntrack_helper: pass helper to expect cleanup (CKI Backport Bot) [RHEL-172614] {CVE-2026-43027}
+- Bluetooth: MGMT: validate LTK enc_size on load (CKI Backport Bot) [RHEL-172566] {CVE-2026-43020}
+- Bluetooth: SCO: Fix use-after-free in sco_recv_frame() due to missing sock_hold (David Marlin) [RHEL-165057] {CVE-2026-31408}
+- Bluetooth: SCO: Fix UAF on sco_sock_timeout (David Marlin) [RHEL-165057] {CVE-2026-31408}
+- Bluetooth: Fix use-after-free bugs caused by sco_sock_timeout (David Marlin) [RHEL-165057] {CVE-2026-31408}
+- Bluetooth: Init sk_peer_* on bt_sock_alloc (David Marlin) [RHEL-165057] {CVE-2026-31408}
+- Bluetooth: Consolidate code around sk_alloc into a helper function (David Marlin) [RHEL-165057] {CVE-2026-31408}
+- netfilter: ip6t_eui64: reject invalid MAC header for all packets (CKI Backport Bot) [RHEL-171149] {CVE-2026-31685}
+- net: sched: act_csum: validate nested VLAN headers (CKI Backport Bot) [RHEL-171132] {CVE-2026-31684}
+- smb: client: fix mid_q_entry memleak leak with per-mid locking (Paulo Alcantara) [RHEL-164032]
+- smb: client: smb: client: eliminate mid_flags field (Paulo Alcantara) [RHEL-164032]
+- smb: client: add mid_counter_lock to protect the mid counter counter (Paulo Alcantara) [RHEL-164032]
+- smb: client: rename server mid_lock to mid_queue_lock (Paulo Alcantara) [RHEL-164032]
+- smb3: fix lock ordering potential deadlock in cifs_sync_mid_result (Paulo Alcantara) [RHEL-164032]
+- smb: client: remove redundant lstrp update in negotiate protocol (Paulo Alcantara) [RHEL-164032]
+- smb: client: fix race condition in negotiate timeout by using more precise timing (Paulo Alcantara) [RHEL-164032]
+- smb: client: fix first command failure during re-negotiation (Paulo Alcantara) [RHEL-164032]
+- smb: client: fix hang in wait_for_response() for negproto (Paulo Alcantara) [RHEL-164032]
+- ima: don't clear IMA_DIGSIG flag when setting or removing non-IMA xattr (Bruno Meneguele) [RHEL-166886] {CVE-2025-68183}
+- selftests/bpf: Test outer map update operations in syscall program (Viktor Malik) [RHEL-152219]
+- selftests/bpf: Add test cases for inner map (Viktor Malik) [RHEL-152219]
+- bpf: prepare for more bpf syscall to be used from kernel and user space. (Viktor Malik) [RHEL-152219]
+- bpf: Optimize the free of inner map (Viktor Malik) [RHEL-152219]
+- bpf: Defer the free of inner map when necessary (Viktor Malik) [RHEL-152219]
+- bpf: Set need_defer as false when clearing fd array during map free (Viktor Malik) [RHEL-152219]
+- bpf: Add map and need_defer parameters to .map_fd_put_ptr() (Viktor Malik) [RHEL-152219]
+- bpf: Check rcu_read_lock_trace_held() before calling bpf map helpers (Viktor Malik) [RHEL-152219]
+- netfilter: nf_conntrack_h323: check for zero length in DecodeQ931() (CKI Backport Bot) [RHEL-166981] {CVE-2026-23455}
+- ALSA: firewire-motu: fix buffer overflow in hwdep read for DSP events (CKI Backport Bot) [RHEL-166960] {CVE-2025-68347}
+- RDMA/umad: Reject negative data_len in ib_umad_write (Kamal Heib) [RHEL-156872] {CVE-2026-23243}
+- Bluetooth: mgmt: remove NULL check in add_ext_adv_params_complete() (David Marlin) [RHEL-122890]
+- Bluetooth: MGMT: Fix list corruption and UAF in command complete handlers (David Marlin) [RHEL-122890]
+- Bluetooth: MGMT: Fix memory leak in set_ssp_complete (David Marlin) [RHEL-122890]
+- Bluetooth: hci_sync: fix race in hci_cmd_sync_dequeue_once (David Marlin) [RHEL-122890]
+- Bluetooth: hci_sync: Avoid use-after-free in dbg for hci_add_adv_monitor() (David Marlin) [RHEL-122890]
+- Bluetooth: ISO: don't try to remove CIG if there are bound CIS left (David Marlin) [RHEL-122890]
+- Bluetooth: hci_sync: Don't double print name in add/remove adv_monitor (David Marlin) [RHEL-122890]
+- Bluetooth: hci_sync: Avoid use-after-free in dbg for hci_remove_adv_monitor() (David Marlin) [RHEL-122890]
+- Bluetooth: hci_event: Fix Invalid wait context (David Marlin) [RHEL-122890]
+- Bluetooth: hci_sync: Fix use HCI_OP_LE_READ_BUFFER_SIZE_V2 (David Marlin) [RHEL-122890]
+- Bluetooth: hci_conn: Fix crash on hci_create_cis_sync (David Marlin) [RHEL-122890]
+- Bluetooth: hci_conn: Fix not restoring ISO buffer count on disconnect (David Marlin) [RHEL-122890]
+- Bluetooth: Fix HCIGETDEVINFO regression (David Marlin) [RHEL-122890]
+- Bluetooth: hci_sync: Fix hci_read_buffer_size_sync (David Marlin) [RHEL-122890]
+- Bluetooth: hci_sync: fix double mgmt_pending_free() in remove_adv_monitor() (David Marlin) [RHEL-122890]
+- Bluetooth: hci_conn: Fix updating ISO QoS PHY (David Marlin) [RHEL-122890]
+- Bluetooth: MGMT: Fix dangling pointer on mgmt_add_adv_patterns_monitor_complete (David Marlin) [RHEL-122890]
+- Bluetooth: MGMT: Fix possible UAFs (David Marlin) [RHEL-122890] {CVE-2025-39981}
+- Bluetooth: hci_sync: fix set_local_name race condition (David Marlin) [RHEL-122890] {CVE-2025-39981}
+- Bluetooth: hci_sync: Add helper functions to manipulate cmd_sync queue (David Marlin) [RHEL-122890]
+- Bluetooth: Fix race condition in hci_cmd_sync_clear (David Marlin) [RHEL-122890]
+- Bluetooth: hci_sock: Prevent race in socket write iter and sock bind (David Marlin) [RHEL-122890]
+- Bluetooth: MGMT: Protect mgmt_pending list with its own lock (David Marlin) [RHEL-122890]
+- Bluetooth: MGMT: Fix sparse errors (David Marlin) [RHEL-122890]
+- Bluetooth: MGMT: Fix possible crash on mgmt_index_removed (David Marlin) [RHEL-122890]
+- Bluetooth: Add initial implementation of CIS connections (David Marlin) [RHEL-122890]
+- Bluetooth: hci_core: Fix possible buffer overflow (David Marlin) [RHEL-122890]
+- Bluetooth: Keep MGMT pending queue ordered FIFO (David Marlin) [RHEL-122890]
+- Bluetooth: MGMT: Remove unused mgmt_pending_find_data (David Marlin) [RHEL-122890]
+- Bluetooth: MGMT: Fix UAF on mgmt_remove_adv_monitor_complete (David Marlin) [RHEL-122890] {CVE-2025-39981}
+- Bluetooth: MGMT: Fix slab-use-after-free Read in mgmt_remove_adv_monitor_sync (David Marlin) [RHEL-122890]
+- Bluetooth: hci_sync: Using hci_cmd_sync_submit when removing Adv Monitor (David Marlin) [RHEL-122890]
+- Bluetooth: MGMT: Fix possible deadlocks (David Marlin) [RHEL-122890] {CVE-2025-39981}
+- Bluetooth: MGMT: Fix slab-use-after-free Read in set_powered_sync (David Marlin) [RHEL-122890] {CVE-2025-39981}
+- Bluetooth: mgmt: remove NULL check in mgmt_set_connectable_complete() (David Marlin) [RHEL-122890] {CVE-2025-39981}
+- Bluetooth: hci_sync: Refactor remove Adv Monitor (David Marlin) [RHEL-122890] {CVE-2025-39981}
+- Bluetooth: hci_sync: Refactor add Adv Monitor (David Marlin) [RHEL-122890] {CVE-2025-39981}
+- Bluetooth: msft: Move code snippet to correct location (David Marlin) [RHEL-122890]
+- Bluetooth: msft: Clear tracked devices on resume (David Marlin) [RHEL-122890] {CVE-2025-39981}
+- Bluetooth: mgmt: Add MGMT Adv Monitor Device Found/Lost events (David Marlin) [RHEL-122890] {CVE-2025-39981}
+- Bluetooth: msft: Handle MSFT Monitor Device Event (David Marlin) [RHEL-122890] {CVE-2025-39981}
+- net/sched: Only allow act_ct to bind to clsact/ingress qdiscs and shared blocks (CKI Backport Bot) [RHEL-157322] {CVE-2026-23270}
+- libceph: make decode_pool() more resilient against corrupted osdmaps (CKI Backport Bot) [RHEL-142093] {CVE-2025-71116}
 
 * Mon May 18 2026 Denys Vlasenko <dvlasenk@redhat.com> [4.18.0-553.125.1.el8_10]
 - net: skbuff: propagate shared-frag marker through frag-transfer helpers (Sabrina Dubroca) [RHEL-176090] {CVE-2026-46300}

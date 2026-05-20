@@ -87,7 +87,7 @@ void __release_mid(struct kref *refcount)
 #endif
 	struct TCP_Server_Info *server = midEntry->server;
 
-	if (midEntry->resp_buf && (midEntry->mid_flags & MID_WAIT_CANCELLED) &&
+	if (midEntry->resp_buf && (midEntry->wait_cancelled) &&
 	    (midEntry->mid_state == MID_RESPONSE_RECEIVED ||
 	     midEntry->mid_state == MID_RESPONSE_READY) &&
 	    server->ops->handle_cancelled_mid)
@@ -158,12 +158,12 @@ void __release_mid(struct kref *refcount)
 void
 delete_mid(struct mid_q_entry *mid)
 {
-	spin_lock(&mid->server->mid_lock);
-	if (!(mid->mid_flags & MID_DELETED)) {
+	spin_lock(&mid->server->mid_queue_lock);
+	if (mid->deleted_from_q == false) {
 		list_del_init(&mid->qhead);
-		mid->mid_flags |= MID_DELETED;
+		mid->deleted_from_q = true;
 	}
-	spin_unlock(&mid->server->mid_lock);
+	spin_unlock(&mid->server->mid_queue_lock);
 
 	release_mid(mid);
 }
@@ -422,7 +422,7 @@ unmask:
 		 * socket so the server throws away the partial SMB
 		 */
 		cifs_signal_cifsd_for_reconnect(server, false);
-		trace_smb3_partial_send_reconnect(server->CurrentMid,
+		trace_smb3_partial_send_reconnect(server->current_mid,
 						  server->conn_id, server->hostname);
 	}
 smbd_done:
@@ -540,7 +540,7 @@ wait_for_free_credits(struct TCP_Server_Info *server, const int num_credits,
 		in_flight = server->in_flight;
 		spin_unlock(&server->req_lock);
 
-		trace_smb3_add_credits(server->CurrentMid,
+		trace_smb3_add_credits(server->current_mid,
 				server->conn_id, server->hostname, scredits, -1, in_flight);
 		cifs_dbg(FYI, "%s: remove %u credits total=%d\n",
 				__func__, 1, scredits);
@@ -573,7 +573,7 @@ wait_for_free_credits(struct TCP_Server_Info *server, const int num_credits,
 				in_flight = server->in_flight;
 				spin_unlock(&server->req_lock);
 
-				trace_smb3_credit_timeout(server->CurrentMid,
+				trace_smb3_credit_timeout(server->current_mid,
 						server->conn_id, server->hostname, scredits,
 						num_credits, in_flight);
 				cifs_server_dbg(VFS, "wait timed out after %d ms\n",
@@ -616,7 +616,7 @@ wait_for_free_credits(struct TCP_Server_Info *server, const int num_credits,
 					spin_unlock(&server->req_lock);
 
 					trace_smb3_credit_timeout(
-							server->CurrentMid,
+							server->current_mid,
 							server->conn_id, server->hostname,
 							scredits, num_credits, in_flight);
 					cifs_server_dbg(VFS, "wait timed out after %d ms\n",
@@ -646,7 +646,7 @@ wait_for_free_credits(struct TCP_Server_Info *server, const int num_credits,
 			in_flight = server->in_flight;
 			spin_unlock(&server->req_lock);
 
-			trace_smb3_add_credits(server->CurrentMid,
+			trace_smb3_add_credits(server->current_mid,
 					server->conn_id, server->hostname, scredits,
 					-(num_credits), in_flight);
 			cifs_dbg(FYI, "%s: remove %u credits total=%d\n",
@@ -697,7 +697,7 @@ wait_for_compound_request(struct TCP_Server_Info *server, int num,
 		 */
 		if (server->in_flight == 0) {
 			spin_unlock(&server->req_lock);
-			trace_smb3_insufficient_credits(server->CurrentMid,
+			trace_smb3_insufficient_credits(server->current_mid,
 					server->conn_id, server->hostname, scredits,
 					num, in_flight);
 			cifs_dbg(FYI, "%s: %d requests in flight, needed %d total=%d\n",
@@ -747,9 +747,9 @@ static int allocate_mid(struct cifs_ses *ses, struct smb_hdr *in_buf,
 	*ppmidQ = alloc_mid(in_buf, ses->server);
 	if (*ppmidQ == NULL)
 		return -ENOMEM;
-	spin_lock(&ses->server->mid_lock);
+	spin_lock(&ses->server->mid_queue_lock);
 	list_add_tail(&(*ppmidQ)->qhead, &ses->server->pending_mid_q);
-	spin_unlock(&ses->server->mid_lock);
+	spin_unlock(&ses->server->mid_queue_lock);
 	return 0;
 }
 
@@ -849,9 +849,9 @@ cifs_call_async(struct TCP_Server_Info *server, struct smb_rqst *rqst,
 	mid->mid_state = MID_REQUEST_SUBMITTED;
 
 	/* put it on the pending_mid_q */
-	spin_lock(&server->mid_lock);
+	spin_lock(&server->mid_queue_lock);
 	list_add_tail(&mid->qhead, &server->pending_mid_q);
-	spin_unlock(&server->mid_lock);
+	spin_unlock(&server->mid_queue_lock);
 
 	/*
 	 * Need to store the time in mid before calling I/O. For call_async,
@@ -910,10 +910,10 @@ cifs_sync_mid_result(struct mid_q_entry *mid, struct TCP_Server_Info *server)
 	cifs_dbg(FYI, "%s: cmd=%d mid=%llu state=%d\n",
 		 __func__, le16_to_cpu(mid->command), mid->mid, mid->mid_state);
 
-	spin_lock(&server->mid_lock);
+	spin_lock(&server->mid_queue_lock);
 	switch (mid->mid_state) {
 	case MID_RESPONSE_READY:
-		spin_unlock(&server->mid_lock);
+		spin_unlock(&server->mid_queue_lock);
 		return rc;
 	case MID_RETRY_NEEDED:
 		rc = -EAGAIN;
@@ -925,16 +925,19 @@ cifs_sync_mid_result(struct mid_q_entry *mid, struct TCP_Server_Info *server)
 		rc = -EHOSTDOWN;
 		break;
 	default:
-		if (!(mid->mid_flags & MID_DELETED)) {
+		if (mid->deleted_from_q == false) {
 			list_del_init(&mid->qhead);
-			mid->mid_flags |= MID_DELETED;
+			mid->deleted_from_q = true;
 		}
+		spin_unlock(&server->mid_queue_lock);
 		cifs_server_dbg(VFS, "%s: invalid mid state mid=%llu state=%d\n",
 			 __func__, mid->mid, mid->mid_state);
 		rc = -EIO;
+		goto sync_mid_done;
 	}
-	spin_unlock(&server->mid_lock);
+	spin_unlock(&server->mid_queue_lock);
 
+sync_mid_done:
 	release_mid(mid);
 	return rc;
 }
@@ -1234,15 +1237,14 @@ compound_send_recv(const unsigned int xid, struct cifs_ses *ses,
 			cifs_server_dbg(FYI, "Cancelling wait for mid %llu cmd: %d\n",
 				 midQ[i]->mid, le16_to_cpu(midQ[i]->command));
 			send_cancel(server, &rqst[i], midQ[i]);
-			spin_lock(&server->mid_lock);
-			midQ[i]->mid_flags |= MID_WAIT_CANCELLED;
-			if (midQ[i]->mid_state == MID_REQUEST_SUBMITTED ||
-			    midQ[i]->mid_state == MID_RESPONSE_RECEIVED) {
+			spin_lock(&midQ[i]->mid_lock);
+			midQ[i]->wait_cancelled = true;
+			if (midQ[i]->callback) {
 				midQ[i]->callback = cifs_cancelled_callback;
 				cancelled_mid[i] = true;
 				credits[i].value = 0;
 			}
-			spin_unlock(&server->mid_lock);
+			spin_unlock(&midQ[i]->mid_lock);
 		}
 	}
 
@@ -1444,16 +1446,16 @@ SendReceive(const unsigned int xid, struct cifs_ses *ses,
 	rc = wait_for_response(server, midQ);
 	if (rc != 0) {
 		send_cancel(server, &rqst, midQ);
-		spin_lock(&server->mid_lock);
+		spin_lock(&server->mid_queue_lock);
 		if (midQ->mid_state == MID_REQUEST_SUBMITTED ||
 		    midQ->mid_state == MID_RESPONSE_RECEIVED) {
 			/* no longer considered to be "in-flight" */
 			midQ->callback = release_mid;
-			spin_unlock(&server->mid_lock);
+			spin_unlock(&server->mid_queue_lock);
 			add_credits(server, &credits, 0);
 			return rc;
 		}
-		spin_unlock(&server->mid_lock);
+		spin_unlock(&server->mid_queue_lock);
 	}
 
 	rc = cifs_sync_mid_result(midQ, server);
@@ -1626,15 +1628,15 @@ SendReceiveBlockingLock(const unsigned int xid, struct cifs_tcon *tcon,
 		rc = wait_for_response(server, midQ);
 		if (rc) {
 			send_cancel(server, &rqst, midQ);
-			spin_lock(&server->mid_lock);
+			spin_lock(&server->mid_queue_lock);
 			if (midQ->mid_state == MID_REQUEST_SUBMITTED ||
 			    midQ->mid_state == MID_RESPONSE_RECEIVED) {
 				/* no longer considered to be "in-flight" */
 				midQ->callback = release_mid;
-				spin_unlock(&server->mid_lock);
+				spin_unlock(&server->mid_queue_lock);
 				return rc;
 			}
-			spin_unlock(&server->mid_lock);
+			spin_unlock(&server->mid_queue_lock);
 		}
 
 		/* We got the response - restart system call. */
