@@ -1,3 +1,92 @@
+* Thu May 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.18.1.el10_2]
+- xfs: fix freemap adjustments when adding xattrs to leaf blocks (CKI Backport Bot) [RHEL-174051] {CVE-2026-43158}
+- xfs: delete attr leaf freemap entries when empty (CKI Backport Bot) [RHEL-174051] {CVE-2026-43158}
+- Bluetooth: SCO: fix race conditions in sco_sock_connect() (CKI Backport Bot) [RHEL-172603] {CVE-2026-43023}
+- Bluetooth: MGMT: validate LTK enc_size on load (CKI Backport Bot) [RHEL-172577] {CVE-2026-43020}
+- crypto: tegra - Disable softirqs before finalizing request (CKI Backport Bot) [RHEL-133872]
+Resolves: RHEL-133872, RHEL-172577, RHEL-172603, RHEL-174051
+
+* Wed May 20 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.17.1.el10_2]
+- dm-thin: fix metadata refcount underflow (Benjamin Marzinski) [RHEL-169625]
+- redhat/kernel.spec.template: disable OBJTOOL_WERROR for gcov builds (Oleksii Baranov)
+- mm/page_alloc: clear page->private in free_pages_prepare() (Rafael Aquini) [RHEL-174756] {CVE-2026-43303}
+- dpaa2-switch: validate num_ifs to prevent out-of-bounds write (CKI Backport Bot) [RHEL-174258] {CVE-2026-43205}
+- dpaa2-switch: prevent ZERO_SIZE_PTR dereference when num_ifs is zero (CKI Backport Bot) [RHEL-174258] {CVE-2026-43205}
+- mm: thp: deny THP for files on anonymous inodes (Rafael Aquini) [RHEL-171617] {CVE-2026-23375}
+- fs: add S_ANON_INODE (Rafael Aquini) [RHEL-171617]
+- anon_inode: raise SB_I_NODEV and SB_I_NOEXEC (Rafael Aquini) [RHEL-171617]
+- pidfs: use anon_inode_setattr() (Rafael Aquini) [RHEL-171617]
+- anon_inode: explicitly block ->setattr() (Rafael Aquini) [RHEL-171617]
+- pidfs: use anon_inode_getattr() (Rafael Aquini) [RHEL-171617]
+- anon_inode: use a proper mode internally (Rafael Aquini) [RHEL-171617]
+- ice: set max queues in alloc_etherdev_mqs() (CKI Backport Bot) [RHEL-174331]
+- ice: use netif_get_num_default_rss_queues() (CKI Backport Bot) [RHEL-174331]
+- net: Fix rcu_tasks stall in threaded busypoll (CKI Backport Bot) [RHEL-170809]
+- netfilter: xt_tcpmss: check remaining length before reading optlen (CKI Backport Bot) [RHEL-174217] {CVE-2026-43190}
+- netfilter: ctnetlink: ensure safe access to master conntrack (CKI Backport Bot) [RHEL-173872] {CVE-2026-43116}
+- wifi: brcmfmac: validate bsscfg indices in IF events (CKI Backport Bot) [RHEL-173857] {CVE-2026-43110}
+- redhat/configs: enable CONFIG_AQTION on all archs (CKI Backport Bot) [RHEL-171944]
+- HID: wacom: fix out-of-bounds read in wacom_intuos_bt_irq (CKI Backport Bot) [RHEL-172745] {CVE-2026-43051}
+- netfilter: nf_conntrack_helper: pass helper to expect cleanup (CKI Backport Bot) [RHEL-172625] {CVE-2026-43027}
+- io_uring/rsrc: reject zero-length fixed buffer import (CKI Backport Bot) [RHEL-172556] {CVE-2026-43006}
+- dpll: zl3073x: Remove redundant cleanup in devm_dpll_init() (CKI Backport Bot) [RHEL-164434]
+- dpll: zl3073x: fix REF_PHASE_OFFSET_COMP register width for some chip IDs (CKI Backport Bot) [RHEL-164434]
+- dpll: zl3073x: Fix ref frequency setting (CKI Backport Bot) [RHEL-164434]
+- dpll: zl3073x: Include current frequency in supported frequencies list (CKI Backport Bot) [RHEL-164434]
+- dpll: zl3073x: Add output pin frequency helper (CKI Backport Bot) [RHEL-164434]
+- cifs: make default value of retrans as zero (Paulo Alcantara) [RHEL-171637]
+- cifs: remove unnecessary tracing after put tcon (Paulo Alcantara) [RHEL-171637]
+- netfilter: ip6t_eui64: reject invalid MAC header for all packets (CKI Backport Bot) [RHEL-171159] {CVE-2026-31685}
+- net: sched: act_csum: validate nested VLAN headers (CKI Backport Bot) [RHEL-171142] {CVE-2026-31684}
+- drm/mgag200: fix mgag200_bmc_stop_scanout() (Jocelyn Falempe) [RHEL-150180]
+- scsi: lpfc: avoid crashing in lpfc_nlp_get() if lpfc_nodelist was freed (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Revise logging format for failed CT MIB requests" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Update debugfs trace ring initialization messages" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Check for hdwq null ptr when cleaning up lpfc_vport structure" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Skip RSCN processing when FC_UNLOADING flag is set" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Early return out of FDMI cmpl for locally rejected statuses" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Simplify error handling for failed lpfc_get_sli4_parameters cmd" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Relocate clearing initial phba flags from link up to link down hdlr" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Ensure HBA_SETUP flag is used only for SLI4 in dev_loss_tmo_callbk" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Move clearing of HBA_SETUP flag to before lpfc_sli4_queue_unset" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Revise CQ_CREATE_SET mailbox bitfield definitions" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Modify end-of-life adapters' model descriptions" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Update lpfc version to 14.4.0.10" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Copyright updates for 14.4.0.10 patches" (Ewan D. Milne) [RHEL-169786]
+- Revert "lpfc: don't use file->f_path.dentry for comparisons" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Fix wrong function reference in a comment" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: use min() to improve code" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Use int type to store negative error codes" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Remove unused member variables in struct lpfc_hba and lpfc_vport" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Abort outstanding ELS WQEs regardless of if rmmod is in progress" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Clean up allocated queues when queue setup mbox commands fail" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Remove ndlp kref decrement clause for F_Port_Ctrl in lpfc_cleanup" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Decrement ndlp kref after FDISC retries exhausted" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Check return status of lpfc_reset_flush_io_context during TGT_RESET" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Ensure PLOGI_ACC is sent prior to PRLI in Point to Point topology" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Define size of debugfs entry for xri rebalancing" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Fix memory leak when nvmeio_trc debugfs entry is used" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Use switch case statements in DIF debugfs handlers" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Clean up extraneous phba dentries" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Convert debugfs directory counts from atomic to unsigned int" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Update lpfc version to 14.4.0.11" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Copyright updates for 14.4.0.11 patches" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Update various NPIV diagnostic log messaging" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Revise discovery related function headers and comments" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Remove redundant NULL ptr assignment in lpfc_els_free_iocb()" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Ensure unregistration of rpis for received PLOGIs" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Fix leaked ndlp krefs when in point-to-point topology" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Modify kref handling for Fabric Controller ndlps" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Fix reusing an ndlp that is marked NLP_DROPPED during FLOGI" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Allow support for BB credit recovery in point-to-point topology" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Add capability to register Platform Name ID to fabric" (Ewan D. Milne) [RHEL-169786]
+- Revert "scsi: lpfc: Update lpfc version to 14.4.0.12" (Ewan D. Milne) [RHEL-169786]
+- netfilter: nf_conntrack_h323: check for zero length in DecodeQ931() (CKI Backport Bot) [RHEL-166991] {CVE-2026-23455}
+- ima: don't clear IMA_DIGSIG flag when setting or removing non-IMA xattr (Bruno Meneguele) [RHEL-169738] {CVE-2025-68183}
+- can: j1939: j1939_session_new(): fix skb reference counting (CKI Backport Bot) [RHEL-162260] {CVE-2024-56645}
+- netfilter: nf_tables: release flowtable after rcu grace period on error (CKI Backport Bot) [RHEL-160469] {CVE-2026-23392}
+Resolves: RHEL-150180, RHEL-160469, RHEL-162260, RHEL-164434, RHEL-166991, RHEL-169625, RHEL-169738, RHEL-169786, RHEL-170809, RHEL-171142, RHEL-171159, RHEL-171617, RHEL-171637, RHEL-171944, RHEL-172556, RHEL-172625, RHEL-172745, RHEL-173857, RHEL-173872, RHEL-174217, RHEL-174258, RHEL-174331, RHEL-174756
+
 * Mon May 18 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.16.1.el10_2]
 - net: skbuff: propagate shared-frag marker through frag-transfer helpers (Sabrina Dubroca) [RHEL-176053] {CVE-2026-46300}
 - net: skbuff: preserve shared-frag marker during coalescing (Sabrina Dubroca) [RHEL-176053] {CVE-2026-46300}

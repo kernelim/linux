@@ -60,25 +60,37 @@ fi
 last_synced=$(sed -n '/\[.*\]$/{s/.*\[\([^]]*\)\]$/\1/p;q;}' "$distgit_clog")
 
 pkg_version="$DISTBASEVERSION"
+HEAD="${HEAD:-HEAD}"
 
-# Assemble: rebuild entry + new kernel entries + previous changelog
+# Get the commit SHA for the rebuild reference
+commit_sha=$(git rev-parse --short=12 "$HEAD")
+
+# Assemble: rebuild entry combined with first kernel entry + remaining entries + previous changelog
 {
-	# Create the rebuild entry, e.g.:
-	#   * Thu Feb 19 2026 Scott Weaver <scweaver@redhat.com> - 6.12.0-209.el10iv
-	#   - Rebuilt for kernel-automotive
+	# Extract new entries from the kernel changelog.
+	# Take everything since the last synced version.
+	new_entries=$(mktemp)
+	if [[ -n "$last_synced" ]]; then
+		sed "/\[${last_synced}\]/,\$d" "$kernel_clog" > "$new_entries"
+	else
+		cat "$kernel_clog" > "$new_entries"
+	fi
+
+	# Create the rebuild entry
+	# Example output:
+	#   * Mon Apr 20 2026 Oleksii Baranov <olebaran@redhat.com> - 6.12.0-220.el10iv
+	#   - Rebuild base kernel commit 5df0f425c0d3 for kernel-automotive
+	#   - iommufd: Report ATS not supported status via IOMMU_GET_HW_INFO (Jerry Snitselaar) [RHEL-160188]
+	#   Resolves: RHEL-160188
 	cdate=$(LC_ALL=C date +"%a %b %d %Y")
 	cname="$(git config user.name) <$(git config user.email)>"
 	echo "* $cdate $cname - $pkg_version"
-	echo "- Rebuilt for ${SPECPACKAGE_NAME}"
-	echo ""
+	echo "- Rebuild base kernel commit ${commit_sha} for ${SPECPACKAGE_NAME}"
 
-	# Extract only new entries from the kernel changelog.
-	# Take everything since the last synced version.
-	if [[ -n "$last_synced" ]]; then
-		sed "/\[${last_synced}\]/,\$d" "$kernel_clog"
-	else
-		cat "$kernel_clog"
-	fi
+	# Remove the first line starting with * (the kernel entry header) and keep everything else
+	sed '0,/^\* /{ /^\* /d; }' "$new_entries"
+
+	rm -f "$new_entries"
 
 	# Append the changelog that we fetched from dist-git
 	cat "$distgit_clog"
