@@ -1,1 +1,1 @@
-# CONFIG_SCLP_OFB is not set
+CONFIG_SCLP_OFB=y

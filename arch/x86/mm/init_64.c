@@ -32,6 +32,7 @@
 #include <linux/memremap.h>
 #include <linux/nmi.h>
 #include <linux/gfp.h>
+#include <linux/iommu.h>
 #include <linux/kcore.h>
 #include <linux/bootmem_info.h>
 
@@ -1016,6 +1017,9 @@ static void __meminit free_pagetable(struct page *page, int order)
 {
 	unsigned long magic;
 	unsigned int nr_pages = 1 << order;
+
+	/* Flush IOMMU paging structure caches before freeing PT page */
+	iommu_sva_invalidate_kva_range(PAGE_OFFSET, TLB_FLUSH_ALL);
 
 	/* bootmem page has reserved flag */
 	if (PageReserved(page)) {

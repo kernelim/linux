@@ -21,6 +21,7 @@
 #include <linux/kernel.h>
 #include <linux/cc_platform.h>
 #include <linux/set_memory.h>
+#include <linux/iommu.h>
 
 #include <asm/e820/api.h>
 #include <asm/processor.h>
@@ -1204,6 +1205,8 @@ static bool try_to_free_pte_page(pte_t *pte)
 		if (!pte_none(pte[i]))
 			return false;
 
+	/* Flush IOMMU paging structure caches before freeing PT page */
+	iommu_sva_invalidate_kva_range(PAGE_OFFSET, TLB_FLUSH_ALL);
 	free_page((unsigned long)pte);
 	return true;
 }
@@ -1216,6 +1219,8 @@ static bool try_to_free_pmd_page(pmd_t *pmd)
 		if (!pmd_none(pmd[i]))
 			return false;
 
+	/* Flush IOMMU paging structure caches before freeing PT page */
+	iommu_sva_invalidate_kva_range(PAGE_OFFSET, TLB_FLUSH_ALL);
 	free_page((unsigned long)pmd);
 	return true;
 }

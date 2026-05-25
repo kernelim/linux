@@ -1,3 +1,64 @@
+* Mon May 25 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.12.1.el9_8]
+- dm-thin: fix metadata refcount underflow (Benjamin Marzinski) [RHEL-169626]
+- netfilter: xt_tcpmss: check remaining length before reading optlen (CKI Backport Bot) [RHEL-174216] {CVE-2026-43190}
+- wifi: brcmfmac: validate bsscfg indices in IF events (CKI Backport Bot) [RHEL-173848] {CVE-2026-43110}
+- Bluetooth: SCO: fix race conditions in sco_sock_connect() (CKI Backport Bot) [RHEL-172599] {CVE-2026-43023}
+- Bluetooth: MGMT: validate LTK enc_size on load (CKI Backport Bot) [RHEL-172572] {CVE-2026-43020}
+- crypto: tegra - Disable softirqs before finalizing request (CKI Backport Bot) [RHEL-170914]
+- proc: fix type confusion in pde_set_flags() (Abhi Das) [RHEL-163343] {CVE-2025-38653}
+- proc: fix missing pde_set_flags() for net proc files (Abhi Das) [RHEL-163343] {CVE-2025-38653}
+- proc: use the same treatment to check proc_lseek as ones for proc_read_iter et.al (CKI Backport Bot) [RHEL-163343] {CVE-2025-38653}
+- pNFS: fix a missing wake up while waiting on NFS_LAYOUT_DRAIN (Olga Kornievskaia) [RHEL-157470]
+Resolves: RHEL-157470, RHEL-163343, RHEL-169626, RHEL-170914, RHEL-172572, RHEL-172599, RHEL-173848, RHEL-174216
+
+* Tue May 19 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.11.1.el9_8]
+- mm/page_alloc: clear page->private in free_pages_prepare() (Rafael Aquini) [RHEL-174750] {CVE-2026-43303}
+- ice: fix infinite recursion in ice_cfg_tx_topo via ice_init_dev_hw (CKI Backport Bot) [RHEL-175441]
+- smb: client: validate dacloffset before building DACL pointers (Paulo Alcantara) [RHEL-172821]
+- smb: client: use kzalloc to zero-initialize security descriptor buffer (Paulo Alcantara) [RHEL-172821]
+- smb: client: scope end_of_dacl to CIFS_DEBUG2 use in parse_dacl (Paulo Alcantara) [RHEL-172821]
+- smb: client: require a full NFS mode SID before reading mode bits (Paulo Alcantara) [RHEL-172821]
+- smb: client: validate the whole DACL before rewriting it in cifsacl (Paulo Alcantara) [RHEL-172821] {CVE-2026-31709}
+- Bluetooth: SCO: Fix use-after-free in sco_recv_frame() due to missing sock_hold (David Marlin) [RHEL-165063] {CVE-2026-31408}
+- xfs: fix freemap adjustments when adding xattrs to leaf blocks (CKI Backport Bot) [RHEL-174058] {CVE-2026-43158}
+- xfs: delete attr leaf freemap entries when empty (CKI Backport Bot) [RHEL-174058] {CVE-2026-43158}
+- redhat/configs: enable CONFIG_SCLP_OFB for s390x (Jan Polensky) [RHEL-172927]
+- HID: wacom: fix out-of-bounds read in wacom_intuos_bt_irq (CKI Backport Bot) [RHEL-172740] {CVE-2026-43051}
+- netfilter: nf_conntrack_helper: pass helper to expect cleanup (CKI Backport Bot) [RHEL-172620] {CVE-2026-43027}
+- s390/pci: Avoid deadlock between PCI error recovery and mlx5 crdump (Ramesh Chhetri) [RHEL-166859]
+- ice: add dpll peer notification for paired SMA and U.FL pins (Petr Oros) [RHEL-171829]
+- ice: fix missing dpll notifications for SW pins (Petr Oros) [RHEL-171829]
+- dpll: export __dpll_pin_change_ntf() for use under dpll_lock (Petr Oros) [RHEL-171829]
+- ice: fix SMA and U.FL pin state changes affecting paired pin (Petr Oros) [RHEL-162179]
+- ice: fix missing SMA pin initialization in DPLL subsystem (Petr Oros) [RHEL-171832]
+- ice: fix NULL pointer dereference in ice_reset_all_vfs() (Petr Oros) [RHEL-172257]
+- dpll: zl3073x: Remove redundant cleanup in devm_dpll_init() (CKI Backport Bot) [RHEL-164442]
+- dpll: zl3073x: fix REF_PHASE_OFFSET_COMP register width for some chip IDs (CKI Backport Bot) [RHEL-164442]
+- dpll: zl3073x: Fix ref frequency setting (CKI Backport Bot) [RHEL-164442]
+- dpll: zl3073x: Include current frequency in supported frequencies list (CKI Backport Bot) [RHEL-164442]
+- dpll: zl3073x: Add output pin frequency helper (CKI Backport Bot) [RHEL-164442]
+- scsi: storvsc: Handle PERSISTENT_RESERVE_IN truncation for Hyper-V vFC (Vitaly Kuznetsov) [RHEL-171378]
+- netfilter: ip6t_eui64: reject invalid MAC header for all packets (CKI Backport Bot) [RHEL-171155] {CVE-2026-31685}
+- net: sched: act_csum: validate nested VLAN headers (CKI Backport Bot) [RHEL-171138] {CVE-2026-31684}
+- cifs: make default value of retrans as zero (Paulo Alcantara) [RHEL-170960]
+- ice: fix ice_ptp_read_tx_hwtstamp_status_eth56g (Petr Oros) [RHEL-170701]
+- ice: fix ready bitmap check for non-E822 devices (Petr Oros) [RHEL-170701]
+- ice: perform PHY soft reset for E825C ports at initialization (Petr Oros) [RHEL-170701]
+- ice: fix timestamp interrupt configuration for E825C (Petr Oros) [RHEL-170701]
+- drm/mgag200: fix mgag200_bmc_stop_scanout() (Jocelyn Falempe) [RHEL-150179]
+- nbd: defer config unlock in nbd_genl_connect (Jeff Moyer) [RHEL-166950] {CVE-2025-68366}
+- x86/mm: flush IOMMU before freeing kernel page table pages (Jerry Snitselaar) [RHEL-167100] {CVE-2025-71089}
+- iommu/sva: add kernel page table IOTLB flush notification (Jerry Snitselaar) [RHEL-167100] {CVE-2025-71089}
+- netfilter: nf_conntrack_h323: check for zero length in DecodeQ931() (CKI Backport Bot) [RHEL-166987] {CVE-2026-23455}
+- crypto: asymmetric_keys - prevent overflow in asymmetric_key_generate_id (CKI Backport Bot) [RHEL-166927] {CVE-2025-68724}
+- ima: don't clear IMA_DIGSIG flag when setting or removing non-IMA xattr (Bruno Meneguele) [RHEL-169734] {CVE-2025-68183}
+- i2c: i801: Revert "i2c: i801: replace acpi_lock with I2C bus lock" (David Arcari) [RHEL-155312]
+- ice: fix PTP timestamping broken by SyncE code on E825C (Petr Oros) [RHEL-162182]
+- ice: fix missing TX timestamps interrupts on E825 devices (CKI Backport Bot) [RHEL-162185]
+- Revert "mm: pcp: increase pcp->free_count threshold to trigger free_high" (Luiz Capitulino) [RHEL-163464]
+- netfilter: nf_tables: release flowtable after rcu grace period on error (CKI Backport Bot) [RHEL-160461] {CVE-2026-23392}
+Resolves: RHEL-150179, RHEL-155312, RHEL-160461, RHEL-162179, RHEL-162182, RHEL-162185, RHEL-163464, RHEL-164442, RHEL-165063, RHEL-166859, RHEL-166927, RHEL-166950, RHEL-166987, RHEL-167100, RHEL-169734, RHEL-170701, RHEL-170960, RHEL-171138, RHEL-171155, RHEL-171378, RHEL-171829, RHEL-171832, RHEL-172257, RHEL-172620, RHEL-172740, RHEL-172821, RHEL-172927, RHEL-174058, RHEL-174750, RHEL-175441
+
 * Mon May 18 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.10.1.el9_8]
 - net: skbuff: propagate shared-frag marker through frag-transfer helpers (Sabrina Dubroca) [RHEL-176064] {CVE-2026-46300}
 - net: move skb_gro_receive_list from udp to core (Sabrina Dubroca) [RHEL-176064] {CVE-2026-46300}
