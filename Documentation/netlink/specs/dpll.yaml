@@ -213,6 +213,27 @@ definitions:
         doc: pin enabled for automatic input selection
     render-max: true
   -
+    type: enum
+    name: pin-operstate
+    doc: |
+      defines possible operational states of a pin with respect to its
+      parent DPLL device, valid values for DPLL_A_PIN_OPERSTATE attribute
+    entries:
+      -
+        name: active
+        doc: pin is qualified and actively used by the DPLL
+        value: 1
+      -
+        name: standby
+        doc: pin is qualified but not actively used by the DPLL
+      -
+        name: no-signal
+        doc: pin does not have a valid signal
+      -
+        name: qual-failed
+        doc: pin signal failed qualification (e.g. frequency or phase monitor)
+    render-max: true
+  -
     type: flags
     name: pin-capabilities
     doc: |
@@ -240,6 +261,20 @@ definitions:
       integer part of a measured phase offset value.
       Value of (DPLL_A_PHASE_OFFSET % DPLL_PHASE_OFFSET_DIVIDER) is a
       fractional part of a measured phase offset value.
+  -
+    type: const
+    name: pin-measured-frequency-divider
+    value: 1000
+    doc: |
+      pin measured frequency divider allows userspace to calculate
+      a value of measured input frequency as a fractional value with
+      three digit decimal precision (millihertz).
+      Value of (DPLL_A_PIN_MEASURED_FREQUENCY /
+      DPLL_PIN_MEASURED_FREQUENCY_DIVIDER) is an integer part of
+      a measured frequency value.
+      Value of (DPLL_A_PIN_MEASURED_FREQUENCY %
+      DPLL_PIN_MEASURED_FREQUENCY_DIVIDER) is a fractional part of
+      a measured frequency value.
   -
     type: enum
     name: feature-state
@@ -319,6 +354,13 @@ attribute-sets:
         name: phase-offset-avg-factor
         type: u32
         doc: Averaging factor applied to calculation of reported phase offset.
+      -
+        name: frequency-monitor
+        type: u32
+        enum: feature-state
+        doc: Current or desired state of the frequency monitor feature.
+          If enabled, dpll device shall measure all currently available
+          inputs for their actual input frequency.
   -
     name: pin
     enum-name: dpll_a_pin
@@ -406,12 +448,14 @@ attribute-sets:
         name: fractional-frequency-offset
         type: sint
         doc: |
-          The FFO (Fractional Frequency Offset) between the RX and TX
-          symbol rate on the media associated with the pin:
-          (rx_frequency-tx_frequency)/rx_frequency
+          The FFO (Fractional Frequency Offset) of the pin.
+          At top level this represents the RX vs TX symbol rate
+          offset on the media associated with the pin. Inside
+          the pin-parent-device nest it represents the frequency
+          offset between the pin and its parent DPLL device.
           Value is in PPM (parts per million).
-          This may be implemented for example for pin of type
-          PIN_TYPE_SYNCE_ETH_PORT.
+          This is a lower-precision version of
+          fractional-frequency-offset-ppt.
       -
         name: esync-frequency
         type: u64
@@ -450,12 +494,33 @@ attribute-sets:
         name: fractional-frequency-offset-ppt
         type: sint
         doc: |
-          The FFO (Fractional Frequency Offset) of the pin with respect to
-          the nominal frequency.
-          Value = (frequency_measured - frequency_nominal) / frequency_nominal
+          The FFO (Fractional Frequency Offset) of the pin.
+          At top level this represents the RX vs TX symbol rate
+          offset on the media associated with the pin. Inside
+          the pin-parent-device nest it represents the frequency
+          offset between the pin and its parent DPLL device.
           Value is in PPT (parts per trillion, 10^-12).
-          Note: This attribute provides higher resolution than the standard
-          fractional-frequency-offset (which is in PPM).
+          This is a higher-precision version of
+          fractional-frequency-offset.
+      -
+        name: measured-frequency
+        type: u64
+        doc: |
+          The measured frequency of the input pin in millihertz (mHz).
+          Value of (DPLL_A_PIN_MEASURED_FREQUENCY /
+          DPLL_PIN_MEASURED_FREQUENCY_DIVIDER) is an integer part (Hz)
+          of a measured frequency value.
+          Value of (DPLL_A_PIN_MEASURED_FREQUENCY %
+          DPLL_PIN_MEASURED_FREQUENCY_DIVIDER) is a fractional part
+          of a measured frequency value.
+      -
+        name: operstate
+        type: u32
+        enum: pin-operstate
+        doc: |
+          Operational state of the pin with respect to its parent DPLL
+          device. Unlike state (which reflects the administrative intent),
+          operstate reflects the actual hardware status.
 
   -
     name: pin-parent-device
@@ -470,7 +535,13 @@ attribute-sets:
       -
         name: state
       -
+        name: operstate
+      -
         name: phase-offset
+      -
+        name: fractional-frequency-offset
+      -
+        name: fractional-frequency-offset-ppt
   -
     name: pin-parent-pin
     subset-of: pin
@@ -544,6 +615,7 @@ operations:
             - type
             - phase-offset-monitor
             - phase-offset-avg-factor
+            - frequency-monitor
 
       dump:
         reply: *dev-attrs
@@ -563,6 +635,7 @@ operations:
             - mode
             - phase-offset-monitor
             - phase-offset-avg-factor
+            - frequency-monitor
     -
       name: device-create-ntf
       doc: Notification about device appearing
@@ -643,6 +716,7 @@ operations:
             - esync-frequency-supported
             - esync-pulse
             - reference-sync
+            - measured-frequency
 
       dump:
         request:

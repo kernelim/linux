@@ -1,3 +1,52 @@
+* Tue Jun 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.20.1.el10_2]
+- smb: client: reject userspace cifs.spnego descriptions (Paulo Alcantara) [RHEL-178932] {CVE-2026-46243}
+- redhat/configs: automotive: disable CONFIG_IO_URING (Brian Masney) [RHEL-179469]
+- sched/deadline: Fix dl_server time accounting (Phil Auld) [RHEL-173950]
+- smb: client: fix OOB reads parsing symlink error response (CKI Backport Bot) [RHEL-171475] {CVE-2026-31613}
+- pNFS: fix a missing wake up while waiting on NFS_LAYOUT_DRAIN (Olga Kornievskaia) [RHEL-157466]
+Resolves: RHEL-157466, RHEL-171475, RHEL-173950, RHEL-178932, RHEL-179469
+
+* Thu May 28 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.19.1.el10_2]
+- Bluetooth: hci_sync: Fix UAF in le_read_features_complete (David Marlin) [RHEL-176903] {CVE-2026-43322}
+- Bluetooth: hci_sync: fix leaks when hci_cmd_sync_queue_once fails (David Marlin) [RHEL-176903]
+- Bluetooth: hci_sync: hci_cmd_sync_queue_once() return -EEXIST if exists (David Marlin) [RHEL-176903]
+- Bluetooth: L2CAP: Add support for setting BT_PHY (David Marlin) [RHEL-176903]
+- Bluetooth: hci_conn: Fix using conn->le_{tx,rx}_phy as supported PHYs (David Marlin) [RHEL-176903]
+- Bluetooth: HCI: Add support for LL Extended Feature Set (David Marlin) [RHEL-176903]
+- Bluetooth: ISO: Add support to bind to trigger PAST (David Marlin) [RHEL-176903]
+- Bluetooth: HCI: Add initial support for PAST (David Marlin) [RHEL-176903]
+- netfilter: flowtable: strictly check for maximum number of actions (CKI Backport Bot) [RHEL-176915] {CVE-2026-43329}
+- dpll: zl3073x: report FFO as DPLL vs input reference offset (Ivan Vecera) [RHEL-175824]
+- dpll: add fractional frequency offset to pin-parent-device (Ivan Vecera) [RHEL-175824]
+- dpll: zl3073x: implement pin operational state reporting (Ivan Vecera) [RHEL-175821]
+- dpll: add pin operational state (Ivan Vecera) [RHEL-175821]
+- smb: client: validate dacloffset before building DACL pointers (Paulo Alcantara) [RHEL-172827]
+- smb: client: use kzalloc to zero-initialize security descriptor buffer (Paulo Alcantara) [RHEL-172827]
+- smb: client: scope end_of_dacl to CIFS_DEBUG2 use in parse_dacl (Paulo Alcantara) [RHEL-172827]
+- smb: client: require a full NFS mode SID before reading mode bits (Paulo Alcantara) [RHEL-172827]
+- smb: client: validate the whole DACL before rewriting it in cifsacl (Paulo Alcantara) [RHEL-172827] {CVE-2026-31709}
+- dpll: zl3073x: add ref-sync pair support (Ivan Vecera) [RHEL-167277]
+- dpll: zl3073x: add ref sync and output clock type helpers (Ivan Vecera) [RHEL-167277]
+- dpll: zl3073x: use FIELD_MODIFY() for clear-and-set patterns (Ivan Vecera) [RHEL-167277]
+- dpll: zl3073x: clean up esync get/set and use zl3073x_out_is_ndiv() (Ivan Vecera) [RHEL-167277]
+- dpll: zl3073x: implement frequency monitoring (Ivan Vecera) [RHEL-167837]
+- dpll: add frequency monitoring callback ops (Ivan Vecera) [RHEL-167837]
+- dpll: add frequency monitoring to netlink spec (Ivan Vecera) [RHEL-167837]
+- dpll: zl3073x: drop selected and simplify connected ref getter (Ivan Vecera) [RHEL-172930]
+- dpll: zl3073x: add reference priority to zl3073x_chan (Ivan Vecera) [RHEL-172930]
+- dpll: zl3073x: add DPLL channel status fields to zl3073x_chan (Ivan Vecera) [RHEL-172930]
+- dpll: zl3073x: introduce zl3073x_chan for DPLL channel state (Ivan Vecera) [RHEL-172930]
+- dpll: zl3073x: add zl3073x_ref_state_update helper (Ivan Vecera) [RHEL-172930]
+- dpll: zl3073x: use struct_group to partition states (Ivan Vecera) [RHEL-172930]
+- dpll: zl3073x: add die temperature reporting for supported chips (Ivan Vecera) [RHEL-172930]
+- dpll: zl3073x: detect DPLL channel count from chip ID at runtime (Ivan Vecera) [RHEL-172930]
+- crypto: authenc - Correctly pass EINPROGRESS back up to the caller (CKI Backport Bot) [RHEL-171302]
+- nbd: defer config unlock in nbd_genl_connect (CKI Backport Bot) [RHEL-166953] {CVE-2025-68366}
+- proc: fix type confusion in pde_set_flags() (Abhi Das) [RHEL-163345] {CVE-2025-38653}
+- proc: fix missing pde_set_flags() for net proc files (Abhi Das) [RHEL-163345] {CVE-2025-38653}
+- proc: use the same treatment to check proc_lseek as ones for proc_read_iter et.al (CKI Backport Bot) [RHEL-163345] {CVE-2025-38653}
+Resolves: RHEL-163345, RHEL-166953, RHEL-167277, RHEL-167837, RHEL-171302, RHEL-172827, RHEL-172930, RHEL-175821, RHEL-175824, RHEL-176903, RHEL-176915
+
 * Thu May 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.18.1.el10_2]
 - xfs: fix freemap adjustments when adding xattrs to leaf blocks (CKI Backport Bot) [RHEL-174051] {CVE-2026-43158}
 - xfs: delete attr leaf freemap entries when empty (CKI Backport Bot) [RHEL-174051] {CVE-2026-43158}
