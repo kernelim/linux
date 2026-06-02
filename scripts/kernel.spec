@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.12.1
+%define pkgrelease 687.13.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.12.1.el9_8
+%define tarfile_release 5.14.0-687.13.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.12.1%{?buildid}%{?dist}
+%define specrelease 687.13.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.12.1.el9_8
+%define kabiversion 5.14.0-687.13.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3713,10 +3713,30 @@ fi
 #
 #
 %changelog
-* Thu May 28 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.12.1
+* Tue Jun 09 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.13.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Tue Jun 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.13.1.el9_8]
+- smb: client: reject userspace cifs.spnego descriptions (Paulo Alcantara) [RHEL-178944] {CVE-2026-46243}
+- s390/dasd: Copy detected format information to secondary device (Ramesh Chhetri) [RHEL-176472]
+- s390/dasd: Move quiesce state with pprc swap (Ramesh Chhetri) [RHEL-176472]
+- s390/dasd: Fix gendisk parent after copy pair swap (Ramesh Chhetri) [RHEL-176472]
+- nvme: nvme-fc: Ensure ->ioerr_work is cancelled in nvme_fc_delete_ctrl() (Ewan D. Milne) [RHEL-171745]
+- nvme: nvme-fc: move tagset removal to nvme_fc_delete_ctrl() (Ewan D. Milne) [RHEL-171745]
+- Buffer overflow in drivers/xen/sys-hypervisor.c (Vitaly Kuznetsov) [RHEL-172510] {CVE-2026-31786}
+- crypto: authenc - Correctly pass EINPROGRESS back up to the caller (Vladislav Dronov) [RHEL-172167]
+- crypto: authenc - Fix sleep in atomic context in decrypt_tail (Vladislav Dronov) [RHEL-172167]
+- smb: client: fix OOB reads parsing symlink error response (CKI Backport Bot) [RHEL-171471] {CVE-2026-31613}
+- mm/page_alloc: add vm.thp_thisnode_reclaim sysctl to allow THP reclaim on local node (Nico Pache) [RHEL-164778]
+- mm/page_alloc: simplify __alloc_pages_slowpath() flow (Nico Pache) [RHEL-164778]
+- mm/page_alloc: refactor the initial compaction handling (Nico Pache) [RHEL-164778]
+- mm/page_alloc: ignore the exact initial compaction result (Nico Pache) [RHEL-164778]
+- mm, page_alloc, thp: prevent reclaim for __GFP_THISNODE THP allocations (Nico Pache) [RHEL-164778]
+- mm/page_alloc.c: avoid infinite retries caused by cpuset race (Nico Pache) [RHEL-164778]
+- mm: warn about illegal __GFP_NOFAIL usage in a more appropriate location and manner (Nico Pache) [RHEL-164778]
+- mm: document __GFP_NOFAIL must be blockable (Nico Pache) [RHEL-164778]
 
 * Mon May 25 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.12.1.el9_8]
 - dm-thin: fix metadata refcount underflow (Benjamin Marzinski) [RHEL-169626]
