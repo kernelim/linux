@@ -38,10 +38,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.126.1.el8_10
+%define pkgrelease 553.129.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.126.1%{?dist}
+%define specrelease 553.129.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2693,13 +2693,28 @@ fi
 #
 #
 %changelog
-* Thu May 28 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.126.1
+* Tue Jun 09 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.129.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Tue Jun 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.129.1.el8_10]
+- smb: client: reject userspace cifs.spnego descriptions (Paulo Alcantara) [RHEL-178938] {CVE-2026-46243}
+
+* Fri May 29 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.128.1.el8_10]
+- smb: client: fix OOB reads parsing symlink error response (Paulo Alcantara) [RHEL-171465] {CVE-2026-31613}
+- geneve: Suppress list corruption splat in geneve_destroy_tunnels(). (Antoine Tenart) [RHEL-168961]
+- geneve: Fix use-after-free in geneve_find_dev(). (Antoine Tenart) [RHEL-168961] {CVE-2025-21858}
+- netfilter: nf_tables: release flowtable after rcu grace period on error (Florian Westphal) [RHEL-160514] {CVE-2026-23392}
+
+* Wed May 27 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.127.1.el8_10]
+- smc: Fix use-after-free in tcp_write_timer_handler(). (Steve Best) [RHEL-167084] {CVE-2023-53781}
+- nbd: defer config unlock in nbd_genl_connect (CKI Backport Bot) [RHEL-166939] {CVE-2025-68366}
+- libceph: prevent potential out-of-bounds reads in handle_auth_done() (CKI Backport Bot) [RHEL-143892] {CVE-2026-22984}
+- libceph: replace overzealous BUG_ON in osdmap_apply_incremental() (CKI Backport Bot) [RHEL-143874] {CVE-2026-22990}
 
 * Wed May 20 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.126.1.el8_10]
 - crypto: af_alg - Work around empty control messages without MSG_MORE (Thomas Huth) [RHEL-175772]

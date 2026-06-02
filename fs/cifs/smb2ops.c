@@ -3134,7 +3134,49 @@ parse_reparse_point(struct reparse_data_buffer *buf,
 }
 
 #define SMB2_SYMLINK_STRUCT_SIZE \
-	(sizeof(struct smb2_err_rsp) - 1 + sizeof(struct smb2_symlink_err_rsp))
+	(sizeof(struct smb2_err_rsp) + sizeof(struct smb2_symlink_err_rsp))
+
+static struct smb2_symlink_err_rsp *symlink_data(const struct kvec *iov)
+{
+	struct smb2_err_rsp *err = iov->iov_base;
+	struct smb2_symlink_err_rsp *sym = ERR_PTR(-EINVAL);
+	u8 *end = (u8 *)err + iov->iov_len;
+	u32 len;
+
+	if (err->ErrorContextCount) {
+		struct smb2_error_context_rsp *p;
+
+		len = (u32)err->ErrorContextCount * (offsetof(struct smb2_error_context_rsp,
+							      ErrorContextData) +
+						     sizeof(struct smb2_symlink_err_rsp));
+		if (le32_to_cpu(err->ByteCount) < len || iov->iov_len < len + sizeof(*err) + 1)
+			return ERR_PTR(-EINVAL);
+
+		p = (struct smb2_error_context_rsp *)err->ErrorData;
+		while ((u8 *)p + sizeof(*p) <= end) {
+			if (le32_to_cpu(p->ErrorId) == SMB2_ERROR_ID_DEFAULT) {
+				sym = (struct smb2_symlink_err_rsp *)p->ErrorContextData;
+				break;
+			}
+			cifs_dbg(FYI, "%s: skipping unhandled error context: 0x%x\n",
+				 __func__, le32_to_cpu(p->ErrorId));
+
+			len = ALIGN(le32_to_cpu(p->ErrorDataLength), 8);
+			p = (struct smb2_error_context_rsp *)(p->ErrorContextData + len);
+		}
+	} else if (le32_to_cpu(err->ByteCount) >= sizeof(*sym) &&
+		   iov->iov_len >= SMB2_SYMLINK_STRUCT_SIZE) {
+		sym = (struct smb2_symlink_err_rsp *)err->ErrorData;
+	}
+
+	if (!IS_ERR(sym) &&
+	    ((u8 *)sym + sizeof(*sym) > end ||
+	     le32_to_cpu(sym->SymLinkErrorTag) != SYMLINK_ERROR_TAG ||
+	     le32_to_cpu(sym->ReparseTag) != IO_REPARSE_TAG_SYMLINK))
+		sym = ERR_PTR(-EINVAL);
+
+	return sym;
+}
 
 static int
 smb2_query_symlink(const unsigned int xid, struct cifs_tcon *tcon,
@@ -3147,7 +3189,6 @@ smb2_query_symlink(const unsigned int xid, struct cifs_tcon *tcon,
 	struct cifs_open_parms oparms;
 	struct cifs_fid fid;
 	struct kvec err_iov = {NULL, 0};
-	struct smb2_err_rsp *err_buf = NULL;
 	struct smb2_symlink_err_rsp *symlink;
 	struct TCP_Server_Info *server = cifs_pick_channel(tcon->ses);
 	unsigned int sub_len;
@@ -3165,6 +3206,7 @@ smb2_query_symlink(const unsigned int xid, struct cifs_tcon *tcon,
 	struct smb2_ioctl_rsp *ioctl_rsp;
 	struct reparse_data_buffer *reparse_buf;
 	int create_options = is_reparse_point ? OPEN_REPARSE_POINT : 0;
+	size_t len;
 	u32 plen;
 
 	cifs_dbg(FYI, "%s: path: %s\n", __func__, full_path);
@@ -3270,35 +3312,38 @@ smb2_query_symlink(const unsigned int xid, struct cifs_tcon *tcon,
 		goto querty_exit;
 	}
 
-	err_buf = err_iov.iov_base;
-	if (le32_to_cpu(err_buf->ByteCount) < sizeof(struct smb2_symlink_err_rsp) ||
-	    err_iov.iov_len < SMB2_SYMLINK_STRUCT_SIZE) {
-		rc = -EINVAL;
-		goto querty_exit;
-	}
-
-	symlink = (struct smb2_symlink_err_rsp *)err_buf->ErrorData;
-	if (le32_to_cpu(symlink->SymLinkErrorTag) != SYMLINK_ERROR_TAG ||
-	    le32_to_cpu(symlink->ReparseTag) != IO_REPARSE_TAG_SYMLINK) {
-		rc = -EINVAL;
-		goto querty_exit;
-	}
-
 	/* open must fail on symlink - reset rc */
 	rc = 0;
+	symlink = symlink_data(&err_iov);
+	if (IS_ERR(symlink)) {
+		rc = PTR_ERR(symlink);
+		goto querty_exit;
+	}
+
 	sub_len = le16_to_cpu(symlink->SubstituteNameLength);
 	sub_offset = le16_to_cpu(symlink->SubstituteNameOffset);
 	print_len = le16_to_cpu(symlink->PrintNameLength);
 	print_offset = le16_to_cpu(symlink->PrintNameOffset);
 
-	if (err_iov.iov_len < SMB2_SYMLINK_STRUCT_SIZE + sub_offset + sub_len) {
+	if ((char *)symlink->PathBuffer + sub_offset + sub_len >
+	    (char *)err_iov.iov_base + err_iov.iov_len ||
+	    (char *)symlink->PathBuffer + print_offset + print_len >
+	    (char *)err_iov.iov_base + err_iov.iov_len) {
+		cifs_dbg(VFS, "srv returned malformed symlink buffer\n");
 		rc = -EINVAL;
 		goto querty_exit;
 	}
 
-	if (err_iov.iov_len <
-	    SMB2_SYMLINK_STRUCT_SIZE + print_offset + print_len) {
-		rc = -EINVAL;
+	if (!sub_len || (sub_len % 2)) {
+		cifs_dbg(VFS, "srv returned malformed symlink buffer\n");
+		rc = -EIO;
+		goto querty_exit;
+	}
+	len = UniStrnlen((wchar_t *)((char *)symlink->PathBuffer + sub_offset),
+			 sub_len / 2);
+	if (len != sub_len / 2) {
+		cifs_dbg(VFS, "srv returned null byte in native symlink target location\n");
+		rc = -EIO;
 		goto querty_exit;
 	}
 

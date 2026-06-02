@@ -7071,6 +7071,7 @@ err5:
 		kfree_rcu(hook, rcu);
 	}
 err4:
+	synchronize_rcu();
 	flowtable->data.type->free(&flowtable->data);
 err3:
 	module_put(type->owner);
