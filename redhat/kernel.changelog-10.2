@@ -1,3 +1,74 @@
+* Wed Jun 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.22.1.el10_2]
+- redhat: Fix rebuild changelog generation for automotive (Oleksii Baranov)
+- scripts/sorttable: Fix endianness handling in build-time mcount sort (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Allow matches to functions before function entry (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Use normal sort if theres no relocs in the mcount section (Jerome Marchand) [RHEL-180932]
+- ftrace: Check against is_kernel_text() instead of kaslr_offset() (Jerome Marchand) [RHEL-180932]
+- ftrace: Test mcount_loc addr before calling ftrace_call_addr() (Jerome Marchand) [RHEL-180932]
+- ftrace: Do not over-allocate ftrace memory (Jerome Marchand) [RHEL-180932]
+- ftrace: Have ftrace pages output reflect freed pages (Jerome Marchand) [RHEL-180932]
+- ftrace: Update the mcount_loc check of skipped entries (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Zero out weak functions in mcount_loc table (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Always use an array for the mcount_loc sorting (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Have mcount rela sort use direct values (Jerome Marchand) [RHEL-180932]
+- arm64: scripts/sorttable: Implement sorting mcount_loc at boot for arm64 (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Use a structure of function pointers for elf helpers (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Get start/stop_mcount_loc from ELF file directly (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Move code from sorttable.h into sorttable.c (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Use uint64_t for mcount sorting (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Add helper functions for Elf_Sym (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Add helper functions for Elf_Shdr (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Add helper functions for Elf_Ehdr (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Convert Elf_Sym MACRO over to a union (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Replace Elf_Shdr Macro with a union (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Convert Elf_Ehdr to union (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Make compare_extable() into two functions (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Have the ORC code use the _r() functions to read (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Remove unneeded Elf_Rel (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Remove unused write functions (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: Remove unused macro defines (Jerome Marchand) [RHEL-180932]
+- scripts/sorttable: fix orc_sort_cmp() to maintain symmetry and transitivity (Jerome Marchand) [RHEL-180932]
+- selinux: fix overlayfs mmap() and mprotect() access checks (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: add backing_file LSM hooks (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- fs: prepare for adding LSM blob to backing_file (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: cleanup the debug and console output in lsm_init.c (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: add/tweak function header comment blocks in lsm_init.c (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: fold lsm_init_ordered() into security_init() (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: cleanup initialize_lsm() and rename to lsm_init_single() (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: cleanup the LSM blob size code (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: rename/rework ordered_lsm_parse() to lsm_order_parse() (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: rename/rework append_ordered_lsm() into lsm_order_append() (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: rename exists_ordered_lsm() to lsm_order_exists() (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: rework the LSM enable/disable setter/getter functions (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: get rid of the lsm_names list and do some cleanup (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: rework lsm_active_cnt and lsm_idlist[] (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: rename the lsm order variables for consistency (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: replace the name field with a pointer to the lsm_id struct (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: rename ordered_lsm_init() to lsm_init_ordered() (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: integrate lsm_early_cred() and lsm_early_task() into caller (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: integrate report_lsm_order() code into caller (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: introduce looping macros for the initialization code (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: consolidate lsm_allowed() and prepare_lsm() into lsm_prepare() (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: split the init code out into lsm_init.c (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- lsm: split the notifier code out into lsm_notifier.c (Ondrej Mosnacek) [RHEL-179437] {CVE-2026-46054}
+- fs: constify file ptr in backing_file accessor helpers (Ondrej Mosnacek) [RHEL-179437]
+- ipv6: rpl: reserve mac_len headroom when recompressed SRH grows (Antoine Tenart) [RHEL-178413] {CVE-2026-43501}
+- ip6_tunnel: clear skb2->cb[] in ip4ip6_err() (Guillaume Nault) [RHEL-172651] {CVE-2026-43037}
+- ALSA: 6fire: fix use-after-free on disconnect (CKI Backport Bot) [RHEL-172973] {CVE-2026-31581}
+- erofs: add GFP_NOIO in the bio completion if needed (CKI Backport Bot) [RHEL-171686] {CVE-2026-31467}
+- can: raw: fix ro->uniq use-after-free in raw_rcv() (CKI Backport Bot) [RHEL-170764] {CVE-2026-31532}
+- nouveau/gsp: drop WARN_ON in ACPI probes (Gary Guo) [RHEL-167788]
+Resolves: RHEL-167788, RHEL-170764, RHEL-171686, RHEL-172651, RHEL-172973, RHEL-178413, RHEL-179437, RHEL-180932
+
+* Thu Jun 04 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.21.1.el10_2]
+- s390/dasd: Copy detected format information to secondary device (Ramesh Chhetri) [RHEL-176473]
+- s390/dasd: Move quiesce state with pprc swap (Ramesh Chhetri) [RHEL-176473]
+- s390/dasd: Fix gendisk parent after copy pair swap (Ramesh Chhetri) [RHEL-176473]
+- ice: fix stats array overflow when VF requests more queues (Michal Schmidt) [RHEL-177518]
+- s390/pci: Avoid deadlock between PCI error recovery and mlx5 crdump (Mircea Dragan) [RHEL-166855]
+- net: bonding: fix use-after-free in bond_xmit_broadcast() (CKI Backport Bot) [RHEL-168073] {CVE-2026-31419}
+Resolves: RHEL-166855, RHEL-168073, RHEL-176473, RHEL-177518
+
 * Tue Jun 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.20.1.el10_2]
 - smb: client: reject userspace cifs.spnego descriptions (Paulo Alcantara) [RHEL-178932] {CVE-2026-46243}
 - redhat/configs: automotive: disable CONFIG_IO_URING (Brian Masney) [RHEL-179469]

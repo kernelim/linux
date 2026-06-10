@@ -3015,7 +3015,7 @@ ice_vsi_rebuild_set_coalesce(struct ice_vsi *vsi,
  * ice_vsi_realloc_stat_arrays - Frees unused stat structures or alloc new ones
  * @vsi: VSI pointer
  */
-static int
+int
 ice_vsi_realloc_stat_arrays(struct ice_vsi *vsi)
 {
 	u16 req_txq = vsi->req_txq ? vsi->req_txq : vsi->alloc_txq;

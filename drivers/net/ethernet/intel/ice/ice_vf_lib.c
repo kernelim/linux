@@ -268,6 +268,13 @@ static int ice_vf_reconfig_vsi(struct ice_vf *vf)
 
 	vsi->flags = ICE_VSI_FLAG_NO_INIT;
 
+	vsi->req_txq = vf->num_req_qs;
+	vsi->req_rxq = vf->num_req_qs;
+
+	err = ice_vsi_realloc_stat_arrays(vsi);
+	if (err)
+		return err;
+
 	ice_vsi_decfg(vsi);
 	ice_fltr_remove_all(vsi);
 
