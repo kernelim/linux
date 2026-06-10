@@ -442,12 +442,15 @@ static int rsb_cmp(struct dlm_rsb *r, const char *name, int nlen)
 	return memcmp(r->res_name, maxname, DLM_RESNAME_MAXLEN);
 }
 
-int dlm_search_rsb_tree(struct rb_root *tree, char *name, int len,
-			struct dlm_rsb **r_ret)
+int dlm_search_rsb_tree(struct rb_root *tree, char *name,
+			unsigned int len, struct dlm_rsb **r_ret)
 {
 	struct rb_node *node = tree->rb_node;
 	struct dlm_rsb *r;
 	int rc;
+
+	if (len > DLM_RESNAME_MAXLEN)
+		return -EINVAL;
 
 	while (node) {
 		r = rb_entry(node, struct dlm_rsb, res_hashnode);

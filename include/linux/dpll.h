@@ -55,8 +55,12 @@ struct dpll_device_ops {
 					   void *dpll_priv, u32 *factor,
 					   struct netlink_ext_ack *extack);
 
-	RH_KABI_RESERVE(1)
-	RH_KABI_RESERVE(2)
+	RH_KABI_USE(1, int (*freq_monitor_set)(const struct dpll_device *dpll, void *dpll_priv,
+				enum dpll_feature_state state,
+				struct netlink_ext_ack *extack))
+	RH_KABI_USE(2, int (*freq_monitor_get)(const struct dpll_device *dpll, void *dpll_priv,
+				enum dpll_feature_state *state,
+				struct netlink_ext_ack *extack))
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
 	RH_KABI_RESERVE(5)
@@ -141,7 +145,10 @@ struct dpll_pin_ops {
 			    enum dpll_pin_state *state,
 			    struct netlink_ext_ack *extack);
 
-	RH_KABI_RESERVE(1)
+	RH_KABI_USE(1, int (*measured_freq_get)(const struct dpll_pin *pin, void *pin_priv,
+				 const struct dpll_device *dpll,
+				 void *dpll_priv, u64 *measured_freq,
+				 struct netlink_ext_ack *extack))
 	RH_KABI_RESERVE(2)
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)

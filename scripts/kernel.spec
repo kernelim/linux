@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.13.1
+%define pkgrelease 687.15.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.13.1.el9_8
+%define tarfile_release 5.14.0-687.15.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.13.1%{?buildid}%{?dist}
+%define specrelease 687.15.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.13.1.el9_8
+%define kabiversion 5.14.0-687.15.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3713,10 +3713,47 @@ fi
 #
 #
 %changelog
-* Tue Jun 09 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.13.1
+* Thu Jun 11 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.15.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Wed Jun 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.15.1.el9_8]
+- ip6_tunnel: clear skb2->cb[] in ip4ip6_err() (Guillaume Nault) [RHEL-172646] {CVE-2026-43037}
+- net: openvswitch: Avoid releasing netdev before teardown completes (CKI Backport Bot) [RHEL-170539] {CVE-2026-31508}
+
+* Tue Jun 09 2026 Tanishi Srivastava <tsrivast@redhat.com> [5.14.0-687.14.1.el9_8]
+- RDMA/mlx4: Fix mis-use of RCU in mlx4_srq_event() (Kamal Heib) [RHEL-179988] {CVE-2026-46181}
+- redhat: Remove the mlx5 symbols from kabi (Kamal Heib) [RHEL-181822]
+- ipv6: rpl: reserve mac_len headroom when recompressed SRH grows (Antoine Tenart) [RHEL-178408] {CVE-2026-43501}
+- RDMA/rxe: Fix double free in rxe_srq_from_init (CKI Backport Bot) [RHEL-179712] {CVE-2026-45852}
+- netfilter: ctnetlink: ensure safe access to master conntrack (Florian Westphal) [RHEL-173843] {CVE-2026-43116}
+- ice: fix stats array overflow when VF requests more queues (Michal Schmidt) [RHEL-177526]
+- ice: set max queues in alloc_etherdev_mqs() (Michal Schmidt) [RHEL-174336]
+- ice: use netif_get_num_default_rss_queues() (Michal Schmidt) [RHEL-174336]
+- ice: set default rss queues num to physical cores / 2 (Michal Schmidt) [RHEL-174336]
+- dlm: fix buffer overflow from negative len in dlm_search_rsb_tree (Alexander Aring) [RHEL-173993] {CVE-2026-43125}
+- dlm: validate length in dlm_search_rsb_tree (Alexander Aring) [RHEL-173993] {CVE-2026-43125}
+- dpll: zl3073x: add ref-sync pair support (Ivan Vecera) [RHEL-167273]
+- dpll: zl3073x: add ref sync and output clock type helpers (Ivan Vecera) [RHEL-167273]
+- dpll: zl3073x: use FIELD_MODIFY() for clear-and-set patterns (Ivan Vecera) [RHEL-167273]
+- dpll: zl3073x: clean up esync get/set and use zl3073x_out_is_ndiv() (Ivan Vecera) [RHEL-167273]
+- dpll: zl3073x: implement frequency monitoring (Ivan Vecera) [RHEL-167833]
+- dpll: add frequency monitoring callback ops (Ivan Vecera) [RHEL-167833]
+- dpll: add frequency monitoring to netlink spec (Ivan Vecera) [RHEL-167833]
+- dpll: zl3073x: drop selected and simplify connected ref getter (Ivan Vecera) [RHEL-172938]
+- dpll: zl3073x: add reference priority to zl3073x_chan (Ivan Vecera) [RHEL-172938]
+- dpll: zl3073x: add DPLL channel status fields to zl3073x_chan (Ivan Vecera) [RHEL-172938]
+- dpll: zl3073x: introduce zl3073x_chan for DPLL channel state (Ivan Vecera) [RHEL-172938]
+- dpll: zl3073x: add zl3073x_ref_state_update helper (Ivan Vecera) [RHEL-172938]
+- dpll: zl3073x: use struct_group to partition states (Ivan Vecera) [RHEL-172938]
+- dpll: zl3073x: add die temperature reporting for supported chips (Ivan Vecera) [RHEL-172938]
+- dpll: zl3073x: detect DPLL channel count from chip ID at runtime (Ivan Vecera) [RHEL-172938]
+- ALSA: 6fire: fix use-after-free on disconnect (CKI Backport Bot) [RHEL-172969] {CVE-2026-31581}
+- net: mana: fix use-after-free in add_adev() error path (CKI Backport Bot) [RHEL-172768] {CVE-2026-43056}
+- scsi: target: iscsi: Fix use-after-free in iscsit_dec_conn_usage_count() (CKI Backport Bot) [RHEL-165564] {CVE-2026-23216}
+- net: bonding: fix use-after-free in bond_xmit_broadcast() (CKI Backport Bot) [RHEL-168068] {CVE-2026-31419}
+- x86/kvm: Avoid freeing stack-allocated node in kvm_async_pf_queue_task (Ryosuke Yasuoka) [RHEL-158916]
 
 * Tue Jun 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.13.1.el9_8]
 - smb: client: reject userspace cifs.spnego descriptions (Paulo Alcantara) [RHEL-178944] {CVE-2026-46243}
