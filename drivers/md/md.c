@@ -8813,6 +8813,7 @@ static void md_clone_bio(struct mddev *mddev, struct bio **bio)
 	md_io_clone = container_of(clone, struct md_io_clone, bio_clone);
 	md_io_clone->orig_bio = *bio;
 	md_io_clone->mddev = mddev;
+	md_io_clone->start_time = 0;
 	if (blk_queue_io_stat((*bio)->bi_disk->queue))
 		md_io_clone->start_time = bio_start_io_acct(*bio);
 

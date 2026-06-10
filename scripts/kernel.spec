@@ -38,10 +38,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.129.1.el8_10
+%define pkgrelease 553.132.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.129.1%{?dist}
+%define specrelease 553.132.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2693,13 +2693,31 @@ fi
 #
 #
 %changelog
-* Tue Jun 09 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.129.1
+* Thu Jun 11 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.132.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Wed Jun 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.132.1.el8_10]
+- ip6_tunnel: clear skb2->cb[] in ip4ip6_err() (Guillaume Nault) [RHEL-172640] {CVE-2026-43037}
+- dlm: fix buffer overflow from negative len in dlm_search_rsb_tree (Alexander Aring) [RHEL-173986] {CVE-2026-43125}
+- dlm: validate length in dlm_search_rsb_tree (Alexander Aring) [RHEL-173986] {CVE-2026-43125}
+
+* Fri Jun 05 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.131.1.el8_10]
+- RDMA/mlx4: Fix mis-use of RCU in mlx4_srq_event() (Kamal Heib) [RHEL-179982] {CVE-2026-46181}
+- nvme: nvme-fc: Ensure ->ioerr_work is cancelled in nvme_fc_delete_ctrl() (Ewan D. Milne) [RHEL-178447]
+- ipv6: icmp: clear skb2->cb[] in ip6_err_gen_icmpv6_unreach() (Guillaume Nault) [RHEL-172664] {CVE-2026-43038}
+- ALSA: 6fire: Fix leftover global pointers after probe failures (Jaroslav Kysela) [RHEL-172963]
+- ALSA: 6fire: Cover the whole probe and disconnect calls with register_mutex (Jaroslav Kysela) [RHEL-172963]
+- ALSA: 6fire: fix use-after-free on disconnect (Jaroslav Kysela) [RHEL-172963] {CVE-2026-31581}
+- ALSA: 6fire: Release resources at card release (Jaroslav Kysela) [RHEL-172963] {CVE-2024-53239}
+
+* Wed Jun 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.130.1.el8_10]
+- RDMA/rxe: Fix double free in rxe_srq_from_init (Kamal Heib) [RHEL-179702] {CVE-2026-45852}
+- md: uninitialized start_time in md_clone_bio() causes bogus IO accounting (Nigel Croxon) [RHEL-170384]
 
 * Tue Jun 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.129.1.el8_10]
 - smb: client: reject userspace cifs.spnego descriptions (Paulo Alcantara) [RHEL-178938] {CVE-2026-46243}
