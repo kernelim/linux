@@ -38,10 +38,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.132.1.el8_10
+%define pkgrelease 553.134.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.132.1%{?dist}
+%define specrelease 553.134.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2693,13 +2693,26 @@ fi
 #
 #
 %changelog
-* Thu Jun 11 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.132.1
+* Tue Jun 16 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.134.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Fri Jun 12 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.134.1.el8_10]
+- wifi: mac80211: remove station if connection prep fails (Jose Ignacio Tornos Martinez) [RHEL-180120] {CVE-2026-46125}
+- wifi: mac80211: drop stray 'static' from fast-RX rx_result (CKI Backport Bot) [RHEL-180058] {CVE-2026-46152}
+- Bluetooth: hci_event: fix potential UAF in SSP passkey handlers (CKI Backport Bot) [RHEL-179360] {CVE-2026-46056}
+- netfilter: flowtable: strictly check for maximum number of actions (Florian Westphal) [RHEL-176909] {CVE-2026-43329}
+- netfilter: nf_tables_offload: add nft_flow_action_entry_next() and use it (Florian Westphal) [RHEL-176909] {CVE-2026-43329}
+- mptcp: fix slab-use-after-free in __inet_lookup_established (Davide Caratti) [RHEL-171500] {CVE-2026-31669}
+- xen/privcmd: fix double free via VMA splitting (Vitaly Kuznetsov) [RHEL-172482] {CVE-2026-31787}
+- wifi: brcmfmac: validate bsscfg indices in IF events (CKI Backport Bot) [RHEL-173853] {CVE-2026-43110}
+
+* Wed Jun 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.133.1.el8_10]
+- Buffer overflow in drivers/xen/sys-hypervisor.c (CKI Backport Bot) [RHEL-172504] {CVE-2026-31786}
 
 * Wed Jun 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.132.1.el8_10]
 - ip6_tunnel: clear skb2->cb[] in ip4ip6_err() (Guillaume Nault) [RHEL-172640] {CVE-2026-43037}
