@@ -38,10 +38,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.134.1.el8_10
+%define pkgrelease 553.136.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.134.1%{?dist}
+%define specrelease 553.136.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2693,13 +2693,30 @@ fi
 #
 #
 %changelog
-* Tue Jun 16 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.134.1
+* Sat Jun 20 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.136.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Thu Jun 18 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.136.1.el8_10]
+- net/sched: fix pedit partial COW leading to page cache corruption (Ivan Vecera) [RHEL-177582] {CVE-2026-46331}
+- net/sched: act_pedit: free pedit keys on bail from offset check (Ivan Vecera) [RHEL-177582] {CVE-2026-46331}
+- net/sched: act_pedit: rate limit datapath messages (Ivan Vecera) [RHEL-177582] {CVE-2026-46331}
+- net/sched: act_pedit: remove extra check for key type (Ivan Vecera) [RHEL-177582] {CVE-2026-46331}
+- net/sched: act_pedit: check static offsets a priori (Ivan Vecera) [RHEL-177582] {CVE-2026-46331}
+- nvmet-tcp: fix race between ICReq handling and queue teardown (Chris Leech) [RHEL-180103] {CVE-2026-46135}
+- net: mana: fix use-after-free in add_adev() error path (CKI Backport Bot) [RHEL-172764] {CVE-2026-43056}
+
+* Wed Jun 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.135.1.el8_10]
+- drm/amd/display: Do not skip unrelated mode changes in DSC validation (José Expósito) [RHEL-178825] {CVE-2026-31488}
+- sched/deadline: Fix missing ENQUEUE_REPLENISH during PI de-boosting (Juri Lelli) [RHEL-178520]
+- RDMA/mana_ib: Validate rx_hash_key_len to prevent buffer overflow (Gaurav Goklani) [RHEL-180089] {CVE-2026-46145}
+- ALSA: aloop: Fix peer runtime UAF during format-change stop (Jaroslav Kysela) [RHEL-179304] {CVE-2026-46090}
+- ALSA: usb-audio: Add sanity check for OOB writes at silencing (CKI Backport Bot) [RHEL-173939] {CVE-2026-43279}
+- net: bonding: fix use-after-free in bond_xmit_broadcast() (Xin Long) [RHEL-168063] {CVE-2026-31419}
 
 * Fri Jun 12 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.134.1.el8_10]
 - wifi: mac80211: remove station if connection prep fails (Jose Ignacio Tornos Martinez) [RHEL-180120] {CVE-2026-46125}

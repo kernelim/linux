@@ -5264,6 +5264,35 @@ static bool check_same_owner(struct task_struct *p)
 	return match;
 }
 
+#ifdef CONFIG_RT_MUTEXES
+static inline void __setscheduler_dl_pi(int newprio, int policy,
+			      struct task_struct *p,
+			      int *flags)
+{
+	/*
+	 * In case a DEADLINE task (either proper or boosted) gets
+	 * setscheduled to a lower priority class, check if it neeeds to
+	 * inherit parameters from a potential pi_task. In that case make
+	 * sure replenishment happens with the next enqueue.
+	 */
+
+	if (dl_prio(newprio) && !dl_policy(policy)) {
+		struct task_struct *pi_task = rt_mutex_get_top_task(p);
+
+		if (pi_task) {
+			p->pi_se = pi_task->pi_se;
+			*flags |= ENQUEUE_REPLENISH;
+		}
+	}
+}
+#else /* !CONFIG_RT_MUTEXES */
+static inline void __setscheduler_dl_pi(int newprio, int policy,
+			      struct task_struct *p,
+			      int *flags)
+{
+}
+#endif /* !CONFIG_RT_MUTEXES */
+
 /*
  * Allow unprivileged RT tasks to decrease priority.
  * Only issue a capable test if needed and only once to avoid an audit
@@ -5507,6 +5536,7 @@ change:
 
 	__setscheduler_params(p, attr);
 	__setscheduler_prio(p, newprio);
+	__setscheduler_dl_pi(newprio, policy, p, &queue_flags);
 
 	if (queued) {
 		/*
