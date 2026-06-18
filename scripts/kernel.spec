@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 211.22.1
+%define pkgrelease 211.26.1
 %define kversion 6
-%define tarfile_release 6.12.0-211.22.1.el10_2
+%define tarfile_release 6.12.0-211.26.1.el10_2
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 211.22.1%{?buildid}%{?dist}
+%define specrelease 211.26.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-211.22.1.el10_2
+%define kabiversion 6.12.0-211.26.1.el10_2
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4477,9 +4477,41 @@ fi\
 #
 #
 %changelog
-* Thu Jun 11 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.22.1
+* Sat Jun 20 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.26.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Thu Jun 18 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.26.1.el10_2]
+- net/sched: fix pedit partial COW leading to page cache corruption (Ivan Vecera) [RHEL-177380] {CVE-2026-46331}
+- exit: prevent preemption of oopsing TASK_DEAD task (CKI Backport Bot) [RHEL-180009] {CVE-2026-46173}
+- crypto: caam - fix overflow on long hmac keys (CKI Backport Bot) [RHEL-179769] {CVE-2026-43330}
+- net: mana: fix use-after-free in add_adev() error path (CKI Backport Bot) [RHEL-172772] {CVE-2026-43056}
+
+* Wed Jun 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.25.1.el10_2]
+- gitlab-ci: use rhel10.2 builder image (Michael Krausch-Hofmann)
+- redhat/configs: enable watchdog pretimout panic functionality for x86 (David Arcari) [RHEL-182299]
+- watchdog: wdat_wdt: Fix ACPI table leak in probe function (David Arcari) [RHEL-182299]
+- mptcp: fix slab-use-after-free in __inet_lookup_established (CKI Backport Bot) [RHEL-171510] {CVE-2026-31669}
+
+* Mon Jun 15 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.24.1.el10_2]
+- s390/mm: Add missing secure storage access fixups for donated memory (Jan Polensky) [RHEL-183319]
+- ibmveth: Disable GSO for packets with small MSS (Mamatha Inamdar) [RHEL-179723]
+- rbd: eliminate a race in lock_dwork draining on unmap (CKI Backport Bot) [RHEL-183127]
+- objtool/klp: Fix unexported static call key access for manually built livepatch modules (Joe Lawrence) [RHEL-178495]
+- bnxt_en: Fix RSS context delete logic (CKI Backport Bot) [RHEL-180307] {CVE-2026-43260}
+- wifi: mac80211: remove station if connection prep fails (CKI Backport Bot) [RHEL-180126] {CVE-2026-46125}
+- wifi: mac80211: drop stray 'static' from fast-RX rx_result (CKI Backport Bot) [RHEL-180060] {CVE-2026-46152}
+- wifi: mac80211: use safe list iteration in radar detect work (CKI Backport Bot) [RHEL-180022] {CVE-2026-46166}
+- Bluetooth: hci_event: fix potential UAF in SSP passkey handlers (CKI Backport Bot) [RHEL-179358] {CVE-2026-46056}
+- scsi: lpfc: Fix reusing an ndlp that is marked NLP_DROPPED during FLOGI (Ewan D. Milne) [RHEL-171774]
+- can: isotp: fix tx.buf use-after-free in isotp_sendmsg() (CKI Backport Bot) [RHEL-175533] {CVE-2026-31474}
+- Buffer overflow in drivers/xen/sys-hypervisor.c (Vitaly Kuznetsov) [RHEL-172516] {CVE-2026-31786}
+- Bluetooth: hci_sync: fix stack buffer overflow in hci_le_big_create_sync (CKI Backport Bot) [RHEL-172862] {CVE-2026-31772}
+- xen/privcmd: fix double free via VMA splitting (CKI Backport Bot) [RHEL-172492] {CVE-2026-31787}
+- rxrpc: Fix RxGK token loading to check bounds (CKI Backport Bot) [RHEL-171419] {CVE-2026-31641}
+
+* Thu Jun 11 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.23.1.el10_2]
+- s390/ap: Expose ap_bindings_complete_count counter via sysfs (Mircea Dragan) [RHEL-166047]
 
 * Wed Jun 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.22.1.el10_2]
 - redhat: Fix rebuild changelog generation for automotive (Oleksii Baranov)

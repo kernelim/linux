@@ -31,7 +31,7 @@ workflow: !reference [.workflow]
     branch: rhel10
   variables:
     kcidb_tree_name: rhel-10.2
-    builder_image: quay.io/cki/builder-rhel10
+    builder_image: quay.io/cki/builder-rhel10.2
 
 .trigger_internal_compat_build_pipeline:
   extends: [.trigger_internal_pipeline, .centos_stream_rhel_internal]
