@@ -325,6 +325,30 @@ dpll_msg_add_pin_on_dpll_state(struct sk_buff *msg, struct dpll_pin *pin,
 }
 
 static int
+dpll_msg_add_pin_operstate(struct sk_buff *msg, struct dpll_pin *pin,
+			   struct dpll_pin_ref *ref,
+			   struct netlink_ext_ack *extack)
+{
+	const struct dpll_pin_ops *ops = dpll_pin_ops(ref);
+	struct dpll_device *dpll = ref->dpll;
+	enum dpll_pin_operstate operstate;
+	int ret;
+
+	if (!ops->operstate_on_dpll_get)
+		return 0;
+	ret = ops->operstate_on_dpll_get(pin,
+					  dpll_pin_on_dpll_priv(dpll, pin),
+					  dpll, dpll_priv(dpll),
+					  &operstate, extack);
+	if (ret)
+		return ret;
+	if (nla_put_u32(msg, DPLL_A_PIN_OPERSTATE, operstate))
+		return -EMSGSIZE;
+
+	return 0;
+}
+
+static int
 dpll_msg_add_pin_direction(struct sk_buff *msg, struct dpll_pin *pin,
 			   struct dpll_pin_ref *ref,
 			   struct netlink_ext_ack *extack)
@@ -393,31 +417,34 @@ dpll_msg_add_phase_offset(struct sk_buff *msg, struct dpll_pin *pin,
 
 static int dpll_msg_add_ffo(struct sk_buff *msg, struct dpll_pin *pin,
 			    struct dpll_pin_ref *ref,
+			    enum dpll_ffo_type type,
 			    struct netlink_ext_ack *extack)
 {
 	const struct dpll_pin_ops *ops = dpll_pin_ops(ref);
-	struct dpll_device *dpll = ref->dpll;
-	s64 ffo;
+	struct dpll_ffo_param ffo = { .type = type };
 	int ret;
 
-	if (!ops->ffo_get)
-		return 0;
-	ret = ops->ffo_get(pin, dpll_pin_on_dpll_priv(dpll, pin),
-			   dpll, dpll_priv(dpll), &ffo, extack);
+	/* RHEL: To maintain backward compatibility with older binary modules,
+	 * we must accept a value of zero for .supported_ffo when the type is
+	 * DPLL_FFO_PORT_RXTX_RATE.
+	 */
+	if (!ops->ffo_get ||
+	    !((ops->supported_ffo & BIT(type)) ||
+	      (!ops->supported_ffo && type == DPLL_FFO_PORT_RXTX_RATE)))
+	    return 0;
+	ret = ops->ffo_get(pin, dpll_pin_on_dpll_priv(ref->dpll, pin),
+			   ref->dpll, dpll_priv(ref->dpll), &ffo, extack);
 	if (ret) {
 		if (ret == -ENODATA)
 			return 0;
 		return ret;
 	}
-	/* Put the FFO value in PPM to preserve compatibility with older
-	 * programs.
-	 */
-	ret = nla_put_sint(msg, DPLL_A_PIN_FRACTIONAL_FREQUENCY_OFFSET,
-			   div_s64(ffo, 1000000));
-	if (ret)
+	if (nla_put_sint(msg, DPLL_A_PIN_FRACTIONAL_FREQUENCY_OFFSET,
+			 div_s64(ffo.ffo, 1000000)))
 		return -EMSGSIZE;
-	return nla_put_sint(msg, DPLL_A_PIN_FRACTIONAL_FREQUENCY_OFFSET_PPT,
-			    ffo);
+	return nla_put_sint(msg,
+			    DPLL_A_PIN_FRACTIONAL_FREQUENCY_OFFSET_PPT,
+			    ffo.ffo);
 }
 
 static int dpll_msg_add_measured_freq(struct sk_buff *msg, struct dpll_pin *pin,
@@ -652,6 +679,9 @@ dpll_msg_add_pin_dplls(struct sk_buff *msg, struct dpll_pin *pin,
 		ret = dpll_msg_add_pin_on_dpll_state(msg, pin, ref, extack);
 		if (ret)
 			goto nest_cancel;
+		ret = dpll_msg_add_pin_operstate(msg, pin, ref, extack);
+		if (ret)
+			goto nest_cancel;
 		ret = dpll_msg_add_pin_prio(msg, pin, ref, extack);
 		if (ret)
 			goto nest_cancel;
@@ -659,6 +689,10 @@ dpll_msg_add_pin_dplls(struct sk_buff *msg, struct dpll_pin *pin,
 		if (ret)
 			goto nest_cancel;
 		ret = dpll_msg_add_phase_offset(msg, pin, ref, extack);
+		if (ret)
+			goto nest_cancel;
+		ret = dpll_msg_add_ffo(msg, pin, ref,
+				       DPLL_FFO_PIN_DEVICE, extack);
 		if (ret)
 			goto nest_cancel;
 		nla_nest_end(msg, attr);
@@ -721,7 +755,8 @@ dpll_cmd_pin_get_one(struct sk_buff *msg, struct dpll_pin *pin,
 	ret = dpll_msg_add_pin_phase_adjust(msg, pin, ref, extack);
 	if (ret)
 		return ret;
-	ret = dpll_msg_add_ffo(msg, pin, ref, extack);
+	ret = dpll_msg_add_ffo(msg, pin, ref,
+			       DPLL_FFO_PORT_RXTX_RATE, extack);
 	if (ret)
 		return ret;
 	ret = dpll_msg_add_measured_freq(msg, pin, ref, extack);

@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.15.1
+%define pkgrelease 687.17.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.15.1.el9_8
+%define tarfile_release 5.14.0-687.17.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.15.1%{?buildid}%{?dist}
+%define specrelease 687.17.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.15.1.el9_8
+%define kabiversion 5.14.0-687.17.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3713,10 +3713,42 @@ fi
 #
 #
 %changelog
-* Thu Jun 11 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.15.1
+* Tue Jun 23 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.17.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Thu Jun 18 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.17.1.el9_8]
+- net/sched: fix pedit partial COW leading to page cache corruption (Ivan Vecera) [RHEL-177392] {CVE-2026-46331}
+- gitlab-ci: use rhel9.8 builder image (Michael Krausch-Hofmann)
+- rbd: eliminate a race in lock_dwork draining on unmap (CKI Backport Bot) [RHEL-183130]
+- scsi: qla2xxx: Completely fix fcport double free (Ewan D. Milne) [RHEL-179754] {CVE-2026-43414}
+- nvmet-tcp: fix race between ICReq handling and queue teardown (Chris Leech) [RHEL-180102] {CVE-2026-46135}
+- RDMA/mana: Remove user triggerable WARN_ON() in mana_ib_create_qp_rss() (CKI Backport Bot) [RHEL-180158] {CVE-2026-46117}
+- exit: prevent preemption of oopsing TASK_DEAD task (CKI Backport Bot) [RHEL-180016] {CVE-2026-46173}
+- ALSA: usb-audio: Add sanity check for OOB writes at silencing (CKI Backport Bot) [RHEL-173941] {CVE-2026-43279}
+
+* Tue Jun 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.16.1.el9_8]
+- s390/mm: Add missing secure storage access fixups for donated memory (Jan Polensky) [RHEL-183317]
+- ibmveth: Disable GSO for packets with small MSS (Mamatha Inamdar) [RHEL-178308]
+- s390/ap: Expose ap_bindings_complete_count counter via sysfs (Jan Polensky) [RHEL-166048]
+- gfs2: Fix use-after-free in iomap inline data write path (Andrew Price) [RHEL-179589] {CVE-2026-45984}
+- gfs2: Add metapath_dibh helper (Andrew Price) [RHEL-179589] {CVE-2026-45984}
+- bnxt_en: Fix RSS context delete logic (CKI Backport Bot) [RHEL-180308] {CVE-2026-43260}
+- wifi: mac80211: remove station if connection prep fails (CKI Backport Bot) [RHEL-180121] {CVE-2026-46125}
+- RDMA/mana: Validate rx_hash_key_len (CKI Backport Bot) [RHEL-180085] {CVE-2026-46145}
+- wifi: mac80211: drop stray 'static' from fast-RX rx_result (CKI Backport Bot) [RHEL-180057] {CVE-2026-46152}
+- wifi: mac80211: use safe list iteration in radar detect work (CKI Backport Bot) [RHEL-180025] {CVE-2026-46166}
+- Bluetooth: hci_event: fix potential UAF in SSP passkey handlers (CKI Backport Bot) [RHEL-179359] {CVE-2026-46056}
+- ice: Fix NULL pointer dereference in ice_vsi_set_napi_queues (CKI Backport Bot) [RHEL-175699]
+- mptcp: fix slab-use-after-free in __inet_lookup_established (Davide Caratti) [RHEL-171506] {CVE-2026-31669}
+- dpll: zl3073x: report FFO as DPLL vs input reference offset (Ivan Vecera) [RHEL-175823]
+- dpll: add fractional frequency offset to pin-parent-device (Ivan Vecera) [RHEL-175823]
+- dpll: zl3073x: implement pin operational state reporting (Ivan Vecera) [RHEL-175820]
+- dpll: add pin operational state (Ivan Vecera) [RHEL-175820]
+- can: isotp: fix tx.buf use-after-free in isotp_sendmsg() (CKI Backport Bot) [RHEL-175525] {CVE-2026-31474}
+- Bluetooth: hci_sync: fix stack buffer overflow in hci_le_big_create_sync (CKI Backport Bot) [RHEL-172858] {CVE-2026-31772}
+- xen/privcmd: fix double free via VMA splitting (CKI Backport Bot) [RHEL-172488] {CVE-2026-31787}
 
 * Wed Jun 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.15.1.el9_8]
 - ip6_tunnel: clear skb2->cb[] in ip4ip6_err() (Guillaume Nault) [RHEL-172646] {CVE-2026-43037}

@@ -71,6 +71,22 @@ struct dpll_device_ops {
 	RH_KABI_RESERVE(10)
 };
 
+enum dpll_ffo_type {
+	DPLL_FFO_PORT_RXTX_RATE,
+	DPLL_FFO_PIN_DEVICE,
+
+	__DPLL_FFO_TYPE_MAX,
+};
+
+/* RHEL: we have to keep 'ffo' field to be first to preserve compatibility
+ * with older .ffo_get() callbacks that accepts 's64 *' as parameter instead
+ * of 'struct dpll_ffo_param *'
+ */
+struct dpll_ffo_param {
+	s64 ffo;
+	enum dpll_ffo_type type;
+};
+
 struct dpll_pin_ops {
 	int (*frequency_set)(const struct dpll_pin *pin, void *pin_priv,
 			     const struct dpll_device *dpll, void *dpll_priv,
@@ -124,9 +140,13 @@ struct dpll_pin_ops {
 				const struct dpll_device *dpll, void *dpll_priv,
 				const s32 phase_adjust,
 				struct netlink_ext_ack *extack);
-	int (*ffo_get)(const struct dpll_pin *pin, void *pin_priv,
+	RH_KABI_REPLACE(int (*ffo_get)(const struct dpll_pin *pin, void *pin_priv,
 		       const struct dpll_device *dpll, void *dpll_priv,
-		       s64 *ffo, struct netlink_ext_ack *extack);
+		       s64 *ffo, struct netlink_ext_ack *extack),
+			int (*ffo_get)(const struct dpll_pin *pin, void *pin_priv,
+		       const struct dpll_device *dpll, void *dpll_priv,
+		       struct dpll_ffo_param *ffo,
+		       struct netlink_ext_ack *extack))
 	int (*esync_set)(const struct dpll_pin *pin, void *pin_priv,
 			 const struct dpll_device *dpll, void *dpll_priv,
 			 u64 freq, struct netlink_ext_ack *extack);
@@ -149,8 +169,13 @@ struct dpll_pin_ops {
 				 const struct dpll_device *dpll,
 				 void *dpll_priv, u64 *measured_freq,
 				 struct netlink_ext_ack *extack))
-	RH_KABI_RESERVE(2)
-	RH_KABI_RESERVE(3)
+	RH_KABI_USE(2, int (*operstate_on_dpll_get)(const struct dpll_pin *pin,
+				     void *pin_priv,
+				     const struct dpll_device *dpll,
+				     void *dpll_priv,
+				     enum dpll_pin_operstate *operstate,
+				     struct netlink_ext_ack *extack))
+	RH_KABI_USE(3, unsigned long supported_ffo)
 	RH_KABI_RESERVE(4)
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)
