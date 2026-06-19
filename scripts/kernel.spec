@@ -38,10 +38,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.136.1.el8_10
+%define pkgrelease 553.137.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.136.1%{?dist}
+%define specrelease 553.137.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2693,13 +2693,29 @@ fi
 #
 #
 %changelog
-* Sat Jun 20 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.136.1
+* Tue Jun 23 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.137.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Fri Jun 19 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.137.1.el8_10]
+- selinux: RHEL-only hotfix for execmem regression (Ondrej Mosnacek) [RHEL-179435] {CVE-2026-46054}
+- selinux: fix overlayfs mmap() and mprotect() access checks (Ondrej Mosnacek) [RHEL-179435] {CVE-2026-46054}
+- lsm: add backing_file LSM hooks (Ondrej Mosnacek) [RHEL-179435] {CVE-2026-46054}
+- fs: prepare for adding LSM blob to backing_file (Ondrej Mosnacek) [RHEL-179435] {CVE-2026-46054}
+- perf/core: Fix MMAP event path names with backing files (Ondrej Mosnacek) [RHEL-179435]
+- fs: constify file ptr in backing_file accessor helpers (Ondrej Mosnacek) [RHEL-179435] {CVE-2026-46054}
+- ovl: Fix nested backing file paths (Ondrej Mosnacek) [RHEL-179435]
+- fs: store real path instead of fake path in backing file f_path (Ondrej Mosnacek) [RHEL-179435]
+- fs: create helper file_user_path() for user displayed mapped file path (Ondrej Mosnacek) [RHEL-179435]
+- fs: get mnt_writers count for an open backing file's real path (Ondrej Mosnacek) [RHEL-179435]
+- fs: move cleanup from init_file() into its callers (Ondrej Mosnacek) [RHEL-179435]
+- fs: use backing_file container for internal files with "fake" f_path (Ondrej Mosnacek) [RHEL-179435]
+- fs: move kmem_cache_zalloc() into alloc_empty_file*() helpers (Ondrej Mosnacek) [RHEL-179435]
+- ovl: pass layer mnt to ovl_open_realfile() (Ondrej Mosnacek) [RHEL-179435]
 
 * Thu Jun 18 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.136.1.el8_10]
 - net/sched: fix pedit partial COW leading to page cache corruption (Ivan Vecera) [RHEL-177582] {CVE-2026-46331}

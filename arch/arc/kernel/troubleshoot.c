@@ -101,7 +101,8 @@ static void show_faulting_vma(unsigned long address, char *buf)
 	if (vma && (vma->vm_start <= address)) {
 		struct file *file = vma->vm_file;
 		if (file) {
-			nm = file_path(file, buf, PAGE_SIZE - 1);
+			/* XXX: can we use %pD below and get rid of buf? */
+			nm = d_path(file_user_path(file), buf, PAGE_SIZE - 1);
 			inode = file_inode(vma->vm_file);
 			dev = inode->i_sb->s_dev;
 			ino = inode->i_ino;
