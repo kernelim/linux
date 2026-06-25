@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 211.26.1
+%define pkgrelease 211.28.1
 %define kversion 6
-%define tarfile_release 6.12.0-211.26.1.el10_2
+%define tarfile_release 6.12.0-211.28.1.el10_2
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 211.26.1%{?buildid}%{?dist}
+%define specrelease 211.28.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-211.26.1.el10_2
+%define kabiversion 6.12.0-211.28.1.el10_2
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4477,9 +4477,22 @@ fi\
 #
 #
 %changelog
-* Sat Jun 20 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.26.1
+* Fri Jun 26 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.28.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Thu Jun 25 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.28.1.el10_2]
+- selinux: RHEL-only hotfix for execmem regression (Ondrej Mosnacek) [RHEL-185117]
+- tcp: fix potential race in tcp_v6_syn_recv_sock() (Paolo Abeni) [RHEL-174242] {CVE-2026-43198}
+- scsi: qla2xxx: Completely fix fcport double free (Ewan D. Milne) [RHEL-179755] {CVE-2026-43414}
+- RDMA/mana: Remove user triggerable WARN_ON() in mana_ib_create_qp_rss() (CKI Backport Bot) [RHEL-180155] {CVE-2026-46117}
+- RDMA/iwcm: Fix workqueue list corruption by removing work_list (CKI Backport Bot) [RHEL-179665] {CVE-2026-45898}
+- rxrpc: fix RESPONSE authenticator parser OOB read (CKI Backport Bot) [RHEL-171456] {CVE-2026-31636}
+
+* Mon Jun 22 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.27.1.el10_2]
+- nvmet-tcp: fix race between ICReq handling and queue teardown (CKI Backport Bot) [RHEL-180106] {CVE-2026-46135}
+- RDMA/mana: Validate rx_hash_key_len (CKI Backport Bot) [RHEL-180090] {CVE-2026-46145}
+- ipv6: icmp: clear skb2->cb[] in ip6_err_gen_icmpv6_unreach() (Guillaume Nault) [RHEL-172675] {CVE-2026-43038}
 
 * Thu Jun 18 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.26.1.el10_2]
 - net/sched: fix pedit partial COW leading to page cache corruption (Ivan Vecera) [RHEL-177380] {CVE-2026-46331}

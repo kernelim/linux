@@ -3808,7 +3808,7 @@ static int default_noexec __ro_after_init;
 
 static int __file_map_prot_check(const struct cred *cred,
 				 const struct file *file, unsigned long prot,
-				 bool shared, bool bf_user_file)
+				 bool shared, bool mounter, bool bf_user_file)
 {
 	struct inode *inode = NULL;
 	bool prot_exec = prot & PROT_EXEC;
@@ -3822,7 +3822,7 @@ static int __file_map_prot_check(const struct cred *cred,
 	}
 
 	if (default_noexec && prot_exec &&
-	    (!file || IS_PRIVATE(inode) || (!shared && prot_write))) {
+	    (!file || IS_PRIVATE(inode) || (!shared && prot_write)) && !mounter) {
 		int rc;
 		u32 sid = cred_sid(cred);
 
@@ -3852,9 +3852,9 @@ static int __file_map_prot_check(const struct cred *cred,
 
 static inline int file_map_prot_check(const struct cred *cred,
 				      const struct file *file,
-				      unsigned long prot, bool shared)
+				      unsigned long prot, bool shared, bool mounter)
 {
-	return __file_map_prot_check(cred, file, prot, shared, false);
+	return __file_map_prot_check(cred, file, prot, shared, mounter, false);
 }
 
 static int selinux_mmap_addr(unsigned long addr)
@@ -3871,7 +3871,7 @@ static int selinux_mmap_addr(unsigned long addr)
 }
 
 static int selinux_mmap_file_common(const struct cred *cred, struct file *file,
-				    unsigned long prot, bool shared)
+				    unsigned long prot, bool shared, bool mounter)
 {
 	if (file) {
 		int rc;
@@ -3884,7 +3884,7 @@ static int selinux_mmap_file_common(const struct cred *cred, struct file *file,
 			return rc;
 	}
 
-	return file_map_prot_check(cred, file, prot, shared);
+	return file_map_prot_check(cred, file, prot, shared, mounter);
 }
 
 static int selinux_mmap_file(struct file *file,
@@ -3892,7 +3892,8 @@ static int selinux_mmap_file(struct file *file,
 			     unsigned long prot, unsigned long flags)
 {
 	return selinux_mmap_file_common(current_cred(), file, prot,
-					(flags & MAP_TYPE) == MAP_SHARED);
+					(flags & MAP_TYPE) == MAP_SHARED,
+					false);
 }
 
 /**
@@ -3925,7 +3926,8 @@ static int selinux_mmap_backing_file(struct vm_area_struct *vma,
 		prot |= PROT_EXEC;
 
 	return selinux_mmap_file_common(backing_file->f_cred, backing_file,
-					prot, vma->vm_flags & VM_SHARED);
+					prot, vma->vm_flags & VM_SHARED,
+					true);
 }
 
 static int selinux_file_mprotect(struct vm_area_struct *vma,
@@ -3986,11 +3988,11 @@ static int selinux_file_mprotect(struct vm_area_struct *vma,
 		}
 	}
 
-	rc = __file_map_prot_check(cred, file, prot, shared, backing_file);
+	rc = __file_map_prot_check(cred, file, prot, shared, false, backing_file);
 	if (rc)
 		return rc;
 	if (backing_file) {
-		rc = file_map_prot_check(file->f_cred, file, prot, shared);
+		rc = file_map_prot_check(file->f_cred, file, prot, shared, true);
 		if (rc)
 			return rc;
 	}

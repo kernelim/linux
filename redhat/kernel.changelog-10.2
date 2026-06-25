@@ -1,3 +1,18 @@
+* Thu Jun 25 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.28.1.el10_2]
+- selinux: RHEL-only hotfix for execmem regression (Ondrej Mosnacek) [RHEL-185117]
+- tcp: fix potential race in tcp_v6_syn_recv_sock() (Paolo Abeni) [RHEL-174242] {CVE-2026-43198}
+- scsi: qla2xxx: Completely fix fcport double free (Ewan D. Milne) [RHEL-179755] {CVE-2026-43414}
+- RDMA/mana: Remove user triggerable WARN_ON() in mana_ib_create_qp_rss() (CKI Backport Bot) [RHEL-180155] {CVE-2026-46117}
+- RDMA/iwcm: Fix workqueue list corruption by removing work_list (CKI Backport Bot) [RHEL-179665] {CVE-2026-45898}
+- rxrpc: fix RESPONSE authenticator parser OOB read (CKI Backport Bot) [RHEL-171456] {CVE-2026-31636}
+Resolves: RHEL-171456, RHEL-174242, RHEL-179665, RHEL-179755, RHEL-180155, RHEL-185117
+
+* Mon Jun 22 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.27.1.el10_2]
+- nvmet-tcp: fix race between ICReq handling and queue teardown (CKI Backport Bot) [RHEL-180106] {CVE-2026-46135}
+- RDMA/mana: Validate rx_hash_key_len (CKI Backport Bot) [RHEL-180090] {CVE-2026-46145}
+- ipv6: icmp: clear skb2->cb[] in ip6_err_gen_icmpv6_unreach() (Guillaume Nault) [RHEL-172675] {CVE-2026-43038}
+Resolves: RHEL-172675, RHEL-180090, RHEL-180106
+
 * Thu Jun 18 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.26.1.el10_2]
 - net/sched: fix pedit partial COW leading to page cache corruption (Ivan Vecera) [RHEL-177380] {CVE-2026-46331}
 - exit: prevent preemption of oopsing TASK_DEAD task (CKI Backport Bot) [RHEL-180009] {CVE-2026-46173}
