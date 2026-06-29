@@ -1980,7 +1980,7 @@ void touch_atime(const struct path *path)
 	if (!sb_start_write_trylock(inode->i_sb))
 		return;
 
-	if (__mnt_want_write(mnt) != 0)
+	if (mnt_get_write_access(mnt) != 0)
 		goto skip_update;
 	/*
 	 * File systems can error out when updating inodes if they need to
@@ -1993,7 +1993,7 @@ void touch_atime(const struct path *path)
 	 */
 	now = current_time(inode);
 	update_time(inode, &now, S_ATIME);
-	__mnt_drop_write(mnt);
+	mnt_put_write_access(mnt);
 skip_update:
 	sb_end_write(inode->i_sb);
 }
@@ -2110,9 +2110,9 @@ static int __file_update_time(struct file *file, struct timespec64 *now,
 	struct inode *inode = file_inode(file);
 
 	/* try to update time settings */
-	if (!__mnt_want_write_file(file)) {
+	if (!mnt_get_write_access_file(file)) {
 		ret = update_time(inode, now, sync_mode);
-		__mnt_drop_write_file(file);
+		mnt_put_write_access_file(file);
 	}
 
 	return ret;

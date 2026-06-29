@@ -100,19 +100,6 @@ unsigned long __mlx5_umem_find_best_quantized_pgoff(
 		__mlx5_bit_sz(typ, page_offset_fld), 0, scale,                 \
 		page_offset_quantized)
 
-static inline unsigned long
-mlx5_umem_dmabuf_find_best_pgsz(struct ib_umem_dmabuf *umem_dmabuf)
-{
-	/*
-	 * mkeys used for dmabuf are fixed at PAGE_SIZE because we must be able
-	 * to hold any sgl after a move operation. Ideally the mkc page size
-	 * could be changed at runtime to be optimal, but right now the driver
-	 * cannot do that.
-	 */
-	return ib_umem_find_best_pgsz(&umem_dmabuf->umem, PAGE_SIZE,
-				      umem_dmabuf->umem.iova);
-}
-
 enum {
 	MLX5_IB_MMAP_OFFSET_START = 9,
 	MLX5_IB_MMAP_OFFSET_END = 255,
@@ -316,8 +303,8 @@ struct mlx5_ib_flow_db {
 	struct mlx5_ib_flow_prio	rdma_tx[MLX5_IB_NUM_FLOW_FT];
 	struct mlx5_ib_flow_prio	opfcs[MLX5_IB_OPCOUNTER_MAX];
 	struct mlx5_flow_table		*lag_demux_ft;
-	struct mlx5_ib_flow_prio        *rdma_transport_rx;
-	struct mlx5_ib_flow_prio        *rdma_transport_tx;
+	struct mlx5_ib_flow_prio        *rdma_transport_rx[MLX5_RDMA_TRANSPORT_BYPASS_PRIO];
+	struct mlx5_ib_flow_prio        *rdma_transport_tx[MLX5_RDMA_TRANSPORT_BYPASS_PRIO];
 	/* Protect flow steering bypass flow tables
 	 * when add/del flow rules.
 	 * only single add/removal of flow steering rule could be done
@@ -348,6 +335,7 @@ struct mlx5_ib_flow_db {
 #define MLX5_IB_UPD_XLT_ACCESS	      BIT(5)
 #define MLX5_IB_UPD_XLT_INDIRECT      BIT(6)
 #define MLX5_IB_UPD_XLT_DOWNGRADE     BIT(7)
+#define MLX5_IB_UPD_XLT_KEEP_PGSZ     BIT(8)
 
 /* Private QP creation flags to be passed in ib_qp_init_attr.create_flags.
  *
@@ -646,8 +634,13 @@ enum mlx5_mkey_type {
 	MLX5_MKEY_IMPLICIT_CHILD,
 };
 
+/* Used for non-existent ph value */
+#define MLX5_IB_NO_PH 0xff
+
 struct mlx5r_cache_rb_key {
 	u8 ats:1;
+	u8 ph;
+	u16 st_index;
 	unsigned int access_mode;
 	unsigned int access_flags;
 	unsigned int ndescs;
@@ -735,6 +728,8 @@ struct mlx5_ib_mr {
 			struct mlx5_ib_mr *dd_crossed_mr;
 			struct list_head dd_node;
 			u8 revoked :1;
+			/* Indicates previous dmabuf page fault occurred */
+			u8 dmabuf_faulted:1;
 			struct mlx5_ib_mkey null_mmkey;
 		};
 	};
@@ -855,6 +850,8 @@ struct mlx5_ib_port_resources {
 struct mlx5_data_direct_resources {
 	u32 pdn;
 	u32 mkey;
+	u32 mkey_ro;
+	u8 mkey_ro_valid :1;
 };
 
 struct mlx5_ib_resources {
@@ -895,13 +892,14 @@ void mlx5_ib_fs_remove_op_fc(struct mlx5_ib_dev *dev,
 			     struct mlx5_ib_op_fc *opfc,
 			     enum mlx5_ib_optional_counter_type type);
 
-int mlx5r_fs_bind_op_fc(struct ib_qp *qp, struct rdma_counter *counter,
-			u32 port);
+int mlx5r_fs_bind_op_fc(struct ib_qp *qp,
+			struct mlx5_fc *fc_arr[MLX5_IB_OPCOUNTER_MAX],
+			struct xarray *qpn_opfc_xa, u32 port);
 
-void mlx5r_fs_unbind_op_fc(struct ib_qp *qp, struct rdma_counter *counter);
+void mlx5r_fs_unbind_op_fc(struct ib_qp *qp, struct xarray *qpn_opfc_xa);
 
 void mlx5r_fs_destroy_fcs(struct mlx5_ib_dev *dev,
-			  struct rdma_counter *counter);
+			  struct mlx5_fc *fc_arr[MLX5_IB_OPCOUNTER_MAX]);
 
 struct mlx5_ib_multiport_info;
 
@@ -1002,7 +1000,6 @@ enum mlx5_ib_stages {
 	MLX5_IB_STAGE_ODP,
 	MLX5_IB_STAGE_COUNTERS,
 	MLX5_IB_STAGE_CONG_DEBUGFS,
-	MLX5_IB_STAGE_UAR,
 	MLX5_IB_STAGE_BFREG,
 	MLX5_IB_STAGE_PRE_IB_REG_UMR,
 	MLX5_IB_STAGE_WHITELIST_UID,
@@ -1110,6 +1107,7 @@ struct mlx5_ib_lb_state {
 	u32			user_td;
 	int			qps;
 	bool			enabled;
+	bool			force_enable;
 };
 
 struct mlx5_ib_pf_eq {
@@ -1369,6 +1367,8 @@ int mlx5_ib_create_cq(struct ib_cq *ibcq, const struct ib_cq_init_attr *attr,
 		      struct uverbs_attr_bundle *attrs);
 int mlx5_ib_destroy_cq(struct ib_cq *cq, struct ib_udata *udata);
 int mlx5_ib_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *wc);
+int mlx5_ib_pre_destroy_cq(struct ib_cq *cq);
+void mlx5_ib_post_destroy_cq(struct ib_cq *cq);
 int mlx5_ib_arm_cq(struct ib_cq *ibcq, enum ib_cq_notify_flags flags);
 int mlx5_ib_modify_cq(struct ib_cq *cq, u16 cq_count, u16 cq_period);
 int mlx5_ib_resize_cq(struct ib_cq *ibcq, int entries, struct ib_udata *udata);
@@ -1747,20 +1747,75 @@ static inline u32 smi_to_native_portnum(struct mlx5_ib_dev *dev, u32 port)
 	return (port - 1) / dev->num_ports + 1;
 }
 
+static inline unsigned int get_max_log_entity_size_cap(struct mlx5_ib_dev *dev,
+						       int access_mode)
+{
+	int max_log_size = 0;
+
+	if (access_mode == MLX5_MKC_ACCESS_MODE_MTT)
+		max_log_size =
+			MLX5_CAP_GEN_2(dev->mdev, max_mkey_log_entity_size_mtt);
+	else if (access_mode == MLX5_MKC_ACCESS_MODE_KSM)
+		max_log_size = MLX5_CAP_GEN_2(
+			dev->mdev, max_mkey_log_entity_size_fixed_buffer);
+
+	if (!max_log_size ||
+	    (max_log_size > 31 &&
+	     !MLX5_CAP_GEN_2(dev->mdev, umr_log_entity_size_5)))
+		max_log_size = 31;
+
+	return max_log_size;
+}
+
+static inline unsigned int get_min_log_entity_size_cap(struct mlx5_ib_dev *dev,
+						       int access_mode)
+{
+	int min_log_size = 0;
+
+	if (access_mode == MLX5_MKC_ACCESS_MODE_KSM &&
+	    MLX5_CAP_GEN_2(dev->mdev,
+			   min_mkey_log_entity_size_fixed_buffer_valid))
+		min_log_size = MLX5_CAP_GEN_2(
+			dev->mdev, min_mkey_log_entity_size_fixed_buffer);
+	else
+		min_log_size =
+			MLX5_CAP_GEN_2(dev->mdev, log_min_mkey_entity_size);
+
+	min_log_size = max(min_log_size, MLX5_ADAPTER_PAGE_SHIFT);
+	return min_log_size;
+}
+
 /*
  * For mkc users, instead of a page_offset the command has a start_iova which
  * specifies both the page_offset and the on-the-wire IOVA
  */
 static __always_inline unsigned long
 mlx5_umem_mkc_find_best_pgsz(struct mlx5_ib_dev *dev, struct ib_umem *umem,
-			     u64 iova)
+			     u64 iova, int access_mode)
 {
-	int page_size_bits =
-		MLX5_CAP_GEN_2(dev->mdev, umr_log_entity_size_5) ? 6 : 5;
-	unsigned long bitmap =
-		__mlx5_log_page_size_to_bitmap(page_size_bits, 0);
+	unsigned int max_log_entity_size_cap, min_log_entity_size_cap;
+	unsigned long bitmap;
+
+	max_log_entity_size_cap = get_max_log_entity_size_cap(dev, access_mode);
+	min_log_entity_size_cap = get_min_log_entity_size_cap(dev, access_mode);
+
+	bitmap = GENMASK_ULL(max_log_entity_size_cap, min_log_entity_size_cap);
+
+	/* In KSM mode HW requires IOVA and mkey's page size to be aligned */
+	if (access_mode == MLX5_MKC_ACCESS_MODE_KSM && iova)
+		bitmap &= GENMASK_ULL(__ffs64(iova), 0);
 
 	return ib_umem_find_best_pgsz(umem, bitmap, iova);
+}
+
+static inline unsigned long
+mlx5_umem_dmabuf_find_best_pgsz(struct ib_umem_dmabuf *umem_dmabuf,
+				int access_mode)
+{
+	return mlx5_umem_mkc_find_best_pgsz(to_mdev(umem_dmabuf->umem.ibdev),
+					    &umem_dmabuf->umem,
+					    umem_dmabuf->umem.iova,
+					    access_mode);
 }
 
 #endif /* MLX5_IB_H */

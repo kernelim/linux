@@ -76,8 +76,8 @@ extern int sb_prepare_remount_readonly(struct super_block *);
 
 extern void __init mnt_init(void);
 
-extern int __mnt_want_write_file(struct file *);
-extern void __mnt_drop_write_file(struct file *);
+int mnt_get_write_access_file(struct file *file);
+void mnt_put_write_access_file(struct file *file);
 
 extern void dissolve_on_fput(struct vfsmount *);
 
@@ -93,8 +93,28 @@ extern void chroot_fs_refs(const struct path *, const struct path *);
 /*
  * file_table.c
  */
-extern struct file *alloc_empty_file(int, const struct cred *);
-extern struct file *alloc_empty_file_noaccount(int, const struct cred *);
+struct file *alloc_empty_file(int flags, const struct cred *cred);
+struct file *alloc_empty_file_noaccount(int flags, const struct cred *cred);
+struct file *alloc_empty_backing_file(int flags, const struct cred *cred,
+				      const struct file *user_file);
+void backing_file_set_user_path(struct file *f, const struct path *path);
+
+static inline void file_put_write_access(struct file *file)
+{
+	put_write_access(file->f_inode);
+	mnt_put_write_access(file->f_path.mnt);
+	if (unlikely(file->f_mode & FMODE_BACKING))
+		mnt_put_write_access(backing_file_user_path(file)->mnt);
+}
+
+static inline void put_file_access(struct file *file)
+{
+	if ((file->f_mode & (FMODE_READ | FMODE_WRITE)) == FMODE_READ) {
+		i_readcount_dec(file->f_inode);
+	} else if (file->f_mode & FMODE_WRITER) {
+		file_put_write_access(file);
+	}
+}
 
 /*
  * super.c

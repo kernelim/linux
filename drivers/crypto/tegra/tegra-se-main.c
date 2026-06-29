@@ -52,7 +52,7 @@ tegra_se_cmdbuf_pin(struct device *dev, struct host1x_bo *bo, enum dma_data_dire
 		return ERR_PTR(-ENOMEM);
 
 	kref_init(&map->ref);
-	map->bo = host1x_bo_get(bo);
+	map->bo = bo;
 	map->direction = direction;
 	map->dev = dev;
 
@@ -93,7 +93,6 @@ static void tegra_se_cmdbuf_unpin(struct host1x_bo_mapping *map)
 	dma_unmap_sgtable(map->dev, map->sgt, map->direction, 0);
 	sg_free_table(map->sgt);
 	kfree(map->sgt);
-	host1x_bo_put(map->bo);
 
 	kfree(map);
 }
@@ -310,7 +309,7 @@ static int tegra_se_probe(struct platform_device *pdev)
 
 	se->engine = crypto_engine_alloc_init(dev, 0);
 	if (!se->engine)
-		return dev_err_probe(dev, -ENOMEM, "failed to init crypto engine\n");
+		return -ENOMEM;
 
 	ret = crypto_engine_start(se->engine);
 	if (ret) {

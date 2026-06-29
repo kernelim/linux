@@ -1195,6 +1195,7 @@ mlx5_tc_ct_block_flow_offload_add(struct mlx5_ct_ft *ft,
 	struct flow_action_entry *meta_action;
 	unsigned long cookie = flow->cookie;
 	struct mlx5_ct_entry *entry;
+	bool has_nat;
 	int err;
 
 	meta_action = mlx5_tc_ct_get_ct_metadata_action(flow_rule);
@@ -1236,6 +1237,8 @@ mlx5_tc_ct_block_flow_offload_add(struct mlx5_ct_ft *ft,
 	err = mlx5_tc_ct_rule_to_tuple_nat(&entry->tuple_nat, flow_rule);
 	if (err)
 		goto err_set;
+	has_nat = memcmp(&entry->tuple, &entry->tuple_nat,
+			 sizeof(entry->tuple));
 
 	spin_lock_bh(&ct_priv->ht_lock);
 
@@ -1244,7 +1247,7 @@ mlx5_tc_ct_block_flow_offload_add(struct mlx5_ct_ft *ft,
 	if (err)
 		goto err_entries;
 
-	if (memcmp(&entry->tuple, &entry->tuple_nat, sizeof(entry->tuple))) {
+	if (has_nat) {
 		err = rhashtable_lookup_insert_fast(&ct_priv->ct_tuples_nat_ht,
 						    &entry->tuple_nat_node,
 						    tuples_nat_ht_params);
@@ -2284,9 +2287,10 @@ mlx5_tc_ct_init(struct mlx5e_priv *priv, struct mlx5_fs_chains *chains,
 		enum mlx5_flow_namespace_type ns_type,
 		struct mlx5e_post_act *post_act)
 {
+	u8 mapping_id[MLX5_SW_IMAGE_GUID_MAX_BYTES];
 	struct mlx5_tc_ct_priv *ct_priv;
 	struct mlx5_core_dev *dev;
-	u64 mapping_id;
+	u8 id_len;
 	int err;
 
 	dev = priv->mdev;
@@ -2298,16 +2302,18 @@ mlx5_tc_ct_init(struct mlx5e_priv *priv, struct mlx5_fs_chains *chains,
 	if (!ct_priv)
 		goto err_alloc;
 
-	mapping_id = mlx5_query_nic_system_image_guid(dev);
+	mlx5_query_nic_sw_system_image_guid(dev, mapping_id, &id_len);
 
-	ct_priv->zone_mapping = mapping_create_for_id(mapping_id, MAPPING_TYPE_ZONE,
+	ct_priv->zone_mapping = mapping_create_for_id(mapping_id, id_len,
+						      MAPPING_TYPE_ZONE,
 						      sizeof(u16), 0, true);
 	if (IS_ERR(ct_priv->zone_mapping)) {
 		err = PTR_ERR(ct_priv->zone_mapping);
 		goto err_mapping_zone;
 	}
 
-	ct_priv->labels_mapping = mapping_create_for_id(mapping_id, MAPPING_TYPE_LABELS,
+	ct_priv->labels_mapping = mapping_create_for_id(mapping_id, id_len,
+							MAPPING_TYPE_LABELS,
 							sizeof(u32) * 4, 0, true);
 	if (IS_ERR(ct_priv->labels_mapping)) {
 		err = PTR_ERR(ct_priv->labels_mapping);
