@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 211.28.1
+%define pkgrelease 211.29.1
 %define kversion 6
-%define tarfile_release 6.12.0-211.28.1.el10_2
+%define tarfile_release 6.12.0-211.29.1.el10_2
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 211.28.1%{?buildid}%{?dist}
+%define specrelease 211.29.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-211.28.1.el10_2
+%define kabiversion 6.12.0-211.29.1.el10_2
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4477,9 +4477,24 @@ fi\
 #
 #
 %changelog
-* Fri Jun 26 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.28.1
+* Wed Jul 01 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.29.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Mon Jun 29 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.29.1.el10_2]
+- RDMA/mlx5: Fix error path fall-through in mlx5_ib_dev_res_srq_init() (CKI Backport Bot) [RHEL-180001] {CVE-2026-46176}
+- crypto: tegra - Return ENOMEM when input buffer allocation fails for ccm (Vladislav Dronov) [RHEL-182759]
+- crypto: tegra - Fix dma_free_coherent size error (Vladislav Dronov) [RHEL-182759]
+- crypto: tegra - Don't touch bo refcount in host1x bo pin/unpin (Vladislav Dronov) [RHEL-182759]
+- crypto: tegra - Add missing CRYPTO_ALG_ASYNC (Vladislav Dronov) [RHEL-182759] {CVE-2026-31739}
+- crypto: tegra - Use int type to store negative error codes (Vladislav Dronov) [RHEL-182759]
+- crypto: tegra - Remove the use of dev_err_probe() (Vladislav Dronov) [RHEL-182759]
+- crypto: tegra - use API helpers to setup fallback request (Vladislav Dronov) [RHEL-182759]
+- crypto: tegra - remove unneeded crypto_engine_stop() call (Vladislav Dronov) [RHEL-182759]
+- scsi: qla2xxx: Add support to report MPI FW state (Ewan D. Milne) [RHEL-181887]
+- RDMA/vmw_pvrdma: Fix double free on pvrdma_alloc_ucontext() error path (CKI Backport Bot) [RHEL-179965] {CVE-2026-46189}
+- ALSA: aloop: Fix peer runtime UAF during format-change stop (CKI Backport Bot) [RHEL-179317] {CVE-2026-46090}
+- ALSA: usb-audio: Add sanity check for OOB writes at silencing (CKI Backport Bot) [RHEL-173937] {CVE-2026-43279}
 
 * Thu Jun 25 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.28.1.el10_2]
 - selinux: RHEL-only hotfix for execmem regression (Ondrej Mosnacek) [RHEL-185117]
