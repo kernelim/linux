@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 211.29.1
+%define pkgrelease 211.30.1
 %define kversion 6
-%define tarfile_release 6.12.0-211.29.1.el10_2
+%define tarfile_release 6.12.0-211.30.1.el10_2
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 211.29.1%{?buildid}%{?dist}
+%define specrelease 211.30.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-211.29.1.el10_2
+%define kabiversion 6.12.0-211.30.1.el10_2
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4477,9 +4477,31 @@ fi\
 #
 #
 %changelog
-* Wed Jul 01 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.29.1
+* Mon Jul 06 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.30.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Wed Jul 01 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.30.1.el10_2]
+- ipv6: account for fraggap on the paged allocation path (Sabrina Dubroca) [RHEL-191349]
+- ipv4: account for fraggap on the paged allocation path (Sabrina Dubroca) [RHEL-191349]
+- fs/smb/client: fix out-of-bounds read in cifs_sanitize_prepath (CKI Backport Bot) [RHEL-189491] {CVE-2026-43112}
+- Enable workaround for ARM64 ERRATUM 4118414 (Mark Salter) [RHEL-183592] {CVE-2025-10263}
+- arm64: errata: Mitigate TLBI errata on Microsoft Azure Cobalt 100 CPU (Mark Salter) [RHEL-183592] {CVE-2025-10263}
+- arm64: errata: Mitigate TLBI errata on NVIDIA Olympus CPU (Mark Salter) [RHEL-183592] {CVE-2025-10263}
+- arm64: errata: Mitigate TLBI errata on various Arm CPUs (Mark Salter) [RHEL-183592] {CVE-2025-10263}
+- arm64: cputype: Add C1-Ultra definitions (Mark Salter) [RHEL-183592] {CVE-2025-10263}
+- arm64: cputype: Add C1-Premium definitions (Mark Salter) [RHEL-183592] {CVE-2025-10263}
+- arm64: cputype: Add C1-Pro definitions (Mark Salter) [RHEL-183592] {CVE-2025-10263}
+- crypto: krb5 - filter out async aead implementations at alloc (CKI Backport Bot) [RHEL-182537]
+- crypto: krb5enc - fix async decrypt skipping hash verification (CKI Backport Bot) [RHEL-182537]
+- crypto: krb5enc - fix sleepable flag handling in encrypt dispatch (CKI Backport Bot) [RHEL-182537]
+- crypto: testmgr - allow authenc(hmac(sha{256,384}),cts(cbc(aes))) in FIPS mode (CKI Backport Bot) [RHEL-182537]
+- ASoC: SDCA: fix NULL pointer dereference in sdca_dev_unregister_functions (CKI Backport Bot) [RHEL-185110]
+- KVM: arm64: vgic-its: Drop the translation cache reference only for the erased entry (CKI Backport Bot) [RHEL-183965] {CVE-2026-46316}
+- netfilter: nft_inner: Fix IPv6 inner_thoff desync (CKI Backport Bot) [RHEL-181936] {CVE-2026-46244}
+- drm/gem: Fix inconsistent plane dimension calculation in drm_gem_fb_init_with_funcs() (CKI Backport Bot) [RHEL-179912] {CVE-2026-46209}
+- rxrpc: Fix rxrpc_input_call_event() to only unshare DATA packets (CKI Backport Bot) [RHEL-179566] {CVE-2026-45998}
+- rxrpc: Fix potential UAF after skb_unshare() failure (CKI Backport Bot) [RHEL-179566] {CVE-2026-45998}
 
 * Mon Jun 29 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.29.1.el10_2]
 - RDMA/mlx5: Fix error path fall-through in mlx5_ib_dev_res_srq_init() (CKI Backport Bot) [RHEL-180001] {CVE-2026-46176}
