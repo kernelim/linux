@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.20.1
+%define pkgrelease 687.22.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.20.1.el9_8
+%define tarfile_release 5.14.0-687.22.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.20.1%{?buildid}%{?dist}
+%define specrelease 687.22.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.20.1.el9_8
+%define kabiversion 5.14.0-687.22.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3713,10 +3713,38 @@ fi
 #
 #
 %changelog
-* Wed Jul 01 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.20.1
+* Mon Jul 06 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.22.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Mon Jul 06 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.22.1.el9_8]
+- smb/client: fix out-of-bounds read in smb2_compound_op() (Paulo Alcantara) [RHEL-180041] {CVE-2026-46155}
+- smb: client: fix off-by-8 bounds check in check_wsl_eas() (Paulo Alcantara) [RHEL-180041]
+- xfrm: defensively unhash xfrm_state lists in __xfrm_state_delete (Sabrina Dubroca) [RHEL-180176] {CVE-2026-46116}
+- net: gro: don't merge zcopy skbs (Sabrina Dubroca) [RHEL-177878] {CVE-2026-46323}
+- net/mana: Null service_wq on setup error to prevent double destroy (CKI Backport Bot) [RHEL-180271] {CVE-2026-43276}
+- net: mana: Fix double destroy_workqueue on service rescan PCI path (CKI Backport Bot) [RHEL-180271] {CVE-2026-43276}
+
+* Thu Jul 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.21.1.el9_8]
+- fs/smb/client: fix out-of-bounds read in cifs_sanitize_prepath (CKI Backport Bot) [RHEL-189503] {CVE-2026-43112}
+- Enable workaround for ARM64 ERRATUM 4118414 (Mark Salter) [RHEL-183625] {CVE-2025-10263}
+- arm64: cputype: Add NVIDIA Olympus definitions (Mark Salter) [RHEL-183625] {CVE-2025-10263}
+- arm64: errata: Mitigate TLBI errata on Microsoft Azure Cobalt 100 CPU (Mark Salter) [RHEL-183625] {CVE-2025-10263}
+- arm64: errata: Mitigate TLBI errata on NVIDIA Olympus CPU (Mark Salter) [RHEL-183625] {CVE-2025-10263}
+- arm64: errata: Mitigate TLBI errata on various Arm CPUs (Mark Salter) [RHEL-183625] {CVE-2025-10263}
+- arm64: errata: Apply workarounds for Neoverse-V3AE (Mark Salter) [RHEL-183625] {CVE-2025-10263}
+- arm64: cputype: Add Neoverse-V3AE definitions (Mark Salter) [RHEL-183625] {CVE-2025-10263}
+- arm64: cputype: Add C1-Ultra definitions (Mark Salter) [RHEL-183625] {CVE-2025-10263}
+- arm64: cputype: Add C1-Premium definitions (Mark Salter) [RHEL-183625] {CVE-2025-10263}
+- arm64: cputype: Add C1-Pro definitions (Mark Salter) [RHEL-183625] {CVE-2025-10263}
+- Clean up documentation mess left by previous backport (Mark Salter) [RHEL-183625] {CVE-2025-10263}
+- KVM: arm64: vgic-its: Drop the translation cache reference only for the erased entry (CKI Backport Bot) [RHEL-183969] {CVE-2026-46316}
+- netfilter: nft_inner: Fix IPv6 inner_thoff desync (CKI Backport Bot) [RHEL-181929] {CVE-2026-46244}
+- procfs: fix missing RCU protection when reading real_parent in do_task_stat() (CKI Backport Bot) [RHEL-181907] {CVE-2026-46259}
+- drm/gem: Fix inconsistent plane dimension calculation in drm_gem_fb_init_with_funcs() (CKI Backport Bot) [RHEL-179909] {CVE-2026-46209}
+- sctp: revalidate list cursor after sctp_sendmsg_to_asoc() in SCTP_SENDALL (CKI Backport Bot) [RHEL-179865] {CVE-2026-46227}
+- nouveau/gsp: drop WARN_ON in ACPI probes (Lyude Paul) [RHEL-160966]
 
 * Mon Jun 29 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.20.1.el9_8]
 - crypto: krb5 - filter out async aead implementations at alloc (CKI Backport Bot) [RHEL-182540]
