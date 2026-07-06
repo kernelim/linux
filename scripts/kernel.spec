@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.139.1.el8_10
+%define pkgrelease 553.141.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.139.1%{?dist}
+%define specrelease 553.141.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2709,13 +2709,47 @@ fi
 #
 #
 %changelog
-* Wed Jul 01 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.139.1
+* Thu Jul 09 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.141.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Mon Jul 06 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.141.1.el8_10]
+- fs/smb/client: fix out-of-bounds read in cifs_sanitize_prepath (CKI Backport Bot) [RHEL-189506] {CVE-2026-43112}
+
+* Thu Jul 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.140.1.el8_10]
+- Enable workaround for ARM64 ERRATUM 4118414 (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: errata: Mitigate TLBI errata on Microsoft Azure Cobalt 100 CPU (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: errata: Mitigate TLBI errata on NVIDIA Olympus CPU (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: errata: Mitigate TLBI errata on various Arm CPUs (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: Add part number for Arm Cortex-A78AE (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: Subscribe Microsoft Azure Cobalt 100 to ARM Neoverse N2 errata (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: cputype: Add NVIDIA Olympus definitions (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: cputype: Add C1-Premium definitions (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: cputype: Add C1-Ultra definitions (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: cputype: Add C1-Pro definitions (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: cputype: Add Cortex-A720AE definitions (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: cputype: Add Neoverse-N3 definitions (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: cputype: Add Cortex-A725 definitions (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: cputype: Add Cortex-A720 definitions (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: Add Cortex-715 CPU part definition (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: cputype: Add Neoverse-V3AE definitions (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: cputype: Add MIDR_CORTEX_A76AE (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: cputype: Add Cortex-X1C definitions (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: cputype: Add Cortex-X925 definitions (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: cputype: Add Cortex-X3 definitions (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: cputype: Add Neoverse-V3 definitions (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: cputype: Add Cortex-X4 definitions (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- arm64: Add Neoverse-V2 part (Mark Salter) [RHEL-183619] {CVE-2025-10263}
+- tcp: fix potential race in tcp_v6_syn_recv_sock() (Antoine Tenart) [RHEL-174237] {CVE-2026-43198}
+- procfs: fix missing RCU protection when reading real_parent in do_task_stat() (CKI Backport Bot) [RHEL-181898] {CVE-2026-46259}
+- drm/gem: Fix inconsistent plane dimension calculation in drm_gem_fb_init_with_funcs() (CKI Backport Bot) [RHEL-179907] {CVE-2026-46209}
+- sctp: revalidate list cursor after sctp_sendmsg_to_asoc() in SCTP_SENDALL (CKI Backport Bot) [RHEL-179857] {CVE-2026-46227}
+- netfilter: nfnetlink_cthelper: fix OOB read in nfnl_cthelper_dump_table() (CKI Backport Bot) [RHEL-179736] {CVE-2026-43450}
+- vfs: validate inode i_link before use in get_link() (Ian Kent) [RHEL-152759]
 
 * Mon Jun 29 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.139.1.el8_10]
 - NFS: improve "Server wrote zero bytes" error (Olga Kornievskaia) [RHEL-147665]
