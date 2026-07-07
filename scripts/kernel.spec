@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 211.30.1
+%define pkgrelease 211.32.1
 %define kversion 6
-%define tarfile_release 6.12.0-211.30.1.el10_2
+%define tarfile_release 6.12.0-211.32.1.el10_2
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 211.30.1%{?buildid}%{?dist}
+%define specrelease 211.32.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-211.30.1.el10_2
+%define kabiversion 6.12.0-211.32.1.el10_2
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4477,9 +4477,41 @@ fi\
 #
 #
 %changelog
-* Mon Jul 06 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.30.1
+* Thu Jul 09 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.32.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Tue Jul 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.32.1.el10_2]
+- KVM: x86: Fix shadow paging use-after-free due to unexpected role (Paolo Bonzini) [RHEL-192407] {CVE-2026-53359}
+- KVM: x86: Fix shadow paging use-after-free due to unexpected GFN (CKI Backport Bot) [RHEL-186698] {CVE-2026-46113}
+- net/sched: ets: Always remove class from active list before deleting in ets_qdisc_change (CKI Backport Bot) [RHEL-183007] {CVE-2025-71066}
+- sctp: revalidate list cursor after sctp_sendmsg_to_asoc() in SCTP_SENDALL (CKI Backport Bot) [RHEL-179854] {CVE-2026-46227}
+
+* Mon Jul 06 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.31.1.el10_2]
+- eventpoll: refresh epi_fget() / ep_remove_file() comments (Ian Kent) [RHEL-180776]
+- eventpoll: Fix integer overflow in ep_loop_check_proc() (Ian Kent) [RHEL-180776]
+- eventpoll: drop vestigial epi->dying flag (Ian Kent) [RHEL-180776]
+- eventpoll: Fix semi-unbounded recursion (Ian Kent) [RHEL-180776] {CVE-2025-38614}
+- eventpoll: drop dead bool return from ep_remove_epi() (Ian Kent) [RHEL-180776]
+- eventpoll: refresh eventpoll_release() fast-path comment (Ian Kent) [RHEL-180776]
+- eventpoll: move f_lock acquisition into ep_remove_file() (Ian Kent) [RHEL-180776]
+- eventpoll: fix ep_remove struct eventpoll / struct file UAF (Ian Kent) [RHEL-180776] {CVE-2026-46242}
+- eventpoll: drop vestigial __ prefix from ep_remove_{file,epi}() (Ian Kent) [RHEL-180776]
+- eventpoll: move epi_fget() up (Ian Kent) [RHEL-180776]
+- eventpoll: rename ep_remove_safe() back to ep_remove() (Ian Kent) [RHEL-180776]
+- eventpoll: kill __ep_remove() (Ian Kent) [RHEL-180776]
+- eventpoll: split __ep_remove() (Ian Kent) [RHEL-180776]
+- eventpoll: use hlist_is_singular_node() in __ep_remove() (Ian Kent) [RHEL-180776]
+- eventpoll: defer struct eventpoll free to RCU grace period (Ian Kent) [RHEL-173832] {CVE-2026-43074}
+- epoll: annotate racy check (Ian Kent) [RHEL-180776]
+- smb/client: fix out-of-bounds read in smb2_compound_op() (Paulo Alcantara) [RHEL-180048] {CVE-2026-46155}
+- smb: client: fix off-by-8 bounds check in check_wsl_eas() (Paulo Alcantara) [RHEL-180048]
+- tg3: Fix race for querying speed/duplex (CKI Backport Bot) [RHEL-182770]
+- procfs: fix missing RCU protection when reading real_parent in do_task_stat() (CKI Backport Bot) [RHEL-181902] {CVE-2026-46259}
+- net/ipv6: ioam6: prevent schema length wraparound in trace fill (Antoine Tenart) [RHEL-174786] {CVE-2026-43341}
+- net/mana: Null service_wq on setup error to prevent double destroy (CKI Backport Bot) [RHEL-180277] {CVE-2026-43276}
+- net: mana: Fix double destroy_workqueue on service rescan PCI path (CKI Backport Bot) [RHEL-180277] {CVE-2026-43276}
+- net: page_pool: avoid false positive warning if NAPI was never added (Ivan Vecera) [RHEL-162140]
 
 * Wed Jul 01 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.30.1.el10_2]
 - ipv6: account for fraggap on the paged allocation path (Sabrina Dubroca) [RHEL-191349]
