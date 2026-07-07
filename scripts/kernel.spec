@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.22.1
+%define pkgrelease 687.24.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.22.1.el9_8
+%define tarfile_release 5.14.0-687.24.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.22.1%{?buildid}%{?dist}
+%define specrelease 687.24.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.22.1.el9_8
+%define kabiversion 5.14.0-687.24.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3713,10 +3713,34 @@ fi
 #
 #
 %changelog
-* Mon Jul 06 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.22.1
+* Thu Jul 09 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.24.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Tue Jul 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.24.1.el9_8]
+- KVM: x86: Fix shadow paging use-after-free due to unexpected role (Paolo Bonzini) [RHEL-192400] {CVE-2026-53359}
+- KVM: x86: Fix shadow paging use-after-free due to unexpected GFN (CKI Backport Bot) [RHEL-186702] {CVE-2026-46113}
+- net/sched: ets: Always remove class from active list before deleting in ets_qdisc_change (CKI Backport Bot) [RHEL-183004] {CVE-2025-71066}
+
+* Mon Jul 06 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.23.1.el9_8]
+- eventpoll: refresh epi_fget() / ep_remove_file() comments (Ian Kent) [RHEL-180773]
+- eventpoll: Fix integer overflow in ep_loop_check_proc() (Ian Kent) [RHEL-180773]
+- eventpoll: drop vestigial epi->dying flag (Ian Kent) [RHEL-180773]
+- eventpoll: drop dead bool return from ep_remove_epi() (Ian Kent) [RHEL-180773]
+- eventpoll: refresh eventpoll_release() fast-path comment (Ian Kent) [RHEL-180773]
+- eventpoll: move f_lock acquisition into ep_remove_file() (Ian Kent) [RHEL-180773]
+- eventpoll: fix ep_remove struct eventpoll / struct file UAF (Ian Kent) [RHEL-180773] {CVE-2026-46242}
+- eventpoll: drop vestigial __ prefix from ep_remove_{file,epi}() (Ian Kent) [RHEL-180773]
+- eventpoll: move epi_fget() up (Ian Kent) [RHEL-180773]
+- eventpoll: rename ep_remove_safe() back to ep_remove() (Ian Kent) [RHEL-180773]
+- eventpoll: kill __ep_remove() (Ian Kent) [RHEL-180773]
+- eventpoll: split __ep_remove() (Ian Kent) [RHEL-180773]
+- eventpoll: use hlist_is_singular_node() in __ep_remove() (Ian Kent) [RHEL-180773]
+- eventpoll: defer struct eventpoll free to RCU grace period (Ian Kent) [RHEL-173830] {CVE-2026-43074}
+- epoll: annotate racy check (Ian Kent) [RHEL-180773]
+- netfilter: bridge: make ebt_snat ARP rewrite writable (CKI Backport Bot) [RHEL-182344]
+- tg3: Fix race for querying speed/duplex (CKI Backport Bot) [RHEL-182768]
 
 * Mon Jul 06 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.22.1.el9_8]
 - smb/client: fix out-of-bounds read in smb2_compound_op() (Paulo Alcantara) [RHEL-180041] {CVE-2026-46155}
