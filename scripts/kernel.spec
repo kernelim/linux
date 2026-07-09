@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.24.1
+%define pkgrelease 687.25.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.24.1.el9_8
+%define tarfile_release 5.14.0-687.25.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.24.1%{?buildid}%{?dist}
+%define specrelease 687.25.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.24.1.el9_8
+%define kabiversion 5.14.0-687.25.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3713,10 +3713,21 @@ fi
 #
 #
 %changelog
-* Thu Jul 09 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.24.1
+* Mon Jul 13 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.25.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Thu Jul 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.25.1.el9_8]
+- futex/requeue: Revert "Prevent NULL pointer dereference in remove_waiter() on self-deadlock"" (Phil Auld) [RHEL-193245] {CVE-2026-53166}
+- locking/rtmutex: Skip remove_waiter() when waiter is not enqueued (Phil Auld) [RHEL-193245] {CVE-2026-53166}
+- futex/requeue: Prevent NULL pointer dereference in remove_waiter() on self-deadlock (Phil Auld) [RHEL-193151] {CVE-2026-43499}
+- rtmutex: Use waiter::task instead of current in remove_waiter() (Phil Auld) [RHEL-193151] {CVE-2026-43499}
+- net: bridge: use a stable FDB dst snapshot in RCU readers (Mohammad Heib) [RHEL-179330] {CVE-2026-46086}
+- kallsyms/bpf: rename __bpf_address_lookup() to bpf_address_lookup() (Anubhav Shelat) [RHEL-183236]
+- kallsyms: clean up modname and modbuildid initialization in kallsyms_lookup_buildid() (Anubhav Shelat) [RHEL-183236]
+- net: fix memory leak in skb_segment_list for GRO packets (CKI Backport Bot) [RHEL-189959] {CVE-2026-22979}
+- crypto: ccp - copy IV using skcipher ivsize (CKI Backport Bot) [RHEL-188459] {CVE-2026-53016}
 
 * Tue Jul 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.24.1.el9_8]
 - KVM: x86: Fix shadow paging use-after-free due to unexpected role (Paolo Bonzini) [RHEL-192400] {CVE-2026-53359}
