@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 211.32.1
+%define pkgrelease 211.33.1
 %define kversion 6
-%define tarfile_release 6.12.0-211.32.1.el10_2
+%define tarfile_release 6.12.0-211.33.1.el10_2
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 211.32.1%{?buildid}%{?dist}
+%define specrelease 211.33.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-211.32.1.el10_2
+%define kabiversion 6.12.0-211.33.1.el10_2
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4477,9 +4477,16 @@ fi\
 #
 #
 %changelog
-* Thu Jul 09 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.32.1
+* Mon Jul 13 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.33.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Thu Jul 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.33.1.el10_2]
+- futex/requeue: Revert "Prevent NULL pointer dereference in remove_waiter() on self-deadlock"" (CKI Backport Bot) [RHEL-193250] {CVE-2026-53166}
+- futex/requeue: Prevent NULL pointer dereference in remove_waiter() on self-deadlock (CKI Backport Bot) [RHEL-193250] {CVE-2026-43499}
+- locking/rtmutex: Skip remove_waiter() when waiter is not enqueued (CKI Backport Bot) [RHEL-193153] {CVE-2026-43499}
+- rtmutex: Use waiter::task instead of current in remove_waiter() (CKI Backport Bot) [RHEL-193153] {CVE-2026-43499}
+- md/bitmap: fix GPF in write_page caused by resize race (Nigel Croxon) [RHEL-174092] {CVE-2026-43163}
 
 * Tue Jul 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.32.1.el10_2]
 - KVM: x86: Fix shadow paging use-after-free due to unexpected role (Paolo Bonzini) [RHEL-192407] {CVE-2026-53359}
