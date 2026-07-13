@@ -11,6 +11,10 @@
 int iommu_sva_alloc_pasid(struct mm_struct *mm, ioasid_t min, ioasid_t max);
 struct mm_struct *iommu_sva_find(ioasid_t pasid);
 
+/* SVA mm tracking for kernel page table change notification */
+int iommu_sva_track_mm(struct mm_struct *mm);
+void iommu_sva_untrack_mm(struct mm_struct *mm);
+
 /* I/O Page fault */
 struct device;
 struct iommu_fault;

@@ -743,6 +743,7 @@ struct iommu_sva *iommu_sva_bind_device(struct device *dev,
 					struct mm_struct *mm);
 void iommu_sva_unbind_device(struct iommu_sva *handle);
 u32 iommu_sva_get_pasid(struct iommu_sva *handle);
+void iommu_sva_invalidate_kva_range(unsigned long start, unsigned long end);
 
 #else /* CONFIG_IOMMU_API */
 
@@ -1117,6 +1118,9 @@ static inline u32 iommu_sva_get_pasid(struct iommu_sva *handle)
 {
 	return IOMMU_PASID_INVALID;
 }
+
+static inline void iommu_sva_invalidate_kva_range(unsigned long start,
+						   unsigned long end) {}
 
 static inline struct iommu_fwspec *dev_iommu_fwspec_get(struct device *dev)
 {

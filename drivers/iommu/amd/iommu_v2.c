@@ -32,6 +32,7 @@
 #include <linux/cc_platform.h>
 
 #include "amd_iommu.h"
+#include "../iommu-sva-lib.h"
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Joerg Roedel <jroedel@suse.de>");
@@ -341,6 +342,9 @@ static void free_pasid_states(struct device_state *dev_state)
 
 		/* Clear the pasid state so that the pasid can be re-used */
 		clear_pasid_state(dev_state, pasid_state->pasid);
+
+		/* Untrack before tearing down the notifier */
+		iommu_sva_untrack_mm(pasid_state->mm);
 
 		/*
 		 * This will call the mn_release function and
@@ -669,6 +673,10 @@ int amd_iommu_bind_pasid(struct pci_dev *pdev, u32 pasid,
 	/* Now we are ready to handle faults */
 	pasid_state->invalid = false;
 
+	ret = iommu_sva_track_mm(mm);
+	if (ret)
+		goto out_clear_state;
+
 	/*
 	 * Drop the reference to the mm_struct here. We rely on the
 	 * mmu_notifier release call-back to inform us when the mm
@@ -725,6 +733,8 @@ void amd_iommu_unbind_pasid(struct pci_dev *pdev, u32 pasid)
 
 	/* Clear the pasid state so that the pasid can be re-used */
 	clear_pasid_state(dev_state, pasid_state->pasid);
+
+	iommu_sva_untrack_mm(pasid_state->mm);
 
 	/*
 	 * Call mmu_notifier_unregister to drop our reference

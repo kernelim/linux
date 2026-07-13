@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.141.1.el8_10
+%define pkgrelease 553.144.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.141.1%{?dist}
+%define specrelease 553.144.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2709,13 +2709,39 @@ fi
 #
 #
 %changelog
-* Thu Jul 09 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.141.1
+* Tue Jul 14 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.144.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Mon Jul 13 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.144.1.el8_10]
+- xfrm: defensively unhash xfrm_state lists in __xfrm_state_delete (Sabrina Dubroca) [RHEL-180170] {CVE-2026-46116}
+- xfs: resample the data fork mapping after cycling ILOCK (Carlos Maiolino) [RHEL-193938]
+- net: bridge: use a stable FDB dst snapshot in RCU readers (Mohammad Heib) [RHEL-179325] {CVE-2026-46086}
+
+* Thu Jul 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.143.1.el8_10]
+- locking/rtmutex: Skip remove_waiter() when waiter is not enqueued (Phil Auld) [RHEL-193334] {CVE-2026-53166}
+- rtmutex: Use waiter::task instead of current in remove_waiter() (Phil Auld) [RHEL-193143] {CVE-2026-43499}
+
+* Thu Jul 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.142.1.el8_10]
+- KVM: x86: Fix shadow paging use-after-free due to unexpected role (Paolo Bonzini) [RHEL-192411] {CVE-2026-53359}
+- KVM: x86: Fix shadow paging use-after-free due to unexpected GFN (Aidan Wallace) [RHEL-186618] {CVE-2026-46113}
+- KVM: x86/mmu: pull call to drop_large_spte() into __link_shadow_page() (Paolo Bonzini) [RHEL-186618]
+- KVM: x86/mmu: Always pass 0 for @quadrant when gptes are 8 bytes (Aidan Wallace) [RHEL-186618]
+- KVM: x86/mmu: Derive shadow MMU page role from parent (Aidan Wallace) [RHEL-186618]
+- KVM: x86/mmu: Stop passing "direct" to mmu_alloc_root() (Aidan Wallace) [RHEL-186618]
+- KVM: x86/mmu: Use a bool for direct (Aidan Wallace) [RHEL-186618]
+- netfilter: bridge: make ebt_snat ARP rewrite writable (CKI Backport Bot) [RHEL-182341]
+- net/sched: ets: Always remove class from active list before deleting in ets_qdisc_change (CKI Backport Bot) [RHEL-182996] {CVE-2025-71066}
+- iommu/vt-d: track SVA mm for kernel page table flush notification (Jerry Snitselaar) [RHEL-150534] {CVE-2025-71089}
+- iommu/amd: track SVA mm for kernel page table flush notification (Jerry Snitselaar) [RHEL-150534] {CVE-2025-71089}
+- x86/mm: flush IOMMU before freeing kernel page table pages (Jerry Snitselaar) [RHEL-150534] {CVE-2025-71089}
+- iommu/sva: add kernel page table IOTLB flush notification (Jerry Snitselaar) [RHEL-150534] {CVE-2025-71089}
+- iommu/vt-d: Fix incorrect cache invalidation for mm notification (Jerry Snitselaar) [RHEL-150534] {CVE-2025-71089}
+- net: atm: fix crash due to unvalidated vcc pointer in sigd_send() (CKI Backport Bot) [RHEL-167045] {CVE-2026-31411}
 
 * Mon Jul 06 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.141.1.el8_10]
 - fs/smb/client: fix out-of-bounds read in cifs_sanitize_prepath (CKI Backport Bot) [RHEL-189506] {CVE-2026-43112}

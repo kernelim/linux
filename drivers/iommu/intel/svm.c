@@ -227,12 +227,41 @@ static void intel_flush_svm_range(struct intel_svm *svm, unsigned long address,
 	rcu_read_unlock();
 }
 
+static void intel_flush_svm_all(struct intel_svm *svm)
+{
+	struct device_domain_info *info;
+	struct intel_svm_dev *sdev;
+
+	rcu_read_lock();
+	list_for_each_entry_rcu(sdev, &svm->devs, list) {
+		info = get_domain_info(sdev->dev);
+
+		qi_flush_piotlb(sdev->iommu, sdev->did, svm->pasid,
+				0, -1UL, 0);
+		if (info->ats_enabled) {
+			qi_flush_dev_iotlb_pasid(sdev->iommu, sdev->sid,
+						 info->pfsid, svm->pasid,
+						 sdev->qdep, 0,
+						 64 - VTD_PAGE_SHIFT);
+			quirk_extra_dev_tlb_flush(info, 0,
+						  64 - VTD_PAGE_SHIFT,
+						  svm->pasid, sdev->qdep);
+		}
+	}
+	rcu_read_unlock();
+}
+
 /* Pages have been freed at this point */
 static void intel_invalidate_range(struct mmu_notifier *mn,
 				   struct mm_struct *mm,
 				   unsigned long start, unsigned long end)
 {
 	struct intel_svm *svm = container_of(mn, struct intel_svm, notifier);
+
+	if (start == 0 && end == -1UL) {
+		intel_flush_svm_all(svm);
+		return;
+	}
 
 	intel_flush_svm_range(svm, start,
 			      (end - start + PAGE_SIZE - 1) >> VTD_PAGE_SHIFT, 0);
@@ -348,6 +377,14 @@ static struct iommu_sva *intel_svm_bind_mm(struct intel_iommu *iommu,
 			kfree(svm);
 			return ERR_PTR(ret);
 		}
+
+		ret = iommu_sva_track_mm(mm);
+		if (ret) {
+			pasid_private_remove(mm->pasid);
+			mmu_notifier_unregister(&svm->notifier, mm);
+			kfree(svm);
+			return ERR_PTR(ret);
+		}
 	}
 
 	/* Find the matching device in svm list */
@@ -396,6 +433,7 @@ free_sdev:
 	kfree(sdev);
 free_svm:
 	if (list_empty(&svm->devs)) {
+		iommu_sva_untrack_mm(mm);
 		mmu_notifier_unregister(&svm->notifier, mm);
 		pasid_private_remove(mm->pasid);
 		kfree(svm);
@@ -439,6 +477,7 @@ static int intel_svm_unbind_mm(struct device *dev, u32 pasid)
 			kfree_rcu(sdev, rcu);
 
 			if (list_empty(&svm->devs)) {
+				iommu_sva_untrack_mm(mm);
 				if (svm->notifier.ops)
 					mmu_notifier_unregister(&svm->notifier, mm);
 				pasid_private_remove(svm->pasid);
