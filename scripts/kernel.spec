@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.25.1
+%define pkgrelease 687.26.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.25.1.el9_8
+%define tarfile_release 5.14.0-687.26.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.25.1%{?buildid}%{?dist}
+%define specrelease 687.26.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.25.1.el9_8
+%define kabiversion 5.14.0-687.26.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3713,10 +3713,13 @@ fi
 #
 #
 %changelog
-* Mon Jul 13 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.25.1
+* Tue Jul 14 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.26.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Mon Jul 13 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.26.1.el9_8]
+- xfs: resample the data fork mapping after cycling ILOCK (Carlos Maiolino) [RHEL-193937]
 
 * Thu Jul 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.25.1.el9_8]
 - futex/requeue: Revert "Prevent NULL pointer dereference in remove_waiter() on self-deadlock"" (Phil Auld) [RHEL-193245] {CVE-2026-53166}
