@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.144.1.el8_10
+%define pkgrelease 553.146.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.144.1%{?dist}
+%define specrelease 553.146.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2709,7 +2709,7 @@ fi
 #
 #
 %changelog
-* Tue Jul 14 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.144.1
+* Tue Jul 21 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.146.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
@@ -2717,7 +2717,14 @@ fi
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
 
-* Mon Jul 13 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.144.1.el8_10]
+* Mon Jul 20 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.146.1.el8_10]
+- RDMA/mana: Remove user triggerable WARN_ON() in mana_ib_create_qp_rss() (Gaurav Goklani) [RHEL-180153] {CVE-2026-46117}
+- PCI: vmd: Make vmd_dev::cfg_lock a raw_spinlock_t type (Herton R. Krzesinski) [RHEL-174916]
+
+* Thu Jul 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.145.1.el8_10]
+- Bluetooth: l2cap: Add missing chan lock in l2cap_ecred_reconf_rsp (CKI Backport Bot) [RHEL-188327] {CVE-2026-53071}
+
+* Tue Jul 14 2026 Jan Stancek <jstancek@redhat.com> [4.18.0-553.144.1.el8_10]
 - xfrm: defensively unhash xfrm_state lists in __xfrm_state_delete (Sabrina Dubroca) [RHEL-180170] {CVE-2026-46116}
 - xfs: resample the data fork mapping after cycling ILOCK (Carlos Maiolino) [RHEL-193938]
 - net: bridge: use a stable FDB dst snapshot in RCU readers (Mohammad Heib) [RHEL-179325] {CVE-2026-46086}

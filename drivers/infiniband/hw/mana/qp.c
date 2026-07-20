@@ -239,11 +239,20 @@ static int mana_ib_create_qp_rss(struct ib_qp *ibqp, struct ib_pd *pd,
 
 		mana_ind_table[i] = wq->rx_object;
 
-		/* Create CQ table entry */
-		WARN_ON(gc->cq_table[cq->id]);
+		/* Create CQ table entry, sharing a CQ between WQs is not supported */
+		if (gc->cq_table[cq->id]) {
+			ret = -EINVAL;
+			/* Reset IDs to prevent mana_ib_destroy_cq from corrupting foreign entry */
+			wq->id = INVALID_QUEUE_ID;
+			cq->id = INVALID_QUEUE_ID;
+			goto fail;
+		}
 		gdma_cq = kzalloc(sizeof(*gdma_cq), GFP_KERNEL);
 		if (!gdma_cq) {
 			ret = -ENOMEM;
+			/* Reset IDs to prevent mana_ib_destroy_cq from corrupting foreign entry */
+			wq->id = INVALID_QUEUE_ID;
+			cq->id = INVALID_QUEUE_ID;
 			goto fail;
 		}
 		gdma_cq_allocated[i] = gdma_cq;
@@ -284,8 +293,11 @@ fail:
 		wq = container_of(ibwq, struct mana_ib_wq, ibwq);
 		cq = container_of(ibcq, struct mana_ib_cq, ibcq);
 
-		gc->cq_table[cq->id] = NULL;
-		kfree(gdma_cq_allocated[i]);
+		/* Only clear cq_table entry if we successfully allocated it */
+		if (gdma_cq_allocated[i]) {
+			gc->cq_table[cq->id] = NULL;
+			kfree(gdma_cq_allocated[i]);
+		}
 
 		mana_destroy_wq_obj(mpc, GDMA_RQ, wq->rx_object);
 	}
@@ -420,7 +432,10 @@ static int mana_ib_create_qp_raw(struct ib_qp *ibqp, struct ib_pd *ibpd,
 	send_cq->id = cq_spec.queue_index;
 
 	/* Create CQ table entry */
-	WARN_ON(gd->gdma_context->cq_table[send_cq->id]);
+	if (gd->gdma_context->cq_table[send_cq->id]) {
+		err = -EINVAL;
+		goto err_destroy_wq_obj;
+	}
 	gdma_cq = kzalloc(sizeof(*gdma_cq), GFP_KERNEL);
 	if (!gdma_cq) {
 		err = -ENOMEM;
