@@ -23,7 +23,7 @@ struct device;
  *
  * Function implementations generic to all architectures are in
  * lib/bitmap.c.  Functions implementations that are architecture
- * specific are in various include/asm-<arch>/bitops.h headers
+ * specific are in various arch/<arch>/include/asm/bitops.h headers
  * and other arch/<arch> specific files.
  *
  * See lib/bitmap.c for more details.
@@ -45,6 +45,8 @@ struct device;
  *  bitmap_copy(dst, src, nbits)                *dst = *src
  *  bitmap_and(dst, src1, src2, nbits)          *dst = *src1 & *src2
  *  bitmap_or(dst, src1, src2, nbits)           *dst = *src1 | *src2
+ *  bitmap_weighted_or(dst, src1, src2, nbits)	*dst = *src1 | *src2. Returns Hamming Weight of dst
+ *  bitmap_weighted_xor(dst, src1, src2, nbits)	*dst = *src1 ^ *src2. Returns Hamming Weight of dst
  *  bitmap_xor(dst, src1, src2, nbits)          *dst = *src1 ^ *src2
  *  bitmap_andnot(dst, src1, src2, nbits)       *dst = *src1 & ~(*src2)
  *  bitmap_complement(dst, src, nbits)          *dst = ~(*src)
@@ -56,6 +58,7 @@ struct device;
  *  bitmap_weight(src, nbits)                   Hamming Weight: number set bits
  *  bitmap_weight_and(src1, src2, nbits)        Hamming Weight of and'ed bitmap
  *  bitmap_weight_andnot(src1, src2, nbits)     Hamming Weight of andnot'ed bitmap
+ *  bitmap_weight_from(src, start, end)         Hamming Weight starting from @start
  *  bitmap_set(dst, pos, nbits)                 Set specified bit area
  *  bitmap_clear(dst, pos, nbits)               Clear specified bit area
  *  bitmap_find_next_zero_area(buf, len, pos, n, mask)  Find bit free area
@@ -165,6 +168,10 @@ bool __bitmap_and(unsigned long *dst, const unsigned long *bitmap1,
 		 const unsigned long *bitmap2, unsigned int nbits);
 void __bitmap_or(unsigned long *dst, const unsigned long *bitmap1,
 		 const unsigned long *bitmap2, unsigned int nbits);
+unsigned int __bitmap_weighted_or(unsigned long *dst, const unsigned long *bitmap1,
+				  const unsigned long *bitmap2, unsigned int nbits);
+unsigned int __bitmap_weighted_xor(unsigned long *dst, const unsigned long *bitmap1,
+				  const unsigned long *bitmap2, unsigned int nbits);
 void __bitmap_xor(unsigned long *dst, const unsigned long *bitmap1,
 		  const unsigned long *bitmap2, unsigned int nbits);
 bool __bitmap_andnot(unsigned long *dst, const unsigned long *bitmap1,
@@ -338,6 +345,30 @@ void bitmap_or(unsigned long *dst, const unsigned long *src1,
 }
 
 static __always_inline
+unsigned int bitmap_weighted_or(unsigned long *dst, const unsigned long *src1,
+				const unsigned long *src2, unsigned int nbits)
+{
+	if (small_const_nbits(nbits)) {
+		*dst = *src1 | *src2;
+		return hweight_long(*dst & BITMAP_LAST_WORD_MASK(nbits));
+	} else {
+		return __bitmap_weighted_or(dst, src1, src2, nbits);
+	}
+}
+
+static __always_inline
+unsigned int bitmap_weighted_xor(unsigned long *dst, const unsigned long *src1,
+				const unsigned long *src2, unsigned int nbits)
+{
+	if (small_const_nbits(nbits)) {
+		*dst = *src1 ^ *src2;
+		return hweight_long(*dst & BITMAP_LAST_WORD_MASK(nbits));
+	} else {
+		return __bitmap_weighted_xor(dst, src1, src2, nbits);
+	}
+}
+
+static __always_inline
 void bitmap_xor(unsigned long *dst, const unsigned long *src1,
 		const unsigned long *src2, unsigned int nbits)
 {
@@ -464,6 +495,38 @@ unsigned long bitmap_weight_andnot(const unsigned long *src1,
 	return __bitmap_weight_andnot(src1, src2, nbits);
 }
 
+/**
+ * bitmap_weight_from - Hamming weight for a memory region
+ * @bitmap: The base address
+ * @start: The bitnumber to starts weighting
+ * @end: the bitmap size in bits
+ *
+ * Returns the number of set bits in the region. If @start >= @end,
+ * return >= end.
+ */
+static __always_inline
+unsigned long bitmap_weight_from(const unsigned long *bitmap,
+				   unsigned int start, unsigned int end)
+{
+	unsigned long w;
+
+	if (unlikely(start >= end))
+		return end;
+
+	if (small_const_nbits(end))
+		return hweight_long(*bitmap & GENMASK(end - 1, start));
+
+	bitmap += start / BITS_PER_LONG;
+	/* Opencode round_down() to not include math.h */
+	end -= start & ~(BITS_PER_LONG - 1);
+	start %= BITS_PER_LONG;
+	w = bitmap_weight(bitmap, end);
+	if (start)
+		w -= hweight_long(*bitmap & BITMAP_LAST_WORD_MASK(start));
+
+	return w;
+}
+
 static __always_inline
 void bitmap_set(unsigned long *map, unsigned int start, unsigned int nbits)
 {
@@ -560,9 +623,9 @@ void bitmap_replace(unsigned long *dst,
  *	      ...0..11...0..10
  *	dst:  0000001100000010
  *
- * A relationship exists between bitmap_scatter() and bitmap_gather().
+ * A relationship exists between bitmap_scatter() and bitmap_gather(). See
+ * bitmap_gather() for the bitmap gather detailed operations. TL;DR:
  * bitmap_gather() can be seen as the 'reverse' bitmap_scatter() operation.
- * See bitmap_scatter() for details related to this relationship.
  */
 static __always_inline
 void bitmap_scatter(unsigned long *dst, const unsigned long *src,
@@ -608,7 +671,9 @@ void bitmap_scatter(unsigned long *dst, const unsigned long *src,
  *	dst:  0000000000011010
  *
  * A relationship exists between bitmap_gather() and bitmap_scatter(). See
- * bitmap_scatter() for the bitmap scatter detailed operations.
+ * bitmap_scatter() for the bitmap scatter detailed operations. TL;DR:
+ * bitmap_scatter() can be seen as the 'reverse' bitmap_gather() operation.
+ *
  * Suppose scattered computed using bitmap_scatter(scattered, src, mask, n).
  * The operation bitmap_gather(result, scattered, mask, n) leads to a result
  * equal or equivalent to src.

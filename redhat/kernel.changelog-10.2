@@ -1,4 +1,75 @@
-* Mon Jul 13 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.34.1.el10_2]
+* Tue Jul 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.37.1.el10_2]
+- can: bcm: defer rx_op deallocation to workqueue to fix thrtimer UAF (CKI Backport Bot) [RHEL-212681]
+- fanotify: fix false positive on permission events (CKI Backport Bot) [RHEL-180076] {CVE-2026-46150}
+Resolves: RHEL-180076, RHEL-212681
+
+* Mon Jul 20 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.36.1.el10_2]
+- ice: fix double-free of tx_buf skb (Jakub Ramaseuski) [RHEL-191324 RHEL-192200] {CVE-2026-53009}
+- ice: fix double free in ice_sf_eth_activate() error path (Jakub Ramaseuski) [RHEL-191324] {CVE-2026-46162}
+- ice: update PCS latency settings for E825 10G/25Gb modes (Jakub Ramaseuski) [RHEL-191324]
+- ice: fix 'adjust' timer programming for E830 devices (Jakub Ramaseuski) [RHEL-191324]
+- ice: use bitmap_empty() in ice_vf_has_no_qs_ena (Jakub Ramaseuski) [RHEL-191324]
+- ice: use bitmap_weighted_xor() in ice_find_free_recp_res_idx() (Jakub Ramaseuski) [RHEL-191324]
+- ice: Make name member of struct ice_cgu_pin_desc const (Jakub Ramaseuski) [RHEL-191324]
+- ice: fix PTP timestamping broken by SyncE code on E825C (Jakub Ramaseuski) [RHEL-191324]
+- ice: ptp: don't WARN when controlling PF is unavailable (Jakub Ramaseuski) [RHEL-191324] {CVE-2026-43346}
+- ice: use ice_update_eth_stats() for representor stats (Jakub Ramaseuski) [RHEL-191324]
+- ice: fix inverted ready check for VF representors (Jakub Ramaseuski) [RHEL-191324]
+- drivers: net: ice: fix devlink parameters get without irdma (Jakub Ramaseuski) [RHEL-191324]
+- ice: fix rxq info registering in mbuf packets (Jakub Ramaseuski) [RHEL-191324]
+- ice: fix retry for AQ command 0x06EE (Jakub Ramaseuski) [RHEL-191324]
+- ice: reintroduce retry mechanism for indirect AQ (Jakub Ramaseuski) [RHEL-191324]
+- ice: fix adding AQ LLDP filter for VF (Jakub Ramaseuski) [RHEL-191324]
+- ice: recap the VSI and QoS info after rebuild (Jakub Ramaseuski) [RHEL-191324]
+- ice: fix missing TX timestamps interrupts on E825 devices (Jakub Ramaseuski) [RHEL-191324]
+- ice: stop counting UDP csum mismatch as rx_errors (Jakub Ramaseuski) [RHEL-191324]
+- ice: reshuffle and group Rx and Tx queue fields by cachelines (Jakub Ramaseuski) [RHEL-191324]
+- ice: convert all ring stats to u64_stats_t (Jakub Ramaseuski) [RHEL-191324]
+- ice: shorten ring stat names and add accessors (Jakub Ramaseuski) [RHEL-191324]
+- ice: use u64_stats API to access pkts/bytes in dim sample (Jakub Ramaseuski) [RHEL-191324]
+- ice: remove ice_q_stats struct and use struct_group (Jakub Ramaseuski) [RHEL-191324]
+- ice: pass pointer to ice_fetch_u64_stats_per_ring (Jakub Ramaseuski) [RHEL-191324]
+- ice: unify PHY FW loading status handler for E800 devices (Jakub Ramaseuski) [RHEL-191324]
+- ice: Fix NULL pointer dereference in ice_vsi_set_napi_queues (Jakub Ramaseuski) [RHEL-191324] {CVE-2026-23166}
+- bitmap: introduce bitmap_weighted_xor() (Jakub Ramaseuski) [RHEL-191324]
+- bitmap: add test_zero_nbits() (Jakub Ramaseuski) [RHEL-191324]
+- bitmap: exclude nbits == 0 cases from bitmap test (Jakub Ramaseuski) [RHEL-191324]
+- bitmap: test bitmap_weight() for more (Jakub Ramaseuski) [RHEL-191324]
+- bitmap: add bitmap_weight_from() (Jakub Ramaseuski) [RHEL-191324]
+- bitmap: align test_bitmap output (Jakub Ramaseuski) [RHEL-191324]
+- bitmap: switch test to scnprintf("%%*pbl") (Jakub Ramaseuski) [RHEL-191324]
+- bitmap: Add test for out-of-boundary modifications for scatter & gather (Jakub Ramaseuski) [RHEL-191324]
+- cpumask: Introduce cpumask_weighted_or() (Jakub Ramaseuski) [RHEL-191324]
+- bitmap: Align documentation between bitmap_gather() and bitmap_scatter() (Jakub Ramaseuski) [RHEL-191324]
+- bitmap: remove _check_eq_u32_array (Jakub Ramaseuski) [RHEL-191324]
+- include: update references to include/asm-<arch> (Jakub Ramaseuski) [RHEL-191324]
+- KEYS: trusted: Fix a memory leak in tpm2_load_cmd (CKI Backport Bot) [RHEL-189604] {CVE-2025-71147}
+- crypto: af_alg - zero initialize memory allocated via sock_kmalloc (CKI Backport Bot) [RHEL-189576] {CVE-2025-71113}
+- drm/xe: Fix error cleanup in xe_exec_queue_create_ioctl() (CKI Backport Bot) [RHEL-188644] {CVE-2026-52976}
+- xfrm: defensively unhash xfrm_state lists in __xfrm_state_delete (Sabrina Dubroca) [RHEL-180167] {CVE-2026-46116}
+Resolves: RHEL-180167, RHEL-188644, RHEL-189576, RHEL-189604, RHEL-191324, RHEL-192200
+
+* Thu Jul 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.35.1.el10_2]
+- drm/xe/dma-buf: fix UAF with retry loop (Karol Herbst) [RHEL-192232] {CVE-2026-52950}
+- drm/xe/dma-buf: handle empty bo and UAF races (Karol Herbst) [RHEL-192232]
+- drm/xe: Fix bo leak in xe_dma_buf_init_obj() on allocation failure (Karol Herbst) [RHEL-192232]
+- drm/xe: Fix dma-buf attachment leak in xe_gem_prime_import() (Karol Herbst) [RHEL-192232]
+- nfsd: cancel async COPY operations when admin revokes filesystem state (Olga Kornievskaia) [RHEL-173103]
+- nfsd: use correct loop termination in nfsd4_revoke_states() (Olga Kornievskaia) [RHEL-173103]
+- nfsd: check that server is running in unlock_filesystem (Olga Kornievskaia) [RHEL-173103]
+- drm/gem: Try to fix change_handle ioctl, attempt 4 (Jocelyn Falempe) [RHEL-179887]
+- drm/gem: fix race between change_handle and handle_delete (Jocelyn Falempe) [RHEL-179887]
+- drm: Replace old pointer to new idr (Jocelyn Falempe) [RHEL-179887]
+- drm: Set old handle to NULL before prime swap in change_handle (Jocelyn Falempe) [RHEL-179887] {CVE-2026-46215}
+- drm: Do not allow userspace to trigger kernel warnings in drm_gem_change_handle_ioctl() (Jocelyn Falempe) [RHEL-179887]
+- cxl/port: Fix use after free of parent_port in cxl_detach_ep() (Myron Stowe) [RHEL-180697] {CVE-2026-31530}
+- flex_proportions: make fprop_new_period() hardirq safe (CKI Backport Bot) [RHEL-189658] {CVE-2026-23168}
+- Bluetooth: l2cap: Add missing chan lock in l2cap_ecred_reconf_rsp (CKI Backport Bot) [RHEL-188331] {CVE-2026-53071}
+- redhat/configs: disable CONFIG_PT_RECLAIM (Luiz Capitulino) [RHEL-186311]
+- libperf build: Always place libperf includes first (Michael Petlan) [RHEL-183975]
+Resolves: RHEL-173103, RHEL-179887, RHEL-180697, RHEL-183975, RHEL-186311, RHEL-188331, RHEL-189658, RHEL-192232
+
+* Tue Jul 14 2026 Jan Stancek <jstancek@redhat.com> [6.12.0-211.34.1.el10_2]
 - crypto: ccp - copy IV using skcipher ivsize (CKI Backport Bot) [RHEL-188463] {CVE-2026-53016}
 - xfs: resample the data fork mapping after cycling ILOCK (Carlos Maiolino) [RHEL-193945]
 - xfrm: esp: restore combined single-frag length gate (CKI Backport Bot) [RHEL-178326]

@@ -1,1 +1,1 @@
-CONFIG_PT_RECLAIM=y
+# CONFIG_PT_RECLAIM is not set
