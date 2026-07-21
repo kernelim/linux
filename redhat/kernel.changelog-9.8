@@ -1,4 +1,63 @@
-* Mon Jul 13 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.26.1.el9_8]
+* Tue Jul 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.29.1.el9_8]
+- can: bcm: defer rx_op deallocation to workqueue to fix thrtimer UAF (Jamie Bainbridge) [RHEL-212685]
+- dpll: fix NULL pointer dereference in dpll_msg_add_pin_ref_sync() (CKI Backport Bot) [RHEL-212061]
+- net: ipv6: fix NOREF dst use in seg6 and rpl lwtunnels (Antoine Tenart) [RHEL-179297] {CVE-2026-46099}
+- xfrm: esp: restore combined single-frag length gate (CKI Backport Bot) [RHEL-178337]
+Resolves: RHEL-178337, RHEL-179297, RHEL-212061, RHEL-212685
+
+* Mon Jul 20 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.28.1.el9_8]
+- fanotify: fix false positive on permission events (CKI Backport Bot) [RHEL-180073] {CVE-2026-46150}
+Resolves: RHEL-180073
+
+* Thu Jul 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.27.1.el9_8]
+- drm/gem: Try to fix change_handle ioctl, attempt 4 (Jocelyn Falempe) [RHEL-179886]
+- drm/gem: fix race between change_handle and handle_delete (Jocelyn Falempe) [RHEL-179886]
+- drm: Replace old pointer to new idr (Jocelyn Falempe) [RHEL-179886]
+- drm: Set old handle to NULL before prime swap in change_handle (Jocelyn Falempe) [RHEL-179886] {CVE-2026-46215}
+- drm: Do not allow userspace to trigger kernel warnings in drm_gem_change_handle_ioctl() (Jocelyn Falempe) [RHEL-179886]
+- crypto: af_alg - zero initialize memory allocated via sock_kmalloc (Herbert Xu) [RHEL-189943] {CVE-2025-71113}
+- crypto: af_alg - Disallow multiple in-flight AIO requests (Herbert Xu) [RHEL-189943]
+- scsi: core: Wake up the error handler when final completions race against each other (CKI Backport Bot) [RHEL-189975] {CVE-2026-23110}
+- net/mlx5: HWS: Reject unsupported remove-header action (Kamal Heib) [RHEL-188121]
+- net/mlx5e: Fix eswitch mode block underflow on IPsec acquire SA (Kamal Heib) [RHEL-188121]
+- net/mlx5: Do not restore destination-less TC rules (Kamal Heib) [RHEL-188121]
+- net/mlx5e: Don't leak RSS context in case of error (Kamal Heib) [RHEL-188121]
+- net/mlx5e: SD, Fix race condition in secondary device probe/remove (Kamal Heib) [RHEL-188121]
+- net/mlx5e: SD, Fix missing cleanup on probe error (Kamal Heib) [RHEL-188121]
+- net/mlx5: SD, Keep multi-pf debugfs entries on primary (Kamal Heib) [RHEL-188121]
+- net/mlx5: SD: Serialize init/cleanup (Kamal Heib) [RHEL-188121]
+- RDMA/mlx5: Add missing store/release for lock elision pattern (Kamal Heib) [RHEL-188121]
+- RDMA/mlx5: Fix null-ptr-deref in Raw Packet QP creation (Kamal Heib) [RHEL-188121]
+- RDMA/mlx5: Fix UAF in DCT destroy due to race with create (Kamal Heib) [RHEL-188121]
+- RDMA/mlx5: Fix UAF in SRQ destroy due to race with create (Kamal Heib) [RHEL-188121]
+- net/mlx5e: IPsec, fix ASO poll timeout with read_poll_timeout_atomic() (Kamal Heib) [RHEL-188121]
+- net/mlx5e: Fix features not applied during netdev registration (Kamal Heib) [RHEL-188121]
+- net/mlx5: Fix switchdev mode rollback in case of failure (Kamal Heib) [RHEL-188121]
+- net/mlx5: Avoid "No data available" when FW version queries fail (Kamal Heib) [RHEL-188121]
+- net/mlx5: lag: Check for LAG device before creating debugfs (Kamal Heib) [RHEL-188121]
+- net/mlx5e: Fix race condition during IPSec ESN update (Kamal Heib) [RHEL-188121]
+- net/mlx5e: Prevent concurrent access to IPSec ASO context (Kamal Heib) [RHEL-188121]
+- net/mlx5e: Fix DMA FIFO desync on error CQE SQ recovery (Kamal Heib) [RHEL-188121]
+- net/mlx5: Fix deadlock between devlink lock and esw->wq (Kamal Heib) [RHEL-188121]
+- net/mlx5e: Fix "scheduling while atomic" in IPsec MAC address query (Kamal Heib) [RHEL-188121]
+- net/mlx5: Fix missing devlink lock in SRIOV enable error path (Kamal Heib) [RHEL-188121]
+- net/mlx5: E-switch, Clear legacy flag when moving to switchdev (Kamal Heib) [RHEL-188121]
+- net/mlx5: LAG, disable MPESW in lag_disable_change() (Kamal Heib) [RHEL-188121]
+- net/mlx5: DR, Fix circular locking dependency in dump (Kamal Heib) [RHEL-188121]
+- net/mlx5e: MACsec, add ASO poll loop in macsec_aso_set_arm_event (Kamal Heib) [RHEL-188121]
+- net/mlx5: Fix misidentification of write combining CQE during poll loop (Kamal Heib) [RHEL-188121]
+- net/mlx5e: Fix misidentification of ASO CQE during poll loop (Kamal Heib) [RHEL-188121]
+- net/mlx5: Fix multiport device check over light SFs (Kamal Heib) [RHEL-188121]
+- RDMA/mlx5: Fix memory leak in GET_DATA_DIRECT_SYSFS_PATH handler (Kamal Heib) [RHEL-188121]
+- IB/mlx5: Fix port speed query for representors (Kamal Heib) [RHEL-188121]
+- RDMA/mlx5: Fix UMR hang in LAG error state unload (Kamal Heib) [RHEL-188121]
+- RDMA/mlx5: Fix ucaps init error flow (Kamal Heib) [RHEL-188121]
+- Bluetooth: l2cap: Add missing chan lock in l2cap_ecred_reconf_rsp (CKI Backport Bot) [RHEL-188333] {CVE-2026-53071}
+- libperf build: Always place libperf includes first (Michael Petlan) [RHEL-183980]
+- libperf: Don't remove -g when EXTRA_CFLAGS are used (Michael Petlan) [RHEL-183980]
+Resolves: RHEL-179886, RHEL-183980, RHEL-188121, RHEL-188333, RHEL-189943, RHEL-189975
+
+* Tue Jul 14 2026 Jan Stancek <jstancek@redhat.com> [5.14.0-687.26.1.el9_8]
 - xfs: resample the data fork mapping after cycling ILOCK (Carlos Maiolino) [RHEL-193937]
 Resolves: RHEL-193937
 
