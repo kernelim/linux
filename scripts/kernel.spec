@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.29.1
+%define pkgrelease 687.30.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.29.1.el9_8
+%define tarfile_release 5.14.0-687.30.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.29.1%{?buildid}%{?dist}
+%define specrelease 687.30.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.29.1.el9_8
+%define kabiversion 5.14.0-687.30.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3713,10 +3713,26 @@ fi
 #
 #
 %changelog
-* Wed Jul 22 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.29.1
+* Mon Jul 27 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.30.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Wed Jul 22 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.30.1.el9_8]
+- KVM: x86/mmu: Ensure hugepage is in by slot before checking max mapping level (Aidan Wallace) [RHEL-213468] {CVE-2026-63807}
+- KVM: nVMX: Hide shadow VMCS right after VMCLEAR (Aidan Wallace) [RHEL-213468]
+- KVM: x86: Check for invalid/obsolete root *after* making MMU pages available (Aidan Wallace) [RHEL-213468]
+- KVM: nVMX: Put vmcs12 pages if nested VM-Enter fails due to invalid guest state (Aidan Wallace) [RHEL-213468]
+- KVM: nVMX: Add helper to put (unmap) vmcs12 pages (Paolo Bonzini) [RHEL-211277]
+- KVM: x86: Don't (re)check L1 intercepts when completing userspace I/O (Aidan Wallace) [RHEL-211277] {CVE-2025-40026}
+- scsi: core: Run queues for all non-SDEV_DEL devices from scsi_run_host_queues (David Jeffery) [RHEL-187412]
+- drm/xe/dma-buf: fix UAF with retry loop (Anusha Srivatsa) [RHEL-192228] {CVE-2026-52950}
+- drm/xe/dma-buf: handle empty bo and UAF races (Anusha Srivatsa) [RHEL-192228] {CVE-2026-52950}
+- drm/xe: Fix bo leak in xe_dma_buf_init_obj() on allocation failure (Anusha Srivatsa) [RHEL-192228] {CVE-2026-52950}
+- drm/xe: Fix dma-buf attachment leak in xe_gem_prime_import() (Anusha Srivatsa) [RHEL-192228] {CVE-2026-52950}
+- ipv6: fix possible UAF in icmpv6_rcv() (CKI Backport Bot) [RHEL-192220] {CVE-2026-53006}
+- drm/xe: Fix error cleanup in xe_exec_queue_create_ioctl() (CKI Backport Bot) [RHEL-188647] {CVE-2026-52976}
+- dm log: fix out-of-bounds write due to region_count overflow (CKI Backport Bot) [RHEL-188541] {CVE-2026-53059}
 
 * Tue Jul 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.29.1.el9_8]
 - can: bcm: defer rx_op deallocation to workqueue to fix thrtimer UAF (Jamie Bainbridge) [RHEL-212685]
