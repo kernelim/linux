@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 211.37.1
+%define pkgrelease 211.39.1
 %define kversion 6
-%define tarfile_release 6.12.0-211.37.1.el10_2
+%define tarfile_release 6.12.0-211.39.1.el10_2
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 211.37.1%{?buildid}%{?dist}
+%define specrelease 211.39.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-211.37.1.el10_2
+%define kabiversion 6.12.0-211.39.1.el10_2
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4477,9 +4477,27 @@ fi\
 #
 #
 %changelog
-* Tue Jul 21 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.37.1
+* Fri Jul 24 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.39.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Thu Jul 23 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.39.1.el10_2]
+- futex: Drop CLONE_THREAD requirement for private default hash alloc (Audra Mitchell) [RHEL-193518] {CVE-2026-52973}
+- net: ipv6: fix NOREF dst use in seg6 and rpl lwtunnels (Antoine Tenart) [RHEL-179299] {CVE-2026-46099}
+- scsi: core: Wake up the error handler when final completions race against each other (CKI Backport Bot) [RHEL-189651] {CVE-2026-23110}
+- dm log: fix out-of-bounds write due to region_count overflow (CKI Backport Bot) [RHEL-188547] {CVE-2026-53059}
+- rtnetlink: add missing netlink_ns_capable() check for peer netns (Guillaume Nault) [RHEL-172537] {CVE-2026-31692}
+- rtnetlink: Try the outer netns attribute in rtnl_get_peer_net(). (Guillaume Nault) [RHEL-172537] {CVE-2026-31692}
+- rtnetlink: fix double call of rtnl_link_get_net_ifla() (Guillaume Nault) [RHEL-172537] {CVE-2026-31692}
+- netkit: Set IFLA_NETKIT_PEER_INFO to netkit_link_ops.peer_type. (Guillaume Nault) [RHEL-172537] {CVE-2026-31692}
+- vxcan: Set VXCAN_INFO_PEER to vxcan_link_ops.peer_type. (Guillaume Nault) [RHEL-172537] {CVE-2026-31692}
+- veth: Set VETH_INFO_PEER to veth_link_ops.peer_type. (Guillaume Nault) [RHEL-172537] {CVE-2026-31692}
+- rtnetlink: Add peer_type in struct rtnl_link_ops. (Guillaume Nault) [RHEL-172537] {CVE-2026-31692}
+- fs/notify: call exportfs_encode_fid with s_umount (Jay Shin) [RHEL-169188] {CVE-2025-40237}
+- fs: relax assertions on failure to encode file handles (Jay Shin) [RHEL-169188]
+
+* Wed Jul 22 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.38.1.el10_2]
+- net: gro: don't merge zcopy skbs (CKI Backport Bot) [RHEL-177856] {CVE-2026-46323}
 
 * Tue Jul 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.37.1.el10_2]
 - can: bcm: defer rx_op deallocation to workqueue to fix thrtimer UAF (CKI Backport Bot) [RHEL-212681]
