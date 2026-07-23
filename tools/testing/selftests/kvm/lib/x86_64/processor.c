@@ -1179,6 +1179,16 @@ struct kvm_x86_state *vcpu_save_state(struct kvm_vm *vm, uint32_t vcpuid)
 	return state;
 }
 
+void vcpu_xsave_set(struct kvm_vm *vm, uint32_t vcpuid, struct kvm_xsave *xstate)
+{
+	struct vcpu *vcpu = vcpu_find(vm, vcpuid);
+	int r;
+
+	r = ioctl(vcpu->fd, KVM_SET_XSAVE, xstate);
+	TEST_ASSERT(r == 0, "Unexpected result from KVM_SET_XSAVE, r: %i",
+		    r);
+}
+
 void vcpu_load_state(struct kvm_vm *vm, uint32_t vcpuid, struct kvm_x86_state *state)
 {
 	struct vcpu *vcpu = vcpu_find(vm, vcpuid);

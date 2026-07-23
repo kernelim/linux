@@ -252,6 +252,20 @@ static void init_regs(void)
 	__xsetbv(0x0, xcr0);
 }
 
+enum {
+	/* Retrieve TMM0 from guest, stash it for TEST_RESTORE_TILEDATA */
+	TEST_SAVE_TILEDATA = 1,
+
+	/* Check TMM0 against tiledata */
+	TEST_COMPARE_TILEDATA = 2,
+
+	/* Restore TMM0 from earlier save */
+	TEST_RESTORE_TILEDATA = 4,
+
+	/* Full VM save/restore */
+	TEST_SAVE_RESTORE = 8,
+};
+
 static void __attribute__((__flatten__)) guest_code(struct tile_config *amx_cfg,
 						    struct tile_data *tiledata,
 						    struct xsave_data *xsave_data)
@@ -268,20 +282,29 @@ static void __attribute__((__flatten__)) guest_code(struct tile_config *amx_cfg,
 	GUEST_ASSERT(xtile.bytes_per_tile == 1024);
 	GUEST_ASSERT(xtile.bytes_per_row == 64);
 	GUEST_ASSERT(xtile.max_rows == 16);
-	GUEST_SYNC(1);
+	GUEST_SYNC(TEST_SAVE_RESTORE);
 
 	/* xfd=0, enable amx */
 	wrmsr(MSR_IA32_XFD, 0);
-	GUEST_SYNC(2);
+	GUEST_SYNC(TEST_SAVE_RESTORE);
 	GUEST_ASSERT(rdmsr(MSR_IA32_XFD) == 0);
 	set_tilecfg(amx_cfg);
 	__ldtilecfg(amx_cfg);
-	GUEST_SYNC(3);
+	GUEST_SYNC(TEST_SAVE_RESTORE);
 	/* Check save/restore when trap to userspace */
 	__tileloadd(tiledata);
-	GUEST_SYNC(4);
+	GUEST_SYNC(TEST_SAVE_TILEDATA | TEST_COMPARE_TILEDATA | TEST_SAVE_RESTORE);
+
+	/* xfd=0x40000, disable amx tiledata */
+	wrmsr(MSR_IA32_XFD, XFEATURE_MASK_XTILEDATA);
+
+	/* host tries setting tiledata while guest XFD is set */
+	GUEST_SYNC(TEST_RESTORE_TILEDATA);
+	GUEST_SYNC(TEST_SAVE_RESTORE);
+
+	wrmsr(MSR_IA32_XFD, 0);
 	__tilerelease();
-	GUEST_SYNC(5);
+	GUEST_SYNC(TEST_SAVE_RESTORE);
 	/* bit 18 not in the XCOMP_BV after xsavec() */
 	set_xstatebv(xsave_data, XFEATURE_MASK_XTILEDATA);
 	__xsavec(xsave_data, XFEATURE_MASK_XTILEDATA);
@@ -289,13 +312,13 @@ static void __attribute__((__flatten__)) guest_code(struct tile_config *amx_cfg,
 
 	/* xfd=0x40000, disable amx tiledata */
 	wrmsr(MSR_IA32_XFD, XFEATURE_MASK_XTILEDATA);
-	GUEST_SYNC(6);
+	GUEST_SYNC(TEST_SAVE_RESTORE);
 	GUEST_ASSERT(rdmsr(MSR_IA32_XFD) == XFEATURE_MASK_XTILEDATA);
 	set_tilecfg(amx_cfg);
 	__ldtilecfg(amx_cfg);
 	/* Trigger #NM exception */
 	__tileloadd(tiledata);
-	GUEST_SYNC(10);
+	GUEST_SYNC(TEST_COMPARE_TILEDATA | TEST_SAVE_RESTORE);
 
 	GUEST_DONE();
 }
@@ -303,15 +326,15 @@ static void __attribute__((__flatten__)) guest_code(struct tile_config *amx_cfg,
 void guest_nm_handler(struct ex_regs *regs)
 {
 	/* Check if #NM is triggered by XFEATURE_MASK_XTILEDATA */
-	GUEST_SYNC(7);
+	GUEST_SYNC(TEST_SAVE_RESTORE);
 	GUEST_ASSERT(rdmsr(MSR_IA32_XFD_ERR) == XFEATURE_MASK_XTILEDATA);
-	GUEST_SYNC(8);
+	GUEST_SYNC(TEST_SAVE_RESTORE);
 	GUEST_ASSERT(rdmsr(MSR_IA32_XFD_ERR) == XFEATURE_MASK_XTILEDATA);
 	/* Clear xfd_err */
 	wrmsr(MSR_IA32_XFD_ERR, 0);
 	/* xfd=0, enable amx */
 	wrmsr(MSR_IA32_XFD, 0);
-	GUEST_SYNC(9);
+	GUEST_SYNC(TEST_SAVE_RESTORE);
 }
 
 int main(int argc, char *argv[])
@@ -322,11 +345,11 @@ int main(int argc, char *argv[])
 	struct kvm_vm *vm;
 	struct kvm_run *run;
 	struct kvm_x86_state *state;
+	struct kvm_x86_state *tile_state = NULL;
 	int xsave_restore_size = 0;
 	vm_vaddr_t amx_cfg, tiledata, xsavedata;
 	struct ucall uc;
-	u32 amx_offset;
-	int stage, ret;
+	int ret;
 
 	vm_xsave_req_perm(XSTATE_XTILE_DATA_BIT);
 
@@ -371,11 +394,12 @@ int main(int argc, char *argv[])
 	memset(addr_gva2hva(vm, xsavedata), 0, 3 * getpagesize());
 	vcpu_args_set(vm, VCPU_ID, 3, amx_cfg, tiledata, xsavedata);
 
-	for (stage = 1; ; stage++) {
+	int iter = 0;
+	for (;;) {
 		_vcpu_run(vm, VCPU_ID);
 		TEST_ASSERT(run->exit_reason == KVM_EXIT_IO,
 			    "Stage %d: unexpected exit reason: %u (%s),\n",
-			    stage, run->exit_reason,
+			    iter, run->exit_reason,
 			    exit_reason_str(run->exit_reason));
 
 		switch (get_ucall(vm, VCPU_ID, &uc)) {
@@ -384,37 +408,50 @@ int main(int argc, char *argv[])
 				  __FILE__, uc.args[1]);
 			/* NOT REACHED */
 		case UCALL_SYNC:
-			switch (uc.args[1]) {
-			case 1:
-			case 2:
-			case 3:
-			case 5:
-			case 6:
-			case 7:
-			case 8:
-				fprintf(stderr, "GUEST_SYNC(%ld)\n", uc.args[1]);
-				break;
-			case 4:
-			case 10:
-				fprintf(stderr,
-				"GUEST_SYNC(%ld), check save/restore status\n", uc.args[1]);
+			++iter;
+			if (uc.args[1] & TEST_SAVE_TILEDATA) {
+				fprintf(stderr, "GUEST_SYNC #%d, save tiledata\n", iter);
+				tile_state = vcpu_save_state(vm, VCPU_ID);
+			}
+			if (uc.args[1] & TEST_COMPARE_TILEDATA) {
+				fprintf(stderr, "GUEST_SYNC #%d, check TMM0 contents\n", iter);
 
 				/* Compacted mode, get amx offset by xsave area
 				 * size subtract 8K amx size.
 				 */
-				amx_offset = xsave_restore_size - NUM_TILES*TILE_SIZE;
-				state = vcpu_save_state(vm, VCPU_ID);
-				void *amx_start = (void *)state->xsave + amx_offset;
+				u32 amx_offset = xsave_restore_size - NUM_TILES*TILE_SIZE;
+				void *amx_start = (void *)tile_state->xsave + amx_offset;
 				void *tiles_data = (void *)addr_gva2hva(vm, tiledata);
 				/* Only check TMM0 register, 1 tile */
 				ret = memcmp(amx_start, tiles_data, TILE_SIZE);
 				TEST_ASSERT(ret == 0, "memcmp failed, ret=%d\n", ret);
+			}
+			if (uc.args[1] & TEST_RESTORE_TILEDATA) {
+				fprintf(stderr, "GUEST_SYNC #%d, before KVM_SET_XSAVE\n", iter);
+				vcpu_xsave_set(vm, VCPU_ID, tile_state->xsave);
+				fprintf(stderr, "GUEST_SYNC #%d, after KVM_SET_XSAVE\n", iter);
+			}
+			if (uc.args[1] & TEST_SAVE_RESTORE) {
+				fprintf(stderr, "GUEST_SYNC #%d, save/restore VM state\n", iter);
+				state = vcpu_save_state(vm, VCPU_ID);
+				memset(&regs1, 0, sizeof(regs1));
+				vcpu_regs_get(vm, VCPU_ID, &regs1);
+
+				kvm_vm_release(vm);
+
+				/* Restore state in a new VM.  */
+				kvm_vm_restart(vm, O_RDWR);
+				vm_vcpu_add(vm, VCPU_ID);
+				vcpu_set_cpuid(vm, VCPU_ID, kvm_get_supported_cpuid());
+				vcpu_load_state(vm, VCPU_ID, state);
+				run = vcpu_state(vm, VCPU_ID);
 				kvm_x86_state_cleanup(state);
-				break;
-			case 9:
-				fprintf(stderr,
-				"GUEST_SYNC(%ld), #NM exception and enable amx\n", uc.args[1]);
-				break;
+
+				memset(&regs2, 0, sizeof(regs2));
+				vcpu_regs_get(vm, VCPU_ID, &regs2);
+				TEST_ASSERT(!memcmp(&regs1, &regs2, sizeof(regs2)),
+					    "Unexpected register values after vcpu_load_state; rdi: %lx rsi: %lx",
+					    (ulong) regs2.rdi, (ulong) regs2.rsi);
 			}
 			break;
 		case UCALL_DONE:
@@ -424,25 +461,6 @@ int main(int argc, char *argv[])
 			TEST_FAIL("Unknown ucall %lu", uc.cmd);
 		}
 
-		state = vcpu_save_state(vm, VCPU_ID);
-		memset(&regs1, 0, sizeof(regs1));
-		vcpu_regs_get(vm, VCPU_ID, &regs1);
-
-		kvm_vm_release(vm);
-
-		/* Restore state in a new VM.  */
-		kvm_vm_restart(vm, O_RDWR);
-		vm_vcpu_add(vm, VCPU_ID);
-		vcpu_set_cpuid(vm, VCPU_ID, kvm_get_supported_cpuid());
-		vcpu_load_state(vm, VCPU_ID, state);
-		run = vcpu_state(vm, VCPU_ID);
-		kvm_x86_state_cleanup(state);
-
-		memset(&regs2, 0, sizeof(regs2));
-		vcpu_regs_get(vm, VCPU_ID, &regs2);
-		TEST_ASSERT(!memcmp(&regs1, &regs2, sizeof(regs2)),
-			    "Unexpected register values after vcpu_load_state; rdi: %lx rsi: %lx",
-			    (ulong) regs2.rdi, (ulong) regs2.rsi);
 	}
 done:
 	kvm_vm_free(vm);
