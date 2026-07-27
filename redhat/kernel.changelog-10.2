@@ -1,3 +1,27 @@
+* Mon Jul 27 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.40.1.el10_2]
+- ipv6: fix possible UAF in icmpv6_rcv() (CKI Backport Bot) [RHEL-192215] {CVE-2026-53006}
+- tipc: fix double-free in tipc_buf_append() (CKI Backport Bot) [RHEL-192181] {CVE-2026-52993}
+- iommu/vt-d: Avoid NULL pointer dereference or refcount corruption (Eder Zulian) [RHEL-190344] {CVE-2026-53281}
+- iommu/vt-d: Fix oops due to out of scope access (Eder Zulian) [RHEL-190344]
+- net: bridge: use a stable FDB dst snapshot in RCU readers (Mohammad Heib) [RHEL-179338] {CVE-2026-46086}
+- rxrpc: rxrpc_verify_data ensure rx_dec_buffer alloc (Marc Dionne) [RHEL-178254]
+- rxrpc: Fix the ACK parser to extract the SACK table for parsing (Marc Dionne) [RHEL-178254]
+- rxrpc: Fix RESPONSE packet verification to extract skb to a linear buffer (Marc Dionne) [RHEL-178254]
+- rxrpc: Fix DATA decrypt vs splice() by copying data to buffer in recvmsg (Marc Dionne) [RHEL-178254]
+- crypto/krb5, rxrpc: Fix lack of pre-decrypt/pre-verify length checks (Marc Dionne) [RHEL-178254]
+- rxrpc: fix oversized RESPONSE authenticator length check (Marc Dionne) [RHEL-178254] {CVE-2026-31635}
+- rxrpc: Fix integer overflow in rxgk_verify_response() (Marc Dionne) [RHEL-178254] {CVE-2026-31633}
+- rxrpc: Fix leak of rxgk context in rxgk_verify_response() (Marc Dionne) [RHEL-178254] {CVE-2026-31632}
+- rxrpc: Fix buffer overread in rxgk_do_verify_authenticator() (Marc Dionne) [RHEL-178254] {CVE-2026-31631}
+- rxgk: Fix potential integer overflow in length check (Marc Dionne) [RHEL-178254]
+- rxrpc: Fix rxkad crypto unalignment handling (Marc Dionne) [RHEL-178254]
+- rxrpc: Fix memory leaks in rxkad_verify_response() (Marc Dionne) [RHEL-178254]
+- rxrpc: Fix missing error checks for rxkad encryption/decryption failure (Marc Dionne) [RHEL-178254]
+- rxrpc: Also unshare DATA/RESPONSE packets when paged frags are present (Marc Dionne) [RHEL-178254] {CVE-2026-43500}
+- rxrpc: Fix conn-level packet handling to unshare RESPONSE packets (Marc Dionne) [RHEL-178254]
+- rxrpc: only handle RESPONSE during service challenge (Marc Dionne) [RHEL-178254] {CVE-2026-31676}
+Resolves: RHEL-178254, RHEL-179338, RHEL-190344, RHEL-192181, RHEL-192215
+
 * Thu Jul 23 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.39.1.el10_2]
 - futex: Drop CLONE_THREAD requirement for private default hash alloc (Audra Mitchell) [RHEL-193518] {CVE-2026-52973}
 - net: ipv6: fix NOREF dst use in seg6 and rpl lwtunnels (Antoine Tenart) [RHEL-179299] {CVE-2026-46099}
