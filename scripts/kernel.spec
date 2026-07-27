@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.147.1.el8_10
+%define pkgrelease 553.148.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.147.1%{?dist}
+%define specrelease 553.148.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2709,13 +2709,16 @@ fi
 #
 #
 %changelog
-* Fri Jul 24 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.147.1
+* Tue Jul 28 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.148.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Mon Jul 27 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.148.1.el8_10]
+- ipv6: fix possible UAF in icmpv6_rcv() (CKI Backport Bot) [RHEL-192211] {CVE-2026-53006}
 
 * Thu Jul 23 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.147.1.el8_10]
 - KVM: x86/mmu: Ensure hugepage is in by slot before checking max mapping level (Aidan Wallace) [RHEL-213341] {CVE-2026-63807}
