@@ -1,3 +1,28 @@
+* Mon Jul 27 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.31.1.el9_8]
+- blk-mq: reinsert cached request to the list (CKI Backport Bot) [RHEL-213163] {CVE-2026-64017}
+- blk-mq: pop cached request if it is usable (CKI Backport Bot) [RHEL-213163] {CVE-2026-64017}
+- futex: Drop CLONE_THREAD requirement for private default hash alloc (Audra Mitchell) [RHEL-193517] {CVE-2026-52973}
+- watchdog: Fix NULL pointer dereference when releasing cdev (Krzysztof Pawlinski) [RHEL-193729]
+- redhat/configs: enable watchdog pretimout panic functionality for x86 (Krzysztof Pawlinski) [RHEL-193729]
+- watchdog: wdat_wdt: Fix ACPI table leak in probe function (Krzysztof Pawlinski) [RHEL-193729]
+- watchdog: Switch to use hrtimer_setup() (Krzysztof Pawlinski) [RHEL-193729]
+- watchdog: iTCO_wdt: Convert comma to semicolon (Krzysztof Pawlinski) [RHEL-193729]
+- watchdog: wdat_wdt: Add timeout value as a param in ping method (Krzysztof Pawlinski) [RHEL-193729]
+- watchdog: iTCO_wdt: Report firmware_version (Krzysztof Pawlinski) [RHEL-193729]
+- watchdog: iTCO_wdt: Set NO_REBOOT if the watchdog is not already running (Krzysztof Pawlinski) [RHEL-193729]
+- watchdog: iTCO_wdt: Using existing macro define covers more scenarios (Krzysztof Pawlinski) [RHEL-193729]
+- watchdog: iTCO_wdt: No need to stop the timer in probe (Krzysztof Pawlinski) [RHEL-193729]
+- watchdog: only run driver set_pretimeout op if device supports it (Krzysztof Pawlinski) [RHEL-193729]
+- watchdog: iTCO_wdt: Make use of the helper function devm_platform_ioremap_resource() (Krzysztof Pawlinski) [RHEL-193729]
+- xfrm: xfrm_alloc_spi shouldn't use 0 as SPI (Sabrina Dubroca) [RHEL-180033] {CVE-2025-39797}
+- xfrm: Duplicate SPI Handling (Sabrina Dubroca) [RHEL-180033] {CVE-2025-39797}
+- iommu/vt-d: Avoid NULL pointer dereference or refcount corruption (Eder Zulian) [RHEL-190342] {CVE-2026-53281}
+- iommu/vt-d: Fix oops due to out of scope access (Eder Zulian) [RHEL-190342]
+- lib/buildid: use __kernel_read() for sleepable context (CKI Backport Bot) [RHEL-189962] {CVE-2026-23002}
+- nfsd: use correct loop termination in nfsd4_revoke_states() (CKI Backport Bot) [RHEL-188257]
+- nfsd: check that server is running in unlock_filesystem (CKI Backport Bot) [RHEL-188257]
+Resolves: RHEL-180033, RHEL-188257, RHEL-189962, RHEL-190342, RHEL-193517, RHEL-193729, RHEL-213163
+
 * Wed Jul 22 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.30.1.el9_8]
 - KVM: x86/mmu: Ensure hugepage is in by slot before checking max mapping level (Aidan Wallace) [RHEL-213468] {CVE-2026-63807}
 - KVM: nVMX: Hide shadow VMCS right after VMCLEAR (Aidan Wallace) [RHEL-213468]
