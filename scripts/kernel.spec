@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 211.40.1
+%define pkgrelease 211.42.1
 %define kversion 6
-%define tarfile_release 6.12.0-211.40.1.el10_2
+%define tarfile_release 6.12.0-211.42.1.el10_2
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 211.40.1%{?buildid}%{?dist}
+%define specrelease 211.42.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-211.40.1.el10_2
+%define kabiversion 6.12.0-211.42.1.el10_2
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4477,9 +4477,18 @@ fi\
 #
 #
 %changelog
-* Tue Jul 28 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.40.1
+* Fri Jul 31 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.42.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Wed Jul 29 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.42.1.el10_2]
+- net/sched: cls_api: Handle TC_ACT_CONSUMED in tcf_qevent_handle (CKI Backport Bot) [RHEL-214082] {CVE-2026-64530}
+- ksm: use range-walk function to jump over holes in scan_get_next_rmap_item (Rafael Aquini) [RHEL-189554] {CVE-2025-68211}
+- isofs: validate Rock Ridge CE continuation extent against volume size (CKI Backport Bot) [RHEL-187415] {CVE-2026-46303}
+
+* Tue Jul 28 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.41.1.el10_2]
+- dpll: fix NULL pointer dereference in dpll_msg_add_pin_ref_sync() (CKI Backport Bot) [RHEL-212063]
+- ASoC: Intel: sof_sdw: append dai type to dai link name unconditionally (CKI Backport Bot) [RHEL-185669]
 
 * Mon Jul 27 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.40.1.el10_2]
 - ipv6: fix possible UAF in icmpv6_rcv() (CKI Backport Bot) [RHEL-192215] {CVE-2026-53006}
