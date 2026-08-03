@@ -1,3 +1,11 @@
+* Mon Aug 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.34.1.el9_8]
+- s390/mm: Ensure physical addr derived from page is passed in to uv_convert_from_secure() (Lucas Oakley) [RHEL-192430]
+- s390/mm: Fix phys_to_folio() usage in do_secure_storage_access() (Charles Haithcock) [RHEL-216471]
+- gfs2: page poisoning fix (CKI Backport Bot) [RHEL-214021]
+- timers: Fix NULL function pointer race in timer_shutdown_sync() (CKI Backport Bot) [RHEL-189940] {CVE-2025-68214}
+- net: wwan: t7xx: Add delay between MD and SAP suspend (CKI Backport Bot) [RHEL-184273]
+Resolves: RHEL-184273, RHEL-189940, RHEL-192430, RHEL-214021, RHEL-216471
+
 * Wed Jul 29 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.33.1.el9_8]
 - net/sched: cls_api: Handle TC_ACT_CONSUMED in tcf_qevent_handle (CKI Backport Bot) [RHEL-213299] {CVE-2026-64530}
 - ipc: limit next_id allocation to the valid ID range (Rafael Aquini) [RHEL-188214] {CVE-2026-52923}

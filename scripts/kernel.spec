@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.33.1
+%define pkgrelease 687.34.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.33.1.el9_8
+%define tarfile_release 5.14.0-687.34.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.33.1%{?buildid}%{?dist}
+%define specrelease 687.34.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.33.1.el9_8
+%define kabiversion 5.14.0-687.34.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3713,10 +3713,17 @@ fi
 #
 #
 %changelog
-* Fri Jul 31 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.33.1
+* Tue Aug 04 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.34.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Mon Aug 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.34.1.el9_8]
+- s390/mm: Ensure physical addr derived from page is passed in to uv_convert_from_secure() (Lucas Oakley) [RHEL-192430]
+- s390/mm: Fix phys_to_folio() usage in do_secure_storage_access() (Charles Haithcock) [RHEL-216471]
+- gfs2: page poisoning fix (CKI Backport Bot) [RHEL-214021]
+- timers: Fix NULL function pointer race in timer_shutdown_sync() (CKI Backport Bot) [RHEL-189940] {CVE-2025-68214}
+- net: wwan: t7xx: Add delay between MD and SAP suspend (CKI Backport Bot) [RHEL-184273]
 
 * Wed Jul 29 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.33.1.el9_8]
 - net/sched: cls_api: Handle TC_ACT_CONSUMED in tcf_qevent_handle (CKI Backport Bot) [RHEL-213299] {CVE-2026-64530}
