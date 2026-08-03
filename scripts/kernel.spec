@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 211.42.1
+%define pkgrelease 211.43.1
 %define kversion 6
-%define tarfile_release 6.12.0-211.42.1.el10_2
+%define tarfile_release 6.12.0-211.43.1.el10_2
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 211.42.1%{?buildid}%{?dist}
+%define specrelease 211.43.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-211.42.1.el10_2
+%define kabiversion 6.12.0-211.43.1.el10_2
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -1538,8 +1538,8 @@ This package provides less commonly used kernel modules for the %{?2:%{2} }kerne
 %package %{?1:%{1}-}modules\
 Summary: kernel modules to match the %{?2:%{2}-}core kernel\
 Provides: %{name}%{?1:-%{1}}-modules-%{_target_cpu} = %{specrpmversion}-%{release}\
-Provides: %{name}-modules-%{_target_cpu} = %{specrpmversion}-%{release}%{uname_suffix %{?1}}\
-Provides: %{name}-modules = %{specrpmversion}-%{release}%{uname_suffix %{?1}}\
+Provides: %{name}%{?1:-%{1}}-modules-%{_target_cpu} = %{specrpmversion}-%{release}%{uname_suffix %{?1}}\
+Provides: %{name}%{?1:-%{1}}-modules = %{specrpmversion}-%{release}%{uname_suffix %{?1}}\
 Provides: installonlypkg(kernel-module)\
 Provides: %{name}%{?1:-%{1}}-modules-uname-r = %{KVERREL}%{uname_suffix %{?1}}\
 Requires: %{name}-uname-r = %{KVERREL}%{uname_suffix %{?1}}\
@@ -1561,8 +1561,8 @@ This package provides commonly used kernel modules for the %{?2:%{2}-}core kerne
 %package %{?1:%{1}-}modules-core\
 Summary: Core kernel modules to match the %{?2:%{2}-}core kernel\
 Provides: %{name}%{?1:-%{1}}-modules-core-%{_target_cpu} = %{specrpmversion}-%{release}\
-Provides: %{name}-modules-core-%{_target_cpu} = %{specrpmversion}-%{release}%{uname_suffix %{?1}}\
-Provides: %{name}-modules-core = %{specrpmversion}-%{release}%{uname_suffix %{?1}}\
+Provides: %{name}%{?1:-%{1}}-modules-core-%{_target_cpu} = %{specrpmversion}-%{release}%{uname_suffix %{?1}}\
+Provides: %{name}%{?1:-%{1}}-modules-core = %{specrpmversion}-%{release}%{uname_suffix %{?1}}\
 Provides: installonlypkg(kernel-module)\
 Provides: %{name}%{?1:-%{1}}-modules-core-uname-r = %{KVERREL}%{uname_suffix %{?1}}\
 Requires: %{name}-uname-r = %{KVERREL}%{uname_suffix %{?1}}\
@@ -4477,9 +4477,37 @@ fi\
 #
 #
 %changelog
-* Fri Jul 31 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.42.1
+* Tue Aug 04 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.43.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Mon Aug 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.43.1.el10_2]
+- redhat/kernel.spec: make module and modules-core provides use variant (Jan Stancek) [RHEL-213965]
+- dpll: allow fwnode pins to attempt state change without capability bit (Jakub Ramaseuski) [RHEL-211011]
+- dpll: extend pin notifier with notification source ID (Jakub Ramaseuski) [RHEL-211011]
+- dpll: balance create/delete notifications in __dpll_pin_(un)register (Jakub Ramaseuski) [RHEL-211011]
+- dpll: guard sync-pair removal on full pin unregister (Jakub Ramaseuski) [RHEL-211011]
+- dpll: emit per-dpll delete notifications in dpll_pin_on_pin_unregister() (Jakub Ramaseuski) [RHEL-211011]
+- dpll: send delete notification before unregister in on-pin rollback (Jakub Ramaseuski) [RHEL-211011]
+- dpll: fix stale iteration in dpll_pin_on_pin_unregister() (Jakub Ramaseuski) [RHEL-211011]
+- dpll: allow registering FW-identified pin with a different DPLL (Jakub Ramaseuski) [RHEL-211011]
+- dpll: add generic DPLL type (Jakub Ramaseuski) [RHEL-211011]
+- dpll: zl3073x: make frequency monitor a per-device attribute (Jakub Ramaseuski) [RHEL-211011]
+- dpll: zl3073x: use __dpll_device_change_ntf() and remove change_work (Jakub Ramaseuski) [RHEL-211011]
+- dpll: export __dpll_device_change_ntf() for use under dpll_lock (Jakub Ramaseuski) [RHEL-211011]
+- dpll: change dpll_netdev_pin_handle_size() to assume DPLL_A_PIN_ID will be used (Jakub Ramaseuski) [RHEL-211011]
+- dpll: zl3073x: fix memory leak on pin registration failure (Jakub Ramaseuski) [RHEL-211011]
+- dpll: zl3073x: Use named initializers for struct i2c_device_id (Jakub Ramaseuski) [RHEL-211011]
+- dpll: Prevent duplicate registrations (Jakub Ramaseuski) [RHEL-211011]
+- dpll: export __dpll_pin_change_ntf() for use under dpll_lock (Jakub Ramaseuski) [RHEL-211011]
+- drm/i915/psr: Use DC_OFF wake reference to block DC6 on vblank enable (Anusha Srivatsa) [RHEL-172832]
+- drm/i915/psr: Block DC states on vblank enable when Panel Replay supported (Anusha Srivatsa) [RHEL-172832]
+- drm/i915/psr: Don't enable Panel Replay on sink if globally disabled (Anusha Srivatsa) [RHEL-172832]
+- drm/i915/alpm: ALPM disable fixes (Anusha Srivatsa) [RHEL-172832]
+- procfs: fix possible double mmput() in do_procmap_query() (Rafael Aquini) [RHEL-189665] {CVE-2026-23199}
+- procfs: avoid fetching build ID while holding VMA lock (Rafael Aquini) [RHEL-189665] {CVE-2026-23199}
+- timers: Fix NULL function pointer race in timer_shutdown_sync() (CKI Backport Bot) [RHEL-189563] {CVE-2025-68214}
+- net: wwan: t7xx: Add delay between MD and SAP suspend (CKI Backport Bot) [RHEL-184266]
 
 * Wed Jul 29 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.42.1.el10_2]
 - net/sched: cls_api: Handle TC_ACT_CONSUMED in tcf_qevent_handle (CKI Backport Bot) [RHEL-214082] {CVE-2026-64530}

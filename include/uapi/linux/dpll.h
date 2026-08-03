@@ -108,11 +108,14 @@ enum dpll_clock_quality_level {
  * enum dpll_type - type of dpll, valid values for DPLL_A_TYPE attribute
  * @DPLL_TYPE_PPS: dpll produces Pulse-Per-Second signal
  * @DPLL_TYPE_EEC: dpll drives the Ethernet Equipment Clock
+ * @DPLL_TYPE_GENERIC: generic dpll type for devices outside PPS/EEC classes
  */
 enum dpll_type {
 	DPLL_TYPE_PPS = 1,
 	DPLL_TYPE_EEC,
-
+#ifndef __GENKSYMS__
+	DPLL_TYPE_GENERIC,
+#endif
 	/* private: */
 	__DPLL_TYPE_MAX,
 	DPLL_TYPE_MAX = (__DPLL_TYPE_MAX - 1)

@@ -13,6 +13,7 @@
 #include <linux/netdevice.h>
 #include <linux/notifier.h>
 #include <linux/rtnetlink.h>
+#include <net/netlink.h>
 
 #include <linux/rh_kabi.h>
 
@@ -264,13 +265,18 @@ struct dpll_pin_notifier_info {
 	u64 clock_id;
 	const struct fwnode_handle *fwnode;
 	const struct dpll_pin_properties *prop;
+	u64 src_clock_id;
 };
 
 #if IS_ENABLED(CONFIG_DPLL)
 void dpll_netdev_pin_set(struct net_device *dev, struct dpll_pin *dpll_pin);
 void dpll_netdev_pin_clear(struct net_device *dev);
 
-size_t dpll_netdev_pin_handle_size(const struct net_device *dev);
+static inline size_t dpll_netdev_pin_handle_size(void)
+{
+	return nla_total_size(4); /* DPLL_A_PIN_ID */
+}
+
 int dpll_netdev_add_pin_handle(struct sk_buff *msg,
 			       const struct net_device *dev);
 
@@ -281,7 +287,7 @@ static inline void
 dpll_netdev_pin_set(struct net_device *dev, struct dpll_pin *dpll_pin) { }
 static inline void dpll_netdev_pin_clear(struct net_device *dev) { }
 
-static inline size_t dpll_netdev_pin_handle_size(const struct net_device *dev)
+static inline size_t dpll_netdev_pin_handle_size(void)
 {
 	return 0;
 }
@@ -336,8 +342,10 @@ void dpll_pin_on_pin_unregister(struct dpll_pin *parent, struct dpll_pin *pin,
 int dpll_pin_ref_sync_pair_add(struct dpll_pin *pin,
 			       struct dpll_pin *ref_sync_pin);
 
+int __dpll_device_change_ntf(struct dpll_device *dpll);
 int dpll_device_change_ntf(struct dpll_device *dpll);
 
+int __dpll_pin_change_ntf(struct dpll_pin *pin);
 int dpll_pin_change_ntf(struct dpll_pin *pin);
 
 int register_dpll_notifier(struct notifier_block *nb);
