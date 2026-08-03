@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.150.1.el8_10
+%define pkgrelease 553.151.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.150.1%{?dist}
+%define specrelease 553.151.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2709,13 +2709,21 @@ fi
 #
 #
 %changelog
-* Fri Jul 31 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.150.1
+* Tue Aug 04 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.151.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Mon Aug 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.151.1.el8_10]
+- net: dns_resolver: allow shorter names in dns_query() (Paulo Alcantara) [RHEL-213976]
+- net/dns_resolver: use kasprintf + kmemdup_nul to simplify dns_query (Paulo Alcantara) [RHEL-213976]
+- net/dns_resolver: consolidate namelen checks in dns_query (Paulo Alcantara) [RHEL-213976]
+- dns: remove redundant zero length namelen check (Paulo Alcantara) [RHEL-213976]
+- ipc: limit next_id allocation to the valid ID range (Rafael Aquini) [RHEL-188216] {CVE-2026-52923}
+- KVM: s390: Limit adapter indicator access to mapped page (Christoph Schlameuss) [RHEL-183880]
 
 * Wed Jul 29 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.150.1.el8_10]
 - net/sched: cls_api: Handle TC_ACT_CONSUMED in tcf_qevent_handle (CKI Backport Bot) [RHEL-213300] {CVE-2026-64530}
