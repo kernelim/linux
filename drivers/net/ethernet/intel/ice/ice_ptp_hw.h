@@ -265,6 +265,13 @@ struct ice_cgu_pin_desc {
 	struct dpll_pin_frequency *freq_supp;
 };
 
+enum ice_e825c_ref_clk {
+	ICE_REF_CLK_ENET,
+	ICE_REF_CLK_SYNCE,
+	ICE_REF_CLK_EREF0,
+	ICE_REF_CLK_MAX,
+};
+
 #define E810C_QSFP_C827_0_HANDLE 2
 #define E810C_QSFP_C827_1_HANDLE 3
 
@@ -300,6 +307,7 @@ void ice_ptp_reset_ts_memory(struct ice_hw *hw);
 int ice_ptp_init_phc(struct ice_hw *hw);
 void ice_ptp_init_hw(struct ice_hw *hw);
 int ice_get_phy_tx_tstamp_ready(struct ice_hw *hw, u8 block, u64 *tstamp_ready);
+int ice_check_phy_tx_tstamp_ready(struct ice_hw *hw);
 int ice_ptp_one_port_cmd(struct ice_hw *hw, u8 configured_port,
 			 enum ice_ptp_tmr_cmd configured_cmd);
 
@@ -374,6 +382,9 @@ int ice_stop_phy_timer_eth56g(struct ice_hw *hw, u8 port, bool soft_reset);
 int ice_start_phy_timer_eth56g(struct ice_hw *hw, u8 port);
 int ice_phy_cfg_intr_eth56g(struct ice_hw *hw, u8 port, bool ena, u8 threshold);
 int ice_phy_cfg_ptp_1step_eth56g(struct ice_hw *hw, u8 port);
+int ice_ptp_phy_soft_reset_eth56g(struct ice_hw *hw, u8 port);
+int ice_get_serdes_ref_sel_e825c(struct ice_hw *hw, u8 port,
+				 enum ice_e825c_ref_clk *clk);
 
 #define ICE_ETH56G_NOMINAL_INCVAL	0x140000000ULL
 #define ICE_ETH56G_NOMINAL_PCS_REF_TUS	0x100000000ULL
@@ -676,6 +687,9 @@ static inline u64 ice_get_base_incval(struct ice_hw *hw)
 #define ICE_P0_GNSS_PRSNT_N	BIT(4)
 
 /* ETH56G PHY register addresses */
+#define PHY_REG_GLOBAL			0x0
+#define PHY_REG_GLOBAL_SOFT_RESET_M	BIT(11)
+
 /* Timestamp PHY incval registers */
 #define PHY_REG_TIMETUS_L		0x8
 #define PHY_REG_TIMETUS_U		0xC
@@ -782,5 +796,13 @@ static inline u64 ice_get_base_incval(struct ice_hw *hw)
 #define PHY_PTP_1STEP_PD_ADD_PD_M	BIT(0)
 #define PHY_PTP_1STEP_PD_DELAY_M	GENMASK(30, 1)
 #define PHY_PTP_1STEP_PD_DLY_V_M	BIT(31)
+
+#define SERDES_IP_IF_LN_FLXM_GENERAL(n, m) \
+	(0x32B800 + (m) * 0x100000 + (n) * 0x8000)
+#define CFG_ICTL_PCS_REF_SEL_RX_NT		GENMASK(9, 6)
+#define CFG_ICTL_PCS_REF_SEL_TX_NT		GENMASK(28, 25)
+#define REF_SEL_NT_ENET				0
+#define REF_SEL_NT_EREF0			1
+#define REF_SEL_NT_SYNCE			2
 
 #endif /* _ICE_PTP_HW_H_ */
