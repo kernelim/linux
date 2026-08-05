@@ -1,3 +1,25 @@
+* Wed Aug 05 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.36.1.el9_8]
+- powerpc/powernv/iommu: iommu incorrectly bypass DMA APIs (Mamatha Inamdar) [RHEL-215575]
+- powerpc/iommu: bypass DMA APIs for coherent allocations for pre-mapped memory (Mamatha Inamdar) [RHEL-215575]
+- mm/vmscan: add sysctl to limit direct reclaim scanning depth (Audra Mitchell) [RHEL-211058]
+- mm/memcg: refactor try_charge_memcg retry logic to use for loop (Audra Mitchell) [RHEL-211058]
+- mm/memcg: introduce tunable sysctl for memory cgroup reclaim retries (Audra Mitchell) [RHEL-211058]
+- futex: Prevent lockup in requeue-PI during signal/ timeout wakeup (Waiman Long) [RHEL-193526] {CVE-2026-52977}
+- futex: Require sys_futex_requeue() to have identical flags (Waiman Long) [RHEL-193526] {CVE-2026-31554}
+- futex: Clear stale exiting pointer in futex_lock_pi() retry path (Waiman Long) [RHEL-193526] {CVE-2026-31555}
+- futex: Fix UaF between futex_key_to_node_opt() and vma_replace_policy() (Waiman Long) [RHEL-193526] {CVE-2026-23415}
+Resolves: RHEL-193526, RHEL-211058, RHEL-215575
+
+* Tue Aug 04 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.35.1.el9_8]
+- octeon_ep_vf: add NULL check for napi_build_skb() (CKI Backport Bot) [RHEL-186331]
+- octeon_ep_vf: introduce octep_vf_oq_next_idx() helper (CKI Backport Bot) [RHEL-186331]
+- octeon_ep_vf: avoid compiler and IQ/OQ reordering (CKI Backport Bot) [RHEL-186331]
+- octeon_ep_vf: Relocate counter updates before NAPI (CKI Backport Bot) [RHEL-186331]
+- octeon_ep_vf: ensure dbell BADDR updation (CKI Backport Bot) [RHEL-186331]
+- net: octeon_ep_vf: fix free_irq dev_id mismatch in IRQ rollback (CKI Backport Bot) [RHEL-186331]
+- netfilter: nfnetlink_cthelper: fix OOB read in nfnl_cthelper_dump_table() (CKI Backport Bot) [RHEL-179745] {CVE-2026-43450}
+Resolves: RHEL-179745, RHEL-186331
+
 * Mon Aug 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.34.1.el9_8]
 - s390/mm: Ensure physical addr derived from page is passed in to uv_convert_from_secure() (Lucas Oakley) [RHEL-192430]
 - s390/mm: Fix phys_to_folio() usage in do_secure_storage_access() (Charles Haithcock) [RHEL-216471]

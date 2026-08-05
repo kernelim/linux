@@ -235,12 +235,6 @@ static inline bool folio_needs_release(struct folio *folio)
 extern unsigned long highest_memmap_pfn;
 
 /*
- * Maximum number of reclaim retries without progress before the OOM
- * killer is consider the only way forward.
- */
-#define MAX_RECLAIM_RETRIES 16
-
-/*
  * in mm/vmscan.c:
  */
 bool isolate_lru_page(struct page *page);

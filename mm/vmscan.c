@@ -168,6 +168,8 @@ struct scan_control {
 
 	/* for recording the reclaimed slab by now */
 	struct reclaim_state reclaim_state;
+
+	bool give_up_direct_reclaim;
 };
 
 #ifdef ARCH_HAS_PREFETCHW
@@ -5619,6 +5621,8 @@ static void lru_gen_shrink_node(struct pglist_data *pgdat, struct scan_control *
 
 #endif /* CONFIG_LRU_GEN */
 
+int sysctl_dr_prio_drop = 0;
+
 static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 {
 	unsigned long nr[NR_LRU_LISTS];
@@ -5629,6 +5633,16 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 	unsigned long nr_to_reclaim = sc->nr_to_reclaim;
 	bool proportional_reclaim;
 	struct blk_plug plug;
+
+	/*
+	 * Prevent lruvec overscanning by direct reclaimers
+	 * to reduce contention over the lruvec spinlock.
+	 */
+	if (unlikely(sysctl_dr_prio_drop && !current_is_kswapd() &&
+	    sc->priority <= (DEF_PRIORITY - sysctl_dr_prio_drop))) {
+		sc->give_up_direct_reclaim = true;
+		return;
+	}
 
 	if (lru_gen_enabled() && !root_reclaim(sc)) {
 		lru_gen_shrink_lruvec(lruvec, sc);
@@ -6197,6 +6211,9 @@ retry:
 			break;
 
 		if (sc->compaction_ready)
+			break;
+
+		if (sc->give_up_direct_reclaim)
 			break;
 
 		/*

@@ -1201,6 +1201,12 @@ static inline bool zone_intersects(struct zone *zone,
  */
 #define DEF_PRIORITY 12
 
+/*
+ * Maximum number of reclaim retries without progress before the OOM
+ * killer is consider the only way forward.
+ */
+#define MAX_RECLAIM_RETRIES 16
+
 /* Maximum number of zones on a zonelist */
 #define MAX_ZONES_PER_ZONELIST (MAX_NUMNODES * MAX_NR_ZONES)
 

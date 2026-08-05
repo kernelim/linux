@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.34.1
+%define pkgrelease 687.36.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.34.1.el9_8
+%define tarfile_release 5.14.0-687.36.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.34.1%{?buildid}%{?dist}
+%define specrelease 687.36.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.34.1.el9_8
+%define kabiversion 5.14.0-687.36.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3713,10 +3713,30 @@ fi
 #
 #
 %changelog
-* Tue Aug 04 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.34.1
+* Thu Aug 06 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.36.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Wed Aug 05 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.36.1.el9_8]
+- powerpc/powernv/iommu: iommu incorrectly bypass DMA APIs (Mamatha Inamdar) [RHEL-215575]
+- powerpc/iommu: bypass DMA APIs for coherent allocations for pre-mapped memory (Mamatha Inamdar) [RHEL-215575]
+- mm/vmscan: add sysctl to limit direct reclaim scanning depth (Audra Mitchell) [RHEL-211058]
+- mm/memcg: refactor try_charge_memcg retry logic to use for loop (Audra Mitchell) [RHEL-211058]
+- mm/memcg: introduce tunable sysctl for memory cgroup reclaim retries (Audra Mitchell) [RHEL-211058]
+- futex: Prevent lockup in requeue-PI during signal/ timeout wakeup (Waiman Long) [RHEL-193526] {CVE-2026-52977}
+- futex: Require sys_futex_requeue() to have identical flags (Waiman Long) [RHEL-193526] {CVE-2026-31554}
+- futex: Clear stale exiting pointer in futex_lock_pi() retry path (Waiman Long) [RHEL-193526] {CVE-2026-31555}
+- futex: Fix UaF between futex_key_to_node_opt() and vma_replace_policy() (Waiman Long) [RHEL-193526] {CVE-2026-23415}
+
+* Tue Aug 04 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.35.1.el9_8]
+- octeon_ep_vf: add NULL check for napi_build_skb() (CKI Backport Bot) [RHEL-186331]
+- octeon_ep_vf: introduce octep_vf_oq_next_idx() helper (CKI Backport Bot) [RHEL-186331]
+- octeon_ep_vf: avoid compiler and IQ/OQ reordering (CKI Backport Bot) [RHEL-186331]
+- octeon_ep_vf: Relocate counter updates before NAPI (CKI Backport Bot) [RHEL-186331]
+- octeon_ep_vf: ensure dbell BADDR updation (CKI Backport Bot) [RHEL-186331]
+- net: octeon_ep_vf: fix free_irq dev_id mismatch in IRQ rollback (CKI Backport Bot) [RHEL-186331]
+- netfilter: nfnetlink_cthelper: fix OOB read in nfnl_cthelper_dump_table() (CKI Backport Bot) [RHEL-179745] {CVE-2026-43450}
 
 * Mon Aug 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.34.1.el9_8]
 - s390/mm: Ensure physical addr derived from page is passed in to uv_convert_from_secure() (Lucas Oakley) [RHEL-192430]

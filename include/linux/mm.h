@@ -79,6 +79,11 @@ extern int page_cluster;
 extern const int page_cluster_max;
 
 #ifdef CONFIG_SYSCTL
+
+#ifdef CONFIG_MEMCG
+extern int sysctl_mem_cgroup_reclaim_retries;
+#endif
+
 extern int sysctl_legacy_va_layout;
 #else
 #define sysctl_legacy_va_layout 0
@@ -3937,6 +3942,7 @@ static inline int in_gate_area(struct mm_struct *mm, unsigned long addr)
 extern bool process_shares_mm(struct task_struct *p, struct mm_struct *mm);
 
 #ifdef CONFIG_SYSCTL
+extern int sysctl_dr_prio_drop;
 extern int sysctl_drop_caches;
 int drop_caches_sysctl_handler(struct ctl_table *, int, void *, size_t *,
 		loff_t *);
