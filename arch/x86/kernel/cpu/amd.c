@@ -1008,6 +1008,24 @@ void init_spectral_chicken(struct cpuinfo_x86 *c)
 #endif
 }
 
+static inline bool is_amd_zen2(struct cpuinfo_x86 *c)
+{
+	if (c->x86 == 0x17) {
+		switch (c->x86_model) {
+		case 0x30 ... 0x4f:
+		case 0x60 ... 0x7f:
+		case 0x90 ... 0x91:
+		case 0xa0 ... 0xaf:
+			return true;
+			break;
+		default:
+			break;
+		}
+	}
+
+	return false;
+}
+
 static void init_amd_zn(struct cpuinfo_x86 *c)
 {
 	set_cpu_cap(c, X86_FEATURE_ZEN);
@@ -1022,6 +1040,9 @@ static void init_amd_zn(struct cpuinfo_x86 *c)
 		/* Erratum 1076: CPB feature bit not being set in CPUID. */
 		if (!cpu_has(c, X86_FEATURE_CPB))
 			set_cpu_cap(c, X86_FEATURE_CPB);
+
+		if (is_amd_zen2(c))
+			msr_set_bit(MSR_ZEN4_BP_CFG, MSR_ZEN2_BP_CFG_BUG_FIX_BIT);
 
 		/*
 		 * Zen3 (Fam19 model < 0x10) parts are not susceptible to
