@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.36.1
+%define pkgrelease 687.38.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.36.1.el9_8
+%define tarfile_release 5.14.0-687.38.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.36.1%{?buildid}%{?dist}
+%define specrelease 687.38.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.36.1.el9_8
+%define kabiversion 5.14.0-687.38.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3713,10 +3713,28 @@ fi
 #
 #
 %changelog
-* Thu Aug 06 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.36.1
+* Tue Aug 11 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.38.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Mon Aug 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.38.1.el9_8]
+- cifs: fix time_last_write stamp placement in setattr/truncate paths (Paulo Alcantara) [RHEL-192999]
+- cifs: consolidate time_last_write stamp into _cifsFileInfo_put() (Paulo Alcantara) [RHEL-192999]
+- cifs: fix cifsFileInfo leak on kmalloc failure in deferred close drain paths (Paulo Alcantara) [RHEL-192999]
+- cifs: prevent readdir from changing file size due to stale directory metadata (Paulo Alcantara) [RHEL-192999]
+- smb: client: fix dir separator in SMB1 UNIX mounts (Paulo Alcantara) [RHEL-192999]
+- smb: client: fix sbflags initialization (Paulo Alcantara) [RHEL-192999]
+- smb: client: use atomic_t for mnt_cifs_flags (Paulo Alcantara) [RHEL-192999]
+- mm/slab: do not limit zeroing to orig_size when only red zoning is enabled (Rafael Aquini) [RHEL-223404] {CVE-2026-64368}
+
+* Fri Aug 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.37.1.el9_8]
+- s390/pkey: Check length in pkey_pckmo handler implementation (Ramesh Chhetri) [RHEL-215578]
+- s390/pkey: Check length in PKEY_VERIFYPROTK ioctl (Ramesh Chhetri) [RHEL-215580]
+- net: openvswitch: reject oversized nested action attrs (CKI Backport Bot) [RHEL-222495] {CVE-2026-64531}
+- cxl/port: Fix use after free of parent_port in cxl_detach_ep() (Myron Stowe) [RHEL-180691] {CVE-2026-31530}
+- net/mlx5: Fix slab-out-of-bounds in mlx5_query_nic_vport_mac_list (CKI Backport Bot) [RHEL-213036]
+- x86/CPU/AMD: Prevent improper isolation of shared resources in Zen2's op cache (Dennis Chen) [RHEL-188790] {CVE-2025-54518}
 
 * Wed Aug 05 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.36.1.el9_8]
 - powerpc/powernv/iommu: iommu incorrectly bypass DMA APIs (Mamatha Inamdar) [RHEL-215575]
