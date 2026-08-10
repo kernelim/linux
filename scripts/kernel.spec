@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.153.1.el8_10
+%define pkgrelease 553.154.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.153.1%{?dist}
+%define specrelease 553.154.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -90,6 +90,8 @@
 %define with_bpftool   %{?_without_bpftool:   0} %{?!_without_bpftool:   1}
 # kernel-debuginfo
 %define with_debuginfo %{?_without_debuginfo: 0} %{?!_without_debuginfo: 1}
+# kernel-kmap-internal: source-to-module mapping data (JSON)
+%define with_kmap      %{?_without_kmap:      0} %{?!_without_kmap:      1}
 # Want to build a the vsdo directories installed
 %define with_vdso_install %{?_without_vdso_install: 0} %{?!_without_vdso_install: 1}
 # kernel-zfcpdump (s390 specific kernel for zfcpdump)
@@ -323,6 +325,18 @@
 %define _enable_debug_packages 0
 %endif
 
+%ifnarch x86_64 ppc64le s390x aarch64
+%define with_kmap 0
+%endif
+
+# Define with_base to indicate if any non-debug variant is being built.
+# Used to conditionally build packages that only make sense for base variants.
+%if %{with_zfcpdump} || %{with_up} || %{with_realtime}
+%define with_base 1
+%else
+%define with_base 0
+%endif
+
 # Architectures we build tools/cpupower on
 %define cpupowerarchs x86_64 ppc64le aarch64
 
@@ -534,6 +548,9 @@ Source400:             mod-kvm.list
 Source2000:            cpupower.service
 Source2001:            cpupower.config
 Source2002:            kvm_stat.logrotate
+
+# kmap script for generating source-to-module mapping data
+Source2100:            kmap.py
 
 # CI gating config
 Source4000:            gating.yaml
@@ -750,6 +767,17 @@ This package provides debug information for package %{name}-tools.
 %{expand:%%global _find_debuginfo_opts %{?_find_debuginfo_opts} -p '.*%%{_bindir}/centrino-decode(\.debug)?|.*%%{_bindir}/powernow-k8-decode(\.debug)?|.*%%{_bindir}/cpupower(\.debug)?|.*%%{_libdir}/libcpupower.*|.*%%{_bindir}/turbostat(\.debug)?|.*%%{_bindir}/x86_energy_perf_policy(\.debug)?|.*%%{_bindir}/tmon(\.debug)?|.*%%{_bindir}/lsgpio(\.debug)?|.*%%{_bindir}/gpio-hammer(\.debug)?|.*%%{_bindir}/gpio-event-mon(\.debug)?|.*%%{_bindir}/iio_event_monitor(\.debug)?|.*%%{_bindir}/iio_generic_buffer(\.debug)?|.*%%{_bindir}/lsiio(\.debug)?|.*%%{_bindir}/intel-speed-select(\.debug)?|.*%%{_bindir}/page_owner_sort(\.debug)?|.*%%{_bindir}/slabinfo(\.debug)?|.*%%{_sbindir}/intel_sdsi(\.debug)?|XXX' -o %{name}-tools-debuginfo.list}
 
 # with_tools
+%endif
+
+%if %{with_kmap} && %{with_base}
+%package -n %{name}-kmap-internal
+Summary:               Kernel source-to-module mapping data (JSON)
+AutoReqProv:           no
+%description -n %{name}-kmap-internal
+This package provides a JSON file that maps kernel source files to the
+kernel objects they compile into, and maps kernel objects to source files
+with variant indices to track per-variant mappings. This data is intended
+for internal Rocky tooling (e.g., kpatch) and is not ABI-stable.
 %endif
 
 %if !%{with_realtime}
@@ -1789,6 +1817,38 @@ BuildKernel() {
     fi
 %endif
 
+%if %{with_kmap} && %{with_base}
+    # Generate source-to-module mapping data using kmap.py.
+    # Must run before the next BuildKernel call issues make mrproper, which
+    # would wipe the .cmd files that kmap.py reads.  Skip debug variants
+    # (same source mapping as the base kernel).
+    if [[ "$Variant" != *debug* ]]; then
+        _kmap_bdir=$(pwd)
+        _kmap_basedir=%{_builddir}/kmap-data
+        _kmap_merged=$_kmap_basedir/kernel-map.json
+        _kmap_variant=${Variant:-stock}
+        _kmap_listprefix=../kernel${Variant:+-${Variant}}
+        mkdir -p $_kmap_basedir
+
+        # Build kmap.py arguments; merge with existing data if present
+        _kmap_args="--directory $_kmap_bdir --outputdir $_kmap_basedir --rhel 8 --variant $_kmap_variant --time"
+        _kmap_args="$_kmap_args --vmlinux-rpm %{name}-core-%{KVERREL}.rpm"
+        if [ -f "$_kmap_merged" ]; then
+            _kmap_args="$_kmap_args --input kernel-map.json"
+        fi
+
+        # Add module list files for module-to-RPM mapping
+        for _kmap_type in modules-core modules modules-extra modules-internal; do
+            if [ -f "${_kmap_listprefix}-${_kmap_type}.list" ]; then
+                _kmap_rpm=%{name}-${_kmap_type}-%{KVERREL}.rpm
+                _kmap_args="$_kmap_args --module-list ${_kmap_rpm}:${_kmap_listprefix}-${_kmap_type}.list"
+            fi
+        done
+
+        python3 %{SOURCE2100} $_kmap_args
+    fi
+%endif
+
 }
 
 ###
@@ -2254,6 +2314,14 @@ HEADERS_CHKSUM=$(export LC_ALL=C; find $RPM_BUILD_ROOT/usr/include -type f -name
 echo "#define KERNEL_HEADERS_CHECKSUM \"$HEADERS_CHKSUM\"" >> $RPM_BUILD_ROOT/usr/include/linux/version.h
 %endif
 
+%if %{with_kmap} && %{with_base}
+# Install kmap data files produced during %build.
+_kmap_basedir=%{_builddir}/kmap-data
+_kmap_destbase=$RPM_BUILD_ROOT%{_datadir}/%{name}-kmap-internal
+mkdir -p $_kmap_destbase
+install -m 644 $_kmap_basedir/kernel-map.json $_kmap_destbase/kernel-map-%{KVERREL}.json
+%endif
+
 ###
 ### clean
 ###
@@ -2603,6 +2671,12 @@ fi
 %{_libexecdir}/kselftests
 %endif
 
+%if %{with_kmap} && %{with_base}
+%files -n %{name}-kmap-internal
+%defattr(-,root,root)
+%{_datadir}/%{name}-kmap-internal/kernel-map-%{KVERREL}.json
+%endif
+
 # empty meta-package
 %ifnarch %nobuildarches noarch
 %files
@@ -2709,13 +2783,17 @@ fi
 #
 #
 %changelog
-* Thu Aug 06 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.153.1
+* Mon Aug 10 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.154.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Mon Aug 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.154.1.el8_10]
+- iio: event: Fix event FIFO reset race (CKI Backport Bot) [RHEL-223364] {CVE-2026-64496}
+- redhat: add kmap.py tool and kernel-kmap-internal package (Rado Vrbovsky)
 
 * Wed Aug 05 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.153.1.el8_10]
 - scsi: storvsc: Handle PERSISTENT_RESERVE_IN truncation for Hyper-V vFC (Vitaly Kuznetsov) [RHEL-188270]
