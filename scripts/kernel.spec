@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 211.44.1
+%define pkgrelease 211.46.1
 %define kversion 6
-%define tarfile_release 6.12.0-211.44.1.el10_2
+%define tarfile_release 6.12.0-211.46.1.el10_2
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 211.44.1%{?buildid}%{?dist}
+%define specrelease 211.46.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-211.44.1.el10_2
+%define kabiversion 6.12.0-211.46.1.el10_2
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4477,9 +4477,26 @@ fi\
 #
 #
 %changelog
-* Fri Aug 07 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.44.1
+* Tue Aug 11 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.46.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Mon Aug 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.46.1.el10_2]
+- mm/slab: do not limit zeroing to orig_size when only red zoning is enabled (Rafael Aquini) [RHEL-223405] {CVE-2026-64368}
+
+* Fri Aug 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.45.1.el10_2]
+- s390/pkey: Check length in PKEY_VERIFYPROTK ioctl (Ramesh Chhetri) [RHEL-222503]
+- s390/pkey: Check length in pkey_pckmo handler implementation (Ramesh Chhetri) [RHEL-222505]
+- net: openvswitch: reject oversized nested action attrs (CKI Backport Bot) [RHEL-222499] {CVE-2026-64531}
+- futex: Prevent lockup in requeue-PI during signal/ timeout wakeup (Waiman Long) [RHEL-193528] {CVE-2026-52977}
+- futex: Require sys_futex_requeue() to have identical flags (Waiman Long) [RHEL-193528] {CVE-2026-31554}
+- futex: Clear stale exiting pointer in futex_lock_pi() retry path (Waiman Long) [RHEL-193528] {CVE-2026-31555}
+- futex: Fix UaF between futex_key_to_node_opt() and vma_replace_policy() (Waiman Long) [RHEL-193528] {CVE-2026-23415}
+- net/mlx5: Fix slab-out-of-bounds in mlx5_query_nic_vport_mac_list (CKI Backport Bot) [RHEL-213035]
+- drm/amd/display: Do not skip unrelated mode changes in DSC validation (CKI Backport Bot) [RHEL-193676] {CVE-2026-31488}
+- shmem: fix recovery on rename failures (Rafael Aquini) [RHEL-189571] {CVE-2025-71072}
+- ipc: limit next_id allocation to the valid ID range (Rafael Aquini) [RHEL-188217] {CVE-2026-52923}
+- fsnotify: Fix ordering of iput() and watched_objects decrement (Jay Shin) [RHEL-175860] {CVE-2024-53143}
 
 * Tue Aug 04 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.44.1.el10_2]
 - ice: remove redundant checks from PTP init (Jakub Ramaseuski) [RHEL-193134]
