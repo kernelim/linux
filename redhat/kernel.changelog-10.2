@@ -1,3 +1,93 @@
+* Wed Aug 12 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.47.1.el10_2]
+- scsi: target: iscsi: Bound iscsi_encode_text_output() appends to rsp_buf (Maurizio Lombardi) [RHEL-213198] {CVE-2026-63887}
+- perf/aux: Fix page UAF in map_range() (CKI Backport Bot) [RHEL-218475] {CVE-2026-64300}
+- net/sched: act_api: use RCU with deferred freeing for action lifecycle (CKI Backport Bot) [RHEL-218188] {CVE-2026-53264}
+- KVM: SVM: make svm_flush_tlb_gva do a full asid flush if NPT enabled (Paolo Bonzini) [RHEL-214436]
+- KVM: x86: hyper-v: Validate all GVAs during PV TLB flush (Paolo Bonzini) [RHEL-214436]
+- KVM: x86/mmu: Ensure hugepage is in by slot before checking max mapping level (Aidan Wallace) [RHEL-213472] {CVE-2026-63807}
+- KVM: nVMX: Hide shadow VMCS right after VMCLEAR (Aidan Wallace) [RHEL-213472]
+- KVM: x86: Check for invalid/obsolete root *after* making MMU pages available (Aidan Wallace) [RHEL-213472]
+- KVM: nVMX: Put vmcs12 pages if nested VM-Enter fails due to invalid guest state (Aidan Wallace) [RHEL-213472]
+- accel/ivpu: Fix signed integer truncation in IPC receive (CKI Backport Bot) [RHEL-190054] {CVE-2026-53202}
+- netfilter: nf_conntrack_expect: store master_tuple in expectation (Florian Westphal) [RHEL-185311]
+- selftests: netfilter: nft_concat_range.sh: add check for flush+reload bug (Florian Westphal) [RHEL-185311]
+- selftests: netfilter: nft_concat_range.sh: add check for overlap detection bug (Florian Westphal) [RHEL-185311]
+- selftests: netfilter: nft_concat_range.sh: add check for double-create bug (Florian Westphal) [RHEL-185311]
+- netfilter: ctnetlink: use nf_ct_exp_net() in expectation dump (Florian Westphal) [RHEL-185311]
+- netfilter: nf_dup_netdev: add nf_dev_xmit_recursion*() helpers and use them (Florian Westphal) [RHEL-185311]
+- netfilter: nft_fib: fix stale stack leak via the OIFNAME register (Florian Westphal) [RHEL-185311]
+- netfilter: nft_exthdr: fix register tracking for F_PRESENT flag (Florian Westphal) [RHEL-185311]
+- netfilter: nf_log: validate MAC header was set before dumping it (Florian Westphal) [RHEL-185311]
+- netfilter: nf_conntrack: destroy stale expectfn expectations on unregister (Florian Westphal) [RHEL-185311]
+- netfilter: revalidate bridge ports (Florian Westphal) [RHEL-185311]
+- netfilter: nft_ct: bail out on template ct in get eval (Florian Westphal) [RHEL-185311]
+- netfilter: nft_tunnel: fix use-after-free on object destroy (Florian Westphal) [RHEL-185311]
+- netfilter: conntrack_irc: fix possible out-of-bounds read (Florian Westphal) [RHEL-185311]
+- netfilter: synproxy: add mutex to guard hook reference counting (Florian Westphal) [RHEL-185311]
+- netfilter: disable payload mangling in userns (Florian Westphal) [RHEL-185311]
+- netfilter: nf_conntrack_gre: fix gre keymap list corruption (Florian Westphal) [RHEL-185311]
+- netfilter: synproxy: refresh tcphdr after skb_ensure_writable (Florian Westphal) [RHEL-185311]
+- netfilter: conntrack: tcp: do not force CLOSE on invalid-seq RST without direction check (Florian Westphal) [RHEL-185311]
+- netfilter: nf_queue: hold bridge skb->dev while queued (Florian Westphal) [RHEL-185311]
+- netfilter: br_netfilter: Reallocate headroom if necessary in neigh_hh_bridge() (Florian Westphal) [RHEL-185311]
+- netfilter: ip6t_hbh: reject oversized option lists (Florian Westphal) [RHEL-185311]
+- netfilter: nf_conntrack_helper: fix possible null deref during error log (Florian Westphal) [RHEL-185311]
+- netfilter: nft_ct: fix missing expect put in obj eval (Florian Westphal) [RHEL-185311]
+- netfilter: nf_conntrack_sip: get helper before allocating expectation (Florian Westphal) [RHEL-185311]
+- netfilter: ctnetlink: check tuple and mask in expectations created via nfqueue (Florian Westphal) [RHEL-185311]
+- netfilter: nf_conntrack_expect: restore helper propagation via expectation (Florian Westphal) [RHEL-185311]
+- netfilter: nf_tables: fix netdev hook allocation memleak with dormant tables (Florian Westphal) [RHEL-185311]
+- netfilter: xt_CT: fix usersize for v1 and v2 revision (Florian Westphal) [RHEL-185311]
+- netfilter: nft_compat: run xt_check_hooks_{match,target}() from .validate (Florian Westphal) [RHEL-185311]
+- netfilter: x_tables: add .check_hooks to matches and targets (Florian Westphal) [RHEL-185311]
+- netfilter: xtables: restrict several matches to inet family (Florian Westphal) [RHEL-185311]
+- netfilter: nft_fwd_netdev: use recursion counter in neigh egress path (Florian Westphal) [RHEL-185311]
+- netfilter: nft_fwd_netdev: add device and headroom validate with neigh forwarding (Florian Westphal) [RHEL-185311]
+- netfilter: replace skb_try_make_writable() by skb_ensure_writable() (Florian Westphal) [RHEL-185311]
+- netfilter: nf_conntrack_sip: don't use simple_strtoul (Florian Westphal) [RHEL-185311]
+- netfilter: xt_policy: fix strict mode inbound policy matching (Florian Westphal) [RHEL-185311]
+- netfilter: nf_tables: add hook transactions for device deletions (Florian Westphal) [RHEL-185311]
+- netfilter: nf_tables: join hook list via splice_list_rcu() in commit phase (Florian Westphal) [RHEL-185311]
+- rculist: add list_splice_rcu() for private lists (Florian Westphal) [RHEL-185311]
+- netfilter: nf_tables: use list_del_rcu for netlink hooks (Florian Westphal) [RHEL-185311] {CVE-2026-46324}
+- netfilter: nfnetlink_osf: fix potential NULL dereference in ttl check (Florian Westphal) [RHEL-185311]
+- netfilter: nfnetlink_osf: fix out-of-bounds read on option matching (Florian Westphal) [RHEL-185311]
+- netfilter: nat: use kfree_rcu to release ops (Florian Westphal) [RHEL-185311]
+- netfilter: conntrack: remove sprintf usage (Florian Westphal) [RHEL-185311]
+- netfilter: nfnetlink_osf: fix divide-by-zero in OSF_WSS_MODULO (Florian Westphal) [RHEL-185311] {CVE-2026-45841}
+- nfnetlink_osf: validate individual option lengths in fingerprints (Florian Westphal) [RHEL-185311] {CVE-2026-23397}
+- netfilter: nft_osf: restrict it to ipv4 (Florian Westphal) [RHEL-185311]
+- netfilter: nft_ct: fix use-after-free in timeout object destroy (Florian Westphal) [RHEL-185311] {CVE-2026-31665}
+- netfilter: xt_multiport: validate range encoding in checkentry (Florian Westphal) [RHEL-185311] {CVE-2026-31681}
+- netfilter: nfnetlink_log: initialize nfgenmsg in NLMSG_DONE terminator (Florian Westphal) [RHEL-185311] {CVE-2026-43085}
+- netfilter: nf_tables: reject immediate NF_QUEUE verdict (Florian Westphal) [RHEL-185311] {CVE-2026-43024}
+- netfilter: x_tables: restrict xt_check_match/xt_check_target extensions for NFPROTO_ARP (Florian Westphal) [RHEL-185311] {CVE-2026-31424}
+- netfilter: ctnetlink: ignore explicit helper on new expectations (Florian Westphal) [RHEL-185311] {CVE-2026-43025}
+- netfilter: ctnetlink: zero expect NAT fields when CTA_EXPECT_NAT absent (Florian Westphal) [RHEL-185311] {CVE-2026-43026}
+- netfilter: ipset: use nla_strcmp for IPSET_ATTR_NAME attr (Florian Westphal) [RHEL-185311]
+- netfilter: x_tables: ensure names are nul-terminated (Florian Westphal) [RHEL-185311] {CVE-2026-43028}
+- netfilter: nfnetlink_log: account for netlink header size (Florian Westphal) [RHEL-185311] {CVE-2026-31416}
+- netfilter: ctnetlink: use netlink policy range checks (Florian Westphal) [RHEL-185311] {CVE-2026-31495}
+- netfilter: ip6t_rt: reject oversized addrnr in rt_mt6_check() (Florian Westphal) [RHEL-185311] {CVE-2026-31674}
+- netfilter: nf_conntrack_expect: store netns and zone in expectation (Florian Westphal) [RHEL-185311]
+- netfilter: nf_conntrack_expect: use expect->helper (Florian Westphal) [RHEL-185311]
+- netfilter: nf_conntrack_expect: honor expectation helper field (Florian Westphal) [RHEL-185311]
+- netfilter: nfnetlink_log: fix uninitialized padding leak in NFULA_PAYLOAD (Florian Westphal) [RHEL-185311] {CVE-2026-31428}
+- netfilter: nft_set_pipapo_avx2: don't return non-matching entry on expiry (Florian Westphal) [RHEL-185311] {CVE-2026-43114}
+- nf_tables: nft_dynset: fix possible stateful expression memleak in error path (Florian Westphal) [RHEL-185311] {CVE-2026-23399}
+- netfilter: nf_conntrack_h323: fix OOB read in decode_int() CONS case (Florian Westphal) [RHEL-185311] {CVE-2026-23456}
+- netfilter: nf_conntrack_sip: fix Content-Length u32 truncation in sip_help_tcp() (Florian Westphal) [RHEL-185311] {CVE-2026-23457}
+- netfilter: conntrack: add missing netlink policy validations (Florian Westphal) [RHEL-185311] {CVE-2026-31407}
+- netfilter: ctnetlink: fix use-after-free in ctnetlink_dump_exp_ct() (Florian Westphal) [RHEL-185311] {CVE-2026-23458}
+- netfilter: nfnetlink_queue: fix entry leak in bridge verdict error path (Florian Westphal) [RHEL-185311] {CVE-2026-43451}
+- netfilter: nft_set_pipapo: fix stack out-of-bounds read in pipapo_drop() (Florian Westphal) [RHEL-185311] {CVE-2026-43453}
+- netfilter: nf_tables: unconditionally bump set->nelems before insertion (Florian Westphal) [RHEL-185311] {CVE-2026-23272}
+- netfilter: nf_conntrack_h323: fix OOB read in decode_choice() (Florian Westphal) [RHEL-185311] {CVE-2026-43233}
+- netfilter: nft_set_hash: fix get operation on big endian (Florian Westphal) [RHEL-185311]
+- netfilter: nf_tables: always walk all pending catchall elements (Florian Westphal) [RHEL-185311] {CVE-2026-23278}
+- netfilter: nft_set_pipapo: split gc into unlink and reclaim phase (Florian Westphal) [RHEL-185311] {CVE-2026-23351}
+Resolves: RHEL-185311, RHEL-190054, RHEL-213198, RHEL-213472, RHEL-214436, RHEL-218188, RHEL-218475
+
 * Mon Aug 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.46.1.el10_2]
 - mm/slab: do not limit zeroing to orig_size when only red zoning is enabled (Rafael Aquini) [RHEL-223405] {CVE-2026-64368}
 Resolves: RHEL-223405
