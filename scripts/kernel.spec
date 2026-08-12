@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.154.1.el8_10
+%define pkgrelease 553.155.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.154.1%{?dist}
+%define specrelease 553.155.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,17 @@ fi
 #
 #
 %changelog
-* Mon Aug 10 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.154.1
+* Wed Aug 12 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.155.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Wed Aug 12 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.155.1.el8_10]
+- udf: fix partition descriptor append bookkeeping (Ravi Singh) [RHEL-179571] {CVE-2026-45991}
+- ice: fix double-free of tx_buf skb (Michal Schmidt) [RHEL-192193] {CVE-2026-53009}
 
 * Mon Aug 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.154.1.el8_10]
 - iio: event: Fix event FIFO reset race (CKI Backport Bot) [RHEL-223364] {CVE-2026-64496}
