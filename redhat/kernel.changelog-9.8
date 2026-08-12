@@ -1,3 +1,11 @@
+* Wed Aug 12 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.39.1.el9_8]
+- x86/mm: Add missing saved dirty bit to page protection change mask (Luiz Capitulino) [RHEL-220787]
+- net/sched: act_api: use RCU with deferred freeing for action lifecycle (CKI Backport Bot) [RHEL-218181] {CVE-2026-53264}
+- KVM: SVM: make svm_flush_tlb_gva do a full asid flush if NPT enabled (Paolo Bonzini) [RHEL-214434]
+- KVM: x86: hyper-v: Validate all GVAs during PV TLB flush (Paolo Bonzini) [RHEL-214434]
+- accel/ivpu: Fix signed integer truncation in IPC receive (CKI Backport Bot) [RHEL-192081] {CVE-2026-53202}
+Resolves: RHEL-192081, RHEL-214434, RHEL-218181, RHEL-220787
+
 * Mon Aug 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.38.1.el9_8]
 - cifs: fix time_last_write stamp placement in setattr/truncate paths (Paulo Alcantara) [RHEL-192999]
 - cifs: consolidate time_last_write stamp into _cifsFileInfo_put() (Paulo Alcantara) [RHEL-192999]

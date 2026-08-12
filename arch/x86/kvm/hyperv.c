@@ -1968,6 +1968,7 @@ int kvm_hv_vcpu_flush_tlb(struct kvm_vcpu *vcpu)
 	u64 entries[KVM_HV_TLB_FLUSH_FIFO_SIZE];
 	int i, j, count;
 	gva_t gva;
+	bool full = false;
 
 	if (!tdp_enabled || !hv_vcpu)
 		return -EINVAL;
@@ -1976,20 +1977,21 @@ int kvm_hv_vcpu_flush_tlb(struct kvm_vcpu *vcpu)
 
 	count = kfifo_out(&tlb_flush_fifo->entries, entries, KVM_HV_TLB_FLUSH_FIFO_SIZE);
 
-	for (i = 0; i < count; i++) {
+	for (i = 0; i < count && !full; i++) {
 		if (entries[i] == KVM_HV_TLB_FLUSHALL_ENTRY)
 			goto out_flush_all;
-
-		if (is_noncanonical_invlpg_address(entries[i], vcpu))
-			continue;
 
 		/*
 		 * Lower 12 bits of 'address' encode the number of additional
 		 * pages to flush.
 		 */
 		gva = entries[i] & PAGE_MASK;
-		for (j = 0; j < (entries[i] & ~PAGE_MASK) + 1; j++)
-			kvm_x86_call(flush_tlb_gva)(vcpu, gva + j * PAGE_SIZE);
+		for (j = 0; j < (entries[i] & ~PAGE_MASK) + 1 && !full; j++) {
+			if (is_noncanonical_invlpg_address(gva + j * PAGE_SIZE, vcpu))
+				continue;
+
+			kvm_x86_call(flush_tlb_gva)(vcpu, gva + j * PAGE_SIZE, &full);
+		}
 
 		++vcpu->stat.tlb_flush;
 	}
