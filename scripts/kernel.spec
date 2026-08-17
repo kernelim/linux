@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.155.1.el8_10
+%define pkgrelease 553.156.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.155.1%{?dist}
+%define specrelease 553.156.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,36 @@ fi
 #
 #
 %changelog
-* Wed Aug 12 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.155.1
+* Mon Aug 17 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.156.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Mon Aug 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.156.1.el8_10]
+- drm/amdkfd: Fix out-of-bounds write in kfd_event_page_set() (CKI Backport Bot) [RHEL-221327] {CVE-2026-43206}
+- drm/amd/display: Validate payload length and link_index in dc_process_dmub_aux_transfer_async (CKI Backport Bot) [RHEL-222576] {CVE-2026-64219}
+- drm/amdgpu: fix amdgpu_hmm_range_get_pages (CKI Backport Bot) [RHEL-222620] {CVE-2026-63879}
+- drm/i915: Fix potential UAF in TTM object purge (CKI Backport Bot) [RHEL-222738] {CVE-2026-63884}
+- drm/amd/display: Use krealloc_array() in dal_vector_reserve() (CKI Backport Bot) [RHEL-222662] {CVE-2026-53329}
+- drm/amd/display: Clamp VBIOS HDMI retimer register count to array size (CKI Backport Bot) [RHEL-222680] {CVE-2026-53136}
+- mm/slub: avoid accessing metadata when pointer is invalid in object_err() (Luiz Capitulino) [RHEL-226551] {CVE-2025-39902}
+- drm/amdgpu: zero-initialize GART table on allocation (CKI Backport Bot) [RHEL-222656] {CVE-2026-53374}
+- vhost: reset the vring metadata cache on vring reconfiguration (CKI Backport Bot) [RHEL-224556]
+- can: bcm: extend bcm_tx_lock usage for data and timer updates (Guillaume Nault) [RHEL-216711] {CVE-2026-17523}
+- can: bcm: add locking when updating filter and timer values (Guillaume Nault) [RHEL-216711] {CVE-2026-17523}
+- can: bcm: fix locking for bcm_op runtime updates (Guillaume Nault) [RHEL-216711] {CVE-2026-17523}
+- can: bcm: add locking for bcm_op runtime updates (Guillaume Nault) [RHEL-216711] {CVE-2026-17523}
+- can: bcm: bcm_tx_setup(): fix KMSAN uninit-value in vfs_write (Guillaume Nault) [RHEL-216711] {CVE-2026-17523}
+- can: bcm: check the result of can_send() in bcm_can_tx() (Guillaume Nault) [RHEL-216711] {CVE-2026-17523}
+- can: bcm: Use hrtimer_forward_now() (Guillaume Nault) [RHEL-216711] {CVE-2026-17523}
+- can: bcm: switch timer to HRTIMER_MODE_SOFT and remove hrtimer_tasklet (Guillaume Nault) [RHEL-216711] {CVE-2026-17523}
+- sched/deadline: Update GRUB description in the documentation (Herton R. Krzesinski) [RHEL-189997]
+- sched/deadline: fix kABI breakage after the introduction of max_bw on dl_rq (Herton R. Krzesinski) [RHEL-189997]
+- sched/deadline: Fix bandwidth reclaim equation in GRUB (Herton R. Krzesinski) [RHEL-189997]
+- crypto: ccp - copy IV using skcipher ivsize (CKI Backport Bot) [RHEL-188453] {CVE-2026-53016}
 
 * Wed Aug 12 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.155.1.el8_10]
 - udf: fix partition descriptor append bookkeeping (Ravi Singh) [RHEL-179571] {CVE-2026-45991}
