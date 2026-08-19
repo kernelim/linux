@@ -987,7 +987,7 @@ smb2_is_path_accessible(const unsigned int xid, struct cifs_tcon *tcon,
 				rc = -EREMOTE;
 		}
 		if (rc == -EREMOTE && IS_ENABLED(CONFIG_CIFS_DFS_UPCALL) &&
-		    (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_NO_DFS))
+		    (cifs_sb_flags(cifs_sb) & CIFS_MOUNT_NO_DFS))
 			rc = -EOPNOTSUPP;
 		goto out;
 	}
@@ -1460,6 +1460,8 @@ smb2_set_fid(struct cifsFileInfo *cfile, struct cifs_fid *fid, __u32 oplock)
 {
 	struct cifsInodeInfo *cinode = CIFS_I(d_inode(cfile->dentry));
 	struct TCP_Server_Info *server = tlink_tcon(cfile->tlink)->ses->server;
+
+	lockdep_assert_held(&cinode->open_file_lock);
 
 	cfile->fid.persistent_fid = fid->persistent_fid;
 	cfile->fid.volatile_fid = fid->volatile_fid;
@@ -2686,16 +2688,19 @@ smb2_is_network_name_deleted(char *buf, struct TCP_Server_Info *server)
 	return false;
 }
 
-static int
-smb2_oplock_response(struct cifs_tcon *tcon, __u64 persistent_fid,
-		__u64 volatile_fid, __u16 net_fid, struct cifsInodeInfo *cinode)
+static int smb2_oplock_response(struct cifs_tcon *tcon, __u64 persistent_fid,
+				__u64 volatile_fid, __u16 net_fid,
+				struct cifsInodeInfo *cinode, unsigned int oplock)
 {
+	unsigned int sbflags = cifs_sb_flags(CIFS_SB(cinode));
+	__u8 op;
+
 	if (tcon->ses->server->capabilities & SMB2_GLOBAL_CAP_LEASING)
 		return SMB2_lease_break(0, tcon, cinode->lease_key,
-					smb2_get_lease_state(cinode));
+					smb2_get_lease_state(cinode, oplock));
 
-	return SMB2_oplock_break(0, tcon, persistent_fid, volatile_fid,
-				 CIFS_CACHE_READ(cinode) ? 1 : 0);
+	op = !!((oplock & CIFS_CACHE_READ_FLG) || (sbflags & CIFS_MOUNT_RO_CACHE));
+	return SMB2_oplock_break(0, tcon, persistent_fid, volatile_fid, op);
 }
 
 void
@@ -3559,6 +3564,7 @@ static int smb3_simple_fallocate_range(unsigned int xid,
 	struct file_allocated_range_buffer in_data, *out_data = NULL, *tmp_data;
 	u32 out_data_len;
 	char *buf = NULL;
+	u64 range_start, range_len, range_end;
 	loff_t l;
 	int rc;
 
@@ -3595,13 +3601,21 @@ static int smb3_simple_fallocate_range(unsigned int xid,
 			goto out;
 		}
 
-		if (off < le64_to_cpu(tmp_data->file_offset)) {
+		range_start = le64_to_cpu(tmp_data->file_offset);
+		range_len = le64_to_cpu(tmp_data->length);
+		if (check_add_overflow(range_start, range_len, &range_end) ||
+		    range_end > S64_MAX) {
+			rc = -EINVAL;
+			goto out;
+		}
+
+		if (off < range_start) {
 			/*
 			 * We are at a hole. Write until the end of the region
 			 * or until the next allocated data,
 			 * whichever comes next.
 			 */
-			l = le64_to_cpu(tmp_data->file_offset) - off;
+			l = range_start - off;
 			if (len < l)
 				l = len;
 			rc = smb3_simple_fallocate_write_range(xid, tcon,
@@ -3618,11 +3632,13 @@ static int smb3_simple_fallocate_range(unsigned int xid,
 		 * until the end of the data or the end of the region
 		 * we are supposed to fallocate, whichever comes first.
 		 */
-		l = le64_to_cpu(tmp_data->length);
-		if (len < l)
-			l = len;
-		off += l;
-		len -= l;
+		if (off < range_end) {
+			l = range_end - off;
+			if (len < l)
+				l = len;
+			off += l;
+			len -= l;
+		}
 
 		tmp_data = &tmp_data[1];
 		out_data_len -= sizeof(struct file_allocated_range_buffer);
@@ -4053,6 +4069,7 @@ smb2_downgrade_oplock(struct TCP_Server_Info *server,
 		      struct cifsInodeInfo *cinode, __u32 oplock,
 		      __u16 epoch, bool *purge_cache)
 {
+	lockdep_assert_held(&cinode->open_file_lock);
 	server->ops->set_oplock_level(cinode, oplock, 0, NULL);
 }
 
@@ -4093,19 +4110,19 @@ smb2_set_oplock_level(struct cifsInodeInfo *cinode, __u32 oplock,
 	if (oplock == SMB2_OPLOCK_LEVEL_NOCHANGE)
 		return;
 	if (oplock == SMB2_OPLOCK_LEVEL_BATCH) {
-		cinode->oplock = CIFS_CACHE_RHW_FLG;
+		WRITE_ONCE(cinode->oplock, CIFS_CACHE_RHW_FLG);
 		cifs_dbg(FYI, "Batch Oplock granted on inode %p\n",
 			 &cinode->netfs.inode);
 	} else if (oplock == SMB2_OPLOCK_LEVEL_EXCLUSIVE) {
-		cinode->oplock = CIFS_CACHE_RW_FLG;
+		WRITE_ONCE(cinode->oplock, CIFS_CACHE_RW_FLG);
 		cifs_dbg(FYI, "Exclusive Oplock granted on inode %p\n",
 			 &cinode->netfs.inode);
 	} else if (oplock == SMB2_OPLOCK_LEVEL_II) {
-		cinode->oplock = CIFS_CACHE_READ_FLG;
+		WRITE_ONCE(cinode->oplock, CIFS_CACHE_READ_FLG);
 		cifs_dbg(FYI, "Level II Oplock granted on inode %p\n",
 			 &cinode->netfs.inode);
 	} else
-		cinode->oplock = 0;
+		WRITE_ONCE(cinode->oplock, 0);
 }
 
 static void
@@ -4140,7 +4157,7 @@ smb21_set_oplock_level(struct cifsInodeInfo *cinode, __u32 oplock,
 	if (!new_oplock)
 		strscpy(message, "None");
 
-	cinode->oplock = new_oplock;
+	WRITE_ONCE(cinode->oplock, new_oplock);
 	cifs_dbg(FYI, "%s Lease granted on inode %p\n", message,
 		 &cinode->netfs.inode);
 }
@@ -4149,30 +4166,32 @@ static void
 smb3_set_oplock_level(struct cifsInodeInfo *cinode, __u32 oplock,
 		      __u16 epoch, bool *purge_cache)
 {
-	unsigned int old_oplock = cinode->oplock;
+	unsigned int old_oplock = READ_ONCE(cinode->oplock);
+	unsigned int new_oplock;
 
 	smb21_set_oplock_level(cinode, oplock, epoch, purge_cache);
+	new_oplock = READ_ONCE(cinode->oplock);
 
 	if (purge_cache) {
 		*purge_cache = false;
 		if (old_oplock == CIFS_CACHE_READ_FLG) {
-			if (cinode->oplock == CIFS_CACHE_READ_FLG &&
+			if (new_oplock == CIFS_CACHE_READ_FLG &&
 			    (epoch - cinode->epoch > 0))
 				*purge_cache = true;
-			else if (cinode->oplock == CIFS_CACHE_RH_FLG &&
+			else if (new_oplock == CIFS_CACHE_RH_FLG &&
 				 (epoch - cinode->epoch > 1))
 				*purge_cache = true;
-			else if (cinode->oplock == CIFS_CACHE_RHW_FLG &&
+			else if (new_oplock == CIFS_CACHE_RHW_FLG &&
 				 (epoch - cinode->epoch > 1))
 				*purge_cache = true;
-			else if (cinode->oplock == 0 &&
+			else if (new_oplock == 0 &&
 				 (epoch - cinode->epoch > 0))
 				*purge_cache = true;
 		} else if (old_oplock == CIFS_CACHE_RH_FLG) {
-			if (cinode->oplock == CIFS_CACHE_RH_FLG &&
+			if (new_oplock == CIFS_CACHE_RH_FLG &&
 			    (epoch - cinode->epoch > 0))
 				*purge_cache = true;
-			else if (cinode->oplock == CIFS_CACHE_RHW_FLG &&
+			else if (new_oplock == CIFS_CACHE_RHW_FLG &&
 				 (epoch - cinode->epoch > 1))
 				*purge_cache = true;
 		}
@@ -5325,7 +5344,7 @@ static int smb2_make_node(unsigned int xid, struct inode *inode,
 			  struct dentry *dentry, struct cifs_tcon *tcon,
 			  const char *full_path, umode_t mode, dev_t dev)
 {
-	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
+	unsigned int sbflags = cifs_sb_flags(CIFS_SB(inode));
 	int rc = -EOPNOTSUPP;
 
 	/*
@@ -5334,7 +5353,7 @@ static int smb2_make_node(unsigned int xid, struct inode *inode,
 	 * supports block and char device, socket & fifo,
 	 * and was used by default in earlier versions of Windows
 	 */
-	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_UNX_EMUL) {
+	if (sbflags & CIFS_MOUNT_UNX_EMUL) {
 		rc = cifs_sfu_make_node(xid, inode, dentry, tcon,
 					full_path, mode, dev);
 	} else if (CIFS_REPARSE_SUPPORT(tcon)) {

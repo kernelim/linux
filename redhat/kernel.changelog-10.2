@@ -1,3 +1,52 @@
+* Wed Aug 19 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.49.1.el10_2]
+- udf: fix partition descriptor append bookkeeping (CKI Backport Bot) [RHEL-179570] {CVE-2026-45991}
+- cifs: fix time_last_write stamp placement in setattr/truncate paths (Paulo Alcantara) [RHEL-235459]
+- cifs: consolidate time_last_write stamp into _cifsFileInfo_put() (Paulo Alcantara) [RHEL-235459]
+- cifs: fix cifsFileInfo leak on kmalloc failure in deferred close drain paths (Paulo Alcantara) [RHEL-235459]
+- cifs: prevent readdir from changing file size due to stale directory metadata (Paulo Alcantara) [RHEL-235459]
+- smb: client: fix dir separator in SMB1 UNIX mounts (Paulo Alcantara) [RHEL-235459]
+- smb: client: fix sbflags initialization (Paulo Alcantara) [RHEL-235459]
+- smb: client: use atomic_t for mnt_cifs_flags (Paulo Alcantara) [RHEL-235459]
+- smb: client: fix data corruption due to racy lease checks (Paulo Alcantara) [RHEL-235459]
+- crypto: pcrypt - Fix handling of MAY_BACKLOG requests (Ricardo Robaina) [RHEL-226717] {CVE-2026-43493}
+- smb: client: fix SMB1 TRANS2 multi-response truncation in SendReceive() (Paulo Alcantara) [RHEL-235812]
+- smb/client: handle overlapping allocated ranges in fallocate (CKI Backport Bot) [RHEL-236210] {CVE-2026-68388}
+- posix-cpu-timers: Prevent UAF caused by non-leader exec() race (Waiman Long) [RHEL-227850] {CVE-2026-64560}
+- posix-cpu-timers: Fix pid refcount leak in do_cpu_nanosleep() error path (Waiman Long) [RHEL-227850] {CVE-2026-64370}
+- exit: kill the pointless __exit_signal()->clear_tsk_thread_flag(TIF_SIGPENDING) (Waiman Long) [RHEL-227850]
+- exit: change the release_task() paths to call flush_sigqueue() lockless (Waiman Long) [RHEL-227850]
+- smb: client: fix double-free in SMB2_open() replay (CKI Backport Bot) [RHEL-234551] {CVE-2026-64382}
+- smb: client: mask server-provided mode to 07777 in modefromsid (CKI Backport Bot) [RHEL-234530] {CVE-2026-64379}
+- smb: client: fix query_info() replay double-free (CKI Backport Bot) [RHEL-234129] {CVE-2026-64386}
+- smb/client: fix out-of-bounds read in symlink_data() (CKI Backport Bot) [RHEL-229066] {CVE-2026-46185}
+- blk-mq: reinsert cached request to the list (CKI Backport Bot) [RHEL-213153] {CVE-2026-64017}
+- blk-mq: pop cached request if it is usable (CKI Backport Bot) [RHEL-213153] {CVE-2026-64017}
+Resolves: RHEL-179570, RHEL-213153, RHEL-226717, RHEL-227850, RHEL-229066, RHEL-234129, RHEL-234530, RHEL-234551, RHEL-235459, RHEL-235812, RHEL-236210
+
+* Mon Aug 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.48.1.el10_2]
+- scsi: target: iscsi: Fix CRC overread and double-free in iscsit_handle_text_cmd() (Maurizio Lombardi) [RHEL-213217] {CVE-2026-63888}
+- drm/i915: Fix potential UAF in TTM object purge (CKI Backport Bot) [RHEL-222740] {CVE-2026-63884}
+- drm/amd/display: Validate payload length and link_index in dc_process_dmub_aux_transfer_async (CKI Backport Bot) [RHEL-222567] {CVE-2026-64219}
+- drm/amd/display: Use krealloc_array() in dal_vector_reserve() (CKI Backport Bot) [RHEL-222667] {CVE-2026-53329}
+- drm/amdgpu: fix amdgpu_hmm_range_get_pages (Mika Penttilä) [RHEL-222625] {CVE-2026-63879}
+- drm/amdkfd: Fix out-of-bounds write in kfd_event_page_set() (CKI Backport Bot) [RHEL-221336] {CVE-2026-43206}
+- drm/i915/gem: Fix phys BO pread/pwrite with offset (CKI Backport Bot) [RHEL-222753] {CVE-2026-53356}
+- drm/amdkfd: Fix watch_id bounds checking in debug address watch v2 (CKI Backport Bot) [RHEL-222721] {CVE-2026-45878}
+- drm/amdkfd: Fix buffer overflow in SDMA queue checkpoint/restore on GFX11 (CKI Backport Bot) [RHEL-222701] {CVE-2026-53143}
+- drm/amd/display: Clamp VBIOS HDMI retimer register count to array size (CKI Backport Bot) [RHEL-222685] {CVE-2026-53136}
+- drm/amdgpu: zero-initialize GART table on allocation (CKI Backport Bot) [RHEL-222646] {CVE-2026-53374}
+- drm/amdgpu: Refactor amdgpu_gem_va_ioctl for Handling Last Fence Update and Timeline Management v7 (CKI Backport Bot) [RHEL-221380] {CVE-2026-43237}
+- drm/amdgpu: Refactor amdgpu_gem_va_ioctl for Handling Last Fence Update and Timeline Management v4 (CKI Backport Bot) [RHEL-221380] {CVE-2026-43237}
+- sched/psi: Create the psimon kthread outside of cgroup_mutex (CKI Backport Bot) [RHEL-232560] {CVE-2026-52991}
+- sched/psi: fix race between file release and pressure write (CKI Backport Bot) [RHEL-232560] {CVE-2026-52991}
+- scsi: target: Fix hexadecimal CHAP_I handling (CKI Backport Bot) [RHEL-231667] {CVE-2026-63886}
+- scsi: target: iscsi: Validate CHAP_R length before base64 decode (CKI Backport Bot) [RHEL-231667] {CVE-2026-63886}
+- memfd: deny writeable mappings when implying SEAL_WRITE (Luiz Capitulino) [RHEL-228531] {CVE-2026-63952}
+- mm/memfd: fix spelling in memfd_add_seals() (Luiz Capitulino) [RHEL-228531]
+- vhost: reset the vring metadata cache on vring reconfiguration (CKI Backport Bot) [RHEL-224545]
+- xfs: fix exchange-range reflink flag clearing issue with INO1_WRITTEN (Lukas Herbolt) [RHEL-223954]
+Resolves: RHEL-213217, RHEL-221336, RHEL-221380, RHEL-222567, RHEL-222625, RHEL-222646, RHEL-222667, RHEL-222685, RHEL-222701, RHEL-222721, RHEL-222740, RHEL-222753, RHEL-223954, RHEL-224545, RHEL-228531, RHEL-231667, RHEL-232560
+
 * Wed Aug 12 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.47.1.el10_2]
 - scsi: target: iscsi: Bound iscsi_encode_text_output() appends to rsp_buf (Maurizio Lombardi) [RHEL-213198] {CVE-2026-63887}
 - perf/aux: Fix page UAF in map_range() (CKI Backport Bot) [RHEL-218475] {CVE-2026-64300}

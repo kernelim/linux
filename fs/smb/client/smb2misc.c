@@ -240,7 +240,8 @@ smb2_check_message(char *buf, unsigned int pdu_len, unsigned int len,
 	if (len != calc_len) {
 		/* create failed on symlink */
 		if (command == SMB2_CREATE_HE &&
-		    shdr->Status == STATUS_STOPPED_ON_SYMLINK)
+		    shdr->Status == STATUS_STOPPED_ON_SYMLINK &&
+		    len > calc_len)
 			return 0;
 		/* Windows 7 server returns 24 bytes more */
 		if (calc_len + 24 == len && command == SMB2_OPLOCK_BREAK_HE)
@@ -454,17 +455,8 @@ calc_size_exit:
 __le16 *
 cifs_convert_path_to_utf16(const char *from, struct cifs_sb_info *cifs_sb)
 {
-	int len;
 	const char *start_of_path;
-	__le16 *to;
-	int map_type;
-
-	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_MAP_SFM_CHR)
-		map_type = SFM_MAP_UNI_RSVD;
-	else if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_MAP_SPECIAL_CHR)
-		map_type = SFU_MAP_UNI_RSVD;
-	else
-		map_type = NO_MAP_UNI_RSVD;
+	int len;
 
 	/* Windows doesn't allow paths beginning with \ */
 	if (from[0] == '\\')
@@ -478,21 +470,20 @@ cifs_convert_path_to_utf16(const char *from, struct cifs_sb_info *cifs_sb)
 	} else
 		start_of_path = from;
 
-	to = cifs_strndup_to_utf16(start_of_path, PATH_MAX, &len,
-				   cifs_sb->local_nls, map_type);
-	return to;
+	return cifs_strndup_to_utf16(start_of_path, PATH_MAX, &len,
+				     cifs_sb->local_nls, cifs_remap(cifs_sb));
 }
 
-__le32
-smb2_get_lease_state(struct cifsInodeInfo *cinode)
+__le32 smb2_get_lease_state(struct cifsInodeInfo *cinode, unsigned int oplock)
 {
+	unsigned int sbflags = cifs_sb_flags(CIFS_SB(cinode));
 	__le32 lease = 0;
 
-	if (CIFS_CACHE_WRITE(cinode))
+	if ((oplock & CIFS_CACHE_WRITE_FLG) || (sbflags & CIFS_MOUNT_RW_CACHE))
 		lease |= SMB2_LEASE_WRITE_CACHING_LE;
-	if (CIFS_CACHE_HANDLE(cinode))
+	if (oplock & CIFS_CACHE_HANDLE_FLG)
 		lease |= SMB2_LEASE_HANDLE_CACHING_LE;
-	if (CIFS_CACHE_READ(cinode))
+	if ((oplock & CIFS_CACHE_READ_FLG) || (sbflags & CIFS_MOUNT_RO_CACHE))
 		lease |= SMB2_LEASE_READ_CACHING_LE;
 	return lease;
 }
