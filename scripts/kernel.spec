@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.156.1.el8_10
+%define pkgrelease 553.157.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.156.1%{?dist}
+%define specrelease 553.157.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,30 @@ fi
 #
 #
 %changelog
-* Mon Aug 17 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.156.1
+* Thu Aug 20 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.157.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Wed Aug 19 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.157.1.el8_10]
+- smb/client: handle overlapping allocated ranges in fallocate (CKI Backport Bot) [RHEL-236195] {CVE-2026-68388}
+- mm, page_alloc: skip ->waternark_boost for atomic order-0 allocations (Jay Shin) [RHEL-219767]
+- mm, page_alloc: reset the zone->watermark_boost early (Jay Shin) [RHEL-219767]
+- scsi: target: iscsi: Fix CRC overread and double-free in iscsit_handle_text_cmd() (Maurizio Lombardi) [RHEL-213227] {CVE-2026-63888}
+- net: ieee802154: do not leave a dangling sk pointer in ieee802154_create() (Abhishek Rawal) [RHEL-224189] {CVE-2024-56602}
+- cgroup/psi: Set of->priv to NULL upon file release (Waiman Long) [RHEL-232546]
+- sched/psi: Create the psimon kthread outside of cgroup_mutex (Waiman Long) [RHEL-232546]
+- sched/psi: fix race between file release and pressure write (Waiman Long) [RHEL-232546] {CVE-2026-52991}
+- sched/psi: Remove unused parameter nbytes of psi_trigger_create() (Waiman Long) [RHEL-232546]
+- psi: fix "no previous prototype" warnings when CONFIG_CGROUPS=n (Waiman Long) [RHEL-232546]
+- smb: client: mask server-provided mode to 07777 in modefromsid (CKI Backport Bot) [RHEL-234516] {CVE-2026-64379}
+- mm/huge_memory: update file PMD counter before folio_put() (Luiz Capitulino) [RHEL-231209] {CVE-2026-53189}
+- net/smc: reject CHID-0 ACCEPT that matches an empty ism_dev slot (CKI Backport Bot) [RHEL-230094] {CVE-2026-64048}
+- scsi: target: iscsi: Bound iscsi_encode_text_output() appends to rsp_buf (CKI Backport Bot) [RHEL-213200] {CVE-2026-63887}
+- ip6_gre: Use cached t->net in ip6erspan_changelink(). (CKI Backport Bot) [RHEL-180148] {CVE-2026-46120}
 
 * Mon Aug 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.156.1.el8_10]
 - drm/amdkfd: Fix out-of-bounds write in kfd_event_page_set() (CKI Backport Bot) [RHEL-221327] {CVE-2026-43206}
