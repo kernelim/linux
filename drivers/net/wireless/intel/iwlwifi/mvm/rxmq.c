@@ -6,6 +6,7 @@
  */
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
+#include <linux/fips.h>
 #include "iwl-trans.h"
 #include "mvm.h"
 #include "fw-api.h"
@@ -494,6 +495,14 @@ static int iwl_mvm_rx_crypto(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
 		return 0;
 	case RX_MPDU_RES_STATUS_SEC_CMAC_GMAC_ENC:
 		break;
+	case RX_MPDU_RES_STATUS_SEC_ENC_ERR:
+		if (fips_enabled) {
+			IWL_DEBUG_RX(mvm,
+				     "FIPS mode: firmware cannot decrypt, status: 0x%x\n",
+				     status);
+			break;
+		}
+		fallthrough;
 	default:
 		/*
 		 * Sometimes we can get frames that were not decrypted

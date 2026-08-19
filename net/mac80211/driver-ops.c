@@ -515,7 +515,7 @@ int drv_set_key(struct ieee80211_local *local,
 		    !(sdata->vif.active_links & BIT(key->link_id))))
 		return -ENOLINK;
 
-	if (fips_enabled)
+	if (!fips_allows(FIPS_EXCEPTION_WIFI_MFP))
 		return -EOPNOTSUPP;
 
 	trace_drv_set_key(local, cmd, sdata, sta, key);

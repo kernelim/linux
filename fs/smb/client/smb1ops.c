@@ -399,11 +399,13 @@ coalesce_t2(char *second_buf, struct smb_hdr *target_hdr, unsigned int *pdu_len)
 	}
 	put_bcc(byte_count, target_hdr);
 
-	byte_count = *pdu_len;
-	byte_count += total_in_src;
+	/* use smbCalcSize() rather than *pdu_len: the demux loop resets
+	 * *pdu_len to each secondary's pdu_length, making it unreliable.
+	 */
+	byte_count = smbCalcSize(target_hdr);
 	/* don't allow buffer to overflow */
 	if (byte_count > CIFSMaxBufSize + MAX_CIFS_HDR_SIZE) {
-		cifs_dbg(FYI, "coalesced BCC exceeds buffer size (%u)\n",
+		cifs_dbg(FYI, "coalesced size exceeds buffer size (%u)\n",
 			 byte_count);
 		return -ENOBUFS;
 	}

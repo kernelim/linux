@@ -462,8 +462,11 @@ int iwl_mvm_mac_setup_register(struct iwl_mvm *mvm)
 		IWL_ERR(mvm,
 			"iwlmvm doesn't allow to disable BT Coex, check bt_coex_active module parameter\n");
 
-	if (!fips_enabled)
+	if (fips_allows(FIPS_EXCEPTION_WIFI_MFP)) {
 		ieee80211_hw_set(hw, MFP_CAPABLE);
+		if (fips_enabled)
+			IWL_WARN(mvm, "FIPS: MFP enabled with known firmware limitation\n");
+	}
 
 	mvm->ciphers[hw->wiphy->n_cipher_suites] = WLAN_CIPHER_SUITE_AES_CMAC;
 	hw->wiphy->n_cipher_suites++;
@@ -492,12 +495,12 @@ int iwl_mvm_mac_setup_register(struct iwl_mvm *mvm)
 	 * beacon protection must be handled by firmware,
 	 * so cannot be done with fips_enabled
 	 */
-	if (!fips_enabled && sec_key_ver &&
+	if (fips_allows(FIPS_EXCEPTION_WIFI_MFP) && sec_key_ver &&
 	    fw_has_capa(&mvm->fw->ucode_capa,
 			IWL_UCODE_TLV_CAPA_BIGTK_TX_SUPPORT))
 		wiphy_ext_feature_set(hw->wiphy,
 				      NL80211_EXT_FEATURE_BEACON_PROTECTION);
-	else if (!fips_enabled &&
+	else if (fips_allows(FIPS_EXCEPTION_WIFI_MFP) &&
 		 fw_has_capa(&mvm->fw->ucode_capa,
 			     IWL_UCODE_TLV_CAPA_BIGTK_SUPPORT))
 		wiphy_ext_feature_set(hw->wiphy,

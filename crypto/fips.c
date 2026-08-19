@@ -19,6 +19,15 @@ EXPORT_SYMBOL_GPL(fips_enabled);
 ATOMIC_NOTIFIER_HEAD(fips_fail_notif_chain);
 EXPORT_SYMBOL_GPL(fips_fail_notif_chain);
 
+static unsigned long rh_fips_exception;
+
+int fips_allows(unsigned long feature)
+{
+	return !fips_enabled ||
+	       (rh_fips_exception & feature);
+}
+EXPORT_SYMBOL_GPL(fips_allows);
+
 /* Process kernel command-line parameter at boot time. fips=0 or fips=1 */
 static int fips_enable(char *str)
 {
@@ -30,6 +39,17 @@ static int fips_enable(char *str)
 
 __setup("fips=", fips_enable);
 
+static int fips_exception(char *str)
+{
+	if (kstrtoul(str, 0, &rh_fips_exception))
+		return 0;
+
+	printk(KERN_INFO "fips exceptions: 0x%lx\n", rh_fips_exception);
+	return 1;
+}
+
+__setup("rh_fips_exception=", fips_exception);
+
 static char fips_name[] = FIPS_MODULE_NAME;
 static char fips_version[] = FIPS_MODULE_VERSION;
 
@@ -40,6 +60,13 @@ static struct ctl_table crypto_sysctl_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "rh_fips_exception",
+		.data		= &rh_fips_exception,
+		.maxlen		= sizeof(unsigned long),
+		.mode		= 0444,
+		.proc_handler	= proc_doulongvec_minmax
 	},
 	{
 		.procname	= "fips_name",

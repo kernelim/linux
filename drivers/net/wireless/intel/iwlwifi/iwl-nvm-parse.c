@@ -484,14 +484,16 @@ static void iwl_init_vht_hw_capab(struct iwl_trans *trans,
 	 */
 	switch (iwlwifi_mod_params.amsdu_size) {
 	case IWL_AMSDU_DEF:
-		if (trans->mac_cfg->mq_rx_supported && !fips_enabled)
+		if (trans->mac_cfg->mq_rx_supported &&
+		    fips_allows(FIPS_EXCEPTION_WIFI_MFP))
 			vht_cap->cap |=
 				IEEE80211_VHT_CAP_MAX_MPDU_LENGTH_11454;
 		else
 			vht_cap->cap |= IEEE80211_VHT_CAP_MAX_MPDU_LENGTH_3895;
 		break;
 	case IWL_AMSDU_2K:
-		if (trans->mac_cfg->mq_rx_supported && !fips_enabled)
+		if (trans->mac_cfg->mq_rx_supported &&
+		    fips_allows(FIPS_EXCEPTION_WIFI_MFP))
 			vht_cap->cap |=
 				IEEE80211_VHT_CAP_MAX_MPDU_LENGTH_11454;
 		else
@@ -850,7 +852,7 @@ iwl_nvm_fixup_sband_iftd(struct iwl_trans *trans,
 
 	/* EHT needs WPA3/MFP so cannot do it for fips_enabled */
 	if (!data->sku_cap_11be_enable || iwlwifi_mod_params.disable_11be ||
-	    fips_enabled)
+	    !fips_allows(FIPS_EXCEPTION_WIFI_MFP))
 		iftype_data->eht_cap.has_eht = false;
 
 	/* Advertise an A-MPDU exponent extension based on
@@ -1140,7 +1142,8 @@ static void iwl_init_sbands(struct iwl_trans *trans,
 	 * avoid spending time on scanning those channels and perhaps
 	 * even finding APs there that cannot be used.
 	 */
-	if (!fips_enabled && data->sku_cap_11ax_enable &&
+	if (fips_allows(FIPS_EXCEPTION_WIFI_MFP) &&
+	    data->sku_cap_11ax_enable &&
 	    !iwlwifi_mod_params.disable_11ax)
 		iwl_init_he_hw_capab(trans, data, sband, tx_chains, rx_chains,
 				     fw);

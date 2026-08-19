@@ -157,7 +157,7 @@ static void iwl_mld_hw_set_security(struct iwl_mld *mld)
 		WLAN_CIPHER_SUITE_BIP_GMAC_256
 	};
 
-	if (fips_enabled)
+	if (!fips_allows(FIPS_EXCEPTION_WIFI_MFP))
 		return;
 
 	hw->wiphy->n_cipher_suites = ARRAY_SIZE(mld_ciphers);
@@ -166,6 +166,9 @@ static void iwl_mld_hw_set_security(struct iwl_mld *mld)
 	ieee80211_hw_set(hw, MFP_CAPABLE);
 	wiphy_ext_feature_set(hw->wiphy,
 			      NL80211_EXT_FEATURE_BEACON_PROTECTION);
+
+	if (fips_enabled)
+		IWL_WARN(mld, "FIPS: MFP enabled with known firmware limitation\n");
 }
 
 static void iwl_mld_hw_set_antennas(struct iwl_mld *mld)
@@ -295,7 +298,7 @@ static void iwl_mac_hw_set_wiphy(struct iwl_mld *mld)
 	if (mld->nvm_data->sku_cap_11be_enable &&
 	    !iwlwifi_mod_params.disable_11ax &&
 	    !iwlwifi_mod_params.disable_11be &&
-	    !fips_enabled)
+	    fips_allows(FIPS_EXCEPTION_WIFI_MFP))
 		wiphy->flags |= WIPHY_FLAG_SUPPORTS_MLO;
 
 	/* the firmware uses u8 for num of iterations, but 0xff is saved for
