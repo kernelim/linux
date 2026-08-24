@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.157.1.el8_10
+%define pkgrelease 553.158.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.157.1%{?dist}
+%define specrelease 553.158.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,30 @@ fi
 #
 #
 %changelog
-* Thu Aug 20 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.157.1
+* Wed Aug 26 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.158.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Mon Aug 24 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.158.1.el8_10]
+- nvmet: fix pre-auth out-of-bounds heap read in Discovery Get Log Page (Maurizio Lombardi) [RHEL-219613] {CVE-2026-64320}
+- selinux: check connect-related permissions on TCP Fast Open (Ondrej Mosnacek) [RHEL-222800]
+- i2c: stub: Reject I2C block transfers with invalid length (CKI Backport Bot) [RHEL-232120] {CVE-2026-64191}
+- scsi: target: Fix hexadecimal CHAP_I handling (CKI Backport Bot) [RHEL-231660] {CVE-2026-63886}
+- scsi: target: iscsi: Validate CHAP_R length before base64 decode (CKI Backport Bot) [RHEL-231660] {CVE-2026-63886}
+- Input: synaptics-rmi4 - bound the F3A keymap to the GPIO count (CKI Backport Bot) [RHEL-231447] {CVE-2026-64277}
+- Input: synaptics-rmi4 - bound the F30 keymap to the GPIO/LED count (CKI Backport Bot) [RHEL-230251] {CVE-2026-64276}
+- netfilter: conntrack: tcp: do not force CLOSE on invalid-seq RST without direction check (CKI Backport Bot) [RHEL-229797] {CVE-2026-63913}
+- netfilter: ipset: fix race between dump and ip_set_list resize (CKI Backport Bot) [RHEL-227676] {CVE-2026-64189}
+- sctp: hold socket lock when dumping endpoints in sctp_diag (Jamie Bainbridge) [RHEL-212400]
+- sctp: Hold sock lock while iterating over address list (Jamie Bainbridge) [RHEL-212400]
+- sctp: Prevent TOCTOU out-of-bounds write (Jamie Bainbridge) [RHEL-212400]
+- sctp: Hold RCU read lock while iterating over address list (Jamie Bainbridge) [RHEL-212400]
+- usb: hub: Make usb_hub_wq type depend on isolcpus/nohz_full setting (Waiman Long) [RHEL-178088]
+- sctp: purge outqueue on stale COOKIE-ECHO handling (CKI Backport Bot) [RHEL-188193] {CVE-2026-52924}
 
 * Wed Aug 19 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.157.1.el8_10]
 - smb/client: handle overlapping allocated ranges in fallocate (CKI Backport Bot) [RHEL-236195] {CVE-2026-68388}
