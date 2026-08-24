@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.41.1
+%define pkgrelease 687.42.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.41.1.el9_8
+%define tarfile_release 5.14.0-687.42.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.41.1%{?buildid}%{?dist}
+%define specrelease 687.42.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.41.1.el9_8
+%define kabiversion 5.14.0-687.42.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3713,10 +3713,34 @@ fi
 #
 #
 %changelog
-* Thu Aug 20 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.41.1
+* Wed Aug 26 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.42.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Mon Aug 24 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.42.1.el9_8]
+- net: ipv6: clear suppressed fib6 rule result (Paolo Abeni) [RHEL-246347] {CVE-2026-74581}
+- s390/ap: Restrict driver_override versus apmask and aqmask use (Ramesh Chhetri) [RHEL-245333]
+- s390/ap: Rename mutex ap_perms_mutex to ap_attr_mutex (Ramesh Chhetri) [RHEL-245333]
+- s390/ap: Support driver_override for AP queue devices (Ramesh Chhetri) [RHEL-245333]
+- s390/ap: Use all-bits-one apmask/aqmask for vfio in_use() checks (Ramesh Chhetri) [RHEL-245333]
+- i2c: stub: Reject I2C block transfers with invalid length (CKI Backport Bot) [RHEL-232111] {CVE-2026-64191}
+- Input: synaptics-rmi4 - bound the F3A keymap to the GPIO count (CKI Backport Bot) [RHEL-231440] {CVE-2026-64277}
+- netfilter: require Ethernet MAC header before using eth_hdr() (CKI Backport Bot) [RHEL-230679] {CVE-2026-53131}
+- Input: synaptics-rmi4 - bound the F30 keymap to the GPIO/LED count (CKI Backport Bot) [RHEL-230236] {CVE-2026-64276}
+- netfilter: xt_policy: fix strict mode inbound policy matching (CKI Backport Bot) [RHEL-228843] {CVE-2026-52920}
+- netfilter: ipset: fix race between dump and ip_set_list resize (CKI Backport Bot) [RHEL-227673] {CVE-2026-64189}
+- netfilter: conntrack_irc: fix possible out-of-bounds read (CKI Backport Bot) [RHEL-225252] {CVE-2026-53268}
+- ksm: use range-walk function to jump over holes in scan_get_next_rmap_item (CKI Backport Bot) [RHEL-189901] {CVE-2025-68211}
+- crypto: qat - cancel work on re-enable SR-IOV timeout (CKI Backport Bot) [RHEL-166118]
+- sctp: hold socket lock when dumping endpoints in sctp_diag (Jamie Bainbridge) [RHEL-212398]
+- sctp: Hold sock lock while iterating over address list (Jamie Bainbridge) [RHEL-212398]
+- sctp: Prevent TOCTOU out-of-bounds write (Jamie Bainbridge) [RHEL-212398]
+- sctp: Hold RCU read lock while iterating over address list (Jamie Bainbridge) [RHEL-212398]
+- zram: fix use-after-free in zram_bvec_write_partial() (CKI Backport Bot) [RHEL-191439] {CVE-2026-53185}
+- ip6_tunnel: use skb_vlan_inet_prepare() in __ip6_tnl_rcv() (CKI Backport Bot) [RHEL-189965] {CVE-2026-23003}
+- netfilter: nft_set_pipapo_avx2: don't return non-matching entry on expiry (CKI Backport Bot) [RHEL-189532] {CVE-2026-43114}
+- sctp: purge outqueue on stale COOKIE-ECHO handling (CKI Backport Bot) [RHEL-188198] {CVE-2026-52924}
 
 * Wed Aug 19 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.41.1.el9_8]
 - smb: client: validate DFS referral PathConsumed (CKI Backport Bot) [RHEL-237668] {CVE-2026-68343}
