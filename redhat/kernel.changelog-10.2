@@ -1,3 +1,49 @@
+* Mon Aug 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.50.1.el10_2]
+- redhat: add kmap.py tool and kernel-kmap-internal package (Rado Vrbovsky)
+- nvmet-auth: reject short AUTH_RECEIVE buffers (CKI Backport Bot) [RHEL-244915] {CVE-2026-72130}
+- locking/rt: Fix the incorrect RCU protection in rt_spin_unlock() (CKI Backport Bot) [RHEL-242861] {CVE-2026-72069}
+- s390: Revert support for DCACHE_WORD_ACCESS (John J Coleman) [RHEL-188180]
+- NFSv4: include MAY_WRITE in open permission mask for O_TRUNC (CKI Backport Bot) [RHEL-234051] {CVE-2026-64298}
+- nfsd: release layout stid on setlease failure (Scott Mayhew) [RHEL-227794] {CVE-2026-53399}
+- NFSv4/flexfiles: reject zero filehandle version count (CKI Backport Bot) [RHEL-229415] {CVE-2026-53392}
+- NFSv4/pNFS: reject zero-length r_addr in nfs4_decode_mp_ds_addr (CKI Backport Bot) [RHEL-228036] {CVE-2026-53391}
+- NFSD: fix nfs4_file access extra count in nfsd4_add_rdaccess_to_wrdeleg (CKI Backport Bot) [RHEL-227946] {CVE-2026-53026}
+- pNFS: Fix use-after-free in pnfs_update_layout() (CKI Backport Bot) [RHEL-226322] {CVE-2026-63800}
+- nfsd: fix posix_acl leak on SETACL decode failure (CKI Backport Bot) [RHEL-225522] {CVE-2026-53397}
+- mm/khugepaged: write all dirty file folios when collapsing (Rafael Aquini) [RHEL-236329] {CVE-2026-68086}
+- userfaultfd: prevent registration of special VMAs (Rafael Aquini) [RHEL-237862] {CVE-2026-68166}
+- userfaultfd: correctly prevent registering VM_DROPPABLE regions (Rafael Aquini) [RHEL-237862] {CVE-2026-68166}
+- crypto: qat - fix VF2PF work teardown race in adf_disable_sriov() (Vladislav Dronov) [RHEL-234477] {CVE-2026-64438}
+- mm: shrinker: fix NULL pointer dereference in debugfs (Rafael Aquini) [RHEL-230833] {CVE-2026-64417}
+- mm: shrinker: fix shrinker_info teardown race with expansion (Rafael Aquini) [RHEL-230833] {CVE-2026-64418}
+- x86/bugs: Make Safe-RET robust against interrupt injection (Waiman Long) [RHEL-230475] {CVE-2026-68480}
+- crypto: qat - validate RSA CRT component lengths (CKI Backport Bot) [RHEL-234546] {CVE-2026-64304}
+- Input: synaptics-rmi4 - bound the F3A keymap to the GPIO count (CKI Backport Bot) [RHEL-231446] {CVE-2026-64277}
+- mm/huge_memory: update file PMD counter before folio_put() (CKI Backport Bot) [RHEL-231228] {CVE-2026-53189}
+- Input: synaptics-rmi4 - bound the F30 keymap to the GPIO/LED count (CKI Backport Bot) [RHEL-230263] {CVE-2026-64276}
+- ALSA: virtio: Validate control metadata from the device (CKI Backport Bot) [RHEL-230142] {CVE-2026-64490}
+- net: mana: validate rx_req_idx to prevent out-of-bounds array access (CKI Backport Bot) [RHEL-229231] {CVE-2026-64018}
+- smb: client: protect tc_count increment in smb2_find_smb_sess_tcon_unlocked() (CKI Backport Bot) [RHEL-228550] {CVE-2026-64136}
+- bonding: alb: fix UAF in rlb_arp_recv during bond up/down (CKI Backport Bot) [RHEL-225292] {CVE-2026-45970}
+- netfilter: ipset: fix race between dump and ip_set_list resize (CKI Backport Bot) [RHEL-227657] {CVE-2026-64189}
+- iommu/amd: Fix clone_alias() to use the original device's devid (CKI Backport Bot) [RHEL-227452] {CVE-2026-53053}
+- smb: client: fix change notify replay double-free (CKI Backport Bot) [RHEL-226988] {CVE-2026-64384}
+- mm/list_lru: drain before clearing xarray entry on reparent (Rafael Aquini) [RHEL-227399] {CVE-2026-53153}
+- s390/pfault: Fix virtual vs physical address confusion (Ramesh Chhetri) [RHEL-222507]
+- crypto: qat - cancel work on re-enable SR-IOV timeout (CKI Backport Bot) [RHEL-218627]
+- nvmet: fix pre-auth out-of-bounds heap read in Discovery Get Log Page (CKI Backport Bot) [RHEL-219623] {CVE-2026-64320}
+- sctp: hold socket lock when dumping endpoints in sctp_diag (CKI Backport Bot) [RHEL-212393]
+- seccomp: passthrough uretprobe systemcall without filtering (Ricardo Robaina) [RHEL-210908] {CVE-2025-21834}
+- qede: fix off-by-one in BD ring consumption on build_skb failure (CKI Backport Bot) [RHEL-193043]
+- zram: fix use-after-free in zram_bvec_write_partial() (CKI Backport Bot) [RHEL-191442] {CVE-2026-53185}
+- USB: serial: io_ti: fix heap overflow in build_i2c_fw_hdr() (Desnes Nunes) [RHEL-191042] {CVE-2026-53195}
+- USB: serial: io_ti: fix heap overflow in get_manuf_info() (Desnes Nunes) [RHEL-191042] {CVE-2026-53196}
+- ip6_tunnel: use skb_vlan_inet_prepare() in __ip6_tnl_rcv() (CKI Backport Bot) [RHEL-189631] {CVE-2026-23003}
+- ip6_gre: Use cached t->net in ip6erspan_changelink(). (CKI Backport Bot) [RHEL-180136] {CVE-2026-46120}
+- netfilter: nf_tables: Fix for duplicate device in netdev hooks (CKI Backport Bot) [RHEL-179761] {CVE-2026-43454}
+- netfilter: nfnetlink_cthelper: fix OOB read in nfnl_cthelper_dump_table() (CKI Backport Bot) [RHEL-179744] {CVE-2026-43450}
+Resolves: RHEL-179744, RHEL-179761, RHEL-180136, RHEL-188180, RHEL-189631, RHEL-191042, RHEL-191442, RHEL-193043, RHEL-210908, RHEL-212393, RHEL-218627, RHEL-219623, RHEL-222507, RHEL-225292, RHEL-225522, RHEL-226322, RHEL-226988, RHEL-227399, RHEL-227452, RHEL-227657, RHEL-227794, RHEL-227946, RHEL-228036, RHEL-228550, RHEL-229231, RHEL-229415, RHEL-230142, RHEL-230263, RHEL-230475, RHEL-230833, RHEL-231228, RHEL-231446, RHEL-234051, RHEL-234477, RHEL-234546, RHEL-236329, RHEL-237862, RHEL-242861, RHEL-244915
+
 * Wed Aug 19 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.49.1.el10_2]
 - udf: fix partition descriptor append bookkeeping (CKI Backport Bot) [RHEL-179570] {CVE-2026-45991}
 - cifs: fix time_last_write stamp placement in setattr/truncate paths (Paulo Alcantara) [RHEL-235459]
