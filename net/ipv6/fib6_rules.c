@@ -296,6 +296,7 @@ static bool fib6_rule_suppress(struct fib_rule *rule, struct fib_lookup_arg *arg
 
 suppress_route:
 	ip6_rt_put(rt);
+	arg->result = NULL;
 	return true;
 }
 

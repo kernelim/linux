@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.158.1.el8_10
+%define pkgrelease 553.159.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.158.1%{?dist}
+%define specrelease 553.159.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,35 @@ fi
 #
 #
 %changelog
-* Wed Aug 26 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.158.1
+* Thu Sep 03 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.159.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Mon Aug 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.159.1.el8_10]
+- net: ipv6: clear suppressed fib6 rule result (Jamie Bainbridge) [RHEL-246806] {CVE-2026-74581}
+- powerpc/pseries: lparcfg - fix kbuf[] underflow (Mamatha Inamdar) [RHEL-240144]
+- powerpc/pseries: Remove VLA from lparcfg_write() (Mamatha Inamdar) [RHEL-240144]
+- RHEL only: Disable zram writeback support on non-4k page size systems (Jeff Moyer) [RHEL-191437] {CVE-2026-53185}
+- nfsd: release layout stid on setlease failure (Scott Mayhew) [RHEL-227780] {CVE-2026-53399}
+- NFSv4/flexfiles: reject zero filehandle version count (Scott Mayhew) [RHEL-229402] {CVE-2026-53392}
+- NFSv4: include MAY_WRITE in open permission mask for O_TRUNC (CKI Backport Bot) [RHEL-234059] {CVE-2026-64298}
+- NFSv4/pNFS: reject zero-length r_addr in nfs4_decode_mp_ds_addr (CKI Backport Bot) [RHEL-228028] {CVE-2026-53391}
+- pNFS: Fix use-after-free in pnfs_update_layout() (CKI Backport Bot) [RHEL-226624] {CVE-2026-63800}
+- nfsd: fix posix_acl leak on SETACL decode failure (CKI Backport Bot) [RHEL-225510] {CVE-2026-53397}
+- x86/bugs: Make Safe-RET robust against interrupt injection (Waiman Long) [RHEL-230492] {CVE-2026-68480}
+- x86: Clean up names/macros conflicting with ptrace-abi.h (Waiman Long) [RHEL-230492]
+- x86/entry: Unify definitions from <asm/calling.h> and <asm/ptrace-abi.h> (Waiman Long) [RHEL-230492]
+- smc91x: fix broken irq-context in PREEMPT_RT (CKI Backport Bot) [RHEL-231993] {CVE-2025-71132}
+- net: smc91x: Fix possible memory leak in smc_drv_probe() (CKI Backport Bot) [RHEL-231993] {CVE-2025-71132}
+- net: mana: validate rx_req_idx to prevent out-of-bounds array access (CKI Backport Bot) [RHEL-229075] {CVE-2026-64018}
+- bonding: alb: fix UAF in rlb_arp_recv during bond up/down (CKI Backport Bot) [RHEL-225272] {CVE-2026-45970}
+- s390/cpum_sf: Handle CPU hotplug remove during sampling (CKI Backport Bot) [RHEL-228073] {CVE-2024-57849}
+- RDMA/siw: bound Read Response placement to the RREAD length (CKI Backport Bot) [RHEL-219521] {CVE-2026-64268}
+- qede: fix off-by-one in BD ring consumption on build_skb failure (CKI Backport Bot) [RHEL-193045]
 
 * Mon Aug 24 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.158.1.el8_10]
 - nvmet: fix pre-auth out-of-bounds heap read in Discovery Get Log Page (Maurizio Lombardi) [RHEL-219613] {CVE-2026-64320}
