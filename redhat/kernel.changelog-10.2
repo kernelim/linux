@@ -1,3 +1,12 @@
+* Tue Sep 01 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.51.1.el10_2]
+- net: ipv6: clear suppressed fib6 rule result (Jamie Bainbridge) [RHEL-246368] {CVE-2026-74581}
+- iomap: fix out-of-bounds bitmap_set() with zero-length range (CKI Backport Bot) [RHEL-240183] {CVE-2026-68145}
+- exfat: fix potential use-after-free in exfat_find_dir_entry() (CKI Backport Bot) [RHEL-231559] {CVE-2026-63808}
+- KEYS: fix overflow in keyctl_pkey_params_get_2() (CKI Backport Bot) [RHEL-229621] {CVE-2026-63824}
+- Bluetooth: hci_ldisc: Clear HCI_UART_PROTO_INIT on error (CKI Backport Bot) [RHEL-223128] {CVE-2026-53073}
+- smb: client: fix query directory replay double-free (CKI Backport Bot) [RHEL-219150] {CVE-2026-64387}
+Resolves: RHEL-219150, RHEL-223128, RHEL-229621, RHEL-231559, RHEL-240183, RHEL-246368
+
 * Mon Aug 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.50.1.el10_2]
 - redhat: add kmap.py tool and kernel-kmap-internal package (Rado Vrbovsky)
 - nvmet-auth: reject short AUTH_RECEIVE buffers (CKI Backport Bot) [RHEL-244915] {CVE-2026-72130}

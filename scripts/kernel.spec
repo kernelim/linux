@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 211.50.1
+%define pkgrelease 211.51.1
 %define kversion 6
-%define tarfile_release 6.12.0-211.50.1.el10_2
+%define tarfile_release 6.12.0-211.51.1.el10_2
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 211.50.1%{?buildid}%{?dist}
+%define specrelease 211.51.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-211.50.1.el10_2
+%define kabiversion 6.12.0-211.51.1.el10_2
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4560,9 +4560,17 @@ fi\
 #
 #
 %changelog
-* Tue Sep 01 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.50.1
+* Fri Sep 04 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.51.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Tue Sep 01 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.51.1.el10_2]
+- net: ipv6: clear suppressed fib6 rule result (Jamie Bainbridge) [RHEL-246368] {CVE-2026-74581}
+- iomap: fix out-of-bounds bitmap_set() with zero-length range (CKI Backport Bot) [RHEL-240183] {CVE-2026-68145}
+- exfat: fix potential use-after-free in exfat_find_dir_entry() (CKI Backport Bot) [RHEL-231559] {CVE-2026-63808}
+- KEYS: fix overflow in keyctl_pkey_params_get_2() (CKI Backport Bot) [RHEL-229621] {CVE-2026-63824}
+- Bluetooth: hci_ldisc: Clear HCI_UART_PROTO_INIT on error (CKI Backport Bot) [RHEL-223128] {CVE-2026-53073}
+- smb: client: fix query directory replay double-free (CKI Backport Bot) [RHEL-219150] {CVE-2026-64387}
 
 * Mon Aug 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.50.1.el10_2]
 - redhat: add kmap.py tool and kernel-kmap-internal package (Rado Vrbovsky)
