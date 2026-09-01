@@ -1,3 +1,48 @@
+* Tue Sep 01 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.44.1.el9_8]
+- locking/rt: Fix the incorrect RCU protection in rt_spin_unlock() (Waiman Long) [RHEL-242684] {CVE-2026-72069}
+- locking/rt: Add sparse annotation for RCU. (Waiman Long) [RHEL-242684]
+- iomap: fix out-of-bounds bitmap_set() with zero-length range (CKI Backport Bot) [RHEL-240191] {CVE-2026-68145}
+- iomap: hold state_lock over call to ifs_set_range_uptodate() (CKI Backport Bot) [RHEL-240191] {CVE-2026-68145}
+- exfat: fix potential use-after-free in exfat_find_dir_entry() (CKI Backport Bot) [RHEL-231461] {CVE-2026-63808}
+- ipv4: free net->ipv4.sysctl_local_reserved_ports after unregister_net_sysctl_table() (CKI Backport Bot) [RHEL-227266] {CVE-2026-64002}
+- Bluetooth: hci_ldisc: Clear HCI_UART_PROTO_INIT on error (CKI Backport Bot) [RHEL-223126] {CVE-2026-53073}
+Resolves: RHEL-223126, RHEL-227266, RHEL-231461, RHEL-240191, RHEL-242684
+
+* Mon Aug 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.43.1.el9_8]
+- scsi: target: iscsi: Bound iscsi_encode_text_output() appends to rsp_buf (Maurizio Lombardi) [RHEL-213202] {CVE-2026-63887}
+- redhat: add kmap.py tool and kernel-kmap-internal package (Rado Vrbovsky)
+- nvmet-auth: reject short AUTH_RECEIVE buffers (CKI Backport Bot) [RHEL-244913] {CVE-2026-72130}
+- sched/rt: Skip currently executing CPU in rto_next_cpu() (CKI Backport Bot) [RHEL-240634]
+- smc: Fix use-after-free in __pnet_find_base_ndev(). (Ramesh Chhetri) [RHEL-152651] {CVE-2025-40064}
+- userfaultfd: prevent registration of special VMAs (Rafael Aquini) [RHEL-240761] {CVE-2026-68166}
+- NFSv4: include MAY_WRITE in open permission mask for O_TRUNC (CKI Backport Bot) [RHEL-234043] {CVE-2026-64298}
+- nfsd: release layout stid on setlease failure (Scott Mayhew) [RHEL-227785] {CVE-2026-53399}
+- NFSv4/flexfiles: reject zero filehandle version count (Scott Mayhew) [RHEL-229407] {CVE-2026-53392}
+- NFSv4/pNFS: reject zero-length r_addr in nfs4_decode_mp_ds_addr (CKI Backport Bot) [RHEL-228038] {CVE-2026-53391}
+- pNFS: Fix use-after-free in pnfs_update_layout() (CKI Backport Bot) [RHEL-226457] {CVE-2026-63800}
+- nfsd: fix posix_acl leak on SETACL decode failure (CKI Backport Bot) [RHEL-225521] {CVE-2026-53397}
+- crypto: qat - fix VF2PF work teardown race in adf_disable_sriov() (Vladislav Dronov) [RHEL-234488] {CVE-2026-64438}
+- KEYS: fix overflow in keyctl_pkey_params_get_2() (Bruno Meneguele) [RHEL-229627] {CVE-2026-63824}
+- KEYS: fix length validation in keyctl_pkey_params_get_2() (Bruno Meneguele) [RHEL-229627] {CVE-2026-63824}
+- x86/bugs: Make Safe-RET robust against interrupt injection (Waiman Long) [RHEL-230496] {CVE-2026-68480}
+- x86: Clean up names/macros conflicting with ptrace-abi.h (Waiman Long) [RHEL-230496]
+- crypto: qat - validate RSA CRT component lengths (CKI Backport Bot) [RHEL-234535] {CVE-2026-64304}
+- tpm: tpm_tis: stop transmit if retries are exhausted (Štěpán Horáček) [RHEL-213940]
+- tpm: tpm_tis: add error logging for data transfer (Štěpán Horáček) [RHEL-213940]
+- tpm, tpm_tis: Workaround failed command reception on Infineon devices (Štěpán Horáček) [RHEL-213940]
+- tpm_tis: Resend command to recover from data transfer errors (Štěpán Horáček) [RHEL-213940]
+- tpm_tis: Use responseRetry to recover from data transfer errors (Štěpán Horáček) [RHEL-213940]
+- scsi: target: Fix hexadecimal CHAP_I handling (CKI Backport Bot) [RHEL-231664] {CVE-2026-63886}
+- scsi: target: iscsi: Validate CHAP_R length before base64 decode (CKI Backport Bot) [RHEL-231664] {CVE-2026-63886}
+- ALSA: virtio: Validate control metadata from the device (CKI Backport Bot) [RHEL-230139] {CVE-2026-64490}
+- net: mana: validate rx_req_idx to prevent out-of-bounds array access (CKI Backport Bot) [RHEL-229228] {CVE-2026-64018}
+- smb/client: fix out-of-bounds read in symlink_data() (CKI Backport Bot) [RHEL-229064] {CVE-2026-46185}
+- bonding: alb: fix UAF in rlb_arp_recv during bond up/down (CKI Backport Bot) [RHEL-225285] {CVE-2026-45970}
+- RDMA/siw: bound Read Response placement to the RREAD length (CKI Backport Bot) [RHEL-219525] {CVE-2026-64268}
+- smb: client: fix query directory replay double-free (CKI Backport Bot) [RHEL-219152] {CVE-2026-64387}
+- KEYS: trusted: Fix a memory leak in tpm2_load_cmd (Štěpán Horáček) [RHEL-189953] {CVE-2025-71147}
+Resolves: RHEL-152651, RHEL-189953, RHEL-213202, RHEL-213940, RHEL-219152, RHEL-219525, RHEL-225285, RHEL-225521, RHEL-226457, RHEL-227785, RHEL-228038, RHEL-229064, RHEL-229228, RHEL-229407, RHEL-229627, RHEL-230139, RHEL-230496, RHEL-231664, RHEL-234043, RHEL-234488, RHEL-234535, RHEL-240634, RHEL-240761, RHEL-244913
+
 * Mon Aug 24 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.42.1.el9_8]
 - net: ipv6: clear suppressed fib6 rule result (Paolo Abeni) [RHEL-246347] {CVE-2026-74581}
 - s390/ap: Restrict driver_override versus apmask and aqmask use (Ramesh Chhetri) [RHEL-245333]

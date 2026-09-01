@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.42.1
+%define pkgrelease 687.44.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.42.1.el9_8
+%define tarfile_release 5.14.0-687.44.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.42.1%{?buildid}%{?dist}
+%define specrelease 687.44.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.42.1.el9_8
+%define kabiversion 5.14.0-687.44.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -226,6 +226,8 @@ Summary: The Linux kernel
 %define with_tools     %{?_without_tools:     0} %{?!_without_tools:     1}
 # kernel-debuginfo
 %define with_debuginfo %{?_without_debuginfo: 0} %{?!_without_debuginfo: 1}
+# kernel-kmap-internal: source-to-module mapping data (JSON)
+%define with_kmap      %{?_without_kmap:      0} %{?!_without_kmap:      1}
 # kernel-abi-stablelists
 %define with_kernel_abi_stablelists %{?_without_kernel_abi_stablelists: 0} %{?!_without_kernel_abi_stablelists: 1}
 # internal samples and selftests
@@ -567,6 +569,10 @@ Summary: The Linux kernel
 %define _enable_debug_packages 0
 %endif
 
+%ifnarch x86_64 ppc64le s390x aarch64
+%define with_kmap 0
+%endif
+
 # Architectures we build tools/cpupower on
 %if 0%{?fedora}
 %define cpupowerarchs %{ix86} x86_64 ppc64le %{arm} aarch64
@@ -597,6 +603,13 @@ Summary: The Linux kernel
 %define with_debug 0
 %endif
 
+# Define with_base to indicate if any non-debug variant is being built.
+# Used to conditionally build packages that only make sense for base variants.
+%if %{with_zfcpdump} || %{with_pae} || %{with_up} || %{with_arm64_64k} || %{with_realtime} || %{with_realtime_arm64_64k}
+%define with_base 1
+%else
+%define with_base 0
+%endif
 
 #
 # Packages that need to be installed before the kernel is, because the %%post
@@ -936,6 +949,9 @@ Source2000: cpupower.service
 Source2001: cpupower.config
 Source2002: kvm_stat.logrotate
 
+# Sources for kernel-kmap-internal
+Source2100: kmap.py
+
 # Some people enjoy building customized kernels from the dist-git in Fedora and
 # use this to override configuration options. One day they may all use the
 # source tree, but in the mean time we carry this to support the legacy workflow
@@ -1181,6 +1197,27 @@ The rv tool is the interface for a collection of monitors that aim
 analysing the logical and timing behavior of Linux.
 
 # with_tools
+%endif
+
+%if %{with_kmap} && %{with_base}
+%package -n %{name}-kmap-internal
+Summary: Kernel source-to-module mapping data and module list
+Group: Development/System
+BuildRequires: python3
+%description -n %{name}-kmap-internal
+The %{name}-kmap-internal package contains a JSON mapping file that describes
+which C source files contributed to each kernel module and to the built-in
+vmlinux image, and which RPM package each module is shipped in.
+
+Files installed under /usr/share/%{name}-kmap-internal/:
+  kernel-map-<KVERREL>.json - unified mapping file for all kernel variants containing:
+    - variants:    list of variant names (e.g., ["stock", "rt"])
+    - source-map:  source file mappings
+      - obj-src:   maps kernel objects to source files with variant indices
+      - src-obj:   maps source files to kernel objects with variant indices
+    - module-map:  module to RPM mappings
+      - module-rpm:  maps module names to RPM package names with variant indices
+      - rpm-modules: maps RPM package names to module names with variant indices
 %endif
 
 %if %{with_selftests}
@@ -2571,6 +2608,44 @@ BuildKernel() {
 %if %{with_gcov}
     popd
 %endif
+
+%if %{with_kmap} && %{with_base}
+    # Generate source-to-module mapping data using kmap.py.
+    # Must run before the next BuildKernel call issues make mrproper, which
+    # would wipe the .cmd files that kmap.py reads.  Skip debug variants
+    # (same source mapping as the base kernel).
+    if [[ "$Variant" != *debug* ]]; then
+        _kmap_bdir=$(pwd)
+        _kmap_basedir=%{_builddir}/kmap-data
+        _kmap_merged=$_kmap_basedir/kernel-map.json
+        _kmap_variant=${Variant:-stock}
+        _kmap_listprefix=../kernel${Variant:+-${Variant}}
+        mkdir -p $_kmap_basedir
+
+        # Build kmap.py arguments; merge with existing data if present
+        _kmap_args="--directory $_kmap_bdir --outputdir $_kmap_basedir --rhel 9 --variant $_kmap_variant --time"
+        _kmap_args="$_kmap_args --vmlinux-rpm %{name}-core-%{KVERREL}.rpm"
+        if [ -f "$_kmap_merged" ]; then
+            _kmap_args="$_kmap_args --input kernel-map.json"
+        fi
+
+        # Add module list files for module-to-RPM mapping
+        for _kmap_type in modules-core modules modules-extra modules-internal; do
+            if [ -f "${_kmap_listprefix}-${_kmap_type}.list" ]; then
+                _kmap_rpm=%{name}-${_kmap_type}-%{KVERREL}.rpm
+                _kmap_args="$_kmap_args --module-list ${_kmap_rpm}:${_kmap_listprefix}-${_kmap_type}.list"
+            fi
+        done
+%if 0%{!?fedora:1}
+        if [ -f "${_kmap_listprefix}-modules-partner.list" ]; then
+            _kmap_rpm=%{name}-modules-partner-%{KVERREL}.rpm
+            _kmap_args="$_kmap_args --module-list ${_kmap_rpm}:${_kmap_listprefix}-modules-partner.list"
+        fi
+%endif
+
+        python3 %{SOURCE2100} $_kmap_args
+    fi
+%endif
 }
 
 ###
@@ -3138,6 +3213,14 @@ find -type f ! -executable -exec install -D -m644 {} %{buildroot}%{_libexecdir}/
 popd
 %endif
 
+%if %{with_kmap} && %{with_base}
+# Install kmap data files produced during %build.
+_kmap_basedir=%{_builddir}/kmap-data
+_kmap_destbase=$RPM_BUILD_ROOT%{_datadir}/%{name}-kmap-internal
+mkdir -p $_kmap_destbase
+install -m 644 $_kmap_basedir/kernel-map.json $_kmap_destbase/kernel-map-%{KVERREL}.json
+%endif
+
 ###
 ### clean
 ###
@@ -3561,6 +3644,13 @@ fi
 %{_libexecdir}/kselftests
 %endif
 
+%if %{with_kmap} && %{with_base}
+%files -n %{name}-kmap-internal
+%defattr(-,root,root)
+%dir %{_datadir}/%{name}-kmap-internal
+%{_datadir}/%{name}-kmap-internal/kernel-map-%{KVERREL}.json
+%endif
+
 # empty meta-package
 %if %{with_up}
 %ifnarch %nobuildarches noarch
@@ -3713,10 +3803,53 @@ fi
 #
 #
 %changelog
-* Wed Aug 26 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.42.1
+* Fri Sep 04 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.44.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Tue Sep 01 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.44.1.el9_8]
+- locking/rt: Fix the incorrect RCU protection in rt_spin_unlock() (Waiman Long) [RHEL-242684] {CVE-2026-72069}
+- locking/rt: Add sparse annotation for RCU. (Waiman Long) [RHEL-242684]
+- iomap: fix out-of-bounds bitmap_set() with zero-length range (CKI Backport Bot) [RHEL-240191] {CVE-2026-68145}
+- iomap: hold state_lock over call to ifs_set_range_uptodate() (CKI Backport Bot) [RHEL-240191] {CVE-2026-68145}
+- exfat: fix potential use-after-free in exfat_find_dir_entry() (CKI Backport Bot) [RHEL-231461] {CVE-2026-63808}
+- ipv4: free net->ipv4.sysctl_local_reserved_ports after unregister_net_sysctl_table() (CKI Backport Bot) [RHEL-227266] {CVE-2026-64002}
+- Bluetooth: hci_ldisc: Clear HCI_UART_PROTO_INIT on error (CKI Backport Bot) [RHEL-223126] {CVE-2026-53073}
+
+* Mon Aug 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.43.1.el9_8]
+- scsi: target: iscsi: Bound iscsi_encode_text_output() appends to rsp_buf (Maurizio Lombardi) [RHEL-213202] {CVE-2026-63887}
+- redhat: add kmap.py tool and kernel-kmap-internal package (Rado Vrbovsky)
+- nvmet-auth: reject short AUTH_RECEIVE buffers (CKI Backport Bot) [RHEL-244913] {CVE-2026-72130}
+- sched/rt: Skip currently executing CPU in rto_next_cpu() (CKI Backport Bot) [RHEL-240634]
+- smc: Fix use-after-free in __pnet_find_base_ndev(). (Ramesh Chhetri) [RHEL-152651] {CVE-2025-40064}
+- userfaultfd: prevent registration of special VMAs (Rafael Aquini) [RHEL-240761] {CVE-2026-68166}
+- NFSv4: include MAY_WRITE in open permission mask for O_TRUNC (CKI Backport Bot) [RHEL-234043] {CVE-2026-64298}
+- nfsd: release layout stid on setlease failure (Scott Mayhew) [RHEL-227785] {CVE-2026-53399}
+- NFSv4/flexfiles: reject zero filehandle version count (Scott Mayhew) [RHEL-229407] {CVE-2026-53392}
+- NFSv4/pNFS: reject zero-length r_addr in nfs4_decode_mp_ds_addr (CKI Backport Bot) [RHEL-228038] {CVE-2026-53391}
+- pNFS: Fix use-after-free in pnfs_update_layout() (CKI Backport Bot) [RHEL-226457] {CVE-2026-63800}
+- nfsd: fix posix_acl leak on SETACL decode failure (CKI Backport Bot) [RHEL-225521] {CVE-2026-53397}
+- crypto: qat - fix VF2PF work teardown race in adf_disable_sriov() (Vladislav Dronov) [RHEL-234488] {CVE-2026-64438}
+- KEYS: fix overflow in keyctl_pkey_params_get_2() (Bruno Meneguele) [RHEL-229627] {CVE-2026-63824}
+- KEYS: fix length validation in keyctl_pkey_params_get_2() (Bruno Meneguele) [RHEL-229627] {CVE-2026-63824}
+- x86/bugs: Make Safe-RET robust against interrupt injection (Waiman Long) [RHEL-230496] {CVE-2026-68480}
+- x86: Clean up names/macros conflicting with ptrace-abi.h (Waiman Long) [RHEL-230496]
+- crypto: qat - validate RSA CRT component lengths (CKI Backport Bot) [RHEL-234535] {CVE-2026-64304}
+- tpm: tpm_tis: stop transmit if retries are exhausted (Štěpán Horáček) [RHEL-213940]
+- tpm: tpm_tis: add error logging for data transfer (Štěpán Horáček) [RHEL-213940]
+- tpm, tpm_tis: Workaround failed command reception on Infineon devices (Štěpán Horáček) [RHEL-213940]
+- tpm_tis: Resend command to recover from data transfer errors (Štěpán Horáček) [RHEL-213940]
+- tpm_tis: Use responseRetry to recover from data transfer errors (Štěpán Horáček) [RHEL-213940]
+- scsi: target: Fix hexadecimal CHAP_I handling (CKI Backport Bot) [RHEL-231664] {CVE-2026-63886}
+- scsi: target: iscsi: Validate CHAP_R length before base64 decode (CKI Backport Bot) [RHEL-231664] {CVE-2026-63886}
+- ALSA: virtio: Validate control metadata from the device (CKI Backport Bot) [RHEL-230139] {CVE-2026-64490}
+- net: mana: validate rx_req_idx to prevent out-of-bounds array access (CKI Backport Bot) [RHEL-229228] {CVE-2026-64018}
+- smb/client: fix out-of-bounds read in symlink_data() (CKI Backport Bot) [RHEL-229064] {CVE-2026-46185}
+- bonding: alb: fix UAF in rlb_arp_recv during bond up/down (CKI Backport Bot) [RHEL-225285] {CVE-2026-45970}
+- RDMA/siw: bound Read Response placement to the RREAD length (CKI Backport Bot) [RHEL-219525] {CVE-2026-64268}
+- smb: client: fix query directory replay double-free (CKI Backport Bot) [RHEL-219152] {CVE-2026-64387}
+- KEYS: trusted: Fix a memory leak in tpm2_load_cmd (Štěpán Horáček) [RHEL-189953] {CVE-2025-71147}
 
 * Mon Aug 24 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.42.1.el9_8]
 - net: ipv6: clear suppressed fib6 rule result (Paolo Abeni) [RHEL-246347] {CVE-2026-74581}

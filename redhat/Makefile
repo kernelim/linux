@@ -639,6 +639,7 @@ sources-rh: $(TARBALL) generate-testpatch-tmp setup-source dist-configs-check
 		mod-sign.sh \
 		scripts/uki_addons/uki_create_addons.py \
 		scripts/uki_addons/uki_addons.json \
+		scripts/kmap.py \
 		configs/flavors \
 		configs/generate_all_configs.sh \
 		configs/merge.pl \
