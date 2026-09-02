@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.44.1
+%define pkgrelease 687.45.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.44.1.el9_8
+%define tarfile_release 5.14.0-687.45.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.44.1%{?buildid}%{?dist}
+%define specrelease 687.45.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.44.1.el9_8
+%define kabiversion 5.14.0-687.45.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3803,10 +3803,23 @@ fi
 #
 #
 %changelog
-* Fri Sep 04 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.44.1
+* Tue Sep 08 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.45.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Wed Sep 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.45.1.el9_8]
+- KVM: arm64: Bound used_lrs when flushing the pKVM hyp vCPU (Jon Maloy) [RHEL-234207] {CVE-2026-64287}
+- nvmet-auth: validate reply message payload bounds against transfer length (CKI Backport Bot) [RHEL-234145] {CVE-2026-64319}
+- smb: client: protect tc_count increment in smb2_find_smb_sess_tcon_unlocked() (CKI Backport Bot) [RHEL-228852] {CVE-2026-64136}
+- io_uring/poll: fix signed comparison in io_poll_get_ownership() (CKI Backport Bot) [RHEL-227107] {CVE-2026-52933}
+- smb: client: fix change notify replay double-free (CKI Backport Bot) [RHEL-226985] {CVE-2026-64384}
+- nvmet: fix pre-auth out-of-bounds heap read in Discovery Get Log Page (CKI Backport Bot) [RHEL-219614] {CVE-2026-64320}
+- can: bcm: extend bcm_tx_lock usage for data and timer updates (CKI Backport Bot) [RHEL-216699] {CVE-2025-38004}
+- can: bcm: add locking when updating filter and timer values (CKI Backport Bot) [RHEL-216699] {CVE-2025-38004}
+- can: bcm: fix locking for bcm_op runtime updates (CKI Backport Bot) [RHEL-216699] {CVE-2025-38004}
+- can: bcm: add locking for bcm_op runtime updates (CKI Backport Bot) [RHEL-216699] {CVE-2025-38004}
+- netfilter: nat: use kfree_rcu to release ops (Florian Westphal) [RHEL-188518] {CVE-2026-53000}
 
 * Tue Sep 01 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.44.1.el9_8]
 - locking/rt: Fix the incorrect RCU protection in rt_spin_unlock() (Waiman Long) [RHEL-242684] {CVE-2026-72069}
