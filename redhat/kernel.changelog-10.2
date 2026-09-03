@@ -1,3 +1,38 @@
+* Thu Sep 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.52.1.el10_2]
+- fuse: fix race between interrupt and resend (Miklos Szeredi) [RHEL-218495] {CVE-2026-64265}
+- fuse: clear intr_entry in fuse_resend and fuse_remove_pending_req (Miklos Szeredi) [RHEL-218495] {CVE-2026-64265}
+- rhashtable: clear stale iter->p on table restart (CKI Backport Bot) [RHEL-248457] {CVE-2026-64563}
+- udp: Fix wildcard bind conflict check when using hash2 (Felix Maurer) [RHEL-218016] {CVE-2026-31503}
+- tcp: optimize inet_use_bhash2_on_bind() (Felix Maurer) [RHEL-218016]
+- tcp: call sk_data_ready() after listener migration (Felix Maurer) [RHEL-232246] {CVE-2026-46015}
+- flow_dissector: do not dissect PPPoE PFC frames (Felix Maurer) [RHEL-232629] {CVE-2026-46306}
+- inet: RAW sockets using IPPROTO_RAW MUST drop incoming ICMP (Felix Maurer) [RHEL-226125] {CVE-2026-46266}
+- ipv6: anycast: insert aca into global hash under idev->lock (Felix Maurer) [RHEL-230763] {CVE-2026-53259}
+- ipv6: mcast: Fix use-after-free when processing MLD queries (Felix Maurer) [RHEL-226073] {CVE-2026-53275}
+- ipv6: prevent possible UaF in addrconf_permanent_addr() (Felix Maurer) [RHEL-225606] {CVE-2026-43339}
+- net: guard timestamp cmsgs to real error queue skbs (Felix Maurer) [RHEL-225864] {CVE-2026-53223}
+- net: add pskb_may_pull() to skb_gro_receive_list() (Felix Maurer) [RHEL-229309] {CVE-2026-53235}
+- can: bcm: extend bcm_tx_lock usage for data and timer updates (Abhishek Rawal) [RHEL-216700] {CVE-2025-38004}
+- can: bcm: add locking when updating filter and timer values (Abhishek Rawal) [RHEL-216700] {CVE-2025-38004}
+- can: bcm: fix locking for bcm_op runtime updates (Abhishek Rawal) [RHEL-216700] {CVE-2025-38004}
+- can: bcm: add locking for bcm_op runtime updates (Abhishek Rawal) [RHEL-216700] {CVE-2025-38004}
+- smb: client: fix double-free in SMB2_close() replay (Paulo Alcantara) [RHEL-240056] {CVE-2026-64597}
+- selftests: nft_queue.sh: add a parallel stress test (Florian Westphal) [RHEL-132852]
+- selftests: netfilter: nft_queue.sh: avoid flakes on debug kernels (Florian Westphal) [RHEL-132852]
+- netfilter: nfnetlink_queue: make hash table per queue (Florian Westphal) [RHEL-132852] {CVE-2026-43084}
+- netfilter: nfnetlink_queue: optimize verdict lookup with hash table (Florian Westphal) [RHEL-132852]
+- netfilter: nfnetlink_queue: nfqnl_instance GFP_ATOMIC -> GFP_KERNEL_ACCOUNT allocation (Florian Westphal) [RHEL-132852]
+- ppp: require CAP_NET_ADMIN in target netns for unattached ioctls (Abhishek Rawal) [RHEL-228009] {CVE-2026-53075}
+- vxlan: do not reuse cached ip_hdr() value after skb_tunnel_check_pmtu() (Abhishek Rawal) [RHEL-231711] {CVE-2026-63993}
+- ipv6: sit: reload inner IPv6 header after GSO offloads (Abhishek Rawal) [RHEL-225920] {CVE-2026-53228}
+- ipv6: add NULL checks for idev in SRv6 paths (Abhishek Rawal) [RHEL-218012] {CVE-2026-23442}
+- nvmet-auth: validate reply message payload bounds against transfer length (CKI Backport Bot) [RHEL-234153] {CVE-2026-64319}
+- KVM: arm64: Bound used_lrs when flushing the pKVM hyp vCPU (CKI Backport Bot) [RHEL-234204] {CVE-2026-64287}
+- KVM: arm64: Take the SRCU lock for page table walks in fault injection and AT emulation (CKI Backport Bot) [RHEL-229347] {CVE-2026-53277}
+- ipv4: free net->ipv4.sysctl_local_reserved_ports after unregister_net_sysctl_table() (CKI Backport Bot) [RHEL-227269] {CVE-2026-64002}
+- io_uring/poll: fix signed comparison in io_poll_get_ownership() (CKI Backport Bot) [RHEL-227111] {CVE-2026-52933}
+Resolves: RHEL-132852, RHEL-216700, RHEL-218012, RHEL-218016, RHEL-218495, RHEL-225606, RHEL-225864, RHEL-225920, RHEL-226073, RHEL-226125, RHEL-227111, RHEL-227269, RHEL-228009, RHEL-229309, RHEL-229347, RHEL-230763, RHEL-231711, RHEL-232246, RHEL-232629, RHEL-234153, RHEL-234204, RHEL-240056, RHEL-248457
+
 * Tue Sep 01 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.51.1.el10_2]
 - net: ipv6: clear suppressed fib6 rule result (Jamie Bainbridge) [RHEL-246368] {CVE-2026-74581}
 - iomap: fix out-of-bounds bitmap_set() with zero-length range (CKI Backport Bot) [RHEL-240183] {CVE-2026-68145}
