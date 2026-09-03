@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.45.1
+%define pkgrelease 687.46.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.45.1.el9_8
+%define tarfile_release 5.14.0-687.46.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.45.1%{?buildid}%{?dist}
+%define specrelease 687.46.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.45.1.el9_8
+%define kabiversion 5.14.0-687.46.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3803,10 +3803,37 @@ fi
 #
 #
 %changelog
-* Tue Sep 08 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.45.1
+* Thu Sep 10 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.46.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Thu Sep 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.46.1.el9_8]
+- tcp: call sk_data_ready() after listener migration (Felix Maurer) [RHEL-232236] {CVE-2026-46015}
+- flow_dissector: do not dissect PPPoE PFC frames (Felix Maurer) [RHEL-232633] {CVE-2026-46306}
+- inet: RAW sockets using IPPROTO_RAW MUST drop incoming ICMP (Felix Maurer) [RHEL-226126] {CVE-2026-46266}
+- ipv4: icmp: convert to dev_net_rcu() (Felix Maurer) [RHEL-226126]
+- ipv6: mcast: Fix use-after-free when processing MLD queries (Felix Maurer) [RHEL-226071] {CVE-2026-53275}
+- ipv6: prevent possible UaF in addrconf_permanent_addr() (Felix Maurer) [RHEL-225592] {CVE-2026-43339}
+- ipv6: account for fraggap on the paged allocation path (Felix Maurer) [RHEL-212891]
+- ipv4: account for fraggap on the paged allocation path (Felix Maurer) [RHEL-212891] {CVE-2026-53366}
+- inet: ping: fix recent breakage (Felix Maurer) [RHEL-212891]
+- net: unify alloclen calculation for paged requests (Felix Maurer) [RHEL-212891]
+- net: guard timestamp cmsgs to real error queue skbs (Felix Maurer) [RHEL-225858] {CVE-2026-53223}
+- rhashtable: clear stale iter->p on table restart (CKI Backport Bot) [RHEL-248451] {CVE-2026-64563}
+- net: bridge: stop fast-leave after deleting a port group (CKI Backport Bot) [RHEL-246930] {CVE-2026-74480}
+- nvmet-rdma: handle inline data with a nonzero offset (CKI Backport Bot) [RHEL-244971] {CVE-2026-72129}
+- Revert "net/smc: Introduce TCP ULP support" (Jan Polensky) [RHEL-227559] {CVE-2026-46330}
+- smb: client: fix double-free in SMB2_close() replay (CKI Backport Bot) [RHEL-240049] {CVE-2026-64597}
+- crypto: pcrypt - Fix handling of MAY_BACKLOG requests (Ricardo Robaina) [RHEL-226689] {CVE-2026-43493}
+- net: mana: Fix TOCTOU double-fetch of hwc_msg_id from DMA buffer (CKI Backport Bot) [RHEL-230988] {CVE-2026-64034}
+- scsi: target: configfs: Bound snprintf() return in tg_pt_gp_members_show() (CKI Backport Bot) [RHEL-225785] {CVE-2026-46149}
+- netfilter: conntrack: remove sprintf usage (CKI Backport Bot) [RHEL-224454] {CVE-2026-53002}
+- KVM: nSVM: Always use vmcb01 in VMLOAD/VMSAVE emulation (CKI Backport Bot) [RHEL-189457] {CVE-2026-43133}
+- mm/ksm: add option to deduplicate only zero pages (Andrea Arcangeli) [RHEL-249161]
+- mm/ksm: don't waste time searching stable tree for fast changing page (Andrea Arcangeli) [RHEL-249161]
+- mm/hugetlb.c: undo errant change (Andrea Arcangeli) [RHEL-249161]
+- mm/ksm: refactor out try_to_merge_with_zero_page() (Andrea Arcangeli) [RHEL-249161]
 
 * Wed Sep 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.45.1.el9_8]
 - KVM: arm64: Bound used_lrs when flushing the pKVM hyp vCPU (Jon Maloy) [RHEL-234207] {CVE-2026-64287}
