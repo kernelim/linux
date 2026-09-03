@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.159.1.el8_10
+%define pkgrelease 553.160.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.159.1%{?dist}
+%define specrelease 553.160.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,24 @@ fi
 #
 #
 %changelog
-* Thu Sep 03 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.159.1
+* Wed Sep 09 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.160.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Thu Sep 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.160.1.el8_10]
+- rhashtable: clear stale iter->p on table restart (CKI Backport Bot) [RHEL-248433] {CVE-2026-64563}
+- net: bridge: stop fast-leave after deleting a port group (CKI Backport Bot) [RHEL-246938] {CVE-2026-74480}
+- nvmet-rdma: handle inline data with a nonzero offset (CKI Backport Bot) [RHEL-244910] {CVE-2026-72129}
+- crypto: pcrypt - Fix handling of MAY_BACKLOG requests (Ricardo Robaina) [RHEL-226702] {CVE-2026-43493}
+- crypto: pcrypt - Delay write to padata->info (Ricardo Robaina) [RHEL-226702] {CVE-2026-43493}
+- crypto: pcrypt - Do not clear MAY_SLEEP flag in original request (Ricardo Robaina) [RHEL-226702] {CVE-2026-43493}
+- smb: client: validate DFS referral PathConsumed (CKI Backport Bot) [RHEL-237655] {CVE-2026-68343}
+- netfilter: synproxy: refresh tcphdr after skb_ensure_writable (CKI Backport Bot) [RHEL-228903] {CVE-2026-64007}
+- netfilter: conntrack: remove sprintf usage (CKI Backport Bot) [RHEL-224448] {CVE-2026-53002}
 
 * Mon Aug 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.159.1.el8_10]
 - net: ipv6: clear suppressed fib6 rule result (Jamie Bainbridge) [RHEL-246806] {CVE-2026-74581}
