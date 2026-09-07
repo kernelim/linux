@@ -1003,7 +1003,7 @@ timerlat_top_bpf_main_loop(struct osnoise_tool *top,
 		if (!params->quiet)
 			timerlat_print_stats(params, top);
 
-		if (wait_retval == 1) {
+		if (wait_retval > 0) {
 			/* Stopping requested by tracer */
 			actions_perform(&params->threshold_actions);
 
