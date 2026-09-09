@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.160.1.el8_10
+%define pkgrelease 553.162.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.160.1%{?dist}
+%define specrelease 553.162.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,47 @@ fi
 #
 #
 %changelog
-* Wed Sep 09 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.160.1
+* Thu Sep 10 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.162.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Wed Sep 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.162.1.el8_10]
+- scsi: mpt3sas: Avoid freeing unallocated PCIe SGL buffers (Laurence Oberman) [RHEL-194117]
+- tipc: fix slab-use-after-free Read in tipc_aead_decrypt_done (Xin Long) [RHEL-228877] {CVE-2026-63801}
+- tipc: clear sock->sk on the failed-insert path in tipc_sk_create() (Xin Long) [RHEL-238050] {CVE-2026-68117}
+- sctp: fix race between sctp_wait_for_connect and peeloff (Xin Long) [RHEL-229464] {CVE-2026-63971}
+- sctp: diag: reject stale associations in dump_one path (Xin Long) [RHEL-231561] {CVE-2026-52917}
+- sctp: validate stream count in sctp_process_strreset_inreq() (Xin Long) [RHEL-236135] {CVE-2026-68315}
+- sctp: fix auth_hmacs array size in struct sctp_cookie (Xin Long) [RHEL-237394] {CVE-2026-68376}
+- sctp: auth: verify auth requirement when auth_chunk is NULL (Xin Long) [RHEL-237088] {CVE-2026-68300}
+- gfs2: harden gfs2_glock_hold (Andreas Gruenbacher) [RHEL-240340]
+- gfs2: gfs2_glock_hold cleanup (Andreas Gruenbacher) [RHEL-240340]
+- sctp: validate embedded INIT chunk and address list lengths in cookie (Xin Long) [RHEL-190202]
+- sctp: validate cached peer INIT chunk length in COOKIE_ECHO processing (Xin Long) [RHEL-190202] {CVE-2026-53246}
+- netfilter: nf_log: validate MAC header was set before dumping it (CKI Backport Bot) [RHEL-232055] {CVE-2026-52942}
+- netfilter: nf_conntrack_sip: don't use simple_strtoul (CKI Backport Bot) [RHEL-232024] {CVE-2026-52986}
+- scsi: qla2xxx: Clear cmds after chip reset (CKI Backport Bot) [RHEL-230822] {CVE-2025-68745}
+- scsi: target: configfs: Bound snprintf() return in tg_pt_gp_members_show() (CKI Backport Bot) [RHEL-225791] {CVE-2026-46149}
+
+* Mon Sep 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.161.1.el8_10]
+- security/keys: fix missed RCU read section on lookup (Bruno Meneguele) [RHEL-225679] {CVE-2026-64015}
+- ixgbevf: fix use-after-free in VEPA multicast source pruning (CKI Backport Bot) [RHEL-227760] {CVE-2026-64113}
+- xfrm: Don't clobber inner headers when already set (Ivan Vecera) [RHEL-188227] {CVE-2026-53091}
+- net: pull headers in qdisc_pkt_len_segs_init() (Ivan Vecera) [RHEL-188227] {CVE-2026-53091}
+- net: qdisc_pkt_len_segs_init() cleanup (Ivan Vecera) [RHEL-188227] {CVE-2026-53091}
+- net: use qdisc_pkt_len_segs_init() in sch_handle_ingress() (Ivan Vecera) [RHEL-188227] {CVE-2026-53091}
+- net_sched: initialize qdisc_skb_cb(skb)->pkt_segs in qdisc_pkt_len_init() (Ivan Vecera) [RHEL-188227] {CVE-2026-53091}
+- net: init shinfo->gso_segs from qdisc_pkt_len_init() (Ivan Vecera) [RHEL-188227] {CVE-2026-53091}
+- net: add more sanity checks to qdisc_pkt_len_init() (Ivan Vecera) [RHEL-188227] {CVE-2026-53091}
+- net_sched: make room for (struct qdisc_skb_cb)->pkt_segs (Ivan Vecera) [RHEL-188227] {CVE-2026-53091}
+- net: account for encap headers in qdisc pkt len (Ivan Vecera) [RHEL-188227] {CVE-2026-53091}
+- sch_cake: do not use skb_mac_header() in cake_overhead() (Ivan Vecera) [RHEL-188227] {CVE-2026-53091}
+- net: do not use skb_mac_header() in qdisc_pkt_len_init() (Ivan Vecera) [RHEL-188227] {CVE-2026-53091}
+- net: Skip GSO length estimation if transport header is not set (Ivan Vecera) [RHEL-188227] {CVE-2026-53091}
 
 * Thu Sep 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.160.1.el8_10]
 - rhashtable: clear stale iter->p on table restart (CKI Backport Bot) [RHEL-248433] {CVE-2026-64563}

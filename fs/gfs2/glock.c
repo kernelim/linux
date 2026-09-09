@@ -213,8 +213,8 @@ static void gfs2_free_dead_glocks(struct gfs2_sbd *sdp)
 
 void gfs2_glock_hold(struct gfs2_glock *gl)
 {
-	GLOCK_BUG_ON(gl, __lockref_is_dead(&gl->gl_lockref));
-	lockref_get(&gl->gl_lockref);
+	if (!lockref_get_not_zero(&gl->gl_lockref))
+		GLOCK_BUG_ON(gl, 1);
 }
 
 /**
@@ -1879,7 +1879,9 @@ void gfs2_glock_cb(struct gfs2_glock *gl, unsigned int state)
 	unsigned long holdtime;
 	unsigned long now = jiffies;
 
-	gfs2_glock_hold(gl);
+	if (!lockref_get_not_dead(&gl->gl_lockref))
+		return;
+
 	spin_lock(&gl->gl_lockref.lock);
 	holdtime = gl->gl_tchange + gl->gl_hold_time;
 	if (!list_empty(&gl->gl_holders) &&
