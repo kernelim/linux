@@ -1,3 +1,145 @@
+* Mon Sep 14 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.55.1.el10_2]
+- arm64: dts: s32g: add SAR ADC support for s32g2 and s32g3 (Jared Kangas) [RHEL-256890]
+- arm64: dts: s32g3: Fix SWT8 watchdog address (Albert Esteve) [RHEL-256890]
+- iio: adc: nxp-sar-adc: Fix the delay calculation in nxp_sar_adc_wait_for() (Albert Esteve) [RHEL-256890]
+- iio: adc: nxp-sar-adc: harden buffer ISR against per-channel read failure (Albert Esteve) [RHEL-256890]
+- iio: adc: nxp-sar-adc: Remove unnecessary type casting (Albert Esteve) [RHEL-256890]
+- iio: core: fix uninitialized data in debugfs (Albert Esteve) [RHEL-256890]
+- iio: fix potential out-of-bound write (Albert Esteve) [RHEL-256890]
+- iio: core: make use of simple_write_to_buffer() (Albert Esteve) [RHEL-256890]
+- iio: buffer: Move from int64_t to s64 for timestamp (Albert Esteve) [RHEL-256890]
+- iio: buffer: Fix DMA fence leak in iio_buffer_enqueue_dmabuf() (Albert Esteve) [RHEL-256890]
+- iio: Replace 'sign' field with union in struct iio_scan_type (Albert Esteve) [RHEL-256890]
+- iio: buffer: ensure repeat alignment is a power of two (Albert Esteve) [RHEL-256890]
+- iio: buffer: cache timestamp offset in scan buffer (Albert Esteve) [RHEL-256890]
+- iio: buffer: check return value of iio_compute_scan_bytes() (Albert Esteve) [RHEL-256890]
+- iio: core: Clean up device correctly on viio_trigger_alloc() failure (Albert Esteve) [RHEL-256890]
+- iio: core: Simplify IIO core managed APIs (Albert Esteve) [RHEL-256890]
+- iio: inkern: call iio_device_put() only on mapped devices (Albert Esteve) [RHEL-256890]
+- iio: Fix fwnode_handle in __fwnode_iio_channel_get_by_name() (Albert Esteve) [RHEL-256890]
+- dmaengine: fsl-edma: Use dev_err_probe() to simplify code (Albert Esteve) [RHEL-256890]
+- dmaengine: fsl-edma: Use managed API dmaenginem_async_device_register() (Albert Esteve) [RHEL-256890]
+- dmaengine: of_dma: Add devm_of_dma_controller_register() (Albert Esteve) [RHEL-256890]
+- dt-bindings: dma: fsl-edma: add dma-channel-mask property description (Albert Esteve) [RHEL-256890]
+- dmaengine: fsl-edma: don't explicitly disable clocks in .remove() (Albert Esteve) [RHEL-256890]
+- dmaengine: fsl-edma: drop unused module alias (Albert Esteve) [RHEL-256890]
+- dmaengine: fsl-edma: configure tcd attr with separate src and dst settings (Albert Esteve) [RHEL-256890]
+- dmaengine: fsl-edma: Fix clk leak on alloc_chan_resources failure (Albert Esteve) [RHEL-256890]
+- dmaengine: fsl-edma: Remove redundant check in fsl_edma_free_chan_resources() (Albert Esteve) [RHEL-256890]
+- dmaengine: fsl-edma: fix channel parameter config for fixed channel requests (Albert Esteve) [RHEL-256890]
+- i2c: imx: fix clock and pinctrl state inconsistency in runtime PM (Albert Esteve) [RHEL-256890]
+- i2c: imx: zero-initialize dma_slave_config for eDMA (Albert Esteve) [RHEL-256890]
+- i2c: imx: ensure no clock is generated after last read (Albert Esteve) [RHEL-256890]
+- i2c: imx: fix i2c issue when reading multiple messages (Albert Esteve) [RHEL-256890]
+- i2c: imx: preserve error state in block data length handler (Albert Esteve) [RHEL-256890]
+- redhat/configs: automotive: enable NXP_SAR_ADC as a module (Eric Chanudet) [RHEL-255233]
+- iio: adc: nxp-sar-adc: Avoid division by zero (Eric Chanudet) [RHEL-255233]
+- iio: adc: nxp-sar-adc: zero-initialize dma_slave_config (Eric Chanudet) [RHEL-255233]
+- iio: adc: nxp-sar-adc: fix division by zero in write_raw (Eric Chanudet) [RHEL-255233]
+- iio: adc: nxp-sar-adc: Fix DMA channel leak in trigger mode (Eric Chanudet) [RHEL-255233]
+- iio: buffer: Fix wait_queue not being removed (Eric Chanudet) [RHEL-255233]
+- iio: core: add separate lockdep class for info_exist_lock (Eric Chanudet) [RHEL-255233]
+- iio: adc: Add the NXP SAR ADC support for the s32g2/3 platforms (Eric Chanudet) [RHEL-255233]
+- dt-bindings: iio: adc: Add the NXP SAR ADC for s32g2/3 platforms (Eric Chanudet) [RHEL-255233]
+- iio: core: Replace lockdep_set_class() + mutex_init() by combined call (Eric Chanudet) [RHEL-255233]
+- iio: core: Clean up device correctly on iio_device_alloc() failure (Eric Chanudet) [RHEL-255233]
+- iio: core: add missing mutex_destroy in iio_dev_release() (Eric Chanudet) [RHEL-255233]
+- iio: iio_format_list() should set stride=1 for IIO_VAL_CHAR (Eric Chanudet) [RHEL-255233]
+- iio: backend: fix out-of-bound write (Eric Chanudet) [RHEL-255233]
+- iio: introduce IIO_DECLARE_BUFFER_WITH_TS macros (Eric Chanudet) [RHEL-255233]
+- iio: make IIO_DMA_MINALIGN minimum of 8 bytes (Eric Chanudet) [RHEL-255233]
+- iio: backend: make sure to NULL terminate stack buffer (Eric Chanudet) [RHEL-255233]
+- iio: core: Rework claim and release of direct mode to work with sparse. (Eric Chanudet) [RHEL-255233]
+- iio: backend: fix wrong pointer passed to IS_ERR() (Eric Chanudet) [RHEL-255233]
+- iio: buffer: document iio_push_to_buffers_with_ts() (Eric Chanudet) [RHEL-255233]
+- iio: introduced iio_push_to_buffers_with_ts() that takes a data_total_len argument. (Eric Chanudet) [RHEL-255233]
+- iio: Drop iio_device_claim_direct_scoped() and related infrastructure (Eric Chanudet) [RHEL-255233]
+- iommu/vt-d: Fix UCTP context table slot when copying root entries (Desnes Nunes) [RHEL-256731]
+- watchdog: fix hrtimer start when pretimeout is zero (David Arcari) [RHEL-255348]
+- smb: server: avoid double-free in smb_direct_free_sendmsg after smb_direct_flush_send_list() (Paulo Alcantara) [RHEL-230559]
+- smb: client: avoid double-free in smbd_free_send_io() after smbd_send_batch_flush() (Paulo Alcantara) [RHEL-230559]
+- smb: client: let send_done handle a completion without IB_SEND_SIGNALED (Paulo Alcantara) [RHEL-230559]
+- smb: client: let smbd_post_send_negotiate_req() use smbd_post_send() (Paulo Alcantara) [RHEL-230559]
+- smb: client: fix last send credit problem causing disconnects (Paulo Alcantara) [RHEL-230559]
+- smb: client: make use of smbdirect_socket.send_io.bcredits (Paulo Alcantara) [RHEL-230559]
+- smb: client: use smbdirect_send_batch processing (Paulo Alcantara) [RHEL-230559]
+- smb: client: introduce and use smbd_{alloc, free}_send_io() (Paulo Alcantara) [RHEL-230559]
+- smb: client: split out smbd_ib_post_send() (Paulo Alcantara) [RHEL-230559]
+- smb: client: port and use the wait_for_credits logic used by server (Paulo Alcantara) [RHEL-230559]
+- smb: client: remove pointless sc->send_io.pending handling in smbd_post_send_iter() (Paulo Alcantara) [RHEL-230559]
+- smb: client: remove pointless sc->recv_io.credits.count rollback (Paulo Alcantara) [RHEL-230559]
+- smb: client: let smbd_post_send() make use of request->wr (Paulo Alcantara) [RHEL-230559]
+- smb: client: let recv_done() queue a refill when the peer is low on credits (Paulo Alcantara) [RHEL-230559]
+- smb: client: make use of smbdirect_socket.recv_io.credits.available (Paulo Alcantara) [RHEL-230559]
+- smb: server: let send_done handle a completion without IB_SEND_SIGNALED (Paulo Alcantara) [RHEL-230559]
+- smb: server: fix last send credit problem causing disconnects (Paulo Alcantara) [RHEL-230559]
+- smb: server: make use of smbdirect_socket.send_io.bcredits (Paulo Alcantara) [RHEL-230559]
+- smb: server: let recv_done() queue a refill when the peer is low on credits (Paulo Alcantara) [RHEL-230559]
+- smb: server: make use of smbdirect_socket.recv_io.credits.available (Paulo Alcantara) [RHEL-230559]
+- smb: smbdirect: introduce smbdirect_socket.send_io.bcredits.* (Paulo Alcantara) [RHEL-230559]
+- smb: smbdirect: introduce smbdirect_socket.recv_io.credits.available (Paulo Alcantara) [RHEL-230559] {CVE-2026-31539}
+- scsi: libiscsi_tcp: Bound SCSI Response data segment to the connection buffer (CKI Backport Bot) [RHEL-254596] {CVE-2026-74556}
+- drm/xe: Issue GGTT invalidation under lock in ggtt_node_remove (Mika Penttilä) [RHEL-222461] {CVE-2026-23466}
+- drm/amdgpu: Fix use-after-free race in VM acquire (CKI Backport Bot) [RHEL-222401] {CVE-2026-43370}
+- drm/i915: Fix potential overflow of shmem scatterlist length (CKI Backport Bot) [RHEL-222474] {CVE-2026-43368}
+- drm/i915/gt: fix refcount underflow in intel_engine_park_heartbeat (CKI Backport Bot) [RHEL-222424] {CVE-2026-31656}
+- drm/amdgpu: Fix fence put before wait in amdgpu_amdkfd_submit_ib (CKI Backport Bot) [RHEL-221279] {CVE-2026-31566}
+- drm/xe: always keep track of remap prev/next (CKI Backport Bot) [RHEL-222307] {CVE-2026-31479}
+- drm/xe: Open-code GGTT MMIO access protection (CKI Backport Bot) [RHEL-222461] {CVE-2026-23466}
+- drm/xe/pt: Reset current_op in xe_pt_update_ops_init() (Mika Penttilä) [RHEL-236579] {CVE-2026-68264}
+- mshv: Fix infinite fault loop on permission-denied GPA intercepts (Maxim Levitsky) [RHEL-245035]
+- mshv: Fix error handling in mshv_region_pin (Maxim Levitsky) [RHEL-245035]
+- mshv: Fix use-after-free in mshv_map_user_memory error path (Maxim Levitsky) [RHEL-245035]
+- mshv: pass struct mshv_user_mem_region by reference (Maxim Levitsky) [RHEL-245035]
+- mshv: Handle insufficient root memory hypervisor statuses (Maxim Levitsky) [RHEL-245035]
+- mshv: Handle insufficient contiguous memory hypervisor status (Maxim Levitsky) [RHEL-245035]
+- mshv: Introduce hv_deposit_memory helper functions (Maxim Levitsky) [RHEL-245035]
+- mshv: Introduce hv_result_needs_memory() helper function (Maxim Levitsky) [RHEL-245035]
+- mshv: Add SMT_ENABLED_GUEST partition creation flag (Maxim Levitsky) [RHEL-245035]
+- mshv: Add support for integrated scheduler (Maxim Levitsky) [RHEL-245035]
+- mshv: Add debugfs to view hypervisor statistics (Maxim Levitsky) [RHEL-245035]
+- mshv: Add data for printing stats page counters (Maxim Levitsky) [RHEL-245035]
+- mshv: Update hv_stats_page definitions (Maxim Levitsky) [RHEL-245035]
+- mshv: Always map child vp stats pages regardless of scheduler type (Maxim Levitsky) [RHEL-245035]
+- mshv: Improve mshv_vp_stats_map/unmap(), add them to mshv_root.h (Maxim Levitsky) [RHEL-245035]
+- mshv: Use typed hv_stats_page pointers (Maxim Levitsky) [RHEL-245035]
+- mshv: Ignore second stats page map result failure (Maxim Levitsky) [RHEL-245035]
+- xfrm: Fix dev use-after-free in xfrm async resumption (Sabrina Dubroca) [RHEL-233037] {CVE-2026-31663}
+- xfrm: hold dev ref until after transport_finish NF_HOOK (Sabrina Dubroca) [RHEL-233037] {CVE-2026-31663}
+- xfrm: hold device only for the asynchronous decryption (Sabrina Dubroca) [RHEL-233037] {CVE-2026-31663}
+- xfrm: input: hold netns during deferred transport reinjection (Sabrina Dubroca) [RHEL-227502] {CVE-2026-63919}
+- xfrm: fix stale skb->prev after async crypto steals a GSO segment (Sabrina Dubroca) [RHEL-236113] {CVE-2026-68426}
+- xfrm: propagate -EINPROGRESS from validate_xmit_xfrm() (Sabrina Dubroca) [RHEL-236113] {CVE-2026-68426}
+- xfrm: policy: fix use-after-free on inexact bin in xfrm_policy_bysel_ctx() (Sabrina Dubroca) [RHEL-228006] {CVE-2026-53239}
+- ip6: vti: Use ip6_tnl.net in vti6_changelink(). (Sabrina Dubroca) [RHEL-231756] {CVE-2026-63917}
+- ip6: vti: Use ip6_tnl.net in vti6_siocdevprivate(). (Sabrina Dubroca) [RHEL-228943] {CVE-2026-63921}
+- af_unix: Set gc_in_progress to true in unix_gc(). (Davide Caratti) [RHEL-227544] {CVE-2026-53361}
+- af_unix: Give up GC if MSG_PEEK intervened. (Davide Caratti) [RHEL-227544] {CVE-2026-23394}
+- af_unix: Consolidate unix_schedule_gc() and wait_for_unix_gc(). (Davide Caratti) [RHEL-227544]
+- af_unix: Remove unix_tot_inflight. (Davide Caratti) [RHEL-227544]
+- af_unix: Refine wait_for_unix_gc(). (Davide Caratti) [RHEL-227544]
+- af_unix: Don't call wait_for_unix_gc() on every sendmsg(). (Davide Caratti) [RHEL-227544]
+- af_unix: Don't trigger GC from close() if unnecessary. (Davide Caratti) [RHEL-227544]
+- af_unix: Simplify GC state. (Davide Caratti) [RHEL-227544]
+- af_unix: Count cyclic SCC. (Davide Caratti) [RHEL-227544]
+- af_unix: Initialise scc_index in unix_add_edge(). (Davide Caratti) [RHEL-227544]
+- af_unix: Clean up #include under net/unix/. (Davide Caratti) [RHEL-227544]
+- af_unix: Explicitly include headers for non-pointer struct fields. (Davide Caratti) [RHEL-227544]
+- af_unix: Sort headers. (Davide Caratti) [RHEL-227544]
+- unix: fix up for "apparmor: add fine grained af_unix mediation" (Davide Caratti) [RHEL-227544]
+- af_unix: Move internal definitions to net/unix/. (Davide Caratti) [RHEL-227544]
+- sctp: validate embedded INIT chunk and address list lengths in cookie (Xin Long) [RHEL-190194]
+- sctp: validate cached peer INIT chunk length in COOKIE_ECHO processing (Xin Long) [RHEL-190194] {CVE-2026-53246}
+- scsi: qla2xxx: Clear cmds after chip reset (CKI Backport Bot) [RHEL-235912] {CVE-2025-68745}
+- lsm: hold cred_guard_mutex for lsm_set_self_attr() (Ricardo Robaina) [RHEL-226807] {CVE-2026-64111}
+- tls: Use __sk_dst_get() and dst_dev_rcu() in get_netdev_for_sock(). (CKI Backport Bot) [RHEL-231909] {CVE-2025-40149}
+- netfilter: require Ethernet MAC header before using eth_hdr() (CKI Backport Bot) [RHEL-230672] {CVE-2026-53131}
+- scsi: scsi_transport_fc: Widen FPIN pname walker counter to u32 (CKI Backport Bot) [RHEL-228717] {CVE-2026-63889}
+- scsi: target: configfs: Bound snprintf() return in tg_pt_gp_members_show() (CKI Backport Bot) [RHEL-225792] {CVE-2026-46149}
+- sctp: purge outqueue on stale COOKIE-ECHO handling (CKI Backport Bot) [RHEL-188199] {CVE-2026-52924}
+- vhost: move vdpa group bound check to vhost_vdpa (CKI Backport Bot) [RHEL-174283] {CVE-2026-43248}
+Resolves: RHEL-174283, RHEL-188199, RHEL-190194, RHEL-221279, RHEL-222307, RHEL-222401, RHEL-222424, RHEL-222461, RHEL-222474, RHEL-225792, RHEL-226807, RHEL-227502, RHEL-227544, RHEL-228006, RHEL-228717, RHEL-228943, RHEL-230559, RHEL-230672, RHEL-231756, RHEL-231909, RHEL-233037, RHEL-235912, RHEL-236113, RHEL-236579, RHEL-245035, RHEL-254596, RHEL-255233, RHEL-255348, RHEL-256731, RHEL-256890
+
 * Mon Sep 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.54.1.el10_2]
 - net: bridge: stop fast-leave after deleting a port group (CKI Backport Bot) [RHEL-246933] {CVE-2026-74480}
 Resolves: RHEL-246933
