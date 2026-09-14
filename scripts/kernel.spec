@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.162.1.el8_10
+%define pkgrelease 553.163.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.162.1%{?dist}
+%define specrelease 553.163.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,28 @@ fi
 #
 #
 %changelog
-* Thu Sep 10 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.162.1
+* Tue Sep 15 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.163.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Mon Sep 14 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.163.1.el8_10]
+- EDAC/bluefield: Fix potential integer overflow (Joel Savitz) [RHEL-234337] {CVE-2024-53161}
+- scsi: libiscsi_tcp: Bound SCSI Response data segment to the connection buffer (CKI Backport Bot) [RHEL-254583] {CVE-2026-74556}
+- blk-cgroup: fix UAF in __blkcg_rstat_flush() (Jeff Moyer) [RHEL-230276] {CVE-2026-63802}
+- dm-verity: fix buffer overflow in FEC calculation (Benjamin Marzinski) [RHEL-244942] {CVE-2026-72098}
+- net: qrtr: restrict socket creation to the initial network namespace (Jose Ignacio Tornos Martinez) [RHEL-239090] {CVE-2026-68294}
+- wifi: ath9k: hif_usb: don't dereference hif_dev after re-arming firmware request (Jose Ignacio Tornos Martinez) [RHEL-237990] {CVE-2026-68363}
+- wifi: mac80211: capture fast-RX rate before mesh reuses skb->cb (Jose Ignacio Tornos Martinez) [RHEL-231677] {CVE-2026-64117}
+- wifi: mac80211: fix missing RX bitrate update for mesh forwarding path (Jose Ignacio Tornos Martinez) [RHEL-231677] {CVE-2026-64117}
+- wifi: mac80211: Discard Beacon frames to non-broadcast address (Jose Ignacio Tornos Martinez) [RHEL-230705] {CVE-2025-71127}
+- wifi: nl80211: reject oversized EMA RNR lists (Jose Ignacio Tornos Martinez) [RHEL-230593] {CVE-2026-53182}
+- net: qrtr: fix refcount saturation and potential UAF in qrtr_port_remove (Jose Ignacio Tornos Martinez) [RHEL-229715] {CVE-2026-52947}
+- scsi: scsi_transport_fc: Widen FPIN pname walker counter to u32 (CKI Backport Bot) [RHEL-228708] {CVE-2026-63889}
+- KVM: nSVM: Always use vmcb01 in VMLOAD/VMSAVE emulation (CKI Backport Bot) [RHEL-189455] {CVE-2026-43133}
 
 * Wed Sep 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.162.1.el8_10]
 - scsi: mpt3sas: Avoid freeing unallocated PCIe SGL buffers (Laurence Oberman) [RHEL-194117]
