@@ -622,7 +622,7 @@ static void gfs2_discard(struct gfs2_sbd *sdp, struct buffer_head *bh)
 	struct gfs2_bufdata *bd;
 
 	lock_buffer(bh);
-	gfs2_log_lock(sdp);
+	spin_lock(&sdp->sd_log_lock);
 	clear_buffer_dirty(bh);
 	bd = bh->b_private;
 	if (bd) {
@@ -638,7 +638,7 @@ static void gfs2_discard(struct gfs2_sbd *sdp, struct buffer_head *bh)
 	clear_buffer_mapped(bh);
 	clear_buffer_req(bh);
 	clear_buffer_new(bh);
-	gfs2_log_unlock(sdp);
+	spin_unlock(&sdp->sd_log_lock);
 	unlock_buffer(bh);
 }
 
@@ -706,7 +706,7 @@ bool gfs2_release_folio(struct folio *folio, gfp_t gfp_mask)
 	 * again.
 	 */
 
-	gfs2_log_lock(sdp);
+	spin_lock(&sdp->sd_log_lock);
 	bh = head;
 	do {
 		if (atomic_read(&bh->b_count))
@@ -738,12 +738,12 @@ bool gfs2_release_folio(struct folio *folio, gfp_t gfp_mask)
 
 		bh = bh->b_this_page;
 	} while (bh != head);
-	gfs2_log_unlock(sdp);
+	spin_unlock(&sdp->sd_log_lock);
 
 	return try_to_free_buffers(folio);
 
 cannot_release:
-	gfs2_log_unlock(sdp);
+	spin_unlock(&sdp->sd_log_lock);
 	return false;
 }
 

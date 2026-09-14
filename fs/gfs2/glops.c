@@ -65,7 +65,7 @@ static void __gfs2_ail_flush(struct gfs2_glock *gl, bool fsync,
 	struct buffer_head *bh;
 	const unsigned long b_state = (1UL << BH_Dirty)|(1UL << BH_Pinned)|(1UL << BH_Lock);
 
-	gfs2_log_lock(sdp);
+	spin_lock(&sdp->sd_log_lock);
 	spin_lock(&sdp->sd_ail_lock);
 	list_for_each_entry_safe_reverse(bd, tmp, head, bd_ail_gl_list) {
 		if (nr_revokes == 0)
@@ -81,7 +81,7 @@ static void __gfs2_ail_flush(struct gfs2_glock *gl, bool fsync,
 	}
 	GLOCK_BUG_ON(gl, !fsync && atomic_read(&gl->gl_ail_count));
 	spin_unlock(&sdp->sd_ail_lock);
-	gfs2_log_unlock(sdp);
+	spin_unlock(&sdp->sd_log_lock);
 
 	if (gfs2_withdrawing(sdp))
 		gfs2_withdraw(sdp);
@@ -113,10 +113,10 @@ static int gfs2_ail_empty_gl(struct gfs2_glock *gl)
 		 * If none of these conditions are true, our revokes are all
 		 * flushed and we can return.
 		 */
-		gfs2_log_lock(sdp);
+		spin_lock(&sdp->sd_log_lock);
 		have_revokes = !list_empty(&sdp->sd_log_revokes);
 		log_in_flight = atomic_read(&sdp->sd_log_in_flight);
-		gfs2_log_unlock(sdp);
+		spin_unlock(&sdp->sd_log_lock);
 		if (have_revokes)
 			goto flush;
 		if (log_in_flight)

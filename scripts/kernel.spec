@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.47.1
+%define pkgrelease 687.48.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.47.1.el9_8
+%define tarfile_release 5.14.0-687.48.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.47.1%{?buildid}%{?dist}
+%define specrelease 687.48.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.47.1.el9_8
+%define kabiversion 5.14.0-687.48.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3803,10 +3803,23 @@ fi
 #
 #
 %changelog
-* Mon Sep 14 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.47.1
+* Tue Sep 15 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.48.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Mon Sep 14 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.48.1.el9_8]
+- scsi: libiscsi_tcp: Bound SCSI Response data segment to the connection buffer (CKI Backport Bot) [RHEL-254594] {CVE-2026-74556}
+- gfs2: bufdata allocation race (Andreas Gruenbacher) [RHEL-178223]
+- gfs2: Remove trans_drain code duplication (Andreas Gruenbacher) [RHEL-178223]
+- gfs2: Move gfs2_remove_from_journal to log.c (Andreas Gruenbacher) [RHEL-178223]
+- gfs2: Get rid of gfs2_log_[un]lock helpers (Andreas Gruenbacher) [RHEL-178223]
+- octeontx2-af: cn10k: restrict VF LMTLINE sharing to its own PF (Michal Schmidt) [RHEL-242822] {CVE-2026-72045}
+- octeontx2-af: validate body pcifunc in rvu_mbox_handler_rep_event_notify (Michal Schmidt) [RHEL-231042] {CVE-2026-63923}
+- net: qrtr: restrict socket creation to the initial network namespace (CKI Backport Bot) [RHEL-240242] {CVE-2026-68294}
+- net: slip: serialize receive against buffer reallocation (CKI Backport Bot) [RHEL-237383] {CVE-2026-68143}
+- security/keys: fix missed RCU read section on lookup (CKI Backport Bot) [RHEL-225660] {CVE-2026-64015}
+- vhost: move vdpa group bound check to vhost_vdpa (Jon Maloy) [RHEL-174277] {CVE-2026-43248}
 
 * Wed Sep 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.47.1.el9_8]
 - dm-verity: fix buffer overflow in FEC calculation (Benjamin Marzinski) [RHEL-244958] {CVE-2026-72098}

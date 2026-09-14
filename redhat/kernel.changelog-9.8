@@ -1,3 +1,17 @@
+* Mon Sep 14 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.48.1.el9_8]
+- scsi: libiscsi_tcp: Bound SCSI Response data segment to the connection buffer (CKI Backport Bot) [RHEL-254594] {CVE-2026-74556}
+- gfs2: bufdata allocation race (Andreas Gruenbacher) [RHEL-178223]
+- gfs2: Remove trans_drain code duplication (Andreas Gruenbacher) [RHEL-178223]
+- gfs2: Move gfs2_remove_from_journal to log.c (Andreas Gruenbacher) [RHEL-178223]
+- gfs2: Get rid of gfs2_log_[un]lock helpers (Andreas Gruenbacher) [RHEL-178223]
+- octeontx2-af: cn10k: restrict VF LMTLINE sharing to its own PF (Michal Schmidt) [RHEL-242822] {CVE-2026-72045}
+- octeontx2-af: validate body pcifunc in rvu_mbox_handler_rep_event_notify (Michal Schmidt) [RHEL-231042] {CVE-2026-63923}
+- net: qrtr: restrict socket creation to the initial network namespace (CKI Backport Bot) [RHEL-240242] {CVE-2026-68294}
+- net: slip: serialize receive against buffer reallocation (CKI Backport Bot) [RHEL-237383] {CVE-2026-68143}
+- security/keys: fix missed RCU read section on lookup (CKI Backport Bot) [RHEL-225660] {CVE-2026-64015}
+- vhost: move vdpa group bound check to vhost_vdpa (Jon Maloy) [RHEL-174277] {CVE-2026-43248}
+Resolves: RHEL-174277, RHEL-178223, RHEL-225660, RHEL-231042, RHEL-237383, RHEL-240242, RHEL-242822, RHEL-254594
+
 * Wed Sep 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.47.1.el9_8]
 - dm-verity: fix buffer overflow in FEC calculation (Benjamin Marzinski) [RHEL-244958] {CVE-2026-72098}
 - mm/khugepaged: write all dirty file folios when collapsing (Rafael Aquini) [RHEL-236332] {CVE-2026-68086}
