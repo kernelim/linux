@@ -1,3 +1,83 @@
+* Wed Sep 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.49.1.el9_8]
+- selinux: check connect-related permissions on TCP Fast Open (CKI Backport Bot) [RHEL-258014] {CVE-2026-72243}
+- gfs2: Get rid of sd_async_glock_wait (Andreas Gruenbacher) [RHEL-253986]
+- watchdog: fix hrtimer start when pretimeout is zero (Krzysztof Pawlinski) [RHEL-255217]
+- iommu/vt-d: Fix UCTP context table slot when copying root entries (Desnes Nunes) [RHEL-256733]
+- wifi: mac80211: limit injected antenna index in ieee80211_parse_tx_radiotap (Izabela Bakollari) [RHEL-246399] {CVE-2026-63869}
+- wifi: cfg80211: advance loop vars in cfg80211_merge_profile() (Izabela Bakollari) [RHEL-240350] {CVE-2026-64174}
+- wifi: brcmfmac: cyw: fix heap overflow on a short auth frame (Izabela Bakollari) [RHEL-242723] {CVE-2026-72003}
+- net: qrtr: fix 32-bit integer overflow in qrtr_endpoint_post() (Izabela Bakollari) [RHEL-244100] {CVE-2026-72298}
+- wifi: ath9k: hif_usb: don't dereference hif_dev after re-arming firmware request (Izabela Bakollari) [RHEL-241012] {CVE-2026-68363}
+- wifi: iwlwifi: mld: stop TX during firmware restart (Izabela Bakollari) [RHEL-243302] {CVE-2026-64175}
+- wifi: iwlwifi: mvm: fix driver-set TX rates on old devices (Izabela Bakollari) [RHEL-243366] {CVE-2026-64176}
+- net: wwan: t7xx: fix potential skb->frags overflow in RX path (Izabela Bakollari) [RHEL-245512] {CVE-2026-23172}
+- gfs2: Remove the glock lru list and shrinker (Andreas Gruenbacher) [RHEL-252544]
+- gfs2: Skip dlm unlocks earlier (Andreas Gruenbacher) [RHEL-252544]
+- gfs2: Don't cache unreferenced glocks (Andreas Gruenbacher) [RHEL-252544]
+- gfs2: Enable automatic glock hash table shrinking (Andreas Gruenbacher) [RHEL-252544]
+- gfs2: Introduce glock_{type,number,sbd} helpers (Andreas Gruenbacher) [RHEL-252544]
+- gfs2: Minor gfs2_glock_cb cleanup (Andreas Gruenbacher) [RHEL-252544]
+- gfs2: Clean up glock demote logic (Andreas Gruenbacher) [RHEL-252544]
+- libceph: bound pg_{temp,upmap,upmap_items} length to CEPH_PG_MAX_SIZE (CKI Backport Bot) [RHEL-237156] {CVE-2026-68159}
+- libceph: Amend checking to fix `make W=1` build breakage (CKI Backport Bot) [RHEL-237156] {CVE-2026-68159}
+- gfs2: Clean up SDF_JOURNAL_LIVE flag handling (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: No longer thaw filesystems during a withdraw (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: gfs2_freeze_unlock cleanup (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: Refcounting fix in gfs2_thaw_super (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: Minor gfs2_{freeze,thaw}_super cleanup (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: Withdraw immediately in gfs2_trans_add_meta (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: New gfs2_withdraw_helper (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: Clean up properly during a withdraw (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: Rename gfs2_{gl_dq_holders => withdraw_glocks} (Andreas Gruenbacher) [RHEL-252540]
+- Revert "gfs2: fix infinite loop when checking ail item count before go_inval" (Andreas Gruenbacher) [RHEL-252540]
+- Revert "gfs2: Allow some glocks to be used during withdraw" (Andreas Gruenbacher) [RHEL-252540]
+- Revert "gfs2: Check for log write errors before telling dlm to unlock" (Andreas Gruenbacher) [RHEL-252540]
+- Revert "gfs2: fix a deadlock on withdraw-during-mount" (Andreas Gruenbacher) [RHEL-252540]
+- Revert "gfs2: Force withdraw to replay journals and wait for it to finish" (6/6) (Andreas Gruenbacher) [RHEL-252540]
+- Revert "gfs2: Force withdraw to replay journals and wait for it to finish" (5/6) (Andreas Gruenbacher) [RHEL-252540]
+- Revert "gfs2: Force withdraw to replay journals and wait for it to finish" (4/6) (Andreas Gruenbacher) [RHEL-252540]
+- Revert "gfs2: Force withdraw to replay journals and wait for it to finish" (3/6) (Andreas Gruenbacher) [RHEL-252540]
+- Revert "gfs2: Force withdraw to replay journals and wait for it to finish" (2/6) (Andreas Gruenbacher) [RHEL-252540]
+- Revert "gfs2: Force withdraw to replay journals and wait for it to finish" (1/6) (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: Follow-up to flag rename in sysfs status file (Andreas Gruenbacher) [RHEL-252540]
+- Revert "gfs2: don't stop reads while withdraw in progress" (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: Rename LM_FLAG_{NOEXP -> RECOVER} (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: Kill gfs2_io_error_bh_wd (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: Withdraw immediately on log write errors (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: Rename gfs2_{withdrawing_or_ => }withdrawn (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: Fix freeze consistency check in log_write_header (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: Get rid of delayed withdraws (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: Fix usage of bio->bi_status in gfs2_end_log_write (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: Asynchronous withdraw (Andreas Gruenbacher) [RHEL-252540]
+- gfs2: Add clean argument to lm_unmount hook (Andreas Gruenbacher) [RHEL-252540]
+- xfrm: Fix dev use-after-free in xfrm async resumption (Sabrina Dubroca) [RHEL-232965] {CVE-2026-31663}
+- xfrm: hold dev ref until after transport_finish NF_HOOK (Sabrina Dubroca) [RHEL-232965] {CVE-2026-31663}
+- xfrm: hold device only for the asynchronous decryption (Sabrina Dubroca) [RHEL-232965] {CVE-2026-31663}
+- xfrm: input: hold netns during deferred transport reinjection (Sabrina Dubroca) [RHEL-227508] {CVE-2026-63919}
+- xfrm: fix stale skb->prev after async crypto steals a GSO segment (Sabrina Dubroca) [RHEL-236120] {CVE-2026-68426}
+- xfrm: propagate -EINPROGRESS from validate_xmit_xfrm() (Sabrina Dubroca) [RHEL-236120] {CVE-2026-68426}
+- xfrm: policy: fix use-after-free on inexact bin in xfrm_policy_bysel_ctx() (Sabrina Dubroca) [RHEL-228016] {CVE-2026-53239}
+- ip6: vti: Use ip6_tnl.net in vti6_changelink(). (Sabrina Dubroca) [RHEL-231753] {CVE-2026-63917}
+- ip6: vti: Use ip6_tnl.net in vti6_siocdevprivate(). (Sabrina Dubroca) [RHEL-228936] {CVE-2026-63921}
+- dm_early_create: fix freeing used table on dm_resume failure (CKI Backport Bot) [RHEL-244932] {CVE-2026-72102}
+- ALSA: timer: don't re-enter an instance callback that is still running (CKI Backport Bot) [RHEL-243028] {CVE-2026-68200}
+- ice: reject out-of-range ptype in ice_parser_profile_init (CKI Backport Bot) [RHEL-240325] {CVE-2026-68128}
+- RDMA/rxe: Fix a use-after-free problem in rxe_mmap (Kamal Heib) [RHEL-233826] {CVE-2026-64582}
+- RDMA/rxe: Reject unknown opcodes before ICRC processing (Kamal Heib) [RHEL-226877] {CVE-2026-46133}
+- RDMA/rxe: Fix race condition in QP timer handlers (Kamal Heib) [RHEL-226914] {CVE-2026-45910}
+- RDMA/rxe: Validate pad and ICRC before payload_size() in rxe_rcv (Kamal Heib) [RHEL-228182] {CVE-2026-46043}
+- RDMA/rxe: Reject non-8-byte ATOMIC_WRITE payloads (Kamal Heib) [RHEL-226315] {CVE-2026-46114}
+- net: ena: PHC: Fix potential use-after-free in get_timestamp (CKI Backport Bot) [RHEL-230627] {CVE-2026-52971}
+- ALSA: timer: Fix UAF at snd_timer_user_params() (CKI Backport Bot) [RHEL-228693] {CVE-2026-53192}
+- ALSA: seq: Serialize UMP output teardown with event_input (CKI Backport Bot) [RHEL-227713] {CVE-2026-64029}
+- ALSA: timer: Clear SNDRV_TIMER_IFLG_DEAD once the close completes (CKI Backport Bot) [RHEL-227087] {CVE-2026-53193}
+- ALSA: timer: Forcibly close timer instances at closing (CKI Backport Bot) [RHEL-227087] {CVE-2026-53193}
+- netfilter: conntrack: tcp: do not force CLOSE on invalid-seq RST without direction check (CKI Backport Bot) [RHEL-226406] {CVE-2026-63913}
+- IB/isert: Reject login PDUs shorter than ISER_HEADERS_LEN (CKI Backport Bot) [RHEL-191605] {CVE-2026-53176}
+- USB: serial: io_ti: fix heap overflow in build_i2c_fw_hdr() (Desnes Nunes) [RHEL-191035] {CVE-2026-53195}
+- USB: serial: io_ti: fix heap overflow in get_manuf_info() (Desnes Nunes) [RHEL-191035] {CVE-2026-53196}
+Resolves: RHEL-191035, RHEL-191605, RHEL-226315, RHEL-226406, RHEL-226877, RHEL-226914, RHEL-227087, RHEL-227508, RHEL-227713, RHEL-228016, RHEL-228182, RHEL-228693, RHEL-228936, RHEL-230627, RHEL-231753, RHEL-232965, RHEL-233826, RHEL-236120, RHEL-237156, RHEL-240325, RHEL-240350, RHEL-241012, RHEL-242723, RHEL-243028, RHEL-243302, RHEL-243366, RHEL-244100, RHEL-244932, RHEL-245512, RHEL-246399, RHEL-252540, RHEL-252544, RHEL-253986, RHEL-255217, RHEL-256733, RHEL-258014
+
 * Mon Sep 14 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.48.1.el9_8]
 - scsi: libiscsi_tcp: Bound SCSI Response data segment to the connection buffer (CKI Backport Bot) [RHEL-254594] {CVE-2026-74556}
 - gfs2: bufdata allocation race (Andreas Gruenbacher) [RHEL-178223]

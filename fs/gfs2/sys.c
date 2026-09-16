@@ -80,15 +80,10 @@ static ssize_t status_show(struct gfs2_sbd *sdp, char *buf)
 		     "No Journal ID:            %d\n"
 		     "Mounted RO:               %d\n"
 		     "RO Recovery:              %d\n"
-		     "Skip DLM Unlock:          %d\n"
 		     "Force AIL Flush:          %d\n"
 		     "FS Freeze Initiator:      %d\n"
 		     "FS Frozen:                %d\n"
-		     "Withdrawing:              %d\n"
-		     "Withdraw In Prog:         %d\n"
-		     "Remote Withdraw:          %d\n"
-		     "Withdraw Recovery:        %d\n"
-		     "Deactivating:             %d\n"
+		     "Killing:                  %d\n"
 		     "sd_log_error:             %d\n"
 		     "sd_log_flush_lock:        %d\n"
 		     "sd_log_num_revoke:        %u\n"
@@ -110,14 +105,9 @@ static ssize_t status_show(struct gfs2_sbd *sdp, char *buf)
 		     test_bit(SDF_NOJOURNALID, &f),
 		     (sb_rdonly(sdp->sd_vfs) ? 1 : 0),
 		     test_bit(SDF_RORECOVERY, &f),
-		     test_bit(SDF_SKIP_DLM_UNLOCK, &f),
 		     test_bit(SDF_FORCE_AIL_FLUSH, &f),
 		     test_bit(SDF_FREEZE_INITIATOR, &f),
 		     test_bit(SDF_FROZEN, &f),
-		     test_bit(SDF_WITHDRAWING, &f),
-		     test_bit(SDF_WITHDRAW_IN_PROG, &f),
-		     test_bit(SDF_REMOTE_WITHDRAW, &f),
-		     test_bit(SDF_WITHDRAW_RECOVERY, &f),
 		     test_bit(SDF_KILL, &f),
 		     sdp->sd_log_error,
 		     rwsem_is_locked(&sdp->sd_log_flush_lock),
@@ -187,7 +177,7 @@ static ssize_t freeze_store(struct gfs2_sbd *sdp, const char *buf, size_t len)
 
 static ssize_t withdraw_show(struct gfs2_sbd *sdp, char *buf)
 {
-	unsigned int b = gfs2_withdrawing_or_withdrawn(sdp);
+	unsigned int b = gfs2_withdrawn(sdp);
 	return snprintf(buf, PAGE_SIZE, "%u\n", b);
 }
 
@@ -427,26 +417,20 @@ static ssize_t block_store(struct gfs2_sbd *sdp, const char *buf, size_t len)
 	return len;
 }
 
-static ssize_t wdack_show(struct gfs2_sbd *sdp, char *buf)
-{
-	int val = completion_done(&sdp->sd_wdack) ? 1 : 0;
-
-	return sprintf(buf, "%d\n", val);
-}
-
-static ssize_t wdack_store(struct gfs2_sbd *sdp, const char *buf, size_t len)
+static ssize_t withdraw_helper_status_store(struct gfs2_sbd *sdp,
+					    const char *buf,
+					    size_t len)
 {
 	int ret, val;
 
 	ret = kstrtoint(buf, 0, &val);
 	if (ret)
 		return ret;
-
-	if ((val == 1) &&
-	    !strcmp(sdp->sd_lockstruct.ls_ops->lm_proto_name, "lock_dlm"))
-		complete(&sdp->sd_wdack);
-	else
+	if (val < 0 || val > 1)
 		return -EINVAL;
+
+	sdp->sd_withdraw_helper_status = val;
+	complete(&sdp->sd_withdraw_helper);
 	return len;
 }
 
@@ -593,7 +577,7 @@ static struct gfs2_attr gdlm_attr_##_name = __ATTR(_name,_mode,_show,_store)
 
 GDLM_ATTR(proto_name,		0444, proto_name_show,		NULL);
 GDLM_ATTR(block,		0644, block_show,		block_store);
-GDLM_ATTR(withdraw,		0644, wdack_show,		wdack_store);
+GDLM_ATTR(withdraw,		0200, NULL,			withdraw_helper_status_store);
 GDLM_ATTR(jid,			0644, jid_show,			jid_store);
 GDLM_ATTR(first,		0644, lkfirst_show,		lkfirst_store);
 GDLM_ATTR(first_done,		0444, first_done_show,		NULL);
@@ -692,6 +676,7 @@ TUNE_ATTR(statfs_slow, 0);
 TUNE_ATTR(new_files_jdata, 0);
 TUNE_ATTR(statfs_quantum, 1);
 TUNE_ATTR_3(quota_scale, quota_scale_show, quota_scale_store);
+TUNE_ATTR(withdraw_helper_timeout, 1);
 
 static struct attribute *tune_attrs[] = {
 	&tune_attr_quota_warn_period.attr,
@@ -702,6 +687,7 @@ static struct attribute *tune_attrs[] = {
 	&tune_attr_statfs_quantum.attr,
 	&tune_attr_quota_scale.attr,
 	&tune_attr_new_files_jdata.attr,
+	&tune_attr_withdraw_helper_timeout.attr,
 	NULL,
 };
 

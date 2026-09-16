@@ -125,7 +125,7 @@ static void gfs2_qd_dispose(struct gfs2_quota_data *qd)
 	hlist_bl_del_rcu(&qd->qd_hlist);
 	spin_unlock_bucket(qd->qd_hash);
 
-	if (!gfs2_withdrawing_or_withdrawn(sdp)) {
+	if (!gfs2_withdrawn(sdp)) {
 		gfs2_assert_warn(sdp, !qd->qd_change);
 		gfs2_assert_warn(sdp, !qd->qd_slot_count);
 		gfs2_assert_warn(sdp, !qd->qd_bh_count);
@@ -967,7 +967,7 @@ out_dq:
 		gfs2_glock_dq_uninit(&ghs[qx]);
 	inode_unlock(&ip->i_inode);
 	kfree(ghs);
-	gfs2_log_flush(ip->i_gl->gl_name.ln_sbd, ip->i_gl,
+	gfs2_log_flush(glock_sbd(ip->i_gl), ip->i_gl,
 		       GFS2_LOG_HEAD_FLUSH_NORMAL | GFS2_LFC_DO_SYNC);
 	if (!error) {
 		for (x = 0; x < num_qd; x++) {
@@ -1016,7 +1016,7 @@ static int do_glock(struct gfs2_quota_data *qd, int force_refresh,
 	struct gfs2_holder i_gh;
 	int error;
 
-	gfs2_assert_warn(sdp, sdp == qd->qd_gl->gl_name.ln_sbd);
+	gfs2_assert_warn(sdp, sdp == glock_sbd(qd->qd_gl));
 restart:
 	error = gfs2_glock_nq_init(qd->qd_gl, LM_ST_SHARED, 0, q_gh);
 	if (error)
@@ -1539,7 +1539,7 @@ static void quotad_error(struct gfs2_sbd *sdp, const char *msg, int error)
 {
 	if (error == 0 || error == -EROFS)
 		return;
-	if (!gfs2_withdrawing_or_withdrawn(sdp)) {
+	if (!gfs2_withdrawn(sdp)) {
 		if (!cmpxchg(&sdp->sd_log_error, 0, error))
 			fs_err(sdp, "gfs2_quotad: %s error %d\n", msg, error);
 		wake_up(&sdp->sd_logd_waitq);
@@ -1570,7 +1570,7 @@ int gfs2_quotad(void *data)
 	while (!kthread_should_stop()) {
 		unsigned long t;
 
-		if (gfs2_withdrawing_or_withdrawn(sdp))
+		if (gfs2_withdrawn(sdp))
 			break;
 
 		now = jiffies;
@@ -1601,7 +1601,7 @@ int gfs2_quotad(void *data)
 		t = min(statfs_deadline - now, quotad_deadline - now);
 		wait_event_freezable_timeout(sdp->sd_quota_wait,
 				sdp->sd_statfs_force_sync ||
-				gfs2_withdrawing_or_withdrawn(sdp) ||
+				gfs2_withdrawn(sdp) ||
 				kthread_should_stop(),
 				t);
 
