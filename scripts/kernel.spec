@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.163.1.el8_10
+%define pkgrelease 553.164.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.163.1%{?dist}
+%define specrelease 553.164.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,44 @@ fi
 #
 #
 %changelog
-* Tue Sep 15 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.163.1
+* Thu Sep 17 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.164.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Wed Sep 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.164.1.el8_10]
+- net: qrtr: fix 32-bit integer overflow in qrtr_endpoint_post() (Izabela Bakollari) [RHEL-244096] {CVE-2026-72298}
+- ipv6: sit: reload inner IPv6 header after GSO offloads (Jamie Bainbridge) [RHEL-225905] {CVE-2026-53228}
+- ipvlan: Make the addrs_lock be per port (Jamie Bainbridge) [RHEL-229962] {CVE-2026-23103}
+- xfrm: Fix dev use-after-free in xfrm async resumption (Sabrina Dubroca) [RHEL-232949] {CVE-2026-31663}
+- xfrm: hold dev ref until after transport_finish NF_HOOK (Sabrina Dubroca) [RHEL-232949] {CVE-2026-31663}
+- xfrm: hold device only for the asynchronous decryption (Sabrina Dubroca) [RHEL-232949] {CVE-2026-31663}
+- xfrm: input: hold netns during deferred transport reinjection (Sabrina Dubroca) [RHEL-227504] {CVE-2026-63919}
+- xfrm: fix stale skb->prev after async crypto steals a GSO segment (Sabrina Dubroca) [RHEL-236099] {CVE-2026-68426}
+- xfrm: propagate -EINPROGRESS from validate_xmit_xfrm() (Sabrina Dubroca) [RHEL-236099] {CVE-2026-68426}
+- xfrm: policy: fix use-after-free on inexact bin in xfrm_policy_bysel_ctx() (Sabrina Dubroca) [RHEL-227976] {CVE-2026-53239}
+- ip6: vti: Use ip6_tnl.net in vti6_changelink(). (Sabrina Dubroca) [RHEL-231741] {CVE-2026-63917}
+- ip6: vti: Use ip6_tnl.net in vti6_siocdevprivate(). (Sabrina Dubroca) [RHEL-228934] {CVE-2026-63921}
+- inet: RAW sockets using IPPROTO_RAW MUST drop incoming ICMP (Jamie Bainbridge) [RHEL-226122] {CVE-2026-46266}
+- ipv4: free net->ipv4.sysctl_local_reserved_ports after unregister_net_sysctl_table() (Jamie Bainbridge) [RHEL-227265] {CVE-2026-64002}
+- ppp: require CAP_NET_ADMIN in target netns for unattached ioctls (Jamie Bainbridge) [RHEL-227981] {CVE-2026-53075}
+- ipv6: mcast: Fix use-after-free when processing MLD queries (Jamie Bainbridge) [RHEL-226057] {CVE-2026-53275}
+- net: guard timestamp cmsgs to real error queue skbs (Jamie Bainbridge) [RHEL-225848] {CVE-2026-53223}
+- flow_dissector: do not dissect PPPoE PFC frames (Jamie Bainbridge) [RHEL-232609] {CVE-2026-46306}
+- ipv6: prevent possible UaF in addrconf_permanent_addr() (Jamie Bainbridge) [RHEL-225595] {CVE-2026-43339}
+- net: slip: serialize receive against buffer reallocation (Michal Schmidt) [RHEL-237390] {CVE-2026-68143}
+- slip: not call free_netdev before rtnl_unlock in slip_open (Michal Schmidt) [RHEL-237390]
+- slip: Fix use-after-free Read in slip_open (Michal Schmidt) [RHEL-237390]
+- slip: Fix memory leak in slip_open error path (Michal Schmidt) [RHEL-237390]
+- netfilter: require Ethernet MAC header before using eth_hdr() (CKI Backport Bot) [RHEL-230663] {CVE-2026-53131}
+- netfilter: nf_conntrack_h323: fix OOB read in decode_choice() (CKI Backport Bot) [RHEL-230607] {CVE-2026-43233}
+- ALSA: timer: Fix UAF at snd_timer_user_params() (CKI Backport Bot) [RHEL-228683] {CVE-2026-53192}
+- netfilter: xt_policy: fix strict mode inbound policy matching (CKI Backport Bot) [RHEL-228832] {CVE-2026-52920}
+- netfilter: conntrack_irc: fix possible out-of-bounds read (CKI Backport Bot) [RHEL-225240] {CVE-2026-53268}
+- IB/isert: Reject login PDUs shorter than ISER_HEADERS_LEN (CKI Backport Bot) [RHEL-191599] {CVE-2026-53176}
 
 * Mon Sep 14 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.163.1.el8_10]
 - EDAC/bluefield: Fix potential integer overflow (Joel Savitz) [RHEL-234337] {CVE-2024-53161}

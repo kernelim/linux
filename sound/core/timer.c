@@ -1841,14 +1841,21 @@ static int snd_timer_user_params(struct file *file,
 	struct snd_timer *t;
 	int err;
 
+	mutex_lock(&register_mutex);
 	tu = file->private_data;
-	if (!tu->timeri)
+	if (!tu->timeri) {
+		mutex_unlock(&register_mutex);
 		return -EBADFD;
+	}
 	t = tu->timeri->timer;
-	if (!t)
+	if (!t) {
+		mutex_unlock(&register_mutex);
 		return -EBADFD;
-	if (copy_from_user(&params, _params, sizeof(params)))
+	}
+	if (copy_from_user(&params, _params, sizeof(params))) {
+		mutex_unlock(&register_mutex);
 		return -EFAULT;
+	}
 	if (!(t->hw.flags & SNDRV_TIMER_HW_SLAVE)) {
 		u64 resolution;
 
@@ -1929,6 +1936,7 @@ static int snd_timer_user_params(struct file *file,
 	spin_unlock_irq(&tu->qlock);
 	err = 0;
  _end:
+	mutex_unlock(&register_mutex);
 	if (copy_to_user(_params, &params, sizeof(params)))
 		return -EFAULT;
 	return err;
