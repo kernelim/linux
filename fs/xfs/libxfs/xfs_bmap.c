@@ -1532,6 +1532,7 @@ xfs_bmap_add_extent_delay_real(
 			if (error)
 				goto done;
 		}
+		ASSERT(da_new <= da_old);
 		break;
 
 	case BMAP_LEFT_FILLING | BMAP_RIGHT_FILLING | BMAP_LEFT_CONTIG:
@@ -1561,6 +1562,7 @@ xfs_bmap_add_extent_delay_real(
 			if (error)
 				goto done;
 		}
+		ASSERT(da_new <= da_old);
 		break;
 
 	case BMAP_LEFT_FILLING | BMAP_RIGHT_FILLING | BMAP_RIGHT_CONTIG:
@@ -1594,6 +1596,7 @@ xfs_bmap_add_extent_delay_real(
 			if (error)
 				goto done;
 		}
+		ASSERT(da_new <= da_old);
 		break;
 
 	case BMAP_LEFT_FILLING | BMAP_RIGHT_FILLING:
@@ -1626,6 +1629,7 @@ xfs_bmap_add_extent_delay_real(
 				goto done;
 			}
 		}
+		ASSERT(da_new <= da_old);
 		break;
 
 	case BMAP_LEFT_FILLING | BMAP_LEFT_CONTIG:
@@ -1663,6 +1667,7 @@ xfs_bmap_add_extent_delay_real(
 			if (error)
 				goto done;
 		}
+		ASSERT(da_new <= da_old);
 		break;
 
 	case BMAP_LEFT_FILLING:
@@ -1750,6 +1755,7 @@ xfs_bmap_add_extent_delay_real(
 		xfs_iext_update_extent(bma->ip, state, &bma->icur, &PREV);
 		xfs_iext_next(ifp, &bma->icur);
 		xfs_iext_update_extent(bma->ip, state, &bma->icur, &RIGHT);
+		ASSERT(da_new <= da_old);
 		break;
 
 	case BMAP_RIGHT_FILLING:
@@ -1797,6 +1803,7 @@ xfs_bmap_add_extent_delay_real(
 		PREV.br_blockcount = temp;
 		xfs_iext_insert(bma->ip, &bma->icur, &PREV, state);
 		xfs_iext_next(ifp, &bma->icur);
+		ASSERT(da_new <= da_old);
 		break;
 
 	case 0:
@@ -1917,11 +1924,9 @@ xfs_bmap_add_extent_delay_real(
 	}
 
 	/* adjust for changes in reserved delayed indirect blocks */
-	if (da_new != da_old) {
-		ASSERT(state == 0 || da_new < da_old);
+	if (da_new != da_old)
 		error = xfs_mod_fdblocks(mp, (int64_t)(da_old - da_new),
-				false);
-	}
+				true);
 
 	xfs_bmap_check_leaf_extents(bma->cur, bma->ip, whichfork);
 done:
@@ -4079,26 +4084,10 @@ xfs_bmapi_allocate(
 	struct xfs_mount	*mp = bma->ip->i_mount;
 	int			whichfork = xfs_bmapi_whichfork(bma->flags);
 	struct xfs_ifork	*ifp = XFS_IFORK_PTR(bma->ip, whichfork);
-	int			tmp_logflags = 0;
 	int			error;
 
 	ASSERT(bma->length > 0);
-
-	/*
-	 * For the wasdelay case, we could also just allocate the stuff asked
-	 * for in this bmap call but that wouldn't be as good.
-	 */
-	if (bma->wasdel) {
-		bma->length = (xfs_extlen_t)bma->got.br_blockcount;
-		bma->offset = bma->got.br_startoff;
-		if (!xfs_iext_peek_prev_extent(ifp, &bma->icur, &bma->prev))
-			bma->prev.br_startoff = NULLFILEOFF;
-	} else {
-		bma->length = XFS_FILBLKS_MIN(bma->length, MAXEXTLEN);
-		if (!bma->eof)
-			bma->length = XFS_FILBLKS_MIN(bma->length,
-					bma->got.br_startoff - bma->offset);
-	}
+	ASSERT(bma->length <= MAXEXTLEN);
 
 	if (bma->flags & XFS_BMAPI_CONTIG)
 		bma->minlen = bma->length;
@@ -4118,6 +4107,10 @@ xfs_bmapi_allocate(
 		return error;
 	if (bma->blkno == NULLFSBLOCK)
 		return -ENOSPC;
+
+	if (WARN_ON_ONCE(!xfs_valid_startblock(bma->ip, bma->blkno))) {
+		return -EFSCORRUPTED;
+	}
 
 	if (bma->flags & XFS_BMAPI_ZERO) {
 		error = xfs_zero_extent(bma->ip, bma->blkno, bma->length);
@@ -4151,8 +4144,6 @@ xfs_bmapi_allocate(
 		error = xfs_bmap_add_extent_hole_real(bma->tp, bma->ip,
 				whichfork, &bma->icur, &bma->cur, &bma->got,
 				&bma->logflags, bma->flags);
-
-	bma->logflags |= tmp_logflags;
 	if (error)
 		return error;
 
@@ -4424,14 +4415,21 @@ xfs_bmapi_write(
 			 * allocation length request (which can be 64 bits in
 			 * length) and the bma length request, which is
 			 * xfs_extlen_t and therefore 32 bits. Hence we have to
-			 * check for 32-bit overflows and handle them here.
+			 * be careful and do the min() using the larger type to
+			 * avoid overflows.
 			 */
-			if (len > (xfs_filblks_t)MAXEXTLEN)
-				bma.length = MAXEXTLEN;
-			else
-				bma.length = len;
+			bma.length = XFS_FILBLKS_MIN(len, MAXEXTLEN);
 
-			ASSERT(len > 0);
+			if (wasdelay) {
+				bma.length = XFS_FILBLKS_MIN(bma.length,
+					bma.got.br_blockcount -
+					(bno - bma.got.br_startoff));
+			} else {
+				if (!eof)
+					bma.length = XFS_FILBLKS_MIN(bma.length,
+						bma.got.br_startoff - bno);
+			}
+
 			ASSERT(bma.length > 0);
 			error = xfs_bmapi_allocate(&bma);
 			if (error) {
@@ -4582,9 +4580,15 @@ xfs_bmapi_convert_delalloc(
 	bma.tp = tp;
 	bma.ip = ip;
 	bma.wasdel = true;
-	bma.offset = bma.got.br_startoff;
-	bma.length = max_t(xfs_filblks_t, bma.got.br_blockcount, MAXEXTLEN);
 	bma.minleft = xfs_bmapi_minleft(tp, ip, whichfork);
+
+	/*
+	 * Always allocate convert from the start of the delalloc extent even if
+	 * that is outside the passed in range to create large contiguous
+	 * extents on disk.
+	 */
+	bma.offset = bma.got.br_startoff;
+	bma.length = bma.got.br_blockcount;
 
 	/*
 	 * When we're converting the delalloc reservations backing dirty pages
@@ -4608,10 +4612,6 @@ xfs_bmapi_convert_delalloc(
 
 	error = xfs_bmapi_allocate(&bma);
 	if (error)
-		goto out_finish;
-
-	error = -EFSCORRUPTED;
-	if (WARN_ON_ONCE(!xfs_valid_startblock(ip, bma.got.br_startblock)))
 		goto out_finish;
 
 	XFS_STATS_ADD(mp, xs_xstrat_bytes, XFS_FSB_TO_B(mp, bma.length));

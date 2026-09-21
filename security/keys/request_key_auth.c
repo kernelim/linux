@@ -111,11 +111,14 @@ static void request_key_auth_revoke(struct key *key)
 	struct request_key_auth *rka = key->payload.data[0];
 
 	kenter("{%d}", key->serial);
+	if (!rka)
+		return;
 
 	if (rka->cred) {
 		put_cred(rka->cred);
 		rka->cred = NULL;
 	}
+	request_key_auth_put(rka);
 }
 
 static void free_request_key_auth(struct request_key_auth *rka)
@@ -131,6 +134,31 @@ static void free_request_key_auth(struct request_key_auth *rka)
 }
 
 /*
+ * Take a reference to the request-key authorisation payload so callers can
+ * drop authkey->sem before doing operations that may sleep.
+ */
+struct request_key_auth *request_key_auth_get(struct key *authkey)
+{
+	struct request_key_auth *rka;
+
+	down_read(&authkey->sem);
+	rka = authkey->payload.data[0];
+	if (rka && !test_bit(KEY_FLAG_REVOKED, &authkey->flags))
+		refcount_inc(&rka->usage);
+	else
+		rka = NULL;
+	up_read(&authkey->sem);
+
+	return rka;
+}
+
+void request_key_auth_put(struct request_key_auth *rka)
+{
+	if (rka && refcount_dec_and_test(&rka->usage))
+		free_request_key_auth(rka);
+}
+
+/*
  * Destroy an instantiation authorisation token key.
  */
 static void request_key_auth_destroy(struct key *key)
@@ -139,7 +167,7 @@ static void request_key_auth_destroy(struct key *key)
 
 	kenter("{%d}", key->serial);
 
-	free_request_key_auth(rka);
+	request_key_auth_put(rka);
 }
 
 /*
@@ -161,6 +189,7 @@ struct key *request_key_auth_new(struct key *target, const void *callout_info,
 	rka = kzalloc(sizeof(*rka), GFP_KERNEL);
 	if (!rka)
 		goto error;
+	refcount_set(&rka->usage, 1);
 	rka->callout_info = kmemdup(callout_info, callout_len, GFP_KERNEL);
 	if (!rka->callout_info)
 		goto error_free_rka;

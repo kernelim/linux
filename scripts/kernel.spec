@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.164.1.el8_10
+%define pkgrelease 553.166.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.164.1%{?dist}
+%define specrelease 553.166.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,51 @@ fi
 #
 #
 %changelog
-* Thu Sep 17 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.164.1
+* Wed Sep 23 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.166.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Mon Sep 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.166.1.el8_10]
+- crypto: af_alg - Fix incorrect boolean values in af_alg_ctx (CKI Backport Bot) [RHEL-264205] {CVE-2025-39964}
+- crypto: af_alg - Disallow concurrent writes in af_alg_sendmsg (CKI Backport Bot) [RHEL-264205] {CVE-2025-39964}
+
+* Mon Sep 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.165.1.el8_10]
+- nvmet-tcp: check INIT_FAILED before nvmet_req_uninit in digest error path (CKI Backport Bot) [RHEL-260522] {CVE-2026-64534}
+- nvmet-tcp: pass iov_len instead of sg->length to bvec_set_page() (Chris Leech) [RHEL-260522] {CVE-2026-64534}
+- nvmet-tcp: remove nvmet_tcp_finish_cmd (CKI Backport Bot) [RHEL-260522] {CVE-2026-64534}
+- nvmet-tcp: fix NULL pointer dereference during release (Chris Leech) [RHEL-260522] {CVE-2026-64534}
+- nvmet-tcp: don't map pages which can't come from HIGHMEM (CKI Backport Bot) [RHEL-260522] {CVE-2026-64534}
+- xfs: do not allocate the entire delalloc extent in xfs_bmapi_write (Lukas Herbolt) [RHEL-251578]
+- xfs: fix xfs_bmap_add_extent_delay_real for partial conversions (Lukas Herbolt) [RHEL-251578]
+- xfs: remove the xfs_iext_peek_prev_extent call in xfs_bmapi_allocate (Lukas Herbolt) [RHEL-251578]
+- xfs: pass the actual offset and len to allocate to xfs_bmapi_allocate (Lukas Herbolt) [RHEL-251578]
+- xfs: don't open code XFS_FILBLKS_MIN in xfs_bmapi_write (Lukas Herbolt) [RHEL-251578]
+- xfs: lift a xfs_valid_startblock into xfs_bmapi_allocate (Lukas Herbolt) [RHEL-251578]
+- xfs: remove the unusued tmp_logflags variable in xfs_bmapi_allocate (Lukas Herbolt) [RHEL-251578]
+- keys: Pin request_key_auth payload in instantiate paths (Bruno Meneguele) [RHEL-225491] {CVE-2026-63823}
+- iommu/vt-d: Remove unnecessary locking in intel_irq_remapping_alloc() (Jakub Brnak) [RHEL-243217]
+- iommu/vt-d: Clear Present bit before tearing down PASID entry (Eder Zulian) [RHEL-228475] {CVE-2026-45894}
+- iommu/amd: Fix clone_alias() to use the original device's devid (Eder Zulian) [RHEL-227450] {CVE-2026-53053}
+- Bluetooth: RFCOMM: Fix session UAF in set_termios (CKI Backport Bot) [RHEL-237326] {CVE-2026-68188}
+- net/mlx5: Fix MCIA register buffer overflow on 32 dword reads (CKI Backport Bot) [RHEL-236787] {CVE-2026-68293}
+- RDMA/rxe: Fix a use-after-free problem in rxe_mmap (Kamal Heib) [RHEL-233821] {CVE-2026-64582}
+- RDMA/rxe: Reject unknown opcodes before ICRC processing (Kamal Heib) [RHEL-226871] {CVE-2026-46133}
+- RDMA/rxe: Validate pad and ICRC before payload_size() in rxe_rcv (Kamal Heib) [RHEL-228181] {CVE-2026-46043}
+- dm cache policy smq: check allocation under invalidate lock (CKI Backport Bot) [RHEL-231810] {CVE-2026-53062}
+- dm cache policy smq: fix missing locks in invalidating cache blocks (CKI Backport Bot) [RHEL-231810] {CVE-2026-53062}
+- Bluetooth: HIDP: fix missing length checks in hidp_input_report() (CKI Backport Bot) [RHEL-231060] {CVE-2026-63947}
+- Bluetooth: L2CAP: Fix potential user-after-free (CKI Backport Bot) [RHEL-229428] {CVE-2023-54214}
+- Bluetooth: L2CAP: Fix possible crash on l2cap_ecred_conn_rsp (CKI Backport Bot) [RHEL-228747] {CVE-2026-63975}
+- Bluetooth: SMP: force responder MITM requirements before building the pairing response (CKI Backport Bot) [RHEL-227528] {CVE-2026-43334}
+- Bluetooth: Fix race condition in hidp_session_thread (CKI Backport Bot) [RHEL-227382] {CVE-2023-54120}
+- Bluetooth: RFCOMM: validate skb length in MCC handlers (CKI Backport Bot) [RHEL-225633] {CVE-2026-53254}
+- Bluetooth: RFCOMM: hold listener socket in rfcomm_connect_ind() (CKI Backport Bot) [RHEL-225571] {CVE-2026-53256}
+- Bluetooth: serialize accept_q access (CKI Backport Bot) [RHEL-225535] {CVE-2026-52918}
+- Bluetooth: btusb: revert use of devm_kzalloc in btusb (CKI Backport Bot) [RHEL-225154] {CVE-2025-71082}
 
 * Wed Sep 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.164.1.el8_10]
 - net: qrtr: fix 32-bit integer overflow in qrtr_endpoint_post() (Izabela Bakollari) [RHEL-244096] {CVE-2026-72298}

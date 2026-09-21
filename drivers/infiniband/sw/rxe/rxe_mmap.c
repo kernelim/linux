@@ -17,7 +17,7 @@
 void rxe_mmap_release(struct kref *ref)
 {
 	struct rxe_mmap_info *ip = container_of(ref,
-					struct rxe_mmap_info, ref);
+			struct rxe_mmap_info, ref);
 	struct rxe_dev *rxe = to_rdev(ip->context->device);
 
 	spin_lock_bh(&rxe->pending_lock);
@@ -94,18 +94,31 @@ int rxe_mmap(struct ib_ucontext *context, struct vm_area_struct *vma)
 	goto done;
 
 found_it:
+	/*
+	 * Increment refcount and check whether it is being freed atm while
+	 * holding lock to prevent UAF
+	 */
+	if (!kref_get_unless_zero(&ip->ref)) {
+		spin_unlock_bh(&rxe->pending_lock);
+		ret = -ENXIO;
+		goto done;
+	}
+
 	list_del_init(&ip->pending_mmaps);
 	spin_unlock_bh(&rxe->pending_lock);
 
+	vma->vm_ops = &rxe_vm_ops;
+	vma->vm_private_data = ip;
+
 	ret = remap_vmalloc_range(vma, ip->obj, 0);
 	if (ret) {
+		vma->vm_private_data = NULL;
+		vma->vm_ops = NULL;
+		kref_put(&ip->ref, rxe_mmap_release);
 		pr_err("err %d from remap_vmalloc_range\n", ret);
 		goto done;
 	}
 
-	vma->vm_ops = &rxe_vm_ops;
-	vma->vm_private_data = ip;
-	rxe_vma_open(vma);
 done:
 	return ret;
 }
