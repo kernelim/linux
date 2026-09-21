@@ -921,32 +921,23 @@ Source13: redhatsecureboot501.cer
 %define signing_key_filename kernel-signing-s390.cer
 %endif
 
+# pesign cert name is auto-discovered during build from secureboot_key_0,
+# see pesign_name_0 shell variable
+#
 # Fedora/ELN pesign macro expects to see these cert file names, see:
 # https://github.com/rhboot/pesign/blob/main/src/pesign-rpmbuild-helper.in#L216
 %if 0%{?fedora}%{?eln}
-%define pesign_name_0 redhatsecureboot501
 %define secureboot_ca_0 %{SOURCE10}
 %define secureboot_key_0 %{SOURCE13}
+%define secureboot_key_uki_0 %{secureboot_key_0}
 %endif
 
 # RHEL/centos certs come from system-sb-certs
 %if 0%{?rhel} && !0%{?eln}
 %define secureboot_ca_0 %{_datadir}/pki/sb-certs/secureboot-ca-%{_arch}.cer
 %define secureboot_key_0 %{_datadir}/pki/sb-certs/secureboot-kernel-%{_arch}.cer
+%define secureboot_key_uki_0 %{_sysconfdir}/pki/sb-certs/secureboot-uki-virt-%{_arch}.cer
 
-%if 0%{?centos}
-%define pesign_name_0 centossecureboot201
-%else
-%ifarch x86_64 aarch64
-%define pesign_name_0 redhatsecureboot801
-%endif
-%ifarch s390x
-%define pesign_name_0 redhatsecureboot302
-%endif
-%ifarch ppc64le
-%define pesign_name_0 redhatsecureboot701
-%endif
-%endif
 # rhel && !eln
 %endif
 
@@ -2404,13 +2395,45 @@ BuildKernel() {
 
     SignImage=$KernelImage
 
+    get_pesign_name() {
+        # If it's a symlink, resolve it to get the pesign cert name
+        # e.g. secureboot-kernel-x86_64.cer -> redhatsecureboot801.cer
+        if [ -L "$1" ]; then
+            basename "$(readlink "$1")" .cer
+            return
+        fi
+        local fname
+        fname=$(basename "$1")
+        # If it's a regular file with a generic name (secureboot-*),
+        # find a pesign-named cert with matching content in the same dir
+        # e.g. secureboot-kernel-x86_64.cer has same md5 as centossecureboot801.cer
+        # e.g. centos-sb-certs-10.0-23.el10.noarch.rpm doesn't have symlinks
+        if [[ "$fname" == secureboot-* ]]; then
+            local dir mysum match
+            dir=$(dirname "$1")
+            mysum=$(md5sum "$1" | awk '{print $1}')
+            match=$(md5sum "$dir"/*.cer 2>/dev/null \
+                | grep -v 'secureboot-' \
+                | awk -v s="$mysum" '$1 == s {print $2; exit}')
+            if [ -n "$match" ]; then
+                basename "$match" .cer
+                return
+            fi
+        fi
+        # Fallback: use the filename as-is
+        basename "$1" .cer
+    }
+
+    pesign_name_0=$(get_pesign_name %{secureboot_key_0})
+    %{log_msg "kernel signing: secureboot_key_0=%{secureboot_key_0} pesign_name_0=$pesign_name_0"}
+
     %ifarch x86_64 aarch64
     %{log_msg "Sign kernel image"}
-    %pesign -s -i $SignImage -o vmlinuz.signed -a %{secureboot_ca_0} -c %{secureboot_key_0} -n %{pesign_name_0}
+    %pesign -s -i $SignImage -o vmlinuz.signed -a %{secureboot_ca_0} -c %{secureboot_key_0} -n $pesign_name_0
     %endif
     %ifarch s390x ppc64le
     if [ -x /usr/bin/rpm-sign ]; then
-	rpm-sign --key "%{pesign_name_0}" --lkmsign $SignImage --output vmlinuz.signed
+	rpm-sign --key "$pesign_name_0" --lkmsign $SignImage --output vmlinuz.signed
     elif [ "$DoModules" == "1" -a "%{signmodules}" == "1" ]; then
 	chmod +x scripts/sign-file
 	./scripts/sign-file -p sha256 certs/signing_key.pem certs/signing_key.x509 $SignImage vmlinuz.signed
@@ -2793,18 +2816,18 @@ BuildKernel() {
     cp System.map $RPM_BUILD_ROOT/.
 
     if [[ "$Variant" == "rt" || "$Variant" == "rt-debug" || "$Variant" == "rt-64k" || "$Variant" == "rt-64k-debug" || "$Variant" == "automotive" || "$Variant" == "automotive-debug" ]]; then
-	%{log_msg "Skipping efiuki build"}
+        %{log_msg "Skipping efiuki build"}
     else
 %if %{with_efiuki}
         %{log_msg "Setup the EFI UKI kernel"}
 
-	KernelUnifiedImageDir="$RPM_BUILD_ROOT/lib/modules/$KernelVer"
-    	KernelUnifiedImage="$KernelUnifiedImageDir/$InstallName-virt.efi"
-	KernelUnifiedInitrd="$KernelUnifiedImageDir/$InstallName-virt.img"
+        KernelUnifiedImageDir="$RPM_BUILD_ROOT/lib/modules/$KernelVer"
+        KernelUnifiedImage="$KernelUnifiedImageDir/$InstallName-virt.efi"
+        KernelUnifiedInitrd="$KernelUnifiedImageDir/$InstallName-virt.img"
 
-    	mkdir -p $KernelUnifiedImageDir
+        mkdir -p $KernelUnifiedImageDir
 
-    	dracut --conf=%{SOURCE86} \
+        dracut --conf=%{SOURCE86} \
            --confdir=$(mktemp -d) \
            --no-hostonly \
            --verbose \
@@ -2813,61 +2836,44 @@ BuildKernel() {
            --logfile=$(mktemp) \
            $KernelUnifiedInitrd
 
-       ukify build --linux $(realpath $KernelImage) --initrd $KernelUnifiedInitrd \
-          --sbat @uki.sbat --os-release @/etc/os-release --uname $KernelVer \
-          --cmdline 'console=tty0 console=ttyS0' --output $KernelUnifiedImage
+        ukify build --linux $(realpath $KernelImage) --initrd $KernelUnifiedInitrd \
+           --sbat @uki.sbat --os-release @/etc/os-release --uname $KernelVer \
+           --cmdline 'console=tty0 console=ttyS0' --output $KernelUnifiedImage
 
-       rm -f $KernelUnifiedInitrd
+        rm -f $KernelUnifiedInitrd
 
-  KernelAddonsDirOut="$KernelUnifiedImage.extra.d"
-  mkdir -p $KernelAddonsDirOut
-  python3 %{SOURCE151} %{SOURCE152} $KernelAddonsDirOut virt %{primary_target} %{_target_cpu} @uki-addons.sbat
+        KernelAddonsDirOut="$KernelUnifiedImage.extra.d"
+        mkdir -p $KernelAddonsDirOut
+        python3 %{SOURCE151} %{SOURCE152} $KernelAddonsDirOut virt %{primary_target} %{_target_cpu} @uki-addons.sbat
 
 %if %{signkernel}
-	%{log_msg "Sign the EFI UKI kernel"}
-%if 0%{?fedora}%{?eln}
-        %pesign -s -i $KernelUnifiedImage -o $KernelUnifiedImage.signed -a %{secureboot_ca_0} -c %{secureboot_key_0} -n %{pesign_name_0}
-%else
-%if 0%{?centos}
-        UKI_secureboot_name=centossecureboot204
-        UKI_secureboot_cert=%{_datadir}/pki/sb-certs/secureboot-uki-virt-%{_arch}.cer
-%else
-	# RHEL only builds UKI for x86
-	UKI_secureboot_name=redhatsecureboot504
-	UKI_secureboot_cert=%{SOURCE153}
-%endif
-
-        %pesign -s -i $KernelUnifiedImage -o $KernelUnifiedImage.signed -a %{secureboot_ca_0} -c $UKI_secureboot_cert -n $UKI_secureboot_name
-        for addon in "$KernelAddonsDirOut"/*; do
-            %pesign -s -i $addon -o $addon.signed -a %{secureboot_ca_0} -c $UKI_secureboot_cert -n $UKI_secureboot_name
-            rm -f $addon
-            mv $addon.signed $addon
-        done
-# 0%{?fedora}%{?eln}
-%endif
+        %{log_msg "Sign the EFI UKI kernel"}
+        pesign_name_uki_0=$(get_pesign_name %{secureboot_key_uki_0})
+        %{log_msg "UKI signing: secureboot_key_uki_0=%{secureboot_key_uki_0} pesign_name_uki_0=$pesign_name_uki_0"}
+        %pesign -s -i $KernelUnifiedImage -o $KernelUnifiedImage.signed -a %{secureboot_ca_0} -c %{secureboot_key_uki_0} -n $pesign_name_uki_0
         if [ ! -s $KernelUnifiedImage.signed ]; then
             echo "pesigning failed"
             exit 1
         fi
         mv $KernelUnifiedImage.signed $KernelUnifiedImage
 
-      mkdir -p $RPM_BUILD_ROOT%{_datadir}/doc/kernel-keys/$KernelVer
-      cp -a $UKI_secureboot_cert $RPM_BUILD_ROOT%{_datadir}/doc/kernel-keys/$KernelVer/secureboot-uki-%{_arch}.cer
-
-# signkernel
+        for addon in "$KernelAddonsDirOut"/*; do
+           %pesign -s -i $addon -o $addon.signed -a %{secureboot_ca_0} -c %{secureboot_key_0} -n $pesign_name_0
+           rm -f $addon
+           mv $addon.signed $addon
+        done
 %endif
 
-    # hmac sign the UKI for FIPS
-    KernelUnifiedImageHMAC="$KernelUnifiedImageDir/.$InstallName-virt.efi.hmac"
-    %{log_msg "hmac sign the UKI for FIPS"}
-    %{log_msg "Creating hmac file: $KernelUnifiedImageHMAC"}
-    (cd $KernelUnifiedImageDir && sha512hmac $InstallName-virt.efi) > $KernelUnifiedImageHMAC;
+        # hmac sign the UKI for FIPS
+        KernelUnifiedImageHMAC="$KernelUnifiedImageDir/.$InstallName-virt.efi.hmac"
+        %{log_msg "hmac sign the UKI for FIPS"}
+        %{log_msg "Creating hmac file: $KernelUnifiedImageHMAC"}
+        (cd $KernelUnifiedImageDir && sha512hmac $InstallName-virt.efi) > $KernelUnifiedImageHMAC;
 
 # with_efiuki
 %endif
-	:  # in case of empty block
+        :  # in case of empty block
     fi # "$Variant" == "rt" || "$Variant" == "rt-debug" || "$Variant" == "automotive" || "$Variant" == "automotive-debug"
-
 
     #
     # Generate the modules files lists

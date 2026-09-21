@@ -1,3 +1,37 @@
+* Mon Sep 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.58.1.el10_2]
+- crypto: af_alg - Fix incorrect boolean values in af_alg_ctx (CKI Backport Bot) [RHEL-264234] {CVE-2025-39964}
+- crypto: af_alg - Disallow concurrent writes in af_alg_sendmsg (CKI Backport Bot) [RHEL-264234] {CVE-2025-39964}
+Resolves: RHEL-264234
+
+* Mon Sep 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.57.1.el10_2]
+- nvmet-tcp: check INIT_FAILED before nvmet_req_uninit in digest error path (CKI Backport Bot) [RHEL-260452] {CVE-2026-64534}
+- mm/hugetlb: fix list corruption in allocate_file_region_entries() (Rafael Aquini) [RHEL-254491] {CVE-2026-74518}
+- redhat/configs: automotive: enable PWM_FSL_FTM as a module (Mattijs Korpershoek) [RHEL-255517]
+- arm64: dts: s32g: add PWM support for s32g2 and s32g3 (Mattijs Korpershoek) [RHEL-255517]
+- pwm: Add the S32G support in the Freescale FTM driver (Mattijs Korpershoek) [RHEL-255517]
+- pwm: fsl-ftm: Drop driver local locking (Mattijs Korpershoek) [RHEL-255517]
+- pwm: fsl-ftm: Handle clk_get_rate() returning 0 (Mattijs Korpershoek) [RHEL-255517]
+- libceph: bound pg_{temp,upmap,upmap_items} length to CEPH_PG_MAX_SIZE (CKI Backport Bot) [RHEL-237164] {CVE-2026-68159}
+- libceph: Amend checking to fix `make W=1` build breakage (CKI Backport Bot) [RHEL-237164] {CVE-2026-68159}
+- Bluetooth: RFCOMM: Fix session UAF in set_termios (CKI Backport Bot) [RHEL-241107] {CVE-2026-68188}
+- libceph: Reject monmaps advertising zero monitors (CKI Backport Bot) [RHEL-240892] {CVE-2026-68155}
+- redhat: look for secureboot-uki-virt in /etc (Jan Stancek) [RHEL-169478]
+- redhat/kernel.spec: derive pesign_name_0 from secureboot_key_0 (Jan Stancek) [RHEL-169478]
+- redhat/kernel.spec.template: Simplify uki-virt signing (Jan Stancek) [RHEL-169478]
+- redhat/kernel.spec.template: Fix indentation of uki-virt generation code (Jan Stancek) [RHEL-169478]
+- redhat: sign centos kernel and UKIs with 800 certs (Jan Stancek) [RHEL-169478]
+- iommu/vt-d: Clear Present bit before tearing down scalable-mode context entry (Eder Zulian) [RHEL-228471]
+- iommu/vt-d: Fix race condition during PASID entry replacement (Eder Zulian) [RHEL-228471] {CVE-2026-45945}
+- iommu/vt-d: Clear Present bit before tearing down context entry (Eder Zulian) [RHEL-228471] {CVE-2026-45944}
+- iommu/vt-d: Clear Present bit before tearing down PASID entry (Eder Zulian) [RHEL-228471] {CVE-2026-45894}
+- Bluetooth: mgmt: hold reference for hci_conn in mgmt_pending_cmds (CKI Backport Bot) [RHEL-236849] {CVE-2026-68391}
+- net/mlx5: Fix MCIA register buffer overflow on 32 dword reads (CKI Backport Bot) [RHEL-236786] {CVE-2026-68293}
+- dm cache policy smq: check allocation under invalidate lock (CKI Backport Bot) [RHEL-231825] {CVE-2026-53062}
+- dm cache policy smq: fix missing locks in invalidating cache blocks (CKI Backport Bot) [RHEL-231825] {CVE-2026-53062}
+- crypto: ccp - Fix a crash due to incorrect cleanup usage of kfree (CKI Backport Bot) [RHEL-230408] {CVE-2026-45959}
+- keys: Pin request_key_auth payload in instantiate paths (CKI Backport Bot) [RHEL-225496] {CVE-2026-63823}
+Resolves: RHEL-169478, RHEL-225496, RHEL-228471, RHEL-230408, RHEL-231825, RHEL-236786, RHEL-236849, RHEL-237164, RHEL-240892, RHEL-241107, RHEL-254491, RHEL-255517, RHEL-260452
+
 * Wed Sep 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.56.1.el10_2]
 - redhat/configs: automotive: enable SENSORS_INA2XX (Jared Kangas) [RHEL-255518]
 - hwmon: (ina2xx) Use scoped_guard() to acquire the subsystem lock (Jared Kangas) [RHEL-255518]
