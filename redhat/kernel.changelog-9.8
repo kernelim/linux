@@ -1,3 +1,93 @@
+* Mon Sep 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.50.1.el9_8]
+- crypto: af_alg - Fix incorrect boolean values in af_alg_ctx (CKI Backport Bot) [RHEL-264235] {CVE-2025-39964}
+- crypto: af_alg - Disallow concurrent writes in af_alg_sendmsg (CKI Backport Bot) [RHEL-264235] {CVE-2025-39964}
+- mm/hugetlb: fix list corruption in allocate_file_region_entries() (Rafael Aquini) [RHEL-254487] {CVE-2026-74518}
+- smb: client: fix multiuser mount with krb5 (Jorge San Emeterio Villalain) [RHEL-254108]
+- net/mlx5e: macsec: fix use-after-free of metadata_dst on RX SC delete (Mohammad Heib) [RHEL-242927] {CVE-2026-72072}
+- iommu/vt-d: Clear Present bit before tearing down scalable-mode context entry (Eder Zulian) [RHEL-228484]
+- iommu/vt-d: Fix race condition during PASID entry replacement (Eder Zulian) [RHEL-228484] {CVE-2026-45945}
+- iommu/vt-d: Clear Present bit before tearing down context entry (Eder Zulian) [RHEL-228484] {CVE-2026-45944}
+- iommu/vt-d: Clear Present bit before tearing down PASID entry (Eder Zulian) [RHEL-228484] {CVE-2026-45894}
+- libceph: Reject monmaps advertising zero monitors (CKI Backport Bot) [RHEL-237896] {CVE-2026-68155}
+- libceph: guard missing CRUSH type name lookup (CKI Backport Bot) [RHEL-237554] {CVE-2026-68157}
+- libceph: refresh auth->authorizer_buf{,_len} after authorizer update (CKI Backport Bot) [RHEL-237486] {CVE-2026-68156}
+- Bluetooth: RFCOMM: Fix session UAF in set_termios (CKI Backport Bot) [RHEL-237311] {CVE-2026-68188}
+- Bluetooth: mgmt: hold reference for hci_conn in mgmt_pending_cmds (CKI Backport Bot) [RHEL-236850] {CVE-2026-68391}
+- net/mlx5: Fix MCIA register buffer overflow on 32 dword reads (CKI Backport Bot) [RHEL-236791] {CVE-2026-68293}
+- dm cache policy smq: check allocation under invalidate lock (CKI Backport Bot) [RHEL-231819] {CVE-2026-53062}
+- dm cache policy smq: fix missing locks in invalidating cache blocks (CKI Backport Bot) [RHEL-231819] {CVE-2026-53062}
+- crypto: ccp - Fix a crash due to incorrect cleanup usage of kfree (CKI Backport Bot) [RHEL-230406] {CVE-2026-45959}
+- keys: Pin request_key_auth payload in instantiate paths (CKI Backport Bot) [RHEL-225501] {CVE-2026-63823}
+- ice: call netif_keep_dst() once when entering switchdev mode (Jakub Ramaseuski) [RHEL-213003]
+- ice: fix ice_init_link() error return preventing probe (Jakub Ramaseuski) [RHEL-213003]
+- ice: fix AQ error code comparison in ice_set_pauseparam() (Jakub Ramaseuski) [RHEL-213003]
+- ice: fix FDIR CTRL VSI resource leak in ice_reset_all_vfs() (Jakub Ramaseuski) [RHEL-213003]
+- ice: dpll: fix memory leak in ice_dpll_init_info error paths (Jakub Ramaseuski) [RHEL-213003]
+- ice: dpll: set pointers to NULL after kfree in ice_dpll_deinit_info (Jakub Ramaseuski) [RHEL-213003]
+- ice: remove redundant checks from PTP init (Jakub Ramaseuski) [RHEL-213003]
+- ice: implement E825 TX ref clock control and TXC hardware sync status (Jakub Ramaseuski) [RHEL-213003]
+- ice: add Tx reference clock index handling to AN restart command (Jakub Ramaseuski) [RHEL-213003]
+- ice: implement CPI support for E825C (Jakub Ramaseuski) [RHEL-213003]
+- ice: introduce TXC DPLL device and TX ref clock pin framework for E825 (Jakub Ramaseuski) [RHEL-213003]
+- ice: fix missing priority callbacks for U.FL DPLL pins (Jakub Ramaseuski) [RHEL-213003]
+- ice: restore PTP Rx timestamp config after ethtool set-channels (Jakub Ramaseuski) [RHEL-213003]
+- ice: ptp: use primary NAC semaphore on E825 (Jakub Ramaseuski) [RHEL-213003]
+- ice: ptp: serialize E825 PHY timer start with PTP lock (Jakub Ramaseuski) [RHEL-213003]
+- ice: fix setting promisc mode while adding VID filter (Jakub Ramaseuski) [RHEL-213003]
+- ice: fix VF queue configuration with low MTU values (Jakub Ramaseuski) [RHEL-213003]
+- ice: fix locking around wait_event_interruptible_locked_irq (Jakub Ramaseuski) [RHEL-213003]
+- ice: dpll: Fix compilation warning (Jakub Ramaseuski) [RHEL-213003]
+- ice: mention fw_activate action along with devlink reload (Jakub Ramaseuski) [RHEL-213003]
+- ice: dpll: fix misplaced header macros (Jakub Ramaseuski) [RHEL-213003]
+- ice: dpll: fix rclk pin state get for E810 (Jakub Ramaseuski) [RHEL-213003]
+- Revert "ice: dpll: fix rclk pin state get and misplaced header macros" (Jakub Ramaseuski) [RHEL-213003]
+- ice: fix locking in ice_dcb_rebuild() (Jakub Ramaseuski) [RHEL-213003]
+- ice: fix setting RSS VSI hash for E830 (Jakub Ramaseuski) [RHEL-213003]
+- ice: fix potential NULL pointer deref in error path of ice_set_ringparam() (Jakub Ramaseuski) [RHEL-213003] {CVE-2026-53007}
+- ice: fix race condition in TX timestamp ring cleanup (Jakub Ramaseuski) [RHEL-213003] {CVE-2026-53008}
+- ice: fix ICE_AQ_LINK_SPEED_M for 200G (Jakub Ramaseuski) [RHEL-213003]
+- ice: fix PHY config on media change with link-down-on-close (Jakub Ramaseuski) [RHEL-213003]
+- ice: Fix memory leak in ice_set_ringparam() (Jakub Ramaseuski) [RHEL-213003] {CVE-2026-23389}
+- ice: fix double-free of tx_buf skb (Jakub Ramaseuski) [RHEL-213003] {CVE-2026-53009}
+- ice: fix double free in ice_sf_eth_activate() error path (Jakub Ramaseuski) [RHEL-213003] {CVE-2026-46162}
+- ice: update PCS latency settings for E825 10G/25Gb modes (Jakub Ramaseuski) [RHEL-213003]
+- ice: fix 'adjust' timer programming for E830 devices (Jakub Ramaseuski) [RHEL-213003]
+- ice: use bitmap_empty() in ice_vf_has_no_qs_ena (Jakub Ramaseuski) [RHEL-213003]
+- ice: ptp: don't WARN when controlling PF is unavailable (Jakub Ramaseuski) [RHEL-213003] {CVE-2026-43346}
+- ice: use ice_update_eth_stats() for representor stats (Jakub Ramaseuski) [RHEL-213003]
+- ice: fix inverted ready check for VF representors (Jakub Ramaseuski) [RHEL-213003]
+- drivers: net: ice: fix devlink parameters get without irdma (Jakub Ramaseuski) [RHEL-213003]
+- ice: fix retry for AQ command 0x06EE (Jakub Ramaseuski) [RHEL-213003]
+- ice: reintroduce retry mechanism for indirect AQ (Jakub Ramaseuski) [RHEL-213003]
+- ice: fix adding AQ LLDP filter for VF (Jakub Ramaseuski) [RHEL-213003]
+- ice: recap the VSI and QoS info after rebuild (Jakub Ramaseuski) [RHEL-213003]
+- ice: stop counting UDP csum mismatch as rx_errors (Jakub Ramaseuski) [RHEL-213003]
+- ice: convert all ring stats to u64_stats_t (Jakub Ramaseuski) [RHEL-213003]
+- ice: shorten ring stat names and add accessors (Jakub Ramaseuski) [RHEL-213003]
+- ice: use u64_stats API to access pkts/bytes in dim sample (Jakub Ramaseuski) [RHEL-213003]
+- ice: remove ice_q_stats struct and use struct_group (Jakub Ramaseuski) [RHEL-213003]
+- ice: pass pointer to ice_fetch_u64_stats_per_ring (Jakub Ramaseuski) [RHEL-213003]
+- ice: unify PHY FW loading status handler for E800 devices (Jakub Ramaseuski) [RHEL-213003]
+- ice: Make name member of struct ice_cgu_pin_desc const (Jakub Ramaseuski) [RHEL-213003]
+- dpll: use pin owner's dpll ref for pin-level attribute reporting (Jakub Ramaseuski) [RHEL-213003]
+- dpll: allow fwnode pins to attempt state change without capability bit (Jakub Ramaseuski) [RHEL-213003]
+- dpll: extend pin notifier with notification source ID (Jakub Ramaseuski) [RHEL-213003]
+- dpll: balance create/delete notifications in __dpll_pin_(un)register (Jakub Ramaseuski) [RHEL-213003]
+- dpll: guard sync-pair removal on full pin unregister (Jakub Ramaseuski) [RHEL-213003]
+- dpll: emit per-dpll delete notifications in dpll_pin_on_pin_unregister() (Jakub Ramaseuski) [RHEL-213003]
+- dpll: send delete notification before unregister in on-pin rollback (Jakub Ramaseuski) [RHEL-213003]
+- dpll: fix stale iteration in dpll_pin_on_pin_unregister() (Jakub Ramaseuski) [RHEL-213003]
+- dpll: allow registering FW-identified pin with a different DPLL (Jakub Ramaseuski) [RHEL-213003]
+- dpll: add generic DPLL type (Jakub Ramaseuski) [RHEL-213003]
+- dpll: zl3073x: make frequency monitor a per-device attribute (Jakub Ramaseuski) [RHEL-213003]
+- dpll: zl3073x: use __dpll_device_change_ntf() and remove change_work (Jakub Ramaseuski) [RHEL-213003] {CVE-2026-63977}
+- dpll: export __dpll_device_change_ntf() for use under dpll_lock (Jakub Ramaseuski) [RHEL-213003]
+- dpll: change dpll_netdev_pin_handle_size() to assume DPLL_A_PIN_ID will be used (Jakub Ramaseuski) [RHEL-213003]
+- dpll: zl3073x: fix memory leak on pin registration failure (Jakub Ramaseuski) [RHEL-213003]
+- dpll: zl3073x: Use named initializers for struct i2c_device_id (Jakub Ramaseuski) [RHEL-213003]
+- dpll: Prevent duplicate registrations (Jakub Ramaseuski) [RHEL-213003] {CVE-2026-23129}
+Resolves: RHEL-213003, RHEL-225501, RHEL-228484, RHEL-230406, RHEL-231819, RHEL-236791, RHEL-236850, RHEL-237311, RHEL-237486, RHEL-237554, RHEL-237896, RHEL-242927, RHEL-254108, RHEL-254487, RHEL-264235
+
 * Wed Sep 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.49.1.el9_8]
 - selinux: check connect-related permissions on TCP Fast Open (CKI Backport Bot) [RHEL-258014] {CVE-2026-72243}
 - gfs2: Get rid of sd_async_glock_wait (Andreas Gruenbacher) [RHEL-253986]
