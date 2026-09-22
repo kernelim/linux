@@ -366,7 +366,7 @@ nf_flow_offload_ip_hook(void *priv, struct sk_buff *skb,
 		return NF_ACCEPT;
 	}
 
-	if (skb_try_make_writable(skb, thoff + hdrsize))
+	if (skb_ensure_writable(skb, thoff + hdrsize))
 		return NF_DROP;
 
 	flow_offload_refresh(flow_table, flow, false);
@@ -607,7 +607,7 @@ nf_flow_offload_ipv6_hook(void *priv, struct sk_buff *skb,
 		return NF_ACCEPT;
 	}
 
-	if (skb_try_make_writable(skb, thoff + hdrsize))
+	if (skb_ensure_writable(skb, thoff + hdrsize))
 		return NF_DROP;
 
 	flow_offload_refresh(flow_table, flow, false);

@@ -1,3 +1,115 @@
+* Tue Sep 22 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.51.1.el9_8]
+- net: tun: bound receive headroom (CKI Backport Bot) [RHEL-264401] {CVE-2026-81000}
+- xfrm: ah6: validate routing header segments_left (CKI Backport Bot) [RHEL-264350] {CVE-2026-80844}
+- scsi: qla2xxx: Bound rsp_info_len to avoid OOB sense-data read (CKI Backport Bot) [RHEL-262595] {CVE-2026-89846}
+- nvmet-tcp: check INIT_FAILED before nvmet_req_uninit in digest error path (CKI Backport Bot) [RHEL-260449] {CVE-2026-64534}
+- af_unix: Drop all SCM attributes for SOCKMAP. (Davide Caratti) [RHEL-229264] {CVE-2026-53005}
+- smb: client: fix double-free in SMB2_flush() replay (CKI Backport Bot) [RHEL-253169] {CVE-2026-64383}
+- RHEL: revert "block: only zero non-PI metadata tuples in bio_integrity_prep" (Jeff Moyer) [RHEL-189969] {CVE-2026-23007}
+- block: don't overwrite bip_vcnt in bio_integrity_copy_user() (Jeff Moyer) [RHEL-232369] {CVE-2026-64053}
+- blk-cgroup: fix UAF in __blkcg_rstat_flush() (Jeff Moyer) [RHEL-230287] {CVE-2026-63802}
+- ASoC: SOF: ipc3-control: Validate size in snd_sof_update_control (CKI Backport Bot) [RHEL-243625] {CVE-2026-72261}
+- netfilter: nft_fib: reject fib expression on the netdev egress hook (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: don't leak bad clone into future transaction (Florian Westphal) [RHEL-236634]
+- netfilter: nft_ct: expectation timeouts are passed in milliseconds (Florian Westphal) [RHEL-236634]
+- netfilter: nft_compat: ebtables emulation must reject non-bridge targets (Florian Westphal) [RHEL-236634]
+- netfilter: nft_meta_bridge: fix NFT_META_BRI_IIFPVID stack leak (Florian Westphal) [RHEL-236634]
+- netfilter: nft_flow_offload: zero device address for non-ether case (Florian Westphal) [RHEL-236634]
+- netfilter: nft_meta_bridge: add validate callback for get operations (Florian Westphal) [RHEL-236634]
+- netfilter: nf_dup_netdev: add nf_dev_xmit_recursion*() helpers and use them (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables_offload: drop device refcount on error (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables_offload: add nft_flow_action_entry_next() and use it (Florian Westphal) [RHEL-236634]
+- netfilter: nft_byteorder: remove multi-register support (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: fix dst corruption in same register operation (Florian Westphal) [RHEL-236634] {CVE-2026-64006}
+- netfilter: nft_fib: fix stale stack leak via the OIFNAME register (Florian Westphal) [RHEL-236634] {CVE-2026-53134}
+- netfilter: nft_exthdr: fix register tracking for F_PRESENT flag (Florian Westphal) [RHEL-236634] {CVE-2026-53218}
+- netfilter: nft_ct: bail out on template ct in get eval (Florian Westphal) [RHEL-236634] {CVE-2026-53267}
+- netfilter: nft_tunnel: fix use-after-free on object destroy (Florian Westphal) [RHEL-236634] {CVE-2026-53212}
+- netfilter: disable payload mangling in userns (Florian Westphal) [RHEL-236634]
+- netfilter: nft_ct: fix missing expect put in obj eval (Florian Westphal) [RHEL-236634] {CVE-2026-52970}
+- netfilter: nft_compat: run xt_check_hooks_{match,target}() from .validate (Florian Westphal) [RHEL-236634]
+- netfilter: nft_fwd_netdev: use recursion counter in neigh egress path (Florian Westphal) [RHEL-236634]
+- netfilter: nft_fwd_netdev: add device and headroom validate with neigh forwarding (Florian Westphal) [RHEL-236634]
+- netfilter: replace skb_try_make_writable() by skb_ensure_writable() (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: use list_del_rcu for netlink hooks (Florian Westphal) [RHEL-236634] {CVE-2026-46324}
+- netfilter: nf_tables: Introduce functions freeing nft_hook objects (Florian Westphal) [RHEL-236634]
+- netfilter: nfnetlink_osf: fix potential NULL dereference in ttl check (Florian Westphal) [RHEL-236634] {CVE-2026-52998}
+- netfilter: nfnetlink_osf: fix out-of-bounds read on option matching (Florian Westphal) [RHEL-236634] {CVE-2026-52999}
+- netfilter: nft_osf: restrict it to ipv4 (Florian Westphal) [RHEL-236634]
+- netfilter: nft_ct: fix use-after-free in timeout object destroy (Florian Westphal) [RHEL-236634] {CVE-2026-31665}
+- netfilter: nft_set_pipapo_avx2: remove redundant loop in lookup_slow (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: increment data in one step (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: reject immediate NF_QUEUE verdict (Florian Westphal) [RHEL-236634] {CVE-2026-43024}
+- netfilter: nfnetlink_log: account for netlink header size (Florian Westphal) [RHEL-236634] {CVE-2026-31416}
+- selftests: netfilter: nft_concat_range.sh: add check for flush+reload bug (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: always walk all pending catchall elements (Florian Westphal) [RHEL-236634] {CVE-2026-23278}
+- netfilter: nft_set_pipapo: split gc into unlink and reclaim phase (Florian Westphal) [RHEL-236634] {CVE-2026-23351}
+- netfilter: nf_tables: clone set on flush only (Florian Westphal) [RHEL-236634] {CVE-2026-23385}
+- netfilter: nf_tables: fix memory leak in nf_tables_newrule() (Florian Westphal) [RHEL-236634]
+- selftests: netfilter: nft_concat_range.sh: add check for overlap detection bug (Florian Westphal) [RHEL-236634]
+- netfilter: nft_ct: add seqadj extension for natted connections (Florian Westphal) [RHEL-236634] {CVE-2025-68206}
+- netfilter: nf_tables: use C99 struct initializer for nft_set_iter (Florian Westphal) [RHEL-236634]
+- netfilter: nft_objref: validate objref and objrefmap expressions (Florian Westphal) [RHEL-236634] {CVE-2025-40206}
+- selftests: netfilter: nft_concat_range.sh: add check for double-create bug (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo_avx2: fix skip of expired entries (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: use 0 genmask for packetpath lookups (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: don't check genbit from packetpath lookups (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: all transaction allocations can now sleep (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: allow iter callbacks to sleep (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: Store real pointer, adjust later. (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo_avx2: split lookup function in two parts (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: don't return bogus extension pointer (Florian Westphal) [RHEL-236634]
+- selftests: netfilter: nft_concat_range.sh: send packets to empty set (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: adjust lockdep assertions handling (Florian Westphal) [RHEL-236634]
+- selftests: netfilter: nft_concat_range.sh: add datapath check for map fill bug (Florian Westphal) [RHEL-236634]
+- selftests: netfilter: nft_concat_range.sh: prefer per element counters for testing (Florian Westphal) [RHEL-236634]
+- netfilter: nft_tunnel: fix geneve_opt dump (Florian Westphal) [RHEL-236634]
+- selftests: netfilter: nft_concat_range.sh: add coverage for 4bit group representation (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_hash: GC reaps elements with conncount for dynamic sets only (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: Flowtable hook's pf value never varies (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: remove the genmask parameter (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: do not defer rule destruction via call_rcu (Florian Westphal) [RHEL-236634] {CVE-2024-56655}
+- netfilter: nf_tables: wait for rcu grace period on net_device removal (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: fix null deref for empty set (Florian Westphal) [RHEL-236634] {CVE-2025-39867}
+- netfilter: nft_set_pipapo: prefer kvmalloc for scratch maps (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: merge pipapo_get/lookup (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set: remove one argument from lookup and update functions (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: remove unused arguments (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: clamp maximum map bucket size to INT_MAX (Florian Westphal) [RHEL-236634] {CVE-2025-38201}
+- netfilter: nft_set_pipapo: prevent overflow in lookup table allocation (Florian Westphal) [RHEL-236634] {CVE-2025-38162}
+- netfilter: nf_tables: missing objects with no memcg accounting (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: allow clone callbacks to sleep (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: remove dirty flag (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: move cloning of match info to insert/removal path (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: prepare pipapo_get helper for on-demand clone (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: merge deactivate helper into caller (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: prepare walk function for on-demand clone (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: prepare destroy function for on-demand clone (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: make pipapo_clone helper return NULL (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: move prove_locking helper around (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: use GFP_KERNEL for insertions (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: speed up bulk element insertions (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo: shrink data structures (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_pipapo_avx2: remove redundant pointer lt (Florian Westphal) [RHEL-236634]
+- netfilter: nft_ct: drop pending enqueued packets on removal (Florian Westphal) [RHEL-236634] {CVE-2026-43060}
+- netfilter: nf_tables: cleanup documentation (Florian Westphal) [RHEL-236634]
+- nf_tables: nft_dynset: fix possible stateful expression memleak in error path (Florian Westphal) [RHEL-236634] {CVE-2026-23399}
+- netfilter: x_tables: add .check_hooks to matches and targets (Florian Westphal) [RHEL-236634]
+- netfilter: xtables: restrict several matches to inet family (Florian Westphal) [RHEL-236634] {CVE-2026-53001}
+- netfilter: nf_tables: avoid false-positive lockdep splats with basechain hook (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: use rcu chain hook list iterator from netlink dump path (Florian Westphal) [RHEL-236634]
+- netfilter: nft_set_bitmap: fix lockdep splat due to missing annotation (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: avoid false-positive lockdep splats in set walker (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: avoid false-positive lockdep splats with flowtables (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: avoid false-positive lockdep splats with sets (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: missing extended netlink error in lookup functions (Florian Westphal) [RHEL-236634]
+- netfilter: nf_tables: avoid false-positive lockdep splat on rule deletion (Florian Westphal) [RHEL-236634]
+- ALSA: timer: drain a slave's callback before its master detaches it (CKI Backport Bot) [RHEL-236081] {CVE-2026-68201}
+- sctp: don't free the ASCONF's own transport in DEL-IP processing (CKI Backport Bot) [RHEL-234304] {CVE-2026-64564}
+- mac802154: llsec: add skb_cow_data() before in-place crypto (CKI Backport Bot) [RHEL-231022] {CVE-2026-63831}
+- sctp: prevent peer transport count overflow (Xin Long) [RHEL-216251]
+Resolves: RHEL-189969, RHEL-216251, RHEL-229264, RHEL-230287, RHEL-231022, RHEL-232369, RHEL-234304, RHEL-236081, RHEL-236634, RHEL-243625, RHEL-253169, RHEL-260449, RHEL-262595, RHEL-264350, RHEL-264401
+
 * Mon Sep 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.50.1.el9_8]
 - crypto: af_alg - Fix incorrect boolean values in af_alg_ctx (CKI Backport Bot) [RHEL-264235] {CVE-2025-39964}
 - crypto: af_alg - Disallow concurrent writes in af_alg_sendmsg (CKI Backport Bot) [RHEL-264235] {CVE-2025-39964}

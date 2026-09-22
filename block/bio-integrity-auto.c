@@ -134,16 +134,15 @@ bool bio_integrity_prep(struct bio *bio)
 	case REQ_OP_WRITE:
 		/*
 		 * Zero the memory allocated to not leak uninitialized kernel
-		 * memory to disk for non-integrity metadata where nothing else
-		 * initializes the memory.
+		 * for non-integrity metadata it affects the entire metadata
+		 * buffer.
 		 */
 		if (bi->flags & BLK_INTEGRITY_NOGENERATE) {
 			if (bi_offload_capable(bi))
 				return true;
 			set_flags = false;
-			gfp |= __GFP_ZERO;
-		} else if (bi->csum_type == BLK_INTEGRITY_CSUM_NONE)
-			gfp |= __GFP_ZERO;
+		}
+		gfp |= __GFP_ZERO;
 		break;
 	default:
 		return true;

@@ -42,9 +42,6 @@
 /* Fields are padded to 32 bits in input registers */
 #define NFT_PIPAPO_GROUPS_PADDED_SIZE(f)				\
 	(round_up((f)->groups / NFT_PIPAPO_GROUPS_PER_BYTE(f), sizeof(u32)))
-#define NFT_PIPAPO_GROUPS_PADDING(f)					\
-	(NFT_PIPAPO_GROUPS_PADDED_SIZE(f) - (f)->groups /		\
-					    NFT_PIPAPO_GROUPS_PER_BYTE(f))
 
 /* Number of buckets given by 2 ^ n, with n bucket bits */
 #define NFT_PIPAPO_BUCKETS(bb)		(1 << (bb))
@@ -70,15 +67,9 @@
 #define NFT_PIPAPO_ALIGN_HEADROOM					\
 	(NFT_PIPAPO_ALIGN - ARCH_KMALLOC_MINALIGN)
 #define NFT_PIPAPO_LT_ALIGN(lt)		(PTR_ALIGN((lt), NFT_PIPAPO_ALIGN))
-#define NFT_PIPAPO_LT_ASSIGN(field, x)					\
-	do {								\
-		(field)->lt_aligned = NFT_PIPAPO_LT_ALIGN(x);		\
-		(field)->lt = (x);					\
-	} while (0)
 #else
 #define NFT_PIPAPO_ALIGN_HEADROOM	0
 #define NFT_PIPAPO_LT_ALIGN(lt)		(lt)
-#define NFT_PIPAPO_LT_ASSIGN(field, x)	((field)->lt = (x))
 #endif /* NFT_PIPAPO_ALIGN */
 
 #define nft_pipapo_for_each_field(field, index, match)		\
@@ -110,22 +101,20 @@ union nft_pipapo_map_bucket {
 
 /**
  * struct nft_pipapo_field - Lookup, mapping tables and related data for a field
- * @groups:	Amount of bit groups
  * @rules:	Number of inserted rules
  * @bsize:	Size of each bucket in lookup table, in longs
+ * @rules_alloc: Number of allocated rules, always >= rules
+ * @groups:	Amount of bit groups
  * @bb:		Number of bits grouped together in lookup table buckets
  * @lt:		Lookup table: 'groups' rows of buckets
- * @lt_aligned:	Version of @lt aligned to NFT_PIPAPO_ALIGN bytes
  * @mt:		Mapping table: one bucket per rule
  */
 struct nft_pipapo_field {
-	int groups;
-	unsigned long rules;
-	size_t bsize;
-	int bb;
-#ifdef NFT_PIPAPO_ALIGN
-	unsigned long *lt_aligned;
-#endif
+	unsigned int rules;
+	unsigned int bsize;
+	unsigned int rules_alloc;
+	u8 groups;
+	u8 bb;
 	unsigned long *lt;
 	union nft_pipapo_map_bucket *mt;
 };
@@ -133,27 +122,33 @@ struct nft_pipapo_field {
 /**
  * struct nft_pipapo_scratch - percpu data used for lookup and matching
  * @map_index:	Current working bitmap index, toggled between field matches
- * @align_off:	Offset to get the originally allocated address
- * @map:	store partial matching results during lookup
+ * @__map:	store partial matching results during lookup
  */
 struct nft_pipapo_scratch {
 	u8 map_index;
-	u32 align_off;
-	unsigned long map[];
+	unsigned long __map[];
+};
+
+enum nft_pipapo_clone_state {
+	NFT_PIPAPO_CLONE_NEW,
+	NFT_PIPAPO_CLONE_MOD,
+	NFT_PIPAPO_CLONE_ERR,
 };
 
 /**
  * struct nft_pipapo_match - Data used for lookup and matching
  * @field_count:	Amount of fields in set
- * @scratch:		Preallocated per-CPU maps for partial matching results
+ * @state:		add/delete state; used from control plane
  * @bsize_max:		Maximum lookup table bucket size of all fields, in longs
+ * @scratch:		Preallocated per-CPU maps for partial matching results
  * @rcu:		Matching data is swapped on commits
  * @f:			Fields, with lookup and mapping tables
  */
 struct nft_pipapo_match {
-	int field_count;
+	u8 field_count;
+	enum nft_pipapo_clone_state state:8;
+	unsigned int bsize_max;
 	struct nft_pipapo_scratch * __percpu *scratch;
-	size_t bsize_max;
 	struct rcu_head rcu;
 	struct nft_pipapo_field f[];
 };
@@ -163,15 +158,15 @@ struct nft_pipapo_match {
  * @match:	Currently in-use matching data
  * @clone:	Copy where pending insertions and deletions are kept
  * @width:	Total bytes to be matched for one packet, including padding
- * @dirty:	Working copy has pending insertions or deletions
  * @last_gc:	Timestamp of last garbage collection run, jiffies
+ * @gc_head:	list of nft_trans_gc to queue up for mem reclaim
  */
 struct nft_pipapo {
 	struct nft_pipapo_match __rcu *match;
 	struct nft_pipapo_match *clone;
 	int width;
-	bool dirty;
 	unsigned long last_gc;
+	struct list_head gc_head;
 };
 
 struct nft_pipapo_elem;
@@ -186,7 +181,8 @@ struct nft_pipapo_elem {
 	struct nft_set_ext	ext;
 };
 
-int pipapo_refill(unsigned long *map, int len, int rules, unsigned long *dst,
+int pipapo_refill(unsigned long *map, unsigned int len, unsigned int rules,
+		  unsigned long *dst,
 		  const union nft_pipapo_map_bucket *mt, bool match_only);
 
 /**
