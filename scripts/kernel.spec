@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 211.58.1
+%define pkgrelease 211.59.1
 %define kversion 6
-%define tarfile_release 6.12.0-211.58.1.el10_2
+%define tarfile_release 6.12.0-211.59.1.el10_2
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 211.58.1%{?buildid}%{?dist}
+%define specrelease 211.59.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-211.58.1.el10_2
+%define kabiversion 6.12.0-211.59.1.el10_2
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4566,9 +4566,58 @@ fi\
 #
 #
 %changelog
-* Wed Sep 23 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.58.1
+* Thu Sep 24 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.59.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Tue Sep 22 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.59.1.el10_2]
+- net: tun: bound receive headroom (CKI Backport Bot) [RHEL-264371] {CVE-2026-81000}
+- xfrm: ah6: validate routing header segments_left (CKI Backport Bot) [RHEL-264303] {CVE-2026-80844}
+- scsi: qla2xxx: Bound rsp_info_len to avoid OOB sense-data read (CKI Backport Bot) [RHEL-262556] {CVE-2026-89846}
+- netfilter: nf_conntrack_sip: widen NAT rewrite delta to s32 in sip_help_tcp() (CKI Backport Bot) [RHEL-260585] {CVE-2026-74569}
+- redhat/configs: automotive: debug: enable KASAN_INLINE (Jared Kangas) [RHEL-259788]
+- watchdog: s32g_wdt: remove incorrect options in watchdog_info struct (Jared Kangas) [RHEL-259788]
+- usb: chipidea: fix usage_count leak when autosuspend_delay is negative (Jared Kangas) [RHEL-259788]
+- usb: chipidea: core: convert ci_role_switch to local variable (Jared Kangas) [RHEL-259788]
+- usb: chipidea: otg: not wait vbus drop if use role_switch (Jared Kangas) [RHEL-259788]
+- usb: chipidea: core: allow ci_irq_handler() handle both ID and VBUS change (Jared Kangas) [RHEL-259788]
+- rtc: pcf85063: fix incorrect maximum clock rate handling (Jared Kangas) [RHEL-259788]
+- mmc: sdhci-esdhc-imx: fix resume error handling (Jared Kangas) [RHEL-259788]
+- mmc: sdhci-esdhc-imx: make non-fatal errors non-blocking in suspend (Jared Kangas) [RHEL-259788]
+- mmc: sdhci-esdhc-imx: use pm_runtime_resume_and_get() in suspend (Jared Kangas) [RHEL-259788]
+- mmc: sdhci-esdhc-imx: disable irq during suspend to fix unhandled interrupt (Jared Kangas) [RHEL-259788]
+- mmc: sdhci-esdhc-imx: restore pinctrl before restoring ios timing on resume (Jared Kangas) [RHEL-259788]
+- mmc: sdhci-esdhc-imx: fix esdhc_change_pinstate() to allow default state restore (Jared Kangas) [RHEL-259788]
+- mmc: sdhci-esdhc-imx: restore DLL override for DDR modes on resume (Jared Kangas) [RHEL-259788]
+- mmc: sdhci-esdhc-imx: remove unnecessary mmc_card_wake_sdio_irq check for tuning save/restore (Jared Kangas) [RHEL-259788]
+- i2c: imx: fix locked bus on SMBus block-read of 0 (IRQ) (Jared Kangas) [RHEL-259788]
+- i2c: imx: fix locked bus on SMBus block-read of 0 (atomic) (Jared Kangas) [RHEL-259788]
+- i2c: imx: Cancel hrtimer before clearing slave pointer (Jared Kangas) [RHEL-259788]
+- i2c: imx: Fix slave registration race and error handling (Jared Kangas) [RHEL-259788]
+- i2c: imx: mark I2C adapter when hardware is powered down (Jared Kangas) [RHEL-259788]
+- gpio: pca953x: fix cache_only and IRQ state on restore_context() failure (Jared Kangas) [RHEL-259788]
+- gpio: pca953x: fix pca953x_irq_bus_sync_unlock regmap lock (Jared Kangas) [RHEL-259788]
+- gpio: pca953x: drop bitmap_complement() where feasible (Jared Kangas) [RHEL-259788]
+- gpio: pca953x: enable latch only on edge-triggered inputs (Jared Kangas) [RHEL-259788]
+- gpio: pca953x: handle short interrupt pulses on PCAL devices (Jared Kangas) [RHEL-259788]
+- gpio: pca953x: Add support for level-triggered interrupts (Jared Kangas) [RHEL-259788]
+- gpio: pca953x: fix wrong error probe return value (Jared Kangas) [RHEL-259788]
+- gpio: pca953x: fix IRQ storm on system wake up (Jared Kangas) [RHEL-259788]
+- gpio: pca953x: log an error when failing to get the reset GPIO (Jared Kangas) [RHEL-259788]
+- gpio: pca953x: Improve interrupt support (Jared Kangas) [RHEL-259788]
+- selinux: check connect-related permissions on TCP Fast Open (CKI Backport Bot) [RHEL-258024] {CVE-2026-72243}
+- smb: client: fix double-free in SMB2_flush() replay (CKI Backport Bot) [RHEL-253205] {CVE-2026-64383}
+- RHEL: revert "block: only zero non-PI metadata tuples in bio_integrity_prep" (Jeff Moyer) [RHEL-189638] {CVE-2026-23007}
+- block: always allocate integrity buffer when required (Jeff Moyer) [RHEL-189638]
+- block: don't overwrite bip_vcnt in bio_integrity_copy_user() (Jeff Moyer) [RHEL-232375] {CVE-2026-64053}
+- blk-cgroup: fix UAF in __blkcg_rstat_flush() (Jeff Moyer) [RHEL-230292] {CVE-2026-63802}
+- bnxt_en: Gate TPH enablement behind BNXT_SUPPORTS_QUEUE_API check (CKI Backport Bot) [RHEL-247283]
+- ALSA: timer: drain a slave's callback before its master detaches it (CKI Backport Bot) [RHEL-236084] {CVE-2026-68201}
+- sctp: don't free the ASCONF's own transport in DEL-IP processing (CKI Backport Bot) [RHEL-234288] {CVE-2026-64564}
+- mac802154: llsec: add skb_cow_data() before in-place crypto (CKI Backport Bot) [RHEL-231034] {CVE-2026-63831}
+- sctp: prevent peer transport count overflow (Xin Long) [RHEL-216247]
+- netfilter: bridge: make ebt_snat ARP rewrite writable (CKI Backport Bot) [RHEL-190036] {CVE-2026-53266}
+- module.lds,codetag: force 0 sh_addr for sections (Joe Lawrence) [RHEL-159298]
 
 * Mon Sep 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.58.1.el10_2]
 - crypto: af_alg - Fix incorrect boolean values in af_alg_ctx (CKI Backport Bot) [RHEL-264234] {CVE-2025-39964}
