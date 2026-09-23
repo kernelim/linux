@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.166.1.el8_10
+%define pkgrelease 553.168.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.166.1%{?dist}
+%define specrelease 553.168.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,31 @@ fi
 #
 #
 %changelog
-* Wed Sep 23 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.166.1
+* Thu Sep 24 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.168.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Wed Sep 23 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.168.1.el8_10]
+- pppoe: reload header pointer after dev_hard_header() (Guillaume Nault) [RHEL-237293] {CVE-2026-68121}
+- nvme-tcp: reject a read that transferred too few bytes (CKI Backport Bot) [RHEL-263345] {CVE-2026-89480}
+- nvme: rename and document nvme_end_request (CKI Backport Bot) [RHEL-263345] {CVE-2026-89480}
+- ipvs: do not propagate one-packet flag to synced conns (CKI Backport Bot) [RHEL-255839] {CVE-2026-80714}
+- netfilter: nf_queue: hold bridge skb->dev while queued (CKI Backport Bot) [RHEL-231233] {CVE-2026-52912}
+- drm/amdgpu: Fix fence put before wait in amdgpu_amdkfd_submit_ib (CKI Backport Bot) [RHEL-221269] {CVE-2026-31566}
+
+* Tue Sep 22 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.167.1.el8_10]
+- net: tun: bound receive headroom (CKI Backport Bot) [RHEL-264385] {CVE-2026-81000}
+- xfrm: ah6: validate routing header segments_left (CKI Backport Bot) [RHEL-264314] {CVE-2026-80844}
+- scsi: qla2xxx: Bound rsp_info_len to avoid OOB sense-data read (CKI Backport Bot) [RHEL-262571] {CVE-2026-89846}
+- ASoC: SOF: ipc3-control: Validate size in snd_sof_update_control (CKI Backport Bot) [RHEL-243620] {CVE-2026-72261}
+- mac802154: llsec: add skb_cow_data() before in-place crypto (Abhishek Rawal) [RHEL-231030] {CVE-2026-63831}
+- sctp: don't free the ASCONF's own transport in DEL-IP processing (CKI Backport Bot) [RHEL-234282] {CVE-2026-64564}
+- drm/amdgpu: Fix use-after-free race in VM acquire (CKI Backport Bot) [RHEL-222381] {CVE-2026-43370}
+- sctp: prevent peer transport count overflow (Xin Long) [RHEL-216297]
 
 * Mon Sep 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.166.1.el8_10]
 - crypto: af_alg - Fix incorrect boolean values in af_alg_ctx (CKI Backport Bot) [RHEL-264205] {CVE-2025-39964}
