@@ -299,6 +299,8 @@ static void do_page_cache_ra(struct readahead_control *ractl,
 	page_cache_ra_unbounded(ractl, nr_to_read, lookahead_size);
 }
 
+int sysctl_legacy_willneed_readahead = 0;
+
 /*
  * Chunk the readahead into 2 megabyte units, so that we don't pin too much
  * memory at once.
@@ -320,6 +322,22 @@ void force_page_cache_ra(struct readahead_control *ractl,
 	 */
 	index = readahead_index(ractl);
 	max_pages = max_t(unsigned long, bdi->io_pages, ra->ra_pages);
+
+	/*
+	 * RHEL-22476 reintroduces legacy behavior where the request will be
+	 * allowed to exceed the readahead window up to an upper boundary
+	 * which is given by the amount of inactive page cache pages plus
+	 * half of the amount of pages currently free in the system.
+	 *
+	 * This is to allow {f,mem}advise and readahead syscalls to
+	 * retain their old behavior of caching as much of the file
+	 * as there is memory available on the system upon their invocation.
+	 */
+	if (unlikely(sysctl_legacy_willneed_readahead)) {
+		max_pages = global_zone_page_state(NR_INACTIVE_FILE) +
+			    global_zone_page_state(NR_FREE_PAGES) / 2;
+	}
+
 	nr_to_read = min_t(unsigned long, nr_to_read, max_pages);
 	while (nr_to_read) {
 		unsigned long this_chunk = (2 * 1024 * 1024) / PAGE_SIZE;
@@ -683,8 +701,15 @@ void page_cache_sync_ra(struct readahead_control *ractl,
 		do_forced_ra = true;
 	}
 
-	/* be dumb */
+	/*
+	 * be dumb, but given changes introduced for RHEL-22476
+	 * clamp req_count to a value never larger than the
+	 * max readahed window.
+	 */
 	if (do_forced_ra) {
+		unsigned long ra_pages = ractl->ra->ra_pages ?
+					 ractl->ra->ra_pages : 1;
+		req_count = min_t(unsigned long, req_count, ra_pages);
 		force_page_cache_ra(ractl, req_count);
 		return;
 	}

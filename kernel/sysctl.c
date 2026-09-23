@@ -2378,6 +2378,15 @@ static struct ctl_table vm_table[] = {
 		.extra1         = SYSCTL_ZERO,
 		.extra2         = SYSCTL_MAX_PRIO_DROP,
 	},
+	{
+		.procname       = "legacy_willneed_readahead",
+		.data           = &sysctl_legacy_willneed_readahead,
+		.maxlen         = sizeof(sysctl_legacy_willneed_readahead),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec_minmax,
+		.extra1         = SYSCTL_ZERO,
+		.extra2         = SYSCTL_ONE,
+	},
 
 	{ }
 };

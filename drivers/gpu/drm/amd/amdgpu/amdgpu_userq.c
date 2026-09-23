@@ -400,6 +400,13 @@ amdgpu_userq_destroy(struct drm_file *filp, int queue_id)
 	}
 	amdgpu_bo_unref(&queue->db_obj.obj);
 
+	r = amdgpu_bo_reserve(queue->wptr_obj.obj, true);
+	if (!r) {
+		amdgpu_bo_unpin(queue->wptr_obj.obj);
+		amdgpu_bo_unreserve(queue->wptr_obj.obj);
+	}
+	amdgpu_bo_unref(&queue->wptr_obj.obj);
+
 #if defined(CONFIG_DEBUG_FS)
 	debugfs_remove_recursive(queue->debugfs_queue);
 #endif

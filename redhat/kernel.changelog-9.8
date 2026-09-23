@@ -1,3 +1,44 @@
+* Wed Sep 23 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.52.1.el9_8]
+- pppoe: reload header pointer after dev_hard_header() (Guillaume Nault) [RHEL-237295] {CVE-2026-68121}
+- mm/readahead: reintroduce legacy madvise_willneed behavior to force_page_cache_readahead (John J. Coleman) [RHEL-260938]
+- smb: client: avoid double-free in smbd_free_send_io() after smbd_send_batch_flush() (Paulo Alcantara) [RHEL-230561]
+- smb: client: let send_done handle a completion without IB_SEND_SIGNALED (Paulo Alcantara) [RHEL-230561]
+- smb: client: let smbd_post_send_negotiate_req() use smbd_post_send() (Paulo Alcantara) [RHEL-230561]
+- smb: client: fix last send credit problem causing disconnects (Paulo Alcantara) [RHEL-230561]
+- smb: client: make use of smbdirect_socket.send_io.bcredits (Paulo Alcantara) [RHEL-230561]
+- smb: client: use smbdirect_send_batch processing (Paulo Alcantara) [RHEL-230561]
+- smb: client: introduce and use smbd_{alloc, free}_send_io() (Paulo Alcantara) [RHEL-230561]
+- smb: client: split out smbd_ib_post_send() (Paulo Alcantara) [RHEL-230561]
+- smb: client: let smbd_post_send() make use of request->wr (Paulo Alcantara) [RHEL-230561]
+- smb: client: port and use the wait_for_credits logic used by server (Paulo Alcantara) [RHEL-230561]
+- smb: client: remove pointless sc->send_io.pending handling in smbd_post_send_iter() (Paulo Alcantara) [RHEL-230561]
+- smb: client: remove pointless sc->recv_io.credits.count rollback (Paulo Alcantara) [RHEL-230561]
+- smb: client: make use of smbdirect_socket.recv_io.credits.available (Paulo Alcantara) [RHEL-230561]
+- smb: smbdirect: introduce smbdirect_socket.send_io.bcredits.* (Paulo Alcantara) [RHEL-230561]
+- smb: smbdirect: introduce smbdirect_socket.recv_io.credits.available (Paulo Alcantara) [RHEL-230561] {CVE-2026-31539}
+- ipvs: do not propagate one-packet flag to synced conns (CKI Backport Bot) [RHEL-255848] {CVE-2026-80714}
+- drm/amdgpu/userq: fix access to stale wptr mapping (José Expósito) [RHEL-225416] {CVE-2026-46311}
+- drm/amdgpu: do not use amdgpu_bo_gpu_offset_no_check individually (José Expósito) [RHEL-225416]
+- drm/xe: Hold a dma-buf reference for imported BOs (CKI Backport Bot) [RHEL-236304] {CVE-2026-68266}
+- drm/amdgpu: Fix context pstate override handling (CKI Backport Bot) [RHEL-236711] {CVE-2026-68273}
+- drm/xe/rtp: Add RING_FORCE_TO_NONPRIV_DENY to OA whitelists (CKI Backport Bot) [RHEL-237964] {CVE-2026-68267}
+- drm/xe/rtp: Refactor OAG MMIO trigger register whitelisting (CKI Backport Bot) [RHEL-237964]
+- drm/xe/xe3: Apply wa_14024997852 (CKI Backport Bot) [RHEL-237964]
+- drm/amdkfd: fix 32-bit overflow in CWSR total size calculation (CKI Backport Bot) [RHEL-237833] {CVE-2026-68257}
+- drm/virtio: use uninterruptible resv lock for plane updates (CKI Backport Bot) [RHEL-229328] {CVE-2026-64098}
+- drm/amdgpu/vcn: fix integer overflow in dec_msg buffer count check (José Expósito) [RHEL-225299]
+- drm/amdgpu/vcn3: Avoid overflow on msg bound check (José Expósito) [RHEL-225299]
+- drm/amdgpu/vcn3: Prevent OOB reads when parsing dec msg (José Expósito) [RHEL-225299] {CVE-2026-46230}
+- fbcon: Set fb_display[i]->mode to NULL when the mode is released (José Expósito) [RHEL-250107] {CVE-2025-40323}
+- drm/amdgpu/vce: fix integer overflow in image size (CKI Backport Bot) [RHEL-237636] {CVE-2026-68108}
+- drm/xe/eustall: Fix drm_dev_put called before stream disable in close (CKI Backport Bot) [RHEL-229378] {CVE-2026-53290}
+- drm/amdgpu/vcn4: Prevent OOB reads when parsing IB (CKI Backport Bot) [RHEL-226050] {CVE-2026-46204}
+- drm/amdgpu/vcn4: Avoid overflow on msg bound check (José Expósito) [RHEL-225443]
+- drm/amdgpu/vcn4: Prevent OOB reads when parsing dec msg (José Expósito) [RHEL-225443] {CVE-2026-46199}
+- netfilter: nf_queue: hold bridge skb->dev while queued (CKI Backport Bot) [RHEL-231247] {CVE-2026-52912}
+- accel/ivpu: Add buffer overflow check in MS get_info_ioctl (CKI Backport Bot) [RHEL-230650] {CVE-2026-53203}
+Resolves: RHEL-225299, RHEL-225416, RHEL-225443, RHEL-226050, RHEL-229328, RHEL-229378, RHEL-230561, RHEL-230650, RHEL-231247, RHEL-236304, RHEL-236711, RHEL-237295, RHEL-237636, RHEL-237833, RHEL-237964, RHEL-250107, RHEL-255848, RHEL-260938
+
 * Tue Sep 22 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.51.1.el9_8]
 - net: tun: bound receive headroom (CKI Backport Bot) [RHEL-264401] {CVE-2026-81000}
 - xfrm: ah6: validate routing header segments_left (CKI Backport Bot) [RHEL-264350] {CVE-2026-80844}

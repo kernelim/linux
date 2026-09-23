@@ -38,6 +38,7 @@ struct user_struct;
 struct pt_regs;
 
 extern int sysctl_page_lock_unfairness;
+extern int sysctl_legacy_willneed_readahead;
 
 void mm_core_init(void);
 void init_mm_internals(void);
