@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 211.59.1
+%define pkgrelease 211.60.1
 %define kversion 6
-%define tarfile_release 6.12.0-211.59.1.el10_2
+%define tarfile_release 6.12.0-211.60.1.el10_2
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 211.59.1%{?buildid}%{?dist}
+%define specrelease 211.60.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-211.59.1.el10_2
+%define kabiversion 6.12.0-211.60.1.el10_2
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4566,9 +4566,43 @@ fi\
 #
 #
 %changelog
-* Thu Sep 24 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.59.1
+* Thu Sep 24 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.60.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Wed Sep 23 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.60.1.el10_2]
+- pppoe: reload header pointer after dev_hard_header() (Guillaume Nault) [RHEL-242509] {CVE-2026-68121}
+- nvme-tcp: fix host memory disclosure on R2T for a read command (CKI Backport Bot) [RHEL-263403] {CVE-2026-89481}
+- af_unix: Drop all SCM attributes for SOCKMAP. (Davide Caratti) [RHEL-229262] {CVE-2026-53005}
+- af_unix: Don't use skb_recv_datagram() in unix_stream_read_skb(). (Davide Caratti) [RHEL-229262]
+- af_unix: Don't check SOCK_DEAD in unix_stream_read_skb(). (Davide Caratti) [RHEL-229262]
+- ipvs: do not propagate one-packet flag to synced conns (CKI Backport Bot) [RHEL-255860] {CVE-2026-80714}
+- drm/amdgpu/vce: fix integer overflow in image size (Mika Penttilä) [RHEL-257136] {CVE-2026-68108}
+- drm/amdkfd: fix 32-bit overflow in CWSR total size calculation (Mika Penttilä) [RHEL-237844] {CVE-2026-68257}
+- drm/xe: Hold a dma-buf reference for imported BOs (CKI Backport Bot) [RHEL-236300] {CVE-2026-68266}
+- drm/virtio: use uninterruptible resv lock for plane updates (CKI Backport Bot) [RHEL-229327] {CVE-2026-64098}
+- drm/amdgpu/userq: fix access to stale wptr mapping (Mika Penttilä) [RHEL-225409] {CVE-2026-46311}
+- drm/amdgpu: do not use amdgpu_bo_gpu_offset_no_check individually (Mika Penttilä) [RHEL-225409] {CVE-2026-46311}
+- drm/amdgpu: Fix context pstate override handling (CKI Backport Bot) [RHEL-236714] {CVE-2026-68273}
+- drm/xe/rtp: Add RING_FORCE_TO_NONPRIV_DENY to OA whitelists (CKI Backport Bot) [RHEL-237962] {CVE-2026-68267}
+- drm/xe/rtp: Refactor OAG MMIO trigger register whitelisting (CKI Backport Bot) [RHEL-237962] {CVE-2026-68267}
+- drm/xe/xe3: Apply wa_14024997852 (CKI Backport Bot) [RHEL-237962] {CVE-2026-68267}
+- drm/xe/eustall: Fix drm_dev_put called before stream disable in close (CKI Backport Bot) [RHEL-229371] {CVE-2026-53290}
+- drm/amdgpu/vcn: fix integer overflow in dec_msg buffer count check (Mika Penttilä) [RHEL-225316]
+- drm/amdgpu/vcn3: Avoid overflow on msg bound check (Mika Penttilä) [RHEL-225316] {CVE-2026-46230}
+- drm/amdgpu/vcn3: Prevent OOB reads when parsing dec msg (Mika Penttilä) [RHEL-225316] {CVE-2026-46230}
+- drm/amdgpu/vcn4: Prevent OOB reads when parsing IB (CKI Backport Bot) [RHEL-226047] {CVE-2026-46204}
+- fbcon: Set fb_display[i]->mode to NULL when the mode is released (Mika Penttilä) [RHEL-250108] {CVE-2025-40323}
+- drm/amdgpu/vcn4: Avoid overflow on msg bound check (Mika Penttilä) [RHEL-225444] {CVE-2026-46199}
+- drm/amdgpu/vcn4: Prevent OOB reads when parsing dec msg (Mika Penttilä) [RHEL-225444] {CVE-2026-46199}
+- powerpc/powernv/iommu: iommu incorrectly bypass DMA APIs (Jerry Snitselaar) [RHEL-252331]
+- powerpc/iommu: bypass DMA APIs for coherent allocations for pre-mapped memory (Jerry Snitselaar) [RHEL-252331]
+- accel/ivpu: Add buffer overflow check in MS get_info_ioctl (CKI Backport Bot) [RHEL-230647] {CVE-2026-53203}
+- libceph: fix potential use-after-free in have_mon_and_osd_map() (CKI Backport Bot) [RHEL-169081] {CVE-2025-68285}
+- libceph: reset sparse-read state in osd_fault() (CKI Backport Bot) [RHEL-169079] {CVE-2026-23136}
+- libceph: replace overzealous BUG_ON in osdmap_apply_incremental() (CKI Backport Bot) [RHEL-169072] {CVE-2026-22990}
+- libceph: prevent potential out-of-bounds reads in handle_auth_done() (CKI Backport Bot) [RHEL-169068] {CVE-2026-22984}
+- libceph: make decode_pool() more resilient against corrupted osdmaps (CKI Backport Bot) [RHEL-169064] {CVE-2025-71116}
 
 * Tue Sep 22 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.59.1.el10_2]
 - net: tun: bound receive headroom (CKI Backport Bot) [RHEL-264371] {CVE-2026-81000}
