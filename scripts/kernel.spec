@@ -176,15 +176,15 @@ Summary: The Linux kernel
 %define specrpmversion 6.12.0
 %define specversion 6.12.0
 %define patchversion 6.12
-%define pkgrelease 211.60.1
+%define pkgrelease 211.61.1
 %define kversion 6
-%define tarfile_release 6.12.0-211.60.1.el10_2
+%define tarfile_release 6.12.0-211.61.1.el10_2
 # This is needed to do merge window version magic
 %define patchlevel 12
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 211.60.1%{?buildid}%{?dist}
+%define specrelease 211.61.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 6.12.0-211.60.1.el10_2
+%define kabiversion 6.12.0-211.61.1.el10_2
 
 # If this variable is set to 1, a bpf selftests build failure will cause a
 # fatal kernel package build error
@@ -4566,9 +4566,26 @@ fi\
 #
 #
 %changelog
-* Thu Sep 24 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.60.1
+* Tue Sep 29 2026 Release Engineering <releng@rockylinux.org> - 6.12.0-211.61.1
 - Add partial riscv64 support for build root
 - Provide basic VisionFive 2 support
+
+* Mon Sep 28 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.61.1.el10_2]
+- perf: Reject exited events as group leaders (Anubhav Shelat) [RHEL-258812] {CVE-2026-74753}
+- perf/core: Detach event groups during remove_on_exec (Anubhav Shelat) [RHEL-250496] {CVE-2026-64556}
+- perf/core: Fix missing read event generation on task exit (Anubhav Shelat) [RHEL-250496]
+- KVM: arm64: Handle negative S1 walk levels in VNCR TLB size evaluation (Gavin Shan) [RHEL-261954] {CVE-2026-89775}
+- KVM: arm64: Reassign nested_mmus array behind mmu_lock (Gavin Shan) [RHEL-227043] {CVE-2026-46317}
+- nvme-tcp: reject a read that transferred too few bytes (CKI Backport Bot) [RHEL-263335] {CVE-2026-89480}
+- x86/mm/ident_map: Fix theoretical virtual address overflow to zero (Mark Langsdorf) [RHEL-260402]
+- fhandle: fix UAF due to unlocked ->mnt_ns read in may_decode_fh() (Abhi Das) [RHEL-231396] {CVE-2026-53341}
+- crypto: testmgr - block Crypto API xxhash64 in FIPS mode (Vladislav Dronov) [RHEL-254943]
+- crypto: tegra - fix rctx->cryptlen calculation in tegra_gcm_do_one_req() (CKI Backport Bot) [RHEL-254306] {CVE-2026-80522}
+- vmxnet3: fix BUG_ON in vmxnet3_get_hdr_len() for Geneve packets (CKI Backport Bot) [RHEL-252817] {CVE-2026-68299}
+- KVM: s390: selftests: Add IRQ routing address offset tests (Christoph Schlameuss) [RHEL-188661]
+- KVM: s390: Limit adapter indicator access to mapped page (Christoph Schlameuss) [RHEL-188661]
+- KVM: nSVM: Raise #UD if unhandled VMMCALL isn't intercepted by L1 (CKI Backport Bot) [RHEL-227378] {CVE-2026-46076}
+- ext4: fix e4b bitmap inconsistency reports (CKI Backport Bot) [RHEL-225949] {CVE-2026-45942}
 
 * Wed Sep 23 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.60.1.el10_2]
 - pppoe: reload header pointer after dev_hard_header() (Guillaume Nault) [RHEL-242509] {CVE-2026-68121}

@@ -2320,8 +2320,6 @@ out:
 	perf_event__header_size(leader);
 }
 
-static void sync_child_event(struct perf_event *child_event);
-
 static void perf_child_detach(struct perf_event *event)
 {
 	struct perf_event *parent_event = event->parent;
@@ -2340,7 +2338,6 @@ static void perf_child_detach(struct perf_event *event)
 	lockdep_assert_held(&parent_event->child_mutex);
 	 */
 
-	sync_child_event(event);
 	list_del_init(&event->child_list);
 }
 
@@ -4598,7 +4595,8 @@ out:
 static void perf_remove_from_owner(struct perf_event *event);
 static void perf_event_exit_event(struct perf_event *event,
 				  struct perf_event_context *ctx,
-				  bool revoke);
+				  struct task_struct *task,
+				  unsigned long detach_flags);
 
 /*
  * Removes all events from the current task that have been marked
@@ -4625,7 +4623,7 @@ static void perf_event_remove_on_exec(struct perf_event_context *ctx)
 
 		modified = true;
 
-		perf_event_exit_event(event, ctx, false);
+		perf_event_exit_event(event, ctx, ctx->task, DETACH_GROUP);
 	}
 
 	raw_spin_lock_irqsave(&ctx->lock, flags);
@@ -12471,7 +12469,7 @@ static void __pmu_detach_event(struct pmu *pmu, struct perf_event *event,
 	/*
 	 * De-schedule the event and mark it REVOKED.
 	 */
-	perf_event_exit_event(event, ctx, true);
+	perf_event_exit_event(event, ctx, ctx->task, DETACH_REVOKE);
 
 	/*
 	 * All _free_event() bits that rely on event->pmu:
@@ -13499,7 +13497,7 @@ SYSCALL_DEFINE5(perf_event_open,
 		if (err)
 			goto err_fd;
 		group_leader = fd_file(group)->private_data;
-		if (group_leader->state <= PERF_EVENT_STATE_REVOKED) {
+		if (group_leader->state <= PERF_EVENT_STATE_EXIT) {
 			err = -ENODEV;
 			goto err_fd;
 		}
@@ -13629,6 +13627,12 @@ SYSCALL_DEFINE5(perf_event_open,
 		 */
 		if (group_leader->ctx != ctx)
 			goto err_locked;
+
+		/* Recheck under ctx::mutex to serialize against remove-on-exec. */
+		if (group_leader->state <= PERF_EVENT_STATE_EXIT) {
+			err = -ENODEV;
+			goto err_locked;
+		}
 
 		/*
 		 * Only a group leader can be exclusive or pinned
@@ -14030,14 +14034,13 @@ void perf_pmu_migrate_context(struct pmu *pmu, int src_cpu, int dst_cpu)
 }
 EXPORT_SYMBOL_GPL(perf_pmu_migrate_context);
 
-static void sync_child_event(struct perf_event *child_event)
+static void sync_child_event(struct perf_event *child_event,
+			     struct task_struct *task)
 {
 	struct perf_event *parent_event = child_event->parent;
 	u64 child_val;
 
 	if (child_event->attr.inherit_stat) {
-		struct task_struct *task = child_event->ctx->task;
-
 		if (task && task != TASK_TOMBSTONE)
 			perf_event_read_event(child_event, task);
 	}
@@ -14056,11 +14059,14 @@ static void sync_child_event(struct perf_event *child_event)
 
 static void
 perf_event_exit_event(struct perf_event *event,
-		      struct perf_event_context *ctx, bool revoke)
+		      struct perf_event_context *ctx,
+		      struct task_struct *task,
+		      unsigned long detach_flags)
 {
 	struct perf_event *parent_event = event->parent;
-	unsigned long detach_flags = DETACH_EXIT;
 	unsigned int attach_state;
+
+	detach_flags |= DETACH_EXIT;
 
 	if (parent_event) {
 		/*
@@ -14079,10 +14085,13 @@ perf_event_exit_event(struct perf_event *event,
 		mutex_lock(&parent_event->child_mutex);
 		/* PERF_ATTACH_ITRACE might be set concurrently */
 		attach_state = READ_ONCE(event->attach_state);
+
+		if (attach_state & PERF_ATTACH_CHILD)
+			sync_child_event(event, task);
 	}
 
-	if (revoke)
-		detach_flags |= DETACH_GROUP | DETACH_REVOKE;
+	if (detach_flags & DETACH_REVOKE)
+		detach_flags |= DETACH_GROUP;
 
 	perf_remove_from_context(event, detach_flags);
 	/*
@@ -14170,7 +14179,7 @@ static void perf_event_exit_task_context(struct task_struct *task, bool exit)
 		perf_event_task(task, ctx, 0);
 
 	list_for_each_entry_safe(child_event, next, &ctx->event_list, event_entry)
-		perf_event_exit_event(child_event, ctx, false);
+		perf_event_exit_event(child_event, ctx, exit ? task : NULL, 0);
 
 	mutex_unlock(&ctx->mutex);
 
