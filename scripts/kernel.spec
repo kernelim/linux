@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.168.1.el8_10
+%define pkgrelease 553.169.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.168.1%{?dist}
+%define specrelease 553.169.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,34 @@ fi
 #
 #
 %changelog
-* Thu Sep 24 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.168.1
+* Mon Sep 28 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.169.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Mon Sep 28 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.169.1.el8_10]
+- net: mana: Fix TOCTOU double-fetch of hwc_msg_id from DMA buffer (Filippo Storniolo) [RHEL-230983] {CVE-2026-64034}
+- arm64: tlb: Flush walk cache when unsharing PMD tables (Rafael Aquini) [RHEL-259308] {CVE-2026-63875}
+- perf: Reject exited events as group leaders (Anubhav Shelat) [RHEL-258792] {CVE-2026-74753}
+- perf/core: Detach event groups during remove_on_exec (Anubhav Shelat) [RHEL-250500] {CVE-2026-64556}
+- drm/amdgpu: Fix context pstate override handling (Jocelyn Falempe) [RHEL-236710] {CVE-2026-68273}
+- drm/amdgpu: keep amdgpu_ctx_mgr in ctx structure (Jocelyn Falempe) [RHEL-236710]
+- drm/amdgpu/vcn: fix integer overflow in dec_msg buffer count check (Jocelyn Falempe) [RHEL-225309]
+- drm/amdgpu/vcn3: Avoid overflow on msg bound check (Jocelyn Falempe) [RHEL-225309]
+- drm/amdgpu/vcn3: Prevent OOB reads when parsing dec msg (Jocelyn Falempe) [RHEL-225309] {CVE-2026-46230}
+- drm/amdgpu/vcn4: Avoid overflow on msg bound check (Jocelyn Falempe) [RHEL-225430]
+- drm/amdgpu/vcn4: Prevent OOB reads when parsing dec msg (Jocelyn Falempe) [RHEL-225430] {CVE-2026-46199}
+- drm/amdgpu/vcn4: Prevent OOB reads when parsing IB (Jocelyn Falempe) [RHEL-226024] {CVE-2026-46204}
+- drm/amdgpu/vcn4: Fix IB parsing with multiple engine info packages (Jocelyn Falempe) [RHEL-226024]
+- fbcon: Set fb_display[i]->mode to NULL when the mode is released (Jocelyn Falempe) [RHEL-230330] {CVE-2025-40323}
+- libceph: bound pg_{temp,upmap,upmap_items} length to CEPH_PG_MAX_SIZE (CKI Backport Bot) [RHEL-237150] {CVE-2026-68159}
+- libceph: Amend checking to fix `make W=1` build breakage (CKI Backport Bot) [RHEL-237150] {CVE-2026-68159}
+- ext4: fix e4b bitmap inconsistency reports (Lukas Herbolt) [RHEL-225932] {CVE-2026-45942}
+- libceph: Reject monmaps advertising zero monitors (CKI Backport Bot) [RHEL-237904] {CVE-2026-68155}
+- libceph: refresh auth->authorizer_buf{,_len} after authorizer update (CKI Backport Bot) [RHEL-237472] {CVE-2026-68156}
 
 * Wed Sep 23 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.168.1.el8_10]
 - pppoe: reload header pointer after dev_hard_header() (Guillaume Nault) [RHEL-237293] {CVE-2026-68121}
