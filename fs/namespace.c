@@ -923,7 +923,7 @@ static void commit_tree(struct mount *mnt)
 
 	list_add_tail(&head, &mnt->mnt_list);
 	list_for_each_entry(m, &head, mnt_list)
-		m->mnt_ns = n;
+		WRITE_ONCE(m->mnt_ns, n);
 
 	list_splice(&head, n->list.prev);
 
@@ -1266,7 +1266,7 @@ EXPORT_SYMBOL(mntget);
 void mnt_make_shortterm(struct vfsmount *mnt)
 {
 	if (mnt)
-		real_mount(mnt)->mnt_ns = NULL;
+		WRITE_ONCE(real_mount(mnt)->mnt_ns, NULL);
 }
 
 /**
@@ -1557,7 +1557,7 @@ static void umount_tree(struct mount *mnt, enum umount_tree_flags how)
 			ns->mounts--;
 			__touch_mnt_namespace(ns);
 		}
-		p->mnt_ns = NULL;
+		WRITE_ONCE(p->mnt_ns, NULL);
 		if (how & UMOUNT_SYNC)
 			p->mnt.mnt_flags |= MNT_SYNC_UMOUNT;
 

@@ -1,3 +1,23 @@
+* Mon Sep 28 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.53.1.el9_8]
+- arm64: tlb: Flush walk cache when unsharing PMD tables (Rafael Aquini) [RHEL-259312] {CVE-2026-63875}
+- perf: Reject exited events as group leaders (Anubhav Shelat) [RHEL-258817] {CVE-2026-74753}
+- perf/core: Detach event groups during remove_on_exec (Anubhav Shelat) [RHEL-250504] {CVE-2026-64556}
+- ext4: fix e4b bitmap inconsistency reports (Lukas Herbolt) [RHEL-225944] {CVE-2026-45942}
+- crypto: af_alg - Cap AEAD AD length to 0x80000000 (CKI Backport Bot) [RHEL-259061] {CVE-2026-52972}
+- fhandle: fix UAF due to unlocked ->mnt_ns read in may_decode_fh() (Abhi Das) [RHEL-231391] {CVE-2026-53341}
+- crypto: testmgr - block Crypto API xxhash64 in FIPS mode (Vladislav Dronov) [RHEL-256437]
+- crypto: tegra - fix rctx->cryptlen calculation in tegra_gcm_do_one_req() (CKI Backport Bot) [RHEL-254308] {CVE-2026-80522}
+- RDMA/rxe: Fix iova-to-va conversion for MR page sizes != PAGE_SIZE (Kamal Heib) [RHEL-230788] {CVE-2026-46325}
+- RDMA/rxe: Remove unused page_offset member (Kamal Heib) [RHEL-230788]
+- RDMA/rxe: Remove redundant assignment to variable page_offset (Kamal Heib) [RHEL-230788]
+- Revert "RDMA/rxe: RHEL-only revert for page size vars in rxe" (Kamal Heib) [RHEL-230788]
+- KVM: s390: selftests: Add IRQ routing address offset tests (Christoph Schlameuss) [RHEL-188656]
+- KVM: s390: Limit adapter indicator access to mapped page (Christoph Schlameuss) [RHEL-188656]
+- RDMA/siw: Reject MPA FPDU length underflow before signed receive math (CKI Backport Bot) [RHEL-232566] {CVE-2026-64102}
+- rxrpc: Fix rxrpc_input_call_event() to only unshare DATA packets (Marc Dionne) [RHEL-179563]
+- rxrpc: Fix potential UAF after skb_unshare() failure (Marc Dionne) [RHEL-179563] {CVE-2026-45998}
+Resolves: RHEL-179563, RHEL-188656, RHEL-225944, RHEL-230788, RHEL-231391, RHEL-232566, RHEL-250504, RHEL-254308, RHEL-256437, RHEL-258817, RHEL-259061, RHEL-259312
+
 * Wed Sep 23 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.52.1.el9_8]
 - pppoe: reload header pointer after dev_hard_header() (Guillaume Nault) [RHEL-237295] {CVE-2026-68121}
 - mm/readahead: reintroduce legacy madvise_willneed behavior to force_page_cache_readahead (John J. Coleman) [RHEL-260938]

@@ -193,6 +193,7 @@ TEST_GEN_PROGS_s390x += guest_print_test
 TEST_GEN_PROGS_s390x += kvm_create_max_vcpus
 TEST_GEN_PROGS_s390x += kvm_page_table_test
 TEST_GEN_PROGS_s390x += rseq_test
+TEST_GEN_PROGS_s390x += s390x/irq_routing
 TEST_GEN_PROGS_s390x += set_memory_region_test
 TEST_GEN_PROGS_s390x += kvm_binary_stats_test
 
