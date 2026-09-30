@@ -118,7 +118,6 @@ static void request_key_auth_revoke(struct key *key)
 		put_cred(rka->cred);
 		rka->cred = NULL;
 	}
-	request_key_auth_put(rka);
 }
 
 static void free_request_key_auth(struct request_key_auth *rka)

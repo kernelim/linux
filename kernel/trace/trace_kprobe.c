@@ -124,6 +124,7 @@ static int register_kprobe_event(struct trace_kprobe *tk);
 static int unregister_kprobe_event(struct trace_kprobe *tk);
 
 static DEFINE_MUTEX(probe_lock);
+static DEFINE_MUTEX(register_trace_kprobe_lock);
 static LIST_HEAD(probe_list);
 
 static int kprobe_dispatcher(struct kprobe *kp, struct pt_regs *regs);
@@ -412,6 +413,9 @@ enable_trace_kprobe(struct trace_kprobe *tk, struct trace_event_file *file)
 	struct event_file_link *link = NULL;
 	int ret = 0;
 
+	if (mutex_is_locked(&register_trace_kprobe_lock))
+		return -EBUSY;
+
 	if (file) {
 		link = kmalloc(sizeof(*link), GFP_KERNEL);
 		if (!link) {
@@ -632,6 +636,7 @@ static int register_trace_kprobe(struct trace_kprobe *tk)
 	struct trace_kprobe *old_tk;
 	int ret;
 
+	mutex_lock(&register_trace_kprobe_lock);
 	mutex_lock(&probe_lock);
 
 	/* Delete old (same name) event if exist */
@@ -660,6 +665,7 @@ static int register_trace_kprobe(struct trace_kprobe *tk)
 
 end:
 	mutex_unlock(&probe_lock);
+	mutex_unlock(&register_trace_kprobe_lock);
 	return ret;
 }
 

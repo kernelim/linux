@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.169.1.el8_10
+%define pkgrelease 553.170.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.169.1%{?dist}
+%define specrelease 553.170.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,22 @@ fi
 #
 #
 %changelog
-* Mon Sep 28 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.169.1
+* Thu Oct 01 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.170.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Wed Sep 30 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.170.1.el8_10]
+- keys: Do not drop the auth key's request_key_auth reference in revoke (Thomas Huth) [RHEL-270349]
+- Tracing: Fix a race condition in register_trace_kprobe() (Jerome Marchand) [RHEL-214136]
+- dm-integrity: don't increment hash_offset twice (CKI Backport Bot) [RHEL-257757] {CVE-2026-72099}
+- net/liquidio: drop cached VF pci_dev LUT (Izabela Bakollari) [RHEL-244368] {CVE-2026-72329}
+- liquidio: Use pcie_flr() instead of reimplementing it (Izabela Bakollari) [RHEL-244368]
+- vmxnet3: fix BUG_ON in vmxnet3_get_hdr_len() for Geneve packets (CKI Backport Bot) [RHEL-252809] {CVE-2026-68299}
+- RDMA/siw: Reject MPA FPDU length underflow before signed receive math (CKI Backport Bot) [RHEL-232567] {CVE-2026-64102}
 
 * Mon Sep 28 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.169.1.el8_10]
 - net: mana: Fix TOCTOU double-fetch of hwc_msg_id from DMA buffer (Filippo Storniolo) [RHEL-230983] {CVE-2026-64034}
