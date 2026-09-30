@@ -152,6 +152,7 @@ struct in_ifaddr {
 	__be32			ifa_broadcast;
 	unsigned char		ifa_scope;
 	unsigned char		ifa_prefixlen;
+	RH_KABI_FILL_HOLE(unsigned char ifa_proto)
 	__u32			ifa_flags;
 	char			ifa_label[IFNAMSIZ];
 
