@@ -133,6 +133,7 @@ static void iwl_dealloc_ucode(struct iwl_drv *drv)
 	kfree(drv->fw.dbg.mem_tlv);
 	kfree(drv->fw.iml);
 	kfree(drv->fw.ucode_capa.cmd_versions);
+	kfree(drv->fw.ucode_capa.cmd_bios_tables);
 	kfree(drv->fw.phy_integration_ver);
 	kfree(drv->trans->dbg.pc_data);
 	drv->trans->dbg.pc_data = NULL;
@@ -177,9 +178,10 @@ static inline char iwl_drv_get_step(int step)
 	return 'a' + step;
 }
 
-static bool iwl_drv_is_wifi7_supported(struct iwl_trans *trans)
+bool iwl_drv_is_wifi7_supported(struct iwl_trans *trans)
 {
-	return CSR_HW_RFID_TYPE(trans->info.hw_rf_id) >= IWL_CFG_RF_TYPE_FM;
+	return trans->mac_cfg->device_family >= IWL_DEVICE_FAMILY_BZ &&
+	       CSR_HW_RFID_TYPE(trans->info.hw_rf_id) >= IWL_CFG_RF_TYPE_FM;
 }
 
 const char *iwl_drv_get_fwname_pre(struct iwl_trans *trans, char *buf)
@@ -347,8 +349,8 @@ static int iwl_request_firmware(struct iwl_drv *drv, bool first)
 
 	if (first)
 		drv->fw_index = ucode_api_max;
-	else if (drv->fw_index == ENCODE_CORE_AS_API(99))
-		drv->fw_index = 101; /* last API-scheme number below core 99 */
+	else if (drv->fw_index == ENCODE_CORE_AS_API(100))
+		drv->fw_index = 102; /* last API-scheme number below core 100 */
 	else
 		drv->fw_index--;
 
@@ -427,7 +429,6 @@ struct iwl_firmware_pieces {
 	size_t dbg_trigger_tlv_len[FW_DBG_TRIGGER_MAX];
 	struct iwl_fw_dbg_mem_seg_tlv *dbg_mem_tlv;
 	size_t n_mem_tlv;
-	u32 major;
 };
 
 static void alloc_sec_data(struct iwl_firmware_pieces *pieces,
@@ -1069,19 +1070,19 @@ static int iwl_parse_tlv_firmware(struct iwl_drv *drv,
 			break;
 		case IWL_UCODE_TLV_FW_VERSION: {
 			const __le32 *ptr = (const void *)tlv_data;
-			u32 minor;
+			u32 major, minor;
 			u8 local_comp;
 
 			if (tlv_len != sizeof(u32) * 3)
 				goto invalid_tlv_len;
 
-			pieces->major = le32_to_cpup(ptr++);
+			major = le32_to_cpup(ptr++);
 			minor = le32_to_cpup(ptr++);
 			local_comp = le32_to_cpup(ptr);
 
 			snprintf(drv->fw.fw_version,
 				 sizeof(drv->fw.fw_version),
-				 "%u.%08x.%u %s", pieces->major, minor,
+				 "%u.%08x.%u %s", major, minor,
 				 local_comp, iwl_reduced_fw_name(drv));
 			break;
 			}
@@ -1314,7 +1315,7 @@ static int iwl_parse_tlv_firmware(struct iwl_drv *drv,
 			if (tlv_len != sizeof(u32))
 				goto invalid_tlv_len;
 			if (le32_to_cpup((const __le32 *)tlv_data) >
-			    IWL_FW_MAX_LINK_ID + 1) {
+			    IWL_FW_MAX_LINKS) {
 				IWL_ERR(drv,
 					"%d is an invalid number of links\n",
 					le32_to_cpup((const __le32 *)tlv_data));
@@ -1425,6 +1426,26 @@ static int iwl_parse_tlv_firmware(struct iwl_drv *drv,
 			if (!drv->fw.pnvm_data)
 				return -ENOMEM;
 			drv->fw.pnvm_size = tlv_len;
+			break;
+		case IWL_UCODE_TLV_CMD_BIOS_TABLE:
+			if (tlv_len % sizeof(struct iwl_fw_cmd_bios_table)) {
+				IWL_ERR(drv,
+					"Invalid length for command bios table: %u\n",
+					tlv_len);
+				return -EINVAL;
+			}
+
+			if (capa->cmd_bios_tables) {
+				IWL_ERR(drv, "Duplicate TLV type 0x%02X detected\n",
+					tlv_type);
+				return -EINVAL;
+			}
+			capa->cmd_bios_tables = kmemdup(tlv_data, tlv_len,
+							GFP_KERNEL);
+			if (!capa->cmd_bios_tables)
+				return -ENOMEM;
+			capa->n_cmd_bios_tables =
+				tlv_len / sizeof(struct iwl_fw_cmd_bios_table);
 			break;
 		default:
 			IWL_DEBUG_INFO(drv, "unknown TLV: %d\n", tlv_type);
@@ -1588,8 +1609,6 @@ static void _iwl_op_mode_stop(struct iwl_drv *drv)
 #endif
 	}
 }
-
-#define IWL_MLD_SUPPORTED_FW_VERSION 97
 
 /*
  * iwl_req_fw_callback - callback when firmware was loaded
@@ -1859,17 +1878,8 @@ static void iwl_req_fw_callback(const struct firmware *ucode_raw, void *context)
 	}
 
 #if IS_ENABLED(CONFIG_IWLMLD)
-	if (pieces->major >= IWL_MLD_SUPPORTED_FW_VERSION &&
-	    iwl_drv_is_wifi7_supported(drv->trans))
+	if (iwl_drv_is_wifi7_supported(drv->trans))
 		op = &iwlwifi_opmode_table[MLD_OP_MODE];
-#else
-	if (pieces->major >= IWL_MLD_SUPPORTED_FW_VERSION &&
-	    iwl_drv_is_wifi7_supported(drv->trans)) {
-		IWL_ERR(drv,
-			"IWLMLD needs to be compiled to support this firmware\n");
-		mutex_unlock(&iwlwifi_opmode_table_mtx);
-		goto out_unbind;
-	}
 #endif
 
 	IWL_INFO(drv, "loaded firmware version %s op_mode %s\n",

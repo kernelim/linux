@@ -110,14 +110,20 @@ static int dwmac4_wrback_get_rx_status(struct stmmac_extra_stats *x,
 
 	message_type = (rdes1 & ERDES4_MSG_TYPE_MASK) >> 8;
 
-	if (rdes1 & RDES1_IP_HDR_ERROR)
+	if (rdes1 & RDES1_IP_HDR_ERROR) {
 		x->ip_hdr_err++;
+		ret |= csum_none;
+	}
 	if (rdes1 & RDES1_IP_CSUM_BYPASSED)
 		x->ip_csum_bypassed++;
 	if (rdes1 & RDES1_IPV4_HEADER)
 		x->ipv4_pkt_rcvd++;
 	if (rdes1 & RDES1_IPV6_HEADER)
 		x->ipv6_pkt_rcvd++;
+	if (rdes1 & RDES1_IP_PAYLOAD_ERROR) {
+		x->ip_payload_err++;
+		ret |= csum_none;
+	}
 
 	if (message_type == RDES_EXT_NO_PTP)
 		x->no_ptp_rx_msg_type_ext++;
@@ -186,10 +192,12 @@ static void dwmac4_set_tx_owner(struct dma_desc *p)
 
 static void dwmac4_set_rx_owner(struct dma_desc *p, int disable_rx_ic)
 {
-	p->des3 |= cpu_to_le32(RDES3_OWN | RDES3_BUFFER1_VALID_ADDR);
+	u32 flags = (RDES3_OWN | RDES3_BUFFER1_VALID_ADDR);
 
 	if (!disable_rx_ic)
-		p->des3 |= cpu_to_le32(RDES3_INT_ON_COMPLETION_EN);
+		flags |= RDES3_INT_ON_COMPLETION_EN;
+
+	p->des3 |= cpu_to_le32(flags);
 }
 
 static int dwmac4_get_tx_ls(struct dma_desc *p)

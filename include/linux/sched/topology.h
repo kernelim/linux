@@ -97,6 +97,9 @@ struct sched_domain {
 	unsigned int nr_balance_failed; /* initialise to 0 */
 
 	/* idle_balance() stats */
+	unsigned int newidle_call;
+	unsigned int newidle_success;
+	unsigned int newidle_ratio;
 	u64 max_newidle_lb_cost;
 	unsigned long last_decay_max_lb_cost;
 
@@ -141,10 +144,8 @@ struct sched_domain {
 	};
 	struct sched_domain_shared *shared;
 
-	/* some of the idle_balance() stats are here, to preserve kabi */
-	RH_KABI_USE_SPLIT(1, unsigned int newidle_call,
-	                     unsigned int newidle_success)
-	RH_KABI_USE_SPLIT(2, unsigned int newidle_ratio)
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 	RH_KABI_RESERVE(3)
 
 	unsigned int span_weight;

@@ -43,8 +43,7 @@ ice-y := ice_main.o	\
 	 ice_repr.o	\
 	 ice_tc_lib.o	\
 	 ice_debugfs.o	\
-	 ice_adapter.o  \
-	 ice_rh.o
+	 ice_adapter.o
 ice-$(CONFIG_PCI_IOV) +=	\
 	ice_sriov.o		\
 	virt/allowlist.o	\

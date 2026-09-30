@@ -1715,7 +1715,7 @@ static int bttv_g_std(struct file *file, void *priv, v4l2_std_id *id)
 	return 0;
 }
 
-static int bttv_querystd(struct file *file, void *f, v4l2_std_id *id)
+static int bttv_querystd(struct file *file, void *priv, v4l2_std_id *id)
 {
 	struct bttv_fh *fh = f;
 	struct bttv *btv = fh->btv;
@@ -1852,7 +1852,7 @@ static int bttv_s_frequency(struct file *file, void *priv,
 	return 0;
 }
 
-static int bttv_log_status(struct file *file, void *f)
+static int bttv_log_status(struct file *file, void *priv)
 {
 	struct video_device *vdev = video_devdata(file);
 	struct bttv_fh *fh  = f;
@@ -1864,7 +1864,7 @@ static int bttv_log_status(struct file *file, void *f)
 }
 
 #ifdef CONFIG_VIDEO_ADV_DEBUG
-static int bttv_g_register(struct file *file, void *f,
+static int bttv_g_register(struct file *file, void *priv,
 					struct v4l2_dbg_register *reg)
 {
 	struct bttv_fh *fh = f;
@@ -1878,7 +1878,7 @@ static int bttv_g_register(struct file *file, void *f,
 	return 0;
 }
 
-static int bttv_s_register(struct file *file, void *f,
+static int bttv_s_register(struct file *file, void *priv,
 					const struct v4l2_dbg_register *reg)
 {
 	struct bttv_fh *fh = f;
@@ -2691,7 +2691,7 @@ static int bttv_streamoff(struct file *file, void *priv,
 	return 0;
 }
 
-static int bttv_g_parm(struct file *file, void *f,
+static int bttv_g_parm(struct file *file, void *priv,
 				struct v4l2_streamparm *parm)
 {
 	struct bttv_fh *fh = f;
@@ -2743,7 +2743,7 @@ static int bttv_g_pixelaspect(struct file *file, void *priv,
 	return 0;
 }
 
-static int bttv_g_selection(struct file *file, void *f, struct v4l2_selection *sel)
+static int bttv_g_selection(struct file *file, void *priv, struct v4l2_selection *sel)
 {
 	struct bttv_fh *fh = f;
 	struct bttv *btv = fh->btv;
@@ -2774,7 +2774,7 @@ static int bttv_g_selection(struct file *file, void *f, struct v4l2_selection *s
 	return 0;
 }
 
-static int bttv_s_selection(struct file *file, void *f, struct v4l2_selection *sel)
+static int bttv_s_selection(struct file *file, void *priv, struct v4l2_selection *sel)
 {
 	struct bttv_fh *fh = f;
 	struct bttv *btv = fh->btv;

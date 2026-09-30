@@ -13,7 +13,6 @@
 #include <linux/pagemap.h>
 #include <asm/div64.h>
 #include "cifsfs.h"
-#include "cifspdu.h"
 #include "cifsglob.h"
 #include "cifsproto.h"
 #include "cifs_debug.h"
@@ -23,8 +22,8 @@
 #include "smb2glob.h"
 #include "smb2proto.h"
 #include "cached_dir.h"
-#include "reparse.h"
 #include "../common/smb2status.h"
+#include "../common/smbfsctl.h"
 
 static struct reparse_data_buffer *reparse_buf_ptr(struct kvec *iov)
 {
@@ -166,6 +165,27 @@ static int check_wsl_eas(struct kvec *rsp_iov)
 }
 
 /*
+ * If @cfile is NULL, then need to account for trailing CLOSE request in the
+ * compound chain.
+ */
+static void set_next_compound(struct cifs_tcon *tcon,
+			      struct cifsFileInfo *cfile,
+			      int i, int num_cmds,
+			      struct smb_rqst *rqst, int *num_rqst)
+{
+	int k = !cfile ? 1 : 0;
+
+	if (i + 1 < num_cmds + k)
+		smb2_set_next_command(tcon, &rqst[*num_rqst]);
+	if (i + k > 0)
+		smb2_set_related(&rqst[*num_rqst]);
+	(*num_rqst)++;
+}
+
+#define COMP_PID(cfile) ((cfile) ? (cfile)->fid.persistent_fid : COMPOUND_FID)
+#define COMP_VID(cfile) ((cfile) ? (cfile)->fid.volatile_fid : COMPOUND_FID)
+
+/*
  * note: If cfile is passed, the reference to it is dropped here.
  * So make sure that you do not reuse cfile after return from this func.
  *
@@ -189,7 +209,7 @@ static int smb2_compound_op(const unsigned int xid, struct cifs_tcon *tcon,
 	struct reparse_data_buffer *rbuf;
 	struct TCP_Server_Info *server;
 	int resp_buftype[MAX_COMPOUND];
-	int retries = 0, cur_sleep = 1;
+	int retries = 0, cur_sleep = 0;
 	__u8 delete_pending[8] = {1,};
 	struct kvec *rsp_iov, *iov;
 	struct inode *inode = NULL;
@@ -210,7 +230,7 @@ replay_again:
 	num_rqst = 0;
 	server = cifs_pick_channel(ses);
 
-	vars = kzalloc(sizeof(*vars), GFP_ATOMIC);
+	vars = kzalloc(sizeof(*vars), GFP_KERNEL);
 	if (vars == NULL) {
 		rc = -ENOMEM;
 		goto out;
@@ -285,32 +305,16 @@ replay_again:
 			rqst[num_rqst].rq_iov = &vars->qi_iov;
 			rqst[num_rqst].rq_nvec = 1;
 
-			if (cfile) {
-				rc = SMB2_query_info_init(tcon, server,
-							  &rqst[num_rqst],
-							  cfile->fid.persistent_fid,
-							  cfile->fid.volatile_fid,
-							  FILE_ALL_INFORMATION,
-							  SMB2_O_INFO_FILE, 0,
-							  sizeof(struct smb2_file_all_info) +
-							  PATH_MAX * 2, 0, NULL);
-			} else {
-				rc = SMB2_query_info_init(tcon, server,
-							  &rqst[num_rqst],
-							  COMPOUND_FID,
-							  COMPOUND_FID,
-							  FILE_ALL_INFORMATION,
-							  SMB2_O_INFO_FILE, 0,
-							  sizeof(struct smb2_file_all_info) +
-							  PATH_MAX * 2, 0, NULL);
-			}
-			if (!rc && (!cfile || num_rqst > 1)) {
-				smb2_set_next_command(tcon, &rqst[num_rqst]);
-				smb2_set_related(&rqst[num_rqst]);
-			} else if (rc) {
+			rc = SMB2_query_info_init(tcon, server,
+						  &rqst[num_rqst],
+						  COMP_PID(cfile), COMP_VID(cfile),
+						  FILE_ALL_INFORMATION,
+						  SMB2_O_INFO_FILE, 0,
+						  sizeof(struct smb2_file_all_info) +
+						  PATH_MAX * 2, 0, NULL);
+			if (rc)
 				goto finished;
-			}
-			num_rqst++;
+			set_next_compound(tcon, cfile, i, num_cmds, rqst, &num_rqst);
 			trace_smb3_query_info_compound_enter(xid, tcon->tid,
 							     ses->Suid, full_path);
 			break;
@@ -318,35 +322,18 @@ replay_again:
 			rqst[num_rqst].rq_iov = &vars->qi_iov;
 			rqst[num_rqst].rq_nvec = 1;
 
-			if (cfile) {
-				/* TBD: fix following to allow for longer SIDs */
-				rc = SMB2_query_info_init(tcon, server,
-							  &rqst[num_rqst],
-							  cfile->fid.persistent_fid,
-							  cfile->fid.volatile_fid,
-							  SMB_FIND_FILE_POSIX_INFO,
-							  SMB2_O_INFO_FILE, 0,
-							  sizeof(struct smb311_posix_qinfo *) +
-							  (PATH_MAX * 2) +
-							  (sizeof(struct smb_sid) * 2), 0, NULL);
-			} else {
-				rc = SMB2_query_info_init(tcon, server,
-							  &rqst[num_rqst],
-							  COMPOUND_FID,
-							  COMPOUND_FID,
-							  SMB_FIND_FILE_POSIX_INFO,
-							  SMB2_O_INFO_FILE, 0,
-							  sizeof(struct smb311_posix_qinfo *) +
-							  (PATH_MAX * 2) +
-							  (sizeof(struct smb_sid) * 2), 0, NULL);
-			}
-			if (!rc && (!cfile || num_rqst > 1)) {
-				smb2_set_next_command(tcon, &rqst[num_rqst]);
-				smb2_set_related(&rqst[num_rqst]);
-			} else if (rc) {
+			/* TBD: fix following to allow for longer SIDs */
+			rc = SMB2_query_info_init(tcon, server,
+						  &rqst[num_rqst],
+						  COMP_PID(cfile), COMP_VID(cfile),
+						  SMB_FIND_FILE_POSIX_INFO,
+						  SMB2_O_INFO_FILE, 0,
+						  sizeof(struct smb311_posix_qinfo) +
+						  (PATH_MAX * 2) +
+						  (sizeof(struct smb_sid) * 2), 0, NULL);
+			if (rc)
 				goto finished;
-			}
-			num_rqst++;
+			set_next_compound(tcon, cfile, i, num_cmds, rqst, &num_rqst);
 			trace_smb3_posix_query_info_compound_enter(xid, tcon->tid,
 								   ses->Suid, full_path);
 			break;
@@ -364,32 +351,15 @@ replay_again:
 			size[0] = 1; /* sizeof __u8 See MS-FSCC section 2.4.11 */
 			data[0] = &delete_pending[0];
 
-			if (cfile) {
-				rc = SMB2_set_info_init(tcon, server,
-							&rqst[num_rqst],
-							cfile->fid.persistent_fid,
-							cfile->fid.volatile_fid,
-							current->tgid,
-							FILE_DISPOSITION_INFORMATION,
-							SMB2_O_INFO_FILE, 0,
-							data, size);
-			} else {
-				rc = SMB2_set_info_init(tcon, server,
-							&rqst[num_rqst],
-							COMPOUND_FID,
-							COMPOUND_FID,
-							current->tgid,
-							FILE_DISPOSITION_INFORMATION,
-							SMB2_O_INFO_FILE, 0,
-							data, size);
-			}
-			if (!rc && (!cfile || num_rqst > 1)) {
-				smb2_set_next_command(tcon, &rqst[num_rqst]);
-				smb2_set_related(&rqst[num_rqst]);
-			} else if (rc) {
+			rc = SMB2_set_info_init(tcon, server,
+						&rqst[num_rqst],
+						COMP_PID(cfile), COMP_VID(cfile),
+						current->tgid, FILE_DISPOSITION_INFORMATION,
+						SMB2_O_INFO_FILE, 0,
+						data, size);
+			if (rc)
 				goto finished;
-			}
-			num_rqst++;
+			set_next_compound(tcon, cfile, i, num_cmds, rqst, &num_rqst);
 			trace_smb3_unlink_enter(xid, tcon->tid, ses->Suid, full_path);
 			break;
 		case SMB2_OP_SET_EOF:
@@ -399,32 +369,15 @@ replay_again:
 			size[0] = in_iov[i].iov_len;
 			data[0] = in_iov[i].iov_base;
 
-			if (cfile) {
-				rc = SMB2_set_info_init(tcon, server,
-							&rqst[num_rqst],
-							cfile->fid.persistent_fid,
-							cfile->fid.volatile_fid,
-							current->tgid,
-							FILE_END_OF_FILE_INFORMATION,
-							SMB2_O_INFO_FILE, 0,
-							data, size);
-			} else {
-				rc = SMB2_set_info_init(tcon, server,
-							&rqst[num_rqst],
-							COMPOUND_FID,
-							COMPOUND_FID,
-							current->tgid,
-							FILE_END_OF_FILE_INFORMATION,
-							SMB2_O_INFO_FILE, 0,
-							data, size);
-			}
-			if (!rc && (!cfile || num_rqst > 1)) {
-				smb2_set_next_command(tcon, &rqst[num_rqst]);
-				smb2_set_related(&rqst[num_rqst]);
-			} else if (rc) {
+			rc = SMB2_set_info_init(tcon, server,
+						&rqst[num_rqst],
+						COMP_PID(cfile), COMP_VID(cfile),
+						current->tgid, FILE_END_OF_FILE_INFORMATION,
+						SMB2_O_INFO_FILE, 0,
+						data, size);
+			if (rc)
 				goto finished;
-			}
-			num_rqst++;
+			set_next_compound(tcon, cfile, i, num_cmds, rqst, &num_rqst);
 			trace_smb3_set_eof_enter(xid, tcon->tid, ses->Suid, full_path);
 			break;
 		case SMB2_OP_SET_INFO:
@@ -434,28 +387,14 @@ replay_again:
 			size[0] = in_iov[i].iov_len;
 			data[0] = in_iov[i].iov_base;
 
-			if (cfile) {
-				rc = SMB2_set_info_init(tcon, server,
-							&rqst[num_rqst],
-							cfile->fid.persistent_fid,
-							cfile->fid.volatile_fid, current->tgid,
-							FILE_BASIC_INFORMATION,
-							SMB2_O_INFO_FILE, 0, data, size);
-			} else {
-				rc = SMB2_set_info_init(tcon, server,
-							&rqst[num_rqst],
-							COMPOUND_FID,
-							COMPOUND_FID, current->tgid,
-							FILE_BASIC_INFORMATION,
-							SMB2_O_INFO_FILE, 0, data, size);
-			}
-			if (!rc && (!cfile || num_rqst > 1)) {
-				smb2_set_next_command(tcon, &rqst[num_rqst]);
-				smb2_set_related(&rqst[num_rqst]);
-			} else if (rc) {
+			rc = SMB2_set_info_init(tcon, server,
+						&rqst[num_rqst],
+						COMP_PID(cfile), COMP_VID(cfile),
+						current->tgid, FILE_BASIC_INFORMATION,
+						SMB2_O_INFO_FILE, 0, data, size);
+			if (rc)
 				goto finished;
-			}
-			num_rqst++;
+			set_next_compound(tcon, cfile, i, num_cmds, rqst, &num_rqst);
 			trace_smb3_set_info_compound_enter(xid, tcon->tid,
 							   ses->Suid, full_path);
 			break;
@@ -475,31 +414,19 @@ replay_again:
 			size[1] = len + 2 /* null */;
 			data[1] = in_iov[i].iov_base;
 
-			if (cfile) {
-				rc = SMB2_set_info_init(tcon, server,
-							&rqst[num_rqst],
-							cfile->fid.persistent_fid,
-							cfile->fid.volatile_fid,
-							current->tgid, FILE_RENAME_INFORMATION,
-							SMB2_O_INFO_FILE, 0, data, size);
-			} else {
-				rc = SMB2_set_info_init(tcon, server,
-							&rqst[num_rqst],
-							COMPOUND_FID, COMPOUND_FID,
-							current->tgid, FILE_RENAME_INFORMATION,
-							SMB2_O_INFO_FILE, 0, data, size);
-			}
-			if (!rc && (!cfile || num_rqst > 1)) {
-				smb2_set_next_command(tcon, &rqst[num_rqst]);
-				smb2_set_related(&rqst[num_rqst]);
-			} else if (rc) {
+			rc = SMB2_set_info_init(tcon, server,
+						&rqst[num_rqst],
+						COMP_PID(cfile), COMP_VID(cfile),
+						current->tgid, FILE_RENAME_INFORMATION,
+						SMB2_O_INFO_FILE, 0, data, size);
+
+			if (rc)
 				goto finished;
-			}
-			num_rqst++;
+			set_next_compound(tcon, cfile, i, num_cmds, rqst, &num_rqst);
 			trace_smb3_rename_enter(xid, tcon->tid, ses->Suid, full_path);
 			break;
 		case SMB2_OP_HARDLINK:
-			rqst[num_rqst].rq_iov = &vars->si_iov[0];
+			rqst[num_rqst].rq_iov = vars->hl_iov;
 			rqst[num_rqst].rq_nvec = 2;
 
 			len = in_iov[i].iov_len;
@@ -515,41 +442,27 @@ replay_again:
 			data[1] = in_iov[i].iov_base;
 
 			rc = SMB2_set_info_init(tcon, server,
-						&rqst[num_rqst], COMPOUND_FID,
-						COMPOUND_FID, current->tgid,
-						FILE_LINK_INFORMATION,
+						&rqst[num_rqst],
+						COMP_PID(cfile), COMP_VID(cfile),
+						current->tgid, FILE_LINK_INFORMATION,
 						SMB2_O_INFO_FILE, 0, data, size);
 			if (rc)
 				goto finished;
-			smb2_set_next_command(tcon, &rqst[num_rqst]);
-			smb2_set_related(&rqst[num_rqst++]);
+			set_next_compound(tcon, cfile, i, num_cmds, rqst, &num_rqst);
 			trace_smb3_hardlink_enter(xid, tcon->tid, ses->Suid, full_path);
 			break;
 		case SMB2_OP_SET_REPARSE:
 			rqst[num_rqst].rq_iov = vars->io_iov;
 			rqst[num_rqst].rq_nvec = ARRAY_SIZE(vars->io_iov);
 
-			if (cfile) {
-				rc = SMB2_ioctl_init(tcon, server, &rqst[num_rqst],
-						     cfile->fid.persistent_fid,
-						     cfile->fid.volatile_fid,
-						     FSCTL_SET_REPARSE_POINT,
-						     in_iov[i].iov_base,
-						     in_iov[i].iov_len, 0);
-			} else {
-				rc = SMB2_ioctl_init(tcon, server, &rqst[num_rqst],
-						     COMPOUND_FID, COMPOUND_FID,
-						     FSCTL_SET_REPARSE_POINT,
-						     in_iov[i].iov_base,
-						     in_iov[i].iov_len, 0);
-			}
-			if (!rc && (!cfile || num_rqst > 1)) {
-				smb2_set_next_command(tcon, &rqst[num_rqst]);
-				smb2_set_related(&rqst[num_rqst]);
-			} else if (rc) {
+			rc = SMB2_ioctl_init(tcon, server, &rqst[num_rqst],
+					     COMP_PID(cfile), COMP_VID(cfile),
+					     FSCTL_SET_REPARSE_POINT,
+					     in_iov[i].iov_base,
+					     in_iov[i].iov_len, 0);
+			if (rc)
 				goto finished;
-			}
-			num_rqst++;
+			set_next_compound(tcon, cfile, i, num_cmds, rqst, &num_rqst);
 			trace_smb3_set_reparse_compound_enter(xid, tcon->tid,
 							      ses->Suid, full_path);
 			break;
@@ -557,25 +470,13 @@ replay_again:
 			rqst[num_rqst].rq_iov = vars->io_iov;
 			rqst[num_rqst].rq_nvec = ARRAY_SIZE(vars->io_iov);
 
-			if (cfile) {
-				rc = SMB2_ioctl_init(tcon, server, &rqst[num_rqst],
-						     cfile->fid.persistent_fid,
-						     cfile->fid.volatile_fid,
-						     FSCTL_GET_REPARSE_POINT,
-						     NULL, 0, CIFSMaxBufSize);
-			} else {
-				rc = SMB2_ioctl_init(tcon, server, &rqst[num_rqst],
-						     COMPOUND_FID, COMPOUND_FID,
-						     FSCTL_GET_REPARSE_POINT,
-						     NULL, 0, CIFSMaxBufSize);
-			}
-			if (!rc && (!cfile || num_rqst > 1)) {
-				smb2_set_next_command(tcon, &rqst[num_rqst]);
-				smb2_set_related(&rqst[num_rqst]);
-			} else if (rc) {
+			rc = SMB2_ioctl_init(tcon, server, &rqst[num_rqst],
+					     COMP_PID(cfile), COMP_VID(cfile),
+					     FSCTL_GET_REPARSE_POINT,
+					     NULL, 0, CIFSMaxBufSize);
+			if (rc)
 				goto finished;
-			}
-			num_rqst++;
+			set_next_compound(tcon, cfile, i, num_cmds, rqst, &num_rqst);
 			trace_smb3_get_reparse_compound_enter(xid, tcon->tid,
 							      ses->Suid, full_path);
 			break;
@@ -583,34 +484,17 @@ replay_again:
 			rqst[num_rqst].rq_iov = &vars->ea_iov;
 			rqst[num_rqst].rq_nvec = 1;
 
-			if (cfile) {
-				rc = SMB2_query_info_init(tcon, server,
-							  &rqst[num_rqst],
-							  cfile->fid.persistent_fid,
-							  cfile->fid.volatile_fid,
-							  FILE_FULL_EA_INFORMATION,
-							  SMB2_O_INFO_FILE, 0,
-							  SMB2_WSL_MAX_QUERY_EA_RESP_SIZE,
-							  sizeof(wsl_query_eas),
-							  (void *)wsl_query_eas);
-			} else {
-				rc = SMB2_query_info_init(tcon, server,
-							  &rqst[num_rqst],
-							  COMPOUND_FID,
-							  COMPOUND_FID,
-							  FILE_FULL_EA_INFORMATION,
-							  SMB2_O_INFO_FILE, 0,
-							  SMB2_WSL_MAX_QUERY_EA_RESP_SIZE,
-							  sizeof(wsl_query_eas),
-							  (void *)wsl_query_eas);
-			}
-			if (!rc && (!cfile || num_rqst > 1)) {
-				smb2_set_next_command(tcon, &rqst[num_rqst]);
-				smb2_set_related(&rqst[num_rqst]);
-			} else if (rc) {
+			rc = SMB2_query_info_init(tcon, server,
+						  &rqst[num_rqst],
+						  COMP_PID(cfile), COMP_VID(cfile),
+						  FILE_FULL_EA_INFORMATION,
+						  SMB2_O_INFO_FILE, 0,
+						  SMB2_WSL_MAX_QUERY_EA_RESP_SIZE,
+						  sizeof(wsl_query_eas),
+						  (void *)wsl_query_eas);
+			if (rc)
 				goto finished;
-			}
-			num_rqst++;
+			set_next_compound(tcon, cfile, i, num_cmds, rqst, &num_rqst);
 			trace_smb3_query_wsl_ea_compound_enter(xid, tcon->tid,
 							       ses->Suid, full_path);
 			break;
@@ -639,18 +523,26 @@ replay_again:
 	num_rqst++;
 
 	if (cfile) {
-		if (retries)
+		if (retries) {
+			/* Back-off before retry */
+			if (cur_sleep)
+				msleep(cur_sleep);
 			for (i = 1; i < num_rqst - 2; i++)
 				smb2_set_replay(server, &rqst[i]);
+		}
 
 		rc = compound_send_recv(xid, ses, server,
 					flags, num_rqst - 2,
 					&rqst[1], &resp_buftype[1],
 					&rsp_iov[1]);
 	} else {
-		if (retries)
+		if (retries) {
+			/* Back-off before retry */
+			if (cur_sleep)
+				msleep(cur_sleep);
 			for (i = 0; i < num_rqst; i++)
 				smb2_set_replay(server, &rqst[i]);
+		}
 
 		rc = compound_send_recv(xid, ses, server,
 					flags, num_rqst,
@@ -678,10 +570,8 @@ finished:
 		idata->fi.Attributes = create_rsp->FileAttributes;
 		idata->fi.AllocationSize = create_rsp->AllocationSize;
 		idata->fi.EndOfFile = create_rsp->EndofFile;
-		idata->contains_posix_file_info = false;
 		if (le32_to_cpu(idata->fi.NumberOfLinks) == 0)
 			idata->fi.NumberOfLinks = cpu_to_le32(1); /* dummy value */
-		idata->unknown_nlink = true;
 		idata->fi.DeletePending = 0; /* successful open = not delete pending */
 		idata->fi.Directory = !!(le32_to_cpu(create_rsp->FileAttributes) & ATTR_DIRECTORY);
 
@@ -702,6 +592,7 @@ finished:
 		switch (cmds[i]) {
 		case SMB2_OP_QUERY_INFO:
 			idata = in_iov[i].iov_base;
+			idata->contains_posix_file_info = false;
 			if (rc == 0 && cfile && cfile->symlink_target) {
 				idata->symlink_target = kstrdup(cfile->symlink_target, GFP_KERNEL);
 				if (!idata->symlink_target)
@@ -714,8 +605,6 @@ finished:
 					le16_to_cpu(qi_rsp->OutputBufferOffset),
 					le32_to_cpu(qi_rsp->OutputBufferLength),
 					&rsp_iov[i + 1], sizeof(idata->fi), (char *)&idata->fi);
-				if (!rc)
-					idata->contains_posix_file_info = false;
 			}
 			SMB2_query_info_free(&rqst[num_rqst++]);
 			if (rc)
@@ -727,6 +616,7 @@ finished:
 			break;
 		case SMB2_OP_POSIX_QUERY_INFO:
 			idata = in_iov[i].iov_base;
+			idata->contains_posix_file_info = true;
 			if (rc == 0 && cfile && cfile->symlink_target) {
 				idata->symlink_target = kstrdup(cfile->symlink_target, GFP_KERNEL);
 				if (!idata->symlink_target)
@@ -740,8 +630,6 @@ finished:
 					le32_to_cpu(qi_rsp->OutputBufferLength),
 					&rsp_iov[i + 1], sizeof(idata->posix_fi) /* add SIDs */,
 					(char *)&idata->posix_fi);
-				if (!rc)
-					idata->contains_posix_file_info = true;
 			}
 			if (rc == 0)
 				rc = parse_posix_sids(idata, &rsp_iov[i + 1]);
@@ -813,6 +701,7 @@ finished:
 				idata = in_iov[i].iov_base;
 				idata->reparse.io.iov = *iov;
 				idata->reparse.io.buftype = resp_buftype[i + 1];
+				idata->contains_posix_file_info = false; /* BB VERIFY */
 				rbuf = reparse_buf_ptr(iov);
 				if (IS_ERR(rbuf)) {
 					rc = PTR_ERR(rbuf);
@@ -834,6 +723,7 @@ finished:
 		case SMB2_OP_QUERY_WSL_EA:
 			if (!rc) {
 				idata = in_iov[i].iov_base;
+				idata->contains_posix_file_info = false;
 				qi_rsp = rsp_iov[i + 1].iov_base;
 				data[0] = (u8 *)qi_rsp + le16_to_cpu(qi_rsp->OutputBufferOffset);
 				size[0] = le32_to_cpu(qi_rsp->OutputBufferLength);
@@ -898,9 +788,19 @@ static int parse_create_response(struct cifs_open_info_data *data,
 		rc = smb2_parse_symlink_response(cifs_sb, iov,
 						 full_path,
 						 &data->symlink_target);
-		if (rc)
+		if (rc != 0 && rc != -ENODATA)
 			return rc;
-		tag = IO_REPARSE_TAG_SYMLINK;
+		/*
+		 * -ENODATA means that the response was parsed but did not contain
+		 * the symlink target at all (see symlink_data()).  Treat it like
+		 * STATUS_IO_REPARSE_TAG_NOT_HANDLED, which does not contain it
+		 * either: leave the tag unset and clear rc, so that the caller
+		 * retrieves the target with SMB2_OP_GET_REPARSE.
+		 */
+		if (rc == -ENODATA)
+			rc = 0;
+		else
+			tag = IO_REPARSE_TAG_SYMLINK;
 		reparse_point = true;
 		break;
 	case STATUS_SUCCESS:
@@ -1093,9 +993,15 @@ int smb2_query_path_info(const unsigned int xid,
 				rc = -EOPNOTSUPP;
 		}
 
-		if (data->reparse.tag == IO_REPARSE_TAG_SYMLINK && !rc) {
-			bool directory = cifs_open_data_attrs(data) & ATTR_DIRECTORY;
-
+		/*
+		 * If the symlink was already parsed in create response then it is needed to fix
+		 * its type now (after the second call with OPEN_REPARSE_POINT which filled the
+		 * data->fi.Attributes). If the symlink was not parsed in create response then
+		 * the data->symlink_target was not filled yet and then the type will be fixed
+		 * later after data->symlink_target is filled.
+		 */
+		if (data->reparse.tag == IO_REPARSE_TAG_SYMLINK && !rc && data->symlink_target) {
+			bool directory = le32_to_cpu(data->fi.Attributes) & ATTR_DIRECTORY;
 			rc = smb2_fix_symlink_target_type(&data->symlink_target, directory, cifs_sb);
 		}
 		break;
@@ -1152,7 +1058,7 @@ smb2_mkdir_setinfo(struct inode *inode, const char *name,
 	cifs_i = CIFS_I(inode);
 	dosattrs = cifs_i->cifsAttrs | ATTR_READONLY;
 	data.Attributes = cpu_to_le32(dosattrs);
-	cifs_get_writable_path(tcon, name, FIND_ANY, &cfile);
+	cifs_get_writable_path(tcon, name, inode, FIND_ANY, &cfile);
 	oparms = CIFS_OPARMS(cifs_sb, tcon, name, FILE_WRITE_ATTRIBUTES,
 			     FILE_CREATE, CREATE_NOT_FILE, ACL_NO_MODE);
 	tmprc = smb2_compound_op(xid, tcon, cifs_sb, name,
@@ -1184,7 +1090,7 @@ smb2_unlink(const unsigned int xid, struct cifs_tcon *tcon, const char *name,
 {
 	struct kvec open_iov[SMB2_CREATE_IOV_SIZE];
 	__le16 *utf16_path __free(kfree) = NULL;
-	int retries = 0, cur_sleep = 1;
+	int retries = 0, cur_sleep = 0;
 	struct TCP_Server_Info *server;
 	struct cifs_open_parms oparms;
 	struct smb2_create_req *creq;
@@ -1248,6 +1154,9 @@ again:
 	smb2_set_related(&rqst[1]);
 
 	if (retries) {
+		/* Back-off before retry */
+		if (cur_sleep)
+			msleep(cur_sleep);
 		for (int i = 0; i < ARRAY_SIZE(rqst);  i++)
 			smb2_set_replay(server, &rqst[i]);
 	}
@@ -1268,7 +1177,7 @@ again:
 	if (rc == -EINVAL && dentry) {
 		dentry = NULL;
 		retries = 0;
-		cur_sleep = 1;
+		cur_sleep = 0;
 		goto again;
 	}
 	/*
@@ -1325,21 +1234,38 @@ int smb2_rename_path(const unsigned int xid,
 		     const char *from_name, const char *to_name,
 		     struct cifs_sb_info *cifs_sb)
 {
+	struct inode *inode = source_dentry ? d_inode(source_dentry) : NULL;
 	struct cifsFileInfo *cfile;
 	__u32 co = file_create_options(source_dentry);
 
 	drop_cached_dir_by_name(xid, tcon, from_name, cifs_sb);
-	cifs_get_writable_path(tcon, from_name, FIND_WITH_DELETE, &cfile);
+	cifs_get_writable_path(tcon, from_name, inode,
+			       FIND_WITH_DELETE, &cfile);
 
 	int rc = smb2_set_path_attr(xid, tcon, from_name, to_name, cifs_sb,
 				  co, DELETE, SMB2_OP_RENAME, cfile, source_dentry);
 	if (rc == -EINVAL) {
 		cifs_dbg(FYI, "invalid lease key, resending request without lease");
-		cifs_get_writable_path(tcon, from_name, FIND_WITH_DELETE, &cfile);
+		cifs_get_writable_path(tcon, from_name, inode,
+				       FIND_WITH_DELETE, &cfile);
 		rc = smb2_set_path_attr(xid, tcon, from_name, to_name, cifs_sb,
 				  co, DELETE, SMB2_OP_RENAME, cfile, NULL);
 	}
 	return rc;
+}
+
+static int clear_tmpfile_attr(const unsigned int xid, struct cifs_tcon *tcon,
+			      struct inode *inode, const char *full_path)
+{
+	struct TCP_Server_Info *server = cifs_pick_channel(tcon->ses);
+	struct cifsInodeInfo *cinode = CIFS_I(inode);
+	FILE_BASIC_INFO fi;
+
+	cinode->cifsAttrs &= ~(ATTR_TEMPORARY | ATTR_HIDDEN);
+	fi = (FILE_BASIC_INFO) {
+		.Attributes = cpu_to_le32(cinode->cifsAttrs),
+	};
+	return server->ops->set_file_info(inode, full_path, &fi, xid);
 }
 
 int smb2_create_hardlink(const unsigned int xid,
@@ -1348,11 +1274,22 @@ int smb2_create_hardlink(const unsigned int xid,
 			 const char *from_name, const char *to_name,
 			 struct cifs_sb_info *cifs_sb)
 {
+	struct inode *inode = source_dentry ? d_inode(source_dentry) : NULL;
 	__u32 co = file_create_options(source_dentry);
+	struct cifsFileInfo *cfile;
+	int rc;
 
+	if (inode && test_bit(CIFS_INO_TMPFILE, &CIFS_I(inode)->flags)) {
+		rc = clear_tmpfile_attr(xid, tcon, inode, from_name);
+		if (rc)
+			return rc;
+	}
+
+	cifs_get_writable_path(tcon, from_name, inode,
+			       FIND_WITH_DELETE, &cfile);
 	return smb2_set_path_attr(xid, tcon, from_name, to_name,
 				  cifs_sb, co, FILE_READ_ATTRIBUTES,
-				  SMB2_OP_HARDLINK, NULL, NULL);
+				  SMB2_OP_HARDLINK, cfile, NULL);
 }
 
 int
@@ -1361,15 +1298,16 @@ smb2_set_path_size(const unsigned int xid, struct cifs_tcon *tcon,
 		   struct cifs_sb_info *cifs_sb, bool set_alloc,
 		   struct dentry *dentry)
 {
+	struct inode *inode = dentry ? d_inode(dentry) : NULL;
+	__le64 eof = cpu_to_le64(size);
 	struct cifs_open_parms oparms;
 	struct cifsFileInfo *cfile;
 	struct kvec in_iov;
-	__le64 eof = cpu_to_le64(size);
 	int rc;
 
 	in_iov.iov_base = &eof;
 	in_iov.iov_len = sizeof(eof);
-	cifs_get_writable_path(tcon, full_path, FIND_ANY, &cfile);
+	cifs_get_writable_path(tcon, full_path, inode, FIND_ANY, &cfile);
 
 	oparms = CIFS_OPARMS(cifs_sb, tcon, full_path, FILE_WRITE_DATA,
 			     FILE_OPEN, 0, ACL_NO_MODE);
@@ -1379,7 +1317,8 @@ smb2_set_path_size(const unsigned int xid, struct cifs_tcon *tcon,
 			      cfile, NULL, NULL, dentry);
 	if (rc == -EINVAL) {
 		cifs_dbg(FYI, "invalid lease key, resending request without lease");
-		cifs_get_writable_path(tcon, full_path, FIND_ANY, &cfile);
+		cifs_get_writable_path(tcon, full_path,
+				       inode, FIND_ANY, &cfile);
 		rc = smb2_compound_op(xid, tcon, cifs_sb,
 				      full_path, &oparms, &in_iov,
 				      &(int){SMB2_OP_SET_EOF}, 1,
@@ -1409,7 +1348,8 @@ smb2_set_file_info(struct inode *inode, const char *full_path,
 	    (buf->LastWriteTime == 0) && (buf->ChangeTime == 0)) {
 		if (buf->Attributes == 0)
 			goto out; /* would be a no op, no sense sending this */
-		cifs_get_writable_path(tcon, full_path, FIND_ANY, &cfile);
+		cifs_get_writable_path(tcon, full_path,
+				       inode, FIND_ANY, &cfile);
 	}
 
 	oparms = CIFS_OPARMS(cifs_sb, tcon, full_path, FILE_WRITE_ATTRIBUTES,
@@ -1468,7 +1408,7 @@ struct inode *smb2_create_reparse_inode(struct cifs_open_info_data *data,
 
 	if (tcon->posix_extensions) {
 		cmds[1] = SMB2_OP_POSIX_QUERY_INFO;
-		cifs_get_writable_path(tcon, full_path, FIND_ANY, &cfile);
+		cifs_get_writable_path(tcon, full_path, NULL, FIND_ANY, &cfile);
 		rc = smb2_compound_op(xid, tcon, cifs_sb, full_path, &oparms,
 				      in_iov, cmds, 2, cfile, out_iov, out_buftype, NULL);
 		if (!rc) {
@@ -1477,7 +1417,7 @@ struct inode *smb2_create_reparse_inode(struct cifs_open_info_data *data,
 		}
 	} else {
 		cmds[1] = SMB2_OP_QUERY_INFO;
-		cifs_get_writable_path(tcon, full_path, FIND_ANY, &cfile);
+		cifs_get_writable_path(tcon, full_path, NULL, FIND_ANY, &cfile);
 		rc = smb2_compound_op(xid, tcon, cifs_sb, full_path, &oparms,
 				      in_iov, cmds, 2, cfile, out_iov, out_buftype, NULL);
 		if (!rc) {
@@ -1559,8 +1499,8 @@ int smb2_rename_pending_delete(const char *full_path,
 			       struct dentry *dentry,
 			       const unsigned int xid)
 {
-	struct cifs_sb_info *cifs_sb = CIFS_SB(d_inode(dentry)->i_sb);
 	struct cifsInodeInfo *cinode = CIFS_I(d_inode(dentry));
+	struct cifs_sb_info *cifs_sb = CIFS_SB(dentry);
 	__le16 *utf16_path __free(kfree) = NULL;
 	__u32 co = file_create_options(dentry);
 	int cmds[] = {
@@ -1572,14 +1512,10 @@ int smb2_rename_pending_delete(const char *full_path,
 	char *to_name __free(kfree) = NULL;
 	__u32 attrs = cinode->cifsAttrs;
 	struct cifs_open_parms oparms;
-	static atomic_t sillycounter;
 	struct cifsFileInfo *cfile;
 	struct tcon_link *tlink;
 	struct cifs_tcon *tcon;
 	struct kvec iov[2];
-	const char *ppath;
-	void *page;
-	size_t len;
 	int rc;
 
 	tlink = cifs_sb_tlink(cifs_sb);
@@ -1587,25 +1523,14 @@ int smb2_rename_pending_delete(const char *full_path,
 		return PTR_ERR(tlink);
 	tcon = tlink_tcon(tlink);
 
-	page = alloc_dentry_path();
-
-	ppath = build_path_from_dentry(dentry->d_parent, page);
-	if (IS_ERR(ppath)) {
-		rc = PTR_ERR(ppath);
+	to_name = cifs_silly_fullpath(dentry);
+	if (IS_ERR(to_name)) {
+		rc = PTR_ERR(to_name);
+		to_name = NULL;
 		goto out;
 	}
 
-	len = strlen(ppath) + strlen("/.__smb1234") + 1;
-	to_name = kmalloc(len, GFP_KERNEL);
-	if (!to_name) {
-		rc = -ENOMEM;
-		goto out;
-	}
-
-	scnprintf(to_name, len, "%s%c.__smb%04X", ppath, CIFS_DIR_SEP(cifs_sb),
-		  atomic_inc_return(&sillycounter) & 0xffff);
-
-	utf16_path = utf16_smb2_path(cifs_sb, to_name, len);
+	utf16_path = utf16_smb2_path(cifs_sb, to_name, strlen(to_name));
 	if (!utf16_path) {
 		rc = -ENOMEM;
 		goto out;
@@ -1628,12 +1553,14 @@ int smb2_rename_pending_delete(const char *full_path,
 	iov[1].iov_base = utf16_path;
 	iov[1].iov_len = sizeof(*utf16_path) * UniStrlen((wchar_t *)utf16_path);
 
-	cifs_get_writable_path(tcon, full_path, FIND_WITH_DELETE, &cfile);
+	cifs_get_writable_path(tcon, full_path, d_inode(dentry),
+			       FIND_WITH_DELETE, &cfile);
 	rc = smb2_compound_op(xid, tcon, cifs_sb, full_path, &oparms, iov,
 			      cmds, num_cmds, cfile, NULL, NULL, dentry);
 	if (rc == -EINVAL) {
 		cifs_dbg(FYI, "invalid lease key, resending request without lease\n");
-		cifs_get_writable_path(tcon, full_path, FIND_WITH_DELETE, &cfile);
+		cifs_get_writable_path(tcon, full_path, d_inode(dentry),
+				       FIND_WITH_DELETE, &cfile);
 		rc = smb2_compound_op(xid, tcon, cifs_sb, full_path, &oparms, iov,
 				      cmds, num_cmds, cfile, NULL, NULL, NULL);
 	}
@@ -1646,6 +1573,5 @@ int smb2_rename_pending_delete(const char *full_path,
 	}
 out:
 	cifs_put_tlink(tlink);
-	free_dentry_path(page);
 	return rc;
 }

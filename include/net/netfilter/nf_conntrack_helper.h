@@ -132,6 +132,8 @@ static inline void *nfct_help_data(const struct nf_conn *ct)
 	struct nf_conn_help *help;
 
 	help = nf_ct_ext_find(ct, NF_CT_EXT_HELPER);
+	if (!help)
+		return NULL;
 
 	return (void *)help->data;
 }
@@ -157,6 +159,7 @@ void nf_ct_helper_log(struct sk_buff *skb, const struct nf_conn *ct,
 
 void nf_ct_helper_expectfn_register(struct nf_ct_helper_expectfn *n);
 void nf_ct_helper_expectfn_unregister(struct nf_ct_helper_expectfn *n);
+void nf_ct_helper_expectfn_destroy(const struct nf_ct_helper_expectfn *n);
 struct nf_ct_helper_expectfn *
 nf_ct_helper_expectfn_find_by_name(const char *name);
 struct nf_ct_helper_expectfn *

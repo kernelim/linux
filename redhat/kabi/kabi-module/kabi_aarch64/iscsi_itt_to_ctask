@@ -1,3 +1,3 @@
-#8-
-0xb311ffd0	iscsi_itt_to_ctask	drivers/scsi/libiscsi	EXPORT_SYMBOL_GPL	
+#9-
+0x57aab114	iscsi_itt_to_ctask	drivers/scsi/libiscsi	EXPORT_SYMBOL_GPL	
 

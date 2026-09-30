@@ -93,7 +93,7 @@ static int kabylake_5660_event_lineout(struct snd_soc_dapm_widget *w,
 			struct snd_kcontrol *k, int event)
 {
 	struct snd_soc_dapm_context *dapm = w->dapm;
-	struct kbl_codec_private *priv = snd_soc_card_get_drvdata(dapm->card);
+	struct kbl_codec_private *priv = snd_soc_card_get_drvdata(snd_soc_dapm_to_card(dapm));
 
 	gpiod_set_value_cansleep(priv->gpio_lo_mute,
 			!(SND_SOC_DAPM_EVENT_ON(event)));
@@ -158,7 +158,7 @@ static int kabylake_rt5660_codec_init(struct snd_soc_pcm_runtime *rtd)
 	int ret;
 	struct kbl_codec_private *ctx = snd_soc_card_get_drvdata(rtd->card);
 	struct snd_soc_component *component = snd_soc_rtd_to_codec(rtd, 0)->component;
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 
 	ret = devm_acpi_dev_add_driver_gpios(component->dev, acpi_rt5660_gpios);
 	if (ret)
@@ -502,7 +502,7 @@ static int kabylake_card_late_probe(struct snd_soc_card *card)
 	if (!component)
 		return -EINVAL;
 
-	return hdac_hdmi_jack_port_init(component, &card->dapm);
+	return hdac_hdmi_jack_port_init(component, card->dapm);
 }
 
 /* kabylake audio machine driver for rt5660 */

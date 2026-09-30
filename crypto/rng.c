@@ -15,6 +15,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/percpu.h>
 #include <linux/random.h>
 #include <linux/seq_file.h>
 #include <linux/sched.h>
@@ -26,8 +27,7 @@
 
 #include "internal.h"
 
-static ____cacheline_aligned_in_smp DEFINE_MUTEX(crypto_reseed_rng_lock);
-static struct crypto_rng *crypto_reseed_rng;
+static DEFINE_PER_CPU(struct crypto_rng *, crypto_rngs);
 static ____cacheline_aligned_in_smp DEFINE_MUTEX(crypto_default_rng_lock);
 struct crypto_rng *crypto_default_rng;
 EXPORT_SYMBOL_GPL(crypto_default_rng);
@@ -187,9 +187,7 @@ out:
 int crypto_del_default_rng(void)
 {
 	return crypto_del_rng(&crypto_default_rng, &crypto_default_rng_refcnt,
-			      &crypto_default_rng_lock) ?:
-	       crypto_del_rng(&crypto_reseed_rng, NULL,
-			      &crypto_reseed_rng_lock);
+			      &crypto_default_rng_lock);
 }
 EXPORT_SYMBOL_GPL(crypto_del_default_rng);
 #endif
@@ -246,47 +244,34 @@ EXPORT_SYMBOL_GPL(crypto_unregister_rngs);
 
 static ssize_t crypto_devrandom_read_iter(struct iov_iter *iter, bool reseed)
 {
+	struct crypto_rng **rngp;
 	struct crypto_rng *rng;
+	u32 flags = 0;
 	u8 tmp[256];
 	ssize_t ret;
 
 	if (unlikely(!iov_iter_count(iter)))
 		return 0;
 
-	if (reseed) {
-		u32 flags = 0;
+	get_cpu();
+	rngp = this_cpu_ptr(&crypto_rngs);
 
-		/* If reseeding is requested, acquire a lock on
-		 * crypto_reseed_rng so it is not swapped out until
-		 * the initial random bytes are generated.
-		 *
-		 * The algorithm implementation is also protected with
-		 * a separate mutex (drbg->drbg_mutex) around the
-		 * reseed-and-generate operation.
+	if (reseed && *rngp) {
+		/* If rngp is not set, it will be seeded
+		 * at creation and thus no reseeding is needed.
 		 */
-		mutex_lock(&crypto_reseed_rng_lock);
-
-		/* If crypto_default_rng is not set, it will be seeded
-		 * at creation in __crypto_get_default_rng and thus no
-		 * reseeding is needed.
-		 */
-		if (crypto_reseed_rng)
-			flags |= CRYPTO_TFM_REQ_NEED_RESEED;
-
-		ret = crypto_get_rng(&crypto_reseed_rng);
-		if (ret) {
-			mutex_unlock(&crypto_reseed_rng_lock);
-			return ret;
-		}
-
-		rng = crypto_reseed_rng;
-		crypto_tfm_set_flags(crypto_rng_tfm(rng), flags);
-	} else {
-		ret = crypto_get_default_rng();
-		if (ret)
-			return ret;
-		rng = crypto_default_rng;
+		flags |= CRYPTO_TFM_REQ_NEED_RESEED;
 	}
+
+	ret = crypto_get_rng(rngp);
+	rng = *rngp;
+	put_cpu();
+
+	if (ret)
+		return ret;
+
+	if (flags)
+		crypto_tfm_set_flags(crypto_rng_tfm(rng), flags);
 
 	for (;;) {
 		size_t i, copied;
@@ -313,10 +298,6 @@ static ssize_t crypto_devrandom_read_iter(struct iov_iter *iter, bool reseed)
 		}
 	}
 
-	if (reseed)
-		mutex_unlock(&crypto_reseed_rng_lock);
-	else
-		crypto_put_default_rng();
 	memzero_explicit(tmp, sizeof(tmp));
 	return ret ? ret : -EFAULT;
 }
@@ -335,7 +316,16 @@ static int __init crypto_rng_init(void)
 
 static void __exit crypto_rng_exit(void)
 {
+	int err;
+	int i;
+
 	random_unregister_extrng();
+	err = crypto_del_default_rng();
+	if (err)
+		pr_err("Failed delete default RNG: %d\n", err);
+
+	for_each_possible_cpu(i)
+		crypto_free_rng(*per_cpu_ptr(&crypto_rngs, i));
 }
 
 late_initcall(crypto_rng_init);

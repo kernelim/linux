@@ -921,6 +921,8 @@ struct kvm_enable_cap {
 #define KVM_CAP_VM_TYPES 235
 #define KVM_CAP_PRE_FAULT_MEMORY 236
 #define KVM_CAP_X86_APIC_BUS_CYCLES_NS 237
+#define KVM_CAP_S390_USER_OPEREXEC 246
+#define KVM_CAP_S390_VSIE_ESAMODE 248
 
 struct kvm_irq_routing_irqchip {
 	__u32 irqchip;

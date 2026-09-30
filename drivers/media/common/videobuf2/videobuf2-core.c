@@ -597,8 +597,7 @@ static void __vb2_queue_free(struct vb2_queue *q, unsigned int start, unsigned i
 	 */
 	if (vb2_get_num_buffers(q)) {
 		bool unbalanced = q->cnt_start_streaming != q->cnt_stop_streaming ||
-				  q->cnt_prepare_streaming != q->cnt_unprepare_streaming ||
-				  q->cnt_wait_prepare != q->cnt_wait_finish;
+				  q->cnt_prepare_streaming != q->cnt_unprepare_streaming;
 
 		if (unbalanced) {
 			pr_info("unbalanced counters for queue %p:\n", q);
@@ -609,13 +608,8 @@ static void __vb2_queue_free(struct vb2_queue *q, unsigned int start, unsigned i
 			if (q->cnt_prepare_streaming != q->cnt_unprepare_streaming)
 				pr_info("     prepare_streaming: %u unprepare_streaming: %u\n",
 					q->cnt_prepare_streaming, q->cnt_unprepare_streaming);
-			if (q->cnt_wait_prepare != q->cnt_wait_finish)
-				pr_info("     wait_prepare: %u wait_finish: %u\n",
-					q->cnt_wait_prepare, q->cnt_wait_finish);
 		}
 		q->cnt_queue_setup = 0;
-		q->cnt_wait_prepare = 0;
-		q->cnt_wait_finish = 0;
 		q->cnt_prepare_streaming = 0;
 		q->cnt_start_streaming = 0;
 		q->cnt_stop_streaming = 0;
@@ -2010,7 +2004,7 @@ static int __vb2_wait_for_done_vb(struct vb2_queue *q, int nonblocking)
 		 * become ready or for streamoff. Driver's lock is released to
 		 * allow streamoff or qbuf to be called while waiting.
 		 */
-		call_void_qop(q, wait_prepare, q);
+		mutex_unlock(q->lock);
 
 		/*
 		 * All locks have been released, it is safe to sleep now.
@@ -2020,12 +2014,13 @@ static int __vb2_wait_for_done_vb(struct vb2_queue *q, int nonblocking)
 				!list_empty(&q->done_list) || !q->streaming ||
 				q->error);
 
+		mutex_lock(q->lock);
+
+		q->waiting_in_dqbuf = 0;
 		/*
 		 * We need to reevaluate both conditions again after reacquiring
 		 * the locks or return an error if one occurred.
 		 */
-		call_void_qop(q, wait_finish, q);
-		q->waiting_in_dqbuf = 0;
 		if (ret) {
 			dprintk(q, 1, "sleep was interrupted\n");
 			return ret;
@@ -2297,7 +2292,7 @@ int vb2_core_streamon(struct vb2_queue *q, unsigned int type)
 	}
 
 	if (q_num_bufs < q->min_queued_buffers) {
-		dprintk(q, 1, "need at least %u queued buffers\n",
+		dprintk(q, 1, "need at least %u allocated buffers\n",
 			q->min_queued_buffers);
 		return -EINVAL;
 	}
@@ -2617,6 +2612,10 @@ int vb2_core_queue_init(struct vb2_queue *q)
 		q->min_reqbufs_allocation = q->min_queued_buffers + 1;
 
 	if (WARN_ON(q->min_reqbufs_allocation > q->max_num_buffers))
+		return -EINVAL;
+
+	/* Warn if q->lock is NULL */
+	if (WARN_ON(!q->lock))
 		return -EINVAL;
 
 	INIT_LIST_HEAD(&q->queued_list);
@@ -3178,10 +3177,10 @@ static int vb2_thread(void *data)
 				continue;
 			prequeue--;
 		} else {
-			call_void_qop(q, wait_finish, q);
+			mutex_lock(q->lock);
 			if (!threadio->stop)
 				ret = vb2_core_dqbuf(q, &index, NULL, 0);
-			call_void_qop(q, wait_prepare, q);
+			mutex_unlock(q->lock);
 			dprintk(q, 5, "file io: vb2_dqbuf result: %d\n", ret);
 			if (!ret)
 				vb = vb2_get_buffer(q, index);
@@ -3193,12 +3192,13 @@ static int vb2_thread(void *data)
 		if (vb->state != VB2_BUF_STATE_ERROR)
 			if (threadio->fnc(vb, threadio->priv))
 				break;
-		call_void_qop(q, wait_finish, q);
 		if (copy_timestamp)
 			vb->timestamp = ktime_get_ns();
-		if (!threadio->stop)
+		if (!threadio->stop) {
+			mutex_lock(q->lock);
 			ret = vb2_core_qbuf(q, vb, NULL, NULL);
-		call_void_qop(q, wait_prepare, q);
+			mutex_unlock(q->lock);
+		}
 		if (ret || threadio->stop)
 			break;
 	}

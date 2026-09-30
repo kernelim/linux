@@ -15,7 +15,6 @@
 #include <linux/fiemap.h>
 #include <asm/div64.h>
 #include "cifsfs.h"
-#include "cifspdu.h"
 #include "cifsglob.h"
 #include "cifsproto.h"
 #include "smb2proto.h"
@@ -1196,7 +1195,7 @@ static int reparse_info_to_fattr(struct cifs_open_info_data *data,
 		break;
 	case IO_REPARSE_TAG_INTERNAL:
 		rc = 0;
-		if (cifs_open_data_attrs(data) & ATTR_DIRECTORY) {
+		if (le32_to_cpu(data->fi.Attributes) & ATTR_DIRECTORY) {
 			cifs_create_junction_fattr(fattr, sb);
 			goto out;
 		}
@@ -1220,7 +1219,7 @@ static int reparse_info_to_fattr(struct cifs_open_info_data *data,
 			 */
 			if (rc == -EOPNOTSUPP &&
 			    IS_REPARSE_TAG_NAME_SURROGATE(data->reparse.tag) &&
-			    (cifs_open_data_attrs(data) & ATTR_DIRECTORY)) {
+			    (le32_to_cpu(data->fi.Attributes) & ATTR_DIRECTORY)) {
 				rc = 0;
 				cifs_create_junction_fattr(fattr, sb);
 				goto out;
@@ -1238,14 +1237,13 @@ static int reparse_info_to_fattr(struct cifs_open_info_data *data,
 		}
 
 		if (data->reparse.tag == IO_REPARSE_TAG_SYMLINK && !rc) {
-			bool directory = cifs_open_data_attrs(data) & ATTR_DIRECTORY;
-
+			bool directory = le32_to_cpu(data->fi.Attributes) & ATTR_DIRECTORY;
 			rc = smb2_fix_symlink_target_type(&data->symlink_target, directory, cifs_sb);
 		}
 		break;
 	}
 
-	if (data->contains_posix_file_info)
+	if (tcon->posix_extensions)
 		smb311_posix_info_to_fattr(fattr, data, sb);
 	else
 		cifs_open_info_to_fattr(fattr, data, sb);
@@ -1598,7 +1596,7 @@ inode_has_hashed_dentries(struct inode *inode)
 	struct dentry *dentry;
 
 	spin_lock(&inode->i_lock);
-	hlist_for_each_entry(dentry, &inode->i_dentry, d_u.d_alias) {
+	for_each_alias(dentry, inode) {
 		if (!d_unhashed(dentry) || IS_ROOT(dentry)) {
 			spin_unlock(&inode->i_lock);
 			return true;
@@ -2627,8 +2625,11 @@ unlink_target:
 	if (d_really_is_positive(target_dentry)) {
 		if (!rc) {
 			struct inode *inode = d_inode(target_dentry);
-
-			/* Update the target link count after rename. */
+			/*
+			 * Samba and ksmbd servers allow renaming a target
+			 * directory that is open, so make sure to update
+			 * ->i_nlink and then mark it as delete pending.
+			 */
 			if (S_ISDIR(inode->i_mode)) {
 				drop_cached_dir_by_name(xid, tcon, to_name, cifs_sb);
 				spin_lock(&inode->i_lock);
@@ -2639,10 +2640,6 @@ unlink_target:
 				CIFS_I(inode)->time = 0; /* force reval */
 				inode_set_ctime_current(inode);
 				inode_set_mtime_to_ts(inode, inode_set_ctime_current(inode));
-			} else {
-				cifs_mark_open_handles_for_deleted_file(inode, to_name);
-				cifs_drop_nlink(inode);
-				inode_set_ctime_current(inode);
 			}
 		} else if (rc == -EACCES || rc == -EEXIST) {
 			/*
@@ -2706,7 +2703,8 @@ cifs_dentry_needs_reval(struct dentry *dentry)
 	struct cifs_tcon *tcon = cifs_sb_master_tcon(cifs_sb);
 	struct cached_fid *cfid = NULL;
 
-	if (test_bit(CIFS_INO_DELETE_PENDING, &cifs_i->flags))
+	if (test_bit(CIFS_INO_DELETE_PENDING, &cifs_i->flags) ||
+	    test_bit(CIFS_INO_TMPFILE, &cifs_i->flags))
 		return false;
 	if (cifs_i->time == 0)
 		return true;
@@ -3050,26 +3048,7 @@ void cifs_setsize(struct inode *inode, loff_t offset)
 		inode->i_blocks = blocks;
 	spin_unlock(&inode->i_lock);
 	inode_set_mtime_to_ts(inode, inode_set_ctime_current(inode));
-	if (offset > old_size)
-		pagecache_isize_extended(inode, old_size, offset);
 	truncate_pagecache(inode, offset);
-}
-
-void cifs_resize_file_locked(struct inode *inode, loff_t offset)
-{
-	struct fscache_cookie *cookie = cifs_inode_cookie(inode);
-
-	lockdep_assert_held_write(&inode->i_rwsem);
-
-	netfs_resize_file(netfs_inode(inode), offset);
-	cifs_setsize(inode, offset);
-
-	if (!cookie)
-		return;
-
-	fscache_use_cookie(cookie, true);
-	fscache_resize_cookie(cookie, offset);
-	cifs_fscache_unuse_inode_cookie(inode, true);
 }
 
 int cifs_file_set_size(const unsigned int xid, struct dentry *dentry,
@@ -3110,7 +3089,6 @@ int cifs_file_set_size(const unsigned int xid, struct dentry *dentry,
 							size, false);
 			cifs_dbg(FYI, "%s: set_file_size: rc = %d\n", __func__, rc);
 			cifsFileInfo_put(open_file);
-			tcon = NULL;
 		}
 	}
 
@@ -3136,8 +3114,10 @@ int cifs_file_set_size(const unsigned int xid, struct dentry *dentry,
 	cifs_put_tlink(tlink);
 
 set_size_out:
-	if (rc == 0)
-		cifs_resize_file_locked(inode, size);
+	if (rc == 0) {
+		netfs_resize_file(&cifsInode->netfs, size);
+		cifs_setsize(inode, size);
+	}
 
 	return rc;
 }
@@ -3223,13 +3203,9 @@ cifs_setattr_unix(struct dentry *direntry, struct iattr *attrs)
 		attrs->ia_valid &= ~(ATTR_CTIME | ATTR_MTIME);
 	}
 
-	/*
-	 * This function is only called when Unix extensions are in effect,
-	 * so the mode is always sent to and stored on the server.  Do not
-	 * skip the mode change when clearing setuid/setgid bits: dropping
-	 * ATTR_MODE here would leave those bits set on the server after a
-	 * write, which is a security issue.
-	 */
+	/* skip mode change if it's just for clearing setuid/setgid */
+	if (attrs->ia_valid & (ATTR_KILL_SUID|ATTR_KILL_SGID))
+		attrs->ia_valid &= ~ATTR_MODE;
 
 	args = kmalloc(sizeof(*args), GFP_KERNEL);
 	if (args == NULL) {
@@ -3301,6 +3277,13 @@ cifs_setattr_unix(struct dentry *direntry, struct iattr *attrs)
 
 	if (rc)
 		goto out;
+
+	if ((attrs->ia_valid & ATTR_SIZE) &&
+	    attrs->ia_size != i_size_read(inode)) {
+		truncate_setsize(inode, attrs->ia_size);
+		netfs_resize_file(&cifsInode->netfs, attrs->ia_size);
+		fscache_resize_cookie(cifs_inode_cookie(inode), attrs->ia_size);
+	}
 
 	setattr_copy(&nop_mnt_idmap, inode, attrs);
 	mark_inode_dirty(inode);
@@ -3415,7 +3398,8 @@ cifs_setattr_nounix(struct dentry *direntry, struct iattr *attrs)
 	if (attrs->ia_valid & ATTR_GID)
 		gid = attrs->ia_gid;
 
-	if (sbflags & (CIFS_MOUNT_CIFS_ACL | CIFS_MOUNT_MODE_FROM_SID)) {
+	if ((sbflags & (CIFS_MOUNT_CIFS_ACL | CIFS_MOUNT_MODE_FROM_SID)) ||
+	    cifs_sb_master_tcon(cifs_sb)->posix_extensions) {
 		if (uid_valid(uid) || gid_valid(gid)) {
 			mode = NO_CHANGE_64;
 			rc = id_mode_to_cifs_acl(inode, full_path, &mode,
@@ -3430,23 +3414,8 @@ cifs_setattr_nounix(struct dentry *direntry, struct iattr *attrs)
 		attrs->ia_valid &= ~(ATTR_UID | ATTR_GID);
 	}
 
-	/*
-	 * Skip the mode change if it is only being done to clear the
-	 * setuid/setgid bits *and* the mode is emulated via the DOS
-	 * read-only attribute (the default, non-ACL case), which cannot
-	 * represent the setuid/setgid bits anyway.
-	 *
-	 * When the mode is instead stored on the server - i.e. with the
-	 * cifsacl or modefromsid mount options (via an ACL) or with the
-	 * SMB3.1.1 POSIX extensions - the cleared mode must be pushed to
-	 * the server.  Dropping ATTR_MODE here would leave the setuid/
-	 * setgid bit set on the server after a write, which is a security
-	 * issue (the bits are not stripped as they are on local
-	 * filesystems).
-	 */
-	if ((attrs->ia_valid & (ATTR_KILL_SUID|ATTR_KILL_SGID)) &&
-	    !((sbflags & (CIFS_MOUNT_CIFS_ACL | CIFS_MOUNT_MODE_FROM_SID)) ||
-	      cifs_sb_master_tcon(cifs_sb)->posix_extensions))
+	/* skip mode change if it's just for clearing setuid/setgid */
+	if (attrs->ia_valid & (ATTR_KILL_SUID|ATTR_KILL_SGID))
 		attrs->ia_valid &= ~ATTR_MODE;
 
 	if (attrs->ia_valid & ATTR_MODE) {
@@ -3520,6 +3489,13 @@ cifs_setattr_nounix(struct dentry *direntry, struct iattr *attrs)
 	   that */
 	if (rc)
 		goto cifs_setattr_exit;
+
+	if ((attrs->ia_valid & ATTR_SIZE) &&
+	    attrs->ia_size != i_size_read(inode)) {
+		truncate_setsize(inode, attrs->ia_size);
+		netfs_resize_file(&cifsInode->netfs, attrs->ia_size);
+		fscache_resize_cookie(cifs_inode_cookie(inode), attrs->ia_size);
+	}
 
 	setattr_copy(&nop_mnt_idmap, inode, attrs);
 	mark_inode_dirty(inode);

@@ -74,6 +74,7 @@ drm_buddy_test
 drm_cmdline_parser_test
 drm_damage_helper_test
 drm_dp_mst_helper_test
+drm_fixp_test
 drm_format_helper_test
 drm_format_test
 drm_framebuffer_test
@@ -116,3 +117,4 @@ usbip-host
 vhci-hcd
 packing_test
 soc-ops-test
+snd-soc-cs35l56-test

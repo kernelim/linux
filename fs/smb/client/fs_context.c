@@ -26,7 +26,6 @@
 #include <linux/parser.h>
 #include <linux/utsname.h>
 #include "cifsfs.h"
-#include "cifspdu.h"
 #include "cifsglob.h"
 #include "cifsproto.h"
 #include "cifs_unicode.h"
@@ -81,7 +80,7 @@ const struct fs_parameter_spec smb3_fs_parameters[] = {
 	fsparam_flag_no("forcegid", Opt_forcegid),
 	fsparam_flag("noblocksend", Opt_noblocksend),
 	fsparam_flag("noautotune", Opt_noautotune),
-	fsparam_flag("nolease", Opt_nolease),
+	fsparam_flag_no("lease", Opt_lease),
 	fsparam_flag_no("hard", Opt_hard),
 	fsparam_flag_no("soft", Opt_soft),
 	fsparam_flag_no("perm", Opt_perm),
@@ -419,7 +418,7 @@ static int parse_symlink_flavor(struct fs_context *fc, char *value,
 #define DUP_CTX_STR(field)						\
 do {									\
 	if (ctx->field) {						\
-		new_ctx->field = kstrdup(ctx->field, GFP_ATOMIC);	\
+		new_ctx->field = kstrdup(ctx->field, GFP_KERNEL);	\
 		if (new_ctx->field == NULL) {				\
 			smb3_cleanup_fs_context_contents(new_ctx);	\
 			return -ENOMEM;					\
@@ -535,37 +534,6 @@ cifs_parse_smb_version(struct fs_context *fc, char *value, struct smb3_fs_contex
 	return 0;
 }
 
-int smb3_parse_opt(const char *options, const char *key, char **val)
-{
-	int rc = -ENOENT;
-	char *opts, *orig, *p;
-
-	orig = opts = kstrdup(options, GFP_KERNEL);
-	if (!opts)
-		return -ENOMEM;
-
-	while ((p = strsep(&opts, ","))) {
-		char *nval;
-
-		if (!*p)
-			continue;
-		if (strncasecmp(p, key, strlen(key)))
-			continue;
-		nval = strchr(p, '=');
-		if (nval) {
-			if (nval == p)
-				continue;
-			*nval++ = 0;
-			*val = kstrdup(nval, GFP_KERNEL);
-			rc = !*val ? -ENOMEM : 0;
-			goto out;
-		}
-	}
-out:
-	kfree(orig);
-	return rc;
-}
-
 /*
  * Remove duplicate path delimiters. Windows is supposed to do that
  * but there are some bugs that prevent rename from working if there are
@@ -661,13 +629,17 @@ smb3_parse_devname(const char *devname, struct smb3_fs_context *ctx)
 
 	/* make sure we have a valid UNC double delimiter prefix */
 	len = strspn(devname, delims);
-	if (len != 2)
+	if (len != 2) {
+		cifs_dbg(VFS, "UNC: path must begin with // or \\\\\n");
 		return -EINVAL;
+	}
 
 	/* find delimiter between host and sharename */
 	pos = strpbrk(devname + 2, delims);
-	if (!pos)
+	if (!pos) {
+		cifs_dbg(VFS, "UNC: missing delimiter between hostname and share name\n");
 		return -EINVAL;
+	}
 
 	/* record the server hostname */
 	kfree(ctx->server_hostname);
@@ -680,8 +652,10 @@ smb3_parse_devname(const char *devname, struct smb3_fs_context *ctx)
 
 	/* now go until next delimiter or end of string */
 	len = strcspn(pos, delims);
-	if (!len)
+	if (!len) {
+		cifs_dbg(VFS, "UNC: missing share name\n");
 		return -EINVAL;
+	}
 
 	/* move "pos" up to delimiter or NULL */
 	pos += len;
@@ -717,6 +691,41 @@ static int smb3_handle_conflicting_options(struct fs_context *fc)
 {
 	struct smb3_fs_context *ctx = smb3_fc2context(fc);
 
+	if (ctx->rdma && ctx->vals->protocol_id < SMB30_PROT_ID) {
+		cifs_errorf(fc, "SMB Direct requires Version >=3.0\n");
+		return -EOPNOTSUPP;
+	}
+
+	if (ctx->multiuser && !IS_ENABLED(CONFIG_KEYS)) {
+		cifs_errorf(fc, "Multiuser mounts require kernels with CONFIG_KEYS enabled\n");
+		return -EOPNOTSUPP;
+	}
+
+	if (ctx->multiuser && ctx->upcall_target == UPTARGET_MOUNT) {
+		cifs_errorf(fc, "multiuser mount option not supported with upcalltarget set as 'mount'\n");
+		return -EINVAL;
+	}
+
+	if (ctx->uid_specified && !ctx->forceuid_specified) {
+		ctx->override_uid = 1;
+		pr_notice("enabling forceuid mount option implicitly because uid= option is specified\n");
+	}
+
+	if (ctx->gid_specified && !ctx->forcegid_specified) {
+		ctx->override_gid = 1;
+		pr_notice("enabling forcegid mount option implicitly because gid= option is specified\n");
+	}
+
+	if (ctx->override_uid && !ctx->uid_specified) {
+		ctx->override_uid = 0;
+		pr_notice("ignoring forceuid mount option specified with no uid= option\n");
+	}
+
+	if (ctx->override_gid && !ctx->gid_specified) {
+		ctx->override_gid = 0;
+		pr_notice("ignoring forcegid mount option specified with no gid= option\n");
+	}
+
 	if (ctx->multichannel_specified) {
 		if (ctx->multichannel) {
 			if (!ctx->max_channels_specified) {
@@ -735,19 +744,14 @@ static int smb3_handle_conflicting_options(struct fs_context *fc)
 				return -EINVAL;
 			}
 		}
-	} else {
-		if (ctx->max_channels_specified) {
-			if (ctx->max_channels > 1)
-				ctx->multichannel = true;
-			else
-				ctx->multichannel = false;
-		} else {
+	} else if (ctx->max_channels_specified) {
+		if (ctx->max_channels > 1)
+			ctx->multichannel = true;
+		else
 			ctx->multichannel = false;
-			ctx->max_channels = 1;
-		}
 	}
 
-	//resetting default values as remount doesn't initialize fs_context again
+	/* clear parse-time latches so they don't persist across remounts */
 	ctx->multichannel_specified = false;
 	ctx->max_channels_specified = false;
 
@@ -760,7 +764,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 static int smb3_fs_context_parse_monolithic(struct fs_context *fc,
 					    void *data);
 static int smb3_get_tree(struct fs_context *fc);
-static void smb3_sync_ses_chan_max(struct cifs_ses *ses, unsigned int max_channels);
+static void smb3_sync_ses_chan_max(struct cifs_ses *ses, size_t max_channels);
 static int smb3_reconfigure(struct fs_context *fc);
 
 static const struct fs_context_operations smb3_fs_context_ops = {
@@ -830,28 +834,23 @@ static int smb3_fs_context_parse_monolithic(struct fs_context *fc,
 		if (ret < 0)
 			break;
 	}
-	return ret ?: smb3_handle_conflicting_options(fc);
+	return ret;
 }
 
 /*
- * Validate the preparsed information in the config.
+ * smb3_fs_context_validate - check initial-mount-only constraints:
+ * UNC presence, address resolution, dialect warnings
+ *
+ * @fc: generic mount context
  */
 static int smb3_fs_context_validate(struct fs_context *fc)
 {
 	struct smb3_fs_context *ctx = smb3_fc2context(fc);
+	int rc;
 
-	if (ctx->rdma && ctx->vals->protocol_id < SMB30_PROT_ID) {
-		cifs_errorf(fc, "SMB Direct requires Version >=3.0\n");
-		return -EOPNOTSUPP;
-	}
-
-#ifndef CONFIG_KEYS
-	/* Muliuser mounts require CONFIG_KEYS support */
-	if (ctx->multiuser) {
-		cifs_errorf(fc, "Multiuser mounts require kernels with CONFIG_KEYS enabled\n");
-		return -1;
-	}
-#endif
+	rc = smb3_handle_conflicting_options(fc);
+	if (rc)
+		return rc;
 
 	if (ctx->got_version == false)
 		pr_warn_once("No dialect specified on mount. Default has changed to a more secure dialect, SMB2.1 or later (e.g. SMB3.1.1), from CIFS (SMB1). To use the less secure SMB1 dialect to access old servers which do not support SMB3.1.1 (or even SMB3 or SMB2.1) specify vers=1.0 on mount.\n");
@@ -886,26 +885,6 @@ static int smb3_fs_context_validate(struct fs_context *fc)
 	/* set the port that we got earlier */
 	cifs_set_port((struct sockaddr *)&ctx->dstaddr, ctx->port);
 
-	if (ctx->uid_specified && !ctx->forceuid_specified) {
-		ctx->override_uid = 1;
-		pr_notice("enabling forceuid mount option implicitly because uid= option is specified\n");
-	}
-
-	if (ctx->gid_specified && !ctx->forcegid_specified) {
-		ctx->override_gid = 1;
-		pr_notice("enabling forcegid mount option implicitly because gid= option is specified\n");
-	}
-
-	if (ctx->override_uid && !ctx->uid_specified) {
-		ctx->override_uid = 0;
-		pr_notice("ignoring forceuid mount option specified with no uid= option\n");
-	}
-
-	if (ctx->override_gid && !ctx->gid_specified) {
-		ctx->override_gid = 0;
-		pr_notice("ignoring forcegid mount option specified with no gid= option\n");
-	}
-
 	return 0;
 }
 
@@ -915,7 +894,7 @@ static int smb3_get_tree_common(struct fs_context *fc)
 	struct dentry *root;
 	int rc = 0;
 
-	root = cifs_smb3_do_mount(fc->fs_type, 0, ctx);
+	root = cifs_smb3_do_mount(fc, ctx);
 	if (IS_ERR(root))
 		return PTR_ERR(root);
 
@@ -1036,25 +1015,34 @@ do {									\
 
 int smb3_sync_session_ctx_passwords(struct cifs_sb_info *cifs_sb, struct cifs_ses *ses)
 {
+	char *password = NULL, *password2 = NULL;
+
 	if (ses->password &&
 	    cifs_sb->ctx->password &&
 	    strcmp(ses->password, cifs_sb->ctx->password)) {
-		kfree_sensitive(cifs_sb->ctx->password);
-		cifs_sb->ctx->password = kstrdup(ses->password, GFP_KERNEL);
-		if (!cifs_sb->ctx->password)
+		password = kstrdup(ses->password, GFP_KERNEL);
+		if (!password)
 			return -ENOMEM;
 	}
 	if (ses->password2 &&
 	    cifs_sb->ctx->password2 &&
 	    strcmp(ses->password2, cifs_sb->ctx->password2)) {
-		kfree_sensitive(cifs_sb->ctx->password2);
-		cifs_sb->ctx->password2 = kstrdup(ses->password2, GFP_KERNEL);
-		if (!cifs_sb->ctx->password2) {
-			kfree_sensitive(cifs_sb->ctx->password);
-			cifs_sb->ctx->password = NULL;
+		password2 = kstrdup(ses->password2, GFP_KERNEL);
+		if (!password2) {
+			kfree_sensitive(password);
 			return -ENOMEM;
 		}
 	}
+
+	if (password) {
+		kfree_sensitive(cifs_sb->ctx->password);
+		cifs_sb->ctx->password = password;
+	}
+	if (password2) {
+		kfree_sensitive(cifs_sb->ctx->password2);
+		cifs_sb->ctx->password2 = password2;
+	}
+
 	return 0;
 }
 
@@ -1067,7 +1055,7 @@ int smb3_sync_session_ctx_passwords(struct cifs_sb_info *cifs_sb, struct cifs_se
  * with the session's channel lock. This should be called whenever the maximum
  * allowed channels for a session changes (e.g., after a remount or reconfigure).
  */
-static void smb3_sync_ses_chan_max(struct cifs_ses *ses, unsigned int max_channels)
+static void smb3_sync_ses_chan_max(struct cifs_ses *ses, size_t max_channels)
 {
 	spin_lock(&ses->chan_lock);
 	ses->chan_max = max_channels;
@@ -1077,12 +1065,15 @@ static void smb3_sync_ses_chan_max(struct cifs_ses *ses, unsigned int max_channe
 static int smb3_reconfigure(struct fs_context *fc)
 {
 	struct smb3_fs_context *ctx = smb3_fc2context(fc);
+	struct smb3_fs_context *new_ctx = NULL;
+	struct smb3_fs_context *old_ctx = NULL;
 	struct dentry *root = fc->root;
 	struct cifs_sb_info *cifs_sb = CIFS_SB(root->d_sb);
 	struct cifs_ses *ses = cifs_sb_master_tcon(cifs_sb)->ses;
 	unsigned int rsize = ctx->rsize, wsize = ctx->wsize;
 	char *new_password = NULL, *new_password2 = NULL;
 	bool need_recon = false;
+	bool need_mchan_update;
 	int rc;
 
 	if (ses->expired_pwd)
@@ -1091,6 +1082,18 @@ static int smb3_reconfigure(struct fs_context *fc)
 	rc = smb3_verify_reconfigure_ctx(fc, ctx, cifs_sb->ctx, need_recon);
 	if (rc)
 		return rc;
+
+	rc = smb3_handle_conflicting_options(fc);
+	if (rc)
+		return rc;
+
+	old_ctx = kzalloc_obj(*old_ctx);
+	if (!old_ctx)
+		return -ENOMEM;
+
+	rc = smb3_fs_context_dup(old_ctx, cifs_sb->ctx);
+	if (rc)
+		goto free_old_ctx;
 
 	/*
 	 * We can not change UNC/username/password/domainname/
@@ -1101,16 +1104,22 @@ static int smb3_reconfigure(struct fs_context *fc)
 	STEAL_STRING(cifs_sb, ctx, UNC);
 	STEAL_STRING(cifs_sb, ctx, source);
 	STEAL_STRING(cifs_sb, ctx, username);
+	STEAL_STRING(cifs_sb, ctx, domainname);
+	STEAL_STRING(cifs_sb, ctx, nodename);
+	STEAL_STRING(cifs_sb, ctx, iocharset);
 
-	if (need_recon == false)
+	if (!need_recon) {
 		STEAL_STRING_SENSITIVE(cifs_sb, ctx, password);
-	else  {
+	} else {
 		if (ctx->password) {
 			new_password = kstrdup(ctx->password, GFP_KERNEL);
-			if (!new_password)
-				return -ENOMEM;
-		} else
+			if (!new_password) {
+				rc = -ENOMEM;
+				goto restore_ctx;
+			}
+		} else {
 			STEAL_STRING_SENSITIVE(cifs_sb, ctx, password);
+		}
 	}
 
 	/*
@@ -1120,11 +1129,29 @@ static int smb3_reconfigure(struct fs_context *fc)
 	if (ctx->password2) {
 		new_password2 = kstrdup(ctx->password2, GFP_KERNEL);
 		if (!new_password2) {
-			kfree_sensitive(new_password);
-			return -ENOMEM;
+			rc = -ENOMEM;
+			goto restore_ctx;
 		}
-	} else
+	} else {
 		STEAL_STRING_SENSITIVE(cifs_sb, ctx, password2);
+	}
+
+	/* if rsize or wsize not passed in on remount, use previous values */
+	ctx->rsize = rsize ? CIFS_ALIGN_RSIZE(fc, rsize) : cifs_sb->ctx->rsize;
+	ctx->wsize = wsize ? CIFS_ALIGN_WSIZE(fc, wsize) : cifs_sb->ctx->wsize;
+
+	new_ctx = kzalloc_obj(*new_ctx);
+	if (!new_ctx) {
+		rc = -ENOMEM;
+		goto restore_ctx;
+	}
+
+	rc = smb3_fs_context_dup(new_ctx, ctx);
+	if (rc)
+		goto restore_ctx;
+
+	need_mchan_update = ctx->multichannel != cifs_sb->ctx->multichannel ||
+			    ctx->max_channels != cifs_sb->ctx->max_channels;
 
 	/*
 	 * we may update the passwords in the ses struct below. Make sure we do
@@ -1135,54 +1162,55 @@ static int smb3_reconfigure(struct fs_context *fc)
 	/*
 	 * smb2_reconnect may swap password and password2 in case session setup
 	 * failed. First get ctx passwords in sync with ses passwords. It should
-	 * be okay to do this even if this function were to return an error at a
-	 * later stage
+	 * be done before committing new passwords.
 	 */
 	rc = smb3_sync_session_ctx_passwords(cifs_sb, ses);
 	if (rc) {
 		mutex_unlock(&ses->session_mutex);
-		kfree_sensitive(new_password);
-		kfree_sensitive(new_password2);
-		return rc;
-	}
-
-	/*
-	 * now that allocations for passwords are done, commit them
-	 */
-	if (new_password) {
-		kfree_sensitive(ses->password);
-		ses->password = new_password;
-	}
-	if (new_password2) {
-		kfree_sensitive(ses->password2);
-		ses->password2 = new_password2;
+		goto cleanup_new_ctx;
 	}
 
 	/*
 	 * If multichannel or max_channels has changed, update the session's channels accordingly.
 	 * This may add or remove channels to match the new configuration.
 	 */
-	if ((ctx->multichannel != cifs_sb->ctx->multichannel) ||
-	    (ctx->max_channels != cifs_sb->ctx->max_channels)) {
-
-		/* Synchronize ses->chan_max with the new mount context */
-		smb3_sync_ses_chan_max(ses, ctx->max_channels);
-		/* Now update the session's channels to match the new configuration */
+	if (need_mchan_update) {
 		/* Prevent concurrent scaling operations */
 		spin_lock(&ses->ses_lock);
 		if (ses->flags & CIFS_SES_FLAG_SCALE_CHANNELS) {
 			spin_unlock(&ses->ses_lock);
 			mutex_unlock(&ses->session_mutex);
-			return -EINVAL;
+			rc = -EINVAL;
+			goto cleanup_new_ctx;
 		}
 		ses->flags |= CIFS_SES_FLAG_SCALE_CHANNELS;
 		spin_unlock(&ses->ses_lock);
+	}
+
+	/*
+	 * Commit session passwords before any channel work so newly added
+	 * channels authenticate with the new credentials.
+	 */
+	if (new_password) {
+		kfree_sensitive(ses->password);
+		ses->password = new_password;
+		new_password = NULL;
+	}
+	if (new_password2) {
+		kfree_sensitive(ses->password2);
+		ses->password2 = new_password2;
+		new_password2 = NULL;
+	}
+
+	if (need_mchan_update) {
+		/* Synchronize ses->chan_max with the new mount context */
+		smb3_sync_ses_chan_max(ses, ctx->max_channels);
 
 		mutex_unlock(&ses->session_mutex);
 
-		rc = smb3_update_ses_channels(ses, ses->server,
-					       false /* from_reconnect */,
-					       false /* disable_mchan */);
+		smb3_update_ses_channels(ses, ses->server,
+					 false /* from_reconnect */,
+					 false /* disable_mchan */);
 
 		/* Clear scaling flag after operation */
 		spin_lock(&ses->ses_lock);
@@ -1192,21 +1220,30 @@ static int smb3_reconfigure(struct fs_context *fc)
 		mutex_unlock(&ses->session_mutex);
 	}
 
-	STEAL_STRING(cifs_sb, ctx, domainname);
-	STEAL_STRING(cifs_sb, ctx, nodename);
-	STEAL_STRING(cifs_sb, ctx, iocharset);
-
-	/* if rsize or wsize not passed in on remount, use previous values */
-	ctx->rsize = rsize ? CIFS_ALIGN_RSIZE(fc, rsize) : cifs_sb->ctx->rsize;
-	ctx->wsize = wsize ? CIFS_ALIGN_WSIZE(fc, wsize) : cifs_sb->ctx->wsize;
-
 	smb3_cleanup_fs_context_contents(cifs_sb->ctx);
-	rc = smb3_fs_context_dup(cifs_sb->ctx, ctx);
+	memcpy(cifs_sb->ctx, new_ctx, sizeof(*new_ctx));
+	kfree(new_ctx);
+	new_ctx = NULL;
+	smb3_cleanup_fs_context(old_ctx);
+	old_ctx = NULL;
 	smb3_update_mnt_flags(cifs_sb);
 #ifdef CONFIG_CIFS_DFS_UPCALL
 	if (!rc)
 		rc = dfs_cache_remount_fs(cifs_sb);
 #endif
+
+	return rc;
+
+cleanup_new_ctx:
+	smb3_cleanup_fs_context_contents(new_ctx);
+restore_ctx:
+	kfree(new_ctx);
+	kfree_sensitive(new_password);
+	kfree_sensitive(new_password2);
+	smb3_cleanup_fs_context_contents(cifs_sb->ctx);
+	memcpy(cifs_sb->ctx, old_ctx, sizeof(*old_ctx));
+free_old_ctx:
+	kfree(old_ctx);
 
 	return rc;
 }
@@ -1337,8 +1374,8 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 	case Opt_noautotune:
 		ctx->noautotune = 1;
 		break;
-	case Opt_nolease:
-		ctx->no_lease = 1;
+	case Opt_lease:
+		ctx->no_lease = result.negated;
 		break;
 	case Opt_nosparse:
 		ctx->no_sparse = 1;
@@ -1920,11 +1957,6 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		break;
 	}
 	/* case Opt_ignore: - is ignored as expected ... */
-
-	if (ctx->multiuser && ctx->upcall_target == UPTARGET_MOUNT) {
-		cifs_errorf(fc, "multiuser mount option not supported with upcalltarget set as 'mount'\n");
-		goto cifs_parse_mount_err;
-	}
 
 	return 0;
 

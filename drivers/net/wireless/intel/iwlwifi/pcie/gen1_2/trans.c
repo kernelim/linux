@@ -3197,7 +3197,7 @@ static ssize_t iwl_dbgfs_reset_write(struct file *file,
 		if (!test_bit(STATUS_DEVICE_ENABLED, &trans->status))
 			return -EINVAL;
 		if (mode == IWL_RESET_MODE_TOP_RESET) {
-			if (trans->mac_cfg->device_family < IWL_DEVICE_FAMILY_SC)
+			if (!iwl_trans_is_top_reset_supported(trans))
 				return -EINVAL;
 			trans->request_top_reset = 1;
 		}
@@ -4217,6 +4217,15 @@ int iwl_pci_gen1_2_probe(struct pci_dev *pdev,
 	IWL_INFO(iwl_trans, "PCI dev %04x/%04x, rev=0x%x, rfid=0x%x\n",
 		 pdev->device, pdev->subsystem_device,
 		 info.hw_rev, info.hw_rf_id);
+
+#if !IS_ENABLED(CONFIG_IWLMLD)
+	if (iwl_drv_is_wifi7_supported(iwl_trans)) {
+		IWL_ERR(iwl_trans,
+			"IWLMLD needs to be compiled to support this device\n");
+		ret = -EOPNOTSUPP;
+		goto out_free_trans;
+	}
+#endif
 
 	dev_info = iwl_pci_find_dev_info(pdev->device, pdev->subsystem_device,
 					 CSR_HW_RFID_TYPE(info.hw_rf_id),

@@ -760,7 +760,7 @@ static void qeth_issue_ipa_msg(struct qeth_ipa_cmd *cmd, int rc,
 	if (rc)
 		QETH_DBF_MESSAGE(2, "IPA: %s(%#x) for device %x returned %#x \"%s\"\n",
 				 ipa_name, com, CARD_DEVID(card), rc,
-				 qeth_get_ipa_msg(rc));
+				 qeth_get_ipa_msg(com, rc));
 	else
 		QETH_DBF_MESSAGE(5, "IPA: %s(%#x) for device %x succeeded\n",
 				 ipa_name, com, CARD_DEVID(card));
@@ -4709,9 +4709,6 @@ static int qeth_snmp_command(struct qeth_card *card, char __user *udata)
 
 	/* Sanitize user input, to avoid overflows in iob size calculation: */
 	if (req_len > QETH_BUFSIZE)
-		return -EINVAL;
-
-	if (qinfo.udata_len < sizeof(struct qeth_snmp_ureq_hdr))
 		return -EINVAL;
 
 	iob = qeth_get_adapter_cmd(card, IPA_SETADP_SET_SNMP_CONTROL, req_len);

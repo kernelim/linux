@@ -25,8 +25,6 @@
  *
  **************************************************************************/
 
-#include <linux/overflow.h>
-
 #include <drm/ttm/ttm_placement.h>
 
 #include "vmwgfx_binding.h"
@@ -597,7 +595,7 @@ int vmw_dx_shader_add(struct vmw_cmdbuf_res_manager *man,
 	if (!vmw_shader_id_ok(user_key, shader_type))
 		return -EINVAL;
 
-	shader = kmalloc(sizeof(*shader), GFP_KERNEL);
+	shader = kmalloc_obj(*shader);
 	if (!shader) {
 		return -ENOMEM;
 	}
@@ -687,7 +685,7 @@ int vmw_shader_destroy_ioctl(struct drm_device *dev, void *data,
 static int vmw_user_shader_alloc(struct vmw_private *dev_priv,
 				 struct vmw_bo *buffer,
 				 size_t shader_size,
-				 u64 offset,
+				 size_t offset,
 				 SVGA3dShaderType shader_type,
 				 uint8_t num_input_sig,
 				 uint8_t num_output_sig,
@@ -698,7 +696,7 @@ static int vmw_user_shader_alloc(struct vmw_private *dev_priv,
 	struct vmw_resource *res, *tmp;
 	int ret;
 
-	ushader = kzalloc(sizeof(*ushader), GFP_KERNEL);
+	ushader = kzalloc_obj(*ushader);
 	if (unlikely(!ushader)) {
 		ret = -ENOMEM;
 		goto out;
@@ -741,14 +739,14 @@ out:
 static struct vmw_resource *vmw_shader_alloc(struct vmw_private *dev_priv,
 					     struct vmw_bo *buffer,
 					     size_t shader_size,
-					     u64 offset,
+					     size_t offset,
 					     SVGA3dShaderType shader_type)
 {
 	struct vmw_shader *shader;
 	struct vmw_resource *res;
 	int ret;
 
-	shader = kzalloc(sizeof(*shader), GFP_KERNEL);
+	shader = kzalloc_obj(*shader);
 	if (unlikely(!shader)) {
 		ret = -ENOMEM;
 		goto out_err;
@@ -770,7 +768,7 @@ out_err:
 
 static int vmw_shader_define(struct drm_device *dev, struct drm_file *file_priv,
 			     enum drm_vmw_shader_type shader_type_drm,
-			     u32 buffer_handle, size_t size, u64 offset,
+			     u32 buffer_handle, size_t size, size_t offset,
 			     uint8_t num_input_sig, uint8_t num_output_sig,
 			     uint32_t *shader_handle)
 {
@@ -781,16 +779,13 @@ static int vmw_shader_define(struct drm_device *dev, struct drm_file *file_priv,
 	int ret;
 
 	if (buffer_handle != SVGA3D_INVALID_ID) {
-		u64 end;
-
 		ret = vmw_user_bo_lookup(file_priv, buffer_handle, &buffer);
 		if (unlikely(ret != 0)) {
 			VMW_DEBUG_USER("Couldn't find buffer for shader creation.\n");
 			return ret;
 		}
 
-		if (check_add_overflow((u64)size, (u64)offset, &end) ||
-		    end > buffer->tbo.base.size) {
+		if ((u64)buffer->tbo.base.size < (u64)size + (u64)offset) {
 			VMW_DEBUG_USER("Illegal buffer- or shader size.\n");
 			ret = -EINVAL;
 			goto out_bad_arg;
@@ -928,8 +923,10 @@ int vmw_compat_shader_add(struct vmw_private *dev_priv,
 	ttm_bo_unreserve(&buf->tbo);
 
 	res = vmw_shader_alloc(dev_priv, buf, size, 0, shader_type);
-	if (unlikely(ret != 0))
+	if (IS_ERR(res)) {
+		ret = PTR_ERR(res);
 		goto no_reserve;
+	}
 
 	ret = vmw_cmdbuf_res_add(man, vmw_cmdbuf_res_shader,
 				 vmw_shader_key(user_key, shader_type),

@@ -10,8 +10,10 @@
 #include <linux/ratelimit.h>
 #include <linux/types.h>
 #include <linux/qat/qat_mig_dev.h>
+#include "adf_anti_rb.h"
 #include "adf_cfg_common.h"
 #include "adf_dc.h"
+#include "adf_kpt.h"
 #include "adf_rl.h"
 #include "adf_telemetry.h"
 #include "adf_pfvf_msg.h"
@@ -26,15 +28,10 @@
 #define ADF_4XXX_DEVICE_NAME "4xxx"
 #define ADF_420XX_DEVICE_NAME "420xx"
 #define ADF_6XXX_DEVICE_NAME "6xxx"
-#define PCI_DEVICE_ID_INTEL_QAT_4XXX 0x4940
 #define PCI_DEVICE_ID_INTEL_QAT_4XXXIOV 0x4941
-#define PCI_DEVICE_ID_INTEL_QAT_401XX 0x4942
 #define PCI_DEVICE_ID_INTEL_QAT_401XXIOV 0x4943
-#define PCI_DEVICE_ID_INTEL_QAT_402XX 0x4944
 #define PCI_DEVICE_ID_INTEL_QAT_402XXIOV 0x4945
-#define PCI_DEVICE_ID_INTEL_QAT_420XX 0x4946
 #define PCI_DEVICE_ID_INTEL_QAT_420XXIOV 0x4947
-#define PCI_DEVICE_ID_INTEL_QAT_6XXX 0x4948
 #define PCI_DEVICE_ID_INTEL_QAT_6XXX_IOV 0x4949
 
 #define ADF_DEVICE_FUSECTL_OFFSET 0x40
@@ -327,6 +324,8 @@ struct adf_hw_device_data {
 	struct adf_dev_err_mask dev_err_mask;
 	struct adf_rl_hw_data rl_data;
 	struct adf_tl_hw_data tl_data;
+	struct adf_anti_rb_hw_data anti_rb_data;
+	struct adf_kpt_hw_data kpt_data;
 	struct qat_migdev_ops vfmig_ops;
 	const char *fw_name;
 	const char *fw_mmp_name;

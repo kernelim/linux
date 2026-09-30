@@ -1,3 +1,3 @@
-#8-
-0xded04262	mana_gd_create_mana_eq	drivers/net/ethernet/microsoft/mana/mana	EXPORT_SYMBOL	NET_MANA
+#9-
+0x7f7c75ce	mana_gd_create_mana_eq	drivers/net/ethernet/microsoft/mana/mana	EXPORT_SYMBOL	NET_MANA
 

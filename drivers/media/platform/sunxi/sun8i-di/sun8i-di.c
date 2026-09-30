@@ -309,7 +309,7 @@ static void deinterlace_init(struct deinterlace_dev *dev)
 
 static inline struct deinterlace_ctx *deinterlace_file2ctx(struct file *file)
 {
-	return container_of(file->private_data, struct deinterlace_ctx, fh);
+	return container_of(file_to_v4l2_fh(file), struct deinterlace_ctx, fh);
 }
 
 static bool deinterlace_check_format(u32 pixelformat)
@@ -732,7 +732,6 @@ static int deinterlace_open(struct file *file)
 	deinterlace_prepare_format(&ctx->dst_fmt);
 
 	v4l2_fh_init(&ctx->fh, video_devdata(file));
-	file->private_data = &ctx->fh;
 	ctx->dev = dev;
 
 	ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(dev->m2m_dev, ctx,
@@ -742,7 +741,7 @@ static int deinterlace_open(struct file *file)
 		goto err_free;
 	}
 
-	v4l2_fh_add(&ctx->fh);
+	v4l2_fh_add(&ctx->fh, file);
 
 	mutex_unlock(&dev->dev_mutex);
 
@@ -763,7 +762,7 @@ static int deinterlace_release(struct file *file)
 
 	mutex_lock(&dev->dev_mutex);
 
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
 

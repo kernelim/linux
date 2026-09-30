@@ -20,6 +20,7 @@
 #define SCLP_ERRNOTIFY_AQ_REPAIR		1
 #define SCLP_ERRNOTIFY_AQ_INFO_LOG		2
 #define SCLP_ERRNOTIFY_AQ_OPTICS_DATA		3
+#define SCLP_ERRNOTIFY_AQ_NVME_SMART_LOG	4
 
 #ifndef __ASSEMBLY__
 #include <linux/uio.h>
@@ -171,6 +172,7 @@ void sclp_early_printk(const char *s);
 void __sclp_early_printk(const char *s, unsigned int len);
 void sclp_emergency_printk(const char *s);
 
+int sclp_init(void);
 int sclp_early_get_memsize(unsigned long *mem);
 int sclp_early_get_hsa_size(unsigned long *hsa_size);
 int _sclp_get_core_info(struct sclp_core_info *info);

@@ -50,6 +50,7 @@ struct xe_eu_stall_data_stream {
 	wait_queue_head_t poll_wq;
 	size_t data_record_size;
 	size_t per_xecore_buf_size;
+	unsigned int fw_ref;
 
 	struct xe_gt *gt;
 	struct xe_bo *bo;
@@ -125,6 +126,27 @@ struct xe_eu_stall_data_xe2 {
 	__u64 unused[6];
 } __packed;
 
+/*
+ * EU stall data format for Xe3p arch GPUs.
+ */
+struct xe_eu_stall_data_xe3p {
+	__u64 ip_addr:61;	  /* Bits 0  to 60  */
+	__u64 tdr_count:8;	  /* Bits 61 to 68  */
+	__u64 other_count:8;	  /* Bits 69 to 76  */
+	__u64 control_count:8;	  /* Bits 77 to 84  */
+	__u64 pipestall_count:8;  /* Bits 85 to 92  */
+	__u64 send_count:8;	  /* Bits 93 to 100 */
+	__u64 dist_acc_count:8;   /* Bits 101 to 108 */
+	__u64 sbid_count:8;	  /* Bits 109 to 116 */
+	__u64 sync_count:8;	  /* Bits 117 to 124 */
+	__u64 inst_fetch_count:8; /* Bits 125 to 132 */
+	__u64 active_count:8;	  /* Bits 133 to 140 */
+	__u64 ex_id:3;		  /* Bits 141 to 143 */
+	__u64 end_flag:1;	  /* Bit  144 */
+	__u64 unused_bits:47;
+	__u64 unused[5];
+} __packed;
+
 const u64 eu_stall_sampling_rates[] = {251, 251 * 2, 251 * 3, 251 * 4, 251 * 5, 251 * 6, 251 * 7};
 
 /**
@@ -168,10 +190,13 @@ size_t xe_eu_stall_data_record_size(struct xe_device *xe)
 {
 	size_t record_size = 0;
 
-	if (xe->info.platform == XE_PVC)
-		record_size = sizeof(struct xe_eu_stall_data_pvc);
+	if (GRAPHICS_VER(xe) >= 35)
+		record_size = sizeof(struct xe_eu_stall_data_xe3p);
 	else if (GRAPHICS_VER(xe) >= 20)
 		record_size = sizeof(struct xe_eu_stall_data_xe2);
+	else if (xe->info.platform == XE_PVC)
+		record_size = sizeof(struct xe_eu_stall_data_pvc);
+
 
 	xe_assert(xe, is_power_of_2(record_size));
 
@@ -214,7 +239,7 @@ int xe_eu_stall_init(struct xe_gt *gt)
 	if (!xe_eu_stall_supported_on_platform(xe))
 		return 0;
 
-	gt->eu_stall = kzalloc(sizeof(*gt->eu_stall), GFP_KERNEL);
+	gt->eu_stall = kzalloc_obj(*gt->eu_stall);
 	if (!gt->eu_stall) {
 		ret = -ENOMEM;
 		goto exit;
@@ -612,7 +637,7 @@ static int xe_eu_stall_data_buf_alloc(struct xe_eu_stall_data_stream *stream,
 	struct xe_bo *bo;
 	u32 size;
 
-	stream->xecore_buf = kcalloc(last_xecore, sizeof(*stream->xecore_buf), GFP_KERNEL);
+	stream->xecore_buf = kzalloc_objs(*stream->xecore_buf, last_xecore);
 	if (!stream->xecore_buf)
 		return -ENOMEM;
 
@@ -637,13 +662,12 @@ static int xe_eu_stall_stream_enable(struct xe_eu_stall_data_stream *stream)
 	struct per_xecore_buf *xecore_buf;
 	struct xe_gt *gt = stream->gt;
 	u16 group, instance;
-	unsigned int fw_ref;
 	int xecore;
 
 	/* Take runtime pm ref and forcewake to disable RC6 */
 	xe_pm_runtime_get(gt_to_xe(gt));
-	fw_ref = xe_force_wake_get(gt_to_fw(gt), XE_FW_RENDER);
-	if (!xe_force_wake_ref_has_domain(fw_ref, XE_FW_RENDER)) {
+	stream->fw_ref = xe_force_wake_get(gt_to_fw(gt), XE_FW_RENDER);
+	if (!xe_force_wake_ref_has_domain(stream->fw_ref, XE_FW_RENDER)) {
 		xe_gt_err(gt, "Failed to get RENDER forcewake\n");
 		xe_pm_runtime_put(gt_to_xe(gt));
 		return -ETIMEDOUT;
@@ -809,7 +833,7 @@ static int xe_eu_stall_disable_locked(struct xe_eu_stall_data_stream *stream)
 		xe_gt_mcr_multicast_write(gt, ROW_CHICKEN2,
 					  _MASKED_BIT_DISABLE(DISABLE_DOP_GATING));
 
-	xe_force_wake_put(gt_to_fw(gt), XE_FW_RENDER);
+	xe_force_wake_put(gt_to_fw(gt), stream->fw_ref);
 	xe_pm_runtime_put(gt_to_xe(gt));
 
 	return 0;
@@ -882,7 +906,7 @@ static int xe_eu_stall_stream_open_locked(struct drm_device *dev,
 		return -EBUSY;
 	}
 
-	stream = kzalloc(sizeof(*stream), GFP_KERNEL);
+	stream = kzalloc_obj(*stream);
 	if (!stream)
 		return -ENOMEM;
 
@@ -940,9 +964,10 @@ int xe_eu_stall_stream_open(struct drm_device *dev, u64 data, struct drm_file *f
 		return -ENODEV;
 	}
 
-	if (xe_observation_paranoid && !perfmon_capable()) {
+	ret = xe_observation_paranoid_check();
+	if (ret) {
 		drm_dbg(&xe->drm,  "Insufficient privileges for EU stall monitoring\n");
-		return -EACCES;
+		return ret;
 	}
 
 	/* Initialize and set default values */

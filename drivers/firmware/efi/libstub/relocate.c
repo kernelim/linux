@@ -48,9 +48,12 @@ efi_status_t efi_low_alloc_above(unsigned long size, unsigned long align,
 		unsigned long m = (unsigned long)map->map;
 		u64 start, end;
 
-		desc = efi_early_memdesc_ptr(m, map->desc_size, i);
+		desc = efi_memdesc_ptr(m, map->desc_size, i);
 
 		if (desc->type != EFI_CONVENTIONAL_MEMORY)
+			continue;
+
+		if (desc->attribute & EFI_MEMORY_HOT_PLUGGABLE)
 			continue;
 
 		if (efi_soft_reserve_enabled() &&

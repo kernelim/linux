@@ -102,7 +102,6 @@ struct multipath {
 	struct bio_list queued_bios;
 
 	struct timer_list nopath_timer;	/* Timeout for queue_if_no_path */
-	bool is_suspending;
 };
 
 /*
@@ -131,7 +130,7 @@ static void queue_if_no_path_timeout_work(struct timer_list *t);
 #define MPATHF_QUEUE_IO 0			/* Must we queue all I/O? */
 #define MPATHF_QUEUE_IF_NO_PATH 1		/* Queue I/O if last path fails? */
 #define MPATHF_SAVED_QUEUE_IF_NO_PATH 2		/* Saved state during suspension */
-#define MPATHF_RETAIN_ATTACHED_HW_HANDLER 3	/* If there's already a hw_handler present, don't change it. */
+/* MPATHF_RETAIN_ATTACHED_HW_HANDLER no longer has any effect */
 #define MPATHF_PG_INIT_DISABLED 4		/* pg_init is not currently allowed */
 #define MPATHF_PG_INIT_REQUIRED 5		/* pg_init needs calling? */
 #define MPATHF_PG_INIT_DELAY_RETRY 6		/* Delay pg_init retry? */
@@ -225,6 +224,7 @@ static struct multipath *alloc_multipath(struct dm_target *ti)
 		mutex_init(&m->work_mutex);
 
 		m->queue_mode = DM_TYPE_NONE;
+		m->pg_init_delay_msecs = DM_PG_INIT_DELAY_DEFAULT;
 
 		m->ti = ti;
 		ti->private = m;
@@ -237,16 +237,10 @@ static struct multipath *alloc_multipath(struct dm_target *ti)
 
 static int alloc_multipath_stage2(struct dm_target *ti, struct multipath *m)
 {
-	if (m->queue_mode == DM_TYPE_NONE) {
+	if (m->queue_mode == DM_TYPE_NONE)
 		m->queue_mode = DM_TYPE_REQUEST_BASED;
-	} else if (m->queue_mode == DM_TYPE_BIO_BASED) {
+	else if (m->queue_mode == DM_TYPE_BIO_BASED)
 		INIT_WORK(&m->process_queued_bios, process_queued_bios);
-		/*
-		 * bio-based doesn't support any direct scsi_dh management;
-		 * it just discovers if a scsi_dh is attached.
-		 */
-		set_bit(MPATHF_RETAIN_ATTACHED_HW_HANDLER, &m->flags);
-	}
 
 	dm_table_set_type(ti->table, m->queue_mode);
 
@@ -257,7 +251,6 @@ static int alloc_multipath_stage2(struct dm_target *ti, struct multipath *m)
 	set_bit(MPATHF_QUEUE_IO, &m->flags);
 	atomic_set(&m->pg_init_in_progress, 0);
 	atomic_set(&m->pg_init_count, 0);
-	m->pg_init_delay_msecs = DM_PG_INIT_DELAY_DEFAULT;
 	init_waitqueue_head(&m->pg_init_wait);
 	init_waitqueue_head(&m->probe_wait);
 
@@ -887,36 +880,30 @@ static int setup_scsi_dh(struct block_device *bdev, struct multipath *m,
 	struct request_queue *q = bdev_get_queue(bdev);
 	int r;
 
-	if (mpath_double_check_test_bit(MPATHF_RETAIN_ATTACHED_HW_HANDLER, m)) {
-retain:
-		if (*attached_handler_name) {
-			/*
-			 * Clear any hw_handler_params associated with a
-			 * handler that isn't already attached.
-			 */
-			if (m->hw_handler_name && strcmp(*attached_handler_name, m->hw_handler_name)) {
-				kfree(m->hw_handler_params);
-				m->hw_handler_params = NULL;
-			}
-
-			/*
-			 * Reset hw_handler_name to match the attached handler
-			 *
-			 * NB. This modifies the table line to show the actual
-			 * handler instead of the original table passed in.
-			 */
-			kfree(m->hw_handler_name);
-			m->hw_handler_name = *attached_handler_name;
-			*attached_handler_name = NULL;
+	if (*attached_handler_name) {
+		/*
+		 * Clear any hw_handler_params associated with a
+		 * handler that isn't already attached.
+		 */
+		if (m->hw_handler_name && strcmp(*attached_handler_name,
+						 m->hw_handler_name)) {
+			kfree(m->hw_handler_params);
+			m->hw_handler_params = NULL;
 		}
+
+		/*
+		 * Reset hw_handler_name to match the attached handler
+		 *
+		 * NB. This modifies the table line to show the actual
+		 * handler instead of the original table passed in.
+		 */
+		kfree(m->hw_handler_name);
+		m->hw_handler_name = *attached_handler_name;
+		*attached_handler_name = NULL;
 	}
 
 	if (m->hw_handler_name) {
 		r = scsi_dh_attach(q, m->hw_handler_name);
-		if (r == -EBUSY) {
-			DMINFO("retaining handler on device %pg", bdev);
-			goto retain;
-		}
 		if (r < 0) {
 			*error = "error attaching hardware handler";
 			return r;
@@ -1138,7 +1125,7 @@ static int parse_features(struct dm_arg_set *as, struct multipath *m)
 		}
 
 		if (!strcasecmp(arg_name, "retain_attached_hw_handler")) {
-			set_bit(MPATHF_RETAIN_ATTACHED_HW_HANDLER, &m->flags);
+			/* no longer has any effect */
 			continue;
 		}
 
@@ -1748,9 +1735,6 @@ static void multipath_presuspend(struct dm_target *ti)
 {
 	struct multipath *m = ti->private;
 
-	spin_lock_irq(&m->lock);
-	m->is_suspending = true;
-	spin_unlock_irq(&m->lock);
 	/* FIXME: bio-based shouldn't need to always disable queue_if_no_path */
 	if (m->queue_mode == DM_TYPE_BIO_BASED || !dm_noflush_suspending(m->ti))
 		queue_if_no_path(m, false, true, __func__);
@@ -1773,7 +1757,6 @@ static void multipath_resume(struct dm_target *ti)
 	struct multipath *m = ti->private;
 
 	spin_lock_irq(&m->lock);
-	m->is_suspending = false;
 	if (test_bit(MPATHF_SAVED_QUEUE_IF_NO_PATH, &m->flags)) {
 		set_bit(MPATHF_QUEUE_IF_NO_PATH, &m->flags);
 		clear_bit(MPATHF_SAVED_QUEUE_IF_NO_PATH, &m->flags);
@@ -1823,7 +1806,6 @@ static void multipath_status(struct dm_target *ti, status_type_t type,
 		DMEMIT("%u ", test_bit(MPATHF_QUEUE_IF_NO_PATH, &m->flags) +
 			      (m->pg_init_retries > 0) * 2 +
 			      (m->pg_init_delay_msecs != DM_PG_INIT_DELAY_DEFAULT) * 2 +
-			      test_bit(MPATHF_RETAIN_ATTACHED_HW_HANDLER, &m->flags) +
 			      (m->queue_mode != DM_TYPE_REQUEST_BASED) * 2);
 
 		if (test_bit(MPATHF_QUEUE_IF_NO_PATH, &m->flags))
@@ -1832,8 +1814,6 @@ static void multipath_status(struct dm_target *ti, status_type_t type,
 			DMEMIT("pg_init_retries %u ", m->pg_init_retries);
 		if (m->pg_init_delay_msecs != DM_PG_INIT_DELAY_DEFAULT)
 			DMEMIT("pg_init_delay_msecs %u ", m->pg_init_delay_msecs);
-		if (test_bit(MPATHF_RETAIN_ATTACHED_HW_HANDLER, &m->flags))
-			DMEMIT("retain_attached_hw_handler ");
 		if (m->queue_mode != DM_TYPE_REQUEST_BASED) {
 			switch (m->queue_mode) {
 			case DM_TYPE_BIO_BASED:
@@ -2100,7 +2080,7 @@ static int probe_active_paths(struct multipath *m)
 		if (m->current_pg == m->last_probed_pg)
 			goto skip_probe;
 	}
-	if (!m->current_pg || m->is_suspending ||
+	if (!m->current_pg || dm_suspended(m->ti) ||
 	    test_bit(MPATHF_QUEUE_IO, &m->flags))
 		goto skip_probe;
 	set_bit(MPATHF_DELAY_PG_SWITCH, &m->flags);
@@ -2109,7 +2089,7 @@ static int probe_active_paths(struct multipath *m)
 
 	list_for_each_entry(pgpath, &pg->pgpaths, list) {
 		if (pg != READ_ONCE(m->current_pg) ||
-		    READ_ONCE(m->is_suspending))
+		    dm_suspended(m->ti))
 			goto out;
 		if (!pgpath->is_active)
 			continue;
@@ -2307,7 +2287,7 @@ static struct target_type multipath_target = {
 	.name = "multipath",
 	.version = {1, 15, 0},
 	.features = DM_TARGET_SINGLETON | DM_TARGET_IMMUTABLE |
-		    DM_TARGET_PASSES_INTEGRITY,
+		    DM_TARGET_PASSES_INTEGRITY | DM_TARGET_ATOMIC_WRITES,
 	.module = THIS_MODULE,
 	.ctr = multipath_ctr,
 	.dtr = multipath_dtr,

@@ -1176,8 +1176,7 @@ static int hva_open(struct file *file)
 
 	INIT_WORK(&ctx->run_work, hva_run_work);
 	v4l2_fh_init(&ctx->fh, video_devdata(file));
-	file->private_data = &ctx->fh;
-	v4l2_fh_add(&ctx->fh);
+	v4l2_fh_add(&ctx->fh, file);
 
 	ret = hva_ctrls_setup(ctx);
 	if (ret) {
@@ -1221,7 +1220,7 @@ static int hva_open(struct file *file)
 err_ctrls:
 	v4l2_ctrl_handler_free(&ctx->ctrl_handler);
 err_fh:
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 	kfree(ctx);
 out:
@@ -1252,7 +1251,7 @@ static int hva_release(struct file *file)
 
 	v4l2_ctrl_handler_free(&ctx->ctrl_handler);
 
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 
 #ifdef CONFIG_VIDEO_STI_HVA_DEBUGFS

@@ -114,7 +114,7 @@ static int skylake_rt286_fe_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_dapm_context *dapm;
 	struct snd_soc_component *component = snd_soc_rtd_to_cpu(rtd, 0)->component;
 
-	dapm = snd_soc_component_get_dapm(component);
+	dapm = snd_soc_component_to_dapm(component);
 	snd_soc_dapm_ignore_suspend(dapm, "Reference Capture");
 
 	return 0;
@@ -135,7 +135,7 @@ static int skylake_rt286_codec_init(struct snd_soc_pcm_runtime *rtd)
 
 	snd_soc_component_set_jack(component, &skylake_headset, NULL);
 
-	snd_soc_dapm_ignore_suspend(&rtd->card->dapm, "SoC DMIC");
+	snd_soc_dapm_ignore_suspend(rtd->card->dapm, "SoC DMIC");
 
 	return 0;
 }
@@ -507,7 +507,7 @@ static int skylake_card_late_probe(struct snd_soc_card *card)
 	if (!component)
 		return -EINVAL;
 
-	return hdac_hdmi_jack_port_init(component, &card->dapm);
+	return hdac_hdmi_jack_port_init(component, card->dapm);
 }
 
 /* skylake audio machine driver for SPT + RT286S */

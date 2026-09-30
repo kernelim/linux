@@ -1,3 +1,3 @@
-#8-
-0x8c3c6bd7	br_vlan_get_proto	net/bridge/bridge	EXPORT_SYMBOL_GPL	
+#9-
+0x8af2fa9e	br_vlan_get_proto	net/bridge/bridge	EXPORT_SYMBOL_GPL	
 

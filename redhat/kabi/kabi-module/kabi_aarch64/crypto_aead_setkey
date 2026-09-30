@@ -1,3 +1,3 @@
-#8-
-0xf082b344	crypto_aead_setkey	vmlinux	EXPORT_SYMBOL_GPL	
+#9-
+0x5a07de46	crypto_aead_setkey	vmlinux	EXPORT_SYMBOL_GPL	
 

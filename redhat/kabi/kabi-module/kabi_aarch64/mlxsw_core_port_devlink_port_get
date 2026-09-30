@@ -1,3 +1,3 @@
-#8-
-0x96dc9006	mlxsw_core_port_devlink_port_get	drivers/net/ethernet/mellanox/mlxsw/mlxsw_core	EXPORT_SYMBOL	
+#9-
+0xe8b68228	mlxsw_core_port_devlink_port_get	drivers/net/ethernet/mellanox/mlxsw/mlxsw_core	EXPORT_SYMBOL	
 

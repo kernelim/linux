@@ -1,3 +1,3 @@
-#8-
-0xf12fb11e	fc_remote_port_add	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
+#9-
+0xc6dfc2b9	fc_remote_port_add	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
 

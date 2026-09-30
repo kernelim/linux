@@ -1,3 +1,3 @@
-#8-
-0xb69038b6	nvme_init_ctrl	drivers/nvme/host/nvme-core	EXPORT_SYMBOL_GPL	
+#9-
+0x0bc166f1	nvme_init_ctrl	drivers/nvme/host/nvme-core	EXPORT_SYMBOL_GPL	
 

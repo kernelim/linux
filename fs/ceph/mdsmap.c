@@ -11,6 +11,7 @@
 #include <linux/ceph/messenger.h>
 #include <linux/ceph/decode.h>
 
+#include "mds_client.h"
 #include "super.h"
 
 #define CEPH_MDS_IS_READY(i, ignore_laggy) \
@@ -114,7 +115,8 @@ bad:
  * Ignore any fields we don't care about (there are quite a few of
  * them).
  */
-struct ceph_mdsmap *ceph_mdsmap_decode(void **p, void *end, bool msgr2)
+struct ceph_mdsmap *ceph_mdsmap_decode(struct ceph_mds_client *mdsc,
+				       void **p, void *end, bool msgr2)
 {
 	struct ceph_mdsmap *m;
 	const void *start = *p;
@@ -352,10 +354,31 @@ struct ceph_mdsmap *ceph_mdsmap_decode(void **p, void *end, bool msgr2)
 		__decode_and_drop_type(p, end, u8, bad_ext);
 	}
 	if (mdsmap_ev >= 8) {
+		size_t fsname_len;
+
 		/* enabled */
 		ceph_decode_8_safe(p, end, m->m_enabled, bad_ext);
 		/* fs_name */
-		ceph_decode_skip_string(p, end, bad_ext);
+		m->m_fs_name = ceph_extract_encoded_string(p, end, &fsname_len,
+							   GFP_NOFS);
+		if (IS_ERR(m->m_fs_name)) {
+			m->m_fs_name = NULL;
+			goto nomem;
+		}
+
+		/* validate fsname against mds_namespace */
+		if (!namespace_equals(mdsc->fsc->mount_options, m->m_fs_name,
+				      fsname_len)) {
+			pr_warn("fsname %s doesn't match mds_namespace %s\n",
+				m->m_fs_name,
+				mdsc->fsc->mount_options->mds_namespace);
+			goto bad;
+		}
+	} else {
+		m->m_enabled = false;
+		m->m_fs_name = kstrdup(CEPH_OLD_FS_NAME, GFP_NOFS);
+		if (!m->m_fs_name)
+			goto nomem;
 	}
 	/* damaged */
 	if (mdsmap_ev >= 9) {
@@ -417,6 +440,7 @@ void ceph_mdsmap_destroy(struct ceph_mdsmap *m)
 		kfree(m->m_info);
 	}
 	kfree(m->m_data_pg_pools);
+	kfree(m->m_fs_name);
 	kfree(m);
 }
 

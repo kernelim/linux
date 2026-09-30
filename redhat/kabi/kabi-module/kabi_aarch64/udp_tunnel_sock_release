@@ -1,3 +1,3 @@
-#8-
-0x131d117e	udp_tunnel_sock_release	net/ipv4/udp_tunnel	EXPORT_SYMBOL_GPL	
+#9-
+0x644e7792	udp_tunnel_sock_release	net/ipv4/udp_tunnel	EXPORT_SYMBOL_GPL	
 

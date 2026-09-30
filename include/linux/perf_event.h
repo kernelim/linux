@@ -157,7 +157,9 @@ struct hw_perf_event {
 	union {
 		struct { /* hardware */
 			u64		config;
+			u64		config1;
 			u64		last_tag;
+			u64		dyn_constraint;
 			unsigned long	config_base;
 			unsigned long	event_base;
 			int		event_base_rdpmc;
@@ -1285,6 +1287,11 @@ static inline void perf_sample_save_callchain(struct perf_sample_data *data,
 {
 	int size = 1;
 
+	if (!(event->attr.sample_type & PERF_SAMPLE_CALLCHAIN))
+		return;
+	if (WARN_ON_ONCE(data->sample_flags & PERF_SAMPLE_CALLCHAIN))
+		return;
+
 	data->callchain = perf_callchain(event, regs);
 	size += data->callchain->nr;
 
@@ -1324,6 +1331,9 @@ static inline void perf_sample_save_brstack(struct perf_sample_data *data,
 
 	if (branch_sample_hw_index(event))
 		size += sizeof(u64);
+
+	brs->nr = min_t(u16, event->attr.sample_max_stack, brs->nr);
+
 	size += brs->nr * sizeof(struct perf_branch_entry);
 
 	/*
@@ -1657,23 +1667,9 @@ static inline int perf_is_paranoid(void)
 	return sysctl_perf_event_paranoid > -1;
 }
 
-int perf_allow_kernel(void);
-
-static inline int perf_allow_cpu(void)
-{
-	if (sysctl_perf_event_paranoid > 0 && !perfmon_capable())
-		return -EACCES;
-
-	return security_perf_event_open(PERF_SECURITY_CPU);
-}
-
-static inline int perf_allow_tracepoint(void)
-{
-	if (sysctl_perf_event_paranoid > -1 && !perfmon_capable())
-		return -EPERM;
-
-	return security_perf_event_open(PERF_SECURITY_TRACEPOINT);
-}
+extern int perf_allow_kernel(void);
+extern int perf_allow_cpu(void);
+extern int perf_allow_tracepoint(void);
 
 extern int perf_exclude_event(struct perf_event *event, struct pt_regs *regs);
 
@@ -1859,19 +1855,27 @@ static inline void perf_event_disable(struct perf_event *event)		{ }
 static inline int __perf_event_disable(void *info)			{ return -1; }
 static inline void perf_event_task_tick(void)				{ }
 static inline int perf_event_release_kernel(struct perf_event *event)	{ return 0; }
-static inline int perf_event_period(struct perf_event *event, u64 value)
+static inline int
+perf_event_period(struct perf_event *event, u64 value)			{ return -EINVAL; }
+static inline u64
+perf_event_pause(struct perf_event *event, bool reset)			{ return 0; }
+static inline int
+perf_exclude_event(struct perf_event *event, struct pt_regs *regs)	{ return 0; }
+
+static inline int perf_allow_kernel(void)
 {
-	return -EINVAL;
+	return perfmon_capable() ? 0 : -EACCES;
 }
-static inline u64 perf_event_pause(struct perf_event *event, bool reset)
+static inline int perf_allow_cpu(void)
 {
-	return 0;
+	return perfmon_capable() ? 0 : -EACCES;
 }
-static inline int perf_exclude_event(struct perf_event *event, struct pt_regs *regs)
+static inline int perf_allow_tracepoint(void)
 {
-	return 0;
+	return perfmon_capable() ? 0 : -EPERM;
 }
-#endif
+
+#endif /* !CONFIG_PERF_EVENTS */
 
 #if defined(CONFIG_PERF_EVENTS) && defined(CONFIG_CPU_SUP_INTEL)
 extern void perf_restore_debug_store(void);

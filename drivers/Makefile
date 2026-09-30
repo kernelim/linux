@@ -192,5 +192,7 @@ obj-$(CONFIG_MOST)		+= most/
 obj-$(CONFIG_HTE)		+= hte/
 obj-$(CONFIG_DRM_ACCEL)		+= accel/
 obj-$(CONFIG_DPLL)		+= dpll/
+obj-y				+= resctrl/
 
+obj-$(CONFIG_DIBS)		+= dibs/
 obj-$(CONFIG_S390)		+= s390/

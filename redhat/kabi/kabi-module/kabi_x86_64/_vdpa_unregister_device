@@ -1,3 +1,3 @@
-#8-
-0x4f1a24f6	_vdpa_unregister_device	drivers/vdpa/vdpa	EXPORT_SYMBOL_GPL	
+#9-
+0x580a787d	_vdpa_unregister_device	drivers/vdpa/vdpa	EXPORT_SYMBOL_GPL	
 

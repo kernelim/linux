@@ -1,3 +1,3 @@
-#8-
-0x6e7e9aa9	iscsi_conn_stop	drivers/scsi/libiscsi	EXPORT_SYMBOL_GPL	
+#9-
+0x6afb2c50	iscsi_conn_stop	drivers/scsi/libiscsi	EXPORT_SYMBOL_GPL	
 

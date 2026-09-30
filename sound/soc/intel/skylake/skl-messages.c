@@ -193,7 +193,7 @@ static const struct skl_dsp_ops dsp_ops[] = {
 		.cleanup = bxt_sst_dsp_cleanup
 	},
 	{
-		.id = PCI_DEVICE_ID_INTEL_HDA_GML,
+		.id = PCI_DEVICE_ID_INTEL_HDA_GLK,
 		.num_cores = 2,
 		.loader_ops = bxt_get_loader_ops,
 		.init = bxt_sst_dsp_init,

@@ -1,3 +1,3 @@
-#8-
-0xfa47a895	xprt_wait_for_buffer_space	net/sunrpc/sunrpc	EXPORT_SYMBOL_GPL	
+#9-
+0x16bff160	xprt_wait_for_buffer_space	net/sunrpc/sunrpc	EXPORT_SYMBOL_GPL	
 

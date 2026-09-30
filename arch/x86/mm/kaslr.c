@@ -52,7 +52,7 @@ static __initdata struct kaslr_memory_region {
 } kaslr_regions[] = {
 	{
 		.base	= &page_offset_base,
-		.end	= &physmem_end,
+		.end	= &direct_map_physmem_end,
 	},
 	{
 		.base	= &vmalloc_base,
@@ -62,8 +62,12 @@ static __initdata struct kaslr_memory_region {
 	},
 };
 
-/* The end of the possible address space for physical memory */
-unsigned long physmem_end __ro_after_init;
+/*
+ * The end of the physical address space that can be mapped directly by the
+ * kernel. This starts out at (1<<MAX_PHYSMEM_BITS) - 1), but KASLR may reduce
+ * that in order to increase the available entropy for mapping other regions.
+ */
+unsigned long direct_map_physmem_end __ro_after_init;
 
 /* Get size in bytes used by the memory region */
 static inline unsigned long get_padding(struct kaslr_memory_region *region)
@@ -94,7 +98,7 @@ void __init kernel_randomize_memory(void)
 	BUILD_BUG_ON(vaddr_end > __START_KERNEL_map);
 
 	/* Preset the end of the possible address space for physical memory */
-	physmem_end = ((1ULL << MAX_PHYSMEM_BITS) - 1);
+	direct_map_physmem_end = ((1ULL << MAX_PHYSMEM_BITS) - 1);
 	if (!kaslr_memory_enabled())
 		return;
 
@@ -111,12 +115,12 @@ void __init kernel_randomize_memory(void)
 
 	/*
 	 * Adapt physical memory region size based on available memory,
-	 * except when CONFIG_PCI_P2PDMA is enabled. P2PDMA exposes the
-	 * device BAR space assuming the direct map space is large enough
-	 * for creating a ZONE_DEVICE mapping in the direct map corresponding
-	 * to the physical BAR address.
+	 * except when CONFIG_ZONE_DEVICE is enabled. ZONE_DEVICE wants to map
+	 * any physical address into the direct-map. KASLR wants to reliably
+	 * steal some physical address bits. Those design choices are in direct
+	 * conflict.
 	 */
-	if (!IS_ENABLED(CONFIG_PCI_P2PDMA) && (memory_tb < kaslr_regions[0].size_tb))
+	if (!IS_ENABLED(CONFIG_ZONE_DEVICE) && (memory_tb < kaslr_regions[0].size_tb))
 		kaslr_regions[0].size_tb = memory_tb;
 
 	/*
@@ -151,7 +155,7 @@ void __init kernel_randomize_memory(void)
 		vaddr += get_padding(&kaslr_regions[i]);
 		/*
 		 * KASLR trims the maximum possible size of the
-		 * direct-map. Update the physmem_end boundary.
+		 * direct-map. Update the direct_map_physmem_end boundary.
 		 * No rounding required as the region starts
 		 * PUD aligned and size is in units of TB.
 		 */

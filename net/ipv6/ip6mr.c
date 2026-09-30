@@ -2006,6 +2006,7 @@ static inline int ip6mr_forward2_finish(struct net *net, struct sock *sk, struct
 static int ip6mr_forward2(struct net *net, struct mr_table *mrt,
 			  struct sk_buff *skb, int vifi)
 {
+	struct net_device *indev = skb->dev;
 	struct ipv6hdr *ipv6h;
 	struct vif_device *vif = &mrt->vif_table[vifi];
 	struct net_device *dev;
@@ -2069,7 +2070,7 @@ static int ip6mr_forward2(struct net *net, struct mr_table *mrt,
 	IP6CB(skb)->flags |= IP6SKB_FORWARDED;
 
 	return NF_HOOK(NFPROTO_IPV6, NF_INET_FORWARD,
-		       net, NULL, skb, skb->dev, dev,
+		       net, NULL, skb, indev, skb->dev,
 		       ip6mr_forward2_finish);
 
 out_free:

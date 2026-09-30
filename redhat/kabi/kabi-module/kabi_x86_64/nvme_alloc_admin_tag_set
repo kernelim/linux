@@ -1,3 +1,3 @@
-#8-
-0x1b1cca9c	nvme_alloc_admin_tag_set	drivers/nvme/host/nvme-core	EXPORT_SYMBOL_GPL	
+#9-
+0x59969fa0	nvme_alloc_admin_tag_set	drivers/nvme/host/nvme-core	EXPORT_SYMBOL_GPL	
 

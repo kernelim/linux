@@ -145,7 +145,7 @@ DECLARE_EVENT_CLASS(event_ltl_monitor_id,
 	),
 
 	TP_fast_assign(
-		__assign_str(comm, comm);
+		__assign_str(comm, task->comm);
 		__entry->pid = task->pid;
 		__assign_str(states, states);
 		__assign_str(atoms, atoms);
@@ -168,7 +168,7 @@ DECLARE_EVENT_CLASS(error_ltl_monitor_id,
 	),
 
 	TP_fast_assign(
-		__assign_str(comm, comm);
+		__assign_str(comm, task->comm);
 		__entry->pid = task->pid;
 	),
 

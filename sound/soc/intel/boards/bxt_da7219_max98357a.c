@@ -57,7 +57,7 @@ static int platform_clock_control(struct snd_soc_dapm_widget *w,
 {
 	int ret = 0;
 	struct snd_soc_dapm_context *dapm = w->dapm;
-	struct snd_soc_card *card = dapm->card;
+	struct snd_soc_card *card = snd_soc_dapm_to_card(dapm);
 	struct snd_soc_dai *codec_dai;
 
 	codec_dai = snd_soc_card_get_codec_dai(card, BXT_DIALOG_CODEC_DAI);
@@ -237,7 +237,7 @@ static int broxton_da7219_codec_init(struct snd_soc_pcm_runtime *rtd)
 
 	snd_soc_component_set_jack(component, &broxton_headset, NULL);
 
-	snd_soc_dapm_ignore_suspend(&rtd->card->dapm, "SoC DMIC");
+	snd_soc_dapm_ignore_suspend(rtd->card->dapm, "SoC DMIC");
 
 	return ret;
 }
@@ -265,7 +265,7 @@ static int broxton_da7219_fe_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_dapm_context *dapm;
 	struct snd_soc_component *component = snd_soc_rtd_to_cpu(rtd, 0)->component;
 
-	dapm = snd_soc_component_get_dapm(component);
+	dapm = snd_soc_component_to_dapm(component);
 	snd_soc_dapm_ignore_suspend(dapm, "Reference Capture");
 
 	return 0;
@@ -630,10 +630,10 @@ static int bxt_card_late_probe(struct snd_soc_card *card)
 	char jack_name[NAME_SIZE];
 
 	if (soc_intel_is_glk())
-		snd_soc_dapm_add_routes(&card->dapm, gemini_map,
+		snd_soc_dapm_add_routes(card->dapm, gemini_map,
 					ARRAY_SIZE(gemini_map));
 	else
-		snd_soc_dapm_add_routes(&card->dapm, broxton_map,
+		snd_soc_dapm_add_routes(card->dapm, broxton_map,
 					ARRAY_SIZE(broxton_map));
 
 	if (list_empty(&ctx->hdmi_pcm_list))
@@ -664,7 +664,7 @@ static int bxt_card_late_probe(struct snd_soc_card *card)
 		i++;
 	}
 
-	return hdac_hdmi_jack_port_init(component, &card->dapm);
+	return hdac_hdmi_jack_port_init(component, card->dapm);
 }
 
 /* broxton audio machine driver for SPT + da7219 */

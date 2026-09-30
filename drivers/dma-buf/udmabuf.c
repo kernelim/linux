@@ -121,7 +121,7 @@ static int vmap_udmabuf(struct dma_buf *buf, struct iosys_map *map)
 
 	dma_resv_assert_held(buf->resv);
 
-	pages = kvmalloc_array(ubuf->pagecount, sizeof(*pages), GFP_KERNEL);
+	pages = kvmalloc_objs(*pages, ubuf->pagecount);
 	if (!pages)
 		return -ENOMEM;
 
@@ -156,7 +156,7 @@ static struct sg_table *get_sg_table(struct device *dev, struct dma_buf *buf,
 	unsigned int i = 0;
 	int ret;
 
-	sg = kzalloc(sizeof(*sg), GFP_KERNEL);
+	sg = kzalloc_obj(*sg);
 	if (!sg)
 		return ERR_PTR(-ENOMEM);
 

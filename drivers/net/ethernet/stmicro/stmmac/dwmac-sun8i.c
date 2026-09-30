@@ -30,10 +30,6 @@
  */
 
 /* struct emac_variant - Describe dwmac-sun8i hardware variant
- * @default_syscon_value:	The default value of the EMAC register in syscon
- *				This value is used for disabling properly EMAC
- *				and used as a good starting value in case of the
- *				boot process(uboot) leave some stuff.
  * @syscon_field		reg_field for the syscon's gmac register
  * @soc_has_internal_phy:	Does the MAC embed an internal PHY
  * @support_mii:		Does the MAC handle MII
@@ -47,7 +43,6 @@
  *				value of zero indicates this is not supported.
  */
 struct emac_variant {
-	u32 default_syscon_value;
 	const struct reg_field *syscon_field;
 	bool soc_has_internal_phy;
 	bool support_mii;
@@ -93,7 +88,6 @@ static const struct reg_field sun8i_ccu_reg_field = {
 };
 
 static const struct emac_variant emac_variant_h3 = {
-	.default_syscon_value = 0x58000,
 	.syscon_field = &sun8i_syscon_reg_field,
 	.soc_has_internal_phy = true,
 	.support_mii = true,
@@ -104,14 +98,12 @@ static const struct emac_variant emac_variant_h3 = {
 };
 
 static const struct emac_variant emac_variant_v3s = {
-	.default_syscon_value = 0x38000,
 	.syscon_field = &sun8i_syscon_reg_field,
 	.soc_has_internal_phy = true,
 	.support_mii = true
 };
 
 static const struct emac_variant emac_variant_a83t = {
-	.default_syscon_value = 0,
 	.syscon_field = &sun8i_syscon_reg_field,
 	.soc_has_internal_phy = false,
 	.support_mii = true,
@@ -121,7 +113,6 @@ static const struct emac_variant emac_variant_a83t = {
 };
 
 static const struct emac_variant emac_variant_r40 = {
-	.default_syscon_value = 0,
 	.syscon_field = &sun8i_ccu_reg_field,
 	.support_mii = true,
 	.support_rgmii = true,
@@ -129,7 +120,6 @@ static const struct emac_variant emac_variant_r40 = {
 };
 
 static const struct emac_variant emac_variant_a64 = {
-	.default_syscon_value = 0,
 	.syscon_field = &sun8i_syscon_reg_field,
 	.soc_has_internal_phy = false,
 	.support_mii = true,
@@ -140,7 +130,6 @@ static const struct emac_variant emac_variant_a64 = {
 };
 
 static const struct emac_variant emac_variant_h6 = {
-	.default_syscon_value = 0x50000,
 	.syscon_field = &sun8i_syscon_reg_field,
 	/* The "Internal PHY" of H6 is not on the die. It's on the
 	 * co-packaged AC200 chip instead.
@@ -298,7 +287,7 @@ static int sun8i_dwmac_dma_reset(void __iomem *ioaddr)
  * Called from stmmac via stmmac_dma_ops->init
  */
 static void sun8i_dwmac_dma_init(void __iomem *ioaddr,
-				 struct stmmac_dma_cfg *dma_cfg, int atds)
+				 struct stmmac_dma_cfg *dma_cfg)
 {
 	writel(EMAC_RX_INT | EMAC_TX_INT, ioaddr + EMAC_INT_EN);
 	writel(0x1FFFFFF, ioaddr + EMAC_INT_STA);
@@ -394,7 +383,7 @@ static void sun8i_dwmac_dma_start_tx(struct stmmac_priv *priv,
 	writel(v, ioaddr + EMAC_TX_CTL1);
 }
 
-static void sun8i_dwmac_enable_dma_transmission(void __iomem *ioaddr)
+static void sun8i_dwmac_enable_dma_transmission(void __iomem *ioaddr, u32 chan)
 {
 	u32 v;
 
@@ -581,16 +570,16 @@ static const struct stmmac_dma_ops sun8i_dwmac_dma_ops = {
 
 static int sun8i_dwmac_power_internal_phy(struct stmmac_priv *priv);
 
-static int sun8i_dwmac_init(struct platform_device *pdev, void *priv)
+static int sun8i_dwmac_init(struct device *dev, void *priv)
 {
-	struct net_device *ndev = platform_get_drvdata(pdev);
+	struct net_device *ndev = dev_get_drvdata(dev);
 	struct sunxi_priv_data *gmac = priv;
 	int ret;
 
 	if (gmac->regulator) {
 		ret = regulator_enable(gmac->regulator);
 		if (ret) {
-			dev_err(&pdev->dev, "Fail to enable regulator\n");
+			dev_err(dev, "Fail to enable regulator\n");
 			return ret;
 		}
 	}
@@ -773,8 +762,8 @@ static int sun8i_dwmac_reset(struct stmmac_priv *priv)
 static int get_ephy_nodes(struct stmmac_priv *priv)
 {
 	struct sunxi_priv_data *gmac = priv->plat->bsp_priv;
-	struct device_node *mdio_mux, *iphynode;
 	struct device_node *mdio_internal;
+	struct device_node *mdio_mux;
 	int ret;
 
 	mdio_mux = of_get_child_by_name(priv->device->of_node, "mdio-mux");
@@ -792,7 +781,7 @@ static int get_ephy_nodes(struct stmmac_priv *priv)
 	}
 
 	/* Seek for internal PHY */
-	for_each_child_of_node(mdio_internal, iphynode) {
+	for_each_child_of_node_scoped(mdio_internal, iphynode) {
 		gmac->ephy_clk = of_clk_get(iphynode, 0);
 		if (IS_ERR(gmac->ephy_clk))
 			continue;
@@ -800,14 +789,12 @@ static int get_ephy_nodes(struct stmmac_priv *priv)
 		if (IS_ERR(gmac->rst_ephy)) {
 			ret = PTR_ERR(gmac->rst_ephy);
 			if (ret == -EPROBE_DEFER) {
-				of_node_put(iphynode);
 				of_node_put(mdio_internal);
 				return ret;
 			}
 			continue;
 		}
 		dev_info(priv->device, "Found internal PHY node\n");
-		of_node_put(iphynode);
 		of_node_put(mdio_internal);
 		return 0;
 	}
@@ -934,25 +921,11 @@ static int sun8i_dwmac_set_syscon(struct device *dev,
 	struct sunxi_priv_data *gmac = plat->bsp_priv;
 	struct device_node *node = dev->of_node;
 	int ret;
-	u32 reg, val;
-
-	ret = regmap_field_read(gmac->regmap_field, &val);
-	if (ret) {
-		dev_err(dev, "Fail to read from regmap field.\n");
-		return ret;
-	}
-
-	reg = gmac->variant->default_syscon_value;
-	if (reg != val)
-		dev_warn(dev,
-			 "Current syscon value is not the default %x (expect %x)\n",
-			 val, reg);
+	u32 reg = 0, val;
 
 	if (gmac->variant->soc_has_internal_phy) {
 		if (of_property_read_bool(node, "allwinner,leds-active-low"))
 			reg |= H3_EPHY_LED_POL;
-		else
-			reg &= ~H3_EPHY_LED_POL;
 
 		/* Force EPHY xtal frequency to 24MHz. */
 		reg |= H3_EPHY_CLK_SEL;
@@ -965,12 +938,7 @@ static int sun8i_dwmac_set_syscon(struct device *dev,
 		/* of_mdio_parse_addr returns a valid (0 ~ 31) PHY
 		 * address. No need to mask it again.
 		 */
-		reg |= 1 << H3_EPHY_ADDR_SHIFT;
-	} else {
-		/* For SoCs without internal PHY the PHY selection bit should be
-		 * set to 0 (external PHY).
-		 */
-		reg &= ~H3_EPHY_SELECT;
+		reg |= ret << H3_EPHY_ADDR_SHIFT;
 	}
 
 	if (!of_property_read_u32(node, "allwinner,tx-delay-ps", &val)) {
@@ -981,8 +949,6 @@ static int sun8i_dwmac_set_syscon(struct device *dev,
 		val /= 100;
 		dev_dbg(dev, "set tx-delay to %x\n", val);
 		if (val <= gmac->variant->tx_delay_max) {
-			reg &= ~(gmac->variant->tx_delay_max <<
-				 SYSCON_ETXDC_SHIFT);
 			reg |= (val << SYSCON_ETXDC_SHIFT);
 		} else {
 			dev_err(dev, "Invalid TX clock delay: %d\n",
@@ -999,8 +965,6 @@ static int sun8i_dwmac_set_syscon(struct device *dev,
 		val /= 100;
 		dev_dbg(dev, "set rx-delay to %x\n", val);
 		if (val <= gmac->variant->rx_delay_max) {
-			reg &= ~(gmac->variant->rx_delay_max <<
-				 SYSCON_ERXDC_SHIFT);
 			reg |= (val << SYSCON_ERXDC_SHIFT);
 		} else {
 			dev_err(dev, "Invalid RX clock delay: %d\n",
@@ -1009,12 +973,7 @@ static int sun8i_dwmac_set_syscon(struct device *dev,
 		}
 	}
 
-	/* Clear interface mode bits */
-	reg &= ~(SYSCON_ETCS_MASK | SYSCON_EPIT);
-	if (gmac->variant->support_rmii)
-		reg &= ~SYSCON_RMII_EN;
-
-	switch (plat->mac_interface) {
+	switch (plat->phy_interface) {
 	case PHY_INTERFACE_MODE_MII:
 		/* default */
 		break;
@@ -1029,7 +988,7 @@ static int sun8i_dwmac_set_syscon(struct device *dev,
 		break;
 	default:
 		dev_err(dev, "Unsupported interface mode: %s",
-			phy_modes(plat->mac_interface));
+			phy_modes(plat->phy_interface));
 		return -EINVAL;
 	}
 
@@ -1040,12 +999,12 @@ static int sun8i_dwmac_set_syscon(struct device *dev,
 
 static void sun8i_dwmac_unset_syscon(struct sunxi_priv_data *gmac)
 {
-	u32 reg = gmac->variant->default_syscon_value;
-
-	regmap_field_write(gmac->regmap_field, reg);
+	if (gmac->variant->soc_has_internal_phy)
+		regmap_field_write(gmac->regmap_field,
+				   (H3_EPHY_SHUTDOWN | H3_EPHY_SELECT));
 }
 
-static void sun8i_dwmac_exit(struct platform_device *pdev, void *priv)
+static void sun8i_dwmac_exit(struct device *dev, void *priv)
 {
 	struct sunxi_priv_data *gmac = priv;
 
@@ -1156,11 +1115,10 @@ static int sun8i_dwmac_probe(struct platform_device *pdev)
 	struct stmmac_resources stmmac_res;
 	struct sunxi_priv_data *gmac;
 	struct device *dev = &pdev->dev;
-	phy_interface_t interface;
-	int ret;
 	struct stmmac_priv *priv;
 	struct net_device *ndev;
 	struct regmap *regmap;
+	int ret;
 
 	ret = stmmac_get_platform_resources(pdev, &stmmac_res);
 	if (ret)
@@ -1220,10 +1178,6 @@ static int sun8i_dwmac_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	ret = of_get_phy_mode(dev->of_node, &interface);
-	if (ret)
-		return -EINVAL;
-
 	plat_dat = devm_stmmac_probe_config_dt(pdev, stmmac_res.mac);
 	if (IS_ERR(plat_dat))
 		return PTR_ERR(plat_dat);
@@ -1231,7 +1185,6 @@ static int sun8i_dwmac_probe(struct platform_device *pdev)
 	/* platform data specifying hardware features and callbacks.
 	 * hardware features were copied from Allwinner drivers.
 	 */
-	plat_dat->mac_interface = interface;
 	plat_dat->rx_coe = STMMAC_RX_COE_TYPE2;
 	plat_dat->tx_coe = 1;
 	plat_dat->flags |= STMMAC_FLAG_HAS_SUN8I;
@@ -1246,13 +1199,9 @@ static int sun8i_dwmac_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	ret = sun8i_dwmac_init(pdev, plat_dat->bsp_priv);
+	ret = stmmac_pltfr_probe(pdev, plat_dat, &stmmac_res);
 	if (ret)
 		goto dwmac_syscon;
-
-	ret = stmmac_dvr_probe(&pdev->dev, plat_dat, &stmmac_res);
-	if (ret)
-		goto dwmac_exit;
 
 	ndev = dev_get_drvdata(&pdev->dev);
 	priv = netdev_priv(ndev);
@@ -1290,9 +1239,7 @@ dwmac_mux:
 	clk_put(gmac->ephy_clk);
 dwmac_remove:
 	pm_runtime_put_noidle(&pdev->dev);
-	stmmac_dvr_remove(&pdev->dev);
-dwmac_exit:
-	sun8i_dwmac_exit(pdev, gmac);
+	stmmac_pltfr_remove(pdev);
 dwmac_syscon:
 	sun8i_dwmac_unset_syscon(gmac);
 
@@ -1322,7 +1269,7 @@ static void sun8i_dwmac_shutdown(struct platform_device *pdev)
 	struct stmmac_priv *priv = netdev_priv(ndev);
 	struct sunxi_priv_data *gmac = priv->plat->bsp_priv;
 
-	sun8i_dwmac_exit(pdev, gmac);
+	sun8i_dwmac_exit(&pdev->dev, gmac);
 }
 
 static const struct of_device_id sun8i_dwmac_match[] = {

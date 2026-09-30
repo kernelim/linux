@@ -1,3 +1,3 @@
-#8-
-0x35b378f4	mlxsw_pci_driver_register	drivers/net/ethernet/mellanox/mlxsw/mlxsw_pci	EXPORT_SYMBOL	
+#9-
+0x41c204d9	mlxsw_pci_driver_register	drivers/net/ethernet/mellanox/mlxsw/mlxsw_pci	EXPORT_SYMBOL	
 

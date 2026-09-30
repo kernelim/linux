@@ -1,3 +1,3 @@
-#8-
-0x9be7fefa	pci_read_config_byte	vmlinux	EXPORT_SYMBOL	
+#9-
+0xcfee5515	pci_read_config_byte	vmlinux	EXPORT_SYMBOL	
 

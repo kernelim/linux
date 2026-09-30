@@ -455,7 +455,7 @@ xlog_recover_validate_buf_type(
  * given buffer.  The bitmap in the buf log format structure indicates
  * where to place the logged data.
  */
-STATIC int
+STATIC void
 xlog_recover_do_reg_buffer(
 	struct xfs_mount		*mp,
 	struct xlog_recover_item	*item,
@@ -483,24 +483,8 @@ xlog_recover_do_reg_buffer(
 		ASSERT(nbits > 0);
 		ASSERT(item->ri_buf[i].i_addr != NULL);
 		ASSERT(item->ri_buf[i].i_len % XFS_BLF_CHUNK == 0);
-		/*
-		 * The bitmap is only trustworthy to the extent that it
-		 * describes a region that actually fits inside the buffer we
-		 * read in based on the (attacker-controlled) blf_len.  Do not
-		 * rely on an ASSERT() for this -- it compiles away entirely on
-		 * non-DEBUG kernels, which is exactly where this matters, so
-		 * validate it for real and abort recovery of this buffer rather
-		 * than copying past the end of it.
-		 */
-		if (XFS_IS_CORRUPT(mp, BBTOB(bp->b_length) <
-				((uint)bit << XFS_BLF_SHIFT) +
-				(nbits << XFS_BLF_SHIFT))) {
-			xfs_alert(mp,
-	"Bad buffer log item dirty bitmap (bit %d, nbits %d) for %d-byte buffer at daddr 0x%llx.",
-				bit, nbits, BBTOB(bp->b_length),
-				xfs_buf_daddr(bp));
-			return -EFSCORRUPTED;
-		}
+		ASSERT(BBTOB(bp->b_length) >=
+		       ((uint)bit << XFS_BLF_SHIFT) + (nbits << XFS_BLF_SHIFT));
 
 		/*
 		 * The dirty regions logged in the buffer, even though
@@ -554,7 +538,6 @@ xlog_recover_do_reg_buffer(
 	ASSERT(i == item->ri_total);
 
 	xlog_recover_validate_buf_type(mp, bp, buf_f, current_lsn);
-	return 0;
 }
 
 /*
@@ -563,10 +546,10 @@ xlog_recover_do_reg_buffer(
  * (ie. USR or GRP), then just toss this buffer away; don't recover it.
  * Else, treat it as a regular buffer and do recovery.
  *
- * Return 0 if the buffer was not recovered (tossed), 1 if it was recovered and
- * needs writing, or a negative errno if recovery of the buffer failed.
+ * Return false if the buffer was tossed and true if we recovered the buffer to
+ * indicate to the caller if the buffer needs writing.
  */
-STATIC int
+STATIC bool
 xlog_recover_do_dquot_buffer(
 	struct xfs_mount		*mp,
 	struct xlog			*log,
@@ -575,7 +558,6 @@ xlog_recover_do_dquot_buffer(
 	struct xfs_buf_log_format	*buf_f)
 {
 	uint			type;
-	int			error;
 
 	trace_xfs_log_recover_buf_dquot_buf(log, buf_f);
 
@@ -583,7 +565,7 @@ xlog_recover_do_dquot_buffer(
 	 * Filesystems are required to send in quota flags at mount time.
 	 */
 	if (!mp->m_qflags)
-		return 0;
+		return false;
 
 	type = 0;
 	if (buf_f->blf_flags & XFS_BLF_UDQUOT_BUF)
@@ -596,12 +578,10 @@ xlog_recover_do_dquot_buffer(
 	 * This type of quotas was turned off, so ignore this buffer
 	 */
 	if (log->l_quotaoffs_flag & type)
-		return 0;
+		return false;
 
-	error = xlog_recover_do_reg_buffer(mp, item, bp, buf_f, NULLCOMMITLSN);
-	if (error)
-		return error;
-	return 1;
+	xlog_recover_do_reg_buffer(mp, item, bp, buf_f, NULLCOMMITLSN);
+	return true;
 }
 
 /*
@@ -738,9 +718,7 @@ xlog_recover_do_primary_sb_buffer(
 	xfs_rgnumber_t			orig_rgcount = mp->m_sb.sb_rgcount;
 	int				error;
 
-	error = xlog_recover_do_reg_buffer(mp, item, bp, buf_f, current_lsn);
-	if (error)
-		return error;
+	xlog_recover_do_reg_buffer(mp, item, bp, buf_f, current_lsn);
 
 	if (orig_agcount == 0) {
 		xfs_alert(mp, "Trying to grow file system without AGs");
@@ -1091,11 +1069,11 @@ xlog_recover_buf_commit_pass2(
 			goto out_release;
 	} else if (buf_f->blf_flags &
 		  (XFS_BLF_UDQUOT_BUF|XFS_BLF_PDQUOT_BUF|XFS_BLF_GDQUOT_BUF)) {
-		error = xlog_recover_do_dquot_buffer(mp, log, item, bp, buf_f);
-		if (error <= 0)
+		bool	dirty;
+
+		dirty = xlog_recover_do_dquot_buffer(mp, log, item, bp, buf_f);
+		if (!dirty)
 			goto out_release;
-		/* write dirty buffer */
-		error = 0;
 	} else if ((xfs_blft_from_flags(buf_f) & XFS_BLFT_SB_BUF) &&
 			xfs_buf_daddr(bp) == 0) {
 		error = xlog_recover_do_primary_sb_buffer(mp, item, bp, buf_f,
@@ -1115,10 +1093,7 @@ xlog_recover_buf_commit_pass2(
 			xfs_buf_relse(rtsb_bp);
 		}
 	} else {
-		error = xlog_recover_do_reg_buffer(mp, item, bp, buf_f,
-						   current_lsn);
-		if (error)
-			goto out_release;
+		xlog_recover_do_reg_buffer(mp, item, bp, buf_f, current_lsn);
 	}
 
 	/*

@@ -630,8 +630,7 @@ sources-rh: $(TARBALL) generate-testpatch-tmp setup-source dist-configs-check
 		kabi/check-kabi \
 		configs/$(PACKAGE_NAME)-*.config \
 		configs/partial*.config \
-		scripts/gating/gating.yaml \
-		scripts/gating/plans.fmf \
+		gating.yaml \
 		update_scripts.sh \
 		kvm_stat.logrotate \
 		mod-denylist.sh \

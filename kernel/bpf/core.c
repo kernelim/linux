@@ -20,7 +20,6 @@
 #include <uapi/linux/btf.h>
 #include <linux/filter.h>
 #include <linux/skbuff.h>
-#include <linux/static_call.h>
 #include <linux/vmalloc.h>
 #include <linux/random.h>
 #include <linux/moduleloader.h>
@@ -744,7 +743,7 @@ static struct bpf_ksym *bpf_ksym_find(unsigned long addr)
 }
 
 const char *bpf_address_lookup(unsigned long addr, unsigned long *size,
-		       unsigned long *off, char *sym)
+				 unsigned long *off, char *sym)
 {
 	struct bpf_ksym *ksym;
 	char *ret = NULL;
@@ -895,15 +894,6 @@ void bpf_jit_fill_hole_with_zero(void *area, unsigned int size)
 	memset(area, 0, size);
 }
 
-DEFINE_STATIC_CALL_NULL(bpf_arch_pred_flush, bpf_arch_pred_flush);
-
-/*
- * Enabled once bpf_arch_pred_flush points at a real flush routine. Lets the
- * pack allocator test "is a predictor flush wired up at all" with a cheap
- * static branch instead of repeatedly querying the static call target.
- */
-DEFINE_STATIC_KEY_FALSE(bpf_pred_flush_enabled);
-
 #define BPF_PROG_SIZE_TO_NBITS(size)	(round_up(size, BPF_PROG_CHUNK_SIZE) / BPF_PROG_CHUNK_SIZE)
 
 static DEFINE_MUTEX(pack_mutex);
@@ -954,7 +944,7 @@ out:
 	return NULL;
 }
 
-void *bpf_prog_pack_alloc(u32 size, bpf_jit_fill_hole_t bpf_fill_ill_insns, bool was_classic)
+void *bpf_prog_pack_alloc(u32 size, bpf_jit_fill_hole_t bpf_fill_ill_insns)
 {
 	unsigned int nbits = BPF_PROG_SIZE_TO_NBITS(size);
 	struct bpf_prog_pack *pack;
@@ -963,14 +953,6 @@ void *bpf_prog_pack_alloc(u32 size, bpf_jit_fill_hole_t bpf_fill_ill_insns, bool
 
 	mutex_lock(&pack_mutex);
 	if (size > BPF_PROG_PACK_SIZE) {
-		/*
-		 * Allocations larger than a pack get their own pages, and
-		 * predictors are not flushed for such allocation. This is only
-		 * safe because cBPF programs (the unprivileged attack surface)
-		 * are bounded well below a pack size.
-		 */
-		if (was_classic && static_branch_unlikely(&bpf_pred_flush_enabled))
-			pr_warn_once("BPF: Predictors not flushed for allocations greater than BPF_PROG_PACK_SIZE\n");
 		size = round_up(size, PAGE_SIZE);
 		ptr = bpf_jit_alloc_exec(size);
 		if (ptr) {
@@ -1001,9 +983,6 @@ void *bpf_prog_pack_alloc(u32 size, bpf_jit_fill_hole_t bpf_fill_ill_insns, bool
 	pos = 0;
 
 found_free_area:
-	/* Flush only for cBPF as it may contain a crafted gadget */
-	if (static_branch_unlikely(&bpf_pred_flush_enabled) && was_classic)
-		static_call_cond(bpf_arch_pred_flush)();
 	bitmap_set(pack->bitmap, pos, nbits);
 	ptr = (void *)(pack->ptr) + (pos << BPF_PROG_CHUNK_SHIFT);
 
@@ -1163,8 +1142,7 @@ bpf_jit_binary_pack_alloc(unsigned int proglen, u8 **image_ptr,
 			  unsigned int alignment,
 			  struct bpf_binary_header **rw_header,
 			  u8 **rw_image,
-			  bpf_jit_fill_hole_t bpf_fill_ill_insns,
-			  bool was_classic)
+			  bpf_jit_fill_hole_t bpf_fill_ill_insns)
 {
 	struct bpf_binary_header *ro_header;
 	u32 size, hole, start;
@@ -1177,7 +1155,7 @@ bpf_jit_binary_pack_alloc(unsigned int proglen, u8 **image_ptr,
 
 	if (bpf_jit_charge_modmem(size))
 		return NULL;
-	ro_header = bpf_prog_pack_alloc(size, bpf_fill_ill_insns, was_classic);
+	ro_header = bpf_prog_pack_alloc(size, bpf_fill_ill_insns);
 	if (!ro_header) {
 		bpf_jit_uncharge_modmem(size);
 		return NULL;

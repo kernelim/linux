@@ -230,17 +230,10 @@ static long papr_phy_attest_create_handle(struct papr_phy_attest_io_block __user
 		return -ENOMEM;
 
 	if (copy_from_user(&params->cmd, ulc,
-			sizeof(struct papr_phy_attest_io_block))) {
-		kfree(params);
+			sizeof(struct papr_phy_attest_io_block)))
 		return -EFAULT;
-	}
 
 	params->cmd_len = be32_to_cpu(params->cmd.length);
-	if (params->cmd_len == 0 || params->cmd_len > sizeof(params->cmd)) {
-		kfree(params);
-		return -EINVAL;
-	}
-
 	seq = (struct papr_rtas_sequence) {
 		.begin = phy_attest_sequence_begin,
 		.end = phy_attest_sequence_end,
@@ -252,9 +245,6 @@ static long papr_phy_attest_create_handle(struct papr_phy_attest_io_block __user
 	fd = papr_rtas_setup_file_interface(&seq,
 			&papr_phy_attest_handle_ops,
 			"[papr-physical-attestation]");
-
-	if (fd < 0)
-		kfree(params);
 
 	return fd;
 }

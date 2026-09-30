@@ -2,7 +2,7 @@
 //
 // TAS2781 HDA I2C driver
 //
-// Copyright 2023 - 2025 Texas Instruments, Inc.
+// Copyright 2023 - 2026 Texas Instruments, Inc.
 //
 // Author: Shenghao Ding <shenghao-ding@ti.com>
 // Current maintainer: Baojun Xu <baojun.xu@ti.com>
@@ -392,19 +392,6 @@ static int tas2563_save_calibration(struct tas2781_hda *h)
 	r->pow_reg = TAS2563_CAL_POWER;
 	r->tlimit_reg = TAS2563_CAL_TLIM;
 
-	/*
-	 * TAS2781_FMWLIB supports two solutions of calibrated data. One is
-	 * from the driver itself: driver reads the calibrated files directly
-	 * during probe; The other from user space: during init of audio hal,
-	 * the audio hal will pass the calibrated data via kcontrol interface.
-	 * Driver will store this data in "struct calidata" for use. For hda
-	 * device, calibrated data are usunally saved into UEFI. So Hda side
-	 * codec driver use the mixture of these two solutions, driver reads
-	 * the data from UEFI, then store this data in "struct calidata" for
-	 * use.
-	 */
-	p->is_user_space_calidata = true;
-
 	return 0;
 }
 
@@ -568,6 +555,9 @@ static int tas2781_hda_bind(struct device *dev, struct device *master,
 	case 0x1028:
 		tas_hda->catlog_id = DELL;
 		break;
+	case 0x103C:
+		tas_hda->catlog_id = HP;
+		break;
 	default:
 		tas_hda->catlog_id = LENOVO;
 		break;
@@ -601,6 +591,9 @@ static void tas2781_hda_unbind(struct device *dev,
 		memset(comp->name, 0, sizeof(comp->name));
 		comp->playback_hook = NULL;
 	}
+
+	request_firmware_nowait_cancel(tas_hda->priv->dev, tas_hda->priv,
+				       tasdev_fw_ready);
 
 	tas2781_hda_remove_controls(tas_hda);
 
@@ -646,6 +639,7 @@ static int tas2781_hda_i2c_probe(struct i2c_client *clt)
 		 */
 		device_name = "TIAS2781";
 		hda_priv->hda_chip_id = HDA_TAS2781;
+		tas_hda->priv->chip_id = TAS2781;
 		hda_priv->save_calibration = tas2781_save_calibration;
 		tas_hda->priv->global_addr = TAS2781_GLOBAL_ADDR;
 	} else if (strstarts(dev_name(&clt->dev), "i2c-TXNW2770")) {
@@ -659,6 +653,7 @@ static int tas2781_hda_i2c_probe(struct i2c_client *clt)
 			     "i2c-TXNW2781:00-tas2781-hda.0")) {
 		device_name = "TXNW2781";
 		hda_priv->hda_chip_id = HDA_TAS2781;
+		tas_hda->priv->chip_id = TAS2781;
 		hda_priv->save_calibration = tas2781_save_calibration;
 		tas_hda->priv->global_addr = TAS2781_GLOBAL_ADDR;
 	} else if (strstr(dev_name(&clt->dev), "INT8866")) {

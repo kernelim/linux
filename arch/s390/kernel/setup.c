@@ -156,7 +156,6 @@ unsigned int __bootdata_preserved(zlib_dfltcc_support);
 EXPORT_SYMBOL(zlib_dfltcc_support);
 u64 __bootdata_preserved(stfle_fac_list[16]);
 EXPORT_SYMBOL(stfle_fac_list);
-u64 alt_stfle_fac_list[16];
 struct oldmem_data __bootdata_preserved(oldmem_data);
 
 unsigned long VMALLOC_START;
@@ -407,6 +406,7 @@ static void __init setup_lowcore(void)
 		panic("%s: Failed to allocate %zu bytes align=%zx\n",
 		      __func__, sizeof(*lc), sizeof(*lc));
 
+	lc->pcpu = (unsigned long)per_cpu_ptr(&pcpu_devices, 0);
 	lc->restart_psw.mask = PSW_KERNEL_BITS & ~PSW_MASK_DAT;
 	lc->restart_psw.addr = __pa(restart_int_handler);
 	lc->external_new_psw.mask = PSW_KERNEL_BITS;
@@ -906,6 +906,9 @@ void __init setup_arch(char **cmdline_p)
 	else
 		pr_info("Linux is running as a guest in 64-bit mode\n");
 
+	if (have_relocated_lowcore())
+		pr_info("Lowcore relocated to 0x%px\n", get_lowcore());
+
 	log_component_list();
 
 	/* Initialize the lockdown LSM */
@@ -960,7 +963,7 @@ void __init setup_arch(char **cmdline_p)
 	setup_uv();
 	dma_contiguous_reserve(ident_map_size);
 	vmcp_cma_reserve();
-	if (MACHINE_HAS_EDAT2)
+	if (cpu_has_edat2())
 		hugetlb_cma_reserve(PUD_SHIFT - PAGE_SHIFT);
 
 	reserve_crashkernel();
@@ -984,6 +987,7 @@ void __init setup_arch(char **cmdline_p)
 	if (test_facility(193))
 		static_branch_enable(&cpu_has_bear);
 
+	setup_protection_map();
 	/*
 	 * Create kernel page tables.
 	 */
@@ -1010,4 +1014,9 @@ void __init setup_arch(char **cmdline_p)
 
 	/* Add system specific data to the random pool */
 	setup_randomness();
+}
+
+void __init arch_cpu_finalize_init(void)
+{
+	sclp_init();
 }

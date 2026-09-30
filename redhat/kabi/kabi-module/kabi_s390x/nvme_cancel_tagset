@@ -1,3 +1,3 @@
-#8-
-0x8083c6f6	nvme_cancel_tagset	drivers/nvme/host/nvme-core	EXPORT_SYMBOL_GPL	
+#9-
+0x9d430de6	nvme_cancel_tagset	drivers/nvme/host/nvme-core	EXPORT_SYMBOL_GPL	
 

@@ -1,3 +1,3 @@
-#8-
-0xfbe6898a	nvme_change_ctrl_state	drivers/nvme/host/nvme-core	EXPORT_SYMBOL_GPL	
+#9-
+0x413ebce7	nvme_change_ctrl_state	drivers/nvme/host/nvme-core	EXPORT_SYMBOL_GPL	
 

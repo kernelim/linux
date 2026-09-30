@@ -4,6 +4,7 @@
  *    Author(s): Martin Schwidefsky <schwidefsky@de.ibm.com>
  */
 
+#include <linux/cpufeature.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -94,7 +95,7 @@ static inline pte_t ptep_flush_direct(struct mm_struct *mm,
 	if (unlikely(pte_val(old) & _PAGE_INVALID))
 		return old;
 	atomic_inc(&mm->context.flush_count);
-	if (MACHINE_HAS_TLB_LC &&
+	if (cpu_has_tlb_lc() &&
 	    cpumask_equal(mm_cpumask(mm), cpumask_of(smp_processor_id())))
 		ptep_ipte_local(mm, addr, ptep, nodat);
 	else
@@ -360,8 +361,6 @@ void ptep_modify_prot_commit(struct vm_area_struct *vma, unsigned long addr,
 	pgste_t pgste;
 	struct mm_struct *mm = vma->vm_mm;
 
-	if (!MACHINE_HAS_NX)
-		pte = clear_pte_bit(pte, __pgprot(_PAGE_NOEXEC));
 	if (mm_has_pgste(mm)) {
 		pgste = pgste_get(ptep);
 		pgste_set_key(ptep, pgste, pte, mm);
@@ -393,7 +392,7 @@ static inline void pmdp_idte_global(struct mm_struct *mm,
 			    mm->context.asce, IDTE_GLOBAL);
 		if (mm_has_pgste(mm) && mm->context.allow_gmap_hpage_1m)
 			gmap_pmdp_idte_global(mm, addr);
-	} else if (MACHINE_HAS_IDTE) {
+	} else if (cpu_has_idte()) {
 		__pmdp_idte(addr, pmdp, 0, 0, IDTE_GLOBAL);
 		if (mm_has_pgste(mm) && mm->context.allow_gmap_hpage_1m)
 			gmap_pmdp_idte_global(mm, addr);
@@ -413,7 +412,7 @@ static inline pmd_t pmdp_flush_direct(struct mm_struct *mm,
 	if (pmd_val(old) & _SEGMENT_ENTRY_INVALID)
 		return old;
 	atomic_inc(&mm->context.flush_count);
-	if (MACHINE_HAS_TLB_LC &&
+	if (cpu_has_tlb_lc() &&
 	    cpumask_equal(mm_cpumask(mm), cpumask_of(smp_processor_id())))
 		pmdp_idte_local(mm, addr, pmdp);
 	else
@@ -520,7 +519,7 @@ static inline void pudp_idte_global(struct mm_struct *mm,
 	if (MACHINE_HAS_TLB_GUEST)
 		__pudp_idte(addr, pudp, IDTE_NODAT | IDTE_GUEST_ASCE,
 			    mm->context.asce, IDTE_GLOBAL);
-	else if (MACHINE_HAS_IDTE)
+	else if (cpu_has_idte())
 		__pudp_idte(addr, pudp, 0, 0, IDTE_GLOBAL);
 	else
 		/*
@@ -539,7 +538,7 @@ static inline pud_t pudp_flush_direct(struct mm_struct *mm,
 	if (pud_val(old) & _REGION_ENTRY_INVALID)
 		return old;
 	atomic_inc(&mm->context.flush_count);
-	if (MACHINE_HAS_TLB_LC &&
+	if (cpu_has_tlb_lc() &&
 	    cpumask_equal(mm_cpumask(mm), cpumask_of(smp_processor_id())))
 		pudp_idte_local(mm, addr, pudp);
 	else

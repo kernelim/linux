@@ -170,7 +170,7 @@ static irqreturn_t rotate_irq(int irq, void *data)
 
 static inline struct rotate_ctx *rotate_file2ctx(struct file *file)
 {
-	return container_of(file->private_data, struct rotate_ctx, fh);
+	return container_of(file_to_v4l2_fh(file), struct rotate_ctx, fh);
 }
 
 static void rotate_prepare_format(struct v4l2_pix_format *pix_fmt)
@@ -661,7 +661,6 @@ static int rotate_open(struct file *file)
 	rotate_set_cap_format(ctx, &ctx->dst_fmt, ctx->rotate);
 
 	v4l2_fh_init(&ctx->fh, video_devdata(file));
-	file->private_data = &ctx->fh;
 	ctx->dev = dev;
 
 	ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(dev->m2m_dev, ctx,
@@ -671,7 +670,7 @@ static int rotate_open(struct file *file)
 		goto err_free;
 	}
 
-	v4l2_fh_add(&ctx->fh);
+	v4l2_fh_add(&ctx->fh, file);
 
 	ret = rotate_setup_ctrls(ctx);
 	if (ret)
@@ -699,7 +698,7 @@ static int rotate_release(struct file *file)
 	mutex_lock(&dev->dev_mutex);
 
 	v4l2_ctrl_handler_free(&ctx->ctrl_handler);
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
 

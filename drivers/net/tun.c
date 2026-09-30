@@ -1164,16 +1164,11 @@ static netdev_features_t tun_net_fix_features(struct net_device *dev,
 static void tun_set_headroom(struct net_device *dev, int new_hr)
 {
 	struct tun_struct *tun = netdev_priv(dev);
-	size_t max_headroom;
 
-	max_headroom = min_t(size_t, SKB_MAX_HEAD(0), U16_MAX - 1);
+	if (new_hr < NET_SKB_PAD)
+		new_hr = NET_SKB_PAD;
 
-	if ((tun->flags & TUN_TYPE_MASK) == IFF_TAP)
-		max_headroom -= ETH_HLEN + NET_IP_ALIGN;
-	else
-		max_headroom -= 1;
-
-	tun->align = clamp_t(int, new_hr, NET_SKB_PAD, max_headroom);
+	tun->align = new_hr;
 }
 
 static void
@@ -1853,17 +1848,16 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 		}
 	}
 
-	skb->dev = tun->dev;
+	if (virtio_net_hdr_to_skb(skb, &gso, tun_is_little_endian(tun))) {
+		atomic_long_inc(&tun->rx_frame_errors);
+		err = -EINVAL;
+		goto free_skb;
+	}
+
 	switch (tun->flags & TUN_TYPE_MASK) {
 	case IFF_TUN:
 		if (tun->flags & IFF_NO_PI) {
-			u8 ip_version;
-
-			if (!pskb_may_pull(skb, 1)) {
-				err = -EINVAL;
-				goto drop;
-			}
-			ip_version = skb->data[0] >> 4;
+			u8 ip_version = skb->len ? (skb->data[0] >> 4) : 0;
 
 			switch (ip_version) {
 			case 4:
@@ -1878,27 +1872,19 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 			}
 		}
 
-		skb_reset_network_header(skb);
+		skb_reset_mac_header(skb);
 		skb->protocol = pi.proto;
+		skb->dev = tun->dev;
 		break;
 	case IFF_TAP:
-		if (!pskb_may_pull(skb, ETH_HLEN)) {
+		if (frags && !pskb_may_pull(skb, ETH_HLEN)) {
 			err = -ENOMEM;
 			drop_reason = SKB_DROP_REASON_HDR_TRUNC;
 			goto drop;
 		}
-		skb_set_network_header(skb, ETH_HLEN);
+		skb->protocol = eth_type_trans(skb, tun->dev);
 		break;
 	}
-
-	if (virtio_net_hdr_to_skb(skb, &gso, tun_is_little_endian(tun))) {
-		atomic_long_inc(&tun->rx_frame_errors);
-		err = -EINVAL;
-		goto free_skb;
-	}
-
-	if ((tun->flags & TUN_TYPE_MASK) == IFF_TAP)
-		skb->protocol = eth_type_trans(skb, tun->dev);
 
 	/* copy skb_ubuf_info for callback when skb has no error */
 	if (zerocopy) {
@@ -2492,8 +2478,7 @@ build:
 
 	skb_reserve(skb, xdp->data - xdp->data_hard_start);
 	skb_put(skb, xdp->data_end - xdp->data);
-	skb->dev = tun->dev;
-	skb_set_network_header(skb, ETH_HLEN);
+
 	if (virtio_net_hdr_to_skb(skb, gso, tun_is_little_endian(tun))) {
 		atomic_long_inc(&tun->rx_frame_errors);
 		kfree_skb(skb);

@@ -1,3 +1,3 @@
-#8-
-0xbe8ecbb1	xprt_complete_rqst	net/sunrpc/sunrpc	EXPORT_SYMBOL_GPL	
+#9-
+0x2316ac0b	xprt_complete_rqst	net/sunrpc/sunrpc	EXPORT_SYMBOL_GPL	
 

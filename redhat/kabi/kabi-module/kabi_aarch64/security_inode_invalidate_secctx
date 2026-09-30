@@ -1,3 +1,3 @@
-#8-
-0x0d55257c	security_inode_invalidate_secctx	vmlinux	EXPORT_SYMBOL	
+#9-
+0x02d48275	security_inode_invalidate_secctx	vmlinux	EXPORT_SYMBOL	
 

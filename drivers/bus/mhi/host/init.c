@@ -1265,7 +1265,7 @@ struct mhi_device *mhi_alloc_device(struct mhi_controller *mhi_cntrl)
 	return mhi_dev;
 }
 
-static int mhi_driver_probe(struct device *dev)
+static int mhi_probe(struct device *dev)
 {
 	struct mhi_device *mhi_dev = to_mhi_device(dev);
 	struct mhi_controller *mhi_cntrl = mhi_dev->mhi_cntrl;
@@ -1341,7 +1341,7 @@ exit_probe:
 	return ret;
 }
 
-static int mhi_driver_remove(struct device *dev)
+static void mhi_remove(struct device *dev)
 {
 	struct mhi_device *mhi_dev = to_mhi_device(dev);
 	struct mhi_driver *mhi_drv = to_mhi_driver(dev->driver);
@@ -1355,7 +1355,7 @@ static int mhi_driver_remove(struct device *dev)
 
 	/* Skip if it is a controller device */
 	if (mhi_dev->dev_type == MHI_DEVICE_CONTROLLER)
-		return 0;
+		return;
 
 	/* Reset both channels */
 	for (dir = 0; dir < 2; dir++) {
@@ -1407,8 +1407,6 @@ static int mhi_driver_remove(struct device *dev)
 
 	while (mhi_dev->dev_wake)
 		mhi_device_put(mhi_dev);
-
-	return 0;
 }
 
 int __mhi_driver_register(struct mhi_driver *mhi_drv, struct module *owner)
@@ -1420,8 +1418,6 @@ int __mhi_driver_register(struct mhi_driver *mhi_drv, struct module *owner)
 
 	driver->bus = &mhi_bus_type;
 	driver->owner = owner;
-	driver->probe = mhi_driver_probe;
-	driver->remove = mhi_driver_remove;
 
 	return driver_register(driver);
 }
@@ -1468,6 +1464,8 @@ const struct bus_type mhi_bus_type = {
 	.dev_name = "mhi",
 	.match = mhi_match,
 	.uevent = mhi_uevent,
+	.probe = mhi_probe,
+	.remove = mhi_remove,
 	.dev_groups = mhi_dev_groups,
 };
 

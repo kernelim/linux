@@ -1342,7 +1342,7 @@ overlay_rop3_store(struct device *dev, struct device_attribute *attr,
 	return count;
 }
 
-static const struct device_attribute overlay_sysfs_attrs[] = {
+static const struct device_attribute overlay_sysfs_attrs[] __maybe_unused = {
 	__ATTR(ovl_alpha, S_IRUGO|S_IWUSR,
 	       overlay_alpha_show, overlay_alpha_store),
 	__ATTR(ovl_mode, S_IRUGO|S_IWUSR,
@@ -1352,6 +1352,10 @@ static const struct device_attribute overlay_sysfs_attrs[] = {
 	__ATTR(ovl_rop3, S_IRUGO|S_IWUSR,
 	       overlay_rop3_show, overlay_rop3_store),
 };
+
+#ifdef CONFIG_FB_DEVICE
+ATTRIBUTE_GROUPS(overlay_sysfs);
+#endif
 
 static const struct fb_fix_screeninfo sh_mobile_lcdc_overlay_fix  = {
 	.id =		"SH Mobile LCDC",

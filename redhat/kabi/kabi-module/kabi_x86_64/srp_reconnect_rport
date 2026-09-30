@@ -1,3 +1,3 @@
-#8-
-0xf6a78e44	srp_reconnect_rport	drivers/scsi/scsi_transport_srp	EXPORT_SYMBOL	
+#9-
+0xe19d9bc9	srp_reconnect_rport	drivers/scsi/scsi_transport_srp	EXPORT_SYMBOL	
 

@@ -60,7 +60,7 @@ static int adf_service_string_to_mask(struct adf_accel_dev *accel_dev, const cha
 	if (len > ADF_CFG_MAX_VAL_LEN_IN_BYTES - 1)
 		return -EINVAL;
 
-	strscpy(services, buf, ADF_CFG_MAX_VAL_LEN_IN_BYTES);
+	strscpy(services, buf);
 	substr = services;
 
 	while ((token = strsep(&substr, ADF_SERVICES_DELIMITER))) {
@@ -94,10 +94,9 @@ static int adf_service_mask_to_string(unsigned long mask, char *buf, size_t len)
 	for_each_set_bit(bit, &mask, SVC_COUNT) {
 		if (offset)
 			offset += scnprintf(buf + offset, len - offset,
-					    ADF_SERVICES_DELIMITER);
-
-		offset += scnprintf(buf + offset, len - offset, "%s",
-				    adf_cfg_services[bit]);
+				ADF_SERVICES_DELIMITER "%s", adf_cfg_services[bit]);
+		else
+			offset += scnprintf(buf, len, "%s", adf_cfg_services[bit]);
 	}
 
 	return 0;

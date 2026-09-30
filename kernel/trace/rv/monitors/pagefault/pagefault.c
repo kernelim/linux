@@ -26,7 +26,7 @@ static void ltl_atoms_fetch(struct task_struct *task, struct ltl_monitor *mon)
 	 * real-task, therefore it should also obey the monitor's rule,
 	 * otherwise the "actual" real-task may be delayed.
 	 */
-	ltl_atom_set(mon, LTL_RT, rt_or_dl_task(task));
+	ltl_atom_set(mon, LTL_RT, rt_task(task) || dl_task(task));
 }
 
 static void ltl_atoms_init(struct task_struct *task, struct ltl_monitor *mon, bool task_creation)

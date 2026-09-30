@@ -1348,8 +1348,8 @@ static int avs_component_mmap(struct snd_soc_component *component,
 
 #define MAX_PREALLOC_SIZE	(32 * 1024 * 1024)
 
-static int avs_component_construct(struct snd_soc_component *component,
-				   struct snd_soc_pcm_runtime *rtd)
+static int avs_component_new(struct snd_soc_component *component,
+			     struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_dai *dai = snd_soc_rtd_to_cpu(rtd, 0);
 	struct snd_pcm *pcm = rtd->pcm;
@@ -1376,7 +1376,7 @@ static struct snd_soc_component_driver avs_component_driver = {
 	.open			= avs_component_open,
 	.pointer		= avs_component_pointer,
 	.mmap			= avs_component_mmap,
-	.pcm_construct		= avs_component_construct,
+	.pcm_new		= avs_component_new,
 	.module_get_upon_open	= 1, /* increment refcount when a pcm is opened */
 	.topology_name_prefix	= "intel/avs",
 };
@@ -1623,7 +1623,7 @@ static int avs_component_hda_probe(struct snd_soc_component *component)
 		return -ENOMEM;
 
 	cname = dev_name(&codec->core.dev);
-	dapm = snd_soc_component_get_dapm(component);
+	dapm = snd_soc_component_to_dapm(component);
 	pcm = list_first_entry(&codec->pcm_list_head, struct hda_pcm, list);
 
 	for (i = 0; i < pcm_count; i++, pcm = list_next_entry(pcm, list)) {
@@ -1754,7 +1754,7 @@ static struct snd_soc_component_driver avs_hda_component_driver = {
 	.open			= avs_component_hda_open,
 	.pointer		= avs_component_pointer,
 	.mmap			= avs_component_mmap,
-	.pcm_construct		= avs_component_construct,
+	.pcm_new		= avs_component_new,
 	/*
 	 * hda platform component's probe() is dependent on
 	 * codec->pcm_list_head, it needs to be initialized after codec

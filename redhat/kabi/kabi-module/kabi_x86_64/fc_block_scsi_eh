@@ -1,3 +1,3 @@
-#8-
-0xc1858c00	fc_block_scsi_eh	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
+#9-
+0x845f572c	fc_block_scsi_eh	drivers/scsi/scsi_transport_fc	EXPORT_SYMBOL	
 

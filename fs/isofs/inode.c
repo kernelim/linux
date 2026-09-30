@@ -655,6 +655,11 @@ static int isofs_fill_super(struct super_block *s, void *data, int silent)
 		goto out_freesbi;
 	}
 	opt.blocksize = sb_min_blocksize(s, opt.blocksize);
+	if (!opt.blocksize) {
+		printk(KERN_ERR
+		       "ISOFS: unable to set blocksize\n");
+		goto out_freesbi;
+	}
 
 	sbi->s_high_sierra = 0; /* default is iso9660 */
 	sbi->s_session = opt.session;

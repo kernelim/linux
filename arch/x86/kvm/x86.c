@@ -12993,7 +12993,7 @@ void __user * __x86_set_memory_region(struct kvm *kvm, int id, gpa_t gpa,
 		m.guest_phys_addr = gpa;
 		m.userspace_addr = hva;
 		m.memory_size = size;
-		r = __kvm_set_memory_region(kvm, &m);
+		r = kvm_set_internal_memslot(kvm, &m);
 		if (r < 0)
 			return ERR_PTR_USR(r);
 	}
@@ -13962,10 +13962,8 @@ static int complete_sev_es_emulated_mmio(struct kvm_vcpu *vcpu)
 	if (vcpu->mmio_cur_fragment >= vcpu->mmio_nr_fragments) {
 		vcpu->mmio_needed = 0;
 
-		/*
-		 * All done, as frag->data always points at the GHCB scratch
-		 * area and VMGEXIT is trap-like (RIP is advanced by hardware).
-		 */
+		// VMG change, at this point, we're always done
+		// RIP has already been advanced
 		return 1;
 	}
 
@@ -13982,19 +13980,16 @@ static int complete_sev_es_emulated_mmio(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
-int kvm_sev_es_mmio(struct kvm_vcpu *vcpu, bool is_write, gpa_t gpa,
-		    unsigned int bytes, void *data)
+int kvm_sev_es_mmio_write(struct kvm_vcpu *vcpu, gpa_t gpa, unsigned int bytes,
+			  void *data)
 {
-	struct kvm_mmio_fragment *frag;
 	int handled;
+	struct kvm_mmio_fragment *frag;
 
-	if (!data || WARN_ON_ONCE(object_is_on_stack(data)))
+	if (!data)
 		return -EINVAL;
 
-	if (is_write)
-		handled = vcpu_mmio_write(vcpu, gpa, bytes, data);
-	else
-		handled = vcpu_mmio_read(vcpu, gpa, bytes, data);
+	handled = write_emultor.read_write_mmio(vcpu, gpa, bytes, data);
 	if (handled == bytes)
 		return 1;
 
@@ -14002,10 +13997,7 @@ int kvm_sev_es_mmio(struct kvm_vcpu *vcpu, bool is_write, gpa_t gpa,
 	gpa += handled;
 	data += handled;
 
-	/*
-	 * TODO: Determine whether or not userspace plays nice with MMIO
-	 *       requests that split a page boundary.
-	 */
+	/*TODO: Check if need to increment number of frags */
 	frag = vcpu->mmio_fragments;
 	vcpu->mmio_nr_fragments = 1;
 	frag->len = bytes;
@@ -14017,16 +14009,53 @@ int kvm_sev_es_mmio(struct kvm_vcpu *vcpu, bool is_write, gpa_t gpa,
 
 	vcpu->run->mmio.phys_addr = gpa;
 	vcpu->run->mmio.len = min(8u, frag->len);
-	vcpu->run->mmio.is_write = is_write;
-	if (is_write)
-		memcpy(vcpu->run->mmio.data, frag->data, min(8u, frag->len));
+	vcpu->run->mmio.is_write = 1;
+	memcpy(vcpu->run->mmio.data, frag->data, min(8u, frag->len));
 	vcpu->run->exit_reason = KVM_EXIT_MMIO;
 
 	vcpu->arch.complete_userspace_io = complete_sev_es_emulated_mmio;
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(kvm_sev_es_mmio);
+EXPORT_SYMBOL_GPL(kvm_sev_es_mmio_write);
+
+int kvm_sev_es_mmio_read(struct kvm_vcpu *vcpu, gpa_t gpa, unsigned int bytes,
+			 void *data)
+{
+	int handled;
+	struct kvm_mmio_fragment *frag;
+
+	if (!data)
+		return -EINVAL;
+
+	handled = read_emultor.read_write_mmio(vcpu, gpa, bytes, data);
+	if (handled == bytes)
+		return 1;
+
+	bytes -= handled;
+	gpa += handled;
+	data += handled;
+
+	/*TODO: Check if need to increment number of frags */
+	frag = vcpu->mmio_fragments;
+	vcpu->mmio_nr_fragments = 1;
+	frag->len = bytes;
+	frag->gpa = gpa;
+	frag->data = data;
+
+	vcpu->mmio_needed = 1;
+	vcpu->mmio_cur_fragment = 0;
+
+	vcpu->run->mmio.phys_addr = gpa;
+	vcpu->run->mmio.len = min(8u, frag->len);
+	vcpu->run->mmio.is_write = 0;
+	vcpu->run->exit_reason = KVM_EXIT_MMIO;
+
+	vcpu->arch.complete_userspace_io = complete_sev_es_emulated_mmio;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(kvm_sev_es_mmio_read);
 
 static void advance_sev_es_emulated_pio(struct kvm_vcpu *vcpu, unsigned count, int size)
 {

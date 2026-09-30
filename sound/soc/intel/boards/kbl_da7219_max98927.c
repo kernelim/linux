@@ -64,7 +64,7 @@ static int platform_clock_control(struct snd_soc_dapm_widget *w,
 					struct snd_kcontrol *k, int  event)
 {
 	struct snd_soc_dapm_context *dapm = w->dapm;
-	struct snd_soc_card *card = dapm->card;
+	struct snd_soc_card *card = snd_soc_dapm_to_card(dapm);
 	struct snd_soc_dai *codec_dai;
 	int ret = 0;
 
@@ -247,7 +247,7 @@ static int kabylake_ssp0_trigger(struct snd_pcm_substream *substream, int cmd)
 		const char *name = codec_dai->component->name;
 		struct snd_soc_component *component = codec_dai->component;
 		struct snd_soc_dapm_context *dapm =
-				snd_soc_component_get_dapm(component);
+				snd_soc_component_to_dapm(component);
 		char pin_name[20];
 
 		if (strcmp(name, MAX98927_DEV0_NAME) &&
@@ -360,7 +360,7 @@ static int kabylake_da7219_codec_init(struct snd_soc_pcm_runtime *rtd)
 	int ret;
 
 
-	ret = snd_soc_dapm_add_routes(&card->dapm,
+	ret = snd_soc_dapm_add_routes(card->dapm,
 			kabylake_ssp1_map,
 			ARRAY_SIZE(kabylake_ssp1_map));
 
@@ -396,7 +396,7 @@ static int kabylake_da7219_codec_init(struct snd_soc_pcm_runtime *rtd)
 static int kabylake_dmic_init(struct snd_soc_pcm_runtime *rtd)
 {
 	int ret;
-	ret = snd_soc_dapm_ignore_suspend(&rtd->card->dapm, "SoC DMIC");
+	ret = snd_soc_dapm_ignore_suspend(rtd->card->dapm, "SoC DMIC");
 	if (ret)
 		dev_err(rtd->dev, "SoC DMIC - Ignore suspend failed %d\n", ret);
 
@@ -441,7 +441,7 @@ static int kabylake_da7219_fe_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_dapm_context *dapm;
 	struct snd_soc_component *component = snd_soc_rtd_to_cpu(rtd, 0)->component;
 
-	dapm = snd_soc_component_get_dapm(component);
+	dapm = snd_soc_component_to_dapm(component);
 	snd_soc_dapm_ignore_suspend(dapm, "Reference Capture");
 
 	return 0;
@@ -974,7 +974,7 @@ static int kabylake_card_late_probe(struct snd_soc_card *card)
 {
 	struct kbl_codec_private *ctx = snd_soc_card_get_drvdata(card);
 	struct kbl_hdmi_pcm *pcm;
-	struct snd_soc_dapm_context *dapm = &card->dapm;
+	struct snd_soc_dapm_context *dapm = card->dapm;
 	struct snd_soc_component *component = NULL;
 	int err, i = 0;
 	char jack_name[NAME_SIZE];
@@ -1001,7 +1001,7 @@ static int kabylake_card_late_probe(struct snd_soc_card *card)
 		return -EINVAL;
 
 
-	err = hdac_hdmi_jack_port_init(component, &card->dapm);
+	err = hdac_hdmi_jack_port_init(component, card->dapm);
 
 	if (err < 0)
 		return err;

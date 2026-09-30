@@ -28,7 +28,7 @@
  * space isn't setup.  Once the kernel is fully booted we can fallback
  * to the more robust memremap*() API.
  *
- * Returns zero on success, a negative error code on failure.
+ * Returns: zero on success, a negative error code on failure.
  */
 int __init __efi_memmap_init(struct efi_memory_map_data *data)
 {
@@ -43,7 +43,8 @@ int __init __efi_memmap_init(struct efi_memory_map_data *data)
 		map.map = early_memremap(phys_map, data->size);
 
 	if (!map.map) {
-		pr_err("Could not map the memory map!\n");
+		pr_err("Could not map the memory map! phys_map=%pa, size=0x%lx\n",
+			&phys_map, data->size);
 		return -ENOMEM;
 	}
 
@@ -68,6 +69,8 @@ int __init __efi_memmap_init(struct efi_memory_map_data *data)
  *
  * Use early_memremap() to map the passed in EFI memory map and assign
  * it to efi.memmap.
+ *
+ * Returns: zero on success, a negative error code on failure.
  */
 int __init efi_memmap_init_early(struct efi_memory_map_data *data)
 {
@@ -98,7 +101,7 @@ void __init efi_memmap_unmap(void)
 
 /**
  * efi_memmap_init_late - Map efi.memmap with memremap()
- * @phys_addr: Physical address of the new EFI memory map
+ * @addr: Physical address of the new EFI memory map
  * @size: Size in bytes of the new EFI memory map
  *
  * Setup a mapping of the EFI memory map using ioremap_cache(). This
@@ -117,7 +120,7 @@ void __init efi_memmap_unmap(void)
  * runtime so that things like efi_mem_desc_lookup() and
  * efi_mem_attributes() always work.
  *
- * Returns zero on success, a negative error code on failure.
+ * Returns: zero on success, a negative error code on failure.
  */
 int __init efi_memmap_init_late(phys_addr_t addr, unsigned long size)
 {

@@ -857,11 +857,8 @@ void iscsit_dec_conn_usage_count(struct iscsit_conn *conn)
 	spin_lock_bh(&conn->conn_usage_lock);
 	conn->conn_usage_count--;
 
-	if (!conn->conn_usage_count && conn->conn_waiting_on_uc) {
-		spin_unlock_bh(&conn->conn_usage_lock);
+	if (!conn->conn_usage_count && conn->conn_waiting_on_uc)
 		complete(&conn->conn_waiting_on_uc_comp);
-		return;
-	}
 
 	spin_unlock_bh(&conn->conn_usage_lock);
 }

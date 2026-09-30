@@ -274,7 +274,7 @@ void ovs_dp_process_packet(struct sk_buff *skb, struct sw_flow_key *key)
 			upcall.portid = ovs_vport_find_upcall_portid(p, skb);
 
 		upcall.mru = OVS_CB(skb)->mru;
-		error = ovs_dp_upcall(dp, skb, key, &upcall, U32_MAX);
+		error = ovs_dp_upcall(dp, skb, key, &upcall, 0);
 		switch (error) {
 		case 0:
 		case -EAGAIN:
@@ -439,8 +439,7 @@ static int queue_userspace_packet(struct datapath *dp, struct sk_buff *skb,
 	struct sk_buff *nskb = NULL;
 	struct sk_buff *user_skb = NULL; /* to be queued to userspace */
 	struct nlattr *nla;
-	size_t msg_size;
-	size_t skb_len;
+	size_t len;
 	unsigned int hlen;
 	int err, dp_ifindex;
 	u64 hash;
@@ -461,8 +460,7 @@ static int queue_userspace_packet(struct datapath *dp, struct sk_buff *skb,
 		skb = nskb;
 	}
 
-	skb_len = min(skb->len, cutlen);
-	if (nla_attr_size(skb_len) > USHRT_MAX) {
+	if (nla_attr_size(skb->len) > USHRT_MAX) {
 		err = -EFBIG;
 		goto out;
 	}
@@ -477,13 +475,13 @@ static int queue_userspace_packet(struct datapath *dp, struct sk_buff *skb,
 	 * padding logic. Only perform zerocopy if padding is not required.
 	 */
 	if (dp->user_features & OVS_DP_F_UNALIGNED)
-		hlen = min(skb_zerocopy_headlen(skb), cutlen);
+		hlen = skb_zerocopy_headlen(skb);
 	else
-		hlen = skb_len;
+		hlen = skb->len;
 
-	msg_size = upcall_msg_size(upcall_info, hlen,
-				   OVS_CB(skb)->acts_origlen);
-	user_skb = genlmsg_new(msg_size, GFP_ATOMIC);
+	len = upcall_msg_size(upcall_info, hlen - cutlen,
+			      OVS_CB(skb)->acts_origlen);
+	user_skb = genlmsg_new(len, GFP_ATOMIC);
 	if (!user_skb) {
 		err = -ENOMEM;
 		goto out;
@@ -544,7 +542,7 @@ static int queue_userspace_packet(struct datapath *dp, struct sk_buff *skb,
 	}
 
 	/* Add OVS_PACKET_ATTR_LEN when packet is truncated */
-	if (skb_len < skb->len &&
+	if (cutlen > 0 &&
 	    nla_put_u32(user_skb, OVS_PACKET_ATTR_LEN, skb->len)) {
 		err = -ENOBUFS;
 		goto out;
@@ -569,9 +567,9 @@ static int queue_userspace_packet(struct datapath *dp, struct sk_buff *skb,
 		err = -ENOBUFS;
 		goto out;
 	}
-	nla->nla_len = nla_attr_size(skb_len);
+	nla->nla_len = nla_attr_size(skb->len - cutlen);
 
-	err = skb_zerocopy(user_skb, skb, skb_len, hlen);
+	err = skb_zerocopy(user_skb, skb, skb->len - cutlen, hlen);
 	if (err)
 		goto out;
 
@@ -628,7 +626,6 @@ static int ovs_packet_cmd_execute(struct sk_buff *skb, struct genl_info *info)
 		packet->ignore_df = 1;
 	}
 	OVS_CB(packet)->mru = mru;
-	OVS_CB(packet)->cutlen = U32_MAX;
 
 	if (a[OVS_PACKET_ATTR_HASH]) {
 		hash = nla_get_u64(a[OVS_PACKET_ATTR_HASH]);
@@ -2681,13 +2678,6 @@ static void __net_exit list_vports_from_net(struct net *net, struct net *dnet,
 	}
 }
 
-static void __net_exit ovs_pre_exit_net(struct net *dnet)
-{
-	ovs_lock();
-	ovs_ct_exit_start(dnet);
-	ovs_unlock();
-}
-
 static void __net_exit ovs_exit_net(struct net *dnet)
 {
 	struct datapath *dp, *dp_next;
@@ -2698,7 +2688,7 @@ static void __net_exit ovs_exit_net(struct net *dnet)
 
 	ovs_lock();
 
-	ovs_ct_exit_finish(dnet);
+	ovs_ct_exit(dnet);
 
 	list_for_each_entry_safe(dp, dp_next, &ovs_net->dps, list_node)
 		__dp_destroy(dp);
@@ -2722,7 +2712,6 @@ static void __net_exit ovs_exit_net(struct net *dnet)
 
 static struct pernet_operations ovs_net_ops = {
 	.init = ovs_init_net,
-	.pre_exit = ovs_pre_exit_net,
 	.exit = ovs_exit_net,
 	.id   = &ovs_net_id,
 	.size = sizeof(struct ovs_net),

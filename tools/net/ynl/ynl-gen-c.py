@@ -2508,6 +2508,8 @@ def render_uapi(family, cw):
 
     defines = []
     for const in family['definitions']:
+        if const.get('scope', 'uapi') != 'uapi':
+            continue
         if const['type'] != 'const':
             cw.writes_defines(defines)
             defines = []
@@ -2630,6 +2632,25 @@ def render_uapi(family, cw):
         cw.nl()
 
     cw.p(f'#endif /* {hdr_prot} */')
+
+
+def render_scoped_consts(family, cw, scope):
+    defines = []
+    for const in family['definitions']:
+        if const['type'] != 'const':
+            continue
+        if const.get('header'):
+            continue
+        if const.get('scope') != scope:
+            continue
+        name_pfx = const.get('name-prefix', f"{family.ident_name}-")
+        defines.append([
+            c_upper(family.get('c-define-name',
+                               f"{name_pfx}{const['name']}")),
+            const['value']])
+    if defines:
+        cw.writes_defines(defines)
+        cw.nl()
 
 
 def _render_user_ntf_entry(ri, op):
@@ -2778,8 +2799,12 @@ def main():
             cw.p('#include "ynl.h"')
         headers = []
     for definition in parsed['definitions']:
-        if 'header' in definition:
-            headers.append(definition['header'])
+        if 'header' not in definition:
+            continue
+        scope = definition.get('scope', 'uapi')
+        if scope != 'uapi' and scope != args.mode:
+            continue
+        headers.append(definition['header'])
     if args.mode == 'user':
         headers.append(parsed.uapi_header)
     seen_header = []
@@ -2796,6 +2821,7 @@ def main():
             for one in args.user_header:
                 cw.p(f'#include "{one}"')
         else:
+            render_scoped_consts(parsed, cw, 'user')
             cw.p('struct ynl_sock;')
             cw.nl()
             render_user_family(parsed, cw, True)
@@ -2803,6 +2829,7 @@ def main():
 
     if args.mode == "kernel":
         if args.header:
+            render_scoped_consts(parsed, cw, 'kernel')
             for _, struct in sorted(parsed.pure_nested_structs.items()):
                 if struct.request:
                     cw.p('/* Common nested types */')

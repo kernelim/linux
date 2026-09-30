@@ -1,3 +1,3 @@
-#8-
-0xe01b19ac	iscsi_conn_teardown	drivers/scsi/libiscsi	EXPORT_SYMBOL_GPL	
+#9-
+0x46a30678	iscsi_conn_teardown	drivers/scsi/libiscsi	EXPORT_SYMBOL_GPL	
 

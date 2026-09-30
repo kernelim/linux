@@ -72,7 +72,7 @@ struct ifa6_config {
 	const struct in6_addr	*pfx;
 	unsigned int		plen;
 
-	RH_KABI_FILL_HOLE(u8 ifa_proto)
+	u8			ifa_proto;
 
 	const struct in6_addr	*peer_pfx;
 

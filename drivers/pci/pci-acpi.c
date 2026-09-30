@@ -817,13 +817,8 @@ int pci_acpi_program_hp_params(struct pci_dev *dev)
 bool pciehp_is_native(struct pci_dev *bridge)
 {
 	const struct pci_host_bridge *host;
-	u32 slot_cap;
 
 	if (!IS_ENABLED(CONFIG_HOTPLUG_PCI_PCIE))
-		return false;
-
-	pcie_capability_read_dword(bridge, PCI_EXP_SLTCAP, &slot_cap);
-	if (!(slot_cap & PCI_EXP_SLTCAP_HPC))
 		return false;
 
 	if (pcie_ports_native)
@@ -851,12 +846,7 @@ bool shpchp_is_native(struct pci_dev *bridge)
  */
 static void pci_acpi_wake_bus(struct acpi_device_wakeup_context *context)
 {
-	struct acpi_device *adev;
-	struct acpi_pci_root *root;
-
-	adev = container_of(context, struct acpi_device, wakeup.context);
-	root = acpi_driver_data(adev);
-	pci_pme_wakeup_bus(root->bus);
+	pci_pme_wakeup_bus(to_pci_host_bridge(context->dev)->bus);
 }
 
 /**
@@ -889,12 +879,14 @@ static void pci_acpi_wake_dev(struct acpi_device_wakeup_context *context)
 }
 
 /**
- * pci_acpi_add_bus_pm_notifier - Register PM notifier for root PCI bus.
+ * pci_acpi_add_root_pm_notifier - Register PM notifier for root PCI bus.
  * @dev: PCI root bridge ACPI device.
+ * @root: PCI root corresponding to @dev.
  */
-acpi_status pci_acpi_add_bus_pm_notifier(struct acpi_device *dev)
+acpi_status pci_acpi_add_root_pm_notifier(struct acpi_device *dev,
+					  struct acpi_pci_root *root)
 {
-	return acpi_add_pm_notifier(dev, NULL, pci_acpi_wake_bus);
+	return acpi_add_pm_notifier(dev, root->bus->bridge, pci_acpi_wake_bus);
 }
 
 /**
@@ -1003,7 +995,7 @@ bool acpi_pci_bridge_d3(struct pci_dev *dev)
 	struct acpi_device *adev, *rpadev;
 	const union acpi_object *obj;
 
-	if (acpi_pci_disabled || !dev->is_hotplug_bridge)
+	if (acpi_pci_disabled || !dev->is_pciehp)
 		return false;
 
 	adev = ACPI_COMPANION(&dev->dev);

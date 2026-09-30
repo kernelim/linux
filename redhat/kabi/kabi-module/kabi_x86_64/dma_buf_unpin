@@ -1,3 +1,3 @@
-#8-
-0x40b989ea	dma_buf_unpin	vmlinux	EXPORT_SYMBOL_GPL	DMA_BUF
+#9-
+0x5fc67354	dma_buf_unpin	vmlinux	EXPORT_SYMBOL_GPL	DMA_BUF
 

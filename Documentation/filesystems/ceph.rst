@@ -57,12 +57,15 @@ a snapshot on any subdirectory (and its nested contents) in the
 system.  Snapshot creation and deletion are as simple as 'mkdir
 .snap/foo' and 'rmdir .snap/foo'.
 
-Ceph also provides some recursive accounting on directories for nested
-files and bytes.  That is, a 'getfattr -d foo' on any directory in the
-system will reveal the total number of nested regular files and
-subdirectories, and a summation of all nested file sizes.  This makes
-the identification of large disk space consumers relatively quick, as
-no 'du' or similar recursive scan of the file system is required.
+Ceph also provides some recursive accounting on directories for nested files
+and bytes.  You can run the commands::
+
+ getfattr -n ceph.dir.rfiles /some/dir
+ getfattr -n ceph.dir.rbytes /some/dir
+
+to get the total number of nested files and their combined size, respectively.
+This makes the identification of large disk space consumers relatively quick,
+as no 'du' or similar recursive scan of the file system is required.
 
 Finally, Ceph also allows quotas to be set on any directory in the system.
 The quota can restrict the number of bytes or the number of files stored

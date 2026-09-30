@@ -14,6 +14,7 @@
 
 #include <linux/sched.h>
 #include <linux/mm_types.h>
+#include <linux/cpufeature.h>
 #include <linux/page-flags.h>
 #include <linux/radix-tree.h>
 #include <linux/atomic.h>
@@ -112,6 +113,8 @@ static inline int is_module_addr(void *addr)
 #else
 #define KASLR_LEN	0UL
 #endif
+
+void setup_protection_map(void);
 
 /*
  * A 64 bit pagetable entry of S390 has following format:
@@ -431,98 +434,107 @@ static inline int is_module_addr(void *addr)
 /*
  * Page protection definitions.
  */
-#define PAGE_NONE	__pgprot(_PAGE_PRESENT | _PAGE_INVALID | _PAGE_PROTECT)
-#define PAGE_RO		__pgprot(_PAGE_PRESENT | _PAGE_READ | \
+#define __PAGE_NONE		(_PAGE_PRESENT | _PAGE_INVALID | _PAGE_PROTECT)
+#define __PAGE_RO		(_PAGE_PRESENT | _PAGE_READ | \
 				 _PAGE_NOEXEC  | _PAGE_INVALID | _PAGE_PROTECT)
-#define PAGE_RX		__pgprot(_PAGE_PRESENT | _PAGE_READ | \
+#define __PAGE_RX		(_PAGE_PRESENT | _PAGE_READ | \
 				 _PAGE_INVALID | _PAGE_PROTECT)
-#define PAGE_RW		__pgprot(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | \
+#define __PAGE_RW		(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | \
 				 _PAGE_NOEXEC  | _PAGE_INVALID | _PAGE_PROTECT)
-#define PAGE_RWX	__pgprot(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | \
+#define __PAGE_RWX		(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | \
 				 _PAGE_INVALID | _PAGE_PROTECT)
-
-#define PAGE_SHARED	__pgprot(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | \
+#define __PAGE_SHARED		(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | \
 				 _PAGE_YOUNG | _PAGE_DIRTY | _PAGE_NOEXEC)
-#define PAGE_KERNEL	__pgprot(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | \
+#define __PAGE_KERNEL		(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | \
 				 _PAGE_YOUNG | _PAGE_DIRTY | _PAGE_NOEXEC)
-#define PAGE_KERNEL_RO	__pgprot(_PAGE_PRESENT | _PAGE_READ | _PAGE_YOUNG | \
+#define __PAGE_KERNEL_RO	(_PAGE_PRESENT | _PAGE_READ | _PAGE_YOUNG | \
 				 _PAGE_PROTECT | _PAGE_NOEXEC)
-#define PAGE_KERNEL_EXEC __pgprot(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | \
-				  _PAGE_YOUNG |	_PAGE_DIRTY)
 
-/*
- * On s390 the page table entry has an invalid bit and a read-only bit.
- * Read permission implies execute permission and write permission
- * implies read permission.
- */
-         /*xwr*/
+extern unsigned long page_noexec_mask;
+
+#define __pgprot_page_mask(x)	__pgprot((x) & page_noexec_mask)
+
+#define PAGE_NONE		__pgprot_page_mask(__PAGE_NONE)
+#define PAGE_RO			__pgprot_page_mask(__PAGE_RO)
+#define PAGE_RX			__pgprot_page_mask(__PAGE_RX)
+#define PAGE_RW			__pgprot_page_mask(__PAGE_RW)
+#define PAGE_RWX		__pgprot_page_mask(__PAGE_RWX)
+#define PAGE_SHARED		__pgprot_page_mask(__PAGE_SHARED)
+#define PAGE_KERNEL		__pgprot_page_mask(__PAGE_KERNEL)
+#define PAGE_KERNEL_RO		__pgprot_page_mask(__PAGE_KERNEL_RO)
 
 /*
  * Segment entry (large page) protection definitions.
  */
-#define SEGMENT_NONE	__pgprot(_SEGMENT_ENTRY_PRESENT | \
+#define __SEGMENT_NONE		(_SEGMENT_ENTRY_PRESENT | \
 				 _SEGMENT_ENTRY_INVALID | \
 				 _SEGMENT_ENTRY_PROTECT)
-#define SEGMENT_RO	__pgprot(_SEGMENT_ENTRY_PRESENT | \
+#define __SEGMENT_RO		(_SEGMENT_ENTRY_PRESENT | \
 				 _SEGMENT_ENTRY_PROTECT | \
 				 _SEGMENT_ENTRY_READ | \
 				 _SEGMENT_ENTRY_NOEXEC)
-#define SEGMENT_RX	__pgprot(_SEGMENT_ENTRY_PRESENT | \
+#define __SEGMENT_RX		(_SEGMENT_ENTRY_PRESENT | \
 				 _SEGMENT_ENTRY_PROTECT | \
 				 _SEGMENT_ENTRY_READ)
-#define SEGMENT_RW	__pgprot(_SEGMENT_ENTRY_PRESENT | \
+#define __SEGMENT_RW		(_SEGMENT_ENTRY_PRESENT | \
 				 _SEGMENT_ENTRY_READ | \
 				 _SEGMENT_ENTRY_WRITE | \
 				 _SEGMENT_ENTRY_NOEXEC)
-#define SEGMENT_RWX	__pgprot(_SEGMENT_ENTRY_PRESENT | \
+#define __SEGMENT_RWX		(_SEGMENT_ENTRY_PRESENT | \
 				 _SEGMENT_ENTRY_READ | \
 				 _SEGMENT_ENTRY_WRITE)
-#define SEGMENT_KERNEL	__pgprot(_SEGMENT_ENTRY |	\
+#define __SEGMENT_KERNEL	(_SEGMENT_ENTRY |	\
 				 _SEGMENT_ENTRY_LARGE |	\
 				 _SEGMENT_ENTRY_READ |	\
 				 _SEGMENT_ENTRY_WRITE | \
 				 _SEGMENT_ENTRY_YOUNG | \
 				 _SEGMENT_ENTRY_DIRTY | \
 				 _SEGMENT_ENTRY_NOEXEC)
-#define SEGMENT_KERNEL_RO __pgprot(_SEGMENT_ENTRY |	\
+#define __SEGMENT_KERNEL_RO	(_SEGMENT_ENTRY |	\
 				 _SEGMENT_ENTRY_LARGE |	\
 				 _SEGMENT_ENTRY_READ |	\
 				 _SEGMENT_ENTRY_YOUNG |	\
 				 _SEGMENT_ENTRY_PROTECT | \
 				 _SEGMENT_ENTRY_NOEXEC)
-#define SEGMENT_KERNEL_EXEC __pgprot(_SEGMENT_ENTRY |	\
-				 _SEGMENT_ENTRY_LARGE |	\
-				 _SEGMENT_ENTRY_READ |	\
-				 _SEGMENT_ENTRY_WRITE | \
-				 _SEGMENT_ENTRY_YOUNG |	\
-				 _SEGMENT_ENTRY_DIRTY)
+
+extern unsigned long segment_noexec_mask;
+
+#define __pgprot_segment_mask(x) __pgprot((x) & segment_noexec_mask)
+
+#define SEGMENT_NONE		__pgprot_segment_mask(__SEGMENT_NONE)
+#define SEGMENT_RO		__pgprot_segment_mask(__SEGMENT_RO)
+#define SEGMENT_RX		__pgprot_segment_mask(__SEGMENT_RX)
+#define SEGMENT_RW		__pgprot_segment_mask(__SEGMENT_RW)
+#define SEGMENT_RWX		__pgprot_segment_mask(__SEGMENT_RWX)
+#define SEGMENT_KERNEL		__pgprot_segment_mask(__SEGMENT_KERNEL)
+#define SEGMENT_KERNEL_RO	__pgprot_segment_mask(__SEGMENT_KERNEL_RO)
 
 /*
  * Region3 entry (large page) protection definitions.
  */
 
-#define REGION3_KERNEL	__pgprot(_REGION_ENTRY_TYPE_R3 | \
+#define __REGION3_KERNEL	(_REGION_ENTRY_TYPE_R3 | \
 				 _REGION3_ENTRY_PRESENT | \
-				 _REGION3_ENTRY_LARGE |	 \
-				 _REGION3_ENTRY_READ |	 \
-				 _REGION3_ENTRY_WRITE |	 \
-				 _REGION3_ENTRY_YOUNG |	 \
+				 _REGION3_ENTRY_LARGE | \
+				 _REGION3_ENTRY_READ | \
+				 _REGION3_ENTRY_WRITE | \
+				 _REGION3_ENTRY_YOUNG | \
 				 _REGION3_ENTRY_DIRTY | \
 				 _REGION_ENTRY_NOEXEC)
-#define REGION3_KERNEL_RO __pgprot(_REGION_ENTRY_TYPE_R3 | \
-				   _REGION3_ENTRY_PRESENT | \
-				   _REGION3_ENTRY_LARGE |  \
-				   _REGION3_ENTRY_READ |   \
-				   _REGION3_ENTRY_YOUNG |  \
-				   _REGION_ENTRY_PROTECT | \
-				   _REGION_ENTRY_NOEXEC)
-#define REGION3_KERNEL_EXEC __pgprot(_REGION_ENTRY_TYPE_R3 | \
+#define __REGION3_KERNEL_RO	(_REGION_ENTRY_TYPE_R3 | \
 				 _REGION3_ENTRY_PRESENT | \
-				 _REGION3_ENTRY_LARGE |	 \
-				 _REGION3_ENTRY_READ |	 \
-				 _REGION3_ENTRY_WRITE |	 \
-				 _REGION3_ENTRY_YOUNG |	 \
-				 _REGION3_ENTRY_DIRTY)
+				 _REGION3_ENTRY_LARGE | \
+				 _REGION3_ENTRY_READ | \
+				 _REGION3_ENTRY_YOUNG | \
+				 _REGION_ENTRY_PROTECT | \
+				 _REGION_ENTRY_NOEXEC)
+
+extern unsigned long region_noexec_mask;
+
+#define __pgprot_region_mask(x)	__pgprot((x) & region_noexec_mask)
+
+#define REGION3_KERNEL		__pgprot_region_mask(__REGION3_KERNEL)
+#define REGION3_KERNEL_RO	__pgprot_region_mask(__REGION3_KERNEL_RO)
 
 static inline bool mm_p4d_folded(struct mm_struct *mm)
 {
@@ -1194,7 +1206,7 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 	res = ptep_xchg_lazy(mm, addr, ptep, __pte(_PAGE_INVALID));
 	/* At this point the reference through the mapping is still present */
 	if (mm_is_protected(mm) && pte_present(res))
-		uv_convert_owned_from_secure(pte_val(res) & PAGE_MASK);
+		uv_convert_from_secure_pte(res);
 	return res;
 }
 
@@ -1212,7 +1224,7 @@ static inline pte_t ptep_clear_flush(struct vm_area_struct *vma,
 	res = ptep_xchg_direct(vma->vm_mm, addr, ptep, __pte(_PAGE_INVALID));
 	/* At this point the reference through the mapping is still present */
 	if (mm_is_protected(vma->vm_mm) && pte_present(res))
-		uv_convert_owned_from_secure(pte_val(res) & PAGE_MASK);
+		uv_convert_from_secure_pte(res);
 	return res;
 }
 
@@ -1244,14 +1256,14 @@ static inline pte_t ptep_get_and_clear_full(struct mm_struct *mm,
 	 * The notifier should have destroyed all protected vCPUs at this
 	 * point, so the destroy should be successful.
 	 */
-	if (full && !uv_destroy_owned_page(pte_val(res) & PAGE_MASK))
+	if (full && !uv_destroy_pte(res))
 		return res;
 	/*
 	 * If something went wrong and the page could not be destroyed, or
 	 * if this is not a mm teardown, the slower export is used as
 	 * fallback instead.
 	 */
-	uv_convert_owned_from_secure(pte_val(res) & PAGE_MASK);
+	uv_convert_from_secure_pte(res);
 	return res;
 }
 
@@ -1295,7 +1307,7 @@ static inline void flush_tlb_fix_spurious_fault(struct vm_area_struct *vma,
 	 * PTE does not have _PAGE_PROTECT set, to avoid unnecessary overhead.
 	 * A local RDP can be used to do the flush.
 	 */
-	if (MACHINE_HAS_RDP && !(pte_val(*ptep) & _PAGE_PROTECT))
+	if (cpu_has_rdp() && !(pte_val(*ptep) & _PAGE_PROTECT))
 		__ptep_rdp(address, ptep, 1);
 }
 #define flush_tlb_fix_spurious_fault flush_tlb_fix_spurious_fault
@@ -1310,7 +1322,7 @@ static inline int ptep_set_access_flags(struct vm_area_struct *vma,
 {
 	if (pte_same(*ptep, entry))
 		return 0;
-	if (MACHINE_HAS_RDP && !mm_has_pgste(vma->vm_mm) && pte_allow_rdp(*ptep, entry))
+	if (cpu_has_rdp() && !mm_has_pgste(vma->vm_mm) && pte_allow_rdp(*ptep, entry))
 		ptep_reset_dat_prot(vma->vm_mm, addr, ptep, entry);
 	else
 		ptep_xchg_direct(vma->vm_mm, addr, ptep, entry);
@@ -1402,8 +1414,6 @@ static inline pte_t mk_pte_phys(unsigned long physpage, pgprot_t pgprot)
 	pte_t __pte;
 
 	__pte = __pte(physpage | pgprot_val(pgprot));
-	if (!MACHINE_HAS_NX)
-		__pte = clear_pte_bit(__pte, __pgprot(_PAGE_NOEXEC));
 	return pte_mkyoung(__pte);
 }
 
@@ -1770,8 +1780,6 @@ static inline int pmdp_clear_flush_young(struct vm_area_struct *vma,
 static inline void set_pmd_at(struct mm_struct *mm, unsigned long addr,
 			      pmd_t *pmdp, pmd_t entry)
 {
-	if (!MACHINE_HAS_NX)
-		entry = clear_pmd_bit(entry, __pgprot(_SEGMENT_ENTRY_NOEXEC));
 	set_pmd(pmdp, entry);
 }
 
@@ -1849,7 +1857,7 @@ static inline int pmd_trans_huge(pmd_t pmd)
 #define has_transparent_hugepage has_transparent_hugepage
 static inline int has_transparent_hugepage(void)
 {
-	return MACHINE_HAS_EDAT1 ? 1 : 0;
+	return cpu_has_edat1() ? 1 : 0;
 }
 #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
 

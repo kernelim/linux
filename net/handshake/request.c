@@ -13,7 +13,6 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/inet.h>
-#include <linux/fdtable.h>
 #include <linux/file.h>
 #include <linux/rhashtable.h>
 
@@ -188,8 +187,9 @@ static bool remove_pending(struct handshake_net *hn, struct handshake_req *req)
  * @class: handler class to match
  *
  * On a non-NULL return, the caller owns an extra reference
- * on @req->hr_file.  FD_PREPARE() consumes it on success; on
- * the FD_PREPARE() failure path the caller must fput() it.
+ * on @req->hr_file.  fd_publish() consumes it on success; on
+ * the fd_publish()/get_unused_fd_flags() failure path the caller
+ * must fput() it.
  *
  * Return: pointer to a removed handshake_req, or NULL.
  */
@@ -205,8 +205,8 @@ struct handshake_req *handshake_req_next(struct handshake_net *hn, int class)
 		__remove_pending_locked(hn, pos);
 		/* Hand off a file reference to the accept side under
 		 * hn_lock.  A concurrent handshake_req_cancel() can drop
-		 * hr_file before accept reaches FD_PREPARE(); this extra
-		 * reference keeps the file alive until FD_PREPARE() takes
+		 * hr_file before accept reaches fd_publish(); this extra
+		 * reference keeps the file alive until fd_publish() takes
 		 * ownership.
 		 */
 		get_file(pos->hr_file);
@@ -305,13 +305,6 @@ int handshake_req_submit(struct socket *sock, struct handshake_req *req,
 			goto out_err;
 	}
 
-	/*
-	 * Pin struct sock so sk_destruct does not run until the
-	 * handshake completion path releases it; struct socket is
-	 * held separately via hr_file above.
-	 */
-	sock_hold(req->hr_sk);
-
 	trace_handshake_submit(net, req, req->hr_sk);
 	return 0;
 
@@ -329,7 +322,7 @@ out_err:
 }
 EXPORT_SYMBOL(handshake_req_submit);
 
-void handshake_complete(struct handshake_req *req, unsigned int status,
+void handshake_complete(struct handshake_req *req, int status,
 			struct genl_info *info)
 {
 	struct sock *sk = req->hr_sk;
@@ -340,9 +333,6 @@ void handshake_complete(struct handshake_req *req, unsigned int status,
 
 		trace_handshake_complete(net, req, sk, status);
 		req->hr_proto->hp_done(req, status, info);
-
-		/* Handshake request is no longer pending */
-		sock_put(sk);
 
 		fput(file);
 	}
@@ -375,7 +365,11 @@ bool handshake_req_cancel(struct sock *sk)
 
 	hn = handshake_pernet(net);
 	if (hn && remove_pending(hn, req)) {
-		/* Request hadn't been accepted */
+		/* Request hadn't been accepted - mark cancelled */
+		if (test_and_set_bit(HANDSHAKE_F_REQ_COMPLETED, &req->hr_flags)) {
+			trace_handshake_cancel_busy(net, req, sk);
+			return false;
+		}
 		goto out_true;
 	}
 	if (test_and_set_bit(HANDSHAKE_F_REQ_COMPLETED, &req->hr_flags)) {
@@ -387,8 +381,6 @@ bool handshake_req_cancel(struct sock *sk)
 out_true:
 	trace_handshake_cancel(net, req, sk);
 
-	/* Handshake request is no longer pending */
-	sock_put(sk);
 	fput(req->hr_file);
 	return true;
 }

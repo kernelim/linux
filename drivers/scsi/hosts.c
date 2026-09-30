@@ -342,6 +342,8 @@ static void scsi_host_dev_release(struct device *dev)
 	/* Wait for functions invoked through call_rcu(&scmd->rcu, ...) */
 	rcu_barrier();
 
+	if (shost->aux)
+		cancel_work_sync(&shost->aux->eh_work);
 	if (shost->tmf_work_q)
 		destroy_workqueue(shost->tmf_work_q);
 	if (shost->ehandler)
@@ -536,6 +538,7 @@ struct Scsi_Host *scsi_host_alloc(struct scsi_host_template *sht, int privsize)
 		goto fail;
 
 	shost->aux->host = shost;
+	INIT_WORK(&shost->aux->eh_work, scsi_rcu_eh_wakeup);
 
 	return shost;
  fail:

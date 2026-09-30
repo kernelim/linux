@@ -64,14 +64,10 @@ enum {
 
 static inline void futex_init_task(struct task_struct *tsk)
 {
-	tsk->robust_list = NULL;
-#ifdef CONFIG_COMPAT
-	tsk->compat_robust_list = NULL;
-#endif
-	INIT_LIST_HEAD(&tsk->pi_state_list);
-	tsk->pi_state_cache = NULL;
-	tsk->futex_state = FUTEX_STATE_OK;
-	mutex_init(&tsk->futex_exit_mutex);
+	memset(&tsk->futex, 0, sizeof(tsk->futex));
+	INIT_LIST_HEAD(&tsk->futex.pi_state_list);
+	tsk->futex.state = FUTEX_STATE_OK;
+	mutex_init(&tsk->futex.exit_mutex);
 }
 
 void futex_exit_recursive(struct task_struct *tsk);
@@ -85,22 +81,20 @@ int futex_hash_prctl(unsigned long arg2, unsigned long arg3, unsigned long arg4)
 #ifdef CONFIG_FUTEX_PRIVATE_HASH
 int futex_hash_allocate_default(void);
 void futex_hash_free(struct mm_struct *mm);
-int futex_mm_init(struct mm_struct *mm);
-
-#else /* !CONFIG_FUTEX_PRIVATE_HASH */
+void futex_mm_init(struct mm_struct *mm);
+#else  /* CONFIG_FUTEX_PRIVATE_HASH */
 static inline int futex_hash_allocate_default(void) { return 0; }
 static inline int futex_hash_free(struct mm_struct *mm) { return 0; }
-static inline int futex_mm_init(struct mm_struct *mm) { return 0; }
-#endif /* CONFIG_FUTEX_PRIVATE_HASH */
+static inline void futex_mm_init(struct mm_struct *mm) { }
+#endif /* !CONFIG_FUTEX_PRIVATE_HASH */
 
-#else /* !CONFIG_FUTEX */
+#else  /* CONFIG_FUTEX */
 static inline void futex_init_task(struct task_struct *tsk) { }
 static inline void futex_exit_recursive(struct task_struct *tsk) { }
 static inline void futex_exit_release(struct task_struct *tsk) { }
 static inline void futex_exec_release(struct task_struct *tsk) { }
-static inline long do_futex(u32 __user *uaddr, int op, u32 val,
-			    ktime_t *timeout, u32 __user *uaddr2,
-			    u32 val2, u32 val3)
+static inline long do_futex(u32 __user *uaddr, int op, u32 val, ktime_t *timeout,
+			    u32 __user *uaddr2, u32 val2, u32 val3)
 {
 	return -EINVAL;
 }
@@ -108,13 +102,9 @@ static inline int futex_hash_prctl(unsigned long arg2, unsigned long arg3, unsig
 {
 	return -EINVAL;
 }
-static inline int futex_hash_allocate_default(void)
-{
-	return 0;
-}
+static inline int futex_hash_allocate_default(void) { return 0; }
 static inline int futex_hash_free(struct mm_struct *mm) { return 0; }
-static inline int futex_mm_init(struct mm_struct *mm) { return 0; }
+static inline void futex_mm_init(struct mm_struct *mm) { }
+#endif /* !CONFIG_FUTEX */
 
-#endif
-
-#endif
+#endif /* _LINUX_FUTEX_H */

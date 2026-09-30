@@ -124,6 +124,8 @@
 
 #define SO_TXREHASH              0x0053
 
+#define SCM_TS_OPT_ID            0x005a
+
 #if !defined(__KERNEL__)
 
 

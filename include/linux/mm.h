@@ -38,7 +38,6 @@ struct user_struct;
 struct pt_regs;
 
 extern int sysctl_page_lock_unfairness;
-extern int sysctl_legacy_willneed_readahead;
 
 void mm_core_init(void);
 void init_mm_internals(void);
@@ -101,8 +100,12 @@ extern const int mmap_rnd_compat_bits_max;
 extern int mmap_rnd_compat_bits __read_mostly;
 #endif
 
-#ifndef PHYSMEM_END
-# define PHYSMEM_END	((1ULL << MAX_PHYSMEM_BITS) - 1)
+#ifndef DIRECT_MAP_PHYSMEM_END
+# ifdef MAX_PHYSMEM_BITS
+# define DIRECT_MAP_PHYSMEM_END ((1ULL << MAX_PHYSMEM_BITS) - 1)
+# else
+# define DIRECT_MAP_PHYSMEM_END (((phys_addr_t)-1)&~(1ULL<<63))
+# endif
 #endif
 
 #include <asm/page.h>

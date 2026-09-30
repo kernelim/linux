@@ -69,23 +69,14 @@
 
 #define DMA_SYS_BUS_MB			BIT(14)
 #define DMA_AXI_1KBBE			BIT(13)
-#define DMA_SYS_BUS_AAL			BIT(12)
+#define DMA_SYS_BUS_AAL			DMA_AXI_AAL
 #define DMA_SYS_BUS_EAME		BIT(11)
-#define DMA_AXI_BLEN256			BIT(7)
-#define DMA_AXI_BLEN128			BIT(6)
-#define DMA_AXI_BLEN64			BIT(5)
-#define DMA_AXI_BLEN32			BIT(4)
-#define DMA_AXI_BLEN16			BIT(3)
-#define DMA_AXI_BLEN8			BIT(2)
-#define DMA_AXI_BLEN4			BIT(1)
 #define DMA_SYS_BUS_FB			BIT(0)
 
 #define DMA_BURST_LEN_DEFAULT		(DMA_AXI_BLEN256 | DMA_AXI_BLEN128 | \
 					DMA_AXI_BLEN64 | DMA_AXI_BLEN32 | \
 					DMA_AXI_BLEN16 | DMA_AXI_BLEN8 | \
 					DMA_AXI_BLEN4)
-
-#define DMA_AXI_BURST_LEN_MASK		0x000000FE
 
 /* DMA TBS Control */
 #define DMA_TBS_FTOS			GENMASK(31, 8)
@@ -127,7 +118,9 @@ static inline u32 dma_chanx_base_addr(const struct dwmac4_addrs *addrs,
 #define DMA_CHAN_SLOT_CTRL_STATUS(addrs, x)	(dma_chanx_base_addr(addrs, x) + 0x3c)
 #define DMA_CHAN_CUR_TX_DESC(addrs, x)	(dma_chanx_base_addr(addrs, x) + 0x44)
 #define DMA_CHAN_CUR_RX_DESC(addrs, x)	(dma_chanx_base_addr(addrs, x) + 0x4c)
+#define DMA_CHAN_CUR_TX_BUF_ADDR_HI(addrs, x)	(dma_chanx_base_addr(addrs, x) + 0x50)
 #define DMA_CHAN_CUR_TX_BUF_ADDR(addrs, x)	(dma_chanx_base_addr(addrs, x) + 0x54)
+#define DMA_CHAN_CUR_RX_BUF_ADDR_HI(addrs, x)	(dma_chanx_base_addr(addrs, x) + 0x58)
 #define DMA_CHAN_CUR_RX_BUF_ADDR(addrs, x)	(dma_chanx_base_addr(addrs, x) + 0x5c)
 #define DMA_CHAN_STATUS(addrs, x)	(dma_chanx_base_addr(addrs, x) + 0x60)
 

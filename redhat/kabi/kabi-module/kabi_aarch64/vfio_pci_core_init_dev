@@ -1,3 +1,3 @@
-#8-
-0xc28b12e4	vfio_pci_core_init_dev	drivers/vfio/pci/vfio-pci-core	EXPORT_SYMBOL_GPL	
+#9-
+0x295a2425	vfio_pci_core_init_dev	drivers/vfio/pci/vfio-pci-core	EXPORT_SYMBOL_GPL	
 

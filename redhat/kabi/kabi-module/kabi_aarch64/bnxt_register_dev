@@ -1,3 +1,3 @@
-#8-
-0x1044685b	bnxt_register_dev	drivers/net/ethernet/broadcom/bnxt/bnxt_en	EXPORT_SYMBOL	
+#9-
+0xf1082759	bnxt_register_dev	drivers/net/ethernet/broadcom/bnxt/bnxt_en	EXPORT_SYMBOL	
 

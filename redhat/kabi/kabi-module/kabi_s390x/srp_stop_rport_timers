@@ -1,3 +1,3 @@
-#8-
-0xb50ea0bb	srp_stop_rport_timers	drivers/scsi/scsi_transport_srp	EXPORT_SYMBOL_GPL	
+#9-
+0xd2f689db	srp_stop_rport_timers	drivers/scsi/scsi_transport_srp	EXPORT_SYMBOL_GPL	
 

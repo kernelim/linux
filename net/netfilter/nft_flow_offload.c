@@ -147,6 +147,10 @@ static void nft_dev_path_info(const struct net_device_path_stack *stack,
 				info->num_encaps++;
 				break;
 			case DEV_PATH_BR_VLAN_UNTAG:
+				if (info->num_encaps == 0) {
+					info->indev = NULL;
+					break;
+				}
 				info->num_encaps--;
 				break;
 			case DEV_PATH_BR_VLAN_KEEP:

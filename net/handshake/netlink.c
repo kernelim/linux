@@ -12,7 +12,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/skbuff.h>
-#include <linux/file.h>
 #include <linux/mm.h>
 
 #include <net/sock.h>
@@ -93,7 +92,6 @@ int handshake_nl_accept_doit(struct sk_buff *skb, struct genl_info *info)
 	struct net *net = sock_net(skb->sk);
 	struct handshake_net *hn = handshake_pernet(net);
 	struct handshake_req *req = NULL;
-	struct file *file;
 	int class, fd, err;
 
 	err = -EOPNOTSUPP;
@@ -110,8 +108,6 @@ int handshake_nl_accept_doit(struct sk_buff *skb, struct genl_info *info)
 	if (!req)
 		goto out_status;
 
-	file = req->hr_file;
-
 	fd = get_unused_fd_flags(O_CLOEXEC);
 	if (fd < 0) {
 		err = fd;
@@ -124,14 +120,16 @@ int handshake_nl_accept_doit(struct sk_buff *skb, struct genl_info *info)
 		goto out_complete;
 	}
 
-	fd_install(fd, file);
+	fd_install(fd, req->hr_file);
 
 	trace_handshake_cmd_accept(net, req, req->hr_sk, fd);
+        fput(req->hr_file); /* drop ref from handshake_req_next() */
 	return 0;
 
 out_complete:
-	handshake_complete(req, -EIO, NULL);
-	fput(file);
+        fput(req->hr_file); /* drop ref from handshake_req_next() */
+	if (req)
+		handshake_complete(req, -EIO, NULL);
 out_status:
 	trace_handshake_cmd_accept_err(net, req, NULL, err);
 	return err;
@@ -164,7 +162,7 @@ int handshake_nl_done_doit(struct sk_buff *skb, struct genl_info *info)
 
 	status = -EIO;
 	if (info->attrs[HANDSHAKE_A_DONE_STATUS])
-		status = nla_get_u32(info->attrs[HANDSHAKE_A_DONE_STATUS]);
+		status = -(int)nla_get_u32(info->attrs[HANDSHAKE_A_DONE_STATUS]);
 
 	handshake_complete(req, status, info);
 	fput(sock->file);

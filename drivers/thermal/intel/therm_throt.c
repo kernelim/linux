@@ -23,6 +23,7 @@
 #include <linux/types.h>
 #include <linux/init.h>
 #include <linux/smp.h>
+#include <linux/sysfs.h>
 #include <linux/cpu.h>
 
 #include <asm/processor.h>
@@ -144,8 +145,8 @@ static ssize_t therm_throt_device_show_##event##_##name(		\
 									\
 	preempt_disable();	/* CPU hotplug */			\
 	if (cpu_online(cpu)) {						\
-		ret = sprintf(buf, "%lu\n",				\
-			      per_cpu(thermal_state, cpu).event.name);	\
+		ret = sysfs_emit(buf, "%lu\n",				\
+			per_cpu(thermal_state, cpu).event.name);	\
 	} else								\
 		ret = 0;						\
 	preempt_enable();						\
@@ -273,7 +274,7 @@ void thermal_clear_package_intr_status(int level, u64 bit_mask)
 	}
 
 	msr_val &= ~bit_mask;
-	wrmsrl(msr, msr_val);
+	wrmsrq(msr, msr_val);
 }
 EXPORT_SYMBOL_GPL(thermal_clear_package_intr_status);
 
@@ -287,7 +288,7 @@ static void get_therm_status(int level, bool *proc_hot, u8 *temp)
 	else
 		msr = MSR_IA32_PACKAGE_THERM_STATUS;
 
-	rdmsrl(msr, msr_val);
+	rdmsrq(msr, msr_val);
 	if (msr_val & THERM_STATUS_PROCHOT_LOG)
 		*proc_hot = true;
 	else
@@ -528,7 +529,12 @@ static int thermal_throttle_online(unsigned int cpu)
 {
 	struct thermal_state *state = &per_cpu(thermal_state, cpu);
 	struct device *dev = get_cpu_device(cpu);
+	int err;
 	u32 l;
+
+	err = thermal_throttle_add_dev(dev, cpu);
+	if (err)
+		return err;
 
 	state->package_throttle.level = PACKAGE_LEVEL;
 	state->core_throttle.level = CORE_LEVEL;
@@ -547,7 +553,7 @@ static int thermal_throttle_online(unsigned int cpu)
 	l = apic_read(APIC_LVTTHMR);
 	apic_write(APIC_LVTTHMR, l & ~APIC_LVT_MASKED);
 
-	return thermal_throttle_add_dev(dev, cpu);
+	return err;
 }
 
 static int thermal_throttle_offline(unsigned int cpu)
@@ -643,7 +649,7 @@ static void notify_thresholds(__u64 msr_val)
 
 void __weak notify_hwp_interrupt(void)
 {
-	wrmsrl_safe(MSR_HWP_STATUS, 0);
+	wrmsrq_safe(MSR_HWP_STATUS, 0);
 }
 
 /* Thermal transition interrupt handler */
@@ -654,7 +660,7 @@ void intel_thermal_interrupt(void)
 	if (static_cpu_has(X86_FEATURE_HWP))
 		notify_hwp_interrupt();
 
-	rdmsrl(MSR_IA32_THERM_STATUS, msr_val);
+	rdmsrq(MSR_IA32_THERM_STATUS, msr_val);
 
 	/* Check for violation of core thermal thresholds*/
 	notify_thresholds(msr_val);
@@ -669,7 +675,7 @@ void intel_thermal_interrupt(void)
 					CORE_LEVEL);
 
 	if (this_cpu_has(X86_FEATURE_PTS)) {
-		rdmsrl(MSR_IA32_PACKAGE_THERM_STATUS, msr_val);
+		rdmsrq(MSR_IA32_PACKAGE_THERM_STATUS, msr_val);
 		/* check violations of package thermal thresholds */
 		notify_package_thresholds(msr_val);
 		therm_throt_process(msr_val & PACKAGE_THERM_STATUS_PROCHOT,

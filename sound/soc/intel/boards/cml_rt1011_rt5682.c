@@ -193,13 +193,13 @@ static int cml_rt1011_spk_init(struct snd_soc_pcm_runtime *rtd)
 		if (ret)
 			return ret;
 
-		ret = snd_soc_dapm_new_controls(&card->dapm,
+		ret = snd_soc_dapm_new_controls(card->dapm,
 					cml_rt1011_tt_widgets,
 					ARRAY_SIZE(cml_rt1011_tt_widgets));
 		if (ret)
 			return ret;
 
-		ret = snd_soc_dapm_add_routes(&card->dapm, cml_rt1011_tt_map,
+		ret = snd_soc_dapm_add_routes(card->dapm, cml_rt1011_tt_map,
 					ARRAY_SIZE(cml_rt1011_tt_map));
 
 		if (ret)
@@ -363,7 +363,7 @@ static int sof_card_late_probe(struct snd_soc_card *card)
 		i++;
 	}
 
-	return hdac_hdmi_jack_port_init(component, &card->dapm);
+	return hdac_hdmi_jack_port_init(component, card->dapm);
 }
 
 static int hdmi_init(struct snd_soc_pcm_runtime *rtd)

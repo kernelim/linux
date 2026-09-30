@@ -114,7 +114,7 @@ struct datapath {
  * @mru: The maximum received fragement size; 0 if the packet is not
  * fragmented.
  * @acts_origlen: The netlink size of the flow actions applied to this skb.
- * @cutlen: The number of bytes in the packet to preserve on output.
+ * @cutlen: The number of bytes from the packet end to be removed.
  * @probability: The sampling probability that was applied to this skb; 0 means
  * no sampling has occurred; U32_MAX means 100% probability.
  * @upcall_pid: Netlink socket PID to use for sending this packet to userspace;
@@ -155,18 +155,13 @@ struct dp_upcall_info {
  * struct ovs_net - Per net-namespace data for ovs.
  * @dps: List of datapaths to enable dumping them all out.
  * Protected by genl_mutex.
- * @ct_limit_info: Hash table of conntrack zone connection limits. Protected
- * by RCU; updates and teardown are serialized by ovs_mutex. May be NULL during
- * netns teardown.
- * @ct_limit_exit_data: CT limit state detached at .pre_exit, freed at .exit.
  */
 struct ovs_net {
 	struct list_head dps;
 	struct work_struct dp_notify_work;
 	struct delayed_work masks_rebalance;
 #if	IS_ENABLED(CONFIG_NETFILTER_CONNCOUNT)
-	struct ovs_ct_limit_info __rcu *ct_limit_info;
-	struct ovs_ct_limit_info *ct_limit_exit_data;
+	struct ovs_ct_limit_info *ct_limit_info;
 #endif
 
 	/* Module reference for configuring conntrack. */

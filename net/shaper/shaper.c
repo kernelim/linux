@@ -65,6 +65,21 @@ net_shaper_hierarchy(struct net_shaper_binding *binding)
 	return NULL;
 }
 
+static struct net_shaper_hierarchy *
+net_shaper_hierarchy_rcu(struct net_shaper_binding *binding)
+{
+	/* Readers look up the device and take a ref, then take RCU lock
+	 * later at which point netdev may have been unregistered and flushed.
+	 * READ_ONCE() pairs with WRITE_ONCE() in net_shaper_hierarchy_setup.
+	 */
+	if (binding->type == NET_SHAPER_BINDING_TYPE_NETDEV &&
+	    READ_ONCE(binding->netdev->reg_state) <= NETREG_REGISTERED)
+		return READ_ONCE(binding->netdev->net_shaper_hierarchy);
+
+	/* No other type supported yet. */
+	return NULL;
+}
+
 static const struct net_shaper_ops *
 net_shaper_ops(struct net_shaper_binding *binding)
 {
@@ -133,35 +148,58 @@ handle_nest_cancel:
 	return -EMSGSIZE;
 }
 
+static void net_shaper_copy(struct net_shaper *dst,
+			    const struct net_shaper *src)
+{
+	WRITE_ONCE(dst->parent.scope, READ_ONCE(src->parent.scope));
+	WRITE_ONCE(dst->parent.id, READ_ONCE(src->parent.id));
+	WRITE_ONCE(dst->handle.scope, READ_ONCE(src->handle.scope));
+	WRITE_ONCE(dst->handle.id, READ_ONCE(src->handle.id));
+
+	WRITE_ONCE(dst->metric, READ_ONCE(src->metric));
+	WRITE_ONCE(dst->bw_min, READ_ONCE(src->bw_min));
+	WRITE_ONCE(dst->bw_max, READ_ONCE(src->bw_max));
+	WRITE_ONCE(dst->burst, READ_ONCE(src->burst));
+	WRITE_ONCE(dst->priority, READ_ONCE(src->priority));
+	WRITE_ONCE(dst->weight, READ_ONCE(src->weight));
+
+	/* private fields are only used on the write path under the lock */
+	data_race(dst->leaves = src->leaves);
+}
+
 static int
 net_shaper_fill_one(struct sk_buff *msg,
 		    const struct net_shaper_binding *binding,
 		    const struct net_shaper *shaper,
 		    const struct genl_info *info)
 {
+	struct net_shaper cur;
 	void *hdr;
 
 	hdr = genlmsg_iput(msg, info);
 	if (!hdr)
 		return -EMSGSIZE;
 
+	/* Make a copy to avoid data races */
+	net_shaper_copy(&cur, shaper);
+
 	if (net_shaper_fill_binding(msg, binding, NET_SHAPER_A_IFINDEX) ||
-	    net_shaper_fill_handle(msg, &shaper->parent,
+	    net_shaper_fill_handle(msg, &cur.parent,
 				   NET_SHAPER_A_PARENT) ||
-	    net_shaper_fill_handle(msg, &shaper->handle,
+	    net_shaper_fill_handle(msg, &cur.handle,
 				   NET_SHAPER_A_HANDLE) ||
-	    ((shaper->bw_min || shaper->bw_max || shaper->burst) &&
-	     nla_put_u32(msg, NET_SHAPER_A_METRIC, shaper->metric)) ||
-	    (shaper->bw_min &&
-	     nla_put_uint(msg, NET_SHAPER_A_BW_MIN, shaper->bw_min)) ||
-	    (shaper->bw_max &&
-	     nla_put_uint(msg, NET_SHAPER_A_BW_MAX, shaper->bw_max)) ||
-	    (shaper->burst &&
-	     nla_put_uint(msg, NET_SHAPER_A_BURST, shaper->burst)) ||
-	    (shaper->priority &&
-	     nla_put_u32(msg, NET_SHAPER_A_PRIORITY, shaper->priority)) ||
-	    (shaper->weight &&
-	     nla_put_u32(msg, NET_SHAPER_A_WEIGHT, shaper->weight)))
+	    ((cur.bw_min || cur.bw_max || cur.burst) &&
+	     nla_put_u32(msg, NET_SHAPER_A_METRIC, cur.metric)) ||
+	    (cur.bw_min &&
+	     nla_put_uint(msg, NET_SHAPER_A_BW_MIN, cur.bw_min)) ||
+	    (cur.bw_max &&
+	     nla_put_uint(msg, NET_SHAPER_A_BW_MAX, cur.bw_max)) ||
+	    (cur.burst &&
+	     nla_put_uint(msg, NET_SHAPER_A_BURST, cur.burst)) ||
+	    (cur.priority &&
+	     nla_put_u32(msg, NET_SHAPER_A_PRIORITY, cur.priority)) ||
+	    (cur.weight &&
+	     nla_put_u32(msg, NET_SHAPER_A_WEIGHT, cur.weight)))
 		goto nla_put_failure;
 
 	genlmsg_end(msg, hdr);
@@ -241,24 +279,24 @@ static void net_shaper_default_parent(const struct net_shaper_handle *handle,
 	parent->id = 0;
 }
 
-/*
- * MARK_0 is already in use due to XA_FLAGS_ALLOC, can't reuse such flag as
- * it's cleared by xa_store().
- */
-#define NET_SHAPER_NOT_VALID XA_MARK_1
-
 static struct net_shaper *
 net_shaper_lookup(struct net_shaper_binding *binding,
 		  const struct net_shaper_handle *handle)
 {
-	struct net_shaper_hierarchy *hierarchy = net_shaper_hierarchy(binding);
 	u32 index = net_shaper_handle_to_index(handle);
+	struct net_shaper_hierarchy *hierarchy;
+	struct net_shaper *cur;
 
-	if (!hierarchy || xa_get_mark(&hierarchy->shapers, index,
-				      NET_SHAPER_NOT_VALID))
+	hierarchy = net_shaper_hierarchy_rcu(binding);
+	if (!hierarchy)
 		return NULL;
 
-	return xa_load(&hierarchy->shapers, index);
+	cur = xa_load(&hierarchy->shapers, index);
+	/* Check valid before reading fields */
+	if (!cur || !smp_load_acquire(&cur->valid))
+		return NULL;
+
+	return cur;
 }
 
 /* Allocate on demand the per device shaper's hierarchy container.
@@ -335,13 +373,10 @@ static int net_shaper_pre_insert(struct net_shaper_binding *binding,
 		goto free_id;
 	}
 
-	/* Mark 'tentative' shaper inside the hierarchy container.
-	 * xa_set_mark is a no-op if the previous store fails.
+	/* Insert as 'tentative' (no VALID mark). The mark will be set by
+	 * net_shaper_commit() once the driver-side configuration succeeds.
 	 */
-	xa_lock(&hierarchy->shapers);
-	prev = __xa_store(&hierarchy->shapers, index, cur, GFP_KERNEL);
-	__xa_set_mark(&hierarchy->shapers, index, NET_SHAPER_NOT_VALID);
-	xa_unlock(&hierarchy->shapers);
+	prev = xa_store(&hierarchy->shapers, index, cur, GFP_KERNEL);
 	if (xa_err(prev)) {
 		NL_SET_ERR_MSG(extack, "Can't insert shaper into device store");
 		kfree_rcu(cur, rcu);
@@ -375,12 +410,10 @@ static void net_shaper_commit(struct net_shaper_binding *binding,
 		if (WARN_ON_ONCE(!cur))
 			continue;
 
-		/* Successful update: drop the tentative mark
-		 * and update the hierarchy container.
-		 */
-		__xa_clear_mark(&hierarchy->shapers, index,
-				NET_SHAPER_NOT_VALID);
-		*cur = shapers[i];
+		/* Successful update: update the hierarchy container... */
+		net_shaper_copy(cur, &shapers[i]);
+		/* ... publish to lockless readers. */
+		smp_store_release(&cur->valid, true);
 	}
 	xa_unlock(&hierarchy->shapers);
 }
@@ -396,10 +429,11 @@ static void net_shaper_rollback(struct net_shaper_binding *binding)
 		return;
 
 	xa_lock(&hierarchy->shapers);
-	xa_for_each_marked(&hierarchy->shapers, index, cur,
-			   NET_SHAPER_NOT_VALID) {
+	xa_for_each(&hierarchy->shapers, index, cur) {
+		if (cur->valid)
+			continue;
 		__xa_erase(&hierarchy->shapers, index);
-		kfree(cur);
+		kfree_rcu(cur, rcu);
 	}
 	xa_unlock(&hierarchy->shapers);
 }
@@ -782,17 +816,24 @@ int net_shaper_nl_get_dumpit(struct sk_buff *skb,
 
 	/* Don't error out dumps performed before any set operation. */
 	binding = net_shaper_binding_from_ctx(ctx);
-	hierarchy = net_shaper_hierarchy(binding);
-	if (!hierarchy)
-		return 0;
 
 	rcu_read_lock();
+	hierarchy = net_shaper_hierarchy_rcu(binding);
+	if (!hierarchy)
+		goto out_unlock;
+
 	for (; (shaper = xa_find(&hierarchy->shapers, &ctx->start_index,
-				 U32_MAX, XA_PRESENT)); ctx->start_index++) {
+				 U32_MAX, XA_PRESENT));
+	     ctx->start_index++) {
+		/* Check valid before reading fields */
+		if (!smp_load_acquire(&shaper->valid))
+			continue;
+
 		ret = net_shaper_fill_one(skb, binding, shaper, info);
 		if (ret)
 			break;
 	}
+out_unlock:
 	rcu_read_unlock();
 
 	return ret;

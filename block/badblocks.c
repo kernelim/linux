@@ -50,8 +50,8 @@
  * -1: there are bad blocks which have not yet been acknowledged in metadata.
  * plus the start/length of the first bad section we overlap.
  */
-int badblocks_check(struct badblocks *bb, sector_t s, int sectors,
-			sector_t *first_bad, int *bad_sectors)
+int badblocks_check(struct badblocks *bb, sector_t s, sector_t sectors,
+			sector_t *first_bad, sector_t *bad_sectors)
 {
 	int hi;
 	int lo;
@@ -159,7 +159,7 @@ static void badblocks_update_acked(struct badblocks *bb)
  *  0: success
  *  1: failed to set badblocks (out of space)
  */
-int badblocks_set(struct badblocks *bb, sector_t s, int sectors,
+int badblocks_set(struct badblocks *bb, sector_t s, sector_t sectors,
 			int acknowledged)
 {
 	u64 *p;
@@ -327,7 +327,7 @@ EXPORT_SYMBOL_GPL(badblocks_set);
  *  0: success
  *  1: failed to clear badblocks
  */
-int badblocks_clear(struct badblocks *bb, sector_t s, int sectors)
+int badblocks_clear(struct badblocks *bb, sector_t s, sector_t sectors)
 {
 	u64 *p;
 	int lo, hi;

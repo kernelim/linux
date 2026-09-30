@@ -284,21 +284,26 @@ dma_mem_error:
 	return err;
 }
 
-/* API for virtchnl "transaction" support ("xn" for short). */
-
+/* API for virtchnl "transaction" support ("xn" for short).
+ *
+ * We are reusing the completion lock to serialize the accesses to the
+ * transaction state for simplicity, but it could be its own separate synchro
+ * as well. For now, this API is only used from within a workqueue context;
+ * raw_spin_lock() is enough.
+ */
 /**
  * idpf_vc_xn_lock - Request exclusive access to vc transaction
  * @xn: struct idpf_vc_xn* to access
  */
 #define idpf_vc_xn_lock(xn)			\
-	spin_lock(&(xn)->lock)
+	raw_spin_lock(&(xn)->completed.wait.lock)
 
 /**
  * idpf_vc_xn_unlock - Release exclusive access to vc transaction
  * @xn: struct idpf_vc_xn* to access
  */
 #define idpf_vc_xn_unlock(xn)		\
-	spin_unlock(&(xn)->lock)
+	raw_spin_unlock(&(xn)->completed.wait.lock)
 
 /**
  * idpf_vc_xn_release_bufs - Release reference to reply buffer(s) and
@@ -330,7 +335,6 @@ static void idpf_vc_xn_init(struct idpf_vc_xn_manager *vcxn_mngr)
 		xn->state = IDPF_VC_XN_IDLE;
 		xn->idx = i;
 		idpf_vc_xn_release_bufs(xn);
-		spin_lock_init(&xn->lock);
 		init_completion(&xn->completed);
 	}
 
@@ -3171,6 +3175,7 @@ restart:
 
 	pci_sriov_set_totalvfs(adapter->pdev, idpf_get_max_vfs(adapter));
 	num_max_vports = idpf_get_max_vports(adapter);
+	adapter->max_vports = num_max_vports;
 	adapter->vports = kcalloc(num_max_vports, sizeof(*adapter->vports),
 				  GFP_KERNEL);
 	if (!adapter->vports)
@@ -3192,12 +3197,6 @@ restart:
 			err);
 		goto err_netdev_alloc;
 	}
-
-	/* Set max_vports only after vports, netdevs and vport_config buffers
-	 * are allocated to make sure max_vport bound loops don't end up
-	 * crashing, following allocation errors on init.
-	 */
-	adapter->max_vports = num_max_vports;
 
 	/* Start the mailbox task before requesting vectors. This will ensure
 	 * vector information response from mailbox is handled

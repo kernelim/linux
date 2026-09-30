@@ -92,7 +92,7 @@ void skl_tplg_d0i3_put(struct skl_dev *skl, enum d0i3_capability caps)
 static int is_skl_dsp_widget_type(struct snd_soc_dapm_widget *w,
 				  struct device *dev)
 {
-	if (w->dapm->dev != dev)
+	if (snd_soc_dapm_to_dev(w->dapm) != dev)
 		return false;
 
 	switch (w->id) {
@@ -1279,7 +1279,7 @@ static int skl_tplg_mixer_event(struct snd_soc_dapm_widget *w,
 				struct snd_kcontrol *k, int event)
 {
 	struct snd_soc_dapm_context *dapm = w->dapm;
-	struct skl_dev *skl = get_skl_ctx(dapm->dev);
+	struct skl_dev *skl = get_skl_ctx(snd_soc_dapm_to_dev(dapm));
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
@@ -1309,7 +1309,7 @@ static int skl_tplg_pga_event(struct snd_soc_dapm_widget *w,
 
 {
 	struct snd_soc_dapm_context *dapm = w->dapm;
-	struct skl_dev *skl = get_skl_ctx(dapm->dev);
+	struct skl_dev *skl = get_skl_ctx(snd_soc_dapm_to_dev(dapm));
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
@@ -1326,8 +1326,7 @@ static int skl_tplg_multi_config_set_get(struct snd_kcontrol *kcontrol,
 					 struct snd_ctl_elem_value *ucontrol,
 					 bool is_set)
 {
-	struct snd_soc_component *component =
-		snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct hdac_bus *bus = snd_soc_component_get_drvdata(component);
 	struct skl_dev *skl = bus_to_skl(bus);
 	struct skl_pipeline *ppl;
@@ -1390,9 +1389,9 @@ static int skl_tplg_tlv_control_get(struct snd_kcontrol *kcontrol,
 	struct soc_bytes_ext *sb =
 			(struct soc_bytes_ext *)kcontrol->private_value;
 	struct skl_algo_data *bc = (struct skl_algo_data *)sb->dobj.private;
-	struct snd_soc_dapm_widget *w = snd_soc_dapm_kcontrol_widget(kcontrol);
+	struct snd_soc_dapm_widget *w = snd_soc_dapm_kcontrol_to_widget(kcontrol);
 	struct skl_module_cfg *mconfig = w->priv;
-	struct skl_dev *skl = get_skl_ctx(w->dapm->dev);
+	struct skl_dev *skl = get_skl_ctx(snd_soc_dapm_to_dev(w->dapm));
 
 	if (w->power)
 		skl_get_module_params(skl, (u32 *)bc->params,
@@ -1422,12 +1421,12 @@ static int skl_tplg_tlv_control_get(struct snd_kcontrol *kcontrol,
 static int skl_tplg_tlv_control_set(struct snd_kcontrol *kcontrol,
 			const unsigned int __user *data, unsigned int size)
 {
-	struct snd_soc_dapm_widget *w = snd_soc_dapm_kcontrol_widget(kcontrol);
+	struct snd_soc_dapm_widget *w = snd_soc_dapm_kcontrol_to_widget(kcontrol);
 	struct skl_module_cfg *mconfig = w->priv;
 	struct soc_bytes_ext *sb =
 			(struct soc_bytes_ext *)kcontrol->private_value;
 	struct skl_algo_data *ac = (struct skl_algo_data *)sb->dobj.private;
-	struct skl_dev *skl = get_skl_ctx(w->dapm->dev);
+	struct skl_dev *skl = get_skl_ctx(snd_soc_dapm_to_dev(w->dapm));
 
 	if (ac->params) {
 		if (size > ac->max)
@@ -1449,7 +1448,7 @@ static int skl_tplg_tlv_control_set(struct snd_kcontrol *kcontrol,
 static int skl_tplg_mic_control_get(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_dapm_widget *w = snd_soc_dapm_kcontrol_widget(kcontrol);
+	struct snd_soc_dapm_widget *w = snd_soc_dapm_kcontrol_to_widget(kcontrol);
 	struct skl_module_cfg *mconfig = w->priv;
 	struct soc_enum *ec = (struct soc_enum *)kcontrol->private_value;
 	u32 ch_type = *((u32 *)ec->dobj.private);
@@ -1488,7 +1487,7 @@ static int skl_fill_mic_sel_params(struct skl_module_cfg *mconfig,
 static int skl_tplg_mic_control_set(struct snd_kcontrol *kcontrol,
 			struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_dapm_widget *w = snd_soc_dapm_kcontrol_widget(kcontrol);
+	struct snd_soc_dapm_widget *w = snd_soc_dapm_kcontrol_to_widget(kcontrol);
 	struct skl_module_cfg *mconfig = w->priv;
 	struct skl_mic_sel_config mic_cfg = {0};
 	struct soc_enum *ec = (struct soc_enum *)kcontrol->private_value;
@@ -1536,7 +1535,7 @@ static int skl_tplg_mic_control_set(struct snd_kcontrol *kcontrol,
 		break;
 
 	default:
-		dev_err(w->dapm->dev,
+		dev_err(snd_soc_dapm_to_dev(w->dapm),
 				"Invalid channel %d for mic_select module\n",
 				ch_type);
 		return -EINVAL;
@@ -1549,7 +1548,7 @@ static int skl_tplg_mic_control_set(struct snd_kcontrol *kcontrol,
 		mic_cfg.blob[out_ch][in_ch] = SKL_DEFAULT_MIC_SEL_GAIN;
 	}
 
-	return skl_fill_mic_sel_params(mconfig, &mic_cfg, w->dapm->dev);
+	return skl_fill_mic_sel_params(mconfig, &mic_cfg, snd_soc_dapm_to_dev(w->dapm));
 }
 
 /*
@@ -2771,7 +2770,7 @@ static void skl_clear_pin_config(struct snd_soc_component *component,
 	struct skl_module_cfg *mconfig;
 	struct skl_pipe *pipe;
 
-	if (!strncmp(w->dapm->component->name, component->name,
+	if (!strncmp(snd_soc_dapm_to_component(w->dapm)->name, component->name,
 					strlen(component->name))) {
 		mconfig = w->priv;
 		pipe = mconfig->pipe;

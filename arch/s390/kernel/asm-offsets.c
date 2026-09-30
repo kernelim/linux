@@ -12,7 +12,6 @@
 #include <linux/purgatory.h>
 #include <linux/pgtable.h>
 #include <linux/ftrace.h>
-#include <asm/gmap.h>
 #include <asm/kvm_host_types.h>
 #include <asm/stacktrace.h>
 
@@ -28,6 +27,7 @@ int main(void)
 	BLANK();
 	/* thread info offsets */
 	OFFSET(__TI_flags, task_struct, thread_info.flags);
+	OFFSET(__TI_sie, task_struct, thread_info.sie);
 	BLANK();
 	/* pt_regs offsets */
 	OFFSET(__PT_PSW, pt_regs, psw);
@@ -114,7 +114,7 @@ int main(void)
 	OFFSET(__LC_SAVE_AREA_SYNC, lowcore, save_area_sync);
 	OFFSET(__LC_SAVE_AREA_ASYNC, lowcore, save_area_async);
 	OFFSET(__LC_SAVE_AREA_RESTART, lowcore, save_area_restart);
-	OFFSET(__LC_CPU_FLAGS, lowcore, cpu_flags);
+	OFFSET(__LC_PCPU, lowcore, pcpu);
 	OFFSET(__LC_RETURN_PSW, lowcore, return_psw);
 	OFFSET(__LC_RETURN_MCCK_PSW, lowcore, return_mcck_psw);
 	OFFSET(__LC_SYS_ENTER_TIMER, lowcore, sys_enter_timer);
@@ -161,7 +161,6 @@ int main(void)
 	OFFSET(__LC_PGM_TDB, lowcore, pgm_tdb);
 	BLANK();
 	/* gmap/sie offsets */
-	OFFSET(__GMAP_ASCE, gmap, asce);
 	OFFSET(__SIE_PROG0C, kvm_s390_sie_block, prog0c);
 	OFFSET(__SIE_PROG20, kvm_s390_sie_block, prog20);
 	/* kexec_sha_region */
@@ -186,5 +185,7 @@ int main(void)
 #endif
 	OFFSET(__FTRACE_REGS_PT_REGS, ftrace_regs, regs);
 	DEFINE(__FTRACE_REGS_SIZE, sizeof(struct ftrace_regs));
+
+	OFFSET(__PCPU_FLAGS, pcpu, flags);
 	return 0;
 }

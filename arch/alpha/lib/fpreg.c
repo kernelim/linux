@@ -7,6 +7,7 @@
 
 #include <linux/compiler.h>
 #include <linux/export.h>
+#include <asm/fpu.h>
 
 #if defined(CONFIG_ALPHA_EV6) || defined(CONFIG_ALPHA_EV67)
 #define STT(reg,val)  asm volatile ("ftoit $f"#reg",%0" : "=r"(val));

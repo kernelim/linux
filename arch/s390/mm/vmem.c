@@ -4,6 +4,7 @@
  */
 
 #include <linux/memory_hotplug.h>
+#include <linux/cpufeature.h>
 #include <linux/memblock.h>
 #include <linux/pfn.h>
 #include <linux/mm.h>
@@ -44,7 +45,7 @@ static void vmem_free_pages(unsigned long addr, int order, struct vmem_altmap *a
 	}
 	/* We don't expect boot memory to be removed ever. */
 	if (!slab_is_available() ||
-	    WARN_ON_ONCE(PageReserved(virt_to_page(addr))))
+	    WARN_ON_ONCE(PageReserved(virt_to_page((void *)addr))))
 		return;
 	free_pages(addr, order);
 }
@@ -171,9 +172,6 @@ static int __ref modify_pte_table(pmd_t *pmd, unsigned long addr,
 	pte_t *pte;
 
 	prot = pgprot_val(PAGE_KERNEL);
-	if (!MACHINE_HAS_NX)
-		prot &= ~_PAGE_NOEXEC;
-
 	pte = pte_offset_kernel(pmd, addr);
 	for (; addr < end; addr += PAGE_SIZE, pte++) {
 		if (!add) {
@@ -230,9 +228,6 @@ static int __ref modify_pmd_table(pud_t *pud, unsigned long addr,
 	pte_t *pte;
 
 	prot = pgprot_val(SEGMENT_KERNEL);
-	if (!MACHINE_HAS_NX)
-		prot &= ~_SEGMENT_ENTRY_NOEXEC;
-
 	pmd = pmd_offset(pud, addr);
 	for (; addr < end; addr = next, pmd++) {
 		next = pmd_addr_end(addr, end);
@@ -255,12 +250,12 @@ static int __ref modify_pmd_table(pud_t *pud, unsigned long addr,
 		} else if (pmd_none(*pmd)) {
 			if (IS_ALIGNED(addr, PMD_SIZE) &&
 			    IS_ALIGNED(next, PMD_SIZE) &&
-			    MACHINE_HAS_EDAT1 && direct &&
+			    cpu_has_edat1() && direct &&
 			    !debug_pagealloc_enabled()) {
 				set_pmd(pmd, __pmd(__pa(addr) | prot));
 				pages++;
 				continue;
-			} else if (!direct && MACHINE_HAS_EDAT1) {
+			} else if (!direct && cpu_has_edat1()) {
 				void *new_page;
 
 				/*
@@ -324,8 +319,6 @@ static int modify_pud_table(p4d_t *p4d, unsigned long addr, unsigned long end,
 	pmd_t *pmd;
 
 	prot = pgprot_val(REGION3_KERNEL);
-	if (!MACHINE_HAS_NX)
-		prot &= ~_REGION_ENTRY_NOEXEC;
 	pud = pud_offset(p4d, addr);
 	for (; addr < end; addr = next, pud++) {
 		next = pud_addr_end(addr, end);
@@ -343,7 +336,7 @@ static int modify_pud_table(p4d_t *p4d, unsigned long addr, unsigned long end,
 		} else if (pud_none(*pud)) {
 			if (IS_ALIGNED(addr, PUD_SIZE) &&
 			    IS_ALIGNED(next, PUD_SIZE) &&
-			    MACHINE_HAS_EDAT2 && direct &&
+			    cpu_has_edat2() && direct &&
 			    !debug_pagealloc_enabled()) {
 				set_pud(pud, __pud(__pa(addr) | prot));
 				pages++;
@@ -661,7 +654,6 @@ void __init vmem_map_init(void)
 {
 	__set_memory_rox(_stext, _etext);
 	__set_memory_ro(_etext, __end_rodata);
-	__set_memory_rox(_sinittext, _einittext);
 	__set_memory_rox(__stext_amode31, __etext_amode31);
 	/*
 	 * If the BEAR-enhancement facility is not installed the first
@@ -670,16 +662,8 @@ void __init vmem_map_init(void)
 	 */
 	if (!static_key_enabled(&cpu_has_bear))
 		set_memory_x(0, 1);
-	if (debug_pagealloc_enabled()) {
-		/*
-		 * Use RELOC_HIDE() as long as __va(0) translates to NULL,
-		 * since performing pointer arithmetic on a NULL pointer
-		 * has undefined behavior and generates compiler warnings.
-		 */
-		__set_memory_4k(__va(0), RELOC_HIDE(__va(0), ident_map_size));
-	}
-	if (MACHINE_HAS_NX)
-		system_ctl_set_bit(0, CR0_INSTRUCTION_EXEC_PROTECTION_BIT);
+	if (debug_pagealloc_enabled())
+		__set_memory_4k(__va(0), __va(0) + ident_map_size);
 	pr_info("Write protected kernel read-only data: %luk\n",
 		(unsigned long)(__end_rodata - _stext) >> 10);
 }

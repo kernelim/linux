@@ -1,3 +1,3 @@
-#8-
-0x6443f6bb	nvmet_unregister_transport	drivers/nvme/target/nvmet	EXPORT_SYMBOL_GPL	
+#9-
+0xda56817b	nvmet_unregister_transport	drivers/nvme/target/nvmet	EXPORT_SYMBOL_GPL	
 

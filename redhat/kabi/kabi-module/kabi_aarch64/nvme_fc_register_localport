@@ -1,3 +1,3 @@
-#8-
-0x4b262f81	nvme_fc_register_localport	drivers/nvme/host/nvme-fc	EXPORT_SYMBOL_GPL	
+#9-
+0x5a11fefa	nvme_fc_register_localport	drivers/nvme/host/nvme-fc	EXPORT_SYMBOL_GPL	
 

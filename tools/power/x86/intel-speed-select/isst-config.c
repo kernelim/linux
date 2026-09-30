@@ -16,7 +16,7 @@ struct process_cmd_struct {
 	int arg;
 };
 
-static const char *version_str = "v1.23";
+static const char *version_str = "v1.25";
 
 static const int supported_api_ver = 3;
 static struct isst_if_platform_info isst_platform_info;
@@ -26,7 +26,7 @@ static FILE *outf;
 
 static int cpu_model;
 static int cpu_stepping;
-static int extended_family;
+static int cpu_family;
 
 #define MAX_CPUS_IN_ONE_REQ 512
 static short max_target_cpus;
@@ -79,6 +79,18 @@ struct cpu_topology {
 	short pkg_id;
 	short die_id;
 };
+
+static int read_only;
+
+static void check_privilege(void)
+{
+	if (!read_only)
+		return;
+
+	isst_display_error_info_message(1, "Insufficient privileges", 0, 0);
+	isst_ctdp_display_information_end(outf);
+	exit(1);
+}
 
 FILE *get_output_file(void)
 {
@@ -146,7 +158,7 @@ int is_icx_platform(void)
 
 static int is_dmr_plus_platform(void)
 {
-	if (extended_family == 0x04)
+	if (cpu_family == 19)
 		return 1;
 
 	return 0;
@@ -155,13 +167,14 @@ static int is_dmr_plus_platform(void)
 static int update_cpu_model(void)
 {
 	unsigned int ebx, ecx, edx;
-	unsigned int fms, family;
+	unsigned int fms;
 
 	__cpuid(1, fms, ebx, ecx, edx);
-	family = (fms >> 8) & 0xf;
-	extended_family = (fms >> 20) & 0x0f;
+	cpu_family = (fms >> 8) & 0xf;
+	if (cpu_family == 0xf)
+		cpu_family += (fms >> 20) & 0xff;
 	cpu_model = (fms >> 4) & 0xf;
-	if (family == 6 || family == 0xf)
+	if (cpu_family == 6 || cpu_family == 0xf)
 		cpu_model += ((fms >> 16) & 0xf) << 4;
 
 	cpu_stepping = fms & 0xf;
@@ -950,9 +963,11 @@ int isolate_cpus(struct isst_id *id, int mask_size, cpu_set_t *cpu_mask, int lev
 		ret = write(fd, "member", strlen("member"));
 		if (ret == -1) {
 			printf("Can't update to member\n");
+			close(fd);
 			return ret;
 		}
 
+		close(fd);
 		return 0;
 	}
 
@@ -1124,7 +1139,7 @@ static int isst_fill_platform_info(void)
 
 	if (isst_platform_info.api_version > supported_api_ver) {
 		printf("Incompatible API versions; Upgrade of tool is required\n");
-		return -1;
+		exit(1);
 	}
 
 set_platform_ops:
@@ -1578,6 +1593,8 @@ free_mask:
 
 static void set_tdp_level(int arg)
 {
+	check_privilege();
+
 	if (cmd_help) {
 		fprintf(stderr, "Set Config TDP level\n");
 		fprintf(stderr,
@@ -2046,6 +2063,8 @@ static void set_pbf_enable(int arg)
 {
 	int enable = arg;
 
+	check_privilege();
+
 	if (cmd_help) {
 		if (enable) {
 			fprintf(stderr,
@@ -2212,6 +2231,8 @@ static void set_fact_enable(int arg)
 	int i, ret, enable = arg;
 	struct isst_id id;
 
+	check_privilege();
+
 	if (cmd_help) {
 		if (enable) {
 			fprintf(stderr,
@@ -2361,6 +2382,8 @@ static void set_clos_enable(int arg)
 {
 	int enable = arg;
 
+	check_privilege();
+
 	if (cmd_help) {
 		if (enable) {
 			fprintf(stderr,
@@ -2491,6 +2514,8 @@ static void set_clos_config_for_cpu(struct isst_id *id, void *arg1, void *arg2, 
 
 static void set_clos_config(int arg)
 {
+	check_privilege();
+
 	if (cmd_help) {
 		fprintf(stderr,
 			"Set core-power configuration for one of the four clos ids\n");
@@ -2556,6 +2581,8 @@ static void set_clos_assoc_for_cpu(struct isst_id *id, void *arg1, void *arg2, v
 
 static void set_clos_assoc(int arg)
 {
+	check_privilege();
+
 	if (cmd_help) {
 		fprintf(stderr, "Associate a clos id to a CPU\n");
 		fprintf(stderr,
@@ -2637,6 +2664,8 @@ static void set_turbo_mode(int arg)
 	int i, disable = arg;
 	struct isst_id id;
 
+	check_privilege();
+
 	if (cmd_help) {
 		if (disable)
 			fprintf(stderr, "Set turbo mode disable\n");
@@ -2682,6 +2711,7 @@ static void get_set_trl(struct isst_id *id, void *arg1, void *arg2, void *arg3,
 	}
 
 	if (set) {
+		check_privilege();
 		ret = isst_set_trl(id, fact_trl);
 		isst_display_result(id, outf, "turbo-mode", "set-trl", ret);
 		return;
@@ -3162,7 +3192,7 @@ static void usage(void)
 		printf("\tTo get full turbo-freq information dump:\n");
 		printf("\t\tintel-speed-select turbo-freq info -l 0\n");
 	}
-	exit(1);
+	exit(0);
 }
 
 static void print_version(void)
@@ -3204,13 +3234,23 @@ static void cmdline(int argc, char **argv)
 	};
 
 	if (geteuid() != 0) {
-		fprintf(stderr, "Must run as root\n");
-		exit(0);
+		int fd;
+
+		fd = open(pathname, O_RDWR);
+		if (fd < 0) {
+			fprintf(stderr, "Must run as root\n");
+			exit(0);
+		}
+		fprintf(stderr, "\nNot running as root, Only read only operations are supported\n");
+		close(fd);
+		read_only = 1;
 	}
 
 	ret = update_cpu_model();
-	if (ret)
-		err(-1, "Invalid CPU model (%d)\n", cpu_model);
+	if (ret) {
+		fprintf(stderr, "Invalid CPU model (%d)\n", cpu_model);
+		exit(1);
+	}
 	printf("Intel(R) Speed Select Technology\n");
 	printf("Executing on CPU model:%d[0x%x]\n", cpu_model, cpu_model);
 

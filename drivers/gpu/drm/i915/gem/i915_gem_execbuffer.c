@@ -9,6 +9,7 @@
 #include <linux/uaccess.h>
 
 #include <drm/drm_auth.h>
+#include <drm/drm_print.h>
 #include <drm/drm_syncobj.h>
 
 #include "gem/i915_gem_ioctls.h"
@@ -142,7 +143,7 @@ enum {
  * we want to leave the object where it is and for all the existing relocations
  * to match. If the object is given a new address, or if userspace thinks the
  * object is elsewhere, we have to parse all the relocation entries and update
- * the addresses. Userspace can set the I915_EXEC_NORELOC flag to hint that
+ * the addresses. Userspace can set the I915_EXEC_NO_RELOC flag to hint that
  * all the target addresses in all of its objects match the value in the
  * relocation entries and that they all match the presumed offsets given by the
  * list of execbuffer objects. Using this knowledge, we know that if we haven't
@@ -895,8 +896,10 @@ static struct i915_vma *eb_lookup_vma(struct i915_execbuffer *eb, u32 handle)
 
 		rcu_read_lock();
 		vma = radix_tree_lookup(&eb->gem_context->handles_vma, handle);
-		if (likely(vma && vma->vm == vm))
+		if (likely(vma))
 			vma = i915_vma_tryget(vma);
+		else
+			vma = NULL;
 		rcu_read_unlock();
 		if (likely(vma))
 			return vma;
@@ -2005,7 +2008,7 @@ static int eb_capture_stage(struct i915_execbuffer *eb)
 		for_each_batch_create_order(eb, j) {
 			struct i915_capture_list *capture;
 
-			capture = kmalloc(sizeof(*capture), GFP_KERNEL);
+			capture = kmalloc_obj(*capture);
 			if (!capture)
 				continue;
 
@@ -3189,7 +3192,7 @@ eb_composite_fence_create(struct i915_execbuffer *eb, int out_fence_fd)
 
 	GEM_BUG_ON(!intel_context_is_parent(eb->context));
 
-	fences = kmalloc_array(eb->num_batches, sizeof(*fences), GFP_KERNEL);
+	fences = kmalloc_objs(*fences, eb->num_batches);
 	if (!fences)
 		return ERR_PTR(-ENOMEM);
 

@@ -24,6 +24,7 @@
 
 #include <linux/memblock.h>
 #include <linux/init.h>
+#include <linux/vmalloc.h>
 
 #include "numa_internal.h"
 

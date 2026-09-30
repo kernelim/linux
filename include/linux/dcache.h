@@ -57,6 +57,7 @@ struct qstr {
 };
 
 #define QSTR_INIT(n,l) { { { .len = l } }, .name = n }
+#define QSTR_LEN(n,l) (struct qstr)QSTR_INIT(n,l)
 
 extern const struct qstr empty_name;
 extern const struct qstr slash_name;
@@ -78,6 +79,7 @@ extern const struct qstr dotdot_name;
 #endif
 
 #define d_lock	d_lockref.lock
+struct completion_list;
 
 struct dentry {
 	/* RCU lookup touched fields */
@@ -104,13 +106,24 @@ struct dentry {
 	struct hlist_node d_sib;	/* child of parent list */
 	struct hlist_head d_children;	/* our children */
 	/*
-	 * d_alias and d_rcu can share memory
+	 * the following members can share memory - their uses are
+	 * mutually exclusive.
 	 */
 	union {
-		struct hlist_node d_alias;	/* inode alias list */
-		struct hlist_bl_node d_in_lookup_hash;	/* only for in-lookup ones */
+		/* positives: inode alias list */
+		struct hlist_node d_alias;
+		/* in-lookup ones (all negative, live): hash chain */
+		struct hlist_bl_node d_in_lookup_hash;
+		/* killed ones: (already negative) used to schedule freeing */
 	 	struct rcu_head d_rcu;
-	} d_u;
+		/*
+		 * live non-in-lookup negatives: used if shrink_dcache_tree()
+		 * races with eviction by another thread and needs to wait for
+		 * this dentry to get killed .  Remains NULL for almost all
+		 * negative dentries.
+		 */
+		struct completion_list *waiters;
+	};
 };
 
 /*
@@ -231,7 +244,6 @@ extern struct dentry * d_splice_alias(struct inode *, struct dentry *);
 extern struct dentry * d_add_ci(struct dentry *, struct inode *, struct qstr *);
 extern bool d_same_name(const struct dentry *dentry, const struct dentry *parent,
 			const struct qstr *name);
-extern struct dentry * d_exact_alias(struct dentry *, struct inode *);
 extern struct dentry *d_find_any_alias(struct inode *inode);
 extern struct dentry * d_obtain_alias(struct inode *);
 extern struct dentry * d_obtain_root(struct inode *);
@@ -245,6 +257,7 @@ extern struct dentry * d_make_root(struct inode *);
 /* <clickety>-<click> the ramfs-type tree */
 extern void d_genocide(struct dentry *);
 
+int d_mark_tmpfile_name(struct file *file, const struct qstr *name);
 extern void d_tmpfile(struct file *, struct inode *);
 
 extern struct dentry *d_find_alias(struct inode *);
@@ -594,5 +607,9 @@ static inline struct dentry *d_next_sibling(const struct dentry *dentry)
 {
 	return hlist_entry_safe(dentry->d_sib.next, struct dentry, d_sib);
 }
+
+/* inode->i_lock must be held over that */
+#define for_each_alias(dentry, inode) \
+	hlist_for_each_entry(dentry, &(inode)->i_dentry, d_alias)
 
 #endif	/* __LINUX_DCACHE_H */

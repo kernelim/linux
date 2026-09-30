@@ -252,7 +252,8 @@ struct rapl_primitive_info {
 static void rapl_init_domains(struct rapl_package *rp);
 static int rapl_read_data_raw(struct rapl_domain *rd,
 			      enum rapl_primitives prim,
-			      bool xlate, u64 *data);
+			      bool xlate, u64 *data,
+			      bool pmu_ctx);
 static int rapl_write_data_raw(struct rapl_domain *rd,
 			       enum rapl_primitives prim,
 			       unsigned long long value);
@@ -288,7 +289,7 @@ static int get_energy_counter(struct powercap_zone *power_zone,
 	cpus_read_lock();
 	rd = power_zone_to_rapl_domain(power_zone);
 
-	if (!rapl_read_data_raw(rd, ENERGY_COUNTER, true, &energy_now)) {
+	if (!rapl_read_data_raw(rd, ENERGY_COUNTER, true, &energy_now, false)) {
 		*energy_raw = energy_now;
 		cpus_read_unlock();
 
@@ -829,7 +830,8 @@ prim_fixups(struct rapl_domain *rd, enum rapl_primitives prim)
  * 63-------------------------- 31--------------------------- 0
  */
 static int rapl_read_data_raw(struct rapl_domain *rd,
-			      enum rapl_primitives prim, bool xlate, u64 *data)
+			      enum rapl_primitives prim, bool xlate, u64 *data,
+			      bool pmu_ctx)
 {
 	u64 value;
 	enum rapl_primitives prim_fixed = prim_fixups(rd, prim);
@@ -851,7 +853,7 @@ static int rapl_read_data_raw(struct rapl_domain *rd,
 
 	ra.mask = rpi->mask;
 
-	if (rd->rp->priv->read_raw(get_rid(rd->rp), &ra)) {
+	if (rd->rp->priv->read_raw(get_rid(rd->rp), &ra, pmu_ctx)) {
 		pr_debug("failed to read reg 0x%llx for %s:%s\n", ra.reg.val, rd->rp->name, rd->name);
 		return -EIO;
 	}
@@ -903,7 +905,7 @@ static int rapl_read_pl_data(struct rapl_domain *rd, int pl,
 	if (!is_pl_valid(rd, pl))
 		return -EINVAL;
 
-	return rapl_read_data_raw(rd, prim, xlate, data);
+	return rapl_read_data_raw(rd, prim, xlate, data, false);
 }
 
 static int rapl_write_pl_data(struct rapl_domain *rd, int pl,
@@ -940,7 +942,7 @@ static int rapl_check_unit_core(struct rapl_domain *rd)
 
 	ra.reg = rd->regs[RAPL_DOMAIN_REG_UNIT];
 	ra.mask = ~0;
-	if (rd->rp->priv->read_raw(get_rid(rd->rp), &ra)) {
+	if (rd->rp->priv->read_raw(get_rid(rd->rp), &ra, false)) {
 		pr_err("Failed to read power unit REG 0x%llx on %s:%s, exit.\n",
 			ra.reg.val, rd->rp->name, rd->name);
 		return -ENODEV;
@@ -968,7 +970,7 @@ static int rapl_check_unit_atom(struct rapl_domain *rd)
 
 	ra.reg = rd->regs[RAPL_DOMAIN_REG_UNIT];
 	ra.mask = ~0;
-	if (rd->rp->priv->read_raw(get_rid(rd->rp), &ra)) {
+	if (rd->rp->priv->read_raw(get_rid(rd->rp), &ra, false)) {
 		pr_err("Failed to read power unit REG 0x%llx on %s:%s, exit.\n",
 			ra.reg.val, rd->rp->name, rd->name);
 		return -ENODEV;
@@ -1155,7 +1157,7 @@ static int rapl_check_unit_tpmi(struct rapl_domain *rd)
 
 	ra.reg = rd->regs[RAPL_DOMAIN_REG_UNIT];
 	ra.mask = ~0;
-	if (rd->rp->priv->read_raw(get_rid(rd->rp), &ra)) {
+	if (rd->rp->priv->read_raw(get_rid(rd->rp), &ra, false)) {
 		pr_err("Failed to read power unit REG 0x%llx on %s:%s, exit.\n",
 			ra.reg.val, rd->rp->name, rd->name);
 		return -ENODEV;
@@ -1284,6 +1286,8 @@ static const struct x86_cpu_id rapl_ids[] __initconst = {
 	X86_MATCH_VFM(INTEL_LUNARLAKE_M,	&rapl_defaults_core),
 	X86_MATCH_VFM(INTEL_PANTHERLAKE_L,	&rapl_defaults_core),
 	X86_MATCH_VFM(INTEL_WILDCATLAKE_L,	&rapl_defaults_core),
+	X86_MATCH_VFM(INTEL_NOVALAKE,		&rapl_defaults_core),
+	X86_MATCH_VFM(INTEL_NOVALAKE_L,		&rapl_defaults_core),
 	X86_MATCH_VFM(INTEL_ARROWLAKE_H,	&rapl_defaults_core),
 	X86_MATCH_VFM(INTEL_ARROWLAKE,		&rapl_defaults_core),
 	X86_MATCH_VFM(INTEL_ARROWLAKE_U,	&rapl_defaults_core),
@@ -1325,7 +1329,7 @@ static void rapl_update_domain_data(struct rapl_package *rp)
 			struct rapl_primitive_info *rpi = get_rpi(rp, prim);
 
 			if (!rapl_read_data_raw(&rp->domains[dmn], prim,
-						rpi->unit, &val))
+						rpi->unit, &val, false))
 				rp->domains[dmn].rdd.primitives[prim] = val;
 		}
 	}
@@ -1425,7 +1429,7 @@ static int rapl_check_domain(int domain, struct rapl_package *rp)
 	 */
 
 	ra.mask = ENERGY_STATUS_MASK;
-	if (rp->priv->read_raw(get_rid(rp), &ra) || !ra.value)
+	if (rp->priv->read_raw(get_rid(rp), &ra, false) || !ra.value)
 		return -ENODEV;
 
 	return 0;
@@ -1585,23 +1589,21 @@ static struct rapl_pmu rapl_pmu;
 
 /* PMU helpers */
 
-static int get_pmu_cpu(struct rapl_package *rp)
+static void set_pmu_cpumask(struct rapl_package *rp, cpumask_var_t mask)
 {
 	int cpu;
 
 	if (!rp->has_pmu)
-		return nr_cpu_ids;
+		return;
 
-	/* Only TPMI RAPL is supported for now */
-	if (rp->priv->type != RAPL_IF_TPMI)
-		return nr_cpu_ids;
+	/* Only TPMI & MSR RAPL are supported for now */
+	if (rp->priv->type != RAPL_IF_TPMI && rp->priv->type != RAPL_IF_MSR)
+		return;
 
-	/* TPMI RAPL uses any CPU in the package for PMU */
+	/* TPMI/MSR RAPL uses any CPU in the package for PMU */
 	for_each_online_cpu(cpu)
 		if (topology_physical_package_id(cpu) == rp->id)
-			return cpu;
-
-	return nr_cpu_ids;
+			cpumask_set_cpu(cpu, mask);
 }
 
 static bool is_rp_pmu_cpu(struct rapl_package *rp, int cpu)
@@ -1609,11 +1611,11 @@ static bool is_rp_pmu_cpu(struct rapl_package *rp, int cpu)
 	if (!rp->has_pmu)
 		return false;
 
-	/* Only TPMI RAPL is supported for now */
-	if (rp->priv->type != RAPL_IF_TPMI)
+	/* Only TPMI & MSR RAPL are supported for now */
+	if (rp->priv->type != RAPL_IF_TPMI && rp->priv->type != RAPL_IF_MSR)
 		return false;
 
-	/* TPMI RAPL uses any CPU in the package for PMU */
+	/* TPMI/MSR RAPL uses any CPU in the package for PMU */
 	return topology_physical_package_id(cpu) == rp->id;
 }
 
@@ -1636,7 +1638,7 @@ static u64 event_read_counter(struct perf_event *event)
 	if (event->hw.idx < 0)
 		return 0;
 
-	ret = rapl_read_data_raw(&rp->domains[event->hw.idx], ENERGY_COUNTER, false, &val);
+	ret = rapl_read_data_raw(&rp->domains[event->hw.idx], ENERGY_COUNTER, false, &val, true);
 
 	/* Return 0 for failed read */
 	if (ret)
@@ -1878,7 +1880,6 @@ static ssize_t cpumask_show(struct device *dev,
 {
 	struct rapl_package *rp;
 	cpumask_var_t cpu_mask;
-	int cpu;
 	int ret;
 
 	if (!alloc_cpumask_var(&cpu_mask, GFP_KERNEL))
@@ -1890,9 +1891,7 @@ static ssize_t cpumask_show(struct device *dev,
 
 	/* Choose a cpu for each RAPL Package */
 	list_for_each_entry(rp, &rapl_packages, plist) {
-		cpu = get_pmu_cpu(rp);
-		if (cpu < nr_cpu_ids)
-			cpumask_set_cpu(cpu, cpu_mask);
+		set_pmu_cpumask(rp, cpu_mask);
 	}
 	cpus_read_unlock();
 
@@ -2027,15 +2026,13 @@ end:
 	return ret;
 }
 
-int rapl_package_add_pmu(struct rapl_package *rp)
+int rapl_package_add_pmu_locked(struct rapl_package *rp)
 {
 	struct rapl_package_pmu_data *data = &rp->pmu_data;
 	int idx;
 
 	if (rp->has_pmu)
 		return -EEXIST;
-
-	guard(cpus_read_lock)();
 
 	for (idx = 0; idx < rp->nr_domains; idx++) {
 		struct rapl_domain *rd = &rp->domains[idx];
@@ -2086,16 +2083,22 @@ int rapl_package_add_pmu(struct rapl_package *rp)
 
 	return rapl_pmu_update(rp);
 }
+EXPORT_SYMBOL_GPL(rapl_package_add_pmu_locked);
+
+int rapl_package_add_pmu(struct rapl_package *rp)
+{
+	guard(cpus_read_lock)();
+
+	return rapl_package_add_pmu_locked(rp);
+}
 EXPORT_SYMBOL_GPL(rapl_package_add_pmu);
 
-void rapl_package_remove_pmu(struct rapl_package *rp)
+void rapl_package_remove_pmu_locked(struct rapl_package *rp)
 {
 	struct rapl_package *pos;
 
 	if (!rp->has_pmu)
 		return;
-
-	guard(cpus_read_lock)();
 
 	list_for_each_entry(pos, &rapl_packages, plist) {
 		/* PMU is still needed */
@@ -2105,6 +2108,14 @@ void rapl_package_remove_pmu(struct rapl_package *rp)
 
 	perf_pmu_unregister(&rapl_pmu.pmu);
 	memset(&rapl_pmu, 0, sizeof(struct rapl_pmu));
+}
+EXPORT_SYMBOL_GPL(rapl_package_remove_pmu_locked);
+
+void rapl_package_remove_pmu(struct rapl_package *rp)
+{
+	guard(cpus_read_lock)();
+
+	rapl_package_remove_pmu_locked(rp);
 }
 EXPORT_SYMBOL_GPL(rapl_package_remove_pmu);
 #endif
@@ -2213,7 +2224,8 @@ struct rapl_package *rapl_add_package_cpuslocked(int id, struct rapl_if_priv *pr
 			 topology_physical_package_id(id) : topology_logical_die_id(id);
 		if ((int)(rp->id) < 0) {
 			pr_err("topology_logical_(package/die)_id() returned a negative value");
-			return ERR_PTR(-EINVAL);
+			ret = -EINVAL;
+			goto err_free_package;
 		}
 		rp->lead_cpu = id;
 		if (!rapl_msrs_are_pkg_scope() && topology_max_dies_per_package() > 1)

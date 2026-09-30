@@ -1,3 +1,3 @@
-#8-
-0x24f865f1	nvmet_cq_put	drivers/nvme/target/nvmet	EXPORT_SYMBOL_GPL	
+#9-
+0x0b4ca4e4	nvmet_cq_put	drivers/nvme/target/nvmet	EXPORT_SYMBOL_GPL	
 

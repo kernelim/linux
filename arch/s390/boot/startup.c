@@ -30,11 +30,13 @@ unsigned long __bootdata_preserved(vmemmap_size);
 unsigned long __bootdata_preserved(MODULES_VADDR);
 unsigned long __bootdata_preserved(MODULES_END);
 unsigned long __bootdata_preserved(max_mappable);
+unsigned long __bootdata_preserved(page_noexec_mask);
+unsigned long __bootdata_preserved(segment_noexec_mask);
+unsigned long __bootdata_preserved(region_noexec_mask);
+int __bootdata_preserved(relocate_lowcore);
 
 u64 __bootdata_preserved(stfle_fac_list[16]);
 struct oldmem_data __bootdata_preserved(oldmem_data);
-
-struct machine_info machine;
 
 void error(char *x)
 {
@@ -47,14 +49,16 @@ void error(char *x)
 
 static void detect_facilities(void)
 {
-	if (test_facility(8)) {
-		machine.has_edat1 = 1;
+	if (cpu_has_edat1())
 		local_ctl_set_bit(0, CR0_EDAT_BIT);
+	page_noexec_mask = -1UL;
+	segment_noexec_mask = -1UL;
+	region_noexec_mask = -1UL;
+	if (!cpu_has_nx()) {
+		page_noexec_mask &= ~_PAGE_NOEXEC;
+		segment_noexec_mask &= ~_SEGMENT_ENTRY_NOEXEC;
+		region_noexec_mask &= ~_REGION_ENTRY_NOEXEC;
 	}
-	if (test_facility(78))
-		machine.has_edat2 = 1;
-	if (test_facility(130))
-		machine.has_nx = 1;
 }
 
 static int cmma_test_essa(void)
@@ -373,6 +377,8 @@ static void kaslr_adjust_vmlinux_info(long offset)
 	vmlinux.init_mm_off += offset;
 	vmlinux.swapper_pg_dir_off += offset;
 	vmlinux.invalid_pg_dir_off += offset;
+	vmlinux.alt_instructions += offset;
+	vmlinux.alt_instructions_end += offset;
 #ifdef CONFIG_KASAN
 	vmlinux.kasan_early_shadow_page_off += offset;
 	vmlinux.kasan_early_shadow_pte_off += offset;
@@ -505,6 +511,9 @@ void startup_kernel(void)
 	kaslr_adjust_got(__kaslr_offset);
 	setup_vmem(__kaslr_offset, __kaslr_offset + kernel_size, asce_limit);
 	copy_bootdata();
+	__apply_alternatives((struct alt_instr *)_vmlinux_info.alt_instructions,
+			     (struct alt_instr *)_vmlinux_info.alt_instructions_end,
+			     ALT_CTX_EARLY);
 
 	/*
 	 * Save KASLR offset for early dumps, before vmcore_info is set.

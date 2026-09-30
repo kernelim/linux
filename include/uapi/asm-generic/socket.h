@@ -128,6 +128,8 @@
 
 #define SO_TXREHASH		74
 
+#define SCM_TS_OPT_ID		81
+
 #if !defined(__KERNEL__)
 
 #if __BITS_PER_LONG == 64 || (defined(__x86_64__) && defined(__ILP32__))

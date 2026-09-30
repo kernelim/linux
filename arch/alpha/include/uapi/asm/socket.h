@@ -131,6 +131,8 @@
 
 #define SO_TXREHASH		74
 
+#define SCM_TS_OPT_ID		81
+
 #if !defined(__KERNEL__)
 
 #if __BITS_PER_LONG == 64

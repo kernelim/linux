@@ -8,7 +8,7 @@
 #include "regs/xe_engine_regs.h"
 #include "regs/xe_gt_regs.h"
 #include "regs/xe_oa_regs.h"
-#include "regs/xe_regs.h"
+#include "xe_device.h"
 #include "xe_gt_types.h"
 #include "xe_gt_printk.h"
 #include "xe_platform_types.h"
@@ -19,10 +19,18 @@
 #undef XE_REG_MCR
 #define XE_REG_MCR(...)     XE_REG(__VA_ARGS__, .mcr = 1)
 
-static bool match_not_render(const struct xe_gt *gt,
+static bool match_not_render(const struct xe_device *xe,
+			     const struct xe_gt *gt,
 			     const struct xe_hw_engine *hwe)
 {
 	return hwe->class != XE_ENGINE_CLASS_RENDER;
+}
+
+static bool match_has_mert(const struct xe_device *xe,
+			   const struct xe_gt *gt,
+			   const struct xe_hw_engine *hwe)
+{
+	return xe_device_has_mert((struct xe_device *)xe);
 }
 
 static const struct xe_rtp_entry_sr register_whitelist[] = {
@@ -84,6 +92,20 @@ static const struct xe_rtp_entry_sr register_whitelist[] = {
 #define WHITELIST_OAG_MMIO_TRG \
 	WHITELIST_OA_MMIO_TRG(OAG_MMIOTRIGGER, OAG_OASTATUS, OAG_OAHEADPTR)
 
+#define WHITELIST_OAM_MMIO_TRG \
+	WHITELIST_OA_MMIO_TRG(OAM_MMIO_TRG(XE_OAM_SAG_BASE_ADJ), \
+			      OAM_STATUS(XE_OAM_SAG_BASE_ADJ), \
+			      OAM_HEAD_POINTER(XE_OAM_SAG_BASE_ADJ)), \
+	WHITELIST_OA_MMIO_TRG(OAM_MMIO_TRG(XE_OAM_SCMI_0_BASE_ADJ), \
+			      OAM_STATUS(XE_OAM_SCMI_0_BASE_ADJ), \
+			      OAM_HEAD_POINTER(XE_OAM_SCMI_0_BASE_ADJ)), \
+	WHITELIST_OA_MMIO_TRG(OAM_MMIO_TRG(XE_OAM_SCMI_1_BASE_ADJ), \
+			      OAM_STATUS(XE_OAM_SCMI_1_BASE_ADJ), \
+			      OAM_HEAD_POINTER(XE_OAM_SCMI_1_BASE_ADJ))
+
+#define WHITELIST_OA_MERT_MMIO_TRG \
+	WHITELIST_OA_MMIO_TRG(OAMERT_MMIO_TRG, OAMERT_STATUS, OAMERT_HEAD_POINTER)
+
 	{ XE_RTP_NAME("oag_mmio_trg_rcs"),
 	  XE_RTP_RULES(GRAPHICS_VERSION_RANGE(1200, XE_RTP_END_VERSION_UNDEFINED),
 		       ENGINE_CLASS(RENDER)),
@@ -93,6 +115,24 @@ static const struct xe_rtp_entry_sr register_whitelist[] = {
 	  XE_RTP_RULES(GRAPHICS_VERSION_RANGE(1200, XE_RTP_END_VERSION_UNDEFINED),
 		       ENGINE_CLASS(COMPUTE)),
 	  XE_RTP_ACTIONS(WHITELIST_OAG_MMIO_TRG)
+	},
+	{ XE_RTP_NAME("oam_mmio_trg_vcs"),
+	  XE_RTP_RULES(MEDIA_VERSION_RANGE(1300, XE_RTP_END_VERSION_UNDEFINED),
+		       ENGINE_CLASS(VIDEO_DECODE)),
+	  XE_RTP_ACTIONS(WHITELIST_OAM_MMIO_TRG)
+	},
+	{ XE_RTP_NAME("oam_mmio_trg_vecs"),
+	  XE_RTP_RULES(MEDIA_VERSION_RANGE(1300, XE_RTP_END_VERSION_UNDEFINED),
+		       ENGINE_CLASS(VIDEO_ENHANCE)),
+	  XE_RTP_ACTIONS(WHITELIST_OAM_MMIO_TRG)
+	},
+	{ XE_RTP_NAME("oa_mert_mmio_trg_ccs"),
+	  XE_RTP_RULES(FUNC(match_has_mert), ENGINE_CLASS(COMPUTE)),
+	  XE_RTP_ACTIONS(WHITELIST_OA_MERT_MMIO_TRG)
+	},
+	{ XE_RTP_NAME("oa_mert_mmio_trg_bcs"),
+	  XE_RTP_RULES(FUNC(match_has_mert), ENGINE_CLASS(COPY)),
+	  XE_RTP_ACTIONS(WHITELIST_OA_MERT_MMIO_TRG)
 	},
 };
 
@@ -180,7 +220,7 @@ void xe_reg_whitelist_print_entry(struct drm_printer *p, unsigned int indent,
 	}
 
 	range_start = reg & REG_GENMASK(25, range_bit);
-	range_end = range_start | REG_GENMASK(range_bit, 0);
+	range_end = range_start | REG_GENMASK(range_bit - 1, 0);
 
 	switch (val & RING_FORCE_TO_NONPRIV_ACCESS_MASK) {
 	case RING_FORCE_TO_NONPRIV_ACCESS_RW:

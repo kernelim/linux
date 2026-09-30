@@ -737,7 +737,7 @@ void cx18_stop_capture(struct cx18_open_id *id, int gop_end)
 
 int cx18_v4l2_close(struct file *filp)
 {
-	struct v4l2_fh *fh = filp->private_data;
+	struct v4l2_fh *fh = file_to_v4l2_fh(filp);
 	struct cx18_open_id *id = fh2id(fh);
 	struct cx18 *cx = id->cx;
 	struct cx18_stream *s = &cx->streams[id->type];
@@ -796,8 +796,7 @@ static int cx18_serialized_open(struct cx18_stream *s, struct file *filp)
 	item->type = s->type;
 
 	item->open_id = cx->open_id++;
-	filp->private_data = &item->fh;
-	v4l2_fh_add(&item->fh);
+	v4l2_fh_add(&item->fh, filp);
 
 	if (item->type == CX18_ENC_STREAM_TYPE_RAD &&
 			v4l2_fh_is_singular_file(filp)) {
@@ -805,7 +804,7 @@ static int cx18_serialized_open(struct cx18_stream *s, struct file *filp)
 			if (atomic_read(&cx->ana_capturing) > 0) {
 				/* switching to radio while capture is
 				   in progress is not polite */
-				v4l2_fh_del(&item->fh);
+				v4l2_fh_del(&item->fh, filp);
 				v4l2_fh_exit(&item->fh);
 				kfree(item);
 				return -EBUSY;

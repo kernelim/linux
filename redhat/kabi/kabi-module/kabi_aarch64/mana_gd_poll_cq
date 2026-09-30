@@ -1,3 +1,3 @@
-#8-
-0xff52886a	mana_gd_poll_cq	drivers/net/ethernet/microsoft/mana/mana	EXPORT_SYMBOL	NET_MANA
+#9-
+0x3dbd96d1	mana_gd_poll_cq	drivers/net/ethernet/microsoft/mana/mana	EXPORT_SYMBOL	NET_MANA
 

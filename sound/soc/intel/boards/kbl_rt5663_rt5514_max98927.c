@@ -80,7 +80,7 @@ static int platform_clock_control(struct snd_soc_dapm_widget *w,
 			struct snd_kcontrol *k, int  event)
 {
 	struct snd_soc_dapm_context *dapm = w->dapm;
-	struct snd_soc_card *card = dapm->card;
+	struct snd_soc_card *card = snd_soc_dapm_to_card(dapm);
 	struct kbl_codec_private *priv = snd_soc_card_get_drvdata(card);
 	int ret = 0;
 
@@ -220,7 +220,7 @@ static int kabylake_rt5663_fe_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_component *component = snd_soc_rtd_to_cpu(rtd, 0)->component;
 	int ret;
 
-	dapm = snd_soc_component_get_dapm(component);
+	dapm = snd_soc_component_to_dapm(component);
 	ret = snd_soc_dapm_ignore_suspend(dapm, "Reference Capture");
 	if (ret)
 		dev_err(rtd->dev, "Ref Cap -Ignore suspend failed = %d\n", ret);
@@ -258,7 +258,7 @@ static int kabylake_rt5663_codec_init(struct snd_soc_pcm_runtime *rtd)
 
 	snd_soc_component_set_jack(component, &ctx->kabylake_headset, NULL);
 
-	ret = snd_soc_dapm_ignore_suspend(&rtd->card->dapm, "DMIC");
+	ret = snd_soc_dapm_ignore_suspend(rtd->card->dapm, "DMIC");
 	if (ret)
 		dev_err(rtd->dev, "DMIC - Ignore suspend failed = %d\n", ret);
 
@@ -695,7 +695,7 @@ static struct snd_soc_dai_link kabylake_dais[] = {
 static int kabylake_set_bias_level(struct snd_soc_card *card,
 	struct snd_soc_dapm_context *dapm, enum snd_soc_bias_level level)
 {
-	struct snd_soc_component *component = dapm->component;
+	struct snd_soc_component *component = snd_soc_dapm_to_component(dapm);
 	struct kbl_codec_private *priv = snd_soc_card_get_drvdata(card);
 	int ret = 0;
 
@@ -712,7 +712,7 @@ static int kabylake_set_bias_level(struct snd_soc_card *card,
 	 */
 	switch (level) {
 	case SND_SOC_BIAS_PREPARE:
-		if (dapm->bias_level == SND_SOC_BIAS_ON) {
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_ON) {
 			if (!__clk_is_enabled(priv->mclk))
 				return 0;
 			dev_dbg(card->dev, "Disable mclk");
@@ -770,7 +770,7 @@ static int kabylake_card_late_probe(struct snd_soc_card *card)
 	if (!component)
 		return -EINVAL;
 
-	return hdac_hdmi_jack_port_init(component, &card->dapm);
+	return hdac_hdmi_jack_port_init(component, card->dapm);
 }
 
 /*

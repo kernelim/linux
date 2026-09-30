@@ -386,18 +386,6 @@ config USB_ISP116X_HCD
 	  To compile this driver as a module, choose M here: the
 	  module will be called isp116x-hcd.
 
-config USB_ISP1362_HCD
-	tristate "ISP1362 HCD support"
-	depends on HAS_IOPORT
-	depends on COMPILE_TEST # nothing uses this
-	help
-	  Supports the Philips ISP1362 chip as a host controller
-
-	  This driver does not support isochronous transfers.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called isp1362-hcd.
-
 config USB_FOTG210_HCD
 	tristate "FOTG210 HCD support"
 	depends on USB && HAS_DMA && HAS_IOMEM
@@ -642,7 +630,7 @@ config USB_UHCI_ASPEED
 
 config USB_FHCI_HCD
 	tristate "Freescale QE USB Host Controller support"
-	depends on OF_GPIO && QE_GPIO && QUICC_ENGINE
+	depends on QE_GPIO && QUICC_ENGINE
 	select FSL_GTM
 	select QE_USB
 	help

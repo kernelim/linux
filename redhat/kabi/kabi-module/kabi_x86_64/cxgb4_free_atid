@@ -1,3 +1,3 @@
-#8-
-0x0e32311b	cxgb4_free_atid	drivers/net/ethernet/chelsio/cxgb4/cxgb4	EXPORT_SYMBOL	
+#9-
+0x6716e087	cxgb4_free_atid	drivers/net/ethernet/chelsio/cxgb4/cxgb4	EXPORT_SYMBOL	
 

@@ -72,7 +72,7 @@ preserve_pci_rom_image(efi_pci_io_protocol_t *pci, struct pci_setup_rom **__rom)
 	rom->data.type	= SETUP_PCI;
 	rom->data.len	= size - sizeof(struct setup_data);
 	rom->data.next	= 0;
-	rom->pcilen	= pci->romsize;
+	rom->pcilen	= romsize;
 	*__rom = rom;
 
 	status = efi_call_proto(pci, pci.read, EfiPciIoWidthUint16,
@@ -457,56 +457,53 @@ static void __noreturn efi_exit(efi_handle_t handle, efi_status_t status)
 		asm("hlt");
 }
 
-void __noreturn efi_stub_entry(efi_handle_t handle,
-			       efi_system_table_t *sys_table_arg,
-			       struct boot_params *boot_params);
-
 /*
  * Because the x86 boot code expects to be passed a boot_params we
  * need to create one ourselves (usually the bootloader would create
  * one for us).
  */
-efi_status_t __efiapi efi_pe_entry(efi_handle_t handle,
-				   efi_system_table_t *sys_table_arg)
+static efi_status_t efi_allocate_bootparams(efi_handle_t handle,
+					    struct boot_params **bp)
 {
-	static struct boot_params boot_params __page_aligned_bss;
-	struct setup_header *hdr = &boot_params.hdr;
 	efi_guid_t proto = LOADED_IMAGE_PROTOCOL_GUID;
-	int options_size = 0;
+	struct boot_params *boot_params;
+	struct setup_header *hdr;
 	efi_status_t status;
+	unsigned long alloc;
 	char *cmdline_ptr;
-
-	efi_system_table = sys_table_arg;
-
-	/* Check if we were booted by the EFI firmware */
-	if (efi_system_table->hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE)
-		efi_exit(handle, EFI_INVALID_PARAMETER);
 
 	status = efi_bs_call(handle_protocol, handle, &proto, (void **)&image);
 	if (status != EFI_SUCCESS) {
 		efi_err("Failed to get handle for LOADED_IMAGE_PROTOCOL\n");
-		efi_exit(handle, status);
+		return status;
 	}
+
+	status = efi_allocate_pages(PARAM_SIZE, &alloc, ULONG_MAX);
+	if (status != EFI_SUCCESS)
+		return status;
+
+	boot_params = memset((void *)alloc, 0x0, PARAM_SIZE);
+	hdr	    = &boot_params->hdr;
 
 	/* Assign the setup_header fields that the kernel actually cares about */
 	hdr->root_flags	= 1;
 	hdr->vid_mode	= 0xffff;
 
 	hdr->type_of_loader = 0x21;
+	hdr->initrd_addr_max = INT_MAX;
 
 	/* Convert unicode cmdline to ascii */
-	cmdline_ptr = efi_convert_cmdline(image, &options_size);
-	if (!cmdline_ptr)
-		goto fail;
+	cmdline_ptr = efi_convert_cmdline(image);
+	if (!cmdline_ptr) {
+		efi_free(PARAM_SIZE, alloc);
+		return EFI_OUT_OF_RESOURCES;
+	}
 
 	efi_set_u64_split((unsigned long)cmdline_ptr, &hdr->cmd_line_ptr,
-			  &boot_params.ext_cmd_line_ptr);
+			  &boot_params->ext_cmd_line_ptr);
 
-	efi_stub_entry(handle, sys_table_arg, &boot_params);
-	/* not reached */
-
-fail:
-	efi_exit(handle, status);
+	*bp = boot_params;
+	return EFI_SUCCESS;
 }
 
 static void add_e820ext(struct boot_params *params,
@@ -551,7 +548,7 @@ setup_e820(struct boot_params *params, struct setup_data *e820ext, u32 e820ext_s
 		m |= (u64)efi->efi_memmap_hi << 32;
 #endif
 
-		d = efi_early_memdesc_ptr(m, efi->efi_memdesc_size, i);
+		d = efi_memdesc_ptr(m, efi->efi_memdesc_size, i);
 		switch (d->type) {
 		case EFI_RESERVED_TYPE:
 		case EFI_RUNTIME_SERVICES_CODE:
@@ -777,7 +774,7 @@ static const char *cmdline_memmap_override;
 static efi_status_t parse_options(const char *cmdline)
 {
 	static const char opts[][14] = {
-		"mem=", "memmap=", "efi_fake_mem=", "hugepages="
+		"mem=", "memmap=", "hugepages="
 	};
 
 	for (int i = 0; i < ARRAY_SIZE(opts); i++) {
@@ -792,12 +789,15 @@ static efi_status_t parse_options(const char *cmdline)
 	return efi_parse_options(cmdline);
 }
 
-static efi_status_t efi_decompress_kernel(unsigned long *kernel_entry)
+static efi_status_t efi_decompress_kernel(unsigned long *kernel_entry,
+					  struct boot_params *boot_params)
 {
 	unsigned long virt_addr = LOAD_PHYSICAL_ADDR;
 	unsigned long addr, alloc_size, entry;
 	efi_status_t status;
 	u32 seed[2] = {};
+
+	boot_params_ptr	= boot_params;
 
 	/* determine the required size of the allocation */
 	alloc_size = ALIGN(max_t(unsigned long, output_len, kernel_total_size),
@@ -829,7 +829,7 @@ static efi_status_t efi_decompress_kernel(unsigned long *kernel_entry)
 			seed[0] = 0;
 		}
 
-		boot_params_ptr->hdr.loadflags |= KASLR_FLAG;
+		boot_params->hdr.loadflags |= KASLR_FLAG;
 	}
 
 	status = efi_random_alloc(alloc_size, CONFIG_PHYSICAL_ALIGN, &addr,
@@ -867,19 +867,26 @@ static void __noreturn enter_kernel(unsigned long kernel_addr,
 void __noreturn efi_stub_entry(efi_handle_t handle,
 			       efi_system_table_t *sys_table_arg,
 			       struct boot_params *boot_params)
+
 {
 	efi_guid_t guid = EFI_MEMORY_ATTRIBUTE_PROTOCOL_GUID;
-	struct setup_header *hdr = &boot_params->hdr;
 	const struct linux_efi_initrd *initrd = NULL;
 	unsigned long kernel_entry;
+	struct setup_header *hdr;
 	efi_status_t status;
-
-	boot_params_ptr = boot_params;
 
 	efi_system_table = sys_table_arg;
 	/* Check if we were booted by the EFI firmware */
 	if (efi_system_table->hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE)
 		efi_exit(handle, EFI_INVALID_PARAMETER);
+
+	if (!IS_ENABLED(CONFIG_EFI_HANDOVER_PROTOCOL) || !boot_params) {
+		status = efi_allocate_bootparams(handle, &boot_params);
+		if (status != EFI_SUCCESS)
+			efi_exit(handle, status);
+	}
+
+	hdr = &boot_params->hdr;
 
 	if (have_unsupported_snp_features())
 		efi_exit(handle, EFI_UNSUPPORTED);
@@ -919,7 +926,10 @@ void __noreturn efi_stub_entry(efi_handle_t handle,
 		}
 	}
 
-	status = efi_decompress_kernel(&kernel_entry);
+	if (efi_mem_encrypt > 0)
+		hdr->xloadflags |= XLF_MEM_ENCRYPTION;
+
+	status = efi_decompress_kernel(&kernel_entry, boot_params);
 	if (status != EFI_SUCCESS) {
 		efi_err("Failed to decompress kernel\n");
 		goto fail;
@@ -987,6 +997,12 @@ fail:
 	efi_err("efi_stub_entry() failed!\n");
 
 	efi_exit(handle, status);
+}
+
+efi_status_t __efiapi efi_pe_entry(efi_handle_t handle,
+				   efi_system_table_t *sys_table_arg)
+{
+	efi_stub_entry(handle, sys_table_arg, NULL);
 }
 
 #ifdef CONFIG_EFI_HANDOVER_PROTOCOL

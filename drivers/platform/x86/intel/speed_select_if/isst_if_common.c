@@ -192,7 +192,7 @@ void isst_resume_common(void)
 			if (cb->registered)
 				isst_mbox_resume_command(cb, sst_cmd);
 		} else {
-			wrmsrl_safe_on_cpu(sst_cmd->cpu, sst_cmd->cmd,
+			wrmsrq_safe_on_cpu(sst_cmd->cpu, sst_cmd->cmd,
 					   sst_cmd->data);
 		}
 	}
@@ -388,7 +388,7 @@ static int isst_if_cpu_online(unsigned int cpu)
 
 	isst_cpu_info[cpu].numa_node = cpu_to_node(cpu);
 
-	ret = rdmsrl_safe(MSR_CPU_BUS_NUMBER, &data);
+	ret = rdmsrq_safe(MSR_CPU_BUS_NUMBER, &data);
 	if (ret) {
 		/* This is not a fatal error on MSR mailbox only I/F */
 		isst_cpu_info[cpu].bus_info[0] = -1;
@@ -402,12 +402,12 @@ static int isst_if_cpu_online(unsigned int cpu)
 
 	if (isst_hpm_support) {
 
-		ret = rdmsrl_safe(MSR_PM_LOGICAL_ID, &data);
+		ret = rdmsrq_safe(MSR_PM_LOGICAL_ID, &data);
 		if (!ret)
 			goto set_punit_id;
 	}
 
-	ret = rdmsrl_safe(MSR_THREAD_ID_INFO, &data);
+	ret = rdmsrq_safe(MSR_THREAD_ID_INFO, &data);
 	if (ret) {
 		isst_cpu_info[cpu].punit_cpu_id = -1;
 		return ret;
@@ -504,7 +504,7 @@ static long isst_if_msr_cmd_req(u8 *cmd_ptr, int *write_only, int resume)
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
 
-		ret = wrmsrl_safe_on_cpu(msr_cmd->logical_cpu,
+		ret = wrmsrq_safe_on_cpu(msr_cmd->logical_cpu,
 					 msr_cmd->msr,
 					 msr_cmd->data);
 		*write_only = 1;
@@ -515,7 +515,7 @@ static long isst_if_msr_cmd_req(u8 *cmd_ptr, int *write_only, int resume)
 	} else {
 		u64 data;
 
-		ret = rdmsrl_safe_on_cpu(msr_cmd->logical_cpu,
+		ret = rdmsrq_safe_on_cpu(msr_cmd->logical_cpu,
 					 msr_cmd->msr, &data);
 		if (!ret) {
 			msr_cmd->data = data;
@@ -811,8 +811,8 @@ static int __init isst_if_common_init(void)
 		u64 data;
 
 		/* Can fail only on some Skylake-X generations */
-		if (rdmsrl_safe(MSR_OS_MAILBOX_INTERFACE, &data) ||
-		    rdmsrl_safe(MSR_OS_MAILBOX_DATA, &data))
+		if (rdmsrq_safe(MSR_OS_MAILBOX_INTERFACE, &data) ||
+		    rdmsrq_safe(MSR_OS_MAILBOX_DATA, &data))
 			return -ENODEV;
 	}
 

@@ -1,3 +1,3 @@
-#8-
-0x655dd720	iscsi_conn_send_pdu	drivers/scsi/libiscsi	EXPORT_SYMBOL_GPL	
+#9-
+0x75f44a85	iscsi_conn_send_pdu	drivers/scsi/libiscsi	EXPORT_SYMBOL_GPL	
 

@@ -23,6 +23,7 @@
 #include <linux/sprintf.h>
 #include <linux/static_call_types.h>
 #include <linux/instruction_pointer.h>
+#include <linux/util_macros.h>
 #include <asm/byteorder.h>
 
 #include <uapi/linux/kernel.h>
@@ -48,15 +49,6 @@
 /* generic data direction definitions */
 #define READ			0
 #define WRITE			1
-
-#define PTR_IF(cond, ptr)	((cond) ? (ptr) : NULL)
-
-#define u64_to_user_ptr(x) (		\
-{					\
-	typecheck(u64, (x));		\
-	(void __user *)(uintptr_t)(x);	\
-}					\
-)
 
 /**
  * upper_32_bits - return bits 32-63 of a number

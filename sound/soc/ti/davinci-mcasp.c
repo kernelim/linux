@@ -25,6 +25,7 @@
 #include <linux/math64.h>
 #include <linux/bitmap.h>
 #include <linux/gpio/driver.h>
+#include <linux/property.h>
 
 #include <sound/asoundef.h>
 #include <sound/core.h>
@@ -1873,11 +1874,7 @@ err1:
 
 static bool davinci_mcasp_have_gpiochip(struct davinci_mcasp *mcasp)
 {
-#ifdef CONFIG_OF_GPIO
-	return of_property_read_bool(mcasp->dev->of_node, "gpio-controller");
-#else
-	return false;
-#endif
+	return device_property_present(mcasp->dev, "gpio-controller");
 }
 
 static int davinci_mcasp_get_config(struct davinci_mcasp *mcasp,
@@ -2528,6 +2525,8 @@ static int davinci_mcasp_runtime_resume(struct device *dev)
 #endif
 
 static const struct dev_pm_ops davinci_mcasp_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
+				pm_runtime_force_resume)
 	SET_RUNTIME_PM_OPS(davinci_mcasp_runtime_suspend,
 			   davinci_mcasp_runtime_resume,
 			   NULL)

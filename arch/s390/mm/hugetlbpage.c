@@ -9,12 +9,13 @@
 #define KMSG_COMPONENT "hugetlb"
 #define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
 
-#include <asm/pgalloc.h>
+#include <linux/cpufeature.h>
 #include <linux/mm.h>
 #include <linux/hugetlb.h>
 #include <linux/mman.h>
 #include <linux/sched/mm.h>
 #include <linux/security.h>
+#include <asm/pgalloc.h>
 
 /*
  * If the bit selected by single-bit bitmask "a" is set within "x", move
@@ -137,7 +138,7 @@ static inline pte_t __rste_to_pte(unsigned long rste)
 
 static void clear_huge_pte_skeys(struct mm_struct *mm, unsigned long rste)
 {
-	struct page *page;
+	struct folio *folio;
 	unsigned long size, paddr;
 
 	if (!mm_uses_skeys(mm) ||
@@ -145,16 +146,16 @@ static void clear_huge_pte_skeys(struct mm_struct *mm, unsigned long rste)
 		return;
 
 	if ((rste & _REGION_ENTRY_TYPE_MASK) == _REGION_ENTRY_TYPE_R3) {
-		page = pud_page(__pud(rste));
+		folio = page_folio(pud_page(__pud(rste)));
 		size = PUD_SIZE;
 		paddr = rste & PUD_MASK;
 	} else {
-		page = pmd_page(__pmd(rste));
+		folio = page_folio(pmd_page(__pmd(rste)));
 		size = PMD_SIZE;
 		paddr = rste & PMD_MASK;
 	}
 
-	if (!test_and_set_bit(PG_arch_1, &page->flags))
+	if (!test_and_set_bit(PG_arch_1, &folio->flags))
 		__storage_key_init_range(paddr, paddr + size);
 }
 
@@ -258,9 +259,9 @@ int pud_huge(pud_t pud)
 
 bool __init arch_hugetlb_valid_size(unsigned long size)
 {
-	if (MACHINE_HAS_EDAT1 && size == PMD_SIZE)
+	if (cpu_has_edat1() && size == PMD_SIZE)
 		return true;
-	else if (MACHINE_HAS_EDAT2 && size == PUD_SIZE)
+	else if (cpu_has_edat2() && size == PUD_SIZE)
 		return true;
 	else
 		return false;

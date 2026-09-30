@@ -1,3 +1,3 @@
-#8-
-0x8ef8305b	iscsit_build_rsp_pdu	drivers/target/iscsi/iscsi_target_mod	EXPORT_SYMBOL	
+#9-
+0x193e786d	iscsit_build_rsp_pdu	drivers/target/iscsi/iscsi_target_mod	EXPORT_SYMBOL	
 

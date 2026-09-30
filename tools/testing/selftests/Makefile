@@ -49,6 +49,7 @@ TARGETS += net
 TARGETS += net/forwarding
 TARGETS += net/hsr
 TARGETS += net/mptcp
+TARGETS += net/tcp_ao
 TARGETS += netfilter
 TARGETS += nsfs
 TARGETS += pidfd

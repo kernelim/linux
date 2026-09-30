@@ -502,7 +502,7 @@ Summary: The Linux kernel
 %define hdrarch s390
 %define all_arch_configs kernel-%{version}-s390x.config
 %define kernel_image arch/s390/boot/bzImage
-%define vmlinux_decompressor arch/s390/boot/compressed/vmlinux
+%define vmlinux_decompressor arch/s390/boot/vmlinux
 %endif
 
 %ifarch %{arm}
@@ -815,7 +815,7 @@ Source2: kernel.changelog
 %define secureboot_key_0 %{_datadir}/pki/sb-certs/secureboot-kernel-%{_arch}.cer
 
 %if 0%{?centos}
-%define pesign_name_0 centossecureboot201
+%define pesign_name_0 centossecureboot801
 %else
 %ifarch x86_64 aarch64
 %define pesign_name_0 redhatsecureboot801
@@ -967,7 +967,6 @@ Source3002: Patchlist.changelog
 Source4000: README.rst
 Source4001: rpminspect.yaml
 Source4002: gating.yaml
-Source4003: plans.fmf
 
 ## Patches needed for building this package
 
@@ -1189,6 +1188,21 @@ the real-time properties of Linux. Instead of testing Linux as a black box,
 rtla leverages kernel tracing capabilities to provide precise information
 about the properties and root causes of unexpected results.
 
+%if %{with_debuginfo}
+%package -n rtla-debuginfo
+Summary: Debug information for package rtla
+Requires: %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}
+AutoReqProv: no
+%description -n rtla-debuginfo
+This package provides debug information for the rtla package.
+
+# Note that this pattern only works right to match the .build-id
+# symlinks because of the trailing nonmatching alternation and
+# the leading .*, because of find-debuginfo.sh's buggy handling
+# of matching the pattern against the symlinks file.
+%{expand:%%global _find_debuginfo_opts %{?_find_debuginfo_opts} -p '.*%%{_bindir}/rtla(\.debug)?|.*%%{_bindir}/hwnoise(\.debug)?|.*%%{_bindir}/osnoise(\.debug)?|.*%%{_bindir}/timerlat(\.debug)?|XXX' -o rtla-debuginfo.list}
+%endif
+
 %package -n rv
 Summary: RV: Runtime Verification
 %description -n rv
@@ -1197,7 +1211,22 @@ complements classical exhaustive verification techniques (such as model
 checking and theorem proving) with a more practical approach for
 complex systems.
 The rv tool is the interface for a collection of monitors that aim
-analysing the logical and timing behavior of Linux.
+to analyze the logical and timing behavior of Linux.
+
+%if %{with_debuginfo}
+%package -n rv-debuginfo
+Summary: Debug information for package rv
+Requires: %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}
+AutoReqProv: no
+%description -n rv-debuginfo
+This package provides debug information for the rv package.
+
+# Note that this pattern only works right to match the .build-id
+# symlinks because of the trailing nonmatching alternation and
+# the leading .*, because of find-debuginfo.sh's buggy handling
+# of matching the pattern against the symlinks file.
+%{expand:%%global _find_debuginfo_opts %{?_find_debuginfo_opts} -p '.*%%{_bindir}/rv(\.debug)?|XXX' -o rv-debuginfo.list}
+%endif
 
 # with_tools
 %endif
@@ -1980,6 +2009,11 @@ BuildKernel() {
       cp arch/$Arch/boot/zImage.stub $RPM_BUILD_ROOT/lib/modules/$KernelVer/zImage.stub-$KernelVer || :
     fi
 
+%if %{efiuki}
+    # Preserve unsigned kernel for the UKI
+    cp $KernelImage $KernelImage.unsigned
+%endif
+
     %if %{signkernel}
     if [ "$KernelImage" = vmlinux ]; then
         # We can't strip and sign $KernelImage in place, because
@@ -2433,6 +2467,20 @@ BuildKernel() {
     if [ "$Variant" != "rt" ] && [ "$Variant" != "rt-debug" ] && [ "$Variant" != "rt-64k" ] && [ "$Variant" != "rt-64k-debug" ]; then
         popd
 
+%if %{signkernel}%{signmodules}
+        # Sign inner vmlinuz with the transient modules signing key to allow kexec
+        KernelUnifiedVmlinuz="$KernelImage.signed.trans"
+        rm -f "$KernelUnifiedVmlinuz"
+        UKI_nss_dir=$(mktemp -d)
+        certutil -N -d "$UKI_nss_dir" --empty-password
+        openssl pkcs12 -export -in certs/signing_key.pem -passout pass: -out certs/signing_key.p12
+        pk12util -i certs/signing_key.p12 -d "$UKI_nss_dir" -W ""
+        NSS_certname=$(certutil -L -d "$UKI_nss_dir" | tail -1 | sed -e 's/u,u,u//' -e 's/^[ \t]*//' -e 's/[ \t]*$//')
+        pesign -n "$UKI_nss_dir" -i "$KernelImage.unsigned" -o "$KernelUnifiedVmlinuz" -c "$NSS_certname" -s -f
+%else
+        KernelUnifiedVmlinuz="$KernelImage.unsigned"
+%endif
+
         SBAT=$(cat <<- EOF
 	linux,1,Red Hat,linux,$KernelVer,mailto:secalert@redhat.com
 	linux.%{sbat_suffix},1,Red Hat,linux,$KernelVer,mailto:secalert@redhat.com
@@ -2459,7 +2507,7 @@ BuildKernel() {
                --logfile=$(mktemp) \
                --uefi \
                --sbat "$SBAT" \
-               --kernel-image $(realpath $KernelImage) \
+               --kernel-image $(realpath $KernelUnifiedVmlinuz) \
                --kernel-cmdline 'console=tty0 console=ttyS0' \
     	   $KernelUnifiedImage
 
@@ -2470,7 +2518,7 @@ BuildKernel() {
 %if %{signkernel}
 
 %if 0%{?centos}
-	UKI_secureboot_name=centossecureboot204
+	UKI_secureboot_name=centossecureboot804
 	UKI_secureboot_cert=%{_datadir}/pki/sb-certs/secureboot-uki-virt-%{_arch}.cer
 %else
 	# RHEL only builds UKI for x86
@@ -2803,7 +2851,7 @@ fi
 pushd tools/testing/selftests
 # We need to install here because we need to call make with ARCH set which
 # doesn't seem possible to do in the install section.
-%{make} %{?_smp_mflags} ARCH=$Arch V=1 TARGETS="bpf cgroup kmod mm livepatch net net/forwarding net/hsr net/mptcp net/netfilter tc-testing memfd drivers/net/bonding iommu cachestat drivers/net" SKIP_TARGETS="" FORCE_TARGETS=1 INSTALL_PATH=%{buildroot}%{_libexecdir}/kselftests VMLINUX_H="${RPM_VMLINUX_H}" DEFAULT_INSTALL_HDR_PATH=0 install
+%{make} %{?_smp_mflags} ARCH=$Arch V=1 TARGETS="bpf cgroup kmod mm livepatch net net/forwarding net/hsr net/mptcp net/netfilter net/tcp_ao tc-testing memfd drivers/net/bonding iommu cachestat drivers/net" SKIP_TARGETS="" FORCE_TARGETS=1 INSTALL_PATH=%{buildroot}%{_libexecdir}/kselftests VMLINUX_H="${RPM_VMLINUX_H}" DEFAULT_INSTALL_HDR_PATH=0 install
 
 # 'make install' for bpf is broken and upstream refuses to fix it.
 # Install the needed files manually.
@@ -2814,9 +2862,15 @@ for dir in bpf bpf/no_alu32 bpf/cpuv4 bpf/progs; do
 	# other issues. If something did not get built, just skip it.
 	test -d $dir || continue
 	mkdir -p %{buildroot}%{_libexecdir}/kselftests/$dir
-	find $dir -maxdepth 1 -type f \( -executable -o -name '*.py' -o -name settings -o \
-		-name 'btf_dump_test_case_*.c' -o -name '*.ko' -o \
-		-name '*.o' -exec sh -c 'readelf -h "{}" | grep -q "^  Machine:.*BPF"' \; \) -print0 | \
+	find $dir -maxdepth 1 -type f \( \
+		-executable -o \
+		-name '*.py' -o \
+		-name settings -o \
+		-name DENYLIST -o \
+		-name 'btf_dump_test_case_*.c' -o \
+		-name '*.ko' -o \
+		-name '*.o' -exec sh -c 'readelf -h "{}" | grep -q "^  Machine:.*BPF"' \; \
+	\) -print0 | \
 	xargs -0 cp -t %{buildroot}%{_libexecdir}/kselftests/$dir || true
 done
 ln -sr  %{buildroot}%{_libexecdir}/kselftests/bpf/bpftool %{buildroot}%{_libexecdir}/kselftests/bpf/no_alu32/bpftool
@@ -2827,6 +2881,13 @@ ln -sr  %{buildroot}%{_libexecdir}/kselftests/bpf/bpftool %{buildroot}%{_libexec
 %buildroot_save_unstripped "usr/libexec/kselftests/bpf/test_progs"
 %buildroot_save_unstripped "usr/libexec/kselftests/bpf/test_progs-no_alu32"
 %buildroot_save_unstripped "usr/libexec/kselftests/bpf/test_progs-cpuv4"
+
+# Append RHEL-specific BPF selftests DENYLIST.rhel to the global DENYLIST that
+# is automatically picked by BPF selftest runners.
+%if 0%{?rhel}%{?centos}
+    cat ./bpf/DENYLIST.rhel >> %{buildroot}%{_libexecdir}/kselftests/bpf/DENYLIST
+%endif
+
 popd
 %endif
 
@@ -3090,10 +3151,10 @@ install -m755 slabinfo %{buildroot}%{_bindir}/slabinfo
 install -m755 page_owner_sort %{buildroot}%{_bindir}/page_owner_sort
 popd
 pushd tools/verification/rv/
-%{tools_make} DESTDIR=%{buildroot} install
+%{tools_make} DESTDIR=%{buildroot} STRIP=/bin/true install
 popd
 pushd tools/tracing/rtla/
-%{tools_make} DESTDIR=%{buildroot} install
+%{tools_make} DESTDIR=%{buildroot} STRIP=/bin/true install
 rm -f %{buildroot}%{_bindir}/hwnoise
 rm -f %{buildroot}%{_bindir}/osnoise
 rm -f %{buildroot}%{_bindir}/timerlat
@@ -3174,6 +3235,12 @@ pushd tools/testing/selftests/net/mptcp
 find -type d -exec install -d %{buildroot}%{_libexecdir}/kselftests/net/mptcp/{} \;
 find -type f -executable -exec install -D -m755 {} %{buildroot}%{_libexecdir}/kselftests/net/mptcp/{} \;
 find -type f ! -executable -exec install -D -m644 {} %{buildroot}%{_libexecdir}/kselftests/net/mptcp/{} \;
+popd
+# install net/tcp_ao selftests
+pushd tools/testing/selftests/net/tcp_ao
+find -type d -exec install -d %{buildroot}%{_libexecdir}/kselftests/net/tcp_ao/{} \;
+find -type f -executable -exec install -D -m755 {} %{buildroot}%{_libexecdir}/kselftests/net/tcp_ao/{} \;
+find -type f ! -executable -exec install -D -m644 {} %{buildroot}%{_libexecdir}/kselftests/net/tcp_ao/{} \;
 popd
 # install tc-testing selftests
 pushd tools/testing/selftests/tc-testing
@@ -3627,6 +3694,10 @@ fi
 %{_mandir}/man1/rtla-timerlat.1.gz
 %{_mandir}/man1/rtla.1.gz
 
+%if %{with_debuginfo}
+%files -f rtla-debuginfo.list -n rtla-debuginfo
+%endif
+
 %files -n rv
 %{_bindir}/rv
 %{_mandir}/man1/rv-list.1.gz
@@ -3635,6 +3706,10 @@ fi
 %{_mandir}/man1/rv-mon.1.gz
 %{_mandir}/man1/rv-mon-sched.1.gz
 %{_mandir}/man1/rv.1.gz
+
+%if %{with_debuginfo}
+%files -f rv-debuginfo.list -n rv-debuginfo
+%endif
 
 # with_tools
 %endif

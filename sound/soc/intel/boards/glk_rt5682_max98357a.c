@@ -257,7 +257,7 @@ static int geminilake_rt5682_fe_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_dapm_context *dapm;
 	int ret;
 
-	dapm = snd_soc_component_get_dapm(component);
+	dapm = snd_soc_component_to_dapm(component);
 	ret = snd_soc_dapm_ignore_suspend(dapm, "Reference Capture");
 	if (ret) {
 		dev_err(rtd->dev, "Ref Cap ignore suspend failed %d\n", ret);
@@ -597,7 +597,7 @@ static int glk_card_late_probe(struct snd_soc_card *card)
 		i++;
 	}
 
-	return hdac_hdmi_jack_port_init(component, &card->dapm);
+	return hdac_hdmi_jack_port_init(component, card->dapm);
 }
 
 /* geminilake audio machine driver for SPT + RT5682 */

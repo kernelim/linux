@@ -1,3 +1,3 @@
-#8-
-0x888ed1cd	iscsi_conn_unbind	drivers/scsi/libiscsi	EXPORT_SYMBOL_GPL	
+#9-
+0xec3d3854	iscsi_conn_unbind	drivers/scsi/libiscsi	EXPORT_SYMBOL_GPL	
 

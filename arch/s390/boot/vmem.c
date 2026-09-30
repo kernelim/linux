@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
+#include <linux/cpufeature.h>
 #include <linux/sched/task.h>
 #include <linux/pgtable.h>
 #include <linux/kasan.h>
@@ -27,6 +28,7 @@ atomic_long_t __bootdata_preserved(direct_pages_count[PG_DIRECT_MAP_MAX]);
 enum populate_mode {
 	POPULATE_NONE,
 	POPULATE_DIRECT,
+	POPULATE_LOWCORE,
 	POPULATE_ABS_LOWCORE,
 	POPULATE_IDENTITY,
 	POPULATE_KERNEL,
@@ -68,8 +70,6 @@ static void kasan_populate_shadow(unsigned long kernel_start, unsigned long kern
 	int i;
 
 	pte_z = __pte(__pa(kasan_early_shadow_page) | pgprot_val(PAGE_KERNEL_RO));
-	if (!machine.has_nx)
-		pte_z = clear_pte_bit(pte_z, __pgprot(_PAGE_NOEXEC));
 	crst_table_init((unsigned long *)kasan_early_shadow_p4d, p4d_val(p4d_z));
 	crst_table_init((unsigned long *)kasan_early_shadow_pud, pud_val(pud_z));
 	crst_table_init((unsigned long *)kasan_early_shadow_pmd, pmd_val(pmd_z));
@@ -244,6 +244,8 @@ static unsigned long resolve_pa_may_alloc(unsigned long addr, unsigned long size
 		return INVALID_PHYS_ADDR;
 	case POPULATE_DIRECT:
 		return addr;
+	case POPULATE_LOWCORE:
+		return __lowcore_pa(addr);
 	case POPULATE_ABS_LOWCORE:
 		return __abs_lowcore_pa(addr);
 	case POPULATE_KERNEL:
@@ -281,7 +283,7 @@ static unsigned long try_get_large_pud_pa(pud_t *pu_dir, unsigned long addr, uns
 {
 	unsigned long pa, size = end - addr;
 
-	if (!machine.has_edat2 || !large_page_mapping_allowed(mode) ||
+	if (!cpu_has_edat2() || !large_page_mapping_allowed(mode) ||
 	    !IS_ALIGNED(addr, PUD_SIZE) || (size < PUD_SIZE))
 		return INVALID_PHYS_ADDR;
 
@@ -297,7 +299,7 @@ static unsigned long try_get_large_pmd_pa(pmd_t *pm_dir, unsigned long addr, uns
 {
 	unsigned long pa, size = end - addr;
 
-	if (!machine.has_edat1 || !large_page_mapping_allowed(mode) ||
+	if (!cpu_has_edat1() || !large_page_mapping_allowed(mode) ||
 	    !IS_ALIGNED(addr, PMD_SIZE) || (size < PMD_SIZE))
 		return INVALID_PHYS_ADDR;
 
@@ -321,8 +323,6 @@ static void pgtable_pte_populate(pmd_t *pmd, unsigned long addr, unsigned long e
 				continue;
 			entry = __pte(resolve_pa_may_alloc(addr, PAGE_SIZE, mode));
 			entry = set_pte_bit(entry, PAGE_KERNEL);
-			if (!machine.has_nx)
-				entry = clear_pte_bit(entry, __pgprot(_PAGE_NOEXEC));
 			set_pte(pte, entry);
 			pages++;
 		}
@@ -348,8 +348,6 @@ static void pgtable_pmd_populate(pud_t *pud, unsigned long addr, unsigned long e
 			if (pa != INVALID_PHYS_ADDR) {
 				entry = __pmd(pa);
 				entry = set_pmd_bit(entry, SEGMENT_KERNEL);
-				if (!machine.has_nx)
-					entry = clear_pmd_bit(entry, __pgprot(_SEGMENT_ENTRY_NOEXEC));
 				set_pmd(pmd, entry);
 				pages++;
 				continue;
@@ -382,8 +380,6 @@ static void pgtable_pud_populate(p4d_t *p4d, unsigned long addr, unsigned long e
 			if (pa != INVALID_PHYS_ADDR) {
 				entry = __pud(pa);
 				entry = set_pud_bit(entry, REGION3_KERNEL);
-				if (!machine.has_nx)
-					entry = clear_pud_bit(entry, __pgprot(_REGION_ENTRY_NOEXEC));
 				set_pud(pud, entry);
 				pages++;
 				continue;
@@ -444,6 +440,7 @@ static void pgtable_populate(unsigned long addr, unsigned long end, enum populat
 
 void setup_vmem(unsigned long kernel_start, unsigned long kernel_end, unsigned long asce_limit)
 {
+	unsigned long lowcore_address = 0;
 	unsigned long start, end;
 	unsigned long asce_type;
 	unsigned long asce_bits;
@@ -481,12 +478,17 @@ void setup_vmem(unsigned long kernel_start, unsigned long kernel_end, unsigned l
 	__arch_set_page_dat((void *)swapper_pg_dir, 1UL << CRST_ALLOC_ORDER);
 	__arch_set_page_dat((void *)invalid_pg_dir, 1UL << CRST_ALLOC_ORDER);
 
+	if (relocate_lowcore)
+		lowcore_address = LOWCORE_ALT_ADDRESS;
+
 	/*
 	 * To allow prefixing the lowcore must be mapped with 4KB pages.
 	 * To prevent creation of a large page at address 0 first map
 	 * the lowcore and create the identity mapping only afterwards.
 	 */
-	pgtable_populate(0, sizeof(struct lowcore), POPULATE_DIRECT);
+	pgtable_populate(lowcore_address,
+			 lowcore_address + sizeof(struct lowcore),
+			 POPULATE_LOWCORE);
 	for_each_physmem_usable_range(i, &start, &end) {
 		pgtable_populate((unsigned long)__identity_va(start),
 				 (unsigned long)__identity_va(end),

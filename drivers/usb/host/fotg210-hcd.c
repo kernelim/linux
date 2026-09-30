@@ -5692,11 +5692,6 @@ static int __init fotg210_hcd_init(void)
 	if (usb_disabled())
 		return -ENODEV;
 
-	set_bit(USB_EHCI_LOADED, &usb_hcds_loaded);
-	if (test_bit(USB_UHCI_LOADED, &usb_hcds_loaded) ||
-			test_bit(USB_OHCI_LOADED, &usb_hcds_loaded))
-		pr_warn("Warning! fotg210_hcd should always be loaded before uhci_hcd and ohci_hcd, not after\n");
-
 	pr_debug("%s: block sizes: qh %zd qtd %zd itd %zd\n",
 			hcd_name, sizeof(struct fotg210_qh),
 			sizeof(struct fotg210_qtd),
@@ -5722,6 +5717,5 @@ static void __exit fotg210_hcd_cleanup(void)
 {
 	platform_driver_unregister(&fotg210_hcd_driver);
 	debugfs_remove(fotg210_debug_root);
-	clear_bit(USB_EHCI_LOADED, &usb_hcds_loaded);
 }
 module_exit(fotg210_hcd_cleanup);

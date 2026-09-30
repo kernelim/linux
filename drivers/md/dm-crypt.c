@@ -254,22 +254,15 @@ static unsigned int max_write_size = 0;
 module_param(max_write_size, uint, 0644);
 MODULE_PARM_DESC(max_write_size, "Maximum size of a write request");
 
-static unsigned get_max_request_sectors(struct dm_target *ti, struct bio *bio)
+static unsigned get_max_request_sectors(struct dm_target *ti, struct bio *bio, bool no_split)
 {
 	struct crypt_config *cc = ti->private;
 	unsigned val, sector_align;
 	bool wrt = op_is_write(bio_op(bio));
 
-	if (wrt) {
-		/*
-		 * For zoned devices, splitting write operations creates the
-		 * risk of deadlocking queue freeze operations with zone write
-		 * plugging BIO work when the reminder of a split BIO is
-		 * issued. So always allow the entire BIO to proceed.
-		 */
-		if (ti->emulate_zone_append)
-			return bio_sectors(bio);
-
+	if (no_split) {
+		val = -1;
+	} else if (wrt) {
 		val = min_not_zero(READ_ONCE(max_write_size),
 				   DM_CRYPT_DEFAULT_MAX_WRITE_SIZE);
 	} else {
@@ -1199,11 +1192,11 @@ static int crypt_integrity_ctr(struct crypt_config *cc, struct dm_target *ti)
 		return -EINVAL;
 	}
 
-	if (bi->tuple_size < cc->used_tag_size) {
+	if (bi->metadata_size < cc->used_tag_size) {
 		ti->error = "Integrity profile tag size mismatch.";
 		return -EINVAL;
 	}
-	cc->tuple_size = bi->tuple_size;
+	cc->tuple_size = bi->metadata_size;
 	if (1 << bi->interval_exp != cc->sector_size) {
 		ti->error = "Integrity profile sector size mismatch.";
 		return -EINVAL;
@@ -1771,7 +1764,7 @@ static void crypt_free_buffer_pages(struct crypt_config *cc, struct bio *clone)
 		bio_for_each_folio_all(fi, clone) {
 			if (folio_test_large(fi.folio)) {
 				percpu_counter_sub(&cc->n_allocated_pages,
-						1 << folio_order(fi.folio));
+						folio_nr_pages(fi.folio));
 				folio_put(fi.folio);
 			} else {
 				mempool_free(&fi.folio->page, &cc->page_pool);
@@ -3487,6 +3480,7 @@ static int crypt_map(struct dm_target *ti, struct bio *bio)
 	struct dm_crypt_io *io;
 	struct crypt_config *cc = ti->private;
 	unsigned max_sectors;
+	bool no_split;
 
 	/*
 	 * If bio is REQ_PREFLUSH or REQ_OP_DISCARD, just bypass crypt queues.
@@ -3504,10 +3498,20 @@ static int crypt_map(struct dm_target *ti, struct bio *bio)
 
 	/*
 	 * Check if bio is too large, split as needed.
+	 *
+	 * For zoned devices, splitting write operations creates the
+	 * risk of deadlocking queue freeze operations with zone write
+	 * plugging BIO work when the reminder of a split BIO is
+	 * issued. So always allow the entire BIO to proceed.
 	 */
-	max_sectors = get_max_request_sectors(ti, bio);
-	if (unlikely(bio_sectors(bio) > max_sectors))
+	no_split = (ti->emulate_zone_append && op_is_write(bio_op(bio))) ||
+		   (bio->bi_opf & REQ_ATOMIC);
+	max_sectors = get_max_request_sectors(ti, bio, no_split);
+	if (unlikely(bio_sectors(bio) > max_sectors)) {
+		if (unlikely(no_split))
+			return DM_MAPIO_KILL;
 		dm_accept_partial_bio(bio, max_sectors);
+	}
 
 	/*
 	 * Ensure that bio is a multiple of internal sector encryption size
@@ -3753,15 +3757,20 @@ static void crypt_io_hints(struct dm_target *ti, struct queue_limits *limits)
 	if (ti->emulate_zone_append)
 		limits->max_hw_sectors = min(limits->max_hw_sectors,
 					     BIO_MAX_VECS << PAGE_SECTORS_SHIFT);
+
+	limits->atomic_write_hw_unit_max = min(limits->atomic_write_hw_unit_max,
+					       BIO_MAX_VECS << PAGE_SHIFT);
+	limits->atomic_write_hw_max = min(limits->atomic_write_hw_max,
+					  BIO_MAX_VECS << PAGE_SHIFT);
 }
 
 static struct target_type crypt_target = {
 	.name   = "crypt",
-	.version = {1, 28, 0},
+	.version = {1, 29, 0},
 	.module = THIS_MODULE,
 	.ctr    = crypt_ctr,
 	.dtr    = crypt_dtr,
-	.features = DM_TARGET_ZONED_HM,
+	.features = DM_TARGET_ZONED_HM | DM_TARGET_ATOMIC_WRITES,
 	.report_zones = crypt_report_zones,
 	.map    = crypt_map,
 	.status = crypt_status,

@@ -1083,7 +1083,8 @@ static int gss_read_proxy_verf(struct svc_rqst *rqstp,
 	}
 
 	length = min_t(unsigned int, inlen, (char *)xdr->end - (char *)xdr->p);
-	memcpy(page_address(in_token->pages[0]), xdr->p, length);
+	if (length)
+		memcpy(page_address(in_token->pages[0]), xdr->p, length);
 	inlen -= length;
 
 	to_offs = length;
@@ -1571,9 +1572,6 @@ svcauth_gss_decode_credbody(struct xdr_stream *xdr,
 	ssize_t handle_len;
 	u32 body_len;
 	__be32 *p;
-
-	/* Early-return paths leave deterministic state, not stale residue. */
-	memset(gc, 0, sizeof(*gc));
 
 	p = xdr_inline_decode(xdr, XDR_UNIT);
 	if (!p)

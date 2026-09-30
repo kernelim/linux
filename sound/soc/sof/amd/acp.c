@@ -54,9 +54,17 @@ static int smn_write(struct pci_dev *dev, u32 smn_addr, u32 data)
 static int smn_read(struct pci_dev *dev, u32 smn_addr)
 {
 	u32 data = 0;
+	int err;
 
-	pci_write_config_dword(dev, 0x60, smn_addr);
-	pci_read_config_dword(dev, 0x64, &data);
+	err = pci_write_config_dword(dev, 0x60, smn_addr);
+	if (err)
+		err = pci_read_config_dword(dev, 0x64, &data);
+
+	if (err)
+		return pcibios_err_to_errno(err);
+
+	if (PCI_POSSIBLE_ERROR(data))
+		return -ENODEV;
 
 	return data;
 }
@@ -213,10 +221,9 @@ int configure_and_run_dma(struct acp_dev_data *adata, unsigned int src_addr,
 static int psp_mbox_ready(struct acp_dev_data *adata, bool ack)
 {
 	struct snd_sof_dev *sdev = adata->dev;
-	int ret;
-	u32 data;
+	int ret, data;
 
-	ret = read_poll_timeout(smn_read, data, data & MBOX_READY_MASK, MBOX_DELAY_US,
+	ret = read_poll_timeout(smn_read, data, data > 0 && data & MBOX_READY_MASK, MBOX_DELAY_US,
 				ACP_PSP_TIMEOUT_US, false, adata->smn_dev, MP0_C2PMSG_114_REG);
 	if (!ret)
 		return 0;
@@ -239,13 +246,13 @@ static int psp_send_cmd(struct acp_dev_data *adata, int cmd)
 {
 	struct snd_sof_dev *sdev = adata->dev;
 	int ret;
-	u32 data;
+	int data;
 
 	if (!cmd)
 		return -EINVAL;
 
 	/* Get a non-zero Doorbell value from PSP */
-	ret = read_poll_timeout(smn_read, data, data, MBOX_DELAY_US, ACP_PSP_TIMEOUT_US, false,
+	ret = read_poll_timeout(smn_read, data, data > 0, MBOX_DELAY_US, ACP_PSP_TIMEOUT_US, false,
 				adata->smn_dev, MP0_C2PMSG_73_REG);
 
 	if (ret) {
@@ -389,6 +396,33 @@ void memcpy_to_scratch(struct snd_sof_dev *sdev, u32 offset, unsigned int *src, 
 		snd_sof_dsp_write(sdev, ACP_DSP_BAR, reg_offset + i, src[j]);
 }
 
+static int acp_init_scratch_mem_ipc_flags(struct snd_sof_dev *sdev)
+{
+	u32 dsp_msg_write, dsp_ack_write, host_msg_write, host_ack_write;
+
+	dsp_msg_write = sdev->debug_box.offset +
+			offsetof(struct scratch_ipc_conf, sof_dsp_msg_write);
+	dsp_ack_write = sdev->debug_box.offset +
+			offsetof(struct scratch_ipc_conf, sof_dsp_ack_write);
+	host_msg_write = sdev->debug_box.offset +
+			 offsetof(struct scratch_ipc_conf, sof_host_msg_write);
+	host_ack_write = sdev->debug_box.offset +
+			 offsetof(struct scratch_ipc_conf, sof_host_ack_write);
+	/* Initialize host message write flag */
+	snd_sof_dsp_write(sdev, ACP_DSP_BAR, ACP_SCRATCH_REG_0 + host_msg_write, 0);
+
+	/* Initialize host ack write flag */
+	snd_sof_dsp_write(sdev, ACP_DSP_BAR, ACP_SCRATCH_REG_0 + host_ack_write, 0);
+
+	/* Initialize DSP message write flag */
+	snd_sof_dsp_write(sdev, ACP_DSP_BAR, ACP_SCRATCH_REG_0 + dsp_msg_write, 0);
+
+	/* Initialize DSP ack write flag */
+	snd_sof_dsp_write(sdev, ACP_DSP_BAR, ACP_SCRATCH_REG_0 + dsp_ack_write, 0);
+
+	return 0;
+}
+
 static int acp_memory_init(struct snd_sof_dev *sdev)
 {
 	struct acp_dev_data *adata = sdev->pdata->hw_pdata;
@@ -396,6 +430,7 @@ static int acp_memory_init(struct snd_sof_dev *sdev)
 
 	snd_sof_dsp_update_bits(sdev, ACP_DSP_BAR, desc->dsp_intr_base + DSP_SW_INTR_CNTL_OFFSET,
 				ACP_DSP_INTR_EN_MASK, ACP_DSP_INTR_EN_MASK);
+	acp_init_scratch_mem_ipc_flags(sdev);
 	init_dma_descriptor(adata);
 
 	return 0;

@@ -180,11 +180,15 @@ static int cs35l56_hda_mixer_get(struct snd_kcontrol *kcontrol,
 {
 	struct cs35l56_hda *cs35l56 = snd_kcontrol_chip(kcontrol);
 	unsigned int reg_val;
-	int i;
+	int i, ret;
 
 	cs35l56_hda_wait_dsp_ready(cs35l56);
 
-	regmap_read(cs35l56->base.regmap, kcontrol->private_value, &reg_val);
+	ret = regmap_read(cs35l56->base.regmap, kcontrol->private_value,
+			  &reg_val);
+	if (ret)
+		return ret;
+
 	reg_val &= CS35L56_ASP_TXn_SRC_MASK;
 
 	for (i = 0; i < CS35L56_NUM_INPUT_SRC; ++i) {
@@ -203,15 +207,20 @@ static int cs35l56_hda_mixer_put(struct snd_kcontrol *kcontrol,
 	struct cs35l56_hda *cs35l56 = snd_kcontrol_chip(kcontrol);
 	unsigned int item = ucontrol->value.enumerated.item[0];
 	bool changed;
+	int ret;
 
 	if (item >= CS35L56_NUM_INPUT_SRC)
 		return -EINVAL;
 
 	cs35l56_hda_wait_dsp_ready(cs35l56);
 
-	regmap_update_bits_check(cs35l56->base.regmap, kcontrol->private_value,
-				 CS35L56_INPUT_MASK, cs35l56_tx_input_values[item],
-				 &changed);
+	ret = regmap_update_bits_check(cs35l56->base.regmap,
+				       kcontrol->private_value,
+				       CS35L56_INPUT_MASK,
+				       cs35l56_tx_input_values[item],
+				       &changed);
+	if (ret)
+		return ret;
 
 	return changed;
 }
@@ -249,7 +258,7 @@ static int cs35l56_hda_posture_put(struct snd_kcontrol *kcontrol,
 				   struct snd_ctl_elem_value *ucontrol)
 {
 	struct cs35l56_hda *cs35l56 = snd_kcontrol_chip(kcontrol);
-	unsigned long pos = ucontrol->value.integer.value[0];
+	long pos = ucontrol->value.integer.value[0];
 	bool changed;
 	int ret;
 
@@ -403,10 +412,6 @@ static void cs35l56_hda_remove_controls(struct cs35l56_hda *cs35l56)
 	snd_ctl_remove(cs35l56->codec->card, cs35l56->volume_ctl);
 }
 
-static const struct cs_dsp_client_ops cs35l56_hda_client_ops = {
-	/* cs_dsp requires the client to provide this even if it is empty */
-};
-
 static int cs35l56_hda_request_firmware_file(struct cs35l56_hda *cs35l56,
 					     const struct firmware **firmware, char **filename,
 					     const char *base_name, const char *system_name,
@@ -548,20 +553,24 @@ static void cs35l56_hda_release_firmware_files(const struct firmware *wmfw_firmw
 	kfree(coeff_filename);
 }
 
-static void cs35l56_hda_apply_calibration(struct cs35l56_hda *cs35l56)
+static int cs35l56_hda_apply_calibration(struct cs35l56_hda *cs35l56)
 {
 	int ret;
 
 	if (!cs35l56->base.cal_data_valid || cs35l56->base.secured)
-		return;
+		return -EACCES;
 
 	ret = cs_amp_write_cal_coeffs(&cs35l56->cs_dsp,
 				      &cs35l56_calibration_controls,
 				      &cs35l56->base.cal_data);
-	if (ret < 0)
+	if (ret < 0) {
 		dev_warn(cs35l56->base.dev, "Failed to write calibration: %d\n", ret);
-	else
-		dev_info(cs35l56->base.dev, "Calibration applied\n");
+		return ret;
+	}
+
+	dev_info(cs35l56->base.dev, "Calibration applied\n");
+
+	return 0;
 }
 
 static void cs35l56_hda_fw_load(struct cs35l56_hda *cs35l56)
@@ -669,7 +678,9 @@ static void cs35l56_hda_fw_load(struct cs35l56_hda *cs35l56)
 	if (ret)
 		dev_dbg(cs35l56->base.dev, "%s: cs_dsp_run ret %d\n", __func__, ret);
 
+	/* Don't need to check return code, it's not fatal if this fails */
 	cs35l56_hda_apply_calibration(cs35l56);
+
 	ret = cs35l56_mbox_send(&cs35l56->base, CS35L56_MBOX_CMD_AUDIO_REINIT);
 	if (ret)
 		cs_dsp_stop(&cs35l56->cs_dsp);
@@ -694,6 +705,100 @@ static void cs35l56_hda_dsp_work(struct work_struct *work)
 
 	cs35l56_hda_fw_load(cs35l56);
 }
+
+static ssize_t cs35l56_hda_debugfs_calibrate_write(struct file *file,
+						   const char __user *from,
+						   size_t count, loff_t *ppos)
+{
+	struct cs35l56_base *cs35l56_base = file->private_data;
+	ssize_t ret;
+
+	ret = pm_runtime_resume_and_get(cs35l56_base->dev);
+	if (ret)
+		return ret;
+
+	ret = cs35l56_calibrate_debugfs_write(cs35l56_base, from, count, ppos);
+	pm_runtime_autosuspend(cs35l56_base->dev);
+
+	return ret;
+}
+
+static ssize_t cs35l56_hda_debugfs_cal_temperature_write(struct file *file,
+							 const char __user *from,
+							 size_t count, loff_t *ppos)
+{
+	struct cs35l56_base *cs35l56_base = file->private_data;
+	ssize_t ret;
+
+	ret = pm_runtime_resume_and_get(cs35l56_base->dev);
+	if (ret)
+		return ret;
+
+	ret = cs35l56_cal_ambient_debugfs_write(cs35l56_base, from, count, ppos);
+	pm_runtime_autosuspend(cs35l56_base->dev);
+
+	return ret;
+}
+
+static ssize_t cs35l56_hda_debugfs_cal_data_read(struct file *file,
+						 char __user *to,
+						 size_t count, loff_t *ppos)
+{
+	struct cs35l56_base *cs35l56_base = file->private_data;
+	ssize_t ret;
+
+	ret = pm_runtime_resume_and_get(cs35l56_base->dev);
+	if (ret)
+		return ret;
+
+	ret = cs35l56_cal_data_debugfs_read(cs35l56_base, to, count, ppos);
+	pm_runtime_autosuspend(cs35l56_base->dev);
+
+	return ret;
+}
+
+static ssize_t cs35l56_hda_debugfs_cal_data_write(struct file *file,
+						  const char __user *from,
+						  size_t count, loff_t *ppos)
+{
+	struct cs35l56_base *cs35l56_base = file->private_data;
+	struct cs35l56_hda *cs35l56 = cs35l56_hda_from_base(cs35l56_base);
+	ssize_t ret;
+
+	ret = cs35l56_cal_data_debugfs_write(cs35l56_base, from, count, ppos);
+	if (ret == -ENODATA)
+		return count;	/* Ignore writes of empty cal blobs */
+
+	if (ret < 0)
+		return ret;
+
+	ret = pm_runtime_resume_and_get(cs35l56_base->dev);
+	if (ret)
+		return ret;
+
+	ret = cs35l56_hda_apply_calibration(cs35l56);
+	if (ret == 0)
+		cs35l56_mbox_send(cs35l56_base, CS35L56_MBOX_CMD_AUDIO_REINIT);
+	else
+		count = -EIO;
+
+	pm_runtime_autosuspend(cs35l56_base->dev);
+
+	return count;
+}
+
+static const struct cs35l56_cal_debugfs_fops cs35l56_hda_cal_debugfs_fops = {
+	.calibrate = {
+		.write = cs35l56_hda_debugfs_calibrate_write,
+	},
+	.cal_temperature = {
+		.write = cs35l56_hda_debugfs_cal_temperature_write,
+	},
+	.cal_data = {
+		.read = cs35l56_hda_debugfs_cal_data_read,
+		.write = cs35l56_hda_debugfs_cal_data_write,
+	},
+};
 
 static int cs35l56_hda_bind(struct device *dev, struct device *master, void *master_data)
 {
@@ -722,6 +827,9 @@ static int cs35l56_hda_bind(struct device *dev, struct device *master, void *mas
 	cs_dsp_init_debugfs(&cs35l56->cs_dsp, cs35l56->debugfs_root);
 #endif
 
+	if (IS_ENABLED(CONFIG_SND_HDA_SCODEC_CS35L56_CAL_DEBUGFS))
+		cs35l56_create_cal_debugfs(&cs35l56->base, &cs35l56_hda_cal_debugfs_fops);
+
 	dev_dbg(cs35l56->base.dev, "Bound\n");
 
 	return 0;
@@ -735,6 +843,7 @@ static void cs35l56_hda_unbind(struct device *dev, struct device *master, void *
 
 	cancel_work_sync(&cs35l56->dsp_work);
 
+	cs35l56_remove_cal_debugfs(&cs35l56->base);
 	cs35l56_hda_remove_controls(cs35l56);
 
 #if IS_ENABLED(CONFIG_SND_DEBUG)
@@ -875,6 +984,7 @@ static int cs35l56_hda_system_resume(struct device *dev)
 static int cs35l56_hda_fixup_yoga9(struct cs35l56_hda *cs35l56, int *bus_addr)
 {
 	/* The cirrus,dev-index property has the wrong values */
+	cs35l56->num_amps = 2;
 	switch (*bus_addr) {
 	case 0x30:
 		cs35l56->index = 1;
@@ -923,8 +1033,7 @@ static int cs35l56_hda_read_acpi(struct cs35l56_hda *cs35l56, int hid, int id)
 	u32 values[HDA_MAX_COMPONENTS];
 	char hid_string[8];
 	struct acpi_device *adev;
-	const char *property, *sub;
-	size_t nval;
+	const char *property;
 	int i, ret;
 
 	/*
@@ -940,12 +1049,14 @@ static int cs35l56_hda_read_acpi(struct cs35l56_hda *cs35l56, int hid, int id)
 			return -ENODEV;
 		}
 		ACPI_COMPANION_SET(cs35l56->base.dev, adev);
+		acpi_dev_put(adev);
 	}
 
 	/* Initialize things that could be overwritten by a fixup */
 	cs35l56->index = -1;
 
-	sub = acpi_get_subsystem_id(ACPI_HANDLE(cs35l56->base.dev));
+	const char *sub __free(kfree) = acpi_get_subsystem_id(ACPI_HANDLE(cs35l56->base.dev));
+
 	ret = cs35l56_hda_apply_platform_fixups(cs35l56, sub, &id);
 	if (ret)
 		return ret;
@@ -960,13 +1071,14 @@ static int cs35l56_hda_read_acpi(struct cs35l56_hda *cs35l56, int hid, int id)
 			ret = -EINVAL;
 			goto err;
 		}
-		nval = ret;
+		cs35l56->num_amps = ret;
 
-		ret = device_property_read_u32_array(cs35l56->base.dev, property, values, nval);
+		ret = device_property_read_u32_array(cs35l56->base.dev, property, values,
+						     cs35l56->num_amps);
 		if (ret)
 			goto err;
 
-		for (i = 0; i < nval; i++) {
+		for (i = 0; i < cs35l56->num_amps; i++) {
 			if (values[i] == id) {
 				cs35l56->index = i;
 				break;
@@ -989,17 +1101,19 @@ static int cs35l56_hda_read_acpi(struct cs35l56_hda *cs35l56, int hid, int id)
 			 "Read ACPI _SUB failed(%ld): fallback to generic firmware\n",
 			 PTR_ERR(sub));
 	} else {
-		ret = cirrus_scodec_get_speaker_id(cs35l56->base.dev, cs35l56->index, nval, -1);
+		ret = cirrus_scodec_get_speaker_id(cs35l56->base.dev, cs35l56->index,
+						   cs35l56->num_amps, -1);
 		if (ret == -ENOENT) {
-			cs35l56->system_name = sub;
+			cs35l56->system_name = devm_kstrdup(cs35l56->base.dev, sub, GFP_KERNEL);
 		} else if (ret >= 0) {
-			cs35l56->system_name = kasprintf(GFP_KERNEL, "%s-spkid%d", sub, ret);
-			kfree(sub);
-			if (!cs35l56->system_name)
-				return -ENOMEM;
+			cs35l56->system_name = devm_kasprintf(cs35l56->base.dev, GFP_KERNEL,
+							      "%s-spkid%d", sub, ret);
 		} else {
 			return ret;
 		}
+
+		if (!cs35l56->system_name)
+			return -ENOMEM;
 	}
 
 	cs35l56->base.reset_gpio = devm_gpiod_get_index_optional(cs35l56->base.dev,
@@ -1050,10 +1164,9 @@ int cs35l56_hda_common_probe(struct cs35l56_hda *cs35l56, int hid, int id)
 	}
 
 	cs35l56->base.type = hid & 0xff;
-	cs35l56->base.cal_index = -1;
+	cs35l56->base.cal_index = cs35l56->index;
 
 	cs35l56_init_cs_dsp(&cs35l56->base, &cs35l56->cs_dsp);
-	cs35l56->cs_dsp.client_ops = &cs35l56_hda_client_ops;
 
 	if (cs35l56->base.reset_gpio) {
 		dev_dbg(cs35l56->base.dev, "Hard reset\n");
@@ -1151,7 +1264,6 @@ void cs35l56_hda_remove(struct device *dev)
 
 	cs_dsp_remove(&cs35l56->cs_dsp);
 
-	kfree(cs35l56->system_name);
 	pm_runtime_put_noidle(cs35l56->base.dev);
 
 	gpiod_set_value_cansleep(cs35l56->base.reset_gpio, 0);

@@ -4,7 +4,7 @@
  * Copyright 2006-2007	Jiri Benc <jbenc@suse.cz>
  * Copyright 2013-2014  Intel Mobile Communications GmbH
  * Copyright (C) 2015 - 2017 Intel Deutschland GmbH
- * Copyright (C) 2018-2025 Intel Corporation
+ * Copyright (C) 2018-2026 Intel Corporation
  */
 
 #include <linux/module.h>
@@ -369,7 +369,9 @@ static void sta_accumulate_removed_link_stats(struct sta_info *sta, int link_id)
 	struct link_sta_info *link_sta = wiphy_dereference(sta->local->hw.wiphy,
 							   sta->link[link_id]);
 	struct ieee80211_link_data *link;
+	unsigned int start;
 	int ac, tid;
+	u64 value;
 	u32 thr;
 
 	for (ac = 0; ac < IEEE80211_NUM_ACS; ac++) {
@@ -378,8 +380,13 @@ static void sta_accumulate_removed_link_stats(struct sta_info *sta, int link_id)
 		sta->rem_link_stats.tx_bytes += link_sta->tx_stats.bytes[ac];
 	}
 
+	do {
+		start = u64_stats_fetch_begin(&link_sta->rx_stats.syncp);
+		value = u64_stats_read(&link_sta->rx_stats.bytes);
+	} while (u64_stats_fetch_retry(&link_sta->rx_stats.syncp, start));
+
 	sta->rem_link_stats.rx_packets += link_sta->rx_stats.packets;
-	sta->rem_link_stats.rx_bytes += link_sta->rx_stats.bytes;
+	sta->rem_link_stats.rx_bytes += value;
 	sta->rem_link_stats.tx_retries += link_sta->status_stats.retry_count;
 	sta->rem_link_stats.tx_failed += link_sta->status_stats.retry_failed;
 	sta->rem_link_stats.rx_dropped_misc += link_sta->rx_stats.dropped;
@@ -389,8 +396,13 @@ static void sta_accumulate_removed_link_stats(struct sta_info *sta, int link_id)
 		sta->rem_link_stats.expected_throughput += thr;
 
 	for (tid = 0; tid < IEEE80211_NUM_TIDS; tid++) {
-		sta->rem_link_stats.pertid_stats.rx_msdu +=
-			link_sta->rx_stats.msdu[tid];
+		do {
+			start = u64_stats_fetch_begin(&link_sta->rx_stats.syncp);
+			value = u64_stats_read(&link_sta->rx_stats.msdu[tid]);
+		} while (u64_stats_fetch_retry(&link_sta->rx_stats.syncp,
+					       start));
+
+		sta->rem_link_stats.pertid_stats.rx_msdu += value;
 		sta->rem_link_stats.pertid_stats.tx_msdu +=
 			link_sta->tx_stats.msdu[tid];
 		sta->rem_link_stats.pertid_stats.tx_msdu_retries +=
@@ -790,6 +802,7 @@ struct sta_info *sta_info_alloc_with_link(struct ieee80211_sub_if_data *sdata,
 static int sta_info_insert_check(struct sta_info *sta)
 {
 	struct ieee80211_sub_if_data *sdata = sta->sdata;
+	struct ieee80211_sta *same_addr_sta;
 
 	lockdep_assert_wiphy(sdata->local->hw.wiphy);
 
@@ -805,13 +818,18 @@ static int sta_info_insert_check(struct sta_info *sta)
 		    !is_valid_ether_addr(sta->sta.addr)))
 		return -EINVAL;
 
+	if (!ieee80211_hw_check(&sdata->local->hw, NEEDS_UNIQUE_STA_ADDR))
+		return 0;
+
 	/* The RCU read lock is required by rhashtable due to
 	 * asynchronous resize/rehash.  We also require the mutex
 	 * for correctness.
 	 */
 	rcu_read_lock();
-	if (ieee80211_hw_check(&sdata->local->hw, NEEDS_UNIQUE_STA_ADDR) &&
-	    ieee80211_find_sta_by_ifaddr(&sdata->local->hw, sta->addr, NULL)) {
+	same_addr_sta = ieee80211_find_sta_by_ifaddr(&sdata->local->hw,
+						     sta->addr, NULL);
+	/* For NAN, a peer can re-use */
+	if (same_addr_sta && same_addr_sta != rcu_access_pointer(sta->sta.nmi)) {
 		rcu_read_unlock();
 		return -ENOTUNIQ;
 	}
@@ -969,7 +987,7 @@ static int sta_info_insert_finish(struct sta_info *sta) __acquires(RCU)
 	}
 
 	sinfo->generation = local->sta_generation;
-	cfg80211_new_sta(sdata->dev, sta->sta.addr, sinfo, GFP_KERNEL);
+	cfg80211_new_sta(&sdata->wdev, sta->sta.addr, sinfo, GFP_KERNEL);
 	kfree(sinfo);
 
 	sta_dbg(sdata, "Inserted STA %pM\n", sta->sta.addr);
@@ -1289,6 +1307,21 @@ static int __must_check __sta_info_destroy_part1(struct sta_info *sta)
 
 	lockdep_assert_wiphy(local->hw.wiphy);
 
+	if (sdata->vif.type == NL80211_IFTYPE_NAN) {
+		struct sta_info *sta_iter, *tmp;
+
+		/* Remove all NDI stations associated with this NMI STA */
+		list_for_each_entry_safe(sta_iter, tmp, &local->sta_list, list) {
+			if (rcu_access_pointer(sta_iter->sta.nmi) != &sta->sta)
+				continue;
+			sta_info_destroy_addr(sta_iter->sdata, sta_iter->addr);
+		}
+
+		/* Free and clear the local peer schedule */
+		ieee80211_nan_free_peer_sched(sta->sta.nan_sched);
+		sta->sta.nan_sched = NULL;
+	}
+
 	/*
 	 * Before removing the station from the driver and
 	 * rate control, it might still start new aggregation
@@ -1428,6 +1461,8 @@ static int _sta_info_move_state(struct sta_info *sta,
 		} else if (sta->sta_state == IEEE80211_STA_AUTHORIZED) {
 			ieee80211_vif_dec_num_mcast(sta->sdata);
 			clear_bit(WLAN_STA_AUTHORIZED, &sta->_flags);
+			if (sta->sdata->vif.type == NL80211_IFTYPE_NAN_DATA)
+				ieee80211_nan_update_ndi_carrier(sta->sdata);
 
 			/*
 			 * If we have encryption offload, flush (station) queues
@@ -1456,6 +1491,8 @@ static int _sta_info_move_state(struct sta_info *sta,
 			set_bit(WLAN_STA_AUTHORIZED, &sta->_flags);
 			ieee80211_check_fast_xmit(sta);
 			ieee80211_check_fast_rx(sta);
+			if (sta->sdata->vif.type == NL80211_IFTYPE_NAN_DATA)
+				ieee80211_nan_update_ndi_carrier(sta->sdata);
 		}
 		if (sta->sdata->vif.type == NL80211_IFTYPE_AP_VLAN ||
 		    sta->sdata->vif.type == NL80211_IFTYPE_AP)
@@ -1540,6 +1577,10 @@ static void __sta_info_destroy_part2(struct sta_info *sta, bool recalc)
 		}
 	}
 
+	sinfo = kzalloc(sizeof(*sinfo), GFP_KERNEL);
+	if (sinfo)
+		sta_set_sinfo(sta, sinfo, true);
+
 	if (sta->uploaded) {
 		ret = drv_sta_state(local, sdata, sta, IEEE80211_STA_NONE,
 				    IEEE80211_STA_NOTEXIST);
@@ -1548,10 +1589,7 @@ static void __sta_info_destroy_part2(struct sta_info *sta, bool recalc)
 
 	sta_dbg(sdata, "Removed STA %pM\n", sta->sta.addr);
 
-	sinfo = kzalloc(sizeof(*sinfo), GFP_KERNEL);
-	if (sinfo)
-		sta_set_sinfo(sta, sinfo, true);
-	cfg80211_del_sta_sinfo(sdata->dev, sta->sta.addr, sinfo, GFP_KERNEL);
+	cfg80211_del_sta_sinfo(&sdata->wdev, sta->sta.addr, sinfo, GFP_KERNEL);
 	kfree(sinfo);
 
 	ieee80211_sta_debugfs_remove(sta);
@@ -2561,6 +2599,17 @@ static void sta_stats_decode_rate(struct ieee80211_local *local, u32 rate,
 		rinfo->eht_gi = STA_STATS_GET(EHT_GI, rate);
 		rinfo->eht_ru_alloc = STA_STATS_GET(EHT_RU, rate);
 		break;
+	case STA_STATS_RATE_TYPE_UHR:
+		rinfo->flags = RATE_INFO_FLAGS_UHR_MCS;
+		rinfo->mcs = STA_STATS_GET(UHR_MCS, rate);
+		rinfo->nss = STA_STATS_GET(UHR_NSS, rate);
+		rinfo->eht_gi = STA_STATS_GET(UHR_GI, rate);
+		rinfo->eht_ru_alloc = STA_STATS_GET(UHR_RU, rate);
+		if (STA_STATS_GET(UHR_ELR, rate))
+			rinfo->flags |= RATE_INFO_FLAGS_UHR_ELR_MCS;
+		if (STA_STATS_GET(UHR_IM, rate))
+			rinfo->flags |= RATE_INFO_FLAGS_UHR_IM;
+		break;
 	}
 }
 
@@ -2584,7 +2633,7 @@ static inline u64 sta_get_tidstats_msdu(struct ieee80211_sta_rx_stats *rxstats,
 
 	do {
 		start = u64_stats_fetch_begin(&rxstats->syncp);
-		value = rxstats->msdu[tid];
+		value = u64_stats_read(&rxstats->msdu[tid]);
 	} while (u64_stats_fetch_retry(&rxstats->syncp, start));
 
 	return value;
@@ -2660,7 +2709,7 @@ static inline u64 sta_get_stats_bytes(struct ieee80211_sta_rx_stats *rxstats)
 
 	do {
 		start = u64_stats_fetch_begin(&rxstats->syncp);
-		value = rxstats->bytes;
+		value = u64_stats_read(&rxstats->bytes);
 	} while (u64_stats_fetch_retry(&rxstats->syncp, start));
 
 	return value;
@@ -2765,7 +2814,9 @@ static void sta_set_link_sinfo(struct sta_info *sta,
 	}
 
 	link_sinfo->inactive_time =
-		jiffies_to_msecs(jiffies - ieee80211_sta_last_active(sta, link_id));
+		jiffies_delta_to_msecs(jiffies -
+				       ieee80211_sta_last_active(sta,
+								 link_id));
 
 	if (!(link_sinfo->filled & (BIT_ULL(NL80211_STA_INFO_TX_BYTES64) |
 				    BIT_ULL(NL80211_STA_INFO_TX_BYTES)))) {
@@ -2998,7 +3049,8 @@ void sta_set_sinfo(struct sta_info *sta, struct station_info *sinfo,
 	sinfo->connected_time = ktime_get_seconds() - sta->last_connected;
 	sinfo->assoc_at = sta->assoc_at;
 	sinfo->inactive_time =
-		jiffies_to_msecs(jiffies - ieee80211_sta_last_active(sta, -1));
+		jiffies_delta_to_msecs(jiffies -
+				       ieee80211_sta_last_active(sta, -1));
 
 	if (!(sinfo->filled & (BIT_ULL(NL80211_STA_INFO_TX_BYTES64) |
 			       BIT_ULL(NL80211_STA_INFO_TX_BYTES)))) {

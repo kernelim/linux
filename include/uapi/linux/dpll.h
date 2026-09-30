@@ -113,9 +113,7 @@ enum dpll_clock_quality_level {
 enum dpll_type {
 	DPLL_TYPE_PPS = 1,
 	DPLL_TYPE_EEC,
-#ifndef __GENKSYMS__
 	DPLL_TYPE_GENERIC,
-#endif
 
 	/* private: */
 	__DPLL_TYPE_MAX,

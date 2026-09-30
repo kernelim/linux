@@ -1,3 +1,3 @@
-#8-
-0x006eaeca	xprt_wake_pending_tasks	net/sunrpc/sunrpc	EXPORT_SYMBOL_GPL	
+#9-
+0x130a9ea5	xprt_wake_pending_tasks	net/sunrpc/sunrpc	EXPORT_SYMBOL_GPL	
 

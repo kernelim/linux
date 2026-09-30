@@ -297,7 +297,7 @@ static int try_fmt(struct v4l2_vbi_format *f, const struct bttv_tvnorm *tvnorm,
 	return 0;
 }
 
-int bttv_try_fmt_vbi_cap(struct file *file, void *f, struct v4l2_format *frt)
+int bttv_try_fmt_vbi_cap(struct file *file, void *priv, struct v4l2_format *frt)
 {
 	struct bttv_fh *fh = f;
 	struct bttv *btv = fh->btv;
@@ -315,7 +315,7 @@ int bttv_try_fmt_vbi_cap(struct file *file, void *f, struct v4l2_format *frt)
 }
 
 
-int bttv_s_fmt_vbi_cap(struct file *file, void *f, struct v4l2_format *frt)
+int bttv_s_fmt_vbi_cap(struct file *file, void *priv, struct v4l2_format *frt)
 {
 	struct bttv_fh *fh = f;
 	struct bttv *btv = fh->btv;
@@ -363,7 +363,7 @@ int bttv_s_fmt_vbi_cap(struct file *file, void *f, struct v4l2_format *frt)
 }
 
 
-int bttv_g_fmt_vbi_cap(struct file *file, void *f, struct v4l2_format *frt)
+int bttv_g_fmt_vbi_cap(struct file *file, void *priv, struct v4l2_format *frt)
 {
 	struct bttv_fh *fh = f;
 	const struct bttv_tvnorm *tvnorm;

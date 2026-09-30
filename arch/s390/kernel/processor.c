@@ -8,6 +8,7 @@
 #define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
 
 #include <linux/stop_machine.h>
+#include <linux/cpufeature.h>
 #include <linux/bitops.h>
 #include <linux/kernel.h>
 #include <linux/random.h>
@@ -17,7 +18,8 @@
 #include <linux/mm_types.h>
 #include <linux/delay.h>
 #include <linux/cpu.h>
-
+#include <linux/smp.h>
+#include <asm/text-patching.h>
 #include <asm/diag.h>
 #include <asm/facility.h>
 #include <asm/elf.h>
@@ -77,6 +79,23 @@ void notrace stop_machine_yield(const struct cpumask *cpumask)
 		if (arch_vcpu_is_preempted(cpu))
 			smp_yield_cpu(cpu);
 	}
+}
+
+static void do_sync_core(void *info)
+{
+	sync_core();
+}
+
+void text_poke_sync(void)
+{
+	on_each_cpu(do_sync_core, NULL, 1);
+}
+
+void text_poke_sync_lock(void)
+{
+	cpus_read_lock();
+	text_poke_sync();
+	cpus_read_unlock();
 }
 
 /*
@@ -193,7 +212,7 @@ static int __init setup_hwcaps(void)
 		elf_hwcap |= HWCAP_DFP;
 
 	/* huge page support */
-	if (MACHINE_HAS_EDAT1)
+	if (cpu_has_edat1())
 		elf_hwcap |= HWCAP_HPAGE;
 
 	/* 64-bit register support for 31-bit processes */
@@ -228,7 +247,7 @@ static int __init setup_hwcaps(void)
 		elf_hwcap |= HWCAP_NNPA;
 
 	/* guarded storage */
-	if (MACHINE_HAS_GS)
+	if (cpu_has_gs())
 		elf_hwcap |= HWCAP_GS;
 
 	if (MACHINE_HAS_PCI_MIO)

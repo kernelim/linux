@@ -13,6 +13,8 @@
 #define DAPM_DIRECT "(direct)"
 #define DAPM_ARROW(dir) (((dir) == SND_SOC_DAPM_DIR_OUT) ? "->" : "<-")
 
+TRACE_DEFINE_ENUM(SND_SOC_DAPM_DIR_OUT);
+
 struct snd_soc_jack;
 struct snd_soc_card;
 struct snd_soc_dapm_widget;
@@ -25,14 +27,14 @@ DECLARE_EVENT_CLASS(snd_soc_dapm,
 	TP_ARGS(dapm, val),
 
 	TP_STRUCT__entry(
-		__string(	card_name,	dapm->card->name)
-		__string(	comp_name,	dapm->component ? dapm->component->name : "(none)")
+		__string(	card_name,	snd_soc_dapm_to_card(dapm)->name)
+		__string(	comp_name,	snd_soc_dapm_to_component(dapm) ? snd_soc_dapm_to_component(dapm)->name : "(none)")
 		__field(	int,		val)
 	),
 
 	TP_fast_assign(
-		__assign_str(card_name, dapm->card->name);
-		__assign_str(comp_name, dapm->component ? dapm->component->name : "(none)");
+		__assign_str(card_name, snd_soc_dapm_to_card(dapm)->name);
+		__assign_str(comp_name, snd_soc_dapm_to_component(dapm) ? snd_soc_dapm_to_component(dapm)->name : "(none)");
 		__entry->val = val;
 	),
 

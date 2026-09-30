@@ -576,6 +576,7 @@ struct Scsi_Host_Aux {
 	struct Scsi_Host *host;
 	struct kref             tagset_refcnt;
 	struct completion       tagset_freed;
+	struct work_struct      eh_work;
 };
 
 struct Scsi_Host {

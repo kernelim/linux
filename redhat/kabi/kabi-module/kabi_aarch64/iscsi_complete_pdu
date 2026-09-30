@@ -1,3 +1,3 @@
-#8-
-0x6789b32d	iscsi_complete_pdu	drivers/scsi/libiscsi	EXPORT_SYMBOL_GPL	
+#9-
+0xd9f25c46	iscsi_complete_pdu	drivers/scsi/libiscsi	EXPORT_SYMBOL_GPL	
 

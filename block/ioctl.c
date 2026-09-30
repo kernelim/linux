@@ -13,6 +13,7 @@
 #include <linux/uaccess.h>
 #include <linux/pagemap.h>
 #include <linux/io_uring/cmd.h>
+#include <linux/blk-integrity.h>
 #include <uapi/linux/blkdev.h>
 #include "blk.h"
 
@@ -557,6 +558,11 @@ static int blkdev_common_ioctl(struct block_device *bdev, blk_mode_t mode,
 			       void __user *argp)
 {
 	unsigned int max_sectors;
+	int ret;
+
+	ret = blk_get_meta_cap(bdev, cmd, argp);
+	if (ret != -ENOIOCTLCMD)
+		return ret;
 
 	switch (cmd) {
 	case BLKFLSBUF:

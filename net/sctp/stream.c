@@ -1042,7 +1042,6 @@ struct sctp_chunk *sctp_process_strreset_resp(
 			stsn, rtsn, GFP_ATOMIC);
 	} else if (req->type == SCTP_PARAM_RESET_ADD_OUT_STREAMS) {
 		struct sctp_strreset_addstrm *addstrm;
-		const struct sctp_sched_ops *sched;
 		__u16 number;
 
 		addstrm = (struct sctp_strreset_addstrm *)req;
@@ -1053,10 +1052,7 @@ struct sctp_chunk *sctp_process_strreset_resp(
 			for (i = number; i < stream->outcnt; i++)
 				SCTP_SO(stream, i)->state = SCTP_STREAM_OPEN;
 		} else {
-			sched = sctp_sched_ops_from_stream(stream);
-			sched->unsched_all(stream);
-			sctp_stream_outq_migrate(stream, NULL, number);
-			sched->sched_all(stream);
+			sctp_stream_shrink_out(stream, number);
 			stream->outcnt = number;
 		}
 

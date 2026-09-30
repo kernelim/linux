@@ -1,3 +1,3 @@
-#8-
-0x9be146f2	iscsit_unregister_transport	drivers/target/iscsi/iscsi_target_mod	EXPORT_SYMBOL	
+#9-
+0x09ab1a5f	iscsit_unregister_transport	drivers/target/iscsi/iscsi_target_mod	EXPORT_SYMBOL	
 

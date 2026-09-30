@@ -139,6 +139,16 @@ int kvm_vgic_create(struct kvm *kvm, u32 type)
 		goto out_unlock;
 	}
 
+	kvm->arch.vgic.in_kernel = true;
+	kvm->arch.vgic.vgic_model = type;
+
+	kvm->arch.vgic.vgic_dist_base = VGIC_ADDR_UNDEF;
+
+	if (type == KVM_DEV_TYPE_ARM_VGIC_V2)
+		kvm->arch.vgic.vgic_cpu_base = VGIC_ADDR_UNDEF;
+	else
+		INIT_LIST_HEAD(&kvm->arch.vgic.rd_regions);
+
 	kvm_for_each_vcpu(i, vcpu, kvm) {
 		ret = vgic_allocate_private_irqs_locked(vcpu, type);
 		if (ret)
@@ -152,18 +162,9 @@ int kvm_vgic_create(struct kvm *kvm, u32 type)
 			vgic_cpu->private_irqs = NULL;
 		}
 
+		kvm->arch.vgic.vgic_model = 0;
 		goto out_unlock;
 	}
-
-	kvm->arch.vgic.in_kernel = true;
-	kvm->arch.vgic.vgic_model = type;
-
-	kvm->arch.vgic.vgic_dist_base = VGIC_ADDR_UNDEF;
-
-	if (type == KVM_DEV_TYPE_ARM_VGIC_V2)
-		kvm->arch.vgic.vgic_cpu_base = VGIC_ADDR_UNDEF;
-	else
-		INIT_LIST_HEAD(&kvm->arch.vgic.rd_regions);
 
 out_unlock:
 	mutex_unlock(&kvm->arch.config_lock);

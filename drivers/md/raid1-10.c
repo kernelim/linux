@@ -3,11 +3,6 @@
 #define RESYNC_BLOCK_SIZE (64*1024)
 #define RESYNC_PAGES ((RESYNC_BLOCK_SIZE + PAGE_SIZE-1) / PAGE_SIZE)
 
-/*
- * Number of guaranteed raid bios in case of extreme VM load:
- */
-#define	NR_RAID_BIOS 256
-
 /* when we get a read error on a read-only array, we redirect to another
  * device without failing the first device, or trying to over-write to
  * correct the read error.  To keep track of bad blocks on a per-bio
@@ -140,7 +135,7 @@ static inline bool raid1_add_bio_to_plug(struct mddev *mddev, struct bio *bio,
 	 * If bitmap is not enabled, it's safe to submit the io directly, and
 	 * this can get optimal performance.
 	 */
-	if (!mddev->bitmap_ops->enabled(mddev)) {
+	if (!md_bitmap_enabled(mddev, true)) {
 		raid1_submit_write(bio);
 		return true;
 	}
@@ -247,7 +242,7 @@ static inline int raid1_check_read_range(struct md_rdev *rdev,
 					 sector_t this_sector, int *len)
 {
 	sector_t first_bad;
-	int bad_sectors;
+	sector_t bad_sectors;
 
 	/* no bad block overlap */
 	if (!is_badblock(rdev, this_sector, *len, &first_bad, &bad_sectors))

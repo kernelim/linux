@@ -2124,12 +2124,11 @@ static void mark_func_jump_tables(struct objtool_file *file,
 			last = insn;
 
 		/*
-		 * Store back-pointers for unconditional forward jumps such
+		 * Store back-pointers for forward jumps such
 		 * that find_jump_table() can back-track using those and
 		 * avoid some potentially confusing code.
 		 */
-		if (insn->type == INSN_JUMP_UNCONDITIONAL && insn->jump_dest &&
-		    insn->offset > last->offset &&
+		if (insn->jump_dest &&
 		    insn->jump_dest->offset > insn->offset &&
 		    !insn->jump_dest->first_jump_src) {
 
@@ -2397,6 +2396,8 @@ static int __annotate_ifc(struct objtool_file *file, int type, struct instructio
 
 static int __annotate_late(struct objtool_file *file, int type, struct instruction *insn)
 {
+	struct symbol *sym;
+
 	switch (type) {
 	case ANNOTYPE_NOENDBR:
 		/* early */
@@ -2436,6 +2437,15 @@ static int __annotate_late(struct objtool_file *file, int type, struct instructi
 
 	case ANNOTYPE_REACHABLE:
 		insn->dead_end = false;
+		break;
+
+	case ANNOTYPE_NOCFI:
+		sym = insn->sym;
+		if (!sym) {
+			ERROR_INSN(insn, "dodgy NOCFI annotation");
+			return -1;
+		}
+		insn->sym->nocfi = 1;
 		break;
 
 	default:
@@ -2903,6 +2913,20 @@ static int update_cfi_state(struct instruction *insn,
 				 * PUSH so things don't go unbalanced.
 				 */
 				cfi->stack_size += 8;
+			}
+
+			else if (cfi->vals[op->src.reg].base == CFI_CFA) {
+				/*
+				 * Clang RSP musical chairs:
+				 *
+				 *   mov %rsp, %rdx [handled above]
+				 *   ...
+				 *   mov %rdx, %rbx [handled here]
+				 *   ...
+				 *   mov %rbx, %rsp [handled above]
+				 */
+				cfi->vals[op->dest.reg].base = CFI_CFA;
+				cfi->vals[op->dest.reg].offset = cfi->vals[op->src.reg].offset;
 			}
 
 
@@ -3996,6 +4020,37 @@ static int validate_retpoline(struct objtool_file *file)
 		WARN_INSN(insn, "indirect %s found in MITIGATION_RETPOLINE build",
 			  insn->type == INSN_JUMP_DYNAMIC ? "jump" : "call");
 		warnings++;
+	}
+
+	if (!opts.cfi)
+		return warnings;
+
+	/*
+	 * kCFI call sites look like:
+	 *
+	 *     movl $(-0x12345678), %r10d
+	 *     addl -4(%r11), %r10d
+	 *     jz 1f
+	 *     ud2
+	 *  1: cs call __x86_indirect_thunk_r11
+	 *
+	 * Verify all indirect calls are kCFI adorned by checking for the
+	 * UD2. Notably, doing __nocfi calls to regular (cfi) functions is
+	 * broken.
+	 */
+	list_for_each_entry(insn, &file->retpoline_call_list, call_node) {
+		struct symbol *sym = insn->sym;
+
+		if (sym && (sym->type == STT_NOTYPE ||
+			    sym->type == STT_FUNC) && !sym->nocfi) {
+			struct instruction *prev =
+				prev_insn_same_sym(file, insn);
+
+			if (!prev || prev->type != INSN_BUG) {
+				WARN_INSN(insn, "no-cfi indirect call!");
+				warnings++;
+			}
+		}
 	}
 
 	return warnings;

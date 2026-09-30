@@ -1,3 +1,3 @@
-#8-
-0xb33fd724	vfio_mig_get_next_state	drivers/vfio/vfio	EXPORT_SYMBOL_GPL	
+#9-
+0xb15e383e	vfio_mig_get_next_state	drivers/vfio/vfio	EXPORT_SYMBOL_GPL	
 

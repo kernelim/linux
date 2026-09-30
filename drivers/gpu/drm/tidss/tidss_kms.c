@@ -27,8 +27,6 @@ static void tidss_atomic_commit_tail(struct drm_atomic_state *old_state)
 	struct tidss_device *tidss = to_tidss(ddev);
 	bool fence_cookie = dma_fence_begin_signalling();
 
-	dev_dbg(ddev->dev, "%s\n", __func__);
-
 	tidss_runtime_get(tidss);
 
 	/*
@@ -273,8 +271,6 @@ int tidss_modeset_init(struct tidss_device *tidss)
 {
 	struct drm_device *ddev = &tidss->ddev;
 	int ret;
-
-	dev_dbg(tidss->dev, "%s\n", __func__);
 
 	ret = drmm_mode_config_init(ddev);
 	if (ret)

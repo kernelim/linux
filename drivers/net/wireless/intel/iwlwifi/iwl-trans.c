@@ -129,7 +129,7 @@ static enum iwl_reset_mode
 iwl_trans_determine_restart_mode(struct iwl_trans *trans)
 {
 	struct iwl_trans_dev_restart_data *data;
-	enum iwl_reset_mode at_least = 0;
+	enum iwl_reset_mode min_mode = 0;
 	unsigned int index;
 	static const enum iwl_reset_mode escalation_list_old[] = {
 		IWL_RESET_MODE_SW_RESET,
@@ -138,7 +138,7 @@ iwl_trans_determine_restart_mode(struct iwl_trans *trans)
 		IWL_RESET_MODE_FUNC_RESET,
 		IWL_RESET_MODE_PROD_RESET,
 	};
-	static const enum iwl_reset_mode escalation_list_sc[] = {
+	static const enum iwl_reset_mode escalation_list_top[] = {
 		IWL_RESET_MODE_SW_RESET,
 		IWL_RESET_MODE_REPROBE,
 		IWL_RESET_MODE_REPROBE,
@@ -159,25 +159,25 @@ iwl_trans_determine_restart_mode(struct iwl_trans *trans)
 
 	if (trans->request_top_reset) {
 		trans->request_top_reset = 0;
-		if (trans->mac_cfg->device_family >= IWL_DEVICE_FAMILY_SC)
+		if (iwl_trans_is_top_reset_supported(trans))
 			return IWL_RESET_MODE_TOP_RESET;
 		return IWL_RESET_MODE_PROD_RESET;
 	}
 
-	if (trans->mac_cfg->device_family >= IWL_DEVICE_FAMILY_SC) {
-		escalation_list = escalation_list_sc;
-		escalation_list_size = ARRAY_SIZE(escalation_list_sc);
+	if (iwl_trans_is_top_reset_supported(trans)) {
+		escalation_list = escalation_list_top;
+		escalation_list_size = ARRAY_SIZE(escalation_list_top);
 	} else {
 		escalation_list = escalation_list_old;
 		escalation_list_size = ARRAY_SIZE(escalation_list_old);
 	}
 
 	if (trans->restart.during_reset)
-		at_least = IWL_RESET_MODE_REPROBE;
+		min_mode = IWL_RESET_MODE_REPROBE;
 
 	data = iwl_trans_get_restart_data(trans->dev);
 	if (!data)
-		return at_least;
+		return min_mode;
 
 	if (!data->backoff &&
 	    ktime_get_boottime_seconds() - data->last_error >=
@@ -194,7 +194,7 @@ iwl_trans_determine_restart_mode(struct iwl_trans *trans)
 		data->backoff = false;
 	}
 
-	return max(at_least, escalation_list[index]);
+	return max(min_mode, escalation_list[index]);
 }
 
 #define IWL_TRANS_TOP_FOLLOWER_WAIT	180 /* ms */

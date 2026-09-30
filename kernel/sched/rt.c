@@ -1906,22 +1906,13 @@ static int find_lowest_rq(struct task_struct *task)
 
 static struct task_struct *pick_next_pushable_task(struct rq *rq)
 {
-	struct plist_head *head = &rq->rt.pushable_tasks;
-	struct task_struct *i, *p = NULL;
+	struct task_struct *p;
 
 	if (!has_pushable_tasks(rq))
 		return NULL;
 
-	plist_for_each_entry(i, head, pushable_tasks) {
-		/* skip tasks that cannot be migrated */
-		if (!task_on_cpu(rq, i) && !is_migration_disabled(i)) {
-			p = i;
-			break;
-		}
-	}
-
-	if (!p)
-		return NULL;
+	p = plist_first_entry(&rq->rt.pushable_tasks,
+			      struct task_struct, pushable_tasks);
 
 	BUG_ON(rq->cpu != task_cpu(p));
 	BUG_ON(task_current(rq, p));

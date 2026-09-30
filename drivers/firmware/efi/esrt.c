@@ -75,8 +75,6 @@ static LIST_HEAD(entry_list);
 struct esre_attribute {
 	struct attribute attr;
 	ssize_t (*show)(struct esre_entry *entry, char *buf);
-	ssize_t (*store)(struct esre_entry *entry,
-			 const char *buf, size_t count);
 };
 
 static struct esre_entry *to_entry(struct kobject *kobj)
@@ -94,10 +92,6 @@ static ssize_t esre_attr_show(struct kobject *kobj,
 {
 	struct esre_entry *entry = to_entry(kobj);
 	struct esre_attribute *attr = to_attr(_attr);
-
-	/* Don't tell normal users what firmware versions we've got... */
-	if (!capable(CAP_SYS_ADMIN))
-		return -EACCES;
 
 	return attr->show(entry, buf);
 }
@@ -156,7 +150,7 @@ static void esre_release(struct kobject *kobj)
 	kfree(entry);
 }
 
-static struct kobj_type esre1_ktype = {
+static const struct kobj_type esre1_ktype = {
 	.release = esre_release,
 	.sysfs_ops = &esre_attr_ops,
 	.default_groups = esre1_groups,

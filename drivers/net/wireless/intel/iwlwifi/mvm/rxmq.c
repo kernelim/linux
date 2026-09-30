@@ -6,7 +6,6 @@
  */
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
-#include <linux/fips.h>
 #include "iwl-trans.h"
 #include "mvm.h"
 #include "fw-api.h"
@@ -495,14 +494,6 @@ static int iwl_mvm_rx_crypto(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
 		return 0;
 	case RX_MPDU_RES_STATUS_SEC_CMAC_GMAC_ENC:
 		break;
-	case RX_MPDU_RES_STATUS_SEC_ENC_ERR:
-		if (fips_enabled) {
-			IWL_DEBUG_RX(mvm,
-				     "FIPS mode: firmware cannot decrypt, status: 0x%x\n",
-				     status);
-			break;
-		}
-		fallthrough;
 	default:
 		/*
 		 * Sometimes we can get frames that were not decrypted
@@ -2263,17 +2254,9 @@ void iwl_mvm_rx_mpdu_mq(struct iwl_mvm *mvm, struct napi_struct *napi,
 					  IWL_RX_MPDU_STATUS_STA_ID);
 
 		if (!WARN_ON_ONCE(sta_id >= mvm->fw->ucode_capa.num_stations)) {
-			struct ieee80211_link_sta *link_sta;
-
 			sta = rcu_dereference(mvm->fw_id_to_mac_id[sta_id]);
 			if (IS_ERR(sta))
 				sta = NULL;
-			link_sta = rcu_dereference(mvm->fw_id_to_link_sta[sta_id]);
-
-			if (sta && sta->valid_links && link_sta) {
-				rx_status->link_valid = 1;
-				rx_status->link_id = link_sta->link_id;
-			}
 		}
 	} else if (!is_multicast_ether_addr(hdr->addr2)) {
 		/*

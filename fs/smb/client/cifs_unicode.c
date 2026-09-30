@@ -6,10 +6,10 @@
  */
 #include <linux/fs.h>
 #include <linux/slab.h>
+#include <asm/unaligned.h>
 #include "cifs_fs_sb.h"
 #include "cifs_unicode.h"
 #include "cifs_uniupr.h"
-#include "cifspdu.h"
 #include "cifsglob.h"
 #include "cifs_debug.h"
 

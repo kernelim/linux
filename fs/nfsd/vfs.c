@@ -468,15 +468,7 @@ static int __nfsd_setattr(struct dentry *dentry, struct iattr *iap)
 	if (!iap->ia_valid)
 		return 0;
 
-	/*
-	 * If ATTR_DELEG is set, then this is an update from a client that
-	 * holds a delegation. If this is an update for only the atime, the
-	 * ctime should not be changed. If the update contains the mtime
-	 * too, then ATTR_CTIME should already be set.
-	 */
-	if (!(iap->ia_valid & ATTR_DELEG))
-		iap->ia_valid |= ATTR_CTIME;
-
+	iap->ia_valid |= ATTR_CTIME;
 	return notify_change(&nop_mnt_idmap, dentry, iap, NULL);
 }
 
@@ -2591,8 +2583,8 @@ nfsd_permission(struct svc_rqst *rqstp, struct svc_export *exp,
 
 	/* Allow read access to binaries even when mode 111 */
 	if (err == -EACCES && S_ISREG(inode->i_mode) &&
-	     (acc == (NFSD_MAY_READ | NFSD_MAY_OWNER_OVERRIDE) ||
-	      acc == (NFSD_MAY_READ | NFSD_MAY_READ_IF_EXEC)))
+	     (((acc & NFSD_MAY_MASK) == NFSD_MAY_READ) &&
+	      (acc & (NFSD_MAY_OWNER_OVERRIDE | NFSD_MAY_READ_IF_EXEC))))
 		err = inode_permission(&nop_mnt_idmap, inode, MAY_EXEC);
 
 	return err? nfserrno(err) : 0;

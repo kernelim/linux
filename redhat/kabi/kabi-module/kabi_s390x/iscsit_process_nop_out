@@ -1,3 +1,3 @@
-#8-
-0x368fb0cd	iscsit_process_nop_out	drivers/target/iscsi/iscsi_target_mod	EXPORT_SYMBOL	
+#9-
+0x0237a46a	iscsit_process_nop_out	drivers/target/iscsi/iscsi_target_mod	EXPORT_SYMBOL	
 

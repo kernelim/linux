@@ -1053,7 +1053,7 @@ static const struct soc_enum btcvsd_enum[] = {
 static int btcvsd_band_get(struct snd_kcontrol *kcontrol,
 			   struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct mtk_btcvsd_snd *bt = snd_soc_component_get_drvdata(cmpnt);
 
 	ucontrol->value.integer.value[0] = bt->band;
@@ -1063,7 +1063,7 @@ static int btcvsd_band_get(struct snd_kcontrol *kcontrol,
 static int btcvsd_band_set(struct snd_kcontrol *kcontrol,
 			   struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct mtk_btcvsd_snd *bt = snd_soc_component_get_drvdata(cmpnt);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 
@@ -1078,7 +1078,7 @@ static int btcvsd_band_set(struct snd_kcontrol *kcontrol,
 static int btcvsd_loopback_get(struct snd_kcontrol *kcontrol,
 			       struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct mtk_btcvsd_snd *bt = snd_soc_component_get_drvdata(cmpnt);
 	bool lpbk_en = bt->tx->state == BT_SCO_STATE_LOOPBACK;
 
@@ -1089,7 +1089,7 @@ static int btcvsd_loopback_get(struct snd_kcontrol *kcontrol,
 static int btcvsd_loopback_set(struct snd_kcontrol *kcontrol,
 			       struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct mtk_btcvsd_snd *bt = snd_soc_component_get_drvdata(cmpnt);
 
 	if (ucontrol->value.integer.value[0]) {
@@ -1105,7 +1105,7 @@ static int btcvsd_loopback_set(struct snd_kcontrol *kcontrol,
 static int btcvsd_tx_mute_get(struct snd_kcontrol *kcontrol,
 			      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct mtk_btcvsd_snd *bt = snd_soc_component_get_drvdata(cmpnt);
 
 	if (!bt->tx) {
@@ -1120,7 +1120,7 @@ static int btcvsd_tx_mute_get(struct snd_kcontrol *kcontrol,
 static int btcvsd_tx_mute_set(struct snd_kcontrol *kcontrol,
 			      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct mtk_btcvsd_snd *bt = snd_soc_component_get_drvdata(cmpnt);
 
 	if (!bt->tx)
@@ -1133,7 +1133,7 @@ static int btcvsd_tx_mute_set(struct snd_kcontrol *kcontrol,
 static int btcvsd_rx_irq_received_get(struct snd_kcontrol *kcontrol,
 				      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct mtk_btcvsd_snd *bt = snd_soc_component_get_drvdata(cmpnt);
 
 	if (!bt->rx)
@@ -1146,7 +1146,7 @@ static int btcvsd_rx_irq_received_get(struct snd_kcontrol *kcontrol,
 static int btcvsd_rx_timeout_get(struct snd_kcontrol *kcontrol,
 				 struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct mtk_btcvsd_snd *bt = snd_soc_component_get_drvdata(cmpnt);
 
 	if (!bt->rx)
@@ -1160,7 +1160,7 @@ static int btcvsd_rx_timeout_get(struct snd_kcontrol *kcontrol,
 static int btcvsd_rx_timestamp_get(struct snd_kcontrol *kcontrol,
 				   unsigned int __user *data, unsigned int size)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct mtk_btcvsd_snd *bt = snd_soc_component_get_drvdata(cmpnt);
 	int ret = 0;
 	struct mtk_btcvsd_snd_time_buffer_info time_buffer_info_rx;
@@ -1187,7 +1187,7 @@ static int btcvsd_rx_timestamp_get(struct snd_kcontrol *kcontrol,
 static int btcvsd_tx_irq_received_get(struct snd_kcontrol *kcontrol,
 				      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct mtk_btcvsd_snd *bt = snd_soc_component_get_drvdata(cmpnt);
 
 	if (!bt->tx)
@@ -1200,7 +1200,7 @@ static int btcvsd_tx_irq_received_get(struct snd_kcontrol *kcontrol,
 static int btcvsd_tx_timeout_get(struct snd_kcontrol *kcontrol,
 				 struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct mtk_btcvsd_snd *bt = snd_soc_component_get_drvdata(cmpnt);
 
 	ucontrol->value.integer.value[0] = bt->tx->timeout;
@@ -1210,7 +1210,7 @@ static int btcvsd_tx_timeout_get(struct snd_kcontrol *kcontrol,
 static int btcvsd_tx_timestamp_get(struct snd_kcontrol *kcontrol,
 				   unsigned int __user *data, unsigned int size)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct mtk_btcvsd_snd *bt = snd_soc_component_get_drvdata(cmpnt);
 	int ret = 0;
 	struct mtk_btcvsd_snd_time_buffer_info time_buffer_info_tx;

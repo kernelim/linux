@@ -476,8 +476,12 @@ void drv_link_info_changed(struct ieee80211_local *local,
 	if (WARN_ON_ONCE(sdata->vif.type == NL80211_IFTYPE_P2P_DEVICE ||
 			 sdata->vif.type == NL80211_IFTYPE_NAN ||
 			 (sdata->vif.type == NL80211_IFTYPE_MONITOR &&
-			  !sdata->vif.bss_conf.mu_mimo_owner &&
-			  !(changed & BSS_CHANGED_TXPOWER))))
+			  changed & ~(BSS_CHANGED_TXPOWER |
+				      BSS_CHANGED_MU_GROUPS))))
+		return;
+
+	if (WARN_ON_ONCE(changed & BSS_CHANGED_MU_GROUPS &&
+			 !sdata->vif.bss_conf.mu_mimo_owner))
 		return;
 
 	if (!check_sdata_in_driver(sdata))
@@ -515,7 +519,7 @@ int drv_set_key(struct ieee80211_local *local,
 		    !(sdata->vif.active_links & BIT(key->link_id))))
 		return -ENOLINK;
 
-	if (!fips_allows(FIPS_EXCEPTION_WIFI_MFP))
+	if (fips_enabled)
 		return -EOPNOTSUPP;
 
 	trace_drv_set_key(local, cmd, sdata, sta, key);

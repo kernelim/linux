@@ -386,6 +386,18 @@ static inline size_t __must_check size_sub(size_t minuend, size_t subtrahend)
 	struct_size((type *)NULL, member, count)
 
 /**
+ * struct_offset() - Calculate the offset of a member within a struct
+ * @p: Pointer to the struct
+ * @member: Name of the member to get the offset of
+ *
+ * Calculates the offset of a particular @member of the structure pointed
+ * to by @p.
+ *
+ * Return: number of bytes to the location of @member.
+ */
+#define struct_offset(p, member) (offsetof(typeof(*(p)), member))
+
+/**
  * _DEFINE_FLEX() - helper macro for DEFINE_FLEX() family.
  * Enables caller macro to pass (different) initializer.
  *
@@ -436,5 +448,47 @@ static inline size_t __must_check size_sub(size_t minuend, size_t subtrahend)
  */
 #define DEFINE_FLEX(TYPE, NAME, MEMBER, COUNTER, COUNT)	\
 	_DEFINE_FLEX(TYPE, NAME, MEMBER, COUNT, = { .obj.COUNTER = COUNT, })
+
+/**
+ * typeof_flex_counter() - Return the type of the counter variable of a given
+ *                         flexible array member annotated by __counted_by().
+ * @FAM: Instance of flexible array member within a given struct.
+ *
+ * Returns: "size_t" if no annotation exists.
+ */
+#define typeof_flex_counter(FAM)				\
+	typeof(_Generic(__flex_counter(FAM),			\
+			void *: (size_t)0,			\
+			default: *__flex_counter(FAM)))
+
+/**
+ * overflows_flex_counter_type() - Check if the counter associated with the
+ *				   given flexible array member can represent
+ *				   a value.
+ * @TYPE: Type of the struct that contains the @FAM.
+ * @FAM: Member name of the FAM within @TYPE.
+ * @COUNT: Value to check against the __counted_by annotated @FAM's counter.
+ *
+ * Returns: true if @COUNT can be represented in the @FAM's counter. When
+ * @FAM is not annotated with __counted_by(), always returns true.
+ */
+#define overflows_flex_counter_type(TYPE, FAM, COUNT)		\
+	(overflows_type(COUNT, typeof_flex_counter(((TYPE *)NULL)->FAM)))
+
+/**
+ * __set_flex_counter() - Set the counter associated with the given flexible
+ *                        array member that has been annoated by __counted_by().
+ * @FAM: Instance of flexible array member within a given struct.
+ * @COUNT: Value to store to the __counted_by annotated @FAM_PTR's counter.
+ *
+ * This is a no-op if no annotation exists. Count needs to be checked with
+ * overflows_flex_counter_type() before using this function.
+ */
+#define __set_flex_counter(FAM, COUNT)				\
+({								\
+	*_Generic(__flex_counter(FAM),				\
+		  void *:  &(size_t){ 0 },			\
+		  default: __flex_counter(FAM)) = (COUNT);	\
+})
 
 #endif /* __LINUX_OVERFLOW_H */

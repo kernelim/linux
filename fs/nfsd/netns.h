@@ -65,6 +65,8 @@ struct nfsd_net {
 
 	struct lock_manager nfsd4_manager;
 	bool grace_ended;
+	bool grace_end_forced;
+	bool client_tracking_active;
 	time64_t boot_time;
 
 	struct dentry *nfsd_client_dir;
@@ -104,8 +106,7 @@ struct nfsd_net {
 
 	struct delayed_work laundromat_work;
 
-	/* client_lock protects the client lru list and session hash
-	 * table; nests inside deleg_lock */
+	/* client_lock protects the client lru list and session hash table */
 	spinlock_t client_lock;
 
 	/* protects blocked_locks_lru */

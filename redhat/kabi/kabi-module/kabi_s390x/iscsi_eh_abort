@@ -1,3 +1,3 @@
-#8-
-0x01de7082	iscsi_eh_abort	drivers/scsi/libiscsi	EXPORT_SYMBOL_GPL	
+#9-
+0x902cac5b	iscsi_eh_abort	drivers/scsi/libiscsi	EXPORT_SYMBOL_GPL	
 

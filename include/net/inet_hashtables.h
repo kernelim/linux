@@ -274,7 +274,7 @@ static inline bool inet_match(struct net *net, const struct sock *sk,
 	int bound_dev_if;
 
 	if (!net_eq(sock_net(sk), net) ||
-	    sk->sk_portpair != ports ||
+	    READ_ONCE(sk->sk_portpair) != ports ||
 	    sk->sk_addrpair != cookie)
 	        return false;
 

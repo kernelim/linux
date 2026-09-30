@@ -2362,7 +2362,7 @@ static int vpe_open(struct file *file)
 		goto exit_fh;
 	}
 
-	v4l2_fh_add(&ctx->fh);
+	v4l2_fh_add(&ctx->fh, file);
 
 	/*
 	 * for now, just report the creation of the first instance, we can later
@@ -2420,7 +2420,7 @@ static int vpe_release(struct file *file)
 	vpdma_free_desc_buf(&ctx->sc_coeff_v);
 	vpdma_free_desc_buf(&ctx->sc_coeff_h);
 
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 	v4l2_ctrl_handler_free(&ctx->hdl);
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);

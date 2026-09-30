@@ -7,7 +7,8 @@
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_fb_cma_helper.h>
 #include <drm/drm_gem_atomic_helper.h>
-#include <drm/drm_gem_cma_helper.h>
+#include <drm/drm_gem_dma_helper.h>
+#include <drm/drm_print.h>
 
 #include "dcss-dev.h"
 #include "dcss-kms.h"
@@ -157,8 +158,8 @@ static int dcss_plane_atomic_check(struct drm_plane *plane,
 	cma_obj = drm_fb_cma_get_gem_obj(fb, 0);
 	WARN_ON(!cma_obj);
 
-	crtc_state = drm_atomic_get_existing_crtc_state(state,
-							new_plane_state->crtc);
+	crtc_state = drm_atomic_get_new_crtc_state(state,
+						   new_plane_state->crtc);
 
 	hdisplay = crtc_state->adjusted_mode.hdisplay;
 	vdisplay = crtc_state->adjusted_mode.vdisplay;
@@ -378,7 +379,7 @@ struct dcss_plane *dcss_plane_init(struct drm_device *drm,
 	if (zpos > 2)
 		return ERR_PTR(-EINVAL);
 
-	dcss_plane = kzalloc(sizeof(*dcss_plane), GFP_KERNEL);
+	dcss_plane = kzalloc_obj(*dcss_plane);
 	if (!dcss_plane) {
 		DRM_ERROR("failed to allocate plane\n");
 		return ERR_PTR(-ENOMEM);

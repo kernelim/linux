@@ -46,3 +46,14 @@ Description:	read/write
 		This is a special sysfs file available to setup additional
 		parameters to be passed to capture kernel. For HASH MMU it
 		is exported only if RMA size higher than 768MB.
+
+What:		/sys/kernel/fadump/hotplug_ready
+Date:		Apr 2024
+Contact:	linuxppc-dev@lists.ozlabs.org
+Description:	read only
+		Kdump udev rule re-registers fadump on memory add/remove events,
+		primarily to update the elfcorehdr. This sysfs indicates the
+		kdump udev rule that fadump re-registration is not required on
+		memory add/remove events because elfcorehdr is now prepared in
+		the second/fadump kernel.
+User:		kexec-tools

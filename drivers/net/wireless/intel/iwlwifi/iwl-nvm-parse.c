@@ -23,6 +23,8 @@
 #include "fw/api/commands.h"
 #include "fw/api/cmdhdr.h"
 #include "fw/img.h"
+#include "fw/dbg.h"
+
 #include "mei/iwl-mei.h"
 
 /* NVM offsets (in words) definitions */
@@ -484,16 +486,14 @@ static void iwl_init_vht_hw_capab(struct iwl_trans *trans,
 	 */
 	switch (iwlwifi_mod_params.amsdu_size) {
 	case IWL_AMSDU_DEF:
-		if (trans->mac_cfg->mq_rx_supported &&
-		    fips_allows(FIPS_EXCEPTION_WIFI_MFP))
+		if (trans->mac_cfg->mq_rx_supported && !fips_enabled)
 			vht_cap->cap |=
 				IEEE80211_VHT_CAP_MAX_MPDU_LENGTH_11454;
 		else
 			vht_cap->cap |= IEEE80211_VHT_CAP_MAX_MPDU_LENGTH_3895;
 		break;
 	case IWL_AMSDU_2K:
-		if (trans->mac_cfg->mq_rx_supported &&
-		    fips_allows(FIPS_EXCEPTION_WIFI_MFP))
+		if (trans->mac_cfg->mq_rx_supported && !fips_enabled)
 			vht_cap->cap |=
 				IEEE80211_VHT_CAP_MAX_MPDU_LENGTH_11454;
 		else
@@ -852,7 +852,7 @@ iwl_nvm_fixup_sband_iftd(struct iwl_trans *trans,
 
 	/* EHT needs WPA3/MFP so cannot do it for fips_enabled */
 	if (!data->sku_cap_11be_enable || iwlwifi_mod_params.disable_11be ||
-	    !fips_allows(FIPS_EXCEPTION_WIFI_MFP))
+	    fips_enabled)
 		iftype_data->eht_cap.has_eht = false;
 
 	/* Advertise an A-MPDU exponent extension based on
@@ -1142,8 +1142,7 @@ static void iwl_init_sbands(struct iwl_trans *trans,
 	 * avoid spending time on scanning those channels and perhaps
 	 * even finding APs there that cannot be used.
 	 */
-	if (fips_allows(FIPS_EXCEPTION_WIFI_MFP) &&
-	    data->sku_cap_11ax_enable &&
+	if (!fips_enabled && data->sku_cap_11ax_enable &&
 	    !iwlwifi_mod_params.disable_11ax)
 		iwl_init_he_hw_capab(trans, data, sband, tx_chains, rx_chains,
 				     fw);
@@ -1715,6 +1714,11 @@ iwl_parse_nvm_mcc_info(struct iwl_trans *trans,
 							     band);
 		new_rule = false;
 
+		if (IWL_FW_CHECK(trans, !center_freq,
+				 "Invalid channel %d (idx %d) in NVM\n",
+				 nvm_chan[ch_idx], ch_idx))
+			continue;
+
 		if (!(ch_flags & NVM_CHANNEL_VALID)) {
 			iwl_nvm_print_channel_flags(dev, IWL_DL_LAR,
 						    nvm_chan[ch_idx], ch_flags);
@@ -2044,7 +2048,7 @@ struct iwl_nvm_data *iwl_get_nvm(struct iwl_trans *trans,
 	if (empty_otp)
 		IWL_INFO(trans, "OTP is empty\n");
 
-	nvm = kzalloc(struct_size(nvm, channels, IWL_NUM_CHANNELS), GFP_KERNEL);
+	nvm = kzalloc(struct_size(nvm, channels, IWL_NUM_CHANNELS_V2), GFP_KERNEL);
 	if (!nvm) {
 		ret = -ENOMEM;
 		goto out;
@@ -2083,7 +2087,7 @@ struct iwl_nvm_data *iwl_get_nvm(struct iwl_trans *trans,
 		!!(mac_flags & NVM_MAC_SKU_FLAGS_BAND_5_2_ENABLED);
 	nvm->sku_cap_mimo_disabled =
 		!!(mac_flags & NVM_MAC_SKU_FLAGS_MIMO_DISABLED);
-	if (CSR_HW_RFID_TYPE(trans->info.hw_rf_id) >= IWL_CFG_RF_TYPE_FM)
+	if (trans->cfg->eht_supported)
 		nvm->sku_cap_11be_enable = true;
 
 	/* Initialize PHY sku data */

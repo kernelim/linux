@@ -84,7 +84,7 @@ static u64 current_sessionid = 1;
 /* forward declarations */
 static bool check_for_locks(struct nfs4_file *fp, struct nfs4_lockowner *lowner);
 static void nfs4_free_ol_stateid(struct nfs4_stid *stid);
-void nfsd4_end_grace(struct nfsd_net *nn);
+static void nfsd4_end_grace(struct nfsd_net *nn);
 static void _free_cpntf_state_locked(struct nfsd_net *nn, struct nfs4_cpntf_state *cps);
 static void nfsd4_file_hash_remove(struct nfs4_file *fi);
 static void deleg_reaper(struct nfsd_net *nn);
@@ -234,17 +234,6 @@ static void put_client_renew(struct nfs4_client *clp)
 	spin_unlock(&nn->client_lock);
 }
 
-static void put_client_no_renew(struct nfs4_client *clp)
-{
-	struct nfsd_net *nn = net_generic(clp->net, nfsd_net_id);
-
-	if (!atomic_dec_and_lock(&clp->cl_rpc_users, &nn->client_lock))
-		return;
-	if (is_client_expired(clp))
-		wake_up_all(&expiry_wq);
-	spin_unlock(&nn->client_lock);
-}
-
 static __be32 nfsd4_get_session_locked(struct nfsd4_session *ses)
 {
 	__be32 status;
@@ -340,16 +329,6 @@ free_blocked_lock(struct nfsd4_blocked_lock *nbl)
 {
 	locks_delete_block(&nbl->nbl_lock);
 	kref_put(&nbl->nbl_kref, free_nbl);
-}
-
-/* A blocked lock's flc_owner is its nfs4_lockowner. */
-static struct nfs4_client *
-nbl_client(struct nfsd4_blocked_lock *nbl)
-{
-	struct nfs4_lockowner *lo;
-
-	lo = (struct nfs4_lockowner *)nbl->nbl_lock.fl_owner;
-	return lo->lo_owner.so_client;
 }
 
 static void
@@ -992,7 +971,7 @@ out_free:
  * Create a unique stateid_t to represent each COPY.
  */
 static int nfs4_init_cp_state(struct nfsd_net *nn, copy_stateid_t *stid,
-			      unsigned char cs_type, struct nfs4_stid *p_stid)
+			      unsigned char cs_type)
 {
 	int new_id;
 
@@ -1002,34 +981,19 @@ static int nfs4_init_cp_state(struct nfsd_net *nn, copy_stateid_t *stid,
 	idr_preload(GFP_KERNEL);
 	spin_lock(&nn->s2s_cp_lock);
 	new_id = idr_alloc_cyclic(&nn->s2s_cp_stateids, stid, 0, 0, GFP_NOWAIT);
-	if (new_id >= 0) {
-		stid->cs_stid.si_opaque.so_id = new_id;
-		stid->cs_stid.si_generation = 1;
-		/*
-		 * Set cs_type and link onto sc_cp_list under the same lock
-		 * that installed the IDR entry, so a concurrent
-		 * manage_cpntf_state() sees either no entry or a fully
-		 * linked cp_list.
-		 */
-		stid->cs_type = cs_type;
-		if (p_stid) {
-			struct nfs4_cpntf_state *cps =
-				container_of(stid, struct nfs4_cpntf_state,
-					     cp_stateid);
-
-			list_add(&cps->cp_list, &p_stid->sc_cp_list);
-		}
-	}
+	stid->cs_stid.si_opaque.so_id = new_id;
+	stid->cs_stid.si_generation = 1;
 	spin_unlock(&nn->s2s_cp_lock);
 	idr_preload_end();
 	if (new_id < 0)
 		return 0;
+	stid->cs_type = cs_type;
 	return 1;
 }
 
 int nfs4_init_copy_state(struct nfsd_net *nn, struct nfsd4_copy *copy)
 {
-	return nfs4_init_cp_state(nn, &copy->cp_stateid, NFS4_COPY_STID, NULL);
+	return nfs4_init_cp_state(nn, &copy->cp_stateid, NFS4_COPY_STID);
 }
 
 struct nfs4_cpntf_state *nfs4_alloc_init_cpntf_state(struct nfsd_net *nn,
@@ -1040,21 +1004,13 @@ struct nfs4_cpntf_state *nfs4_alloc_init_cpntf_state(struct nfsd_net *nn,
 	cps = kzalloc(sizeof(struct nfs4_cpntf_state), GFP_KERNEL);
 	if (!cps)
 		return NULL;
-	/* So a stale list_del_init() before linking is a no-op. */
-	INIT_LIST_HEAD(&cps->cp_list);
 	cps->cpntf_time = ktime_get_boottime_seconds();
-	/*
-	 * Fully initialize the entry before nfs4_init_cp_state() publishes it,
-	 * since a concurrent OFFLOAD_CANCEL could then free it. Take an extra
-	 * reference for the caller (dropped with nfs4_put_cpntf_state()).
-	 */
-	memcpy(&cps->cp_p_stateid, &p_stid->sc_stateid, sizeof(stateid_t));
-	memcpy(&cps->cp_p_clid, &p_stid->sc_client->cl_clientid,
-	       sizeof(clientid_t));
-	refcount_set(&cps->cp_stateid.cs_count, 2);
-	if (!nfs4_init_cp_state(nn, &cps->cp_stateid, NFS4_COPYNOTIFY_STID,
-				p_stid))
+	refcount_set(&cps->cp_stateid.cs_count, 1);
+	if (!nfs4_init_cp_state(nn, &cps->cp_stateid, NFS4_COPYNOTIFY_STID))
 		goto out_free;
+	spin_lock(&nn->s2s_cp_lock);
+	list_add(&cps->cp_list, &p_stid->sc_cp_list);
+	spin_unlock(&nn->s2s_cp_lock);
 	return cps;
 out_free:
 	kfree(cps);
@@ -1074,66 +1030,18 @@ void nfs4_free_copy_state(struct nfsd4_copy *copy)
 	spin_unlock(&nn->s2s_cp_lock);
 }
 
-/*
- * Drop the parent's reference on an already-unlinked cpntf entry. If a
- * concurrent holder still owns a reference, its nfs4_put_cpntf_state() does
- * the final free.
- *
- * nn->s2s_cp_lock must be held.
- */
-static void put_cpntf_state_unlinked_locked(struct nfs4_cpntf_state *cps)
-{
-	WARN_ON_ONCE(cps->cp_stateid.cs_type != NFS4_COPYNOTIFY_STID);
-	WARN_ON_ONCE(!list_empty(&cps->cp_list));
-
-	if (refcount_dec_and_test(&cps->cp_stateid.cs_count))
-		kfree(cps);
-}
-
-/*
- * Unhash from the IDR and sc_cp_list. Gated on list_empty() to avoid
- * evicting a recycled so_id.
- */
-static void nfsd4_unhash_cpntf_state(struct nfsd_net *nn, struct nfs4_cpntf_state *cps)
-{
-	lockdep_assert_held(&nn->s2s_cp_lock);
-
-	if (!list_empty(&cps->cp_list)) {
-		list_del_init(&cps->cp_list);
-		idr_remove(&nn->s2s_cp_stateids, cps->cp_stateid.cs_stid.si_opaque.so_id);
-	}
-}
-
-/*
- * Revoke a copy-notify stateid: unlink it from the IDR and sc_cp_list first
- * so no new finder can discover it, then drop the membership reference. Every
- * revoke path (cancel, laundromat, drain) must use this rather than
- * _free_cpntf_state_locked(), which unlinks only at refcount zero and so could
- * let a second revoke free the entry under a concurrent reader.
- *
- * nn->s2s_cp_lock must be held.
- */
-static void revoke_cpntf_state_locked(struct nfsd_net *nn,
-				      struct nfs4_cpntf_state *cps)
-{
-	nfsd4_unhash_cpntf_state(nn, cps);
-	put_cpntf_state_unlinked_locked(cps);
-}
-
 static void nfs4_free_cpntf_statelist(struct net *net, struct nfs4_stid *stid)
 {
-	struct nfs4_cpntf_state *cps, *tmp;
+	struct nfs4_cpntf_state *cps;
 	struct nfsd_net *nn;
 
 	nn = net_generic(net, nfsd_net_id);
 	spin_lock(&nn->s2s_cp_lock);
-	/*
-	 * Revoke unlinks each entry before dropping the parent's reference, so
-	 * the drain terminates in one pass per entry regardless of cs_count; a
-	 * concurrent holder does the final kfree via nfs4_put_cpntf_state().
-	 */
-	list_for_each_entry_safe(cps, tmp, &stid->sc_cp_list, cp_list)
-		revoke_cpntf_state_locked(nn, cps);
+	while (!list_empty(&stid->sc_cp_list)) {
+		cps = list_first_entry(&stid->sc_cp_list,
+				       struct nfs4_cpntf_state, cp_list);
+		_free_cpntf_state_locked(nn, cps);
+	}
 	spin_unlock(&nn->s2s_cp_lock);
 }
 
@@ -3075,8 +2983,10 @@ static int client_states_open(struct inode *inode, struct file *file)
 		return -ENXIO;
 
 	ret = seq_open(file, &states_seq_ops);
-	if (ret)
+	if (ret) {
+		drop_client(clp);
 		return ret;
+	}
 	s = file->private_data;
 	s->private = clp;
 	return 0;
@@ -6185,7 +6095,6 @@ nfs4_open_delegation(struct nfsd4_open *open, struct nfs4_ol_stateid *stp,
 			goto out_no_deleg;
 		}
 		open->op_delegate_type = NFS4_OPEN_DELEGATE_WRITE;
-		dp->dl_cb_fattr.ncf_cur_fsize = stat.size;
 		dp->dl_cb_fattr.ncf_initial_cinfo = nfsd4_change_attribute(&stat);
 		trace_nfsd_deleg_write(&dp->dl_stid.sc_stateid);
 	} else {
@@ -6400,7 +6309,7 @@ nfsd4_renew(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	return nfs_ok;
 }
 
-void
+static void
 nfsd4_end_grace(struct nfsd_net *nn)
 {
 	/* do nothing if grace period already ended */
@@ -6433,6 +6342,33 @@ nfsd4_end_grace(struct nfsd_net *nn)
 	 */
 }
 
+/**
+ * nfsd4_force_end_grace - forcibly end the NFSv4 grace period
+ * @nn: network namespace for the server instance to be updated
+ *
+ * Forces bypass of normal grace period completion, then schedules
+ * the laundromat to end the grace period immediately. Does not wait
+ * for the grace period to fully terminate before returning.
+ *
+ * Return values:
+ *   %true: Grace termination schedule
+ *   %false: No action was taken
+ */
+bool nfsd4_force_end_grace(struct nfsd_net *nn)
+{
+	if (!nn->client_tracking_ops)
+		return false;
+	spin_lock(&nn->client_lock);
+	if (nn->grace_ended || !nn->client_tracking_active) {
+		spin_unlock(&nn->client_lock);
+		return false;
+	}
+	WRITE_ONCE(nn->grace_end_forced, true);
+	mod_delayed_work(laundry_wq, &nn->laundromat_work, 0);
+	spin_unlock(&nn->client_lock);
+	return true;
+}
+
 /*
  * If we've waited a lease period but there are still clients trying to
  * reclaim, wait a little longer to give them a chance to finish.
@@ -6442,6 +6378,8 @@ static bool clients_still_reclaiming(struct nfsd_net *nn)
 	time64_t double_grace_period_end = nn->boot_time +
 					   2 * nn->nfsd4_lease;
 
+	if (READ_ONCE(nn->grace_end_forced))
+		return false;
 	if (nn->track_reclaim_completes &&
 			atomic_read(&nn->nr_reclaim_complete) ==
 			nn->reclaim_str_hashtbl_size)
@@ -6709,7 +6647,6 @@ nfs4_laundromat(struct nfsd_net *nn)
 		.new_timeo = nn->nfsd4_lease
 	};
 	struct nfs4_cpntf_state *cps;
-	struct nfs4_client *clp;
 	copy_stateid_t *cps_t;
 	int i;
 
@@ -6724,7 +6661,7 @@ nfs4_laundromat(struct nfsd_net *nn)
 		cps = container_of(cps_t, struct nfs4_cpntf_state, cp_stateid);
 		if (cps->cp_stateid.cs_type == NFS4_COPYNOTIFY_STID &&
 				state_expired(&lt, cps->cpntf_time))
-			revoke_cpntf_state_locked(nn, cps);
+			_free_cpntf_state_locked(nn, cps);
 	}
 	spin_unlock(&nn->s2s_cp_lock);
 	nfs4_get_client_reaplist(nn, &reaplist, &lt);
@@ -6737,18 +6674,6 @@ nfs4_laundromat(struct nfsd_net *nn)
 		dp = list_entry (pos, struct nfs4_delegation, dl_recall_lru);
 		if (!state_expired(&lt, dp->dl_time))
 			break;
-		clp = dp->dl_stid.sc_client;
-		spin_lock(&nn->client_lock);
-		if (is_client_expired(clp)) {
-			spin_unlock(&nn->client_lock);
-			continue;
-		}
-		/*
-		 * Pin without reviving: get_client_locked() would
-		 * flip a courtesy client back to NFSD4_ACTIVE.
-		 */
-		atomic_inc(&clp->cl_rpc_users);
-		spin_unlock(&nn->client_lock);
 		refcount_inc(&dp->dl_stid.sc_count);
 		unhash_delegation_locked(dp, SC_STATUS_REVOKED);
 		list_add(&dp->dl_recall_lru, &reaplist);
@@ -6757,18 +6682,8 @@ nfs4_laundromat(struct nfsd_net *nn)
 	while (!list_empty(&reaplist)) {
 		dp = list_first_entry(&reaplist, struct nfs4_delegation,
 					dl_recall_lru);
-		clp = dp->dl_stid.sc_client;
 		list_del_init(&dp->dl_recall_lru);
 		revoke_delegation(dp);
-		/*
-		 * Unpin without renewing: put_client_renew() would
-		 * renew the reaped client's lease.
-		 */
-		if (atomic_dec_and_lock(&clp->cl_rpc_users, &nn->client_lock)) {
-			if (is_client_expired(clp))
-				wake_up_all(&expiry_wq);
-			spin_unlock(&nn->client_lock);
-		}
 	}
 
 	spin_lock(&nn->client_lock);
@@ -6798,29 +6713,22 @@ nfs4_laundromat(struct nfsd_net *nn)
 	 * indefinitely once the lock does become free.
 	 */
 	BUG_ON(!list_empty(&reaplist));
-	spin_lock(&nn->client_lock);
 	spin_lock(&nn->blocked_locks_lock);
-	list_for_each_safe(pos, next, &nn->blocked_locks_lru) {
-		nbl = list_entry(pos, struct nfsd4_blocked_lock, nbl_lru);
+	while (!list_empty(&nn->blocked_locks_lru)) {
+		nbl = list_first_entry(&nn->blocked_locks_lru,
+					struct nfsd4_blocked_lock, nbl_lru);
 		if (!state_expired(&lt, nbl->nbl_time))
 			break;
-		clp = nbl_client(nbl);
-		if (is_client_expired(clp))
-			continue;
-		atomic_inc(&clp->cl_rpc_users);
 		list_move(&nbl->nbl_lru, &reaplist);
 		list_del_init(&nbl->nbl_list);
 	}
 	spin_unlock(&nn->blocked_locks_lock);
-	spin_unlock(&nn->client_lock);
 
 	while (!list_empty(&reaplist)) {
 		nbl = list_first_entry(&reaplist,
 					struct nfsd4_blocked_lock, nbl_lru);
-		clp = nbl_client(nbl);
 		list_del_init(&nbl->nbl_lru);
 		free_blocked_lock(nbl);
-		put_client_no_renew(clp);
 	}
 #ifdef CONFIG_NFSD_V4_2_INTER_SSC
 	/* service the server-to-server copy delayed unmount list */
@@ -7152,14 +7060,16 @@ nfs4_check_file(struct svc_rqst *rqstp, struct svc_fh *fhp, struct nfs4_stid *s,
 out:
 	return status;
 }
-
-static void _free_cpntf_state_locked(struct nfsd_net *nn, struct nfs4_cpntf_state *cps)
+static void
+_free_cpntf_state_locked(struct nfsd_net *nn, struct nfs4_cpntf_state *cps)
 {
 	WARN_ON_ONCE(cps->cp_stateid.cs_type != NFS4_COPYNOTIFY_STID);
-	if (refcount_dec_and_test(&cps->cp_stateid.cs_count)) {
-		nfsd4_unhash_cpntf_state(nn, cps);
-		kfree(cps);
-	}
+	if (!refcount_dec_and_test(&cps->cp_stateid.cs_count))
+		return;
+	list_del(&cps->cp_list);
+	idr_remove(&nn->s2s_cp_stateids,
+		   cps->cp_stateid.cs_stid.si_opaque.so_id);
+	kfree(cps);
 }
 /*
  * A READ from an inter server to server COPY will have a
@@ -7184,20 +7094,10 @@ __be32 manage_cpntf_state(struct nfsd_net *nn, stateid_t *st,
 			state = NULL;
 			goto unlock;
 		}
-		if (!clp) {
+		if (!clp)
 			refcount_inc(&state->cp_stateid.cs_count);
-		} else if (memcmp(&clp->cl_clientid, &state->cp_p_clid,
-				  sizeof(clientid_t))) {
-			/*
-			 * OFFLOAD_CANCEL: only the creating client may cancel.
-			 * so_id is guessable, so without this check any client
-			 * could free another's cpntf state.
-			 */
-			state = NULL;
-			goto unlock;
-		} else {
-			revoke_cpntf_state_locked(nn, state);
-		}
+		else
+			_free_cpntf_state_locked(nn, state);
 	}
 unlock:
 	spin_unlock(&nn->s2s_cp_lock);
@@ -8799,6 +8699,8 @@ static int nfs4_state_create_net(struct net *net)
 	nn->unconf_name_tree = RB_ROOT;
 	nn->boot_time = ktime_get_real_seconds();
 	nn->grace_ended = false;
+	nn->grace_end_forced = false;
+	nn->client_tracking_active = false;
 	nn->nfsd4_manager.block_opens = true;
 	INIT_LIST_HEAD(&nn->nfsd4_manager.list);
 	INIT_LIST_HEAD(&nn->client_lru);
@@ -8874,6 +8776,10 @@ nfs4_state_start_net(struct net *net)
 		return ret;
 	locks_start_grace(net, &nn->nfsd4_manager);
 	nfsd4_client_tracking_init(net);
+	/* safe for laundromat to run now */
+	spin_lock(&nn->client_lock);
+	nn->client_tracking_active = true;
+	spin_unlock(&nn->client_lock);
 	if (nn->track_reclaim_completes && nn->reclaim_str_hashtbl_size == 0)
 		goto skip_grace;
 	printk(KERN_INFO "NFSD: starting %lld-second grace period (net %x)\n",
@@ -8914,6 +8820,9 @@ nfs4_state_shutdown_net(struct net *net)
 
 	unregister_shrinker(&nn->nfsd_client_shrinker);
 	cancel_work_sync(&nn->nfsd_shrinker_work);
+	spin_lock(&nn->client_lock);
+	nn->client_tracking_active = false;
+	spin_unlock(&nn->client_lock);
 	cancel_delayed_work_sync(&nn->laundromat_work);
 	locks_end_grace(&nn->nfsd4_manager);
 
@@ -9134,11 +9043,15 @@ nfsd4_deleg_getattr_conflict(struct svc_rqst *rqstp, struct dentry *dentry,
 		if (status != nfserr_jukebox ||
 		    !nfsd_wait_for_delegreturn(rqstp, inode))
 			goto out_status;
+		status = nfs_ok;
+		goto out_status;
 	}
-	if (!ncf->ncf_file_modified &&
-	    (ncf->ncf_initial_cinfo != ncf->ncf_cb_change ||
-	     ncf->ncf_cur_fsize != ncf->ncf_cb_fsize))
-		ncf->ncf_file_modified = true;
+	if (!ncf->ncf_file_modified) {
+		if (ncf->ncf_initial_cinfo != ncf->ncf_cb_change)
+			ncf->ncf_file_modified = true;
+		else if (i_size_read(inode) != ncf->ncf_cb_fsize)
+			ncf->ncf_file_modified = true;
+	}
 	if (ncf->ncf_file_modified) {
 		int err;
 
