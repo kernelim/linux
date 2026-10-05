@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.170.1.el8_10
+%define pkgrelease 553.171.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.170.1%{?dist}
+%define specrelease 553.171.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,67 @@ fi
 #
 #
 %changelog
-* Thu Oct 01 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.170.1
+* Mon Oct 05 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.171.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Mon Oct 05 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.171.1.el8_10]
+- nvme/ioctl: check SUBMIT_IO with CAP_SYS_ADMIN (Chris Leech) [RHEL-269479] {CVE-2026-90227}
+- s390/topology: Use zero-based numbering for containing entities (Jan Polensky) [RHEL-252199]
+- s390/vfio_ccw: Implement a crw lock (Jan Polensky) [RHEL-252194]
+- s390/vfio_ccw: Selectively expand io_mutex (Jan Polensky) [RHEL-252194]
+- s390/vfio_ccw: Cancel existing workqueues (Jan Polensky) [RHEL-252194]
+- s390/vfio_ccw: Ensure index for read/write regions are within range (Jan Polensky) [RHEL-252194]
+- s390/vfio_ccw: Calculate idal length based on idaw type (Jan Polensky) [RHEL-252194]
+- s390/vfio_ccw: Ensure first IDAW remains constant (Jan Polensky) [RHEL-252194]
+- s390/vfio_ccw: Fix out of bounds check on CCW array (Jan Polensky) [RHEL-252194]
+- s390/vfio_ccw: Limit the number of channel program segments (Jan Polensky) [RHEL-252194]
+- s390/vfio_ccw: Free all memory if cp_init() fails (Jan Polensky) [RHEL-252194]
+- nvme-pci: fix mempool alloc size (Maurizio Lombardi) [RHEL-230386] {CVE-2022-50756}
+- nvme-pci: use max of PRP or SGL for iod size (Maurizio Lombardi) [RHEL-230386] {CVE-2022-50756}
+- nvme: add missing SRCU grace period in error path (CKI Backport Bot) [RHEL-270894] {CVE-2026-89972}
+- netfilter: nf_conntrack: use get_unaligned_be32() in tcp_sack() (CKI Backport Bot) [RHEL-270661] {CVE-2026-97417}
+- crypto: af_alg - Cap AEAD AD length to 0x80000000 (Pablo Alessandro Santos Hugen) [RHEL-259055] {CVE-2026-52972}
+- vlan: fix skb_under_panic and races when toggling HW VLAN offload (Jamie Bainbridge) [RHEL-254254]
+- macvlan: inherit needed_headroom and needed_tailroom from lowerdev (Jamie Bainbridge) [RHEL-254254]
+- ipvlan: inherit needed_headroom and needed_tailroom from phy_dev (Jamie Bainbridge) [RHEL-254254] {CVE-2026-74744}
+- vxlan: require CAP_NET_ADMIN in the device netns for changelink (Jamie Bainbridge) [RHEL-238885] {CVE-2026-68432}
+- tunnels: do not assume transport header in iptunnel_pmtud_check_icmp() (Jamie Bainbridge) [RHEL-230777] {CVE-2026-63992}
+- net: ip6_gre: require CAP_NET_ADMIN in the device netns for changelink (Jamie Bainbridge) [RHEL-247003] {CVE-2026-72052}
+- net: ip_gre: require CAP_NET_ADMIN in the device netns for changelink (Jamie Bainbridge) [RHEL-247023] {CVE-2026-63829}
+- net: ip_gre: Accept IFLA_INFO_DATA-less configuration (Jamie Bainbridge) [RHEL-247023]
+- net: ip_gre: Separate ERSPAN newlink / changelink callbacks (Jamie Bainbridge) [RHEL-247023]
+- tunnels: load network headers after skb_cow() in iptunnel_pmtud_build_icmp[v6]() (Jamie Bainbridge) [RHEL-259654] {CVE-2026-63994}
+- NFSD: Force all NFSv4.2 COPY requests to be synchronous (Roberto Bergantinos Corpas) [RHEL-266661]
+- nvme-tcp: fix host memory disclosure on R2T for a read command (CKI Backport Bot) [RHEL-263413] {CVE-2026-89481}
+- netfilter: nf_conntrack_sip: widen NAT rewrite delta to s32 in sip_help_tcp() (CKI Backport Bot) [RHEL-260589] {CVE-2026-74569}
+- KVM: s390: vsie: zero stale crypto bits (CKI Backport Bot) [RHEL-258125] {CVE-2026-80921}
+- net/mlx5: Fix slab-out-of-bounds in mlx5_query_nic_vport_mac_list (Mohammad Heib) [RHEL-225698] {CVE-2026-53230}
+- ipvs: clear IPv4 options after rebasing tunnel ICMP errors (Phil Sutter) [RHEL-254393] {CVE-2026-74669}
+- ipvs: ensure inner headers in ICMP errors are in headroom (Phil Sutter) [RHEL-254393]
+- KVM: SVM: Update x2APIC MSR intercepts if AVIC is inhibited while L2 is active (CKI Backport Bot) [RHEL-254507] {CVE-2026-74516}
+- netfilter: nf_queue: pin bridge device while NFQUEUE holds fake dst (CKI Backport Bot) [RHEL-252413] {CVE-2026-72255}
+- netfilter: flowtable: publish GC-visible tuple last (CKI Backport Bot) [RHEL-250542] {CVE-2026-74746}
+- RDMA/bnxt_re: Prevent handling any completions after qp destroy (Kamal Heib) [RHEL-231374] {CVE-2023-54048}
+- gfs2: add some missing log locking (Andrew Price) [RHEL-230306] {CVE-2026-53049}
+- gfs2: Move gfs2_remove_from_journal to log.c (Andrew Price) [RHEL-230306] {CVE-2026-53049}
+- gfs2: Fix unlikely race in gdlm_put_lock (CKI Backport Bot) [RHEL-231267] {CVE-2025-40242}
+- gfs2: Unlock fewer glocks on unmount (CKI Backport Bot) [RHEL-231267] {CVE-2025-40242}
+- media: tuner: xc5000: Fix use-after-free in xc5000_release (Kate Hsuan) [RHEL-231646] {CVE-2025-39994}
+- media: tunner: xc5000: Refactor firmware load (Kate Hsuan) [RHEL-231646]
+- net/sched: act_ct: Only release RCU read lock after ct_ft (Ivan Vecera) [RHEL-229652] {CVE-2026-46319}
+- sched: act_ct: take care of padding in struct zones_ht_key (Ivan Vecera) [RHEL-229652] {CVE-2026-46319}
+- sched: act_ct: add netns into the key of tcf_ct_flow_table (Ivan Vecera) [RHEL-229652] {CVE-2026-46319}
+- RDMA/uverbs: Validate wqe_size before using it in ib_uverbs_post_send (CKI Backport Bot) [RHEL-232580] {CVE-2026-45856}
+- gfs2: Fix slab-use-after-free in qd_put (CKI Backport Bot) [RHEL-227251] {CVE-2026-45861}
+- net/sched: qfq: Use cl_is_active to determine whether class is active in qfq_rm_from_ag (CKI Backport Bot) [RHEL-226861] {CVE-2026-23105}
+- net_sched: qfq: Fix double list add in class with netem as child qdisc (CKI Backport Bot) [RHEL-226861] {CVE-2026-23105}
+- ipvs: clear the svc scheduler ptr early on edit (CKI Backport Bot) [RHEL-225976] {CVE-2026-53270}
+- KVM: SVM: Fix page overflow in sev_dbg_crypt() for ENCRYPT path (CKI Backport Bot) [RHEL-214936] {CVE-2026-63794}
 
 * Wed Sep 30 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.170.1.el8_10]
 - keys: Do not drop the auth key's request_key_auth reference in revoke (Thomas Huth) [RHEL-270349]

@@ -115,6 +115,9 @@ static int nvme_submit_io(struct nvme_ns *ns, struct nvme_user_io __user *uio)
 	unsigned length, meta_len;
 	void __user *metadata;
 
+	if (!capable(CAP_SYS_ADMIN))
+		return -EACCES;
+
 	if (copy_from_user(&io, uio, sizeof(io)))
 		return -EFAULT;
 	if (io.flags)
