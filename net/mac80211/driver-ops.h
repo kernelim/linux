@@ -903,7 +903,7 @@ static inline void drv_set_rekey_data(struct ieee80211_local *local,
 	if (!check_sdata_in_driver(sdata))
 		return;
 
-	if (fips_enabled)
+	if (!fips_allows(FIPS_EXCEPTION_WIFI_MFP))
 		return;
 
 	trace_drv_set_rekey_data(local, sdata, data);
