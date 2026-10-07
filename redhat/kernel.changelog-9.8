@@ -1,3 +1,109 @@
+* Wed Oct 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.56.1.el9_8]
+- ice: use per-interface clock_id for E825 generic DPLLs (Jakub Ramaseuski) [RHEL-183201]
+- ice: add TSPLL DPLL device and TIME_REF pin for E825 (Jakub Ramaseuski) [RHEL-183201]
+- ice: monitor TSPLL lock from PTP periodic worker (Jakub Ramaseuski) [RHEL-183201]
+- ice: suppress DPLL errors during reset recovery (Jakub Ramaseuski) [RHEL-183201]
+- redhat/configs: Enable Epson RX8111 RTC driver (CKI Backport Bot) [RHEL-212014]
+- rtc: rx8111: Adapt upstream driver for kernel 5.14 (CKI Backport Bot) [RHEL-212014]
+- rtc: rx8111: handle VLOW flag (CKI Backport Bot) [RHEL-212014]
+- rtc: rx8111: demote warnings to debug level (CKI Backport Bot) [RHEL-212014]
+- rtc: Add driver for Epson RX8111 (CKI Backport Bot) [RHEL-212014]
+- nfsd: defer vfree of compound ops to fix rpc_status UAF (Roberto Bergantinos Corpas) [RHEL-264950] {CVE-2026-89690}
+- svcrdma: Reject inline replies that overflow the pull-up buffer (Roberto Bergantinos Corpas) [RHEL-187734] {CVE-2026-89530}
+- nfsd: initialize copy-notify stateid before publishing it (Roberto Bergantinos Corpas) [RHEL-264186] {CVE-2026-89669}
+- nfsd: revoke copy-notify stateids before dropping their reference (Roberto Bergantinos Corpas) [RHEL-264152] {CVE-2026-89663}
+- nfsd: check client ownership when cancelling a copy-notify stateid (Roberto Bergantinos Corpas) [RHEL-264152]
+- nfsd: fix cpntf publish race in nfs4_init_cp_state (Roberto Bergantinos Corpas) [RHEL-264152]
+- NFSD: Fix SECINFO_NO_NAME decode error cleanup (Roberto Bergantinos Corpas) [RHEL-259240] {CVE-2026-53398}
+- SUNRPC: pin upper rpc_clnt across the TLS connect_worker (Roberto Bergantinos Corpas) [RHEL-261480] {CVE-2026-72317}
+- vlan: fix skb_under_panic and races when toggling HW VLAN offload (Vb Vasu) [RHEL-254246]
+- macvlan: inherit needed_headroom and needed_tailroom from lowerdev (Vb Vasu) [RHEL-254246]
+- ipvlan: inherit needed_headroom and needed_tailroom from phy_dev (Vb Vasu) [RHEL-254246] {CVE-2026-74744}
+- ipvlan: Make the addrs_lock be per port (Vb Vasu) [RHEL-246115] {CVE-2026-23103}
+- sched/rt,dl: Skip migrate-disabled tasks when picking a push candidate (Herton R. Krzesinski) [RHEL-256279]
+- sched: Make class_schedulers avoid pushing current, and get rid of proxy_tag_curr() [partial] (Herton R. Krzesinski) [RHEL-256279]
+- vsock/virtio: bind uarg before filling zerocopy skb (Jon Maloy) [RHEL-229027] {CVE-2026-63970}
+- vsock/virtio: fix zerocopy completion for multi-skb sends (Jon Maloy) [RHEL-232843] {CVE-2026-53365}
+- vsock/virtio: fix MSG_ZEROCOPY pinned-pages accounting (Jon Maloy) [RHEL-232843] {CVE-2026-53365}
+- idpf: fix max_vport related crash on allocation error during init (Michal Schmidt) [RHEL-243408] {CVE-2026-68291}
+- idpf: fix double free and use-after-free in aux device error paths (Michal Schmidt) [RHEL-243408] {CVE-2026-53286}
+- idpf: fix read_dev_clk_lock spinlock init in idpf_ptp_init() (Michal Schmidt) [RHEL-243408] {CVE-2026-64162}
+- idpf: fix PREEMPT_RT raw/bh spinlock nesting for async VC handling (Michal Schmidt) [RHEL-243408] {CVE-2026-31647}
+- KVM: SEV: Use READ_ONCE() when reading entries/indices from PSC buffer (Rahul Kumar) [RHEL-192284] {CVE-2026-53360}
+- KVM: SEV: Check PSC request indices against the actual size of the buffer (Rahul Kumar) [RHEL-192284] {CVE-2026-53360}
+- KVM: SEV: Don't explicitly pass PSC buffer to snp_begin_psc() (Rahul Kumar) [RHEL-192284] {CVE-2026-53360}
+- KVM: SEV: WARN if KVM attempts to setup scratch area with min_len==0 (Rahul Kumar) [RHEL-192284] {CVE-2026-53360}
+- KVM: SEV: Compute the correct max length of the in-GHCB scratch area (Rahul Kumar) [RHEL-192284] {CVE-2026-53360}
+- KVM: SEV: Use the size of the PSC header as the minimum size for PSC requests (Rahul Kumar) [RHEL-192284] {CVE-2026-53360}
+- KVM: SEV: Ignore Port I/O requests of length '0' (Rahul Kumar) [RHEL-192284] {CVE-2026-53360}
+- KVM: SEV: Reject MMIO requests larger than 8 bytes with GHCB v2+ (Rahul Kumar) [RHEL-192284] {CVE-2026-53360}
+- KVM: SVM: Provide helpers to set the error code (Rahul Kumar) [RHEL-192284] {CVE-2026-53360}
+- KVM: SVM: Convert plain error code numbers to defines (Rahul Kumar) [RHEL-192284] {CVE-2026-53360}
+- KVM: SEV: Ignore MMIO requests of length '0' (Rahul Kumar) [RHEL-192284] {CVE-2026-53360}
+- KVM: x86: Consolidate SEV-ES MMIO emulation into a single public API (Rahul Kumar) [RHEL-192284] {CVE-2026-53360}
+- KVM: x86: Dedup kvm_sev_es_mmio_{read,write}() (Rahul Kumar) [RHEL-192284] {CVE-2026-53360}
+- KVM: x86: Harden SEV-ES MMIO against on-stack use-after-free (Rahul Kumar) [RHEL-192284] {CVE-2026-53360}
+- KVM: SEV: Require in-GHCB scratch area if GHCB v2+ is in use (Rahul Kumar) [RHEL-192284] {CVE-2026-53360}
+- x86/vmware: Fix hypercall clobbers (Jon Maloy) [RHEL-186577]
+- vsock/vmci: fix UAF when peer resets connection during handshake (CKI Backport Bot) [RHEL-232270] {CVE-2026-64115}
+- igc: set tx buffer type for SMD frames (CKI Backport Bot) [RHEL-227034] {CVE-2026-64035}
+- iavf: fix wrong VLAN mask for legacy Rx descriptors L2TAG2 (CKI Backport Bot) [RHEL-169480]
+Resolves: RHEL-169480, RHEL-183201, RHEL-186577, RHEL-187734, RHEL-192284, RHEL-212014, RHEL-227034, RHEL-229027, RHEL-232270, RHEL-232843, RHEL-243408, RHEL-246115, RHEL-254246, RHEL-256279, RHEL-259240, RHEL-261480, RHEL-264152, RHEL-264186, RHEL-264950
+
+* Mon Oct 05 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.55.1.el9_8]
+- dmaengine: idxd: Fix refcount underflow on module unload (Jerry Snitselaar) [RHEL-274410]
+- nvme/ioctl: check SUBMIT_IO with nvme_cmd_allowed() (CKI Backport Bot) [RHEL-269504] {CVE-2026-90227}
+- s390/cpum_cf: Handle CPU hotplug via prepare/dead callbacks (Jan Polensky) [RHEL-270892]
+- netfilter: nfnetlink_log: wait for rcu grace period before freeing pernet state (CKI Backport Bot) [RHEL-271672] {CVE-2026-93288}
+- thermal: core: Fix thermal zone device registration error path (Dennis Chen) [RHEL-226822] {CVE-2026-43332}
+- nvme: add missing SRCU grace period in error path (CKI Backport Bot) [RHEL-270902] {CVE-2026-89972}
+- netfilter: nf_conntrack: use get_unaligned_be32() in tcp_sack() (CKI Backport Bot) [RHEL-270670] {CVE-2026-97417}
+- KVM: arm64: Reassign nested_mmus array behind mmu_lock (Jon Maloy) [RHEL-227040] {CVE-2026-46317}
+- Bluetooth: hci_uart: clear HCI_UART_SENDING when write_work is canceled (CKI Backport Bot) [RHEL-232611] {CVE-2026-46275}
+- Bluetooth: hci_uart: fix UAFs and race conditions in close and init paths (CKI Backport Bot) [RHEL-232611] {CVE-2026-46275}
+- io_uring/kbuf: check if target buffer list is still legacy on recycle (David Jeffery) [RHEL-254192]
+- nvme-tcp: fix host memory disclosure on R2T for a read command (CKI Backport Bot) [RHEL-263460] {CVE-2026-89481}
+- nvme-tcp: reject a read that transferred too few bytes (CKI Backport Bot) [RHEL-263369] {CVE-2026-89480}
+- ipv6: add NULL checks for idev in SRv6 paths (Antoine Tenart) [RHEL-257690] {CVE-2026-23442}
+- ipv6: fix use-after-free in ip6_finish_output2() (Antoine Tenart) [RHEL-258675] {CVE-2026-80792}
+- ipv6: exthdrs: refresh nh pointer after ipv6_hop_jumbo() (Antoine Tenart) [RHEL-259361] {CVE-2026-63924}
+- ipv6: exthdrs: refresh nh after handling HAO option (Antoine Tenart) [RHEL-259413] {CVE-2026-63922}
+- ipv6: rpl: fix hdrlen overflow in ipv6_rpl_srh_decompress() (Antoine Tenart) [RHEL-231279] {CVE-2026-63984}
+- ipv6: validate extension header length before copying to cmsg (Antoine Tenart) [RHEL-225381] {CVE-2026-63920}
+- Bluetooth: L2CAP: Fix use-after-free in l2cap_sock_new_connection_cb() (CKI Backport Bot) [RHEL-231351] {CVE-2026-64557}
+- Bluetooth: 6lowpan: fix cyclic locking warning on netdev unregister (CKI Backport Bot) [RHEL-231351] {CVE-2026-64557}
+- Bluetooth: L2CAP: Fix null-ptr-deref in l2cap_sock_new_connection_cb() (CKI Backport Bot) [RHEL-231351] {CVE-2026-64557}
+- vxlan: do not reuse cached ip_hdr() value after skb_tunnel_check_pmtu() (Abhishek Rawal) [RHEL-231721] {CVE-2026-63993}
+- tunnels: load network headers after skb_cow() in iptunnel_pmtud_build_icmp[v6]() (Abhishek Rawal) [RHEL-259588] {CVE-2026-63994}
+- tunnels: do not assume transport header in iptunnel_pmtud_check_icmp() (Abhishek Rawal) [RHEL-230774] {CVE-2026-63992}
+- vxlan: require CAP_NET_ADMIN in the device netns for changelink (Abhishek Rawal) [RHEL-238889] {CVE-2026-68432}
+- net: ip6_gre: require CAP_NET_ADMIN in the device netns for changelink (Abhishek Rawal) [RHEL-247004] {CVE-2026-72052}
+- net: ip_gre: require CAP_NET_ADMIN in the device netns for changelink (Abhishek Rawal) [RHEL-247040] {CVE-2026-63829}
+- hwmon: (core) Use device name as a fallback in devm_hwmon_device_register_with_info (CKI Backport Bot) [RHEL-262029]
+- netfilter: nf_conntrack_sip: widen NAT rewrite delta to s32 in sip_help_tcp() (CKI Backport Bot) [RHEL-260635] {CVE-2026-74569}
+- smb: client: fix double-free in SMB2_ioctl() replay (CKI Backport Bot) [RHEL-259778] {CVE-2026-64385}
+- KVM: s390: vsie: zero stale crypto bits (CKI Backport Bot) [RHEL-258123] {CVE-2026-80921}
+- dm-integrity: don't increment hash_offset twice (CKI Backport Bot) [RHEL-257771] {CVE-2026-72099}
+- KVM: nSVM: Raise #UD if unhandled VMMCALL isn't intercepted by L1 (Jon Maloy) [RHEL-227374] {CVE-2026-46076}
+- KVM: SVM: Update x2APIC MSR intercepts if AVIC is inhibited while L2 is active (Jon Maloy) [RHEL-254524] {CVE-2026-74516}
+- KVM: SVM: Set/clear CR8 write interception when AVIC is (de)activated (Jon Maloy) [RHEL-254524] {CVE-2026-74516}
+- KVM: SVM: Move x2AVIC MSR interception helper to avic.c (Jon Maloy) [RHEL-254524] {CVE-2026-74516}
+- Bluetooth: L2CAP: use chan timer to close channels in cleanup_listen() (David Marlin) [RHEL-229777]
+- Bluetooth: fix UAF in bt_accept_dequeue() (CKI Backport Bot) [RHEL-229777] {CVE-2026-53357}
+- Bluetooth: fix UAF in l2cap_sock_cleanup_listen() vs l2cap_conn_del() (CKI Backport Bot) [RHEL-229777] {CVE-2026-53357}
+- ipvs: clear IPv4 options after rebasing tunnel ICMP errors (CKI Backport Bot) [RHEL-254400] {CVE-2026-74669}
+- ipvs: ensure inner headers in ICMP errors are in headroom (CKI Backport Bot) [RHEL-254400] {CVE-2026-74669}
+- ipvs: fix PMTU for GUE/GRE tunnel ICMP errors (CKI Backport Bot) [RHEL-254400] {CVE-2026-74669}
+- netfilter: nf_queue: pin bridge device while NFQUEUE holds fake dst (CKI Backport Bot) [RHEL-252427] {CVE-2026-72255}
+- KVM: arm64: vgic: Check the interrupt is still ours before migrating it (CKI Backport Bot) [RHEL-252481] {CVE-2026-72289}
+- netfilter: flowtable: publish GC-visible tuple last (CKI Backport Bot) [RHEL-250570] {CVE-2026-74746}
+- netfilter: nf_log: validate MAC header was set before dumping it (CKI Backport Bot) [RHEL-232060] {CVE-2026-52942}
+- netfilter: nf_conntrack_sip: don't use simple_strtoul (CKI Backport Bot) [RHEL-232031] {CVE-2026-52986}
+- gfs2: add some missing log locking (CKI Backport Bot) [RHEL-230316] {CVE-2026-53049}
+- gfs2: Fix slab-use-after-free in qd_put (CKI Backport Bot) [RHEL-227553] {CVE-2026-45861}
+- tls: Use __sk_dst_get() and dst_dev_rcu() in get_netdev_for_sock(). (CKI Backport Bot) [RHEL-189937] {CVE-2025-40149}
+Resolves: RHEL-189937, RHEL-225381, RHEL-226822, RHEL-227040, RHEL-227374, RHEL-227553, RHEL-229777, RHEL-230316, RHEL-230774, RHEL-231279, RHEL-231351, RHEL-231721, RHEL-232031, RHEL-232060, RHEL-232611, RHEL-238889, RHEL-247004, RHEL-247040, RHEL-250570, RHEL-252427, RHEL-252481, RHEL-254192, RHEL-254400, RHEL-254524, RHEL-257690, RHEL-257771, RHEL-258123, RHEL-258675, RHEL-259361, RHEL-259413, RHEL-259588, RHEL-259778, RHEL-260635, RHEL-262029, RHEL-263369, RHEL-263460, RHEL-269504, RHEL-270670, RHEL-270892, RHEL-270902, RHEL-271672, RHEL-274410
+
 * Wed Sep 30 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.54.1.el9_8]
 - Revert "mm/memcg: refactor try_charge_memcg retry logic to use for loop" (Audra Mitchell) [RHEL-269060]
 - futex: Prevent rcuwait use-after-free during requeue PI (Waiman Long) [RHEL-263481] {CVE-2026-90003}

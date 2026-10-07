@@ -181,6 +181,18 @@ static bool ip6_parse_tlv(const struct tlvtype_proc *procs,
 					   func(). */
 					if (curr->func(skb, off) == false)
 						return false;
+
+					/* RHEL-only: allow per-option special
+					 * handling after the above call, due to
+					 * missing upstream commit 51b8f812e5b3.
+					 */
+					switch (curr->type) {
+					case IPV6_TLV_HAO:
+					case IPV6_TLV_JUMBO:
+						nh = skb_network_header(skb);
+						break;
+					}
+
 					break;
 				}
 			}
@@ -367,6 +379,10 @@ static int ipv6_srh_rcv(struct sk_buff *skb)
 	hdr = (struct ipv6_sr_hdr *)skb_transport_header(skb);
 
 	idev = __in6_dev_get(skb->dev);
+	if (!idev) {
+		kfree_skb(skb);
+		return -1;
+	}
 
 	accept_seg6 = min(READ_ONCE(net->ipv6.devconf_all->seg6_enabled),
 			  READ_ONCE(idev->cnf.seg6_enabled));
@@ -544,7 +560,7 @@ looped_back:
 	 * unsigned char which is segments_left field. Should not be
 	 * higher than that.
 	 */
-	if (r || (n + 1) > 255) {
+	if (r || (n + 1) > 127) {
 		kfree_skb(skb);
 		return -1;
 	}
