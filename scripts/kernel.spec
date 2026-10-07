@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.171.1.el8_10
+%define pkgrelease 553.172.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.171.1%{?dist}
+%define specrelease 553.172.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,22 @@ fi
 #
 #
 %changelog
-* Mon Oct 05 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.171.1
+* Thu Oct 08 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.172.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Wed Oct 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.172.1.el8_10]
+- svcrdma: Reject inline replies that overflow the pull-up buffer (Roberto Bergantinos Corpas) [RHEL-187743] {CVE-2026-89530}
+- packet: use consistent hard_header_len in TX_RING send path (Jamie Bainbridge) [RHEL-244539]
+- net: remove CAP_SYS_RAWIO zero-padding in dev_validate_header (Jamie Bainbridge) [RHEL-244539]
+- packet: use consistent hard_header_len in non-ring send paths (Jamie Bainbridge) [RHEL-244539] {CVE-2026-74582}
+- net/ip6_tunnel: Prevent perpetual tunnel growth (Jamie Bainbridge) [RHEL-244539]
+- net: tunnels: annotate lockless accesses to dev->needed_headroom (Jamie Bainbridge) [RHEL-244539]
+- vsock/vmci: fix UAF when peer resets connection during handshake (CKI Backport Bot) [RHEL-232253] {CVE-2026-64115}
 
 * Mon Oct 05 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.171.1.el8_10]
 - nvme/ioctl: check SUBMIT_IO with CAP_SYS_ADMIN (Chris Leech) [RHEL-269479] {CVE-2026-90227}
