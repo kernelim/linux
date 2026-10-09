@@ -1,3 +1,21 @@
+* Fri Oct 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.57.1.el9_8]
+- nvmet-auth: Synchronize timeout work during SQ teardown (CKI Backport Bot) [RHEL-276348] {CVE-2026-89970}
+- drm/amdkfd: Add TLB flush after MES queue eviction/suspension (José Expósito) [RHEL-262131] {CVE-2026-89811}
+- drm/xe/uapi: Reject coh_none PAT index for CPU cached memory in madvise (José Expósito) [RHEL-250806] {CVE-2026-46309}
+- drm/xe: Fix memory leak in xe_vm_madvise_ioctl (José Expósito) [RHEL-250806]
+- drm/amd/display: set new_stream to NULL after release (CKI Backport Bot) [RHEL-260532] {CVE-2026-68236}
+- drm/vmwgfx: use check_add_overflow for shader size+offset bound (CKI Backport Bot) [RHEL-258162] {CVE-2026-80887}
+- drm/amdgpu: fix lifetime issue of amdgpu_vm_get_task_info_pasid() (CKI Backport Bot) [RHEL-236241] {CVE-2026-68245}
+- drm/dp/mst: fix buffer overflows in sideband chunk accumulation (CKI Backport Bot) [RHEL-240851] {CVE-2026-68278}
+- bpf: Restrict JIT predictor flush to cBPF (Viktor Malik) [RHEL-273882] {CVE-2026-64508}
+- x86/bugs: Enable IBPB flush on BPF JIT allocation (Viktor Malik) [RHEL-273998] {CVE-2026-64507}
+- bpf: Support for hardening against JIT spraying (Viktor Malik) [RHEL-273882] {CVE-2026-64508}
+- openvswitch: fix GSO userspace truncation underflow (CKI Backport Bot) [RHEL-263867] {CVE-2026-68123}
+- media: cx231xx: reject geometry changes while the VBI queue is busy (CKI Backport Bot) [RHEL-262527] {CVE-2026-89894}
+- macsec: fix replay protection at XPN lower-PN wrap (Abhishek Rawal) [RHEL-226673] {CVE-2026-63925}
+- cifs: validate DFS referral string offsets (CKI Backport Bot) [RHEL-261999] {CVE-2026-72318}
+Resolves: RHEL-226673, RHEL-236241, RHEL-240851, RHEL-250806, RHEL-258162, RHEL-260532, RHEL-261999, RHEL-262131, RHEL-262527, RHEL-263867, RHEL-273882, RHEL-273998, RHEL-276348
+
 * Wed Oct 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.56.1.el9_8]
 - ice: use per-interface clock_id for E825 generic DPLLs (Jakub Ramaseuski) [RHEL-183201]
 - ice: add TSPLL DPLL device and TIME_REF pin for E825 (Jakub Ramaseuski) [RHEL-183201]
