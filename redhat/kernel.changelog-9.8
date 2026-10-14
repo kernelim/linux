@@ -1,3 +1,29 @@
+* Wed Oct 14 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.58.1.el9_8]
+- net/smc: carry oversized SMC-Rv2 LLC messages in the queue entry (Jan Polensky) [RHEL-271472] {CVE-2026-80985}
+- net/smc: bound the peer rkey counts in SMC-Rv2 LLC messages (Jan Polensky) [RHEL-271472] {CVE-2026-80985}
+- net/smc: fix use-after-free of the LLC qentry in smc_llc_srv_add_link() (Jan Polensky) [RHEL-271472] {CVE-2026-80985}
+- KVM: arm64: vgic: Handle race between interrupt affinity change and LPI disabling (Mohammadfaiz Bawa) [RHEL-243814] {CVE-2026-72288}
+- SUNRPC: Zero rpc_gss_wire_cred at svcauth_gss_decode_credbody() entry (Olga Kornievskaia) [RHEL-275058] {CVE-2026-93207}
+- svcrdma: Reject Write/Reply chunks with segcount 0 (Olga Kornievskaia) [RHEL-275076] {CVE-2026-93228}
+- NFSD: Prevent client use-after-free during blocked-lock reaping (Olga Kornievskaia) [RHEL-270929] {CVE-2026-90036}
+- NFSD: Prevent client use-after-free during delegation revoke (Olga Kornievskaia) [RHEL-270929] {CVE-2026-89659}
+- svcrdma: Validate Read chunk positions before reconstruction (Olga Kornievskaia) [RHEL-271453] {CVE-2026-89526}
+- udp: fix potential use-after-free in tunnel segmentation (Antoine Tenart) [RHEL-268122] {CVE-2026-74705}
+- net/iucv: filter frames in afiucv_hs_rcv() by ingress device (CKI Backport Bot) [RHEL-270908] {CVE-2026-81003}
+- wifi: cfg80211: use wiphy work for socket owner autodisconnect (Jose Ignacio Tornos Martinez) [RHEL-240485] {CVE-2026-68404}
+- wifi: cfg80211: convert pmsr_free_wk to wiphy_work to fix deadlock (Jose Ignacio Tornos Martinez) [RHEL-240485] {CVE-2026-68404}
+- wifi: cfg80211: cancel pmsr_free_wk in cfg80211_pmsr_wdev_down (Jose Ignacio Tornos Martinez) [RHEL-240485] {CVE-2026-68404}
+- wifi: mac80211: defer link RX stats percpu free to RCU (Jose Ignacio Tornos Martinez) [RHEL-263788] {CVE-2026-68409}
+- wifi: mac80211: bounds-check link_id in ieee80211_ml_epcs (Jose Ignacio Tornos Martinez) [RHEL-259560] {CVE-2026-64030}
+- ASoC: SOF: ipc3-control: Fix heap overflow in bytes_ext put/get (CKI Backport Bot) [RHEL-261686] {CVE-2026-72262}
+- net/iucv: fix use-after-free of a severed iucv_path (CKI Backport Bot) [RHEL-260511] {CVE-2026-68140}
+- netfilter: nft_lookup: fix catchall element handling with inverted lookups (CKI Backport Bot) [RHEL-261293] {CVE-2026-72320}
+- ALSA: usx2y: bound the hwdep mmap fault offset (CKI Backport Bot) [RHEL-256448] {CVE-2026-74641}
+- net/sched: act_tunnel_key: Defer dst_release to RCU callback (CKI Backport Bot) [RHEL-237219] {CVE-2026-68377}
+- net/sched: act_ct: Only release RCU read lock after ct_ft (CKI Backport Bot) [RHEL-229654] {CVE-2026-46319}
+- net/sched: taprio: fix use-after-free in advance_sched() on schedule switch (CKI Backport Bot) [RHEL-226490] {CVE-2026-53011}
+Resolves: RHEL-226490, RHEL-229654, RHEL-237219, RHEL-240485, RHEL-243814, RHEL-256448, RHEL-259560, RHEL-260511, RHEL-261293, RHEL-261686, RHEL-263788, RHEL-268122, RHEL-270908, RHEL-270929, RHEL-271453, RHEL-271472, RHEL-275058, RHEL-275076
+
 * Fri Oct 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.57.1.el9_8]
 - nvmet-auth: Synchronize timeout work during SQ teardown (CKI Backport Bot) [RHEL-276348] {CVE-2026-89970}
 - drm/amdkfd: Add TLB flush after MES queue eviction/suspension (José Expósito) [RHEL-262131] {CVE-2026-89811}
