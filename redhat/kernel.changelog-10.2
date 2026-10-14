@@ -1,3 +1,41 @@
+* Wed Oct 14 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.66.1.el10_2]
+- net/smc: carry oversized SMC-Rv2 LLC messages in the queue entry (Jan Polensky) [RHEL-271473] {CVE-2026-80985}
+- net/smc: bound the peer rkey counts in SMC-Rv2 LLC messages (Jan Polensky) [RHEL-271473] {CVE-2026-80985}
+- net/smc: fix use-after-free of the LLC qentry in smc_llc_srv_add_link() (Jan Polensky) [RHEL-271473] {CVE-2026-80985}
+- SUNRPC: Zero rpc_gss_wire_cred at svcauth_gss_decode_credbody() entry (Olga Kornievskaia) [RHEL-275057] {CVE-2026-93207}
+- svcrdma: Reject Write/Reply chunks with segcount 0 (Olga Kornievskaia) [RHEL-275073] {CVE-2026-93228}
+- nfsd: don't free session slots that are still in use (Olga Kornievskaia) [RHEL-270850] {CVE-2026-89689}
+- NFSD: Prevent client use-after-free during blocked-lock reaping (Olga Kornievskaia) [RHEL-270946] {CVE-2026-90036}
+- NFSD: Prevent client use-after-free during delegation revoke (Olga Kornievskaia) [RHEL-270946] {CVE-2026-89659}
+- svcrdma: Validate Read chunk positions before reconstruction (Olga Kornievskaia) [RHEL-271459] {CVE-2026-89526}
+- ice: skip unnecessary VF reset when setting trust (Jose Ignacio Tornos Martinez) [RHEL-143410]
+- iavf: send MAC change request synchronously (Jose Ignacio Tornos Martinez) [RHEL-143410]
+- i40e: skip unnecessary VF reset when setting trust (Jose Ignacio Tornos Martinez) [RHEL-143410]
+- iavf: iavf_virtchnl_completion: drop duplicate ether_addr_equal() test (Jose Ignacio Tornos Martinez) [RHEL-143410]
+- media: cx231xx: reject geometry changes while the VBI queue is busy (CKI Backport Bot) [RHEL-262501] {CVE-2026-89894}
+- ASoC: SOF: ipc3-control: Fix heap overflow in bytes_ext put/get (CKI Backport Bot) [RHEL-261677] {CVE-2026-72262}
+- net/iucv: fix use-after-free of a severed iucv_path (CKI Backport Bot) [RHEL-260529] {CVE-2026-68140}
+- wifi: mac80211: bounds-check link_id in ieee80211_ml_epcs (CKI Backport Bot) [RHEL-259554] {CVE-2026-64030}
+- USB: serial: cypress_m8: fix memory corruption with small endpoint (Desnes Nunes) [RHEL-259316] {CVE-2026-63956}
+- USB: serial: safe_serial: fix memory corruption with small endpoint (Desnes Nunes) [RHEL-259316] {CVE-2026-63957}
+- USB: serial: omninet: fix memory corruption with small endpoint (Desnes Nunes) [RHEL-259316] {CVE-2026-63928}
+- USB: serial: mxuport: fix memory corruption with small endpoint (Desnes Nunes) [RHEL-259316] {CVE-2026-63899}
+- netfilter: nfnetlink_queue: do shared-unconfirmed check before segmentation (Phil Sutter) [RHEL-230721] {CVE-2026-45859}
+- ALSA: usx2y: bound the hwdep mmap fault offset (CKI Backport Bot) [RHEL-256452] {CVE-2026-74641}
+- dmaengine: idxd: fix fdev setup failure cleanup in idxd_cdev_open() (CKI Backport Bot) [RHEL-254620] {CVE-2026-74574}
+- idpf: fix max_vport related crash on allocation error during init (Michal Schmidt) [RHEL-243402] {CVE-2026-68291}
+- idpf: fix double free and use-after-free in aux device error paths (Michal Schmidt) [RHEL-243402] {CVE-2026-53286}
+- idpf: fix read_dev_clk_lock spinlock init in idpf_ptp_init() (Michal Schmidt) [RHEL-243402] {CVE-2026-64162}
+- idpf: fix PREEMPT_RT raw/bh spinlock nesting for async VC handling (Michal Schmidt) [RHEL-243402] {CVE-2026-31647}
+- Bluetooth: hci_core: Fix queuing tx_work after workqueue is drained (CKI Backport Bot) [RHEL-244763] {CVE-2026-63974}
+- Bluetooth: hci_sync: Set HCI_CMD_DRAIN_WORKQUEUE during device close (CKI Backport Bot) [RHEL-244763] {CVE-2026-63974}
+- net/sched: act_tunnel_key: Defer dst_release to RCU callback (CKI Backport Bot) [RHEL-240917] {CVE-2026-68377}
+- bridge: mcast: Fix a possible use-after-free when removing a bridge port (CKI Backport Bot) [RHEL-232531] {CVE-2026-64032}
+- net/sched: act_ct: Only release RCU read lock after ct_ft (CKI Backport Bot) [RHEL-229655] {CVE-2026-46319}
+- net/sched: taprio: fix use-after-free in advance_sched() on schedule switch (CKI Backport Bot) [RHEL-226492] {CVE-2026-53011}
+- ionic: convert to ndo_hwtstamp API (CKI Backport Bot) [RHEL-165657]
+Resolves: RHEL-143410, RHEL-165657, RHEL-226492, RHEL-229655, RHEL-230721, RHEL-232531, RHEL-240917, RHEL-243402, RHEL-244763, RHEL-254620, RHEL-256452, RHEL-259316, RHEL-259554, RHEL-260529, RHEL-261677, RHEL-262501, RHEL-270850, RHEL-270946, RHEL-271459, RHEL-271473, RHEL-275057, RHEL-275073
+
 * Fri Oct 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.65.1.el10_2]
 - nvmet-auth: Synchronize timeout work during SQ teardown (CKI Backport Bot) [RHEL-276363] {CVE-2026-89970}
 - thermal: core: Fix thermal zone device registration error path (Dennis Chen) [RHEL-226827] {CVE-2026-43332}
