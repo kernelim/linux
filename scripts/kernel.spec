@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.173.1.el8_10
+%define pkgrelease 553.174.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.173.1%{?dist}
+%define specrelease 553.174.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,26 @@ fi
 #
 #
 %changelog
-* Wed Oct 14 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.173.1
+* Thu Oct 15 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.174.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Wed Oct 14 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.174.1.el8_10]
+- powerpc/pseries: pci - logic bug (Mamatha Inamdar) [RHEL-240146]
+- md/raid5-ppl: fix use-after-free in ppl_do_flush() (CKI Backport Bot) [RHEL-278122] {CVE-2026-93262}
+- svcrdma: Reject Write/Reply chunks with segcount 0 (Olga Kornievskaia) [RHEL-275085] {CVE-2026-93228}
+- svcrdma: Address an integer overflow (Olga Kornievskaia) [RHEL-275085] {CVE-2024-53151}
+- NFSD: Prevent client use-after-free during blocked-lock reaping (Olga Kornievskaia) [RHEL-270899] {CVE-2026-90036}
+- svcrdma: Validate Read chunk positions before reconstruction (Olga Kornievskaia) [RHEL-271446] {CVE-2026-89526}
+- udp: fix potential use-after-free in tunnel segmentation (Antoine Tenart) [RHEL-268111] {CVE-2026-74705}
+- ASoC: SOF: ipc3-control: Fix heap overflow in bytes_ext put/get (CKI Backport Bot) [RHEL-261680] {CVE-2026-72262}
+- ALSA: usx2y: bound the hwdep mmap fault offset (CKI Backport Bot) [RHEL-256443] {CVE-2026-74641}
+- net/sched: cls_route: fix fastmap use-after-free on filter (CKI Backport Bot) [RHEL-248781] {CVE-2026-74583}
+- net/sched: act_tunnel_key: Defer dst_release to RCU callback (CKI Backport Bot) [RHEL-240916] {CVE-2026-68377}
 
 * Mon Oct 12 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.173.1.el8_10]
 - drm/amdkfd: Add TLB flush after MES queue eviction/suspension (Jocelyn Falempe) [RHEL-262108] {CVE-2026-89811}
