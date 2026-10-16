@@ -7,13 +7,44 @@
 #include <linux/cpuhotplug.h>
 #include <linux/minmax.h>
 #include <linux/export.h>
+#include <linux/set_memory.h>
 #include <asm/mshyperv.h>
+#include <asm/tlbflush.h>
 
 /*
  * See struct hv_deposit_memory. The first u64 is partition ID, the rest
  * are GPAs.
  */
 #define HV_DEPOSIT_MAX (HV_HYP_PAGE_SIZE / sizeof(u64) - 1)
+
+/*
+ * Add or remove a set of physically contiguous page runs from the kernel
+ * direct map. Once a page has been deposited the hypervisor owns it and
+ * revokes root partition access to it.
+ */
+static int hv_deposit_update_direct_map(struct page **pages, int *counts,
+					int num_allocations, bool valid)
+{
+	int i, err, ret = 0;
+
+	for (i = 0; i < num_allocations; ++i) {
+		err = set_direct_map_valid_noflush(pages[i], counts[i], valid);
+		if (err && !ret)
+			ret = err;
+	}
+
+	if (valid)
+		return ret;
+
+	for (i = 0; i < num_allocations; ++i) {
+		unsigned long addr = (unsigned long)page_address(pages[i]);
+		unsigned long size = (unsigned long)counts[i] << PAGE_SHIFT;
+
+		flush_tlb_kernel_range(addr, addr + size);
+	}
+
+	return ret;
+}
 
 /* Deposits exact number of pages. Must be called with interrupts enabled.  */
 int hv_call_deposit_pages(int node, u64 partition_id, u32 num_pages)
@@ -72,6 +103,10 @@ int hv_call_deposit_pages(int node, u64 partition_id, u32 num_pages)
 	}
 	num_allocations = i;
 
+	ret = hv_deposit_update_direct_map(pages, counts, num_allocations, false);
+	if (ret)
+		goto err_restore_direct_map;
+
 	local_irq_save(flags);
 
 	input_page = *this_cpu_ptr(hyperv_pcpu_input_arg);
@@ -90,11 +125,22 @@ int hv_call_deposit_pages(int node, u64 partition_id, u32 num_pages)
 	if (!hv_result_success(status)) {
 		hv_status_err(status, "\n");
 		ret = hv_result_to_errno(status);
-		goto err_free_allocations;
+		goto err_restore_direct_map;
 	}
 
 	ret = 0;
 	goto free_buf;
+
+err_restore_direct_map:
+	/*
+	 * We don't want to return pages to the allocator if weren't able to
+	 * mark them valid in the direct map.
+	 */
+	if (hv_deposit_update_direct_map(pages, counts, num_allocations, true)) {
+		WARN(1, "leaking %d page block(s) that could not be set to valid\n",
+		     num_allocations);
+		goto free_buf;
+	}
 
 err_free_allocations:
 	for (i = 0; i < num_allocations; ++i) {
@@ -109,6 +155,41 @@ free_buf:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(hv_call_deposit_pages);
+
+/*
+ * Put withdrawn pages back in the direct map. Counterpart to the direct map
+ * removal done by hv_call_deposit_pages().
+ */
+void hv_restore_withdrawn_pages(const u64 *pfns, int count)
+{
+	int i, j, end, n, ret;
+	struct page *page;
+
+	for (i = 0; i < count; i = end) {
+		page = pfn_to_page(pfns[i]);
+		/* find consecutive runs of pfns */
+		for (end = i + 1; end < count; ++end) {
+			if (pfns[end] != pfns[end - 1] + 1)
+				break;
+		}
+		n = end - i;
+		ret = set_direct_map_valid_noflush(page, n, true);
+
+		for (j = i; j < end; ++j) {
+			page = pfn_to_page(pfns[j]);
+			/*
+			 * Retry individually on failed batch. We don't want
+			 * to return pages to the allocator that we couldn't mark
+			 * valid in the direct map.
+			 */
+			if (ret &&
+			    WARN_ON_ONCE(set_direct_map_valid_noflush(page, 1, true)))
+				continue;
+			__free_page(page);
+		}
+	}
+}
+EXPORT_SYMBOL_GPL(hv_restore_withdrawn_pages);
 
 int hv_deposit_memory_node(int node, u64 partition_id,
 			   u64 hv_status)

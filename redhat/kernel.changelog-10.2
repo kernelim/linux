@@ -1,3 +1,44 @@
+* Fri Oct 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.67.1.el10_2]
+- net: always dissect GSO packets in __virtio_net_hdr_to_skb() (Davide Caratti) [RHEL-280590]
+- ipv4: validate checksum_start before completing checksum (CKI Backport Bot) [RHEL-280590] {CVE-2026-99999}
+- signal: Prevent exec() race (Phil Auld) [RHEL-282048] {CVE-2026-98256}
+- posix-timers: Target group sigqueue to current task only if not exiting (Phil Auld) [RHEL-282048]
+- exec: Cleanup POSIX timers right after de_thread() (Luiz Capitulino) [RHEL-282070] {CVE-2026-98260}
+- smb: client: reject a tree connect response whose byte count is too small (CKI Backport Bot) [RHEL-271291] {CVE-2026-89631}
+- smb: client: fix OOB read/write from unvalidated DataOffset in coalesce_t2() (Frank Sorenson) [RHEL-271484] {CVE-2026-89633}
+- xfrm: espintcp: fix UAF during close (CKI Backport Bot) [RHEL-256678]
+- xfrm: nat_keepalive: avoid double free on send error (CKI Backport Bot) [RHEL-256678]
+- xfrm: Check for underflow in xfrm_state_mtu (CKI Backport Bot) [RHEL-256678]
+- xfrm: route MIGRATE notifications to caller's netns (CKI Backport Bot) [RHEL-256678]
+- drivers/hv: remove deposited pages from direct map (Paolo Bonzini) [RHEL-267038]
+- selftests/mm: hugepage-mremap: fix mapping alignment (Luiz Capitulino) [RHEL-181987]
+- sctp: validate cookie AUTH state before use (Xin Long) [RHEL-254315] {CVE-2026-74752}
+- sctp: stop processing a packet once its association is deleted (Xin Long) [RHEL-254315] {CVE-2026-89479}
+- sctp: avoid auth_enable sysctl UAF during netns teardown (Xin Long) [RHEL-258778] {CVE-2026-68162}
+- sctp: keep chunk->transport in step with the list it is queued on (Xin Long) [RHEL-254353] {CVE-2026-74588}
+- usb: typec: ucsi: validate connector number in ucsi_connector_change() (Desnes Nunes) [RHEL-259412] {CVE-2026-63958}
+- usb: typec: ucsi: displayport: NAK DP_CMD_CONFIGURE without a payload VDO (Desnes Nunes) [RHEL-259412]
+- usb: typec: tcpm: bound altmode_desc[] per iteration in svdm_consume_modes() (Desnes Nunes) [RHEL-259412] {CVE-2026-63962}
+- usb: typec: tcpm: validate VDO count in Discover Identity ACK handlers (Desnes Nunes) [RHEL-259412] {CVE-2026-63963}
+- usb: typec: altmodes/displayport: validate count before reading Status Update VDO (Desnes Nunes) [RHEL-259412] {CVE-2026-63961}
+- redhat/configs: automotive: enable USB_CHIPIDEA_IMX (Jared Kangas) [RHEL-257228]
+- Bluetooth: hci_sync: Fix advertising data UAFs (CKI Backport Bot) [RHEL-254672] {CVE-2026-74509}
+- openvswitch: vport: fix self-deadlock on release of tunnel ports (CKI Backport Bot) [RHEL-253867] {CVE-2026-31678}
+- openvswitch: defer tunnel netdev_put to RCU release (CKI Backport Bot) [RHEL-253867] {CVE-2026-31678}
+- tipc: fix slab-use-after-free Read in tipc_aead_decrypt_done (Xin Long) [RHEL-228912] {CVE-2026-63801}
+- tipc: clear sock->sk on the failed-insert path in tipc_sk_create() (Xin Long) [RHEL-238046] {CVE-2026-68117}
+- sctp: fix race between sctp_wait_for_connect and peeloff (Xin Long) [RHEL-229479] {CVE-2026-63971}
+- sctp: diag: reject stale associations in dump_one path (Xin Long) [RHEL-231579] {CVE-2026-52917}
+- sctp: validate stream count in sctp_process_strreset_inreq() (Xin Long) [RHEL-236158] {CVE-2026-68315}
+- sctp: fix auth_hmacs array size in struct sctp_cookie (Xin Long) [RHEL-237097] {CVE-2026-68376}
+- sctp: auth: verify auth requirement when auth_chunk is NULL (Xin Long) [RHEL-237097] {CVE-2026-68300}
+- s390/ap: Restrict driver_override versus apmask and aqmask use (Ramesh Chhetri) [RHEL-245336]
+- s390/ap: Rename mutex ap_perms_mutex to ap_attr_mutex (Ramesh Chhetri) [RHEL-245336]
+- s390/ap: Support driver_override for AP queue devices (Ramesh Chhetri) [RHEL-245336]
+- s390/ap: Use all-bits-one apmask/aqmask for vfio in_use() checks (Ramesh Chhetri) [RHEL-245336]
+- xfrm: espintcp: do not reuse an in-progress partial send (CKI Backport Bot) [RHEL-222980] {CVE-2026-52935}
+Resolves: RHEL-181987, RHEL-222980, RHEL-228912, RHEL-229479, RHEL-231579, RHEL-236158, RHEL-237097, RHEL-238046, RHEL-245336, RHEL-253867, RHEL-254315, RHEL-254353, RHEL-254672, RHEL-256678, RHEL-257228, RHEL-258778, RHEL-259412, RHEL-267038, RHEL-271291, RHEL-271484, RHEL-280590, RHEL-282048, RHEL-282070
+
 * Wed Oct 14 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [6.12.0-211.66.1.el10_2]
 - net/smc: carry oversized SMC-Rv2 LLC messages in the queue entry (Jan Polensky) [RHEL-271473] {CVE-2026-80985}
 - net/smc: bound the peer rkey counts in SMC-Rv2 LLC messages (Jan Polensky) [RHEL-271473] {CVE-2026-80985}

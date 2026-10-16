@@ -378,6 +378,7 @@ static inline bool hv_parent_partition(void)
 bool hv_result_needs_memory(u64 status);
 int hv_deposit_memory_node(int node, u64 partition_id, u64 status);
 int hv_call_deposit_pages(int node, u64 partition_id, u32 num_pages);
+void hv_restore_withdrawn_pages(const u64 *pfns, int count);
 int hv_call_add_logical_proc(int node, u32 lp_index, u32 acpi_id);
 int hv_call_create_vp(int node, u64 partition_id, u32 vp_index, u32 flags);
 
@@ -394,6 +395,9 @@ static inline int hv_call_deposit_pages(int node, u64 partition_id, u32 num_page
 {
 	return -EOPNOTSUPP;
 }
+
+static inline void hv_restore_withdrawn_pages(const u64 *pfns, int count) { }
+
 static inline int hv_call_add_logical_proc(int node, u32 lp_index, u32 acpi_id)
 {
 	return -EOPNOTSUPP;
