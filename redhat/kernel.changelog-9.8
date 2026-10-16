@@ -1,3 +1,37 @@
+* Fri Oct 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.59.1.el9_8]
+- net: always dissect GSO packets in __virtio_net_hdr_to_skb() (Davide Caratti) [RHEL-284987]
+- ipv4: validate checksum_start before completing checksum (CKI Backport Bot) [RHEL-284987] {CVE-2026-99999}
+- smb: client: reject a tree connect response whose byte count is too small (Alisher Mazhirinov) [RHEL-271284] {CVE-2026-89631}
+- exec: Cleanup POSIX timers right after de_thread() (Luiz Capitulino) [RHEL-282063] {CVE-2026-98260}
+- perf: Fix addr_filter_ranges lifetime (Vratislav Bendel) [RHEL-271871] {CVE-2026-93817}
+- smb: client: fix OOB read/write from unvalidated DataOffset in coalesce_t2() (Frank Sorenson) [RHEL-271487] {CVE-2026-89633}
+- strparser: make sure __strp_recv isn't running before tearing down the parser (Sabrina Dubroca) [RHEL-270747]
+- xfrm: espintcp: fix UAF during close (CKI Backport Bot) [RHEL-256697]
+- xfrm: Check for underflow in xfrm_state_mtu (CKI Backport Bot) [RHEL-256697]
+- xfrm: route MIGRATE notifications to caller's netns (CKI Backport Bot) [RHEL-256697]
+- bridge: mcast: Fix a possible use-after-free when removing a bridge port (Jakub Ramaseuski) [RHEL-232528] {CVE-2026-64032}
+- net: bridge: Flush multicast groups when snooping is disabled (Jakub Ramaseuski) [RHEL-232528]
+- tcp: fix stale per-CPU tcp_tw_isn leak enabling ISN prediction (Antoine Tenart) [RHEL-231693] {CVE-2026-64024}
+- ipv4: fib: free fib_alias with kfree_rcu() on insert error path (Jamie Bainbridge) [RHEL-233131] {CVE-2026-64572}
+- inet: frags: strip GSO state from fragments before reassembly (Jamie Bainbridge) [RHEL-254224] {CVE-2026-80590}
+- ipv4: raw: reject IP_HDRINCL packets with ihl < 5 (Jamie Bainbridge) [RHEL-225452] {CVE-2026-64114}
+- usb: typec: ucsi: validate connector number in ucsi_connector_change() (Desnes Nunes) [RHEL-259429] {CVE-2026-63958}
+- usb: typec: ucsi: displayport: NAK DP_CMD_CONFIGURE without a payload VDO (Desnes Nunes) [RHEL-259429]
+- usb: typec: tcpm: bound altmode_desc[] per iteration in svdm_consume_modes() (Desnes Nunes) [RHEL-259429] {CVE-2026-63962}
+- usb: typec: tcpm: validate VDO count in Discover Identity ACK handlers (Desnes Nunes) [RHEL-259429] {CVE-2026-63963}
+- usb: typec: altmodes/displayport: validate count before reading Status Update VDO (Desnes Nunes) [RHEL-259429] {CVE-2026-63961}
+- USB: serial: cypress_m8: fix memory corruption with small endpoint (Desnes Nunes) [RHEL-259322] {CVE-2026-63956}
+- USB: serial: safe_serial: fix memory corruption with small endpoint (Desnes Nunes) [RHEL-259322] {CVE-2026-63957}
+- USB: serial: omninet: fix memory corruption with small endpoint (Desnes Nunes) [RHEL-259322] {CVE-2026-63928}
+- USB: serial: mxuport: fix memory corruption with small endpoint (Desnes Nunes) [RHEL-259322] {CVE-2026-63899}
+- Bluetooth: hci_sync: Fix advertising data UAFs (CKI Backport Bot) [RHEL-254674] {CVE-2026-74509}
+- openvswitch: vport: fix self-deadlock on release of tunnel ports (CKI Backport Bot) [RHEL-253856] {CVE-2026-31678}
+- openvswitch: defer tunnel netdev_put to RCU release (CKI Backport Bot) [RHEL-253856] {CVE-2026-31678}
+- Bluetooth: hci_core: Fix queuing tx_work after workqueue is drained (CKI Backport Bot) [RHEL-244764] {CVE-2026-63974}
+- Bluetooth: hci_sync: Set HCI_CMD_DRAIN_WORKQUEUE during device close (CKI Backport Bot) [RHEL-244764] {CVE-2026-63974}
+- xfrm: espintcp: do not reuse an in-progress partial send (CKI Backport Bot) [RHEL-222958] {CVE-2026-52935}
+Resolves: RHEL-222958, RHEL-225452, RHEL-231693, RHEL-232528, RHEL-233131, RHEL-244764, RHEL-253856, RHEL-254224, RHEL-254674, RHEL-256697, RHEL-259322, RHEL-259429, RHEL-270747, RHEL-271284, RHEL-271487, RHEL-271871, RHEL-282063, RHEL-284987
+
 * Wed Oct 14 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.58.1.el9_8]
 - net/smc: carry oversized SMC-Rv2 LLC messages in the queue entry (Jan Polensky) [RHEL-271472] {CVE-2026-80985}
 - net/smc: bound the peer rkey counts in SMC-Rv2 LLC messages (Jan Polensky) [RHEL-271472] {CVE-2026-80985}
