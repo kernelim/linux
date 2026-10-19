@@ -1574,12 +1574,11 @@ int gfs2_quotad(void *data)
 	unsigned long statfs_timeo = 0;
 	unsigned long quotad_timeo = 0;
 	unsigned long t = 0;
-	DEFINE_WAIT(wait);
 
 	while (!kthread_should_stop()) {
-
 		if (gfs2_withdrawn(sdp))
-			goto bypass;
+			break;
+
 		/* Update the master statfs file */
 		if (sdp->sd_statfs_force_sync) {
 			int error = gfs2_statfs_sync(sdp->sd_vfs, 0);
@@ -1595,17 +1594,16 @@ int gfs2_quotad(void *data)
 		quotad_check_timeo(sdp, "sync", gfs2_quota_sync, t,
 				   &quotad_timeo, &tune->gt_quota_quantum);
 
-		try_to_freeze();
-
-bypass:
 		t = min(quotad_timeo, statfs_timeo);
 
-		prepare_to_wait(&sdp->sd_quota_wait, &wait, TASK_INTERRUPTIBLE);
-		if (!sdp->sd_statfs_force_sync)
-			t -= schedule_timeout(t);
-		else
+		t -= wait_event_freezable_timeout(sdp->sd_quota_wait,
+				sdp->sd_statfs_force_sync ||
+				gfs2_withdrawn(sdp) ||
+				kthread_should_stop(),
+				t);
+
+		if (sdp->sd_statfs_force_sync)
 			t = 0;
-		finish_wait(&sdp->sd_quota_wait, &wait);
 	}
 
 	return 0;

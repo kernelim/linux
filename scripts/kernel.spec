@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.174.1.el8_10
+%define pkgrelease 553.176.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.174.1%{?dist}
+%define specrelease 553.176.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,98 @@ fi
 #
 #
 %changelog
-* Thu Oct 15 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.174.1
+* Tue Oct 20 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.176.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Mon Oct 19 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.176.1.el8_10]
+- smb: client: reject a tree connect response whose byte count is too small (CKI Backport Bot) [RHEL-271288] {CVE-2026-89631}
+- netfilter: flowtable: hold reference on ct until flow is released (CKI Backport Bot) [RHEL-280060] {CVE-2026-98320}
+- perf: Fix addr_filter_ranges lifetime (Vratislav Bendel) [RHEL-271853] {CVE-2026-93817}
+- USB: serial: io_ti: fix heap overflow in build_i2c_fw_hdr() (Desnes Nunes) [RHEL-191034] {CVE-2026-53195}
+- USB: serial: io_ti: fix heap overflow in get_manuf_info() (Desnes Nunes) [RHEL-191034] {CVE-2026-53196}
+- gfs2: a minor finish_xmote cleanup (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Minor run_queue fixes (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: run_queue cleanup (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: only apply DLM_LKF_VALBLK if sb_lvbptr is not NULL (Alexander Aring) [RHEL-129363]
+- gfs2: Fix "gfs2: Switch to wait_event in gfs2_quotad" (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Use wait_event_freezable_timeout() for freezable kthread (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: less aggressive low-memory log flushing (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: low-memory forced flush fixes (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: add missing withdraw locking (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Disable GL_NOPID (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Rename "gfs_recovery" workqueue to "gfs2_recovery" (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Clean up SDF_JOURNAL_LIVE flag handling (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: No longer thaw filesystems during a withdraw (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: gfs2_freeze_unlock cleanup (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Refcounting fix in gfs2_thaw_super (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Minor gfs2_{freeze,thaw}_super cleanup (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Withdraw immediately in gfs2_trans_add_meta (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: New gfs2_withdraw_helper (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Clean up properly during a withdraw (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Simplify do_promote (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Rename gfs2_{gl_dq_holders => withdraw_glocks} (Andreas Gruenbacher) [RHEL-129363]
+- Revert "gfs2: fix infinite loop when checking ail item count before go_inval" (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: introduce new gfs2_glock_assert_withdraw (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Get rid of GLF_INVALIDATE_IN_PROGRESS (Andreas Gruenbacher) [RHEL-129363]
+- Revert "gfs2: Allow some glocks to be used during withdraw" (Andreas Gruenbacher) [RHEL-129363]
+- Revert "gfs2: Check for log write errors before telling dlm to unlock" (Andreas Gruenbacher) [RHEL-129363]
+- Revert "gfs2: fix a deadlock on withdraw-during-mount" (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Simplify refcounting in do_xmote (Andreas Gruenbacher) [RHEL-129363]
+- Revert "gfs2: Force withdraw to replay journals and wait for it to finish" (6/6) (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Make recovery error more readable (Andreas Gruenbacher) [RHEL-129363]
+- Revert "gfs2: Force withdraw to replay journals and wait for it to finish" (5/6) (Andreas Gruenbacher) [RHEL-129363]
+- Revert "gfs2: Force withdraw to replay journals and wait for it to finish" (4/6) (Andreas Gruenbacher) [RHEL-129363]
+- Revert "gfs2: Force withdraw to replay journals and wait for it to finish" (3/6) (Andreas Gruenbacher) [RHEL-129363]
+- Revert "gfs2: Force withdraw to replay journals and wait for it to finish" (2/6) (Andreas Gruenbacher) [RHEL-129363]
+- Revert "gfs2: Force withdraw to replay journals and wait for it to finish" (1/6) (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Follow-up to flag rename in sysfs status file (Andreas Gruenbacher) [RHEL-129363]
+- Revert "gfs2: don't stop reads while withdraw in progress" (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Rename LM_FLAG_{NOEXP -> RECOVER} (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Mark the remaining process-independent glock holders as GL_NOPID (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Mark flock glock holders as GL_NOPID (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Kill gfs2_io_error_bh_wd (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Get rid of newlines in log messages (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Withdraw immediately on log write errors (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Sanitize kthread stopping (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Fix logd wakeup on I/O error (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Switch to wait_event in gfs2_quotad (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Switch to wait_event in gfs2_logd (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Remove duplicate check in do_xmote (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Remove space before newline (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Fix LM_FLAG_TRY* logic in add_to_queue (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Remove DLM_LKF_ALTCW / DLM_LKF_ALTPR code (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Further sanitize lock_dlm.c (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: sanitize the gdlm_ast -> finish_xmote interface (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Simplify DLM_LKF_QUECVT use (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Fix freeze consistency check in log_write_header (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Get rid of delayed withdraws (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Lift withdraw check out of gfs2_ail1_empty (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: don't withdraw if init_threads() got interrupted (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Fix usage of bio->bi_status in gfs2_end_log_write (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Asynchronous withdraw (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Fix slab-use-after-free in gfs2_qd_dealloc (Andreas Gruenbacher) [RHEL-129363] {CVE-2023-52760}
+- gfs2: Fix asynchronous thread destruction (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Stop using gfs2_make_fs_ro for withdraw (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Add clean argument to lm_unmount hook (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Turn gfs2_withdraw into a void function (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: Mark withdraws as unlikely (Andreas Gruenbacher) [RHEL-129363]
+- gfs2: ignore rindex_update failure in dinode_dealloc (Andreas Gruenbacher) [RHEL-129363]
+
+* Fri Oct 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.175.1.el8_10]
+- strparser: make sure __strp_recv isn't running before tearing down the parser (Sabrina Dubroca) [RHEL-270732]
+- xfrm: espintcp: fix UAF during close (CKI Backport Bot) [RHEL-256684]
+- xfrm: Check for underflow in xfrm_state_mtu (CKI Backport Bot) [RHEL-256684]
+- xfrm: route MIGRATE notifications to caller's netns (CKI Backport Bot) [RHEL-256684]
+- netfilter: nfnetlink_log: wait for rcu grace period before freeing pernet state (CKI Backport Bot) [RHEL-271657] {CVE-2026-93288}
+- sctp: validate cookie AUTH state before use (Xin Long) [RHEL-254282] {CVE-2026-74752}
+- sctp: stop processing a packet once its association is deleted (Xin Long) [RHEL-263292] {CVE-2026-89479}
+- sctp: keep chunk->transport in step with the list it is queued on (Xin Long) [RHEL-254357] {CVE-2026-74588}
+- xfrm: espintcp: do not reuse an in-progress partial send (CKI Backport Bot) [RHEL-222954] {CVE-2026-52935}
 
 * Wed Oct 14 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.174.1.el8_10]
 - powerpc/pseries: pci - logic bug (Mamatha Inamdar) [RHEL-240146]

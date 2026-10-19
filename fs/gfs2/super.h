@@ -35,6 +35,7 @@ int gfs2_lookup_in_master_dir(struct gfs2_sbd *sdp, char *filename,
 int gfs2_make_fs_rw(struct gfs2_sbd *sdp);
 void gfs2_make_fs_ro(struct gfs2_sbd *sdp);
 void gfs2_online_uevent(struct gfs2_sbd *sdp);
+void gfs2_destroy_threads(struct gfs2_sbd *sdp);
 int gfs2_statfs_init(struct gfs2_sbd *sdp);
 void gfs2_statfs_change(struct gfs2_sbd *sdp, s64 total, s64 free,
 		        s64 dinodes);
@@ -46,7 +47,6 @@ void update_statfs(struct gfs2_sbd *sdp, struct buffer_head *m_bh,
 		   struct buffer_head *l_bh);
 int gfs2_statfs_sync(struct super_block *sb, int type);
 void gfs2_freeze_func(struct work_struct *work);
-void gfs2_thaw_freeze_initiator(struct super_block *sb);
 
 void free_lcl_statfs_inodes(struct gfs2_sbd *sdp);
 struct inode *find_lcl_statfs_inode(struct gfs2_sbd *sdp,

@@ -62,6 +62,7 @@ static void gfs2_tune_init(struct gfs2_tune *gt)
 	gt->gt_new_files_jdata = 0;
 	gt->gt_max_readahead = BIT(18);
 	gt->gt_complain_secs = 10;
+	gt->gt_withdraw_helper_timeout = 5;
 }
 
 void free_sbd(struct gfs2_sbd *sdp)
@@ -94,7 +95,7 @@ static struct gfs2_sbd *init_sbd(struct super_block *sb)
 	init_waitqueue_head(&sdp->sd_async_glock_wait);
 	atomic_set(&sdp->sd_glock_disposal, 0);
 	init_completion(&sdp->sd_locking_init);
-	init_completion(&sdp->sd_wdack);
+	init_completion(&sdp->sd_withdraw_helper);
 	spin_lock_init(&sdp->sd_statfs_spin);
 
 	spin_lock_init(&sdp->sd_rindex_spin);
@@ -395,7 +396,8 @@ static int init_locking(struct gfs2_sbd *sdp, struct gfs2_holder *mount_gh,
 
 	error = gfs2_glock_nq_num(sdp,
 				  GFS2_MOUNT_LOCK, &gfs2_nondisk_glops,
-				  LM_ST_EXCLUSIVE, LM_FLAG_NOEXP | GL_NOCACHE,
+				  LM_ST_EXCLUSIVE,
+				  LM_FLAG_RECOVER | GL_NOCACHE | GL_NOPID,
 				  mount_gh);
 	if (error) {
 		fs_err(sdp, "can't acquire mount glock: %d\n", error);
@@ -405,7 +407,7 @@ static int init_locking(struct gfs2_sbd *sdp, struct gfs2_holder *mount_gh,
 	error = gfs2_glock_nq_num(sdp,
 				  GFS2_LIVE_LOCK, &gfs2_nondisk_glops,
 				  LM_ST_SHARED,
-				  LM_FLAG_NOEXP | GL_EXACT,
+				  LM_FLAG_RECOVER | GL_EXACT | GL_NOPID,
 				  &sdp->sd_live_gh);
 	if (error) {
 		fs_err(sdp, "can't acquire live glock: %d\n", error);
@@ -552,8 +554,6 @@ static int gfs2_jindex_hold(struct gfs2_sbd *sdp, struct gfs2_holder *ji_gh)
 	mutex_lock(&sdp->sd_jindex_mutex);
 
 	for (;;) {
-		struct gfs2_inode *jip;
-
 		error = gfs2_glock_nq_init(dip->i_gl, LM_ST_SHARED, 0, ji_gh);
 		if (error)
 			break;
@@ -594,8 +594,6 @@ static int gfs2_jindex_hold(struct gfs2_sbd *sdp, struct gfs2_holder *ji_gh)
 		d_mark_dontcache(jd->jd_inode);
 		spin_lock(&sdp->sd_jindex_spin);
 		jd->jd_jid = sdp->sd_journals++;
-		jip = GFS2_I(jd->jd_inode);
-		jd->jd_no_addr = jip->i_no_addr;
 		list_add_tail(&jd->jd_list, &sdp->sd_jindex_list);
 		spin_unlock(&sdp->sd_jindex_spin);
 	}
@@ -667,7 +665,7 @@ static int init_statfs(struct gfs2_sbd *sdp)
 	iput(pn);
 	pn = NULL;
 	ip = GFS2_I(sdp->sd_sc_inode);
-	error = gfs2_glock_nq_init(ip->i_gl, LM_ST_EXCLUSIVE, 0,
+	error = gfs2_glock_nq_init(ip->i_gl, LM_ST_EXCLUSIVE, GL_NOPID,
 				   &sdp->sd_sc_gh);
 	if (error) {
 		fs_err(sdp, "can't lock local \"sc\" file: %d\n", error);
@@ -747,7 +745,7 @@ static int init_journal(struct gfs2_sbd *sdp, int undo)
 		error = gfs2_glock_nq_num(sdp, sdp->sd_lockstruct.ls_jid,
 					  &gfs2_journal_glops,
 					  LM_ST_EXCLUSIVE,
-					  LM_FLAG_NOEXP | GL_NOCACHE,
+					  LM_FLAG_RECOVER | GL_NOPID,
 					  &sdp->sd_journal_gh);
 		if (error) {
 			fs_err(sdp, "can't acquire journal glock: %d\n", error);
@@ -755,9 +753,9 @@ static int init_journal(struct gfs2_sbd *sdp, int undo)
 		}
 
 		ip = GFS2_I(sdp->sd_jdesc->jd_inode);
-		sdp->sd_jinode_gl = ip->i_gl;
 		error = gfs2_glock_nq_init(ip->i_gl, LM_ST_SHARED,
-					   LM_FLAG_NOEXP | GL_EXACT | GL_NOCACHE,
+					   LM_FLAG_RECOVER | GL_EXACT |
+					   GL_NOCACHE | GL_NOPID,
 					   &sdp->sd_jinode_gh);
 		if (error) {
 			fs_err(sdp, "can't acquire journal inode glock: %d\n",
@@ -823,13 +821,10 @@ static int init_journal(struct gfs2_sbd *sdp, int undo)
 fail_statfs:
 	uninit_statfs(sdp);
 fail_jinode_gh:
-	/* A withdraw may have done dq/uninit so now we need to check it */
-	if (!sdp->sd_args.ar_spectator &&
-	    gfs2_holder_initialized(&sdp->sd_jinode_gh))
+	if (!sdp->sd_args.ar_spectator)
 		gfs2_glock_dq_uninit(&sdp->sd_jinode_gh);
 fail_journal_gh:
-	if (!sdp->sd_args.ar_spectator &&
-	    gfs2_holder_initialized(&sdp->sd_journal_gh))
+	if (!sdp->sd_args.ar_spectator)
 		gfs2_glock_dq_uninit(&sdp->sd_journal_gh);
 fail_jindex:
 	gfs2_jindex_free(sdp);
@@ -928,7 +923,7 @@ static int init_per_node(struct gfs2_sbd *sdp, int undo)
 	pn = NULL;
 
 	ip = GFS2_I(sdp->sd_qc_inode);
-	error = gfs2_glock_nq_init(ip->i_gl, LM_ST_EXCLUSIVE, 0,
+	error = gfs2_glock_nq_init(ip->i_gl, LM_ST_EXCLUSIVE, GL_NOPID,
 				   &sdp->sd_qc_gh);
 	if (error) {
 		fs_err(sdp, "can't lock local \"qc\" file: %d\n", error);
@@ -1042,8 +1037,8 @@ hostdata_error:
 void gfs2_lm_unmount(struct gfs2_sbd *sdp)
 {
 	const struct lm_lockops *lm = sdp->sd_lockstruct.ls_ops;
-	if (likely(!gfs2_withdrawn(sdp)) && lm->lm_unmount)
-		lm->lm_unmount(sdp);
+	if (!gfs2_withdrawn(sdp) && lm->lm_unmount)
+		lm->lm_unmount(sdp, true);
 }
 
 static int wait_on_journal(struct gfs2_sbd *sdp)
@@ -1071,27 +1066,47 @@ static int init_threads(struct gfs2_sbd *sdp)
 	struct task_struct *p;
 	int error = 0;
 
-	p = kthread_run(gfs2_logd, sdp, "gfs2_logd");
+	p = kthread_create(gfs2_logd, sdp, "gfs2_logd");
 	if (IS_ERR(p)) {
 		error = PTR_ERR(p);
-		fs_err(sdp, "can't start logd thread: %d\n", error);
+		fs_err(sdp, "can't create logd thread: %d\n", error);
 		return error;
 	}
+	get_task_struct(p);
 	sdp->sd_logd_process = p;
 
-	p = kthread_run(gfs2_quotad, sdp, "gfs2_quotad");
+	p = kthread_create(gfs2_quotad, sdp, "gfs2_quotad");
 	if (IS_ERR(p)) {
 		error = PTR_ERR(p);
-		fs_err(sdp, "can't start quotad thread: %d\n", error);
+		fs_err(sdp, "can't create quotad thread: %d\n", error);
 		goto fail;
 	}
+	get_task_struct(p);
 	sdp->sd_quotad_process = p;
+
+	wake_up_process(sdp->sd_logd_process);
+	wake_up_process(sdp->sd_quotad_process);
 	return 0;
 
 fail:
 	kthread_stop(sdp->sd_logd_process);
+	put_task_struct(sdp->sd_logd_process);
 	sdp->sd_logd_process = NULL;
 	return error;
+}
+
+void gfs2_destroy_threads(struct gfs2_sbd *sdp)
+{
+	if (sdp->sd_logd_process) {
+		kthread_stop(sdp->sd_logd_process);
+		put_task_struct(sdp->sd_logd_process);
+		sdp->sd_logd_process = NULL;
+	}
+	if (sdp->sd_quotad_process) {
+		kthread_stop(sdp->sd_quotad_process);
+		put_task_struct(sdp->sd_quotad_process);
+		sdp->sd_quotad_process = NULL;
+	}
 }
 
 /**
@@ -1198,6 +1213,8 @@ static int gfs2_fill_super(struct super_block *sb, struct fs_context *fc)
 	if (error)
 		goto fail_debug;
 
+	INIT_WORK(&sdp->sd_withdraw_work, gfs2_withdraw_func);
+
 	error = init_locking(sdp, &mount_gh, DO);
 	if (error)
 		goto fail_lm;
@@ -1247,10 +1264,8 @@ static int gfs2_fill_super(struct super_block *sb, struct fs_context *fc)
 
 	if (!sb_rdonly(sb)) {
 		error = init_threads(sdp);
-		if (error) {
-			gfs2_withdraw_delayed(sdp);
+		if (error)
 			goto fail_per_node;
-		}
 	}
 
 	error = gfs2_freeze_lock_shared(sdp);
@@ -1261,13 +1276,8 @@ static int gfs2_fill_super(struct super_block *sb, struct fs_context *fc)
 		error = gfs2_make_fs_rw(sdp);
 
 	if (error) {
-		gfs2_freeze_unlock(&sdp->sd_freeze_gh);
-		if (sdp->sd_quotad_process)
-			kthread_stop(sdp->sd_quotad_process);
-		sdp->sd_quotad_process = NULL;
-		if (sdp->sd_logd_process)
-			kthread_stop(sdp->sd_logd_process);
-		sdp->sd_logd_process = NULL;
+		gfs2_freeze_unlock(sdp);
+		gfs2_destroy_threads(sdp);
 		fs_err(sdp, "can't make FS RW: %d\n", error);
 		goto fail_per_node;
 	}
@@ -1387,12 +1397,14 @@ static const struct constant_table gfs2_param_data[] = {
 };
 
 enum opt_errors {
-	Opt_errors_withdraw = GFS2_ERRORS_WITHDRAW,
-	Opt_errors_panic    = GFS2_ERRORS_PANIC,
+	Opt_errors_withdraw   = GFS2_ERRORS_WITHDRAW,
+	Opt_errors_deactivate = GFS2_ERRORS_DEACTIVATE,
+	Opt_errors_panic      = GFS2_ERRORS_PANIC,
 };
 
 static const struct constant_table gfs2_param_errors[] = {
 	{"withdraw",   Opt_errors_withdraw },
+	{"deactivate", Opt_errors_deactivate },
 	{"panic",      Opt_errors_panic },
 	{}
 };

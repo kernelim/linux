@@ -154,7 +154,7 @@ struct inode *gfs2_inode_lookup(struct super_block *sb, unsigned int type,
 		else
 			gfs2_cancel_delete_work(io_gl);
 		error = gfs2_glock_nq_init(io_gl, LM_ST_SHARED,
-					   GL_EXACT | extra_flags,
+					   GL_EXACT | GL_NOPID | extra_flags,
 					   &ip->i_iopen_gh);
 		gfs2_glock_put(io_gl);
 		if (unlikely(error))
@@ -462,9 +462,7 @@ int gfs2_dinode_dealloc(struct gfs2_inode *ip)
 		return -EIO;
 	}
 
-	error = gfs2_rindex_update(sdp);
-	if (error)
-		return error;
+	gfs2_rindex_update(sdp);
 
 	error = gfs2_quota_hold(ip, NO_UID_QUOTA_CHANGE, NO_GID_QUOTA_CHANGE);
 	if (error)
@@ -822,7 +820,8 @@ retry:
 	if (error)
 		goto fail_gunlock2;
 
-	error = gfs2_glock_nq_init(io_gl, LM_ST_SHARED, GL_EXACT, &ip->i_iopen_gh);
+	error = gfs2_glock_nq_init(io_gl, LM_ST_SHARED, GL_EXACT | GL_NOPID,
+				   &ip->i_iopen_gh);
 	if (error)
 		goto fail_gunlock2;
 

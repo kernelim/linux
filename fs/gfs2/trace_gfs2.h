@@ -52,7 +52,6 @@
 	{(1UL << GLF_DEMOTE_IN_PROGRESS),	"p" },		\
 	{(1UL << GLF_DIRTY),			"y" },		\
 	{(1UL << GLF_LFLUSH),			"f" },		\
-	{(1UL << GLF_INVALIDATE_IN_PROGRESS),	"i" },		\
 	{(1UL << GLF_MAY_CANCEL),		"c" },		\
 	{(1UL << GLF_HAVE_REPLY),		"r" },		\
 	{(1UL << GLF_INITIAL),			"a" },		\
@@ -60,7 +59,6 @@
 	{(1UL << GLF_LRU),			"L" },		\
 	{(1UL << GLF_OBJECT),			"o" },		\
 	{(1UL << GLF_BLOCKING),			"b" },		\
-	{(1UL << GLF_UNLOCKED),			"x" },		\
 	{(1UL << GLF_INSTANTIATE_NEEDED),	"n" },		\
 	{(1UL << GLF_INSTANTIATE_IN_PROG),	"N" },		\
 	{(1UL << GLF_TRY_TO_EVICT),		"e" },		\

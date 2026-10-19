@@ -227,13 +227,11 @@ struct gfs2_glock_operations {
 	void (*go_dump)(struct seq_file *seq, struct gfs2_glock *gl,
 			const char *fs_id_buf);
 	void (*go_callback)(struct gfs2_glock *gl, bool remote);
-	void (*go_unlocked)(struct gfs2_glock *gl);
 	const int go_subclass;
 	const int go_type;
 	const unsigned long go_flags;
 #define GLOF_ASPACE 1 /* address space attached */
 #define GLOF_LVB    2 /* Lock Value Block attached */
-#define GLOF_NONDISK   8 /* not I/O related */
 };
 
 enum {
@@ -323,7 +321,6 @@ enum {
 	GLF_DEMOTE_IN_PROGRESS		= 5,
 	GLF_DIRTY			= 6,
 	GLF_LFLUSH			= 7,
-	GLF_INVALIDATE_IN_PROGRESS	= 8,
 	GLF_HAVE_REPLY			= 9,
 	GLF_INITIAL			= 10,
 	GLF_HAVE_FROZEN_REPLY		= 11,
@@ -331,7 +328,6 @@ enum {
 	GLF_LRU				= 13,
 	GLF_OBJECT			= 14, /* Used only for tracing */
 	GLF_BLOCKING			= 15,
-	GLF_UNLOCKED			= 16, /* Wait for glock to be unlocked */
 	GLF_TRY_TO_EVICT		= 17, /* iopen glocks only */
 	GLF_VERIFY_DELETE		= 18, /* iopen glocks only */
 	GLF_MAY_CANCEL			= 19,
@@ -530,8 +526,6 @@ struct gfs2_jdesc {
 
 	struct list_head jd_revoke_list;
 	unsigned int jd_replay_tail;
-
-	u64 jd_no_addr;
 };
 
 struct gfs2_statfs_change_host {
@@ -552,8 +546,7 @@ struct gfs2_statfs_change_host {
 
 #define GFS2_ERRORS_DEFAULT     GFS2_ERRORS_WITHDRAW
 #define GFS2_ERRORS_WITHDRAW    0
-#define GFS2_ERRORS_CONTINUE    1 /* place holder for future feature */
-#define GFS2_ERRORS_RO          2 /* place holder for future feature */
+#define GFS2_ERRORS_DEACTIVATE  1
 #define GFS2_ERRORS_PANIC       3
 
 struct gfs2_args {
@@ -569,7 +562,7 @@ struct gfs2_args {
 	unsigned int ar_data:2;			/* ordered/writeback */
 	unsigned int ar_meta:1;			/* mount metafs */
 	unsigned int ar_discard:1;		/* discard requests */
-	unsigned int ar_errors:2;               /* errors=withdraw | panic */
+	unsigned int ar_errors:2;               /* errors=withdraw | deactivate | panic */
 	unsigned int ar_nobarrier:1;            /* do not send barriers */
 	unsigned int ar_rgrplvb:1;		/* use lvbs for rgrp info */
 	unsigned int ar_loccookie:1;		/* use location based readdir
@@ -594,6 +587,7 @@ struct gfs2_tune {
 	unsigned int gt_complain_secs;
 	unsigned int gt_statfs_quantum;
 	unsigned int gt_statfs_slow;
+	unsigned int gt_withdraw_helper_timeout;
 };
 
 enum {
@@ -608,11 +602,6 @@ enum {
 	SDF_SKIP_DLM_UNLOCK	= 8,
 	SDF_FORCE_AIL_FLUSH     = 9,
 	SDF_FREEZE_INITIATOR	= 10,
-	SDF_WITHDRAWING		= 11, /* Will withdraw eventually */
-	SDF_WITHDRAW_IN_PROG	= 12, /* Withdraw is in progress */
-	SDF_REMOTE_WITHDRAW	= 13, /* Performing remote recovery */
-	SDF_WITHDRAW_RECOVERY	= 14, /* Wait for journal recovery when we are
-					 withdrawing */
 	SDF_KILL		= 15,
 	SDF_EVICTING		= 16,
 	SDF_FROZEN		= 17,
@@ -725,11 +714,13 @@ struct gfs2_sbd {
 	struct gfs2_glock *sd_rename_gl;
 	struct gfs2_glock *sd_freeze_gl;
 	struct work_struct sd_freeze_work;
+	struct work_struct sd_withdraw_work;
 	wait_queue_head_t sd_kill_wait;
 	wait_queue_head_t sd_async_glock_wait;
 	atomic_t sd_glock_disposal;
 	struct completion sd_locking_init;
-	struct completion sd_wdack;
+	struct completion sd_withdraw_helper;
+	int sd_withdraw_helper_status;
 	struct delayed_work sd_control_work;
 
 	/* Inode Stuff */
@@ -770,7 +761,6 @@ struct gfs2_sbd {
 	struct gfs2_jdesc *sd_jdesc;
 	struct gfs2_holder sd_journal_gh;
 	struct gfs2_holder sd_jinode_gh;
-	struct gfs2_glock *sd_jinode_gl;
 
 	struct gfs2_holder sd_sc_gh;
 	struct gfs2_holder sd_qc_gh;
@@ -855,7 +845,6 @@ struct gfs2_sbd {
 
 	unsigned long sd_last_warning;
 	struct dentry *debugfs_dir;    /* debugfs directory */
-	unsigned long sd_glock_dqs_held;
 };
 
 #define GFS2_BAD_INO 1

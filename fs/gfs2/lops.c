@@ -52,7 +52,7 @@ void gfs2_pin(struct gfs2_sbd *sdp, struct buffer_head *bh)
 	if (test_set_buffer_pinned(bh))
 		gfs2_assert_withdraw(sdp, 0);
 	if (!buffer_uptodate(bh))
-		gfs2_io_error_bh_wd(sdp, bh);
+		gfs2_io_error_bh(sdp, bh);
 	bd = bh->b_private;
 	/* If this buffer is in the AIL and it has already been written
 	 * to in-place disk block, remove it from the AIL.
@@ -211,13 +211,12 @@ static void gfs2_end_log_write(struct bio *bio)
 	int i;
 
 	if (bio->bi_status) {
-		if (!cmpxchg(&sdp->sd_log_error, 0, (int)bio->bi_status))
+		int err = blk_status_to_errno(bio->bi_status);
+
+		if (!cmpxchg(&sdp->sd_log_error, 0, err))
 			fs_err(sdp, "Error %d writing to journal, jid=%u\n",
-			       bio->bi_status, sdp->sd_jdesc->jd_jid);
-		gfs2_withdraw_delayed(sdp);
-		/* prevent more writes to the journal */
-		clear_bit(SDF_JOURNAL_LIVE, &sdp->sd_flags);
-		wake_up(&sdp->sd_logd_waitq);
+			       err, sdp->sd_jdesc->jd_jid);
+		gfs2_withdraw(sdp);
 	}
 
 	bio_for_each_segment_all(bvec, bio, i) {

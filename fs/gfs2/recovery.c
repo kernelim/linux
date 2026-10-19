@@ -30,7 +30,7 @@
 #include "util.h"
 #include "dir.h"
 
-struct workqueue_struct *gfs_recovery_wq;
+struct workqueue_struct *gfs2_recovery_wq;
 
 int gfs2_replay_read_block(struct gfs2_jdesc *jd, unsigned int blk,
 			   struct buffer_head **bh)
@@ -425,7 +425,8 @@ void gfs2_recover_func(struct work_struct *work)
 
 		error = gfs2_glock_nq_num(sdp, jd->jd_jid, &gfs2_journal_glops,
 					  LM_ST_EXCLUSIVE,
-					  LM_FLAG_NOEXP | LM_FLAG_TRY | GL_NOCACHE,
+					  LM_FLAG_RECOVER | LM_FLAG_TRY |
+					  GL_NOCACHE,
 					  &j_gh);
 		switch (error) {
 		case 0:
@@ -441,7 +442,8 @@ void gfs2_recover_func(struct work_struct *work)
 		};
 
 		error = gfs2_glock_nq_init(ip->i_gl, LM_ST_SHARED,
-					   LM_FLAG_NOEXP | GL_NOCACHE, &ji_gh);
+					   LM_FLAG_RECOVER | GL_NOCACHE,
+					   &ji_gh);
 		if (error)
 			goto fail_gunlock_j;
 	} else {
@@ -571,7 +573,7 @@ int gfs2_recover_journal(struct gfs2_jdesc *jd, bool wait)
 		return -EBUSY;
 
 	/* we have JDF_RECOVERY, queue should always succeed */
-	rv = queue_work(gfs_recovery_wq, &jd->jd_work);
+	rv = queue_work(gfs2_recovery_wq, &jd->jd_work);
 	BUG_ON(!rv);
 
 	if (wait)
