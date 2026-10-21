@@ -49,10 +49,10 @@
 # define buildid .local
 
 %define specversion 4.18.0
-%define pkgrelease 553.176.1.el8_10
+%define pkgrelease 553.177.1.el8_10
 
 # allow pkg_release to have configurable %%{?dist} tag
-%define specrelease 553.176.1%{?dist}
+%define specrelease 553.177.1%{?dist}
 
 %define pkg_release %{specrelease}%{?buildid}
 
@@ -2783,13 +2783,22 @@ fi
 #
 #
 %changelog
-* Tue Oct 20 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.176.1
+* Wed Oct 21 2026 Release Engineering <releng@rockylinux.org> - 4.18.0-553.177.1
 - Adding prod certs and changed cert date to 20210620 (Sherif Nagy)
 - Adding Rocky secure boot certs (Sherif Nagy)
 - Fixing vmlinuz removal (Sherif Nagy)
 - Fixing UEFI CA path (Sherif Nagy)
 - Porting to 8.10, debranding and Rocky branding (Louis Abel)
 - Fixing pesign_key_name values (Sherif Nagy)
+
+* Wed Oct 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.177.1.el8_10]
+- vfio/pci: clear vdev->msi_perm after freeing it on init failure (Rodolfo Vick) [RHEL-270905] {CVE-2026-89777}
+- ALSA: seq: close a re-opened queue timer in the destructor (CKI Backport Bot) [RHEL-263644] {CVE-2026-68202}
+- inet: frags: strip GSO state from fragments before reassembly (Jamie Bainbridge) [RHEL-254200] {CVE-2026-80590}
+- ipv4: fib: free fib_alias with kfree_rcu() on insert error path (Jamie Bainbridge) [RHEL-233134] {CVE-2026-64572}
+- ipv4: raw: reject IP_HDRINCL packets with ihl < 5 (Jamie Bainbridge) [RHEL-225459] {CVE-2026-64114}
+- xfs: bounds-check buffer log item's dirty bitmap (CKI Backport Bot) [RHEL-253365] {CVE-2026-80536}
+- fuse: re-lock request before returning from fuse_ref_folio() (CKI Backport Bot) [RHEL-234242] {CVE-2026-64266}
 
 * Mon Oct 19 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [4.18.0-553.176.1.el8_10]
 - smb: client: reject a tree connect response whose byte count is too small (CKI Backport Bot) [RHEL-271288] {CVE-2026-89631}
