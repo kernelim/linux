@@ -1384,7 +1384,7 @@ int timerlat_hist_main(int argc, char *argv[])
 							    trace);
 			if (retval < 0) {
 				err_msg("Error iterating on events\n");
-				goto out_hist;
+				goto out_signals;
 			}
 
 			if (osnoise_trace_is_off(tool, record)) {
@@ -1437,7 +1437,7 @@ int timerlat_hist_main(int argc, char *argv[])
 		retval = timerlat_hist_bpf_pull_data(tool);
 		if (retval) {
 			err_msg("Error pulling BPF data\n");
-			goto out_hist;
+			goto out_signals;
 		}
 	}
 
@@ -1461,6 +1461,8 @@ int timerlat_hist_main(int argc, char *argv[])
 		return_value = FAILED;
 	}
 
+out_signals:
+	unset_signals(params->duration);
 out_hist:
 	timerlat_aa_destroy();
 	if (dma_latency_fd >= 0)

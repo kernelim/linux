@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.59.1
+%define pkgrelease 687.60.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.59.1.el9_8
+%define tarfile_release 5.14.0-687.60.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.59.1%{?buildid}%{?dist}
+%define specrelease 687.60.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.59.1.el9_8
+%define kabiversion 5.14.0-687.60.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3803,10 +3803,22 @@ fi
 #
 #
 %changelog
-* Wed Oct 21 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.59.1
+* Fri Oct 23 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.60.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Wed Oct 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.60.1.el9_8]
+- xfs: bounds-check buffer log item's dirty bitmap (Pavel Reichl) [RHEL-253366] {CVE-2026-80536}
+- ovl: check access to copy_file_range source with src mounter creds (Miklos Szeredi) [RHEL-238870] {CVE-2026-68448}
+- ALSA: seq: close a re-opened queue timer in the destructor (CKI Backport Bot) [RHEL-263709] {CVE-2026-68202}
+- calipso: unlock rcu before returning -EAFNOSUPPORT (CKI Backport Bot) [RHEL-257685] {CVE-2025-38147}
+- calipso: Don't call calipso functions for AF_INET sk. (CKI Backport Bot) [RHEL-257685] {CVE-2025-38147}
+- netlabel: Fix NULL pointer exception caused by CALIPSO on IPv4 sockets (CKI Backport Bot) [RHEL-257666] {CVE-2025-22063}
+- xfs: fix exchange-range reflink flag clearing issue with INO1_WRITTEN (CKI Backport Bot) [RHEL-255258] {CVE-2026-80530}
+- vmxnet3: fix BUG_ON in vmxnet3_get_hdr_len() for Geneve packets (CKI Backport Bot) [RHEL-252811] {CVE-2026-68299}
+- ALSA: hda/cs35l41: Fix firmware load work teardown (CKI Backport Bot) [RHEL-234099] {CVE-2026-64481}
+- rtla: Fix segfault on multiple SIGINTs (Tomas Glozar) [RHEL-193029]
 
 * Fri Oct 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.59.1.el9_8]
 - net: always dissect GSO packets in __virtio_net_hdr_to_skb() (Davide Caratti) [RHEL-284987]

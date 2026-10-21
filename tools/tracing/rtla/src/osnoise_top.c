@@ -702,7 +702,7 @@ int osnoise_top_main(int argc, char **argv)
 						    trace);
 		if (retval < 0) {
 			err_msg("Error iterating on events\n");
-			goto out_top;
+			goto out_signals;
 		}
 
 		if (!params->quiet)
@@ -724,6 +724,8 @@ int osnoise_top_main(int argc, char **argv)
 		return_value = FAILED;
 	}
 
+out_signals:
+	unset_signals(params->duration);
 out_top:
 	trace_events_destroy(&record->trace, params->events);
 	params->events = NULL;

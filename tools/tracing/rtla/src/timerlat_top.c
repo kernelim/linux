@@ -1238,7 +1238,7 @@ int timerlat_top_main(int argc, char *argv[])
 		retval = timerlat_top_bpf_main_loop(top, record, aa, params, &params_u);
 
 	if (retval)
-		goto out_top;
+		goto out_signals;
 
 	if (params->mode != TRACING_MODE_TRACEFS)
 		timerlat_bpf_detach();
@@ -1273,6 +1273,8 @@ int timerlat_top_main(int argc, char *argv[])
 		}
 	}
 
+out_signals:
+	unset_signals(params->duration);
 out_top:
 	timerlat_aa_destroy();
 	if (dma_latency_fd >= 0)

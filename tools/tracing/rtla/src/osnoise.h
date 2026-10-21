@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 #pragma once
 
+#include <signal.h>
+#include <unistd.h>
 #include "utils.h"
 #include "trace.h"
 
@@ -156,6 +158,18 @@ struct osnoise_tool *osnoise_init_trace_tool(char *tracer);
 void osnoise_report_missed_events(struct osnoise_tool *tool);
 bool osnoise_trace_is_off(struct osnoise_tool *tool, struct osnoise_tool *record);
 int osnoise_apply_config(struct osnoise_tool *tool, struct osnoise_params *params);
+
+/*
+ * unset_signals - unsets the signals to stop the tool
+ */
+static inline void unset_signals(int duration)
+{
+	signal(SIGINT, SIG_DFL);
+	if (duration) {
+		alarm(0);
+		signal(SIGALRM, SIG_DFL);
+	}
+}
 
 int osnoise_hist_main(int argc, char *argv[]);
 int osnoise_top_main(int argc, char **argv);

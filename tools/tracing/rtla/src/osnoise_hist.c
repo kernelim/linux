@@ -878,7 +878,7 @@ int osnoise_hist_main(int argc, char *argv[])
 						    trace);
 		if (retval < 0) {
 			err_msg("Error iterating on events\n");
-			goto out_hist;
+			goto out_signals;
 		}
 
 		if (osnoise_trace_is_off(tool, record))
@@ -898,6 +898,8 @@ int osnoise_hist_main(int argc, char *argv[])
 		return_value = FAILED;
 	}
 
+out_signals:
+	unset_signals(params->duration);
 out_hist:
 	trace_events_destroy(&record->trace, params->events);
 	params->events = NULL;
