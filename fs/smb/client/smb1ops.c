@@ -619,6 +619,7 @@ static int cifs_query_path_info(const unsigned int xid,
 
 	data->reparse_point = false;
 	data->adjust_tz = false;
+	data->unknown_nlink = false;
 
 	/*
 	 * First try CIFSSMBQPathInfo() function which returns more info
@@ -685,6 +686,7 @@ static int cifs_query_path_info(const unsigned int xid,
 				fi.EASize = di->EaSize;
 			}
 			fi.NumberOfLinks = cpu_to_le32(1);
+			data->unknown_nlink = true;
 			fi.DeletePending = 0;
 			fi.Directory = !!(le32_to_cpu(fi.Attributes) & ATTR_DIRECTORY);
 			cifs_buf_release(search_info.ntwrk_buf_start);
@@ -707,6 +709,8 @@ static int cifs_query_path_info(const unsigned int xid,
 		rc = SMBQueryInformation(xid, tcon, full_path, &fi, cifs_sb->local_nls,
 					 cifs_remap(cifs_sb));
 		data->adjust_tz = true;
+		if (!rc)
+			data->unknown_nlink = true;
 	} else if ((rc == -EOPNOTSUPP || rc == -EINVAL) && non_unicode_wildcard) {
 		/* Path with non-UNICODE wildcard character cannot exist. */
 		rc = -ENOENT;
@@ -970,8 +974,10 @@ static int cifs_open_file(const unsigned int xid, struct cifs_open_parms *oparms
 	else
 		rc = CIFS_open(xid, oparms, oplock, &fi);
 
-	if (!rc && data)
+	if (!rc && data) {
 		move_cifs_info_to_smb2(&data->fi, &fi);
+		data->unknown_nlink = true;
+	}
 
 	return rc;
 }
@@ -1032,7 +1038,7 @@ smb_set_file_info(struct inode *inode, const char *full_path,
 	struct cifs_open_parms oparms;
 	struct cifsFileInfo *open_file;
 	FILE_BASIC_INFO new_buf;
-	struct cifs_open_info_data query_data;
+	struct cifs_open_info_data query_data = {};
 	__le64 write_time = buf->LastWriteTime;
 	struct cifsInodeInfo *cinode = CIFS_I(inode);
 	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
@@ -1040,7 +1046,7 @@ smb_set_file_info(struct inode *inode, const char *full_path,
 	struct cifs_tcon *tcon;
 
 	/* if the file is already open for write, just use that fileid */
-	open_file = find_writable_file(cinode, FIND_WR_FSUID_ONLY);
+	open_file = find_writable_file(cinode, FIND_FSUID_ONLY);
 
 	if (open_file) {
 		fid.netfid = open_file->fid.netfid;

@@ -146,10 +146,9 @@ extern int SMB2_tcon(const unsigned int xid, struct cifs_ses *ses,
 		     const struct nls_table *);
 extern int SMB2_tdis(const unsigned int xid, struct cifs_tcon *tcon);
 extern int SMB2_open(const unsigned int xid, struct cifs_open_parms *oparms,
-		     __le16 *path, __u8 *oplock,
-		     struct smb2_file_all_info *buf,
-		     struct create_posix_rsp *posix,
-		     struct kvec *err_iov, int *resp_buftype);
+		     __le16 *path, __u8 *oplock, struct cifs_open_info_data *buf,
+		     struct create_posix_rsp *posix, struct kvec *err_iov,
+		     int *buftype);
 extern int SMB2_open_init(struct cifs_tcon *tcon,
 			  struct TCP_Server_Info *server,
 			  struct smb_rqst *rqst,
@@ -229,6 +228,9 @@ extern void SMB2_query_directory_free(struct smb_rqst *rqst);
 extern int SMB2_set_eof(const unsigned int xid, struct cifs_tcon *tcon,
 			u64 persistent_fid, u64 volatile_fid, u32 pid,
 			loff_t new_eof);
+int SMB2_set_allocation(const unsigned int xid, struct cifs_tcon *tcon,
+			u64 persistent_fid, u64 volatile_fid, u32 pid,
+			loff_t allocation_size);
 extern int SMB2_set_info_init(struct cifs_tcon *tcon,
 			      struct TCP_Server_Info *server,
 			      struct smb_rqst *rqst,

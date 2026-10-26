@@ -1318,7 +1318,7 @@ static int cifs_precopy_set_eof(struct inode *src_inode, struct cifsInodeInfo *s
 	struct cifsFileInfo *writeable_srcfile;
 	int rc = -EINVAL;
 
-	writeable_srcfile = find_writable_file(src_cifsi, FIND_WR_FSUID_ONLY);
+	writeable_srcfile = find_writable_file(src_cifsi, FIND_FSUID_ONLY);
 	if (writeable_srcfile) {
 		if (src_tcon->ses->server->ops->set_file_size)
 			rc = src_tcon->ses->server->ops->set_file_size(
@@ -1414,8 +1414,19 @@ static loff_t cifs_remap_file_range(struct file *src_file, loff_t off,
 	 */
 	lock_two_nondirectories(target_inode, src_inode);
 
-	if (len == 0)
-		len = src_inode->i_size - off;
+	if (len == 0) {
+		loff_t src_size = i_size_read(src_inode);
+
+		if (off > src_size) {
+			rc = -EINVAL;
+			goto unlock;
+		}
+		len = src_size - off;
+		if (!len) {
+			rc = 0;
+			goto unlock;
+		}
+	}
 
 	cifs_dbg(FYI, "clone range\n");
 
@@ -1463,11 +1474,7 @@ static loff_t cifs_remap_file_range(struct file *src_file, loff_t off,
 	if (target_tcon->ses->server->ops->duplicate_extents) {
 		rc = target_tcon->ses->server->ops->duplicate_extents(xid,
 			smb_file_src, smb_file_target, off, len, destoff);
-		if (rc == 0 && new_size > old_size) {
-			truncate_setsize(target_inode, new_size);
-			fscache_resize_cookie(cifs_inode_cookie(target_inode),
-					      new_size);
-		} else if (rc == -EOPNOTSUPP) {
+		if (rc == -EOPNOTSUPP) {
 			/*
 			 * copy_file_range syscall man page indicates EINVAL
 			 * is returned e.g when "fd_in and fd_out refer to the
@@ -1484,9 +1491,13 @@ static loff_t cifs_remap_file_range(struct file *src_file, loff_t off,
 		}
 	}
 
-	/* force revalidate of size and timestamps of target file now
-	   that target is updated on the server */
-	CIFS_I(target_inode)->time = 0;
+	/*
+	 * On success, duplicate_extents already updated the target inode attrs
+	 * or marked them stale if the refresh failed.  On failure, mark attrs
+	 * stale because EOF may have changed before the clone failed.
+	 */
+	if (rc)
+		CIFS_I(target_inode)->time = 0;
 unlock:
 	/* although unlocking in the reverse order from locking is not
 	   strictly necessary here it is a little cleaner to be consistent */
@@ -1688,7 +1699,7 @@ const struct file_operations cifs_file_strict_ops = {
 
 const struct file_operations cifs_file_direct_ops = {
 	.read_iter = cifs_direct_readv,
-	.write_iter = cifs_direct_writev,
+	.write_iter = cifs_direct_write_iter,
 	.open = cifs_open,
 	.release = cifs_close,
 	.lock = cifs_lock,
@@ -1744,7 +1755,7 @@ const struct file_operations cifs_file_strict_nobrl_ops = {
 
 const struct file_operations cifs_file_direct_nobrl_ops = {
 	.read_iter = cifs_direct_readv,
-	.write_iter = cifs_direct_writev,
+	.write_iter = cifs_direct_write_iter,
 	.open = cifs_open,
 	.release = cifs_close,
 	.fsync = cifs_fsync,

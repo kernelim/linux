@@ -62,6 +62,11 @@ typedef struct {
 	char FileName[];
 } __packed FILE_FULL_DIRECTORY_INFO; /* level 0x102 rsp data */
 
+/* See MS-FSCC 2.4.4 */
+struct smb2_file_alloc_info { /* encoding of request for level 19 */
+	__le64 AllocationSize;
+} __packed;
+
 /* See MS-FSCC 2.4.24 */
 typedef struct {
 	__le32 NextEntryOffset;

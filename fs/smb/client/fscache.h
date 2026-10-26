@@ -38,12 +38,22 @@ struct cifs_fscache_inode_coherency_data {
 /*
  * fscache.c
  */
-extern int cifs_fscache_get_super_cookie(struct cifs_tcon *);
-extern void cifs_fscache_release_super_cookie(struct cifs_tcon *);
+int cifs_fscache_get_super_cookie(struct cifs_tcon *tcon);
+void cifs_fscache_release_super_cookie(struct cifs_tcon *tcon);
+void cifs_fscache_get_inode_cookie(struct inode *inode);
+void cifs_fscache_unuse_inode_cookie(struct inode *inode, bool update);
+void cifs_fscache_release_inode_cookie(struct inode *inode);
+int __cifs_readpage_from_fscache(struct inode *inode, struct page *page);
+void __cifs_readpage_to_fscache(struct inode *inode, struct page *page);
+int __cifs_fscache_query_occupancy(struct inode *inode, pgoff_t first,
+				   unsigned int nr_pages, pgoff_t *_data_first,
+				   unsigned int *_data_nr_pages);
+int cifs_fscache_get_super_cookie(struct cifs_tcon *tcon);
+void cifs_fscache_release_super_cookie(struct cifs_tcon *tcon);
 
-extern void cifs_fscache_get_inode_cookie(struct inode *inode);
-extern void cifs_fscache_release_inode_cookie(struct inode *);
-extern void cifs_fscache_unuse_inode_cookie(struct inode *inode, bool update);
+void cifs_fscache_get_inode_cookie(struct inode *inode);
+void cifs_fscache_release_inode_cookie(struct inode *inode);
+void cifs_fscache_unuse_inode_cookie(struct inode *inode, bool update);
 
 static inline
 void cifs_fscache_fill_coherency(struct inode *inode,
@@ -74,10 +84,9 @@ static inline void cifs_invalidate_cache(struct inode *inode, unsigned int flags
 			   i_size_read(inode), flags);
 }
 
-extern int __cifs_fscache_query_occupancy(struct inode *inode,
-					  pgoff_t first, unsigned int nr_pages,
-					  pgoff_t *_data_first,
-					  unsigned int *_data_nr_pages);
+int __cifs_fscache_query_occupancy(struct inode *inode, pgoff_t first,
+				   unsigned int nr_pages, pgoff_t *_data_first,
+				   unsigned int *_data_nr_pages);
 
 static inline int cifs_fscache_query_occupancy(struct inode *inode,
 					       pgoff_t first, unsigned int nr_pages,
@@ -90,8 +99,8 @@ static inline int cifs_fscache_query_occupancy(struct inode *inode,
 					      _data_first, _data_nr_pages);
 }
 
-extern int __cifs_readpage_from_fscache(struct inode *pinode, struct page *ppage);
-extern void __cifs_readpage_to_fscache(struct inode *pinode, struct page *ppage);
+int __cifs_readpage_from_fscache(struct inode *inode, struct page *page);
+void __cifs_readpage_to_fscache(struct inode *inode, struct page *page);
 
 
 static inline int cifs_readpage_from_fscache(struct inode *inode,

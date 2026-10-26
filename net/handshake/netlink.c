@@ -12,6 +12,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/skbuff.h>
+#include <linux/file.h>
 #include <linux/mm.h>
 
 #include <net/sock.h>
@@ -92,7 +93,7 @@ int handshake_nl_accept_doit(struct sk_buff *skb, struct genl_info *info)
 	struct net *net = sock_net(skb->sk);
 	struct handshake_net *hn = handshake_pernet(net);
 	struct handshake_req *req = NULL;
-	struct socket *sock;
+	struct file *file;
 	int class, fd, err;
 
 	err = -EOPNOTSUPP;
@@ -109,7 +110,8 @@ int handshake_nl_accept_doit(struct sk_buff *skb, struct genl_info *info)
 	if (!req)
 		goto out_status;
 
-	sock = req->hr_sk->sk_socket;
+	file = req->hr_file;
+
 	fd = get_unused_fd_flags(O_CLOEXEC);
 	if (fd < 0) {
 		err = fd;
@@ -122,13 +124,14 @@ int handshake_nl_accept_doit(struct sk_buff *skb, struct genl_info *info)
 		goto out_complete;
 	}
 
-	fd_install(fd, get_file(sock->file));
+	fd_install(fd, file);
 
 	trace_handshake_cmd_accept(net, req, req->hr_sk, fd);
 	return 0;
 
 out_complete:
 	handshake_complete(req, -EIO, NULL);
+	fput(file);
 out_status:
 	trace_handshake_cmd_accept_err(net, req, NULL, err);
 	return err;
@@ -203,21 +206,21 @@ static void __net_exit handshake_net_exit(struct net *net)
 	 * accepted and are in progress will be destroyed when
 	 * the socket is closed.
 	 */
-	spin_lock(&hn->hn_lock);
+	spin_lock_bh(&hn->hn_lock);
 	set_bit(HANDSHAKE_F_NET_DRAINING, &hn->hn_flags);
-	list_splice_init(&requests, &hn->hn_requests);
-	spin_unlock(&hn->hn_lock);
+	list_splice_init(&hn->hn_requests, &requests);
+	list_for_each_entry(req, &requests, hr_list)
+		get_file(req->hr_file);
+	spin_unlock_bh(&hn->hn_lock);
 
 	while (!list_empty(&requests)) {
+		struct file *file;
+
 		req = list_first_entry(&requests, struct handshake_req, hr_list);
-		list_del(&req->hr_list);
-
-		/*
-		 * Requests on this list have not yet been
-		 * accepted, so they do not have an fd to put.
-		 */
-
+		file = req->hr_file;
+		list_del_init(&req->hr_list);
 		handshake_complete(req, -ETIMEDOUT, NULL);
+		fput(file);
 	}
 }
 
