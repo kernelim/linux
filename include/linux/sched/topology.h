@@ -141,8 +141,10 @@ struct sched_domain {
 	};
 	struct sched_domain_shared *shared;
 
-	RH_KABI_RESERVE(1)
-	RH_KABI_RESERVE(2)
+	/* some of the idle_balance() stats are here, to preserve kabi */
+	RH_KABI_USE_SPLIT(1, unsigned int newidle_call,
+	                     unsigned int newidle_success)
+	RH_KABI_USE_SPLIT(2, unsigned int newidle_ratio)
 	RH_KABI_RESERVE(3)
 
 	unsigned int span_weight;

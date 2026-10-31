@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.61.1
+%define pkgrelease 687.64.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.61.1.el9_8
+%define tarfile_release 5.14.0-687.64.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.61.1%{?buildid}%{?dist}
+%define specrelease 687.64.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.61.1.el9_8
+%define kabiversion 5.14.0-687.64.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3804,10 +3804,58 @@ fi
 #
 #
 %changelog
-* Tue Oct 27 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.61.1
+* Mon Nov 02 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.64.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Sat Oct 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.64.1.el9_8]
+- ipv4: free inet_opt and ireq_opt after an RCU grace period (CKI Backport Bot) [RHEL-295635] {CVE-2026-98432}
+- nvmet-auth: fix out-of-bounds write in nvmet_auth_challenge() (Maurizio Lombardi) [RHEL-290719] {CVE-2026-98725}
+- spi: fsl-lpspi: terminate the RX channel on TX prepare failure path (Iker Pedrosa) [RHEL-234297] {CVE-2026-64303}
+- spi: fsl-lpspi: replace dmaengine_terminate_all() with dmaengine_terminate_sync() (Iker Pedrosa) [RHEL-234297] {CVE-2026-64303}
+- xfrm: hold net_device reference under RCU in bundle creation (Abhishek Rawal) [RHEL-277984] {CVE-2026-98364}
+- entry: Fix seccomp bypass after ptrace with TSYNC (Audra Mitchell) [RHEL-271399] {CVE-2026-89603}
+- smb: client: bound dirent name against end of SMB response in cifs_filldir (CKI Backport Bot) [RHEL-278331] {CVE-2026-93787}
+- sctp: stream: fully roll back denied add-stream state (CKI Backport Bot) [RHEL-277123] {CVE-2026-52929}
+- tipc: require net admin for TIPCv2 netlink mutators (CKI Backport Bot) [RHEL-273181] {CVE-2026-74283}
+- Bluetooth: mgmt: fix UAF in pair command cancellation (CKI Backport Bot) [RHEL-254650] {CVE-2026-74510}
+- ipvs: clear the svc scheduler ptr early on edit (CKI Backport Bot) [RHEL-225993] {CVE-2026-53270}
+
+* Thu Oct 29 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.63.1.el9_8]
+- net: skbuff: propagate shared-frag marker in skb_zerocopy() (Xin Long) [RHEL-291166]
+- selftests: netfilter: use KHDR_INCLUDES in CFLAGS (Phil Sutter) [RHEL-291352]
+- selftests: netfilter: run conntrack_dump_flush in netns (Phil Sutter) [RHEL-291352]
+- netfilter: conntrack: make filtering by zone discoverable (Phil Sutter) [RHEL-291352]
+- selftests: netfilter: conntrack_dump_flush: remove unused variables and fix typo (Phil Sutter) [RHEL-291352]
+- selftests: netfilter: Fix missing return values in conntrack_dump_flush (Phil Sutter) [RHEL-291352]
+- selftests: netfilter: remove unused parameter (Phil Sutter) [RHEL-291352]
+- selftests: netfilter: Add missing return value (Phil Sutter) [RHEL-291352]
+- selftests: netfilter: fix conntrack_dump_flush retval on unsupported kernel (Phil Sutter) [RHEL-291352]
+- netfilter: report NLM_F_DUMP_FILTERED when all is filtered out (Phil Sutter) [RHEL-291352]
+- netfilter: ctnetlink: fix filtering for zone 0 (Phil Sutter) [RHEL-291352]
+- netfilter: ctnetlink: support filtering by zone (Phil Sutter) [RHEL-291352]
+- KVM: arm64: Transfer the hyp stack pages out of the host stage-2 (CKI Backport Bot) [RHEL-287053] {CVE-2026-98466}
+- mptcp: pm: userspace: fix use-after-free in get_local_id (Prasenjit Mukherjee) [RHEL-236687] {CVE-2026-68169}
+- mptcp: options: reset DSS fields in case of unexpected size (Prasenjit Mukherjee) [RHEL-250609] {CVE-2026-80586}
+- blk-throttle: fix throtl_data leak during disk release (David Jeffery) [RHEL-250378]
+- blk-throttle: fix access race during throttle policy activation (David Jeffery) [RHEL-250378]
+
+* Wed Oct 28 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.62.1.el9_8]
+- virtio-fs: avoid double-free on failed queue setup (Miklos Szeredi) [RHEL-278131] {CVE-2026-93827}
+- sched/fair: Proportional newidle balance (Herton R. Krzesinski) [RHEL-288067]
+- sched/fair: Small cleanup to update_newidle_cost() (Herton R. Krzesinski) [RHEL-288067]
+- sched/fair: Small cleanup to sched_balance_newidle() (Herton R. Krzesinski) [RHEL-288067]
+- sched/fair: Revert max_newidle_lb_cost bump (Herton R. Krzesinski) [RHEL-288067]
+- scsi: target: iscsi: Reserve a terminator byte for the login payload (CKI Backport Bot) [RHEL-285602] {CVE-2026-90011}
+- scsi: target: core: Fix iSCSI ISID use-after-free in REGISTER AND MOVE (CKI Backport Bot) [RHEL-283505] {CVE-2026-72083}
+- arp: do not assume dev_hard_header() does not change skb->head (Guillaume Nault) [RHEL-271130]
+- ip6_gre: make ip6gre_header() robust (Guillaume Nault) [RHEL-271130]
+- ipv4: ip_gre: make ipgre_header() robust (Guillaume Nault) [RHEL-271127]
+- packet: use consistent hard_header_len in TX_RING send path (Toke Høiland-Jørgensen) [RHEL-244551]
+- packet: use consistent hard_header_len in non-ring send paths (Toke Høiland-Jørgensen) [RHEL-244551] {CVE-2026-74582}
+- net: remove CAP_SYS_RAWIO zero-padding in dev_validate_header (Toke Høiland-Jørgensen) [RHEL-244551]
+- ipv6: sit: reload inner IPv6 header after GSO offloads (CKI Backport Bot) [RHEL-225916] {CVE-2026-53228}
 
 * Mon Oct 26 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.61.1.el9_8]
 - netfilter: flowtable: hold reference on ct until flow is released (CKI Backport Bot) [RHEL-280075] {CVE-2026-98320}
