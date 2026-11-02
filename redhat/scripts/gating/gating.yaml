@@ -1,0 +1,11 @@
+--- !Policy
+product_versions:
+  - rhel-9
+decision_context: osci_compose_gate
+rules:
+  - !PassingTestCaseRule {test_case_name: osci.brew-build./plans/plans/gating/kernel/rhel-9/kernel/baremetal.functional}
+  - !PassingTestCaseRule {test_case_name: osci.brew-build./plans/plans/gating/kernel/rhel-9/kernel/vm.functional}
+  - !PassingTestCaseRule {test_case_name: osci.brew-build./plans/plans/gating/kernel/rhel-9/kernel-64k/baremetal.functional}
+  - !PassingTestCaseRule {test_case_name: osci.brew-build./plans/plans/gating/kernel/rhel-9/kernel-rt/baremetal.functional}
+  - !PassingTestCaseRule {test_case_name: osci.brew-build./plans/plans/gating/kernel/rhel-9/kernel-rt/vm.functional}
+  - !PassingTestCaseRule {test_case_name: osci.brew-build./plans/plans/gating/kernel/rhel-9/kernel-rt-64k/baremetal.functional}

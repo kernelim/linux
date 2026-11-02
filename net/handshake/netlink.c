@@ -123,7 +123,6 @@ int handshake_nl_accept_doit(struct sk_buff *skb, struct genl_info *info)
 	fd_install(fd, req->hr_file);
 
 	trace_handshake_cmd_accept(net, req, req->hr_sk, fd);
-        fput(req->hr_file); /* drop ref from handshake_req_next() */
 	return 0;
 
 out_complete:

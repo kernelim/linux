@@ -2,12 +2,15 @@
 
 top_srcdir = ../../../../..
 
+CFLAGS += $(KHDR_INCLUDES)
+
 HOSTPKG_CONFIG := pkg-config
 MNL_CFLAGS := $(shell $(HOSTPKG_CONFIG) --cflags libmnl 2>/dev/null)
 MNL_LDLIBS := $(shell $(HOSTPKG_CONFIG) --libs libmnl 2>/dev/null || echo -lmnl)
 
 TEST_PROGS := br_netfilter.sh bridge_brouter.sh
 TEST_PROGS += br_netfilter_queue.sh
+TEST_PROGS += conntrack_dump_flush.sh
 TEST_PROGS += conntrack_icmp_related.sh
 TEST_PROGS += conntrack_ipip_mtu.sh
 TEST_PROGS += conntrack_tcp_unreplied.sh
@@ -35,12 +38,16 @@ TEST_PROGS_EXTENDED = nft_concat_range_perf.sh
 
 TEST_GEN_FILES = audit_logread
 TEST_GEN_FILES += connect_close nf_queue
+TEST_GEN_FILES += conntrack_dump_flush
 TEST_GEN_FILES += sctp_collision
 
 include ../../lib.mk
 
 $(OUTPUT)/nf_queue: CFLAGS += $(MNL_CFLAGS)
 $(OUTPUT)/nf_queue: LDLIBS += $(MNL_LDLIBS)
+
+$(OUTPUT)/conntrack_dump_flush: CFLAGS += $(MNL_CFLAGS)
+$(OUTPUT)/conntrack_dump_flush: LDLIBS += $(MNL_LDLIBS)
 
 TEST_FILES := lib.sh
 

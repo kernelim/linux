@@ -94,6 +94,7 @@ modules.order
 #
 !.clang-format
 !.cocciconfig
+!.fmf
 !.get_maintainer.ignore
 !.gitattributes
 !.gitignore

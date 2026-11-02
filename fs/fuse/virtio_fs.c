@@ -779,8 +779,10 @@ out:
 	kfree(names);
 	kfree(callbacks);
 	kfree(vqs);
-	if (ret)
+	if (ret) {
 		kfree(fs->vqs);
+		fs->vqs = NULL;
+	}
 	return ret;
 }
 

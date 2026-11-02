@@ -1,0 +1,7 @@
+plan:
+    import:
+        url: https://gitlab.com/redhat/centos-stream/tests/kernel/test-plans.git
+        ref: main
+        scope: all-plans
+        importing: become-parent
+        name: /plans/gating/kernel/rhel-9/

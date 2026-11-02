@@ -1131,6 +1131,8 @@ int cifs_tmpfile(struct mnt_idmap *idmap, struct inode *dir,
 	} while (unlikely(rc == -EEXIST) && ++retries < max_retries);
 
 	if (rc) {
+		if (rc == -ENOENT)
+			rc = -EOPNOTSUPP;
 		cifs_del_pending_open(&open);
 		goto out;
 	}
