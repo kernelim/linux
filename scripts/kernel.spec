@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.64.1
+%define pkgrelease 687.65.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.64.1.el9_8
+%define tarfile_release 5.14.0-687.65.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.64.1%{?buildid}%{?dist}
+%define specrelease 687.65.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.64.1.el9_8
+%define kabiversion 5.14.0-687.65.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3804,10 +3804,14 @@ fi
 #
 #
 %changelog
-* Mon Nov 02 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.64.1
+* Mon Nov 02 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.65.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Mon Nov 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.65.1.el9_8]
+- ethtool: cmis: require exact CDB reply length (CKI Backport Bot) [RHEL-229677] {CVE-2026-63996}
+- ethtool: coalesce: cap profile updates at NET_DIM_PARAMS_NUM_PROFILES (CKI Backport Bot) [RHEL-227145] {CVE-2026-63987}
 
 * Sat Oct 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.64.1.el9_8]
 - ipv4: free inet_opt and ireq_opt after an RCU grace period (CKI Backport Bot) [RHEL-295635] {CVE-2026-98432}
