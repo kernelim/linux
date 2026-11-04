@@ -176,15 +176,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 687.65.1
+%define pkgrelease 687.66.1
 %define kversion 5
-%define tarfile_release 5.14.0-687.65.1.el9_8
+%define tarfile_release 5.14.0-687.66.1.el9_8
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 687.65.1%{?buildid}%{?dist}
+%define specrelease 687.66.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-687.65.1.el9_8
+%define kabiversion 5.14.0-687.66.1.el9_8
 
 #
 # End of genspec.sh variables
@@ -3804,10 +3804,29 @@ fi
 #
 #
 %changelog
-* Mon Nov 02 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.65.1
+* Thu Nov 05 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-687.66.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Wed Nov 04 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.66.1.el9_8]
+- s390/qeth: validate user buffer length in SNMP and ARP query ioctls (Jan Polensky) [RHEL-295101] {CVE-2026-80584}
+- s390/vfio_ccw: Cancel existing workqueues (Jan Polensky) [RHEL-295162] {CVE-2026-80553}
+- s390/zcrypt: Validate length for CCA AES cipher key requests (Jan Polensky) [RHEL-297856] {CVE-2026-68452}
+- s390/zcrypt: Validate length for CCA ECC private key requests (Jan Polensky) [RHEL-297864] {CVE-2026-68451}
+- net/smc: fix UAF in smc_cdc_rx_handler() by pinning the socket (Jan Polensky) [RHEL-298271] {CVE-2026-64541}
+- sunrpc: wait for in-flight TLS handshake callback when cancel loses race (Olga Kornievskaia) [RHEL-283645] {CVE-2026-72221}
+- sunrpc: pin svc_xprt across the asynchronous TLS handshake callback (Olga Kornievskaia) [RHEL-283259] {CVE-2026-72222}
+- fs/resctrl: Fix use-after-free during unmount (Dennis Chen) [RHEL-296700] {CVE-2026-72080}
+- powerpc/pseries: papr-phy-attest - validate cmd.length, plug mem leak (Mamatha Inamdar) [RHEL-295113] {CVE-2026-80571}
+- s390/boot: Avoid IPL parameter append past command line (Jan Polensky) [RHEL-292349] {CVE-2026-98403}
+- s390/boot: Add sized_strscpy() to enable strscpy() usage (Jan Polensky) [RHEL-292349] {CVE-2026-98403}
+- sctp: clear new_transport when removing a peer (CKI Backport Bot) [RHEL-275363] {CVE-2026-74586}
+- openvswitch: Fix CT limit teardown use-after-free (Timothy Redaelli) [RHEL-263551] {CVE-2026-89488}
+- sctp: validate cookie AUTH state before use (Xin Long) [RHEL-254284] {CVE-2026-74752}
+- sctp: stop processing a packet once its association is deleted (Xin Long) [RHEL-263317] {CVE-2026-89479}
+- sctp: avoid auth_enable sysctl UAF during netns teardown (Xin Long) [RHEL-258776] {CVE-2026-68162}
+- sctp: keep chunk->transport in step with the list it is queued on (Xin Long) [RHEL-254364] {CVE-2026-74588}
 
 * Mon Nov 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-687.65.1.el9_8]
 - ethtool: cmis: require exact CDB reply length (CKI Backport Bot) [RHEL-229677] {CVE-2026-63996}
