@@ -1756,6 +1756,8 @@ static void receive_buf(struct virtnet_info *vi, struct receive_queue *rq,
 	if (hdr->hdr.flags & VIRTIO_NET_HDR_F_DATA_VALID)
 		skb->ip_summed = CHECKSUM_UNNECESSARY;
 
+	skb->dev = dev;
+	skb_set_network_header(skb, ETH_HLEN);
 	if (virtio_net_hdr_to_skb(skb, &hdr->hdr,
 				  virtio_is_little_endian(vi->vdev))) {
 		net_warn_ratelimited("%s: bad gso: type: %u, size: %u\n",

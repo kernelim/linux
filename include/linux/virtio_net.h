@@ -103,47 +103,37 @@ static inline int virtio_net_hdr_to_skb(struct sk_buff *skb,
 		p_off = skb_transport_offset(skb) + thlen;
 		if (!pskb_may_pull(skb, p_off))
 			return -EINVAL;
-	} else {
+	} else if (gso_type) {
 		/* gso packets without NEEDS_CSUM do not set transport_offset.
 		 * probe and drop if does not match one of the above types.
 		 */
-		if (gso_type && skb->network_header) {
-			struct flow_keys_basic keys;
+		struct flow_keys_basic keys;
 
-			if (!skb->protocol) {
-				__be16 protocol = dev_parse_header_protocol(skb);
-
-				if (!protocol)
-					virtio_net_hdr_set_proto(skb, hdr);
-				else if (!virtio_net_hdr_match_proto(protocol, hdr->gso_type))
-					return -EINVAL;
-				else
-					skb->protocol = protocol;
-			}
-retry:
-			if (!skb_flow_dissect_flow_keys_basic(NULL, skb, &keys,
-							      NULL, 0, 0, 0,
-							      0)) {
-				/* UFO does not specify ipv4 or 6: try both */
-				if (gso_type & SKB_GSO_UDP &&
-				    skb->protocol == htons(ETH_P_IP)) {
-					skb->protocol = htons(ETH_P_IPV6);
-					goto retry;
-				}
-				return -EINVAL;
-			}
-
-			p_off = keys.control.thoff + thlen;
-			if (!pskb_may_pull(skb, p_off) ||
-			    keys.basic.ip_proto != ip_proto)
-				return -EINVAL;
-
-			skb_set_transport_header(skb, keys.control.thoff);
-		} else if (gso_type) {
-			p_off = thlen;
-			if (!pskb_may_pull(skb, p_off))
-				return -EINVAL;
+		if (!skb->protocol) {
+			skb->protocol = dev_parse_header_protocol(skb);
+			if (!skb->protocol)
+				virtio_net_hdr_set_proto(skb, hdr);
 		}
+retry:
+		if (!skb_flow_dissect_flow_keys_basic(NULL, skb, &keys,
+						      NULL, 0, 0, 0,
+						      0)) {
+			/* UFO does not specify ipv4 or 6: try both */
+			if (gso_type & SKB_GSO_UDP &&
+			    skb->protocol == htons(ETH_P_IP)) {
+				skb->protocol = htons(ETH_P_IPV6);
+				goto retry;
+			}
+			return -EINVAL;
+		}
+
+		p_off = keys.control.thoff + thlen;
+		if (!pskb_may_pull(skb, p_off) ||
+		    keys.basic.ip_proto != ip_proto ||
+		    !virtio_net_hdr_match_proto(keys.basic.n_proto, hdr->gso_type))
+			return -EINVAL;
+
+		skb_set_transport_header(skb, keys.control.thoff);
 	}
 
 	if (hdr->gso_type != VIRTIO_NET_HDR_GSO_NONE) {

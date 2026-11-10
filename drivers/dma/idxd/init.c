@@ -1309,6 +1309,8 @@ static void idxd_remove(struct pci_dev *pdev)
 	idxd_device_remove_debugfs(idxd);
 	perfmon_pmu_remove(idxd);
 	idxd_cleanup_interrupts(idxd);
+	if (device_pasid_enabled(idxd))
+		idxd_disable_system_pasid(idxd);
 	pci_iounmap(pdev, idxd->reg_base);
 	put_device(idxd_confdev(idxd));
 	pci_disable_device(pdev);

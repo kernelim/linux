@@ -1,3 +1,69 @@
+* Tue Nov 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-741.22.1.el9_9]
+- net/smc: protect clcsock lifetime in smc_getname (CKI Backport Bot) [RHEL-303993] {CVE-2026-99032}
+- s390/zcrypt: Validate length for CCA AES cipher key requests (Jan Polensky) [RHEL-297853] {CVE-2026-68452}
+- s390/zcrypt: Validate length for CCA ECC private key requests (Jan Polensky) [RHEL-297863] {CVE-2026-68451}
+- mptcp: options: reset DSS fields in case of unexpected size (Toke Høiland-Jørgensen) [RHEL-250613] {CVE-2026-80586}
+- s390/vfio-ap: Fix missing lock required to access list of ap_matrix_mdev objects (Ramesh Chhetri) [RHEL-293883] {CVE-2026-89956}
+- powerpc/pseries: papr-phy-attest - validate cmd.length, plug mem leak (Mamatha Inamdar) [RHEL-295112] {CVE-2026-80571}
+- sunrpc: wait for in-flight TLS handshake callback when cancel loses race (Olga Kornievskaia) [RHEL-283652] {CVE-2026-72221}
+- sunrpc: pin svc_xprt across the asynchronous TLS handshake callback (Olga Kornievskaia) [RHEL-283262] {CVE-2026-72222}
+- scsi: libiscsi: Validate the ITT reflected in a Reject PDU (CKI Backport Bot) [RHEL-298508] {CVE-2026-99153}
+- scsi: libiscsi: Validate the task named by a management response (CKI Backport Bot) [RHEL-298468] {CVE-2026-99152}
+- ipv6: fix use-after-free in ip6_finish_output2() (Antoine Tenart) [RHEL-258689] {CVE-2026-80792}
+- sctp: clear new_transport when removing a peer (Jamie Bainbridge) [RHEL-275364] {CVE-2026-74586}
+- sctp: stop processing a packet once its association is deleted (Jamie Bainbridge) [RHEL-263321] {CVE-2026-89479}
+- sctp: close UDP tunnel sockets during netns teardown (Jamie Bainbridge) [RHEL-258777]
+- sctp: avoid auth_enable sysctl UAF during netns teardown (Jamie Bainbridge) [RHEL-258777] {CVE-2026-68162}
+- sctp: keep chunk->transport in step with the list it is queued on (Jamie Bainbridge) [RHEL-254351] {CVE-2026-74588}
+- sctp: validate cookie AUTH state before use (Jamie Bainbridge) [RHEL-254293] {CVE-2026-74752}
+- fprobe: Fix to allocate entry_data_size buffer with rethook instances (Viktor Malik) [RHEL-275457]
+- objpool: fix to make percpu slot allocation more robust (Viktor Malik) [RHEL-275457]
+- objpool: fix choosing allocation for percpu slots (Viktor Malik) [RHEL-275457]
+- objpool: fix the overestimation of object pooling metadata size (Viktor Malik) [RHEL-275457]
+- objpool: cache nr_possible_cpus() and avoid caching nr_cpu_ids (Viktor Malik) [RHEL-275457]
+- objpool: enable inlining objpool_push() and objpool_pop() operations (Viktor Malik) [RHEL-275457]
+- lib: objpool: fix head overrun on RK3588 SBC (Viktor Malik) [RHEL-275457]
+- kprobes: freelist.h removed (Viktor Malik) [RHEL-275457]
+- kprobes: kretprobe scalability improvement (Viktor Malik) [RHEL-275457]
+- redhat/configs: Disable CONFIG_TEST_OBJPOOL (Viktor Malik) [RHEL-275457]
+- lib: objpool test module added (Viktor Malik) [RHEL-275457]
+- lib: objpool added: ring-array based lockless MPMC (Viktor Malik) [RHEL-275457]
+- ALSA: ua101: reject mismatched capture/playback packet sizes (CKI Backport Bot) [RHEL-290840] {CVE-2026-98741}
+- signal: complete_signal: use __for_each_thread() (Lucas Oakley) [RHEL-290031]
+- net/sched: act_ct: fix helper UAF due to extensions realloc (CKI Backport Bot) [RHEL-286694] {CVE-2026-98442}
+- net/sched: act_ct: remove 'add_helper' dead code (CKI Backport Bot) [RHEL-286694] {CVE-2026-98442}
+- net/sched: act_ct: fix sk_buff leak when the header checks reject a packet (CKI Backport Bot) [RHEL-286694] {CVE-2026-98442}
+- net/sched: act_ct: preserve tc_skb_cb across defragmentation (CKI Backport Bot) [RHEL-286694] {CVE-2026-98442}
+- net/sched: act_ct: avoid modifying shared unconfirmed ct entry (CKI Backport Bot) [RHEL-286694] {CVE-2026-98442}
+- net: openvswitch: conntrack: avoid modifying shared unconfirmed ct entry (CKI Backport Bot) [RHEL-286694] {CVE-2026-98442}
+- netfilter: conntrack: Remove unused function declarations (CKI Backport Bot) [RHEL-286694] {CVE-2026-98442}
+- net: always dissect GSO packets in __virtio_net_hdr_to_skb() (Davide Caratti) [RHEL-284989]
+- ipv4: validate checksum_start before completing checksum (CKI Backport Bot) [RHEL-284989] {CVE-2026-99999}
+- ALSA: seq: midi: Serialize input teardown with event_input (CKI Backport Bot) [RHEL-282922] {CVE-2026-90207}
+- ALSA: seq: midi: Optimize event_input locking with RCU (CKI Backport Bot) [RHEL-282922] {CVE-2026-90207}
+- af_unix: Fix peek then tail dereference UAF in unix_stream_data_wait() (Jamie Bainbridge) [RHEL-275410] {CVE-2026-64109}
+- smb: client: validate absolute native symlink targets before NT fixups (CKI Backport Bot) [RHEL-280054] {CVE-2026-98318}
+- nvmet-tcp: check return value of nvmet_tcp_set_queue_sock (CKI Backport Bot) [RHEL-277635] {CVE-2026-74385}
+- ALSA: pcm: Serialize PCM mmap with buffer reallocation to fix page UAF (CKI Backport Bot) [RHEL-276109] {CVE-2026-98116}
+- dmaengine: idxd: Fix refcount underflow on module unload (Jerry Snitselaar) [RHEL-274411]
+- s390/cpum_cf: Handle CPU hotplug via prepare/dead callbacks (Jan Polensky) [RHEL-270893]
+- smb: client: fix OOB read/write from unvalidated DataOffset in coalesce_t2() (CKI Backport Bot) [RHEL-271490] {CVE-2026-89633}
+- Revert "mm/memcg: refactor try_charge_memcg retry logic to use for loop" (Audra Mitchell) [RHEL-269061]
+- mm/readahead: reintroduce legacy madvise_willneed behavior to force_page_cache_readahead (John J. Coleman) [RHEL-259532]
+- net/iucv: fix use-after-free of a severed iucv_path (CKI Backport Bot) [RHEL-260524] {CVE-2026-68140}
+- sched/rt,dl: Skip migrate-disabled tasks when picking a push candidate (Herton R. Krzesinski) [RHEL-256280]
+- sched: Make class_schedulers avoid pushing current, and get rid of proxy_tag_curr() [partial] (Herton R. Krzesinski) [RHEL-256280]
+Resolves: RHEL-250613, RHEL-254293, RHEL-254351, RHEL-256280, RHEL-258689, RHEL-258777, RHEL-259532, RHEL-260524, RHEL-263321, RHEL-269061, RHEL-270893, RHEL-271490, RHEL-274411, RHEL-275364, RHEL-275410, RHEL-275457, RHEL-276109, RHEL-277635, RHEL-280054, RHEL-282922, RHEL-283262, RHEL-283652, RHEL-284989, RHEL-286694, RHEL-290031, RHEL-290840, RHEL-293883, RHEL-295112, RHEL-297853, RHEL-297863, RHEL-298468, RHEL-298508, RHEL-303993
+
+* Wed Nov 04 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-741.21.1.el9_9]
+- net/smc: fix use-after-free of the LLC qentry in smc_llc_srv_add_link() (Jan Polensky) [RHEL-294750] {CVE-2026-80981}
+- s390/qeth: validate user buffer length in SNMP and ARP query ioctls (Jan Polensky) [RHEL-295106] {CVE-2026-80584}
+- s390/vfio_ccw: Cancel existing workqueues (Jan Polensky) [RHEL-295168] {CVE-2026-80553}
+- watchdog: fix hrtimer start when pretimeout is zero (David Arcari) [RHEL-255218]
+- USB: serial: io_ti: fix heap overflow in build_i2c_fw_hdr() (Desnes Nunes) [RHEL-191040] {CVE-2026-53195}
+- USB: serial: io_ti: fix heap overflow in get_manuf_info() (Desnes Nunes) [RHEL-191040] {CVE-2026-53196}
+Resolves: RHEL-191040, RHEL-255218, RHEL-294750, RHEL-295106, RHEL-295168
+
 * Mon Nov 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-741.20.1.el9_9]
 - ipv4: free inet_opt and ireq_opt after an RCU grace period (CKI Backport Bot) [RHEL-295638] {CVE-2026-98432}
 - net: skbuff: propagate shared-frag marker in skb_zerocopy() (Xin Long) [RHEL-291163]
