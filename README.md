@@ -21,6 +21,13 @@ See the following tree branches:
 ## Available tags
 
 The following is a chronological list of distribution kernel tags managed in this repository:
+* Rocky 9.x kernel version **5.14.0-741.22.1.el9_9** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-741.22.1.el9_9.tar.xz), dated 2026-11-10 23:25:23
+* Rocky 9.x kernel version **5.14.0-687.66.1.el9_8** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-687.66.1.el9_8.tar.xz), dated 2026-11-04 02:16:04
+* Rocky 9.x kernel version **5.14.0-741.20.1.el9_9** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-741.20.1.el9_9.tar.xz), dated 2026-11-02 20:12:50
+* Rocky 9.x kernel version **5.14.0-687.65.1.el9_8** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-687.65.1.el9_8.tar.xz), dated 2026-11-02 02:15:34
+* Rocky 9.x kernel version **5.14.0-687.64.1.el9_8** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-687.64.1.el9_8.tar.xz), dated 2026-10-31 23:14:14
+* Rocky 9.x kernel version **5.14.0-687.61.1.el9_8** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-687.61.1.el9_8.tar.xz), dated 2026-10-26 02:15:37
+* Rocky 9.x kernel version **5.14.0-687.60.1.el9_8** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-687.60.1.el9_8.tar.xz), dated 2026-10-21 03:14:59
 * Rocky 8.x kernel version **4.18.0-553.177.1.el8_10** - [tag](https://github.com/kernelim/linux/releases/tag/linux-4.18.0-553.177.1.el8_10.tar.xz), dated 2026-10-21 03:14:16
 * Rocky 8.x kernel version **4.18.0-553.176.1.el8_10** - [tag](https://github.com/kernelim/linux/releases/tag/linux-4.18.0-553.176.1.el8_10.tar.xz), dated 2026-10-19 03:15:40
 * Rocky 9.x kernel version **5.14.0-687.59.1.el9_8** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-687.59.1.el9_8.tar.xz), dated 2026-10-17 00:23:05
@@ -38,6 +45,7 @@ The following is a chronological list of distribution kernel tags managed in thi
 * Rocky 8.x kernel version **4.18.0-553.170.1.el8_10** - [tag](https://github.com/kernelim/linux/releases/tag/linux-4.18.0-553.170.1.el8_10.tar.xz), dated 2026-09-30 03:16:25
 * Rocky 10.x kernel version **6.12.0-211.62.1.el10_2** - [tag](https://github.com/kernelim/linux/releases/tag/linux-6.12.0-211.62.1.el10_2.tar.xz), dated 2026-09-30 03:16:05
 * Rocky 9.x kernel version **5.14.0-687.54.1.el9_8** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-687.54.1.el9_8.tar.xz), dated 2026-09-30 03:16:05
+* Rocky 9.x kernel version **5.14.0-741.14.1.el9_9** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-741.14.1.el9_9.tar.xz), dated 2026-09-30 03:00:05
 * Rocky 9.x kernel version **5.14.0-687.53.1.el9_8** - [tag](https://github.com/kernelim/linux/releases/tag/linux-5.14.0-687.53.1.el9_8.tar.xz), dated 2026-09-28 03:17:43
 * Rocky 10.x kernel version **6.12.0-211.61.1.el10_2** - [tag](https://github.com/kernelim/linux/releases/tag/linux-6.12.0-211.61.1.el10_2.tar.xz), dated 2026-09-28 03:16:49
 * Rocky 8.x kernel version **4.18.0-553.169.1.el8_10** - [tag](https://github.com/kernelim/linux/releases/tag/linux-4.18.0-553.169.1.el8_10.tar.xz), dated 2026-09-28 03:16:24
